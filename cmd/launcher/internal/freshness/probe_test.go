@@ -160,6 +160,72 @@ func TestProbe_LivelockRegression_FreshWhenTagMatchesDespiteOutPathNameDrift(t *
 	}
 }
 
+// TestProbe_DriverScopedRepo_FreshWhenImageHashMatches verifies that a
+// loaded image tagged under a driver-scoped repo (e.g. "spindrift-opencode",
+// not the default "spindrift") makes Probe derive its tip tag under that
+// SAME repo, so a matching content hash reports fresh — an opencode image
+// must never compare against a hardcoded "spindrift:" tip tag (#262).
+func TestProbe_DriverScopedRepo_FreshWhenImageHashMatches(t *testing.T) {
+	pwd := newCloneWithOrigin(t, "main")
+	eval := &Fake{OutPath: "/nix/store/" + sameHash + "-agent-image"}
+
+	res := Probe("podman", pwd, "main", ".#packages.x86_64-linux.agent-image", "spindrift-opencode:"+sameHash, eval)
+
+	if !res.Applicable {
+		t.Fatalf("Applicable = false, want true for podman runtime")
+	}
+	if !res.Fresh {
+		t.Errorf("Fresh = false, want true when the driver-scoped image tag matches; message: %s", res.Message)
+	}
+}
+
+// TestProbe_DriverScopedRepo_RebuildNeededWhenImageHashDiffers verifies that
+// a driver-scoped loaded tag (e.g. "spindrift-opencode:<hash>") whose hash
+// differs from the tip's evaluated hash reports rebuild-needed, and the
+// message names the repo-matching tip tag (not a hardcoded "spindrift:"
+// tag) so the diagnostic is accurate for the driver in play.
+func TestProbe_DriverScopedRepo_RebuildNeededWhenImageHashDiffers(t *testing.T) {
+	pwd := newCloneWithOrigin(t, "main")
+	eval := &Fake{OutPath: "/nix/store/" + diffHash + "-agent-image"}
+
+	res := Probe("podman", pwd, "main", ".#packages.x86_64-linux.agent-image", "spindrift-opencode:"+sameHash, eval)
+
+	if !res.Applicable {
+		t.Fatalf("Applicable = false, want true for podman runtime")
+	}
+	if res.Fresh {
+		t.Errorf("Fresh = true, want false when the driver-scoped image tag's hash differs; message: %s", res.Message)
+	}
+	if !strings.Contains(res.Message, "spindrift-opencode:"+diffHash) {
+		t.Errorf("Message %q does not name the repo-matching tip tag spindrift-opencode:%s", res.Message, diffHash)
+	}
+}
+
+// TestImageRepo_DerivesRepoFromLastColon verifies imageRepo splits an
+// "<repo>:<tag>" reference on the LAST colon (a repo can itself embed a
+// colon, e.g. a "host:port" registry prefix), and falls back to the default
+// "spindrift" repo for a degenerate tag with no colon at all rather than
+// deriving an empty or nonsensical repo.
+func TestImageRepo_DerivesRepoFromLastColon(t *testing.T) {
+	cases := []struct {
+		name     string
+		imageTag string
+		want     string
+	}{
+		{"default claude repo", "spindrift:" + sameHash, "spindrift"},
+		{"driver-scoped repo", "spindrift-opencode:" + sameHash, "spindrift-opencode"},
+		{"no colon falls back to default", "spindrift", "spindrift"},
+		{"empty tag falls back to default", "", "spindrift"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := imageRepo(c.imageTag); got != c.want {
+				t.Errorf("imageRepo(%q) = %q, want %q", c.imageTag, got, c.want)
+			}
+		})
+	}
+}
+
 // TestProbe_Rev_MatchesFetchedTip verifies Result.Rev carries the same
 // fetched base-tip sha Eval was hermetically evaluated at — a caller (the
 // Console's in-session rebuild, issue #652) needs the rev itself, not just

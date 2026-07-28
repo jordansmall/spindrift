@@ -52,17 +52,33 @@ const (
 	storeHashLen       = 32
 )
 
-// imageTagFromOutPath derives the "spindrift:<hash>" tag from a nix store
+// imageTagFromOutPath derives the "<repo>:<hash>" tag from a nix store
 // output path the same way mkHarness.nix's imageHash does — the exact
 // currency `build`/EnsureReady gates on (an already-loaded tag skips the
 // rebuild), so a fresh verdict here always corresponds to a rebuild build
-// would actually perform.
-func imageTagFromOutPath(outPath string) (string, error) {
+// would actually perform. repo is the loaded image's own repo (see
+// imageRepo), so a driver-scoped image (e.g. "spindrift-opencode") compares
+// its tip tag against the same repo it was loaded under, rather than a
+// hardcoded "spindrift" repo.
+func imageTagFromOutPath(outPath, repo string) (string, error) {
 	if !strings.HasPrefix(outPath, "/nix/store/") || len(outPath) < storeHashPrefixLen+storeHashLen {
 		return "", fmt.Errorf("not a nix store path: %q", outPath)
 	}
 	hash := outPath[storeHashPrefixLen : storeHashPrefixLen+storeHashLen]
-	return "spindrift:" + hash, nil
+	return repo + ":" + hash, nil
+}
+
+// imageRepo derives the repo portion of an "<repo>:<tag>" image reference —
+// everything before the LAST colon, since a repo can itself contain a colon
+// (e.g. a registry host:port prefix). Falls back to the default "spindrift"
+// repo when imageTag has no colon at all (a degenerate/empty tag), rather
+// than deriving an empty or nonsensical repo.
+func imageRepo(imageTag string) string {
+	i := strings.LastIndex(imageTag, ":")
+	if i < 0 {
+		return "spindrift"
+	}
+	return imageTag[:i]
 }
 
 // Probe answers whether the loaded OCI image would be rebuilt if dispatch
@@ -119,7 +135,7 @@ func Probe(runtime, pwd, baseBranch, flakeImageAttr, imageTag string, eval Evalu
 		}
 	}
 
-	tipTag, err := imageTagFromOutPath(outPath)
+	tipTag, err := imageTagFromOutPath(outPath, imageRepo(imageTag))
 	if err != nil {
 		return Result{
 			Applicable: true,

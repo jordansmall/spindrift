@@ -707,6 +707,29 @@ func TestLoadImage_InvokesLoadThenTag(t *testing.T) {
 	}
 }
 
+// TestLoadImage_DriverScopedRepo_TagsFromMatchingSourceTag verifies that
+// loadImage re-tags from "<repo>:latest" where repo is derived from the
+// adapter's own imageTag — not a hardcoded "spindrift:latest" — so a
+// driver-scoped archive (e.g. an opencode image, which loads as
+// "spindrift-opencode:latest") is found by the re-tag (#262).
+func TestLoadImage_DriverScopedRepo_TagsFromMatchingSourceTag(t *testing.T) {
+	script, dir := newFakeCLI(t,
+		fakeCall{},
+		fakeCall{},
+	)
+	a := &ociAdapter{cli: script, imageTag: "spindrift-opencode:abc123"}
+
+	if err := a.loadImage("/tmp/spindrift-opencode-image.tar"); err != nil {
+		t.Fatalf("loadImage: %v", err)
+	}
+
+	tag := readCall(t, dir, 1)
+	want := []string{"tag", "spindrift-opencode:latest", "spindrift-opencode:abc123"}
+	if strings.Join(tag, " ") != strings.Join(want, " ") {
+		t.Errorf("tag call: got %v, want %v", tag, want)
+	}
+}
+
 // TestIsReady_ImageAbsentReturnsError verifies IsReady surfaces a descriptive
 // error when `image inspect` fails (the image is not loaded).
 func TestIsReady_ImageAbsentReturnsError(t *testing.T) {
