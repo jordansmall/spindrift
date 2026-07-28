@@ -27,6 +27,11 @@ type execConfig struct {
 	logPath      string
 	heartbeatLog string
 	issue        string
+	// topLevelRole is forwarded to the Driver's heartbeat writer so a
+	// top-level orchestrator-owned pass, whose events carry an empty
+	// parent_tool_use_id, resolves to this role instead of the
+	// implementor default (issue #2092).
+	topLevelRole string
 }
 
 // run spawns the Driver (per cfg), tees its raw stdout unchanged to stdout
@@ -50,7 +55,7 @@ func run(cfg execConfig, stdout io.Writer) (int, error) {
 		return 0, err
 	}
 	raw := io.MultiWriter(stdout, logFile)
-	w := d.NewHeartbeatWriter(raw, cfg.issue, heartbeatFile)
+	w := d.NewHeartbeatWriter(raw, cfg.issue, heartbeatFile, cfg.topLevelRole)
 
 	rc, err := runOnce(cfg, w)
 	if err != nil {

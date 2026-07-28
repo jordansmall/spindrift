@@ -40,7 +40,7 @@ func ActivityFeed(drv driver.Driver, pwd, number string) []ActivityLine {
 		return nil
 	}
 	var buf bytes.Buffer
-	w := drv.NewHeartbeatWriter(io.Discard, number, &buf)
+	w := drv.NewHeartbeatWriter(io.Discard, number, &buf, "")
 	if _, err := w.Write(data); err != nil {
 		return nil
 	}

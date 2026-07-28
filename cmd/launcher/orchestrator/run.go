@@ -66,6 +66,14 @@ type config struct {
 	// ORCHESTRATOR-on work-dispatch path (ADR 0035's master switch; there
 	// is no separate review-pass sub-knob).
 	reviewPromptFile string
+	// topLevelRole is the resolution role forwarded as driver-exec's own
+	// --top-level-role flag for this pass (issue #2092): claude.ImplementorRole
+	// for an implement/fix/land pass, claude.ReviewerRole for the code-owned
+	// review pass. Empty omits the flag entirely -- driver-exec then defaults
+	// to the implementor role -- which is what the legacy run() single-loop
+	// path (no reviewPromptFile) leaves it, keeping that path's argv shape
+	// byte-identical to before this field existed.
+	topLevelRole string
 }
 
 // run loops driver-exec for as many passes as the implementor's own
@@ -198,6 +206,13 @@ func run(cfg config, stdout io.Writer) (int, error) {
 // legacy loop) is what actually stops it, once that land pass reaches its
 // own outcome -- there is no separate "land" pass kind in the Go code.
 func runWithReviewPass(cfg config, stdout io.Writer) (int, error) {
+	// Every implement/fix/land pass this loop invokes below (seedAndInvokePass
+	// copies cfg by value, so this local mutation flows into each of its own
+	// passCfg) carries the implementor top-level role; the review pass, built
+	// separately below, overrides its own copy to claude.ReviewerRole (issue
+	// #2092).
+	cfg.topLevelRole = claude.ImplementorRole
+
 	state, err := ReadRunState(cfg.stateFile)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "orchestrator: read run state:", err)
@@ -270,6 +285,7 @@ func runWithReviewPass(cfg config, stdout io.Writer) (int, error) {
 		reviewCfg := cfg
 		reviewCfg.promptFile = cfg.reviewPromptFile
 		reviewCfg.sessionFile = ""
+		reviewCfg.topLevelRole = claude.ReviewerRole
 
 		rc, err = invokeDriverExec(reviewCfg, stdout)
 		if err != nil {
@@ -403,7 +419,7 @@ func scanPassLog(logPath, driverName string) (verdict string, hasOutcome bool) {
 		fmt.Fprintln(os.Stderr, "orchestrator: scan pass log:", err)
 		return "", false
 	}
-	rendered, err := d.RenderTranscript(logPath)
+	rendered, err := d.RenderTranscript(logPath, claude.ImplementorRole)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "orchestrator: scan pass log:", err)
 		return "", false
@@ -447,7 +463,7 @@ func scanReviewLog(logPath, driverName string) (verdict, findings string) {
 		fmt.Fprintln(os.Stderr, "orchestrator: scan review log:", err)
 		return "", ""
 	}
-	rendered, err := d.RenderTranscript(logPath)
+	rendered, err := d.RenderTranscript(logPath, claude.ReviewerRole)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "orchestrator: scan review log:", err)
 		return "", ""
@@ -596,6 +612,9 @@ func buildDriverExecCmd(cfg config) (*exec.Cmd, error) {
 	}
 	if cfg.devshell {
 		args = append(args, "--devshell", "--devshell-name", cfg.devshellName)
+	}
+	if cfg.topLevelRole != "" {
+		args = append(args, "--top-level-role", cfg.topLevelRole)
 	}
 	return exec.Command(bin, args...), nil
 }

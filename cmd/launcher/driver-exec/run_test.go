@@ -162,6 +162,43 @@ func TestRunWritesHeartbeatToFileNotRawJSON(t *testing.T) {
 	}
 }
 
+// TestRunTopLevelRoleAppliesToHeartbeatSwitchHeader verifies cfg.topLevelRole
+// reaches the Driver's heartbeat writer end-to-end (issue #2092): a
+// review-role invocation whose stream carries one top-level (no
+// parent_tool_use_id) assistant event must show a "reviewer" switch header
+// in the heartbeat log, not the implementor default.
+func TestRunTopLevelRoleAppliesToHeartbeatSwitchHeader(t *testing.T) {
+	const rule = "\xe2\x94\x80\xe2\x94\x80" // ──
+	dir := t.TempDir()
+	streamJSON := `{"type":"assistant","message":{"content":[{"type":"text","text":"Reviewing the change."}]}}` + "\n" +
+		`{"type":"result","num_turns":1}` + "\n"
+	bin := writeFakeDriver(t, dir, "fake-driver", `printf '`+streamJSON+`'`)
+	heartbeatLog := filepath.Join(dir, "heartbeat.log")
+	cfg := execConfig{
+		driver:       "claude",
+		driverBin:    bin,
+		logPath:      filepath.Join(dir, "stream.log"),
+		heartbeatLog: heartbeatLog,
+		issue:        "42",
+		topLevelRole: "reviewer",
+	}
+	var stdout bytes.Buffer
+	if _, err := run(cfg, &stdout); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	got, err := os.ReadFile(heartbeatLog)
+	if err != nil {
+		t.Fatalf("read heartbeatLog: %v", err)
+	}
+	content := string(got)
+	if !strings.Contains(content, rule+" reviewer ") {
+		t.Errorf("heartbeat log missing reviewer switch header: %q", content)
+	}
+	if strings.Contains(content, rule+" implementor ") {
+		t.Errorf("heartbeat log must not emit an implementor header when topLevelRole is set: %q", content)
+	}
+}
+
 // TestRunDevshellWrapsCommand verifies that with cfg.devshell set, run spawns
 // the Driver via `nix develop .#<name> --command <absolute-driver-bin>
 // <args...>` instead of invoking the Driver directly — the devShell-first

@@ -32,7 +32,10 @@ type Driver interface {
 	// NewHeartbeatWriter wraps raw (the log file) with a writer that emits
 	// coarse status lines to out at natural event boundaries in this
 	// Driver's own transcript format, forwarding all bytes to raw unchanged.
-	NewHeartbeatWriter(raw io.Writer, issue string, out io.Writer) io.Writer
+	// topLevelRole is the role attributed to top-level (empty
+	// parent_tool_use_id) messages; an empty value means the implementor's
+	// own default (issue #2092).
+	NewHeartbeatWriter(raw io.Writer, issue string, out io.Writer, topLevelRole string) io.Writer
 
 	// ExtractUsage scans the box log at logPath and returns its aggregate and
 	// per-model usage in one report, in this Driver's own log format.
@@ -41,7 +44,10 @@ type Driver interface {
 	// RenderTranscript scans the box log at logPath and returns a readable
 	// rendering of its assistant turns and tool calls, in this Driver's own
 	// transcript format — a Console drill-in's rendered view (#648).
-	RenderTranscript(logPath string) (string, error)
+	// topLevelRole is the role attributed to top-level (empty
+	// parent_tool_use_id) messages; an empty value means the implementor's
+	// own default (issue #2092).
+	RenderTranscript(logPath, topLevelRole string) (string, error)
 }
 
 // registry maps a Driver name to its strategy. Populated by each driver's

@@ -40,6 +40,7 @@ func main() {
 	issue := flag.String("issue", os.Getenv("ISSUE_NUMBER"), "issue number, for the heartbeat log prefix")
 	logPath := flag.String("log-path", "", "path to tee the raw Driver stream to, for outcome extraction (required)")
 	heartbeatLog := flag.String("heartbeat-log", "/tmp/heartbeat.log", "path to write coarse heartbeat status lines")
+	topLevelRole := flag.String("top-level-role", "", "role for this pass's own top-level (no parent_tool_use_id) messages; empty defaults to implementor (issue #2092)")
 	flag.Parse()
 
 	if *issue == "" {
@@ -86,6 +87,7 @@ func main() {
 		logPath:      *logPath,
 		heartbeatLog: *heartbeatLog,
 		issue:        *issue,
+		topLevelRole: *topLevelRole,
 	}, os.Stdout)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "driver-exec:", err)

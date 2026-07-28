@@ -49,7 +49,7 @@ func (t *tailer) readAppended(drv driver.Driver, number string) (data string, ok
 	}
 	if t.writer == nil {
 		t.out = &bytes.Buffer{}
-		t.writer = drv.NewHeartbeatWriter(io.Discard, number, t.out)
+		t.writer = drv.NewHeartbeatWriter(io.Discard, number, t.out, "")
 	} else {
 		t.out.Reset()
 	}

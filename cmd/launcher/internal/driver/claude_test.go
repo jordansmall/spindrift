@@ -19,7 +19,7 @@ func TestClaudeDriverHeartbeatWriterForwardsRaw(t *testing.T) {
 	}
 
 	var raw, out bytes.Buffer
-	w := d.NewHeartbeatWriter(&raw, "42", &out)
+	w := d.NewHeartbeatWriter(&raw, "42", &out, "")
 
 	streamJSON := `{"type":"result","num_turns":2}` + "\n"
 	if _, err := w.Write([]byte(streamJSON)); err != nil {
@@ -189,7 +189,7 @@ func TestClaudeDriverRenderTranscript(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, err := d.RenderTranscript(logPath)
+	got, err := d.RenderTranscript(logPath, "")
 	if err != nil {
 		t.Fatalf("RenderTranscript: %v", err)
 	}

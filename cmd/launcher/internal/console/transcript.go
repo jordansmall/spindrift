@@ -33,7 +33,7 @@ func DrillIn(drv driver.Driver, pwd, number string) Msg {
 		rendered.WriteString(boundary)
 		raw.WriteString(boundary)
 
-		text, err := drv.RenderTranscript(p.Path)
+		text, err := drv.RenderTranscript(p.Path, "")
 		if err != nil {
 			return DrillInMsg{Number: number, Err: err}
 		}

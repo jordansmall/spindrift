@@ -165,7 +165,7 @@ func (d *Dispatch) runOnce(logPath string, env map[string]string, driverCacheDir
 		Issue:          d.number,
 		Name:           name,
 		Env:            env,
-		Output:         d.driver.NewHeartbeatWriter(logFile, d.number, d.humanOut()),
+		Output:         d.driver.NewHeartbeatWriter(logFile, d.number, d.humanOut(), ""),
 		DriverCacheDir: driverCacheDir,
 		OutboxDir:      outboxDir,
 	}
