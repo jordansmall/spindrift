@@ -17,11 +17,14 @@ import (
 // fetches ref from repoPath itself — finds it. Returns an error, leaving the
 // seam unlanded, when the bundle is missing or fails `git bundle verify`
 // (the prerequisite commit(s) it was built against aren't reachable from
-// repoPath, or its contents are corrupt). The fetch refspec is forced: a
-// retried seam (the Box crashed and re-dispatched, rebuilding its bundle from
-// a rebased branch) must be able to overwrite whatever an earlier, abandoned
-// attempt already left at the same ref, even when the new history diverges
-// from it.
+// repoPath, or its contents are corrupt) — but the two cases are distinct: a
+// missing bundle wraps forge.ErrBundleNotFound, the benign "Box wrote
+// nothing" case, while a present-but-corrupt bundle is a generic error,
+// matching the github forge's own relay.go distinction. The fetch refspec is
+// forced: a retried seam (the Box crashed and re-dispatched, rebuilding its
+// bundle from a rebased branch) must be able to overwrite whatever an
+// earlier, abandoned attempt already left at the same ref, even when the new
+// history diverges from it.
 func relayBundle(repoPath, outboxDir, ref string) error {
 	// Defense in depth, matching the git adapter's own validateGitRef: settle
 	// derives ref from cf.AgentBranch(num) host-side (issue #1949) and never
@@ -34,6 +37,9 @@ func relayBundle(repoPath, outboxDir, ref string) error {
 	}
 	bundlePath := filepath.Join(outboxDir, seambundle.FileName)
 	if _, err := os.Stat(bundlePath); err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("local: bundle relay: %w: %s", forge.ErrBundleNotFound, bundlePath)
+		}
 		return fmt.Errorf("local: bundle relay: %w", err)
 	}
 	if out, err := exec.Command("git", "-C", repoPath, "bundle", "verify", bundlePath).CombinedOutput(); err != nil {

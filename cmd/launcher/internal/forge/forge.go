@@ -33,6 +33,14 @@ var ErrAuthFailure = errors.New("forge auth failure")
 // be reached or does not exist under the authenticated account.
 var ErrRepoNotFound = errors.New("forge repo not found")
 
+// ErrBundleNotFound is returned by a BundleRelay's RelayBundle when the
+// outbox seam bundle is simply absent — nothing was written because the
+// Box's branch range was empty (issue #2096), a benign "nothing to relay"
+// outcome the blocked-hand-off call site logs informationally rather than
+// as a relay failure. A bundle that is present but unreadable or corrupt
+// is a genuine error and is NOT this sentinel.
+var ErrBundleNotFound = errors.New("forge bundle not found")
+
 // Issue is a GitHub issue as seen by the launcher.
 type Issue struct {
 	Number string // launcher keeps issue numbers as strings

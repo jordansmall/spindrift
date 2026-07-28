@@ -41,7 +41,12 @@ func NewReadOnlyCodeForge(repo string, labels forge.DispatchLabels, branchPrefix
 // bare backing repo since there is no remote to push to. A missing or
 // malformed bundle is returned as an error, never a silent no-op, so a
 // broken hand-off blocks the seam instead of landing nothing (mirroring
-// local's own bundle-relay failure posture).
+// local's own bundle-relay failure posture). The two failure modes are
+// distinguished (issue #2096): an absent bundle file returns
+// forge.ErrBundleNotFound, the benign "Box wrote nothing" case, while a
+// bundle that is present but unreadable or fails `git bundle verify` returns
+// a generic error, since that's a genuine relay failure the caller should
+// not treat as a no-op.
 func (c *readOnlyCodeForge) RelayBundle(outboxDir, ref string) error {
 	// Defense in depth, matching local's own relayBundle: settle derives ref
 	// from cf.AgentBranch(num) host-side (issue #1949) and never forwards the
@@ -54,6 +59,9 @@ func (c *readOnlyCodeForge) RelayBundle(outboxDir, ref string) error {
 	}
 	bundlePath := filepath.Join(outboxDir, seambundle.FileName)
 	if _, err := os.Stat(bundlePath); err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("github: relay bundle: %w: %s", forge.ErrBundleNotFound, bundlePath)
+		}
 		return fmt.Errorf("github: relay bundle: %w", err)
 	}
 
