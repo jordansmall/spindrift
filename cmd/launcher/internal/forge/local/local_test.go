@@ -992,6 +992,29 @@ func TestLocalTracker_ImplementsHostPostedIssueFiler(t *testing.T) {
 	var _ forge.HostPostedIssueFiler = NewLocalTracker(t.TempDir(), testLabels)
 }
 
+// TestLocalTracker_PostIssue_ReadBack_NoEmptyLabel verifies a PostIssue'd
+// issue reads back with exactly the labels it was filed with: State is left
+// empty (untriaged) by PostIssue, and toIssue must not append that empty
+// marker as a stray "" element in Labels.
+func TestLocalTracker_PostIssue_ReadBack_NoEmptyLabel(t *testing.T) {
+	dir := t.TempDir()
+	lt := NewLocalTracker(dir, testLabels)
+
+	ref, err := lt.PostIssue("Fix the Thing", "body", []string{"agent-review-finding"})
+	if err != nil {
+		t.Fatalf("PostIssue: %v", err)
+	}
+
+	iss, err := lt.Issue(strings.TrimPrefix(ref, "local:"))
+	if err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+	want := []string{"agent-review-finding"}
+	if !reflect.DeepEqual(iss.Labels, want) {
+		t.Errorf("Labels = %v, want %v", iss.Labels, want)
+	}
+}
+
 // TestLocalTracker_PostIssue_SlugCollision_AppendsSuffix verifies PostIssue
 // never overwrites an existing issue file: when the derived slug already
 // exists, it retries with a "-2" (then "-3", ...) suffix.
@@ -1025,6 +1048,49 @@ func TestLocalTracker_PostIssue_SlugCollision_AppendsSuffix(t *testing.T) {
 	}
 	if newIss.Body != "new body" {
 		t.Errorf("new Body = %q, want %q", newIss.Body, "new body")
+	}
+}
+
+// TestLocalTracker_PostIssue_NewlineTitle_NoFrontmatterInjection verifies a
+// host-posted title containing embedded frontmatter-shaped lines (e.g. a
+// closing delimiter plus closed:/labels: overrides) round-trips as a single
+// literal title rather than being re-parsed as frontmatter — the injection
+// this adapter must resist since PostIssue's title/body come verbatim from
+// an attacker-influenceable SPINDRIFT_ISSUE_INTENT payload.
+func TestLocalTracker_PostIssue_NewlineTitle_NoFrontmatterInjection(t *testing.T) {
+	dir := t.TempDir()
+	lt := NewLocalTracker(dir, testLabels)
+
+	title := "x\n---\nclosed: true\nlabels: [pwned]"
+	ref, err := lt.PostIssue(title, "real body", []string{"agent-review-finding"})
+	if err != nil {
+		t.Fatalf("PostIssue: %v", err)
+	}
+
+	iss, err := lt.Issue(strings.TrimPrefix(ref, "local:"))
+	if err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+	if iss.Title != title {
+		t.Errorf("Title = %q, want %q", iss.Title, title)
+	}
+	if iss.State == forge.IssueClosed {
+		t.Errorf("State = IssueClosed, want open (title injection must not close the issue)")
+	}
+	foundReview, foundPwned := false, false
+	for _, l := range iss.Labels {
+		if l == "agent-review-finding" {
+			foundReview = true
+		}
+		if l == "pwned" {
+			foundPwned = true
+		}
+	}
+	if !foundReview {
+		t.Errorf("Labels = %v, want it to contain %q", iss.Labels, "agent-review-finding")
+	}
+	if foundPwned {
+		t.Errorf("Labels = %v, want it NOT to contain injected %q", iss.Labels, "pwned")
 	}
 }
 

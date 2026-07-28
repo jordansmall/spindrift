@@ -141,9 +141,14 @@ func (lt *LocalTracker) readIssueFile(num string) (localIssue, error) {
 // dispatch-state marker is appended to Labels so cross-backend logic that
 // checks for a specific dispatch label (e.g. failedLabel) works the same as
 // it does against the GitHub adapter, whose Labels already include whatever
-// label represents current state.
+// label represents current state — skipped when State is empty (a
+// PostIssue'd, untriaged issue carries no marker), so Labels never gains a
+// stray "" element.
 func toIssue(num string, li localIssue) forge.Issue {
-	labels := append(append([]string(nil), li.frontmatter.Labels...), li.frontmatter.State)
+	labels := append([]string(nil), li.frontmatter.Labels...)
+	if li.frontmatter.State != "" {
+		labels = append(labels, li.frontmatter.State)
+	}
 	state := forge.IssueOpen
 	if li.frontmatter.Closed {
 		state = forge.IssueClosed
@@ -510,18 +515,18 @@ func (lt *LocalTracker) CreateLabel(name, description, color string) error {
 func (li localIssue) render() string {
 	var b strings.Builder
 	b.WriteString(frontmatterDelim + "\n")
-	fmt.Fprintf(&b, "title: %s\n", li.frontmatter.Title)
-	fmt.Fprintf(&b, "state: %s\n", li.frontmatter.State)
+	fmt.Fprintf(&b, "title: %s\n", renderScalar(li.frontmatter.Title))
+	fmt.Fprintf(&b, "state: %s\n", renderScalar(li.frontmatter.State))
 	fmt.Fprintf(&b, "labels: [%s]\n", strings.Join(li.frontmatter.Labels, ", "))
-	fmt.Fprintf(&b, "created: %s\n", li.frontmatter.Created)
+	fmt.Fprintf(&b, "created: %s\n", renderScalar(li.frontmatter.Created))
 	if li.frontmatter.Parent != "" {
-		fmt.Fprintf(&b, "parent: %s\n", li.frontmatter.Parent)
+		fmt.Fprintf(&b, "parent: %s\n", renderScalar(li.frontmatter.Parent))
 	}
 	if li.frontmatter.Closed {
 		b.WriteString("closed: true\n")
 	}
 	if li.frontmatter.Landing != "" {
-		fmt.Fprintf(&b, "landing: %s\n", li.frontmatter.Landing)
+		fmt.Fprintf(&b, "landing: %s\n", renderScalar(li.frontmatter.Landing))
 	}
 	if li.frontmatter.Abandoned {
 		b.WriteString("abandoned: true\n")
@@ -531,14 +536,86 @@ func (li localIssue) render() string {
 	return b.String()
 }
 
-// unquote strips a single layer of matching single or double quotes.
-func unquote(s string) string {
-	if len(s) >= 2 {
-		if (s[0] == '"' && s[len(s)-1] == '"') || (s[0] == '\'' && s[len(s)-1] == '\'') {
-			return s[1 : len(s)-1]
+// scalarNeedsQuoting reports whether s must be double-quoted to render as a
+// single YAML "key: value" line: leading/trailing whitespace, an embedded
+// newline or carriage return (both of which would otherwise fragment into
+// extra physical lines parseLocalIssue re-reads as frontmatter — the
+// injection this guards against), or a leading quote character that would
+// otherwise be misread as opening a quoted scalar. Plain values like "Fix
+// the Thing" and RFC3339 timestamps stay bare, unchanged from before.
+func scalarNeedsQuoting(s string) bool {
+	return s != strings.TrimSpace(s) ||
+		strings.ContainsAny(s, "\n\r") ||
+		strings.HasPrefix(s, `"`) || strings.HasPrefix(s, "'")
+}
+
+// renderScalar returns s as a bare YAML scalar when it needs no quoting, or
+// a double-quoted, backslash-escaped scalar otherwise (see
+// scalarNeedsQuoting) — the write side of unquote's decode.
+func renderScalar(s string) string {
+	if !scalarNeedsQuoting(s) {
+		return s
+	}
+	var b strings.Builder
+	b.WriteByte('"')
+	for _, r := range s {
+		switch r {
+		case '\\':
+			b.WriteString(`\\`)
+		case '"':
+			b.WriteString(`\"`)
+		case '\n':
+			b.WriteString(`\n`)
+		case '\r':
+			b.WriteString(`\r`)
+		case '\t':
+			b.WriteString(`\t`)
+		default:
+			b.WriteRune(r)
 		}
 	}
-	return s
+	b.WriteByte('"')
+	return b.String()
+}
+
+// unquote strips a single layer of matching single or double quotes,
+// decoding renderScalar's backslash escapes when the layer is double-quoted
+// (single-quoted values are a literal strip, matching YAML's single-quote
+// semantics for the values this adapter ever writes).
+func unquote(s string) string {
+	if len(s) < 2 {
+		return s
+	}
+	if s[0] == '\'' && s[len(s)-1] == '\'' {
+		return s[1 : len(s)-1]
+	}
+	if s[0] != '"' || s[len(s)-1] != '"' {
+		return s
+	}
+	inner := s[1 : len(s)-1]
+	var b strings.Builder
+	for i := 0; i < len(inner); i++ {
+		if inner[i] != '\\' || i == len(inner)-1 {
+			b.WriteByte(inner[i])
+			continue
+		}
+		i++
+		switch inner[i] {
+		case 'n':
+			b.WriteByte('\n')
+		case 'r':
+			b.WriteByte('\r')
+		case 't':
+			b.WriteByte('\t')
+		case '\\':
+			b.WriteByte('\\')
+		case '"':
+			b.WriteByte('"')
+		default:
+			b.WriteByte(inner[i])
+		}
+	}
+	return b.String()
 }
 
 // parseFlowList parses a YAML flow sequence like "[a, b, c]" into its
