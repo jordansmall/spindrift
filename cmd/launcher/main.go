@@ -1282,7 +1282,7 @@ func runContinuousDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, 
 			return errQueueEmpty
 		}
 		if errors.Is(err, waves.ErrImageStale) {
-			return classifyStaleOutcome(staleRev, tracker, func() string {
+			return classifyStaleOutcome(staleRev, staleTipTag, tracker, func() string {
 				return freshness.HostTaintDiagnostic(c.baseBranch, staleRev, c.flakeImageAttr, staleTipTag, c.imageTag)
 			}, os.Stdout)
 		}
