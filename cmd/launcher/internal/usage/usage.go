@@ -35,11 +35,11 @@ type Usage struct {
 }
 
 // ModelUsage holds token usage aggregated across every turn and subagent for
-// one model family (opus/haiku/sonnet), split into the five billable
-// categories. Tokens only, never dollars — counts are exact from the API,
-// whereas any cost figure needs pricing spindrift does not own (issue #2085).
+// one model, split into the five billable categories. Tokens only, never
+// dollars — counts are exact from the API, whereas any cost figure needs
+// pricing spindrift does not own (issue #2085).
 type ModelUsage struct {
-	Model                string // model family: "opus", "haiku", "sonnet", or raw id
+	Model                string // exact model id, e.g. "claude-opus-4-8"; "unknown" if the log carried no model field
 	UncachedInputTokens  int
 	OutputTokens         int
 	CacheReadInputTokens int

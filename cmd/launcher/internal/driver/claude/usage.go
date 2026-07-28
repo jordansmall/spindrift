@@ -137,11 +137,11 @@ func breakdownByModelFile(path string) ([]usage.ModelUsage, error) {
 			}
 			seenIDs[id] = true
 		}
-		family := ModelFamily(ev.Message.Model)
-		if family == "" {
-			family = "unknown"
+		model := ev.Message.Model
+		if model == "" {
+			model = "unknown"
 		}
-		b := ensure(family)
+		b := ensure(model)
 		b.UncachedInputTokens += ev.Message.Usage.InputTokens
 		b.OutputTokens += ev.Message.Usage.OutputTokens
 		b.CacheReadInputTokens += ev.Message.Usage.CacheReadInputTokens
@@ -165,25 +165,35 @@ func breakdownByModelFile(path string) ([]usage.ModelUsage, error) {
 		return nil, err
 	}
 
-	// Deterministic order: opus, haiku, sonnet first (when present), then
-	// any remaining families (including "unknown") sorted for stability.
-	priority := []string{"opus", "haiku", "sonnet"}
-	seen := make(map[string]bool, len(priority))
-	var result []usage.ModelUsage
-	for _, model := range priority {
-		if b, ok := buckets[model]; ok {
-			result = append(result, *b)
-			seen[model] = true
+	// Deterministic order: opus, haiku, sonnet families first (when
+	// present), then any remaining families (including "unknown"), each
+	// bucket keyed and labeled by its exact model id — not the collapsed
+	// family name. ModelFamily is used here for ordering only; within a
+	// family, rows sort by raw id for stability.
+	familyRank := func(id string) int {
+		switch ModelFamily(id) {
+		case "opus":
+			return 0
+		case "haiku":
+			return 1
+		case "sonnet":
+			return 2
+		default:
+			return 3
 		}
 	}
-	var rest []string
+	var models []string
 	for model := range buckets {
-		if !seen[model] {
-			rest = append(rest, model)
-		}
+		models = append(models, model)
 	}
-	sort.Strings(rest)
-	for _, model := range rest {
+	sort.Slice(models, func(i, j int) bool {
+		if ri, rj := familyRank(models[i]), familyRank(models[j]); ri != rj {
+			return ri < rj
+		}
+		return models[i] < models[j]
+	})
+	var result []usage.ModelUsage
+	for _, model := range models {
 		result = append(result, *buckets[model])
 	}
 	return result, nil

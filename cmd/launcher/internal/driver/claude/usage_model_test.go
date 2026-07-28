@@ -84,7 +84,7 @@ func TestBreakdownByModel_Fixture(t *testing.T) {
 	if len(got) != 3 {
 		t.Fatalf("len(got) = %d, want 3: %+v", len(got), got)
 	}
-	wantOrder := []string{"opus", "haiku", "sonnet"}
+	wantOrder := []string{"claude-opus-4-8", "claude-haiku-4-5-20251001", "claude-sonnet-5"}
 	for i, m := range got {
 		if m.Model != wantOrder[i] {
 			t.Errorf("got[%d].Model = %q, want %q (order: %v)", i, m.Model, wantOrder[i], got)
@@ -96,7 +96,7 @@ func TestBreakdownByModel_Fixture(t *testing.T) {
 		byModel[m.Model] = m
 	}
 
-	opus := byModel["opus"]
+	opus := byModel["claude-opus-4-8"]
 	if opus.UncachedInputTokens != 140 {
 		t.Errorf("opus.UncachedInputTokens = %d, want 140", opus.UncachedInputTokens)
 	}
@@ -113,7 +113,7 @@ func TestBreakdownByModel_Fixture(t *testing.T) {
 		t.Errorf("opus.CacheWrite1hTokens = %d, want 140", opus.CacheWrite1hTokens)
 	}
 
-	haiku := byModel["haiku"]
+	haiku := byModel["claude-haiku-4-5-20251001"]
 	if haiku.UncachedInputTokens != 18 {
 		t.Errorf("haiku.UncachedInputTokens = %d, want 18", haiku.UncachedInputTokens)
 	}
@@ -130,7 +130,7 @@ func TestBreakdownByModel_Fixture(t *testing.T) {
 		t.Errorf("haiku.CacheWrite1hTokens = %d, want 0", haiku.CacheWrite1hTokens)
 	}
 
-	sonnet := byModel["sonnet"]
+	sonnet := byModel["claude-sonnet-5"]
 	if sonnet.UncachedInputTokens != 30 {
 		t.Errorf("sonnet.UncachedInputTokens = %d, want 30", sonnet.UncachedInputTokens)
 	}
@@ -217,8 +217,8 @@ func TestBreakdownByModel_DedupByMessageID(t *testing.T) {
 	}
 
 	opus := got[0]
-	if opus.Model != "opus" {
-		t.Fatalf("got[0].Model = %q, want %q", opus.Model, "opus")
+	if opus.Model != "claude-opus-4-8" {
+		t.Fatalf("got[0].Model = %q, want %q", opus.Model, "claude-opus-4-8")
 	}
 	if opus.UncachedInputTokens != 140 {
 		t.Errorf("opus.UncachedInputTokens = %d, want 140", opus.UncachedInputTokens)
@@ -234,6 +234,35 @@ func TestBreakdownByModel_DedupByMessageID(t *testing.T) {
 	}
 	if opus.CacheWrite1hTokens != 140 {
 		t.Errorf("opus.CacheWrite1hTokens = %d, want 140", opus.CacheWrite1hTokens)
+	}
+}
+
+// TestBreakdownByModel_TwoIdsSameFamily confirms two distinct model ids in
+// the same ModelFamily (opus) yield two distinct rows, each labeled with its
+// exact id rather than being collapsed into one "opus" row. ModelFamily is
+// used for ordering only, so within the opus family the two rows are
+// ordered by raw id ("claude-opus-4-7" sorts before "claude-opus-4-8").
+func TestBreakdownByModel_TwoIdsSameFamily(t *testing.T) {
+	lines := []string{
+		`{"type":"assistant","message":{"id":"msg_1","model":"claude-opus-4-8","content":[],"usage":{"input_tokens":100,"output_tokens":50}}}`,
+		`{"type":"assistant","message":{"id":"msg_2","model":"claude-opus-4-7","content":[],"usage":{"input_tokens":10,"output_tokens":5}}}`,
+		`{"type":"assistant","message":{"id":"msg_3","model":"claude-sonnet-5","content":[],"usage":{"input_tokens":1,"output_tokens":1}}}`,
+	}
+	path := WriteLog(t, lines...)
+
+	got, err := breakdownByModel(path)
+	if err != nil {
+		t.Fatalf("breakdownByModel: %v", err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("len(got) = %d, want 3: %+v", len(got), got)
+	}
+
+	wantOrder := []string{"claude-opus-4-7", "claude-opus-4-8", "claude-sonnet-5"}
+	for i, m := range got {
+		if m.Model != wantOrder[i] {
+			t.Errorf("got[%d].Model = %q, want %q (order: %v)", i, m.Model, wantOrder[i], got)
+		}
 	}
 }
 
