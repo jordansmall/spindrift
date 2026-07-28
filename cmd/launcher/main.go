@@ -808,17 +808,24 @@ func newDispatchFactory(c config, pwd string, r runner.Runner, lw *localloop.Wir
 // honored rather than silently bypassed.
 func settleConfig(c config, lw *localloop.Wired, cf forge.CodeForge) settle.Config {
 	return settle.Config{
-		MergeMode:          c.mergeMode,
-		MergeGuardPaths:    c.mergeGuardPaths,
-		CompleteLabel:      c.completeLabel,
-		MergePollInterval:  c.mergePollInterval,
-		MergePollTimeout:   c.mergePollTimeout,
-		MaxFixAttempts:     c.maxFixAttempts,
-		MaxRebaseAttempts:  c.maxRebaseAttempts,
-		MaxBudgetTokens:    c.maxBudgetTokens,
-		MaxBudgetUSD:       c.maxBudgetUSD,
-		PreflightStaleBase: c.preflightStaleBase,
-		OutboxDir:          lw.OutboxDir,
+		MergeMode:         c.mergeMode,
+		MergeGuardPaths:   c.mergeGuardPaths,
+		CompleteLabel:     c.completeLabel,
+		MergePollInterval: c.mergePollInterval,
+		MergePollTimeout:  c.mergePollTimeout,
+		MaxFixAttempts:    c.maxFixAttempts,
+		MaxRebaseAttempts: c.maxRebaseAttempts,
+		// The rebase-push retry loops reuse the same transient-backoff and
+		// hold-jitter knobs the dispatch-exit retry path does (issue #2095) --
+		// a settle push 403/5xx is the same class of transient, so it backs
+		// off on the same schedule rather than inventing a second knob pair.
+		// Clock is left zero here; settle.New defaults it to RealClock.
+		TransientBackoffSecs: c.transientBackoffSecs,
+		HoldJitterSecs:       c.holdJitterSecs,
+		MaxBudgetTokens:      c.maxBudgetTokens,
+		MaxBudgetUSD:         c.maxBudgetUSD,
+		PreflightStaleBase:   c.preflightStaleBase,
+		OutboxDir:            lw.OutboxDir,
 		CodeForgeForIssue: func(num string) forge.CodeForge {
 			if c.codeForge != "local" {
 				return cf

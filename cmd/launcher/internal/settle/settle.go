@@ -33,6 +33,21 @@ type Config struct {
 	MaxFixAttempts    int
 	MaxRebaseAttempts int
 
+	// TransientBackoffSecs is the linear backoff unit applied between
+	// rebase-push retries on forge.ErrTransientPushFailure (issue #2095):
+	// attempt N waits TransientBackoffSecs*N, mirroring
+	// dispatch.Config.TransientBackoffSecs' own semantics.
+	TransientBackoffSecs int
+
+	// HoldJitterSecs is added to every rebase-push backoff sleep, mirroring
+	// dispatch.Config.HoldJitterSecs.
+	HoldJitterSecs int
+
+	// Clock is the injectable sleep seam the rebase-push backoff sleeps
+	// through — defaults to dispatch.RealClock() when unset (its Sleep
+	// field left nil).
+	Clock dispatch.Clock
+
 	// MaxBudgetTokens and MaxBudgetUSD cap cumulative usage (issue #2001) —
 	// summed across the initial run and every fix pass dispatched so far,
 	// via Dispatcher.CumulativeUsage — before selfHealGate launches another
@@ -144,6 +159,9 @@ type Settle struct {
 	// landing calls (Config.CodeForgeForIssue, issue #1734) — defaults to
 	// always returning cf when Config.CodeForgeForIssue is nil.
 	cfForNum func(num string) forge.CodeForge
+	// clock backs the rebase-push backoff sleep (Config.Clock, issue #2095)
+	// — defaults to dispatch.RealClock() when Config.Clock is unset.
+	clock dispatch.Clock
 }
 
 // SetTerminated wires reg as this Settle's termination registry — called
@@ -177,5 +195,9 @@ func New(cfg Config, it forge.IssueTracker, cf forge.CodeForge) *Settle {
 	if cfForNum == nil {
 		cfForNum = func(string) forge.CodeForge { return cf }
 	}
-	return &Settle{cfg: cfg, it: it, cf: cf, pr: pr, landing: landing, readOnly: cfg.ReadOnly, cfForNum: cfForNum}
+	clock := cfg.Clock
+	if clock.Sleep == nil {
+		clock = dispatch.RealClock()
+	}
+	return &Settle{cfg: cfg, it: it, cf: cf, pr: pr, landing: landing, readOnly: cfg.ReadOnly, cfForNum: cfForNum, clock: clock}
 }
