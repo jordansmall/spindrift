@@ -31,6 +31,11 @@
   # The selected Driver's in-box half (ADR 0009): invocation binary/flags,
   # skill wiring, and outcome extraction.
   driverEntry,
+  # The OCI image name, scoped to the selected Driver (issue #262 AC1):
+  # "spindrift" for the default claude Driver, "spindrift-<driver>" otherwise.
+  # The buildLayeredImage name below, so `driver = "opencode"` realises a
+  # distinct spindrift-opencode artifact.
+  imageName,
   # In-box Driver runner (#626), built for Linux by mkHarness: runs one
   # Driver invocation direct or inside the devShell, tees the stream, and
   # filters heartbeats in-process (absorbing the former standalone
@@ -377,7 +382,7 @@ let
   extraClosurePaths = extraClosures pkgs;
 
   image = pkgs.dockerTools.buildLayeredImage {
-    name = "spindrift";
+    name = imageName;
     tag = "latest";
     contents = [
       agentEnv

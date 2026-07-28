@@ -98,6 +98,7 @@ in
         prefetch = "";
         imagePath = "/nix/store/ccc-image";
         imageHash = "deadbeef";
+        imageName = "spindrift";
         runtime = "bwrap";
         imageDrv = "/nix/store/ddd-image.drv";
         nixBuilderImage = "docker.io/nixos/nix@sha256:aaaa";
@@ -144,6 +145,7 @@ in
         prefetch = "";
         imagePath = "/nix/store/ccc-image";
         imageHash = "deadbeef";
+        imageName = "spindrift";
         runtime = "podman";
         imageDrv = "/nix/store/ddd-image.drv";
         nixBuilderImage = "docker.io/nixos/nix@sha256:aaaa";
@@ -177,6 +179,35 @@ in
     ) "runArtifacts (oci) must not set bwrap-only keys, got: ${builtins.toJSON out}";
     pkgs.runCommand "preambles-run-artifacts-oci" { } "touch $out";
 
+  # Issue #262 AC1: a driver-scoped image name flows into IMAGE_TAG, so an
+  # opencode Box's run artifacts point the launcher at the spindrift-opencode
+  # archive, not the historical spindrift one.
+  preambles-run-artifacts-oci-driver-scoped-image-name =
+    let
+      out = preambles.runArtifacts {
+        runnerKind = "oci";
+        driverEntry = {
+          name = "opencode";
+          skillsDirRelative = ".claude/skills";
+        };
+        agentFilesPath = "/nix/store/aaa-agent-files";
+        agentEnvPath = "/nix/store/bbb-agent-env";
+        prefetch = "";
+        imagePath = "/nix/store/ccc-image";
+        imageHash = "deadbeef";
+        imageName = "spindrift-opencode";
+        runtime = "podman";
+        imageDrv = "/nix/store/ddd-image.drv";
+        nixBuilderImage = "docker.io/nixos/nix@sha256:aaaa";
+        linuxSystem = "x86_64-linux";
+        boxEnvVars = "MODEL";
+      };
+    in
+    assert assertMsg (
+      out.IMAGE_TAG == "spindrift-opencode:deadbeef"
+    ) "runArtifacts (oci) must scope IMAGE_TAG to the driver image name, got: ${builtins.toJSON out}";
+    pkgs.runCommand "preambles-run-artifacts-oci-driver-scoped-image-name" { } "touch $out";
+
   preambles-build-artifacts-bwrap =
     let
       out = preambles.buildArtifacts {
@@ -186,6 +217,7 @@ in
         runtime = "bwrap";
         imagePath = "/nix/store/ccc-image";
         imageHash = "deadbeef";
+        imageName = "spindrift";
         imageDrv = "/nix/store/ddd-image.drv";
         nixBuilderImage = "docker.io/nixos/nix@sha256:aaaa";
         linuxSystem = "x86_64-linux";
@@ -214,6 +246,7 @@ in
         runtime = "podman";
         imagePath = "/nix/store/ccc-image";
         imageHash = "deadbeef";
+        imageName = "spindrift";
         imageDrv = "/nix/store/ddd-image.drv";
         nixBuilderImage = "docker.io/nixos/nix@sha256:aaaa";
         linuxSystem = "x86_64-linux";

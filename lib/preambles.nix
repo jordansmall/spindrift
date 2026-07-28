@@ -96,6 +96,7 @@ rec {
       prefetch,
       imagePath,
       imageHash,
+      imageName,
       runtime,
       imageDrv,
       nixBuilderImage,
@@ -114,7 +115,7 @@ rec {
       else
         {
           IMAGE_ARCHIVE = imagePath;
-          IMAGE_TAG = "spindrift:${imageHash}";
+          IMAGE_TAG = "${imageName}:${imageHash}";
           RUNTIME = runtime;
           DRIVER = driverEntry.name;
           IMAGE_DRV = imageDrv;
@@ -144,6 +145,7 @@ rec {
       runtime,
       imagePath,
       imageHash,
+      imageName,
       imageDrv,
       nixBuilderImage,
       linuxSystem,
@@ -158,7 +160,7 @@ rec {
       {
         RUNTIME = runtime;
         IMAGE_ARCHIVE = imagePath;
-        IMAGE_TAG = "spindrift:${imageHash}";
+        IMAGE_TAG = "${imageName}:${imageHash}";
         IMAGE_DRV = imageDrv;
         NIX_BUILDER_IMAGE = nixBuilderImage;
         NIX_VOLUME = "spindrift-nix";
