@@ -212,3 +212,45 @@ func TestBwrapRun_SandboxGHTokenReflectsBoxEnvOverride(t *testing.T) {
 		t.Error("sandbox process env missing GH_TOKEN=box-token")
 	}
 }
+
+// TestBwrapRun_OpencodeAuthContentOffArgvButInProcessEnv verifies
+// OPENCODE_AUTH_CONTENT (the opencode github-copilot credential, issue #263)
+// never appears on the bwrap command line -- ps/proc on the host would
+// otherwise expose it to other local users -- while still reaching the
+// sandbox via process-environment inheritance (bwrap has no --clearenv),
+// mirroring how GH_TOKEN and the other bwrapSecrets entries are delivered.
+func TestBwrapRun_OpencodeAuthContentOffArgvButInProcessEnv(t *testing.T) {
+	const sentinel = "opencode-auth-content-sentinel-value"
+	t.Setenv("OPENCODE_AUTH_CONTENT", sentinel)
+
+	script, _ := newFakeCLI(t, fakeCall{exit: 0})
+	orig := execCommand
+	t.Cleanup(func() { execCommand = orig })
+	var gotCmd *exec.Cmd
+	execCommand = func(name string, args ...string) *exec.Cmd {
+		gotCmd = exec.Command(script, args...)
+		return gotCmd
+	}
+
+	a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok"}
+	box := Box{Env: map[string]string{"OPENCODE_AUTH_CONTENT": sentinel}}
+	if err := a.Run(box); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	for _, arg := range a.buildArgs("/tmp/fake-etc", box) {
+		if strings.Contains(arg, sentinel) {
+			t.Errorf("OPENCODE_AUTH_CONTENT sentinel found in bwrap argv: %v", arg)
+		}
+	}
+
+	found := false
+	for _, kv := range gotCmd.Env {
+		if kv == "OPENCODE_AUTH_CONTENT="+sentinel {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("sandbox process env missing OPENCODE_AUTH_CONTENT sentinel")
+	}
+}
