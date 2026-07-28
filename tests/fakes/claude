@@ -119,12 +119,21 @@ fi
 # this block instead of a `git commit` erroring on an empty index.
 if [ "${FAKE_CLAUDE_COMMIT:-0}" = "1" ] && ! git diff --cached --quiet; then
   git commit -m "feat: stub agent commit for #${ISSUE_NUMBER:-0}" >/dev/null
-  git push origin "$branch" >/dev/null 2>&1
-  gh pr create \
-    --base "${BASE_BRANCH:-main}" \
-    --head "$branch" \
-    --title "feat: resolve issue #${ISSUE_NUMBER:-0}" \
-    --body "Closes #${ISSUE_NUMBER:-0}"
+  # A real read-only Box (BOX_WRITE_ENABLED unset) holds no push-capable
+  # token, so a driver-initiated `git push`/`gh pr create` there would fail
+  # authenticating, not succeed against a local bare repo the way this fake's
+  # `origin` (rewritten via git's insteadOf) always would (issue #2094).
+  # Gate both on the same signal the entrypoint itself gates its own pushes
+  # on, so a read-only fixture's commit lands only in this Box's own clone,
+  # never the remote -- exactly like the real credential boundary.
+  if [ -n "${BOX_WRITE_ENABLED:-}" ]; then
+    git push origin "$branch" >/dev/null 2>&1
+    gh pr create \
+      --base "${BASE_BRANCH:-main}" \
+      --head "$branch" \
+      --title "feat: resolve issue #${ISSUE_NUMBER:-0}" \
+      --body "Closes #${ISSUE_NUMBER:-0}"
+  fi
 fi
 
 # Emit a stream-json transcript to stdout, matching `--output-format stream-json`:
