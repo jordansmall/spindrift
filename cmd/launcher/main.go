@@ -763,7 +763,11 @@ func localBaseBranchResolver(c config, it forge.IssueTracker, lw *localloop.Wire
 				// missing means a blocked seam slipped through onto bare
 				// base. Make that loud rather than silently seeding the
 				// operator base branch.
-				if deps, derr := it.DepsOf(num); derr == nil && len(deps) > 0 {
+				deps, derr := it.DepsOf(num)
+				switch {
+				case derr != nil:
+					fmt.Printf("!! BASE_BRANCH: seam #%s: checking blockers: %v; integration branch %s does not exist, falling back to %s -- cannot confirm the #2130 readiness gate held a blocked seam\n", num, derr, integrationBranch, c.baseBranch)
+				case len(deps) > 0:
 					fmt.Printf("!! BASE_BRANCH: seam #%s has %d blocker(s) but its integration branch %s does not exist; falling back to %s -- the #2130 readiness gate should have held this seam rather than seeding it onto bare base\n", num, len(deps), integrationBranch, c.baseBranch)
 				}
 			}

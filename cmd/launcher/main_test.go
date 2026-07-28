@@ -1724,6 +1724,39 @@ func TestDispatchConfig_Local_ResolveEnv_SilentlyFallsBackWhenBlockerFreeSeamMis
 	}
 }
 
+// TestDispatchConfig_Local_ResolveEnv_LoudlyFallsBackWhenBlockerLookupErrors
+// covers the residual path AC5's blocker-count diagnostic left silent: when
+// the Integration branch is missing AND DepsOf itself errors, the resolver
+// cannot confirm whether the seam was blocked, so it must still fall back to
+// the operator base branch but say so loudly rather than seeding bare base in
+// silence -- an unknown blocker status is not the same as a known
+// blocker-free one.
+func TestDispatchConfig_Local_ResolveEnv_LoudlyFallsBackWhenBlockerLookupErrors(t *testing.T) {
+	c := minimalValidConfig()
+	c.codeForge = "local"
+	c.baseBranch = "main"
+	fc := forge.NewFake()
+	// Deliberately do NOT SetIssue("42"): DepsOf then returns an
+	// "issue 42 not found" error, while ResolveParent falls back to the
+	// seam's own slug (integration/42), which BranchExists reports absent.
+	fc.SetBranchExists("integration/42", false)
+	cf := fc.AsLocal()
+
+	cfg := dispatchConfig(c, fc, testWired(fc), cf)
+
+	var got string
+	out := captureStdout(t, func() {
+		got = cfg.ResolveEnv("42", "BASE_BRANCH")
+	})
+
+	if got != "main" {
+		t.Errorf("ResolveEnv(42, BASE_BRANCH) = %q, want %q", got, "main")
+	}
+	if !strings.Contains(out, "checking blockers") {
+		t.Errorf("stdout = %q, want a loud diagnostic mentioning %q", out, "checking blockers")
+	}
+}
+
 // TestDispatchConfig_NonLocal_ResolveEnv_PassesThroughUnchanged verifies
 // that localBaseBranchResolver's non-local branch forwards BASE_BRANCH
 // exactly as resolveBoxEnvVar would -- CODE_FORGE=github/git never consult
