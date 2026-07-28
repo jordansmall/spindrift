@@ -1222,9 +1222,9 @@ ready-for-agent ──dispatch──▶ agent-in-progress ───landing settl
   after each. Only once those are exhausted (or a fix box exits non-zero
   after transient retries) does it swap to `agent-failed` and stop. There are
   **no automatic re-dispatches from `ready-for-agent`**: a human inspects
-  `.spindrift/logs/issue-<n>.log` and re-labels to retry. A fix box's transient exits get
-  the same in-session retry as the initial run — a 429 mid-fix-pass holds
-  until the reset time and re-dispatches rather than burning one of the
+  `.spindrift/logs/issue-<n>.log` and re-labels to retry. A fix box's transient
+  exits get the same in-session retry as the initial run — a 429 mid-fix-pass
+  holds until the reset time and re-dispatches rather than burning one of the
   `MAX_FIX_ATTEMPTS` slots.
 - **The fix box gets the concrete failure, not a guess.** At the moment
   genuine-red is declared, `selfHeal` fetches the failed check names plus a
