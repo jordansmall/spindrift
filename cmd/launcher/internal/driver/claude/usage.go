@@ -200,6 +200,14 @@ func breakdownByModelFile(path string) ([]usage.ModelUsage, error) {
 		if cc := ev.Message.Usage.CacheCreation; cc != nil {
 			b.CacheWrite5mTokens += cc.Ephemeral5mInputTokens
 			b.CacheWrite1hTokens += cc.Ephemeral1hInputTokens
+		} else if v := ev.Message.Usage.CacheCreationInputTokens; v > 0 {
+			// Pre-TTL-split stream-json log: the nested cache_creation
+			// object is absent, but the flat cache_creation_input_tokens
+			// total is populated. Attribute it to the 5-minute bucket,
+			// since the Messages API's cache_control default TTL is 5m
+			// (ephemeral 1h caching is opt-in), so an un-split total is
+			// overwhelmingly likely to be all-5m rather than all-1h.
+			b.CacheWrite5mTokens += v
 		}
 	})
 	if err != nil {
