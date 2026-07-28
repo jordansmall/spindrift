@@ -29,16 +29,16 @@ func (claudeDriver) ClassifyTransient(logPath string) (Classification, error) {
 	}, nil
 }
 
-func (claudeDriver) NewHeartbeatWriter(raw io.Writer, issue string, out io.Writer) io.Writer {
-	return claude.New(raw, issue, out)
+func (claudeDriver) NewHeartbeatWriter(raw io.Writer, issue string, out io.Writer, topLevelRole string) io.Writer {
+	return claude.NewWithTopLevelRole(raw, issue, out, topLevelRole)
 }
 
 func (claudeDriver) ExtractUsage(logPath string) (usage.Report, error) {
 	return claude.ExtractUsage(logPath)
 }
 
-func (claudeDriver) RenderTranscript(logPath string) (string, error) {
-	return claude.RenderTranscript(logPath)
+func (claudeDriver) RenderTranscript(logPath, topLevelRole string) (string, error) {
+	return claude.RenderTranscriptWithRole(logPath, topLevelRole)
 }
 
 func init() {

@@ -58,7 +58,7 @@ func (d fakeDriver) ClassifyTransient(logPath string) (driver.Classification, er
 	return driver.Classification{Class: driver.Terminal, Reason: driver.TaskFailed}, nil
 }
 
-func (d fakeDriver) NewHeartbeatWriter(raw io.Writer, issue string, out io.Writer) io.Writer {
+func (d fakeDriver) NewHeartbeatWriter(raw io.Writer, issue string, out io.Writer, topLevelRole string) io.Writer {
 	return raw
 }
 
@@ -66,6 +66,6 @@ func (d fakeDriver) ExtractUsage(logPath string) (usage.Report, error) {
 	return driverclaude.ExtractUsage(logPath)
 }
 
-func (d fakeDriver) RenderTranscript(logPath string) (string, error) {
-	return driverclaude.RenderTranscript(logPath)
+func (d fakeDriver) RenderTranscript(logPath, topLevelRole string) (string, error) {
+	return driverclaude.RenderTranscriptWithRole(logPath, topLevelRole)
 }

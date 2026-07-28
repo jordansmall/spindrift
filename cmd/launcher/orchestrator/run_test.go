@@ -163,6 +163,41 @@ func TestBuildDriverExecCmdForwardsDriverFlag(t *testing.T) {
 	}
 }
 
+// TestBuildDriverExecCmdForwardsTopLevelRoleFlag verifies buildDriverExecCmd
+// forwards cfg.topLevelRole as driver-exec's own --top-level-role flag when
+// set (issue #2092), and omits the flag entirely -- not just an empty value
+// -- when cfg.topLevelRole is "", keeping the legacy run() path's argv shape
+// byte-identical to before this field existed.
+func TestBuildDriverExecCmdForwardsTopLevelRoleFlag(t *testing.T) {
+	dir := t.TempDir()
+	callLog := filepath.Join(dir, "calls.log")
+	writeFakeDriverExec(t, dir, callLog, "exit 0\n")
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	cfg := config{
+		driverBin:    "claude",
+		topLevelRole: "reviewer",
+	}
+	cmd, err := buildDriverExecCmd(cfg)
+	if err != nil {
+		t.Fatalf("buildDriverExecCmd: %v", err)
+	}
+	got := strings.Join(cmd.Args, " ")
+	if !strings.Contains(got, "--top-level-role reviewer") {
+		t.Errorf("driver-exec argv = %q, want it to contain %q", got, "--top-level-role reviewer")
+	}
+
+	cfg.topLevelRole = ""
+	cmd, err = buildDriverExecCmd(cfg)
+	if err != nil {
+		t.Fatalf("buildDriverExecCmd: %v", err)
+	}
+	got = strings.Join(cmd.Args, " ")
+	if strings.Contains(got, "--top-level-role") {
+		t.Errorf("driver-exec argv = %q, want no --top-level-role flag when cfg.topLevelRole is empty", got)
+	}
+}
+
 // TestRunEmitsPassStartMarkerOnStdout verifies run prints a machine-readable
 // "spindrift_op" pass_start marker to stdout before invoking driver-exec for
 // each pass (issue #2027), so the heartbeat parser can surface the
@@ -870,6 +905,67 @@ func TestRunWithReviewPassSequenceOnBlockThenApprove(t *testing.T) {
 	}
 	if got.LastVerdict != "APPROVE" {
 		t.Errorf("LastVerdict = %q, want %q", got.LastVerdict, "APPROVE")
+	}
+}
+
+// TestRunWithReviewPassSendsTopLevelRoleReviewerForReviewPassAndImplementorForImplementFixPasses
+// verifies runWithReviewPass forwards the correct --top-level-role to
+// driver-exec on every pass (issue #2092): "reviewer" for the code-owned
+// review pass, "implementor" for every implement/fix/land pass -- reusing
+// the same implement -> review -> fix -> review -> land fixture as
+// TestRunWithReviewPassSequenceOnBlockThenApprove.
+func TestRunWithReviewPassSendsTopLevelRoleReviewerForReviewPassAndImplementorForImplementFixPasses(t *testing.T) {
+	dir := t.TempDir()
+	callLog := filepath.Join(dir, "calls.log")
+	writeFakeDriverExec(t, dir, callLog, reviewPassFakeDriverBody(callLog))
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	promptFile := filepath.Join(dir, "prompt.txt")
+	if err := os.WriteFile(promptFile, []byte("ORIGINAL PROMPT TEXT"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	reviewPromptFile := filepath.Join(dir, "review-prompt.txt")
+	if err := os.WriteFile(reviewPromptFile, []byte("REVIEW PROMPT TEXT"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sessionFile := filepath.Join(dir, "session.txt")
+	if err := os.WriteFile(sessionFile, []byte("--session-id fake-id"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stateFile := filepath.Join(dir, "run-state.json")
+
+	cfg := config{
+		promptFile:       promptFile,
+		reviewPromptFile: reviewPromptFile,
+		sessionFile:      sessionFile,
+		driverBin:        "claude",
+		issue:            "7",
+		logPath:          filepath.Join(dir, "stream.log"),
+		heartbeatLog:     filepath.Join(dir, "heartbeat.log"),
+		stateFile:        stateFile,
+		maxReviewRounds:  3,
+		maxSlices:        10,
+	}
+
+	var stdout bytes.Buffer
+	if _, err := run(cfg, &stdout); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	calls, err := os.ReadFile(callLog)
+	if err != nil {
+		t.Fatalf("read callLog: %v", err)
+	}
+	lines := strings.Split(strings.TrimRight(string(calls), "\n"), "\n")
+	if len(lines) != 5 {
+		t.Fatalf("driver-exec invocation count = %d, want 5 (log: %q)", len(lines), calls)
+	}
+
+	wantRoles := []string{"implementor", "reviewer", "implementor", "reviewer", "implementor"}
+	for i, wantRole := range wantRoles {
+		if got := flagValue(lines[i], "--top-level-role"); got != wantRole {
+			t.Errorf("pass %d --top-level-role = %q, want %q (argv: %q)", i+1, got, wantRole, lines[i])
+		}
 	}
 }
 

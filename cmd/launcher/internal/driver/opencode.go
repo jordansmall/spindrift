@@ -29,7 +29,10 @@ func (opencodeDriver) ClassifyTransient(logPath string) (Classification, error) 
 	}, nil
 }
 
-func (opencodeDriver) NewHeartbeatWriter(raw io.Writer, issue string, out io.Writer) io.Writer {
+// NewHeartbeatWriter wraps raw with opencode's own heartbeat writer.
+// opencode's transcript carries no role attribution, so topLevelRole is
+// ignored (issue #2092).
+func (opencodeDriver) NewHeartbeatWriter(raw io.Writer, issue string, out io.Writer, topLevelRole string) io.Writer {
 	return opencode.New(raw, issue, out)
 }
 
@@ -37,7 +40,10 @@ func (opencodeDriver) ExtractUsage(logPath string) (usage.Report, error) {
 	return opencode.ExtractUsage(logPath)
 }
 
-func (opencodeDriver) RenderTranscript(logPath string) (string, error) {
+// RenderTranscript renders the opencode transcript at logPath. opencode's
+// transcript carries no role attribution, so topLevelRole is ignored (issue
+// #2092).
+func (opencodeDriver) RenderTranscript(logPath, topLevelRole string) (string, error) {
 	return opencode.RenderTranscript(logPath)
 }
 

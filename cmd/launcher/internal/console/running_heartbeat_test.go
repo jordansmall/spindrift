@@ -228,8 +228,8 @@ type spyHeartbeatDriver struct {
 	fed *int
 }
 
-func (d spyHeartbeatDriver) NewHeartbeatWriter(raw io.Writer, issue string, out io.Writer) io.Writer {
-	inner := d.Driver.NewHeartbeatWriter(raw, issue, out)
+func (d spyHeartbeatDriver) NewHeartbeatWriter(raw io.Writer, issue string, out io.Writer, topLevelRole string) io.Writer {
+	inner := d.Driver.NewHeartbeatWriter(raw, issue, out, topLevelRole)
 	return byteCountingWriter{Writer: inner, total: d.fed}
 }
 
