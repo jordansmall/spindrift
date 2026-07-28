@@ -192,6 +192,39 @@ func TestBreakdownByRole_Filer(t *testing.T) {
 	}
 }
 
+func TestBreakdownByRole_AgentToolName(t *testing.T) {
+	// Main agent invokes the reviewer subagent via the confirmed real tool
+	// name "Agent" (not the fallback "Task"). Tokens must still bucket under
+	// "reviewer", not the generic "subagent" fallback (#2078).
+	implMain1 := `{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_reviewer","name":"Agent","input":{"subagent_type":"reviewer","prompt":"review diff"}}],"usage":{"input_tokens":150,"output_tokens":60}}}`
+	reviewerMsg1 := `{"type":"assistant","message":{"content":[],"usage":{"input_tokens":300,"output_tokens":100}},"parent_tool_use_id":"toolu_reviewer"}`
+
+	path := WriteLog(t, implMain1, reviewerMsg1)
+
+	breakdown, err := breakdownByRole(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	roles := map[string]usage.RoleUsage{}
+	for _, r := range breakdown {
+		roles[r.Role] = r
+	}
+
+	reviewer, ok := roles["reviewer"]
+	if !ok {
+		t.Fatal("want a reviewer role bucket for an Agent-named spawn block, got none")
+	}
+	if reviewer.InputTokens != 300 {
+		t.Errorf("reviewer input tokens: got %d, want 300", reviewer.InputTokens)
+	}
+	if reviewer.OutputTokens != 100 {
+		t.Errorf("reviewer output tokens: got %d, want 100", reviewer.OutputTokens)
+	}
+	if _, ok := roles["subagent"]; ok {
+		t.Error("want no subagent bucket; Agent-named reviewer spawn should sum into reviewer")
+	}
+}
+
 func TestBreakdownByRole_ReviewerReinvoked(t *testing.T) {
 	// First reviewer invocation
 	implMain1 := `{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_rev1","name":"Task","input":{"subagent_type":"reviewer","prompt":"review diff"}}],"usage":{"input_tokens":100,"output_tokens":30}}}`

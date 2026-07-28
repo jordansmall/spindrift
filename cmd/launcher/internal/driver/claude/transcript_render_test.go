@@ -118,6 +118,23 @@ func TestRenderTranscript_SubagentNarration_PrefixesSubagentRole(t *testing.T) {
 	}
 }
 
+func TestRenderTranscript_SubagentNarration_AgentToolName_PrefixesReviewerRole(t *testing.T) {
+	lines := []string{
+		`{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_reviewer","name":"Agent","input":{"subagent_type":"reviewer"}}]}}`,
+		`{"type":"assistant","message":{"content":[{"type":"text","text":"Looks good."}]},"parent_tool_use_id":"toolu_reviewer"}`,
+	}
+	path := claude.WriteLog(t, lines...)
+
+	got, err := claude.RenderTranscript(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := "[implementor] Agent(reviewer)\n[reviewer] Looks good.\n"
+	if got != want {
+		t.Errorf("RenderTranscript = %q, want %q", got, want)
+	}
+}
+
 func TestRenderTranscript_MissingFile_ReturnsEmpty(t *testing.T) {
 	got, err := claude.RenderTranscript(filepath.Join(t.TempDir(), "missing.log"))
 	if err != nil {
