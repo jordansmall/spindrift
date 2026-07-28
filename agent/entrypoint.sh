@@ -960,6 +960,14 @@ emit_outcome_backstop() {
     # already sitting in this Box's own clone regardless, unlike git/github
     # where a push is the only way work survives the container exiting.
     note="${note}; no bundle was ever emitted (no writable remote under CODE_FORGE=local)"
+  elif [ -z "${BOX_WRITE_ENABLED:-}" ] && [ "${CODE_FORGE:-github}" = "github" ]; then
+    # A read-only github Box holds no push token by design (BOX_WRITE_ENABLED
+    # unset), so a force-push here can only ever 403 -- a structural failure,
+    # not a transient one (issue #2094). main() instead falls through to the
+    # harness-owned bundle-out step, which relays $BRANCH through the outbox
+    # seam.bundle exactly as a read-only status=ready hand-off does. Leave the
+    # note free of any push artifact.
+    note="${note}; branch relayed via outbox bundle (read-only Box)"
   else
     local push_log
     push_log="$(mktemp)"
@@ -1133,7 +1141,17 @@ main() {
   # transient failure into a terminal synthetic status=blocked (issue #593).
   if [ "$claude_rc" -eq 0 ] && [ -z "$_last_outcome_line" ]; then
     emit_outcome_backstop
-    exit 0
+    # A read-only github Box (BOX_WRITE_ENABLED unset) holds no push token, so
+    # emit_outcome_backstop could not push $BRANCH itself. Fall through to the
+    # harness-owned bundle-out step below, which relays the branch through the
+    # outbox seam.bundle exactly as a read-only status=ready hand-off does
+    # (issue #2094). Every other forge/mode has nothing more to do here --
+    # writable github and git already force-pushed in the backstop, local never
+    # had a writable remote, and research cuts no branch -- so they exit now,
+    # behaviour unchanged.
+    if ! { [ -z "${BOX_WRITE_ENABLED:-}" ] && [ "${CODE_FORGE:-github}" = "github" ] && ! _is_research_kind; }; then
+      exit 0
+    fi
   fi
 
   [ "$claude_rc" -eq 0 ] || exit "$claude_rc"
