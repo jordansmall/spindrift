@@ -99,7 +99,7 @@
         name = ".config/opencode/agents/${e.name}.md";
         value = ''
           ---
-          description: ${e.description or ""}
+          description: ${builtins.toJSON (e.description or "")}
           mode: ${e.mode or "subagent"}
           model: ${e.model}
           ---

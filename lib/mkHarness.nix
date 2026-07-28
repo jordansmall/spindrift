@@ -293,20 +293,27 @@ let
 
   # Nix-baked name -> prompt file map (issue #264), read at runtime by
   # entrypoint.sh's generic per-agent prompt injection loop so a custom Nth
-  # agent's prompt resolves the same way as the four built-in names.
+  # agent's prompt resolves the same way as the four built-in names. A custom
+  # roster entry (the AC4 path) that omits promptFile falls back to
+  # "<name>-prompt.md", matching agent/entrypoint.sh's own runtime fallback
+  # for an unknown agent name -- so the baked map and the runtime fallback
+  # agree even when this Nix-side default is the one that actually applies
+  # (issue #264 review finding).
   agentsPromptFilesJson = builtins.toJSON (
     lib.listToAttrs (
       map (e: {
         name = e.name;
-        value = e.promptFile;
+        value = e.promptFile or "${e.name}-prompt.md";
       }) resolvedRoster
     )
   );
 
   # Roster entries carrying their own prompt (a custom agent, as opposed to
   # the four built-in ones whose prompt is always baked separately below) --
-  # baked into the image alongside the four fixed prompt files.
-  customRosterPromptFiles = lib.filter (e: e.prompt != null) resolvedRoster;
+  # baked into the image alongside the four fixed prompt files. A custom
+  # roster entry omitting `prompt` entirely is treated the same as one
+  # explicitly setting it to null (issue #264 review finding).
+  customRosterPromptFiles = lib.filter (e: (e.prompt or null) != null) resolvedRoster;
 
   # The Driver's in-box half, rendered by the registry (issue #624) into
   # agent/entrypoint.sh's DRIVER_* vars and function definitions (ADR 0009),
