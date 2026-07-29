@@ -553,6 +553,35 @@ in
       "opencode Driver's skillsDirRelative must stay .claude/skills, got: ${opencodeEntry.skillsDirRelative}";
     pkgs.runCommand "drivers-opencode-skills-dir-pinned" { } "touch $out";
 
+  # Issue #2153: renderPreamble must bake DRIVER_AGENT_FILES_DIR from the
+  # real opencode entry's agentFilesDirRelative so agent/entrypoint.sh's
+  # file-rewrite loop (agent/entrypoint.sh:784+) actually runs in a real Box
+  # -- the loop is gated entirely on this var being non-empty. The baked
+  # value must match agentFilesTemplate's own on-disk path
+  # (.config/opencode/agents), or the entrypoint would rewrite files the
+  # template never bakes.
+  drivers-render-preamble-opencode-agent-files-dir =
+    let
+      opencodeEntry = driverRegistry.entries.opencode;
+      out = driverRegistry.renderPreamble opencodeEntry;
+    in
+    assert assertMsg (hasInfix "DRIVER_AGENT_FILES_DIR=/home/agent/.config/opencode/agents" out)
+      "renderPreamble must bake DRIVER_AGENT_FILES_DIR from the opencode Driver entry's agentFilesDirRelative under /home/agent, got: ${out}";
+    pkgs.runCommand "drivers-render-preamble-opencode-agent-files-dir" { } "touch $out";
+
+  # A Driver entry that declares no agentFilesDirRelative (every stub fixture
+  # in this file, and claude.nix in production) must render no
+  # DRIVER_AGENT_FILES_DIR line at all -- an empty/unset var, not an empty
+  # string assignment -- so agent/entrypoint.sh's `[ -n "${DRIVER_AGENT_FILES_DIR:-}" ]`
+  # gate stays a true no-op for such a Driver.
+  drivers-render-preamble-omits-agent-files-dir-when-absent =
+    let
+      out = driverRegistry.renderPreamble stubDriverBase;
+    in
+    assert assertMsg (!(hasInfix "DRIVER_AGENT_FILES_DIR" out))
+      "renderPreamble must omit DRIVER_AGENT_FILES_DIR entirely for a Driver entry with no agentFilesDirRelative, got: ${out}";
+    pkgs.runCommand "drivers-render-preamble-omits-agent-files-dir-when-absent" { } "touch $out";
+
   # Issue #2152 slice C: claude's agentsJsonTemplate builds an attrset and
   # returns builtins.toJSON over the whole thing, so every scalar -- not just
   # description -- is already properly JSON-encoded. Round-trip a

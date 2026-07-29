@@ -99,6 +99,17 @@ let
     + "DRIVER_SKILLS_DIR="
     + lib.escapeShellArg "/home/agent/${driverEntry.skillsDirRelative}"
     + "\n"
+    # Optional, like sessionCacheDirRelative (see requiredAttrs comment
+    # above): rendered only when the Driver entry declares
+    # agentFilesDirRelative (currently opencode.nix only), so
+    # agent/entrypoint.sh's DRIVER_AGENT_FILES_DIR-gated file-rewrite loop
+    # (issue #2153) stays a true no-op -- the var unset, not empty -- for a
+    # Driver (claude) whose subagents don't ride on-disk files.
+    + lib.optionalString (driverEntry ? agentFilesDirRelative) (
+      "DRIVER_AGENT_FILES_DIR="
+      + lib.escapeShellArg "/home/agent/${driverEntry.agentFilesDirRelative}"
+      + "\n"
+    )
     + renderEnvCommon driverEntry
     + renderFunctions driverEntry;
 in
