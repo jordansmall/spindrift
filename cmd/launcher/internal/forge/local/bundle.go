@@ -195,10 +195,10 @@ func parseLandingRef(landing string) (branch, sha string, ok bool) {
 // is false, with a nil error, when branch doesn't exist there — `git
 // rev-parse --verify --quiet` exits non-zero (via *exec.ExitError) with no
 // output for a missing ref, the same "nothing to report" result
-// BranchMergedIntoIntegration treats as merged=false rather than a hard
-// error. A failure that isn't itself a verdict (git can't even run) is
-// distinct — the same distinction isMergedIntoIntegration's own exec.ExitError
-// check draws — and returns a real error instead.
+// LandingContained's own landingSHA helper treats as contained=false rather
+// than a hard error. A failure that isn't itself a verdict (git can't even
+// run) is distinct — the same distinction isMergedIntoIntegration's own
+// exec.ExitError check draws — and returns a real error instead.
 func branchTipSHA(repoPath, branch string) (sha string, ok bool, err error) {
 	out, err := exec.Command("git", "-C", repoPath, "rev-parse", "--verify", "--quiet", "refs/heads/"+branch).Output()
 	if err == nil {
@@ -213,7 +213,7 @@ func branchTipSHA(repoPath, branch string) (sha string, ok bool, err error) {
 
 // isMergedIntoIntegration reports whether sha is an ancestor of
 // integrationBranch's current tip inside repoPath — the no-network merge
-// observation VerifyLanding relies on (ADR 0029, ADR 0033). Ancestry, not
+// observation LandingContained relies on (ADR 0029, ADR 0033). Ancestry, not
 // tip equality, because a sibling seam landing after this one moves
 // integrationBranch's tip forward without ever un-merging this commit. A
 // non-ancestor result (sha unknown to the repo, or genuinely not merged —
@@ -240,7 +240,7 @@ func isMergedIntoIntegration(repoPath, sha, integrationBranch string) (bool, err
 
 // patchEquivalentToIntegration reports whether every one of sha's own
 // commits is already present, patch-for-patch, on integrationBranch's
-// current tip inside repoPath — BranchMergedIntoIntegration's fallback for a
+// current tip inside repoPath — LandingContained's fallback for a
 // rebased-and-landed sha, whose replay onto integrationBranch gives every
 // commit a new, unrelated sha that raw ancestry (isMergedIntoIntegration)
 // can never see again (issue #1890). `git cherry upstream sha` lists every

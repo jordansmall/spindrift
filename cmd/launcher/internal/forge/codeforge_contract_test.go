@@ -114,11 +114,11 @@ func TestFake_CodeForgeContract_PushOnly(t *testing.T) {
 
 // fakeLocalCodeForgeHarness adapts forge.Fake to forgetest.CodeForgeHarness
 // via AsLocal() — CODE_FORGE=local's shape (BundleRelay/LandingRef/
-// LandingVerifier/LandingRepair, no PRForge) — plus forgetest.LandingHarness,
-// so RunCodeForgeContract's landing scenario (issue #1809) exercises the
-// Fake's scripted LandingVerifier/LandingRepair behavior the same generic
-// assertions drive against the real local adapter's git-backed one, keeping
-// the two from silently drifting apart.
+// LandingContainmentQuery/LandingRepair, no PRForge) — plus
+// forgetest.LandingHarness, so RunCodeForgeContract's landing scenario (issue
+// #1809) exercises the Fake's scripted LandingContainmentQuery/LandingRepair
+// behavior the same generic assertions drive against the real local
+// adapter's git-backed one, keeping the two from silently drifting apart.
 type fakeLocalCodeForgeHarness struct {
 	t      *testing.T
 	f      *forge.Fake
@@ -139,22 +139,18 @@ func newFakeLocalCodeForgeHarness(t *testing.T) *fakeLocalCodeForgeHarness {
 }
 
 // localTrackingCodeForge forwards the local-shaped optional interfaces
-// (LandingVerifier, LandingRepair) trackingCodeForge's plain interface
-// embedding erases for type assertions against the outer *trackingCodeForge
-// (Go's promotion only exposes an embedded interface field's own declared
-// methods, not its dynamic value's broader ones) — deliberately local-only,
-// so the github-shaped trackingCodeForge itself never spuriously claims a
-// capability its own wrapped Fake doesn't have.
+// (LandingContainmentQuery, LandingRepair) trackingCodeForge's plain
+// interface embedding erases for type assertions against the outer
+// *trackingCodeForge (Go's promotion only exposes an embedded interface
+// field's own declared methods, not its dynamic value's broader ones) —
+// deliberately local-only, so the github-shaped trackingCodeForge itself
+// never spuriously claims a capability its own wrapped Fake doesn't have.
 type localTrackingCodeForge struct {
 	*trackingCodeForge
 }
 
-func (w localTrackingCodeForge) VerifyLanding(landing string) (bool, error) {
-	return w.CodeForge.(forge.LandingVerifier).VerifyLanding(landing)
-}
-
-func (w localTrackingCodeForge) BranchMergedIntoIntegration(branch, parent string) (bool, error) {
-	return w.CodeForge.(forge.LandingRepair).BranchMergedIntoIntegration(branch, parent)
+func (w localTrackingCodeForge) LandingContained(landing forge.Landing, scope forge.SeedScope) (bool, error) {
+	return w.CodeForge.(forge.LandingContainmentQuery).LandingContained(landing, scope)
 }
 
 func (w localTrackingCodeForge) IntegrationTip(parent string) (string, error) {
@@ -196,11 +192,20 @@ func (h *fakeLocalCodeForgeHarness) FailNextRebase(_ string) {
 
 func (h *fakeLocalCodeForgeHarness) Parent() string { return h.parent }
 
+// Scope implements forgetest.LandingHarness (issue #2151): the harness's own
+// parent paired with an operator-facing Integration branch label, mirroring
+// local.IntegrationBranch's own "integration/<parent>" grammar closely
+// enough for diagnostics, though the Fake never actually renders it.
+func (h *fakeLocalCodeForgeHarness) Scope() forge.SeedScope {
+	return forge.NewSeedScope(h.parent, "integration/"+h.parent)
+}
+
 // MarkLanded implements forgetest.LandingHarness: merges num's branch
 // (scripted bookkeeping — the Fake has no real git backing) and scripts the
-// Fake's LandingVerifier/LandingRepair surfaces to agree with the landing
-// string it returns, exactly as the real local adapter's git ancestry check
-// would once Merge actually lands the branch onto the Integration branch.
+// Fake's LandingContainmentQuery/LandingRepair surfaces to agree with the
+// landing string it returns, exactly as the real local adapter's git
+// ancestry check would once Merge actually lands the branch onto the
+// Integration branch.
 func (h *fakeLocalCodeForgeHarness) MarkLanded(num string) string {
 	h.t.Helper()
 	branch := h.f.AgentBranch(num)
@@ -208,8 +213,8 @@ func (h *fakeLocalCodeForgeHarness) MarkLanded(num string) string {
 		h.t.Fatalf("Merge(%q): %v", branch, err)
 	}
 	landing := "integration/" + h.parent + "@" + num + "sha"
-	h.f.SetVerifyLanding(landing, true, nil)
-	h.f.SetBranchMergedIntoIntegration(branch, h.parent, true, nil)
+	h.f.SetLandingContained(landing, h.parent, true, nil)
+	h.f.SetLandingContained(branch, h.parent, true, nil)
 	h.f.SetIntegrationTip(h.parent, landing)
 	return landing
 }

@@ -49,17 +49,22 @@ type PushOnly interface {
 }
 
 // LandingHarness lets RunCodeForgeContract additionally exercise the
-// LandingVerifier/LandingRepair surfaces CODE_FORGE=local's adapter
-// implements (ADR 0029, ADR 0033, issue #1809) — only local-shaped harnesses
-// implement it; github has no such surface.
+// LandingContainmentQuery/LandingRepair surfaces CODE_FORGE=local's adapter
+// implements (ADR 0029, ADR 0033, issue #1809, issue #2151) — only
+// local-shaped harnesses implement it; github has no such surface.
 type LandingHarness interface {
 	// Parent returns the broad-ticket key the harness's CodeForge checks
-	// BranchMergedIntoIntegration/IntegrationTip against.
+	// IntegrationTip against.
 	Parent() string
+	// Scope returns the opaque forge.SeedScope LandingContained checks a
+	// landing's containment against — the harness's own parent paired with
+	// its adapter-rendered Integration branch label (issue #2151).
+	Scope() forge.SeedScope
 	// MarkLanded merges num's SeedLandable ref (real git for the local
 	// adapter, scripted state for a fake) and returns the resulting
-	// IntegrationRef landing string — VerifyLanding's own "<branch>@<sha>"
-	// grammar, so it can be handed straight back into VerifyLanding.
+	// IntegrationRef landing string — LandingContained's own "<branch>@<sha>"
+	// grammar (via forge.ParseLanding), so it can be handed straight back
+	// into LandingContained.
 	MarkLanded(num string) string
 }
 
@@ -74,50 +79,56 @@ func RunCodeForgeContract(t *testing.T, h CodeForgeHarness) {
 	t.Run("RebaseConflict", func(t *testing.T) { testRebaseConflict(t, h) })
 	t.Run("Probe", func(t *testing.T) { testProbe(t, h) })
 	t.Run("PushOnlyMergeModeMapping", func(t *testing.T) { testPushOnlyMergeModeMapping(t, h) })
-	t.Run("LandingVerifierAndRepair", func(t *testing.T) { testLandingVerifierAndRepair(t, h) })
+	t.Run("LandingContainment", func(t *testing.T) { testLandingContainment(t, h) })
 }
 
-// testLandingVerifierAndRepair verifies the LandingVerifier/LandingRepair
-// contract (issue #1809): a not-yet-merged branch reports unmerged through
-// both surfaces, and once MarkLanded lands it, VerifyLanding, the same
-// BranchMergedIntoIntegration check, and IntegrationTip all agree. Skipped
-// entirely for a harness that doesn't implement LandingHarness (github has
-// no such surface).
-func testLandingVerifierAndRepair(t *testing.T, h CodeForgeHarness) {
+// testLandingContainment verifies the collapsed LandingContained/LandingRepair
+// contract (issue #1809, issue #2151): a not-yet-merged branch reports
+// uncontained, and once MarkLanded lands it, LandingContained agrees for both
+// the resolved IntegrationRef and the raw BranchRef shape, and IntegrationTip
+// resolves the same landing. Skipped entirely for a harness that doesn't
+// implement LandingHarness (github has no such surface).
+func testLandingContainment(t *testing.T, h CodeForgeHarness) {
 	lh, ok := h.(LandingHarness)
 	if !ok {
 		return
 	}
 	cf := h.Forge()
-	verifier, ok := cf.(forge.LandingVerifier)
+	q, ok := cf.(forge.LandingContainmentQuery)
 	if !ok {
-		t.Fatal("LandingHarness's Forge() does not implement forge.LandingVerifier")
+		t.Fatal("LandingHarness's Forge() does not implement forge.LandingContainmentQuery")
 	}
 	repair, ok := cf.(forge.LandingRepair)
 	if !ok {
 		t.Fatal("LandingHarness's Forge() does not implement forge.LandingRepair")
 	}
+	scope := lh.Scope()
 
 	const num = "906"
 	branch := h.SeedLandable(num)
-	if merged, err := repair.BranchMergedIntoIntegration(branch, lh.Parent()); err != nil || merged {
-		t.Fatalf("BranchMergedIntoIntegration(%q) before merge = (%v, %v), want (false, nil)", branch, merged, err)
+	branchLanding := forge.Landing{Kind: forge.LandingBranchRef, Branch: branch}
+	if contained, err := q.LandingContained(branchLanding, scope); err != nil || contained {
+		t.Fatalf("LandingContained(%q) before merge = (%v, %v), want (false, nil)", branch, contained, err)
 	}
 
-	landing := lh.MarkLanded(num)
-
-	if merged, err := verifier.VerifyLanding(landing); err != nil || !merged {
-		t.Fatalf("VerifyLanding(%q) after merge = (%v, %v), want (true, nil)", landing, merged, err)
+	landingStr := lh.MarkLanded(num)
+	landing, err := forge.ParseLanding(landingStr)
+	if err != nil {
+		t.Fatalf("ParseLanding(%q): %v", landingStr, err)
 	}
-	if merged, err := repair.BranchMergedIntoIntegration(branch, lh.Parent()); err != nil || !merged {
-		t.Fatalf("BranchMergedIntoIntegration(%q) after merge = (%v, %v), want (true, nil)", branch, merged, err)
+
+	if contained, err := q.LandingContained(landing, scope); err != nil || !contained {
+		t.Fatalf("LandingContained(%q) after merge = (%v, %v), want (true, nil)", landingStr, contained, err)
+	}
+	if contained, err := q.LandingContained(branchLanding, scope); err != nil || !contained {
+		t.Fatalf("LandingContained(%q) after merge = (%v, %v), want (true, nil)", branch, contained, err)
 	}
 	tip, err := repair.IntegrationTip(lh.Parent())
 	if err != nil {
 		t.Fatalf("IntegrationTip(%q): %v", lh.Parent(), err)
 	}
-	if tip != landing {
-		t.Fatalf("IntegrationTip(%q) = %q, want %q (the Integration branch's tip is unchanged since the merge)", lh.Parent(), tip, landing)
+	if tip != landingStr {
+		t.Fatalf("IntegrationTip(%q) = %q, want %q (the Integration branch's tip is unchanged since the merge)", lh.Parent(), tip, landingStr)
 	}
 }
 

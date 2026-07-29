@@ -50,15 +50,16 @@ type LivenessProbe interface {
 // landing whose PR (per cf's PRForge surface) has merged is closed; one with
 // no landing, or whose landing PR is still open, is left untouched. Against a
 // CODE_FORGE=local Code Forge — no PR concept at all — Run instead checks
-// each recorded landing through cf's LandingVerifier surface (ADR 0033) and
-// closes only once that reports the landing merged into the adapter's own
-// Integration branch, no network call either way. Run never merges, opens,
-// or pushes — cf is queried read-only and it is only ever transitioned to
-// closed.
+// each recorded landing through cf's LandingContainmentQuery surface (ADR
+// 0033, issue #2151) and closes only once that reports the landing contained
+// in the adapter's own Integration branch, no network call either way. Run
+// never merges, opens, or pushes — cf is queried read-only and it is only
+// ever transitioned to closed.
 //
 // Run is a no-op, not an error, when it has no IssueCloser surface (every
-// tracker but local) or cf has neither a PRForge nor a LandingVerifier
-// surface — there is nothing to check or nowhere to write in either case.
+// tracker but local) or cf has neither a PRForge nor a
+// LandingContainmentQuery surface — there is nothing to check or nowhere to
+// write in either case.
 //
 // After closing, Run sweeps every InProgress issue and resets it to
 // Dispatchable when lp reports the composite death signal: no PR (in any
@@ -69,20 +70,21 @@ type LivenessProbe interface {
 // PRForge-specific — a local Code Forge has no PR/branch signal to key an
 // orphan reset off, so Run skips it entirely when cf has no PRForge surface.
 //
-// parentFor resolves an issue number to its own broad ticket's parent token
-// (ADR 0033) for the LandingBranchRef healing path's BranchMergedIntoIntegration
-// and IntegrationTip calls — reconcile stays adapter-agnostic (issue #1819)
-// by taking this as a caller-supplied callback, mirroring
-// settle.Config.CodeForgeForIssue, rather than importing forge/local itself
-// to resolve it. Unused on every path but the local-only healing path.
-func Run(it forge.IssueTracker, cf forge.CodeForge, lp LivenessProbe, parentFor func(num string) string) (Result, error) {
+// scopeFor resolves an issue number to its own broad ticket's opaque
+// forge.SeedScope (ADR 0033, issue #2151) for the LandingBranchRef healing
+// path's LandingContained and IntegrationTip calls — reconcile stays
+// adapter-agnostic (issue #1819) by taking this as a caller-supplied
+// callback, mirroring settle.Config.CodeForgeForIssue, rather than importing
+// forge/local itself to resolve it. Unused on every path but the local-only
+// healing/discovery path.
+func Run(it forge.IssueTracker, cf forge.CodeForge, lp LivenessProbe, scopeFor func(num string) forge.SeedScope) (Result, error) {
 	closer, ok := it.(forge.IssueCloser)
 	if !ok {
 		return Result{}, nil
 	}
 	pr, hasPR := cf.(forge.PRForge)
-	verifier, hasVerifier := cf.(forge.LandingVerifier)
-	if !hasPR && !hasVerifier {
+	container, hasLocal := cf.(forge.LandingContainmentQuery)
+	if !hasPR && !hasLocal {
 		return Result{}, nil
 	}
 	lr, _ := it.(forge.LandingRecorder)
@@ -96,7 +98,7 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, lp LivenessProbe, parentFor 
 
 	var res Result
 	prc := prReconciler{closer: closer, pr: pr, cf: cf, lr: lr, flagger: flagger}
-	llc := localLandingReconciler{closer: closer, verifier: verifier, repair: repair, lr: lr, parentFor: parentFor}
+	llc := localLandingReconciler{closer: closer, container: container, repair: repair, lr: lr, cf: cf, scopeFor: scopeFor}
 	for _, iss := range issues {
 		if hasPR {
 			if err := prc.reconcile(&res, iss); err != nil {
@@ -147,7 +149,8 @@ type prReconciler struct {
 // closing it on a merged landing PR, discovering an unrecorded landing by
 // agent branch, and flagging an abandoned issue whose landing PR closed
 // unmerged — the remote-PR half of Run's per-issue sweep, unchanged from
-// before Run also supported LandingVerifier's no-PR path.
+// before Run also supported the no-PR local Code Forge's own containment
+// path.
 func (p prReconciler) reconcile(res *Result, iss forge.Issue) error {
 	landing := iss.Landing
 	if landing == "" {
@@ -193,39 +196,46 @@ func (p prReconciler) reconcile(res *Result, iss forge.Issue) error {
 // nil for a Code Forge with no forge.LandingRepair surface (every adapter
 // but local, though (localLandingReconciler).reconcile's caller never
 // reaches that case today since Run only takes this path when cf implements
-// LandingVerifier, which only local does too) — a LandingBranchRef then
-// prints a loud "no repair surface" line rather than the pre-#1809 silent
-// no-op, since there is no ancestor check to run.
+// LandingContainmentQuery, which only local does too) — a LandingBranchRef
+// then prints a loud "no repair surface" line rather than the pre-#1809
+// silent no-op, since there is no ancestor check to run. cf backs the
+// discovery path's AgentBranch(num) call for an issue with no recorded
+// landing yet.
 type localLandingReconciler struct {
 	closer    forge.IssueCloser
-	verifier  forge.LandingVerifier
+	container forge.LandingContainmentQuery
 	repair    forge.LandingRepair
 	lr        forge.LandingRecorder
-	parentFor func(num string) string
+	cf        forge.CodeForge
+	scopeFor  func(num string) forge.SeedScope
 }
 
 // reconcile checks a single open issue's recorded landing, parsed into its
 // typed forge.Landing (issue #1809) so this switches on meaning instead of
 // re-deriving the string grammar itself:
 //
+//   - No recorded landing at all discovers one by agent branch — see
+//     discover's own doc.
 //   - LandingIntegrationRef (the post-merge form) is checked via
-//     LandingVerifier exactly as before: merged closes the issue through the
-//     normal close path, not-yet-merged (a conflicting land, ADR 0033) leaves
-//     it open, blocked — there is no separate "blocked" axis to set.
+//     LandingContained exactly as before (issue #2151's collapse of the
+//     former no-scope self-verification check into it): contained closes
+//     the issue through the normal close path, not-yet-contained (a
+//     conflicting land, ADR 0033) leaves it open, blocked — there is no
+//     separate "blocked" axis to set.
 //   - LandingBranchRef (settle's pre-merge record) is Reconcile's healing
-//     path: BranchMergedIntoIntegration checks it against the ticket's own
-//     Integration branch. An ancestor means the merge landed but the
-//     post-merge upgrade never ran — repair upgrades the recorded landing to
-//     the rich IntegrationRef form and closes the seam through the same
-//     normal close path a fresh merge would have. Not an ancestor prints a
-//     loud stuck verdict naming the branch (issue #1809: the silent
-//     stuck-open cluster this replaces) and leaves the issue open.
+//     path: LandingContained checks it against the ticket's own Integration
+//     branch. Contained means the merge landed but the post-merge upgrade
+//     never ran — repair upgrades the recorded landing to the rich
+//     IntegrationRef form and closes the seam through the same normal close
+//     path a fresh merge would have. Not contained prints a loud stuck
+//     verdict naming the branch (issue #1809: the silent stuck-open cluster
+//     this replaces) and leaves the issue open.
 //   - Any other shape (e.g. a PR URL reaching this local-only path) prints a
 //     distinct, loud "unverifiable" line rather than being silently folded
 //     into "not merged yet".
 func (l localLandingReconciler) reconcile(res *Result, iss forge.Issue) error {
 	if iss.Landing == "" {
-		return nil
+		return l.discover(res, iss)
 	}
 	landing, err := forge.ParseLanding(iss.Landing)
 	if err != nil {
@@ -234,11 +244,11 @@ func (l localLandingReconciler) reconcile(res *Result, iss forge.Issue) error {
 	}
 	switch landing.Kind {
 	case forge.LandingIntegrationRef:
-		merged, err := l.verifier.VerifyLanding(iss.Landing)
+		contained, err := l.container.LandingContained(landing, l.scopeFor(iss.Number))
 		if err != nil {
-			return fmt.Errorf("reconcile issue %s: verify landing %s: %w", iss.Number, iss.Landing, err)
+			return fmt.Errorf("reconcile issue %s: check landing %s containment: %w", iss.Number, iss.Landing, err)
 		}
-		if !merged {
+		if !contained {
 			return nil
 		}
 		return l.close(res, iss.Number)
@@ -257,13 +267,13 @@ func (l localLandingReconciler) reconcileBranchRef(res *Result, iss forge.Issue,
 		fmt.Printf("    #%s  landing=%s  status=landing-unverifiable  !! Code Forge has no repair surface to check branch %s against\n", iss.Number, iss.Landing, landing.Branch)
 		return nil
 	}
-	parent := l.parentFor(iss.Number)
-	merged, err := l.repair.BranchMergedIntoIntegration(landing.Branch, parent)
+	scope := l.scopeFor(iss.Number)
+	contained, err := l.container.LandingContained(landing, scope)
 	if err != nil {
-		return fmt.Errorf("reconcile issue %s: check branch %s ancestry: %w", iss.Number, landing.Branch, err)
+		return fmt.Errorf("reconcile issue %s: check branch %s containment: %w", iss.Number, landing.Branch, err)
 	}
-	if !merged {
-		fmt.Printf("    #%s  landing=%s  status=stuck  !! branch %s not merged into %s's integration branch\n", iss.Number, iss.Landing, landing.Branch, parent)
+	if !contained {
+		fmt.Printf("    #%s  landing=%s  status=stuck  !! branch %s not merged into %s's integration branch\n", iss.Number, iss.Landing, landing.Branch, scope.String())
 		if res.Stuck == nil {
 			res.Stuck = map[string]string{}
 		}
@@ -279,14 +289,52 @@ func (l localLandingReconciler) reconcileBranchRef(res *Result, iss forge.Issue,
 		fmt.Printf("    #%s  landing=%s  status=landing-unverifiable  !! branch %s merged but no LandingRecorder to persist the repaired landing\n", iss.Number, iss.Landing, landing.Branch)
 		return nil
 	}
-	tip, err := l.repair.IntegrationTip(parent)
+	tip, err := l.repair.IntegrationTip(scope.Parent())
 	if err != nil {
-		return fmt.Errorf("reconcile issue %s: resolve integration tip for %s: %w", iss.Number, parent, err)
+		return fmt.Errorf("reconcile issue %s: resolve integration tip for %s: %w", iss.Number, scope.Parent(), err)
 	}
 	if err := l.lr.RecordLanding(iss.Number, tip); err != nil {
 		return fmt.Errorf("reconcile issue %s: record repaired landing: %w", iss.Number, err)
 	}
 	fmt.Printf("    #%s  landing=%s  status=landing-repaired  repaired-landing=%s\n", iss.Number, iss.Landing, tip)
+	return l.close(res, iss.Number)
+}
+
+// discover is reconcile's local-forge counterpart of prReconciler's own
+// branch-discovery fallback (issue #2151): an issue with no recorded landing
+// at all (the box died before its outcome line was parsed) is checked by
+// wrapping its agent branch as a raw BranchRef Landing and asking
+// LandingContained directly, rather than assuming there is nothing to check
+// the way reconcile did before this discovery path existed. A no-op, silent
+// like prReconciler's own not-found case, when there is no repair surface to
+// persist a discovered landing through, when the check itself errors (wrapped
+// and surfaced instead), or when the branch simply isn't contained yet — the
+// common case, since most issues with no recorded landing genuinely haven't
+// landed. Contained discovers the landing: records the resolved
+// IntegrationTip, prints a loud discovered line, and closes through the
+// normal close path.
+func (l localLandingReconciler) discover(res *Result, iss forge.Issue) error {
+	if l.lr == nil || l.repair == nil {
+		return nil
+	}
+	branch := l.cf.AgentBranch(iss.Number)
+	landing := forge.Landing{Kind: forge.LandingBranchRef, Branch: branch}
+	scope := l.scopeFor(iss.Number)
+	contained, err := l.container.LandingContained(landing, scope)
+	if err != nil {
+		return fmt.Errorf("reconcile issue %s: check discovered branch %s containment: %w", iss.Number, branch, err)
+	}
+	if !contained {
+		return nil
+	}
+	tip, err := l.repair.IntegrationTip(scope.Parent())
+	if err != nil {
+		return fmt.Errorf("reconcile issue %s: resolve integration tip for %s: %w", iss.Number, scope.Parent(), err)
+	}
+	if err := l.lr.RecordLanding(iss.Number, tip); err != nil {
+		return fmt.Errorf("reconcile issue %s: record discovered landing: %w", iss.Number, err)
+	}
+	fmt.Printf("    #%s  landing=%s  status=landing-discovered  discovered-landing=%s\n", iss.Number, branch, tip)
 	return l.close(res, iss.Number)
 }
 

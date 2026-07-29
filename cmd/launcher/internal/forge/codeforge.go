@@ -53,73 +53,57 @@ type LandingRef interface {
 	LandingRef() (string, error)
 }
 
-// LandingVerifier is CODE_FORGE=local's optional no-network merge-observation
-// surface (ADR 0029, ADR 0033): reconcile's sole closing authority extends
-// here for a Code Forge with no PR concept to check instead. Discovered via
-// type assertion, like PRForge; only the local adapter implements it.
-type LandingVerifier interface {
-	// VerifyLanding reports whether landing — the immutable ref
-	// RecordLanding persisted — is merged into the adapter's own Integration
-	// branch, checked via local git ancestry, never a network call. A
-	// malformed landing (not this adapter's "<branch>@<sha>" shape) and a
-	// landing whose commit is not an ancestor of the Integration branch's
-	// current tip (the merge that recorded it in fact conflicted) both
-	// report merged=false with a nil error — either way reconcile leaves the
-	// seam-issue open rather than closing it, the same "stays open, blocked"
-	// posture. A non-nil error is reserved for a genuine local-git failure
-	// (e.g. the Accumulation repo itself is unreadable).
-	VerifyLanding(landing string) (merged bool, err error)
-}
-
 // LandingRepair is CODE_FORGE=local's optional bookkeeping-repair surface
 // (ADR 0029, ADR 0033, issue #1809): Reconcile's healing path for a seam
 // whose merge landed but whose post-merge landing upgrade (settle's
 // LandingRef call) never ran, leaving a stale LandingBranchRef recorded
-// instead of the rich LandingIntegrationRef. Unlike LandingRef and
-// LandingVerifier — which lean on either the adapter's own construction-time
-// parent or a self-describing ref — Reconcile's sweep holds one Code Forge
-// instance across a whole, possibly mixed-parent batch (its cf is always
-// constructed with an empty parent), so both methods here take the issue's
-// own resolved parent explicitly rather than relying on the adapter's own.
-// Discovered via type assertion, like BundleRelay/LandingRef; only the local
-// adapter implements it.
+// instead of the rich LandingIntegrationRef. Unlike LandingRef — which leans
+// on the adapter's own construction-time parent — Reconcile's sweep holds
+// one Code Forge instance across a whole, possibly mixed-parent batch (its
+// cf is always constructed with an empty parent), so IntegrationTip takes
+// the issue's own resolved parent explicitly rather than relying on the
+// adapter's own. Discovered via type assertion, like BundleRelay/LandingRef;
+// only the local adapter implements it.
 type LandingRepair interface {
-	// BranchMergedIntoIntegration reports whether branch — the raw,
-	// pre-merge landing record settle's outcome line wrote before any
-	// post-merge upgrade — is an ancestor of parent's own Integration
-	// branch, checked via local git ancestry, never a network call. A
-	// branch absent from the Accumulation repo (never relayed, or a
-	// since-abandoned attempt) reports merged=false, nil — the same
-	// "stays open" posture VerifyLanding gives a not-yet-landed ref; a
-	// non-nil error is reserved for a genuine local-git failure.
-	BranchMergedIntoIntegration(branch, parent string) (bool, error)
 	// IntegrationTip resolves parent's own Integration branch to its
 	// current landing-ready "<branch>@<sha>" reference — the value
-	// Reconcile's repair records once BranchMergedIntoIntegration confirms
-	// the merge, the same grammar LandingRef produces for the fresh-merge
-	// path.
+	// Reconcile's repair records once LandingContained confirms the merge,
+	// the same grammar LandingRef produces for the fresh-merge path.
 	IntegrationTip(parent string) (string, error)
 }
 
-// LandingContainmentQuery is CODE_FORGE=local's optional parent-agnostic
-// containment surface (issue #2129, issue #1734, ADR 0033): like
-// LandingRepair, the target parent is an explicit argument rather than the
-// adapter's own construction-time one, so a single shared Code Forge
-// instance can answer the question for any parent in a mixed batch. It
-// reports whether integration/<parent> already contains landing's commit,
-// either as a plain git ancestor or — mirroring
-// BranchMergedIntoIntegration's rebase-aware fallback — by
-// patch-equivalence, since a rebase-based land (issue #1889) replays commits
-// under new shas that a pure ancestry check can no longer see. A malformed
-// landing (not this adapter's "<branch>@<sha>" shape) and a landing whose
-// integration branch doesn't exist or doesn't yet contain it both report
-// contained=false, nil — the same "not ready" posture VerifyLanding and
-// BranchMergedIntoIntegration give their own not-yet-landed cases; a
-// non-nil error is reserved for a genuine local-git failure.
+// LandingContainmentQuery is CODE_FORGE=local's optional single
+// containment-check surface (issue #2129, issue #1734, ADR 0033, issue
+// #2151): the sole no-network merge-observation seam reconcile's closing
+// authority and the wave engine's dependent blocker gate both check a local
+// Code Forge through, replacing the three narrower single-purpose methods
+// this issue collapsed into it: a no-scope self-verification check, a
+// bookkeeping-repair ancestry check that used to live on LandingRepair, and
+// this interface's own prior narrower single-shape query. Like LandingRepair,
+// scope's parent is an explicit argument rather than the adapter's own
+// construction-time one, so
+// a single shared Code Forge instance can answer the question for any
+// parent — including a batch's own broad ticket parent (reconcile's own
+// case, where scope's parent equals landing's own recorded parent) or a
+// dependent's cross-seam parent (the wave gate's own case, ADR 0033 D2) — in
+// a single mixed pass.
 type LandingContainmentQuery interface {
-	// IntegrationContainsLanding reports whether parent's own Integration
-	// branch already contains landing's commit.
-	IntegrationContainsLanding(landing, parent string) (bool, error)
+	// LandingContained reports whether landing's commit is already
+	// contained in scope's own Integration branch, either as a plain git
+	// ancestor or by patch-equivalence, since a rebase-based land (issue
+	// #1889) replays commits under new shas that a pure ancestry check can
+	// no longer see. landing's own commit sha comes from its Kind: a
+	// LandingIntegrationRef supplies it directly; a LandingBranchRef (the
+	// raw, pre-merge record settle's outcome line wrote before any
+	// post-merge upgrade) resolves it by looking up the named branch's
+	// current tip; any other shape (e.g. a PR URL reaching this local-only
+	// path) reports contained=false, nil outright. A landing whose resolved
+	// commit is absent from the Accumulation repo, or whose commit hasn't
+	// (yet) reached scope's Integration branch, both report
+	// contained=false, nil — the same "stays open, blocked" posture either
+	// way; a non-nil error is reserved for a genuine local-git failure
+	// (e.g. the Accumulation repo itself is unreadable).
+	LandingContained(landing Landing, scope SeedScope) (contained bool, err error)
 }
 
 // PRForge is the optional PR, CI-rollup, and auto-merge surface. Only

@@ -180,30 +180,15 @@ type Fake struct {
 	// LandingRefCallCount counts every LandingRef invocation.
 	LandingRefCallCount int
 
-	// verifyLandingResults scripts VerifyLanding's result per landing ref —
-	// merged, or an error simulating a genuine (non-malformed) local-git
-	// failure. Only reachable through AsLocal(), the only wrapper
-	// implementing forge.LandingVerifier.
-	verifyLandingResults map[string]verifyLandingResult
-	// VerifyLandingCalls records every VerifyLanding invocation in order.
-	VerifyLandingCalls []string
-
-	// branchMergedIntoIntegrationResults scripts BranchMergedIntoIntegration's
-	// result per (branch, parent) pair, defaulting to merged=false, nil when
-	// unscripted — the same "stays open" default verifyLandingResults uses.
-	// Only reachable through AsLocal(), the only wrapper implementing
-	// forge.LandingRepair.
-	branchMergedIntoIntegrationResults map[branchParentKey]branchIntegrationResult
-	// BranchMergedIntoIntegrationCalls records every
-	// BranchMergedIntoIntegration invocation in order.
-	BranchMergedIntoIntegrationCalls []BranchMergedIntoIntegrationCall
-
-	// integrationContainsLandingResults scripts IntegrationContainsLanding's
-	// result per (landing, parent) pair, defaulting to contained=false, nil
-	// when unscripted — the same "not contained" default
-	// branchMergedIntoIntegrationResults uses. Only reachable through
-	// AsLocal(), the only wrapper implementing forge.LandingContainmentQuery.
-	integrationContainsLandingResults map[branchParentKey]branchIntegrationResult
+	// landingContainedResults scripts LandingContained's result per
+	// (landing string, parent) pair, defaulting to contained=false, nil when
+	// unscripted — the same "stays open" default the three predecessors this
+	// issue collapsed used. Only reachable through AsLocal(), the only
+	// wrapper implementing forge.LandingContainmentQuery.
+	landingContainedResults map[landingParentKey]landingContainedResult
+	// LandingContainedCalls records every LandingContained invocation in
+	// order.
+	LandingContainedCalls []LandingContainedCall
 
 	// integrationTipResults scripts IntegrationTip's success result per
 	// parent. Only reachable through AsLocal().
@@ -986,102 +971,48 @@ func (f *Fake) landingRef() (string, error) {
 	return f.LandingRefValue, nil
 }
 
-// verifyLandingResult scripts a single SetVerifyLanding entry.
-type verifyLandingResult struct {
-	merged bool
-	err    error
+// landingParentKey keys landingContainedResults on the (landing string,
+// parent) pair LandingContained's scope.Parent() takes alongside landing's
+// own String() form.
+type landingParentKey struct{ landing, parent string }
+
+// landingContainedResult scripts a single SetLandingContained entry.
+type landingContainedResult struct {
+	contained bool
+	err       error
 }
 
-// SetVerifyLanding scripts VerifyLanding(landing)'s result — merged, or a
-// genuine error distinct from the normal "not merged" (malformed ref,
-// conflicting/unlanded merge) outcome, which callers script as merged=false,
-// err=nil instead.
-func (f *Fake) SetVerifyLanding(landing string, merged bool, err error) {
+// LandingContainedCall records a single LandingContained invocation.
+type LandingContainedCall struct {
+	Landing, Parent string
+}
+
+// SetLandingContained scripts LandingContained(landing, scope)'s result for
+// landing's stored-string form paired with scope's parent — contained, or a
+// genuine error distinct from the normal "not contained" (malformed landing,
+// conflicting/unlanded merge) outcome, which callers script as
+// contained=false, err=nil instead.
+func (f *Fake) SetLandingContained(landing, parent string, contained bool, err error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if f.verifyLandingResults == nil {
-		f.verifyLandingResults = map[string]verifyLandingResult{}
+	if f.landingContainedResults == nil {
+		f.landingContainedResults = map[landingParentKey]landingContainedResult{}
 	}
-	f.verifyLandingResults[landing] = verifyLandingResult{merged: merged, err: err}
+	f.landingContainedResults[landingParentKey{landing, parent}] = landingContainedResult{contained: contained, err: err}
 }
 
-// verifyLanding backs the optional LandingVerifier surface (ADR 0029, ADR
-// 0033), the same AsLocal()-only restriction as relayBundle above, for the
-// same reason. An unscripted landing defaults to merged=false, nil — the
-// same posture as a malformed or not-yet-merged ref in production.
-func (f *Fake) verifyLanding(landing string) (bool, error) {
+// landingContained backs the optional LandingContainmentQuery surface (ADR
+// 0029, ADR 0033, issue #1809, issue #2129, issue #2151), the same
+// AsLocal()-only restriction as relayBundle above. An unscripted
+// (landing.String(), scope.Parent()) pair defaults to contained=false, nil —
+// the same posture as a malformed or not-yet-merged landing in production.
+func (f *Fake) landingContained(landing Landing, scope SeedScope) (bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.VerifyLandingCalls = append(f.VerifyLandingCalls, landing)
-	res := f.verifyLandingResults[landing]
-	return res.merged, res.err
-}
-
-// branchParentKey keys branchMergedIntoIntegrationResults on the
-// (branch, parent) pair forge.LandingRepair's BranchMergedIntoIntegration
-// takes both of explicitly.
-type branchParentKey struct{ branch, parent string }
-
-// branchIntegrationResult scripts a single SetBranchMergedIntoIntegration entry.
-type branchIntegrationResult struct {
-	merged bool
-	err    error
-}
-
-// BranchMergedIntoIntegrationCall records a single BranchMergedIntoIntegration
-// invocation.
-type BranchMergedIntoIntegrationCall struct {
-	Branch, Parent string
-}
-
-// SetBranchMergedIntoIntegration scripts BranchMergedIntoIntegration(branch,
-// parent)'s result — merged, or a genuine error distinct from the normal
-// "not merged" outcome, which callers script as merged=false, err=nil
-// instead.
-func (f *Fake) SetBranchMergedIntoIntegration(branch, parent string, merged bool, err error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if f.branchMergedIntoIntegrationResults == nil {
-		f.branchMergedIntoIntegrationResults = map[branchParentKey]branchIntegrationResult{}
-	}
-	f.branchMergedIntoIntegrationResults[branchParentKey{branch, parent}] = branchIntegrationResult{merged: merged, err: err}
-}
-
-// branchMergedIntoIntegration backs the optional LandingRepair surface (ADR
-// 0029, ADR 0033, issue #1809), the same AsLocal()-only restriction as
-// relayBundle above. An unscripted (branch, parent) pair defaults to
-// merged=false, nil — the same posture as an unscripted VerifyLanding call.
-func (f *Fake) branchMergedIntoIntegration(branch, parent string) (bool, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.BranchMergedIntoIntegrationCalls = append(f.BranchMergedIntoIntegrationCalls, BranchMergedIntoIntegrationCall{Branch: branch, Parent: parent})
-	res := f.branchMergedIntoIntegrationResults[branchParentKey{branch, parent}]
-	return res.merged, res.err
-}
-
-// SetIntegrationContainsLanding scripts IntegrationContainsLanding(landing,
-// parent)'s result — contained, or a genuine error distinct from the normal
-// "not contained" outcome, which callers script as contained=false, err=nil
-// instead.
-func (f *Fake) SetIntegrationContainsLanding(landing, parent string, contained bool, err error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if f.integrationContainsLandingResults == nil {
-		f.integrationContainsLandingResults = map[branchParentKey]branchIntegrationResult{}
-	}
-	f.integrationContainsLandingResults[branchParentKey{landing, parent}] = branchIntegrationResult{merged: contained, err: err}
-}
-
-// integrationContainsLanding backs the optional LandingContainmentQuery
-// surface (issue #2129, issue #2130), the same AsLocal()-only restriction as
-// relayBundle above. An unscripted (landing, parent) pair defaults to
-// contained=false, nil — the same posture as an unscripted
-// BranchMergedIntoIntegration call.
-func (f *Fake) integrationContainsLanding(landing, parent string) (bool, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	res := f.integrationContainsLandingResults[branchParentKey{landing, parent}]
-	return res.merged, res.err
+	key := landingParentKey{landing.String(), scope.Parent()}
+	f.LandingContainedCalls = append(f.LandingContainedCalls, LandingContainedCall{Landing: key.landing, Parent: key.parent})
+	res := f.landingContainedResults[key]
+	return res.contained, res.err
 }
 
 // SetIntegrationTip scripts IntegrationTip(parent)'s success result — the
@@ -1238,15 +1169,13 @@ type localForge struct{ pushOnlyForge }
 // LandingRef, but not PRForge — the local adapter's shape.
 func (f *Fake) AsLocal() CodeForge { return localForge{pushOnlyForge{f}} }
 
-func (l localForge) RelayBundle(outboxDir, ref string) error    { return l.f.relayBundle(outboxDir, ref) }
-func (l localForge) LandingRef() (string, error)                { return l.f.landingRef() }
-func (l localForge) VerifyLanding(landing string) (bool, error) { return l.f.verifyLanding(landing) }
-func (l localForge) BranchMergedIntoIntegration(branch, parent string) (bool, error) {
-	return l.f.branchMergedIntoIntegration(branch, parent)
+func (l localForge) RelayBundle(outboxDir, ref string) error { return l.f.relayBundle(outboxDir, ref) }
+func (l localForge) LandingRef() (string, error)             { return l.f.landingRef() }
+func (l localForge) IntegrationTip(parent string) (string, error) {
+	return l.f.integrationTip(parent)
 }
-func (l localForge) IntegrationTip(parent string) (string, error) { return l.f.integrationTip(parent) }
-func (l localForge) IntegrationContainsLanding(landing, parent string) (bool, error) {
-	return l.f.integrationContainsLanding(landing, parent)
+func (l localForge) LandingContained(landing Landing, scope SeedScope) (bool, error) {
+	return l.f.landingContained(landing, scope)
 }
 
 var _ CodeForge = localForge{}
@@ -1277,6 +1206,5 @@ var _ PRForge = githubReadOnlyForge{}
 var _ BundleRelay = githubReadOnlyForge{}
 var _ DraftPRCreator = githubReadOnlyForge{}
 var _ LandingRef = localForge{}
-var _ LandingVerifier = localForge{}
 var _ LandingRepair = localForge{}
 var _ LandingContainmentQuery = localForge{}
