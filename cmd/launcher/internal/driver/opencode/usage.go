@@ -91,7 +91,7 @@ func breakdownByModelFile(path string) ([]usage.ModelUsage, error) {
 		}
 		model := ev.Part.ModelID
 		if model == "" {
-			model = "unknown"
+			model = usage.UnknownModel
 		}
 		b := ensure(model)
 		b.UncachedInputTokens += ev.Part.Tokens.Input

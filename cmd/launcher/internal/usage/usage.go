@@ -34,12 +34,16 @@ type Usage struct {
 	NumTurns                 int     `json:"num_turns"`
 }
 
+// UnknownModel is the Model value used when a driver's log carried no model
+// field.
+const UnknownModel = "unknown"
+
 // ModelUsage holds token usage aggregated across every turn and subagent for
 // one model, split into the five billable categories. Tokens only, never
 // dollars — counts are exact from the API, whereas any cost figure needs
 // pricing spindrift does not own (issue #2085).
 type ModelUsage struct {
-	Model                string // exact model id, e.g. "claude-opus-4-8"; "unknown" if the log carried no model field
+	Model                string // exact model id, e.g. "claude-opus-4-8"; UnknownModel if the log carried no model field
 	UncachedInputTokens  int
 	OutputTokens         int
 	CacheReadInputTokens int
