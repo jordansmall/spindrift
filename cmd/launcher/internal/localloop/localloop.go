@@ -77,7 +77,22 @@ func ResolveParent(it forge.IssueTracker, num string) local.SanitizedParent {
 // and the Console consume, so the two can never disagree about which blocker
 // landing gates a dependent.
 func SeedScopeOf(it forge.IssueTracker, num string) forge.SeedScope {
-	p := ResolveParent(it, num)
+	return seedScopeFor(ResolveParent(it, num))
+}
+
+// SeedScopeOf resolves num's dependent SeedScope through w's memoized
+// ResolveParent — the Wired-scoped twin of the package SeedScopeOf, reusing
+// its NewSeedScope construction so reconcile's sweep and the dispatch path
+// can never disagree about a seam's seed branch.
+func (w *Wired) SeedScopeOf(num string) forge.SeedScope {
+	return seedScopeFor(w.ResolveParent(num))
+}
+
+// seedScopeFor builds the opaque SeedScope for an already-resolved parent —
+// the single NewSeedScope construction site both SeedScopeOf and
+// (*Wired).SeedScopeOf share, so the package function and its memoized method
+// stay in lockstep.
+func seedScopeFor(p local.SanitizedParent) forge.SeedScope {
 	return forge.NewSeedScope(p.String(), local.IntegrationBranch(p))
 }
 
