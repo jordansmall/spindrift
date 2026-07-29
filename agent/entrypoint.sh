@@ -956,111 +956,32 @@ run_driver_in_env() {
   return "$claude_rc"
 }
 
-# emit_outcome_backstop pushes any committed work on BRANCH best-effort, then
-# prints a single synthetic status=blocked SPINDRIFT_OUTCOME line -- called
-# from main only when the Driver's run produced no parseable outcome line, so
-# the launcher always gets a terminal signal to classify (issue #593) instead
-# of a silent gap.
+# emit_outcome_backstop hands off to the driver-exec outcome-backstop verb,
+# which best-effort preserves any committed work on BRANCH and prints a single
+# synthetic status=blocked SPINDRIFT_OUTCOME line -- called from main only when
+# the Driver's run produced no parseable outcome line, so the launcher always
+# gets a terminal signal to classify (issue #593) instead of a silent gap.
 #
-# Draft-ness retired as a salvage signal (issue #1654): the Driver no longer
-# flips a PR out of draft itself (#1653) -- the launcher owns that flip, once
-# CI is green, before it merges. So a PR's draft state here says nothing
-# about whether the Driver reached status=ready and just lost the line on
-# the way out; synthesize status=blocked unconditionally, exactly as for a
-# missing PR. The launcher's own no-outcome path agrees: it never adopts a
-# PR off draft-ness either (cmd/launcher/internal/settle/gate.go), so both
-# sides land on the same terminal classification instead of one side staying
-# silent for the other to settle.
+# The whole backstop decision -- research short-circuit, dirty-tree salvage,
+# no-work / CODE_FORGE=local / read-only-github-relay / writable-push-with-
+# retry branching, and the single synthetic status=blocked SPINDRIFT_OUTCOME
+# line -- now lives in the driver-exec `outcome-backstop` verb (issue #2157,
+# ADR 0036). This function is just linear exec glue: it hands the verb the
+# inputs it needs and lets it own the decision.
 emit_outcome_backstop() {
-  local note="driver exited without emitting an outcome"
-  if [ -n "${_recovery_attempted:-}" ]; then
-    note="${note}; a resume attempt also produced no outcome"
-  fi
-  echo "==> driver produced no SPINDRIFT_OUTCOME line — emitting synthetic backstop"
-  # A research dispatch never cuts a branch (ADR 0022) -- there is nothing to
-  # push best-effort, and no landing reference beyond "none".
-  if _is_research_kind; then
-    echo "SPINDRIFT_OUTCOME issue=${ISSUE_NUMBER} landing=none status=blocked note=${note} nonce=${RUN_NONCE:-}"
-    return
-  fi
-  # A Driver that completed real work but only staged it (or left unstaged
-  # edits) never advances commit_count below -- indistinguishable, until now,
-  # from a Driver that produced nothing at all (issue #2012: the #1998
-  # dogfood run's resume pass left a complete implementation staged but
-  # never committed, and lost it here). Salvage any dirty index/working tree
-  # into one commit before the commit_count check runs, so that check sees
-  # the salvaged state too. Never let a salvage failure abort this function
-  # under `set -e` -- same reasoning as the commit_count fallback below: a
-  # needless note beats skipping the always-emit outcome invariant (#593).
-  # Commits onto the current HEAD, then the push below sends BRANCH by name
-  # -- correct exactly when HEAD is BRANCH, which every phase before the
-  # Driver runs (phase_prework_rebase et al) already guarantees by the time
-  # main() reaches here.
-  if [ -n "$(git status --porcelain 2>/dev/null)" ]; then
-    if git add -A && git commit -m "chore: salvage uncommitted work before exiting without an outcome" >/dev/null 2>&1; then
-      note="${note}; salvaged uncommitted work into a commit"
-    else
-      note="${note}; failed to salvage uncommitted work"
-    fi
-  fi
-  # Nothing to preserve if BRANCH never advanced past the base -- pushing it
-  # anyway would publish an empty branch that looks like lost work (#1606).
-  # Fall back to "assume there is work" rather than let a resolution failure
-  # abort this function under `set -e` -- that would skip the always-emit
-  # outcome invariant (#593) entirely, worse than a needless push attempt.
-  local commit_count
-  commit_count="$(git rev-list --count "origin/${BASE_BRANCH:-}..${BRANCH}" 2>/dev/null)" || commit_count=1
-  if [ "$commit_count" -eq 0 ]; then
-    note="${note}; no work to preserve"
-  elif [ "${CODE_FORGE:-github}" = "local" ]; then
-    # origin is the read-only Accumulation-repo mount under CODE_FORGE=local
-    # (ADR 0033) -- a push here would only ever fail, and the commits are
-    # already sitting in this Box's own clone regardless, unlike git/github
-    # where a push is the only way work survives the container exiting.
-    note="${note}; no bundle was ever emitted (no writable remote under CODE_FORGE=local)"
-  elif _is_readonly_github; then
-    # A read-only github Box holds no push token by design (BOX_WRITE_ENABLED
-    # unset), so a force-push here can only ever 403 -- a structural failure,
-    # not a transient one (issue #2094). main() instead falls through to the
-    # harness-owned bundle-out step, which relays $BRANCH through the outbox
-    # seam.bundle exactly as a read-only status=ready hand-off does. Leave the
-    # note free of any push artifact.
-    note="${note}; branch relayed via outbox bundle (read-only Box)"
-  else
-    local push_log attempts backoff jitter attempt
-    push_log="$(mktemp)"
-    # Bounded retry-with-backoff on a transient push failure (issue #2095):
-    # reuse the same retry-count / linear-backoff / jitter knobs settle's own
-    # rebase-push loop does (MAX_REBASE_ATTEMPTS / TRANSIENT_BACKOFF_SECS /
-    # HOLD_JITTER_SECS), defaulting to their env-schema defaults since these
-    # knobs are not forwarded into the Box. A persistent 403 still gives up
-    # after the cap rather than looping forever, and the original error is
-    # surfaced in the note unchanged.
-    attempts="${MAX_REBASE_ATTEMPTS:-3}"
-    backoff="${TRANSIENT_BACKOFF_SECS:-30}"
-    jitter="${HOLD_JITTER_SECS:-5}"
-    [ "$attempts" -lt 1 ] && attempts=1
-    # A misconfigured negative backoff/jitter would make the `sleep` below
-    # reject its argument and, under `set -e`, abort before the always-emit
-    # outcome line (#593) -- clamp both to zero, same guard as attempts above.
-    [ "$backoff" -lt 0 ] && backoff=0
-    [ "$jitter" -lt 0 ] && jitter=0
-    attempt=1
-    while true; do
-      if git push --force-with-lease origin "$BRANCH" 2>"$push_log"; then
-        break
-      fi
-      if [ "$attempt" -ge "$attempts" ]; then
-        note="${note}; push failed after ${attempt} attempt(s): $(tail -1 "$push_log")"
-        break
-      fi
-      sleep "$(( backoff * attempt + jitter ))"
-      attempt=$(( attempt + 1 ))
-    done
-    rm -f "$push_log"
-  fi
-
-  echo "SPINDRIFT_OUTCOME issue=${ISSUE_NUMBER} landing=${BRANCH} status=blocked note=${note} nonce=${RUN_NONCE:-}"
+  driver-exec outcome-backstop \
+    --repo "$WORK_DIR" \
+    --issue "$ISSUE_NUMBER" \
+    --branch "$BRANCH" \
+    --base "origin/${BASE_BRANCH:-}" \
+    --dispatch-kind "${DISPATCH_KIND:-work}" \
+    --code-forge "${CODE_FORGE:-github}" \
+    --box-write-enabled "${BOX_WRITE_ENABLED:-}" \
+    --nonce "${RUN_NONCE:-}" \
+    --recovery-attempted "${_recovery_attempted:-}" \
+    --max-attempts "$MAX_REBASE_ATTEMPTS" \
+    --backoff-secs "$TRANSIENT_BACKOFF_SECS" \
+    --jitter-secs "$HOLD_JITTER_SECS"
 }
 
 # required_marker_gate is the reusable shape issue #1607 hardwired to
