@@ -24,10 +24,11 @@ const (
 type Reason string
 
 const (
-	RateLimit  Reason = "rateLimit"  // API rate limit
-	Overloaded Reason = "overloaded" // API overload / capacity error
-	Network    Reason = "network"    // transient network failure
-	TaskFailed Reason = "taskFailed" // agent ran but produced no valid result
+	RateLimit       Reason = "rateLimit"       // API rate limit
+	Overloaded      Reason = "overloaded"      // API overload / capacity error
+	Network         Reason = "network"         // transient network failure
+	TaskFailed      Reason = "taskFailed"      // agent ran but produced no valid result
+	UnsupportedFlag Reason = "unsupportedFlag" // driver rejected a CLI option we passed (version skew)
 )
 
 // Classification is the result of a Driver's ClassifyTransient, in this

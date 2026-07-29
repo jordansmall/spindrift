@@ -20,6 +20,7 @@ func TestReasonValues(t *testing.T) {
 		{Overloaded, "overloaded"},
 		{Network, "network"},
 		{TaskFailed, "taskFailed"},
+		{UnsupportedFlag, "unsupportedFlag"},
 	}
 	for _, c := range cases {
 		if string(c.got) != c.want {

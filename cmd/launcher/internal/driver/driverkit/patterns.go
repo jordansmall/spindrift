@@ -34,12 +34,18 @@ var BaseTransientPatterns = []Pattern{
 // again), so pinning them at a fixed base position would reorder
 // classification across reason categories for at least one driver.
 func MatchTransient(line string, extras []Pattern) (Reason, bool) {
-	for _, p := range extras {
-		if strings.Contains(line, p.Substr) {
-			return p.Reason, true
-		}
+	if r, ok := MatchExtras(line, extras); ok {
+		return r, true
 	}
-	for _, p := range BaseTransientPatterns {
+	return MatchExtras(line, BaseTransientPatterns)
+}
+
+// MatchExtras scans patterns in order (first-match-wins) and returns the first
+// match's Reason, or ("", false). Unlike MatchTransient it does NOT fall through
+// to BaseTransientPatterns, so a caller matching a terminal pattern list never
+// picks up a network Reason by accident.
+func MatchExtras(line string, patterns []Pattern) (Reason, bool) {
+	for _, p := range patterns {
 		if strings.Contains(line, p.Substr) {
 			return p.Reason, true
 		}

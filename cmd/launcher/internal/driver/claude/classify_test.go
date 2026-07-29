@@ -470,6 +470,48 @@ var classifyTests = []struct {
 		wantResetAt: nil,
 	},
 	{
+		// A claude-code build that predates the --agents flag rejects it
+		// outright with a plain-text CLI-usage error. Distinct from the
+		// generic Terminal/TaskFailed bucket so the operator gets a hint the
+		// fix is to bump claude-code (issue #1552).
+		name: "Terminal_UnsupportedFlag_UnknownAgentsOption",
+		lines: []string{
+			`==> claude implementing issue #142 on agent/issue-142`,
+			`error: unknown option '--agents'`,
+		},
+		wantClass:   claude.Terminal,
+		wantReason:  claude.UnsupportedFlag,
+		wantResetAt: nil,
+	},
+	{
+		// A genuine assistant turn (real model) whose own prose quotes the
+		// unknown-option marker verbatim — e.g. a box working on this very
+		// classifier case — must not be misattributed as the CLI rejecting
+		// --agents; the #579 self-poison guard still applies (issue #1552).
+		name: "Terminal_SelfPoisoning_UnknownAgentsOptionInGenuineAssistantContent",
+		lines: []string{
+			`{"type":"assistant","message":{"model":"claude-sonnet-4-6","content":[{"type":"text","text":"Adding a classifier case for error: unknown option '--agents'"}]}}`,
+		},
+		wantClass:   claude.Terminal,
+		wantReason:  claude.TaskFailed,
+		wantResetAt: nil,
+	},
+	{
+		// The claude CLI's normal terminal type:"result" line echoes the
+		// preceding assistant turn's text into its "result" field on an
+		// ordinary (non-error) completion. If that text quoted the
+		// unknown-option marker in genuine prose, the echo must not be
+		// scanned as a fresh signal (issue #818, applied to #1552).
+		name: "Terminal_SelfPoisoning_UnknownAgentsOptionEchoedInResultLine",
+		lines: []string{
+			`{"type":"assistant","message":{"model":"claude-sonnet-4-6","content":[{"type":"text","text":"Fixing the unknown option '--agents' guard now."}]}}`,
+			`{"type":"result","is_error":false,"result":"Fixing the unknown option '--agents' guard now.","stop_reason":"end_turn"}`,
+		},
+		wantClass:   claude.Terminal,
+		wantReason:  claude.TaskFailed,
+		wantResetAt: nil,
+	},
+	{
 		// Issue numbers, byte counts, or port numbers containing "429" or "529"
 		// must not be mistaken for API rate-limit / overload errors.
 		name: "Terminal_NoBareDigitFalsePositive",

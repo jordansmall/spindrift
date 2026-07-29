@@ -29,10 +29,11 @@ const (
 type Reason = driverkit.Reason
 
 const (
-	RateLimit  = driverkit.RateLimit
-	Overloaded = driverkit.Overloaded
-	Network    = driverkit.Network
-	TaskFailed = driverkit.TaskFailed
+	RateLimit       = driverkit.RateLimit
+	Overloaded      = driverkit.Overloaded
+	Network         = driverkit.Network
+	TaskFailed      = driverkit.TaskFailed
+	UnsupportedFlag = driverkit.UnsupportedFlag
 )
 
 // Classification is the result of Classify.
@@ -61,9 +62,35 @@ var transientExtras = []driverkit.Pattern{
 	{Substr: "net/http: request canceled", Reason: Network},
 }
 
+// terminalExtras holds markers for genuine, non-retryable failures whose
+// specific cause is worth naming to the operator. A claude-code build that
+// predates the --agents flag rejects it outright (issue #1552); classifying
+// that distinctly, instead of the generic TaskFailed bucket, tells the
+// operator the fix is to bump claude-code (or blank SCOUT_MODEL/REVIEW_MODEL)
+// rather than retry, which is futile. Routed through the same self-poison /
+// echo guard as transientExtras so a box editing this very string in its own
+// agent content is not misattributed (issues #579/#818).
+var terminalExtras = []driverkit.Pattern{
+	{Substr: "unknown option '--agents'", Reason: UnsupportedFlag},
+}
+
+// matchMarker classifies a single log line: a transient API/network marker
+// (Transient) takes precedence over a terminal CLI-usage marker (Terminal).
+// Returns ("", "", false) when neither matches.
+func matchMarker(line string) (Reason, Class, bool) {
+	if r, ok := driverkit.MatchTransient(line, transientExtras); ok {
+		return r, Transient, true
+	}
+	if r, ok := driverkit.MatchExtras(line, terminalExtras); ok {
+		return r, Terminal, true
+	}
+	return "", "", false
+}
+
 // scanResult accumulates everything Classify needs from one pass over the log.
 type scanResult struct {
 	reason   Reason
+	class    Class
 	found    bool
 	resetsAt *time.Time
 }
@@ -94,7 +121,7 @@ func Classify(logPath string) (Classification, error) {
 		return Classification{Class: Terminal, Reason: TaskFailed}, nil
 	}
 
-	cl := Classification{Class: Transient, Reason: sr.reason}
+	cl := Classification{Class: sr.class, Reason: sr.reason}
 	if sr.reason == RateLimit {
 		cl.ResetAt = sr.resetsAt
 	}
@@ -137,21 +164,22 @@ func scanLog(logPath string) (scanResult, error) {
 			// so a type:"result" line right after it that echoes the same
 			// marker is recognized as that same echo, not a fresh signal
 			// (issue #818).
-			echoReason, echoPending = driverkit.MatchTransient(chunk, transientExtras)
+			echoReason, _, echoPending = matchMarker(chunk)
 			return
 		}
 		if echoPending {
 			if resultText, ok := resultEventText(chunk); ok {
 				echoPending = false
-				if reason, matched := driverkit.MatchTransient(resultText, transientExtras); matched && reason == echoReason {
+				if reason, _, matched := matchMarker(resultText); matched && reason == echoReason {
 					return
 				}
 			}
 		}
 		if !sr.found {
-			if reason, ok := driverkit.MatchTransient(chunk, transientExtras); ok {
+			if reason, class, ok := matchMarker(chunk); ok {
 				sr.found = true
 				sr.reason = reason
+				sr.class = class
 			}
 		}
 		if sr.resetsAt == nil {
