@@ -249,10 +249,10 @@ in
   # Issue #262 slice 5 (AC4): opencode has no --agents JSON flag, so it
   # composes subagents from on-disk agents/*.md files under $HOME instead
   # (agentFilesTemplate). Rendering scout with a model must produce YAML
-  # frontmatter carrying `mode: subagent`, the model verbatim, and the same
-  # description claude.nix's agentsJsonTemplate uses for scout -- so the two
-  # Drivers present identical subagent framing regardless of which mechanism
-  # composes it.
+  # frontmatter carrying `mode: "subagent"`, the model JSON-encoded (issue
+  # #2152 slice C), and the same description claude.nix's agentsJsonTemplate
+  # uses for scout -- so the two Drivers present identical subagent framing
+  # regardless of which mechanism composes it.
   drivers-opencode-agent-files-scout-frontmatter =
     let
       opencodeEntry = driverRegistry.entries.opencode;
@@ -292,10 +292,10 @@ in
       };
       scoutFile = rendered.".config/opencode/agents/scout.md" or "";
     in
-    assert assertMsg (hasInfix "mode: subagent" scoutFile)
-      "opencode agentFilesTemplate's scout.md must set mode: subagent, got: ${scoutFile}";
-    assert assertMsg (hasInfix "model: solo-scout-model" scoutFile)
-      "opencode agentFilesTemplate's scout.md must carry the scout model verbatim, got: ${scoutFile}";
+    assert assertMsg (hasInfix ''mode: "subagent"'' scoutFile)
+      "opencode agentFilesTemplate's scout.md must set mode: \"subagent\" (JSON-encoded, issue #2152 slice C), got: ${scoutFile}";
+    assert assertMsg (hasInfix ''model: "solo-scout-model"'' scoutFile)
+      "opencode agentFilesTemplate's scout.md must carry the scout model JSON-encoded (issue #2152 slice C), got: ${scoutFile}";
     assert assertMsg
       (hasInfix "Map relevant files, seams, and tests; return a structured brief" scoutFile)
       "opencode agentFilesTemplate's scout.md must carry the scout description, got: ${scoutFile}";
@@ -507,10 +507,10 @@ in
       "claude agentsJsonTemplate's auditor entry must carry the roster model verbatim, got: ${builtins.toJSON (claudeRendered.auditor or { })}";
     assert assertMsg (opencodeRendered ? ".config/opencode/agents/auditor.md")
       "opencode agentFilesTemplate must render a custom roster entry (auditor.md), got keys: ${concatStringsSep ", " (builtins.attrNames opencodeRendered)}";
-    assert assertMsg (hasInfix "model: audit-model" opencodeAuditorFile)
-      "opencode agentFilesTemplate's auditor.md must carry the roster model verbatim, got: ${opencodeAuditorFile}";
-    assert assertMsg (hasInfix "mode: subagent" opencodeAuditorFile)
-      "opencode agentFilesTemplate's auditor.md must carry the roster mode, got: ${opencodeAuditorFile}";
+    assert assertMsg (hasInfix ''model: "audit-model"'' opencodeAuditorFile)
+      "opencode agentFilesTemplate's auditor.md must carry the roster model JSON-encoded (issue #2152 slice C), got: ${opencodeAuditorFile}";
+    assert assertMsg (hasInfix ''mode: "subagent"'' opencodeAuditorFile)
+      "opencode agentFilesTemplate's auditor.md must carry the roster mode JSON-encoded (issue #2152 slice C), got: ${opencodeAuditorFile}";
     pkgs.runCommand "drivers-roster-custom-agent-both-drivers" { } "touch $out";
 
   # A description containing a colon (e.g. "Audit: colon") must not break the
@@ -552,4 +552,162 @@ in
     assert assertMsg (opencodeEntry.skillsDirRelative == ".claude/skills")
       "opencode Driver's skillsDirRelative must stay .claude/skills, got: ${opencodeEntry.skillsDirRelative}";
     pkgs.runCommand "drivers-opencode-skills-dir-pinned" { } "touch $out";
+
+  # Issue #2152 slice C: claude's agentsJsonTemplate builds an attrset and
+  # returns builtins.toJSON over the whole thing, so every scalar -- not just
+  # description -- is already properly JSON-encoded. Round-trip a
+  # JSON-breaking payload (an embedded double quote and a newline) through
+  # both description and model and assert the parsed value equals the exact
+  # payload -- a bare string-concatenation template would instead corrupt the
+  # JSON structure or silently truncate/mangle the payload.
+  drivers-claude-agents-json-escapes-every-scalar =
+    let
+      claudeEntry = driverRegistry.entries.claude;
+      payload = "x\"y\nz";
+      rendered = claudeEntry.agentsJsonTemplate {
+        roster = [
+          {
+            name = "escapee";
+            model = payload;
+            mode = "subagent";
+            description = payload;
+            tools = [ "Read" ];
+            promptFile = "escapee-prompt.md";
+            prompt = null;
+          }
+        ];
+      };
+      parsed = builtins.fromJSON rendered;
+    in
+    assert assertMsg (parsed ? escapee)
+      "claude agentsJsonTemplate must render the escapee roster entry, got keys: ${concatStringsSep ", " (builtins.attrNames parsed)}";
+    assert assertMsg (parsed.escapee.description or "" == payload)
+      "claude agentsJsonTemplate must round-trip a JSON-breaking description exactly, got: ${builtins.toJSON (parsed.escapee.description or "")}";
+    assert assertMsg (parsed.escapee.model or "" == payload)
+      "claude agentsJsonTemplate must round-trip a JSON-breaking model exactly, got: ${builtins.toJSON (parsed.escapee.model or "")}";
+    pkgs.runCommand "drivers-claude-agents-json-escapes-every-scalar" { } "touch $out";
+
+  # Issue #2152 slice C: opencode's agentFilesTemplate now JSON-encodes the
+  # `model` frontmatter scalar (previously raw-interpolated), so a model value
+  # carrying a double quote and a newline can no longer break out of the YAML
+  # scalar and inject a second frontmatter key. The rendered file must carry
+  # the JSON-encoded form of the payload, and must NOT carry the payload's
+  # embedded newline followed by the injected key as a raw YAML line.
+  drivers-opencode-agent-files-escapes-model =
+    let
+      opencodeEntry = driverRegistry.entries.opencode;
+      payload = "evil\"\ninjected: true";
+      rendered = opencodeEntry.agentFilesTemplate {
+        roster = [
+          {
+            name = "escapee";
+            model = payload;
+            mode = "subagent";
+            description = "Escapee";
+            tools = [ "Read" ];
+            promptFile = "escapee-prompt.md";
+            prompt = null;
+          }
+        ];
+      };
+      file = rendered.".config/opencode/agents/escapee.md" or "";
+    in
+    assert assertMsg (hasInfix (builtins.toJSON payload) file)
+      "opencode agentFilesTemplate must JSON-encode a model value carrying a quote/newline, got: ${file}";
+    assert assertMsg (!(hasInfix "\ninjected: true" file))
+      "opencode agentFilesTemplate must not let a model value's embedded newline inject a raw YAML key, got: ${file}";
+    pkgs.runCommand "drivers-opencode-agent-files-escapes-model" { } "touch $out";
+
+  # Same injection vector as drivers-opencode-agent-files-escapes-model above,
+  # but through the `mode` frontmatter scalar instead of `model`.
+  drivers-opencode-agent-files-escapes-mode =
+    let
+      opencodeEntry = driverRegistry.entries.opencode;
+      payload = "evil\"\ninjected: true";
+      rendered = opencodeEntry.agentFilesTemplate {
+        roster = [
+          {
+            name = "escapee";
+            model = "escapee-model";
+            mode = payload;
+            description = "Escapee";
+            tools = [ "Read" ];
+            promptFile = "escapee-prompt.md";
+            prompt = null;
+          }
+        ];
+      };
+      file = rendered.".config/opencode/agents/escapee.md" or "";
+    in
+    assert assertMsg (hasInfix (builtins.toJSON payload) file)
+      "opencode agentFilesTemplate must JSON-encode a mode value carrying a quote/newline, got: ${file}";
+    assert assertMsg (!(hasInfix "\ninjected: true" file))
+      "opencode agentFilesTemplate must not let a mode value's embedded newline inject a raw YAML key, got: ${file}";
+    pkgs.runCommand "drivers-opencode-agent-files-escapes-mode" { } "touch $out";
+
+  # Issue #2152 slice C (documents the deliberate agent-less image, mirroring
+  # normalizeRoster's own empty-roster comment in lib/roster.nix): an empty
+  # roster must render into the same empty shape both Drivers already return
+  # for an all-empty-model roster -- claude's agentsJsonTemplate returns "",
+  # opencode's agentFilesTemplate returns {}.
+  drivers-render-empty-roster =
+    let
+      claudeEntry = driverRegistry.entries.claude;
+      opencodeEntry = driverRegistry.entries.opencode;
+      claudeRendered = claudeEntry.agentsJsonTemplate { roster = [ ]; };
+      opencodeRendered = opencodeEntry.agentFilesTemplate { roster = [ ]; };
+    in
+    assert assertMsg (claudeRendered == "")
+      "claude agentsJsonTemplate must return \"\" for an empty roster, got: ${claudeRendered}";
+    assert assertMsg (opencodeRendered == { })
+      "opencode agentFilesTemplate must return {} for an empty roster, got: ${builtins.toJSON opencodeRendered}";
+    pkgs.runCommand "drivers-render-empty-roster" { } "touch $out";
+
+  # Issue #2152 slice C: one custom, multi-agent roster (a builtin scout plus
+  # a custom "auditor" agent beyond the historical
+  # scout/reviewer/filer/worker set) rendered by BOTH Drivers from the same
+  # roster list -- claude's --agents JSON carries the custom agent's model,
+  # and opencode's on-disk auditor.md frontmatter carries the JSON-encoded
+  # model/mode/description.
+  drivers-render-custom-roster-both =
+    let
+      claudeEntry = driverRegistry.entries.claude;
+      opencodeEntry = driverRegistry.entries.opencode;
+      roster = [
+        {
+          name = "scout";
+          model = "solo-scout-model";
+          mode = "subagent";
+          description = "Map relevant files, seams, and tests; return a structured brief";
+          tools = [ "Read" ];
+          promptFile = "scout-prompt.md";
+          prompt = null;
+        }
+        {
+          name = "auditor";
+          model = "audit-model";
+          mode = "subagent";
+          description = "Audit stuff";
+          tools = [ "Read" ];
+          promptFile = "auditor-prompt.md";
+          prompt = null;
+        }
+      ];
+      claudeRendered = builtins.fromJSON (claudeEntry.agentsJsonTemplate { inherit roster; });
+      opencodeRendered = opencodeEntry.agentFilesTemplate { inherit roster; };
+      auditorFile = opencodeRendered.".config/opencode/agents/auditor.md" or "";
+    in
+    assert assertMsg (claudeRendered ? auditor)
+      "claude agentsJsonTemplate must render the custom roster entry (auditor), got keys: ${concatStringsSep ", " (builtins.attrNames claudeRendered)}";
+    assert assertMsg (claudeRendered.auditor.model or "" == "audit-model")
+      "claude agentsJsonTemplate's auditor entry must carry the roster model, got: ${builtins.toJSON (claudeRendered.auditor or { })}";
+    assert assertMsg (opencodeRendered ? ".config/opencode/agents/auditor.md")
+      "opencode agentFilesTemplate must render the custom roster entry (auditor.md), got keys: ${concatStringsSep ", " (builtins.attrNames opencodeRendered)}";
+    assert assertMsg (hasInfix ''model: "audit-model"'' auditorFile)
+      "opencode agentFilesTemplate's auditor.md must carry the JSON-encoded model, got: ${auditorFile}";
+    assert assertMsg (hasInfix ''mode: "subagent"'' auditorFile)
+      "opencode agentFilesTemplate's auditor.md must carry the JSON-encoded mode, got: ${auditorFile}";
+    assert assertMsg (hasInfix ''description: "Audit stuff"'' auditorFile)
+      "opencode agentFilesTemplate's auditor.md must carry the JSON-encoded description, got: ${auditorFile}";
+    pkgs.runCommand "drivers-render-custom-roster-both" { } "touch $out";
 }

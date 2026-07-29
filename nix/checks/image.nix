@@ -125,26 +125,26 @@ in
       echo "opencode agentFiles missing scout.md" >&2
       exit 1
     }
-    grep -q 'mode: subagent' "$scout" \
-      || { echo "opencode scout.md missing mode: subagent" >&2; exit 1; }
-    grep -q 'model: anthropic/claude-x' "$scout" \
-      || { echo "opencode scout.md missing its configured model" >&2; exit 1; }
+    grep -q 'mode: "subagent"' "$scout" \
+      || { echo "opencode scout.md missing mode: \"subagent\" (JSON-encoded, issue #2152 slice C)" >&2; exit 1; }
+    grep -q 'model: "anthropic/claude-x"' "$scout" \
+      || { echo "opencode scout.md missing its configured model (JSON-encoded, issue #2152 slice C)" >&2; exit 1; }
 
     reviewer=${opencodeHarness.agentFiles}/home/agent/.config/opencode/agents/reviewer.md
     [ -f "$reviewer" ] || {
       echo "opencode agentFiles missing reviewer.md" >&2
       exit 1
     }
-    grep -q 'model: anthropic/claude-y' "$reviewer" \
-      || { echo "opencode reviewer.md missing its configured model" >&2; exit 1; }
+    grep -q 'model: "anthropic/claude-y"' "$reviewer" \
+      || { echo "opencode reviewer.md missing its configured model (JSON-encoded, issue #2152 slice C)" >&2; exit 1; }
 
     worker=${opencodeHarness.agentFiles}/home/agent/.config/opencode/agents/worker.md
     [ -f "$worker" ] || {
       echo "opencode agentFiles missing worker.md" >&2
       exit 1
     }
-    grep -q 'model: anthropic/claude-z' "$worker" \
-      || { echo "opencode worker.md missing its configured model" >&2; exit 1; }
+    grep -q 'model: "anthropic/claude-z"' "$worker" \
+      || { echo "opencode worker.md missing its configured model (JSON-encoded, issue #2152 slice C)" >&2; exit 1; }
 
     filer=${opencodeHarness.agentFiles}/home/agent/.config/opencode/agents/filer.md
     [ ! -e "$filer" ] || {
