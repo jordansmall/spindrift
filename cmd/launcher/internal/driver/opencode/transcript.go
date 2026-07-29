@@ -2,10 +2,9 @@ package opencode
 
 import (
 	"encoding/json"
-	"errors"
-	"os"
 	"strings"
 
+	"spindrift.dev/launcher/internal/driver/driverkit"
 	"spindrift.dev/launcher/internal/logscan"
 )
 
@@ -31,7 +30,7 @@ type textEvent struct {
 // Driver's RenderTranscript not-found contract.
 func RenderTranscript(logPath string) (string, error) {
 	var texts []string
-	err := logscan.ForEachLine(logPath, logscan.SkipOversized, func(line string) {
+	err := driverkit.ScanLog(logPath, logscan.SkipOversized, func(line string) {
 		s := strings.TrimSpace(line)
 		if s == "" {
 			return
@@ -46,9 +45,6 @@ func RenderTranscript(logPath string) (string, error) {
 		texts = append(texts, ev.Part.Text)
 	})
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return "", nil
-		}
 		return "", err
 	}
 	if len(texts) == 0 {

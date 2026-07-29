@@ -2,70 +2,47 @@
 // transient-error taxonomy and NDJSON event parsing for the `opencode run
 // --format json` transcript shape (one JSON object per line — no envelope
 // wrapping the whole stream, unlike claude's stream-json array-of-events
-// framing). The parent driver package owns the Driver interface, the shared
-// Class/Reason/Classification vocabulary, and the registry wiring; this
-// package must not import it (the registration adapter in
-// driver/opencode.go imports this package, not the other way around, to
-// avoid a cycle) — Classify therefore returns its own Class/Reason values,
-// mirrored 1:1 onto driver.Class/driver.Reason by that adapter.
+// framing). The parent driver package owns the Driver interface and the
+// registry wiring; the shared Class/Reason/Classification vocabulary lives
+// in driverkit, and this package type-aliases it, so the registration
+// adapter in driver/opencode.go needs no cast between this package's and
+// driver's Class/Reason values.
 package opencode
 
 import (
 	"encoding/json"
-	"errors"
-	"os"
 	"strings"
-	"time"
 
+	"spindrift.dev/launcher/internal/driver/driverkit"
 	"spindrift.dev/launcher/internal/logscan"
 )
 
 // Class describes whether a non-zero agent exit is retryable or not.
-// Mirrors driver.Class; see the package doc for why this is a local copy.
-type Class string
+type Class = driverkit.Class
 
 const (
-	Transient Class = "transient"
-	Terminal  Class = "terminal"
+	Transient = driverkit.Transient
+	Terminal  = driverkit.Terminal
 )
 
 // Reason identifies the specific cause of a classified exit.
-// Mirrors driver.Reason; see the package doc for why this is a local copy.
-type Reason string
+type Reason = driverkit.Reason
 
 const (
-	RateLimit  Reason = "rateLimit"  // API 429 rate limit
-	Overloaded Reason = "overloaded" // API 529 / overloaded_error / capacity error
-	Network    Reason = "network"    // transient network failure
-	TaskFailed Reason = "taskFailed" // agent ran but produced no valid result
+	RateLimit  = driverkit.RateLimit
+	Overloaded = driverkit.Overloaded
+	Network    = driverkit.Network
+	TaskFailed = driverkit.TaskFailed
 )
 
 // Classification is the result of Classify.
-type Classification struct {
-	Class   Class
-	Reason  Reason
-	ResetAt *time.Time // non-nil only for RateLimit with a known reset time
-}
+type Classification = driverkit.Classification
 
-// transientPatterns lists log-line substrings that mark a transient failure,
-// mirrored from driver/claude/classify.go's own table (the same underlying
-// API-error and network-failure vocabulary applies regardless of which CLI
-// is fronting the model). The first match in the ordered list wins when
-// multiple markers appear on the same line.
-var transientPatterns = []struct {
-	substr string
-	reason Reason
-}{
-	{"rate_limit_error", RateLimit},
-	{"429", RateLimit},
-	{"overloaded_error", Overloaded},
-	{"529", Overloaded},
-	{"Overloaded", Overloaded},
-	{"connection refused", Network},
-	{"connection reset", Network},
-	{"dial tcp", Network},
-	{"context deadline exceeded", Network},
-	{"no such host", Network},
+// transientExtras lists opencode-specific transient markers layered on top
+// of driverkit.BaseTransientPatterns.
+var transientExtras = []driverkit.Pattern{
+	{Substr: "429", Reason: RateLimit},
+	{Substr: "529", Reason: Overloaded},
 }
 
 // event is the minimal NDJSON envelope Classify needs: enough to tell a
@@ -88,7 +65,7 @@ type event struct {
 func Classify(logPath string) (Classification, error) {
 	found := false
 	var reason Reason
-	err := logscan.ForEachLine(logPath, logscan.SkipOversized, func(line string) {
+	err := driverkit.ScanLog(logPath, logscan.SkipOversized, func(line string) {
 		s := strings.TrimSpace(line)
 		if s == "" {
 			return
@@ -100,30 +77,16 @@ func Classify(logPath string) (Classification, error) {
 		if ev.Type != "error" {
 			return
 		}
-		if r, ok := matchTransient(s); ok {
+		if r, ok := driverkit.MatchTransient(s, transientExtras); ok {
 			found = true
 			reason = r
 		}
 	})
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return Classification{Class: Terminal, Reason: TaskFailed}, nil
-		}
 		return Classification{}, err
 	}
 	if !found {
 		return Classification{Class: Terminal, Reason: TaskFailed}, nil
 	}
 	return Classification{Class: Transient, Reason: reason}, nil
-}
-
-// matchTransient checks whether line contains a known transient marker.
-// Returns the first matching reason in pattern order.
-func matchTransient(line string) (Reason, bool) {
-	for _, p := range transientPatterns {
-		if strings.Contains(line, p.substr) {
-			return p.reason, true
-		}
-	}
-	return "", false
 }
