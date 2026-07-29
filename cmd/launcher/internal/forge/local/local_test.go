@@ -168,6 +168,45 @@ func TestLocalIssue_RenderParseRoundTrip_Abandoned(t *testing.T) {
 	}
 }
 
+// TestLocalIssue_RenderParseRoundTrip_ScalarEscaping covers the remaining
+// scalarNeedsQuoting/renderScalar/unquote escaping vectors — a tab, a
+// carriage return, a leading double-quote, and an embedded double-quote —
+// each carried through render() then parseLocalIssue as the Title field.
+func TestLocalIssue_RenderParseRoundTrip_ScalarEscaping(t *testing.T) {
+	cases := []struct {
+		name  string
+		title string
+	}{
+		{name: "tab", title: "a\tb"},
+		{name: "carriage return", title: "a\rb"},
+		{name: "leading double-quote", title: `"leading`},
+		{name: "embedded double-quote", title: `a"b`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			li := localIssue{
+				frontmatter: localFrontmatter{
+					Title:   tc.title,
+					State:   "ready-for-agent",
+					Labels:  []string{"bug"},
+					Created: "2026-07-09T12:00:00Z",
+				},
+				body: "## What to build\n\nDo the thing.\n",
+			}
+			got, err := parseLocalIssue([]byte(li.render()))
+			if err != nil {
+				t.Fatalf("parseLocalIssue(render()): %v", err)
+			}
+			if got.frontmatter.Title != tc.title {
+				t.Errorf("Title round trip = %q, want %q", got.frontmatter.Title, tc.title)
+			}
+			if !reflect.DeepEqual(got, li) {
+				t.Errorf("round trip = %+v, want %+v", got, li)
+			}
+		})
+	}
+}
+
 func TestLocalTracker_ListIssues_OrderedByCreated(t *testing.T) {
 	dir := t.TempDir()
 	labels := testLabels
@@ -1051,6 +1090,80 @@ func TestLocalTracker_PostIssue_SlugCollision_AppendsSuffix(t *testing.T) {
 	}
 }
 
+// TestLocalTracker_PostIssue_MkdirAllFails_ReturnsError verifies PostIssue
+// surfaces os.MkdirAll's error rather than panicking or swallowing it when
+// lt.dir can't be created — here because a path component (parent) already
+// exists as a regular file, so MkdirAll fails with ENOTDIR.
+func TestLocalTracker_PostIssue_MkdirAllFails_ReturnsError(t *testing.T) {
+	parent := filepath.Join(t.TempDir(), "not-a-dir")
+	if err := os.WriteFile(parent, []byte("x"), 0o644); err != nil {
+		t.Fatalf("write %s: %v", parent, err)
+	}
+	dir := filepath.Join(parent, "issues")
+
+	lt := NewLocalTracker(dir, testLabels)
+	if _, err := lt.PostIssue("Fix the Thing", "body", nil); err == nil {
+		t.Fatal("PostIssue: got nil error, want non-nil (MkdirAll should fail: parent is a regular file)")
+	}
+}
+
+// TestLocalTracker_PostIssue_WriteFileFails_ReturnsError verifies PostIssue
+// surfaces os.WriteFile's error rather than swallowing it when the issues
+// dir exists but rejects writes — here because it's read-only (0o500: owner
+// can still traverse/stat it, satisfying uniqueSlug's stat, but not create
+// a file in it). Skipped when running as root, which bypasses permission
+// checks entirely.
+func TestLocalTracker_PostIssue_WriteFileFails_ReturnsError(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("running as root: permission checks are bypassed, so this test can't force a write failure")
+	}
+
+	dir := filepath.Join(t.TempDir(), "issues")
+	if err := os.Mkdir(dir, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", dir, err)
+	}
+	if err := os.Chmod(dir, 0o500); err != nil {
+		t.Fatalf("chmod %s: %v", dir, err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
+
+	lt := NewLocalTracker(dir, testLabels)
+	if _, err := lt.PostIssue("Fix the Thing", "body", nil); err == nil {
+		t.Fatal("PostIssue: got nil error, want non-nil (WriteFile should fail: dir is read-only)")
+	}
+}
+
+// TestLocalTracker_PostIssue_UniqueSlugStatFails_ReturnsError verifies
+// PostIssue propagates a non-IsNotExist stat error from uniqueSlug's
+// collision check rather than looping past it or succeeding — here because
+// the issues dir itself is unsearchable (0o000: no read, no execute), so
+// stat-ing the candidate slug path inside it fails with a permission error
+// rather than the IsNotExist that signals "no collision, use this slug".
+// Skipped when running as root, which bypasses permission checks entirely.
+func TestLocalTracker_PostIssue_UniqueSlugStatFails_ReturnsError(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("running as root: permission checks are bypassed, so this test can't force a stat failure")
+	}
+
+	dir := filepath.Join(t.TempDir(), "issues")
+	if err := os.Mkdir(dir, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", dir, err)
+	}
+	if err := os.Chmod(dir, 0o000); err != nil {
+		t.Fatalf("chmod %s: %v", dir, err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
+
+	lt := NewLocalTracker(dir, testLabels)
+	_, err := lt.PostIssue("Fix the Thing", "body", nil)
+	if err == nil {
+		t.Fatal("PostIssue: got nil error, want non-nil (uniqueSlug's stat should fail: dir is unsearchable)")
+	}
+	if !strings.Contains(err.Error(), "stat local issue") {
+		t.Errorf("err = %q, want it to come from uniqueSlug's stat branch (contain %q)", err.Error(), "stat local issue")
+	}
+}
+
 // TestLocalTracker_PostIssue_NewlineTitle_NoFrontmatterInjection verifies a
 // host-posted title containing embedded frontmatter-shaped lines (e.g. a
 // closing delimiter plus closed:/labels: overrides) round-trips as a single
@@ -1091,6 +1204,30 @@ func TestLocalTracker_PostIssue_NewlineTitle_NoFrontmatterInjection(t *testing.T
 	}
 	if foundPwned {
 		t.Errorf("Labels = %v, want it NOT to contain injected %q", iss.Labels, "pwned")
+	}
+}
+
+// TestLocalTracker_PostIssue_LabelInjection_RoundTripsExactLabels verifies a
+// host-posted label containing a comma, bracket, or newline round-trips as a
+// single literal label rather than fragmenting the frontmatter "labels: [...]"
+// flow-list — the injection this adapter must resist since PostIssue's labels
+// arg is now caller-supplied (issue #2018) rather than hard-coded.
+func TestLocalTracker_PostIssue_LabelInjection_RoundTripsExactLabels(t *testing.T) {
+	dir := t.TempDir()
+	lt := NewLocalTracker(dir, testLabels)
+
+	labels := []string{"a,b", "x[y]", "line1\nline2: pwned"}
+	ref, err := lt.PostIssue("Fix the Thing", "body", labels)
+	if err != nil {
+		t.Fatalf("PostIssue: %v", err)
+	}
+
+	iss, err := lt.Issue(strings.TrimPrefix(ref, "local:"))
+	if err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+	if !reflect.DeepEqual(iss.Labels, labels) {
+		t.Errorf("Labels = %v, want %v (exact round-trip, not fragmented)", iss.Labels, labels)
 	}
 }
 

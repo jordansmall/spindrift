@@ -120,6 +120,39 @@ func TestLocalCodeForge_RelayBundle_MalformedBundleErrors(t *testing.T) {
 	}
 }
 
+// TestLocalCodeForge_RelayBundle_UnreadableBundleErrors asserts a stat
+// failure that is NOT os.IsNotExist (here, ENOTDIR from a path component
+// that's a regular file rather than a directory — standing in for
+// permission-denied or any other stat error a present-but-unreadable outbox
+// could produce) is reported as a generic error, not conflated with the
+// benign "nothing to relay" ErrBundleNotFound case reserved for a genuinely
+// absent bundle/outbox.
+func TestLocalCodeForge_RelayBundle_UnreadableBundleErrors(t *testing.T) {
+	setGitIdentityEnv(t)
+	parent := ResolveParent("1694", "")
+	repo := forgetest.NewGitRepoFixture(t, IntegrationBranch(parent))
+
+	// A regular file standing in for what should be a directory: any path
+	// that walks through it (outbox itself, here) makes os.Stat fail with
+	// ENOTDIR rather than ENOENT.
+	blocker := filepath.Join(t.TempDir(), "not-a-dir")
+	if err := os.WriteFile(blocker, []byte("blocker"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	outbox := filepath.Join(blocker, "outbox")
+
+	cf := NewLocalCodeForge(repo.Bare, IntegrationBranch(parent), parent, "Test Bot", "bot@example.com", "agent/issue-")
+	br := cf.(forge.BundleRelay)
+
+	err := br.RelayBundle(outbox, "agent/issue-1698")
+	if err == nil {
+		t.Fatal("RelayBundle with an unreadable (ENOTDIR) bundle path: got nil error, want one")
+	}
+	if errors.Is(err, forge.ErrBundleNotFound) {
+		t.Errorf("RelayBundle with an unreadable (ENOTDIR) bundle path: err = %v, want a generic error, not forge.ErrBundleNotFound", err)
+	}
+}
+
 // TestLocalCodeForge_RelayBundle_ReRelayOverwritesDivergedRef asserts a retry
 // (the Box crashed, re-dispatched, and rebuilt its bundle from a rebased
 // branch) can relay again even though the new bundle's branch tip diverged
