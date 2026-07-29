@@ -38,11 +38,17 @@ const (
 // Classification is the result of Classify.
 type Classification = driverkit.Classification
 
-// transientExtras lists opencode-specific transient markers layered on top
-// of driverkit.BaseTransientPatterns.
+// transientExtras holds opencode's complete ordered marker list, checked
+// before the shared driverkit.BaseTransientPatterns network suffix.
+// opencode deliberately supplies these (it does NOT "pass none") to preserve
+// its loose-digit "429"/"529" markers and their original precedence over
+// "overloaded_error"/"Overloaded".
 var transientExtras = []driverkit.Pattern{
+	{Substr: "rate_limit_error", Reason: RateLimit},
 	{Substr: "429", Reason: RateLimit},
+	{Substr: "overloaded_error", Reason: Overloaded},
 	{Substr: "529", Reason: Overloaded},
+	{Substr: "Overloaded", Reason: Overloaded},
 }
 
 // event is the minimal NDJSON envelope Classify needs: enough to tell a

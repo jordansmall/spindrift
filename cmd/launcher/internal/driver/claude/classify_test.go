@@ -485,6 +485,29 @@ var classifyTests = []struct {
 	},
 }
 
+// TestClassify_RateLimitBeatsBareOverloaded_SameLine locks in claude's
+// intra-extras ordering: the specific "429 Too Many Requests" -> RateLimit
+// marker precedes the bare "Overloaded" -> Overloaded fallback within
+// transientExtras, so a line carrying both classifies as RateLimit
+// (first-match wins). Both markers are claude extras, not shared base —
+// driverkit.BaseTransientPatterns holds only Network markers — so reordering
+// them within the extras list is what would flip this line to Overloaded
+// (issue #2149).
+func TestClassify_RateLimitBeatsBareOverloaded_SameLine(t *testing.T) {
+	logPath := claude.WriteLog(t, `Error: 429 Too Many Requests — server Overloaded`)
+
+	c, err := claude.Classify(logPath)
+	if err != nil {
+		t.Fatalf("Classify() error: %v", err)
+	}
+	if c.Class != claude.Transient {
+		t.Errorf("Class: got %q, want %q", c.Class, claude.Transient)
+	}
+	if c.Reason != claude.RateLimit {
+		t.Errorf("Reason: got %q, want %q", c.Reason, claude.RateLimit)
+	}
+}
+
 // TestClassify_OversizedLine_ChunkMatchesMarker locks in the chunk-matching
 // oversized-line policy: a marker planted past the internal 4 MiB scan
 // buffer, inside one giant line, must still be found.

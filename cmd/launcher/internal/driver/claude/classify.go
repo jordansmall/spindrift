@@ -41,11 +41,14 @@ type Classification = driverkit.Classification
 // resetsAtRe matches the JSON field "resetsAt":UNIX_TIMESTAMP (integer).
 var resetsAtRe = regexp.MustCompile(`"resetsAt"\s*:\s*(\d+)`)
 
-// transientExtras lists claude-specific transient markers layered on top of
-// driverkit.BaseTransientPatterns. Patterns are deliberately specific to
-// avoid matching ordinary log content (issue numbers, byte counts, port
-// numbers, etc. containing digit sequences).
+// transientExtras holds claude's complete ordered API-error marker list,
+// checked before the shared driverkit.BaseTransientPatterns network suffix.
+// Patterns are deliberately specific to avoid matching ordinary log content
+// (issue numbers, byte counts, port numbers, etc. containing digit
+// sequences).
 var transientExtras = []driverkit.Pattern{
+	{Substr: "rate_limit_error", Reason: RateLimit},
+	{Substr: "overloaded_error", Reason: Overloaded},
 	{Substr: "usage_limit_reached", Reason: RateLimit},
 	{Substr: "server_error", Reason: Overloaded},
 	{Substr: "429 Too Many Requests", Reason: RateLimit},
@@ -54,6 +57,7 @@ var transientExtras = []driverkit.Pattern{
 	{Substr: "hit your session limit", Reason: RateLimit},
 	{Substr: "hit your weekly limit", Reason: RateLimit},
 	{Substr: "hit your Opus limit", Reason: RateLimit},
+	{Substr: "Overloaded", Reason: Overloaded},
 	{Substr: "net/http: request canceled", Reason: Network},
 }
 
