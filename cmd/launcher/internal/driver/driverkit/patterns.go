@@ -8,14 +8,13 @@ type Pattern struct {
 	Reason Reason
 }
 
-// BaseTransientPatterns holds the transient markers shared by every Driver
-// strategy today. Patterns are deliberately specific to avoid matching
+// BaseTransientPatterns holds the network-level transient markers shared
+// verbatim by every Driver strategy — a reason-homogeneous block (every
+// marker maps to Network) always checked LAST, so it never reorders a
+// driver's own markers. Patterns are deliberately specific to avoid matching
 // ordinary log content (issue numbers, byte counts, port numbers, etc.
 // containing digit sequences).
 var BaseTransientPatterns = []Pattern{
-	{"rate_limit_error", RateLimit},
-	{"overloaded_error", Overloaded},
-	{"Overloaded", Overloaded},
 	{"connection refused", Network},
 	{"connection reset", Network},
 	{"dial tcp", Network},
@@ -23,19 +22,24 @@ var BaseTransientPatterns = []Pattern{
 	{"no such host", Network},
 }
 
-// MatchTransient reports the Reason of the first Pattern whose Substr
-// appears in line, checking BaseTransientPatterns first (in order) and then
-// extras (in order) — order within a reason-category never changes the
-// classified Reason, because every marker in a category maps to the same
-// Reason; extras hold per-Driver-specific markers layered on top of the
-// shared base table. Returns ("", false) if no pattern matches.
+// MatchTransient checks the per-Driver extras (ordered most-specific-first)
+// before the shared BaseTransientPatterns network suffix, first-match wins,
+// and returns ("", false) if none match.
+//
+// The API-error rows (rate_limit_error, overloaded_error, Overloaded) live in
+// each driver's extras rather than in the shared base: although the markers
+// are shared text, their position relative to a driver's own markers differs
+// between strategies (e.g. opencode's loose-digit "429"/"529" markers must
+// outrank "overloaded_error"/"Overloaded", while claude's ordering differs
+// again), so pinning them at a fixed base position would reorder
+// classification across reason categories for at least one driver.
 func MatchTransient(line string, extras []Pattern) (Reason, bool) {
-	for _, p := range BaseTransientPatterns {
+	for _, p := range extras {
 		if strings.Contains(line, p.Substr) {
 			return p.Reason, true
 		}
 	}
-	for _, p := range extras {
+	for _, p := range BaseTransientPatterns {
 		if strings.Contains(line, p.Substr) {
 			return p.Reason, true
 		}

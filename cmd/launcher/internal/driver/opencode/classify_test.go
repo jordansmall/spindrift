@@ -58,6 +58,28 @@ func TestClassify_NoErrorEvent_IsTerminal(t *testing.T) {
 	}
 }
 
+// TestClassify_ErrorEvent_LooseDigit429BeatsOverloaded locks in opencode's
+// intra-extras ordering: the loose "429" -> RateLimit digit marker precedes
+// the "overloaded_error" -> Overloaded marker within transientExtras, so an
+// event carrying both classifies as RateLimit (first-match wins). Both
+// markers are opencode extras, not shared base —
+// driverkit.BaseTransientPatterns holds only Network markers — so reordering
+// them within the extras list is what would flip this event to Overloaded
+// (issue #2149).
+func TestClassify_ErrorEvent_LooseDigit429BeatsOverloaded(t *testing.T) {
+	logPath := opencode.WriteLog(t,
+		`{"type":"error","error":"overloaded_error: upstream returned status 429"}`,
+	)
+
+	got, err := opencode.Classify(logPath)
+	if err != nil {
+		t.Fatalf("Classify: %v", err)
+	}
+	if got.Class != opencode.Transient || got.Reason != opencode.RateLimit {
+		t.Errorf("Class/Reason: got %s/%s, want %s/%s", got.Class, got.Reason, opencode.Transient, opencode.RateLimit)
+	}
+}
+
 // TestClassify_MissingFile_IsTerminal verifies the missing-log-file contract
 // shared with the claude Driver's Classify.
 func TestClassify_MissingFile_IsTerminal(t *testing.T) {

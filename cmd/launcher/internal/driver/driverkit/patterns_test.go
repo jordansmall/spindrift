@@ -32,11 +32,29 @@ func TestMatchTransientNoMatch(t *testing.T) {
 	}
 }
 
+// TestMatchTransientExtrasBeatBase locks in that a per-Driver extras marker
+// beats a shared BaseTransientPatterns marker when both appear on the same
+// line — extras must be checked before the base table (issue #2149). Under
+// base-first matching "connection refused" (Network) is found first and
+// wins instead.
+func TestMatchTransientExtrasBeatBase(t *testing.T) {
+	reason, ok := MatchTransient("connection refused after 429 retries", []Pattern{{Substr: "429", Reason: RateLimit}})
+	if !ok {
+		t.Fatalf("MatchTransient: got no match, want a match")
+	}
+	if reason != RateLimit {
+		t.Errorf("reason = %q, want %q", reason, RateLimit)
+	}
+}
+
 func TestMatchTransientBasePrecedence(t *testing.T) {
-	// "rate_limit_error" appears earlier in BaseTransientPatterns than
-	// "overloaded_error" -- a line containing both should classify as the
-	// first (RateLimit), confirming order-of-first-match wins.
-	reason, ok := MatchTransient("rate_limit_error and overloaded_error both present", nil)
+	// "rate_limit_error" appears earlier than "overloaded_error" in the
+	// extras passed here -- a line containing both should classify as the
+	// first (RateLimit), confirming first-match-wins through extras.
+	reason, ok := MatchTransient("rate_limit_error and overloaded_error both present", []Pattern{
+		{Substr: "rate_limit_error", Reason: RateLimit},
+		{Substr: "overloaded_error", Reason: Overloaded},
+	})
 	if !ok {
 		t.Fatalf("MatchTransient: got no match, want a match")
 	}
