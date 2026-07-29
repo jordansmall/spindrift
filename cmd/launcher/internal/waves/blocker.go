@@ -256,8 +256,9 @@ func containsLabel(labels []string, target string) bool {
 
 // unreadyBlockers returns num's declared blockers that are not yet satisfied,
 // in edge order. Empty means the issue is ready to dispatch. scopeOf
-// resolves num to its own opaque SeedScope (#2130); nil keeps the pre-#2130
-// legacy behavior.
+// resolves num to its own opaque SeedScope (#2130); nil yields a zero scope,
+// which skips the seed-branch containment check so an IntegrationRef-landed
+// blocker stays unready.
 func unreadyBlockers(it forge.IssueTracker, cf forge.CodeForge, num string, edges map[string][]string, scopeOf func(num string) forge.SeedScope) []string {
 	var scope forge.SeedScope
 	if scopeOf != nil {

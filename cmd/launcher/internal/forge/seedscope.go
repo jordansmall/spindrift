@@ -7,8 +7,9 @@ package forge
 // wave engine still treats it opaquely: it hands the whole scope to the
 // local Code Forge's containment query and prints it in hold diagnostics, but
 // never constructs or parses a Code Forge's own Integration-branch ref
-// grammar. A zero SeedScope means "no scope" — every non-local forge — which
-// keeps the pre-#2130 landing-verification behavior.
+// grammar. A zero SeedScope means "no scope" — every non-local forge — for
+// which the seed-branch containment gate never fires; such a blocker is
+// judged solely by its PR/issue state.
 type SeedScope struct {
 	parent string // sanitized parent token the containment query keys on
 	branch string // operator-facing branch label, rendered by the local adapter
