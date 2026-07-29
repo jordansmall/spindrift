@@ -47,6 +47,37 @@ func TestMatchTransientExtrasBeatBase(t *testing.T) {
 	}
 }
 
+// TestMatchExtras locks in that MatchExtras scans only the passed patterns
+// and never falls through to BaseTransientPatterns — a caller matching a
+// terminal pattern list must not accidentally pick up a network Reason.
+func TestMatchExtras(t *testing.T) {
+	patterns := []Pattern{{Substr: "unsupported flag", Reason: UnsupportedFlag}}
+
+	reason, ok := MatchExtras("error: unsupported flag --foo", patterns)
+	if !ok {
+		t.Fatalf("MatchExtras: got no match, want a match")
+	}
+	if reason != UnsupportedFlag {
+		t.Errorf("reason = %q, want %q", reason, UnsupportedFlag)
+	}
+
+	reason, ok = MatchExtras("dial tcp 1.2.3.4:443: connection refused", patterns)
+	if ok {
+		t.Fatalf("MatchExtras: got a match (%q), want none (must not fall through to BaseTransientPatterns)", reason)
+	}
+	if reason != "" {
+		t.Errorf("reason = %q, want empty", reason)
+	}
+
+	reason, ok = MatchExtras("nothing interesting here", patterns)
+	if ok {
+		t.Fatalf("MatchExtras: got a match (%q), want none", reason)
+	}
+	if reason != "" {
+		t.Errorf("reason = %q, want empty", reason)
+	}
+}
+
 func TestMatchTransientBasePrecedence(t *testing.T) {
 	// "rate_limit_error" appears earlier than "overloaded_error" in the
 	// extras passed here -- a line containing both should classify as the
