@@ -130,13 +130,13 @@ type Config struct {
 	// matching every pre-existing (kind-unaware) construction site.
 	Verb string
 
-	// ParentOf resolves a dependent issue number to the sanitized parent
-	// token keying its own Integration branch (integration/<parent>) — the
-	// seam's own seed branch the local blocker gate (#2130) checks a blocker's
-	// landed work against. Set only under CODE_FORGE=local; nil for every
-	// other forge, where the seed-branch containment gate never fires and the
-	// blocker gate keeps its pre-#2130 landing-verification behavior.
-	ParentOf func(num string) string
+	// SeedScopeOf resolves a dependent issue number to the opaque SeedScope
+	// its blocker gate is checked against — the seed branch a blocker's landed
+	// work must have reached before the dependent is ready. Set only under
+	// CODE_FORGE=local; nil for every other forge, where the seed-branch gate
+	// never fires and the blocker gate keeps its pre-#2130 landing-verification
+	// behavior.
+	SeedScopeOf func(num string) SeedScope
 
 	// pollInterval overrides RunContinuous's background refill-poll cadence
 	// (issue #1637) — zero (every production construction site) means "use

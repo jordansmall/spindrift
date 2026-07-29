@@ -2566,7 +2566,7 @@ func TestEngageAliasRemoved(t *testing.T) {
 // TestSeedParentResolver_NonLocalForge_ReturnsNil verifies that under any
 // forge that doesn't implement forge.LandingContainmentQuery (i.e. every
 // forge but local), seedParentResolver returns nil -- keeping
-// waves.Config.ParentOf nil, so the blocker gate's seed-branch check (#2130)
+// waves.Config.SeedScopeOf nil, so the blocker gate's seed-branch check (#2130)
 // never fires and the gate retains its pre-#2130 landing-verification
 // behavior.
 func TestSeedParentResolver_NonLocalForge_ReturnsNil(t *testing.T) {
@@ -2579,9 +2579,9 @@ func TestSeedParentResolver_NonLocalForge_ReturnsNil(t *testing.T) {
 
 // TestSeedParentResolver_LocalForge_ResolvesDependentsParent verifies that
 // under CODE_FORGE=local (forge.LandingContainmentQuery), seedParentResolver
-// returns a non-nil resolver that maps a dependent issue's own num to its
-// sanitized parent: frontmatter token via localloop.ResolveParent -- the
-// same token keying that dependent's integration/<parent> seed branch.
+// returns a non-nil resolver that maps a dependent issue's own num to the
+// opaque waves.SeedScope whose label is the sanitized parent's Integration
+// branch.
 func TestSeedParentResolver_LocalForge_ResolvesDependentsParent(t *testing.T) {
 	fc := forge.NewFake()
 	fc.SetIssue(forge.Issue{Number: "11", Parent: "Render Pipeline"})
@@ -2591,7 +2591,7 @@ func TestSeedParentResolver_LocalForge_ResolvesDependentsParent(t *testing.T) {
 	if resolve == nil {
 		t.Fatal("seedParentResolver(local forge) = nil, want a non-nil resolver")
 	}
-	if got := resolve("11"); got != "render-pipeline" {
-		t.Errorf("resolve(11) = %q, want %q", got, "render-pipeline")
+	if got := resolve("11").String(); got != "integration/render-pipeline" {
+		t.Errorf("resolve(11) = %q, want %q", got, "integration/render-pipeline")
 	}
 }

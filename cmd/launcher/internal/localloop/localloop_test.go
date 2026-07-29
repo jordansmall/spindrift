@@ -184,6 +184,21 @@ func TestWired_ResolveParent_MemoizesPerIssue(t *testing.T) {
 	}
 }
 
+// TestSeedScopeOf_PairsSanitizedParentWithIntegrationLabel verifies
+// SeedScopeOf resolves num's sanitized seed-branch parent (ResolveParent) and
+// the local adapter's rendered Integration branch label
+// (local.IntegrationBranch) into the same waves.SeedScope both the dispatch
+// command path and the Console will consume (issue #2150), so the two can
+// never disagree about which blocker landing gates a dependent.
+func TestSeedScopeOf_PairsSanitizedParentWithIntegrationLabel(t *testing.T) {
+	fc := forge.NewFake()
+	fc.SetIssue(forge.Issue{Number: "11", Parent: "Render Pipeline"})
+
+	if got, want := localloop.SeedScopeOf(fc, "11").String(), "integration/render-pipeline"; got != want {
+		t.Errorf("SeedScopeOf(11).String() = %q, want %q", got, want)
+	}
+}
+
 func containsLabel(labels []string, want string) bool {
 	for _, l := range labels {
 		if l == want {
@@ -853,7 +868,7 @@ func TestWire_ComposedLoop_SameParentBlockerChainLandsInOneRun(t *testing.T) {
 		InProgressLabel: testLabels.InProgress,
 		FailedLabel:     testLabels.Failed,
 		CompleteLabel:   testLabels.Complete,
-		ParentOf:        func(num string) string { return lw.ResolveParent(num).String() },
+		SeedScopeOf:     func(num string) waves.SeedScope { return localloop.SeedScopeOf(it, num) },
 	}
 	var ready bool
 	var failed, unready []string
@@ -1007,7 +1022,7 @@ func captureStdout(t *testing.T, fn func()) string {
 // LandingVerifier fallback (ready would come back true there) and passes
 // against current HEAD, where forge/local's LandingContainmentQuery checks
 // containment against the dependent's own seed-branch parent
-// (seedParent, from cfg.ParentOf) instead.
+// (the SeedScope, from cfg.SeedScopeOf) instead.
 func TestWire_ComposedLoop_CrossParentBlockerHoldsLoudly(t *testing.T) {
 	setGitIdentityEnv(t)
 	operatorDir := newOperatorCheckout(t)
@@ -1080,7 +1095,7 @@ func TestWire_ComposedLoop_CrossParentBlockerHoldsLoudly(t *testing.T) {
 		InProgressLabel: testLabels.InProgress,
 		FailedLabel:     testLabels.Failed,
 		CompleteLabel:   testLabels.Complete,
-		ParentOf:        func(num string) string { return lw.ResolveParent(num).String() },
+		SeedScopeOf:     func(num string) waves.SeedScope { return localloop.SeedScopeOf(it, num) },
 	}
 
 	var ready bool

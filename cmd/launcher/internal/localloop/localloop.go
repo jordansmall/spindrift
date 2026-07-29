@@ -16,6 +16,7 @@ import (
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/local"
+	"spindrift.dev/launcher/internal/waves"
 )
 
 // Config carries the subset of launcher config Wire needs to construct
@@ -67,6 +68,18 @@ func ResolveParent(it forge.IssueTracker, num string) local.SanitizedParent {
 		return local.ResolveParent(num, "")
 	}
 	return local.ResolveParent(num, iss.Parent)
+}
+
+// SeedScopeOf resolves num to the opaque waves.SeedScope its blocker gate is
+// checked against under CODE_FORGE=local (issue #2150): num's own sanitized
+// seed-branch parent token (ResolveParent) paired with the operator-facing
+// Integration branch label the local adapter renders for it
+// (local.IntegrationBranch). The single seam both the dispatch command path
+// and the Console consume, so the two can never disagree about which blocker
+// landing gates a dependent.
+func SeedScopeOf(it forge.IssueTracker, num string) waves.SeedScope {
+	p := ResolveParent(it, num)
+	return waves.NewSeedScope(p.String(), local.IntegrationBranch(p))
 }
 
 // ResolveParent resolves num's own Integration-branch key through w's own

@@ -158,7 +158,7 @@ outer:
 		}
 		var unready []string
 		if !cfg.PreResolved && !cfg.IgnoreBlockers {
-			unready = unreadyBlockers(it, cf, iss.Number, edges, cfg.ParentOf)
+			unready = unreadyBlockers(it, cf, iss.Number, edges, cfg.SeedScopeOf)
 		}
 		switch {
 		// A blocker bearing FailedLabel is held here too (unreadyBlockers
@@ -202,7 +202,7 @@ outer:
 					}
 					fmt.Printf("==> #%s blocker check failed; wrote .spindrift/logs/%s for the pipeline to release the claim\n", num, blockedMarker)
 				default:
-					if blockers := unreadyBlockers(it, cf, num, edges, cfg.ParentOf); len(blockers) > 0 {
+					if blockers := unreadyBlockers(it, cf, num, edges, cfg.SeedScopeOf); len(blockers) > 0 {
 						if err := writeBlockedMarker(pwd, blockers, sources[num]); err != nil {
 							return err
 						}

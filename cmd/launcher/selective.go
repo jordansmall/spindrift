@@ -53,7 +53,7 @@ func selectiveListDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, 
 
 	in := waves.Input{Origin: waves.OriginSelective, Issues: toWaveIssues(issues), Edges: readiness.Edges, Sources: readiness.Sources, Failed: readiness.Failed}
 	cfg := selectiveWavesConfig(c)
-	cfg.ParentOf = seedParentResolver(it, cf)
+	cfg.SeedScopeOf = seedParentResolver(it, cf)
 	return waves.Dispatch(cfg, it, cf, pwd, f, s, in)
 }
 
@@ -105,16 +105,16 @@ func evictUnmetBlockers(it forge.IssueTracker, cf forge.CodeForge, readiness wav
 
 	var notices []string
 
-	// parentOf resolves a dependent's sanitized seed-branch parent token
-	// under local forge (#2130); nil under every other forge, where
-	// seedParentFor always yields "" and Ready falls back to its
-	// pre-#2130 landing-verification behavior.
-	parentOf := seedParentResolver(it, cf)
-	seedParentFor := func(dependent string) string {
-		if parentOf == nil {
-			return ""
+	// resolve resolves a dependent's opaque SeedScope under local forge
+	// (#2130); nil under every other forge, where seedScopeFor always yields
+	// a zero SeedScope and Ready falls back to its pre-#2130
+	// landing-verification behavior.
+	resolve := seedParentResolver(it, cf)
+	seedScopeFor := func(dependent string) waves.SeedScope {
+		if resolve == nil {
+			return waves.SeedScope{}
 		}
-		return parentOf(dependent)
+		return resolve(dependent)
 	}
 
 	// blockerSatisfied returns true if the blocker is in willRun OR already
@@ -124,7 +124,7 @@ func evictUnmetBlockers(it forge.IssueTracker, cf forge.CodeForge, readiness wav
 		if willRun[blocker] {
 			return true
 		}
-		return readiness.Ready(it, cf, blocker, seedParentFor(dependent))
+		return readiness.Ready(it, cf, blocker, seedScopeFor(dependent))
 	}
 
 	// Iterate the issues slice (not the map) to produce stable output order.
@@ -145,7 +145,7 @@ func evictUnmetBlockers(it forge.IssueTracker, cf forge.CodeForge, readiness wav
 			break
 		}
 		for _, num := range toEvict {
-			dep := firstUnmet(it, cf, readiness, willRun, num, readiness.Edges[num], seedParentFor)
+			dep := firstUnmet(it, cf, readiness, willRun, num, readiness.Edges[num], seedScopeFor)
 			notices = append(notices, fmt.Sprintf("⚠ #%s blocked by %s (not in list, unmerged); skipping",
 				num, forge.Ref(dep, readiness.Sources[num][dep])))
 			delete(willRun, num)
@@ -164,9 +164,9 @@ func evictUnmetBlockers(it forge.IssueTracker, cf forge.CodeForge, readiness wav
 // firstUnmet returns the first entry in deps that is neither in willRun nor
 // already satisfied (closed/complete), relative to dependent (the evicted
 // issue whose edges deps came from). Used only for notice formatting.
-func firstUnmet(it forge.IssueTracker, cf forge.CodeForge, readiness waves.Readiness, willRun map[string]bool, dependent string, deps []string, seedParentFor func(string) string) string {
+func firstUnmet(it forge.IssueTracker, cf forge.CodeForge, readiness waves.Readiness, willRun map[string]bool, dependent string, deps []string, seedScopeFor func(string) waves.SeedScope) string {
 	for _, dep := range deps {
-		if !willRun[dep] && !readiness.Ready(it, cf, dep, seedParentFor(dependent)) {
+		if !willRun[dep] && !readiness.Ready(it, cf, dep, seedScopeFor(dependent)) {
 			return dep
 		}
 	}
