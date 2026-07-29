@@ -131,12 +131,13 @@ func salvage(git func(args ...string) (string, string, error), note string) stri
 	if err != nil || strings.TrimSpace(stdout) == "" {
 		return note
 	}
-	_, _, addErr := git("add", "-A")
-	_, _, commitErr := git("commit", "-m", "chore: salvage uncommitted work before exiting without an outcome")
-	if addErr == nil && commitErr == nil {
-		return note + "; salvaged uncommitted work into a commit"
+	if _, _, addErr := git("add", "-A"); addErr != nil {
+		return note + "; failed to salvage uncommitted work"
 	}
-	return note + "; failed to salvage uncommitted work"
+	if _, _, commitErr := git("commit", "-m", "chore: salvage uncommitted work before exiting without an outcome"); commitErr != nil {
+		return note + "; failed to salvage uncommitted work"
+	}
+	return note + "; salvaged uncommitted work into a commit"
 }
 
 // commitCount returns the number of commits on base..branch.
