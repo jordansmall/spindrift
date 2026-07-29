@@ -40,7 +40,7 @@ wrapper. The domains are `agents`, `git`, `issues`, `forge`, `dispatch`, and
 Placement is expressed by a new **Nix-only `nixPath`** on each `flakeOption`
 knob in `lib/env-schema.nix` (structural options, which are not schema knobs,
 are placed by a small hand-written map in `lib/flakeModule.nix`). `nixPath` is
-a dotted path — `agents.models.filer`, `git.merge.mode`,
+a dotted path — `agents.models.filer`, `git.merge.policy`,
 `dispatch.retry.holdJitter` — and the flake-parts shim generates the entire
 option tree from it, forwarding each leaf back to its underlying knob when it
 calls `mkHarness`.
@@ -61,7 +61,7 @@ agents.models.{default,scout,review,filer,worker,roster}
 agents.{driver,prompt,skills}
 agents.{format,lint}.enable
 git.{baseBranch,branchPrefix}
-git.merge.{mode,guardPaths,pollInterval,pollTimeout,preflightStaleBase}
+git.merge.{policy,guardPaths,pollInterval,pollTimeout,preflightStaleBase}
 git.user.{name,email}
 issues.{tracker,localDir,localReference}
 issues.jira.{baseURL,projectKey,email,includeComments,statusMapping}
@@ -95,6 +95,34 @@ capability toggles: `orchestratorEnabled` → `dispatch.orchestrator.enable`,
 → `agents.format.enable` / `agents.lint.enable`. The other booleans stay flat —
 they are sub-options, not features you turn on: `issues.jira.includeComments`,
 `issues.localReference`, `infra.network.bwrapUnshare`.
+
+### The `git.merge` axes
+
+`mergeMode` renames to `git.merge.policy` — its own doc already calls it the
+"post-green merge policy" (`immediate` / `auto` / `manual`: *when and whether* a
+green PR merges). `mode` was too vague to survive next to the two sibling axes
+it was starting to blur:
+
+- `git.merge.method` — GitHub's own `merge_method` (`merge` / `squash` /
+  `rebase`): *how* the final integration commits. Hardcoded to `rebase` today
+  (`gh pr merge --rebase`).
+- `git.merge.syncMethod` — how the launcher brings a behind or conflicted branch
+  *current* before landing (`rebase` vs merge-in): the local rebase hygiene that
+  `preflightStaleBase` proactively triggers and the reactive conflict retry
+  reuses. Hardcoded to `rebase` today.
+
+The three are independent axes. `method = squash` with `syncMethod = rebase` —
+rebase to stay current throughout, squash once at the end — is a normal
+combination, which is why no single knob can serve both. `policy` is spindrift's
+own term because GitHub has no umbrella name for the immediate/auto/manual
+triad; `method` and `syncMethod` borrow GitHub's `merge_method` vocabulary where
+it applies.
+
+Only the `policy` rename is in this ADR's Pass-1 scope — a Nix-only leaf rename
+of an existing knob. `method` and `syncMethod` are new knobs with launcher-side
+Go work (parameterizing the `gh pr merge` method and the pre-landing sync) and
+land as a separate feature; this ADR only reserves their names so the
+`git.merge` namespace is designed for all three from the start.
 
 ### Two sequenced passes
 
