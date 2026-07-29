@@ -310,16 +310,10 @@ in
             systems = [ system ];
             imports = [ ../../lib/flakeModule.nix ];
             perSystem.spindrift = {
-              packages = p: [ p.hello ];
-              settings = {
-                models = {
-                  scoutModel = "scout-test";
-                  reviewModel = "review-test";
-                };
-                lifecycleLabels = {
-                  completeLabel = "done-test";
-                };
-              };
+              agents.models.scout = "scout-test";
+              agents.models.review = "review-test";
+              issues.labels.complete = "done-test";
+              infra.image.packages = p: [ p.hello ];
             };
           };
       direct105 = import ../../lib/mkHarness.nix {
@@ -337,6 +331,69 @@ in
       {
         moduleSpindrift = consumerPkgs105.spindrift;
         directSpindrift = direct105.spindrift;
+      }
+      ''
+        [ "$moduleSpindrift" = "$directSpindrift" ] \
+          || { echo "spindrift mismatch: $moduleSpindrift != $directSpindrift" >&2; exit 1; }
+        touch $out
+      '';
+
+  # ADR 0037 Pass 1 (issue #2179): the OLD settings.* / flat structural paths
+  # must keep working (deprecation shims that forward via lib.warn) — a
+  # consumer that sets a representative spread of knobs via old paths gets
+  # byte-identical outputs to a direct mkHarness call with the equivalent
+  # flat `defaults`. Deprecation warnings print during eval; that's expected.
+  flakemodule-alias-parity =
+    let
+      consumer105b =
+        flake-parts.lib.mkFlake
+          {
+            inputs = {
+              inherit nixpkgs;
+              self = {
+                outPath = ../../.;
+              };
+            };
+          }
+          {
+            systems = [ system ];
+            imports = [ ../../lib/flakeModule.nix ];
+            perSystem.spindrift = {
+              settings = {
+                branches = {
+                  mergeMode = "immediate";
+                };
+                models = {
+                  filerModel = "claude-haiku-4-5-20251001";
+                };
+                repository = {
+                  boxForgeAndIssueAccess = "read-only";
+                };
+              };
+              driver = "claude";
+              # Deprecated flat nixpkgs path (issue #2179 Pass 2): exercises
+              # the old-path fallback so structuralResolved.nixpkgs stays
+              # symmetric with the other structural knobs.
+              nixpkgs = nixpkgs;
+              packages = p: [ p.hello ];
+            };
+          };
+      direct105b = import ../../lib/mkHarness.nix {
+        inherit nixpkgs system;
+        defaults = {
+          mergeMode = "immediate";
+          filerModel = "claude-haiku-4-5-20251001";
+          boxForgeAndIssueAccess = "read-only";
+        };
+        driver = "claude";
+        packages = p: [ p.hello ];
+      };
+      consumerPkgs105b = consumer105b.packages.${system};
+    in
+    pkgs.runCommand "flakemodule-alias-parity"
+      {
+        moduleSpindrift = consumerPkgs105b.spindrift;
+        directSpindrift = direct105b.spindrift;
       }
       ''
         [ "$moduleSpindrift" = "$directSpindrift" ] \
