@@ -69,6 +69,24 @@ func TestSchemaFlags_GenericBoolsAreBool(t *testing.T) {
 	}
 }
 
+// TestSchemaFlags_ContinuousDispatchIsBoolAlias asserts CONTINUOUS_DISPATCH
+// is a presence-style bool flag with --continuous as a schema alias (issue
+// #2147 slice 1).
+func TestSchemaFlags_ContinuousDispatchIsBoolAlias(t *testing.T) {
+	for _, e := range schemaFlags {
+		if e.env == "CONTINUOUS_DISPATCH" {
+			if e.kind != "bool" {
+				t.Errorf("CONTINUOUS_DISPATCH kind = %q, want %q", e.kind, "bool")
+			}
+			if e.alias != "continuous" {
+				t.Errorf("CONTINUOUS_DISPATCH alias = %q, want %q", e.alias, "continuous")
+			}
+			return
+		}
+	}
+	t.Fatalf("CONTINUOUS_DISPATCH entry not found in schemaFlags")
+}
+
 // TestExtractInputFlag_Present extracts the document path and strips both
 // tokens from the remaining args.
 func TestExtractInputFlag_Present(t *testing.T) {
@@ -448,15 +466,38 @@ func TestPrintSubcommands_ConsoleFirst(t *testing.T) {
 	}
 }
 
-// TestParseFlags_ContinuousPassthrough: --continuous passes through like
-// --no-build, rather than erroring as an unknown flag (issue #2033).
-func TestParseFlags_ContinuousPassthrough(t *testing.T) {
+// TestParseFlags_ContinuousAlias: --continuous is now a schema-backed bool
+// alias for --continuous-dispatch (slice 1) — it is consumed by parseFlags
+// like any other schema bool flag, setting CONTINUOUS_DISPATCH directly
+// rather than passing through to the verb handler for hand-rolled extraction
+// (issue #2033/#2147).
+func TestParseFlags_ContinuousAlias(t *testing.T) {
+	t.Setenv("CONTINUOUS_DISPATCH", "")
 	remaining, err := parseFlags([]string{"dispatch", "--continuous"})
 	if err != nil {
 		t.Fatalf("parseFlags with --continuous: unexpected error: %v", err)
 	}
-	if len(remaining) != 2 || remaining[0] != "dispatch" || remaining[1] != "--continuous" {
-		t.Errorf("remaining = %v, want [dispatch --continuous]", remaining)
+	if got := os.Getenv("CONTINUOUS_DISPATCH"); got != "1" {
+		t.Errorf("CONTINUOUS_DISPATCH = %q, want %q", got, "1")
+	}
+	if len(remaining) != 1 || remaining[0] != "dispatch" {
+		t.Errorf("remaining = %v, want [dispatch] (flag consumed, not passed through)", remaining)
+	}
+}
+
+// TestParseFlags_ContinuousDispatchBareAlias: bare --continuous-dispatch (no
+// value) also sets CONTINUOUS_DISPATCH=1, same as --continuous.
+func TestParseFlags_ContinuousDispatchBareAlias(t *testing.T) {
+	t.Setenv("CONTINUOUS_DISPATCH", "")
+	remaining, err := parseFlags([]string{"dispatch", "--continuous-dispatch"})
+	if err != nil {
+		t.Fatalf("parseFlags with --continuous-dispatch: unexpected error: %v", err)
+	}
+	if got := os.Getenv("CONTINUOUS_DISPATCH"); got != "1" {
+		t.Errorf("CONTINUOUS_DISPATCH = %q, want %q", got, "1")
+	}
+	if len(remaining) != 1 || remaining[0] != "dispatch" {
+		t.Errorf("remaining = %v, want [dispatch] (flag consumed, not passed through)", remaining)
 	}
 }
 
@@ -1610,29 +1651,6 @@ func TestDispatchIssueArgs_SkipsNonNumeric(t *testing.T) {
 	got := dispatchIssueArgs([]string{"--no-build", "42", "foo"})
 	if len(got) != 1 || got[0] != "42" {
 		t.Errorf("dispatchIssueArgs: got %v, want [42]", got)
-	}
-}
-
-// TestDispatchContinuousArgs: dispatch --continuous arg extraction.
-func TestDispatchContinuousArgs(t *testing.T) {
-	continuous, rest := dispatchContinuousArgs([]string{"--continuous", "123"})
-	if !continuous {
-		t.Error("want continuous=true, got false")
-	}
-	if len(rest) != 1 || rest[0] != "123" {
-		t.Errorf("rest = %v, want [123]", rest)
-	}
-}
-
-// TestDispatchContinuousArgs_AbsentFlag: no --continuous flag leaves
-// continuous false.
-func TestDispatchContinuousArgs_AbsentFlag(t *testing.T) {
-	continuous, rest := dispatchContinuousArgs([]string{"42"})
-	if continuous {
-		t.Error("want continuous=false, got true")
-	}
-	if len(rest) != 1 || rest[0] != "42" {
-		t.Errorf("rest = %v, want [42]", rest)
 	}
 }
 
