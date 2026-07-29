@@ -517,11 +517,7 @@ func (s *Settle) mergeImmediate(num string, gen uint64, pr string, d dispatch.Di
 			pushRetries++
 			fmt.Printf("    #%s  landing=%s  status=rebase-push-retry  attempt=%d/%d  !! %v\n",
 				num, pr, pushRetries, s.cfg.MaxRebaseAttempts, rbErr)
-			retry.LinearBackoff{
-				Unit:   time.Duration(s.cfg.TransientBackoffSecs) * time.Second,
-				Jitter: time.Duration(s.cfg.HoldJitterSecs) * time.Second,
-				Clock:  s.clock,
-			}.Do(pushRetries)
+			s.rebasePushBackoff().Do(pushRetries)
 			rbErr = cf.Rebase(pr)
 		}
 		if rbErr != nil {
@@ -550,6 +546,18 @@ func (s *Settle) mergeImmediate(num string, gen uint64, pr string, d dispatch.Di
 		if rwErr := s.rewaitAfterForcePush(num, gen, pr); rwErr != nil {
 			return rwErr
 		}
+	}
+}
+
+// rebasePushBackoff builds the linear backoff both rebase-push retry loops
+// share: Unit scaled by attempt plus the fixed HoldJitterSecs nudge, slept
+// on s.clock (issue #2095). Centralizing it keeps the two call sites from
+// drifting apart.
+func (s *Settle) rebasePushBackoff() retry.LinearBackoff {
+	return retry.LinearBackoff{
+		Unit:   time.Duration(s.cfg.TransientBackoffSecs) * time.Second,
+		Jitter: time.Duration(s.cfg.HoldJitterSecs) * time.Second,
+		Clock:  s.clock,
 	}
 }
 
@@ -608,11 +616,7 @@ func (s *Settle) preflightStaleBase(num string, gen uint64, pr string, d dispatc
 	for pushRetries := 0; rbErr != nil && errors.Is(rbErr, forge.ErrTransientPushFailure) && pushRetries < s.cfg.MaxRebaseAttempts; pushRetries++ {
 		fmt.Printf("    #%s  landing=%s  status=rebase-push-retry  attempt=%d/%d  !! %v\n",
 			num, pr, pushRetries+1, s.cfg.MaxRebaseAttempts, rbErr)
-		retry.LinearBackoff{
-			Unit:   time.Duration(s.cfg.TransientBackoffSecs) * time.Second,
-			Jitter: time.Duration(s.cfg.HoldJitterSecs) * time.Second,
-			Clock:  s.clock,
-		}.Do(pushRetries + 1)
+		s.rebasePushBackoff().Do(pushRetries + 1)
 		rbErr = cf.Rebase(pr)
 	}
 	if rbErr != nil {
