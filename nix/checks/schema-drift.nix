@@ -7,6 +7,7 @@
 let
   inherit (fixtures) harness;
   renderers = import ../../lib/renderers.nix;
+  schema = import ../../lib/env-schema.nix;
 
   # Shared by schema-choices and schema-secret-choices-guard (issue #872) so
   # the guard predicate is defined exactly once and can be exercised against
@@ -782,4 +783,56 @@ in
         need 'spindrift __complete-issues'
         touch $out
       '';
+
+  # ADR 0037 Pass 1 (issue #2179): every flakeOption = true knob must declare
+  # a Nix-only `nixPath` — its dotted leaf in the flake surface's domain tree
+  # — and every declared nixPath must be unique and prefix-disjoint from
+  # every other one, so no leaf can collide with (or nest inside) another
+  # knob's namespace.
+  flake-nixpath-exhaustive-disjoint =
+    let
+      inherit (pkgs.lib)
+        assertMsg
+        attrValues
+        filter
+        concatStringsSep
+        splitString
+        ;
+      flakeOptionEntries = filter (e: e.flakeOption or false) (attrValues schema);
+      missingNixPath = filter (
+        e: !(e ? nixPath) || !builtins.isString e.nixPath || e.nixPath == ""
+      ) flakeOptionEntries;
+      nixPaths = map (e: e.nixPath) flakeOptionEntries;
+      segmentsOf = p: splitString "." p;
+      isPrefixOf =
+        a: b:
+        let
+          la = builtins.length a;
+        in
+        la <= builtins.length b && a == (builtins.genList (i: builtins.elemAt b i) la);
+      pairs = builtins.concatMap (
+        i:
+        map (j: {
+          a = builtins.elemAt nixPaths i;
+          b = builtins.elemAt nixPaths j;
+        }) (filter (j: j != i) (builtins.genList (x: x) (builtins.length nixPaths)))
+      ) (builtins.genList (x: x) (builtins.length nixPaths));
+      collidingPairs = filter (
+        p: p.a != p.b -> isPrefixOf (segmentsOf p.a) (segmentsOf p.b)
+      ) (filter (p: p.a != p.b) pairs);
+      duplicatePaths = filter (p: p.a == p.b) pairs;
+    in
+    assert assertMsg (missingNixPath == [ ])
+      "lib/env-schema.nix: every flakeOption knob must declare a non-empty nixPath (ADR 0037): ${
+        concatStringsSep ", " (map (e: e.env) missingNixPath)
+      }";
+    assert assertMsg (duplicatePaths == [ ])
+      "lib/env-schema.nix: flakeOption nixPath values must be unique — duplicate: ${
+        concatStringsSep ", " (map (p: p.a) duplicatePaths)
+      }";
+    assert assertMsg (collidingPairs == [ ])
+      "lib/env-schema.nix: flakeOption nixPath values must be prefix-disjoint (no leaf may be an ancestor of another) — colliding pair: ${
+        concatStringsSep ", " (map (p: "${p.a} vs ${p.b}") collidingPairs)
+      }";
+    pkgs.runCommand "flake-nixpath-exhaustive-disjoint" { } "touch $out";
 }

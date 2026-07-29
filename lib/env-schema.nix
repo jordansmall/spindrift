@@ -40,6 +40,7 @@
     default = "ready-for-agent";
     doc = "issues carrying this label are dispatchable (the launch button)";
     flakeOption = true;
+    nixPath = "issues.labels.dispatch";
     boxEnv = false;
   };
   issueTracker = {
@@ -53,6 +54,7 @@
       "jira"
     ];
     flakeOption = true;
+    nixPath = "issues.tracker";
     # Forwarded into the Box (issue #1429): the issue prompt's PR-body
     # reference step (lib/fragments.nix PR_BODY_CLOSES/PR_BODY_LOCAL_REF/
     # PR_BODY_LOCAL_NOREF gates) needs to know the tracker in-box to pick the
@@ -66,6 +68,7 @@
     default = ".spindrift/issues";
     doc = "directory scanned for issue files when ISSUE_TRACKER=local; keep it git-ignored so breakout issues stay private";
     flakeOption = true;
+    nixPath = "issues.localDir";
     boxEnv = false;
   };
   localIssueReference = {
@@ -75,6 +78,7 @@
     kind = "bool";
     doc = "when enabled and ISSUE_TRACKER=local, the PR body includes a non-auto-closing `Local-issue: <slug>` breadcrumb; default off keeps the private local ticket slug out of the PR body entirely (ISSUE_TRACKER=github is unaffected -- `Closes #ISSUE_NUMBER` stays either way)";
     flakeOption = true;
+    nixPath = "issues.localReference";
     boxEnv = true;
     boxEnvOnly = true;
   };
@@ -84,6 +88,7 @@
     default = "main";
     doc = "default branch agent PRs merge into";
     flakeOption = true;
+    nixPath = "git.baseBranch";
     boxEnv = true;
   };
   maxParallel = {
@@ -92,6 +97,7 @@
     default = 3;
     doc = "maximum concurrent agent containers";
     flakeOption = true;
+    nixPath = "dispatch.maxParallel";
     boxEnv = false;
   };
   branchPrefix = {
@@ -100,6 +106,7 @@
     default = "agent/issue-";
     doc = "prefix for agent-cut branches";
     flakeOption = true;
+    nixPath = "git.branchPrefix";
     boxEnv = true;
   };
   inProgressLabel = {
@@ -108,6 +115,7 @@
     default = "agent-in-progress";
     doc = "label swapped on from LABEL when an issue enters the queue";
     flakeOption = true;
+    nixPath = "issues.labels.inProgress";
     boxEnv = true;
   };
   failedLabel = {
@@ -116,6 +124,7 @@
     default = "agent-failed";
     doc = "label swapped on when the agent box exits non-zero";
     flakeOption = true;
+    nixPath = "issues.labels.failed";
     boxEnv = false;
   };
   completeLabel = {
@@ -124,6 +133,7 @@
     default = "agent-complete";
     doc = "label the launcher swaps on when CI reaches green (agent is done; merge is separate)";
     flakeOption = true;
+    nixPath = "issues.labels.complete";
     boxEnv = true;
   };
   mergeMode = {
@@ -137,6 +147,7 @@
       "manual"
     ];
     flakeOption = true;
+    nixPath = "git.merge.policy";
     boxEnv = false;
   };
   mergeGuardPaths = {
@@ -145,6 +156,7 @@
     default = ".github/**,**/CLAUDE.md,**/AGENTS.md,.claude/**,.opencode/**";
     doc = "comma-separated globs matched against every changed path (added, modified, deleted); a hit downgrades the merge to manual regardless of MERGE_MODE and posts a PR comment naming the match; empty disables the guard (github Code Forge merge path only)";
     flakeOption = true;
+    nixPath = "git.merge.guardPaths";
     boxEnv = false;
   };
   model = {
@@ -153,6 +165,7 @@
     default = "claude-opus-4-8";
     doc = "main/coordinator Claude model for the agent (zero-rebuild runtime switch); worker-tier defaults are unaffected";
     flakeOption = true;
+    nixPath = "agents.models.default";
     boxEnv = true;
     boxEnvOnly = true;
   };
@@ -162,6 +175,7 @@
     default = "claude-haiku-4-5-20251001";
     doc = "scout subagent model tier; empty omits the scout entry from --agents; the flag itself is omitted only when no subagent model is set. DEPRECATED: superseded by the roster option (see docs/reference.md); these per-agent knobs still work but will be removed.";
     flakeOption = true;
+    nixPath = "agents.models.scout";
     boxEnv = true;
     boxEnvOnly = true;
   };
@@ -171,6 +185,7 @@
     default = "claude-opus-4-8";
     doc = "reviewer subagent model tier; empty omits the reviewer entry from --agents; the flag itself is omitted only when no subagent model is set. DEPRECATED: superseded by the roster option (see docs/reference.md); these per-agent knobs still work but will be removed.";
     flakeOption = true;
+    nixPath = "agents.models.review";
     boxEnv = true;
     boxEnvOnly = true;
   };
@@ -180,6 +195,7 @@
     default = "";
     doc = "filer subagent model tier; empty (default) omits the filer entry from --agents and means the filer is not provisioned at all — setting a model is the opt-in (recommended: claude-haiku-4-5-20251001). DEPRECATED: superseded by the roster option (see docs/reference.md); these per-agent knobs still work but will be removed.";
     flakeOption = true;
+    nixPath = "agents.models.filer";
     boxEnv = true;
     boxEnvOnly = true;
   };
@@ -189,6 +205,7 @@
     default = "claude-sonnet-5";
     doc = "implement-capable worker subagent model tier; empty omits the worker entry from --agents; the implementor prompt does not delegate to it yet — this only provisions the subagent so it is invokable. DEPRECATED: superseded by the roster option (see docs/reference.md); these per-agent knobs still work but will be removed.";
     flakeOption = true;
+    nixPath = "agents.models.worker";
     boxEnv = true;
     boxEnvOnly = true;
   };
@@ -198,6 +215,7 @@
     default = "default";
     doc = "which devShell to enter; lets a Target expose a lean headless ci shell distinct from a heavy interactive default";
     flakeOption = true;
+    nixPath = "infra.devShell.name";
     boxEnv = true;
     boxEnvOnly = true;
   };
@@ -207,6 +225,7 @@
     default = 300;
     doc = "seconds before the devShell probe is abandoned and the baked toolchain is used";
     flakeOption = true;
+    nixPath = "infra.devShell.probeTimeout";
     boxEnv = true;
     boxEnvOnly = true;
   };
@@ -215,6 +234,7 @@
     group = "Sandbox & resources";
     doc = "--network value for podman run; empty applies no flag (podman NAT default); set to 'pasta' to restrict egress";
     flakeOption = true;
+    nixPath = "infra.network.podman";
     boxEnv = false;
   };
   bwrapUnshareNet = {
@@ -228,6 +248,7 @@
     kind = "bool";
     doc = "when non-empty, adds --unshare-net to bwrap; requires slirp/pasta for DNS; by default bwrap shares the host network namespace (host-loopback reachable)";
     flakeOption = true;
+    nixPath = "infra.network.bwrapUnshare";
     boxEnv = false;
   };
   memoryLimit = {
@@ -239,6 +260,7 @@
     default = "5g";
     doc = "max memory per agent container (--memory); empty string disables the limit";
     flakeOption = true;
+    nixPath = "infra.limits.memory";
     boxEnv = false;
   };
   pidsLimit = {
@@ -247,6 +269,7 @@
     default = "512";
     doc = "max processes per agent container (--pids-limit); empty string disables the limit";
     flakeOption = true;
+    nixPath = "infra.limits.pids";
     boxEnv = false;
   };
   jiraBaseURL = {
@@ -254,6 +277,7 @@
     group = "Repository & identity";
     doc = "Jira site base URL (e.g. https://yourcompany.atlassian.net); required when ISSUE_TRACKER=jira";
     flakeOption = true;
+    nixPath = "issues.jira.baseURL";
     boxEnv = false;
   };
   jiraProjectKey = {
@@ -261,6 +285,7 @@
     group = "Repository & identity";
     doc = "Jira project key issues are read from (e.g. ENG); required when ISSUE_TRACKER=jira";
     flakeOption = true;
+    nixPath = "issues.jira.projectKey";
     boxEnv = false;
   };
   jiraEmail = {
@@ -268,6 +293,7 @@
     group = "Repository & identity";
     doc = "Jira Cloud account email, paired with JIRA_TOKEN for Basic auth; leave empty for Bearer-token auth (Jira Server/Data Center PATs)";
     flakeOption = true;
+    nixPath = "issues.jira.email";
     boxEnv = false;
   };
   jiraStatusMapping = {
@@ -276,6 +302,7 @@
     default = "";
     doc = "JSON object mapping dispatch states (dispatchable, inProgress, complete, failed) to native Jira status names, e.g. {'inProgress':'In Progress'}; TransitionState performs the matching workflow transition, falling back to swapping the matching lifecycle label when a state is unmapped or its transition is blocked by the project's workflow";
     flakeOption = true;
+    nixPath = "issues.jira.statusMapping";
     boxEnv = false;
   };
   jiraIncludeComments = {
@@ -285,6 +312,7 @@
     kind = "bool";
     doc = "when enabled, the Jira adapter appends the issue's comment thread to the description it returns; off (default) keeps the prompt-injection surface tight";
     flakeOption = true;
+    nixPath = "issues.jira.includeComments";
     boxEnv = false;
   };
   # ── Required runtime inputs ────────────────────────────────────────────────
@@ -295,6 +323,7 @@
     placeholder = "owner/repo";
     doc = "target GitHub repository the agents work on; required unless CODE_FORGE and ISSUE_TRACKER are both local";
     flakeOption = true;
+    nixPath = "forge.repoSlug";
     boxEnv = true;
   };
   ghToken = {
@@ -310,6 +339,7 @@
     group = "Repository & identity";
     doc = "path to a file the launcher re-reads and swaps into GH_TOKEN whenever its content changes — lets an external minter (e.g. a workflow step re-minting a GitHub App installation token, keeping the App private key in the workflow rather than the launcher) keep the credential fresh across a run that outlives the token's ~1h lifetime (#1027); empty (default) leaves GH_TOKEN static for the whole run";
     flakeOption = true;
+    nixPath = "forge.ghTokenRefreshFile";
     boxEnv = false;
   };
   boxGhToken = {
@@ -349,6 +379,7 @@
     placeholder = "Test Bot";
     doc = "commit identity name; falls back to host git config user.name";
     flakeOption = true;
+    nixPath = "git.user.name";
     boxEnv = true;
   };
   gitUserEmail = {
@@ -357,6 +388,7 @@
     placeholder = "bot@example.com";
     doc = "commit identity email; falls back to host git config user.email";
     flakeOption = true;
+    nixPath = "git.user.email";
     boxEnv = true;
   };
   codeForge = {
@@ -370,6 +402,7 @@
       "local"
     ];
     flakeOption = true;
+    nixPath = "forge.backend";
     boxEnv = true;
   };
   codeForgeRemoteURL = {
@@ -377,6 +410,7 @@
     group = "Repository & identity";
     doc = "plain git remote URL to clone from and push to (self-hosted git, gitea, GitLab-without-MRs, a bare server repo); required when CODE_FORGE=git, unused otherwise";
     flakeOption = true;
+    nixPath = "forge.remoteURL";
     boxEnv = true;
   };
   codeForgeAccumulationRepoDir = {
@@ -384,6 +418,7 @@
     group = "Repository & identity";
     doc = "host path to the bare Accumulation repo (ADR 0033), mounted read-only into the Box and landed into host-side; when CODE_FORGE=local, defaults to .spindrift/accum.git under the launcher's working directory (auto-created and seeded) and an explicit value still overrides it; unused otherwise";
     flakeOption = true;
+    nixPath = "forge.accumulationRepoDir";
     boxEnv = false;
   };
   boxForgeAndIssueAccess = {
@@ -396,6 +431,7 @@
       "read-only"
     ];
     flakeOption = true;
+    nixPath = "forge.boxAccess";
     # Forwarded into the Box, but the Box's prompt fragments no longer branch
     # on this raw value (issue #1951): dispatch.buildBoxEnv resolves the
     # write-enabled-vs-not decision once, host-side, from this value and
@@ -418,6 +454,7 @@
     default = 3;
     doc = "fix-agent passes when CI is genuinely red before marking agent-failed; 0 disables self-healing";
     flakeOption = true;
+    nixPath = "dispatch.retry.maxFix";
     boxEnv = false;
   };
   maxRebaseAttempts = {
@@ -426,6 +463,7 @@
     default = 3;
     doc = "rebase-and-retry passes when a green PR conflicts with the base after a sibling merge; 0 disables rebase retries";
     flakeOption = true;
+    nixPath = "dispatch.retry.maxRebase";
     # Forwarded into the Box so the driver-exec outcome-backstop verb reads
     # this bound for its own best-effort push retry from launcher-delivered
     # plumbing rather than a hand-copied default (issue #2157).
@@ -437,6 +475,7 @@
     default = 0;
     doc = "cumulative tokens across the initial run and every fix pass before selfHealGate stops dispatching further fix passes (issue #2001); 0 disables the token budget cap";
     flakeOption = true;
+    nixPath = "dispatch.budget.tokens";
     boxEnv = false;
   };
   maxBudgetUSD = {
@@ -452,6 +491,7 @@
     default = 0.0;
     doc = "cumulative cost in USD across the initial run and every fix pass before selfHealGate stops dispatching further fix passes (issue #2001); 0 disables the cost budget cap; give it as a quoted string in flake settings since it may be fractional, e.g. 4.44";
     flakeOption = true;
+    nixPath = "dispatch.budget.usd";
     boxEnv = false;
   };
   preflightStaleBase = {
@@ -461,6 +501,7 @@
     kind = "bool";
     doc = "when enabled, the launcher proactively rebases a green PR that is behind its base (no textual conflict) before merging and re-waits for CI on the rebased tree, drawing on MAX_REBASE_ATTEMPTS for its budget (ADR 0026). Off by default: a green-but-behind PR merges as-is, relying on its green CI as the landing gate — this trades the rare cross-PR semantic break ADR 0026 guarded against (two individually-green PRs that break combined) for the throughput of parallel landings that never wait on an extra rebase+CI cycle. WARNING: enabling this on a highly-parallelized fleet without a merge queue in front of the branch invites near-constant rebase+re-CI thrashing (each landing leaves the others behind again), burning CI minutes and tokens — see the Stale-base preflight docs";
     flakeOption = true;
+    nixPath = "git.merge.preflightStaleBase";
     boxEnv = false;
   };
   maxJobs = {
@@ -469,6 +510,7 @@
     default = 0;
     doc = "caps the wave size; 0 means uncapped";
     flakeOption = true;
+    nixPath = "dispatch.maxJobs";
     boxEnv = false;
   };
   continuousDispatch = {
@@ -479,6 +521,7 @@
     alias = "continuous";
     doc = "when enabled, dispatch runs as a long-running slot-refill loop instead of a single wave (#527): as each Box finishes, the launcher re-discovers the queue and refills the freed slot when the image-freshness probe (#526) reports fresh; a rebuild-needed result stops refilling, lets in-flight Boxes finish, and exits with the new documented code (see the exit-code table in docs/reference.md's Dogfood loop section, under Termination). Off by default; applies to queue discovery only — ISSUE_NUMBER-claimed and selective dispatch ignore it";
     flakeOption = true;
+    nixPath = "dispatch.continuous.enable";
     boxEnv = false;
   };
   overlapGate = {
@@ -491,6 +534,7 @@
       "off"
     ];
     flakeOption = true;
+    nixPath = "dispatch.overlapGate";
     boxEnv = false;
   };
   mergePollInterval = {
@@ -499,6 +543,7 @@
     default = 30;
     doc = "seconds between merge-gate poll iterations";
     flakeOption = true;
+    nixPath = "git.merge.pollInterval";
     boxEnv = false;
   };
   mergePollTimeout = {
@@ -507,6 +552,7 @@
     default = 1800;
     doc = "total seconds to wait for CI green before abandoning the merge attempt";
     flakeOption = true;
+    nixPath = "git.merge.pollTimeout";
     boxEnv = false;
   };
   spindriftPromptDir = {
@@ -528,6 +574,7 @@
     kind = "bool";
     doc = "when enabled, the implementor auto-detects and runs the project's formatter on changed files before each commit; skips silently when no formatter is found";
     flakeOption = true;
+    nixPath = "agents.format.enable";
     boxEnv = true;
     boxEnvOnly = true;
   };
@@ -538,6 +585,7 @@
     kind = "bool";
     doc = "when enabled, the implementor auto-detects and runs the project's linter on changed files before each commit, applying auto-fix then resolving remaining findings; skips silently when no linter is found";
     flakeOption = true;
+    nixPath = "agents.lint.enable";
     boxEnv = true;
     boxEnvOnly = true;
   };
@@ -548,6 +596,7 @@
     kind = "bool";
     doc = "master feature-flag switch (issue #1996; canonicalized #2047): when enabled, forks entrypoint.sh's rendered prompt/--agents JSON onto the orchestrator-on path -- the implementor pass hands off to the in-box Go orchestrator instead of calling driver-exec directly, and every other orchestrator-conditioned fork (e.g. the filer's write-mechanism gate) reads this same switch; off by default, the direct driver-exec path is unchanged; the off-path is legacy, slated for demolition once this defaults on in production with a sustained A/B win (ADR 0035 amendment)";
     flakeOption = true;
+    nixPath = "dispatch.orchestrator.enable";
     boxEnv = true;
     boxEnvOnly = true;
   };
@@ -564,6 +613,7 @@
     default = 5;
     doc = "jitter seconds added to 429 hold duration to spread re-dispatch";
     flakeOption = true;
+    nixPath = "dispatch.retry.holdJitter";
     # Forwarded into the Box for the outcome-backstop verb's push-retry
     # jitter (issue #2157); see maxRebaseAttempts.
     boxEnv = true;
@@ -574,6 +624,7 @@
     default = 30;
     doc = "base backoff seconds per retry for 529/overloaded and network transients";
     flakeOption = true;
+    nixPath = "dispatch.retry.transientBackoff";
     # Forwarded into the Box for the outcome-backstop verb's push-retry
     # linear backoff unit (issue #2157); see maxRebaseAttempts.
     boxEnv = true;
@@ -584,6 +635,7 @@
     default = 3;
     doc = "max retries for transient exits (529/network backoff; consecutive 429 holds)";
     flakeOption = true;
+    nixPath = "dispatch.retry.transientMax";
     boxEnv = false;
   };
 }
