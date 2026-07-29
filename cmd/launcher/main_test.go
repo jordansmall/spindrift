@@ -2580,7 +2580,7 @@ func TestSeedParentResolver_NonLocalForge_ReturnsNil(t *testing.T) {
 // TestSeedParentResolver_LocalForge_ResolvesDependentsParent verifies that
 // under CODE_FORGE=local (forge.LandingContainmentQuery), seedScopeResolver
 // returns a non-nil resolver that maps a dependent issue's own num to the
-// opaque waves.SeedScope whose label is the sanitized parent's Integration
+// opaque forge.SeedScope whose label is the sanitized parent's Integration
 // branch.
 func TestSeedParentResolver_LocalForge_ResolvesDependentsParent(t *testing.T) {
 	fc := forge.NewFake()

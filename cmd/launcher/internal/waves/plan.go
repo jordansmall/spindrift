@@ -12,6 +12,8 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"spindrift.dev/launcher/internal/forge"
 )
 
 // ErrOpenNoneDispatchable is returned by Dispatch when ModeDrain selects zero
@@ -136,7 +138,7 @@ type Config struct {
 	// CODE_FORGE=local; nil for every other forge, where the seed-branch gate
 	// never fires and the blocker gate keeps its pre-#2130 landing-verification
 	// behavior.
-	SeedScopeOf func(num string) SeedScope
+	SeedScopeOf func(num string) forge.SeedScope
 
 	// pollInterval overrides RunContinuous's background refill-poll cadence
 	// (issue #1637) — zero (every production construction site) means "use
