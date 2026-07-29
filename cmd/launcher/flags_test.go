@@ -41,6 +41,34 @@ func TestSchemaFlags_BwrapUnshareNetIsBool(t *testing.T) {
 	t.Fatal("bwrap-unshare-net entry not found in schemaFlags")
 }
 
+// TestSchemaFlags_GenericBoolsAreBool asserts each of the six generic
+// boolean knobs converted in issue #2146 slice 1 renders as a presence-style
+// bool flag, not a string.
+func TestSchemaFlags_GenericBoolsAreBool(t *testing.T) {
+	envs := []string{
+		"AUTO_FORMAT",
+		"AUTO_LINT",
+		"LOCAL_ISSUE_REFERENCE",
+		"ORCHESTRATOR_ENABLED",
+		"PREFLIGHT_STALE_BASE",
+		"JIRA_INCLUDE_COMMENTS",
+	}
+	for _, env := range envs {
+		env := env
+		t.Run(env, func(t *testing.T) {
+			for _, e := range schemaFlags {
+				if e.env == env {
+					if e.kind != "bool" {
+						t.Errorf("%s kind = %q, want %q", env, e.kind, "bool")
+					}
+					return
+				}
+			}
+			t.Fatalf("%s entry not found in schemaFlags", env)
+		})
+	}
+}
+
 // TestExtractInputFlag_Present extracts the document path and strips both
 // tokens from the remaining args.
 func TestExtractInputFlag_Present(t *testing.T) {
