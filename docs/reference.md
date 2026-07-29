@@ -780,8 +780,9 @@ exits rather than committing under an arbitrary identity.
 > **`--agents` needs a recent `claude-code`.** Whenever any subagent model
 > above (`SCOUT_MODEL`/`REVIEW_MODEL`/`WORKER_MODEL`/… or the [`roster`](#subagent-roster))
 > is non-empty — the default — the launcher passes the subagent roster to the
-> claude Driver as `--agents <json>`. That flag exists only on `claude-code`
-> **≥ 2.1.204**. A Consumer whose `nixpkgs` input pins an older `pkgs.claude-code`
+> claude Driver as `--agents <json>`. That flag needs a recent `claude-code`
+> — it is present on **2.1.204** (older builds may predate it). A Consumer
+> whose `nixpkgs` input pins an older `pkgs.claude-code`
 > (the [`default` template](../templates/default/flake.nix) does not `follow`
 > spindrift's `nixpkgs`, so its version floats with the Consumer's own pin)
 > fails *every* issue with `error: unknown option '--agents'`. The launcher
