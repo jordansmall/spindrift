@@ -8,6 +8,7 @@ import (
 
 	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/outcome"
+	"spindrift.dev/launcher/internal/retry"
 	"spindrift.dev/launcher/internal/runner"
 )
 
@@ -109,10 +110,14 @@ func (d *Dispatch) dispatchWithRetry(logPath string, once func() error) Result {
 				d.number, d.cfg.TransientRetryMax)
 			return Result{Success: false}
 		}
-		backoff := time.Duration(d.cfg.TransientBackoffSecs) * time.Second * time.Duration(transientCount)
+		lb := retry.LinearBackoff{
+			Unit:  time.Duration(d.cfg.TransientBackoffSecs) * time.Second,
+			Clock: d.clock,
+		}
+		backoff := lb.Duration(transientCount)
 		fmt.Fprintf(d.humanOut(), "    .. #%s: transient (%s); retry %d/%d in %s\n",
 			d.number, cls.Reason, transientCount, d.cfg.TransientRetryMax, backoff)
-		d.clock.Sleep(backoff)
+		lb.Do(transientCount)
 	}
 }
 
