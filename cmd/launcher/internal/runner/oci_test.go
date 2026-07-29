@@ -211,6 +211,25 @@ func TestIsTransientRegistryError(t *testing.T) {
 	}
 }
 
+func TestIsRuntimeUnusableError(t *testing.T) {
+	tests := []struct {
+		stderr string
+		want   bool
+	}{
+		{"Error: OCI runtime error: crun: unknown version specified", true},
+		{"Error: OCI runtime error: runc: exec failed", true},
+		{"Trying to pull docker.io/library/busybox:stable...\nError: OCI runtime error: crun: unknown version specified", true},
+		{"CapEff:\t0000000000000000", false},
+		{"Error: pulling image: connection refused", false},
+		{"", false},
+	}
+	for _, tc := range tests {
+		if got := isRuntimeUnusableError(tc.stderr); got != tc.want {
+			t.Errorf("isRuntimeUnusableError(%q) = %v, want %v", tc.stderr, got, tc.want)
+		}
+	}
+}
+
 func TestBuildRunArgsIncludesHardeningFlags(t *testing.T) {
 	a := &ociAdapter{
 		cli:         "podman",
