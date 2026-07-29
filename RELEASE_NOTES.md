@@ -10,6 +10,58 @@ depending on how you use spindrift; it won't affect everyone.
 
 ---
 
+## 0.8.0 — 2026-07-28
+
+spindrift can now run an agent other than Claude Code. The Box picks its agent
+CLI through a new pluggable "Driver," and the first alternative is an
+experimental opencode Driver, which brings GitHub Copilot along as a model
+provider.
+
+No breaking changes.
+
+- **Experimental opencode Driver.** spindrift is no longer locked to Claude
+  Code. A new Driver seam selects which agent CLI runs in the Box by name;
+  `claude` stays the default and is unchanged. Set the Driver to `opencode` and
+  the Box runs [opencode](https://opencode.ai) instead, with its own image,
+  subagents rendered to `agents/*.md`, and run-log usage parsing. It's
+  experimental: expect rough edges and give it a non-critical queue for now.
+- **GitHub Copilot through opencode.** Because opencode is provider-flexible,
+  pointing it at its `github-copilot` provider is how you run spindrift on
+  Copilot. Run `opencode auth login -p github-copilot` on the host once, export
+  the resulting auth slice into `OPENCODE_AUTH_CONTENT`, and set
+  `MODEL=github-copilot/<model>`. The credential is kept off the sandbox's
+  command line, and the launcher only requires it when the Driver actually needs
+  it. See the opencode Driver docs in `docs/reference.md`.
+- **Orchestrator mode moves more work into the harness.** The opt-in,
+  experimental orchestrator (still off by default) leans further on the launcher
+  instead of the agent's own judgment. The launcher now resolves each pass's
+  role itself, including nested and `Agent`-named subagent spawns, so
+  coordinator, worker, and reviewer get wired up by the harness rather than
+  inferred by the model, and the review pass is attributed to a reviewer role.
+  The harness also takes over steps the agent used to run from its prompt: it
+  owns the read-only git bundle and derives the merged-outcome verify ref
+  host-side. Less of the run rides on the model doing the right thing.
+- **Per-model token usage.** Run usage now breaks tokens down by exact model id
+  instead of one lump, with cache-creation split out by TTL, so a run that spans
+  a coordinator and a cheaper worker shows where the tokens went. The old dollar
+  cost estimate is dropped in favor of that per-model table.
+- **Roster of subagents.** Define an N-agent roster and spindrift renders each
+  one into the Box, replacing the single-subagent knobs (now deprecated). Lets a
+  run stand up several named, differently-tuned subagents instead of one.
+- **Sturdier run recovery.** When an agent finishes just short of declaring its
+  outcome, the recovery nudge now recognizes that near-miss instead of treating
+  it as a clean miss, and the host's outcome-backstop push retries with bounded
+  backoff rather than giving up on a transient failure.
+- **Local-forge improvements.** Host-posted issues get filed on the local
+  tracker (closing the local gap next to GitHub's), blocker chains resolve their
+  own seed branch instead of silently seeding off a bare base, and issue
+  frontmatter is escaped so a hostile title can't inject fields.
+- **Operational tidying.** Host logs and the dogfood pidfile moved under
+  `.spindrift/`, continuous dispatch halts on an image that won't converge, and
+  the dogfood loop halts on exit code 5 instead of spinning.
+
+---
+
 ## 0.7.1 — 2026-07-27
 
 An opt-in multi-pass orchestrator that runs the whole work-review-fix loop
