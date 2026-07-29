@@ -129,7 +129,7 @@
             # };
             # sandbox = {
             #   # when non-empty, adds --unshare-net to bwrap; requires slirp/pasta for DNS; by default bwrap shares the host network namespace (host-loopback reachable)
-            #   bwrapUnshareNet = "";
+            #   bwrapUnshareNet = false;
             #   # which devShell to enter; lets a Target expose a lean headless ci shell distinct from a heavy interactive default
             #   devShellName = "default";
             #   # seconds before the devShell probe is abandoned and the baked toolchain is used

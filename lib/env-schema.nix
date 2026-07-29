@@ -219,6 +219,12 @@
   bwrapUnshareNet = {
     env = "BWRAP_UNSHARE_NET";
     group = "Sandbox & resources";
+    default = false;
+    # Presence-style bool flag (issue #2145): `--bwrap-unshare-net` (bare) or
+    # `--bwrap-unshare-net=<value>` set it; the space-separated value form is
+    # not accepted. The boolean `default` also makes it a `types.bool` flake
+    # option; `kind` opts its CLI flag into presence parsing.
+    kind = "bool";
     doc = "when non-empty, adds --unshare-net to bwrap; requires slirp/pasta for DNS; by default bwrap shares the host network namespace (host-loopback reachable)";
     flakeOption = true;
     boxEnv = false;

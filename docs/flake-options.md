@@ -79,7 +79,7 @@ See [`docs/reference.md`](reference.md) for the full option surface and runtime 
 
 | attr path | env var | default | description |
 |---|---|---|---|
-| `settings.sandbox.bwrapUnshareNet` | `BWRAP_UNSHARE_NET` | — | when non-empty, adds --unshare-net to bwrap; requires slirp/pasta for DNS; by default bwrap shares the host network namespace (host-loopback reachable) |
+| `settings.sandbox.bwrapUnshareNet` | `BWRAP_UNSHARE_NET` | `` | when non-empty, adds --unshare-net to bwrap; requires slirp/pasta for DNS; by default bwrap shares the host network namespace (host-loopback reachable) |
 | `settings.sandbox.devShellName` | `DEV_SHELL_NAME` | `default` | which devShell to enter; lets a Target expose a lean headless ci shell distinct from a heavy interactive default |
 | `settings.sandbox.devShellProbeTimeout` | `DEV_SHELL_PROBE_TIMEOUT` | `300` | seconds before the devShell probe is abandoned and the baked toolchain is used |
 | `settings.sandbox.memoryLimit` | `MEMORY_LIMIT` | `5g` | max memory per agent container (--memory); empty string disables the limit |
