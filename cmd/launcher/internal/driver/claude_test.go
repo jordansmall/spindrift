@@ -85,11 +85,11 @@ func TestClaudeDriverExtractUsage(t *testing.T) {
 	if !report.Found {
 		t.Fatal("Found: got false, want true")
 	}
-	if report.NumTurns != 5 {
-		t.Errorf("NumTurns: got %d, want 5", report.NumTurns)
+	if report.FinalSnapshot.NumTurns != 5 {
+		t.Errorf("NumTurns: got %d, want 5", report.FinalSnapshot.NumTurns)
 	}
-	if report.TotalCostUSD != 0.25 {
-		t.Errorf("TotalCostUSD: got %f, want 0.25", report.TotalCostUSD)
+	if report.FinalSnapshot.TotalCostUSD != 0.25 {
+		t.Errorf("TotalCostUSD: got %f, want 0.25", report.FinalSnapshot.TotalCostUSD)
 	}
 }
 
