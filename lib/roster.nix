@@ -24,13 +24,13 @@
   normalizeRoster =
     roster:
     let
-      inherit (lib) foldl';
+      inherit (lib) foldl' imap0;
       step =
-        acc: idx:
-        let
-          e = builtins.elemAt roster idx;
-        in
-        if builtins.match "[a-z0-9-]+" e.name == null then
+        acc:
+        { idx, e }:
+        if !(e ? name) then
+          throw "normalizeRoster: entry ${toString idx} is missing a name -- every roster entry must set name"
+        else if builtins.match "[a-z0-9-]+" e.name == null then
           throw "normalizeRoster: entry ${toString idx} has an invalid name ${builtins.toJSON e.name} -- names must match [a-z0-9-]+"
         else if acc.seen ? ${e.name} then
           throw "normalizeRoster: duplicate name ${builtins.toJSON e.name} at entries ${toString acc.seen.${e.name}} and ${toString idx}"
@@ -47,7 +47,7 @@
       result = foldl' step {
         seen = { };
         out = [ ];
-      } (builtins.genList (i: i) (builtins.length roster));
+      } (imap0 (idx: e: { inherit idx e; }) roster);
     in
     result.out;
 

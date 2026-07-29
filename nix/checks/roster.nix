@@ -34,6 +34,27 @@ in
     ) "normalizeRoster must throw on a name that isn't lowercase-alnum-dash";
     pkgs.runCommand "roster-normalize-rejects-invalid-name" { } "touch $out";
 
+  roster-normalize-rejects-missing-name =
+    let
+      result = builtins.tryEval (
+        let
+          r = rosterLib.normalizeRoster [
+            {
+              model = "m";
+              mode = "subagent";
+              description = "d";
+              tools = [ ];
+            }
+          ];
+        in
+        builtins.deepSeq r r
+      );
+    in
+    assert assertMsg (
+      !result.success
+    ) "normalizeRoster must throw on an entry that omits name";
+    pkgs.runCommand "roster-normalize-rejects-missing-name" { } "touch $out";
+
   roster-normalize-accepts-valid-name =
     let
       result = builtins.tryEval (
