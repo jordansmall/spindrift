@@ -72,7 +72,8 @@
     env = "LOCAL_ISSUE_REFERENCE";
     group = "Issue discovery";
     default = false;
-    doc = "when non-empty and ISSUE_TRACKER=local, the PR body includes a non-auto-closing `Local-issue: <slug>` breadcrumb; default off keeps the private local ticket slug out of the PR body entirely (ISSUE_TRACKER=github is unaffected -- `Closes #ISSUE_NUMBER` stays either way)";
+    kind = "bool";
+    doc = "when enabled and ISSUE_TRACKER=local, the PR body includes a non-auto-closing `Local-issue: <slug>` breadcrumb; default off keeps the private local ticket slug out of the PR body entirely (ISSUE_TRACKER=github is unaffected -- `Closes #ISSUE_NUMBER` stays either way)";
     flakeOption = true;
     boxEnv = true;
     boxEnvOnly = true;
@@ -280,7 +281,9 @@
   jiraIncludeComments = {
     env = "JIRA_INCLUDE_COMMENTS";
     group = "Issue discovery";
-    doc = "when non-empty, the Jira adapter appends the issue's comment thread to the description it returns; empty (default) keeps the prompt-injection surface tight";
+    default = false;
+    kind = "bool";
+    doc = "when enabled, the Jira adapter appends the issue's comment thread to the description it returns; off (default) keeps the prompt-injection surface tight";
     flakeOption = true;
     boxEnv = false;
   };
@@ -452,7 +455,8 @@
     env = "PREFLIGHT_STALE_BASE";
     group = "Self-healing & retries";
     default = false;
-    doc = "when non-empty, the launcher proactively rebases a green PR that is behind its base (no textual conflict) before merging and re-waits for CI on the rebased tree, drawing on MAX_REBASE_ATTEMPTS for its budget (ADR 0026). Off by default: a green-but-behind PR merges as-is, relying on its green CI as the landing gate — this trades the rare cross-PR semantic break ADR 0026 guarded against (two individually-green PRs that break combined) for the throughput of parallel landings that never wait on an extra rebase+CI cycle. WARNING: enabling this on a highly-parallelized fleet without a merge queue in front of the branch invites near-constant rebase+re-CI thrashing (each landing leaves the others behind again), burning CI minutes and tokens — see the Stale-base preflight docs";
+    kind = "bool";
+    doc = "when enabled, the launcher proactively rebases a green PR that is behind its base (no textual conflict) before merging and re-waits for CI on the rebased tree, drawing on MAX_REBASE_ATTEMPTS for its budget (ADR 0026). Off by default: a green-but-behind PR merges as-is, relying on its green CI as the landing gate — this trades the rare cross-PR semantic break ADR 0026 guarded against (two individually-green PRs that break combined) for the throughput of parallel landings that never wait on an extra rebase+CI cycle. WARNING: enabling this on a highly-parallelized fleet without a merge queue in front of the branch invites near-constant rebase+re-CI thrashing (each landing leaves the others behind again), burning CI minutes and tokens — see the Stale-base preflight docs";
     flakeOption = true;
     boxEnv = false;
   };
@@ -516,7 +520,8 @@
     env = "AUTO_FORMAT";
     group = "Prompt & skill iteration";
     default = false;
-    doc = "when non-empty, the implementor auto-detects and runs the project's formatter on changed files before each commit; skips silently when no formatter is found";
+    kind = "bool";
+    doc = "when enabled, the implementor auto-detects and runs the project's formatter on changed files before each commit; skips silently when no formatter is found";
     flakeOption = true;
     boxEnv = true;
     boxEnvOnly = true;
@@ -525,7 +530,8 @@
     env = "AUTO_LINT";
     group = "Prompt & skill iteration";
     default = false;
-    doc = "when non-empty, the implementor auto-detects and runs the project's linter on changed files before each commit, applying auto-fix then resolving remaining findings; skips silently when no linter is found";
+    kind = "bool";
+    doc = "when enabled, the implementor auto-detects and runs the project's linter on changed files before each commit, applying auto-fix then resolving remaining findings; skips silently when no linter is found";
     flakeOption = true;
     boxEnv = true;
     boxEnvOnly = true;
@@ -534,7 +540,8 @@
     env = "ORCHESTRATOR_ENABLED";
     group = "Prompt & skill iteration";
     default = false;
-    doc = "master feature-flag switch (issue #1996; canonicalized #2047): when non-empty, forks entrypoint.sh's rendered prompt/--agents JSON onto the orchestrator-on path -- the implementor pass hands off to the in-box Go orchestrator instead of calling driver-exec directly, and every other orchestrator-conditioned fork (e.g. the filer's write-mechanism gate) reads this same switch; off by default, the direct driver-exec path is unchanged; the off-path is legacy, slated for demolition once this defaults on in production with a sustained A/B win (ADR 0035 amendment)";
+    kind = "bool";
+    doc = "master feature-flag switch (issue #1996; canonicalized #2047): when enabled, forks entrypoint.sh's rendered prompt/--agents JSON onto the orchestrator-on path -- the implementor pass hands off to the in-box Go orchestrator instead of calling driver-exec directly, and every other orchestrator-conditioned fork (e.g. the filer's write-mechanism gate) reads this same switch; off by default, the direct driver-exec path is unchanged; the off-path is legacy, slated for demolition once this defaults on in production with a sustained A/B win (ADR 0035 amendment)";
     flakeOption = true;
     boxEnv = true;
     boxEnvOnly = true;
