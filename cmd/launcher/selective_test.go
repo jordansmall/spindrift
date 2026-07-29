@@ -502,7 +502,7 @@ func TestEvictUnmetBlockers_KeepsMergedBlocker(t *testing.T) {
 // TestEvictUnmetBlockers_LocalForge_SameParentBlockerLandingReleases verifies
 // the real seed-branch wiring (#2130, not a stubbed Config.SeedScopeOf): under
 // CODE_FORGE=local, evictUnmetBlockers resolves the dependent's own
-// seedParentResolver(it, cf) live, so an external blocker whose landing has
+// seedScopeResolver(it, cf) live, so an external blocker whose landing has
 // already reached the dependent's own integration/<parent> seed branch
 // satisfies the edge -- no eviction.
 func TestEvictUnmetBlockers_LocalForge_SameParentBlockerLandingReleases(t *testing.T) {
