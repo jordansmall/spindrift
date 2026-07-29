@@ -42,6 +42,20 @@ strategy in the launcher (transient classification, heartbeat, usage
 extraction). _Provisional
 name_ — may be renamed (e.g. "agent harness"). _Avoid_: engine, backend, tool.
 
+**driverkit**:
+The shared leaf package under the Driver seam's host-side half (ADR 0009) that
+both Driver strategies (`claude`, `opencode`), the parent driver package, and
+the orchestrator import, so the substrate every strategy needs is declared once
+instead of hand-mirrored per strategy. Owns the transient-classification
+vocabulary (the `Class`/`Reason`/`Classification` types the driver package
+re-exports as true type aliases), the shared transient-pattern base table
+behind a `MatchTransient` that takes per-Driver extras, the buffered NDJSON
+line-framer both heartbeat writers use, the not-found-returns-zero-value
+log-scan degrade helper, and the role constants (implementor, reviewer, default
+subagent). It imports nothing from the driver package, so a new Driver author
+inherits the seam instead of copying the `claude` strategy. _Avoid_: driver
+core, shared driver lib.
+
 **Provider**:
 The model backend a Driver talks to. Only Anthropic is available today, via
 the `claude` Driver, which is effectively locked to it; GitHub Copilot and
