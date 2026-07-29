@@ -298,6 +298,25 @@ value later.
 _Avoid_: surface notice, skip reason (both pre-#1811 names for the scattered
 prints Verdict consolidates).
 
+**Guard**:
+`freshness.Guard` (issue #2155, campaign #2144 D5) — the sealed home of the
+continuous-dispatch host-taint halt rule and its prior-rev memory. It wraps
+the single-line persisted prior-stale-rev file and classifies a stale
+`freshness.Probe` `Result` directly, so the empty-tip-tag post-condition (an
+empty derived tag means a stuck eval/derive failure, never structural host
+taint) lives beside the same-rev non-convergence check it guards. `Classify`
+returns a `Disposition` — `Rebuild` (content staleness: record the rev, the
+loop rebuilds and retries) or `HostTainted` (the same base tip was already
+rebuilt against yet is still stale: clear the memory, the loop halts) — with
+record and clear kept internal so a future edit cannot reintroduce the
+perpetual-rebuild loop (#2113, #2128) by clearing state at the wrong moment;
+the launcher merely maps `HostTainted` to exit code 5 and `Reset` clears the
+memory on the queue-drained path. The outcome type is deliberately a
+`Disposition`, **not** a Verdict — that term stays reserved for the localloop
+Surface report above and research verdicts.
+_Avoid_: staleRevTracker, classifyStaleOutcome (both pre-#2155 names for the
+main-package glue Guard absorbs); naming its outcome type Verdict.
+
 **Conformance contract**:
 The executable contract for the forge seams: a shared `forgetest` suite that
 every adapter of a seam interface — the shared test Fake included — must pass,
