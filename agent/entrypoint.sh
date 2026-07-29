@@ -780,6 +780,48 @@ phase_prompt_assembly() {
   else
     agents_json=""
   fi
+
+  # File-rewrite twin of the agents-JSON injection loop above, for a Driver
+  # (opencode) whose subagents ride on-disk agent files instead of the
+  # --agents JSON flag. DRIVER_AGENT_FILES_DIR is baked non-empty only for
+  # such a Driver (lib/drivers/default.nix renderPreamble); claude leaves it
+  # unset, so this block is a no-op there -- no per-Driver-name branch. For
+  # each nix-baked roster agent, the agent's baked file's body is overwritten
+  # with the same runtime-substituted prompt the JSON loop injects, so the
+  # same roster yields the same effective subagent prompt under either Driver
+  # (issue #2153). Generic over N agents, keyed off the same
+  # AGENTS_PROMPT_FILES map, no per-name branch (#264).
+  if [ -n "${DRIVER_AGENT_FILES_DIR:-}" ]; then
+    if [ -n "$ORCHESTRATOR" ]; then
+      # Mechanism parity with the JSON loop's `del(.reviewer)`: the code-owned
+      # review pass owns verdict authority (issue #2037), so the reviewer's
+      # baked agent file is removed outright rather than rewritten.
+      rm -f "${DRIVER_AGENT_FILES_DIR}/reviewer.md"
+    else
+      # Off-row (mirrors the JSON loop's own off-row above): no reviewer
+      # drop -- the generic rewrite loop below still rewrites reviewer's
+      # baked agent file like any other roster entry when the orchestrator
+      # is off.
+      :
+    fi
+    if [ -n "${AGENTS_PROMPT_FILES:-}" ]; then
+      local _af_name _af_pf _af_file _af_prompt _af_frontmatter
+      while IFS= read -r _af_name; do
+        [ -n "$_af_name" ] || continue
+        _af_file="${DRIVER_AGENT_FILES_DIR}/${_af_name}.md"
+        # An entry with an empty model gets no baked file (opencode drops it),
+        # and a reviewer file just removed above is likewise gone -- skip both.
+        [ -f "$_af_file" ] || continue
+        _af_pf="$(printf '%s' "$AGENTS_PROMPT_FILES" | jq -r --arg n "$_af_name" '.[$n] // empty')"
+        [ -f "${PROMPTS_DIR}/${_af_pf}" ] || continue
+        _af_prompt="$(_subst "${PROMPTS_DIR}/${_af_pf}")"
+        # Preserve the baked YAML frontmatter (every line up to and including
+        # the second `---`) and replace only the body beneath it.
+        _af_frontmatter="$(awk '{ print } /^---$/ { if (++_c == 2) exit }' "$_af_file")"
+        printf '%s\n%s\n' "$_af_frontmatter" "$_af_prompt" >"$_af_file"
+      done < <(printf '%s' "$AGENTS_PROMPT_FILES" | jq -r 'keys[]')
+    fi
+  fi
 }
 
 # run_driver_in_env runs the Driver against $1 (the assembled prompt), with
