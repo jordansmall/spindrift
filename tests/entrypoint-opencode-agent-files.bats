@@ -124,6 +124,24 @@ EOF
   [[ "$scout_body" == *"Return only the brief"* ]]
 }
 
+@test "entrypoint rewrites the reviewer's baked opencode agent file when the orchestrator is off" {
+  # Parity with the JSON loop's off-row: with the orchestrator off, reviewer
+  # is not dropped -- its baked file is rewritten like any other roster entry.
+  local dir="$BATS_TEST_TMPDIR/agent-files"
+  mkdir -p "$dir"
+  write_agent_file "$dir/reviewer.md" "reviewer"
+  export DRIVER_AGENT_FILES_DIR="$dir"
+
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+
+  [ -f "$dir/reviewer.md" ]
+  local reviewer_body
+  reviewer_body="$(agent_file_body "$dir/reviewer.md")"
+  [ -n "$reviewer_body" ]
+  [ "$reviewer_body" != "placeholder body for reviewer" ]
+}
+
 @test "entrypoint skips a roster agent with no baked opencode agent file without error" {
   local dir="$BATS_TEST_TMPDIR/agent-files"
   mkdir -p "$dir"
