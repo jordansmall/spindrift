@@ -14,6 +14,43 @@
 # generic prompt-injection loop).
 { lib }:
 {
+  # Normalizes a roster list before any Driver consumes it (issue #2152 slice
+  # A): validates each entry's name and injects a promptFile default for any
+  # entry that omits one, so every Driver-facing consumer can assume every
+  # entry already carries a promptFile rather than re-deriving the default
+  # itself. Deliberately does no escaping (a later slice's concern) and never
+  # filters by model -- that stays the Drivers' job (see
+  # drivers-opencode-agent-files-omits-empty-model in nix/checks/drivers.nix).
+  normalizeRoster =
+    roster:
+    let
+      inherit (lib) foldl';
+      step =
+        acc: idx:
+        let
+          e = builtins.elemAt roster idx;
+        in
+        if builtins.match "[a-z0-9-]+" e.name == null then
+          throw "normalizeRoster: entry ${toString idx} has an invalid name ${builtins.toJSON e.name} -- names must match [a-z0-9-]+"
+        else if acc.seen ? ${e.name} then
+          throw "normalizeRoster: duplicate name ${builtins.toJSON e.name} at entries ${toString acc.seen.${e.name}} and ${toString idx}"
+        else
+          {
+            seen = acc.seen // {
+              ${e.name} = idx;
+            };
+            out = acc.out ++ [ (if e ? promptFile then e else e // { promptFile = "${e.name}-prompt.md"; }) ];
+          };
+      # An empty roster is a deliberate agent-less image (issue #2152) -- the
+      # fold's base case naturally returns [] without ever throwing, no
+      # special-case needed.
+      result = foldl' step {
+        seen = { };
+        out = [ ];
+      } (builtins.genList (i: i) (builtins.length roster));
+    in
+    result.out;
+
   defaultRoster =
     {
       scoutModel,
