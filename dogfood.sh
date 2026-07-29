@@ -166,9 +166,9 @@ echo "==> dogfood: nix run .# -- build"
 nix run .# -- build
 
 while :; do
-  echo "==> dogfood: nix run .# -- $DOGFOOD_KIND --max-jobs $MAX_JOBS --continuous-dispatch $CONTINUOUS_DISPATCH"
+  echo "==> dogfood: nix run .# -- $DOGFOOD_KIND --max-jobs $MAX_JOBS --continuous-dispatch=$CONTINUOUS_DISPATCH"
   nix_exit=0
-  nix run .# -- "$DOGFOOD_KIND" --max-jobs "$MAX_JOBS" --continuous-dispatch "$CONTINUOUS_DISPATCH" || nix_exit=$?
+  nix run .# -- "$DOGFOOD_KIND" --max-jobs "$MAX_JOBS" --continuous-dispatch="$CONTINUOUS_DISPATCH" || nix_exit=$?
 
   if [ "$nix_exit" -eq 2 ]; then
     echo "==> dogfood: queue empty — done after $iteration iteration(s)."

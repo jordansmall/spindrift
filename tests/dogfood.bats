@@ -202,7 +202,7 @@ EOF
 @test "dogfood passes --continuous-dispatch" {
   run env BASE_BRANCH=main bash "$WORK/dogfood.sh"
   [ "$status" -eq 0 ]
-  grep -q -- '--continuous-dispatch 1' "$NIX_LOG"
+  grep -q -- '--continuous-dispatch=1' "$NIX_LOG"
 }
 
 @test "dogfood runs dispatch by default" {
