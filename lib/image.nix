@@ -341,7 +341,7 @@ let
     ${lib.concatMapStrings (
       e:
       let
-        pf = e.promptFile or "${e.name}-prompt.md";
+        pf = e.promptFile;
       in
       "cp ${pkgs.writeText pf e.prompt} $out/agent/prompts/${pf}\n"
     ) customRosterPromptFiles}

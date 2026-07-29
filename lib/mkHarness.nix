@@ -268,7 +268,7 @@ let
   # deprecated -- see the lib.warnIf below) so an existing Consumer keeps
   # building the exact same four agents it always has.
   rosterLib = import ./roster.nix { inherit lib; };
-  resolvedRoster =
+  resolvedRoster = rosterLib.normalizeRoster (
     if roster != null then
       roster
     else
@@ -277,7 +277,8 @@ let
         reviewModel = mergedDefaults.reviewModel or "";
         filerModel = mergedDefaults.filerModel or "";
         workerModel = mergedDefaults.workerModel or "";
-      };
+      }
+  );
 
   # --agents JSON, rendered by the selected Driver (ADR 0009) from the
   # resolved roster above, so a future Driver with a different agent-config
@@ -293,17 +294,16 @@ let
 
   # Nix-baked name -> prompt file map (issue #264), read at runtime by
   # entrypoint.sh's generic per-agent prompt injection loop so a custom Nth
-  # agent's prompt resolves the same way as the four built-in names. A custom
-  # roster entry (the AC4 path) that omits promptFile falls back to
-  # "<name>-prompt.md", matching agent/entrypoint.sh's own runtime fallback
-  # for an unknown agent name -- so the baked map and the runtime fallback
-  # agree even when this Nix-side default is the one that actually applies
-  # (issue #264 review finding).
+  # agent's prompt resolves the same way as the four built-in names. Every
+  # `resolvedRoster` entry is guaranteed to carry a `promptFile` by
+  # `rosterLib.normalizeRoster` above (issue #2152 slice B), which injects the
+  # "<name>-prompt.md" default for any entry that omits one -- so there's no
+  # fallback left to re-derive here.
   agentsPromptFilesJson = builtins.toJSON (
     lib.listToAttrs (
       map (e: {
         name = e.name;
-        value = e.promptFile or "${e.name}-prompt.md";
+        value = e.promptFile;
       }) resolvedRoster
     )
   );
@@ -544,7 +544,7 @@ let
     ${lib.concatMapStrings (
       e:
       let
-        pf = e.promptFile or "${e.name}-prompt.md";
+        pf = e.promptFile;
       in
       "cp ${hostPkgs.writeText pf e.prompt} $out/${pf}\n"
     ) customRosterPromptFiles}

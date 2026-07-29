@@ -762,9 +762,10 @@ phase_prompt_assembly() {
       :
     fi
     # Inject each present agent's runtime-substituted prompt. The prompt file
-    # for an agent is AGENTS_PROMPT_FILES[name] (nix-baked from the roster),
-    # falling back to "<name>-prompt.md". Generic over the roster: a custom
-    # Nth agent's prompt is injected the same way, no per-name branch (#264).
+    # for an agent is AGENTS_PROMPT_FILES[name] (nix-baked from the
+    # normalized roster, which guarantees every entry a promptFile -- issue
+    # #2152 slice B). Generic over the roster: a custom Nth agent's prompt is
+    # injected the same way, no per-name branch (#264).
     local _agent_name _pf _p
     while IFS= read -r _agent_name; do
       [ -n "$_agent_name" ] || continue
@@ -772,7 +773,6 @@ phase_prompt_assembly() {
       if [ -n "${AGENTS_PROMPT_FILES:-}" ]; then
         _pf="$(printf '%s' "$AGENTS_PROMPT_FILES" | jq -r --arg n "$_agent_name" '.[$n] // empty')"
       fi
-      [ -n "$_pf" ] || _pf="${_agent_name}-prompt.md"
       [ -f "${PROMPTS_DIR}/${_pf}" ] || continue
       _p="$(_subst "${PROMPTS_DIR}/${_pf}")"
       agents_json="$(printf '%s' "$agents_json" | jq --arg n "$_agent_name" --arg p "$_p" '.[$n].prompt = $p')"
