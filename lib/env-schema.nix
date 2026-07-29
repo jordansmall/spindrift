@@ -426,7 +426,10 @@
     default = 3;
     doc = "rebase-and-retry passes when a green PR conflicts with the base after a sibling merge; 0 disables rebase retries";
     flakeOption = true;
-    boxEnv = false;
+    # Forwarded into the Box so the driver-exec outcome-backstop verb reads
+    # this bound for its own best-effort push retry from launcher-delivered
+    # plumbing rather than a hand-copied default (issue #2157).
+    boxEnv = true;
   };
   maxBudgetTokens = {
     env = "MAX_BUDGET_TOKENS";
@@ -561,7 +564,9 @@
     default = 5;
     doc = "jitter seconds added to 429 hold duration to spread re-dispatch";
     flakeOption = true;
-    boxEnv = false;
+    # Forwarded into the Box for the outcome-backstop verb's push-retry
+    # jitter (issue #2157); see maxRebaseAttempts.
+    boxEnv = true;
   };
   transientBackoffSecs = {
     env = "TRANSIENT_BACKOFF_SECS";
@@ -569,7 +574,9 @@
     default = 30;
     doc = "base backoff seconds per retry for 529/overloaded and network transients";
     flakeOption = true;
-    boxEnv = false;
+    # Forwarded into the Box for the outcome-backstop verb's push-retry
+    # linear backoff unit (issue #2157); see maxRebaseAttempts.
+    boxEnv = true;
   };
   transientRetryMax = {
     env = "TRANSIENT_RETRY_MAX";
