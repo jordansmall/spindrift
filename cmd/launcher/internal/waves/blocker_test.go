@@ -317,33 +317,40 @@ func TestReadinessReady_ClosedIssueFallback(t *testing.T) {
 
 func TestReadinessReady_LocalLandingVerifiedMerged(t *testing.T) {
 	fc := forge.NewFake()
-	fc.SetIssue(forge.Issue{Number: "99", State: "OPEN", Landing: "agent/issue-99@abc123"})
-	fc.SetVerifyLanding("agent/issue-99@abc123", true, nil)
+	landing := "agent/issue-99@abc123"
+	fc.SetIssue(forge.Issue{Number: "99", State: "OPEN", Landing: landing})
+	fc.SetLandingContained(landing, "dependent-parent", true, nil)
+	scope := forge.NewSeedScope("dependent-parent", "integration/dependent-parent")
 
-	if !(Readiness{}).Ready(fc, fc.AsLocal(), "99", forge.SeedScope{}) {
-		t.Error("Readiness.Ready: want true for blocker whose landing verifies merged, got false")
+	if !(Readiness{}).Ready(fc, fc.AsLocal(), "99", scope) {
+		t.Error("Readiness.Ready: want true for blocker whose landing is contained, got false")
 	}
 }
 
 func TestReadinessReady_LocalLandingNotYetMerged(t *testing.T) {
 	fc := forge.NewFake()
-	fc.SetIssue(forge.Issue{Number: "99", State: "OPEN", Landing: "agent/issue-99@abc123"})
-	fc.SetVerifyLanding("agent/issue-99@abc123", false, nil)
+	landing := "agent/issue-99@abc123"
+	fc.SetIssue(forge.Issue{Number: "99", State: "OPEN", Landing: landing})
+	fc.SetLandingContained(landing, "dependent-parent", false, nil)
+	scope := forge.NewSeedScope("dependent-parent", "integration/dependent-parent")
 
-	if (Readiness{}).Ready(fc, fc.AsLocal(), "99", forge.SeedScope{}) {
-		t.Error("Readiness.Ready: want false for blocker whose landing is not yet merged, got true")
+	if (Readiness{}).Ready(fc, fc.AsLocal(), "99", scope) {
+		t.Error("Readiness.Ready: want false for blocker whose landing is not yet contained, got true")
 	}
 }
 
 func TestReadinessReady_LocalLandingBranchRefStaysHeld(t *testing.T) {
 	fc := forge.NewFake()
 	// A raw, pre-merge branch ref (no "@sha") is settle's LandingBranchRef
-	// shape -- not yet upgraded to the verifiable IntegrationRef form, so it
-	// must never reach VerifyLanding and must stay held.
-	fc.SetIssue(forge.Issue{Number: "99", State: "OPEN", Landing: "agent/issue-99"})
-	fc.SetVerifyLanding("agent/issue-99", true, nil)
+	// shape -- not yet upgraded to the containment-checkable IntegrationRef
+	// form, so it must never reach LandingContained and must stay held.
+	landing := "agent/issue-99"
+	fc.SetIssue(forge.Issue{Number: "99", State: "OPEN", Landing: landing})
+	branchLanding := forge.Landing{Kind: forge.LandingBranchRef, Branch: landing}
+	fc.SetLandingContained(branchLanding.String(), "dependent-parent", true, nil)
+	scope := forge.NewSeedScope("dependent-parent", "integration/dependent-parent")
 
-	if (Readiness{}).Ready(fc, fc.AsLocal(), "99", forge.SeedScope{}) {
+	if (Readiness{}).Ready(fc, fc.AsLocal(), "99", scope) {
 		t.Error("Readiness.Ready: want false for unmerged LandingBranchRef, got true")
 	}
 }
@@ -478,7 +485,7 @@ func TestBlockerStatus_SeedBranchGate_NotContainedOnDependentParentHolds(t *test
 	fc := forge.NewFake()
 	landing := "integration/999@shaXYZ"
 	fc.SetIssue(forge.Issue{Number: "12", State: "OPEN", Landing: landing})
-	fc.SetIntegrationContainsLanding(landing, "dependent-parent", false, nil)
+	fc.SetLandingContained(landing, "dependent-parent", false, nil)
 	cf := fc.AsLocal()
 	cfg := c
 	cfg.SeedScopeOf = func(string) forge.SeedScope {
@@ -508,15 +515,15 @@ func TestBlockerStatus_SeedBranchGate_NotContainedOnDependentParentHolds(t *test
 }
 
 // TestBlockerStatus_SeedBranchGate_ContainmentErrorHolds verifies that when
-// the local Code Forge's IntegrationContainsLanding call errors (e.g. a
-// git merge-base failure), the dependent must hold loudly -- stay
-// unready -- rather than treating the blocker as satisfied.
+// the local Code Forge's LandingContained call errors (e.g. a git merge-base
+// failure), the dependent must hold loudly -- stay unready -- rather than
+// treating the blocker as satisfied.
 func TestBlockerStatus_SeedBranchGate_ContainmentErrorHolds(t *testing.T) {
 	c := baseConfig()
 	fc := forge.NewFake()
 	landing := "integration/999@shaXYZ"
 	fc.SetIssue(forge.Issue{Number: "12", State: "OPEN", Landing: landing})
-	fc.SetIntegrationContainsLanding(landing, "dependent-parent", false, errors.New("git merge-base exploded"))
+	fc.SetLandingContained(landing, "dependent-parent", false, errors.New("git merge-base exploded"))
 	cf := fc.AsLocal()
 	cfg := c
 	cfg.SeedScopeOf = func(string) forge.SeedScope {
@@ -542,7 +549,7 @@ func TestBlockerStatus_SeedBranchGate_ContainedOnDependentParentReady(t *testing
 	fc := forge.NewFake()
 	landing := "integration/999@shaXYZ"
 	fc.SetIssue(forge.Issue{Number: "12", State: "OPEN", Landing: landing})
-	fc.SetIntegrationContainsLanding(landing, "dependent-parent", true, nil)
+	fc.SetLandingContained(landing, "dependent-parent", true, nil)
 	cf := fc.AsLocal()
 	cfg := c
 	cfg.SeedScopeOf = func(string) forge.SeedScope {
@@ -569,7 +576,7 @@ func TestBlockerStatus_SeedBranchGate_ClosedBlockerReadyRegardlessOfContainment(
 	fc := forge.NewFake()
 	landing := "integration/999@shaXYZ"
 	fc.SetIssue(forge.Issue{Number: "12", State: "CLOSED", Landing: landing})
-	fc.SetIntegrationContainsLanding(landing, "dependent-parent", false, nil)
+	fc.SetLandingContained(landing, "dependent-parent", false, nil)
 	cf := fc.AsLocal()
 	cfg := c
 	cfg.SeedScopeOf = func(string) forge.SeedScope {
@@ -587,17 +594,19 @@ func TestBlockerStatus_SeedBranchGate_ClosedBlockerReadyRegardlessOfContainment(
 	}
 }
 
-// TestReadinessReady_SeedBranchGate_EmptySeedParentFallsBackToLandingVerifier
-// verifies the pre-#2130 legacy path: a zero SeedScope (nil SeedScopeOf)
-// keeps falling back to LandingVerifier.VerifyLanding, not the seed-branch
-// containment gate, so a legacy caller sees no regression.
-func TestReadinessReady_SeedBranchGate_EmptySeedParentFallsBackToLandingVerifier(t *testing.T) {
+// TestReadinessReady_SeedBranchGate_EmptySeedScopeNeverChecksContainment
+// verifies a zero SeedScope (nil SeedScopeOf) skips the seed-branch
+// containment check entirely (issue #2151 dropped the pre-#2130 no-scope
+// self-verification fallback that used to answer this case) — an open
+// IntegrationRef-landed blocker stays unready even when LandingContained is
+// scripted true for the empty-parent key, since blockerReady never calls it.
+func TestReadinessReady_SeedBranchGate_EmptySeedScopeNeverChecksContainment(t *testing.T) {
 	fc := forge.NewFake()
 	landing := "agent/issue-99@abc123"
 	fc.SetIssue(forge.Issue{Number: "99", State: "OPEN", Landing: landing})
-	fc.SetVerifyLanding(landing, true, nil)
+	fc.SetLandingContained(landing, "", true, nil)
 
-	if !(Readiness{}).Ready(fc, fc.AsLocal(), "99", forge.SeedScope{}) {
-		t.Error("Ready: want true for legacy landing-verified blocker with empty seedParent, got false")
+	if (Readiness{}).Ready(fc, fc.AsLocal(), "99", forge.SeedScope{}) {
+		t.Error("Ready: want false for an open IntegrationRef-landed blocker with an empty SeedScope, got true")
 	}
 }

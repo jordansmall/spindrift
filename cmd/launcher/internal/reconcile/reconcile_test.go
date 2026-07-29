@@ -19,7 +19,7 @@ func TestRun_ClosesIssueWithMergedLanding(t *testing.T) {
 	f.SetIssue(forge.Issue{Number: "42", State: forge.IssueOpen, Landing: "https://github.com/o/r/pull/1"})
 	f.SetPRState("https://github.com/o/r/pull/1", forge.PRMerged)
 
-	res, err := reconcile.Run(f, f, fakeLiveness{}, selfParent)
+	res, err := reconcile.Run(f, f, fakeLiveness{}, selfScope)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -44,7 +44,7 @@ func TestRun_LeavesOpenLandingPRUntouched(t *testing.T) {
 	f.SetIssue(forge.Issue{Number: "42", State: forge.IssueOpen, Landing: "https://github.com/o/r/pull/1"})
 	f.SetPRState("https://github.com/o/r/pull/1", forge.PROpen)
 
-	res, err := reconcile.Run(f, f, fakeLiveness{}, selfParent)
+	res, err := reconcile.Run(f, f, fakeLiveness{}, selfScope)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -67,7 +67,7 @@ func TestRun_SkipsIssueWithNoLanding(t *testing.T) {
 	f := forge.NewFake()
 	f.SetIssue(forge.Issue{Number: "42", State: forge.IssueOpen})
 
-	res, err := reconcile.Run(f, f, fakeLiveness{}, selfParent)
+	res, err := reconcile.Run(f, f, fakeLiveness{}, selfScope)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -84,10 +84,10 @@ func TestRun_SecondSweepIsNoOp(t *testing.T) {
 	f.SetIssue(forge.Issue{Number: "42", State: forge.IssueOpen, Landing: "https://github.com/o/r/pull/1"})
 	f.SetPRState("https://github.com/o/r/pull/1", forge.PRMerged)
 
-	if _, err := reconcile.Run(f, f, fakeLiveness{}, selfParent); err != nil {
+	if _, err := reconcile.Run(f, f, fakeLiveness{}, selfScope); err != nil {
 		t.Fatalf("first Run: %v", err)
 	}
-	res, err := reconcile.Run(f, f, fakeLiveness{}, selfParent)
+	res, err := reconcile.Run(f, f, fakeLiveness{}, selfScope)
 	if err != nil {
 		t.Fatalf("second Run: %v", err)
 	}
@@ -111,7 +111,7 @@ func TestRun_DiscoversMergedLandingByBranchAndCloses(t *testing.T) {
 	f.SetPR(branch, forge.PR{URL: "https://github.com/o/r/pull/7"})
 	f.SetPRState("https://github.com/o/r/pull/7", forge.PRMerged)
 
-	res, err := reconcile.Run(f, f, fakeLiveness{}, selfParent)
+	res, err := reconcile.Run(f, f, fakeLiveness{}, selfScope)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -141,7 +141,7 @@ func TestRun_DiscoversOpenLandingByBranchAndLeavesIssueOpen(t *testing.T) {
 	branch := f.AgentBranch("42")
 	f.SetPR(branch, forge.PR{URL: "https://github.com/o/r/pull/7"})
 
-	res, err := reconcile.Run(f, f, fakeLiveness{}, selfParent)
+	res, err := reconcile.Run(f, f, fakeLiveness{}, selfScope)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -167,7 +167,7 @@ func TestRun_DiscoversClosedUnmergedLandingByBranchAndFlagsAbandoned(t *testing.
 	f.SetPR(branch, forge.PR{URL: "https://github.com/o/r/pull/7"})
 	f.SetPRState("https://github.com/o/r/pull/7", forge.PRClosed)
 
-	res, err := reconcile.Run(f, f, fakeLiveness{}, selfParent)
+	res, err := reconcile.Run(f, f, fakeLiveness{}, selfScope)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -191,7 +191,7 @@ func TestRun_FlagsAbandonedWhenLandingPRClosedUnmerged(t *testing.T) {
 	f.SetIssue(forge.Issue{Number: "42", State: forge.IssueOpen, Landing: "https://github.com/o/r/pull/1"})
 	f.SetPRState("https://github.com/o/r/pull/1", forge.PRClosed)
 
-	res, err := reconcile.Run(f, f, fakeLiveness{}, selfParent)
+	res, err := reconcile.Run(f, f, fakeLiveness{}, selfScope)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -219,10 +219,10 @@ func TestRun_SecondSweepDoesNotReflagAbandoned(t *testing.T) {
 	f.SetIssue(forge.Issue{Number: "42", State: forge.IssueOpen, Landing: "https://github.com/o/r/pull/1"})
 	f.SetPRState("https://github.com/o/r/pull/1", forge.PRClosed)
 
-	if _, err := reconcile.Run(f, f, fakeLiveness{}, selfParent); err != nil {
+	if _, err := reconcile.Run(f, f, fakeLiveness{}, selfScope); err != nil {
 		t.Fatalf("first Run: %v", err)
 	}
-	res, err := reconcile.Run(f, f, fakeLiveness{}, selfParent)
+	res, err := reconcile.Run(f, f, fakeLiveness{}, selfScope)
 	if err != nil {
 		t.Fatalf("second Run: %v", err)
 	}
@@ -243,7 +243,7 @@ func TestRun_NoOpForNonLocalTracker(t *testing.T) {
 	f.SetPRState("https://github.com/o/r/pull/1", forge.PRMerged)
 	it := f.AsNoLandingRecorder()
 
-	res, err := reconcile.Run(it, f, fakeLiveness{}, selfParent)
+	res, err := reconcile.Run(it, f, fakeLiveness{}, selfScope)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -263,7 +263,7 @@ func TestRun_NoOpForPushOnlyCodeForge(t *testing.T) {
 	f.SetIssue(forge.Issue{Number: "42", State: forge.IssueOpen, Landing: "some-branch"})
 	cf := f.AsPushOnly()
 
-	res, err := reconcile.Run(f, cf, fakeLiveness{}, selfParent)
+	res, err := reconcile.Run(f, cf, fakeLiveness{}, selfScope)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -276,17 +276,17 @@ func TestRun_NoOpForPushOnlyCodeForge(t *testing.T) {
 }
 
 // TestRun_ClosesLocalLandingVerifiedMerged verifies Reconcile closes an open
-// issue whose recorded landing verifies as merged into the local Code
-// Forge's Integration branch (CODE_FORGE=local, ADR 0033) — the no-PR
-// counterpart of TestRun_ClosesIssueWithMergedLanding, checked via
-// LandingVerifier rather than PRForge.
+// issue whose recorded landing is contained in the local Code Forge's
+// Integration branch (CODE_FORGE=local, ADR 0033) — the no-PR counterpart of
+// TestRun_ClosesIssueWithMergedLanding, checked via LandingContained rather
+// than PRForge.
 func TestRun_ClosesLocalLandingVerifiedMerged(t *testing.T) {
 	f := forge.NewFake()
 	f.SetIssue(forge.Issue{Number: "42", State: forge.IssueOpen, Landing: "integration/1694@abc123"})
-	f.SetVerifyLanding("integration/1694@abc123", true, nil)
+	f.SetLandingContained("integration/1694@abc123", "42", true, nil)
 	cf := f.AsLocal()
 
-	res, err := reconcile.Run(f, cf, fakeLiveness{}, selfParent)
+	res, err := reconcile.Run(f, cf, fakeLiveness{}, selfScope)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -304,17 +304,17 @@ func TestRun_ClosesLocalLandingVerifiedMerged(t *testing.T) {
 }
 
 // TestRun_LeavesLocalLandingOpenWhenNotVerifiedMerged verifies Reconcile
-// leaves an issue open when its recorded local landing does not verify as
-// merged — a conflicting land (ADR 0033: "a conflicting merge leaves the
-// seam unlanded and blocked") reports merged=false via VerifyLanding for the
-// already-upgraded IntegrationRef form.
+// leaves an issue open when its recorded local landing is not contained in
+// the Integration branch — a conflicting land (ADR 0033: "a conflicting
+// merge leaves the seam unlanded and blocked") reports contained=false via
+// LandingContained for the already-upgraded IntegrationRef form.
 func TestRun_LeavesLocalLandingOpenWhenNotVerifiedMerged(t *testing.T) {
 	f := forge.NewFake()
 	f.SetIssue(forge.Issue{Number: "42", State: forge.IssueOpen, Landing: "integration/1694@abc123"})
-	f.SetVerifyLanding("integration/1694@abc123", false, nil)
+	f.SetLandingContained("integration/1694@abc123", "42", false, nil)
 	cf := f.AsLocal()
 
-	res, err := reconcile.Run(f, cf, fakeLiveness{}, selfParent)
+	res, err := reconcile.Run(f, cf, fakeLiveness{}, selfScope)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -336,17 +336,17 @@ func TestRun_LeavesLocalLandingOpenWhenNotVerifiedMerged(t *testing.T) {
 
 // TestRun_PrintsStuckVerdictForUnmergedBranchRefLanding verifies Reconcile
 // prints a loud, branch-naming stuck verdict — never a silent no-op — for a
-// LandingBranchRef (settle's pre-merge record) that BranchMergedIntoIntegration
-// reports as not yet an ancestor of its Integration branch (issue #1809: the
+// LandingBranchRef (settle's pre-merge record) that LandingContained reports
+// as not yet contained in its Integration branch (issue #1809: the
 // silent-stuck-cluster this typed repair path replaces).
 func TestRun_PrintsStuckVerdictForUnmergedBranchRefLanding(t *testing.T) {
 	f := forge.NewFake()
 	f.SetIssue(forge.Issue{Number: "42", State: forge.IssueOpen, Landing: "agent/issue-42"})
-	f.SetBranchMergedIntoIntegration("agent/issue-42", "42", false, nil)
+	f.SetLandingContained("agent/issue-42", "42", false, nil)
 	cf := f.AsLocal()
 
 	out := testutil.CaptureStdout(t, func() {
-		res, err := reconcile.Run(f, cf, fakeLiveness{}, selfParent)
+		res, err := reconcile.Run(f, cf, fakeLiveness{}, selfScope)
 		if err != nil {
 			t.Fatalf("Run: %v", err)
 		}
@@ -371,14 +371,14 @@ func TestRun_PrintsStuckVerdictForUnmergedBranchRefLanding(t *testing.T) {
 // a stuck LandingBranchRef's branch name keyed by issue number (issue
 // #1811) — Surface's basis for naming "stuck landing" as a broad ticket's
 // held gate instead of the generic "open seam", without redoing the same
-// ancestry check reconcile.Run just performed.
+// containment check reconcile.Run just performed.
 func TestRun_ReportsStuckBranchRefInResult(t *testing.T) {
 	f := forge.NewFake()
 	f.SetIssue(forge.Issue{Number: "42", State: forge.IssueOpen, Landing: "agent/issue-42"})
-	f.SetBranchMergedIntoIntegration("agent/issue-42", "42", false, nil)
+	f.SetLandingContained("agent/issue-42", "42", false, nil)
 	cf := f.AsLocal()
 
-	res, err := reconcile.Run(f, cf, fakeLiveness{}, selfParent)
+	res, err := reconcile.Run(f, cf, fakeLiveness{}, selfScope)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -389,19 +389,19 @@ func TestRun_ReportsStuckBranchRefInResult(t *testing.T) {
 
 // TestRun_HealsBranchRefLandingWhenAncestorOfIntegration verifies Reconcile
 // repairs a merged-but-mislabeled seam: a LandingBranchRef whose branch
-// BranchMergedIntoIntegration confirms already landed is upgraded to the
-// rich IntegrationRef form (recorded via LandingRecorder) and the seam closes
+// LandingContained confirms already landed is upgraded to the rich
+// IntegrationRef form (recorded via LandingRecorder) and the seam closes
 // through the normal close path — issue #1809's healing behavior for a seam
 // whose post-merge landing upgrade never ran even though the merge itself
 // succeeded.
 func TestRun_HealsBranchRefLandingWhenAncestorOfIntegration(t *testing.T) {
 	f := forge.NewFake()
 	f.SetIssue(forge.Issue{Number: "42", State: forge.IssueOpen, Landing: "agent/issue-42"})
-	f.SetBranchMergedIntoIntegration("agent/issue-42", "42", true, nil)
+	f.SetLandingContained("agent/issue-42", "42", true, nil)
 	f.SetIntegrationTip("42", "integration/42@abc123")
 	cf := f.AsLocal()
 
-	res, err := reconcile.Run(f, cf, fakeLiveness{}, selfParent)
+	res, err := reconcile.Run(f, cf, fakeLiveness{}, selfScope)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -422,23 +422,25 @@ func TestRun_HealsBranchRefLandingWhenAncestorOfIntegration(t *testing.T) {
 }
 
 // TestRun_UsesInjectedParentResolverForBranchRef verifies Run resolves a
-// LandingBranchRef's parent through the injected parentFor callback instead
-// of reaching into forge/local itself (issue #1819: reconcile stays
+// LandingBranchRef's scope through the injected scopeFor callback instead of
+// reaching into forge/local itself (issue #1819: reconcile stays
 // adapter-agnostic, driving every Code Forge only through forge's own
 // interfaces and caller-supplied callbacks).
 func TestRun_UsesInjectedParentResolverForBranchRef(t *testing.T) {
 	f := forge.NewFake()
 	f.SetIssue(forge.Issue{Number: "42", State: forge.IssueOpen, Landing: "agent/issue-42"})
-	f.SetBranchMergedIntoIntegration("agent/issue-42", "custom-parent", true, nil)
+	f.SetLandingContained("agent/issue-42", "custom-parent", true, nil)
 	f.SetIntegrationTip("custom-parent", "integration/custom-parent@abc123")
 	cf := f.AsLocal()
 
-	res, err := reconcile.Run(f, cf, fakeLiveness{}, func(num string) string { return "custom-parent" })
+	res, err := reconcile.Run(f, cf, fakeLiveness{}, func(num string) forge.SeedScope {
+		return forge.NewSeedScope("custom-parent", "integration/custom-parent")
+	})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	if len(res.Closed) != 1 || res.Closed[0] != "42" {
-		t.Errorf("Closed = %v, want [42] -- Run must resolve the parent through the injected callback, not forge/local's own default", res.Closed)
+		t.Errorf("Closed = %v, want [42] -- Run must resolve the scope through the injected callback, not forge/local's own default", res.Closed)
 	}
 }
 
@@ -453,7 +455,7 @@ func TestRun_PrintsUnverifiableForNonLocalLandingShape(t *testing.T) {
 	cf := f.AsLocal()
 
 	out := testutil.CaptureStdout(t, func() {
-		res, err := reconcile.Run(f, cf, fakeLiveness{}, selfParent)
+		res, err := reconcile.Run(f, cf, fakeLiveness{}, selfScope)
 		if err != nil {
 			t.Fatalf("Run: %v", err)
 		}
@@ -466,40 +468,80 @@ func TestRun_PrintsUnverifiableForNonLocalLandingShape(t *testing.T) {
 	}
 }
 
-// TestRun_SkipsLocalIssueWithNoLanding verifies Reconcile leaves a local
-// issue with no recorded landing untouched, never calling VerifyLanding — a
-// local landing has no branch-discovery fallback (unlike the PRForge path):
-// settle is the only writer of the landing: field.
-func TestRun_SkipsLocalIssueWithNoLanding(t *testing.T) {
+// TestRun_SilentlyLeavesLocalIssueOpenWhenDiscoveredBranchNotContained
+// verifies Reconcile's local-forge discovery path (issue #2151) — which
+// wraps the agent branch as a BranchRef Landing and asks LandingContained,
+// mirroring prReconciler's own branch-discovery fallback — stays silent, not
+// loud, when the discovered branch isn't (yet) contained: the common case,
+// since most issues with no recorded landing genuinely haven't landed.
+func TestRun_SilentlyLeavesLocalIssueOpenWhenDiscoveredBranchNotContained(t *testing.T) {
 	f := forge.NewFake()
 	f.SetIssue(forge.Issue{Number: "42", State: forge.IssueOpen})
 	cf := f.AsLocal()
 
-	res, err := reconcile.Run(f, cf, fakeLiveness{}, selfParent)
+	res, err := reconcile.Run(f, cf, fakeLiveness{}, selfScope)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	if len(res.Closed) != 0 {
 		t.Errorf("Closed = %v, want none", res.Closed)
 	}
-	if len(f.VerifyLandingCalls) != 0 {
-		t.Errorf("VerifyLandingCalls = %v, want none", f.VerifyLandingCalls)
+	if len(f.LandingContainedCalls) != 1 {
+		t.Errorf("LandingContainedCalls = %v, want exactly 1 (the discovery attempt)", f.LandingContainedCalls)
+	}
+	if len(f.RecordLandingCalls) != 0 {
+		t.Errorf("RecordLandingCalls = %v, want none", f.RecordLandingCalls)
+	}
+}
+
+// TestRun_DiscoversLocalLandingByBranchAndCloses verifies Reconcile's
+// local-forge discovery path closes an issue with no recorded landing once
+// LandingContained reports its agent branch already contained in scope's own
+// Integration branch — the no-PR counterpart of
+// TestRun_DiscoversMergedLandingByBranchAndCloses, recording the resolved
+// IntegrationTip as the discovered landing (issue #2151).
+func TestRun_DiscoversLocalLandingByBranchAndCloses(t *testing.T) {
+	f := forge.NewFake()
+	f.SetIssue(forge.Issue{Number: "42", State: forge.IssueOpen})
+	f.BranchPrefix = "agent/issue-"
+	branch := f.AgentBranch("42")
+	f.SetLandingContained(branch, "42", true, nil)
+	f.SetIntegrationTip("42", "integration/42@abc123")
+	cf := f.AsLocal()
+
+	res, err := reconcile.Run(f, cf, fakeLiveness{}, selfScope)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(res.Closed) != 1 || res.Closed[0] != "42" {
+		t.Errorf("Closed = %v, want [42]", res.Closed)
+	}
+	if len(f.RecordLandingCalls) != 1 || f.RecordLandingCalls[0] != (forge.RecordLandingCall{Num: "42", Landing: "integration/42@abc123"}) {
+		t.Errorf("RecordLandingCalls = %v, want one call recording the discovered landing", f.RecordLandingCalls)
+	}
+
+	iss, err := f.Issue("42")
+	if err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+	if iss.State != forge.IssueClosed {
+		t.Errorf("State = %v, want IssueClosed", iss.State)
 	}
 }
 
 // TestRun_SecondSweepLocalLandingIsNoOp verifies a second Run over an
 // already-closed local landing closes nothing further, mirroring
-// TestRun_SecondSweepIsNoOp for the LandingVerifier path.
+// TestRun_SecondSweepIsNoOp for the LandingContained path.
 func TestRun_SecondSweepLocalLandingIsNoOp(t *testing.T) {
 	f := forge.NewFake()
 	f.SetIssue(forge.Issue{Number: "42", State: forge.IssueOpen, Landing: "integration/1694@abc123"})
-	f.SetVerifyLanding("integration/1694@abc123", true, nil)
+	f.SetLandingContained("integration/1694@abc123", "42", true, nil)
 	cf := f.AsLocal()
 
-	if _, err := reconcile.Run(f, cf, fakeLiveness{}, selfParent); err != nil {
+	if _, err := reconcile.Run(f, cf, fakeLiveness{}, selfScope); err != nil {
 		t.Fatalf("first Run: %v", err)
 	}
-	res, err := reconcile.Run(f, cf, fakeLiveness{}, selfParent)
+	res, err := reconcile.Run(f, cf, fakeLiveness{}, selfScope)
 	if err != nil {
 		t.Fatalf("second Run: %v", err)
 	}
@@ -511,17 +553,17 @@ func TestRun_SecondSweepLocalLandingIsNoOp(t *testing.T) {
 	}
 }
 
-// TestRun_PropagatesLocalLandingVerifyError verifies Reconcile surfaces a
-// genuine VerifyLanding error (a local-git failure, not the normal
-// merged=false "not landed yet" outcome) rather than swallowing it.
-func TestRun_PropagatesLocalLandingVerifyError(t *testing.T) {
+// TestRun_PropagatesLocalLandingContainmentError verifies Reconcile surfaces
+// a genuine LandingContained error (a local-git failure, not the normal
+// contained=false "not landed yet" outcome) rather than swallowing it.
+func TestRun_PropagatesLocalLandingContainmentError(t *testing.T) {
 	f := forge.NewFake()
 	f.SetIssue(forge.Issue{Number: "42", State: forge.IssueOpen, Landing: "integration/1694@abc123"})
 	wantErr := errors.New("local: repo unreadable")
-	f.SetVerifyLanding("integration/1694@abc123", false, wantErr)
+	f.SetLandingContained("integration/1694@abc123", "42", false, wantErr)
 	cf := f.AsLocal()
 
-	_, err := reconcile.Run(f, cf, fakeLiveness{}, selfParent)
+	_, err := reconcile.Run(f, cf, fakeLiveness{}, selfScope)
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("Run error = %v, want it to wrap %v", err, wantErr)
 	}
@@ -535,11 +577,11 @@ func TestRun_PropagatesLocalLandingVerifyError(t *testing.T) {
 // and ContainerLive defaults to (false, false) (not live, not reachable) —
 // tests opt in per issue number to the death-signal values they want to
 // assert against.
-// selfParent is a parentFor stub for tests whose fixture issues carry no
+// selfScope is a scopeFor stub for tests whose fixture issues carry no
 // parent: frontmatter — mirroring local.ResolveParent's own fallback (a
-// parentless seam is its own broad ticket), so the BranchMergedIntoIntegration/
-// IntegrationTip fixtures keyed on an issue's own number still match.
-func selfParent(num string) string { return num }
+// parentless seam is its own broad ticket), so the SetLandingContained/
+// SetIntegrationTip fixtures keyed on an issue's own number still match.
+func selfScope(num string) forge.SeedScope { return forge.NewSeedScope(num, "integration/"+num) }
 
 type fakeLiveness struct {
 	stale     map[string]bool
@@ -566,7 +608,7 @@ func TestRun_ResetsOrphanedInProgressIssue(t *testing.T) {
 		reachable: map[string]bool{"42": true},
 	}
 
-	res, err := reconcile.Run(f, f, lp, selfParent)
+	res, err := reconcile.Run(f, f, lp, selfScope)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -593,7 +635,7 @@ func TestRun_ResetsOrphanedInProgressIssue_UnreachableRuntime(t *testing.T) {
 	f.SetIssue(forge.Issue{Number: "42", State: forge.IssueOpen, Labels: []string{"in-progress"}})
 	lp := fakeLiveness{stale: map[string]bool{"42": true}} // reachable defaults to false
 
-	res, err := reconcile.Run(f, f, lp, selfParent)
+	res, err := reconcile.Run(f, f, lp, selfScope)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -614,7 +656,7 @@ func TestRun_LeavesInProgressUntouched_WhenPRExistsForBranch(t *testing.T) {
 	f.SetPRState("https://github.com/o/r/pull/9", forge.PRClosed)
 	lp := fakeLiveness{stale: map[string]bool{"42": true}, reachable: map[string]bool{"42": true}}
 
-	res, err := reconcile.Run(f, f, lp, selfParent)
+	res, err := reconcile.Run(f, f, lp, selfScope)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -641,7 +683,7 @@ func TestRun_LeavesInProgressUntouched_WhenBranchExistsNoPR(t *testing.T) {
 	f.SetBranchExists(f.AgentBranch("42"), true)
 	lp := fakeLiveness{stale: map[string]bool{"42": true}, reachable: map[string]bool{"42": true}}
 
-	res, err := reconcile.Run(f, f, lp, selfParent)
+	res, err := reconcile.Run(f, f, lp, selfScope)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -666,7 +708,7 @@ func TestRun_LeavesInProgressUntouched_WhenLogFresh(t *testing.T) {
 	f.SetIssue(forge.Issue{Number: "42", State: forge.IssueOpen, Labels: []string{"in-progress"}})
 	lp := fakeLiveness{reachable: map[string]bool{"42": true}} // stale defaults to false
 
-	res, err := reconcile.Run(f, f, lp, selfParent)
+	res, err := reconcile.Run(f, f, lp, selfScope)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -689,7 +731,7 @@ func TestRun_LeavesInProgressUntouched_WhenContainerLive(t *testing.T) {
 		reachable: map[string]bool{"42": true},
 	}
 
-	res, err := reconcile.Run(f, f, lp, selfParent)
+	res, err := reconcile.Run(f, f, lp, selfScope)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -707,10 +749,10 @@ func TestRun_ResetIsIdempotent(t *testing.T) {
 	f.SetIssue(forge.Issue{Number: "42", State: forge.IssueOpen, Labels: []string{"in-progress"}})
 	lp := fakeLiveness{stale: map[string]bool{"42": true}, reachable: map[string]bool{"42": true}}
 
-	if _, err := reconcile.Run(f, f, lp, selfParent); err != nil {
+	if _, err := reconcile.Run(f, f, lp, selfScope); err != nil {
 		t.Fatalf("first Run: %v", err)
 	}
-	res, err := reconcile.Run(f, f, lp, selfParent)
+	res, err := reconcile.Run(f, f, lp, selfScope)
 	if err != nil {
 		t.Fatalf("second Run: %v", err)
 	}
@@ -730,7 +772,7 @@ func TestRun_NeverMergesOrPushes(t *testing.T) {
 	f.SetIssue(forge.Issue{Number: "42", State: forge.IssueOpen, Landing: "https://github.com/o/r/pull/1"})
 	f.SetPRState("https://github.com/o/r/pull/1", forge.PRMerged)
 
-	if _, err := reconcile.Run(f, f, fakeLiveness{}, selfParent); err != nil {
+	if _, err := reconcile.Run(f, f, fakeLiveness{}, selfScope); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	if f.Merged != "" {

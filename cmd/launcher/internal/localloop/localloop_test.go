@@ -269,7 +269,10 @@ func TestWire_ComposedLoop_HappyPath(t *testing.T) {
 		t.Fatalf("issue %s labels = %v, want %s after settle", num, iss.Labels, testLabels.Complete)
 	}
 
-	res, err := reconcile.Run(it, cf, nil, func(num string) string { return lw.ResolveParent(num).String() })
+	res, err := reconcile.Run(it, cf, nil, func(num string) forge.SeedScope {
+		p := lw.ResolveParent(num)
+		return forge.NewSeedScope(p.String(), local.IntegrationBranch(p))
+	})
 	if err != nil {
 		t.Fatalf("reconcile.Run: %v", err)
 	}
@@ -347,7 +350,10 @@ func TestWire_ComposedLoop_EmptyTitleSanitizesToSlug(t *testing.T) {
 	}
 	s.Settle(dispatch.NewFake(), num, 0, result)
 
-	res, err := reconcile.Run(it, cf, nil, func(num string) string { return lw.ResolveParent(num).String() })
+	res, err := reconcile.Run(it, cf, nil, func(num string) forge.SeedScope {
+		p := lw.ResolveParent(num)
+		return forge.NewSeedScope(p.String(), local.IntegrationBranch(p))
+	})
 	if err != nil {
 		t.Fatalf("reconcile.Run: %v", err)
 	}
@@ -420,7 +426,10 @@ func TestWire_ComposedLoop_GarbageParentUsesTitleNaming(t *testing.T) {
 	}
 	s.Settle(dispatch.NewFake(), num, 0, result)
 
-	res, err := reconcile.Run(it, cf, nil, func(num string) string { return lw.ResolveParent(num).String() })
+	res, err := reconcile.Run(it, cf, nil, func(num string) forge.SeedScope {
+		p := lw.ResolveParent(num)
+		return forge.NewSeedScope(p.String(), local.IntegrationBranch(p))
+	})
 	if err != nil {
 		t.Fatalf("reconcile.Run: %v", err)
 	}
@@ -493,7 +502,10 @@ func TestWire_ComposedLoop_HealsStuckBranchRefLanding(t *testing.T) {
 		t.Fatalf("RecordLanding: %v", err)
 	}
 
-	res, err := reconcile.Run(it, cf, nil, func(num string) string { return lw.ResolveParent(num).String() })
+	res, err := reconcile.Run(it, cf, nil, func(num string) forge.SeedScope {
+		p := lw.ResolveParent(num)
+		return forge.NewSeedScope(p.String(), local.IntegrationBranch(p))
+	})
 	if err != nil {
 		t.Fatalf("reconcile.Run: %v", err)
 	}
@@ -576,7 +588,10 @@ func TestWire_ComposedLoop_MissingBundleBlocksNotFailed(t *testing.T) {
 		t.Fatalf("issue %s labels = %v, must NOT carry %s after a blocked relay", num, iss.Labels, testLabels.Failed)
 	}
 
-	res, err := reconcile.Run(it, cf, nil, func(num string) string { return lw.ResolveParent(num).String() })
+	res, err := reconcile.Run(it, cf, nil, func(num string) forge.SeedScope {
+		p := lw.ResolveParent(num)
+		return forge.NewSeedScope(p.String(), local.IntegrationBranch(p))
+	})
 	if err != nil {
 		t.Fatalf("reconcile.Run: %v", err)
 	}
@@ -651,7 +666,10 @@ func TestWire_ComposedLoop_OneOpenSiblingNotSurfaced(t *testing.T) {
 	}
 	s.Settle(dispatch.NewFake(), landedNum, 0, result)
 
-	res, err := reconcile.Run(it, cf, nil, func(num string) string { return lw.ResolveParent(num).String() })
+	res, err := reconcile.Run(it, cf, nil, func(num string) forge.SeedScope {
+		p := lw.ResolveParent(num)
+		return forge.NewSeedScope(p.String(), local.IntegrationBranch(p))
+	})
 	if err != nil {
 		t.Fatalf("reconcile.Run: %v", err)
 	}
@@ -737,7 +755,10 @@ func TestWire_ComposedLoop_MixedParentBatch_EachOwnIntegrationBranch(t *testing.
 		Outcome: outcome.Outcome{Issue: numB, Landing: branchB, Status: "ready"},
 	})
 
-	res, err := reconcile.Run(it, cfA, nil, func(num string) string { return lw.ResolveParent(num).String() })
+	res, err := reconcile.Run(it, cfA, nil, func(num string) forge.SeedScope {
+		p := lw.ResolveParent(num)
+		return forge.NewSeedScope(p.String(), local.IntegrationBranch(p))
+	})
 	if err != nil {
 		t.Fatalf("reconcile.Run: %v", err)
 	}
@@ -784,21 +805,22 @@ func TestWire_ComposedLoop_MixedParentBatch_EachOwnIntegrationBranch(t *testing.
 // The load-bearing pre-#2130 discriminator here is the RELEASED-REASON
 // string blockerReady prints to stdout (blocker.go:236): "landing present
 // on integration/<parent> (this seam's own integration branch)". Pre-#2130
-// the LandingVerifier fallback releases too, but prints a different reason
-// ("landing verified merged into Integration") — so asserting this exact
-// string goes red if #2130's containment gate is reverted. The release-gate
-// *result* (ready=true) is NOT itself a discriminator: in this same-parent
-// geometry it is identical pre- and post-#2130 (the cross-parent companion
-// test, TestWire_ComposedLoop_CrossParentBlockerHoldsLoudly, is the
-// release-gate's own pre-#2130 regression guard).
+// the removed no-scope containment fallback (issue #2151) released too, but
+// printed a different reason ("landing verified merged into Integration") —
+// so asserting this exact string goes red if #2130's containment gate is
+// reverted. The release-gate *result* (ready=true) is NOT itself a
+// discriminator: in this same-parent geometry it is identical pre- and
+// post-#2130 (the cross-parent companion test,
+// TestWire_ComposedLoop_CrossParentBlockerHoldsLoudly, is the release-gate's
+// own pre-#2130 regression guard).
 //
 // #01 staying OPEN through the readiness assertion is a SUPPORTING check
 // only: it rules out the trivial IssueClosed/IssueMerged shortcut (which
 // would also release, but for a non-#2130 reason), so combined with the
 // released-reason string it pins the release specifically to the #2130
 // containment path. It does NOT, by itself, distinguish pre-#2130 behavior
-// — the pre-#2130 LandingVerifier fallback also releases with the blocker
-// still open.
+// — the pre-#2130 no-scope fallback also released with the blocker still
+// open.
 func TestWire_ComposedLoop_SameParentBlockerChainLandsInOneRun(t *testing.T) {
 	setGitIdentityEnv(t)
 	operatorDir := newOperatorCheckout(t)
@@ -887,7 +909,7 @@ func TestWire_ComposedLoop_SameParentBlockerChainLandsInOneRun(t *testing.T) {
 
 	wantReleaseReason := fmt.Sprintf("landing present on integration/%s (this seam's own integration branch)", lw.ResolveParent(dependentNum).String())
 	if !strings.Contains(output, wantReleaseReason) {
-		t.Errorf("captured stdout = %q, want it to contain the #2130 released-via-containment reason %q -- pre-#2130 would print the LandingVerifier \"verified merged into Integration\" reason instead", output, wantReleaseReason)
+		t.Errorf("captured stdout = %q, want it to contain the #2130 released-via-containment reason %q -- pre-#2130 would print the removed no-scope fallback's \"verified merged into Integration\" reason instead", output, wantReleaseReason)
 	}
 
 	iss01, err := it.Issue(blockerNum)
@@ -928,7 +950,10 @@ func TestWire_ComposedLoop_SameParentBlockerChainLandsInOneRun(t *testing.T) {
 		Outcome: outcome.Outcome{Issue: dependentNum, Landing: branch02, Status: "ready"},
 	})
 
-	res, err := reconcile.Run(it, cf02, nil, func(num string) string { return lw.ResolveParent(num).String() })
+	res, err := reconcile.Run(it, cf02, nil, func(num string) forge.SeedScope {
+		p := lw.ResolveParent(num)
+		return forge.NewSeedScope(p.String(), local.IntegrationBranch(p))
+	})
 	if err != nil {
 		t.Fatalf("reconcile.Run: %v", err)
 	}
@@ -1008,18 +1033,17 @@ func captureStdout(t *testing.T, fn func()) string {
 // for that companion case) — and must never be dispatched onto the bare
 // base branch as a result.
 //
-// Before #2130, the local forge satisfied forge.LandingVerifier, and
-// blockerReady's fallback called VerifyLanding(issue.Landing), which merge-
-// base-checks the blocker's landing against the blocker's OWN Integration
-// branch (integration/alpha-engine here) — not the dependent's seed branch
-// (integration/beta-engine). A blocker merged onto ANY Integration branch
-// therefore read as "verified merged into Integration" and released every
-// waiting dependent, regardless of which seam it actually seeded from — the
-// cross-parent leak #2130 closes. This test drives that exact setup (a
-// blocker landed on a DIFFERENT parent's Integration branch than the
-// dependent's own) through the composed wiring and asserts the gate now
-// holds instead of releasing: it fails against the pre-#2130
-// LandingVerifier fallback (ready would come back true there) and passes
+// Before #2130, the local forge's now-removed no-scope containment fallback
+// (issue #2151) merge-base-checked the blocker's landing against the
+// blocker's OWN Integration branch (integration/alpha-engine here) — not the
+// dependent's seed branch (integration/beta-engine). A blocker merged onto
+// ANY Integration branch therefore read as "verified merged into
+// Integration" and released every waiting dependent, regardless of which
+// seam it actually seeded from — the cross-parent leak #2130 closes. This
+// test drives that exact setup (a blocker landed on a DIFFERENT parent's
+// Integration branch than the dependent's own) through the composed wiring
+// and asserts the gate now holds instead of releasing: it fails against the
+// pre-#2130 no-scope fallback (ready would come back true there) and passes
 // against current HEAD, where forge/local's LandingContainmentQuery checks
 // containment against the dependent's own seed-branch parent
 // (the SeedScope, from cfg.SeedScopeOf) instead.
@@ -1085,7 +1109,7 @@ func TestWire_ComposedLoop_CrossParentBlockerHoldsLoudly(t *testing.T) {
 	// integration/beta-engine, never received the blocker's commit, so
 	// #2130's LandingContainmentQuery reports not-contained rather than
 	// falling back to IssueClosed (the blocker is still open) or a
-	// cross-branch LandingVerifier check.
+	// cross-branch containment check against the wrong parent.
 	rdy, err := waves.NewReadiness(it, []waves.Issue{{Number: dependentNum}})
 	if err != nil {
 		t.Fatalf("waves.NewReadiness: %v", err)

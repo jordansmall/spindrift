@@ -72,6 +72,14 @@ func (h *localCodeForgeHarness) FailNextRebase(ref string) {
 
 func (h *localCodeForgeHarness) Parent() string { return h.parent.String() }
 
+// Scope implements forgetest.LandingHarness (issue #2151): the harness's own
+// parent paired with the real Integration branch label the local adapter
+// renders for it, so LandingContained checks containment against exactly the
+// branch MarkLanded merged onto.
+func (h *localCodeForgeHarness) Scope() forge.SeedScope {
+	return forge.NewSeedScope(h.parent.String(), IntegrationBranch(h.parent))
+}
+
 // MarkLanded implements forgetest.LandingHarness (issue #1809): merges num's
 // already-seeded branch for real and resolves the landed IntegrationRef via
 // the same forge.LandingRef surface production's post-merge upgrade uses.

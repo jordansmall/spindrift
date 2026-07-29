@@ -256,12 +256,15 @@ func TestNextReady_Local_ClosedOnDiskUnblocksDependent_IndependentSeamUnaffected
 }
 
 // TestNextReady_Local_LandingVerifiedUnblocksDependentInSameRun guards issue
-// #1850: a local blocker's landing verifying merged into its Integration
-// branch must unblock its dependent immediately, in the very next readiness
-// check -- not held until the post-loop reconcile closes the blocker issue.
+// #1850: a local blocker's landing being contained in its Integration branch
+// must unblock its dependent immediately, in the very next readiness check --
+// not held until the post-loop reconcile closes the blocker issue. Requires
+// a non-empty c.SeedScopeOf (issue #2151 dropped the pre-#2130 no-scope
+// self-verification fallback a zero SeedScope used to fall back to).
 func TestNextReady_Local_LandingVerifiedUnblocksDependentInSameRun(t *testing.T) {
 	c := baseConfig()
 	c.Label = "agent-trigger"
+	c.SeedScopeOf = func(string) forge.SeedScope { return forge.NewSeedScope("parent", "integration/parent") }
 
 	fc := forge.NewFake(dispatchLabels(c))
 	cf := fc.AsLocal()
@@ -290,7 +293,7 @@ func TestNextReady_Local_LandingVerifiedUnblocksDependentInSameRun(t *testing.T)
 	// integration/<parent>@<sha> ref, but seam 1's issue is still OPEN
 	// (reconcile hasn't run yet, it runs once after the loop returns).
 	fc.SetIssue(forge.Issue{Number: "1", State: "OPEN", Landing: "integration/parent@abc123"})
-	fc.SetVerifyLanding("integration/parent@abc123", true, nil)
+	fc.SetLandingContained("integration/parent@abc123", "parent", true, nil)
 
 	iss, ok = nextReady(c, fc, cf, checkOverlap, []Issue{
 		{Number: "2", Title: "dependent"},

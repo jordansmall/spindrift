@@ -132,8 +132,8 @@ func (r Readiness) Status(cfg Config, it forge.IssueTracker, cf forge.CodeForge,
 // readiness falls straight to the issue-closed check. scope is the caller's
 // dependent's already-resolved opaque SeedScope (#2130) that a
 // LandingContainmentQuery forge checks the blocker's landing against; a
-// zero SeedScope keeps the pre-#2130 landing-verification behavior
-// (LandingVerifier).
+// zero SeedScope (no parent) means the containment check never runs, leaving
+// an open IntegrationRef-landed blocker unready until it closes.
 func (r Readiness) Ready(it forge.IssueTracker, cf forge.CodeForge, dep string, scope forge.SeedScope) bool {
 	ready, _ := blockerReady(it, cf, dep, scope)
 	return ready
@@ -200,8 +200,8 @@ func detectCycle(edges map[string][]string, nums []string) (string, bool) {
 // readiness without ever calling it.Issue, letting blockerStatus tell "no
 // fetch happened" apart from "fetched and still open" without a second call.
 // scope is the dependent's own already-resolved opaque SeedScope (#2130); a
-// zero SeedScope means unknown/legacy, keeping the pre-#2130 LandingVerifier
-// behavior.
+// zero SeedScope (no parent) skips the seed-branch containment check
+// entirely, so an open IntegrationRef-landed blocker stays unready.
 func blockerReady(it forge.IssueTracker, cf forge.CodeForge, dep string, scope forge.SeedScope) (ready bool, fi *forge.Issue) {
 	if pr, ok := cf.(forge.PRForge); ok {
 		branch := cf.AgentBranch(dep)
@@ -229,7 +229,7 @@ func blockerReady(it forge.IssueTracker, cf forge.CodeForge, dep string, scope f
 	if issue.Landing != "" {
 		if landing, perr := forge.ParseLanding(issue.Landing); perr == nil && landing.Kind == forge.LandingIntegrationRef {
 			if q, ok := cf.(forge.LandingContainmentQuery); ok && scope.Parent() != "" {
-				contained, cerr := q.IntegrationContainsLanding(issue.Landing, scope.Parent())
+				contained, cerr := q.LandingContained(landing, scope)
 				if cerr != nil {
 					fmt.Printf("    .. blocker #%s seed-branch containment check failed: %v; holding\n", dep, cerr)
 				} else if contained {
@@ -237,14 +237,6 @@ func blockerReady(it forge.IssueTracker, cf forge.CodeForge, dep string, scope f
 					return true, &issue
 				} else {
 					fmt.Printf("    .. blocker #%s landed but not yet on %s (this seam's own integration branch); holding\n", dep, scope)
-				}
-			} else if verifier, ok := cf.(forge.LandingVerifier); ok {
-				merged, verr := verifier.VerifyLanding(issue.Landing)
-				if verr != nil {
-					fmt.Printf("    .. blocker #%s landing verification failed: %v; holding\n", dep, verr)
-				} else if merged {
-					fmt.Printf("    .. blocker #%s landing verified merged into Integration (still open); treating as satisfied\n", dep)
-					return true, &issue
 				}
 			}
 		}

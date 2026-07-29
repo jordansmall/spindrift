@@ -511,7 +511,7 @@ func TestEvictUnmetBlockers_LocalForge_SameParentBlockerLandingReleases(t *testi
 	// #15 (the dependent) shares #99's own parent: frontmatter.
 	fc.SetIssue(forge.Issue{Number: "15", Title: "needs 99", Parent: "shared-parent"})
 	fc.SetIssue(forge.Issue{Number: "99", State: "OPEN", Landing: landing})
-	fc.SetIntegrationContainsLanding(landing, "shared-parent", true, nil)
+	fc.SetLandingContained(landing, "shared-parent", true, nil)
 	cf := fc.AsLocal()
 
 	issues := []issue{{number: "15", title: "needs 99"}}
@@ -537,8 +537,8 @@ func TestEvictUnmetBlockers_LocalForge_CrossParentBlockerLandingHolds(t *testing
 	fc.SetIssue(forge.Issue{Number: "15", Title: "needs 99", Parent: "dependents-own-parent"})
 	fc.SetIssue(forge.Issue{Number: "99", State: "OPEN", Landing: landing})
 	// The landing reached "some-other-parent"'s seed branch, not #15's own.
-	fc.SetIntegrationContainsLanding(landing, "some-other-parent", true, nil)
-	fc.SetIntegrationContainsLanding(landing, "dependents-own-parent", false, nil)
+	fc.SetLandingContained(landing, "some-other-parent", true, nil)
+	fc.SetLandingContained(landing, "dependents-own-parent", false, nil)
 	cf := fc.AsLocal()
 
 	issues := []issue{{number: "15", title: "needs 99"}}

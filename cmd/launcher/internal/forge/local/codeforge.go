@@ -89,80 +89,58 @@ func (l *localCodeForge) LandingRef() (string, error) {
 	return landingRef(l.repoPath, IntegrationBranch(l.parent))
 }
 
-// VerifyLanding reports whether landing is merged into its own named
-// Integration branch, with no network call (forge.LandingVerifier, ADR
-// 0029, ADR 0033) — reconcile's sole closing authority calls this instead of
-// a PRForge check when cf has no PR concept. landing is self-describing
-// ("<branch>@<sha>", ADR 0033), so verification never depends on which
-// parent this particular adapter instance was constructed with (issue
-// #1734) — one shared instance correctly verifies every parent's seams in a
-// mixed batch, not just its own. A landing that doesn't parse (the raw
-// agent-branch name settle recorded before a merge was attempted) is
-// reported unmerged rather than an error — the same "stays open" posture a
-// genuine ancestry miss gets.
-func (l *localCodeForge) VerifyLanding(landing string) (bool, error) {
-	branch, sha, ok := parseLandingRef(landing)
-	if !ok {
-		return false, nil
-	}
-	return isMergedIntoIntegration(l.repoPath, sha, branch)
-}
-
-// BranchMergedIntoIntegration implements the optional forge.LandingRepair
-// surface (ADR 0029, ADR 0033, issue #1809) — reconcile's healing-path check
-// for a stuck LandingBranchRef: is branch, resolved against parent's own
-// Integration branch (explicit, not l's own construction-time parent — see
-// forge.LandingRepair), an ancestor of it, or — once landing is rebase-based
-// (issue #1889) — at least patch-equivalent to it (issue #1890): rebasing
-// branch onto a since-advanced Integration branch replays its commits under
-// new shas, so a genuinely-landed branch can fail the ancestry check outright
-// and still need recognizing. A branch the Accumulation repo has never seen
-// (never relayed, or a since-abandoned attempt) reports merged=false, nil,
-// the same "stays open" posture as a genuinely unmerged one.
-func (l *localCodeForge) BranchMergedIntoIntegration(branch, parent string) (bool, error) {
-	sha, ok, err := branchTipSHA(l.repoPath, branch)
-	if err != nil {
-		return false, err
-	}
-	if !ok {
-		return false, nil
-	}
-	integrationBranch := IntegrationBranch(SanitizedParent{token: parent})
-	merged, err := isMergedIntoIntegration(l.repoPath, sha, integrationBranch)
-	if err != nil || merged {
-		return merged, err
-	}
-	return patchEquivalentToIntegration(l.repoPath, sha, integrationBranch)
-}
-
 // IntegrationTip implements the optional forge.LandingRepair surface (ADR
 // 0029, ADR 0033, issue #1809) — reconcile's healing-path resolution of
 // parent's own Integration branch (explicit, not l's own construction-time
 // parent) to its current landing-ready "<branch>@<sha>" reference, the value
-// a confirmed BranchMergedIntoIntegration repair records.
+// a confirmed LandingContained repair records.
 func (l *localCodeForge) IntegrationTip(parent string) (string, error) {
 	return landingRef(l.repoPath, IntegrationBranch(SanitizedParent{token: parent}))
 }
 
-// IntegrationContainsLanding implements the optional
-// forge.LandingContainmentQuery surface (issue #2129, issue #1734, ADR
-// 0033) — a parent-agnostic check of whether parent's own Integration
-// branch (explicit, not l's own construction-time parent) already contains
-// landing's commit, either as a plain git ancestor or — mirroring
-// BranchMergedIntoIntegration's rebase-aware fallback — by
-// patch-equivalence, since a rebase-based land (issue #1889) replays
-// commits under new shas an ancestry check alone can't see. A malformed
-// landing reports contained=false, nil, the same "not ready" posture a
-// genuine containment miss gets.
-func (l *localCodeForge) IntegrationContainsLanding(landing, parent string) (bool, error) {
-	_, sha, ok := parseLandingRef(landing)
-	if !ok {
-		return false, nil
+// LandingContained implements the optional forge.LandingContainmentQuery
+// surface (issue #2129, issue #1734, ADR 0033, issue #2151) — the single
+// no-network containment check replacing the three narrower single-purpose
+// methods this issue collapsed into it: a no-scope self-verification check,
+// a bookkeeping-repair ancestry check that used to live on LandingRepair,
+// and this method's own prior narrower single-shape query. It resolves
+// landing's own commit sha via landingSHA, then checks it against scope's
+// own Integration branch
+// (explicit, not l's own construction-time parent), via ancestry first and —
+// mirroring the pre-collapse rebase-aware fallback — patch-equivalence
+// second, since a rebase-based land (issue #1889) replays commits under new
+// shas an ancestry check alone can't see. A landing landingSHA can't resolve
+// reports contained=false, nil, the same "not ready" posture a genuine
+// containment miss gets.
+func (l *localCodeForge) LandingContained(landing forge.Landing, scope forge.SeedScope) (bool, error) {
+	sha, ok, err := landingSHA(l.repoPath, landing)
+	if err != nil || !ok {
+		return false, err
 	}
-	integrationBranch := IntegrationBranch(SanitizedParent{token: parent})
+	integrationBranch := IntegrationBranch(SanitizedParent{token: scope.Parent()})
 	contained, err := isMergedIntoIntegration(l.repoPath, sha, integrationBranch)
 	if err != nil || contained {
 		return contained, err
 	}
 	return patchEquivalentToIntegration(l.repoPath, sha, integrationBranch)
+}
+
+// landingSHA resolves landing's own commit sha, the value LandingContained
+// checks against scope's Integration branch: a LandingIntegrationRef (the
+// rich post-merge form) already carries it directly; a LandingBranchRef (the
+// raw, pre-merge record settle's outcome line wrote before any post-merge
+// upgrade) resolves it by looking up branch's current tip inside repoPath,
+// reporting ok=false with a nil error when the branch is absent (never
+// relayed, or a since-abandoned attempt); any other shape (e.g. a PR URL
+// reaching this local-only path) reports ok=false, nil outright — there is
+// no commit to resolve.
+func landingSHA(repoPath string, landing forge.Landing) (sha string, ok bool, err error) {
+	switch landing.Kind {
+	case forge.LandingIntegrationRef:
+		return landing.SHA, true, nil
+	case forge.LandingBranchRef:
+		return branchTipSHA(repoPath, landing.Branch)
+	default:
+		return "", false, nil
+	}
 }
