@@ -43,10 +43,12 @@ rec {
   # value. It is deliberately not inferred from a boolean `default`: several
   # knobs already carry `default = false` purely to render as a `types.bool`
   # flake option (lib/flakeModule.nix), while their CLI flag stays a
-  # space-separated value form with in-repo callers (dogfood.sh,
-  # ab-orchestrator.sh, dispatchContinuousArgs); inferring bool from the
-  # default would silently flip all of them. Each converts on its own ticket,
-  # migrating its callers atomically.
+  # space-separated value form with in-repo callers (e.g. dogfood.sh);
+  # inferring bool from the default would silently flip all of them. Each
+  # converts on its own ticket, migrating its callers atomically —
+  # --continuous-dispatch was one such knob until issue #2147 converted it
+  # to kind = "bool" and retired its hand-rolled --continuous passthrough in
+  # favour of the schema alias.
   flagKind =
     e:
     if e ? kind then e.kind else if builtins.isInt (e.default or null) then "int" else "string";
