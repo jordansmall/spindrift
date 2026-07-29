@@ -1,5 +1,125 @@
 # Changelog
 
+## [0.8.0](https://github.com/jordansmall/spindrift/compare/v0.7.1...v0.8.0) (2026-07-29)
+
+
+### Features
+
+* **agent:** make the outcome recovery nudge near-miss-aware ([3ceecd5](https://github.com/jordansmall/spindrift/commit/3ceecd5a146abeb574b08062f67f73f11ba73498))
+* **agent:** retry the outcome-backstop push with bounded backoff ([bd8eeb3](https://github.com/jordansmall/spindrift/commit/bd8eeb3e24f6543c69bc534da20bab245e7bc844))
+* **dispatch:** halt continuous dispatch on non-converging image ([4c106a8](https://github.com/jordansmall/spindrift/commit/4c106a845e9668dd19ddd7fc6e5e30a58b756475))
+* **dispatch:** render one per-model token table, drop cost ([6207272](https://github.com/jordansmall/spindrift/commit/62072720925221cc5cce21b84e3c5c74984264f8)), closes [#2086](https://github.com/jordansmall/spindrift/issues/2086)
+* **dispatch:** render per-model token breakdown in run usage ([1bd9deb](https://github.com/jordansmall/spindrift/commit/1bd9debd1b6276bd2177ee72800d60a91e2f1977))
+* **dogfood:** halt the loop on exit code 5 ([17ae809](https://github.com/jordansmall/spindrift/commit/17ae809c0620878e76c438d4a377a40fd75d6e78))
+* **dogfood:** move pidfile under .spindrift/ ([cf02ec0](https://github.com/jordansmall/spindrift/commit/cf02ec0fe350d24bcf082049f423845903688232))
+* **driver:** add opencode host-side Driver strategy ([3779767](https://github.com/jordansmall/spindrift/commit/3779767ec0201cd369f4aebc65cad4a019cddda9))
+* **driver:** aggregate per-model tokens from the run log ([ce1c0d0](https://github.com/jordansmall/spindrift/commit/ce1c0d0f5e5e6ded3bf30b2e7dd1c586b3d4dbd9))
+* **driver:** register the opencode Driver in the nix registry ([ff26c7b](https://github.com/jordansmall/spindrift/commit/ff26c7bcfea8915c5e1dff8ab68768f6656897fe))
+* **driver:** render opencode subagents to agents/*.md ([7f83eb5](https://github.com/jordansmall/spindrift/commit/7f83eb56117c385e35e227361399868e44fb5d86))
+* **drivers:** add a near-miss outcome extractor to the registry ([8ada9f0](https://github.com/jordansmall/spindrift/commit/8ada9f0779e7f5c7a3268485f844363ea8774a34))
+* **driver:** scope the OCI image name to the Driver ([ef64ab8](https://github.com/jordansmall/spindrift/commit/ef64ab8e6b3cf189536f3cb58bd9b50565fcbb06))
+* **driver:** select the Driver strategy by name in the box ([025a3c5](https://github.com/jordansmall/spindrift/commit/025a3c591381a362650ffd93325a7945a630e648))
+* **driver:** thread a top-level role into role resolution ([0143478](https://github.com/jordansmall/spindrift/commit/0143478a882600f3d987b41f6e9fc3bd80b1c7be)), closes [#2092](https://github.com/jordansmall/spindrift/issues/2092)
+* **forge:** distinguish absent bundle from unreadable in RelayBundle ([4655e3b](https://github.com/jordansmall/spindrift/commit/4655e3b2774b87eaa2eb051b2a13cd8142971f00))
+* **freshness:** expose tip tag and host-taint diagnostic ([0fbdd82](https://github.com/jordansmall/spindrift/commit/0fbdd82485f3acbfb7a5d51e3a17a08f5d0ac40b))
+* **launcher:** gate credential required-ness on the Driver ([b128924](https://github.com/jordansmall/spindrift/commit/b128924145e57513e89888c279b550d783efe5db))
+* **local:** file host-posted issues on the local tracker ([8fef885](https://github.com/jordansmall/spindrift/commit/8fef885b61b0bc0245eb12986d0670b202eeff59))
+* **local:** log the blocker-lookup error fallback path ([49f7872](https://github.com/jordansmall/spindrift/commit/49f7872b94ba5d8b536bf22561f2dcbb4cd65684))
+* **local:** query if Integration branch contains a landing ([d35584a](https://github.com/jordansmall/spindrift/commit/d35584a27656a1e2e19649d18d94d6c03c1ece93))
+* **local:** resolve seed branch and refuse silent bare-base seed ([ef3580d](https://github.com/jordansmall/spindrift/commit/ef3580db6e2b2b42f4b2f7378fe4361f3ccc7e4f)), closes [#2130](https://github.com/jordansmall/spindrift/issues/2130)
+* **logs:** relocate host logs under .spindrift/logs ([0034182](https://github.com/jordansmall/spindrift/commit/0034182eba42004f4fd50a35ad13ed85234e6c04))
+* **opencode:** aggregate usage from the run log ([62f5d9f](https://github.com/jordansmall/spindrift/commit/62f5d9f67902b25dabc207ecd41cf64b023ceca0)), closes [#2125](https://github.com/jordansmall/spindrift/issues/2125)
+* **orchestrator:** attribute the review pass to reviewer ([73c3f5b](https://github.com/jordansmall/spindrift/commit/73c3f5b973d40c3d37f230e85548d79e86db01d0)), closes [#2092](https://github.com/jordansmall/spindrift/issues/2092)
+* **roster:** expose the roster on the flake surface ([ef30c90](https://github.com/jordansmall/spindrift/commit/ef30c90e1b1a2748c0048322217ab27220d3e140))
+* **roster:** render subagents from an N-agent roster ([3089ac9](https://github.com/jordansmall/spindrift/commit/3089ac9f120cfced2ef198695dcb33dacbd1e1eb))
+* **runner:** keep OPENCODE_AUTH_CONTENT off the bwrap argv ([f764769](https://github.com/jordansmall/spindrift/commit/f764769f9574187e9b48eb38d67ba4e44cd2d14f))
+* **schema:** add the github-copilot Provider credential knob ([03f67cc](https://github.com/jordansmall/spindrift/commit/03f67cca681535d72ae6eabf181c67afc7b987e1))
+* **settle:** back off between transient rebase-push retries ([227ae70](https://github.com/jordansmall/spindrift/commit/227ae70e6245044da01d4660f220b22e779ed259))
+* **usage:** add per-model, per-category ModelUsage type ([bae4dbf](https://github.com/jordansmall/spindrift/commit/bae4dbf2423d2b16bd931a78f04d9529a1ef0006))
+* **usage:** label per-model token rows by exact model id ([d231ca4](https://github.com/jordansmall/spindrift/commit/d231ca4f45eac9aca05fe7fa622ec00993140bd2)), closes [#2110](https://github.com/jordansmall/spindrift/issues/2110)
+* **usage:** parse cache_creation TTL split on TokenUsage ([ae463f6](https://github.com/jordansmall/spindrift/commit/ae463f6e9b091176acb5961fb177de05d01b4e44))
+* **waves:** gate a local dependent on its own seed branch ([b801454](https://github.com/jordansmall/spindrift/commit/b8014548689a288677bd2a5634ba915115e8de72))
+
+
+### Bug Fixes
+
+* **agent:** clamp negative backoff/jitter in the backstop retry ([8b2be47](https://github.com/jordansmall/spindrift/commit/8b2be473303fd946dd03cd204263fd4d1930e3f0))
+* **dogfood:** relocate pidfile readers to .spindrift/ ([62dbd90](https://github.com/jordansmall/spindrift/commit/62dbd90fe709b542de25b76c1635299b50628b93))
+* **driver:** count collapsed cache_creation under 5m TTL ([b657678](https://github.com/jordansmall/spindrift/commit/b6576786687789fb0a82dcfb7d41ede35fc4f706))
+* **driver:** thread imageName through the artifact-key probe ([84d63be](https://github.com/jordansmall/spindrift/commit/84d63be5ccb37f88487c0505d7b239bdf5054349))
+* **entrypoint:** harness bundles read-only github seam post-driver ([58a6dd3](https://github.com/jordansmall/spindrift/commit/58a6dd3160ee13c06659e0f1d0b6dc9da4b3ce75)), closes [#2082](https://github.com/jordansmall/spindrift/issues/2082)
+* **entrypoint:** relay no-outcome backstop via outbox on read-only Box ([872b67e](https://github.com/jordansmall/spindrift/commit/872b67e90edd52e89844fc2aa2eaa9b2f88239f5)), closes [#2094](https://github.com/jordansmall/spindrift/issues/2094)
+* **freshness:** gate host-taint halt on a derived tip tag ([8441a7f](https://github.com/jordansmall/spindrift/commit/8441a7f53eee4a7e368d228d120d4ff5d957ca87))
+* **freshness:** keep host-taint guard across clean runs ([705227a](https://github.com/jordansmall/spindrift/commit/705227ae57dc8e3da1eec68f20a0dd7d7e6fddbb)), closes [#2128](https://github.com/jordansmall/spindrift/issues/2128)
+* **launcher:** derive the image repo from the loaded tag ([90e9a0c](https://github.com/jordansmall/spindrift/commit/90e9a0c90882cfcd3461d38b985796219eab456b))
+* **launcher:** name missing seam in read-only gate errors ([1933779](https://github.com/jordansmall/spindrift/commit/1933779eb229dc1d7a1ecd252cb4f85a1952ddbf)), closes [#2118](https://github.com/jordansmall/spindrift/issues/2118)
+* **launcher:** resolve Agent-named subagent spawns to real role ([0396032](https://github.com/jordansmall/spindrift/commit/0396032dbf6d5f17f0bd54ca2cb87724bceab7fb))
+* **launcher:** resolve roles for nested subagents ([79752cc](https://github.com/jordansmall/spindrift/commit/79752cc3c46adddac2e17854af489d2b9f66ae6d))
+* **local:** escape frontmatter scalars against title injection ([c1b2ae5](https://github.com/jordansmall/spindrift/commit/c1b2ae54d7be687606c6e12a07b61c1c966658bc))
+* **local:** exempt fully-local Box from GH_TOKEN/REPO_SLUG ([48f594d](https://github.com/jordansmall/spindrift/commit/48f594de2aa93f895186044a3e7fba415a8cf532))
+* **outcome:** quiet comment/PR-intent scan on non-attempts ([b28ac7b](https://github.com/jordansmall/spindrift/commit/b28ac7b2fa49c31b5eb5ef3d1957da0a5caf4a34)), closes [#2089](https://github.com/jordansmall/spindrift/issues/2089)
+* **outcome:** stop warning on template OUTCOME lines ([870509e](https://github.com/jordansmall/spindrift/commit/870509ef1eeb58ab3a2993493bb7a8240fedc038)), closes [#2088](https://github.com/jordansmall/spindrift/issues/2088)
+* **roster:** harden roster-entry rendering ([fbff065](https://github.com/jordansmall/spindrift/commit/fbff06532637f6e5b1b5ce8f2aa50fd23d7cbe27))
+* **roster:** tolerate inline prompt without promptFile in bake ([55a36f5](https://github.com/jordansmall/spindrift/commit/55a36f535df9e06c708d1b97d001da1dafec3d64))
+* **settle:** host-derive merged-outcome verify ref ([3b0874a](https://github.com/jordansmall/spindrift/commit/3b0874a9c208bc7f5887662b8a24969b19f04911))
+* **settle:** log benign no-bundle blocked relay informationally ([0db58b4](https://github.com/jordansmall/spindrift/commit/0db58b4a9b62a1156008642486defdbf4cdf20cf))
+* **usage:** dedup per-model tokens by message.id ([5fa6efa](https://github.com/jordansmall/spindrift/commit/5fa6efaf59c2e562719ac652db2dfa1ac07cf66d))
+
+
+### Documentation
+
+* **driver:** correct ExtractUsage per-role to per-model ([46cd420](https://github.com/jordansmall/spindrift/commit/46cd42027b94ce494bd6885b1f01a765a00840c2))
+* **driver:** ground per-call summation rule in real evidence ([7c62837](https://github.com/jordansmall/spindrift/commit/7c6283704bf058acf38c9fe241a243d3d7982f70))
+* **local:** note escaping and concurrency caveats ([6a7fd86](https://github.com/jordansmall/spindrift/commit/6a7fd86056ba97262ea17f96fe64cd40a9096a2b))
+* **logs:** point log-path references at .spindrift/logs ([2547880](https://github.com/jordansmall/spindrift/commit/2547880b19c7f71a6e466d7c9a075bf225b414e7))
+* **logs:** rewrap log-path prose to the 80-col margin ([618c7e4](https://github.com/jordansmall/spindrift/commit/618c7e4fb9106e05a918e11069297be7f747e4f5))
+* name the pidfile as .spindrift/dogfood.pid ([59c3719](https://github.com/jordansmall/spindrift/commit/59c3719aa8f7fdd9f9bc496801db2402a6074742))
+* **prompt:** fix stale read-only bundle attribution ([3effe36](https://github.com/jordansmall/spindrift/commit/3effe364f75f74e39337275dc9b846b6bddcf39d)), closes [#2083](https://github.com/jordansmall/spindrift/issues/2083)
+* **reference:** document the github-copilot Provider credential ([af58928](https://github.com/jordansmall/spindrift/commit/af589288df9baad2dac83dd2093b9bcf81174e86))
+* **reference:** document the opencode Driver ([5dfb241](https://github.com/jordansmall/spindrift/commit/5dfb2412b6d92182704f3af0caaf532f83f59f0a))
+* **reference:** stop pinning a rotting Copilot model id ([f3b67e8](https://github.com/jordansmall/spindrift/commit/f3b67e8c4542c992468b708c623177f5ff13354f)), closes [#2122](https://github.com/jordansmall/spindrift/issues/2122)
+* **release:** add 0.8.0 notes for opencode ([801ac89](https://github.com/jordansmall/spindrift/commit/801ac891debb40ce55cc14996f1a17dc14ef010f))
+* **roster:** document the roster and deprecate legacy knobs ([60ba515](https://github.com/jordansmall/spindrift/commit/60ba515f914f698ec71a4d7c3f13d4fb48ec3396))
+* **settle:** correct the rebasePushBackoff jitter comment ([fc8746e](https://github.com/jordansmall/spindrift/commit/fc8746e58b6e17afea7e93fc6d3bbdc4dfe7bbb2))
+* **settle:** note harness owns read-only blocked bundle ([9334973](https://github.com/jordansmall/spindrift/commit/93349730eb30d8a74067d153a27909fefd392ade)), closes [#2083](https://github.com/jordansmall/spindrift/issues/2083)
+* **usage:** note opencode has no message.id dedup ([258c7cd](https://github.com/jordansmall/spindrift/commit/258c7cde20290f42a8134df5dfc5c1bfa648934b))
+
+
+### Code Refactoring
+
+* **driver:** extract shared assistantEvent decode helper ([1d935a1](https://github.com/jordansmall/spindrift/commit/1d935a1f765cc5e77431f2927ab14cb9edabf9f9))
+* **entrypoint:** extract _is_readonly_github predicate ([c177424](https://github.com/jordansmall/spindrift/commit/c177424a43f708bdec9a4a6f1b9ac2d77a45255f))
+* **logs:** centralize host-side log dir behind one helper ([f42f622](https://github.com/jordansmall/spindrift/commit/f42f62296579bf88845b5dc8bb089cc1e99fd92f)), closes [#2137](https://github.com/jordansmall/spindrift/issues/2137)
+* **logs:** skip empty legacy dir without creating dest ([6510f72](https://github.com/jordansmall/spindrift/commit/6510f72ddd77bf5876df0d4f9da223901bd00554))
+* **prompt:** retire read-only bundle-write steps ([e8f84a8](https://github.com/jordansmall/spindrift/commit/e8f84a8e4e6b92247d91dba0eea5ec7b25397ae9)), closes [#2083](https://github.com/jordansmall/spindrift/issues/2083)
+* **settle:** unify merged-arm landing label, harden test ([1990700](https://github.com/jordansmall/spindrift/commit/19907006d28e063647b965c82be34582c4ef5d30))
+* **usage:** remove the unused per-role token breakdown ([1e6345c](https://github.com/jordansmall/spindrift/commit/1e6345c9bdc4b207fe5e33ee6dec3175659222ac))
+
+
+### Tests
+
+* **agent:** cover the near-miss recovery nudge ([6bbe949](https://github.com/jordansmall/spindrift/commit/6bbe949c3cfb8bcf67bd68d9db06a7153e471889))
+* **checks:** assert image drvPath host-independence for more knobs ([76cc213](https://github.com/jordansmall/spindrift/commit/76cc213a50963e9b9c05822a2a41e5bdee1aceed)), closes [#2114](https://github.com/jordansmall/spindrift/issues/2114)
+* **console:** widen waitForOutputRetry de-flake margin ([b9d2aea](https://github.com/jordansmall/spindrift/commit/b9d2aea2959ddc402f7e901ad73f2fc8401c77ae))
+* **entrypoint:** pin read-only no-outcome bundle relay ([15ae5a1](https://github.com/jordansmall/spindrift/commit/15ae5a132c13e5c712313ad740dee7efd5061a08))
+* **forge:** script LandingContainmentQuery on the Fake ([de1a7d1](https://github.com/jordansmall/spindrift/commit/de1a7d1c96d1e23dc165cf15ccc371d8f1efbe09))
+* **freshness:** adjudicate Theory A vs B in the [#2127](https://github.com/jordansmall/spindrift/issues/2127) verdict ([5326d77](https://github.com/jordansmall/spindrift/commit/5326d775faddf351e4319c061950c670bd58dc61))
+* **freshness:** pin issue-close host-taint guard reset ([cff8db8](https://github.com/jordansmall/spindrift/commit/cff8db86c57d96410b88c0d405fb36f80672705b)), closes [#2127](https://github.com/jordansmall/spindrift/issues/2127)
+* **launcher:** lock Agent-named spawn renders real role end-to-end ([42c000d](https://github.com/jordansmall/spindrift/commit/42c000d9f1e5dd48baf1116c838bc77abd77ea7f))
+* **local:** cover host-posted issue-filing end-to-end ([5163a44](https://github.com/jordansmall/spindrift/commit/5163a44cc85b0517da41eb60869d65ac645119f0))
+* **local:** pin blocker-chain seed inheritance ([a8c8aa9](https://github.com/jordansmall/spindrift/commit/a8c8aa9b702686c433aa81d3828a8bfce95054ea)), closes [#2131](https://github.com/jordansmall/spindrift/issues/2131)
+* **settle:** mirror benign no-bundle relay test for local forge ([7e286af](https://github.com/jordansmall/spindrift/commit/7e286afcbdc878861d6e156f61aac40e00bf14de))
+
+
+### Build System
+
+* **driver:** bake the opencode subpackage into in-box binaries ([6fc297b](https://github.com/jordansmall/spindrift/commit/6fc297bce906b7e77347d296bad687039a9eedcd))
+
+
+### Miscellaneous Chores
+
+* **gitignore:** drop redundant top-level logs entry ([de0da06](https://github.com/jordansmall/spindrift/commit/de0da06b2e7f5cf02f4b755df5ea99f00eefeddf))
+
 ## [0.7.1](https://github.com/jordansmall/spindrift/compare/v0.7.0...v0.7.1) (2026-07-28)
 
 
