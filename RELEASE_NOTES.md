@@ -10,6 +10,27 @@ depending on how you use spindrift; it won't affect everyone.
 
 ---
 
+## Unreleased
+
+Boolean knobs are now presence-style flags.
+
+**⚠ Breaking changes**: the space-separated value form (`--flag 1`) is no
+longer accepted for the converted boolean flags.
+
+- **⚠ Breaking: boolean flags are presence-style.** `--continuous-dispatch`,
+  `--auto-format`, `--auto-lint`, `--local-issue-reference`,
+  `--orchestrator-enabled`, `--preflight-stale-base`, `--bwrap-unshare-net`, and
+  `--jira-include-comments` now turn on from the bare flag alone (e.g.
+  `--auto-format`). The old space-separated value form (`--auto-format 1`) no
+  longer feeds the flag its value — the trailing `1` is left as a stray
+  positional arg; use the bare flag, or the explicit equals form to set either
+  direction (`--auto-format=1` on, `--auto-format=0` off).
+- **`--continuous` alias.** `--continuous-dispatch` is now one of these presence
+  flags, with `--continuous` as its bare-flag alias — `spindrift dispatch
+  --continuous` turns on the slot-refill loop.
+
+---
+
 ## 0.8.0 — 2026-07-28
 
 spindrift can now run an agent other than Claude Code. The Box picks its agent
