@@ -3,9 +3,8 @@
 
 # Flake options reference
 
-Consumer-tunable knobs available under `perSystem.spindrift.settings`.
-Grouped by section (matching `spindrift --help --all`); sections with no
-consumer-tunable knobs are omitted.
+Consumer-tunable knobs live under `perSystem.spindrift.*`, grouped by
+domain (ADR 0037); domains with no consumer-tunable knobs are omitted.
 
 Precedence at runtime: CLI flag > flake setting (via the Launcher input
 document, ADR 0020) > baked default. A knob env var still wins over the
@@ -13,100 +12,85 @@ flake setting this release, but is deprecated and warns; env configures
 only secrets and internal plumbing going forward.
 See [`docs/reference.md`](reference.md) for the full option surface and runtime vars.
 
-## Issue discovery (`settings.issueDiscovery`)
+## Agents (`perSystem.spindrift.agents`)
 
 | attr path | env var | default | description |
 |---|---|---|---|
-| `settings.issueDiscovery.issueTracker` | `ISSUE_TRACKER` | `github` | IssueTracker backend (ADR 0013): github (gh-exec, default), local (private Markdown + YAML frontmatter files; see LOCAL_ISSUES_DIR), or jira (see JIRA_BASE_URL/JIRA_PROJECT_KEY/JIRA_TOKEN); the Code Forge (PR/CI/merge) stays github regardless |
-| `settings.issueDiscovery.jiraIncludeComments` | `JIRA_INCLUDE_COMMENTS` | `` | when enabled, the Jira adapter appends the issue's comment thread to the description it returns; off (default) keeps the prompt-injection surface tight |
-| `settings.issueDiscovery.label` | `LABEL` | `ready-for-agent` | issues carrying this label are dispatchable (the launch button) |
-| `settings.issueDiscovery.localIssueReference` | `LOCAL_ISSUE_REFERENCE` | `` | when enabled and ISSUE_TRACKER=local, the PR body includes a non-auto-closing `Local-issue: <slug>` breadcrumb; default off keeps the private local ticket slug out of the PR body entirely (ISSUE_TRACKER=github is unaffected -- `Closes #ISSUE_NUMBER` stays either way) |
-| `settings.issueDiscovery.localIssuesDir` | `LOCAL_ISSUES_DIR` | `.spindrift/issues` | directory scanned for issue files when ISSUE_TRACKER=local; keep it git-ignored so breakout issues stay private |
+| `perSystem.spindrift.agents.format.enable` | `AUTO_FORMAT` | `` | when enabled, the implementor auto-detects and runs the project's formatter on changed files before each commit; skips silently when no formatter is found |
+| `perSystem.spindrift.agents.lint.enable` | `AUTO_LINT` | `` | when enabled, the implementor auto-detects and runs the project's linter on changed files before each commit, applying auto-fix then resolving remaining findings; skips silently when no linter is found |
+| `perSystem.spindrift.agents.models.default` | `MODEL` | `claude-opus-4-8` | main/coordinator Claude model for the agent (zero-rebuild runtime switch); worker-tier defaults are unaffected |
+| `perSystem.spindrift.agents.models.filer` | `FILER_MODEL` | `` | filer subagent model tier; empty (default) omits the filer entry from --agents and means the filer is not provisioned at all — setting a model is the opt-in (recommended: claude-haiku-4-5-20251001). DEPRECATED: superseded by the roster option (see docs/reference.md); these per-agent knobs still work but will be removed. |
+| `perSystem.spindrift.agents.models.review` | `REVIEW_MODEL` | `claude-opus-4-8` | reviewer subagent model tier; empty omits the reviewer entry from --agents; the flag itself is omitted only when no subagent model is set. DEPRECATED: superseded by the roster option (see docs/reference.md); these per-agent knobs still work but will be removed. |
+| `perSystem.spindrift.agents.models.scout` | `SCOUT_MODEL` | `claude-haiku-4-5-20251001` | scout subagent model tier; empty omits the scout entry from --agents; the flag itself is omitted only when no subagent model is set. DEPRECATED: superseded by the roster option (see docs/reference.md); these per-agent knobs still work but will be removed. |
+| `perSystem.spindrift.agents.models.worker` | `WORKER_MODEL` | `claude-sonnet-5` | implement-capable worker subagent model tier; empty omits the worker entry from --agents; the implementor prompt does not delegate to it yet — this only provisions the subagent so it is invokable. DEPRECATED: superseded by the roster option (see docs/reference.md); these per-agent knobs still work but will be removed. |
 
-## Lifecycle labels (`settings.lifecycleLabels`)
-
-| attr path | env var | default | description |
-|---|---|---|---|
-| `settings.lifecycleLabels.completeLabel` | `COMPLETE_LABEL` | `agent-complete` | label the launcher swaps on when CI reaches green (agent is done; merge is separate) |
-| `settings.lifecycleLabels.failedLabel` | `FAILED_LABEL` | `agent-failed` | label swapped on when the agent box exits non-zero |
-| `settings.lifecycleLabels.inProgressLabel` | `IN_PROGRESS_LABEL` | `agent-in-progress` | label swapped on from LABEL when an issue enters the queue |
-| `settings.lifecycleLabels.jiraStatusMapping` | `JIRA_STATUS_MAPPING` | `` | JSON object mapping dispatch states (dispatchable, inProgress, complete, failed) to native Jira status names, e.g. {'inProgress':'In Progress'}; TransitionState performs the matching workflow transition, falling back to swapping the matching lifecycle label when a state is unmapped or its transition is blocked by the project's workflow |
-
-## Branches & merge (`settings.branches`)
+## Git (`perSystem.spindrift.git`)
 
 | attr path | env var | default | description |
 |---|---|---|---|
-| `settings.branches.baseBranch` | `BASE_BRANCH` | `main` | default branch agent PRs merge into |
-| `settings.branches.branchPrefix` | `BRANCH_PREFIX` | `agent/issue-` | prefix for agent-cut branches |
-| `settings.branches.mergeGuardPaths` | `MERGE_GUARD_PATHS` | `.github/**,**/CLAUDE.md,**/AGENTS.md,.claude/**,.opencode/**` | comma-separated globs matched against every changed path (added, modified, deleted); a hit downgrades the merge to manual regardless of MERGE_MODE and posts a PR comment naming the match; empty disables the guard (github Code Forge merge path only) |
-| `settings.branches.mergeMode` | `MERGE_MODE` | `manual` | post-green merge policy: immediate (merge on green), auto (enqueue GitHub native auto-merge; repo must have Allow auto-merge enabled), manual (leave PR open for human approval) |
-| `settings.branches.mergePollInterval` | `MERGE_POLL_INTERVAL` | `30` | seconds between merge-gate poll iterations |
-| `settings.branches.mergePollTimeout` | `MERGE_POLL_TIMEOUT` | `1800` | total seconds to wait for CI green before abandoning the merge attempt |
+| `perSystem.spindrift.git.baseBranch` | `BASE_BRANCH` | `main` | default branch agent PRs merge into |
+| `perSystem.spindrift.git.branchPrefix` | `BRANCH_PREFIX` | `agent/issue-` | prefix for agent-cut branches |
+| `perSystem.spindrift.git.merge.guardPaths` | `MERGE_GUARD_PATHS` | `.github/**,**/CLAUDE.md,**/AGENTS.md,.claude/**,.opencode/**` | comma-separated globs matched against every changed path (added, modified, deleted); a hit downgrades the merge to manual regardless of MERGE_MODE and posts a PR comment naming the match; empty disables the guard (github Code Forge merge path only) |
+| `perSystem.spindrift.git.merge.policy` | `MERGE_MODE` | `manual` | post-green merge policy: immediate (merge on green), auto (enqueue GitHub native auto-merge; repo must have Allow auto-merge enabled), manual (leave PR open for human approval) |
+| `perSystem.spindrift.git.merge.pollInterval` | `MERGE_POLL_INTERVAL` | `30` | seconds between merge-gate poll iterations |
+| `perSystem.spindrift.git.merge.pollTimeout` | `MERGE_POLL_TIMEOUT` | `1800` | total seconds to wait for CI green before abandoning the merge attempt |
+| `perSystem.spindrift.git.merge.preflightStaleBase` | `PREFLIGHT_STALE_BASE` | `` | when enabled, the launcher proactively rebases a green PR that is behind its base (no textual conflict) before merging and re-waits for CI on the rebased tree, drawing on MAX_REBASE_ATTEMPTS for its budget (ADR 0026). Off by default: a green-but-behind PR merges as-is, relying on its green CI as the landing gate — this trades the rare cross-PR semantic break ADR 0026 guarded against (two individually-green PRs that break combined) for the throughput of parallel landings that never wait on an extra rebase+CI cycle. WARNING: enabling this on a highly-parallelized fleet without a merge queue in front of the branch invites near-constant rebase+re-CI thrashing (each landing leaves the others behind again), burning CI minutes and tokens — see the Stale-base preflight docs |
+| `perSystem.spindrift.git.user.email` | `GIT_USER_EMAIL` | — | commit identity email; falls back to host git config user.email |
+| `perSystem.spindrift.git.user.name` | `GIT_USER_NAME` | — | commit identity name; falls back to host git config user.name |
 
-## Concurrency & dependency waves (`settings.concurrency`)
-
-| attr path | env var | default | description |
-|---|---|---|---|
-| `settings.concurrency.continuousDispatch` | `CONTINUOUS_DISPATCH` | `` | when enabled, dispatch runs as a long-running slot-refill loop instead of a single wave (#527): as each Box finishes, the launcher re-discovers the queue and refills the freed slot when the image-freshness probe (#526) reports fresh; a rebuild-needed result stops refilling, lets in-flight Boxes finish, and exits with the new documented code (see the exit-code table in docs/reference.md's Dogfood loop section, under Termination). Off by default; applies to queue discovery only — ISSUE_NUMBER-claimed and selective dispatch ignore it |
-| `settings.concurrency.maxJobs` | `MAX_JOBS` | `0` | caps the wave size; 0 means uncapped |
-| `settings.concurrency.maxParallel` | `MAX_PARALLEL` | `3` | maximum concurrent agent containers |
-| `settings.concurrency.overlapGate` | `OVERLAP_GATE` | `defer` | declared ## Touches overlap policy: defer (hold a Dispatchable issue whose declared touch-set intersects an InProgress issue's, retrying once the collider completes), off (disable the check) |
-
-## Models (`settings.models`)
+## Issues (`perSystem.spindrift.issues`)
 
 | attr path | env var | default | description |
 |---|---|---|---|
-| `settings.models.filerModel` | `FILER_MODEL` | `` | filer subagent model tier; empty (default) omits the filer entry from --agents and means the filer is not provisioned at all — setting a model is the opt-in (recommended: claude-haiku-4-5-20251001). DEPRECATED: superseded by the roster option (see docs/reference.md); these per-agent knobs still work but will be removed. |
-| `settings.models.model` | `MODEL` | `claude-opus-4-8` | main/coordinator Claude model for the agent (zero-rebuild runtime switch); worker-tier defaults are unaffected |
-| `settings.models.reviewModel` | `REVIEW_MODEL` | `claude-opus-4-8` | reviewer subagent model tier; empty omits the reviewer entry from --agents; the flag itself is omitted only when no subagent model is set. DEPRECATED: superseded by the roster option (see docs/reference.md); these per-agent knobs still work but will be removed. |
-| `settings.models.scoutModel` | `SCOUT_MODEL` | `claude-haiku-4-5-20251001` | scout subagent model tier; empty omits the scout entry from --agents; the flag itself is omitted only when no subagent model is set. DEPRECATED: superseded by the roster option (see docs/reference.md); these per-agent knobs still work but will be removed. |
-| `settings.models.workerModel` | `WORKER_MODEL` | `claude-sonnet-5` | implement-capable worker subagent model tier; empty omits the worker entry from --agents; the implementor prompt does not delegate to it yet — this only provisions the subagent so it is invokable. DEPRECATED: superseded by the roster option (see docs/reference.md); these per-agent knobs still work but will be removed. |
+| `perSystem.spindrift.issues.jira.baseURL` | `JIRA_BASE_URL` | — | Jira site base URL (e.g. https://yourcompany.atlassian.net); required when ISSUE_TRACKER=jira |
+| `perSystem.spindrift.issues.jira.email` | `JIRA_EMAIL` | — | Jira Cloud account email, paired with JIRA_TOKEN for Basic auth; leave empty for Bearer-token auth (Jira Server/Data Center PATs) |
+| `perSystem.spindrift.issues.jira.includeComments` | `JIRA_INCLUDE_COMMENTS` | `` | when enabled, the Jira adapter appends the issue's comment thread to the description it returns; off (default) keeps the prompt-injection surface tight |
+| `perSystem.spindrift.issues.jira.projectKey` | `JIRA_PROJECT_KEY` | — | Jira project key issues are read from (e.g. ENG); required when ISSUE_TRACKER=jira |
+| `perSystem.spindrift.issues.jira.statusMapping` | `JIRA_STATUS_MAPPING` | `` | JSON object mapping dispatch states (dispatchable, inProgress, complete, failed) to native Jira status names, e.g. {'inProgress':'In Progress'}; TransitionState performs the matching workflow transition, falling back to swapping the matching lifecycle label when a state is unmapped or its transition is blocked by the project's workflow |
+| `perSystem.spindrift.issues.labels.complete` | `COMPLETE_LABEL` | `agent-complete` | label the launcher swaps on when CI reaches green (agent is done; merge is separate) |
+| `perSystem.spindrift.issues.labels.dispatch` | `LABEL` | `ready-for-agent` | issues carrying this label are dispatchable (the launch button) |
+| `perSystem.spindrift.issues.labels.failed` | `FAILED_LABEL` | `agent-failed` | label swapped on when the agent box exits non-zero |
+| `perSystem.spindrift.issues.labels.inProgress` | `IN_PROGRESS_LABEL` | `agent-in-progress` | label swapped on from LABEL when an issue enters the queue |
+| `perSystem.spindrift.issues.localDir` | `LOCAL_ISSUES_DIR` | `.spindrift/issues` | directory scanned for issue files when ISSUE_TRACKER=local; keep it git-ignored so breakout issues stay private |
+| `perSystem.spindrift.issues.localReference` | `LOCAL_ISSUE_REFERENCE` | `` | when enabled and ISSUE_TRACKER=local, the PR body includes a non-auto-closing `Local-issue: <slug>` breadcrumb; default off keeps the private local ticket slug out of the PR body entirely (ISSUE_TRACKER=github is unaffected -- `Closes #ISSUE_NUMBER` stays either way) |
+| `perSystem.spindrift.issues.tracker` | `ISSUE_TRACKER` | `github` | IssueTracker backend (ADR 0013): github (gh-exec, default), local (private Markdown + YAML frontmatter files; see LOCAL_ISSUES_DIR), or jira (see JIRA_BASE_URL/JIRA_PROJECT_KEY/JIRA_TOKEN); the Code Forge (PR/CI/merge) stays github regardless |
 
-## Self-healing & retries (`settings.selfHealing`)
-
-| attr path | env var | default | description |
-|---|---|---|---|
-| `settings.selfHealing.holdJitterSecs` | `HOLD_JITTER_SECS` | `5` | jitter seconds added to 429 hold duration to spread re-dispatch |
-| `settings.selfHealing.maxBudgetTokens` | `MAX_BUDGET_TOKENS` | `0` | cumulative tokens across the initial run and every fix pass before selfHealGate stops dispatching further fix passes (issue #2001); 0 disables the token budget cap |
-| `settings.selfHealing.maxBudgetUSD` | `MAX_BUDGET_USD` | `0.000000` | cumulative cost in USD across the initial run and every fix pass before selfHealGate stops dispatching further fix passes (issue #2001); 0 disables the cost budget cap; give it as a quoted string in flake settings since it may be fractional, e.g. 4.44 |
-| `settings.selfHealing.maxFixAttempts` | `MAX_FIX_ATTEMPTS` | `3` | fix-agent passes when CI is genuinely red before marking agent-failed; 0 disables self-healing |
-| `settings.selfHealing.maxRebaseAttempts` | `MAX_REBASE_ATTEMPTS` | `3` | rebase-and-retry passes when a green PR conflicts with the base after a sibling merge; 0 disables rebase retries |
-| `settings.selfHealing.preflightStaleBase` | `PREFLIGHT_STALE_BASE` | `` | when enabled, the launcher proactively rebases a green PR that is behind its base (no textual conflict) before merging and re-waits for CI on the rebased tree, drawing on MAX_REBASE_ATTEMPTS for its budget (ADR 0026). Off by default: a green-but-behind PR merges as-is, relying on its green CI as the landing gate — this trades the rare cross-PR semantic break ADR 0026 guarded against (two individually-green PRs that break combined) for the throughput of parallel landings that never wait on an extra rebase+CI cycle. WARNING: enabling this on a highly-parallelized fleet without a merge queue in front of the branch invites near-constant rebase+re-CI thrashing (each landing leaves the others behind again), burning CI minutes and tokens — see the Stale-base preflight docs |
-| `settings.selfHealing.transientBackoffSecs` | `TRANSIENT_BACKOFF_SECS` | `30` | base backoff seconds per retry for 529/overloaded and network transients |
-| `settings.selfHealing.transientRetryMax` | `TRANSIENT_RETRY_MAX` | `3` | max retries for transient exits (529/network backoff; consecutive 429 holds) |
-
-## Sandbox & resources (`settings.sandbox`)
+## Forge (`perSystem.spindrift.forge`)
 
 | attr path | env var | default | description |
 |---|---|---|---|
-| `settings.sandbox.bwrapUnshareNet` | `BWRAP_UNSHARE_NET` | `` | when non-empty, adds --unshare-net to bwrap; requires slirp/pasta for DNS; by default bwrap shares the host network namespace (host-loopback reachable) |
-| `settings.sandbox.devShellName` | `DEV_SHELL_NAME` | `default` | which devShell to enter; lets a Target expose a lean headless ci shell distinct from a heavy interactive default |
-| `settings.sandbox.devShellProbeTimeout` | `DEV_SHELL_PROBE_TIMEOUT` | `300` | seconds before the devShell probe is abandoned and the baked toolchain is used |
-| `settings.sandbox.memoryLimit` | `MEMORY_LIMIT` | `5g` | max memory per agent container (--memory); empty string disables the limit |
-| `settings.sandbox.pidsLimit` | `PIDS_LIMIT` | `512` | max processes per agent container (--pids-limit); empty string disables the limit |
-| `settings.sandbox.podmanNetwork` | `PODMAN_NETWORK` | — | --network value for podman run; empty applies no flag (podman NAT default); set to 'pasta' to restrict egress |
+| `perSystem.spindrift.forge.accumulationRepoDir` | `CODE_FORGE_ACCUMULATION_REPO_DIR` | — | host path to the bare Accumulation repo (ADR 0033), mounted read-only into the Box and landed into host-side; when CODE_FORGE=local, defaults to .spindrift/accum.git under the launcher's working directory (auto-created and seeded) and an explicit value still overrides it; unused otherwise |
+| `perSystem.spindrift.forge.backend` | `CODE_FORGE` | `github` | code-landing backend: github (open PR, watch CI, merge), git (push-only to CODE_FORGE_REMOTE_URL; no PR, CI-watch, or merge gate), or local (host-mediated landing onto the Accumulation repo's Integration branch by rebase and fast-forward, never a merge commit; no PR, CI-watch, or network; ADR 0033, issue #1889) |
+| `perSystem.spindrift.forge.boxAccess` | `BOX_FORGE_AND_ISSUE_ACCESS` | `read-write` | whether the Box writes to the Code Forge and Issue Tracker directly (read-write) or the launcher host-mediates every write instead (read-only), a third axis orthogonal to CODE_FORGE and ISSUE_TRACKER (issue #1914); read-only is gated at startup by capability — permitted only when the selected forge implements bundle-relay and host-side draft-PR-create and the selected tracker implements host-posted comments, otherwise the launcher exits with a startup error naming the missing seam; local and github backends both satisfy the gate today (ADR extending 0032/0033 to github, docs/adr/0034-host-mediated-github-forge-and-issue-access.md) |
+| `perSystem.spindrift.forge.ghTokenRefreshFile` | `GH_TOKEN_REFRESH_FILE` | — | path to a file the launcher re-reads and swaps into GH_TOKEN whenever its content changes — lets an external minter (e.g. a workflow step re-minting a GitHub App installation token, keeping the App private key in the workflow rather than the launcher) keep the credential fresh across a run that outlives the token's ~1h lifetime (#1027); empty (default) leaves GH_TOKEN static for the whole run |
+| `perSystem.spindrift.forge.remoteURL` | `CODE_FORGE_REMOTE_URL` | — | plain git remote URL to clone from and push to (self-hosted git, gitea, GitLab-without-MRs, a bare server repo); required when CODE_FORGE=git, unused otherwise |
+| `perSystem.spindrift.forge.repoSlug` | `REPO_SLUG` | — | target GitHub repository the agents work on; required unless CODE_FORGE and ISSUE_TRACKER are both local |
 
-## Repository & identity (`settings.repository`)
-
-| attr path | env var | default | description |
-|---|---|---|---|
-| `settings.repository.boxForgeAndIssueAccess` | `BOX_FORGE_AND_ISSUE_ACCESS` | `read-write` | whether the Box writes to the Code Forge and Issue Tracker directly (read-write) or the launcher host-mediates every write instead (read-only), a third axis orthogonal to CODE_FORGE and ISSUE_TRACKER (issue #1914); read-only is gated at startup by capability — permitted only when the selected forge implements bundle-relay and host-side draft-PR-create and the selected tracker implements host-posted comments, otherwise the launcher exits with a startup error naming the missing seam; local and github backends both satisfy the gate today (ADR extending 0032/0033 to github, docs/adr/0034-host-mediated-github-forge-and-issue-access.md) |
-| `settings.repository.codeForge` | `CODE_FORGE` | `github` | code-landing backend: github (open PR, watch CI, merge), git (push-only to CODE_FORGE_REMOTE_URL; no PR, CI-watch, or merge gate), or local (host-mediated landing onto the Accumulation repo's Integration branch by rebase and fast-forward, never a merge commit; no PR, CI-watch, or network; ADR 0033, issue #1889) |
-| `settings.repository.codeForgeAccumulationRepoDir` | `CODE_FORGE_ACCUMULATION_REPO_DIR` | — | host path to the bare Accumulation repo (ADR 0033), mounted read-only into the Box and landed into host-side; when CODE_FORGE=local, defaults to .spindrift/accum.git under the launcher's working directory (auto-created and seeded) and an explicit value still overrides it; unused otherwise |
-| `settings.repository.codeForgeRemoteURL` | `CODE_FORGE_REMOTE_URL` | — | plain git remote URL to clone from and push to (self-hosted git, gitea, GitLab-without-MRs, a bare server repo); required when CODE_FORGE=git, unused otherwise |
-| `settings.repository.ghTokenRefreshFile` | `GH_TOKEN_REFRESH_FILE` | — | path to a file the launcher re-reads and swaps into GH_TOKEN whenever its content changes — lets an external minter (e.g. a workflow step re-minting a GitHub App installation token, keeping the App private key in the workflow rather than the launcher) keep the credential fresh across a run that outlives the token's ~1h lifetime (#1027); empty (default) leaves GH_TOKEN static for the whole run |
-| `settings.repository.gitUserEmail` | `GIT_USER_EMAIL` | — | commit identity email; falls back to host git config user.email |
-| `settings.repository.gitUserName` | `GIT_USER_NAME` | — | commit identity name; falls back to host git config user.name |
-| `settings.repository.jiraBaseURL` | `JIRA_BASE_URL` | — | Jira site base URL (e.g. https://yourcompany.atlassian.net); required when ISSUE_TRACKER=jira |
-| `settings.repository.jiraEmail` | `JIRA_EMAIL` | — | Jira Cloud account email, paired with JIRA_TOKEN for Basic auth; leave empty for Bearer-token auth (Jira Server/Data Center PATs) |
-| `settings.repository.jiraProjectKey` | `JIRA_PROJECT_KEY` | — | Jira project key issues are read from (e.g. ENG); required when ISSUE_TRACKER=jira |
-| `settings.repository.repoSlug` | `REPO_SLUG` | — | target GitHub repository the agents work on; required unless CODE_FORGE and ISSUE_TRACKER are both local |
-
-## Prompt & skill iteration (`settings.promptSkillIteration`)
+## Dispatch (`perSystem.spindrift.dispatch`)
 
 | attr path | env var | default | description |
 |---|---|---|---|
-| `settings.promptSkillIteration.autoFormat` | `AUTO_FORMAT` | `` | when enabled, the implementor auto-detects and runs the project's formatter on changed files before each commit; skips silently when no formatter is found |
-| `settings.promptSkillIteration.autoLint` | `AUTO_LINT` | `` | when enabled, the implementor auto-detects and runs the project's linter on changed files before each commit, applying auto-fix then resolving remaining findings; skips silently when no linter is found |
-| `settings.promptSkillIteration.orchestratorEnabled` | `ORCHESTRATOR_ENABLED` | `` | master feature-flag switch (issue #1996; canonicalized #2047): when enabled, forks entrypoint.sh's rendered prompt/--agents JSON onto the orchestrator-on path -- the implementor pass hands off to the in-box Go orchestrator instead of calling driver-exec directly, and every other orchestrator-conditioned fork (e.g. the filer's write-mechanism gate) reads this same switch; off by default, the direct driver-exec path is unchanged; the off-path is legacy, slated for demolition once this defaults on in production with a sustained A/B win (ADR 0035 amendment) |
+| `perSystem.spindrift.dispatch.budget.tokens` | `MAX_BUDGET_TOKENS` | `0` | cumulative tokens across the initial run and every fix pass before selfHealGate stops dispatching further fix passes (issue #2001); 0 disables the token budget cap |
+| `perSystem.spindrift.dispatch.budget.usd` | `MAX_BUDGET_USD` | `0.000000` | cumulative cost in USD across the initial run and every fix pass before selfHealGate stops dispatching further fix passes (issue #2001); 0 disables the cost budget cap; give it as a quoted string in flake settings since it may be fractional, e.g. 4.44 |
+| `perSystem.spindrift.dispatch.continuous.enable` | `CONTINUOUS_DISPATCH` | `` | when enabled, dispatch runs as a long-running slot-refill loop instead of a single wave (#527): as each Box finishes, the launcher re-discovers the queue and refills the freed slot when the image-freshness probe (#526) reports fresh; a rebuild-needed result stops refilling, lets in-flight Boxes finish, and exits with the new documented code (see the exit-code table in docs/reference.md's Dogfood loop section, under Termination). Off by default; applies to queue discovery only — ISSUE_NUMBER-claimed and selective dispatch ignore it |
+| `perSystem.spindrift.dispatch.maxJobs` | `MAX_JOBS` | `0` | caps the wave size; 0 means uncapped |
+| `perSystem.spindrift.dispatch.maxParallel` | `MAX_PARALLEL` | `3` | maximum concurrent agent containers |
+| `perSystem.spindrift.dispatch.orchestrator.enable` | `ORCHESTRATOR_ENABLED` | `` | master feature-flag switch (issue #1996; canonicalized #2047): when enabled, forks entrypoint.sh's rendered prompt/--agents JSON onto the orchestrator-on path -- the implementor pass hands off to the in-box Go orchestrator instead of calling driver-exec directly, and every other orchestrator-conditioned fork (e.g. the filer's write-mechanism gate) reads this same switch; off by default, the direct driver-exec path is unchanged; the off-path is legacy, slated for demolition once this defaults on in production with a sustained A/B win (ADR 0035 amendment) |
+| `perSystem.spindrift.dispatch.overlapGate` | `OVERLAP_GATE` | `defer` | declared ## Touches overlap policy: defer (hold a Dispatchable issue whose declared touch-set intersects an InProgress issue's, retrying once the collider completes), off (disable the check) |
+| `perSystem.spindrift.dispatch.retry.holdJitter` | `HOLD_JITTER_SECS` | `5` | jitter seconds added to 429 hold duration to spread re-dispatch |
+| `perSystem.spindrift.dispatch.retry.maxFix` | `MAX_FIX_ATTEMPTS` | `3` | fix-agent passes when CI is genuinely red before marking agent-failed; 0 disables self-healing |
+| `perSystem.spindrift.dispatch.retry.maxRebase` | `MAX_REBASE_ATTEMPTS` | `3` | rebase-and-retry passes when a green PR conflicts with the base after a sibling merge; 0 disables rebase retries |
+| `perSystem.spindrift.dispatch.retry.transientBackoff` | `TRANSIENT_BACKOFF_SECS` | `30` | base backoff seconds per retry for 529/overloaded and network transients |
+| `perSystem.spindrift.dispatch.retry.transientMax` | `TRANSIENT_RETRY_MAX` | `3` | max retries for transient exits (529/network backoff; consecutive 429 holds) |
+
+## Infra (`perSystem.spindrift.infra`)
+
+| attr path | env var | default | description |
+|---|---|---|---|
+| `perSystem.spindrift.infra.devShell.name` | `DEV_SHELL_NAME` | `default` | which devShell to enter; lets a Target expose a lean headless ci shell distinct from a heavy interactive default |
+| `perSystem.spindrift.infra.devShell.probeTimeout` | `DEV_SHELL_PROBE_TIMEOUT` | `300` | seconds before the devShell probe is abandoned and the baked toolchain is used |
+| `perSystem.spindrift.infra.limits.memory` | `MEMORY_LIMIT` | `5g` | max memory per agent container (--memory); empty string disables the limit |
+| `perSystem.spindrift.infra.limits.pids` | `PIDS_LIMIT` | `512` | max processes per agent container (--pids-limit); empty string disables the limit |
+| `perSystem.spindrift.infra.network.bwrapUnshare` | `BWRAP_UNSHARE_NET` | `` | when non-empty, adds --unshare-net to bwrap; requires slirp/pasta for DNS; by default bwrap shares the host network namespace (host-loopback reachable) |
+| `perSystem.spindrift.infra.network.podman` | `PODMAN_NETWORK` | — | --network value for podman run; empty applies no flag (podman NAT default); set to 'pasta' to restrict egress |
 
