@@ -816,7 +816,12 @@ phase_prompt_assembly() {
         [ -f "${PROMPTS_DIR}/${_af_pf}" ] || continue
         _af_prompt="$(_subst "${PROMPTS_DIR}/${_af_pf}")"
         # Preserve the baked YAML frontmatter (every line up to and including
-        # the second `---`) and replace only the body beneath it.
+        # the second `---`) and replace only the body beneath it. This relies
+        # on every baked agent file carrying two `---` delimiters -- guaranteed
+        # by opencode's agentFilesTemplate (lib/drivers/opencode.nix), which
+        # always emits an opening and a closing frontmatter fence; a file
+        # missing the second fence would fall through to `print`ing the whole
+        # file as frontmatter.
         _af_frontmatter="$(awk '{ print } /^---$/ { if (++_c == 2) exit }' "$_af_file")"
         printf '%s\n%s\n' "$_af_frontmatter" "$_af_prompt" >"$_af_file"
       done < <(printf '%s' "$AGENTS_PROMPT_FILES" | jq -r 'keys[]')
