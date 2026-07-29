@@ -8,6 +8,7 @@ import (
 
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/retry"
 )
 
 // This file holds the ready path end to end — gate, guard, merge, re-wait —
@@ -516,7 +517,11 @@ func (s *Settle) mergeImmediate(num string, gen uint64, pr string, d dispatch.Di
 			pushRetries++
 			fmt.Printf("    #%s  landing=%s  status=rebase-push-retry  attempt=%d/%d  !! %v\n",
 				num, pr, pushRetries, s.cfg.MaxRebaseAttempts, rbErr)
-			s.rebasePushBackoff(pushRetries)
+			retry.LinearBackoff{
+				Unit:   time.Duration(s.cfg.TransientBackoffSecs) * time.Second,
+				Jitter: time.Duration(s.cfg.HoldJitterSecs) * time.Second,
+				Clock:  s.clock,
+			}.Do(pushRetries)
 			rbErr = cf.Rebase(pr)
 		}
 		if rbErr != nil {
@@ -603,7 +608,11 @@ func (s *Settle) preflightStaleBase(num string, gen uint64, pr string, d dispatc
 	for pushRetries := 0; rbErr != nil && errors.Is(rbErr, forge.ErrTransientPushFailure) && pushRetries < s.cfg.MaxRebaseAttempts; pushRetries++ {
 		fmt.Printf("    #%s  landing=%s  status=rebase-push-retry  attempt=%d/%d  !! %v\n",
 			num, pr, pushRetries+1, s.cfg.MaxRebaseAttempts, rbErr)
-		s.rebasePushBackoff(pushRetries + 1)
+		retry.LinearBackoff{
+			Unit:   time.Duration(s.cfg.TransientBackoffSecs) * time.Second,
+			Jitter: time.Duration(s.cfg.HoldJitterSecs) * time.Second,
+			Clock:  s.clock,
+		}.Do(pushRetries + 1)
 		rbErr = cf.Rebase(pr)
 	}
 	if rbErr != nil {
@@ -634,22 +643,6 @@ func (s *Settle) preflightStaleBase(num string, gen uint64, pr string, d dispatc
 		return rbErr
 	}
 	return s.rewaitAfterForcePush(num, gen, pr)
-}
-
-// rebasePushBackoff sleeps a linear backoff between rebase-push retries on
-// forge.ErrTransientPushFailure (issue #2095), shared by mergeImmediate's
-// reactive conflict-retry loop and preflightStaleBase's own push-retry loop.
-// attempt is 1-based (the Nth retry): the sleep duration is
-// TransientBackoffSecs*attempt -- the same linear schedule
-// dispatch/retry.go's transient-retry path uses -- plus a fixed
-// HoldJitterSecs-second offset. That offset reuses dispatch.Config's
-// HoldJitterSecs knob, which dispatch only adds on its rate-limit-hold path,
-// not this linear one, so here it is a constant nudge, not randomized jitter.
-// Routed through s.clock so tests can inject a recording Clock instead of a
-// real sleep.
-func (s *Settle) rebasePushBackoff(attempt int) {
-	d := time.Duration(s.cfg.TransientBackoffSecs)*time.Second*time.Duration(attempt) + time.Duration(s.cfg.HoldJitterSecs)*time.Second
-	s.clock.Sleep(d)
 }
 
 // resolveConflict dispatches a Box to resolve a genuine ErrMergeConflict
