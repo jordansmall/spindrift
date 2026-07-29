@@ -857,13 +857,15 @@ in
 
   # A custom roster entry (the AC4 path) omitting both `promptFile` and
   # `prompt` must degrade gracefully -- not throw a cryptic missing-attribute
-  # eval error -- since both Driver templates (claude.nix's agentsJsonTemplate,
-  # opencode.nix's agentFilesTemplate) already tolerate the omission via `or`.
-  # mkHarness's own agentsPromptFilesJson/customRosterPromptFiles must match
-  # that tolerance (issue #264 review finding). Forcing `.spindrift` to a
-  # string realizes the whole image-input graph, including the roster-derived
-  # JSON map, so a bare `e.promptFile`/`e.prompt` read (no `or` default) would
-  # throw here.
+  # eval error. mkHarness routes every roster (explicit or default) through
+  # `rosterLib.normalizeRoster` (issue #2152 slice B) before anything reads
+  # `promptFile`, so by the time agentsPromptFilesJson/customRosterPromptFiles
+  # run their now-unconditional `e.promptFile` reads, every entry already
+  # carries one -- normalizeRoster's own default-injection is pinned
+  # separately in nix/checks/roster.nix. Forcing `.spindrift` to a string
+  # realizes the whole image-input graph, including the roster-derived JSON
+  # map, so a regression reintroducing a bare unnormalized `e.promptFile`/
+  # `e.prompt` read would throw here.
   mkharness-roster-custom-entry-missing-prompt-fields =
     let
       minimalRoster = [
@@ -890,10 +892,12 @@ in
   # NO `promptFile`. Unlike the missing-both case above (dropped by
   # customRosterPromptFiles' `prompt != null` filter, so its bake line never
   # runs), this entry survives the filter and IS baked -- exercising the one
-  # code path customRosterPromptFiles exists to serve. The bake `cp` must
-  # resolve its target filename from `e.promptFile or "${e.name}-prompt.md"`,
-  # matching agentsPromptFilesJson's own fallback; a bare `e.promptFile` read
-  # would throw a missing-attribute error here (issue #264 review finding).
+  # code path customRosterPromptFiles exists to serve. `resolvedRoster` is
+  # normalized before customRosterPromptFiles is derived from it (issue #2152
+  # slice B), so the entry's `promptFile` is already "auditor-prompt.md" by
+  # the time the bake `cp` reads it unconditionally; a regression that read
+  # `e.promptFile` before normalization would throw a missing-attribute error
+  # here (issue #264 review finding).
   mkharness-roster-custom-entry-inline-prompt-no-file =
     let
       inlineRoster = [
