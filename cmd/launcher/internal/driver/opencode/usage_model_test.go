@@ -74,6 +74,38 @@ func TestBreakdownByModel_UnknownModel(t *testing.T) {
 	}
 }
 
+// TestBreakdownByModel_EmptyMessageIDAlwaysCounted confirms that two
+// step_finish lines carrying an empty messageID are both counted, not
+// deduped against each other — there is nothing to dedup an empty id
+// against, unlike the non-empty-id case in
+// TestBreakdownByModel_DedupByMessageID.
+func TestBreakdownByModel_EmptyMessageIDAlwaysCounted(t *testing.T) {
+	lines := []string{
+		`{"type":"step_finish","part":{"messageID":"","modelID":"gpt-5","tokens":{"input":10,"output":5}}}`,
+		`{"type":"step_finish","part":{"messageID":"","modelID":"gpt-5","tokens":{"input":10,"output":5}}}`,
+	}
+	path := WriteLog(t, lines...)
+
+	got, err := breakdownByModel(path)
+	if err != nil {
+		t.Fatalf("breakdownByModel: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("len(got) = %d, want 1: %+v", len(got), got)
+	}
+
+	m := got[0]
+	if m.Model != "gpt-5" {
+		t.Fatalf("got[0].Model = %q, want %q", m.Model, "gpt-5")
+	}
+	if m.UncachedInputTokens != 20 {
+		t.Errorf("UncachedInputTokens = %d, want 20", m.UncachedInputTokens)
+	}
+	if m.OutputTokens != 10 {
+		t.Errorf("OutputTokens = %d, want 10", m.OutputTokens)
+	}
+}
+
 // TestBreakdownByModel_CacheWriteTo5m confirms tokens.cache.write lands in
 // CacheWrite5mTokens and CacheWrite1hTokens stays 0 — opencode reports no
 // TTL split, unlike claude-code's ephemeral_5m/1h cache_creation.
