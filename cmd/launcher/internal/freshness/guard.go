@@ -62,7 +62,8 @@ func (g Guard) Reset() error {
 }
 
 // Prior returns the rev recorded by the previous run, or "" — read-only
-// observation; mutation stays internal via record/clear.
+// observation; mutation stays internal via record/clear. Exported so tests
+// can assert the armed/cleared state that Classify manages internally.
 func (g Guard) Prior() string {
 	return g.prior()
 }
