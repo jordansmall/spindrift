@@ -53,7 +53,7 @@ func selectiveListDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, 
 
 	in := waves.Input{Origin: waves.OriginSelective, Issues: toWaveIssues(issues), Edges: readiness.Edges, Sources: readiness.Sources, Failed: readiness.Failed}
 	cfg := selectiveWavesConfig(c)
-	cfg.SeedScopeOf = seedParentResolver(it, cf)
+	cfg.SeedScopeOf = seedScopeResolver(it, cf)
 	return waves.Dispatch(cfg, it, cf, pwd, f, s, in)
 }
 
@@ -109,7 +109,7 @@ func evictUnmetBlockers(it forge.IssueTracker, cf forge.CodeForge, readiness wav
 	// (#2130); nil under every other forge, where seedScopeFor always yields
 	// a zero SeedScope and Ready falls back to its pre-#2130
 	// landing-verification behavior.
-	resolve := seedParentResolver(it, cf)
+	resolve := seedScopeResolver(it, cf)
 	seedScopeFor := func(dependent string) waves.SeedScope {
 		if resolve == nil {
 			return waves.SeedScope{}

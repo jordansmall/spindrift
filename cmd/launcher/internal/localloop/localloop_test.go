@@ -1118,7 +1118,7 @@ func TestWire_ComposedLoop_CrossParentBlockerHoldsLoudly(t *testing.T) {
 	if got := seedParent; got != "beta-engine" {
 		t.Fatalf("ResolveParent(%s) = %q, want %q", dependentNum, got, "beta-engine")
 	}
-	wantReason := fmt.Sprintf("landed but not yet on this seam's integration branch (integration/%s); holding", seedParent)
+	wantReason := fmt.Sprintf("landed but not yet on integration/%s (this seam's own integration branch); holding", seedParent)
 	if !strings.Contains(output, wantReason) {
 		t.Errorf("captured stdout = %q, want it to contain the #2130 held reason %q", output, wantReason)
 	}

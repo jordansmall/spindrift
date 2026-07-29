@@ -236,7 +236,7 @@ func blockerReady(it forge.IssueTracker, cf forge.CodeForge, dep string, scope S
 					fmt.Printf("    .. blocker #%s landing present on %s (this seam's own integration branch); treating as satisfied\n", dep, scope)
 					return true, &issue
 				} else {
-					fmt.Printf("    .. blocker #%s landed but not yet on this seam's integration branch (%s); holding\n", dep, scope)
+					fmt.Printf("    .. blocker #%s landed but not yet on %s (this seam's own integration branch); holding\n", dep, scope)
 				}
 			} else if verifier, ok := cf.(forge.LandingVerifier); ok {
 				merged, verr := verifier.VerifyLanding(issue.Landing)
