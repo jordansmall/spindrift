@@ -2566,9 +2566,9 @@ func TestEngageAliasRemoved(t *testing.T) {
 // TestSeedParentResolver_NonLocalForge_ReturnsNil verifies that under any
 // forge that doesn't implement forge.LandingContainmentQuery (i.e. every
 // forge but local), seedScopeResolver returns nil -- keeping
-// waves.Config.SeedScopeOf nil, so the blocker gate's seed-branch check (#2130)
-// never fires and the gate retains its pre-#2130 landing-verification
-// behavior.
+// waves.Config.SeedScopeOf nil, so the blocker gate's seed-branch containment
+// check (#2130) never fires and a blocker is judged solely by its PR/issue
+// state.
 func TestSeedParentResolver_NonLocalForge_ReturnsNil(t *testing.T) {
 	fc := forge.NewFake()
 

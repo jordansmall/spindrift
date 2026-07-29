@@ -107,8 +107,8 @@ func evictUnmetBlockers(it forge.IssueTracker, cf forge.CodeForge, readiness wav
 
 	// resolve resolves a dependent's opaque SeedScope under local forge
 	// (#2130); nil under every other forge, where seedScopeFor always yields
-	// a zero SeedScope and Ready falls back to its pre-#2130
-	// landing-verification behavior.
+	// a zero SeedScope, so the seed-branch containment gate never fires and a
+	// blocker is judged solely by its PR/issue state.
 	resolve := seedScopeResolver(it, cf)
 	seedScopeFor := func(dependent string) forge.SeedScope {
 		if resolve == nil {

@@ -273,7 +273,7 @@ func (l localLandingReconciler) reconcileBranchRef(res *Result, iss forge.Issue,
 		return fmt.Errorf("reconcile issue %s: check branch %s containment: %w", iss.Number, landing.Branch, err)
 	}
 	if !contained {
-		fmt.Printf("    #%s  landing=%s  status=stuck  !! branch %s not merged into %s's integration branch\n", iss.Number, iss.Landing, landing.Branch, scope.String())
+		fmt.Printf("    #%s  landing=%s  status=stuck  !! branch %s not merged into %s's integration branch\n", iss.Number, iss.Landing, landing.Branch, scope.Parent())
 		if res.Stuck == nil {
 			res.Stuck = map[string]string{}
 		}

@@ -135,9 +135,9 @@ type Config struct {
 	// SeedScopeOf resolves a dependent issue number to the opaque SeedScope
 	// its blocker gate is checked against — the seed branch a blocker's landed
 	// work must have reached before the dependent is ready. Set only under
-	// CODE_FORGE=local; nil for every other forge, where the seed-branch gate
-	// never fires and the blocker gate keeps its pre-#2130 landing-verification
-	// behavior.
+	// CODE_FORGE=local; nil for every other forge, where the seed-branch
+	// containment gate never fires and a blocker is judged solely by its
+	// PR/issue state.
 	SeedScopeOf func(num string) forge.SeedScope
 
 	// pollInterval overrides RunContinuous's background refill-poll cadence
