@@ -5,22 +5,19 @@ import (
 	"encoding/hex"
 	"io"
 	"sync/atomic"
-	"time"
 
 	"spindrift.dev/launcher/internal/driver"
+	"spindrift.dev/launcher/internal/retry"
 	"spindrift.dev/launcher/internal/runner"
 )
 
-// Clock is injectable for tests; RealClock() gives production behaviour.
-type Clock struct {
-	Now   func() time.Time
-	Sleep func(time.Duration)
-}
+// Clock is the injectable time seam, now owned by the retry leaf (issue
+// #2154); dispatch keeps this alias so every existing constructor compiles
+// unchanged.
+type Clock = retry.Clock
 
 // RealClock returns a Clock backed by the real time.Now / time.Sleep.
-func RealClock() Clock {
-	return Clock{Now: time.Now, Sleep: time.Sleep}
-}
+func RealClock() Clock { return retry.RealClock() }
 
 // Factory is constructed once per top-level dispatch entry point (run, the
 // selective `dispatch <nums>` path, or recover) with the config, working
