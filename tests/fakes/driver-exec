@@ -13,7 +13,8 @@
 #
 # The `bundle-out` verb (issue #1808) is a second, unrelated entry point --
 # real git plumbing, not a Driver invocation -- so it is dispatched off a
-# bare first arg before the flag loop below ever runs.
+# bare first arg before the flag loop below ever runs. The `outcome-backstop`
+# verb (issue #2157) is a third such entry point, dispatched the same way.
 set -euo pipefail
 
 if [ "${1:-}" = "bundle-out" ]; then
@@ -38,6 +39,77 @@ if [ "${1:-}" = "bundle-out" ]; then
     printf 'SPINDRIFT_OUTCOME issue=%s landing=none status=blocked note=agent reported ready but no commits exist on %s\n' \
       "$bundle_issue" "$branch"
   fi
+  exit 0
+fi
+
+if [ "${1:-}" = "outcome-backstop" ]; then
+  shift
+  repo="" ob_issue="" branch="" base="" kind="work" forge="github"
+  write="" nonce="" recovery="" attempts="1" backoff="0" jitter="0"
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --repo) repo="$2"; shift 2 ;;
+      --issue) ob_issue="$2"; shift 2 ;;
+      --branch) branch="$2"; shift 2 ;;
+      --base) base="$2"; shift 2 ;;
+      --dispatch-kind) kind="$2"; shift 2 ;;
+      --code-forge) forge="$2"; shift 2 ;;
+      --box-write-enabled) write="$2"; shift 2 ;;
+      --nonce) nonce="$2"; shift 2 ;;
+      --recovery-attempted) recovery="$2"; shift 2 ;;
+      --max-attempts) attempts="$2"; shift 2 ;;
+      --backoff-secs) backoff="$2"; shift 2 ;;
+      --jitter-secs) jitter="$2"; shift 2 ;;
+      *) shift ;;
+    esac
+  done
+  # Run every git call from inside the repo, not via `git -C`: the bats
+  # push shims match on `$1 = push`, so a leading `-C <repo>` would slip the
+  # force-push past them. The real Go verb uses `git -C` -- there is no shim
+  # in production. (issue #2157)
+  cd "$repo"
+  note="driver exited without emitting an outcome"
+  [ -n "$recovery" ] && note="${note}; a resume attempt also produced no outcome"
+  if [ "$kind" = "research" ]; then
+    printf 'SPINDRIFT_OUTCOME issue=%s landing=none status=blocked note=%s nonce=%s\n' \
+      "$ob_issue" "$note" "$nonce"
+    exit 0
+  fi
+  if [ -n "$(git status --porcelain 2>/dev/null)" ]; then
+    if git add -A && git commit -m "chore: salvage uncommitted work before exiting without an outcome" >/dev/null 2>&1; then
+      note="${note}; salvaged uncommitted work into a commit"
+    else
+      note="${note}; failed to salvage uncommitted work"
+    fi
+  fi
+  commit_count="$(git rev-list --count "$base..$branch" 2>/dev/null)" || commit_count=1
+  if [ "$commit_count" -eq 0 ]; then
+    note="${note}; no work to preserve"
+  elif [ "$forge" = "local" ]; then
+    note="${note}; no bundle was ever emitted (no writable remote under CODE_FORGE=local)"
+  elif [ -z "$write" ] && [ "$forge" = "github" ]; then
+    note="${note}; branch relayed via outbox bundle (read-only Box)"
+  else
+    [ "$attempts" -lt 1 ] && attempts=1
+    [ "$backoff" -lt 0 ] && backoff=0
+    [ "$jitter" -lt 0 ] && jitter=0
+    push_log="$(mktemp)"
+    attempt=1
+    while true; do
+      if git push --force-with-lease origin "$branch" 2>"$push_log"; then
+        break
+      fi
+      if [ "$attempt" -ge "$attempts" ]; then
+        note="${note}; push failed after ${attempt} attempt(s): $(tail -1 "$push_log")"
+        break
+      fi
+      sleep "$(( backoff * attempt + jitter ))"
+      attempt=$(( attempt + 1 ))
+    done
+    rm -f "$push_log"
+  fi
+  printf 'SPINDRIFT_OUTCOME issue=%s landing=%s status=blocked note=%s nonce=%s\n' \
+    "$ob_issue" "$branch" "$note" "$nonce"
   exit 0
 fi
 
