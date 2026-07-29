@@ -28,6 +28,17 @@
   # directory (e.g. .config/opencode/skills) exists or is wired.
   skillsDirRelative = ".claude/skills";
 
+  # HOME-relative dir agentFilesTemplate (below) bakes each subagent's
+  # agents/<name>.md file into. Optional (like sessionCacheDirRelative
+  # below), not part of default.nix's requiredAttrs, since a Driver whose
+  # subagents don't ride on-disk files (claude) has nothing to rewrite here.
+  # agent/entrypoint.sh's file-rewrite loop (issue #2153) reads the rendered
+  # DRIVER_AGENT_FILES_DIR (lib/drivers/default.nix's renderPreamble) to
+  # find and rewrite each baked agent file's body at runtime -- this value
+  # must stay in lockstep with the path agentFilesTemplate bakes into, or
+  # the loop would look in the wrong place and silently no-op.
+  agentFilesDirRelative = ".config/opencode/agents";
+
   # sessionCacheDirRelative is deliberately omitted: opencode wires no
   # resumable session state, so the launcher creates no per-issue cache and
   # the runner adapters add no mount for it (see lib/drivers/default.nix's
