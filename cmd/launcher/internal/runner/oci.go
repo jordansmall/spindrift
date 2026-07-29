@@ -190,6 +190,24 @@ func isTransientRegistryError(stderr string) bool {
 	return false
 }
 
+// isRuntimeUnusableError reports whether stderr indicates the low-level OCI
+// runtime (crun/runc) itself failed to start the container, rather than the
+// container running and returning an unexpected result. requireRealOCI only
+// probes `<cli> info`, so a runtime that is present and reports a reachable
+// daemon but is actually broken (a version mismatch on a CI runner image:
+// "OCI runtime error: crun: unknown version specified") slips past that gate
+// and only surfaces at `run` time. Such a runtime is "not usable" in the sense
+// ci.yml's integration step means, so the probes skip on it rather than fail
+// hard — the same clean degradation the daemon-unreachable path already gives.
+// A broken runtime can never start a container, so this is never a genuine
+// hardening regression, which surfaces instead as wrong /proc output from a
+// container that did start. Like isTransientRegistryError it only has an
+// integration caller but lives here, untagged, for a plain unit test under
+// checks-inbox.
+func isRuntimeUnusableError(stderr string) bool {
+	return strings.Contains(stderr, "OCI runtime error")
+}
+
 func (a *ociAdapter) loadImage(archive string) error {
 	fmt.Printf("==> loading spindrift image from %s\n", archive)
 	load := exec.Command(a.cli, "load", "-i", archive)

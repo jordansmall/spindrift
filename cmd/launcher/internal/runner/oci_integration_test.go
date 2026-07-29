@@ -109,6 +109,9 @@ func runProbe(t *testing.T, cli string, args []string) []byte {
 			return stdout.Bytes()
 		}
 		lastErr, lastStderr = err, stderr.String()
+		if isRuntimeUnusableError(lastStderr) {
+			t.Skipf("%s has no usable OCI runtime: %v: %s", cli, err, lastStderr)
+		}
 		if ctx.Err() != context.DeadlineExceeded && !isTransientRegistryError(lastStderr) {
 			t.Fatalf("%s run failed: %v: %s", cli, err, lastStderr)
 		}
