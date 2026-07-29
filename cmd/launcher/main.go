@@ -1283,18 +1283,17 @@ func runContinuousDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, 
 		return waveIssues, result.Edges, result.Sources, result.Failed, nil
 	}
 
-	tracker := newStaleRevTracker(pwd)
-	var staleRev, staleTipTag string
+	guard := freshness.NewGuard(pwd)
+	var staleResult freshness.Result
 
 	fresh := func() (bool, bool, string) {
 		res := freshness.Probe(c.runtime, pwd, c.baseBranch, c.flakeImageAttr, c.imageTag, eval)
 		// fresh() is called under RunContinuous's mutex (see its doc
-		// comment), so these plain writes are serialized — no separate
+		// comment), so this plain write is serialized — no separate
 		// locking needed, mirroring the firstQuery*/firstQueryEmpty comment
 		// above.
 		if res.Applicable && !res.Fresh {
-			staleRev = res.Rev
-			staleTipTag = res.TipTag
+			staleResult = res
 		}
 		return res.Applicable, res.Fresh, res.Message
 	}
@@ -1317,23 +1316,18 @@ func runContinuousDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, 
 			if err := reconcileAfterDispatch(c, it, cf, lp, pwd, os.Stdout); err != nil {
 				return err
 			}
-			_ = tracker.clear()
+			_ = guard.Reset()
 			return errQueueEmpty
 		}
 		if errors.Is(err, waves.ErrImageStale) {
-			return classifyStaleOutcome(staleRev, staleTipTag, tracker, func() string {
-				return freshness.HostTaintDiagnostic(c.baseBranch, staleRev, c.flakeImageAttr, staleTipTag, c.imageTag)
-			}, os.Stdout)
+			if guard.Classify(staleResult) == freshness.HostTainted {
+				fmt.Fprintln(os.Stdout, freshness.HostTaintDiagnostic(c.baseBranch, staleResult.Rev, c.flakeImageAttr, staleResult.TipTag, c.imageTag))
+				return errImageHostTainted
+			}
+			return waves.ErrImageStale
 		}
 		return err
 	}
-	// Do NOT clear the tracker here. Clearing it on every clean success
-	// (issue #2128) wiped the #2113 non-convergence guard armed by a prior
-	// stale run, downgrading a same-rev host-taint repeat (exit 5 halt) to
-	// a perpetual rebuild (exit 4). The guard is scoped to actual stale
-	// outcomes and cleared only where that's correct: the
-	// ErrOpenNoneDispatchable path above and classifyStaleOutcome's own
-	// host-taint-halt path (continuous_freshness.go).
 	fmt.Print(dispatchCompletionBanner(c))
 	return reconcileAfterDispatch(c, it, cf, lp, pwd, os.Stdout)
 }
