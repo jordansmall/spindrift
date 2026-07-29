@@ -177,7 +177,7 @@ func TestLocalIssue_RenderParseRoundTrip_ScalarEscaping(t *testing.T) {
 		name  string
 		title string
 	}{
-		{name: "tab", title: "a\tb"},
+		{name: "tab", title: "\tleading tab"},
 		{name: "carriage return", title: "a\rb"},
 		{name: "leading double-quote", title: `"leading`},
 		{name: "embedded double-quote", title: `a"b`},
