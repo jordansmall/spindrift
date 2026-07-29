@@ -817,9 +817,9 @@ in
           b = builtins.elemAt nixPaths j;
         }) (filter (j: j != i) (builtins.genList (x: x) (builtins.length nixPaths)))
       ) (builtins.genList (x: x) (builtins.length nixPaths));
-      collidingPairs = filter (
-        p: p.a != p.b -> isPrefixOf (segmentsOf p.a) (segmentsOf p.b)
-      ) (filter (p: p.a != p.b) pairs);
+      collidingPairs = filter (p: p.a != p.b -> isPrefixOf (segmentsOf p.a) (segmentsOf p.b)) (
+        filter (p: p.a != p.b) pairs
+      );
       duplicatePaths = filter (p: p.a == p.b) pairs;
     in
     assert assertMsg (missingNixPath == [ ])
