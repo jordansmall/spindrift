@@ -176,6 +176,14 @@ func scanLog(logPath string) (scanResult, error) {
 			}
 		}
 		if !sr.found {
+			// First marker in the log wins: once a chunk matches, sr.found
+			// latches and later chunks are ignored. matchMarker prefers a
+			// transient marker over a terminal one *within* a single chunk,
+			// but across chunks a terminal marker seen first now latches
+			// Terminal — before this change every match was transient, so
+			// ordering never crossed classes. Harmless for the --agents case:
+			// that CLI-usage error aborts the run before any API call, so no
+			// transient marker can precede it in a genuine failure log.
 			if reason, class, ok := matchMarker(chunk); ok {
 				sr.found = true
 				sr.reason = reason
