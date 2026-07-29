@@ -43,6 +43,26 @@ func TestSynthesizeExit_ValidOutcomeWithErrorEvent_IsNonZero(t *testing.T) {
 	}
 }
 
+// TestSynthesizeExit_NearMissOutcome_IsNonZero verifies that a log carrying
+// the SPINDRIFT_OUTCOME token but missing a required field (landing) --
+// outcome.ParseAnywhere's near-miss case (outcome.ErrNearMiss) -- still
+// synthesizes a non-zero exit code, same as no token at all: SynthesizeExit
+// only branches on ParseAnywhere's ok bool, so a near-miss line never gets
+// distinguished from "never attempted" here.
+func TestSynthesizeExit_NearMissOutcome_IsNonZero(t *testing.T) {
+	logPath := opencode.WriteLog(t,
+		`{"type":"text","part":{"text":"SPINDRIFT_OUTCOME issue=42 status=ready note=done"}}`,
+	)
+
+	code, err := opencode.SynthesizeExit(logPath)
+	if err != nil {
+		t.Fatalf("SynthesizeExit: %v", err)
+	}
+	if code == 0 {
+		t.Errorf("code: got 0, want non-zero for a near-miss (malformed) SPINDRIFT_OUTCOME line")
+	}
+}
+
 // TestSynthesizeExit_NoOutcome_IsNonZero verifies that a log with no
 // SPINDRIFT_OUTCOME line at all synthesizes a non-zero exit code.
 func TestSynthesizeExit_NoOutcome_IsNonZero(t *testing.T) {
