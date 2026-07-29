@@ -1,12 +1,13 @@
 package claude
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
 	"strings"
 	"sync"
+
+	"spindrift.dev/launcher/internal/driver/driverkit"
 )
 
 // Writer is a streaming stream-json parser: it wraps a raw io.Writer (the
@@ -23,7 +24,7 @@ type Writer struct {
 	topLevelRole string
 
 	mu              sync.Mutex
-	buf             []byte
+	frame           driverkit.LineFramer
 	turns           int
 	taskRole        map[string]string         // Task tool-use id → subagent role
 	currentRole     string                    // role of the message being parsed
@@ -66,16 +67,7 @@ func (w *Writer) Write(p []byte) (int, error) {
 	}
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	w.buf = append(w.buf, p[:n]...)
-	for {
-		nl := bytes.IndexByte(w.buf, '\n')
-		if nl < 0 {
-			break
-		}
-		line := string(w.buf[:nl])
-		w.buf = w.buf[nl+1:]
-		w.parseLine(line)
-	}
+	w.frame.Push(p[:n], w.parseLine)
 	return n, nil
 }
 

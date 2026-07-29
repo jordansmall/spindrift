@@ -1,6 +1,10 @@
 package claude
 
-import "encoding/json"
+import (
+	"encoding/json"
+
+	"spindrift.dev/launcher/internal/driver/driverkit"
+)
 
 // Event is one line of a claude CLI stream-json transcript. This shape, and
 // the Task-ID-to-role resolution below, are shared by every consumer that
@@ -105,18 +109,20 @@ func EncodeSpindriftOp(op SpindriftOp) string {
 	return string(b) + "\n"
 }
 
-// ImplementorRole is the role attributed to any message with no
-// parent_tool_use_id — the main agent loop, as opposed to a Task subagent.
-const ImplementorRole = "implementor"
+const (
+	// ImplementorRole is the role attributed to any message with no
+	// parent_tool_use_id — the main agent loop, as opposed to a Task subagent.
+	ImplementorRole = driverkit.ImplementorRole
 
-// ReviewerRole is the role attributed to a top-level orchestrator-owned
-// review pass (issue #2092).
-const ReviewerRole = "reviewer"
+	// ReviewerRole is the role attributed to a top-level orchestrator-owned
+	// review pass (issue #2092).
+	ReviewerRole = driverkit.ReviewerRole
 
-// DefaultRole is the role attributed to a Task whose input carries no (or
-// empty) subagent_type, and to any message whose parent_tool_use_id does not
-// match a Task ID collected so far.
-const DefaultRole = "subagent"
+	// DefaultRole is the role attributed to a Task whose input carries no (or
+	// empty) subagent_type, and to any message whose parent_tool_use_id does
+	// not match a Task ID collected so far.
+	DefaultRole = driverkit.DefaultRole
+)
 
 // isSubagentSpawnTool reports whether a tool-use block with this name
 // spawns a subagent. "Task" is the legacy name; "Agent" is the current

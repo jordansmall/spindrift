@@ -2,12 +2,12 @@ package claude
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"sort"
 	"strings"
 
+	"spindrift.dev/launcher/internal/driver/driverkit"
 	"spindrift.dev/launcher/internal/logscan"
 	"spindrift.dev/launcher/internal/usage"
 )
@@ -37,7 +37,7 @@ type usageData struct {
 // other than file-not-found or oversized lines.
 func lastInLog(path string) (usage.Usage, bool, error) {
 	var last *usage.Usage
-	err := logscan.ForEachLine(path, logscan.SkipOversized, func(line string) {
+	err := driverkit.ScanLog(path, logscan.SkipOversized, func(line string) {
 		s := strings.TrimSpace(line)
 		if strings.Contains(s, `"type":"result"`) {
 			var ev resultEvent
@@ -57,9 +57,6 @@ func lastInLog(path string) (usage.Usage, bool, error) {
 		}
 	})
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return usage.Usage{}, false, nil
-		}
 		return usage.Usage{}, false, err
 	}
 
@@ -126,7 +123,7 @@ func breakdownByModelFile(path string) ([]usage.ModelUsage, error) {
 	}
 	seenIDs := make(map[string]bool)
 
-	err := logscan.ForEachLine(path, logscan.SkipOversized, func(line string) {
+	err := driverkit.ScanLog(path, logscan.SkipOversized, func(line string) {
 		ev, ok := assistantEvent(line)
 		if !ok {
 			return
@@ -159,9 +156,6 @@ func breakdownByModelFile(path string) ([]usage.ModelUsage, error) {
 		}
 	})
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return nil, nil
-		}
 		return nil, err
 	}
 
