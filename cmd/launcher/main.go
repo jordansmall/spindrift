@@ -941,17 +941,17 @@ func selectiveWavesConfig(c config) waves.Config {
 	return cfg
 }
 
-// seedParentResolver returns the waves.Config.ParentOf resolver for the
-// local blocker gate (#2130): a dependent num -> the sanitized parent token
-// keying its own integration/<parent> seed branch. Non-nil only when cf is
+// seedParentResolver returns the waves.Config.SeedScopeOf resolver for the
+// local blocker gate (#2130, #2150): a dependent num -> the opaque
+// waves.SeedScope its blocker gate is checked against. Non-nil only when cf is
 // CODE_FORGE=local's containment-query surface; nil for every other forge,
 // where the seed-branch gate never fires and the blocker gate keeps its
 // pre-#2130 landing-verification behavior.
-func seedParentResolver(it forge.IssueTracker, cf forge.CodeForge) func(string) string {
+func seedParentResolver(it forge.IssueTracker, cf forge.CodeForge) func(string) waves.SeedScope {
 	if _, ok := cf.(forge.LandingContainmentQuery); !ok {
 		return nil
 	}
-	return func(num string) string { return localloop.ResolveParent(it, num).String() }
+	return func(num string) waves.SeedScope { return localloop.SeedScopeOf(it, num) }
 }
 
 // toWaveIssues converts main's local issue type to waves.Issue for a call
@@ -1219,7 +1219,7 @@ func run(lc *launchContext) error {
 	}
 	in := waves.Input{Origin: origin, Issues: toWaveIssues(issues), Edges: readiness.Edges, Sources: readiness.Sources, Failed: readiness.Failed}
 	cfg := wavesConfig(c)
-	cfg.ParentOf = seedParentResolver(it, cf)
+	cfg.SeedScopeOf = seedParentResolver(it, cf)
 	if err := waves.Dispatch(cfg, it, cf, pwd, f, s, in); err != nil {
 		return err
 	}
@@ -1300,7 +1300,7 @@ func runContinuousDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, 
 	}
 
 	cfg := wavesConfig(c)
-	cfg.ParentOf = seedParentResolver(it, cf)
+	cfg.SeedScopeOf = seedParentResolver(it, cf)
 	if err := waves.RunContinuous(cfg, nil, it, cf, pwd, f, s, discover, fresh); err != nil {
 		// refill swallows every discover error to stderr and retries on the
 		// next trigger (a transient-tracker-hiccup tolerance that's fine for

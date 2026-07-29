@@ -94,7 +94,7 @@ func nextReady(cfg Config, it forge.IssueTracker, cf forge.CodeForge, checkOverl
 	for _, iss := range issues {
 		var unready []string
 		if !cfg.PreResolved {
-			unready = unreadyBlockers(it, cf, iss.Number, edges, cfg.ParentOf)
+			unready = unreadyBlockers(it, cf, iss.Number, edges, cfg.SeedScopeOf)
 		}
 		switch {
 		case !cfg.PreResolved && !cfg.IgnoreBlockers && depsOfFailed[iss.Number]:

@@ -129,13 +129,13 @@ func (r Readiness) Status(cfg Config, it forge.IssueTracker, cf forge.CodeForge,
 // that is merged, with no discoverable agent branch (human-handled work, or
 // a blocker ref that names a PR number directly). cf's PR surface is
 // optional: a push-only Code Forge (no PRForge) has no PR to discover, so
-// readiness falls straight to the issue-closed check. seedParent is the
-// caller's dependent seed-branch parent token (#2130) — the sanitized
-// parent keying the dependent's own integration/<parent> branch that a
-// LandingContainmentQuery forge checks the blocker's landing against;
-// "" keeps the pre-#2130 landing-verification behavior (LandingVerifier).
-func (r Readiness) Ready(it forge.IssueTracker, cf forge.CodeForge, dep, seedParent string) bool {
-	ready, _ := blockerReady(it, cf, dep, seedParent)
+// readiness falls straight to the issue-closed check. scope is the caller's
+// dependent's already-resolved opaque SeedScope (#2130) that a
+// LandingContainmentQuery forge checks the blocker's landing against; a
+// zero SeedScope keeps the pre-#2130 landing-verification behavior
+// (LandingVerifier).
+func (r Readiness) Ready(it forge.IssueTracker, cf forge.CodeForge, dep string, scope SeedScope) bool {
+	ready, _ := blockerReady(it, cf, dep, scope)
 	return ready
 }
 
@@ -199,10 +199,10 @@ func detectCycle(edges map[string][]string, nums []string) (string, bool) {
 // the readiness check needed one. fi is nil when a merged-PR lookup resolved
 // readiness without ever calling it.Issue, letting blockerStatus tell "no
 // fetch happened" apart from "fetched and still open" without a second call.
-// seedParent is the dependent's own already-resolved sanitized seed-branch
-// parent token (#2130); "" means unknown/legacy, keeping the
-// pre-#2130 LandingVerifier behavior.
-func blockerReady(it forge.IssueTracker, cf forge.CodeForge, dep, seedParent string) (ready bool, fi *forge.Issue) {
+// scope is the dependent's own already-resolved opaque SeedScope (#2130); a
+// zero SeedScope means unknown/legacy, keeping the pre-#2130 LandingVerifier
+// behavior.
+func blockerReady(it forge.IssueTracker, cf forge.CodeForge, dep string, scope SeedScope) (ready bool, fi *forge.Issue) {
 	if pr, ok := cf.(forge.PRForge); ok {
 		branch := cf.AgentBranch(dep)
 		prURL, found, err := pr.PRForBranch(branch)
@@ -228,15 +228,15 @@ func blockerReady(it forge.IssueTracker, cf forge.CodeForge, dep, seedParent str
 	}
 	if issue.Landing != "" {
 		if landing, perr := forge.ParseLanding(issue.Landing); perr == nil && landing.Kind == forge.LandingIntegrationRef {
-			if q, ok := cf.(forge.LandingContainmentQuery); ok && seedParent != "" {
-				contained, cerr := q.IntegrationContainsLanding(issue.Landing, seedParent)
+			if q, ok := cf.(forge.LandingContainmentQuery); ok && scope.parent != "" {
+				contained, cerr := q.IntegrationContainsLanding(issue.Landing, scope.parent)
 				if cerr != nil {
 					fmt.Printf("    .. blocker #%s seed-branch containment check failed: %v; holding\n", dep, cerr)
 				} else if contained {
-					fmt.Printf("    .. blocker #%s landing present on integration/%s (this seam's own integration branch); treating as satisfied\n", dep, seedParent)
+					fmt.Printf("    .. blocker #%s landing present on %s (this seam's own integration branch); treating as satisfied\n", dep, scope)
 					return true, &issue
 				} else {
-					fmt.Printf("    .. blocker #%s landed but not yet on this seam's integration branch (integration/%s); holding\n", dep, seedParent)
+					fmt.Printf("    .. blocker #%s landed but not yet on this seam's integration branch (%s); holding\n", dep, scope)
 				}
 			} else if verifier, ok := cf.(forge.LandingVerifier); ok {
 				merged, verr := verifier.VerifyLanding(issue.Landing)
@@ -263,17 +263,17 @@ func containsLabel(labels []string, target string) bool {
 }
 
 // unreadyBlockers returns num's declared blockers that are not yet satisfied,
-// in edge order. Empty means the issue is ready to dispatch. parentOf
-// resolves num to its own seed-branch parent token (#2130); nil keeps the
-// pre-#2130 legacy behavior.
-func unreadyBlockers(it forge.IssueTracker, cf forge.CodeForge, num string, edges map[string][]string, parentOf func(num string) string) []string {
-	seedParent := ""
-	if parentOf != nil {
-		seedParent = parentOf(num)
+// in edge order. Empty means the issue is ready to dispatch. scopeOf
+// resolves num to its own opaque SeedScope (#2130); nil keeps the pre-#2130
+// legacy behavior.
+func unreadyBlockers(it forge.IssueTracker, cf forge.CodeForge, num string, edges map[string][]string, scopeOf func(num string) SeedScope) []string {
+	var scope SeedScope
+	if scopeOf != nil {
+		scope = scopeOf(num)
 	}
 	var out []string
 	for _, dep := range edges[num] {
-		if ready, _ := blockerReady(it, cf, dep, seedParent); !ready {
+		if ready, _ := blockerReady(it, cf, dep, scope); !ready {
 			out = append(out, dep)
 		}
 	}
@@ -285,12 +285,12 @@ func unreadyBlockers(it forge.IssueTracker, cf forge.CodeForge, num string, edge
 // can reuse it against a Plan's edges without going through a Readiness
 // value.
 func blockerStatus(cfg Config, it forge.IssueTracker, cf forge.CodeForge, num string, edges map[string][]string) (ready bool, failed, unready []string) {
-	seedParent := ""
-	if cfg.ParentOf != nil {
-		seedParent = cfg.ParentOf(num)
+	var scope SeedScope
+	if cfg.SeedScopeOf != nil {
+		scope = cfg.SeedScopeOf(num)
 	}
 	for _, dep := range edges[num] {
-		depReady, fi := blockerReady(it, cf, dep, seedParent)
+		depReady, fi := blockerReady(it, cf, dep, scope)
 		if !depReady {
 			unready = append(unready, dep)
 		}
