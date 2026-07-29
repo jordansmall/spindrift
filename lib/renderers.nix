@@ -24,6 +24,14 @@ let
   toLower = builtins.replaceStrings (chars "ABCDEFGHIJKLMNOPQRSTUVWXYZ") (
     chars "abcdefghijklmnopqrstuvwxyz"
   );
+  toUpper = builtins.replaceStrings (chars "abcdefghijklmnopqrstuvwxyz") (
+    chars "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+  );
+  # Schema entry nixPath (e.g. "git.merge.policy") -> its dot-separated
+  # segments. Shared by renderTemplateSettingsBlock (builds the nested
+  # domain-tree example) and renderFlakeOptionsDoc (groups by the first
+  # segment, the domain) — ADR 0037.
+  splitNixPath = path: builtins.filter builtins.isString (builtins.split "\\." path);
 in
 rec {
   # Env var name -> flag name (e.g. MAX_PARALLEL -> max-parallel). Shared by
@@ -51,7 +59,12 @@ rec {
   # favour of the schema alias.
   flagKind =
     e:
-    if e ? kind then e.kind else if builtins.isInt (e.default or null) then "int" else "string";
+    if e ? kind then
+      e.kind
+    else if builtins.isInt (e.default or null) then
+      "int"
+    else
+      "string";
 
   # Schema entry -> its default rendered as a string, or "" if it has none.
   flagDflt = e: if e ? default then builtins.toString e.default else "";
@@ -132,9 +145,11 @@ rec {
     + "}\n";
 
   # The generated portion of templates/default/flake.nix's commented settings
-  # example, between its BEGIN/END GENERATED SETTINGS EXAMPLE markers:
-  # every flakeOption knob, grouped by section, with its doc string, so a new
-  # knob is discoverable in the template without a hand-edit (issue #520).
+  # example, between its BEGIN/END GENERATED SETTINGS EXAMPLE markers: every
+  # flakeOption knob, rendered as a nested domain tree keyed by its nixPath
+  # (ADR 0037; issue #2179 — supersedes the flat groupToAttr/groupOrder
+  # `settings = { ... }` shape), with its doc string, so a new knob is
+  # discoverable in the template without a hand-edit (issue #520).
   renderTemplateSettingsBlock =
     schema:
     let
@@ -157,19 +172,48 @@ rec {
           "\"${e.placeholder or ""}\""
         else
           "\"\"";
-      renderKnob = key: e: "${ind}  # ${e.doc}\n" + "${ind}  ${key} = ${nixLiteral e};\n";
-      renderSection =
-        group:
+      # Insert one schema entry into the nested domain tree at its nixPath,
+      # e.g. "agents.models.filer" -> tree.agents.models.filer. Each leaf is
+      # tagged (__leaf) so renderNode below can tell a schema entry apart
+      # from a plain namespace node, even though both are attrsets.
+      insertLeaf =
+        tree: segs: entry:
         let
-          sectionAttr = groupToAttr.${group};
-          knobs = filterAttrs (_: e: (e.group or null) == group) flakeOptionEntries;
+          seg = builtins.head segs;
+          rest = builtins.tail segs;
         in
-        if knobs == { } then
-          ""
+        if rest == [ ] then
+          tree
+          // {
+            ${seg} = {
+              __leaf = true;
+              inherit entry;
+            };
+          }
         else
-          "${ind}${sectionAttr} = {\n" + concatStrings (mapAttrsToList renderKnob knobs) + "${ind}};\n";
+          tree // { ${seg} = insertLeaf (tree.${seg} or { }) rest entry; };
+      domainTree = builtins.foldl' (
+        acc: key: insertLeaf acc (splitNixPath flakeOptionEntries.${key}.nixPath) flakeOptionEntries.${key}
+      ) { } (builtins.attrNames flakeOptionEntries);
+      # 2 spaces per depth level; children are ordered by attribute name
+      # (mapAttrsToList walks builtins.attrNames, which sorts).
+      indentAt = depth: builtins.concatStringsSep "" (builtins.genList (_: "  ") depth);
+      renderNode =
+        depth: node:
+        let
+          pad = indentAt depth;
+        in
+        concatStrings (
+          mapAttrsToList (
+            name: child:
+            if child.__leaf or false then
+              "${ind}${pad}# ${child.entry.doc}\n" + "${ind}${pad}${name} = ${nixLiteral child.entry};\n"
+            else
+              "${ind}${pad}${name} = {\n" + renderNode (depth + 1) child + "${ind}${pad}};\n"
+          ) node
+        );
     in
-    "${ind}settings = {\n" + concatStrings (map renderSection groupOrder) + "${ind}};\n";
+    renderNode 0 domainTree;
 
   # templates/default/harness.env.example content: secrets only (ADR 0020).
   # Every other knob flows through the Launcher input document, seeded by
@@ -299,29 +343,44 @@ rec {
     + secretRows
     + "}\n";
 
+  # Domain section order for docs/flake-options.md and
+  # renderTemplateSettingsBlock's nested domain tree (ADR 0037): the first
+  # segment of each flakeOption knob's nixPath.
+  domainOrder = [
+    "agents"
+    "git"
+    "issues"
+    "forge"
+    "dispatch"
+    "infra"
+  ];
+
   # docs/flake-options.md content.
   renderFlakeOptionsDoc =
     schema:
     let
       flakeOptionEntries = filterAttrs (_: e: e.flakeOption or false) schema;
-      groupKnobs = group: filterAttrs (_: e: (e.group or null) == group) flakeOptionEntries;
+      domainOf = e: builtins.head (splitNixPath e.nixPath);
+      domainKnobs =
+        domain: builtins.filter (e: domainOf e == domain) (builtins.attrValues flakeOptionEntries);
       renderDefault = entry: if entry ? default then "`${toString entry.default}`" else "—";
+      capitalize =
+        s: toUpper (builtins.substring 0 1 s) + builtins.substring 1 (builtins.stringLength s) s;
       renderRow =
-        knobName: entry: sectionAttr:
-        "| `settings.${sectionAttr}.${knobName}` | `${entry.env}` | ${renderDefault entry} | ${entry.doc} |\n";
+        entry:
+        "| `perSystem.spindrift.${entry.nixPath}` | `${entry.env}` | ${renderDefault entry} | ${entry.doc} |\n";
       renderSection =
-        group:
+        domain:
         let
-          sectionAttr = groupToAttr.${group};
-          knobs = groupKnobs group;
+          knobs = builtins.sort (a: b: a.nixPath < b.nixPath) (domainKnobs domain);
         in
-        if knobs == { } then
+        if knobs == [ ] then
           ""
         else
-          "## ${group} (`settings.${sectionAttr}`)\n\n"
+          "## ${capitalize domain} (`perSystem.spindrift.${domain}`)\n\n"
           + "| attr path | env var | default | description |\n"
           + "|---|---|---|---|\n"
-          + concatStrings (mapAttrsToList (knobName: entry: renderRow knobName entry sectionAttr) knobs)
+          + concatStrings (map renderRow knobs)
           + "\n";
     in
     "<!-- Code generated by nix/checks.nix from lib/env-schema.nix. DO NOT EDIT. -->\n"
@@ -329,9 +388,8 @@ rec {
     + "\n"
     + "# Flake options reference\n"
     + "\n"
-    + "Consumer-tunable knobs available under `perSystem.spindrift.settings`.\n"
-    + "Grouped by section (matching `spindrift --help --all`); sections with no\n"
-    + "consumer-tunable knobs are omitted.\n"
+    + "Consumer-tunable knobs live under `perSystem.spindrift.*`, grouped by\n"
+    + "domain (ADR 0037); domains with no consumer-tunable knobs are omitted.\n"
     + "\n"
     + "Precedence at runtime: CLI flag > flake setting (via the Launcher input\n"
     + "document, ADR 0020) > baked default. A knob env var still wins over the\n"
@@ -339,7 +397,7 @@ rec {
     + "only secrets and internal plumbing going forward.\n"
     + "See [`docs/reference.md`](reference.md) for the full option surface and runtime vars.\n"
     + "\n"
-    + concatStrings (map renderSection groupOrder);
+    + concatStrings (map renderSection domainOrder);
 
   # share/bash-completion/completions/spindrift content: subcommand
   # completion for the first word, flag completion (incl. the --issue alias
