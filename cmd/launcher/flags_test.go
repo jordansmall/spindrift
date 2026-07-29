@@ -27,6 +27,20 @@ func TestModelDefault_IsOpus48(t *testing.T) {
 	t.Fatal("MODEL entry not found in schemaFlags")
 }
 
+// TestSchemaFlags_BwrapUnshareNetIsBool asserts the bwrap-unshare-net entry
+// is a presence-style bool flag, not a string (issue #2145 slice A).
+func TestSchemaFlags_BwrapUnshareNetIsBool(t *testing.T) {
+	for _, e := range schemaFlags {
+		if e.flag == "bwrap-unshare-net" {
+			if e.kind != "bool" {
+				t.Errorf("bwrap-unshare-net kind = %q, want %q", e.kind, "bool")
+			}
+			return
+		}
+	}
+	t.Fatal("bwrap-unshare-net entry not found in schemaFlags")
+}
+
 // TestExtractInputFlag_Present extracts the document path and strips both
 // tokens from the remaining args.
 func TestExtractInputFlag_Present(t *testing.T) {
@@ -195,6 +209,92 @@ func TestParseFlags_MultipleFlags(t *testing.T) {
 	}
 	if got := os.Getenv("MAX_JOBS"); got != "1" {
 		t.Errorf("MAX_JOBS = %q, want %q", got, "1")
+	}
+}
+
+// TestParseFlags_BoolFlag_BarePresence: a bare bool-kind flag (no value
+// token) sets its env var to "1" and does not consume the next arg (issue
+// #2145 slice B).
+func TestParseFlags_BoolFlag_BarePresence(t *testing.T) {
+	t.Setenv("BWRAP_UNSHARE_NET", "")
+	remaining, err := parseFlags([]string{"dispatch", "--bwrap-unshare-net"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := os.Getenv("BWRAP_UNSHARE_NET"); got != "1" {
+		t.Errorf("BWRAP_UNSHARE_NET = %q, want %q", got, "1")
+	}
+	if len(remaining) != 1 || remaining[0] != "dispatch" {
+		t.Errorf("remaining = %v, want [dispatch]", remaining)
+	}
+}
+
+// TestParseFlags_BoolFlag_EqualsForms: the --flag=<value> equals form is ON
+// for "1"/"true" and OFF for ""/"0"/"false" (issue #2145 slice B).
+func TestParseFlags_BoolFlag_EqualsForms(t *testing.T) {
+	cases := []struct {
+		arg  string
+		want string
+	}{
+		{"--bwrap-unshare-net=1", "1"},
+		{"--bwrap-unshare-net=true", "1"},
+		{"--bwrap-unshare-net=0", ""},
+		{"--bwrap-unshare-net=false", ""},
+		{"--bwrap-unshare-net=", ""},
+	}
+	for _, c := range cases {
+		t.Run(c.arg, func(t *testing.T) {
+			t.Setenv("BWRAP_UNSHARE_NET", "")
+			_, err := parseFlags([]string{c.arg})
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got := os.Getenv("BWRAP_UNSHARE_NET"); got != c.want {
+				t.Errorf("BWRAP_UNSHARE_NET = %q, want %q", got, c.want)
+			}
+		})
+	}
+}
+
+// TestParseFlags_BoolFlag_SpaceSeparatedIsPositional: a token following a
+// bare bool-kind flag is never swallowed as its value — it survives as a
+// normal positional arg in remaining (issue #2145 slice B).
+func TestParseFlags_BoolFlag_SpaceSeparatedIsPositional(t *testing.T) {
+	t.Setenv("BWRAP_UNSHARE_NET", "")
+	remaining, err := parseFlags([]string{"dispatch", "--bwrap-unshare-net", "1"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := os.Getenv("BWRAP_UNSHARE_NET"); got != "1" {
+		t.Errorf("BWRAP_UNSHARE_NET = %q, want %q", got, "1")
+	}
+	found := false
+	for _, r := range remaining {
+		if r == "1" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("remaining = %v, want it to contain %q (must not be swallowed as flag value)", remaining, "1")
+	}
+}
+
+// TestParseFlags_BoolFlag_ExplicitOffOverridesAmbient: an explicit
+// --flag=0/--flag=false/--flag= clears an already-set env var to "" rather
+// than leaving the ambient "1" in place — flag-over-env precedence applies
+// to the off case too (ADR 0020; issue #2145 slice B).
+func TestParseFlags_BoolFlag_ExplicitOffOverridesAmbient(t *testing.T) {
+	for _, arg := range []string{"--bwrap-unshare-net=0", "--bwrap-unshare-net=false", "--bwrap-unshare-net="} {
+		t.Run(arg, func(t *testing.T) {
+			t.Setenv("BWRAP_UNSHARE_NET", "1")
+			_, err := parseFlags([]string{arg})
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got := os.Getenv("BWRAP_UNSHARE_NET"); got != "" {
+				t.Errorf("BWRAP_UNSHARE_NET = %q, want empty (explicit off must override ambient env)", got)
+			}
+		})
 	}
 }
 
@@ -432,6 +532,30 @@ func TestPrintHelpFull_CoversEverySchemaFlag(t *testing.T) {
 		if !strings.Contains(out, "--"+e.flag) {
 			t.Errorf("full help output missing flag --%s (group %q not rendered?)", e.flag, e.group)
 		}
+	}
+}
+
+// TestPrintHelpFull_BoolFlagNoValuePlaceholder: a presence-style bool flag
+// (kind = "bool", issue #2145) renders in the full reference labelled "bool"
+// and with no value placeholder — it takes no following value.
+func TestPrintHelpFull_BoolFlagNoValuePlaceholder(t *testing.T) {
+	var buf bytes.Buffer
+	printHelpFull(&buf)
+	var line string
+	for _, l := range strings.Split(buf.String(), "\n") {
+		if strings.Contains(l, "--bwrap-unshare-net") {
+			line = l
+			break
+		}
+	}
+	if line == "" {
+		t.Fatal("full help output missing --bwrap-unshare-net")
+	}
+	if !strings.Contains(line, "bool") {
+		t.Errorf("bool flag line should be labelled bool, got: %q", line)
+	}
+	if strings.ContainsAny(line, "<>") {
+		t.Errorf("bool flag line must carry no <value> placeholder, got: %q", line)
 	}
 }
 

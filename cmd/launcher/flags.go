@@ -116,7 +116,7 @@ type flagEntry struct {
 	env          string // env-var name (SCREAMING_SNAKE_CASE)
 	flag         string // flag name without leading dashes (kebab-case)
 	alias        string // optional short-form alias without leading dashes; empty when absent
-	kind         string // "string" or "int"
+	kind         string // "string", "int", or "bool"
 	doc          string // one-line description from env-schema.nix
 	dflt         string // baked-in default as a string; empty when there is none
 	group        string // category heading for the full reference (from env-schema.nix)
@@ -219,7 +219,15 @@ type subcommandEntry struct {
 // returned as-is.
 func parseFlags(args []string) ([]string, error) {
 	byFlag := make(map[string]*flagEntry, len(schemaFlags)*2)
+	byBool := make(map[string]*flagEntry, 2)
 	for i := range schemaFlags {
+		if schemaFlags[i].kind == "bool" {
+			byBool["--"+schemaFlags[i].flag] = &schemaFlags[i]
+			if schemaFlags[i].alias != "" {
+				byBool["--"+schemaFlags[i].alias] = &schemaFlags[i]
+			}
+			continue
+		}
 		byFlag["--"+schemaFlags[i].flag] = &schemaFlags[i]
 		if schemaFlags[i].alias != "" {
 			byFlag["--"+schemaFlags[i].alias] = &schemaFlags[i]
@@ -274,6 +282,24 @@ func parseFlags(args []string) ([]string, error) {
 				return nil, fmt.Errorf("flag --secret-cmd requires a command")
 			}
 			globalSecretCmdTemplate = args[i]
+			i++
+			continue
+		}
+		name, value, hasEquals := strings.Cut(arg, "=")
+		if entry, ok := byBool[name]; ok {
+			var on bool
+			if hasEquals {
+				on = value != "" && value != "0" && value != "false"
+			} else {
+				on = true
+			}
+			setTo := ""
+			if on {
+				setTo = "1"
+			}
+			if err := os.Setenv(entry.env, setTo); err != nil {
+				return nil, err
+			}
 			i++
 			continue
 		}
