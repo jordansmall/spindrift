@@ -1156,6 +1156,7 @@ Print the required line exactly once as your final message, using this grammar -
   # is non-zero; forcing exit 0 here would silently turn a retryable
   # transient failure into a terminal synthetic status=blocked (issue #593).
   if [ "$claude_rc" -eq 0 ] && [ -z "$_last_outcome_line" ]; then
+    echo "==> driver produced no SPINDRIFT_OUTCOME line — emitting synthetic backstop"
     emit_outcome_backstop
     # A read-only github Box (BOX_WRITE_ENABLED unset) holds no push token, so
     # emit_outcome_backstop could not push $BRANCH itself. Fall through to the
