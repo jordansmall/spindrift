@@ -174,7 +174,7 @@ func TestRunContinuousDispatch_CleanSuccessPreservesHostTaintGuard_Halts(t *test
 	if got := exitCodeFor(err1); got != 4 {
 		t.Fatalf("call 1: exitCodeFor(err1) = %d, want 4 (waves.ErrImageStale)", got)
 	}
-	rev := newStaleRevTracker(dir).prior()
+	rev := freshness.NewGuard(dir).Prior()
 	if rev == "" {
 		t.Fatalf("call 1: tracker.prior() = %q, want a non-empty recorded rev (guard armed)", rev)
 	}
@@ -192,7 +192,7 @@ func TestRunContinuousDispatch_CleanSuccessPreservesHostTaintGuard_Halts(t *test
 	if len(fr.RunCalls) != 1 || fr.RunCalls[0].Issue != "1" {
 		t.Fatalf("call 2: fr.RunCalls = %v, want exactly one Run call for issue #1", fr.RunCalls)
 	}
-	if got := newStaleRevTracker(dir).prior(); got != rev {
+	if got := freshness.NewGuard(dir).Prior(); got != rev {
 		t.Fatalf("call 2: tracker.prior() = %q, want %q -- the fix under test: an unrelated clean success must PRESERVE the host-taint guard armed by call 1 (main.go's success path no longer unconditionally clears the tracker)", got, rev)
 	}
 
@@ -213,7 +213,7 @@ func TestRunContinuousDispatch_CleanSuccessPreservesHostTaintGuard_Halts(t *test
 	if got := exitCodeFor(err3); got != 5 {
 		t.Fatalf("call 3: exitCodeFor(err3) = %d, want 5 (errImageHostTainted — same-rev repeat after the guard survived call 2's clean success)", got)
 	}
-	if got := newStaleRevTracker(dir).prior(); got != "" {
+	if got := freshness.NewGuard(dir).Prior(); got != "" {
 		t.Fatalf("call 3: tracker.prior() = %q, want empty (classifyStaleOutcome's host-taint-halt path clears the tracker after reporting the non-convergence)", got)
 	}
 }
