@@ -777,6 +777,20 @@ identity is **required**: an override wins, else the host's `git config
 user.name`/`user.email` is inherited; if neither is set, `spindrift dispatch`
 exits rather than committing under an arbitrary identity.
 
+> **`--agents` needs a recent `claude-code`.** Whenever any subagent model
+> above (`SCOUT_MODEL`/`REVIEW_MODEL`/`WORKER_MODEL`/… or the [`roster`](#subagent-roster))
+> is non-empty — the default — the launcher passes the subagent roster to the
+> claude Driver as `--agents <json>`. That flag exists only on `claude-code`
+> **≥ 2.1.204**. A Consumer whose `nixpkgs` input pins an older `pkgs.claude-code`
+> (the [`default` template](../templates/default/flake.nix) does not `follow`
+> spindrift's `nixpkgs`, so its version floats with the Consumer's own pin)
+> fails *every* issue with `error: unknown option '--agents'`. The launcher
+> classifies that failure as `reason=unsupportedFlag` (not the generic
+> `taskFailed`) so the dispatch log names the cause. The fix: bump the
+> Consumer's `nixpkgs` input so `pkgs.claude-code` is current, or blank the
+> subagent model knobs (set `SCOUT_MODEL=`/`REVIEW_MODEL=`, etc.) to drop the
+> roster and stop emitting `--agents`.
+
 ### opencode Driver: github-copilot Provider credential
 
 The opencode Driver's `github-copilot` Provider is OAuth-only (ADR 0009
