@@ -1,12 +1,13 @@
 package opencode
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
 	"strings"
 	"sync"
+
+	"spindrift.dev/launcher/internal/driver/driverkit"
 )
 
 // Writer is a streaming NDJSON parser: it wraps a raw io.Writer (the log
@@ -20,8 +21,8 @@ type Writer struct {
 	issue string
 	out   io.Writer
 
-	mu  sync.Mutex
-	buf []byte
+	mu    sync.Mutex
+	frame driverkit.LineFramer
 }
 
 // New returns a Writer that passes all bytes to raw unchanged and emits a
@@ -39,16 +40,7 @@ func (w *Writer) Write(p []byte) (int, error) {
 	}
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	w.buf = append(w.buf, p[:n]...)
-	for {
-		nl := bytes.IndexByte(w.buf, '\n')
-		if nl < 0 {
-			break
-		}
-		line := string(w.buf[:nl])
-		w.buf = w.buf[nl+1:]
-		w.parseLine(line)
-	}
+	w.frame.Push(p[:n], w.parseLine)
 	return n, nil
 }
 

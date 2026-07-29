@@ -2,10 +2,9 @@ package opencode
 
 import (
 	"encoding/json"
-	"errors"
-	"os"
 	"strings"
 
+	"spindrift.dev/launcher/internal/driver/driverkit"
 	"spindrift.dev/launcher/internal/logscan"
 	"spindrift.dev/launcher/internal/usage"
 )
@@ -60,7 +59,7 @@ func ExtractUsage(logPath string) (usage.Report, error) {
 	var firstStart, lastFinish int64
 	haveStart := false
 
-	err := logscan.ForEachLine(logPath, logscan.SkipOversized, func(line string) {
+	err := driverkit.ScanLog(logPath, logscan.SkipOversized, func(line string) {
 		s := strings.TrimSpace(line)
 		if s == "" {
 			return
@@ -86,9 +85,6 @@ func ExtractUsage(logPath string) (usage.Report, error) {
 		}
 	})
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return usage.Report{Found: false}, nil
-		}
 		return usage.Report{}, err
 	}
 
