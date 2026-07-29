@@ -520,7 +520,7 @@ func (li localIssue) render() string {
 	b.WriteString(frontmatterDelim + "\n")
 	fmt.Fprintf(&b, "title: %s\n", renderScalar(li.frontmatter.Title))
 	fmt.Fprintf(&b, "state: %s\n", renderScalar(li.frontmatter.State))
-	// Each label is escaped through renderScalar before joining: a comma,
+	// Each label is escaped through renderLabel before joining: a comma,
 	// bracket, or newline in a label would otherwise fragment the flow-list
 	// or inject extra frontmatter lines. PostIssue's labels arg is
 	// caller-supplied (issue #2018), not hard-coded, so this must hold for
