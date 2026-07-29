@@ -134,6 +134,17 @@ setup() {
   [ "$(grep -c -- '-- dispatch' "$NIX_LOG")" -eq 2 ]
 }
 
+@test "dogfood halts cleanly with a diagnostic when launcher exits 5 (host-tainted)" {
+  _install_exit_code_nix 5
+  run env BASE_BRANCH=main bash "$WORK/dogfood.sh"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"non-converging (host-tainted)"* ]]
+  # The loop HALTS on exit 5 — it does not rebuild-and-retry the way exit 4
+  # does, so dispatch is invoked exactly once (contrast the exit-4 sibling's
+  # two calls).
+  [ "$(grep -c -- '-- dispatch' "$NIX_LOG")" -eq 1 ]
+}
+
 @test "dogfood terminates cleanly with triage message when launcher exits 3" {
   _install_exit_code_nix 3
   run env BASE_BRANCH=main bash "$WORK/dogfood.sh"
