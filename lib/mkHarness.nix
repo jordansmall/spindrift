@@ -360,9 +360,12 @@ let
   # (Driver-agnostic report types), internal/logscan (claude's log-scan
   # helper), internal/outcome (the SPINDRIFT_OUTCOME grammar/log-scan, issue
   # #1808's bundle-out verb reads/writes it), internal/bundleout
-  # (CODE_FORGE=local's harness-owned code-out step bundle-out wraps), and
+  # (CODE_FORGE=local's harness-owned code-out step bundle-out wraps),
   # internal/seambundle (the bundle filename constant bundleout and the
-  # launcher's local Code Forge both share) only, with *_test.go excluded. If
+  # launcher's local Code Forge both share), internal/outcomebackstop (issue
+  # #2157's outcome-backstop verb decision), and internal/retry (the shared
+  # linear-backoff leaf that verb's push retry rides) only, with *_test.go
+  # excluded. If
   # a new import is added outside this closure the build fails loudly
   # (missing package) — that is the intended failure mode (#474).
   driverExecBin = pkgs.buildGoModule {
@@ -400,6 +403,12 @@ let
         (lib.fileset.fileFilter (
           f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
         ) ../cmd/launcher/internal/seambundle)
+        (lib.fileset.fileFilter (
+          f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
+        ) ../cmd/launcher/internal/outcomebackstop)
+        (lib.fileset.fileFilter (
+          f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
+        ) ../cmd/launcher/internal/retry)
       ];
     };
     # Same go.mod/go.sum as launcherBin above, but NOT the same vendorHash:
