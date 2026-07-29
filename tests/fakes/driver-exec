@@ -43,6 +43,12 @@ if [ "${1:-}" = "bundle-out" ]; then
 fi
 
 if [ "${1:-}" = "outcome-backstop" ]; then
+  # This branch re-implements the decision tree that the real verb owns in
+  # cmd/launcher/internal/outcomebackstop (Config resolution, salvage,
+  # commit-count / forge / write-enabled branching, push-with-retry). It is a
+  # stand-in for the bats wiring tests only -- the Go package is the
+  # source-of-truth. Keep the two in lockstep: any change to the verb's
+  # decisions belongs here too, and vice versa.
   shift
   repo="" ob_issue="" branch="" base="" kind="work" forge="github"
   write="" nonce="" recovery="" attempts="1" backoff="0" jitter="0"
