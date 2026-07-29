@@ -102,18 +102,20 @@
           # fed from the same leaf values as fixtures.nix's direct mirror
           # (nix/dogfood-defaults.nix, issue #459).
           spindrift = {
-            inherit (dogfoodDefaults)
-              prefetch
-              packages
-              nixStoreWritable
-              extraClosures
-              ;
-            skills = dogfoodSkills;
-            settings.branches.mergeMode = dogfoodDefaults.defaults.mergeMode;
-            settings.repository.boxForgeAndIssueAccess = dogfoodDefaults.defaults.boxForgeAndIssueAccess;
-            settings.promptSkillIteration.autoFormat = dogfoodDefaults.defaults.autoFormat;
-            settings.promptSkillIteration.autoLint = dogfoodDefaults.defaults.autoLint;
-            settings.models.filerModel = dogfoodDefaults.defaults.filerModel;
+            # ADR 0037 Pass 1 (issue #2179): the dogfood configures every knob
+            # at its new domain-tree path, off the deprecated `settings.*` and
+            # flat structural paths, so spindrift's own flake never trips the
+            # eval-time deprecation warnings it now emits for consumers.
+            infra.image.prefetch = dogfoodDefaults.prefetch;
+            infra.image.packages = dogfoodDefaults.packages;
+            infra.image.extraClosures = dogfoodDefaults.extraClosures;
+            infra.nix.storeWritable = dogfoodDefaults.nixStoreWritable;
+            agents.skills = dogfoodSkills;
+            git.merge.policy = dogfoodDefaults.defaults.mergeMode;
+            forge.boxAccess = dogfoodDefaults.defaults.boxForgeAndIssueAccess;
+            agents.format.enable = dogfoodDefaults.defaults.autoFormat;
+            agents.lint.enable = dogfoodDefaults.defaults.autoLint;
+            agents.models.filer = dogfoodDefaults.defaults.filerModel;
           };
 
           checks = checksResult.checks;
