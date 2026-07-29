@@ -545,10 +545,13 @@ in
           };
         };
 
-        # Generated from env-schema.nix: one sub-option per section (matching
-        # groupOrder in cmd/launcher/flags.go), one per consumer-tunable knob
-        # within each section.  Undeclared section or knob names are rejected at
-        # eval time by the NixOS module system.
+        # Legacy `settings.<section>.<knob>` deprecation shim (ADR 0037): the
+        # primary surface is now the domain tree built by `buildTree`. Generated
+        # from env-schema.nix — one sub-option per section (matching groupOrder
+        # in cmd/launcher/flags.go), one per consumer-tunable knob within each
+        # section. A set value forwards to the new domain-tree path via
+        # `lib.warn`; undeclared section or knob names are rejected at eval time
+        # by the NixOS module system.
         settingsOption = {
           settings = mkOption {
             type = types.submodule {
