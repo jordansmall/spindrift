@@ -265,6 +265,20 @@ so an unsanitized string can't reach a branch name (issue #1810).
 _Avoid_: local-loop glue, launcher wiring (both too vague — `localloop` is
 the package name).
 
+**SeedScope**:
+`waves.SeedScope` (issue #2150, spec #2144 D2) — the opaque seed-branch
+scope a dependent's blocker gate is resolved against under CODE_FORGE=local.
+The wave engine holds it via `Config.SeedScopeOf` and hands the whole value to
+the local Code Forge's containment query, but never constructs or parses the
+`integration/<parent>` ref grammar itself — the local adapter's
+`local.IntegrationBranch` renders the branch label the scope prints, so the
+operator-facing hold diagnostic names the Integration branch while the wave
+engine stays adapter-neutral. `localloop.SeedScopeOf` is the single seam that
+builds it, consumed by both the dispatch command path and the Console, so the
+two can never disagree about which blocker landing gates a dependent.
+_Avoid_: seed parent, `ParentOf` (the pre-#2150 name of the now-deleted
+resolver closure and Config field).
+
 **Verdict**:
 `localloop.Verdict` (issue #1811, campaign #1803 C4) — Surface's
 one-line-per-broad-ticket report, printed by both Reconcile entry points (the
