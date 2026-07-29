@@ -58,16 +58,17 @@ the schema again.
 
 ```
 agents.models.{default,scout,review,filer,worker,roster}
-agents.{driver,prompt,skills,autoFormat,autoLint}
+agents.{driver,prompt,skills}
+agents.{format,lint}.enable
 git.{baseBranch,branchPrefix}
-git.merge.{mode,guardPaths,pollInterval,pollTimeout}
+git.merge.{mode,guardPaths,pollInterval,pollTimeout,preflightStaleBase}
 git.user.{name,email}
 issues.{tracker,localDir,localReference}
 issues.jira.{baseURL,projectKey,email,includeComments,statusMapping}
 issues.labels.{dispatch,inProgress,failed,complete}
 forge.{repoSlug,backend,remoteURL,accumulationRepoDir,ghTokenRefreshFile,boxAccess}
-dispatch.{maxParallel,maxJobs,overlapGate,continuous,preflightStaleBase}
-dispatch.orchestrator.enable
+dispatch.{maxParallel,maxJobs,overlapGate}
+dispatch.{continuous,orchestrator}.enable
 dispatch.budget.{tokens,usd}
 dispatch.retry.{maxFix,maxRebase,transientBackoff,transientMax,holdJitter}
 infra.runtime
@@ -80,13 +81,20 @@ infra.{nixpkgs,overlays,config}
 ```
 
 Leaf names are chosen for the domain they now sit in: `codeForge` →
-`forge.backend`, `boxForgeAndIssueAccess` → `forge.boxAccess`,
-`continuousDispatch` → `dispatch.continuous`, and the discovery `label` →
-`issues.labels.dispatch`, which resolves the `issues.label` (singular knob) vs
-`issues.labels` (plural namespace) collision by folding the launch-button label
-in with the lifecycle labels. `orchestratorEnabled` becomes
-`dispatch.orchestrator.enable`, following the NixOS `enable`-under-a-feature
-idiom (`services.foo.enable = true`).
+`forge.backend`, `boxForgeAndIssueAccess` → `forge.boxAccess`, and the discovery
+`label` → `issues.labels.dispatch`, which resolves the `issues.label` (singular
+knob) vs `issues.labels` (plural namespace) collision by folding the
+launch-button label in with the lifecycle labels. `preflightStaleBase` moves to
+`git.merge.preflightStaleBase` — it is a pre-merge rebase-and-recheck, so it
+belongs with the merge knobs rather than in the retry group its schema section
+happens to name.
+
+The `enable`-under-a-feature idiom (`services.foo.enable = true`) applies to the
+capability toggles: `orchestratorEnabled` → `dispatch.orchestrator.enable`,
+`continuousDispatch` → `dispatch.continuous.enable`, and `autoFormat` / `autoLint`
+→ `agents.format.enable` / `agents.lint.enable`. The other booleans stay flat —
+they are sub-options, not features you turn on: `issues.jira.includeComments`,
+`issues.localReference`, `infra.network.bwrapUnshare`.
 
 ### Two sequenced passes
 
