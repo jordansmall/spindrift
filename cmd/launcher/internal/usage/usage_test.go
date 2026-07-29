@@ -39,12 +39,12 @@ func TestModelUsage_Fields(t *testing.T) {
 		CacheWrite5mTokens:   4,
 		CacheWrite1hTokens:   5,
 	}
-	report := usage.Report{Models: []usage.ModelUsage{mu}}
+	report := usage.Report{SummedByModel: []usage.ModelUsage{mu}}
 
-	if len(report.Models) != 1 {
-		t.Fatalf("len(report.Models) = %d, want 1", len(report.Models))
+	if len(report.SummedByModel) != 1 {
+		t.Fatalf("len(report.SummedByModel) = %d, want 1", len(report.SummedByModel))
 	}
-	got := report.Models[0]
+	got := report.SummedByModel[0]
 	if got.Model != "claude-opus-4-8" {
 		t.Errorf("Model = %q, want %q", got.Model, "claude-opus-4-8")
 	}

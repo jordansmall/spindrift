@@ -216,5 +216,5 @@ func ExtractUsage(logPath string) (usage.Report, error) {
 		fmt.Fprintf(os.Stderr, "WARNING: breakdown by model failed for %s: %v\n", logPath, err)
 		models = nil
 	}
-	return usage.Report{Usage: u, Found: true, Models: models}, nil
+	return usage.Report{FinalSnapshot: u, Found: true, SummedByModel: models}, nil
 }

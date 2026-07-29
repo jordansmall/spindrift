@@ -47,13 +47,22 @@ type ModelUsage struct {
 	CacheWrite1hTokens   int // cache_creation.ephemeral_1h_input_tokens, summed
 }
 
-// Report combines a Box run's aggregate Usage with its per-model breakdown,
-// as extracted by a Driver's ExtractUsage from one pass over a Box log. Found
-// is false when the log contains no result event (or does not exist), in
-// which case Usage is zero-valued. Models is the per-model, per-category
-// token breakdown (ModelUsage).
+// Report combines a Box run's aggregate usage snapshot with its per-model
+// breakdown, as extracted by a Driver's ExtractUsage from one pass over a Box
+// log. Found is false when the log contains no result event (or does not
+// exist), in which case FinalSnapshot is zero-valued.
+//
+// FinalSnapshot and SummedByModel obey different aggregation rules and
+// deliberately do not reconcile numerically — that is a documented fact, not
+// a bug:
+//
+//   - FinalSnapshot is the Driver's own last-reported totals: last-wins for
+//     claude (its final result-event snapshot), a plain sum over
+//     step_finish events for opencode. It is not a per-message sum.
+//   - SummedByModel is the per-call sums keyed by model, deduplicated by
+//     message id — a different rule from FinalSnapshot.
 type Report struct {
-	Usage
-	Found  bool
-	Models []ModelUsage
+	FinalSnapshot Usage
+	Found         bool
+	SummedByModel []ModelUsage
 }
