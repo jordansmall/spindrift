@@ -34,7 +34,8 @@ let
     // (import ./dispatch-labels.nix common)
     // (import ./agent-workflow-smoke.nix common)
     // (import ./changelog.nix common)
-    // (import ./go.nix common);
+    // (import ./go.nix common)
+    // (import ./roster.nix common);
 
   imageChecks = pkgs.lib.optionalAttrs pkgs.stdenv.isLinux (import ./image.nix common);
 
