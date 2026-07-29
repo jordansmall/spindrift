@@ -1,85 +1,60 @@
 // Package claude is the claude Driver's host-side half (ADR 0009): the
 // Anthropic transient-error taxonomy, stream-json heartbeat parsing, the
 // claude CLI transcript shape, and usage-log parsing. The parent driver
-// package owns the Driver interface, the shared Class/Reason/Classification
-// vocabulary, and the registry wiring; this package must not import it (the
-// registration adapter in driver/claude.go imports this package, not the
-// other way around, to avoid a cycle) — Classify therefore returns its own
-// Class/Reason values, mirrored 1:1 onto driver.Class/driver.Reason by that
-// adapter.
+// package owns the Driver interface and the registry wiring; the shared
+// Class/Reason/Classification vocabulary lives in driverkit, and this
+// package type-aliases it, so the registration adapter in driver/claude.go
+// needs no cast between this package's and driver's Class/Reason values.
 package claude
 
 import (
 	"encoding/json"
-	"errors"
-	"os"
 	"regexp"
 	"strconv"
-	"strings"
 	"time"
 
+	"spindrift.dev/launcher/internal/driver/driverkit"
 	"spindrift.dev/launcher/internal/logscan"
 )
 
 // Class describes whether a non-zero agent exit is retryable or not.
-// Mirrors driver.Class; see the package doc for why this is a local copy.
-type Class string
+type Class = driverkit.Class
 
 const (
-	Transient Class = "transient"
-	Terminal  Class = "terminal"
+	Transient = driverkit.Transient
+	Terminal  = driverkit.Terminal
 )
 
 // Reason identifies the specific cause of a classified exit.
-// Mirrors driver.Reason; see the package doc for why this is a local copy.
-type Reason string
+type Reason = driverkit.Reason
 
 const (
-	RateLimit  Reason = "rateLimit"  // Claude API 429 rate limit
-	Overloaded Reason = "overloaded" // Claude API 529 / overloaded_error
-	Network    Reason = "network"    // transient network failure
-	TaskFailed Reason = "taskFailed" // agent ran but produced no valid result
+	RateLimit  = driverkit.RateLimit
+	Overloaded = driverkit.Overloaded
+	Network    = driverkit.Network
+	TaskFailed = driverkit.TaskFailed
 )
 
 // Classification is the result of Classify.
-type Classification struct {
-	Class   Class
-	Reason  Reason
-	ResetAt *time.Time // non-nil only for RateLimit with a known reset time
-}
+type Classification = driverkit.Classification
 
 // resetsAtRe matches the JSON field "resetsAt":UNIX_TIMESTAMP (integer).
 var resetsAtRe = regexp.MustCompile(`"resetsAt"\s*:\s*(\d+)`)
 
-// transientPatterns lists log-line substrings that mark a transient failure.
-// Patterns are deliberately specific to avoid matching ordinary log content
-// (issue numbers, byte counts, port numbers, etc. containing digit sequences).
-// The first match in the ordered list wins when multiple markers appear.
-var transientPatterns = []struct {
-	substr string
-	reason Reason
-}{
-	// Structured API error types — highest specificity, check first.
-	{"rate_limit_error", RateLimit},
-	{"overloaded_error", Overloaded},
-	{"usage_limit_reached", RateLimit},
-	{"server_error", Overloaded},
-	// HTTP status phrase patterns — specific enough to avoid false positives.
-	{"429 Too Many Requests", RateLimit},
-	{"529 Overloaded", Overloaded},
-	// Claude plain-text error messages.
-	{"Claude Code usage limit reached", RateLimit},
-	{"hit your session limit", RateLimit},
-	{"hit your weekly limit", RateLimit},
-	{"hit your Opus limit", RateLimit},
-	{"Overloaded", Overloaded},
-	// Network-level failures logged by the Go HTTP client or stdlib.
-	{"connection refused", Network},
-	{"connection reset", Network},
-	{"dial tcp", Network},
-	{"net/http: request canceled", Network},
-	{"context deadline exceeded", Network},
-	{"no such host", Network},
+// transientExtras lists claude-specific transient markers layered on top of
+// driverkit.BaseTransientPatterns. Patterns are deliberately specific to
+// avoid matching ordinary log content (issue numbers, byte counts, port
+// numbers, etc. containing digit sequences).
+var transientExtras = []driverkit.Pattern{
+	{Substr: "usage_limit_reached", Reason: RateLimit},
+	{Substr: "server_error", Reason: Overloaded},
+	{Substr: "429 Too Many Requests", Reason: RateLimit},
+	{Substr: "529 Overloaded", Reason: Overloaded},
+	{Substr: "Claude Code usage limit reached", Reason: RateLimit},
+	{Substr: "hit your session limit", Reason: RateLimit},
+	{Substr: "hit your weekly limit", Reason: RateLimit},
+	{Substr: "hit your Opus limit", Reason: RateLimit},
+	{Substr: "net/http: request canceled", Reason: Network},
 }
 
 // scanResult accumulates everything Classify needs from one pass over the log.
@@ -108,9 +83,6 @@ type scanResult struct {
 func Classify(logPath string) (Classification, error) {
 	sr, err := scanLog(logPath)
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return Classification{Class: Terminal, Reason: TaskFailed}, nil
-		}
 		return Classification{}, err
 	}
 
@@ -148,7 +120,7 @@ func scanLog(logPath string) (scanResult, error) {
 	var sr scanResult
 	var echoReason Reason
 	var echoPending bool
-	err := logscan.ForEachLine(logPath, logscan.ChunkOversized, func(chunk string) {
+	err := driverkit.ScanLog(logPath, logscan.ChunkOversized, func(chunk string) {
 		if isAgentContentEvent(chunk) {
 			// The agent's own tool_result / assistant-text / file-edit
 			// content can quote rate-limit markers verbatim (e.g. while
@@ -161,19 +133,19 @@ func scanLog(logPath string) (scanResult, error) {
 			// so a type:"result" line right after it that echoes the same
 			// marker is recognized as that same echo, not a fresh signal
 			// (issue #818).
-			echoReason, echoPending = matchTransient(chunk)
+			echoReason, echoPending = driverkit.MatchTransient(chunk, transientExtras)
 			return
 		}
 		if echoPending {
 			if resultText, ok := resultEventText(chunk); ok {
 				echoPending = false
-				if reason, matched := matchTransient(resultText); matched && reason == echoReason {
+				if reason, matched := driverkit.MatchTransient(resultText, transientExtras); matched && reason == echoReason {
 					return
 				}
 			}
 		}
 		if !sr.found {
-			if reason, ok := matchTransient(chunk); ok {
+			if reason, ok := driverkit.MatchTransient(chunk, transientExtras); ok {
 				sr.found = true
 				sr.reason = reason
 			}
@@ -266,17 +238,6 @@ func resultEventText(chunk string) (string, bool) {
 		return "", false
 	}
 	return ev.Result, true
-}
-
-// matchTransient checks whether line contains a known transient marker.
-// Returns the first matching reason in pattern order.
-func matchTransient(line string) (Reason, bool) {
-	for _, p := range transientPatterns {
-		if strings.Contains(line, p.substr) {
-			return p.reason, true
-		}
-	}
-	return "", false
 }
 
 // extractResetsAt parses the first "resetsAt":UNIX_TIMESTAMP occurrence in
