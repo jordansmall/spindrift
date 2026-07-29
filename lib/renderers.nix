@@ -38,7 +38,18 @@ rec {
     e: [ "--${toKebab e.env}" ] ++ (if e ? alias then [ "--${e.alias}" ] else [ ]);
 
   # Schema entry -> the type token the flag table and man page print.
-  flagKind = e: if builtins.isInt (e.default or null) then "int" else "string";
+  # A knob opts into the presence-style bool kind explicitly, with `kind =
+  # "bool";` (issue #2145) — the CLI parses it by presence, not a following
+  # value. It is deliberately not inferred from a boolean `default`: several
+  # knobs already carry `default = false` purely to render as a `types.bool`
+  # flake option (lib/flakeModule.nix), while their CLI flag stays a
+  # space-separated value form with in-repo callers (dogfood.sh,
+  # ab-orchestrator.sh, dispatchContinuousArgs); inferring bool from the
+  # default would silently flip all of them. Each converts on its own ticket,
+  # migrating its callers atomically.
+  flagKind =
+    e:
+    if e ? kind then e.kind else if builtins.isInt (e.default or null) then "int" else "string";
 
   # Schema entry -> its default rendered as a string, or "" if it has none.
   flagDflt = e: if e ? default then builtins.toString e.default else "";
@@ -708,8 +719,11 @@ rec {
             "\\-\\-" + escFlag (toKebab e.env) + (if e ? alias then ", \\-\\-" + escFlag e.alias else "");
           dflt = flagDflt e;
           dfltSentence = if dflt == "" then "No default." else "Default: " + esc dflt + ".";
+          # A presence-style bool flag takes no value, so render its name with
+          # no italic type placeholder (issue #2145).
+          typeToken = if flagKind e == "bool" then "" else " \\fI${flagKind e}\\fR";
         in
-        ".TP\n.B ${names} \\fI${flagKind e}\\fR\n\\&${esc e.doc}. ${dfltSentence}\n";
+        ".TP\n.B ${names}${typeToken}\n\\&${esc e.doc}. ${dfltSentence}\n";
       groupSection =
         g:
         let

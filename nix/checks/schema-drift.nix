@@ -422,6 +422,12 @@ in
         ${flagChecks}
         ${secretChecks}
         ${subcommandChecks}
+        # A presence-style bool flag (kind = "bool", issue #2145) renders its
+        # name with no italic type placeholder; it never emits \fIbool\fR.
+        if grep -qF '\fIbool\fR' "$man"; then
+          echo "man page renders a \\fIbool\\fR type placeholder for a presence flag" >&2
+          exit 1
+        fi
         touch $out
       '';
 
