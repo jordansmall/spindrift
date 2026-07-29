@@ -134,7 +134,7 @@ func (r Readiness) Status(cfg Config, it forge.IssueTracker, cf forge.CodeForge,
 // LandingContainmentQuery forge checks the blocker's landing against; a
 // zero SeedScope keeps the pre-#2130 landing-verification behavior
 // (LandingVerifier).
-func (r Readiness) Ready(it forge.IssueTracker, cf forge.CodeForge, dep string, scope SeedScope) bool {
+func (r Readiness) Ready(it forge.IssueTracker, cf forge.CodeForge, dep string, scope forge.SeedScope) bool {
 	ready, _ := blockerReady(it, cf, dep, scope)
 	return ready
 }
@@ -202,7 +202,7 @@ func detectCycle(edges map[string][]string, nums []string) (string, bool) {
 // scope is the dependent's own already-resolved opaque SeedScope (#2130); a
 // zero SeedScope means unknown/legacy, keeping the pre-#2130 LandingVerifier
 // behavior.
-func blockerReady(it forge.IssueTracker, cf forge.CodeForge, dep string, scope SeedScope) (ready bool, fi *forge.Issue) {
+func blockerReady(it forge.IssueTracker, cf forge.CodeForge, dep string, scope forge.SeedScope) (ready bool, fi *forge.Issue) {
 	if pr, ok := cf.(forge.PRForge); ok {
 		branch := cf.AgentBranch(dep)
 		prURL, found, err := pr.PRForBranch(branch)
@@ -228,8 +228,8 @@ func blockerReady(it forge.IssueTracker, cf forge.CodeForge, dep string, scope S
 	}
 	if issue.Landing != "" {
 		if landing, perr := forge.ParseLanding(issue.Landing); perr == nil && landing.Kind == forge.LandingIntegrationRef {
-			if q, ok := cf.(forge.LandingContainmentQuery); ok && scope.parent != "" {
-				contained, cerr := q.IntegrationContainsLanding(issue.Landing, scope.parent)
+			if q, ok := cf.(forge.LandingContainmentQuery); ok && scope.Parent() != "" {
+				contained, cerr := q.IntegrationContainsLanding(issue.Landing, scope.Parent())
 				if cerr != nil {
 					fmt.Printf("    .. blocker #%s seed-branch containment check failed: %v; holding\n", dep, cerr)
 				} else if contained {
@@ -266,8 +266,8 @@ func containsLabel(labels []string, target string) bool {
 // in edge order. Empty means the issue is ready to dispatch. scopeOf
 // resolves num to its own opaque SeedScope (#2130); nil keeps the pre-#2130
 // legacy behavior.
-func unreadyBlockers(it forge.IssueTracker, cf forge.CodeForge, num string, edges map[string][]string, scopeOf func(num string) SeedScope) []string {
-	var scope SeedScope
+func unreadyBlockers(it forge.IssueTracker, cf forge.CodeForge, num string, edges map[string][]string, scopeOf func(num string) forge.SeedScope) []string {
+	var scope forge.SeedScope
 	if scopeOf != nil {
 		scope = scopeOf(num)
 	}
@@ -285,7 +285,7 @@ func unreadyBlockers(it forge.IssueTracker, cf forge.CodeForge, num string, edge
 // can reuse it against a Plan's edges without going through a Readiness
 // value.
 func blockerStatus(cfg Config, it forge.IssueTracker, cf forge.CodeForge, num string, edges map[string][]string) (ready bool, failed, unready []string) {
-	var scope SeedScope
+	var scope forge.SeedScope
 	if cfg.SeedScopeOf != nil {
 		scope = cfg.SeedScopeOf(num)
 	}

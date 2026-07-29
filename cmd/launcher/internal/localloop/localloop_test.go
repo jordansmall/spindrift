@@ -187,7 +187,7 @@ func TestWired_ResolveParent_MemoizesPerIssue(t *testing.T) {
 // TestSeedScopeOf_PairsSanitizedParentWithIntegrationLabel verifies
 // SeedScopeOf resolves num's sanitized seed-branch parent (ResolveParent) and
 // the local adapter's rendered Integration branch label
-// (local.IntegrationBranch) into the same waves.SeedScope both the dispatch
+// (local.IntegrationBranch) into the same forge.SeedScope both the dispatch
 // command path and the Console will consume (issue #2150), so the two can
 // never disagree about which blocker landing gates a dependent.
 func TestSeedScopeOf_PairsSanitizedParentWithIntegrationLabel(t *testing.T) {
@@ -868,7 +868,7 @@ func TestWire_ComposedLoop_SameParentBlockerChainLandsInOneRun(t *testing.T) {
 		InProgressLabel: testLabels.InProgress,
 		FailedLabel:     testLabels.Failed,
 		CompleteLabel:   testLabels.Complete,
-		SeedScopeOf:     func(num string) waves.SeedScope { return localloop.SeedScopeOf(it, num) },
+		SeedScopeOf:     func(num string) forge.SeedScope { return localloop.SeedScopeOf(it, num) },
 	}
 	var ready bool
 	var failed, unready []string
@@ -1095,7 +1095,7 @@ func TestWire_ComposedLoop_CrossParentBlockerHoldsLoudly(t *testing.T) {
 		InProgressLabel: testLabels.InProgress,
 		FailedLabel:     testLabels.Failed,
 		CompleteLabel:   testLabels.Complete,
-		SeedScopeOf:     func(num string) waves.SeedScope { return localloop.SeedScopeOf(it, num) },
+		SeedScopeOf:     func(num string) forge.SeedScope { return localloop.SeedScopeOf(it, num) },
 	}
 
 	var ready bool

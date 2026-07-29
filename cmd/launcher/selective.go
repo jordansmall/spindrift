@@ -110,9 +110,9 @@ func evictUnmetBlockers(it forge.IssueTracker, cf forge.CodeForge, readiness wav
 	// a zero SeedScope and Ready falls back to its pre-#2130
 	// landing-verification behavior.
 	resolve := seedScopeResolver(it, cf)
-	seedScopeFor := func(dependent string) waves.SeedScope {
+	seedScopeFor := func(dependent string) forge.SeedScope {
 		if resolve == nil {
-			return waves.SeedScope{}
+			return forge.SeedScope{}
 		}
 		return resolve(dependent)
 	}
@@ -164,7 +164,7 @@ func evictUnmetBlockers(it forge.IssueTracker, cf forge.CodeForge, readiness wav
 // firstUnmet returns the first entry in deps that is neither in willRun nor
 // already satisfied (closed/complete), relative to dependent (the evicted
 // issue whose edges deps came from). Used only for notice formatting.
-func firstUnmet(it forge.IssueTracker, cf forge.CodeForge, readiness waves.Readiness, willRun map[string]bool, dependent string, deps []string, seedScopeFor func(string) waves.SeedScope) string {
+func firstUnmet(it forge.IssueTracker, cf forge.CodeForge, readiness waves.Readiness, willRun map[string]bool, dependent string, deps []string, seedScopeFor func(string) forge.SeedScope) string {
 	for _, dep := range deps {
 		if !willRun[dep] && !readiness.Ready(it, cf, dep, seedScopeFor(dependent)) {
 			return dep

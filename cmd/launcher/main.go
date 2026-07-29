@@ -943,15 +943,15 @@ func selectiveWavesConfig(c config) waves.Config {
 
 // seedScopeResolver returns the waves.Config.SeedScopeOf resolver for the
 // local blocker gate (#2130, #2150): a dependent num -> the opaque
-// waves.SeedScope its blocker gate is checked against. Non-nil only when cf is
+// forge.SeedScope its blocker gate is checked against. Non-nil only when cf is
 // CODE_FORGE=local's containment-query surface; nil for every other forge,
 // where the seed-branch gate never fires and the blocker gate keeps its
 // pre-#2130 landing-verification behavior.
-func seedScopeResolver(it forge.IssueTracker, cf forge.CodeForge) func(string) waves.SeedScope {
+func seedScopeResolver(it forge.IssueTracker, cf forge.CodeForge) func(string) forge.SeedScope {
 	if _, ok := cf.(forge.LandingContainmentQuery); !ok {
 		return nil
 	}
-	return func(num string) waves.SeedScope { return localloop.SeedScopeOf(it, num) }
+	return func(num string) forge.SeedScope { return localloop.SeedScopeOf(it, num) }
 }
 
 // toWaveIssues converts main's local issue type to waves.Issue for a call
