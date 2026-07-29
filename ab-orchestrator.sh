@@ -293,7 +293,7 @@ run_arm() { # $1=issue $2=arm $3=orch $4=branch_prefix $5=worker_model
     --model "$AB_MODEL"
     --issue-tracker "$tracker"
     --box-forge-and-issue-access read-write
-    --orchestrator-enabled "$orch"
+    --orchestrator-enabled="$orch"
     --worker-model "$wm"
     "$issue"
   )
