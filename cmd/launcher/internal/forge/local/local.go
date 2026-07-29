@@ -520,11 +520,16 @@ func (li localIssue) render() string {
 	b.WriteString(frontmatterDelim + "\n")
 	fmt.Fprintf(&b, "title: %s\n", renderScalar(li.frontmatter.Title))
 	fmt.Fprintf(&b, "state: %s\n", renderScalar(li.frontmatter.State))
-	// Labels join un-escaped: a comma or newline in a label would fragment
-	// the flow-list, unlike the renderScalar-escaped scalars above. Safe
-	// because the only caller (the settle relay) hard-codes issueIntentLabels;
-	// escape here too if labels ever become caller-supplied.
-	fmt.Fprintf(&b, "labels: [%s]\n", strings.Join(li.frontmatter.Labels, ", "))
+	// Each label is escaped through renderScalar before joining: a comma,
+	// bracket, or newline in a label would otherwise fragment the flow-list
+	// or inject extra frontmatter lines. PostIssue's labels arg is
+	// caller-supplied (issue #2018), not hard-coded, so this must hold for
+	// arbitrary label content, not just the settle relay's own labels.
+	renderedLabels := make([]string, len(li.frontmatter.Labels))
+	for i, l := range li.frontmatter.Labels {
+		renderedLabels[i] = renderLabel(l)
+	}
+	fmt.Fprintf(&b, "labels: [%s]\n", strings.Join(renderedLabels, ", "))
 	fmt.Fprintf(&b, "created: %s\n", renderScalar(li.frontmatter.Created))
 	if li.frontmatter.Parent != "" {
 		fmt.Fprintf(&b, "parent: %s\n", renderScalar(li.frontmatter.Parent))
@@ -568,6 +573,32 @@ func renderScalar(s string) string {
 	if !scalarNeedsQuoting(s) {
 		return s
 	}
+	return quoteScalar(s)
+}
+
+// labelNeedsQuoting reports whether s must be double-quoted to render as one
+// element of a "labels: [...]" flow-list: everything scalarNeedsQuoting
+// already guards against, plus a comma (the flow-list's own element
+// separator) or a bracket (which would otherwise read as nesting or closing
+// the list) — the vectors specific to a flow-list element rather than a bare
+// "key: value" scalar.
+func labelNeedsQuoting(s string) bool {
+	return scalarNeedsQuoting(s) || strings.ContainsAny(s, ",[]")
+}
+
+// renderLabel returns s as a bare flow-list element when it needs no
+// quoting, or a double-quoted, backslash-escaped element otherwise (see
+// labelNeedsQuoting) — the write side of parseFlowList's decode.
+func renderLabel(s string) string {
+	if !labelNeedsQuoting(s) {
+		return s
+	}
+	return quoteScalar(s)
+}
+
+// quoteScalar double-quotes s, backslash-escaping the characters unquote
+// decodes: the shared quoting body for both renderScalar and renderLabel.
+func quoteScalar(s string) string {
 	var b strings.Builder
 	b.WriteByte('"')
 	for _, r := range s {
@@ -639,12 +670,48 @@ func parseFlowList(s string) []string {
 	if strings.TrimSpace(s) == "" {
 		return nil
 	}
-	parts := strings.Split(s, ",")
+	parts := splitFlowListElements(s)
 	out := make([]string, 0, len(parts))
 	for _, p := range parts {
 		if p = unquote(strings.TrimSpace(p)); p != "" {
 			out = append(out, p)
 		}
 	}
+	return out
+}
+
+// splitFlowListElements splits s on commas that separate flow-list elements,
+// skipping commas inside a quoted element (renderLabel's escaping) so a
+// label like "a,b" round-trips as one element rather than fragmenting on its
+// embedded comma — unlike a blind strings.Split(s, ","), which cannot tell
+// an element-separating comma from one quoted-escaped inside an element.
+func splitFlowListElements(s string) []string {
+	var out []string
+	var cur strings.Builder
+	var quote byte
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case quote != 0:
+			cur.WriteByte(c)
+			if c == '\\' && quote == '"' && i+1 < len(s) {
+				i++
+				cur.WriteByte(s[i])
+				continue
+			}
+			if c == quote {
+				quote = 0
+			}
+		case c == '"' || c == '\'':
+			quote = c
+			cur.WriteByte(c)
+		case c == ',':
+			out = append(out, cur.String())
+			cur.Reset()
+		default:
+			cur.WriteByte(c)
+		}
+	}
+	out = append(out, cur.String())
 	return out
 }
