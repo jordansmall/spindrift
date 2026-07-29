@@ -104,7 +104,13 @@
   # empty model is dropped entirely (#392 semantics) rather than baking a
   # modelless stub. The model is passed VERBATIM (never string-processed) --
   # the operator supplies the full provider-prefixed model id, matching
-  # driver-exec's unprefixed `-m <model>` invocation.
+  # driver-exec's unprefixed `-m <model>` invocation -- but every frontmatter
+  # scalar, including mode/model, is JSON-encoded (issue #2152 slice C): JSON
+  # is a valid YAML scalar and a YAML parser strips the quotes, so the model
+  # still reaches driver-exec verbatim, just quoted, and a value carrying a
+  # newline/colon/quote can no longer inject a second YAML key into the
+  # frontmatter block (contrast the body line below, which stays raw since
+  # it's the system-prompt seed, not a frontmatter scalar).
   agentFilesTemplate =
     { roster }:
     let
@@ -116,8 +122,8 @@
         value = ''
           ---
           description: ${builtins.toJSON (e.description or "")}
-          mode: ${e.mode or "subagent"}
-          model: ${e.model}
+          mode: ${builtins.toJSON (e.mode or "subagent")}
+          model: ${builtins.toJSON e.model}
           ---
           ${e.description or ""}
         '';
