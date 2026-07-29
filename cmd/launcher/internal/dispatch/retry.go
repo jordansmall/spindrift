@@ -117,7 +117,7 @@ func (d *Dispatch) dispatchWithRetry(logPath string, once func() error) Result {
 		backoff := lb.Duration(transientCount)
 		fmt.Fprintf(d.humanOut(), "    .. #%s: transient (%s); retry %d/%d in %s\n",
 			d.number, cls.Reason, transientCount, d.cfg.TransientRetryMax, backoff)
-		lb.Do(transientCount)
+		d.clock.Sleep(backoff)
 	}
 }
 
