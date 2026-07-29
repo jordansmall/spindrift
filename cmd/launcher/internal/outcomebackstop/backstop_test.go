@@ -326,6 +326,30 @@ func TestRun_SalvageFails(t *testing.T) {
 	}
 }
 
+func TestRun_SalvageAddFailsSkipsCommit(t *testing.T) {
+	git := &fakeGit{responses: map[string]fakeResult{
+		"status":   {stdout: " M some/file.go\n"},
+		"add":      {err: fmt.Errorf("index locked")},
+		"rev-list": {stdout: "1\n"},
+	}}
+	clk := &fakeClock{}
+	cfg := baseConfig(git, clk)
+	cfg.WriteEnabled = true
+	cfg.CodeForge = "github"
+
+	var buf bytes.Buffer
+	if err := Run(cfg, &buf); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	line := buf.String()
+	if !strings.Contains(line, "failed to salvage uncommitted work") {
+		t.Fatalf("expected salvage-failed note, got %q", line)
+	}
+	if git.countCalls("commit") != 0 {
+		t.Fatalf("expected commit to be skipped after add failed, got %v", git.calls)
+	}
+}
+
 func TestRun_RevListErrorTreatedAsWorkExists(t *testing.T) {
 	git := &fakeGit{responses: map[string]fakeResult{
 		"rev-list": {err: fmt.Errorf("bad revision")},
