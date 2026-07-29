@@ -24,14 +24,17 @@ set_box_env() {
   export GH_TOKEN="fake-token"
   export GIT_USER_EMAIL="bot@example.com"
   export GIT_USER_NAME="Test Bot"
+  export HOLD_JITTER_SECS=5
   export IN_PROGRESS_LABEL="agent-in-progress"
   export ISSUE_TRACKER="github"
   export LOCAL_ISSUE_REFERENCE=""
+  export MAX_REBASE_ATTEMPTS=3
   export MODEL="claude-opus-4-8"
   export OPENCODE_AUTH_CONTENT=""
   export ORCHESTRATOR_ENABLED=""
   export REPO_SLUG="owner/repo"
   export REVIEW_MODEL="claude-opus-4-8"
   export SCOUT_MODEL="claude-haiku-4-5-20251001"
+  export TRANSIENT_BACKOFF_SECS=30
   export WORKER_MODEL="claude-sonnet-5"
 }
