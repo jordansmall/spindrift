@@ -10,23 +10,16 @@ import (
 // opencodeDriver is the host-side strategy for the opencode Driver: a thin
 // adapter onto the driver/opencode subpackage, which owns the opencode CLI's
 // NDJSON transcript shape and transient-error taxonomy. It cannot import
-// this package (that would cycle back to here), so ClassifyTransient
-// converts opencode's local Class/Reason values onto this package's shared
-// vocabulary.
+// this package (that would cycle back to here). Both opencode.Classification
+// and this package's Classification are true aliases of
+// driverkit.Classification, so the vocabulary is shared by construction and
+// ClassifyTransient just returns opencode.Classify's result.
 type opencodeDriver struct{}
 
 func (opencodeDriver) Name() string { return "opencode" }
 
 func (opencodeDriver) ClassifyTransient(logPath string) (Classification, error) {
-	c, err := opencode.Classify(logPath)
-	if err != nil {
-		return Classification{}, err
-	}
-	return Classification{
-		Class:   Class(c.Class),
-		Reason:  Reason(c.Reason),
-		ResetAt: c.ResetAt,
-	}, nil
+	return opencode.Classify(logPath)
 }
 
 // NewHeartbeatWriter wraps raw with opencode's own heartbeat writer.
