@@ -143,9 +143,9 @@ var breakdownByModel = breakdownByModelFile
 // messageIDs (dedup collapses multi-part re-emits of one message) keyed by
 // exact modelID; opencode's single tokens.cache.write total maps to the
 // 5-minute cache-write bucket since opencode reports no TTL split. A
-// breakdownByModel I/O error degrades only the per-model section (Models is
-// set to nil with a stderr warning), not the aggregate FinalSnapshot already
-// summed above.
+// breakdownByModel I/O error degrades only the per-model section
+// (SummedByModel is set to nil with a stderr warning), not the aggregate
+// FinalSnapshot already summed above.
 //
 // Returns usage.Report{Found: false} when the log contains no step_finish
 // event or does not exist. Returns (usage.Report{}, err) on other I/O
