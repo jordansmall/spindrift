@@ -224,7 +224,8 @@ Optional behaviors, each off unless noted (see [`docs/reference.md`](docs/refere
 for configuration):
 
 - **Merge guard.** A green PR whose diff touches a guarded path (`.github/**`,
-  `**/CLAUDE.md`, `**/AGENTS.md`, `.claude/**`, `.opencode/**` by default) is
+  `.forgejo/**`, `**/CLAUDE.md`, `**/AGENTS.md`, `.claude/**`, `.opencode/**`
+  by default) is
   downgraded to manual regardless of `MERGE_MODE` — see
   [Merge guard](docs/reference.md#merge-guard).
 - **Two-actor separation.** Set `BOX_GH_TOKEN` to a second machine user's PAT
