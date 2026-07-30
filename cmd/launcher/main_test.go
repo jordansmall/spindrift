@@ -2562,36 +2562,3 @@ func TestEngageAliasRemoved(t *testing.T) {
 		t.Error(`main.go still dispatches the deprecated "engage" subcommand; remove the handler`)
 	}
 }
-
-// TestSeedParentResolver_NonLocalForge_ReturnsNil verifies that under any
-// forge that doesn't implement forge.LandingContainmentQuery (i.e. every
-// forge but local), seedScopeResolver returns nil -- keeping
-// waves.Config.SeedScopeOf nil, so the blocker gate's seed-branch containment
-// check (#2130) never fires and a blocker is judged solely by its PR/issue
-// state.
-func TestSeedParentResolver_NonLocalForge_ReturnsNil(t *testing.T) {
-	fc := forge.NewFake()
-
-	if got := seedScopeResolver(fc, fc); got != nil {
-		t.Error("seedScopeResolver(non-containment forge) returned non-nil, want nil")
-	}
-}
-
-// TestSeedParentResolver_LocalForge_ResolvesDependentsParent verifies that
-// under CODE_FORGE=local (forge.LandingContainmentQuery), seedScopeResolver
-// returns a non-nil resolver that maps a dependent issue's own num to the
-// opaque forge.SeedScope whose label is the sanitized parent's Integration
-// branch.
-func TestSeedParentResolver_LocalForge_ResolvesDependentsParent(t *testing.T) {
-	fc := forge.NewFake()
-	fc.SetIssue(forge.Issue{Number: "11", Parent: "Render Pipeline"})
-	cf := fc.AsLocal()
-
-	resolve := seedScopeResolver(fc, cf)
-	if resolve == nil {
-		t.Fatal("seedScopeResolver(local forge) = nil, want a non-nil resolver")
-	}
-	if got := resolve("11").String(); got != "integration/render-pipeline" {
-		t.Errorf("resolve(11) = %q, want %q", got, "integration/render-pipeline")
-	}
-}

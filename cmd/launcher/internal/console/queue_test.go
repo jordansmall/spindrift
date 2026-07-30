@@ -58,6 +58,62 @@ func TestQueue_Discover_SourcesNilAcrossPaths(t *testing.T) {
 	}
 }
 
+// TestQueue_Discover_WiresSeedScopeContainmentOnlyUnderLocalForge verifies
+// Queue.Discover's own cfg.SeedScopeOf = localloop.SeedScopeResolver(tracker,
+// cf) wiring (queue.go, issue #2135) actually takes effect at the
+// queue-driven readiness path, not just at the main-layer composition this
+// was previously only covered at: a dependent (#42, parented under "Render
+// Pipeline") blocked on an OPEN blocker (#41) whose Landing is a
+// LandingIntegrationRef only gets its seed-branch containment query
+// (forge.LandingContainmentQuery.LandingContained) consulted when cf is
+// CODE_FORGE=local's containment-query shape (forge.Fake.AsLocal()); under a
+// plain forge that doesn't implement LandingContainmentQuery,
+// SeedScopeResolver returns nil, cfg.SeedScopeOf stays nil, and blockerReady
+// never has a non-empty scope to check the landing against.
+func TestQueue_Discover_WiresSeedScopeContainmentOnlyUnderLocalForge(t *testing.T) {
+	const landing = "integration/render-pipeline@abc123"
+
+	// Case A: a local (LandingContainmentQuery) forge -- the containment
+	// query must run.
+	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress", Failed: "agent-failed"})
+	f.SetIssue(forge.Issue{Number: "41", Title: "first", State: forge.IssueOpen, Landing: landing})
+	f.SetIssue(forge.Issue{Number: "42", Title: "then", Labels: []string{"ready-for-agent"}, Parent: "Render Pipeline"})
+	f.NativeDeps = map[string][]string{"42": {"41"}}
+	f.SetLandingContained(landing, "render-pipeline", true, nil)
+
+	q := NewQueue()
+	q.Add(Pick{Number: "42", Title: "then", State: PickQueued})
+
+	issues, _, _, err := q.Discover(f, f.AsLocal(), "agent-failed", KindWork)
+	if err != nil {
+		t.Fatalf("Discover (local forge): %v", err)
+	}
+	if len(f.LandingContainedCalls) == 0 {
+		t.Fatal("LandingContainedCalls is empty, want the seed-branch containment query to have run under a local forge -- SeedScopeOf was not wired")
+	}
+	if len(issues) != 1 || issues[0].Number != "42" {
+		t.Fatalf("Discover (local forge) issues = %v, want #42 claimed once its blocker's landing reads contained", issues)
+	}
+
+	// Case B: a plain forge that doesn't implement LandingContainmentQuery --
+	// the containment query must never run.
+	f2 := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress", Failed: "agent-failed"})
+	f2.SetIssue(forge.Issue{Number: "41", Title: "first", State: forge.IssueOpen, Landing: landing})
+	f2.SetIssue(forge.Issue{Number: "42", Title: "then", Labels: []string{"ready-for-agent"}, Parent: "Render Pipeline"})
+	f2.NativeDeps = map[string][]string{"42": {"41"}}
+	f2.SetLandingContained(landing, "render-pipeline", true, nil)
+
+	q2 := NewQueue()
+	q2.Add(Pick{Number: "42", Title: "then", State: PickQueued})
+
+	if _, _, _, err := q2.Discover(f2, f2, "agent-failed", KindWork); err != nil {
+		t.Fatalf("Discover (plain forge): %v", err)
+	}
+	if len(f2.LandingContainedCalls) != 0 {
+		t.Errorf("LandingContainedCalls = %v, want none -- SeedScopeOf must stay nil under a forge that isn't LandingContainmentQuery-shaped", f2.LandingContainedCalls)
+	}
+}
+
 // TestQueue_Empty verifies Empty() reports false while any pick is still
 // eligible to launch (PickQueued or PickHeld) — the predicate tryLaunch
 // (launcher.go) gates its drain spawn on (#754). See Queue.Empty's doc
