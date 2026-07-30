@@ -246,6 +246,29 @@ func imageRepo(imageTag string) string {
 	return imageTag[:i]
 }
 
+// gitSafeDirectoryPrelude sets a writable HOME under the /build-output mount
+// and writes a global gitconfig marking /workspace (the bind-mounted host
+// repo) safe, so upstream Nix's libgit2 dubious-ownership guard does not
+// reject it when the host repo is owned by a UID different from
+// container-root. Written directly via printf — no dependency on a `git`
+// CLI being present in the builder image. Mirrors the safe.directory
+// precedent in agent/entrypoint.sh:138-139, written directly rather than via
+// `git config` (issue #2196).
+const gitSafeDirectoryPrelude = `export HOME=/build-output/home; ` +
+	`mkdir -p "$HOME"; ` +
+	`printf '[safe]\n\tdirectory = *\n\tdirectory = /workspace\n' > "$HOME/.gitconfig"`
+
+// containerBuildCmd assembles the `sh -euc` command run inside the Nix
+// builder container to build the image and stage it for the host to pick
+// up. Separated from buildInContainer so the command construction can be
+// tested without spawning docker/podman — mirrors buildRunArgs.
+func containerBuildCmd(flakeImageAttr string) string {
+	return gitSafeDirectoryPrelude + "; " + fmt.Sprintf(
+		"nix --extra-experimental-features 'nix-command flakes' build '%s' --print-out-paths --no-link >/build-output/image-path && cp \"$(cat /build-output/image-path)\" /build-output/image.tar",
+		flakeImageAttr,
+	)
+}
+
 func (a *ociAdapter) buildInContainer() error {
 	// Stage under a temp dir so interruption never litters the consumer tree.
 	tmpDir, err := os.MkdirTemp("", "spindrift-build-*")
@@ -260,10 +283,7 @@ func (a *ociAdapter) buildInContainer() error {
 	fmt.Printf("==> no host Linux builder; building the image inside a %s container\n", a.nixBuilderImage)
 	fmt.Printf("    (reusing the '%s' volume for /nix so rebuilds are incremental)\n", a.nixVolume)
 
-	shCmd := fmt.Sprintf(
-		"nix --extra-experimental-features 'nix-command flakes' build '%s' --print-out-paths --no-link >/build-output/image-path && cp \"$(cat /build-output/image-path)\" /build-output/image.tar",
-		a.flakeImageAttr,
-	)
+	shCmd := containerBuildCmd(a.flakeImageAttr)
 	build := exec.Command(a.cli, "run", "--rm",
 		"-v", a.nixVolume+":/nix",
 		"-v", a.pwd+":/workspace",
