@@ -27,11 +27,11 @@ type readOnlyCodeForge struct {
 
 // NewReadOnlyCodeForge returns the gh-exec adapter used under
 // BOX_FORGE_AND_ISSUE_ACCESS=read-only: identical to NewExecClient (same
-// repo/labels/branchPrefix, same PRForge surface via embedding) plus
-// RelayBundle, the host-mediated hand-off for a Box that cannot push
+// repo/labels/branchPrefix, same PRForge surface via embedding, same opts)
+// plus RelayBundle, the host-mediated hand-off for a Box that cannot push
 // directly (issue #1918).
-func NewReadOnlyCodeForge(repo string, labels forge.DispatchLabels, branchPrefix string, verdictLabels ...forge.VerdictLabels) forge.CodeForge {
-	return &readOnlyCodeForge{execClient: NewExecClient(repo, labels, branchPrefix, verdictLabels...)}
+func NewReadOnlyCodeForge(repo string, labels forge.DispatchLabels, branchPrefix string, opts ...ExecOption) forge.CodeForge {
+	return &readOnlyCodeForge{execClient: NewExecClient(repo, labels, branchPrefix, opts...)}
 }
 
 // RelayBundle imports ref from outboxDir/seambundle.FileName into a fresh
