@@ -230,6 +230,58 @@ func TestIsRuntimeUnusableError(t *testing.T) {
 	}
 }
 
+func TestContainerBuildCmd(t *testing.T) {
+	attr := ".#packages.aarch64-linux.agent-image"
+	got := containerBuildCmd(attr)
+
+	if !strings.Contains(got, "nix --extra-experimental-features 'nix-command flakes' build '"+attr+"'") {
+		t.Errorf("missing nix build invocation for attr %q in: %s", attr, got)
+	}
+	if !strings.Contains(got, ">/build-output/image-path && cp") {
+		t.Errorf("missing tail redirect/copy in: %s", got)
+	}
+}
+
+// TestContainerBuildCmd_SafeDirectoryPreludePrecedesNixBuild verifies
+// containerBuildCmd prepends a safe.directory gitconfig prelude — written
+// directly via printf under a writable HOME rooted at /build-output, with no
+// dependency on a `git` CLI being present in the builder image — ahead of
+// the existing `nix build` invocation (issue #2196).
+func TestContainerBuildCmd_SafeDirectoryPreludePrecedesNixBuild(t *testing.T) {
+	attr := ".#packages.aarch64-linux.agent-image"
+	got := containerBuildCmd(attr)
+
+	nixIdx := strings.Index(got, "nix --extra-experimental-features")
+	if nixIdx < 0 {
+		t.Fatalf("missing nix build invocation in: %s", got)
+	}
+
+	homeIdx := strings.Index(got, "export HOME=/build-output/")
+	if homeIdx < 0 {
+		t.Fatalf("missing HOME export under /build-output in: %s", got)
+	}
+	if homeIdx >= nixIdx {
+		t.Errorf("HOME export (idx %d) must precede nix build (idx %d) in: %s", homeIdx, nixIdx, got)
+	}
+
+	printfIdx := strings.Index(got, "printf '[safe]")
+	if printfIdx < 0 {
+		t.Fatalf("missing printf-written safe.directory gitconfig in: %s", got)
+	}
+	if printfIdx >= nixIdx {
+		t.Errorf("gitconfig printf (idx %d) must precede nix build (idx %d) in: %s", printfIdx, nixIdx, got)
+	}
+	if !strings.Contains(got, "directory = *") || !strings.Contains(got, "directory = /workspace") {
+		t.Errorf("expected safe.directory entries for '*' and '/workspace' in: %s", got)
+	}
+	if !strings.Contains(got, ".gitconfig") {
+		t.Errorf("expected gitconfig written to $HOME/.gitconfig in: %s", got)
+	}
+	if strings.Contains(got, "git config") {
+		t.Errorf("gitconfig must be written directly via printf, not `git config` (no git CLI dependency); got: %s", got)
+	}
+}
+
 func TestBuildRunArgsIncludesHardeningFlags(t *testing.T) {
 	a := &ociAdapter{
 		cli:         "podman",
