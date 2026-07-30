@@ -180,6 +180,10 @@ type config struct {
 	// of mergeMode. Empty disables the guard.
 	mergeGuardPaths string
 
+	// mergeMethod maps to GitHub's native merge_method: "merge", "squash", or
+	// "rebase" (default). github Code Forge merge path only.
+	mergeMethod string
+
 	// codeForge selects the Code Forge adapter: "github" (open PR, watch CI,
 	// merge) or "git" (push-only to codeForgeRemoteURL; no PR, CI-watch, or
 	// merge gate).
@@ -423,6 +427,7 @@ func loadConfig() config {
 
 		mergeMode:       getenvSchema("MERGE_MODE"),
 		mergeGuardPaths: getenvSchema("MERGE_GUARD_PATHS"),
+		mergeMethod:     getenvSchema("MERGE_METHOD"),
 
 		codeForge:                    codeForge,
 		codeForgeRemoteURL:           getenvSchema("CODE_FORGE_REMOTE_URL"),
@@ -470,6 +475,9 @@ func validate(c config) error {
 		return err
 	}
 	if err := settle.ValidateMergeMode(c.mergeMode); err != nil {
+		return err
+	}
+	if err := settle.ValidateMergeMethod(c.mergeMethod); err != nil {
 		return err
 	}
 	switch c.overlapGate {
@@ -599,9 +607,9 @@ func newCodeForge(c config, parent local.SanitizedParent) forge.CodeForge {
 		// itself to satisfy forge.BundleRelay. read-write (the default) keeps
 		// the plain adapter, which never satisfies it, byte-for-byte.
 		if c.boxForgeAndIssueAccess == "read-only" {
-			return github.NewReadOnlyCodeForge(c.repoSlug, dispatchLabels(c), c.branchPrefix)
+			return github.NewReadOnlyCodeForge(c.repoSlug, dispatchLabels(c), c.branchPrefix, github.WithMergeMethod(c.mergeMethod))
 		}
-		return github.NewExecClient(c.repoSlug, dispatchLabels(c), c.branchPrefix)
+		return github.NewExecClient(c.repoSlug, dispatchLabels(c), c.branchPrefix, github.WithMergeMethod(c.mergeMethod))
 	}
 }
 
