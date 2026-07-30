@@ -74,6 +74,43 @@ func TestSelfHeal_MergeGuardHit_DowngradesToManual(t *testing.T) {
 	}
 }
 
+// TestSelfHeal_MergeGuardHit_ForgejoPath verifies the guard covers
+// .forgejo/ workflow paths just as it covers .github/ — the guard must
+// protect CI config unconditionally, regardless of which forge backend the
+// repo runs on.
+func TestSelfHeal_MergeGuardHit_ForgejoPath(t *testing.T) {
+	c := baseConfig()
+	c.MergeMode = "immediate"
+	c.MergeGuardPaths = ".github/**,.forgejo/**"
+	fc := forge.NewFake(testDispatchLabels)
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
+	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
+	fc.SetPRFiles(testPR, []string{"src/main.go", ".forgejo/workflows/ci.yml"})
+	s := New(c, fc, fc)
+
+	landing := s.selfHeal(dispatch.NewFake(), "1", 0, testPR)
+	if landing != landingManual {
+		t.Errorf("selfHeal = %v, want landingManual (merge guard hit on .forgejo/ path)", landing)
+	}
+	if fc.Merged != "" {
+		t.Errorf("merge guard must prevent Merge from being called; fc.Merged=%q", fc.Merged)
+	}
+	iss, _ := fc.Issue("1")
+	if !containsLabel(iss.Labels, "agent-complete") {
+		t.Errorf("issue must carry agent-complete after a guard-downgraded green PR; labels=%v", iss.Labels)
+	}
+	if len(fc.CommentCalls) != 1 {
+		t.Fatalf("expected exactly one guard comment, got %d: %+v", len(fc.CommentCalls), fc.CommentCalls)
+	}
+	body := fc.CommentCalls[0].Body
+	if !strings.Contains(body, ".forgejo/workflows/ci.yml") {
+		t.Errorf("comment must name the matched path; body=%q", body)
+	}
+	if !strings.Contains(body, "MERGE_GUARD_PATHS") {
+		t.Errorf("comment must name the knob that triggered it; body=%q", body)
+	}
+}
+
 // TestSelfHeal_MergeGuardHit_AutoMode verifies the guard fires under
 // MERGE_MODE=auto too — the acceptance criterion covers both immediate and
 // auto, since the guard downgrades regardless of mode.
