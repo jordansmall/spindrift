@@ -775,7 +775,16 @@ rec {
       optionBlock =
         e:
         let
-          names = builtins.concatStringsSep ", " (map (n: "\\-\\-" + escFlag n) (allFlagNames e));
+          # Canonical first, then any live alias, then the deprecated old
+          # name tagged "(deprecated)" — parity with `--help --all`'s flag
+          # column (cmd/launcher/flags.go printHelp), so a man-page reader can
+          # tell the retired spelling apart from the supported forms.
+          renderName = n: "\\-\\-" + escFlag n;
+          names = builtins.concatStringsSep ", " (
+            [ (renderName (flagName e)) ]
+            ++ map renderName (liveFlagAliases e)
+            ++ map (n: renderName n + " (deprecated)") (deprecatedFlagAliases e)
+          );
           dflt = flagDflt e;
           dfltSentence = if dflt == "" then "No default." else "Default: " + esc dflt + ".";
           # A presence-style bool flag takes no value, so render its name with
