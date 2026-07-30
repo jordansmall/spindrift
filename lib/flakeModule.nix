@@ -16,6 +16,7 @@ let
   inherit (lib) mkOption types;
   mkHarness = import ./mkHarness.nix;
   schema = import ./env-schema.nix;
+  resolveNixPath = import ./nixpath.nix;
   # flakeOption entries are the Consumer-tunable subset.
   flakeOptionEntries = lib.filterAttrs (_: e: e.flakeOption or false) schema;
 
@@ -128,10 +129,10 @@ let
   # ADR 0037 Pass 1 (issue #2179): build the new domain-tree option surface
   # generically from a flat list of { path; opt; } entries. Entries are
   # grouped by their first path segment; a length-1 path is a leaf (the
-  # option itself), a longer path recurses into a submodule. nixPaths are
-  # prefix-disjoint (enforced by nix/checks/schema-drift.nix's
-  # flake-nixpath-exhaustive-disjoint), so no segment is ever both a leaf and
-  # a namespace.
+  # option itself), a longer path recurses into a submodule. Derived flake
+  # paths (lib/nixpath.nix) are prefix-disjoint (enforced by
+  # nix/checks/schema-drift.nix's flake-nixpath-exhaustive-disjoint), so no
+  # segment is ever both a leaf and a namespace.
   buildTree =
     entries:
     let
@@ -165,9 +166,9 @@ let
     ) grouped;
 
   # flakeOption leaves: one entry per Consumer-tunable knob, keyed by its
-  # dotted nixPath.
+  # derived flake path (lib/nixpath.nix).
   flakeOptionTreeEntries = lib.mapAttrsToList (key: entry: {
-    path = lib.splitString "." entry.nixPath;
+    path = lib.splitString "." (resolveNixPath key entry);
     opt = mkKnobOption key entry;
   }) flakeOptionEntries;
 
@@ -536,14 +537,14 @@ in
         lib.mapAttrs (
           key: entry:
           let
-            newVal = lib.attrByPath (lib.splitString "." entry.nixPath) null cfg;
+            newVal = lib.attrByPath (lib.splitString "." (resolveNixPath key entry)) null cfg;
             sectionAttr = legacySettingsSection.${key} or null;
             oldVal = if sectionAttr == null then null else cfg.settings.${sectionAttr}.${key} or null;
           in
           if newVal != null then
             newVal
           else if oldVal != null then
-            lib.warn "perSystem.spindrift.settings.${sectionAttr}.${key} is deprecated; use perSystem.spindrift.${entry.nixPath}" oldVal
+            lib.warn "perSystem.spindrift.settings.${sectionAttr}.${key} is deprecated; use perSystem.spindrift.${resolveNixPath key entry}" oldVal
           else
             null
         ) flakeOptionEntries
