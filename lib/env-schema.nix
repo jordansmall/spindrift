@@ -182,6 +182,19 @@
     nixSubPath = "merge.method";
     boxEnv = false;
   };
+  syncMethod = {
+    env = "SYNC_METHOD";
+    group = "git";
+    default = "rebase";
+    doc = "how a behind branch is brought current before landing: rebase (linear history) or merge (merge the base in); governs both the preflight-stale-base proactive sync and the reactive on-conflict sync during an immediate merge (github Code Forge PR-landing path only)";
+    choices = [
+      "rebase"
+      "merge"
+    ];
+    flakeOption = true;
+    nixSubPath = "merge.syncMethod";
+    boxEnv = false;
+  };
   mergeGuardPaths = {
     env = "MERGE_GUARD_PATHS";
     group = "git";
