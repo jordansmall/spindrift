@@ -49,6 +49,59 @@ let
         concatStringsSep ", " (map (e: e.env) issues.badSecret)
       }";
     schema;
+
+  structuralPaths = import ../../lib/structural-paths.nix;
+
+  # Uniqueness + prefix-disjointness predicate over a flat list of dotted
+  # nixPath strings, factored (like schemaChoiceIssues) so the guard can be
+  # exercised against a synthetic/injected path set in a test, not only the
+  # real one.
+  nixPathIssues =
+    nixPaths:
+    let
+      inherit (pkgs.lib) filter splitString;
+      segmentsOf = p: splitString "." p;
+      isPrefixOf =
+        a: b:
+        let
+          la = builtins.length a;
+        in
+        la <= builtins.length b && a == (builtins.genList (i: builtins.elemAt b i) la);
+      pairs = builtins.concatMap (
+        i:
+        map (j: {
+          a = builtins.elemAt nixPaths i;
+          b = builtins.elemAt nixPaths j;
+        }) (filter (j: j != i) (builtins.genList (x: x) (builtins.length nixPaths)))
+      ) (builtins.genList (x: x) (builtins.length nixPaths));
+    in
+    {
+      collidingPairs = filter (p: isPrefixOf (segmentsOf p.a) (segmentsOf p.b)) (
+        filter (p: p.a != p.b) pairs
+      );
+      duplicatePaths = filter (p: p.a == p.b) pairs;
+    };
+
+  # Throws via nixPathIssues on a non-disjoint / non-unique path set, else
+  # returns it unchanged. Shared so the collision guard exercises this exact
+  # assertion path. Messages are source-agnostic (no lib/env-schema.nix:
+  # prefix) on purpose: the colliding path may be a flakeOption knob or a
+  # structural domain-tree leaf, so a single source file is not implicated.
+  assertNixPathsOk =
+    nixPaths:
+    let
+      inherit (pkgs.lib) assertMsg concatStringsSep;
+      issues = nixPathIssues nixPaths;
+    in
+    assert assertMsg (issues.duplicatePaths == [ ])
+      "flake nixPath values must be unique — duplicate: ${
+        concatStringsSep ", " (map (p: p.a) issues.duplicatePaths)
+      }";
+    assert assertMsg (issues.collidingPairs == [ ])
+      "flake nixPath values must be prefix-disjoint (no leaf may be an ancestor of another) — colliding pair: ${
+        concatStringsSep ", " (map (p: "${p.a} vs ${p.b}") issues.collidingPairs)
+      }";
+    nixPaths;
 in
 {
   # cmd/launcher/internal/driver/drivernames_gen.go must match the key list
@@ -796,43 +849,54 @@ in
         attrValues
         filter
         concatStringsSep
-        splitString
         ;
       flakeOptionEntries = filter (e: e.flakeOption or false) (attrValues schema);
       missingNixPath = filter (
         e: !(e ? nixPath) || !builtins.isString e.nixPath || e.nixPath == ""
       ) flakeOptionEntries;
-      nixPaths = map (e: e.nixPath) flakeOptionEntries;
-      segmentsOf = p: splitString "." p;
-      isPrefixOf =
-        a: b:
-        let
-          la = builtins.length a;
-        in
-        la <= builtins.length b && a == (builtins.genList (i: builtins.elemAt b i) la);
-      pairs = builtins.concatMap (
-        i:
-        map (j: {
-          a = builtins.elemAt nixPaths i;
-          b = builtins.elemAt nixPaths j;
-        }) (filter (j: j != i) (builtins.genList (x: x) (builtins.length nixPaths)))
-      ) (builtins.genList (x: x) (builtins.length nixPaths));
-      collidingPairs = filter (p: isPrefixOf (segmentsOf p.a) (segmentsOf p.b)) (
-        filter (p: p.a != p.b) pairs
-      );
-      duplicatePaths = filter (p: p.a == p.b) pairs;
+      # Fold the structural domain-tree paths into the same disjointness set:
+      # both flakeOption leaves and structural leaves are merged into one tree
+      # by buildTree at flake eval (lib/flakeModule.nix), so a cross-set prefix
+      # collision is just as fatal — catch it here as a clear error instead of
+      # an opaque buildTree throw (issue #2184).
+      allNixPaths =
+        (map (e: e.nixPath) flakeOptionEntries)
+        ++ (map (segs: concatStringsSep "." segs) (attrValues structuralPaths));
     in
     assert assertMsg (missingNixPath == [ ])
       "lib/env-schema.nix: every flakeOption knob must declare a non-empty nixPath (ADR 0037): ${
         concatStringsSep ", " (map (e: e.env) missingNixPath)
       }";
-    assert assertMsg (duplicatePaths == [ ])
-      "lib/env-schema.nix: flakeOption nixPath values must be unique — duplicate: ${
-        concatStringsSep ", " (map (p: p.a) duplicatePaths)
-      }";
-    assert assertMsg (collidingPairs == [ ])
-      "lib/env-schema.nix: flakeOption nixPath values must be prefix-disjoint (no leaf may be an ancestor of another) — colliding pair: ${
-        concatStringsSep ", " (map (p: "${p.a} vs ${p.b}") collidingPairs)
-      }";
+    assert (assertNixPathsOk allNixPaths) == allNixPaths;
     pkgs.runCommand "flake-nixpath-exhaustive-disjoint" { } "touch $out";
+
+  # Regression guard (issue #2184, ADR 0037): the disjointness assertion must
+  # cover the structural domain-tree paths too, not just the flakeOption
+  # nixPaths — a future structural-vs-flakeOption prefix collision otherwise
+  # slips past this check and surfaces as an opaque buildTree throw at flake
+  # eval. Runs assertNixPathsOk — the exact function the real check calls —
+  # against the real combined path set with one synthetic path injected that
+  # nests under the structural leaf `agents.driver`, via tryEval, so it fails
+  # if assertNixPathsOk ever stops folding in / rejecting a structural
+  # collision.
+  flake-nixpath-disjointness-collision-guard =
+    let
+      inherit (pkgs.lib)
+        assertMsg
+        attrValues
+        filter
+        concatStringsSep
+        ;
+      flakeOptionEntries = filter (e: e.flakeOption or false) (attrValues schema);
+      realNixPaths =
+        (map (e: e.nixPath) flakeOptionEntries)
+        ++ (map (segs: concatStringsSep "." segs) (attrValues structuralPaths));
+      # "agents.driver" is a real structural leaf; a knob landing under it
+      # would collide — exactly the latent cross-set failure this guards.
+      badPaths = realNixPaths ++ [ "agents.driver.injected" ];
+      result = builtins.tryEval (assertNixPathsOk badPaths);
+    in
+    assert assertMsg (!result.success)
+      "flake-nixpath-disjointness-collision-guard: expected assertNixPathsOk to reject a synthetic path nesting under the structural leaf agents.driver, but it evaluated successfully";
+    pkgs.runCommand "flake-nixpath-disjointness-collision-guard" { } "touch $out";
 }
