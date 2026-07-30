@@ -12,3 +12,17 @@ func ValidateMergeMode(mode string) error {
 		return fmt.Errorf("MERGE_MODE=%q is not valid; must be immediate, auto, or manual", mode)
 	}
 }
+
+// ValidateMergeMethod checks method against the three documented
+// MERGE_METHOD values. Unlike ValidateMergeMode, the value it guards is
+// not carried on settle.Config: main.go's validate calls this on the raw
+// knob, which is then threaded into the github adapter via
+// github.WithMergeMethod rather than consumed by settle.New.
+func ValidateMergeMethod(method string) error {
+	switch method {
+	case "merge", "squash", "rebase":
+		return nil
+	default:
+		return fmt.Errorf("MERGE_METHOD=%q is not valid; must be merge, squash, or rebase", method)
+	}
+}

@@ -19,3 +19,21 @@ func TestValidateMergeMode_AcceptsKnown(t *testing.T) {
 		}
 	}
 }
+
+// TestValidateMergeMethod_RejectsUnknown verifies ValidateMergeMethod rejects
+// a method outside the three documented values.
+func TestValidateMergeMethod_RejectsUnknown(t *testing.T) {
+	if err := ValidateMergeMethod("turbo"); err == nil {
+		t.Fatal("ValidateMergeMethod(\"turbo\") should error")
+	}
+}
+
+// TestValidateMergeMethod_AcceptsKnown verifies ValidateMergeMethod accepts
+// each of the three documented MERGE_METHOD values.
+func TestValidateMergeMethod_AcceptsKnown(t *testing.T) {
+	for _, method := range []string{"merge", "squash", "rebase"} {
+		if err := ValidateMergeMethod(method); err != nil {
+			t.Errorf("ValidateMergeMethod(%q) = %v, want nil", method, err)
+		}
+	}
+}
