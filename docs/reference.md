@@ -112,7 +112,7 @@ settings = {
                       completeLabel   = "agent-complete"; };
   branches        = { baseBranch = "main"; branchPrefix = "agent/issue-";
                       mergeMode  = "manual";
-                      mergeGuardPaths = ".github/**,**/CLAUDE.md,**/AGENTS.md,.claude/**,.opencode/**";
+                      mergeGuardPaths = ".github/**,.forgejo/**,**/CLAUDE.md,**/AGENTS.md,.claude/**,.opencode/**";
                       mergePollInterval = 30; mergePollTimeout = 1800; };
   concurrency     = { maxParallel = 3; maxJobs = 0; };
   models          = { model = "claude-opus-4-8";
@@ -757,7 +757,7 @@ exceptions.
 | `MERGE_MODE`              | `manual` (baked)       | post-green merge policy: `manual` (leave the green PR for a human), `immediate` (rebase-merge on green), `auto` (enqueue GitHub native auto-merge — repo must have *Allow auto-merge* on). Under `CODE_FORGE=git`, `manual`/`immediate` map to remote pushes instead (leave the pushed branch / push straight to the target branch); `auto` has no meaning off `github` and fails fast at startup. Under `CODE_FORGE=local`, only `immediate` relays the seam bundle into the Accumulation repo — `manual`/`auto` have no meaning under `local` and fail fast at startup. |
 | `MERGE_METHOD`            | `rebase` (baked)       | how the final integration commits land on green: `merge` (merge commit), `squash`, or `rebase`; maps to GitHub's native `merge_method` (`github` Code Forge merge path only) |
 | `SYNC_METHOD`             | `rebase` (baked)       | how a behind branch is brought current before landing: `rebase` (linear history) or `merge` (merge the base in); governs both the preflight-stale-base proactive sync and the reactive on-conflict sync during an immediate merge (`github` Code Forge PR-landing path only) |
-| `MERGE_GUARD_PATHS`       | `.github/**,**/CLAUDE.md,**/AGENTS.md,.claude/**,.opencode/**` (baked) | comma-separated globs; a green PR touching a matched path downgrades to manual regardless of `MERGE_MODE` (`github` Code Forge only; empty disables — see [Merge guard](#merge-guard)) |
+| `MERGE_GUARD_PATHS`       | `.github/**,.forgejo/**,**/CLAUDE.md,**/AGENTS.md,.claude/**,.opencode/**` (baked) | comma-separated globs; a green PR touching a matched path downgrades to manual regardless of `MERGE_MODE` (`github` Code Forge only; empty disables — see [Merge guard](#merge-guard)) |
 | `MODEL`                   | `claude-opus-4-8` (baked) | main/coordinator Claude model the in-container agent runs (worker-tier defaults are unaffected) |
 | `SCOUT_MODEL`             | `claude-haiku-4-5-20251001` (baked) | scout subagent model tier (empty drops the scout entry from `--agents`). **Deprecated** — superseded by the [`roster`](#subagent-roster) option |
 | `REVIEW_MODEL`            | `claude-opus-4-8` (baked) | reviewer subagent model tier (empty drops the reviewer entry from `--agents`). **Deprecated** — superseded by the [`roster`](#subagent-roster) option |
@@ -1350,10 +1350,10 @@ downgrades, it never blocks: the cost of a hit is one human read.
 The default is:
 
 ```
-.github/**,**/CLAUDE.md,**/AGENTS.md,.claude/**,.opencode/**
+.github/**,.forgejo/**,**/CLAUDE.md,**/AGENTS.md,.claude/**,.opencode/**
 ```
 
-— CI config plus the instruction surface (`CLAUDE.md`, `AGENTS.md`,
+— CI config for both forges plus the instruction surface (`CLAUDE.md`, `AGENTS.md`,
 `.claude/`, `.opencode/`). Those files are a cross-run persistence vector: a
 poisoned instruction file merged once feeds every future Agent as trusted
 input on its next fresh clone, so the default set is deliberately broad.
