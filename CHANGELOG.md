@@ -1,5 +1,115 @@
 # Changelog
 
+## [0.9.0](https://github.com/jordansmall/spindrift/compare/v0.8.0...v0.9.0) (2026-07-30)
+
+
+### Features
+
+* **classify:** name the --agents unsupported-flag failure ([4915f2e](https://github.com/jordansmall/spindrift/commit/4915f2e6d040fbb58277695838c6c8980d15a26d)), closes [#1552](https://github.com/jordansmall/spindrift/issues/1552)
+* **cli:** re-cut flag groups to domains, rename flags ([b260201](https://github.com/jordansmall/spindrift/commit/b2602019040db4e864bfe4ca2035cea1e7872909))
+* **driver-exec:** add the outcome-backstop verb ([d83d6f3](https://github.com/jordansmall/spindrift/commit/d83d6f33fbf456803c0d210c3acf9f6f0556cb6a))
+* **driver:** bake DRIVER_AGENT_FILES_DIR for opencode ([95ee5be](https://github.com/jordansmall/spindrift/commit/95ee5beab8d0fcbdac012f6e5757afe3f3fb8363)), closes [#2144](https://github.com/jordansmall/spindrift/issues/2144)
+* **driverkit:** add shared Driver-seam leaf package ([52ee4d7](https://github.com/jordansmall/spindrift/commit/52ee4d79f83ad5564bd0ddf4426ac97863f09e49)), closes [#2149](https://github.com/jordansmall/spindrift/issues/2149)
+* **entrypoint:** restore the synthetic-backstop operator diagnostic ([a64ba0a](https://github.com/jordansmall/spindrift/commit/a64ba0ab4f3d6b074ad4738c0c0d5f4b869f4dbc))
+* **flake:** generate the domain-tree option surface from nixPath ([5ef87af](https://github.com/jordansmall/spindrift/commit/5ef87af207a81804f11484381495f4d8a7b72c74))
+* **freshness:** add Guard sealing the host-taint halt rule ([b98a603](https://github.com/jordansmall/spindrift/commit/b98a603dd295c80046a68024e2e87d0476b524ba))
+* **github:** honor a configurable branch-sync method ([9f5d3fc](https://github.com/jordansmall/spindrift/commit/9f5d3fc1e27d5fae621da52fe7f863221d692f71))
+* **github:** honor a configurable pr merge method ([26f48cb](https://github.com/jordansmall/spindrift/commit/26f48cb97f3a22bcb1f1f820287678b5db550dc9))
+* **launcher:** parse bool flags by presence ([1bf06e1](https://github.com/jordansmall/spindrift/commit/1bf06e19e30887b26a1b12f1f541a82c41d0b59c)), closes [#2145](https://github.com/jordansmall/spindrift/issues/2145)
+* **opencode:** rewrite subagent agent-file bodies at runtime ([0f8aead](https://github.com/jordansmall/spindrift/commit/0f8aead0e8cb18e416b21f2fbc3aac3f0abfdb2f)), closes [#2153](https://github.com/jordansmall/spindrift/issues/2153)
+* **outcomebackstop:** add the backstop decision package ([bd0e91d](https://github.com/jordansmall/spindrift/commit/bd0e91da586c6ba85a7ff2f00a61c4ed693df5f1))
+* **retry:** add LinearBackoff behind the Clock seam ([a1bab8e](https://github.com/jordansmall/spindrift/commit/a1bab8e984a8b1dcf52657e2dd221ecd3b7156b1))
+* **roster:** add normalizeRoster validation seam ([a873aa7](https://github.com/jordansmall/spindrift/commit/a873aa76f983d7c5798de849d94973e28eea0bab))
+* **schema:** add Nix-only nixPath to every flakeOption knob ([9f7e580](https://github.com/jordansmall/spindrift/commit/9f7e5800ee52e91c309b76a2d1b9398a3d4b48ed))
+* **schema:** add presence-style bool flag kind ([4806b87](https://github.com/jordansmall/spindrift/commit/4806b87588cc456fafc896abf2d3390188169fa8)), closes [#2145](https://github.com/jordansmall/spindrift/issues/2145)
+* **schema:** add the MERGE_METHOD knob and wiring ([e998413](https://github.com/jordansmall/spindrift/commit/e9984138f722031d0ebd3e93c16e6fd89a755a56))
+* **schema:** add the SYNC_METHOD knob and wiring ([cba0b11](https://github.com/jordansmall/spindrift/commit/cba0b113aedc498d0de141245c9c42b5ffbe7fdc)), closes [#2177](https://github.com/jordansmall/spindrift/issues/2177)
+* **schema:** convert generic bool knobs to bool kind ([884006c](https://github.com/jordansmall/spindrift/commit/884006cd00e9a087b6c0ff9d2a045d562f850193)), closes [#2146](https://github.com/jordansmall/spindrift/issues/2146)
+* **schema:** forward the push-retry backoff knobs into the Box ([87a3594](https://github.com/jordansmall/spindrift/commit/87a359436789a8aa76511eb03693f3e1504dbdf1))
+* **schema:** make continuous-dispatch a bool kind with --continuous alias ([d08f4a2](https://github.com/jordansmall/spindrift/commit/d08f4a213436dd96f0ac1d8245389d622d769874))
+* **settle:** add MERGE_METHOD choice validator ([12257e8](https://github.com/jordansmall/spindrift/commit/12257e84a93ffebfc37fdb7f2f6f6ee77ab21bf5))
+* **settle:** add SYNC_METHOD choice validator ([ffe3859](https://github.com/jordansmall/spindrift/commit/ffe385948fea27ccfa7ab100336e5fa342972d95))
+* **usage:** state Report rules, add opencode per-model ([f5d604a](https://github.com/jordansmall/spindrift/commit/f5d604af7420e3286f08a94d8e25db240dae23b4)), closes [#2156](https://github.com/jordansmall/spindrift/issues/2156)
+
+
+### Bug Fixes
+
+* **checks:** fold structural paths into nixpath disjointness ([4789bee](https://github.com/jordansmall/spindrift/commit/4789bee6e124d3a475265db5560641cc2886af5d)), closes [#2184](https://github.com/jordansmall/spindrift/issues/2184)
+* **driverkit:** check per-Driver extras before shared base ([a013548](https://github.com/jordansmall/spindrift/commit/a0135483961c0b708fe942a670c27b2d9951c3ff))
+* **drivers:** JSON-encode opencode mode and model ([e306bf3](https://github.com/jordansmall/spindrift/commit/e306bf30fec5f48406d3d13fdd1cd09e7ef42381))
+* **local:** escape frontmatter labels in the flow-list ([e9199e5](https://github.com/jordansmall/spindrift/commit/e9199e551cb5260baccdc40f8d2301a237a3dc63))
+* **outcomebackstop:** short-circuit salvage commit on add failure ([491c04a](https://github.com/jordansmall/spindrift/commit/491c04af575093186474a6d349238281375ed01f))
+
+
+### Documentation
+
+* **adr:** record 0036, hand-off branching belongs to driver-exec ([fcde639](https://github.com/jordansmall/spindrift/commit/fcde639535831189d46457b1a57608fe8b74ad37))
+* **adr:** record 0037, flake surface is a domain tree ([e5a2743](https://github.com/jordansmall/spindrift/commit/e5a2743b8db15a266d0dcb7caee36317cd384281))
+* **adr:** refine 0037 nixPath leaf names ([e58e10c](https://github.com/jordansmall/spindrift/commit/e58e10c78754030d5e58f5d2e70fdb154d5b7a66))
+* **adr:** rename mergeMode to git.merge.policy in 0037 ([359fbce](https://github.com/jordansmall/spindrift/commit/359fbcea0950091cc85bd50edb9e49df13a66323))
+* **classify:** note first-match-wins can latch Terminal ([8e4911f](https://github.com/jordansmall/spindrift/commit/8e4911fe3f8a1e718d20e95916d6ac539b52dc5d))
+* **context:** add the freshness Guard term ([9b763ec](https://github.com/jordansmall/spindrift/commit/9b763ec187da9bcef53d11d9adc2f0abbefe519a))
+* **context:** add the SeedScope glossary term ([2b9f8e3](https://github.com/jordansmall/spindrift/commit/2b9f8e3b1ec6e78c9814fe0bfc8f85f0abf4b4ff))
+* **context:** define the driverkit term ([43c1130](https://github.com/jordansmall/spindrift/commit/43c113071137b15ad58495c69fa3ee0a4c1183b1)), closes [#2149](https://github.com/jordansmall/spindrift/issues/2149)
+* **fakes:** pin the driver-exec backstop fake to its Go source ([79370eb](https://github.com/jordansmall/spindrift/commit/79370eb29f7e39e47367688127c1d8b5125bdb80))
+* **flake:** correct the settings shim comment ([1838f93](https://github.com/jordansmall/spindrift/commit/1838f9322e42b5e25460e5f34811202897ba9119))
+* **flake:** render the reference and template on the domain tree ([84e513a](https://github.com/jordansmall/spindrift/commit/84e513ae32f1510e1091ba48bba94f947d049241))
+* **flake:** tag the deprecated old flag name in the man page ([c5983ab](https://github.com/jordansmall/spindrift/commit/c5983ab203da989f62425b45d9335c6610965ff8))
+* **freshness:** refresh regression comments to name the Guard ([4aed1a0](https://github.com/jordansmall/spindrift/commit/4aed1a098c79671ecc41f9e91813d4d39fb00a97))
+* **local:** fix drifted comment and pin the tab escape ([614cc1c](https://github.com/jordansmall/spindrift/commit/614cc1c615db4dcad37f929e8777239731a7fae7))
+* **reference:** note --agents needs claude-code 2.1.204+ ([f3bc544](https://github.com/jordansmall/spindrift/commit/f3bc5448db6090bd7613a7c9fdc98c4e7f86eb72))
+* **reference:** soften the --agents claude-code version claim ([e62fc51](https://github.com/jordansmall/spindrift/commit/e62fc518663f802e88f106a5dbfddcf2b6839879))
+* **release:** cut the 0.9.0 release-notes section ([871eafa](https://github.com/jordansmall/spindrift/commit/871eafafcee598918b71764ff9cfbec5d441afcd))
+* **release:** note presence-style flag break ([150a316](https://github.com/jordansmall/spindrift/commit/150a31615ac88b237319ec5fb6d31f2ee88d7a33))
+* **schema:** correct --continuous-dispatch bool prose ([84eb3c5](https://github.com/jordansmall/spindrift/commit/84eb3c51bf30f69c6b957f30783a736c08f8ea82))
+* **usage:** rename Models to SummedByModel in opencode doc ([6b08d9e](https://github.com/jordansmall/spindrift/commit/6b08d9e38f786ec7d4cff748d33e9c14f6fce760))
+* **waves:** correct stale pre-[#2130](https://github.com/jordansmall/spindrift/issues/2130) landing-verification comments ([5fcb2f2](https://github.com/jordansmall/spindrift/commit/5fcb2f2e529e27cf212f00e6cae2e828e09a65ed))
+
+
+### Code Refactoring
+
+* **ab-orchestrator:** pass orchestrator flag in equals form ([1dc8e78](https://github.com/jordansmall/spindrift/commit/1dc8e785717dece6626854920a41b12ba4773461))
+* **check:** drop dead antecedent in disjoint guard ([aa875ac](https://github.com/jordansmall/spindrift/commit/aa875ac1ac2c23c914b1294f96d04efb486c7ece))
+* **claude:** source Driver substrate from driverkit ([4c12bea](https://github.com/jordansmall/spindrift/commit/4c12bea918b4b46fe00a84c333ad66160d3088e4)), closes [#2149](https://github.com/jordansmall/spindrift/issues/2149)
+* **dispatch:** move the Clock seam into the retry leaf ([651a10a](https://github.com/jordansmall/spindrift/commit/651a10aa4317cc3fa2dedfbbe56bef30c9182298))
+* **driver:** alias vocabulary to driverkit, drop casts ([059ce79](https://github.com/jordansmall/spindrift/commit/059ce79900ff1e501d115b39230f35911e9a5ebb)), closes [#2149](https://github.com/jordansmall/spindrift/issues/2149)
+* **entrypoint:** collapse the backstop to the outcome-backstop verb ([84dd3f5](https://github.com/jordansmall/spindrift/commit/84dd3f549e1daa11303c5d634208d9aae3fbecf6))
+* **flake:** collapse the nixPath scaffolding ([957723e](https://github.com/jordansmall/spindrift/commit/957723e233c8f20fc71890863e76ecfe747ae900)), closes [#2188](https://github.com/jordansmall/spindrift/issues/2188)
+* **flake:** extract structural paths to shared module ([6eb90a1](https://github.com/jordansmall/spindrift/commit/6eb90a1e4e06730e6b486b62a9946397582ab851))
+* **flake:** move the dogfood config onto the domain tree ([42105b6](https://github.com/jordansmall/spindrift/commit/42105b6888de526c04e1439ce5166023ae852897))
+* **forge:** collapse local containment into LandingContained ([a261045](https://github.com/jordansmall/spindrift/commit/a2610455a15a5449654e0cc5e514c65cb8be6c48))
+* **forge:** move SeedScope from waves to forge ([30fbed3](https://github.com/jordansmall/spindrift/commit/30fbed3f27596d325c957779083e6d4d41ea6388))
+* **launcher:** retire hand-rolled --continuous machinery ([abebe89](https://github.com/jordansmall/spindrift/commit/abebe898112672cf8ba6f40e324ea1cf3ca454e4))
+* **launcher:** route callers through SeedScopeResolver ([c6b4ba9](https://github.com/jordansmall/spindrift/commit/c6b4ba93e3e266f4832bb2a287b830ff50a746a9)), closes [#2135](https://github.com/jordansmall/spindrift/issues/2135)
+* **launcher:** route stale outcome through freshness.Guard ([64f3d1e](https://github.com/jordansmall/spindrift/commit/64f3d1e5f606f384282d2c61ac340e96527a2658))
+* **localloop:** add shared SeedScopeResolver helper ([872e4b0](https://github.com/jordansmall/spindrift/commit/872e4b0b57af162aceb32cc7bcc17def6a36230c)), closes [#2135](https://github.com/jordansmall/spindrift/issues/2135)
+* **opencode:** source Driver substrate from driverkit ([bdb293e](https://github.com/jordansmall/spindrift/commit/bdb293ef0c3b31f0356d0df2adbeccb4c32d692e)), closes [#2149](https://github.com/jordansmall/spindrift/issues/2149)
+* **orchestrator:** take role constants from driverkit ([5f0621d](https://github.com/jordansmall/spindrift/commit/5f0621da997bb84c5f29ace5655d9e46425c4125)), closes [#2149](https://github.com/jordansmall/spindrift/issues/2149)
+* **roster:** iterate normalizeRoster with imap0 ([51b5041](https://github.com/jordansmall/spindrift/commit/51b5041fc426a977ac9ca4abd5631c4a0d6ec05e))
+* **roster:** normalize resolvedRoster, drop fallbacks ([eab8bbb](https://github.com/jordansmall/spindrift/commit/eab8bbbd51b2f56b8e7e0ff9697d5c48ad9f0457))
+* **settle,dispatch:** trim linear-backoff call-site duplication ([b631393](https://github.com/jordansmall/spindrift/commit/b63139344684f4c2bd3802a58ca8f88692dfb49b))
+* **settle:** use retry.LinearBackoff for rebase-push backoff ([ac29cd3](https://github.com/jordansmall/spindrift/commit/ac29cd36e23abb9aab4ec180bd7c248dfa177789))
+* **usage:** centralize unknown-model literal, test empty id ([2dd58de](https://github.com/jordansmall/spindrift/commit/2dd58de4a52018e3c60d297858f7d6cff4215f0f))
+* **waves:** hold the seed-branch gate as an opaque SeedScope ([2d094bf](https://github.com/jordansmall/spindrift/commit/2d094bf855944f7bd4b676ed29dfe7446d15d2aa))
+* **waves:** rename resolver to seedScopeResolver ([a047411](https://github.com/jordansmall/spindrift/commit/a047411d0536776f449877d6df94e21032adec5e))
+
+
+### Tests
+
+* **dogfood:** pin the exit-code-5 host-taint halt ([5cbfe0f](https://github.com/jordansmall/spindrift/commit/5cbfe0f9141bf34358718a931e99927eb930847a))
+* **driver:** cover opencode adapter at the driver seam ([433d582](https://github.com/jordansmall/spindrift/commit/433d582e09e6471355e2381211653755711b3ddf)), closes [#2149](https://github.com/jordansmall/spindrift/issues/2149)
+* **launcher:** cover SeedScopeResolver and its queue wiring ([4303f31](https://github.com/jordansmall/spindrift/commit/4303f311807ccd541b690c6a031e41cd069b0aa4)), closes [#2135](https://github.com/jordansmall/spindrift/issues/2135)
+* **local:** pin the orphan tracker and bundle gaps ([8bc275d](https://github.com/jordansmall/spindrift/commit/8bc275de02b7962b215c6f5f2d2393d5d01101b6))
+* **opencode:** cover reviewer off-row rewrite; note awk fence coupling ([f13dd42](https://github.com/jordansmall/spindrift/commit/f13dd426ff1f54e11cbd78143b2ae5a81e375dfc))
+* **opencode:** pin near-miss outcome synthesis ([bc876f4](https://github.com/jordansmall/spindrift/commit/bc876f4ddd16e007faa5c8df0ebae068837798b3))
+* **runner:** skip OCI probes on an unusable runtime ([bde68bb](https://github.com/jordansmall/spindrift/commit/bde68bbe255947d5c5dff7018d97e0ed02499be5))
+* **usage:** cover opencode breakdownByModel error degrade ([0effab7](https://github.com/jordansmall/spindrift/commit/0effab7fe09dbd34ee038809a2c2c48d6ee3c902))
+
+
+### Build System
+
+* **image:** add outcomebackstop and retry to the driver-exec fileset ([8bb0fa2](https://github.com/jordansmall/spindrift/commit/8bb0fa2439ca270d77e42e7361850f49bea9a7d2))
+
 ## [0.8.0](https://github.com/jordansmall/spindrift/compare/v0.7.1...v0.8.0) (2026-07-29)
 
 
