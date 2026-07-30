@@ -16,7 +16,7 @@ func TestMatchedGuardPaths_HitReturnsMatchedFiles(t *testing.T) {
 // no-match, a deleted file's (still-reported) path, a nested CLAUDE.md, and
 // the empty-string opt-out that disables the guard entirely.
 func TestMatchedGuardPaths(t *testing.T) {
-	const defaultPaths = ".github/**,**/CLAUDE.md,**/AGENTS.md,.claude/**,.opencode/**"
+	const defaultPaths = ".github/**,.forgejo/**,**/CLAUDE.md,**/AGENTS.md,.claude/**,.opencode/**"
 
 	cases := []struct {
 		name  string
@@ -55,6 +55,12 @@ func TestMatchedGuardPaths(t *testing.T) {
 			paths: "",
 			files: []string{"CLAUDE.md", ".github/workflows/ci.yml"},
 			want:  nil,
+		},
+		{
+			name:  ".forgejo/ workflow matches — guarded on every backend",
+			paths: defaultPaths,
+			files: []string{".forgejo/workflows/ci.yml"},
+			want:  []string{".forgejo/workflows/ci.yml"},
 		},
 	}
 	for _, tc := range cases {
