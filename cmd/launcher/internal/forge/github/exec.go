@@ -13,6 +13,7 @@ type execClient struct {
 	verdictLabels forge.VerdictLabels
 	branchPrefix  string
 	mergeMethod   string // "", "merge", "squash", or "rebase"; "" behaves as "rebase" (mergeMethodFlag)
+	syncMethod    string // "", "rebase", or "merge"; "" behaves as "rebase"
 }
 
 // ExecOption configures an optional, construction-site-specific field on
@@ -35,6 +36,13 @@ func WithVerdictLabels(vl forge.VerdictLabels) ExecOption {
 // (mergeMethodFlag).
 func WithMergeMethod(method string) ExecOption {
 	return func(e *execClient) { e.mergeMethod = method }
+}
+
+// WithSyncMethod sets the git verb ("rebase" or "merge") Rebase uses to
+// bring a PR branch up to date with its base. Omitted (or an empty
+// string), it preserves today's rebase-only behavior byte-for-byte.
+func WithSyncMethod(method string) ExecOption {
+	return func(e *execClient) { e.syncMethod = method }
 }
 
 // NewExecClient returns the gh-exec adapter for the given repo slug, backed

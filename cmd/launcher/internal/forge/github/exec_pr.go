@@ -427,9 +427,11 @@ func (e *execClient) CreateLabel(name, description, color string) error {
 
 // Rebase checks out the PR's head branch into a temporary clone of the target
 // repository, rebases it onto origin/<base>, and force-pushes the result.
-// Returns ErrMergeConflict if the rebase cannot be completed automatically,
-// or an error wrapping ErrTransientPushFailure if the force-push fails for a
-// reason unrelated to the branch state (callers may retry).
+// When the client's sync method (WithSyncMethod) is "merge", it merges
+// origin/<base> in instead of rebasing onto it. Returns ErrMergeConflict if
+// the sync cannot be completed automatically, or an error wrapping
+// ErrTransientPushFailure if the force-push fails for a reason unrelated to
+// the branch state (callers may retry).
 func (e *execClient) Rebase(prURL string) error {
 	out, err := exec.Command("gh", "pr", "view", prURL,
 		"--json", "headRefName,baseRefName",
@@ -462,8 +464,12 @@ func (e *execClient) Rebase(prURL string) error {
 	if err := gitIn("checkout", head).Run(); err != nil {
 		return fmt.Errorf("git checkout %s: %w", head, err)
 	}
-	if err := gitIn("rebase", "origin/"+base).Run(); err != nil {
-		_ = gitIn("rebase", "--abort").Run()
+	syncVerb := "rebase"
+	if e.syncMethod == "merge" {
+		syncVerb = "merge"
+	}
+	if err := gitIn(syncVerb, "origin/"+base).Run(); err != nil {
+		_ = gitIn(syncVerb, "--abort").Run()
 		return forge.ErrMergeConflict
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), rebaseForcePushTimeout)
