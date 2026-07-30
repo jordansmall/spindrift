@@ -10,46 +10,55 @@ depending on how you use spindrift; it won't affect everyone.
 
 ---
 
-## Unreleased
+## 0.9.0 — 2026-07-30
 
-Boolean knobs are now presence-style flags.
+A consistency release. The same six-domain taxonomy (agents, git, issues, forge,
+dispatch, infra) now shapes the CLI flags, the `--help` output, and the Nix
+flake surface, so a knob's flag, help section, and flake path finally line up.
+Along the way, boolean flags became presence-style and two hard-coded merge
+steps became knobs.
 
-**⚠ Breaking changes**: the space-separated value form (`--flag 1`) is no
-longer accepted for the converted boolean flags.
+**⚠ Breaking changes** this release: the space-separated value form (`--flag 1`)
+no longer works for the converted boolean flags.
 
 - **⚠ Breaking: boolean flags are presence-style.** `--continuous-dispatch`,
   `--auto-format`, `--auto-lint`, `--local-issue-reference`,
   `--orchestrator-enabled`, `--preflight-stale-base`, `--bwrap-unshare-net`, and
   `--jira-include-comments` now turn on from the bare flag alone (e.g.
   `--auto-format`). The old space-separated value form (`--auto-format 1`) no
-  longer feeds the flag its value — the trailing `1` is left as a stray
-  positional arg; use the bare flag, or the explicit equals form to set either
-  direction (`--auto-format=1` on, `--auto-format=0` off).
-- **`--continuous` alias.** `--continuous-dispatch` is now one of these presence
-  flags, with `--continuous` as its bare-flag alias — `spindrift dispatch
+  longer feeds the flag its value; the trailing `1` is left as a stray
+  positional arg. Use the bare flag, or the explicit equals form to set either
+  direction (`--auto-format=1` on, `--auto-format=0` off). `--continuous-dispatch`
+  also picks up `--continuous` as a bare-flag alias, so `spindrift dispatch
   --continuous` turns on the slot-refill loop.
-
-CLI flags now group and read by domain.
-
-- **`--help`, the man page, and completions group by the six domains.**
-  `agents`, `git`, `issues`, `forge`, `dispatch`, and `infra` — the same
-  taxonomy the flake surface already uses (ADR 0037 Pass 2), so a knob's flag,
-  help section, and flake path finally agree.
-- **Several flags renamed to their domain leaf, old names deprecated.**
-  `--issue-tracker` → `--tracker`, `--code-forge` → `--forge-backend`,
+- **CLI flags group and read by domain.** `--help`, the man page, and shell
+  completions now group flags under the six domains (`agents`, `git`, `issues`,
+  `forge`, `dispatch`, `infra`), and several flags were renamed to their domain
+  leaf: `--issue-tracker` → `--tracker`, `--code-forge` → `--forge-backend`,
   `--code-forge-remote-url` → `--remote-url`,
   `--code-forge-accumulation-repo-dir` → `--accumulation-repo-dir`,
-  `--box-forge-and-issue-access` → `--box-access`,
-  `--merge-mode` → `--merge-policy`, `--git-user-name` → `--user-name`,
-  `--git-user-email` → `--user-email`, `--label` → `--dispatch-label`,
-  `--local-issues-dir` → `--local-dir`,
-  `--local-issue-reference` → `--local-reference`,
-  `--orchestrator-enabled` → `--orchestrator`,
-  `--spindrift-prompt-dir` → `--prompt-dir`,
-  `--spindrift-skills-dir` → `--skills-dir`. Every previous name keeps working
-  as a deprecated alias resolving to the same value (marked `(deprecated)` in
-  `--help --all`), so no dispatch script breaks; the aliases are removed at 1.0.
-  Env-var names are unchanged.
+  `--box-forge-and-issue-access` → `--box-access`, `--merge-mode` →
+  `--merge-policy`, `--git-user-name` → `--user-name`, `--git-user-email` →
+  `--user-email`, `--label` → `--dispatch-label`, `--local-issues-dir` →
+  `--local-dir`, `--local-issue-reference` → `--local-reference`,
+  `--orchestrator-enabled` → `--orchestrator`, `--spindrift-prompt-dir` →
+  `--prompt-dir`, and `--spindrift-skills-dir` → `--skills-dir`. Every old name
+  keeps working as a deprecated alias (marked `(deprecated)` in `--help --all`)
+  and is removed at 1.0, so no dispatch script breaks today. Env-var names are
+  unchanged.
+- **The Nix flake surface is a domain tree too.** `perSystem.spindrift.*` is
+  regrouped into the same six domains, so you configure a knob at its domain path
+  (e.g. `git.merge.policy`, `agents.models.filer`, `infra.image.packages`). Every
+  old `settings.<section>.<knob>` path still works, forwarded with a deprecation
+  warning to the identical result, so existing flake configs produce
+  byte-identical output.
+- **Configurable PR merge method.** A new `MERGE_METHOD` knob picks how a green
+  PR is integrated (`merge`, `squash`, or `rebase`), on both the immediate
+  merge-on-green and GitHub native auto-merge paths. It defaults to `rebase`, the
+  previous hard-coded behavior, so nothing changes until you set it.
+- **Configurable branch-sync method.** A companion `SYNC_METHOD` knob picks how a
+  behind PR branch is brought current before merge: `rebase` (the default,
+  unchanged) or `merge` to merge the base branch in instead.
 
 ---
 
