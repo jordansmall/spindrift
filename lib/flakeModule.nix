@@ -121,10 +121,7 @@ let
   # default, description) the flat option had before this slice.
   structuralTreeEntries = [
     {
-      path = [
-        "agents"
-        "driver"
-      ];
+      path = structuralPlacements.driver;
       opt = mkOption {
         # A plain string, not `types.enum`, so the lib/drivers/ registry (not
         # this option) stays the single source of truth for valid names —
@@ -136,10 +133,7 @@ let
       };
     }
     {
-      path = [
-        "agents"
-        "prompt"
-      ];
+      path = structuralPlacements.prompt;
       opt = mkOption {
         type = types.nullOr types.lines;
         default = null;
@@ -147,10 +141,7 @@ let
       };
     }
     {
-      path = [
-        "agents"
-        "skills"
-      ];
+      path = structuralPlacements.skills;
       opt = mkOption {
         type = types.nullOr (
           types.listOf (
@@ -175,11 +166,7 @@ let
       };
     }
     {
-      path = [
-        "agents"
-        "models"
-        "roster"
-      ];
+      path = structuralPlacements.roster;
       opt = mkOption {
         type = types.nullOr (types.listOf types.attrs);
         default = null;
@@ -197,10 +184,7 @@ let
       };
     }
     {
-      path = [
-        "infra"
-        "runtime"
-      ];
+      path = structuralPlacements.runtime;
       opt = mkOption {
         type = types.nullOr (
           types.enum [
@@ -215,11 +199,7 @@ let
       };
     }
     {
-      path = [
-        "infra"
-        "image"
-        "packages"
-      ];
+      path = structuralPlacements.packages;
       opt = mkOption {
         type = types.nullOr (types.functionTo (types.listOf types.package));
         default = null;
@@ -227,11 +207,7 @@ let
       };
     }
     {
-      path = [
-        "infra"
-        "image"
-        "prefetch"
-      ];
+      path = structuralPlacements.prefetch;
       opt = mkOption {
         type = types.nullOr types.lines;
         default = null;
@@ -239,11 +215,7 @@ let
       };
     }
     {
-      path = [
-        "infra"
-        "image"
-        "extraClosures"
-      ];
+      path = structuralPlacements.extraClosures;
       opt = mkOption {
         type = types.nullOr (types.functionTo (types.listOf types.package));
         default = null;
@@ -256,11 +228,7 @@ let
       };
     }
     {
-      path = [
-        "infra"
-        "nix"
-        "inBox"
-      ];
+      path = structuralPlacements.nixInBox;
       opt = mkOption {
         type = types.nullOr types.bool;
         default = null;
@@ -273,11 +241,7 @@ let
       };
     }
     {
-      path = [
-        "infra"
-        "nix"
-        "storeWritable"
-      ];
+      path = structuralPlacements.nixStoreWritable;
       opt = mkOption {
         type = types.nullOr types.bool;
         default = null;
@@ -293,10 +257,7 @@ let
       };
     }
     {
-      path = [
-        "infra"
-        "nixpkgs"
-      ];
+      path = structuralPlacements.nixpkgs;
       opt = mkOption {
         type = types.nullOr types.raw;
         default = null;
@@ -304,10 +265,7 @@ let
       };
     }
     {
-      path = [
-        "infra"
-        "overlays"
-      ];
+      path = structuralPlacements.overlays;
       opt = mkOption {
         type = types.nullOr (types.listOf types.raw);
         default = null;
@@ -315,10 +273,7 @@ let
       };
     }
     {
-      path = [
-        "infra"
-        "config"
-      ];
+      path = structuralPlacements.config;
       opt = mkOption {
         type = types.nullOr types.attrs;
         default = null;
@@ -334,66 +289,7 @@ let
   # moved to (slice 2's placement map), keyed by the flat option name — used
   # both to declare the deprecation-shim options and to resolve the
   # new-wins-old precedence in config.perSystem below.
-  structuralPlacements = {
-    driver = [
-      "agents"
-      "driver"
-    ];
-    prompt = [
-      "agents"
-      "prompt"
-    ];
-    skills = [
-      "agents"
-      "skills"
-    ];
-    roster = [
-      "agents"
-      "models"
-      "roster"
-    ];
-    runtime = [
-      "infra"
-      "runtime"
-    ];
-    packages = [
-      "infra"
-      "image"
-      "packages"
-    ];
-    prefetch = [
-      "infra"
-      "image"
-      "prefetch"
-    ];
-    extraClosures = [
-      "infra"
-      "image"
-      "extraClosures"
-    ];
-    nixInBox = [
-      "infra"
-      "nix"
-      "inBox"
-    ];
-    nixStoreWritable = [
-      "infra"
-      "nix"
-      "storeWritable"
-    ];
-    nixpkgs = [
-      "infra"
-      "nixpkgs"
-    ];
-    overlays = [
-      "infra"
-      "overlays"
-    ];
-    config = [
-      "infra"
-      "config"
-    ];
-  };
+  structuralPlacements = import ./structural-paths.nix;
 in
 {
   options.perSystem = flake-parts-lib.mkPerSystemOption {
