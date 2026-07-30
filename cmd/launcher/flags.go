@@ -103,7 +103,7 @@ type flagEntry struct {
 	doc             string // one-line description from env-schema.nix
 	dflt            string // baked-in default as a string; empty when there is none
 	group           string // category heading for the full reference (from env-schema.nix)
-	settingsPath    string // domain-tree flake path (the knob's nixPath, e.g. git.merge.policy); empty for a non-flakeOption knob
+	settingsPath    string // domain-tree flake path (the knob's derived flake path, e.g. git.merge.policy); empty for a non-flakeOption knob
 	deprecatedAlias string // deprecated old flag name (env-derived kebab); empty unless the knob's canonical flag was renamed (ADR 0037 Pass 2)
 }
 

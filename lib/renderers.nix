@@ -27,11 +27,13 @@ let
   toUpper = builtins.replaceStrings (chars "abcdefghijklmnopqrstuvwxyz") (
     chars "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
   );
-  # Schema entry nixPath (e.g. "git.merge.policy") -> its dot-separated
-  # segments. Shared by renderTemplateSettingsBlock (builds the nested
-  # domain-tree example) and renderFlakeOptionsDoc (groups by the first
+  # A resolved flake path (e.g. "git.merge.policy", derived by resolveNixPath
+  # from a knob's group + optional nixSubPath — lib/nixpath.nix) -> its
+  # dot-separated segments. Shared by renderTemplateSettingsBlock (builds the
+  # nested domain-tree example) and renderFlakeOptionsDoc (groups by the first
   # segment, the domain) — ADR 0037.
   splitNixPath = path: builtins.filter builtins.isString (builtins.split "\\." path);
+  resolveNixPath = import ./nixpath.nix;
 in
 rec {
   # Env var name -> flag name (e.g. MAX_PARALLEL -> max-parallel). Shared by
@@ -145,7 +147,8 @@ rec {
 
   # The generated portion of templates/default/flake.nix's commented settings
   # example, between its BEGIN/END GENERATED SETTINGS EXAMPLE markers: every
-  # flakeOption knob, rendered as a nested domain tree keyed by its nixPath
+  # flakeOption knob, rendered as a nested domain tree keyed by its derived
+  # flake path (group + optional nixSubPath — lib/nixpath.nix)
   # (ADR 0037; issue #2179 — supersedes the flat groupToAttr/groupOrder
   # `settings = { ... }` shape), with its doc string, so a new knob is
   # discoverable in the template without a hand-edit (issue #520).
@@ -171,8 +174,9 @@ rec {
           "\"${e.placeholder or ""}\""
         else
           "\"\"";
-      # Insert one schema entry into the nested domain tree at its nixPath,
-      # e.g. "agents.models.filer" -> tree.agents.models.filer. Each leaf is
+      # Insert one schema entry into the nested domain tree at its derived
+      # flake path, e.g. "agents.models.filer" -> tree.agents.models.filer.
+      # Each leaf is
       # tagged (__leaf) so renderNode below can tell a schema entry apart
       # from a plain namespace node, even though both are attrsets.
       insertLeaf =
@@ -192,7 +196,8 @@ rec {
         else
           tree // { ${seg} = insertLeaf (tree.${seg} or { }) rest entry; };
       domainTree = builtins.foldl' (
-        acc: key: insertLeaf acc (splitNixPath flakeOptionEntries.${key}.nixPath) flakeOptionEntries.${key}
+        acc: key:
+        insertLeaf acc (splitNixPath (resolveNixPath key flakeOptionEntries.${key})) flakeOptionEntries.${key}
       ) { } (builtins.attrNames flakeOptionEntries);
       # 2 spaces per depth level; children are ordered by attribute name
       # (mapAttrsToList walks builtins.attrNames, which sorts).
@@ -295,13 +300,14 @@ rec {
       secretSchema = filterAttrs (_: e: (e.secret or false)) schema;
       flagAlias = e: if e ? alias then ", alias: \"${e.alias}\"" else "";
       flagDeprecatedAlias = e: if e ? flag then ", deprecatedAlias: \"${toKebab e.env}\"" else "";
-      # The knob's domain-tree nixPath (e.g. "git.merge.policy") — the flake
-      # surface is now the domain tree (ADR 0037 Pass 1), so the settings
-      # path IS the knob's nixPath — the provenance warning's second
-      # migration target (ADR 0020), alongside the flag every non-secret
-      # knob already carries. Empty for a knob with no flake-settings
-      # surface (e.g. ISSUE_NUMBER, SPINDRIFT_PROMPT_DIR).
-      flagSettingsPath = _key: e: if e.flakeOption or false then e.nixPath else "";
+      # The knob's derived domain-tree flake path (e.g. "git.merge.policy",
+      # via resolveNixPath — lib/nixpath.nix) — the flake surface is now the
+      # domain tree (ADR 0037 Pass 1), so the settings path IS the knob's
+      # derived flake path — the provenance warning's second migration
+      # target (ADR 0020), alongside the flag every non-secret knob already
+      # carries. Empty for a knob with no flake-settings surface (e.g.
+      # ISSUE_NUMBER, SPINDRIFT_PROMPT_DIR).
+      flagSettingsPath = key: e: if e.flakeOption or false then resolveNixPath key e else "";
       # Every non-secret knob must declare a group so the full reference groups
       # it under a heading; a missing group is a schema error, not a silent "".
       ungrouped = mapAttrsToList (k: _: k) (filterAttrs (_: e: !(e ? group)) nonSecretSchema);
@@ -345,7 +351,7 @@ rec {
 
   # Domain section order for docs/flake-options.md and
   # renderTemplateSettingsBlock's nested domain tree (ADR 0037): the first
-  # segment of each flakeOption knob's nixPath.
+  # segment of each flakeOption knob's derived flake path (its `group`).
   domainOrder = [
     "agents"
     "git"
@@ -360,19 +366,23 @@ rec {
     schema:
     let
       flakeOptionEntries = filterAttrs (_: e: e.flakeOption or false) schema;
-      domainOf = e: builtins.head (splitNixPath e.nixPath);
-      domainKnobs =
-        domain: builtins.filter (e: domainOf e == domain) (builtins.attrValues flakeOptionEntries);
+      flakeOptionNames = builtins.attrNames flakeOptionEntries;
+      domainKnobs = domain: builtins.filter (n: flakeOptionEntries.${n}.group == domain) flakeOptionNames;
       renderDefault = entry: if entry ? default then "`${toString entry.default}`" else "—";
       capitalize =
         s: toUpper (builtins.substring 0 1 s) + builtins.substring 1 (builtins.stringLength s) s;
       renderRow =
-        entry:
-        "| `perSystem.spindrift.${entry.nixPath}` | `${entry.env}` | ${renderDefault entry} | ${entry.doc} |\n";
+        name:
+        let
+          entry = flakeOptionEntries.${name};
+        in
+        "| `perSystem.spindrift.${resolveNixPath name entry}` | `${entry.env}` | ${renderDefault entry} | ${entry.doc} |\n";
       renderSection =
         domain:
         let
-          knobs = builtins.sort (a: b: a.nixPath < b.nixPath) (domainKnobs domain);
+          knobs = builtins.sort (
+            a: b: resolveNixPath a flakeOptionEntries.${a} < resolveNixPath b flakeOptionEntries.${b}
+          ) (domainKnobs domain);
         in
         if knobs == [ ] then
           ""

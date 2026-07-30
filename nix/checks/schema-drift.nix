@@ -51,6 +51,7 @@ let
     schema;
 
   structuralPaths = import ../../lib/structural-paths.nix;
+  resolveNixPath = import ../../lib/nixpath.nix;
 
   # Uniqueness + prefix-disjointness predicate over a flat list of dotted
   # nixPath strings, factored (like schemaChoiceIssues) so the guard can be
@@ -837,36 +838,43 @@ in
         touch $out
       '';
 
-  # ADR 0037 Pass 1 (issue #2179): every flakeOption = true knob must declare
-  # a Nix-only `nixPath` — its dotted leaf in the flake surface's domain tree
-  # — and every declared nixPath must be unique and prefix-disjoint from
-  # every other one, so no leaf can collide with (or nest inside) another
-  # knob's namespace.
+  # ADR 0037 Pass 2 (issue #2188): the flake path is derived, not stored —
+  # every flakeOption = true knob must declare a non-empty string `group`
+  # (the domain segment), and lib/nixpath.nix's resolveNixPath combines it
+  # with the knob's optional `nixSubPath` (defaulting to the knob's own
+  # schema key) to produce its dotted leaf in the flake surface's domain
+  # tree. This check asserts every flakeOption knob has a usable `group` and
+  # that all derived paths — folded together with the structural domain-tree
+  # paths — are unique and prefix-disjoint, so no leaf can collide with (or
+  # nest inside) another knob's namespace.
   flake-nixpath-exhaustive-disjoint =
     let
       inherit (pkgs.lib)
         assertMsg
+        attrNames
         attrValues
         filter
         concatStringsSep
         ;
-      flakeOptionEntries = filter (e: e.flakeOption or false) (attrValues schema);
-      missingNixPath = filter (
-        e: !(e ? nixPath) || !builtins.isString e.nixPath || e.nixPath == ""
-      ) flakeOptionEntries;
       # Fold the structural domain-tree paths into the same disjointness set:
       # both flakeOption leaves and structural leaves are merged into one tree
       # by buildTree at flake eval (lib/flakeModule.nix), so a cross-set prefix
       # collision is just as fatal — catch it here as a clear error instead of
       # an opaque buildTree throw (issue #2184).
+      flakeOptionNames = filter (n: schema.${n}.flakeOption or false) (attrNames schema);
+      missingGroup = filter (
+        n:
+        let
+          e = schema.${n};
+        in
+        !(e ? group) || !builtins.isString e.group || e.group == ""
+      ) flakeOptionNames;
       allNixPaths =
-        (map (e: e.nixPath) flakeOptionEntries)
+        (map (n: resolveNixPath n schema.${n}) flakeOptionNames)
         ++ (map (segs: concatStringsSep "." segs) (attrValues structuralPaths));
     in
-    assert assertMsg (missingNixPath == [ ])
-      "lib/env-schema.nix: every flakeOption knob must declare a non-empty nixPath (ADR 0037): ${
-        concatStringsSep ", " (map (e: e.env) missingNixPath)
-      }";
+    assert assertMsg (missingGroup == [ ])
+      "lib/env-schema.nix: every flakeOption knob must declare a non-empty group (ADR 0037 Pass 2): ${concatStringsSep ", " missingGroup}";
     assert (assertNixPathsOk allNixPaths) == allNixPaths;
     pkgs.runCommand "flake-nixpath-exhaustive-disjoint" { } "touch $out";
 
@@ -883,13 +891,14 @@ in
     let
       inherit (pkgs.lib)
         assertMsg
+        attrNames
         attrValues
         filter
         concatStringsSep
         ;
-      flakeOptionEntries = filter (e: e.flakeOption or false) (attrValues schema);
+      flakeOptionNames = filter (n: schema.${n}.flakeOption or false) (attrNames schema);
       realNixPaths =
-        (map (e: e.nixPath) flakeOptionEntries)
+        (map (n: resolveNixPath n schema.${n}) flakeOptionNames)
         ++ (map (segs: concatStringsSep "." segs) (attrValues structuralPaths));
       # "agents.driver" is a real structural leaf; a knob landing under it
       # would collide — exactly the latent cross-set failure this guards.

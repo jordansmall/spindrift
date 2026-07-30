@@ -56,8 +56,8 @@ func TestLoadInputDocument_InvalidJSON(t *testing.T) {
 // TestWarnAmbientKnobEnv_WarnsWithFlagAndSettingsEquivalent proves a knob
 // env var present in the environment produces one warning naming the
 // variable, its flag equivalent, and its domain-tree path (the knob's
-// nixPath, ADR 0037 Pass 2) — ADR 0020's provenance requirement — when the
-// knob is flakeOption-backed.
+// derived flake path, ADR 0037 Pass 2) — ADR 0020's provenance requirement —
+// when the knob is flakeOption-backed.
 func TestWarnAmbientKnobEnv_WarnsWithFlagAndSettingsEquivalent(t *testing.T) {
 	t.Cleanup(func() { os.Unsetenv("BASE_BRANCH") })
 	orig := schemaFlags
