@@ -2378,9 +2378,9 @@ schema as `--help` and the man page: subcommands (`dispatch`, `research`,
 `preview`, `build`, `recover`, `doctor`) complete as the first word, every
 flag (including the `--issue` alias and the secret `--*-file` flags) completes
 anywhere after it, a `--*-file` flag's argument completes as a filesystem path,
-and an enumerable flag's argument (`--merge-mode`, `--code-forge`,
-`--issue-tracker`, `--overlap-gate`) completes to its fixed set of legal values
-(e.g. `--merge-mode <TAB>` offers `immediate auto manual`).
+and an enumerable flag's argument (`--merge-policy`, `--forge-backend`,
+`--tracker`, `--overlap-gate`) completes to its fixed set of legal values
+(e.g. `--merge-policy <TAB>` offers `immediate auto manual`).
 
 `dispatch`, `preview`, and `recover` additionally complete their positional
 issue-number argument dynamically: `spindrift dispatch <TAB>` queries the

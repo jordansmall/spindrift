@@ -1,5 +1,5 @@
 # Shared render functions for the artifacts generated from lib/env-schema.nix,
-# and the owner of the flag-group section taxonomy (groupOrder/groupToAttr).
+# and the owner of the flag-group section taxonomy (groupOrder).
 # nix/checks/schema-drift.nix (drift guards) and nix/regen.nix (the one-shot
 # regenerator, `nix run .#regen`) call these — one renderer per artifact — so
 # the guard and the regenerator can never drift from each other (issue #402).
@@ -38,12 +38,25 @@ rec {
   # every renderer and check that prints or greps for a flag name.
   toKebab = env: toLower (builtins.replaceStrings [ "_" ] [ "-" ] env);
 
+  # ADR 0037 Pass 2: a knob's canonical CLI flag is its `flag` override when
+  # set, else its env-derived kebab name. When `flag` is set, the env-derived
+  # name (toKebab env) is retained as a *deprecated* alias so operator scripts
+  # using the old flag keep working until 1.0. `alias` stays the knob's
+  # optional live short-form alias (e.g. --issue for --issue-number).
+  flagName = e: e.flag or (toKebab e.env);
+  deprecatedFlagAliases = e: if e ? flag then [ (toKebab e.env) ] else [ ];
+  liveFlagAliases = e: if e ? alias then [ e.alias ] else [ ];
+  # Non-canonical forms (live alias then deprecated old name) for renderers
+  # that list secondary forms; all forms (canonical first) for case patterns.
+  secondaryFlagNames = e: liveFlagAliases e ++ deprecatedFlagAliases e;
+  allFlagNames = e: [ (flagName e) ] ++ secondaryFlagNames e;
+
   # Schema entry -> the case-arm flag patterns for a choices knob: its
-  # canonical --<kebab> name, plus --<alias> when present (issue #874).
-  # Shared by renderBashCompletion/renderZshCompletion's choicesFlagBranch,
-  # since bash/zsh `case` patterns are the same `|`-joined syntax.
-  choicesFlagPatterns =
-    e: [ "--${toKebab e.env}" ] ++ (if e ? alias then [ "--${e.alias}" ] else [ ]);
+  # canonical --<name> flag, plus every secondary form (live --<alias> and/or
+  # deprecated --<old-name>). Shared by renderBashCompletion/
+  # renderZshCompletion's choicesFlagBranch, since bash/zsh `case` patterns
+  # are the same `|`-joined syntax.
+  choicesFlagPatterns = e: map (n: "--${n}") (allFlagNames e);
 
   # Schema entry -> the type token the flag table and man page print.
   # A knob opts into the presence-style bool kind explicitly, with `kind =
@@ -70,19 +83,17 @@ rec {
   flagDflt = e: if e ? default then builtins.toString e.default else "";
 
   # Display order for the full flag reference (man page OPTIONS groups,
-  # flake-options.md sections). cmd/launcher/flags.go carries its own copy
-  # (Go stays hand-written per issue #105); nix/checks/schema-drift.nix's
-  # launcher-grouporder check pins it against this list.
+  # flake-options.md sections): the six domains (ADR 0037). cmd/launcher/
+  # flags.go carries its own copy (Go stays hand-written per issue #105);
+  # nix/checks/schema-drift.nix's launcher-grouporder check pins it against
+  # this list.
   groupOrder = [
-    "Issue discovery"
-    "Lifecycle labels"
-    "Branches & merge"
-    "Concurrency & dependency waves"
-    "Models"
-    "Self-healing & retries"
-    "Sandbox & resources"
-    "Repository & identity"
-    "Prompt & skill iteration"
+    "agents"
+    "git"
+    "issues"
+    "forge"
+    "dispatch"
+    "infra"
   ];
 
   # Subcommands that take a positional issue-number argument spindrift can
@@ -101,18 +112,6 @@ rec {
   issueCompletionSubcommands =
     subcommandRegistry:
     map (s: s.name) (builtins.filter (s: s.dynamicIssueCompletion or false) subcommandRegistry);
-
-  groupToAttr = {
-    "Issue discovery" = "issueDiscovery";
-    "Lifecycle labels" = "lifecycleLabels";
-    "Branches & merge" = "branches";
-    "Concurrency & dependency waves" = "concurrency";
-    "Models" = "models";
-    "Self-healing & retries" = "selfHealing";
-    "Sandbox & resources" = "sandbox";
-    "Repository & identity" = "repository";
-    "Prompt & skill iteration" = "promptSkillIteration";
-  };
 
   # tests/box_env_gen.bash content: a set_box_env bash function exporting
   # every boxEnv = true schema knob at its schema default, or its placeholder
@@ -295,13 +294,14 @@ rec {
       nonSecretSchema = filterAttrs (_: e: !(e.secret or false)) schema;
       secretSchema = filterAttrs (_: e: (e.secret or false)) schema;
       flagAlias = e: if e ? alias then ", alias: \"${e.alias}\"" else "";
-      # settings.<section>.<knob> attr path for a Consumer-tunable knob, or ""
-      # for a knob with no flake-settings surface (e.g. ISSUE_NUMBER,
-      # SPINDRIFT_PROMPT_DIR) — the provenance warning's second migration
-      # target (ADR 0020), alongside the flag every non-secret knob already
-      # carries.
-      flagSettingsPath =
-        key: e: if e.flakeOption or false then "settings.${groupToAttr.${e.group}}.${key}" else "";
+      flagDeprecatedAlias = e: if e ? flag then ", deprecatedAlias: \"${toKebab e.env}\"" else "";
+      # The knob's domain-tree nixPath (e.g. "git.merge.policy") — the flake
+      # surface is now the domain tree (ADR 0037 Pass 1), so the settings
+      # path IS the knob's nixPath — the provenance warning's second
+      # migration target (ADR 0020), alongside the flag every non-secret
+      # knob already carries. Empty for a knob with no flake-settings
+      # surface (e.g. ISSUE_NUMBER, SPINDRIFT_PROMPT_DIR).
+      flagSettingsPath = _key: e: if e.flakeOption or false then e.nixPath else "";
       # Every non-secret knob must declare a group so the full reference groups
       # it under a heading; a missing group is a schema error, not a silent "".
       ungrouped = mapAttrsToList (k: _: k) (filterAttrs (_: e: !(e ? group)) nonSecretSchema);
@@ -312,7 +312,7 @@ rec {
           concatStrings (
             mapAttrsToList (
               key: e:
-              "\t{env: \"${e.env}\", flag: \"${toKebab e.env}\", group: \"${e.group}\"${flagAlias e}, kind: \"${flagKind e}\", doc: \"${e.doc}\", dflt: \"${flagDflt e}\", settingsPath: \"${flagSettingsPath key e}\"},\n"
+              "\t{env: \"${e.env}\", flag: \"${flagName e}\", group: \"${e.group}\"${flagAlias e}${flagDeprecatedAlias e}, kind: \"${flagKind e}\", doc: \"${e.doc}\", dflt: \"${flagDflt e}\", settingsPath: \"${flagSettingsPath key e}\"},\n"
             ) nonSecretSchema
           );
       secretRows = concatStrings (
@@ -424,8 +424,8 @@ rec {
         "--version"
         "--secret-cmd"
       ];
-      knobFlags = map (e: "--" + toKebab e.env) nonSecret;
-      aliasFlags = map (e: "--" + e.alias) (builtins.filter (e: e ? alias) nonSecret);
+      knobFlags = map (e: "--" + flagName e) nonSecret;
+      aliasFlags = builtins.concatMap (e: map (n: "--" + n) (secondaryFlagNames e)) nonSecret;
       fileFlags = map (e: "--" + toKebab e.env + "-file") secretEntries;
       cmdFlags = map (e: "--" + toKebab e.env + "-cmd") secretEntries;
       allFlags = builtins.concatStringsSep " " (
@@ -572,12 +572,12 @@ rec {
       choicesArgs = e: " -x -a '${builtins.concatStringsSep " " e.choices}'";
       flagArgs = e: if e ? choices then choicesArgs e else "";
       knobCompletions = builtins.concatStringsSep "\n" (
-        map (e: "complete -c spindrift -l ${toKebab e.env} -d \"${e.doc}\"${flagArgs e}") nonSecret
+        map (e: "complete -c spindrift -l ${flagName e} -d \"${e.doc}\"${flagArgs e}") nonSecret
       );
       aliasCompletions = builtins.concatStringsSep "\n" (
-        map (e: "complete -c spindrift -l ${e.alias} -d \"${e.doc}\"") (
-          builtins.filter (e: e ? alias) nonSecret
-        )
+        builtins.concatMap (
+          e: map (n: "complete -c spindrift -l ${n} -d \"${e.doc}\"${flagArgs e}") (secondaryFlagNames e)
+        ) nonSecret
       );
       fileCompletions = builtins.concatStringsSep "\n" (
         map (e: "complete -c spindrift -l ${toKebab e.env}-file -r -F -d \"${e.doc}\"") secretEntries
@@ -636,8 +636,8 @@ rec {
       # inserts is never re-escaped — hence backslash first).
       zshEsc = s: builtins.replaceStrings [ "\\" "'" ] [ "\\\\" "'\\''" ] s;
       subcommandSpecs = map (s: "    '${s.name}:${zshEsc s.doc}'\n") subcommands;
-      knobSpec = e: "    '--${toKebab e.env}:${zshEsc e.doc}'\n";
-      aliasSpec = e: "    '--${e.alias}:${zshEsc e.doc}'\n";
+      knobSpec = e: "    '--${flagName e}:${zshEsc e.doc}'\n";
+      secondarySpec = e: concatStrings (map (n: "    '--${n}:${zshEsc e.doc}'\n") (secondaryFlagNames e));
       fileSpec = e: "    '--${toKebab e.env}-file:${zshEsc e.doc}'\n";
       cmdSpec = e: "    '--${toKebab e.env}-cmd:${zshEsc e.doc}'\n";
       fileFlags = map (e: "--" + toKebab e.env + "-file") secretEntries;
@@ -652,7 +652,7 @@ rec {
       ];
       allFlagSpecs = concatStrings (
         map knobSpec nonSecret
-        ++ map aliasSpec (builtins.filter (e: e ? alias) nonSecret)
+        ++ map secondarySpec nonSecret
         ++ map fileSpec secretEntries
         ++ map cmdSpec secretEntries
         ++ extraFlagSpecs
@@ -775,8 +775,7 @@ rec {
       optionBlock =
         e:
         let
-          names =
-            "\\-\\-" + escFlag (toKebab e.env) + (if e ? alias then ", \\-\\-" + escFlag e.alias else "");
+          names = builtins.concatStringsSep ", " (map (n: "\\-\\-" + escFlag n) (allFlagNames e));
           dflt = flagDflt e;
           dfltSentence = if dflt == "" then "No default." else "Default: " + esc dflt + ".";
           # A presence-style bool flag takes no value, so render its name with

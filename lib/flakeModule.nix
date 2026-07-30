@@ -16,14 +16,69 @@ let
   inherit (lib) mkOption types;
   mkHarness = import ./mkHarness.nix;
   schema = import ./env-schema.nix;
-  renderers = import ./renderers.nix;
   # flakeOption entries are the Consumer-tunable subset.
   flakeOptionEntries = lib.filterAttrs (_: e: e.flakeOption or false) schema;
 
-  # Map from groupOrder heading to the attr name used under
-  # perSystem.spindrift.settings. Sections with no flakeOption knobs (Prompt &
-  # skill iteration) are silently skipped when rendering.
-  inherit (renderers) groupToAttr;
+  # Frozen snapshot (ADR 0037 Pass 2): each flakeOption knob's original
+  # ADR-0015-era `settings.<section>` attr name. Pass 2 re-cut the schema
+  # `group` field to domains, so the legacy section name can no longer be
+  # derived from `group`; this frozen map preserves the exact deprecated
+  # `perSystem.spindrift.settings.<section>.<knob>` alias spelling until the
+  # whole legacy surface is removed at 1.0.
+  legacySettingsSection = {
+    autoFormat = "promptSkillIteration";
+    autoLint = "promptSkillIteration";
+    baseBranch = "branches";
+    boxForgeAndIssueAccess = "repository";
+    branchPrefix = "branches";
+    bwrapUnshareNet = "sandbox";
+    codeForge = "repository";
+    codeForgeAccumulationRepoDir = "repository";
+    codeForgeRemoteURL = "repository";
+    completeLabel = "lifecycleLabels";
+    continuousDispatch = "concurrency";
+    devShellName = "sandbox";
+    devShellProbeTimeout = "sandbox";
+    failedLabel = "lifecycleLabels";
+    filerModel = "models";
+    ghTokenRefreshFile = "repository";
+    gitUserEmail = "repository";
+    gitUserName = "repository";
+    holdJitterSecs = "selfHealing";
+    inProgressLabel = "lifecycleLabels";
+    issueTracker = "issueDiscovery";
+    jiraBaseURL = "repository";
+    jiraEmail = "repository";
+    jiraIncludeComments = "issueDiscovery";
+    jiraProjectKey = "repository";
+    jiraStatusMapping = "lifecycleLabels";
+    label = "issueDiscovery";
+    localIssueReference = "issueDiscovery";
+    localIssuesDir = "issueDiscovery";
+    maxBudgetTokens = "selfHealing";
+    maxBudgetUSD = "selfHealing";
+    maxFixAttempts = "selfHealing";
+    maxJobs = "concurrency";
+    maxParallel = "concurrency";
+    maxRebaseAttempts = "selfHealing";
+    memoryLimit = "sandbox";
+    mergeGuardPaths = "branches";
+    mergeMode = "branches";
+    mergePollInterval = "branches";
+    mergePollTimeout = "branches";
+    model = "models";
+    orchestratorEnabled = "promptSkillIteration";
+    overlapGate = "concurrency";
+    pidsLimit = "sandbox";
+    podmanNetwork = "sandbox";
+    preflightStaleBase = "selfHealing";
+    repoSlug = "repository";
+    reviewModel = "models";
+    scoutModel = "models";
+    transientBackoffSecs = "selfHealing";
+    transientRetryMax = "selfHealing";
+    workerModel = "models";
+  };
 
   # Group flakeOptionEntries by their section attr name; the result is
   # { sectionAttr = { knobName = entry; ... }; ... }.
@@ -31,7 +86,7 @@ let
     acc: knobName:
     let
       entry = flakeOptionEntries.${knobName};
-      sectionAttr = groupToAttr.${entry.group} or null;
+      sectionAttr = legacySettingsSection.${knobName} or null;
     in
     if sectionAttr == null then
       acc
@@ -482,7 +537,7 @@ in
           key: entry:
           let
             newVal = lib.attrByPath (lib.splitString "." entry.nixPath) null cfg;
-            sectionAttr = groupToAttr.${entry.group} or null;
+            sectionAttr = legacySettingsSection.${key} or null;
             oldVal = if sectionAttr == null then null else cfg.settings.${sectionAttr}.${key} or null;
           in
           if newVal != null then

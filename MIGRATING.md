@@ -27,35 +27,35 @@ idiom; set it in `flake.nix` `settings` instead.
 | `BASE_BRANCH` | `--base-branch` | `settings.branches.baseBranch` |
 | `BRANCH_PREFIX` | `--branch-prefix` | `settings.branches.branchPrefix` |
 | `BWRAP_UNSHARE_NET` | `--bwrap-unshare-net` | `settings.sandbox.bwrapUnshareNet` |
-| `CODE_FORGE` | `--code-forge` | `settings.repository.codeForge` |
-| `CODE_FORGE_REMOTE_URL` | `--code-forge-remote-url` | `settings.repository.codeForgeRemoteURL` |
+| `CODE_FORGE` | `--forge-backend` | `settings.repository.codeForge` |
+| `CODE_FORGE_REMOTE_URL` | `--remote-url` | `settings.repository.codeForgeRemoteURL` |
 | `COMPLETE_LABEL` | `--complete-label` | `settings.lifecycleLabels.completeLabel` |
 | `CONTINUOUS_DISPATCH` | `--continuous-dispatch` | `settings.concurrency.continuousDispatch` |
 | `DEV_SHELL_NAME` | `--dev-shell-name` | `settings.sandbox.devShellName` |
 | `DEV_SHELL_PROBE_TIMEOUT` | `--dev-shell-probe-timeout` | `settings.sandbox.devShellProbeTimeout` |
 | `FAILED_LABEL` | `--failed-label` | `settings.lifecycleLabels.failedLabel` |
 | `FILER_MODEL` | `--filer-model` | `settings.models.filerModel` |
-| `GIT_USER_EMAIL` | `--git-user-email` | `settings.repository.gitUserEmail` |
-| `GIT_USER_NAME` | `--git-user-name` | `settings.repository.gitUserName` |
+| `GIT_USER_EMAIL` | `--user-email` | `settings.repository.gitUserEmail` |
+| `GIT_USER_NAME` | `--user-name` | `settings.repository.gitUserName` |
 | `HOLD_JITTER_SECS` | `--hold-jitter-secs` | `settings.selfHealing.holdJitterSecs` |
 | `IN_PROGRESS_LABEL` | `--in-progress-label` | `settings.lifecycleLabels.inProgressLabel` |
 | `ISSUE_NUMBER` | `--issue-number` | — |
-| `ISSUE_TRACKER` | `--issue-tracker` | `settings.issueDiscovery.issueTracker` |
+| `ISSUE_TRACKER` | `--tracker` | `settings.issueDiscovery.issueTracker` |
 | `JIRA_BASE_URL` | `--jira-base-url` | `settings.repository.jiraBaseURL` |
 | `JIRA_EMAIL` | `--jira-email` | `settings.repository.jiraEmail` |
 | `JIRA_INCLUDE_COMMENTS` | `--jira-include-comments` | `settings.issueDiscovery.jiraIncludeComments` |
 | `JIRA_PROJECT_KEY` | `--jira-project-key` | `settings.repository.jiraProjectKey` |
 | `JIRA_STATUS_MAPPING` | `--jira-status-mapping` | `settings.lifecycleLabels.jiraStatusMapping` |
-| `LABEL` | `--label` | `settings.issueDiscovery.label` |
-| `LOCAL_ISSUES_DIR` | `--local-issues-dir` | `settings.issueDiscovery.localIssuesDir` |
-| `LOCAL_ISSUE_REFERENCE` | `--local-issue-reference` | `settings.issueDiscovery.localIssueReference` |
+| `LABEL` | `--dispatch-label` | `settings.issueDiscovery.label` |
+| `LOCAL_ISSUES_DIR` | `--local-dir` | `settings.issueDiscovery.localIssuesDir` |
+| `LOCAL_ISSUE_REFERENCE` | `--local-reference` | `settings.issueDiscovery.localIssueReference` |
 | `MAX_FIX_ATTEMPTS` | `--max-fix-attempts` | `settings.selfHealing.maxFixAttempts` |
 | `MAX_JOBS` | `--max-jobs` | `settings.concurrency.maxJobs` |
 | `MAX_PARALLEL` | `--max-parallel` | `settings.concurrency.maxParallel` |
 | `MAX_REBASE_ATTEMPTS` | `--max-rebase-attempts` | `settings.selfHealing.maxRebaseAttempts` |
 | `MEMORY_LIMIT` | `--memory-limit` | `settings.sandbox.memoryLimit` |
 | `MERGE_GUARD_PATHS` | `--merge-guard-paths` | `settings.branches.mergeGuardPaths` |
-| `MERGE_MODE` | `--merge-mode` | `settings.branches.mergeMode` |
+| `MERGE_MODE` | `--merge-policy` | `settings.branches.mergeMode` |
 | `MERGE_POLL_INTERVAL` | `--merge-poll-interval` | `settings.branches.mergePollInterval` |
 | `MERGE_POLL_TIMEOUT` | `--merge-poll-timeout` | `settings.branches.mergePollTimeout` |
 | `MODEL` | `--model` | `settings.models.model` |
@@ -65,10 +65,23 @@ idiom; set it in `flake.nix` `settings` instead.
 | `REPO_SLUG` | `--repo-slug` | `settings.repository.repoSlug` |
 | `REVIEW_MODEL` | `--review-model` | `settings.models.reviewModel` |
 | `SCOUT_MODEL` | `--scout-model` | `settings.models.scoutModel` |
-| `SPINDRIFT_PROMPT_DIR` | `--spindrift-prompt-dir` | — |
-| `SPINDRIFT_SKILLS_DIR` | `--spindrift-skills-dir` | — |
+| `SPINDRIFT_PROMPT_DIR` | `--prompt-dir` | — |
+| `SPINDRIFT_SKILLS_DIR` | `--skills-dir` | — |
 | `TRANSIENT_BACKOFF_SECS` | `--transient-backoff-secs` | `settings.selfHealing.transientBackoffSecs` |
 | `TRANSIENT_RETRY_MAX` | `--transient-retry-max` | `settings.selfHealing.transientRetryMax` |
+
+### Flag names re-cut to domains (ADR 0037 Pass 2)
+
+The `Flag` column above shows each knob's **canonical** flag. Several were
+renamed to read from their domain leaf, dropping a now-redundant prefix —
+`--issue-tracker` → `--tracker`, `--code-forge` → `--forge-backend`,
+`--merge-mode` → `--merge-policy`, `--git-user-name` → `--user-name`, and so on.
+Every previous flag name **keeps working as a deprecated alias** (it resolves to
+the same value; `spindrift --help --all` marks it `(deprecated)`), so no
+dispatch script breaks — migrate at your leisure before the aliases are removed
+at 1.0. The env-var names are unchanged. The primary flake surface is the domain
+tree under `perSystem.spindrift.*` (see `docs/flake-options.md`); the
+`settings.<section>.*` paths above remain as deprecated aliases until 1.0.
 
 ## `nix run .#run` / `nix run .#build` (removed in v0.5.0)
 

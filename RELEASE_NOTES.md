@@ -29,6 +29,28 @@ longer accepted for the converted boolean flags.
   flags, with `--continuous` as its bare-flag alias — `spindrift dispatch
   --continuous` turns on the slot-refill loop.
 
+CLI flags now group and read by domain.
+
+- **`--help`, the man page, and completions group by the six domains.**
+  `agents`, `git`, `issues`, `forge`, `dispatch`, and `infra` — the same
+  taxonomy the flake surface already uses (ADR 0037 Pass 2), so a knob's flag,
+  help section, and flake path finally agree.
+- **Several flags renamed to their domain leaf, old names deprecated.**
+  `--issue-tracker` → `--tracker`, `--code-forge` → `--forge-backend`,
+  `--code-forge-remote-url` → `--remote-url`,
+  `--code-forge-accumulation-repo-dir` → `--accumulation-repo-dir`,
+  `--box-forge-and-issue-access` → `--box-access`,
+  `--merge-mode` → `--merge-policy`, `--git-user-name` → `--user-name`,
+  `--git-user-email` → `--user-email`, `--label` → `--dispatch-label`,
+  `--local-issues-dir` → `--local-dir`,
+  `--local-issue-reference` → `--local-reference`,
+  `--orchestrator-enabled` → `--orchestrator`,
+  `--spindrift-prompt-dir` → `--prompt-dir`,
+  `--spindrift-skills-dir` → `--skills-dir`. Every previous name keeps working
+  as a deprecated alias resolving to the same value (marked `(deprecated)` in
+  `--help --all`), so no dispatch script breaks; the aliases are removed at 1.0.
+  Env-var names are unchanged.
+
 ---
 
 ## 0.8.0 — 2026-07-28

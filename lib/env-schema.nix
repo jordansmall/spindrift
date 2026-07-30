@@ -6,11 +6,17 @@
 #
 # Fields (all optional except env, doc, and group on non-secret knobs):
 #   env          string  env-var name (SCREAMING_SNAKE_CASE)
-#   group        string  category heading for the full flag reference (--help --all
-#                        and the man page); required on every non-secret knob and
-#                        must match a heading in lib/renderers.nix's groupOrder
+#   group        string  one of the six domains (agents, git, issues, forge,
+#                        dispatch, infra), matching the first segment of the
+#                        knob's nixPath; required on every non-secret knob and
+#                        must still match a heading in lib/renderers.nix's
+#                        groupOrder
 #   alias        string  optional short-form CLI flag alias (kebab-case, no dashes);
 #                        when set, --<alias> is a second way to set the same knob
+#   flag         string  optional canonical CLI flag name (kebab-case, no dashes);
+#                        when set, --<flag> is the knob's flag and its env-derived
+#                        name (toKebab env) becomes a deprecated alias (ADR 0037
+#                        Pass 2). When absent, the flag is toKebab(env).
 #   default      any     baked-in default; absent means runtime-required or empty
 #   placeholder  string  friendly value shown in harness.env.example for required
 #                        non-secret vars (e.g. REPO_SLUG=owner/repo); also the
@@ -36,7 +42,8 @@
   # ── Consumer-tunable (flakeOption = true) ──────────────────────────────────
   label = {
     env = "LABEL";
-    group = "Issue discovery";
+    group = "issues";
+    flag = "dispatch-label";
     default = "ready-for-agent";
     doc = "issues carrying this label are dispatchable (the launch button)";
     flakeOption = true;
@@ -45,7 +52,8 @@
   };
   issueTracker = {
     env = "ISSUE_TRACKER";
-    group = "Issue discovery";
+    group = "issues";
+    flag = "tracker";
     default = "github";
     doc = "IssueTracker backend (ADR 0013): github (gh-exec, default), local (private Markdown + YAML frontmatter files; see LOCAL_ISSUES_DIR), or jira (see JIRA_BASE_URL/JIRA_PROJECT_KEY/JIRA_TOKEN); the Code Forge (PR/CI/merge) stays github regardless";
     choices = [
@@ -64,7 +72,8 @@
   };
   localIssuesDir = {
     env = "LOCAL_ISSUES_DIR";
-    group = "Issue discovery";
+    group = "issues";
+    flag = "local-dir";
     default = ".spindrift/issues";
     doc = "directory scanned for issue files when ISSUE_TRACKER=local; keep it git-ignored so breakout issues stay private";
     flakeOption = true;
@@ -73,7 +82,8 @@
   };
   localIssueReference = {
     env = "LOCAL_ISSUE_REFERENCE";
-    group = "Issue discovery";
+    group = "issues";
+    flag = "local-reference";
     default = false;
     kind = "bool";
     doc = "when enabled and ISSUE_TRACKER=local, the PR body includes a non-auto-closing `Local-issue: <slug>` breadcrumb; default off keeps the private local ticket slug out of the PR body entirely (ISSUE_TRACKER=github is unaffected -- `Closes #ISSUE_NUMBER` stays either way)";
@@ -84,7 +94,7 @@
   };
   baseBranch = {
     env = "BASE_BRANCH";
-    group = "Branches & merge";
+    group = "git";
     default = "main";
     doc = "default branch agent PRs merge into";
     flakeOption = true;
@@ -93,7 +103,7 @@
   };
   maxParallel = {
     env = "MAX_PARALLEL";
-    group = "Concurrency & dependency waves";
+    group = "dispatch";
     default = 3;
     doc = "maximum concurrent agent containers";
     flakeOption = true;
@@ -102,7 +112,7 @@
   };
   branchPrefix = {
     env = "BRANCH_PREFIX";
-    group = "Branches & merge";
+    group = "git";
     default = "agent/issue-";
     doc = "prefix for agent-cut branches";
     flakeOption = true;
@@ -111,7 +121,7 @@
   };
   inProgressLabel = {
     env = "IN_PROGRESS_LABEL";
-    group = "Lifecycle labels";
+    group = "issues";
     default = "agent-in-progress";
     doc = "label swapped on from LABEL when an issue enters the queue";
     flakeOption = true;
@@ -120,7 +130,7 @@
   };
   failedLabel = {
     env = "FAILED_LABEL";
-    group = "Lifecycle labels";
+    group = "issues";
     default = "agent-failed";
     doc = "label swapped on when the agent box exits non-zero";
     flakeOption = true;
@@ -129,7 +139,7 @@
   };
   completeLabel = {
     env = "COMPLETE_LABEL";
-    group = "Lifecycle labels";
+    group = "issues";
     default = "agent-complete";
     doc = "label the launcher swaps on when CI reaches green (agent is done; merge is separate)";
     flakeOption = true;
@@ -138,7 +148,8 @@
   };
   mergeMode = {
     env = "MERGE_MODE";
-    group = "Branches & merge";
+    group = "git";
+    flag = "merge-policy";
     default = "manual";
     doc = "post-green merge policy: immediate (merge on green), auto (enqueue GitHub native auto-merge; repo must have Allow auto-merge enabled), manual (leave PR open for human approval)";
     choices = [
@@ -152,7 +163,7 @@
   };
   mergeMethod = {
     env = "MERGE_METHOD";
-    group = "Branches & merge";
+    group = "git";
     default = "rebase";
     doc = "how the final integration commits land on green: merge (merge commit), squash, or rebase; maps to GitHub's native merge_method (github Code Forge merge path only)";
     choices = [
@@ -166,7 +177,7 @@
   };
   mergeGuardPaths = {
     env = "MERGE_GUARD_PATHS";
-    group = "Branches & merge";
+    group = "git";
     default = ".github/**,**/CLAUDE.md,**/AGENTS.md,.claude/**,.opencode/**";
     doc = "comma-separated globs matched against every changed path (added, modified, deleted); a hit downgrades the merge to manual regardless of MERGE_MODE and posts a PR comment naming the match; empty disables the guard (github Code Forge merge path only)";
     flakeOption = true;
@@ -175,7 +186,7 @@
   };
   model = {
     env = "MODEL";
-    group = "Models";
+    group = "agents";
     default = "claude-opus-4-8";
     doc = "main/coordinator Claude model for the agent (zero-rebuild runtime switch); worker-tier defaults are unaffected";
     flakeOption = true;
@@ -185,7 +196,7 @@
   };
   scoutModel = {
     env = "SCOUT_MODEL";
-    group = "Models";
+    group = "agents";
     default = "claude-haiku-4-5-20251001";
     doc = "scout subagent model tier; empty omits the scout entry from --agents; the flag itself is omitted only when no subagent model is set. DEPRECATED: superseded by the roster option (see docs/reference.md); these per-agent knobs still work but will be removed.";
     flakeOption = true;
@@ -195,7 +206,7 @@
   };
   reviewModel = {
     env = "REVIEW_MODEL";
-    group = "Models";
+    group = "agents";
     default = "claude-opus-4-8";
     doc = "reviewer subagent model tier; empty omits the reviewer entry from --agents; the flag itself is omitted only when no subagent model is set. DEPRECATED: superseded by the roster option (see docs/reference.md); these per-agent knobs still work but will be removed.";
     flakeOption = true;
@@ -205,7 +216,7 @@
   };
   filerModel = {
     env = "FILER_MODEL";
-    group = "Models";
+    group = "agents";
     default = "";
     doc = "filer subagent model tier; empty (default) omits the filer entry from --agents and means the filer is not provisioned at all — setting a model is the opt-in (recommended: claude-haiku-4-5-20251001). DEPRECATED: superseded by the roster option (see docs/reference.md); these per-agent knobs still work but will be removed.";
     flakeOption = true;
@@ -215,7 +226,7 @@
   };
   workerModel = {
     env = "WORKER_MODEL";
-    group = "Models";
+    group = "agents";
     default = "claude-sonnet-5";
     doc = "implement-capable worker subagent model tier; empty omits the worker entry from --agents; the implementor prompt does not delegate to it yet — this only provisions the subagent so it is invokable. DEPRECATED: superseded by the roster option (see docs/reference.md); these per-agent knobs still work but will be removed.";
     flakeOption = true;
@@ -225,7 +236,7 @@
   };
   devShellName = {
     env = "DEV_SHELL_NAME";
-    group = "Sandbox & resources";
+    group = "infra";
     default = "default";
     doc = "which devShell to enter; lets a Target expose a lean headless ci shell distinct from a heavy interactive default";
     flakeOption = true;
@@ -235,7 +246,7 @@
   };
   devShellProbeTimeout = {
     env = "DEV_SHELL_PROBE_TIMEOUT";
-    group = "Sandbox & resources";
+    group = "infra";
     default = 300;
     doc = "seconds before the devShell probe is abandoned and the baked toolchain is used";
     flakeOption = true;
@@ -245,7 +256,7 @@
   };
   podmanNetwork = {
     env = "PODMAN_NETWORK";
-    group = "Sandbox & resources";
+    group = "infra";
     doc = "--network value for podman run; empty applies no flag (podman NAT default); set to 'pasta' to restrict egress";
     flakeOption = true;
     nixPath = "infra.network.podman";
@@ -253,7 +264,7 @@
   };
   bwrapUnshareNet = {
     env = "BWRAP_UNSHARE_NET";
-    group = "Sandbox & resources";
+    group = "infra";
     default = false;
     # Presence-style bool flag (issue #2145): `--bwrap-unshare-net` (bare) or
     # `--bwrap-unshare-net=<value>` set it; the space-separated value form is
@@ -267,7 +278,7 @@
   };
   memoryLimit = {
     env = "MEMORY_LIMIT";
-    group = "Sandbox & resources";
+    group = "infra";
     # #712: a single `nix build .#checks-inbox` peaks near 3.7 GiB RSS
     # (agent-issue-640 dmesg); 4g left ~300MiB headroom and got cgroup
     # OOM-killed. 5g gives real headroom above the observed peak.
@@ -279,7 +290,7 @@
   };
   pidsLimit = {
     env = "PIDS_LIMIT";
-    group = "Sandbox & resources";
+    group = "infra";
     default = "512";
     doc = "max processes per agent container (--pids-limit); empty string disables the limit";
     flakeOption = true;
@@ -288,7 +299,7 @@
   };
   jiraBaseURL = {
     env = "JIRA_BASE_URL";
-    group = "Repository & identity";
+    group = "issues";
     doc = "Jira site base URL (e.g. https://yourcompany.atlassian.net); required when ISSUE_TRACKER=jira";
     flakeOption = true;
     nixPath = "issues.jira.baseURL";
@@ -296,7 +307,7 @@
   };
   jiraProjectKey = {
     env = "JIRA_PROJECT_KEY";
-    group = "Repository & identity";
+    group = "issues";
     doc = "Jira project key issues are read from (e.g. ENG); required when ISSUE_TRACKER=jira";
     flakeOption = true;
     nixPath = "issues.jira.projectKey";
@@ -304,7 +315,7 @@
   };
   jiraEmail = {
     env = "JIRA_EMAIL";
-    group = "Repository & identity";
+    group = "issues";
     doc = "Jira Cloud account email, paired with JIRA_TOKEN for Basic auth; leave empty for Bearer-token auth (Jira Server/Data Center PATs)";
     flakeOption = true;
     nixPath = "issues.jira.email";
@@ -312,7 +323,7 @@
   };
   jiraStatusMapping = {
     env = "JIRA_STATUS_MAPPING";
-    group = "Lifecycle labels";
+    group = "issues";
     default = "";
     doc = "JSON object mapping dispatch states (dispatchable, inProgress, complete, failed) to native Jira status names, e.g. {'inProgress':'In Progress'}; TransitionState performs the matching workflow transition, falling back to swapping the matching lifecycle label when a state is unmapped or its transition is blocked by the project's workflow";
     flakeOption = true;
@@ -321,7 +332,7 @@
   };
   jiraIncludeComments = {
     env = "JIRA_INCLUDE_COMMENTS";
-    group = "Issue discovery";
+    group = "issues";
     default = false;
     kind = "bool";
     doc = "when enabled, the Jira adapter appends the issue's comment thread to the description it returns; off (default) keeps the prompt-injection surface tight";
@@ -332,7 +343,7 @@
   # ── Required runtime inputs ────────────────────────────────────────────────
   repoSlug = {
     env = "REPO_SLUG";
-    group = "Repository & identity";
+    group = "forge";
     required = true;
     placeholder = "owner/repo";
     doc = "target GitHub repository the agents work on; required unless CODE_FORGE and ISSUE_TRACKER are both local";
@@ -350,7 +361,7 @@
   };
   ghTokenRefreshFile = {
     env = "GH_TOKEN_REFRESH_FILE";
-    group = "Repository & identity";
+    group = "forge";
     doc = "path to a file the launcher re-reads and swaps into GH_TOKEN whenever its content changes — lets an external minter (e.g. a workflow step re-minting a GitHub App installation token, keeping the App private key in the workflow rather than the launcher) keep the credential fresh across a run that outlives the token's ~1h lifetime (#1027); empty (default) leaves GH_TOKEN static for the whole run";
     flakeOption = true;
     nixPath = "forge.ghTokenRefreshFile";
@@ -389,7 +400,8 @@
   };
   gitUserName = {
     env = "GIT_USER_NAME";
-    group = "Repository & identity";
+    group = "git";
+    flag = "user-name";
     placeholder = "Test Bot";
     doc = "commit identity name; falls back to host git config user.name";
     flakeOption = true;
@@ -398,7 +410,8 @@
   };
   gitUserEmail = {
     env = "GIT_USER_EMAIL";
-    group = "Repository & identity";
+    group = "git";
+    flag = "user-email";
     placeholder = "bot@example.com";
     doc = "commit identity email; falls back to host git config user.email";
     flakeOption = true;
@@ -407,7 +420,8 @@
   };
   codeForge = {
     env = "CODE_FORGE";
-    group = "Repository & identity";
+    group = "forge";
+    flag = "forge-backend";
     default = "github";
     doc = "code-landing backend: github (open PR, watch CI, merge), git (push-only to CODE_FORGE_REMOTE_URL; no PR, CI-watch, or merge gate), or local (host-mediated landing onto the Accumulation repo's Integration branch by rebase and fast-forward, never a merge commit; no PR, CI-watch, or network; ADR 0033, issue #1889)";
     choices = [
@@ -421,7 +435,8 @@
   };
   codeForgeRemoteURL = {
     env = "CODE_FORGE_REMOTE_URL";
-    group = "Repository & identity";
+    group = "forge";
+    flag = "remote-url";
     doc = "plain git remote URL to clone from and push to (self-hosted git, gitea, GitLab-without-MRs, a bare server repo); required when CODE_FORGE=git, unused otherwise";
     flakeOption = true;
     nixPath = "forge.remoteURL";
@@ -429,7 +444,8 @@
   };
   codeForgeAccumulationRepoDir = {
     env = "CODE_FORGE_ACCUMULATION_REPO_DIR";
-    group = "Repository & identity";
+    group = "forge";
+    flag = "accumulation-repo-dir";
     doc = "host path to the bare Accumulation repo (ADR 0033), mounted read-only into the Box and landed into host-side; when CODE_FORGE=local, defaults to .spindrift/accum.git under the launcher's working directory (auto-created and seeded) and an explicit value still overrides it; unused otherwise";
     flakeOption = true;
     nixPath = "forge.accumulationRepoDir";
@@ -437,7 +453,8 @@
   };
   boxForgeAndIssueAccess = {
     env = "BOX_FORGE_AND_ISSUE_ACCESS";
-    group = "Repository & identity";
+    group = "forge";
+    flag = "box-access";
     default = "read-write";
     doc = "whether the Box writes to the Code Forge and Issue Tracker directly (read-write) or the launcher host-mediates every write instead (read-only), a third axis orthogonal to CODE_FORGE and ISSUE_TRACKER (issue #1914); read-only is gated at startup by capability — permitted only when the selected forge implements bundle-relay and host-side draft-PR-create and the selected tracker implements host-posted comments, otherwise the launcher exits with a startup error naming the missing seam; local and github backends both satisfy the gate today (ADR extending 0032/0033 to github, docs/adr/0034-host-mediated-github-forge-and-issue-access.md)";
     choices = [
@@ -464,7 +481,7 @@
   # ── Operator-tunable knobs (flakeOption = true; also tune via harness.env) ─
   maxFixAttempts = {
     env = "MAX_FIX_ATTEMPTS";
-    group = "Self-healing & retries";
+    group = "dispatch";
     default = 3;
     doc = "fix-agent passes when CI is genuinely red before marking agent-failed; 0 disables self-healing";
     flakeOption = true;
@@ -473,7 +490,7 @@
   };
   maxRebaseAttempts = {
     env = "MAX_REBASE_ATTEMPTS";
-    group = "Self-healing & retries";
+    group = "dispatch";
     default = 3;
     doc = "rebase-and-retry passes when a green PR conflicts with the base after a sibling merge; 0 disables rebase retries";
     flakeOption = true;
@@ -485,7 +502,7 @@
   };
   maxBudgetTokens = {
     env = "MAX_BUDGET_TOKENS";
-    group = "Self-healing & retries";
+    group = "dispatch";
     default = 0;
     doc = "cumulative tokens across the initial run and every fix pass before selfHealGate stops dispatching further fix passes (issue #2001); 0 disables the token budget cap";
     flakeOption = true;
@@ -501,7 +518,7 @@
     # for. Falling through to types.str instead means a Consumer flake sets
     # it quoted, e.g. maxBudgetUSD = "4.44";.
     env = "MAX_BUDGET_USD";
-    group = "Self-healing & retries";
+    group = "dispatch";
     default = 0.0;
     doc = "cumulative cost in USD across the initial run and every fix pass before selfHealGate stops dispatching further fix passes (issue #2001); 0 disables the cost budget cap; give it as a quoted string in flake settings since it may be fractional, e.g. 4.44";
     flakeOption = true;
@@ -510,7 +527,7 @@
   };
   preflightStaleBase = {
     env = "PREFLIGHT_STALE_BASE";
-    group = "Self-healing & retries";
+    group = "git";
     default = false;
     kind = "bool";
     doc = "when enabled, the launcher proactively rebases a green PR that is behind its base (no textual conflict) before merging and re-waits for CI on the rebased tree, drawing on MAX_REBASE_ATTEMPTS for its budget (ADR 0026). Off by default: a green-but-behind PR merges as-is, relying on its green CI as the landing gate — this trades the rare cross-PR semantic break ADR 0026 guarded against (two individually-green PRs that break combined) for the throughput of parallel landings that never wait on an extra rebase+CI cycle. WARNING: enabling this on a highly-parallelized fleet without a merge queue in front of the branch invites near-constant rebase+re-CI thrashing (each landing leaves the others behind again), burning CI minutes and tokens — see the Stale-base preflight docs";
@@ -520,7 +537,7 @@
   };
   maxJobs = {
     env = "MAX_JOBS";
-    group = "Concurrency & dependency waves";
+    group = "dispatch";
     default = 0;
     doc = "caps the wave size; 0 means uncapped";
     flakeOption = true;
@@ -529,7 +546,7 @@
   };
   continuousDispatch = {
     env = "CONTINUOUS_DISPATCH";
-    group = "Concurrency & dependency waves";
+    group = "dispatch";
     default = false;
     kind = "bool";
     alias = "continuous";
@@ -540,7 +557,7 @@
   };
   overlapGate = {
     env = "OVERLAP_GATE";
-    group = "Concurrency & dependency waves";
+    group = "dispatch";
     default = "defer";
     doc = "declared ## Touches overlap policy: defer (hold a Dispatchable issue whose declared touch-set intersects an InProgress issue's, retrying once the collider completes), off (disable the check)";
     choices = [
@@ -553,7 +570,7 @@
   };
   mergePollInterval = {
     env = "MERGE_POLL_INTERVAL";
-    group = "Branches & merge";
+    group = "git";
     default = 30;
     doc = "seconds between merge-gate poll iterations";
     flakeOption = true;
@@ -562,7 +579,7 @@
   };
   mergePollTimeout = {
     env = "MERGE_POLL_TIMEOUT";
-    group = "Branches & merge";
+    group = "git";
     default = 1800;
     doc = "total seconds to wait for CI green before abandoning the merge attempt";
     flakeOption = true;
@@ -571,19 +588,21 @@
   };
   spindriftPromptDir = {
     env = "SPINDRIFT_PROMPT_DIR";
-    group = "Prompt & skill iteration";
+    group = "agents";
+    flag = "prompt-dir";
     doc = "host directory mounted over /agent/prompts for zero-rebuild prompt iteration";
     boxEnv = false;
   };
   spindriftSkillsDir = {
     env = "SPINDRIFT_SKILLS_DIR";
-    group = "Prompt & skill iteration";
+    group = "agents";
+    flag = "skills-dir";
     doc = "host directory mounted read-only over /home/agent/.claude/skills so the headless agent can load operator-provided skills";
     boxEnv = false;
   };
   autoFormat = {
     env = "AUTO_FORMAT";
-    group = "Prompt & skill iteration";
+    group = "agents";
     default = false;
     kind = "bool";
     doc = "when enabled, the implementor auto-detects and runs the project's formatter on changed files before each commit; skips silently when no formatter is found";
@@ -594,7 +613,7 @@
   };
   autoLint = {
     env = "AUTO_LINT";
-    group = "Prompt & skill iteration";
+    group = "agents";
     default = false;
     kind = "bool";
     doc = "when enabled, the implementor auto-detects and runs the project's linter on changed files before each commit, applying auto-fix then resolving remaining findings; skips silently when no linter is found";
@@ -605,7 +624,8 @@
   };
   orchestratorEnabled = {
     env = "ORCHESTRATOR_ENABLED";
-    group = "Prompt & skill iteration";
+    group = "dispatch";
+    flag = "orchestrator";
     default = false;
     kind = "bool";
     doc = "master feature-flag switch (issue #1996; canonicalized #2047): when enabled, forks entrypoint.sh's rendered prompt/--agents JSON onto the orchestrator-on path -- the implementor pass hands off to the in-box Go orchestrator instead of calling driver-exec directly, and every other orchestrator-conditioned fork (e.g. the filer's write-mechanism gate) reads this same switch; off by default, the direct driver-exec path is unchanged; the off-path is legacy, slated for demolition once this defaults on in production with a sustained A/B win (ADR 0035 amendment)";
@@ -616,14 +636,14 @@
   };
   issueNumber = {
     env = "ISSUE_NUMBER";
-    group = "Issue discovery";
+    group = "issues";
     alias = "issue";
     doc = "dispatch only this issue number, bypassing the LABEL query; empty discovers by LABEL";
     boxEnv = false;
   };
   holdJitterSecs = {
     env = "HOLD_JITTER_SECS";
-    group = "Self-healing & retries";
+    group = "dispatch";
     default = 5;
     doc = "jitter seconds added to 429 hold duration to spread re-dispatch";
     flakeOption = true;
@@ -634,7 +654,7 @@
   };
   transientBackoffSecs = {
     env = "TRANSIENT_BACKOFF_SECS";
-    group = "Self-healing & retries";
+    group = "dispatch";
     default = 30;
     doc = "base backoff seconds per retry for 529/overloaded and network transients";
     flakeOption = true;
@@ -645,7 +665,7 @@
   };
   transientRetryMax = {
     env = "TRANSIENT_RETRY_MAX";
-    group = "Self-healing & retries";
+    group = "dispatch";
     default = 3;
     doc = "max retries for transient exits (529/network backoff; consecutive 429 holds)";
     flakeOption = true;
