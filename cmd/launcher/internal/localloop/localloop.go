@@ -96,6 +96,19 @@ func seedScopeFor(p local.SanitizedParent) forge.SeedScope {
 	return forge.NewSeedScope(p.String(), local.IntegrationBranch(p))
 }
 
+// SeedScopeResolver returns the waves.Config.SeedScopeOf resolver for the
+// local blocker gate (#2130, #2150): a dependent num -> the opaque
+// forge.SeedScope its blocker gate is checked against. Non-nil only when cf is
+// CODE_FORGE=local's containment-query surface; nil for every other forge,
+// where the seed-branch containment gate never fires and a blocker is judged
+// solely by its PR/issue state.
+func SeedScopeResolver(it forge.IssueTracker, cf forge.CodeForge) func(string) forge.SeedScope {
+	if _, ok := cf.(forge.LandingContainmentQuery); !ok {
+		return nil
+	}
+	return func(num string) forge.SeedScope { return SeedScopeOf(it, num) }
+}
+
 // ResolveParent resolves num's own Integration-branch key through w's own
 // IssueTracker (see the package-level ResolveParent), memoized so num's
 // parent is resolved exactly once per Wired: CodeForgeForIssue, Surface, and
