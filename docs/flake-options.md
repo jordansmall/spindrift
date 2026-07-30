@@ -30,7 +30,7 @@ See [`docs/reference.md`](reference.md) for the full option surface and runtime 
 |---|---|---|---|
 | `perSystem.spindrift.git.baseBranch` | `BASE_BRANCH` | `main` | default branch agent PRs merge into |
 | `perSystem.spindrift.git.branchPrefix` | `BRANCH_PREFIX` | `agent/issue-` | prefix for agent-cut branches |
-| `perSystem.spindrift.git.merge.guardPaths` | `MERGE_GUARD_PATHS` | `.github/**,**/CLAUDE.md,**/AGENTS.md,.claude/**,.opencode/**` | comma-separated globs matched against every changed path (added, modified, deleted); a hit downgrades the merge to manual regardless of MERGE_MODE and posts a PR comment naming the match; empty disables the guard (github Code Forge merge path only) |
+| `perSystem.spindrift.git.merge.guardPaths` | `MERGE_GUARD_PATHS` | `.github/**,.forgejo/**,**/CLAUDE.md,**/AGENTS.md,.claude/**,.opencode/**` | comma-separated globs matched against every changed path (added, modified, deleted); a hit downgrades the merge to manual regardless of MERGE_MODE and posts a PR comment naming the match; empty disables the guard (github Code Forge merge path only) |
 | `perSystem.spindrift.git.merge.method` | `MERGE_METHOD` | `rebase` | how the final integration commits land on green: merge (merge commit), squash, or rebase; maps to GitHub's native merge_method (github Code Forge merge path only) |
 | `perSystem.spindrift.git.merge.policy` | `MERGE_MODE` | `manual` | post-green merge policy: immediate (merge on green), auto (enqueue GitHub native auto-merge; repo must have Allow auto-merge enabled), manual (leave PR open for human approval) |
 | `perSystem.spindrift.git.merge.pollInterval` | `MERGE_POLL_INTERVAL` | `30` | seconds between merge-gate poll iterations |
