@@ -258,12 +258,27 @@ func (e *execClient) ListPRFiles(url string) ([]string, error) {
 
 func (e *execClient) Merge(url string) error {
 	var stderr bytes.Buffer
-	cmd := exec.Command("gh", "pr", "merge", url, "--rebase", "--delete-branch")
+	cmd := exec.Command("gh", "pr", "merge", url, mergeMethodFlag(e.mergeMethod), "--delete-branch")
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
 		return e.classifyMergeFailure(url, err, stderr.String())
 	}
 	return nil
+}
+
+// mergeMethodFlag maps the MERGE_METHOD knob's value onto gh pr merge's
+// native flag. An empty method (unset) resolves to --rebase, matching the
+// literal `--rebase` this package hard-coded before the knob existed, so an
+// unset MERGE_METHOD stays byte-identical to prior behavior.
+func mergeMethodFlag(method string) string {
+	switch method {
+	case "merge":
+		return "--merge"
+	case "squash":
+		return "--squash"
+	default:
+		return "--rebase"
+	}
 }
 
 // classifyMergeFailure distinguishes a genuine merge conflict from a PR that
@@ -314,7 +329,7 @@ func (e *execClient) CanAutoMerge() (bool, error) {
 // EnqueueAutoMerge enqueues GitHub's native auto-merge for the PR. GitHub will
 // merge the PR automatically once all branch-protection requirements are met.
 func (e *execClient) EnqueueAutoMerge(prURL string) error {
-	cmd := exec.Command("gh", "pr", "merge", prURL, "--auto", "--rebase", "--delete-branch")
+	cmd := exec.Command("gh", "pr", "merge", prURL, "--auto", mergeMethodFlag(e.mergeMethod), "--delete-branch")
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("gh pr merge --auto %s: %w", prURL, err)
 	}

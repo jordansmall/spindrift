@@ -492,7 +492,7 @@ func TestExecClient_CompleteVerdict_MissingInProgressErrorsWithoutEditing(t *tes
 esac
 `)
 
-	c := NewExecClient("owner/repo", testLabels, "agent/issue-", forge.ResearchVerdictLabels())
+	c := NewExecClient("owner/repo", testLabels, "agent/issue-", WithVerdictLabels(forge.ResearchVerdictLabels()))
 	err := c.CompleteVerdict("10", forge.Recommend)
 	if err == nil {
 		t.Fatal("want error when issue lacks InProgress label, got nil")
@@ -531,7 +531,7 @@ func TestExecClient_CompleteVerdict_InProgressPresentEditsIssue(t *testing.T) {
 esac
 `)
 
-	c := NewExecClient("owner/repo", testLabels, "agent/issue-", forge.ResearchVerdictLabels())
+	c := NewExecClient("owner/repo", testLabels, "agent/issue-", WithVerdictLabels(forge.ResearchVerdictLabels()))
 	if err := c.CompleteVerdict("10", forge.Recommend); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

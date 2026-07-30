@@ -575,7 +575,7 @@ func newIssueTracker(c config) forge.IssueTracker {
 			IncludeComments: c.jiraIncludeComments,
 		})
 	default:
-		return github.NewExecClient(c.repoSlug, dispatchLabels(c), c.branchPrefix, vl)
+		return github.NewExecClient(c.repoSlug, dispatchLabels(c), c.branchPrefix, github.WithVerdictLabels(vl))
 	}
 }
 
