@@ -37,3 +37,21 @@ func TestValidateMergeMethod_AcceptsKnown(t *testing.T) {
 		}
 	}
 }
+
+// TestValidateSyncMethod_RejectsUnknown verifies ValidateSyncMethod rejects a
+// method outside the two documented values.
+func TestValidateSyncMethod_RejectsUnknown(t *testing.T) {
+	if err := ValidateSyncMethod("turbo"); err == nil {
+		t.Fatal("ValidateSyncMethod(\"turbo\") should error")
+	}
+}
+
+// TestValidateSyncMethod_AcceptsKnown verifies ValidateSyncMethod accepts
+// each of the two documented SYNC_METHOD values.
+func TestValidateSyncMethod_AcceptsKnown(t *testing.T) {
+	for _, method := range []string{"rebase", "merge"} {
+		if err := ValidateSyncMethod(method); err != nil {
+			t.Errorf("ValidateSyncMethod(%q) = %v, want nil", method, err)
+		}
+	}
+}
