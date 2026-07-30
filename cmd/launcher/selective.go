@@ -8,6 +8,7 @@ import (
 
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/localloop"
 	"spindrift.dev/launcher/internal/settle"
 	"spindrift.dev/launcher/internal/waves"
 )
@@ -53,7 +54,7 @@ func selectiveListDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, 
 
 	in := waves.Input{Origin: waves.OriginSelective, Issues: toWaveIssues(issues), Edges: readiness.Edges, Sources: readiness.Sources, Failed: readiness.Failed}
 	cfg := selectiveWavesConfig(c)
-	cfg.SeedScopeOf = seedScopeResolver(it, cf)
+	cfg.SeedScopeOf = localloop.SeedScopeResolver(it, cf)
 	return waves.Dispatch(cfg, it, cf, pwd, f, s, in)
 }
 
@@ -109,7 +110,7 @@ func evictUnmetBlockers(it forge.IssueTracker, cf forge.CodeForge, readiness wav
 	// (#2130); nil under every other forge, where seedScopeFor always yields
 	// a zero SeedScope, so the seed-branch containment gate never fires and a
 	// blocker is judged solely by its PR/issue state.
-	resolve := seedScopeResolver(it, cf)
+	resolve := localloop.SeedScopeResolver(it, cf)
 	seedScopeFor := func(dependent string) forge.SeedScope {
 		if resolve == nil {
 			return forge.SeedScope{}

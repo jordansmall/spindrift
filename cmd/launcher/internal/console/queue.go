@@ -131,9 +131,7 @@ func (q *Queue) Discover(tracker forge.IssueTracker, cf forge.CodeForge, failedL
 			continue
 		}
 		cfg := waves.Config{FailedLabel: failedLabel}
-		if _, ok := cf.(forge.LandingContainmentQuery); ok {
-			cfg.SeedScopeOf = func(num string) forge.SeedScope { return localloop.SeedScopeOf(tracker, num) }
-		}
+		cfg.SeedScopeOf = localloop.SeedScopeResolver(tracker, cf)
 		ready, failed, unready := readiness.Status(cfg, tracker, cf, pick.Number)
 		if !ready {
 			q.setHeld(pick.Number, unready, failed, readiness.Sources[pick.Number])

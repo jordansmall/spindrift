@@ -941,19 +941,6 @@ func selectiveWavesConfig(c config) waves.Config {
 	return cfg
 }
 
-// seedScopeResolver returns the waves.Config.SeedScopeOf resolver for the
-// local blocker gate (#2130, #2150): a dependent num -> the opaque
-// forge.SeedScope its blocker gate is checked against. Non-nil only when cf is
-// CODE_FORGE=local's containment-query surface; nil for every other forge,
-// where the seed-branch containment gate never fires and a blocker is judged
-// solely by its PR/issue state.
-func seedScopeResolver(it forge.IssueTracker, cf forge.CodeForge) func(string) forge.SeedScope {
-	if _, ok := cf.(forge.LandingContainmentQuery); !ok {
-		return nil
-	}
-	return func(num string) forge.SeedScope { return localloop.SeedScopeOf(it, num) }
-}
-
 // toWaveIssues converts main's local issue type to waves.Issue for a call
 // into the wave engine.
 func toWaveIssues(issues []issue) []waves.Issue {
@@ -1219,7 +1206,7 @@ func run(lc *launchContext) error {
 	}
 	in := waves.Input{Origin: origin, Issues: toWaveIssues(issues), Edges: readiness.Edges, Sources: readiness.Sources, Failed: readiness.Failed}
 	cfg := wavesConfig(c)
-	cfg.SeedScopeOf = seedScopeResolver(it, cf)
+	cfg.SeedScopeOf = localloop.SeedScopeResolver(it, cf)
 	if err := waves.Dispatch(cfg, it, cf, pwd, f, s, in); err != nil {
 		return err
 	}
@@ -1299,7 +1286,7 @@ func runContinuousDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, 
 	}
 
 	cfg := wavesConfig(c)
-	cfg.SeedScopeOf = seedScopeResolver(it, cf)
+	cfg.SeedScopeOf = localloop.SeedScopeResolver(it, cf)
 	if err := waves.RunContinuous(cfg, nil, it, cf, pwd, f, s, discover, fresh); err != nil {
 		// refill swallows every discover error to stderr and retries on the
 		// next trigger (a transient-tracker-hiccup tolerance that's fine for
