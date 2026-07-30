@@ -150,6 +150,20 @@
     nixPath = "git.merge.policy";
     boxEnv = false;
   };
+  mergeMethod = {
+    env = "MERGE_METHOD";
+    group = "Branches & merge";
+    default = "rebase";
+    doc = "how the final integration commits land on green: merge (merge commit), squash, or rebase; maps to GitHub's native merge_method (github Code Forge merge path only)";
+    choices = [
+      "merge"
+      "squash"
+      "rebase"
+    ];
+    flakeOption = true;
+    nixPath = "git.merge.method";
+    boxEnv = false;
+  };
   mergeGuardPaths = {
     env = "MERGE_GUARD_PATHS";
     group = "Branches & merge";

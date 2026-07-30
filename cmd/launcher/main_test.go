@@ -1165,6 +1165,28 @@ func TestValidateMergeMode_AcceptsKnown(t *testing.T) {
 	}
 }
 
+// TestValidateMergeMethod_RejectsUnknown verifies that validate() fails fast
+// when MERGE_METHOD is set to an unrecognised value.
+func TestValidateMergeMethod_RejectsUnknown(t *testing.T) {
+	c := minimalValidConfig()
+	c.mergeMethod = "fast-forward"
+	if err := validate(c); err == nil {
+		t.Fatal("validate() should reject unrecognised MERGE_METHOD")
+	}
+}
+
+// TestValidateMergeMethod_AcceptsKnown verifies that validate() accepts the
+// three documented MERGE_METHOD values.
+func TestValidateMergeMethod_AcceptsKnown(t *testing.T) {
+	for _, method := range []string{"merge", "squash", "rebase"} {
+		c := minimalValidConfig()
+		c.mergeMethod = method
+		if err := validate(c); err != nil {
+			t.Errorf("validate() rejected valid MERGE_METHOD %q: %v", method, err)
+		}
+	}
+}
+
 // TestValidateOverlapGate_RejectsUnknown verifies that validate() fails fast
 // when OVERLAP_GATE is set to an unrecognised value.
 func TestValidateOverlapGate_RejectsUnknown(t *testing.T) {
@@ -2021,6 +2043,7 @@ func minimalValidConfig() config {
 		claudeOAuthToken:       "tok",
 		runtime:                "echo", // echo is always on PATH
 		mergeMode:              "manual",
+		mergeMethod:            "rebase",
 		issueTracker:           "github",
 		codeForge:              "github",
 		overlapGate:            "defer",
