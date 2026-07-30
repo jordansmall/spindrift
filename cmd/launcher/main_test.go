@@ -162,8 +162,8 @@ func TestMainRun_AmbientKnobEnv_WarnsAndStillHonored(t *testing.T) {
 	if !strings.Contains(out, "MAX_JOBS=5 set in environment") {
 		t.Errorf("stderr = %q, want a MAX_JOBS provenance warning", out)
 	}
-	if !strings.Contains(out, "--max-jobs") || !strings.Contains(out, "settings.concurrency.maxJobs") {
-		t.Errorf("stderr = %q, want both the flag and settings migration targets named", out)
+	if !strings.Contains(out, "--max-jobs") || !strings.Contains(out, "dispatch.maxJobs") {
+		t.Errorf("stderr = %q, want both the flag and domain-path migration targets named", out)
 	}
 
 	// The value is still honored this release: loadConfig() (called inside

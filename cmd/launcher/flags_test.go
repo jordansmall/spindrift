@@ -584,7 +584,7 @@ func TestPrintHelpFull_GroupsFlags(t *testing.T) {
 	var buf bytes.Buffer
 	printHelpFull(&buf)
 	out := buf.String()
-	for _, g := range []string{"Issue discovery", "Models", "Sandbox & resources"} {
+	for _, g := range []string{"issues", "agents", "infra"} {
 		if !strings.Contains(out, g) {
 			t.Errorf("full help output missing group heading %q, got:\n%s", g, out)
 		}
@@ -664,6 +664,53 @@ func TestParseFlags_AliasSetEnv(t *testing.T) {
 	}
 	if got := os.Getenv("ISSUE_NUMBER"); got != "42" {
 		t.Errorf("ISSUE_NUMBER = %q, want %q (alias must set same env var)", got, "42")
+	}
+}
+
+// TestParseFlags_DeprecatedAliasSetsSameEnv asserts a deprecated old flag
+// name resolves to the same env var as its renamed canonical flag (ADR 0037
+// Pass 2), for both a value-taking and a presence-style bool knob.
+func TestParseFlags_DeprecatedAliasSetsSameEnv(t *testing.T) {
+	// A value-taking renamed knob: --merge-mode (deprecated) sets the same
+	// env var as the canonical --merge-policy (ADR 0037 Pass 2).
+	t.Setenv("MERGE_MODE", "")
+	if _, err := parseFlags([]string{"--merge-mode", "auto"}); err != nil {
+		t.Fatalf("parseFlags --merge-mode: %v", err)
+	}
+	if got := os.Getenv("MERGE_MODE"); got != "auto" {
+		t.Errorf("MERGE_MODE = %q, want %q (deprecated alias must set same env var)", got, "auto")
+	}
+	// A presence-style bool renamed knob: --orchestrator-enabled (deprecated)
+	// sets the same env var as the canonical --orchestrator.
+	t.Setenv("ORCHESTRATOR_ENABLED", "")
+	if _, err := parseFlags([]string{"--orchestrator-enabled"}); err != nil {
+		t.Fatalf("parseFlags --orchestrator-enabled: %v", err)
+	}
+	if got := os.Getenv("ORCHESTRATOR_ENABLED"); got != "1" {
+		t.Errorf("ORCHESTRATOR_ENABLED = %q, want %q", got, "1")
+	}
+}
+
+// TestParseFlags_NewCanonicalFlagResolves asserts the new canonical flag
+// name resolves too, to the same env var as its deprecated alias.
+func TestParseFlags_NewCanonicalFlagResolves(t *testing.T) {
+	t.Setenv("MERGE_MODE", "")
+	if _, err := parseFlags([]string{"--merge-policy", "immediate"}); err != nil {
+		t.Fatalf("parseFlags --merge-policy: %v", err)
+	}
+	if got := os.Getenv("MERGE_MODE"); got != "immediate" {
+		t.Errorf("MERGE_MODE = %q, want %q", got, "immediate")
+	}
+}
+
+// TestPrintHelpFull_MarksDeprecatedAlias: the full help lists the canonical
+// flag and marks the old name deprecated.
+func TestPrintHelpFull_MarksDeprecatedAlias(t *testing.T) {
+	var buf bytes.Buffer
+	printHelpFull(&buf)
+	out := buf.String()
+	if !strings.Contains(out, "--merge-policy, --merge-mode (deprecated)") {
+		t.Errorf("full help must show canonical flag and mark the old name deprecated; got:\n%s", out)
 	}
 }
 

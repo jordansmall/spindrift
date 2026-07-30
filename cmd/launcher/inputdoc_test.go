@@ -55,14 +55,15 @@ func TestLoadInputDocument_InvalidJSON(t *testing.T) {
 
 // TestWarnAmbientKnobEnv_WarnsWithFlagAndSettingsEquivalent proves a knob
 // env var present in the environment produces one warning naming the
-// variable, its flag equivalent, and its settings.<section>.<knob> path
-// (ADR 0020's provenance requirement) when the knob is flakeOption-backed.
+// variable, its flag equivalent, and its domain-tree path (the knob's
+// nixPath, ADR 0037 Pass 2) — ADR 0020's provenance requirement — when the
+// knob is flakeOption-backed.
 func TestWarnAmbientKnobEnv_WarnsWithFlagAndSettingsEquivalent(t *testing.T) {
 	t.Cleanup(func() { os.Unsetenv("BASE_BRANCH") })
 	orig := schemaFlags
 	t.Cleanup(func() { schemaFlags = orig })
 	schemaFlags = []flagEntry{
-		{env: "BASE_BRANCH", flag: "base-branch", settingsPath: "settings.branches.baseBranch"},
+		{env: "BASE_BRANCH", flag: "base-branch", settingsPath: "git.baseBranch"},
 	}
 	os.Setenv("BASE_BRANCH", "develop")
 
@@ -70,7 +71,7 @@ func TestWarnAmbientKnobEnv_WarnsWithFlagAndSettingsEquivalent(t *testing.T) {
 	warnAmbientKnobEnv(&buf)
 
 	out := buf.String()
-	for _, want := range []string{"BASE_BRANCH", "--base-branch", "settings.branches.baseBranch"} {
+	for _, want := range []string{"BASE_BRANCH", "--base-branch", "git.baseBranch"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("warning = %q, want it to mention %q", out, want)
 		}
@@ -95,8 +96,8 @@ func TestWarnAmbientKnobEnv_NoSettingsPath_FlagOnly(t *testing.T) {
 	if !strings.Contains(out, "--issue-number") {
 		t.Errorf("warning = %q, want it to mention --issue-number", out)
 	}
-	if strings.Contains(out, "settings.") {
-		t.Errorf("warning = %q, want no settings.* mention for a non-flakeOption knob", out)
+	if strings.Contains(out, " or ") {
+		t.Errorf("warning = %q, want just the flag (no second migration target) for a non-flakeOption knob", out)
 	}
 }
 
@@ -108,7 +109,7 @@ func TestWarnAmbientKnobEnv_UnsetKnob_NoWarning(t *testing.T) {
 	orig := schemaFlags
 	t.Cleanup(func() { schemaFlags = orig })
 	schemaFlags = []flagEntry{
-		{env: "MAX_PARALLEL", flag: "max-parallel", settingsPath: "settings.concurrency.maxParallel"},
+		{env: "MAX_PARALLEL", flag: "max-parallel", settingsPath: "dispatch.maxParallel"},
 	}
 
 	var buf bytes.Buffer
