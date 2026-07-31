@@ -54,6 +54,22 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, gen uint64, result di
 	s.fileIssueIntents(num, result)
 	switch o.Status {
 	case "blocked":
+		// A read-only run's status=blocked here may just be the ADR 0036
+		// synthetic backstop stitched in over a Box that crashed or was cut
+		// short before its own final print — not a genuine "never
+		// finished" (issue #2224). tryAdoptRelayedBranch checks the driver's
+		// own last genuine self-report (Result.SelfReport, issue #2223) for
+		// evidence the run actually succeeded and, if the fingerprint holds
+		// and a branch was actually relayable, opens a PR on the relayed
+		// branch and drives the normal merge lifecycle in place of the
+		// park-agent-failed path below. A false return means the
+		// fingerprint didn't match (not synthetic, not read-only, no
+		// self-report, or a self-report that itself isn't success) or
+		// nothing was actually relayable (no bundle in the outbox) — in
+		// either case the normal blocked handling below runs unchanged.
+		if s.tryAdoptRelayedBranch(d, num, gen, result) {
+			return
+		}
 		fmt.Printf("    #%s  landing=%s  status=%s  !! %s\n", num, o.Landing, o.Status, o.Note)
 		s.transitionState(num, forge.InProgress, forge.Failed)
 		// A read-only Box never pushes or opens a PR in-box (issue #1933,
