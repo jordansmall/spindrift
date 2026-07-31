@@ -270,8 +270,9 @@ in
         "github"
         "local"
         "jira"
+        "forgejo"
       ]
-    ) "lib/env-schema.nix: issueTracker.choices must be [ github local jira ]";
+    ) "lib/env-schema.nix: issueTracker.choices must be [ github local jira forgejo ]";
     assert assertMsg (
       schema.overlapGate.choices or [ ] == [
         "defer"

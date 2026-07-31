@@ -432,6 +432,8 @@ func secretRequiredThisRun(env string) bool {
 		return !fullyLocal
 	case "JIRA_TOKEN":
 		return getenvSchema("ISSUE_TRACKER") == "jira"
+	case "FORGEJO_TOKEN":
+		return getenvSchema("ISSUE_TRACKER") == "forgejo"
 	case "CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY":
 		// Either satisfies validate()'s check; only attempt the template for
 		// one when neither already has a value (parseFlags' own loop above

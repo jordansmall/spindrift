@@ -65,11 +65,12 @@
     group = "issues";
     flag = "tracker";
     default = "github";
-    doc = "IssueTracker backend (ADR 0013): github (gh-exec, default), local (private Markdown + YAML frontmatter files; see LOCAL_ISSUES_DIR), or jira (see JIRA_BASE_URL/JIRA_PROJECT_KEY/JIRA_TOKEN); the Code Forge (PR/CI/merge) stays github regardless";
+    doc = "IssueTracker backend (ADR 0013): github (gh-exec, default), local (private Markdown + YAML frontmatter files; see LOCAL_ISSUES_DIR), jira (see JIRA_BASE_URL/JIRA_PROJECT_KEY/JIRA_TOKEN), or forgejo (Forgejo/Gitea REST API adapter; Codeberg default via FORGEJO_BASE_URL; see FORGEJO_BASE_URL/FORGEJO_TOKEN); the Code Forge (PR/CI/merge) stays github regardless";
     choices = [
       "github"
       "local"
       "jira"
+      "forgejo"
     ];
     flakeOption = true;
     nixSubPath = "tracker";
@@ -360,6 +361,15 @@
     nixSubPath = "jira.includeComments";
     boxEnv = false;
   };
+  forgejoBaseURL = {
+    env = "FORGEJO_BASE_URL";
+    group = "issues";
+    default = "https://codeberg.org";
+    doc = "Forgejo/Gitea instance base URL, defaulting to Codeberg; used when ISSUE_TRACKER=forgejo";
+    flakeOption = true;
+    nixSubPath = "forgejo.baseURL";
+    boxEnv = false;
+  };
   # ── Required runtime inputs ────────────────────────────────────────────────
   repoSlug = {
     env = "REPO_SLUG";
@@ -414,6 +424,12 @@
     env = "JIRA_TOKEN";
     secret = true;
     doc = "Jira API token (Cloud: paired with JIRA_EMAIL for Basic auth; Server/Data Center: used alone as a Bearer PAT); required when ISSUE_TRACKER=jira";
+    boxEnv = false;
+  };
+  forgejoToken = {
+    env = "FORGEJO_TOKEN";
+    secret = true;
+    doc = "Forgejo/Gitea API token (Bearer/token scheme); required when ISSUE_TRACKER=forgejo";
     boxEnv = false;
   };
   gitUserName = {

@@ -594,6 +594,32 @@ func TestNewIssueTracker_Jira(t *testing.T) {
 	}
 }
 
+// TestNewIssueTracker_Forgejo verifies that ISSUE_TRACKER=forgejo selects a
+// tracker backed by the Forgejo/Gitea REST API instead of the GitHub
+// gh-exec adapter.
+func TestNewIssueTracker_Forgejo(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"full_name":"owner/repo"}`))
+	}))
+	defer srv.Close()
+
+	c := minimalValidConfig()
+	c.issueTracker = "forgejo"
+	c.forgejoBaseURL = srv.URL
+	c.forgejoToken = "tok"
+	c.repoSlug = "owner/repo"
+
+	it := newIssueTracker(c)
+	slug, err := it.Probe()
+	if err != nil {
+		t.Fatalf("Probe: %v", err)
+	}
+	if slug != "owner/repo" {
+		t.Errorf("Probe() = %q, want the Forgejo adapter (owner/repo)", slug)
+	}
+}
+
 // --- dispatch kind tests (ADR 0022) ---
 
 // TestApplyDispatchKind_Research_SetsResearchLabelFamily verifies that the
@@ -1107,6 +1133,36 @@ func TestValidate_JiraFieldsOptionalForGitHub(t *testing.T) {
 	c := minimalValidConfig()
 	if err := validate(c); err != nil {
 		t.Fatalf("github default must not require jira fields: %v", err)
+	}
+}
+
+// TestValidate_ForgejoRequiresBaseURLAndToken verifies validate() requires
+// FORGEJO_BASE_URL and FORGEJO_TOKEN when ISSUE_TRACKER=forgejo, and accepts
+// a fully configured forgejo config.
+func TestValidate_ForgejoRequiresBaseURLAndToken(t *testing.T) {
+	base := minimalValidConfig()
+	base.issueTracker = "forgejo"
+	base.forgejoBaseURL = "https://codeberg.org"
+	base.forgejoToken = "tok"
+
+	if err := validate(base); err != nil {
+		t.Fatalf("fully configured forgejo config should validate: %v", err)
+	}
+
+	c := base
+	c.forgejoToken = ""
+	err := validate(c)
+	if err == nil {
+		t.Fatalf("validate() must require FORGEJO_TOKEN when ISSUE_TRACKER=forgejo")
+	}
+	if !strings.Contains(err.Error(), "FORGEJO_TOKEN") {
+		t.Errorf("validate() error = %q, want it to name FORGEJO_TOKEN", err.Error())
+	}
+
+	c = base
+	c.forgejoBaseURL = ""
+	if err := validate(c); err == nil {
+		t.Errorf("validate() must require FORGEJO_BASE_URL when ISSUE_TRACKER=forgejo")
 	}
 }
 
