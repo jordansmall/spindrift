@@ -26,6 +26,13 @@ type FailCall struct {
 	Result dispatch.Result
 }
 
+// SettleRelayedBranchCall records one SettleRelayedBranch invocation.
+type SettleRelayedBranchCall struct {
+	Num    string
+	Gen    uint64
+	Result dispatch.Result
+}
+
 // Fake is an in-memory Settler for unit tests that only need to assert
 // wiring (that Settle/SettleAdopted was called with the expected arguments)
 // rather than exercise the real merge-gate behavior. All methods are safe for
@@ -39,6 +46,11 @@ type Fake struct {
 	SettleAdoptedCalls []SettleAdoptedCall
 	// FailCalls records all Fail invocations in order.
 	FailCalls []FailCall
+	// SettleRelayedBranchCalls records all SettleRelayedBranch invocations in
+	// order.
+	SettleRelayedBranchCalls []SettleRelayedBranchCall
+	// SettleRelayedBranchReturn is the value SettleRelayedBranch returns.
+	SettleRelayedBranchReturn bool
 }
 
 var _ Settler = (*Fake)(nil)
@@ -67,4 +79,12 @@ func (f *Fake) Fail(num string, gen uint64, result dispatch.Result) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.FailCalls = append(f.FailCalls, FailCall{Num: num, Gen: gen, Result: result})
+}
+
+// SettleRelayedBranch records the call and returns SettleRelayedBranchReturn.
+func (f *Fake) SettleRelayedBranch(d dispatch.Dispatcher, num string, gen uint64, result dispatch.Result) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.SettleRelayedBranchCalls = append(f.SettleRelayedBranchCalls, SettleRelayedBranchCall{Num: num, Gen: gen, Result: result})
+	return f.SettleRelayedBranchReturn
 }

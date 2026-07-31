@@ -41,19 +41,32 @@ func (s *Settle) tryAdoptRelayedBranch(d dispatch.Dispatcher, num string, gen ui
 		return false
 	}
 
+	return s.adoptAndGate(d, num, gen, result, "backstop-synthetic blocked overridden by genuine success self-report; PR opened on relayed branch")
+}
+
+// adoptAndGate is the shared adopt+gate tail behind both
+// tryAdoptRelayedBranch (issue #2224, the read-only backstop-override arm)
+// and SettleRelayedBranch (issue #2225, recover's operator-driven arm): open
+// a PR on num's relayed branch via adoptRelayedBranch, print the
+// status=adopted line with note attached, then drive the exact same merge
+// gate (recordLanding, selfHeal, verifyMerged/failed-print/abandoned-return,
+// postUsageComment) either caller's own "ready" or "adopted" siblings use.
+// Returns false — with no side effect beyond adoptRelayedBranch's own
+// early-out — the moment adoptRelayedBranch itself fails to open a PR.
+func (s *Settle) adoptAndGate(d dispatch.Dispatcher, num string, gen uint64, result dispatch.Result, note string) bool {
 	pr, ok := s.adoptRelayedBranch(num, result)
 	if !ok {
 		return false
 	}
 
-	fmt.Printf("    #%s  landing=%s  status=adopted  note=backstop-synthetic blocked overridden by genuine success self-report; PR opened on relayed branch\n", num, pr)
+	fmt.Printf("    #%s  landing=%s  status=adopted  note=%s\n", num, pr, note)
 	s.recordLanding(num, pr)
 	switch s.selfHeal(d, num, gen, pr) {
 	case landingMerged:
-		// s.pr is guaranteed non-nil by the fingerprint gate above, but the
-		// nil check is kept anyway so this mirrors gate.go's "ready" arm
-		// shape exactly, rather than relying on an invariant a future edit
-		// could quietly break.
+		// s.pr is guaranteed non-nil by tryAdoptRelayedBranch's fingerprint
+		// gate, but SettleRelayedBranch carries no such guarantee (recover
+		// runs read-write, so s.pr may be nil for a push-only Code Forge);
+		// the nil check keeps this correct for both callers.
 		if s.pr != nil {
 			s.verifyMerged(num, pr)
 		}
@@ -66,6 +79,25 @@ func (s *Settle) tryAdoptRelayedBranch(d dispatch.Dispatcher, num string, gen ui
 	}
 	s.postUsageComment(num, d)
 	return true
+}
+
+// SettleRelayedBranch is spindrift recover's adopt-a-relayed-branch arm
+// (issue #2225). With no open PR on num, recover consults the driver's own
+// last genuine success self-report (result.SelfReport, issue #2223 —
+// recovered from disk by dispatch.LastSelfReportFromLogs) for evidence a
+// prior run finished the work and relayed its branch to the outbox before
+// stranding without a PR. Unlike tryAdoptRelayedBranch, this does NOT
+// require result.Outcome.Synthetic or s.readOnly — recover is
+// operator-driven and runs read-write; the capability gate inside
+// adoptRelayedBranch (BundleRelay + DraftPRCreator + OutboxDir) is what
+// still scopes it. Returns false — leaving recover's unchanged "no open PR"
+// exit — the moment the self-report isn't a genuine success or nothing was
+// actually relayable.
+func (s *Settle) SettleRelayedBranch(d dispatch.Dispatcher, num string, gen uint64, result dispatch.Result) bool {
+	if !result.SelfReportFound || !isSuccessSelfReport(result.SelfReport.Status) {
+		return false
+	}
+	return s.adoptAndGate(d, num, gen, result, "genuine success self-report; PR opened on relayed branch")
 }
 
 // adoptRelayedBranch is tryAdoptRelayedBranch's PR-opening step: relay num's
