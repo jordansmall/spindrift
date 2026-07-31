@@ -21,6 +21,7 @@ type fakeEnvironment struct {
 	runtimes       map[string]bool
 	gitConfig      map[string]string
 	repoSlug       string
+	remoteURL      string
 }
 
 func (f fakeEnvironment) LookPath(file string) (string, error) {
@@ -41,6 +42,8 @@ func (f fakeEnvironment) GHAuthToken() (string, error) { return f.ghAuthToken, f
 func (f fakeEnvironment) GitConfig(key string) string { return f.gitConfig[key] }
 
 func (f fakeEnvironment) GitRemoteRepoSlug() string { return f.repoSlug }
+
+func (f fakeEnvironment) GitRemoteURL() string { return f.remoteURL }
 
 func withPodman() fakeEnvironment {
 	return fakeEnvironment{runtimes: map[string]bool{"podman": true}}
@@ -1178,7 +1181,7 @@ func passingForge() *forge.Fake {
 // IssueTracker and CodeForge seams regardless of the collected settings, so
 // tests can inject a forge.Fake instead of shelling out to gh/Jira.
 func fakeForgeBuilder(f *forge.Fake) ForgeBuilder {
-	return func(repoSlug string, tracker trackerSettings, ghToken, jiraToken string) (forge.IssueTracker, forge.CodeForge) {
+	return func(repoSlug string, tracker trackerSettings, ghToken, jiraToken, forgejoToken string) (forge.IssueTracker, forge.CodeForge) {
 		return f, f
 	}
 }
@@ -1290,6 +1293,69 @@ func TestRender_HappyPath_ReturnsFourFiles(t *testing.T) {
 	}
 }
 
+func TestRender_ForgejoCodeberg_ConfiguresBothSeamsOmitsDefaultBaseURL(t *testing.T) {
+	a := answers{
+		repoSlug:         "owner/repo",
+		runtime:          "podman",
+		gitUserName:      "Ada",
+		gitUserEmail:     "ada@example.com",
+		tracker:          trackerSettings{issueTracker: "forgejo", forgejoBaseURL: "https://codeberg.org"},
+		forgejoToken:     "forgejo-faketoken",
+		claudeOAuthToken: "claude-oauth-faketoken",
+	}
+
+	files := render(a)
+
+	byPath := make(map[string]scaffoldFile, len(files))
+	for _, f := range files {
+		byPath[f.path] = f
+	}
+
+	flakeNix := byPath["flake.nix"]
+	if !strings.Contains(flakeNix.content, `settings.issueDiscovery.issueTracker = "forgejo"`) {
+		t.Errorf("expected flake.nix to configure the forgejo issue tracker, got:\n%s", flakeNix.content)
+	}
+	if !strings.Contains(flakeNix.content, `forge.backend = "forgejo"`) {
+		t.Errorf("expected flake.nix to configure the forgejo code forge, got:\n%s", flakeNix.content)
+	}
+	if strings.Contains(flakeNix.content, "issues.forgejo.baseURL") {
+		t.Errorf("expected flake.nix to omit issues.forgejo.baseURL for the codeberg default, got:\n%s", flakeNix.content)
+	}
+
+	harnessEnv := byPath["harness.env"]
+	if !strings.Contains(harnessEnv.content, "FORGEJO_TOKEN=forgejo-faketoken") {
+		t.Errorf("expected harness.env to contain FORGEJO_TOKEN, got:\n%s", harnessEnv.content)
+	}
+	if strings.Contains(harnessEnv.content, "GH_TOKEN=") {
+		t.Errorf("expected harness.env to omit GH_TOKEN when the tracker is forgejo, got:\n%s", harnessEnv.content)
+	}
+}
+
+func TestRender_ForgejoSelfHosted_EmitsBaseURL(t *testing.T) {
+	a := answers{
+		repoSlug:         "owner/repo",
+		runtime:          "podman",
+		gitUserName:      "Ada",
+		gitUserEmail:     "ada@example.com",
+		tracker:          trackerSettings{issueTracker: "forgejo", forgejoBaseURL: "https://git.example.com"},
+		forgejoToken:     "forgejo-faketoken",
+		claudeOAuthToken: "claude-oauth-faketoken",
+	}
+
+	files := render(a)
+
+	var flakeNix string
+	for _, f := range files {
+		if f.path == "flake.nix" {
+			flakeNix = f.content
+		}
+	}
+
+	if !strings.Contains(flakeNix, `issues.forgejo.baseURL = "https://git.example.com"`) {
+		t.Errorf("expected flake.nix to contain the self-hosted forgejo baseURL, got:\n%s", flakeNix)
+	}
+}
+
 func TestRender_AnthropicAPIKey_WrittenWhenNoOAuthToken(t *testing.T) {
 	a := answers{
 		repoSlug:        "jordansmall/spindrift",
@@ -1367,5 +1433,135 @@ func TestRender_NixSpecialChars_AreEscaped(t *testing.T) {
 				t.Errorf("expected flake.nix to contain escaped %q, got:\n%s", tc.wantEsc, flakeNix)
 			}
 		})
+	}
+}
+
+func TestRunQuickstart_CodebergRemote_UsesForgejoBackend(t *testing.T) {
+	dir := t.TempDir()
+	var out bytes.Buffer
+	env := fakeEnvironment{
+		remoteURL: "https://codeberg.org/owner/repo.git",
+		env:       map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "claude-oauth-faketoken"},
+		runtimes:  map[string]bool{"podman": true},
+	}
+	stdin := strings.NewReader(strings.Join([]string{
+		"",                  // repoSlug default owner/repo
+		"",                  // runtime default podman
+		"Ada Lovelace",      // git user name
+		"ada@example.com",   // git user email
+		"forgejo-faketoken", // Forgejo token
+	}, "\n") + "\n")
+
+	if err := runQuickstart(dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false); err != nil {
+		t.Fatalf("runQuickstart: %v", err)
+	}
+
+	transcript := out.String()
+	if !strings.Contains(transcript, "codeberg.org") {
+		t.Errorf("expected transcript to mention codeberg.org, got:\n%s", transcript)
+	}
+	if strings.Contains(transcript, "Backend (github/forgejo)") {
+		t.Errorf("expected no backend prompt for a codeberg.org remote, got:\n%s", transcript)
+	}
+	if !strings.Contains(transcript, "Forgejo token validated") {
+		t.Errorf("expected transcript to confirm forgejo token validation, got:\n%s", transcript)
+	}
+
+	flakeNix, err := os.ReadFile(filepath.Join(dir, "flake.nix"))
+	if err != nil {
+		t.Fatalf("read flake.nix: %v", err)
+	}
+	if !strings.Contains(string(flakeNix), `settings.issueDiscovery.issueTracker = "forgejo"`) {
+		t.Errorf("expected flake.nix to set issueTracker to forgejo, got:\n%s", flakeNix)
+	}
+	if !strings.Contains(string(flakeNix), `forge.backend = "forgejo"`) {
+		t.Errorf("expected flake.nix to set codeForge to forgejo, got:\n%s", flakeNix)
+	}
+	if strings.Contains(string(flakeNix), "issues.forgejo.baseURL") {
+		t.Errorf("expected flake.nix not to emit an explicit forgejo baseURL for the codeberg default, got:\n%s", flakeNix)
+	}
+
+	harnessEnv, err := os.ReadFile(filepath.Join(dir, "harness.env"))
+	if err != nil {
+		t.Fatalf("read harness.env: %v", err)
+	}
+	if !strings.Contains(string(harnessEnv), "FORGEJO_TOKEN=forgejo-faketoken") {
+		t.Errorf("expected harness.env to carry FORGEJO_TOKEN, got:\n%s", harnessEnv)
+	}
+	if strings.Contains(string(harnessEnv), "GH_TOKEN=") {
+		t.Errorf("expected harness.env not to carry GH_TOKEN on the forgejo path, got:\n%s", harnessEnv)
+	}
+}
+
+func TestRunQuickstart_SelfHostedForgejo_AsksBackendAndEmitsBaseURL(t *testing.T) {
+	dir := t.TempDir()
+	var out bytes.Buffer
+	env := fakeEnvironment{
+		remoteURL: "https://git.example.com/team/proj.git",
+		env:       map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "claude-oauth-faketoken"},
+		runtimes:  map[string]bool{"podman": true},
+	}
+	stdin := strings.NewReader(strings.Join([]string{
+		"forgejo",           // backend
+		"",                  // repoSlug default team/proj
+		"",                  // runtime default podman
+		"Ada Lovelace",      // git user name
+		"ada@example.com",   // git user email
+		"forgejo-faketoken", // Forgejo token
+	}, "\n") + "\n")
+
+	if err := runQuickstart(dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false); err != nil {
+		t.Fatalf("runQuickstart: %v", err)
+	}
+
+	transcript := out.String()
+	if !strings.Contains(transcript, "Backend (github/forgejo)") {
+		t.Errorf("expected transcript to ask for backend on an unrecognized host, got:\n%s", transcript)
+	}
+
+	flakeNix, err := os.ReadFile(filepath.Join(dir, "flake.nix"))
+	if err != nil {
+		t.Fatalf("read flake.nix: %v", err)
+	}
+	if !strings.Contains(string(flakeNix), `settings.repository.repoSlug = "team/proj"`) {
+		t.Errorf("expected flake.nix to carry the detected repoSlug team/proj, got:\n%s", flakeNix)
+	}
+	if !strings.Contains(string(flakeNix), `issues.forgejo.baseURL = "https://git.example.com"`) {
+		t.Errorf("expected flake.nix to carry the self-hosted forgejo baseURL, got:\n%s", flakeNix)
+	}
+	if !strings.Contains(string(flakeNix), `forge.backend = "forgejo"`) {
+		t.Errorf("expected flake.nix to set codeForge to forgejo, got:\n%s", flakeNix)
+	}
+}
+
+func TestRunQuickstart_InvalidForgejoToken_AbortsNamingKnobs(t *testing.T) {
+	dir := t.TempDir()
+	var out bytes.Buffer
+	env := fakeEnvironment{
+		remoteURL: "https://codeberg.org/owner/repo.git",
+		env:       map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "claude-oauth-faketoken"},
+		runtimes:  map[string]bool{"podman": true},
+	}
+	stdin := strings.NewReader(strings.Join([]string{
+		"",                // repoSlug default owner/repo
+		"",                // runtime default podman
+		"Ada Lovelace",    // git user name
+		"ada@example.com", // git user email
+		"bad-token",       // Forgejo token
+	}, "\n") + "\n")
+
+	f := forge.NewFake()
+	f.ProbeErr = forge.ErrAuthFailure
+
+	err := runQuickstart(dir, env, &fakeCommandRunner{}, fakeForgeBuilder(f), &out, stdin, true, false)
+	if err == nil {
+		t.Fatalf("expected runQuickstart to return an error for a rejected forgejo token")
+	}
+	if !strings.Contains(err.Error(), "FORGEJO_TOKEN") || !strings.Contains(err.Error(), "FORGEJO_BASE_URL") {
+		t.Errorf("expected error to name both FORGEJO_TOKEN and FORGEJO_BASE_URL, got: %v", err)
+	}
+
+	if _, statErr := os.Stat(filepath.Join(dir, "flake.nix")); !os.IsNotExist(statErr) {
+		t.Errorf("expected no flake.nix to be written when forgejo token validation fails, got stat err: %v", statErr)
 	}
 }

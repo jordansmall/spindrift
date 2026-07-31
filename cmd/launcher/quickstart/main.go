@@ -118,6 +118,65 @@ func parseGitHubRepoSlug(remoteURL string) string {
 	return rest
 }
 
+// GitRemoteURL returns the raw "origin" remote URL, or "" if there is no
+// remote or git is unavailable.
+func (hostEnvironment) GitRemoteURL() string {
+	out, err := exec.Command("git", "remote", "get-url", "origin").Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// parseRemoteHostSlug extracts the host and "owner/repo" slug from a git
+// remote URL in any common form — scp-like ssh (git@host:owner/repo.git),
+// ssh:// (ssh://git@host/owner/repo.git), or https
+// (https://host/owner/repo.git) — stripping a trailing ".git". Forgejo/Gitea
+// repos are always a single owner/repo pair (no nested groups), so a path
+// that is not exactly one "/" apart yields ("",""). Returns ("","") for any
+// input it cannot parse into host + owner/repo.
+func parseRemoteHostSlug(remoteURL string) (host, slug string) {
+	s := strings.TrimSpace(remoteURL)
+	s = strings.TrimSuffix(s, ".git")
+
+	if i := strings.Index(s, "://"); i >= 0 {
+		s = s[i+len("://"):]
+	}
+	if i := strings.Index(s, "@"); i >= 0 {
+		s = s[i+1:]
+	}
+
+	colonIdx := strings.Index(s, ":")
+	slashIdx := strings.Index(s, "/")
+	var sep int
+	switch {
+	case colonIdx < 0 && slashIdx < 0:
+		return "", ""
+	case colonIdx < 0:
+		sep = slashIdx
+	case slashIdx < 0:
+		sep = colonIdx
+	case colonIdx < slashIdx:
+		sep = colonIdx
+	default:
+		sep = slashIdx
+	}
+
+	host = s[:sep]
+	path := s[sep+1:]
+
+	if host == "" || strings.ContainsAny(host, " \t") {
+		return "", ""
+	}
+
+	path = strings.Trim(path, "/")
+	if path == "" || strings.Count(path, "/") != 1 {
+		return "", ""
+	}
+
+	return host, path
+}
+
 // hostCommandRunner is the real CommandRunner: runs the named command with
 // the process's own stdio. Used for the `claude setup-token` finish-line
 // step; `spindrift build` wiring is still unbuilt (ADR 0027).
