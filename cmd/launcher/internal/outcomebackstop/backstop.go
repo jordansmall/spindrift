@@ -109,13 +109,16 @@ func Run(cfg Config, w io.Writer) error {
 	return emit(w, cfg.Issue, cfg.Branch, note, cfg.Nonce)
 }
 
-// emit builds and writes the final SPINDRIFT_OUTCOME line for w.
+// emit builds and writes the final SPINDRIFT_OUTCOME line for w, flagged
+// synthetic=true (issue #2223) since it's the backstop's own manufactured
+// terminal signal, not one the driver emitted.
 func emit(w io.Writer, issue, landing, note, nonce string) error {
 	o := outcome.Outcome{
-		Issue:   issue,
-		Landing: landing,
-		Status:  "blocked",
-		Note:    note,
+		Issue:     issue,
+		Landing:   landing,
+		Status:    "blocked",
+		Note:      note,
+		Synthetic: true,
 	}
 	line := o.Line() + " nonce=" + nonce
 	_, err := fmt.Fprintln(w, line)

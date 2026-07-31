@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"spindrift.dev/launcher/internal/outcome"
 	"spindrift.dev/launcher/internal/retry"
 )
 
@@ -90,6 +91,37 @@ func TestRun_ResearchKind(t *testing.T) {
 	}
 	if len(git.calls) != 0 {
 		t.Fatalf("expected git never called for research kind, got %v", git.calls)
+	}
+}
+
+// TestRun_EmitsSyntheticFlag verifies every backstop-emitted line carries
+// synthetic=true (issue #2223), and that it round-trips through
+// outcome.Parse as Outcome.Synthetic == true alongside Status == "blocked".
+func TestRun_EmitsSyntheticFlag(t *testing.T) {
+	git := &fakeGit{responses: map[string]fakeResult{
+		"rev-list": {stdout: "1\n"},
+	}}
+	clk := &fakeClock{}
+	cfg := baseConfig(git, clk)
+	cfg.WriteEnabled = true
+
+	var buf bytes.Buffer
+	if err := Run(cfg, &buf); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	line := strings.TrimSpace(buf.String())
+	if !strings.Contains(line, "synthetic=true") {
+		t.Fatalf("expected synthetic=true in line, got %q", line)
+	}
+	o, err := outcome.Parse(line)
+	if err != nil {
+		t.Fatalf("outcome.Parse(%q): %v", line, err)
+	}
+	if !o.Synthetic {
+		t.Fatalf("expected Synthetic == true, got %+v", o)
+	}
+	if o.Status != "blocked" {
+		t.Fatalf("expected Status == blocked, got %+v", o)
 	}
 }
 
