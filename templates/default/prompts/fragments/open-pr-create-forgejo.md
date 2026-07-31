@@ -1,0 +1,1 @@
+2. `fj pr create --base ${BASE_BRANCH} --head ${BRANCH} --title "WIP: <conventional title>" --body "<summary>"` — the `WIP: ` prefix opens it as a draft; the launcher strips it and flips the PR ready once CI is green, then merges (it watches CI and merges host-side via the forgejo PRForge, so there is nothing left for you to watch here). Do NOT run `gh pr create`.

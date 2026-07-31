@@ -163,11 +163,15 @@ Harness bundles your commits out of the container after you exit.
    onto the Integration branch host-side. There is no PR to open, no CI to
    watch, and nothing further for you to do.
 
+**`CODE_FORGE=forgejo`** (Forgejo/Gitea Code Forge — the Box opens the PR via
+`fj pr create` and the launcher watches CI and merges it host-side, ADR 0038
++ issue #1961): continue with OPEN A PULL REQUEST below.
+
 **`CODE_FORGE=github`** (default): continue with OPEN A PULL REQUEST below.
 
 # OPEN A PULL REQUEST
 
-${OPEN_PR_PUSH_READ_WRITE_STEP}${OPEN_PR_PUSH_READ_ONLY_STEP}${OPEN_PR_CREATE_READ_WRITE_STEP}${OPEN_PR_CREATE_READ_ONLY_STEP}${PR_BODY_CLOSES_STEP}${PR_BODY_LOCAL_REF_STEP}${PR_BODY_LOCAL_NOREF_STEP}The PR opens as a **draft** and stays a **draft** — the launcher flips it to
+${OPEN_PR_PUSH_READ_WRITE_STEP}${OPEN_PR_PUSH_READ_ONLY_STEP}${OPEN_PR_CREATE_READ_WRITE_STEP}${OPEN_PR_CREATE_READ_WRITE_FORGEJO_STEP}${OPEN_PR_CREATE_READ_ONLY_STEP}${PR_BODY_CLOSES_STEP}${PR_BODY_LOCAL_REF_STEP}${PR_BODY_LOCAL_NOREF_STEP}The PR opens as a **draft** and stays a **draft** — the launcher flips it to
 ready once CI reaches green, immediately before it merges (the launcher
 already gates on CI green itself, so there is nothing left for you to watch
 or confirm here). Do NOT merge and do NOT flip it yourself; the LAUNCHER
@@ -176,8 +180,9 @@ rebase-merge, and the complete-label swap.
 
 # OUTCOME
 
-(`CODE_FORGE=github` only — `CODE_FORGE=git` and `CODE_FORGE=local` already
-printed their outcome line and stopped under LAND THE CHANGE above.)
+(`CODE_FORGE=github` and `CODE_FORGE=forgejo` only — `CODE_FORGE=git` and
+`CODE_FORGE=local` already printed their outcome line and stopped under LAND
+THE CHANGE above.)
 
 ${OUTCOME_LANDING_READ_WRITE_STEP}${OUTCOME_LANDING_READ_ONLY_STEP}Grammar: `SPINDRIFT_OUTCOME issue=${ISSUE_NUMBER} landing=<landing-ref> status=<status> note=<short reason> nonce=${RUN_NONCE}`
 — one line, space-delimited fields, `note` then `nonce` last (`note` may

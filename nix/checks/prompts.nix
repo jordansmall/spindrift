@@ -814,4 +814,20 @@ in
         grep -q 'SPINDRIFT_ISSUE_INTENT ''${RUN_NONCE}' ${../../templates/default/prompts/fragments/filer-file-relay.md}
         touch $out
       '';
+
+  # The OPEN A PULL REQUEST read-write create step forks on CODE_FORGE
+  # (issue #1963, OPEN_PR_CREATE_RW_GH/OPEN_PR_CREATE_RW_FORGEJO computed in
+  # entrypoint.sh): the github fragment must keep `gh pr create` and never
+  # invoke `fj pr create`, and the new forgejo fragment must invoke
+  # `fj pr create` and never `gh pr create`. Same static, eval-only grep
+  # shape as the other fragment-content checks above.
+  open-pr-create-fragments-fork-forge-on-read-write =
+    pkgs.runCommand "open-pr-create-fragments-fork-forge-on-read-write" { }
+      ''
+        grep -q 'gh pr create' ${../../templates/default/prompts/fragments/open-pr-create-git.md}
+        ! grep -q 'fj pr create' ${../../templates/default/prompts/fragments/open-pr-create-git.md}
+        grep -q 'fj pr create' ${../../templates/default/prompts/fragments/open-pr-create-forgejo.md}
+        ! grep -q 'gh pr create' ${../../templates/default/prompts/fragments/open-pr-create-forgejo.md}
+        touch $out
+      '';
 }

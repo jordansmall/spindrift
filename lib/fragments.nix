@@ -347,10 +347,23 @@
   # Claude Code's stream-json JSONL transport) -- the launcher opens the
   # draft PR host-side from it (forge.DraftPRCreator), the same
   # host-mediation shape RelayBundle already gives the push step.
+  #
+  # The read-write case further forks on CODE_FORGE (issue #1963,
+  # OPEN_PR_CREATE_RW_GH/OPEN_PR_CREATE_RW_FORGEJO computed in
+  # entrypoint.sh): a github Box opens its draft PR with `gh pr create`, a
+  # forgejo Box with `fj pr create` (#1961's forgejo PRForge watches CI and
+  # merges the box-opened draft host-side). Read-only stays forge-agnostic
+  # -- it never forks on CODE_FORGE -- because SPINDRIFT_PR_INTENT is
+  # relayed and opened host-side regardless of which forge backend answers.
   {
-    gate = "BOX_ACCESS_READ_WRITE";
+    gate = "OPEN_PR_CREATE_RW_GH";
     fragment = "open-pr-create-git.md";
     var = "OPEN_PR_CREATE_READ_WRITE_STEP";
+  }
+  {
+    gate = "OPEN_PR_CREATE_RW_FORGEJO";
+    fragment = "open-pr-create-forgejo.md";
+    var = "OPEN_PR_CREATE_READ_WRITE_FORGEJO_STEP";
   }
   {
     gate = "BOX_ACCESS_READ_ONLY";
