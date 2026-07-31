@@ -887,6 +887,37 @@ the authoritative list.
 | `PODMAN_NETWORK`       | —       | `sandbox`          | `--network` value for podman run; set `pasta` to restrict egress |
 | `BWRAP_UNSHARE_NET`    | —       | `sandbox`          | non-empty adds `--unshare-net` to the bwrap runner      |
 
+#### Reaching a local/self-hosted model server under egress restriction
+
+A local/self-hosted opencode Provider — Ollama, LM Studio, or a llama.cpp
+server (Tier 5; [ADR 0009](adr/0009-agent-cli-is-a-pluggable-driver.md)'s
+issue-#269 amendment) — is an OpenAI-compatible endpoint on the host loopback
+or LAN (`http://localhost:11434/v1`, `http://127.0.0.1:1234/v1`,
+`http://127.0.0.1:8080/v1`). Whether the Box can reach it turns entirely on the
+two knobs above, and the two runners differ:
+
+- **Defaults, either runner — already reachable.** bwrap with
+  `BWRAP_UNSHARE_NET` unset shares the host network namespace, and podman's
+  default bridge permits general egress, so a host-loopback/LAN model server is
+  reachable with no extra wiring. Selecting a local Provider opens nothing new;
+  the reachability is already latent.
+- **Restricted egress, podman — use a compound `--network` value.**
+  `PODMAN_NETWORK` is passed verbatim to `--network`, so a backend that both
+  restricts egress *and* reopens host-loopback works through the existing knob:
+  `PODMAN_NETWORK=pasta:--map-gw` or
+  `PODMAN_NETWORK=slirp4netns:allow_host_loopback=true`. Plain-default host-loopback
+  reach is rootless-podman-version/`containers.conf`-dependent — verify it against
+  your podman rather than assume it.
+- **Restricted egress, bwrap — unsupported today.** `BWRAP_UNSHARE_NET=1` is
+  all-or-nothing: it drops *all* egress (including GitHub), and no
+  slirp4netns/pasta companion is wired to punch a scoped host-loopback hole. A
+  local Provider under `BWRAP_UNSHARE_NET=1` is not reachable until such a
+  companion lands.
+
+Reopening host loopback under a restricted-egress config is a deliberate
+weakening of that posture — treat it as an explicit opt-in, never something a
+Provider selection implies silently.
+
 ### Claude Code output caps
 
 Unlike every knob above, `BASH_MAX_OUTPUT_LENGTH` and `MAX_MCP_OUTPUT_TOKENS`
