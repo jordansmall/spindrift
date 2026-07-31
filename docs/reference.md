@@ -1609,8 +1609,9 @@ when the repo variable is unset) and `FORGEJO_TOKEN` from the secret.
    Actions → Runners). Codeberg's shared runners cannot build the agent
    image — it needs Nix and the build is heavy/long — so a self-hosted
    runner is required; provision it with Nix build capability plus `curl`
-   and `jq` on `PATH` (the runner-side blocked-release and park-on-failure
-   steps talk to the Forgejo REST API directly with `curl`/`jq` because `fj`
+   and `jq` on `PATH` (the up-front claim, the blocked-release, and the
+   park-on-failure steps all talk to the Forgejo REST API through the
+   `forgejo-label-swap` composite, which shells `curl`/`jq`, because `fj`
    has no label verb and is not guaranteed on the runner). If your runner
    carries a different label, edit each workflow's `runs-on: self-hosted`
    to match.
@@ -1622,7 +1623,11 @@ when the repo variable is unset) and `FORGEJO_TOKEN` from the secret.
    (`vars.*`, optionally `FORGEJO_BASE_URL` too) — same secrets/variables
    the `agent-setup` composite action (`./.github/actions/agent-setup`,
    which Forgejo resolves from the checked-out tree the same as GitHub)
-   consumes on the GitHub set.
+   consumes on the GitHub set. The forgejo workflows call it with
+   `forge: forgejo`, which skips agent-setup's GitHub-only rate-limit smoke
+   (`gh api rate_limit`) and `gh issue edit` claim — both target
+   api.github.com, which a Forgejo token cannot authenticate against — and
+   claim the issue through `forgejo-label-swap` before the build instead.
 4. **Ensure the label families exist** on the repo: the four triage labels
    for dispatch/recover, and — if using research — the `agent-research*`
    family; see [Create the research
