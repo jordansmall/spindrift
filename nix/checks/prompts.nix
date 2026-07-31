@@ -6,6 +6,7 @@ let
     promptHarness
     fixPromptHarness
     researchPromptHarness
+    researchVerdictsHarness
     batsHarness
     ;
 
@@ -328,6 +329,33 @@ in
     pkgs.runCommand "mkharness-prompt-research-outcome-default-unchanged" { }
       ''
         diff ${../../templates/default/prompts/research-prompt.md} ${batsHarness.promptDir}/research-prompt.md
+        touch $out
+      '';
+
+  # A custom RESEARCH_VERDICTS set (issue #2201) flows into the baked research
+  # prompt's verdict contract: the VERDICT bullets, the enumeration, and the
+  # status alternation all render from the configured set, and no default
+  # verdict token survives in the contract. Proves the set reaches the prompt,
+  # not only the launcher.
+  mkharness-prompt-research-verdicts-custom-rendered =
+    pkgs.runCommand "mkharness-prompt-research-verdicts-custom-rendered" { }
+      ''
+        p=${researchVerdictsHarness.promptDir}/research-prompt.md
+        grep -qF -- '- `approve` — relevant and worth doing; promote it.' "$p" \
+          || { echo "custom verdict bullet missing from rendered research prompt" >&2; exit 1; }
+        grep -qF -- '- `decline` — not worth doing.' "$p" \
+          || { echo "custom verdict bullet missing from rendered research prompt" >&2; exit 1; }
+        grep -qF -- 'status=<approve|decline>' "$p" \
+          || { echo "custom status alternation missing from rendered research prompt" >&2; exit 1; }
+        grep -qF -- '`approve` / `decline`' "$p" \
+          || { echo "custom enumeration missing from rendered research prompt" >&2; exit 1; }
+        if grep -qF -- 'status=<recommend|reject|unclear>' "$p"; then
+          echo "default status alternation must not survive a custom verdict set" >&2
+          exit 1
+        fi
+        # The outcome contract is still injected exactly once.
+        [ "$(grep -c '# POST THE VERDICT' "$p")" -eq 1 ] \
+          || { echo "outcome contract not injected exactly once under a custom set" >&2; exit 1; }
         touch $out
       '';
 
