@@ -1194,15 +1194,36 @@ func TestValidate_MixedLocalStillRequiresRepoSlugAndGhToken(t *testing.T) {
 
 // TestValidate_ResearchSelfContainedExemptsRepoSlugAndGhToken verifies that
 // validate() does not require REPO_SLUG or GH_TOKEN for a research dispatch
-// with selfContained set (issue #2202, --self-contained): the Box clones no
-// repo and explores none, so neither field is meaningful.
+// with selfContained set and a local issue tracker (issue #2202,
+// --self-contained): the Box clones no repo and explores none, and the local
+// tracker supplies the issue content directly, so neither field is
+// meaningful.
 func TestValidate_ResearchSelfContainedExemptsRepoSlugAndGhToken(t *testing.T) {
 	c := applyDispatchKind(minimalValidConfig(), dispatchKindResearch)
 	c.selfContained = true
+	c.issueTracker = "local"
 	c.repoSlug = ""
 	c.ghToken = ""
 	if err := validate(c); err != nil {
-		t.Errorf("validate() should exempt REPO_SLUG/GH_TOKEN for self-contained research: %v", err)
+		t.Errorf("validate() should exempt REPO_SLUG/GH_TOKEN for self-contained research with a local issue tracker: %v", err)
+	}
+}
+
+// TestValidate_ResearchSelfContainedGithubTrackerStillRequiresRepoSlug
+// verifies that the self-contained REPO_SLUG/GH_TOKEN relaxation does not
+// fire for a github issue tracker (issue #2202): a self-contained research
+// run against a github-hosted issue still needs REPO_SLUG/GH_TOKEN to read
+// the issue and post the verdict, so validate() must keep requiring it.
+func TestValidate_ResearchSelfContainedGithubTrackerStillRequiresRepoSlug(t *testing.T) {
+	c := applyDispatchKind(minimalValidConfig(), dispatchKindResearch)
+	c.selfContained = true
+	c.repoSlug = ""
+	err := validate(c)
+	if err == nil {
+		t.Fatal("validate() must still require REPO_SLUG for self-contained research with a github issue tracker")
+	}
+	if !strings.Contains(err.Error(), "REPO_SLUG") {
+		t.Errorf("error should mention REPO_SLUG, got: %v", err)
 	}
 }
 
