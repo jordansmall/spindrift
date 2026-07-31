@@ -1,10 +1,13 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
 
+	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/testutil"
 )
@@ -93,6 +96,84 @@ func TestRecoverByNumber_DraftPRSkipped(t *testing.T) {
 	}
 	if stalePRLabel.MatchString(out) {
 		t.Errorf("console output must not use the stale pr= label; got: %q", out)
+	}
+}
+
+// TestRecoverByNumber_RelayedBranchAdoptedMergesAndCompletes covers issue
+// #2225's new relayed-branch adoption arm: with no open PR but a genuine
+// success self-report recovered from disk, recoverByNumber must open a PR on
+// the relayed branch itself and drive it through the normal merge gate to
+// agent-complete, rather than immediately reporting "no open PR".
+func TestRecoverByNumber_RelayedBranchAdoptedMergesAndCompletes(t *testing.T) {
+	c := reconcileConfig()
+	fc := forge.NewFake(dispatchLabels(c))
+	fc.BranchPrefix = c.branchPrefix
+
+	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.inProgressLabel}})
+	branch := fc.AgentBranch("42")
+	// No PR registered for the branch -- forge.ResolveOpenPR must resolve
+	// res.Found=false so recoverByNumber's new adopt arm actually fires.
+	fc.CreateDraftPRURL = testReconcilePR
+	// A leading PENDING proves this run's own checks registered, matching
+	// TestRecoverByNumber_GreenMergesAndCompletes' own reasoning (#1652).
+	fc.SetCheckStates(testReconcilePR, []forge.RollupState{forge.StatePending, forge.StateSuccess, forge.StateSuccess})
+
+	dir := tempLogDir(t)
+	logPath := filepath.Join(dispatch.HostLogDirFor(dir), "issue-42.log")
+	if err := os.WriteFile(logPath, []byte("SPINDRIFT_OUTCOME: success\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	cf := fc.AsGithubReadOnly()
+	err := recoverByNumber(c, fc, cf, dir, testFactory(t, dir, nil), newSettle(c, fc, testWired(fc), cf), "42")
+
+	if err != nil {
+		t.Errorf("expected nil error on relayed-branch adopt path; got %v", err)
+	}
+	if fc.Merged != testReconcilePR {
+		t.Errorf("expected PR to be merged; fc.Merged=%q", fc.Merged)
+	}
+	if len(fc.TransitionStateCalls) == 0 {
+		t.Fatal("expected TransitionState call for completeLabel")
+	}
+	if last := fc.TransitionStateCalls[len(fc.TransitionStateCalls)-1]; last.To != forge.Complete {
+		t.Errorf("last transition To=%v, want Complete", last.To)
+	}
+	if len(fc.CreateDraftPRCalls) != 1 {
+		t.Fatalf("CreateDraftPRCalls = %+v, want exactly 1", fc.CreateDraftPRCalls)
+	}
+	if fc.CreateDraftPRCalls[0].Head != branch {
+		t.Errorf("CreateDraftPRCalls[0].Head = %q, want %q", fc.CreateDraftPRCalls[0].Head, branch)
+	}
+}
+
+// TestRecoverByNumber_NoPRNoSelfReportStillNoOps proves the new relayed-
+// branch adoption arm never fires when there is neither an open PR nor a
+// self-report on disk to recover -- the pre-#2225 no-PR path (labels
+// untouched, no PR opened) must be exactly unchanged.
+func TestRecoverByNumber_NoPRNoSelfReportStillNoOps(t *testing.T) {
+	c := reconcileConfig()
+	fc := forge.NewFake()
+	fc.BranchPrefix = c.branchPrefix
+
+	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.inProgressLabel}})
+	// No PR registered for the branch, and no log written -- tempLogDir's
+	// dir stays empty, so dispatch.LastSelfReportFromLogs finds nothing.
+
+	dir := tempLogDir(t)
+	err := recoverByNumber(c, fc, fc, dir, testFactory(t, dir, nil), newSettle(c, fc, testWired(fc), fc), "42")
+
+	if err == nil {
+		t.Error("expected error for no-PR, no-self-report case; got nil")
+	}
+	if fc.Merged != "" {
+		t.Errorf("no-PR case must not trigger merge; fc.Merged=%q", fc.Merged)
+	}
+	if len(fc.TransitionStateCalls) != 0 {
+		t.Errorf("no-PR case must not trigger label churn; got %v", fc.TransitionStateCalls)
+	}
+	if len(fc.CreateDraftPRCalls) != 0 {
+		t.Errorf("no-PR, no-self-report case must not open a PR; got %+v", fc.CreateDraftPRCalls)
 	}
 }
 
