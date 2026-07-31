@@ -82,16 +82,22 @@ func conflictLogPathFor(pwd, number string) string {
 // Run dispatches the initial box for this issue.
 func (d *Dispatch) Run() Result {
 	logPath := d.logPath()
-	return d.dispatchWithRetry(logPath, func() error {
+	return d.dispatchWithRetry(logPath, func(resumeAfterHold bool) error {
 		fmt.Fprintf(d.humanOut(), "    -> #%s: %s\n", d.number, d.title)
-		return d.runOnce(logPath, buildBoxEnv(d.cfg, d.number, d.title, 0, "", d.nonce), d.cacheDir)
+		env := buildBoxEnv(d.cfg, d.number, d.title, 0, "", d.nonce)
+		if resumeAfterHold {
+			env["RESUME_AFTER_HOLD"] = "1"
+		}
+		return d.runOnce(logPath, env, d.cacheDir)
 	})
 }
 
-// Fix dispatches a fix box for the given 1-based pass number.
+// Fix dispatches a fix box for the given 1-based pass number. resumeAfterHold
+// is ignored: a fix pass already resumes its session via FIX_PASS>0, so a
+// 429 hold mid-fix needs no extra signal.
 func (d *Dispatch) Fix(pass int, ciFailureSummary string) Result {
 	logPath := d.fixLogPath(pass)
-	return d.dispatchWithRetry(logPath, func() error {
+	return d.dispatchWithRetry(logPath, func(_ bool) error {
 		fmt.Fprintf(d.humanOut(), "    -> #%s (fix-pass-%d): %s\n", d.number, pass, d.title)
 		return d.runOnce(logPath, buildBoxEnv(d.cfg, d.number, d.title, pass, ciFailureSummary, d.nonce), d.cacheDir)
 	})

@@ -35,13 +35,14 @@ import (
 // classification (no transient marker at all) returns as before, so
 // status=missing still means "box finished cleanly but told us nothing, and
 // there's nothing to retry."
-func (d *Dispatch) dispatchWithRetry(logPath string, once func() error) Result {
+func (d *Dispatch) dispatchWithRetry(logPath string, once func(resumeAfterHold bool) error) Result {
 	holdCount := 0
 	transientCount := 0
 	prevWasHold := false
 
 	for {
-		err := once()
+		resumeAfterHold := prevWasHold
+		err := once(resumeAfterHold)
 
 		var cls driver.Classification
 		if err == nil {
@@ -62,6 +63,17 @@ func (d *Dispatch) dispatchWithRetry(logPath string, once func() error) Result {
 		} else {
 			if errors.Is(err, runner.ErrAlreadyRunning) {
 				return Result{AlreadyInFlight: true}
+			}
+
+			if result, ok := d.settledOutcome(logPath); ok {
+				// A non-zero exit still settles on a genuine, nonce-gated
+				// outcome the box printed before dying (issue #2075): a run
+				// resumed after a 429 hold can finish and print
+				// status=ready/blocked yet exit non-zero, and reclassifying
+				// that into another hold or an agent-failed would re-spend the
+				// tokens the resume preserved. A limit-hit box prints no
+				// outcome and still falls through to classification below.
+				return result
 			}
 
 			var clsErr error
@@ -139,25 +151,57 @@ func (d *Dispatch) successResult(logPath string) Result {
 		return Result{Success: true, ParseErr: err}
 	}
 	if found {
-		comment, commentFound, commentErr := outcome.LastCommentLineInLog(logPath, d.nonce)
-		if commentErr != nil {
-			fmt.Fprintf(os.Stderr, "    ?? #%s: comment scan: %v\n", d.number, commentErr)
-		}
-		prIntent, prIntentFound, prIntentErr := outcome.LastPRIntentInLog(logPath, d.nonce)
-		if prIntentErr != nil {
-			fmt.Fprintf(os.Stderr, "    ?? #%s: pr-intent scan: %v\n", d.number, prIntentErr)
-		}
-		issueIntents, issueIntentsErr := outcome.AllIssueIntentLinesInLog(logPath, d.nonce)
-		if issueIntentsErr != nil {
-			fmt.Fprintf(os.Stderr, "    ?? #%s: issue-intent scan: %v\n", d.number, issueIntentsErr)
-		}
-		return Result{
-			Success: true, Outcome: o, OutcomeFound: true,
-			Comment: comment, CommentFound: commentFound,
-			PRIntent: prIntent, PRIntentFound: prIntentFound,
-			IssueIntents: issueIntents, IssueIntentsFound: len(issueIntents) > 0,
-		}
+		return d.outcomeResult(logPath, o)
 	}
 	cls, clsErr := d.driver.ClassifyTransient(logPath)
 	return Result{Success: true, Classification: cls, ClassifyErr: clsErr}
+}
+
+// outcomeResult builds the fully populated Result for a parsed outcome o,
+// gathering the companion comment / PR-intent / issue-intent host-mediated
+// signals from logPath. Shared by the zero-exit success path (successResult)
+// and the non-zero-exit settled-outcome path (settledOutcome, issue #2075) so
+// both surface the identical signals.
+func (d *Dispatch) outcomeResult(logPath string, o outcome.Outcome) Result {
+	comment, commentFound, commentErr := outcome.LastCommentLineInLog(logPath, d.nonce)
+	if commentErr != nil {
+		fmt.Fprintf(os.Stderr, "    ?? #%s: comment scan: %v\n", d.number, commentErr)
+	}
+	prIntent, prIntentFound, prIntentErr := outcome.LastPRIntentInLog(logPath, d.nonce)
+	if prIntentErr != nil {
+		fmt.Fprintf(os.Stderr, "    ?? #%s: pr-intent scan: %v\n", d.number, prIntentErr)
+	}
+	issueIntents, issueIntentsErr := outcome.AllIssueIntentLinesInLog(logPath, d.nonce)
+	if issueIntentsErr != nil {
+		fmt.Fprintf(os.Stderr, "    ?? #%s: issue-intent scan: %v\n", d.number, issueIntentsErr)
+	}
+	return Result{
+		Success: true, Outcome: o, OutcomeFound: true,
+		Comment: comment, CommentFound: commentFound,
+		PRIntent: prIntent, PRIntentFound: prIntentFound,
+		IssueIntents: issueIntents, IssueIntentsFound: len(issueIntents) > 0,
+	}
+}
+
+// settledOutcome scans logPath for this run's nonce-bearing SPINDRIFT_OUTCOME
+// line after a NON-ZERO exit. When one parses cleanly it returns the fully
+// populated Result (Success and OutcomeFound true) plus ok=true, so a run
+// that finished its work and printed status=ready/blocked yet exited non-zero
+// -- a run resumed after a 429 hold whose driver process dies after emitting
+// its verdict (issue #2075) -- settles on that verdict instead of being
+// reclassified into another hold or an agent-failed, re-spending the tokens
+// the resume preserved. ok=false means no genuine outcome was printed (a
+// limit-hit box prints none, and a near-miss/unparseable line is left to the
+// caller's transient classification), so the caller proceeds to classify. The
+// scan is nonce-gated exactly like successResult's: a SPINDRIFT_OUTCOME-shaped
+// line without this run's nonce is not a candidate and only logs a warning.
+func (d *Dispatch) settledOutcome(logPath string) (Result, bool) {
+	o, found, skipped, err := outcome.LastInLog(logPath, d.nonce)
+	if skipped {
+		fmt.Fprintf(os.Stderr, "    ?? #%s: outcome scan: skipped a SPINDRIFT_OUTCOME-shaped line without this run's nonce\n", d.number)
+	}
+	if err != nil || !found {
+		return Result{}, false
+	}
+	return d.outcomeResult(logPath, o), true
 }

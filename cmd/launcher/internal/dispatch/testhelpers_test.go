@@ -9,6 +9,7 @@ import (
 
 	"spindrift.dev/launcher/internal/driver"
 	driverclaude "spindrift.dev/launcher/internal/driver/claude"
+	"spindrift.dev/launcher/internal/runner"
 	"spindrift.dev/launcher/internal/usage"
 )
 
@@ -38,6 +39,33 @@ func writeFile(path, content string) error {
 // line should have no trailing newline.
 func nonceLine(d *Dispatch, line string) []byte {
 	return []byte(line + " nonce=" + d.nonce + "\n")
+}
+
+// writeOutcomeOnFinalCall configures fr to return errs[i] for the i-th Run
+// call (mirroring runner.Fake's own RunErrs semantics: the last element is
+// reused once the sequence is exhausted), writing line to that call's log
+// only when errs[i] is nil. Before issue #2075, dispatchWithRetry never
+// scanned a non-zero exit's log for an outcome, so a hold/backoff retry
+// fixture could get away with a single fr.WriteToOutput echoing the eventual
+// outcome onto every call, including the earlier, still-failing ones. Now
+// that a genuine printed outcome settles a non-zero exit immediately, that
+// shortcut would falsify the scenario under test -- an earlier attempt dying
+// with no verdict at all -- so those fixtures use this helper instead to
+// keep the outcome line on the genuinely successful call only.
+func writeOutcomeOnFinalCall(fr *runner.Fake, errs []error, line []byte) {
+	calls := 0
+	fr.RunFunc = func(box runner.Box) error {
+		i := calls
+		if i >= len(errs) {
+			i = len(errs) - 1
+		}
+		calls++
+		err := errs[i]
+		if err == nil {
+			box.Output.Write(line) //nolint:errcheck
+		}
+		return err
+	}
 }
 
 // fakeDriver is a test double for driver.Driver. ClassifyFn, when set,
