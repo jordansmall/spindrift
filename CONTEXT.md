@@ -129,8 +129,9 @@ _Avoid_: packages, baked toolchain, dependencies.
 The seam that supplies work and carries dispatch state: listing dispatchable
 issues, reading an issue's body/title/state, transitioning its Dispatch state,
 and posting comments. One of two independent axes (the other is the Code Forge).
-Implemented adapters: `github` (issues via `gh`), `jira`, and `local` (issues
-as files in the Target repo, no server). The launcher reasons in canonical
+Implemented adapters: `github` (issues via `gh`), `forgejo` (Forgejo/Gitea REST
+API; Codeberg the default instance), `jira`, and `local` (issues as files in the
+Target repo, no server). The launcher reasons in canonical
 Dispatch states, never in a backend's native mechanism.
 _Avoid_: issue source, ticketing, backlog.
 
@@ -163,19 +164,22 @@ honors with real behavior: agent branch naming, rebase, merge/landing under
 `MERGE_MODE`, and a connectivity probe. A second axis independent of the Issue
 Tracker, freely combinable with any of them. A git endpoint always exists,
 split — like the Issue Tracker — by in-box reachability: **reachable** endpoints
-(`github`, `git`) let the Box clone from and push to them directly; the
+(`github`, `forgejo`, `git`) let the Box clone from and push to them directly; the
 **host-mediated** endpoint (`local`) is not reachable in-box, so the Launcher
-mediates. Three values:
+mediates. Four values:
 
 - `github` — the full flow: open a PR, watch the CI rollup, rebase, merge. The
-  `gh`-exec adapter; the only value that additionally implements **PRForge**
-  (see below).
+  `gh`-exec adapter; one of two values (with `forgejo`) that additionally
+  implements **PRForge** (see below).
+- `forgejo` — the same full flow (open a PR, watch the CI rollup, rebase, merge)
+  against a Forgejo/Gitea instance (Codeberg by default). The second value that
+  implements **PRForge**; a native REST client, not a CLI-exec adapter (ADR 0038).
 - `git` — **push-only** to a plain git remote URL (self-hosted git, gitea,
   GitLab-without-MRs, a bare server repo): clone, commit to a per-issue branch,
   push, and stop. No PR, no CI, no merge gate — it implements CodeForge only,
   with no stub methods. `MERGE_MODE` maps to remote pushes — `manual` pushes
   the feature branch; `immediate` pushes straight to the target branch; `auto`
-  is native GitHub auto-merge and has no meaning here.
+  is the forge's native auto-merge and has no meaning here.
 - `local` — **host-mediated**, the code-plane mirror of the `local` tracker
   (ADR 0033): the Box clones from a read-only mount of the Accumulation repo and
   emits its branch as a git bundle through a writable outbox; the Launcher lands
@@ -200,7 +204,7 @@ _Avoid_: GitHub adapter, API layer, client wrapper.
 The optional PR, CI-rollup, and auto-merge surface (`OpenPRForBranch`,
 `PRForBranch`, `PRState`, `CheckState`, `FailureDetail`, `ListPRFiles`,
 `CanAutoMerge`, `EnqueueAutoMerge`) split out of Code Forge (ADR 0013
-amendment, issue #517). Only the `github` adapter implements it; callers
+amendment, issue #517). The `github` and `forgejo` adapters implement it; callers
 discover it with a type assertion — `pr, ok := cf.(forge.PRForge)` — the
 standard Go optional-interface pattern, rather than a `PushOnly()` capability
 flag. `internal/settle` is the primary consumer: it resolves `PRForge` once at
@@ -434,12 +438,13 @@ the issue stays `InProgress` throughout that work so the label never claims
 "nothing left to do" while a Box may still run. MERGE_MODE governs that
 landing path: `immediate` merges automatically (locally, via a push that
 updates a clean checked-out branch); `manual` (default) leaves the branch/PR
-for a human; `auto` is native GitHub auto-merge and has no meaning off
-`github`. A merge failure after green leaves the issue `Complete` with a
-merge-blocked note — never `Failed` — once that landing attempt settles,
-except when the post-force-push re-wait (after rebase or conflict-resolve)
-ends red or times out, or the conflict-resolve dispatch itself fails: there
-the force-pushed head never went green, so the issue ends `Failed` instead.
+for a human; `auto` is the forge's native auto-merge — meaningful on any
+`PRForge` backend (`github`, `forgejo`). A merge failure after green leaves the
+issue `Complete` with a merge-blocked note — never `Failed` — once that landing
+attempt settles, except when the post-force-push re-wait (after rebase or
+conflict-resolve) ends red or times out, or the conflict-resolve dispatch
+itself fails: there the force-pushed head never went green, so the issue ends
+`Failed` instead.
 _Was_: "Label lifecycle" — labels were GitHub's storage mechanism, mistaken for
 the states themselves.
 _Avoid_: status, queue, state machine.
@@ -681,9 +686,9 @@ _Avoid_: path filter, merge block, review gate.
 **Instruction surface**:
 The repo-carried files a Driver reads as trusted instructions on every fresh
 clone — `CLAUDE.md`, `AGENTS.md`, `.claude/`, `.opencode/` — plus the CI config
-under `.github/`. The cross-run persistence vector: a poisoned instruction file
-merged once feeds every future Agent as trusted input. Guarded by the Merge
-guard's default path set.
+under `.github/` and `.forgejo/`. The cross-run persistence vector: a poisoned
+instruction file merged once feeds every future Agent as trusted input. Guarded
+by the Merge guard's default path set.
 _Avoid_: config files, dotfiles, prompt files.
 
 **Two-actor separation**:
