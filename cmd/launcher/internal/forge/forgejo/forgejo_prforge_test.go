@@ -472,6 +472,11 @@ func TestNeedsUpdate_True(t *testing.T) {
 			http.NotFound(w, r)
 			return
 		}
+		// The refs are swapped to head...base so total_commits counts the
+		// behind set against Forgejo's ahead-only compare; pin that order.
+		if got := r.URL.Path; !strings.HasSuffix(got, "/compare/agent/issue-206...main") {
+			t.Errorf("compare path = %q, want head...base order .../compare/agent/issue-206...main", got)
+		}
 		w.Write([]byte(`{"total_commits":3}`))
 	}))
 	got, err := pr.NeedsUpdate("https://forge.test/owner/repo/pulls/206")

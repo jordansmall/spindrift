@@ -349,14 +349,14 @@ func (f *forgejoCodeForge) NeedsUpdate(prURL string) (bool, error) {
 		return false, err
 	}
 	// {head}...{base}: commits on base not reachable from the PR's head.
-	basehead := url.PathEscape(p.Head.Ref) + "..." + url.PathEscape(p.Base.Ref)
+	headBase := url.PathEscape(p.Head.Ref) + "..." + url.PathEscape(p.Base.Ref)
 	var cmp forgejoCompare
-	status, err := f.rest.do(http.MethodGet, f.rest.repoPath()+"/compare/"+basehead, nil, &cmp)
+	status, err := f.rest.do(http.MethodGet, f.rest.repoPath()+"/compare/"+headBase, nil, &cmp)
 	if err != nil {
 		return false, err
 	}
 	if status != http.StatusOK {
-		return false, fmt.Errorf("forgejo: compare %s: unexpected status %d", basehead, status)
+		return false, fmt.Errorf("forgejo: compare %s: unexpected status %d", headBase, status)
 	}
 	return cmp.TotalCommits > 0, nil
 }
@@ -396,12 +396,7 @@ func (f *forgejoCodeForge) EnqueueAutoMerge(prURL string) error {
 	if err != nil {
 		return err
 	}
-	body := map[string]any{
-		"Do":                        forgejoMergeDo(f.mergeMethod),
-		"merge_when_checks_succeed": true,
-		"delete_branch_after_merge": true,
-	}
-	status, err := f.rest.do(http.MethodPost, f.rest.repoPath()+"/pulls/"+index+"/merge", body, nil)
+	status, err := f.postMerge(index, map[string]any{"merge_when_checks_succeed": true})
 	if err != nil {
 		return err
 	}
