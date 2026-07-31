@@ -441,6 +441,12 @@
     doc = "Forgejo/Gitea API token (Bearer/token scheme); required when ISSUE_TRACKER=forgejo";
     boxEnv = true;
   };
+  boxForgejoToken = {
+    env = "BOX_FORGEJO_TOKEN";
+    secret = true;
+    doc = "opt-in two-actor separation (ADR 0016 analog): a second machine user's Forgejo PAT for the Box only — the launcher keeps using its own FORGEJO_TOKEN for merges, labels, and all host-side forge calls, while the Box receives this value as its FORGEJO_TOKEN instead; empty (default) leaves the single-token flow unchanged. Pair with Forgejo branch protection barring this user from updating the base branch";
+    boxEnv = false;
+  };
   gitUserName = {
     env = "GIT_USER_NAME";
     group = "git";
