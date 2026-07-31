@@ -1,6 +1,8 @@
 package forgejo_test
 
 import (
+	"bufio"
+	"bytes"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -9,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"spindrift.dev/launcher/internal/doctor"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/forgejo"
 )
@@ -257,5 +260,132 @@ func TestForgejoClient_TouchesOf_ParsesBodyTouchSection(t *testing.T) {
 	want := []string{"lib/env-schema.nix"}
 	if !reflect.DeepEqual(touches, want) {
 		t.Fatalf("TouchesOf = %v, want %v", touches, want)
+	}
+}
+
+// newForgejoLabelServer starts an httptest server backing a single
+// owner/repo Forgejo repository: it answers Probe, ListLabels, and
+// CreateLabel against an in-memory label set seeded from initial, and
+// records every name POSTed to the create-label endpoint (in call order,
+// duplicates included) so a test can assert on exactly what doctor.Run
+// asked the real forgejo adapter to create.
+func newForgejoLabelServer(t *testing.T, initial []string) (srv *httptest.Server, created *[]string) {
+	t.Helper()
+	labels := make(map[string]bool, len(initial))
+	for _, l := range initial {
+		labels[l] = true
+	}
+	var createdNames []string
+	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/owner/repo":
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"full_name":"owner/repo"}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/owner/repo/labels":
+			type labelOut struct {
+				Name string `json:"name"`
+			}
+			out := make([]labelOut, 0, len(labels))
+			for name := range labels {
+				out = append(out, labelOut{Name: name})
+			}
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(out)
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/repos/owner/repo/labels":
+			var body map[string]any
+			json.NewDecoder(r.Body).Decode(&body)
+			name, _ := body["name"].(string)
+			labels[name] = true
+			createdNames = append(createdNames, name)
+			w.WriteHeader(http.StatusCreated)
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	return srv, &createdNames
+}
+
+// TestDoctorRun_Forgejo_CreatesTriageAndResearchLabels drives doctor.Run
+// against the real forgejo IssueTracker adapter (over an httptest server,
+// not a fake) end-to-end: starting from a repo with none of its labels
+// defined, it proves both the four work/triage labels (AC#2) and the six
+// ADR 0022 research labels (AC#3) get created via the adapter's real
+// CreateLabel HTTP call, and that doctor's post-creation re-verify then
+// reports every label present.
+func TestDoctorRun_Forgejo_CreatesTriageAndResearchLabels(t *testing.T) {
+	srv, created := newForgejoLabelServer(t, nil)
+	defer srv.Close()
+
+	fc := forgejo.NewForgejoClient(forgejo.ForgejoConfig{BaseURL: srv.URL, Repo: "owner/repo", Token: "tok"})
+	cf := forge.NewFake()
+	cf.ProbeRepo = "owner/repo"
+
+	cfg := doctor.Config{
+		IssueTracker:    "forgejo",
+		Label:           "ready-for-agent",
+		InProgressLabel: "agent-in-progress",
+		FailedLabel:     "agent-failed",
+		CompleteLabel:   "agent-complete",
+	}
+
+	var buf bytes.Buffer
+	err := doctor.Run(fc, cf, cfg, &buf, bufio.NewScanner(strings.NewReader("y\n")), true)
+	if err != nil {
+		t.Fatalf("doctor.Run: %v", err)
+	}
+
+	wantLabels := append([]string{cfg.Label, cfg.InProgressLabel, cfg.FailedLabel, cfg.CompleteLabel}, doctor.ResearchLabelNames()...)
+	createdSet := make(map[string]bool, len(*created))
+	for _, name := range *created {
+		createdSet[name] = true
+	}
+	for _, want := range wantLabels {
+		if !createdSet[want] {
+			t.Errorf("label %q was never POSTed to the forgejo adapter's create-label endpoint; created = %v", want, *created)
+		}
+	}
+
+	if got := buf.String(); !strings.Contains(got, "ok: all triage and research labels present") {
+		t.Errorf("output missing final success line, got:\n%s", got)
+	}
+}
+
+// TestDoctorRun_Forgejo_MissingResearchLabelsAdvisoryOnly verifies AC#3:
+// when a Forgejo repo already has all four work/triage labels but is
+// missing the ADR 0022 research labels, doctor.Run reports the gap as
+// advisory and returns nil (does not fail the check) — proven against the
+// real forgejo adapter's ListLabels response, in non-interactive mode so
+// no creation prompt/POST happens at all.
+func TestDoctorRun_Forgejo_MissingResearchLabelsAdvisoryOnly(t *testing.T) {
+	workLabels := []string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}
+	srv, created := newForgejoLabelServer(t, workLabels)
+	defer srv.Close()
+
+	fc := forgejo.NewForgejoClient(forgejo.ForgejoConfig{BaseURL: srv.URL, Repo: "owner/repo", Token: "tok"})
+	cf := forge.NewFake()
+	cf.ProbeRepo = "owner/repo"
+
+	cfg := doctor.Config{
+		IssueTracker:    "forgejo",
+		Label:           workLabels[0],
+		InProgressLabel: workLabels[1],
+		FailedLabel:     workLabels[2],
+		CompleteLabel:   workLabels[3],
+	}
+
+	var buf bytes.Buffer
+	err := doctor.Run(fc, cf, cfg, &buf, bufio.NewScanner(strings.NewReader("")), false)
+	if err != nil {
+		t.Fatalf("doctor.Run: %v, want nil — missing research labels are advisory only (AC#3)", err)
+	}
+
+	if len(*created) != 0 {
+		t.Errorf("expected no CreateLabel calls in the non-interactive advisory path, got created = %v", *created)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "advisory:") || !strings.Contains(out, "does not fail") {
+		t.Errorf("output missing advisory line, got:\n%s", out)
 	}
 }
