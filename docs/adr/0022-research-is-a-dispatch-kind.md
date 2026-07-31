@@ -145,5 +145,60 @@ surrounding semantic *guidance* prose per verdict (for example, the "Open
 questions — mandatory when the verdict is `unclear`" step, which names
 default verdicts directly) is not rewritten from a custom set — only the
 machine-checkable contract and each verdict's label render dynamically.
-Rewriting per-verdict guidance itself is left to a future self-contained
-research mode.
+Rewriting per-verdict guidance itself is out of scope here and applies
+equally to the self-contained research mode's own baked prompt — see the
+[amendment for issue
+#2202](#amendment-issue-2202-a-self-contained-no-repo-research-sub-mode)
+below.
+
+## Amendment (issue #2202): a self-contained, no-repo research sub-mode
+
+The original decision above assumed every research run explores a fresh
+clone of the Target repo alongside the issue text. Some issues are
+self-contained instead — everything needed to judge relevance and enrich
+the issue lives in the issue body and comments, with no repository content
+to weigh in. Forcing those through the ordinary clone-and-explore path
+buys nothing: it burns the clone, the branch-recovery and toolchain-nudge
+steps, and a devShell probe on a repo the prompt never asks the Box to
+open. `spindrift research --self-contained` (`SelfContained` on
+`dispatch.Config`, forwarded into the Box as `SELF_CONTAINED=1`) is a
+sub-mode of the research kind that skips all of it: bootstrap stands up an
+empty working directory instead of calling `clone_repo`, and skips branch
+recovery, prework rebase, the toolchain nudge, the devShell probe, and
+prefetch — the entrypoint's `_is_self_contained` gate short-circuits the
+whole repo-setup sequence before prompt assembly.
+
+Because there is no repo, launcher startup validation relaxes its
+otherwise-unconditional `REPO_SLUG`/`GH_TOKEN` requirement specifically for
+the `research` kind with `--self-contained` set (`validate`,
+`cmd/launcher/main.go`) — the same shape as the existing fully-local
+exemption, but for a different reason: fully-local has no `github` client
+to construct, while self-contained research has a `github` client
+available but nothing for it to clone. `--self-contained` is rejected
+outright, before bootstrap, on every subcommand except `research`
+(`dispatch`, `recover`) — a no-repo work dispatch has no repo to branch
+from or land a PR onto, so the flag is refused rather than silently
+ignored. The natural pairing is a local issue tracker
+(`ISSUE_TRACKER=local`) supplying the self-contained content with no forge
+repo configured at all, though nothing enforces that pairing; a GitHub
+issue tracker with `--self-contained` works too; only the repo clone is
+skipped.
+
+The Box is driven by a distinct baked prompt,
+`research-self-contained-prompt.md` (`researchSelfContainedPrompt`,
+`lib/mkHarness.nix`/`lib/image.nix`), rather than the ordinary
+`research-prompt.md` — it drops the EXPLORE-the-repo step entirely and
+instructs the Box to judge relevance from the issue content alone. It
+composes with both prior amendments rather than sitting outside them: like
+`research-prompt.md`, it is overridable at runtime via the
+`SPINDRIFT_PROMPT_DIR` prompt-directory override (issue #2200) — a custom
+prompt directory ships both prompt files to override each independently —
+and its machine-checkable verdict contract renders from the same
+configured `RESEARCH_VERDICTS` set as the ordinary prompt (issue #2201,
+`researchVerdicts.renderIfCustom`, applied to both prompts), so a custom
+vocabulary reaches self-contained research too. Settle is unchanged:
+self-contained research still posts exactly one required verdict comment
+through the same configurable-verdict path this ADR and its #2201
+amendment established, and applies exactly one terminal label — the
+absence of a repo changes what the Box can explore, not the verdict
+contract or the one-comment rule.

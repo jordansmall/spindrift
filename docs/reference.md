@@ -1895,8 +1895,9 @@ surrounding *guidance* prose (for example, the "Open questions — mandatory
 when the verdict is `unclear`" step, which names specific default verdicts
 by name) is not rewritten from a custom set — only the machine-checkable
 contract and each verdict's label render dynamically; rewriting the
-per-verdict semantic guidance itself is out of scope here and left to a
-future self-contained research mode.
+per-verdict semantic guidance itself is out of scope here and applies
+equally to the self-contained research mode's own baked prompt — see
+[Self-contained research mode](#self-contained-research-mode).
 
 #### Caveat: a killed launcher can strand an issue
 
@@ -2586,6 +2587,45 @@ run on the same issue. It takes an optional second least-privilege token — see
 [Research token](#research-token-least-privilege-optional) for the scopes and
 what the fallback gives up. Labels must exist on the Target repo before first
 use — see [Create the research labels](#create-the-research-labels-on-the-target-repo).
+
+### Self-contained research mode
+
+`spindrift research --self-contained` (issue #2202) is a sub-mode of the
+research kind for issues that are already self-contained — everything
+needed to judge and enrich them lives in the issue body and its comments,
+with no repository to read against. The flag clones no repo and runs none of
+the ordinary research pass's repo-exploration steps: bootstrap skips
+`clone_repo`, branch recovery, the toolchain nudge, the devShell probe, and
+prefetch entirely, standing up only an empty working directory before
+prompt assembly. Because there's nothing to clone, this mode also needs
+neither `REPO_SLUG` nor `GH_TOKEN` — startup validation relaxes the
+otherwise-unconditional requirement for both when `--self-contained` is
+paired with the research kind, so the natural pairing is a local issue
+tracker (`ISSUE_TRACKER=local`) supplying the self-contained content, with
+no forge repo configured at all.
+
+The Box is driven by a distinct baked prompt,
+`research-self-contained-prompt.md`, rather than the ordinary
+`research-prompt.md` — it drops the EXPLORE-the-repo step and judges
+relevance from the issue content alone. Like the ordinary research prompt,
+it's overridable at runtime via the same `SPINDRIFT_PROMPT_DIR` /
+`--prompt-dir` prompt-directory override (issue #2200) for zero-rebuild
+iteration — a custom prompt directory ships
+`research-self-contained-prompt.md` alongside `research-prompt.md` to
+override both — and its machine-checkable verdict contract renders
+from the same [`RESEARCH_VERDICTS`](#configuring-the-research-verdict-vocabulary-research_verdicts)
+configured set as the ordinary prompt (issue #2201), so a custom vocabulary
+reaches both. Settle is unchanged: self-contained research still posts
+exactly one required verdict comment through the same configurable-verdict
+path and applies exactly one terminal label — no repo means no code to
+explore, not a different verdict contract or a looser one-comment rule.
+
+`--self-contained` is meaningful only on the `research` subcommand;
+`dispatch` and `recover` reject it outright rather than silently ignoring
+it, since a no-repo work dispatch would have nothing to branch from or land
+a PR onto. See [ADR 0022's amendment for issue
+#2202](adr/0022-research-is-a-dispatch-kind.md#amendment-issue-2202-a-self-contained-no-repo-research-sub-mode)
+for the full rationale.
 
 ## Dogfood loop
 
