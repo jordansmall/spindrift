@@ -5,6 +5,8 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
+	"strings"
 	"testing"
 
 	"spindrift.dev/launcher/internal/forge"
@@ -112,6 +114,52 @@ func TestMerge_BlockedByChecks(t *testing.T) {
 	err := cf.Merge("https://forge.test/owner/repo/pulls/206")
 	if !errors.Is(err, forge.ErrMergeBlockedByChecks) {
 		t.Fatalf("Merge(...): want forge.ErrMergeBlockedByChecks, got %v", err)
+	}
+}
+
+// TestMerge_NonRefusalStatus_SurfacesRawError verifies Merge does NOT fold a
+// non-refusal failure status (403 token lacks merge scope, 429 rate limit,
+// 500 server error) into ErrMergeConflict or ErrMergeBlockedByChecks. Only
+// Forgejo's "not mergeable" refusal statuses (405/409) are disambiguated via
+// the pull's mergeable field; every other non-2xx must surface as a raw error
+// naming the status, mirroring the github adapter which gates on
+// IsMergeConflict(stderr) before classifying (exec_pr.go, issue #566).
+func TestMerge_NonRefusalStatus_SurfacesRawError(t *testing.T) {
+	for _, status := range []int{
+		http.StatusForbidden,
+		http.StatusTooManyRequests,
+		http.StatusInternalServerError,
+	} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			var gotGet bool
+			cf := newMergeTestForge(t, "", func(w http.ResponseWriter, r *http.Request) {
+				switch r.Method {
+				case http.MethodPost:
+					w.WriteHeader(status)
+				case http.MethodGet:
+					gotGet = true
+					w.Write([]byte(pullJSON(206, "open", false, false, false, "add feature", "agent/issue-206", "abc123", "main")))
+				default:
+					http.NotFound(w, r)
+				}
+			})
+			err := cf.Merge("https://forge.test/owner/repo/pulls/206")
+			if err == nil {
+				t.Fatalf("Merge(...): want error for status %d, got nil", status)
+			}
+			if errors.Is(err, forge.ErrMergeConflict) {
+				t.Errorf("Merge(...) status %d: masked as ErrMergeConflict: %v", status, err)
+			}
+			if errors.Is(err, forge.ErrMergeBlockedByChecks) {
+				t.Errorf("Merge(...) status %d: masked as ErrMergeBlockedByChecks: %v", status, err)
+			}
+			if !strings.Contains(err.Error(), strconv.Itoa(status)) {
+				t.Errorf("Merge(...) status %d: error %q does not name the status", status, err)
+			}
+			if gotGet {
+				t.Errorf("Merge(...) status %d: queried mergeable state for a non-refusal failure", status)
+			}
+		})
 	}
 }
 

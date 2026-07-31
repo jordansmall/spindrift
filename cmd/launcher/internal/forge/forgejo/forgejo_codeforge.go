@@ -160,13 +160,20 @@ func (f *forgejoCodeForge) Merge(prURL string) error {
 
 // classifyMergeFailure distinguishes a genuine merge conflict from a PR
 // that's merely blocked by pending or failing required checks. Forgejo's
-// merge endpoint returns the same non-2xx status ("not mergeable") for both
-// refusals, so the distinction is made by querying the PR's mergeable state
-// instead — the same disambiguation the github adapter's
-// classifyMergeFailure performs (issue #566). A mergeable state this
-// function cannot map to either outcome is surfaced as its own error rather
-// than folded into ErrMergeConflict.
+// merge endpoint returns the same "not mergeable" refusal status (405 Method
+// Not Allowed or 409 Conflict) for both cases, so those two — and only those
+// two — are disambiguated by querying the PR's mergeable state, the same
+// disambiguation the github adapter's classifyMergeFailure performs after it
+// gates on IsMergeConflict(stderr) (issue #566). Any other non-2xx status
+// (403 token lacks merge scope, 429 rate limit, 500 server error) is a
+// genuine failure and is surfaced as a raw error naming the status rather
+// than masked as ErrMergeConflict or ErrMergeBlockedByChecks. A refusal-status
+// mergeable state this function cannot map to either outcome is likewise
+// surfaced as its own error.
 func (f *forgejoCodeForge) classifyMergeFailure(prURL string, status int) error {
+	if status != http.StatusMethodNotAllowed && status != http.StatusConflict {
+		return fmt.Errorf("forgejo: merge %s: unexpected status %d", prURL, status)
+	}
 	state, err := f.Mergeable(prURL)
 	if err != nil {
 		return fmt.Errorf("forgejo: merge %s: unexpected status %d (mergeable state unavailable: %w)", prURL, status, err)
