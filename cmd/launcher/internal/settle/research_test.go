@@ -36,7 +36,7 @@ func TestResearchSettle_Recommend(t *testing.T) {
 		Outcome:      outcome.Outcome{Issue: "42", Landing: "https://github.com/owner/repo/issues/42#issuecomment-1", Status: "recommend", Note: "grounded in code"},
 	}
 
-	s := NewResearchSettle(fc.AsNoLandingRecorder())
+	s := NewResearchSettle(fc.AsNoLandingRecorder(), researchVerdictLabels)
 	s.Settle(dispatch.NewFake(), "42", 0, result)
 
 	if len(fc.CompleteVerdictCalls) != 1 {
@@ -62,7 +62,7 @@ func TestResearchSettle_Reject(t *testing.T) {
 		Outcome:      outcome.Outcome{Issue: "7", Landing: "https://github.com/owner/repo/issues/7#issuecomment-2", Status: "reject", Note: "duplicate of #3"},
 	}
 
-	s := NewResearchSettle(fc.AsNoLandingRecorder())
+	s := NewResearchSettle(fc.AsNoLandingRecorder(), researchVerdictLabels)
 	s.Settle(dispatch.NewFake(), "7", 0, result)
 
 	if len(fc.CompleteVerdictCalls) != 1 || fc.CompleteVerdictCalls[0].Verdict != forge.Reject {
@@ -80,7 +80,7 @@ func TestResearchSettle_Unclear(t *testing.T) {
 		Outcome:      outcome.Outcome{Issue: "8", Landing: "https://github.com/owner/repo/issues/8#issuecomment-3", Status: "unclear", Note: "needs answers"},
 	}
 
-	s := NewResearchSettle(fc.AsNoLandingRecorder())
+	s := NewResearchSettle(fc.AsNoLandingRecorder(), researchVerdictLabels)
 	s.Settle(dispatch.NewFake(), "8", 0, result)
 
 	if len(fc.CompleteVerdictCalls) != 1 || fc.CompleteVerdictCalls[0].Verdict != forge.Unclear {
@@ -100,7 +100,7 @@ func TestResearchSettle_CompleteVerdictError(t *testing.T) {
 		Outcome:      outcome.Outcome{Issue: "42", Landing: "https://github.com/owner/repo/issues/42#issuecomment-1", Status: "recommend", Note: "grounded in code"},
 	}
 
-	s := NewResearchSettle(fc.AsNoLandingRecorder())
+	s := NewResearchSettle(fc.AsNoLandingRecorder(), researchVerdictLabels)
 	out := testutil.CaptureStdout(t, func() {
 		s.Settle(dispatch.NewFake(), "42", 0, result)
 	})
@@ -130,7 +130,7 @@ func TestResearchSettle_CompleteVerdictError_MissingInProgress(t *testing.T) {
 		Outcome:      outcome.Outcome{Issue: "42", Landing: "https://github.com/owner/repo/issues/42#issuecomment-1", Status: "recommend", Note: "grounded in code"},
 	}
 
-	s := NewResearchSettle(fc.AsNoLandingRecorder())
+	s := NewResearchSettle(fc.AsNoLandingRecorder(), researchVerdictLabels)
 	out := testutil.CaptureStdout(t, func() {
 		s.Settle(dispatch.NewFake(), "42", 0, result)
 	})
@@ -158,7 +158,7 @@ func TestResearchSettle_Local_PostsCommentBlockThenVerdict(t *testing.T) {
 		CommentFound: true,
 	}
 
-	s := NewResearchSettle(fc)
+	s := NewResearchSettle(fc, researchVerdictLabels)
 	s.Settle(dispatch.NewFake(), "42", 0, result)
 
 	if len(fc.CommentCalls) != 1 {
@@ -185,7 +185,7 @@ func TestResearchSettle_Local_MissingCommentBlockTreatedAsBlocked(t *testing.T) 
 		CommentFound: false,
 	}
 
-	s := NewResearchSettle(fc)
+	s := NewResearchSettle(fc, researchVerdictLabels)
 	s.Settle(dispatch.NewFake(), "42", 0, result)
 
 	if len(fc.CommentCalls) != 0 {
@@ -218,7 +218,7 @@ func TestResearchSettle_Local_EmptyCommentBlockTreatedAsBlocked(t *testing.T) {
 		CommentFound: true,
 	}
 
-	s := NewResearchSettle(fc)
+	s := NewResearchSettle(fc, researchVerdictLabels)
 	s.Settle(dispatch.NewFake(), "42", 0, result)
 
 	if len(fc.CommentCalls) != 0 {
@@ -245,7 +245,7 @@ func TestResearchSettle_Github_NeverPostsComment(t *testing.T) {
 		Outcome:      outcome.Outcome{Issue: "42", Landing: "https://github.com/owner/repo/issues/42#issuecomment-1", Status: "recommend", Note: "grounded in code"},
 	}
 
-	s := NewResearchSettle(ghLike)
+	s := NewResearchSettle(ghLike, researchVerdictLabels)
 	s.Settle(dispatch.NewFake(), "42", 0, result)
 
 	if len(fc.CommentCalls) != 0 {
@@ -267,7 +267,7 @@ func TestResearchSettle_Blocked(t *testing.T) {
 		Outcome:      outcome.Outcome{Issue: "9", Landing: "https://github.com/owner/repo/issues/9#issuecomment-4", Status: "blocked", Note: "push rejected"},
 	}
 
-	s := NewResearchSettle(fc)
+	s := NewResearchSettle(fc, researchVerdictLabels)
 	s.Settle(dispatch.NewFake(), "9", 0, result)
 
 	if len(fc.CompleteVerdictCalls) != 0 {
@@ -289,7 +289,7 @@ func TestResearchSettle_MissingOutcome(t *testing.T) {
 	fc := newResearchFake("11")
 	result := dispatch.Result{Success: true}
 
-	s := NewResearchSettle(fc)
+	s := NewResearchSettle(fc, researchVerdictLabels)
 	s.Settle(dispatch.NewFake(), "11", 0, result)
 
 	if len(fc.TransitionStateCalls) != 1 {
@@ -319,7 +319,7 @@ func TestResearchSettle_GithubReadOnly_PostsCommentBlockThenVerdict(t *testing.T
 		CommentFound: true,
 	}
 
-	s := NewResearchSettleReadOnly(ghLike)
+	s := NewResearchSettleReadOnly(ghLike, researchVerdictLabels)
 	s.Settle(dispatch.NewFake(), "42", 0, result)
 
 	if len(fc.CommentCalls) != 1 {
@@ -347,7 +347,7 @@ func TestResearchSettle_GithubReadOnly_MissingCommentBlockTreatedAsBlocked(t *te
 		CommentFound: false,
 	}
 
-	s := NewResearchSettleReadOnly(ghLike)
+	s := NewResearchSettleReadOnly(ghLike, researchVerdictLabels)
 	s.Settle(dispatch.NewFake(), "42", 0, result)
 
 	if len(fc.CommentCalls) != 0 {
@@ -362,5 +362,70 @@ func TestResearchSettle_GithubReadOnly_MissingCommentBlockTreatedAsBlocked(t *te
 	call := fc.TransitionStateCalls[0]
 	if call.Num != "42" || call.From != forge.InProgress || call.To != forge.Failed {
 		t.Errorf("unexpected transition: %+v", call)
+	}
+}
+
+// TestResearchSettle_CustomVerdictSet verifies that Settle validates the
+// posted outcome's Status against the verdict set threaded into the
+// constructor (ADR 0022, issue #2201's RESEARCH_VERDICTS override) rather
+// than the compiled default: a custom "approve" token applies
+// CompleteVerdict(Verdict("approve")).
+func TestResearchSettle_CustomVerdictSet(t *testing.T) {
+	custom := forge.NewVerdictLabels(
+		forge.VerdictLabel{Verdict: "approve", Label: "agent-research-approve", Description: "x"},
+		forge.VerdictLabel{Verdict: "skip", Label: "agent-research-skip", Description: "y"},
+	)
+	fc := forge.NewFake(researchLabels)
+	fc.VerdictLabels = custom
+	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{"agent-research-in-progress"}})
+	result := dispatch.Result{
+		Success:      true,
+		OutcomeFound: true,
+		Outcome:      outcome.Outcome{Issue: "42", Landing: "https://github.com/owner/repo/issues/42#issuecomment-1", Status: "approve", Note: "looks good"},
+	}
+
+	s := NewResearchSettle(fc.AsNoLandingRecorder(), custom)
+	s.Settle(dispatch.NewFake(), "42", 0, result)
+
+	if len(fc.CompleteVerdictCalls) != 1 {
+		t.Fatalf("want 1 CompleteVerdict call, got %d", len(fc.CompleteVerdictCalls))
+	}
+	verdictCall := fc.CompleteVerdictCalls[0]
+	if verdictCall.Num != "42" || verdictCall.Verdict != forge.Verdict("approve") {
+		t.Errorf("unexpected call: %+v", verdictCall)
+	}
+}
+
+// TestResearchSettle_CustomVerdictSet_DefaultTokenNotRecognized verifies the
+// inverse: a compiled-default verdict token ("recommend") that is NOT part
+// of the configured custom set fails to parse, taking the invalid-verdict
+// path — no CompleteVerdict, transitioned to Failed — proving Settle
+// validates against the configured set, not the hardcoded default.
+func TestResearchSettle_CustomVerdictSet_DefaultTokenNotRecognized(t *testing.T) {
+	custom := forge.NewVerdictLabels(
+		forge.VerdictLabel{Verdict: "approve", Label: "agent-research-approve", Description: "x"},
+		forge.VerdictLabel{Verdict: "skip", Label: "agent-research-skip", Description: "y"},
+	)
+	fc := forge.NewFake(researchLabels)
+	fc.VerdictLabels = custom
+	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{"agent-research-in-progress"}})
+	result := dispatch.Result{
+		Success:      true,
+		OutcomeFound: true,
+		Outcome:      outcome.Outcome{Issue: "42", Landing: "https://github.com/owner/repo/issues/42#issuecomment-1", Status: "recommend", Note: "grounded in code"},
+	}
+
+	s := NewResearchSettle(fc.AsNoLandingRecorder(), custom)
+	s.Settle(dispatch.NewFake(), "42", 0, result)
+
+	if len(fc.CompleteVerdictCalls) != 0 {
+		t.Errorf("want no CompleteVerdict call for a token outside the configured set, got %+v", fc.CompleteVerdictCalls)
+	}
+	if len(fc.TransitionStateCalls) != 1 {
+		t.Fatalf("want 1 TransitionState call, got %d", len(fc.TransitionStateCalls))
+	}
+	transitionCall := fc.TransitionStateCalls[0]
+	if transitionCall.Num != "42" || transitionCall.From != forge.InProgress || transitionCall.To != forge.Failed {
+		t.Errorf("unexpected transition: %+v", transitionCall)
 	}
 }

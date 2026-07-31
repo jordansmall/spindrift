@@ -420,9 +420,9 @@ func TestLocalTracker_CompleteVerdict_RewritesFrontmatterToVerdictLabel(t *testi
 		verdict   forge.Verdict
 		wantState string
 	}{
-		{forge.Recommend, verdictLabels.Recommend},
-		{forge.Reject, verdictLabels.Reject},
-		{forge.Unclear, verdictLabels.Unclear},
+		{forge.Recommend, verdictLabels.Label(forge.Recommend)},
+		{forge.Reject, verdictLabels.Label(forge.Reject)},
+		{forge.Unclear, verdictLabels.Label(forge.Unclear)},
 	}
 	for _, tc := range cases {
 		dir := t.TempDir()
@@ -516,7 +516,7 @@ func TestLocalTracker_ResearchDispatch_InProgressAndFailedUseResearchLabels(t *t
 		t.Fatalf("ListIssues(Failed) = %+v, want [research-me]", failed)
 	}
 
-	terminals := []string{labels.Failed, verdictLabels.Recommend, verdictLabels.Reject, verdictLabels.Unclear}
+	terminals := []string{labels.Failed, verdictLabels.Label(forge.Recommend), verdictLabels.Label(forge.Reject), verdictLabels.Label(forge.Unclear)}
 	seen := map[string]bool{}
 	for _, l := range terminals {
 		if seen[l] {

@@ -99,6 +99,12 @@ type config struct {
 	forgejoBaseURL string
 	forgejoToken   string
 
+	// researchVerdicts is the RESEARCH_VERDICTS knob: a JSON array
+	// overriding the built-in research verdict vocabulary and its
+	// terminal labels (ADR 0022). Consulted only when dispatchKind ==
+	// dispatchKindResearch; see researchVerdictLabels.
+	researchVerdicts string
+
 	// Transient-exit retry knobs
 	transientRetryMax    int
 	transientBackoffSecs int
@@ -402,6 +408,8 @@ func loadConfig() config {
 		forgejoBaseURL:      getenvSchema("FORGEJO_BASE_URL"),
 		forgejoToken:        os.Getenv("FORGEJO_TOKEN"),
 
+		researchVerdicts: getenvSchema("RESEARCH_VERDICTS"),
+
 		transientRetryMax:    atoiSchema("TRANSIENT_RETRY_MAX"),
 		transientBackoffSecs: atoiSchema("TRANSIENT_BACKOFF_SECS"),
 		holdJitterSecs:       atoiNonnegSchema("HOLD_JITTER_SECS"),
@@ -542,6 +550,9 @@ func validate(c config) error {
 	default:
 		return fmt.Errorf("BOX_FORGE_AND_ISSUE_ACCESS=%q is not valid; must be read-write or read-only", c.boxForgeAndIssueAccess)
 	}
+	if _, err := forge.ParseResearchVerdicts(c.researchVerdicts); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -566,13 +577,20 @@ func dispatchLabels(c config) forge.DispatchLabels {
 	}
 }
 
-// researchVerdictLabels returns the fixed verdict-label mapping for
-// research-kind construction, or the zero value for work — only
-// ResearchSettle ever calls CompleteVerdict, so a work-kind tracker carrying
-// a zero VerdictLabels is inert.
+// researchVerdictLabels returns the configured verdict-label mapping for
+// research-kind construction (RESEARCH_VERDICTS; defaults to the built-in
+// three), or the zero value for work — only ResearchSettle ever calls
+// CompleteVerdict, so a work-kind tracker carrying a zero VerdictLabels is
+// inert.
 func researchVerdictLabels(c config) forge.VerdictLabels {
 	if c.dispatchKind == dispatchKindResearch {
-		return forge.ResearchVerdictLabels()
+		vl, err := forge.ParseResearchVerdicts(c.researchVerdicts)
+		if err != nil {
+			// validate() already rejects a malformed set before this is
+			// reached; fall back to the compiled default set.
+			return forge.ResearchVerdictLabels()
+		}
+		return vl
 	}
 	return forge.VerdictLabels{}
 }
@@ -939,10 +957,11 @@ func localloopConfig(c config) localloop.Config {
 // ResearchSettle, or work's full merge-gate Settle.
 func newSettle(c config, it forge.IssueTracker, lw *localloop.Wired, cf forge.CodeForge) settle.Settler {
 	if c.dispatchKind == dispatchKindResearch {
+		vl := researchVerdictLabels(c)
 		if c.boxForgeAndIssueAccess == "read-only" {
-			return settle.NewResearchSettleReadOnly(it)
+			return settle.NewResearchSettleReadOnly(it, vl)
 		}
-		return settle.NewResearchSettle(it)
+		return settle.NewResearchSettle(it, vl)
 	}
 	return settle.New(settleConfig(c, lw, cf), it, cf)
 }

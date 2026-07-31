@@ -185,9 +185,9 @@ func testResearchVerdictTerminals(t *testing.T, h Harness) {
 		verdict   forge.Verdict
 		wantLabel string
 	}{
-		{"401", forge.Recommend, verdictLabels.Recommend},
-		{"402", forge.Reject, verdictLabels.Reject},
-		{"403", forge.Unclear, verdictLabels.Unclear},
+		{"401", forge.Recommend, verdictLabels.Label(forge.Recommend)},
+		{"402", forge.Reject, verdictLabels.Label(forge.Reject)},
+		{"403", forge.Unclear, verdictLabels.Label(forge.Unclear)},
 	}
 	tr := h.Tracker()
 	for _, tc := range cases {
