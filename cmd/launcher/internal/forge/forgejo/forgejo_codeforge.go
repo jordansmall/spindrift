@@ -85,6 +85,12 @@ type forgejoCodeForge struct {
 	rest        *forgejoClient
 	git         forge.CodeForge
 	mergeMethod string
+	// remote is the token-authenticated git clone/push URL (forgejoGitRemoteURL,
+	// or cfg.GitRemoteURL verbatim in tests): the same remote the underlying
+	// git adapter clones/pushes against, kept here too so the read-only
+	// wrapper (forgejo_readonly.go) can clone it directly for RelayBundle
+	// without threading a second config surface through NewForgejoCodeForge.
+	remote string
 }
 
 // NewForgejoCodeForge returns a forge.CodeForge backed by a Forgejo repo:
@@ -109,7 +115,7 @@ func NewForgejoCodeForge(cfg ForgejoCodeForgeConfig) forge.CodeForge {
 
 	rest := &forgejoClient{cfg: ForgejoConfig{BaseURL: baseURL, Repo: cfg.Repo, Token: cfg.Token}, hc: hc}
 	gitCF := git.NewGitClient(remote, cfg.BaseBranch, cfg.UserName, cfg.UserEmail, cfg.BranchPrefix)
-	return &forgejoCodeForge{rest: rest, git: gitCF, mergeMethod: cfg.MergeMethod}
+	return &forgejoCodeForge{rest: rest, git: gitCF, mergeMethod: cfg.MergeMethod, remote: remote}
 }
 
 // AgentBranch delegates to the underlying git adapter.

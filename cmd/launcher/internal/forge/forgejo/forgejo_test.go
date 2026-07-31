@@ -121,6 +121,100 @@ func TestForgejoClient_Comment_PostsBody(t *testing.T) {
 	}
 }
 
+// TestForgejoClient_ImplementsHostPostedIssueFiler verifies the forgejo
+// adapter satisfies forge.HostPostedIssueFiler (issue #1964) — the same
+// read-only issue-filing relay channel the github adapter implements.
+func TestForgejoClient_ImplementsHostPostedIssueFiler(t *testing.T) {
+	if _, ok := forgejo.NewForgejoClient(forgejo.ForgejoConfig{}).(forge.HostPostedIssueFiler); !ok {
+		t.Error("forgejoClient does not satisfy forge.HostPostedIssueFiler, want it implemented")
+	}
+}
+
+// TestForgejoClient_PostIssue_CreatesAndReturnsURL verifies PostIssue POSTs
+// the title/body to the issues endpoint and returns the created issue's
+// html_url, without touching the labels endpoint when no labels are given.
+func TestForgejoClient_PostIssue_CreatesAndReturnsURL(t *testing.T) {
+	var gotPath, gotMethod string
+	var gotBody map[string]any
+	labelsCalled := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/labels") {
+			labelsCalled = true
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		gotPath = r.URL.Path
+		gotMethod = r.Method
+		json.NewDecoder(r.Body).Decode(&gotBody)
+		w.WriteHeader(http.StatusCreated)
+		w.Write([]byte(`{"number":99,"html_url":"https://codeberg.org/owner/repo/issues/99"}`))
+	}))
+	defer srv.Close()
+
+	fc := forgejo.NewForgejoClient(forgejo.ForgejoConfig{BaseURL: srv.URL, Repo: "owner/repo", Token: "tok"})
+	filer := fc.(forge.HostPostedIssueFiler)
+	url, err := filer.PostIssue("a title", "a body", nil)
+	if err != nil {
+		t.Fatalf("PostIssue: %v", err)
+	}
+	if url != "https://codeberg.org/owner/repo/issues/99" {
+		t.Errorf("url = %q", url)
+	}
+	if gotMethod != http.MethodPost {
+		t.Errorf("method = %q, want POST", gotMethod)
+	}
+	if gotPath != "/api/v1/repos/owner/repo/issues" {
+		t.Errorf("path = %q", gotPath)
+	}
+	if gotBody["title"] != "a title" || gotBody["body"] != "a body" {
+		t.Errorf("body = %v", gotBody)
+	}
+	if labelsCalled {
+		t.Error("labels endpoint called with no labels given")
+	}
+}
+
+// TestForgejoClient_PostIssue_AppliesLabels verifies PostIssue applies
+// non-empty labels via the replace-all-labels PUT endpoint after creating
+// the issue — Forgejo's create endpoint wants label IDs, so create-then-label
+// by name avoids ID bookkeeping.
+func TestForgejoClient_PostIssue_AppliesLabels(t *testing.T) {
+	var labelsPath, labelsMethod string
+	var labelsBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/labels") {
+			labelsPath = r.URL.Path
+			labelsMethod = r.Method
+			json.NewDecoder(r.Body).Decode(&labelsBody)
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		w.WriteHeader(http.StatusCreated)
+		w.Write([]byte(`{"number":100,"html_url":"https://codeberg.org/owner/repo/issues/100"}`))
+	}))
+	defer srv.Close()
+
+	fc := forgejo.NewForgejoClient(forgejo.ForgejoConfig{BaseURL: srv.URL, Repo: "owner/repo", Token: "tok"})
+	filer := fc.(forge.HostPostedIssueFiler)
+	url, err := filer.PostIssue("a title", "a body", []string{"agent-review-finding"})
+	if err != nil {
+		t.Fatalf("PostIssue: %v", err)
+	}
+	if url != "https://codeberg.org/owner/repo/issues/100" {
+		t.Errorf("url = %q", url)
+	}
+	if labelsMethod != http.MethodPut {
+		t.Errorf("labels method = %q, want PUT", labelsMethod)
+	}
+	if labelsPath != "/api/v1/repos/owner/repo/issues/100/labels" {
+		t.Errorf("labels path = %q", labelsPath)
+	}
+	gotLabels, _ := labelsBody["labels"].([]any)
+	if len(gotLabels) != 1 || gotLabels[0] != "agent-review-finding" {
+		t.Errorf("labels body = %v", labelsBody)
+	}
+}
+
 // TestForgejoClient_ListLabels_ReturnsRepoLabels verifies ListLabels reads
 // the repository's defined label names.
 func TestForgejoClient_ListLabels_ReturnsRepoLabels(t *testing.T) {
