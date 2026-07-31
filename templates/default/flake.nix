@@ -71,6 +71,8 @@
             #     # implement-capable worker subagent model tier; empty omits the worker entry from --agents; the implementor prompt does not delegate to it yet — this only provisions the subagent so it is invokable. DEPRECATED: superseded by the roster option (see docs/reference.md); these per-agent knobs still work but will be removed.
             #     worker = "claude-sonnet-5";
             #   };
+            #   # host directory mounted over /agent/prompts for zero-rebuild prompt iteration
+            #   promptDir = "";
             # };
             # dispatch = {
             #   budget = {
