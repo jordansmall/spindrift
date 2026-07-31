@@ -53,6 +53,12 @@
   # comment instead of implementing the issue, so this prompt replaces the
   # whole issue-prompt.md flow rather than sharing its COMMS/CHECK blocks.
   researchPrompt ? builtins.readFile ../templates/default/prompts/research-prompt.md,
+  # Driven instead of `researchPrompt` when the research dispatch runs in its
+  # self-contained sub-mode (ADR 0022, issue #2202): no repo, no clone -- the
+  # issue body/comments are the only input, so this prompt skips the EXPLORE
+  # step entirely rather than sharing research-prompt.md's repo-exploration
+  # prose.
+  researchSelfContainedPrompt ? builtins.readFile ../templates/default/prompts/research-self-contained-prompt.md,
   # The Conditional fragment registry (issue #622, CONTEXT.md): rows of
   # (gate, fragment, var) the entrypoint's single fragment loop and its
   # `_subst` substitution allowlist are both rendered from. Not
@@ -240,6 +246,9 @@ let
   researchVerdicts = import ./research-verdicts.nix;
   researchVerdictsKnob = mergedDefaults.researchVerdicts or "";
   researchPromptRendered = researchVerdicts.renderIfCustom researchVerdictsKnob researchPrompt;
+  # Same verdict-set rendering, applied to the self-contained sub-mode prompt
+  # (issue #2202) so a custom RESEARCH_VERDICTS knob reaches both prompts.
+  researchSelfContainedPromptRendered = researchVerdicts.renderIfCustom researchVerdictsKnob researchSelfContainedPrompt;
   researchPromptSourceRendered = researchVerdicts.renderIfCustom researchVerdictsKnob researchPromptSource;
   researchOutcomeContract = sliceFromMarker researchOutcomeContractMarker researchPromptSourceRendered;
   injectResearchOutcomeContract = injectSection researchOutcomeContractMarker researchOutcomeContract;
@@ -528,6 +537,8 @@ let
     # The research prompt baked into the image carries the verdict contract
     # rendered from the configured set (issue #2201); default knob is a no-op.
     researchPrompt = researchPromptRendered;
+    # The self-contained sub-mode's own prompt (issue #2202), same rendering.
+    researchSelfContainedPrompt = researchSelfContainedPromptRendered;
     entrypointDefaultsPreamble = renderDefaultsPreamble { };
   };
   inherit (imageModule) image agentEnv agentFiles;
@@ -580,6 +591,7 @@ let
     cp ${hostPkgs.writeText "conflict-resolve-prompt.md" conflictResolvePrompt} $out/conflict-resolve-prompt.md
     cp ${hostPkgs.writeText "fix-prompt.md" (injectFixSharedBlocks fixPrompt)} $out/fix-prompt.md
     cp ${hostPkgs.writeText "research-prompt.md" (injectResearchOutcomeContract researchPromptRendered)} $out/research-prompt.md
+    cp ${hostPkgs.writeText "research-self-contained-prompt.md" (injectResearchOutcomeContract researchSelfContainedPromptRendered)} $out/research-self-contained-prompt.md
     cp -r ${fragmentsSourceDir} $out/fragments
   '';
 

@@ -88,6 +88,9 @@
   fixPrompt,
   # Driven instead of `prompt` when DISPATCH_KIND=research (ADR 0022, issue #640).
   researchPrompt,
+  # Driven instead of `researchPrompt` when the research dispatch runs in its
+  # self-contained sub-mode (ADR 0022, issue #2202): no repo, no clone.
+  researchSelfContainedPrompt,
   # The SPINDRIFT_OUTCOME / COMMS / CHECK-COMMIT shared blocks (issues #419,
   # #455) and their injectors, sliced from issue-prompt.md by mkHarness so the
   # host-side contract files (which stay in mkHarness) cannot drift from what
@@ -358,6 +361,7 @@ let
     cp ${pkgs.writeText "conflict-resolve-prompt.md" conflictResolvePrompt} $out/agent/prompts/conflict-resolve-prompt.md
     cp ${pkgs.writeText "fix-prompt.md" (injectFixSharedBlocks fixPrompt)} $out/agent/prompts/fix-prompt.md
     cp ${pkgs.writeText "research-prompt.md" (injectResearchOutcomeContract researchPrompt)} $out/agent/prompts/research-prompt.md
+    cp ${pkgs.writeText "research-self-contained-prompt.md" (injectResearchOutcomeContract researchSelfContainedPrompt)} $out/agent/prompts/research-self-contained-prompt.md
     cp -r ${fragmentsSourceDir} $out/agent/prompts/fragments
     ${lib.optionalString (skills != [ ]) ''
       mkdir -p $out/home/agent/${driverEntry.skillsDirRelative}
