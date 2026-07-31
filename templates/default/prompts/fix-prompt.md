@@ -12,13 +12,7 @@ ${CI_FAILURE_STEP}# CONTEXT
 Read first (run these yourself) — skip anything CI FAILURE above already answered:
 
 - `git log -n 10 --oneline` — the prior run's commits already on this branch.
-- `gh pr view --json url,statusCheckRollup` — the open PR and its current CI
-  state.
-- `gh run list --branch ${BRANCH} --status failure --limit 5` and
-  `gh run view --log-failed <run-id>` (or the CI provider's equivalent) — the
-  actual failure, not a guess.
-
-# FIX
+${FIX_CI_READ_GITHUB_STEP}${FIX_CI_READ_FORGEJO_STEP}# FIX
 
 ${SKILL_PREAMBLE}No SCOUT, no implement-from-scratch. Go straight to:
 

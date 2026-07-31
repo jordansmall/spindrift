@@ -340,11 +340,28 @@ setup() {
 @test "OPEN A PULL REQUEST create step: forgejo read-write uses fj pr create, never gh pr create" {
   export ISSUE_TRACKER=forgejo
   export CODE_FORGE=forgejo
+  export FORGEJO_BASE_URL="https://forge.test"
+  export FORGEJO_TOKEN="fjtok"
+  # clone_repo requires FORGEJO_TOKEN and builds the clone URL as
+  # https://<token>@<host>/<slug>.git; redirect that exact URL to the bare
+  # repo setup_bare_repo already seeded so the clone stays offline (mirrors
+  # tests/entrypoint-clone.bats's CODE_FORGE=forgejo clone test).
+  git config --global "url.file://$REMOTE_ROOT/.insteadOf" "https://fjtok@forge.test/"
   export WORK_DIR="$BATS_TEST_TMPDIR/work-open-pr-create-forgejo-read-write"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  grep -qF 'fj pr create' "$CLAUDE_PROMPT_FILE"
-  ! grep -qF 'gh pr create' "$CLAUDE_PROMPT_FILE"
+  # Scoped to the OPEN A PULL REQUEST section: LAND THE CHANGE's own
+  # CODE_FORGE=forgejo branch (above this section) unconditionally mentions
+  # `fj pr create` in its descriptive prose regardless of read/write mode,
+  # so a whole-file grep would false-positive on it.
+  local open_pr_section
+  open_pr_section="$(awk '/^# OPEN A PULL REQUEST/,/^# OUTCOME/' "$CLAUDE_PROMPT_FILE")"
+  # Anchored to the step-2 invocation itself, not a bare substring: the
+  # forgejo fragment's own step 2 also carries a "Do NOT run `gh pr create`"
+  # reminder in its prose, which a plain `grep -qF 'gh pr create'` would
+  # false-positive on.
+  grep -qE '^2\. `fj pr create' <<<"$open_pr_section"
+  ! grep -qE '^2\. `gh pr create' <<<"$open_pr_section"
 }
 
 # Read-only stays forge-agnostic (SPINDRIFT_PR_INTENT relay, issue #1963) --
@@ -352,13 +369,20 @@ setup() {
 @test "OPEN A PULL REQUEST create step: forgejo read-only stays forge-agnostic via SPINDRIFT_PR_INTENT, never fj pr create" {
   export ISSUE_TRACKER=forgejo
   export CODE_FORGE=forgejo
+  export FORGEJO_BASE_URL="https://forge.test"
+  export FORGEJO_TOKEN="fjtok"
+  git config --global "url.file://$REMOTE_ROOT/.insteadOf" "https://fjtok@forge.test/"
   unset BOX_WRITE_ENABLED
   export RUN_NONCE="deadbeefcafe1234"
   export WORK_DIR="$BATS_TEST_TMPDIR/work-open-pr-create-forgejo-read-only"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   grep -qF 'SPINDRIFT_PR_INTENT deadbeefcafe1234' "$CLAUDE_PROMPT_FILE"
-  ! grep -qF 'fj pr create' "$CLAUDE_PROMPT_FILE"
+  # Scoped to the OPEN A PULL REQUEST section, same reasoning as the
+  # read-write case above.
+  local open_pr_section
+  open_pr_section="$(awk '/^# OPEN A PULL REQUEST/,/^# OUTCOME/' "$CLAUDE_PROMPT_FILE")"
+  ! grep -qF 'fj pr create' <<<"$open_pr_section"
 }
 
 @test "OPEN A PULL REQUEST create step: read-only emits a nonce-guarded SPINDRIFT_PR_INTENT line, never gh pr create" {
@@ -889,6 +913,31 @@ FILER_AGENTS_JSON_TEMPLATE='{"filer":{"description":"filer","model":"haiku","pro
   ! grep -qF 'gh label create' "$CLAUDE_AGENTS_FILE"
   grep -qF 'queued for filing' "$CLAUDE_PROMPT_FILE"
   ! grep -qF "the filer's returned issue URLs" "$CLAUDE_PROMPT_FILE"
+}
+
+# The direct case forks further on ISSUE_TRACKER (issue #1963): fj has no
+# label verb and `fj issue create` has no --label flag, so a forgejo
+# tracker's direct filer writes go through the *-forgejo fragments (fj issue
+# create + a curl fallback for the label) instead of gh label create/gh
+# issue create.
+@test "filer write step: forgejo direct filer speaks fj issue create, never gh issue create" {
+  export AGENTS_JSON_TEMPLATE="$FILER_AGENTS_JSON_TEMPLATE"
+  export ISSUE_TRACKER=forgejo
+  export WORK_DIR="$BATS_TEST_TMPDIR/work-filer-forgejo-direct"
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -qF 'fj issue create' "$CLAUDE_AGENTS_FILE"
+  ! grep -qF 'gh issue create' "$CLAUDE_AGENTS_FILE"
+  ! grep -qF 'gh label create' "$CLAUDE_AGENTS_FILE"
+}
+
+@test "filer write step: github direct filer still speaks gh issue create, never fj issue create" {
+  export AGENTS_JSON_TEMPLATE="$FILER_AGENTS_JSON_TEMPLATE"
+  export WORK_DIR="$BATS_TEST_TMPDIR/work-filer-github-direct"
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -qF 'gh issue create' "$CLAUDE_AGENTS_FILE"
+  ! grep -qF 'fj issue create' "$CLAUDE_AGENTS_FILE"
 }
 
 # The REVIEW section fork (issue #2037, ADR 0035): orchestrator off keeps the

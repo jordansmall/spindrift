@@ -13,7 +13,7 @@ open).
 
 Steps:
 
-${FILER_LABEL_DIRECT_STEP}${FILER_LABEL_RELAY_STEP}2. Dedup — a finding must not already be tracked, or already dismissed:
+${FILER_LABEL_DIRECT_STEP}${FILER_LABEL_DIRECT_FORGEJO_STEP}${FILER_LABEL_RELAY_STEP}2. Dedup — a finding must not already be tracked, or already dismissed:
    - Search ALL open issues, regardless of label — an open issue describing
      the same problem means it's already tracked, whether human-filed,
      `ready-for-agent`, filed via `/to-tickets`, or from a prior Filer run:
@@ -33,7 +33,7 @@ ${FILER_LABEL_DIRECT_STEP}${FILER_LABEL_RELAY_STEP}2. Dedup — a finding must n
    Skip any finding that matches an existing issue in either search by
    subject.
 
-${FILER_FILE_DIRECT_STEP}${FILER_FILE_RELAY_STEP}4. Each filed issue:
+${FILER_FILE_DIRECT_STEP}${FILER_FILE_DIRECT_FORGEJO_STEP}${FILER_FILE_RELAY_STEP}4. Each filed issue:
    - Title: a conventional-commit-style title scoped to the fix itself (e.g.
      `fix(auth): validate token expiry before use`) — never a meta-title like
      "review finding".

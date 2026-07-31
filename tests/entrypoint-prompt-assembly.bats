@@ -89,3 +89,38 @@ setup() {
   ! grep -q "lint: FAILURE" "$CLAUDE_PROMPT_FILE"
 }
 
+# The fix-pass CONTEXT CI-read step forks on CODE_FORGE (issue #1963): `gh pr
+# view`/`gh run list`/`gh run view` don't exist against a Forgejo remote, so a
+# forgejo fix pass reads CI via `fj pr status` instead.
+@test "fix pass on CODE_FORGE=forgejo reads CI via fj pr status, never gh pr view" {
+  export FIX_PASS="2"
+  export CODE_FORGE=forgejo
+  export FORGEJO_BASE_URL="https://forge.test"
+  export FORGEJO_TOKEN="fjtok"
+  # clone_repo requires FORGEJO_TOKEN and builds the clone URL as
+  # https://<token>@<host>/<slug>.git; redirect that exact URL to the bare
+  # repo setup_bare_repo already seeded so the clone stays offline (mirrors
+  # tests/entrypoint-clone.bats's CODE_FORGE=forgejo clone test).
+  git config --global "url.file://$REMOTE_ROOT/.insteadOf" "https://fjtok@forge.test/"
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  # Scoped to the fix pass's own CONTEXT section: the shared contract
+  # appended below it (IF BLOCKED's own PR step, out of this issue's scope)
+  # legitimately keeps its own unconditional `gh pr view` regardless of
+  # CODE_FORGE, so a whole-file grep would false-positive on it.
+  local context_section
+  context_section="$(awk '/^# CONTEXT/,/^# FIX/' "$CLAUDE_PROMPT_FILE")"
+  grep -qF 'fj pr status' <<<"$context_section"
+  ! grep -qF 'gh pr view' <<<"$context_section"
+}
+
+@test "fix pass on default (github) CODE_FORGE reads CI via gh pr view, never fj pr status" {
+  export FIX_PASS="2"
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  local context_section
+  context_section="$(awk '/^# CONTEXT/,/^# FIX/' "$CLAUDE_PROMPT_FILE")"
+  grep -qF 'gh pr view' <<<"$context_section"
+  ! grep -qF 'fj pr status' <<<"$context_section"
+}
+
