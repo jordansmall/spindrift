@@ -4,24 +4,38 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/git"
 )
+
+// defaultForgejoProbeTimeout bounds the default HTTP client used for the
+// Probe REST call so a hung Forgejo instance can't block Probe forever.
+const defaultForgejoProbeTimeout = 30 * time.Second
 
 // forgejoGitRemoteURL builds a token-authenticated git clone URL for repo
 // (an owner/repo slug) on the Forgejo instance at baseURL, e.g.
 // ("https://codeberg.org", "owner/repo", "tok") ->
 // "https://tok@codeberg.org/owner/repo.git" — the shape `git clone`/`git
 // push` expect for HTTP(S) token auth (the token rides as the URL's
-// userinfo, with no password half). Falls back to plain string
-// concatenation if baseURL fails to parse, so a malformed
-// FORGEJO_BASE_URL still yields a best-effort remote rather than an empty
-// string.
+// userinfo, with no password half). Falls back to string concatenation
+// with the token spliced in as userinfo if baseURL fails to parse, so a
+// malformed FORGEJO_BASE_URL still yields a best-effort, push-authenticated
+// remote rather than an anonymous one that would fail to push.
 func forgejoGitRemoteURL(baseURL, repo, token string) string {
 	u, err := url.Parse(baseURL)
 	if err != nil {
-		return strings.TrimSuffix(baseURL, "/") + "/" + strings.Trim(repo, "/") + ".git"
+		// Best-effort even when baseURL fails to parse: keep the token as the
+		// remote's userinfo (inserted right after the scheme when one is
+		// present) so the fallback is still a push-authenticated remote, not
+		// an anonymous one that would fail to push.
+		base := strings.TrimSuffix(baseURL, "/")
+		slug := strings.Trim(repo, "/")
+		if i := strings.Index(base, "://"); i >= 0 {
+			return base[:i+3] + token + "@" + base[i+3:] + "/" + slug + ".git"
+		}
+		return token + "@" + base + "/" + slug + ".git"
 	}
 	u.User = url.User(token)
 	u.Path = "/" + strings.Trim(repo, "/") + ".git"
@@ -40,8 +54,8 @@ type ForgejoCodeForgeConfig struct {
 	BranchPrefix string // baked into AgentBranch's output
 
 	// HTTPClient overrides the HTTP client used for the REST Probe call; nil
-	// uses http.DefaultClient. Tests inject a client pointed at a fake
-	// server.
+	// uses a client with a default 30s timeout. Tests inject a client
+	// pointed at a fake server.
 	HTTPClient *http.Client
 
 	// GitRemoteURL overrides the derived token-authenticated git remote
@@ -81,7 +95,7 @@ func NewForgejoCodeForge(cfg ForgejoCodeForgeConfig) forge.CodeForge {
 
 	hc := cfg.HTTPClient
 	if hc == nil {
-		hc = http.DefaultClient
+		hc = &http.Client{Timeout: defaultForgejoProbeTimeout}
 	}
 
 	rest := &forgejoClient{cfg: ForgejoConfig{BaseURL: baseURL, Repo: cfg.Repo, Token: cfg.Token}, hc: hc}

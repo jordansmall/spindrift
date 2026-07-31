@@ -30,3 +30,15 @@ func TestForgejoGitRemoteURL_RedactedStripsToken(t *testing.T) {
 		t.Fatalf("RedactURLCredentials(%q) = %q, still contains the token", remote, redacted)
 	}
 }
+
+// TestForgejoGitRemoteURL_FallbackKeepsToken verifies that when baseURL
+// fails to parse (here, a control character url.Parse rejects), the
+// fallback branch still produces a token-authenticated remote rather than
+// silently dropping the token and yielding an anonymous remote that would
+// fail to push.
+func TestForgejoGitRemoteURL_FallbackKeepsToken(t *testing.T) {
+	got := forgejoGitRemoteURL("https://forge.test\x7f", "owner/repo", "tok")
+	if !strings.Contains(got, "tok@") {
+		t.Fatalf("forgejoGitRemoteURL(...) = %q, want it to contain %q (token as userinfo)", got, "tok@")
+	}
+}
