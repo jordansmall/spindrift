@@ -46,16 +46,19 @@ type launchContext struct {
 // that varies per entry point. kind (dispatchKindWork or
 // dispatchKindResearch, ADR 0022) selects the label family, waves blocker
 // handling, and Settle implementation via applyDispatchKind — the other axis,
-// carried by which subcommand launched. No step here can fail after the
-// dispatch factory is constructed, so an error return never carries a launch
-// context that still needs cleanup.
-func bootstrap(ensureReady bool, kind string) (*launchContext, error) {
+// carried by which subcommand launched. selfContained (issue #2202,
+// --self-contained) is the research kind's no-repo sub-mode: set only by the
+// research subcommand handler, false everywhere else. No step here can fail
+// after the dispatch factory is constructed, so an error return never
+// carries a launch context that still needs cleanup.
+func bootstrap(ensureReady bool, kind string, selfContained bool) (*launchContext, error) {
 	pwd, err := os.Getwd()
 	if err != nil {
 		return nil, err
 	}
 
 	c := applyDispatchKind(loadConfig(), kind)
+	c.selfContained = selfContained
 	if err := validate(c); err != nil {
 		return nil, err
 	}

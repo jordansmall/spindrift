@@ -72,6 +72,20 @@ func dispatchYesArgs(args []string) (yes bool, remaining []string) {
 	return
 }
 
+// dispatchSelfContainedArgs extracts the --self-contained flag (issue #2202)
+// from the args following a dispatch-family verb. Returns (true, filtered)
+// when present, with the flag removed.
+func dispatchSelfContainedArgs(args []string) (selfContained bool, remaining []string) {
+	for _, a := range args {
+		if a == "--self-contained" {
+			selfContained = true
+		} else {
+			remaining = append(remaining, a)
+		}
+	}
+	return
+}
+
 // extractInputFlag pulls "--input <path>" out of args — the nix-rendered
 // wrapper's sole nix-computed argument (ADR 0020): the Launcher input
 // document's store path. Not a schema knob, so it is extracted before

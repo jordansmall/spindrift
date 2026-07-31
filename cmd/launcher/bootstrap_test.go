@@ -16,7 +16,7 @@ import (
 func TestBootstrap_PropagatesValidateError(t *testing.T) {
 	t.Setenv("REPO_SLUG", "")
 
-	lc, err := bootstrap(true, dispatchKindWork)
+	lc, err := bootstrap(true, dispatchKindWork, false)
 
 	if lc != nil {
 		t.Errorf("bootstrap() launch context = %+v, want nil on validate error", lc)

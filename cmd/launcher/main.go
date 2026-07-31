@@ -229,6 +229,12 @@ type config struct {
 	// the environment directly — it is operator intent carried by which
 	// subcommand launched (dispatch vs research), not a config knob.
 	dispatchKind string
+
+	// selfContained is the research kind's no-repo sub-mode (issue #2202,
+	// --self-contained): the Box clones no repo and explores none, and startup
+	// validation permits the no-REPO_SLUG/no-GH_TOKEN configuration. Set only by
+	// the research subcommand handler; rejected by validate for any other kind.
+	selfContained bool
 }
 
 // dispatchKindWork and dispatchKindResearch are the two Dispatch kinds (ADR
@@ -459,12 +465,19 @@ func loadConfig() config {
 }
 
 func validate(c config) error {
+	if c.selfContained && c.dispatchKind != dispatchKindResearch {
+		return fmt.Errorf("--self-contained is only valid for the research dispatch kind")
+	}
 	// A fully-local run (both seams local) never constructs the github
 	// gh-exec client that reads REPO_SLUG/GH_TOKEN, so neither is required —
 	// any other combination (github, git, jira, or a mixed local pairing)
-	// keeps the unconditional requirement.
+	// keeps the unconditional requirement. A self-contained research run
+	// (issue #2202, --self-contained) is exempted for a different reason:
+	// the Box clones no repo and explores none, so neither field is
+	// meaningful.
 	fullyLocal := c.codeForge == "local" && c.issueTracker == "local"
-	if !fullyLocal && c.repoSlug == "" {
+	noRepoResearch := c.dispatchKind == dispatchKindResearch && c.selfContained
+	if !fullyLocal && !noRepoResearch && c.repoSlug == "" {
 		return fmt.Errorf("set REPO_SLUG=owner/repo (the target GitHub repository)")
 	}
 	if c.gitUserName == "" {
@@ -473,7 +486,7 @@ func validate(c config) error {
 	if c.gitUserEmail == "" {
 		return fmt.Errorf("set GIT_USER_EMAIL, or configure git user.email on the host")
 	}
-	if !fullyLocal && c.ghToken == "" {
+	if !fullyLocal && !noRepoResearch && c.ghToken == "" {
 		return fmt.Errorf("set GH_TOKEN (fine-grained PAT scoped to the single target repo: Issues RW, Contents RW, Pull requests RW, Metadata R)")
 	}
 	switch c.driver {
@@ -908,6 +921,7 @@ func dispatchConfig(c config, it forge.IssueTracker, lw *localloop.Wired, cf for
 		BoxEnvVars:             c.boxEnvVars,
 		ResolveEnv:             boxGHTokenResolver(boxForgejoTokenResolver(localBaseBranchResolver(c, it, lw, cf))),
 		Kind:                   c.dispatchKind,
+		SelfContained:          c.selfContained,
 		CodeForge:              c.codeForge,
 		BoxForgeAndIssueAccess: c.boxForgeAndIssueAccess,
 		TransientRetryMax:      c.transientRetryMax,
@@ -1615,7 +1629,7 @@ var verbHandlers = map[string]verbHandler{
 	"doctor":    func(args []string, stderr io.Writer) int { return cmdDoctor() },
 	"reconcile": func(args []string, stderr io.Writer) int { return cmdReconcile() },
 	"console": func(args []string, stderr io.Writer) int {
-		lc, err := bootstrap(true, dispatchKindWork)
+		lc, err := bootstrap(true, dispatchKindWork, false)
 		if err != nil {
 			fmt.Fprintf(stderr, "%s\n", err)
 			return 1
@@ -1623,11 +1637,15 @@ var verbHandlers = map[string]verbHandler{
 		return cmdConsole(lc, os.Stdin, os.Stdout)
 	},
 	"recover": func(args []string, stderr io.Writer) int {
+		if sc, _ := dispatchSelfContainedArgs(args); sc {
+			fmt.Fprintln(stderr, "flag --self-contained is only valid for the research subcommand")
+			return 1
+		}
 		if len(args) < 1 {
 			fmt.Fprintln(stderr, "usage: spindrift recover <issue-number>")
 			return 1
 		}
-		lc, err := bootstrap(true, dispatchKindWork)
+		lc, err := bootstrap(true, dispatchKindWork, false)
 		if err != nil {
 			fmt.Fprintf(stderr, "%s\n", err)
 			return 1
@@ -1638,10 +1656,14 @@ var verbHandlers = map[string]verbHandler{
 		return cmdPreview(dispatchIssueArgs(args))
 	},
 	"dispatch": func(args []string, stderr io.Writer) int {
+		if sc, _ := dispatchSelfContainedArgs(args); sc {
+			fmt.Fprintln(stderr, "flag --self-contained is only valid for the research subcommand")
+			return 1
+		}
 		noBuild, dispatchArgs := dispatchNoBuildArgs(args)
 		forceYes, dispatchArgs := dispatchYesArgs(dispatchArgs)
 		nums := dispatchIssueArgs(dispatchArgs)
-		lc, err := bootstrap(!noBuild, dispatchKindWork)
+		lc, err := bootstrap(!noBuild, dispatchKindWork, false)
 		if err != nil {
 			fmt.Fprintf(stderr, "%s\n", err)
 			return 1
@@ -1654,8 +1676,9 @@ var verbHandlers = map[string]verbHandler{
 	"research": func(args []string, stderr io.Writer) int {
 		noBuild, researchArgs := dispatchNoBuildArgs(args)
 		forceYes, researchArgs := dispatchYesArgs(researchArgs)
+		selfContained, researchArgs := dispatchSelfContainedArgs(researchArgs)
 		nums := dispatchIssueArgs(researchArgs)
-		lc, err := bootstrap(!noBuild, dispatchKindResearch)
+		lc, err := bootstrap(!noBuild, dispatchKindResearch, selfContained)
 		if err != nil {
 			fmt.Fprintf(stderr, "%s\n", err)
 			return 1
