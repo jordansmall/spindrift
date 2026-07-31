@@ -44,6 +44,7 @@ See [`docs/reference.md`](reference.md) for the full option surface and runtime 
 
 | attr path | env var | default | description |
 |---|---|---|---|
+| `perSystem.spindrift.issues.forgejo.baseURL` | `FORGEJO_BASE_URL` | `https://codeberg.org` | Forgejo/Gitea instance base URL, defaulting to Codeberg; used when ISSUE_TRACKER=forgejo |
 | `perSystem.spindrift.issues.jira.baseURL` | `JIRA_BASE_URL` | — | Jira site base URL (e.g. https://yourcompany.atlassian.net); required when ISSUE_TRACKER=jira |
 | `perSystem.spindrift.issues.jira.email` | `JIRA_EMAIL` | — | Jira Cloud account email, paired with JIRA_TOKEN for Basic auth; leave empty for Bearer-token auth (Jira Server/Data Center PATs) |
 | `perSystem.spindrift.issues.jira.includeComments` | `JIRA_INCLUDE_COMMENTS` | `` | when enabled, the Jira adapter appends the issue's comment thread to the description it returns; off (default) keeps the prompt-injection surface tight |
@@ -55,7 +56,7 @@ See [`docs/reference.md`](reference.md) for the full option surface and runtime 
 | `perSystem.spindrift.issues.labels.inProgress` | `IN_PROGRESS_LABEL` | `agent-in-progress` | label swapped on from LABEL when an issue enters the queue |
 | `perSystem.spindrift.issues.localDir` | `LOCAL_ISSUES_DIR` | `.spindrift/issues` | directory scanned for issue files when ISSUE_TRACKER=local; keep it git-ignored so breakout issues stay private |
 | `perSystem.spindrift.issues.localReference` | `LOCAL_ISSUE_REFERENCE` | `` | when enabled and ISSUE_TRACKER=local, the PR body includes a non-auto-closing `Local-issue: <slug>` breadcrumb; default off keeps the private local ticket slug out of the PR body entirely (ISSUE_TRACKER=github is unaffected -- `Closes #ISSUE_NUMBER` stays either way) |
-| `perSystem.spindrift.issues.tracker` | `ISSUE_TRACKER` | `github` | IssueTracker backend (ADR 0013): github (gh-exec, default), local (private Markdown + YAML frontmatter files; see LOCAL_ISSUES_DIR), or jira (see JIRA_BASE_URL/JIRA_PROJECT_KEY/JIRA_TOKEN); the Code Forge (PR/CI/merge) stays github regardless |
+| `perSystem.spindrift.issues.tracker` | `ISSUE_TRACKER` | `github` | IssueTracker backend (ADR 0013): github (gh-exec, default), local (private Markdown + YAML frontmatter files; see LOCAL_ISSUES_DIR), jira (see JIRA_BASE_URL/JIRA_PROJECT_KEY/JIRA_TOKEN), or forgejo (Forgejo/Gitea REST API adapter; Codeberg default via FORGEJO_BASE_URL; see FORGEJO_BASE_URL/FORGEJO_TOKEN); the Code Forge (PR/CI/merge) stays github regardless |
 
 ## Forge (`perSystem.spindrift.forge`)
 

@@ -746,7 +746,7 @@ exceptions.
 | `BOX_FORGE_AND_ISSUE_ACCESS` | `read-write` (baked)   | a third axis, orthogonal to `CODE_FORGE`/`ISSUE_TRACKER` (issue #1914): `read-write` (the Box writes directly, unchanged) or `read-only` (the Launcher host-mediates every write instead — see [Read-only Box](#read-only-box-box_forge_and_issue_accessread-only)), gated at startup by capability — `read-only` is permitted only when the selected forge implements bundle-relay and host-side draft-PR-create and the selected tracker implements host-posted comments; `local` and `github` both satisfy the gate today |
 | `LABEL`                   | `ready-for-agent` (baked) | issues to pick up                     |
 | `ISSUE_NUMBER`            | — (empty = discover)   | dispatch only this one issue, bypassing the `LABEL` query (per-run only; not bakeable) |
-| `ISSUE_TRACKER`           | `github` (baked)       | IssueTracker backend: `github`, `local` (private Markdown + YAML frontmatter files — see [Local issue tracker](#local-issue-tracker-issue_trackerlocal)), or `jira` (see [Issue Tracker backends](#issue-tracker-backends)) |
+| `ISSUE_TRACKER`           | `github` (baked)       | IssueTracker backend: `github`, `local` (private Markdown + YAML frontmatter files — see [Local issue tracker](#local-issue-tracker-issue_trackerlocal)), `jira`, or `forgejo` (see [Issue Tracker backends](#issue-tracker-backends)) |
 | `LOCAL_ISSUES_DIR`        | `.spindrift/issues` (baked) | directory scanned for issue files when `ISSUE_TRACKER=local`; git-ignored by default |
 | `BASE_BRANCH`             | `main` (baked)         | branch to cut from and PR into           |
 | `MAX_PARALLEL`            | `3` (baked)            | concurrent containers                    |
@@ -1270,7 +1270,7 @@ live) are independent axes. `ISSUE_TRACKER` selects the tracker; the Code
 Forge stays `github` regardless (Jira issues, GitHub PRs).
 
 The [Quickstart wizard](../README.md#quick-start) always provisions
-`github`; it never prompts for a tracker. `local` and `jira` are
+`github`; it never prompts for a tracker. `local`, `jira`, and `forgejo` are
 experimental and reachable only by hand-editing `ISSUE_TRACKER` in the
 generated `flake.nix`.
 
@@ -1335,6 +1335,29 @@ generated `flake.nix`.
   deferred until a Jira user exists (ADR 0022). The `local` tracker maps
   research states the same way it maps work states, through its frontmatter
   `state` field.
+
+- **`forgejo`** — a Forgejo/Gitea REST API adapter; Codeberg is the default
+  instance, set via `FORGEJO_BASE_URL` (default `https://codeberg.org`, so a
+  self-hosted Forgejo/Gitea instance just re-points it). `FORGEJO_TOKEN` is a
+  secret env var alongside `GH_TOKEN`, a Forgejo/Gitea API token used with
+  the Bearer/`token` auth scheme.
+
+  Dispatch state uses the same label lifecycle as `github` (`ready-for-agent`
+  / `agent-in-progress` / `agent-complete` / `agent-failed`, same
+  `LABEL`/`IN_PROGRESS_LABEL`/`FAILED_LABEL`/`COMPLETE_LABEL` knobs) — Forgejo
+  has no native workflow-status concept to prefer over labels, unlike Jira's
+  status mapping.
+
+  Dependencies resolve from Forgejo's native issue-dependencies API first,
+  falling back to the `## Blocked by` / `depends on #N` body-text convention
+  when the native lookup is empty or unavailable — the same precedence and
+  `(native)` / `(body)` source tagging as the `github` tracker.
+
+  Config: `FORGEJO_BASE_URL` is non-secret, set via `settings.issues.forgejo`
+  (baked) or its env var (runtime) — see the [flake options
+  reference](flake-options.md). `spindrift doctor`'s `Probe()` check
+  validates the token and instance reachability independently of the GitHub
+  Code Forge probe.
 
 #### Merge guard
 

@@ -22,6 +22,7 @@ import (
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/forge/forgejo"
 	"spindrift.dev/launcher/internal/forge/git"
 	"spindrift.dev/launcher/internal/forge/github"
 	"spindrift.dev/launcher/internal/forge/jira"
@@ -81,9 +82,10 @@ type config struct {
 	continuousDispatch bool
 
 	// issueTracker selects the IssueTracker adapter: "github" (default),
-	// "local", or "jira". localIssuesDir is the local adapter's issue
-	// directory; the jira* fields are only consulted when issueTracker ==
-	// "jira". The Code Forge (PR/CI/merge) stays github regardless.
+	// "local", "jira", or "forgejo". localIssuesDir is the local adapter's
+	// issue directory; the jira* fields are only consulted when issueTracker
+	// == "jira", and the forgejo* fields only when issueTracker ==
+	// "forgejo". The Code Forge (PR/CI/merge) stays github regardless.
 	issueTracker   string
 	localIssuesDir string
 
@@ -93,6 +95,9 @@ type config struct {
 	jiraToken           string
 	jiraStatusMapping   string
 	jiraIncludeComments bool
+
+	forgejoBaseURL string
+	forgejoToken   string
 
 	// Transient-exit retry knobs
 	transientRetryMax    int
@@ -394,6 +399,8 @@ func loadConfig() config {
 		jiraToken:           os.Getenv("JIRA_TOKEN"),
 		jiraStatusMapping:   getenvSchema("JIRA_STATUS_MAPPING"),
 		jiraIncludeComments: getenvSchema("JIRA_INCLUDE_COMMENTS") != "",
+		forgejoBaseURL:      getenvSchema("FORGEJO_BASE_URL"),
+		forgejoToken:        os.Getenv("FORGEJO_TOKEN"),
 
 		transientRetryMax:    atoiSchema("TRANSIENT_RETRY_MAX"),
 		transientBackoffSecs: atoiSchema("TRANSIENT_BACKOFF_SECS"),
@@ -497,13 +504,18 @@ func validate(c config) error {
 		return fmt.Errorf("OVERLAP_GATE=%q is not valid; must be defer or off", c.overlapGate)
 	}
 	switch c.issueTracker {
-	case "github", "local", "jira":
+	case "github", "local", "jira", "forgejo":
 		// valid
 	default:
-		return fmt.Errorf("ISSUE_TRACKER=%q is not valid; must be github, local, or jira", c.issueTracker)
+		return fmt.Errorf("ISSUE_TRACKER=%q is not valid; must be github, local, forgejo, or jira", c.issueTracker)
 	}
 	if c.issueTracker == "jira" {
 		if err := jira.ValidateJiraEnv(c.jiraBaseURL, c.jiraProjectKey, c.jiraToken, c.jiraStatusMapping); err != nil {
+			return err
+		}
+	}
+	if c.issueTracker == "forgejo" {
+		if err := forgejo.ValidateForgejoEnv(c.forgejoBaseURL, c.forgejoToken); err != nil {
 			return err
 		}
 	}
@@ -591,6 +603,14 @@ func newIssueTracker(c config) forge.IssueTracker {
 			Labels:          dispatchLabels(c),
 			VerdictLabels:   vl,
 			IncludeComments: c.jiraIncludeComments,
+		})
+	case "forgejo":
+		return forgejo.NewForgejoClient(forgejo.ForgejoConfig{
+			BaseURL:       c.forgejoBaseURL,
+			Repo:          c.repoSlug,
+			Token:         c.forgejoToken,
+			Labels:        dispatchLabels(c),
+			VerdictLabels: vl,
 		})
 	default:
 		return github.NewExecClient(c.repoSlug, dispatchLabels(c), c.branchPrefix, github.WithVerdictLabels(vl))
