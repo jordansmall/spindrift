@@ -64,3 +64,104 @@ half synthesizes the static `OPENCODE_AUTH_CONTENT` wrapper. Either way the
 variable joins the `bwrapSecrets` allowlist and the Driver-conditional
 `validate()` gate. Full findings, sources, and empirical transcript live on
 issue #260.
+
+## Amendment (issue #267): Tier 3 cloud-IAM Providers — Bedrock env-native, Vertex needs a file, Azure rides the auth store
+
+Research-only for the three cloud-IAM Providers opencode can point the AI SDK
+at — Amazon Bedrock (`amazon-bedrock`), Google Vertex (`google-vertex`),
+Azure OpenAI (`azure`) — whose auth is cloud credentials rather than a plain
+`{env:VAR}` apiKey. No knobs land here: the Driver-conditional `validate()`
+gate this section owes is itself owed by #262/#263, and one leg needs an
+env-var-content→file primitive that does not exist yet
+(`cmd/launcher/internal/runner/bwrap.go`'s `bwrapSecrets` only keeps values
+off argv, it never writes files). These are findings and a design fork, to be
+wired once the base opencode Driver and the `validate()` machinery exist. The
+Providers are a **runtime `MODEL` prefix** on the one opencode Driver
+(`amazon-bedrock/<model>`, `google-vertex/<model>`, `azure/<model>`), not new
+Drivers — so the seam is the same one-Driver/many-Providers axis this ADR
+already draws, and each leg's wiring is **at most** one new
+**Driver+Provider-conditional** env-schema entry beside `opencodeAuthContent`
+(Azure may reuse `opencodeAuthContent` and add none; Vertex also needs the
+content→file primitive below), not a new `lib/drivers/` file.
+The three legs fall into three distinct auth shapes:
+
+- **Bedrock — env-native, closest to the existing model, no file.** The AI
+  SDK's `@ai-sdk/amazon-bedrock` reads only env *values*: SigV4
+  `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`/`AWS_SESSION_TOKEN`, or — the
+  single-secret leg to standardize on — the API-key bearer
+  `AWS_BEARER_TOKEN_BEDROCK`, which the SDK prefers over SigV4 when set. Same
+  shape as `ANTHROPIC_API_KEY`: one `secret = true`, `boxEnv = true` env-var
+  knob, joined to `bwrapSecrets`. Region is a **non-secret** `AWS_REGION` env
+  value (or an `opencode.json` `provider.amazon-bedrock.options.region`, which
+  wins over env) and needs no secret handling. Avoid the `AWS_PROFILE` leg: it
+  resolves through the AWS credential chain against a mounted
+  `~/.aws/credentials`, reintroducing the host-file coupling this model
+  rejects. Verdict: the "secrets are env, never host files" model holds
+  cleanly — `AWS_BEARER_TOKEN_BEDROCK` is the one-env-var credential.
+
+- **Vertex — the one leg that genuinely needs a file.** opencode's Node CLI
+  embeds `@ai-sdk/google-vertex`, whose default (Node) path reads
+  `GOOGLE_APPLICATION_CREDENTIALS` as a **filesystem path** to a
+  service-account JSON, resolved by `google-auth-library` — the env var holds
+  a *path*, not the secret. The env-*value* trio
+  `GOOGLE_CLIENT_EMAIL`/`GOOGLE_PRIVATE_KEY`/`GOOGLE_PRIVATE_KEY_ID` the SDK
+  documents belongs to its separate `@ai-sdk/google-vertex/edge` entry point,
+  not the Node CLI, so it is not a drop-in escape from the file. This is the
+  case the issue anticipated: it needs a **materialize-env-content-to-a-file**
+  entrypoint primitive that does not exist yet — a generic "write `$VAR`'s
+  content to a fixed in-box path, then export `GOOGLE_APPLICATION_CREDENTIALS`
+  pointing at it," so the secret still enters the Box as an env value and the
+  host filesystem is never mounted. This is distinct from `OPENCODE_AUTH_CONTENT`:
+  that var is opencode's *own* auth store (#260), whereas
+  `GOOGLE_APPLICATION_CREDENTIALS` is consumed by Google's auth library
+  underneath the SDK, so the auth-store path cannot carry it. Project/location
+  are **non-secret** env values (opencode names them `GOOGLE_CLOUD_PROJECT`
+  and optional `VERTEX_LOCATION`; the raw SDK uses
+  `GOOGLE_VERTEX_PROJECT`/`GOOGLE_VERTEX_LOCATION` — opencode wraps and
+  renames, worth stating explicitly). Verdict: "secrets are env" holds only
+  once the content→file primitive lands; until then this leg is blocked on
+  that primitive, not just on #262/#263.
+
+- **Azure — rides the auth store, mirroring the Copilot resolution.** The
+  correction to the pre-spike guess: `@ai-sdk/azure` *does* read an
+  `AZURE_API_KEY` env value (and supports an Entra/`@azure/identity` bearer
+  token provider in place of the key), so an env-native leg is not
+  structurally impossible. But opencode's *own* documented flow enters the key
+  interactively via `/connect` → its auth store (not headless-safe), with only
+  the **non-secret** `AZURE_RESOURCE_NAME` left as an env var — structurally
+  identical to the Copilot case #260 resolved. The strong first lead is
+  therefore the same one that leg landed on: pre-seed the Azure credential
+  through `OPENCODE_AUTH_CONTENT` (the whole auth store, env-native, nothing
+  written to disk) rather than inventing a new mechanism — to be confirmed by
+  the same kind of empirical mini-spike #260 ran (does opencode 1.17.x honor
+  an `azure` slice in `OPENCODE_AUTH_CONTENT` the way it honors the
+  `github-copilot` slice?). If that holds, Azure needs no new secret env var
+  at all — it reuses `opencodeAuthContent` plus a non-secret
+  `AZURE_RESOURCE_NAME` env knob; if it does not, the fallback is a plain
+  `AZURE_API_KEY` secret knob in the `bwrapSecrets`/`{env:}` idiom.
+
+**env-schema / `validate()` shape owed (per leg, once #262/#263 land):** each
+new knob follows the `opencodeAuthContent`/`anthropicAPIKey` pattern in
+`lib/env-schema.nix` (`env`, `secret`, `doc`, `boxEnv`) and gates on **both**
+Driver and Provider — required only when `DRIVER=opencode` *and* `MODEL`
+carries the matching Provider prefix, ignored otherwise, exactly as
+`opencodeAuthContent` is scoped to `MODEL=github-copilot/<model>`. Bedrock:
+one `awsBedrockBearerToken` (`AWS_BEARER_TOKEN_BEDROCK`) secret + non-secret
+`AWS_REGION`. Vertex: a `googleVertexCredentials` **content** secret (feeding
+the file primitive above, *not* a raw path knob) + non-secret
+`GOOGLE_CLOUD_PROJECT`/`VERTEX_LOCATION`. Azure: reuse `opencodeAuthContent`
+(pending the spike) + non-secret `AZURE_RESOURCE_NAME`, or a fallback
+`azureAPIKey` secret. Each secret env var joins the `bwrapSecrets` allowlist
+in `bwrap.go` when its knob lands.
+
+**Egress / netns:** none of the three needs new runner-netns wiring under the
+current coarse network model (`lib/env-schema.nix`'s network mode is
+unset/NAT vs `pasta`, with no per-domain egress allowlist). The regional
+endpoints each leg reaches —
+`bedrock-runtime.<region>.amazonaws.com`,
+`<region>-aiplatform.googleapis.com`,
+`<resource>.openai.azure.com` — all resolve over the same egress path as
+`api.anthropic.com`; region is a config/env choice, not a firewall change.
+Worth a one-line note in any future per-domain egress design, not a blocker
+here. Full sources (opencode provider docs, the AI SDK provider pages, AWS
+Bedrock endpoint reference) and reasoning live on issue #267.
