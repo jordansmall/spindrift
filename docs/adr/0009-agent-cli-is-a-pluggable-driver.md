@@ -165,3 +165,94 @@ endpoints each leg reaches —
 Worth a one-line note in any future per-domain egress design, not a blocker
 here. Full sources (opencode provider docs, the AI SDK provider pages, AWS
 Bedrock endpoint reference) and reasoning live on issue #267.
+
+## Amendment (issue #269): Tier 5 local/self-hosted Providers — no auth axis, the crux is the runner netns
+
+Research-only for the three local/self-hosted Providers opencode can point the
+AI SDK at — Ollama (`ollama`), LM Studio (`lmstudio`), and a llama.cpp server —
+all three OpenAI-compatible endpoints loaded through the same
+`@ai-sdk/openai-compatible` npm shim. Unlike Tiers 1–4 (#260, #267), this tier
+has **no secret-injection axis at all**: the endpoints need no `apiKey` or
+credential, so there is no env-schema knob, no `validate()` gate, no
+`bwrapSecrets` entry, and nothing for the content→file primitive #267 called
+for. What the tier *does* need is the one thing the cloud tiers get for free —
+the Box being able to **reach** the model server — and that reachability is a
+runner-netns question (ADR 0006), not a Driver question. No knobs land here;
+these are findings and a documented posture, to be wired once the base opencode
+Driver and its `opencode.json` generation exist (blocked on #262/#263).
+
+**opencode-side config — `baseURL` + a static `models` map, nothing else.**
+Each Provider is registered in the generated `opencode.json` with only a
+`baseURL` and an explicit, hand-listed `models` block; none of the three
+supports model auto-discovery through the AI SDK, so the model IDs and their
+context/output limits must be enumerated in the generated config rather than
+probed at runtime. The default local endpoints are:
+
+- Ollama: `http://localhost:11434/v1`
+- LM Studio: `http://127.0.0.1:1234/v1`
+- llama.cpp server: `http://127.0.0.1:8080/v1`
+
+Since there is no `opencode.json`-generation code yet (`lib/drivers/opencode.nix`
+renders agent files but not the provider config — that is #262/#263's job),
+this is forward-looking: whatever config-rendering shape those issues land
+should need only a per-Provider `baseURL` + static `models` block here, with no
+new env-schema secret knob beside `opencodeAuthContent`.
+
+**Network reachability — the actual crux, per runner.** The two runners differ
+sharply because they take opposite default stances on the network namespace:
+
+- **bwrap (`cmd/launcher/internal/runner/bwrap.go`) — reachable by default,
+  unsupported once isolated.** With the default `BWRAP_UNSHARE_NET` unset the
+  Box shares the host network namespace outright (ADR 0006: "network kept for
+  GitHub"), so `localhost:<port>` and any LAN endpoint are reachable with
+  **zero new wiring**. But `--unshare-net` (appended at `bwrap.go`'s
+  `unshareFlags` only when `unshareNet` is set) is a hard on/off switch with no
+  slirp4netns/pasta companion wired anywhere in the repo — turning it on kills
+  *all* egress including GitHub, not just local-model reachability, and there is
+  no in-repo path to "isolated-but-can-still-reach-host-loopback." So under
+  bwrap the two states are: default (unset) → local Provider works; isolated
+  (`BWRAP_UNSHARE_NET=1`) → local Provider is **unsupported today**, and would
+  stay unsupported until a slirp/pasta companion lands to punch a scoped
+  host-loopback hole.
+
+- **podman/docker (`cmd/launcher/internal/runner/oci.go`) — the compound
+  `--network` value already covers it, no code change.** `PODMAN_NETWORK` is
+  spliced verbatim as a single `--network <value>` arg (`oci.go`'s
+  `buildRunArgs`), so compound backend values already flow through the existing
+  knob: `PODMAN_NETWORK=pasta:--map-gw` or
+  `PODMAN_NETWORK=slirp4netns:allow_host_loopback=true` punch a host-loopback
+  hole while keeping the egress-restricting backend. The **plain default**
+  (`PODMAN_NETWORK` empty) reachability of host loopback is
+  rootless-podman-version- and `containers.conf`-dependent — a worker wiring
+  this must verify it empirically against the podman the flake pins rather than
+  assume it "just works."
+
+**Does it weaken the egress-restriction posture?** Under *defaults* (no
+restriction opted into) nothing changes — bwrap already shares the host netns
+and podman's default bridge already permits general egress, so local-Provider
+reachability is **already latent, not newly opened** by selecting one. The real
+tension is only for an operator who has *deliberately* opted into
+`BWRAP_UNSHARE_NET`/`PODMAN_NETWORK=pasta` to restrict egress: enabling a local
+Provider there means reopening a host-loopback path
+(`pasta:--map-gw`/`slirp4netns:allow_host_loopback=true`), a genuine, callable
+weakening of that posture. This should be an **explicit, documented opt-in** —
+never something a Provider selection silently implies — mirroring how
+`PODMAN_NETWORK`/`BWRAP_UNSHARE_NET` are already separate, explicit knobs from
+Driver/Provider selection (see `docs/reference.md`'s network-knob rows).
+
+**Shape owed once #262/#263 land** (no code here):
+
+- `opencode.json` Provider block for each of Ollama/LM Studio/llama.cpp:
+  `baseURL` + explicit `models` map, **no credential knob** and no
+  `bwrapSecrets` entry.
+- A doc note (added below in `docs/reference.md`, beside the
+  `PODMAN_NETWORK`/`BWRAP_UNSHARE_NET` rows) on the compound `--network` values
+  that reach host-loopback when egress is restricted, for both runners.
+- An explicit call-out — not silent reachability — when a local Provider is
+  selected under a restricted-egress config.
+- bwrap: `BWRAP_UNSHARE_NET=1` + local Provider is unsupported until a
+  slirp/pasta companion is wired.
+
+Full sources (opencode's provider docs at https://opencode.ai/docs/providers/,
+the `@ai-sdk/openai-compatible` loader, and this repo's runner code) and the
+reasoning live on issue #269.
