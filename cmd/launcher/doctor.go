@@ -38,6 +38,11 @@ func runDoctor(it forge.IssueTracker, cf forge.CodeForge, c config, w io.Writer,
 // forgejo) isn't active, so both are always called under read-only and only
 // the relevant one prints anything beyond its self-noop.
 func reportReadOnlyTokenGate(c config, w io.Writer) error {
+	// Guarded on read-write (not read-only) so the read-only branch stays the
+	// default: boxForgeAndIssueAccess is a schema enum constrained upstream to
+	// exactly read-only|read-write, so no third value reaches here — the two
+	// gates below self-noop under read-write anyway, making the branch choice a
+	// display concern (no-op line vs. gate outcomes) rather than a safety one.
 	if c.boxForgeAndIssueAccess != "read-write" {
 		return reportReadOnlyTokenGates(c, w)
 	}
