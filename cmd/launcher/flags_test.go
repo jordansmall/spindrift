@@ -41,6 +41,22 @@ func TestSchemaFlags_BwrapUnshareNetIsBool(t *testing.T) {
 	t.Fatal("bwrap-unshare-net entry not found in schemaFlags")
 }
 
+// TestSchemaFlags_PromptDirSettingsPath asserts the SPINDRIFT_PROMPT_DIR
+// entry carries the flake-module settingsPath "agents.promptDir" (issue
+// #2200 slice 1), i.e. spindriftPromptDir in lib/env-schema.nix declares
+// flakeOption = true with nixSubPath = "promptDir".
+func TestSchemaFlags_PromptDirSettingsPath(t *testing.T) {
+	for _, e := range schemaFlags {
+		if e.env == "SPINDRIFT_PROMPT_DIR" {
+			if e.settingsPath != "agents.promptDir" {
+				t.Errorf("SPINDRIFT_PROMPT_DIR settingsPath = %q, want %q", e.settingsPath, "agents.promptDir")
+			}
+			return
+		}
+	}
+	t.Fatal("SPINDRIFT_PROMPT_DIR entry not found in schemaFlags")
+}
+
 // TestSchemaFlags_GenericBoolsAreBool asserts each of the six generic
 // boolean knobs converted in issue #2146 slice 1 renders as a presence-style
 // bool flag, not a string.

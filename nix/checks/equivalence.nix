@@ -338,6 +338,55 @@ in
         touch $out
       '';
 
+  # The flakeModule must expose `agents.promptDir` as a real domain-tree
+  # option (issue #2200 slice 2, following slice 1's `flakeOption = true;
+  # nixSubPath = "promptDir";` on the schema entry). A consumer that sets
+  # `agents.promptDir` gets byte-identical outputs to a direct mkHarness call
+  # with the equivalent flat `spindriftPromptDir` default, and the value
+  # bakes into the generated input document as SPINDRIFT_PROMPT_DIR.
+  flakemodule-prompt-dir =
+    let
+      consumer2200 =
+        flake-parts.lib.mkFlake
+          {
+            inputs = {
+              inherit nixpkgs;
+              self = {
+                outPath = ../../.;
+              };
+            };
+          }
+          {
+            systems = [ system ];
+            imports = [ ../../lib/flakeModule.nix ];
+            perSystem.spindrift = {
+              packages = p: [ p.hello ];
+              agents.promptDir = "prompt-dir-test";
+            };
+          };
+      direct2200 = import ../../lib/mkHarness.nix {
+        inherit nixpkgs system;
+        packages = p: [ p.hello ];
+        defaults = {
+          spindriftPromptDir = "prompt-dir-test";
+        };
+      };
+      consumerPkgs2200 = consumer2200.packages.${system};
+    in
+    pkgs.runCommand "flakemodule-prompt-dir"
+      {
+        moduleSpindrift = consumerPkgs2200.spindrift;
+        directSpindrift = direct2200.spindrift;
+        doc = direct2200.runInputDocumentFile;
+      }
+      ''
+        [ "$moduleSpindrift" = "$directSpindrift" ] \
+          || { echo "spindrift mismatch: $moduleSpindrift != $directSpindrift" >&2; exit 1; }
+        grep -q '"SPINDRIFT_PROMPT_DIR":"prompt-dir-test"' "$doc" \
+          || { echo "SPINDRIFT_PROMPT_DIR=prompt-dir-test not baked in the input document" >&2; exit 1; }
+        touch $out
+      '';
+
   # ADR 0037 Pass 1 (issue #2179): the OLD settings.* / flat structural paths
   # must keep working (deprecation shims that forward via lib.warn) — a
   # consumer that sets a representative spread of knobs via old paths gets
