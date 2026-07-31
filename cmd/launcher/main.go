@@ -1252,8 +1252,15 @@ func logDiscoveryPoll(c config, issues []issue, first bool, seen map[string]bool
 // and drives the adopt-and-gate path: the sole way an agent-in-progress issue
 // is ever adopted, gated on the operator's explicit agent-recover label (see
 // .github/workflows/agent-recover.yml) rather than any automatic sweep (#600).
-// Returns an error when the issue cannot be fetched, the PR is a draft, or no
-// open PR exists; the caller should treat those as non-success exits.
+// When no open PR exists, recover falls back to a second adopt arm (issue
+// #2225): it recovers the driver's last genuine self-report from the issue's
+// on-disk pass logs, and — when that report is a genuine success and the
+// prior run left a relayable finished branch in the outbox — opens the PR on
+// that relayed branch itself and drives it through the same merge gate,
+// rather than immediately giving up. Returns an error when the issue cannot
+// be fetched, the PR is a draft, or neither an open PR nor an adoptable
+// relayed-branch success exists (labels untouched in that last case); the
+// caller should treat those as non-success exits.
 func recoverByNumber(c config, it forge.IssueTracker, cf forge.CodeForge, pwd string, f *dispatch.Factory, s settle.Settler, issueNum string) error {
 	fi, err := it.Issue(issueNum)
 	if err != nil {
@@ -1266,6 +1273,17 @@ func recoverByNumber(c config, it forge.IssueTracker, cf forge.CodeForge, pwd st
 		return fmt.Errorf("issue %s: resolve PR: %w", issueNum, prErr)
 	}
 	if !res.Found {
+		if sr, ok := dispatch.LastSelfReportFromLogs(pwd, iss.number); ok {
+			if err := os.MkdirAll(dispatch.HostLogDirFor(pwd), 0o755); err != nil {
+				return fmt.Errorf("mkdir logs: %w", err)
+			}
+			d := f.New(iss.number, iss.title)
+			defer d.Close()
+			result := dispatch.Result{SelfReport: sr, SelfReportFound: true}
+			if s.SettleRelayedBranch(d, iss.number, 0, result) {
+				return nil
+			}
+		}
 		fmt.Printf("    #%s  status=skipped  note=no open PR on %s\n", issueNum, branch)
 		return fmt.Errorf("issue %s: no open PR", issueNum)
 	}
