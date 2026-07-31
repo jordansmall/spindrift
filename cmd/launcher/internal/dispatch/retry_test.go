@@ -193,6 +193,46 @@ func TestDispatchWithRetry_SuccessWithPRIntentLinePopulatesResult(t *testing.T) 
 	}
 }
 
+// TestDispatchWithRetry_SelfReportSurvivesSyntheticBackstop verifies that the
+// driver's own genuine near-miss self-report ("SPINDRIFT_OUTCOME: success",
+// no nonce, paraphrasing the grammar) survives on Result.SelfReport even
+// though a synthetic backstop line (ADR 0036) appended after it wins the
+// authoritative Result.Outcome via last-line-wins (issue #2223/#2224). The
+// backstop line carries this run's own nonce so LastInLog accepts it as
+// authoritative.
+func TestDispatchWithRetry_SelfReportSurvivesSyntheticBackstop(t *testing.T) {
+	fr := runner.NewFake()
+	drv := fakeDriver{ClassifyFn: func(string) (driver.Classification, error) {
+		return driver.Classification{}, nil
+	}}
+	var sleeps []time.Duration
+	d := newTestDispatch(t, retryConfig(3, 0, 0), fr, drv, fakeClock(time.Time{}, &sleeps))
+
+	fr.WriteToOutput = append([]byte("SPINDRIFT_OUTCOME: success\n"),
+		nonceLine(d, "SPINDRIFT_OUTCOME issue=1 landing=agent/issue-1 status=blocked synthetic=true note=backstop")...)
+
+	result := d.Run()
+
+	if !result.OutcomeFound {
+		t.Fatal("want OutcomeFound=true")
+	}
+	if !result.Outcome.Synthetic {
+		t.Error("Outcome.Synthetic: got false, want true")
+	}
+	if result.Outcome.Status != "blocked" {
+		t.Errorf("Outcome.Status: got %q, want %q", result.Outcome.Status, "blocked")
+	}
+	if !result.SelfReportFound {
+		t.Fatal("want SelfReportFound=true")
+	}
+	if result.SelfReport.Status != "success" {
+		t.Errorf("SelfReport.Status: got %q, want %q", result.SelfReport.Status, "success")
+	}
+	if result.SelfReport.Parsed {
+		t.Error("SelfReport.Parsed: got true, want false (near-miss line does not parse the full grammar)")
+	}
+}
+
 // TestDispatchWithRetry_SuccessWithIssueIntentLinesPopulatesResult verifies
 // that multiple single-line, nonce-guarded SPINDRIFT_ISSUE_INTENT control
 // signals alongside the outcome line in the box's log all surface on

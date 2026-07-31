@@ -175,11 +175,16 @@ func (d *Dispatch) outcomeResult(logPath string, o outcome.Outcome) Result {
 	if issueIntentsErr != nil {
 		fmt.Fprintf(os.Stderr, "    ?? #%s: issue-intent scan: %v\n", d.number, issueIntentsErr)
 	}
+	selfReport, selfReportFound, selfReportErr := outcome.LastSelfReportInLog(logPath)
+	if selfReportErr != nil {
+		fmt.Fprintf(os.Stderr, "    ?? #%s: self-report scan: %v\n", d.number, selfReportErr)
+	}
 	return Result{
 		Success: true, Outcome: o, OutcomeFound: true,
 		Comment: comment, CommentFound: commentFound,
 		PRIntent: prIntent, PRIntentFound: prIntentFound,
 		IssueIntents: issueIntents, IssueIntentsFound: len(issueIntents) > 0,
+		SelfReport: selfReport, SelfReportFound: selfReportFound,
 	}
 }
 
