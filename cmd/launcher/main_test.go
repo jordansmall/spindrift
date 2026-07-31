@@ -123,6 +123,35 @@ func TestMainRun_Research_ContinuousSetsEnv(t *testing.T) {
 	}
 }
 
+// TestDispatch_RejectsSelfContained verifies the `dispatch` verb rejects
+// --self-contained (issue #2202) before reaching bootstrap — the flag is
+// research-only. Asserted via the returned error text rather than a
+// REPO_SLUG validation error, proving the guard fires ahead of bootstrap.
+func TestDispatch_RejectsSelfContained(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := mainRun([]string{"dispatch", "--self-contained"}, &stdout, &stderr)
+	if code != 1 {
+		t.Errorf("mainRun(dispatch --self-contained) code = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "self-contained") {
+		t.Errorf("mainRun(dispatch --self-contained) stderr = %q, want it to mention self-contained", stderr.String())
+	}
+}
+
+// TestRecover_RejectsSelfContained verifies the `recover` verb rejects
+// --self-contained (issue #2202) the same way dispatch does — it is
+// research-only.
+func TestRecover_RejectsSelfContained(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := mainRun([]string{"recover", "--self-contained", "42"}, &stdout, &stderr)
+	if code != 1 {
+		t.Errorf("mainRun(recover --self-contained 42) code = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "self-contained") {
+		t.Errorf("mainRun(recover --self-contained 42) stderr = %q, want it to mention self-contained", stderr.String())
+	}
+}
+
 // TestMainRun_Console_RoutesThroughBootstrap verifies the `console`
 // subcommand reaches the same bootstrap/validate prologue as the other
 // subcommands — proven here by a missing REPO_SLUG surfacing the same
@@ -1160,6 +1189,46 @@ func TestValidate_MixedLocalStillRequiresRepoSlugAndGhToken(t *testing.T) {
 	c.ghToken = ""
 	if err := validate(c); err == nil {
 		t.Error("validate() must still require GH_TOKEN when only ISSUE_TRACKER is local")
+	}
+}
+
+// TestValidate_ResearchSelfContainedExemptsRepoSlugAndGhToken verifies that
+// validate() does not require REPO_SLUG or GH_TOKEN for a research dispatch
+// with selfContained set (issue #2202, --self-contained): the Box clones no
+// repo and explores none, so neither field is meaningful.
+func TestValidate_ResearchSelfContainedExemptsRepoSlugAndGhToken(t *testing.T) {
+	c := applyDispatchKind(minimalValidConfig(), dispatchKindResearch)
+	c.selfContained = true
+	c.repoSlug = ""
+	c.ghToken = ""
+	if err := validate(c); err != nil {
+		t.Errorf("validate() should exempt REPO_SLUG/GH_TOKEN for self-contained research: %v", err)
+	}
+}
+
+// TestValidate_SelfContainedRejectedOutsideResearch verifies that validate()
+// rejects selfContained set on any dispatch kind other than research (issue
+// #2202) — the flag is research-only.
+func TestValidate_SelfContainedRejectedOutsideResearch(t *testing.T) {
+	c := minimalValidConfig()
+	c.selfContained = true
+	err := validate(c)
+	if err == nil {
+		t.Fatal("validate() must reject selfContained outside the research dispatch kind")
+	}
+	if !strings.Contains(err.Error(), "self-contained") {
+		t.Errorf("error should mention self-contained, got: %v", err)
+	}
+}
+
+// TestValidate_ResearchWithoutSelfContainedStillRequiresRepoSlug guards
+// against over-relaxing the REPO_SLUG gate: a research dispatch without
+// --self-contained still requires REPO_SLUG like any other kind.
+func TestValidate_ResearchWithoutSelfContainedStillRequiresRepoSlug(t *testing.T) {
+	c := applyDispatchKind(minimalValidConfig(), dispatchKindResearch)
+	c.repoSlug = ""
+	if err := validate(c); err == nil {
+		t.Error("validate() must still require REPO_SLUG for research without --self-contained")
 	}
 }
 

@@ -98,6 +98,25 @@ func TestBuildBoxEnvSetsDispatchKind(t *testing.T) {
 	}
 }
 
+// TestBuildBoxEnv_SelfContainedSetsMarker verifies buildBoxEnv forwards
+// Config.SelfContained into the Box as SELF_CONTAINED=1 (issue #2202), so the
+// entrypoint can skip clone_repo and select the self-contained research
+// prompt.
+func TestBuildBoxEnv_SelfContainedSetsMarker(t *testing.T) {
+	if got := buildBoxEnv(Config{SelfContained: true}, "3", "T", 0, "", "")["SELF_CONTAINED"]; got != "1" {
+		t.Errorf("SELF_CONTAINED with Config.SelfContained=true: got %q, want %q", got, "1")
+	}
+}
+
+// TestBuildBoxEnv_SelfContainedAbsentByDefault verifies buildBoxEnv leaves
+// SELF_CONTAINED unset (not "0", not "") when Config.SelfContained is false,
+// matching every pre-#2202 construction site.
+func TestBuildBoxEnv_SelfContainedAbsentByDefault(t *testing.T) {
+	if _, ok := buildBoxEnv(Config{}, "3", "T", 0, "", "")["SELF_CONTAINED"]; ok {
+		t.Error("SELF_CONTAINED should be absent when Config.SelfContained is false")
+	}
+}
+
 // TestBuildBoxEnvSetsRunNonce verifies buildBoxEnv forwards the Dispatch's
 // per-run nonce (issue #1937) into the Box as RUN_NONCE.
 func TestBuildBoxEnvSetsRunNonce(t *testing.T) {

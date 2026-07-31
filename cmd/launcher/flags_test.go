@@ -1747,6 +1747,31 @@ func TestDispatchYesArgs_Absent(t *testing.T) {
 	}
 }
 
+// TestDispatchSelfContainedArgs: --self-contained sets selfContained=true and
+// is removed from remaining; absent leaves it false and args untouched
+// (issue #2202).
+func TestDispatchSelfContainedArgs(t *testing.T) {
+	selfContained, rest := dispatchSelfContainedArgs([]string{"--self-contained", "42"})
+	if !selfContained {
+		t.Error("want selfContained=true, got false")
+	}
+	if len(rest) != 1 || rest[0] != "42" {
+		t.Errorf("rest = %v, want [42]", rest)
+	}
+}
+
+// TestDispatchSelfContainedArgs_Absent: no --self-contained flag leaves
+// selfContained false and args unchanged.
+func TestDispatchSelfContainedArgs_Absent(t *testing.T) {
+	selfContained, rest := dispatchSelfContainedArgs([]string{"42"})
+	if selfContained {
+		t.Error("want selfContained=false, got true")
+	}
+	if len(rest) != 1 || rest[0] != "42" {
+		t.Errorf("rest = %v, want [42]", rest)
+	}
+}
+
 // TestParseFlags_YesPassthrough: --yes passes through like --no-build.
 func TestParseFlags_YesPassthrough(t *testing.T) {
 	remaining, err := parseFlags([]string{"dispatch", "--yes", "42"})

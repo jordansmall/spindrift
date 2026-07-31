@@ -56,6 +56,13 @@ type Config struct {
 	// construction site.
 	Kind string
 
+	// SelfContained forwards the research kind's no-repo sub-mode (issue #2202)
+	// into the Box as SELF_CONTAINED=1, so the entrypoint skips clone_repo and
+	// all repo exploration and selects the self-contained research prompt.
+	// Meaningful only when Kind == "research"; false (the default) for every
+	// pre-#2202 construction site leaves the env var unset.
+	SelfContained bool
+
 	// CodeForge is the CODE_FORGE knob value. runOnce consults it, alongside
 	// BoxForgeAndIssueAccess, to decide whether a Box needs a writable
 	// outbox directory at all: "local" always does (ADR 0033), and so does
@@ -116,6 +123,9 @@ func buildBoxEnv(cfg Config, number, title string, fixPass int, ciFailureSummary
 		kind = "work"
 	}
 	env["DISPATCH_KIND"] = kind
+	if cfg.SelfContained {
+		env["SELF_CONTAINED"] = "1"
+	}
 	if fixPass > 0 {
 		env["FIX_PASS"] = strconv.Itoa(fixPass)
 	}
