@@ -101,14 +101,20 @@ configure_env() {
 # clone_repo authenticates, clones the target repo into WORK_DIR, sets the
 # repo-local git identity, and fetches the latest refs.
 clone_repo() {
-  # CODE_FORGE=local clones from a local filesystem mount, never github.com,
-  # so there is nothing for gh's credential helper to apply to -- skipping it
-  # keeps this path a genuine no-forge-network-call guarantee (ADR 0033)
-  # rather than merely "the actual clone happens not to use it."
-  if [ "${CODE_FORGE:-github}" != "local" ]; then
+  # CODE_FORGE=local clones from a local filesystem mount, and CODE_FORGE=forgejo
+  # clones from and pushes to a Forgejo instance over a FORGEJO_TOKEN-authenticated
+  # URL (ADR 0038); neither target is github.com, so gh's github credential helper
+  # has nothing to apply -- and running it would fail a forgejo Box that carries no
+  # GH_TOKEN (ISSUE_TRACKER=forgejo). Skipping it keeps both paths a genuine
+  # no-github-credential-helper guarantee rather than merely "the actual clone
+  # happens not to use it."
+  case "${CODE_FORGE:-github}" in
+  local | forgejo) ;;
+  *)
     export GH_TOKEN
     gh auth setup-git
-  fi
+    ;;
+  esac
 
   # CODE_FORGE=git clones from and pushes to a configured plain git remote
   # instead of the target GitHub repo (ADR 0013); CODE_FORGE=local clones from
@@ -120,6 +126,17 @@ clone_repo() {
   local CLONE_URL="https://github.com/${REPO_SLUG}.git"
   if [ "${CODE_FORGE:-github}" = "git" ]; then
     CLONE_URL="${CODE_FORGE_REMOTE_URL:?CODE_FORGE_REMOTE_URL is required when CODE_FORGE=git}"
+  elif [ "${CODE_FORGE:-github}" = "forgejo" ]; then
+    # CODE_FORGE=forgejo clones from and pushes to a Forgejo/Gitea instance
+    # (ADR 0038), authenticating with FORGEJO_TOKEN carried as the remote URL's
+    # userinfo -- the same https://<token>@<host>/<owner>/<repo>.git shape the
+    # launcher's forgejoGitRemoteURL builds host-side, so the branch this Box
+    # pushes here and the branch the launcher's Merge later clones target one
+    # remote.
+    : "${FORGEJO_TOKEN:?FORGEJO_TOKEN is required when CODE_FORGE=forgejo}"
+    local _fj_base="${FORGEJO_BASE_URL:-https://codeberg.org}"
+    _fj_base="${_fj_base%/}"
+    CLONE_URL="${_fj_base%%://*}://${FORGEJO_TOKEN}@${_fj_base#*://}/${REPO_SLUG}.git"
   elif [ "${CODE_FORGE:-github}" = "local" ]; then
     CLONE_URL="$REPO_MOUNT_DIR"
     # Under rootless podman the Box's mapped uid never matches the

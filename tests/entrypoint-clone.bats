@@ -43,6 +43,44 @@ setup() {
   [ "$output" = "$other_remote" ]
 }
 
+# CODE_FORGE=forgejo: the Box clones from and pushes to a Forgejo/Gitea
+# instance over a FORGEJO_TOKEN-authenticated URL (ADR 0038), never
+# github.com. Stand up a bare "forgejo" remote and rewrite the
+# token-authenticated https URL the entrypoint builds to it via insteadOf so
+# the real clone stays offline; the rewrite prefix carries the token, so the
+# clone only resolves if the entrypoint actually embedded FORGEJO_TOKEN as the
+# remote's userinfo.
+@test "CODE_FORGE=forgejo clones from a FORGEJO_TOKEN-authenticated Forgejo remote" {
+  local forge_root="$BATS_TEST_TMPDIR/forge"
+  mkdir -p "$forge_root/owner"
+  git init --bare -q "$forge_root/owner/repo.git"
+  local fseed="$BATS_TEST_TMPDIR/forge-seed"
+  git clone -q "$forge_root/owner/repo.git" "$fseed"
+  (
+    cd "$fseed" || exit 1
+    echo "# forge repo" >README.md
+    git add -A
+    git commit -q -m "chore: seed forge remote"
+    git push -q origin HEAD:main
+  )
+  git config --global "url.file://$forge_root/.insteadOf" "https://fjtok@forge.test/"
+
+  export CODE_FORGE="forgejo"
+  export FORGEJO_BASE_URL="https://forge.test"
+  export FORGEJO_TOKEN="fjtok"
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  [ -d "$WORK_DIR/.git" ]
+  # Read the raw stored remote.origin.url, not `git remote get-url`: the latter
+  # re-applies the url.insteadOf rewrite at read time and would echo back the
+  # file:// redirect the offline clone resolved through. `git config --get`
+  # returns the value clone actually wrote to .git/config -- the
+  # token-authenticated https URL the entrypoint built and pushes back to.
+  run git -C "$WORK_DIR" config --get remote.origin.url
+  [ "$status" -eq 0 ]
+  [ "$output" = "https://fjtok@forge.test/owner/repo.git" ]
+}
+
 # CODE_FORGE=local: the Box clones from the read-only Accumulation-repo mount
 # (REPO_MOUNT_DIR, standing in for the container's fixed /repo target — ADR
 # 0033 / #1698) instead of any network remote. No gh/https URL is touched.
