@@ -18,6 +18,7 @@ let
     extraClosuresHarness
     harness
     opencodeHarness
+    forgejoHarness
     ;
   fragmentRows = import ../../lib/fragments.nix;
   fragmentBasenames = map (row: pkgs.lib.removeSuffix ".md" row.fragment) fragmentRows;
@@ -557,6 +558,24 @@ in
           || true)
         [ "$uid" != "1000" ] || {
           echo "default harness (nixStoreWritable=false) must not chown nix/store to uid 1000" >&2
+          exit 1
+        }
+        touch $out
+      '';
+
+  # fj (forgejo-cli) is baked into the image only for a forgejo-backend
+  # Consumer (issue #1963), never for a github-backend one, so a
+  # github-backend image never carries an unused CLI. Realizes both
+  # harnesses' agentEnv, so it's Linux-gated like the other image checks.
+  forgejo-cli-baked-only-for-forgejo-backend =
+    pkgs.runCommand "forgejo-cli-baked-only-for-forgejo-backend" { }
+      ''
+        test -x ${forgejoHarness.agentEnv}/bin/fj || {
+          echo "fj missing from forgejo-backend image" >&2
+          exit 1
+        }
+        ! test -e ${nonRustHarness.agentEnv}/bin/fj || {
+          echo "fj leaked into non-forgejo image" >&2
           exit 1
         }
         touch $out

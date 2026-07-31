@@ -170,6 +170,17 @@ let
     packages = p: [ p.hello ];
   };
 
+  # A forgejo-backend Consumer (issue #1963): proves fj (forgejo-cli) is
+  # baked into the image only for a forgejo-backend harness. Eval-only,
+  # consumed by the forgejo-cli-baked-only-for-forgejo-backend image check.
+  forgejoHarness = import ../lib/mkHarness.nix {
+    inherit nixpkgs system;
+    defaults = {
+      issueTracker = "forgejo";
+    };
+    packages = p: [ p.hello ];
+  };
+
   # The opencode Driver's on-disk agent-files fixture (issue #262 slice 5,
   # AC4): scout/review/worker models set, filerModel left at its default
   # empty so the filer file's omission is provable too, mirroring
@@ -397,6 +408,7 @@ in
     reviewerOnlyHarness
     filerOnlyHarness
     workerOnlyHarness
+    forgejoHarness
     opencodeHarness
     customHarness
     dockerHarness

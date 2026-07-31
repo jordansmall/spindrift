@@ -81,6 +81,55 @@ setup() {
   [ "$output" = "https://fjtok@forge.test/owner/repo.git" ]
 }
 
+# fj credential wiring (issue #1963): when fj (forgejo-cli) is on PATH and
+# FORGEJO_TOKEN is set, clone_repo configures fj non-interactively via
+# `fj auth add-key`, piping the token on stdin -- never argv, so it never
+# shows up in `ps`. A fake fj on PATH records its args and stdin so the test
+# can assert both without a real forgejo-cli binary.
+@test "CODE_FORGE=forgejo configures fj via auth add-key with the token on stdin, not argv" {
+  local forge_root="$BATS_TEST_TMPDIR/forge"
+  mkdir -p "$forge_root/owner"
+  git init --bare -q "$forge_root/owner/repo.git"
+  local fseed="$BATS_TEST_TMPDIR/forge-seed"
+  git clone -q "$forge_root/owner/repo.git" "$fseed"
+  (
+    cd "$fseed" || exit 1
+    echo "# forge repo" >README.md
+    git add -A
+    git commit -q -m "chore: seed forge remote"
+    git push -q origin HEAD:main
+  )
+  git config --global "url.file://$forge_root/.insteadOf" "https://fjtok@forge.test/"
+
+  local fj_args_file="$BATS_TEST_TMPDIR/fj-args.txt"
+  local fj_stdin_file="$BATS_TEST_TMPDIR/fj-stdin.txt"
+  {
+    printf '#!%s\n' "$(command -v bash)"
+    cat <<EOF
+echo "\$@" >"$fj_args_file"
+cat >"$fj_stdin_file"
+EOF
+  } >"$FAKE_BIN/fj"
+  chmod +x "$FAKE_BIN/fj"
+
+  export CODE_FORGE="forgejo"
+  export ISSUE_TRACKER="forgejo"
+  export FORGEJO_BASE_URL="https://forge.test"
+  export FORGEJO_TOKEN="fjtok"
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+
+  run cat "$fj_args_file"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"-H https://forge.test auth add-key"* ]]
+  # The token must arrive on stdin, never as an argv word.
+  [[ "$output" != *"fjtok"* ]]
+
+  run cat "$fj_stdin_file"
+  [ "$status" -eq 0 ]
+  [ "$output" = "fjtok" ]
+}
+
 # CODE_FORGE=local: the Box clones from the read-only Accumulation-repo mount
 # (REPO_MOUNT_DIR, standing in for the container's fixed /repo target — ADR
 # 0033 / #1698) instead of any network remote. No gh/https URL is touched.
