@@ -7,6 +7,7 @@ package main
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -15,6 +16,7 @@ import (
 
 	"spindrift.dev/launcher/internal/doctor"
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/forge/forgejo"
 	"spindrift.dev/launcher/internal/forge/github"
 	"spindrift.dev/launcher/internal/forge/jira"
 	"spindrift.dev/launcher/internal/forge/local"
@@ -47,6 +49,12 @@ type Environment interface {
 
 	GitConfig(key string) string
 	GitRemoteRepoSlug() string
+
+	// GitRemoteURL returns the raw "origin" remote URL (git remote get-url
+	// origin), or "" when there is no origin remote. Callers parse it with
+	// parseRemoteHostSlug to detect a Forgejo/Codeberg host; the github-only
+	// GitRemoteRepoSlug still seeds the repo-slug default.
+	GitRemoteURL() string
 }
 
 // runtimePrecedence is the order Quickstart probes for an available
@@ -91,6 +99,20 @@ func validateRuntimeChoice(runtime string) error {
 	return fmt.Errorf("expected one of %s, got %q", strings.Join(validRuntimeChoices, ", "), runtime)
 }
 
+// validBackendChoices are the operator-facing code-forge backends the wizard
+// accepts when the git remote host is neither github.com nor codeberg.org.
+var validBackendChoices = []string{"github", "forgejo"}
+
+// validateBackendChoice rejects any value outside validBackendChoices.
+func validateBackendChoice(b string) error {
+	for _, v := range validBackendChoices {
+		if b == v {
+			return nil
+		}
+	}
+	return fmt.Errorf("expected one of %s, got %q", strings.Join(validBackendChoices, ", "), b)
+}
+
 // detectRuntime returns the first runtime in runtimePrecedence found on
 // PATH (aliased via runtimeAlias), or an actionable error naming all four
 // when none is available — Quickstart cannot proceed without one (ADR 0027).
@@ -114,6 +136,12 @@ type CommandRunner interface {
 // (flagtable_gen.go) — Quickstart doesn't prompt for it.
 const defaultBranchPrefix = "agent/issue-"
 
+// codebergBaseURL is the Forgejo adapter's default base URL — a
+// forgejoBaseURL of exactly this value is the adapter default and must not
+// be emitted as an explicit issues.forgejo.baseURL line in the generated
+// flake.
+const codebergBaseURL = "https://codeberg.org"
+
 // defaultDispatchLabels are the four triage labels Quickstart's generated
 // flake relies on implicitly (the launcher's own LABEL/IN_PROGRESS_LABEL/
 // FAILED_LABEL/COMPLETE_LABEL defaults) — the wizard never prompts for
@@ -136,16 +164,19 @@ var spindriftBuildArgs = []string{"nix", "develop", "--command", "spindrift", "b
 // real forge — no `spindrift doctor` subprocess, since the `spindrift`
 // binary doesn't exist yet at Quickstart's pre-CLI stage. Injected so tests
 // substitute a forge.Fake instead of shelling out to gh/Jira for real.
-type ForgeBuilder func(repoSlug string, tracker trackerSettings, ghToken, jiraToken string) (forge.IssueTracker, forge.CodeForge)
+type ForgeBuilder func(repoSlug string, tracker trackerSettings, ghToken, jiraToken, forgejoToken string) (forge.IssueTracker, forge.CodeForge)
 
-// buildForge is the production ForgeBuilder. The Code Forge is always
-// github (ADR 0027: Quickstart never prompts for it); the Issue Tracker
-// switches on tracker.issueTracker, which the wizard always sets to
-// "github" (issue #1559) — the jira/local cases exist for buildForge's own
-// tests. github.NewExecClient shells out to the gh CLI, which reads
-// GH_TOKEN from the process environment — runQuickstart exports the
-// collected token before calling this.
-func buildForge(repoSlug string, tracker trackerSettings, ghToken, jiraToken string) (forge.IssueTracker, forge.CodeForge) {
+// buildForge is the production ForgeBuilder. The Code Forge is github by
+// default (ADR 0027: Quickstart never prompts for it) except for the
+// forgejo case, which builds both the IssueTracker and CodeForge seams
+// from the Forgejo REST adapters so doctor validates against a Forgejo
+// instance instead. The Issue Tracker switches on tracker.issueTracker,
+// which the wizard always sets to "github" (issue #1559) — the
+// jira/local/forgejo cases exist for buildForge's own tests.
+// github.NewExecClient shells out to the gh CLI, which reads GH_TOKEN from
+// the process environment — runQuickstart exports the collected token
+// before calling this.
+func buildForge(repoSlug string, tracker trackerSettings, ghToken, jiraToken, forgejoToken string) (forge.IssueTracker, forge.CodeForge) {
 	cf := github.NewExecClient(repoSlug, defaultDispatchLabels, defaultBranchPrefix)
 	switch tracker.issueTracker {
 	case "jira":
@@ -158,6 +189,20 @@ func buildForge(repoSlug string, tracker trackerSettings, ghToken, jiraToken str
 		}), cf
 	case "local":
 		return local.NewLocalTracker(tracker.localIssuesDir, defaultDispatchLabels), cf
+	case "forgejo":
+		it := forgejo.NewForgejoClient(forgejo.ForgejoConfig{
+			BaseURL: tracker.forgejoBaseURL,
+			Repo:    repoSlug,
+			Token:   forgejoToken,
+			Labels:  defaultDispatchLabels,
+		})
+		cf := forgejo.NewForgejoCodeForge(forgejo.ForgejoCodeForgeConfig{
+			BaseURL:      tracker.forgejoBaseURL,
+			Repo:         repoSlug,
+			Token:        forgejoToken,
+			BranchPrefix: defaultBranchPrefix,
+		})
+		return it, cf
 	default:
 		return cf, cf
 	}
@@ -242,7 +287,26 @@ func runQuickstart(dir string, env Environment, runner CommandRunner, forgeBuild
 		return value
 	}
 
-	repoSlug, err := promptValidated("Repo slug (owner/repo)", env.GitRemoteRepoSlug(), validateRepoSlug)
+	remoteURL := env.GitRemoteURL()
+	host, remoteSlug := parseRemoteHostSlug(remoteURL)
+	backend := "github"
+	forgejoBaseURL := ""
+	repoSlugDefault := env.GitRemoteRepoSlug()
+	switch {
+	case host == "codeberg.org":
+		backend, forgejoBaseURL, repoSlugDefault = "forgejo", codebergBaseURL, remoteSlug
+		fmt.Fprintln(w, "detected a codeberg.org remote — using the forgejo backend")
+	case host != "" && host != "github.com":
+		b, err := promptValidated("Backend (github/forgejo)", "github", validateBackendChoice)
+		if err != nil {
+			return err
+		}
+		if b == "forgejo" {
+			backend, forgejoBaseURL, repoSlugDefault = "forgejo", "https://"+host, remoteSlug
+		}
+	}
+
+	repoSlug, err := promptValidated("Repo slug (owner/repo)", repoSlugDefault, validateRepoSlug)
 	if err != nil {
 		return err
 	}
@@ -253,18 +317,27 @@ func runQuickstart(dir string, env Environment, runner CommandRunner, forgeBuild
 	gitUserName := promptDefault("Git user name", env.GitConfig("user.name"))
 	gitUserEmail := promptDefault("Git user email", env.GitConfig("user.email"))
 
-	// Quickstart is GitHub-only (issue #1559): no tracker-selection prompt,
-	// no Jira/local sub-prompts. The Jira/local adapters and runtime
+	// Quickstart detects github vs. forgejo from the git remote host (a
+	// codeberg.org remote or an explicit "forgejo" backend answer above); no
+	// Jira/local sub-prompts either way. The Jira/local adapters and runtime
 	// ISSUE_TRACKER validation stay in place for an operator who hand-edits
 	// the generated flake.
-	tracker := trackerSettings{issueTracker: "github"}
+	tracker := trackerSettings{issueTracker: backend, forgejoBaseURL: forgejoBaseURL}
 
-	ghToken, err := acquireGHToken(env, w, promptMasked)
-	if err != nil {
-		return err
-	}
-	if err := auditGHToken(ghToken, env, w, prompt); err != nil {
-		return err
+	var ghToken, forgejoToken string
+	if backend == "forgejo" {
+		forgejoToken, err = acquireForgejoToken(w, promptMasked, forgeBuilder, repoSlug, forgejoBaseURL)
+		if err != nil {
+			return err
+		}
+	} else {
+		ghToken, err = acquireGHToken(env, w, promptMasked)
+		if err != nil {
+			return err
+		}
+		if err := auditGHToken(ghToken, env, w, prompt); err != nil {
+			return err
+		}
 	}
 
 	claudeOAuthToken := ""
@@ -294,6 +367,7 @@ func runQuickstart(dir string, env Environment, runner CommandRunner, forgeBuild
 		gitUserEmail:     gitUserEmail,
 		tracker:          tracker,
 		ghToken:          ghToken,
+		forgejoToken:     forgejoToken,
 		claudeOAuthToken: claudeOAuthToken,
 		anthropicAPIKey:  anthropicAPIKey,
 	}
@@ -305,11 +379,14 @@ func runQuickstart(dir string, env Environment, runner CommandRunner, forgeBuild
 	}
 
 	// The gh CLI (used by the github Code Forge, and by the github Issue
-	// Tracker branch) reads auth from GH_TOKEN in the process environment.
-	if err := os.Setenv("GH_TOKEN", ghToken); err != nil {
-		return fmt.Errorf("set GH_TOKEN: %w", err)
+	// Tracker branch) reads auth from GH_TOKEN in the process environment —
+	// only relevant on the github path.
+	if backend != "forgejo" {
+		if err := os.Setenv("GH_TOKEN", ghToken); err != nil {
+			return fmt.Errorf("set GH_TOKEN: %w", err)
+		}
 	}
-	it, cf := forgeBuilder(repoSlug, tracker, ghToken, "")
+	it, cf := forgeBuilder(repoSlug, tracker, ghToken, "", a.forgejoToken)
 	if err := doctor.Run(it, cf, doctor.Config{
 		IssueTracker:    tracker.issueTracker,
 		Label:           defaultDispatchLabels.Dispatchable,
@@ -358,6 +435,28 @@ func acquireGHToken(env Environment, w io.Writer, promptMasked func(string) stri
 	if token == "" {
 		return "", fmt.Errorf("gh auth token returned no token — run `gh auth login` and retry")
 	}
+	return token, nil
+}
+
+// acquireForgejoToken prompts for a Forgejo personal access token and
+// validates it with a live API ping (Probe) rather than a prefix audit —
+// Forgejo PATs have no sniffable prefix the way GitHub's do (ghp_/gho_/
+// github_pat_), so there is nothing to inspect locally. The error hints name
+// FORGEJO_TOKEN and FORGEJO_BASE_URL, the two env knobs an operator needs to
+// fix and rerun.
+func acquireForgejoToken(w io.Writer, promptMasked func(string) string, forgeBuilder ForgeBuilder, repoSlug, baseURL string) (string, error) {
+	token := promptMasked("Forgejo token (paste a Forgejo personal access token — FORGEJO_TOKEN)")
+	if token == "" {
+		return "", fmt.Errorf("no Forgejo token provided — set FORGEJO_TOKEN and rerun")
+	}
+	it, _ := forgeBuilder(repoSlug, trackerSettings{issueTracker: "forgejo", forgejoBaseURL: baseURL}, "", "", token)
+	if _, err := it.Probe(); err != nil {
+		if errors.Is(err, forge.ErrAuthFailure) {
+			return "", fmt.Errorf("Forgejo token rejected by the API — check FORGEJO_TOKEN is valid and FORGEJO_BASE_URL (%s) points at the right instance: %w", baseURL, err)
+		}
+		return "", fmt.Errorf("Forgejo connectivity check failed — check FORGEJO_BASE_URL (%s) is reachable: %w", baseURL, err)
+	}
+	fmt.Fprintln(w, "ok: Forgejo token validated via live API ping")
 	return token, nil
 }
 
@@ -462,6 +561,10 @@ type trackerSettings struct {
 	jiraProjectKey string
 	jiraEmail      string
 	localIssuesDir string
+	// forgejoBaseURL is the Forgejo/Gitea instance base URL; empty falls
+	// back to the adapter's default (codeberg.org). Only consulted when
+	// issueTracker == "forgejo".
+	forgejoBaseURL string
 }
 
 // answers holds every operator decision the prompt/detect phase gathers —
@@ -475,6 +578,7 @@ type answers struct {
 	gitUserEmail     string
 	tracker          trackerSettings
 	ghToken          string
+	forgejoToken     string
 	claudeOAuthToken string
 	anthropicAPIKey  string
 }
@@ -495,7 +599,7 @@ type scaffoldFile struct {
 func render(a answers) []scaffoldFile {
 	return []scaffoldFile{
 		{path: "flake.nix", content: renderFlakeNix(a.repoSlug, a.runtime, a.gitUserName, a.gitUserEmail, a.tracker), mode: 0o644},
-		{path: "harness.env", content: renderHarnessEnv(a.ghToken, a.claudeOAuthToken, a.anthropicAPIKey), mode: 0o600},
+		{path: "harness.env", content: renderHarnessEnv(a.tracker.issueTracker, a.ghToken, a.forgejoToken, a.claudeOAuthToken, a.anthropicAPIKey), mode: 0o600},
 		{path: ".gitignore", content: quickstartGitignore, mode: 0o644},
 		{path: ".envrc", content: quickstartEnvrc, mode: 0o644},
 	}
@@ -507,6 +611,19 @@ func render(a answers) []scaffoldFile {
 // prompts/ directory is scaffolded — the harness defaults every prompt.
 func renderFlakeNix(repoSlug, runtime, gitUserName, gitUserEmail string, tracker trackerSettings) string {
 	trackerLine := fmt.Sprintf("            settings.issueDiscovery.issueTracker = \"%s\";\n", nixEscape(tracker.issueTracker))
+
+	settingsLines := trackerLine
+	if tracker.issueTracker == "forgejo" {
+		// forgejo drives both axes: ISSUE_TRACKER=forgejo (the tracker line
+		// above) and CODE_FORGE=forgejo, so the generated flake lands code on
+		// the same instance doctor validated. Emitted in the current
+		// domain-tree spelling (forge.backend / issues.forgejo.baseURL), the
+		// same one templates/default/flake.nix documents.
+		settingsLines += "            forge.backend = \"forgejo\";\n"
+		if tracker.forgejoBaseURL != "" && tracker.forgejoBaseURL != codebergBaseURL {
+			settingsLines += fmt.Sprintf("            issues.forgejo.baseURL = \"%s\";\n", nixEscape(tracker.forgejoBaseURL))
+		}
+	}
 
 	return fmt.Sprintf(`{
   description = "A spindrift consumer — headless Claude Code agents in nix-built, disposable containers, one per GitHub issue";
@@ -550,7 +667,7 @@ func renderFlakeNix(repoSlug, runtime, gitUserName, gitUserEmail string, tracker
         };
     };
 }
-`, nixEscape(runtime), nixEscape(repoSlug), nixEscape(gitUserName), nixEscape(gitUserEmail), trackerLine)
+`, nixEscape(runtime), nixEscape(repoSlug), nixEscape(gitUserName), nixEscape(gitUserEmail), settingsLines)
 }
 
 // nixEscape escapes a string for embedding in a Nix double-quoted string
@@ -568,10 +685,16 @@ func nixEscape(s string) string {
 }
 
 // renderHarnessEnv writes only the secrets the wizard actually collected:
-// GH_TOKEN, and whichever Claude credential the operator chose (OAuth token
-// or API key, never both).
-func renderHarnessEnv(ghToken, claudeOAuthToken, anthropicAPIKey string) string {
-	out := fmt.Sprintf("GH_TOKEN=%s\n", ghToken)
+// the code-forge credential — FORGEJO_TOKEN when the operator chose the
+// forgejo tracker, GH_TOKEN otherwise — and whichever Claude credential the
+// operator chose (OAuth token or API key, never both).
+func renderHarnessEnv(issueTracker, ghToken, forgejoToken, claudeOAuthToken, anthropicAPIKey string) string {
+	var out string
+	if issueTracker == "forgejo" {
+		out = fmt.Sprintf("FORGEJO_TOKEN=%s\n", forgejoToken)
+	} else {
+		out = fmt.Sprintf("GH_TOKEN=%s\n", ghToken)
+	}
 	if claudeOAuthToken != "" {
 		out += fmt.Sprintf("CLAUDE_CODE_OAUTH_TOKEN=%s\n", claudeOAuthToken)
 	} else {

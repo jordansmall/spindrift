@@ -9,7 +9,7 @@ import (
 )
 
 func TestBuildForge_GithubTracker_ReturnsSameInstanceForBothSeams(t *testing.T) {
-	it, cf := buildForge("owner/repo", trackerSettings{issueTracker: "github"}, "ghp_faketoken", "")
+	it, cf := buildForge("owner/repo", trackerSettings{issueTracker: "github"}, "ghp_faketoken", "", "")
 	if it == nil || cf == nil {
 		t.Fatal("expected non-nil IssueTracker and CodeForge")
 	}
@@ -20,7 +20,7 @@ func TestBuildForge_GithubTracker_ReturnsSameInstanceForBothSeams(t *testing.T) 
 
 func TestBuildForge_LocalTracker_ProbeCreatesIssuesDir(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "issues")
-	it, _ := buildForge("owner/repo", trackerSettings{issueTracker: "local", localIssuesDir: dir}, "ghp_faketoken", "")
+	it, _ := buildForge("owner/repo", trackerSettings{issueTracker: "local", localIssuesDir: dir}, "ghp_faketoken", "", "")
 
 	repo, err := it.Probe()
 	if err != nil {
@@ -52,7 +52,7 @@ func TestBuildForge_JiraTracker_ProbeHitsConfiguredBaseURLAndProjectKey(t *testi
 		issueTracker:   "jira",
 		jiraBaseURL:    srv.URL,
 		jiraProjectKey: "ENG",
-	}, "ghp_faketoken", "jira-faketoken")
+	}, "ghp_faketoken", "jira-faketoken", "")
 
 	repo, err := it.Probe()
 	if err != nil {
@@ -60,5 +60,31 @@ func TestBuildForge_JiraTracker_ProbeHitsConfiguredBaseURLAndProjectKey(t *testi
 	}
 	if repo != "ENG" {
 		t.Errorf("Probe() = %q, want the configured project key %q", repo, "ENG")
+	}
+}
+
+func TestBuildForge_ForgejoTracker_ProbeHitsConfiguredBaseURL(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/repos/owner/repo" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"full_name":"owner/repo"}`))
+	}))
+	defer srv.Close()
+
+	it, _ := buildForge("owner/repo", trackerSettings{
+		issueTracker:   "forgejo",
+		forgejoBaseURL: srv.URL,
+	}, "ghp_x", "", "forgejo-faketoken")
+
+	repo, err := it.Probe()
+	if err != nil {
+		t.Fatalf("Probe: %v", err)
+	}
+	if repo != "owner/repo" {
+		t.Errorf("Probe() = %q, want %q", repo, "owner/repo")
 	}
 }
