@@ -1579,11 +1579,12 @@ func TestNewCodeForge_Git_ReturnsPushOnlyAdapter(t *testing.T) {
 	}
 }
 
-// TestNewCodeForge_Forgejo_ReturnsPushOnlyAdapter verifies that
-// CODE_FORGE=forgejo wires newCodeForge to the push-only Forgejo adapter —
-// one with no PRForge surface at all — instead of the github gh-exec
-// adapter.
-func TestNewCodeForge_Forgejo_ReturnsPushOnlyAdapter(t *testing.T) {
+// TestNewCodeForge_Forgejo_IsPRForge verifies that CODE_FORGE=forgejo wires
+// newCodeForge to the Forgejo adapter, which satisfies forge.PRForge — the
+// second full-parity PRForge backend beside github (issue #1961): it opens
+// PRs, watches CI, and drives merge/auto-merge/draft-ready through the same
+// seam.
+func TestNewCodeForge_Forgejo_IsPRForge(t *testing.T) {
 	c := minimalValidConfig()
 	c.codeForge = "forgejo"
 	c.forgejoBaseURL = "https://codeberg.org"
@@ -1594,8 +1595,8 @@ func TestNewCodeForge_Forgejo_ReturnsPushOnlyAdapter(t *testing.T) {
 	if cf == nil {
 		t.Fatal("newCodeForge(CODE_FORGE=forgejo) returned nil")
 	}
-	if _, ok := cf.(forge.PRForge); ok {
-		t.Error("newCodeForge(CODE_FORGE=forgejo) satisfies PRForge, want the push-only forgejo adapter to implement CodeForge only")
+	if _, ok := cf.(forge.PRForge); !ok {
+		t.Error("newCodeForge(CODE_FORGE=forgejo) does not satisfy PRForge, want the full-parity PRForge adapter")
 	}
 }
 
