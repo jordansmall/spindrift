@@ -108,10 +108,18 @@ configure_forgejo_cli() {
   command -v fj >/dev/null 2>&1 || return 0
   [ -n "${FORGEJO_TOKEN:-}" ] || return 0
   local _fj_base="${FORGEJO_BASE_URL:-https://codeberg.org}"
+  _fj_base="${_fj_base%/}"
+  # Strip any trailing slash so the host fj keys the token under (below)
+  # matches the host clone_repo derives from the same _fj_base; a
+  # FORGEJO_BASE_URL set with a trailing slash would otherwise key the token
+  # under a host the stripped git remote never resolves to.
   # fj stores the token in ~/.local/share/forgejo-cli/keys.json keyed by the
   # bare host; the name argument is just a cosmetic label. The token is fed
   # on stdin, not argv, so it never lands in `ps`/argv snooping. Offline --
-  # writes the keys file only, no network call.
+  # writes the keys file only, no network call. `auth add-key` (NAME
+  # positional, token on stdin) is the forgejo-cli 0.5.0 spelling baked into
+  # the image; a nixpkgs bump that renames it (add-key -> add-token) must
+  # update this call in lockstep, or fj would store GIT_USER_NAME as the token.
   printf '%s' "$FORGEJO_TOKEN" | fj -H "$_fj_base" auth add-key "${GIT_USER_NAME:-spindrift-agent}" >/dev/null
 }
 

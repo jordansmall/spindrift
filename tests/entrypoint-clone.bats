@@ -130,6 +130,49 @@ EOF
   [ "$output" = "fjtok" ]
 }
 
+# A FORGEJO_BASE_URL carrying a trailing slash must key the fj token under the
+# same bare host clone_repo derives (it strips the slash before building the
+# remote URL). Without the strip in configure_forgejo_cli, fj would store the
+# token under "https://forge.test/" while the git remote resolves to
+# "forge.test", silently breaking `fj issue view`/auth lookup (issue #1963).
+@test "CODE_FORGE=forgejo strips a trailing slash from FORGEJO_BASE_URL when keying fj" {
+  local forge_root="$BATS_TEST_TMPDIR/forge"
+  mkdir -p "$forge_root/owner"
+  git init --bare -q "$forge_root/owner/repo.git"
+  local fseed="$BATS_TEST_TMPDIR/forge-seed"
+  git clone -q "$forge_root/owner/repo.git" "$fseed"
+  (
+    cd "$fseed" || exit 1
+    echo "# forge repo" >README.md
+    git add -A
+    git commit -q -m "chore: seed forge remote"
+    git push -q origin HEAD:main
+  )
+  git config --global "url.file://$forge_root/.insteadOf" "https://fjtok@forge.test/"
+
+  local fj_args_file="$BATS_TEST_TMPDIR/fj-args.txt"
+  {
+    printf '#!%s\n' "$(command -v bash)"
+    cat <<EOF
+echo "\$@" >"$fj_args_file"
+cat >/dev/null
+EOF
+  } >"$FAKE_BIN/fj"
+  chmod +x "$FAKE_BIN/fj"
+
+  export CODE_FORGE="forgejo"
+  export ISSUE_TRACKER="forgejo"
+  export FORGEJO_BASE_URL="https://forge.test/"
+  export FORGEJO_TOKEN="fjtok"
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+
+  run cat "$fj_args_file"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"-H https://forge.test auth add-key"* ]]
+  [[ "$output" != *"forge.test/ auth"* ]]
+}
+
 # CODE_FORGE=local: the Box clones from the read-only Accumulation-repo mount
 # (REPO_MOUNT_DIR, standing in for the container's fixed /repo target — ADR
 # 0033 / #1698) instead of any network remote. No gh/https URL is touched.
