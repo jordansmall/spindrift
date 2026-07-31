@@ -27,9 +27,11 @@ let
 in
 rec {
   # One renderer used by both the shell and Go preamble families: iterates
-  # over flakeOption schema entries and emits `[export ]VAR="${VAR:-<baked>}"`
-  # lines. A matching env var (or harness.env, sourced by the wrapper) still
-  # wins at runtime.
+  # over flakeOption schema entries and emits `[export ]VAR=${VAR:-<baked>}`
+  # lines, shell-escaping each baked default via escapeShellArg so a value
+  # containing quotes (e.g. a builtins.toJSON default) neither trips SC2140 nor
+  # corrupts at runtime (issue #2234). A matching env var (or harness.env,
+  # sourced by the wrapper) still wins at runtime.
   renderDefaultsPreamble =
     {
       export ? false,
@@ -44,7 +46,7 @@ rec {
           prefix = if export then "export " else "";
         in
         ''
-          ${prefix}${entry.env}="''${${entry.env}:-${toString value}}"
+          ${prefix}${entry.env}=''${${entry.env}:-${escapeShellArg value}}
         ''
       ) flakeOptionEntries
     );
