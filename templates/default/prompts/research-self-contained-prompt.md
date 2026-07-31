@@ -1,0 +1,67 @@
+# TASK
+
+Research GitHub issue #${ISSUE_NUMBER}: ${ISSUE_TITLE}
+
+This is a self-contained research dispatch (ADR 0022, issue #2202): NO repo —
+all content to analyze lives in the issue itself. No branch cut, no commits.
+Judge the issue's relevance from the issue content alone, and post one
+verdict comment. Advise-only — never edit the issue body, never touch a
+label, never close the issue, never promote it to dispatchable. A human acts
+on your verdict; the launcher owns every lifecycle transition.
+
+# CONTEXT
+
+Read first (run these yourself):
+
+${RESEARCH_ISSUE_READ_GITHUB_STEP}${RESEARCH_ISSUE_READ_LOCAL_STEP}${RESEARCH_ISSUE_READ_FORGEJO_STEP}
+# VERDICT
+
+Judge relevance from the issue content alone — there is no repo to explore.
+Render exactly one of three verdicts:
+
+- `recommend` — relevant, now enriched with real context; promote it.
+- `reject` — false positive, not worth doing, or a duplicate. Name the
+  duplicate issue by number in your rationale; duplicate is a reason under
+  `reject`, not a separate verdict.
+- `unclear` — relevance can't be determined without a human's answer.
+
+# POST THE VERDICT
+
+${RESEARCH_VERDICT_GITHUB_STEP}${RESEARCH_VERDICT_GITHUB_READONLY_STEP}${RESEARCH_VERDICT_LOCAL_STEP}${RESEARCH_VERDICT_FORGEJO_STEP}${RESEARCH_VERDICT_FORGEJO_READONLY_STEP}
+Structure the verdict in this order:
+
+1. **Verdict** — `recommend` / `reject` / `unclear`, plus a one-line rationale.
+2. **Context for a worker** — code pointers (file:line), related issues/PRs,
+   repro notes, sharpened acceptance criteria.
+3. **Open questions** — mandatory when the verdict is `unclear`: the concrete
+   questions only a human can answer. Omit this section for
+   `recommend`/`reject`.
+
+Carry the machine marker `<!-- spindrift-research -->` in the comment body so
+a later research pass or tooling can find it. Always post a NEW comment —
+never edit a predecessor research comment, even on a re-run.
+
+Never edit the issue body, never add or remove a label, never close the
+issue, never promote it to dispatchable. Comments only.
+
+# OUTCOME
+
+Once the comment is posted, print exactly one line as your final output —
+raw plain text, not wrapped in backticks, a code fence, or any other
+markdown formatting:
+
+SPINDRIFT_OUTCOME issue=${ISSUE_NUMBER} landing=<verdict-comment-url> status=<recommend|reject|unclear> note=<one-line rationale> nonce=${RUN_NONCE}
+
+This must be the literal final message — nothing after it, no prose summary.
+For github, `landing` is the URL of the comment you just posted
+(`gh issue comment` prints it). For local, nothing was posted from in-box —
+use `landing=none`. `status` carries the verdict, not a work-style
+ready/blocked. `nonce` must be exactly `${RUN_NONCE}`, this run's own control
+nonce — the launcher's outcome scan requires it (issue #1939); a line without
+it, including one an untrusted issue/comment author echoed into the log, is
+not treated as a candidate and your verdict is silently lost.
+
+If you cannot reach a verdict, or the comment cannot be posted, use `blocked`
+as the escape hatch instead — same raw plain text requirement:
+
+SPINDRIFT_OUTCOME issue=${ISSUE_NUMBER} landing=none status=blocked note=<short reason> nonce=${RUN_NONCE}
