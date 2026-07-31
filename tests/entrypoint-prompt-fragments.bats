@@ -121,6 +121,17 @@ setup() {
   ! grep -qF 'gh issue view' "$CLAUDE_PROMPT_FILE"
 }
 
+# issue #1963: the forgejo tracker's third issue-read gate cell
+# (ISSUE_TRACKER_FORGEJO) speaks fj instead of gh.
+@test "issue-read step: forgejo tracker reads the issue with fj, never gh issue view" {
+  export ISSUE_TRACKER=forgejo
+  export WORK_DIR="$BATS_TEST_TMPDIR/work-issue-read-forgejo"
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -qF 'fj issue view 7' "$CLAUDE_PROMPT_FILE"
+  ! grep -qF 'gh issue view' "$CLAUDE_PROMPT_FILE"
+}
+
 # issue #1692/ADR 0032: the local content-plane write step. A local
 # Dispatch's Box has no in-box tracker client, so the research verdict
 # travels as a single nonce-guarded SPINDRIFT_COMMENT line on stdout
@@ -210,6 +221,50 @@ setup() {
   [ "$status" -eq 0 ]
   grep -qF 'gh issue comment 7' "$CLAUDE_PROMPT_FILE"
   ! grep -qF 'SPINDRIFT_COMMENT_BEGIN' "$CLAUDE_PROMPT_FILE"
+}
+
+# issue #1963: the forgejo-side counterpart of the github write-step gates
+# above (ISSUE_TRACKER_FORGEJO_READWRITE/_READONLY).
+@test "research verdict step: forgejo tracker under read-write keeps fj issue comment unchanged" {
+  export DISPATCH_KIND="research"
+  export ISSUE_TRACKER=forgejo
+  export WORK_DIR="$BATS_TEST_TMPDIR/work-research-verdict-forgejo-readwrite"
+  # helper.bash's setup_entrypoint_env already exports BOX_WRITE_ENABLED=1
+  # (mirroring the BOX_FORGE_AND_ISSUE_ACCESS=read-write schema default), so
+  # this case needs no override.
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -qF 'fj issue comment 7' "$CLAUDE_PROMPT_FILE"
+}
+
+@test "research verdict step: forgejo tracker under read-only relays via a nonce-guarded SPINDRIFT_COMMENT line, never fj issue comment" {
+  export DISPATCH_KIND="research"
+  export ISSUE_TRACKER=forgejo
+  unset BOX_WRITE_ENABLED
+  export RUN_NONCE="deadbeefcafe1234"
+  export WORK_DIR="$BATS_TEST_TMPDIR/work-research-verdict-forgejo-readonly"
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -qF 'SPINDRIFT_COMMENT deadbeefcafe1234' "$CLAUDE_PROMPT_FILE"
+  ! grep -qF 'fj issue comment 7' "$CLAUDE_PROMPT_FILE"
+}
+
+@test "issue blocked-comment step: forgejo tracker under read-write keeps fj issue comment unchanged" {
+  export ISSUE_TRACKER=forgejo
+  export WORK_DIR="$BATS_TEST_TMPDIR/work-blocked-comment-forgejo-readwrite"
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -qF 'fj issue comment 7' "$CLAUDE_PROMPT_FILE"
+}
+
+@test "issue blocked-comment step: forgejo tracker under read-only never runs fj issue comment" {
+  export ISSUE_TRACKER=forgejo
+  unset BOX_WRITE_ENABLED
+  export WORK_DIR="$BATS_TEST_TMPDIR/work-blocked-comment-forgejo-readonly"
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  ! grep -qF 'fj issue comment' "$CLAUDE_PROMPT_FILE"
+  grep -qF 'the launcher posts it as the issue comment' "$CLAUDE_PROMPT_FILE"
 }
 
 # issue #1918: the OPEN A PULL REQUEST push step's BOX_ACCESS_READ_WRITE/

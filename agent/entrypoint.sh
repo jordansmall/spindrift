@@ -634,17 +634,22 @@ phase_prompt_assembly() {
     PR_BODY_CLOSES=1
   fi
 
-  # The issue-read step gate (issue #1691, ADR 0032): local issues have no
-  # in-box reachability -- there is no server to reach and gh issue view
-  # ${ISSUE_NUMBER} either fails or, for a numeric slug, silently fetches an
-  # unrelated real issue -- so the read step branches on ISSUE_TRACKER between
-  # gh issue view (github, and jira, which shares github's in-box reachability)
-  # and the read-only /issues mount (local).
+  # The issue-read step gate (issue #1691, ADR 0032; forgejo added #1963):
+  # local issues have no in-box reachability -- there is no server to reach
+  # and gh issue view ${ISSUE_NUMBER} either fails or, for a numeric slug,
+  # silently fetches an unrelated real issue -- so the read step branches on
+  # ISSUE_TRACKER between gh issue view (github, and jira, which shares
+  # github's in-box reachability), fj issue view (forgejo), and the
+  # read-only /issues mount (local).
   local ISSUE_TRACKER_GITHUB=""
   local ISSUE_TRACKER_LOCAL=""
+  local ISSUE_TRACKER_FORGEJO=""
   if [ "${ISSUE_TRACKER:-github}" = "local" ]; then
     # shellcheck disable=SC2034 # read indirectly via "${!_fgate}" in the loop below
     ISSUE_TRACKER_LOCAL=1
+  elif [ "${ISSUE_TRACKER:-github}" = "forgejo" ]; then
+    # shellcheck disable=SC2034 # read indirectly via "${!_fgate}" in the loop below
+    ISSUE_TRACKER_FORGEJO=1
   else
     # shellcheck disable=SC2034 # read indirectly via "${!_fgate}" in the loop below
     ISSUE_TRACKER_GITHUB=1
@@ -674,6 +679,23 @@ phase_prompt_assembly() {
     else
       # shellcheck disable=SC2034 # read indirectly via "${!_fgate}" in the loop below
       ISSUE_TRACKER_GITHUB_READONLY=1
+    fi
+  fi
+
+  # The issue-blocked-comment/research-verdict write-step gates for forgejo
+  # (issue #1963), mirroring ISSUE_TRACKER_GITHUB_READWRITE/_READONLY above:
+  # a read-only Box holds no write-capable FORGEJO_TOKEN, so a forgejo
+  # Dispatch's blocked-note and verdict comment fall back to the same
+  # host-mediated relay form the github/local write steps use.
+  local ISSUE_TRACKER_FORGEJO_READWRITE=""
+  local ISSUE_TRACKER_FORGEJO_READONLY=""
+  if [ -n "$ISSUE_TRACKER_FORGEJO" ]; then
+    if [ -n "${BOX_WRITE_ENABLED:-}" ]; then
+      # shellcheck disable=SC2034 # read indirectly via "${!_fgate}" in the loop below
+      ISSUE_TRACKER_FORGEJO_READWRITE=1
+    else
+      # shellcheck disable=SC2034 # read indirectly via "${!_fgate}" in the loop below
+      ISSUE_TRACKER_FORGEJO_READONLY=1
     fi
   fi
 

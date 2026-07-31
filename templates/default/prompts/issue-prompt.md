@@ -8,7 +8,7 @@ Fresh clone, new branch `${BRANCH}` cut from `${BASE_BRANCH}`. This issue only.
 
 Read first (run these yourself):
 
-${ISSUE_READ_GITHUB_STEP}${ISSUE_READ_LOCAL_STEP}
+${ISSUE_READ_GITHUB_STEP}${ISSUE_READ_LOCAL_STEP}${ISSUE_READ_FORGEJO_STEP}
 # COMMS
 
 ${CAVEMAN_STEP}Your text output is a machine-parsed log, not a conversation.
@@ -235,7 +235,7 @@ git diff origin/${BASE_BRANCH} -- '.github/workflows/'
 Then:
 
 ${IF_BLOCKED_PUSH_READ_WRITE_STEP}${IF_BLOCKED_PUSH_READ_ONLY_STEP}${IF_BLOCKED_PR_READ_WRITE_STEP}${IF_BLOCKED_PR_READ_ONLY_STEP}3. Leave the issue in-progress — do NOT close it.
-${ISSUE_BLOCKED_COMMENT_GITHUB_STEP}${ISSUE_BLOCKED_COMMENT_GITHUB_READONLY_STEP}${ISSUE_BLOCKED_COMMENT_LOCAL_STEP}5. Print exactly one line and stop — raw plain text, not wrapped in
+${ISSUE_BLOCKED_COMMENT_GITHUB_STEP}${ISSUE_BLOCKED_COMMENT_GITHUB_READONLY_STEP}${ISSUE_BLOCKED_COMMENT_LOCAL_STEP}${ISSUE_BLOCKED_COMMENT_FORGEJO_STEP}${ISSUE_BLOCKED_COMMENT_FORGEJO_READONLY_STEP}5. Print exactly one line and stop — raw plain text, not wrapped in
    backticks, a code fence, or any other markdown formatting:
 
 ${IF_BLOCKED_OUTCOME_LANDING_READ_WRITE_STEP}${IF_BLOCKED_OUTCOME_LANDING_READ_ONLY_STEP}
