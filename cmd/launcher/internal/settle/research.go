@@ -124,6 +124,13 @@ func (r *ResearchSettle) fail(num, note string) {
 func (r *ResearchSettle) SettleAdopted(d dispatch.Dispatcher, num string, gen uint64, prURL string) {
 }
 
+// SettleRelayedBranch is unreachable in practice: research never opens a PR,
+// watches CI, or merges, so there is no relayed branch to adopt. Present
+// only to satisfy the Settler interface.
+func (r *ResearchSettle) SettleRelayedBranch(d dispatch.Dispatcher, num string, gen uint64, result dispatch.Result) bool {
+	return false
+}
+
 // Fail is a no-op today, but it is reachable: under CONTINUOUS_DISPATCH
 // (e.g. dogfood.sh DOGFOOD_KIND=research), this Settler runs inside
 // RunContinuous, whose Box-failure branch calls Fail on any Box exit. The

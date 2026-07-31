@@ -121,6 +121,14 @@ type Settler interface {
 	// reconcile/recover entry point). gen is as in Settle.
 	SettleAdopted(d dispatch.Dispatcher, num string, gen uint64, prURL string)
 
+	// SettleRelayedBranch is recover's adopt-a-relayed-branch entry point
+	// (issue #2225): with no open PR discovered on num, consult result's
+	// self-report evidence and, if it is a genuine success, relay the
+	// branch, open a PR, and run the same merge gate as Settle/SettleAdopted.
+	// Returns false when there is no relayable evidence, leaving the caller's
+	// own "no open PR" handling unchanged. gen is as in Settle.
+	SettleRelayedBranch(d dispatch.Dispatcher, num string, gen uint64, result dispatch.Result) bool
+
 	// Fail records a Box that ran and exited non-zero (result.Success ==
 	// false). Unlike Settle, it runs no merge-gate machinery — the caller
 	// already transitioned the tracker issue to Failed itself — this hook
