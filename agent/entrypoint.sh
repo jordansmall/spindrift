@@ -19,9 +19,17 @@ fully_local=false
 if [ "${CODE_FORGE:-}" = local ] && [ "${ISSUE_TRACKER:-}" = local ]; then
   fully_local=true
 fi
-[ "$fully_local" = true ] || : "${REPO_SLUG:?REPO_SLUG (owner/repo) is required}"
+# Self-contained research (issue #2202) supplies its content from a local
+# issue tracker and clones no repo, so REPO_SLUG/GH_TOKEN have nothing to
+# resolve against either -- mirrors the launcher validate()'s noRepoResearch
+# permit, which is likewise scoped to a local issue tracker.
+no_repo=false
+if [ "${SELF_CONTAINED:-}" = 1 ] && [ "${ISSUE_TRACKER:-}" = local ]; then
+  no_repo=true
+fi
+[ "$fully_local" = true ] || [ "$no_repo" = true ] || : "${REPO_SLUG:?REPO_SLUG (owner/repo) is required}"
 : "${ISSUE_NUMBER:?ISSUE_NUMBER is required}"
-[ "$fully_local" = true ] || : "${GH_TOKEN:?GH_TOKEN is required}"
+[ "$fully_local" = true ] || [ "$no_repo" = true ] || : "${GH_TOKEN:?GH_TOKEN is required}"
 : "${GIT_USER_NAME:?GIT_USER_NAME is required}"
 : "${GIT_USER_EMAIL:?GIT_USER_EMAIL is required}"
 

@@ -37,6 +37,27 @@ setup() {
   [ "$(grep -c '# POST THE VERDICT' "$CLAUDE_PROMPT_FILE")" -eq 1 ]
 }
 
+@test "SELF_CONTAINED=1 with a local issue tracker starts with no REPO_SLUG/GH_TOKEN" {
+  export DISPATCH_KIND="research"
+  export SELF_CONTAINED="1"
+  export ISSUE_TRACKER="local"
+  unset REPO_SLUG
+  unset GH_TOKEN
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  [ ! -d "$WORK_DIR/.git" ]
+  grep -qi "self-contained" "$CLAUDE_PROMPT_FILE"
+}
+
+@test "SELF_CONTAINED=1 with a github tracker but no REPO_SLUG still fails loudly at startup" {
+  export DISPATCH_KIND="research"
+  export SELF_CONTAINED="1"
+  unset REPO_SLUG
+  run bash "$ENTRYPOINT"
+  [ "$status" -ne 0 ]
+  grep -q "REPO_SLUG" <<<"$output"
+}
+
 # --- regression: research without SELF_CONTAINED is unaffected --------------
 
 @test "DISPATCH_KIND=research without SELF_CONTAINED still drives research-prompt.md and clones" {

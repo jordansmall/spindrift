@@ -472,11 +472,14 @@ func validate(c config) error {
 	// gh-exec client that reads REPO_SLUG/GH_TOKEN, so neither is required —
 	// any other combination (github, git, jira, or a mixed local pairing)
 	// keeps the unconditional requirement. A self-contained research run
-	// (issue #2202, --self-contained) is exempted for a different reason:
-	// the Box clones no repo and explores none, so neither field is
-	// meaningful.
+	// (issue #2202, --self-contained) is exempted for a different reason,
+	// but only when a local issue tracker supplies the content directly:
+	// the Box clones no repo and explores none. A github or forgejo issue
+	// tracker still needs REPO_SLUG/GH_TOKEN even in self-contained mode, to
+	// read the issue and post the verdict — relaxing the guardrail there
+	// would trade a clear launcher error for a downstream Box crash.
 	fullyLocal := c.codeForge == "local" && c.issueTracker == "local"
-	noRepoResearch := c.dispatchKind == dispatchKindResearch && c.selfContained
+	noRepoResearch := c.dispatchKind == dispatchKindResearch && c.selfContained && c.issueTracker == "local"
 	if !fullyLocal && !noRepoResearch && c.repoSlug == "" {
 		return fmt.Errorf("set REPO_SLUG=owner/repo (the target GitHub repository)")
 	}
