@@ -2,7 +2,6 @@ package bundlerelay
 
 import (
 	"errors"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -26,50 +25,6 @@ func localClone(bare string) func(dir string) error {
 	}
 }
 
-// seedRelayBundle clones bare, creates branch one commit ahead of base
-// carrying a marker file, and writes a git bundle of base..branch to
-// outboxDir/seambundle.FileName -- standing in for the Box's code-out.
-// Returns branch's HEAD sha.
-func seedRelayBundle(t *testing.T, bare, base, outboxDir, branch string) string {
-	t.Helper()
-	work := t.TempDir()
-	run(t, "", "clone", bare, work)
-	run(t, work, "checkout", base)
-	run(t, work, "checkout", "-b", branch)
-	writeFile(t, filepath.Join(work, "feature.txt"), "feature\n")
-	run(t, work, "add", "feature.txt")
-	run(t, work, "commit", "-m", "feature")
-	run(t, work, "bundle", "create", filepath.Join(outboxDir, seambundle.FileName), base+".."+branch)
-	return revParse(t, work, branch)
-}
-
-// run runs `git -C dir args...`, failing t on error.
-func run(t *testing.T, dir string, args ...string) {
-	t.Helper()
-	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("git %v: %v: %s", args, err, out)
-	}
-}
-
-// revParse returns the commit ref resolves to inside the repo at dir.
-func revParse(t *testing.T, dir, ref string) string {
-	t.Helper()
-	out, err := exec.Command("git", "-C", dir, "rev-parse", ref).CombinedOutput()
-	if err != nil {
-		t.Fatalf("rev-parse %s in %s: %v: %s", ref, dir, err, out)
-	}
-	return strings.TrimSpace(string(out))
-}
-
-// writeFile writes contents to path, failing t on error.
-func writeFile(t *testing.T, path, contents string) {
-	t.Helper()
-	if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
-		t.Fatal(err)
-	}
-}
-
 func newBundleRelayHarness(t *testing.T) *forgetest.GitRepoFixture {
 	t.Helper()
 	t.Setenv("GIT_AUTHOR_NAME", "Test Bot")
@@ -86,13 +41,13 @@ func TestRelay_PushesRefToOrigin(t *testing.T) {
 	repo := newBundleRelayHarness(t)
 	outbox := t.TempDir()
 	branch := "agent/issue-2212"
-	wantSHA := seedRelayBundle(t, repo.Bare, "main", outbox, branch)
+	wantSHA := forgetest.SeedRelayBundle(t, repo.Bare, "main", outbox, branch)
 
 	if err := Relay("test", outbox, branch, localClone(repo.Bare)); err != nil {
 		t.Fatalf("Relay: %v", err)
 	}
 
-	if got := revParse(t, repo.Bare, "refs/heads/"+branch); got != wantSHA {
+	if got := forgetest.RevParse(t, repo.Bare, "refs/heads/"+branch); got != wantSHA {
 		t.Errorf("refs/heads/%s = %s, want %s", branch, got, wantSHA)
 	}
 }
@@ -158,7 +113,7 @@ func TestRelay_MissingOutboxDirErrors(t *testing.T) {
 func TestRelay_MalformedBundleErrors(t *testing.T) {
 	repo := newBundleRelayHarness(t)
 	outbox := t.TempDir()
-	writeFile(t, filepath.Join(outbox, seambundle.FileName), "not a bundle")
+	forgetest.WriteFile(t, filepath.Join(outbox, seambundle.FileName), "not a bundle")
 
 	err := Relay("test", outbox, "agent/issue-2212", localClone(repo.Bare))
 	if err == nil {
@@ -174,7 +129,7 @@ func TestRelay_MalformedBundleErrors(t *testing.T) {
 func TestRelay_CloneErrorPropagatesVerbatim(t *testing.T) {
 	repo := newBundleRelayHarness(t)
 	outbox := t.TempDir()
-	seedRelayBundle(t, repo.Bare, "main", outbox, "agent/issue-2212")
+	forgetest.SeedRelayBundle(t, repo.Bare, "main", outbox, "agent/issue-2212")
 
 	sentinel := errors.New("sentinel clone failure")
 	err := Relay("test", outbox, "agent/issue-2212", func(dir string) error {

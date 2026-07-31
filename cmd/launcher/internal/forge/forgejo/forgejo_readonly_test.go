@@ -5,10 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"os/exec"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"spindrift.dev/launcher/internal/forge"
@@ -42,44 +39,6 @@ func newReadOnlyRelayHarness(t *testing.T) (*forgetest.GitRepoFixture, forge.Cod
 		GitRemoteURL: repo.Bare,
 	})
 	return repo, cf
-}
-
-// forgejoRun runs `git -C dir args...`, failing t on error.
-func forgejoRun(t *testing.T, dir string, args ...string) {
-	t.Helper()
-	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("git %v: %v: %s", args, err, out)
-	}
-}
-
-// forgejoRevParse returns the commit ref resolves to inside the repo at dir.
-func forgejoRevParse(t *testing.T, dir, ref string) string {
-	t.Helper()
-	out, err := exec.Command("git", "-C", dir, "rev-parse", ref).CombinedOutput()
-	if err != nil {
-		t.Fatalf("rev-parse %s in %s: %v: %s", ref, dir, err, out)
-	}
-	return strings.TrimSpace(string(out))
-}
-
-// seedReadOnlyRelayBundle clones bare, creates branch one commit ahead of
-// base carrying a marker file, and writes a git bundle of base..branch to
-// outboxDir/seambundle.FileName -- standing in for the Box's code-out.
-// Returns branch's HEAD sha.
-func seedReadOnlyRelayBundle(t *testing.T, bare, base, outboxDir, branch string) string {
-	t.Helper()
-	work := t.TempDir()
-	forgejoRun(t, "", "clone", bare, work)
-	forgejoRun(t, work, "checkout", base)
-	forgejoRun(t, work, "checkout", "-b", branch)
-	if err := os.WriteFile(filepath.Join(work, "feature.txt"), []byte("feature\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	forgejoRun(t, work, "add", "feature.txt")
-	forgejoRun(t, work, "commit", "-m", "feature")
-	forgejoRun(t, work, "bundle", "create", filepath.Join(outboxDir, seambundle.FileName), base+".."+branch)
-	return forgejoRevParse(t, work, branch)
 }
 
 // TestNewForgejoCodeForge_DoesNotImplementBundleRelay guards read-write's own
@@ -131,7 +90,7 @@ func TestReadOnlyForgejoCodeForge_RelayBundle_PushesRefToOrigin(t *testing.T) {
 	repo, cf := newReadOnlyRelayHarness(t)
 	outbox := t.TempDir()
 	branch := "agent/issue-1964"
-	wantSHA := seedReadOnlyRelayBundle(t, repo.Bare, "main", outbox, branch)
+	wantSHA := forgetest.SeedRelayBundle(t, repo.Bare, "main", outbox, branch)
 
 	br, ok := cf.(forge.BundleRelay)
 	if !ok {
@@ -142,7 +101,7 @@ func TestReadOnlyForgejoCodeForge_RelayBundle_PushesRefToOrigin(t *testing.T) {
 		t.Fatalf("RelayBundle: %v", err)
 	}
 
-	if got := forgejoRevParse(t, repo.Bare, "refs/heads/"+branch); got != wantSHA {
+	if got := forgetest.RevParse(t, repo.Bare, "refs/heads/"+branch); got != wantSHA {
 		t.Errorf("refs/heads/%s = %s, want %s", branch, got, wantSHA)
 	}
 }
@@ -155,7 +114,7 @@ func TestReadOnlyForgejoCodeForge_RelayBundle_ReRelayForceUpdatesRef(t *testing.
 	repo, cf := newReadOnlyRelayHarness(t)
 	outbox := t.TempDir()
 	branch := "agent/issue-1964"
-	seedReadOnlyRelayBundle(t, repo.Bare, "main", outbox, branch)
+	forgetest.SeedRelayBundle(t, repo.Bare, "main", outbox, branch)
 
 	br := cf.(forge.BundleRelay)
 	if err := br.RelayBundle(outbox, branch); err != nil {
@@ -166,22 +125,20 @@ func TestReadOnlyForgejoCodeForge_RelayBundle_ReRelayForceUpdatesRef(t *testing.
 	// name) -- a fresh clone of bare's base, not of the already-relayed ref,
 	// so the new commit shares no ancestry with the one already relayed in.
 	work := t.TempDir()
-	forgejoRun(t, "", "clone", repo.Bare, work)
-	forgejoRun(t, work, "checkout", "main")
-	forgejoRun(t, work, "checkout", "-b", branch)
-	if err := os.WriteFile(filepath.Join(work, "feature.txt"), []byte("retried\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	forgejoRun(t, work, "add", "feature.txt")
-	forgejoRun(t, work, "commit", "-m", "retried feature")
-	wantSHA := forgejoRevParse(t, work, branch)
-	forgejoRun(t, work, "bundle", "create", filepath.Join(outbox, seambundle.FileName), "main.."+branch)
+	forgetest.Run(t, "", "clone", repo.Bare, work)
+	forgetest.Run(t, work, "checkout", "main")
+	forgetest.Run(t, work, "checkout", "-b", branch)
+	forgetest.WriteFile(t, filepath.Join(work, "feature.txt"), "retried\n")
+	forgetest.Run(t, work, "add", "feature.txt")
+	forgetest.Run(t, work, "commit", "-m", "retried feature")
+	wantSHA := forgetest.RevParse(t, work, branch)
+	forgetest.Run(t, work, "bundle", "create", filepath.Join(outbox, seambundle.FileName), "main.."+branch)
 
 	if err := br.RelayBundle(outbox, branch); err != nil {
 		t.Fatalf("RelayBundle (retry, diverged history): %v", err)
 	}
 
-	if got := forgejoRevParse(t, repo.Bare, "refs/heads/"+branch); got != wantSHA {
+	if got := forgetest.RevParse(t, repo.Bare, "refs/heads/"+branch); got != wantSHA {
 		t.Errorf("refs/heads/%s = %s, want %s (the retried bundle's tip)", branch, got, wantSHA)
 	}
 }
@@ -209,9 +166,7 @@ func TestReadOnlyForgejoCodeForge_RelayBundle_MissingBundleErrors(t *testing.T) 
 func TestReadOnlyForgejoCodeForge_RelayBundle_MalformedBundleErrors(t *testing.T) {
 	_, cf := newReadOnlyRelayHarness(t)
 	outbox := t.TempDir()
-	if err := os.WriteFile(filepath.Join(outbox, seambundle.FileName), []byte("not a bundle"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	forgetest.WriteFile(t, filepath.Join(outbox, seambundle.FileName), "not a bundle")
 
 	br := cf.(forge.BundleRelay)
 	err := br.RelayBundle(outbox, "agent/issue-1964")
