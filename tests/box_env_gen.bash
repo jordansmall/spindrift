@@ -21,6 +21,8 @@ set_box_env() {
   export DEV_SHELL_NAME="default"
   export DEV_SHELL_PROBE_TIMEOUT=300
   export FILER_MODEL=""
+  export FORGEJO_BASE_URL="https://codeberg.org"
+  export FORGEJO_TOKEN=""
   export GH_TOKEN="fake-token"
   export GIT_USER_EMAIL="bot@example.com"
   export GIT_USER_NAME="Test Bot"
