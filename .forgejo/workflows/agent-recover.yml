@@ -1,0 +1,124 @@
+name: Agent recover
+
+# Adding the `agent-recover` label to an issue re-runs the merge gate on it:
+# `spindrift recover <n>` finds the open non-draft PR for the issue's branch and
+# drives it to green (self-healing red CI up to MAX_FIX_ATTEMPTS), then applies
+# MERGE_MODE. It is the manual unstick for an issue stranded in
+# `agent-in-progress` after a killed launcher — the case `spindrift dispatch`
+# can't reconcile on its own — and the retry path for an `agent-failed` PR.
+#
+# recover owns its terminal label swaps: green -> agent-complete, exhausted red
+# -> agent-failed. Those swaps read *from* agent-in-progress, so the claim step
+# normalises the issue onto agent-in-progress before recover runs. The claim
+# also clears agent-recover, so the label self-clears and will not re-fire.
+#
+# This is the Forgejo Actions mirror of .github/workflows/agent-recover.yml
+# (issue #1967): a single, non-expiring `FORGEJO_TOKEN` repository secret in
+# place of the GitHub worker-App mint and gh-token-refresher, which have no
+# Forgejo analog (ADR 0038). Requires a registered self-hosted runner (the
+# `self-hosted` label) — see docs/reference.md, "Forgejo Actions dispatch
+# templates".
+on:
+  issues:
+    types: [labeled]
+
+# Serialise per issue only: two labelings of the SAME issue queue behind each
+# other (no double-recover), but different issues run concurrently. Agent boxes
+# share one Claude rate-limit window — the operator is responsible for not
+# triggering more issues than that window allows.
+concurrency:
+  group: agent-recover-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  recover:
+    if: github.event.label.name == 'agent-recover'
+    runs-on: self-hosted
+    timeout-minutes: 180
+    env:
+      # Select the forgejo backend on both axes; the launcher reads these from
+      # the environment. FORGEJO_BASE_URL falls back to Codeberg when the repo
+      # variable is unset (ADR 0038).
+      ISSUE_TRACKER: forgejo
+      CODE_FORGE: forgejo
+      FORGEJO_BASE_URL: ${{ vars.FORGEJO_BASE_URL || 'https://codeberg.org' }}
+      FORGEJO_TOKEN: ${{ secrets.FORGEJO_TOKEN }}
+    steps:
+      # Checkout must precede the local composite step below: Forgejo resolves
+      # ./.github/actions/agent-setup from the checked-out tree.
+      - uses: actions/checkout@v4
+
+      # Claim, Install Nix, and build — plus the plumbing env (RUNTIME +
+      # tokens) written to the job env and the bot identity surfaced as step
+      # outputs for the recover flags below. The claim normalises onto
+      # agent-in-progress up front so recover's terminal swaps (which read from
+      # agent-in-progress) have the state they expect: it strips every other
+      # lifecycle label so the issue lands cleanly on agent-in-progress
+      # regardless of prior state. Removing agent-recover self-clears the
+      # trigger (no re-fire); removing the terminal labels makes a
+      # retry-from-agent-failed / re-run-on-agent-complete start clean;
+      # removing ready-for-agent keeps a concurrent dispatch from grabbing it;
+      # removing agent-trigger drops a stale dispatch trigger that never fired.
+      # Auth is the single `FORGEJO_TOKEN` repository secret: Forgejo has no
+      # App-installation token to mint and its PATs do not expire (ADR 0038).
+      - name: Agent setup
+        id: setup
+        uses: ./.github/actions/agent-setup
+        with:
+          gh-token: ${{ secrets.FORGEJO_TOKEN }}
+          claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          issue-number: ${{ github.event.issue.number }}
+          repo: ${{ github.repository }}
+          claim-add-label: agent-in-progress
+          claim-remove-labels: agent-recover agent-failed agent-complete ready-for-agent agent-trigger
+          git-user-name: ${{ vars.AGENT_GIT_USER_NAME }}
+          git-user-email: ${{ vars.AGENT_GIT_USER_EMAIL }}
+
+      # recover exits non-zero ONLY when there is nothing to adopt (no open PR,
+      # a draft-only PR, or the issue can't be fetched) — and in that case it
+      # leaves labels untouched. Every path where a PR exists (green->complete,
+      # red-exhausted->failed, merge-blocked->complete) exits 0 with the label
+      # already swapped, so the park step below stays dormant.
+      - name: Recover the issue
+        id: recover
+        run: |
+          nix run . -- recover "${{ github.event.issue.number }}" \
+            --box-forge-and-issue-access read-write \
+            --repo-slug "${{ github.repository }}" \
+            --base-branch "${{ github.event.repository.default_branch }}" \
+            --git-user-name "${{ steps.setup.outputs.git-user-name }}" \
+            --git-user-email "${{ steps.setup.outputs.git-user-email }}"
+
+      # Only fires when recover itself couldn't adopt (guarded on the step
+      # outcome so a failed build/install does NOT mislabel the issue). Park to
+      # agent-failed for human triage and say why — the claim already moved it
+      # off agent-recover, so without this it would sit silently on
+      # agent-in-progress with nothing running. fj has no label verb and is not
+      # guaranteed on the runner, so the comment and label swap go through curl
+      # against the Forgejo REST API.
+      - name: Park if nothing to recover
+        if: always() && steps.recover.outcome == 'failure'
+        run: |
+          api="${FORGEJO_BASE_URL%/}/api/v1/repos/${{ github.repository }}"
+          issue="${{ github.event.issue.number }}"
+          auth="Authorization: token ${FORGEJO_TOKEN}"
+          curl -fsS -X POST -H "$auth" -H "Content-Type: application/json" \
+            "${api}/issues/${issue}/comments" \
+            -d "$(jq -n --arg b "⚠️ \`spindrift recover\` found nothing to adopt — no open non-draft PR on \`agent/issue-${issue}\`. Parked to \`agent-failed\`; re-label \`agent-recover\` once an open PR exists, or \`ready-for-agent\` to re-dispatch from scratch." '{body: $b}')" >/dev/null
+          labels=$(curl -fsS -H "$auth" "${api}/labels")
+          failed_id=$(printf '%s' "$labels" | jq '.[] | select(.name == "agent-failed") | .id')
+          inprog_id=$(printf '%s' "$labels" | jq '.[] | select(.name == "agent-in-progress") | .id')
+          curl -fsS -X POST -H "$auth" -H "Content-Type: application/json" \
+            "${api}/issues/${issue}/labels" -d "{\"labels\": [${failed_id}]}" >/dev/null
+          curl -fsS -X DELETE -H "$auth" "${api}/issues/${issue}/labels/${inprog_id}" >/dev/null
+
+      - name: Upload run logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-recover-logs-${{ github.event.issue.number }}
+          path: logs/
+          if-no-files-found: ignore
