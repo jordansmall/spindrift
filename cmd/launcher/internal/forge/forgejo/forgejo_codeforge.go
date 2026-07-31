@@ -135,6 +135,22 @@ func forgejoMergeDo(method string) string {
 	}
 }
 
+// postMerge POSTs a merge request for the PR at index with the base merge
+// fields — f.mergeMethod's style (forgejoMergeDo) and deletion of the head
+// branch after merge — plus any extra fields, returning the HTTP status so
+// each caller classifies a non-2xx response its own way (Merge via
+// classifyMergeFailure, EnqueueAutoMerge as a raw error).
+func (f *forgejoCodeForge) postMerge(index string, extra map[string]any) (int, error) {
+	body := map[string]any{
+		"Do":                        forgejoMergeDo(f.mergeMethod),
+		"delete_branch_after_merge": true,
+	}
+	for k, v := range extra {
+		body[k] = v
+	}
+	return f.rest.do(http.MethodPost, f.rest.repoPath()+"/pulls/"+index+"/merge", body, nil)
+}
+
 // Merge merges the pull request at prURL via Forgejo's REST merge endpoint,
 // requesting f.mergeMethod's style (forgejoMergeDo) and deletion of the head
 // branch after merge. A non-2xx response is classified like the github
@@ -144,11 +160,7 @@ func (f *forgejoCodeForge) Merge(prURL string) error {
 	if err != nil {
 		return err
 	}
-	body := map[string]any{
-		"Do":                        forgejoMergeDo(f.mergeMethod),
-		"delete_branch_after_merge": true,
-	}
-	status, err := f.rest.do(http.MethodPost, f.rest.repoPath()+"/pulls/"+index+"/merge", body, nil)
+	status, err := f.postMerge(index, nil)
 	if err != nil {
 		return err
 	}
