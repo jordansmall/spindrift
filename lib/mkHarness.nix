@@ -268,6 +268,13 @@ let
   schemaDefaults = lib.mapAttrs (_: e: e.default or "") flakeOptionEntries;
   mergedDefaults = schemaDefaults // defaults;
 
+  # Whether either backend knob selects forgejo (issue #1963): drives
+  # lib/image.nix's fj (forgejo-cli) bake, so a github-backend Consumer's
+  # image never carries an unused CLI.
+  forgejoBackend =
+    (mergedDefaults.issueTracker or "github") == "forgejo"
+    || (mergedDefaults.codeForge or "github") == "forgejo";
+
   # Unknown defaults keys are caught at eval time — a typo like `basebranch`
   # would otherwise be silently ignored, never baked, never surfaced.
   unknownDefaultKeys = lib.filter (k: !(lib.hasAttr k flakeOptionEntries)) (lib.attrNames defaults);
@@ -489,6 +496,7 @@ let
       prefetch
       nixInBox
       nixStoreWritable
+      forgejoBackend
       extraClosures
       driverEntry
       imageName

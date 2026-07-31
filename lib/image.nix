@@ -20,6 +20,9 @@
   prefetch,
   nixInBox,
   nixStoreWritable,
+  # Whether ISSUE_TRACKER or CODE_FORGE selects the forgejo backend; bakes fj
+  # (forgejo-cli) into the image when true, absent otherwise (issue #1963).
+  forgejoBackend ? false,
   # Extra derivations whose closures are baked into the image contents and,
   # when nixInBox is on, registered in the store DB alongside the runtime
   # closure — so in-box nix sees them as already present instead of
@@ -142,7 +145,10 @@ let
     ])
     # The nix CLI is included by default so `nix flake check` / `nix develop`
     # work inside the box. Omitted only when the Consumer opts into the lean image.
-    ++ lib.optional nixInBox pkgs.nix;
+    ++ lib.optional nixInBox pkgs.nix
+    # fj (forgejo-cli): baked only for a forgejo-backend Consumer (issue
+    # #1963), so a github-backend image never gains an unused CLI.
+    ++ lib.optional forgejoBackend pkgs.forgejo-cli;
 
   agentEnv = pkgs.buildEnv {
     name = "agent-env";
@@ -163,16 +169,20 @@ let
   # derivation's body.
   entrypoint = pkgs.writeShellApplication {
     name = "entrypoint";
-    runtimeInputs = with pkgs; [
-      git
-      gh
-      (driverEntry.package pkgs)
-      gettext # envsubst
-      coreutils
-      jq # extracts the outcome from the stream-json transcript
-      driverExecBin # in-box Driver runner (#626)
-      orchestratorBin # in-box orchestrator (#1996)
-    ];
+    runtimeInputs =
+      (with pkgs; [
+        git
+        gh
+        (driverEntry.package pkgs)
+        gettext # envsubst
+        coreutils
+        jq # extracts the outcome from the stream-json transcript
+        driverExecBin # in-box Driver runner (#626)
+        orchestratorBin # in-box orchestrator (#1996)
+      ])
+      # fj (forgejo-cli): resolved on PATH for the entrypoint's fj credential
+      # setup only when the Consumer's backend is forgejo (issue #1963).
+      ++ lib.optional forgejoBackend pkgs.forgejo-cli;
     # Prepend the schema-derived defaults block so the entrypoint carries the
     # baked values without hardcoding them in the source script.
     # AGENTS_JSON_TEMPLATE is baked as a fixed value (not a :-default) because it

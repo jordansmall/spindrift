@@ -98,6 +98,23 @@ configure_env() {
   # registry-rendered bodies via DRIVER_PREAMBLE_FILE (issue #433).
 }
 
+# configure_forgejo_cli wires FORGEJO_TOKEN into fj (forgejo-cli) so the
+# agent's `fj issue`/`fj pr` commands (ADR-0038-adjacent, issue #1963) run
+# non-interactively. A no-op when fj isn't baked (non-forgejo images) or no
+# token is set (a read-only Box: see the read-only ISSUE_TRACKER_FORGEJO
+# gates in phase_prompt_assembly, which never surface an fj write command in
+# that case anyway).
+configure_forgejo_cli() {
+  command -v fj >/dev/null 2>&1 || return 0
+  [ -n "${FORGEJO_TOKEN:-}" ] || return 0
+  local _fj_base="${FORGEJO_BASE_URL:-https://codeberg.org}"
+  # fj stores the token in ~/.local/share/forgejo-cli/keys.json keyed by the
+  # bare host; the name argument is just a cosmetic label. The token is fed
+  # on stdin, not argv, so it never lands in `ps`/argv snooping. Offline --
+  # writes the keys file only, no network call.
+  printf '%s' "$FORGEJO_TOKEN" | fj -H "$_fj_base" auth add-key "${GIT_USER_NAME:-spindrift-agent}" >/dev/null
+}
+
 # clone_repo authenticates, clones the target repo into WORK_DIR, sets the
 # repo-local git identity, and fetches the latest refs.
 clone_repo() {
@@ -174,6 +191,10 @@ clone_repo() {
   # Fetch the absolute latest refs so the pre-work rebase positions the branch
   # on current origin/BASE_BRANCH, not the state captured at clone time.
   git fetch origin
+  # Configure fj (forgejo-cli) now that the repo-local identity above is set,
+  # so GIT_USER_NAME is available for its (cosmetic) key label -- mirrors gh
+  # auth setup-git's placement earlier in this function for the github case.
+  configure_forgejo_cli
 }
 
 # phase_branch_recovery adopts prior work on an open PR or force-resets a
