@@ -966,6 +966,40 @@ func TestLoadConfig_EnvBeatsDocument(t *testing.T) {
 	}
 }
 
+// TestLoadConfig_PromptDirDocumentSettingBeatsSchemaDefault proves the
+// Launcher input document's settings value backs spindriftPromptDir ahead of
+// the generated schemaFlags table when no ambient env var supplies one —
+// the prompt-dir specialization of TestLoadConfig_DocumentSettingBeatsSchemaDefault
+// (issue #2200).
+func TestLoadConfig_PromptDirDocumentSettingBeatsSchemaDefault(t *testing.T) {
+	t.Setenv("SPINDRIFT_PROMPT_DIR", "")
+	os.Unsetenv("SPINDRIFT_PROMPT_DIR")
+	t.Cleanup(func() { loadedDoc = nil })
+
+	loadedDoc = &inputDocument{Settings: map[string]string{"SPINDRIFT_PROMPT_DIR": "from-document-prompt"}}
+
+	c := loadConfig()
+	if c.spindriftPromptDir != "from-document-prompt" {
+		t.Errorf("spindriftPromptDir = %q, want from-document-prompt", c.spindriftPromptDir)
+	}
+}
+
+// TestLoadConfig_PromptDirEnvBeatsDocument proves an ambient
+// SPINDRIFT_PROMPT_DIR env var still overrides the document's settings
+// value — the prompt-dir specialization of TestLoadConfig_EnvBeatsDocument
+// (issue #2200).
+func TestLoadConfig_PromptDirEnvBeatsDocument(t *testing.T) {
+	t.Cleanup(func() { loadedDoc = nil })
+
+	loadedDoc = &inputDocument{Settings: map[string]string{"SPINDRIFT_PROMPT_DIR": "from-document-prompt"}}
+	t.Setenv("SPINDRIFT_PROMPT_DIR", "from-env-prompt")
+
+	c := loadConfig()
+	if c.spindriftPromptDir != "from-env-prompt" {
+		t.Errorf("spindriftPromptDir = %q, want from-env-prompt", c.spindriftPromptDir)
+	}
+}
+
 // TestLoadConfig_ArtifactsFromDocument proves the nix-computed artifact
 // fields (image refs, driver name, ...) resolve from the loaded document's
 // artifacts section when no env var supplies them — the replacement for the
