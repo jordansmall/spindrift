@@ -143,6 +143,59 @@ func TestSettle_GithubReadOnly_AdoptsWithDefaultPRBodyWhenNoIntent(t *testing.T)
 	}
 }
 
+// TestSettle_GithubReadOnly_AdoptedPRWithRedCIDoesNotMerge covers the
+// landingFailed arm of the adoption's selfHeal switch: the fingerprint holds
+// and the PR is opened on the relayed branch, but CI comes back red. Like the
+// "ready" path it mirrors, adoption must not merge on red and must leave the
+// issue short of agent-complete — the CI gate is the authoritative judge, not
+// the driver's own success self-report.
+func TestSettle_GithubReadOnly_AdoptedPRWithRedCIDoesNotMerge(t *testing.T) {
+	const issNum = "2224"
+	const prURL = "https://github.com/owner/repo/pull/2224"
+
+	fc := forge.NewFake(testDispatchLabels)
+	fc.BranchPrefix = "agent/issue-"
+	branch := fc.AgentBranch(issNum)
+	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
+	fc.CreateDraftPRURL = prURL
+	fc.SetCheckStates(prURL, []forge.RollupState{forge.StateFailure})
+
+	d := dispatch.NewFake()
+	result := dispatch.Result{
+		Success:      true,
+		OutcomeFound: true,
+		Outcome: outcome.Outcome{
+			Issue:     issNum,
+			Landing:   branch,
+			Status:    "blocked",
+			Synthetic: true,
+			Note:      "driver exited without emitting an outcome",
+		},
+		SelfReportFound: true,
+		SelfReport:      outcome.SelfReport{Status: "success"},
+		PRIntent:        "feat: add widget\n\nAdds a widget.",
+		PRIntentFound:   true,
+	}
+
+	c := baseConfig()
+	c.ReadOnly = true
+	c.OutboxDir = func(num string) string { return "/outbox/" + num }
+	c.BaseBranch = "main"
+	s := New(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
+	s.Settle(d, issNum, 0, result)
+
+	if len(fc.CreateDraftPRCalls) != 1 {
+		t.Fatalf("adoption must still open the PR before CI judges it; CreateDraftPRCalls=%+v", fc.CreateDraftPRCalls)
+	}
+	if fc.Merged != "" {
+		t.Errorf("an adopted PR must not merge on red CI; fc.Merged=%q", fc.Merged)
+	}
+	iss, _ := fc.Issue(issNum)
+	if containsLabel(iss.Labels, "agent-complete") {
+		t.Errorf("issue must not carry agent-complete when the adopted PR's CI is red; labels=%v", iss.Labels)
+	}
+}
+
 // TestSettle_GithubReadOnly_NonSyntheticBlockedDoesNotAdopt covers a driver
 // that genuinely blocked (Outcome.Synthetic=false) — even with a self-report
 // that says success, adoption must not fire: a non-synthetic status=blocked
