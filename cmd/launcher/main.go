@@ -661,6 +661,7 @@ func newCodeForge(c config, parent local.SanitizedParent) forge.CodeForge {
 			UserName:     c.gitUserName,
 			UserEmail:    c.gitUserEmail,
 			BranchPrefix: c.branchPrefix,
+			MergeMethod:  c.mergeMethod,
 		})
 	default:
 		// BOX_FORGE_AND_ISSUE_ACCESS=read-only swaps in the BundleRelay-
