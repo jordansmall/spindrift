@@ -132,6 +132,20 @@ setup() {
   ! grep -qF 'gh issue view' "$CLAUDE_PROMPT_FILE"
 }
 
+# jira maps to the same gh-flavored path as github (ISSUE_TRACKER_GITHUB=1 ->
+# gh issue view) -- this guards that mapping so a future refactor collapsing
+# the per-tracker gates into a per-axis case (whose `*)` arm covers github
+# AND jira) can't silently regress jira onto fj or the local mount.
+@test "issue-read step: jira tracker reads the issue with gh, never fj or the local mount" {
+  export ISSUE_TRACKER=jira
+  export WORK_DIR="$BATS_TEST_TMPDIR/work-issue-read-jira"
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -qF 'gh issue view' "$CLAUDE_PROMPT_FILE"
+  ! grep -qF 'fj issue view' "$CLAUDE_PROMPT_FILE"
+  ! grep -qF '/issues/7.md' "$CLAUDE_PROMPT_FILE"
+}
+
 # issue #1692/ADR 0032: the local content-plane write step. A local
 # Dispatch's Box has no in-box tracker client, so the research verdict
 # travels as a single nonce-guarded SPINDRIFT_COMMENT line on stdout
