@@ -368,7 +368,7 @@
     doc = "Forgejo/Gitea instance base URL, defaulting to Codeberg; used when ISSUE_TRACKER=forgejo";
     flakeOption = true;
     nixSubPath = "forgejo.baseURL";
-    boxEnv = false;
+    boxEnv = true;
   };
   researchVerdicts = {
     env = "RESEARCH_VERDICTS";
@@ -439,7 +439,7 @@
     env = "FORGEJO_TOKEN";
     secret = true;
     doc = "Forgejo/Gitea API token (Bearer/token scheme); required when ISSUE_TRACKER=forgejo";
-    boxEnv = false;
+    boxEnv = true;
   };
   gitUserName = {
     env = "GIT_USER_NAME";
