@@ -225,6 +225,29 @@ setup() {
   grep -qF 'the launcher posts it as the issue comment' "$CLAUDE_PROMPT_FILE"
 }
 
+# jira rides github's write-step arm too: the consolidated `_it_write` case
+# maps jira through its `*)` catch-all onto ISSUE_TRACKER_GITHUB_READWRITE/
+# _READONLY (issue #2214), the same `*`-arm that carries the read step above.
+# Guard both halves so a future forge added to that arm can't silently regress
+# jira's blocked-note off the gh-flavored write path.
+@test "issue blocked-comment step: jira tracker under read-write keeps gh issue comment unchanged" {
+  export ISSUE_TRACKER=jira
+  export WORK_DIR="$BATS_TEST_TMPDIR/work-blocked-comment-jira-readwrite"
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -qF 'gh issue comment 7' "$CLAUDE_PROMPT_FILE"
+}
+
+@test "issue blocked-comment step: jira tracker under read-only never runs gh issue comment" {
+  export ISSUE_TRACKER=jira
+  unset BOX_WRITE_ENABLED
+  export WORK_DIR="$BATS_TEST_TMPDIR/work-blocked-comment-jira-readonly"
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  ! grep -qF 'gh issue comment' "$CLAUDE_PROMPT_FILE"
+  grep -qF 'the launcher posts it as the issue comment' "$CLAUDE_PROMPT_FILE"
+}
+
 @test "research verdict step: github tracker under read-write is unaffected by the new gate" {
   export DISPATCH_KIND="research"
   export WORK_DIR="$BATS_TEST_TMPDIR/work-research-verdict-github-readwrite-explicit"
