@@ -185,6 +185,15 @@ const forgejoPortTimeout = 10 * time.Second
 // for the freshly started container to start answering requests.
 const forgejoReadyTimeout = 60 * time.Second
 
+// forgejoHTTPTimeout bounds a single harness HTTP request so one hung
+// connect/read can't block past the surrounding readiness deadline
+// (forgejoWaitReady) or go test's global timeout (doREST).
+const forgejoHTTPTimeout = 10 * time.Second
+
+// forgejoHTTPClient is the timeout-bounded client every harness HTTP call
+// uses, in place of http.DefaultClient's unbounded default.
+var forgejoHTTPClient = &http.Client{Timeout: forgejoHTTPTimeout}
+
 // forgejoAdminBootRetries bounds how many times bootForgejo retries the
 // admin-user bootstrap command — the database may not be finished migrating
 // the instant /version starts answering 200.
@@ -266,14 +275,12 @@ func forgejoWaitForPort(t *testing.T, cli, name string) int {
 	var lastErr error
 	for time.Now().Before(deadline) {
 		out, err := exec.Command(cli, "port", name, "3000").Output()
-		if err == nil {
-			if port, perr := parseForgejoHostPort(string(out)); perr == nil {
-				return port
-			} else {
-				lastErr = perr
-			}
-		} else {
+		if err != nil {
 			lastErr = err
+		} else if port, perr := parseForgejoHostPort(string(out)); perr != nil {
+			lastErr = perr
+		} else {
+			return port
 		}
 		time.Sleep(300 * time.Millisecond)
 	}
@@ -289,7 +296,7 @@ func forgejoWaitReady(t *testing.T, baseURL string) {
 	deadline := time.Now().Add(forgejoReadyTimeout)
 	var lastErr error
 	for time.Now().Before(deadline) {
-		resp, err := http.Get(url)
+		resp, err := forgejoHTTPClient.Get(url)
 		if err == nil {
 			resp.Body.Close()
 			if resp.StatusCode == http.StatusOK {
@@ -304,6 +311,13 @@ func forgejoWaitReady(t *testing.T, baseURL string) {
 	t.Fatalf("forgejo harness: %s never became ready: %v", url, lastErr)
 }
 
+// forgejoExecArgs prefixes an in-container `forgejo` subcommand argv (cmd)
+// with the `<cli> exec -u git <name>` runner prefix both the admin-bootstrap
+// and token-mint helpers share.
+func forgejoExecArgs(name string, cmd []string) []string {
+	return append([]string{"exec", "-u", "git", name}, cmd...)
+}
+
 // forgejoBootstrapAdmin runs `forgejo admin user create` (forgejoAdminCreateArgs)
 // inside the harness container, retrying up to forgejoAdminBootRetries times
 // since the database may not have finished migrating the instant the version
@@ -311,7 +325,7 @@ func forgejoWaitReady(t *testing.T, baseURL string) {
 // racing its own prior, actually-successful attempt) is treated as success.
 func forgejoBootstrapAdmin(t *testing.T, cli, name string) {
 	t.Helper()
-	args := append([]string{"exec", "-u", "git", name}, forgejoAdminCreateArgs(forgejoAdminUser, forgejoAdminPassword, forgejoAdminEmail)...)
+	args := forgejoExecArgs(name, forgejoAdminCreateArgs(forgejoAdminUser, forgejoAdminPassword, forgejoAdminEmail))
 	var lastOut []byte
 	var lastErr error
 	for attempt := 0; attempt < forgejoAdminBootRetries; attempt++ {
@@ -333,7 +347,7 @@ func forgejoBootstrapAdmin(t *testing.T, cli, name string) {
 // token printed to stdout.
 func forgejoMintToken(t *testing.T, cli, name string) string {
 	t.Helper()
-	args := append([]string{"exec", "-u", "git", name}, forgejoTokenGenArgs(forgejoAdminUser)...)
+	args := forgejoExecArgs(name, forgejoTokenGenArgs(forgejoAdminUser))
 	out, err := exec.Command(cli, args...).Output()
 	if err != nil {
 		t.Fatalf("forgejo harness: token mint failed: %v", err)
@@ -375,7 +389,7 @@ func doREST(t *testing.T, method, url, token string, body, out any) int {
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := forgejoHTTPClient.Do(req)
 	if err != nil {
 		t.Fatalf("forgejo harness: %s %s: %v", method, url, err)
 	}
@@ -392,6 +406,16 @@ func doREST(t *testing.T, method, url, token string, body, out any) int {
 	return resp.StatusCode
 }
 
+// require2xx fails the test — labelled with what REST call it guards — when
+// status falls outside the 2xx success range, the check every seed helper
+// applies to its doREST result.
+func require2xx(t *testing.T, status int, what string) {
+	t.Helper()
+	if status < 200 || status >= 300 {
+		t.Fatalf("forgejo harness: %s: unexpected status %d", what, status)
+	}
+}
+
 // seedRepo creates the harness's single repository ("harness", owned by the
 // admin user seeded by bootForgejo) with an initial commit on "main", and
 // returns its owner/repo slug.
@@ -399,9 +423,7 @@ func seedRepo(t *testing.T, baseURL, token string) string {
 	t.Helper()
 	status := doREST(t, http.MethodPost, baseURL+"/api/v1/user/repos", token,
 		map[string]any{"name": "harness", "auto_init": true, "default_branch": "main"}, nil)
-	if status < 200 || status >= 300 {
-		t.Fatalf("forgejo harness: create repo: unexpected status %d", status)
-	}
+	require2xx(t, status, "create repo")
 	return forgejoAdminUser + "/harness"
 }
 
@@ -413,9 +435,7 @@ func seedLabels(t *testing.T, baseURL, token, repo string) {
 	for _, l := range forgejoHarnessLabels() {
 		status := doREST(t, http.MethodPost, baseURL+"/api/v1/repos/"+repo+"/labels", token,
 			map[string]any{"name": l.Name, "color": "#" + l.Color}, nil)
-		if status < 200 || status >= 300 {
-			t.Fatalf("forgejo harness: create label %q: unexpected status %d", l.Name, status)
-		}
+		require2xx(t, status, fmt.Sprintf("create label %q", l.Name))
 	}
 }
 
@@ -430,16 +450,12 @@ func seedIssue(t *testing.T, baseURL, token, repo, title, body string, labelName
 	}
 	status := doREST(t, http.MethodPost, baseURL+"/api/v1/repos/"+repo+"/issues", token,
 		map[string]any{"title": title, "body": body}, &created)
-	if status < 200 || status >= 300 {
-		t.Fatalf("forgejo harness: create issue %q: unexpected status %d", title, status)
-	}
+	require2xx(t, status, fmt.Sprintf("create issue %q", title))
 	if len(labelNames) > 0 {
 		numStr := strconv.Itoa(created.Number)
 		status := doREST(t, http.MethodPut, baseURL+"/api/v1/repos/"+repo+"/issues/"+numStr+"/labels", token,
 			map[string]any{"labels": labelNames}, nil)
-		if status < 200 || status >= 300 {
-			t.Fatalf("forgejo harness: label issue %d: unexpected status %d", created.Number, status)
-		}
+		require2xx(t, status, fmt.Sprintf("label issue %d", created.Number))
 	}
 	return created.Number
 }
@@ -457,9 +473,7 @@ func seedBranchWithCommit(t *testing.T, baseURL, token, repo, branch string) {
 			"new_branch": branch,
 			"message":    "harness work",
 		}, nil)
-	if status < 200 || status >= 300 {
-		t.Fatalf("forgejo harness: seed branch %q with commit: unexpected status %d", branch, status)
-	}
+	require2xx(t, status, fmt.Sprintf("seed branch %q with commit", branch))
 }
 
 // openPR opens a pull request on repo from head onto base with the given
@@ -473,9 +487,7 @@ func openPR(t *testing.T, baseURL, token, repo, head, base, title string) string
 	}
 	status := doREST(t, http.MethodPost, baseURL+"/api/v1/repos/"+repo+"/pulls", token,
 		map[string]any{"head": head, "base": base, "title": title}, &created)
-	if status < 200 || status >= 300 {
-		t.Fatalf("forgejo harness: open PR %s -> %s: unexpected status %d", head, base, status)
-	}
+	require2xx(t, status, fmt.Sprintf("open PR %s -> %s", head, base))
 	if created.HTMLURL == "" {
 		t.Fatalf("forgejo harness: open PR %s -> %s: response had no html_url", head, base)
 	}
