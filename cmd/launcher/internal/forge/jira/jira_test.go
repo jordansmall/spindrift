@@ -784,7 +784,7 @@ func TestJiraClient_ResearchDispatch_InProgressAndFailedUseResearchLabels(t *tes
 	if !reflect.DeepEqual(gotAdds, wantAdds) {
 		t.Fatalf("added labels = %v, want %v", gotAdds, wantAdds)
 	}
-	terminals := []string{"agent-research-failed", researchVerdictLabels.Recommend, researchVerdictLabels.Reject, researchVerdictLabels.Unclear}
+	terminals := []string{"agent-research-failed", researchVerdictLabels.Label(forge.Recommend), researchVerdictLabels.Label(forge.Reject), researchVerdictLabels.Label(forge.Unclear)}
 	seen := map[string]bool{}
 	for _, l := range terminals {
 		if seen[l] {

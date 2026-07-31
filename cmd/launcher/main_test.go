@@ -701,6 +701,48 @@ body
 	}
 }
 
+// TestNewIssueTracker_ResearchKind_WiresCustomVerdictLabels mirrors
+// TestNewIssueTracker_ResearchKind_WiresVerdictLabels but sets a custom
+// RESEARCH_VERDICTS override (c.researchVerdicts, the field
+// researchVerdictLabels(c) parses) end-to-end through newIssueTracker: a
+// custom "approve" verdict applies the configured "agent-research-approve"
+// label instead of any compiled-default label (ADR 0022, issue #2201).
+func TestNewIssueTracker_ResearchKind_WiresCustomVerdictLabels(t *testing.T) {
+	dir := t.TempDir()
+	issueFile := `---
+title: Some issue
+state: agent-research-in-progress
+labels: []
+created: 2026-07-09T12:00:00Z
+---
+body
+`
+	if err := os.WriteFile(filepath.Join(dir, "42.md"), []byte(issueFile), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	c := minimalValidConfig()
+	c.issueTracker = "local"
+	c.localIssuesDir = dir
+	c = applyDispatchKind(c, dispatchKindResearch)
+	c.researchVerdicts = `[{"verdict":"approve","label":"agent-research-approve","description":"looks good"}]`
+
+	it := newIssueTracker(c)
+	if err := it.CompleteVerdict("42", forge.Verdict("approve")); err != nil {
+		t.Fatalf("CompleteVerdict: %v", err)
+	}
+	iss, err := it.Issue("42")
+	if err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+	if !containsLabel(iss.Labels, "agent-research-approve") {
+		t.Errorf("issue labels = %v, want agent-research-approve", iss.Labels)
+	}
+	if containsLabel(iss.Labels, "agent-research-recommend") {
+		t.Errorf("issue labels = %v, must not contain the compiled-default label", iss.Labels)
+	}
+}
+
 // --- integer-knob parsing tests ---
 
 // TestMaxParallelEdgeCases covers the atoi() fallback for values where zero

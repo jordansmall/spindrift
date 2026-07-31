@@ -36,17 +36,26 @@ type ResearchSettle struct {
 	// clearer at each of its two call sites than a single-field Config
 	// would.
 	readOnly bool
+	// verdicts is the configured research verdict vocabulary (ADR 0022,
+	// issue #2201): the ordered verdict->label set Settle validates the
+	// posted outcome's Status against, sourced from RESEARCH_VERDICTS (or
+	// the compiled default, forge.ResearchVerdictLabels, when unset) via
+	// main.go's researchVerdictLabels(c) at construction time.
+	verdicts forge.VerdictLabels
 }
 
 var _ Settler = (*ResearchSettle)(nil)
 
 // NewResearchSettle constructs a ResearchSettle against it, the
 // research-labeled IssueTracker instance (ADR 0022's fixed
-// agent-research/agent-research-in-progress/verdict label family), for the
-// BOX_FORGE_AND_ISSUE_ACCESS=read-write (default) path.
-func NewResearchSettle(it forge.IssueTracker) *ResearchSettle {
+// agent-research/agent-research-in-progress state-label family plus the
+// configured verdict vocabulary), for the BOX_FORGE_AND_ISSUE_ACCESS=read-write
+// (default) path. verdicts is the configured research verdict set (ADR 0022,
+// issue #2201) Settle validates the posted verdict against — the compiled
+// default (forge.ResearchVerdictLabels) unless RESEARCH_VERDICTS overrides it.
+func NewResearchSettle(it forge.IssueTracker, verdicts forge.VerdictLabels) *ResearchSettle {
 	landing, _ := it.(forge.LandingRecorder)
-	return &ResearchSettle{it: it, landing: landing}
+	return &ResearchSettle{it: it, landing: landing, verdicts: verdicts}
 }
 
 // NewResearchSettleReadOnly constructs a ResearchSettle for a Dispatch
@@ -54,10 +63,13 @@ func NewResearchSettle(it forge.IssueTracker) *ResearchSettle {
 // the relayed SPINDRIFT_COMMENT via it.Comment before applying the verdict
 // label, the same as NewResearchSettle already does for a LandingRecorder-
 // implementing (local) tracker — because the read-only Box, github or not,
-// has no in-box write token to post its own comment with either.
-func NewResearchSettleReadOnly(it forge.IssueTracker) *ResearchSettle {
+// has no in-box write token to post its own comment with either. verdicts is
+// the configured research verdict set (ADR 0022, issue #2201) Settle
+// validates the posted verdict against — the compiled default
+// (forge.ResearchVerdictLabels) unless RESEARCH_VERDICTS overrides it.
+func NewResearchSettleReadOnly(it forge.IssueTracker, verdicts forge.VerdictLabels) *ResearchSettle {
 	landing, _ := it.(forge.LandingRecorder)
-	return &ResearchSettle{it: it, landing: landing, readOnly: true}
+	return &ResearchSettle{it: it, landing: landing, readOnly: true, verdicts: verdicts}
 }
 
 // Settle interprets result and drives num to its terminal research label:
@@ -75,7 +87,7 @@ func (r *ResearchSettle) Settle(d dispatch.Dispatcher, num string, gen uint64, r
 		return
 	}
 	o := result.Outcome
-	verdict, ok := forge.ParseVerdict(o.Status)
+	verdict, ok := r.verdicts.Parse(o.Status)
 	if !ok {
 		r.fail(num, o.Note)
 		return

@@ -48,7 +48,11 @@ var TriageLabelMeta = map[string]LabelMeta{
 func ResearchLabelNames() []string {
 	dl := forge.ResearchDispatchLabels()
 	vl := forge.ResearchVerdictLabels()
-	return []string{dl.Dispatchable, dl.InProgress, dl.Failed, vl.Recommend, vl.Reject, vl.Unclear}
+	names := []string{dl.Dispatchable, dl.InProgress, dl.Failed}
+	for _, e := range vl.Entries() {
+		names = append(names, e.Label)
+	}
+	return names
 }
 
 // Config is the minimal slice of launcher config Run needs: the Issue
