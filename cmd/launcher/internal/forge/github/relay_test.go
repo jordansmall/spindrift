@@ -3,9 +3,7 @@ package github
 import (
 	"errors"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"spindrift.dev/launcher/internal/forge"
@@ -32,42 +30,6 @@ func newRelayHarness(t *testing.T) *forgetest.GitRepoFixture {
 	t.Setenv("REMOTE", repo.Bare)
 	t.Setenv("STATE_DIR", t.TempDir())
 	return repo
-}
-
-// seedRelayBundle clones bare, creates branch one commit ahead of base
-// carrying a marker file, and writes a git bundle of base..branch to
-// outboxDir/seambundle.FileName -- standing in for the Box's code-out.
-// Returns branch's HEAD sha.
-func seedRelayBundle(t *testing.T, bare, base, outboxDir, branch string) string {
-	t.Helper()
-	work := t.TempDir()
-	run(t, "", "clone", bare, work)
-	run(t, work, "checkout", base)
-	run(t, work, "checkout", "-b", branch)
-	writeFile(t, filepath.Join(work, "feature.txt"), "feature\n")
-	run(t, work, "add", "feature.txt")
-	run(t, work, "commit", "-m", "feature")
-	run(t, work, "bundle", "create", filepath.Join(outboxDir, seambundle.FileName), base+".."+branch)
-	return revParse(t, work, branch)
-}
-
-// run runs `git -C dir args...`, failing t on error.
-func run(t *testing.T, dir string, args ...string) {
-	t.Helper()
-	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("git %v: %v: %s", args, err, out)
-	}
-}
-
-// revParse returns the commit ref resolves to inside the repo at dir.
-func revParse(t *testing.T, dir, ref string) string {
-	t.Helper()
-	out, err := exec.Command("git", "-C", dir, "rev-parse", ref).CombinedOutput()
-	if err != nil {
-		t.Fatalf("rev-parse %s in %s: %v: %s", ref, dir, err, out)
-	}
-	return strings.TrimSpace(string(out))
 }
 
 // TestExecClient_DoesNotImplementBundleRelay guards read-write's own
@@ -102,7 +64,7 @@ func TestReadOnlyCodeForge_RelayBundle_PushesRefToOrigin(t *testing.T) {
 	repo := newRelayHarness(t)
 	outbox := t.TempDir()
 	branch := "agent/issue-1918"
-	wantSHA := seedRelayBundle(t, repo.Bare, "main", outbox, branch)
+	wantSHA := forgetest.SeedRelayBundle(t, repo.Bare, "main", outbox, branch)
 
 	cf := NewReadOnlyCodeForge("owner/repo", forge.DispatchLabels{}, "agent/issue-")
 	br, ok := cf.(forge.BundleRelay)
@@ -114,7 +76,7 @@ func TestReadOnlyCodeForge_RelayBundle_PushesRefToOrigin(t *testing.T) {
 		t.Fatalf("RelayBundle: %v", err)
 	}
 
-	if got := revParse(t, repo.Bare, "refs/heads/"+branch); got != wantSHA {
+	if got := forgetest.RevParse(t, repo.Bare, "refs/heads/"+branch); got != wantSHA {
 		t.Errorf("refs/heads/%s = %s, want %s", branch, got, wantSHA)
 	}
 }
@@ -144,9 +106,7 @@ func TestReadOnlyCodeForge_RelayBundle_MissingBundleErrors(t *testing.T) {
 func TestReadOnlyCodeForge_RelayBundle_MalformedBundleErrors(t *testing.T) {
 	newRelayHarness(t)
 	outbox := t.TempDir()
-	if err := os.WriteFile(filepath.Join(outbox, seambundle.FileName), []byte("not a bundle"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	forgetest.WriteFile(t, filepath.Join(outbox, seambundle.FileName), "not a bundle")
 
 	cf := NewReadOnlyCodeForge("owner/repo", forge.DispatchLabels{}, "agent/issue-")
 	br := cf.(forge.BundleRelay)
@@ -217,7 +177,7 @@ func TestReadOnlyCodeForge_RelayBundle_ReRelayForceUpdatesRef(t *testing.T) {
 	repo := newRelayHarness(t)
 	outbox := t.TempDir()
 	branch := "agent/issue-1918"
-	seedRelayBundle(t, repo.Bare, "main", outbox, branch)
+	forgetest.SeedRelayBundle(t, repo.Bare, "main", outbox, branch)
 
 	cf := NewReadOnlyCodeForge("owner/repo", forge.DispatchLabels{}, "agent/issue-")
 	br := cf.(forge.BundleRelay)
@@ -229,20 +189,20 @@ func TestReadOnlyCodeForge_RelayBundle_ReRelayForceUpdatesRef(t *testing.T) {
 	// name) -- a fresh clone of bare's base, not of the already-relayed ref,
 	// so the new commit shares no ancestry with the one already relayed in.
 	work := t.TempDir()
-	run(t, "", "clone", repo.Bare, work)
-	run(t, work, "checkout", "main")
-	run(t, work, "checkout", "-b", branch)
-	writeFile(t, filepath.Join(work, "feature.txt"), "retried\n")
-	run(t, work, "add", "feature.txt")
-	run(t, work, "commit", "-m", "retried feature")
-	wantSHA := revParse(t, work, branch)
-	run(t, work, "bundle", "create", filepath.Join(outbox, seambundle.FileName), "main.."+branch)
+	forgetest.Run(t, "", "clone", repo.Bare, work)
+	forgetest.Run(t, work, "checkout", "main")
+	forgetest.Run(t, work, "checkout", "-b", branch)
+	forgetest.WriteFile(t, filepath.Join(work, "feature.txt"), "retried\n")
+	forgetest.Run(t, work, "add", "feature.txt")
+	forgetest.Run(t, work, "commit", "-m", "retried feature")
+	wantSHA := forgetest.RevParse(t, work, branch)
+	forgetest.Run(t, work, "bundle", "create", filepath.Join(outbox, seambundle.FileName), "main.."+branch)
 
 	if err := br.RelayBundle(outbox, branch); err != nil {
 		t.Fatalf("RelayBundle (retry, diverged history): %v", err)
 	}
 
-	if got := revParse(t, repo.Bare, "refs/heads/"+branch); got != wantSHA {
+	if got := forgetest.RevParse(t, repo.Bare, "refs/heads/"+branch); got != wantSHA {
 		t.Errorf("refs/heads/%s = %s, want %s (the retried bundle's tip)", branch, got, wantSHA)
 	}
 }
