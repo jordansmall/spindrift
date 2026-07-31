@@ -33,6 +33,7 @@ in
           ${../../agent/bash-output-tee.sh} \
           ${../../agent/bash-output-summary.sh} \
           ${../../ab-orchestrator.sh} \
+          ${../../.github/actions/forgejo-label-swap/label-swap.sh} \
           ${../../tests/fakes/runtime} \
           ${../../tests/fakes/gh} \
           ${../../tests/fakes/claude} \
