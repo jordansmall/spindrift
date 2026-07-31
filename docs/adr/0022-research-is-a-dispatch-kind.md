@@ -100,3 +100,50 @@ or merge — the blast radius collapses to a bad comment a human reads anyway.
   is untouched.
 - The `pr=` → `landing=` rename sweeps the outcome package, prompt
   templates, and prompt-contract checks in one change.
+
+## Amendment (issue #2201): the verdict vocabulary and label mapping are configurable via `RESEARCH_VERDICTS`
+
+The original decision above fixed the verdict set at three tokens
+(`recommend` / `reject` / `unclear`) with hard-coded labels
+(`agent-research-recommend` / `-reject` / `-unclear`). That set is not
+universal — a deployment may want different verdict names, more or fewer
+terminals, or different label text — so the vocabulary and its label
+mapping move behind a new operator knob, `RESEARCH_VERDICTS` (flake option
+`settings.issues.research.verdicts`, schema key `researchVerdicts`; see
+[Configuring the research verdict vocabulary
+(`RESEARCH_VERDICTS`)](../reference.md#configuring-the-research-verdict-vocabulary-research_verdicts)
+for the operator-facing format and validation rules). The default remains
+the empty string, which resolves to exactly the original three verdicts and
+labels with no behavior change — this amendment adds configurability, it
+does not change any default-configuration behavior described above.
+
+`Verdict` becomes string-valued rather than a closed three-value enum
+(`cmd/launcher/internal/forge/verdict.go`), and the fixed pair — `recommend`
+→ promote / `reject` → close / `unclear` → answer-and-relabel — becomes an
+ordered `VerdictLabels` set (`forge.ParseResearchVerdicts`, launcher
+startup) validated for a non-empty array, unique whitespace-free verdict
+tokens, non-empty labels, and exclusion of the reserved `blocked` token,
+which stays the fixed escape hatch for "the Box crashed or produced no
+verdict" (`agent-research-failed`) independent of the configured set. On
+Settle, the posted outcome line's verdict is parsed against the configured
+set; anything outside it — an unmapped token, `blocked`, or a missing
+outcome line — still routes to `agent-research-failed` rather than being
+mapped to some label anyway, preserving the original crash/no-verdict-vs.
+concluded-verdict separation this ADR established. `agent-research`,
+`agent-research-in-progress`, and `agent-research-failed` themselves stay
+fixed, non-configurable names; only the verdict-terminal labels move.
+
+The configured set also drives the research prompt, not only the launcher:
+the prompt's machine-checkable verdict contract — its VERDICT bullet list,
+the verdict enumeration, and the `status=<...>` outcome-line alternation —
+renders from the same set at build time (`lib/research-verdicts.nix`, wired
+through `lib/mkHarness.nix`), so a custom vocabulary is consistently what
+both the Box is told to emit and what the launcher accepts. This is a
+`flakeOption`, baked at image build time like the label knobs above, not a
+zero-rebuild runtime switch. Deliberately out of scope: the prompt's
+surrounding semantic *guidance* prose per verdict (for example, the "Open
+questions — mandatory when the verdict is `unclear`" step, which names
+default verdicts directly) is not rewritten from a custom set — only the
+machine-checkable contract and each verdict's label render dynamically.
+Rewriting per-verdict guidance itself is left to a future self-contained
+research mode.
