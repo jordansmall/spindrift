@@ -263,8 +263,9 @@ in
         "github"
         "git"
         "local"
+        "forgejo"
       ]
-    ) "lib/env-schema.nix: codeForge.choices must be [ github git local ]";
+    ) "lib/env-schema.nix: codeForge.choices must be [ github git local forgejo ]";
     assert assertMsg (
       schema.issueTracker.choices or [ ] == [
         "github"
