@@ -614,16 +614,42 @@ phase_prompt_assembly() {
   # once above), not ORCHESTRATOR_ENABLED directly -- this compound
   # condition keeps its exact pre-#2047 truth table, only the predicate's
   # source changes.
-  local FILER_FILE_DIRECT=""
+  #
+  # The direct case forks further on ISSUE_TRACKER (issue #1963): fj has no
+  # label verb and `fj issue create` has no --label flag, so a forgejo
+  # tracker's direct filer writes render FILER_LABEL_DIRECT_FORGEJO_STEP/
+  # FILER_FILE_DIRECT_FORGEJO_STEP (curl against the REST API for the label)
+  # instead of the gh-flavored FILER_LABEL_DIRECT_STEP/FILER_FILE_DIRECT_STEP
+  # rows (now gated FILER_FILE_DIRECT_GH). The relay path (FILER_FILE_RELAY,
+  # SPINDRIFT_ISSUE_INTENT) never shells out to gh/fj directly, so it stays
+  # forge-agnostic and unchanged.
+  local FILER_FILE_DIRECT_GH=""
+  local FILER_FILE_DIRECT_FORGEJO=""
   local FILER_FILE_RELAY=""
   if [ -n "$FILER_ENABLED" ]; then
     if [ -z "${BOX_WRITE_ENABLED:-}" ] && [ -n "$ORCHESTRATOR" ]; then
       # shellcheck disable=SC2034 # read indirectly via "${!_fgate}" in the loop below
       FILER_FILE_RELAY=1
     else
-      # shellcheck disable=SC2034 # read indirectly via "${!_fgate}" in the loop below
-      FILER_FILE_DIRECT=1
+      if [ "${ISSUE_TRACKER:-github}" = "forgejo" ]; then
+        # shellcheck disable=SC2034 # read indirectly via "${!_fgate}" in the loop below
+        FILER_FILE_DIRECT_FORGEJO=1
+      else
+        # shellcheck disable=SC2034 # read indirectly via "${!_fgate}" in the loop below
+        FILER_FILE_DIRECT_GH=1
+      fi
     fi
+  fi
+
+  # file-issues-direct.md (the orchestrator's own intro to delegating findings
+  # to the filer subagent) carries no gh/fj command -- it's forge-agnostic
+  # guidance -- so it must render whenever either direct fork above is on,
+  # not just the gh one. FILER_FILE_DIRECT itself is no longer a gate (split
+  # above); this combined var is its narrow replacement for that one row.
+  local FILER_FILE_DIRECT_ANY=""
+  if [ -n "$FILER_FILE_DIRECT_GH" ] || [ -n "$FILER_FILE_DIRECT_FORGEJO" ]; then
+    # shellcheck disable=SC2034 # read indirectly via "${!_fgate}" in the loop below
+    FILER_FILE_DIRECT_ANY=1
   fi
 
   # The PR-body ticket-reference gates the pr-body-closes/pr-body-local-ref/
@@ -753,6 +779,20 @@ phase_prompt_assembly() {
       # shellcheck disable=SC2034 # read indirectly via "${!_fgate}" in the loop below
       OPEN_PR_CREATE_RW_GH=1
     fi
+  fi
+
+  # The fix-pass CONTEXT CI-read step forks on CODE_FORGE (issue #1963):
+  # fix-prompt.md's CI-read bullets shelled out unconditionally to `gh pr
+  # view`/`gh run list`/`gh run view`, which don't exist against a Forgejo
+  # remote -- a forgejo fix pass reads CI via `fj pr status` instead.
+  local FIX_CI_READ_GH=""
+  local FIX_CI_READ_FORGEJO=""
+  if [ "${CODE_FORGE:-github}" = "forgejo" ]; then
+    # shellcheck disable=SC2034 # read indirectly via "${!_fgate}" in the loop below
+    FIX_CI_READ_FORGEJO=1
+  else
+    # shellcheck disable=SC2034 # read indirectly via "${!_fgate}" in the loop below
+    FIX_CI_READ_GH=1
   fi
 
   # One loop over the Conditional fragment registry (lib/fragments.nix, issue

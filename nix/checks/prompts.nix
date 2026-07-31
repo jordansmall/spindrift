@@ -815,6 +815,22 @@ in
         touch $out
       '';
 
+  # The forgejo counterpart of filer-direct-fragments-keep-gh-write-unchanged
+  # above (issue #1963): fj has no label verb and `fj issue create` has no
+  # --label flag, so the forgejo direct-mode fragments must speak `fj issue
+  # create` (never `gh issue create`) and the REST API (curl) for the label
+  # (never `gh label create`). Same static, eval-only grep shape.
+  filer-direct-forgejo-fragments-speak-fj-and-curl =
+    pkgs.runCommand "filer-direct-forgejo-fragments-speak-fj-and-curl" { }
+      ''
+        grep -q 'fj issue create' ${../../templates/default/prompts/fragments/filer-file-direct-forgejo.md}
+        ! grep -q 'gh issue create' ${../../templates/default/prompts/fragments/filer-file-direct-forgejo.md}
+        grep -q '/api/v1/repos' ${../../templates/default/prompts/fragments/filer-label-direct-forgejo.md}
+        grep -q 'agent-review-finding' ${../../templates/default/prompts/fragments/filer-label-direct-forgejo.md}
+        ! grep -q 'gh label create' ${../../templates/default/prompts/fragments/filer-label-direct-forgejo.md}
+        touch $out
+      '';
+
   # The OPEN A PULL REQUEST read-write create step forks on CODE_FORGE
   # (issue #1963, OPEN_PR_CREATE_RW_GH/OPEN_PR_CREATE_RW_FORGEJO computed in
   # entrypoint.sh): the github fragment must keep `gh pr create` and never
@@ -830,4 +846,18 @@ in
         ! grep -q 'gh pr create' ${../../templates/default/prompts/fragments/open-pr-create-forgejo.md}
         touch $out
       '';
+
+  # The fix-pass CONTEXT CI-read step forks on CODE_FORGE (issue #1963,
+  # FIX_CI_READ_GH/FIX_CI_READ_FORGEJO computed in entrypoint.sh): the github
+  # fragment must keep `gh pr view` and never invoke `fj pr status`, and the
+  # forgejo fragment must invoke `fj pr status` and never `gh pr view`. Same
+  # static, eval-only grep shape as open-pr-create-fragments-fork-forge-on-
+  # read-write above.
+  fix-ci-read-fragments-fork-forge = pkgs.runCommand "fix-ci-read-fragments-fork-forge" { } ''
+    grep -q 'gh pr view' ${../../templates/default/prompts/fragments/fix-ci-read-github.md}
+    ! grep -q 'fj pr status' ${../../templates/default/prompts/fragments/fix-ci-read-github.md}
+    grep -q 'fj pr status' ${../../templates/default/prompts/fragments/fix-ci-read-forgejo.md}
+    ! grep -q 'gh pr view' ${../../templates/default/prompts/fragments/fix-ci-read-forgejo.md}
+    touch $out
+  '';
 }

@@ -100,8 +100,16 @@
   # titling, merge-vs-split) stays in the unconditional dedup/title/body
   # steps filer-prompt.md keeps outside this split -- only the write
   # mechanism itself is gated.
+  #
+  # The direct case forks further on ISSUE_TRACKER (issue #1963): fj has no
+  # label verb and `fj issue create` has no --label flag, so a forgejo
+  # tracker's direct filer writes render the *-forgejo fragments below
+  # (curl against the REST API for the label) instead of the gh-flavored
+  # ones, now gated FILER_FILE_DIRECT_GH. file-issues-direct.md carries no
+  # gh/fj command -- it's forge-agnostic intro guidance -- so it alone stays
+  # on the combined FILER_FILE_DIRECT_ANY gate (either direct fork).
   {
-    gate = "FILER_FILE_DIRECT";
+    gate = "FILER_FILE_DIRECT_ANY";
     fragment = "file-issues-direct.md";
     var = "FILE_ISSUES_DIRECT_STEP";
   }
@@ -111,9 +119,14 @@
     var = "FILE_ISSUES_RELAY_STEP";
   }
   {
-    gate = "FILER_FILE_DIRECT";
+    gate = "FILER_FILE_DIRECT_GH";
     fragment = "filer-label-direct.md";
     var = "FILER_LABEL_DIRECT_STEP";
+  }
+  {
+    gate = "FILER_FILE_DIRECT_FORGEJO";
+    fragment = "filer-label-direct-forgejo.md";
+    var = "FILER_LABEL_DIRECT_FORGEJO_STEP";
   }
   {
     gate = "FILER_FILE_RELAY";
@@ -121,9 +134,14 @@
     var = "FILER_LABEL_RELAY_STEP";
   }
   {
-    gate = "FILER_FILE_DIRECT";
+    gate = "FILER_FILE_DIRECT_GH";
     fragment = "filer-file-direct.md";
     var = "FILER_FILE_DIRECT_STEP";
+  }
+  {
+    gate = "FILER_FILE_DIRECT_FORGEJO";
+    fragment = "filer-file-direct-forgejo.md";
+    var = "FILER_FILE_DIRECT_FORGEJO_STEP";
   }
   {
     gate = "FILER_FILE_RELAY";
@@ -145,6 +163,24 @@
     fragment = "ci-failure.md";
     var = "CI_FAILURE_STEP";
     extraSubstVars = [ "CI_FAILURE_SUMMARY" ];
+  }
+  # The fix-pass CONTEXT CI-read step forks on CODE_FORGE (issue #1963,
+  # FIX_CI_READ_GH/FIX_CI_READ_FORGEJO computed in entrypoint.sh): a github
+  # fix pass reads CI via `gh pr view`/`gh run list`/`gh run view`, none of
+  # which exist against a Forgejo remote, so a forgejo fix pass reads it via
+  # `fj pr status` instead. Exactly one of the two gates is ever on, so
+  # fix-prompt.md concatenates both vars and only the active one renders --
+  # the same conditional-residue mechanism the CODE_FORGE PR-create fork
+  # (OPEN_PR_CREATE_RW_GH/_FORGEJO below) already uses.
+  {
+    gate = "FIX_CI_READ_GH";
+    fragment = "fix-ci-read-github.md";
+    var = "FIX_CI_READ_GITHUB_STEP";
+  }
+  {
+    gate = "FIX_CI_READ_FORGEJO";
+    fragment = "fix-ci-read-forgejo.md";
+    var = "FIX_CI_READ_FORGEJO_STEP";
   }
   # The PR-body ticket-reference step (issue #1429, ADR 0029): exactly one of
   # these three gates is ever on (agent/entrypoint.sh's phase_prompt_assembly
