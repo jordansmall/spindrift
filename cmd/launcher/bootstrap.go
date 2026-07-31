@@ -104,6 +104,9 @@ func bootstrap(ensureReady bool, kind string) (*launchContext, error) {
 	if _, err := checkReadOnlyTokenGate(c, ghTokenIntrospector, os.Stdout); err != nil {
 		return nil, err
 	}
+	if _, err := checkReadOnlyForgejoTokenGate(c, os.Stdout); err != nil {
+		return nil, err
+	}
 	lw := localloop.Wire(localloopConfig(c), it)
 	f := newDispatchFactory(c, pwd, r, it, lw, cf)
 	s := newSettle(c, it, lw, cf)

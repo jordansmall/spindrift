@@ -653,7 +653,14 @@ func newCodeForge(c config, parent local.SanitizedParent) forge.CodeForge {
 	case "local":
 		return local.NewLocalCodeForge(c.codeForgeAccumulationRepoDir, c.baseBranch, parent, c.gitUserName, c.gitUserEmail, c.branchPrefix)
 	case "forgejo":
-		return forgejo.NewForgejoCodeForge(forgejo.ForgejoCodeForgeConfig{
+		// BOX_FORGE_AND_ISSUE_ACCESS=read-only swaps in the BundleRelay/
+		// DraftPRCreator-capable wrapper (mirrors the github default case
+		// below): the Box no longer pushes or opens PRs in-box, so
+		// settle's generic relay-before-merge and draft-PR-create seams
+		// need the adapter itself to satisfy those interfaces. read-write
+		// (the default) keeps the plain adapter, which never satisfies
+		// them, byte-for-byte.
+		cfg := forgejo.ForgejoCodeForgeConfig{
 			BaseURL:      c.forgejoBaseURL,
 			Repo:         c.repoSlug,
 			Token:        c.forgejoToken,
@@ -662,7 +669,11 @@ func newCodeForge(c config, parent local.SanitizedParent) forge.CodeForge {
 			UserEmail:    c.gitUserEmail,
 			BranchPrefix: c.branchPrefix,
 			MergeMethod:  c.mergeMethod,
-		})
+		}
+		if c.boxForgeAndIssueAccess == "read-only" {
+			return forgejo.NewReadOnlyForgejoCodeForge(cfg)
+		}
+		return forgejo.NewForgejoCodeForge(cfg)
 	default:
 		// BOX_FORGE_AND_ISSUE_ACCESS=read-only swaps in the BundleRelay-
 		// capable wrapper (issue #1918): the Box no longer pushes in-box, so
@@ -868,6 +879,25 @@ func boxGHTokenResolver(next func(num, name string) string) func(num, name strin
 	}
 }
 
+// boxForgejoTokenResolver wraps next, overriding the "FORGEJO_TOKEN"
+// BoxEnvVars name to the operator's BOX_FORGEJO_TOKEN when set -- the
+// Forgejo analog of boxGHTokenResolver's ADR 0016 two-actor separation: the
+// Box then receives that value as its own FORGEJO_TOKEN, while the
+// launcher's own os.Getenv("FORGEJO_TOKEN") stays untouched for merges,
+// labels, and every other host-side forge call. BOX_FORGEJO_TOKEN unset
+// falls straight through to next, so the single-token default stays
+// byte-for-byte unchanged.
+func boxForgejoTokenResolver(next func(num, name string) string) func(num, name string) string {
+	return func(num, name string) string {
+		if name == "FORGEJO_TOKEN" {
+			if v := os.Getenv("BOX_FORGEJO_TOKEN"); v != "" {
+				return v
+			}
+		}
+		return next(num, name)
+	}
+}
+
 // dispatchConfig builds the subset of config a dispatch.Factory needs.
 // OpenPRForIssue wires forge.ResolveOpenPR (issue #565), so a zero-exit
 // rate-limited retry never re-runs a box whose work already landed a PR;
@@ -876,7 +906,7 @@ func boxGHTokenResolver(next func(num, name string) string) func(num, name strin
 func dispatchConfig(c config, it forge.IssueTracker, lw *localloop.Wired, cf forge.CodeForge) dispatch.Config {
 	return dispatch.Config{
 		BoxEnvVars:             c.boxEnvVars,
-		ResolveEnv:             boxGHTokenResolver(localBaseBranchResolver(c, it, lw, cf)),
+		ResolveEnv:             boxGHTokenResolver(boxForgejoTokenResolver(localBaseBranchResolver(c, it, lw, cf))),
 		Kind:                   c.dispatchKind,
 		CodeForge:              c.codeForge,
 		BoxForgeAndIssueAccess: c.boxForgeAndIssueAccess,

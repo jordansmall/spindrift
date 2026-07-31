@@ -16,6 +16,8 @@ func TestCheckReadOnlyTokenGate(t *testing.T) {
 	cases := []struct {
 		name                 string
 		access               string
+		codeForge            string
+		issueTracker         string
 		launcherToken        string
 		boxToken             string // BOX_GH_TOKEN; empty means unset
 		result               tokenIntrospectionResult
@@ -81,6 +83,13 @@ func TestCheckReadOnlyTokenGate(t *testing.T) {
 			expectIntrospectCall: true,
 			wantErrSubstr:        "introspecting BOX_GH_TOKEN failed",
 		},
+		{
+			name:                 "read-only pure-forgejo deployment is a no-op",
+			access:               "read-only",
+			codeForge:            "forgejo",
+			issueTracker:         "forgejo",
+			expectIntrospectCall: false,
+		},
 	}
 
 	for _, tc := range cases {
@@ -89,6 +98,12 @@ func TestCheckReadOnlyTokenGate(t *testing.T) {
 			c.boxForgeAndIssueAccess = tc.access
 			c.ghToken = tc.launcherToken
 			c.repoSlug = "owner/repo"
+			if tc.codeForge != "" {
+				c.codeForge = tc.codeForge
+			}
+			if tc.issueTracker != "" {
+				c.issueTracker = tc.issueTracker
+			}
 			t.Setenv("BOX_GH_TOKEN", tc.boxToken)
 
 			called := false

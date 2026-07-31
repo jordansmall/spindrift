@@ -1695,6 +1695,53 @@ func TestNewCodeForge_GithubReadOnly_SatisfiesCapabilityGate(t *testing.T) {
 	}
 }
 
+// TestNewCodeForge_ForgejoReadOnly_SatisfiesBundleRelayAndDraftPRCreator
+// verifies that CODE_FORGE=forgejo with BOX_FORGE_AND_ISSUE_ACCESS=read-only
+// wires newCodeForge to the read-only Forgejo wrapper
+// (forgejo.NewReadOnlyForgejoCodeForge), which satisfies both
+// forge.BundleRelay and forge.DraftPRCreator -- the same host-mediation
+// seams github's read-only wrapper already provides, mirrored for the
+// second full-parity PRForge backend (issue #1964).
+func TestNewCodeForge_ForgejoReadOnly_SatisfiesBundleRelayAndDraftPRCreator(t *testing.T) {
+	c := minimalValidConfig()
+	c.codeForge = "forgejo"
+	c.forgejoBaseURL = "https://codeberg.org"
+	c.forgejoToken = "tok"
+	c.boxForgeAndIssueAccess = "read-only"
+
+	cf := newCodeForge(c, local.SanitizedParent{})
+
+	if _, ok := cf.(forge.BundleRelay); !ok {
+		t.Error("newCodeForge(CODE_FORGE=forgejo, BOX_FORGE_AND_ISSUE_ACCESS=read-only) does not satisfy forge.BundleRelay")
+	}
+	if _, ok := cf.(forge.DraftPRCreator); !ok {
+		t.Error("newCodeForge(CODE_FORGE=forgejo, BOX_FORGE_AND_ISSUE_ACCESS=read-only) does not satisfy forge.DraftPRCreator")
+	}
+}
+
+// TestNewCodeForge_ForgejoReadWrite_DoesNotImplementBundleRelayOrDraftPRCreator
+// verifies the default BOX_FORGE_AND_ISSUE_ACCESS=read-write keeps today's
+// plain Forgejo adapter byte-for-byte: it must satisfy neither
+// forge.BundleRelay nor forge.DraftPRCreator, or settle's generic
+// relay-before-merge (ready.go) would try to relay a bundle a read-write Box
+// never wrote.
+func TestNewCodeForge_ForgejoReadWrite_DoesNotImplementBundleRelayOrDraftPRCreator(t *testing.T) {
+	c := minimalValidConfig()
+	c.codeForge = "forgejo"
+	c.forgejoBaseURL = "https://codeberg.org"
+	c.forgejoToken = "tok"
+	c.boxForgeAndIssueAccess = "read-write"
+
+	cf := newCodeForge(c, local.SanitizedParent{})
+
+	if _, ok := cf.(forge.BundleRelay); ok {
+		t.Error("newCodeForge(CODE_FORGE=forgejo, BOX_FORGE_AND_ISSUE_ACCESS=read-write) satisfies forge.BundleRelay, want it hidden")
+	}
+	if _, ok := cf.(forge.DraftPRCreator); ok {
+		t.Error("newCodeForge(CODE_FORGE=forgejo, BOX_FORGE_AND_ISSUE_ACCESS=read-write) satisfies forge.DraftPRCreator, want it hidden")
+	}
+}
+
 // TestDispatchCompletionBanner_Github verifies that CODE_FORGE=github keeps
 // the "branches pushed and PRs opened" wording, since it's the only forge
 // that opens PRs (issue #1733).
@@ -2030,6 +2077,67 @@ func TestDispatchConfig_ResolveEnv_GHTokenPassthroughWhenBoxGHTokenUnset(t *test
 
 	if got := cfg.ResolveEnv("42", "GH_TOKEN"); got != "launcher-token" {
 		t.Errorf("ResolveEnv(42, GH_TOKEN) = %q, want %q", got, "launcher-token")
+	}
+}
+
+// TestDispatchConfig_ResolveEnv_BoxForgejoTokenOverridesForgejoToken verifies
+// the Forgejo analog of BOX_GH_TOKEN (ADR 0016): when BOX_FORGEJO_TOKEN is
+// set, dispatchConfig's ResolveEnv resolves the Box's FORGEJO_TOKEN to that
+// value instead of the launcher's own -- the credential-withholding
+// mechanism for "no forgejo write credential in the Box under read-only".
+func TestDispatchConfig_ResolveEnv_BoxForgejoTokenOverridesForgejoToken(t *testing.T) {
+	c := minimalValidConfig()
+	c.codeForge = "forgejo"
+	c.forgejoBaseURL = "https://codeberg.org"
+	c.forgejoToken = "launcher-fj-tok"
+	t.Setenv("FORGEJO_TOKEN", "launcher-fj-tok")
+	t.Setenv("BOX_FORGEJO_TOKEN", "box-fj-tok")
+	cf := newCodeForge(c, local.SanitizedParent{})
+
+	cfg := dispatchConfig(c, forge.NewFake(), testWired(forge.NewFake()), cf)
+
+	if got := cfg.ResolveEnv("1", "FORGEJO_TOKEN"); got != "box-fj-tok" {
+		t.Errorf("ResolveEnv(1, FORGEJO_TOKEN) = %q, want %q", got, "box-fj-tok")
+	}
+}
+
+// TestDispatchConfig_ResolveEnv_BoxForgejoTokenUnsetFallsThrough verifies the
+// single-token default: with BOX_FORGEJO_TOKEN unset, ResolveEnv resolves
+// FORGEJO_TOKEN exactly as before this issue -- the launcher's own ambient
+// value, forwarded unchanged.
+func TestDispatchConfig_ResolveEnv_BoxForgejoTokenUnsetFallsThrough(t *testing.T) {
+	c := minimalValidConfig()
+	c.codeForge = "forgejo"
+	c.forgejoBaseURL = "https://codeberg.org"
+	c.forgejoToken = "launcher-fj-tok"
+	t.Setenv("FORGEJO_TOKEN", "launcher-fj-tok")
+	t.Setenv("BOX_FORGEJO_TOKEN", "")
+	cf := newCodeForge(c, local.SanitizedParent{})
+
+	cfg := dispatchConfig(c, forge.NewFake(), testWired(forge.NewFake()), cf)
+
+	if got := cfg.ResolveEnv("1", "FORGEJO_TOKEN"); got != "launcher-fj-tok" {
+		t.Errorf("ResolveEnv(1, FORGEJO_TOKEN) = %q, want %q", got, "launcher-fj-tok")
+	}
+}
+
+// TestDispatchConfig_ResolveEnv_BoxForgejoTokenDoesNotAffectOtherNames
+// verifies the override is scoped to the FORGEJO_TOKEN name only -- a
+// BOX_FORGEJO_TOKEN set in the environment must not leak into GH_TOKEN or
+// any other resolved name.
+func TestDispatchConfig_ResolveEnv_BoxForgejoTokenDoesNotAffectOtherNames(t *testing.T) {
+	c := minimalValidConfig()
+	c.codeForge = "forgejo"
+	c.forgejoBaseURL = "https://codeberg.org"
+	c.forgejoToken = "launcher-fj-tok"
+	t.Setenv("GH_TOKEN", "launcher-gh-tok")
+	t.Setenv("BOX_FORGEJO_TOKEN", "box-fj-tok")
+	cf := newCodeForge(c, local.SanitizedParent{})
+
+	cfg := dispatchConfig(c, forge.NewFake(), testWired(forge.NewFake()), cf)
+
+	if got := cfg.ResolveEnv("1", "GH_TOKEN"); got != "launcher-gh-tok" {
+		t.Errorf("ResolveEnv(1, GH_TOKEN) = %q, want %q", got, "launcher-gh-tok")
 	}
 }
 
@@ -2381,6 +2489,8 @@ func defaultLabelConfig() config {
 		inProgressLabel: "agent-in-progress",
 		failedLabel:     "agent-failed",
 		completeLabel:   "agent-complete",
+		codeForge:       "github",
+		issueTracker:    "github",
 	}
 }
 
@@ -2800,6 +2910,57 @@ func TestDoctor_ReadOnlyTokenGate_NonIntrospectableTokenDoesNotClaimVerified(t *
 	}
 	if strings.Contains(out, "confirmed not write-capable") {
 		t.Errorf("doctor claimed write-capability was confirmed for a non-introspectable token, got %q", out)
+	}
+}
+
+// TestDoctor_ReadOnlyForgejoTokenGate_MissingBoxTokenFails verifies runDoctor
+// also surfaces checkReadOnlyForgejoTokenGate's outcome (issue #1964) when
+// forgejo is the active backend: under read-only with BOX_FORGEJO_TOKEN
+// unset, doctor fails the same fail-closed way a live dispatch would at
+// bootstrap.
+func TestDoctor_ReadOnlyForgejoTokenGate_MissingBoxTokenFails(t *testing.T) {
+	f := forge.NewFake()
+	f.ProbeRepo = "owner/repo"
+	f.Labels = []string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}
+	c := defaultLabelConfig()
+	c.codeForge = "forgejo"
+	c.issueTracker = "forgejo"
+	c.boxForgeAndIssueAccess = "read-only"
+	c.forgejoToken = "launcher-token"
+	t.Setenv("BOX_FORGEJO_TOKEN", "")
+
+	var buf bytes.Buffer
+	err := runDoctor(f, f, c, &buf, strings.NewReader(""), false)
+	if err == nil || !strings.Contains(err.Error(), "BOX_FORGEJO_TOKEN") {
+		t.Fatalf("runDoctor() error = %v, want a BOX_FORGEJO_TOKEN error", err)
+	}
+}
+
+// TestDoctor_ReadOnlyForgejoTokenGate_DistinctTokenWarns verifies runDoctor
+// prints the forgejo gate's non-introspectable warning (Forgejo has no
+// scope-introspection endpoint) rather than claiming write-capability was
+// confirmed, when BOX_FORGEJO_TOKEN is set and distinct from FORGEJO_TOKEN.
+func TestDoctor_ReadOnlyForgejoTokenGate_DistinctTokenWarns(t *testing.T) {
+	f := forge.NewFake()
+	f.ProbeRepo = "owner/repo"
+	f.Labels = []string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}
+	c := defaultLabelConfig()
+	c.codeForge = "forgejo"
+	c.issueTracker = "forgejo"
+	c.boxForgeAndIssueAccess = "read-only"
+	c.forgejoToken = "launcher-token"
+	t.Setenv("BOX_FORGEJO_TOKEN", "box-token")
+
+	var buf bytes.Buffer
+	if err := runDoctor(f, f, c, &buf, strings.NewReader(""), false); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "WARNING") {
+		t.Fatalf("want the forgejo gate's warning printed, got %q", out)
+	}
+	if strings.Contains(out, "confirmed not write-capable") {
+		t.Errorf("doctor claimed write-capability was confirmed for a forgejo token, got %q", out)
 	}
 }
 

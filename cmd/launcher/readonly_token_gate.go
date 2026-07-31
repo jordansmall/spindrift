@@ -40,6 +40,12 @@ func checkReadOnlyTokenGate(c config, introspect tokenIntrospector, w io.Writer)
 	if c.boxForgeAndIssueAccess != "read-only" {
 		return false, nil
 	}
+	// The github token gate governs GH_TOKEN, relevant only when github is
+	// the active Code Forge or Issue Tracker; a pure-forgejo (or pure-local)
+	// read-only deployment has no GH_TOKEN to withhold, so skip it there.
+	if c.codeForge != "github" && c.issueTracker != "github" {
+		return false, nil
+	}
 	boxToken := os.Getenv("BOX_GH_TOKEN")
 	if boxToken == "" {
 		return false, fmt.Errorf("BOX_FORGE_AND_ISSUE_ACCESS=read-only requires BOX_GH_TOKEN to be set to a credential distinct from GH_TOKEN — the Box must never receive the Launcher's own write-capable token")
