@@ -1,0 +1,49 @@
+name: Forgejo label swap
+description: >-
+  Swap labels on one Forgejo issue over the REST API: optionally post a comment,
+  then add and remove named labels. The .forgejo/workflows control-plane set
+  (issue #1967) uses this for the up-front claim and the dispatch/recover undo
+  swaps, since no `fj`/`gh` label verb is guaranteed on a self-hosted runner and
+  a Forgejo token cannot authenticate against api.github.com. The label logic
+  lives in label-swap.sh so the repo shellcheck sweep covers it.
+
+inputs:
+  base-url:
+    description: Forgejo base URL (e.g. https://codeberg.org)
+    required: true
+  token:
+    description: Forgejo API token (the FORGEJO_TOKEN repository secret)
+    required: true
+  repo:
+    description: owner/repo slug
+    required: true
+  issue-number:
+    description: Issue index to mutate
+    required: true
+  add-labels:
+    description: Space-separated label names to add (each must exist on the repo)
+    required: false
+    default: ""
+  remove-labels:
+    description: Space-separated label names to remove (absent ones are skipped)
+    required: false
+    default: ""
+  comment:
+    description: Optional issue comment to post before the label swap
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - name: Swap labels over the Forgejo REST API
+      shell: bash
+      env:
+        SWAP_BASE_URL: ${{ inputs.base-url }}
+        SWAP_TOKEN: ${{ inputs.token }}
+        SWAP_REPO: ${{ inputs.repo }}
+        SWAP_ISSUE: ${{ inputs.issue-number }}
+        SWAP_ADD_LABELS: ${{ inputs.add-labels }}
+        SWAP_REMOVE_LABELS: ${{ inputs.remove-labels }}
+        SWAP_COMMENT: ${{ inputs.comment }}
+      run: bash "$GITHUB_ACTION_PATH/label-swap.sh"
