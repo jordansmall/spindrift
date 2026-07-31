@@ -31,14 +31,74 @@ in
         };
       };
     in
-    assert assertMsg (hasInfix ''MAX_PARALLEL="''${MAX_PARALLEL:-5}"'' out)
-      "renderDefaultsPreamble must emit VAR=\"\${VAR:-<baked>}\" per flakeOption entry";
+    assert assertMsg (hasInfix ''MAX_PARALLEL=''${MAX_PARALLEL:-5}'' out)
+      "renderDefaultsPreamble must emit VAR=\${VAR:-<baked>} per flakeOption entry";
     assert assertMsg (
       !hasInfix "export " out
     ) "renderDefaultsPreamble export=false must not emit `export`";
-    assert assertMsg (hasInfix ''export MAX_PARALLEL="''${MAX_PARALLEL:-5}"'' outExported)
+    assert assertMsg (hasInfix ''export MAX_PARALLEL=''${MAX_PARALLEL:-5}'' outExported)
       "renderDefaultsPreamble export=true must prefix each line with `export `";
     pkgs.runCommand "preambles-defaults-shape" { } "touch $out";
+
+  # Issue #2234: renderDefaultsPreamble used to splice a baked flakeOption
+  # default raw inside a double-quoted `VAR="${VAR:-<baked>}"` shell
+  # assignment, so a default that itself contained double quotes (e.g. a
+  # JSON string) broke out of that quoting and tripped shellcheck's SC2140.
+  # The renderer now escapes each baked default with escapeShellArg. Pins
+  # that the rendered preamble is shellcheck-clean and round-trips the baked
+  # default unchanged when the env var is unset — for a value carrying both
+  # double quotes and an embedded single quote, exercising escapeShellArg's
+  # `'\''` path — while an explicit env override still wins.
+  preambles-defaults-quote-containing =
+    let
+      verdicts = builtins.toJSON [
+        {
+          verdict = "approve";
+          reason = "it's good";
+        }
+      ];
+      out = preambles.renderDefaultsPreamble {
+        flakeOptionEntries = {
+          researchVerdicts = {
+            env = "RESEARCH_VERDICTS";
+          };
+        };
+        mergedDefaults = {
+          researchVerdicts = verdicts;
+        };
+      };
+    in
+    pkgs.runCommand "preambles-defaults-quote-containing"
+      {
+        preamble = out;
+        expected = verdicts;
+        nativeBuildInputs = [ pkgs.shellcheck ];
+      }
+      ''
+        cat >script.sh <<'SCRIPT_HEADER'
+        #!/usr/bin/env bash
+        set -euo pipefail
+        SCRIPT_HEADER
+        printf '%s\n' "$preamble" >>script.sh
+        cat >>script.sh <<'SCRIPT_TAIL'
+        printf '%s' "$RESEARCH_VERDICTS"
+        SCRIPT_TAIL
+
+        shellcheck script.sh
+
+        # Round-trip in a command-substitution subshell so the sourced
+        # script's `set -euo pipefail` stays contained, not leaked into this
+        # builder shell.
+        got=$(unset RESEARCH_VERDICTS; source script.sh)
+        if [ "$got" != "$expected" ]; then
+          echo "round-trip mismatch: got [$got] want [$expected]" >&2
+          exit 1
+        fi
+
+        RESEARCH_VERDICTS=override bash -c 'source script.sh; test "$RESEARCH_VERDICTS" = override'
+
+        touch $out
+      '';
 
   preambles-box-env-vars-list =
     let
