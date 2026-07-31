@@ -246,6 +246,7 @@ var roundTripCases = []outcome.Outcome{
 	{Issue: "42", Landing: "https://github.com/o/r/pull/5", Status: "ready", Note: "key=value"},
 	{Issue: "7", Landing: "https://github.com/o/r/pull/7", Status: "blocked", Note: "stalled on feat=2"},
 	{Issue: "3", Landing: "https://github.com/o/r/pull/3", Status: "merged", Note: ""},
+	{Issue: "9", Landing: "agent/issue-9", Status: "blocked", Note: "driver exited without emitting an outcome", Synthetic: true},
 }
 
 func TestLine_RoundTrip(t *testing.T) {
@@ -258,6 +259,50 @@ func TestLine_RoundTrip(t *testing.T) {
 		if got != want {
 			t.Errorf("round-trip mismatch:\n  want: %+v\n  got:  %+v", want, got)
 		}
+	}
+}
+
+// TestParse_Synthetic verifies a line carrying the synthetic=true field
+// (issue #2223) parses with Synthetic==true and that the field does not
+// bleed into Note, which follows it in the grammar.
+func TestParse_Synthetic(t *testing.T) {
+	line := "SPINDRIFT_OUTCOME issue=9 landing=agent/issue-9 status=blocked synthetic=true note=some note here"
+	o, err := outcome.Parse(line)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !o.Synthetic {
+		t.Error("Synthetic: got false, want true")
+	}
+	if o.Status != "blocked" {
+		t.Errorf("Status: got %q, want %q", o.Status, "blocked")
+	}
+	if o.Note != "some note here" {
+		t.Errorf("Note: got %q, want %q (synthetic field leaked into Note)", o.Note, "some note here")
+	}
+}
+
+// TestParse_NotSynthetic verifies a normal full-grammar line with no
+// synthetic field parses with Synthetic==false.
+func TestParse_NotSynthetic(t *testing.T) {
+	line := "SPINDRIFT_OUTCOME issue=127 landing=https://github.com/o/r/pull/1 status=ready note=all good"
+	o, err := outcome.Parse(line)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if o.Synthetic {
+		t.Error("Synthetic: got true, want false")
+	}
+}
+
+// TestLine_NonSyntheticByteIdentical is a regression guard (issue #2223):
+// a non-synthetic Outcome's rendered line must stay byte-identical to the
+// pre-Synthetic-field wire format.
+func TestLine_NonSyntheticByteIdentical(t *testing.T) {
+	o := outcome.Outcome{Issue: "1", Landing: "x", Status: "ready", Note: "ok"}
+	want := "SPINDRIFT_OUTCOME issue=1 landing=x status=ready note=ok"
+	if got := o.Line(); got != want {
+		t.Errorf("Line(): got %q, want %q", got, want)
 	}
 }
 
@@ -990,6 +1035,116 @@ func TestLastInLog_OversizedLine_TakesLast(t *testing.T) {
 	}
 	if o.Note != "final" {
 		t.Errorf("Note: got %q, want %q", o.Note, "final")
+	}
+}
+
+// --- LastSelfReportInLog tests (issue #2223) ---
+
+// TestLastSelfReportInLog_NearMissThenSynthetic is acceptance criterion (a):
+// a driver near-miss self-report ("SPINDRIFT_OUTCOME: success", paraphrasing
+// the grammar with no fields at all) followed by the backstop's synthetic
+// line. LastSelfReportInLog must surface the driver's own near-miss rather
+// than being shadowed by the synthetic line, while LastInLog (the
+// authoritative outcome) still reports the synthetic, blocked outcome.
+func TestLastSelfReportInLog_NearMissThenSynthetic(t *testing.T) {
+	path := writeLog(t,
+		"SPINDRIFT_OUTCOME: success",
+		"SPINDRIFT_OUTCOME issue=9 landing=agent/issue-9 status=blocked synthetic=true note=driver exited without emitting an outcome nonce=abc123",
+	)
+
+	report, found, err := outcome.LastSelfReportInLog(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !found {
+		t.Fatal("expected found=true for a near-miss self-report")
+	}
+	if report.Status != "success" {
+		t.Errorf("Status: got %q, want %q", report.Status, "success")
+	}
+	if report.Parsed {
+		t.Error("Parsed: got true, want false (line does not parse the full grammar)")
+	}
+
+	o, found, _, err := outcome.LastInLog(path, "abc123")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !found {
+		t.Fatal("expected found=true for the authoritative synthetic outcome")
+	}
+	if !o.Synthetic {
+		t.Error("Synthetic: got false, want true")
+	}
+	if o.Status != "blocked" {
+		t.Errorf("Status: got %q, want %q", o.Status, "blocked")
+	}
+}
+
+// TestLastSelfReportInLog_FullGrammarGenuine is acceptance criterion (b): a
+// single genuine, full-grammar, non-synthetic line parses fully and its
+// Outcome is populated.
+func TestLastSelfReportInLog_FullGrammarGenuine(t *testing.T) {
+	path := writeLog(t,
+		"SPINDRIFT_OUTCOME issue=9 landing=https://github.com/o/r/pull/9 status=ready note=all good nonce=abc123",
+	)
+
+	report, found, err := outcome.LastSelfReportInLog(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !found {
+		t.Fatal("expected found=true")
+	}
+	if !report.Parsed {
+		t.Error("Parsed: got false, want true")
+	}
+	if report.Status != "ready" {
+		t.Errorf("Status: got %q, want %q", report.Status, "ready")
+	}
+	if report.Outcome.Landing != "https://github.com/o/r/pull/9" {
+		t.Errorf("Outcome.Landing: got %q, want %q", report.Outcome.Landing, "https://github.com/o/r/pull/9")
+	}
+	if report.Outcome.Synthetic {
+		t.Error("Outcome.Synthetic: got true, want false")
+	}
+}
+
+// TestLastSelfReportInLog_NoOutcome is acceptance criterion (c): a log with
+// only prose lines and no SPINDRIFT_OUTCOME token at all yields found=false,
+// no error.
+func TestLastSelfReportInLog_NoOutcome(t *testing.T) {
+	path := writeLog(t,
+		"some output",
+		"nothing outcome-shaped here",
+	)
+
+	_, found, err := outcome.LastSelfReportInLog(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if found {
+		t.Fatal("expected found=false: no leading-token line present")
+	}
+}
+
+// TestLastSelfReportInLog_SkipsSyntheticOnlyLog verifies that when the ONLY
+// leading-token line in the log is the backstop's own synthetic line, the
+// self-report is genuinely absent — only the backstop spoke, the driver
+// never did — so LastSelfReportInLog must not mistake the synthetic line for
+// a genuine self-report.
+func TestLastSelfReportInLog_SkipsSyntheticOnlyLog(t *testing.T) {
+	path := writeLog(t,
+		"some output",
+		"SPINDRIFT_OUTCOME issue=9 landing=agent/issue-9 status=blocked synthetic=true note=driver exited without emitting an outcome nonce=abc123",
+	)
+
+	_, found, err := outcome.LastSelfReportInLog(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if found {
+		t.Fatal("expected found=false: the only leading-token line is synthetic")
 	}
 }
 
