@@ -507,7 +507,7 @@ func validate(c config) error {
 	case "github", "local", "jira", "forgejo":
 		// valid
 	default:
-		return fmt.Errorf("ISSUE_TRACKER=%q is not valid; must be github, local, forgejo, or jira", c.issueTracker)
+		return fmt.Errorf("ISSUE_TRACKER=%q is not valid; must be github, local, jira, or forgejo", c.issueTracker)
 	}
 	if c.issueTracker == "jira" {
 		if err := jira.ValidateJiraEnv(c.jiraBaseURL, c.jiraProjectKey, c.jiraToken, c.jiraStatusMapping); err != nil {
