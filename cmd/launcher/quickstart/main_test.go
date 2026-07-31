@@ -63,6 +63,42 @@ func TestParseRemoteHostSlug(t *testing.T) {
 			wantHost:  "",
 			wantSlug:  "",
 		},
+		{
+			name:      "https scheme with explicit port",
+			remoteURL: "https://git.example.com:3000/owner/repo.git",
+			wantHost:  "git.example.com",
+			wantSlug:  "owner/repo",
+		},
+		{
+			name:      "https scheme with explicit port, no .git suffix",
+			remoteURL: "https://git.example.com:3000/owner/repo",
+			wantHost:  "git.example.com",
+			wantSlug:  "owner/repo",
+		},
+		{
+			name:      "scp-like ssh github still parses",
+			remoteURL: "git@github.com:owner/repo.git",
+			wantHost:  "github.com",
+			wantSlug:  "owner/repo",
+		},
+		{
+			name:      "https scheme github still parses",
+			remoteURL: "https://github.com/owner/repo.git",
+			wantHost:  "github.com",
+			wantSlug:  "owner/repo",
+		},
+		{
+			name:      "ssh:// scheme codeberg still parses",
+			remoteURL: "ssh://git@codeberg.org/owner/repo.git",
+			wantHost:  "codeberg.org",
+			wantSlug:  "owner/repo",
+		},
+		{
+			name:      "ssh:// scheme with explicit port",
+			remoteURL: "ssh://git@git.example.com:2222/owner/repo",
+			wantHost:  "git.example.com",
+			wantSlug:  "owner/repo",
+		},
 	}
 
 	for _, tt := range tests {
