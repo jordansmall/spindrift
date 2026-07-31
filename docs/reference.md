@@ -1579,6 +1579,65 @@ branch-protection rule is the enforcement boundary regardless; provision the
 Box user's PAT with least privilege and verify its scope yourself before
 relying on it.
 
+#### Forgejo Actions dispatch templates
+
+`.forgejo/workflows/agent-dispatch.yml`, `agent-recover.yml`, and
+`agent-research.yml` are the Forgejo Actions mirror of the
+`.github/workflows/` control plane described in the [Label
+lifecycle](#label-lifecycle) section and the [GitHub App installation
+token](#github-app-installation-token-recommended) / [Research
+token](#research-token-least-privilege-optional) sections above — same
+`issues: labeled` trigger, same label vocabulary (`agent-trigger` fires
+dispatch, `agent-recover` fires recover, `agent-research` fires research;
+the same lifecycle and research label families apply unchanged). What
+differs is authentication: Forgejo has no GitHub App model, so there is no
+worker-App mint and no `gh-token-refresher` on this backend ([ADR
+0038](adr/0038-the-forgejo-backend-decision-set.md)) — each workflow
+authenticates with a single, non-expiring `FORGEJO_TOKEN` **repository
+secret**, read directly rather than minted per run. A job-level `env:`
+block selects the forgejo backend on both axes (`ISSUE_TRACKER: forgejo`,
+`CODE_FORGE: forgejo`), and sets `FORGEJO_BASE_URL` (falls back to
+`https://codeberg.org` via `vars.FORGEJO_BASE_URL || 'https://codeberg.org'`
+when the repo variable is unset) and `FORGEJO_TOKEN` from the secret.
+
+**Setup steps:**
+
+1. **Enable Actions on the repository.** Codeberg (and most Forgejo
+   instances) ship Actions disabled by default — opt in under Settings →
+   Actions before any label can fire a run.
+2. **Register a self-hosted runner** labelled `self-hosted` (Settings →
+   Actions → Runners). Codeberg's shared runners cannot build the agent
+   image — it needs Nix and the build is heavy/long — so a self-hosted
+   runner is required; provision it with Nix build capability plus `curl`
+   and `jq` on `PATH` (the runner-side blocked-release and park-on-failure
+   steps talk to the Forgejo REST API directly with `curl`/`jq` because `fj`
+   has no label verb and is not guaranteed on the runner). If your runner
+   carries a different label, edit each workflow's `runs-on: self-hosted`
+   to match.
+3. **Create the `FORGEJO_TOKEN` repository secret** (Actions secret) — the
+   token the workflows read directly, scoped the same as the Forgejo
+   backend token documented above (Contents/Pull requests/Issues/Metadata
+   RW). Also create the `CLAUDE_CODE_OAUTH_TOKEN` secret, and the
+   `AGENT_GIT_USER_NAME` / `AGENT_GIT_USER_EMAIL` repository variables
+   (`vars.*`, optionally `FORGEJO_BASE_URL` too) — same secrets/variables
+   the `agent-setup` composite action (`./.github/actions/agent-setup`,
+   which Forgejo resolves from the checked-out tree the same as GitHub)
+   consumes on the GitHub set.
+4. **Ensure the label families exist** on the repo: the four triage labels
+   for dispatch/recover, and — if using research — the `agent-research*`
+   family; see [Create the research
+   labels](#create-the-research-labels-on-the-target-repo) and `spindrift
+   doctor`.
+
+Because Forgejo PATs don't expire, a long run never needs to re-mint: unlike
+the GitHub set's App-token machinery, there is no mint step and no
+background refresher here — the single `FORGEJO_TOKEN` secret is read once
+at job start and used for the whole run.
+
+`.forgejo/**` is already part of the default `MERGE_GUARD_PATHS` glob (see
+[Merge guard](#merge-guard) above), so a PR that edits these templates
+matches it the same way an edit to `.github/workflows/**` does.
+
 #### Stale-base preflight
 
 A green PR can still be **behind** its base: main may have advanced past a
