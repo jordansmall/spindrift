@@ -1,0 +1,122 @@
+name: Agent dispatch
+
+# Adding the `agent-trigger` label to an issue fires one dogfood run against it:
+# claim the issue (swap `agent-trigger` -> `agent-in-progress` up front), build
+# the image, then drain that single issue (open PR, poll checks, rebase-merge on
+# green). The claim clears `agent-trigger` before any build work, so the label
+# self-clears and will not re-fire.
+#
+# This is the Forgejo Actions mirror of .github/workflows/agent-dispatch.yml
+# (issue #1967). Forgejo has no GitHub App model, so there is no worker-App
+# mint and no gh-token-refresher to port: the job authenticates with a single,
+# non-expiring `FORGEJO_TOKEN` repository secret (ADR 0038). Codeberg's shared
+# runners cannot build the agent image, so this workflow targets a registered
+# self-hosted runner (the `self-hosted` label) — see docs/reference.md,
+# "Forgejo Actions dispatch templates".
+on:
+  issues:
+    types: [labeled]
+
+# Serialise per issue only: two labelings of the SAME issue queue behind each
+# other (no double-dispatch), but different issues run concurrently. Agent boxes
+# share one Claude rate-limit window — with repo-wide serialisation removed, the
+# operator is responsible for not triggering more issues than that window allows.
+concurrency:
+  group: agent-dispatch-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  dispatch:
+    if: github.event.label.name == 'agent-trigger'
+    runs-on: self-hosted
+    timeout-minutes: 180
+    env:
+      # Select the forgejo backend on both axes; the launcher reads these from
+      # the environment. FORGEJO_BASE_URL falls back to Codeberg when the repo
+      # variable is unset (ADR 0038).
+      ISSUE_TRACKER: forgejo
+      CODE_FORGE: forgejo
+      FORGEJO_BASE_URL: ${{ vars.FORGEJO_BASE_URL || 'https://codeberg.org' }}
+      FORGEJO_TOKEN: ${{ secrets.FORGEJO_TOKEN }}
+    steps:
+      # Checkout must precede the local composite step below: Forgejo resolves
+      # ./.github/actions/agent-setup from the checked-out tree.
+      - uses: actions/checkout@v4
+
+      # Claim (agent-trigger -> agent-in-progress, up front so ownership is
+      # atomic before the build), Install Nix, and build — plus the plumbing env
+      # (RUNTIME + tokens) written to the job env and the bot identity surfaced
+      # as step outputs for the dispatch flags below. Auth is the single
+      # `FORGEJO_TOKEN` repository secret: Forgejo has no App-installation token
+      # to mint and its PATs do not expire, so neither the App mint nor the
+      # gh-token-refresher the GitHub workflow carries has any analog here (ADR
+      # 0038).
+      - name: Agent setup
+        id: setup
+        uses: ./.github/actions/agent-setup
+        with:
+          gh-token: ${{ secrets.FORGEJO_TOKEN }}
+          claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          issue-number: ${{ github.event.issue.number }}
+          repo: ${{ github.repository }}
+          claim-add-label: agent-in-progress
+          # Strip every other lifecycle label, not just the trigger and
+          # ready-for-agent: a re-triggered issue may still carry a stale
+          # terminal label (agent-complete / agent-failed) or a leftover
+          # agent-recover, and the claim must land it cleanly on
+          # agent-in-progress regardless of what it was wearing before.
+          claim-remove-labels: agent-trigger ready-for-agent agent-recover agent-complete agent-failed
+          git-user-name: ${{ vars.AGENT_GIT_USER_NAME }}
+          git-user-email: ${{ vars.AGENT_GIT_USER_EMAIL }}
+
+      # The claim step (inside agent-setup) already swapped the issue onto
+      # agent-in-progress, so --issue-number targets it by number rather than a
+      # label query; --label still names the in-progress label so dispatchWave
+      # skips the redundant re-claim of an already-claimed issue.
+      - name: Dispatch the labeled issue
+        run: |
+          nix run . -- dispatch \
+            --box-forge-and-issue-access read-write \
+            --issue-number "${{ github.event.issue.number }}" \
+            --label agent-in-progress \
+            --max-jobs 1 \
+            --repo-slug "${{ github.repository }}" \
+            --base-branch "${{ github.event.repository.default_branch }}" \
+            --git-user-name "${{ steps.setup.outputs.git-user-name }}" \
+            --git-user-email "${{ steps.setup.outputs.git-user-email }}"
+
+      # The launcher parses the two blocker formats and, when this claimed issue
+      # is blocked by an unmet dependency, drops logs/blocked.txt naming the
+      # blockers instead of working it. Undo the up-front claim (back to
+      # ready-for-agent) and say why. No recovery — the operator re-triggers once
+      # the blocker resolves. always() so a failed build (no marker) is a no-op.
+      # fj has no label verb and is not guaranteed on the runner, so the comment
+      # and label swap go through curl against the Forgejo REST API.
+      - name: Release the claim if blocked
+        if: always()
+        run: |
+          [ -f logs/blocked.txt ] || exit 0
+          blockers=$(cat logs/blocked.txt)
+          api="${FORGEJO_BASE_URL%/}/api/v1/repos/${{ github.repository }}"
+          issue="${{ github.event.issue.number }}"
+          auth="Authorization: token ${FORGEJO_TOKEN}"
+          curl -fsS -X POST -H "$auth" -H "Content-Type: application/json" \
+            "${api}/issues/${issue}/comments" \
+            -d "$(jq -n --arg b "🚧 Agent made no changes: this issue is blocked by ${blockers} (not yet \`agent-complete\` or closed). Released back to \`ready-for-agent\`; re-trigger once the blocker is resolved." '{body: $b}')" >/dev/null
+          labels=$(curl -fsS -H "$auth" "${api}/labels")
+          ready_id=$(printf '%s' "$labels" | jq '.[] | select(.name == "ready-for-agent") | .id')
+          inprog_id=$(printf '%s' "$labels" | jq '.[] | select(.name == "agent-in-progress") | .id')
+          curl -fsS -X POST -H "$auth" -H "Content-Type: application/json" \
+            "${api}/issues/${issue}/labels" -d "{\"labels\": [${ready_id}]}" >/dev/null
+          curl -fsS -X DELETE -H "$auth" "${api}/issues/${issue}/labels/${inprog_id}" >/dev/null
+
+      - name: Upload run logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-logs-${{ github.event.issue.number }}
+          path: logs/
+          if-no-files-found: ignore

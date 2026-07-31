@@ -1,0 +1,102 @@
+name: Agent research
+
+# Adding the `agent-research` label to an issue fires one research dispatch
+# against it (ADR 0022): claim the issue (swap `agent-research` ->
+# `agent-research-in-progress` up front), build the image, then run
+# `spindrift research` against that single issue — a fresh clone, a review of
+# the issue against the Target repo, and one posted verdict comment. Research
+# never lands code: no PR, no CI watch, no merge. The claim clears
+# `agent-research` before any build work, so the label self-clears and will
+# not re-fire.
+#
+# This is the Forgejo Actions mirror of .github/workflows/agent-research.yml
+# (issue #1967). Forgejo has no GitHub App model, so there is no research-App
+# mint to port and no optional-App conditional: the job authenticates with the
+# single `FORGEJO_TOKEN` repository secret unconditionally (ADR 0038).
+# Requires a registered self-hosted runner (the `self-hosted` label) — see
+# docs/reference.md, "Forgejo Actions dispatch templates".
+on:
+  issues:
+    types: [labeled]
+
+# Serialise per kind per issue (ADR 0022): two labelings of the SAME issue
+# with `agent-research` queue behind each other (no double-dispatch), but a
+# research run on one issue and a work run on the same issue are separate
+# concurrency groups and may run simultaneously — permitted, operator's
+# responsibility, matching the existing dispatch rate-limit stance. Different
+# issues always run concurrently.
+concurrency:
+  group: agent-research-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  research:
+    if: github.event.label.name == 'agent-research'
+    runs-on: self-hosted
+    timeout-minutes: 180
+    env:
+      # Select the forgejo backend; research only reads the issue tracker, but
+      # both axes are set for parity with the dispatch/recover templates. The
+      # launcher reads these from the environment. FORGEJO_BASE_URL falls back
+      # to Codeberg when the repo variable is unset (ADR 0038).
+      ISSUE_TRACKER: forgejo
+      CODE_FORGE: forgejo
+      FORGEJO_BASE_URL: ${{ vars.FORGEJO_BASE_URL || 'https://codeberg.org' }}
+      FORGEJO_TOKEN: ${{ secrets.FORGEJO_TOKEN }}
+    steps:
+      # Checkout must precede the local composite step below: Forgejo resolves
+      # ./.github/actions/agent-setup from the checked-out tree.
+      - uses: actions/checkout@v4
+
+      # Claim (agent-research -> agent-research-in-progress, up front so
+      # ownership is atomic before the build), Install Nix, and build — plus
+      # the plumbing env (RUNTIME + tokens) written to the job env and the bot
+      # identity surfaced as step outputs for the research flags below.
+      #
+      # Token: the single `FORGEJO_TOKEN` repository secret. Forgejo has no App
+      # model, so the GitHub workflow's optional research-App mint (and its PAT
+      # fallback) has no analog — research authenticates with the same secret
+      # as dispatch/recover. Provision that token least-privilege (Issues RW,
+      # Contents R) if the advise-only read-only guarantee matters (ADR 0038).
+      - name: Agent setup
+        id: setup
+        uses: ./.github/actions/agent-setup
+        with:
+          gh-token: ${{ secrets.FORGEJO_TOKEN }}
+          claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          issue-number: ${{ github.event.issue.number }}
+          repo: ${{ github.repository }}
+          claim-add-label: agent-research-in-progress
+          # Strip only the research-family labels (ADR 0022): the claim never
+          # touches ready-for-agent/agent-in-progress/agent-complete/
+          # agent-failed — an issue wearing a work lifecycle label keeps it
+          # through a research claim, since the two kinds are disjoint and a
+          # research dispatch may legitimately run alongside a work dispatch
+          # on the same issue.
+          claim-remove-labels: >-
+            agent-research agent-research-recommend agent-research-reject
+            agent-research-unclear agent-research-failed
+          git-user-name: ${{ vars.AGENT_GIT_USER_NAME }}
+          git-user-email: ${{ vars.AGENT_GIT_USER_EMAIL }}
+
+      - name: Research the labeled issue
+        run: |
+          nix run . -- research \
+            --box-forge-and-issue-access read-write \
+            --issue-number "${{ github.event.issue.number }}" \
+            --max-jobs 1 \
+            --repo-slug "${{ github.repository }}" \
+            --base-branch "${{ github.event.repository.default_branch }}" \
+            --git-user-name "${{ steps.setup.outputs.git-user-name }}" \
+            --git-user-email "${{ steps.setup.outputs.git-user-email }}"
+
+      - name: Upload run logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-research-logs-${{ github.event.issue.number }}
+          path: logs/
+          if-no-files-found: ignore

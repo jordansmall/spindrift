@@ -4,7 +4,8 @@
 # build), and each agent workflow inherits it by calling that action. This
 # guard pins both halves of that invariant against the hand-maintained YAML so
 # neither can silently regress: the `gh api rate_limit` preflight must exist in
-# agent-setup, and every agent workflow must wire agent-setup in.
+# agent-setup, and every agent workflow must wire agent-setup in — across both
+# the `.github` and `.forgejo` control-plane template sets (issue #1967).
 { pkgs, ... }:
 let
   inherit (pkgs.lib) assertMsg concatStringsSep filter hasInfix;
@@ -13,6 +14,9 @@ let
     "agent-dispatch.yml" = builtins.readFile ../../.github/workflows/agent-dispatch.yml;
     "agent-recover.yml" = builtins.readFile ../../.github/workflows/agent-recover.yml;
     "agent-research.yml" = builtins.readFile ../../.github/workflows/agent-research.yml;
+    "forgejo/agent-dispatch.yml" = builtins.readFile ../../.forgejo/workflows/agent-dispatch.yml;
+    "forgejo/agent-recover.yml" = builtins.readFile ../../.forgejo/workflows/agent-recover.yml;
+    "forgejo/agent-research.yml" = builtins.readFile ../../.forgejo/workflows/agent-research.yml;
   };
   setupHasSmoke = hasInfix "gh api rate_limit" setupSrc;
   missingWire = filter (
