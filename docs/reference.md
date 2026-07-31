@@ -1495,6 +1495,58 @@ bypass list:
 See [SECURITY.md](../SECURITY.md) for how this changes the "Box cannot merge
 its own PR" claim.
 
+#### Two-actor separation on Forgejo
+
+The Forgejo backend earns the same opt-in hard mode, mirroring the GitHub
+recipe above with `BOX_FORGEJO_TOKEN` in place of `BOX_GH_TOKEN`. Under the
+single-token default, the `FORGEJO_TOKEN` that opens a PR is the same token
+that can merge it, so a fully adversarial Agent could merge its own green PR
+from inside the Box before the launcher evaluates the merge guard. Two
+machine Forgejo users instead of one, with a branch-protection rule barring
+the Box's user from updating the base branch, closes that gap. Forgejo has no
+App-token model, so this is the Forgejo analog of GitHub's ruleset: a plain
+branch-protection rule whose push and merge whitelists name only the
+launcher's user.
+
+**Setup:**
+
+1. Create a **second Forgejo user** (or bot account) distinct from the one
+   behind your existing `FORGEJO_TOKEN`. Mint it a PAT scoped to **only the
+   Target repository**, with the same permission set the single-token default
+   already grants.
+2. Set that PAT as `BOX_FORGEJO_TOKEN` — a secret, like `FORGEJO_TOKEN`
+   itself: `harness.env` or your shell, never a flake setting. Unset, the
+   harness behaves exactly as the single-token default, byte-for-byte; set,
+   the Box receives this value as its own `FORGEJO_TOKEN` while the launcher
+   keeps using its own for every host-side call (merges, labels, the usage
+   comment).
+3. On the Target repo, add a **branch-protection rule** (Settings → Branches →
+   Branch protection rules → Add new rule) whose branch-name pattern matches
+   the base branch (e.g. `main`). Enable it so direct pushes are blocked
+   unless whitelisted, and turn on **Enable Merge Whitelist** so unwhitelisted
+   users cannot merge PRs into the branch either.
+4. Set both the **push whitelist and the merge whitelist to the launcher's own
+   user only** — the one behind `FORGEJO_TOKEN`. Every other actor, including
+   the Box's user, is then blocked from updating the base branch by the rule
+   itself, whether by a direct push or by merging a PR. No PAT permission
+   scope controls this — the branch-protection rule does, which is why it
+   closes the gap the merge guard cannot.
+
+**Per-token permissions** — both tokens carry the same scopes; what differs is
+which Forgejo user each belongs to, and only one is whitelisted:
+
+| token                      | Forgejo user               | can update the base branch? |
+| -------------------------- | -------------------------- | ---------------------------- |
+| `BOX_FORGEJO_TOKEN` (Box)  | second, non-whitelisted user | No — the rule blocks it, even via PR merge |
+| `FORGEJO_TOKEN` (launcher) | primary, whitelisted user  | Yes — the rule's sole whitelisted actor |
+
+Unlike GitHub, **Forgejo exposes no endpoint to introspect a token's granted
+scopes**, so the launcher cannot verify `BOX_FORGEJO_TOKEN`'s write capability
+at startup the way `BOX_GH_TOKEN` is checked under `read-only`. The
+branch-protection rule is the enforcement boundary regardless; provision the
+Box user's PAT with least privilege and verify its scope yourself before
+relying on it.
+
 #### Stale-base preflight
 
 A green PR can still be **behind** its base: main may have advanced past a
