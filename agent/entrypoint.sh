@@ -626,6 +626,21 @@ phase_prompt_assembly() {
     WORKER_PROVISIONED=1
   fi
 
+  # ISSUE_TRACKER -> per-axis descriptor for its gate families. Coverage
+  # differs by family, hence three fields: _it_read (issue-read step suffix,
+  # always one of GITHUB/LOCAL/FORGEJO), _it_write (direct write-step suffix,
+  # empty when the tracker has no in-box direct-write path -- local always
+  # relays), _it_filer (filer direct-write suffix). jira shares github's
+  # in-box reachability, so it rides the GITHUB/GH arms. ADR 0013 keeps this
+  # axis independent of CODE_FORGE. A new tracker (gitlab, bitbucket) adds one
+  # arm here, not an elif in each block below.
+  local _it_read _it_write _it_filer
+  case "${ISSUE_TRACKER:-github}" in
+    local)   _it_read=LOCAL   _it_write=""        _it_filer=GH ;;
+    forgejo) _it_read=FORGEJO _it_write=FORGEJO   _it_filer=FORGEJO ;;
+    *)       _it_read=GITHUB  _it_write=GITHUB    _it_filer=GH ;;
+  esac
+
   # The filer's write-mechanism gates (issue #2019): relay only activates on
   # read-only (BOX_WRITE_ENABLED absent) + the orchestrator gate -- every
   # other combination (read-write regardless of orchestrator, or read-only
@@ -647,7 +662,9 @@ phase_prompt_assembly() {
   # rows (now gated FILER_FILE_DIRECT_GH). The relay path (FILER_FILE_RELAY,
   # SPINDRIFT_ISSUE_INTENT) never shells out to gh/fj directly, so it stays
   # forge-agnostic and unchanged.
+  # shellcheck disable=SC2034 # read indirectly via "${!_fgate}" in the loop below
   local FILER_FILE_DIRECT_GH=""
+  # shellcheck disable=SC2034 # read indirectly via "${!_fgate}" in the loop below
   local FILER_FILE_DIRECT_FORGEJO=""
   local FILER_FILE_RELAY=""
   if [ -n "$FILER_ENABLED" ]; then
@@ -655,13 +672,7 @@ phase_prompt_assembly() {
       # shellcheck disable=SC2034 # read indirectly via "${!_fgate}" in the loop below
       FILER_FILE_RELAY=1
     else
-      if [ "${ISSUE_TRACKER:-github}" = "forgejo" ]; then
-        # shellcheck disable=SC2034 # read indirectly via "${!_fgate}" in the loop below
-        FILER_FILE_DIRECT_FORGEJO=1
-      else
-        # shellcheck disable=SC2034 # read indirectly via "${!_fgate}" in the loop below
-        FILER_FILE_DIRECT_GH=1
-      fi
+      printf -v "FILER_FILE_DIRECT_${_it_filer}" '%s' 1
     fi
   fi
 
@@ -712,27 +723,24 @@ phase_prompt_assembly() {
   # ISSUE_TRACKER between gh issue view (github, and jira, which shares
   # github's in-box reachability), fj issue view (forgejo), and the
   # read-only /issues mount (local).
+  # shellcheck disable=SC2034 # read indirectly via "${!_fgate}" in the loop below
   local ISSUE_TRACKER_GITHUB=""
+  # shellcheck disable=SC2034 # read indirectly via "${!_fgate}" in the loop below
   local ISSUE_TRACKER_LOCAL=""
+  # shellcheck disable=SC2034 # read indirectly via "${!_fgate}" in the loop below
   local ISSUE_TRACKER_FORGEJO=""
-  if [ "${ISSUE_TRACKER:-github}" = "local" ]; then
-    # shellcheck disable=SC2034 # read indirectly via "${!_fgate}" in the loop below
-    ISSUE_TRACKER_LOCAL=1
-  elif [ "${ISSUE_TRACKER:-github}" = "forgejo" ]; then
-    # shellcheck disable=SC2034 # read indirectly via "${!_fgate}" in the loop below
-    ISSUE_TRACKER_FORGEJO=1
-  else
-    # shellcheck disable=SC2034 # read indirectly via "${!_fgate}" in the loop below
-    ISSUE_TRACKER_GITHUB=1
-  fi
+  printf -v "ISSUE_TRACKER_${_it_read}" '%s' 1
 
-  # The issue-blocked-comment/research-verdict write-step gates (issue #1917):
-  # a read-only Box (BOX_WRITE_ENABLED absent, issue #1951) holds no write
-  # token, so a github/jira Dispatch's blocked-note and verdict comment need
-  # the same host-mediated relay form local's write step always renders --
-  # distinct from ISSUE_TRACKER_GITHUB/ISSUE_TRACKER_LOCAL above, which stay
-  # unaffected by read-only mode (a read-only token still permits
-  # gh issue view for the read step those gate).
+  # The issue-blocked-comment/research-verdict write-step gates (issue #1917;
+  # forgejo mirror added #1963): a read-only Box (BOX_WRITE_ENABLED absent,
+  # issue #1951) holds no write token, so a github/jira/forgejo Dispatch's
+  # blocked-note and verdict comment need the same host-mediated relay form
+  # local's write step always renders -- distinct from ISSUE_TRACKER_GITHUB/
+  # ISSUE_TRACKER_LOCAL/ISSUE_TRACKER_FORGEJO above, which stay unaffected by
+  # read-only mode (a read-only token still permits gh/fj issue view for the
+  # read step those gate). local has no direct write-step path (_it_write
+  # empty above), so it renders neither pair here -- its blocked-note/verdict
+  # always goes through the relay form regardless of BOX_WRITE_ENABLED.
   #
   # BOX_WRITE_ENABLED is the single explicit write-enable signal the
   # launcher resolves once, host-side, from BOX_FORGE_AND_ISSUE_ACCESS
@@ -741,32 +749,19 @@ phase_prompt_assembly() {
   # defaultable BOX_FORGE_AND_ISSUE_ACCESS, is the gate below -- an unset,
   # typo'd, or forwarding-glitched value renders the no-write path, never
   # the write-capable one.
+  # shellcheck disable=SC2034 # read indirectly via "${!_fgate}" in the loop below
   local ISSUE_TRACKER_GITHUB_READWRITE=""
+  # shellcheck disable=SC2034 # read indirectly via "${!_fgate}" in the loop below
   local ISSUE_TRACKER_GITHUB_READONLY=""
-  if [ -n "$ISSUE_TRACKER_GITHUB" ]; then
-    if [ -n "${BOX_WRITE_ENABLED:-}" ]; then
-      # shellcheck disable=SC2034 # read indirectly via "${!_fgate}" in the loop below
-      ISSUE_TRACKER_GITHUB_READWRITE=1
-    else
-      # shellcheck disable=SC2034 # read indirectly via "${!_fgate}" in the loop below
-      ISSUE_TRACKER_GITHUB_READONLY=1
-    fi
-  fi
-
-  # The issue-blocked-comment/research-verdict write-step gates for forgejo
-  # (issue #1963), mirroring ISSUE_TRACKER_GITHUB_READWRITE/_READONLY above:
-  # a read-only Box holds no write-capable FORGEJO_TOKEN, so a forgejo
-  # Dispatch's blocked-note and verdict comment fall back to the same
-  # host-mediated relay form the github/local write steps use.
+  # shellcheck disable=SC2034 # read indirectly via "${!_fgate}" in the loop below
   local ISSUE_TRACKER_FORGEJO_READWRITE=""
+  # shellcheck disable=SC2034 # read indirectly via "${!_fgate}" in the loop below
   local ISSUE_TRACKER_FORGEJO_READONLY=""
-  if [ -n "$ISSUE_TRACKER_FORGEJO" ]; then
+  if [ -n "$_it_write" ]; then
     if [ -n "${BOX_WRITE_ENABLED:-}" ]; then
-      # shellcheck disable=SC2034 # read indirectly via "${!_fgate}" in the loop below
-      ISSUE_TRACKER_FORGEJO_READWRITE=1
+      printf -v "ISSUE_TRACKER_${_it_write}_READWRITE" '%s' 1
     else
-      # shellcheck disable=SC2034 # read indirectly via "${!_fgate}" in the loop below
-      ISSUE_TRACKER_FORGEJO_READONLY=1
+      printf -v "ISSUE_TRACKER_${_it_write}_READONLY" '%s' 1
     fi
   fi
 
@@ -789,35 +784,37 @@ phase_prompt_assembly() {
     BOX_ACCESS_READ_ONLY=1
   fi
 
+  # CODE_FORGE -> backend suffix its gate families (OPEN_PR_CREATE_RW_*,
+  # FIX_CI_READ_*) carry. Only forgejo diverges; github/git/local share the
+  # gh-flavored path. Per-axis dispatch (ADR 0013): a new code forge
+  # (gitlab, bitbucket) adds one arm here, not an elif in each family below.
+  local _code_forge_backend
+  case "${CODE_FORGE:-github}" in
+    forgejo) _code_forge_backend=FORGEJO ;;
+    *)       _code_forge_backend=GH ;;
+  esac
+
   # The OPEN A PULL REQUEST create step forks the read-write case on
   # CODE_FORGE (issue #1963): a forgejo Box opens its draft PR with fj pr
   # create, a github Box with gh pr create. Read-only stays forge-agnostic
   # (SPINDRIFT_PR_INTENT relay), so only the read-write create splits here.
+  # shellcheck disable=SC2034 # read indirectly via "${!_fgate}" in the loop below
   local OPEN_PR_CREATE_RW_GH=""
+  # shellcheck disable=SC2034 # read indirectly via "${!_fgate}" in the loop below
   local OPEN_PR_CREATE_RW_FORGEJO=""
   if [ -n "$BOX_ACCESS_READ_WRITE" ]; then
-    if [ "${CODE_FORGE:-github}" = "forgejo" ]; then
-      # shellcheck disable=SC2034 # read indirectly via "${!_fgate}" in the loop below
-      OPEN_PR_CREATE_RW_FORGEJO=1
-    else
-      # shellcheck disable=SC2034 # read indirectly via "${!_fgate}" in the loop below
-      OPEN_PR_CREATE_RW_GH=1
-    fi
+    printf -v "OPEN_PR_CREATE_RW_${_code_forge_backend}" '%s' 1
   fi
 
   # The fix-pass CONTEXT CI-read step forks on CODE_FORGE (issue #1963):
   # fix-prompt.md's CI-read bullets shelled out unconditionally to `gh pr
   # view`/`gh run list`/`gh run view`, which don't exist against a Forgejo
   # remote -- a forgejo fix pass reads CI via `fj pr status` instead.
+  # shellcheck disable=SC2034 # read indirectly via "${!_fgate}" in the loop below
   local FIX_CI_READ_GH=""
+  # shellcheck disable=SC2034 # read indirectly via "${!_fgate}" in the loop below
   local FIX_CI_READ_FORGEJO=""
-  if [ "${CODE_FORGE:-github}" = "forgejo" ]; then
-    # shellcheck disable=SC2034 # read indirectly via "${!_fgate}" in the loop below
-    FIX_CI_READ_FORGEJO=1
-  else
-    # shellcheck disable=SC2034 # read indirectly via "${!_fgate}" in the loop below
-    FIX_CI_READ_GH=1
-  fi
+  printf -v "FIX_CI_READ_${_code_forge_backend}" '%s' 1
 
   # One loop over the Conditional fragment registry (lib/fragments.nix, issue
   # #622), rendered into _FRAGMENT_ROWS by lib/mkHarness.nix's
