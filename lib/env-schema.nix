@@ -623,6 +623,8 @@
     group = "agents";
     flag = "prompt-dir";
     doc = "host directory mounted over /agent/prompts for zero-rebuild prompt iteration";
+    flakeOption = true;
+    nixSubPath = "promptDir";
     boxEnv = false;
   };
   spindriftSkillsDir = {

@@ -23,6 +23,7 @@ See [`docs/reference.md`](reference.md) for the full option surface and runtime 
 | `perSystem.spindrift.agents.models.review` | `REVIEW_MODEL` | `claude-opus-4-8` | reviewer subagent model tier; empty omits the reviewer entry from --agents; the flag itself is omitted only when no subagent model is set. DEPRECATED: superseded by the roster option (see docs/reference.md); these per-agent knobs still work but will be removed. |
 | `perSystem.spindrift.agents.models.scout` | `SCOUT_MODEL` | `claude-haiku-4-5-20251001` | scout subagent model tier; empty omits the scout entry from --agents; the flag itself is omitted only when no subagent model is set. DEPRECATED: superseded by the roster option (see docs/reference.md); these per-agent knobs still work but will be removed. |
 | `perSystem.spindrift.agents.models.worker` | `WORKER_MODEL` | `claude-sonnet-5` | implement-capable worker subagent model tier; empty omits the worker entry from --agents; the implementor prompt does not delegate to it yet — this only provisions the subagent so it is invokable. DEPRECATED: superseded by the roster option (see docs/reference.md); these per-agent knobs still work but will be removed. |
+| `perSystem.spindrift.agents.promptDir` | `SPINDRIFT_PROMPT_DIR` | — | host directory mounted over /agent/prompts for zero-rebuild prompt iteration |
 
 ## Git (`perSystem.spindrift.git`)
 
