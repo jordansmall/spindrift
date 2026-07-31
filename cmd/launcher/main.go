@@ -541,8 +541,12 @@ func validate(c config) error {
 					"only immediate relays the seam bundle into the Accumulation "+
 					"repo; manual/auto strand it in the outbox", c.mergeMode)
 		}
+	case "forgejo":
+		if err := forgejo.ValidateForgejoEnv(c.forgejoBaseURL, c.forgejoToken); err != nil {
+			return err
+		}
 	default:
-		return fmt.Errorf("CODE_FORGE=%q is not valid; must be github, git, or local", c.codeForge)
+		return fmt.Errorf("CODE_FORGE=%q is not valid; must be github, git, local, or forgejo", c.codeForge)
 	}
 	switch c.boxForgeAndIssueAccess {
 	case "read-write", "read-only":
@@ -648,6 +652,16 @@ func newCodeForge(c config, parent local.SanitizedParent) forge.CodeForge {
 		return git.NewGitClient(c.codeForgeRemoteURL, c.baseBranch, c.gitUserName, c.gitUserEmail, c.branchPrefix)
 	case "local":
 		return local.NewLocalCodeForge(c.codeForgeAccumulationRepoDir, c.baseBranch, parent, c.gitUserName, c.gitUserEmail, c.branchPrefix)
+	case "forgejo":
+		return forgejo.NewForgejoCodeForge(forgejo.ForgejoCodeForgeConfig{
+			BaseURL:      c.forgejoBaseURL,
+			Repo:         c.repoSlug,
+			Token:        c.forgejoToken,
+			BaseBranch:   c.baseBranch,
+			UserName:     c.gitUserName,
+			UserEmail:    c.gitUserEmail,
+			BranchPrefix: c.branchPrefix,
+		})
 	default:
 		// BOX_FORGE_AND_ISSUE_ACCESS=read-only swaps in the BundleRelay-
 		// capable wrapper (issue #1918): the Box no longer pushes in-box, so
@@ -669,12 +683,14 @@ func dispatchCompletionBanner(c config) string {
 	switch c.codeForge {
 	case "git":
 		return fmt.Sprintf("==> all agents finished — branches pushed on %s.\n", c.repoSlug)
+	case "forgejo":
+		return fmt.Sprintf("==> all agents finished — branches pushed on %s.\n", c.repoSlug)
 	case "local":
 		return "==> all agents finished — seams landed host-side into their own Integration branches in the Accumulation repo.\n"
 	default:
-		// validate() restricts c.codeForge to "git", "local", or "github" —
-		// github is the fallback so a future forge fails loud in validate()
-		// rather than silently inheriting this wording.
+		// validate() restricts c.codeForge to "git", "local", "forgejo", or
+		// github — github is the fallback so a future forge fails loud in
+		// validate() rather than silently inheriting this wording.
 		return fmt.Sprintf("==> all agents finished — branches pushed and PRs opened on %s.\n", c.repoSlug)
 	}
 }

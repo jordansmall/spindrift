@@ -1242,6 +1242,29 @@ func TestValidate_ForgejoRequiresBaseURLAndToken(t *testing.T) {
 	}
 }
 
+// TestValidate_ForgejoCodeForge verifies validate() requires
+// FORGEJO_BASE_URL and FORGEJO_TOKEN when CODE_FORGE=forgejo, and accepts a
+// fully configured forgejo code-forge config.
+func TestValidate_ForgejoCodeForge(t *testing.T) {
+	c := minimalValidConfig()
+	c.codeForge = "forgejo"
+	c.forgejoBaseURL = "https://codeberg.org"
+	c.forgejoToken = "tok"
+
+	if err := validate(c); err != nil {
+		t.Fatalf("fully configured forgejo code-forge config should validate: %v", err)
+	}
+
+	c.forgejoToken = ""
+	err := validate(c)
+	if err == nil {
+		t.Fatalf("validate() must require FORGEJO_TOKEN when CODE_FORGE=forgejo")
+	}
+	if !strings.Contains(err.Error(), "FORGEJO_TOKEN") {
+		t.Errorf("validate() error = %q, want it to name FORGEJO_TOKEN", err.Error())
+	}
+}
+
 // TestValidate_OpencodeCopilotCredential verifies that validate() gates
 // credential required-ness on the Driver: the opencode Driver's
 // github-copilot Provider is OAuth-only and needs OPENCODE_AUTH_CONTENT (not
@@ -1553,6 +1576,26 @@ func TestNewCodeForge_Git_ReturnsPushOnlyAdapter(t *testing.T) {
 
 	if _, ok := cf.(forge.PRForge); ok {
 		t.Error("newCodeForge(CODE_FORGE=git) satisfies PRForge, want the push-only git adapter to implement CodeForge only")
+	}
+}
+
+// TestNewCodeForge_Forgejo_ReturnsPushOnlyAdapter verifies that
+// CODE_FORGE=forgejo wires newCodeForge to the push-only Forgejo adapter —
+// one with no PRForge surface at all — instead of the github gh-exec
+// adapter.
+func TestNewCodeForge_Forgejo_ReturnsPushOnlyAdapter(t *testing.T) {
+	c := minimalValidConfig()
+	c.codeForge = "forgejo"
+	c.forgejoBaseURL = "https://codeberg.org"
+	c.forgejoToken = "tok"
+
+	cf := newCodeForge(c, local.SanitizedParent{})
+
+	if cf == nil {
+		t.Fatal("newCodeForge(CODE_FORGE=forgejo) returned nil")
+	}
+	if _, ok := cf.(forge.PRForge); ok {
+		t.Error("newCodeForge(CODE_FORGE=forgejo) satisfies PRForge, want the push-only forgejo adapter to implement CodeForge only")
 	}
 }
 
