@@ -175,10 +175,9 @@ the `research` kind with `--self-contained` set (`validate`,
 exemption, but for a different reason: fully-local has no `github` client
 to construct, while self-contained research has a `github` client
 available but nothing for it to clone. `--self-contained` is rejected
-outright, before bootstrap, on every subcommand except `research`
-(`dispatch`, `recover`) — a no-repo work dispatch has no repo to branch
-from or land a PR onto, so the flag is refused rather than silently
-ignored. The natural pairing is a local issue tracker
+outright, before bootstrap, on the work-dispatch verbs (`dispatch`,
+`recover`) — a no-repo work dispatch has no repo to branch from or land a
+PR onto, so the flag is refused rather than silently ignored. The natural pairing is a local issue tracker
 (`ISSUE_TRACKER=local`) supplying the self-contained content with no forge
 repo configured at all, though nothing enforces that pairing; a GitHub
 issue tracker with `--self-contained` works too; only the repo clone is
