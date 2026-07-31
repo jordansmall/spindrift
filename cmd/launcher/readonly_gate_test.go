@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/forge/forgejo"
 	"spindrift.dev/launcher/internal/forge/github"
 	"spindrift.dev/launcher/internal/forge/local"
 )
@@ -169,6 +170,39 @@ func TestReadOnlyCapabilityGate_GithubTrackerSatisfiesHostPostedIssueFiler(t *te
 	it := github.NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
 	if err := checkReadOnlyCapabilityGate(c, cf, it); err != nil {
 		t.Errorf("checkReadOnlyCapabilityGate() with the real github tracker = %v, want nil", err)
+	}
+}
+
+// TestReadOnlyCapabilityGate_ForgejoReadOnlyAdapterSatisfies verifies the
+// closing acceptance criterion of issue #1964: the real
+// forgejo.NewReadOnlyForgejoCodeForge adapter — not a synthetic test fixture
+// — implements both BundleRelay and DraftPRCreator, so the capability gate
+// passes for the concrete adapter newCodeForge wires up for CODE_FORGE=forgejo,
+// mirroring TestReadOnlyCapabilityGate_GithubReadOnlyAdapterSatisfies.
+func TestReadOnlyCapabilityGate_ForgejoReadOnlyAdapterSatisfies(t *testing.T) {
+	c := minimalValidConfig()
+	c.boxForgeAndIssueAccess = "read-only"
+	cf := forgejo.NewReadOnlyForgejoCodeForge(forgejo.ForgejoCodeForgeConfig{Repo: "owner/repo"})
+	it := forgejo.NewForgejoClient(forgejo.ForgejoConfig{Repo: "owner/repo"})
+	if err := checkReadOnlyCapabilityGate(c, cf, it); err != nil {
+		t.Errorf("checkReadOnlyCapabilityGate() with the real forgejo read-only adapter = %v, want nil", err)
+	}
+}
+
+// TestReadOnlyCapabilityGate_ForgejoTrackerSatisfiesHostPostedIssueFiler
+// verifies the closing acceptance criterion of issue #1964: the real forgejo
+// tracker (forgejo.NewForgejoClient, ISSUE_TRACKER=forgejo) — not a
+// synthetic fake — implements forge.HostPostedIssueFiler, so the gate's
+// issue-filing axis passes for the concrete tracker newIssueTracker wires
+// up, mirroring TestReadOnlyCapabilityGate_GithubTrackerSatisfiesHostPostedIssueFiler.
+func TestReadOnlyCapabilityGate_ForgejoTrackerSatisfiesHostPostedIssueFiler(t *testing.T) {
+	c := minimalValidConfig()
+	c.boxForgeAndIssueAccess = "read-only"
+	c.issueTracker = "forgejo"
+	cf := forgejo.NewReadOnlyForgejoCodeForge(forgejo.ForgejoCodeForgeConfig{Repo: "owner/repo"})
+	it := forgejo.NewForgejoClient(forgejo.ForgejoConfig{Repo: "owner/repo"})
+	if err := checkReadOnlyCapabilityGate(c, cf, it); err != nil {
+		t.Errorf("checkReadOnlyCapabilityGate() with the real forgejo tracker = %v, want nil", err)
 	}
 }
 
