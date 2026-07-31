@@ -1402,6 +1402,38 @@ curl -fsS -H "Authorization: token ${FORGEJO_TOKEN}" \
   | jq -r '.[-10:][] | "\(.user.login) (\(.created_at)): \(.body)"'
 ```
 
+#### Forgejo integration harness
+
+The httptest contract suite (`TestForgejoClient_TrackerContract`,
+`TestForgejoCodeForge_PRForgeContract`) pins the adapter's behaviour against a
+fake that mirrors the adapter's own expectations back at it — fast, hermetic,
+and part of the default gate, but structurally unable to catch the adapter
+drifting from Forgejo's *real* wire format, because the fake drifts along with
+it. The **integration harness** closes that gap: it boots a throwaway Forgejo
+from its published OCI image, seeds a repo, an issue, and both label families,
+and drives one real dispatch loop — claim, work, PR, merge, complete — entirely
+through the real IssueTracker and CodeForge/PRForge adapters, asserting the
+canonical lifecycle at each step. A deliberate API-shape regression in the
+adapter (a renamed JSON tag, a changed REST path) fails the harness where the
+contract suite stays green.
+
+It is **opt-in and excluded from the default check gate**: it lives behind the
+`integration` build tag, so `nix build .#checks-inbox`, `nix flake check`, and a
+plain `go test ./...` never compile it, and it self-skips wherever no container
+daemon is reachable (including this repo's own dogfood Box, which has none).
+Run it explicitly, **pre-release or on demand**, on a host with `podman` or
+`docker` and network egress to pull the image:
+
+```sh
+go test -tags integration -run TestForgejoIntegration ./cmd/launcher/internal/forge/forgejo/
+```
+
+One command boots, seeds, runs the loop, asserts, and tears the container down
+— no external service and no credential beyond the throwaway admin account the
+test itself creates inside the disposable, localhost-only instance. The image
+defaults to `codeberg.org/forgejo/forgejo:11`; set `SPINDRIFT_FORGEJO_IMAGE` to
+pin a different tag or a local mirror.
+
 #### Merge guard
 
 Between CI going green and the merge itself, the launcher checks the PR's
