@@ -3,6 +3,8 @@ package dispatch
 import (
 	"fmt"
 	"os"
+
+	"spindrift.dev/launcher/internal/outcome"
 )
 
 // PassLog names one log file belonging to a Dispatch's history — the
@@ -36,6 +38,39 @@ func LogPaths(pwd, number string) []PassLog {
 		out = append(out, PassLog{Label: "conflict-resolve", Path: p})
 	}
 	return out
+}
+
+// LastSelfReportFromLogs recovers, from disk, the driver's last genuine
+// (non-synthetic) leading-token SPINDRIFT_OUTCOME self-report for issue
+// number under pwd — the same signal outcomeResult (retry.go) surfaces as
+// Result.SelfReport for a live dispatch, but reconstructed after the fact for
+// callers like `spindrift recover` (issue #2225) whose original run's Box
+// has long since exited.
+//
+// It walks LogPaths(pwd, num) in chronological order and keeps the last
+// self-report found across all pass logs, so a later pass (e.g. a fix pass)
+// overrides an earlier one exactly as outcomeResult does within one log.
+// A per-pass scan error is reported to stderr in the house diagnostic style
+// and does not abort the walk — later passes are still consulted. Returns
+// (SelfReport{}, false) when no pass log carried a non-synthetic
+// leading-token line at all.
+func LastSelfReportFromLogs(pwd, num string) (outcome.SelfReport, bool) {
+	var (
+		last  outcome.SelfReport
+		found bool
+	)
+	for _, pl := range LogPaths(pwd, num) {
+		report, ok, err := outcome.LastSelfReportInLog(pl.Path)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "    ?? #%s: self-report scan: %v\n", num, err)
+			continue
+		}
+		if ok {
+			last = report
+			found = true
+		}
+	}
+	return last, found
 }
 
 func fileExists(path string) bool {
