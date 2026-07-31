@@ -126,11 +126,12 @@ type forgejoLabel struct {
 // forgejoIssuePayload is the subset of the Forgejo issue REST representation
 // this adapter reads.
 type forgejoIssuePayload struct {
-	Number int            `json:"number"`
-	Title  string         `json:"title"`
-	Body   string         `json:"body"`
-	State  string         `json:"state"`
-	Labels []forgejoLabel `json:"labels"`
+	Number  int            `json:"number"`
+	Title   string         `json:"title"`
+	Body    string         `json:"body"`
+	State   string         `json:"state"`
+	Labels  []forgejoLabel `json:"labels"`
+	HTMLURL string         `json:"html_url"`
 }
 
 // issueState maps Forgejo's "open"/"closed" state string to the canonical
@@ -394,6 +395,29 @@ func (c *forgejoClient) Comment(num, body string) error {
 		return fmt.Errorf("forgejo: comment %s: unexpected status %d", num, status)
 	}
 	return nil
+}
+
+// PostIssue implements forge.HostPostedIssueFiler (issue #1964): it files a
+// new issue against this adapter's own repo and returns the created issue's
+// html_url. Forgejo's issue-creation endpoint wants label IDs rather than
+// names, so labels are applied in a second call via setLabels (which accepts
+// names), avoiding label-ID bookkeeping.
+func (c *forgejoClient) PostIssue(title, body string, labels []string) (string, error) {
+	var payload forgejoIssuePayload
+	status, err := c.do(http.MethodPost, c.repoPath()+"/issues",
+		map[string]any{"title": title, "body": body}, &payload)
+	if err != nil {
+		return "", err
+	}
+	if status < 200 || status >= 300 {
+		return "", fmt.Errorf("forgejo: post issue: unexpected status %d", status)
+	}
+	if len(labels) > 0 {
+		if err := c.setLabels(strconv.Itoa(payload.Number), labels); err != nil {
+			return "", err
+		}
+	}
+	return payload.HTMLURL, nil
 }
 
 // StateLabels implements forge.LabeledTracker, returning the DispatchLabels
