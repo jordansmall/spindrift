@@ -10,9 +10,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"spindrift.dev/launcher/internal/doctor"
 	"spindrift.dev/launcher/internal/forge"
@@ -166,6 +168,13 @@ var spindriftBuildArgs = []string{"nix", "develop", "--command", "spindrift", "b
 // substitute a forge.Fake instead of shelling out to gh/Jira for real.
 type ForgeBuilder func(repoSlug string, tracker trackerSettings, ghToken, jiraToken, forgejoToken string) (forge.IssueTracker, forge.CodeForge)
 
+// forgejoProbeTimeout bounds the HTTP client the forgejo IssueTracker uses
+// for the interactive token-validation ping (acquireForgejoToken's Probe
+// call), so an unreachable or hung Forgejo host can't block the wizard
+// forever. Mirrors defaultForgejoProbeTimeout in the sibling Forgejo
+// CodeForge adapter.
+const forgejoProbeTimeout = 30 * time.Second
+
 // buildForge is the production ForgeBuilder. The Code Forge is github by
 // default (ADR 0027: Quickstart never prompts for it) except for the
 // forgejo case, which builds both the IssueTracker and CodeForge seams
@@ -191,10 +200,11 @@ func buildForge(repoSlug string, tracker trackerSettings, ghToken, jiraToken, fo
 		return local.NewLocalTracker(tracker.localIssuesDir, defaultDispatchLabels), cf
 	case "forgejo":
 		it := forgejo.NewForgejoClient(forgejo.ForgejoConfig{
-			BaseURL: tracker.forgejoBaseURL,
-			Repo:    repoSlug,
-			Token:   forgejoToken,
-			Labels:  defaultDispatchLabels,
+			BaseURL:    tracker.forgejoBaseURL,
+			Repo:       repoSlug,
+			Token:      forgejoToken,
+			Labels:     defaultDispatchLabels,
+			HTTPClient: &http.Client{Timeout: forgejoProbeTimeout},
 		})
 		cf := forgejo.NewForgejoCodeForge(forgejo.ForgejoCodeForgeConfig{
 			BaseURL:      tracker.forgejoBaseURL,
