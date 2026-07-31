@@ -46,7 +46,7 @@ label_id() {
 # error rather than a silent skip.
 read -ra add_arr <<<"$add_labels"
 add_ids=()
-for name in "${add_arr[@]}"; do
+for name in ${add_arr[@]+"${add_arr[@]}"}; do
   id=$(label_id "$name")
   if [ -z "$id" ]; then
     echo "::error::label not found on ${SWAP_REPO}: ${name} (run 'spindrift doctor' to create the lifecycle labels)" >&2
@@ -67,7 +67,7 @@ fi
 # unresolved id instead of failing the step — an unpaired DELETE on an empty id
 # would hit .../labels/ and 404, killing the workflow.
 read -ra rm_arr <<<"$remove_labels"
-for name in "${rm_arr[@]}"; do
+for name in ${rm_arr[@]+"${rm_arr[@]}"}; do
   id=$(label_id "$name")
   [ -z "$id" ] && continue
   curl -fsS -X DELETE -H "$auth" "${api}/issues/${SWAP_ISSUE}/labels/${id}" >/dev/null
