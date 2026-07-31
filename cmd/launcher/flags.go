@@ -275,7 +275,7 @@ func parseFlags(args []string) ([]string, error) {
 			continue
 		}
 		// Dispatch-only boolean flags: pass through to the verb handler.
-		if arg == "--no-build" || arg == "--yes" || arg == "--force" {
+		if arg == "--no-build" || arg == "--yes" || arg == "--force" || arg == "--self-contained" {
 			remaining = append(remaining, arg)
 			i++
 			continue

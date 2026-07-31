@@ -100,6 +100,16 @@ setup() {
   grep -q -- 'issue edit 1 --repo owner/repo --add-label agent-research-in-progress' "$GH_LOG"
 }
 
+@test "research --self-contained forwards SELF_CONTAINED=1 and still posts a verdict" {
+  export FAKE_PODMAN_IMAGE_PRESENT=1
+  export FAKE_GH_ISSUES=$'1\tOnly issue'
+  export FAKE_PODMAN_OUTCOME_1="SPINDRIFT_OUTCOME issue=1 landing=https://github.com/owner/repo/issues/1#issuecomment-1 status=recommend note=self-contained analysis"
+  run "$SPINDRIFT_CMD" research --self-contained --yes 1
+  [ "$status" -eq 0 ]
+  grep -q 'SELF_CONTAINED=1' "$PODMAN_LOG"
+  grep -q -- 'issue edit 1 --repo owner/repo --add-label agent-research-recommend --remove-label agent-research-in-progress' "$GH_LOG"
+}
+
 @test "research never touches the work label family" {
   export FAKE_PODMAN_IMAGE_PRESENT=1
   run "$SPINDRIFT_CMD" research
