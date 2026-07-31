@@ -740,7 +740,7 @@ exceptions.
 | `ANTHROPIC_API_KEY`       | —                      | alternative to the OAuth token (secret; env only) |
 | `GIT_USER_NAME`           | host `git config`; baked via `settings.repository.gitUserName` | commit author name (applied repo-locally inside the Box — see [Hermetic git config](#hermetic-git-config)) |
 | `GIT_USER_EMAIL`          | host `git config`; baked via `settings.repository.gitUserEmail` | commit author email (applied repo-locally inside the Box — see [Hermetic git config](#hermetic-git-config)) |
-| `CODE_FORGE`              | `github` (baked)       | code-landing backend: `github` (open PR, watch CI, merge), `git` (push-only to `CODE_FORGE_REMOTE_URL`; no PR, CI-watch, or merge gate — see [ADR 0013](../docs/adr/0013-issue-tracker-and-code-forge-are-independent-seams.md)), `local` (host-mediated landing onto the Accumulation repo's Integration branch; no PR, CI-watch, or network — see [ADR 0033](../docs/adr/0033-host-mediated-local-code-forge.md)), or `forgejo` (push-only to a Forgejo/Gitea instance authenticated by `FORGEJO_TOKEN`; agent branch, rebase, and merge under `MERGE_MODE`, no PR surface yet — see [ADR 0038](../docs/adr/0038-the-forgejo-backend-decision-set.md)) |
+| `CODE_FORGE`              | `github` (baked)       | code-landing backend: `github` (open PR, watch CI, merge), `git` (push-only to `CODE_FORGE_REMOTE_URL`; no PR, CI-watch, or merge gate — see [ADR 0013](../docs/adr/0013-issue-tracker-and-code-forge-are-independent-seams.md)), `local` (host-mediated landing onto the Accumulation repo's Integration branch; no PR, CI-watch, or network — see [ADR 0033](../docs/adr/0033-host-mediated-local-code-forge.md)), or `forgejo` (open a PR via `fj pr create`, watch the CI rollup, and rebase-merge under `MERGE_MODE` on a Forgejo/Gitea instance authenticated by `FORGEJO_TOKEN` — the second full `PRForge` backend beside `github`; see [ADR 0038](../docs/adr/0038-the-forgejo-backend-decision-set.md)) |
 | `CODE_FORGE_REMOTE_URL`   | — (required when `CODE_FORGE=git`) | plain git remote URL to clone from and push to (self-hosted git, gitea, GitLab-without-MRs, a bare server repo) |
 | `CODE_FORGE_ACCUMULATION_REPO_DIR` | `.spindrift/accum.git` under the launcher's working directory when `CODE_FORGE=local` (auto-created and seeded); an explicit value overrides it | host path to the bare Accumulation repo, mounted read-only into the Box and landed into host-side |
 | `BOX_FORGE_AND_ISSUE_ACCESS` | `read-write` (baked)   | a third axis, orthogonal to `CODE_FORGE`/`ISSUE_TRACKER` (issue #1914): `read-write` (the Box writes directly, unchanged) or `read-only` (the Launcher host-mediates every write instead — see [Read-only Box](#read-only-box-box_forge_and_issue_accessread-only)), gated at startup by capability — `read-only` is permitted only when the selected forge implements bundle-relay and host-side draft-PR-create and the selected tracker implements host-posted comments; `local` and `github` both satisfy the gate today |
@@ -754,10 +754,10 @@ exceptions.
 | `IN_PROGRESS_LABEL`       | `agent-in-progress` (baked) | label a dispatched issue is swapped to |
 | `FAILED_LABEL`            | `agent-failed` (baked) | label an issue gets when its Box fails or its PR can't merge |
 | `COMPLETE_LABEL`          | `agent-complete` (baked) | label the launcher swaps on when CI reaches green (agent is done; the merge is a separate step) |
-| `MERGE_MODE`              | `manual` (baked)       | post-green merge policy: `manual` (leave the green PR for a human), `immediate` (rebase-merge on green), `auto` (enqueue GitHub native auto-merge — repo must have *Allow auto-merge* on). Under `CODE_FORGE=git`, `manual`/`immediate` map to remote pushes instead (leave the pushed branch / push straight to the target branch); `auto` has no meaning off `github` and fails fast at startup. Under `CODE_FORGE=local`, only `immediate` relays the seam bundle into the Accumulation repo — `manual`/`auto` have no meaning under `local` and fail fast at startup. |
+| `MERGE_MODE`              | `manual` (baked)       | post-green merge policy: `manual` (leave the green PR for a human), `immediate` (rebase-merge on green), `auto` (enqueue the forge's native auto-merge — meaningful on any `PRForge` backend, `github` or `forgejo`; the forge repo must have auto-merge enabled). Under `CODE_FORGE=git`, `manual`/`immediate` map to remote pushes instead (leave the pushed branch / push straight to the target branch); `auto` has no meaning off a `PRForge` backend and fails fast at startup. Under `CODE_FORGE=local`, only `immediate` relays the seam bundle into the Accumulation repo — `manual`/`auto` have no meaning under `local` and fail fast at startup. |
 | `MERGE_METHOD`            | `rebase` (baked)       | how the final integration commits land on green: `merge` (merge commit), `squash`, or `rebase`; maps to GitHub's native `merge_method` (`github` Code Forge merge path only) |
 | `SYNC_METHOD`             | `rebase` (baked)       | how a behind branch is brought current before landing: `rebase` (linear history) or `merge` (merge the base in); governs both the preflight-stale-base proactive sync and the reactive on-conflict sync during an immediate merge (`github` Code Forge PR-landing path only) |
-| `MERGE_GUARD_PATHS`       | `.github/**,.forgejo/**,**/CLAUDE.md,**/AGENTS.md,.claude/**,.opencode/**` (baked) | comma-separated globs; a green PR touching a matched path downgrades to manual regardless of `MERGE_MODE` (`github` Code Forge only; empty disables — see [Merge guard](#merge-guard)) |
+| `MERGE_GUARD_PATHS`       | `.github/**,.forgejo/**,**/CLAUDE.md,**/AGENTS.md,.claude/**,.opencode/**` (baked) | comma-separated globs; a green PR touching a matched path downgrades to manual regardless of `MERGE_MODE` (`github` and `forgejo` Code Forges only; empty disables — see [Merge guard](#merge-guard)) |
 | `MODEL`                   | `claude-opus-4-8` (baked) | main/coordinator Claude model the in-container agent runs (worker-tier defaults are unaffected) |
 | `SCOUT_MODEL`             | `claude-haiku-4-5-20251001` (baked) | scout subagent model tier (empty drops the scout entry from `--agents`). **Deprecated** — superseded by the [`roster`](#subagent-roster) option |
 | `REVIEW_MODEL`            | `claude-opus-4-8` (baked) | reviewer subagent model tier (empty drops the reviewer entry from `--agents`). **Deprecated** — superseded by the [`roster`](#subagent-roster) option |
@@ -1088,7 +1088,7 @@ spindrift dispatch   (the nix-built Go launcher, host-side)
            │           immediate → rebase-merge the PR now (rebase-retry and
            │                       an agent conflict-resolve box keep the
            │                       issue agent-in-progress until this settles)
-           │           auto      → enqueue GitHub native auto-merge
+           │           auto      → enqueue the forge's native auto-merge
            ├─ red   → capture the failed checks + a bounded log excerpt
            │          (best-effort), then dispatch fix boxes (up to
            │          MAX_FIX_ATTEMPTS, each driving prompts/fix-prompt.md
@@ -1141,7 +1141,7 @@ replaces everything from *open PR* onward: the Box pushes its branch to
 nothing to poll) and swaps the issue straight to `agent-complete`, then
 applies `MERGE_MODE` as a plain push: `manual` leaves the branch as pushed,
 `immediate` merges it onto the target branch. `auto` has no meaning off
-`github` and is rejected at startup.
+a `PRForge` backend and is rejected at startup.
 
 `immediate`'s merge-and-push to `CODE_FORGE_REMOTE_URL` runs on the
 **launcher host** (a throwaway local clone, not inside a Box), reusing
@@ -1502,9 +1502,9 @@ own PR bypasses the launcher-side check entirely. See
 [ADR 0016](adr/0016-merge-guard-bounds-drift-not-adversaries.md) for that
 boundary and the two-actor-separation hard mode.
 
-The guard exists **only on the `github` Code Forge merge path**. The
-push-only `git` forge has no launcher in the merge path and therefore no
-guard at all.
+The guard exists on the `github` and `forgejo` Code Forge merge paths (both
+implement `PRForge`). The push-only `git` forge has no launcher in the merge
+path and therefore no guard at all.
 
 Configure it via `settings.branches.mergeGuardPaths` (baked) or the
 `MERGE_GUARD_PATHS` env var (runtime) — see the [flake options
@@ -1724,8 +1724,8 @@ swallowed rather than blocking the merge; the ordinary `Merge` call surfaces
 any real problem through its already-tested error handling.
 
 This is a launcher-side sanity check, not an adversary-proof gate, and it
-exists only on the `github` Code Forge merge path for the same reason the
-merge guard does — see [ADR
+exists on the `github` and `forgejo` Code Forge merge paths for the same reason
+the merge guard does — see [ADR
 0026](adr/0026-preflight-stale-base-before-merge.md) for the root-cause
 writeup and the trade-off against gating GitHub branch protection or
 downgrading every stale PR to manual, and [ADR
