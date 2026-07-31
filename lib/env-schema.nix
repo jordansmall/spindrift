@@ -444,7 +444,7 @@
   boxForgejoToken = {
     env = "BOX_FORGEJO_TOKEN";
     secret = true;
-    doc = "opt-in two-actor separation (ADR 0016 analog): a second machine user's Forgejo PAT for the Box only — the launcher keeps using its own FORGEJO_TOKEN for merges, labels, and all host-side forge calls, while the Box receives this value as its FORGEJO_TOKEN instead; empty (default) leaves the single-token flow unchanged. Pair with Forgejo branch protection barring this user from updating the base branch";
+    doc = "opt-in two-actor separation (ADR 0016 analog): a second machine user's Forgejo PAT for the Box only — the launcher keeps using its own FORGEJO_TOKEN for merges, labels, and all host-side forge calls, while the Box receives this value as its FORGEJO_TOKEN instead; empty (default) leaves the single-token flow unchanged. Pair with a Forgejo branch-protection rule that bars this user from updating the base branch and whitelists only the launcher's user for push and merge — see docs/reference.md's Forgejo two-actor separation recipe";
     boxEnv = false;
   };
   gitUserName = {
