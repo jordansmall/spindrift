@@ -79,6 +79,9 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, w io.Writer, stdin
 	if c.IssueTracker == "jira" {
 		tokenHint, slugHint = "JIRA_TOKEN", "JIRA_BASE_URL / JIRA_PROJECT_KEY"
 	}
+	if c.IssueTracker == "forgejo" {
+		tokenHint, slugHint = "FORGEJO_TOKEN", "FORGEJO_BASE_URL"
+	}
 	repo, err := it.Probe()
 	if err != nil {
 		if errors.Is(err, forge.ErrAuthFailure) {
