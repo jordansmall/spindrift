@@ -47,33 +47,46 @@ jobs:
       FORGEJO_BASE_URL: ${{ vars.FORGEJO_BASE_URL || 'https://codeberg.org' }}
       FORGEJO_TOKEN: ${{ secrets.FORGEJO_TOKEN }}
     steps:
-      # Checkout must precede the local composite step below: Forgejo resolves
-      # ./.github/actions/agent-setup from the checked-out tree.
+      # Checkout must precede the local composite steps below: Forgejo resolves
+      # ./.github/actions/* from the checked-out tree.
       - uses: actions/checkout@v4
 
-      # Claim, Install Nix, and build — plus the plumbing env (RUNTIME +
-      # tokens) written to the job env and the bot identity surfaced as step
-      # outputs for the recover flags below. The claim normalises onto
-      # agent-in-progress up front so recover's terminal swaps (which read from
+      # Claim up front through the forgejo-label-swap composite (Forgejo REST) —
+      # the GitHub workflow does this inside agent-setup via `gh issue edit`, but
+      # `gh` cannot authenticate against a Forgejo runner. The claim normalises
+      # onto agent-in-progress so recover's terminal swaps (which read from
       # agent-in-progress) have the state they expect: it strips every other
       # lifecycle label so the issue lands cleanly on agent-in-progress
-      # regardless of prior state. Removing agent-recover self-clears the
-      # trigger (no re-fire); removing the terminal labels makes a
-      # retry-from-agent-failed / re-run-on-agent-complete start clean;
-      # removing ready-for-agent keeps a concurrent dispatch from grabbing it;
-      # removing agent-trigger drops a stale dispatch trigger that never fired.
-      # Auth is the single `FORGEJO_TOKEN` repository secret: Forgejo has no
-      # App-installation token to mint and its PATs do not expire (ADR 0038).
+      # regardless of prior state. Removing agent-recover self-clears the trigger
+      # (no re-fire); removing the terminal labels makes a
+      # retry-from-agent-failed / re-run-on-agent-complete start clean; removing
+      # ready-for-agent keeps a concurrent dispatch from grabbing it; removing
+      # agent-trigger drops a stale dispatch trigger that never fired.
+      - name: Claim the issue
+        uses: ./.github/actions/forgejo-label-swap
+        with:
+          base-url: ${{ env.FORGEJO_BASE_URL }}
+          token: ${{ secrets.FORGEJO_TOKEN }}
+          repo: ${{ github.repository }}
+          issue-number: ${{ github.event.issue.number }}
+          add-labels: agent-in-progress
+          remove-labels: agent-recover agent-failed agent-complete ready-for-agent agent-trigger
+
+      # Install Nix and build — plus the plumbing env (RUNTIME + tokens) written
+      # to the job env and the bot identity surfaced as step outputs for the
+      # recover flags below. `forge: forgejo` skips agent-setup's GitHub-only
+      # rate-limit smoke and `gh` claim (that claim ran above). Auth is the
+      # single `FORGEJO_TOKEN` repository secret: Forgejo has no App-installation
+      # token to mint and its PATs do not expire (ADR 0038).
       - name: Agent setup
         id: setup
         uses: ./.github/actions/agent-setup
         with:
+          forge: forgejo
           gh-token: ${{ secrets.FORGEJO_TOKEN }}
           claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           issue-number: ${{ github.event.issue.number }}
           repo: ${{ github.repository }}
-          claim-add-label: agent-in-progress
-          claim-remove-labels: agent-recover agent-failed agent-complete ready-for-agent agent-trigger
           git-user-name: ${{ vars.AGENT_GIT_USER_NAME }}
           git-user-email: ${{ vars.AGENT_GIT_USER_EMAIL }}
 
@@ -96,24 +109,24 @@ jobs:
       # outcome so a failed build/install does NOT mislabel the issue). Park to
       # agent-failed for human triage and say why — the claim already moved it
       # off agent-recover, so without this it would sit silently on
-      # agent-in-progress with nothing running. fj has no label verb and is not
-      # guaranteed on the runner, so the comment and label swap go through curl
-      # against the Forgejo REST API.
+      # agent-in-progress with nothing running. The comment and label swap run
+      # through the forgejo-label-swap composite (Forgejo REST); `fj` has no
+      # label verb and is not guaranteed on the runner.
       - name: Park if nothing to recover
         if: always() && steps.recover.outcome == 'failure'
-        run: |
-          api="${FORGEJO_BASE_URL%/}/api/v1/repos/${{ github.repository }}"
-          issue="${{ github.event.issue.number }}"
-          auth="Authorization: token ${FORGEJO_TOKEN}"
-          curl -fsS -X POST -H "$auth" -H "Content-Type: application/json" \
-            "${api}/issues/${issue}/comments" \
-            -d "$(jq -n --arg b "⚠️ \`spindrift recover\` found nothing to adopt — no open non-draft PR on \`agent/issue-${issue}\`. Parked to \`agent-failed\`; re-label \`agent-recover\` once an open PR exists, or \`ready-for-agent\` to re-dispatch from scratch." '{body: $b}')" >/dev/null
-          labels=$(curl -fsS -H "$auth" "${api}/labels")
-          failed_id=$(printf '%s' "$labels" | jq '.[] | select(.name == "agent-failed") | .id')
-          inprog_id=$(printf '%s' "$labels" | jq '.[] | select(.name == "agent-in-progress") | .id')
-          curl -fsS -X POST -H "$auth" -H "Content-Type: application/json" \
-            "${api}/issues/${issue}/labels" -d "{\"labels\": [${failed_id}]}" >/dev/null
-          curl -fsS -X DELETE -H "$auth" "${api}/issues/${issue}/labels/${inprog_id}" >/dev/null
+        uses: ./.github/actions/forgejo-label-swap
+        with:
+          base-url: ${{ env.FORGEJO_BASE_URL }}
+          token: ${{ secrets.FORGEJO_TOKEN }}
+          repo: ${{ github.repository }}
+          issue-number: ${{ github.event.issue.number }}
+          add-labels: agent-failed
+          remove-labels: agent-in-progress
+          comment: >-
+            ⚠️ `spindrift recover` found nothing to adopt — no open non-draft PR
+            on `agent/issue-${{ github.event.issue.number }}`. Parked to
+            `agent-failed`; re-label `agent-recover` once an open PR exists, or
+            `ready-for-agent` to re-dispatch from scratch.
 
       - name: Upload run logs
         if: always()

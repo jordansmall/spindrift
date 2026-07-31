@@ -9,7 +9,21 @@ description: >-
   call this so the claim/install/build steps and the git bot identity literal
   exist exactly once.
 
+  The `forge` input selects the control plane: on the default `github` the
+  action runs the GitHub rate-limit smoke test and the `gh issue edit` claim; on
+  `forgejo` it skips both, because `gh` and api.github.com have no analog on a
+  Codeberg/Forgejo runner — the .forgejo/workflows set claims the issue itself
+  through the forgejo-label-swap composite before calling this action (issue
+  #1967). The install/build/env/identity steps run identically on either forge.
+
 inputs:
+  forge:
+    description: >-
+      Control plane this run targets — `github` (default) or `forgejo`. On
+      `forgejo` the GitHub-only rate-limit smoke and `gh` claim steps are
+      skipped; the caller claims the issue via the forgejo-label-swap composite.
+    required: false
+    default: github
   gh-token:
     description: Token for gh CLI calls (claim step and exported GH_TOKEN)
     required: true
@@ -23,11 +37,17 @@ inputs:
     description: owner/repo slug for the claim step's gh calls
     required: true
   claim-add-label:
-    description: Label to add when claiming the issue
-    required: true
+    description: >-
+      Label to add when claiming the issue (github forge only — the forgejo
+      forge claims via forgejo-label-swap, so it leaves this empty).
+    required: false
+    default: ""
   claim-remove-labels:
-    description: Space-separated labels to remove when claiming the issue
-    required: true
+    description: >-
+      Space-separated labels to remove when claiming the issue (github forge
+      only — see claim-add-label).
+    required: false
+    default: ""
   git-user-name:
     description: >-
       Bot git user.name. Empty falls back to the default baked into this
@@ -98,6 +118,10 @@ runs:
     # name can't be set dynamically, so the job summary is the only surface
     # that shows the numbers without expanding this step's log.
     - name: Rate-limit smoke test
+      # GitHub-only: `gh api rate_limit` targets api.github.com, which a Forgejo
+      # token cannot authenticate against. The forgejo forge skips it (issue
+      # #1967).
+      if: inputs.forge != 'forgejo'
       shell: bash
       env:
         # Floor below which starting a run risks mid-run exhaustion — the
@@ -125,6 +149,10 @@ runs:
     # only the triggering issue: never scans or strips labels across other
     # issues.
     - name: Claim the issue
+      # GitHub-only: `gh issue edit` targets api.github.com. The forgejo forge
+      # claims the issue itself via the forgejo-label-swap composite before
+      # calling this action, so this step is skipped there (issue #1967).
+      if: inputs.forge != 'forgejo'
       shell: bash
       run: |
         remove_args=()

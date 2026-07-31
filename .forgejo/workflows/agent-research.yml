@@ -47,14 +47,35 @@ jobs:
       FORGEJO_BASE_URL: ${{ vars.FORGEJO_BASE_URL || 'https://codeberg.org' }}
       FORGEJO_TOKEN: ${{ secrets.FORGEJO_TOKEN }}
     steps:
-      # Checkout must precede the local composite step below: Forgejo resolves
-      # ./.github/actions/agent-setup from the checked-out tree.
+      # Checkout must precede the local composite steps below: Forgejo resolves
+      # ./.github/actions/* from the checked-out tree.
       - uses: actions/checkout@v4
 
-      # Claim (agent-research -> agent-research-in-progress, up front so
-      # ownership is atomic before the build), Install Nix, and build — plus
-      # the plumbing env (RUNTIME + tokens) written to the job env and the bot
-      # identity surfaced as step outputs for the research flags below.
+      # Claim up front (agent-research -> agent-research-in-progress) through the
+      # forgejo-label-swap composite (Forgejo REST) — the GitHub workflow does
+      # this inside agent-setup via `gh issue edit`, but `gh` cannot
+      # authenticate against a Forgejo runner. Strip only the research-family
+      # labels (ADR 0022): the claim never touches
+      # ready-for-agent/agent-in-progress/agent-complete/agent-failed — an issue
+      # wearing a work lifecycle label keeps it through a research claim, since
+      # the two kinds are disjoint and a research dispatch may legitimately run
+      # alongside a work dispatch on the same issue.
+      - name: Claim the issue
+        uses: ./.github/actions/forgejo-label-swap
+        with:
+          base-url: ${{ env.FORGEJO_BASE_URL }}
+          token: ${{ secrets.FORGEJO_TOKEN }}
+          repo: ${{ github.repository }}
+          issue-number: ${{ github.event.issue.number }}
+          add-labels: agent-research-in-progress
+          remove-labels: >-
+            agent-research agent-research-recommend agent-research-reject
+            agent-research-unclear agent-research-failed
+
+      # Install Nix and build — plus the plumbing env (RUNTIME + tokens) written
+      # to the job env and the bot identity surfaced as step outputs for the
+      # research flags below. `forge: forgejo` skips agent-setup's GitHub-only
+      # rate-limit smoke and `gh` claim (that claim ran above).
       #
       # Token: the single `FORGEJO_TOKEN` repository secret. Forgejo has no App
       # model, so the GitHub workflow's optional research-App mint (and its PAT
@@ -65,20 +86,11 @@ jobs:
         id: setup
         uses: ./.github/actions/agent-setup
         with:
+          forge: forgejo
           gh-token: ${{ secrets.FORGEJO_TOKEN }}
           claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           issue-number: ${{ github.event.issue.number }}
           repo: ${{ github.repository }}
-          claim-add-label: agent-research-in-progress
-          # Strip only the research-family labels (ADR 0022): the claim never
-          # touches ready-for-agent/agent-in-progress/agent-complete/
-          # agent-failed — an issue wearing a work lifecycle label keeps it
-          # through a research claim, since the two kinds are disjoint and a
-          # research dispatch may legitimately run alongside a work dispatch
-          # on the same issue.
-          claim-remove-labels: >-
-            agent-research agent-research-recommend agent-research-reject
-            agent-research-unclear agent-research-failed
           git-user-name: ${{ vars.AGENT_GIT_USER_NAME }}
           git-user-email: ${{ vars.AGENT_GIT_USER_EMAIL }}
 

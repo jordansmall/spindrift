@@ -42,33 +42,47 @@ jobs:
       FORGEJO_BASE_URL: ${{ vars.FORGEJO_BASE_URL || 'https://codeberg.org' }}
       FORGEJO_TOKEN: ${{ secrets.FORGEJO_TOKEN }}
     steps:
-      # Checkout must precede the local composite step below: Forgejo resolves
-      # ./.github/actions/agent-setup from the checked-out tree.
+      # Checkout must precede the local composite steps below: Forgejo resolves
+      # ./.github/actions/* from the checked-out tree.
       - uses: actions/checkout@v4
 
-      # Claim (agent-trigger -> agent-in-progress, up front so ownership is
-      # atomic before the build), Install Nix, and build — plus the plumbing env
-      # (RUNTIME + tokens) written to the job env and the bot identity surfaced
-      # as step outputs for the dispatch flags below. Auth is the single
-      # `FORGEJO_TOKEN` repository secret: Forgejo has no App-installation token
-      # to mint and its PATs do not expire, so neither the App mint nor the
+      # Claim up front (agent-trigger -> agent-in-progress) so ownership is
+      # atomic before the ~2m40s build. The GitHub workflow does this inside
+      # agent-setup via `gh issue edit`, but `gh` targets api.github.com and a
+      # Forgejo token cannot authenticate there, so the claim runs through the
+      # forgejo-label-swap composite (Forgejo REST) instead — hence it precedes
+      # agent-setup here rather than living inside it. Strip every other
+      # lifecycle label, not just the trigger and ready-for-agent: a re-triggered
+      # issue may still carry a stale terminal label (agent-complete /
+      # agent-failed) or a leftover agent-recover, and the claim must land it
+      # cleanly on agent-in-progress regardless of what it was wearing before.
+      - name: Claim the issue
+        uses: ./.github/actions/forgejo-label-swap
+        with:
+          base-url: ${{ env.FORGEJO_BASE_URL }}
+          token: ${{ secrets.FORGEJO_TOKEN }}
+          repo: ${{ github.repository }}
+          issue-number: ${{ github.event.issue.number }}
+          add-labels: agent-in-progress
+          remove-labels: agent-trigger ready-for-agent agent-recover agent-complete agent-failed
+
+      # Install Nix and build — plus the plumbing env (RUNTIME + tokens) written
+      # to the job env and the bot identity surfaced as step outputs for the
+      # dispatch flags below. `forge: forgejo` skips agent-setup's GitHub-only
+      # rate-limit smoke and `gh` claim (that claim ran above). Auth is the
+      # single `FORGEJO_TOKEN` repository secret: Forgejo has no App-installation
+      # token to mint and its PATs do not expire, so neither the App mint nor the
       # gh-token-refresher the GitHub workflow carries has any analog here (ADR
       # 0038).
       - name: Agent setup
         id: setup
         uses: ./.github/actions/agent-setup
         with:
+          forge: forgejo
           gh-token: ${{ secrets.FORGEJO_TOKEN }}
           claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           issue-number: ${{ github.event.issue.number }}
           repo: ${{ github.repository }}
-          claim-add-label: agent-in-progress
-          # Strip every other lifecycle label, not just the trigger and
-          # ready-for-agent: a re-triggered issue may still carry a stale
-          # terminal label (agent-complete / agent-failed) or a leftover
-          # agent-recover, and the claim must land it cleanly on
-          # agent-in-progress regardless of what it was wearing before.
-          claim-remove-labels: agent-trigger ready-for-agent agent-recover agent-complete agent-failed
           git-user-name: ${{ vars.AGENT_GIT_USER_NAME }}
           git-user-email: ${{ vars.AGENT_GIT_USER_EMAIL }}
 
@@ -90,28 +104,42 @@ jobs:
 
       # The launcher parses the two blocker formats and, when this claimed issue
       # is blocked by an unmet dependency, drops logs/blocked.txt naming the
-      # blockers instead of working it. Undo the up-front claim (back to
-      # ready-for-agent) and say why. No recovery — the operator re-triggers once
-      # the blocker resolves. always() so a failed build (no marker) is a no-op.
-      # fj has no label verb and is not guaranteed on the runner, so the comment
-      # and label swap go through curl against the Forgejo REST API.
-      - name: Release the claim if blocked
+      # blockers instead of working it. Detect that marker, then undo the
+      # up-front claim (back to ready-for-agent) and say why. No recovery — the
+      # operator re-triggers once the blocker resolves. always() so a failed
+      # build (no marker) is a no-op. The label swap runs through the
+      # forgejo-label-swap composite (Forgejo REST); `fj` has no label verb and
+      # is not guaranteed on the runner.
+      - name: Detect a blocked marker
+        id: blocked
         if: always()
         run: |
-          [ -f logs/blocked.txt ] || exit 0
-          blockers=$(cat logs/blocked.txt)
-          api="${FORGEJO_BASE_URL%/}/api/v1/repos/${{ github.repository }}"
-          issue="${{ github.event.issue.number }}"
-          auth="Authorization: token ${FORGEJO_TOKEN}"
-          curl -fsS -X POST -H "$auth" -H "Content-Type: application/json" \
-            "${api}/issues/${issue}/comments" \
-            -d "$(jq -n --arg b "🚧 Agent made no changes: this issue is blocked by ${blockers} (not yet \`agent-complete\` or closed). Released back to \`ready-for-agent\`; re-trigger once the blocker is resolved." '{body: $b}')" >/dev/null
-          labels=$(curl -fsS -H "$auth" "${api}/labels")
-          ready_id=$(printf '%s' "$labels" | jq '.[] | select(.name == "ready-for-agent") | .id')
-          inprog_id=$(printf '%s' "$labels" | jq '.[] | select(.name == "agent-in-progress") | .id')
-          curl -fsS -X POST -H "$auth" -H "Content-Type: application/json" \
-            "${api}/issues/${issue}/labels" -d "{\"labels\": [${ready_id}]}" >/dev/null
-          curl -fsS -X DELETE -H "$auth" "${api}/issues/${issue}/labels/${inprog_id}" >/dev/null
+          if [ -f logs/blocked.txt ]; then
+            {
+              echo "blocked=true"
+              echo "blockers<<EOF"
+              cat logs/blocked.txt
+              echo "EOF"
+            } >> "$GITHUB_OUTPUT"
+          else
+            echo "blocked=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Release the claim if blocked
+        if: always() && steps.blocked.outputs.blocked == 'true'
+        uses: ./.github/actions/forgejo-label-swap
+        with:
+          base-url: ${{ env.FORGEJO_BASE_URL }}
+          token: ${{ secrets.FORGEJO_TOKEN }}
+          repo: ${{ github.repository }}
+          issue-number: ${{ github.event.issue.number }}
+          add-labels: ready-for-agent
+          remove-labels: agent-in-progress
+          comment: >-
+            🚧 Agent made no changes: this issue is blocked by
+            ${{ steps.blocked.outputs.blockers }} (not yet `agent-complete` or
+            closed). Released back to `ready-for-agent`; re-trigger once the
+            blocker is resolved.
 
       - name: Upload run logs
         if: always()
