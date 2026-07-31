@@ -764,7 +764,7 @@ exceptions.
 | `FILER_MODEL`             | `` (baked)             | filer subagent model tier; empty (default) means the filer is not provisioned — setting a model is the opt-in (recommended: `claude-haiku-4-5-20251001`); see [Filer](#filer). **Deprecated** — superseded by the [`roster`](#subagent-roster) option |
 | `WORKER_MODEL`            | `claude-sonnet-5` (baked) | implement-capable worker subagent model tier (empty drops the worker entry from `--agents`); the implementor prompt does not delegate to it yet. **Deprecated** — superseded by the [`roster`](#subagent-roster) option |
 | `IMAGE`                   | `spindrift:latest`     | image tag to run                         |
-| `SPINDRIFT_PROMPT_DIR`    | baked prompt store path | hot-override the mounted prompt dir (not bakeable) |
+| `SPINDRIFT_PROMPT_DIR`    | baked prompt store path | host directory mounted over `/agent/prompts` for zero-rebuild prompt iteration; declaratively configurable via the `perSystem.spindrift.agents.promptDir` flake option or `settings`, or hot-overridden at dispatch time via `--prompt-dir` / the env var |
 | `SPINDRIFT_SKILLS_DIR`    | baked skills store path | hot-override the mounted skills dir (not bakeable) |
 
 Every `settings`-baked knob above can be re-pointed at dispatch time with its
@@ -858,8 +858,8 @@ a missing/expired `OPENCODE_AUTH_CONTENT`, not just an auth problem.
 
 ### Advanced tuning
 
-These knobs are rarely changed. All except `SPINDRIFT_PROMPT_DIR`,
-`SPINDRIFT_SKILLS_DIR`, and `ISSUE_NUMBER` can be baked via `settings` (see
+These knobs are rarely changed. All except `SPINDRIFT_SKILLS_DIR` and
+`ISSUE_NUMBER` can be baked via `settings` (see
 [Option surface](#option-surface)) or overridden at dispatch time via
 `--flag` (env still works this release too, deprecated — ADR 0020). See
 `lib/env-schema.nix` for
