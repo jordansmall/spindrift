@@ -329,7 +329,36 @@ setup() {
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   grep -qF 'gh pr create --draft' "$CLAUDE_PROMPT_FILE"
+  ! grep -qF 'fj pr create' "$CLAUDE_PROMPT_FILE"
   ! grep -qF 'SPINDRIFT_PR_INTENT_BEGIN' "$CLAUDE_PROMPT_FILE"
+}
+
+# issue #1963: the OPEN A PULL REQUEST create step's read-write case further
+# forks on CODE_FORGE (OPEN_PR_CREATE_RW_GH/OPEN_PR_CREATE_RW_FORGEJO
+# computed in entrypoint.sh) -- a forgejo Box opens its draft PR with
+# `fj pr create`, never `gh pr create`.
+@test "OPEN A PULL REQUEST create step: forgejo read-write uses fj pr create, never gh pr create" {
+  export ISSUE_TRACKER=forgejo
+  export CODE_FORGE=forgejo
+  export WORK_DIR="$BATS_TEST_TMPDIR/work-open-pr-create-forgejo-read-write"
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -qF 'fj pr create' "$CLAUDE_PROMPT_FILE"
+  ! grep -qF 'gh pr create' "$CLAUDE_PROMPT_FILE"
+}
+
+# Read-only stays forge-agnostic (SPINDRIFT_PR_INTENT relay, issue #1963) --
+# a read-only forgejo Box must never render `fj pr create` either.
+@test "OPEN A PULL REQUEST create step: forgejo read-only stays forge-agnostic via SPINDRIFT_PR_INTENT, never fj pr create" {
+  export ISSUE_TRACKER=forgejo
+  export CODE_FORGE=forgejo
+  unset BOX_WRITE_ENABLED
+  export RUN_NONCE="deadbeefcafe1234"
+  export WORK_DIR="$BATS_TEST_TMPDIR/work-open-pr-create-forgejo-read-only"
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -qF 'SPINDRIFT_PR_INTENT deadbeefcafe1234' "$CLAUDE_PROMPT_FILE"
+  ! grep -qF 'fj pr create' "$CLAUDE_PROMPT_FILE"
 }
 
 @test "OPEN A PULL REQUEST create step: read-only emits a nonce-guarded SPINDRIFT_PR_INTENT line, never gh pr create" {

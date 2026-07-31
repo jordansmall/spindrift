@@ -739,6 +739,22 @@ phase_prompt_assembly() {
     BOX_ACCESS_READ_ONLY=1
   fi
 
+  # The OPEN A PULL REQUEST create step forks the read-write case on
+  # CODE_FORGE (issue #1963): a forgejo Box opens its draft PR with fj pr
+  # create, a github Box with gh pr create. Read-only stays forge-agnostic
+  # (SPINDRIFT_PR_INTENT relay), so only the read-write create splits here.
+  local OPEN_PR_CREATE_RW_GH=""
+  local OPEN_PR_CREATE_RW_FORGEJO=""
+  if [ -n "$BOX_ACCESS_READ_WRITE" ]; then
+    if [ "${CODE_FORGE:-github}" = "forgejo" ]; then
+      # shellcheck disable=SC2034 # read indirectly via "${!_fgate}" in the loop below
+      OPEN_PR_CREATE_RW_FORGEJO=1
+    else
+      # shellcheck disable=SC2034 # read indirectly via "${!_fgate}" in the loop below
+      OPEN_PR_CREATE_RW_GH=1
+    fi
+  fi
+
   # One loop over the Conditional fragment registry (lib/fragments.nix, issue
   # #622), rendered into _FRAGMENT_ROWS by lib/mkHarness.nix's
   # fragmentRegistryPreamble: each row's gate variable (a knob env var for
