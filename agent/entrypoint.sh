@@ -427,6 +427,14 @@ _is_research_kind() {
   [ "${DISPATCH_KIND:-work}" = "research" ]
 }
 
+# _is_self_contained reports (via exit status) whether this is the research
+# kind's no-repo sub-mode (issue #2202): the launcher forwards SELF_CONTAINED=1,
+# so the Box clones no repo and explores none. Unset defaults to off, so every
+# repo-backed dispatch is unaffected.
+_is_self_contained() {
+  [ "${SELF_CONTAINED:-}" = "1" ]
+}
+
 # _is_readonly_github reports (via exit status) whether this is a read-only
 # github Box: BOX_WRITE_ENABLED is unset (no push-capable token was ever
 # issued, so a force-push can only 403) and the Code Forge is github. Such a
@@ -843,7 +851,11 @@ phase_prompt_assembly() {
   # review-less warm-fix flow (fix-prompt.md), orthogonal to this loop.
   review_prompt_rendered=""
   if _is_research_kind; then
-    prompt="$(_subst "${PROMPTS_DIR}/research-prompt.md")"
+    if _is_self_contained; then
+      prompt="$(_subst "${PROMPTS_DIR}/research-self-contained-prompt.md")"
+    else
+      prompt="$(_subst "${PROMPTS_DIR}/research-prompt.md")"
+    fi
     _driver_session_mode="initial"
   elif [ -n "${FIX_PASS:-}" ] && [ "${FIX_PASS}" -gt 0 ]; then
     prompt="$(_subst "${PROMPTS_DIR}/fix-prompt.md")"
@@ -1235,16 +1247,26 @@ main() {
   local ORCHESTRATOR
 
   configure_env
-  clone_repo
-  # A research dispatch (ADR 0022, issue #640) explores the fresh clone but
-  # never lands code: no branch to cut, adopt, or rebase.
-  if ! _is_research_kind; then
-    phase_branch_recovery
-    phase_prework_rebase
+  if _is_self_contained; then
+    # No repo to clone or explore (issue #2202): stand up an empty working
+    # directory for the Driver, wire fj for a forgejo verdict post, and skip
+    # every clone/branch/toolchain/devShell/prefetch phase.
+    mkdir -p "$WORK_DIR"
+    cd "$WORK_DIR"
+    configure_forgejo_cli
+    _use_dev_shell=0
+  else
+    clone_repo
+    # A research dispatch (ADR 0022, issue #640) explores the fresh clone but
+    # never lands code: no branch to cut, adopt, or rebase.
+    if ! _is_research_kind; then
+      phase_branch_recovery
+      phase_prework_rebase
+    fi
+    phase_toolchain_nudge
+    phase_devshell_probe
+    phase_prefetch
   fi
-  phase_toolchain_nudge
-  phase_devshell_probe
-  phase_prefetch
   phase_prompt_assembly
 
   if _is_research_kind; then
