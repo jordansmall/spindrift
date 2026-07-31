@@ -12,7 +12,7 @@ on your verdict; the launcher owns every lifecycle transition.
 
 Read first (run these yourself):
 
-${RESEARCH_ISSUE_READ_GITHUB_STEP}${RESEARCH_ISSUE_READ_LOCAL_STEP}
+${RESEARCH_ISSUE_READ_GITHUB_STEP}${RESEARCH_ISSUE_READ_LOCAL_STEP}${RESEARCH_ISSUE_READ_FORGEJO_STEP}
 # EXPLORE
 
 Explore the actual repo — grep, read the relevant files, check existing
@@ -35,7 +35,7 @@ Render exactly one of three verdicts:
 
 # POST THE VERDICT
 
-${RESEARCH_VERDICT_GITHUB_STEP}${RESEARCH_VERDICT_GITHUB_READONLY_STEP}${RESEARCH_VERDICT_LOCAL_STEP}
+${RESEARCH_VERDICT_GITHUB_STEP}${RESEARCH_VERDICT_GITHUB_READONLY_STEP}${RESEARCH_VERDICT_LOCAL_STEP}${RESEARCH_VERDICT_FORGEJO_STEP}${RESEARCH_VERDICT_FORGEJO_READONLY_STEP}
 Structure the verdict in this order:
 
 1. **Verdict** — `recommend` / `reject` / `unclear`, plus a one-line rationale.

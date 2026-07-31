@@ -664,6 +664,23 @@ in
         touch $out
       '';
 
+  # The forgejo-side counterpart (issue #1963): each of the four forgejo
+  # variants speaks fj issue view, never gh issue view.
+  issue-read-forgejo-fragments-speak-fj-not-gh =
+    pkgs.runCommand "issue-read-forgejo-fragments-speak-fj-not-gh" { }
+      ''
+        for f in issue-read-forgejo.md research-issue-read-forgejo.md \
+          scout-issue-read-forgejo.md review-issue-read-forgejo.md; do
+          grep -q 'fj issue view ''${ISSUE_NUMBER}' ${../../templates/default/prompts/fragments}/"$f"
+          n=$(grep -c 'gh issue view' ${../../templates/default/prompts/fragments}/"$f" || true)
+          [ "$n" -eq 0 ] || {
+            echo "$f: expected no 'gh issue view', found $n occurrence(s)" >&2
+            exit 1
+          }
+        done
+        touch $out
+      '';
+
   # Issue #1990: unbounded `--comments` pulls a meta-issue's entire comment
   # history into the agent's context on every turn. Each of the four github
   # variants must cap intake to the last 10 comments (`comments[-10:]`)
@@ -725,6 +742,40 @@ in
           grep -q 'SPINDRIFT_COMMENT ''${RUN_NONCE}' ${../../templates/default/prompts/fragments}/"$f"
           ! grep -q 'SPINDRIFT_COMMENT_BEGIN' ${../../templates/default/prompts/fragments}/"$f"
         done
+        touch $out
+      '';
+
+  # The forgejo-side counterpart of github-readwrite-comment-fragments-*
+  # above (issue #1963): the read-write write-step fragments must keep
+  # `fj issue comment` -- same static, eval-only grep shape.
+  forgejo-readwrite-comment-fragments-keep-fj-issue-comment =
+    pkgs.runCommand "forgejo-readwrite-comment-fragments-keep-fj-issue-comment" { }
+      ''
+        for f in issue-blocked-comment-forgejo.md research-verdict-forgejo.md; do
+          grep -q 'fj issue comment' ${../../templates/default/prompts/fragments}/"$f"
+        done
+        touch $out
+      '';
+
+  # The forgejo-side counterpart of github-readonly-comment-fragments-*
+  # above (issue #1963): a read-only Box holds no write-capable
+  # FORGEJO_TOKEN, so its blocked-note/verdict-comment fragments must never
+  # invoke `fj issue comment` and must carry the same host-mediated relay
+  # forms (note= field / SPINDRIFT_COMMENT line) as the github/local
+  # counterparts.
+  forgejo-readonly-comment-fragments-never-invoke-fj-issue-comment =
+    pkgs.runCommand "forgejo-readonly-comment-fragments-never-invoke-fj-issue-comment" { }
+      ''
+        for f in issue-blocked-comment-forgejo-readonly.md research-verdict-forgejo-readonly.md; do
+          n=$(grep -c 'fj issue comment' ${../../templates/default/prompts/fragments}/"$f" || true)
+          [ "$n" -eq 0 ] || {
+            echo "$f: expected no 'fj issue comment', found $n occurrence(s)" >&2
+            exit 1
+          }
+        done
+        grep -q 'note=' ${../../templates/default/prompts/fragments/issue-blocked-comment-forgejo-readonly.md}
+        grep -q 'SPINDRIFT_COMMENT ''${RUN_NONCE}' ${../../templates/default/prompts/fragments/research-verdict-forgejo-readonly.md}
+        ! grep -q 'SPINDRIFT_COMMENT_BEGIN' ${../../templates/default/prompts/fragments/research-verdict-forgejo-readonly.md}
         touch $out
       '';
 

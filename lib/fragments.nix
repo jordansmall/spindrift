@@ -172,17 +172,19 @@
     fragment = "pr-body-local-noref.md";
     var = "PR_BODY_LOCAL_NOREF_STEP";
   }
-  # The issue-read step (issue #1691, ADR 0032): local issues are read from
-  # the read-only /issues mount instead of gh issue view. ISSUE_TRACKER_GITHUB
-  # / ISSUE_TRACKER_LOCAL (agent/entrypoint.sh's phase_prompt_assembly
-  # precompute block, derived from ISSUE_TRACKER) are shared by all four
-  # per-prompt row pairs below -- one gate computation, several render sites.
-  # Each pair's fragment folds in the following unconditional line(s) too
-  # (the trailing `git log`/prior-research-comment bullet, the Inputs: block's
-  # git diff/git log lines) rather than leaving them in the template outside
-  # the substitution: the fragment loop appends a blank-line separator after
-  # every rendered fragment, so a `${VAR}` sitting mid-list/mid-block would
-  # otherwise split a tight list or an indented command block in two.
+  # The issue-read step (issue #1691, ADR 0032; forgejo third case added
+  # #1963): local issues are read from the read-only /issues mount instead
+  # of gh issue view, and forgejo issues are read via fj issue view instead.
+  # ISSUE_TRACKER_GITHUB / ISSUE_TRACKER_LOCAL / ISSUE_TRACKER_FORGEJO
+  # (agent/entrypoint.sh's phase_prompt_assembly precompute block, derived
+  # from ISSUE_TRACKER) are shared by all four per-prompt row triples below --
+  # one gate computation, several render sites. Each triple's fragment folds
+  # in the following unconditional line(s) too (the trailing `git
+  # log`/prior-research-comment bullet, the Inputs: block's git diff/git log
+  # lines) rather than leaving them in the template outside the substitution:
+  # the fragment loop appends a blank-line separator after every rendered
+  # fragment, so a `${VAR}` sitting mid-list/mid-block would otherwise split a
+  # tight list or an indented command block in two.
   {
     gate = "ISSUE_TRACKER_GITHUB";
     fragment = "issue-read-github.md";
@@ -192,6 +194,11 @@
     gate = "ISSUE_TRACKER_LOCAL";
     fragment = "issue-read-local.md";
     var = "ISSUE_READ_LOCAL_STEP";
+  }
+  {
+    gate = "ISSUE_TRACKER_FORGEJO";
+    fragment = "issue-read-forgejo.md";
+    var = "ISSUE_READ_FORGEJO_STEP";
   }
   {
     gate = "ISSUE_TRACKER_GITHUB";
@@ -204,6 +211,11 @@
     var = "RESEARCH_ISSUE_READ_LOCAL_STEP";
   }
   {
+    gate = "ISSUE_TRACKER_FORGEJO";
+    fragment = "research-issue-read-forgejo.md";
+    var = "RESEARCH_ISSUE_READ_FORGEJO_STEP";
+  }
+  {
     gate = "ISSUE_TRACKER_GITHUB";
     fragment = "scout-issue-read-github.md";
     var = "SCOUT_ISSUE_READ_GITHUB_STEP";
@@ -214,6 +226,11 @@
     var = "SCOUT_ISSUE_READ_LOCAL_STEP";
   }
   {
+    gate = "ISSUE_TRACKER_FORGEJO";
+    fragment = "scout-issue-read-forgejo.md";
+    var = "SCOUT_ISSUE_READ_FORGEJO_STEP";
+  }
+  {
     gate = "ISSUE_TRACKER_GITHUB";
     fragment = "review-issue-read-github.md";
     var = "REVIEW_ISSUE_READ_GITHUB_STEP";
@@ -222,6 +239,11 @@
     gate = "ISSUE_TRACKER_LOCAL";
     fragment = "review-issue-read-local.md";
     var = "REVIEW_ISSUE_READ_LOCAL_STEP";
+  }
+  {
+    gate = "ISSUE_TRACKER_FORGEJO";
+    fragment = "review-issue-read-forgejo.md";
+    var = "REVIEW_ISSUE_READ_FORGEJO_STEP";
   }
   # The local content-plane write step (issue #1692, ADR 0032): a local
   # Dispatch's Box has no in-box tracker client, so it can't run
@@ -242,6 +264,13 @@
   # scout-issue-read, research-issue-read, review-issue-read) are unaffected
   # by read-only mode -- a read-only token still permits `gh issue view` --
   # so their gate must stay exactly ISSUE_TRACKER_GITHUB/ISSUE_TRACKER_LOCAL.
+  #
+  # forgejo (issue #1963) mirrors the github split exactly:
+  # ISSUE_TRACKER_FORGEJO_READWRITE keeps the in-box `fj issue comment`;
+  # ISSUE_TRACKER_FORGEJO_READONLY falls back to the same host-mediated
+  # relay form. The read-step forgejo rows above stay gated on the
+  # undifferentiated ISSUE_TRACKER_FORGEJO for the same reason the github
+  # ones do -- a read-only FORGEJO_TOKEN still permits `fj issue view`.
   {
     gate = "ISSUE_TRACKER_GITHUB_READWRITE";
     fragment = "research-verdict-github.md";
@@ -258,6 +287,16 @@
     var = "RESEARCH_VERDICT_LOCAL_STEP";
   }
   {
+    gate = "ISSUE_TRACKER_FORGEJO_READWRITE";
+    fragment = "research-verdict-forgejo.md";
+    var = "RESEARCH_VERDICT_FORGEJO_STEP";
+  }
+  {
+    gate = "ISSUE_TRACKER_FORGEJO_READONLY";
+    fragment = "research-verdict-forgejo-readonly.md";
+    var = "RESEARCH_VERDICT_FORGEJO_READONLY_STEP";
+  }
+  {
     gate = "ISSUE_TRACKER_GITHUB_READWRITE";
     fragment = "issue-blocked-comment-github.md";
     var = "ISSUE_BLOCKED_COMMENT_GITHUB_STEP";
@@ -271,6 +310,16 @@
     gate = "ISSUE_TRACKER_LOCAL";
     fragment = "issue-blocked-comment-local.md";
     var = "ISSUE_BLOCKED_COMMENT_LOCAL_STEP";
+  }
+  {
+    gate = "ISSUE_TRACKER_FORGEJO_READWRITE";
+    fragment = "issue-blocked-comment-forgejo.md";
+    var = "ISSUE_BLOCKED_COMMENT_FORGEJO_STEP";
+  }
+  {
+    gate = "ISSUE_TRACKER_FORGEJO_READONLY";
+    fragment = "issue-blocked-comment-forgejo-readonly.md";
+    var = "ISSUE_BLOCKED_COMMENT_FORGEJO_READONLY_STEP";
   }
   # The OPEN A PULL REQUEST push step (issue #1918, BOX_FORGE_AND_ISSUE_ACCESS):
   # a read-only github Box holds no push-capable token, so it writes its
