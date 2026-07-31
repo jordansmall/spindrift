@@ -64,7 +64,7 @@ let
   ) (builtins.attrNames forgejoWorkflows);
 in
 {
-  agent-workflows-run-rate-limit-smoke =
+  agent-workflows-control-plane-wiring =
     assert assertMsg setupHasSmoke
       "agent-setup/action.yml is missing the `gh api rate_limit` smoke test — the rate-limit preflight was removed or renamed.";
     assert assertMsg setupForgeRoutes
@@ -77,5 +77,5 @@ in
     assert assertMsg (
       forgejoBroken == [ ]
     ) "forgejo agent workflow(s) do not reach the build via agent-setup with `forge: forgejo` and a forgejo-label-swap claim — they would fall back onto the gh-shaped smoke/claim and fail on api.github.com: ${concatStringsSep ", " forgejoBroken}";
-    pkgs.runCommand "agent-workflows-run-rate-limit-smoke" { } "touch $out";
+    pkgs.runCommand "agent-workflows-control-plane-wiring" { } "touch $out";
 }
