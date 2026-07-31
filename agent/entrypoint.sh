@@ -155,7 +155,13 @@ clone_repo() {
     git config --global --add safe.directory "$REPO_MOUNT_DIR"
     git config --global --add safe.directory "$WORK_DIR"
   fi
-  echo "==> cloning $CLONE_URL"
+  # Redact any embedded userinfo (<token>@) before echoing: for
+  # CODE_FORGE=forgejo CLONE_URL always carries FORGEJO_TOKEN as the URL's
+  # userinfo (https://<token>@host/...), and CODE_FORGE_REMOTE_URL commonly
+  # carries embedded credentials too, so echoing verbatim would leak a
+  # secret to Box stdout. This mirrors the Go launcher's
+  # forge.RedactURLCredentials: strip "://<userinfo>@" down to "://".
+  echo "==> cloning $(printf '%s' "$CLONE_URL" | sed -E 's#://[^/@[:space:]]+@#://#')"
   git clone "$CLONE_URL" "$WORK_DIR"
   cd "$WORK_DIR"
   # Identity is repo-local, not global (#404): CI's hermetic check environment
