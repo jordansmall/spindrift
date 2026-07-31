@@ -5,6 +5,8 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
+	"strings"
 	"testing"
 
 	"spindrift.dev/launcher/internal/forge"
@@ -182,5 +184,78 @@ func TestForgejoClient_DefaultBaseURL(t *testing.T) {
 	}
 	if gotPath != "/api/v1/repos/owner/repo" {
 		t.Errorf("path = %q, want trailing slash stripped from BaseURL", gotPath)
+	}
+}
+
+// TestForgejoClient_BlocksOf_ReturnsNativeBlocking verifies BlocksOf queries
+// Forgejo's native "blocks" endpoint and reports every result as
+// DepSourceNative, deduplicating repeated IDs in the response (Forgejo's
+// dependency API has no documented uniqueness guarantee, so dependencyIDs
+// dedups defensively).
+func TestForgejoClient_BlocksOf_ReturnsNativeBlocking(t *testing.T) {
+	var gotPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`[{"number":42},{"number":43},{"number":42}]`))
+	}))
+	defer srv.Close()
+
+	fc := forgejo.NewForgejoClient(forgejo.ForgejoConfig{BaseURL: srv.URL, Repo: "owner/repo", Token: "tok"}).(forge.BlockersLister)
+	blocks, err := fc.BlocksOf("7")
+	if err != nil {
+		t.Fatalf("BlocksOf: %v", err)
+	}
+	want := []forge.Dependency{{ID: "42", Source: forge.DepSourceNative}, {ID: "43", Source: forge.DepSourceNative}}
+	if !reflect.DeepEqual(blocks, want) {
+		t.Fatalf("BlocksOf = %v, want %v", blocks, want)
+	}
+	if gotPath != "/api/v1/repos/owner/repo/issues/7/blocks" {
+		t.Errorf("path = %q, want the /blocks endpoint", gotPath)
+	}
+}
+
+// TestForgejoClient_BlocksOf_PropagatesNativeError verifies BlocksOf
+// surfaces a native lookup failure directly rather than degrading to some
+// fallback — there is none to fall back to.
+func TestForgejoClient_BlocksOf_PropagatesNativeError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	fc := forgejo.NewForgejoClient(forgejo.ForgejoConfig{BaseURL: srv.URL, Repo: "owner/repo", Token: "tok"}).(forge.BlockersLister)
+	_, err := fc.BlocksOf("7")
+	if err == nil {
+		t.Fatal("BlocksOf: want error, got nil")
+	}
+	if !strings.Contains(err.Error(), "500") {
+		t.Fatalf("BlocksOf error = %q, want it to mention the status", err.Error())
+	}
+}
+
+// TestForgejoClient_TouchesOf_ParsesBodyTouchSection verifies TouchesOf
+// fetches the full issue (Issue()'s payload includes body, unlike the
+// summary list endpoint) and parses its "## Touches" section via the shared
+// forge.ParseTouchPaths grammar — Forgejo has no native touch-set concept to
+// prefer over it.
+func TestForgejoClient_TouchesOf_ParsesBodyTouchSection(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/repos/owner/repo/issues/10" {
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"number":10,"title":"t","body":"## Touches\n- lib/env-schema.nix","state":"open","labels":[]}`))
+	}))
+	defer srv.Close()
+
+	fc := forgejo.NewForgejoClient(forgejo.ForgejoConfig{BaseURL: srv.URL, Repo: "owner/repo", Token: "tok"})
+	touches, err := fc.TouchesOf("10")
+	if err != nil {
+		t.Fatalf("TouchesOf: %v", err)
+	}
+	want := []string{"lib/env-schema.nix"}
+	if !reflect.DeepEqual(touches, want) {
+		t.Fatalf("TouchesOf = %v, want %v", touches, want)
 	}
 }
