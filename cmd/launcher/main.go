@@ -681,9 +681,7 @@ func newCodeForge(c config, parent local.SanitizedParent) forge.CodeForge {
 // (issue #1733).
 func dispatchCompletionBanner(c config) string {
 	switch c.codeForge {
-	case "git":
-		return fmt.Sprintf("==> all agents finished — branches pushed on %s.\n", c.repoSlug)
-	case "forgejo":
+	case "git", "forgejo":
 		return fmt.Sprintf("==> all agents finished — branches pushed on %s.\n", c.repoSlug)
 	case "local":
 		return "==> all agents finished — seams landed host-side into their own Integration branches in the Accumulation repo.\n"
