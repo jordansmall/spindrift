@@ -281,6 +281,29 @@ let
     packages = p: [ p.hello ];
   };
 
+  # A harness whose RESEARCH_VERDICTS knob defines a custom verdict set
+  # (issue #2201): proves the configured verdict vocabulary and label mapping
+  # flow into the baked research prompt's verdict contract, not only the
+  # launcher. nix/checks/prompts.nix greps the rendered research-prompt.md.
+  researchVerdictsHarness = import ../lib/mkHarness.nix {
+    inherit nixpkgs system;
+    defaults = {
+      researchVerdicts = builtins.toJSON [
+        {
+          verdict = "approve";
+          label = "agent-research-approve";
+          description = "relevant and worth doing; promote it.";
+        }
+        {
+          verdict = "decline";
+          label = "agent-research-decline";
+          description = "not worth doing.";
+        }
+      ];
+    };
+    packages = p: [ p.hello ];
+  };
+
   # A Consumer-configured skill (#119): proves the `skills` argument bakes
   # the skill files into the image's skills path. Eval-only for the
   # skillsDir assertion; the image-layer check is Linux-gated.
@@ -383,6 +406,7 @@ in
     promptHarness
     fixPromptHarness
     researchPromptHarness
+    researchVerdictsHarness
     skillsHarness
     skillsBwrapHarness
     minimalDirect

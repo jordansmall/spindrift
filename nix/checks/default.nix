@@ -29,6 +29,7 @@ let
     // (import ./preambles.nix common)
     // (import ./drivers.nix common)
     // (import ./prompt-inject.nix common)
+    // (import ./research-verdicts.nix common)
     // (import ./prompts.nix common)
     // (import ./schema-drift.nix common)
     // (import ./dispatch-labels.nix common)

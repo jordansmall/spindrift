@@ -231,7 +231,17 @@ let
   # injected block and the default prompt's own copy cannot drift apart.
   researchPromptSource = builtins.readFile ../templates/default/prompts/research-prompt.md;
   researchOutcomeContractMarker = "# POST THE VERDICT";
-  researchOutcomeContract = sliceFromMarker researchOutcomeContractMarker researchPromptSource;
+  # The configurable verdict vocabulary (issue #2201): render the verdict
+  # contract from the RESEARCH_VERDICTS knob before slicing the outcome
+  # contract and baking the prompt, so a custom set flows into both the baked
+  # research prompt and the contract injected into a Consumer prompt lacking
+  # it. The empty (default) knob is a no-op, keeping the default research
+  # prompt byte-identical to the template on disk (nix/checks/prompts.nix).
+  researchVerdicts = import ./research-verdicts.nix;
+  researchVerdictsKnob = mergedDefaults.researchVerdicts or "";
+  researchPromptRendered = researchVerdicts.renderIfCustom researchVerdictsKnob researchPrompt;
+  researchPromptSourceRendered = researchVerdicts.renderIfCustom researchVerdictsKnob researchPromptSource;
+  researchOutcomeContract = sliceFromMarker researchOutcomeContractMarker researchPromptSourceRendered;
   injectResearchOutcomeContract = injectSection researchOutcomeContractMarker researchOutcomeContract;
 
   # The Driver registry (ADR 0009); driverEntry is the selected Driver's
@@ -497,7 +507,6 @@ let
       workerPrompt
       conflictResolvePrompt
       fixPrompt
-      researchPrompt
       outcomeContract
       commsBlock
       checkBlock
@@ -508,6 +517,9 @@ let
       fragmentsSourceDir
       skills
       ;
+    # The research prompt baked into the image carries the verdict contract
+    # rendered from the configured set (issue #2201); default knob is a no-op.
+    researchPrompt = researchPromptRendered;
     entrypointDefaultsPreamble = renderDefaultsPreamble { };
   };
   inherit (imageModule) image agentEnv agentFiles;
@@ -559,7 +571,7 @@ let
     ) customRosterPromptFiles}
     cp ${hostPkgs.writeText "conflict-resolve-prompt.md" conflictResolvePrompt} $out/conflict-resolve-prompt.md
     cp ${hostPkgs.writeText "fix-prompt.md" (injectFixSharedBlocks fixPrompt)} $out/fix-prompt.md
-    cp ${hostPkgs.writeText "research-prompt.md" (injectResearchOutcomeContract researchPrompt)} $out/research-prompt.md
+    cp ${hostPkgs.writeText "research-prompt.md" (injectResearchOutcomeContract researchPromptRendered)} $out/research-prompt.md
     cp -r ${fragmentsSourceDir} $out/fragments
   '';
 
