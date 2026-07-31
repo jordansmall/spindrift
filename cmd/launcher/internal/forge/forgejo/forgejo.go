@@ -1,6 +1,10 @@
-// Package forgejo is the Forgejo REST adapter. It satisfies the parent forge
-// package's IssueTracker interface only — per ADR 0013, code still lands via
-// the github Code Forge.
+// Package forgejo is the Forgejo REST adapter. It satisfies all three of the
+// parent forge package's seams (ADR 0038): the IssueTracker interface
+// (forgejoClient), the CodeForge interface, and the full PRForge optional
+// interface (both on forgejoCodeForge) — the second full-parity backend
+// beside github, so the whole dispatch loop (claim, work, PR, CI watch,
+// merge) runs against a Codeberg or self-hosted Forgejo instance exactly as
+// it does on GitHub.
 package forgejo
 
 import (

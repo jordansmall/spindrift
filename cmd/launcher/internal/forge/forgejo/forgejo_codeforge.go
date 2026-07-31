@@ -1,6 +1,7 @@
 package forgejo
 
 import (
+	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
@@ -48,10 +49,16 @@ type ForgejoCodeForgeConfig struct {
 	Repo    string // owner/repo slug
 	Token   string
 
-	BaseBranch   string // target branch Merge pushes onto for MERGE_MODE=immediate
-	UserName     string // commit identity for Merge's throwaway clone
+	BaseBranch   string // target branch Merge merges onto / Rebase rebases onto for MERGE_MODE=immediate
+	UserName     string // commit identity for Rebase's throwaway clone
 	UserEmail    string
 	BranchPrefix string // baked into AgentBranch's output
+
+	// MergeMethod selects the merge style Merge and EnqueueAutoMerge request
+	// via Forgejo's merge endpoint's "Do" field: "merge", "squash", or
+	// "rebase". Empty (unset) resolves to "rebase" (forgejoMergeDo),
+	// mirroring the github adapter's MERGE_METHOD knob default.
+	MergeMethod string
 
 	// HTTPClient overrides the HTTP client used for the REST Probe call; nil
 	// uses a client with a default 30s timeout. Tests inject a client
@@ -66,21 +73,23 @@ type ForgejoCodeForgeConfig struct {
 	GitRemoteURL string
 }
 
-// forgejoCodeForge is the Forgejo CodeForge adapter. Like the plain git
-// adapter it wraps, it is push-only — Forgejo pull requests are not driven
-// through this seam — so it implements forge.CodeForge only, never
-// forge.PRForge. AgentBranch/BranchExists/Merge/Rebase delegate to a plain
-// git.CodeForge against a token-authenticated remote; Probe delegates to the
-// Forgejo REST client instead of git ls-remote, so it also validates the
-// token and instance reachability, not just the repo's git-level presence.
+// forgejoCodeForge is the Forgejo CodeForge adapter. AgentBranch/BranchExists
+// delegate to a plain git.CodeForge against a token-authenticated remote;
+// Probe delegates to the Forgejo REST client instead of git ls-remote, so it
+// also validates the token and instance reachability, not just the repo's
+// git-level presence. Merge drives Forgejo's REST merge endpoint directly
+// (a PR URL, not a branch); Rebase resolves the PR's head branch via REST
+// and then delegates to the underlying git.CodeForge's Rebase, which clones
+// the token remote, rebases the branch onto baseBranch, and force-pushes.
 type forgejoCodeForge struct {
-	rest *forgejoClient
-	git  forge.CodeForge
+	rest        *forgejoClient
+	git         forge.CodeForge
+	mergeMethod string
 }
 
 // NewForgejoCodeForge returns a forge.CodeForge backed by a Forgejo repo:
-// git plumbing (via the push-only git adapter) for AgentBranch/BranchExists/
-// Merge/Rebase, and the Forgejo REST API for Probe.
+// the Forgejo REST API for Probe/Merge, git plumbing (via the push-only git
+// adapter) for AgentBranch/BranchExists/Rebase.
 func NewForgejoCodeForge(cfg ForgejoCodeForgeConfig) forge.CodeForge {
 	baseURL := cfg.BaseURL
 	if baseURL == "" {
@@ -100,7 +109,7 @@ func NewForgejoCodeForge(cfg ForgejoCodeForgeConfig) forge.CodeForge {
 
 	rest := &forgejoClient{cfg: ForgejoConfig{BaseURL: baseURL, Repo: cfg.Repo, Token: cfg.Token}, hc: hc}
 	gitCF := git.NewGitClient(remote, cfg.BaseBranch, cfg.UserName, cfg.UserEmail, cfg.BranchPrefix)
-	return &forgejoCodeForge{rest: rest, git: gitCF}
+	return &forgejoCodeForge{rest: rest, git: gitCF, mergeMethod: cfg.MergeMethod}
 }
 
 // AgentBranch delegates to the underlying git adapter.
@@ -111,11 +120,78 @@ func (f *forgejoCodeForge) BranchExists(branch string) (bool, error) {
 	return f.git.BranchExists(branch)
 }
 
-// Merge delegates to the underlying git adapter.
-func (f *forgejoCodeForge) Merge(ref string) error { return f.git.Merge(ref) }
+// forgejoMergeDo maps the MergeMethod knob's value onto the value Forgejo's
+// merge endpoint's "Do" field expects. An empty method (unset) resolves to
+// "rebase", mirroring the github adapter's mergeMethodFlag default so an
+// unset MergeMethod behaves the same across both forges.
+func forgejoMergeDo(method string) string {
+	switch method {
+	case "merge":
+		return "merge"
+	case "squash":
+		return "squash"
+	default:
+		return "rebase"
+	}
+}
 
-// Rebase delegates to the underlying git adapter.
-func (f *forgejoCodeForge) Rebase(ref string) error { return f.git.Rebase(ref) }
+// Merge merges the pull request at prURL via Forgejo's REST merge endpoint,
+// requesting f.mergeMethod's style (forgejoMergeDo) and deletion of the head
+// branch after merge. A non-2xx response is classified like the github
+// adapter's classifyMergeFailure (exec_pr.go, issue #566).
+func (f *forgejoCodeForge) Merge(prURL string) error {
+	index, err := parsePRIndex(prURL)
+	if err != nil {
+		return err
+	}
+	body := map[string]any{
+		"Do":                        forgejoMergeDo(f.mergeMethod),
+		"delete_branch_after_merge": true,
+	}
+	status, err := f.rest.do(http.MethodPost, f.rest.repoPath()+"/pulls/"+index+"/merge", body, nil)
+	if err != nil {
+		return err
+	}
+	if status >= 200 && status < 300 {
+		return nil
+	}
+	return f.classifyMergeFailure(prURL, status)
+}
+
+// classifyMergeFailure distinguishes a genuine merge conflict from a PR
+// that's merely blocked by pending or failing required checks. Forgejo's
+// merge endpoint returns the same non-2xx status ("not mergeable") for both
+// refusals, so the distinction is made by querying the PR's mergeable state
+// instead — the same disambiguation the github adapter's
+// classifyMergeFailure performs (issue #566). A mergeable state this
+// function cannot map to either outcome is surfaced as its own error rather
+// than folded into ErrMergeConflict.
+func (f *forgejoCodeForge) classifyMergeFailure(prURL string, status int) error {
+	state, err := f.Mergeable(prURL)
+	if err != nil {
+		return fmt.Errorf("forgejo: merge %s: unexpected status %d (mergeable state unavailable: %w)", prURL, status, err)
+	}
+	switch state {
+	case forge.MergeableConflicting:
+		return forge.ErrMergeConflict
+	case forge.MergeableMergeable:
+		return forge.ErrMergeBlockedByChecks
+	default:
+		return fmt.Errorf("forgejo: merge %s: unexpected status %d (mergeable state %q undetermined)", prURL, status, state)
+	}
+}
+
+// Rebase resolves prURL's PR to its head branch via REST, then delegates to
+// the underlying git adapter's Rebase, which clones the token remote,
+// rebases the branch onto the configured base branch, and force-pushes the
+// result back to the remote.
+func (f *forgejoCodeForge) Rebase(prURL string) error {
+	p, err := f.getPull(prURL)
+	if err != nil {
+		return err
+	}
+	return f.git.Rebase(p.Head.Ref)
+}
 
 // Probe delegates to the Forgejo REST client, validating token and instance
 // reachability (not just the remote's git-level presence, unlike the plain
