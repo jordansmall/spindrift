@@ -2334,6 +2334,46 @@ func TestDoctor_RepoNotFound(t *testing.T) {
 	}
 }
 
+// TestDoctor_AuthFailure_Forgejo verifies the auth-failure remediation text
+// names FORGEJO_TOKEN, not GH_TOKEN, when the issue tracker is forgejo — the
+// generic message would misdirect an operator debugging a Forgejo probe.
+func TestDoctor_AuthFailure_Forgejo(t *testing.T) {
+	f := forge.NewFake()
+	f.ProbeErr = forge.ErrAuthFailure
+
+	var buf bytes.Buffer
+	err := runDoctor(f, f, config{issueTracker: "forgejo"}, &buf, strings.NewReader(""), false)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "FORGEJO_TOKEN") {
+		t.Errorf("want error to mention FORGEJO_TOKEN, got: %v", err)
+	}
+	if strings.Contains(err.Error(), "GH_TOKEN") {
+		t.Errorf("want error to not mention GH_TOKEN, got: %v", err)
+	}
+}
+
+// TestDoctor_RepoNotFound_Forgejo verifies the repo-not-found remediation
+// text names FORGEJO_BASE_URL, not REPO_SLUG, when the issue tracker is
+// forgejo.
+func TestDoctor_RepoNotFound_Forgejo(t *testing.T) {
+	f := forge.NewFake()
+	f.ProbeErr = forge.ErrRepoNotFound
+
+	var buf bytes.Buffer
+	err := runDoctor(f, f, config{issueTracker: "forgejo"}, &buf, strings.NewReader(""), false)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "FORGEJO_BASE_URL") {
+		t.Errorf("want error to mention FORGEJO_BASE_URL, got: %v", err)
+	}
+	if strings.Contains(err.Error(), "REPO_SLUG") {
+		t.Errorf("want error to not mention REPO_SLUG, got: %v", err)
+	}
+}
+
 func defaultLabelConfig() config {
 	return config{
 		label:           "ready-for-agent",
