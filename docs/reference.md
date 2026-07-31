@@ -1598,12 +1598,17 @@ gh label create agent-failed      --repo owner/repo --color d93f0b --description
 
 #### Create the research labels on the Target repo
 
-The research label family (ADR 0022) is a fixed, non-configurable vocabulary
-— `agent-research.yml` and the research prompt key off these names directly.
-`spindrift doctor` checks and, in interactive mode, offers to create these
-too, but treats them as advisory: unlike the four triage labels above, a
-missing research label never fails the check (so CI `doctor` runs stay green
-for deployments that don't use research yet). To create them manually:
+The standing/trigger and crash-triage labels (`agent-research`,
+`agent-research-in-progress`, `agent-research-failed`) are a fixed,
+non-configurable vocabulary — `agent-research.yml` keys off these names
+directly. The three verdict-terminal labels below them are the compiled
+*default* vocabulary; see [Configuring the research verdict vocabulary
+(`RESEARCH_VERDICTS`)](#configuring-the-research-verdict-vocabulary-research_verdicts)
+to change the verdicts and their labels. `spindrift doctor` checks and, in
+interactive mode, offers to create these too, but treats them as advisory:
+unlike the four triage labels above, a missing research label never fails
+the check (so CI `doctor` runs stay green for deployments that don't use
+research yet). To create the default set manually:
 
 ```sh
 gh label create agent-research             --repo owner/repo --color fbca04 --description "Apply to fire a research dispatch"
@@ -1613,6 +1618,63 @@ gh label create agent-research-reject      --repo owner/repo --color e11d21 --de
 gh label create agent-research-unclear     --repo owner/repo --color d4c5f9 --description "Needs a human answer — answer, then re-apply agent-research"
 gh label create agent-research-failed      --repo owner/repo --color b60205 --description "Box crashed or produced no verdict; needs human triage"
 ```
+
+If a custom `RESEARCH_VERDICTS` set is configured, create its labels
+instead of (or alongside, if some overlap) the three above.
+
+#### Configuring the research verdict vocabulary (`RESEARCH_VERDICTS`)
+
+By default the research kind's verdict terminals are the fixed three above:
+`recommend` → `agent-research-recommend`, `reject` → `agent-research-reject`,
+`unclear` → `agent-research-unclear`. `RESEARCH_VERDICTS` (flake option
+`settings.issues.research.verdicts`, schema key `researchVerdicts`) makes
+that vocabulary — and each verdict's label — operator-configurable instead,
+per [ADR 0022's amendment for issue
+#2201](adr/0022-research-is-a-dispatch-kind.md#amendment-issue-2201-the-verdict-vocabulary-and-label-mapping-are-configurable-via-research_verdicts).
+The default is the empty string, which is exactly the built-in three above
+with no behavior change — this knob only matters once set.
+
+The value is a JSON array of objects, **order preserved**, each with a
+`verdict` token, the issue-tracker `label` its Complete transition swaps to,
+and a one-line `description` of what it means (rendered into the research
+prompt's verdict contract):
+
+```json
+[
+  { "verdict": "approve", "label": "agent-research-approve", "description": "relevant; promote it." },
+  { "verdict": "decline", "label": "agent-research-decline", "description": "not worth doing." }
+]
+```
+
+The launcher (`forge.ParseResearchVerdicts`) validates the value at startup:
+the array must be non-empty; every `verdict` and `label` must be non-empty;
+verdict tokens must be unique and contain no whitespace; and no verdict
+token may be the reserved `blocked` status, which stays the escape hatch for
+"the Box crashed or produced no verdict" regardless of configuration. A
+malformed value aborts startup rather than silently falling back to the
+default.
+
+On Settle, the launcher parses the posted outcome line's verdict against
+this configured set and applies the mapped label. An unrecognized verdict —
+one not in the configured set, the reserved `blocked` token, or a missing
+outcome line entirely — is never silently mapped to some label anyway; it
+routes the issue to `agent-research-failed`, the same crash/no-verdict path
+a genuinely absent verdict already takes.
+
+The vocabulary is not launcher-only: the research prompt's machine-checkable
+verdict contract — the VERDICT bullet list, the verdict enumeration, and the
+`status=<...>` outcome-line alternation — is rendered from the same
+configured set at build time (`lib/research-verdicts.nix`, wired through
+`lib/mkHarness.nix`), so a custom set reaches both what the launcher accepts
+and what the Box is told to emit. This is a `flakeOption` like the label
+knobs (baked into the image), not a zero-rebuild runtime switch like
+`SPINDRIFT_PROMPT_DIR` — changing it requires an image rebuild. The prompt's
+surrounding *guidance* prose (for example, the "Open questions — mandatory
+when the verdict is `unclear`" step, which names specific default verdicts
+by name) is not rewritten from a custom set — only the machine-checkable
+contract and each verdict's label render dynamically; rewriting the
+per-verdict semantic guidance itself is out of scope here and left to a
+future self-contained research mode.
 
 #### Caveat: a killed launcher can strand an issue
 
