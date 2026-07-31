@@ -850,7 +850,17 @@ phase_prompt_assembly() {
     _driver_session_mode="resume"
   else
     prompt="$(_subst "${PROMPTS_DIR}/issue-prompt.md")"
-    _driver_session_mode="initial"
+    # A box re-dispatched after a 429 rate-limit hold (RESUME_AFTER_HOLD set
+    # by the launcher's dispatch retry loop, issue #2075) resumes its pinned
+    # Driver session instead of re-pinning it, so the recovered run continues
+    # the same conversation rather than restarting cold and re-spending the
+    # pre-hold tokens. Orthogonal to FIX_PASS: still the cold issue-prompt.md
+    # and the same review pass, only the session mode changes.
+    if [ -n "${RESUME_AFTER_HOLD:-}" ]; then
+      _driver_session_mode="resume"
+    else
+      _driver_session_mode="initial"
+    fi
     if [ -n "$ORCHESTRATOR" ]; then
       review_prompt_rendered="$(_subst "${PROMPTS_DIR}/review-prompt.md")"
     else
