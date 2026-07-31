@@ -1359,6 +1359,49 @@ generated `flake.nix`.
   validates the token and instance reachability independently of the GitHub
   Code Forge probe.
 
+#### In-Box forgejo tooling (`fj`)
+
+When either backend knob selects forgejo — `ISSUE_TRACKER=forgejo` or
+`CODE_FORGE=forgejo` — the image bakes [`fj`](https://codeberg.org/Cyborus/forgejo-cli)
+(forgejo-cli) onto the Box's PATH; a github-backend image never carries it.
+This is the forgejo analog of the `gh` load out: in the default read-write
+mode an Agent reads its issue, comments, posts research verdicts, and opens
+the PR through `fj` porcelain rather than hand-assembled REST calls.
+
+The entrypoint configures `fj` non-interactively at clone time:
+`configure_forgejo_cli` feeds `FORGEJO_TOKEN` on stdin (never argv) to
+`fj auth add-key`, which writes `~/.local/share/forgejo-cli/keys.json` keyed
+by the instance host — an offline write, no network call. It is inert on a
+non-forgejo image (no `fj`) or a read-only Box (no token), so the token
+plumbing follows exactly where `fj` is baked and permitted to write. The
+same `FORGEJO_TOKEN` also authenticates git pushes, carried as the origin
+remote URL's userinfo.
+
+The `*-forgejo` prompt-fragment family names the commands the Agent runs,
+pinned by the prompt eval-checks the same way the `gh` family is:
+
+- **Read** (`fj issue view ${ISSUE_NUMBER}`, plus the `comments` subcommand)
+  — for the issue-read, scout, research, and review passes.
+- **Comment / verdict** (`fj issue comment ${ISSUE_NUMBER} "..."`) — the
+  read-write blocked-note and research-verdict steps; a read-only Box relays
+  both host-side (a nonce-guarded `SPINDRIFT_COMMENT` line and the
+  `SPINDRIFT_OUTCOME` `note=` field) exactly as the local and read-only
+  github trackers do.
+- **Open PR** (`fj pr create --base … --head … --title "WIP: …"`) — the
+  read-write `CODE_FORGE=forgejo` create step; the `WIP: ` prefix opens a
+  draft the launcher flips ready on CI green before it merges (the forgejo
+  PRForge surface, [ADR 0038](../docs/adr/0038-the-forgejo-backend-decision-set.md)).
+
+For the REST surface `fj` lacks — a bounded, machine-readable pull of the
+last N comments, or attaching a label at issue-create time — the fragments
+document a `curl` fallback against the Forgejo REST API, e.g.:
+
+```sh
+curl -fsS -H "Authorization: token ${FORGEJO_TOKEN}" \
+  "${FORGEJO_BASE_URL:-https://codeberg.org}/api/v1/repos/${REPO_SLUG}/issues/${ISSUE_NUMBER}/comments" \
+  | jq -r '.[-10:][] | "\(.user.login) (\(.created_at)): \(.body)"'
+```
+
 #### Merge guard
 
 Between CI going green and the merge itself, the launcher checks the PR's
