@@ -371,6 +371,27 @@ in
         touch $out
       '';
 
+  # The self-contained research prompt's `# POST THE VERDICT` tail is
+  # hand-maintained: injectResearchOutcomeContract (lib/mkHarness.nix:593-594)
+  # no-ops on both source templates because each already owns the
+  # `# POST THE VERDICT` marker, so nothing structurally pins the
+  # self-contained copy to the canonical research-prompt.md. This check slices
+  # the tail (marker -> EOF) from both source templates and asserts they stay
+  # byte-identical, catching silent drift (issue #2230, found during #2202).
+  research-self-contained-prompt-outcome-parity =
+    pkgs.runCommand "research-self-contained-prompt-outcome-parity" { }
+      ''
+        awk '/# POST THE VERDICT/{f=1} f' \
+          ${../../templates/default/prompts/research-prompt.md} > canonical-tail.txt
+        awk '/# POST THE VERDICT/{f=1} f' \
+          ${../../templates/default/prompts/research-self-contained-prompt.md} > self-contained-tail.txt
+        diff canonical-tail.txt self-contained-tail.txt || {
+          echo "research-self-contained-prompt.md and research-prompt.md '# POST THE VERDICT' tails have drifted; keep them byte-identical" >&2
+          exit 1
+        }
+        touch $out
+      '';
+
   # Same gap as mkharness-prompt-outcome-contract-has-landing-token, for the
   # research kind's own contract (issue #654), including the same
   # SPINDRIFT_OUTCOME anchoring fix (issue #886) and the partial-revert
