@@ -39,9 +39,13 @@ func (d *Dispatch) dispatchWithRetry(logPath string, once func(resumeAfterHold b
 	holdCount := 0
 	transientCount := 0
 	prevWasHold := false
+	// prevRedispatched threads the resume signal on ANY re-dispatch — hold
+	// OR backoff — distinct from prevWasHold, which is purely hold-cap
+	// (no-progress) accounting below and must not be repurposed for this.
+	prevRedispatched := false
 
 	for {
-		resumeAfterHold := prevWasHold
+		resumeAfterHold := prevRedispatched
 		err := once(resumeAfterHold)
 
 		var cls driver.Classification
@@ -110,12 +114,14 @@ func (d *Dispatch) dispatchWithRetry(logPath string, once func(resumeAfterHold b
 				d.number, cls.ResetAt.UTC().Format("15:04 UTC"))
 			d.clock.Sleep(wait)
 			prevWasHold = true
+			prevRedispatched = true
 			continue
 		}
 
 		// 529/overloaded, network, or 429 without a known reset time →
 		// backoff retry.
 		prevWasHold = false
+		prevRedispatched = true
 		transientCount++
 		if transientCount > d.cfg.TransientRetryMax {
 			fmt.Fprintf(d.humanOut(), "    !! #%s: transient retry cap exhausted (%d)\n",
