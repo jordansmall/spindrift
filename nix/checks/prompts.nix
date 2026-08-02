@@ -378,12 +378,12 @@ in
   # self-contained copy to the canonical research-prompt.md. This check slices
   # the tail (marker -> EOF) from both source templates and asserts they stay
   # byte-identical, catching silent drift (issue #2230, found during #2202).
-  research-self-contained-prompt-outcome-parity =
-    pkgs.runCommand "research-self-contained-prompt-outcome-parity" { }
+  mkharness-prompt-research-self-contained-outcome-parity =
+    pkgs.runCommand "mkharness-prompt-research-self-contained-outcome-parity" { }
       ''
-        awk '/# POST THE VERDICT/{f=1} f' \
+        awk '/^# POST THE VERDICT$/{f=1} f' \
           ${../../templates/default/prompts/research-prompt.md} > canonical-tail.txt
-        awk '/# POST THE VERDICT/{f=1} f' \
+        awk '/^# POST THE VERDICT$/{f=1} f' \
           ${../../templates/default/prompts/research-self-contained-prompt.md} > self-contained-tail.txt
         diff canonical-tail.txt self-contained-tail.txt || {
           echo "research-self-contained-prompt.md and research-prompt.md '# POST THE VERDICT' tails have drifted; keep them byte-identical" >&2
