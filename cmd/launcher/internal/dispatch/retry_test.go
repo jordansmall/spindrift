@@ -498,6 +498,32 @@ func TestDispatchWithRetry_HoldReDispatchSetsResumeAfterHold(t *testing.T) {
 	}
 }
 
+// TestDispatchWithRetry_TransientBackoffReDispatchSetsResumeAfterHold verifies
+// that the re-dispatch following a 529/backoff transient (not a 429 hold)
+// ALSO carries RESUME_AFTER_HOLD=1 in the box env, so a cold restart on the
+// backoff path doesn't re-pin --session-id on a possibly-existing session.
+func TestDispatchWithRetry_TransientBackoffReDispatchSetsResumeAfterHold(t *testing.T) {
+	fr := runner.NewFake()
+	drv := fakeDriver{ClassifyFn: func(string) (driver.Classification, error) {
+		return driver.Classification{Class: driver.Transient, Reason: driver.Overloaded}, nil
+	}}
+	var sleeps []time.Duration
+	d := newTestDispatch(t, retryConfig(3, 10, 0), fr, drv, fakeClock(time.Time{}, &sleeps))                                                                // backoffSecs=10
+	writeOutcomeOnFinalCall(fr, []error{boxErr, nil}, nonceLine(d, "SPINDRIFT_OUTCOME issue=1 landing=https://github.com/o/r/pull/1 status=ready note=ok")) // first fails (529, no outcome), second succeeds
+
+	d.Run()
+
+	if len(fr.RunCalls) != 2 {
+		t.Fatalf("RunCalls: got %d, want 2 (initial + backoff re-dispatch)", len(fr.RunCalls))
+	}
+	if _, ok := fr.RunCalls[0].Env["RESUME_AFTER_HOLD"]; ok {
+		t.Errorf("initial dispatch env has RESUME_AFTER_HOLD set, want absent: %v", fr.RunCalls[0].Env)
+	}
+	if got := fr.RunCalls[1].Env["RESUME_AFTER_HOLD"]; got != "1" {
+		t.Errorf("backoff re-dispatch env RESUME_AFTER_HOLD: got %q, want \"1\"", got)
+	}
+}
+
 // TestDispatchWithRetry_NonZeroExitWithOutcomeSettles verifies that a box
 // which prints a valid, nonce-bearing SPINDRIFT_OUTCOME but then exits
 // non-zero settles on that printed outcome (issue #2075) rather than being

@@ -94,7 +94,8 @@ func (d *Dispatch) Run() Result {
 
 // Fix dispatches a fix box for the given 1-based pass number. resumeAfterHold
 // is ignored: a fix pass already resumes its session via FIX_PASS>0, so a
-// 429 hold mid-fix needs no extra signal.
+// transient-backoff re-dispatch mid-fix (a 429 hold or a 529 backoff) needs no
+// extra signal.
 func (d *Dispatch) Fix(pass int, ciFailureSummary string) Result {
 	logPath := d.fixLogPath(pass)
 	return d.dispatchWithRetry(logPath, func(_ bool) error {
