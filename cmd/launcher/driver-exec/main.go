@@ -113,7 +113,7 @@ func main() {
 func resolveExit(d driver.Driver, rc int, logPath string) int {
 	resolved, err := d.ResolveExit(logPath, rc)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "driver-exec: synthesize exit code:", err)
+		fmt.Fprintln(os.Stderr, "driver-exec: resolve exit code:", err)
 		return rc
 	}
 	return resolved
