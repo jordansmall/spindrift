@@ -38,8 +38,8 @@ func (e *execClient) ListIssues(state forge.DispatchState) ([]forge.Issue, error
 		"--label", label,
 		"--limit", strconv.Itoa(forge.ResultPageLimit),
 		"--search", "sort:created-asc",
-		"--json", "number,title",
-		"--jq", "sort_by(.number) | .[] | [.number, .title] | @tsv",
+		"--json", "number,title,labels",
+		"--jq", `sort_by(.number) | .[] | [.number, .title, (.labels | map(.name) | join(","))] | @tsv`,
 	)
 	out, err := cmd.Output()
 	if err != nil {
@@ -52,11 +52,20 @@ func (e *execClient) ListIssues(state forge.DispatchState) ([]forge.Issue, error
 		if line == "" {
 			continue
 		}
-		parts := strings.SplitN(line, "\t", 2)
-		if len(parts) < 2 {
+		parts := strings.SplitN(line, "\t", 3)
+		if len(parts) < 3 {
 			continue
 		}
-		issues = append(issues, forge.Issue{Number: parts[0], Title: parts[1]})
+		var labels []string
+		if parts[2] != "" {
+			labels = strings.Split(parts[2], ",")
+		}
+		issues = append(issues, forge.Issue{
+			Number:   parts[0],
+			Title:    parts[1],
+			Labels:   labels,
+			Priority: forge.ResolvePriority(labels),
+		})
 	}
 	forge.WarnPageMayTruncateBacklog("gh issue list", len(issues))
 	return issues, nil
@@ -88,10 +97,12 @@ func (e *execClient) ListOpenIssues() ([]forge.Issue, error) {
 	}
 	issues := make([]forge.Issue, len(raw))
 	for i, r := range raw {
+		names := labelNames(r.Labels)
 		issues[i] = forge.Issue{
-			Number: strconv.Itoa(r.Number),
-			Title:  r.Title,
-			Labels: labelNames(r.Labels),
+			Number:   strconv.Itoa(r.Number),
+			Title:    r.Title,
+			Labels:   names,
+			Priority: forge.ResolvePriority(names),
 		}
 	}
 	sort.Slice(issues, func(i, j int) bool {
@@ -122,12 +133,14 @@ func (e *execClient) Issue(num string) (forge.Issue, error) {
 	if err := json.Unmarshal(out, &raw); err != nil {
 		return forge.Issue{}, fmt.Errorf("parse issue %s: %w", num, err)
 	}
+	names := labelNames(raw.Labels)
 	return forge.Issue{
-		Number: strconv.Itoa(raw.Number),
-		Title:  raw.Title,
-		Body:   raw.Body,
-		State:  forge.IssueState(raw.State),
-		Labels: labelNames(raw.Labels),
+		Number:   strconv.Itoa(raw.Number),
+		Title:    raw.Title,
+		Body:     raw.Body,
+		State:    forge.IssueState(raw.State),
+		Labels:   names,
+		Priority: forge.ResolvePriority(names),
 	}, nil
 }
 

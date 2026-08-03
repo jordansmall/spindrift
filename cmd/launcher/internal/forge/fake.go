@@ -465,6 +465,12 @@ func (f *Fake) ListIssues(state DispatchState) ([]Issue, error) {
 		if iss.State == IssueClosed {
 			continue
 		}
+		// Resolved from Labels at read time, not stored separately, so
+		// Labels stays the single source of truth (#2281): a test that sets
+		// Labels via SetIssue without also setting Priority can't drift the
+		// two out of sync, mirroring the github adapter's resolution at its
+		// own read edge (exec_issues.go).
+		iss.Priority = ResolvePriority(iss.Labels)
 		if label == "" {
 			// Mirrors GitHub's `--label ""` (ignored by gh, returns every
 			// open issue) and Local's `frontmatter.State == ""` (matches
@@ -498,6 +504,9 @@ func (f *Fake) ListOpenIssues() ([]Issue, error) {
 		if iss.State == IssueClosed {
 			continue
 		}
+		// See ListIssues's matching comment: resolved from Labels at read
+		// time so Labels stays the single source of truth.
+		iss.Priority = ResolvePriority(iss.Labels)
 		out = append(out, iss)
 	}
 	sort.Slice(out, func(i, j int) bool {
@@ -519,6 +528,9 @@ func (f *Fake) Issue(num string) (Issue, error) {
 	if !ok {
 		return Issue{}, fmt.Errorf("issue %s not found", num)
 	}
+	// See ListIssues's matching comment: resolved from Labels at read time
+	// so Labels stays the single source of truth.
+	iss.Priority = ResolvePriority(iss.Labels)
 	return iss, nil
 }
 

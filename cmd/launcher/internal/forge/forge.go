@@ -66,6 +66,58 @@ type Issue struct {
 	// (a parentless seam is its own broad ticket, keyed on its own slug
 	// instead — see local.ResolveParent).
 	Parent string
+	// Priority is the canonical dispatch priority (ADR 0040), resolved by
+	// each IssueTracker adapter from its own agent-priority-* labels (or
+	// left at the zero value PriorityNormal for adapters that don't map
+	// priority labels yet). The launcher sorts the dispatchable pool by
+	// this value, highest tier first, with oldest-first as the
+	// within-tier tiebreaker — that sort is not part of this type.
+	Priority Priority
+}
+
+// Priority is the canonical dispatch priority a launcher sorts the
+// dispatchable pool by (ADR 0040): Critical > High > Normal > Low. Each
+// IssueTracker adapter (github, jira, local, and the fake) translates its
+// own agent-priority-* labels to these values at its own edge — priority is
+// a canonical launcher concept resolved from labels, never a native
+// per-tracker field or a per-adapter sort.
+//
+// The zero value is PriorityNormal, so an issue built without setting
+// Priority (e.g. an adapter that hasn't wired label resolution yet) safely
+// defaults to the tier an unlabeled issue occupies. The four constants are
+// ordered so that plain Go comparison operators (<, >) already express the
+// ADR's total order — a future central sort can compare two Priority values
+// directly with no separate ranking method.
+type Priority int
+
+const (
+	// PriorityLow is the "run only when the pool would otherwise idle"
+	// tier — the ADR's bury tier, below the Normal default.
+	PriorityLow Priority = iota - 1
+	// PriorityNormal is the zero value and the tier an unlabeled issue
+	// occupies.
+	PriorityNormal
+	// PriorityHigh boosts an issue above the Normal default.
+	PriorityHigh
+	// PriorityCritical is the top tier; highest label wins if an issue
+	// somehow carries more than one priority label.
+	PriorityCritical
+)
+
+// String renders the priority as its lowercase tier name.
+func (p Priority) String() string {
+	switch p {
+	case PriorityCritical:
+		return "critical"
+	case PriorityHigh:
+		return "high"
+	case PriorityNormal:
+		return "normal"
+	case PriorityLow:
+		return "low"
+	default:
+		return "normal"
+	}
 }
 
 // IssueState is the canonical open/closed state of an issue. Each

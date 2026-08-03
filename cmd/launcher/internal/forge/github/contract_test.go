@@ -87,6 +87,8 @@ func (h *githubHarness) FailNativeDeps(num string) {
 
 func (h *githubHarness) IsolatesNativeFailure() {}
 
+func (h *githubHarness) IsPriorityCapable() {}
+
 func TestExecClient_TrackerContract(t *testing.T) {
 	forgetest.RunTrackerContract(t, newGithubHarness(t))
 }
