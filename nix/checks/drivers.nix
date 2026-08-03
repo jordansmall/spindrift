@@ -479,6 +479,104 @@ in
     ) "claude agentsJsonTemplate must never emit a `mode` key on any agent (claude's --agents schema has none), got: ${rendered}";
     pkgs.runCommand "drivers-claude-agents-json-roster" { } "touch $out";
 
+  # Issue #2242 slice 1: a roster entry may set an optional `effort` field
+  # (a per-agent reasoning-effort knob, e.g. "high"/"low") alongside `model`.
+  # claude's agentsJsonTemplate must pass it through into the rendered
+  # --agents JSON verbatim, same handling as `model` -- no normalization or
+  # validation.
+  drivers-claude-agents-json-effort-present =
+    let
+      claudeEntry = driverRegistry.entries.claude;
+      rendered = claudeEntry.agentsJsonTemplate {
+        roster = [
+          {
+            name = "scout";
+            model = "solo-scout-model";
+            effort = "high";
+            mode = "subagent";
+            description = "Map relevant files, seams, and tests; return a structured brief";
+            tools = [ "Read" ];
+            promptFile = "scout-prompt.md";
+            prompt = null;
+          }
+        ];
+      };
+      parsed = builtins.fromJSON rendered;
+    in
+    assert assertMsg (parsed ? scout)
+      "claude agentsJsonTemplate must render a roster entry with a non-empty model, got keys: ${concatStringsSep ", " (builtins.attrNames parsed)}";
+    assert assertMsg (parsed.scout.effort or "" == "high")
+      "claude agentsJsonTemplate must carry a roster entry's effort field verbatim into the rendered JSON, got: ${builtins.toJSON (parsed.scout or { })}";
+    pkgs.runCommand "drivers-claude-agents-json-effort-present" { } "touch $out";
+
+  # Issue #2242 slice 1: an entry that omits `effort` (or sets it to "") must
+  # not carry an `effort` key in the rendered JSON at all -- no default is
+  # emitted, so a Driver invocation with no effort knob renders byte-stable
+  # with the pre-#2242 shape.
+  drivers-claude-agents-json-effort-absent =
+    let
+      claudeEntry = driverRegistry.entries.claude;
+      rendered = claudeEntry.agentsJsonTemplate {
+        roster = [
+          {
+            name = "scout";
+            model = "solo-scout-model";
+            mode = "subagent";
+            description = "Map relevant files, seams, and tests; return a structured brief";
+            tools = [ "Read" ];
+            promptFile = "scout-prompt.md";
+            prompt = null;
+          }
+          {
+            name = "filer";
+            model = "filer-model";
+            effort = "";
+            mode = "subagent";
+            description = "File tickets";
+            tools = [ "Read" ];
+            promptFile = "filer-prompt.md";
+            prompt = null;
+          }
+        ];
+      };
+      parsed = builtins.fromJSON rendered;
+    in
+    assert assertMsg (parsed ? scout)
+      "claude agentsJsonTemplate must render a roster entry with a non-empty model, got keys: ${concatStringsSep ", " (builtins.attrNames parsed)}";
+    assert assertMsg (!(parsed.scout ? effort))
+      "claude agentsJsonTemplate must omit the effort key entirely when a roster entry doesn't set effort, got: ${builtins.toJSON parsed.scout}";
+    assert assertMsg (parsed ? filer)
+      "claude agentsJsonTemplate must render a roster entry with a non-empty model, got keys: ${concatStringsSep ", " (builtins.attrNames parsed)}";
+    assert assertMsg (!(parsed.filer ? effort))
+      "claude agentsJsonTemplate must omit the effort key entirely when a roster entry sets effort to the empty string, got: ${builtins.toJSON parsed.filer}";
+    pkgs.runCommand "drivers-claude-agents-json-effort-absent" { } "touch $out";
+
+  # Issue #2242 slice 1: `effort` must not affect the existing filter-by-
+  # model-presence gate (#392 semantics) -- an entry with effort set but no
+  # (or empty) model is still dropped entirely, same as today.
+  drivers-claude-agents-json-effort-does-not-bypass-model-filter =
+    let
+      claudeEntry = driverRegistry.entries.claude;
+      rendered = claudeEntry.agentsJsonTemplate {
+        roster = [
+          {
+            name = "reviewer";
+            model = "";
+            effort = "high";
+            mode = "subagent";
+            description = "Review the branch diff for spec compliance and coding standards";
+            tools = [ "Read" ];
+            promptFile = "review-prompt.md";
+            prompt = null;
+          }
+        ];
+      };
+      parsed = if rendered == "" then { } else builtins.fromJSON rendered;
+    in
+    assert assertMsg (!(parsed ? reviewer))
+      "claude agentsJsonTemplate must omit a roster entry with an empty model even when effort is set (filter-by-model-presence gate must stay unaffected by effort), got keys: ${concatStringsSep ", " (builtins.attrNames parsed)}";
+    pkgs.runCommand "drivers-claude-agents-json-effort-does-not-bypass-model-filter" { } "touch $out";
+
   # AC#4: a single roster containing a custom agent not in the historical
   # scout/reviewer/filer/worker set must render into BOTH Drivers' output --
   # claude's --agents JSON and opencode's on-disk agents/*.md -- from the same

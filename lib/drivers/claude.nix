@@ -168,12 +168,14 @@
       agents = lib.listToAttrs (
         map (e: {
           name = e.name;
-          value = {
-            description = e.description or "";
-            prompt = "";
-            tools = e.tools or [ ];
-            model = e.model;
-          };
+          value =
+            {
+              description = e.description or "";
+              prompt = "";
+              tools = e.tools or [ ];
+              model = e.model;
+            }
+            // (if (e.effort or "") != "" then { effort = e.effort; } else { });
         }) present
       );
     in
