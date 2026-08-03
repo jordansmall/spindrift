@@ -33,6 +33,7 @@ type config struct {
 	driverBin    string
 	driverFlags  string
 	model        string
+	effort       string
 	devshell     bool
 	devshellName string
 	issue        string
@@ -607,6 +608,7 @@ func buildDriverExecCmd(cfg config) (*exec.Cmd, error) {
 		"--driver-bin", cfg.driverBin,
 		"--driver-flags", cfg.driverFlags,
 		"--model", cfg.model,
+		"--effort", cfg.effort,
 		"--issue", cfg.issue,
 		"--log-path", cfg.logPath,
 		"--heartbeat-log", cfg.heartbeatLog,

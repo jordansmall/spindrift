@@ -22,6 +22,7 @@ func main() {
 	driverBin := flag.String("driver-bin", "", "the Driver's binary name or path (required)")
 	driverFlags := flag.String("driver-flags", "", "space-separated flags common to every Driver invocation")
 	model := flag.String("model", "", "value for the Driver's --model flag")
+	effort := flag.String("effort", "", "value for the Driver's --effort flag (claude) or --variant flag (opencode); empty omits it")
 	devshell := flag.Bool("devshell", false, "run the Driver inside `nix develop` instead of directly")
 	devshellName := flag.String("devshell-name", "default", "the devShell flake output to enter when --devshell is set")
 	issue := flag.String("issue", os.Getenv("ISSUE_NUMBER"), "issue number, for the heartbeat log prefix")
@@ -58,6 +59,7 @@ func main() {
 		driverBin:        *driverBin,
 		driverFlags:      *driverFlags,
 		model:            *model,
+		effort:           *effort,
 		devshell:         *devshell,
 		devshellName:     *devshellName,
 		issue:            *issue,
