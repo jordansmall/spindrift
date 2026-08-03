@@ -1084,6 +1084,7 @@ run_driver_in_env() {
     --driver-bin "$DRIVER_BIN" \
     --driver-flags "$DRIVER_FLAGS_COMMON" \
     --model "${MODEL:-}" \
+    --effort "${EFFORT:-}" \
     --issue "$ISSUE_NUMBER" \
     --log-path "$stream_log" \
     "${_devshell_flags[@]}" \

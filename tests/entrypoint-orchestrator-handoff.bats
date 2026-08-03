@@ -28,6 +28,22 @@ setup() {
   printf '%s\n' "$output" | grep -q '^SPINDRIFT_OUTCOME .*status=ready'
 }
 
+# Issue #2241: EFFORT threads through run_driver_in_env's shared invocation
+# block to whichever binary $_driver_invoker names (orchestrator here,
+# driver-exec on the direct path) alongside --model, using the same
+# ${VAR:-} empty-default pattern. The fake orchestrator echoes its raw argv
+# to ORCHESTRATOR_LOG verbatim (issue #1996), so this asserts the flag
+# reaches the invoker without needing driver-exec's own flag parsing (which
+# this fake, standing in for the real binary, does not model) to forward it
+# any further.
+@test "entrypoint forwards EFFORT to the orchestrator as --effort" {
+  export ORCHESTRATOR_ENABLED=1
+  export EFFORT="high"
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -q -- "--effort high" "$ORCHESTRATOR_LOG"
+}
+
 # Issue #2011: reject-background-bash.sh's PreToolUse deny is Bash-only and
 # fires after the fact; CLAUDE_CODE_DISABLE_BACKGROUND_TASKS instead makes
 # claude itself omit run_in_background from the Bash/Agent/Task/PowerShell
