@@ -1,0 +1,9 @@
+{"type":"step_start","timestamp":1000,"part":{"messageID":"msg_1"}}
+{"type":"text","part":{"messageID":"msg_1","text":"Looking into issue #42."}}
+{"type":"step_finish","timestamp":1500,"part":{"messageID":"msg_1","modelID":"claude-sonnet-4","tokens":{"input":120,"output":40,"reasoning":0,"cache":{"write":0,"read":0}},"cost":0.004}}
+{"type":"step_start","timestamp":2000,"part":{"messageID":"msg_2"}}
+{"type":"text","part":{"messageID":"msg_2","text":"Reading main.go and applying a fix."}}
+{"type":"step_finish","timestamp":2500,"part":{"messageID":"msg_2","modelID":"claude-sonnet-4","tokens":{"input":150,"output":55,"reasoning":10,"cache":{"write":50,"read":100}},"cost":0.006}}
+{"type":"step_start","timestamp":3000,"part":{"messageID":"msg_3"}}
+{"type":"text","part":{"messageID":"msg_3","text":"Fixed the issue and verified the tests pass.\nSPINDRIFT_OUTCOME issue=42 landing=agent/issue-42 status=ready note=fixture nonce=deadbeef"}}
+{"type":"step_finish","timestamp":3500,"part":{"messageID":"msg_3","modelID":"claude-sonnet-4","tokens":{"input":60,"output":30,"reasoning":0,"cache":{"write":0,"read":0}},"cost":0.002}}
