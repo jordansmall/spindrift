@@ -121,7 +121,14 @@
   # still reaches driver-exec verbatim, just quoted, and a value carrying a
   # newline/colon/quote can no longer inject a second YAML key into the
   # frontmatter block (contrast the body line below, which stays raw since
-  # it's the system-prompt seed, not a frontmatter scalar).
+  # it's the system-prompt seed, not a frontmatter scalar). A roster entry may
+  # also set an optional `effort` field (issue #2242 slice 2, same knob as
+  # claude.nix's agentsJsonTemplate); opencode has no --agents JSON schema to
+  # carry it in, so it's rendered as a `reasoningEffort` frontmatter scalar
+  # instead -- opencode reads provider-native passthrough keys directly on the
+  # agent, hence the different key name -- JSON-encoded the same way as
+  # model/mode, and omitted entirely when effort is unset/empty so output
+  # stays byte-stable for a roster that doesn't use it.
   agentFilesTemplate =
     { roster }:
     let
@@ -135,7 +142,9 @@
           description: ${builtins.toJSON (e.description or "")}
           mode: ${builtins.toJSON (e.mode or "subagent")}
           model: ${builtins.toJSON e.model}
-          ---
+          ${lib.optionalString (
+            (e.effort or "") != ""
+          ) "reasoningEffort: ${builtins.toJSON e.effort}\n"}---
           ${e.description or ""}
         '';
       }) present
