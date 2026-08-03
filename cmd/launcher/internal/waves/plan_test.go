@@ -1,6 +1,10 @@
 package waves
 
-import "testing"
+import (
+	"testing"
+
+	"spindrift.dev/launcher/internal/forge"
+)
 
 // TestNewPlan_Discovered_NoEdges_SelectsDrainMode verifies a label-discovered
 // batch always selects ModeDrain, even with MaxJobs unset (0) — MAX_JOBS=0 is
@@ -146,5 +150,216 @@ func TestNewPlan_FailedPropagates(t *testing.T) {
 	}
 	if !plan.Failed["1"] {
 		t.Errorf("Plan.Failed = %v, want it to carry issue 1", plan.Failed)
+	}
+}
+
+// planIssueNums returns the Number field of each issue in order, for
+// concise ordering assertions below.
+func planIssueNums(issues []Issue) []string {
+	nums := make([]string, len(issues))
+	for i, iss := range issues {
+		nums[i] = iss.Number
+	}
+	return nums
+}
+
+// TestNewPlan_SortsByPriorityDescending verifies a mixed-priority
+// OriginDiscovered batch sorts to Critical, High, Normal, Low regardless of
+// input order (ADR 0040).
+func TestNewPlan_SortsByPriorityDescending(t *testing.T) {
+	cfg := Config{}
+	in := Input{
+		Origin: OriginDiscovered,
+		Issues: []Issue{
+			{Number: "1", Priority: forge.PriorityNormal},
+			{Number: "2", Priority: forge.PriorityCritical},
+			{Number: "3", Priority: forge.PriorityLow},
+			{Number: "4", Priority: forge.PriorityHigh},
+		},
+	}
+	plan, err := NewPlan(cfg, in)
+	if err != nil {
+		t.Fatalf("NewPlan: %v", err)
+	}
+	got := planIssueNums(plan.Issues)
+	want := []string{"2", "4", "1", "3"}
+	if len(got) != len(want) {
+		t.Fatalf("Issues order = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("Issues order = %v, want %v", got, want)
+			break
+		}
+	}
+}
+
+// TestNewPlan_SortIsStableWithinTier verifies equal-priority issues keep
+// their original relative (oldest-first, since every Issue Tracker adapter
+// returns issues oldest-first) order after the priority sort.
+func TestNewPlan_SortIsStableWithinTier(t *testing.T) {
+	cfg := Config{}
+	in := Input{
+		Origin: OriginDiscovered,
+		Issues: []Issue{
+			{Number: "10", Priority: forge.PriorityHigh},
+			{Number: "5", Priority: forge.PriorityHigh},
+			{Number: "7", Priority: forge.PriorityHigh},
+		},
+	}
+	plan, err := NewPlan(cfg, in)
+	if err != nil {
+		t.Fatalf("NewPlan: %v", err)
+	}
+	got := planIssueNums(plan.Issues)
+	want := []string{"10", "5", "7"}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("Issues order = %v, want %v (input order preserved within tier)", got, want)
+			break
+		}
+	}
+}
+
+// TestNewPlan_LowSortsLast verifies every Low-priority issue sorts after
+// every Normal-priority issue, no matter how the input interleaves them.
+func TestNewPlan_LowSortsLast(t *testing.T) {
+	cfg := Config{}
+	in := Input{
+		Origin: OriginDiscovered,
+		Issues: []Issue{
+			{Number: "1", Priority: forge.PriorityLow},
+			{Number: "2", Priority: forge.PriorityNormal},
+			{Number: "3", Priority: forge.PriorityLow},
+			{Number: "4", Priority: forge.PriorityNormal},
+		},
+	}
+	plan, err := NewPlan(cfg, in)
+	if err != nil {
+		t.Fatalf("NewPlan: %v", err)
+	}
+	seenLow := false
+	for _, iss := range plan.Issues {
+		if iss.Priority == forge.PriorityNormal && seenLow {
+			t.Fatalf("Normal issue #%s sorted after a Low issue: %v", iss.Number, planIssueNums(plan.Issues))
+		}
+		if iss.Priority == forge.PriorityLow {
+			seenLow = true
+		}
+	}
+}
+
+// TestNewPlan_PriorityNeverInherited verifies a blocked Low-priority issue's
+// own Priority field is unchanged after NewPlan even though its dependent is
+// Critical — priority sort never derives or mutates a Priority value from
+// Edges, it only reorders the slice using each issue's own field.
+func TestNewPlan_PriorityNeverInherited(t *testing.T) {
+	cfg := Config{}
+	in := Input{
+		Origin: OriginDiscovered,
+		Issues: []Issue{
+			{Number: "1", Priority: forge.PriorityLow},      // blocker
+			{Number: "2", Priority: forge.PriorityCritical}, // dependent
+		},
+		Edges: map[string][]string{"2": {"1"}},
+	}
+	plan, err := NewPlan(cfg, in)
+	if err != nil {
+		t.Fatalf("NewPlan: %v", err)
+	}
+	for _, iss := range plan.Issues {
+		if iss.Number == "1" && iss.Priority != forge.PriorityLow {
+			t.Errorf("blocker #1 Priority = %v, want unchanged PriorityLow", iss.Priority)
+		}
+	}
+}
+
+// TestNewPlan_EdgesCarriedThroughUnchangedByPrioritySort verifies that, even
+// though a Critical-priority dependent sorts ahead of its Low-priority
+// blocker in plan.Issues (sort is blind to edges — that's expected), Edges
+// itself is carried through unchanged so a downstream drainMaxJobs readiness
+// check still holds the dependent back regardless of its position in the
+// sorted slice. Actual dependency enforcement happens in drainMaxJobs, not
+// in NewPlan's sort; NewPlan's job here is only to prove priority sorting
+// never corrupts or overrides the edges data blocking still relies on
+// downstream.
+func TestNewPlan_EdgesCarriedThroughUnchangedByPrioritySort(t *testing.T) {
+	cfg := Config{}
+	edges := map[string][]string{"2": {"1"}}
+	in := Input{
+		Origin: OriginDiscovered,
+		Issues: []Issue{
+			{Number: "1", Priority: forge.PriorityLow},      // blocker
+			{Number: "2", Priority: forge.PriorityCritical}, // dependent, blocked
+		},
+		Edges: edges,
+	}
+	plan, err := NewPlan(cfg, in)
+	if err != nil {
+		t.Fatalf("NewPlan: %v", err)
+	}
+	got := planIssueNums(plan.Issues)
+	if len(got) != 2 || got[0] != "2" || got[1] != "1" {
+		t.Fatalf("Issues order = %v, want [2 1] (Critical dependent sorts ahead of its Low blocker)", got)
+	}
+	if len(plan.Edges["2"]) != 1 || plan.Edges["2"][0] != "1" {
+		t.Errorf("Edges not carried through unchanged: %v", plan.Edges)
+	}
+}
+
+// TestNewPlan_UnlabeledBatchByteIdenticalOrder verifies an all-PriorityNormal
+// (zero value; issues constructed without setting Priority at all) batch in
+// an arbitrary Number order sorts to the exact same order as the input —
+// zero behaviour change for the common case (no agent-priority-* labels in
+// use).
+func TestNewPlan_UnlabeledBatchByteIdenticalOrder(t *testing.T) {
+	cfg := Config{}
+	in := Input{
+		Origin: OriginDiscovered,
+		Issues: []Issue{
+			{Number: "42"},
+			{Number: "7"},
+			{Number: "13"},
+			{Number: "1"},
+		},
+	}
+	want := []string{"42", "7", "13", "1"}
+	plan, err := NewPlan(cfg, in)
+	if err != nil {
+		t.Fatalf("NewPlan: %v", err)
+	}
+	got := planIssueNums(plan.Issues)
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("Issues order = %v, want %v (byte-identical to input)", got, want)
+			break
+		}
+	}
+}
+
+// TestNewPlan_SelectiveNeverReordersByPriority verifies OriginSelective —
+// the operator's hand-picked list — is never reordered by priority (ADR
+// 0040: a selective list keeps the operator's typed order).
+func TestNewPlan_SelectiveNeverReordersByPriority(t *testing.T) {
+	cfg := Config{}
+	in := Input{
+		Origin: OriginSelective,
+		Issues: []Issue{
+			{Number: "1", Priority: forge.PriorityLow},
+			{Number: "2", Priority: forge.PriorityCritical},
+			{Number: "3", Priority: forge.PriorityNormal},
+		},
+	}
+	want := []string{"1", "2", "3"}
+	plan, err := NewPlan(cfg, in)
+	if err != nil {
+		t.Fatalf("NewPlan: %v", err)
+	}
+	got := planIssueNums(plan.Issues)
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("Issues order = %v, want %v (selective order untouched)", got, want)
+			break
+		}
 	}
 }

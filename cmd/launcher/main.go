@@ -267,8 +267,9 @@ func applyDispatchKind(c config, kind string) config {
 }
 
 type issue struct {
-	number string
-	title  string
+	number   string
+	title    string
+	priority forge.Priority
 }
 
 func getenv(key, def string) string {
@@ -1065,7 +1066,7 @@ func selectiveWavesConfig(c config) waves.Config {
 func toWaveIssues(issues []issue) []waves.Issue {
 	out := make([]waves.Issue, len(issues))
 	for i, iss := range issues {
-		out[i] = waves.Issue{Number: iss.number, Title: iss.title}
+		out[i] = waves.Issue{Number: iss.number, Title: iss.title, Priority: iss.priority}
 	}
 	return out
 }
@@ -1199,7 +1200,7 @@ func discoverIssues(c config, it forge.IssueTracker) ([]issue, waves.Origin, err
 		if err != nil {
 			return nil, origin, err
 		}
-		return []issue{{number: fi.Number, title: fi.Title}}, origin, nil
+		return []issue{{number: fi.Number, title: fi.Title, priority: fi.Priority}}, origin, nil
 	}
 	fmt.Printf("==> querying open '%s' issues in %s\n", c.label, c.repoSlug)
 	issues, err := queryOpenIssues(c, it)
@@ -1217,7 +1218,7 @@ func queryOpenIssues(c config, it forge.IssueTracker) ([]issue, error) {
 	}
 	var issues []issue
 	for _, fi := range rawIssues {
-		issues = append(issues, issue{number: fi.Number, title: fi.Title})
+		issues = append(issues, issue{number: fi.Number, title: fi.Title, priority: fi.Priority})
 	}
 	return issues, nil
 }
@@ -1266,7 +1267,7 @@ func recoverByNumber(c config, it forge.IssueTracker, cf forge.CodeForge, pwd st
 	if err != nil {
 		return fmt.Errorf("issue %s: %w", issueNum, err)
 	}
-	iss := issue{number: fi.Number, title: fi.Title}
+	iss := issue{number: fi.Number, title: fi.Title, priority: fi.Priority}
 	branch := cf.AgentBranch(iss.number)
 	res, prErr := forge.ResolveOpenPR(cf, iss.number)
 	if prErr != nil {
