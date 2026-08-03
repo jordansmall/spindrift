@@ -228,7 +228,7 @@ let
         default = null;
         description = ''
           The first-class N-agent roster (issue #264, lib/roster.nix): a list of
-          `{ name; model; mode; description; tools; promptFile; prompt }`
+          `{ name; model; effort; mode; description; tools; promptFile; prompt }`
           attrsets that both Drivers render subagents from, replacing the four
           hardcoded scout/reviewer/filer/worker model knobs. An explicit
           `roster` always wins over the legacy per-agent model knobs
@@ -236,6 +236,11 @@ let
           `mkHarness.nix` applies to a raw call. Untyped (`types.attrs`
           elements, not a submodule) so the forwarded list matches the
           Consumer's input verbatim, byte-for-byte, with no default-injection.
+          `effort` (issue #2242) is an optional pass-through, driver-specific
+          effort/reasoning-level string: the claude Driver emits it as the
+          `effort` key in the agent's `--agents` JSON entry, the opencode
+          Driver as the `reasoningEffort` key in the agent-file frontmatter;
+          omitted entirely when not set.
         '';
       };
     }
@@ -474,7 +479,7 @@ in
             default = null;
             description = ''
               The first-class N-agent roster (issue #264, lib/roster.nix): a list of
-              `{ name; model; mode; description; tools; promptFile; prompt }`
+              `{ name; model; effort; mode; description; tools; promptFile; prompt }`
               attrsets that both Drivers render subagents from, replacing the four
               hardcoded scout/reviewer/filer/worker model knobs. An explicit
               `roster` always wins over the legacy per-agent model knobs
@@ -482,6 +487,11 @@ in
               `mkHarness.nix` applies to a raw call. Untyped (`types.attrs`
               elements, not a submodule) so the forwarded list matches the
               Consumer's input verbatim, byte-for-byte, with no default-injection.
+              `effort` (issue #2242) is an optional pass-through, driver-specific
+              effort/reasoning-level string: the claude Driver emits it as the
+              `effort` key in the agent's `--agents` JSON entry, the opencode
+              Driver as the `reasoningEffort` key in the agent-file frontmatter;
+              omitted entirely when not set.
             '';
           };
 
