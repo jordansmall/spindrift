@@ -61,6 +61,8 @@ type fakeForgejo struct {
 	enqueued      map[string]bool
 	autoMergeOK   bool
 
+	compareTotalCommits map[string]int // PR num -> total_commits the compare route reports
+
 	// mergeHook, when set, is invoked by the non-auto-merge POST
 	// /pulls/{index}/merge path before the pull is flipped merged. A
 	// non-nil error fails the merge request rather than flipping state —
@@ -76,6 +78,8 @@ var (
 	fakeForgejoStatusRe    = regexp.MustCompile(`^/api/v1/repos/owner/repo/commits/([^/]+)/status$`)
 	fakeForgejoStatusesRe  = regexp.MustCompile(`^/api/v1/repos/owner/repo/commits/([^/]+)/statuses$`)
 	fakeForgejoRepoRootRe  = regexp.MustCompile(`^/api/v1/repos/owner/repo$`)
+	fakeForgejoCompareRe   = regexp.MustCompile(`^/api/v1/repos/owner/repo/compare/`)
+	fakeForgejoIssueNumRe  = regexp.MustCompile(`issue-(\d+)`)
 )
 
 // newFakeForgejo starts the fake server and registers its cleanup on t.
@@ -176,6 +180,22 @@ func (f *fakeForgejo) SetMergeable(num string, mergeable bool) {
 	}
 }
 
+// SeedNeedsUpdate scripts num's compare-route total_commits: >0 (needsUpdate
+// true) or 0 (false) — mirrors forgejo_prforge.go's NeedsUpdate, which reads
+// total_commits from the swapped-refs compare call.
+func (f *fakeForgejo) SeedNeedsUpdate(url string, needsUpdate bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.compareTotalCommits == nil {
+		f.compareTotalCommits = map[string]int{}
+	}
+	n := 0
+	if needsUpdate {
+		n = 1
+	}
+	f.compareTotalCommits[prNumFromURL(url)] = n
+}
+
 // AutoMergeEnqueued reports whether the merge route recorded url's PR as
 // enqueued via merge_when_checks_succeed.
 func (f *fakeForgejo) AutoMergeEnqueued(url string) bool {
@@ -214,6 +234,8 @@ func (f *fakeForgejo) handle(w http.ResponseWriter, r *http.Request) {
 		f.handleCommitStatus(w, r, fakeForgejoStatusRe.FindStringSubmatch(r.URL.Path)[1])
 	case r.Method == http.MethodGet && fakeForgejoStatusesRe.MatchString(r.URL.Path):
 		f.handleCommitStatuses(w, r, fakeForgejoStatusesRe.FindStringSubmatch(r.URL.Path)[1])
+	case r.Method == http.MethodGet && fakeForgejoCompareRe.MatchString(r.URL.Path):
+		f.handleCompare(w, r)
 	default:
 		http.NotFound(w, r)
 	}
@@ -342,6 +364,22 @@ func (f *fakeForgejo) handleCommitStatus(w http.ResponseWriter, _ *http.Request,
 		"state":       rollupToForgejoState[next],
 		"total_count": 1,
 	})
+}
+
+// handleCompare serves the swapped-refs compare route NeedsUpdate reads,
+// mirroring forgejoCompare in forgejo_prforge.go: {"total_commits": <n>}.
+// The PR number is recovered from the head ref embedded in the compare
+// path, which is always agent/issue-<num>.
+func (f *fakeForgejo) handleCompare(w http.ResponseWriter, r *http.Request) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	match := fakeForgejoIssueNumRe.FindStringSubmatch(r.URL.Path)
+	n := 0
+	if match != nil {
+		n = f.compareTotalCommits[match[1]]
+	}
+	json.NewEncoder(w).Encode(map[string]any{"total_commits": n})
 }
 
 func (f *fakeForgejo) handleCommitStatuses(w http.ResponseWriter, _ *http.Request, sha string) {
