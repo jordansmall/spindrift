@@ -2,6 +2,7 @@ package forge_test
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"spindrift.dev/launcher/internal/forge"
@@ -252,6 +253,75 @@ func TestFake_AgentBranch_ZeroValue(t *testing.T) {
 	if got := f.AgentBranch("7"); got != "7" {
 		t.Errorf("AgentBranch(7) = %q, want %q", got, "7")
 	}
+}
+
+// TestClassifyMergeFailure verifies the MergeableState → sentinel-error
+// mapping shared by every adapter's Merge failure path.
+func TestClassifyMergeFailure(t *testing.T) {
+	cases := []struct {
+		name    string
+		state   forge.MergeableState
+		wantErr error
+		wantOK  bool
+	}{
+		{"conflicting", forge.MergeableConflicting, forge.ErrMergeConflict, true},
+		{"mergeable", forge.MergeableMergeable, forge.ErrMergeBlockedByChecks, true},
+		{"unknown", forge.MergeableUnknown, nil, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err, ok := forge.ClassifyMergeFailure(tc.state)
+			if ok != tc.wantOK {
+				t.Fatalf("ok = %v, want %v", ok, tc.wantOK)
+			}
+			if !errors.Is(err, tc.wantErr) && err != tc.wantErr {
+				t.Fatalf("err = %v, want %v", err, tc.wantErr)
+			}
+		})
+	}
+}
+
+// TestRenderFailureDetail verifies the shared failure-detail formatter: empty
+// input, a couple of failing entries, and truncation to MaxFailureDetailBytes.
+func TestRenderFailureDetail(t *testing.T) {
+	t.Run("empty", func(t *testing.T) {
+		if got := forge.RenderFailureDetail(nil); got != "" {
+			t.Fatalf("want \"\", got %q", got)
+		}
+	})
+
+	t.Run("formats entries", func(t *testing.T) {
+		entries := []forge.FailureDetailEntry{
+			{Name: "lint", State: "FAILURE", Summary: "2 errors"},
+			{Name: "legacy-status", State: "ERROR", Summary: "build broke"},
+		}
+		got := forge.RenderFailureDetail(entries)
+		want := "lint: FAILURE\n2 errors\n---\nlegacy-status: ERROR\nbuild broke\n---"
+		if got != want {
+			t.Fatalf("got %q, want %q", got, want)
+		}
+	})
+
+	t.Run("omits blank summary", func(t *testing.T) {
+		entries := []forge.FailureDetailEntry{
+			{Name: "legacy-ci", State: "FAILURE"},
+		}
+		got := forge.RenderFailureDetail(entries)
+		want := "legacy-ci: FAILURE\n---"
+		if got != want {
+			t.Fatalf("got %q, want %q", got, want)
+		}
+	})
+
+	t.Run("truncates to MaxFailureDetailBytes", func(t *testing.T) {
+		entries := []forge.FailureDetailEntry{
+			{Name: "huge", State: "FAILURE", Summary: strings.Repeat("x", forge.MaxFailureDetailBytes*2)},
+		}
+		got := forge.RenderFailureDetail(entries)
+		if len(got) != forge.MaxFailureDetailBytes {
+			t.Fatalf("len(got) = %d, want %d", len(got), forge.MaxFailureDetailBytes)
+		}
+	})
 }
 
 // TestFake_ListPRFiles verifies that ListPRFiles returns the scripted changed
