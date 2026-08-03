@@ -211,8 +211,8 @@ type IssueCloser interface {
 // valid combination — were this surface named CloseIssue like IssueCloser,
 // the local adapter's existing method would satisfy it too, and settle would
 // drive the local closed: axis directly, a write only reconcile's sweep may
-// make. Only github implements MergeCloser. Callers discover it with a type
-// assertion — `mc, ok := it.(MergeCloser)`.
+// make. Only github and forgejo implement MergeCloser. Callers discover
+// it with a type assertion — `mc, ok := it.(MergeCloser)`.
 type MergeCloser interface {
 	// CloseMergedIssue closes issue num once settle has independently
 	// confirmed a genuine merge. Idempotent: closing an already-closed issue
