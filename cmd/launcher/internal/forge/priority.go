@@ -13,6 +13,10 @@ package forge
 // mirroring DispatchLabels.ClaimRemoveLabels's shared-helper precedent.
 func ResolvePriority(labels []string) Priority {
 	priority := PriorityNormal
+	// found tracks whether any priority label matched yet — required
+	// because PriorityLow < PriorityNormal, so a lone agent-priority-low
+	// label must still win over the zero-value default via `!found`, not
+	// just via the `candidate > priority` comparison.
 	found := false
 	for _, label := range labels {
 		var candidate Priority
