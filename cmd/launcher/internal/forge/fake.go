@@ -1123,10 +1123,10 @@ func (f *Fake) AsNoLandingRecorder() IssueTracker { return noLandingIssueTracker
 // local-only write surfaces (LandingRecorder, IssueCloser) but hides
 // MergeCloser — the real local adapter's shape (issue #1892): local
 // implements the reconcile-owned closed: axis (IssueCloser) but never
-// settle's github-only merge-driven backstop (MergeCloser), even when paired
-// with a PRForge-implementing Code Forge (ISSUE_TRACKER=local +
-// CODE_FORGE=github is a valid independent combination, main.go's
-// newIssueTracker/newCodeForge).
+// settle's merge-driven backstop (MergeCloser, implemented by github and
+// forgejo), even when paired with a PRForge-implementing Code Forge
+// (ISSUE_TRACKER=local + CODE_FORGE=github is a valid independent
+// combination, main.go's newIssueTracker/newCodeForge).
 type localShapedIssueTracker struct {
 	IssueTracker
 	f *Fake
@@ -1142,7 +1142,7 @@ func (l localShapedIssueTracker) CloseIssue(num string) error {
 
 // AsLocalShaped returns f wrapped so it satisfies IssueTracker,
 // LandingRecorder, and IssueCloser — the local adapter's shape — but not
-// MergeCloser, which only github implements.
+// MergeCloser, which only github and forgejo implement.
 func (f *Fake) AsLocalShaped() IssueTracker {
 	return localShapedIssueTracker{IssueTracker: f, f: f}
 }
