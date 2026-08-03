@@ -20,6 +20,7 @@ set_box_env() {
   export COMPLETE_LABEL="agent-complete"
   export DEV_SHELL_NAME="default"
   export DEV_SHELL_PROBE_TIMEOUT=300
+  export EFFORT=""
   export FILER_MODEL=""
   export FORGEJO_BASE_URL="https://codeberg.org"
   export FORGEJO_TOKEN=""
