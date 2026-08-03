@@ -13,8 +13,8 @@
 # "part":{"text":"..."}}` event (the shape lib/drivers/opencode.nix's
 # outcomeExtractFnBody parses via `jq -r 'select(.type == "text") |
 # .part.text // empty'`, and the shape asserted in
-# cmd/launcher/internal/driver/opencode_test.go's
-# TestOpencodeDriverRenderTranscript), not claude's `result` envelope.
+# cmd/launcher/internal/driver/opencode/transcript_test.go's
+# TestRenderTranscript_SurfacesTextEvents), not claude's `result` envelope.
 set -euo pipefail
 
 : "${DRIVER_LOG:?DRIVER_LOG must point at a log file}"
@@ -25,16 +25,11 @@ call_index="$(grep -c '^driver invoked for issue' "$DRIVER_LOG" 2>/dev/null || t
 printf '%s\n' "$*" >>"$DRIVER_LOG"
 
 prompt=""
-agents=""
 model=""
 while [ $# -gt 0 ]; do
   case "$1" in
     -p)
       prompt="${2:-}"
-      shift 2
-      ;;
-    --agents)
-      agents="${2:-}"
       shift 2
       ;;
     --model)
@@ -46,7 +41,6 @@ while [ $# -gt 0 ]; do
 done
 
 printf '%s' "$prompt" >"${DRIVER_PROMPT_FILE:-/dev/null}"
-printf '%s' "$agents" >"${DRIVER_AGENTS_FILE:-/dev/null}"
 printf 'driver invoked for issue #%s model=%s\n' "${ISSUE_NUMBER:-?}" "$model" >>"$DRIVER_LOG"
 
 # Real claude reads CLAUDE_CODE_DISABLE_BACKGROUND_TASKS from its own process

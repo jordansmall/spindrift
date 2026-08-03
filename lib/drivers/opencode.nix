@@ -52,11 +52,11 @@
   # stream has no single terminal `result` envelope -- instead every
   # `type:"text"` event carries incremental `.part.text`, so every such
   # event's text is scanned for the outcome line. The per-line markdown-strip,
-  # colon/space delimiter normalization, and required-field greps mirror
-  # claude.nix's outcomeExtractFnBody exactly (see that file's comment for the
-  # full rationale) so both Drivers produce the same launcher-side outcome
-  # line shape from whichever event stream they emit. That mirroring is
-  # verified, not just asserted: tests/driver-registry-outcome-extraction.bats
+  # colon/space delimiter normalization, and required-field greps match
+  # claude.nix's outcomeExtractFnBody (see that file's comment for the full
+  # rationale) so both Drivers produce the same launcher-side outcome line
+  # shape from whichever event stream they emit. That match is verified, not
+  # just asserted: tests/driver-registry-outcome-extraction.bats
   # (nix/checks/bats.nix's driver-registry-outcome-extraction check) runs this
   # exact rendered body against
   # cmd/launcher/internal/driver/opencode/testdata/outcome-fixture.jsonl, and
@@ -77,10 +77,10 @@
   '';
 
   # Shell function body extracting a *near-miss* SPINDRIFT_OUTCOME line from
-  # opencode's NDJSON text events (issue #1900). Mirrors claude.nix's
-  # outcomeExtractNearMissFnBody exactly (see that file's comment for the full
+  # opencode's NDJSON text events (issue #1900). Matches claude.nix's
+  # outcomeExtractNearMissFnBody (see that file's comment for the full
   # rationale) over opencode's `type:"text"`/`.part.text` event stream, the
-  # same way this file's outcomeExtractFnBody mirrors its claude.nix sibling.
+  # same way this file's outcomeExtractFnBody matches its claude.nix sibling.
   # Verified the same way too: the driver-registry-outcome-extraction and
   # bats-outcome-opencode checks named on outcomeExtractFnBody above exercise
   # this near-miss body against the same opencode-shaped fixtures (issue
