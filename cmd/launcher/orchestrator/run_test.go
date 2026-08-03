@@ -90,6 +90,7 @@ exit 0
 		driverBin:    "claude",
 		driverFlags:  "--dangerously-skip-permissions",
 		model:        "claude-sonnet-5",
+		effort:       "high",
 		issue:        "7",
 		logPath:      filepath.Join(dir, "stream.log"),
 		heartbeatLog: filepath.Join(dir, "heartbeat.log"),
@@ -128,6 +129,7 @@ exit 0
 		"--driver-bin claude",
 		"--driver-flags --dangerously-skip-permissions",
 		"--model claude-sonnet-5",
+		"--effort high",
 		"--issue 7",
 		"--log-path " + cfg.logPath,
 		"--heartbeat-log " + cfg.heartbeatLog,
@@ -160,6 +162,42 @@ func TestBuildDriverExecCmdForwardsDriverFlag(t *testing.T) {
 	got := strings.Join(cmd.Args, " ")
 	if !strings.Contains(got, "--driver opencode") {
 		t.Errorf("driver-exec argv = %q, want it to contain %q", got, "--driver opencode")
+	}
+}
+
+// TestBuildDriverExecCmdForwardsEffortFlag verifies buildDriverExecCmd
+// forwards cfg.effort as driver-exec's own --effort flag unconditionally
+// (issue #2241 slice 3) -- driver-exec's own buildDriverArgs decides whether
+// to actually emit the downstream flag based on non-empty, so the
+// orchestrator forwards the raw value the same way it does for cfg.model,
+// including when it's empty.
+func TestBuildDriverExecCmdForwardsEffortFlag(t *testing.T) {
+	dir := t.TempDir()
+	callLog := filepath.Join(dir, "calls.log")
+	writeFakeDriverExec(t, dir, callLog, "exit 0\n")
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	cfg := config{
+		driverBin: "claude",
+		effort:    "high",
+	}
+	cmd, err := buildDriverExecCmd(cfg)
+	if err != nil {
+		t.Fatalf("buildDriverExecCmd: %v", err)
+	}
+	got := strings.Join(cmd.Args, " ")
+	if !strings.Contains(got, "--effort high") {
+		t.Errorf("driver-exec argv = %q, want it to contain %q", got, "--effort high")
+	}
+
+	cfg.effort = ""
+	cmd, err = buildDriverExecCmd(cfg)
+	if err != nil {
+		t.Fatalf("buildDriverExecCmd: %v", err)
+	}
+	got = strings.Join(cmd.Args, " ")
+	if !strings.Contains(got, "--effort") {
+		t.Errorf("driver-exec argv = %q, want it to still contain the --effort flag (unconditionally forwarded, matching --model) when cfg.effort is empty", got)
 	}
 }
 
