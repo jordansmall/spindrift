@@ -8,6 +8,7 @@ import (
 
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/driver"
+	"spindrift.dev/launcher/internal/driver/driverkit"
 )
 
 // ActivityLine is one distinct emitted status line of a Dispatch's Activity
@@ -40,7 +41,7 @@ func ActivityFeed(drv driver.Driver, pwd, number string) []ActivityLine {
 		return nil
 	}
 	var buf bytes.Buffer
-	w := drv.NewHeartbeatWriter(io.Discard, number, &buf, "")
+	w := drv.NewHeartbeatWriter(io.Discard, number, &buf, driverkit.RenderOptions{})
 	if _, err := w.Write(data); err != nil {
 		return nil
 	}

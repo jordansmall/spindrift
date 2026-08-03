@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"spindrift.dev/launcher/internal/driver"
+	"spindrift.dev/launcher/internal/driver/driverkit"
 )
 
 // tailer holds the persistent per-log-path parser state appendHeartbeat and
@@ -49,7 +50,7 @@ func (t *tailer) readAppended(drv driver.Driver, number string) (data string, ok
 	}
 	if t.writer == nil {
 		t.out = &bytes.Buffer{}
-		t.writer = drv.NewHeartbeatWriter(io.Discard, number, t.out, "")
+		t.writer = drv.NewHeartbeatWriter(io.Discard, number, t.out, driverkit.RenderOptions{})
 	} else {
 		t.out.Reset()
 	}

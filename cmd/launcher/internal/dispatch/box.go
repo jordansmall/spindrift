@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 
 	"spindrift.dev/launcher/internal/driver"
+	"spindrift.dev/launcher/internal/driver/driverkit"
 	"spindrift.dev/launcher/internal/runner"
 )
 
@@ -180,7 +181,7 @@ func (d *Dispatch) runOnce(logPath string, env map[string]string, driverCacheDir
 		Issue:          d.number,
 		Name:           name,
 		Env:            env,
-		Output:         d.driver.NewHeartbeatWriter(logFile, d.number, d.humanOut(), ""),
+		Output:         d.driver.NewHeartbeatWriter(logFile, d.number, d.humanOut(), driverkit.RenderOptions{}),
 		DriverCacheDir: driverCacheDir,
 		OutboxDir:      outboxDir,
 	}

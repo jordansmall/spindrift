@@ -9,6 +9,7 @@ import (
 
 	"spindrift.dev/launcher/internal/driver"
 	driverclaude "spindrift.dev/launcher/internal/driver/claude"
+	"spindrift.dev/launcher/internal/driver/driverkit"
 	"spindrift.dev/launcher/internal/runner"
 	"spindrift.dev/launcher/internal/usage"
 )
@@ -86,7 +87,7 @@ func (d fakeDriver) ClassifyTransient(logPath string) (driver.Classification, er
 	return driver.Classification{Class: driver.Terminal, Reason: driver.TaskFailed}, nil
 }
 
-func (d fakeDriver) NewHeartbeatWriter(raw io.Writer, issue string, out io.Writer, topLevelRole string) io.Writer {
+func (d fakeDriver) NewHeartbeatWriter(raw io.Writer, issue string, out io.Writer, opts driverkit.RenderOptions) io.Writer {
 	return raw
 }
 
@@ -94,6 +95,13 @@ func (d fakeDriver) ExtractUsage(logPath string) (usage.Report, error) {
 	return driverclaude.ExtractUsage(logPath)
 }
 
-func (d fakeDriver) RenderTranscript(logPath, topLevelRole string) (string, error) {
-	return driverclaude.RenderTranscriptWithRole(logPath, topLevelRole)
+func (d fakeDriver) RenderTranscript(logPath string, opts driverkit.RenderOptions) (string, error) {
+	return driverclaude.RenderTranscriptWithRole(logPath, opts.TopLevelRole)
+}
+
+// ResolveExit trusts the passed exitCode unchanged, mirroring claudeDriver's
+// own behavior (issue #2263) since fakeDriver otherwise stands in for the
+// claude strategy in dispatch's tests.
+func (d fakeDriver) ResolveExit(logPath string, exitCode int) (int, error) {
+	return exitCode, nil
 }

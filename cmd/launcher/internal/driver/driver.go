@@ -13,6 +13,7 @@ import (
 	"io"
 	"sort"
 
+	"spindrift.dev/launcher/internal/driver/driverkit"
 	"spindrift.dev/launcher/internal/usage"
 )
 
@@ -32,10 +33,10 @@ type Driver interface {
 	// NewHeartbeatWriter wraps raw (the log file) with a writer that emits
 	// coarse status lines to out at natural event boundaries in this
 	// Driver's own transcript format, forwarding all bytes to raw unchanged.
-	// topLevelRole is the role attributed to top-level (empty
+	// opts.TopLevelRole is the role attributed to top-level (empty
 	// parent_tool_use_id) messages; an empty value means the implementor's
 	// own default (issue #2092).
-	NewHeartbeatWriter(raw io.Writer, issue string, out io.Writer, topLevelRole string) io.Writer
+	NewHeartbeatWriter(raw io.Writer, issue string, out io.Writer, opts driverkit.RenderOptions) io.Writer
 
 	// ExtractUsage scans the box log at logPath and returns its aggregate and
 	// per-model usage in one report, in this Driver's own log format.
@@ -44,10 +45,19 @@ type Driver interface {
 	// RenderTranscript scans the box log at logPath and returns a readable
 	// rendering of its assistant turns and tool calls, in this Driver's own
 	// transcript format — a Console drill-in's rendered view (#648).
-	// topLevelRole is the role attributed to top-level (empty
+	// opts.TopLevelRole is the role attributed to top-level (empty
 	// parent_tool_use_id) messages; an empty value means the implementor's
 	// own default (issue #2092).
-	RenderTranscript(logPath, topLevelRole string) (string, error)
+	RenderTranscript(logPath string, opts driverkit.RenderOptions) (string, error)
+
+	// ResolveExit returns the exit code the launcher should treat as
+	// authoritative for a completed run. exitCode is the agent process's own
+	// exit code; logPath is the box log. A Driver whose own exit code is
+	// already trustworthy (e.g. claude) returns exitCode unchanged; a Driver
+	// whose own exit code is not (e.g. opencode, which exits 0 even on a
+	// mid-run error) derives a replacement from the log instead (issue
+	// #2263).
+	ResolveExit(logPath string, exitCode int) (int, error)
 }
 
 // registry maps a Driver name to its strategy. Populated by each driver's

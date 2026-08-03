@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"spindrift.dev/launcher/internal/driver/driverkit"
 )
 
 // TestClaudeDriverHeartbeatWriterForwardsRaw verifies that the claude
@@ -19,7 +21,7 @@ func TestClaudeDriverHeartbeatWriterForwardsRaw(t *testing.T) {
 	}
 
 	var raw, out bytes.Buffer
-	w := d.NewHeartbeatWriter(&raw, "42", &out, "")
+	w := d.NewHeartbeatWriter(&raw, "42", &out, driverkit.RenderOptions{})
 
 	streamJSON := `{"type":"result","num_turns":2}` + "\n"
 	if _, err := w.Write([]byte(streamJSON)); err != nil {
@@ -172,6 +174,27 @@ func TestClaudeDriverClassifyTransient(t *testing.T) {
 	})
 }
 
+// TestClaudeDriverResolveExitTrustsPassedExitCode verifies that the claude
+// Driver's ResolveExit trusts the caller's own exit code unchanged,
+// regardless of logPath content — claude's stream-json type:"result" event
+// already carries a trustworthy is_error/subtype pair, so there's nothing to
+// derive from the log, unlike opencode (issue #2263).
+func TestClaudeDriverResolveExitTrustsPassedExitCode(t *testing.T) {
+	d, err := New("claude")
+	if err != nil {
+		t.Fatalf("New(claude): %v", err)
+	}
+
+	logPath := filepath.Join(t.TempDir(), "does-not-exist.log")
+	got, err := d.ResolveExit(logPath, 17)
+	if err != nil {
+		t.Fatalf("ResolveExit: %v", err)
+	}
+	if got != 17 {
+		t.Errorf("ResolveExit: got %d, want 17", got)
+	}
+}
+
 // TestClaudeDriverRenderTranscript verifies the claude Driver's fifth
 // method delegates to the claude subpackage's RenderTranscript strategy —
 // the Driver seam's transcript-rendering capability (#648), beside
@@ -189,11 +212,40 @@ func TestClaudeDriverRenderTranscript(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, err := d.RenderTranscript(logPath, "")
+	got, err := d.RenderTranscript(logPath, driverkit.RenderOptions{})
 	if err != nil {
 		t.Fatalf("RenderTranscript: %v", err)
 	}
 	want := "[implementor] Investigating.\n"
+	if got != want {
+		t.Errorf("RenderTranscript = %q, want %q", got, want)
+	}
+}
+
+// TestClaudeDriverRenderTranscript_TopLevelRoleOptionCarriesThrough verifies
+// that the claude Driver's RenderTranscript threads opts.TopLevelRole from
+// the collapsed driverkit.RenderOptions value through to the claude
+// subpackage's RenderTranscriptWithRole strategy end to end (issue #2263):
+// a non-default role in the options value attributes the top-level event to
+// that role, not the "implementor" default.
+func TestClaudeDriverRenderTranscript_TopLevelRoleOptionCarriesThrough(t *testing.T) {
+	d, err := New("claude")
+	if err != nil {
+		t.Fatalf("New(claude): %v", err)
+	}
+
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "issue-1.log")
+	line := `{"type":"assistant","message":{"content":[{"type":"text","text":"Reviewing."}]}}`
+	if err := os.WriteFile(logPath, []byte(line+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := d.RenderTranscript(logPath, driverkit.RenderOptions{TopLevelRole: "reviewer"})
+	if err != nil {
+		t.Fatalf("RenderTranscript: %v", err)
+	}
+	want := "[reviewer] Reviewing.\n"
 	if got != want {
 		t.Errorf("RenderTranscript = %q, want %q", got, want)
 	}

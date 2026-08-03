@@ -8,13 +8,13 @@ import (
 	"spindrift.dev/launcher/internal/driver"
 )
 
-// TestApplyExitSynthUsesSynthesizedExitForOpencode verifies applyExitSynth
+// TestResolveExitUsesSynthesizedExitForOpencode verifies resolveExit
 // replaces the child process's own exit code with the opencode Driver's
-// SynthesizeExit result (issue #262 slice 4) -- opencode's own process exit
-// code is not trustworthy on its own (see driver/opencode/exitsynth.go), so
-// driver-exec's main must apply the optional ExitSynthesizer pass after run
-// returns, for a Driver that implements it.
-func TestApplyExitSynthUsesSynthesizedExitForOpencode(t *testing.T) {
+// ResolveExit result (issue #2263) -- opencode's own process exit code is
+// not trustworthy on its own (see driver/opencode/exitsynth.go), so
+// driver-exec's main must apply the Driver's required ResolveExit pass after
+// run returns.
+func TestResolveExitUsesSynthesizedExitForOpencode(t *testing.T) {
 	dir := t.TempDir()
 	logPath := filepath.Join(dir, "stream.log")
 	// A log with a valid outcome line and no error event synthesizes to 0
@@ -32,32 +32,31 @@ func TestApplyExitSynthUsesSynthesizedExitForOpencode(t *testing.T) {
 		t.Fatalf("driver.New(opencode): %v", err)
 	}
 
-	got := applyExitSynth(d, 7, logPath)
+	got := resolveExit(d, 7, logPath)
 	if got == 7 {
-		t.Errorf("applyExitSynth = %d, want it to replace the child rc (7) with the synthesized exit code", got)
+		t.Errorf("resolveExit = %d, want it to replace the child rc (7) with the synthesized exit code", got)
 	}
 }
 
-// TestApplyExitSynthLeavesClaudeExitCodeUntouched verifies applyExitSynth is
-// a no-op for a Driver that does not implement ExitSynthesizer (claude's own
-// exit code is already trustworthy) -- the child rc passes through
-// unchanged, and the log path is never even consulted.
-func TestApplyExitSynthLeavesClaudeExitCodeUntouched(t *testing.T) {
+// TestResolveExitLeavesClaudeExitCodeUntouched verifies resolveExit is a
+// no-op for a Driver (claude) whose ResolveExit trusts the passed exit code
+// unchanged -- the child rc passes through unchanged.
+func TestResolveExitLeavesClaudeExitCodeUntouched(t *testing.T) {
 	d, err := driver.New("claude")
 	if err != nil {
 		t.Fatalf("driver.New(claude): %v", err)
 	}
 
-	got := applyExitSynth(d, 7, filepath.Join(t.TempDir(), "does-not-exist.log"))
+	got := resolveExit(d, 7, filepath.Join(t.TempDir(), "does-not-exist.log"))
 	if got != 7 {
-		t.Errorf("applyExitSynth = %d, want 7 (claude's own rc, untouched)", got)
+		t.Errorf("resolveExit = %d, want 7 (claude's own rc, untouched)", got)
 	}
 }
 
-// TestApplyExitSynthOnErrorKeepsOriginalRC verifies a SynthesizeExit failure
-// (e.g. an unreadable log path) degrades safely to the original child rc
-// instead of masking a real failure behind a synthesis error.
-func TestApplyExitSynthOnErrorKeepsOriginalRC(t *testing.T) {
+// TestResolveExitOnErrorKeepsOriginalRC verifies a ResolveExit failure (e.g.
+// an unreadable log path) degrades safely to the original child rc instead
+// of masking a real failure behind a resolution failure.
+func TestResolveExitOnErrorKeepsOriginalRC(t *testing.T) {
 	d, err := driver.New("opencode")
 	if err != nil {
 		t.Fatalf("driver.New(opencode): %v", err)
@@ -68,8 +67,8 @@ func TestApplyExitSynthOnErrorKeepsOriginalRC(t *testing.T) {
 	// so this exercises the fallback path indirectly: a missing-file result
 	// is still a non-error, non-zero synthesized code, which is exactly what
 	// this test wants to see replace the child rc.
-	got := applyExitSynth(d, 0, filepath.Join(t.TempDir(), "does-not-exist.log"))
+	got := resolveExit(d, 0, filepath.Join(t.TempDir(), "does-not-exist.log"))
 	if got == 0 {
-		t.Errorf("applyExitSynth = %d, want a non-zero synthesized exit for a missing/invalid log", got)
+		t.Errorf("resolveExit = %d, want a non-zero synthesized exit for a missing/invalid log", got)
 	}
 }
