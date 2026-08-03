@@ -45,12 +45,11 @@ type HostMediationHarness interface {
 }
 
 // IssueFilerHarness is implemented by harnesses whose Tracker() also
-// satisfies forge.HostPostedIssueFiler -- currently the Fake only, via
-// AsIssueFiler() (github/forgejo's production issue-filing lands in a later
-// issue; issuetracker.go:158-176's own doc). RunHostMediationContract
-// type-asserts for it and no-ops the issue-filing scenario when absent, the
-// same optional-marker pattern PRForgeHarness's PushOnlyCodeForgeProvider
-// and CodeForgeHarness's LandingHarness already use.
+// satisfies forge.HostPostedIssueFiler -- github, forgejo, and the Fake (via
+// AsIssueFiler()) all qualify. RunHostMediationContract type-asserts for it
+// and no-ops the issue-filing scenario when absent, the same optional-marker
+// pattern PRForgeHarness's PushOnlyCodeForgeProvider and CodeForgeHarness's
+// LandingHarness already use.
 type IssueFilerHarness interface {
 	// IssueFilerTracker returns an IssueTracker that also implements
 	// forge.HostPostedIssueFiler.
