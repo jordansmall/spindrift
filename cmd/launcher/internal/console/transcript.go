@@ -8,6 +8,7 @@ import (
 
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/driver"
+	"spindrift.dev/launcher/internal/driver/driverkit"
 )
 
 // DrillIn loads and renders every pass log dispatch.LogPaths finds for
@@ -33,7 +34,7 @@ func DrillIn(drv driver.Driver, pwd, number string) Msg {
 		rendered.WriteString(boundary)
 		raw.WriteString(boundary)
 
-		text, err := drv.RenderTranscript(p.Path, "")
+		text, err := drv.RenderTranscript(p.Path, driverkit.RenderOptions{})
 		if err != nil {
 			return DrillInMsg{Number: number, Err: err}
 		}

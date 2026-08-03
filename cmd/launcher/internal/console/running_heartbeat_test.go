@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/driver"
+	"spindrift.dev/launcher/internal/driver/driverkit"
 )
 
 // TestRunningHeartbeat_ReplaysLatestPassLog_ReturnsLastEmittedLine verifies
@@ -228,8 +229,8 @@ type spyHeartbeatDriver struct {
 	fed *int
 }
 
-func (d spyHeartbeatDriver) NewHeartbeatWriter(raw io.Writer, issue string, out io.Writer, topLevelRole string) io.Writer {
-	inner := d.Driver.NewHeartbeatWriter(raw, issue, out, topLevelRole)
+func (d spyHeartbeatDriver) NewHeartbeatWriter(raw io.Writer, issue string, out io.Writer, opts driverkit.RenderOptions) io.Writer {
+	inner := d.Driver.NewHeartbeatWriter(raw, issue, out, opts)
 	return byteCountingWriter{Writer: inner, total: d.fed}
 }
 

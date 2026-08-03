@@ -4,6 +4,7 @@ import (
 	"io"
 
 	"spindrift.dev/launcher/internal/driver/claude"
+	"spindrift.dev/launcher/internal/driver/driverkit"
 	"spindrift.dev/launcher/internal/usage"
 )
 
@@ -22,16 +23,24 @@ func (claudeDriver) ClassifyTransient(logPath string) (Classification, error) {
 	return claude.Classify(logPath)
 }
 
-func (claudeDriver) NewHeartbeatWriter(raw io.Writer, issue string, out io.Writer, topLevelRole string) io.Writer {
-	return claude.NewWithTopLevelRole(raw, issue, out, topLevelRole)
+func (claudeDriver) NewHeartbeatWriter(raw io.Writer, issue string, out io.Writer, opts driverkit.RenderOptions) io.Writer {
+	return claude.NewWithTopLevelRole(raw, issue, out, opts.TopLevelRole)
 }
 
 func (claudeDriver) ExtractUsage(logPath string) (usage.Report, error) {
 	return claude.ExtractUsage(logPath)
 }
 
-func (claudeDriver) RenderTranscript(logPath, topLevelRole string) (string, error) {
-	return claude.RenderTranscriptWithRole(logPath, topLevelRole)
+func (claudeDriver) RenderTranscript(logPath string, opts driverkit.RenderOptions) (string, error) {
+	return claude.RenderTranscriptWithRole(logPath, opts.TopLevelRole)
+}
+
+// ResolveExit trusts the caller's own exitCode unchanged: claude's
+// stream-json type:"result" event already carries a trustworthy
+// is_error/subtype pair, so the process's own exit code needs no
+// replacement.
+func (claudeDriver) ResolveExit(logPath string, exitCode int) (int, error) {
+	return exitCode, nil
 }
 
 func init() {

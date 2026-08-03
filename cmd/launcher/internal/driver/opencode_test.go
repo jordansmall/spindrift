@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"spindrift.dev/launcher/internal/driver/driverkit"
 )
 
 // TestNewSelectsOpencodeByName verifies that New("opencode") resolves to the
@@ -32,7 +34,7 @@ func TestOpencodeDriverHeartbeatWriterForwardsRaw(t *testing.T) {
 	}
 
 	var raw, out bytes.Buffer
-	w := d.NewHeartbeatWriter(&raw, "77", &out, "")
+	w := d.NewHeartbeatWriter(&raw, "77", &out, driverkit.RenderOptions{})
 
 	ndjson := `{"type":"text","part":{"text":"doing the thing"}}` + "\n"
 	if _, err := w.Write([]byte(ndjson)); err != nil {
@@ -61,7 +63,7 @@ func TestOpencodeDriverHeartbeatWriterIgnoresTopLevelRole(t *testing.T) {
 	}
 
 	var raw, out bytes.Buffer
-	w := d.NewHeartbeatWriter(&raw, "77", &out, "reviewer")
+	w := d.NewHeartbeatWriter(&raw, "77", &out, driverkit.RenderOptions{TopLevelRole: "reviewer"})
 
 	ndjson := `{"type":"text","part":{"text":"doing the thing"}}` + "\n"
 	if _, err := w.Write([]byte(ndjson)); err != nil {
@@ -73,6 +75,82 @@ func TestOpencodeDriverHeartbeatWriterIgnoresTopLevelRole(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "#77") {
 		t.Errorf("heartbeat output missing issue prefix: %q", out.String())
+	}
+}
+
+// TestOpencodeDriverResolveExitValidOutcomeNoError_IsZero verifies that the
+// opencode Driver's ResolveExit derives 0 from a log carrying a valid
+// SPINDRIFT_OUTCOME line with no type:"error" event, even when the passed-in
+// exitCode is non-zero — opencode's own exit code is never trustworthy
+// (issue #2263).
+func TestOpencodeDriverResolveExitValidOutcomeNoError_IsZero(t *testing.T) {
+	d, err := New("opencode")
+	if err != nil {
+		t.Fatalf("New(opencode): %v", err)
+	}
+
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "issue-1.log")
+	line := `{"type":"text","part":{"text":"SPINDRIFT_OUTCOME issue=42 landing=https://example/pr/1 status=ready note=done"}}`
+	if err := os.WriteFile(logPath, []byte(line+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := d.ResolveExit(logPath, 17)
+	if err != nil {
+		t.Fatalf("ResolveExit: %v", err)
+	}
+	if got != 0 {
+		t.Errorf("ResolveExit: got %d, want 0", got)
+	}
+}
+
+// TestOpencodeDriverResolveExitErrorEvent_IsNonZero verifies that the
+// opencode Driver's ResolveExit derives a non-zero code from a log carrying
+// a type:"error" event, even when the passed-in exitCode is zero — opencode
+// exits 0 even on a mid-run error, so the log is the only trustworthy
+// source (issue #2263).
+func TestOpencodeDriverResolveExitErrorEvent_IsNonZero(t *testing.T) {
+	d, err := New("opencode")
+	if err != nil {
+		t.Fatalf("New(opencode): %v", err)
+	}
+
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "issue-1.log")
+	lines := []string{
+		`{"type":"text","part":{"text":"SPINDRIFT_OUTCOME issue=42 landing=https://example/pr/1 status=ready note=done"}}`,
+		`{"type":"error","error":"boom"}`,
+	}
+	if err := os.WriteFile(logPath, []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := d.ResolveExit(logPath, 0)
+	if err != nil {
+		t.Fatalf("ResolveExit: %v", err)
+	}
+	if got == 0 {
+		t.Errorf("ResolveExit: got 0, want non-zero")
+	}
+}
+
+// TestOpencodeDriverResolveExitMissingLog_IsNonZero verifies that the
+// opencode Driver's ResolveExit derives a non-zero code from a missing log
+// file, even when the passed-in exitCode is zero.
+func TestOpencodeDriverResolveExitMissingLog_IsNonZero(t *testing.T) {
+	d, err := New("opencode")
+	if err != nil {
+		t.Fatalf("New(opencode): %v", err)
+	}
+
+	logPath := filepath.Join(t.TempDir(), "does-not-exist.log")
+	got, err := d.ResolveExit(logPath, 0)
+	if err != nil {
+		t.Fatalf("ResolveExit: %v", err)
+	}
+	if got == 0 {
+		t.Errorf("ResolveExit: got 0, want non-zero")
 	}
 }
 
@@ -96,7 +174,7 @@ func TestOpencodeDriverRenderTranscript(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, err := d.RenderTranscript(logPath, "")
+	got, err := d.RenderTranscript(logPath, driverkit.RenderOptions{})
 	if err != nil {
 		t.Fatalf("RenderTranscript: %v", err)
 	}

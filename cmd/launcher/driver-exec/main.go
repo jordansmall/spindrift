@@ -99,29 +99,22 @@ func main() {
 		os.Exit(1)
 	}
 
-	rc = applyExitSynth(d, rc, *logPath)
+	rc = resolveExit(d, rc, *logPath)
 	os.Exit(rc)
 }
 
-// applyExitSynth replaces rc with d's SynthesizeExit result when d
-// implements the optional ExitSynthesizer interface (issue #262 slice 4):
-// opencode's own process exit code is not on its own trustworthy (see
-// driver/opencode/exitsynth.go's doc comment), so its synthesized code --
-// derived from the log's own outcome/error markers -- replaces it here,
-// after run has already produced the final log. claude does not implement
-// ExitSynthesizer, so this is a no-op for it; rc passes through untouched,
-// exactly as before this Driver-selection slice existed. A SynthesizeExit
-// error is reported to stderr and degrades safely to the original rc rather
-// than masking a real (possibly successful) run behind a synthesis failure.
-func applyExitSynth(d driver.Driver, rc int, logPath string) int {
-	es, ok := d.(driver.ExitSynthesizer)
-	if !ok {
-		return rc
-	}
-	synthesized, err := es.SynthesizeExit(logPath)
+// resolveExit calls d's required ResolveExit method (issue #2263) to obtain
+// the final exit code, after run has already produced the final log. Each
+// Driver decides for itself how much weight to give the process's own exit
+// code versus the log's own outcome/error markers, so this call site carries
+// no per-Driver knowledge. A ResolveExit error is reported to stderr and
+// degrades safely to the original rc rather than masking a real (possibly
+// successful) run behind a resolution failure.
+func resolveExit(d driver.Driver, rc int, logPath string) int {
+	resolved, err := d.ResolveExit(logPath, rc)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "driver-exec: synthesize exit code:", err)
 		return rc
 	}
-	return synthesized
+	return resolved
 }

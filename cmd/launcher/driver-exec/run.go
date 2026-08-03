@@ -7,6 +7,7 @@ import (
 	"os/exec"
 
 	"spindrift.dev/launcher/internal/driver"
+	"spindrift.dev/launcher/internal/driver/driverkit"
 )
 
 // execConfig is everything driver-exec needs to spawn one Driver invocation
@@ -55,7 +56,7 @@ func run(cfg execConfig, stdout io.Writer) (int, error) {
 		return 0, err
 	}
 	raw := io.MultiWriter(stdout, logFile)
-	w := d.NewHeartbeatWriter(raw, cfg.issue, heartbeatFile, cfg.topLevelRole)
+	w := d.NewHeartbeatWriter(raw, cfg.issue, heartbeatFile, driverkit.RenderOptions{TopLevelRole: cfg.topLevelRole})
 
 	rc, err := runOnce(cfg, w)
 	if err != nil {

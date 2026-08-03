@@ -436,7 +436,7 @@ func scanPassLog(logPath, driverName string) (verdict string, hasOutcome bool) {
 		fmt.Fprintln(os.Stderr, "orchestrator: scan pass log:", err)
 		return "", false
 	}
-	rendered, err := d.RenderTranscript(logPath, driverkit.ImplementorRole)
+	rendered, err := d.RenderTranscript(logPath, driverkit.RenderOptions{TopLevelRole: driverkit.ImplementorRole})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "orchestrator: scan pass log:", err)
 		return "", false
@@ -480,7 +480,7 @@ func scanReviewLog(logPath, driverName string) (verdict, findings string) {
 		fmt.Fprintln(os.Stderr, "orchestrator: scan review log:", err)
 		return "", ""
 	}
-	rendered, err := d.RenderTranscript(logPath, driverkit.ReviewerRole)
+	rendered, err := d.RenderTranscript(logPath, driverkit.RenderOptions{TopLevelRole: driverkit.ReviewerRole})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "orchestrator: scan review log:", err)
 		return "", ""
