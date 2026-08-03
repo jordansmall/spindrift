@@ -138,6 +138,115 @@ func TestBuildDriverArgsOpencodeEmptyModelOmitsDashM(t *testing.T) {
 	}
 }
 
+// TestBuildDriverArgsClaudeEffort verifies a non-empty effort is spliced in
+// as a trailing --effort <value> pair, after model/agents/session/
+// driverFlags, for the claude shape.
+func TestBuildDriverArgsClaudeEffort(t *testing.T) {
+	dir := t.TempDir()
+	promptFile := filepath.Join(dir, "prompt.txt")
+	if err := os.WriteFile(promptFile, []byte("do it"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	in := driverInput{
+		promptFile: promptFile,
+		model:      "claude-opus-4-8",
+		effort:     "high",
+	}
+	got, err := buildDriverArgs(in)
+	if err != nil {
+		t.Fatalf("buildDriverArgs: %v", err)
+	}
+	want := []string{"-p", "do it", "--model", "claude-opus-4-8", "--effort", "high"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("buildDriverArgs = %q, want %q", got, want)
+	}
+}
+
+// TestBuildDriverArgsClaudeEffortOmittedWhenEmpty verifies an empty effort
+// omits --effort entirely for the claude shape -- unlike --model, which is
+// always present even empty.
+func TestBuildDriverArgsClaudeEffortOmittedWhenEmpty(t *testing.T) {
+	dir := t.TempDir()
+	promptFile := filepath.Join(dir, "prompt.txt")
+	if err := os.WriteFile(promptFile, []byte("do it"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	in := driverInput{
+		promptFile: promptFile,
+		model:      "claude-opus-4-8",
+		effort:     "",
+	}
+	got, err := buildDriverArgs(in)
+	if err != nil {
+		t.Fatalf("buildDriverArgs: %v", err)
+	}
+	for _, a := range got {
+		if a == "--effort" {
+			t.Errorf("buildDriverArgs = %q, want no --effort flag", got)
+		}
+	}
+	want := []string{"-p", "do it", "--model", "claude-opus-4-8"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("buildDriverArgs = %q, want %q", got, want)
+	}
+}
+
+// TestBuildDriverArgsOpencodeEffort verifies a non-empty effort is spliced
+// in as --variant <value>, in the same position as -m <model>, before the
+// trailing prompt positional argument, for the opencode shape.
+func TestBuildDriverArgsOpencodeEffort(t *testing.T) {
+	dir := t.TempDir()
+	promptFile := filepath.Join(dir, "prompt.txt")
+	if err := os.WriteFile(promptFile, []byte("do it"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	in := driverInput{
+		driver:      "opencode",
+		promptFile:  promptFile,
+		model:       "opencode/gpt-5",
+		effort:      "high",
+		driverFlags: "run --format json --auto",
+	}
+	got, err := buildDriverArgs(in)
+	if err != nil {
+		t.Fatalf("buildDriverArgs: %v", err)
+	}
+	want := []string{"run", "--format", "json", "--auto", "-m", "opencode/gpt-5", "--variant", "high", "do it"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("buildDriverArgs = %q, want %q", got, want)
+	}
+}
+
+// TestBuildDriverArgsOpencodeEffortOmittedWhenEmpty verifies an empty effort
+// omits --variant entirely for the opencode shape.
+func TestBuildDriverArgsOpencodeEffortOmittedWhenEmpty(t *testing.T) {
+	dir := t.TempDir()
+	promptFile := filepath.Join(dir, "prompt.txt")
+	if err := os.WriteFile(promptFile, []byte("do it"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	in := driverInput{
+		driver:      "opencode",
+		promptFile:  promptFile,
+		model:       "opencode/gpt-5",
+		effort:      "",
+		driverFlags: "run --format json --auto",
+	}
+	got, err := buildDriverArgs(in)
+	if err != nil {
+		t.Fatalf("buildDriverArgs: %v", err)
+	}
+	for _, a := range got {
+		if a == "--variant" {
+			t.Errorf("buildDriverArgs = %q, want no --variant flag", got)
+		}
+	}
+	want := []string{"run", "--format", "json", "--auto", "-m", "opencode/gpt-5", "do it"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("buildDriverArgs = %q, want %q", got, want)
+	}
+}
+
 // TestBuildDriverArgsSessionAndFlagsAreWordSplit verifies the session file's
 // content is word-split into separate argv elements (matching the shell's
 // prior `read -ra` behaviour) and driverFlags (a space-separated common-flags
