@@ -33,6 +33,7 @@ func main() {
 	maxReviewRounds := flag.Int("max-review-rounds", 3, "cap on additional fresh-session passes a BLOCK verdict may trigger; 0 disables the cap")
 	maxSlices := flag.Int("max-slices", 5, "cap on total driver-exec invocations this run makes; 0 disables the cap")
 	reviewPromptFile := flag.String("review-prompt-file", "", "path to the code-owned review pass's own prompt text; empty disables the review pass")
+	reviewModel := flag.String("review-model", "", "value for the review pass's own --model flag, empty falls back to the coordinator's -model")
 	flag.Parse()
 
 	if *issue == "" {
@@ -70,6 +71,7 @@ func main() {
 		maxReviewRounds:  *maxReviewRounds,
 		maxSlices:        *maxSlices,
 		reviewPromptFile: *reviewPromptFile,
+		reviewModel:      *reviewModel,
 	}, os.Stdout)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "orchestrator:", err)

@@ -76,6 +76,14 @@ type config struct {
 	// path (no reviewPromptFile) leaves it, keeping that path's argv shape
 	// byte-identical to before this field existed.
 	topLevelRole string
+	// reviewModel is the code-owned review pass's own --model value (issue
+	// #2277): when set, runWithReviewPass forwards it as the review pass's
+	// driver-exec --model flag instead of the coordinator's own model,
+	// letting a reviewer model be configured distinctly from the
+	// implementor/coordinator one. Empty falls back to cfg.model, matching
+	// pre-#2277 behavior of the review pass silently reusing the
+	// coordinator's model.
+	reviewModel string
 }
 
 // run loops driver-exec for as many passes as the implementor's own
@@ -288,6 +296,13 @@ func runWithReviewPass(cfg config, stdout io.Writer) (int, error) {
 		reviewCfg.promptFile = cfg.reviewPromptFile
 		reviewCfg.sessionFile = ""
 		reviewCfg.topLevelRole = driverkit.ReviewerRole
+		// Issue #2277: a configured reviewer model overrides the coordinator
+		// model reviewCfg otherwise inherited via `reviewCfg := cfg` above;
+		// an unset reviewModel leaves that inherited cfg.model in place, so
+		// the review pass falls back to the coordinator's own model.
+		if cfg.reviewModel != "" {
+			reviewCfg.model = cfg.reviewModel
+		}
 
 		rc, err = invokeDriverExec(reviewCfg, stdout)
 		if err != nil {
