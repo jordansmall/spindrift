@@ -13,7 +13,7 @@ setup() {
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   [ ! -s "$ORCHESTRATOR_LOG" ]
-  grep -q "claude invoked for issue #7" "$CLAUDE_LOG"
+  grep -q "driver invoked for issue #7" "$DRIVER_LOG"
 }
 
 @test "entrypoint hands the pass off to the orchestrator when ORCHESTRATOR_ENABLED is set" {
@@ -24,7 +24,7 @@ setup() {
   grep -q -- "--driver-bin claude" "$ORCHESTRATOR_LOG"
   # Behaviour stays identical to the direct path: the orchestrator's own
   # single pass still reaches the Driver and re-emits its outcome line.
-  grep -q "claude invoked for issue #7" "$CLAUDE_LOG"
+  grep -q "driver invoked for issue #7" "$DRIVER_LOG"
   printf '%s\n' "$output" | grep -q '^SPINDRIFT_OUTCOME .*status=ready'
 }
 
@@ -57,14 +57,14 @@ setup() {
 @test "direct driver-exec path exports CLAUDE_CODE_DISABLE_BACKGROUND_TASKS to the Driver" {
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  grep -q '^env: CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1$' "$CLAUDE_LOG"
+  grep -q '^env: CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1$' "$DRIVER_LOG"
 }
 
 @test "orchestrator path exports CLAUDE_CODE_DISABLE_BACKGROUND_TASKS to the Driver identically" {
   export ORCHESTRATOR_ENABLED=1
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  grep -q '^env: CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1$' "$CLAUDE_LOG"
+  grep -q '^env: CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1$' "$DRIVER_LOG"
 }
 
 # The code-owned review pass (issue #2037): entrypoint.sh renders
@@ -103,7 +103,7 @@ setup() {
   # First pass forgets its outcome; the SPINDRIFT_OUTCOME gate resumes once,
   # so the orchestrator is invoked exactly twice -- one line per invocation in
   # ORCHESTRATOR_LOG (the fake echoes its argv there, issue #1996).
-  export FAKE_CLAUDE_NO_OUTCOME_FIRST_CALL_ONLY=1
+  export FAKE_DRIVER_NO_OUTCOME_FIRST_CALL_ONLY=1
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   [ "$(grep -c . "$ORCHESTRATOR_LOG")" -eq 2 ]

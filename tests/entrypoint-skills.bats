@@ -28,7 +28,7 @@ SKILL
   [ "$status" -eq 0 ]
   # The fake claude reports each discovered skill by its directory name; assert
   # this one was found.
-  grep -q "skill discovered: test-skill" "$CLAUDE_LOG"
+  grep -q "skill discovered: test-skill" "$DRIVER_LOG"
 }
 
 # --- prompt skill preference (issue #120) -------------------------------------
@@ -47,7 +47,7 @@ Use TDD.
 SKILL
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  grep -qi 'tdd' "$CLAUDE_PROMPT_FILE"
+  grep -qi 'tdd' "$DRIVER_PROMPT_FILE"
 }
 
 @test "prompt contains no skill reference when HOME/.claude/skills is empty" {
@@ -56,7 +56,7 @@ SKILL
   mkdir -p "$HOME/.claude/skills"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  ! grep -qi '\bskill\b' "$CLAUDE_PROMPT_FILE"
+  ! grep -qi '\bskill\b' "$DRIVER_PROMPT_FILE"
 }
 
 @test "prompt advertises /caveman when the caveman skill is baked (issue #486)" {
@@ -73,7 +73,7 @@ Respond terse like smart caveman.
 SKILL
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  grep -qi 'caveman' "$CLAUDE_PROMPT_FILE"
+  grep -qi 'caveman' "$DRIVER_PROMPT_FILE"
 }
 
 # --- caveman-default narration (issue #487) ---------------------------------
@@ -93,8 +93,8 @@ Respond terse like smart caveman.
 SKILL
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  grep -qi 'narration' "$CLAUDE_PROMPT_FILE"
-  grep -qi 'exempt' "$CLAUDE_PROMPT_FILE"
+  grep -qi 'narration' "$DRIVER_PROMPT_FILE"
+  grep -qi 'exempt' "$DRIVER_PROMPT_FILE"
 }
 
 @test "prompt carries no caveman-default narration instruction when caveman is not baked" {
@@ -108,7 +108,7 @@ Use TDD.
 SKILL
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  ! grep -qi 'narration' "$CLAUDE_PROMPT_FILE"
+  ! grep -qi 'narration' "$DRIVER_PROMPT_FILE"
 }
 
 # The default applies to both agent passes (issue #487): CAVEMAN_STEP is
@@ -130,8 +130,8 @@ SKILL
   printf '# COMMS\n\n%sbody text\n' '${CAVEMAN_STEP}' >"$COMMS_CONTRACT_FILE"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  grep -qi 'narration' "$CLAUDE_PROMPT_FILE"
-  grep -qi 'exempt' "$CLAUDE_PROMPT_FILE"
+  grep -qi 'narration' "$DRIVER_PROMPT_FILE"
+  grep -qi 'exempt' "$DRIVER_PROMPT_FILE"
 }
 
 
@@ -153,7 +153,7 @@ SKILL
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   # Distinctive to tdd-default.md, not the inline RED/GREEN/REFACTOR steps.
-  grep -qi 'red-green-refactor' "$CLAUDE_PROMPT_FILE"
+  grep -qi 'red-green-refactor' "$DRIVER_PROMPT_FILE"
 }
 
 @test "prompt carries no /tdd deferral when the tdd skill is not baked" {
@@ -167,7 +167,7 @@ Respond terse like smart caveman.
 SKILL
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  ! grep -qi 'red-green-refactor' "$CLAUDE_PROMPT_FILE"
+  ! grep -qi 'red-green-refactor' "$DRIVER_PROMPT_FILE"
 }
 
 @test "prompt defers commit messages to /commit when the commit skill is baked" {
@@ -182,7 +182,7 @@ SKILL
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   # Distinctive to commit-default.md.
-  grep -qi 'supersedes the inline format rules' "$CLAUDE_PROMPT_FILE"
+  grep -qi 'supersedes the inline format rules' "$DRIVER_PROMPT_FILE"
 }
 
 @test "prompt carries no /commit deferral when the commit skill is not baked" {
@@ -196,7 +196,7 @@ Respond terse like smart caveman.
 SKILL
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  ! grep -qi 'supersedes the inline format rules' "$CLAUDE_PROMPT_FILE"
+  ! grep -qi 'supersedes the inline format rules' "$DRIVER_PROMPT_FILE"
 }
 
 # The /commit deferral sits in the COMMIT section, part of the CHECK/COMMIT
@@ -216,5 +216,5 @@ SKILL
   printf '# CHECK\n\n%sStrict Conventional Commits.\n' '${COMMIT_STEP}' >"$CHECK_CONTRACT_FILE"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  grep -qi 'supersedes the inline format rules' "$CLAUDE_PROMPT_FILE"
+  grep -qi 'supersedes the inline format rules' "$DRIVER_PROMPT_FILE"
 }

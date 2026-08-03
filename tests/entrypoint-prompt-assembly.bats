@@ -10,9 +10,9 @@ setup() {
 @test "entrypoint renders the prompt with issue placeholders substituted" {
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  grep -q "Implement GitHub issue #7: Do the thing" "$CLAUDE_PROMPT_FILE"
-  grep -q "agent/issue-7" "$CLAUDE_PROMPT_FILE"
-  grep -q "cut from" "$CLAUDE_PROMPT_FILE"
+  grep -q "Implement GitHub issue #7: Do the thing" "$DRIVER_PROMPT_FILE"
+  grep -q "agent/issue-7" "$DRIVER_PROMPT_FILE"
+  grep -q "cut from" "$DRIVER_PROMPT_FILE"
 }
 
 # RUN_NONCE (issue #1937): the launcher mints a per-run nonce and forwards it
@@ -22,7 +22,7 @@ setup() {
   export RUN_NONCE="deadbeefcafe1234"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  grep -qF "deadbeefcafe1234" "$CLAUDE_PROMPT_FILE"
+  grep -qF "deadbeefcafe1234" "$DRIVER_PROMPT_FILE"
 }
 
 @test "the configured mkHarness prompt is what reaches claude" {
@@ -30,8 +30,8 @@ setup() {
   export PROMPTS_DIR="$PROMPT_HARNESS_DIR"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  grep -q "CONFIGURED-PROMPT-MARKER" "$CLAUDE_PROMPT_FILE"
-  grep -q "Implement issue #7: Do the thing on agent/issue-7" "$CLAUDE_PROMPT_FILE"
+  grep -q "CONFIGURED-PROMPT-MARKER" "$DRIVER_PROMPT_FILE"
+  grep -q "Implement issue #7: Do the thing on agent/issue-7" "$DRIVER_PROMPT_FILE"
 }
 
 # FIX_PASS (issue #425): the launcher sets FIX_PASS on a fix box (dispatched
@@ -40,24 +40,24 @@ setup() {
 @test "FIX_PASS unset drives issue-prompt.md, not fix-prompt.md" {
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  grep -q "Fresh clone, new branch" "$CLAUDE_PROMPT_FILE"
-  ! grep -q "already checked out" "$CLAUDE_PROMPT_FILE"
+  grep -q "Fresh clone, new branch" "$DRIVER_PROMPT_FILE"
+  ! grep -q "already checked out" "$DRIVER_PROMPT_FILE"
 }
 
 @test "FIX_PASS=0 still drives issue-prompt.md (byte-identical to unset)" {
   export FIX_PASS="0"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  grep -q "Fresh clone, new branch" "$CLAUDE_PROMPT_FILE"
-  ! grep -q "already checked out" "$CLAUDE_PROMPT_FILE"
+  grep -q "Fresh clone, new branch" "$DRIVER_PROMPT_FILE"
+  ! grep -q "already checked out" "$DRIVER_PROMPT_FILE"
 }
 
 @test "FIX_PASS>0 drives fix-prompt.md instead of issue-prompt.md" {
   export FIX_PASS="2"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  grep -q "already checked out" "$CLAUDE_PROMPT_FILE"
-  ! grep -q "Fresh clone, new branch" "$CLAUDE_PROMPT_FILE"
+  grep -q "already checked out" "$DRIVER_PROMPT_FILE"
+  ! grep -q "Fresh clone, new branch" "$DRIVER_PROMPT_FILE"
 }
 
 # CI_FAILURE_SUMMARY (issue #426): the launcher captures the concrete CI
@@ -69,24 +69,24 @@ setup() {
 2 errors in main.go"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  grep -q "lint: FAILURE" "$CLAUDE_PROMPT_FILE"
-  grep -q "2 errors in main.go" "$CLAUDE_PROMPT_FILE"
+  grep -q "lint: FAILURE" "$DRIVER_PROMPT_FILE"
+  grep -q "2 errors in main.go" "$DRIVER_PROMPT_FILE"
 }
 
 @test "CI_FAILURE_SUMMARY unset on a fix pass falls back with no error" {
   export FIX_PASS="2"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  grep -q "already checked out" "$CLAUDE_PROMPT_FILE"
-  ! grep -q '\${CI_FAILURE_SUMMARY}' "$CLAUDE_PROMPT_FILE"
+  grep -q "already checked out" "$DRIVER_PROMPT_FILE"
+  ! grep -q '\${CI_FAILURE_SUMMARY}' "$DRIVER_PROMPT_FILE"
 }
 
 @test "CI_FAILURE_SUMMARY is ignored on a fresh (non-fix) run" {
   export CI_FAILURE_SUMMARY="lint: FAILURE"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  grep -q "Fresh clone, new branch" "$CLAUDE_PROMPT_FILE"
-  ! grep -q "lint: FAILURE" "$CLAUDE_PROMPT_FILE"
+  grep -q "Fresh clone, new branch" "$DRIVER_PROMPT_FILE"
+  ! grep -q "lint: FAILURE" "$DRIVER_PROMPT_FILE"
 }
 
 # The fix-pass CONTEXT CI-read step forks on CODE_FORGE (issue #1963): `gh pr
@@ -109,7 +109,7 @@ setup() {
   # legitimately keeps its own unconditional `gh pr view` regardless of
   # CODE_FORGE, so a whole-file grep would false-positive on it.
   local context_section
-  context_section="$(awk '/^# CONTEXT/,/^# FIX/' "$CLAUDE_PROMPT_FILE")"
+  context_section="$(awk '/^# CONTEXT/,/^# FIX/' "$DRIVER_PROMPT_FILE")"
   grep -qF 'fj pr status' <<<"$context_section"
   ! grep -qF 'gh pr view' <<<"$context_section"
 }
@@ -119,7 +119,7 @@ setup() {
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   local context_section
-  context_section="$(awk '/^# CONTEXT/,/^# FIX/' "$CLAUDE_PROMPT_FILE")"
+  context_section="$(awk '/^# CONTEXT/,/^# FIX/' "$DRIVER_PROMPT_FILE")"
   grep -qF 'gh pr view' <<<"$context_section"
   ! grep -qF 'fj pr status' <<<"$context_section"
 }

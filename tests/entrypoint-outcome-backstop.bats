@@ -13,8 +13,8 @@ setup() {
 # The fake claude commits work (so there is something to push) but is told to
 # suppress its own outcome line, simulating a driver that forgot to emit one.
 @test "driver exits with no outcome line -> entrypoint emits a synthetic blocked outcome" {
-  export FAKE_CLAUDE_COMMIT=1
-  export FAKE_CLAUDE_NO_OUTCOME=1
+  export FAKE_DRIVER_COMMIT=1
+  export FAKE_DRIVER_NO_OUTCOME=1
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   [ "$(grep -c '^SPINDRIFT_OUTCOME ' <<<"$output")" -eq 1 ]
@@ -27,7 +27,7 @@ setup() {
 # #1606) -- the backstop must not force-push a branch byte-identical to
 # main, and the note must say so rather than claim a push happened.
 @test "driver exits with no commits and no outcome line -> no push, note says no work to preserve" {
-  export FAKE_CLAUDE_NO_OUTCOME=1
+  export FAKE_DRIVER_NO_OUTCOME=1
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   [ "$(grep -c '^SPINDRIFT_OUTCOME ' <<<"$output")" -eq 1 ]
@@ -44,8 +44,8 @@ setup() {
 # genuinely-empty case above -- but a dirty index is not "no work to
 # preserve": the backstop must salvage it into a commit and push it.
 @test "driver stages work but never commits + no outcome line -> backstop salvages a commit and pushes" {
-  export FAKE_CLAUDE_STAGE_ONLY=1
-  export FAKE_CLAUDE_NO_OUTCOME=1
+  export FAKE_DRIVER_STAGE_ONLY=1
+  export FAKE_DRIVER_NO_OUTCOME=1
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   [ "$(grep -c '^SPINDRIFT_OUTCOME ' <<<"$output")" -eq 1 ]
@@ -75,8 +75,8 @@ EOF
   chmod +x "$shim/git"
   export PATH="$shim:$PATH"
 
-  export FAKE_CLAUDE_COMMIT=1
-  export FAKE_CLAUDE_NO_OUTCOME=1
+  export FAKE_DRIVER_COMMIT=1
+  export FAKE_DRIVER_NO_OUTCOME=1
   # Negative values would otherwise reach `sleep -7` on the first retry and,
   # under `set -e`, abort before the synthetic outcome line ever prints.
   export TRANSIENT_BACKOFF_SECS=-5
@@ -124,8 +124,8 @@ EOF
 
   # A commit must exist on the branch, or the new no-work skip (#1606) would
   # short-circuit before ever reaching this shimmed push.
-  export FAKE_CLAUDE_COMMIT=1
-  export FAKE_CLAUDE_NO_OUTCOME=1
+  export FAKE_DRIVER_COMMIT=1
+  export FAKE_DRIVER_NO_OUTCOME=1
   # This shim fails every push attempt, so the backstop's bounded retry loop
   # (issue #2095) runs to exhaustion -- zero these out so the test doesn't
   # actually sleep through the linear backoff.
@@ -169,8 +169,8 @@ EOF
   chmod +x "$shim/git"
   export PATH="$shim:$PATH"
 
-  export FAKE_CLAUDE_COMMIT=1
-  export FAKE_CLAUDE_NO_OUTCOME=1
+  export FAKE_DRIVER_COMMIT=1
+  export FAKE_DRIVER_NO_OUTCOME=1
   export TRANSIENT_BACKOFF_SECS=0
   export HOLD_JITTER_SECS=0
   export MAX_REBASE_ATTEMPTS=3
@@ -191,8 +191,8 @@ EOF
 # status=blocked, which would silently turn a retryable transient failure
 # into a terminal one.
 @test "driver crashes non-zero with no outcome -> non-zero exit propagates, no synthetic line" {
-  export FAKE_CLAUDE_NO_OUTCOME=1
-  export FAKE_CLAUDE_CRASH_EXIT=17
+  export FAKE_DRIVER_NO_OUTCOME=1
+  export FAKE_DRIVER_CRASH_EXIT=17
   run bash "$ENTRYPOINT"
   [ "$status" -eq 17 ]
   [ "$(grep -c '^SPINDRIFT_OUTCOME ' <<<"$output")" -eq 0 ]
@@ -204,8 +204,8 @@ EOF
 # no-outcome path never adopts off draft-ness either, so both sides agree a
 # lost outcome line always synthesizes status=blocked.
 @test "no outcome line + open non-draft PR on branch -> synthetic blocked" {
-  export FAKE_CLAUDE_COMMIT=1
-  export FAKE_CLAUDE_NO_OUTCOME=1
+  export FAKE_DRIVER_COMMIT=1
+  export FAKE_DRIVER_NO_OUTCOME=1
   export FAKE_GH_PR_LIST_7='[{"isDraft":false}]'
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
@@ -220,7 +220,7 @@ EOF
 # already advanced): the no-work-to-preserve early return (#1606) skips the
 # push, not the synthesized outcome line.
 @test "no outcome line + no commits + open non-draft PR on branch -> synthetic blocked" {
-  export FAKE_CLAUDE_NO_OUTCOME=1
+  export FAKE_DRIVER_NO_OUTCOME=1
   export FAKE_GH_PR_LIST_7='[{"isDraft":false}]'
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
@@ -229,8 +229,8 @@ EOF
 }
 
 @test "no outcome line + draft PR on branch -> synthetic blocked, same as no PR" {
-  export FAKE_CLAUDE_COMMIT=1
-  export FAKE_CLAUDE_NO_OUTCOME=1
+  export FAKE_DRIVER_COMMIT=1
+  export FAKE_DRIVER_NO_OUTCOME=1
   export FAKE_GH_PR_LIST_7='[{"isDraft":true}]'
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
@@ -239,14 +239,14 @@ EOF
 }
 
 # Regression for the #1582 shape end-to-end: the driver's own outcome line
-# was backtick-wrapped (FAKE_CLAUDE_WRAP_OUTCOME=backticks, issue #1611's
+# was backtick-wrapped (FAKE_DRIVER_WRAP_OUTCOME=backticks, issue #1611's
 # repro of the same dogfood run), and there is a ready PR on the branch.
 # #1611 already made the extractor tolerate the wrapping, so the real
 # status=ready line surfaces and this backstop never even runs -- but the
 # combined, end-to-end guarantee this issue adds is what matters: no
 # synthetic status=blocked line ever appears alongside a ready PR.
 @test "markdown-mangled outcome line (#1582) + open non-draft PR -> no synthetic blocked line" {
-  export FAKE_CLAUDE_WRAP_OUTCOME=backticks
+  export FAKE_DRIVER_WRAP_OUTCOME=backticks
   export FAKE_GH_PR_LIST_7='[{"isDraft":false}]'
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
@@ -261,7 +261,7 @@ EOF
 # extractor normalizes the delimiter and surfaces it, so the backstop never
 # runs at all.
 @test "colon-delimited outcome line (#2012) -> extractor salvages it, no synthetic blocked line" {
-  export FAKE_CLAUDE_WRAP_OUTCOME=colon
+  export FAKE_DRIVER_WRAP_OUTCOME=colon
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   [ "$(grep -c '^SPINDRIFT_OUTCOME ' <<<"$output")" -eq 1 ]
@@ -277,8 +277,8 @@ EOF
 # the dirty index into a commit and pushes it, rather than discarding it as
 # "no work to preserve".
 @test "prose-only outcome sign-off (#2012, #1998 shape) + staged work -> backstop salvages the work" {
-  export FAKE_CLAUDE_STAGE_ONLY=1
-  export FAKE_CLAUDE_WRAP_OUTCOME=prose
+  export FAKE_DRIVER_STAGE_ONLY=1
+  export FAKE_DRIVER_WRAP_OUTCOME=prose
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   [ "$(grep -c '^SPINDRIFT_OUTCOME ' <<<"$output")" -eq 1 ]
@@ -300,14 +300,14 @@ EOF
 # ends its turn the same way any other forgetful driver does -- no
 # SPINDRIFT_OUTCOME line, rc=0 -- so it must land on this same backstop
 # regardless of which invoker (driver-exec directly, or the orchestrator)
-# ran the Driver. FAKE_CLAUDE_NO_OUTCOME stands in for that parked turn:
+# ran the Driver. FAKE_DRIVER_NO_OUTCOME stands in for that parked turn:
 # CLAUDE_CODE_DISABLE_BACKGROUND_TASKS (this issue's structural fix) closes
 # the parking vector itself, but this test is the last-resort net for
 # whatever still gets through it -- a run must never exit silently.
 @test "orchestrator path: driver parks with no outcome line -> entrypoint still emits a synthetic blocked outcome" {
   export ORCHESTRATOR_ENABLED=1
-  export FAKE_CLAUDE_COMMIT=1
-  export FAKE_CLAUDE_NO_OUTCOME=1
+  export FAKE_DRIVER_COMMIT=1
+  export FAKE_DRIVER_NO_OUTCOME=1
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   [ "$(grep -c '^SPINDRIFT_OUTCOME ' <<<"$output")" -eq 1 ]
@@ -316,7 +316,7 @@ EOF
 }
 
 @test "prose with one stray field marker (#2012) -> extractor still leaves it unmatched" {
-  export FAKE_CLAUDE_WRAP_OUTCOME=stray-field
+  export FAKE_DRIVER_WRAP_OUTCOME=stray-field
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   [ "$(grep -c '^SPINDRIFT_OUTCOME ' <<<"$output")" -eq 1 ]
@@ -333,8 +333,8 @@ EOF
   unset BOX_WRITE_ENABLED     # read-only Box: no push token
   unset CODE_FORGE            # default github
   export OUTBOX_DIR="$BATS_TEST_TMPDIR/outbox"
-  export FAKE_CLAUDE_COMMIT=1
-  export FAKE_CLAUDE_NO_OUTCOME=1
+  export FAKE_DRIVER_COMMIT=1
+  export FAKE_DRIVER_NO_OUTCOME=1
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   [ "$(grep -c '^SPINDRIFT_OUTCOME ' <<<"$output")" -eq 1 ]
@@ -357,8 +357,8 @@ EOF
   export CODE_FORGE=local
   export REPO_MOUNT_DIR="$REMOTE_ROOT/owner/repo.git"
   export OUTBOX_DIR="$BATS_TEST_TMPDIR/outbox"
-  export FAKE_CLAUDE_COMMIT=1
-  export FAKE_CLAUDE_NO_OUTCOME=1
+  export FAKE_DRIVER_COMMIT=1
+  export FAKE_DRIVER_NO_OUTCOME=1
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   [ "$(grep -c '^SPINDRIFT_OUTCOME ' <<<"$output")" -eq 1 ]

@@ -21,7 +21,7 @@ setup() {
   # appear in NIX_LOG beyond the probe's `--command true` (issue #626: the
   # entrypoint no longer renders its own bash wrapper for this).
   grep -v -- '--command true$' "$NIX_LOG" | grep -q -- '--command'
-  grep -q "claude invoked for issue #7" "$CLAUDE_LOG"
+  grep -q "driver invoked for issue #7" "$DRIVER_LOG"
 }
 
 @test "DEV_SHELL_NAME default: nix develop targets .#default when name is default" {
@@ -76,6 +76,6 @@ FAKE
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   # fake claude logs "model=<value>" — verify MODEL reached the wrapper
-  grep -q 'model=claude-test-model' "$CLAUDE_LOG"
+  grep -q 'model=claude-test-model' "$DRIVER_LOG"
 }
 

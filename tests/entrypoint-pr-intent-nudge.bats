@@ -130,19 +130,19 @@ EOF
 @test "PR-intent gate: missing PR-intent on a status=ready read-only run resumes once and the resumed pass supplies it" {
   export RUN_NONCE="deadbeefcafe1234"
   unset BOX_WRITE_ENABLED
-  export FAKE_CLAUDE_NO_PR_INTENT_FIRST_CALL_ONLY=1
+  export FAKE_DRIVER_NO_PR_INTENT_FIRST_CALL_ONLY=1
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
 
   # Exactly two Driver invocations: the initial pass and the one resume pass
   # the gate's required_marker_gate row fires.
-  [ "$(grep -c '^claude invoked for issue' "$CLAUDE_LOG")" -eq 2 ]
+  [ "$(grep -c '^driver invoked for issue' "$DRIVER_LOG")" -eq 2 ]
 
   # The resumed pass is the one whose prompt was actually rendered last
-  # (fakes/claude overwrites $CLAUDE_PROMPT_FILE per call) -- it must carry
+  # (fakes/claude overwrites $DRIVER_PROMPT_FILE per call) -- it must carry
   # the canonical grammar and this run's own nonce, not a fresh one.
-  grep -qF 'SPINDRIFT_PR_INTENT deadbeefcafe1234 <base64-encoded title' "$CLAUDE_PROMPT_FILE"
-  grep -qF 'status=ready' "$CLAUDE_PROMPT_FILE"
+  grep -qF 'SPINDRIFT_PR_INTENT deadbeefcafe1234 <base64-encoded title' "$DRIVER_PROMPT_FILE"
+  grep -qF 'status=ready' "$DRIVER_PROMPT_FILE"
 
   # The resumed pass's own canned output actually supplies the marker this
   # time -- visible in the raw teed Driver stream, not just believed.
@@ -162,12 +162,12 @@ EOF
 @test "PR-intent gate: a second consecutive miss falls through unchanged, no loop" {
   export RUN_NONCE="deadbeefcafe1234"
   unset BOX_WRITE_ENABLED
-  export FAKE_CLAUDE_NO_PR_INTENT=1
+  export FAKE_DRIVER_NO_PR_INTENT=1
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
 
   # One resume attempt only -- never a second.
-  [ "$(grep -c '^claude invoked for issue' "$CLAUDE_LOG")" -eq 2 ]
+  [ "$(grep -c '^driver invoked for issue' "$DRIVER_LOG")" -eq 2 ]
 
   # required_marker_gate never rewrites the outcome itself on a miss -- the
   # status=ready line the Driver already committed to survives, for the
@@ -185,7 +185,7 @@ EOF
 @test "PR-intent gate: an exhausted nudge emits a heartbeat give-up op" {
   export RUN_NONCE="deadbeefcafe1234"
   unset BOX_WRITE_ENABLED
-  export FAKE_CLAUDE_NO_PR_INTENT=1
+  export FAKE_DRIVER_NO_PR_INTENT=1
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
 
@@ -208,10 +208,10 @@ EOF
   # Box opens its own PR in-box (gh pr create) and never prints PR-intent at
   # all, so a missing one here is expected, not a bug.
   export RUN_NONCE="deadbeefcafe1234"
-  export FAKE_CLAUDE_NO_PR_INTENT=1
+  export FAKE_DRIVER_NO_PR_INTENT=1
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  [ "$(grep -c '^claude invoked for issue' "$CLAUDE_LOG")" -eq 1 ]
+  [ "$(grep -c '^driver invoked for issue' "$DRIVER_LOG")" -eq 1 ]
 }
 
 @test "PR-intent gate: never fires under CODE_FORGE=git" {
@@ -221,11 +221,11 @@ EOF
   export CODE_FORGE="git"
   export CODE_FORGE_REMOTE_URL="$REMOTE_ROOT/owner/repo.git"
   unset BOX_WRITE_ENABLED
-  export FAKE_CLAUDE_NO_PR_INTENT=1
+  export FAKE_DRIVER_NO_PR_INTENT=1
   export OUTBOX_DIR="$BATS_TEST_TMPDIR/outbox"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  [ "$(grep -c '^claude invoked for issue' "$CLAUDE_LOG")" -eq 1 ]
+  [ "$(grep -c '^driver invoked for issue' "$DRIVER_LOG")" -eq 1 ]
 }
 
 @test "PR-intent gate: never fires under CODE_FORGE=local" {
@@ -236,20 +236,20 @@ EOF
   export CODE_FORGE="local"
   export REPO_MOUNT_DIR="$REMOTE_ROOT/owner/repo.git"
   unset BOX_WRITE_ENABLED
-  export FAKE_CLAUDE_NO_PR_INTENT=1
+  export FAKE_DRIVER_NO_PR_INTENT=1
   export OUTBOX_DIR="$BATS_TEST_TMPDIR/outbox"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  [ "$(grep -c '^claude invoked for issue' "$CLAUDE_LOG")" -eq 1 ]
+  [ "$(grep -c '^driver invoked for issue' "$DRIVER_LOG")" -eq 1 ]
 }
 
 @test "PR-intent gate: never fires on a status=blocked run" {
   export RUN_NONCE="deadbeefcafe1234"
   unset BOX_WRITE_ENABLED
-  export FAKE_CLAUDE_NO_PR_INTENT=1
-  export FAKE_CLAUDE_OUTCOME_STATUS="blocked"
+  export FAKE_DRIVER_NO_PR_INTENT=1
+  export FAKE_DRIVER_OUTCOME_STATUS="blocked"
   export OUTBOX_DIR="$BATS_TEST_TMPDIR/outbox"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  [ "$(grep -c '^claude invoked for issue' "$CLAUDE_LOG")" -eq 1 ]
+  [ "$(grep -c '^driver invoked for issue' "$DRIVER_LOG")" -eq 1 ]
 }

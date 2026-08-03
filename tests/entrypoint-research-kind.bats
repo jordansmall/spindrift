@@ -12,14 +12,14 @@ setup() {
   export DISPATCH_KIND="research"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  grep -q "Research GitHub issue #7" "$CLAUDE_PROMPT_FILE"
-  ! grep -q "Fresh clone, new branch" "$CLAUDE_PROMPT_FILE"
+  grep -q "Research GitHub issue #7" "$DRIVER_PROMPT_FILE"
+  ! grep -q "Fresh clone, new branch" "$DRIVER_PROMPT_FILE"
 }
 
 @test "DISPATCH_KIND unset still drives issue-prompt.md" {
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  grep -q "Fresh clone, new branch" "$CLAUDE_PROMPT_FILE"
+  grep -q "Fresh clone, new branch" "$DRIVER_PROMPT_FILE"
 }
 
 # --- research kind skips the work-only branch/rebase phases (ADR 0022) ------
@@ -77,8 +77,8 @@ setup() {
     >"$RESEARCH_OUTCOME_CONTRACT_FILE"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  [ "$(grep -c '# POST THE VERDICT' "$CLAUDE_PROMPT_FILE")" -eq 1 ]
-  grep -q 'canonical research contract for issue 7' "$CLAUDE_PROMPT_FILE"
+  [ "$(grep -c '# POST THE VERDICT' "$DRIVER_PROMPT_FILE")" -eq 1 ]
+  grep -q 'canonical research contract for issue 7' "$DRIVER_PROMPT_FILE"
 }
 
 @test "runtime prompt-dir override of research-prompt.md already containing the outcome contract is unchanged" {
@@ -92,9 +92,9 @@ setup() {
   printf '# POST THE VERDICT\n\nshould not appear\n' >"$RESEARCH_OUTCOME_CONTRACT_FILE"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  [ "$(grep -c '# POST THE VERDICT' "$CLAUDE_PROMPT_FILE")" -eq 1 ]
-  grep -q 'already has its own contract' "$CLAUDE_PROMPT_FILE"
-  ! grep -q 'should not appear' "$CLAUDE_PROMPT_FILE"
+  [ "$(grep -c '# POST THE VERDICT' "$DRIVER_PROMPT_FILE")" -eq 1 ]
+  grep -q 'already has its own contract' "$DRIVER_PROMPT_FILE"
+  ! grep -q 'should not appear' "$DRIVER_PROMPT_FILE"
 }
 
 @test "research kind fails loudly when RESEARCH_OUTCOME_CONTRACT_FILE is missing" {
@@ -115,7 +115,7 @@ setup() {
 
 @test "research kind backstop: no outcome line emits blocked with no branch push" {
   export DISPATCH_KIND="research"
-  export FAKE_CLAUDE_NO_OUTCOME=1
+  export FAKE_DRIVER_NO_OUTCOME=1
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   [ "$(grep -c '^SPINDRIFT_OUTCOME ' <<<"$output")" -eq 1 ]
@@ -123,6 +123,6 @@ setup() {
   # A research dispatch pins no session worth resuming (issue #1607) --
   # exactly one Driver invocation, no resume pass, and its note carries no
   # mention of a recovery attempt.
-  [ "$(grep -c '^claude invoked for issue' "$CLAUDE_LOG")" -eq 1 ]
+  [ "$(grep -c '^driver invoked for issue' "$DRIVER_LOG")" -eq 1 ]
   ! grep -q 'resume attempt' <<<"$output"
 }
