@@ -100,6 +100,39 @@ func (h *hostMediationHarness) CommentPosted(num, body string) bool {
 	return strings.Contains(string(data), body)
 }
 
+func (h *hostMediationHarness) IssueFilerTracker() forge.IssueTracker { return h.tr }
+
+func (h *hostMediationHarness) SeedIssueFilerTarget(failing bool) (title, body string, labels []string) {
+	if failing {
+		return "fail-issue", "body", nil
+	}
+	return "widget: filed issue", "Filed by the host-mediation contract.", []string{"bug"}
+}
+
+func (h *hostMediationHarness) IssuePosted(title, body string, labels []string) bool {
+	data, err := os.ReadFile(filepath.Join(h.stateDir, "issues", "1000"))
+	if err != nil {
+		return false
+	}
+	lines := strings.Split(string(data), "\n")
+	if len(lines) < 2 || lines[0] != title || lines[1] != body {
+		return false
+	}
+	got := lines[2:]
+	if len(got) > 0 && got[len(got)-1] == "" {
+		got = got[:len(got)-1]
+	}
+	if len(got) != len(labels) {
+		return false
+	}
+	for i, label := range labels {
+		if got[i] != label {
+			return false
+		}
+	}
+	return true
+}
+
 func TestReadOnlyCodeForge_HostMediationContract(t *testing.T) {
 	forgetest.RunHostMediationContract(t, newHostMediationHarness(t))
 }
