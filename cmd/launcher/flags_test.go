@@ -11,11 +11,10 @@ import (
 	"time"
 )
 
-// TestModelDefault_IsOpus48 asserts that the main/coordinator session model
-// default is claude-opus-4-8, not an older release or the worker tier's
-// claude-sonnet-5 (issue #2055).
-func TestModelDefault_IsOpus48(t *testing.T) {
-	const want = "claude-opus-4-8"
+// TestModelDefault_IsSonnet5 asserts that the main/coordinator session model
+// default is claude-sonnet-5, not opus-4-8 or an older release (issue #2240).
+func TestModelDefault_IsSonnet5(t *testing.T) {
+	const want = "claude-sonnet-5"
 	for _, e := range schemaFlags {
 		if e.env == "MODEL" {
 			if e.dflt != want {

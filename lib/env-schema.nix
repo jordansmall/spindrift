@@ -208,7 +208,7 @@
   model = {
     env = "MODEL";
     group = "agents";
-    default = "claude-opus-4-8";
+    default = "claude-sonnet-5";
     doc = "main/coordinator Claude model for the agent (zero-rebuild runtime switch); worker-tier defaults are unaffected";
     flakeOption = true;
     nixSubPath = "models.default";
