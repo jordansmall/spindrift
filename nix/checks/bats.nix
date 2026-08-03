@@ -13,6 +13,77 @@ let
     skillsBwrapHarness
     opencodeHarness
     ;
+
+  # Registry-driven manifest (issue #2261 slice 2): one entry per Driver in
+  # lib/drivers/default.nix's `entries`, pairing that Driver's rendered
+  # preamble (the same _driver_extract_outcome/_driver_extract_near_miss_outcome
+  # bodies the image bakes in) with its own canonical
+  # testdata/outcome-fixture.jsonl transcript. A new Driver registry entry
+  # with its own fixture is picked up automatically -- no edits needed here
+  # or in tests/driver-registry-outcome-extraction.bats.
+  driverRegistry = import ../../lib/drivers/default.nix { inherit (pkgs) lib; };
+  driverOutcomeManifest = pkgs.lib.mapAttrs (name: entry: {
+    preamble = "${pkgs.writeText "driver-preamble-${name}.sh" (driverRegistry.renderPreamble entry)}";
+    fixture = "${(../../cmd/launcher/internal/driver + "/${name}/testdata/outcome-fixture.jsonl")}";
+  }) driverRegistry.entries;
+  driverOutcomeManifestFile = pkgs.writeText "driver-outcome-manifest.json" (
+    builtins.toJSON driverOutcomeManifest
+  );
+
+  # Registry-driven (issue #2261 slices 4-6): runs the *unchanged*
+  # entrypoint-outcome-{contract,recovery,backstop}.bats suites end-to-end
+  # against every non-claude registered Driver's own fake binary
+  # (tests/fakes/<name>) and rendered preamble (reused from
+  # driverOutcomeManifest above -- no separate harness needed, renderPreamble
+  # is pure string rendering over the entry's own data). claude keeps running
+  # via the `bats` derivation above unchanged; a new Driver registry entry
+  # with its own tests/fakes/<name> fake is covered automatically, no edits
+  # needed here.
+  nonClaudeDrivers = pkgs.lib.filterAttrs (name: _: name != "claude") driverRegistry.entries;
+  outcomeBatsChecks = pkgs.lib.mapAttrs' (
+    name: entry:
+    pkgs.lib.nameValuePair "bats-outcome-${name}" (
+      pkgs.runCommand "bats-outcome-${name}"
+        {
+          nativeBuildInputs = [
+            pkgs.bats
+            pkgs.bash
+            pkgs.git
+            pkgs.gettext
+            pkgs.coreutils
+            pkgs.gnugrep
+            pkgs.gnused
+            pkgs.jq
+          ];
+          ENTRYPOINT = ../../agent/entrypoint.sh;
+          PROMPTS_DIR = ../../templates/default/prompts;
+          OUTCOME_CONTRACT_FILE = batsHarness.outcomeContractFile;
+          COMMS_CONTRACT_FILE = batsHarness.commsContractFile;
+          CHECK_CONTRACT_FILE = batsHarness.checkContractFile;
+          RESEARCH_OUTCOME_CONTRACT_FILE = batsHarness.researchOutcomeContractFile;
+          DRIVER_PREAMBLE_FILE = driverOutcomeManifest.${name}.preamble;
+          FRAGMENT_REGISTRY_FILE = batsHarness.fragmentRegistryFile;
+          DRIVER = name;
+          DRIVER_SESSION_RESUMABLE = pkgs.lib.optionalString (entry ? sessionCacheDirRelative) "1";
+        }
+        ''
+          export HOME="$TMPDIR/home"
+          mkdir -p "$HOME"
+          cp -r ${../../tests} tests
+          chmod -R +w tests
+          for f in tests/fakes/*; do
+            substituteInPlace "$f" \
+              --replace '#!/usr/bin/env bash' "#!${pkgs.bash}/bin/bash"
+          done
+          export FAKES_DIR="$PWD/tests/fakes"
+          bats --print-output-on-failure \
+            tests/entrypoint-outcome-contract.bats \
+            tests/entrypoint-outcome-recovery.bats \
+            tests/entrypoint-outcome-backstop.bats
+          touch $out
+        ''
+    )
+  ) nonClaudeDrivers;
 in
 {
   shellcheck =
@@ -38,6 +109,7 @@ in
           ${../../tests/fakes/runtime} \
           ${../../tests/fakes/gh} \
           ${../../tests/fakes/claude} \
+          ${../../tests/fakes/opencode} \
           ${../../tests/fakes/nix} \
           ${../../tests/fakes/driver-exec} \
           ${../../tests/helper.bash} \
@@ -124,6 +196,19 @@ in
         # substitution allowlist (issue #622); helper.bash prepends this
         # alongside DRIVER_PREAMBLE_FILE for the same reason.
         FRAGMENT_REGISTRY_FILE = batsHarness.fragmentRegistryFile;
+        # tests/driver-registry-outcome-extraction.bats (issue #2261 slice 2)
+        # lives under tests/ like every other suite, so this catch-all `bats
+        # tests/` run picks it up too -- export the same registry-driven
+        # manifest the dedicated driver-registry-outcome-extraction check
+        # below exports, or that file's required-var guard fails here.
+        DRIVER_OUTCOME_MANIFEST = driverOutcomeManifestFile;
+        # claude's own resume-session test
+        # (entrypoint-outcome-recovery.bats's "the resume pass targets the
+        # pinned session via --resume") stays unconditionally green (issue
+        # #2261 slices 4-6): claude is resumable, so this mirrors the
+        # bats-outcome-<name> derivations' own per-driver
+        # DRIVER_SESSION_RESUMABLE computed from sessionCacheDirRelative.
+        DRIVER_SESSION_RESUMABLE = "1";
         # Harnesses with baked skills for skills-precedence tests.
         SKILLS_RUN_CMD = "${skillsHarness.run}/bin/run";
         SKILLS_BWRAP_RUN_CMD = "${skillsBwrapHarness.run}/bin/run";
@@ -162,4 +247,32 @@ in
         bats --print-output-on-failure tests/
         touch $out
       '';
+
+  # Registry-driven (issue #2261 slice 2): executes every registered Driver's
+  # outcome-extraction shell bodies (_driver_extract_outcome/
+  # _driver_extract_near_miss_outcome, lib/drivers/*.nix) against its own
+  # canonical fixture (cmd/launcher/internal/driver/*/testdata/outcome-fixture.jsonl).
+  # Deliberately excluded from image realization and driver package builds
+  # (renderPreamble only touches string-valued attrs of each entry), so this
+  # belongs in both `checks` and `checks-inbox` (nix/checks/default.nix).
+  "driver-registry-outcome-extraction" =
+    pkgs.runCommand "driver-registry-outcome-extraction"
+      {
+        nativeBuildInputs = [
+          pkgs.bats
+          pkgs.bash
+          pkgs.jq
+          pkgs.gnugrep
+          pkgs.gnused
+          pkgs.coreutils
+        ];
+        DRIVER_OUTCOME_MANIFEST = driverOutcomeManifestFile;
+      }
+      ''
+        cp -r ${../../tests} tests
+        chmod -R +w tests
+        bats --print-output-on-failure tests/driver-registry-outcome-extraction.bats
+        touch $out
+      '';
 }
+// outcomeBatsChecks
