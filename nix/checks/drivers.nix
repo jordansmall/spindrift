@@ -409,6 +409,128 @@ in
       "opencode agentFilesTemplate must return {} when every model is empty, got: ${builtins.toJSON rendered}";
     pkgs.runCommand "drivers-opencode-agent-files-all-empty-returns-empty-set" { } "touch $out";
 
+  # Issue #2242 slice 2: a roster entry may set an optional `effort` field
+  # (a per-agent reasoning-effort knob, e.g. "high"/"low") alongside `model`.
+  # opencode has no --agents JSON flag (contrast claude.nix), so this Driver
+  # passes it through as a `reasoningEffort` frontmatter scalar instead --
+  # opencode reads provider-native passthrough keys directly on the agent,
+  # hence the different key name -- JSON-encoded like `model`/`mode` above.
+  drivers-opencode-agent-files-effort-present =
+    let
+      opencodeEntry = driverRegistry.entries.opencode;
+      rendered = opencodeEntry.agentFilesTemplate {
+        roster = [
+          {
+            name = "scout";
+            model = "solo-scout-model";
+            effort = "high";
+            mode = "subagent";
+            description = "Map relevant files, seams, and tests; return a structured brief";
+            tools = [ "Read" ];
+            promptFile = "scout-prompt.md";
+            prompt = null;
+          }
+        ];
+      };
+      scoutFile = rendered.".config/opencode/agents/scout.md" or "";
+    in
+    assert assertMsg (hasInfix ''reasoningEffort: "high"'' scoutFile)
+      "opencode agentFilesTemplate's scout.md must carry a roster entry's effort field as a JSON-encoded reasoningEffort frontmatter scalar, got: ${scoutFile}";
+    pkgs.runCommand "drivers-opencode-agent-files-effort-present" { } "touch $out";
+
+  # Issue #2242 slice 2: an entry that omits `effort` (or sets it to "") must
+  # not carry a `reasoningEffort` line in the rendered frontmatter at all --
+  # byte-stable output for entries that don't set it (mirrors claude.nix's
+  # drivers-claude-agents-json-effort-absent).
+  drivers-opencode-agent-files-effort-absent =
+    let
+      opencodeEntry = driverRegistry.entries.opencode;
+      rendered = opencodeEntry.agentFilesTemplate {
+        roster = [
+          {
+            name = "scout";
+            model = "solo-scout-model";
+            mode = "subagent";
+            description = "Map relevant files, seams, and tests; return a structured brief";
+            tools = [ "Read" ];
+            promptFile = "scout-prompt.md";
+            prompt = null;
+          }
+          {
+            name = "filer";
+            model = "filer-model";
+            effort = "";
+            mode = "subagent";
+            description = "File tickets";
+            tools = [ "Read" ];
+            promptFile = "filer-prompt.md";
+            prompt = null;
+          }
+        ];
+      };
+      scoutFile = rendered.".config/opencode/agents/scout.md" or "";
+      filerFile = rendered.".config/opencode/agents/filer.md" or "";
+    in
+    assert assertMsg (!(hasInfix "reasoningEffort:" scoutFile))
+      "opencode agentFilesTemplate must omit the reasoningEffort line entirely when a roster entry doesn't set effort, got: ${scoutFile}";
+    assert assertMsg (!(hasInfix "reasoningEffort:" filerFile))
+      "opencode agentFilesTemplate must omit the reasoningEffort line entirely when a roster entry sets effort to the empty string, got: ${filerFile}";
+    pkgs.runCommand "drivers-opencode-agent-files-effort-absent" { } "touch $out";
+
+  # Same injection vector as drivers-opencode-agent-files-escapes-model above,
+  # but through the `effort` frontmatter scalar instead of `model`.
+  drivers-opencode-agent-files-escapes-effort =
+    let
+      opencodeEntry = driverRegistry.entries.opencode;
+      payload = "evil\"\ninjected: true";
+      rendered = opencodeEntry.agentFilesTemplate {
+        roster = [
+          {
+            name = "escapee";
+            model = "escapee-model";
+            effort = payload;
+            mode = "subagent";
+            description = "Escapee";
+            tools = [ "Read" ];
+            promptFile = "escapee-prompt.md";
+            prompt = null;
+          }
+        ];
+      };
+      file = rendered.".config/opencode/agents/escapee.md" or "";
+    in
+    assert assertMsg (hasInfix (builtins.toJSON payload) file)
+      "opencode agentFilesTemplate must JSON-encode an effort value carrying a quote/newline, got: ${file}";
+    assert assertMsg (!(hasInfix "\ninjected: true" file))
+      "opencode agentFilesTemplate must not let an effort value's embedded newline inject a raw YAML key, got: ${file}";
+    pkgs.runCommand "drivers-opencode-agent-files-escapes-effort" { } "touch $out";
+
+  # Issue #2242 slice 2: `effort` must not affect the existing filter-by-
+  # model-presence gate (#392 semantics) -- an entry with effort set but no
+  # (or empty) model still gets no agent file generated at all, same as today
+  # (mirrors claude.nix's drivers-claude-agents-json-effort-does-not-bypass-model-filter).
+  drivers-opencode-agent-files-effort-does-not-bypass-model-filter =
+    let
+      opencodeEntry = driverRegistry.entries.opencode;
+      rendered = opencodeEntry.agentFilesTemplate {
+        roster = [
+          {
+            name = "reviewer";
+            model = "";
+            effort = "high";
+            mode = "subagent";
+            description = "Review the branch diff for spec compliance and coding standards";
+            tools = [ "Read" ];
+            promptFile = "review-prompt.md";
+            prompt = null;
+          }
+        ];
+      };
+    in
+    assert assertMsg (!(rendered ? ".config/opencode/agents/reviewer.md"))
+      "opencode agentFilesTemplate must omit a roster entry's agent file with an empty model even when effort is set (filter-by-model-presence gate must stay unaffected by effort), got keys: ${concatStringsSep ", " (builtins.attrNames rendered)}";
+    pkgs.runCommand "drivers-opencode-agent-files-effort-does-not-bypass-model-filter" { } "touch $out";
+
   # Issue #264: claude's agentsJsonTemplate now takes a roster list rather
   # than four fixed model-knob args -- a custom 5th agent ("auditor", not one
   # of scout/reviewer/filer/worker) must render into the --agents JSON the
