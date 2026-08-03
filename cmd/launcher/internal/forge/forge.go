@@ -2,7 +2,10 @@
 // repo's host. GitHub is today's only adapter; the name goes into the glossary.
 package forge
 
-import "errors"
+import (
+	"errors"
+	"strings"
+)
 
 // ErrMergeConflict is returned by Merge when the PR branch cannot be
 // auto-merged due to conflicts with the base branch. Callers may attempt to
@@ -111,6 +114,24 @@ const (
 	MergeableConflicting MergeableState = "CONFLICTING"
 )
 
+// ClassifyMergeFailure maps a PR's MergeableState to the sentinel error a
+// failed Merge should return, shared by every CodeForge adapter so the
+// conflict-vs-checks distinction (see ErrMergeConflict, ErrMergeBlockedByChecks)
+// is made in one place. ok is false for any state the caller must not mask
+// behind a sentinel — MergeableUnknown, or any adapter-native value this
+// package doesn't recognize — telling the caller to build its own
+// adapter-specific raw error instead.
+func ClassifyMergeFailure(state MergeableState) (err error, ok bool) {
+	switch state {
+	case MergeableConflicting:
+		return ErrMergeConflict, true
+	case MergeableMergeable:
+		return ErrMergeBlockedByChecks, true
+	default:
+		return nil, false
+	}
+}
+
 // RollupState is the aggregate CI status of a PR's head commit.
 type RollupState string
 
@@ -123,3 +144,41 @@ const (
 	StateError    RollupState = "ERROR"
 	StateNone     RollupState = "NONE" // no checks registered on this commit
 )
+
+// MaxFailureDetailBytes bounds the string RenderFailureDetail returns, so a
+// large CI log excerpt cannot blow the fix Box's env/prompt budget.
+const MaxFailureDetailBytes = 4000
+
+// FailureDetailEntry is one failing check or status, normalized from an
+// adapter's native shape (github: CheckRun name+conclusion+summary or
+// StatusContext context+state+description, unioned; forgejo: context+state+
+// description) into the common fields RenderFailureDetail formats.
+type FailureDetailEntry struct {
+	Name    string
+	State   string
+	Summary string
+}
+
+// RenderFailureDetail formats already-filtered failing entries into a
+// bounded, human-readable excerpt: one "Name: State" header per entry plus
+// its summary, truncated to MaxFailureDetailBytes. Callers are responsible
+// for filtering entries down to failing ones before calling this function.
+func RenderFailureDetail(entries []FailureDetailEntry) string {
+	var b strings.Builder
+	for _, e := range entries {
+		b.WriteString(e.Name)
+		b.WriteString(": ")
+		b.WriteString(e.State)
+		b.WriteString("\n")
+		if e.Summary != "" {
+			b.WriteString(e.Summary)
+			b.WriteString("\n")
+		}
+		b.WriteString("---\n")
+	}
+	s := strings.TrimSpace(b.String())
+	if len(s) > MaxFailureDetailBytes {
+		s = s[:MaxFailureDetailBytes]
+	}
+	return s
+}
