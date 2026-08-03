@@ -602,6 +602,22 @@ and the explicit `recover` gesture. _Avoid_: sync, sweep, cleanup, recover
 (the operator's explicit per-issue adopt-and-merge gesture, a different
 act).
 
+**Recoverable**:
+A first-class terminal lifecycle state (ADR 0039) a `CODE_FORGE=local`
+push-only Dispatch reaches when its work is stranded but salvageable: a bundle
+is in the outbox and the driver's advisory self-report says success, yet no
+genuine nonce-gated `status=ready` [[Outcome line]] ever settled it — the
+Window-3 false-`blocked` and the die-with-a-bundle cases. Settle transitions
+into it *instead of* `Failed`, so the deliverable is neither auto-landed on an
+unauthenticated signal (a local fast-forward has no draft-PR review catch,
+unlike the PR-shaped forge that auto-adopts) nor lost to the `Failed` triage
+queue. [[Reconcile]] skips it — never resets it toward `Dispatchable`, so it is
+never silently re-dispatched — and `spindrift recover` (the
+`SettleRelayedBranch` arm, issue #2225) is what lands it; `doctor` and the
+Console surface a count. The operator's action becomes *recover*, not
+*restart*. _Avoid_: stranded, salvageable, failed-recoverable (it is a state of
+its own, not a flavor of `Failed`).
+
 **Transcript**:
 The Driver-rendered record of a Dispatch's work across its pass logs — the full
 content the live-tail sidebar shows on toggle, with a raw-JSONL toggle for the
@@ -637,7 +653,13 @@ Box — never backend identity or other run config, which the Launcher already
 holds authoritatively. The `cmd/launcher/internal/outcome` package is the
 authoritative spec and implementation: `Parse` validates the grammar, `Line`
 produces the canonical form, and `LastInLog` scans a Box log while gracefully
-skipping lines too large for the scanner buffer.
+skipping lines too large for the scanner buffer. The line is *evidence*, not
+the verdict: the Launcher is the sole authority that decides a run's
+disposition (ADR 0039), reading it alongside the outbox bundle (present ⇒
+commits exist), the driver's advisory self-report, and the Box exit class —
+so a synthetic `blocked` or an absent line whose work landed is promoted from
+that evidence rather than taken at face value. The Box advises; the Launcher
+decides.
 _Was_: `pr=<url>` — renamed once the field carried branch refs and comment
 URLs; PR-vs-issue is a GitHub-ism that confuses on split backends.
 _Avoid_: result line, output line, status line.
