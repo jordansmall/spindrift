@@ -3,9 +3,11 @@
 # forgetest.RunHostMediationContract harness. REMOTE names the bare git repo
 # `gh repo clone` clones from (RelayBundle's real push target); STATE_DIR/
 # comments/<num> records posted comment bodies for CommentPosted to read
-# back. A magic PR head "fail-head" and a magic issue number "fail-comment"
-# make their respective calls fail, mirroring fake-gh-codeforge.sh's own
-# "fail-head" convention for pr-create.
+# back; STATE_DIR/issues/<num> records filed issues (title, then body, then
+# one label per remaining line) for IssuePosted to read back. A magic PR head
+# "fail-head", a magic issue number "fail-comment", and a magic issue title
+# "fail-issue" make their respective calls fail, mirroring
+# fake-gh-codeforge.sh's own "fail-head" convention for pr-create.
 
 case "$1-$2" in
 repo-clone)
@@ -43,5 +45,32 @@ issue-comment)
 	done
 	mkdir -p "$STATE_DIR/comments"
 	printf '%s\n' "$body" >> "$STATE_DIR/comments/$num"
+	;;
+issue-create)
+	shift 2
+	title=""
+	body=""
+	labels=""
+	while [ $# -gt 0 ]; do
+		case "$1" in
+		--title) title="$2"; shift 2 ;;
+		--body) body="$2"; shift 2 ;;
+		--label) labels="$labels$2
+"; shift 2 ;;
+		*) shift ;;
+		esac
+	done
+	if [ "$title" = "fail-issue" ]; then
+		printf 'could not create issue\n' >&2
+		exit 1
+	fi
+	num=1000
+	mkdir -p "$STATE_DIR/issues"
+	{
+		printf '%s\n' "$title"
+		printf '%s\n' "$body"
+		printf '%s' "$labels"
+	} > "$STATE_DIR/issues/$num"
+	printf 'https://github.com/owner/repo/issues/%s\n' "$num"
 	;;
 esac
