@@ -2,6 +2,7 @@ package waves
 
 import (
 	"errors"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -1126,5 +1127,60 @@ func TestRunContinuous_PollRefillsSlotLeftIdleByTransientMiss(t *testing.T) {
 
 	if len(fr.RunCalls) != 2 {
 		t.Fatalf("RunCalls: got %d, want 2", len(fr.RunCalls))
+	}
+}
+
+// TestRunContinuous_RefillDispatchesInPriorityOrder verifies the #2281
+// review finding: continuous.go's refill closure sorts the discovered pool
+// by Priority (sortByPriority) before picking the next launch, so the
+// refill loop actually dispatches in priority order end to end — not just
+// in the isolated sortByPriority/NewPlan unit coverage in plan_test.go.
+// MaxParallel=1 forces strictly one-at-a-time dispatch, so fr.RunCalls'
+// order is the observed launch order; five issues spanning every tier are
+// seeded out of priority order (deliberately, so a passing result can only
+// come from the sort, never from discovery/insertion order) and must launch
+// Critical > High > Normal > Low, oldest-number-first within a tier.
+func TestRunContinuous_RefillDispatchesInPriorityOrder(t *testing.T) {
+	c := baseConfig()
+	c.Label = "agent-trigger"
+	c.MaxParallel = 1
+
+	fc := forge.NewFake(dispatchLabels(c))
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.Label}})                            // Normal (unlabeled)
+	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{c.Label, "agent-priority-low"}})      // Low
+	fc.SetIssue(forge.Issue{Number: "3", Labels: []string{c.Label, "agent-priority-critical"}}) // Critical
+	fc.SetIssue(forge.Issue{Number: "4", Labels: []string{c.Label, "agent-priority-high"}})     // High
+	fc.SetIssue(forge.Issue{Number: "5", Labels: []string{c.Label, "agent-priority-critical"}}) // Critical, tiebreaks after #3
+
+	fr := runner.NewFake()
+
+	dir := tempLogDir(t)
+	f := testFactory(t, dir, fr)
+	s := newSettle(fc, fc)
+
+	discover := func() ([]Issue, map[string][]string, Sources, map[string]bool, error) {
+		raw, err := fc.ListIssues(forge.Dispatchable)
+		if err != nil {
+			return nil, nil, nil, nil, err
+		}
+		out := make([]Issue, len(raw))
+		for i, fi := range raw {
+			out[i] = Issue{Number: fi.Number, Title: fi.Title, Priority: fi.Priority}
+		}
+		return out, map[string][]string{}, nil, nil, nil
+	}
+	fresh := func() (bool, bool, string) { return true, true, "fresh" }
+
+	if err := RunContinuous(c, nil, fc, fc, dir, f, s, discover, fresh); err != nil {
+		t.Fatalf("RunContinuous: got %v, want nil", err)
+	}
+
+	got := make([]string, len(fr.RunCalls))
+	for i, box := range fr.RunCalls {
+		got[i] = box.Issue
+	}
+	want := []string{"3", "5", "4", "1", "2"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("dispatch order: got %v, want %v (Critical > High > Normal > Low, oldest-number-first within a tier)", got, want)
 	}
 }
