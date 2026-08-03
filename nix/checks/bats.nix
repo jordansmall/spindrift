@@ -11,6 +11,7 @@ let
     promptHarness
     skillsHarness
     skillsBwrapHarness
+    opencodeHarness
     ;
 in
 {
@@ -132,6 +133,18 @@ in
         # The run command embeds the path via unsafeDiscardStringContext, which
         # drops the Nix dependency — without this attr the path is absent.
         SKILLS_AGENT_FILES = skillsBwrapHarness.agentFiles;
+        # The opencode Driver's registry-rendered preamble (issue #2262), so
+        # the cross-half integration test derives DRIVER_AGENT_FILES_DIR from
+        # the same rendered bytes an opencode image bakes in, instead of
+        # retyping the relative path -- keeping it in lockstep with whatever
+        # agentFilesTemplate below actually bakes into.
+        OPENCODE_DRIVER_PREAMBLE_FILE = opencodeHarness.driverPreambleFile;
+        # The opencode Driver's REAL baked agent-files template output (issue
+        # #2262), so the same test renders through lib/drivers/opencode.nix's
+        # agentFilesTemplate instead of write_agent_file's hand-written
+        # fixture -- proof the entrypoint's rewrite loop works against actual
+        # baked bytes, not just a fixture shaped to look like them.
+        OPENCODE_AGENT_FILES = opencodeHarness.agentFiles;
       }
       ''
         export HOME="$TMPDIR/home"

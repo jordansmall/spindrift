@@ -22,6 +22,13 @@ agent_file_frontmatter() {
   awk '{ print } /^---$/ { if (++c == 2) exit }' "$1"
 }
 
+# Counts frontmatter fence lines ("---") in a baked opencode agent file --
+# used to assert the rewrite preserves the two-fence shape (one open, one
+# close) rather than e.g. leaving a stray third fence behind.
+agent_file_fence_count() {
+  grep -c '^---$' "$1"
+}
+
 # Writes a baked opencode agent file fixture with real frontmatter shape and a
 # placeholder body distinguishable from any real rendered prompt.
 write_agent_file() {
@@ -219,4 +226,42 @@ EOF
   opencode_body="${opencode_body%$'\n'}"
 
   [ "$opencode_body" = "$claude_prompt" ]
+}
+
+# Cross-half integration case (issue #2262): renders agent files through the
+# REAL baked agentFilesTemplate (lib/drivers/opencode.nix:132-152) instead of
+# write_agent_file's hand-written fixture, and derives DRIVER_AGENT_FILES_DIR
+# from the REAL rendered preamble (lib/drivers/default.nix's renderPreamble)
+# instead of retyping the relative path -- so if agentFilesTemplate's
+# on-disk path (opencode.nix:139) ever drifts from agentFilesDirRelative
+# (opencode.nix:40), the two Nix-rendered artifacts land at different
+# relative paths and this test fails instead of staying silently pinned.
+@test "entrypoint rewrites the real baked opencode agent-files template output, preserving frontmatter and the two-fence shape" {
+  eval "$(grep '^DRIVER_AGENT_FILES_DIR=' "$OPENCODE_DRIVER_PREAMBLE_FILE")"
+  local relative="${DRIVER_AGENT_FILES_DIR#/home/agent/}"
+  local dir="$BATS_TEST_TMPDIR/agent-files-real/$relative"
+  mkdir -p "$dir"
+  cp "$OPENCODE_AGENT_FILES/home/agent/$relative/"*.md "$dir/"
+  # The store path is read-only; the entrypoint rewrites these files in
+  # place, so give the copies write permission (the store's own bits don't
+  # carry over usefully here since cp preserves them).
+  chmod u+w "$dir"/*.md
+
+  local scout="$dir/scout.md"
+  [ -f "$scout" ]
+  local frontmatter_before
+  frontmatter_before="$(agent_file_frontmatter "$scout")"
+  [ "$(agent_file_fence_count "$scout")" -eq 2 ]
+
+  export DRIVER_AGENT_FILES_DIR="$dir"
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+
+  [ "$(agent_file_fence_count "$scout")" -eq 2 ]
+  [ "$(agent_file_frontmatter "$scout")" = "$frontmatter_before" ]
+  local body
+  body="$(agent_file_body "$scout")"
+  [ -n "$body" ]
+  [ "$body" != "Map relevant files, seams, and tests; return a structured brief" ]
+  [[ "$body" == *"Return only the brief"* ]]
 }
