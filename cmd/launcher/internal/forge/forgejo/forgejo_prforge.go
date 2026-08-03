@@ -192,10 +192,6 @@ func (f *forgejoCodeForge) PRForBranch(branch string) (string, bool, error) {
 	return "", false, nil
 }
 
-// maxFailureDetailBytes bounds the string FailureDetail returns, so a large
-// CI log excerpt cannot blow the fix Box's env/prompt budget.
-const maxFailureDetailBytes = 4000
-
 // forgejoCombinedStatus is the shape Forgejo's combined commit-status
 // endpoint (/commits/{sha}/status) returns: an already-aggregated state
 // across every status posted against the commit, plus how many contributed.
@@ -260,12 +256,13 @@ var forgejoFailingStatusStates = map[string]bool{
 
 // FailureDetail renders the PR head commit's failing statuses into a
 // bounded, human-readable excerpt: one "context: STATE" header per failing
-// status (state upper-cased, mirroring the github adapter's
-// FAILURE/ERROR/... conclusion rendering) plus its description, truncated
-// to maxFailureDetailBytes. Returns "" when nothing is currently failing.
-// The fetch is best-effort in intent — callers should treat a non-nil error
-// as "detail unavailable" — but a genuine HTTP failure is still surfaced as
-// an error rather than silently swallowed.
+// status (state upper-cased) plus its description. It normalizes the
+// failing statuses into forge.FailureDetailEntry values and defers the
+// actual rendering, including the forge.MaxFailureDetailBytes truncation,
+// to the shared forge.RenderFailureDetail. Returns "" when nothing is
+// currently failing. The fetch is best-effort in intent — callers should
+// treat a non-nil error as "detail unavailable" — but a genuine HTTP
+// failure is still surfaced as an error rather than silently swallowed.
 func (f *forgejoCodeForge) FailureDetail(prURL string) (string, error) {
 	p, err := f.getPull(prURL)
 	if err != nil {
@@ -279,22 +276,18 @@ func (f *forgejoCodeForge) FailureDetail(prURL string) (string, error) {
 	if status != http.StatusOK {
 		return "", fmt.Errorf("forgejo: commit statuses %s: unexpected status %d", p.Head.Sha, status)
 	}
-	var b strings.Builder
+	var entries []forge.FailureDetailEntry
 	for _, s := range statuses {
 		if !forgejoFailingStatusStates[s.State] {
 			continue
 		}
-		fmt.Fprintf(&b, "%s: %s\n", s.Context, strings.ToUpper(s.State))
-		if s.Description != "" {
-			fmt.Fprintf(&b, "%s\n", s.Description)
-		}
-		b.WriteString("---\n")
+		entries = append(entries, forge.FailureDetailEntry{
+			Name:    s.Context,
+			State:   strings.ToUpper(s.State),
+			Summary: s.Description,
+		})
 	}
-	out := strings.TrimSpace(b.String())
-	if len(out) > maxFailureDetailBytes {
-		out = out[:maxFailureDetailBytes]
-	}
-	return out, nil
+	return forge.RenderFailureDetail(entries), nil
 }
 
 // forgejoPRFile is the shape Forgejo's pulls/{index}/files endpoint returns
