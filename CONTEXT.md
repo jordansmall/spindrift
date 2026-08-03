@@ -450,12 +450,40 @@ the states themselves.
 _Avoid_: status, queue, state machine.
 
 **Dispatch order**:
-The order in which `ListIssues` hands work to the launcher — canonically
-oldest-first. Identity is opaque to the launcher (`Number` is a string), so the
-launcher never parses or compares IDs numerically; each Issue Tracker adapter
-returns issues already in canonical order using its own order key: `github` =
-issue number, `jira` = created time, `local` = a `created` frontmatter timestamp.
-_Avoid_: issue number, sequence, priority.
+The order in which `ListIssues` hands work to the launcher — oldest-first, which
+is now the *tiebreaker within a [[Dispatch priority]] tier* rather than the whole
+rule: priority is the primary sort key, oldest-first the secondary. Identity is
+opaque to the launcher (`Number` is a string), so the launcher never parses or
+compares IDs numerically; each Issue Tracker adapter returns issues already in
+canonical oldest-first order using its own order key: `github` = issue number,
+`jira` = created time, `local` = a `created` frontmatter timestamp — and the
+launcher applies the priority sort over that order once, centrally.
+_Avoid_: issue number, sequence.
+
+**Dispatch priority**:
+The primary sort key over the dispatchable pool, layered above [[Dispatch
+order]]: the launcher orders ready issues by priority tier first, oldest-first
+*within* a tier. Four tiers — Critical > High > **Normal** > Low — where Normal
+is the default an *unlabeled* issue occupies, so priority both boosts
+(Critical/High) and buries (Low) relative to the untouched middle. Carried by a
+disjoint label family (`agent-priority-critical` / `-high` / `-low`,
+`agent-`-namespaced to never collide with a repo's own `priority-*` project
+labels) that each Issue Tracker adapter resolves into one canonical `Priority`
+value on the returned issue — the same shape as dispatch-state labels becoming a
+canonical [[Dispatch lifecycle]] state — so the launcher sorts once, centrally
+(in the plan), never in a backend's mechanism. Applies to the discovered pool
+(queue-drain and continuous-refill hydration) and the Console [[Backlog]]; a
+hand-picked selective list keeps the operator's typed order (ADR 0011), and it
+is a no-op on the single-issue workflow trigger. Strictly a sort key: it never
+overrides a dependency edge (a blocker runs before its dependent regardless of
+tier, and a blocker does **not** inherit its dependents' priority — a [[Wave]]'s
+ready set is ordered by each issue's own tier), never authorizes a dispatch (an
+issue still needs the launch-button label; a `priority-*` label is not a
+trigger), and applies no aging — lower tiers starve under sustained higher-tier
+inflow, which *is* the meaning of a low tier. Highest label wins if an issue
+carries more than one.
+_Avoid_: severity (an issue-quality axis, not a dispatch-order axis), rank,
+weight, SLA.
 
 **Wave**:
 One batch of Dispatches launched concurrently. With no blocker edges the whole
