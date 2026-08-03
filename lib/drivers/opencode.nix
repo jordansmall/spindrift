@@ -55,7 +55,14 @@
   # colon/space delimiter normalization, and required-field greps mirror
   # claude.nix's outcomeExtractFnBody exactly (see that file's comment for the
   # full rationale) so both Drivers produce the same launcher-side outcome
-  # line shape from whichever event stream they emit.
+  # line shape from whichever event stream they emit. That mirroring is
+  # verified, not just asserted: tests/driver-registry-outcome-extraction.bats
+  # (nix/checks/bats.nix's driver-registry-outcome-extraction check) runs this
+  # exact rendered body against
+  # cmd/launcher/internal/driver/opencode/testdata/outcome-fixture.jsonl, and
+  # tests/entrypoint-outcome-{contract,recovery,backstop}.bats exercise it
+  # end-to-end via tests/fakes/opencode (nix/checks/bats.nix's
+  # bats-outcome-opencode check, issue #2261).
   outcomeExtractFnBody = ''
     # The backtick below is a literal char in a single-quoted sed script, not
     # an unexpanded command substitution.
@@ -74,6 +81,10 @@
   # outcomeExtractNearMissFnBody exactly (see that file's comment for the full
   # rationale) over opencode's `type:"text"`/`.part.text` event stream, the
   # same way this file's outcomeExtractFnBody mirrors its claude.nix sibling.
+  # Verified the same way too: the driver-registry-outcome-extraction and
+  # bats-outcome-opencode checks named on outcomeExtractFnBody above exercise
+  # this near-miss body against the same opencode-shaped fixtures (issue
+  # #2261).
   outcomeExtractNearMissFnBody = ''
     # The backtick below is a literal char in a single-quoted sed script, not
     # an unexpanded command substitution.
