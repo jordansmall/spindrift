@@ -43,7 +43,7 @@ type CodeForgeHarness interface {
 // the git adapter and the Fake's push-only wrapper — so RunCodeForgeContract's
 // push-only MERGE_MODE scenario (manual lands the raw agent branch directly,
 // no PR indirection; auto has no meaning, CONTEXT.md) only runs against them.
-// github implements PRForge and does not implement this marker.
+// github and forgejo implement PRForge and do not implement this marker.
 type PushOnly interface {
 	IsPushOnly()
 }
@@ -51,7 +51,8 @@ type PushOnly interface {
 // LandingHarness lets RunCodeForgeContract additionally exercise the
 // LandingContainmentQuery/LandingRepair surfaces CODE_FORGE=local's adapter
 // implements (ADR 0029, ADR 0033, issue #1809, issue #2151) — only
-// local-shaped harnesses implement it; github has no such surface.
+// local-shaped harnesses implement it; github and forgejo have no such
+// surface.
 type LandingHarness interface {
 	// Parent returns the broad-ticket key the harness's CodeForge checks
 	// IntegrationTip against.
@@ -87,7 +88,7 @@ func RunCodeForgeContract(t *testing.T, h CodeForgeHarness) {
 // uncontained, and once MarkLanded lands it, LandingContained agrees for both
 // the resolved IntegrationRef and the raw BranchRef shape, and IntegrationTip
 // resolves the same landing. Skipped entirely for a harness that doesn't
-// implement LandingHarness (github has no such surface).
+// implement LandingHarness (github and forgejo have no such surface).
 func testLandingContainment(t *testing.T, h CodeForgeHarness) {
 	lh, ok := h.(LandingHarness)
 	if !ok {
@@ -210,14 +211,14 @@ func testProbe(t *testing.T, h CodeForgeHarness) {
 
 // testPushOnlyMergeModeMapping pins the push-only half of the MERGE_MODE
 // mapping (CONTEXT.md) that lives at the CodeForge seam itself: auto has no
-// meaning off github (no PRForge to enqueue it against), and Merge/Rebase
-// take the raw agent branch name directly — no PR-URL indirection layer for
-// a scripted ref to hide behind. (The manual-vs-immediate choice of whether
-// to call Merge at all is the settle package's concern, not CodeForge's, so
-// it isn't asserted here.) Runs only against harnesses that implement
-// PushOnly (the git adapter, and the Fake's push-only wrapper) — github's
-// own PRForge-backed auto mapping belongs to the sibling PRForge contract
-// (issue #1546).
+// meaning off github/forgejo (no PRForge to enqueue it against), and
+// Merge/Rebase take the raw agent branch name directly — no PR-URL
+// indirection layer for a scripted ref to hide behind. (The
+// manual-vs-immediate choice of whether to call Merge at all is the settle
+// package's concern, not CodeForge's, so it isn't asserted here.) Runs only
+// against harnesses that implement PushOnly (the git adapter, and the
+// Fake's push-only wrapper) — github and forgejo's own PRForge-backed auto
+// mapping belongs to the sibling PRForge contract (issue #1546).
 func testPushOnlyMergeModeMapping(t *testing.T, h CodeForgeHarness) {
 	if _, ok := h.(PushOnly); !ok {
 		return
