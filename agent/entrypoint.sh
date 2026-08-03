@@ -965,6 +965,20 @@ phase_prompt_assembly() {
   # AGENTS_PROMPT_FILES map, no per-name branch (#264).
   if [ -n "${DRIVER_AGENT_FILES_DIR:-}" ]; then
     if [ -n "$ORCHESTRATOR" ]; then
+      # Issue #2278: file-based twin of the JSON loop's #2277 extraction
+      # above -- the same reasoning applies here, only the source is a baked
+      # agent file's `model:` frontmatter scalar instead of a JSON template's
+      # .reviewer.model. Extraction must happen before the `rm -f` just below,
+      # since once the file is removed its configured model is unrecoverable;
+      # threading it through run_driver_in_env to the orchestrator's own
+      # --review-model flag is the only way the review pass still learns the
+      # configured model instead of silently falling back to the coordinator
+      # model. Mirrors the claude path's `// empty` fallback: no reviewer.md
+      # (opencode drops the file outright when the reviewer has no configured
+      # model, #392) leaves review_model_rendered at its already-initialized
+      # empty default rather than erroring.
+      [ -f "${DRIVER_AGENT_FILES_DIR}/reviewer.md" ] &&
+        review_model_rendered="$(awk '{ print } /^---$/ { if (++_c == 2) exit }' "${DRIVER_AGENT_FILES_DIR}/reviewer.md" | sed -n 's/^model: //p' | jq -r '.')"
       # Mechanism parity with the JSON loop's `del(.reviewer)`: the code-owned
       # review pass owns verdict authority (issue #2037), so the reviewer's
       # baked agent file is removed outright rather than rewritten.

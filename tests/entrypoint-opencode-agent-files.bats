@@ -131,6 +131,46 @@ EOF
   [[ "$scout_body" == *"Return only the brief"* ]]
 }
 
+# Issue #2278: file-based twin of entrypoint-orchestrator-handoff.bats's
+# "orchestrator path forwards --review-model from the reviewer's configured
+# model" (issue #2277, JSON path). Here the reviewer's configured model rides
+# the baked reviewer.md's `model:` frontmatter scalar instead of
+# AGENTS_JSON_TEMPLATE's .reviewer.model, but it must reach the orchestrator's
+# --review-model flag the same way, extracted before the reviewer.md removal
+# just above drops it.
+@test "entrypoint forwards --review-model from the reviewer's baked opencode agent file when the orchestrator is on" {
+  local dir="$BATS_TEST_TMPDIR/agent-files"
+  mkdir -p "$dir"
+  write_agent_file "$dir/reviewer.md" "reviewer"
+  export DRIVER_AGENT_FILES_DIR="$dir"
+  export ORCHESTRATOR_ENABLED=1
+  export WORK_DIR="$BATS_TEST_TMPDIR/work-agent-files-review-model"
+
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+
+  grep -q -- '--review-model opus' "$ORCHESTRATOR_LOG"
+}
+
+# Mirrors entrypoint-orchestrator-handoff.bats's "orchestrator path omits
+# --review-model when no reviewer model is configured": on the opencode
+# file-based path, no reviewer.md at all (the #392 empty-model-drops-the-file
+# semantics) means no configured model to extract -- entrypoint.sh must omit
+# --review-model entirely rather than pass it empty.
+@test "entrypoint omits --review-model when no reviewer baked opencode agent file exists" {
+  local dir="$BATS_TEST_TMPDIR/agent-files"
+  mkdir -p "$dir"
+  write_agent_file "$dir/scout.md" "scout"
+  export DRIVER_AGENT_FILES_DIR="$dir"
+  export ORCHESTRATOR_ENABLED=1
+  export WORK_DIR="$BATS_TEST_TMPDIR/work-agent-files-no-review-model"
+
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+
+  ! grep -q -- '--review-model' "$ORCHESTRATOR_LOG"
+}
+
 @test "entrypoint rewrites the reviewer's baked opencode agent file when the orchestrator is off" {
   # Parity with the JSON loop's off-row: with the orchestrator off, reviewer
   # is not dropped -- its baked file is rewritten like any other roster entry.
