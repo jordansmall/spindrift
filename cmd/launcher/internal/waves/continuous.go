@@ -223,6 +223,10 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 			fmt.Fprintf(os.Stderr, "continuous: re-discover: %v\n", err)
 			return false
 		}
+		// Continuous refill has no Origin concept — it is always the
+		// discovered pool, never a hand-picked selective list — so, unlike
+		// NewPlan, sort unconditionally (ADR 0040).
+		sortByPriority(issues)
 		if len(edges) > 0 {
 			if node, cycle := detectCycle(edges, issueNums(issues)); cycle {
 				fmt.Fprintf(os.Stderr, "==> ERROR: dependency cycle detected (issue #%s is in the cycle); skipping this refill\n", node)

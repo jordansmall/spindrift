@@ -151,6 +151,53 @@ func TestDrainMaxJobs_HoldsDependentWhenBlockerFails(t *testing.T) {
 	}
 }
 
+// TestDrainMaxJobs_PriorityOrderDoesNotBypassBlocker verifies that a
+// priority-sorted Issues slice — where a Critical-priority dependent leads a
+// Low-priority blocker, as NewPlan's sortByPriority would produce (#2281) —
+// still holds the dependent back: drainMaxJobs' own blocker gate is blind to
+// list position, so the still-unready dependent is skipped regardless of
+// where the priority sort placed it, and the ready blocker dispatches on its
+// own turn.
+func TestDrainMaxJobs_PriorityOrderDoesNotBypassBlocker(t *testing.T) {
+	c := baseConfig()
+	c.Label = "agent-trigger"
+	c.MaxParallel = 2
+	c.MaxJobs = 0
+
+	fc := forge.NewFake(dispatchLabels(c))
+	// Issue #1 is the (Low-priority) blocker; issue #2 is the
+	// (Critical-priority) dependent, blocked by #1, which is not complete.
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.Label}})
+	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{c.Label}})
+
+	fr := runner.NewFake()
+	edges := map[string][]string{"2": {"1"}}
+
+	dir := tempLogDir(t)
+	f := testFactory(t, dir, fr)
+	s := newSettle(fc, fc)
+	out := testutil.CaptureStdout(t, func() {
+		// Issue order mirrors what NewPlan's priority sort would produce:
+		// the Critical dependent (#2) ahead of its Low blocker (#1).
+		if err := drainMaxJobs(c, fc, fc, dir, f, s, []Issue{
+			{Number: "2", Title: "dependent", Priority: forge.PriorityCritical},
+			{Number: "1", Title: "blocker", Priority: forge.PriorityLow},
+		}, edges, nil, nil, OriginDiscovered); err != nil {
+			t.Fatalf("drainMaxJobs: %v", err)
+		}
+	})
+
+	if !strings.Contains(out, "~~ #2 blocked by #1; skipping") {
+		t.Errorf("output must hold #2 with the standard blocked-skip line; got:\n%s", out)
+	}
+	if len(fr.RunCalls) != 1 {
+		t.Fatalf("RunCalls: got %d, want 1", len(fr.RunCalls))
+	}
+	if fr.RunCalls[0].Issue != "1" {
+		t.Errorf("dispatched issue: got %q, want \"1\" (the ready blocker)", fr.RunCalls[0].Issue)
+	}
+}
+
 // TestDrainMaxJobs_MaxJobsCapHonored verifies that the maxJobs cap is
 // respected even when more unblocked issues follow the cap-trigger in the
 // batch — i.e. the labeled-break exits the for loop, not just the switch.

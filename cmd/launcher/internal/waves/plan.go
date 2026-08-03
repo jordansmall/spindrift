@@ -11,6 +11,7 @@ package waves
 import (
 	"errors"
 	"fmt"
+	"sort"
 	"time"
 
 	"spindrift.dev/launcher/internal/forge"
@@ -64,6 +65,12 @@ type Issue struct {
 	// eventually makes checks termination against its own incarnation, not
 	// whichever one last happened to hold the issue number.
 	Generation uint64
+
+	// Priority is the issue's own agent-priority-{critical,high,low} tier
+	// (ADR 0040), carried through from forge.Issue.Priority by every caller
+	// that builds an Issue from a tracker query. sortByPriority is the only
+	// thing that reads it.
+	Priority forge.Priority
 }
 
 // Input is what a caller supplies to NewPlan: the batch to dispatch and the
@@ -161,7 +168,22 @@ func NewPlan(cfg Config, in Input) (Plan, error) {
 			return Plan{}, fmt.Errorf("ERROR: dependency cycle detected (issue #%s is in the cycle)", node)
 		}
 	}
+	if in.Origin != OriginSelective {
+		sortByPriority(in.Issues)
+	}
 	return Plan{Mode: ModeDrain, Origin: in.Origin, Issues: in.Issues, Edges: in.Edges, Sources: in.Sources, Failed: in.Failed}, nil
+}
+
+// sortByPriority stably orders issues by Priority descending (Critical >
+// High > Normal > Low); a stable sort means equal-priority issues keep
+// their input relative order, which — since every Issue Tracker adapter
+// already returns issues oldest-first — makes oldest-first the natural,
+// zero-extra-code tiebreaker within a tier (ADR 0040), and an all-Normal
+// batch (today's default) sorts byte-identical to its input order.
+func sortByPriority(issues []Issue) {
+	sort.SliceStable(issues, func(i, j int) bool {
+		return issues[i].Priority > issues[j].Priority
+	})
 }
 
 // issueNums returns the number strings from a slice of issues.

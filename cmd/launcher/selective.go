@@ -68,7 +68,7 @@ func fetchSelectiveIssues(c config, it forge.IssueTracker, nums []string) ([]iss
 		if err != nil {
 			return nil, nil, fmt.Errorf("issue %s: %w", num, err)
 		}
-		issues = append(issues, issue{number: fi.Number, title: fi.Title})
+		issues = append(issues, issue{number: fi.Number, title: fi.Title, priority: fi.Priority})
 		if !containsLabel(fi.Labels, c.label) {
 			unlabeled = append(unlabeled, fi.Number)
 		}

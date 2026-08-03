@@ -81,6 +81,30 @@ func TestDiscoverIssues_OldestFirst(t *testing.T) {
 	}
 }
 
+// Priority (ADR 0040, issue #2281) must survive the forge.Issue -> local
+// issue -> waves.Issue conversion chain: discoverIssues populates it from
+// the tracker's Priority field, and toWaveIssues carries it through
+// unchanged into waves.Issue for NewPlan's priority sort to read.
+func TestDiscoverIssues_PriorityPropagatesToWaveIssues(t *testing.T) {
+	c := baseConfig()
+	c.label = "ready-for-agent"
+	fc := forge.NewFake(testDispatchLabels)
+	fc.SetIssue(forge.Issue{Number: "1", Title: "critical one", Labels: []string{c.label, "agent-priority-critical"}})
+
+	issues, _, err := discoverIssues(c, fc)
+	if err != nil {
+		t.Fatalf("discoverIssues: %v", err)
+	}
+	if len(issues) != 1 || issues[0].priority != forge.PriorityCritical {
+		t.Fatalf("discoverIssues priority = %+v, want PriorityCritical", issues)
+	}
+
+	waveIssues := toWaveIssues(issues)
+	if len(waveIssues) != 1 || waveIssues[0].Priority != forge.PriorityCritical {
+		t.Fatalf("toWaveIssues priority = %+v, want PriorityCritical", waveIssues)
+	}
+}
+
 // logDiscoveryPoll's first call always announces the baseline query — the
 // #1645 invariant a continuous run's very first discover must preserve —
 // regardless of what the seen set already holds.
