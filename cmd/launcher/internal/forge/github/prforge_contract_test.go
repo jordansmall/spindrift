@@ -137,6 +137,17 @@ func (h *prforgeHarness) SeedAutoMergeAllowed(allowed bool) {
 	writeFile(h.t, filepath.Join(h.stateDir, "automerge_allowed"), strconv.FormatBool(allowed))
 }
 
+// SeedNeedsUpdate scripts url's PR's behind_by count the fake gh script's
+// `api repos/.../compare/...` case reads back.
+func (h *prforgeHarness) SeedNeedsUpdate(url string, needsUpdate bool) {
+	num := prNum(url)
+	behindBy := "0"
+	if needsUpdate {
+		behindBy = "1"
+	}
+	writeFile(h.t, filepath.Join(h.stateDir, "prs", num, "behind_by"), behindBy)
+}
+
 // AutoMergeEnqueued reports whether the fake gh script's `pr merge --auto`
 // handler recorded url's PR number as enqueued.
 func (h *prforgeHarness) AutoMergeEnqueued(url string) bool {

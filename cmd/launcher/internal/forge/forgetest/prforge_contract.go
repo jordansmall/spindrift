@@ -9,10 +9,10 @@ import (
 
 // PRForgeHarness lets RunPRForgeContract drive a PRForge's scripted backend
 // without knowing which adapter it is. Only adapters that open PRs and watch
-// CI implement PRForge (github, the Fake); the push-only git adapter has no
-// harness here at all — its absence of PRForge is pinned from the other
-// side, by PushOnlyCodeForgeProvider below and by the sibling CodeForge
-// contract's PushOnly marker (issue #1545).
+// CI implement PRForge (github, forgejo, the Fake); the push-only git adapter
+// has no harness here at all — its absence of PRForge is pinned from the
+// other side, by PushOnlyCodeForgeProvider below and by the sibling
+// CodeForge contract's PushOnly marker (issue #1545).
 type PRForgeHarness interface {
 	// Forge returns the PRForge under test.
 	Forge() forge.PRForge
@@ -35,6 +35,10 @@ type PRForgeHarness interface {
 	// SeedAutoMergeAllowed scripts CanAutoMerge's result for the repo under
 	// test.
 	SeedAutoMergeAllowed(allowed bool)
+	// SeedNeedsUpdate scripts url's NeedsUpdate result — true (the PR's base
+	// branch has commits its head hasn't incorporated yet) or false (head is
+	// already up to date with base).
+	SeedNeedsUpdate(url string, needsUpdate bool)
 	// AutoMergeEnqueued reports whether EnqueueAutoMerge actually recorded
 	// url as enqueued — proof of a side effect, not just a nil error.
 	AutoMergeEnqueued(url string) bool
@@ -64,6 +68,7 @@ func RunPRForgeContract(t *testing.T, h PRForgeHarness) {
 	t.Run("AutoMergeEligibility", func(t *testing.T) { testAutoMergeEligibility(t, h) })
 	t.Run("MarkDraftIdempotent", func(t *testing.T) { testMarkDraftIdempotent(t, h) })
 	t.Run("FailureDetailOnFailingCheck", func(t *testing.T) { testFailureDetailOnFailingCheck(t, h) })
+	t.Run("NeedsUpdate", func(t *testing.T) { testNeedsUpdate(t, h) })
 }
 
 // testOptionalInterfaceDiscovery verifies that the standard Go
@@ -252,5 +257,36 @@ func testFailureDetailOnFailingCheck(t *testing.T, h PRForgeHarness) {
 	}
 	if !strings.Contains(detail, "build") || !strings.Contains(detail, "FAILURE") {
 		t.Fatalf("FailureDetail(%q) = %q, want it to mention the failing check's name and conclusion", failingURL, detail)
+	}
+}
+
+// testNeedsUpdate verifies NeedsUpdate reports the scripted staleness for
+// both directions — a PR whose base has moved on without it (true) and one
+// that's still current (false) — pinning the shared behind-detection
+// semantics every adapter must agree on (issue #936, issue #2258): github's
+// native compare API and forgejo's swapped-refs compensation
+// (forgejo_prforge.go's NeedsUpdate doc) must produce the same bool for the
+// same scripted fact.
+func testNeedsUpdate(t *testing.T, h PRForgeHarness) {
+	cases := []struct {
+		name        string
+		num         string
+		needsUpdate bool
+	}{
+		{"stale", "212", true},
+		{"upToDate", "213", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			url := h.SeedOpenPR(tc.num)
+			h.SeedNeedsUpdate(url, tc.needsUpdate)
+			got, err := h.Forge().NeedsUpdate(url)
+			if err != nil {
+				t.Fatalf("NeedsUpdate(%q): %v", url, err)
+			}
+			if got != tc.needsUpdate {
+				t.Fatalf("NeedsUpdate(%q) = %v, want %v", url, got, tc.needsUpdate)
+			}
+		})
 	}
 }

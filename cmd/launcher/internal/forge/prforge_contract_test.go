@@ -45,6 +45,10 @@ func (h *fakePRForgeHarness) SeedAutoMergeAllowed(allowed bool) {
 	h.f.AutoMergeAllowed = allowed
 }
 
+func (h *fakePRForgeHarness) SeedNeedsUpdate(url string, needsUpdate bool) {
+	h.f.SetNeedsUpdate(url, needsUpdate)
+}
+
 func (h *fakePRForgeHarness) AutoMergeEnqueued(url string) bool {
 	for _, u := range h.f.EnqueueAutoMergeCalls {
 		if u == url {

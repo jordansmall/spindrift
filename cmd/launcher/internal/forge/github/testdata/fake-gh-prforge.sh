@@ -126,4 +126,13 @@ api-graphql)
 		;;
 	esac
 	;;
+api-repos/*/compare/*)
+	# $2 is "repos/<owner>/<repo>/compare/<base>...<head>"; head always ends
+	# in "-<num>" (agent/issue-<num>, url.PathEscape'd), so the trailing
+	# hyphen segment recovers the seeded PR number regardless of compare
+	# direction.
+	basehead="${2##*/compare/}"
+	num="${basehead##*-}"
+	cat "$STATE_DIR/prs/$num/behind_by" 2>/dev/null || echo 0
+	;;
 esac
