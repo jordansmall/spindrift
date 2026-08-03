@@ -855,6 +855,7 @@ phase_prompt_assembly() {
   # (ADR 0022), and a warm FIX_PASS box already has its own pre-existing,
   # review-less warm-fix flow (fix-prompt.md), orthogonal to this loop.
   review_prompt_rendered=""
+  review_model_rendered=""
   if _is_research_kind; then
     if _is_self_contained; then
       prompt="$(_subst "${PROMPTS_DIR}/research-self-contained-prompt.md")"
@@ -911,6 +912,16 @@ phase_prompt_assembly() {
   if [ -n "${AGENTS_JSON_TEMPLATE:-}" ]; then
     agents_json="$AGENTS_JSON_TEMPLATE"
     if [ -n "$ORCHESTRATOR" ]; then
+      # Issue #2277: extract the reviewer's own configured model into the
+      # review_model_rendered global (declared in main; plain assignment,
+      # not local -- same pattern as review_prompt_rendered elsewhere in
+      # this function) before the del(.reviewer) line below drops the
+      # reviewer entry from the template entirely. Once dropped, its model
+      # is unrecoverable -- threading it through run_driver_in_env to the
+      # orchestrator's own --review-model flag is the only way the review
+      # pass still learns the configured model instead of silently falling
+      # back to the coordinator model.
+      review_model_rendered="$(printf '%s' "$agents_json" | jq -r '.reviewer.model // empty')"
       # The code-owned review pass replaces the implementor's own inline
       # reviewer subagent entirely on this path (issue #2037) -- drop it
       # from the template so it's never provisioned into --agents at all,
@@ -999,7 +1010,12 @@ phase_prompt_assembly() {
 # --review-prompt-file, the only case driver-exec itself ever sees since it
 # declares no such flag -- only $ORCHESTRATOR's orchestrator invoker below
 # understands it, and entrypoint.sh only ever renders $4 non-empty when
-# $ORCHESTRATOR is already on). Delegates to driver-exec
+# $ORCHESTRATOR is already on), and $5 (the reviewer's own configured model,
+# issue #2277; "" to omit --review-model and let the orchestrator's review
+# pass fall back to the coordinator model, same "only meaningful under
+# $ORCHESTRATOR" shape as $4 -- extracted in phase_prompt_assembly from the
+# --agents JSON template's .reviewer.model before that same reviewer entry
+# is dropped from the template). Delegates to driver-exec
 # (issue #626), the in-box Go unit that owns "run the Driver, optionally
 # inside the Project devShell" as one code path: it takes the prompt/agents/
 # session as file paths (a compiled binary crosses the devShell process
@@ -1021,7 +1037,7 @@ phase_prompt_assembly() {
 # sentinel, issue #515's dynamic-scoping shape), not ORCHESTRATOR_ENABLED
 # directly -- the one authority for orchestrator-conditioned divergence.
 run_driver_in_env() {
-  local prompt="$1" agents_json="$2" session_mode="$3" review_prompt="${4:-}"
+  local prompt="$1" agents_json="$2" session_mode="$3" review_prompt="${4:-}" review_model="${5:-}"
 
   # An unrecognized session_mode (e.g. "" for the conflict-resolve pass, which
   # pins/resumes no session) falls through _driver_session_flags' case with no
@@ -1074,6 +1090,15 @@ run_driver_in_env() {
     _review_prompt_flags=(--review-prompt-file "$_review_prompt_file")
   fi
 
+  # --review-model, same orchestrator-only shape as --review-prompt-file
+  # just above (issue #2277): the reviewer's own configured model, threaded
+  # through so the orchestrator's review pass uses it instead of falling
+  # back to the coordinator model when it's unset.
+  local -a _review_model_flags=()
+  if [ "$_driver_invoker" = orchestrator ] && [ -n "$review_model" ]; then
+    _review_model_flags=(--review-model "$review_model")
+  fi
+
   local claude_rc=0
   set +e
   "$_driver_invoker" \
@@ -1088,7 +1113,8 @@ run_driver_in_env() {
     --issue "$ISSUE_NUMBER" \
     --log-path "$stream_log" \
     "${_devshell_flags[@]}" \
-    "${_review_prompt_flags[@]}"
+    "${_review_prompt_flags[@]}" \
+    "${_review_model_flags[@]}"
   claude_rc=$?
   set -e
   rm -f "$_prompt_file" "$_agents_file" "$_session_file" "$_review_prompt_file"
@@ -1252,7 +1278,7 @@ main() {
   # keeping them out of true global scope (issue #515).
   local _rebase_and_publish _had_rebase_conflict
   local _use_dev_shell _harness_path
-  local prompt agents_json _driver_session_mode review_prompt_rendered
+  local prompt agents_json _driver_session_mode review_prompt_rendered review_model_rendered
   local _last_outcome_line _last_near_miss_line _last_pr_intent_line _recovery_attempted
   local ORCHESTRATOR
 
@@ -1286,7 +1312,7 @@ main() {
   fi
   local claude_rc=0
   _recovery_attempted=""
-  run_driver_in_env "$prompt" "$agents_json" "$_driver_session_mode" "$review_prompt_rendered" || claude_rc=$?
+  run_driver_in_env "$prompt" "$agents_json" "$_driver_session_mode" "$review_prompt_rendered" "$review_model_rendered" || claude_rc=$?
 
   # Resume-once-then-fall-through via the required-marker gate (issue
   # #2044). The same --agents JSON as the first pass rides along on any
