@@ -112,3 +112,26 @@ setup() {
   # ... and the corrective resume (the second, last line) does not.
   ! tail -1 "$ORCHESTRATOR_LOG" | grep -q -- '--review-prompt-file'
 }
+
+# Issue #2277: the reviewer's own configured model (nix-baked into
+# AGENTS_JSON_TEMPLATE's .reviewer.model) must reach the orchestrator's
+# --review-model flag, extracted before phase_prompt_assembly's
+# del(.reviewer) drops the reviewer entry from --agents entirely.
+@test "orchestrator path forwards --review-model from the reviewer's configured model" {
+  export ORCHESTRATOR_ENABLED=1
+  export AGENTS_JSON_TEMPLATE='{"reviewer":{"description":"Review the branch diff for spec compliance and coding standards","model":"haiku","prompt":"","tools":["Read","Bash","WebFetch"]}}'
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -q -- '--review-model haiku' "$ORCHESTRATOR_LOG"
+}
+
+# Without a reviewer entry in the template, there's no configured model to
+# override with -- the orchestrator's review pass falls back to the
+# coordinator model on its own (run.go's runWithReviewPass), so entrypoint.sh
+# must omit --review-model entirely rather than pass it empty.
+@test "orchestrator path omits --review-model when no reviewer model is configured" {
+  export ORCHESTRATOR_ENABLED=1
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  ! grep -q -- '--review-model' "$ORCHESTRATOR_LOG"
+}
