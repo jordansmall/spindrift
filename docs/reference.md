@@ -1207,6 +1207,10 @@ implementor spawning a `reviewer` subagent inline. `entrypoint.sh` sets the
 flag only on the ORCHESTRATOR-on work-dispatch path — never for research or a
 warm `FIX_PASS` box — so this is a consumer of ADR 0035's master switch, not a
 separate sub-knob: turning the orchestrator on always drives the review pass.
+`--review-model` (from `REVIEW_MODEL`) binds the review pass's own `--model`
+flag, so the review pass runs on the reviewer model tier instead of silently
+inheriting the coordinator/implementor's `--model`; empty falls back to the
+coordinator model, matching the pre-#2277 behavior.
 An implement/fix pass's own REVIEW section is stripped to a short deferral
 (`review-loop-orchestrator.md`) that stops the turn right after COMMIT unless
 the seeded run-state above it already shows an `APPROVE` verdict, and the
