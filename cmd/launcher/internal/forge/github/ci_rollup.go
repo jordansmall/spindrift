@@ -5,11 +5,9 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
-)
 
-// maxFailureDetailBytes bounds the string FailureDetail returns, so a large
-// CI log excerpt cannot blow the fix Box's env/prompt budget.
-const maxFailureDetailBytes = 4000
+	"spindrift.dev/launcher/internal/forge"
+)
 
 // failureDetailContext is one node of a statusCheckRollup's contexts union —
 // either a CheckRun (GitHub Actions and most third-party checks) or a
@@ -74,34 +72,32 @@ func (e *execClient) FailureDetail(url string) (string, error) {
 
 // renderFailureDetail formats the failing contexts into a bounded, human-
 // readable excerpt: one "name: conclusion" header per failing check plus its
-// summary, truncated to maxFailureDetailBytes.
+// summary, truncated to forge.MaxFailureDetailBytes. It normalizes the
+// failing contexts into forge.FailureDetailEntry values and defers the
+// actual rendering to the shared forge.RenderFailureDetail.
 func renderFailureDetail(contexts []failureDetailContext) string {
-	var b strings.Builder
+	var entries []forge.FailureDetailEntry
 	for _, ctx := range contexts {
 		switch ctx.TypeName {
 		case "CheckRun":
 			if !failingCheckRunConclusions[ctx.Conclusion] {
 				continue
 			}
-			fmt.Fprintf(&b, "%s: %s\n", ctx.Name, ctx.Conclusion)
-			if ctx.Summary != "" {
-				fmt.Fprintf(&b, "%s\n", ctx.Summary)
-			}
-			b.WriteString("---\n")
+			entries = append(entries, forge.FailureDetailEntry{
+				Name:    ctx.Name,
+				State:   ctx.Conclusion,
+				Summary: ctx.Summary,
+			})
 		case "StatusContext":
 			if !failingStatusContextStates[ctx.State] {
 				continue
 			}
-			fmt.Fprintf(&b, "%s: %s\n", ctx.Context, ctx.State)
-			if ctx.Description != "" {
-				fmt.Fprintf(&b, "%s\n", ctx.Description)
-			}
-			b.WriteString("---\n")
+			entries = append(entries, forge.FailureDetailEntry{
+				Name:    ctx.Context,
+				State:   ctx.State,
+				Summary: ctx.Description,
+			})
 		}
 	}
-	s := strings.TrimSpace(b.String())
-	if len(s) > maxFailureDetailBytes {
-		s = s[:maxFailureDetailBytes]
-	}
-	return s
+	return forge.RenderFailureDetail(entries)
 }
