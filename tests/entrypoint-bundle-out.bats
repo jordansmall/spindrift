@@ -15,7 +15,7 @@ setup() {
 }
 
 @test "CODE_FORGE=local with real commits writes a seam bundle to the outbox" {
-  export FAKE_CLAUDE_COMMIT=1
+  export FAKE_DRIVER_COMMIT=1
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   [ -f "$OUTBOX_DIR/seam.bundle" ]
@@ -25,7 +25,7 @@ setup() {
 
 @test "CODE_FORGE=local with no commits after a ready claim appends a corrective blocked outcome" {
   # Default fake claude claims status=ready but (with no
-  # FAKE_CLAUDE_COMMIT) never commits anything on the branch.
+  # FAKE_DRIVER_COMMIT) never commits anything on the branch.
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   [ ! -f "$OUTBOX_DIR/seam.bundle" ]
@@ -45,7 +45,7 @@ setup() {
 @test "read-only github with real commits writes a seam bundle to the outbox" {
   unset CODE_FORGE            # default github
   unset BOX_WRITE_ENABLED     # read-only
-  export FAKE_CLAUDE_COMMIT=1
+  export FAKE_DRIVER_COMMIT=1
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   [ -f "$OUTBOX_DIR/seam.bundle" ]

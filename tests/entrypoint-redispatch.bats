@@ -14,7 +14,7 @@ setup() {
 @test "default prompt instructs agent to push with --force-with-lease" {
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  grep -q -- '--force-with-lease' "$CLAUDE_PROMPT_FILE"
+  grep -q -- '--force-with-lease' "$DRIVER_PROMPT_FILE"
 }
 
 @test "re-dispatched box force-resets a stale remote branch (no open PR)" {

@@ -8,7 +8,7 @@ load helper
 setup() {
   setup_fakes
   setup_bare_repo
-  export FAKE_CLAUDE_COMMIT=1
+  export FAKE_DRIVER_COMMIT=1
   # This fixture's stub agent pushes and opens the PR itself (the read-write
   # agent-owned code-out flow), so it is a read-write Box: set the same
   # BOX_WRITE_ENABLED signal a real read-write Box receives (issue #1951).

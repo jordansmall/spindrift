@@ -23,8 +23,8 @@ setup() {
   printf '# LAND THE CHANGE\n\ncanonical contract for %s\n' '${BRANCH}' >"$OUTCOME_CONTRACT_FILE"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  [ "$(grep -c '# LAND THE CHANGE' "$CLAUDE_PROMPT_FILE")" -eq 1 ]
-  grep -q 'canonical contract for agent/issue-7' "$CLAUDE_PROMPT_FILE"
+  [ "$(grep -c '# LAND THE CHANGE' "$DRIVER_PROMPT_FILE")" -eq 1 ]
+  grep -q 'canonical contract for agent/issue-7' "$DRIVER_PROMPT_FILE"
 }
 
 # A mounted prompt that already carries the contract (e.g. copied from a
@@ -41,9 +41,9 @@ setup() {
   printf '# LAND THE CHANGE\n\nshould not appear\n' >"$OUTCOME_CONTRACT_FILE"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  [ "$(grep -c '# LAND THE CHANGE' "$CLAUDE_PROMPT_FILE")" -eq 1 ]
-  grep -q 'already has its own contract' "$CLAUDE_PROMPT_FILE"
-  ! grep -q 'should not appear' "$CLAUDE_PROMPT_FILE"
+  [ "$(grep -c '# LAND THE CHANGE' "$DRIVER_PROMPT_FILE")" -eq 1 ]
+  grep -q 'already has its own contract' "$DRIVER_PROMPT_FILE"
+  ! grep -q 'should not appear' "$DRIVER_PROMPT_FILE"
 }
 
 # The fix prompt shares the same COMMS, CHECK/COMMIT, and outcome-contract
@@ -68,18 +68,18 @@ setup() {
   printf '# LAND THE CHANGE\n\ncanonical outcome contract\n' >"$OUTCOME_CONTRACT_FILE"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  [ "$(grep -c '# COMMS' "$CLAUDE_PROMPT_FILE")" -eq 1 ]
-  [ "$(grep -c '# CHECK' "$CLAUDE_PROMPT_FILE")" -eq 1 ]
-  [ "$(grep -c '# LAND THE CHANGE' "$CLAUDE_PROMPT_FILE")" -eq 1 ]
-  grep -q 'canonical comms contract' "$CLAUDE_PROMPT_FILE"
-  grep -q 'canonical check contract' "$CLAUDE_PROMPT_FILE"
-  grep -q 'canonical outcome contract' "$CLAUDE_PROMPT_FILE"
+  [ "$(grep -c '# COMMS' "$DRIVER_PROMPT_FILE")" -eq 1 ]
+  [ "$(grep -c '# CHECK' "$DRIVER_PROMPT_FILE")" -eq 1 ]
+  [ "$(grep -c '# LAND THE CHANGE' "$DRIVER_PROMPT_FILE")" -eq 1 ]
+  grep -q 'canonical comms contract' "$DRIVER_PROMPT_FILE"
+  grep -q 'canonical check contract' "$DRIVER_PROMPT_FILE"
+  grep -q 'canonical outcome contract' "$DRIVER_PROMPT_FILE"
   # Order: fix stub, then COMMS, then CHECK, then the outcome contract.
   local stub_line comms_line check_line outcome_line
-  stub_line="$(grep -n 'fix stub' "$CLAUDE_PROMPT_FILE" | head -1 | cut -d: -f1)"
-  comms_line="$(grep -n '# COMMS' "$CLAUDE_PROMPT_FILE" | head -1 | cut -d: -f1)"
-  check_line="$(grep -n '# CHECK' "$CLAUDE_PROMPT_FILE" | head -1 | cut -d: -f1)"
-  outcome_line="$(grep -n '# LAND THE CHANGE' "$CLAUDE_PROMPT_FILE" | head -1 | cut -d: -f1)"
+  stub_line="$(grep -n 'fix stub' "$DRIVER_PROMPT_FILE" | head -1 | cut -d: -f1)"
+  comms_line="$(grep -n '# COMMS' "$DRIVER_PROMPT_FILE" | head -1 | cut -d: -f1)"
+  check_line="$(grep -n '# CHECK' "$DRIVER_PROMPT_FILE" | head -1 | cut -d: -f1)"
+  outcome_line="$(grep -n '# LAND THE CHANGE' "$DRIVER_PROMPT_FILE" | head -1 | cut -d: -f1)"
   [ "$stub_line" -lt "$comms_line" ]
   [ "$comms_line" -lt "$check_line" ]
   [ "$check_line" -lt "$outcome_line" ]
@@ -105,13 +105,13 @@ setup() {
   printf '# LAND THE CHANGE\n\nshould not appear\n' >"$OUTCOME_CONTRACT_FILE"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  [ "$(grep -c '# COMMS' "$CLAUDE_PROMPT_FILE")" -eq 1 ]
-  [ "$(grep -c '# CHECK' "$CLAUDE_PROMPT_FILE")" -eq 1 ]
-  [ "$(grep -c '# LAND THE CHANGE' "$CLAUDE_PROMPT_FILE")" -eq 1 ]
-  grep -q 'own comms' "$CLAUDE_PROMPT_FILE"
-  grep -q 'own check' "$CLAUDE_PROMPT_FILE"
-  grep -q 'own contract' "$CLAUDE_PROMPT_FILE"
-  ! grep -q 'should not appear' "$CLAUDE_PROMPT_FILE"
+  [ "$(grep -c '# COMMS' "$DRIVER_PROMPT_FILE")" -eq 1 ]
+  [ "$(grep -c '# CHECK' "$DRIVER_PROMPT_FILE")" -eq 1 ]
+  [ "$(grep -c '# LAND THE CHANGE' "$DRIVER_PROMPT_FILE")" -eq 1 ]
+  grep -q 'own comms' "$DRIVER_PROMPT_FILE"
+  grep -q 'own check' "$DRIVER_PROMPT_FILE"
+  grep -q 'own contract' "$DRIVER_PROMPT_FILE"
+  ! grep -q 'should not appear' "$DRIVER_PROMPT_FILE"
 }
 
 # A missing/unreadable OUTCOME_CONTRACT_FILE must fail the entrypoint loudly

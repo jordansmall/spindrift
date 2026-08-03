@@ -37,14 +37,14 @@ setup() {
     export WORK_DIR="$BATS_TEST_TMPDIR/work-$i-off"
     run bash "$ENTRYPOINT"
     [ "$status" -eq 0 ]
-    ! grep -qF "$marker" "$CLAUDE_PROMPT_FILE"
+    ! grep -qF "$marker" "$DRIVER_PROMPT_FILE"
 
     # shellcheck disable=SC2163 # $assign is itself a NAME=value pair
     export "$assign"
     export WORK_DIR="$BATS_TEST_TMPDIR/work-$i-on"
     run bash "$ENTRYPOINT"
     [ "$status" -eq 0 ]
-    grep -qF "$marker" "$CLAUDE_PROMPT_FILE"
+    grep -qF "$marker" "$DRIVER_PROMPT_FILE"
     unset "${assign%%=*}"
   done
 }
@@ -61,8 +61,8 @@ setup() {
   export WORK_DIR="$BATS_TEST_TMPDIR/work-pr-body-github"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  grep -qF 'Closes #7' "$CLAUDE_PROMPT_FILE"
-  ! grep -qF 'Local-issue:' "$CLAUDE_PROMPT_FILE"
+  grep -qF 'Closes #7' "$DRIVER_PROMPT_FILE"
+  ! grep -qF 'Local-issue:' "$DRIVER_PROMPT_FILE"
 }
 
 @test "PR-body reference: local tracker defaults to no reference at all" {
@@ -70,8 +70,8 @@ setup() {
   export WORK_DIR="$BATS_TEST_TMPDIR/work-pr-body-local-off"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  ! grep -qF 'Closes #7' "$CLAUDE_PROMPT_FILE"
-  ! grep -qF 'Local-issue:' "$CLAUDE_PROMPT_FILE"
+  ! grep -qF 'Closes #7' "$DRIVER_PROMPT_FILE"
+  ! grep -qF 'Local-issue:' "$DRIVER_PROMPT_FILE"
 }
 
 @test "PR-body reference: local tracker opt-in emits a Local-issue breadcrumb, never Closes" {
@@ -80,8 +80,8 @@ setup() {
   export WORK_DIR="$BATS_TEST_TMPDIR/work-pr-body-local-on"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  grep -qF 'Local-issue: 7' "$CLAUDE_PROMPT_FILE"
-  ! grep -qF 'Closes #7' "$CLAUDE_PROMPT_FILE"
+  grep -qF 'Local-issue: 7' "$DRIVER_PROMPT_FILE"
+  ! grep -qF 'Closes #7' "$DRIVER_PROMPT_FILE"
 }
 
 # issue #1429: same conditional-residue separation guarantee as the
@@ -93,23 +93,23 @@ setup() {
   export WORK_DIR="$BATS_TEST_TMPDIR/work-pr-body-sep"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  ! grep -q 'know\.The PR opens' "$CLAUDE_PROMPT_FILE"
+  ! grep -q 'know\.The PR opens' "$DRIVER_PROMPT_FILE"
 }
 
 # issue #1691/ADR 0032: the issue-read step's ISSUE_TRACKER_GITHUB/
 # ISSUE_TRACKER_LOCAL gates (agent/entrypoint.sh's phase_prompt_assembly
 # precompute block) drive four row pairs -- this exercises issue-prompt.md's,
-# the one CLAUDE_PROMPT_FILE captures directly; the other three prompts share
+# the one DRIVER_PROMPT_FILE captures directly; the other three prompts share
 # the same gates and are covered at the fragment-content level by
 # nix/checks/prompts.nix.
 @test "issue-read step: github tracker reads the issue with bounded comments" {
   export WORK_DIR="$BATS_TEST_TMPDIR/work-issue-read-github"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  grep -qF 'gh issue view 7 --json body,comments --jq' "$CLAUDE_PROMPT_FILE"
-  grep -qF 'comments[-10:]' "$CLAUDE_PROMPT_FILE"
-  ! grep -qF 'gh issue view 7 --comments`' "$CLAUDE_PROMPT_FILE"
-  ! grep -qF '/issues/7.md' "$CLAUDE_PROMPT_FILE"
+  grep -qF 'gh issue view 7 --json body,comments --jq' "$DRIVER_PROMPT_FILE"
+  grep -qF 'comments[-10:]' "$DRIVER_PROMPT_FILE"
+  ! grep -qF 'gh issue view 7 --comments`' "$DRIVER_PROMPT_FILE"
+  ! grep -qF '/issues/7.md' "$DRIVER_PROMPT_FILE"
 }
 
 @test "issue-read step: local tracker reads the /issues mount, never gh issue view" {
@@ -117,8 +117,8 @@ setup() {
   export WORK_DIR="$BATS_TEST_TMPDIR/work-issue-read-local"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  grep -qF '/issues/7.md' "$CLAUDE_PROMPT_FILE"
-  ! grep -qF 'gh issue view' "$CLAUDE_PROMPT_FILE"
+  grep -qF '/issues/7.md' "$DRIVER_PROMPT_FILE"
+  ! grep -qF 'gh issue view' "$DRIVER_PROMPT_FILE"
 }
 
 # issue #1963: the forgejo tracker's third issue-read gate cell
@@ -128,8 +128,8 @@ setup() {
   export WORK_DIR="$BATS_TEST_TMPDIR/work-issue-read-forgejo"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  grep -qF 'fj issue view 7' "$CLAUDE_PROMPT_FILE"
-  ! grep -qF 'gh issue view' "$CLAUDE_PROMPT_FILE"
+  grep -qF 'fj issue view 7' "$DRIVER_PROMPT_FILE"
+  ! grep -qF 'gh issue view' "$DRIVER_PROMPT_FILE"
 }
 
 # jira maps to the same gh-flavored path as github (ISSUE_TRACKER_GITHUB=1 ->
@@ -141,9 +141,9 @@ setup() {
   export WORK_DIR="$BATS_TEST_TMPDIR/work-issue-read-jira"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  grep -qF 'gh issue view' "$CLAUDE_PROMPT_FILE"
-  ! grep -qF 'fj issue view' "$CLAUDE_PROMPT_FILE"
-  ! grep -qF '/issues/7.md' "$CLAUDE_PROMPT_FILE"
+  grep -qF 'gh issue view' "$DRIVER_PROMPT_FILE"
+  ! grep -qF 'fj issue view' "$DRIVER_PROMPT_FILE"
+  ! grep -qF '/issues/7.md' "$DRIVER_PROMPT_FILE"
 }
 
 # issue #1692/ADR 0032: the local content-plane write step. A local
@@ -157,8 +157,8 @@ setup() {
   export WORK_DIR="$BATS_TEST_TMPDIR/work-research-verdict-github"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  grep -qF 'gh issue comment 7' "$CLAUDE_PROMPT_FILE"
-  ! grep -qF 'SPINDRIFT_COMMENT_BEGIN' "$CLAUDE_PROMPT_FILE"
+  grep -qF 'gh issue comment 7' "$DRIVER_PROMPT_FILE"
+  ! grep -qF 'SPINDRIFT_COMMENT_BEGIN' "$DRIVER_PROMPT_FILE"
 }
 
 @test "research verdict step: local tracker emits a nonce-guarded SPINDRIFT_COMMENT line, never gh issue comment" {
@@ -168,21 +168,21 @@ setup() {
   export WORK_DIR="$BATS_TEST_TMPDIR/work-research-verdict-local"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  grep -qF 'SPINDRIFT_COMMENT deadbeefcafe1234' "$CLAUDE_PROMPT_FILE"
-  ! grep -qF 'SPINDRIFT_COMMENT_BEGIN' "$CLAUDE_PROMPT_FILE"
-  ! grep -qF 'SPINDRIFT_COMMENT_END' "$CLAUDE_PROMPT_FILE"
+  grep -qF 'SPINDRIFT_COMMENT deadbeefcafe1234' "$DRIVER_PROMPT_FILE"
+  ! grep -qF 'SPINDRIFT_COMMENT_BEGIN' "$DRIVER_PROMPT_FILE"
+  ! grep -qF 'SPINDRIFT_COMMENT_END' "$DRIVER_PROMPT_FILE"
   # Not the bare substring: the unconditional OUTCOME section still
   # explains the github-side `gh issue comment` URL source for contrast.
   # It's the invocation shape (issue number immediately after) that must
   # be absent for local.
-  ! grep -qF 'gh issue comment 7' "$CLAUDE_PROMPT_FILE"
+  ! grep -qF 'gh issue comment 7' "$DRIVER_PROMPT_FILE"
 }
 
 @test "issue blocked-comment step: github tracker keeps gh issue comment unchanged" {
   export WORK_DIR="$BATS_TEST_TMPDIR/work-blocked-comment-github"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  grep -qF 'gh issue comment 7' "$CLAUDE_PROMPT_FILE"
+  grep -qF 'gh issue comment 7' "$DRIVER_PROMPT_FILE"
 }
 
 @test "issue blocked-comment step: local tracker never runs gh issue comment" {
@@ -190,8 +190,8 @@ setup() {
   export WORK_DIR="$BATS_TEST_TMPDIR/work-blocked-comment-local"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  ! grep -qF 'gh issue comment' "$CLAUDE_PROMPT_FILE"
-  grep -qF 'the launcher posts the SPINDRIFT_OUTCOME' "$CLAUDE_PROMPT_FILE"
+  ! grep -qF 'gh issue comment' "$DRIVER_PROMPT_FILE"
+  grep -qF 'the launcher posts the SPINDRIFT_OUTCOME' "$DRIVER_PROMPT_FILE"
 }
 
 # issue #1917: read-only (BOX_WRITE_ENABLED absent, issue #1951) strips the
@@ -206,14 +206,14 @@ setup() {
   export WORK_DIR="$BATS_TEST_TMPDIR/work-research-verdict-github-readonly"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  grep -qF 'SPINDRIFT_COMMENT deadbeefcafe1234' "$CLAUDE_PROMPT_FILE"
-  ! grep -qF 'SPINDRIFT_COMMENT_BEGIN' "$CLAUDE_PROMPT_FILE"
-  ! grep -qF 'SPINDRIFT_COMMENT_END' "$CLAUDE_PROMPT_FILE"
+  grep -qF 'SPINDRIFT_COMMENT deadbeefcafe1234' "$DRIVER_PROMPT_FILE"
+  ! grep -qF 'SPINDRIFT_COMMENT_BEGIN' "$DRIVER_PROMPT_FILE"
+  ! grep -qF 'SPINDRIFT_COMMENT_END' "$DRIVER_PROMPT_FILE"
   # Not the bare substring: research-prompt.md's unconditional OUTCOME
   # section names `gh issue comment` (with no issue number) to explain
   # github's URL source for contrast, same reason the local variant's test
   # above pins the invocation shape rather than the bare phrase.
-  ! grep -qF 'gh issue comment 7' "$CLAUDE_PROMPT_FILE"
+  ! grep -qF 'gh issue comment 7' "$DRIVER_PROMPT_FILE"
 }
 
 @test "issue blocked-comment step: github tracker under read-only never runs gh issue comment" {
@@ -221,8 +221,8 @@ setup() {
   export WORK_DIR="$BATS_TEST_TMPDIR/work-blocked-comment-github-readonly"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  ! grep -qF 'gh issue comment' "$CLAUDE_PROMPT_FILE"
-  grep -qF 'the launcher posts it as the issue comment' "$CLAUDE_PROMPT_FILE"
+  ! grep -qF 'gh issue comment' "$DRIVER_PROMPT_FILE"
+  grep -qF 'the launcher posts it as the issue comment' "$DRIVER_PROMPT_FILE"
 }
 
 # jira rides github's write-step arm too: the consolidated `_it_write` case
@@ -235,7 +235,7 @@ setup() {
   export WORK_DIR="$BATS_TEST_TMPDIR/work-blocked-comment-jira-readwrite"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  grep -qF 'gh issue comment 7' "$CLAUDE_PROMPT_FILE"
+  grep -qF 'gh issue comment 7' "$DRIVER_PROMPT_FILE"
 }
 
 @test "issue blocked-comment step: jira tracker under read-only never runs gh issue comment" {
@@ -244,8 +244,8 @@ setup() {
   export WORK_DIR="$BATS_TEST_TMPDIR/work-blocked-comment-jira-readonly"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  ! grep -qF 'gh issue comment' "$CLAUDE_PROMPT_FILE"
-  grep -qF 'the launcher posts it as the issue comment' "$CLAUDE_PROMPT_FILE"
+  ! grep -qF 'gh issue comment' "$DRIVER_PROMPT_FILE"
+  grep -qF 'the launcher posts it as the issue comment' "$DRIVER_PROMPT_FILE"
 }
 
 @test "research verdict step: github tracker under read-write is unaffected by the new gate" {
@@ -256,8 +256,8 @@ setup() {
   # this case needs no override.
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  grep -qF 'gh issue comment 7' "$CLAUDE_PROMPT_FILE"
-  ! grep -qF 'SPINDRIFT_COMMENT_BEGIN' "$CLAUDE_PROMPT_FILE"
+  grep -qF 'gh issue comment 7' "$DRIVER_PROMPT_FILE"
+  ! grep -qF 'SPINDRIFT_COMMENT_BEGIN' "$DRIVER_PROMPT_FILE"
 }
 
 # issue #1963: the forgejo-side counterpart of the github write-step gates
@@ -271,7 +271,7 @@ setup() {
   # this case needs no override.
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  grep -qF 'fj issue comment 7' "$CLAUDE_PROMPT_FILE"
+  grep -qF 'fj issue comment 7' "$DRIVER_PROMPT_FILE"
 }
 
 @test "research verdict step: forgejo tracker under read-only relays via a nonce-guarded SPINDRIFT_COMMENT line, never fj issue comment" {
@@ -282,8 +282,8 @@ setup() {
   export WORK_DIR="$BATS_TEST_TMPDIR/work-research-verdict-forgejo-readonly"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  grep -qF 'SPINDRIFT_COMMENT deadbeefcafe1234' "$CLAUDE_PROMPT_FILE"
-  ! grep -qF 'fj issue comment 7' "$CLAUDE_PROMPT_FILE"
+  grep -qF 'SPINDRIFT_COMMENT deadbeefcafe1234' "$DRIVER_PROMPT_FILE"
+  ! grep -qF 'fj issue comment 7' "$DRIVER_PROMPT_FILE"
 }
 
 @test "issue blocked-comment step: forgejo tracker under read-write keeps fj issue comment unchanged" {
@@ -291,7 +291,7 @@ setup() {
   export WORK_DIR="$BATS_TEST_TMPDIR/work-blocked-comment-forgejo-readwrite"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  grep -qF 'fj issue comment 7' "$CLAUDE_PROMPT_FILE"
+  grep -qF 'fj issue comment 7' "$DRIVER_PROMPT_FILE"
 }
 
 @test "issue blocked-comment step: forgejo tracker under read-only never runs fj issue comment" {
@@ -300,8 +300,8 @@ setup() {
   export WORK_DIR="$BATS_TEST_TMPDIR/work-blocked-comment-forgejo-readonly"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  ! grep -qF 'fj issue comment' "$CLAUDE_PROMPT_FILE"
-  grep -qF 'the launcher posts it as the issue comment' "$CLAUDE_PROMPT_FILE"
+  ! grep -qF 'fj issue comment' "$DRIVER_PROMPT_FILE"
+  grep -qF 'the launcher posts it as the issue comment' "$DRIVER_PROMPT_FILE"
 }
 
 # issue #1918: the OPEN A PULL REQUEST push step's BOX_ACCESS_READ_WRITE/
@@ -314,8 +314,8 @@ setup() {
   export WORK_DIR="$BATS_TEST_TMPDIR/work-open-pr-push-read-write"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  grep -qF 'git push --force-with-lease -u origin' "$CLAUDE_PROMPT_FILE"
-  ! grep -qF 'seam.bundle' "$CLAUDE_PROMPT_FILE"
+  grep -qF 'git push --force-with-lease -u origin' "$DRIVER_PROMPT_FILE"
+  ! grep -qF 'seam.bundle' "$DRIVER_PROMPT_FILE"
 }
 
 @test "OPEN A PULL REQUEST push step: read-only takes no bundle/push action -- harness lands the committed branch" {
@@ -323,7 +323,7 @@ setup() {
   export WORK_DIR="$BATS_TEST_TMPDIR/work-open-pr-push-read-only"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  ! grep -qF '/outbox/seam.bundle' "$CLAUDE_PROMPT_FILE"
+  ! grep -qF '/outbox/seam.bundle' "$DRIVER_PROMPT_FILE"
 
   # Scoped to the OPEN A PULL REQUEST section itself -- the earlier COMMIT
   # section's generic rebase-then-push guidance (unrelated to this gate,
@@ -334,7 +334,7 @@ setup() {
   # whole-file grep could false-pass on it even if this section's fragment
   # failed to render.
   local open_pr_section
-  open_pr_section="$(awk '/^# OPEN A PULL REQUEST/,/^# OUTCOME/' "$CLAUDE_PROMPT_FILE")"
+  open_pr_section="$(awk '/^# OPEN A PULL REQUEST/,/^# OUTCOME/' "$DRIVER_PROMPT_FILE")"
   grep -qF 'harness relays your committed branch out' <<<"$open_pr_section"
   ! grep -qF 'git push --force-with-lease -u origin' <<<"$open_pr_section"
 }
@@ -346,13 +346,13 @@ setup() {
   export WORK_DIR="$BATS_TEST_TMPDIR/work-open-pr-push-sep-rw"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  ! grep -q '`2\. `gh pr create' "$CLAUDE_PROMPT_FILE"
+  ! grep -q '`2\. `gh pr create' "$DRIVER_PROMPT_FILE"
 
   unset BOX_WRITE_ENABLED
   export WORK_DIR="$BATS_TEST_TMPDIR/work-open-pr-push-sep-ro"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  ! grep -q 'attempt\.2\. `gh pr create' "$CLAUDE_PROMPT_FILE"
+  ! grep -q 'attempt\.2\. `gh pr create' "$DRIVER_PROMPT_FILE"
 }
 
 # issue #1919: the OPEN A PULL REQUEST create step's BOX_ACCESS_READ_WRITE/
@@ -365,9 +365,9 @@ setup() {
   export WORK_DIR="$BATS_TEST_TMPDIR/work-open-pr-create-read-write"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  grep -qF 'gh pr create --draft' "$CLAUDE_PROMPT_FILE"
-  ! grep -qF 'fj pr create' "$CLAUDE_PROMPT_FILE"
-  ! grep -qF 'SPINDRIFT_PR_INTENT_BEGIN' "$CLAUDE_PROMPT_FILE"
+  grep -qF 'gh pr create --draft' "$DRIVER_PROMPT_FILE"
+  ! grep -qF 'fj pr create' "$DRIVER_PROMPT_FILE"
+  ! grep -qF 'SPINDRIFT_PR_INTENT_BEGIN' "$DRIVER_PROMPT_FILE"
 }
 
 # issue #1963: the OPEN A PULL REQUEST create step's read-write case further
@@ -392,7 +392,7 @@ setup() {
   # `fj pr create` in its descriptive prose regardless of read/write mode,
   # so a whole-file grep would false-positive on it.
   local open_pr_section
-  open_pr_section="$(awk '/^# OPEN A PULL REQUEST/,/^# OUTCOME/' "$CLAUDE_PROMPT_FILE")"
+  open_pr_section="$(awk '/^# OPEN A PULL REQUEST/,/^# OUTCOME/' "$DRIVER_PROMPT_FILE")"
   # Anchored to the step-2 invocation itself, not a bare substring: the
   # forgejo fragment's own step 2 also carries a "Do NOT run `gh pr create`"
   # reminder in its prose, which a plain `grep -qF 'gh pr create'` would
@@ -414,11 +414,11 @@ setup() {
   export WORK_DIR="$BATS_TEST_TMPDIR/work-open-pr-create-forgejo-read-only"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  grep -qF 'SPINDRIFT_PR_INTENT deadbeefcafe1234' "$CLAUDE_PROMPT_FILE"
+  grep -qF 'SPINDRIFT_PR_INTENT deadbeefcafe1234' "$DRIVER_PROMPT_FILE"
   # Scoped to the OPEN A PULL REQUEST section, same reasoning as the
   # read-write case above.
   local open_pr_section
-  open_pr_section="$(awk '/^# OPEN A PULL REQUEST/,/^# OUTCOME/' "$CLAUDE_PROMPT_FILE")"
+  open_pr_section="$(awk '/^# OPEN A PULL REQUEST/,/^# OUTCOME/' "$DRIVER_PROMPT_FILE")"
   ! grep -qF 'fj pr create' <<<"$open_pr_section"
 }
 
@@ -428,16 +428,16 @@ setup() {
   export WORK_DIR="$BATS_TEST_TMPDIR/work-open-pr-create-read-only"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  grep -qF 'SPINDRIFT_PR_INTENT deadbeefcafe1234' "$CLAUDE_PROMPT_FILE"
-  ! grep -qF 'SPINDRIFT_PR_INTENT_BEGIN' "$CLAUDE_PROMPT_FILE"
-  ! grep -qF 'SPINDRIFT_PR_INTENT_END' "$CLAUDE_PROMPT_FILE"
+  grep -qF 'SPINDRIFT_PR_INTENT deadbeefcafe1234' "$DRIVER_PROMPT_FILE"
+  ! grep -qF 'SPINDRIFT_PR_INTENT_BEGIN' "$DRIVER_PROMPT_FILE"
+  ! grep -qF 'SPINDRIFT_PR_INTENT_END' "$DRIVER_PROMPT_FILE"
 
   # Not the bare substring: the read-only fragment itself explains "do NOT
   # `gh pr create`" (naming the forbidden command, same pattern
   # outcome-ready-means-outbox.md and CODE_FORGE=git's LAND THE CHANGE use)
   # -- pin the concrete invocation form instead, which only the read-write
   # fragment ever renders.
-  ! grep -qF 'gh pr create --draft --base' "$CLAUDE_PROMPT_FILE"
+  ! grep -qF 'gh pr create --draft --base' "$DRIVER_PROMPT_FILE"
 }
 
 # issue #1933: the IF BLOCKED section's push step (step 1) has the same
@@ -449,9 +449,9 @@ setup() {
   export WORK_DIR="$BATS_TEST_TMPDIR/work-if-blocked-push-read-write"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  grep -qF 'Push what you have (or note if even that is impossible)' "$CLAUDE_PROMPT_FILE"
+  grep -qF 'Push what you have (or note if even that is impossible)' "$DRIVER_PROMPT_FILE"
   local if_blocked_section
-  if_blocked_section="$(awk '/^# IF BLOCKED/,/^# OUTCOME/' "$CLAUDE_PROMPT_FILE")"
+  if_blocked_section="$(awk '/^# IF BLOCKED/,/^# OUTCOME/' "$DRIVER_PROMPT_FILE")"
   ! grep -qF 'seam.bundle' <<<"$if_blocked_section"
 }
 
@@ -462,7 +462,7 @@ setup() {
   [ "$status" -eq 0 ]
 
   local if_blocked_section
-  if_blocked_section="$(awk '/^# IF BLOCKED/,/^# OUTCOME/' "$CLAUDE_PROMPT_FILE")"
+  if_blocked_section="$(awk '/^# IF BLOCKED/,/^# OUTCOME/' "$DRIVER_PROMPT_FILE")"
   ! grep -qF '/outbox/seam.bundle' <<<"$if_blocked_section"
   grep -qF 'harness relays your committed branch out' <<<"$if_blocked_section"
   ! grep -qF 'Push what you have (or note if even that is impossible)' <<<"$if_blocked_section"
@@ -477,7 +477,7 @@ setup() {
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   local if_blocked_section
-  if_blocked_section="$(awk '/^# IF BLOCKED/,/^# OUTCOME/' "$CLAUDE_PROMPT_FILE")"
+  if_blocked_section="$(awk '/^# IF BLOCKED/,/^# OUTCOME/' "$DRIVER_PROMPT_FILE")"
   grep -qF 'gh pr view --json url' <<<"$if_blocked_section"
   ! grep -qF 'SPINDRIFT_PR_INTENT' <<<"$if_blocked_section"
 }
@@ -489,7 +489,7 @@ setup() {
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   local if_blocked_section
-  if_blocked_section="$(awk '/^# IF BLOCKED/,/^# OUTCOME/' "$CLAUDE_PROMPT_FILE")"
+  if_blocked_section="$(awk '/^# IF BLOCKED/,/^# OUTCOME/' "$DRIVER_PROMPT_FILE")"
   grep -qF 'SPINDRIFT_PR_INTENT deadbeefcafe1234' <<<"$if_blocked_section"
   ! grep -qF 'gh pr view --json url' <<<"$if_blocked_section"
 
@@ -512,7 +512,7 @@ setup() {
   export WORK_DIR="$BATS_TEST_TMPDIR/work-if-blocked-outcome-read-write"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  grep -qF 'landing=<pr-url> status=blocked' "$CLAUDE_PROMPT_FILE"
+  grep -qF 'landing=<pr-url> status=blocked' "$DRIVER_PROMPT_FILE"
 }
 
 @test "IF BLOCKED outcome line: read-only reports the branch, never a pr-url placeholder" {
@@ -521,10 +521,10 @@ setup() {
   export WORK_DIR="$BATS_TEST_TMPDIR/work-if-blocked-outcome-read-only"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  grep -qF 'landing=agent/issue-7 status=blocked' "$CLAUDE_PROMPT_FILE"
+  grep -qF 'landing=agent/issue-7 status=blocked' "$DRIVER_PROMPT_FILE"
 
   local if_blocked_section
-  if_blocked_section="$(awk '/^# IF BLOCKED/,0' "$CLAUDE_PROMPT_FILE")"
+  if_blocked_section="$(awk '/^# IF BLOCKED/,0' "$DRIVER_PROMPT_FILE")"
   ! grep -qF 'landing=<pr-url>' <<<"$if_blocked_section"
 }
 
@@ -544,8 +544,8 @@ setup() {
   export WORK_DIR="$BATS_TEST_TMPDIR/work-outcome-landing-read-write"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  grep -qF 'landing=<pr-url> status=ready' "$CLAUDE_PROMPT_FILE"
-  grep -qF 'status=ready note=<short reason> nonce=deadbeefcafe1234' "$CLAUDE_PROMPT_FILE"
+  grep -qF 'landing=<pr-url> status=ready' "$DRIVER_PROMPT_FILE"
+  grep -qF 'status=ready note=<short reason> nonce=deadbeefcafe1234' "$DRIVER_PROMPT_FILE"
 }
 
 @test "OUTCOME landing step: read-only reports the branch, never a pr-url placeholder" {
@@ -554,15 +554,15 @@ setup() {
   export WORK_DIR="$BATS_TEST_TMPDIR/work-outcome-landing-read-only"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  grep -qF 'landing=agent/issue-7 status=ready' "$CLAUDE_PROMPT_FILE"
-  grep -qF 'status=ready note=<short reason> nonce=deadbeefcafe1234' "$CLAUDE_PROMPT_FILE"
+  grep -qF 'landing=agent/issue-7 status=ready' "$DRIVER_PROMPT_FILE"
+  grep -qF 'status=ready note=<short reason> nonce=deadbeefcafe1234' "$DRIVER_PROMPT_FILE"
 
   # Scoped to the OUTCOME section itself -- OPEN A PULL REQUEST's own
   # PR-intent fragment legitimately mentions "the launcher opens the draft
   # PR" prose, so a whole-file grep for the pr-url placeholder could
   # false-positive on unrelated read-only prose elsewhere.
   local outcome_section
-  outcome_section="$(awk '/^# OUTCOME/,/^# IF BLOCKED/' "$CLAUDE_PROMPT_FILE")"
+  outcome_section="$(awk '/^# OUTCOME/,/^# IF BLOCKED/' "$DRIVER_PROMPT_FILE")"
   ! grep -qF 'landing=<pr-url>' <<<"$outcome_section"
 }
 
@@ -580,7 +580,7 @@ setup() {
   export AGENTS_JSON_TEMPLATE='{"reviewer":{"description":"r","model":"opus","prompt":"","tools":["Read"]},"scout":{"description":"s","model":"haiku","prompt":"","tools":["Read"]}}'
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  jq -e 'has("filer") | not' "$CLAUDE_AGENTS_FILE" >/dev/null
+  jq -e 'has("filer") | not' "$DRIVER_AGENTS_FILE" >/dev/null
 }
 
 # issue #452: `nix fmt` can never succeed in-box (uid 1000 has no
@@ -591,15 +591,15 @@ setup() {
   export AUTO_FORMAT=1
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  ! grep -q '`nix fmt` when the target flake defines a formatter' "$CLAUDE_PROMPT_FILE"
+  ! grep -q '`nix fmt` when the target flake defines a formatter' "$DRIVER_PROMPT_FILE"
 }
 
 @test "AUTO-FORMAT step explains why nix fmt is unavailable in-box" {
   export AUTO_FORMAT=1
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  grep -q 'nix fmt' "$CLAUDE_PROMPT_FILE"
-  grep -qi 'permission' "$CLAUDE_PROMPT_FILE"
+  grep -q 'nix fmt' "$DRIVER_PROMPT_FILE"
+  grep -qi 'permission' "$DRIVER_PROMPT_FILE"
 }
 
 # issue #463: the conditional prompt steps above (SKILL_PREAMBLE,
@@ -634,15 +634,15 @@ setup() {
   export AUTO_LINT=1
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  ! grep -q 'run\.# AUTO-LINT' "$CLAUDE_PROMPT_FILE"
-  ! grep -q 'run\.# COMMIT' "$CLAUDE_PROMPT_FILE"
+  ! grep -q 'run\.# AUTO-LINT' "$DRIVER_PROMPT_FILE"
+  ! grep -q 'run\.# COMMIT' "$DRIVER_PROMPT_FILE"
 }
 
 @test "FILE ISSUES step stays separated from LAND THE CHANGE" {
   export AGENTS_JSON_TEMPLATE='{"filer":{"description":"filer","model":"haiku","prompt":"","tools":["Read","Bash","WebFetch"]}}'
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  ! grep -q 'configured\.# LAND THE CHANGE' "$CLAUDE_PROMPT_FILE"
+  ! grep -q 'configured\.# LAND THE CHANGE' "$DRIVER_PROMPT_FILE"
 }
 
 @test "CI FAILURE step stays separated from CONTEXT on a fix pass" {
@@ -650,8 +650,8 @@ setup() {
   export CI_FAILURE_SUMMARY="build failed"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  ! grep -q 'scratch:build failed' "$CLAUDE_PROMPT_FILE"
-  ! grep -q 'failed# CONTEXT' "$CLAUDE_PROMPT_FILE"
+  ! grep -q 'scratch:build failed' "$DRIVER_PROMPT_FILE"
+  ! grep -q 'failed# CONTEXT' "$DRIVER_PROMPT_FILE"
 }
 
 @test "CAVEMAN_STEP stays separated from the COMMS body text" {
@@ -665,7 +665,7 @@ Respond terse like smart caveman.
 SKILL
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  ! grep -q 'verbatim\.Your text output' "$CLAUDE_PROMPT_FILE"
+  ! grep -q 'verbatim\.Your text output' "$DRIVER_PROMPT_FILE"
 }
 
 # issue #689: TDD_BAKED had zero test coverage of its gate mechanism before
@@ -681,7 +681,7 @@ Red, green, refactor.
 SKILL
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  grep -qF 'Use the `/tdd` skill to run the test-first loop below' "$CLAUDE_PROMPT_FILE"
+  grep -qF 'Use the `/tdd` skill to run the test-first loop below' "$DRIVER_PROMPT_FILE"
 }
 
 # issue #689: COMMIT_BAKED had zero test coverage of its gate mechanism
@@ -697,15 +697,15 @@ Hard-wrapped Conventional Commits.
 SKILL
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  grep -qF 'Use the `/commit` skill to write every commit message' "$CLAUDE_PROMPT_FILE"
+  grep -qF 'Use the `/commit` skill to write every commit message' "$DRIVER_PROMPT_FILE"
 }
 
 # issue #788: the reviewer subagent favors the /code-review skill when it is
 # baked at DRIVER_SKILLS_DIR/code-review/SKILL.md, same gated-fragment idiom
 # as CAVEMAN_STEP/TDD_STEP/COMMIT_STEP above. CODE_REVIEW_STEP renders into
 # review-prompt.md, which flows into the reviewer subagent's prompt in the
-# --agents JSON, not $CLAUDE_PROMPT_FILE -- so this reads it from
-# $CLAUDE_AGENTS_FILE's .reviewer.prompt instead.
+# --agents JSON, not $DRIVER_PROMPT_FILE -- so this reads it from
+# $DRIVER_AGENTS_FILE's .reviewer.prompt instead.
 @test "CODE_REVIEW_STEP renders when the code-review skill is baked" {
   mkdir -p "$HOME/.claude/skills/code-review"
   cat >"$HOME/.claude/skills/code-review/SKILL.md" <<'SKILL'
@@ -718,7 +718,7 @@ SKILL
   export AGENTS_JSON_TEMPLATE='{"reviewer":{"description":"reviewer","model":"opus","prompt":"","tools":["Read","Bash","WebFetch","Agent"]}}'
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  jq -e '.reviewer.prompt' "$CLAUDE_AGENTS_FILE" | grep -qF 'Run the `/code-review` skill FIRST'
+  jq -e '.reviewer.prompt' "$DRIVER_AGENTS_FILE" | grep -qF 'Run the `/code-review` skill FIRST'
 }
 
 # issue #788: the fallback -- no code-review skill baked -- must still end in
@@ -729,7 +729,7 @@ SKILL
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   local rendered
-  rendered="$(jq -r '.reviewer.prompt' "$CLAUDE_AGENTS_FILE")"
+  rendered="$(jq -r '.reviewer.prompt' "$DRIVER_AGENTS_FILE")"
   ! grep -qF 'Run the `/code-review` skill FIRST' <<<"$rendered"
   grep -qF 'VERDICT: APPROVE | BLOCK' <<<"$rendered"
 }
@@ -743,7 +743,7 @@ SKILL
   export AGENTS_JSON_TEMPLATE='{"reviewer":{"description":"reviewer","model":"opus","prompt":"","tools":["Read","Bash","WebFetch","Agent"]}}'
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  jq -e '.reviewer.prompt' "$CLAUDE_AGENTS_FILE" | grep -qF 'rather than replacing these dimensions'
+  jq -e '.reviewer.prompt' "$DRIVER_AGENTS_FILE" | grep -qF 'rather than replacing these dimensions'
 }
 
 # issue #626: driver-exec absorbed the direct-path/devShell-wrapper dual
@@ -776,19 +776,19 @@ SKILL
   export AUTO_FORMAT=1
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  grep -q 'CUSTOM-FRAGMENT-MARKER' "$CLAUDE_PROMPT_FILE"
+  grep -q 'CUSTOM-FRAGMENT-MARKER' "$DRIVER_PROMPT_FILE"
 }
 
 @test "entrypoint includes a read-only tools whitelist in agents JSON" {
   export AGENTS_JSON_TEMPLATE='{"reviewer":{"description":"Review the branch diff for spec compliance and coding standards","model":"haiku","prompt":"","tools":["Read","Bash","WebFetch"]},"scout":{"description":"Map relevant files, seams, and tests; return a structured brief","model":"opus","prompt":"","tools":["Read","Bash","WebFetch","WebSearch","Glob","Grep"]}}'
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  jq -e '.scout.tools | length > 0' "$CLAUDE_AGENTS_FILE" >/dev/null
-  jq -e '.reviewer.tools | length > 0' "$CLAUDE_AGENTS_FILE" >/dev/null
-  jq -e '.scout.tools | contains(["Edit"]) | not' "$CLAUDE_AGENTS_FILE" >/dev/null
-  jq -e '.scout.tools | contains(["Write"]) | not' "$CLAUDE_AGENTS_FILE" >/dev/null
-  jq -e '.reviewer.tools | contains(["Edit"]) | not' "$CLAUDE_AGENTS_FILE" >/dev/null
-  jq -e '.reviewer.tools | contains(["Write"]) | not' "$CLAUDE_AGENTS_FILE" >/dev/null
+  jq -e '.scout.tools | length > 0' "$DRIVER_AGENTS_FILE" >/dev/null
+  jq -e '.reviewer.tools | length > 0' "$DRIVER_AGENTS_FILE" >/dev/null
+  jq -e '.scout.tools | contains(["Edit"]) | not' "$DRIVER_AGENTS_FILE" >/dev/null
+  jq -e '.scout.tools | contains(["Write"]) | not' "$DRIVER_AGENTS_FILE" >/dev/null
+  jq -e '.reviewer.tools | contains(["Edit"]) | not' "$DRIVER_AGENTS_FILE" >/dev/null
+  jq -e '.reviewer.tools | contains(["Write"]) | not' "$DRIVER_AGENTS_FILE" >/dev/null
 }
 
 @test "IN_PROGRESS_LABEL and COMPLETE_LABEL are substituted in the prompt" {
@@ -804,8 +804,8 @@ EOF
   export COMPLETE_LABEL="done"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  grep -q 'label: wip' "$CLAUDE_PROMPT_FILE"
-  grep -q 'complete: done' "$CLAUDE_PROMPT_FILE"
+  grep -q 'label: wip' "$DRIVER_PROMPT_FILE"
+  grep -q 'complete: done' "$DRIVER_PROMPT_FILE"
 }
 
 @test "envsubst substitutes placeholders in scout and review prompt files" {
@@ -818,45 +818,45 @@ EOF
   export AGENTS_JSON_TEMPLATE='{"reviewer":{"description":"r","model":"opus","prompt":"","tools":["Read"]},"scout":{"description":"s","model":"haiku","prompt":"","tools":["Read"]}}'
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  jq -e '.scout.prompt | contains("scout for issue 7")' "$CLAUDE_AGENTS_FILE" >/dev/null
-  jq -e '.reviewer.prompt | contains("review base main")' "$CLAUDE_AGENTS_FILE" >/dev/null
+  jq -e '.scout.prompt | contains("scout for issue 7")' "$DRIVER_AGENTS_FILE" >/dev/null
+  jq -e '.reviewer.prompt | contains("review base main")' "$DRIVER_AGENTS_FILE" >/dev/null
 }
 
 @test "default prompt delegates exploration to the scout subagent" {
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  grep -qi 'scout' "$CLAUDE_PROMPT_FILE"
+  grep -qi 'scout' "$DRIVER_PROMPT_FILE"
 }
 
 @test "default prompt spawns a reviewer subagent" {
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  grep -qi 'reviewer' "$CLAUDE_PROMPT_FILE"
+  grep -qi 'reviewer' "$DRIVER_PROMPT_FILE"
 }
 
 @test "default prompt specifies a review loop keyed on VERDICT: BLOCK" {
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  grep -q 'VERDICT.*BLOCK\|BLOCK.*VERDICT' "$CLAUDE_PROMPT_FILE"
+  grep -q 'VERDICT.*BLOCK\|BLOCK.*VERDICT' "$DRIVER_PROMPT_FILE"
 }
 
 @test "default prompt emits exactly one SPINDRIFT_OUTCOME line" {
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  grep -c 'SPINDRIFT_OUTCOME' "$CLAUDE_PROMPT_FILE" | grep -q '^[1-9]'
+  grep -c 'SPINDRIFT_OUTCOME' "$DRIVER_PROMPT_FILE" | grep -q '^[1-9]'
 }
 
 @test "default prompt emits SPINDRIFT_OUTCOME with status=blocked in the blocked path" {
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  grep -q 'status=blocked' "$CLAUDE_PROMPT_FILE"
+  grep -q 'status=blocked' "$DRIVER_PROMPT_FILE"
 }
 
 @test "default prompt emits status=ready as the success outcome" {
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  grep -q 'status=ready' "$CLAUDE_PROMPT_FILE"
-  ! grep -q 'status=merged' "$CLAUDE_PROMPT_FILE"
+  grep -q 'status=ready' "$DRIVER_PROMPT_FILE"
+  ! grep -q 'status=merged' "$DRIVER_PROMPT_FILE"
 }
 
 # issue #622: the fragment loop and its substitution allowlist are rendered
@@ -884,7 +884,7 @@ EOF
   export FIXTURE_ROW_ON=1
   run bash "$wrapped"
   [ "$status" -eq 0 ]
-  grep -q 'FIXTURE-ROW-MARKER' "$CLAUDE_PROMPT_FILE"
+  grep -q 'FIXTURE-ROW-MARKER' "$DRIVER_PROMPT_FILE"
 }
 
 # issue #2019: the filer's write-mechanism gates (FILER_FILE_DIRECT/
@@ -894,9 +894,9 @@ EOF
 # combination keeps today's direct `gh issue create`/`gh label create` path,
 # byte-for-byte unchanged. helper.bash's setup_entrypoint_env already
 # exports BOX_WRITE_ENABLED=1 (read-write); tests below unset it for the
-# read-only cases. CLAUDE_AGENTS_FILE (the fake claude driver's own copy of
+# read-only cases. DRIVER_AGENTS_FILE (the fake claude driver's own copy of
 # the rendered --agents JSON) is where the filer's own prompt text lands,
-# not CLAUDE_PROMPT_FILE (the top-level agent's prompt).
+# not DRIVER_PROMPT_FILE (the top-level agent's prompt).
 FILER_AGENTS_JSON_TEMPLATE='{"filer":{"description":"filer","model":"haiku","prompt":"","tools":["Read","Bash","WebFetch"]}}'
 
 @test "filer write step: read-write keeps gh issue create unchanged regardless of ORCHESTRATOR_ENABLED" {
@@ -905,10 +905,10 @@ FILER_AGENTS_JSON_TEMPLATE='{"filer":{"description":"filer","model":"haiku","pro
   export WORK_DIR="$BATS_TEST_TMPDIR/work-filer-readwrite-orch-on"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  grep -qF 'gh issue create' "$CLAUDE_AGENTS_FILE"
-  grep -qF 'gh label create' "$CLAUDE_AGENTS_FILE"
-  ! grep -qF 'SPINDRIFT_ISSUE_INTENT' "$CLAUDE_AGENTS_FILE"
-  grep -qF "the filer's returned issue URLs" "$CLAUDE_PROMPT_FILE"
+  grep -qF 'gh issue create' "$DRIVER_AGENTS_FILE"
+  grep -qF 'gh label create' "$DRIVER_AGENTS_FILE"
+  ! grep -qF 'SPINDRIFT_ISSUE_INTENT' "$DRIVER_AGENTS_FILE"
+  grep -qF "the filer's returned issue URLs" "$DRIVER_PROMPT_FILE"
 }
 
 # AC2's own wording (issue #2019): read-write with the orchestrator OFF (no
@@ -921,9 +921,9 @@ FILER_AGENTS_JSON_TEMPLATE='{"filer":{"description":"filer","model":"haiku","pro
   export WORK_DIR="$BATS_TEST_TMPDIR/work-filer-readwrite-orch-off"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  grep -qF 'gh issue create' "$CLAUDE_AGENTS_FILE"
-  ! grep -qF 'SPINDRIFT_ISSUE_INTENT' "$CLAUDE_AGENTS_FILE"
-  grep -qF "the filer's returned issue URLs" "$CLAUDE_PROMPT_FILE"
+  grep -qF 'gh issue create' "$DRIVER_AGENTS_FILE"
+  ! grep -qF 'SPINDRIFT_ISSUE_INTENT' "$DRIVER_AGENTS_FILE"
+  grep -qF "the filer's returned issue URLs" "$DRIVER_PROMPT_FILE"
 }
 
 @test "filer write step: read-only with orchestrator off keeps today's degraded direct-file path unchanged" {
@@ -932,9 +932,9 @@ FILER_AGENTS_JSON_TEMPLATE='{"filer":{"description":"filer","model":"haiku","pro
   export WORK_DIR="$BATS_TEST_TMPDIR/work-filer-readonly-orch-off"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  grep -qF 'gh issue create' "$CLAUDE_AGENTS_FILE"
-  ! grep -qF 'SPINDRIFT_ISSUE_INTENT' "$CLAUDE_AGENTS_FILE"
-  grep -qF "the filer's returned issue URLs" "$CLAUDE_PROMPT_FILE"
+  grep -qF 'gh issue create' "$DRIVER_AGENTS_FILE"
+  ! grep -qF 'SPINDRIFT_ISSUE_INTENT' "$DRIVER_AGENTS_FILE"
+  grep -qF "the filer's returned issue URLs" "$DRIVER_PROMPT_FILE"
 }
 
 @test "filer write step: read-only with orchestrator on emits SPINDRIFT_ISSUE_INTENT, never gh issue create" {
@@ -945,11 +945,11 @@ FILER_AGENTS_JSON_TEMPLATE='{"filer":{"description":"filer","model":"haiku","pro
   export WORK_DIR="$BATS_TEST_TMPDIR/work-filer-readonly-orch-on"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  grep -qF 'SPINDRIFT_ISSUE_INTENT deadbeefcafe1234' "$CLAUDE_AGENTS_FILE"
-  ! grep -qF 'gh issue create' "$CLAUDE_AGENTS_FILE"
-  ! grep -qF 'gh label create' "$CLAUDE_AGENTS_FILE"
-  grep -qF 'queued for filing' "$CLAUDE_PROMPT_FILE"
-  ! grep -qF "the filer's returned issue URLs" "$CLAUDE_PROMPT_FILE"
+  grep -qF 'SPINDRIFT_ISSUE_INTENT deadbeefcafe1234' "$DRIVER_AGENTS_FILE"
+  ! grep -qF 'gh issue create' "$DRIVER_AGENTS_FILE"
+  ! grep -qF 'gh label create' "$DRIVER_AGENTS_FILE"
+  grep -qF 'queued for filing' "$DRIVER_PROMPT_FILE"
+  ! grep -qF "the filer's returned issue URLs" "$DRIVER_PROMPT_FILE"
 }
 
 # The direct case forks further on ISSUE_TRACKER (issue #1963): fj has no
@@ -963,9 +963,9 @@ FILER_AGENTS_JSON_TEMPLATE='{"filer":{"description":"filer","model":"haiku","pro
   export WORK_DIR="$BATS_TEST_TMPDIR/work-filer-forgejo-direct"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  grep -qF 'fj issue create' "$CLAUDE_AGENTS_FILE"
-  ! grep -qF 'gh issue create' "$CLAUDE_AGENTS_FILE"
-  ! grep -qF 'gh label create' "$CLAUDE_AGENTS_FILE"
+  grep -qF 'fj issue create' "$DRIVER_AGENTS_FILE"
+  ! grep -qF 'gh issue create' "$DRIVER_AGENTS_FILE"
+  ! grep -qF 'gh label create' "$DRIVER_AGENTS_FILE"
 }
 
 @test "filer write step: github direct filer still speaks gh issue create, never fj issue create" {
@@ -973,8 +973,8 @@ FILER_AGENTS_JSON_TEMPLATE='{"filer":{"description":"filer","model":"haiku","pro
   export WORK_DIR="$BATS_TEST_TMPDIR/work-filer-github-direct"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  grep -qF 'gh issue create' "$CLAUDE_AGENTS_FILE"
-  ! grep -qF 'fj issue create' "$CLAUDE_AGENTS_FILE"
+  grep -qF 'gh issue create' "$DRIVER_AGENTS_FILE"
+  ! grep -qF 'fj issue create' "$DRIVER_AGENTS_FILE"
 }
 
 # The REVIEW section fork (issue #2037, ADR 0035): orchestrator off keeps the
@@ -996,17 +996,17 @@ WORKER_AGENTS_JSON_TEMPLATE='{"worker":{"description":"Implement a scoped slice 
   export WORK_DIR="$BATS_TEST_TMPDIR/work-coordinator-on"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  grep -qF 'coordinator' "$CLAUDE_PROMPT_FILE"
-  grep -qF 'delegate each slice' "$CLAUDE_PROMPT_FILE"
+  grep -qF 'coordinator' "$DRIVER_PROMPT_FILE"
+  grep -qF 'delegate each slice' "$DRIVER_PROMPT_FILE"
 }
 
 @test "IMPLEMENT section: no worker leaves the single-implementor prompt unchanged" {
   export WORK_DIR="$BATS_TEST_TMPDIR/work-coordinator-off"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  ! grep -qF 'delegate each slice' "$CLAUDE_PROMPT_FILE"
+  ! grep -qF 'delegate each slice' "$DRIVER_PROMPT_FILE"
   # The single-implementor test-first rule still leads the section verbatim.
-  grep -qF 'Work test-first, one slice at a time. Hard rule:' "$CLAUDE_PROMPT_FILE"
+  grep -qF 'Work test-first, one slice at a time. Hard rule:' "$DRIVER_PROMPT_FILE"
 }
 
 @test "coordinator step stays separated from the test-first rule below it" {
@@ -1014,10 +1014,10 @@ WORKER_AGENTS_JSON_TEMPLATE='{"worker":{"description":"Implement a scoped slice 
   export WORK_DIR="$BATS_TEST_TMPDIR/work-coordinator-sep"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  ! grep -q 'commits\.Work test-first' "$CLAUDE_PROMPT_FILE"
+  ! grep -q 'commits\.Work test-first' "$DRIVER_PROMPT_FILE"
   # The coordinator step still renders ahead of the retained Hard rule prose.
-  coord_line=$(grep -nF 'coordinator' "$CLAUDE_PROMPT_FILE" | head -1 | cut -d: -f1)
-  rule_line=$(grep -nF 'Work test-first, one slice' "$CLAUDE_PROMPT_FILE" | head -1 | cut -d: -f1)
+  coord_line=$(grep -nF 'coordinator' "$DRIVER_PROMPT_FILE" | head -1 | cut -d: -f1)
+  rule_line=$(grep -nF 'Work test-first, one slice' "$DRIVER_PROMPT_FILE" | head -1 | cut -d: -f1)
   [ "$coord_line" -lt "$rule_line" ]
 }
 
@@ -1025,8 +1025,8 @@ WORKER_AGENTS_JSON_TEMPLATE='{"worker":{"description":"Implement a scoped slice 
   export WORK_DIR="$BATS_TEST_TMPDIR/work-review-loop-off"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  grep -qF 'spawn a fresh `reviewer` subagent' "$CLAUDE_PROMPT_FILE"
-  ! grep -qF 'Review is handled by the orchestrator as a separate' "$CLAUDE_PROMPT_FILE"
+  grep -qF 'spawn a fresh `reviewer` subagent' "$DRIVER_PROMPT_FILE"
+  ! grep -qF 'Review is handled by the orchestrator as a separate' "$DRIVER_PROMPT_FILE"
 }
 
 @test "REVIEW section: orchestrator on defers to the code-owned review pass" {
@@ -1034,6 +1034,6 @@ WORKER_AGENTS_JSON_TEMPLATE='{"worker":{"description":"Implement a scoped slice 
   export WORK_DIR="$BATS_TEST_TMPDIR/work-review-loop-on"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  grep -qF 'Review is handled by the orchestrator as a separate' "$CLAUDE_PROMPT_FILE"
-  ! grep -qF 'spawn a fresh `reviewer` subagent' "$CLAUDE_PROMPT_FILE"
+  grep -qF 'Review is handled by the orchestrator as a separate' "$DRIVER_PROMPT_FILE"
+  ! grep -qF 'spawn a fresh `reviewer` subagent' "$DRIVER_PROMPT_FILE"
 }

@@ -70,7 +70,8 @@ setup_fakes() {
   cp "$FAKES_DIR/runtime" "$FAKE_BIN/podman"
   cp "$FAKES_DIR/runtime" "$FAKE_BIN/docker"
   cp "$FAKES_DIR/runtime" "$FAKE_BIN/bwrap"
-  cp "$FAKES_DIR/gh" "$FAKES_DIR/claude" "$FAKES_DIR/nix" \
+  : "${DRIVER:=claude}"
+  cp "$FAKES_DIR/gh" "$FAKES_DIR/$DRIVER" "$FAKES_DIR/nix" \
      "$FAKES_DIR/driver-exec" "$FAKES_DIR/orchestrator" "$FAKE_BIN/"
   chmod +x "$FAKE_BIN"/*
   export PATH="$FAKE_BIN:$PATH"
@@ -80,16 +81,16 @@ setup_fakes() {
   export BWRAP_LOG="$BATS_TEST_TMPDIR/bwrap.log"
   export GH_LOG="$BATS_TEST_TMPDIR/gh.log"
   export GIT_LOG="$BATS_TEST_TMPDIR/git.log"
-  export CLAUDE_LOG="$BATS_TEST_TMPDIR/claude.log"
+  export DRIVER_LOG="$BATS_TEST_TMPDIR/claude.log"
   export NIX_LOG="$BATS_TEST_TMPDIR/nix.log"
   export ORCHESTRATOR_LOG="$BATS_TEST_TMPDIR/orchestrator.log"
-  export CLAUDE_PROMPT_FILE="$BATS_TEST_TMPDIR/claude-prompt.txt"
-  export CLAUDE_AGENTS_FILE="$BATS_TEST_TMPDIR/claude-agents.json"
+  export DRIVER_PROMPT_FILE="$BATS_TEST_TMPDIR/claude-prompt.txt"
+  export DRIVER_AGENTS_FILE="$BATS_TEST_TMPDIR/claude-agents.json"
   : >"$PODMAN_LOG"
   : >"$DOCKER_LOG"
   : >"$BWRAP_LOG"
   : >"$GH_LOG"
-  : >"$CLAUDE_LOG"
+  : >"$DRIVER_LOG"
   : >"$NIX_LOG"
   : >"$ORCHESTRATOR_LOG"
 
@@ -98,6 +99,9 @@ setup_fakes() {
   # such file, so fall back to a minimal fixture -- entrypoint.sh reads this
   # whenever a rendered issue prompt lacks the contract (issue #420). A test
   # exercising the injection itself overrides this with its own fixture.
+  # Coordination: spec #2244's registry slice also touches this
+  # OUTCOME_CONTRACT_FILE fallback seam. Check for conflicts with that work
+  # before changing this block further.
   : "${OUTCOME_CONTRACT_FILE:=$BATS_TEST_TMPDIR/outcome-contract.md}"
   export OUTCOME_CONTRACT_FILE
   if [ ! -s "$OUTCOME_CONTRACT_FILE" ]; then

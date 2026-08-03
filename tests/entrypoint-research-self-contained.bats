@@ -13,10 +13,10 @@ setup() {
   export SELF_CONTAINED="1"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  grep -qi "self-contained" "$CLAUDE_PROMPT_FILE"
-  ! grep -q "Fresh clone" "$CLAUDE_PROMPT_FILE"
-  ! grep -qi "explore the actual repo" "$CLAUDE_PROMPT_FILE"
-  ! grep -q "^# EXPLORE$" "$CLAUDE_PROMPT_FILE"
+  grep -qi "self-contained" "$DRIVER_PROMPT_FILE"
+  ! grep -q "Fresh clone" "$DRIVER_PROMPT_FILE"
+  ! grep -qi "explore the actual repo" "$DRIVER_PROMPT_FILE"
+  ! grep -q "^# EXPLORE$" "$DRIVER_PROMPT_FILE"
 }
 
 @test "SELF_CONTAINED=1 clones no repo" {
@@ -34,7 +34,7 @@ setup() {
   export SELF_CONTAINED="1"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  [ "$(grep -c '# POST THE VERDICT' "$CLAUDE_PROMPT_FILE")" -eq 1 ]
+  [ "$(grep -c '# POST THE VERDICT' "$DRIVER_PROMPT_FILE")" -eq 1 ]
 }
 
 @test "SELF_CONTAINED=1 with a local issue tracker starts with no REPO_SLUG/GH_TOKEN" {
@@ -46,7 +46,7 @@ setup() {
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   [ ! -d "$WORK_DIR/.git" ]
-  grep -qi "self-contained" "$CLAUDE_PROMPT_FILE"
+  grep -qi "self-contained" "$DRIVER_PROMPT_FILE"
 }
 
 @test "SELF_CONTAINED=1 with a github tracker but no REPO_SLUG still fails loudly at startup" {
@@ -64,7 +64,7 @@ setup() {
   export DISPATCH_KIND="research"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  grep -q "Research GitHub issue #7" "$CLAUDE_PROMPT_FILE"
-  ! grep -qi "self-contained" "$CLAUDE_PROMPT_FILE"
+  grep -q "Research GitHub issue #7" "$DRIVER_PROMPT_FILE"
+  ! grep -qi "self-contained" "$DRIVER_PROMPT_FILE"
   [ -d "$WORK_DIR/.git" ]
 }

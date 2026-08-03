@@ -25,26 +25,26 @@ pinned_session_id() {
 # real one on the resumed call -- the run must settle on that outcome, with
 # no synthetic backstop line appended.
 @test "driver exits with no outcome -> resume pass emits an outcome, no synthetic backstop" {
-  export FAKE_CLAUDE_NO_OUTCOME_FIRST_CALL_ONLY=1
+  export FAKE_DRIVER_NO_OUTCOME_FIRST_CALL_ONLY=1
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   [ "$(grep -c '^SPINDRIFT_OUTCOME ' <<<"$output")" -eq 1 ]
   grep -q '^SPINDRIFT_OUTCOME issue=7 landing=https://github.com/owner/repo/pull/1 status=ready note=fake$' <<<"$output"
   # Exactly two Driver invocations: the initial pass and the one resume pass.
-  [ "$(grep -c '^claude invoked for issue' "$CLAUDE_LOG")" -eq 2 ]
+  [ "$(grep -c '^driver invoked for issue' "$DRIVER_LOG")" -eq 2 ]
 }
 
 # The fake claude forgets its outcome on every call -- the resume pass also
 # produces nothing, so the synthetic backstop fires as it did before this
 # issue, but the note now says so a recovery pass was attempted.
 @test "driver exits with no outcome, resume also emits none -> synthetic backstop notes the recovery attempt" {
-  export FAKE_CLAUDE_NO_OUTCOME=1
+  export FAKE_DRIVER_NO_OUTCOME=1
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   [ "$(grep -c '^SPINDRIFT_OUTCOME ' <<<"$output")" -eq 1 ]
   grep -q '^SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=blocked note=.*driver exited without emitting an outcome.*resume attempt also produced no outcome' <<<"$output"
   # Exactly two Driver invocations: the initial pass and the one resume pass.
-  [ "$(grep -c '^claude invoked for issue' "$CLAUDE_LOG")" -eq 2 ]
+  [ "$(grep -c '^driver invoked for issue' "$DRIVER_LOG")" -eq 2 ]
 }
 
 # The fake commits identical fixture content on every call (issue #1607's
@@ -53,13 +53,13 @@ pinned_session_id() {
 # commit` erroring on an empty index, and the single commit from the first
 # call still reaches the remote branch.
 @test "driver commits then forgets its outcome twice -> commit survives both calls, backstop fires once" {
-  export FAKE_CLAUDE_COMMIT=1
-  export FAKE_CLAUDE_NO_OUTCOME=1
+  export FAKE_DRIVER_COMMIT=1
+  export FAKE_DRIVER_NO_OUTCOME=1
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   [ "$(grep -c '^SPINDRIFT_OUTCOME ' <<<"$output")" -eq 1 ]
   grep -q '^SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=blocked' <<<"$output"
-  [ "$(grep -c '^claude invoked for issue' "$CLAUDE_LOG")" -eq 2 ]
+  [ "$(grep -c '^driver invoked for issue' "$DRIVER_LOG")" -eq 2 ]
   git -C "$BATS_TEST_TMPDIR" ls-remote "https://github.com/owner/repo.git" "agent/issue-7" | grep -q .
 }
 
@@ -68,28 +68,32 @@ pinned_session_id() {
 # present, the resumed call's argv carries --resume <id>, never a second
 # --session-id.
 @test "the resume pass targets the pinned session via --resume" {
+  if [ -z "${DRIVER_SESSION_RESUMABLE:-}" ]; then
+    skip "driver has no resumable session state"
+  fi
+
   local id
   id="$(pinned_session_id)"
   mkdir -p "$HOME/.claude/projects/fake-project"
   touch "$HOME/.claude/projects/fake-project/${id}.jsonl"
 
-  export FAKE_CLAUDE_NO_OUTCOME_FIRST_CALL_ONLY=1
+  export FAKE_DRIVER_NO_OUTCOME_FIRST_CALL_ONLY=1
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  [ "$(grep -c -- "--session-id ${id}" "$CLAUDE_LOG")" -eq 1 ]
-  [ "$(grep -c -- "--resume ${id}" "$CLAUDE_LOG")" -eq 1 ]
+  [ "$(grep -c -- "--session-id ${id}" "$DRIVER_LOG")" -eq 1 ]
+  [ "$(grep -c -- "--resume ${id}" "$DRIVER_LOG")" -eq 1 ]
 }
 
 # A driver killed by a transient infrastructure failure exits non-zero with
 # no outcome line -- that's the launcher's ClassifyTransient/retry path to
 # handle (issue #593), not this recovery. No resume pass should run.
 @test "driver crashes non-zero with no outcome -> no resume attempted" {
-  export FAKE_CLAUDE_NO_OUTCOME=1
-  export FAKE_CLAUDE_CRASH_EXIT=17
+  export FAKE_DRIVER_NO_OUTCOME=1
+  export FAKE_DRIVER_CRASH_EXIT=17
   run bash "$ENTRYPOINT"
   [ "$status" -eq 17 ]
   [ "$(grep -c '^SPINDRIFT_OUTCOME ' <<<"$output")" -eq 0 ]
-  [ "$(grep -c '^claude invoked for issue' "$CLAUDE_LOG")" -eq 1 ]
+  [ "$(grep -c '^driver invoked for issue' "$DRIVER_LOG")" -eq 1 ]
 }
 
 # A near-miss outcome (the SPINDRIFT_OUTCOME token present but the line
@@ -98,17 +102,17 @@ pinned_session_id() {
 # grammar/allowed status values (issue #1900), rather than the generic nudge.
 # The resumed call then emits a real outcome, so the run settles on it.
 @test "near-miss outcome -> resume prompt quotes the offending line and restates the grammar" {
-  export FAKE_CLAUDE_NEAR_MISS_FIRST_CALL_ONLY=1
+  export FAKE_DRIVER_NEAR_MISS_FIRST_CALL_ONLY=1
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   [ "$(grep -c '^SPINDRIFT_OUTCOME ' <<<"$output")" -eq 1 ]
   grep -q '^SPINDRIFT_OUTCOME issue=7 landing=https://github.com/owner/repo/pull/1 status=ready note=fake$' <<<"$output"
   # Exactly two Driver invocations: the initial near-miss pass and one resume.
-  [ "$(grep -c '^claude invoked for issue' "$CLAUDE_LOG")" -eq 2 ]
+  [ "$(grep -c '^driver invoked for issue' "$DRIVER_LOG")" -eq 2 ]
   # The resume pass's rendered prompt (the last one written) quotes the
   # offending near-miss text verbatim and restates the grammar + status values.
-  grep -q 'SPINDRIFT_OUTCOME: SUCCESS' "$CLAUDE_PROMPT_FILE"
-  grep -q 'valid status values are ready and blocked' "$CLAUDE_PROMPT_FILE"
+  grep -q 'SPINDRIFT_OUTCOME: SUCCESS' "$DRIVER_PROMPT_FILE"
+  grep -q 'valid status values are ready and blocked' "$DRIVER_PROMPT_FILE"
 }
 
 # A near-miss on every call: the single corrective resume still fires exactly
@@ -117,13 +121,13 @@ pinned_session_id() {
 # backstop unchanged -- proving the near-miss path loops no more than the bare
 # absence path does (issue #1900).
 @test "near-miss outcome on every call -> resumes once then falls through to the backstop" {
-  export FAKE_CLAUDE_NEAR_MISS=1
+  export FAKE_DRIVER_NEAR_MISS=1
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   [ "$(grep -c '^SPINDRIFT_OUTCOME ' <<<"$output")" -eq 1 ]
   grep -q '^SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=blocked' <<<"$output"
   # Exactly two Driver invocations: the initial pass and the one resume pass.
-  [ "$(grep -c '^claude invoked for issue' "$CLAUDE_LOG")" -eq 2 ]
+  [ "$(grep -c '^driver invoked for issue' "$DRIVER_LOG")" -eq 2 ]
   # The one resume it did fire quoted the offending near-miss text.
-  grep -q 'SPINDRIFT_OUTCOME: SUCCESS' "$CLAUDE_PROMPT_FILE"
+  grep -q 'SPINDRIFT_OUTCOME: SUCCESS' "$DRIVER_PROMPT_FILE"
 }

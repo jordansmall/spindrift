@@ -181,7 +181,7 @@ EOF
 # derive scout's prompt from the identical _subst "$PROMPTS_DIR/scout-prompt.md"
 # call (entrypoint.sh's --agents JSON injection loop and its
 # DRIVER_AGENT_FILES_DIR-gated file-rewrite twin, agent/entrypoint.sh:784+),
-# so claude's $CLAUDE_AGENTS_FILE .scout.prompt and opencode's rewritten
+# so claude's $DRIVER_AGENTS_FILE .scout.prompt and opencode's rewritten
 # scout.md body must match byte-for-byte, modulo the single trailing newline
 # the file body carries (printf '%s\n%s\n' ...) that the JSON string strips
 # (command substitution trims trailing newlines).
@@ -189,9 +189,9 @@ EOF
   export AGENTS_JSON_TEMPLATE='{"scout":{"description":"Map relevant files, seams, and tests; return a structured brief","model":"opus","prompt":"","tools":["Read","Bash","WebFetch","WebSearch","Glob","Grep"]}}'
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  [ -s "$CLAUDE_AGENTS_FILE" ]
+  [ -s "$DRIVER_AGENTS_FILE" ]
   local claude_prompt
-  claude_prompt="$(jq -r '.scout.prompt' "$CLAUDE_AGENTS_FILE")"
+  claude_prompt="$(jq -r '.scout.prompt' "$DRIVER_AGENTS_FILE")"
   [ -n "$claude_prompt" ]
 
   # Fresh state for the opencode-side run: no --agents JSON flag (opencode

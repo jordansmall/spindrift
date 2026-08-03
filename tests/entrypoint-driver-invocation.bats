@@ -10,22 +10,22 @@ setup() {
 @test "entrypoint invokes claude headlessly with skip-permissions" {
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  grep -q "claude invoked for issue #7" "$CLAUDE_LOG"
-  grep -q -- "--dangerously-skip-permissions" "$CLAUDE_LOG"
+  grep -q "driver invoked for issue #7" "$DRIVER_LOG"
+  grep -q -- "--dangerously-skip-permissions" "$DRIVER_LOG"
 }
 
 @test "entrypoint passes MODEL env var to claude" {
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  grep -q -- "--model claude-test-model" "$CLAUDE_LOG"
+  grep -q -- "--model claude-test-model" "$DRIVER_LOG"
 }
 
 @test "MODEL env overrides the baked default model at runtime" {
   export MODEL="claude-sonnet-4-6"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  grep -q -- "--model claude-sonnet-4-6" "$CLAUDE_LOG"
-  ! grep -q -- "--model claude-test-model" "$CLAUDE_LOG"
+  grep -q -- "--model claude-sonnet-4-6" "$DRIVER_LOG"
+  ! grep -q -- "--model claude-test-model" "$DRIVER_LOG"
 }
 
 # Observability (#113): text --print emits nothing until the end, so the box
@@ -34,8 +34,8 @@ setup() {
 @test "entrypoint runs claude in stream-json mode so activity streams live" {
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  grep -q -- "--output-format stream-json" "$CLAUDE_LOG"
-  grep -q -- "--verbose" "$CLAUDE_LOG"
+  grep -q -- "--output-format stream-json" "$DRIVER_LOG"
+  grep -q -- "--verbose" "$DRIVER_LOG"
 }
 
 # Issue #1609: the claude Driver's flagsCommon strips the harness's
@@ -45,13 +45,13 @@ setup() {
 @test "entrypoint invokes claude with --disallowedTools blocking loop/background affordances" {
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  grep -q -- "--disallowedTools" "$CLAUDE_LOG"
-  grep -q -- "ScheduleWakeup" "$CLAUDE_LOG"
-  grep -q -- "CronCreate" "$CLAUDE_LOG"
-  grep -q -- "CronDelete" "$CLAUDE_LOG"
-  grep -q -- "CronList" "$CLAUDE_LOG"
-  grep -q -- "RemoteTrigger" "$CLAUDE_LOG"
-  grep -q -- "Monitor" "$CLAUDE_LOG"
+  grep -q -- "--disallowedTools" "$DRIVER_LOG"
+  grep -q -- "ScheduleWakeup" "$DRIVER_LOG"
+  grep -q -- "CronCreate" "$DRIVER_LOG"
+  grep -q -- "CronDelete" "$DRIVER_LOG"
+  grep -q -- "CronList" "$DRIVER_LOG"
+  grep -q -- "RemoteTrigger" "$DRIVER_LOG"
+  grep -q -- "Monitor" "$DRIVER_LOG"
 }
 
 # In-box heartbeat view (#183, absorbed into driver-exec by #626): the
@@ -102,7 +102,7 @@ setup() {
 # real outcome and the entrypoint's own backstop fired a synthetic
 # status=blocked over a PR that was actually green.
 @test "entrypoint strips a backtick-wrapped SPINDRIFT_OUTCOME line" {
-  export FAKE_CLAUDE_WRAP_OUTCOME=backticks
+  export FAKE_DRIVER_WRAP_OUTCOME=backticks
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   [ "$(printf '%s\n' "$output" | grep -c '^SPINDRIFT_OUTCOME ')" -eq 1 ]
@@ -110,7 +110,7 @@ setup() {
 }
 
 @test "entrypoint strips a bold-marker-wrapped SPINDRIFT_OUTCOME line" {
-  export FAKE_CLAUDE_WRAP_OUTCOME=bold
+  export FAKE_DRIVER_WRAP_OUTCOME=bold
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   [ "$(printf '%s\n' "$output" | grep -c '^SPINDRIFT_OUTCOME ')" -eq 1 ]
@@ -118,7 +118,7 @@ setup() {
 }
 
 @test "entrypoint strips a whitespace-padded SPINDRIFT_OUTCOME line" {
-  export FAKE_CLAUDE_WRAP_OUTCOME=whitespace
+  export FAKE_DRIVER_WRAP_OUTCOME=whitespace
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   [ "$(printf '%s\n' "$output" | grep -c '^SPINDRIFT_OUTCOME ')" -eq 1 ]
@@ -126,7 +126,7 @@ setup() {
 }
 
 @test "entrypoint keeps the last outcome line across multiple result events" {
-  export FAKE_CLAUDE_MULTI_RESULT=1
+  export FAKE_DRIVER_MULTI_RESULT=1
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   # Two result events each carry an outcome line, but only the last is

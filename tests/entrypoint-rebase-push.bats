@@ -15,28 +15,28 @@ setup() {
 @test "prompt instructs agent to rebase onto base before pushing" {
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  grep -q 'git rebase' "$CLAUDE_PROMPT_FILE"
-  grep -q 'git fetch' "$CLAUDE_PROMPT_FILE"
+  grep -q 'git rebase' "$DRIVER_PROMPT_FILE"
+  grep -q 'git fetch' "$DRIVER_PROMPT_FILE"
 }
 
 @test "prompt instructs agent to retry push exactly once on rejection" {
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  grep -q 'rejected' "$CLAUDE_PROMPT_FILE"
-  grep -q 'retry' "$CLAUDE_PROMPT_FILE"
+  grep -q 'rejected' "$DRIVER_PROMPT_FILE"
+  grep -q 'retry' "$DRIVER_PROMPT_FILE"
 }
 
 @test "prompt instructs agent to emit status=blocked on persistent push failure" {
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  grep -q 'status=blocked' "$CLAUDE_PROMPT_FILE"
-  grep -q 'gh issue comment' "$CLAUDE_PROMPT_FILE"
+  grep -q 'status=blocked' "$DRIVER_PROMPT_FILE"
+  grep -q 'gh issue comment' "$DRIVER_PROMPT_FILE"
 }
 
 @test "prompt treats genuine .github/workflows/ change as a hard stop" {
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  grep -q '\.github/workflows' "$CLAUDE_PROMPT_FILE"
-  grep -q 'workflow' "$CLAUDE_PROMPT_FILE"
+  grep -q '\.github/workflows' "$DRIVER_PROMPT_FILE"
+  grep -q 'workflow' "$DRIVER_PROMPT_FILE"
 }
 
