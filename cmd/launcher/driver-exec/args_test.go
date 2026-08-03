@@ -247,6 +247,43 @@ func TestBuildDriverArgsOpencodeEffortOmittedWhenEmpty(t *testing.T) {
 	}
 }
 
+// TestBuildDriverArgsClaudeEffortWithSessionAndFlags verifies the claude
+// shape's full relative ordering from the buildDriverArgs doc comment when
+// session, driverFlags, and effort are all set together: session-file
+// content word-split first, then driverFlags word-split, then --effort
+// <value> last.
+func TestBuildDriverArgsClaudeEffortWithSessionAndFlags(t *testing.T) {
+	dir := t.TempDir()
+	promptFile := filepath.Join(dir, "prompt.txt")
+	if err := os.WriteFile(promptFile, []byte("do it"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	sessionFile := filepath.Join(dir, "session.txt")
+	if err := os.WriteFile(sessionFile, []byte("--session-id abc-123"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	in := driverInput{
+		promptFile:  promptFile,
+		model:       "claude-opus-4-8",
+		sessionFile: sessionFile,
+		driverFlags: "--verbose --dangerously-skip-permissions",
+		effort:      "high",
+	}
+	got, err := buildDriverArgs(in)
+	if err != nil {
+		t.Fatalf("buildDriverArgs: %v", err)
+	}
+	want := []string{
+		"-p", "do it", "--model", "claude-opus-4-8",
+		"--session-id", "abc-123",
+		"--verbose", "--dangerously-skip-permissions",
+		"--effort", "high",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("buildDriverArgs = %q, want %q", got, want)
+	}
+}
+
 // TestBuildDriverArgsSessionAndFlagsAreWordSplit verifies the session file's
 // content is word-split into separate argv elements (matching the shell's
 // prior `read -ra` behaviour) and driverFlags (a space-separated common-flags
