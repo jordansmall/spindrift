@@ -2,9 +2,12 @@ package forgejo_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"regexp"
+	"slices"
+	"strconv"
 	"sync"
 	"testing"
 
@@ -14,6 +17,7 @@ import (
 )
 
 var hostMediationCommentRe = regexp.MustCompile(`^/api/v1/repos/owner/repo/issues/([0-9]+)/comments$`)
+var hostMediationLabelsRe = regexp.MustCompile(`^/api/v1/repos/owner/repo/issues/([0-9]+)/labels$`)
 
 // hostMediationHarness is a forgetest.HostMediationHarness backed by a real
 // bare git repo (RelayBundle's genuine push target, mirroring
@@ -32,6 +36,19 @@ type hostMediationHarness struct {
 	// far. An issue number absent from this map 404s -- the fault case,
 	// exactly like contract_test.go's forgejoHarness comment route.
 	comments map[string][]string
+	// filedIssues maps an assigned issue number to the title/body/labels
+	// PostIssue filed it with, so far -- nextIssueNum hands out the next
+	// number, mirroring Forgejo's own auto-incrementing issue numbering.
+	filedIssues  map[int]filedIssue
+	nextIssueNum int
+}
+
+// filedIssue records a PostIssue call's title, body, and labels as observed
+// by the hostMediationHarness's issue-creation and set-labels routes.
+type filedIssue struct {
+	Title  string
+	Body   string
+	Labels []string
 }
 
 func newHostMediationHarness(t *testing.T) *hostMediationHarness {
@@ -43,10 +60,12 @@ func newHostMediationHarness(t *testing.T) *hostMediationHarness {
 
 	repo := forgetest.NewGitRepoFixture(t, "main")
 	h := &hostMediationHarness{
-		t:          t,
-		repo:       repo,
-		relayedSHA: map[string]string{},
-		comments:   map[string][]string{"801": nil},
+		t:            t,
+		repo:         repo,
+		relayedSHA:   map[string]string{},
+		comments:     map[string][]string{"801": nil},
+		filedIssues:  map[int]filedIssue{},
+		nextIssueNum: 1000,
 	}
 	h.srv = httptest.NewServer(http.HandlerFunc(h.handle))
 	t.Cleanup(h.srv.Close)
@@ -104,6 +123,40 @@ func (h *hostMediationHarness) handle(w http.ResponseWriter, r *http.Request) {
 		h.comments[num] = append(h.comments[num], body.Body)
 		h.mu.Unlock()
 		w.WriteHeader(http.StatusCreated)
+	case r.Method == http.MethodPost && r.URL.Path == "/api/v1/repos/owner/repo/issues":
+		var body struct {
+			Title string `json:"title"`
+			Body  string `json:"body"`
+		}
+		json.NewDecoder(r.Body).Decode(&body)
+		if body.Title == "fail-issue" {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		h.mu.Lock()
+		num := h.nextIssueNum
+		h.nextIssueNum++
+		h.filedIssues[num] = filedIssue{Title: body.Title, Body: body.Body}
+		h.mu.Unlock()
+		json.NewEncoder(w).Encode(map[string]any{
+			"number":   num,
+			"html_url": fmt.Sprintf("https://forge.test/owner/repo/issues/%d", num),
+		})
+	case r.Method == http.MethodPut && hostMediationLabelsRe.MatchString(r.URL.Path):
+		numStr := hostMediationLabelsRe.FindStringSubmatch(r.URL.Path)[1]
+		num, _ := strconv.Atoi(numStr)
+		var body struct {
+			Labels []string `json:"labels"`
+		}
+		json.NewDecoder(r.Body).Decode(&body)
+		h.mu.Lock()
+		iss, ok := h.filedIssues[num]
+		if ok {
+			iss.Labels = body.Labels
+			h.filedIssues[num] = iss
+		}
+		h.mu.Unlock()
+		w.WriteHeader(http.StatusOK)
 	default:
 		http.NotFound(w, r)
 	}
@@ -150,6 +203,33 @@ func (h *hostMediationHarness) CommentPosted(num, body string) bool {
 	defer h.mu.Unlock()
 	for _, b := range h.comments[num] {
 		if b == body {
+			return true
+		}
+	}
+	return false
+}
+
+func (h *hostMediationHarness) IssueFilerTracker() forge.IssueTracker { return h.tr }
+
+func (h *hostMediationHarness) SeedIssueFilerTarget(failing bool) (title, body string, labels []string) {
+	if failing {
+		return "fail-issue", "body", nil
+	}
+	return "widget: filed issue", "Filed by the host-mediation contract.", []string{"bug"}
+}
+
+func (h *hostMediationHarness) IssuePosted(title, body string, labels []string) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for _, iss := range h.filedIssues {
+		if iss.Title != title || iss.Body != body {
+			continue
+		}
+		got := append([]string(nil), iss.Labels...)
+		want := append([]string(nil), labels...)
+		slices.Sort(got)
+		slices.Sort(want)
+		if slices.Equal(got, want) {
 			return true
 		}
 	}
