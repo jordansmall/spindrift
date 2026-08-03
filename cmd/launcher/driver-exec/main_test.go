@@ -12,8 +12,8 @@ import (
 // replaces the child process's own exit code with the opencode Driver's
 // ResolveExit result (issue #2263) -- opencode's own process exit code is
 // not trustworthy on its own (see driver/opencode/exitsynth.go), so
-// driver-exec's main must apply the Driver's required ResolveExit pass after
-// run returns.
+// driver-exec's main must apply the Driver's required ResolveExit result
+// after run returns.
 func TestResolveExitUsesSynthesizedExitForOpencode(t *testing.T) {
 	dir := t.TempDir()
 	logPath := filepath.Join(dir, "stream.log")
