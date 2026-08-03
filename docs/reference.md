@@ -183,6 +183,15 @@ flag (one key per non-empty-model entry); `lib/drivers/opencode.nix` renders
 it into `.config/opencode/agents/<name>.md` files instead, one per
 non-empty-model entry, each with `description`/`mode`/`model` frontmatter.
 
+An entry may also set `effort` (issue #2242), a pass-through, driver-specific
+effort/reasoning-level string — spindrift does not normalize it, so the value
+must already be one the target driver accepts (e.g. `"high"`). The claude
+Driver emits it as an `"effort"` key beside `model` in the agent's `--agents`
+JSON object; the opencode Driver emits it as a `reasoningEffort:` key beside
+`model:` in the agent's YAML frontmatter. Omitting `effort` omits the
+key/line entirely on both Drivers — the same inherit-session-effort behavior
+as today.
+
 The legacy knobs map onto the default roster's entry names:
 
 | Legacy knob    | Roster entry `name` |

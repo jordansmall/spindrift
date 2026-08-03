@@ -1,6 +1,6 @@
 # The default agent roster (issue #264): a first-class, N-agent list of
-# { name; model; mode; description; tools; promptFile; prompt } entries that
-# both Drivers (lib/drivers/claude.nix's agentsJsonTemplate,
+# { name; model; effort; mode; description; tools; promptFile; prompt }
+# entries that both Drivers (lib/drivers/claude.nix's agentsJsonTemplate,
 # lib/drivers/opencode.nix's agentFilesTemplate) render from, replacing the
 # four hardcoded scout/reviewer/filer/worker model-knob args each Driver
 # template used to take directly. `defaultRoster` reproduces today's four
@@ -11,7 +11,9 @@
 # supported) while resolving them into a roster under the hood. `prompt` is
 # always `null` here -- entrypoint.sh injects each agent's rendered prompt at
 # runtime from `promptFile`, never at eval time (see agent/entrypoint.sh's
-# generic prompt-injection loop).
+# generic prompt-injection loop). `effort`, like `model`, is an optional
+# pass-through -- no normalization, no default -- that each Driver forwards
+# verbatim when set (issue #2242).
 { lib }:
 {
   # Normalizes a roster list before any Driver consumes it (issue #2152 slice
