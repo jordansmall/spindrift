@@ -264,4 +264,18 @@ EOF
   [ -n "$body" ]
   [ "$body" != "Map relevant files, seams, and tests; return a structured brief" ]
   [[ "$body" == *"Return only the brief"* ]]
+
+  local reviewer="$dir/reviewer.md"
+  local reviewer_body
+  reviewer_body="$(agent_file_body "$reviewer")"
+  [ -n "$reviewer_body" ]
+  [ "$reviewer_body" != "Review the branch diff for spec compliance and coding standards" ]
+  [[ "$reviewer_body" == *"adversarially review a branch diff"* ]]
+
+  local worker="$dir/worker.md"
+  local worker_body
+  worker_body="$(agent_file_body "$worker")"
+  [ -n "$worker_body" ]
+  [ "$worker_body" != "Implement a scoped slice of work delegated to it, with full implement-capable tools" ]
+  [[ "$worker_body" == *"Stay inside the slice you were handed"* ]]
 }
