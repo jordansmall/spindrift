@@ -1007,6 +1007,134 @@ func TestRunWithReviewPassSendsTopLevelRoleReviewerForReviewPassAndImplementorFo
 	}
 }
 
+// TestRunWithReviewPassUsesReviewModelForReviewPassOnly verifies issue #2277:
+// when cfg.reviewModel is set, runWithReviewPass forwards it as the review
+// pass's own driver-exec --model flag instead of cfg.model, while every
+// implement/fix/land pass keeps carrying cfg.model unchanged -- reusing the
+// same implement -> review -> fix -> review -> land fixture as
+// TestRunWithReviewPassSendsTopLevelRoleReviewerForReviewPassAndImplementorForImplementFixPasses.
+func TestRunWithReviewPassUsesReviewModelForReviewPassOnly(t *testing.T) {
+	dir := t.TempDir()
+	callLog := filepath.Join(dir, "calls.log")
+	writeFakeDriverExec(t, dir, callLog, reviewPassFakeDriverBody(callLog))
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	promptFile := filepath.Join(dir, "prompt.txt")
+	if err := os.WriteFile(promptFile, []byte("ORIGINAL PROMPT TEXT"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	reviewPromptFile := filepath.Join(dir, "review-prompt.txt")
+	if err := os.WriteFile(reviewPromptFile, []byte("REVIEW PROMPT TEXT"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sessionFile := filepath.Join(dir, "session.txt")
+	if err := os.WriteFile(sessionFile, []byte("--session-id fake-id"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stateFile := filepath.Join(dir, "run-state.json")
+
+	const coordinatorModel = "claude-sonnet-5"
+	const reviewerModel = "claude-opus-4-8"
+
+	cfg := config{
+		promptFile:       promptFile,
+		reviewPromptFile: reviewPromptFile,
+		sessionFile:      sessionFile,
+		driverBin:        "claude",
+		model:            coordinatorModel,
+		reviewModel:      reviewerModel,
+		issue:            "7",
+		logPath:          filepath.Join(dir, "stream.log"),
+		heartbeatLog:     filepath.Join(dir, "heartbeat.log"),
+		stateFile:        stateFile,
+		maxReviewRounds:  3,
+		maxSlices:        10,
+	}
+
+	var stdout bytes.Buffer
+	if _, err := run(cfg, &stdout); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	calls, err := os.ReadFile(callLog)
+	if err != nil {
+		t.Fatalf("read callLog: %v", err)
+	}
+	lines := strings.Split(strings.TrimRight(string(calls), "\n"), "\n")
+	if len(lines) != 5 {
+		t.Fatalf("driver-exec invocation count = %d, want 5 (log: %q)", len(lines), calls)
+	}
+
+	wantModels := []string{coordinatorModel, reviewerModel, coordinatorModel, reviewerModel, coordinatorModel}
+	for i, wantModel := range wantModels {
+		if got := flagValue(lines[i], "--model"); got != wantModel {
+			t.Errorf("pass %d --model = %q, want %q (argv: %q)", i+1, got, wantModel, lines[i])
+		}
+	}
+}
+
+// TestRunWithReviewPassFallsBackToCoordinatorModelWhenReviewModelUnset
+// verifies issue #2277's fallback semantics: when cfg.reviewModel is left
+// empty, the review pass's own --model still carries cfg.model, the
+// coordinator's model -- i.e. default cost/behavior is unchanged from before
+// the reviewModel field existed.
+func TestRunWithReviewPassFallsBackToCoordinatorModelWhenReviewModelUnset(t *testing.T) {
+	dir := t.TempDir()
+	callLog := filepath.Join(dir, "calls.log")
+	writeFakeDriverExec(t, dir, callLog, reviewPassFakeDriverBody(callLog))
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	promptFile := filepath.Join(dir, "prompt.txt")
+	if err := os.WriteFile(promptFile, []byte("ORIGINAL PROMPT TEXT"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	reviewPromptFile := filepath.Join(dir, "review-prompt.txt")
+	if err := os.WriteFile(reviewPromptFile, []byte("REVIEW PROMPT TEXT"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sessionFile := filepath.Join(dir, "session.txt")
+	if err := os.WriteFile(sessionFile, []byte("--session-id fake-id"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stateFile := filepath.Join(dir, "run-state.json")
+
+	const coordinatorModel = "claude-sonnet-5"
+
+	cfg := config{
+		promptFile:       promptFile,
+		reviewPromptFile: reviewPromptFile,
+		sessionFile:      sessionFile,
+		driverBin:        "claude",
+		model:            coordinatorModel,
+		issue:            "7",
+		logPath:          filepath.Join(dir, "stream.log"),
+		heartbeatLog:     filepath.Join(dir, "heartbeat.log"),
+		stateFile:        stateFile,
+		maxReviewRounds:  3,
+		maxSlices:        10,
+	}
+
+	var stdout bytes.Buffer
+	if _, err := run(cfg, &stdout); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	calls, err := os.ReadFile(callLog)
+	if err != nil {
+		t.Fatalf("read callLog: %v", err)
+	}
+	lines := strings.Split(strings.TrimRight(string(calls), "\n"), "\n")
+	if len(lines) != 5 {
+		t.Fatalf("driver-exec invocation count = %d, want 5 (log: %q)", len(lines), calls)
+	}
+
+	for i, line := range lines {
+		if got := flagValue(line, "--model"); got != coordinatorModel {
+			t.Errorf("pass %d --model = %q, want %q (argv: %q)", i+1, got, coordinatorModel, line)
+		}
+	}
+}
+
 // noOutcomeAfterApproveFakeDriverBody returns a writeFakeDriverExec body
 // scripting a fake driver-exec for issue #2069: the implement pass (call 1)
 // and the land pass (call 3, seeded with the review's own APPROVE verdict)
