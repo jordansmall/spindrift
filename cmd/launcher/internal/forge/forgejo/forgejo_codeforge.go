@@ -159,8 +159,8 @@ func (f *forgejoCodeForge) postMerge(index string, extra map[string]any) (int, e
 
 // Merge merges the pull request at prURL via Forgejo's REST merge endpoint,
 // requesting f.mergeMethod's style (forgejoMergeDo) and deletion of the head
-// branch after merge. A non-2xx response is classified like the github
-// adapter's classifyMergeFailure (exec_pr.go, issue #566).
+// branch after merge. A non-2xx response is classified by
+// f.classifyMergeFailure.
 func (f *forgejoCodeForge) Merge(prURL string) error {
 	index, err := parsePRIndex(prURL)
 	if err != nil {
@@ -180,13 +180,13 @@ func (f *forgejoCodeForge) Merge(prURL string) error {
 // that's merely blocked by pending or failing required checks. Forgejo's
 // merge endpoint returns the same "not mergeable" refusal status (405 Method
 // Not Allowed or 409 Conflict) for both cases, so those two — and only those
-// two — are disambiguated by querying the PR's mergeable state, the same
-// disambiguation the github adapter's classifyMergeFailure performs after it
-// gates on IsMergeConflict(stderr) (issue #566). Any other non-2xx status
-// (403 token lacks merge scope, 429 rate limit, 500 server error) is a
-// genuine failure and is surfaced as a raw error naming the status rather
-// than masked as ErrMergeConflict or ErrMergeBlockedByChecks. A refusal-status
-// mergeable state this function cannot map to either outcome is likewise
+// two — are disambiguated by querying the PR's mergeable state and handing
+// it to the shared forge.ClassifyMergeFailure, which owns the actual
+// state-to-sentinel mapping. Any other non-2xx status (403 token lacks merge
+// scope, 429 rate limit, 500 server error) is a genuine failure and is
+// surfaced as a raw error naming the status rather than masked as
+// ErrMergeConflict or ErrMergeBlockedByChecks. A refusal-status mergeable
+// state forge.ClassifyMergeFailure cannot map to either outcome is likewise
 // surfaced as its own error.
 func (f *forgejoCodeForge) classifyMergeFailure(prURL string, status int) error {
 	if status != http.StatusMethodNotAllowed && status != http.StatusConflict {
@@ -196,14 +196,10 @@ func (f *forgejoCodeForge) classifyMergeFailure(prURL string, status int) error 
 	if err != nil {
 		return fmt.Errorf("forgejo: merge %s: unexpected status %d (mergeable state unavailable: %w)", prURL, status, err)
 	}
-	switch state {
-	case forge.MergeableConflicting:
-		return forge.ErrMergeConflict
-	case forge.MergeableMergeable:
-		return forge.ErrMergeBlockedByChecks
-	default:
-		return fmt.Errorf("forgejo: merge %s: unexpected status %d (mergeable state %q undetermined)", prURL, status, state)
+	if sentinel, ok := forge.ClassifyMergeFailure(state); ok {
+		return sentinel
 	}
+	return fmt.Errorf("forgejo: merge %s: unexpected status %d (mergeable state %q undetermined)", prURL, status, state)
 }
 
 // Rebase resolves prURL's PR to its head branch via REST, then delegates to
