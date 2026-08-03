@@ -644,11 +644,21 @@ where `note` may contain spaces and `=`. `landing` is the landing reference —
 a PR URL (`github` Code Forge), a branch ref (push-only `git`), or a
 verdict-comment URL (research dispatch); `status` values are scoped to the
 Dispatch kind (`ready`/`blocked` for work, the verdicts plus `blocked` for
-research). `nonce` must carry this run's own per-run control nonce (`RUN_NONCE`, issue #1939):
-`LastInLog` treats an otherwise well-formed line lacking it as not a
-candidate at all, so an untrusted issue/comment author's echoed line —
-authored before the nonce existed — can never win last-wins over the Box's
-genuine line. The line carries only what the Launcher cannot know without the
+research). The `nonce=` field carries this run's per-run control nonce
+(`RUN_NONCE`, issues #1937/#1939), but for _this_ channel it is a redundant
+third layer, not the real defense: `SPINDRIFT_OUTCOME` is defended by
+**structure**. In-box, the per-driver extractor jq-scopes to the agent's own
+final message (claude `select(.type=="result")`, opencode
+`select(.type=="text")`) and re-emits one **bare, leading** line; host-side,
+`LastInLog`'s primary tier requires the token to _lead_ the line. Untrusted
+corpus reaches the log only as a `tool_result` (wrong event type) or buried
+mid-JSON in the raw transcript (non-leading), so it cannot win regardless of
+the nonce. ADR 0039 records the decision to retire the nonce here — structural
+scoping is the freshness boundary — while keeping it as the _sole_ replay
+defense for the mid-run signal channels (`SPINDRIFT_COMMENT` /
+`SPINDRIFT_PR_INTENT` / `SPINDRIFT_ISSUE_INTENT`), which cannot be
+structurally scoped because they survive only as a token embedded in one
+JSON-escaped line. The line carries only what the Launcher cannot know without the
 Box — never backend identity or other run config, which the Launcher already
 holds authoritatively. The `cmd/launcher/internal/outcome` package is the
 authoritative spec and implementation: `Parse` validates the grammar, `Line`
