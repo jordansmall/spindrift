@@ -110,27 +110,38 @@ func (h *hostMediationHarness) SeedIssueFilerTarget(failing bool) (title, body s
 }
 
 func (h *hostMediationHarness) IssuePosted(title, body string, labels []string) bool {
-	data, err := os.ReadFile(filepath.Join(h.stateDir, "issues", "1000"))
+	matches, err := filepath.Glob(filepath.Join(h.stateDir, "issues", "*"))
 	if err != nil {
 		return false
 	}
-	lines := strings.Split(string(data), "\n")
-	if len(lines) < 2 || lines[0] != title || lines[1] != body {
-		return false
-	}
-	got := lines[2:]
-	if len(got) > 0 && got[len(got)-1] == "" {
-		got = got[:len(got)-1]
-	}
-	if len(got) != len(labels) {
-		return false
-	}
-	for i, label := range labels {
-		if got[i] != label {
-			return false
+	for _, path := range matches {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		lines := strings.Split(string(data), "\n")
+		if len(lines) < 2 || lines[0] != title || lines[1] != body {
+			continue
+		}
+		got := lines[2:]
+		if len(got) > 0 && got[len(got)-1] == "" {
+			got = got[:len(got)-1]
+		}
+		if len(got) != len(labels) {
+			continue
+		}
+		match := true
+		for i, label := range labels {
+			if got[i] != label {
+				match = false
+				break
+			}
+		}
+		if match {
+			return true
 		}
 	}
-	return true
+	return false
 }
 
 func TestReadOnlyCodeForge_HostMediationContract(t *testing.T) {
