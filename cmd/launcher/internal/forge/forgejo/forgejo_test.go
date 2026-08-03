@@ -483,3 +483,118 @@ func TestDoctorRun_Forgejo_MissingResearchLabelsAdvisoryOnly(t *testing.T) {
 		t.Errorf("output missing advisory line, got:\n%s", out)
 	}
 }
+
+// TestForgejoClient_ImplementsMergeCloser verifies the forgejo adapter
+// satisfies forge.MergeCloser (issue #2259) — settle's deterministic
+// post-merge close backstop. It must NOT satisfy forge.IssueCloser (that
+// surface is reserved for the local adapter's reconcile-owned closed: axis;
+// a forgejo adapter implementing it too would let an ISSUE_TRACKER=local +
+// CODE_FORGE=forgejo pairing close a local issue through the wrong path).
+func TestForgejoClient_ImplementsMergeCloser(t *testing.T) {
+	fc := forgejo.NewForgejoClient(forgejo.ForgejoConfig{})
+	if _, ok := fc.(forge.MergeCloser); !ok {
+		t.Error("forgejoClient does not satisfy forge.MergeCloser, want it implemented")
+	}
+	if _, ok := fc.(forge.IssueCloser); ok {
+		t.Error("forgejoClient satisfies forge.IssueCloser, want it hidden")
+	}
+}
+
+// TestForgejoClient_CloseMergedIssue_AlreadyClosedIsNoOp verifies that
+// CloseMergedIssue is a no-op — and never issues a PATCH — when the issue is
+// already closed (issue #2259: Forgejo's own merged-PR auto-close already
+// ran, e.g. the PR body carried a Closes #<N> keyword). A PATCH here would
+// be a bug: the fake server fails the test if it ever sees one.
+func TestForgejoClient_CloseMergedIssue_AlreadyClosedIsNoOp(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/owner/repo/issues/42":
+			w.Write([]byte(`{"number":42,"title":"t","body":"","state":"closed","labels":[]}`))
+		case r.Method == http.MethodPatch:
+			t.Error("must not PATCH an already-closed issue")
+			w.WriteHeader(http.StatusOK)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	fc := forgejo.NewForgejoClient(forgejo.ForgejoConfig{BaseURL: srv.URL, Repo: "owner/repo", Token: "tok"})
+	mc, ok := fc.(forge.MergeCloser)
+	if !ok {
+		t.Fatalf("forgejoClient does not satisfy forge.MergeCloser")
+	}
+	if err := mc.CloseMergedIssue("42"); err != nil {
+		t.Fatalf("CloseMergedIssue on an already-closed issue must be a no-op, got: %v", err)
+	}
+}
+
+// TestForgejoClient_CloseMergedIssue_ClosesOpenIssue verifies that
+// CloseMergedIssue PATCHes the issue state to "closed" when the issue is
+// still open — the case Forgejo's own auto-close missed.
+func TestForgejoClient_CloseMergedIssue_ClosesOpenIssue(t *testing.T) {
+	var gotPath, gotMethod string
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/owner/repo/issues/42":
+			w.Write([]byte(`{"number":42,"title":"t","body":"","state":"open","labels":[]}`))
+		case r.Method == http.MethodPatch:
+			gotPath = r.URL.Path
+			gotMethod = r.Method
+			json.NewDecoder(r.Body).Decode(&gotBody)
+			w.WriteHeader(http.StatusOK)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	fc := forgejo.NewForgejoClient(forgejo.ForgejoConfig{BaseURL: srv.URL, Repo: "owner/repo", Token: "tok"})
+	mc, ok := fc.(forge.MergeCloser)
+	if !ok {
+		t.Fatalf("forgejoClient does not satisfy forge.MergeCloser")
+	}
+	if err := mc.CloseMergedIssue("42"); err != nil {
+		t.Fatalf("CloseMergedIssue on an open issue: %v", err)
+	}
+	if gotMethod != http.MethodPatch {
+		t.Fatalf("method = %q, want PATCH", gotMethod)
+	}
+	if gotPath != "/api/v1/repos/owner/repo/issues/42" {
+		t.Fatalf("path = %q, want %q", gotPath, "/api/v1/repos/owner/repo/issues/42")
+	}
+	if gotBody["state"] != "closed" {
+		t.Fatalf("body[state] = %v, want %q", gotBody["state"], "closed")
+	}
+}
+
+// TestForgejoClient_CloseMergedIssue_GenuineFailureSurfaced verifies that a
+// real close-PATCH failure on an open issue is returned as an error rather
+// than swallowed as if it were the idempotent already-closed case.
+func TestForgejoClient_CloseMergedIssue_GenuineFailureSurfaced(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/owner/repo/issues/42":
+			w.Write([]byte(`{"number":42,"title":"t","body":"","state":"open","labels":[]}`))
+		case r.Method == http.MethodPatch:
+			w.WriteHeader(http.StatusForbidden)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	fc := forgejo.NewForgejoClient(forgejo.ForgejoConfig{BaseURL: srv.URL, Repo: "owner/repo", Token: "tok"})
+	mc, ok := fc.(forge.MergeCloser)
+	if !ok {
+		t.Fatalf("forgejoClient does not satisfy forge.MergeCloser")
+	}
+	err := mc.CloseMergedIssue("42")
+	if err == nil {
+		t.Fatal("want error, got nil")
+	}
+	if !strings.Contains(err.Error(), "403") {
+		t.Errorf("error must surface the unexpected status, got: %v", err)
+	}
+}

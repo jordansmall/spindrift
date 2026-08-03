@@ -384,6 +384,30 @@ func (c *forgejoClient) TouchesOf(num string) ([]string, error) {
 	return forge.ParseTouchPaths(iss.Body), nil
 }
 
+// CloseMergedIssue implements the optional forge.MergeCloser surface (issue
+// #2259): a deterministic backstop for a merged agent PR whose body's
+// Closes #<N> keyword Forgejo's own auto-close missed. Checks state before
+// PATCHing so an already-closed issue (the common case — auto-close already
+// ran) is a true no-op rather than relying on a redundant PATCH's status.
+func (c *forgejoClient) CloseMergedIssue(num string) error {
+	iss, err := c.Issue(num)
+	if err != nil {
+		return err
+	}
+	if iss.State == forge.IssueClosed {
+		return nil
+	}
+	status, err := c.do(http.MethodPatch, c.repoPath()+"/issues/"+num,
+		map[string]string{"state": "closed"}, nil)
+	if err != nil {
+		return err
+	}
+	if status < 200 || status >= 300 {
+		return fmt.Errorf("forgejo: close issue %s: unexpected status %d", num, status)
+	}
+	return nil
+}
+
 // Comment posts a comment on the Forgejo issue.
 func (c *forgejoClient) Comment(num, body string) error {
 	status, err := c.do(http.MethodPost, c.repoPath()+"/issues/"+num+"/comments",
