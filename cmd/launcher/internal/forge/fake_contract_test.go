@@ -37,6 +37,7 @@ func (h *fakeHarness) SeedNativeDeps(num string, ids []string) {
 	h.f.NativeDeps[num] = ids
 }
 func (h *fakeHarness) IsolatesNativeFailure() {}
+func (h *fakeHarness) IsPriorityCapable()     {}
 
 func TestFake_TrackerContract(t *testing.T) {
 	forgetest.RunTrackerContract(t, newFakeHarness())

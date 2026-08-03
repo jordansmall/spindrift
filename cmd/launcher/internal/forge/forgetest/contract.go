@@ -44,6 +44,17 @@ type NativeFailureIsolatable interface {
 	IsolatesNativeFailure()
 }
 
+// PriorityCapable is implemented by harnesses whose adapter resolves the
+// agent-priority-* label family (ADR 0040) into a real forge.Priority tier —
+// github and the Fake as of issue #2281. forgejo does not yet (tracked
+// separately as issue #2283), and jira/local are documented to default every
+// issue to PriorityNormal permanently. testLabelToPriority type-asserts for
+// this marker to decide whether a labeled issue should resolve to its tier
+// or, for a harness that hasn't implemented one, stay at PriorityNormal.
+type PriorityCapable interface {
+	IsPriorityCapable()
+}
+
 // RunTrackerContract runs the shared IssueTracker conformance suite against
 // h. Every adapter package calls this from its own test file, backed by its
 // own scripted-backend Harness.
@@ -53,6 +64,7 @@ func RunTrackerContract(t *testing.T, h Harness) {
 	t.Run("DepsOf", func(t *testing.T) { testDepsOf(t, h) })
 	t.Run("ResearchVerdictTerminals", func(t *testing.T) { testResearchVerdictTerminals(t, h) })
 	t.Run("DispatchOrder", func(t *testing.T) { testDispatchOrder(t, h) })
+	t.Run("LabelToPriority", func(t *testing.T) { testLabelToPriority(t, h) })
 }
 
 // testDispatchLifecycle verifies TransitionState's label/state swaps move an
@@ -255,6 +267,56 @@ func testDispatchOrder(t *testing.T, h Harness) {
 		if got[i] != want[i] {
 			t.Fatalf("ListIssues(Dispatchable) order = %v, want %v", got, want)
 		}
+	}
+}
+
+// testLabelToPriority verifies label->Priority resolution (ADR 0040): an
+// unlabeled issue resolves to PriorityNormal on every adapter, unconditionally
+// — that assertion holds whether or not the adapter maps agent-priority-*
+// labels at all. Harnesses that implement PriorityCapable (github, Fake) are
+// additionally asserted to resolve each agent-priority-* label to its own
+// tier, and a conflicting pair to the highest tier present. Harnesses that
+// don't implement it (forgejo, jira, local) are asserted to stay at
+// PriorityNormal even when an issue carries an agent-priority-* label —
+// documenting today's non-capable-adapter behavior rather than a future
+// commitment (forgejo's own resolution is issue #2283; jira/local never map
+// it, per ADR 0040).
+func testLabelToPriority(t *testing.T, h Harness) {
+	tr := h.Tracker()
+	_, capable := h.(PriorityCapable)
+
+	h.SeedIssue(forge.Issue{Number: "601", Title: "unlabeled"})
+	requirePriority(t, tr, "601", forge.PriorityNormal)
+
+	cases := []struct {
+		num    string
+		labels []string
+		want   forge.Priority
+	}{
+		{"602", []string{"agent-priority-critical"}, forge.PriorityCritical},
+		{"603", []string{"agent-priority-high"}, forge.PriorityHigh},
+		{"604", []string{"agent-priority-low"}, forge.PriorityLow},
+		{"605", []string{"agent-priority-low", "agent-priority-critical"}, forge.PriorityCritical},
+	}
+	for _, tc := range cases {
+		h.SeedIssue(forge.Issue{Number: tc.num, Title: "labeled", Labels: tc.labels})
+		want := forge.PriorityNormal
+		if capable {
+			want = tc.want
+		}
+		requirePriority(t, tr, tc.num, want)
+	}
+}
+
+// requirePriority fails the test unless tr.Issue(num).Priority equals want.
+func requirePriority(t *testing.T, tr forge.IssueTracker, num string, want forge.Priority) {
+	t.Helper()
+	iss, err := tr.Issue(num)
+	if err != nil {
+		t.Fatalf("Issue(%s): %v", num, err)
+	}
+	if iss.Priority != want {
+		t.Fatalf("Issue(%s).Priority = %v, want %v", num, iss.Priority, want)
 	}
 }
 

@@ -324,6 +324,91 @@ func TestRenderFailureDetail(t *testing.T) {
 	})
 }
 
+// TestPriority_ZeroValue verifies the zero value of forge.Priority is
+// PriorityNormal (ADR 0040) — an unlabeled issue must default to Normal
+// without any adapter having to set it explicitly.
+func TestPriority_ZeroValue(t *testing.T) {
+	var p forge.Priority
+	if p != forge.PriorityNormal {
+		t.Fatalf("zero value = %v, want PriorityNormal", p)
+	}
+}
+
+// TestPriority_Ordering verifies the total order ADR 0040 requires for the
+// future central sort: Critical > High > Normal > Low, via plain Go
+// comparison operators.
+func TestPriority_Ordering(t *testing.T) {
+	if !(forge.PriorityCritical > forge.PriorityHigh) {
+		t.Errorf("want PriorityCritical > PriorityHigh")
+	}
+	if !(forge.PriorityHigh > forge.PriorityNormal) {
+		t.Errorf("want PriorityHigh > PriorityNormal")
+	}
+	if !(forge.PriorityNormal > forge.PriorityLow) {
+		t.Errorf("want PriorityNormal > PriorityLow")
+	}
+	if !(forge.PriorityCritical > forge.PriorityLow) {
+		t.Errorf("want PriorityCritical > PriorityLow")
+	}
+}
+
+// TestPriority_String verifies Priority's Stringer rendering, mirroring the
+// Verdict.String() pattern.
+func TestPriority_String(t *testing.T) {
+	cases := []struct {
+		p    forge.Priority
+		want string
+	}{
+		{forge.PriorityCritical, "critical"},
+		{forge.PriorityHigh, "high"},
+		{forge.PriorityNormal, "normal"},
+		{forge.PriorityLow, "low"},
+	}
+	for _, c := range cases {
+		if got := c.p.String(); got != c.want {
+			t.Errorf("Priority(%d).String() = %q, want %q", int(c.p), got, c.want)
+		}
+	}
+}
+
+// TestFake_ResolvesPriorityFromLabels verifies that Fake resolves an issue's
+// Priority from its Labels via forge.ResolvePriority at read time — Labels,
+// not a separately-set Priority field, is the single source of truth (a
+// test that mutates Labels via SetIssue without also touching Priority can't
+// leave the two out of sync), and every read path (Issue, ListIssues,
+// ListOpenIssues) agrees.
+func TestFake_ResolvesPriorityFromLabels(t *testing.T) {
+	f := forge.NewFake(testLabels)
+	f.SetIssue(forge.Issue{
+		Number: "42",
+		Labels: []string{"ready-for-agent", "agent-priority-high"},
+	})
+
+	iss, err := f.Issue("42")
+	if err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+	if iss.Priority != forge.PriorityHigh {
+		t.Errorf("Issue(42).Priority = %v, want PriorityHigh", iss.Priority)
+	}
+
+	listed, err := f.ListIssues(forge.Dispatchable)
+	if err != nil {
+		t.Fatalf("ListIssues: %v", err)
+	}
+	if len(listed) != 1 || listed[0].Priority != forge.PriorityHigh {
+		t.Fatalf("ListIssues(Dispatchable) = %+v, want one issue with PriorityHigh", listed)
+	}
+
+	open, err := f.ListOpenIssues()
+	if err != nil {
+		t.Fatalf("ListOpenIssues: %v", err)
+	}
+	if len(open) != 1 || open[0].Priority != forge.PriorityHigh {
+		t.Fatalf("ListOpenIssues() = %+v, want one issue with PriorityHigh", open)
+	}
+}
+
 // TestFake_ListPRFiles verifies that ListPRFiles returns the scripted changed
 // files for a PR — the merge guard's only source of changed paths.
 func TestFake_ListPRFiles(t *testing.T) {
