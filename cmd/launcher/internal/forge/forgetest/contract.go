@@ -1,7 +1,7 @@
 // Package forgetest is the executable contract for forge.IssueTracker: one
-// shared test suite every adapter — github, jira, local, and the shared
-// Fake — runs against its own scripted-backend harness, so semantic drift
-// between the Fake and a real adapter fails CI instead of resting on
+// shared test suite every adapter — github, forgejo, jira, local, and the
+// shared Fake — runs against its own scripted-backend harness, so semantic
+// drift between the Fake and a real adapter fails CI instead of resting on
 // "mirrors the real adapter" comments and reviewer discipline.
 package forgetest
 
@@ -25,9 +25,10 @@ type Harness interface {
 
 // NativeCapable is implemented by harnesses whose backend has a genuine
 // native dependency-relationship concept distinct from body-text parsing
-// (github, jira, and the Fake once NativeDeps is seeded) — RunTrackerContract
-// type-asserts for it to decide whether the native-wins scenario applies.
-// The local adapter has no native concept and does not implement it.
+// (github, forgejo, jira, and the Fake once NativeDeps is seeded) —
+// RunTrackerContract type-asserts for it to decide whether the native-wins
+// scenario applies. The local adapter has no native concept and does not
+// implement it.
 type NativeCapable interface {
 	// SeedNativeDeps registers ids as num's native dependency relationships,
 	// independent of whatever body text SeedIssue wrote.
@@ -36,8 +37,8 @@ type NativeCapable interface {
 
 // NativeFailureIsolatable is implemented by harnesses where a native lookup
 // failure can be exercised independent of body-content availability — the
-// Fake and the github adapter only (issue #1544 AC2). Jira's native lookup
-// and its Issue body fetch share one underlying request, so the two can't be
+// Fake, github, and forgejo (issue #1544 AC2). Jira's native lookup and its
+// Issue body fetch share one underlying request, so the two can't be
 // decoupled; local has no native concept to fail.
 type NativeFailureIsolatable interface {
 	IsolatesNativeFailure()
@@ -121,8 +122,8 @@ func testDoubleDispatchGuard(t *testing.T, h Harness) {
 // testDepsOf verifies DepsOf's native-wins-when-non-empty rule and, where
 // the harness's backend can decouple native failure from body-content
 // availability, the native-error-falls-back-to-body path (issue #1544 AC2:
-// exercised on the Fake and github only — jira's native lookup and Issue
-// fetch share one request, and local has no native concept at all, so
+// exercised on the Fake, github, and forgejo — jira's native lookup and
+// Issue fetch share one request, and local has no native concept at all, so
 // neither harness implements NativeFailureIsolatable).
 func testDepsOf(t *testing.T, h Harness) {
 	nc, hasNative := h.(NativeCapable)
@@ -223,8 +224,8 @@ func testResearchVerdictTerminals(t *testing.T, h Harness) {
 // testDispatchOrder verifies ListIssues returns issues in each adapter's
 // canonical order — seeded and moved to Dispatchable in ascending-number
 // order, so the assertion holds regardless of whether an adapter's native
-// order key is issue number (github, Fake) or creation time (local, jira),
-// which naturally coincides with insertion order in a scripted-backend
+// order key is issue number (github, forgejo, Fake) or creation time (local,
+// jira), which naturally coincides with insertion order in a scripted-backend
 // harness.
 func testDispatchOrder(t *testing.T, h Harness) {
 	tr := h.Tracker()

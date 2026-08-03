@@ -20,7 +20,7 @@ type CodeForgeHarness interface {
 	// SeedLandable creates a landable artifact for issue num — one commit
 	// ahead of the current base tip, carrying a marker unique to num — and
 	// returns whatever ref Merge/Rebase expect for it (a branch name for
-	// git/Fake, a PR URL for github).
+	// git/Fake, a PR URL for github/forgejo).
 	SeedLandable(num string) string
 	// AdvanceBase adds a new commit to the base branch, so every
 	// already-seeded ref is now behind it — the state Rebase exists to fix.
