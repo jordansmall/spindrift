@@ -865,7 +865,7 @@ func readCallArgs(t *testing.T, dir string, n int) string {
 }
 
 // TestRenderFailureDetail verifies the failing-context filter and the
-// maxFailureDetailBytes truncation.
+// forge.MaxFailureDetailBytes truncation.
 func TestRenderFailureDetail(t *testing.T) {
 	t.Run("filters out passing and non-failing conclusions", func(t *testing.T) {
 		contexts := []failureDetailContext{
@@ -897,11 +897,11 @@ func TestRenderFailureDetail(t *testing.T) {
 
 	t.Run("truncates to maxFailureDetailBytes", func(t *testing.T) {
 		contexts := []failureDetailContext{
-			{TypeName: "CheckRun", Name: "huge", Conclusion: "FAILURE", Summary: strings.Repeat("x", maxFailureDetailBytes*2)},
+			{TypeName: "CheckRun", Name: "huge", Conclusion: "FAILURE", Summary: strings.Repeat("x", forge.MaxFailureDetailBytes*2)},
 		}
 		got := renderFailureDetail(contexts)
-		if len(got) > maxFailureDetailBytes {
-			t.Fatalf("detail not bounded: got %d bytes, want <= %d", len(got), maxFailureDetailBytes)
+		if len(got) > forge.MaxFailureDetailBytes {
+			t.Fatalf("detail not bounded: got %d bytes, want <= %d", len(got), forge.MaxFailureDetailBytes)
 		}
 	})
 }

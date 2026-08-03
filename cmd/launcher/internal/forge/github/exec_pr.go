@@ -285,8 +285,9 @@ func mergeMethodFlag(method string) string {
 // is merely blocked by pending or failing required checks. gh's stderr
 // carries the same "not mergeable" wording for both refusals, so the
 // distinction is made by querying the PR's mergeable state instead
-// (issue #566). A mergeable state this function cannot map to either outcome
-// is surfaced as its own error rather than folded into ErrMergeConflict.
+// (issue #566) and mapping it via the shared forge.ClassifyMergeFailure. A
+// mergeable state that function cannot map to either outcome is surfaced as
+// its own error rather than folded into ErrMergeConflict.
 func (e *execClient) classifyMergeFailure(url string, mergeErr error, stderr string) error {
 	if !gitplumbing.IsMergeConflict(stderr) {
 		return fmt.Errorf("gh pr merge %s: %w: %s", url, mergeErr, strings.TrimSpace(stderr))
@@ -295,14 +296,10 @@ func (e *execClient) classifyMergeFailure(url string, mergeErr error, stderr str
 	if err != nil {
 		return fmt.Errorf("gh pr merge %s: %w (mergeable state unavailable: %v)", url, mergeErr, err)
 	}
-	switch state {
-	case forge.MergeableConflicting:
-		return forge.ErrMergeConflict
-	case forge.MergeableMergeable:
-		return forge.ErrMergeBlockedByChecks
-	default:
-		return fmt.Errorf("gh pr merge %s: %w (mergeable state %q undetermined)", url, mergeErr, state)
+	if sentinel, ok := forge.ClassifyMergeFailure(state); ok {
+		return sentinel
 	}
+	return fmt.Errorf("gh pr merge %s: %w (mergeable state %q undetermined)", url, mergeErr, state)
 }
 
 // CanAutoMerge queries whether the repo allows GitHub's native auto-merge feature.
