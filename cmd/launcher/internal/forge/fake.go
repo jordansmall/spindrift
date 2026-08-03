@@ -143,6 +143,8 @@ type Fake struct {
 	CompleteVerdictErr error
 	// CommentCalls records all Comment invocations in order.
 	CommentCalls []CommentCall
+	// CommentErr, if non-nil, is returned by every Comment call.
+	CommentErr error
 	// RecordLandingCalls records all RecordLanding invocations in order.
 	RecordLandingCalls []RecordLandingCall
 	// RecordLandingErr, if non-nil, is returned by every RecordLanding call.
@@ -659,7 +661,7 @@ func (f *Fake) Comment(num, body string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.CommentCalls = append(f.CommentCalls, CommentCall{num, body})
-	return nil
+	return f.CommentErr
 }
 
 func (f *Fake) OpenPRForBranch(branch string) (PR, bool, error) {
