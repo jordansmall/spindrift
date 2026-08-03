@@ -39,34 +39,34 @@ func (e *execClient) ListIssues(state forge.DispatchState) ([]forge.Issue, error
 		"--limit", strconv.Itoa(forge.ResultPageLimit),
 		"--search", "sort:created-asc",
 		"--json", "number,title,labels",
-		"--jq", `sort_by(.number) | .[] | [.number, .title, (.labels | map(.name) | join(","))] | @tsv`,
 	)
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("gh issue list: %w", err)
 	}
-	var issues []forge.Issue
-	scanner := bufio.NewScanner(strings.NewReader(string(out)))
-	for scanner.Scan() {
-		line := scanner.Text()
-		if line == "" {
-			continue
-		}
-		parts := strings.SplitN(line, "\t", 3)
-		if len(parts) < 3 {
-			continue
-		}
-		var labels []string
-		if parts[2] != "" {
-			labels = strings.Split(parts[2], ",")
-		}
-		issues = append(issues, forge.Issue{
-			Number:   parts[0],
-			Title:    parts[1],
-			Labels:   labels,
-			Priority: forge.ResolvePriority(labels),
-		})
+	var raw []struct {
+		Number int       `json:"number"`
+		Title  string    `json:"title"`
+		Labels []ghLabel `json:"labels"`
 	}
+	if err := json.Unmarshal(out, &raw); err != nil {
+		return nil, fmt.Errorf("parse gh issue list: %w", err)
+	}
+	issues := make([]forge.Issue, len(raw))
+	for i, r := range raw {
+		names := labelNames(r.Labels)
+		issues[i] = forge.Issue{
+			Number:   strconv.Itoa(r.Number),
+			Title:    r.Title,
+			Labels:   names,
+			Priority: forge.ResolvePriority(names),
+		}
+	}
+	sort.Slice(issues, func(i, j int) bool {
+		ni, _ := strconv.Atoi(issues[i].Number)
+		nj, _ := strconv.Atoi(issues[j].Number)
+		return ni < nj
+	})
 	forge.WarnPageMayTruncateBacklog("gh issue list", len(issues))
 	return issues, nil
 }

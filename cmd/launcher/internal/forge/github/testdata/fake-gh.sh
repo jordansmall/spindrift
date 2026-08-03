@@ -33,22 +33,6 @@ labels_json() {
 	printf ']'
 }
 
-# labels_csv prints issue $1's labels as a comma-joined list, matching the
-# real gh --jq filter's `.labels | map(.name) | join(",")` output — the
-# third tsv column ListIssues (the --label branch below) parses.
-labels_csv() {
-	f="$DIR/$1/labels"
-	first=1
-	if [ -f "$f" ]; then
-		while IFS= read -r l; do
-			[ -z "$l" ] && continue
-			[ $first -eq 0 ] && printf ','
-			first=0
-			printf '%s' "$l"
-		done < "$f"
-	fi
-}
-
 cmd1="$1"; cmd2="$2"
 
 case "$cmd1-$cmd2" in
@@ -61,25 +45,21 @@ issue-list)
 		*) shift ;;
 		esac
 	done
-	if [ -n "$label" ]; then
-		for num in $(ordered_nums); do
+	printf '['
+	first=1
+	for num in $(ordered_nums); do
+		if [ -n "$label" ]; then
 			labf="$DIR/$num/labels"
-			if [ -f "$labf" ] && grep -qxF "$label" "$labf"; then
-				title=$(cat "$DIR/$num/title" 2>/dev/null)
-				printf '%s\t%s\t%s\n' "$num" "$title" "$(labels_csv "$num")"
+			if [ ! -f "$labf" ] || ! grep -qxF "$label" "$labf"; then
+				continue
 			fi
-		done
-	else
-		printf '['
-		first=1
-		for num in $(ordered_nums); do
-			[ $first -eq 0 ] && printf ','
-			first=0
-			title=$(cat "$DIR/$num/title" 2>/dev/null)
-			printf '{"number":%s,"title":"%s","labels":%s}' "$num" "$(json_escape "$title")" "$(labels_json "$num")"
-		done
-		printf ']'
-	fi
+		fi
+		[ $first -eq 0 ] && printf ','
+		first=0
+		title=$(cat "$DIR/$num/title" 2>/dev/null)
+		printf '{"number":%s,"title":"%s","labels":%s}' "$num" "$(json_escape "$title")" "$(labels_json "$num")"
+	done
+	printf ']'
 	;;
 issue-view)
 	num="$3"

@@ -23,11 +23,15 @@ case "${1:-}" in
   issue)
     case "${2:-}" in
       list)
+        # execClient.ListIssues()/ListOpenIssues() expect a JSON array
+        # matching --json number,title,labels — not the plain-text tsv
+        # lines this used to print.
         want=""
         args=("$@")
         for ((i = 0; i < ${#args[@]}; i++)); do
           [ "${args[i]}" = "--label" ] && want="${args[i + 1]:-}"
         done
+        entries=()
         while IFS=$'\t' read -r num title; do
           [ -n "$num" ] || continue
           cur=""
@@ -37,11 +41,28 @@ case "${1:-}" in
             done < "$GH_STATE"
           fi
           if [ -z "$cur" ] || [ "$cur" = "$want" ]; then
-            printf '%s\t%s\n' "$num" "$title"
+            label="${cur:-$want}"
+            labelsvar="FAKE_GH_ISSUE_LABELS_${num}"
+            extra_label="${!labelsvar:-}"
+            labels_json="[]"
+            if [ -n "$label" ] && [ -n "$extra_label" ]; then
+              labels_json=$(jq -cn '[{"name":$a},{"name":$b}]' --arg a "$label" --arg b "$extra_label")
+            elif [ -n "$label" ]; then
+              labels_json=$(jq -cn '[{"name":$a}]' --arg a "$label")
+            elif [ -n "$extra_label" ]; then
+              labels_json=$(jq -cn '[{"name":$a}]' --arg a "$extra_label")
+            fi
+            entries+=("$(jq -cn --argjson num "$num" --arg title "$title" --argjson labels "$labels_json" \
+              '{"number":$num,"title":$title,"labels":$labels}')")
           fi
         done <<EOF
 ${FAKE_GH_ISSUES:-}
 EOF
+        if [ "${#entries[@]}" -eq 0 ]; then
+          printf '[]\n'
+        else
+          printf '%s\n' "${entries[@]}" | jq -cs '.'
+        fi
         ;;
       edit)
         num="${3:-}"
