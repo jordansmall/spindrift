@@ -167,8 +167,9 @@ type HostPostedCommenter interface {
 // argument for a payload to redirect — and labels are always supplied by the
 // caller, never read back out of the Box's own payload (issue #1949's
 // do-not-trust-the-agent-target invariant, extended from destination repo to
-// labels). No adapter implements it yet; a later issue lands the github
-// implementation.
+// labels). github (exec_issues.go's execClient.PostIssue, issue #2028) and
+// forgejo (forgejo.go's forgejoClient.PostIssue, issue #1964) both implement
+// it; the Fake does too, behind AsIssueFiler() (issue #2018).
 type HostPostedIssueFiler interface {
 	// PostIssue files a new issue with the given title, body, and labels,
 	// and returns its URL.

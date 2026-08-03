@@ -943,9 +943,11 @@ func (f *Fake) postIssue(title, body string, labels []string) (string, error) {
 }
 
 // issueFilerTracker adapts a Fake to expose IssueTracker plus
-// HostPostedIssueFiler — a shape no real adapter has yet (issue #2018's
-// plumbing lands ahead of any adapter implementation, mirroring
-// githubReadOnlyForge's own DraftPRCreator staging).
+// HostPostedIssueFiler, the same isolation githubReadOnlyForge's own
+// DraftPRCreator staging uses — github and forgejo satisfy the interface
+// directly on their own IssueTracker (issue #2028, issue #1964), but the
+// Fake stays gated behind AsIssueFiler() so a bare *Fake used as an
+// IssueTracker elsewhere never silently starts satisfying it too.
 type issueFilerTracker struct {
 	IssueTracker
 	f *Fake
