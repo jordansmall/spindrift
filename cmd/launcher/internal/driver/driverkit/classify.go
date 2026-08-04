@@ -27,20 +27,21 @@ type ScanDecision struct {
 // participates in classification.
 type ExtractFunc func(chunk string) ScanDecision
 
-// ClassifyScan runs the shared scan+trim+unmarshal+transient-match loop:
-// driverkit.ScanLog over logPath with policy, calling extract per chunk. The
+// ClassifyScan runs the shared scan+match loop: driverkit.ScanLog over
+// logPath with policy, calling extract per chunk (trim/unmarshal of each
+// chunk stays in the caller's extract, since that's strategy-specific). The
 // first unrecovered match latches (Class/Reason returned via the
 // Classification's Class/Reason fields, ResetAt always zero — callers set
-// ResetAt themselves from their own resetsAt extraction, since that's
+// ResetAt themselves from their own resetsAt extraction, since that's also
 // strategy-specific); a later chunk with Reset:true un-latches an earlier
 // match, allowing a subsequent chunk to match again. A chunk with
 // Overwrite:true is not skipped just because an earlier chunk already
 // latched — a match overwrites the existing latch, while a non-match leaves
-// it untouched. found reports whether
-// anything matched by the end of the scan, so callers can apply their own
-// terminal/TaskFailed fallback. transientExtras is checked (via
-// MatchTransient, so BaseTransientPatterns is included) before terminalExtras
-// (via MatchExtras, no base fallback) for each unskipped chunk.
+// it untouched. found reports whether anything matched by the end of the
+// scan, so callers can apply their own terminal/TaskFailed fallback.
+// transientExtras is checked (via MatchTransient, so BaseTransientPatterns is
+// included) before terminalExtras (via MatchExtras, no base fallback) for
+// each unskipped chunk.
 func ClassifyScan(logPath string, policy logscan.Policy, extract ExtractFunc, transientExtras, terminalExtras []Pattern) (cl Classification, found bool, err error) {
 	scanErr := ScanLog(logPath, policy, func(line string) {
 		decision := extract(line)
