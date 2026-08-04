@@ -72,9 +72,11 @@ configure_env() {
   # 0009, issue #624) via the nix-rendered preamble prepended ahead of this
   # file at image build time. No fallback literal lives here: a Box built
   # without that preamble dies loudly instead of silently impersonating the
-  # claude Driver. Checked ahead of the _contract_marker lookups below so a
-  # Box missing every nix-rendered preamble dies naming the Driver preamble,
-  # not the unrelated contract-registry one (issue #2246).
+  # claude Driver. Checked ahead of phase_prompt_assembly's
+  # _inject_shared_block calls (which resolve their markers via
+  # _contract_marker) so a Box missing every nix-rendered preamble dies
+  # naming the Driver preamble, not the unrelated contract-registry one
+  # (issue #2246).
   : "${DRIVER_BIN:?DRIVER_BIN not set -- the nix-rendered Driver preamble did not run}"
   : "${DRIVER_FLAGS_COMMON:?DRIVER_FLAGS_COMMON not set -- the nix-rendered Driver preamble did not run}"
   : "${DRIVER_SKILLS_DIR:?DRIVER_SKILLS_DIR not set -- the nix-rendered Driver preamble did not run}"
@@ -83,27 +85,23 @@ configure_env() {
   # The canonical SPINDRIFT_OUTCOME contract (issue #419), baked at a sibling
   # path to /agent/prompts so a SPINDRIFT_PROMPT_DIR mount -- which shadows only
   # /agent/prompts -- never hides it (issue #420).
-  # The marker is sourced from the registry-rendered _INJECT_BLOCK_ROWS
-  # (lib/prompt-contract.nix's injectBlocks, issue #2246) via _contract_marker
-  # rather than hardcoded here, so it cannot drift from the block's canonical
-  # source-file heading.
-  OUTCOME_CONTRACT_MARKER="$(_contract_marker outcome)"
+  # Only the file-path default lives here; _inject_shared_block resolves the
+  # id's marker itself via _contract_marker against the registry-rendered
+  # _INJECT_BLOCK_ROWS (lib/prompt-contract.nix's injectBlocks, issue #2246),
+  # so it cannot drift from the block's canonical source-file heading.
   OUTCOME_CONTRACT_FILE="${OUTCOME_CONTRACT_FILE:-/agent/outcome-contract.md}"
 
   # The COMMS and CHECK/COMMIT blocks fix-prompt.md shares with issue-prompt.md
   # (issue #455 extends #419/#420's slice mechanism beyond the outcome contract):
   # baked and injected the same way, so a SPINDRIFT_PROMPT_DIR override of the
   # fix prompt gets the identical treatment.
-  COMMS_CONTRACT_MARKER="$(_contract_marker comms)"
   COMMS_CONTRACT_FILE="${COMMS_CONTRACT_FILE:-/agent/comms-contract.md}"
-  CHECK_CONTRACT_MARKER="$(_contract_marker check)"
   CHECK_CONTRACT_FILE="${CHECK_CONTRACT_FILE:-/agent/check-contract.md}"
 
   # The research dispatch kind's own harness-owned outcome contract (ADR 0022,
   # issue #640): posting the verdict comment and emitting the outcome line.
   # Baked and injected the same way as the work contract above, so a
   # SPINDRIFT_PROMPT_DIR override of research-prompt.md gets it too.
-  RESEARCH_OUTCOME_CONTRACT_MARKER="$(_contract_marker research-verdict)"
   RESEARCH_OUTCOME_CONTRACT_FILE="${RESEARCH_OUTCOME_CONTRACT_FILE:-/agent/research-outcome-contract.md}"
 
   # _driver_extract_outcome and _driver_session_flags are defined by the Driver
@@ -465,7 +463,9 @@ _is_readonly_github() {
 # contract-registry.sh (mirrors the _FRAGMENT_ROWS mechanism above, issue
 # #2246). A nix-built image prepends _INJECT_BLOCK_ROWS via
 # contractRegistryPreamble (lib/mkHarness.nix), and the bats harness sources
-# the same registry-rendered rows via CONTRACT_REGISTRY_FILE.
+# the same registry-rendered rows via CONTRACT_REGISTRY_FILE. Called from
+# exactly one place -- _inject_shared_block below -- so no per-block marker
+# variable can drift from this single resolution point (issue #2248).
 _contract_marker() {
   local _id="$1" _crow _cid _cmarker _rest
   for _crow in "${_INJECT_BLOCK_ROWS[@]}"; do
@@ -483,9 +483,12 @@ _contract_marker() {
 # prompt that dropped a shared block (issue #419, extended to COMMS/CHECK by
 # #455) never gets the build-time injection; append the canonical block here,
 # at run time, unless it is already present (idempotent, mirrors
-# lib/mkHarness.nix).
+# lib/mkHarness.nix). Takes the block's registry id (not a pre-resolved
+# marker) and looks the marker up itself via _contract_marker, so this is the
+# only call site in the runtime path that resolves a marker (issue #2248).
 _inject_shared_block() {
-  local marker="$1" file="$2"
+  local id="$1" file="$2" marker
+  marker="$(_contract_marker "$id")"
   if [[ "$prompt" != *"$marker"* ]]; then
     # A direct assignment from the substitution (rather than nesting it as a
     # printf argument) so a missing/unreadable contract file fails loudly
@@ -920,11 +923,11 @@ phase_prompt_assembly() {
   # the same order the issue prompt carries them. The research prompt carries
   # none of these work-only blocks -- it gets its own outcome contract instead.
   if _is_research_kind; then
-    _inject_shared_block "$RESEARCH_OUTCOME_CONTRACT_MARKER" "$RESEARCH_OUTCOME_CONTRACT_FILE"
+    _inject_shared_block "research-verdict" "$RESEARCH_OUTCOME_CONTRACT_FILE"
   else
-    _inject_shared_block "$COMMS_CONTRACT_MARKER" "$COMMS_CONTRACT_FILE"
-    _inject_shared_block "$CHECK_CONTRACT_MARKER" "$CHECK_CONTRACT_FILE"
-    _inject_shared_block "$OUTCOME_CONTRACT_MARKER" "$OUTCOME_CONTRACT_FILE"
+    _inject_shared_block "comms" "$COMMS_CONTRACT_FILE"
+    _inject_shared_block "check" "$CHECK_CONTRACT_FILE"
+    _inject_shared_block "outcome" "$OUTCOME_CONTRACT_FILE"
   fi
 
   # Forward the nix-baked --agents JSON to the Agent. AGENTS_JSON_TEMPLATE is
