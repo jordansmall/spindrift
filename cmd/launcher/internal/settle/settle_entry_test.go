@@ -582,6 +582,117 @@ func TestSettle_RecordLanding_NoOpWhenTrackerDoesNotImplementIt(t *testing.T) {
 	}
 }
 
+// TestSettle_SpecMismatchOutcome_TransitionsToSpecMismatchLabel verifies that
+// a status=spec-mismatch outcome (issue #2275's pre-implement SPEC CHECK
+// halt) swaps agent-in-progress to agent-spec-mismatch, mirroring
+// TestSettle_BlockedOutcome_DemotesToFailed's shape. Uses a github-shaped
+// tracker (AsNoLandingRecorder) since a plain forge.NewFake implements
+// LandingRecorder and would take the read-only/local comment-relay branch
+// instead of this non-relay one.
+func TestSettle_SpecMismatchOutcome_TransitionsToSpecMismatchLabel(t *testing.T) {
+	const issNum = "42"
+
+	fc := forge.NewFake(testDispatchLabels)
+	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
+
+	d := dispatch.NewFake()
+	result := dispatch.Result{
+		Success:      true,
+		OutcomeFound: true,
+		Outcome:      outcome.Outcome{Issue: issNum, Landing: "none", Status: forge.SpecMismatchStatus, Note: "title asks X, body asks Y"},
+	}
+
+	s := New(baseConfig(), fc.AsNoLandingRecorder(), fc)
+	s.Settle(d, issNum, 0, result)
+
+	iss, _ := fc.Issue(issNum)
+	if !containsLabel(iss.Labels, "agent-spec-mismatch") {
+		t.Errorf("spec-mismatch outcome must transition to agent-spec-mismatch; got labels=%v", iss.Labels)
+	}
+	if containsLabel(iss.Labels, "agent-in-progress") {
+		t.Errorf("spec-mismatch outcome must remove agent-in-progress; got labels=%v", iss.Labels)
+	}
+}
+
+// TestSettle_SpecMismatchOutcome_LocalRelaysCommentBeforeTransition verifies
+// that when the tracker implements LandingRecorder (local's shape, here a
+// plain forge.NewFake) and a SPINDRIFT_COMMENT relay was found, Settle posts
+// the relayed comment via it.Comment before transitioning to
+// agent-spec-mismatch — the read-only/local Box can't post its own
+// escalation comment in-box, so settle relays it host-side.
+func TestSettle_SpecMismatchOutcome_LocalRelaysCommentBeforeTransition(t *testing.T) {
+	const issNum = "43"
+	const relayedComment = "some escalation body"
+
+	fc := forge.NewFake(testDispatchLabels)
+	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
+
+	d := dispatch.NewFake()
+	result := dispatch.Result{
+		Success:      true,
+		OutcomeFound: true,
+		Outcome:      outcome.Outcome{Issue: issNum, Landing: "none", Status: forge.SpecMismatchStatus, Note: "title asks X, body asks Y"},
+		CommentFound: true,
+		Comment:      relayedComment,
+	}
+
+	s := New(baseConfig(), fc, fc)
+	s.Settle(d, issNum, 0, result)
+
+	found := false
+	for _, c := range fc.CommentCalls {
+		if c.Body == relayedComment {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("want a comment call carrying the relayed comment %q; got %+v", relayedComment, fc.CommentCalls)
+	}
+
+	iss, _ := fc.Issue(issNum)
+	if !containsLabel(iss.Labels, "agent-spec-mismatch") {
+		t.Errorf("spec-mismatch outcome must transition to agent-spec-mismatch; got labels=%v", iss.Labels)
+	}
+}
+
+// TestSettle_SpecMismatchOutcome_LocalNoCommentDemotesToFailed verifies that
+// when the tracker implements LandingRecorder but no SPINDRIFT_COMMENT relay
+// arrived (CommentFound false), Settle demotes the issue to agent-failed
+// instead of silently landing on agent-spec-mismatch with no escalation
+// comment at all.
+func TestSettle_SpecMismatchOutcome_LocalNoCommentDemotesToFailed(t *testing.T) {
+	const issNum = "44"
+
+	fc := forge.NewFake(testDispatchLabels)
+	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
+
+	d := dispatch.NewFake()
+	d.UsageReportBody = "## Run usage\n\ncost: 0.10"
+	result := dispatch.Result{
+		Success:      true,
+		OutcomeFound: true,
+		Outcome:      outcome.Outcome{Issue: issNum, Landing: "none", Status: forge.SpecMismatchStatus, Note: "title asks X, body asks Y"},
+		CommentFound: false,
+	}
+
+	s := New(baseConfig(), fc, fc)
+	s.Settle(d, issNum, 0, result)
+
+	// Only the usage comment should have been posted -- no separate
+	// escalation-relay comment, since no relay ever arrived.
+	if len(fc.CommentCalls) != 1 || fc.CommentCalls[0].Body != d.UsageReportBody {
+		t.Errorf("want exactly 1 comment call (the usage report), got %+v", fc.CommentCalls)
+	}
+
+	iss, _ := fc.Issue(issNum)
+	if !containsLabel(iss.Labels, "agent-failed") {
+		t.Errorf("no-relay spec-mismatch outcome must demote to agent-failed; got labels=%v", iss.Labels)
+	}
+	if containsLabel(iss.Labels, "agent-spec-mismatch") {
+		t.Errorf("no-relay spec-mismatch outcome must not land on agent-spec-mismatch; got labels=%v", iss.Labels)
+	}
+}
+
 var errFake = fakeErr("fake error")
 
 type fakeErr string

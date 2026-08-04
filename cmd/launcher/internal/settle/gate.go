@@ -156,6 +156,29 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, gen uint64, result di
 			fmt.Printf("    #%s  landing=%s  status=%s\n", num, branch, o.Status)
 		}
 		s.postUsageComment(num, d)
+	case forge.SpecMismatchStatus:
+		// A read-only Box (or local's file-backed tracker) can't post its own
+		// escalation comment in-box, so it relays one via SPINDRIFT_COMMENT the
+		// same way research's verdict comment does (result.Comment/
+		// CommentFound, dispatch/result.go) -- post it host-side before the
+		// label swap. A relay that never arrived means the Box crashed or
+		// malformed its output after deciding to halt, which is no more
+		// trustworthy than a missing outcome line, so it demotes to Failed
+		// instead of silently landing on SpecMismatch with no comment at all.
+		if s.landing != nil || s.readOnly {
+			if !result.CommentFound || result.Comment == "" {
+				fmt.Printf("    #%s  landing=%s  status=%s  !! %s (no escalation comment relayed)\n", num, o.Landing, o.Status, o.Note)
+				s.transitionState(num, forge.InProgress, forge.Failed)
+				s.postUsageComment(num, d)
+				return
+			}
+			if err := s.it.Comment(num, result.Comment); err != nil {
+				fmt.Fprintf(os.Stderr, "    ?? #%s: could not post spec-mismatch comment: %v\n", num, err)
+			}
+		}
+		fmt.Printf("    #%s  landing=%s  status=%s  note=%s\n", num, o.Landing, o.Status, o.Note)
+		s.transitionState(num, forge.InProgress, forge.SpecMismatch)
+		s.postUsageComment(num, d)
 	default:
 		fmt.Printf("    #%s  landing=%s  status=%s\n", num, o.Landing, o.Status)
 		s.postUsageComment(num, d)
