@@ -2612,7 +2612,8 @@ func TestDoctor_AllLabelsPresent_PrintsSuccess(t *testing.T) {
 	f := forge.NewFake()
 	f.ProbeRepo = "owner/repo"
 	research := doctor.ResearchLabelNames()
-	f.Labels = append([]string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}, research...)
+	priority := doctor.PriorityLabelNames()
+	f.Labels = append(append([]string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}, research...), priority...)
 
 	var buf bytes.Buffer
 	if err := runDoctor(f, f, defaultLabelConfig(), &buf, strings.NewReader(""), false); err != nil {
@@ -2720,15 +2721,16 @@ func TestDoctor_TTY_Confirm(t *testing.T) {
 	f := forge.NewFake()
 	f.ProbeRepo = "owner/repo"
 	research := doctor.ResearchLabelNames()
-	// Two work labels missing: agent-failed and agent-complete. Research
-	// labels are all present throughout, so this test stays scoped to work
-	// label creation.
-	f.Labels = append([]string{"ready-for-agent", "agent-in-progress"}, research...)
+	priority := doctor.PriorityLabelNames()
+	// Two work labels missing: agent-failed and agent-complete. Research and
+	// priority labels are all present throughout, so this test stays scoped
+	// to work label creation.
+	f.Labels = append(append([]string{"ready-for-agent", "agent-in-progress"}, research...), priority...)
 	// After creation the fake doesn't auto-add to Labels, so script the
 	// second ListLabels call (re-verify) to return all four work labels.
 	f.LabelsSeq = [][]string{
-		append([]string{"ready-for-agent", "agent-in-progress"}, research...),                                   // first check
-		append([]string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}, research...), // re-verify
+		append(append([]string{"ready-for-agent", "agent-in-progress"}, research...), priority...),                                   // first check
+		append(append([]string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}, research...), priority...), // re-verify
 	}
 
 	var buf bytes.Buffer
@@ -2764,10 +2766,13 @@ func TestDoctor_TTY_Confirm_ResearchLabels(t *testing.T) {
 	f.ProbeRepo = "owner/repo"
 	work := []string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}
 	research := doctor.ResearchLabelNames()
-	f.Labels = work // all work labels present, all six research labels missing
+	priority := doctor.PriorityLabelNames()
+	// All work and priority labels present; all six research labels missing,
+	// so this test stays scoped to research label creation.
+	f.Labels = append(append([]string{}, work...), priority...)
 	f.LabelsSeq = [][]string{
-		work,
-		append(append([]string{}, work...), research...), // re-verify: research now created too
+		append(append([]string{}, work...), priority...),
+		append(append(append([]string{}, work...), priority...), research...), // re-verify: research now created too
 	}
 
 	var buf bytes.Buffer
@@ -2826,6 +2831,106 @@ func TestDoctor_TTY_Confirm_ResearchStillMissing_Advisory(t *testing.T) {
 	}
 	if strings.Contains(out, "ok: all triage and research labels present") {
 		t.Errorf("must not print success message when research labels are still missing, got:\n%s", out)
+	}
+}
+
+// TestDoctor_NoTTY_PriorityLabelsMissing_ExitZero verifies missing priority
+// labels (ADR 0040) are advisory only: doctor reports each one MISSING but
+// exits zero as long as the fatal work labels are all present, mirroring the
+// research tier's non-fatal treatment (#2282).
+func TestDoctor_NoTTY_PriorityLabelsMissing_ExitZero(t *testing.T) {
+	f := forge.NewFake()
+	f.ProbeRepo = "owner/repo"
+	f.Labels = []string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}
+
+	var buf bytes.Buffer
+	err := runDoctor(f, f, defaultLabelConfig(), &buf, strings.NewReader(""), false)
+	if err != nil {
+		t.Fatalf("missing priority labels must not fail doctor, got: %v", err)
+	}
+	out := buf.String()
+	for _, label := range doctor.PriorityLabelNames() {
+		if !strings.Contains(out, "MISSING: label \""+label+"\"") {
+			t.Errorf("want MISSING line for priority label %q, got:\n%s", label, out)
+		}
+	}
+}
+
+// TestDoctor_TTY_Confirm_PriorityLabels verifies interactive doctor also
+// offers to create missing priority labels (advisory tier, ADR 0040)
+// alongside work labels, and creates them with real colors/descriptions —
+// never the "ededed" gray fallback (#2282).
+func TestDoctor_TTY_Confirm_PriorityLabels(t *testing.T) {
+	f := forge.NewFake()
+	f.ProbeRepo = "owner/repo"
+	work := []string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}
+	research := doctor.ResearchLabelNames()
+	priority := doctor.PriorityLabelNames()
+	// All work and research labels present; all three priority labels
+	// missing, so this test stays scoped to priority label creation.
+	f.Labels = append(append([]string{}, work...), research...)
+	f.LabelsSeq = [][]string{
+		append(append([]string{}, work...), research...),
+		append(append(append([]string{}, work...), research...), priority...), // re-verify: priority now created too
+	}
+
+	var buf bytes.Buffer
+	err := runDoctor(f, f, defaultLabelConfig(), &buf, strings.NewReader("y\n"), true)
+	if err != nil {
+		t.Fatalf("unexpected error after confirm: %v", err)
+	}
+	if len(f.CreateLabelCalls) != len(priority) {
+		t.Fatalf("want %d CreateLabel calls, got %d", len(priority), len(f.CreateLabelCalls))
+	}
+	for _, call := range f.CreateLabelCalls {
+		if call.Color == "" || call.Color == "ededed" {
+			t.Errorf("priority label %q should use a named color, got %q", call.Name, call.Color)
+		}
+		if call.Description == "" {
+			t.Errorf("priority label %q should have a description", call.Name)
+		}
+	}
+}
+
+// TestDoctor_TTY_Confirm_PriorityStillMissing_Advisory verifies that when a
+// create run's re-verify still finds priority labels missing (e.g. eventual
+// consistency on the forge side), doctor prints a non-fatal advisory summary
+// instead of silently returning nil — mirroring the research tier's
+// analogous message but never failing the check (#2282).
+func TestDoctor_TTY_Confirm_PriorityStillMissing_Advisory(t *testing.T) {
+	f := forge.NewFake()
+	f.ProbeRepo = "owner/repo"
+	work := []string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}
+	research := doctor.ResearchLabelNames()
+	f.Labels = append(append([]string{}, work...), research...) // all work and research labels present, all three priority labels missing
+	f.LabelsSeq = [][]string{
+		append(append([]string{}, work...), research...),
+		append(append([]string{}, work...), research...), // re-verify: priority labels still missing despite CreateLabel "succeeding"
+	}
+
+	var buf bytes.Buffer
+	err := runDoctor(f, f, defaultLabelConfig(), &buf, strings.NewReader("y\n"), true)
+	if err != nil {
+		t.Fatalf("priority labels still missing after creation must not fail doctor, got: %v", err)
+	}
+	out := buf.String()
+	var advisoryLine string
+	for _, line := range strings.Split(out, "\n") {
+		if strings.HasPrefix(line, "advisory: 3 priority label(s) still missing after creation") {
+			advisoryLine = line
+			break
+		}
+	}
+	if advisoryLine == "" {
+		t.Fatalf("want advisory summary after incomplete priority creation, got:\n%s", out)
+	}
+	for _, name := range doctor.PriorityLabelNames() {
+		if !strings.Contains(advisoryLine, name) {
+			t.Errorf("want advisory line to name missing label %q, got:\n%s", name, advisoryLine)
+		}
+	}
+	if strings.Contains(out, "ok: all triage and research labels present") {
+		t.Errorf("must not print success message when priority labels are still missing, got:\n%s", out)
 	}
 }
 
