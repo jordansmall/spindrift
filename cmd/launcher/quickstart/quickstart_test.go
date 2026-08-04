@@ -630,6 +630,59 @@ func TestRunQuickstart_AmbientGHToken_SkipsPrompt(t *testing.T) {
 	}
 }
 
+// TestRunQuickstart_GithubTokenEnvVar_ReadFromDescriptor pins the github
+// token-acquisition path to backend.GitHub.TokenEnvVar rather than a
+// hardcoded "GH_TOKEN" literal: it swaps in a registry with a differently
+// named TokenEnvVar (mirroring the registry-override pattern used by
+// TestDoctorHints_RegistryDriven) and asserts the ambient lookup follows the
+// descriptor, not the literal.
+func TestRunQuickstart_GithubTokenEnvVar_ReadFromDescriptor(t *testing.T) {
+	original := backend.Registry
+	replaced := append([]backend.Descriptor{}, original...)
+	for i, d := range replaced {
+		if d.Name == "github" {
+			replaced[i].TokenEnvVar = "CUSTOM_GH_TOKEN"
+		}
+	}
+	backend.Registry = replaced
+	defer func() { backend.Registry = original }()
+
+	dir := t.TempDir()
+	var out bytes.Buffer
+	stdin := strings.NewReader(strings.Join([]string{
+		"jordansmall/spindrift", // repoSlug
+		"podman",                // runtime
+		"Ada Lovelace",          // git user name
+		"ada@example.com",       // git user email
+		// no GitHub token line — ambient CUSTOM_GH_TOKEN must be reused without a prompt
+	}, "\n") + "\n")
+
+	env := fakeEnvironment{
+		env: map[string]string{
+			"GH_TOKEN":                "ghp_wrongtoken",
+			"CUSTOM_GH_TOKEN":         "ghp_righttoken",
+			"CLAUDE_CODE_OAUTH_TOKEN": "claude-oauth-faketoken",
+		},
+		runtimes: map[string]bool{"podman": true},
+	}
+
+	if err := runQuickstart(dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false); err != nil {
+		t.Fatalf("runQuickstart: %v", err)
+	}
+
+	if strings.Contains(out.String(), "No ambient") {
+		t.Errorf("expected the descriptor-named token env var to be picked up ambiently without a prompt, got transcript:\n%s", out.String())
+	}
+
+	harnessEnv, err := os.ReadFile(filepath.Join(dir, "harness.env"))
+	if err != nil {
+		t.Fatalf("read harness.env: %v", err)
+	}
+	if !strings.Contains(string(harnessEnv), "GH_TOKEN=ghp_righttoken") {
+		t.Errorf("expected harness.env to carry the token read via the descriptor's CUSTOM_GH_TOKEN env var, got:\n%s", harnessEnv)
+	}
+}
+
 func TestRunQuickstart_FineGrainedToken_PrintsRequiredPermissions(t *testing.T) {
 	dir := t.TempDir()
 	var out bytes.Buffer
@@ -1247,7 +1300,7 @@ func TestRender_HappyPath_ReturnsFourFiles(t *testing.T) {
 		gitUserName:      "Ada Lovelace",
 		gitUserEmail:     "ada@example.com",
 		tracker:          trackerSettings{issueTracker: "github"},
-		ghToken:          "ghp_faketoken",
+		token:            "ghp_faketoken",
 		claudeOAuthToken: "claude-oauth-faketoken",
 	}
 
@@ -1303,7 +1356,7 @@ func TestRender_ForgejoCodeberg_ConfiguresBothSeamsOmitsDefaultBaseURL(t *testin
 		gitUserName:      "Ada",
 		gitUserEmail:     "ada@example.com",
 		tracker:          trackerSettings{issueTracker: "forgejo", forgejoBaseURL: "https://codeberg.org"},
-		forgejoToken:     "forgejo-faketoken",
+		token:            "forgejo-faketoken",
 		claudeOAuthToken: "claude-oauth-faketoken",
 	}
 
@@ -1341,7 +1394,7 @@ func TestRender_ForgejoSelfHosted_EmitsBaseURL(t *testing.T) {
 		gitUserName:      "Ada",
 		gitUserEmail:     "ada@example.com",
 		tracker:          trackerSettings{issueTracker: "forgejo", forgejoBaseURL: "https://git.example.com"},
-		forgejoToken:     "forgejo-faketoken",
+		token:            "forgejo-faketoken",
 		claudeOAuthToken: "claude-oauth-faketoken",
 	}
 
@@ -1366,7 +1419,7 @@ func TestRender_AnthropicAPIKey_WrittenWhenNoOAuthToken(t *testing.T) {
 		gitUserName:     "Ada Lovelace",
 		gitUserEmail:    "ada@example.com",
 		tracker:         trackerSettings{issueTracker: "github"},
-		ghToken:         "ghp_faketoken",
+		token:           "ghp_faketoken",
 		anthropicAPIKey: "sk-ant-faketoken",
 	}
 
@@ -1391,7 +1444,7 @@ func TestRender_NixSpecialChars_AreEscaped(t *testing.T) {
 		gitUserName:  "Ada Lovelace",
 		gitUserEmail: "ada@example.com",
 		tracker:      trackerSettings{issueTracker: "github"},
-		ghToken:      "ghp_faketoken",
+		token:        "ghp_faketoken",
 	}
 
 	cases := []struct {
@@ -1484,6 +1537,32 @@ func TestDoctorHints_RegistryDriven(t *testing.T) {
 
 	if gotToken, gotSlug := doctorHints("gitlab"); gotToken != "GITLAB_TOKEN" || gotSlug != "GITLAB_BASE_URL" {
 		t.Errorf(`doctorHints("gitlab") = (%q, %q), want ("GITLAB_TOKEN", "GITLAB_BASE_URL")`, gotToken, gotSlug)
+	}
+}
+
+// TestRenderHarnessEnv_RegistryDriven pins that renderHarnessEnv resolves its
+// harness.env token line's env-var name through backend.ByName rather than a
+// hardcoded github/forgejo branch: appending a fake "gitlab" descriptor with
+// its own TokenEnvVar to backend.Registry makes renderHarnessEnv("gitlab", ...)
+// emit that descriptor's env var, not a GH_TOKEN fallback, with zero
+// quickstart-side code change for the new backend.
+func TestRenderHarnessEnv_RegistryDriven(t *testing.T) {
+	original := backend.Registry
+	backend.Registry = append(append([]backend.Descriptor{}, original...), backend.Descriptor{
+		Name:             "gitlab",
+		ValidAsTracker:   true,
+		ValidAsCodeForge: true,
+		TokenEnvVar:      "GITLAB_TOKEN",
+	})
+	defer func() { backend.Registry = original }()
+
+	out := renderHarnessEnv("gitlab", "gitlab-faketoken", "claude-oauth-faketoken", "")
+
+	if !strings.Contains(out, "GITLAB_TOKEN=gitlab-faketoken") {
+		t.Errorf("expected harness.env to contain GITLAB_TOKEN, got:\n%s", out)
+	}
+	if strings.Contains(out, "GH_TOKEN=") {
+		t.Errorf("expected harness.env to omit GH_TOKEN for the gitlab backend, got:\n%s", out)
 	}
 }
 
