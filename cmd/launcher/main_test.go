@@ -2731,6 +2731,36 @@ func TestDoctor_ReportsRecoverableCount(t *testing.T) {
 	}
 }
 
+// TestDoctor_RecoverableCount_ZeroWhenLabelUnmapped verifies doctor reports
+// zero recoverable issues — not the full open-issue count — against a
+// tracker whose label family leaves Recoverable unmapped, mirroring GitHub
+// and Forgejo in production (#2255): both ignore an empty label filter and
+// return every open issue rather than erroring, so a naive unconditional
+// ListIssues(Recoverable) call would misreport every open issue as
+// recoverable instead of zero.
+func TestDoctor_RecoverableCount_ZeroWhenLabelUnmapped(t *testing.T) {
+	f := forge.NewFake(forge.DispatchLabels{
+		Dispatchable: "ready-for-agent",
+		InProgress:   "agent-in-progress",
+		Complete:     "agent-complete",
+		Failed:       "agent-failed",
+		// Recoverable left empty — never a real label on this tracker.
+	})
+	f.ProbeRepo = "owner/repo"
+	f.Labels = []string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}
+	f.SetIssue(forge.Issue{Number: "5", State: forge.IssueOpen, Labels: []string{"ready-for-agent"}})
+	f.SetIssue(forge.Issue{Number: "6", State: forge.IssueOpen, Labels: []string{"agent-failed"}})
+
+	var buf bytes.Buffer
+	if err := runDoctor(f, f, defaultLabelConfig(), &buf, strings.NewReader(""), false); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "0 recoverable issue(s)") {
+		t.Errorf("want output to report 0 recoverable issue(s), got:\n%s", out)
+	}
+}
+
 // TestDoctor_AllLabelsPresent_PrintsSuccess verifies the early-return path
 // taken when both work and research labels are already present prints an
 // explicit success confirmation, mirroring the post-creation success line
