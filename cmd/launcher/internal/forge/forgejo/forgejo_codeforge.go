@@ -13,9 +13,16 @@ import (
 	"spindrift.dev/launcher/internal/forge/rest"
 )
 
-// defaultForgejoProbeTimeout bounds the default HTTP client used for the
-// Probe REST call so a hung Forgejo instance can't block Probe forever.
-const defaultForgejoProbeTimeout = 30 * time.Second
+// defaultForgejoHTTPTimeout bounds the default HTTP client used for all
+// Forgejo REST calls -- both the IssueTracker adapter (NewForgejoClient) and
+// the CodeForge adapter's Probe/Merge (newForgejoCodeForge) -- so a hung
+// Forgejo instance can't block any of them forever. This also matters for
+// the shared-client seam (issue #2256): when CODE_FORGE=forgejo and
+// ISSUE_TRACKER=forgejo agree on the same repo, newForgejoCodeForge reuses
+// the tracker's own *rest.Client instead of building a second one, so the
+// tracker's default must be timeout-bound too, not just the CodeForge's own
+// locally-computed default.
+const defaultForgejoHTTPTimeout = 30 * time.Second
 
 // forgejoGitRemoteURL builds a token-authenticated git clone URL for repo
 // (an owner/repo slug) on the Forgejo instance at baseURL, e.g.
@@ -143,7 +150,7 @@ func newForgejoCodeForge(cfg ForgejoCodeForgeConfig, tracker forge.IssueTracker,
 
 	hc := cfg.HTTPClient
 	if hc == nil {
-		hc = &http.Client{Timeout: defaultForgejoProbeTimeout}
+		hc = &http.Client{Timeout: defaultForgejoHTTPTimeout}
 	}
 
 	var restCli *rest.Client

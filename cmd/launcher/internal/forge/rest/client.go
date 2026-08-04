@@ -71,6 +71,14 @@ func New(baseURL string, auth AuthStrategy, backend string, statuses StatusMap, 
 	}
 }
 
+// HTTPClientForTest returns the underlying *http.Client Do issues requests
+// through -- test-only, letting callers outside this package (e.g. an
+// adapter's own tests) assert construction defaults, such as a bounded
+// Timeout, without driving a real slow request through Do.
+func (c *Client) HTTPClientForTest() *http.Client {
+	return c.hc
+}
+
 // Do issues an HTTP request with the given method and path (relative to the
 // Client's base URL), marshaling body as the JSON request body (nil for
 // none) and decoding a JSON response into out (nil to discard the body). A

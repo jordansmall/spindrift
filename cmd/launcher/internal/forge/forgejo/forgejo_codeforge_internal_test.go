@@ -67,6 +67,16 @@ func TestNewForgejoCodeForge_ReusesTrackerRESTClient(t *testing.T) {
 		t.Fatalf("newForgejoCodeForge(..., tracker, ...).rest = %p, want the tracker's own *rest.Client %p (shared instance)", cf.rest, fc.rest)
 	}
 
+	// The shared instance must still carry a bounded HTTP timeout: when
+	// NewForgejoClient built fc.rest, it must not have defaulted to the
+	// untimed http.DefaultClient, since newForgejoCodeForge's own
+	// locally-computed timed client is discarded in this reuse path -- a
+	// hung Forgejo instance must not be able to block Probe/Merge/IssueTracker
+	// calls forever (regression coverage for the shared-client seam).
+	if timeout := fc.rest.HTTPClientForTest().Timeout; timeout <= 0 {
+		t.Fatalf("tracker built by NewForgejoClient with no HTTPClient override: rest client Timeout = %v, want a bounded (>0) timeout", timeout)
+	}
+
 	// Sanity check the fallback: a nil tracker (or one that isn't a
 	// *forgejoClient) must NOT share the same *rest.Client as some other
 	// unrelated tracker -- it builds its own instead.

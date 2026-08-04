@@ -171,8 +171,8 @@ type ForgeBuilder func(repoSlug string, tracker trackerSettings, ghToken, jiraTo
 // forgejoProbeTimeout bounds the HTTP client the forgejo IssueTracker uses
 // for the interactive token-validation ping (acquireForgejoToken's Probe
 // call), so an unreachable or hung Forgejo host can't block the wizard
-// forever. Mirrors defaultForgejoProbeTimeout in the sibling Forgejo
-// CodeForge adapter.
+// forever. Mirrors defaultForgejoHTTPTimeout in the sibling Forgejo
+// IssueTracker/CodeForge adapters.
 const forgejoProbeTimeout = 30 * time.Second
 
 // buildForge is the production ForgeBuilder. The Code Forge is github by
