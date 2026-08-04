@@ -108,7 +108,7 @@ func TestRun_EmptyRangeAfterReadyClaim_AppendsCorrectiveOutcome(t *testing.T) {
 	dir, base, branch := newRepoNoFeatureCommits(t)
 	outbox := t.TempDir()
 
-	priorLine := outcome.Outcome{Issue: "7", Landing: branch, Status: "ready", Note: "done"}.Line() + " nonce=abc123"
+	priorLine := outcome.Outcome{Issue: "7", Landing: branch, Status: "ready", Note: "done"}.Line()
 
 	logPath := filepath.Join(t.TempDir(), "box.log")
 	logFile, err := os.Create(logPath)
@@ -126,7 +126,6 @@ func TestRun_EmptyRangeAfterReadyClaim_AppendsCorrectiveOutcome(t *testing.T) {
 		OutboxDir:        outbox,
 		Issue:            "7",
 		PriorOutcomeLine: priorLine,
-		Nonce:            "abc123",
 	}, logFile)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
@@ -137,14 +136,10 @@ func TestRun_EmptyRangeAfterReadyClaim_AppendsCorrectiveOutcome(t *testing.T) {
 		t.Fatalf("bundle created for an empty range, want none")
 	}
 
-	// Read back through the same nonce-gated scan the launcher runs in
-	// production (issue #1939): the corrective line must carry the run's
-	// nonce, or the gate would exclude it and let the agent's stale
-	// status=ready claim win last-wins instead.
-	resolved, err := outcome.Resolve([]outcome.PassLog{{Path: logPath}}, "abc123", "")
-	if resolved.Skipped {
-		t.Error("expected skipped=false: the corrective line must carry the nonce")
-	}
+	// Read back through the same scan the launcher runs in production: the
+	// corrective line must be found (ADR 0039, issue #2274 — the outcome scan
+	// no longer gates on a nonce).
+	resolved, err := outcome.Resolve([]outcome.PassLog{{Path: logPath}}, "")
 	if err != nil {
 		t.Fatalf("outcome.Resolve: %v", err)
 	}
@@ -160,34 +155,6 @@ func TestRun_EmptyRangeAfterReadyClaim_AppendsCorrectiveOutcome(t *testing.T) {
 	}
 	if !strings.Contains(o.Note, "ready") || !strings.Contains(o.Note, branch) {
 		t.Errorf("corrective outcome note = %q, want it to name the ready/no-commits contradiction on %s", o.Note, branch)
-	}
-}
-
-// TestRun_EmptyRangeAfterReadyClaim_NoNonceOmitsField verifies that an empty
-// Config.Nonce (a caller with no per-run nonce to carry, e.g. tests) prints
-// the corrective line with no trailing " nonce=" field, rather than the
-// literal empty value "nonce=" (issue #1939).
-func TestRun_EmptyRangeAfterReadyClaim_NoNonceOmitsField(t *testing.T) {
-	dir, base, branch := newRepoNoFeatureCommits(t)
-	outbox := t.TempDir()
-
-	priorLine := outcome.Outcome{Issue: "7", Landing: branch, Status: "ready", Note: "done"}.Line()
-
-	var stdout bytes.Buffer
-	err := bundleout.Run(bundleout.Config{
-		Repo:             dir,
-		Base:             base,
-		Branch:           branch,
-		OutboxDir:        outbox,
-		Issue:            "7",
-		PriorOutcomeLine: priorLine,
-	}, &stdout)
-	if err != nil {
-		t.Fatalf("Run: %v", err)
-	}
-
-	if strings.Contains(stdout.String(), "nonce=") {
-		t.Errorf("stdout = %q, want no nonce field when Config.Nonce is empty", stdout.String())
 	}
 }
 
