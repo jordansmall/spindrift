@@ -50,9 +50,6 @@ type Config struct {
 	// RecoveryAttempted reports whether a resume pass already ran and also
 	// produced no outcome.
 	RecoveryAttempted bool
-	// Nonce is this run's control nonce (RUN_NONCE), appended to the
-	// emitted line unconditionally, matching the bash's `nonce=${RUN_NONCE:-}`.
-	Nonce string
 	// MaxAttempts bounds the push retry loop; values < 1 clamp to 1.
 	MaxAttempts int
 	// Backoff and Jitter feed retry.LinearBackoff{Unit,Jitter}; a negative
@@ -88,7 +85,7 @@ func Run(cfg Config, w io.Writer) error {
 	}
 
 	if cfg.Kind == "research" {
-		return emit(w, cfg.Issue, "none", note, cfg.Nonce)
+		return emit(w, cfg.Issue, "none", note)
 	}
 
 	note = salvage(git, note)
@@ -113,13 +110,13 @@ func Run(cfg Config, w io.Writer) error {
 		note = pushWithRetry(git, clock, cfg, note)
 	}
 
-	return emit(w, cfg.Issue, cfg.Branch, note, cfg.Nonce)
+	return emit(w, cfg.Issue, cfg.Branch, note)
 }
 
 // emit builds and writes the final SPINDRIFT_OUTCOME line for w, flagged
 // synthetic=true (issue #2223) since it's the backstop's own manufactured
 // terminal signal, not one the driver emitted.
-func emit(w io.Writer, issue, landing, note, nonce string) error {
+func emit(w io.Writer, issue, landing, note string) error {
 	o := outcome.Outcome{
 		Issue:     issue,
 		Landing:   landing,
@@ -127,7 +124,7 @@ func emit(w io.Writer, issue, landing, note, nonce string) error {
 		Note:      note,
 		Synthetic: true,
 	}
-	line := o.Line() + " nonce=" + nonce
+	line := o.Line()
 	_, err := fmt.Fprintln(w, line)
 	return err
 }

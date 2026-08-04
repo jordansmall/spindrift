@@ -66,7 +66,6 @@ func baseConfig(git *fakeGit, clk *fakeClock) Config {
 		Base:               "origin/main",
 		Kind:               "work",
 		OutboxRelayCapable: true,
-		Nonce:              "abc123",
 		Clock:              clk.clock(),
 		Git:                git.run,
 	}
@@ -86,8 +85,8 @@ func TestRun_ResearchKind(t *testing.T) {
 	if !strings.Contains(line, "landing=none") || !strings.Contains(line, "status=blocked") {
 		t.Fatalf("unexpected line: %q", line)
 	}
-	if !strings.Contains(line, "nonce=abc123") {
-		t.Fatalf("expected nonce in line: %q", line)
+	if strings.Contains(line, "nonce=") {
+		t.Fatalf("expected no nonce field in line: %q", line)
 	}
 	if len(git.calls) != 0 {
 		t.Fatalf("expected git never called for research kind, got %v", git.calls)
