@@ -417,8 +417,6 @@ let
       "forgejo"
     else
       null;
-  researchReadonlyFragmentFile =
-    fragmentsDir + "/research-verdict-${researchReadonlyForgeSuffix}-readonly.md";
   buildTimeRejectVerdicts = promptContract.buildTimeRejectVerdicts {
     staticGates = {
       orchestratorEnabled = mergedDefaults.orchestratorEnabled == true;
@@ -428,7 +426,9 @@ let
       "reviewer-verdict" = reviewPrompt;
     }
     // lib.optionalAttrs (researchReadonlyForgeSuffix != null) {
-      "verdict-comment-relay" = builtins.readFile researchReadonlyFragmentFile;
+      "verdict-comment-relay" = builtins.readFile (
+        fragmentsDir + "/research-verdict-${researchReadonlyForgeSuffix}-readonly.md"
+      );
     };
   };
 
