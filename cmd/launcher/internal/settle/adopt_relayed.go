@@ -59,8 +59,12 @@ func (s *Settle) tryAdoptRelayedBranch(d dispatch.Dispatcher, num string, gen ui
 // see tryAdoptRelayedBranch's own doc comment for the full reasoning behind
 // the self-report trust boundary and the remaining gate conditions, which
 // this function mirrors unchanged apart from the outcome-line check itself.
+//
+// No explicit !result.OutcomeFound guard here: gate.go's sole caller already
+// sits inside the `!result.OutcomeFound` branch, so OutcomeFound is always
+// false on entry.
 func (s *Settle) tryAdoptRelayedBranchNoOutcome(d dispatch.Dispatcher, num string, gen uint64, result dispatch.Result) bool {
-	if result.OutcomeFound || !s.readOnly || s.pr == nil ||
+	if !s.readOnly || s.pr == nil ||
 		!result.SelfReportFound || !isSuccessSelfReport(result.SelfReport.Status) {
 		return false
 	}
