@@ -448,11 +448,13 @@ func TestForgejoClient_ListOpenIssues_WalksAllPages(t *testing.T) {
 }
 
 // newForgejoLabelServer starts an httptest server backing a single
-// owner/repo Forgejo repository: it answers Probe, ListLabels, and
-// CreateLabel against an in-memory label set seeded from initial, and
-// records every name POSTed to the create-label endpoint (in call order,
-// duplicates included) so a test can assert on exactly what doctor.Run
-// asked the real forgejo adapter to create.
+// owner/repo Forgejo repository: it answers Probe, ListLabels, ListIssues
+// (always empty — doctor.Run's recoverable-issue count, #2255, needs
+// somewhere to land, not a populated fixture), and CreateLabel against an
+// in-memory label set seeded from initial, and records every name POSTed to
+// the create-label endpoint (in call order, duplicates included) so a test
+// can assert on exactly what doctor.Run asked the real forgejo adapter to
+// create.
 func newForgejoLabelServer(t *testing.T, initial []string) (srv *httptest.Server, created *[]string) {
 	t.Helper()
 	labels := make(map[string]bool, len(initial))
@@ -475,6 +477,9 @@ func newForgejoLabelServer(t *testing.T, initial []string) (srv *httptest.Server
 			}
 			w.WriteHeader(http.StatusOK)
 			json.NewEncoder(w).Encode(out)
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/owner/repo/issues":
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`[]`))
 		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/repos/owner/repo/labels":
 			var body map[string]any
 			json.NewDecoder(r.Body).Decode(&body)
