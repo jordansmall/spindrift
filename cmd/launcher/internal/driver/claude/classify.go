@@ -3,8 +3,9 @@
 // claude CLI transcript shape, and usage-log parsing. The parent driver
 // package owns the Driver interface and the registry wiring; the shared
 // Class/Reason/Classification vocabulary lives in driverkit, and this
-// package type-aliases it, so the registration adapter in driver/claude.go
-// needs no cast between this package's and driver's Class/Reason values.
+// package uses driverkit's types directly (no local aliases), so the
+// registration adapter in driver/claude.go needs no cast between this
+// package's and driver's Class/Reason values.
 package claude
 
 import (
@@ -17,28 +18,6 @@ import (
 	"spindrift.dev/launcher/internal/logscan"
 )
 
-// Class describes whether a non-zero agent exit is retryable or not.
-type Class = driverkit.Class
-
-const (
-	Transient = driverkit.Transient
-	Terminal  = driverkit.Terminal
-)
-
-// Reason identifies the specific cause of a classified exit.
-type Reason = driverkit.Reason
-
-const (
-	RateLimit       = driverkit.RateLimit
-	Overloaded      = driverkit.Overloaded
-	Network         = driverkit.Network
-	TaskFailed      = driverkit.TaskFailed
-	UnsupportedFlag = driverkit.UnsupportedFlag
-)
-
-// Classification is the result of Classify.
-type Classification = driverkit.Classification
-
 // resetsAtRe matches the JSON field "resetsAt":UNIX_TIMESTAMP (integer).
 var resetsAtRe = regexp.MustCompile(`"resetsAt"\s*:\s*(\d+)`)
 
@@ -48,18 +27,18 @@ var resetsAtRe = regexp.MustCompile(`"resetsAt"\s*:\s*(\d+)`)
 // (issue numbers, byte counts, port numbers, etc. containing digit
 // sequences).
 var transientExtras = []driverkit.Pattern{
-	{Substr: "rate_limit_error", Reason: RateLimit},
-	{Substr: "overloaded_error", Reason: Overloaded},
-	{Substr: "usage_limit_reached", Reason: RateLimit},
-	{Substr: "server_error", Reason: Overloaded},
-	{Substr: "429 Too Many Requests", Reason: RateLimit},
-	{Substr: "529 Overloaded", Reason: Overloaded},
-	{Substr: "Claude Code usage limit reached", Reason: RateLimit},
-	{Substr: "hit your session limit", Reason: RateLimit},
-	{Substr: "hit your weekly limit", Reason: RateLimit},
-	{Substr: "hit your Opus limit", Reason: RateLimit},
-	{Substr: "Overloaded", Reason: Overloaded},
-	{Substr: "net/http: request canceled", Reason: Network},
+	{Substr: "rate_limit_error", Reason: driverkit.RateLimit},
+	{Substr: "overloaded_error", Reason: driverkit.Overloaded},
+	{Substr: "usage_limit_reached", Reason: driverkit.RateLimit},
+	{Substr: "server_error", Reason: driverkit.Overloaded},
+	{Substr: "429 Too Many Requests", Reason: driverkit.RateLimit},
+	{Substr: "529 Overloaded", Reason: driverkit.Overloaded},
+	{Substr: "Claude Code usage limit reached", Reason: driverkit.RateLimit},
+	{Substr: "hit your session limit", Reason: driverkit.RateLimit},
+	{Substr: "hit your weekly limit", Reason: driverkit.RateLimit},
+	{Substr: "hit your Opus limit", Reason: driverkit.RateLimit},
+	{Substr: "Overloaded", Reason: driverkit.Overloaded},
+	{Substr: "net/http: request canceled", Reason: driverkit.Network},
 }
 
 // terminalExtras holds markers for genuine, non-retryable failures whose
@@ -71,26 +50,25 @@ var transientExtras = []driverkit.Pattern{
 // echo guard as transientExtras so a box editing this very string in its own
 // agent content is not misattributed (issues #579/#818).
 var terminalExtras = []driverkit.Pattern{
-	{Substr: "unknown option '--agents'", Reason: UnsupportedFlag},
+	{Substr: "unknown option '--agents'", Reason: driverkit.UnsupportedFlag},
 }
 
 // matchMarker classifies a single log line: a transient API/network marker
 // (Transient) takes precedence over a terminal CLI-usage marker (Terminal).
 // Returns ("", "", false) when neither matches.
-func matchMarker(line string) (Reason, Class, bool) {
+func matchMarker(line string) (driverkit.Reason, driverkit.Class, bool) {
 	if r, ok := driverkit.MatchTransient(line, transientExtras); ok {
-		return r, Transient, true
+		return r, driverkit.Transient, true
 	}
 	if r, ok := driverkit.MatchExtras(line, terminalExtras); ok {
-		return r, Terminal, true
+		return r, driverkit.Terminal, true
 	}
 	return "", "", false
 }
 
 // scanResult accumulates everything Classify needs from one pass over the log.
 type scanResult struct {
-	reason   Reason
-	class    Class
+	cl       driverkit.Classification
 	found    bool
 	resetsAt *time.Time
 }
@@ -111,18 +89,18 @@ type scanResult struct {
 // A missing log file is treated as terminal/taskFailed. Lines larger than the
 // 4 MiB scan buffer are processed in chunks, matching the same resilience
 // contract as lastInLog.
-func Classify(logPath string) (Classification, error) {
+func Classify(logPath string) (driverkit.Classification, error) {
 	sr, err := scanLog(logPath)
 	if err != nil {
-		return Classification{}, err
+		return driverkit.Classification{}, err
 	}
 
 	if !sr.found {
-		return Classification{Class: Terminal, Reason: TaskFailed}, nil
+		return driverkit.Classification{Class: driverkit.Terminal, Reason: driverkit.TaskFailed}, nil
 	}
 
-	cl := Classification{Class: sr.class, Reason: sr.reason}
-	if sr.reason == RateLimit {
+	cl := sr.cl
+	if cl.Reason == driverkit.RateLimit {
 		cl.ResetAt = sr.resetsAt
 	}
 	return cl, nil
@@ -148,10 +126,10 @@ func Classify(logPath string) (Classification, error) {
 // is only cleared by the type:"result" line itself or by a second genuine
 // agent-content event (issue #1197).
 func scanLog(logPath string) (scanResult, error) {
-	var sr scanResult
-	var echoReason Reason
+	var resetsAt *time.Time
+	var echoReason driverkit.Reason
 	var echoPending bool
-	err := driverkit.ScanLog(logPath, logscan.ChunkOversized, func(chunk string) {
+	extract := func(chunk string) driverkit.ScanDecision {
 		if isAgentContentEvent(chunk) {
 			// The agent's own tool_result / assistant-text / file-edit
 			// content can quote rate-limit markers verbatim (e.g. while
@@ -159,47 +137,43 @@ func scanLog(logPath string) (scanResult, error) {
 			// far is unattributable to the actual exit — the run continued
 			// past it — so drop it and look for a later, genuine cause
 			// (issue #579).
-			sr = scanResult{}
+			resetsAt = nil
 			// Remember whether this genuine content itself quoted a marker,
 			// so a type:"result" line right after it that echoes the same
 			// marker is recognized as that same echo, not a fresh signal
 			// (issue #818).
 			echoReason, _, echoPending = matchMarker(chunk)
-			return
+			return driverkit.ScanDecision{Reset: true, Skip: true}
 		}
 		if echoPending {
 			if resultText, ok := resultEventText(chunk); ok {
 				echoPending = false
 				if reason, _, matched := matchMarker(resultText); matched && reason == echoReason {
-					return
+					return driverkit.ScanDecision{Skip: true}
 				}
 			}
 		}
-		if !sr.found {
-			// First marker in the log wins: once a chunk matches, sr.found
-			// latches and later chunks are ignored. matchMarker prefers a
-			// transient marker over a terminal one *within* a single chunk,
-			// but across chunks a terminal marker seen first now latches
-			// Terminal — before this change every match was transient, so
-			// ordering never crossed classes. Harmless for the --agents case:
-			// that CLI-usage error aborts the run before any API call, so no
-			// transient marker can precede it in a genuine failure log.
-			if reason, class, ok := matchMarker(chunk); ok {
-				sr.found = true
-				sr.reason = reason
-				sr.class = class
-			}
-		}
-		if sr.resetsAt == nil {
+		// First marker in the log wins: ClassifyScan latches on the first
+		// unrecovered match and ignores later chunks once found. It prefers
+		// a transient marker over a terminal one *within* a single chunk,
+		// but across chunks a terminal marker seen first now latches
+		// Terminal — before this change every match was transient, so
+		// ordering never crossed classes. Harmless for the --agents case:
+		// that CLI-usage error aborts the run before any API call, so no
+		// transient marker can precede it in a genuine failure log.
+		if resetsAt == nil {
 			if t := extractResetsAt(chunk); t != nil {
-				sr.resetsAt = t
+				resetsAt = t
 			}
 		}
-	})
+		return driverkit.ScanDecision{Text: chunk}
+	}
+
+	cl, found, err := driverkit.ClassifyScan(logPath, logscan.ChunkOversized, extract, transientExtras, terminalExtras)
 	if err != nil {
 		return scanResult{}, err
 	}
-	return sr, nil
+	return scanResult{cl: cl, found: found, resetsAt: resetsAt}, nil
 }
 
 // agentContentEvent is the minimal envelope needed to identify a Claude Code

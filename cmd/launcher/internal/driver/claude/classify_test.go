@@ -7,13 +7,14 @@ import (
 	"time"
 
 	"spindrift.dev/launcher/internal/driver/claude"
+	"spindrift.dev/launcher/internal/driver/driverkit"
 )
 
 var classifyTests = []struct {
 	name        string
 	lines       []string
-	wantClass   claude.Class
-	wantReason  claude.Reason
+	wantClass   driverkit.Class
+	wantReason  driverkit.Reason
 	wantResetAt *time.Time // nil means expect nil
 }{
 	{
@@ -22,8 +23,8 @@ var classifyTests = []struct {
 			`{"type":"error","error":{"type":"rate_limit_error","message":"Rate limit exceeded"},"resetsAt":1783192800}`,
 			`Error: 429 Too Many Requests`,
 		},
-		wantClass:   claude.Transient,
-		wantReason:  claude.RateLimit,
+		wantClass:   driverkit.Transient,
+		wantReason:  driverkit.RateLimit,
 		wantResetAt: func() *time.Time { t := time.Unix(1783192800, 0).UTC(); return &t }(),
 	},
 	{
@@ -32,8 +33,8 @@ var classifyTests = []struct {
 			`Error: 429 Too Many Requests`,
 			`{"resetsAt":1783192800}`,
 		},
-		wantClass:   claude.Transient,
-		wantReason:  claude.RateLimit,
+		wantClass:   driverkit.Transient,
+		wantReason:  driverkit.RateLimit,
 		wantResetAt: func() *time.Time { t := time.Unix(1783192800, 0).UTC(); return &t }(),
 	},
 	{
@@ -42,8 +43,8 @@ var classifyTests = []struct {
 			`Error: 429 Too Many Requests`,
 			`rate limit exceeded, please retry later`,
 		},
-		wantClass:   claude.Transient,
-		wantReason:  claude.RateLimit,
+		wantClass:   driverkit.Transient,
+		wantReason:  driverkit.RateLimit,
 		wantResetAt: nil,
 	},
 	{
@@ -52,8 +53,8 @@ var classifyTests = []struct {
 			`Error: 529 Overloaded`,
 			`The server is temporarily overloaded.`,
 		},
-		wantClass:   claude.Transient,
-		wantReason:  claude.Overloaded,
+		wantClass:   driverkit.Transient,
+		wantReason:  driverkit.Overloaded,
 		wantResetAt: nil,
 	},
 	{
@@ -61,8 +62,8 @@ var classifyTests = []struct {
 		lines: []string{
 			`{"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}`,
 		},
-		wantClass:   claude.Transient,
-		wantReason:  claude.Overloaded,
+		wantClass:   driverkit.Transient,
+		wantReason:  driverkit.Overloaded,
 		wantResetAt: nil,
 	},
 	{
@@ -73,8 +74,8 @@ var classifyTests = []struct {
 		lines: []string{
 			`Overloaded`,
 		},
-		wantClass:   claude.Transient,
-		wantReason:  claude.Overloaded,
+		wantClass:   driverkit.Transient,
+		wantReason:  driverkit.Overloaded,
 		wantResetAt: nil,
 	},
 	{
@@ -84,8 +85,8 @@ var classifyTests = []struct {
 		lines: []string{
 			`{"type":"error","error":{"type":"server_error","message":"Server error"}}`,
 		},
-		wantClass:   claude.Transient,
-		wantReason:  claude.Overloaded,
+		wantClass:   driverkit.Transient,
+		wantReason:  driverkit.Overloaded,
 		wantResetAt: nil,
 	},
 	{
@@ -99,8 +100,8 @@ var classifyTests = []struct {
 			`{"type":"assistant","message":{"model":"<synthetic>","content":[{"type":"text","text":"API Error: Server error mid-response. The response above may be incomplete."}],"stop_reason":"stop_sequence"},"error":"server_error"}`,
 			`{"type":"result","is_error":true,"result":"API Error: Server error mid-response","stop_reason":"stop_sequence","terminal_reason":"completed"}`,
 		},
-		wantClass:   claude.Transient,
-		wantReason:  claude.Overloaded,
+		wantClass:   driverkit.Transient,
+		wantReason:  driverkit.Overloaded,
 		wantResetAt: nil,
 	},
 	{
@@ -113,8 +114,8 @@ var classifyTests = []struct {
 		lines: []string{
 			`{"type":"assistant","message":{"model":"claude-sonnet-4-6","content":[{"type":"text","text":"Adding a server_error transient pattern test case"}]}}`,
 		},
-		wantClass:   claude.Terminal,
-		wantReason:  claude.TaskFailed,
+		wantClass:   driverkit.Terminal,
+		wantReason:  driverkit.TaskFailed,
 		wantResetAt: nil,
 	},
 	{
@@ -128,8 +129,8 @@ var classifyTests = []struct {
 			`{"type":"assistant","message":{"model":"claude-sonnet-4-6","content":[{"type":"text","text":"Fixing the server_error guard now."}]}}`,
 			`{"type":"result","is_error":false,"result":"Fixing the server_error guard now.","stop_reason":"end_turn"}`,
 		},
-		wantClass:   claude.Terminal,
-		wantReason:  claude.TaskFailed,
+		wantClass:   driverkit.Terminal,
+		wantReason:  driverkit.TaskFailed,
 		wantResetAt: nil,
 	},
 	{
@@ -144,8 +145,8 @@ var classifyTests = []struct {
 			`{"type":"system","session_id":"s1"}`,
 			`{"type":"result","is_error":false,"result":"Fixing the server_error guard now.","stop_reason":"end_turn"}`,
 		},
-		wantClass:   claude.Terminal,
-		wantReason:  claude.TaskFailed,
+		wantClass:   driverkit.Terminal,
+		wantReason:  driverkit.TaskFailed,
 		wantResetAt: nil,
 	},
 	{
@@ -160,8 +161,8 @@ var classifyTests = []struct {
 			`{"type":"system","session_id":"s1"}`,
 			`{"type":"result","is_error":false,"result":"Fixing the server_error guard now.","stop_reason":"end_turn"}`,
 		},
-		wantClass:   claude.Terminal,
-		wantReason:  claude.TaskFailed,
+		wantClass:   driverkit.Terminal,
+		wantReason:  driverkit.TaskFailed,
 		wantResetAt: nil,
 	},
 	{
@@ -181,8 +182,8 @@ var classifyTests = []struct {
 			`{"type":"assistant","message":{"model":"<synthetic>","content":[{"type":"text","text":"API Error: Server error mid-response. The response above may be incomplete."}],"stop_reason":"stop_sequence"},"error":"server_error"}`,
 			`{"type":"result","is_error":true,"result":"API Error: Server error mid-response","stop_reason":"stop_sequence","terminal_reason":"completed"}`,
 		},
-		wantClass:   claude.Transient,
-		wantReason:  claude.Overloaded,
+		wantClass:   driverkit.Transient,
+		wantReason:  driverkit.Overloaded,
 		wantResetAt: nil,
 	},
 	{
@@ -197,8 +198,8 @@ var classifyTests = []struct {
 			`{"type":"assistant","message":{"model":"claude-sonnet-4-6","content":[{"type":"text","text":"Investigating the rate_limit_error handling code now."}]}}`,
 			`{"type":"result","is_error":true,"result":"API Error: rate_limit_error occurred","stop_reason":"stop_sequence"}`,
 		},
-		wantClass:   claude.Transient,
-		wantReason:  claude.RateLimit,
+		wantClass:   driverkit.Transient,
+		wantReason:  driverkit.RateLimit,
 		wantResetAt: nil,
 	},
 	{
@@ -220,8 +221,8 @@ var classifyTests = []struct {
 			`{"type":"assistant","message":{"model":"<synthetic>","content":[{"type":"text","text":"API Error: Server error mid-response. The response above may be incomplete."}],"stop_reason":"stop_sequence"},"error":"server_error"}`,
 			`{"type":"result","is_error":true,"result":"API Error: Server error mid-response","stop_reason":"stop_sequence","terminal_reason":"completed"}`,
 		},
-		wantClass:   claude.Transient,
-		wantReason:  claude.Overloaded,
+		wantClass:   driverkit.Transient,
+		wantReason:  driverkit.Overloaded,
 		wantResetAt: nil,
 	},
 	{
@@ -230,8 +231,8 @@ var classifyTests = []struct {
 			`dial tcp: connection refused`,
 			`retrying...`,
 		},
-		wantClass:   claude.Transient,
-		wantReason:  claude.Network,
+		wantClass:   driverkit.Transient,
+		wantReason:  driverkit.Network,
 		wantResetAt: nil,
 	},
 	{
@@ -239,8 +240,8 @@ var classifyTests = []struct {
 		lines: []string{
 			`read tcp 127.0.0.1:42000->127.0.0.1:443: connection reset by peer`,
 		},
-		wantClass:   claude.Transient,
-		wantReason:  claude.Network,
+		wantClass:   driverkit.Transient,
+		wantReason:  driverkit.Network,
 		wantResetAt: nil,
 	},
 	{
@@ -248,8 +249,8 @@ var classifyTests = []struct {
 		lines: []string{
 			`dial tcp 1.2.3.4:443: i/o timeout`,
 		},
-		wantClass:   claude.Transient,
-		wantReason:  claude.Network,
+		wantClass:   driverkit.Transient,
+		wantReason:  driverkit.Network,
 		wantResetAt: nil,
 	},
 	{
@@ -257,8 +258,8 @@ var classifyTests = []struct {
 		lines: []string{
 			`Get "https://api.anthropic.com/v1/messages": net/http: request canceled`,
 		},
-		wantClass:   claude.Transient,
-		wantReason:  claude.Network,
+		wantClass:   driverkit.Transient,
+		wantReason:  driverkit.Network,
 		wantResetAt: nil,
 	},
 	{
@@ -266,8 +267,8 @@ var classifyTests = []struct {
 		lines: []string{
 			`Post "https://api.anthropic.com/v1/messages": context deadline exceeded`,
 		},
-		wantClass:   claude.Transient,
-		wantReason:  claude.Network,
+		wantClass:   driverkit.Transient,
+		wantReason:  driverkit.Network,
 		wantResetAt: nil,
 	},
 	{
@@ -275,8 +276,8 @@ var classifyTests = []struct {
 		lines: []string{
 			`lookup api.anthropic.com on 8.8.8.8:53: no such host`,
 		},
-		wantClass:   claude.Transient,
-		wantReason:  claude.Network,
+		wantClass:   driverkit.Transient,
+		wantReason:  driverkit.Network,
 		wantResetAt: nil,
 	},
 	{
@@ -287,8 +288,8 @@ var classifyTests = []struct {
 			`connection refused`,
 			`rate_limit_error occurred`,
 		},
-		wantClass:   claude.Transient,
-		wantReason:  claude.Network,
+		wantClass:   driverkit.Transient,
+		wantReason:  driverkit.Network,
 		wantResetAt: nil,
 	},
 	{
@@ -297,22 +298,22 @@ var classifyTests = []struct {
 			`Agent completed with no valid outcome.`,
 			`SPINDRIFT_OUTCOME issue=1 landing= status=blocked note=failed to open PR`,
 		},
-		wantClass:   claude.Terminal,
-		wantReason:  claude.TaskFailed,
+		wantClass:   driverkit.Terminal,
+		wantReason:  driverkit.TaskFailed,
 		wantResetAt: nil,
 	},
 	{
 		name:        "Terminal_NoLog",
 		lines:       nil, // no lines — will use a nonexistent file
-		wantClass:   claude.Terminal,
-		wantReason:  claude.TaskFailed,
+		wantClass:   driverkit.Terminal,
+		wantReason:  driverkit.TaskFailed,
 		wantResetAt: nil,
 	},
 	{
 		name:        "Terminal_EmptyLog",
 		lines:       []string{},
-		wantClass:   claude.Terminal,
-		wantReason:  claude.TaskFailed,
+		wantClass:   driverkit.Terminal,
+		wantReason:  driverkit.TaskFailed,
 		wantResetAt: nil,
 	},
 	{
@@ -321,8 +322,8 @@ var classifyTests = []struct {
 		lines: []string{
 			`{"type":"error","error":{"type":"usage_limit_reached","message":"Claude Code usage limit reached"}}`,
 		},
-		wantClass:   claude.Transient,
-		wantReason:  claude.RateLimit,
+		wantClass:   driverkit.Transient,
+		wantReason:  driverkit.RateLimit,
 		wantResetAt: nil,
 	},
 	{
@@ -331,8 +332,8 @@ var classifyTests = []struct {
 		lines: []string{
 			`{"type":"error","error":{"type":"usage_limit_reached","message":"Claude Code usage limit reached"},"resetsAt":1783192800}`,
 		},
-		wantClass:   claude.Transient,
-		wantReason:  claude.RateLimit,
+		wantClass:   driverkit.Transient,
+		wantReason:  driverkit.RateLimit,
 		wantResetAt: func() *time.Time { t := time.Unix(1783192800, 0).UTC(); return &t }(),
 	},
 	{
@@ -341,8 +342,8 @@ var classifyTests = []struct {
 		lines: []string{
 			`Claude Code usage limit reached`,
 		},
-		wantClass:   claude.Transient,
-		wantReason:  claude.RateLimit,
+		wantClass:   driverkit.Transient,
+		wantReason:  driverkit.RateLimit,
 		wantResetAt: nil,
 	},
 	{
@@ -353,8 +354,8 @@ var classifyTests = []struct {
 		lines: []string{
 			`You've hit your session limit · resets 6:30pm (UTC)`,
 		},
-		wantClass:   claude.Transient,
-		wantReason:  claude.RateLimit,
+		wantClass:   driverkit.Transient,
+		wantReason:  driverkit.RateLimit,
 		wantResetAt: nil,
 	},
 	{
@@ -363,8 +364,8 @@ var classifyTests = []struct {
 		lines: []string{
 			`You've hit your weekly limit · resets Mon 12:00am (UTC)`,
 		},
-		wantClass:   claude.Transient,
-		wantReason:  claude.RateLimit,
+		wantClass:   driverkit.Transient,
+		wantReason:  driverkit.RateLimit,
 		wantResetAt: nil,
 	},
 	{
@@ -374,8 +375,8 @@ var classifyTests = []struct {
 		lines: []string{
 			`You've hit your Opus limit · resets 6:30pm (UTC)`,
 		},
-		wantClass:   claude.Transient,
-		wantReason:  claude.RateLimit,
+		wantClass:   driverkit.Transient,
+		wantReason:  driverkit.RateLimit,
 		wantResetAt: nil,
 	},
 	{
@@ -388,8 +389,8 @@ var classifyTests = []struct {
 		lines: []string{
 			`{"type":"assistant","message":{"id":"a2645b97-8af6-46ec-aa20-7cde65f631ea","model":"<synthetic>","role":"assistant","content":[{"type":"text","text":"You've hit your session limit · resets 6:30pm (UTC)"}]},"session_id":"e89ee32d-c257-468d-c90b-5549c606b8bd","uuid":"1f7d9873-9ac8-4f1a-a7a5-d6ed1a3a6793"}`,
 		},
-		wantClass:   claude.Terminal,
-		wantReason:  claude.TaskFailed,
+		wantClass:   driverkit.Terminal,
+		wantReason:  driverkit.TaskFailed,
 		wantResetAt: nil,
 	},
 	{
@@ -404,8 +405,8 @@ var classifyTests = []struct {
 			`{"type":"assistant","message":{"id":"a2645b97-8af6-46ec-aa20-7cde65f631ea","model":"<synthetic>","role":"assistant","content":[{"type":"text","text":"You've hit your session limit · resets 6:30pm (UTC)"}]},"error":"rate_limit","session_id":"e89ee32d-c257-468d-c90b-5549c606b8bd","uuid":"1f7d9873-9ac8-4f1a-a7a5-d6ed1a3a6793"}`,
 			`{"type":"result","subtype":"success","is_error":true,"api_error_status":429,"result":"You've hit your session limit · resets 6:30pm (UTC)","stop_reason":"stop_sequence","session_id":"e89ee32d-c257-468d-c90b-5549c606b8bd","terminal_reason":"api_error","uuid":"b58acae4-f040-47fd-b18d-6a49eabb4b5b"}`,
 		},
-		wantClass:   claude.Transient,
-		wantReason:  claude.RateLimit,
+		wantClass:   driverkit.Transient,
+		wantReason:  driverkit.RateLimit,
 		wantResetAt: func() *time.Time { t := time.Unix(1784399400, 0).UTC(); return &t }(),
 	},
 	{
@@ -417,8 +418,8 @@ var classifyTests = []struct {
 		lines: []string{
 			`{"type":"assistant","message":{"content":[{"type":"text","text":"Adding a rate_limit_error test case with 429 Too Many Requests and resetsAt:1783963200 fixture data"}]}}`,
 		},
-		wantClass:   claude.Terminal,
-		wantReason:  claude.TaskFailed,
+		wantClass:   driverkit.Terminal,
+		wantReason:  driverkit.TaskFailed,
 		wantResetAt: nil,
 	},
 	{
@@ -429,8 +430,8 @@ var classifyTests = []struct {
 		lines: []string{
 			`{"type":"user","message":{"content":[{"type":"tool_result","content":"logs/issue-565.log:1: rate_limit_error 429 Too Many Requests \"resetsAt\":1783963200"}]}}`,
 		},
-		wantClass:   claude.Terminal,
-		wantReason:  claude.TaskFailed,
+		wantClass:   driverkit.Terminal,
+		wantReason:  driverkit.TaskFailed,
 		wantResetAt: nil,
 	},
 	{
@@ -445,8 +446,8 @@ var classifyTests = []struct {
 			`{"type":"assistant","message":{"content":[{"type":"text","text":"Continuing the task after the retry succeeded."}]}}`,
 			`Agent completed with no valid outcome.`,
 		},
-		wantClass:   claude.Terminal,
-		wantReason:  claude.TaskFailed,
+		wantClass:   driverkit.Terminal,
+		wantReason:  driverkit.TaskFailed,
 		wantResetAt: nil,
 	},
 	{
@@ -465,8 +466,8 @@ var classifyTests = []struct {
 			`{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t2","name":"Bash","input":{"command":"go test ./..."}}]}}`,
 			`{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t2","content":"ok  	spindrift.dev/launcher/internal/outcome	0.05s"}]}}`,
 		},
-		wantClass:   claude.Terminal,
-		wantReason:  claude.TaskFailed,
+		wantClass:   driverkit.Terminal,
+		wantReason:  driverkit.TaskFailed,
 		wantResetAt: nil,
 	},
 	{
@@ -479,8 +480,8 @@ var classifyTests = []struct {
 			`==> claude implementing issue #142 on agent/issue-142`,
 			`error: unknown option '--agents'`,
 		},
-		wantClass:   claude.Terminal,
-		wantReason:  claude.UnsupportedFlag,
+		wantClass:   driverkit.Terminal,
+		wantReason:  driverkit.UnsupportedFlag,
 		wantResetAt: nil,
 	},
 	{
@@ -492,8 +493,8 @@ var classifyTests = []struct {
 		lines: []string{
 			`{"type":"assistant","message":{"model":"claude-sonnet-4-6","content":[{"type":"text","text":"Adding a classifier case for error: unknown option '--agents'"}]}}`,
 		},
-		wantClass:   claude.Terminal,
-		wantReason:  claude.TaskFailed,
+		wantClass:   driverkit.Terminal,
+		wantReason:  driverkit.TaskFailed,
 		wantResetAt: nil,
 	},
 	{
@@ -507,8 +508,8 @@ var classifyTests = []struct {
 			`{"type":"assistant","message":{"model":"claude-sonnet-4-6","content":[{"type":"text","text":"Fixing the unknown option '--agents' guard now."}]}}`,
 			`{"type":"result","is_error":false,"result":"Fixing the unknown option '--agents' guard now.","stop_reason":"end_turn"}`,
 		},
-		wantClass:   claude.Terminal,
-		wantReason:  claude.TaskFailed,
+		wantClass:   driverkit.Terminal,
+		wantReason:  driverkit.TaskFailed,
 		wantResetAt: nil,
 	},
 	{
@@ -521,8 +522,8 @@ var classifyTests = []struct {
 			`listening on port 5290`,
 			`gcc: error at line 529 in module.c`,
 		},
-		wantClass:   claude.Terminal,
-		wantReason:  claude.TaskFailed,
+		wantClass:   driverkit.Terminal,
+		wantReason:  driverkit.TaskFailed,
 		wantResetAt: nil,
 	},
 }
@@ -542,11 +543,11 @@ func TestClassify_RateLimitBeatsBareOverloaded_SameLine(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Classify() error: %v", err)
 	}
-	if c.Class != claude.Transient {
-		t.Errorf("Class: got %q, want %q", c.Class, claude.Transient)
+	if c.Class != driverkit.Transient {
+		t.Errorf("Class: got %q, want %q", c.Class, driverkit.Transient)
 	}
-	if c.Reason != claude.RateLimit {
-		t.Errorf("Reason: got %q, want %q", c.Reason, claude.RateLimit)
+	if c.Reason != driverkit.RateLimit {
+		t.Errorf("Reason: got %q, want %q", c.Reason, driverkit.RateLimit)
 	}
 }
 
@@ -579,11 +580,11 @@ func TestClassify_OversizedLine_ChunkMatchesMarker(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Classify() error: %v", err)
 	}
-	if c.Class != claude.Transient {
-		t.Errorf("Class: got %q, want %q", c.Class, claude.Transient)
+	if c.Class != driverkit.Transient {
+		t.Errorf("Class: got %q, want %q", c.Class, driverkit.Transient)
 	}
-	if c.Reason != claude.RateLimit {
-		t.Errorf("Reason: got %q, want %q", c.Reason, claude.RateLimit)
+	if c.Reason != driverkit.RateLimit {
+		t.Errorf("Reason: got %q, want %q", c.Reason, driverkit.RateLimit)
 	}
 }
 
