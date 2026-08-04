@@ -139,6 +139,15 @@ func transitionToDispatchable(tracker forge.IssueTracker, num, title string, kin
 // false "not in state." This is deliberately conservative: an exactly-100
 // state with num genuinely absent also errors here, blocking a valid pick
 // rather than risk a double-box on a truly truncated one.
+//
+// That fail-safe is skipped for a tracker implementing forge.FullyPaginated
+// (forgejo, jira, #2265): those adapters walk every page of ListIssues
+// themselves, so a result at or above the cap is a proven-complete set, not
+// a truncated single page — treating it as "possibly truncated" would be a
+// false positive, wrongly blocking a legitimate pick whenever a state
+// genuinely holds >= forge.ResultPageLimit issues. forge.Fake and the
+// still-single-page github gh-exec adapter don't implement it, so they keep
+// paying the conservative fail-safe above unchanged.
 func issueInState(tracker forge.IssueTracker, num string, state forge.DispatchState) (bool, error) {
 	if lt, ok := tracker.(forge.LabeledTracker); ok && lt.StateLabels().Label(state) == "" {
 		return false, nil
@@ -151,6 +160,9 @@ func issueInState(tracker forge.IssueTracker, num string, state forge.DispatchSt
 		if iss.Number == num {
 			return true, nil
 		}
+	}
+	if fp, ok := tracker.(forge.FullyPaginated); ok && fp.WalksAllPages() {
+		return false, nil
 	}
 	if len(issues) >= forge.ResultPageLimit {
 		return false, fmt.Errorf("issue #%s not found among %d %s issues — list may be truncated at the page limit, refusing to assume it's not", num, len(issues), dispatchStateName(state))
