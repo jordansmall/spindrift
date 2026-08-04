@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/doctor"
 	"spindrift.dev/launcher/internal/forge"
 )
@@ -1181,7 +1182,7 @@ func passingForge() *forge.Fake {
 // IssueTracker and CodeForge seams regardless of the collected settings, so
 // tests can inject a forge.Fake instead of shelling out to gh/Jira.
 func fakeForgeBuilder(f *forge.Fake) ForgeBuilder {
-	return func(repoSlug string, tracker trackerSettings, ghToken, jiraToken, forgejoToken string) (forge.IssueTracker, forge.CodeForge) {
+	return func(repoSlug string, tracker trackerSettings, token string) (forge.IssueTracker, forge.CodeForge) {
 		return f, f
 	}
 }
@@ -1435,6 +1436,54 @@ func TestRender_NixSpecialChars_AreEscaped(t *testing.T) {
 				t.Errorf("expected flake.nix to contain escaped %q, got:\n%s", tc.wantEsc, flakeNix)
 			}
 		})
+	}
+}
+
+// TestValidateBackendChoice_NewRegistryEntryNeedsNoQuickstartEdit pins that
+// validateBackendChoice is genuinely registry-driven: appending a fake
+// eligible "gitlab" descriptor to backend.Registry makes
+// validateBackendChoice("gitlab") pass with zero quickstart-side code
+// change, proving the choice list derives from backend.QuickstartEligible()
+// rather than a hardcoded slice.
+func TestValidateBackendChoice_NewRegistryEntryNeedsNoQuickstartEdit(t *testing.T) {
+	original := backend.Registry
+	backend.Registry = append(append([]backend.Descriptor{}, original...), backend.Descriptor{
+		Name:             "gitlab",
+		ValidAsTracker:   true,
+		ValidAsCodeForge: true,
+	})
+	defer func() { backend.Registry = original }()
+
+	if err := validateBackendChoice("gitlab"); err != nil {
+		t.Errorf("validateBackendChoice(\"gitlab\") = %v, want nil", err)
+	}
+}
+
+// TestDoctorHints_RegistryDriven pins that doctorHints resolves through
+// backend.ByName rather than a hardcoded github/forgejo branch: appending a
+// fake "gitlab" descriptor to backend.Registry makes
+// doctorHints("gitlab") return its hints with zero quickstart-side code
+// change.
+func TestDoctorHints_RegistryDriven(t *testing.T) {
+	if gotToken, gotSlug := doctorHints("github"); gotToken != "" || gotSlug != "" {
+		t.Errorf(`doctorHints("github") = (%q, %q), want ("", "")`, gotToken, gotSlug)
+	}
+	if gotToken, gotSlug := doctorHints("forgejo"); gotToken != "FORGEJO_TOKEN" || gotSlug != "FORGEJO_BASE_URL" {
+		t.Errorf(`doctorHints("forgejo") = (%q, %q), want ("FORGEJO_TOKEN", "FORGEJO_BASE_URL")`, gotToken, gotSlug)
+	}
+
+	original := backend.Registry
+	backend.Registry = append(append([]backend.Descriptor{}, original...), backend.Descriptor{
+		Name:             "gitlab",
+		ValidAsTracker:   true,
+		ValidAsCodeForge: true,
+		DoctorTokenHint:  "GITLAB_TOKEN",
+		DoctorSlugHint:   "GITLAB_BASE_URL",
+	})
+	defer func() { backend.Registry = original }()
+
+	if gotToken, gotSlug := doctorHints("gitlab"); gotToken != "GITLAB_TOKEN" || gotSlug != "GITLAB_BASE_URL" {
+		t.Errorf(`doctorHints("gitlab") = (%q, %q), want ("GITLAB_TOKEN", "GITLAB_BASE_URL")`, gotToken, gotSlug)
 	}
 }
 
