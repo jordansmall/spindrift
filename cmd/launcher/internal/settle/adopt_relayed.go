@@ -2,10 +2,13 @@ package settle
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/seambundle"
 )
 
 // tryAdoptRelayedBranch is gate.go's "blocked" arm's first move (issue
@@ -116,16 +119,53 @@ func (s *Settle) adoptAndGate(d dispatch.Dispatcher, num string, gen uint64, res
 // prior run finished the work and relayed its branch to the outbox before
 // stranding without a PR. Unlike tryAdoptRelayedBranch, this does NOT
 // require result.Outcome.Synthetic or s.readOnly — recover is
-// operator-driven and runs read-write; the capability gate inside
-// adoptRelayedBranch (BundleRelay + DraftPRCreator + OutboxDir) is what
-// still scopes it. Returns false — leaving recover's unchanged "no open PR"
-// exit — the moment the self-report isn't a genuine success or nothing was
-// actually relayable.
+// operator-driven and runs read-write.
+//
+// Two shapes fall out of the same self-report fingerprint. A CODE_FORGE=local
+// push-only run (ADR 0039, issue #2254) has no PR surface to adopt at all —
+// adoptRelayedBranch's DraftPRCreator assertion always fails for it — so that
+// shape (s.pr == nil and cf implements forge.BundleRelay, the same gate
+// tryMarkRecoverable used to promote the issue to Recoverable in the first
+// place) is routed to landRelayedBranchPushOnly instead, which lands the
+// branch directly via the same RelayBundle+merge machinery a genuine
+// status=ready outcome uses. Every other shape — a PR-shaped forge, or plain
+// git push-only (s.pr == nil but no BundleRelay) — falls through to
+// adoptAndGate unchanged; the capability gate inside adoptRelayedBranch
+// (BundleRelay + DraftPRCreator + OutboxDir) is what still scopes that path,
+// correctly returning false for git the same way it always has. Returns
+// false — leaving recover's unchanged "no open PR" exit — the moment the
+// self-report isn't a genuine success or nothing was actually relayable.
 func (s *Settle) SettleRelayedBranch(d dispatch.Dispatcher, num string, gen uint64, result dispatch.Result) bool {
 	if !result.SelfReportFound || !isSuccessSelfReport(result.SelfReport.Status) {
 		return false
 	}
+	cf := s.cfForNum(num)
+	if _, ok := cf.(forge.BundleRelay); ok && s.pr == nil {
+		return s.landRelayedBranchPushOnly(d, num, gen)
+	}
 	return s.adoptAndGate(d, num, gen, result, "genuine success self-report; PR opened on relayed branch")
+}
+
+// landRelayedBranchPushOnly is SettleRelayedBranch's local push-only
+// counterpart to adoptAndGate: local has no PR surface to open
+// (adoptRelayedBranch's DraftPRCreator assertion always fails for it), so
+// recovering a Recoverable issue instead drives the exact same
+// RelayBundle+merge landing path a genuine status=ready outcome uses
+// (selfHealGate's landPushOnly arm), keyed off the issue's own derived
+// agent branch — never any outcome-line field (issue #1949 provenance
+// discipline; there may be no parsed outcome line at all on this path).
+func (s *Settle) landRelayedBranchPushOnly(d dispatch.Dispatcher, num string, gen uint64) bool {
+	branch := s.cfForNum(num).AgentBranch(num)
+	fmt.Printf("    #%s  landing=%s  status=adopted  note=genuine success self-report; relayed branch landed\n", num, branch)
+	s.recordLanding(num, branch)
+	switch s.selfHeal(d, num, gen, branch) {
+	case landingFailed:
+		fmt.Printf("    #%s  landing=%s  status=failed  !! CI or merge failed\n", num, branch)
+	case landingAbandoned:
+		return true
+	}
+	s.postUsageComment(num, d)
+	return true
 }
 
 // adoptRelayedBranch is tryAdoptRelayedBranch's PR-opening step: relay num's
@@ -201,6 +241,40 @@ func (s *Settle) defaultAdoptPRText(num string) (title, body string) {
 		num,
 	)
 	return title, body
+}
+
+// tryMarkRecoverable is settle's local push-only counterpart to
+// tryAdoptRelayedBranch/tryAdoptRelayedBranchNoOutcome (ADR 0039): a
+// CODE_FORGE=local push-only run has no PR-shaped adopt path at all
+// (adoptRelayedBranch's DraftPRCreator assertion always fails for it, since
+// local never implements it) — instead of parking Failed, a genuine success
+// self-report plus a bundle actually sitting in the outbox promotes the
+// issue to Recoverable, leaving the actual land (RelayBundle + fast-forward
+// merge into the Integration branch) to the operator-driven `spindrift
+// recover`. This function only stats the outbox — it never calls
+// RelayBundle/Merge itself, so a local issue is never auto-fast-forwarded on
+// an unauthenticated self-report alone.
+func (s *Settle) tryMarkRecoverable(num string, result dispatch.Result) bool {
+	cf := s.cfForNum(num)
+	if _, ok := cf.(forge.BundleRelay); !ok || s.pr != nil ||
+		!result.SelfReportFound || !isSuccessSelfReport(result.SelfReport.Status) ||
+		!s.bundlePresent(num) {
+		return false
+	}
+	fmt.Printf("    #%s  status=recoverable  note=genuine success self-report; bundle present in outbox; run `spindrift recover %s` to land it\n", num, num)
+	s.transitionState(num, forge.InProgress, forge.Recoverable)
+	return true
+}
+
+// bundlePresent reports whether num's outbox holds a relayable bundle file —
+// a plain stat, not a RelayBundle call: detecting Recoverable must never
+// itself import or land anything (see tryMarkRecoverable).
+func (s *Settle) bundlePresent(num string) bool {
+	if s.cfg.OutboxDir == nil {
+		return false
+	}
+	_, err := os.Stat(filepath.Join(s.cfg.OutboxDir(num), seambundle.FileName))
+	return err == nil
 }
 
 // isSuccessSelfReport reports whether status — a driver self-report's
