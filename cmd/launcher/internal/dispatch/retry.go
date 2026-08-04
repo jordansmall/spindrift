@@ -149,15 +149,21 @@ func (d *Dispatch) dispatchWithRetry(logPath string, once func(resumeAfterHold b
 // win last-wins over the Box's genuine outcome. A skipped line still logs a
 // warning so a spoof attempt or misconfigured run is visible.
 func (d *Dispatch) successResult(logPath string) Result {
-	o, found, skipped, err := outcome.LastInLog(logPath, d.nonce)
-	if skipped {
+	resolved, err := outcome.Resolve([]outcome.PassLog{{Path: logPath}}, d.nonce, d.cfg.Kind)
+	if resolved.Skipped {
 		fmt.Fprintf(os.Stderr, "    ?? #%s: outcome scan: skipped a SPINDRIFT_OUTCOME-shaped line without this run's nonce\n", d.number)
 	}
 	if err != nil {
 		return Result{Success: true, ParseErr: err}
 	}
-	if found {
-		return d.outcomeResult(logPath, o)
+	// Provenance != ProvenanceSelfReport excludes Resolve's own last-resort
+	// self-report fallback tier: this single-log scan must settle only on a
+	// genuine or synthetic outcome, exactly as the unexported lastInLog scan
+	// this replaced did (it never looked at self-report at all) — a
+	// self-report-only match here must still fall through to classification
+	// below, unchanged from before.
+	if resolved.Found && resolved.Provenance != outcome.ProvenanceSelfReport {
+		return d.outcomeResult(logPath, resolved.Outcome)
 	}
 	cls, clsErr := d.driver.ClassifyTransient(logPath)
 	return Result{Success: true, Classification: cls, ClassifyErr: clsErr}
@@ -181,7 +187,7 @@ func (d *Dispatch) outcomeResult(logPath string, o outcome.Outcome) Result {
 	if issueIntentsErr != nil {
 		fmt.Fprintf(os.Stderr, "    ?? #%s: issue-intent scan: %v\n", d.number, issueIntentsErr)
 	}
-	selfReport, selfReportFound, selfReportErr := outcome.LastSelfReportInLog(logPath)
+	selfReport, selfReportFound, selfReportErr := outcome.LastSelfReport(logPath)
 	if selfReportErr != nil {
 		fmt.Fprintf(os.Stderr, "    ?? #%s: self-report scan: %v\n", d.number, selfReportErr)
 	}
@@ -207,12 +213,16 @@ func (d *Dispatch) outcomeResult(logPath string, o outcome.Outcome) Result {
 // scan is nonce-gated exactly like successResult's: a SPINDRIFT_OUTCOME-shaped
 // line without this run's nonce is not a candidate and only logs a warning.
 func (d *Dispatch) settledOutcome(logPath string) (Result, bool) {
-	o, found, skipped, err := outcome.LastInLog(logPath, d.nonce)
-	if skipped {
+	resolved, err := outcome.Resolve([]outcome.PassLog{{Path: logPath}}, d.nonce, d.cfg.Kind)
+	if resolved.Skipped {
 		fmt.Fprintf(os.Stderr, "    ?? #%s: outcome scan: skipped a SPINDRIFT_OUTCOME-shaped line without this run's nonce\n", d.number)
 	}
-	if err != nil || !found {
+	// Provenance != ProvenanceSelfReport: see successResult's identical
+	// reasoning above -- a self-report-only match must still read as
+	// ok=false here, so the caller proceeds to classification exactly as it
+	// did against the unexported lastInLog scan this replaced.
+	if err != nil || !resolved.Found || resolved.Provenance == outcome.ProvenanceSelfReport {
 		return Result{}, false
 	}
-	return d.outcomeResult(logPath, o), true
+	return d.outcomeResult(logPath, resolved.Outcome), true
 }
