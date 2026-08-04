@@ -875,6 +875,7 @@ EOF
   {
     cat "$DRIVER_PREAMBLE_FILE"
     cat "$FRAGMENT_REGISTRY_FILE"
+    cat "$CONTRACT_REGISTRY_FILE"
     printf '_FRAGMENT_ROWS+=("FIXTURE_ROW_ON|fixture-row.md|FIXTURE_ROW_STEP")\n'
     printf '_FRAGMENT_SUBST_VARS+=("FIXTURE_ROW_STEP")\n'
     tail -n +2 "$ENTRYPOINT_SRC"

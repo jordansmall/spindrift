@@ -1,18 +1,18 @@
 # Eval-level pins for lib/prompt-contract.nix (issue #2245): a pure-data
 # registry of the harness-owned shared prompt blocks (outcome contract,
-# COMMS, CHECK/COMMIT, research verdict) that lib/mkHarness.nix currently
-# slices/injects by hand via lib/prompt-inject.nix, plus (below) the
-# registry of markers a Box's own output is expected to emit
-# (validateMarkers). This check pins both registries' row shape and content
-# ahead of any consumer wiring, so a later slice of #2245 can drive
-# mkHarness.nix and a post-run validation pass from this data without
-# silently changing which blocks go where or which omissions matter.
+# COMMS, CHECK/COMMIT, research verdict) that lib/mkHarness.nix now
+# slices/injects from instead of hand-wiring via lib/prompt-inject.nix
+# (issue #2246), plus (below) the registry of markers a Box's own output is
+# expected to emit (validateMarkers, not yet consumed by a post-run
+# validation pass). This check pins both registries' row shape and content
+# so a future consumer can't silently change which blocks go where or which
+# omissions matter.
 { pkgs, ... }:
 let
   promptContract = import ../../lib/prompt-contract.nix;
   promptInject = import ../../lib/prompt-inject.nix;
   inherit (pkgs.lib) assertMsg concatStringsSep;
-  byId = id: builtins.head (builtins.filter (r: r.id == id) promptContract.injectBlocks);
+  inherit (promptContract) byId;
   markerById = id: builtins.head (builtins.filter (r: r.id == id) promptContract.validateMarkers);
   issuePromptSource = builtins.readFile ../../templates/default/prompts/issue-prompt.md;
   researchPromptSource = builtins.readFile ../../templates/default/prompts/research-prompt.md;

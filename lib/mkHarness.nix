@@ -179,11 +179,21 @@ let
   # Marker-delimited slicing/injection primitives (issue #512);
   # nix/checks/prompt-inject.nix pins each primitive's behavior.
   promptInject = import ./prompt-inject.nix;
-  inherit (promptInject) sliceBetween sliceFromMarker injectSection;
+  inherit (promptInject) sliceFromMarker injectSection;
 
-  # issue-prompt.md is the single source every shared block below is sliced
-  # from — read once so each slice sees the identical text.
-  issuePromptSource = builtins.readFile ../templates/default/prompts/issue-prompt.md;
+  # Pure-data registry of the harness-owned shared prompt blocks (issue
+  # #2245): the single source of truth for each block's id/marker/source/
+  # slice-range/kinds, driving the marker constants and canonical text below
+  # instead of each being a separate hand-wired literal (issue #2246 slice
+  # 1). nix/checks/prompt-contract.nix pins the registry's own shape and
+  # content. The outcome/comms/check blocks' canonical text is now read from
+  # promptContract.canonicalText (which slices issue-prompt.md itself, see
+  # lib/prompt-contract.nix) rather than a local issuePromptSource re-read
+  # here; only the research block below still slices its own source
+  # directly, since it needs the RESEARCH_VERDICTS-rendered text, not the
+  # registry's unrendered default.
+  promptContract = import ./prompt-contract.nix;
+  inherit (promptContract) byId;
 
   # The conditional prompt steps (skill preamble, FILE ISSUES, AUTO-FORMAT,
   # AUTO-LINT, CI FAILURE) live as fragment files under the prompts directory
@@ -201,8 +211,8 @@ let
   # happens. Sliced from the default prompt's own heading rather than
   # duplicated into a second file, so the injected block and the default
   # prompt's sections cannot drift apart — same source, same bytes.
-  outcomeContractMarker = "# LAND THE CHANGE";
-  outcomeContract = sliceFromMarker outcomeContractMarker issuePromptSource;
+  outcomeContractMarker = (byId "outcome").marker;
+  outcomeContract = promptContract.canonicalText.outcome;
 
   injectOutcomeContract = injectSection outcomeContractMarker outcomeContract;
 
@@ -213,10 +223,10 @@ let
   # instead. COMMS runs from its own heading up to SCOUT (issue-prompt-only —
   # the fix prompt runs FIX in its place); CHECK/COMMIT runs from CHECK up to
   # REVIEW (also issue-prompt-only — a fix pass has no review step).
-  commsMarker = "# COMMS";
-  commsBlock = sliceBetween commsMarker "# SCOUT" issuePromptSource;
-  checkMarker = "# CHECK";
-  checkBlock = sliceBetween checkMarker "# REVIEW" issuePromptSource;
+  commsMarker = (byId "comms").marker;
+  commsBlock = promptContract.canonicalText.comms;
+  checkMarker = (byId "check").marker;
+  checkBlock = promptContract.canonicalText.check;
 
   injectComms = injectSection commsMarker commsBlock;
   injectCheckCommit = injectSection checkMarker checkBlock;
@@ -236,7 +246,7 @@ let
   # through EOF (mirrors outcomeContractMarker/outcomeContract above) so the
   # injected block and the default prompt's own copy cannot drift apart.
   researchPromptSource = builtins.readFile ../templates/default/prompts/research-prompt.md;
-  researchOutcomeContractMarker = "# POST THE VERDICT";
+  researchOutcomeContractMarker = (byId "research-verdict").marker;
   # The configurable verdict vocabulary (issue #2201): render the verdict
   # contract from the RESEARCH_VERDICTS knob before slicing the outcome
   # contract and baking the prompt, so a custom set flows into both the baked
@@ -365,6 +375,13 @@ let
     + "_FRAGMENT_SUBST_VARS=(\n"
     + lib.concatMapStrings (v: "  " + lib.escapeShellArg v + "\n") fragmentSubstVars
     + ")\n";
+
+  # The shared prompt block registry (lib/prompt-contract.nix, issue #2245),
+  # rendered into agent/entrypoint.sh's `_INJECT_BLOCK_ROWS` array the same
+  # way fragmentRegistryPreamble above renders `_FRAGMENT_ROWS` -- already
+  # derived by prompt-contract.nix itself, so no re-derivation needed here
+  # (issue #2246).
+  contractRegistryPreamble = promptContract.injectBlocksBashPreamble;
 
   # Version sourced from the release-please manifest so mkHarness always tracks
   # the bot-maintained source of truth (ADR-0010).
@@ -517,6 +534,7 @@ let
       driverAgentFiles
       driverPreamble
       fragmentRegistryPreamble
+      contractRegistryPreamble
       prompt
       scoutPrompt
       reviewPrompt
@@ -569,6 +587,12 @@ let
   # exec-ing the entrypoint so tests exercise the same registry-rendered loop
   # input and substitution allowlist that mkHarness bakes into the image.
   fragmentRegistryFile = hostPkgs.writeText "fragment-registry.sh" fragmentRegistryPreamble;
+
+  # The shared prompt block registry as a host store-path file (issue #2246,
+  # mirrors fragmentRegistryFile above). The bats harness prepends this
+  # before exec-ing the entrypoint so tests exercise the same
+  # `_INJECT_BLOCK_ROWS` data that mkHarness bakes into the image.
+  contractRegistryFile = hostPkgs.writeText "contract-registry.sh" contractRegistryPreamble;
 
   # The rendered prompt directory as a host store path (native-buildable on
   # darwin, so it needs no Linux builder). The prompt is normally baked into
@@ -942,6 +966,7 @@ else
       researchOutcomeContractFile
       driverPreambleFile
       fragmentRegistryFile
+      contractRegistryFile
       driverExecBin
       driverEntry
       runInputDocumentFile
