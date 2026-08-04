@@ -120,11 +120,21 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, w io.Writer, stdin
 	}
 	fmt.Fprintf(w, "ok: code forge confirmed — %s is reachable\n", cfRepo)
 
-	recoverable, err := it.ListIssues(forge.Recoverable)
-	if err != nil {
-		return fmt.Errorf("recoverable issue check failed: %w", err)
+	recoverableCount := 0
+	if lt, ok := it.(forge.LabeledTracker); !ok || lt.StateLabels().Label(forge.Recoverable) != "" {
+		// Only query when Recoverable resolves to a real label: an
+		// unconditional ListIssues(Recoverable) call would false-match every
+		// open issue on a tracker (GitHub, Forgejo) that leaves Recoverable
+		// unmapped, since both ignore an empty label filter instead of
+		// erroring (forge.LabeledTracker's doc comment) — mirroring
+		// console/adapter.go's countRecoverable guard for the same reason.
+		recoverable, err := it.ListIssues(forge.Recoverable)
+		if err != nil {
+			return fmt.Errorf("recoverable issue check failed: %w", err)
+		}
+		recoverableCount = len(recoverable)
 	}
-	fmt.Fprintf(w, "ok: %d recoverable issue(s) — run `spindrift recover` to land them\n", len(recoverable))
+	fmt.Fprintf(w, "ok: %d recoverable issue(s) — run `spindrift recover <issue>` to land each\n", recoverableCount)
 
 	checkLabelSet := func(names []string, present map[string]bool) []string {
 		var missing []string
