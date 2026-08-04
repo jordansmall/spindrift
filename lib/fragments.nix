@@ -332,6 +332,37 @@
     fragment = "research-verdict-forgejo-readonly.md";
     var = "RESEARCH_VERDICT_FORGEJO_READONLY_STEP";
   }
+
+  # Same five gates, one row each, but for issue #2275's pre-implement SPEC
+  # CHECK gate in issue-prompt.md: a "materially unrelated title vs body"
+  # escalation, not a research verdict. Mirrors the research-verdict rows
+  # just above rather than sharing them, since the two gates fire from
+  # different sections of the prompt and post differently-worded comments.
+  {
+    gate = "ISSUE_TRACKER_GITHUB_READWRITE";
+    fragment = "spec-check-mismatch-github.md";
+    var = "SPEC_CHECK_MISMATCH_GITHUB_STEP";
+  }
+  {
+    gate = "ISSUE_TRACKER_GITHUB_READONLY";
+    fragment = "spec-check-mismatch-github-readonly.md";
+    var = "SPEC_CHECK_MISMATCH_GITHUB_READONLY_STEP";
+  }
+  {
+    gate = "ISSUE_TRACKER_LOCAL";
+    fragment = "spec-check-mismatch-local.md";
+    var = "SPEC_CHECK_MISMATCH_LOCAL_STEP";
+  }
+  {
+    gate = "ISSUE_TRACKER_FORGEJO_READWRITE";
+    fragment = "spec-check-mismatch-forgejo.md";
+    var = "SPEC_CHECK_MISMATCH_FORGEJO_STEP";
+  }
+  {
+    gate = "ISSUE_TRACKER_FORGEJO_READONLY";
+    fragment = "spec-check-mismatch-forgejo-readonly.md";
+    var = "SPEC_CHECK_MISMATCH_FORGEJO_READONLY_STEP";
+  }
   {
     gate = "ISSUE_TRACKER_GITHUB_READWRITE";
     fragment = "issue-blocked-comment-github.md";

@@ -9,6 +9,36 @@ Fresh clone, new branch `${BRANCH}` cut from `${BASE_BRANCH}`. This issue only.
 Read first (run these yourself):
 
 ${ISSUE_READ_GITHUB_STEP}${ISSUE_READ_LOCAL_STEP}${ISSUE_READ_FORGEJO_STEP}
+# SPEC CHECK
+
+Before scouting or writing any code, check whether the issue's title and
+body describe the same piece of work. Read the title and the body as two
+independent one-line specs and compare them — not "could I stretch this
+body to justify that title" but "does a reader handed only the title, and a
+reader handed only the body, land on the same task."
+
+If they agree — the common case, a body that elaborates, narrows, or
+restates the title — proceed straight to SCOUT below; nothing else in this
+section applies.
+
+If they describe two materially unrelated pieces of work — not a
+paraphrase, not a subset, a different task entirely (e.g. the title asks to
+change one component and the body is a complete, self-contained spec for
+something else) — halt here. Do not scout, do not implement, do not open a
+PR.
+
+${SPEC_CHECK_MISMATCH_GITHUB_STEP}${SPEC_CHECK_MISMATCH_GITHUB_READONLY_STEP}${SPEC_CHECK_MISMATCH_LOCAL_STEP}${SPEC_CHECK_MISMATCH_FORGEJO_STEP}${SPEC_CHECK_MISMATCH_FORGEJO_READONLY_STEP}
+State both interpretations plainly — the title's spec and the body's spec —
+and ask which one governs. Then print exactly one line as your final output
+and stop — raw plain text, not wrapped in backticks, a code fence, or any
+other markdown formatting:
+
+SPINDRIFT_OUTCOME issue=${ISSUE_NUMBER} landing=none status=spec-mismatch note=<one-line summary of the contradiction> nonce=${RUN_NONCE}
+
+This is a successful stop, not a failure: a human needs to say which spec
+governs before any implementation work is safe to start, not a crash to
+triage. Do not continue to SCOUT after printing this line.
+
 # COMMS
 
 ${CAVEMAN_STEP}Your text output is a machine-parsed log, not a conversation.
@@ -187,6 +217,9 @@ THE CHANGE above.)
 ${OUTCOME_LANDING_READ_WRITE_STEP}${OUTCOME_LANDING_READ_ONLY_STEP}Grammar: `SPINDRIFT_OUTCOME issue=${ISSUE_NUMBER} landing=<landing-ref> status=<status> note=<short reason> nonce=${RUN_NONCE}`
 — one line, space-delimited fields, `note` then `nonce` last (`note` may
 itself contain spaces and `=`). The only valid `status` values here are `ready` and `blocked` — no other word belongs in that field.
+(The SPEC CHECK section above documents a third, earlier-exit status,
+`spec-mismatch` — a run that halts there never reaches this OUTCOME
+section, so this pair is the only valid choice for any run that does.)
 `nonce` must be exactly `${RUN_NONCE}`, this run's own control nonce (below)
 — it is not optional.
 
