@@ -94,6 +94,8 @@ func (h *forgejoHarness) FailNativeDeps(num string) {
 
 func (h *forgejoHarness) IsolatesNativeFailure() {}
 
+func (h *forgejoHarness) IsPriorityCapable() {}
+
 func (h *forgejoHarness) issuePayload(rec *forgejoIssueRecord) map[string]any {
 	labels := make([]map[string]any, len(rec.labels))
 	for i, l := range rec.labels {
