@@ -1,7 +1,9 @@
 package rest
 
 import (
+	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -311,5 +313,66 @@ func TestDoTransportFailure(t *testing.T) {
 	err := c.Do(http.MethodGet, "/widgets/1", nil, nil)
 	if err == nil {
 		t.Fatal("Do returned nil error, want a transport error against a closed listener")
+	}
+}
+
+// TestPaginateWalksAllPages covers the substrate-level page-walking
+// behavior: a 3-page fixture (two full pages of 3 items, a shorter final
+// page of 1 item) must yield every item across all pages, in order, via a
+// fetch closure that does its own c.Do call per page and signals "done"
+// once it observes a short page -- and the server must never see a request
+// for a page beyond that last, short page.
+func TestPaginateWalksAllPages(t *testing.T) {
+	const pageSize = 3
+	fixture := map[int][]string{
+		1: {"a", "b", "c"},
+		2: {"d", "e", "f"},
+		3: {"g"},
+	}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		page, err := strconv.Atoi(r.URL.Query().Get("page"))
+		if err != nil {
+			t.Errorf("server received request with invalid page query param: %v", err)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		items, ok := fixture[page]
+		if !ok {
+			t.Errorf("server received request for page %d, want no request beyond the last (short) page", page)
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		if err := json.NewEncoder(w).Encode(items); err != nil {
+			t.Fatalf("server failed to encode fixture page %d: %v", page, err)
+		}
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, nil, "testbackend", nil, nil)
+
+	var got []string
+	err := c.Paginate(func(page int) (bool, error) {
+		var items []string
+		if err := c.Do(http.MethodGet, fmt.Sprintf("/items?page=%d", page), nil, &items); err != nil {
+			return false, err
+		}
+		got = append(got, items...)
+		return len(items) < pageSize, nil
+	})
+	if err != nil {
+		t.Fatalf("Paginate returned unexpected error: %v", err)
+	}
+
+	want := []string{"a", "b", "c", "d", "e", "f", "g"}
+	if len(got) != len(want) {
+		t.Fatalf("Paginate accumulated %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("Paginate accumulated %v, want %v", got, want)
+		}
 	}
 }

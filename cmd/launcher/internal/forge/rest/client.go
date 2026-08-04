@@ -168,3 +168,20 @@ func (c *Client) Do(method, path string, body, out any) error {
 	}
 	return fmt.Errorf("%s: %s %s: maxAttempts must be >= 1 (got %d)", c.backend, method, path, c.maxAttempts)
 }
+
+// Paginate repeatedly invokes fetch for page 1, 2, 3, ... until fetch
+// reports the walk is done, so a caller performs one Do call per page and
+// decides its own last-page signal (array length, startAt/total, a
+// next-page header, whatever its backend uses) without writing the loop
+// itself. Paginate returns the first error fetch returns, if any.
+func (c *Client) Paginate(fetch func(page int) (done bool, err error)) error {
+	for page := 1; ; page++ {
+		done, err := fetch(page)
+		if err != nil {
+			return err
+		}
+		if done {
+			return nil
+		}
+	}
+}
