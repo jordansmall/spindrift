@@ -152,51 +152,30 @@ func ParseAnywhere(line string) (Outcome, bool) {
 // candidate line fails to parse — err satisfies IsNearMiss in that case —
 // or on an I/O error other than file-not-found or oversized lines.
 //
-// expectedNonce gates candidacy (issue #1939): when non-empty, a line that
-// would otherwise qualify at either tier above but does not carry
-// expectedNonce (per LineHasNonce) is not a candidate at all — the same
-// treatment as a bare mention. This is what stops an OUTCOME-shaped line an
-// untrusted issue/comment author echoed into the log, who wrote their text
-// before this run's nonce was minted and so cannot carry it, from
-// shadowing a genuine line via last-wins. An empty expectedNonce disables
-// the gate entirely (every line is eligible regardless of nonce content),
-// for callers with no per-run nonce to check against. skipped reports
-// whether at least one line was excluded solely for failing this gate, so
-// a caller can warn that a spoof attempt or misconfigured run occurred even
-// when a valid outcome was ultimately found (or wasn't). A line excluded by
-// the gate that is also a recognizable template/placeholder line — the
-// prompt's own example OUTCOME line with unsubstituted ${...} fields, or an
-// empty nonce= field — never sets skipped (issue #2088): such a line is
-// never a plausible spoof, so warning about it would be noise. It is still
-// excluded from candidacy either way; only the warning is suppressed.
-func lastInLog(path string, expectedNonce string) (o Outcome, found bool, skipped bool, err error) {
+// lastInLog applies no nonce gate (ADR 0039, issue #2274): unlike the
+// mid-run signal channels (SPINDRIFT_COMMENT, SPINDRIFT_PR_INTENT,
+// SPINDRIFT_ISSUE_INTENT), the outcome line is a single, final,
+// end-of-Box-lifetime signal the launcher reads only after the Box has
+// exited, so there is no later mid-run window left for an untrusted
+// issue/comment author's echoed line to race ahead of. Every leading-token
+// or field-bearing-mention line is a candidate regardless of any nonce= field
+// it may or may not carry.
+func lastInLog(path string) (o Outcome, found bool, err error) {
 	var lastLeading, lastMention string
 	scanErr := logscan.ForEachLine(path, logscan.SkipOversized, func(line string) {
 		if _, ok := stripToken(strings.TrimSpace(line), Token); ok {
-			if expectedNonce != "" && !LineHasNonce(line, expectedNonce) {
-				if !isTemplatePlaceholder(line) {
-					skipped = true
-				}
-				return
-			}
 			lastLeading = line
 			return
 		}
 		if containsToken(line, Token) && looksLikeAttempt(line) {
-			if expectedNonce != "" && !LineHasNonce(line, expectedNonce) {
-				if !isTemplatePlaceholder(line) {
-					skipped = true
-				}
-				return
-			}
 			lastMention = line
 		}
 	})
 	if scanErr != nil {
 		if errors.Is(scanErr, os.ErrNotExist) {
-			return Outcome{}, false, skipped, nil
+			return Outcome{}, false, nil
 		}
-		return Outcome{}, false, skipped, scanErr
+		return Outcome{}, false, scanErr
 	}
 
 	candidate := lastLeading
@@ -204,13 +183,13 @@ func lastInLog(path string, expectedNonce string) (o Outcome, found bool, skippe
 		candidate = lastMention
 	}
 	if candidate == "" {
-		return Outcome{}, false, skipped, nil
+		return Outcome{}, false, nil
 	}
 	o, err = Parse(candidate)
 	if err != nil {
-		return Outcome{}, false, skipped, err
+		return Outcome{}, false, err
 	}
-	return o, true, skipped, nil
+	return o, true, nil
 }
 
 // SelfReport is the driver's own last genuine (non-synthetic) leading-token
@@ -226,12 +205,11 @@ func lastInLog(path string, expectedNonce string) (o Outcome, found bool, skippe
 // `SPINDRIFT_OUTCOME: success` a model emits when it paraphrases the grammar.
 // Outcome and Parsed are set only when the line parsed the full grammar.
 //
-// Unlike lastInLog, lastSelfReportInLog applies NO nonce gate: the motivating
+// lastSelfReportInLog is unauthenticated and advisory: the motivating
 // near-miss carries no nonce at all (the paraphrasing model dropped every
-// field), so gating would discard the very signal this surfaces. The
-// self-report is therefore unauthenticated and advisory — a consumer that
-// acts on it owns weighing that trust, exactly as the prefactor framing
-// intends.
+// field), and the outcome path itself no longer gates on a nonce either (ADR
+// 0039, issue #2274). A consumer that acts on the self-report owns weighing
+// that trust, exactly as the prefactor framing intends.
 type SelfReport struct {
 	Raw     string  // the raw driver-authored leading-token line
 	Status  string  // best-effort self-reported status (field value or bare word)
@@ -245,7 +223,7 @@ type SelfReport struct {
 // or `TOKEN:`) and is NOT flagged synthetic=true, so the backstop's own
 // appended synthetic line — which wins lastInLog's last-line-wins — is
 // skipped here and the driver's real signal survives. See SelfReport for the
-// trust caveat (no nonce gate).
+// trust caveat.
 //
 // Returns (SelfReport{}, false, nil) when no non-synthetic leading-token line
 // exists, or the file does not exist. Returns (SelfReport{}, false, err) only
@@ -363,14 +341,6 @@ type Resolved struct {
 	// by design.
 	Kind  string
 	Found bool
-	// Skipped reports whether Resolve's genuine/synthetic tier walk (see
-	// lastInLog) excluded at least one SPINDRIFT_OUTCOME-shaped line, across
-	// every log scanned, for failing the nonce gate -- regardless of whether
-	// Resolve still went on to find a match via a later log or the
-	// self-report tier. A caller can use this to warn about a spoof attempt
-	// or misconfigured run even on an otherwise-successful Resolve, the same
-	// diagnostic lastInLog's own skipped return offered a direct caller.
-	Skipped bool
 }
 
 // Resolve is the single seam that picks among the tiers of the
@@ -381,30 +351,30 @@ type Resolved struct {
 // accidentally diverge from, that precedence by calling the underlying
 // per-log scanners directly.
 //
-// Resolve walks logs in order calling lastInLog(log.Path, nonce), keeping
+// Resolve walks logs in order calling lastInLog(log.Path), keeping
 // the last log that reports a match ("last pass wins", the same precedence
 // LastSelfReportFromLogs already applies across passes). A parse error on
 // the chosen candidate line (lastInLog's own near-miss contract) propagates
 // as Resolve's error. If a match was found, Resolved.Provenance is
 // ProvenanceSynthetic when the winning line's Outcome.Synthetic is true,
-// otherwise ProvenanceGenuine. Resolved.Skipped reports whether any log's
-// scan excluded a candidate line for failing the nonce gate, regardless of
-// which tier (or neither) ultimately wins.
+// otherwise ProvenanceGenuine. The outcome path applies no nonce gate (ADR
+// 0039, issue #2274): its freshness boundary is structural, so every
+// leading-token or field-bearing line is a candidate regardless of any
+// nonce= field it carries.
 //
-// If no genuine/synthetic match was found anywhere, Resolve does not give up:
-// it walks logs a second time calling lastSelfReportInLog(log.Path) — no
-// nonce, since the self-report tier is intentionally ungated (see
-// SelfReport) — again keeping the last log with a report. When one is found
-// and report.Parsed is true, Resolved.Outcome is report.Outcome in full and
-// Provenance is ProvenanceSelfReport. When one is found but NOT Parsed (the
-// bare-word near-miss a model produces when it paraphrases the grammar, e.g.
-// "SPINDRIFT_OUTCOME: success" with no other fields), Resolve still reports
-// Found: true and Provenance: ProvenanceSelfReport, but Resolved.Outcome only
-// has Status populated from report.Status — Issue, Landing, and Note stay
-// zero, since a bare word carries no other field to fill them from. This is
-// a deliberate, if thin, edge case: a caller reading Resolved.Outcome.Status
-// after a ProvenanceSelfReport result must not assume the rest of Outcome is
-// meaningful.
+// If the genuine/synthetic tier found no leading-token line at all (neither a
+// clean match nor a near-miss), Resolve does not give up: it walks logs a
+// second time calling lastSelfReportInLog(log.Path) — the self-report tier is
+// likewise ungated (see SelfReport) — again keeping the last log with a
+// report. When one is found and report.Parsed is true, Resolved.Outcome is
+// report.Outcome in full and Provenance is ProvenanceSelfReport. When one is
+// found but NOT Parsed, Resolved.Outcome only has Status populated from
+// report.Status — Issue, Landing, and Note stay zero. A caller reading
+// Resolved.Outcome.Status after a ProvenanceSelfReport result must not assume
+// the rest of Outcome is meaningful. Note that with the nonce gate retired
+// (ADR 0039, issue #2274) a bare-word leading line like "SPINDRIFT_OUTCOME:
+// success" is now lastInLog's own near-miss, so it surfaces as Resolve's
+// near-miss error above rather than reaching this self-report fallback.
 //
 // Only when neither tier yields anything does Resolve return
 // Resolved{Found: false} with no error — matching this package's existing
@@ -412,7 +382,7 @@ type Resolved struct {
 //
 // kind is normalized ("" becomes "work") and stored on Resolved.Kind
 // regardless of which tier won; it never changes selection.
-func Resolve(logs []PassLog, nonce string, kind string) (Resolved, error) {
+func Resolve(logs []PassLog, kind string) (Resolved, error) {
 	if kind == "" {
 		kind = "work"
 	}
@@ -421,13 +391,9 @@ func Resolve(logs []PassLog, nonce string, kind string) (Resolved, error) {
 		winner  Outcome
 		found   bool
 		lastErr error
-		skipped bool
 	)
 	for _, log := range logs {
-		o, ok, skip, err := lastInLog(log.Path, nonce)
-		if skip {
-			skipped = true
-		}
+		o, ok, err := lastInLog(log.Path)
 		switch {
 		case err != nil:
 			// A later log's near-miss candidate (issue-shaped line present,
@@ -445,7 +411,7 @@ func Resolve(logs []PassLog, nonce string, kind string) (Resolved, error) {
 		// running state from prior logs untouched.
 	}
 	if lastErr != nil {
-		return Resolved{Kind: kind, Skipped: skipped}, lastErr
+		return Resolved{Kind: kind}, lastErr
 	}
 	if found {
 		provenance := ProvenanceGenuine
@@ -457,13 +423,12 @@ func Resolve(logs []PassLog, nonce string, kind string) (Resolved, error) {
 			Provenance: provenance,
 			Kind:       kind,
 			Found:      true,
-			Skipped:    skipped,
 		}, nil
 	}
 
 	report, reportFound := lastSelfReportAcrossLogs(logs)
 	if !reportFound {
-		return Resolved{Kind: kind, Skipped: skipped}, nil
+		return Resolved{Kind: kind}, nil
 	}
 	if report.Parsed {
 		return Resolved{
@@ -471,7 +436,6 @@ func Resolve(logs []PassLog, nonce string, kind string) (Resolved, error) {
 			Provenance: ProvenanceSelfReport,
 			Kind:       kind,
 			Found:      true,
-			Skipped:    skipped,
 		}, nil
 	}
 	return Resolved{
@@ -479,7 +443,6 @@ func Resolve(logs []PassLog, nonce string, kind string) (Resolved, error) {
 		Provenance: ProvenanceSelfReport,
 		Kind:       kind,
 		Found:      true,
-		Skipped:    skipped,
 	}, nil
 }
 
@@ -791,26 +754,6 @@ func looksLikeAttempt(line string) bool {
 		tokenField(line, "landing") != "" ||
 		tokenField(line, "status") != "" ||
 		noteField(line) != ""
-}
-
-// isTemplatePlaceholder reports whether line is a recognizable prompt
-// template/example line rather than a genuine (or spoofed) attempt (issue
-// #2088): either it contains an unsubstituted `${...}` substitution field —
-// the prompt's own grammar example, never a real value a Box or an untrusted
-// echo would produce — or it carries a standalone `nonce=` field token with
-// no value at all. Used only to decide whether an excluded nonce-gate line
-// is worth warning about; it never affects candidacy, since a line that
-// fails the nonce gate is excluded from candidacy either way.
-func isTemplatePlaceholder(line string) bool {
-	if strings.Contains(line, "${") {
-		return true
-	}
-	for _, tok := range strings.Fields(line) {
-		if tok == "nonce=" {
-			return true
-		}
-	}
-	return false
 }
 
 // stripToken reports whether line begins with token followed by a space or a
