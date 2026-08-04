@@ -116,8 +116,10 @@ rec {
   # Box's own prompt output is expected to emit, so a later slice can drive a
   # post-run validation pass from this data instead of the omission going
   # unnoticed until something downstream (a merge, a comment relay) silently
-  # no-ops. Not yet consumed anywhere -- same "parallel, not-yet-wired data
-  # source" status as injectBlocks above.
+  # no-ops. validateMarkersBashRows/validateMarkersBashPreamble below render
+  # this list into the bash array a following slice's in-box validator reads
+  # (issue #2249) -- the list itself stays data-only; runtime consumption
+  # lives in agent/entrypoint.sh.
   #   id       -- short, stable identifier for the expected marker.
   #   marker   -- the literal marker text a Box's output is scanned for.
   #   carrier  -- where the marker is expected to appear:
@@ -219,5 +221,23 @@ rec {
   injectBlocksBashPreamble =
     "_INJECT_BLOCK_ROWS=(\n"
     + builtins.concatStringsSep "" (map (row: "  " + escapeShellArg row + "\n") injectBlocksBashRows)
+    + ")\n";
+
+  # Each validateMarkers row rendered into a pipe-joined string, in row
+  # order -- mirrors injectBlocksBashRows above, minus the injectBlocks-only
+  # fields (source/startMarker/endMarker/kinds): validateMarkers rows only
+  # ever need id/marker/carrier/severity/when.
+  validateMarkersBashRows = map (
+    row: "${row.id}|${row.marker}|${row.carrier}|${row.severity}|${row.when}"
+  ) validateMarkers;
+
+  # validateMarkersBashRows wrapped into a bash array literal, formatted
+  # exactly like injectBlocksBashPreamble above renders injectBlocksBashRows
+  # into `_INJECT_BLOCK_ROWS` -- gives a following slice's in-box validator a
+  # `_VALIDATE_MARKER_ROWS` array to scan by id (issue #2249), the same way
+  # `_contract_marker`/`_INJECT_BLOCK_ROWS` already work for injectBlocks.
+  validateMarkersBashPreamble =
+    "_VALIDATE_MARKER_ROWS=(\n"
+    + builtins.concatStringsSep "" (map (row: "  " + escapeShellArg row + "\n") validateMarkersBashRows)
     + ")\n";
 }

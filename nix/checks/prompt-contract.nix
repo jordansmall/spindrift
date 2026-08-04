@@ -308,4 +308,65 @@ in
     assert assertMsg (missing == [ ])
       "injectBlocksBashPreamble must contain every injectBlocksBashRows entry single-quote-wrapped and indented 2 spaces; missing: [${concatStringsSep ", " missing}]";
     pkgs.runCommand "prompt-contract-inject-blocks-bash-preamble-contains-every-quoted-row" { } "touch $out";
+
+  prompt-contract-validate-markers-bash-rows-has-four-entries =
+    let
+      out = builtins.length promptContract.validateMarkersBashRows;
+    in
+    assert assertMsg (out == 4)
+      "validateMarkersBashRows must have exactly 4 entries (one per validateMarkers row), got: ${toString out}";
+    assert assertMsg (out == builtins.length promptContract.validateMarkers)
+      "validateMarkersBashRows' length must equal validateMarkers' length (derived-from-validateMarkers property)";
+    pkgs.runCommand "prompt-contract-validate-markers-bash-rows-has-four-entries" { } "touch $out";
+
+  prompt-contract-validate-markers-bash-rows-order =
+    let
+      ids = map (row: builtins.head (pkgs.lib.splitString "|" row)) promptContract.validateMarkersBashRows;
+      expected = [ "verdict-comment-relay" "reviewer-verdict" "pr-intent" "issue-intent" ];
+    in
+    assert assertMsg (ids == expected)
+      "validateMarkersBashRows must appear in validateMarkers row order [verdict-comment-relay, reviewer-verdict, pr-intent, issue-intent], got: [${concatStringsSep ", " ids}]";
+    pkgs.runCommand "prompt-contract-validate-markers-bash-rows-order" { } "touch $out";
+
+  prompt-contract-validate-markers-bash-rows-verdict-comment-relay-exact-string =
+    let
+      out = builtins.elemAt promptContract.validateMarkersBashRows 0;
+      expected = "verdict-comment-relay|SPINDRIFT_COMMENT|fragment-body|reject|readOnlyResearch";
+    in
+    assert assertMsg (out == expected)
+      "validateMarkersBashRows' verdict-comment-relay row must equal '${expected}', got: '${out}'";
+    pkgs.runCommand "prompt-contract-validate-markers-bash-rows-verdict-comment-relay-exact-string" { } "touch $out";
+
+  prompt-contract-validate-markers-bash-preamble-starts-with-array-open =
+    let
+      out = promptContract.validateMarkersBashPreamble;
+      prefix = "_VALIDATE_MARKER_ROWS=(\n";
+    in
+    assert assertMsg (builtins.substring 0 (builtins.stringLength prefix) out == prefix)
+      "validateMarkersBashPreamble must start with '_VALIDATE_MARKER_ROWS=(\\n', got: '${builtins.substring 0 40 out}...'";
+    pkgs.runCommand "prompt-contract-validate-markers-bash-preamble-starts-with-array-open" { } "touch $out";
+
+  prompt-contract-validate-markers-bash-preamble-ends-with-array-close =
+    let
+      out = promptContract.validateMarkersBashPreamble;
+      suffix = ")\n";
+      len = builtins.stringLength out;
+      suffixLen = builtins.stringLength suffix;
+    in
+    assert assertMsg (builtins.substring (len - suffixLen) suffixLen out == suffix)
+      "validateMarkersBashPreamble must end with ')\\n', got tail: '${builtins.substring (len - 40) 40 out}'";
+    pkgs.runCommand "prompt-contract-validate-markers-bash-preamble-ends-with-array-close" { } "touch $out";
+
+  prompt-contract-validate-markers-bash-preamble-contains-every-quoted-row =
+    let
+      preamble = promptContract.validateMarkersBashPreamble;
+      # Every row's content (`|` and space are both outside
+      # `[[:alnum:],._+:@%/-]+`) trips the quoted branch, so each row must
+      # appear single-quote-wrapped on its own indented line.
+      expectedLines = map (row: "  '${row}'\n") promptContract.validateMarkersBashRows;
+      missing = builtins.filter (line: !(pkgs.lib.hasInfix line preamble)) expectedLines;
+    in
+    assert assertMsg (missing == [ ])
+      "validateMarkersBashPreamble must contain every validateMarkersBashRows entry single-quote-wrapped and indented 2 spaces; missing: [${concatStringsSep ", " missing}]";
+    pkgs.runCommand "prompt-contract-validate-markers-bash-preamble-contains-every-quoted-row" { } "touch $out";
 }
