@@ -18,15 +18,20 @@ import (
 // github/priority_test.go). This just confirms toForgeIssue — the single
 // conversion function behind Issue, ListIssues, and ListOpenIssues — resolves
 // Priority from the issue's labels.
+const (
+	issue1JSON = `{"number":1,"title":"critical bug","state":"open","labels":[{"name":"ready-for-agent"},{"name":"agent-priority-critical"}]}`
+	issue2JSON = `{"number":2,"title":"unlabeled","state":"open","labels":[]}`
+)
+
 func TestForgejoClient_Priority_ResolvedFromLabels(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/v1/repos/owner/repo/issues/1":
-			w.Write([]byte(`{"number":1,"title":"critical bug","state":"open","labels":[{"name":"ready-for-agent"},{"name":"agent-priority-critical"}]}`))
+			w.Write([]byte(issue1JSON))
 		case "/api/v1/repos/owner/repo/issues/2":
-			w.Write([]byte(`{"number":2,"title":"unlabeled","state":"open","labels":[]}`))
+			w.Write([]byte(issue2JSON))
 		case "/api/v1/repos/owner/repo/issues":
-			w.Write([]byte(`[{"number":1,"title":"critical bug","state":"open","labels":[{"name":"ready-for-agent"},{"name":"agent-priority-critical"}]},{"number":2,"title":"unlabeled","state":"open","labels":[]}]`))
+			w.Write([]byte("[" + issue1JSON + "," + issue2JSON + "]"))
 		default:
 			http.NotFound(w, r)
 		}
@@ -56,5 +61,17 @@ func TestForgejoClient_Priority_ResolvedFromLabels(t *testing.T) {
 	}
 	if got["2"] != forge.PriorityNormal {
 		t.Errorf("ListOpenIssues()[2].Priority = %v, want PriorityNormal", got["2"])
+	}
+
+	listed, err := fc.ListIssues(forge.Dispatchable)
+	if err != nil {
+		t.Fatalf("ListIssues(Dispatchable): %v", err)
+	}
+	got = map[string]forge.Priority{}
+	for _, i := range listed {
+		got[i.Number] = i.Priority
+	}
+	if got["1"] != forge.PriorityCritical {
+		t.Errorf("ListIssues(Dispatchable)[1].Priority = %v, want PriorityCritical", got["1"])
 	}
 }
