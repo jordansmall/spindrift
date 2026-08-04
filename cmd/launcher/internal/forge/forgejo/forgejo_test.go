@@ -5,9 +5,11 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -354,6 +356,94 @@ func TestForgejoClient_TouchesOf_ParsesBodyTouchSection(t *testing.T) {
 	want := []string{"lib/env-schema.nix"}
 	if !reflect.DeepEqual(touches, want) {
 		t.Fatalf("TouchesOf = %v, want %v", touches, want)
+	}
+}
+
+// forgejoIssuesPage renders count issues as a Forgejo issues-list JSON page,
+// numbered start, start+1, ..., start+count-1.
+func forgejoIssuesPage(start, count int) string {
+	var b strings.Builder
+	b.WriteByte('[')
+	for i := 0; i < count; i++ {
+		if i > 0 {
+			b.WriteByte(',')
+		}
+		fmt.Fprintf(&b, `{"number":%d,"title":"t","body":"","state":"open","labels":[]}`, start+i)
+	}
+	b.WriteByte(']')
+	return b.String()
+}
+
+// TestForgejoClient_ListOpenIssues_WalksAllPages verifies listIssues (via the
+// ListOpenIssues seam) walks every page of the Forgejo issues-list endpoint
+// via rest.Client.Paginate rather than fetching a single bounded page (issue
+// #2265): the server serves forge.ResultPageLimit issues on page 1 (a full
+// page, numbered descending to prove the final sort is real) and a short
+// final page of 5 issues on page 2, and the test asserts the server never
+// sees a request for a page beyond that short page, that both requests carry
+// the expected "page"/"limit" query params, and that the combined result
+// contains every issue across both pages in ascending issue-number order.
+func TestForgejoClient_ListOpenIssues_WalksAllPages(t *testing.T) {
+	const pageSize = forge.ResultPageLimit
+	// Page 1: issue numbers pageSize+5 down to 6 (descending, full page).
+	// Page 2 (short, signals done): issue numbers 5 down to 1.
+	var gotPages []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/repos/owner/repo/issues" {
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+		q := r.URL.Query()
+		if limit := q.Get("limit"); limit != strconv.Itoa(pageSize) {
+			t.Errorf("limit query param = %q, want %q", limit, strconv.Itoa(pageSize))
+		}
+		page, err := strconv.Atoi(q.Get("page"))
+		if err != nil {
+			t.Fatalf("invalid page query param: %v", err)
+		}
+		gotPages = append(gotPages, q.Get("page"))
+		w.WriteHeader(http.StatusOK)
+		switch page {
+		case 1:
+			// Descending issue numbers pageSize+5 .. 6, a full page.
+			var b strings.Builder
+			b.WriteByte('[')
+			for i := 0; i < pageSize; i++ {
+				if i > 0 {
+					b.WriteByte(',')
+				}
+				fmt.Fprintf(&b, `{"number":%d,"title":"t","body":"","state":"open","labels":[]}`, pageSize+5-i)
+			}
+			b.WriteByte(']')
+			w.Write([]byte(b.String()))
+		case 2:
+			// Issue numbers 1..5, a short page (5 < pageSize), signals the
+			// walk is done.
+			w.Write([]byte(forgejoIssuesPage(1, 5)))
+		default:
+			t.Errorf("server received request for page %d, want no request beyond the short page 2", page)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	fc := forgejo.NewForgejoClient(forgejo.ForgejoConfig{BaseURL: srv.URL, Repo: "owner/repo", Token: "tok"})
+	issues, err := fc.ListOpenIssues()
+	if err != nil {
+		t.Fatalf("ListOpenIssues: %v", err)
+	}
+
+	wantCount := pageSize + 5
+	if len(issues) != wantCount {
+		t.Fatalf("ListOpenIssues returned %d issues, want %d (all pages merged)", len(issues), wantCount)
+	}
+	for i, iss := range issues {
+		wantNum := strconv.Itoa(i + 1)
+		if iss.Number != wantNum {
+			t.Fatalf("issues[%d].Number = %q, want %q (ascending order across merged pages)", i, iss.Number, wantNum)
+		}
+	}
+	if len(gotPages) != 2 || gotPages[0] != "1" || gotPages[1] != "2" {
+		t.Fatalf("server saw page requests %v, want exactly [1 2]", gotPages)
 	}
 }
 
