@@ -44,6 +44,13 @@ var ErrRepoNotFound = errors.New("forge repo not found")
 // is a genuine error and is NOT this sentinel.
 var ErrBundleNotFound = errors.New("forge bundle not found")
 
+// ErrNotFound is returned when a requested resource (an issue, a pull
+// request, a label, etc.) does not exist on the forge. Unlike
+// ErrRepoNotFound, which is Probe-specific (the configured repository
+// itself is unreachable), ErrNotFound is the generic per-resource sentinel
+// callers can errors.Is check for any REST lookup.
+var ErrNotFound = errors.New("forge: not found")
+
 // Issue is a GitHub issue as seen by the launcher.
 type Issue struct {
 	Number string // launcher keeps issue numbers as strings
