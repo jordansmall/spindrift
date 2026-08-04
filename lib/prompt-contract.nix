@@ -26,6 +26,22 @@ let
     else
       string;
 
+  # Does `text` contain the literal (non-regex) `needle` -- mirrors
+  # lib/prompt-inject.nix's own splitOnce/injectSection idiom
+  # (builtins.split on a regex-escaped literal, checking for more than the
+  # one no-match part) without depending on that file's private, unexported
+  # escapeRegex (pure builtins only, same reasoning as escapeShellArg above).
+  hasInfix =
+    needle: text:
+    builtins.length (
+      builtins.split (
+        builtins.replaceStrings
+          [ "\\" "^" "$" "." "|" "?" "*" "+" "(" ")" "[" "]" "{" "}" ]
+          [ "\\\\" "\\^" "\\$" "\\." "\\|" "\\?" "\\*" "\\+" "\\(" "\\)" "\\[" "\\]" "\\{" "\\}" ]
+          needle
+      ) text
+    ) > 1;
+
   # Slices one injectBlocks row's canonical text live from its declared
   # `source` prompt file -- never a standalone contract file, so this can
   # never drift from the default prompt's own copy (issue #419). Re-derives,
@@ -240,4 +256,67 @@ rec {
     "_VALIDATE_MARKER_ROWS=(\n"
     + builtins.concatStringsSep "" (map (row: "  " + escapeShellArg row + "\n") validateMarkersBashRows)
     + ")\n";
+
+  # Build-time reject arm (issue #2250, parent #2244): resolves each
+  # validateMarkers "reject" row into one of ok/reject/advise from whatever
+  # static gate/content knowledge a caller (lib/mkHarness.nix, a later slice)
+  # can supply at build time. Iterates validateMarkers itself -- filtered to
+  # severity == "reject" -- rather than a hand-duplicated id list, so a
+  # future third reject row is picked up here automatically.
+  #
+  #   staticGates     -- attrset from a row's `when` symbol to a bool. A
+  #                      `when` not present as a key is unresolved (not
+  #                      knowable at build time), never treated as false.
+  #   contentByRowId  -- attrset from a row's `id` to the prompt/fragment
+  #                      text to search for that row's `marker`. An `id` not
+  #                      present as a key means the content isn't available
+  #                      at build time, also unresolved.
+  #
+  # A marker confirmed present in its content always wins ("ok"), regardless
+  # of what the gate says -- a present marker is never a problem, known-
+  # triggered or not. Absent from unresolvable content, or present-but-
+  # missing-marker content under a false/unresolved gate, is "advise" (a
+  # non-fatal nudge, since the condition isn't provably triggered); only
+  # present-but-missing-marker content under a provably-true gate is
+  # "reject" (the omission is unambiguous, mirroring
+  # agent/entrypoint.sh's runtime _validate_prompt_contract reject arm).
+  buildTimeRejectVerdicts =
+    {
+      staticGates,
+      contentByRowId,
+    }:
+    let
+      rejectRows = builtins.filter (row: row.severity == "reject") validateMarkers;
+      verdictFor =
+        row:
+        let
+          hasContent = builtins.hasAttr row.id contentByRowId;
+          content = contentByRowId.${row.id} or "";
+          markerPresent = hasContent && hasInfix row.marker content;
+          gateKnownTrue = builtins.hasAttr row.when staticGates && staticGates.${row.when};
+        in
+        if markerPresent then
+          {
+            inherit (row) id marker;
+            verdict = "ok";
+            message = "";
+          }
+        else if hasContent && gateKnownTrue then
+          {
+            inherit (row) id marker;
+            verdict = "reject";
+            message = "mkHarness: '${row.id}' content is missing the required '${row.marker}' marker, and its gating condition '${row.when}' is statically known true at build time -- this omission can never be recovered from at runtime, so the build must fail now.";
+          }
+        else
+          {
+            inherit (row) id marker;
+            verdict = "advise";
+            message =
+              if !hasContent then
+                "mkHarness: '${row.id}' content is not available at build time, so its required '${row.marker}' marker can't be checked -- deferring to the runtime validator."
+              else
+                "mkHarness: '${row.id}' content is missing the required '${row.marker}' marker, but its gating condition '${row.when}' is not statically known true at build time -- deferring to the runtime validator instead of failing the build.";
+          };
+    in
+    map verdictFor rejectRows;
 }
