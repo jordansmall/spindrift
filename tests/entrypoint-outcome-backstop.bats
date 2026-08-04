@@ -350,10 +350,11 @@ EOF
 }
 
 # CODE_FORGE=local's read-only-style no-writable-remote note (issue #1808)
-# must stay exactly as it was before this change: no bundle is written on
-# this no-outcome backstop path (only a genuine status=ready claim triggers
-# the harness-owned bundle-out step at the bottom of main()).
-@test "CODE_FORGE=local + no outcome line -> unchanged: no bundle, no-writable-remote note" {
+# now falls through to the same harness-owned bundle-out step every other
+# status=blocked-with-commits path uses (ADR 0039 slice S1, issue #2252): a
+# real bundle IS written even though the note still explains there's no
+# writable remote to push to directly.
+@test "CODE_FORGE=local + no outcome line -> bundle relayed via outbox, no-writable-remote note" {
   export CODE_FORGE=local
   export REPO_MOUNT_DIR="$REMOTE_ROOT/owner/repo.git"
   export OUTBOX_DIR="$BATS_TEST_TMPDIR/outbox"
@@ -362,6 +363,8 @@ EOF
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   [ "$(grep -c '^SPINDRIFT_OUTCOME ' <<<"$output")" -eq 1 ]
-  grep -q '^SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=blocked note=.*no writable remote under CODE_FORGE=local' <<<"$output"
-  [ ! -f "$OUTBOX_DIR/seam.bundle" ]
+  grep -q '^SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=blocked note=.*branch relayed via outbox bundle.*no writable remote under CODE_FORGE=local' <<<"$output"
+  [ -f "$OUTBOX_DIR/seam.bundle" ]
+  run git -C "$WORK_DIR" bundle verify "$OUTBOX_DIR/seam.bundle"
+  [ "$status" -eq 0 ]
 }
