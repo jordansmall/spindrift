@@ -32,7 +32,6 @@ func runOutcomeBackstop(args []string, stdout io.Writer) int {
 	hostMediatedRemote := fs.String("host-mediated-remote", "", "non-empty when the active CODE_FORGE has no writable remote at all (presence flag)")
 	outboxRelayCapable := fs.String("outbox-relay-capable", "", "non-empty when the active CODE_FORGE backend gets outbox-relay treatment under read-only (presence flag)")
 	boxWrite := fs.String("box-write-enabled", "", "non-empty when BOX_WRITE_ENABLED was set (presence flag)")
-	nonce := fs.String("nonce", "", "this run's own control nonce (RUN_NONCE), appended to the emitted line")
 	recovery := fs.String("recovery-attempted", "", "non-empty when a resume pass already ran and also produced no outcome (presence flag)")
 	maxAttempts := fs.Int("max-attempts", 1, "bounds the push retry loop")
 	backoffSecs := fs.Int("backoff-secs", 0, "linear backoff unit, in seconds, between push retries")
@@ -56,7 +55,6 @@ func runOutcomeBackstop(args []string, stdout io.Writer) int {
 		OutboxRelayCapable: *outboxRelayCapable != "",
 		WriteEnabled:       *boxWrite != "",
 		RecoveryAttempted:  *recovery != "",
-		Nonce:              *nonce,
 		MaxAttempts:        *maxAttempts,
 		Backoff:            time.Duration(*backoffSecs) * time.Second,
 		Jitter:             time.Duration(*jitterSecs) * time.Second,

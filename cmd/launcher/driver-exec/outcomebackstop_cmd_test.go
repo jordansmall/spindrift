@@ -9,8 +9,8 @@ import (
 // TestRunOutcomeBackstop_ParsesFlagsAndEmits verifies the outcome-backstop
 // subcommand's flag parsing reaches outcomebackstop.Run with the right
 // Config: a CODE_FORGE=local repo with a base and a branch commit emits a
-// single status=blocked SPINDRIFT_OUTCOME line carrying the given nonce and
-// landing=<branch>, without ever attempting a push (issue #2157).
+// single status=blocked SPINDRIFT_OUTCOME line carrying landing=<branch>,
+// without ever attempting a push (issue #2157).
 func TestRunOutcomeBackstop_ParsesFlagsAndEmits(t *testing.T) {
 	dir := t.TempDir()
 	runGitCmd(t, dir, "init", "-b", "main")
@@ -31,7 +31,6 @@ func TestRunOutcomeBackstop_ParsesFlagsAndEmits(t *testing.T) {
 		"--branch", "agent/issue-42",
 		"--base", "main",
 		"--host-mediated-remote", "1",
-		"--nonce", "abc123",
 	}, &stdout)
 	if rc != 0 {
 		t.Fatalf("runOutcomeBackstop exit = %d, want 0 (stdout=%q)", rc, stdout.String())
@@ -50,8 +49,8 @@ func TestRunOutcomeBackstop_ParsesFlagsAndEmits(t *testing.T) {
 	if !bytes.Contains([]byte(out), []byte("landing=agent/issue-42")) {
 		t.Fatalf("expected landing=agent/issue-42, got %q", out)
 	}
-	if !bytes.Contains([]byte(out), []byte("nonce=abc123")) {
-		t.Fatalf("expected nonce=abc123, got %q", out)
+	if bytes.Contains([]byte(out), []byte("nonce=")) {
+		t.Fatalf("expected no nonce field, got %q", out)
 	}
 	if !bytes.Contains([]byte(out), []byte("no writable remote under CODE_FORGE=local")) {
 		t.Fatalf("expected the local no-writable-remote note, got %q", out)
