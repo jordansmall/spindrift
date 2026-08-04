@@ -44,6 +44,30 @@ func (s *Settle) tryAdoptRelayedBranch(d dispatch.Dispatcher, num string, gen ui
 	return s.adoptAndGate(d, num, gen, result, "backstop-synthetic blocked overridden by genuine success self-report; PR opened on relayed branch")
 }
 
+// tryAdoptRelayedBranchNoOutcome is gate.go's "no outcome line at all" arm's
+// first move (issue #2253): a read-only Box that crashed, hung, or was
+// killed before it ever emitted a parseable SPINDRIFT_OUTCOME line leaves
+// result.OutcomeFound false — no synthetic status=blocked backstop gets
+// stitched in for this case the way ADR 0036 does when a driver log carries
+// at least a trailing partial line, so tryAdoptRelayedBranch's own
+// Outcome.Synthetic gate never fires here. This is otherwise the same
+// fingerprint and the same false-negative risk tryAdoptRelayedBranch guards
+// against: the driver's own last genuine self-report (Result.SelfReport,
+// issue #2223) may still say the run succeeded, and a real branch may still
+// be sitting in the outbox waiting to be relayed. Rather than park that as
+// agent-failed, this reuses adoptAndGate's exact same adopt-then-gate tail —
+// see tryAdoptRelayedBranch's own doc comment for the full reasoning behind
+// the self-report trust boundary and the remaining gate conditions, which
+// this function mirrors unchanged apart from the outcome-line check itself.
+func (s *Settle) tryAdoptRelayedBranchNoOutcome(d dispatch.Dispatcher, num string, gen uint64, result dispatch.Result) bool {
+	if result.OutcomeFound || !s.readOnly || s.pr == nil ||
+		!result.SelfReportFound || !isSuccessSelfReport(result.SelfReport.Status) {
+		return false
+	}
+
+	return s.adoptAndGate(d, num, gen, result, "no outcome line; genuine success self-report and relayed bundle; PR opened on relayed branch")
+}
+
 // adoptAndGate is the shared adopt+gate tail behind both
 // tryAdoptRelayedBranch (issue #2224, the read-only backstop-override arm)
 // and SettleRelayedBranch (issue #2225, recover's operator-driven arm): open
@@ -169,7 +193,7 @@ func (s *Settle) defaultAdoptPRText(num string) (title, body string) {
 		title = iss.Title
 	}
 	body = fmt.Sprintf(
-		"Auto-adopted PR for the relayed agent branch (issue #2224): the run succeeded but its outcome degraded to the synthetic backstop (ADR 0036); this PR was opened host-side from the relayed outbox bundle.\n\nCloses #%s",
+		"Auto-adopted PR for the relayed agent branch: the run's driver self-reported success but its outcome line was missing or degraded to the synthetic backstop (ADR 0036/0039); this PR was opened host-side from the relayed outbox bundle.\n\nCloses #%s",
 		num,
 	)
 	return title, body
