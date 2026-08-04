@@ -66,6 +66,14 @@
   # fragmentsSourceDir below); overridable here only for the bats
   # fixture-row test proving a new row needs no entrypoint edit.
   fragments ? import ./fragments.nix,
+  # The directory the fragment registry's files live under, cp -r'd whole
+  # into the image (see fragmentsSourceDir/fragmentRegistryPreamble below).
+  # Not Consumer-tunable like `prompt`/`scoutPrompt`/etc above; overridable
+  # here only so nix/checks/prompts.nix's build-time-reject-research-
+  # verdict-comment-relay-* checks (issue #2250) can point buildTimeReject-
+  # Verdicts' research-verdict-*-readonly.md lookup at a broken fixture
+  # directory without touching the real templates tree.
+  fragmentsDir ? ../templates/default/prompts/fragments,
   # Skill files baked into the image at /home/agent/.claude/skills so the
   # headless agent can invoke them without a runtime mount. Each element is
   # either a path/derivation (copied under its basename), or a
@@ -202,7 +210,9 @@ let
   # fixed source into every image the same way, under /agent/prompts/fragments
   # -- a SPINDRIFT_PROMPT_DIR override supplies its own fragment for whichever
   # knob it enables, exactly as it already must supply filer-prompt.md.
-  fragmentsSourceDir = ../templates/default/prompts/fragments;
+  # (fragmentsDir above is the actual param; this is a thin alias so the rest
+  # of this file's existing fragmentsSourceDir usages are unchanged.)
+  fragmentsSourceDir = fragmentsDir;
 
   # The SPINDRIFT_OUTCOME contract (the LAND THE CHANGE / WATCH CI / OUTCOME /
   # IF BLOCKED sections) is harness-owned (issue #419): a Consumer `prompt`
@@ -386,6 +396,41 @@ let
   # contract-registry.sh from one source.
   contractRegistryPreamble =
     promptContract.injectBlocksBashPreamble + promptContract.validateMarkersBashPreamble;
+
+  # Build-time reject arm (issue #2250, parent #2244): resolves both
+  # validateMarkers "reject" rows against this build's own static knowledge.
+  # `reviewer-verdict` is gated on whether the orchestrator is enabled
+  # (mergedDefaults.orchestratorEnabled) and checked against the literal
+  # reviewPrompt text this image bakes. `verdict-comment-relay` is gated on
+  # whether research runs read-only (mergedDefaults.boxForgeAndIssueAccess)
+  # and checked against the literal research-verdict-*-readonly.md fragment
+  # this build's mergedDefaults.issueTracker statically selects -- github and
+  # forgejo are the only trackers with a distinct "-readonly" fragment file
+  # (lib/fragments.nix); local/jira have none, so researchReadonlyForgeSuffix
+  # is null and the id is simply omitted from contentByRowId below, resolving
+  # to "advise" per lib/prompt-contract.nix's own doc comment. buildTimeReject
+  # Ok below is what actually forces this list's evaluation at build time.
+  researchReadonlyForgeSuffix =
+    if mergedDefaults.issueTracker == "github" then
+      "github"
+    else if mergedDefaults.issueTracker == "forgejo" then
+      "forgejo"
+    else
+      null;
+  researchReadonlyFragmentFile =
+    fragmentsDir + "/research-verdict-${researchReadonlyForgeSuffix}-readonly.md";
+  buildTimeRejectVerdicts = promptContract.buildTimeRejectVerdicts {
+    staticGates = {
+      orchestratorEnabled = mergedDefaults.orchestratorEnabled == true;
+      readOnlyResearch = mergedDefaults.boxForgeAndIssueAccess == "read-only";
+    };
+    contentByRowId = {
+      "reviewer-verdict" = reviewPrompt;
+    }
+    // lib.optionalAttrs (researchReadonlyForgeSuffix != null) {
+      "verdict-comment-relay" = builtins.readFile researchReadonlyFragmentFile;
+    };
+  };
 
   # Version sourced from the release-please manifest so mkHarness always tracks
   # the bot-maintained source of truth (ADR-0010).
@@ -945,10 +990,28 @@ let
     "workerModel"
   ];
   deprecationMsg = "spindrift: the per-agent model knobs (${lib.concatStringsSep ", " legacyKnobsSet}) are deprecated and will be removed; migrate to the `roster` option (see docs/reference.md).";
+
+  # Forces buildTimeRejectVerdicts' evaluation (issue #2250): builtins.all
+  # must evaluate every element to a bool to decide its own result, so a
+  # `throw` raised while evaluating one element's "reject" branch propagates
+  # through builtins.all and then through the `assert` below -- there is no
+  # lazy element `assert` skips past. A "reject" verdict throws v.message
+  # (an unrecoverable build failure); an "advise" verdict is a non-fatal
+  # builtins.trace nudge to stderr; "ok" is silent.
+  buildTimeRejectOk = builtins.all (
+    v:
+    if v.verdict == "reject" then
+      throw v.message
+    else if v.verdict == "advise" then
+      builtins.trace v.message true
+    else
+      true
+  ) buildTimeRejectVerdicts;
 in
 if unknownDefaultKeys != [ ] then
   throw "mkHarness: unknown defaults key(s): ${lib.concatStringsSep ", " unknownDefaultKeys}; valid keys: ${lib.concatStringsSep ", " (lib.attrNames flakeOptionEntries)}"
 else
+  assert buildTimeRejectOk;
   lib.warnIf (legacyKnobsSet != [ ]) deprecationMsg {
     inherit
       image

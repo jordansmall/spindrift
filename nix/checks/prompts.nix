@@ -1,6 +1,12 @@
 # Prompt/outcome-contract behavior: rendering the configured prompt, and the
 # SPINDRIFT_OUTCOME contract injection/idempotency rules (issue #419).
-{ pkgs, fixtures, ... }:
+{
+  pkgs,
+  fixtures,
+  nixpkgs,
+  system,
+  ...
+}:
 let
   inherit (fixtures)
     promptHarness
@@ -41,6 +47,35 @@ let
     awk '/^# CHECK$/{f=1} /^# REVIEW$/{exit} f' \
       ${batsHarness.promptDir}/issue-prompt.md > $out/issue-check.txt
   '';
+
+  # Broken fixture shared by both build-time-reject-research-verdict-comment-
+  # relay-* checks below (issue #2250, parent #2244): the whole fragments
+  # directory, cp -r'd from the real templates tree so every other fragment
+  # fragmentRegistryPreamble's `cp -r` step needs is still present, but with
+  # research-verdict-github-readonly.md swapped for a broken copy missing the
+  # required SPINDRIFT_COMMENT marker -- mirrors the reviewPrompt fixture
+  # build-time-reject-orchestrator-verdict-{missing,not-triggered} share
+  # above.
+  brokenResearchVerdictFragmentBody = ''
+    Your GitHub token is read-only here -- you cannot comment on the issue
+    yourself. Print the verdict as a single line on stdout instead -- the
+    launcher finds it by this run's nonce, decodes it, and posts it to the
+    issue, host-side, once you exit.
+
+    This fixture deliberately omits the required marker line.
+  '';
+  brokenResearchVerdictFragmentsDir =
+    pkgs.runCommand "broken-research-verdict-fragments"
+      {
+        passAsFile = [ "brokenBody" ];
+        brokenBody = brokenResearchVerdictFragmentBody;
+      }
+      ''
+        mkdir -p $out
+        cp -r ${../../templates/default/prompts/fragments}/. $out/
+        chmod -R u+w $out
+        cp "$brokenBodyPath" $out/research-verdict-github-readonly.md
+      '';
 in
 {
   # The configured `prompt` is rendered to a store-path directory and,
@@ -881,4 +916,102 @@ in
     ! grep -q 'gh pr view' ${../../templates/default/prompts/fragments/fix-ci-read-forgejo.md}
     touch $out
   '';
+
+  # Build-time reject arm (issue #2250, parent #2244): mkHarness.nix wires the
+  # `reviewer-verdict` validateMarkers row (lib/prompt-contract.nix's
+  # buildTimeRejectVerdicts) into a real build-time failure when the
+  # orchestrator is statically enabled and reviewPrompt is missing the
+  # required `VERDICT:` marker -- mirrors nix/checks/equivalence.nix's
+  # `flakemodule-rejects-unknown-settings` tryEval-based "this must throw"
+  # idiom. Each mkHarness.nix call here is a broken fixture built INLINE,
+  # never exported from nix/fixtures.nix -- a fixture there would be forced
+  # by every other consumer of that file, but this reject case must stay
+  # local to this one check (mirrors equivalence.nix's badSection/badKnob).
+  build-time-reject-orchestrator-verdict-missing =
+    let
+      inherit (pkgs.lib) assertMsg;
+      broken = builtins.tryEval (
+        (import ../../lib/mkHarness.nix {
+          inherit nixpkgs system;
+          packages = p: [ p.hello ];
+          defaults = {
+            orchestratorEnabled = true;
+          };
+          reviewPrompt = "a reviewer prompt preamble with no verdict marker at all";
+        }).spindrift
+      );
+    in
+    assert assertMsg (!broken.success)
+      "mkHarness.nix must throw when orchestratorEnabled is statically true and reviewPrompt is missing the required VERDICT: marker";
+    pkgs.runCommand "build-time-reject-orchestrator-verdict-missing" { } "touch $out";
+
+  # The gate-not-triggered counterpart (AC3): the same missing-marker
+  # reviewPrompt, but orchestratorEnabled left at its schema default (false)
+  # -- the omission is real but its gating condition isn't statically known
+  # true, so buildTimeRejectVerdicts resolves "advise", not "reject", and the
+  # build must succeed.
+  build-time-reject-orchestrator-verdict-not-triggered =
+    let
+      inherit (pkgs.lib) assertMsg;
+      ok = builtins.tryEval (
+        (import ../../lib/mkHarness.nix {
+          inherit nixpkgs system;
+          packages = p: [ p.hello ];
+          defaults = {
+            orchestratorEnabled = false;
+          };
+          reviewPrompt = "a reviewer prompt preamble with no verdict marker at all";
+        }).spindrift
+      );
+    in
+    assert assertMsg ok.success
+      "mkHarness.nix must not throw when orchestratorEnabled is not statically true, even with a missing VERDICT: marker";
+    pkgs.runCommand "build-time-reject-orchestrator-verdict-not-triggered" { } "touch $out";
+
+  # The `verdict-comment-relay` counterpart (issue #2250, parent #2244):
+  # brokenResearchVerdictFragmentsDir (defined in the `let` above) swaps in
+  # a research-verdict-github-readonly.md missing the required
+  # SPINDRIFT_COMMENT marker. Shared by both checks below (missing/not-
+  # triggered), mirroring the reviewPrompt fixture build-time-reject-
+  # orchestrator-verdict-{missing,not-triggered} share above.
+  build-time-reject-research-verdict-comment-relay-missing =
+    let
+      inherit (pkgs.lib) assertMsg;
+      broken = builtins.tryEval (
+        (import ../../lib/mkHarness.nix {
+          inherit nixpkgs system;
+          packages = p: [ p.hello ];
+          fragmentsDir = brokenResearchVerdictFragmentsDir;
+          defaults = {
+            boxForgeAndIssueAccess = "read-only";
+          };
+        }).spindrift
+      );
+    in
+    assert assertMsg (!broken.success)
+      "mkHarness.nix must throw when boxForgeAndIssueAccess is statically read-only and research-verdict-github-readonly.md is missing the required SPINDRIFT_COMMENT marker";
+    pkgs.runCommand "build-time-reject-research-verdict-comment-relay-missing" { } "touch $out";
+
+  # The gate-not-triggered counterpart (AC3): the same broken fragments
+  # directory, but boxForgeAndIssueAccess left at its schema default
+  # (read-write) -- the omission is real but its gating condition isn't
+  # statically known true, so buildTimeRejectVerdicts resolves "advise", not
+  # "reject", and the build must succeed.
+  build-time-reject-research-verdict-comment-relay-not-triggered =
+    let
+      inherit (pkgs.lib) assertMsg;
+      ok = builtins.tryEval (
+        (import ../../lib/mkHarness.nix {
+          inherit nixpkgs system;
+          packages = p: [ p.hello ];
+          fragmentsDir = brokenResearchVerdictFragmentsDir;
+          defaults = {
+            boxForgeAndIssueAccess = "read-write";
+          };
+        }).spindrift
+      );
+    in
+    assert assertMsg ok.success
+      "mkHarness.nix must not throw when boxForgeAndIssueAccess is not statically read-only, even with a missing SPINDRIFT_COMMENT marker";
+    pkgs.runCommand "build-time-reject-research-verdict-comment-relay-not-triggered" { } "touch $out";
 }
