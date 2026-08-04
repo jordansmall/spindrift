@@ -12,6 +12,12 @@ type ScanDecision struct {
 	Reset bool
 	// Skip means this chunk carries no matchable text; Text is ignored.
 	Skip bool
+	// Overwrite means this chunk's match attempt is not skipped just because
+	// an earlier chunk already latched (found) — if it matches, it
+	// overwrites the existing latch; if it doesn't match, the existing latch
+	// (if any) is left untouched. Default false preserves today's
+	// first-match-wins/no-overwrite behavior.
+	Overwrite bool
 	// Text is scanned against transientExtras (then BaseTransientPatterns),
 	// then terminalExtras, first-match-wins, when Skip is false.
 	Text string
@@ -27,7 +33,10 @@ type ExtractFunc func(chunk string) ScanDecision
 // Classification's Class/Reason fields, ResetAt always zero — callers set
 // ResetAt themselves from their own resetsAt extraction, since that's
 // strategy-specific); a later chunk with Reset:true un-latches an earlier
-// match, allowing a subsequent chunk to match again. found reports whether
+// match, allowing a subsequent chunk to match again. A chunk with
+// Overwrite:true is not skipped just because an earlier chunk already
+// latched — a match overwrites the existing latch, while a non-match leaves
+// it untouched. found reports whether
 // anything matched by the end of the scan, so callers can apply their own
 // terminal/TaskFailed fallback. transientExtras is checked (via
 // MatchTransient, so BaseTransientPatterns is included) before terminalExtras
@@ -41,7 +50,10 @@ func ClassifyScan(logPath string, policy logscan.Policy, extract ExtractFunc, tr
 			cl = Classification{}
 		}
 
-		if decision.Skip || found {
+		if decision.Skip {
+			return
+		}
+		if found && !decision.Overwrite {
 			return
 		}
 

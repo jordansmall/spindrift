@@ -124,6 +124,65 @@ func TestClassifyScanResetUnlatchesEarlierMatch(t *testing.T) {
 	}
 }
 
+// TestClassifyScanOverwriteMatchReplacesEarlierLatch verifies that a later
+// chunk with Overwrite:true whose Text matches a transientExtras pattern
+// replaces an earlier latched match, instead of being skipped because found
+// is already true (issue #2269).
+func TestClassifyScanOverwriteMatchReplacesEarlierLatch(t *testing.T) {
+	logPath := writeClassifyLog(t,
+		"first: rate limited",
+		"second: overloaded now",
+	)
+
+	extract := func(chunk string) ScanDecision {
+		return ScanDecision{Text: chunk, Overwrite: true}
+	}
+	transientExtras := []Pattern{
+		{Substr: "rate limited", Reason: RateLimit},
+		{Substr: "overloaded", Reason: Overloaded},
+	}
+
+	got, found, err := ClassifyScan(logPath, logscan.SkipOversized, extract, transientExtras, nil)
+	if err != nil {
+		t.Fatalf("ClassifyScan: unexpected error: %v", err)
+	}
+	if !found {
+		t.Fatalf("found = false, want true")
+	}
+	if got.Class != Transient || got.Reason != Overloaded {
+		t.Errorf("got %s/%s, want %s/%s", got.Class, got.Reason, Transient, Overloaded)
+	}
+}
+
+// TestClassifyScanOverwriteNonMatchLeavesEarlierLatchUntouched verifies that
+// a later chunk with Overwrite:true whose Text does NOT match any extras
+// leaves an earlier latched match untouched, rather than clearing it.
+func TestClassifyScanOverwriteNonMatchLeavesEarlierLatchUntouched(t *testing.T) {
+	logPath := writeClassifyLog(t,
+		"first: rate limited",
+		"second: nothing interesting here",
+	)
+
+	extract := func(chunk string) ScanDecision {
+		return ScanDecision{Text: chunk, Overwrite: true}
+	}
+	transientExtras := []Pattern{
+		{Substr: "rate limited", Reason: RateLimit},
+		{Substr: "overloaded", Reason: Overloaded},
+	}
+
+	got, found, err := ClassifyScan(logPath, logscan.SkipOversized, extract, transientExtras, nil)
+	if err != nil {
+		t.Fatalf("ClassifyScan: unexpected error: %v", err)
+	}
+	if !found {
+		t.Fatalf("found = false, want true")
+	}
+	if got.Class != Transient || got.Reason != RateLimit {
+		t.Errorf("got %s/%s, want %s/%s", got.Class, got.Reason, Transient, RateLimit)
+	}
+}
+
 // TestClassifyScanNoMatchReturnsZeroValue verifies that a log where no
 // chunk matches either extras list reports found=false with a zero-value
 // Classification.
