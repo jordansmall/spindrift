@@ -840,11 +840,12 @@ func TestJiraClient_ListIssues_JQLAndOrder(t *testing.T) {
 	}
 }
 
-// TestJiraClient_ListIssues_CapsMaxResults verifies ListIssues bounds the
-// search page size (the shared resultPageLimit, also used by the github
-// adapter) so a large backlog degrades to a warning instead of an
-// unbounded response.
-func TestJiraClient_ListIssues_CapsMaxResults(t *testing.T) {
+// TestJiraClient_ListIssues_PageSizeIsResultPageLimit verifies ListIssues
+// requests the shared ResultPageLimit page size (also used by the github
+// adapter) per page — it no longer caps the backlog to a single page, since
+// doSearch walks every page via forge.WalkPages, but each request still
+// asks for ResultPageLimit results at a time.
+func TestJiraClient_ListIssues_PageSizeIsResultPageLimit(t *testing.T) {
 	var gotMaxResults string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotMaxResults = r.URL.Query().Get("maxResults")
@@ -953,6 +954,77 @@ func TestJiraClient_ListOpenIssues_NoStateClauseExcludesDone(t *testing.T) {
 	}
 	if strings.Contains(gotJQL, "status =") || strings.Contains(gotJQL, "labels =") {
 		t.Errorf("jql = %q, must not scope by status or label", gotJQL)
+	}
+}
+
+// TestJiraClient_ListIssues_WalksAllPages verifies ListIssues follows
+// startAt/maxResults/total across a multi-page Jira search response,
+// merging every page's issues (in fetch order, since Jira's JQL already
+// orders server-side) and never requesting a page beyond the last one.
+func TestJiraClient_ListIssues_WalksAllPages(t *testing.T) {
+	var gotStartAt, gotMaxResults []string
+	requests := 0
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		startAt := r.URL.Query().Get("startAt")
+		maxResults := r.URL.Query().Get("maxResults")
+		gotStartAt = append(gotStartAt, startAt)
+		gotMaxResults = append(gotMaxResults, maxResults)
+
+		w.WriteHeader(http.StatusOK)
+		switch startAt {
+		case "0":
+			w.Write([]byte(`{
+				"startAt": 0, "maxResults": 100, "total": 3,
+				"issues": [
+					{"key": "PROJ-1", "fields": {"summary": "first", "status": {"name": "To Do"}, "labels": []}},
+					{"key": "PROJ-2", "fields": {"summary": "second", "status": {"name": "To Do"}, "labels": []}}
+				]
+			}`))
+		case "100":
+			w.Write([]byte(`{
+				"startAt": 100, "maxResults": 100, "total": 3,
+				"issues": [
+					{"key": "PROJ-3", "fields": {"summary": "third", "status": {"name": "To Do"}, "labels": []}}
+				]
+			}`))
+		default:
+			t.Errorf("unexpected startAt %q; want no request beyond the last page", startAt)
+			w.Write([]byte(`{"issues": []}`))
+		}
+	}))
+	defer srv.Close()
+
+	jc := jira.NewJiraClient(jira.JiraConfig{
+		BaseURL:    srv.URL,
+		Token:      "tok",
+		ProjectKey: "PROJ",
+		StatusMapping: map[forge.DispatchState]string{
+			forge.Dispatchable: "To Do",
+		},
+		Labels: testLabels,
+	})
+
+	issues, err := jc.ListIssues(forge.Dispatchable)
+	if err != nil {
+		t.Fatalf("ListIssues: %v", err)
+	}
+
+	if requests != 2 {
+		t.Fatalf("server received %d requests, want exactly 2", requests)
+	}
+	if len(issues) != 3 || issues[0].Number != "PROJ-1" || issues[1].Number != "PROJ-2" || issues[2].Number != "PROJ-3" {
+		t.Fatalf("issues = %+v, want PROJ-1, PROJ-2, PROJ-3 in fetch order", issues)
+	}
+	wantStartAt := []string{"0", "100"}
+	if len(gotStartAt) != len(wantStartAt) || gotStartAt[0] != wantStartAt[0] || gotStartAt[1] != wantStartAt[1] {
+		t.Errorf("startAt per request = %v, want %v", gotStartAt, wantStartAt)
+	}
+	for _, mr := range gotMaxResults {
+		if mr != "100" {
+			t.Errorf("maxResults per request = %v, want every request to send 100", gotMaxResults)
+		}
 	}
 }
 
