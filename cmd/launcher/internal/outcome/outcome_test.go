@@ -994,7 +994,6 @@ func TestResolve(t *testing.T) {
 	cases := []struct {
 		name           string
 		logs           func(t *testing.T) []outcome.PassLog
-		nonce          string
 		kind           string
 		wantFound      bool
 		wantProvenance outcome.Provenance
@@ -1010,7 +1009,6 @@ func TestResolve(t *testing.T) {
 				)
 				return []outcome.PassLog{{Label: "pass-1", Path: path}}
 			},
-			nonce:          "the-nonce",
 			wantFound:      true,
 			wantProvenance: outcome.ProvenanceGenuine,
 			wantStatus:     "ready",
@@ -1025,7 +1023,6 @@ func TestResolve(t *testing.T) {
 				)
 				return []outcome.PassLog{{Label: "pass-1", Path: path}}
 			},
-			nonce:          "the-nonce",
 			wantFound:      true,
 			wantProvenance: outcome.ProvenanceSynthetic,
 			wantStatus:     "blocked",
@@ -1040,7 +1037,6 @@ func TestResolve(t *testing.T) {
 				)
 				return []outcome.PassLog{{Label: "pass-1", Path: first}, {Label: "pass-2", Path: second}}
 			},
-			nonce:          "the-nonce",
 			wantFound:      true,
 			wantProvenance: outcome.ProvenanceGenuine,
 			wantStatus:     "ready",
@@ -1057,7 +1053,6 @@ func TestResolve(t *testing.T) {
 				)
 				return []outcome.PassLog{{Label: "pass-1", Path: first}, {Label: "pass-2", Path: second}}
 			},
-			nonce:          "the-nonce",
 			wantFound:      true,
 			wantProvenance: outcome.ProvenanceGenuine,
 			wantStatus:     "ready",
@@ -1068,7 +1063,6 @@ func TestResolve(t *testing.T) {
 			logs: func(t *testing.T) []outcome.PassLog {
 				return nil
 			},
-			nonce:     "the-nonce",
 			wantFound: false,
 			wantKind:  "work",
 		},
@@ -1080,7 +1074,6 @@ func TestResolve(t *testing.T) {
 				)
 				return []outcome.PassLog{{Label: "pass-1", Path: path}}
 			},
-			nonce:          "the-nonce",
 			kind:           "",
 			wantFound:      true,
 			wantProvenance: outcome.ProvenanceGenuine,
@@ -1095,7 +1088,6 @@ func TestResolve(t *testing.T) {
 				)
 				return []outcome.PassLog{{Label: "pass-1", Path: path}}
 			},
-			nonce:          "the-nonce",
 			kind:           "research",
 			wantFound:      true,
 			wantProvenance: outcome.ProvenanceGenuine,
@@ -1110,68 +1102,69 @@ func TestResolve(t *testing.T) {
 				)
 				return []outcome.PassLog{{Label: "pass-1", Path: path}}
 			},
-			nonce:     "the-nonce",
 			wantFound: false,
 			wantKind:  "work",
 		},
 		{
-			name: "self-report tier used when no genuine or synthetic outcome present",
+			// Pre-#2274 this nonce-free full-grammar line was excluded from the
+			// genuine tier and surfaced via the self-report fallback. With the
+			// gate gone it is simply a genuine outcome.
+			name: "nonce-free full-grammar line is genuine",
 			logs: func(t *testing.T) []outcome.PassLog {
 				path := writeLog(t,
 					"SPINDRIFT_OUTCOME issue=1 landing=https://github.com/o/r/pull/1 status=merged note=self only",
 				)
 				return []outcome.PassLog{{Label: "pass-1", Path: path}}
 			},
-			nonce:          "the-nonce",
 			wantFound:      true,
-			wantProvenance: outcome.ProvenanceSelfReport,
+			wantProvenance: outcome.ProvenanceGenuine,
 			wantStatus:     "merged",
 			wantKind:       "work",
 		},
 		{
-			name: "echoed nonce mismatch on genuine falls through to self-report",
+			// ADR 0039 / issue #2274: the outcome path no longer gates on a
+			// nonce, so a genuine line carrying any nonce= value (even one
+			// that would once have failed the gate) is accepted as genuine.
+			name: "genuine line with any nonce value is accepted (no gate)",
 			logs: func(t *testing.T) []outcome.PassLog {
 				path := writeLog(t,
-					"SPINDRIFT_OUTCOME issue=1 landing=https://github.com/o/r/pull/1 status=ready note=spoofed nonce=someone-elses-guess",
+					"SPINDRIFT_OUTCOME issue=1 landing=https://github.com/o/r/pull/1 status=ready note=ok nonce=someone-elses-guess",
 				)
 				return []outcome.PassLog{{Label: "pass-1", Path: path}}
 			},
-			nonce:          "the-nonce",
-			wantFound:      true,
-			wantProvenance: outcome.ProvenanceSelfReport,
-			wantStatus:     "ready",
-			wantKind:       "work",
-		},
-		{
-			name: "empty nonce arg leaves genuine-shaped line eligible",
-			logs: func(t *testing.T) []outcome.PassLog {
-				path := writeLog(t,
-					"SPINDRIFT_OUTCOME issue=1 landing=https://github.com/o/r/pull/1 status=ready note=ok nonce=whatever",
-				)
-				return []outcome.PassLog{{Label: "pass-1", Path: path}}
-			},
-			nonce:          "",
 			wantFound:      true,
 			wantProvenance: outcome.ProvenanceGenuine,
 			wantStatus:     "ready",
 			wantKind:       "work",
 		},
 		{
-			name: "self-report ignores wrong nonce with no genuine line at all",
+			name: "genuine-shaped line with a nonce field is accepted",
+			logs: func(t *testing.T) []outcome.PassLog {
+				path := writeLog(t,
+					"SPINDRIFT_OUTCOME issue=1 landing=https://github.com/o/r/pull/1 status=ready note=ok nonce=whatever",
+				)
+				return []outcome.PassLog{{Label: "pass-1", Path: path}}
+			},
+			wantFound:      true,
+			wantProvenance: outcome.ProvenanceGenuine,
+			wantStatus:     "ready",
+			wantKind:       "work",
+		},
+		{
+			name: "genuine blocked line is accepted regardless of nonce field",
 			logs: func(t *testing.T) []outcome.PassLog {
 				path := writeLog(t,
 					"SPINDRIFT_OUTCOME issue=1 landing=https://github.com/o/r/pull/1 status=blocked note=no gate here nonce=wrong-nonce",
 				)
 				return []outcome.PassLog{{Label: "pass-1", Path: path}}
 			},
-			nonce:          "the-nonce",
 			wantFound:      true,
-			wantProvenance: outcome.ProvenanceSelfReport,
+			wantProvenance: outcome.ProvenanceGenuine,
 			wantStatus:     "blocked",
 			wantKind:       "work",
 		},
 		{
-			name: "multi log last pass wins for self-report",
+			name: "multi log last pass wins across nonce-free genuine lines",
 			logs: func(t *testing.T) []outcome.PassLog {
 				first := writeLog(t,
 					"SPINDRIFT_OUTCOME issue=1 landing=https://github.com/o/r/pull/1 status=blocked note=first",
@@ -1181,9 +1174,8 @@ func TestResolve(t *testing.T) {
 				)
 				return []outcome.PassLog{{Label: "pass-1", Path: first}, {Label: "pass-2", Path: second}}
 			},
-			nonce:          "the-nonce",
 			wantFound:      true,
-			wantProvenance: outcome.ProvenanceSelfReport,
+			wantProvenance: outcome.ProvenanceGenuine,
 			wantStatus:     "ready",
 			wantKind:       "work",
 		},
@@ -1191,7 +1183,7 @@ func TestResolve(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			logs := tc.logs(t)
-			got, err := outcome.Resolve(logs, tc.nonce, tc.kind)
+			got, err := outcome.Resolve(logs, tc.kind)
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
@@ -1214,28 +1206,27 @@ func TestResolve(t *testing.T) {
 	}
 }
 
-// TestResolve_SelfReportBareWordOnlyPopulatesStatus pins the deliberate edge
-// case documented on Resolve: an unparsed (bare-word) self-report only
-// populates Outcome.Status, leaving Issue/Landing/Note zero, since the
-// near-miss line carries no other field to fill them from.
-func TestResolve_SelfReportBareWordOnlyPopulatesStatus(t *testing.T) {
+// TestResolve_BareWordLeadingLineIsNearMiss pins the post-#2274 behavior for a
+// bare-word leading line ("SPINDRIFT_OUTCOME: success"). Before the nonce gate
+// was retired (ADR 0039), a nonce-less line like this was excluded from the
+// genuine tier ahead of Parse, letting Resolve fall through to the self-report
+// tier. With the gate gone, lastInLog reaches Parse and the line is its normal
+// near-miss, which Resolve propagates as an error rather than a fabricated
+// outcome.
+func TestResolve_BareWordLeadingLineIsNearMiss(t *testing.T) {
 	path := writeLog(t,
 		"SPINDRIFT_OUTCOME: success",
 	)
 	logs := []outcome.PassLog{{Label: "pass-1", Path: path}}
 
-	got, err := outcome.Resolve(logs, "the-nonce", "")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	got, err := outcome.Resolve(logs, "")
+	if err == nil {
+		t.Fatal("expected a near-miss error, got nil")
 	}
-	if !got.Found {
-		t.Fatal("Found: got false, want true")
+	if !outcome.IsNearMiss(err) {
+		t.Errorf("expected near-miss error, got %v", err)
 	}
-	if got.Provenance != outcome.ProvenanceSelfReport {
-		t.Errorf("Provenance: got %q, want %q", got.Provenance, outcome.ProvenanceSelfReport)
-	}
-	want := outcome.Outcome{Status: "success"}
-	if got.Outcome != want {
-		t.Errorf("Outcome: got %+v, want %+v", got.Outcome, want)
+	if got.Found {
+		t.Error("Found: got true, want false on a near-miss")
 	}
 }
