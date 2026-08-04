@@ -302,8 +302,8 @@ in
     '';
 
   # Same drift guard, for the research-verdict marker (issue #640's
-  # RESEARCH_OUTCOME_CONTRACT_MARKER) -- previously uncovered by any parity
-  # check (issue #2246 slice 1 coverage gap fix).
+  # "research-verdict" row) -- previously uncovered by any parity check
+  # (issue #2246 slice 1 coverage gap fix).
   research-outcome-contract-marker-parity =
     let
       row = byId "research-verdict";
