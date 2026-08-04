@@ -75,6 +75,66 @@ func TestSettle_GithubReadOnly_AdoptsBackstopSyntheticSuccess(t *testing.T) {
 	}
 }
 
+// TestSettle_GithubReadOnly_AdoptsNoOutcomeSuccess is the positive case for
+// issue #2253's auto-adoption: a read-only github run that exited with no
+// parseable outcome line at all (!result.OutcomeFound) — distinct from
+// #2224's synthetic status=blocked backstop — but whose driver self-report
+// says the work actually succeeded (issue #2223) must not be parked
+// agent-failed either. Instead settle relays the finished branch, opens a PR
+// from the box's own PR-intent line, and drives the normal merge lifecycle
+// through to agent-complete on green, mirroring
+// TestSettle_GithubReadOnly_AdoptsBackstopSyntheticSuccess exactly except for
+// the missing outcome line.
+func TestSettle_GithubReadOnly_AdoptsNoOutcomeSuccess(t *testing.T) {
+	const issNum = "2253"
+	const prURL = "https://github.com/owner/repo/pull/2253"
+
+	fc := forge.NewFake(testDispatchLabels)
+	fc.BranchPrefix = "agent/issue-"
+	branch := fc.AgentBranch(issNum)
+	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
+	fc.CreateDraftPRURL = prURL
+	fc.SetCheckStates(prURL, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
+
+	d := dispatch.NewFake()
+	result := dispatch.Result{
+		Success:         true,
+		OutcomeFound:    false,
+		SelfReportFound: true,
+		SelfReport:      outcome.SelfReport{Status: "success"},
+		PRIntent:        "feat: add widget\n\nAdds a widget.",
+		PRIntentFound:   true,
+	}
+
+	c := baseConfig()
+	c.ReadOnly = true
+	c.OutboxDir = func(num string) string { return "/outbox/" + num }
+	c.BaseBranch = "main"
+	s := New(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
+	s.Settle(d, issNum, 0, result)
+
+	if len(fc.RelayBundleCalls) != 1 || fc.RelayBundleCalls[0] != (forge.RelayBundleCall{OutboxDir: "/outbox/2253", Ref: branch}) {
+		t.Fatalf("RelayBundleCalls = %+v, want one call with outbox=/outbox/2253 ref=%s", fc.RelayBundleCalls, branch)
+	}
+	if len(fc.CreateDraftPRCalls) != 1 {
+		t.Fatalf("CreateDraftPRCalls = %+v, want exactly 1", fc.CreateDraftPRCalls)
+	}
+	want := forge.CreateDraftPRCall{Title: "feat: add widget", Body: "Adds a widget.", Base: "main", Head: branch}
+	if fc.CreateDraftPRCalls[0] != want {
+		t.Errorf("CreateDraftPRCalls[0] = %+v, want %+v", fc.CreateDraftPRCalls[0], want)
+	}
+	if fc.Merged != prURL {
+		t.Errorf("expected Merge(%q) to have run; fc.Merged=%q", prURL, fc.Merged)
+	}
+	iss, _ := fc.Issue(issNum)
+	if !containsLabel(iss.Labels, "agent-complete") {
+		t.Errorf("issue must carry agent-complete after an adopted-and-merged landing; labels=%v", iss.Labels)
+	}
+	if containsLabel(iss.Labels, "agent-failed") {
+		t.Errorf("issue must not carry agent-failed after an adopted-and-merged landing; labels=%v", iss.Labels)
+	}
+}
+
 // TestSettle_GithubReadOnly_AdoptsWithDefaultPRBodyWhenNoIntent covers
 // acceptance criterion 2: when the box's log carried no usable PR-intent
 // line, adoptRelayedBranch falls back to defaultAdoptPRText — an
@@ -446,6 +506,142 @@ func TestSettle_GithubReadWrite_SyntheticSuccessDoesNotAdopt(t *testing.T) {
 	iss, _ := fc.Issue(issNum)
 	if !containsLabel(iss.Labels, "agent-failed") {
 		t.Errorf("issue must carry agent-failed under read-write; labels=%v", iss.Labels)
+	}
+}
+
+// TestSettle_GithubReadOnly_NoOutcomeNoSelfReportDoesNotAdopt covers
+// tryAdoptRelayedBranchNoOutcome's own fingerprint (issue #2253) in the
+// !result.OutcomeFound arm: a Box that crashed and never self-reported at
+// all has no evidence at all that the run succeeded, so adoption must not
+// fire and settle must fall back to its normal no-outcome handling
+// (settleUnresolved), which — with no PR ever opened for ResolveOpenPR to
+// find — parks the issue agent-failed.
+func TestSettle_GithubReadOnly_NoOutcomeNoSelfReportDoesNotAdopt(t *testing.T) {
+	const issNum = "2253"
+	const prURL = "https://github.com/owner/repo/pull/2253"
+
+	fc := forge.NewFake(testDispatchLabels)
+	fc.BranchPrefix = "agent/issue-"
+	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
+	fc.CreateDraftPRURL = prURL
+
+	d := dispatch.NewFake()
+	result := dispatch.Result{
+		Success:         true,
+		OutcomeFound:    false,
+		SelfReportFound: false,
+	}
+
+	c := baseConfig()
+	c.ReadOnly = true
+	c.OutboxDir = func(num string) string { return "/outbox/" + num }
+	c.BaseBranch = "main"
+	s := New(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
+	s.Settle(d, issNum, 0, result)
+
+	if len(fc.CreateDraftPRCalls) != 0 {
+		t.Errorf("expected no CreateDraftPR calls; got %+v", fc.CreateDraftPRCalls)
+	}
+	if fc.Merged != "" {
+		t.Errorf("expected no merge to have run; fc.Merged=%q", fc.Merged)
+	}
+	iss, _ := fc.Issue(issNum)
+	if !containsLabel(iss.Labels, "agent-failed") {
+		t.Errorf("issue must carry agent-failed when the driver never self-reported; labels=%v", iss.Labels)
+	}
+	if containsLabel(iss.Labels, "agent-complete") {
+		t.Errorf("issue must not carry agent-complete when the driver never self-reported; labels=%v", iss.Labels)
+	}
+}
+
+// TestSettle_GithubReadOnly_NoOutcomeSelfReportBlockedDoesNotAdopt covers a
+// Box that did self-report in the !result.OutcomeFound arm (issue #2253),
+// but self-reported blocked rather than success — isSuccessSelfReport must
+// reject it, so no PR is opened at all and settle falls back to
+// settleUnresolved's agent-failed park.
+func TestSettle_GithubReadOnly_NoOutcomeSelfReportBlockedDoesNotAdopt(t *testing.T) {
+	const issNum = "2253"
+	const prURL = "https://github.com/owner/repo/pull/2253"
+
+	fc := forge.NewFake(testDispatchLabels)
+	fc.BranchPrefix = "agent/issue-"
+	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
+	fc.CreateDraftPRURL = prURL
+
+	d := dispatch.NewFake()
+	result := dispatch.Result{
+		Success:         true,
+		OutcomeFound:    false,
+		SelfReportFound: true,
+		SelfReport:      outcome.SelfReport{Status: "blocked"},
+	}
+
+	c := baseConfig()
+	c.ReadOnly = true
+	c.OutboxDir = func(num string) string { return "/outbox/" + num }
+	c.BaseBranch = "main"
+	s := New(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
+	s.Settle(d, issNum, 0, result)
+
+	if len(fc.CreateDraftPRCalls) != 0 {
+		t.Errorf("expected no CreateDraftPR calls; got %+v", fc.CreateDraftPRCalls)
+	}
+	if fc.Merged != "" {
+		t.Errorf("expected no merge to have run; fc.Merged=%q", fc.Merged)
+	}
+	iss, _ := fc.Issue(issNum)
+	if !containsLabel(iss.Labels, "agent-failed") {
+		t.Errorf("issue must carry agent-failed when the self-report itself says blocked; labels=%v", iss.Labels)
+	}
+	if containsLabel(iss.Labels, "agent-complete") {
+		t.Errorf("issue must not carry agent-complete when the self-report itself says blocked; labels=%v", iss.Labels)
+	}
+}
+
+// TestSettle_GithubReadOnly_NoOutcomeBundleMissingFallsBackToBlocked covers
+// the fingerprint condition (c) in the !result.OutcomeFound arm (issue
+// #2253): a full success fingerprint (no outcome line + success self-report)
+// can still fail to actually adopt if RelayBundle itself errors — no bundle
+// means no finished branch to open a PR on, so
+// tryAdoptRelayedBranchNoOutcome must bail there and let settleUnresolved's
+// normal no-outcome handling run.
+func TestSettle_GithubReadOnly_NoOutcomeBundleMissingFallsBackToBlocked(t *testing.T) {
+	const issNum = "2253"
+	const prURL = "https://github.com/owner/repo/pull/2253"
+
+	fc := forge.NewFake(testDispatchLabels)
+	fc.BranchPrefix = "agent/issue-"
+	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
+	fc.CreateDraftPRURL = prURL
+	fc.RelayBundleErr = errors.New("bundle missing")
+
+	d := dispatch.NewFake()
+	result := dispatch.Result{
+		Success:         true,
+		OutcomeFound:    false,
+		SelfReportFound: true,
+		SelfReport:      outcome.SelfReport{Status: "success"},
+	}
+
+	c := baseConfig()
+	c.ReadOnly = true
+	c.OutboxDir = func(num string) string { return "/outbox/" + num }
+	c.BaseBranch = "main"
+	s := New(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
+	s.Settle(d, issNum, 0, result)
+
+	if len(fc.CreateDraftPRCalls) != 0 {
+		t.Errorf("expected no CreateDraftPR calls when the bundle relay fails; got %+v", fc.CreateDraftPRCalls)
+	}
+	if fc.Merged != "" {
+		t.Errorf("expected no merge to have run; fc.Merged=%q", fc.Merged)
+	}
+	iss, _ := fc.Issue(issNum)
+	if !containsLabel(iss.Labels, "agent-failed") {
+		t.Errorf("issue must carry agent-failed when the relay bundle is missing; labels=%v", iss.Labels)
+	}
+	if containsLabel(iss.Labels, "agent-complete") {
+		t.Errorf("issue must not carry agent-complete when the relay bundle is missing; labels=%v", iss.Labels)
 	}
 }
 
