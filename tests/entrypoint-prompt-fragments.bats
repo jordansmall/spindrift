@@ -547,7 +547,10 @@ setup() {
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   grep -qF 'landing=<pr-url> status=ready' "$DRIVER_PROMPT_FILE"
-  grep -qF 'status=ready note=<short reason>' "$DRIVER_PROMPT_FILE"
+  # End-anchored: the OUTCOME line must terminate at note=, with no trailing
+  # nonce= field (issue #2274/ADR 0039). A bare -F substring match would still
+  # pass if the retired nonce crept back onto the line.
+  grep -qE 'status=ready note=<short reason>$' "$DRIVER_PROMPT_FILE"
 }
 
 @test "OUTCOME landing step: read-only reports the branch, never a pr-url placeholder" {
@@ -557,7 +560,10 @@ setup() {
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   grep -qF 'landing=agent/issue-7 status=ready' "$DRIVER_PROMPT_FILE"
-  grep -qF 'status=ready note=<short reason>' "$DRIVER_PROMPT_FILE"
+  # End-anchored: the OUTCOME line must terminate at note=, with no trailing
+  # nonce= field (issue #2274/ADR 0039). A bare -F substring match would still
+  # pass if the retired nonce crept back onto the line.
+  grep -qE 'status=ready note=<short reason>$' "$DRIVER_PROMPT_FILE"
 
   # Scoped to the OUTCOME section itself -- OPEN A PULL REQUEST's own
   # PR-intent fragment legitimately mentions "the launcher opens the draft
