@@ -40,6 +40,13 @@ var TriageLabelMeta = map[string]LabelMeta{
 	"agent-research-reject":      {Description: "False positive, not worth it, or a duplicate — close it", Color: "e11d21"},
 	"agent-research-unclear":     {Description: "Needs a human answer — answer, then re-apply agent-research", Color: "d4c5f9"},
 	"agent-research-failed":      {Description: "Box crashed or produced no verdict; needs human triage", Color: "b60205"},
+
+	// agent-spec-mismatch is issue #2275's fixed, advisory spec-mismatch
+	// label (conceptually forge.SpecMismatchLabel) — a third tier alongside
+	// the work and research families above, using the same lavender as
+	// agent-research-unclear since both share a "needs a human answer"
+	// semantic.
+	"agent-spec-mismatch": {Description: "Title and body describe unrelated work — needs a human decision", Color: "d4c5f9"},
 }
 
 // ResearchLabelNames returns the six fixed research-tier label names (ADR
@@ -112,14 +119,15 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, w io.Writer, stdin
 		return missing
 	}
 
-	// checkLabels reports on both label tiers: work (fatal if missing) and
+	// checkLabels reports on all three label tiers: work (fatal if missing),
 	// research (advisory — ADR 0022's agent-research family is reported but
 	// never fails the check, so CI doctor runs stay green for deployments
-	// that don't use research yet).
-	checkLabels := func() (workMissing, researchMissing []string, err error) {
+	// that don't use research yet), and spec-mismatch (advisory — issue
+	// #2275's fixed agent-spec-mismatch label, same never-fails treatment).
+	checkLabels := func() (workMissing, researchMissing, specMismatchMissing []string, err error) {
 		existing, lerr := it.ListLabels()
 		if lerr != nil {
-			return nil, nil, fmt.Errorf("label check failed: %w", lerr)
+			return nil, nil, nil, fmt.Errorf("label check failed: %w", lerr)
 		}
 		present := make(map[string]bool, len(existing))
 		for _, l := range existing {
@@ -127,17 +135,21 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, w io.Writer, stdin
 		}
 		workMissing = checkLabelSet([]string{c.Label, c.InProgressLabel, c.FailedLabel, c.CompleteLabel}, present)
 		researchMissing = checkLabelSet(ResearchLabelNames(), present)
-		return workMissing, researchMissing, nil
+		specMismatchMissing = checkLabelSet([]string{forge.SpecMismatchLabel}, present)
+		return workMissing, researchMissing, specMismatchMissing, nil
 	}
 
-	workMissing, researchMissing, err := checkLabels()
+	workMissing, researchMissing, specMismatchMissing, err := checkLabels()
 	if err != nil {
 		return err
 	}
 	if len(researchMissing) > 0 {
 		fmt.Fprintf(w, "advisory: %d research label(s) missing (ADR 0022) — does not fail this check\n", len(researchMissing))
 	}
-	missing := append(append([]string{}, workMissing...), researchMissing...)
+	if len(specMismatchMissing) > 0 {
+		fmt.Fprintf(w, "advisory: %d spec-mismatch label(s) missing (issue #2275) — does not fail this check\n", len(specMismatchMissing))
+	}
+	missing := append(append(append([]string{}, workMissing...), researchMissing...), specMismatchMissing...)
 	if len(missing) == 0 {
 		fmt.Fprintln(w, "ok: all triage and research labels present")
 		return nil
@@ -171,19 +183,30 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, w io.Writer, stdin
 	}
 
 	// Re-verify after creation.
-	workMissing, researchMissing, err = checkLabels()
+	workMissing, researchMissing, specMismatchMissing, err = checkLabels()
 	if err != nil {
 		return err
 	}
 	if len(workMissing) > 0 {
 		return fmt.Errorf("one or more triage labels are still missing after creation")
 	}
-	// Work labels are fatal (handled above) and research labels are
-	// advisory (ADR 0022), so the two tiers get separate wrap-up lines
-	// here: an advisory note if research is still short after creation,
-	// or a single success line naming both tiers once neither is.
+	// Work labels are fatal (handled above) and research/spec-mismatch
+	// labels are advisory (ADR 0022 / issue #2275), so each tier gets its
+	// own wrap-up line here: an advisory note if a tier is still short
+	// after creation, or a single success line naming both tiers once
+	// neither is (the spec-mismatch tier doesn't get its own mention in
+	// that success line — see the "ok: all triage and research labels
+	// present" string other tests assert on verbatim).
+	stillMissing := false
 	if len(researchMissing) > 0 {
 		fmt.Fprintf(w, "advisory: %d research label(s) still missing after creation (ADR 0022) — does not fail this check: %s\n", len(researchMissing), strings.Join(researchMissing, ", "))
+		stillMissing = true
+	}
+	if len(specMismatchMissing) > 0 {
+		fmt.Fprintf(w, "advisory: %d spec-mismatch label(s) still missing after creation (issue #2275) — does not fail this check: %s\n", len(specMismatchMissing), strings.Join(specMismatchMissing, ", "))
+		stillMissing = true
+	}
+	if stillMissing {
 		return nil
 	}
 	fmt.Fprintln(w, "ok: all triage and research labels present")

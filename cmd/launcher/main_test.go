@@ -2612,7 +2612,7 @@ func TestDoctor_AllLabelsPresent_PrintsSuccess(t *testing.T) {
 	f := forge.NewFake()
 	f.ProbeRepo = "owner/repo"
 	research := doctor.ResearchLabelNames()
-	f.Labels = append([]string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}, research...)
+	f.Labels = append([]string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete", forge.SpecMismatchLabel}, research...)
 
 	var buf bytes.Buffer
 	if err := runDoctor(f, f, defaultLabelConfig(), &buf, strings.NewReader(""), false); err != nil {
@@ -2721,14 +2721,14 @@ func TestDoctor_TTY_Confirm(t *testing.T) {
 	f.ProbeRepo = "owner/repo"
 	research := doctor.ResearchLabelNames()
 	// Two work labels missing: agent-failed and agent-complete. Research
-	// labels are all present throughout, so this test stays scoped to work
-	// label creation.
-	f.Labels = append([]string{"ready-for-agent", "agent-in-progress"}, research...)
+	// and spec-mismatch labels are all present throughout, so this test
+	// stays scoped to work label creation.
+	f.Labels = append([]string{"ready-for-agent", "agent-in-progress", forge.SpecMismatchLabel}, research...)
 	// After creation the fake doesn't auto-add to Labels, so script the
 	// second ListLabels call (re-verify) to return all four work labels.
 	f.LabelsSeq = [][]string{
-		append([]string{"ready-for-agent", "agent-in-progress"}, research...),                                   // first check
-		append([]string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}, research...), // re-verify
+		append([]string{"ready-for-agent", "agent-in-progress", forge.SpecMismatchLabel}, research...),                                   // first check
+		append([]string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete", forge.SpecMismatchLabel}, research...), // re-verify
 	}
 
 	var buf bytes.Buffer
@@ -2762,9 +2762,9 @@ func TestDoctor_TTY_Confirm(t *testing.T) {
 func TestDoctor_TTY_Confirm_ResearchLabels(t *testing.T) {
 	f := forge.NewFake()
 	f.ProbeRepo = "owner/repo"
-	work := []string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}
+	work := []string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete", forge.SpecMismatchLabel}
 	research := doctor.ResearchLabelNames()
-	f.Labels = work // all work labels present, all six research labels missing
+	f.Labels = work // all work labels + spec-mismatch present, all six research labels missing
 	f.LabelsSeq = [][]string{
 		work,
 		append(append([]string{}, work...), research...), // re-verify: research now created too
@@ -2923,15 +2923,37 @@ func TestReferenceDocHasLocalCodeForgeSection(t *testing.T) {
 // visually colliding in the GitHub label UI by reusing the same hex color
 // (#801) — TestReferenceDocLabelSnippetMatchesTriageDefaults checks
 // docs/code parity per name but never asserts uniqueness across the map.
+//
+// One intentional exception: agent-spec-mismatch (issue #2275) deliberately
+// reuses agent-research-unclear's lavender (d4c5f9) since both share a
+// "needs a human answer" semantic across their respective families.
 func TestTriageLabelMeta_ColorsAreDistinct(t *testing.T) {
+	allowedSharedColor := "d4c5f9"
+	allowedSharedNames := map[string]bool{
+		"agent-research-unclear": true,
+		"agent-spec-mismatch":    true,
+	}
 	byColor := map[string][]string{}
 	for name, meta := range doctor.TriageLabelMeta {
 		byColor[meta.Color] = append(byColor[meta.Color], name)
 	}
 	for color, names := range byColor {
-		if len(names) > 1 {
-			t.Errorf("color %q reused by %d labels %v, want distinct colors", color, len(names), names)
+		if len(names) <= 1 {
+			continue
 		}
+		if color == allowedSharedColor {
+			allShared := true
+			for _, n := range names {
+				if !allowedSharedNames[n] {
+					allShared = false
+					break
+				}
+			}
+			if allShared && len(names) == len(allowedSharedNames) {
+				continue
+			}
+		}
+		t.Errorf("color %q reused by %d labels %v, want distinct colors", color, len(names), names)
 	}
 }
 

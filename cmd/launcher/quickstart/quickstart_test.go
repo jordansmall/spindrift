@@ -1205,7 +1205,7 @@ func TestRunQuickstart_FinishLine_ProbesForgeThenCreatesLabelsThenBuilds(t *test
 	f.Labels = []string{"ready-for-agent"} // three work labels missing; research all present
 	f.LabelsSeq = [][]string{
 		append([]string{"ready-for-agent"}, research...),
-		append([]string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}, research...),
+		append([]string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete", forge.SpecMismatchLabel}, research...),
 	}
 	runner := &fakeCommandRunner{}
 
@@ -1216,8 +1216,11 @@ func TestRunQuickstart_FinishLine_ProbesForgeThenCreatesLabelsThenBuilds(t *test
 	if !strings.Contains(out.String(), "jordansmall/spindrift is reachable") {
 		t.Errorf("expected transcript to confirm forge connectivity, got:\n%s", out.String())
 	}
-	if len(f.CreateLabelCalls) != 3 {
-		t.Fatalf("want 3 CreateLabel calls, got %d", len(f.CreateLabelCalls))
+	// 3 missing work labels (agent-in-progress/agent-failed/agent-complete)
+	// plus the new agent-spec-mismatch advisory label (issue #2275) — research
+	// labels are all present in this fixture, so they contribute none.
+	if len(f.CreateLabelCalls) != 4 {
+		t.Fatalf("want 4 CreateLabel calls, got %d", len(f.CreateLabelCalls))
 	}
 
 	if len(runner.calls) != 1 || strings.Join(runner.calls[0], " ") != strings.Join(spindriftBuildArgs, " ") {
