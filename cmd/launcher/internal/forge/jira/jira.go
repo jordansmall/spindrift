@@ -403,7 +403,10 @@ func (j *jiraClient) CompleteVerdict(num string, verdict forge.Verdict) error {
 }
 
 type jiraSearchPayload struct {
-	Issues []jiraIssuePayload `json:"issues"`
+	Issues     []jiraIssuePayload `json:"issues"`
+	StartAt    int                `json:"startAt"`
+	MaxResults int                `json:"maxResults"`
+	Total      int                `json:"total"`
 }
 
 // ListIssues returns open issues in dispatch state state, in canonical order
@@ -429,12 +432,11 @@ func (j *jiraClient) ListIssues(state forge.DispatchState) ([]forge.Issue, error
 	clauses = append(clauses, "statusCategory != Done")
 	jql := strings.Join(clauses, " AND ") + " order by created asc"
 
-	var payload jiraSearchPayload
-	if err := j.doSearch(jql, &payload); err != nil {
+	issues, err := j.doSearch(jql)
+	if err != nil {
 		return nil, err
 	}
-	forge.WarnPageMayTruncateBacklog("jira search", len(payload.Issues))
-	return issuesFromPayload(payload), nil
+	return issuesFromIssues(issues), nil
 }
 
 // ListOpenIssues returns every open issue scoped to the project, in
@@ -444,20 +446,18 @@ func (j *jiraClient) ListIssues(state forge.DispatchState) ([]forge.Issue, error
 func (j *jiraClient) ListOpenIssues() ([]forge.Issue, error) {
 	jql := fmt.Sprintf("project = %q AND statusCategory != Done order by created asc", j.cfg.ProjectKey)
 
-	var payload jiraSearchPayload
-	if err := j.doSearch(jql, &payload); err != nil {
+	issues, err := j.doSearch(jql)
+	if err != nil {
 		return nil, err
 	}
-	forge.WarnPageMayTruncateBacklog("jira search", len(payload.Issues))
-	return issuesFromPayload(payload), nil
+	return issuesFromIssues(issues), nil
 }
 
-// issuesFromPayload converts a jiraSearchPayload's raw issues into the
-// launcher's canonical forge.Issue shape, shared by ListIssues and
-// ListOpenIssues.
-func issuesFromPayload(payload jiraSearchPayload) []forge.Issue {
-	issues := make([]forge.Issue, len(payload.Issues))
-	for i, p := range payload.Issues {
+// issuesFromIssues converts raw Jira issue payloads into the launcher's
+// canonical forge.Issue shape, shared by ListIssues and ListOpenIssues.
+func issuesFromIssues(payload []jiraIssuePayload) []forge.Issue {
+	issues := make([]forge.Issue, len(payload))
+	for i, p := range payload {
 		issues[i] = forge.Issue{
 			Number: p.Key,
 			Title:  p.Fields.Summary,
@@ -469,14 +469,48 @@ func issuesFromPayload(payload jiraSearchPayload) []forge.Issue {
 	return issues
 }
 
-// doSearch issues a Jira JQL search request via GET /rest/api/2/search.
-func (j *jiraClient) doSearch(jql string, out any) error {
-	q := url.Values{"jql": {jql}, "maxResults": {fmt.Sprintf("%d", forge.ResultPageLimit)}}
-	return j.rest.Do(http.MethodGet, "/rest/api/2/search?"+q.Encode(), nil, out)
+// doSearch issues a Jira JQL search request via GET /rest/api/2/search,
+// walking every result page via j.rest.Paginate so a backlog larger than a
+// single ResultPageLimit page is never silently truncated: each page
+// requests startAt=(page-1)*ResultPageLimit and maxResults=ResultPageLimit,
+// and a page is the last one once startAt+len(issues) reaches the search's
+// reported total. Jira's JQL already orders results server-side (callers
+// append "order by created asc"), and pages are appended in fetch order, so
+// oldest-first ordering is preserved across the walk without a client-side
+// sort.
+func (j *jiraClient) doSearch(jql string) ([]jiraIssuePayload, error) {
+	var all []jiraIssuePayload
+	err := j.rest.Paginate(func(page int) (bool, error) {
+		startAt := (page - 1) * forge.ResultPageLimit
+		q := url.Values{
+			"jql":        {jql},
+			"startAt":    {fmt.Sprintf("%d", startAt)},
+			"maxResults": {fmt.Sprintf("%d", forge.ResultPageLimit)},
+		}
+		var payload jiraSearchPayload
+		if err := j.rest.Do(http.MethodGet, "/rest/api/2/search?"+q.Encode(), nil, &payload); err != nil {
+			return false, err
+		}
+		all = append(all, payload.Issues...)
+		return startAt+len(payload.Issues) >= payload.Total, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return all, nil
 }
 
 type jiraLabelsPayload struct {
 	Values []string `json:"values"`
+}
+
+// WalksAllPages implements forge.FullyPaginated: doSearch (behind both
+// ListIssues and ListOpenIssues) walks every page of a Jira JQL search via
+// forge.WalkPages, so its results are never truncated at
+// forge.ResultPageLimit — a caller like issueInState's page-limit fail-safe
+// can trust a full-looking result as complete.
+func (j *jiraClient) WalksAllPages() bool {
+	return true
 }
 
 // ListLabels returns Jira's site-wide label list.

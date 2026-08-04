@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"regexp"
+	"strconv"
 	"sync"
 	"testing"
 
@@ -131,7 +132,41 @@ func (h *jiraHarness) handle(w http.ResponseWriter, r *http.Request) {
 			}
 			out = append(out, h.payload(num, rec))
 		}
-		json.NewEncoder(w).Encode(map[string]any{"issues": out})
+
+		// Genuinely paginate on startAt/maxResults (issue #2265), matching
+		// the real Jira search response shape jiraSearchPayload decodes:
+		// {"issues": <window>, "startAt", "maxResults", "total"} — total is
+		// the full matching count, which is what doSearch's
+		// startAt+len(issues) >= total "done" check relies on.
+		startAt := 0
+		if s := r.URL.Query().Get("startAt"); s != "" {
+			if v, err := strconv.Atoi(s); err == nil && v >= 0 {
+				startAt = v
+			}
+		}
+		maxResults := len(out)
+		if m := r.URL.Query().Get("maxResults"); m != "" {
+			if v, err := strconv.Atoi(m); err == nil && v > 0 {
+				maxResults = v
+			}
+		}
+		var window []map[string]any
+		if startAt < len(out) {
+			end := startAt + maxResults
+			if end > len(out) {
+				end = len(out)
+			}
+			window = out[startAt:end]
+		}
+		if window == nil {
+			window = []map[string]any{}
+		}
+		json.NewEncoder(w).Encode(map[string]any{
+			"issues":     window,
+			"startAt":    startAt,
+			"maxResults": maxResults,
+			"total":      len(out),
+		})
 		return
 
 	case r.Method == http.MethodGet && matchIssuePath(r.URL.Path) != "":
@@ -209,4 +244,39 @@ func removeString(ss []string, s string) []string {
 
 func TestJiraClient_TrackerContract(t *testing.T) {
 	forgetest.RunTrackerContract(t, newJiraHarness(t))
+}
+
+// TestJiraClient_ListIssues_PaginatesAcrossMultipleRealPages seeds more than
+// forge.ResultPageLimit issues so doSearch (issue #2265) must walk at least
+// two real pages of the harness's now-genuinely-paginating search endpoint
+// to see them all, then asserts every seeded issue comes back, preserving
+// the creation order they were seeded in (h.order's append sequence stands
+// in for Jira's created-time ordering).
+func TestJiraClient_ListIssues_PaginatesAcrossMultipleRealPages(t *testing.T) {
+	h := newJiraHarness(t)
+	const seeded = forge.ResultPageLimit + 30
+
+	var want []string
+	for i := 1; i <= seeded; i++ {
+		num := fmt.Sprintf("PROJ-%d", i)
+		want = append(want, num)
+		h.SeedIssue(forge.Issue{
+			Number: num,
+			Title:  "paged",
+			Labels: []string{testLabels.Dispatchable},
+		})
+	}
+
+	issues, err := h.Tracker().ListIssues(forge.Dispatchable)
+	if err != nil {
+		t.Fatalf("ListIssues(Dispatchable): %v", err)
+	}
+	if len(issues) != seeded {
+		t.Fatalf("ListIssues(Dispatchable) returned %d issues, want %d", len(issues), seeded)
+	}
+	for i, iss := range issues {
+		if iss.Number != want[i] {
+			t.Fatalf("ListIssues(Dispatchable)[%d].Number = %q, want %q (creation order not preserved)", i, iss.Number, want[i])
+		}
+	}
 }
