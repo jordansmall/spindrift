@@ -154,12 +154,14 @@ func labelNames(labels []forgejoLabel) []string {
 // toForgeIssue converts a forgejoIssuePayload into the launcher's canonical
 // forge.Issue shape.
 func toForgeIssue(p forgejoIssuePayload) forge.Issue {
+	names := labelNames(p.Labels)
 	return forge.Issue{
-		Number: strconv.Itoa(p.Number),
-		Title:  p.Title,
-		Body:   p.Body,
-		State:  issueState(p.State),
-		Labels: labelNames(p.Labels),
+		Number:   strconv.Itoa(p.Number),
+		Title:    p.Title,
+		Body:     p.Body,
+		State:    issueState(p.State),
+		Labels:   names,
+		Priority: forge.ResolvePriority(names),
 	}
 }
 
