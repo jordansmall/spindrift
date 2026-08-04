@@ -92,7 +92,7 @@ if [ "${1:-}" = "outcome-backstop" ]; then
   if [ "$commit_count" -eq 0 ]; then
     note="${note}; no work to preserve"
   elif [ "$forge" = "local" ]; then
-    note="${note}; no bundle was ever emitted (no writable remote under CODE_FORGE=local)"
+    note="${note}; branch relayed via outbox bundle (no writable remote under CODE_FORGE=local)"
   elif [ -z "$write" ] && [ "$forge" = "github" ]; then
     note="${note}; branch relayed via outbox bundle (read-only Box)"
   else

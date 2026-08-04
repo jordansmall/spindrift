@@ -1213,7 +1213,17 @@ required_marker_gate() {
 # The SPINDRIFT_OUTCOME row on the required-marker gate above -- the scanner
 # reads back main's captured outcome line, and the predicate is bare
 # presence, the same condition the pre-#2044 inline check tested.
+#
+# Both are only ever invoked indirectly, via required_marker_gate's
+# "$_scanner"/"$_predicate" parameters (see its body above), never by their
+# literal names. shellcheck's own indirect-invocation credit for that
+# pattern stops working once main() ends with an unconditional
+# `exit "$claude_rc"` (ADR 0039 slice S1, issue #2252) -- a shellcheck
+# limitation, not a real dead-code finding; both are called from main() well
+# before that trailing exit.
+# shellcheck disable=SC2329
 _scan_outcome() { printf '%s' "$_last_outcome_line"; }
+# shellcheck disable=SC2329
 _require_nonempty() { [ -n "$1" ]; }
 
 # _scan_pr_intent_in_log reports (via stdout) the last line in $1 (a raw
@@ -1251,6 +1261,10 @@ _scan_pr_intent_in_log() {
 # #2045, the #2036 fix): the scanner reads back main's captured PR-intent
 # line, reusing _require_nonempty as its predicate -- the same bare-presence
 # condition the SPINDRIFT_OUTCOME row above already uses.
+#
+# Same shellcheck note as _scan_outcome above: only ever invoked indirectly
+# via required_marker_gate's "$_scanner" parameter.
+# shellcheck disable=SC2329
 _scan_pr_intent() { printf '%s' "$_last_pr_intent_line"; }
 
 # _emit_pr_intent_giveup_op prints a single heartbeat "decision" op (issue
@@ -1357,19 +1371,17 @@ Print the required line exactly once as your final message, using this grammar -
     echo "==> driver produced no SPINDRIFT_OUTCOME line — emitting synthetic backstop"
     emit_outcome_backstop
     # A read-only github Box (BOX_WRITE_ENABLED unset) holds no push token, so
-    # emit_outcome_backstop could not push $BRANCH itself. Fall through to the
-    # harness-owned bundle-out step below, which relays the branch through the
-    # outbox seam.bundle exactly as a read-only status=ready hand-off does
-    # (issue #2094). Every other forge/mode has nothing more to do here --
-    # writable github and git already force-pushed in the backstop, local never
-    # had a writable remote, and research cuts no branch -- so they exit now,
-    # behaviour unchanged.
-    if ! _is_readonly_github || _is_research_kind; then
-      exit 0
-    fi
+    # emit_outcome_backstop could not push $BRANCH itself. Fall through
+    # unconditionally to the harness-owned bundle-out step below, which
+    # relays the branch through the outbox seam.bundle exactly as a
+    # read-only status=ready hand-off does (issue #2094). This is no longer
+    # a per-forge branch (ADR 0039 slice S1, issue #2252): every forge/mode
+    # -- writable github, git, local, and read-only github alike -- falls
+    # through the same way to the single exit at the bottom of main(), after
+    # bundle-out has had a chance to run. bundleout.Run is a safe no-op when
+    # there is nothing to relay (no commits, or a prior line that already
+    # claimed something other than ready), so nothing further is needed here.
   fi
-
-  [ "$claude_rc" -eq 0 ] || exit "$claude_rc"
 
   # The SPINDRIFT_PR_INTENT row on the required-marker gate (issue #2045,
   # the #2036 fix): a read-only github Box that reaches status=ready but
@@ -1390,56 +1402,65 @@ Print the required line exactly once as your final message, using this grammar -
   # itself contain the substring "status=ready" (e.g. an agent explaining
   # why a status=blocked run couldn't reach status=ready), and a bare
   # grep across the full line would false-positive on that.
-  local _outcome_fields_before_note="${_last_outcome_line%% note=*}"
-  if _is_readonly_github \
-    && [[ " $_outcome_fields_before_note " == *" status=ready "* ]]; then
-    # Carries this run's nonce (so the resumed pass can emit a line
-    # _scan_pr_intent_in_log will actually match) and repeats the exact
-    # SPINDRIFT_OUTCOME line already captured above verbatim: run_driver_in_env
-    # recaptures $_last_outcome_line from whatever this resumed pass prints,
-    # so without an instruction to repeat it, a resume that prints only the
-    # PR-intent line would blank that var out and trip the no-outcome
-    # backstop above on a run that already genuinely finished ready.
-    #
-    # The grammar spelled out below is free-text LLM instruction, not a
-    # machine-parsed contract -- only the bare SPINDRIFT_PR_INTENT token
-    # (outcome.PRIntentToken) is load-bearing for _scan_pr_intent_in_log and
-    # the launcher's own outcome.LastPRIntentInLog, and that literal is what
-    # TestPromptMarkersMatchScanner pins against
-    # open-pr-create-outbox.md/if-blocked-pr-outbox.md. A reworded sentence
-    # here is harmless as long as it still leads the agent to print the
-    # token, the nonce, and a base64 payload in that order.
-    local _original_ready_outcome_line="$_last_outcome_line"
-    local pr_intent_recovery_prompt="Your last message ended with a status=ready SPINDRIFT_OUTCOME line but printed no SPINDRIFT_PR_INTENT line, so the launcher has no draft PR to open. Print exactly one SPINDRIFT_PR_INTENT line, grammar: SPINDRIFT_PR_INTENT ${RUN_NONCE:-} <base64-encoded title, a blank line, then the body>, built by joining the PR title, a blank line, and the PR body, then base64-encoding the result into one unbroken token with no embedded newlines or spaces. Then repeat this exact line as your final message: ${_last_outcome_line}"
-    required_marker_gate _scan_pr_intent "$pr_intent_recovery_prompt" _require_nonempty
-    # The nudge is exhausted: required_marker_gate resumed the session once
-    # and the resumed pass still left no usable PR-intent line, so settle's
-    # host-mediated draft-PR step will find nothing to relay and report this
-    # run merge-blocked. Record that give-up as a heartbeat op (issue #2046)
-    # so the terminal state is visibly explained -- an operator sees the nudge
-    # ran and gave up, rather than an unexplained blocked hand-off (the #2036
-    # confusion). Fires only on the genuinely-exhausted path: a resume that
-    # supplied the marker leaves $_last_pr_intent_line non-empty and skips it,
-    # and this whole block is already gated on read-only + github +
-    # status=ready, so a run that landed a PR never reaches here. The single
-    # attempt is required_marker_gate's own one-resume contract.
-    if [ -z "$_last_pr_intent_line" ]; then
-      _emit_pr_intent_giveup_op 1
-    fi
-    # Belt-and-braces beyond the "repeat this exact line" instruction above:
-    # the resumed pass is still a fresh LLM turn that could garble or drop
-    # the outcome line despite being told not to, and unlike the
-    # SPINDRIFT_OUTCOME row's own resume (which only ever replaces "nothing"
-    # with something), this row's resume has a known-good line to fall back
-    # on. Restoring it here fixes both entrypoint.sh's own bookkeeping (so
-    # the no-outcome backstop below never fires on a run that already
-    # genuinely finished ready) and the container log the launcher's own
-    # last-line-wins outcome.LastInLog scans (so a garbled resumed line
-    # never shadows the good one there either).
-    if [ "$_last_outcome_line" != "$_original_ready_outcome_line" ]; then
-      echo "==> resumed pass did not repeat the original SPINDRIFT_OUTCOME line — restoring it"
-      _last_outcome_line="$_original_ready_outcome_line"
-      printf '%s\n' "$_last_outcome_line"
+  #
+  # This whole block only makes sense on a genuine status=ready reached by a
+  # cleanly-exited driver. It used to rely on the now-deleted
+  # `[ "$claude_rc" -eq 0 ] || exit "$claude_rc"` line above for that
+  # guarantee; the explicit guard below (ADR 0039 slice S1, issue #2252)
+  # replaces it now that a non-zero claude_rc falls through instead of
+  # exiting immediately.
+  if [ "$claude_rc" -eq 0 ]; then
+    local _outcome_fields_before_note="${_last_outcome_line%% note=*}"
+    if _is_readonly_github \
+      && [[ " $_outcome_fields_before_note " == *" status=ready "* ]]; then
+      # Carries this run's nonce (so the resumed pass can emit a line
+      # _scan_pr_intent_in_log will actually match) and repeats the exact
+      # SPINDRIFT_OUTCOME line already captured above verbatim: run_driver_in_env
+      # recaptures $_last_outcome_line from whatever this resumed pass prints,
+      # so without an instruction to repeat it, a resume that prints only the
+      # PR-intent line would blank that var out and trip the no-outcome
+      # backstop above on a run that already genuinely finished ready.
+      #
+      # The grammar spelled out below is free-text LLM instruction, not a
+      # machine-parsed contract -- only the bare SPINDRIFT_PR_INTENT token
+      # (outcome.PRIntentToken) is load-bearing for _scan_pr_intent_in_log and
+      # the launcher's own outcome.LastPRIntentInLog, and that literal is what
+      # TestPromptMarkersMatchScanner pins against
+      # open-pr-create-outbox.md/if-blocked-pr-outbox.md. A reworded sentence
+      # here is harmless as long as it still leads the agent to print the
+      # token, the nonce, and a base64 payload in that order.
+      local _original_ready_outcome_line="$_last_outcome_line"
+      local pr_intent_recovery_prompt="Your last message ended with a status=ready SPINDRIFT_OUTCOME line but printed no SPINDRIFT_PR_INTENT line, so the launcher has no draft PR to open. Print exactly one SPINDRIFT_PR_INTENT line, grammar: SPINDRIFT_PR_INTENT ${RUN_NONCE:-} <base64-encoded title, a blank line, then the body>, built by joining the PR title, a blank line, and the PR body, then base64-encoding the result into one unbroken token with no embedded newlines or spaces. Then repeat this exact line as your final message: ${_last_outcome_line}"
+      required_marker_gate _scan_pr_intent "$pr_intent_recovery_prompt" _require_nonempty
+      # The nudge is exhausted: required_marker_gate resumed the session once
+      # and the resumed pass still left no usable PR-intent line, so settle's
+      # host-mediated draft-PR step will find nothing to relay and report this
+      # run merge-blocked. Record that give-up as a heartbeat op (issue #2046)
+      # so the terminal state is visibly explained -- an operator sees the nudge
+      # ran and gave up, rather than an unexplained blocked hand-off (the #2036
+      # confusion). Fires only on the genuinely-exhausted path: a resume that
+      # supplied the marker leaves $_last_pr_intent_line non-empty and skips it,
+      # and this whole block is already gated on read-only + github +
+      # status=ready, so a run that landed a PR never reaches here. The single
+      # attempt is required_marker_gate's own one-resume contract.
+      if [ -z "$_last_pr_intent_line" ]; then
+        _emit_pr_intent_giveup_op 1
+      fi
+      # Belt-and-braces beyond the "repeat this exact line" instruction above:
+      # the resumed pass is still a fresh LLM turn that could garble or drop
+      # the outcome line despite being told not to, and unlike the
+      # SPINDRIFT_OUTCOME row's own resume (which only ever replaces "nothing"
+      # with something), this row's resume has a known-good line to fall back
+      # on. Restoring it here fixes both entrypoint.sh's own bookkeeping (so
+      # the no-outcome backstop below never fires on a run that already
+      # genuinely finished ready) and the container log the launcher's own
+      # last-line-wins outcome.LastInLog scans (so a garbled resumed line
+      # never shadows the good one there either).
+      if [ "$_last_outcome_line" != "$_original_ready_outcome_line" ]; then
+        echo "==> resumed pass did not repeat the original SPINDRIFT_OUTCOME line — restoring it"
+        _last_outcome_line="$_original_ready_outcome_line"
+        printf '%s\n' "$_last_outcome_line"
+      fi
     fi
   fi
 
@@ -1458,7 +1479,11 @@ Print the required line exactly once as your final message, using this grammar -
   # otherwise: a bundle-out failure (e.g. a transient git error) is a
   # genuine container failure, not a judgment call, so it belongs on the
   # launcher's own ClassifyTransient/retry path like any other non-zero
-  # exit here, rather than a caught-and-noted best-effort step.
+  # exit here, rather than a caught-and-noted best-effort step. Reached for
+  # any $claude_rc value, zero or non-zero (ADR 0039 slice S1, issue #2252):
+  # a driver that crashed non-zero can still have left real commits on
+  # $BRANCH worth relaying, and bundleout.Run is a safe no-op when there is
+  # nothing to bundle.
   if ! _is_research_kind \
     && { [ "${CODE_FORGE:-github}" = "local" ] \
       || _is_readonly_github; }; then
@@ -1473,6 +1498,7 @@ Print the required line exactly once as your final message, using this grammar -
   fi
 
   echo "==> entrypoint complete for issue #$ISSUE_NUMBER"
+  exit "$claude_rc"
 }
 
 main "$@"
