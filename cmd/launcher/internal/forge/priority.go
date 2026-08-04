@@ -1,5 +1,25 @@
 package forge
 
+// The agent-priority-{critical,high,low} label strings (ADR 0040). These are
+// the single source of the label names: ResolvePriority's switch and
+// PriorityLabelNames both read from these constants rather than duplicating
+// the literals.
+const (
+	labelPriorityCritical = "agent-priority-critical"
+	labelPriorityHigh     = "agent-priority-high"
+	labelPriorityLow      = "agent-priority-low"
+)
+
+// PriorityLabelNames returns the three agent-priority-* label strings
+// (ADR 0040) in critical/high/low order — the same order ResolvePriority
+// checks precedence in. Callers that need to enumerate the label family
+// (e.g. doctor's label-existence check) use this instead of re-deriving the
+// literals, mirroring ResearchDispatchLabels/ResearchVerdictLabels.Entries's
+// role for the research label family (see verdict.go).
+func PriorityLabelNames() []string {
+	return []string{labelPriorityCritical, labelPriorityHigh, labelPriorityLow}
+}
+
 // ResolvePriority scans an issue's label names for the agent-priority-
 // {critical,high,low} labels (ADR 0040) and returns the canonical Priority
 // tier, highest wins if an issue somehow carries more than one. Label names
@@ -21,11 +41,11 @@ func ResolvePriority(labels []string) Priority {
 	for _, label := range labels {
 		var candidate Priority
 		switch label {
-		case "agent-priority-critical":
+		case labelPriorityCritical:
 			candidate = PriorityCritical
-		case "agent-priority-high":
+		case labelPriorityHigh:
 			candidate = PriorityHigh
-		case "agent-priority-low":
+		case labelPriorityLow:
 			candidate = PriorityLow
 		default:
 			continue

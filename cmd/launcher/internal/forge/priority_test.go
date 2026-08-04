@@ -58,3 +58,20 @@ func TestResolvePriority(t *testing.T) {
 		})
 	}
 }
+
+// TestPriorityLabelNames verifies PriorityLabelNames is the single source of
+// the three agent-priority-* label strings, in critical/high/low order,
+// matching ResolvePriority's precedence — mirroring how ResearchDispatchLabels
+// single-sources the research label family (see verdict.go).
+func TestPriorityLabelNames(t *testing.T) {
+	want := []string{"agent-priority-critical", "agent-priority-high", "agent-priority-low"}
+	got := forge.PriorityLabelNames()
+	if len(got) != len(want) {
+		t.Fatalf("PriorityLabelNames() = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("PriorityLabelNames()[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
