@@ -1,6 +1,7 @@
 package forgejo_test
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -154,4 +155,26 @@ func (h *forgejoCodeForgeHarness) realMerge(num string) error {
 
 func TestForgejoClient_CodeForgeContract(t *testing.T) {
 	forgetest.RunCodeForgeContract(t, newForgejoCodeForgeHarness(t))
+}
+
+// TestForgejoCodeForge_Probe_AuthFailure verifies the CodeForge seam's Probe
+// surfaces forge.ErrAuthFailure (rather than wrapping it in ErrRepoNotFound)
+// when Forgejo rejects the credentials -- the CodeForge contract suite only
+// exercises success and unreachable-backend Probe, so this covers the 401/403
+// discrimination branch forgejoCodeForge.Probe shares with the tracker's own
+// (already-tested) Probe.
+func TestForgejoCodeForge_Probe_AuthFailure(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer srv.Close()
+
+	cf := forgejo.NewForgejoCodeForge(forgejo.ForgejoCodeForgeConfig{
+		BaseURL: srv.URL,
+		Repo:    "owner/repo",
+		Token:   "bad-token",
+	}, nil)
+	if _, err := cf.Probe(); !errors.Is(err, forge.ErrAuthFailure) {
+		t.Fatalf("Probe() error = %v, want ErrAuthFailure", err)
+	}
 }
