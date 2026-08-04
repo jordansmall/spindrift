@@ -31,6 +31,38 @@ func TestRefresh_WrapsListOpenIssuesResult(t *testing.T) {
 	}
 }
 
+// TestRefresh_SortsByPriority verifies Refresh orders the wrapped Issues by
+// descending Priority (ADR 0040), oldest-first within a tier, rather than
+// passing ListOpenIssues' raw oldest-first-only order straight through — so
+// the Backlog renders in the same priority order the headless dispatch pool
+// uses (#2284).
+func TestRefresh_SortsByPriority(t *testing.T) {
+	f := forge.NewFake()
+	f.SetIssue(forge.Issue{Number: "1", Title: "normal one", State: forge.IssueOpen})
+	f.SetIssue(forge.Issue{Number: "2", Title: "low", State: forge.IssueOpen, Labels: []string{"agent-priority-low"}})
+	f.SetIssue(forge.Issue{Number: "3", Title: "critical", State: forge.IssueOpen, Labels: []string{"agent-priority-critical"}})
+	f.SetIssue(forge.Issue{Number: "4", Title: "normal two", State: forge.IssueOpen})
+
+	msg := Refresh(f)
+
+	loaded, ok := msg.(IssuesLoadedMsg)
+	if !ok {
+		t.Fatalf("Refresh() = %T, want IssuesLoadedMsg", msg)
+	}
+	if loaded.Err != nil {
+		t.Fatalf("Err = %v, want nil", loaded.Err)
+	}
+	want := []string{"3", "1", "4", "2"}
+	if len(loaded.Issues) != len(want) {
+		t.Fatalf("Issues = %+v, want %d issues in order %v", loaded.Issues, len(want), want)
+	}
+	for i, num := range want {
+		if loaded.Issues[i].Number != num {
+			t.Errorf("Issues[%d].Number = %q, want %q (order %v)", i, loaded.Issues[i].Number, num, want)
+		}
+	}
+}
+
 // TestRefresh_TrackerErr_WrapsErr verifies a tracker failure surfaces as
 // IssuesLoadedMsg.Err rather than a panic or a silently empty list.
 func TestRefresh_TrackerErr_WrapsErr(t *testing.T) {
