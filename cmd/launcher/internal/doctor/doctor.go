@@ -157,7 +157,7 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, w io.Writer, stdin
 	}
 	missing := append(append(append([]string{}, workMissing...), researchMissing...), priorityMissing...)
 	if len(missing) == 0 {
-		fmt.Fprintln(w, "ok: all triage and research labels present")
+		fmt.Fprintln(w, "ok: all triage, research, and priority labels present")
 		return nil
 	}
 
@@ -199,8 +199,8 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, w io.Writer, stdin
 	// Work labels are fatal (handled above) and research/priority labels
 	// are advisory (ADR 0022 / ADR 0040), so each advisory tier gets its
 	// own wrap-up line here: an advisory note if that tier is still short
-	// after creation, or a single success line naming both fixed tiers
-	// once neither is.
+	// after creation, or a single success line naming all three tiers
+	// once none is.
 	stillMissing := false
 	if len(researchMissing) > 0 {
 		fmt.Fprintf(w, "advisory: %d research label(s) still missing after creation (ADR 0022) — does not fail this check: %s\n", len(researchMissing), strings.Join(researchMissing, ", "))
@@ -213,6 +213,6 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, w io.Writer, stdin
 	if stillMissing {
 		return nil
 	}
-	fmt.Fprintln(w, "ok: all triage and research labels present")
+	fmt.Fprintln(w, "ok: all triage, research, and priority labels present")
 	return nil
 }
