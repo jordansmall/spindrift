@@ -99,7 +99,7 @@ func Run(cfg Config, w io.Writer) error {
 	case count == 0:
 		note += "; no work to preserve"
 	case cfg.CodeForge == "local":
-		note += "; no bundle was ever emitted (no writable remote under CODE_FORGE=local)"
+		note += "; branch relayed via outbox bundle (no writable remote under CODE_FORGE=local)"
 	case !cfg.WriteEnabled && cfg.CodeForge == "github":
 		note += "; branch relayed via outbox bundle (read-only Box)"
 	default:

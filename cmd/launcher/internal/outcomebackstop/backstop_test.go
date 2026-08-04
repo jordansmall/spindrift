@@ -160,7 +160,7 @@ func TestRun_CodeForgeLocal(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 	line := buf.String()
-	if !strings.Contains(line, "no writable remote under CODE_FORGE=local") {
+	if !strings.Contains(line, "branch relayed via outbox bundle (no writable remote under CODE_FORGE=local)") {
 		t.Fatalf("unexpected note: %q", line)
 	}
 	if git.countCalls("push") != 0 {
