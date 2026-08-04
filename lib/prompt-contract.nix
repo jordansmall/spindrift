@@ -1,0 +1,218 @@
+# Pure-data registry of the harness-owned shared prompt blocks (issue #2245):
+# the outcome contract, COMMS, CHECK/COMMIT, and research-verdict blocks that
+# lib/mkHarness.nix currently slices out of the default prompts by hand via
+# lib/prompt-inject.nix, one hardcoded marker/source pair at a time. This
+# file is not yet consumed anywhere -- it's a parallel, not-yet-wired data
+# source that a later slice of #2245 will drive lib/mkHarness.nix from, so
+# that file's own set of slice/inject calls stops being the only place the
+# block-to-prompt-kind mapping is written down.
+#
+# Pure builtins only (no `pkgs.lib`): keeps this file evaluable and unit-
+# testable with a bare `nix eval`, without needing a locked nixpkgs (mirrors
+# lib/prompt-inject.nix, issue #512, and lib/renderers.nix, issue #402).
+let
+  promptInject = import ./prompt-inject.nix;
+
+  # Matches `lib.escapeShellArg` byte for byte without depending on pkgs.lib
+  # (mirrors lib/preambles.nix's copy of the same logic, issue #513): a
+  # string of only shell-safe characters passes through unquoted; anything
+  # else gets single-quote-wrapped, with embedded `'` escaped as `'\''`.
+  escapeShellArg =
+    arg:
+    let
+      string = builtins.toString arg;
+    in
+    if builtins.match "[[:alnum:],._+:@%/-]+" string == null then
+      "'" + builtins.replaceStrings [ "'" ] [ "'\\''" ] string + "'"
+    else
+      string;
+
+  # Slices one injectBlocks row's canonical text live from its declared
+  # `source` prompt file -- never a standalone contract file, so this can
+  # never drift from the default prompt's own copy (issue #419). Re-derives,
+  # as pure data-driven code, the same slicing lib/mkHarness.nix's
+  # outcomeContract/commsBlock/checkBlock/researchOutcomeContract already do
+  # by hand, one hardcoded marker/source pair at a time.
+  sliceRow =
+    row:
+    let
+      sourceText = builtins.readFile (../templates/default/prompts/${row.source});
+    in
+    if row.endMarker == null then
+      promptInject.sliceFromMarker row.startMarker sourceText
+    else
+      promptInject.sliceBetween row.startMarker row.endMarker sourceText;
+in
+rec {
+  # Each row describes one shared block:
+  #   id          -- short, stable identifier for the block.
+  #   marker      -- the heading text injectSection scans a target prompt for
+  #                  to decide whether the block is already present.
+  #   source      -- the default prompt file (relative to
+  #                  templates/default/prompts/) this block's canonical text
+  #                  is sliced from. There is no separate standalone contract
+  #                  file: slicing from the live default prompt is what keeps
+  #                  the injected copy and that prompt's own copy byte-
+  #                  identical, so they can never drift apart (issue #419).
+  #   startMarker -- the heading the slice starts at (inclusive).
+  #   endMarker   -- the heading the slice stops before (exclusive), or
+  #                  `null` to slice from startMarker all the way to the end
+  #                  of the source file (sliceFromMarker instead of
+  #                  sliceBetween in lib/prompt-inject.nix terms).
+  #   kinds       -- every prompt kind (issue/fix/research/
+  #                  research-self-contained) this block is injected into.
+  #                  Deliberately excludes the prompt named by `source`
+  #                  itself where that prompt already carries its own copy of
+  #                  the block inline -- injection only ever targets prompts
+  #                  that would otherwise be missing it.
+  injectBlocks = [
+    {
+      id = "outcome";
+      marker = "# LAND THE CHANGE";
+      source = "issue-prompt.md";
+      startMarker = "# LAND THE CHANGE";
+      endMarker = null;
+      # issue-prompt.md carries the section inline (it's the source), so
+      # outcome injection only targets fix-prompt.md. research-prompt.md has
+      # its own separate outcome contract (see "research-verdict" below), so
+      # this block is not injected there.
+      kinds = [ "issue" "fix" ];
+    }
+    {
+      id = "comms";
+      marker = "# COMMS";
+      source = "issue-prompt.md";
+      startMarker = "# COMMS";
+      endMarker = "# SCOUT";
+      # fix-prompt.md runs a FIX step in place of issue-prompt.md's COMMS
+      # step, so it's the only other prompt that needs COMMS injected.
+      kinds = [ "fix" ];
+    }
+    {
+      id = "check";
+      marker = "# CHECK";
+      source = "issue-prompt.md";
+      startMarker = "# CHECK";
+      endMarker = "# REVIEW";
+      # fix-prompt.md has no review step of its own, but still needs the
+      # CHECK/COMMIT block injected the same way COMMS is above.
+      kinds = [ "fix" ];
+    }
+    {
+      id = "research-verdict";
+      marker = "# POST THE VERDICT";
+      source = "research-prompt.md";
+      startMarker = "# POST THE VERDICT";
+      endMarker = null;
+      # research-prompt.md carries the section inline (it's the source);
+      # research-self-contained-prompt.md shares the same verdict-posting
+      # contract and needs it injected the same way fix-prompt.md needs the
+      # other three blocks above.
+      kinds = [ "research" "research-self-contained" ];
+    }
+  ];
+
+  # Second pure-data registry (issue #2245, drawn from parent issue #2244's
+  # classification of the harness's inject/outject markers): every marker a
+  # Box's own prompt output is expected to emit, so a later slice can drive a
+  # post-run validation pass from this data instead of the omission going
+  # unnoticed until something downstream (a merge, a comment relay) silently
+  # no-ops. Not yet consumed anywhere -- same "parallel, not-yet-wired data
+  # source" status as injectBlocks above.
+  #   id       -- short, stable identifier for the expected marker.
+  #   marker   -- the literal marker text a Box's output is scanned for.
+  #   carrier  -- where the marker is expected to appear:
+  #               "subagent-first-line" for a marker that must be the first
+  #               line of a review subagent's own output (see
+  #               templates/default/prompts/review-prompt.md), vs
+  #               "fragment-body" for a marker embedded anywhere in the body
+  #               of a rendered prompt fragment (see
+  #               templates/default/prompts/fragments/*.md).
+  #   severity -- "reject" for the two provably-fatal, condition-gated
+  #               omissions parent issue #2244 named (a missing verdict-
+  #               comment relay when research is read-only can never post its
+  #               verdict; a missing reviewer VERDICT: line when the
+  #               orchestrator is enabled can never gate the multi-pass
+  #               review loop) -- both narrow and already condition-gated, so
+  #               a missing marker there is unambiguous. "warn" for the other
+  #               two, which already have a working non-fatal backstop (PR
+  #               intent: the existing nudge + bundle-adopt salvage path;
+  #               issue intent: the filer's best-effort PR-body fallback), so
+  #               treating their absence as fatal would be a false positive.
+  #   when     -- a symbolic gating-condition name, not yet consumed by any
+  #               bash/Nix logic -- wiring `when` to an actual runtime
+  #               condition is future work, out of scope for this issue.
+  validateMarkers = [
+    {
+      id = "verdict-comment-relay";
+      marker = "SPINDRIFT_COMMENT";
+      carrier = "fragment-body";
+      severity = "reject";
+      when = "readOnlyResearch";
+    }
+    {
+      id = "reviewer-verdict";
+      marker = "VERDICT:";
+      carrier = "subagent-first-line";
+      severity = "reject";
+      when = "orchestratorEnabled";
+    }
+    {
+      id = "pr-intent";
+      marker = "SPINDRIFT_PR_INTENT";
+      carrier = "fragment-body";
+      severity = "warn";
+      when = "boxAccessReadOnly";
+    }
+    {
+      id = "issue-intent";
+      marker = "SPINDRIFT_ISSUE_INTENT";
+      carrier = "fragment-body";
+      severity = "warn";
+      when = "filerFileRelay";
+    }
+  ];
+
+  # Each injectBlocks row's canonical text, keyed by `id`, sliced live from
+  # its declared `source` prompt file -- pure derivation off injectBlocks, so
+  # a new row picked up here automatically without a hand-written case per
+  # block.
+  canonicalText = builtins.listToAttrs (
+    map (row: {
+      name = row.id;
+      value = sliceRow row;
+    }) injectBlocks
+  );
+
+  # The single list of every injectBlocks row's marker, in row order -- one
+  # place a future Nix bake / bash runtime injector / parity check can all
+  # read instead of independently re-declaring the same marker strings
+  # (issue #2244 user story 19).
+  markerList = map (row: row.marker) injectBlocks;
+
+  # Each injectBlocks row rendered into a pipe-joined string, in row order --
+  # the same "row -> pipe-joined string" shape lib/mkHarness.nix's
+  # fragmentRegistryRows uses for the fragment registry (see
+  # fragmentRegistryRows/fragmentRegistryPreamble there). `endMarker` renders
+  # as the empty string for a null (slice-to-EOF) row, so the field is still
+  # present -- just empty -- rather than the whole row shrinking a field.
+  # `kinds` renders as a single space-joined field.
+  injectBlocksBashRows = map (
+    row:
+    let
+      endMarkerRendered = if row.endMarker == null then "" else row.endMarker;
+      kindsRendered = builtins.concatStringsSep " " row.kinds;
+    in
+    "${row.id}|${row.marker}|${row.source}|${row.startMarker}|${endMarkerRendered}|${kindsRendered}"
+  ) injectBlocks;
+
+  # injectBlocksBashRows wrapped into a bash array literal, formatted exactly
+  # like lib/mkHarness.nix's fragmentRegistryPreamble renders
+  # fragmentRegistryRows into `_FRAGMENT_ROWS`. Not yet consumed anywhere --
+  # same "parallel, not-yet-wired data source" status as injectBlocks/
+  # validateMarkers above.
+  injectBlocksBashPreamble =
+    "_INJECT_BLOCK_ROWS=(\n"
+    + builtins.concatStringsSep "" (map (row: "  " + escapeShellArg row + "\n") injectBlocksBashRows)
+    + ")\n";
+}
