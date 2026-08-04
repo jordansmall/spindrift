@@ -84,14 +84,7 @@ func NewForgejoClient(cfg ForgejoConfig) forge.IssueTracker {
 	// NewForgejoCodeForge reuses this tracker's *rest.Client (issue #2256's
 	// shared-client seam), the merge endpoint's disambiguation still works
 	// against the reused instance.
-	statuses := rest.StatusMap{
-		http.StatusUnauthorized:     forge.ErrAuthFailure,
-		http.StatusForbidden:        forge.ErrAuthFailure,
-		http.StatusNotFound:         forge.ErrNotFound,
-		http.StatusMethodNotAllowed: errMergeRefused,
-		http.StatusConflict:         errMergeRefused,
-	}
-	restClient := rest.New(cfg.BaseURL, rest.TokenAuth{Scheme: "token", Token: cfg.Token}, "forgejo", statuses, hc)
+	restClient := rest.New(cfg.BaseURL, rest.TokenAuth{Scheme: "token", Token: cfg.Token}, "forgejo", forgejoStatusMap(), hc)
 	return &forgejoClient{cfg: cfg, rest: restClient}
 }
 

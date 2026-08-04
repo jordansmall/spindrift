@@ -83,6 +83,21 @@ type ForgejoCodeForgeConfig struct {
 // forge.ErrMergeBlockedByChecks, or a raw wrapped error.
 var errMergeRefused = errors.New("forgejo: merge refused")
 
+// forgejoStatusMap is the HTTP-status -> sentinel-error table shared by
+// every *rest.Client this package builds against the Forgejo REST API
+// (NewForgejoClient's tracker and newForgejoCodeForge's fallback
+// CodeForge client) -- kept in one place so the tracker and CodeForge
+// seams can't drift out of sync on which status maps to which sentinel.
+func forgejoStatusMap() rest.StatusMap {
+	return rest.StatusMap{
+		http.StatusUnauthorized:     forge.ErrAuthFailure,
+		http.StatusForbidden:        forge.ErrAuthFailure,
+		http.StatusNotFound:         forge.ErrNotFound,
+		http.StatusMethodNotAllowed: errMergeRefused,
+		http.StatusConflict:         errMergeRefused,
+	}
+}
+
 // forgejoCodeForge is the Forgejo CodeForge adapter. AgentBranch/BranchExists
 // delegate to a plain git.CodeForge against a token-authenticated remote;
 // Probe drives the Forgejo REST client directly instead of git ls-remote, so
@@ -157,17 +172,16 @@ func newForgejoCodeForge(cfg ForgejoCodeForgeConfig, tracker forge.IssueTracker,
 	if fc, ok := tracker.(*forgejoClient); ok {
 		// Reuse the tracker's own *rest.Client so the two seams share one
 		// underlying client instance (issue #2256) instead of each building
-		// its own against the same repo.
+		// its own against the same repo -- cfg.BaseURL/Token/HTTPClient are
+		// silently ignored on this branch. Safe only because production
+		// wiring (main.go) always constructs the tracker and this CodeForge
+		// from the same c.forgejoBaseURL/c.forgejoToken/c.repoSlug, so the
+		// reused client's config can never diverge from cfg's; nothing here
+		// enforces that invariant, so a future caller feeding a tracker and
+		// cfg for different repos/instances would merge silently wrong.
 		restCli = fc.rest
 	} else {
-		statuses := rest.StatusMap{
-			http.StatusUnauthorized:     forge.ErrAuthFailure,
-			http.StatusForbidden:        forge.ErrAuthFailure,
-			http.StatusNotFound:         forge.ErrNotFound,
-			http.StatusMethodNotAllowed: errMergeRefused,
-			http.StatusConflict:         errMergeRefused,
-		}
-		restCli = rest.New(baseURL, rest.TokenAuth{Scheme: "token", Token: cfg.Token}, "forgejo", statuses, hc)
+		restCli = rest.New(baseURL, rest.TokenAuth{Scheme: "token", Token: cfg.Token}, "forgejo", forgejoStatusMap(), hc)
 	}
 
 	gitCF := git.NewGitClient(remote, cfg.BaseBranch, cfg.UserName, cfg.UserEmail, cfg.BranchPrefix)
