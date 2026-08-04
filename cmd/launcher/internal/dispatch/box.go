@@ -164,11 +164,12 @@ func (d *Dispatch) runOnce(logPath string, env map[string]string, driverCacheDir
 	}
 	defer logFile.Close()
 
-	// CODE_FORGE=local always needs an outbox (ADR 0033); CODE_FORGE=github
-	// needs one only under BOX_FORGE_AND_ISSUE_ACCESS=read-only (issue
-	// #1918) — every other combination skips creating
-	// .spindrift/outbox/<num> entirely rather than leaving a harmless but
-	// pointless empty directory behind on every dispatch.
+	// A HostMediatedRemote backend always needs an outbox (ADR 0033,
+	// CODE_FORGE=local); an OutboxRelayCapable backend needs one only under
+	// BOX_FORGE_AND_ISSUE_ACCESS=read-only (issue #1918) — every other
+	// combination skips creating .spindrift/outbox/<num> entirely rather
+	// than leaving a harmless but pointless empty directory behind on every
+	// dispatch.
 	var outboxDir string
 	if needsOutbox(d.cfg) {
 		outboxDir = OutboxDirFor(d.pwd, d.number)
@@ -189,14 +190,14 @@ func (d *Dispatch) runOnce(logPath string, env map[string]string, driverCacheDir
 }
 
 // needsOutbox reports whether cfg's dispatch needs a writable per-issue
-// outbox directory at all: CODE_FORGE=local unconditionally (ADR 0033), or
-// CODE_FORGE=github under BOX_FORGE_AND_ISSUE_ACCESS=read-only (issue
-// #1918) — the harness bundles the Box's finished branch to seam.bundle
-// there post-driver (issue #2082) instead of the Box pushing it, for the
-// launcher's BundleRelay to pick up.
+// outbox directory at all: cfg.HostMediatedRemote unconditionally (ADR
+// 0033, CODE_FORGE=local), or cfg.OutboxRelayCapable under
+// BOX_FORGE_AND_ISSUE_ACCESS=read-only (issue #1918) — the harness bundles
+// the Box's finished branch to seam.bundle there post-driver (issue #2082)
+// instead of the Box pushing it, for the launcher's BundleRelay to pick up.
 func needsOutbox(cfg Config) bool {
-	return cfg.CodeForge == "local" ||
-		(cfg.CodeForge == "github" && cfg.BoxForgeAndIssueAccess == "read-only")
+	return cfg.HostMediatedRemote ||
+		(cfg.OutboxRelayCapable && cfg.BoxForgeAndIssueAccess == "read-only")
 }
 
 // resetOutboxDir removes any bundle a previous attempt at this issue may

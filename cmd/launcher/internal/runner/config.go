@@ -44,18 +44,24 @@ type Config struct {
 	DriverSkillsDir       string
 	DriverSessionCacheDir string
 
-	// CodeForge is the CODE_FORGE knob value; AccumulationRepoDir is the host
-	// path to the bare Accumulation repo mounted read-only at /repo when it
-	// is "local" (ADR 0033, issue #1697). BoxForgeAndIssueAccess is the
+	// HostMediatedRemote reports whether the active CODE_FORGE backend has no
+	// writable remote to push to in-box at all (ADR 0033: CODE_FORGE=local);
+	// AccumulationRepoDir is the host path to the bare Accumulation repo
+	// mounted read-only at /repo when it is set (issue #1697).
+	// OutboxRelayCapable reports whether the active CODE_FORGE backend gets
+	// the outbox-relay treatment under BoxForgeAndIssueAccess=="read-only"
+	// (issue #1918: true only for "github"). BoxForgeAndIssueAccess is the
 	// BOX_FORGE_AND_ISSUE_ACCESS knob value ("read-write" or "read-only"),
-	// which alongside CodeForge gates the writable /outbox mount (issue
-	// #1918).
-	CodeForge              string
+	// which alongside HostMediatedRemote/OutboxRelayCapable gates the
+	// writable /outbox mount.
+	HostMediatedRemote     bool
 	AccumulationRepoDir    string
+	OutboxRelayCapable     bool
 	BoxForgeAndIssueAccess string
 
-	// IssueTracker and LocalIssuesDir gate the read-only /issues mount
-	// (ADR 0032): only ISSUE_TRACKER=local reads its issues from the Box.
-	IssueTracker   string
-	LocalIssuesDir string
+	// HostMediatedIssueTracker and LocalIssuesDir gate the read-only /issues
+	// mount (ADR 0032): only ISSUE_TRACKER=local reads its issues from the
+	// Box.
+	HostMediatedIssueTracker bool
+	LocalIssuesDir           string
 }

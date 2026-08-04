@@ -356,6 +356,7 @@ EOF
 # writable remote to push to directly.
 @test "CODE_FORGE=local + no outcome line -> bundle relayed via outbox, no-writable-remote note" {
   export CODE_FORGE=local
+  export BOX_HOST_MEDIATED_REMOTE=1
   export REPO_MOUNT_DIR="$REMOTE_ROOT/owner/repo.git"
   export OUTBOX_DIR="$BATS_TEST_TMPDIR/outbox"
   export FAKE_DRIVER_COMMIT=1

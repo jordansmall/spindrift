@@ -172,14 +172,21 @@ in
         touch $out
       '';
 
-  # Every env-var string literal in cmd/launcher/main.go must have a
-  # matching entry in lib/env-schema.nix, and vice-versa (presence-only;
-  # value-level pinning would be refactor-brittle). The document's artifact
-  # keys (lib/preambles.nix documentArtifactKeys — derived from what
-  # runArtifacts/buildArtifacts actually render into the Launcher input
-  # document's `artifacts` section, ADR 0020, issue #810) are the schema for
-  # what main.go may read outside lib/env-schema.nix, read via
-  # getenvArtifact instead of os.Getenv/getenv.
+  # Every env-var string literal in cmd/launcher/main.go (plus backend.go,
+  # issue #2267 — the backend-descriptor registry's per-row token knobs, e.g.
+  # BOX_GH_TOKEN/BOX_FORGEJO_TOKEN, moved out of main.go's own resolver
+  # functions and into backend.go's row literals, so this check's source
+  # scan follows them there rather than widening to every file in package
+  # main, which would also pull in flags.go's separately-documented
+  # SECRET_CMD fallback — a deliberate sibling-naming convention, not a
+  # schema-registered knob, and out of scope for this coverage check to
+  # start policing) must have a matching entry in lib/env-schema.nix, and
+  # vice-versa (presence-only; value-level pinning would be
+  # refactor-brittle). The document's artifact keys (lib/preambles.nix
+  # documentArtifactKeys — derived from what runArtifacts/buildArtifacts
+  # actually render into the Launcher input document's `artifacts` section,
+  # ADR 0020, issue #810) are the schema for what main.go may read outside
+  # lib/env-schema.nix, read via getenvArtifact instead of os.Getenv/getenv.
   launcher-env-coverage =
     let
       schema = import ../../lib/env-schema.nix;
@@ -190,7 +197,13 @@ in
         filter
         subtractLists
         ;
-      mainGoSrc = builtins.readFile ../../cmd/launcher/main.go;
+      launcherDir = ../../cmd/launcher;
+      mainGoSrc = concatStringsSep "\n" (
+        map (name: builtins.readFile (launcherDir + "/${name}")) [
+          "main.go"
+          "backend.go"
+        ]
+      );
       # Document artifact keys: nix-computed plumbing main.go reads via
       # getenvArtifact, not user-facing knobs. Derived from
       # lib/preambles.nix documentArtifactKeys, not hand-maintained here.

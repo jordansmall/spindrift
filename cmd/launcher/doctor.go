@@ -15,8 +15,11 @@ import (
 // `spindrift doctor` subcommand's call site (main.go) and its tests
 // unchanged by the extraction.
 func runDoctor(it forge.IssueTracker, cf forge.CodeForge, c config, w io.Writer, stdin io.Reader, interactive bool) error {
+	row, _ := backendByName(c.issueTracker)
 	if err := doctor.Run(it, cf, doctor.Config{
 		IssueTracker:    c.issueTracker,
+		TokenHint:       row.doctorTokenHint,
+		SlugHint:        row.doctorSlugHint,
 		Label:           c.label,
 		InProgressLabel: c.inProgressLabel,
 		FailedLabel:     c.failedLabel,
@@ -50,27 +53,24 @@ func reportReadOnlyTokenGate(c config, w io.Writer) error {
 	return nil
 }
 
-// reportReadOnlyTokenGates runs both backend-specific read-only token gates
-// under BOX_FORGE_AND_ISSUE_ACCESS=read-only, reporting the github gate only
-// when github is an active backend and the forgejo gate only when forgejo
-// is an active backend, since each gate self-noops otherwise.
+// reportReadOnlyTokenGates runs every backendRows entry's read-only token
+// gate under BOX_FORGE_AND_ISSUE_ACCESS=read-only, reporting a row's gate
+// only when that row is an active backend (its name is the CODE_FORGE or
+// ISSUE_TRACKER selection); a row with no readOnlyTokenGate (jira, local,
+// git) is skipped outright.
 func reportReadOnlyTokenGates(c config, w io.Writer) error {
-	if c.codeForge == "github" || c.issueTracker == "github" {
-		verified, err := checkReadOnlyTokenGate(c, ghTokenIntrospector, w)
+	for _, row := range backendRows {
+		if row.readOnlyTokenGate == nil {
+			continue
+		}
+		if c.codeForge != row.name && c.issueTracker != row.name {
+			continue
+		}
+		verified, err := row.readOnlyTokenGate(c, w)
 		if err != nil {
 			return err
 		}
-		if verified {
-			fmt.Fprintln(w, "ok: read-only token gate satisfied — BOX_GH_TOKEN is set, distinct, and confirmed not write-capable")
-		} else {
-			fmt.Fprintln(w, "ok: read-only token gate satisfied — BOX_GH_TOKEN is set and distinct (see warning above: its write capability could not be verified)")
-		}
-	}
-	if c.codeForge == "forgejo" || c.issueTracker == "forgejo" {
-		if _, err := checkReadOnlyForgejoTokenGate(c, w); err != nil {
-			return err
-		}
-		fmt.Fprintln(w, "ok: read-only token gate satisfied — BOX_FORGEJO_TOKEN is set and distinct (see warning above: its write capability could not be verified — Forgejo exposes no introspection endpoint)")
+		fmt.Fprintln(w, row.readOnlyGateOkMessage(verified))
 	}
 	return nil
 }

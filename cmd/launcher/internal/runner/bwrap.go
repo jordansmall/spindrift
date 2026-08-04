@@ -41,18 +41,18 @@ type bwrapAdapter struct {
 	// selected Driver declares no session-state dir, in which case
 	// box.DriverCacheDir is never bound regardless of its value.
 	driverSessionCacheDir string
-	// codeForge is the CODE_FORGE knob value; accumulationRepoDir is the host
-	// path to the bare Accumulation repo bound read-only at /repo when it is
-	// "local" (ADR 0033, issue #1697). boxForgeAndIssueAccess is the
-	// BOX_FORGE_AND_ISSUE_ACCESS knob value; see MountParams.
-	codeForge              string
+	// hostMediatedRemote/outboxRelayCapable/accumulationRepoDir/
+	// boxForgeAndIssueAccess gate the /repo and /outbox mounts (ADR 0033,
+	// issue #1697; issue #1918); see MountParams.
+	hostMediatedRemote     bool
 	accumulationRepoDir    string
+	outboxRelayCapable     bool
 	boxForgeAndIssueAccess string
-	// issueTracker and localIssuesDir gate the read-only /issues mount
-	// (ADR 0032); see MountParams.
-	issueTracker   string
-	localIssuesDir string
-	unshareNet     bool // when true, adds --unshare-net (isolates from host netns)
+	// hostMediatedIssueTracker and localIssuesDir gate the read-only /issues
+	// mount (ADR 0032); see MountParams.
+	hostMediatedIssueTracker bool
+	localIssuesDir           string
+	unshareNet               bool // when true, adds --unshare-net (isolates from host netns)
 
 	// mu guards running, the box-name -> live process map Kill (issue #649)
 	// consults — bwrap sandboxes are unnamed child processes with no
@@ -70,19 +70,20 @@ type bwrapAdapter struct {
 // reachable).
 func NewBwrap(cfg Config) Runner {
 	return &bwrapAdapter{
-		agentFiles:             cfg.AgentFiles,
-		agentEnv:               cfg.AgentEnv,
-		bakedPrefetch:          cfg.BakedPrefetch,
-		promptDir:              cfg.PromptDir,
-		skillsDir:              cfg.SkillsDir,
-		driverSkillsDir:        cfg.DriverSkillsDir,
-		driverSessionCacheDir:  cfg.DriverSessionCacheDir,
-		codeForge:              cfg.CodeForge,
-		accumulationRepoDir:    cfg.AccumulationRepoDir,
-		boxForgeAndIssueAccess: cfg.BoxForgeAndIssueAccess,
-		issueTracker:           cfg.IssueTracker,
-		localIssuesDir:         cfg.LocalIssuesDir,
-		unshareNet:             cfg.BwrapUnshareNet,
+		agentFiles:               cfg.AgentFiles,
+		agentEnv:                 cfg.AgentEnv,
+		bakedPrefetch:            cfg.BakedPrefetch,
+		promptDir:                cfg.PromptDir,
+		skillsDir:                cfg.SkillsDir,
+		driverSkillsDir:          cfg.DriverSkillsDir,
+		driverSessionCacheDir:    cfg.DriverSessionCacheDir,
+		hostMediatedRemote:       cfg.HostMediatedRemote,
+		accumulationRepoDir:      cfg.AccumulationRepoDir,
+		outboxRelayCapable:       cfg.OutboxRelayCapable,
+		boxForgeAndIssueAccess:   cfg.BoxForgeAndIssueAccess,
+		hostMediatedIssueTracker: cfg.HostMediatedIssueTracker,
+		localIssuesDir:           cfg.LocalIssuesDir,
+		unshareNet:               cfg.BwrapUnshareNet,
 	}
 }
 
@@ -98,15 +99,16 @@ func (a *bwrapAdapter) IsReady() error { return nil }
 // the OCI adapter (buildMountSpecs); only the rendering below differs.
 func (a *bwrapAdapter) mountSpecs(box Box) []MountSpec {
 	return buildMountSpecs(MountParams{
-		PromptDir:              a.promptDir,
-		SkillsDir:              a.skillsDir,
-		DriverSkillsDir:        a.driverSkillsDir,
-		DriverSessionCacheDir:  a.driverSessionCacheDir,
-		CodeForge:              a.codeForge,
-		AccumulationRepoDir:    a.accumulationRepoDir,
-		BoxForgeAndIssueAccess: a.boxForgeAndIssueAccess,
-		IssueTracker:           a.issueTracker,
-		LocalIssuesDir:         a.localIssuesDir,
+		PromptDir:                a.promptDir,
+		SkillsDir:                a.skillsDir,
+		DriverSkillsDir:          a.driverSkillsDir,
+		DriverSessionCacheDir:    a.driverSessionCacheDir,
+		HostMediatedRemote:       a.hostMediatedRemote,
+		AccumulationRepoDir:      a.accumulationRepoDir,
+		OutboxRelayCapable:       a.outboxRelayCapable,
+		BoxForgeAndIssueAccess:   a.boxForgeAndIssueAccess,
+		HostMediatedIssueTracker: a.hostMediatedIssueTracker,
+		LocalIssuesDir:           a.localIssuesDir,
 	}, box)
 }
 

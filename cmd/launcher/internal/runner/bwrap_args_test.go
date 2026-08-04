@@ -102,11 +102,11 @@ func TestBwrapArgs_SkillsMountTarget_FromDriverDeclaration(t *testing.T) {
 func TestBwrapArgs_IssuesDirMounted(t *testing.T) {
 	dir := t.TempDir()
 	a := &bwrapAdapter{
-		agentFiles:     "/fake/agent",
-		agentEnv:       "/fake/env",
-		bakedPrefetch:  "echo ok",
-		issueTracker:   "local",
-		localIssuesDir: dir,
+		agentFiles:               "/fake/agent",
+		agentEnv:                 "/fake/env",
+		bakedPrefetch:            "echo ok",
+		hostMediatedIssueTracker: true,
+		localIssuesDir:           dir,
 	}
 	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}})
 
@@ -125,11 +125,11 @@ func TestBwrapArgs_IssuesDirMounted(t *testing.T) {
 func TestBwrapArgs_IssuesDirUnset_NoMount(t *testing.T) {
 	dir := t.TempDir()
 	a := &bwrapAdapter{
-		agentFiles:     "/fake/agent",
-		agentEnv:       "/fake/env",
-		bakedPrefetch:  "echo ok",
-		issueTracker:   "github",
-		localIssuesDir: dir,
+		agentFiles:               "/fake/agent",
+		agentEnv:                 "/fake/env",
+		bakedPrefetch:            "echo ok",
+		hostMediatedIssueTracker: false,
+		localIssuesDir:           dir,
 	}
 	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}})
 

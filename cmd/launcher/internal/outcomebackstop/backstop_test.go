@@ -60,15 +60,15 @@ func (f *fakeClock) clock() retry.Clock {
 
 func baseConfig(git *fakeGit, clk *fakeClock) Config {
 	return Config{
-		Repo:      "/repo",
-		Issue:     "42",
-		Branch:    "agent/issue-42",
-		Base:      "origin/main",
-		Kind:      "work",
-		CodeForge: "github",
-		Nonce:     "abc123",
-		Clock:     clk.clock(),
-		Git:       git.run,
+		Repo:               "/repo",
+		Issue:              "42",
+		Branch:             "agent/issue-42",
+		Base:               "origin/main",
+		Kind:               "work",
+		OutboxRelayCapable: true,
+		Nonce:              "abc123",
+		Clock:              clk.clock(),
+		Git:                git.run,
 	}
 }
 
@@ -152,7 +152,7 @@ func TestRun_CodeForgeLocal(t *testing.T) {
 	}}
 	clk := &fakeClock{}
 	cfg := baseConfig(git, clk)
-	cfg.CodeForge = "local"
+	cfg.HostMediatedRemote = true
 	cfg.WriteEnabled = true
 
 	var buf bytes.Buffer
@@ -174,7 +174,7 @@ func TestRun_ReadOnlyGithub(t *testing.T) {
 	}}
 	clk := &fakeClock{}
 	cfg := baseConfig(git, clk)
-	cfg.CodeForge = "github"
+	cfg.OutboxRelayCapable = true
 	cfg.WriteEnabled = false
 
 	var buf bytes.Buffer
@@ -197,7 +197,7 @@ func TestRun_WritablePushSuccess(t *testing.T) {
 	clk := &fakeClock{}
 	cfg := baseConfig(git, clk)
 	cfg.WriteEnabled = true
-	cfg.CodeForge = "github"
+	cfg.OutboxRelayCapable = true
 	cfg.MaxAttempts = 3
 
 	var buf bytes.Buffer
@@ -224,7 +224,7 @@ func TestRun_PushFailsEveryAttempt(t *testing.T) {
 	clk := &fakeClock{}
 	cfg := baseConfig(git, clk)
 	cfg.WriteEnabled = true
-	cfg.CodeForge = "github"
+	cfg.OutboxRelayCapable = true
 	cfg.MaxAttempts = 2
 
 	var buf bytes.Buffer
@@ -250,7 +250,7 @@ func TestRun_PushTransientThenSucceeds(t *testing.T) {
 	clk := &fakeClock{}
 	cfg := baseConfig(git, clk)
 	cfg.WriteEnabled = true
-	cfg.CodeForge = "github"
+	cfg.OutboxRelayCapable = true
 	cfg.MaxAttempts = 3
 	// Override Git with a closure that fails the first push, succeeds the second.
 	cfg.Git = func(args ...string) (string, string, error) {
@@ -295,7 +295,7 @@ func TestRun_MaxAttemptsClampsToOne(t *testing.T) {
 	clk := &fakeClock{}
 	cfg := baseConfig(git, clk)
 	cfg.WriteEnabled = true
-	cfg.CodeForge = "github"
+	cfg.OutboxRelayCapable = true
 	cfg.MaxAttempts = 0
 
 	var buf bytes.Buffer
@@ -322,7 +322,7 @@ func TestRun_SalvageSucceeds(t *testing.T) {
 	clk := &fakeClock{}
 	cfg := baseConfig(git, clk)
 	cfg.WriteEnabled = true
-	cfg.CodeForge = "github"
+	cfg.OutboxRelayCapable = true
 
 	var buf bytes.Buffer
 	if err := Run(cfg, &buf); err != nil {
@@ -346,7 +346,7 @@ func TestRun_SalvageFails(t *testing.T) {
 	clk := &fakeClock{}
 	cfg := baseConfig(git, clk)
 	cfg.WriteEnabled = true
-	cfg.CodeForge = "github"
+	cfg.OutboxRelayCapable = true
 
 	var buf bytes.Buffer
 	if err := Run(cfg, &buf); err != nil {
@@ -367,7 +367,7 @@ func TestRun_SalvageAddFailsSkipsCommit(t *testing.T) {
 	clk := &fakeClock{}
 	cfg := baseConfig(git, clk)
 	cfg.WriteEnabled = true
-	cfg.CodeForge = "github"
+	cfg.OutboxRelayCapable = true
 
 	var buf bytes.Buffer
 	if err := Run(cfg, &buf); err != nil {
@@ -389,7 +389,7 @@ func TestRun_RevListErrorTreatedAsWorkExists(t *testing.T) {
 	clk := &fakeClock{}
 	cfg := baseConfig(git, clk)
 	cfg.WriteEnabled = true
-	cfg.CodeForge = "github"
+	cfg.OutboxRelayCapable = true
 
 	var buf bytes.Buffer
 	if err := Run(cfg, &buf); err != nil {
@@ -411,7 +411,7 @@ func TestRun_RevListUnparseableTreatedAsWorkExists(t *testing.T) {
 	clk := &fakeClock{}
 	cfg := baseConfig(git, clk)
 	cfg.WriteEnabled = true
-	cfg.CodeForge = "github"
+	cfg.OutboxRelayCapable = true
 
 	var buf bytes.Buffer
 	if err := Run(cfg, &buf); err != nil {
@@ -452,7 +452,7 @@ func TestRun_NegativeBackoffJitterClampsAndDoesNotPanic(t *testing.T) {
 	clk := &fakeClock{}
 	cfg := baseConfig(git, clk)
 	cfg.WriteEnabled = true
-	cfg.CodeForge = "github"
+	cfg.OutboxRelayCapable = true
 	cfg.MaxAttempts = 2
 	cfg.Backoff = -5 * time.Second
 	cfg.Jitter = -3 * time.Second

@@ -63,18 +63,23 @@ type Config struct {
 	// pre-#2202 construction site leaves the env var unset.
 	SelfContained bool
 
-	// CodeForge is the CODE_FORGE knob value. runOnce consults it, alongside
+	// HostMediatedRemote reports whether this run's CODE_FORGE has no
+	// writable remote to push to in-box at all (ADR 0033: CODE_FORGE=local)
+	// -- runOnce consults it, alongside OutboxRelayCapable and
 	// BoxForgeAndIssueAccess, to decide whether a Box needs a writable
-	// outbox directory at all: "local" always does (ADR 0033), and so does
-	// "github" under BoxForgeAndIssueAccess=="read-only" (issue #1918,
-	// BOX_FORGE_AND_ISSUE_ACCESS). Every other combination (every
-	// pre-#1918 construction site) skips creating .spindrift/outbox/<num>
-	// entirely rather than leaving a harmless but pointless empty directory
-	// behind on every dispatch.
-	CodeForge string
+	// outbox directory at all.
+	HostMediatedRemote bool
+	// OutboxRelayCapable reports whether the active CODE_FORGE backend gets
+	// the outbox-relay treatment under BoxForgeAndIssueAccess=="read-only"
+	// (issue #1918: true for github today; every other backend, including
+	// forgejo's own read-only CodeForge variant, is false -- a pre-existing
+	// asymmetry this field preserves rather than fixes, since #2267 is
+	// behavior-preserving).
+	OutboxRelayCapable bool
 
 	// BoxForgeAndIssueAccess is the BOX_FORGE_AND_ISSUE_ACCESS knob value
-	// ("read-write" or "read-only"). See CodeForge's doc comment above.
+	// ("read-write" or "read-only"). See HostMediatedRemote/
+	// OutboxRelayCapable's doc comments above.
 	BoxForgeAndIssueAccess string
 
 	// OpenPRForIssue reports whether an open PR already exists for the
@@ -144,6 +149,17 @@ func buildBoxEnv(cfg Config, number, title string, fixPass int, ciFailureSummary
 	// moved host-side.
 	if cfg.BoxForgeAndIssueAccess == "read-write" {
 		env["BOX_WRITE_ENABLED"] = "1"
+	}
+	// HostMediatedRemote/OutboxRelayCapable forward the same two backend-
+	// registry capability facts needsOutbox already consults (issue #2267),
+	// so the in-box `driver-exec outcome-backstop` verb can key its no-
+	// outcome backstop decision off explicit signals instead of re-deriving
+	// them from a raw CODE_FORGE name comparison the way it did before.
+	if cfg.HostMediatedRemote {
+		env["BOX_HOST_MEDIATED_REMOTE"] = "1"
+	}
+	if cfg.OutboxRelayCapable {
+		env["BOX_OUTBOX_RELAY_CAPABLE"] = "1"
 	}
 	return env
 }

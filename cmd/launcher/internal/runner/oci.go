@@ -30,20 +30,20 @@ type ociAdapter struct {
 	// selected Driver declares no session-state dir, in which case
 	// box.DriverCacheDir is never mounted regardless of its value.
 	driverSessionCacheDir string
-	// codeForge is the CODE_FORGE knob value; accumulationRepoDir is the host
-	// path to the bare Accumulation repo bound read-only at /repo when it is
-	// "local" (ADR 0033, issue #1697). boxForgeAndIssueAccess is the
-	// BOX_FORGE_AND_ISSUE_ACCESS knob value; see MountParams.
-	codeForge              string
+	// hostMediatedRemote/outboxRelayCapable/accumulationRepoDir/
+	// boxForgeAndIssueAccess gate the /repo and /outbox mounts (ADR 0033,
+	// issue #1697; issue #1918); see MountParams.
+	hostMediatedRemote     bool
 	accumulationRepoDir    string
+	outboxRelayCapable     bool
 	boxForgeAndIssueAccess string
-	// issueTracker and localIssuesDir gate the read-only /issues mount
-	// (ADR 0032); see MountParams.
-	issueTracker   string
-	localIssuesDir string
-	podmanNetwork  string // optional --network value; empty omits the flag
-	pidsLimit      string // --pids-limit value; empty disables the flag
-	memoryLimit    string // --memory value; empty disables the flag
+	// hostMediatedIssueTracker and localIssuesDir gate the read-only /issues
+	// mount (ADR 0032); see MountParams.
+	hostMediatedIssueTracker bool
+	localIssuesDir           string
+	podmanNetwork            string // optional --network value; empty omits the flag
+	pidsLimit                string // --pids-limit value; empty disables the flag
+	memoryLimit              string // --memory value; empty disables the flag
 }
 
 // runtimeCLI maps a Config.Runtime value to the CLI binary it invokes.
@@ -63,27 +63,28 @@ func runtimeCLI(runtime string) string {
 // dependency passed separately from cfg.
 func NewOCI(cfg Config, pwd string) Runner {
 	return &ociAdapter{
-		cli:                    runtimeCLI(cfg.Runtime),
-		image:                  cfg.Image,
-		imageArchive:           cfg.ImageArchive,
-		imageDrv:               cfg.ImageDrv,
-		imageTag:               cfg.ImageTag,
-		nixBuilderImage:        cfg.NixBuilderImage,
-		nixVolume:              cfg.NixVolume,
-		flakeImageAttr:         cfg.FlakeImageAttr,
-		pwd:                    pwd,
-		promptDir:              cfg.PromptDir,
-		skillsDir:              cfg.SkillsDir,
-		driverSkillsDir:        cfg.DriverSkillsDir,
-		driverSessionCacheDir:  cfg.DriverSessionCacheDir,
-		codeForge:              cfg.CodeForge,
-		accumulationRepoDir:    cfg.AccumulationRepoDir,
-		boxForgeAndIssueAccess: cfg.BoxForgeAndIssueAccess,
-		issueTracker:           cfg.IssueTracker,
-		localIssuesDir:         cfg.LocalIssuesDir,
-		podmanNetwork:          cfg.PodmanNetwork,
-		pidsLimit:              cfg.PidsLimit,
-		memoryLimit:            cfg.MemoryLimit,
+		cli:                      runtimeCLI(cfg.Runtime),
+		image:                    cfg.Image,
+		imageArchive:             cfg.ImageArchive,
+		imageDrv:                 cfg.ImageDrv,
+		imageTag:                 cfg.ImageTag,
+		nixBuilderImage:          cfg.NixBuilderImage,
+		nixVolume:                cfg.NixVolume,
+		flakeImageAttr:           cfg.FlakeImageAttr,
+		pwd:                      pwd,
+		promptDir:                cfg.PromptDir,
+		skillsDir:                cfg.SkillsDir,
+		driverSkillsDir:          cfg.DriverSkillsDir,
+		driverSessionCacheDir:    cfg.DriverSessionCacheDir,
+		hostMediatedRemote:       cfg.HostMediatedRemote,
+		accumulationRepoDir:      cfg.AccumulationRepoDir,
+		outboxRelayCapable:       cfg.OutboxRelayCapable,
+		boxForgeAndIssueAccess:   cfg.BoxForgeAndIssueAccess,
+		hostMediatedIssueTracker: cfg.HostMediatedIssueTracker,
+		localIssuesDir:           cfg.LocalIssuesDir,
+		podmanNetwork:            cfg.PodmanNetwork,
+		pidsLimit:                cfg.PidsLimit,
+		memoryLimit:              cfg.MemoryLimit,
 	}
 }
 
@@ -333,15 +334,16 @@ func (a *ociAdapter) ListRunning() ([]string, error) {
 // the bwrap adapter (buildMountSpecs); only the rendering below differs.
 func (a *ociAdapter) mountSpecs(box Box) []MountSpec {
 	return buildMountSpecs(MountParams{
-		PromptDir:              a.promptDir,
-		SkillsDir:              a.skillsDir,
-		DriverSkillsDir:        a.driverSkillsDir,
-		DriverSessionCacheDir:  a.driverSessionCacheDir,
-		CodeForge:              a.codeForge,
-		AccumulationRepoDir:    a.accumulationRepoDir,
-		BoxForgeAndIssueAccess: a.boxForgeAndIssueAccess,
-		IssueTracker:           a.issueTracker,
-		LocalIssuesDir:         a.localIssuesDir,
+		PromptDir:                a.promptDir,
+		SkillsDir:                a.skillsDir,
+		DriverSkillsDir:          a.driverSkillsDir,
+		DriverSessionCacheDir:    a.driverSessionCacheDir,
+		HostMediatedRemote:       a.hostMediatedRemote,
+		AccumulationRepoDir:      a.accumulationRepoDir,
+		OutboxRelayCapable:       a.outboxRelayCapable,
+		BoxForgeAndIssueAccess:   a.boxForgeAndIssueAccess,
+		HostMediatedIssueTracker: a.hostMediatedIssueTracker,
+		LocalIssuesDir:           a.localIssuesDir,
 	}, box)
 }
 
