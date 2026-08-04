@@ -1,11 +1,10 @@
 # Pure-data registry of the harness-owned shared prompt blocks (issue #2245):
 # the outcome contract, COMMS, CHECK/COMMIT, and research-verdict blocks that
-# lib/mkHarness.nix currently slices out of the default prompts by hand via
-# lib/prompt-inject.nix, one hardcoded marker/source pair at a time. This
-# file is not yet consumed anywhere -- it's a parallel, not-yet-wired data
-# source that a later slice of #2245 will drive lib/mkHarness.nix from, so
-# that file's own set of slice/inject calls stops being the only place the
-# block-to-prompt-kind mapping is written down.
+# lib/mkHarness.nix used to slice out of the default prompts by hand via
+# lib/prompt-inject.nix, one hardcoded marker/source pair at a time.
+# lib/mkHarness.nix and the marker-parity checks under nix/checks/ now derive
+# from this registry instead (issue #2246), so this file's row shape is the
+# single place the block-to-prompt-kind mapping is written down.
 #
 # Pure builtins only (no `pkgs.lib`): keeps this file evaluable and unit-
 # testable with a bare `nix eval`, without needing a locked nixpkgs (mirrors
@@ -189,6 +188,12 @@ rec {
   # read instead of independently re-declaring the same marker strings
   # (issue #2244 user story 19).
   markerList = map (row: row.marker) injectBlocks;
+
+  # Look up one injectBlocks row by id -- the single copy every consumer
+  # (nix/checks/prompt-contract.nix, nix/checks/image.nix, lib/mkHarness.nix)
+  # shares instead of each re-declaring the same filter-and-head one-liner
+  # (issue #2246 review).
+  byId = id: builtins.head (builtins.filter (r: r.id == id) injectBlocks);
 
   # Each injectBlocks row rendered into a pipe-joined string, in row order --
   # the same "row -> pipe-joined string" shape lib/mkHarness.nix's

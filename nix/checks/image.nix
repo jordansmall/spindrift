@@ -22,6 +22,13 @@ let
     ;
   fragmentRows = import ../../lib/fragments.nix;
   fragmentBasenames = map (row: pkgs.lib.removeSuffix ".md" row.fragment) fragmentRows;
+  # The shared prompt-block registry (issue #2245) lib/mkHarness.nix's
+  # injectOutcomeContract/injectComms/injectCheckCommit/
+  # injectResearchOutcomeContract now derive their markers from -- the
+  # marker-parity checks below assert against this registry instead of a
+  # hand-wired `lib/mkHarness.nix` literal (issue #2246 slice 1).
+  promptContract = import ../../lib/prompt-contract.nix;
+  inherit (promptContract) byId;
 in
 {
   # The baked entrypoint must carry a store-path shebang, not the
@@ -253,26 +260,58 @@ in
     touch $out
   '';
 
-  # The idempotency check (issue #420) hinges on the entrypoint's marker
-  # literal matching the one lib/mkHarness.nix slices the contract on; each is
-  # a hardcoded literal in its own language, with nothing else forcing them to
-  # agree, so a one-sided edit would silently break injection or duplicate
-  # the contract on every run. Compared as plain text (no eval) so this stays
-  # cheap and catches the drift at the source-literal level.
-  outcome-contract-marker-parity = pkgs.runCommand "outcome-contract-marker-parity" { } ''
-    grep -qF 'outcomeContractMarker = "# LAND THE CHANGE";' ${../../lib/mkHarness.nix}
-    grep -qF 'OUTCOME_CONTRACT_MARKER="# LAND THE CHANGE"' ${../../agent/entrypoint.sh}
-    touch $out
-  '';
+  # The idempotency check (issue #420) hinges on the entrypoint sourcing its
+  # marker from the same registry row lib/mkHarness.nix now looks up from
+  # lib/prompt-contract.nix (issue #2246 slice 1). Since slice 2,
+  # agent/entrypoint.sh no longer hardcodes the marker literal itself: it
+  # calls the `_contract_marker` helper against the registry-rendered
+  # _INJECT_BLOCK_ROWS array (contract-registry.sh, baked ahead of it at
+  # image-build time), so the entrypoint.sh-side half of this check confirms
+  # the call site reads from the registry for this id, rather than
+  # re-asserting a marker literal that no longer appears in the source.
+  outcome-contract-marker-parity =
+    let
+      row = byId "outcome";
+    in
+    assert pkgs.lib.assertMsg (
+      row.marker == "# LAND THE CHANGE"
+    ) "prompt-contract.nix outcome row's marker must be '# LAND THE CHANGE', got: ${row.marker}";
+    pkgs.runCommand "outcome-contract-marker-parity" { } ''
+      grep -qF 'OUTCOME_CONTRACT_MARKER="$(_contract_marker outcome)"' ${../../agent/entrypoint.sh}
+      touch $out
+    '';
 
   # Same drift guard, for the COMMS and CHECK/COMMIT markers (issue #455).
-  comms-check-contract-marker-parity = pkgs.runCommand "comms-check-contract-marker-parity" { } ''
-    grep -qF 'commsMarker = "# COMMS";' ${../../lib/mkHarness.nix}
-    grep -qF 'COMMS_CONTRACT_MARKER="# COMMS"' ${../../agent/entrypoint.sh}
-    grep -qF 'checkMarker = "# CHECK";' ${../../lib/mkHarness.nix}
-    grep -qF 'CHECK_CONTRACT_MARKER="# CHECK"' ${../../agent/entrypoint.sh}
-    touch $out
-  '';
+  comms-check-contract-marker-parity =
+    let
+      commsRow = byId "comms";
+      checkRow = byId "check";
+    in
+    assert pkgs.lib.assertMsg (
+      commsRow.marker == "# COMMS"
+    ) "prompt-contract.nix comms row's marker must be '# COMMS', got: ${commsRow.marker}";
+    assert pkgs.lib.assertMsg (
+      checkRow.marker == "# CHECK"
+    ) "prompt-contract.nix check row's marker must be '# CHECK', got: ${checkRow.marker}";
+    pkgs.runCommand "comms-check-contract-marker-parity" { } ''
+      grep -qF 'COMMS_CONTRACT_MARKER="$(_contract_marker comms)"' ${../../agent/entrypoint.sh}
+      grep -qF 'CHECK_CONTRACT_MARKER="$(_contract_marker check)"' ${../../agent/entrypoint.sh}
+      touch $out
+    '';
+
+  # Same drift guard, for the research-verdict marker (issue #640's
+  # RESEARCH_OUTCOME_CONTRACT_MARKER) -- previously uncovered by any parity
+  # check (issue #2246 slice 1 coverage gap fix).
+  research-outcome-contract-marker-parity =
+    let
+      row = byId "research-verdict";
+    in
+    assert pkgs.lib.assertMsg (row.marker == "# POST THE VERDICT")
+      "prompt-contract.nix research-verdict row's marker must be '# POST THE VERDICT', got: ${row.marker}";
+    pkgs.runCommand "research-outcome-contract-marker-parity" { } ''
+      grep -qF 'RESEARCH_OUTCOME_CONTRACT_MARKER="$(_contract_marker research-verdict)"' ${../../agent/entrypoint.sh}
+      touch $out
+    '';
 
   # Skills configured at build time must land in the agent-files layer at the
   # Driver's declared skills dir (ADR 0009) so the Box is self-contained.

@@ -177,6 +177,13 @@ setup_fakes() {
       if [ -n "${FRAGMENT_REGISTRY_FILE:-}" ]; then
         cat "$FRAGMENT_REGISTRY_FILE"
       fi
+      # CONTRACT_REGISTRY_FILE is the shared prompt block registry's
+      # rendered `_INJECT_BLOCK_ROWS` array (lib/prompt-contract.nix, issue
+      # #2246) -- prepend it the same way as FRAGMENT_REGISTRY_FILE above, so
+      # entrypoint.sh's `_contract_marker` lookup has data to read.
+      if [ -n "${CONTRACT_REGISTRY_FILE:-}" ]; then
+        cat "$CONTRACT_REGISTRY_FILE"
+      fi
       tail -n +2 "$ENTRYPOINT"
     } >"$_wrapped"
     chmod +x "$_wrapped"

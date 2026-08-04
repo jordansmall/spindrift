@@ -67,38 +67,44 @@ configure_env() {
   # otherwise.
   OUTBOX_DIR="${OUTBOX_DIR:-/outbox}"
 
+  # DRIVER_NAME, DRIVER_BIN, DRIVER_FLAGS_COMMON, and DRIVER_SKILLS_DIR are
+  # baked by the selected Driver's lib/drivers/<name>.nix registry entry (ADR
+  # 0009, issue #624) via the nix-rendered preamble prepended ahead of this
+  # file at image build time. No fallback literal lives here: a Box built
+  # without that preamble dies loudly instead of silently impersonating the
+  # claude Driver. Checked ahead of the _contract_marker lookups below so a
+  # Box missing every nix-rendered preamble dies naming the Driver preamble,
+  # not the unrelated contract-registry one (issue #2246).
+  : "${DRIVER_BIN:?DRIVER_BIN not set -- the nix-rendered Driver preamble did not run}"
+  : "${DRIVER_FLAGS_COMMON:?DRIVER_FLAGS_COMMON not set -- the nix-rendered Driver preamble did not run}"
+  : "${DRIVER_SKILLS_DIR:?DRIVER_SKILLS_DIR not set -- the nix-rendered Driver preamble did not run}"
+  : "${DRIVER_NAME:?DRIVER_NAME not set -- the nix-rendered Driver preamble did not run}"
+
   # The canonical SPINDRIFT_OUTCOME contract (issue #419), baked at a sibling
   # path to /agent/prompts so a SPINDRIFT_PROMPT_DIR mount -- which shadows only
   # /agent/prompts -- never hides it (issue #420).
-  OUTCOME_CONTRACT_MARKER="# LAND THE CHANGE"
+  # The marker is sourced from the registry-rendered _INJECT_BLOCK_ROWS
+  # (lib/prompt-contract.nix's injectBlocks, issue #2246) via _contract_marker
+  # rather than hardcoded here, so it cannot drift from the block's canonical
+  # source-file heading.
+  OUTCOME_CONTRACT_MARKER="$(_contract_marker outcome)"
   OUTCOME_CONTRACT_FILE="${OUTCOME_CONTRACT_FILE:-/agent/outcome-contract.md}"
 
   # The COMMS and CHECK/COMMIT blocks fix-prompt.md shares with issue-prompt.md
   # (issue #455 extends #419/#420's slice mechanism beyond the outcome contract):
   # baked and injected the same way, so a SPINDRIFT_PROMPT_DIR override of the
   # fix prompt gets the identical treatment.
-  COMMS_CONTRACT_MARKER="# COMMS"
+  COMMS_CONTRACT_MARKER="$(_contract_marker comms)"
   COMMS_CONTRACT_FILE="${COMMS_CONTRACT_FILE:-/agent/comms-contract.md}"
-  CHECK_CONTRACT_MARKER="# CHECK"
+  CHECK_CONTRACT_MARKER="$(_contract_marker check)"
   CHECK_CONTRACT_FILE="${CHECK_CONTRACT_FILE:-/agent/check-contract.md}"
 
   # The research dispatch kind's own harness-owned outcome contract (ADR 0022,
   # issue #640): posting the verdict comment and emitting the outcome line.
   # Baked and injected the same way as the work contract above, so a
   # SPINDRIFT_PROMPT_DIR override of research-prompt.md gets it too.
-  RESEARCH_OUTCOME_CONTRACT_MARKER="# POST THE VERDICT"
+  RESEARCH_OUTCOME_CONTRACT_MARKER="$(_contract_marker research-verdict)"
   RESEARCH_OUTCOME_CONTRACT_FILE="${RESEARCH_OUTCOME_CONTRACT_FILE:-/agent/research-outcome-contract.md}"
-
-  # DRIVER_NAME, DRIVER_BIN, DRIVER_FLAGS_COMMON, and DRIVER_SKILLS_DIR are
-  # baked by the selected Driver's lib/drivers/<name>.nix registry entry (ADR
-  # 0009, issue #624) via the nix-rendered preamble prepended ahead of this
-  # file at image build time. No fallback literal lives here: a Box built
-  # without that preamble dies loudly instead of silently impersonating the
-  # claude Driver.
-  : "${DRIVER_BIN:?DRIVER_BIN not set -- the nix-rendered Driver preamble did not run}"
-  : "${DRIVER_FLAGS_COMMON:?DRIVER_FLAGS_COMMON not set -- the nix-rendered Driver preamble did not run}"
-  : "${DRIVER_SKILLS_DIR:?DRIVER_SKILLS_DIR not set -- the nix-rendered Driver preamble did not run}"
-  : "${DRIVER_NAME:?DRIVER_NAME not set -- the nix-rendered Driver preamble did not run}"
 
   # _driver_extract_outcome and _driver_session_flags are defined by the Driver
   # registry (lib/drivers/<name>.nix); a nix-built image prepends them via
@@ -451,6 +457,26 @@ _is_self_contained() {
 # ${CODE_FORGE:-github} read in this file.
 _is_readonly_github() {
   [ -z "${BOX_WRITE_ENABLED:-}" ] && [ "${CODE_FORGE:-github}" = "github" ]
+}
+
+# _contract_marker reads the marker field (pipe position 2) out of the
+# registry-rendered _INJECT_BLOCK_ROWS row whose id (pipe position 1) matches
+# $1 -- sourced from lib/prompt-contract.nix's injectBlocks via
+# contract-registry.sh (mirrors the _FRAGMENT_ROWS mechanism above, issue
+# #2246). A nix-built image prepends _INJECT_BLOCK_ROWS via
+# contractRegistryPreamble (lib/mkHarness.nix), and the bats harness sources
+# the same registry-rendered rows via CONTRACT_REGISTRY_FILE.
+_contract_marker() {
+  local _id="$1" _crow _cid _cmarker _rest
+  for _crow in "${_INJECT_BLOCK_ROWS[@]}"; do
+    IFS='|' read -r _cid _cmarker _rest <<<"$_crow"
+    if [ "$_cid" = "$_id" ]; then
+      printf '%s' "$_cmarker"
+      return 0
+    fi
+  done
+  echo "_contract_marker: no row for id '$_id' in _INJECT_BLOCK_ROWS" >&2
+  return 1
 }
 
 # A SPINDRIFT_PROMPT_DIR mount replaces the whole prompt dir, so a rendered
