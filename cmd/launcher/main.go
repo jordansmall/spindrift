@@ -663,7 +663,7 @@ func newIssueTracker(c config) forge.IssueTracker {
 // own resolved Integration-branch key (local.ResolveParent, issue #1734);
 // every other codeForge ignores it — there is no per-run parent knob left
 // to derive it from.
-func newCodeForge(c config, parent local.SanitizedParent) forge.CodeForge {
+func newCodeForge(c config, parent local.SanitizedParent, it forge.IssueTracker) forge.CodeForge {
 	switch c.codeForge {
 	case "git":
 		return git.NewGitClient(c.codeForgeRemoteURL, c.baseBranch, c.gitUserName, c.gitUserEmail, c.branchPrefix)
@@ -688,9 +688,9 @@ func newCodeForge(c config, parent local.SanitizedParent) forge.CodeForge {
 			MergeMethod:  c.mergeMethod,
 		}
 		if c.boxForgeAndIssueAccess == "read-only" {
-			return forgejo.NewReadOnlyForgejoCodeForge(cfg)
+			return forgejo.NewReadOnlyForgejoCodeForge(cfg, it)
 		}
-		return forgejo.NewForgejoCodeForge(cfg)
+		return forgejo.NewForgejoCodeForge(cfg, it)
 	default:
 		// BOX_FORGE_AND_ISSUE_ACCESS=read-only swaps in the BundleRelay-
 		// capable wrapper (issue #1918): the Box no longer pushes in-box, so
@@ -1475,7 +1475,7 @@ func cmdBuild() int {
 func cmdDoctor() int {
 	c := loadConfig()
 	it := newIssueTracker(c)
-	cf := newCodeForge(c, local.SanitizedParent{})
+	cf := newCodeForge(c, local.SanitizedParent{}, it)
 	stat, serr := os.Stdin.Stat()
 	interactive := serr == nil && (stat.Mode()&os.ModeCharDevice) != 0
 	if err := runDoctor(it, cf, c, os.Stdout, os.Stdin, interactive); err != nil {

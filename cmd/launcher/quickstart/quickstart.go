@@ -211,7 +211,7 @@ func buildForge(repoSlug string, tracker trackerSettings, ghToken, jiraToken, fo
 			Repo:         repoSlug,
 			Token:        forgejoToken,
 			BranchPrefix: defaultBranchPrefix,
-		})
+		}, it)
 		return it, cf
 	default:
 		return cf, cf
