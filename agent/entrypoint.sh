@@ -479,6 +479,119 @@ _contract_marker() {
   return 1
 }
 
+# _validate_marker_row mirrors _contract_marker above, but scans
+# _VALIDATE_MARKER_ROWS (lib/prompt-contract.nix's validateMarkers registry,
+# rendered by validateMarkersBashPreamble, issue #2249) instead of
+# _INJECT_BLOCK_ROWS: prints the row whose id (pipe position 1) matches $1,
+# unparsed, so the one caller below (_validate_prompt_contract) can split it
+# with `IFS='|' read -r` for whichever of marker/carrier/severity/when it
+# needs -- unlike _contract_marker, callers here need more than just the
+# marker field.
+_validate_marker_row() {
+  local _id="$1" _vrow _vid _rest
+  for _vrow in "${_VALIDATE_MARKER_ROWS[@]}"; do
+    _vid="${_vrow%%|*}"
+    if [ "$_vid" = "$_id" ]; then
+      printf '%s' "$_vrow"
+      return 0
+    fi
+  done
+  echo "_validate_marker_row: no row for id '$_id' in _VALIDATE_MARKER_ROWS" >&2
+  return 1
+}
+
+# _validate_prompt_contract is the in-box reject/warn matrix (issue #2249):
+# run once, at the very end of phase_prompt_assembly -- after every fragment
+# has been rendered/injected and $prompt/$agents_json are fully assembled,
+# strictly before run_driver_in_env is ever called (main calls
+# phase_prompt_assembly before run_driver_in_env, so no separate call site is
+# needed) -- it scans for the markers lib/prompt-contract.nix's
+# validateMarkers registry names, each gated on the exact same condition
+# that gated the fragment/step supposed to carry it. A "reject" row's marker
+# missing under its gate condition means the Box's own contract with the
+# launcher/host is unmet in a way nothing downstream can recover from, so it
+# exits non-zero before the Driver ever runs (saving the wasted turn); a
+# "warn" row already has a working non-fatal backstop, so its marker missing
+# is only ever advisory, never fatal.
+#
+# Reuses the same local gate variables (ORCHESTRATOR, BOX_ACCESS_READ_ONLY,
+# FILER_FILE_RELAY, review_prompt_rendered, prompt, agents_json)
+# phase_prompt_assembly already computed to decide what to render, rather
+# than re-deriving the gating condition from raw env vars -- the actual
+# source of truth for what got rendered, so this can never silently drift
+# from the real fragment-gating logic (see brief for #2249).
+_validate_prompt_contract() {
+  local _marker _row
+
+  # reject verdict-comment-relay: a read-only research dispatch's only path
+  # to post its verdict is the SPINDRIFT_COMMENT relay (research-prompt.md's
+  # POST THE VERDICT section) -- missing it here means the verdict can never
+  # reach the launcher.
+  if _is_research_kind && [ -n "$BOX_ACCESS_READ_ONLY" ]; then
+    _row="$(_validate_marker_row verdict-comment-relay)"
+    IFS='|' read -r _ _marker _ <<<"$_row"
+    if [[ "$prompt" != *"$_marker"* ]]; then
+      echo "_validate_prompt_contract: read-only research dispatch's rendered prompt is missing the required '$_marker' marker -- this belongs in research-prompt.md's (or a SPINDRIFT_PROMPT_DIR override's) POST THE VERDICT section; without it a read-only Box has no way to hand its verdict to the launcher. Refusing to invoke the Driver." >&2
+      exit 1
+    fi
+  fi
+
+  # reject reviewer-verdict: review_prompt_rendered is only non-empty for a
+  # fresh, non-research, non-FIX_PASS dispatch with the orchestrator on (see
+  # the if/elif/else above) -- exactly the case where a missing VERDICT:
+  # line would leave the multi-pass review loop with nothing to gate on. The
+  # marker lookup happens unconditionally, ahead of the $ORCHESTRATOR test
+  # below, so that test stays a single flat if/else with no nested fi ahead
+  # of its else -- the shape orchestrator-fork-well-formed's line-scan
+  # (nix/checks/prompts.nix) requires of every $ORCHESTRATOR conditional.
+  _row="$(_validate_marker_row reviewer-verdict)"
+  IFS='|' read -r _ _marker _ <<<"$_row"
+  if [ -n "$ORCHESTRATOR" ] && [ -n "$review_prompt_rendered" ] \
+    && [[ "$review_prompt_rendered" != *"$_marker"* ]]; then
+    echo "_validate_prompt_contract: the orchestrator's rendered review prompt is missing the required '$_marker' marker -- this belongs in review-prompt.md's (or a SPINDRIFT_PROMPT_DIR override's) verdict line; without it the code-owned review loop has nothing to gate on. Refusing to invoke the Driver." >&2
+    exit 1
+  else
+    # Off-row (orchestrator-fork-well-formed, issue #2047): orchestrator off,
+    # review_prompt_rendered empty (research/FIX_PASS dispatch), or the
+    # marker is present -- the inline reviewer-subagent loop (or the
+    # research/fix pass's own contract) governs verdict-gating instead in
+    # the first two cases, so this row's reject condition is correctly a
+    # no-op here, not merely implicit.
+    :
+  fi
+
+  # warn pr-intent: a read-only, non-research dispatch relies on the
+  # SPINDRIFT_PR_INTENT relay (issue-prompt.md's OPEN A PULL REQUEST section)
+  # to hand its finished branch to the launcher's host-mediated draft-PR
+  # step. Already has a working non-fatal backstop (the required-marker
+  # gate's pr-intent-recovery nudge below, plus settle's bundle-adopt salvage
+  # path), so a missing marker here is advisory only.
+  if [ -n "$BOX_ACCESS_READ_ONLY" ] && ! _is_research_kind; then
+    _row="$(_validate_marker_row pr-intent)"
+    IFS='|' read -r _ _marker _ <<<"$_row"
+    if [[ "$prompt" != *"$_marker"* ]]; then
+      echo "_validate_prompt_contract: warning -- read-only dispatch's rendered prompt is missing the '$_marker' marker (belongs in issue-prompt.md's, or fix-prompt.md's injected, OPEN A PULL REQUEST section). Proceeding: a status=ready run with no PR-intent line still gets one resume-nudge attempt post-driver, and a genuinely exhausted attempt falls back to the merge-blocked report rather than losing the branch." >&2
+    fi
+  fi
+
+  # warn issue-intent: a filer-relay dispatch relies on the
+  # SPINDRIFT_ISSUE_INTENT relay (filer-file-relay.md) to hand its filed
+  # issues to the launcher's host-mediated create step -- checked against the
+  # filer's own rendered prompt inside agents_json, not $prompt, since that's
+  # where filer-prompt.md's substituted text actually lands. Already has a
+  # working non-fatal backstop (the filer's best-effort PR-body fallback), so
+  # a missing marker here is advisory only.
+  if [ -n "$FILER_FILE_RELAY" ]; then
+    _row="$(_validate_marker_row issue-intent)"
+    IFS='|' read -r _ _marker _ <<<"$_row"
+    local _filer_prompt
+    _filer_prompt="$(printf '%s' "${agents_json:-}" | jq -r '.filer.prompt // empty')"
+    if [[ "$_filer_prompt" != *"$_marker"* ]]; then
+      echo "_validate_prompt_contract: warning -- filer-relay dispatch's rendered filer prompt is missing the '$_marker' marker (belongs in filer-prompt.md's, or a SPINDRIFT_PROMPT_DIR override's, filer-file-relay.md-injected section). Proceeding: the filer's own best-effort PR-body fallback still records the issue reference even without the relay." >&2
+    fi
+  fi
+}
+
 # A SPINDRIFT_PROMPT_DIR mount replaces the whole prompt dir, so a rendered
 # prompt that dropped a shared block (issue #419, extended to COMMS/CHECK by
 # #455) never gets the build-time injection; append the canonical block here,
@@ -1028,6 +1141,11 @@ phase_prompt_assembly() {
       done < <(printf '%s' "$AGENTS_PROMPT_FILES" | jq -r 'keys[]')
     fi
   fi
+
+  # Reject/warn marker matrix (issue #2249): runs last, after every fragment
+  # is rendered/injected and $prompt/$agents_json are fully assembled, and
+  # strictly before run_driver_in_env is ever called from main.
+  _validate_prompt_contract
 }
 
 # run_driver_in_env runs the Driver against $1 (the assembled prompt), with
