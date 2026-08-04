@@ -102,7 +102,7 @@ func TestRun_NonEmptyRange_CreatesBundle(t *testing.T) {
 // empty base..branch range after the Agent's own status=ready claim gets no
 // bundle and a corrective SPINDRIFT_OUTCOME line instead — a false `ready`
 // can't settle silently (issue #1808). Read back through
-// outcome.LastInLog, the same log-scan seam the launcher itself uses, so the
+// outcome.Resolve, the same log-scan seam the launcher itself uses, so the
 // test exercises the actual contract rather than string-matching stdout.
 func TestRun_EmptyRangeAfterReadyClaim_AppendsCorrectiveOutcome(t *testing.T) {
 	dir, base, branch := newRepoNoFeatureCommits(t)
@@ -141,16 +141,17 @@ func TestRun_EmptyRangeAfterReadyClaim_AppendsCorrectiveOutcome(t *testing.T) {
 	// production (issue #1939): the corrective line must carry the run's
 	// nonce, or the gate would exclude it and let the agent's stale
 	// status=ready claim win last-wins instead.
-	o, found, skipped, err := outcome.LastInLog(logPath, "abc123")
-	if skipped {
+	resolved, err := outcome.Resolve([]outcome.PassLog{{Path: logPath}}, "abc123", "")
+	if resolved.Skipped {
 		t.Error("expected skipped=false: the corrective line must carry the nonce")
 	}
 	if err != nil {
-		t.Fatalf("outcome.LastInLog: %v", err)
+		t.Fatalf("outcome.Resolve: %v", err)
 	}
-	if !found {
-		t.Fatal("outcome.LastInLog: no outcome line found")
+	if !resolved.Found || resolved.Provenance == outcome.ProvenanceSelfReport {
+		t.Fatal("outcome.Resolve: no genuine outcome line found")
 	}
+	o := resolved.Outcome
 	if o.Status != "blocked" {
 		t.Errorf("corrective outcome status = %q, want %q", o.Status, "blocked")
 	}

@@ -40,11 +40,11 @@ type Config struct {
 	PriorOutcomeLine string
 	// Nonce is this run's own control nonce (RUN_NONCE, issue #1939),
 	// carried into the corrective outcome line below. The launcher's
-	// LastInLog scan gates candidacy on this same nonce, so a corrective
-	// line printed without it would be silently excluded — the Agent's own
-	// stale status=ready claim would win last-wins instead of the
-	// correction, reopening the exact false-ready-with-no-commits gap this
-	// package exists to close (issue #1808).
+	// outcome.Resolve scan gates candidacy on this same nonce, so a
+	// corrective line printed without it would be silently excluded — the
+	// Agent's own stale status=ready claim would win last-wins instead of
+	// the correction, reopening the exact false-ready-with-no-commits gap
+	// this package exists to close (issue #1808).
 	Nonce string
 }
 
@@ -52,7 +52,7 @@ type Config struct {
 // An empty range after the Agent's own claimed status=ready is a
 // contradiction the Box can't leave standing: no bundle is written, and a
 // corrective status=blocked SPINDRIFT_OUTCOME line is printed to w instead,
-// picked up by the launcher's last-line-wins log scan (outcome.LastInLog)
+// picked up by the launcher's last-line-wins log scan (outcome.Resolve)
 // with no launcher changes. An empty range after any other claimed status is
 // already consistent — nothing is written.
 func Run(cfg Config, w io.Writer) error {

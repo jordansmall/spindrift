@@ -60,7 +60,7 @@ func LastSelfReportFromLogs(pwd, num string) (outcome.SelfReport, bool) {
 		found bool
 	)
 	for _, pl := range LogPaths(pwd, num) {
-		report, ok, err := outcome.LastSelfReportInLog(pl.Path)
+		report, ok, err := outcome.LastSelfReport(pl.Path)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "    ?? #%s: self-report scan: %v\n", num, err)
 			continue
