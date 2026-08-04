@@ -262,3 +262,36 @@ type errTracker struct {
 func (errTracker) ListOpenIssues() ([]forge.Issue, error) {
 	return nil, errBoom
 }
+
+// plainTracker wraps a forge.IssueTracker without also exposing
+// forge.LabeledTracker: embedding the interface only promotes the methods
+// forge.IssueTracker itself declares, so a tracker whose only observable
+// surface is plainTracker's own — even when its underlying concrete value
+// happens to implement StateLabels — never satisfies the type assertion.
+type plainTracker struct {
+	forge.IssueTracker
+}
+
+// TestRefresh_RecoverableCount_NonLabeledTrackerIsZero verifies
+// countRecoverable's `!ok` branch: a tracker that doesn't implement
+// forge.LabeledTracker at all (Jira, ADR 0039) reports zero rather than
+// panicking or falling through to some other resolution, even when a
+// fetched issue happens to carry a label string that would match if the
+// tracker were LabeledTracker.
+func TestRefresh_RecoverableCount_NonLabeledTrackerIsZero(t *testing.T) {
+	f := forge.NewFake(forge.DispatchLabels{Recoverable: "agent-recoverable"})
+	f.SetIssue(forge.Issue{Number: "1", Title: "looks recoverable", State: forge.IssueOpen, Labels: []string{"agent-recoverable"}})
+
+	msg := Refresh(plainTracker{f})
+
+	loaded, ok := msg.(IssuesLoadedMsg)
+	if !ok {
+		t.Fatalf("Refresh() = %T, want IssuesLoadedMsg", msg)
+	}
+	if loaded.Err != nil {
+		t.Fatalf("Err = %v, want nil", loaded.Err)
+	}
+	if loaded.RecoverableCount != 0 {
+		t.Errorf("RecoverableCount = %d, want 0 (tracker is not a LabeledTracker)", loaded.RecoverableCount)
+	}
+}
