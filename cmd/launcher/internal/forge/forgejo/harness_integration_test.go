@@ -368,9 +368,9 @@ func forgejoMintToken(t *testing.T, cli, name string) string {
 // so callers can assert on it themselves.
 //
 // This is deliberately a hand-rolled REST client, independent of the
-// forgejo package's own forgejoClient.do — see the AC3 cross-check in
-// TestForgejoIntegration_DispatchLifecycle for why that independence
-// matters.
+// forgejo package's own rest.Client-backed REST plumbing — see the AC3
+// cross-check in TestForgejoIntegration_DispatchLifecycle for why that
+// independence matters.
 func doREST(t *testing.T, method, url, token string, body, out any) int {
 	t.Helper()
 	var reqBody io.Reader
@@ -585,7 +585,7 @@ func TestForgejoIntegration_DispatchLifecycle(t *testing.T) {
 		UserEmail:    "harness@harness.local",
 		BranchPrefix: "agent/issue-",
 		MergeMethod:  "rebase",
-	})
+	}, nil)
 	prf, ok := cf.(forge.PRForge)
 	if !ok {
 		t.Fatalf("forgejo CodeForge does not implement forge.PRForge")

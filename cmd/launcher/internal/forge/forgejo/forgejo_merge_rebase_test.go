@@ -20,14 +20,13 @@ func newMergeTestForge(t *testing.T, mergeMethod string, handler http.HandlerFun
 	t.Helper()
 	srv := httptest.NewServer(handler)
 	t.Cleanup(srv.Close)
-	return forgejo.NewForgejoCodeForge(forgejo.ForgejoCodeForgeConfig{
+	return forgejo.NewForgejoCodeForgeForTest(forgejo.ForgejoCodeForgeConfig{
 		BaseURL:      srv.URL,
 		Repo:         "owner/repo",
 		Token:        "tok",
-		GitRemoteURL: "unused",
 		BranchPrefix: "agent/issue-",
 		MergeMethod:  mergeMethod,
-	})
+	}, nil, "unused")
 }
 
 // TestMerge_Success_DefaultRebase verifies Merge POSTs to the pull's merge
@@ -189,7 +188,7 @@ func TestRebase_ResolvesHeadBranchAndRebases(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	cf := forgejo.NewForgejoCodeForge(forgejo.ForgejoCodeForgeConfig{
+	cf := forgejo.NewForgejoCodeForgeForTest(forgejo.ForgejoCodeForgeConfig{
 		BaseURL:      srv.URL,
 		Repo:         "owner/repo",
 		Token:        "tok",
@@ -197,8 +196,7 @@ func TestRebase_ResolvesHeadBranchAndRebases(t *testing.T) {
 		UserName:     "Test Bot",
 		UserEmail:    "bot@example.com",
 		BranchPrefix: "agent/issue-",
-		GitRemoteURL: repo.Bare,
-	})
+	}, nil, repo.Bare)
 
 	if err := cf.Rebase("https://forge.test/owner/repo/pulls/206"); err != nil {
 		t.Fatalf("Rebase(...) unexpected error: %v", err)
