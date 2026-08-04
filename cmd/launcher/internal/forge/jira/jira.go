@@ -117,8 +117,9 @@ func NewJiraClient(cfg JiraConfig) forge.IssueTracker {
 
 // jiraAuthStrategy implements rest.AuthStrategy: HTTP Basic (base64
 // "email:token") for Jira Cloud when Email is set, or Bearer token for
-// Server/Data Center PATs when Email is empty. Captured once at
-// NewJiraClient construction time rather than recomputed per request.
+// Server/Data Center PATs when Email is empty. The email/token pair is
+// captured once at NewJiraClient construction time; Apply still
+// base64-encodes the header value per request.
 type jiraAuthStrategy struct {
 	email string
 	token string
