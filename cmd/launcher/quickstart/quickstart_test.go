@@ -678,8 +678,8 @@ func TestRunQuickstart_GithubTokenEnvVar_ReadFromDescriptor(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read harness.env: %v", err)
 	}
-	if !strings.Contains(string(harnessEnv), "GH_TOKEN=ghp_righttoken") {
-		t.Errorf("expected harness.env to carry the token read via the descriptor's CUSTOM_GH_TOKEN env var, got:\n%s", harnessEnv)
+	if !strings.Contains(string(harnessEnv), "CUSTOM_GH_TOKEN=ghp_righttoken") {
+		t.Errorf("expected harness.env to carry the token under the descriptor-named CUSTOM_GH_TOKEN key, got:\n%s", harnessEnv)
 	}
 }
 
