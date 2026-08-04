@@ -634,7 +634,7 @@ act).
 A first-class terminal lifecycle state (ADR 0039) a `CODE_FORGE=local`
 push-only Dispatch reaches when its work is stranded but salvageable: a bundle
 is in the outbox and the driver's advisory self-report says success, yet no
-genuine nonce-gated `status=ready` [[Outcome line]] ever settled it — the
+genuine `status=ready` [[Outcome line]] ever settled it — the
 Window-3 false-`blocked` and the die-with-a-bundle cases. Settle transitions
 into it *instead of* `Failed`, so the deliverable is neither auto-landed on an
 unauthenticated signal (a local fast-forward has no draft-PR review catch,
@@ -667,26 +667,25 @@ _Avoid_: heartbeat log, status log, activity log, event stream.
 The machine-readable final line a Box writes to stdout, parsed by the Launcher
 to learn where the deliverable landed and whether the Dispatch is ready for
 settle, blocked, or failed. Grammar:
-`SPINDRIFT_OUTCOME issue=<num> landing=<ref> status=<status> note=<text> nonce=<nonce>`
+`SPINDRIFT_OUTCOME issue=<num> landing=<ref> status=<status> note=<text>`
 where `note` may contain spaces and `=`. `landing` is the landing reference —
 a PR URL (`github` Code Forge), a branch ref (push-only `git`), or a
 verdict-comment URL (research dispatch); `status` values are scoped to the
 Dispatch kind (`ready`/`blocked` for work, the verdicts plus `blocked` for
-research). The `nonce=` field carries this run's per-run control nonce
-(`RUN_NONCE`, issues #1937/#1939), but for _this_ channel it is a redundant
-third layer, not the real defense: `SPINDRIFT_OUTCOME` is defended by
-**structure**. In-box, the per-driver extractor jq-scopes to the agent's own
-final message (claude `select(.type=="result")`, opencode
-`select(.type=="text")`) and re-emits one **bare, leading** line; host-side,
-`LastInLog`'s primary tier requires the token to _lead_ the line. Untrusted
-corpus reaches the log only as a `tool_result` (wrong event type) or buried
-mid-JSON in the raw transcript (non-leading), so it cannot win regardless of
-the nonce. ADR 0039 records the decision to retire the nonce here — structural
-scoping is the freshness boundary — while keeping it as the _sole_ replay
-defense for the mid-run signal channels (`SPINDRIFT_COMMENT` /
-`SPINDRIFT_PR_INTENT` / `SPINDRIFT_ISSUE_INTENT`), which cannot be
-structurally scoped because they survive only as a token embedded in one
-JSON-escaped line. The line carries only what the Launcher cannot know without the
+research). Unlike the mid-run signal channels below, this line carries no
+per-run control nonce (`RUN_NONCE`, issues #1937/#1939): `SPINDRIFT_OUTCOME`
+is defended by **structure** instead. In-box, the per-driver extractor
+jq-scopes to the agent's own final message (claude
+`select(.type=="result")`, opencode `select(.type=="text")`) and re-emits one
+**bare, leading** line; host-side, `LastInLog`'s primary tier requires the
+token to _lead_ the line. Untrusted corpus reaches the log only as a
+`tool_result` (wrong event type) or buried mid-JSON in the raw transcript
+(non-leading), so it cannot win regardless of any nonce. ADR 0039 records the
+decision to retire the nonce here — structural scoping is the freshness
+boundary — while keeping it as the _sole_ replay defense for the mid-run
+signal channels (`SPINDRIFT_COMMENT` / `SPINDRIFT_PR_INTENT` /
+`SPINDRIFT_ISSUE_INTENT`), which cannot be structurally scoped because they
+survive only as a token embedded in one JSON-escaped line. The line carries only what the Launcher cannot know without the
 Box — never backend identity or other run config, which the Launcher already
 holds authoritatively. The `cmd/launcher/internal/outcome` package is the
 authoritative spec and implementation: `Parse` validates the grammar, `Line`
@@ -713,8 +712,8 @@ to pin down (issue #2251) — Resolve is that seam. It walks a Dispatch's
 ordered pass logs once, choosing among three tiers in strict precedence — a
 genuine driver-authored outcome line, the outcome backstop's synthetic line
 (ADR 0036), and, only when neither turns up anywhere, the driver's
-unauthenticated self-report fallback, nonce-gated the same as the line itself
-— and names which tier won on `Resolved.Provenance` (`ProvenanceGenuine` /
+unauthenticated self-report fallback (structurally scoped, never nonce-gated —
+ADR 0039) — and names which tier won on `Resolved.Provenance` (`ProvenanceGenuine` /
 `ProvenanceSynthetic` / `ProvenanceSelfReport`). The per-log scanners the
 tiers walk (`lastInLog`, `lastSelfReportInLog`) are unexported now, reachable
 only through Resolve; the one door left open beside it is the exported
