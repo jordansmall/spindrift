@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/doctor"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/forgejo"
@@ -101,18 +102,29 @@ func validateRuntimeChoice(runtime string) error {
 	return fmt.Errorf("expected one of %s, got %q", strings.Join(validRuntimeChoices, ", "), runtime)
 }
 
-// validBackendChoices are the operator-facing code-forge backends the wizard
-// accepts when the git remote host is neither github.com nor codeberg.org.
-var validBackendChoices = []string{"github", "forgejo"}
+// quickstartBackendNames returns the operator-facing code-forge backend
+// names the wizard accepts when the git remote host is neither github.com
+// nor codeberg.org, derived from backend.QuickstartEligible() so a new
+// backend registered in the shared registry automatically appears here with
+// no quickstart-side edit.
+func quickstartBackendNames() []string {
+	descriptors := backend.QuickstartEligible()
+	names := make([]string, len(descriptors))
+	for i, d := range descriptors {
+		names[i] = d.Name
+	}
+	return names
+}
 
-// validateBackendChoice rejects any value outside validBackendChoices.
+// validateBackendChoice rejects any value outside quickstartBackendNames().
 func validateBackendChoice(b string) error {
-	for _, v := range validBackendChoices {
+	names := quickstartBackendNames()
+	for _, v := range names {
 		if b == v {
 			return nil
 		}
 	}
-	return fmt.Errorf("expected one of %s, got %q", strings.Join(validBackendChoices, ", "), b)
+	return fmt.Errorf("expected one of %s, got %q", strings.Join(names, ", "), b)
 }
 
 // detectRuntime returns the first runtime in runtimePrecedence found on
@@ -161,12 +173,14 @@ var defaultDispatchLabels = forge.DispatchLabels{
 var spindriftBuildArgs = []string{"nix", "develop", "--command", "spindrift", "build"}
 
 // ForgeBuilder constructs the real IssueTracker/CodeForge from the wizard's
-// collected repoSlug, GitHub token, and Issue Tracker settings, so the
-// finish line's doctor validation (ADR 0027) runs in-process against the
-// real forge — no `spindrift doctor` subprocess, since the `spindrift`
-// binary doesn't exist yet at Quickstart's pre-CLI stage. Injected so tests
-// substitute a forge.Fake instead of shelling out to gh/Jira for real.
-type ForgeBuilder func(repoSlug string, tracker trackerSettings, ghToken, jiraToken, forgejoToken string) (forge.IssueTracker, forge.CodeForge)
+// collected repoSlug, Issue Tracker settings, and the single backend token
+// the wizard collected (whichever one is relevant to the chosen backend —
+// only one is ever active per call), so the finish line's doctor validation
+// (ADR 0027) runs in-process against the real forge — no `spindrift doctor`
+// subprocess, since the `spindrift` binary doesn't exist yet at Quickstart's
+// pre-CLI stage. Injected so tests substitute a forge.Fake instead of
+// shelling out to gh/Jira for real.
+type ForgeBuilder func(repoSlug string, tracker trackerSettings, token string) (forge.IssueTracker, forge.CodeForge)
 
 // forgejoProbeTimeout bounds the HTTP client the forgejo IssueTracker uses
 // for the interactive token-validation ping (acquireForgejoToken's Probe
@@ -181,11 +195,13 @@ const forgejoProbeTimeout = 30 * time.Second
 // from the Forgejo REST adapters so doctor validates against a Forgejo
 // instance instead. The Issue Tracker switches on tracker.issueTracker,
 // which the wizard always sets to "github" (issue #1559) — the
-// jira/local/forgejo cases exist for buildForge's own tests.
-// github.NewExecClient shells out to the gh CLI, which reads GH_TOKEN from
-// the process environment — runQuickstart exports the collected token
-// before calling this.
-func buildForge(repoSlug string, tracker trackerSettings, ghToken, jiraToken, forgejoToken string) (forge.IssueTracker, forge.CodeForge) {
+// jira/local/forgejo cases exist for buildForge's own tests. token is the
+// single backend credential relevant to tracker.issueTracker (empty for
+// "github"/"local", where the credential either lives ambient in the process
+// environment or isn't needed at all): github.NewExecClient shells out to
+// the gh CLI, which reads GH_TOKEN from the process environment —
+// runQuickstart exports the collected token before calling this.
+func buildForge(repoSlug string, tracker trackerSettings, token string) (forge.IssueTracker, forge.CodeForge) {
 	cf := github.NewExecClient(repoSlug, defaultDispatchLabels, defaultBranchPrefix)
 	switch tracker.issueTracker {
 	case "jira":
@@ -193,7 +209,7 @@ func buildForge(repoSlug string, tracker trackerSettings, ghToken, jiraToken, fo
 			BaseURL:    tracker.jiraBaseURL,
 			ProjectKey: tracker.jiraProjectKey,
 			Email:      tracker.jiraEmail,
-			Token:      jiraToken,
+			Token:      token,
 			Labels:     defaultDispatchLabels,
 		}), cf
 	case "local":
@@ -202,14 +218,14 @@ func buildForge(repoSlug string, tracker trackerSettings, ghToken, jiraToken, fo
 		it := forgejo.NewForgejoClient(forgejo.ForgejoConfig{
 			BaseURL:    tracker.forgejoBaseURL,
 			Repo:       repoSlug,
-			Token:      forgejoToken,
+			Token:      token,
 			Labels:     defaultDispatchLabels,
 			HTTPClient: &http.Client{Timeout: forgejoProbeTimeout},
 		})
 		cf := forgejo.NewForgejoCodeForge(forgejo.ForgejoCodeForgeConfig{
 			BaseURL:      tracker.forgejoBaseURL,
 			Repo:         repoSlug,
-			Token:        forgejoToken,
+			Token:        token,
 			BranchPrefix: defaultBranchPrefix,
 		}, it)
 		return it, cf
@@ -307,7 +323,7 @@ func runQuickstart(dir string, env Environment, runner CommandRunner, forgeBuild
 		backend, forgejoBaseURL, repoSlugDefault = "forgejo", codebergBaseURL, remoteSlug
 		fmt.Fprintln(w, "detected a codeberg.org remote — using the forgejo backend")
 	case host != "" && host != "github.com":
-		b, err := promptValidated("Backend (github/forgejo)", "github", validateBackendChoice)
+		b, err := promptValidated(fmt.Sprintf("Backend (%s)", strings.Join(quickstartBackendNames(), "/")), "github", validateBackendChoice)
 		if err != nil {
 			return err
 		}
@@ -396,7 +412,11 @@ func runQuickstart(dir string, env Environment, runner CommandRunner, forgeBuild
 			return fmt.Errorf("set GH_TOKEN: %w", err)
 		}
 	}
-	it, cf := forgeBuilder(repoSlug, tracker, ghToken, "", a.forgejoToken)
+	token := ghToken
+	if a.forgejoToken != "" {
+		token = a.forgejoToken
+	}
+	it, cf := forgeBuilder(repoSlug, tracker, token)
 	tokenHint, slugHint := doctorHints(tracker.issueTracker)
 	if err := doctor.Run(it, cf, doctor.Config{
 		IssueTracker:    tracker.issueTracker,
@@ -462,7 +482,7 @@ func acquireForgejoToken(w io.Writer, promptMasked func(string) string, forgeBui
 	if token == "" {
 		return "", fmt.Errorf("no Forgejo token provided — set FORGEJO_TOKEN and rerun")
 	}
-	it, _ := forgeBuilder(repoSlug, trackerSettings{issueTracker: "forgejo", forgejoBaseURL: baseURL}, "", "", token)
+	it, _ := forgeBuilder(repoSlug, trackerSettings{issueTracker: "forgejo", forgejoBaseURL: baseURL}, token)
 	if _, err := it.Probe(); err != nil {
 		if errors.Is(err, forge.ErrAuthFailure) {
 			return "", fmt.Errorf("Forgejo token rejected by the API — check FORGEJO_TOKEN is valid and FORGEJO_BASE_URL (%s) points at the right instance: %w", baseURL, err)
@@ -563,18 +583,15 @@ harness.env
 const quickstartEnvrc = "use flake\n"
 
 // doctorHints resolves doctor.Config's TokenHint/SlugHint for the wizard's
-// own doctor.Run call. Quickstart is a standalone pre-CLI binary (it runs
-// before the `spindrift` binary/its backend registry exist, ADR 0027) so it
-// can't reach cmd/launcher's backendRows the way runDoctor does — it mirrors
-// just the two backend names the wizard ever drives (github, forgejo;
-// jira/local aren't wizard-driven paths, see trackerSettings) rather than
-// importing the registry. Empty return values mean "use doctor.Run's
-// github-shaped default".
+// own doctor.Run call, via backend.ByName. An unregistered issueTracker name
+// (or a registered one with no hints, e.g. "github") returns empty values,
+// meaning "use doctor.Run's github-shaped default".
 func doctorHints(issueTracker string) (tokenHint, slugHint string) {
-	if issueTracker == "forgejo" {
-		return "FORGEJO_TOKEN", "FORGEJO_BASE_URL"
+	row, ok := backend.ByName(issueTracker)
+	if !ok {
+		return "", ""
 	}
-	return "", ""
+	return row.DoctorTokenHint, row.DoctorSlugHint
 }
 
 // trackerSettings holds the fields buildForge needs to construct an Issue
