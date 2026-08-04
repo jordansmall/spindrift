@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 
+	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/forgejo"
 	"spindrift.dev/launcher/internal/forge/git"
@@ -21,10 +22,7 @@ import (
 // means this backend doesn't participate in that axis/capability -- e.g.
 // jira's newCodeForge is nil since jira is a tracker only.
 type backendRow struct {
-	name string
-
-	validAsTracker   bool
-	validAsCodeForge bool
+	backend.Descriptor
 
 	// validateTracker/validateCodeForge run only when this row is the
 	// active ISSUE_TRACKER/CODE_FORGE selection, beyond the bare axis
@@ -36,16 +34,9 @@ type backendRow struct {
 	newCodeForge         func(c config, parent local.SanitizedParent, it forge.IssueTracker) forge.CodeForge
 	newReadOnlyCodeForge func(c config, parent local.SanitizedParent, it forge.IssueTracker) forge.CodeForge
 
-	// tokenEnvVar/boxTokenEnvVar are this backend's bearer-token knob and
-	// its ADR 0016 Box-side override name; both empty when the backend
-	// carries no bearer token (git, local).
-	tokenEnvVar, boxTokenEnvVar string
-
-	// doctorTokenHint/doctorSlugHint name the env vars `spindrift doctor`
-	// points an operator at when this backend is the active ISSUE_TRACKER.
-	// Empty means "use the github-shaped default" (GH_TOKEN / --repo-slug
-	// REPO_SLUG) -- matches today's if/if fallthrough exactly.
-	doctorTokenHint, doctorSlugHint string
+	// boxTokenEnvVar is this backend's ADR 0016 Box-side token override
+	// name; empty when the backend carries no bearer token (git, local).
+	boxTokenEnvVar string
 
 	// readOnlyTokenGate enforces BOX_FORGE_AND_ISSUE_ACCESS=read-only's
 	// token-distinctness gate for this backend's token; nil when the
@@ -55,9 +46,6 @@ type backendRow struct {
 	// nil iff readOnlyTokenGate is nil.
 	readOnlyGateOkMessage func(verified bool) string
 
-	// hostMediatedRemote is true only for a backend with no writable
-	// remote to push to at all under CODE_FORGE (ADR 0033: "local").
-	hostMediatedRemote bool
 	// outboxRelayCapable is true for a backend whose CODE_FORGE selection
 	// gets the outbox mount/relay treatment under read-only today (issue
 	// #1918: "github" only). NOTE: forgejo also has its own read-only
@@ -98,9 +86,7 @@ func forgejoCodeForgeConfig(c config) forgejo.ForgejoCodeForgeConfig {
 // behavior through backendByName/this slice instead of a name switch.
 var backendRows = []backendRow{
 	{
-		name:             "github",
-		validAsTracker:   true,
-		validAsCodeForge: true,
+		Descriptor: backend.GitHub,
 
 		newIssueTracker: func(c config) forge.IssueTracker {
 			return github.NewExecClient(c.repoSlug, dispatchLabels(c), c.branchPrefix, github.WithVerdictLabels(researchVerdictLabels(c)))
@@ -112,7 +98,6 @@ var backendRows = []backendRow{
 			return github.NewReadOnlyCodeForge(c.repoSlug, dispatchLabels(c), c.branchPrefix, github.WithMergeMethod(c.mergeMethod), github.WithSyncMethod(c.syncMethod))
 		},
 
-		tokenEnvVar:    "GH_TOKEN",
 		boxTokenEnvVar: "BOX_GH_TOKEN",
 
 		readOnlyTokenGate: func(c config, w io.Writer) (bool, error) {
@@ -128,9 +113,7 @@ var backendRows = []backendRow{
 		outboxRelayCapable: true,
 	},
 	{
-		name:             "forgejo",
-		validAsTracker:   true,
-		validAsCodeForge: true,
+		Descriptor: backend.Forgejo,
 
 		validateTracker: func(c config) error {
 			return forgejo.ValidateForgejoEnv(c.forgejoBaseURL, c.forgejoToken)
@@ -155,11 +138,7 @@ var backendRows = []backendRow{
 			return forgejo.NewReadOnlyForgejoCodeForge(forgejoCodeForgeConfig(c), it)
 		},
 
-		tokenEnvVar:    "FORGEJO_TOKEN",
 		boxTokenEnvVar: "BOX_FORGEJO_TOKEN",
-
-		doctorTokenHint: "FORGEJO_TOKEN",
-		doctorSlugHint:  "FORGEJO_BASE_URL",
 
 		readOnlyTokenGate: func(c config, w io.Writer) (bool, error) {
 			return checkReadOnlyForgejoTokenGate(c, w)
@@ -171,9 +150,7 @@ var backendRows = []backendRow{
 		outboxRelayCapable: false,
 	},
 	{
-		name:             "jira",
-		validAsTracker:   true,
-		validAsCodeForge: false,
+		Descriptor: backend.Jira,
 
 		validateTracker: func(c config) error {
 			return jira.ValidateJiraEnv(c.jiraBaseURL, c.jiraProjectKey, c.jiraToken, c.jiraStatusMapping)
@@ -198,16 +175,9 @@ var backendRows = []backendRow{
 				IncludeComments: c.jiraIncludeComments,
 			})
 		},
-
-		tokenEnvVar: "JIRA_TOKEN",
-
-		doctorTokenHint: "JIRA_TOKEN",
-		doctorSlugHint:  "JIRA_BASE_URL / JIRA_PROJECT_KEY",
 	},
 	{
-		name:             "local",
-		validAsTracker:   true,
-		validAsCodeForge: true,
+		Descriptor: backend.Local,
 
 		validateCodeForge: func(c config) error {
 			if c.mergeMode != "immediate" {
@@ -226,13 +196,10 @@ var backendRows = []backendRow{
 			return local.NewLocalCodeForge(c.codeForgeAccumulationRepoDir, c.baseBranch, parent, c.gitUserName, c.gitUserEmail, c.branchPrefix)
 		},
 
-		hostMediatedRemote:      true,
 		inBoxUnreachableTracker: true,
 	},
 	{
-		name:             "git",
-		validAsTracker:   false,
-		validAsCodeForge: true,
+		Descriptor: backend.Git,
 
 		validateCodeForge: func(c config) error {
 			if c.codeForgeRemoteURL == "" {
@@ -251,7 +218,7 @@ var backendRows = []backendRow{
 // CODE_FORGE knob value). ok is false for an unregistered name.
 func backendByName(name string) (backendRow, bool) {
 	for _, r := range backendRows {
-		if r.name == name {
+		if r.Name == name {
 			return r, true
 		}
 	}

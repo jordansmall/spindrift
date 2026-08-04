@@ -100,29 +100,29 @@ func TestBackendRowsShape(t *testing.T) {
 			if !ok {
 				t.Fatalf("backendByName(%q) ok=false, want true", tc.name)
 			}
-			if row.name != tc.name {
-				t.Errorf("name = %q, want %q", row.name, tc.name)
+			if row.Name != tc.name {
+				t.Errorf("name = %q, want %q", row.Name, tc.name)
 			}
-			if row.validAsTracker != tc.validAsTracker {
-				t.Errorf("validAsTracker = %v, want %v", row.validAsTracker, tc.validAsTracker)
+			if row.ValidAsTracker != tc.validAsTracker {
+				t.Errorf("validAsTracker = %v, want %v", row.ValidAsTracker, tc.validAsTracker)
 			}
-			if row.validAsCodeForge != tc.validAsCodeForge {
-				t.Errorf("validAsCodeForge = %v, want %v", row.validAsCodeForge, tc.validAsCodeForge)
+			if row.ValidAsCodeForge != tc.validAsCodeForge {
+				t.Errorf("validAsCodeForge = %v, want %v", row.ValidAsCodeForge, tc.validAsCodeForge)
 			}
-			if row.tokenEnvVar != tc.tokenEnvVar {
-				t.Errorf("tokenEnvVar = %q, want %q", row.tokenEnvVar, tc.tokenEnvVar)
+			if row.TokenEnvVar != tc.tokenEnvVar {
+				t.Errorf("tokenEnvVar = %q, want %q", row.TokenEnvVar, tc.tokenEnvVar)
 			}
 			if row.boxTokenEnvVar != tc.boxTokenEnvVar {
 				t.Errorf("boxTokenEnvVar = %q, want %q", row.boxTokenEnvVar, tc.boxTokenEnvVar)
 			}
-			if row.doctorTokenHint != tc.doctorTokenHint {
-				t.Errorf("doctorTokenHint = %q, want %q", row.doctorTokenHint, tc.doctorTokenHint)
+			if row.DoctorTokenHint != tc.doctorTokenHint {
+				t.Errorf("doctorTokenHint = %q, want %q", row.DoctorTokenHint, tc.doctorTokenHint)
 			}
-			if row.doctorSlugHint != tc.doctorSlugHint {
-				t.Errorf("doctorSlugHint = %q, want %q", row.doctorSlugHint, tc.doctorSlugHint)
+			if row.DoctorSlugHint != tc.doctorSlugHint {
+				t.Errorf("doctorSlugHint = %q, want %q", row.DoctorSlugHint, tc.doctorSlugHint)
 			}
-			if row.hostMediatedRemote != tc.hostMediatedRemote {
-				t.Errorf("hostMediatedRemote = %v, want %v", row.hostMediatedRemote, tc.hostMediatedRemote)
+			if row.HostMediatedRemote != tc.hostMediatedRemote {
+				t.Errorf("hostMediatedRemote = %v, want %v", row.HostMediatedRemote, tc.hostMediatedRemote)
 			}
 			if row.outboxRelayCapable != tc.outboxRelayCapable {
 				t.Errorf("outboxRelayCapable = %v, want %v", row.outboxRelayCapable, tc.outboxRelayCapable)

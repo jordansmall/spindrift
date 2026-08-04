@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/local"
 )
@@ -17,9 +18,14 @@ import (
 // doctor-hint/read-only-gate machinery those axes carry.
 func fakeGitlabRow() backendRow {
 	return backendRow{
-		name:             "gitlab",
-		validAsTracker:   true,
-		validAsCodeForge: true,
+		Descriptor: backend.Descriptor{
+			Name:             "gitlab",
+			ValidAsTracker:   true,
+			ValidAsCodeForge: true,
+			TokenEnvVar:      "GITLAB_TOKEN",
+			DoctorTokenHint:  "GITLAB_TOKEN",
+			DoctorSlugHint:   "GITLAB_BASE_URL",
+		},
 		validateTracker: func(c config) error {
 			if c.repoSlug == "" {
 				return fmt.Errorf("set REPO_SLUG for ISSUE_TRACKER=gitlab")
@@ -32,11 +38,7 @@ func fakeGitlabRow() backendRow {
 		newCodeForge: func(c config, _ local.SanitizedParent, _ forge.IssueTracker) forge.CodeForge {
 			return forge.NewFake()
 		},
-		tokenEnvVar:    "GITLAB_TOKEN",
 		boxTokenEnvVar: "BOX_GITLAB_TOKEN",
-
-		doctorTokenHint: "GITLAB_TOKEN",
-		doctorSlugHint:  "GITLAB_BASE_URL",
 
 		readOnlyTokenGate: func(c config, w io.Writer) (bool, error) {
 			return true, nil
@@ -72,11 +74,11 @@ func TestBackendRegistry_NewBackendNeedsOnlyRowAndNoOtherChanges(t *testing.T) {
 	if !ok {
 		t.Fatal("backendByName(\"gitlab\") ok = false, want true")
 	}
-	if row.name != "gitlab" {
-		t.Errorf("backendByName(\"gitlab\").name = %q, want %q", row.name, "gitlab")
+	if row.Name != "gitlab" {
+		t.Errorf("backendByName(\"gitlab\").name = %q, want %q", row.Name, "gitlab")
 	}
-	if !row.validAsTracker || !row.validAsCodeForge {
-		t.Errorf("backendByName(\"gitlab\") validAsTracker/validAsCodeForge = %v/%v, want true/true", row.validAsTracker, row.validAsCodeForge)
+	if !row.ValidAsTracker || !row.ValidAsCodeForge {
+		t.Errorf("backendByName(\"gitlab\") validAsTracker/validAsCodeForge = %v/%v, want true/true", row.ValidAsTracker, row.ValidAsCodeForge)
 	}
 
 	// validate() accepts ISSUE_TRACKER=gitlab / CODE_FORGE=gitlab with no
@@ -129,10 +131,10 @@ func TestBackendRegistry_NewBackendNeedsOnlyRowAndNoOtherChanges(t *testing.T) {
 	if !ok {
 		t.Fatal("backendByName(c.issueTracker) ok = false, want true")
 	}
-	if hintRow.doctorTokenHint != "GITLAB_TOKEN" {
-		t.Errorf("doctorTokenHint = %q, want %q", hintRow.doctorTokenHint, "GITLAB_TOKEN")
+	if hintRow.DoctorTokenHint != "GITLAB_TOKEN" {
+		t.Errorf("doctorTokenHint = %q, want %q", hintRow.DoctorTokenHint, "GITLAB_TOKEN")
 	}
-	if hintRow.doctorSlugHint != "GITLAB_BASE_URL" {
-		t.Errorf("doctorSlugHint = %q, want %q", hintRow.doctorSlugHint, "GITLAB_BASE_URL")
+	if hintRow.DoctorSlugHint != "GITLAB_BASE_URL" {
+		t.Errorf("doctorSlugHint = %q, want %q", hintRow.DoctorSlugHint, "GITLAB_BASE_URL")
 	}
 }
