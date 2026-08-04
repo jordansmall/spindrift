@@ -341,6 +341,42 @@ func TestPickIssue_TargetFoundWithinFullPage_ReturnsDissolvedMsg(t *testing.T) {
 	}
 }
 
+// fullyPaginatedFake wraps forge.Fake and additionally implements
+// forge.FullyPaginated, reporting true — a stand-in for the forgejo/jira
+// adapters, which now walk every page of ListIssues, so a result at or
+// above forge.ResultPageLimit is a complete set, never a truncated one.
+type fullyPaginatedFake struct {
+	*forge.Fake
+}
+
+func (fullyPaginatedFake) WalksAllPages() bool { return true }
+
+// TestPickIssue_InProgressListAtPageLimit_FullyPaginated_NotTruncated
+// verifies that a tracker implementing forge.FullyPaginated is exempt from
+// issueInState's page-limit fail-safe (#707/#986): unlike
+// TestPickIssue_InProgressListAtPageLimit_TargetMissing_FailsSafe's plain
+// forge.Fake, a full-looking InProgress page from a fully-paginating
+// tracker is trusted as complete, so a target missing from it means "not
+// InProgress" rather than "possibly truncated" — the pick proceeds instead
+// of dissolving with a truncation error.
+func TestPickIssue_InProgressListAtPageLimit_FullyPaginated_NotTruncated(t *testing.T) {
+	f := fullyPaginatedFake{forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress"})}
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing"})
+	for i := 0; i < forge.ResultPageLimit; i++ {
+		f.SetIssue(forge.Issue{Number: strconv.Itoa(1000 + i), Title: "other", Labels: []string{"agent-in-progress"}})
+	}
+
+	msg := PickIssue(f, "42", "fix the thing", KindWork)
+
+	queued, ok := msg.(PickQueuedMsg)
+	if !ok {
+		t.Fatalf("PickIssue() = %+v (%T), want PickQueuedMsg — a fully-paginating tracker's full page is complete, not truncated", msg, msg)
+	}
+	if queued.Number != "42" {
+		t.Errorf("PickQueuedMsg = %+v, want #42 queued", queued)
+	}
+}
+
 func hasLabel(iss forge.Issue, label string) bool {
 	for _, l := range iss.Labels {
 		if l == label {
