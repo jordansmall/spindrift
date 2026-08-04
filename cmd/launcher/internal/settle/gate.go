@@ -36,6 +36,15 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, gen uint64, result di
 				clsNote += "  resetsAt=" + result.Classification.ResetAt.UTC().Format(time.RFC3339)
 			}
 		}
+		// A read-only run's !OutcomeFound here may just mean the Box crashed
+		// or was cut short before it ever printed a parseable outcome line
+		// at all — no ADR 0036 synthetic backstop line to key off of, unlike
+		// the "blocked" arm below (issue #2253). tryAdoptRelayedBranchNoOutcome
+		// checks the same self-report fingerprint tryAdoptRelayedBranch does;
+		// see its own doc comment for the full reasoning.
+		if s.tryAdoptRelayedBranchNoOutcome(d, num, gen, result) {
+			return
+		}
 		s.settleUnresolved(num, clsNote, "no outcome in log")
 		return
 	}
