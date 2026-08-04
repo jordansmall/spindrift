@@ -30,6 +30,7 @@ var testLabels = forge.DispatchLabels{
 	InProgress:   "agent-in-progress",
 	Complete:     "agent-complete",
 	Failed:       "agent-failed",
+	Recoverable:  "agent-recoverable",
 }
 
 func setGitIdentityEnv(t *testing.T) {
@@ -640,6 +641,117 @@ func TestWire_ComposedLoop_MissingBundleBlocksNotFailed(t *testing.T) {
 	}
 	if err := exec.Command("git", "-C", operatorDir, "rev-parse", "--verify", "--quiet", "refs/heads/"+parent.String()).Run(); err == nil {
 		t.Errorf("refs/heads/%s must not exist — parent's only seam never landed", parent)
+	}
+}
+
+// TestWire_ComposedLoop_NoOutcomeBundlePresentRecoversAndLands drives ADR
+// 0039's local push-only recovery path end to end through the composed
+// wiring (issue #2254): a Box that never emitted a parseable SPINDRIFT_OUTCOME
+// line at all (OutcomeFound: false) but did leave a genuine success
+// self-report and a real bundle in the outbox must not be parked
+// agent-failed. settle.Settle's tryMarkRecoverable (gate.go's !OutcomeFound
+// arm) promotes the issue to Recoverable instead — neither agent-complete
+// nor agent-failed — and only `spindrift recover`'s own
+// Settler.SettleRelayedBranch call (landRelayedBranchPushOnly, the same
+// method recoverByNumber in main.go drives) actually relays the bundle and
+// fast-forward-merges it onto the Integration branch, landing the issue for
+// real.
+func TestWire_ComposedLoop_NoOutcomeBundlePresentRecoversAndLands(t *testing.T) {
+	setGitIdentityEnv(t)
+	operatorDir := newOperatorCheckout(t)
+	t.Chdir(operatorDir)
+
+	accumDir := filepath.Join(t.TempDir(), "accum.git")
+	if err := local.SeedAccumulationRepo(accumDir, operatorDir, testBaseBranch); err != nil {
+		t.Fatalf("SeedAccumulationRepo: %v", err)
+	}
+
+	issuesDir := t.TempDir()
+	it := local.NewLocalTracker(issuesDir, testLabels)
+	const num = "70"
+	writeLocalIssue(t, issuesDir, num, "seam 70", "", testLabels.InProgress)
+
+	lw := localloop.Wire(localloop.Config{
+		AccumulationRepoDir: accumDir,
+		BaseBranch:          testBaseBranch,
+		GitUserName:         "Test Bot",
+		GitUserEmail:        "bot@example.com",
+		BranchPrefix:        "agent/issue-",
+	}, it)
+
+	parent := lw.ResolveParent(num)
+	cf := lw.CodeForgeForIssue(num)
+	branch := cf.AgentBranch(num)
+
+	// A real commit on the agent branch, bundled out via the real
+	// bundleout producer -- standing in for a Box that finished its work
+	// and relayed it to the outbox before whatever cut its final print
+	// short left no parseable outcome line behind.
+	fixtureSHA := bundleFixtureCommit(t, accumDir, testBaseBranch, branch, num, lw.OutboxDir(num))
+
+	cfg := settle.Config{
+		MergeMode:         "immediate",
+		CompleteLabel:     testLabels.Complete,
+		OutboxDir:         lw.OutboxDir,
+		CodeForgeForIssue: lw.CodeForgeForIssue,
+	}
+	s := settle.New(cfg, it, cf)
+	result := dispatch.Result{
+		OutcomeFound:    false,
+		SelfReportFound: true,
+		SelfReport:      outcome.SelfReport{Status: "ready"},
+	}
+	s.Settle(dispatch.NewFake(), num, 0, result)
+
+	iss, err := it.Issue(num)
+	if err != nil {
+		t.Fatalf("Issue(%s): %v", num, err)
+	}
+	if !containsLabel(iss.Labels, testLabels.Recoverable) {
+		t.Fatalf("issue %s labels = %v, want %s after settle with no outcome line + bundle present", num, iss.Labels, testLabels.Recoverable)
+	}
+	if containsLabel(iss.Labels, testLabels.Failed) {
+		t.Fatalf("issue %s labels = %v, must NOT carry %s -- a recoverable bundle is not a failure", num, iss.Labels, testLabels.Failed)
+	}
+	if containsLabel(iss.Labels, testLabels.Complete) {
+		t.Fatalf("issue %s labels = %v, must NOT carry %s yet -- the branch has not landed until recover runs", num, iss.Labels, testLabels.Complete)
+	}
+
+	// Drive the recover path: the same Settler method and dispatch.Result
+	// shape recoverByNumber (main.go) builds when it recovers the driver's
+	// last genuine self-report from the issue's on-disk pass logs.
+	recoverResult := dispatch.Result{SelfReport: outcome.SelfReport{Status: "ready"}, SelfReportFound: true}
+	if !s.SettleRelayedBranch(dispatch.NewFake(), num, 0, recoverResult) {
+		t.Fatalf("SettleRelayedBranch(%s) = false, want true", num)
+	}
+
+	iss, err = it.Issue(num)
+	if err != nil {
+		t.Fatalf("Issue(%s): %v", num, err)
+	}
+	if !containsLabel(iss.Labels, testLabels.Complete) {
+		t.Fatalf("issue %s labels = %v, want %s after recover lands it", num, iss.Labels, testLabels.Complete)
+	}
+	if containsLabel(iss.Labels, testLabels.Failed) {
+		t.Fatalf("issue %s labels = %v, must NOT carry %s after a successful recover", num, iss.Labels, testLabels.Failed)
+	}
+
+	// The branch really did land: the fixture commit is reachable from the
+	// parent's Integration branch in the Accumulation repo.
+	integ := local.IntegrationBranch(parent)
+	if err := exec.Command("git", "-C", accumDir, "merge-base", "--is-ancestor", fixtureSHA, "refs/heads/"+integ).Run(); err != nil {
+		t.Errorf("fixture commit %s not reachable from Integration branch %s after recover", fixtureSHA, integ)
+	}
+
+	res, err := reconcile.Run(it, cf, nil, func(num string) forge.SeedScope {
+		p := lw.ResolveParent(num)
+		return forge.NewSeedScope(p.String(), local.IntegrationBranch(p))
+	})
+	if err != nil {
+		t.Fatalf("reconcile.Run: %v", err)
+	}
+	if len(res.Closed) != 1 || res.Closed[0] != num {
+		t.Fatalf("reconcile.Run closed = %v, want [%s]", res.Closed, num)
 	}
 }
 
