@@ -566,12 +566,18 @@ func repoBanner(c config) string {
 }
 
 // dispatchLabels builds the DispatchLabels mapping from loaded config.
+// Recoverable is a fixed string literal, not sourced from config/env: it
+// only ever applies to CODE_FORGE=local push-only runs and is stored as a
+// local frontmatter marker, never a real GitHub label, so it doesn't need
+// an env-configurable knob (which would also mean touching the
+// Nix-generated lib/env-schema.nix / flagtable_gen.go files) (#2254).
 func dispatchLabels(c config) forge.DispatchLabels {
 	return forge.DispatchLabels{
 		Dispatchable: c.label,
 		InProgress:   c.inProgressLabel,
 		Complete:     c.completeLabel,
 		Failed:       c.failedLabel,
+		Recoverable:  "agent-recoverable",
 	}
 }
 
