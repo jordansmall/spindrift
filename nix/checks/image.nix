@@ -263,12 +263,14 @@ in
   # The idempotency check (issue #420) hinges on the entrypoint sourcing its
   # marker from the same registry row lib/mkHarness.nix now looks up from
   # lib/prompt-contract.nix (issue #2246 slice 1). Since slice 2,
-  # agent/entrypoint.sh no longer hardcodes the marker literal itself: it
-  # calls the `_contract_marker` helper against the registry-rendered
+  # agent/entrypoint.sh no longer materializes a per-block *_CONTRACT_MARKER
+  # variable at all: `_inject_shared_block` resolves the marker internally
+  # via `_contract_marker "$id"` against the registry-rendered
   # _INJECT_BLOCK_ROWS array (contract-registry.sh, baked ahead of it at
   # image-build time), so the entrypoint.sh-side half of this check confirms
-  # the call site reads from the registry for this id, rather than
-  # re-asserting a marker literal that no longer appears in the source.
+  # the call site passes the bare id through to that single resolution point,
+  # rather than re-asserting a marker literal that no longer appears in the
+  # source.
   outcome-contract-marker-parity =
     let
       row = byId "outcome";
@@ -277,7 +279,7 @@ in
       row.marker == "# LAND THE CHANGE"
     ) "prompt-contract.nix outcome row's marker must be '# LAND THE CHANGE', got: ${row.marker}";
     pkgs.runCommand "outcome-contract-marker-parity" { } ''
-      grep -qF 'OUTCOME_CONTRACT_MARKER="$(_contract_marker outcome)"' ${../../agent/entrypoint.sh}
+      grep -qF '_inject_shared_block "outcome" "$OUTCOME_CONTRACT_FILE"' ${../../agent/entrypoint.sh}
       touch $out
     '';
 
@@ -294,8 +296,8 @@ in
       checkRow.marker == "# CHECK"
     ) "prompt-contract.nix check row's marker must be '# CHECK', got: ${checkRow.marker}";
     pkgs.runCommand "comms-check-contract-marker-parity" { } ''
-      grep -qF 'COMMS_CONTRACT_MARKER="$(_contract_marker comms)"' ${../../agent/entrypoint.sh}
-      grep -qF 'CHECK_CONTRACT_MARKER="$(_contract_marker check)"' ${../../agent/entrypoint.sh}
+      grep -qF '_inject_shared_block "comms" "$COMMS_CONTRACT_FILE"' ${../../agent/entrypoint.sh}
+      grep -qF '_inject_shared_block "check" "$CHECK_CONTRACT_FILE"' ${../../agent/entrypoint.sh}
       touch $out
     '';
 
@@ -309,7 +311,7 @@ in
     assert pkgs.lib.assertMsg (row.marker == "# POST THE VERDICT")
       "prompt-contract.nix research-verdict row's marker must be '# POST THE VERDICT', got: ${row.marker}";
     pkgs.runCommand "research-outcome-contract-marker-parity" { } ''
-      grep -qF 'RESEARCH_OUTCOME_CONTRACT_MARKER="$(_contract_marker research-verdict)"' ${../../agent/entrypoint.sh}
+      grep -qF '_inject_shared_block "research-verdict" "$RESEARCH_OUTCOME_CONTRACT_FILE"' ${../../agent/entrypoint.sh}
       touch $out
     '';
 
