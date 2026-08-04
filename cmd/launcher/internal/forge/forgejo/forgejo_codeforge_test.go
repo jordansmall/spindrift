@@ -22,7 +22,7 @@ func TestNewForgejoCodeForge_ImplementsPRForge(t *testing.T) {
 		BaseURL: "https://codeberg.org",
 		Repo:    "owner/repo",
 		Token:   "tok",
-	})
+	}, nil)
 	if _, ok := cf.(forge.PRForge); !ok {
 		t.Fatal("NewForgejoCodeForge does not satisfy forge.PRForge, want the full-parity PRForge adapter")
 	}
@@ -54,7 +54,7 @@ func newForgejoCodeForgeHarness(t *testing.T) *forgejoCodeForgeHarness {
 	repo := forgetest.NewGitRepoFixture(t, "main")
 	fake := newFakeForgejo(t)
 
-	cf := forgejo.NewForgejoCodeForge(forgejo.ForgejoCodeForgeConfig{
+	cf := forgejo.NewForgejoCodeForgeForTest(forgejo.ForgejoCodeForgeConfig{
 		BaseURL:      fake.URL(),
 		Repo:         "owner/repo",
 		Token:        "tok",
@@ -62,8 +62,7 @@ func newForgejoCodeForgeHarness(t *testing.T) *forgejoCodeForgeHarness {
 		UserName:     "Test Bot",
 		UserEmail:    "bot@example.com",
 		BranchPrefix: "agent/issue-",
-		GitRemoteURL: repo.Bare,
-	})
+	}, nil, repo.Bare)
 	h := &forgejoCodeForgeHarness{t: t, repo: repo, fake: fake, cf: cf}
 	fake.mergeHook = h.realMerge
 	return h
@@ -77,7 +76,7 @@ func (h *forgejoCodeForgeHarness) Forge() forge.CodeForge { return h.cf }
 func (h *forgejoCodeForgeHarness) Unreachable() forge.CodeForge {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
 	srv.Close()
-	return forgejo.NewForgejoCodeForge(forgejo.ForgejoCodeForgeConfig{
+	return forgejo.NewForgejoCodeForgeForTest(forgejo.ForgejoCodeForgeConfig{
 		BaseURL:      srv.URL,
 		Repo:         "owner/repo",
 		Token:        "tok",
@@ -85,8 +84,7 @@ func (h *forgejoCodeForgeHarness) Unreachable() forge.CodeForge {
 		UserName:     "Test Bot",
 		UserEmail:    "bot@example.com",
 		BranchPrefix: "agent/issue-",
-		GitRemoteURL: filepath.Join(h.t.TempDir(), "does-not-exist.git"),
-	})
+	}, nil, filepath.Join(h.t.TempDir(), "does-not-exist.git"))
 }
 
 func (h *forgejoCodeForgeHarness) BranchPrefix() string { return "agent/issue-" }

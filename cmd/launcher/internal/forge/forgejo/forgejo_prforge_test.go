@@ -42,13 +42,12 @@ func newPRForgeTestForge(t *testing.T, handler http.HandlerFunc) prReader {
 	t.Helper()
 	srv := httptest.NewServer(handler)
 	t.Cleanup(srv.Close)
-	cf := forgejo.NewForgejoCodeForge(forgejo.ForgejoCodeForgeConfig{
+	cf := forgejo.NewForgejoCodeForgeForTest(forgejo.ForgejoCodeForgeConfig{
 		BaseURL:      srv.URL,
 		Repo:         "owner/repo",
 		Token:        "tok",
-		GitRemoteURL: "unused",
 		BranchPrefix: "agent/issue-",
-	})
+	}, nil, "unused")
 	pr, ok := cf.(prReader)
 	if !ok {
 		t.Fatalf("forgejoCodeForge does not satisfy prReader (methods not yet implemented)")
@@ -551,13 +550,12 @@ func TestEnqueueAutoMerge_PostsMergeWhenChecksSucceed(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer srv.Close()
-	cf := forgejo.NewForgejoCodeForge(forgejo.ForgejoCodeForgeConfig{
+	cf := forgejo.NewForgejoCodeForgeForTest(forgejo.ForgejoCodeForgeConfig{
 		BaseURL:      srv.URL,
 		Repo:         "owner/repo",
 		Token:        "tok",
-		GitRemoteURL: "unused",
 		BranchPrefix: "agent/issue-",
-	})
+	}, nil, "unused")
 	pr, ok := cf.(prReader)
 	if !ok {
 		t.Fatalf("forgejoCodeForge does not satisfy prReader (methods not yet implemented)")
@@ -595,13 +593,12 @@ func TestMarkReady_StripsWIPPrefix(t *testing.T) {
 		}
 	}))
 	defer srv.Close()
-	cf := forgejo.NewForgejoCodeForge(forgejo.ForgejoCodeForgeConfig{
+	cf := forgejo.NewForgejoCodeForgeForTest(forgejo.ForgejoCodeForgeConfig{
 		BaseURL:      srv.URL,
 		Repo:         "owner/repo",
 		Token:        "tok",
-		GitRemoteURL: "unused",
 		BranchPrefix: "agent/issue-",
-	})
+	}, nil, "unused")
 	pr, ok := cf.(prReader)
 	if !ok {
 		t.Fatalf("forgejoCodeForge does not satisfy prReader (methods not yet implemented)")
@@ -636,13 +633,12 @@ func TestMarkReady_AlreadyReadyNoOp(t *testing.T) {
 		}
 	}))
 	defer srv.Close()
-	cf := forgejo.NewForgejoCodeForge(forgejo.ForgejoCodeForgeConfig{
+	cf := forgejo.NewForgejoCodeForgeForTest(forgejo.ForgejoCodeForgeConfig{
 		BaseURL:      srv.URL,
 		Repo:         "owner/repo",
 		Token:        "tok",
-		GitRemoteURL: "unused",
 		BranchPrefix: "agent/issue-",
-	})
+	}, nil, "unused")
 	pr, ok := cf.(prReader)
 	if !ok {
 		t.Fatalf("forgejoCodeForge does not satisfy prReader (methods not yet implemented)")
@@ -674,13 +670,12 @@ func TestMarkDraft_AddsWIPPrefix(t *testing.T) {
 		}
 	}))
 	defer srv.Close()
-	cf := forgejo.NewForgejoCodeForge(forgejo.ForgejoCodeForgeConfig{
+	cf := forgejo.NewForgejoCodeForgeForTest(forgejo.ForgejoCodeForgeConfig{
 		BaseURL:      srv.URL,
 		Repo:         "owner/repo",
 		Token:        "tok",
-		GitRemoteURL: "unused",
 		BranchPrefix: "agent/issue-",
-	})
+	}, nil, "unused")
 	pr, ok := cf.(prReader)
 	if !ok {
 		t.Fatalf("forgejoCodeForge does not satisfy prReader (methods not yet implemented)")
@@ -715,13 +710,12 @@ func TestMarkDraft_AlreadyDraftNoOp(t *testing.T) {
 		}
 	}))
 	defer srv.Close()
-	cf := forgejo.NewForgejoCodeForge(forgejo.ForgejoCodeForgeConfig{
+	cf := forgejo.NewForgejoCodeForgeForTest(forgejo.ForgejoCodeForgeConfig{
 		BaseURL:      srv.URL,
 		Repo:         "owner/repo",
 		Token:        "tok",
-		GitRemoteURL: "unused",
 		BranchPrefix: "agent/issue-",
-	})
+	}, nil, "unused")
 	pr, ok := cf.(prReader)
 	if !ok {
 		t.Fatalf("forgejoCodeForge does not satisfy prReader (methods not yet implemented)")

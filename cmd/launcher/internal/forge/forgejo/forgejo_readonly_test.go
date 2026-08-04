@@ -28,7 +28,7 @@ func newReadOnlyRelayHarness(t *testing.T) (*forgetest.GitRepoFixture, forge.Cod
 	repo := forgetest.NewGitRepoFixture(t, "main")
 	fake := newFakeForgejo(t)
 
-	cf := forgejo.NewReadOnlyForgejoCodeForge(forgejo.ForgejoCodeForgeConfig{
+	cf := forgejo.NewReadOnlyForgejoCodeForgeForTest(forgejo.ForgejoCodeForgeConfig{
 		BaseURL:      fake.URL(),
 		Repo:         "owner/repo",
 		Token:        "tok",
@@ -36,8 +36,7 @@ func newReadOnlyRelayHarness(t *testing.T) (*forgetest.GitRepoFixture, forge.Cod
 		UserName:     "Test Bot",
 		UserEmail:    "bot@example.com",
 		BranchPrefix: "agent/issue-",
-		GitRemoteURL: repo.Bare,
-	})
+	}, nil, repo.Bare)
 	return repo, cf
 }
 
@@ -51,7 +50,7 @@ func TestNewForgejoCodeForge_DoesNotImplementBundleRelay(t *testing.T) {
 		BaseURL: "https://codeberg.org",
 		Repo:    "owner/repo",
 		Token:   "tok",
-	})
+	}, nil)
 	if _, ok := cf.(forge.BundleRelay); ok {
 		t.Error("NewForgejoCodeForge satisfies forge.BundleRelay, want it hidden for read-write")
 	}
@@ -66,7 +65,7 @@ func TestNewForgejoCodeForge_DoesNotImplementDraftPRCreator(t *testing.T) {
 		BaseURL: "https://codeberg.org",
 		Repo:    "owner/repo",
 		Token:   "tok",
-	})
+	}, nil)
 	if _, ok := cf.(forge.DraftPRCreator); ok {
 		t.Error("NewForgejoCodeForge satisfies forge.DraftPRCreator, want it hidden for read-write")
 	}
@@ -217,7 +216,7 @@ func TestReadOnlyForgejoCodeForge_CreateDraftPR_ReturnsURL(t *testing.T) {
 		BaseURL: srv.URL,
 		Repo:    "owner/repo",
 		Token:   "tok",
-	})
+	}, nil)
 	dpc, ok := cf.(forge.DraftPRCreator)
 	if !ok {
 		t.Fatal("forgejo read-only CodeForge does not implement forge.DraftPRCreator")
@@ -260,7 +259,7 @@ func TestReadOnlyForgejoCodeForge_CreateDraftPR_Errors(t *testing.T) {
 		BaseURL: srv.URL,
 		Repo:    "owner/repo",
 		Token:   "tok",
-	})
+	}, nil)
 	dpc := cf.(forge.DraftPRCreator)
 
 	if _, err := dpc.CreateDraftPR("feat: add widget", "body", "main", "fail-head"); err == nil {

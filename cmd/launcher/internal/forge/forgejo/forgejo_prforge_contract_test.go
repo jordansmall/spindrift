@@ -19,14 +19,13 @@ type prforgeHarness struct {
 func newPRForgeHarness(t *testing.T) *prforgeHarness {
 	t.Helper()
 	f := newFakeForgejo(t)
-	cf := forgejo.NewForgejoCodeForge(forgejo.ForgejoCodeForgeConfig{
+	cf := forgejo.NewForgejoCodeForgeForTest(forgejo.ForgejoCodeForgeConfig{
 		BaseURL:      f.URL(),
 		Repo:         "owner/repo",
 		Token:        "tok",
 		BaseBranch:   "main",
 		BranchPrefix: "agent/issue-",
-		GitRemoteURL: "unused",
-	})
+	}, nil, "unused")
 	return &prforgeHarness{fakeForgejo: f, cf: cf}
 }
 

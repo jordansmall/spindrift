@@ -1,6 +1,8 @@
 package forgejo
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -40,5 +42,36 @@ func TestForgejoGitRemoteURL_FallbackKeepsToken(t *testing.T) {
 	got := forgejoGitRemoteURL("https://forge.test\x7f", "owner/repo", "tok")
 	if !strings.Contains(got, "tok@") {
 		t.Fatalf("forgejoGitRemoteURL(...) = %q, want it to contain %q (token as userinfo)", got, "tok@")
+	}
+}
+
+// TestNewForgejoCodeForge_ReusesTrackerRESTClient asserts issue #2256's
+// shared-client seam: when NewForgejoCodeForge is handed a tracker built by
+// NewForgejoClient, the CodeForge's underlying *rest.Client is the identical
+// pointer to the tracker's own -- not a second, separately constructed
+// client against the same repo. Passing a nil tracker (the "different
+// backend, or none configured" case) must fall back to building its own
+// client instead.
+func TestNewForgejoCodeForge_ReusesTrackerRESTClient(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	defer srv.Close()
+
+	tracker := NewForgejoClient(ForgejoConfig{BaseURL: srv.URL, Repo: "owner/repo", Token: "tok"})
+	fc, ok := tracker.(*forgejoClient)
+	if !ok {
+		t.Fatalf("NewForgejoClient(...) = %T, want *forgejoClient", tracker)
+	}
+
+	cf := newForgejoCodeForge(ForgejoCodeForgeConfig{BaseURL: srv.URL, Repo: "owner/repo", Token: "tok"}, tracker, "unused")
+	if cf.rest != fc.rest {
+		t.Fatalf("newForgejoCodeForge(..., tracker, ...).rest = %p, want the tracker's own *rest.Client %p (shared instance)", cf.rest, fc.rest)
+	}
+
+	// Sanity check the fallback: a nil tracker (or one that isn't a
+	// *forgejoClient) must NOT share the same *rest.Client as some other
+	// unrelated tracker -- it builds its own instead.
+	cfNoTracker := newForgejoCodeForge(ForgejoCodeForgeConfig{BaseURL: srv.URL, Repo: "owner/repo", Token: "tok"}, nil, "unused")
+	if cfNoTracker.rest == fc.rest {
+		t.Fatal("newForgejoCodeForge(..., nil, ...).rest unexpectedly shares the unrelated tracker's *rest.Client")
 	}
 }

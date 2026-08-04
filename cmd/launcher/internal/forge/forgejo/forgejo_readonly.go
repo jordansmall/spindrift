@@ -28,8 +28,15 @@ type readOnlyCodeForge struct {
 // RelayBundle and CreateDraftPR, the host-mediated hand-off for a Box that
 // cannot push or open a PR directly (mirroring github's
 // NewReadOnlyCodeForge, issue #1918/#1919).
-func NewReadOnlyForgejoCodeForge(cfg ForgejoCodeForgeConfig) forge.CodeForge {
-	cf := NewForgejoCodeForge(cfg).(*forgejoCodeForge)
+func NewReadOnlyForgejoCodeForge(cfg ForgejoCodeForgeConfig, tracker forge.IssueTracker) forge.CodeForge {
+	cf := NewForgejoCodeForge(cfg, tracker).(*forgejoCodeForge)
+	return &readOnlyCodeForge{forgejoCodeForge: cf}
+}
+
+// NewReadOnlyForgejoCodeForgeForTest mirrors NewForgejoCodeForgeForTest for
+// the read-only wrapper.
+func NewReadOnlyForgejoCodeForgeForTest(cfg ForgejoCodeForgeConfig, tracker forge.IssueTracker, gitRemoteURL string) forge.CodeForge {
+	cf := newForgejoCodeForge(cfg, tracker, gitRemoteURL)
 	return &readOnlyCodeForge{forgejoCodeForge: cf}
 }
 
@@ -74,12 +81,8 @@ func (c *readOnlyCodeForge) CreateDraftPR(title, body, base, head string) (strin
 		"body":  body,
 	}
 	var payload forgejoPullPayload
-	status, err := c.rest.do(http.MethodPost, c.rest.repoPath()+"/pulls", reqBody, &payload)
-	if err != nil {
+	if err := c.rest.Do(http.MethodPost, c.repoPath()+"/pulls", reqBody, &payload); err != nil {
 		return "", fmt.Errorf("forgejo: create draft PR: %w", err)
-	}
-	if status < 200 || status >= 300 {
-		return "", fmt.Errorf("forgejo: create draft PR: unexpected status %d", status)
 	}
 	return payload.HTMLURL, nil
 }
