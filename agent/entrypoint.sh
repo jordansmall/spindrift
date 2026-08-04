@@ -528,7 +528,7 @@ _validate_prompt_contract() {
   # POST THE VERDICT section) -- missing it here means the verdict can never
   # reach the launcher.
   if _is_research_kind && [ -n "$BOX_ACCESS_READ_ONLY" ]; then
-    _row="$(_validate_marker_row verdict-comment-relay)"
+    _row="$(_validate_marker_row verdict-comment-relay)" || exit 1
     IFS='|' read -r _ _marker _ <<<"$_row"
     if [[ "$prompt" != *"$_marker"* ]]; then
       echo "_validate_prompt_contract: read-only research dispatch's rendered prompt is missing the required '$_marker' marker -- this belongs in research-prompt.md's (or a SPINDRIFT_PROMPT_DIR override's) POST THE VERDICT section; without it a read-only Box has no way to hand its verdict to the launcher. Refusing to invoke the Driver." >&2
@@ -544,7 +544,7 @@ _validate_prompt_contract() {
   # below, so that test stays a single flat if/else with no nested fi ahead
   # of its else -- the shape orchestrator-fork-well-formed's line-scan
   # (nix/checks/prompts.nix) requires of every $ORCHESTRATOR conditional.
-  _row="$(_validate_marker_row reviewer-verdict)"
+  _row="$(_validate_marker_row reviewer-verdict)" || exit 1
   IFS='|' read -r _ _marker _ <<<"$_row"
   if [ -n "$ORCHESTRATOR" ] && [ -n "$review_prompt_rendered" ] \
     && [[ "$review_prompt_rendered" != *"$_marker"* ]]; then
@@ -567,7 +567,7 @@ _validate_prompt_contract() {
   # gate's pr-intent-recovery nudge below, plus settle's bundle-adopt salvage
   # path), so a missing marker here is advisory only.
   if [ -n "$BOX_ACCESS_READ_ONLY" ] && ! _is_research_kind; then
-    _row="$(_validate_marker_row pr-intent)"
+    _row="$(_validate_marker_row pr-intent)" || exit 1
     IFS='|' read -r _ _marker _ <<<"$_row"
     if [[ "$prompt" != *"$_marker"* ]]; then
       echo "_validate_prompt_contract: warning -- read-only dispatch's rendered prompt is missing the '$_marker' marker (belongs in issue-prompt.md's, or fix-prompt.md's injected, OPEN A PULL REQUEST section). Proceeding: a status=ready run with no PR-intent line still gets one resume-nudge attempt post-driver, and a genuinely exhausted attempt falls back to the merge-blocked report rather than losing the branch." >&2
@@ -582,7 +582,7 @@ _validate_prompt_contract() {
   # working non-fatal backstop (the filer's best-effort PR-body fallback), so
   # a missing marker here is advisory only.
   if [ -n "$FILER_FILE_RELAY" ]; then
-    _row="$(_validate_marker_row issue-intent)"
+    _row="$(_validate_marker_row issue-intent)" || exit 1
     IFS='|' read -r _ _marker _ <<<"$_row"
     local _filer_prompt
     _filer_prompt="$(printf '%s' "${agents_json:-}" | jq -r '.filer.prompt // empty')"
