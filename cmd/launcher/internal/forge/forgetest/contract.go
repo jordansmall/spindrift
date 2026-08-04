@@ -46,11 +46,11 @@ type NativeFailureIsolatable interface {
 
 // PriorityCapable is implemented by harnesses whose adapter resolves the
 // agent-priority-* label family (ADR 0040) into a real forge.Priority tier —
-// github and the Fake as of issue #2281. forgejo does not yet (tracked
-// separately as issue #2283), and jira/local are documented to default every
-// issue to PriorityNormal permanently. testLabelToPriority type-asserts for
-// this marker to decide whether a labeled issue should resolve to its tier
-// or, for a harness that hasn't implemented one, stay at PriorityNormal.
+// github and the Fake as of issue #2281, forgejo as of issue #2283. jira/local
+// are documented to default every issue to PriorityNormal permanently.
+// testLabelToPriority type-asserts for this marker to decide whether a
+// labeled issue should resolve to its tier or, for a harness that hasn't
+// implemented one, stay at PriorityNormal.
 type PriorityCapable interface {
 	IsPriorityCapable()
 }
@@ -273,14 +273,13 @@ func testDispatchOrder(t *testing.T, h Harness) {
 // testLabelToPriority verifies label->Priority resolution (ADR 0040): an
 // unlabeled issue resolves to PriorityNormal on every adapter, unconditionally
 // — that assertion holds whether or not the adapter maps agent-priority-*
-// labels at all. Harnesses that implement PriorityCapable (github, Fake) are
-// additionally asserted to resolve each agent-priority-* label to its own
-// tier, and a conflicting pair to the highest tier present. Harnesses that
-// don't implement it (forgejo, jira, local) are asserted to stay at
+// labels at all. Harnesses that implement PriorityCapable (github, forgejo,
+// Fake) are additionally asserted to resolve each agent-priority-* label to
+// its own tier, and a conflicting pair to the highest tier present. Harnesses
+// that don't implement it (jira, local) are asserted to stay at
 // PriorityNormal even when an issue carries an agent-priority-* label —
 // documenting today's non-capable-adapter behavior rather than a future
-// commitment (forgejo's own resolution is issue #2283; jira/local never map
-// it, per ADR 0040).
+// commitment (jira/local never map it, per ADR 0040).
 func testLabelToPriority(t *testing.T, h Harness) {
 	tr := h.Tracker()
 	_, capable := h.(PriorityCapable)
