@@ -22,12 +22,13 @@ type LabelMeta struct {
 	Color       string // hex without leading #
 }
 
-// TriageLabelMeta is the single source of truth for default triage/research
-// label colors and descriptions, keyed by the canonical label name. It
-// covers both the four operator-configurable work-tier labels and the six
-// fixed research-tier labels (ADR 0022, `forge.ResearchDispatchLabels()` /
-// `forge.ResearchVerdictLabels()`) so a doctor run creates either kind with a
-// real color/description instead of falling back to gray.
+// TriageLabelMeta is the single source of truth for default triage/research/
+// priority label colors and descriptions, keyed by the canonical label name.
+// It covers the four operator-configurable work-tier labels, the six fixed
+// research-tier labels (ADR 0022, `forge.ResearchDispatchLabels()` /
+// `forge.ResearchVerdictLabels()`), and the three fixed priority-tier labels
+// (ADR 0040, `forge.PriorityLabelNames()`) so a doctor run creates any kind
+// with a real color/description instead of falling back to gray.
 var TriageLabelMeta = map[string]LabelMeta{
 	"ready-for-agent":   {Description: "Fully specified; ready for an AFK agent", Color: "0075ca"},
 	"agent-in-progress": {Description: "An AFK agent is actively working this issue", Color: "e4e669"},
@@ -40,6 +41,10 @@ var TriageLabelMeta = map[string]LabelMeta{
 	"agent-research-reject":      {Description: "False positive, not worth it, or a duplicate — close it", Color: "e11d21"},
 	"agent-research-unclear":     {Description: "Needs a human answer — answer, then re-apply agent-research", Color: "d4c5f9"},
 	"agent-research-failed":      {Description: "Box crashed or produced no verdict; needs human triage", Color: "b60205"},
+
+	"agent-priority-critical": {Description: "Drop everything — highest dispatch priority", Color: "d73a4a"},
+	"agent-priority-high":     {Description: "Dispatch ahead of normal-priority issues", Color: "ff8c00"},
+	"agent-priority-low":      {Description: "Dispatch behind normal-priority issues", Color: "8a9ba8"},
 }
 
 // ResearchLabelNames returns the six fixed research-tier label names (ADR
@@ -55,6 +60,13 @@ func ResearchLabelNames() []string {
 	return names
 }
 
+// PriorityLabelNames returns the three fixed priority-tier label names (ADR
+// 0040), sourced from forge.PriorityLabelNames() rather than duplicated as
+// string literals.
+func PriorityLabelNames() []string {
+	return forge.PriorityLabelNames()
+}
+
 // Config is the minimal slice of launcher config Run needs: the Issue
 // Tracker kind (for error hints) and the four work-tier label names.
 type Config struct {
@@ -66,11 +78,12 @@ type Config struct {
 }
 
 // Run probes both seams (IssueTracker + CodeForge), then checks that all
-// configured triage labels and the fixed research-tier labels (ADR 0022)
-// exist in the repository. When interactive is true and labels are missing,
-// it prompts to create them. In non-interactive mode, missing triage labels
-// are fatal (non-zero exit); missing research labels are advisory only and
-// never affect the exit code. stdin is an already-constructed *bufio.Scanner
+// configured triage labels and the fixed research-tier (ADR 0022) and
+// priority-tier (ADR 0040) labels exist in the repository. When interactive
+// is true and labels are missing, it prompts to create them. In
+// non-interactive mode, missing triage labels are fatal (non-zero exit);
+// missing research and priority labels are advisory only and never affect
+// the exit code. stdin is an already-constructed *bufio.Scanner
 // so a caller mid-way through its own scripted stdin flow (Quickstart's
 // finish line) can hand over the same scanner instead of double-wrapping the
 // underlying reader and losing already-buffered input.
@@ -112,14 +125,15 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, w io.Writer, stdin
 		return missing
 	}
 
-	// checkLabels reports on both label tiers: work (fatal if missing) and
+	// checkLabels reports on all three label tiers: work (fatal if missing),
 	// research (advisory — ADR 0022's agent-research family is reported but
 	// never fails the check, so CI doctor runs stay green for deployments
-	// that don't use research yet).
-	checkLabels := func() (workMissing, researchMissing []string, err error) {
+	// that don't use research yet), and priority (advisory — ADR 0040's
+	// agent-priority-* family, same treatment).
+	checkLabels := func() (workMissing, researchMissing, priorityMissing []string, err error) {
 		existing, lerr := it.ListLabels()
 		if lerr != nil {
-			return nil, nil, fmt.Errorf("label check failed: %w", lerr)
+			return nil, nil, nil, fmt.Errorf("label check failed: %w", lerr)
 		}
 		present := make(map[string]bool, len(existing))
 		for _, l := range existing {
@@ -127,17 +141,21 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, w io.Writer, stdin
 		}
 		workMissing = checkLabelSet([]string{c.Label, c.InProgressLabel, c.FailedLabel, c.CompleteLabel}, present)
 		researchMissing = checkLabelSet(ResearchLabelNames(), present)
-		return workMissing, researchMissing, nil
+		priorityMissing = checkLabelSet(PriorityLabelNames(), present)
+		return workMissing, researchMissing, priorityMissing, nil
 	}
 
-	workMissing, researchMissing, err := checkLabels()
+	workMissing, researchMissing, priorityMissing, err := checkLabels()
 	if err != nil {
 		return err
 	}
 	if len(researchMissing) > 0 {
 		fmt.Fprintf(w, "advisory: %d research label(s) missing (ADR 0022) — does not fail this check\n", len(researchMissing))
 	}
-	missing := append(append([]string{}, workMissing...), researchMissing...)
+	if len(priorityMissing) > 0 {
+		fmt.Fprintf(w, "advisory: %d priority label(s) missing (ADR 0040) — does not fail this check\n", len(priorityMissing))
+	}
+	missing := append(append(append([]string{}, workMissing...), researchMissing...), priorityMissing...)
 	if len(missing) == 0 {
 		fmt.Fprintln(w, "ok: all triage and research labels present")
 		return nil
@@ -171,19 +189,28 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, w io.Writer, stdin
 	}
 
 	// Re-verify after creation.
-	workMissing, researchMissing, err = checkLabels()
+	workMissing, researchMissing, priorityMissing, err = checkLabels()
 	if err != nil {
 		return err
 	}
 	if len(workMissing) > 0 {
 		return fmt.Errorf("one or more triage labels are still missing after creation")
 	}
-	// Work labels are fatal (handled above) and research labels are
-	// advisory (ADR 0022), so the two tiers get separate wrap-up lines
-	// here: an advisory note if research is still short after creation,
-	// or a single success line naming both tiers once neither is.
+	// Work labels are fatal (handled above) and research/priority labels
+	// are advisory (ADR 0022 / ADR 0040), so each advisory tier gets its
+	// own wrap-up line here: an advisory note if that tier is still short
+	// after creation, or a single success line naming both fixed tiers
+	// once neither is.
+	stillMissing := false
 	if len(researchMissing) > 0 {
 		fmt.Fprintf(w, "advisory: %d research label(s) still missing after creation (ADR 0022) — does not fail this check: %s\n", len(researchMissing), strings.Join(researchMissing, ", "))
+		stillMissing = true
+	}
+	if len(priorityMissing) > 0 {
+		fmt.Fprintf(w, "advisory: %d priority label(s) still missing after creation (ADR 0040) — does not fail this check: %s\n", len(priorityMissing), strings.Join(priorityMissing, ", "))
+		stillMissing = true
+	}
+	if stillMissing {
 		return nil
 	}
 	fmt.Fprintln(w, "ok: all triage and research labels present")
