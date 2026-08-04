@@ -8,10 +8,8 @@
 package forgejo
 
 import (
-	"bytes"
-	"encoding/json"
+	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -21,6 +19,7 @@ import (
 	"strings"
 
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/forge/rest"
 )
 
 // ForgejoConfig configures the Forgejo IssueTracker adapter.
@@ -61,8 +60,8 @@ const defaultForgejoBaseURL = "https://codeberg.org"
 
 // forgejoClient is the Forgejo REST adapter. It satisfies IssueTracker only.
 type forgejoClient struct {
-	cfg ForgejoConfig
-	hc  *http.Client
+	cfg  ForgejoConfig
+	rest *rest.Client
 }
 
 // NewForgejoClient returns an IssueTracker backed by the Forgejo REST API.
@@ -75,47 +74,27 @@ func NewForgejoClient(cfg ForgejoConfig) forge.IssueTracker {
 	if hc == nil {
 		hc = http.DefaultClient
 	}
-	return &forgejoClient{cfg: cfg, hc: hc}
+	// The 405/409 -> errMergeRefused entries only ever matter on the merge
+	// endpoint (forgejo_codeforge.go's postMerge), which this IssueTracker
+	// never calls -- they're carried here too so that when
+	// NewForgejoCodeForge reuses this tracker's *rest.Client (issue #2256's
+	// shared-client seam), the merge endpoint's disambiguation still works
+	// against the reused instance.
+	statuses := rest.StatusMap{
+		http.StatusUnauthorized:     forge.ErrAuthFailure,
+		http.StatusForbidden:        forge.ErrAuthFailure,
+		http.StatusNotFound:         forge.ErrNotFound,
+		http.StatusMethodNotAllowed: errMergeRefused,
+		http.StatusConflict:         errMergeRefused,
+	}
+	restClient := rest.New(cfg.BaseURL, rest.TokenAuth{Scheme: "token", Token: cfg.Token}, "forgejo", statuses, hc)
+	return &forgejoClient{cfg: cfg, rest: restClient}
 }
 
 // repoPath returns the API base path for the configured repo,
 // /api/v1/repos/{owner}/{repo}.
 func (c *forgejoClient) repoPath() string {
 	return "/api/v1/repos/" + c.cfg.Repo
-}
-
-// do issues a Forgejo REST request with the given method, path (relative to
-// cfg.BaseURL), and JSON body (nil for none), and decodes a JSON response
-// into out (nil to discard the body). It returns the HTTP status code so
-// callers can branch on it.
-func (c *forgejoClient) do(method, path string, body, out any) (int, error) {
-	var reqBody io.Reader
-	if body != nil {
-		b, err := json.Marshal(body)
-		if err != nil {
-			return 0, fmt.Errorf("forgejo: marshal request: %w", err)
-		}
-		reqBody = bytes.NewReader(b)
-	}
-	req, err := http.NewRequest(method, c.cfg.BaseURL+path, reqBody)
-	if err != nil {
-		return 0, fmt.Errorf("forgejo: build request: %w", err)
-	}
-	req.Header.Set("Authorization", "token "+c.cfg.Token)
-	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
-	resp, err := c.hc.Do(req)
-	if err != nil {
-		return 0, fmt.Errorf("forgejo: %s %s: %w", method, path, err)
-	}
-	defer resp.Body.Close()
-	if out != nil {
-		if err := json.NewDecoder(resp.Body).Decode(out); err != nil && err != io.EOF {
-			return resp.StatusCode, fmt.Errorf("forgejo: decode response from %s %s: %w", method, path, err)
-		}
-	}
-	return resp.StatusCode, nil
 }
 
 // forgejoLabel is the label shape Forgejo's REST API emits.
@@ -168,12 +147,8 @@ func toForgeIssue(p forgejoIssuePayload) forge.Issue {
 // Issue returns the Forgejo issue's title, body, state, and labels.
 func (c *forgejoClient) Issue(num string) (forge.Issue, error) {
 	var payload forgejoIssuePayload
-	status, err := c.do(http.MethodGet, c.repoPath()+"/issues/"+num, nil, &payload)
-	if err != nil {
+	if err := c.rest.Do(http.MethodGet, c.repoPath()+"/issues/"+num, nil, &payload); err != nil {
 		return forge.Issue{}, err
-	}
-	if status != http.StatusOK {
-		return forge.Issue{}, fmt.Errorf("forgejo: issue %s: unexpected status %d", num, status)
 	}
 	return toForgeIssue(payload), nil
 }
@@ -209,12 +184,8 @@ func (c *forgejoClient) listIssues(label string) ([]forge.Issue, error) {
 		q.Set("labels", label)
 	}
 	var payload []forgejoIssuePayload
-	status, err := c.do(http.MethodGet, c.repoPath()+"/issues?"+q.Encode(), nil, &payload)
-	if err != nil {
+	if err := c.rest.Do(http.MethodGet, c.repoPath()+"/issues?"+q.Encode(), nil, &payload); err != nil {
 		return nil, err
-	}
-	if status != http.StatusOK {
-		return nil, fmt.Errorf("forgejo: issue list: unexpected status %d", status)
 	}
 	issues := make([]forge.Issue, len(payload))
 	for i, p := range payload {
@@ -236,15 +207,8 @@ func (c *forgejoClient) setLabels(num string, names []string) error {
 	if names == nil {
 		names = []string{}
 	}
-	status, err := c.do(http.MethodPut, c.repoPath()+"/issues/"+num+"/labels",
+	return c.rest.Do(http.MethodPut, c.repoPath()+"/issues/"+num+"/labels",
 		map[string]any{"labels": names}, nil)
-	if err != nil {
-		return err
-	}
-	if status < 200 || status >= 300 {
-		return fmt.Errorf("forgejo: set labels on %s: unexpected status %d", num, status)
-	}
-	return nil
 }
 
 // TransitionState moves issue num from state from to state to by replacing
@@ -329,12 +293,8 @@ func dependencyIDs(payload []forgejoDependencyPayload) []string {
 // that block num.
 func (c *forgejoClient) nativeDepsOf(num string) ([]string, error) {
 	var payload []forgejoDependencyPayload
-	status, err := c.do(http.MethodGet, c.repoPath()+"/issues/"+num+"/dependencies", nil, &payload)
-	if err != nil {
+	if err := c.rest.Do(http.MethodGet, c.repoPath()+"/issues/"+num+"/dependencies", nil, &payload); err != nil {
 		return nil, err
-	}
-	if status != http.StatusOK {
-		return nil, fmt.Errorf("forgejo: dependencies %s: unexpected status %d", num, status)
 	}
 	return dependencyIDs(payload), nil
 }
@@ -365,12 +325,8 @@ func (c *forgejoClient) DepsOf(num string) ([]forge.Dependency, error) {
 // to and is returned directly.
 func (c *forgejoClient) BlocksOf(num string) ([]forge.Dependency, error) {
 	var payload []forgejoDependencyPayload
-	status, err := c.do(http.MethodGet, c.repoPath()+"/issues/"+num+"/blocks", nil, &payload)
-	if err != nil {
+	if err := c.rest.Do(http.MethodGet, c.repoPath()+"/issues/"+num+"/blocks", nil, &payload); err != nil {
 		return nil, err
-	}
-	if status != http.StatusOK {
-		return nil, fmt.Errorf("forgejo: blocks %s: unexpected status %d", num, status)
 	}
 	return forge.WithSource(dependencyIDs(payload), forge.DepSourceNative), nil
 }
@@ -399,28 +355,14 @@ func (c *forgejoClient) CloseMergedIssue(num string) error {
 	if iss.State == forge.IssueClosed {
 		return nil
 	}
-	status, err := c.do(http.MethodPatch, c.repoPath()+"/issues/"+num,
+	return c.rest.Do(http.MethodPatch, c.repoPath()+"/issues/"+num,
 		map[string]string{"state": "closed"}, nil)
-	if err != nil {
-		return err
-	}
-	if status < 200 || status >= 300 {
-		return fmt.Errorf("forgejo: close issue %s: unexpected status %d", num, status)
-	}
-	return nil
 }
 
 // Comment posts a comment on the Forgejo issue.
 func (c *forgejoClient) Comment(num, body string) error {
-	status, err := c.do(http.MethodPost, c.repoPath()+"/issues/"+num+"/comments",
+	return c.rest.Do(http.MethodPost, c.repoPath()+"/issues/"+num+"/comments",
 		map[string]string{"body": body}, nil)
-	if err != nil {
-		return err
-	}
-	if status < 200 || status >= 300 {
-		return fmt.Errorf("forgejo: comment %s: unexpected status %d", num, status)
-	}
-	return nil
 }
 
 // PostIssue implements forge.HostPostedIssueFiler (issue #1964): it files a
@@ -430,13 +372,9 @@ func (c *forgejoClient) Comment(num, body string) error {
 // names), avoiding label-ID bookkeeping.
 func (c *forgejoClient) PostIssue(title, body string, labels []string) (string, error) {
 	var payload forgejoIssuePayload
-	status, err := c.do(http.MethodPost, c.repoPath()+"/issues",
-		map[string]any{"title": title, "body": body}, &payload)
-	if err != nil {
+	if err := c.rest.Do(http.MethodPost, c.repoPath()+"/issues",
+		map[string]any{"title": title, "body": body}, &payload); err != nil {
 		return "", err
-	}
-	if status < 200 || status >= 300 {
-		return "", fmt.Errorf("forgejo: post issue: unexpected status %d", status)
 	}
 	if len(labels) > 0 {
 		if err := c.setLabels(strconv.Itoa(payload.Number), labels); err != nil {
@@ -455,12 +393,8 @@ func (c *forgejoClient) StateLabels() forge.DispatchLabels {
 // ListLabels returns the repository's defined label names.
 func (c *forgejoClient) ListLabels() ([]string, error) {
 	var payload []forgejoLabel
-	status, err := c.do(http.MethodGet, c.repoPath()+"/labels", nil, &payload)
-	if err != nil {
+	if err := c.rest.Do(http.MethodGet, c.repoPath()+"/labels", nil, &payload); err != nil {
 		return nil, err
-	}
-	if status != http.StatusOK {
-		return nil, fmt.Errorf("forgejo: list labels: unexpected status %d", status)
 	}
 	return labelNames(payload), nil
 }
@@ -470,15 +404,8 @@ func (c *forgejoClient) ListLabels() ([]string, error) {
 // wants a leading # on the hex color, unlike the color argument's own
 // convention.
 func (c *forgejoClient) CreateLabel(name, description, color string) error {
-	status, err := c.do(http.MethodPost, c.repoPath()+"/labels",
+	return c.rest.Do(http.MethodPost, c.repoPath()+"/labels",
 		map[string]any{"name": name, "description": description, "color": "#" + color}, nil)
-	if err != nil {
-		return err
-	}
-	if status < 200 || status >= 300 {
-		return fmt.Errorf("forgejo: create label %q: unexpected status %d", name, status)
-	}
-	return nil
 }
 
 // forgejoRepoPayload is the subset of the Forgejo repository REST
@@ -491,15 +418,11 @@ type forgejoRepoPayload struct {
 // name (owner/repo).
 func (c *forgejoClient) Probe() (string, error) {
 	var payload forgejoRepoPayload
-	status, err := c.do(http.MethodGet, c.repoPath(), nil, &payload)
-	if err != nil {
+	if err := c.rest.Do(http.MethodGet, c.repoPath(), nil, &payload); err != nil {
+		if errors.Is(err, forge.ErrAuthFailure) {
+			return "", err
+		}
 		return "", fmt.Errorf("%w: %s", forge.ErrRepoNotFound, err)
-	}
-	if status == http.StatusUnauthorized || status == http.StatusForbidden {
-		return "", fmt.Errorf("%w: forgejo returned %d", forge.ErrAuthFailure, status)
-	}
-	if status != http.StatusOK {
-		return "", fmt.Errorf("%w: forgejo returned %d", forge.ErrRepoNotFound, status)
 	}
 	return payload.FullName, nil
 }
