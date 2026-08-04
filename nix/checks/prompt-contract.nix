@@ -369,4 +369,87 @@ in
     assert assertMsg (missing == [ ])
       "validateMarkersBashPreamble must contain every validateMarkersBashRows entry single-quote-wrapped and indented 2 spaces; missing: [${concatStringsSep ", " missing}]";
     pkgs.runCommand "prompt-contract-validate-markers-bash-preamble-contains-every-quoted-row" { } "touch $out";
+
+  # Pins buildTimeRejectVerdicts (issue #2250): the build-time reject arm that
+  # resolves each validateMarkers "reject" row into one of ok/reject/advise,
+  # given whatever static gate/content knowledge is available at build time.
+  # A future consumer (lib/mkHarness.nix) supplies the real staticGates/
+  # contentByRowId; this check exercises the pure function in isolation with
+  # minimal inline fixtures.
+  prompt-contract-build-time-reject-verdicts-reject-when-gate-true-and-marker-missing =
+    let
+      out = promptContract.buildTimeRejectVerdicts {
+        staticGates = {
+          orchestratorEnabled = true;
+        };
+        contentByRowId = {
+          reviewer-verdict = "no marker here";
+        };
+      };
+      row = builtins.head (builtins.filter (r: r.id == "reviewer-verdict") out);
+    in
+    assert assertMsg (row.verdict == "reject")
+      "buildTimeRejectVerdicts: reviewer-verdict must be 'reject' when orchestratorEnabled=true and its content lacks the marker, got: ${row.verdict}";
+    pkgs.runCommand "prompt-contract-build-time-reject-verdicts-reject-when-gate-true-and-marker-missing" { } "touch $out";
+
+  prompt-contract-build-time-reject-verdicts-advise-when-gate-false-and-marker-missing =
+    let
+      out = promptContract.buildTimeRejectVerdicts {
+        staticGates = {
+          orchestratorEnabled = false;
+        };
+        contentByRowId = {
+          reviewer-verdict = "no marker here";
+        };
+      };
+      row = builtins.head (builtins.filter (r: r.id == "reviewer-verdict") out);
+    in
+    assert assertMsg (row.verdict == "advise")
+      "buildTimeRejectVerdicts: reviewer-verdict must be 'advise' when orchestratorEnabled=false and its content lacks the marker, got: ${row.verdict}";
+    pkgs.runCommand "prompt-contract-build-time-reject-verdicts-advise-when-gate-false-and-marker-missing" { } "touch $out";
+
+  prompt-contract-build-time-reject-verdicts-ok-when-marker-present =
+    let
+      out = promptContract.buildTimeRejectVerdicts {
+        staticGates = {
+          orchestratorEnabled = true;
+        };
+        contentByRowId = {
+          reviewer-verdict = "the VERDICT: line is here";
+        };
+      };
+      row = builtins.head (builtins.filter (r: r.id == "reviewer-verdict") out);
+    in
+    assert assertMsg (row.verdict == "ok")
+      "buildTimeRejectVerdicts: reviewer-verdict must be 'ok' when its content contains the marker (regardless of the gate), got: ${row.verdict}";
+    pkgs.runCommand "prompt-contract-build-time-reject-verdicts-ok-when-marker-present" { } "touch $out";
+
+  prompt-contract-build-time-reject-verdicts-advise-when-fully-unresolved =
+    let
+      out = promptContract.buildTimeRejectVerdicts {
+        staticGates = { };
+        contentByRowId = { };
+      };
+      verdicts = map (r: r.verdict) out;
+    in
+    assert assertMsg (builtins.all (v: v == "advise") verdicts)
+      "buildTimeRejectVerdicts: every row must be 'advise' when both staticGates and contentByRowId are entirely unresolved, got: [${concatStringsSep ", " verdicts}]";
+    pkgs.runCommand "prompt-contract-build-time-reject-verdicts-advise-when-fully-unresolved" { } "touch $out";
+
+  prompt-contract-build-time-reject-verdicts-covers-every-reject-row =
+    let
+      out = promptContract.buildTimeRejectVerdicts {
+        staticGates = { };
+        contentByRowId = { };
+      };
+      expectedIds = map (r: r.id) (
+        builtins.filter (r: r.severity == "reject") promptContract.validateMarkers
+      );
+      outIds = map (r: r.id) out;
+    in
+    assert assertMsg (builtins.length out == builtins.length expectedIds)
+      "buildTimeRejectVerdicts must return exactly one entry per severity==\"reject\" validateMarkers row (currently ${toString (builtins.length expectedIds)}), got: ${toString (builtins.length out)}";
+    assert assertMsg (outIds == expectedIds)
+      "buildTimeRejectVerdicts must iterate validateMarkers' own severity==\"reject\" rows in order rather than a hand-duplicated list, expected ids [${concatStringsSep ", " expectedIds}], got: [${concatStringsSep ", " outIds}]";
+    pkgs.runCommand "prompt-contract-build-time-reject-verdicts-covers-every-reject-row" { } "touch $out";
 }
