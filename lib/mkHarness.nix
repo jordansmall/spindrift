@@ -380,8 +380,12 @@ let
   # rendered into agent/entrypoint.sh's `_INJECT_BLOCK_ROWS` array the same
   # way fragmentRegistryPreamble above renders `_FRAGMENT_ROWS` -- already
   # derived by prompt-contract.nix itself, so no re-derivation needed here
-  # (issue #2246).
-  contractRegistryPreamble = promptContract.injectBlocksBashPreamble;
+  # (issue #2246). Also carries the reject/warn marker matrix (issue #2249
+  # slice 1) as a second `_VALIDATE_MARKER_ROWS` array, concatenated onto
+  # the same preamble string so both registries are baked into
+  # contract-registry.sh from one source.
+  contractRegistryPreamble =
+    promptContract.injectBlocksBashPreamble + promptContract.validateMarkersBashPreamble;
 
   # Version sourced from the release-please manifest so mkHarness always tracks
   # the bot-maintained source of truth (ADR-0010).
