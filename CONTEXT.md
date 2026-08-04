@@ -702,6 +702,31 @@ _Was_: `pr=<url>` — renamed once the field carried branch refs and comment
 URLs; PR-vs-issue is a GitHub-ism that confuses on split backends.
 _Avoid_: result line, output line, status line.
 
+**Resolved outcome**:
+The value `outcome.Resolve` (issue #2260) returns: the one seam that decides
+what a Dispatch's [[Outcome line]] evidence actually says, across every pass
+log, in a single call a test can drive end-to-end. Before it existed, the
+`outcome` package hosted six log scanners with overlapping-but-divergent
+nonce/synthetic/last-wins selection rules, and "what really happened in the
+Box" fell out of four layers spread across three packages with no single seam
+to pin down (issue #2251) — Resolve is that seam. It walks a Dispatch's
+ordered pass logs once, choosing among three tiers in strict precedence — a
+genuine driver-authored outcome line, the outcome backstop's synthetic line
+(ADR 0036), and, only when neither turns up anywhere, the driver's
+unauthenticated self-report fallback, nonce-gated the same as the line itself
+— and names which tier won on `Resolved.Provenance` (`ProvenanceGenuine` /
+`ProvenanceSynthetic` / `ProvenanceSelfReport`). The per-log scanners the
+tiers walk (`lastInLog`, `lastSelfReportInLog`) are unexported now, reachable
+only through Resolve; the one door left open beside it is the exported
+`LastSelfReport`, a single-log read for a caller that wants the self-report
+signal unconditionally, alongside a possibly already-found genuine outcome,
+rather than adjudicated against it as Resolve's own last-resort tier does.
+This ticket wires the seam only — `dispatch.Result` does not yet carry a
+`Provenance` field, and settle still re-derives its own view of which tier
+produced an outcome rather than reading it off Resolved; a follow-on ticket
+makes those consumers read through Resolve instead.
+_Avoid_: box truth, verdict.
+
 **Guardrail prompt**:
 The harness-owned prompt carried in the system slot of every harness-issued
 Driver invocation, stating the trust boundaries to the model: issue bodies and
