@@ -533,19 +533,21 @@ setup() {
 # never learns a URL to report. ISSUE_NUMBER=7/BRANCH_PREFIX=agent/issue- from
 # helper.bash/box_env_gen.bash together fix BRANCH at agent/issue-7.
 #
-# Both variants must also carry nonce=${RUN_NONCE} (issue #1939): the
-# launcher's LastInLog scan now gates every SPINDRIFT_OUTCOME line's
-# candidacy on this run's own nonce, so a rendered line missing it -- read-
-# write's own outcome-landing-git.md fragment, or read-only's
-# outcome-landing-outbox.md fragment -- would have every genuine outcome
-# line silently dropped, regardless of what the Box's log otherwise says.
+# issue #2274/ADR 0039 retired the nonce gate for SPINDRIFT_OUTCOME
+# specifically: structural scoping (the in-box extractor's own
+# final-message tiebreak, the host scan's leading-token requirement) already
+# gives every genuine outcome line the freshness guarantee the nonce used to
+# provide, so neither variant's fragment needs to carry nonce=${RUN_NONCE}
+# any longer. RUN_NONCE is still set here because the same rendered prompt
+# also carries the SPINDRIFT_PR_INTENT line, which keeps its own nonce gate
+# unchanged.
 @test "OUTCOME landing step: read-write keeps the pr-url placeholder unchanged" {
   export RUN_NONCE="deadbeefcafe1234"
   export WORK_DIR="$BATS_TEST_TMPDIR/work-outcome-landing-read-write"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   grep -qF 'landing=<pr-url> status=ready' "$DRIVER_PROMPT_FILE"
-  grep -qF 'status=ready note=<short reason> nonce=deadbeefcafe1234' "$DRIVER_PROMPT_FILE"
+  grep -qF 'status=ready note=<short reason>' "$DRIVER_PROMPT_FILE"
 }
 
 @test "OUTCOME landing step: read-only reports the branch, never a pr-url placeholder" {
@@ -555,7 +557,7 @@ setup() {
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   grep -qF 'landing=agent/issue-7 status=ready' "$DRIVER_PROMPT_FILE"
-  grep -qF 'status=ready note=<short reason> nonce=deadbeefcafe1234' "$DRIVER_PROMPT_FILE"
+  grep -qF 'status=ready note=<short reason>' "$DRIVER_PROMPT_FILE"
 
   # Scoped to the OUTCOME section itself -- OPEN A PULL REQUEST's own
   # PR-intent fragment legitimately mentions "the launcher opens the draft
