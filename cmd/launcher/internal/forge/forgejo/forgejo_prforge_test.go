@@ -42,13 +42,12 @@ func newPRForgeTestForge(t *testing.T, handler http.HandlerFunc) prReader {
 	t.Helper()
 	srv := httptest.NewServer(handler)
 	t.Cleanup(srv.Close)
-	cf := forgejo.NewForgejoCodeForge(forgejo.ForgejoCodeForgeConfig{
+	cf := forgejo.NewForgejoCodeForgeForTest(forgejo.ForgejoCodeForgeConfig{
 		BaseURL:      srv.URL,
 		Repo:         "owner/repo",
 		Token:        "tok",
-		GitRemoteURL: "unused",
 		BranchPrefix: "agent/issue-",
-	})
+	}, nil, "unused")
 	pr, ok := cf.(prReader)
 	if !ok {
 		t.Fatalf("forgejoCodeForge does not satisfy prReader (methods not yet implemented)")
@@ -258,6 +257,91 @@ func TestPRForBranch_Absent(t *testing.T) {
 	}
 	if ok {
 		t.Fatal("PRForBranch(...) ok = true, want false")
+	}
+}
+
+// forgejoPullsPage renders count open, non-draft pulls as a Forgejo
+// pulls-list JSON page, numbered start, start+1, ..., start+count-1, each
+// with a distinct head ref "branch-N" so a test can target one on a
+// specific page.
+func forgejoPullsPage(start, count int) string {
+	var parts []string
+	for i := 0; i < count; i++ {
+		n := start + i
+		parts = append(parts, pullJSON(n, "open", false, true, false, "add feature", "branch-"+strconv.Itoa(n), "sha"+strconv.Itoa(n), "main"))
+	}
+	return "[" + strings.Join(parts, ",") + "]"
+}
+
+// TestOpenPRForBranch_WalksAllPages verifies listPulls (via the
+// OpenPRForBranch seam) walks every page of the Forgejo pulls-list endpoint
+// via rest.Client.Paginate rather than fetching a single bounded page (issue
+// #2265): the server serves forge.ResultPageLimit pulls on page 1 (a full
+// page) and a short final page of 2 pulls on page 2, with the target branch
+// only present on the short page 2. The test asserts every request carries
+// the expected "page"/"limit"/"state" query params, that the server never
+// sees a request for a page beyond the short page, and that the pull on the
+// later page is still found (proving the pages were merged, not just the
+// first one consulted).
+func TestOpenPRForBranch_WalksAllPages(t *testing.T) {
+	const pageSize = forge.ResultPageLimit
+	var gotPages []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/repos/owner/repo/pulls" {
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+		q := r.URL.Query()
+		if state := q.Get("state"); state != "open" {
+			t.Errorf("state query param = %q, want %q", state, "open")
+		}
+		if limit := q.Get("limit"); limit != strconv.Itoa(pageSize) {
+			t.Errorf("limit query param = %q, want %q", limit, strconv.Itoa(pageSize))
+		}
+		page, err := strconv.Atoi(q.Get("page"))
+		if err != nil {
+			t.Fatalf("invalid page query param: %v", err)
+		}
+		gotPages = append(gotPages, q.Get("page"))
+		w.WriteHeader(http.StatusOK)
+		switch page {
+		case 1:
+			// A full page (pageSize pulls), numbered 1..pageSize.
+			w.Write([]byte(forgejoPullsPage(1, pageSize)))
+		case 2:
+			// A short page (2 < pageSize), signals the walk is done. The
+			// target branch lives here, on the second page.
+			w.Write([]byte(forgejoPullsPage(pageSize+1, 2)))
+		default:
+			t.Errorf("server received request for page %d, want no request beyond the short page 2", page)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	cf := forgejo.NewForgejoCodeForgeForTest(forgejo.ForgejoCodeForgeConfig{
+		BaseURL:      srv.URL,
+		Repo:         "owner/repo",
+		Token:        "tok",
+		BranchPrefix: "agent/issue-",
+	}, nil, "unused")
+	pr, ok := cf.(prReader)
+	if !ok {
+		t.Fatalf("forgejoCodeForge does not satisfy prReader (methods not yet implemented)")
+	}
+
+	got, ok, err := pr.OpenPRForBranch("branch-" + strconv.Itoa(pageSize+2))
+	if err != nil {
+		t.Fatalf("OpenPRForBranch(...) unexpected error: %v", err)
+	}
+	if !ok {
+		t.Fatal("OpenPRForBranch(...) ok = false, want true (branch is on the second page)")
+	}
+	wantURL := "https://forge.test/owner/repo/pulls/" + strconv.Itoa(pageSize+2)
+	if got.URL != wantURL {
+		t.Fatalf("OpenPRForBranch(...) URL = %q, want %q", got.URL, wantURL)
+	}
+	if len(gotPages) != 2 || gotPages[0] != "1" || gotPages[1] != "2" {
+		t.Fatalf("server saw page requests %v, want exactly [1 2]", gotPages)
 	}
 }
 
@@ -551,13 +635,12 @@ func TestEnqueueAutoMerge_PostsMergeWhenChecksSucceed(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer srv.Close()
-	cf := forgejo.NewForgejoCodeForge(forgejo.ForgejoCodeForgeConfig{
+	cf := forgejo.NewForgejoCodeForgeForTest(forgejo.ForgejoCodeForgeConfig{
 		BaseURL:      srv.URL,
 		Repo:         "owner/repo",
 		Token:        "tok",
-		GitRemoteURL: "unused",
 		BranchPrefix: "agent/issue-",
-	})
+	}, nil, "unused")
 	pr, ok := cf.(prReader)
 	if !ok {
 		t.Fatalf("forgejoCodeForge does not satisfy prReader (methods not yet implemented)")
@@ -595,13 +678,12 @@ func TestMarkReady_StripsWIPPrefix(t *testing.T) {
 		}
 	}))
 	defer srv.Close()
-	cf := forgejo.NewForgejoCodeForge(forgejo.ForgejoCodeForgeConfig{
+	cf := forgejo.NewForgejoCodeForgeForTest(forgejo.ForgejoCodeForgeConfig{
 		BaseURL:      srv.URL,
 		Repo:         "owner/repo",
 		Token:        "tok",
-		GitRemoteURL: "unused",
 		BranchPrefix: "agent/issue-",
-	})
+	}, nil, "unused")
 	pr, ok := cf.(prReader)
 	if !ok {
 		t.Fatalf("forgejoCodeForge does not satisfy prReader (methods not yet implemented)")
@@ -636,13 +718,12 @@ func TestMarkReady_AlreadyReadyNoOp(t *testing.T) {
 		}
 	}))
 	defer srv.Close()
-	cf := forgejo.NewForgejoCodeForge(forgejo.ForgejoCodeForgeConfig{
+	cf := forgejo.NewForgejoCodeForgeForTest(forgejo.ForgejoCodeForgeConfig{
 		BaseURL:      srv.URL,
 		Repo:         "owner/repo",
 		Token:        "tok",
-		GitRemoteURL: "unused",
 		BranchPrefix: "agent/issue-",
-	})
+	}, nil, "unused")
 	pr, ok := cf.(prReader)
 	if !ok {
 		t.Fatalf("forgejoCodeForge does not satisfy prReader (methods not yet implemented)")
@@ -674,13 +755,12 @@ func TestMarkDraft_AddsWIPPrefix(t *testing.T) {
 		}
 	}))
 	defer srv.Close()
-	cf := forgejo.NewForgejoCodeForge(forgejo.ForgejoCodeForgeConfig{
+	cf := forgejo.NewForgejoCodeForgeForTest(forgejo.ForgejoCodeForgeConfig{
 		BaseURL:      srv.URL,
 		Repo:         "owner/repo",
 		Token:        "tok",
-		GitRemoteURL: "unused",
 		BranchPrefix: "agent/issue-",
-	})
+	}, nil, "unused")
 	pr, ok := cf.(prReader)
 	if !ok {
 		t.Fatalf("forgejoCodeForge does not satisfy prReader (methods not yet implemented)")
@@ -715,13 +795,12 @@ func TestMarkDraft_AlreadyDraftNoOp(t *testing.T) {
 		}
 	}))
 	defer srv.Close()
-	cf := forgejo.NewForgejoCodeForge(forgejo.ForgejoCodeForgeConfig{
+	cf := forgejo.NewForgejoCodeForgeForTest(forgejo.ForgejoCodeForgeConfig{
 		BaseURL:      srv.URL,
 		Repo:         "owner/repo",
 		Token:        "tok",
-		GitRemoteURL: "unused",
 		BranchPrefix: "agent/issue-",
-	})
+	}, nil, "unused")
 	pr, ok := cf.(prReader)
 	if !ok {
 		t.Fatalf("forgejoCodeForge does not satisfy prReader (methods not yet implemented)")

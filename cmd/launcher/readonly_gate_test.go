@@ -182,8 +182,8 @@ func TestReadOnlyCapabilityGate_GithubTrackerSatisfiesHostPostedIssueFiler(t *te
 func TestReadOnlyCapabilityGate_ForgejoReadOnlyAdapterSatisfies(t *testing.T) {
 	c := minimalValidConfig()
 	c.boxForgeAndIssueAccess = "read-only"
-	cf := forgejo.NewReadOnlyForgejoCodeForge(forgejo.ForgejoCodeForgeConfig{Repo: "owner/repo"})
 	it := forgejo.NewForgejoClient(forgejo.ForgejoConfig{Repo: "owner/repo"})
+	cf := forgejo.NewReadOnlyForgejoCodeForge(forgejo.ForgejoCodeForgeConfig{Repo: "owner/repo"}, it)
 	if err := checkReadOnlyCapabilityGate(c, cf, it); err != nil {
 		t.Errorf("checkReadOnlyCapabilityGate() with the real forgejo read-only adapter = %v, want nil", err)
 	}
@@ -199,8 +199,8 @@ func TestReadOnlyCapabilityGate_ForgejoTrackerSatisfiesHostPostedIssueFiler(t *t
 	c := minimalValidConfig()
 	c.boxForgeAndIssueAccess = "read-only"
 	c.issueTracker = "forgejo"
-	cf := forgejo.NewReadOnlyForgejoCodeForge(forgejo.ForgejoCodeForgeConfig{Repo: "owner/repo"})
 	it := forgejo.NewForgejoClient(forgejo.ForgejoConfig{Repo: "owner/repo"})
+	cf := forgejo.NewReadOnlyForgejoCodeForge(forgejo.ForgejoCodeForgeConfig{Repo: "owner/repo"}, it)
 	if err := checkReadOnlyCapabilityGate(c, cf, it); err != nil {
 		t.Errorf("checkReadOnlyCapabilityGate() with the real forgejo tracker = %v, want nil", err)
 	}

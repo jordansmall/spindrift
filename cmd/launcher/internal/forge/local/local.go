@@ -503,6 +503,9 @@ func (lt *LocalTracker) Probe() (string, error) {
 // ListLabels returns the four dispatch state markers. The local adapter has
 // no separate label registry to check against — a file's state field is
 // always one of these — so they are reported unconditionally present.
+// Recoverable is excluded: forge.DispatchLabels.AllLabels() deliberately
+// omits it as a local-only frontmatter marker, never a real GitHub label,
+// so it never needs a registry-membership check here either (#2254).
 func (lt *LocalTracker) ListLabels() ([]string, error) {
 	return lt.labels.AllLabels(), nil
 }

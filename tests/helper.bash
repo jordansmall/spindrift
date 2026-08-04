@@ -28,6 +28,16 @@ setup_entrypoint_env() {
   # set_box_env's BOX_FORGE_AND_ISSUE_ACCESS=read-write default; individual
   # read-only tests unset it instead of overriding BOX_FORGE_AND_ISSUE_ACCESS.
   export BOX_WRITE_ENABLED=1
+  # BOX_OUTBOX_RELAY_CAPABLE is not a schema knob either (same reasoning as
+  # BOX_WRITE_ENABLED above): dispatch.buildBoxEnv computes it host-side from
+  # the backend registry's outboxRelayCapable field and forwards it whenever
+  # true, unconditional on read-only/read-write. Set it here to mirror what a
+  # real Box receives under the suite's default CODE_FORGE=github (github's
+  # row has outboxRelayCapable=true); the CODE_FORGE=local test below
+  # overrides it via BOX_HOST_MEDIATED_REMOTE instead (checked first in the
+  # backstop's switch, so this value becomes irrelevant there, same as
+  # BOX_WRITE_ENABLED already staying set-but-irrelevant in that test today).
+  export BOX_OUTBOX_RELAY_CAPABLE=1
   # Pinned to a value distinct from the schema default (issue #2055: now
   # claude-opus-4-8) so the MODEL-flag assertions below stay stable
   # regardless of what the schema defaults to.
@@ -166,6 +176,13 @@ setup_fakes() {
       echo 'DRIVER_SKILLS_DIR="$HOME/${DRIVER_SKILLS_DIR#/home/agent/}"'
       if [ -n "${FRAGMENT_REGISTRY_FILE:-}" ]; then
         cat "$FRAGMENT_REGISTRY_FILE"
+      fi
+      # CONTRACT_REGISTRY_FILE is the shared prompt block registry's
+      # rendered `_INJECT_BLOCK_ROWS` array (lib/prompt-contract.nix, issue
+      # #2246) -- prepend it the same way as FRAGMENT_REGISTRY_FILE above, so
+      # entrypoint.sh's `_contract_marker` lookup has data to read.
+      if [ -n "${CONTRACT_REGISTRY_FILE:-}" ]; then
+        cat "$CONTRACT_REGISTRY_FILE"
       fi
       tail -n +2 "$ENTRYPOINT"
     } >"$_wrapped"

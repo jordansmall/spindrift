@@ -66,6 +66,14 @@
   # fragmentsSourceDir below); overridable here only for the bats
   # fixture-row test proving a new row needs no entrypoint edit.
   fragments ? import ./fragments.nix,
+  # The directory the fragment registry's files live under, cp -r'd whole
+  # into the image (see fragmentsSourceDir/fragmentRegistryPreamble below).
+  # Not Consumer-tunable like `prompt`/`scoutPrompt`/etc above; overridable
+  # here only so nix/checks/prompts.nix's build-time-reject-research-
+  # verdict-comment-relay-* checks (issue #2250) can point buildTimeReject-
+  # Verdicts' research-verdict-*-readonly.md lookup at a broken fixture
+  # directory without touching the real templates tree.
+  fragmentsDir ? ../templates/default/prompts/fragments,
   # Skill files baked into the image at /home/agent/.claude/skills so the
   # headless agent can invoke them without a runtime mount. Each element is
   # either a path/derivation (copied under its basename), or a
@@ -179,11 +187,21 @@ let
   # Marker-delimited slicing/injection primitives (issue #512);
   # nix/checks/prompt-inject.nix pins each primitive's behavior.
   promptInject = import ./prompt-inject.nix;
-  inherit (promptInject) sliceBetween sliceFromMarker injectSection;
+  inherit (promptInject) sliceFromMarker injectSection;
 
-  # issue-prompt.md is the single source every shared block below is sliced
-  # from — read once so each slice sees the identical text.
-  issuePromptSource = builtins.readFile ../templates/default/prompts/issue-prompt.md;
+  # Pure-data registry of the harness-owned shared prompt blocks (issue
+  # #2245): the single source of truth for each block's id/marker/source/
+  # slice-range/kinds, driving the marker constants and canonical text below
+  # instead of each being a separate hand-wired literal (issue #2246 slice
+  # 1). nix/checks/prompt-contract.nix pins the registry's own shape and
+  # content. The outcome/comms/check blocks' canonical text is now read from
+  # promptContract.canonicalText (which slices issue-prompt.md itself, see
+  # lib/prompt-contract.nix) rather than a local issuePromptSource re-read
+  # here; only the research block below still slices its own source
+  # directly, since it needs the RESEARCH_VERDICTS-rendered text, not the
+  # registry's unrendered default.
+  promptContract = import ./prompt-contract.nix;
+  inherit (promptContract) byId;
 
   # The conditional prompt steps (skill preamble, FILE ISSUES, AUTO-FORMAT,
   # AUTO-LINT, CI FAILURE) live as fragment files under the prompts directory
@@ -192,7 +210,9 @@ let
   # fixed source into every image the same way, under /agent/prompts/fragments
   # -- a SPINDRIFT_PROMPT_DIR override supplies its own fragment for whichever
   # knob it enables, exactly as it already must supply filer-prompt.md.
-  fragmentsSourceDir = ../templates/default/prompts/fragments;
+  # (fragmentsDir above is the actual param; this is a thin alias so the rest
+  # of this file's existing fragmentsSourceDir usages are unchanged.)
+  fragmentsSourceDir = fragmentsDir;
 
   # The SPINDRIFT_OUTCOME contract (the LAND THE CHANGE / WATCH CI / OUTCOME /
   # IF BLOCKED sections) is harness-owned (issue #419): a Consumer `prompt`
@@ -201,8 +221,8 @@ let
   # happens. Sliced from the default prompt's own heading rather than
   # duplicated into a second file, so the injected block and the default
   # prompt's sections cannot drift apart — same source, same bytes.
-  outcomeContractMarker = "# LAND THE CHANGE";
-  outcomeContract = sliceFromMarker outcomeContractMarker issuePromptSource;
+  outcomeContractMarker = (byId "outcome").marker;
+  outcomeContract = promptContract.canonicalText.outcome;
 
   injectOutcomeContract = injectSection outcomeContractMarker outcomeContract;
 
@@ -213,10 +233,10 @@ let
   # instead. COMMS runs from its own heading up to SCOUT (issue-prompt-only —
   # the fix prompt runs FIX in its place); CHECK/COMMIT runs from CHECK up to
   # REVIEW (also issue-prompt-only — a fix pass has no review step).
-  commsMarker = "# COMMS";
-  commsBlock = sliceBetween commsMarker "# SCOUT" issuePromptSource;
-  checkMarker = "# CHECK";
-  checkBlock = sliceBetween checkMarker "# REVIEW" issuePromptSource;
+  commsMarker = (byId "comms").marker;
+  commsBlock = promptContract.canonicalText.comms;
+  checkMarker = (byId "check").marker;
+  checkBlock = promptContract.canonicalText.check;
 
   injectComms = injectSection commsMarker commsBlock;
   injectCheckCommit = injectSection checkMarker checkBlock;
@@ -236,7 +256,7 @@ let
   # through EOF (mirrors outcomeContractMarker/outcomeContract above) so the
   # injected block and the default prompt's own copy cannot drift apart.
   researchPromptSource = builtins.readFile ../templates/default/prompts/research-prompt.md;
-  researchOutcomeContractMarker = "# POST THE VERDICT";
+  researchOutcomeContractMarker = (byId "research-verdict").marker;
   # The configurable verdict vocabulary (issue #2201): render the verdict
   # contract from the RESEARCH_VERDICTS knob before slicing the outcome
   # contract and baking the prompt, so a custom set flows into both the baked
@@ -365,6 +385,52 @@ let
     + "_FRAGMENT_SUBST_VARS=(\n"
     + lib.concatMapStrings (v: "  " + lib.escapeShellArg v + "\n") fragmentSubstVars
     + ")\n";
+
+  # The shared prompt block registry (lib/prompt-contract.nix, issue #2245),
+  # rendered into agent/entrypoint.sh's `_INJECT_BLOCK_ROWS` array the same
+  # way fragmentRegistryPreamble above renders `_FRAGMENT_ROWS` -- already
+  # derived by prompt-contract.nix itself, so no re-derivation needed here
+  # (issue #2246). Also carries the reject/warn marker matrix (issue #2249
+  # slice 1) as a second `_VALIDATE_MARKER_ROWS` array, concatenated onto
+  # the same preamble string so both registries are baked into
+  # contract-registry.sh from one source.
+  contractRegistryPreamble =
+    promptContract.injectBlocksBashPreamble + promptContract.validateMarkersBashPreamble;
+
+  # Build-time reject arm (issue #2250, parent #2244): resolves both
+  # validateMarkers "reject" rows against this build's own static knowledge.
+  # `reviewer-verdict` is gated on whether the orchestrator is enabled
+  # (mergedDefaults.orchestratorEnabled) and checked against the literal
+  # reviewPrompt text this image bakes. `verdict-comment-relay` is gated on
+  # whether research runs read-only (mergedDefaults.boxForgeAndIssueAccess)
+  # and checked against the literal research-verdict-*-readonly.md fragment
+  # this build's mergedDefaults.issueTracker statically selects -- github and
+  # forgejo are the only trackers with a distinct "-readonly" fragment file
+  # (lib/fragments.nix); local/jira have none, so researchReadonlyForgeSuffix
+  # is null and the id is simply omitted from contentByRowId below, resolving
+  # to "advise" per lib/prompt-contract.nix's own doc comment. buildTimeReject
+  # Ok below is what actually forces this list's evaluation at build time.
+  researchReadonlyForgeSuffix =
+    if mergedDefaults.issueTracker == "github" then
+      "github"
+    else if mergedDefaults.issueTracker == "forgejo" then
+      "forgejo"
+    else
+      null;
+  buildTimeRejectVerdicts = promptContract.buildTimeRejectVerdicts {
+    staticGates = {
+      orchestratorEnabled = mergedDefaults.orchestratorEnabled == true;
+      readOnlyResearch = mergedDefaults.boxForgeAndIssueAccess == "read-only";
+    };
+    contentByRowId = {
+      "reviewer-verdict" = reviewPrompt;
+    }
+    // lib.optionalAttrs (researchReadonlyForgeSuffix != null) {
+      "verdict-comment-relay" = builtins.readFile (
+        fragmentsDir + "/research-verdict-${researchReadonlyForgeSuffix}-readonly.md"
+      );
+    };
+  };
 
   # Version sourced from the release-please manifest so mkHarness always tracks
   # the bot-maintained source of truth (ADR-0010).
@@ -517,6 +583,7 @@ let
       driverAgentFiles
       driverPreamble
       fragmentRegistryPreamble
+      contractRegistryPreamble
       prompt
       scoutPrompt
       reviewPrompt
@@ -569,6 +636,12 @@ let
   # exec-ing the entrypoint so tests exercise the same registry-rendered loop
   # input and substitution allowlist that mkHarness bakes into the image.
   fragmentRegistryFile = hostPkgs.writeText "fragment-registry.sh" fragmentRegistryPreamble;
+
+  # The shared prompt block registry as a host store-path file (issue #2246,
+  # mirrors fragmentRegistryFile above). The bats harness prepends this
+  # before exec-ing the entrypoint so tests exercise the same
+  # `_INJECT_BLOCK_ROWS` data that mkHarness bakes into the image.
+  contractRegistryFile = hostPkgs.writeText "contract-registry.sh" contractRegistryPreamble;
 
   # The rendered prompt directory as a host store path (native-buildable on
   # darwin, so it needs no Linux builder). The prompt is normally baked into
@@ -917,10 +990,28 @@ let
     "workerModel"
   ];
   deprecationMsg = "spindrift: the per-agent model knobs (${lib.concatStringsSep ", " legacyKnobsSet}) are deprecated and will be removed; migrate to the `roster` option (see docs/reference.md).";
+
+  # Forces buildTimeRejectVerdicts' evaluation (issue #2250): builtins.all
+  # must evaluate every element to a bool to decide its own result, so a
+  # `throw` raised while evaluating one element's "reject" branch propagates
+  # through builtins.all and then through the `assert` below -- there is no
+  # lazy element `assert` skips past. A "reject" verdict throws v.message
+  # (an unrecoverable build failure); an "advise" verdict is a non-fatal
+  # builtins.trace nudge to stderr; "ok" is silent.
+  buildTimeRejectOk = builtins.all (
+    v:
+    if v.verdict == "reject" then
+      throw v.message
+    else if v.verdict == "advise" then
+      builtins.trace v.message true
+    else
+      true
+  ) buildTimeRejectVerdicts;
 in
 if unknownDefaultKeys != [ ] then
   throw "mkHarness: unknown defaults key(s): ${lib.concatStringsSep ", " unknownDefaultKeys}; valid keys: ${lib.concatStringsSep ", " (lib.attrNames flakeOptionEntries)}"
 else
+  assert buildTimeRejectOk;
   lib.warnIf (legacyKnobsSet != [ ]) deprecationMsg {
     inherit
       image
@@ -942,6 +1033,7 @@ else
       researchOutcomeContractFile
       driverPreambleFile
       fragmentRegistryFile
+      contractRegistryFile
       driverExecBin
       driverEntry
       runInputDocumentFile

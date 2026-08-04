@@ -22,10 +22,6 @@ import (
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/forge"
-	"spindrift.dev/launcher/internal/forge/forgejo"
-	"spindrift.dev/launcher/internal/forge/git"
-	"spindrift.dev/launcher/internal/forge/github"
-	"spindrift.dev/launcher/internal/forge/jira"
 	"spindrift.dev/launcher/internal/forge/local"
 	"spindrift.dev/launcher/internal/freshness"
 	"spindrift.dev/launcher/internal/localloop"
@@ -479,8 +475,10 @@ func validate(c config) error {
 	// tracker still needs REPO_SLUG/GH_TOKEN even in self-contained mode, to
 	// read the issue and post the verdict — relaxing the guardrail there
 	// would trade a clear launcher error for a downstream Box crash.
-	fullyLocal := c.codeForge == "local" && c.issueTracker == "local"
-	noRepoResearch := c.dispatchKind == dispatchKindResearch && c.selfContained && c.issueTracker == "local"
+	codeForgeRow, codeForgeRowOK := backendByName(c.codeForge)
+	trackerRow, trackerRowOK := backendByName(c.issueTracker)
+	fullyLocal := codeForgeRow.HostMediatedRemote && trackerRow.inBoxUnreachableTracker
+	noRepoResearch := c.dispatchKind == dispatchKindResearch && c.selfContained && trackerRow.inBoxUnreachableTracker
 	if !fullyLocal && !noRepoResearch && c.repoSlug == "" {
 		return fmt.Errorf("set REPO_SLUG=owner/repo (the target GitHub repository)")
 	}
@@ -528,42 +526,21 @@ func validate(c config) error {
 	default:
 		return fmt.Errorf("OVERLAP_GATE=%q is not valid; must be defer or off", c.overlapGate)
 	}
-	switch c.issueTracker {
-	case "github", "local", "jira", "forgejo":
-		// valid
-	default:
+	if !trackerRowOK || !trackerRow.ValidAsTracker {
 		return fmt.Errorf("ISSUE_TRACKER=%q is not valid; must be github, local, jira, or forgejo", c.issueTracker)
 	}
-	if c.issueTracker == "jira" {
-		if err := jira.ValidateJiraEnv(c.jiraBaseURL, c.jiraProjectKey, c.jiraToken, c.jiraStatusMapping); err != nil {
+	if trackerRow.validateTracker != nil {
+		if err := trackerRow.validateTracker(c); err != nil {
 			return err
 		}
 	}
-	if c.issueTracker == "forgejo" {
-		if err := forgejo.ValidateForgejoEnv(c.forgejoBaseURL, c.forgejoToken); err != nil {
-			return err
-		}
-	}
-	switch c.codeForge {
-	case "github":
-		// valid
-	case "git":
-		if c.codeForgeRemoteURL == "" {
-			return fmt.Errorf("set CODE_FORGE_REMOTE_URL (the plain git remote to clone from and push to) when CODE_FORGE=git")
-		}
-	case "local":
-		if c.mergeMode != "immediate" {
-			return fmt.Errorf(
-				"CODE_FORGE=local requires MERGE_MODE=immediate (got %q) — "+
-					"only immediate relays the seam bundle into the Accumulation "+
-					"repo; manual/auto strand it in the outbox", c.mergeMode)
-		}
-	case "forgejo":
-		if err := forgejo.ValidateForgejoEnv(c.forgejoBaseURL, c.forgejoToken); err != nil {
-			return err
-		}
-	default:
+	if !codeForgeRowOK || !codeForgeRow.ValidAsCodeForge {
 		return fmt.Errorf("CODE_FORGE=%q is not valid; must be github, git, local, or forgejo", c.codeForge)
+	}
+	if codeForgeRow.validateCodeForge != nil {
+		if err := codeForgeRow.validateCodeForge(c); err != nil {
+			return err
+		}
 	}
 	switch c.boxForgeAndIssueAccess {
 	case "read-write", "read-only":
@@ -589,12 +566,18 @@ func repoBanner(c config) string {
 }
 
 // dispatchLabels builds the DispatchLabels mapping from loaded config.
+// Recoverable is a fixed string literal, not sourced from config/env: it
+// only ever applies to CODE_FORGE=local push-only runs and is stored as a
+// local frontmatter marker, never a real GitHub label, so it doesn't need
+// an env-configurable knob (which would also mean touching the
+// Nix-generated lib/env-schema.nix / flagtable_gen.go files) (#2254).
 func dispatchLabels(c config) forge.DispatchLabels {
 	return forge.DispatchLabels{
 		Dispatchable: c.label,
 		InProgress:   c.inProgressLabel,
 		Complete:     c.completeLabel,
 		Failed:       c.failedLabel,
+		Recoverable:  "agent-recoverable",
 	}
 }
 
@@ -619,41 +602,18 @@ func researchVerdictLabels(c config) forge.VerdictLabels {
 // newIssueTracker returns the IssueTracker adapter selected by ISSUE_TRACKER
 // (default "github"), carrying c.dispatchKind's label family (dispatchLabels)
 // and verdict labels (researchVerdictLabels) — the kind-aware seam ADR 0022
-// describes.
+// describes. Looks up the backend registry (backend.go); an unregistered
+// c.issueTracker or a row with no newIssueTracker constructor is unreachable
+// post-validate() (which already rejects any ISSUE_TRACKER not registered/
+// not validAsTracker) and falls back to github's own constructor, matching
+// the pre-registry switch's default case.
 func newIssueTracker(c config) forge.IssueTracker {
-	vl := researchVerdictLabels(c)
-	switch c.issueTracker {
-	case "local":
-		return local.NewLocalTracker(c.localIssuesDir, dispatchLabels(c), vl)
-	case "jira":
-		statusMapping, err := jira.ParseStatusMapping(c.jiraStatusMapping)
-		if err != nil {
-			// validate() already rejects a malformed mapping before this is
-			// reached; treat it as unmapped (label-only lifecycle) as a
-			// fallback.
-			statusMapping = map[forge.DispatchState]string{}
-		}
-		return jira.NewJiraClient(jira.JiraConfig{
-			BaseURL:         c.jiraBaseURL,
-			ProjectKey:      c.jiraProjectKey,
-			Email:           c.jiraEmail,
-			Token:           c.jiraToken,
-			StatusMapping:   statusMapping,
-			Labels:          dispatchLabels(c),
-			VerdictLabels:   vl,
-			IncludeComments: c.jiraIncludeComments,
-		})
-	case "forgejo":
-		return forgejo.NewForgejoClient(forgejo.ForgejoConfig{
-			BaseURL:       c.forgejoBaseURL,
-			Repo:          c.repoSlug,
-			Token:         c.forgejoToken,
-			Labels:        dispatchLabels(c),
-			VerdictLabels: vl,
-		})
-	default:
-		return github.NewExecClient(c.repoSlug, dispatchLabels(c), c.branchPrefix, github.WithVerdictLabels(vl))
+	row, ok := backendByName(c.issueTracker)
+	if !ok || row.newIssueTracker == nil {
+		gh, _ := backendByName("github")
+		return gh.newIssueTracker(c)
 	}
+	return row.newIssueTracker(c)
 }
 
 // newCodeForge returns the CodeForge adapter selected by CODE_FORGE: "github"
@@ -662,46 +622,23 @@ func newIssueTracker(c config) forge.IssueTracker {
 // Accumulation repo's Integration branch; ADR 0033). parent is the seam's
 // own resolved Integration-branch key (local.ResolveParent, issue #1734);
 // every other codeForge ignores it — there is no per-run parent knob left
-// to derive it from.
-func newCodeForge(c config, parent local.SanitizedParent) forge.CodeForge {
-	switch c.codeForge {
-	case "git":
-		return git.NewGitClient(c.codeForgeRemoteURL, c.baseBranch, c.gitUserName, c.gitUserEmail, c.branchPrefix)
-	case "local":
-		return local.NewLocalCodeForge(c.codeForgeAccumulationRepoDir, c.baseBranch, parent, c.gitUserName, c.gitUserEmail, c.branchPrefix)
-	case "forgejo":
-		// BOX_FORGE_AND_ISSUE_ACCESS=read-only swaps in the BundleRelay/
-		// DraftPRCreator-capable wrapper (mirrors the github default case
-		// below): the Box no longer pushes or opens PRs in-box, so
-		// settle's generic relay-before-merge and draft-PR-create seams
-		// need the adapter itself to satisfy those interfaces. read-write
-		// (the default) keeps the plain adapter, which never satisfies
-		// them, byte-for-byte.
-		cfg := forgejo.ForgejoCodeForgeConfig{
-			BaseURL:      c.forgejoBaseURL,
-			Repo:         c.repoSlug,
-			Token:        c.forgejoToken,
-			BaseBranch:   c.baseBranch,
-			UserName:     c.gitUserName,
-			UserEmail:    c.gitUserEmail,
-			BranchPrefix: c.branchPrefix,
-			MergeMethod:  c.mergeMethod,
-		}
-		if c.boxForgeAndIssueAccess == "read-only" {
-			return forgejo.NewReadOnlyForgejoCodeForge(cfg)
-		}
-		return forgejo.NewForgejoCodeForge(cfg)
-	default:
-		// BOX_FORGE_AND_ISSUE_ACCESS=read-only swaps in the BundleRelay-
-		// capable wrapper (issue #1918): the Box no longer pushes in-box, so
-		// settle's generic relay-before-merge (ready.go) needs the adapter
-		// itself to satisfy forge.BundleRelay. read-write (the default) keeps
-		// the plain adapter, which never satisfies it, byte-for-byte.
-		if c.boxForgeAndIssueAccess == "read-only" {
-			return github.NewReadOnlyCodeForge(c.repoSlug, dispatchLabels(c), c.branchPrefix, github.WithMergeMethod(c.mergeMethod), github.WithSyncMethod(c.syncMethod))
-		}
-		return github.NewExecClient(c.repoSlug, dispatchLabels(c), c.branchPrefix, github.WithMergeMethod(c.mergeMethod), github.WithSyncMethod(c.syncMethod))
+// to derive it from. Looks up the backend registry (backend.go): an
+// unregistered c.codeForge or a row with no newCodeForge constructor is
+// unreachable post-validate() and falls back to github, matching the
+// pre-registry switch's default case. BOX_FORGE_AND_ISSUE_ACCESS=read-only
+// swaps in the row's read-only wrapper when it has one (github, forgejo);
+// git and local carry no such wrapper (newReadOnlyCodeForge is nil for
+// both, per backend.go), so read-only falls through to the plain
+// constructor unchanged, byte-for-byte.
+func newCodeForge(c config, parent local.SanitizedParent, it forge.IssueTracker) forge.CodeForge {
+	row, ok := backendByName(c.codeForge)
+	if !ok || row.newCodeForge == nil {
+		row, _ = backendByName("github")
 	}
+	if c.boxForgeAndIssueAccess == "read-only" && row.newReadOnlyCodeForge != nil {
+		return row.newReadOnlyCodeForge(c, parent, it)
+	}
+	return row.newCodeForge(c, parent, it)
 }
 
 // dispatchCompletionBanner returns the forge-aware end-of-dispatch
@@ -767,33 +704,36 @@ func absCodeForgeAccumulationRepoDir(codeForge, dir string) string {
 // build entry point never calls Run(), so leaving PromptDir/SkillsDir/
 // PodmanNetwork populated is harmless there.
 func runnerConfig(c config) runner.Config {
+	codeForgeRow, _ := backendByName(c.codeForge)
+	trackerRow, _ := backendByName(c.issueTracker)
 	return runner.Config{
-		Runtime:                c.runtime,
-		Image:                  c.image,
-		ImageArchive:           c.imageArchive,
-		ImageDrv:               c.imageDrv,
-		ImageTag:               c.imageTag,
-		NixBuilderImage:        c.nixBuilderImage,
-		NixVolume:              c.nixVolume,
-		FlakeImageAttr:         c.flakeImageAttr,
-		PodmanNetwork:          c.podmanNetwork,
-		PidsLimit:              c.pidsLimit,
-		MemoryLimit:            c.memoryLimit,
-		AgentFiles:             c.agentFiles,
-		AgentEnv:               c.agentEnv,
-		AgentFilesDrv:          c.agentFilesDrv,
-		AgentEnvDrv:            c.agentEnvDrv,
-		BakedPrefetch:          c.bakedPrefetch,
-		BwrapUnshareNet:        c.bwrapUnshareNet,
-		PromptDir:              c.spindriftPromptDir,
-		SkillsDir:              c.spindriftSkillsDir,
-		DriverSkillsDir:        c.driverSkillsDir,
-		DriverSessionCacheDir:  c.driverSessionCacheDir,
-		IssueTracker:           c.issueTracker,
-		LocalIssuesDir:         absLocalIssuesDir(c.localIssuesDir),
-		CodeForge:              c.codeForge,
-		AccumulationRepoDir:    c.codeForgeAccumulationRepoDir,
-		BoxForgeAndIssueAccess: c.boxForgeAndIssueAccess,
+		Runtime:                  c.runtime,
+		Image:                    c.image,
+		ImageArchive:             c.imageArchive,
+		ImageDrv:                 c.imageDrv,
+		ImageTag:                 c.imageTag,
+		NixBuilderImage:          c.nixBuilderImage,
+		NixVolume:                c.nixVolume,
+		FlakeImageAttr:           c.flakeImageAttr,
+		PodmanNetwork:            c.podmanNetwork,
+		PidsLimit:                c.pidsLimit,
+		MemoryLimit:              c.memoryLimit,
+		AgentFiles:               c.agentFiles,
+		AgentEnv:                 c.agentEnv,
+		AgentFilesDrv:            c.agentFilesDrv,
+		AgentEnvDrv:              c.agentEnvDrv,
+		BakedPrefetch:            c.bakedPrefetch,
+		BwrapUnshareNet:          c.bwrapUnshareNet,
+		PromptDir:                c.spindriftPromptDir,
+		SkillsDir:                c.spindriftSkillsDir,
+		DriverSkillsDir:          c.driverSkillsDir,
+		DriverSessionCacheDir:    c.driverSessionCacheDir,
+		HostMediatedIssueTracker: trackerRow.inBoxUnreachableTracker,
+		LocalIssuesDir:           absLocalIssuesDir(c.localIssuesDir),
+		HostMediatedRemote:       codeForgeRow.HostMediatedRemote,
+		AccumulationRepoDir:      c.codeForgeAccumulationRepoDir,
+		OutboxRelayCapable:       codeForgeRow.outboxRelayCapable,
+		BoxForgeAndIssueAccess:   c.boxForgeAndIssueAccess,
 	}
 }
 
@@ -875,41 +815,29 @@ func localBaseBranchResolver(c config, it forge.IssueTracker, lw *localloop.Wire
 	}
 }
 
-// boxGHTokenResolver wraps next, overriding the "GH_TOKEN" BoxEnvVars name
-// to the operator's BOX_GH_TOKEN when set -- opt-in two-actor separation
-// (ADR 0016, issue #380): the Box then receives that value as its own
-// GH_TOKEN, while the launcher's own os.Getenv("GH_TOKEN") stays untouched
-// for merges, labels, and every other host-side forge call. Checked ahead
-// of next's own dispatch (which fans out on CODE_FORGE, e.g.
-// localBaseBranchResolver's BASE_BRANCH case) so the override applies
-// under every Code Forge, not just one. BOX_GH_TOKEN unset falls straight
-// through to next, so the single-token default stays byte-for-byte
-// unchanged.
-func boxGHTokenResolver(next func(num, name string) string) func(num, name string) string {
+// boxTokenResolver wraps next, overriding a Box's bearer-token BoxEnvVars
+// name to the operator's own BOX_<X>_TOKEN override when set for whichever
+// registered backend owns that env var name (ADR 0016's opt-in two-actor
+// separation, issue #380, generalized across every backend row carrying a
+// boxTokenEnvVar per ADR 0038's backend-prefixed token knobs, instead of one
+// hand-copied wrapper per backend). The Box then receives the override value
+// as its own token, while the launcher's own os.Getenv(token) stays
+// untouched for merges, labels, and every other host-side forge call. A row
+// with no boxTokenEnvVar (jira, local, git) never matches, so name falls
+// straight through to next unchanged for those. Checked ahead of next's own
+// dispatch (which fans out on CODE_FORGE, e.g. localBaseBranchResolver's
+// BASE_BRANCH case) so the override applies under every Code Forge, not
+// just one.
+func boxTokenResolver(next func(num, name string) string) func(num, name string) string {
 	return func(num, name string) string {
-		if name == "GH_TOKEN" {
-			if v := os.Getenv("BOX_GH_TOKEN"); v != "" {
+		for _, row := range backendRows {
+			if row.TokenEnvVar == "" || row.boxTokenEnvVar == "" || name != row.TokenEnvVar {
+				continue
+			}
+			if v := os.Getenv(row.boxTokenEnvVar); v != "" {
 				return v
 			}
-		}
-		return next(num, name)
-	}
-}
-
-// boxForgejoTokenResolver wraps next, overriding the "FORGEJO_TOKEN"
-// BoxEnvVars name to the operator's BOX_FORGEJO_TOKEN when set -- the
-// Forgejo analog of boxGHTokenResolver's ADR 0016 two-actor separation: the
-// Box then receives that value as its own FORGEJO_TOKEN, while the
-// launcher's own os.Getenv("FORGEJO_TOKEN") stays untouched for merges,
-// labels, and every other host-side forge call. BOX_FORGEJO_TOKEN unset
-// falls straight through to next, so the single-token default stays
-// byte-for-byte unchanged.
-func boxForgejoTokenResolver(next func(num, name string) string) func(num, name string) string {
-	return func(num, name string) string {
-		if name == "FORGEJO_TOKEN" {
-			if v := os.Getenv("BOX_FORGEJO_TOKEN"); v != "" {
-				return v
-			}
+			break
 		}
 		return next(num, name)
 	}
@@ -921,12 +849,14 @@ func boxForgejoTokenResolver(next func(num, name string) string) func(num, name 
 // ResolveOpenPR itself resolves to Found: false, nil for a push-only Code
 // Forge, so the retry proceeds unguarded there without any guard here.
 func dispatchConfig(c config, it forge.IssueTracker, lw *localloop.Wired, cf forge.CodeForge) dispatch.Config {
+	codeForgeRow, _ := backendByName(c.codeForge)
 	return dispatch.Config{
 		BoxEnvVars:             c.boxEnvVars,
-		ResolveEnv:             boxGHTokenResolver(boxForgejoTokenResolver(localBaseBranchResolver(c, it, lw, cf))),
+		ResolveEnv:             boxTokenResolver(localBaseBranchResolver(c, it, lw, cf)),
 		Kind:                   c.dispatchKind,
 		SelfContained:          c.selfContained,
-		CodeForge:              c.codeForge,
+		HostMediatedRemote:     codeForgeRow.HostMediatedRemote,
+		OutboxRelayCapable:     codeForgeRow.outboxRelayCapable,
 		BoxForgeAndIssueAccess: c.boxForgeAndIssueAccess,
 		TransientRetryMax:      c.transientRetryMax,
 		TransientBackoffSecs:   c.transientBackoffSecs,
@@ -1475,7 +1405,7 @@ func cmdBuild() int {
 func cmdDoctor() int {
 	c := loadConfig()
 	it := newIssueTracker(c)
-	cf := newCodeForge(c, local.SanitizedParent{})
+	cf := newCodeForge(c, local.SanitizedParent{}, it)
 	stat, serr := os.Stdin.Stat()
 	interactive := serr == nil && (stat.Mode()&os.ModeCharDevice) != 0
 	if err := runDoctor(it, cf, c, os.Stdout, os.Stdin, interactive); err != nil {

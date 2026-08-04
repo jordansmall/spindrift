@@ -939,13 +939,18 @@ func clipBannerErr(s string, width int) string {
 const headerTitle = "spindrift"
 
 // renderHeader renders the Console's full-width header: the status line
-// (running/cap, waiting, held, settled, failed), and the stale-image,
-// rebuilding-in-progress, rebuild-failed, orphan-adopt-failed,
+// (running/cap, waiting, held, settled, failed, recoverable), and the
+// stale-image, rebuilding-in-progress, rebuild-failed, orphan-adopt-failed,
 // branch-switch-notice, and competing-dogfood alert lines. The six alerts
 // render in that fixed order with no priority or dismissal logic — any
 // subset can be true at once, and each renders unconditionally on its own
-// line. Status counts are derived from Cap, Live, and the Picks slice's
-// PickState tags rather than a new stored counter (issue #843, ADR 0025).
+// line. The waiting/held/settled/failed counts are derived from the Picks
+// slice's PickState tags rather than a new stored counter (issue #843, ADR
+// 0025) — this session's own launches. recoverable is a different,
+// session-independent axis: RecoverableCount, set straight from the
+// adapter's periodic backlog refresh (Refresh/IssuesLoadedMsg), counts
+// pre-existing terminal state from a prior run that never appears in Picks
+// (issue #2255, ADR 0039 slice S4).
 func renderHeader(m Model) string {
 	var waiting, held, settled, failed int
 	for _, p := range m.Picks {
@@ -971,12 +976,13 @@ func renderHeader(m Model) string {
 	// Each segment is styled by its own semantic role (ADR 0031), so content
 	// survives styling as separate substrings rather than one contiguous
 	// line (issue #1499).
-	fmt.Fprintf(&b, "%s · %s · %s · %s · %s\n",
+	fmt.Fprintf(&b, "%s · %s · %s · %s · %s · %s\n",
 		roleStyle(RoleRunning).Render(fmt.Sprintf("running %d/%d", m.Live, m.Cap)),
 		roleStyle(RoleDim).Render(fmt.Sprintf("waiting %d", waiting)),
 		roleStyle(RoleHeld).Render(fmt.Sprintf("held %d", held)),
 		roleStyle(RoleSettled).Render(fmt.Sprintf("settled %d", settled)),
-		roleStyle(RoleFailed).Render(fmt.Sprintf("failed %d", failed)))
+		roleStyle(RoleFailed).Render(fmt.Sprintf("failed %d", failed)),
+		roleStyle(RoleHeld).Render(fmt.Sprintf("recoverable %d", m.RecoverableCount)))
 	if m.RebuildStatus.Stale {
 		b.WriteString(roleStyle(RoleHeld).Render(fmt.Sprintf("%s image stale: %s — new launches held; press [b] to rebuild", glyphWarning, m.RebuildStatus.Message)))
 		b.WriteString("\n")

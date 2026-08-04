@@ -31,6 +31,38 @@ func TestRefresh_WrapsListOpenIssuesResult(t *testing.T) {
 	}
 }
 
+// TestRefresh_SortsByPriority verifies Refresh orders the wrapped Issues by
+// descending Priority (ADR 0040), oldest-first within a tier, rather than
+// passing ListOpenIssues' raw oldest-first-only order straight through — so
+// the Backlog renders in the same priority order the headless dispatch pool
+// uses (#2284).
+func TestRefresh_SortsByPriority(t *testing.T) {
+	f := forge.NewFake()
+	f.SetIssue(forge.Issue{Number: "1", Title: "normal one", State: forge.IssueOpen})
+	f.SetIssue(forge.Issue{Number: "2", Title: "low", State: forge.IssueOpen, Labels: []string{"agent-priority-low"}})
+	f.SetIssue(forge.Issue{Number: "3", Title: "critical", State: forge.IssueOpen, Labels: []string{"agent-priority-critical"}})
+	f.SetIssue(forge.Issue{Number: "4", Title: "normal two", State: forge.IssueOpen})
+
+	msg := Refresh(f)
+
+	loaded, ok := msg.(IssuesLoadedMsg)
+	if !ok {
+		t.Fatalf("Refresh() = %T, want IssuesLoadedMsg", msg)
+	}
+	if loaded.Err != nil {
+		t.Fatalf("Err = %v, want nil", loaded.Err)
+	}
+	want := []string{"3", "1", "4", "2"}
+	if len(loaded.Issues) != len(want) {
+		t.Fatalf("Issues = %+v, want %d issues in order %v", loaded.Issues, len(want), want)
+	}
+	for i, num := range want {
+		if loaded.Issues[i].Number != num {
+			t.Errorf("Issues[%d].Number = %q, want %q (order %v)", i, loaded.Issues[i].Number, num, want)
+		}
+	}
+}
+
 // TestRefresh_TrackerErr_WrapsErr verifies a tracker failure surfaces as
 // IssuesLoadedMsg.Err rather than a panic or a silently empty list.
 func TestRefresh_TrackerErr_WrapsErr(t *testing.T) {
@@ -44,6 +76,47 @@ func TestRefresh_TrackerErr_WrapsErr(t *testing.T) {
 	}
 	if loaded.Err == nil {
 		t.Fatal("Err = nil, want the tracker error")
+	}
+}
+
+// TestRefresh_CountsRecoverableFromFetchedIssues verifies Refresh derives
+// RecoverableCount from the same ListOpenIssues call it already makes — no
+// extra tracker round trip — by resolving the Recoverable state's own label
+// (forge.LabeledTracker.StateLabels) and counting how many of the fetched
+// issues carry it (issue #2255, ADR 0039 slice S4).
+func TestRefresh_CountsRecoverableFromFetchedIssues(t *testing.T) {
+	f := forge.NewFake(forge.DispatchLabels{Recoverable: "agent-recoverable"})
+	f.SetIssue(forge.Issue{Number: "1", Title: "recoverable one", State: forge.IssueOpen, Labels: []string{"agent-recoverable"}})
+	f.SetIssue(forge.Issue{Number: "2", Title: "plain", State: forge.IssueOpen})
+	f.SetIssue(forge.Issue{Number: "3", Title: "recoverable two", State: forge.IssueOpen, Labels: []string{"agent-recoverable"}})
+
+	msg := Refresh(f)
+
+	loaded, ok := msg.(IssuesLoadedMsg)
+	if !ok {
+		t.Fatalf("Refresh() = %T, want IssuesLoadedMsg", msg)
+	}
+	if loaded.RecoverableCount != 2 {
+		t.Errorf("RecoverableCount = %d, want 2", loaded.RecoverableCount)
+	}
+}
+
+// TestRefresh_RecoverableCount_UnmappedLabelIsZero verifies a tracker whose
+// label family leaves Recoverable unmapped (empty label string) reports zero
+// rather than matching every issue — the same "unmapped state matches
+// everything, so treat as zero" caution issueInState documents (#1742).
+func TestRefresh_RecoverableCount_UnmappedLabelIsZero(t *testing.T) {
+	f := forge.NewFake(forge.DispatchLabels{})
+	f.SetIssue(forge.Issue{Number: "1", Title: "no marker", State: forge.IssueOpen})
+
+	msg := Refresh(f)
+
+	loaded, ok := msg.(IssuesLoadedMsg)
+	if !ok {
+		t.Fatalf("Refresh() = %T, want IssuesLoadedMsg", msg)
+	}
+	if loaded.RecoverableCount != 0 {
+		t.Errorf("RecoverableCount = %d, want 0", loaded.RecoverableCount)
 	}
 }
 
@@ -188,4 +261,37 @@ type errTracker struct {
 
 func (errTracker) ListOpenIssues() ([]forge.Issue, error) {
 	return nil, errBoom
+}
+
+// plainTracker wraps a forge.IssueTracker without also exposing
+// forge.LabeledTracker: embedding the interface only promotes the methods
+// forge.IssueTracker itself declares, so a tracker whose only observable
+// surface is plainTracker's own — even when its underlying concrete value
+// happens to implement StateLabels — never satisfies the type assertion.
+type plainTracker struct {
+	forge.IssueTracker
+}
+
+// TestRefresh_RecoverableCount_NonLabeledTrackerIsZero verifies
+// countRecoverable's `!ok` branch: a tracker that doesn't implement
+// forge.LabeledTracker at all (Jira, ADR 0039) reports zero rather than
+// panicking or falling through to some other resolution, even when a
+// fetched issue happens to carry a label string that would match if the
+// tracker were LabeledTracker.
+func TestRefresh_RecoverableCount_NonLabeledTrackerIsZero(t *testing.T) {
+	f := forge.NewFake(forge.DispatchLabels{Recoverable: "agent-recoverable"})
+	f.SetIssue(forge.Issue{Number: "1", Title: "looks recoverable", State: forge.IssueOpen, Labels: []string{"agent-recoverable"}})
+
+	msg := Refresh(plainTracker{f})
+
+	loaded, ok := msg.(IssuesLoadedMsg)
+	if !ok {
+		t.Fatalf("Refresh() = %T, want IssuesLoadedMsg", msg)
+	}
+	if loaded.Err != nil {
+		t.Fatalf("Err = %v, want nil", loaded.Err)
+	}
+	if loaded.RecoverableCount != 0 {
+		t.Errorf("RecoverableCount = %d, want 0 (tracker is not a LabeledTracker)", loaded.RecoverableCount)
+	}
 }

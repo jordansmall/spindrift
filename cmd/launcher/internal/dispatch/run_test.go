@@ -135,7 +135,7 @@ func TestRun_PopulatesBoxOutboxDir(t *testing.T) {
 	dir := tempLogDir(t)
 
 	fr := runner.NewFake()
-	f, err := NewFactory(Config{CodeForge: "local"}, dir, fr, fakeDriver{}, RealClock())
+	f, err := NewFactory(Config{HostMediatedRemote: true}, dir, fr, fakeDriver{}, RealClock())
 	if err != nil {
 		t.Fatalf("NewFactory: %v", err)
 	}
@@ -196,7 +196,7 @@ func TestRun_PopulatesBoxOutboxDir_GithubReadOnly(t *testing.T) {
 	dir := tempLogDir(t)
 
 	fr := runner.NewFake()
-	f, err := NewFactory(Config{CodeForge: "github", BoxForgeAndIssueAccess: "read-only"}, dir, fr, fakeDriver{}, RealClock())
+	f, err := NewFactory(Config{OutboxRelayCapable: true, BoxForgeAndIssueAccess: "read-only"}, dir, fr, fakeDriver{}, RealClock())
 	if err != nil {
 		t.Fatalf("NewFactory: %v", err)
 	}
@@ -228,7 +228,7 @@ func TestRun_NoOutboxDirForGithubReadWrite(t *testing.T) {
 	dir := tempLogDir(t)
 
 	fr := runner.NewFake()
-	f, err := NewFactory(Config{CodeForge: "github", BoxForgeAndIssueAccess: "read-write"}, dir, fr, fakeDriver{}, RealClock())
+	f, err := NewFactory(Config{OutboxRelayCapable: true, BoxForgeAndIssueAccess: "read-write"}, dir, fr, fakeDriver{}, RealClock())
 	if err != nil {
 		t.Fatalf("NewFactory: %v", err)
 	}
@@ -244,6 +244,36 @@ func TestRun_NoOutboxDirForGithubReadWrite(t *testing.T) {
 	}
 	if got := fr.RunCalls[0].OutboxDir; got != "" {
 		t.Errorf("Box.OutboxDir: got %q, want empty for github read-write", got)
+	}
+}
+
+// TestRun_NoOutboxDirForForgejoReadOnly verifies that a Box dispatched under
+// CODE_FORGE=forgejo with BOX_FORGE_AND_ISSUE_ACCESS=read-only still gets no
+// outbox directory -- forgejo's backend row leaves outboxRelayCapable false
+// (a preserved pre-existing asymmetry with github's read-only outbox-relay
+// treatment, issue #1918), so OutboxRelayCapable stays false here too and
+// needsOutbox must not flip true just because BoxForgeAndIssueAccess is
+// read-only (issue #2267).
+func TestRun_NoOutboxDirForForgejoReadOnly(t *testing.T) {
+	dir := tempLogDir(t)
+
+	fr := runner.NewFake()
+	f, err := NewFactory(Config{OutboxRelayCapable: false, BoxForgeAndIssueAccess: "read-only"}, dir, fr, fakeDriver{}, RealClock())
+	if err != nil {
+		t.Fatalf("NewFactory: %v", err)
+	}
+	defer f.Cleanup()
+
+	d := f.New("81", "T")
+	if result := d.Run(); !result.Success {
+		t.Fatalf("Run: want Success=true, got %+v", result)
+	}
+
+	if len(fr.RunCalls) != 1 {
+		t.Fatalf("RunCalls: got %d, want 1", len(fr.RunCalls))
+	}
+	if got := fr.RunCalls[0].OutboxDir; got != "" {
+		t.Errorf("Box.OutboxDir: got %q, want empty for forgejo read-only (OutboxRelayCapable=false)", got)
 	}
 }
 

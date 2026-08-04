@@ -125,7 +125,7 @@ func TestBuildMountSpecs_SkillsDirUnset_NoMount(t *testing.T) {
 // Accumulation repo single-writer).
 func TestBuildMountSpecs_LocalCodeForge_AccumulationRepoMountedReadOnly(t *testing.T) {
 	dir := t.TempDir()
-	specs := buildMountSpecs(MountParams{CodeForge: "local", AccumulationRepoDir: dir}, Box{})
+	specs := buildMountSpecs(MountParams{HostMediatedRemote: true, AccumulationRepoDir: dir}, Box{})
 
 	var found *MountSpec
 	for i := range specs {
@@ -150,7 +150,7 @@ func TestBuildMountSpecs_LocalCodeForge_AccumulationRepoMountedReadOnly(t *testi
 // writable outbox since it cannot push to the read-only /repo mount).
 func TestBuildMountSpecs_LocalCodeForge_OutboxMountedWritable(t *testing.T) {
 	dir := t.TempDir()
-	specs := buildMountSpecs(MountParams{CodeForge: "local"}, Box{OutboxDir: dir})
+	specs := buildMountSpecs(MountParams{HostMediatedRemote: true}, Box{OutboxDir: dir})
 
 	var found *MountSpec
 	for i := range specs {
@@ -171,14 +171,15 @@ func TestBuildMountSpecs_LocalCodeForge_OutboxMountedWritable(t *testing.T) {
 
 // TestBuildMountSpecs_NonLocalCodeForge_NoAccumulationOrOutboxMount verifies
 // that a present AccumulationRepoDir/OutboxDir produce neither mount when
-// CodeForge is not "local" — the two mounts are local-only (ADR 0033).
+// HostMediatedRemote is false and BoxForgeAndIssueAccess isn't "read-only" —
+// the two mounts are local-only (ADR 0033), regardless of OutboxRelayCapable.
 func TestBuildMountSpecs_NonLocalCodeForge_NoAccumulationOrOutboxMount(t *testing.T) {
 	repoDir, outboxDir := t.TempDir(), t.TempDir()
-	for _, cf := range []string{"github", "git", ""} {
-		specs := buildMountSpecs(MountParams{CodeForge: cf, AccumulationRepoDir: repoDir}, Box{OutboxDir: outboxDir})
+	for _, outboxRelayCapable := range []bool{true, false} {
+		specs := buildMountSpecs(MountParams{HostMediatedRemote: false, OutboxRelayCapable: outboxRelayCapable, AccumulationRepoDir: repoDir}, Box{OutboxDir: outboxDir})
 		for _, s := range specs {
 			if s.Target == "/repo" || s.Target == "/outbox" {
-				t.Errorf("CodeForge=%q: unexpected spec %+v", cf, s)
+				t.Errorf("OutboxRelayCapable=%v: unexpected spec %+v", outboxRelayCapable, s)
 			}
 		}
 	}
@@ -186,10 +187,10 @@ func TestBuildMountSpecs_NonLocalCodeForge_NoAccumulationOrOutboxMount(t *testin
 
 // TestBuildMountSpecs_LocalCodeForge_AbsentAccumulationRepoDir_NoMount
 // verifies that an unset/nonexistent AccumulationRepoDir yields no /repo
-// spec even under CODE_FORGE=local — both local mounts stay gated on
-// candidateMount, not just the CodeForge check.
+// spec even under HostMediatedRemote — both local mounts stay gated on
+// candidateMount, not just the HostMediatedRemote check.
 func TestBuildMountSpecs_LocalCodeForge_AbsentAccumulationRepoDir_NoMount(t *testing.T) {
-	specs := buildMountSpecs(MountParams{CodeForge: "local"}, Box{})
+	specs := buildMountSpecs(MountParams{HostMediatedRemote: true}, Box{})
 
 	for _, s := range specs {
 		if s.Target == "/repo" {
@@ -199,9 +200,9 @@ func TestBuildMountSpecs_LocalCodeForge_AbsentAccumulationRepoDir_NoMount(t *tes
 }
 
 // TestBuildMountSpecs_LocalCodeForge_AbsentOutboxDir_NoMount verifies that an
-// unset Box.OutboxDir yields no /outbox spec even under CODE_FORGE=local.
+// unset Box.OutboxDir yields no /outbox spec even under HostMediatedRemote.
 func TestBuildMountSpecs_LocalCodeForge_AbsentOutboxDir_NoMount(t *testing.T) {
-	specs := buildMountSpecs(MountParams{CodeForge: "local"}, Box{})
+	specs := buildMountSpecs(MountParams{HostMediatedRemote: true}, Box{})
 
 	for _, s := range specs {
 		if s.Target == "/outbox" {
@@ -219,7 +220,7 @@ func TestBuildMountSpecs_LocalCodeForge_AbsentOutboxDir_NoMount(t *testing.T) {
 // from a locally mounted Accumulation repo.
 func TestBuildMountSpecs_GithubReadOnly_OutboxMountedWritable(t *testing.T) {
 	dir := t.TempDir()
-	specs := buildMountSpecs(MountParams{CodeForge: "github", BoxForgeAndIssueAccess: "read-only"}, Box{OutboxDir: dir})
+	specs := buildMountSpecs(MountParams{HostMediatedRemote: false, OutboxRelayCapable: true, BoxForgeAndIssueAccess: "read-only"}, Box{OutboxDir: dir})
 
 	var found *MountSpec
 	for i := range specs {
@@ -247,11 +248,32 @@ func TestBuildMountSpecs_GithubReadOnly_OutboxMountedWritable(t *testing.T) {
 // never consults an outbox.
 func TestBuildMountSpecs_GithubReadWrite_NoOutboxMount(t *testing.T) {
 	dir := t.TempDir()
-	specs := buildMountSpecs(MountParams{CodeForge: "github", BoxForgeAndIssueAccess: "read-write"}, Box{OutboxDir: dir})
+	specs := buildMountSpecs(MountParams{HostMediatedRemote: false, OutboxRelayCapable: true, BoxForgeAndIssueAccess: "read-write"}, Box{OutboxDir: dir})
 
 	for _, s := range specs {
 		if s.Target == "/outbox" {
 			t.Errorf("unexpected /outbox spec for CODE_FORGE=github read-write: %+v", specs)
+		}
+	}
+}
+
+// TestBuildMountSpecs_ForgejoReadOnly_NoOutboxMount pins a pre-existing
+// asymmetry (issue #2267): CODE_FORGE=forgejo does NOT get the outbox-relay
+// treatment under BoxForgeAndIssueAccess="read-only", unlike github, even
+// though forgejo also has its own read-only CodeForge constructor
+// (NewReadOnlyForgejoCodeForge). This mirrors github's own OutboxRelayCapable
+// field being false for forgejo in the backendRow registry
+// (cmd/launcher/backend.go) -- confirmed by running this exact scenario
+// (via the string-based CodeForge=="github" check that predates #2267)
+// against the pre-migration code, where it also passed, proving this is a
+// behavior pin and not new behavior.
+func TestBuildMountSpecs_ForgejoReadOnly_NoOutboxMount(t *testing.T) {
+	dir := t.TempDir()
+	specs := buildMountSpecs(MountParams{HostMediatedRemote: false, OutboxRelayCapable: false, BoxForgeAndIssueAccess: "read-only"}, Box{OutboxDir: dir})
+
+	for _, s := range specs {
+		if s.Target == "/outbox" {
+			t.Errorf("unexpected /outbox spec for CODE_FORGE=forgejo read-only: %+v", specs)
 		}
 	}
 }
@@ -263,7 +285,7 @@ func TestBuildMountSpecs_GithubReadWrite_NoOutboxMount(t *testing.T) {
 // mount is the tracker's normal read path, not a diagnostic override.
 func TestBuildMountSpecs_IssuesDirMounted(t *testing.T) {
 	dir := t.TempDir()
-	specs := buildMountSpecs(MountParams{IssueTracker: "local", LocalIssuesDir: dir}, Box{})
+	specs := buildMountSpecs(MountParams{HostMediatedIssueTracker: true, LocalIssuesDir: dir}, Box{})
 
 	var found *MountSpec
 	for i := range specs {
@@ -290,7 +312,7 @@ func TestBuildMountSpecs_IssuesDirMounted(t *testing.T) {
 // resolves to a real directory — the mount is local-only (ADR 0032).
 func TestBuildMountSpecs_IssuesDirNonLocalTracker_NoMount(t *testing.T) {
 	dir := t.TempDir()
-	specs := buildMountSpecs(MountParams{IssueTracker: "github", LocalIssuesDir: dir}, Box{})
+	specs := buildMountSpecs(MountParams{HostMediatedIssueTracker: false, LocalIssuesDir: dir}, Box{})
 
 	for _, s := range specs {
 		if s.Target == "/issues" {
@@ -303,7 +325,7 @@ func TestBuildMountSpecs_IssuesDirNonLocalTracker_NoMount(t *testing.T) {
 // with an absent LocalIssuesDir yields no mount rather than an error — a
 // misconfigured or not-yet-created issues dir fails gracefully (ADR 0032).
 func TestBuildMountSpecs_IssuesDirMissing_NoMount(t *testing.T) {
-	specs := buildMountSpecs(MountParams{IssueTracker: "local", LocalIssuesDir: "/nonexistent/does-not-exist"}, Box{})
+	specs := buildMountSpecs(MountParams{HostMediatedIssueTracker: true, LocalIssuesDir: "/nonexistent/does-not-exist"}, Box{})
 
 	for _, s := range specs {
 		if s.Target == "/issues" {
@@ -393,14 +415,14 @@ func TestLocalCodeForgeMounts_RenderedIdenticallyAcrossBackends(t *testing.T) {
 	oci := &ociAdapter{
 		cli:                 "podman",
 		image:               "spindrift:test",
-		codeForge:           "local",
+		hostMediatedRemote:  true,
 		accumulationRepoDir: repoDir,
 	}
 	bwrap := &bwrapAdapter{
 		agentFiles:          t.TempDir(),
 		agentEnv:            "/fake/env",
 		bakedPrefetch:       "echo ok",
-		codeForge:           "local",
+		hostMediatedRemote:  true,
 		accumulationRepoDir: repoDir,
 	}
 	box := Box{Name: "agent-issue-1", Env: map[string]string{}, OutboxDir: outboxDir}
@@ -435,14 +457,14 @@ func TestGithubReadOnlyOutboxMount_RenderedIdenticallyAcrossBackends(t *testing.
 	oci := &ociAdapter{
 		cli:                    "podman",
 		image:                  "spindrift:test",
-		codeForge:              "github",
+		outboxRelayCapable:     true,
 		boxForgeAndIssueAccess: "read-only",
 	}
 	bwrap := &bwrapAdapter{
 		agentFiles:             t.TempDir(),
 		agentEnv:               "/fake/env",
 		bakedPrefetch:          "echo ok",
-		codeForge:              "github",
+		outboxRelayCapable:     true,
 		boxForgeAndIssueAccess: "read-only",
 	}
 	box := Box{Name: "agent-issue-1", Env: map[string]string{}, OutboxDir: outboxDir}

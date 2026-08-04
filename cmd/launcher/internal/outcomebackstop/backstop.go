@@ -35,8 +35,15 @@ type Config struct {
 	// dispatch never cuts a branch (ADR 0022), so Run never touches git for
 	// it.
 	Kind string
-	// CodeForge is "github" | "git" | "local".
-	CodeForge string
+	// HostMediatedRemote reports whether this run's CODE_FORGE has no
+	// writable remote to push to in-box at all (ADR 0033: CODE_FORGE=local)
+	// -- mirrors dispatch.Config's field of the same name (issue #2267).
+	HostMediatedRemote bool
+	// OutboxRelayCapable reports whether the active CODE_FORGE backend gets
+	// the outbox-relay treatment under a read-only Box (issue #1918: true
+	// for github today) -- mirrors dispatch.Config's field of the same name
+	// (issue #2267).
+	OutboxRelayCapable bool
 	// WriteEnabled reports whether BOX_WRITE_ENABLED was present -- a
 	// read-only github Box holds no push token by design.
 	WriteEnabled bool
@@ -98,9 +105,9 @@ func Run(cfg Config, w io.Writer) error {
 	switch {
 	case count == 0:
 		note += "; no work to preserve"
-	case cfg.CodeForge == "local":
-		note += "; no bundle was ever emitted (no writable remote under CODE_FORGE=local)"
-	case !cfg.WriteEnabled && cfg.CodeForge == "github":
+	case cfg.HostMediatedRemote:
+		note += "; branch relayed via outbox bundle (no writable remote under CODE_FORGE=local)"
+	case !cfg.WriteEnabled && cfg.OutboxRelayCapable:
 		note += "; branch relayed via outbox bundle (read-only Box)"
 	default:
 		note = pushWithRetry(git, clock, cfg, note)

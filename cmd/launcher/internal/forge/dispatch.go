@@ -17,6 +17,7 @@ const (
 	// terminal state within the work kind's own DispatchState enum, not a
 	// research Verdict.
 	SpecMismatch
+	Recoverable // work is salvageable; needs recovery, not a fresh dispatch
 	// Untriaged is not a real tracker state — it is the "from" state a
 	// promotion TransitionState(Untriaged, Dispatchable) call names for an
 	// issue that has never carried a dispatch label. Its Label is "", so
@@ -49,6 +50,7 @@ type DispatchLabels struct {
 	InProgress   string // default "agent-in-progress"
 	Complete     string // default "agent-complete"
 	Failed       string // default "agent-failed"
+	Recoverable  string // local-only frontmatter marker; not a real GitHub label
 }
 
 // Label returns the native label string for state s.
@@ -64,12 +66,18 @@ func (d DispatchLabels) Label(s DispatchState) string {
 		return d.Failed
 	case SpecMismatch:
 		return SpecMismatchLabel
+	case Recoverable:
+		return d.Recoverable
 	default:
 		return ""
 	}
 }
 
-// AllLabels returns all four dispatch label strings.
+// AllLabels returns all four dispatch label strings that back a real
+// GitHub label. Recoverable is deliberately excluded: it is a local-only
+// frontmatter marker (never a real GitHub label), so it must not appear in
+// the registry-membership set adapters like the local tracker's ListLabels
+// report as present.
 func (d DispatchLabels) AllLabels() []string {
 	return []string{d.Dispatchable, d.InProgress, d.Complete, d.Failed}
 }

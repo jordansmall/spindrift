@@ -9,7 +9,7 @@ import (
 )
 
 func TestBuildForge_GithubTracker_ReturnsSameInstanceForBothSeams(t *testing.T) {
-	it, cf := buildForge("owner/repo", trackerSettings{issueTracker: "github"}, "ghp_faketoken", "", "")
+	it, cf := buildForge("owner/repo", trackerSettings{issueTracker: "github"}, "")
 	if it == nil || cf == nil {
 		t.Fatal("expected non-nil IssueTracker and CodeForge")
 	}
@@ -20,7 +20,7 @@ func TestBuildForge_GithubTracker_ReturnsSameInstanceForBothSeams(t *testing.T) 
 
 func TestBuildForge_LocalTracker_ProbeCreatesIssuesDir(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "issues")
-	it, _ := buildForge("owner/repo", trackerSettings{issueTracker: "local", localIssuesDir: dir}, "ghp_faketoken", "", "")
+	it, _ := buildForge("owner/repo", trackerSettings{issueTracker: "local", localIssuesDir: dir}, "")
 
 	repo, err := it.Probe()
 	if err != nil {
@@ -52,7 +52,7 @@ func TestBuildForge_JiraTracker_ProbeHitsConfiguredBaseURLAndProjectKey(t *testi
 		issueTracker:   "jira",
 		jiraBaseURL:    srv.URL,
 		jiraProjectKey: "ENG",
-	}, "ghp_faketoken", "jira-faketoken", "")
+	}, "jira-faketoken")
 
 	repo, err := it.Probe()
 	if err != nil {
@@ -78,7 +78,7 @@ func TestBuildForge_ForgejoTracker_ProbeHitsConfiguredBaseURL(t *testing.T) {
 	it, _ := buildForge("owner/repo", trackerSettings{
 		issueTracker:   "forgejo",
 		forgejoBaseURL: srv.URL,
-	}, "ghp_x", "", "forgejo-faketoken")
+	}, "forgejo-faketoken")
 
 	repo, err := it.Probe()
 	if err != nil {

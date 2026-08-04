@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/doctor"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/forgejo"
@@ -101,18 +102,29 @@ func validateRuntimeChoice(runtime string) error {
 	return fmt.Errorf("expected one of %s, got %q", strings.Join(validRuntimeChoices, ", "), runtime)
 }
 
-// validBackendChoices are the operator-facing code-forge backends the wizard
-// accepts when the git remote host is neither github.com nor codeberg.org.
-var validBackendChoices = []string{"github", "forgejo"}
+// quickstartBackendNames returns the operator-facing code-forge backend
+// names the wizard accepts when the git remote host is neither github.com
+// nor codeberg.org, derived from backend.QuickstartEligible() so a new
+// backend registered in the shared registry automatically appears here with
+// no quickstart-side edit.
+func quickstartBackendNames() []string {
+	descriptors := backend.QuickstartEligible()
+	names := make([]string, len(descriptors))
+	for i, d := range descriptors {
+		names[i] = d.Name
+	}
+	return names
+}
 
-// validateBackendChoice rejects any value outside validBackendChoices.
+// validateBackendChoice rejects any value outside quickstartBackendNames().
 func validateBackendChoice(b string) error {
-	for _, v := range validBackendChoices {
+	names := quickstartBackendNames()
+	for _, v := range names {
 		if b == v {
 			return nil
 		}
 	}
-	return fmt.Errorf("expected one of %s, got %q", strings.Join(validBackendChoices, ", "), b)
+	return fmt.Errorf("expected one of %s, got %q", strings.Join(names, ", "), b)
 }
 
 // detectRuntime returns the first runtime in runtimePrecedence found on
@@ -161,18 +173,20 @@ var defaultDispatchLabels = forge.DispatchLabels{
 var spindriftBuildArgs = []string{"nix", "develop", "--command", "spindrift", "build"}
 
 // ForgeBuilder constructs the real IssueTracker/CodeForge from the wizard's
-// collected repoSlug, GitHub token, and Issue Tracker settings, so the
-// finish line's doctor validation (ADR 0027) runs in-process against the
-// real forge — no `spindrift doctor` subprocess, since the `spindrift`
-// binary doesn't exist yet at Quickstart's pre-CLI stage. Injected so tests
-// substitute a forge.Fake instead of shelling out to gh/Jira for real.
-type ForgeBuilder func(repoSlug string, tracker trackerSettings, ghToken, jiraToken, forgejoToken string) (forge.IssueTracker, forge.CodeForge)
+// collected repoSlug, Issue Tracker settings, and the single backend token
+// the wizard collected (whichever one is relevant to the chosen backend —
+// only one is ever active per call), so the finish line's doctor validation
+// (ADR 0027) runs in-process against the real forge — no `spindrift doctor`
+// subprocess, since the `spindrift` binary doesn't exist yet at Quickstart's
+// pre-CLI stage. Injected so tests substitute a forge.Fake instead of
+// shelling out to gh/Jira for real.
+type ForgeBuilder func(repoSlug string, tracker trackerSettings, token string) (forge.IssueTracker, forge.CodeForge)
 
 // forgejoProbeTimeout bounds the HTTP client the forgejo IssueTracker uses
 // for the interactive token-validation ping (acquireForgejoToken's Probe
 // call), so an unreachable or hung Forgejo host can't block the wizard
-// forever. Mirrors defaultForgejoProbeTimeout in the sibling Forgejo
-// CodeForge adapter.
+// forever. Mirrors defaultForgejoHTTPTimeout in the sibling Forgejo
+// IssueTracker/CodeForge adapters.
 const forgejoProbeTimeout = 30 * time.Second
 
 // buildForge is the production ForgeBuilder. The Code Forge is github by
@@ -181,11 +195,13 @@ const forgejoProbeTimeout = 30 * time.Second
 // from the Forgejo REST adapters so doctor validates against a Forgejo
 // instance instead. The Issue Tracker switches on tracker.issueTracker,
 // which the wizard always sets to "github" (issue #1559) — the
-// jira/local/forgejo cases exist for buildForge's own tests.
-// github.NewExecClient shells out to the gh CLI, which reads GH_TOKEN from
-// the process environment — runQuickstart exports the collected token
-// before calling this.
-func buildForge(repoSlug string, tracker trackerSettings, ghToken, jiraToken, forgejoToken string) (forge.IssueTracker, forge.CodeForge) {
+// jira/local/forgejo cases exist for buildForge's own tests. token is the
+// single backend credential relevant to tracker.issueTracker (empty for
+// "github"/"local", where the credential either lives ambient in the process
+// environment or isn't needed at all): github.NewExecClient shells out to
+// the gh CLI, which reads GH_TOKEN from the process environment —
+// runQuickstart exports the collected token before calling this.
+func buildForge(repoSlug string, tracker trackerSettings, token string) (forge.IssueTracker, forge.CodeForge) {
 	cf := github.NewExecClient(repoSlug, defaultDispatchLabels, defaultBranchPrefix)
 	switch tracker.issueTracker {
 	case "jira":
@@ -193,7 +209,7 @@ func buildForge(repoSlug string, tracker trackerSettings, ghToken, jiraToken, fo
 			BaseURL:    tracker.jiraBaseURL,
 			ProjectKey: tracker.jiraProjectKey,
 			Email:      tracker.jiraEmail,
-			Token:      jiraToken,
+			Token:      token,
 			Labels:     defaultDispatchLabels,
 		}), cf
 	case "local":
@@ -202,16 +218,16 @@ func buildForge(repoSlug string, tracker trackerSettings, ghToken, jiraToken, fo
 		it := forgejo.NewForgejoClient(forgejo.ForgejoConfig{
 			BaseURL:    tracker.forgejoBaseURL,
 			Repo:       repoSlug,
-			Token:      forgejoToken,
+			Token:      token,
 			Labels:     defaultDispatchLabels,
 			HTTPClient: &http.Client{Timeout: forgejoProbeTimeout},
 		})
 		cf := forgejo.NewForgejoCodeForge(forgejo.ForgejoCodeForgeConfig{
 			BaseURL:      tracker.forgejoBaseURL,
 			Repo:         repoSlug,
-			Token:        forgejoToken,
+			Token:        token,
 			BranchPrefix: defaultBranchPrefix,
-		})
+		}, it)
 		return it, cf
 	default:
 		return cf, cf
@@ -299,20 +315,20 @@ func runQuickstart(dir string, env Environment, runner CommandRunner, forgeBuild
 
 	remoteURL := env.GitRemoteURL()
 	host, remoteSlug := parseRemoteHostSlug(remoteURL)
-	backend := "github"
+	backendName := "github"
 	forgejoBaseURL := ""
 	repoSlugDefault := env.GitRemoteRepoSlug()
 	switch {
 	case host == "codeberg.org":
-		backend, forgejoBaseURL, repoSlugDefault = "forgejo", codebergBaseURL, remoteSlug
+		backendName, forgejoBaseURL, repoSlugDefault = "forgejo", codebergBaseURL, remoteSlug
 		fmt.Fprintln(w, "detected a codeberg.org remote — using the forgejo backend")
 	case host != "" && host != "github.com":
-		b, err := promptValidated("Backend (github/forgejo)", "github", validateBackendChoice)
+		b, err := promptValidated(fmt.Sprintf("Backend (%s)", strings.Join(quickstartBackendNames(), "/")), "github", validateBackendChoice)
 		if err != nil {
 			return err
 		}
 		if b == "forgejo" {
-			backend, forgejoBaseURL, repoSlugDefault = "forgejo", "https://"+host, remoteSlug
+			backendName, forgejoBaseURL, repoSlugDefault = "forgejo", "https://"+host, remoteSlug
 		}
 	}
 
@@ -332,16 +348,21 @@ func runQuickstart(dir string, env Environment, runner CommandRunner, forgeBuild
 	// Jira/local sub-prompts either way. The Jira/local adapters and runtime
 	// ISSUE_TRACKER validation stay in place for an operator who hand-edits
 	// the generated flake.
-	tracker := trackerSettings{issueTracker: backend, forgejoBaseURL: forgejoBaseURL}
+	tracker := trackerSettings{issueTracker: backendName, forgejoBaseURL: forgejoBaseURL}
+
+	desc, ok := backend.ByName(backendName)
+	if !ok {
+		return fmt.Errorf("unregistered backend %q", backendName)
+	}
 
 	var ghToken, forgejoToken string
-	if backend == "forgejo" {
-		forgejoToken, err = acquireForgejoToken(w, promptMasked, forgeBuilder, repoSlug, forgejoBaseURL)
+	if backendName == "forgejo" {
+		forgejoToken, err = acquireForgejoToken(w, promptMasked, forgeBuilder, repoSlug, forgejoBaseURL, desc.TokenEnvVar)
 		if err != nil {
 			return err
 		}
 	} else {
-		ghToken, err = acquireGHToken(env, w, promptMasked)
+		ghToken, err = acquireGHToken(env, w, promptMasked, desc.TokenEnvVar)
 		if err != nil {
 			return err
 		}
@@ -370,14 +391,18 @@ func runQuickstart(dir string, env Environment, runner CommandRunner, forgeBuild
 		anthropicAPIKey = promptMasked("Anthropic API key (ANTHROPIC_API_KEY)")
 	}
 
+	token := ghToken
+	if forgejoToken != "" {
+		token = forgejoToken
+	}
+
 	a := answers{
 		repoSlug:         repoSlug,
 		runtime:          runtime,
 		gitUserName:      gitUserName,
 		gitUserEmail:     gitUserEmail,
 		tracker:          tracker,
-		ghToken:          ghToken,
-		forgejoToken:     forgejoToken,
+		token:            token,
 		claudeOAuthToken: claudeOAuthToken,
 		anthropicAPIKey:  anthropicAPIKey,
 	}
@@ -391,14 +416,17 @@ func runQuickstart(dir string, env Environment, runner CommandRunner, forgeBuild
 	// The gh CLI (used by the github Code Forge, and by the github Issue
 	// Tracker branch) reads auth from GH_TOKEN in the process environment —
 	// only relevant on the github path.
-	if backend != "forgejo" {
+	if backendName != "forgejo" {
 		if err := os.Setenv("GH_TOKEN", ghToken); err != nil {
 			return fmt.Errorf("set GH_TOKEN: %w", err)
 		}
 	}
-	it, cf := forgeBuilder(repoSlug, tracker, ghToken, "", a.forgejoToken)
+	it, cf := forgeBuilder(repoSlug, tracker, a.token)
+	tokenHint, slugHint := doctorHints(tracker.issueTracker)
 	if err := doctor.Run(it, cf, doctor.Config{
 		IssueTracker:    tracker.issueTracker,
+		TokenHint:       tokenHint,
+		SlugHint:        slugHint,
 		Label:           defaultDispatchLabels.Dispatchable,
 		InProgressLabel: defaultDispatchLabels.InProgress,
 		FailedLabel:     defaultDispatchLabels.Failed,
@@ -427,11 +455,11 @@ func runQuickstart(dir string, env Environment, runner CommandRunner, forgeBuild
 // `gh auth token` fallback for an operator in a hurry (labeled with a
 // broad-scope warning, since the gh CLI's own OAuth token is typically
 // repo-wide).
-func acquireGHToken(env Environment, w io.Writer, promptMasked func(string) string) (string, error) {
-	if token := env.Getenv("GH_TOKEN"); token != "" {
+func acquireGHToken(env Environment, w io.Writer, promptMasked func(string) string, tokenEnvVar string) (string, error) {
+	if token := env.Getenv(tokenEnvVar); token != "" {
 		return token, nil
 	}
-	fmt.Fprintln(w, "No ambient GH_TOKEN found.")
+	fmt.Fprintf(w, "No ambient %s found.\n", tokenEnvVar)
 	fmt.Fprint(w, "Create a fine-grained personal access token scoped to only this repo, with:\n"+requiredGHPermissions)
 	token := promptMasked("GitHub token (paste a fine-grained PAT, or leave blank to fall back to `gh auth token` — broader scope warning)")
 	if token != "" {
@@ -454,12 +482,12 @@ func acquireGHToken(env Environment, w io.Writer, promptMasked func(string) stri
 // github_pat_), so there is nothing to inspect locally. The error hints name
 // FORGEJO_TOKEN and FORGEJO_BASE_URL, the two env knobs an operator needs to
 // fix and rerun.
-func acquireForgejoToken(w io.Writer, promptMasked func(string) string, forgeBuilder ForgeBuilder, repoSlug, baseURL string) (string, error) {
-	token := promptMasked("Forgejo token (paste a Forgejo personal access token — FORGEJO_TOKEN)")
+func acquireForgejoToken(w io.Writer, promptMasked func(string) string, forgeBuilder ForgeBuilder, repoSlug, baseURL, tokenEnvVar string) (string, error) {
+	token := promptMasked(fmt.Sprintf("Forgejo token (paste a Forgejo personal access token — %s)", tokenEnvVar))
 	if token == "" {
-		return "", fmt.Errorf("no Forgejo token provided — set FORGEJO_TOKEN and rerun")
+		return "", fmt.Errorf("no Forgejo token provided — set %s and rerun", tokenEnvVar)
 	}
-	it, _ := forgeBuilder(repoSlug, trackerSettings{issueTracker: "forgejo", forgejoBaseURL: baseURL}, "", "", token)
+	it, _ := forgeBuilder(repoSlug, trackerSettings{issueTracker: "forgejo", forgejoBaseURL: baseURL}, token)
 	if _, err := it.Probe(); err != nil {
 		if errors.Is(err, forge.ErrAuthFailure) {
 			return "", fmt.Errorf("Forgejo token rejected by the API — check FORGEJO_TOKEN is valid and FORGEJO_BASE_URL (%s) points at the right instance: %w", baseURL, err)
@@ -559,6 +587,18 @@ harness.env
 
 const quickstartEnvrc = "use flake\n"
 
+// doctorHints resolves doctor.Config's TokenHint/SlugHint for the wizard's
+// own doctor.Run call, via backend.ByName. An unregistered issueTracker name
+// (or a registered one with no hints, e.g. "github") returns empty values,
+// meaning "use doctor.Run's github-shaped default".
+func doctorHints(issueTracker string) (tokenHint, slugHint string) {
+	row, ok := backend.ByName(issueTracker)
+	if !ok {
+		return "", ""
+	}
+	return row.DoctorTokenHint, row.DoctorSlugHint
+}
+
 // trackerSettings holds the fields buildForge needs to construct an Issue
 // Tracker adapter (ADR 0013): github needs none beyond repoSlug, jira adds
 // its base URL/project key/optional email, local adds an issues directory.
@@ -587,8 +627,7 @@ type answers struct {
 	gitUserName      string
 	gitUserEmail     string
 	tracker          trackerSettings
-	ghToken          string
-	forgejoToken     string
+	token            string
 	claudeOAuthToken string
 	anthropicAPIKey  string
 }
@@ -609,7 +648,7 @@ type scaffoldFile struct {
 func render(a answers) []scaffoldFile {
 	return []scaffoldFile{
 		{path: "flake.nix", content: renderFlakeNix(a.repoSlug, a.runtime, a.gitUserName, a.gitUserEmail, a.tracker), mode: 0o644},
-		{path: "harness.env", content: renderHarnessEnv(a.tracker.issueTracker, a.ghToken, a.forgejoToken, a.claudeOAuthToken, a.anthropicAPIKey), mode: 0o600},
+		{path: "harness.env", content: renderHarnessEnv(a.tracker.issueTracker, a.token, a.claudeOAuthToken, a.anthropicAPIKey), mode: 0o600},
 		{path: ".gitignore", content: quickstartGitignore, mode: 0o644},
 		{path: ".envrc", content: quickstartEnvrc, mode: 0o644},
 	}
@@ -695,16 +734,16 @@ func nixEscape(s string) string {
 }
 
 // renderHarnessEnv writes only the secrets the wizard actually collected:
-// the code-forge credential — FORGEJO_TOKEN when the operator chose the
-// forgejo tracker, GH_TOKEN otherwise — and whichever Claude credential the
-// operator chose (OAuth token or API key, never both).
-func renderHarnessEnv(issueTracker, ghToken, forgejoToken, claudeOAuthToken, anthropicAPIKey string) string {
-	var out string
-	if issueTracker == "forgejo" {
-		out = fmt.Sprintf("FORGEJO_TOKEN=%s\n", forgejoToken)
-	} else {
-		out = fmt.Sprintf("GH_TOKEN=%s\n", ghToken)
+// the code-forge credential — under the registered backend's TokenEnvVar
+// (e.g. FORGEJO_TOKEN for forgejo, GH_TOKEN for github), falling back to
+// GH_TOKEN for an unregistered/tokenless issueTracker — and whichever Claude
+// credential the operator chose (OAuth token or API key, never both).
+func renderHarnessEnv(issueTracker, token, claudeOAuthToken, anthropicAPIKey string) string {
+	tokenEnvVar := "GH_TOKEN"
+	if desc, ok := backend.ByName(issueTracker); ok && desc.TokenEnvVar != "" {
+		tokenEnvVar = desc.TokenEnvVar
 	}
+	out := fmt.Sprintf("%s=%s\n", tokenEnvVar, token)
 	if claudeOAuthToken != "" {
 		out += fmt.Sprintf("CLAUDE_CODE_OAUTH_TOKEN=%s\n", claudeOAuthToken)
 	} else {

@@ -11,10 +11,11 @@ import (
 // opencodeDriver is the host-side strategy for the opencode Driver: a thin
 // adapter onto the driver/opencode subpackage, which owns the opencode CLI's
 // NDJSON transcript shape and transient-error taxonomy. It cannot import
-// this package (that would cycle back to here). Both opencode.Classification
-// and this package's Classification are true aliases of
-// driverkit.Classification, so the vocabulary is shared by construction and
-// ClassifyTransient just returns opencode.Classify's result.
+// this package (that would cycle back to here). opencode.Classify returns
+// driverkit.Classification directly, and this package's Classification is a
+// true alias of driverkit.Classification, so the vocabulary is shared by
+// construction and ClassifyTransient just returns opencode.Classify's
+// result.
 type opencodeDriver struct{}
 
 func (opencodeDriver) Name() string { return "opencode" }

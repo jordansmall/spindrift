@@ -1879,6 +1879,20 @@ create it manually:
 gh label create agent-spec-mismatch --repo owner/repo --color d4c5f9 --description "Title and body describe unrelated work — needs a human decision"
 ```
 
+#### Create the priority labels on the Target repo
+
+The `agent-priority-{critical,high,low}` labels (ADR 0040) are a fixed,
+non-configurable vocabulary that `ResolvePriority` matches by exact name.
+`spindrift doctor` checks and, in interactive mode, offers to create these
+too, but treats them as advisory: like the research labels above, a missing
+priority label never fails the check. To create them manually:
+
+```sh
+gh label create agent-priority-critical --repo owner/repo --color d73a4a --description "Drop everything — highest dispatch priority"
+gh label create agent-priority-high     --repo owner/repo --color ff8c00 --description "Dispatch ahead of normal-priority issues"
+gh label create agent-priority-low      --repo owner/repo --color 8a9ba8 --description "Dispatch behind normal-priority issues"
+```
+
 #### Configuring the research verdict vocabulary (`RESEARCH_VERDICTS`)
 
 By default the research kind's verdict terminals are the fixed three above:

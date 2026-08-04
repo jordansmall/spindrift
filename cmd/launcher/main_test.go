@@ -11,6 +11,7 @@ import (
 	"reflect"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -448,11 +449,12 @@ func TestRunnerConfig_DriverSessionCacheDirUnset(t *testing.T) {
 	}
 }
 
-// TestRunnerConfig_IssueTrackerAndLocalIssuesDir verifies that ISSUE_TRACKER
-// reaches runner.Config unchanged and LOCAL_ISSUES_DIR reaches it resolved to
-// an absolute path (issue #1691, ADR 0032): the runners render the /issues
-// mount's Source directly into their bind syntax, and a relative host path
-// there is a footgun the Launcher must not hand off.
+// TestRunnerConfig_IssueTrackerAndLocalIssuesDir verifies that ISSUE_TRACKER=
+// local reaches runner.Config as HostMediatedIssueTracker=true and
+// LOCAL_ISSUES_DIR reaches it resolved to an absolute path (issue #1691,
+// ADR 0032; issue #2267): the runners render the /issues mount's Source
+// directly into their bind syntax, and a relative host path there is a
+// footgun the Launcher must not hand off.
 func TestRunnerConfig_IssueTrackerAndLocalIssuesDir(t *testing.T) {
 	t.Setenv("ISSUE_TRACKER", "local")
 	t.Setenv("LOCAL_ISSUES_DIR", "relative-issues-dir")
@@ -460,8 +462,8 @@ func TestRunnerConfig_IssueTrackerAndLocalIssuesDir(t *testing.T) {
 	c := loadConfig()
 	rc := runnerConfig(c)
 
-	if rc.IssueTracker != "local" {
-		t.Errorf("IssueTracker = %q, want local", rc.IssueTracker)
+	if !rc.HostMediatedIssueTracker {
+		t.Errorf("HostMediatedIssueTracker = %v, want true for ISSUE_TRACKER=local", rc.HostMediatedIssueTracker)
 	}
 	if !filepath.IsAbs(rc.LocalIssuesDir) {
 		t.Errorf("LocalIssuesDir = %q, want an absolute path", rc.LocalIssuesDir)
@@ -524,7 +526,7 @@ func TestRunnerConfig_CodeForgeLocal_MatchesNewCodeForgeAccumulationRepoDir(t *t
 
 	c := loadConfig()
 	rc := runnerConfig(c)
-	if cf := newCodeForge(c, local.SanitizedParent{}); cf == nil {
+	if cf := newCodeForge(c, local.SanitizedParent{}, nil); cf == nil {
 		t.Fatal("newCodeForge(CODE_FORGE=local) = nil")
 	}
 
@@ -1562,6 +1564,22 @@ func TestValidateCodeForge_RejectsUnknown(t *testing.T) {
 	}
 }
 
+// TestValidateCodeForge_RejectsUnknown_ExactMessage verifies validate()'s
+// exact CODE_FORGE-invalid error string, so a registry-driven rewrite of the
+// CODE_FORGE switch (issue #2267) can't silently drift the message text.
+func TestValidateCodeForge_RejectsUnknown_ExactMessage(t *testing.T) {
+	c := minimalValidConfig()
+	c.codeForge = "gitlab"
+	err := validate(c)
+	if err == nil {
+		t.Fatal("validate() should reject unrecognised CODE_FORGE")
+	}
+	want := `CODE_FORGE="gitlab" is not valid; must be github, git, local, or forgejo`
+	if err.Error() != want {
+		t.Errorf("validate() error = %q, want %q", err.Error(), want)
+	}
+}
+
 // TestValidateCodeForge_Git_RequiresRemoteURL verifies that validate() fails
 // fast when CODE_FORGE=git but no remote URL is configured — the git Code
 // Forge has nothing to clone from or push to without one.
@@ -1662,7 +1680,7 @@ func TestNewCodeForge_Git_ReturnsPushOnlyAdapter(t *testing.T) {
 	c.codeForge = "git"
 	c.codeForgeRemoteURL = "https://git.example.com/owner/repo.git"
 
-	cf := newCodeForge(c, local.SanitizedParent{})
+	cf := newCodeForge(c, local.SanitizedParent{}, nil)
 
 	if _, ok := cf.(forge.PRForge); ok {
 		t.Error("newCodeForge(CODE_FORGE=git) satisfies PRForge, want the push-only git adapter to implement CodeForge only")
@@ -1680,7 +1698,7 @@ func TestNewCodeForge_Forgejo_IsPRForge(t *testing.T) {
 	c.forgejoBaseURL = "https://codeberg.org"
 	c.forgejoToken = "tok"
 
-	cf := newCodeForge(c, local.SanitizedParent{})
+	cf := newCodeForge(c, local.SanitizedParent{}, nil)
 
 	if cf == nil {
 		t.Fatal("newCodeForge(CODE_FORGE=forgejo) returned nil")
@@ -1699,7 +1717,7 @@ func TestNewCodeForge_Local_ReturnsBundleRelayAdapter(t *testing.T) {
 	c.codeForge = "local"
 	c.codeForgeAccumulationRepoDir = filepath.Join(t.TempDir(), "repo.git")
 
-	cf := newCodeForge(c, local.ResolveParent("1694", ""))
+	cf := newCodeForge(c, local.ResolveParent("1694", ""), nil)
 
 	if _, ok := cf.(forge.PRForge); ok {
 		t.Error("newCodeForge(CODE_FORGE=local) satisfies PRForge, want a push-only adapter")
@@ -1718,7 +1736,7 @@ func TestNewCodeForge_Github_ImplementsPRForge(t *testing.T) {
 	c := minimalValidConfig()
 	c.codeForge = "github"
 
-	cf := newCodeForge(c, local.SanitizedParent{})
+	cf := newCodeForge(c, local.SanitizedParent{}, nil)
 
 	if _, ok := cf.(forge.PRForge); !ok {
 		t.Error("newCodeForge(CODE_FORGE=github) does not satisfy PRForge")
@@ -1736,7 +1754,7 @@ func TestNewCodeForge_GithubReadOnly_ImplementsBundleRelay(t *testing.T) {
 	c.codeForge = "github"
 	c.boxForgeAndIssueAccess = "read-only"
 
-	cf := newCodeForge(c, local.SanitizedParent{})
+	cf := newCodeForge(c, local.SanitizedParent{}, nil)
 
 	if _, ok := cf.(forge.BundleRelay); !ok {
 		t.Error("newCodeForge(CODE_FORGE=github, BOX_FORGE_AND_ISSUE_ACCESS=read-only) does not satisfy forge.BundleRelay")
@@ -1756,7 +1774,7 @@ func TestNewCodeForge_GithubReadWrite_DoesNotImplementBundleRelay(t *testing.T) 
 	c.codeForge = "github"
 	c.boxForgeAndIssueAccess = "read-write"
 
-	cf := newCodeForge(c, local.SanitizedParent{})
+	cf := newCodeForge(c, local.SanitizedParent{}, nil)
 
 	if _, ok := cf.(forge.BundleRelay); ok {
 		t.Error("newCodeForge(CODE_FORGE=github, BOX_FORGE_AND_ISSUE_ACCESS=read-write) satisfies forge.BundleRelay, want it hidden")
@@ -1776,7 +1794,7 @@ func TestNewCodeForge_GithubReadOnly_SatisfiesCapabilityGate(t *testing.T) {
 	c := minimalValidConfig()
 	c.codeForge = "github"
 	c.boxForgeAndIssueAccess = "read-only"
-	cf := newCodeForge(c, local.SanitizedParent{})
+	cf := newCodeForge(c, local.SanitizedParent{}, nil)
 	fc := forge.NewFake() // HostPostedCommenter-shaped; stands in for the tracker
 	it := fc.AsIssueFiler()
 
@@ -1799,7 +1817,7 @@ func TestNewCodeForge_ForgejoReadOnly_SatisfiesBundleRelayAndDraftPRCreator(t *t
 	c.forgejoToken = "tok"
 	c.boxForgeAndIssueAccess = "read-only"
 
-	cf := newCodeForge(c, local.SanitizedParent{})
+	cf := newCodeForge(c, local.SanitizedParent{}, nil)
 
 	if _, ok := cf.(forge.BundleRelay); !ok {
 		t.Error("newCodeForge(CODE_FORGE=forgejo, BOX_FORGE_AND_ISSUE_ACCESS=read-only) does not satisfy forge.BundleRelay")
@@ -1822,13 +1840,57 @@ func TestNewCodeForge_ForgejoReadWrite_DoesNotImplementBundleRelayOrDraftPRCreat
 	c.forgejoToken = "tok"
 	c.boxForgeAndIssueAccess = "read-write"
 
-	cf := newCodeForge(c, local.SanitizedParent{})
+	cf := newCodeForge(c, local.SanitizedParent{}, nil)
 
 	if _, ok := cf.(forge.BundleRelay); ok {
 		t.Error("newCodeForge(CODE_FORGE=forgejo, BOX_FORGE_AND_ISSUE_ACCESS=read-write) satisfies forge.BundleRelay, want it hidden")
 	}
 	if _, ok := cf.(forge.DraftPRCreator); ok {
 		t.Error("newCodeForge(CODE_FORGE=forgejo, BOX_FORGE_AND_ISSUE_ACCESS=read-write) satisfies forge.DraftPRCreator, want it hidden")
+	}
+}
+
+// TestNewCodeForge_LocalReadOnly_ReturnsPlainAdapter verifies that
+// CODE_FORGE=local ignores BOX_FORGE_AND_ISSUE_ACCESS=read-only entirely:
+// local never had a distinct read-only CodeForge constructor, so read-only
+// falls through to the same plain adapter as read-write (unlike github and
+// forgejo, which swap in a dedicated read-only wrapper).
+func TestNewCodeForge_LocalReadOnly_ReturnsPlainAdapter(t *testing.T) {
+	c := minimalValidConfig()
+	c.codeForge = "local"
+	c.codeForgeAccumulationRepoDir = filepath.Join(t.TempDir(), "repo.git")
+	c.boxForgeAndIssueAccess = "read-only"
+
+	cf := newCodeForge(c, local.ResolveParent("1694", ""), nil)
+
+	if cf == nil {
+		t.Fatal("newCodeForge(CODE_FORGE=local, BOX_FORGE_AND_ISSUE_ACCESS=read-only) returned nil")
+	}
+	if _, ok := cf.(forge.BundleRelay); !ok {
+		t.Error("newCodeForge(CODE_FORGE=local, BOX_FORGE_AND_ISSUE_ACCESS=read-only) does not satisfy forge.BundleRelay")
+	}
+	if _, ok := cf.(forge.PRForge); ok {
+		t.Error("newCodeForge(CODE_FORGE=local, BOX_FORGE_AND_ISSUE_ACCESS=read-only) satisfies PRForge, want a push-only adapter")
+	}
+}
+
+// TestNewCodeForge_GitReadOnly_ReturnsPlainAdapter mirrors
+// TestNewCodeForge_LocalReadOnly_ReturnsPlainAdapter for CODE_FORGE=git:
+// git also has no distinct read-only CodeForge constructor, so read-only
+// falls through to the same push-only adapter as read-write.
+func TestNewCodeForge_GitReadOnly_ReturnsPlainAdapter(t *testing.T) {
+	c := minimalValidConfig()
+	c.codeForge = "git"
+	c.codeForgeRemoteURL = "https://git.example.com/owner/repo.git"
+	c.boxForgeAndIssueAccess = "read-only"
+
+	cf := newCodeForge(c, local.SanitizedParent{}, nil)
+
+	if cf == nil {
+		t.Fatal("newCodeForge(CODE_FORGE=git, BOX_FORGE_AND_ISSUE_ACCESS=read-only) returned nil")
+	}
+	if _, ok := cf.(forge.PRForge); ok {
+		t.Error("newCodeForge(CODE_FORGE=git, BOX_FORGE_AND_ISSUE_ACCESS=read-only) satisfies PRForge, want a push-only adapter")
 	}
 }
 
@@ -1923,7 +1985,7 @@ func TestDispatchConfig_NonPRForge_OpenPRForIssueAlwaysReportsNotFound(t *testin
 	c := minimalValidConfig()
 	c.codeForge = "git"
 	c.codeForgeRemoteURL = "https://example.com/repo.git"
-	cf := newCodeForge(c, local.SanitizedParent{})
+	cf := newCodeForge(c, local.SanitizedParent{}, nil)
 	if _, ok := cf.(forge.PRForge); ok {
 		t.Fatal("test setup: expected a non-PRForge Code Forge")
 	}
@@ -2182,7 +2244,7 @@ func TestDispatchConfig_ResolveEnv_BoxForgejoTokenOverridesForgejoToken(t *testi
 	c.forgejoToken = "launcher-fj-tok"
 	t.Setenv("FORGEJO_TOKEN", "launcher-fj-tok")
 	t.Setenv("BOX_FORGEJO_TOKEN", "box-fj-tok")
-	cf := newCodeForge(c, local.SanitizedParent{})
+	cf := newCodeForge(c, local.SanitizedParent{}, nil)
 
 	cfg := dispatchConfig(c, forge.NewFake(), testWired(forge.NewFake()), cf)
 
@@ -2202,7 +2264,7 @@ func TestDispatchConfig_ResolveEnv_BoxForgejoTokenUnsetFallsThrough(t *testing.T
 	c.forgejoToken = "launcher-fj-tok"
 	t.Setenv("FORGEJO_TOKEN", "launcher-fj-tok")
 	t.Setenv("BOX_FORGEJO_TOKEN", "")
-	cf := newCodeForge(c, local.SanitizedParent{})
+	cf := newCodeForge(c, local.SanitizedParent{}, nil)
 
 	cfg := dispatchConfig(c, forge.NewFake(), testWired(forge.NewFake()), cf)
 
@@ -2222,12 +2284,31 @@ func TestDispatchConfig_ResolveEnv_BoxForgejoTokenDoesNotAffectOtherNames(t *tes
 	c.forgejoToken = "launcher-fj-tok"
 	t.Setenv("GH_TOKEN", "launcher-gh-tok")
 	t.Setenv("BOX_FORGEJO_TOKEN", "box-fj-tok")
-	cf := newCodeForge(c, local.SanitizedParent{})
+	cf := newCodeForge(c, local.SanitizedParent{}, nil)
 
 	cfg := dispatchConfig(c, forge.NewFake(), testWired(forge.NewFake()), cf)
 
 	if got := cfg.ResolveEnv("1", "GH_TOKEN"); got != "launcher-gh-tok" {
 		t.Errorf("ResolveEnv(1, GH_TOKEN) = %q, want %q", got, "launcher-gh-tok")
+	}
+}
+
+// TestDispatchConfig_ResolveEnv_JiraTokenFallsThroughUntouched verifies
+// boxTokenResolver's registry walk (issue #2267) leaves a token name with no
+// registered boxTokenEnvVar -- jira's row carries a tokenEnvVar but no
+// boxTokenEnvVar, since jira is tracker-only and has no Box-side override
+// knob -- to fall straight through to next unchanged, exactly like any other
+// non-overridden name.
+func TestDispatchConfig_ResolveEnv_JiraTokenFallsThroughUntouched(t *testing.T) {
+	c := minimalValidConfig()
+	c.codeForge = "github"
+	t.Setenv("JIRA_TOKEN", "launcher-jira-tok")
+	cf := forge.NewFake()
+
+	cfg := dispatchConfig(c, cf, testWired(forge.NewFake()), cf)
+
+	if got := cfg.ResolveEnv("1", "JIRA_TOKEN"); got != "launcher-jira-tok" {
+		t.Errorf("ResolveEnv(1, JIRA_TOKEN) = %q, want %q", got, "launcher-jira-tok")
 	}
 }
 
@@ -2573,6 +2654,24 @@ func TestDoctor_RepoNotFound_Forgejo(t *testing.T) {
 	}
 }
 
+// TestDoctor_AuthFailure_Local pins today's behavior for ISSUE_TRACKER=local:
+// the backend registry carries no doctor hint override for "local" (it falls
+// through to the github-shaped default), so the auth-failure remediation
+// text still names GH_TOKEN / --repo-slug, not a local-specific hint.
+func TestDoctor_AuthFailure_Local(t *testing.T) {
+	f := forge.NewFake()
+	f.ProbeErr = forge.ErrAuthFailure
+
+	var buf bytes.Buffer
+	err := runDoctor(f, f, config{issueTracker: "local"}, &buf, strings.NewReader(""), false)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "GH_TOKEN") {
+		t.Errorf("want error to mention GH_TOKEN, got: %v", err)
+	}
+}
+
 func defaultLabelConfig() config {
 	return config{
 		label:           "ready-for-agent",
@@ -2604,6 +2703,64 @@ func TestDoctor_LabelsAllPresent(t *testing.T) {
 	}
 }
 
+// TestDoctor_ReportsRecoverableCount verifies doctor prints a count of
+// issues in the Recoverable dispatch state (ADR 0039 slice S4, #2255) as its
+// own line, counting only issues carrying the Recoverable label and not
+// issues in other states.
+func TestDoctor_ReportsRecoverableCount(t *testing.T) {
+	f := forge.NewFake(forge.DispatchLabels{
+		Dispatchable: "ready-for-agent",
+		InProgress:   "agent-in-progress",
+		Complete:     "agent-complete",
+		Failed:       "agent-failed",
+		Recoverable:  "agent-recoverable",
+	})
+	f.ProbeRepo = "owner/repo"
+	f.Labels = []string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}
+	f.SetIssue(forge.Issue{Number: "5", State: forge.IssueOpen, Labels: []string{"agent-recoverable"}})
+	f.SetIssue(forge.Issue{Number: "6", State: forge.IssueOpen, Labels: []string{"agent-recoverable"}})
+	f.SetIssue(forge.Issue{Number: "7", State: forge.IssueOpen, Labels: []string{"agent-failed"}})
+
+	var buf bytes.Buffer
+	if err := runDoctor(f, f, defaultLabelConfig(), &buf, strings.NewReader(""), false); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "2 recoverable issue(s)") {
+		t.Errorf("want output to report 2 recoverable issue(s), got:\n%s", out)
+	}
+}
+
+// TestDoctor_RecoverableCount_ZeroWhenLabelUnmapped verifies doctor reports
+// zero recoverable issues — not the full open-issue count — against a
+// tracker whose label family leaves Recoverable unmapped, mirroring GitHub
+// and Forgejo in production (#2255): both ignore an empty label filter and
+// return every open issue rather than erroring, so a naive unconditional
+// ListIssues(Recoverable) call would misreport every open issue as
+// recoverable instead of zero.
+func TestDoctor_RecoverableCount_ZeroWhenLabelUnmapped(t *testing.T) {
+	f := forge.NewFake(forge.DispatchLabels{
+		Dispatchable: "ready-for-agent",
+		InProgress:   "agent-in-progress",
+		Complete:     "agent-complete",
+		Failed:       "agent-failed",
+		// Recoverable left empty — never a real label on this tracker.
+	})
+	f.ProbeRepo = "owner/repo"
+	f.Labels = []string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}
+	f.SetIssue(forge.Issue{Number: "5", State: forge.IssueOpen, Labels: []string{"ready-for-agent"}})
+	f.SetIssue(forge.Issue{Number: "6", State: forge.IssueOpen, Labels: []string{"agent-failed"}})
+
+	var buf bytes.Buffer
+	if err := runDoctor(f, f, defaultLabelConfig(), &buf, strings.NewReader(""), false); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "0 recoverable issue(s)") {
+		t.Errorf("want output to report 0 recoverable issue(s), got:\n%s", out)
+	}
+}
+
 // TestDoctor_AllLabelsPresent_PrintsSuccess verifies the early-return path
 // taken when both work and research labels are already present prints an
 // explicit success confirmation, mirroring the post-creation success line
@@ -2612,14 +2769,15 @@ func TestDoctor_AllLabelsPresent_PrintsSuccess(t *testing.T) {
 	f := forge.NewFake()
 	f.ProbeRepo = "owner/repo"
 	research := doctor.ResearchLabelNames()
-	f.Labels = append([]string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete", forge.SpecMismatchLabel}, research...)
+	priority := doctor.PriorityLabelNames()
+	f.Labels = append(append([]string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete", forge.SpecMismatchLabel}, research...), priority...)
 
 	var buf bytes.Buffer
 	if err := runDoctor(f, f, defaultLabelConfig(), &buf, strings.NewReader(""), false); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	out := buf.String()
-	if !strings.Contains(out, "ok: all triage and research labels present") {
+	if !strings.Contains(out, "ok: all triage, research, and priority labels present") {
 		t.Errorf("want success confirmation, got:\n%s", out)
 	}
 }
@@ -2720,15 +2878,16 @@ func TestDoctor_TTY_Confirm(t *testing.T) {
 	f := forge.NewFake()
 	f.ProbeRepo = "owner/repo"
 	research := doctor.ResearchLabelNames()
-	// Two work labels missing: agent-failed and agent-complete. Research
-	// and spec-mismatch labels are all present throughout, so this test
-	// stays scoped to work label creation.
-	f.Labels = append([]string{"ready-for-agent", "agent-in-progress", forge.SpecMismatchLabel}, research...)
+	priority := doctor.PriorityLabelNames()
+	// Two work labels missing: agent-failed and agent-complete. Research,
+	// spec-mismatch, and priority labels are all present throughout, so this
+	// test stays scoped to work label creation.
+	f.Labels = append(append([]string{"ready-for-agent", "agent-in-progress", forge.SpecMismatchLabel}, research...), priority...)
 	// After creation the fake doesn't auto-add to Labels, so script the
 	// second ListLabels call (re-verify) to return all four work labels.
 	f.LabelsSeq = [][]string{
-		append([]string{"ready-for-agent", "agent-in-progress", forge.SpecMismatchLabel}, research...),                                   // first check
-		append([]string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete", forge.SpecMismatchLabel}, research...), // re-verify
+		append(append([]string{"ready-for-agent", "agent-in-progress", forge.SpecMismatchLabel}, research...), priority...),                                   // first check
+		append(append([]string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete", forge.SpecMismatchLabel}, research...), priority...), // re-verify
 	}
 
 	var buf bytes.Buffer
@@ -2750,7 +2909,7 @@ func TestDoctor_TTY_Confirm(t *testing.T) {
 		}
 	}
 	out := buf.String()
-	if !strings.Contains(out, "ok: all triage and research labels present") {
+	if !strings.Contains(out, "ok: all triage, research, and priority labels present") {
 		t.Errorf("want success message after creation, got:\n%s", out)
 	}
 }
@@ -2764,10 +2923,14 @@ func TestDoctor_TTY_Confirm_ResearchLabels(t *testing.T) {
 	f.ProbeRepo = "owner/repo"
 	work := []string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete", forge.SpecMismatchLabel}
 	research := doctor.ResearchLabelNames()
-	f.Labels = work // all work labels + spec-mismatch present, all six research labels missing
+	priority := doctor.PriorityLabelNames()
+	// All work labels (incl. spec-mismatch) and priority labels present; all
+	// six research labels missing, so this test stays scoped to research label
+	// creation.
+	f.Labels = append(append([]string{}, work...), priority...)
 	f.LabelsSeq = [][]string{
-		work,
-		append(append([]string{}, work...), research...), // re-verify: research now created too
+		append(append([]string{}, work...), priority...),
+		append(append(append([]string{}, work...), priority...), research...), // re-verify: research now created too
 	}
 
 	var buf bytes.Buffer
@@ -2824,8 +2987,113 @@ func TestDoctor_TTY_Confirm_ResearchStillMissing_Advisory(t *testing.T) {
 			t.Errorf("want advisory line to name missing label %q, got:\n%s", name, advisoryLine)
 		}
 	}
-	if strings.Contains(out, "ok: all triage and research labels present") {
+	if strings.Contains(out, "ok: all triage, research, and priority labels present") {
 		t.Errorf("must not print success message when research labels are still missing, got:\n%s", out)
+	}
+}
+
+// TestDoctor_NoTTY_PriorityLabelsMissing_ExitZero verifies missing priority
+// labels (ADR 0040) are advisory only: doctor reports each one MISSING but
+// exits zero as long as the fatal work labels are all present, mirroring the
+// research tier's non-fatal treatment (#2282).
+func TestDoctor_NoTTY_PriorityLabelsMissing_ExitZero(t *testing.T) {
+	f := forge.NewFake()
+	f.ProbeRepo = "owner/repo"
+	f.Labels = []string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}
+
+	var buf bytes.Buffer
+	err := runDoctor(f, f, defaultLabelConfig(), &buf, strings.NewReader(""), false)
+	if err != nil {
+		t.Fatalf("missing priority labels must not fail doctor, got: %v", err)
+	}
+	out := buf.String()
+	for _, label := range doctor.PriorityLabelNames() {
+		if !strings.Contains(out, "MISSING: label \""+label+"\"") {
+			t.Errorf("want MISSING line for priority label %q, got:\n%s", label, out)
+		}
+	}
+	wantAdvisory := "advisory: " + strconv.Itoa(len(doctor.PriorityLabelNames())) + " priority label(s) missing (ADR 0040)"
+	if !strings.Contains(out, wantAdvisory) {
+		t.Errorf("want advisory line %q, got:\n%s", wantAdvisory, out)
+	}
+}
+
+// TestDoctor_TTY_Confirm_PriorityLabels verifies interactive doctor also
+// offers to create missing priority labels (advisory tier, ADR 0040)
+// alongside work labels, and creates them with real colors/descriptions —
+// never the "ededed" gray fallback (#2282).
+func TestDoctor_TTY_Confirm_PriorityLabels(t *testing.T) {
+	f := forge.NewFake()
+	f.ProbeRepo = "owner/repo"
+	work := []string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete", forge.SpecMismatchLabel}
+	research := doctor.ResearchLabelNames()
+	priority := doctor.PriorityLabelNames()
+	// All work (incl. spec-mismatch) and research labels present; all three
+	// priority labels missing, so this test stays scoped to priority label
+	// creation.
+	f.Labels = append(append([]string{}, work...), research...)
+	f.LabelsSeq = [][]string{
+		append(append([]string{}, work...), research...),
+		append(append(append([]string{}, work...), research...), priority...), // re-verify: priority now created too
+	}
+
+	var buf bytes.Buffer
+	err := runDoctor(f, f, defaultLabelConfig(), &buf, strings.NewReader("y\n"), true)
+	if err != nil {
+		t.Fatalf("unexpected error after confirm: %v", err)
+	}
+	if len(f.CreateLabelCalls) != len(priority) {
+		t.Fatalf("want %d CreateLabel calls, got %d", len(priority), len(f.CreateLabelCalls))
+	}
+	for _, call := range f.CreateLabelCalls {
+		if call.Color == "" || call.Color == "ededed" {
+			t.Errorf("priority label %q should use a named color, got %q", call.Name, call.Color)
+		}
+		if call.Description == "" {
+			t.Errorf("priority label %q should have a description", call.Name)
+		}
+	}
+}
+
+// TestDoctor_TTY_Confirm_PriorityStillMissing_Advisory verifies that when a
+// create run's re-verify still finds priority labels missing (e.g. eventual
+// consistency on the forge side), doctor prints a non-fatal advisory summary
+// instead of silently returning nil — mirroring the research tier's
+// analogous message but never failing the check (#2282).
+func TestDoctor_TTY_Confirm_PriorityStillMissing_Advisory(t *testing.T) {
+	f := forge.NewFake()
+	f.ProbeRepo = "owner/repo"
+	work := []string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete", forge.SpecMismatchLabel}
+	research := doctor.ResearchLabelNames()
+	f.Labels = append(append([]string{}, work...), research...) // all work (incl. spec-mismatch) and research labels present, all three priority labels missing
+	f.LabelsSeq = [][]string{
+		append(append([]string{}, work...), research...),
+		append(append([]string{}, work...), research...), // re-verify: priority labels still missing despite CreateLabel "succeeding"
+	}
+
+	var buf bytes.Buffer
+	err := runDoctor(f, f, defaultLabelConfig(), &buf, strings.NewReader("y\n"), true)
+	if err != nil {
+		t.Fatalf("priority labels still missing after creation must not fail doctor, got: %v", err)
+	}
+	out := buf.String()
+	var advisoryLine string
+	for _, line := range strings.Split(out, "\n") {
+		if strings.HasPrefix(line, "advisory: 3 priority label(s) still missing after creation") {
+			advisoryLine = line
+			break
+		}
+	}
+	if advisoryLine == "" {
+		t.Fatalf("want advisory summary after incomplete priority creation, got:\n%s", out)
+	}
+	for _, name := range doctor.PriorityLabelNames() {
+		if !strings.Contains(advisoryLine, name) {
+			t.Errorf("want advisory line to name missing label %q, got:\n%s", name, advisoryLine)
+		}
+	}
+	if strings.Contains(out, "ok: all triage, research, and priority labels present") {
+		t.Errorf("must not print success message when priority labels are still missing, got:\n%s", out)
 	}
 }
 
@@ -3073,6 +3341,42 @@ func TestDoctor_ReadOnlyForgejoTokenGate_DistinctTokenWarns(t *testing.T) {
 	}
 	if strings.Contains(out, "confirmed not write-capable") {
 		t.Errorf("doctor claimed write-capability was confirmed for a forgejo token, got %q", out)
+	}
+}
+
+// TestDoctor_ReadOnlyTokenGates_BothBackendsActiveOnDifferentAxes verifies
+// runDoctor reports both the github and forgejo read-only token gates in a
+// single call when the two backends are active on different axes at once
+// (CODE_FORGE=github, ISSUE_TRACKER=forgejo) — a regression pin for the
+// loop over backendRows in reportReadOnlyTokenGates, which must run every
+// matching row's gate rather than stopping after the first.
+func TestDoctor_ReadOnlyTokenGates_BothBackendsActiveOnDifferentAxes(t *testing.T) {
+	it := forge.NewFake()
+	it.ProbeRepo = "PROJ"
+	it.Labels = []string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}
+	cf := forge.NewFake()
+	cf.ProbeRepo = "owner/repo"
+
+	c := defaultLabelConfig()
+	c.codeForge = "github"
+	c.issueTracker = "forgejo"
+	c.boxForgeAndIssueAccess = "read-only"
+	c.ghToken = "launcher-token"
+	c.repoSlug = "owner/repo"
+	c.forgejoToken = "forgejo-launcher-token"
+	t.Setenv("BOX_GH_TOKEN", "box-gh-token")
+	t.Setenv("BOX_FORGEJO_TOKEN", "box-forgejo-token")
+
+	var buf bytes.Buffer
+	if err := runDoctor(it, cf, c, &buf, strings.NewReader(""), false); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "BOX_GH_TOKEN is set and distinct") {
+		t.Errorf("want the github gate's success line, got %q", out)
+	}
+	if !strings.Contains(out, "BOX_FORGEJO_TOKEN is set and distinct") {
+		t.Errorf("want the forgejo gate's success line, got %q", out)
 	}
 }
 

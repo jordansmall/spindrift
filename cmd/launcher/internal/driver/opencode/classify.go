@@ -4,9 +4,9 @@
 // wrapping the whole stream, unlike claude's stream-json array-of-events
 // framing). The parent driver package owns the Driver interface and the
 // registry wiring; the shared Class/Reason/Classification vocabulary lives
-// in driverkit, and this package type-aliases it, so the registration
-// adapter in driver/opencode.go needs no cast between this package's and
-// driver's Class/Reason values.
+// in driverkit, and this package uses driverkit's types directly (no local
+// aliases), so the registration adapter in driver/opencode.go needs no cast
+// between this package's and driver's Class/Reason values.
 package opencode
 
 import (
@@ -17,38 +17,17 @@ import (
 	"spindrift.dev/launcher/internal/logscan"
 )
 
-// Class describes whether a non-zero agent exit is retryable or not.
-type Class = driverkit.Class
-
-const (
-	Transient = driverkit.Transient
-	Terminal  = driverkit.Terminal
-)
-
-// Reason identifies the specific cause of a classified exit.
-type Reason = driverkit.Reason
-
-const (
-	RateLimit  = driverkit.RateLimit
-	Overloaded = driverkit.Overloaded
-	Network    = driverkit.Network
-	TaskFailed = driverkit.TaskFailed
-)
-
-// Classification is the result of Classify.
-type Classification = driverkit.Classification
-
 // transientExtras holds opencode's complete ordered marker list, checked
 // before the shared driverkit.BaseTransientPatterns network suffix.
 // opencode deliberately supplies these (it does NOT "pass none") to preserve
 // its loose-digit "429"/"529" markers and their original precedence over
 // "overloaded_error"/"Overloaded".
 var transientExtras = []driverkit.Pattern{
-	{Substr: "rate_limit_error", Reason: RateLimit},
-	{Substr: "429", Reason: RateLimit},
-	{Substr: "overloaded_error", Reason: Overloaded},
-	{Substr: "529", Reason: Overloaded},
-	{Substr: "Overloaded", Reason: Overloaded},
+	{Substr: "rate_limit_error", Reason: driverkit.RateLimit},
+	{Substr: "429", Reason: driverkit.RateLimit},
+	{Substr: "overloaded_error", Reason: driverkit.Overloaded},
+	{Substr: "529", Reason: driverkit.Overloaded},
+	{Substr: "Overloaded", Reason: driverkit.Overloaded},
 }
 
 // event is the minimal NDJSON envelope Classify needs: enough to tell a
@@ -68,31 +47,26 @@ type event struct {
 // rate-limit code) is not attributed as the cause. A log with no
 // type:"error" event at all — or one whose error text carries no known
 // marker — classifies as Terminal/TaskFailed, as does a missing log file.
-func Classify(logPath string) (Classification, error) {
-	found := false
-	var reason Reason
-	err := driverkit.ScanLog(logPath, logscan.SkipOversized, func(line string) {
-		s := strings.TrimSpace(line)
+func Classify(logPath string) (driverkit.Classification, error) {
+	cl, found, err := driverkit.ClassifyScan(logPath, logscan.SkipOversized, func(chunk string) driverkit.ScanDecision {
+		s := strings.TrimSpace(chunk)
 		if s == "" {
-			return
+			return driverkit.ScanDecision{Skip: true}
 		}
 		var ev event
 		if jsonErr := json.Unmarshal([]byte(s), &ev); jsonErr != nil {
-			return
+			return driverkit.ScanDecision{Skip: true}
 		}
 		if ev.Type != "error" {
-			return
+			return driverkit.ScanDecision{Skip: true}
 		}
-		if r, ok := driverkit.MatchTransient(s, transientExtras); ok {
-			found = true
-			reason = r
-		}
-	})
+		return driverkit.ScanDecision{Text: s, Overwrite: true}
+	}, transientExtras, nil)
 	if err != nil {
-		return Classification{}, err
+		return driverkit.Classification{}, err
 	}
 	if !found {
-		return Classification{Class: Terminal, Reason: TaskFailed}, nil
+		return driverkit.Classification{Class: driverkit.Terminal, Reason: driverkit.TaskFailed}, nil
 	}
-	return Classification{Class: Transient, Reason: reason}, nil
+	return cl, nil
 }

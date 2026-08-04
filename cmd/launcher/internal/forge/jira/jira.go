@@ -4,18 +4,17 @@
 package jira
 
 import (
-	"bytes"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"slices"
 	"strings"
 
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/forge/rest"
 )
 
 // JiraConfig configures the Jira IssueTracker adapter.
@@ -102,8 +101,8 @@ func ValidateJiraEnv(baseURL, projectKey, token, statusMapping string) error {
 
 // jiraClient is the Jira REST adapter. It satisfies IssueTracker only.
 type jiraClient struct {
-	cfg JiraConfig
-	hc  *http.Client
+	cfg  JiraConfig
+	rest *rest.Client
 }
 
 // NewJiraClient returns an IssueTracker backed by the Jira REST API.
@@ -112,50 +111,44 @@ func NewJiraClient(cfg JiraConfig) forge.IssueTracker {
 	if hc == nil {
 		hc = http.DefaultClient
 	}
-	return &jiraClient{cfg: cfg, hc: hc}
+	restClient := rest.New(cfg.BaseURL, jiraAuthStrategy{email: cfg.Email, token: cfg.Token}, "jira", jiraStatusMap(), hc)
+	return &jiraClient{cfg: cfg, rest: restClient}
 }
 
-// authHeader returns the Authorization header value: Basic email:token for
-// Jira Cloud, or Bearer token for Server/Data Center PATs.
-func (j *jiraClient) authHeader() string {
-	if j.cfg.Email != "" {
-		raw := j.cfg.Email + ":" + j.cfg.Token
-		return "Basic " + base64.StdEncoding.EncodeToString([]byte(raw))
-	}
-	return "Bearer " + j.cfg.Token
+// jiraAuthStrategy implements rest.AuthStrategy: HTTP Basic (base64
+// "email:token") for Jira Cloud when Email is set, or Bearer token for
+// Server/Data Center PATs when Email is empty. The email/token pair is
+// captured once at NewJiraClient construction time; Apply still
+// base64-encodes the header value per request.
+type jiraAuthStrategy struct {
+	email string
+	token string
 }
 
-// do issues a Jira REST request with the given method, path, and JSON body
-// (nil for none), and decodes a JSON response into out (nil to discard the
-// body). It returns the HTTP status code so callers can branch on it.
-func (j *jiraClient) do(method, path string, body, out any) (int, error) {
-	var reqBody io.Reader
-	if body != nil {
-		b, err := json.Marshal(body)
-		if err != nil {
-			return 0, fmt.Errorf("jira: marshal request: %w", err)
-		}
-		reqBody = bytes.NewReader(b)
+// Apply sets the Authorization header per jiraAuthStrategy's email/token:
+// Basic email:token (base64) when email is set, else Bearer token.
+func (a jiraAuthStrategy) Apply(req *http.Request) {
+	if a.email != "" {
+		raw := a.email + ":" + a.token
+		req.Header.Set("Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte(raw)))
+		return
 	}
-	req, err := http.NewRequest(method, j.cfg.BaseURL+path, reqBody)
-	if err != nil {
-		return 0, fmt.Errorf("jira: build request: %w", err)
+	req.Header.Set("Authorization", "Bearer "+a.token)
+}
+
+// jiraStatusMap is the HTTP-status -> sentinel-error table for *rest.Client
+// instances this package builds against the Jira REST API: 401/403 ->
+// forge.ErrAuthFailure, and the generic per-resource 404 ->
+// forge.ErrNotFound that per-issue call sites (Issue, TransitionState, ...)
+// rely on. forge.ErrRepoNotFound remains Probe-specific (see
+// forge.ErrRepoNotFound's doc comment) and is applied at Probe's own call
+// site, not via this shared table.
+func jiraStatusMap() rest.StatusMap {
+	return rest.StatusMap{
+		http.StatusUnauthorized: forge.ErrAuthFailure,
+		http.StatusForbidden:    forge.ErrAuthFailure,
+		http.StatusNotFound:     forge.ErrNotFound,
 	}
-	req.Header.Set("Authorization", j.authHeader())
-	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
-	resp, err := j.hc.Do(req)
-	if err != nil {
-		return 0, fmt.Errorf("jira: %s %s: %w", method, path, err)
-	}
-	defer resp.Body.Close()
-	if out != nil {
-		if err := json.NewDecoder(resp.Body).Decode(out); err != nil && err != io.EOF {
-			return resp.StatusCode, fmt.Errorf("jira: decode response from %s %s: %w", method, path, err)
-		}
-	}
-	return resp.StatusCode, nil
 }
 
 // jiraIssuePayload is the subset of the Jira issue REST representation this
@@ -200,12 +193,8 @@ const jiraBlocksLink = "blocks"
 // native Jira issue links (not prose parsing) — always DepSourceNative.
 func (j *jiraClient) DepsOf(num string) ([]forge.Dependency, error) {
 	var payload jiraIssuePayload
-	status, err := j.do(http.MethodGet, "/rest/api/2/issue/"+num, nil, &payload)
-	if err != nil {
+	if err := j.rest.Do(http.MethodGet, "/rest/api/2/issue/"+num, nil, &payload); err != nil {
 		return nil, err
-	}
-	if status != http.StatusOK {
-		return nil, fmt.Errorf("jira: issue %s: unexpected status %d", num, status)
 	}
 	var deps []string
 	seen := map[string]bool{}
@@ -223,12 +212,8 @@ func (j *jiraClient) DepsOf(num string) ([]forge.Dependency, error) {
 // entries rather than the inward "is blocked by" ones (issue #1744).
 func (j *jiraClient) BlocksOf(num string) ([]forge.Dependency, error) {
 	var payload jiraIssuePayload
-	status, err := j.do(http.MethodGet, "/rest/api/2/issue/"+num, nil, &payload)
-	if err != nil {
+	if err := j.rest.Do(http.MethodGet, "/rest/api/2/issue/"+num, nil, &payload); err != nil {
 		return nil, err
-	}
-	if status != http.StatusOK {
-		return nil, fmt.Errorf("jira: issue %s: unexpected status %d", num, status)
 	}
 	var deps []string
 	seen := map[string]bool{}
@@ -261,23 +246,15 @@ type jiraCommentsPayload struct {
 // When IncludeComments is set, the comment thread is appended to Body.
 func (j *jiraClient) Issue(num string) (forge.Issue, error) {
 	var payload jiraIssuePayload
-	status, err := j.do(http.MethodGet, "/rest/api/2/issue/"+num, nil, &payload)
-	if err != nil {
+	if err := j.rest.Do(http.MethodGet, "/rest/api/2/issue/"+num, nil, &payload); err != nil {
 		return forge.Issue{}, err
-	}
-	if status != http.StatusOK {
-		return forge.Issue{}, fmt.Errorf("jira: issue %s: unexpected status %d", num, status)
 	}
 
 	body := payload.Fields.Description
 	if j.cfg.IncludeComments {
 		var comments jiraCommentsPayload
-		cStatus, cErr := j.do(http.MethodGet, "/rest/api/2/issue/"+num+"/comment", nil, &comments)
-		if cErr != nil {
-			return forge.Issue{}, cErr
-		}
-		if cStatus != http.StatusOK {
-			return forge.Issue{}, fmt.Errorf("jira: issue %s comments: unexpected status %d", num, cStatus)
+		if err := j.rest.Do(http.MethodGet, "/rest/api/2/issue/"+num+"/comment", nil, &comments); err != nil {
+			return forge.Issue{}, err
 		}
 		for _, c := range comments.Comments {
 			body = forge.AppendComment(body, c.Body)
@@ -306,15 +283,8 @@ func (j *jiraClient) TouchesOf(num string) ([]string, error) {
 
 // Comment posts a comment on the Jira issue.
 func (j *jiraClient) Comment(num, body string) error {
-	status, err := j.do(http.MethodPost, "/rest/api/2/issue/"+num+"/comment",
+	return j.rest.Do(http.MethodPost, "/rest/api/2/issue/"+num+"/comment",
 		map[string]string{"body": body}, nil)
-	if err != nil {
-		return err
-	}
-	if status < 200 || status >= 300 {
-		return fmt.Errorf("jira: comment %s: unexpected status %d", num, status)
-	}
-	return nil
 }
 
 type jiraTransitionsPayload struct {
@@ -340,12 +310,8 @@ var errTransitionUnavailable = fmt.Errorf("jira: no available transition")
 // non-nil error is an infra failure that must propagate.
 func (j *jiraClient) transitionByStatus(num, targetStatus string) error {
 	var payload jiraTransitionsPayload
-	status, err := j.do(http.MethodGet, "/rest/api/2/issue/"+num+"/transitions", nil, &payload)
-	if err != nil {
+	if err := j.rest.Do(http.MethodGet, "/rest/api/2/issue/"+num+"/transitions", nil, &payload); err != nil {
 		return err
-	}
-	if status != http.StatusOK {
-		return fmt.Errorf("jira: list transitions for %s: unexpected status %d", num, status)
 	}
 	var transitionID string
 	for _, t := range payload.Transitions {
@@ -357,15 +323,8 @@ func (j *jiraClient) transitionByStatus(num, targetStatus string) error {
 	if transitionID == "" {
 		return fmt.Errorf("%w to %q on issue %s", errTransitionUnavailable, targetStatus, num)
 	}
-	status, err = j.do(http.MethodPost, "/rest/api/2/issue/"+num+"/transitions",
+	return j.rest.Do(http.MethodPost, "/rest/api/2/issue/"+num+"/transitions",
 		map[string]any{"transition": map[string]string{"id": transitionID}}, nil)
-	if err != nil {
-		return err
-	}
-	if status < 200 || status >= 300 {
-		return fmt.Errorf("jira: transition %s to %q: unexpected status %d", num, targetStatus, status)
-	}
-	return nil
 }
 
 // swapLabel adds the add label and removes the remove label on issue num via
@@ -381,15 +340,8 @@ func (j *jiraClient) swapLabel(num, add, remove string) error {
 	if len(ops) == 0 {
 		return nil
 	}
-	status, err := j.do(http.MethodPut, "/rest/api/2/issue/"+num,
+	return j.rest.Do(http.MethodPut, "/rest/api/2/issue/"+num,
 		map[string]any{"update": map[string]any{"labels": ops}}, nil)
-	if err != nil {
-		return err
-	}
-	if status < 200 || status >= 300 {
-		return fmt.Errorf("jira: update labels on %s: unexpected status %d", num, status)
-	}
-	return nil
 }
 
 // TransitionState moves issue num from state from to state to. It performs
@@ -439,12 +391,8 @@ func (j *jiraClient) CompleteVerdict(num string, verdict forge.Verdict) error {
 	remove := j.cfg.Labels.Label(forge.InProgress)
 	if remove != "" {
 		var payload jiraIssuePayload
-		status, err := j.do(http.MethodGet, "/rest/api/2/issue/"+num, nil, &payload)
-		if err != nil {
+		if err := j.rest.Do(http.MethodGet, "/rest/api/2/issue/"+num, nil, &payload); err != nil {
 			return err
-		}
-		if status != http.StatusOK {
-			return fmt.Errorf("jira: issue %s: unexpected status %d", num, status)
 		}
 		if !slices.Contains(payload.Fields.Labels, remove) {
 			return fmt.Errorf("jira: issue %s: expected %q label, issue has %v", num, remove, payload.Fields.Labels)
@@ -455,7 +403,10 @@ func (j *jiraClient) CompleteVerdict(num string, verdict forge.Verdict) error {
 }
 
 type jiraSearchPayload struct {
-	Issues []jiraIssuePayload `json:"issues"`
+	Issues     []jiraIssuePayload `json:"issues"`
+	StartAt    int                `json:"startAt"`
+	MaxResults int                `json:"maxResults"`
+	Total      int                `json:"total"`
 }
 
 // ListIssues returns open issues in dispatch state state, in canonical order
@@ -481,16 +432,11 @@ func (j *jiraClient) ListIssues(state forge.DispatchState) ([]forge.Issue, error
 	clauses = append(clauses, "statusCategory != Done")
 	jql := strings.Join(clauses, " AND ") + " order by created asc"
 
-	var payload jiraSearchPayload
-	status, err := j.doSearch(jql, &payload)
+	issues, err := j.doSearch(jql)
 	if err != nil {
 		return nil, err
 	}
-	if status != http.StatusOK {
-		return nil, fmt.Errorf("jira: search: unexpected status %d", status)
-	}
-	forge.WarnPageMayTruncateBacklog("jira search", len(payload.Issues))
-	return issuesFromPayload(payload), nil
+	return issuesFromIssues(issues), nil
 }
 
 // ListOpenIssues returns every open issue scoped to the project, in
@@ -500,24 +446,18 @@ func (j *jiraClient) ListIssues(state forge.DispatchState) ([]forge.Issue, error
 func (j *jiraClient) ListOpenIssues() ([]forge.Issue, error) {
 	jql := fmt.Sprintf("project = %q AND statusCategory != Done order by created asc", j.cfg.ProjectKey)
 
-	var payload jiraSearchPayload
-	status, err := j.doSearch(jql, &payload)
+	issues, err := j.doSearch(jql)
 	if err != nil {
 		return nil, err
 	}
-	if status != http.StatusOK {
-		return nil, fmt.Errorf("jira: search: unexpected status %d", status)
-	}
-	forge.WarnPageMayTruncateBacklog("jira search", len(payload.Issues))
-	return issuesFromPayload(payload), nil
+	return issuesFromIssues(issues), nil
 }
 
-// issuesFromPayload converts a jiraSearchPayload's raw issues into the
-// launcher's canonical forge.Issue shape, shared by ListIssues and
-// ListOpenIssues.
-func issuesFromPayload(payload jiraSearchPayload) []forge.Issue {
-	issues := make([]forge.Issue, len(payload.Issues))
-	for i, p := range payload.Issues {
+// issuesFromIssues converts raw Jira issue payloads into the launcher's
+// canonical forge.Issue shape, shared by ListIssues and ListOpenIssues.
+func issuesFromIssues(payload []jiraIssuePayload) []forge.Issue {
+	issues := make([]forge.Issue, len(payload))
+	for i, p := range payload {
 		issues[i] = forge.Issue{
 			Number: p.Key,
 			Title:  p.Fields.Summary,
@@ -529,25 +469,55 @@ func issuesFromPayload(payload jiraSearchPayload) []forge.Issue {
 	return issues
 }
 
-// doSearch issues a Jira JQL search request via GET /rest/api/2/search.
-func (j *jiraClient) doSearch(jql string, out any) (int, error) {
-	q := url.Values{"jql": {jql}, "maxResults": {fmt.Sprintf("%d", forge.ResultPageLimit)}}
-	return j.do(http.MethodGet, "/rest/api/2/search?"+q.Encode(), nil, out)
+// doSearch issues a Jira JQL search request via GET /rest/api/2/search,
+// walking every result page via j.rest.Paginate so a backlog larger than a
+// single ResultPageLimit page is never silently truncated: each page
+// requests startAt=(page-1)*ResultPageLimit and maxResults=ResultPageLimit,
+// and a page is the last one once startAt+len(issues) reaches the search's
+// reported total. Jira's JQL already orders results server-side (callers
+// append "order by created asc"), and pages are appended in fetch order, so
+// oldest-first ordering is preserved across the walk without a client-side
+// sort.
+func (j *jiraClient) doSearch(jql string) ([]jiraIssuePayload, error) {
+	var all []jiraIssuePayload
+	err := j.rest.Paginate(func(page int) (bool, error) {
+		startAt := (page - 1) * forge.ResultPageLimit
+		q := url.Values{
+			"jql":        {jql},
+			"startAt":    {fmt.Sprintf("%d", startAt)},
+			"maxResults": {fmt.Sprintf("%d", forge.ResultPageLimit)},
+		}
+		var payload jiraSearchPayload
+		if err := j.rest.Do(http.MethodGet, "/rest/api/2/search?"+q.Encode(), nil, &payload); err != nil {
+			return false, err
+		}
+		all = append(all, payload.Issues...)
+		return startAt+len(payload.Issues) >= payload.Total, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return all, nil
 }
 
 type jiraLabelsPayload struct {
 	Values []string `json:"values"`
 }
 
+// WalksAllPages implements forge.FullyPaginated: doSearch (behind both
+// ListIssues and ListOpenIssues) walks every page of a Jira JQL search via
+// forge.WalkPages, so its results are never truncated at
+// forge.ResultPageLimit — a caller like issueInState's page-limit fail-safe
+// can trust a full-looking result as complete.
+func (j *jiraClient) WalksAllPages() bool {
+	return true
+}
+
 // ListLabels returns Jira's site-wide label list.
 func (j *jiraClient) ListLabels() ([]string, error) {
 	var payload jiraLabelsPayload
-	status, err := j.do(http.MethodGet, "/rest/api/2/label", nil, &payload)
-	if err != nil {
+	if err := j.rest.Do(http.MethodGet, "/rest/api/2/label", nil, &payload); err != nil {
 		return nil, err
-	}
-	if status != http.StatusOK {
-		return nil, fmt.Errorf("jira: list labels: unexpected status %d", status)
 	}
 	return payload.Values, nil
 }
@@ -561,15 +531,11 @@ func (j *jiraClient) CreateLabel(name, description, color string) error {
 
 // Probe checks Jira connectivity/auth and returns the configured project key.
 func (j *jiraClient) Probe() (string, error) {
-	status, err := j.do(http.MethodGet, "/rest/api/2/myself", nil, nil)
-	if err != nil {
+	if err := j.rest.Do(http.MethodGet, "/rest/api/2/myself", nil, nil); err != nil {
+		if errors.Is(err, forge.ErrAuthFailure) {
+			return "", err
+		}
 		return "", fmt.Errorf("%w: %s", forge.ErrRepoNotFound, err)
-	}
-	if status == http.StatusUnauthorized || status == http.StatusForbidden {
-		return "", fmt.Errorf("%w: jira returned %d", forge.ErrAuthFailure, status)
-	}
-	if status != http.StatusOK {
-		return "", fmt.Errorf("%w: jira returned %d", forge.ErrRepoNotFound, status)
 	}
 	return j.cfg.ProjectKey, nil
 }

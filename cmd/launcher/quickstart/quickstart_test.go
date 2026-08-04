@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/doctor"
 	"spindrift.dev/launcher/internal/forge"
 )
@@ -629,6 +630,59 @@ func TestRunQuickstart_AmbientGHToken_SkipsPrompt(t *testing.T) {
 	}
 }
 
+// TestRunQuickstart_GithubTokenEnvVar_ReadFromDescriptor pins the github
+// token-acquisition path to backend.GitHub.TokenEnvVar rather than a
+// hardcoded "GH_TOKEN" literal: it swaps in a registry with a differently
+// named TokenEnvVar (mirroring the registry-override pattern used by
+// TestDoctorHints_RegistryDriven) and asserts the ambient lookup follows the
+// descriptor, not the literal.
+func TestRunQuickstart_GithubTokenEnvVar_ReadFromDescriptor(t *testing.T) {
+	original := backend.Registry
+	replaced := append([]backend.Descriptor{}, original...)
+	for i, d := range replaced {
+		if d.Name == "github" {
+			replaced[i].TokenEnvVar = "CUSTOM_GH_TOKEN"
+		}
+	}
+	backend.Registry = replaced
+	defer func() { backend.Registry = original }()
+
+	dir := t.TempDir()
+	var out bytes.Buffer
+	stdin := strings.NewReader(strings.Join([]string{
+		"jordansmall/spindrift", // repoSlug
+		"podman",                // runtime
+		"Ada Lovelace",          // git user name
+		"ada@example.com",       // git user email
+		// no GitHub token line — ambient CUSTOM_GH_TOKEN must be reused without a prompt
+	}, "\n") + "\n")
+
+	env := fakeEnvironment{
+		env: map[string]string{
+			"GH_TOKEN":                "ghp_wrongtoken",
+			"CUSTOM_GH_TOKEN":         "ghp_righttoken",
+			"CLAUDE_CODE_OAUTH_TOKEN": "claude-oauth-faketoken",
+		},
+		runtimes: map[string]bool{"podman": true},
+	}
+
+	if err := runQuickstart(dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false); err != nil {
+		t.Fatalf("runQuickstart: %v", err)
+	}
+
+	if strings.Contains(out.String(), "No ambient") {
+		t.Errorf("expected the descriptor-named token env var to be picked up ambiently without a prompt, got transcript:\n%s", out.String())
+	}
+
+	harnessEnv, err := os.ReadFile(filepath.Join(dir, "harness.env"))
+	if err != nil {
+		t.Fatalf("read harness.env: %v", err)
+	}
+	if !strings.Contains(string(harnessEnv), "CUSTOM_GH_TOKEN=ghp_righttoken") {
+		t.Errorf("expected harness.env to carry the token under the descriptor-named CUSTOM_GH_TOKEN key, got:\n%s", harnessEnv)
+	}
+}
+
 func TestRunQuickstart_FineGrainedToken_PrintsRequiredPermissions(t *testing.T) {
 	dir := t.TempDir()
 	var out bytes.Buffer
@@ -1181,7 +1235,7 @@ func passingForge() *forge.Fake {
 // IssueTracker and CodeForge seams regardless of the collected settings, so
 // tests can inject a forge.Fake instead of shelling out to gh/Jira.
 func fakeForgeBuilder(f *forge.Fake) ForgeBuilder {
-	return func(repoSlug string, tracker trackerSettings, ghToken, jiraToken, forgejoToken string) (forge.IssueTracker, forge.CodeForge) {
+	return func(repoSlug string, tracker trackerSettings, token string) (forge.IssueTracker, forge.CodeForge) {
 		return f, f
 	}
 }
@@ -1200,12 +1254,15 @@ func TestRunQuickstart_FinishLine_ProbesForgeThenCreatesLabelsThenBuilds(t *test
 	env := fakeEnvironment{env: map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "claude-oauth-faketoken"}, runtimes: map[string]bool{"podman": true}}
 
 	research := doctor.ResearchLabelNames()
+	priority := doctor.PriorityLabelNames()
 	f := forge.NewFake()
 	f.ProbeRepo = "jordansmall/spindrift"
-	f.Labels = []string{"ready-for-agent"} // three work labels missing; research all present
+	// three work labels + spec-mismatch missing; research and priority labels
+	// all present
+	f.Labels = append(append([]string{"ready-for-agent"}, research...), priority...)
 	f.LabelsSeq = [][]string{
-		append([]string{"ready-for-agent"}, research...),
-		append([]string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete", forge.SpecMismatchLabel}, research...),
+		append(append([]string{"ready-for-agent"}, research...), priority...),
+		append(append([]string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete", forge.SpecMismatchLabel}, research...), priority...),
 	}
 	runner := &fakeCommandRunner{}
 
@@ -1247,7 +1304,7 @@ func TestRender_HappyPath_ReturnsFourFiles(t *testing.T) {
 		gitUserName:      "Ada Lovelace",
 		gitUserEmail:     "ada@example.com",
 		tracker:          trackerSettings{issueTracker: "github"},
-		ghToken:          "ghp_faketoken",
+		token:            "ghp_faketoken",
 		claudeOAuthToken: "claude-oauth-faketoken",
 	}
 
@@ -1303,7 +1360,7 @@ func TestRender_ForgejoCodeberg_ConfiguresBothSeamsOmitsDefaultBaseURL(t *testin
 		gitUserName:      "Ada",
 		gitUserEmail:     "ada@example.com",
 		tracker:          trackerSettings{issueTracker: "forgejo", forgejoBaseURL: "https://codeberg.org"},
-		forgejoToken:     "forgejo-faketoken",
+		token:            "forgejo-faketoken",
 		claudeOAuthToken: "claude-oauth-faketoken",
 	}
 
@@ -1341,7 +1398,7 @@ func TestRender_ForgejoSelfHosted_EmitsBaseURL(t *testing.T) {
 		gitUserName:      "Ada",
 		gitUserEmail:     "ada@example.com",
 		tracker:          trackerSettings{issueTracker: "forgejo", forgejoBaseURL: "https://git.example.com"},
-		forgejoToken:     "forgejo-faketoken",
+		token:            "forgejo-faketoken",
 		claudeOAuthToken: "claude-oauth-faketoken",
 	}
 
@@ -1366,7 +1423,7 @@ func TestRender_AnthropicAPIKey_WrittenWhenNoOAuthToken(t *testing.T) {
 		gitUserName:     "Ada Lovelace",
 		gitUserEmail:    "ada@example.com",
 		tracker:         trackerSettings{issueTracker: "github"},
-		ghToken:         "ghp_faketoken",
+		token:           "ghp_faketoken",
 		anthropicAPIKey: "sk-ant-faketoken",
 	}
 
@@ -1391,7 +1448,7 @@ func TestRender_NixSpecialChars_AreEscaped(t *testing.T) {
 		gitUserName:  "Ada Lovelace",
 		gitUserEmail: "ada@example.com",
 		tracker:      trackerSettings{issueTracker: "github"},
-		ghToken:      "ghp_faketoken",
+		token:        "ghp_faketoken",
 	}
 
 	cases := []struct {
@@ -1436,6 +1493,80 @@ func TestRender_NixSpecialChars_AreEscaped(t *testing.T) {
 				t.Errorf("expected flake.nix to contain escaped %q, got:\n%s", tc.wantEsc, flakeNix)
 			}
 		})
+	}
+}
+
+// TestValidateBackendChoice_NewRegistryEntryNeedsNoQuickstartEdit pins that
+// validateBackendChoice is genuinely registry-driven: appending a fake
+// eligible "gitlab" descriptor to backend.Registry makes
+// validateBackendChoice("gitlab") pass with zero quickstart-side code
+// change, proving the choice list derives from backend.QuickstartEligible()
+// rather than a hardcoded slice.
+func TestValidateBackendChoice_NewRegistryEntryNeedsNoQuickstartEdit(t *testing.T) {
+	original := backend.Registry
+	backend.Registry = append(append([]backend.Descriptor{}, original...), backend.Descriptor{
+		Name:             "gitlab",
+		ValidAsTracker:   true,
+		ValidAsCodeForge: true,
+	})
+	defer func() { backend.Registry = original }()
+
+	if err := validateBackendChoice("gitlab"); err != nil {
+		t.Errorf("validateBackendChoice(\"gitlab\") = %v, want nil", err)
+	}
+}
+
+// TestDoctorHints_RegistryDriven pins that doctorHints resolves through
+// backend.ByName rather than a hardcoded github/forgejo branch: appending a
+// fake "gitlab" descriptor to backend.Registry makes
+// doctorHints("gitlab") return its hints with zero quickstart-side code
+// change.
+func TestDoctorHints_RegistryDriven(t *testing.T) {
+	if gotToken, gotSlug := doctorHints("github"); gotToken != "" || gotSlug != "" {
+		t.Errorf(`doctorHints("github") = (%q, %q), want ("", "")`, gotToken, gotSlug)
+	}
+	if gotToken, gotSlug := doctorHints("forgejo"); gotToken != "FORGEJO_TOKEN" || gotSlug != "FORGEJO_BASE_URL" {
+		t.Errorf(`doctorHints("forgejo") = (%q, %q), want ("FORGEJO_TOKEN", "FORGEJO_BASE_URL")`, gotToken, gotSlug)
+	}
+
+	original := backend.Registry
+	backend.Registry = append(append([]backend.Descriptor{}, original...), backend.Descriptor{
+		Name:             "gitlab",
+		ValidAsTracker:   true,
+		ValidAsCodeForge: true,
+		DoctorTokenHint:  "GITLAB_TOKEN",
+		DoctorSlugHint:   "GITLAB_BASE_URL",
+	})
+	defer func() { backend.Registry = original }()
+
+	if gotToken, gotSlug := doctorHints("gitlab"); gotToken != "GITLAB_TOKEN" || gotSlug != "GITLAB_BASE_URL" {
+		t.Errorf(`doctorHints("gitlab") = (%q, %q), want ("GITLAB_TOKEN", "GITLAB_BASE_URL")`, gotToken, gotSlug)
+	}
+}
+
+// TestRenderHarnessEnv_RegistryDriven pins that renderHarnessEnv resolves its
+// harness.env token line's env-var name through backend.ByName rather than a
+// hardcoded github/forgejo branch: appending a fake "gitlab" descriptor with
+// its own TokenEnvVar to backend.Registry makes renderHarnessEnv("gitlab", ...)
+// emit that descriptor's env var, not a GH_TOKEN fallback, with zero
+// quickstart-side code change for the new backend.
+func TestRenderHarnessEnv_RegistryDriven(t *testing.T) {
+	original := backend.Registry
+	backend.Registry = append(append([]backend.Descriptor{}, original...), backend.Descriptor{
+		Name:             "gitlab",
+		ValidAsTracker:   true,
+		ValidAsCodeForge: true,
+		TokenEnvVar:      "GITLAB_TOKEN",
+	})
+	defer func() { backend.Registry = original }()
+
+	out := renderHarnessEnv("gitlab", "gitlab-faketoken", "claude-oauth-faketoken", "")
+
+	if !strings.Contains(out, "GITLAB_TOKEN=gitlab-faketoken") {
+		t.Errorf("expected harness.env to contain GITLAB_TOKEN, got:\n%s", out)
+	}
+	if strings.Contains(out, "GH_TOKEN=") {
+		t.Errorf("expected harness.env to omit GH_TOKEN for the gitlab backend, got:\n%s", out)
 	}
 }
 

@@ -30,7 +30,7 @@ func TestRunOutcomeBackstop_ParsesFlagsAndEmits(t *testing.T) {
 		"--issue", "42",
 		"--branch", "agent/issue-42",
 		"--base", "main",
-		"--code-forge", "local",
+		"--host-mediated-remote", "1",
 		"--nonce", "abc123",
 	}, &stdout)
 	if rc != 0 {

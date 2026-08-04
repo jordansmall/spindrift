@@ -23,6 +23,19 @@ setup() {
   [ "$status" -eq 0 ]
 }
 
+@test "CODE_FORGE=local with real commits and a non-zero driver crash still writes a seam bundle and propagates the exit code" {
+  # ADR 0039 (issue #2252): bundle-out must run before the box exits, even
+  # when the driver itself crashed non-zero -- a committed branch is real
+  # work worth relaying regardless of why the driver's own process died.
+  export FAKE_DRIVER_COMMIT=1
+  export FAKE_DRIVER_CRASH_EXIT=17
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 17 ]
+  [ -f "$OUTBOX_DIR/seam.bundle" ]
+  run git -C "$WORK_DIR" bundle verify "$OUTBOX_DIR/seam.bundle"
+  [ "$status" -eq 0 ]
+}
+
 @test "CODE_FORGE=local with no commits after a ready claim appends a corrective blocked outcome" {
   # Default fake claude claims status=ready but (with no
   # FAKE_DRIVER_COMMIT) never commits anything on the branch.
@@ -68,5 +81,19 @@ setup() {
   export DISPATCH_KIND=research
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
+  [ ! -e "$OUTBOX_DIR" ]
+}
+
+@test "read-only github research dispatch with a non-zero driver crash still never invokes bundle-out" {
+  # ADR 0039 (issue #2252): bundle-out now runs for both zero and non-zero
+  # claude_rc, but the !_is_research_kind guard on the bundle-out block
+  # itself is unchanged -- a research dispatch never cuts a branch (ADR
+  # 0022), so it must still emit no bundle even when the driver crashed.
+  unset CODE_FORGE            # default github
+  unset BOX_WRITE_ENABLED     # read-only
+  export DISPATCH_KIND=research
+  export FAKE_DRIVER_CRASH_EXIT=17
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 17 ]
   [ ! -e "$OUTBOX_DIR" ]
 }

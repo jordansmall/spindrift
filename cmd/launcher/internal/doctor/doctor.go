@@ -22,12 +22,13 @@ type LabelMeta struct {
 	Color       string // hex without leading #
 }
 
-// TriageLabelMeta is the single source of truth for default triage/research
-// label colors and descriptions, keyed by the canonical label name. It
-// covers both the four operator-configurable work-tier labels and the six
-// fixed research-tier labels (ADR 0022, `forge.ResearchDispatchLabels()` /
-// `forge.ResearchVerdictLabels()`) so a doctor run creates either kind with a
-// real color/description instead of falling back to gray.
+// TriageLabelMeta is the single source of truth for default triage/research/
+// priority label colors and descriptions, keyed by the canonical label name.
+// It covers the four operator-configurable work-tier labels, the six fixed
+// research-tier labels (ADR 0022, `forge.ResearchDispatchLabels()` /
+// `forge.ResearchVerdictLabels()`), and the three fixed priority-tier labels
+// (ADR 0040, `forge.PriorityLabelNames()`) so a doctor run creates any kind
+// with a real color/description instead of falling back to gray.
 var TriageLabelMeta = map[string]LabelMeta{
 	"ready-for-agent":   {Description: "Fully specified; ready for an AFK agent", Color: "0075ca"},
 	"agent-in-progress": {Description: "An AFK agent is actively working this issue", Color: "e4e669"},
@@ -47,6 +48,10 @@ var TriageLabelMeta = map[string]LabelMeta{
 	// agent-research-unclear since both share a "needs a human answer"
 	// semantic.
 	"agent-spec-mismatch": {Description: "Title and body describe unrelated work — needs a human decision", Color: "d4c5f9"},
+
+	"agent-priority-critical": {Description: "Drop everything — highest dispatch priority", Color: "d73a4a"},
+	"agent-priority-high":     {Description: "Dispatch ahead of normal-priority issues", Color: "ff8c00"},
+	"agent-priority-low":      {Description: "Dispatch behind normal-priority issues", Color: "8a9ba8"},
 }
 
 // ResearchLabelNames returns the six fixed research-tier label names (ADR
@@ -62,10 +67,28 @@ func ResearchLabelNames() []string {
 	return names
 }
 
+// PriorityLabelNames returns the three fixed priority-tier label names (ADR
+// 0040), sourced from forge.PriorityLabelNames() rather than duplicated as
+// string literals.
+func PriorityLabelNames() []string {
+	return forge.PriorityLabelNames()
+}
+
 // Config is the minimal slice of launcher config Run needs: the Issue
-// Tracker kind (for error hints) and the four work-tier label names.
+// Tracker kind, the caller-resolved auth/repo hint strings for that tracker
+// (TokenHint/SlugHint — internal/doctor can't see package main's backend
+// registry that owns the "which backend names which env var" mapping, so
+// the caller resolves it and hands the strings in), and the four work-tier
+// label names.
 type Config struct {
-	IssueTracker    string
+	IssueTracker string
+
+	// TokenHint/SlugHint name the env var(s) Run points an operator at in
+	// its auth-failure/repo-not-found remediation text. Empty means "use
+	// the github-shaped default" (GH_TOKEN / --repo-slug REPO_SLUG).
+	TokenHint string
+	SlugHint  string
+
 	Label           string
 	InProgressLabel string
 	FailedLabel     string
@@ -73,21 +96,19 @@ type Config struct {
 }
 
 // Run probes both seams (IssueTracker + CodeForge), then checks that all
-// configured triage labels and the fixed research-tier labels (ADR 0022)
-// exist in the repository. When interactive is true and labels are missing,
-// it prompts to create them. In non-interactive mode, missing triage labels
-// are fatal (non-zero exit); missing research labels are advisory only and
-// never affect the exit code. stdin is an already-constructed *bufio.Scanner
+// configured triage labels and the fixed research-tier (ADR 0022) and
+// priority-tier (ADR 0040) labels exist in the repository. When interactive
+// is true and labels are missing, it prompts to create them. In
+// non-interactive mode, missing triage labels are fatal (non-zero exit);
+// missing research and priority labels are advisory only and never affect
+// the exit code. stdin is an already-constructed *bufio.Scanner
 // so a caller mid-way through its own scripted stdin flow (Quickstart's
 // finish line) can hand over the same scanner instead of double-wrapping the
 // underlying reader and losing already-buffered input.
 func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, w io.Writer, stdin *bufio.Scanner, interactive bool) error {
 	tokenHint, slugHint := "GH_TOKEN", "--repo-slug / REPO_SLUG"
-	if c.IssueTracker == "jira" {
-		tokenHint, slugHint = "JIRA_TOKEN", "JIRA_BASE_URL / JIRA_PROJECT_KEY"
-	}
-	if c.IssueTracker == "forgejo" {
-		tokenHint, slugHint = "FORGEJO_TOKEN", "FORGEJO_BASE_URL"
+	if c.TokenHint != "" {
+		tokenHint, slugHint = c.TokenHint, c.SlugHint
 	}
 	repo, err := it.Probe()
 	if err != nil {
@@ -106,6 +127,22 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, w io.Writer, stdin
 	}
 	fmt.Fprintf(w, "ok: code forge confirmed — %s is reachable\n", cfRepo)
 
+	recoverableCount := 0
+	if lt, ok := it.(forge.LabeledTracker); !ok || lt.StateLabels().Label(forge.Recoverable) != "" {
+		// Only query when Recoverable resolves to a real label: an
+		// unconditional ListIssues(Recoverable) call would false-match every
+		// open issue on a tracker (GitHub, Forgejo) that leaves Recoverable
+		// unmapped, since both ignore an empty label filter instead of
+		// erroring (forge.LabeledTracker's doc comment) — mirroring
+		// console/adapter.go's countRecoverable guard for the same reason.
+		recoverable, err := it.ListIssues(forge.Recoverable)
+		if err != nil {
+			return fmt.Errorf("recoverable issue check failed: %w", err)
+		}
+		recoverableCount = len(recoverable)
+	}
+	fmt.Fprintf(w, "ok: %d recoverable issue(s) — run `spindrift recover <issue>` to land each\n", recoverableCount)
+
 	checkLabelSet := func(names []string, present map[string]bool) []string {
 		var missing []string
 		for _, label := range names {
@@ -122,12 +159,14 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, w io.Writer, stdin
 	// checkLabels reports on all three label tiers: work (fatal if missing),
 	// research (advisory — ADR 0022's agent-research family is reported but
 	// never fails the check, so CI doctor runs stay green for deployments
-	// that don't use research yet), and spec-mismatch (advisory — issue
-	// #2275's fixed agent-spec-mismatch label, same never-fails treatment).
-	checkLabels := func() (workMissing, researchMissing, specMismatchMissing []string, err error) {
+	// that don't use research yet), spec-mismatch (advisory — issue #2275's
+	// fixed agent-spec-mismatch label, same never-fails treatment), and
+	// priority (advisory — ADR 0040's agent-priority-* family, same
+	// treatment).
+	checkLabels := func() (workMissing, researchMissing, specMismatchMissing, priorityMissing []string, err error) {
 		existing, lerr := it.ListLabels()
 		if lerr != nil {
-			return nil, nil, nil, fmt.Errorf("label check failed: %w", lerr)
+			return nil, nil, nil, nil, fmt.Errorf("label check failed: %w", lerr)
 		}
 		present := make(map[string]bool, len(existing))
 		for _, l := range existing {
@@ -136,10 +175,11 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, w io.Writer, stdin
 		workMissing = checkLabelSet([]string{c.Label, c.InProgressLabel, c.FailedLabel, c.CompleteLabel}, present)
 		researchMissing = checkLabelSet(ResearchLabelNames(), present)
 		specMismatchMissing = checkLabelSet([]string{forge.SpecMismatchLabel}, present)
-		return workMissing, researchMissing, specMismatchMissing, nil
+		priorityMissing = checkLabelSet(PriorityLabelNames(), present)
+		return workMissing, researchMissing, specMismatchMissing, priorityMissing, nil
 	}
 
-	workMissing, researchMissing, specMismatchMissing, err := checkLabels()
+	workMissing, researchMissing, specMismatchMissing, priorityMissing, err := checkLabels()
 	if err != nil {
 		return err
 	}
@@ -149,9 +189,12 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, w io.Writer, stdin
 	if len(specMismatchMissing) > 0 {
 		fmt.Fprintf(w, "advisory: %d spec-mismatch label(s) missing (issue #2275) — does not fail this check\n", len(specMismatchMissing))
 	}
-	missing := append(append(append([]string{}, workMissing...), researchMissing...), specMismatchMissing...)
+	if len(priorityMissing) > 0 {
+		fmt.Fprintf(w, "advisory: %d priority label(s) missing (ADR 0040) — does not fail this check\n", len(priorityMissing))
+	}
+	missing := append(append(append(append([]string{}, workMissing...), researchMissing...), specMismatchMissing...), priorityMissing...)
 	if len(missing) == 0 {
-		fmt.Fprintln(w, "ok: all triage and research labels present")
+		fmt.Fprintln(w, "ok: all triage, research, and priority labels present")
 		return nil
 	}
 
@@ -183,20 +226,20 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, w io.Writer, stdin
 	}
 
 	// Re-verify after creation.
-	workMissing, researchMissing, specMismatchMissing, err = checkLabels()
+	workMissing, researchMissing, specMismatchMissing, priorityMissing, err = checkLabels()
 	if err != nil {
 		return err
 	}
 	if len(workMissing) > 0 {
 		return fmt.Errorf("one or more triage labels are still missing after creation")
 	}
-	// Work labels are fatal (handled above) and research/spec-mismatch
-	// labels are advisory (ADR 0022 / issue #2275), so each tier gets its
-	// own wrap-up line here: an advisory note if a tier is still short
-	// after creation, or a single success line naming both tiers once
-	// neither is (the spec-mismatch tier doesn't get its own mention in
-	// that success line — see the "ok: all triage and research labels
-	// present" string other tests assert on verbatim).
+	// Work labels are fatal (handled above) and research/spec-mismatch/priority
+	// labels are advisory (ADR 0022 / issue #2275 / ADR 0040), so each advisory
+	// tier gets its own wrap-up line here: an advisory note if that tier is
+	// still short after creation, or a single success line once none is (the
+	// spec-mismatch tier doesn't get its own mention in that success line — see
+	// the "ok: all triage, research, and priority labels present" string other
+	// tests assert on verbatim).
 	stillMissing := false
 	if len(researchMissing) > 0 {
 		fmt.Fprintf(w, "advisory: %d research label(s) still missing after creation (ADR 0022) — does not fail this check: %s\n", len(researchMissing), strings.Join(researchMissing, ", "))
@@ -206,9 +249,13 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, w io.Writer, stdin
 		fmt.Fprintf(w, "advisory: %d spec-mismatch label(s) still missing after creation (issue #2275) — does not fail this check: %s\n", len(specMismatchMissing), strings.Join(specMismatchMissing, ", "))
 		stillMissing = true
 	}
+	if len(priorityMissing) > 0 {
+		fmt.Fprintf(w, "advisory: %d priority label(s) still missing after creation (ADR 0040) — does not fail this check: %s\n", len(priorityMissing), strings.Join(priorityMissing, ", "))
+		stillMissing = true
+	}
 	if stillMissing {
 		return nil
 	}
-	fmt.Fprintln(w, "ok: all triage and research labels present")
+	fmt.Fprintln(w, "ok: all triage, research, and priority labels present")
 	return nil
 }

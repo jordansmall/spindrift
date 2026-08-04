@@ -764,6 +764,52 @@ func TestRun_ResetIsIdempotent(t *testing.T) {
 	}
 }
 
+// TestRun_Local_RecoverableIssueNeverReset verifies Reconcile leaves a
+// Recoverable-state issue (ADR 0039, Slice B: a stranded CODE_FORGE=local
+// push-only run promoted to Recoverable instead of Failed) completely
+// untouched — never reset to Dispatchable, never silently closed. Against a
+// push-only local Code Forge (f.AsLocal(), no PRForge surface) Run's only
+// reset mechanism — the second InProgress sweep at the tail of Run — is
+// structurally skipped (hasPR is false), so this exercises that the local
+// landing path itself, which only ever closes or leaves an issue open, never
+// mistakes an unverified landing on a Recoverable issue for a reason to
+// touch its dispatch state.
+func TestRun_Local_RecoverableIssueNeverReset(t *testing.T) {
+	labels := forge.DispatchLabels{Dispatchable: "dispatchable", InProgress: "in-progress", Recoverable: "recoverable"}
+	f := forge.NewFake(labels)
+	f.SetIssue(forge.Issue{Number: "42", State: forge.IssueOpen, Labels: []string{"recoverable"}, Landing: "integration/1694@abc123"})
+	f.SetLandingContained("integration/1694@abc123", "42", false, nil)
+	cf := f.AsLocal()
+
+	res, err := reconcile.Run(f, cf, fakeLiveness{}, selfScope)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(res.Closed) != 0 {
+		t.Errorf("Closed = %v, want none — a Recoverable issue must never be silently closed", res.Closed)
+	}
+	if len(res.Reset) != 0 {
+		t.Errorf("Reset = %v, want none — Reconcile must never reset a Recoverable issue to Dispatchable", res.Reset)
+	}
+	if len(f.TransitionStateCalls) != 0 {
+		t.Errorf("TransitionStateCalls = %v, want none", f.TransitionStateCalls)
+	}
+
+	iss, err := f.Issue("42")
+	if err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+	if iss.State != forge.IssueOpen {
+		t.Errorf("State = %v, want unchanged IssueOpen", iss.State)
+	}
+	if !slices.Contains(iss.Labels, "recoverable") {
+		t.Errorf("Labels = %v, want recoverable label to survive reconcile untouched", iss.Labels)
+	}
+	if slices.Contains(iss.Labels, "dispatchable") {
+		t.Errorf("Labels = %v, must NOT carry dispatchable -- reconcile must never reset Recoverable", iss.Labels)
+	}
+}
+
 // TestRun_NeverMergesOrPushes verifies a Reconcile sweep that closes an
 // issue leaves the Code Forge's landing-path methods (Merge, Rebase,
 // EnqueueAutoMerge, MarkReady) untouched — reconcile is observational only.

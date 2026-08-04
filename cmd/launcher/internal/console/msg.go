@@ -17,6 +17,14 @@ type Msg interface {
 type IssuesLoadedMsg struct {
 	Issues []forge.Issue
 	Err    error
+	// RecoverableCount is how many of Issues carry the tracker's Recoverable
+	// dispatch-state label — derived from this same ListOpenIssues call, no
+	// extra round trip (issue #2255, ADR 0039 slice S4). Zero when the
+	// tracker doesn't implement forge.LabeledTracker or leaves Recoverable
+	// unmapped (empty label string), never every issue — the same
+	// "unmapped state matches everything, so treat as zero" caution
+	// issueInState documents.
+	RecoverableCount int
 }
 
 func (IssuesLoadedMsg) isConsoleMsg() {}

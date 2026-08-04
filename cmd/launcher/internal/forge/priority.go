@@ -1,5 +1,27 @@
 package forge
 
+import "sort"
+
+// The agent-priority-{critical,high,low} label strings (ADR 0040). These are
+// the single source of the label names: ResolvePriority's switch and
+// PriorityLabelNames both read from these constants rather than duplicating
+// the literals.
+const (
+	labelPriorityCritical = "agent-priority-critical"
+	labelPriorityHigh     = "agent-priority-high"
+	labelPriorityLow      = "agent-priority-low"
+)
+
+// PriorityLabelNames returns the three agent-priority-* label strings
+// (ADR 0040) in critical/high/low order — the same order ResolvePriority
+// checks precedence in. Callers that need to enumerate the label family
+// (e.g. doctor's label-existence check) use this instead of re-deriving the
+// literals, mirroring ResearchDispatchLabels/ResearchVerdictLabels.Entries's
+// role for the research label family (see verdict.go).
+func PriorityLabelNames() []string {
+	return []string{labelPriorityCritical, labelPriorityHigh, labelPriorityLow}
+}
+
 // ResolvePriority scans an issue's label names for the agent-priority-
 // {critical,high,low} labels (ADR 0040) and returns the canonical Priority
 // tier, highest wins if an issue somehow carries more than one. Label names
@@ -21,11 +43,11 @@ func ResolvePriority(labels []string) Priority {
 	for _, label := range labels {
 		var candidate Priority
 		switch label {
-		case "agent-priority-critical":
+		case labelPriorityCritical:
 			candidate = PriorityCritical
-		case "agent-priority-high":
+		case labelPriorityHigh:
 			candidate = PriorityHigh
-		case "agent-priority-low":
+		case labelPriorityLow:
 			candidate = PriorityLow
 		default:
 			continue
@@ -36,4 +58,15 @@ func ResolvePriority(labels []string) Priority {
 		}
 	}
 	return priority
+}
+
+// SortByPriority stably orders issues by Priority descending (Critical >
+// High > Normal > Low); a stable sort means equal-priority issues keep
+// their input relative order, which — since every Issue Tracker adapter
+// already returns issues oldest-first — makes oldest-first the natural,
+// zero-extra-code tiebreaker within a tier (ADR 0040).
+func SortByPriority(issues []Issue) {
+	sort.SliceStable(issues, func(i, j int) bool {
+		return issues[i].Priority > issues[j].Priority
+	})
 }

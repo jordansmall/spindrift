@@ -90,12 +90,8 @@ func (f *forgejoCodeForge) getPull(prURL string) (forgejoPullPayload, error) {
 		return forgejoPullPayload{}, err
 	}
 	var payload forgejoPullPayload
-	status, err := f.rest.do(http.MethodGet, f.rest.repoPath()+"/pulls/"+index, nil, &payload)
-	if err != nil {
+	if err := f.rest.Do(http.MethodGet, f.repoPath()+"/pulls/"+index, nil, &payload); err != nil {
 		return forgejoPullPayload{}, err
-	}
-	if status != http.StatusOK {
-		return forgejoPullPayload{}, fmt.Errorf("forgejo: pull %s: unexpected status %d", index, status)
 	}
 	return payload, nil
 }
@@ -142,22 +138,29 @@ func (f *forgejoCodeForge) Mergeable(prURL string) (forge.MergeableState, error)
 	return forge.MergeableConflicting, nil
 }
 
-// listPulls fetches a page of pulls in the given state ("open" or "all")
-// from the configured repo, bounded by forge.ResultPageLimit.
+// listPulls walks every page of the pulls listing in the given state ("open"
+// or "all") from the configured repo via f.rest.Paginate (issue #2265),
+// merging every page's pulls, rather than fetching a single page bounded by
+// forge.ResultPageLimit.
 func (f *forgejoCodeForge) listPulls(state string) ([]forgejoPullPayload, error) {
-	q := url.Values{
-		"state": {state},
-		"limit": {strconv.Itoa(forge.ResultPageLimit)},
-	}
-	var payload []forgejoPullPayload
-	status, err := f.rest.do(http.MethodGet, f.rest.repoPath()+"/pulls?"+q.Encode(), nil, &payload)
+	var pulls []forgejoPullPayload
+	err := f.rest.Paginate(func(page int) (bool, error) {
+		q := url.Values{
+			"state": {state},
+			"limit": {strconv.Itoa(forge.ResultPageLimit)},
+			"page":  {strconv.Itoa(page)},
+		}
+		var payload []forgejoPullPayload
+		if err := f.rest.Do(http.MethodGet, f.repoPath()+"/pulls?"+q.Encode(), nil, &payload); err != nil {
+			return false, err
+		}
+		pulls = append(pulls, payload...)
+		return len(payload) < forge.ResultPageLimit, nil
+	})
 	if err != nil {
 		return nil, err
 	}
-	if status != http.StatusOK {
-		return nil, fmt.Errorf("forgejo: pull list (state=%s): unexpected status %d", state, status)
-	}
-	return payload, nil
+	return pulls, nil
 }
 
 // OpenPRForBranch returns the open, non-draft pull whose head matches
@@ -222,12 +225,8 @@ func (f *forgejoCodeForge) CheckState(prURL string) (forge.RollupState, error) {
 		return forge.StateNone, err
 	}
 	var combined forgejoCombinedStatus
-	status, err := f.rest.do(http.MethodGet, f.rest.repoPath()+"/commits/"+url.PathEscape(p.Head.Sha)+"/status", nil, &combined)
-	if err != nil {
+	if err := f.rest.Do(http.MethodGet, f.repoPath()+"/commits/"+url.PathEscape(p.Head.Sha)+"/status", nil, &combined); err != nil {
 		return forge.StateNone, err
-	}
-	if status != http.StatusOK {
-		return forge.StateNone, fmt.Errorf("forgejo: commit status %s: unexpected status %d", p.Head.Sha, status)
 	}
 	if combined.State == "" || combined.TotalCount == 0 {
 		return forge.StateNone, nil
@@ -269,12 +268,8 @@ func (f *forgejoCodeForge) FailureDetail(prURL string) (string, error) {
 		return "", err
 	}
 	var statuses []forgejoStatus
-	status, err := f.rest.do(http.MethodGet, f.rest.repoPath()+"/commits/"+url.PathEscape(p.Head.Sha)+"/statuses", nil, &statuses)
-	if err != nil {
+	if err := f.rest.Do(http.MethodGet, f.repoPath()+"/commits/"+url.PathEscape(p.Head.Sha)+"/statuses", nil, &statuses); err != nil {
 		return "", err
-	}
-	if status != http.StatusOK {
-		return "", fmt.Errorf("forgejo: commit statuses %s: unexpected status %d", p.Head.Sha, status)
 	}
 	var entries []forge.FailureDetailEntry
 	for _, s := range statuses {
@@ -304,12 +299,8 @@ func (f *forgejoCodeForge) ListPRFiles(prURL string) ([]string, error) {
 		return nil, err
 	}
 	var payload []forgejoPRFile
-	status, err := f.rest.do(http.MethodGet, f.rest.repoPath()+"/pulls/"+index+"/files", nil, &payload)
-	if err != nil {
+	if err := f.rest.Do(http.MethodGet, f.repoPath()+"/pulls/"+index+"/files", nil, &payload); err != nil {
 		return nil, err
-	}
-	if status != http.StatusOK {
-		return nil, fmt.Errorf("forgejo: pull %s files: unexpected status %d", index, status)
 	}
 	var files []string
 	for _, file := range payload {
@@ -344,12 +335,8 @@ func (f *forgejoCodeForge) NeedsUpdate(prURL string) (bool, error) {
 	// {head}...{base}: commits on base not reachable from the PR's head.
 	headBase := url.PathEscape(p.Head.Ref) + "..." + url.PathEscape(p.Base.Ref)
 	var cmp forgejoCompare
-	status, err := f.rest.do(http.MethodGet, f.rest.repoPath()+"/compare/"+headBase, nil, &cmp)
-	if err != nil {
+	if err := f.rest.Do(http.MethodGet, f.repoPath()+"/compare/"+headBase, nil, &cmp); err != nil {
 		return false, err
-	}
-	if status != http.StatusOK {
-		return false, fmt.Errorf("forgejo: compare %s: unexpected status %d", headBase, status)
 	}
 	return cmp.TotalCommits > 0, nil
 }
@@ -369,12 +356,8 @@ type forgejoAutoMergeStylesPayload struct {
 // that (rather than a dedicated flag) is the signal read here.
 func (f *forgejoCodeForge) CanAutoMerge() (bool, error) {
 	var repo forgejoAutoMergeStylesPayload
-	status, err := f.rest.do(http.MethodGet, f.rest.repoPath(), nil, &repo)
-	if err != nil {
+	if err := f.rest.Do(http.MethodGet, f.repoPath(), nil, &repo); err != nil {
 		return false, err
-	}
-	if status != http.StatusOK {
-		return false, fmt.Errorf("forgejo: repo: unexpected status %d", status)
 	}
 	return repo.AllowMergeCommits || repo.AllowRebase || repo.AllowSquashMerge, nil
 }
@@ -389,14 +372,7 @@ func (f *forgejoCodeForge) EnqueueAutoMerge(prURL string) error {
 	if err != nil {
 		return err
 	}
-	status, err := f.postMerge(index, map[string]any{"merge_when_checks_succeed": true})
-	if err != nil {
-		return err
-	}
-	if status < 200 || status >= 300 {
-		return fmt.Errorf("forgejo: enqueue auto-merge %s: unexpected status %d", index, status)
-	}
-	return nil
+	return f.postMerge(index, map[string]any{"merge_when_checks_succeed": true})
 }
 
 // MarkReady flips the PR out of draft by PATCHing its title with the
@@ -417,14 +393,7 @@ func (f *forgejoCodeForge) MarkReady(prURL string) error {
 		return err
 	}
 	body := map[string]any{"title": stripWIPPrefix(p.Title)}
-	status, err := f.rest.do(http.MethodPatch, f.rest.repoPath()+"/pulls/"+index, body, nil)
-	if err != nil {
-		return err
-	}
-	if status < 200 || status >= 300 {
-		return fmt.Errorf("forgejo: mark ready %s: unexpected status %d", index, status)
-	}
-	return nil
+	return f.rest.Do(http.MethodPatch, f.repoPath()+"/pulls/"+index, body, nil)
 }
 
 // MarkDraft flips the PR back to draft by PATCHing its title with a leading
@@ -443,12 +412,5 @@ func (f *forgejoCodeForge) MarkDraft(prURL string) error {
 		return err
 	}
 	body := map[string]any{"title": forgejoWIPPrefix + " " + p.Title}
-	status, err := f.rest.do(http.MethodPatch, f.rest.repoPath()+"/pulls/"+index, body, nil)
-	if err != nil {
-		return err
-	}
-	if status < 200 || status >= 300 {
-		return fmt.Errorf("forgejo: mark draft %s: unexpected status %d", index, status)
-	}
-	return nil
+	return f.rest.Do(http.MethodPatch, f.repoPath()+"/pulls/"+index, body, nil)
 }

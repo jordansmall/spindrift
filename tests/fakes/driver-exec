@@ -50,7 +50,8 @@ if [ "${1:-}" = "outcome-backstop" ]; then
   # source-of-truth. Keep the two in lockstep: any change to the verb's
   # decisions belongs here too, and vice versa.
   shift
-  repo="" ob_issue="" branch="" base="" kind="work" forge="github"
+  repo="" ob_issue="" branch="" base="" kind="work"
+  host_mediated_remote="" outbox_relay_capable=""
   write="" nonce="" recovery="" attempts="1" backoff="0" jitter="0"
   while [ $# -gt 0 ]; do
     case "$1" in
@@ -59,7 +60,8 @@ if [ "${1:-}" = "outcome-backstop" ]; then
       --branch) branch="$2"; shift 2 ;;
       --base) base="$2"; shift 2 ;;
       --dispatch-kind) kind="$2"; shift 2 ;;
-      --code-forge) forge="$2"; shift 2 ;;
+      --host-mediated-remote) host_mediated_remote="$2"; shift 2 ;;
+      --outbox-relay-capable) outbox_relay_capable="$2"; shift 2 ;;
       --box-write-enabled) write="$2"; shift 2 ;;
       --nonce) nonce="$2"; shift 2 ;;
       --recovery-attempted) recovery="$2"; shift 2 ;;
@@ -91,9 +93,9 @@ if [ "${1:-}" = "outcome-backstop" ]; then
   commit_count="$(git rev-list --count "$base..$branch" 2>/dev/null)" || commit_count=1
   if [ "$commit_count" -eq 0 ]; then
     note="${note}; no work to preserve"
-  elif [ "$forge" = "local" ]; then
-    note="${note}; no bundle was ever emitted (no writable remote under CODE_FORGE=local)"
-  elif [ -z "$write" ] && [ "$forge" = "github" ]; then
+  elif [ -n "$host_mediated_remote" ]; then
+    note="${note}; branch relayed via outbox bundle (no writable remote under CODE_FORGE=local)"
+  elif [ -z "$write" ] && [ -n "$outbox_relay_capable" ]; then
     note="${note}; branch relayed via outbox bundle (read-only Box)"
   else
     [ "$attempts" -lt 1 ] && attempts=1

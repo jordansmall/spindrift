@@ -17,6 +17,33 @@ func TestDispatchLabels_Untriaged_HasNoLabel(t *testing.T) {
 	}
 }
 
+// TestDispatchLabels_Recoverable_LabelAndAllLabels verifies Recoverable maps
+// to its configured marker via Label, but is excluded from AllLabels: it is
+// a local-only frontmatter marker (never a real GitHub label), so it must
+// not appear in the registry-membership set the local adapter's ListLabels
+// reports (#2254).
+func TestDispatchLabels_Recoverable_LabelAndAllLabels(t *testing.T) {
+	d := DispatchLabels{
+		Dispatchable: "ready-for-agent",
+		InProgress:   "agent-in-progress",
+		Complete:     "agent-complete",
+		Failed:       "agent-failed",
+		Recoverable:  "agent-recoverable",
+	}
+	if got := d.Label(Recoverable); got != "agent-recoverable" {
+		t.Fatalf("Label(Recoverable): got %q, want %q", got, "agent-recoverable")
+	}
+	all := d.AllLabels()
+	if len(all) != 4 {
+		t.Fatalf("AllLabels len = %d, want 4 (Recoverable excluded)", len(all))
+	}
+	for _, l := range all {
+		if l == "agent-recoverable" {
+			t.Fatalf("AllLabels = %v, must not contain the Recoverable marker", all)
+		}
+	}
+}
+
 // TestDispatchLabels_ClaimRemoveLabels_ClaimStripsStaleTerminals verifies a
 // claim (to == InProgress) removes the from-state label plus both terminal
 // labels and the fixed SpecMismatchLabel, deduplicated — the single source

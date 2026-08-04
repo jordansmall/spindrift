@@ -67,38 +67,42 @@ configure_env() {
   # otherwise.
   OUTBOX_DIR="${OUTBOX_DIR:-/outbox}"
 
+  # DRIVER_NAME, DRIVER_BIN, DRIVER_FLAGS_COMMON, and DRIVER_SKILLS_DIR are
+  # baked by the selected Driver's lib/drivers/<name>.nix registry entry (ADR
+  # 0009, issue #624) via the nix-rendered preamble prepended ahead of this
+  # file at image build time. No fallback literal lives here: a Box built
+  # without that preamble dies loudly instead of silently impersonating the
+  # claude Driver. Checked ahead of phase_prompt_assembly's
+  # _inject_shared_block calls (which resolve their markers via
+  # _contract_marker) so a Box missing every nix-rendered preamble dies
+  # naming the Driver preamble, not the unrelated contract-registry one
+  # (issue #2246).
+  : "${DRIVER_BIN:?DRIVER_BIN not set -- the nix-rendered Driver preamble did not run}"
+  : "${DRIVER_FLAGS_COMMON:?DRIVER_FLAGS_COMMON not set -- the nix-rendered Driver preamble did not run}"
+  : "${DRIVER_SKILLS_DIR:?DRIVER_SKILLS_DIR not set -- the nix-rendered Driver preamble did not run}"
+  : "${DRIVER_NAME:?DRIVER_NAME not set -- the nix-rendered Driver preamble did not run}"
+
   # The canonical SPINDRIFT_OUTCOME contract (issue #419), baked at a sibling
   # path to /agent/prompts so a SPINDRIFT_PROMPT_DIR mount -- which shadows only
   # /agent/prompts -- never hides it (issue #420).
-  OUTCOME_CONTRACT_MARKER="# LAND THE CHANGE"
+  # Only the file-path default lives here; _inject_shared_block resolves the
+  # id's marker itself via _contract_marker against the registry-rendered
+  # _INJECT_BLOCK_ROWS (lib/prompt-contract.nix's injectBlocks, issue #2246),
+  # so it cannot drift from the block's canonical source-file heading.
   OUTCOME_CONTRACT_FILE="${OUTCOME_CONTRACT_FILE:-/agent/outcome-contract.md}"
 
   # The COMMS and CHECK/COMMIT blocks fix-prompt.md shares with issue-prompt.md
   # (issue #455 extends #419/#420's slice mechanism beyond the outcome contract):
   # baked and injected the same way, so a SPINDRIFT_PROMPT_DIR override of the
   # fix prompt gets the identical treatment.
-  COMMS_CONTRACT_MARKER="# COMMS"
   COMMS_CONTRACT_FILE="${COMMS_CONTRACT_FILE:-/agent/comms-contract.md}"
-  CHECK_CONTRACT_MARKER="# CHECK"
   CHECK_CONTRACT_FILE="${CHECK_CONTRACT_FILE:-/agent/check-contract.md}"
 
   # The research dispatch kind's own harness-owned outcome contract (ADR 0022,
   # issue #640): posting the verdict comment and emitting the outcome line.
   # Baked and injected the same way as the work contract above, so a
   # SPINDRIFT_PROMPT_DIR override of research-prompt.md gets it too.
-  RESEARCH_OUTCOME_CONTRACT_MARKER="# POST THE VERDICT"
   RESEARCH_OUTCOME_CONTRACT_FILE="${RESEARCH_OUTCOME_CONTRACT_FILE:-/agent/research-outcome-contract.md}"
-
-  # DRIVER_NAME, DRIVER_BIN, DRIVER_FLAGS_COMMON, and DRIVER_SKILLS_DIR are
-  # baked by the selected Driver's lib/drivers/<name>.nix registry entry (ADR
-  # 0009, issue #624) via the nix-rendered preamble prepended ahead of this
-  # file at image build time. No fallback literal lives here: a Box built
-  # without that preamble dies loudly instead of silently impersonating the
-  # claude Driver.
-  : "${DRIVER_BIN:?DRIVER_BIN not set -- the nix-rendered Driver preamble did not run}"
-  : "${DRIVER_FLAGS_COMMON:?DRIVER_FLAGS_COMMON not set -- the nix-rendered Driver preamble did not run}"
-  : "${DRIVER_SKILLS_DIR:?DRIVER_SKILLS_DIR not set -- the nix-rendered Driver preamble did not run}"
-  : "${DRIVER_NAME:?DRIVER_NAME not set -- the nix-rendered Driver preamble did not run}"
 
   # _driver_extract_outcome and _driver_session_flags are defined by the Driver
   # registry (lib/drivers/<name>.nix); a nix-built image prepends them via
@@ -453,13 +457,151 @@ _is_readonly_github() {
   [ -z "${BOX_WRITE_ENABLED:-}" ] && [ "${CODE_FORGE:-github}" = "github" ]
 }
 
+# _contract_marker reads the marker field (pipe position 2) out of the
+# registry-rendered _INJECT_BLOCK_ROWS row whose id (pipe position 1) matches
+# $1 -- sourced from lib/prompt-contract.nix's injectBlocks via
+# contract-registry.sh (mirrors the _FRAGMENT_ROWS mechanism above, issue
+# #2246). A nix-built image prepends _INJECT_BLOCK_ROWS via
+# contractRegistryPreamble (lib/mkHarness.nix), and the bats harness sources
+# the same registry-rendered rows via CONTRACT_REGISTRY_FILE. Called from
+# exactly one place -- _inject_shared_block below -- so no per-block marker
+# variable can drift from this single resolution point (issue #2248).
+_contract_marker() {
+  local _id="$1" _crow _cid _cmarker _rest
+  for _crow in "${_INJECT_BLOCK_ROWS[@]}"; do
+    IFS='|' read -r _cid _cmarker _rest <<<"$_crow"
+    if [ "$_cid" = "$_id" ]; then
+      printf '%s' "$_cmarker"
+      return 0
+    fi
+  done
+  echo "_contract_marker: no row for id '$_id' in _INJECT_BLOCK_ROWS" >&2
+  return 1
+}
+
+# _validate_marker_row mirrors _contract_marker above, but scans
+# _VALIDATE_MARKER_ROWS (lib/prompt-contract.nix's validateMarkers registry,
+# rendered by validateMarkersBashPreamble, issue #2249) instead of
+# _INJECT_BLOCK_ROWS: prints the row whose id (pipe position 1) matches $1,
+# unparsed, so the one caller below (_validate_prompt_contract) can split it
+# with `IFS='|' read -r` for whichever of marker/carrier/severity/when it
+# needs -- unlike _contract_marker, callers here need more than just the
+# marker field.
+_validate_marker_row() {
+  local _id="$1" _vrow _vid _rest
+  for _vrow in "${_VALIDATE_MARKER_ROWS[@]}"; do
+    _vid="${_vrow%%|*}"
+    if [ "$_vid" = "$_id" ]; then
+      printf '%s' "$_vrow"
+      return 0
+    fi
+  done
+  echo "_validate_marker_row: no row for id '$_id' in _VALIDATE_MARKER_ROWS" >&2
+  return 1
+}
+
+# _validate_prompt_contract is the in-box reject/warn matrix (issue #2249):
+# run once, at the very end of phase_prompt_assembly -- after every fragment
+# has been rendered/injected and $prompt/$agents_json are fully assembled,
+# strictly before run_driver_in_env is ever called (main calls
+# phase_prompt_assembly before run_driver_in_env, so no separate call site is
+# needed) -- it scans for the markers lib/prompt-contract.nix's
+# validateMarkers registry names, each gated on the exact same condition
+# that gated the fragment/step supposed to carry it. A "reject" row's marker
+# missing under its gate condition means the Box's own contract with the
+# launcher/host is unmet in a way nothing downstream can recover from, so it
+# exits non-zero before the Driver ever runs (saving the wasted turn); a
+# "warn" row already has a working non-fatal backstop, so its marker missing
+# is only ever advisory, never fatal.
+#
+# Reuses the same local gate variables (ORCHESTRATOR, BOX_ACCESS_READ_ONLY,
+# FILER_FILE_RELAY, review_prompt_rendered, prompt, agents_json)
+# phase_prompt_assembly already computed to decide what to render, rather
+# than re-deriving the gating condition from raw env vars -- the actual
+# source of truth for what got rendered, so this can never silently drift
+# from the real fragment-gating logic (see brief for #2249).
+_validate_prompt_contract() {
+  local _marker _row
+
+  # reject verdict-comment-relay: a read-only research dispatch's only path
+  # to post its verdict is the SPINDRIFT_COMMENT relay (research-prompt.md's
+  # POST THE VERDICT section) -- missing it here means the verdict can never
+  # reach the launcher.
+  if _is_research_kind && [ -n "$BOX_ACCESS_READ_ONLY" ]; then
+    _row="$(_validate_marker_row verdict-comment-relay)" || exit 1
+    IFS='|' read -r _ _marker _ <<<"$_row"
+    if [[ "$prompt" != *"$_marker"* ]]; then
+      echo "_validate_prompt_contract: read-only research dispatch's rendered prompt is missing the required '$_marker' marker -- this belongs in research-prompt.md's (or a SPINDRIFT_PROMPT_DIR override's) POST THE VERDICT section; without it a read-only Box has no way to hand its verdict to the launcher. Refusing to invoke the Driver." >&2
+      exit 1
+    fi
+  fi
+
+  # reject reviewer-verdict: review_prompt_rendered is only non-empty for a
+  # fresh, non-research, non-FIX_PASS dispatch with the orchestrator on (see
+  # the if/elif/else above) -- exactly the case where a missing VERDICT:
+  # line would leave the multi-pass review loop with nothing to gate on. The
+  # marker lookup happens unconditionally, ahead of the $ORCHESTRATOR test
+  # below, so that test stays a single flat if/else with no nested fi ahead
+  # of its else -- the shape orchestrator-fork-well-formed's line-scan
+  # (nix/checks/prompts.nix) requires of every $ORCHESTRATOR conditional.
+  _row="$(_validate_marker_row reviewer-verdict)" || exit 1
+  IFS='|' read -r _ _marker _ <<<"$_row"
+  if [ -n "$ORCHESTRATOR" ] && [ -n "$review_prompt_rendered" ] \
+    && [[ "$review_prompt_rendered" != *"$_marker"* ]]; then
+    echo "_validate_prompt_contract: the orchestrator's rendered review prompt is missing the required '$_marker' marker -- this belongs in review-prompt.md's (or a SPINDRIFT_PROMPT_DIR override's) verdict line; without it the code-owned review loop has nothing to gate on. Refusing to invoke the Driver." >&2
+    exit 1
+  else
+    # Off-row (orchestrator-fork-well-formed, issue #2047): orchestrator off,
+    # review_prompt_rendered empty (research/FIX_PASS dispatch), or the
+    # marker is present -- the inline reviewer-subagent loop (or the
+    # research/fix pass's own contract) governs verdict-gating instead in
+    # the first two cases, so this row's reject condition is correctly a
+    # no-op here, not merely implicit.
+    :
+  fi
+
+  # warn pr-intent: a read-only, non-research dispatch relies on the
+  # SPINDRIFT_PR_INTENT relay (issue-prompt.md's OPEN A PULL REQUEST section)
+  # to hand its finished branch to the launcher's host-mediated draft-PR
+  # step. Already has a working non-fatal backstop (the required-marker
+  # gate's pr-intent-recovery nudge below, plus settle's bundle-adopt salvage
+  # path), so a missing marker here is advisory only.
+  if [ -n "$BOX_ACCESS_READ_ONLY" ] && ! _is_research_kind; then
+    _row="$(_validate_marker_row pr-intent)" || exit 1
+    IFS='|' read -r _ _marker _ <<<"$_row"
+    if [[ "$prompt" != *"$_marker"* ]]; then
+      echo "_validate_prompt_contract: warning -- read-only dispatch's rendered prompt is missing the '$_marker' marker (belongs in issue-prompt.md's, or fix-prompt.md's injected, OPEN A PULL REQUEST section). Proceeding: a status=ready run with no PR-intent line still gets one resume-nudge attempt post-driver, and a genuinely exhausted attempt falls back to the merge-blocked report rather than losing the branch." >&2
+    fi
+  fi
+
+  # warn issue-intent: a filer-relay dispatch relies on the
+  # SPINDRIFT_ISSUE_INTENT relay (filer-file-relay.md) to hand its filed
+  # issues to the launcher's host-mediated create step -- checked against the
+  # filer's own rendered prompt inside agents_json, not $prompt, since that's
+  # where filer-prompt.md's substituted text actually lands. Already has a
+  # working non-fatal backstop (the filer's best-effort PR-body fallback), so
+  # a missing marker here is advisory only.
+  if [ -n "$FILER_FILE_RELAY" ]; then
+    _row="$(_validate_marker_row issue-intent)" || exit 1
+    IFS='|' read -r _ _marker _ <<<"$_row"
+    local _filer_prompt
+    _filer_prompt="$(printf '%s' "${agents_json:-}" | jq -r '.filer.prompt // empty')"
+    if [[ "$_filer_prompt" != *"$_marker"* ]]; then
+      echo "_validate_prompt_contract: warning -- filer-relay dispatch's rendered filer prompt is missing the '$_marker' marker (belongs in filer-prompt.md's, or a SPINDRIFT_PROMPT_DIR override's, filer-file-relay.md-injected section). Proceeding: the filer's own best-effort PR-body fallback still records the issue reference even without the relay." >&2
+    fi
+  fi
+}
+
 # A SPINDRIFT_PROMPT_DIR mount replaces the whole prompt dir, so a rendered
 # prompt that dropped a shared block (issue #419, extended to COMMS/CHECK by
 # #455) never gets the build-time injection; append the canonical block here,
 # at run time, unless it is already present (idempotent, mirrors
-# lib/mkHarness.nix).
+# lib/mkHarness.nix). Takes the block's registry id (not a pre-resolved
+# marker) and looks the marker up itself via _contract_marker, so this is the
+# only call site in the runtime path that resolves a marker (issue #2248).
 _inject_shared_block() {
-  local marker="$1" file="$2"
+  local id="$1" file="$2" marker
+  marker="$(_contract_marker "$id")"
   if [[ "$prompt" != *"$marker"* ]]; then
     # A direct assignment from the substitution (rather than nesting it as a
     # printf argument) so a missing/unreadable contract file fails loudly
@@ -894,11 +1036,11 @@ phase_prompt_assembly() {
   # the same order the issue prompt carries them. The research prompt carries
   # none of these work-only blocks -- it gets its own outcome contract instead.
   if _is_research_kind; then
-    _inject_shared_block "$RESEARCH_OUTCOME_CONTRACT_MARKER" "$RESEARCH_OUTCOME_CONTRACT_FILE"
+    _inject_shared_block "research-verdict" "$RESEARCH_OUTCOME_CONTRACT_FILE"
   else
-    _inject_shared_block "$COMMS_CONTRACT_MARKER" "$COMMS_CONTRACT_FILE"
-    _inject_shared_block "$CHECK_CONTRACT_MARKER" "$CHECK_CONTRACT_FILE"
-    _inject_shared_block "$OUTCOME_CONTRACT_MARKER" "$OUTCOME_CONTRACT_FILE"
+    _inject_shared_block "comms" "$COMMS_CONTRACT_FILE"
+    _inject_shared_block "check" "$CHECK_CONTRACT_FILE"
+    _inject_shared_block "outcome" "$OUTCOME_CONTRACT_FILE"
   fi
 
   # Forward the nix-baked --agents JSON to the Agent. AGENTS_JSON_TEMPLATE is
@@ -999,6 +1141,11 @@ phase_prompt_assembly() {
       done < <(printf '%s' "$AGENTS_PROMPT_FILES" | jq -r 'keys[]')
     fi
   fi
+
+  # Reject/warn marker matrix (issue #2249): runs last, after every fragment
+  # is rendered/injected and $prompt/$agents_json are fully assembled, and
+  # strictly before run_driver_in_env is ever called from main.
+  _validate_prompt_contract
 }
 
 # run_driver_in_env runs the Driver against $1 (the assembled prompt), with
@@ -1155,7 +1302,11 @@ run_driver_in_env() {
 # retry branching, and the single synthetic status=blocked SPINDRIFT_OUTCOME
 # line -- now lives in the driver-exec `outcome-backstop` verb (issue #2157,
 # ADR 0036). This function is just linear exec glue: it hands the verb the
-# inputs it needs and lets it own the decision.
+# inputs it needs and lets it own the decision. BOX_HOST_MEDIATED_REMOTE and
+# BOX_OUTBOX_RELAY_CAPABLE are the two backend-capability facts that decision
+# keys off (issue #2267) -- forwarded here as presence flags the launcher's
+# dispatch.buildBoxEnv already resolved host-side from the backend registry,
+# not re-derived in-box from CODE_FORGE's name.
 emit_outcome_backstop() {
   driver-exec outcome-backstop \
     --repo "$WORK_DIR" \
@@ -1163,7 +1314,8 @@ emit_outcome_backstop() {
     --branch "$BRANCH" \
     --base "origin/${BASE_BRANCH:-}" \
     --dispatch-kind "${DISPATCH_KIND:-work}" \
-    --code-forge "${CODE_FORGE:-github}" \
+    --host-mediated-remote "${BOX_HOST_MEDIATED_REMOTE:-}" \
+    --outbox-relay-capable "${BOX_OUTBOX_RELAY_CAPABLE:-}" \
     --box-write-enabled "${BOX_WRITE_ENABLED:-}" \
     --nonce "${RUN_NONCE:-}" \
     --recovery-attempted "${_recovery_attempted:-}" \
@@ -1213,7 +1365,17 @@ required_marker_gate() {
 # The SPINDRIFT_OUTCOME row on the required-marker gate above -- the scanner
 # reads back main's captured outcome line, and the predicate is bare
 # presence, the same condition the pre-#2044 inline check tested.
+#
+# Both are only ever invoked indirectly, via required_marker_gate's
+# "$_scanner"/"$_predicate" parameters (see its body above), never by their
+# literal names. shellcheck's own indirect-invocation credit for that
+# pattern stops working once main() ends with an unconditional
+# `exit "$claude_rc"` (ADR 0039 slice S1, issue #2252) -- a shellcheck
+# limitation, not a real dead-code finding; both are called from main() well
+# before that trailing exit.
+# shellcheck disable=SC2329
 _scan_outcome() { printf '%s' "$_last_outcome_line"; }
+# shellcheck disable=SC2329
 _require_nonempty() { [ -n "$1" ]; }
 
 # _scan_pr_intent_in_log reports (via stdout) the last line in $1 (a raw
@@ -1251,6 +1413,10 @@ _scan_pr_intent_in_log() {
 # #2045, the #2036 fix): the scanner reads back main's captured PR-intent
 # line, reusing _require_nonempty as its predicate -- the same bare-presence
 # condition the SPINDRIFT_OUTCOME row above already uses.
+#
+# Same shellcheck note as _scan_outcome above: only ever invoked indirectly
+# via required_marker_gate's "$_scanner" parameter.
+# shellcheck disable=SC2329
 _scan_pr_intent() { printf '%s' "$_last_pr_intent_line"; }
 
 # _emit_pr_intent_giveup_op prints a single heartbeat "decision" op (issue
@@ -1357,19 +1523,17 @@ Print the required line exactly once as your final message, using this grammar -
     echo "==> driver produced no SPINDRIFT_OUTCOME line — emitting synthetic backstop"
     emit_outcome_backstop
     # A read-only github Box (BOX_WRITE_ENABLED unset) holds no push token, so
-    # emit_outcome_backstop could not push $BRANCH itself. Fall through to the
-    # harness-owned bundle-out step below, which relays the branch through the
-    # outbox seam.bundle exactly as a read-only status=ready hand-off does
-    # (issue #2094). Every other forge/mode has nothing more to do here --
-    # writable github and git already force-pushed in the backstop, local never
-    # had a writable remote, and research cuts no branch -- so they exit now,
-    # behaviour unchanged.
-    if ! _is_readonly_github || _is_research_kind; then
-      exit 0
-    fi
+    # emit_outcome_backstop could not push $BRANCH itself. Fall through
+    # unconditionally to the harness-owned bundle-out step below, which
+    # relays the branch through the outbox seam.bundle exactly as a
+    # read-only status=ready hand-off does (issue #2094). This is no longer
+    # a per-forge branch (ADR 0039 slice S1, issue #2252): every forge/mode
+    # -- writable github, git, local, and read-only github alike -- falls
+    # through the same way to the single exit at the bottom of main(), after
+    # bundle-out has had a chance to run. bundleout.Run is a safe no-op when
+    # there is nothing to relay (no commits, or a prior line that already
+    # claimed something other than ready), so nothing further is needed here.
   fi
-
-  [ "$claude_rc" -eq 0 ] || exit "$claude_rc"
 
   # The SPINDRIFT_PR_INTENT row on the required-marker gate (issue #2045,
   # the #2036 fix): a read-only github Box that reaches status=ready but
@@ -1390,56 +1554,65 @@ Print the required line exactly once as your final message, using this grammar -
   # itself contain the substring "status=ready" (e.g. an agent explaining
   # why a status=blocked run couldn't reach status=ready), and a bare
   # grep across the full line would false-positive on that.
-  local _outcome_fields_before_note="${_last_outcome_line%% note=*}"
-  if _is_readonly_github \
-    && [[ " $_outcome_fields_before_note " == *" status=ready "* ]]; then
-    # Carries this run's nonce (so the resumed pass can emit a line
-    # _scan_pr_intent_in_log will actually match) and repeats the exact
-    # SPINDRIFT_OUTCOME line already captured above verbatim: run_driver_in_env
-    # recaptures $_last_outcome_line from whatever this resumed pass prints,
-    # so without an instruction to repeat it, a resume that prints only the
-    # PR-intent line would blank that var out and trip the no-outcome
-    # backstop above on a run that already genuinely finished ready.
-    #
-    # The grammar spelled out below is free-text LLM instruction, not a
-    # machine-parsed contract -- only the bare SPINDRIFT_PR_INTENT token
-    # (outcome.PRIntentToken) is load-bearing for _scan_pr_intent_in_log and
-    # the launcher's own outcome.LastPRIntentInLog, and that literal is what
-    # TestPromptMarkersMatchScanner pins against
-    # open-pr-create-outbox.md/if-blocked-pr-outbox.md. A reworded sentence
-    # here is harmless as long as it still leads the agent to print the
-    # token, the nonce, and a base64 payload in that order.
-    local _original_ready_outcome_line="$_last_outcome_line"
-    local pr_intent_recovery_prompt="Your last message ended with a status=ready SPINDRIFT_OUTCOME line but printed no SPINDRIFT_PR_INTENT line, so the launcher has no draft PR to open. Print exactly one SPINDRIFT_PR_INTENT line, grammar: SPINDRIFT_PR_INTENT ${RUN_NONCE:-} <base64-encoded title, a blank line, then the body>, built by joining the PR title, a blank line, and the PR body, then base64-encoding the result into one unbroken token with no embedded newlines or spaces. Then repeat this exact line as your final message: ${_last_outcome_line}"
-    required_marker_gate _scan_pr_intent "$pr_intent_recovery_prompt" _require_nonempty
-    # The nudge is exhausted: required_marker_gate resumed the session once
-    # and the resumed pass still left no usable PR-intent line, so settle's
-    # host-mediated draft-PR step will find nothing to relay and report this
-    # run merge-blocked. Record that give-up as a heartbeat op (issue #2046)
-    # so the terminal state is visibly explained -- an operator sees the nudge
-    # ran and gave up, rather than an unexplained blocked hand-off (the #2036
-    # confusion). Fires only on the genuinely-exhausted path: a resume that
-    # supplied the marker leaves $_last_pr_intent_line non-empty and skips it,
-    # and this whole block is already gated on read-only + github +
-    # status=ready, so a run that landed a PR never reaches here. The single
-    # attempt is required_marker_gate's own one-resume contract.
-    if [ -z "$_last_pr_intent_line" ]; then
-      _emit_pr_intent_giveup_op 1
-    fi
-    # Belt-and-braces beyond the "repeat this exact line" instruction above:
-    # the resumed pass is still a fresh LLM turn that could garble or drop
-    # the outcome line despite being told not to, and unlike the
-    # SPINDRIFT_OUTCOME row's own resume (which only ever replaces "nothing"
-    # with something), this row's resume has a known-good line to fall back
-    # on. Restoring it here fixes both entrypoint.sh's own bookkeeping (so
-    # the no-outcome backstop below never fires on a run that already
-    # genuinely finished ready) and the container log the launcher's own
-    # last-line-wins outcome.LastInLog scans (so a garbled resumed line
-    # never shadows the good one there either).
-    if [ "$_last_outcome_line" != "$_original_ready_outcome_line" ]; then
-      echo "==> resumed pass did not repeat the original SPINDRIFT_OUTCOME line — restoring it"
-      _last_outcome_line="$_original_ready_outcome_line"
-      printf '%s\n' "$_last_outcome_line"
+  #
+  # This whole block only makes sense on a genuine status=ready reached by a
+  # cleanly-exited driver. It used to rely on the now-deleted
+  # `[ "$claude_rc" -eq 0 ] || exit "$claude_rc"` line above for that
+  # guarantee; the explicit guard below (ADR 0039 slice S1, issue #2252)
+  # replaces it now that a non-zero claude_rc falls through instead of
+  # exiting immediately.
+  if [ "$claude_rc" -eq 0 ]; then
+    local _outcome_fields_before_note="${_last_outcome_line%% note=*}"
+    if _is_readonly_github \
+      && [[ " $_outcome_fields_before_note " == *" status=ready "* ]]; then
+      # Carries this run's nonce (so the resumed pass can emit a line
+      # _scan_pr_intent_in_log will actually match) and repeats the exact
+      # SPINDRIFT_OUTCOME line already captured above verbatim: run_driver_in_env
+      # recaptures $_last_outcome_line from whatever this resumed pass prints,
+      # so without an instruction to repeat it, a resume that prints only the
+      # PR-intent line would blank that var out and trip the no-outcome
+      # backstop above on a run that already genuinely finished ready.
+      #
+      # The grammar spelled out below is free-text LLM instruction, not a
+      # machine-parsed contract -- only the bare SPINDRIFT_PR_INTENT token
+      # (outcome.PRIntentToken) is load-bearing for _scan_pr_intent_in_log and
+      # the launcher's own outcome.LastPRIntentInLog, and that literal is what
+      # TestPromptMarkersMatchScanner pins against
+      # open-pr-create-outbox.md/if-blocked-pr-outbox.md. A reworded sentence
+      # here is harmless as long as it still leads the agent to print the
+      # token, the nonce, and a base64 payload in that order.
+      local _original_ready_outcome_line="$_last_outcome_line"
+      local pr_intent_recovery_prompt="Your last message ended with a status=ready SPINDRIFT_OUTCOME line but printed no SPINDRIFT_PR_INTENT line, so the launcher has no draft PR to open. Print exactly one SPINDRIFT_PR_INTENT line, grammar: SPINDRIFT_PR_INTENT ${RUN_NONCE:-} <base64-encoded title, a blank line, then the body>, built by joining the PR title, a blank line, and the PR body, then base64-encoding the result into one unbroken token with no embedded newlines or spaces. Then repeat this exact line as your final message: ${_last_outcome_line}"
+      required_marker_gate _scan_pr_intent "$pr_intent_recovery_prompt" _require_nonempty
+      # The nudge is exhausted: required_marker_gate resumed the session once
+      # and the resumed pass still left no usable PR-intent line, so settle's
+      # host-mediated draft-PR step will find nothing to relay and report this
+      # run merge-blocked. Record that give-up as a heartbeat op (issue #2046)
+      # so the terminal state is visibly explained -- an operator sees the nudge
+      # ran and gave up, rather than an unexplained blocked hand-off (the #2036
+      # confusion). Fires only on the genuinely-exhausted path: a resume that
+      # supplied the marker leaves $_last_pr_intent_line non-empty and skips it,
+      # and this whole block is already gated on read-only + github +
+      # status=ready, so a run that landed a PR never reaches here. The single
+      # attempt is required_marker_gate's own one-resume contract.
+      if [ -z "$_last_pr_intent_line" ]; then
+        _emit_pr_intent_giveup_op 1
+      fi
+      # Belt-and-braces beyond the "repeat this exact line" instruction above:
+      # the resumed pass is still a fresh LLM turn that could garble or drop
+      # the outcome line despite being told not to, and unlike the
+      # SPINDRIFT_OUTCOME row's own resume (which only ever replaces "nothing"
+      # with something), this row's resume has a known-good line to fall back
+      # on. Restoring it here fixes both entrypoint.sh's own bookkeeping (so
+      # the no-outcome backstop below never fires on a run that already
+      # genuinely finished ready) and the container log the launcher's own
+      # last-line-wins outcome.LastInLog scans (so a garbled resumed line
+      # never shadows the good one there either).
+      if [ "$_last_outcome_line" != "$_original_ready_outcome_line" ]; then
+        echo "==> resumed pass did not repeat the original SPINDRIFT_OUTCOME line — restoring it"
+        _last_outcome_line="$_original_ready_outcome_line"
+        printf '%s\n' "$_last_outcome_line"
+      fi
     fi
   fi
 
@@ -1458,7 +1631,11 @@ Print the required line exactly once as your final message, using this grammar -
   # otherwise: a bundle-out failure (e.g. a transient git error) is a
   # genuine container failure, not a judgment call, so it belongs on the
   # launcher's own ClassifyTransient/retry path like any other non-zero
-  # exit here, rather than a caught-and-noted best-effort step.
+  # exit here, rather than a caught-and-noted best-effort step. Reached for
+  # any $claude_rc value, zero or non-zero (ADR 0039 slice S1, issue #2252):
+  # a driver that crashed non-zero can still have left real commits on
+  # $BRANCH worth relaying, and bundleout.Run is a safe no-op when there is
+  # nothing to bundle.
   if ! _is_research_kind \
     && { [ "${CODE_FORGE:-github}" = "local" ] \
       || _is_readonly_github; }; then
@@ -1473,6 +1650,7 @@ Print the required line exactly once as your final message, using this grammar -
   fi
 
   echo "==> entrypoint complete for issue #$ISSUE_NUMBER"
+  exit "$claude_rc"
 }
 
 main "$@"

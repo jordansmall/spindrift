@@ -36,6 +36,25 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, gen uint64, result di
 				clsNote += "  resetsAt=" + result.Classification.ResetAt.UTC().Format(time.RFC3339)
 			}
 		}
+		// A read-only run's !OutcomeFound here may just mean the Box crashed
+		// or was cut short before it ever printed a parseable outcome line
+		// at all — no ADR 0036 synthetic backstop line to key off of, unlike
+		// the "blocked" arm below (issue #2253). tryAdoptRelayedBranchNoOutcome
+		// checks the same self-report fingerprint tryAdoptRelayedBranch does;
+		// see its own doc comment for the full reasoning.
+		if s.tryAdoptRelayedBranchNoOutcome(d, num, gen, result) {
+			return
+		}
+		// CODE_FORGE=local push-only counterpart to the adopt call above
+		// (ADR 0039): local has no PR-shaped adopt path at all (s.pr is
+		// always nil for it), so tryAdoptRelayedBranchNoOutcome's own
+		// s.pr != nil gate always returns false here — tryMarkRecoverable
+		// checks the same self-report fingerprint but promotes to
+		// Recoverable instead, leaving the land itself to `spindrift
+		// recover`.
+		if s.tryMarkRecoverable(num, result) {
+			return
+		}
 		s.settleUnresolved(num, clsNote, "no outcome in log")
 		return
 	}
@@ -68,6 +87,17 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, gen uint64, result di
 		// nothing was actually relayable (no bundle in the outbox) — in
 		// either case the normal blocked handling below runs unchanged.
 		if s.tryAdoptRelayedBranch(d, num, gen, result) {
+			return
+		}
+		// CODE_FORGE=local push-only counterpart to the adopt call above
+		// (ADR 0039): local has no PR-shaped adopt path at all, so
+		// tryAdoptRelayedBranch's own s.pr != nil gate always returns false
+		// here. The Outcome.Synthetic guard is repeated explicitly here
+		// (rather than left to tryMarkRecoverable) because a genuine
+		// (non-synthetic) status=blocked is the driver's own authoritative
+		// outcome line, not the ADR 0036 backstop this override exists to
+		// second-guess — it must still park Failed below.
+		if result.Outcome.Synthetic && s.tryMarkRecoverable(num, result) {
 			return
 		}
 		fmt.Printf("    #%s  landing=%s  status=%s  !! %s\n", num, o.Landing, o.Status, o.Note)
