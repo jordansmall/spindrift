@@ -11,11 +11,19 @@ import (
 	"spindrift.dev/launcher/internal/forge"
 )
 
-// Refresh queries tracker for the full open backlog and wraps the result
-// into a Msg — the thin adapter between the forge.IssueTracker seam and the
-// pure Update, so Update itself never touches the network.
+// Refresh queries tracker for the full open backlog, orders it by dispatch
+// priority (forge.SortByPriority, ADR 0040), and wraps the result into a Msg
+// — the thin adapter between the forge.IssueTracker seam and the pure
+// Update, so Update itself never touches the network. The Backlog therefore
+// renders in the same priority order the headless dispatch pool uses,
+// without Update or the view re-deriving it. A failed ListOpenIssues call
+// leaves issues nil/garbage, so the sort is skipped on the error path —
+// err passes through untouched either way.
 func Refresh(tracker forge.IssueTracker) Msg {
 	issues, err := tracker.ListOpenIssues()
+	if err == nil {
+		forge.SortByPriority(issues)
+	}
 	return IssuesLoadedMsg{Issues: issues, Err: err}
 }
 

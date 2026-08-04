@@ -1,5 +1,7 @@
 package forge
 
+import "sort"
+
 // The agent-priority-{critical,high,low} label strings (ADR 0040). These are
 // the single source of the label names: ResolvePriority's switch and
 // PriorityLabelNames both read from these constants rather than duplicating
@@ -56,4 +58,15 @@ func ResolvePriority(labels []string) Priority {
 		}
 	}
 	return priority
+}
+
+// SortByPriority stably orders issues by Priority descending (Critical >
+// High > Normal > Low); a stable sort means equal-priority issues keep
+// their input relative order, which — since every Issue Tracker adapter
+// already returns issues oldest-first — makes oldest-first the natural,
+// zero-extra-code tiebreaker within a tier (ADR 0040).
+func SortByPriority(issues []Issue) {
+	sort.SliceStable(issues, func(i, j int) bool {
+		return issues[i].Priority > issues[j].Priority
+	})
 }
