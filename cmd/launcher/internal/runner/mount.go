@@ -27,25 +27,29 @@ type MountParams struct {
 	DriverSkillsDir       string
 	DriverSessionCacheDir string
 
-	// CodeForge is the CODE_FORGE knob value; the Accumulation-repo mount
-	// below applies only when it is "local" (ADR 0033). The outbox mount
-	// applies when it is "local", or "github" with BoxForgeAndIssueAccess
-	// "read-only" (issue #1918).
-	CodeForge string
+	// HostMediatedRemote reports whether this run's CODE_FORGE has no
+	// writable remote to push to in-box at all (ADR 0033: CODE_FORGE=local)
+	// -- gates the read-only Accumulation-repo mount at /repo, and
+	// (alongside OutboxRelayCapable) the writable /outbox mount.
+	HostMediatedRemote bool
 	// AccumulationRepoDir is the host path to the bare Accumulation repo
 	// (.spindrift/accum.git by default, issue #1726) mounted read-only at
-	// /repo under CODE_FORGE=local.
+	// /repo under HostMediatedRemote.
 	AccumulationRepoDir string
+	// OutboxRelayCapable reports whether the active CODE_FORGE backend gets
+	// the outbox-relay treatment under BoxForgeAndIssueAccess=="read-only"
+	// (issue #1918) -- combined with BoxForgeAndIssueAccess to gate the
+	// /outbox mount alongside HostMediatedRemote.
+	OutboxRelayCapable bool
 	// BoxForgeAndIssueAccess is the BOX_FORGE_AND_ISSUE_ACCESS knob value
-	// ("read-write" or "read-only") — see CodeForge's doc comment above.
+	// ("read-write" or "read-only") -- see OutboxRelayCapable's doc comment.
 	BoxForgeAndIssueAccess string
 
-	// IssueTracker and LocalIssuesDir gate the read-only /issues mount
-	// (ADR 0032): only ISSUE_TRACKER=local reads its issues from the Box, so
-	// only that tracker gets the mount, and only when LocalIssuesDir resolves
-	// to a real directory.
-	IssueTracker   string
-	LocalIssuesDir string
+	// HostMediatedIssueTracker reports whether ISSUE_TRACKER has no in-box
+	// reachability at all (ADR 0032: ISSUE_TRACKER=local), gating the
+	// read-only /issues mount.
+	HostMediatedIssueTracker bool
+	LocalIssuesDir           string
 }
 
 // candidateMount reports whether source should be mounted at target: both
@@ -82,12 +86,12 @@ func buildMountSpecs(p MountParams, box Box) []MountSpec {
 		specs = append(specs, spec)
 	}
 
-	if p.CodeForge == "local" {
+	if p.HostMediatedRemote {
 		if spec, ok := candidateMount(p.AccumulationRepoDir, "/repo", true); ok {
 			specs = append(specs, spec)
 		}
 	}
-	if p.CodeForge == "local" || (p.CodeForge == "github" && p.BoxForgeAndIssueAccess == "read-only") {
+	if p.HostMediatedRemote || (p.OutboxRelayCapable && p.BoxForgeAndIssueAccess == "read-only") {
 		if spec, ok := candidateMount(box.OutboxDir, "/outbox", false); ok {
 			specs = append(specs, spec)
 		}
@@ -98,7 +102,7 @@ func buildMountSpecs(p MountParams, box Box) []MountSpec {
 	// at the fixed top-level target /issues, silent like the driver-cache
 	// mount (this is the tracker's normal read path, not an operator
 	// override). A missing dir or non-local tracker yields no mount.
-	if p.IssueTracker == "local" {
+	if p.HostMediatedIssueTracker {
 		if spec, ok := candidateMount(p.LocalIssuesDir, "/issues", true); ok {
 			specs = append(specs, spec)
 		}

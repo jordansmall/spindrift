@@ -29,7 +29,8 @@ func runOutcomeBackstop(args []string, stdout io.Writer) int {
 	branch := fs.String("branch", "", "agent branch name, e.g. agent/issue-42 (required)")
 	base := fs.String("base", "", "full base ref, e.g. origin/main (required)")
 	kind := fs.String("dispatch-kind", "work", "dispatch kind: work | research | ...")
-	forge := fs.String("code-forge", "github", "code forge: github | git | local")
+	hostMediatedRemote := fs.String("host-mediated-remote", "", "non-empty when the active CODE_FORGE has no writable remote at all (presence flag)")
+	outboxRelayCapable := fs.String("outbox-relay-capable", "", "non-empty when the active CODE_FORGE backend gets outbox-relay treatment under read-only (presence flag)")
 	boxWrite := fs.String("box-write-enabled", "", "non-empty when BOX_WRITE_ENABLED was set (presence flag)")
 	nonce := fs.String("nonce", "", "this run's own control nonce (RUN_NONCE), appended to the emitted line")
 	recovery := fs.String("recovery-attempted", "", "non-empty when a resume pass already ran and also produced no outcome (presence flag)")
@@ -46,19 +47,20 @@ func runOutcomeBackstop(args []string, stdout io.Writer) int {
 	}
 
 	err := outcomebackstop.Run(outcomebackstop.Config{
-		Repo:              *repo,
-		Issue:             *issue,
-		Branch:            *branch,
-		Base:              *base,
-		Kind:              *kind,
-		CodeForge:         *forge,
-		WriteEnabled:      *boxWrite != "",
-		RecoveryAttempted: *recovery != "",
-		Nonce:             *nonce,
-		MaxAttempts:       *maxAttempts,
-		Backoff:           time.Duration(*backoffSecs) * time.Second,
-		Jitter:            time.Duration(*jitterSecs) * time.Second,
-		Clock:             retry.RealClock(),
+		Repo:               *repo,
+		Issue:              *issue,
+		Branch:             *branch,
+		Base:               *base,
+		Kind:               *kind,
+		HostMediatedRemote: *hostMediatedRemote != "",
+		OutboxRelayCapable: *outboxRelayCapable != "",
+		WriteEnabled:       *boxWrite != "",
+		RecoveryAttempted:  *recovery != "",
+		Nonce:              *nonce,
+		MaxAttempts:        *maxAttempts,
+		Backoff:            time.Duration(*backoffSecs) * time.Second,
+		Jitter:             time.Duration(*jitterSecs) * time.Second,
+		Clock:              retry.RealClock(),
 	}, stdout)
 	if err != nil {
 		fmt.Fprintln(fs.Output(), "driver-exec outcome-backstop:", err)

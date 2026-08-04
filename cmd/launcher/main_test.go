@@ -449,11 +449,12 @@ func TestRunnerConfig_DriverSessionCacheDirUnset(t *testing.T) {
 	}
 }
 
-// TestRunnerConfig_IssueTrackerAndLocalIssuesDir verifies that ISSUE_TRACKER
-// reaches runner.Config unchanged and LOCAL_ISSUES_DIR reaches it resolved to
-// an absolute path (issue #1691, ADR 0032): the runners render the /issues
-// mount's Source directly into their bind syntax, and a relative host path
-// there is a footgun the Launcher must not hand off.
+// TestRunnerConfig_IssueTrackerAndLocalIssuesDir verifies that ISSUE_TRACKER=
+// local reaches runner.Config as HostMediatedIssueTracker=true and
+// LOCAL_ISSUES_DIR reaches it resolved to an absolute path (issue #1691,
+// ADR 0032; issue #2267): the runners render the /issues mount's Source
+// directly into their bind syntax, and a relative host path there is a
+// footgun the Launcher must not hand off.
 func TestRunnerConfig_IssueTrackerAndLocalIssuesDir(t *testing.T) {
 	t.Setenv("ISSUE_TRACKER", "local")
 	t.Setenv("LOCAL_ISSUES_DIR", "relative-issues-dir")
@@ -461,8 +462,8 @@ func TestRunnerConfig_IssueTrackerAndLocalIssuesDir(t *testing.T) {
 	c := loadConfig()
 	rc := runnerConfig(c)
 
-	if rc.IssueTracker != "local" {
-		t.Errorf("IssueTracker = %q, want local", rc.IssueTracker)
+	if !rc.HostMediatedIssueTracker {
+		t.Errorf("HostMediatedIssueTracker = %v, want true for ISSUE_TRACKER=local", rc.HostMediatedIssueTracker)
 	}
 	if !filepath.IsAbs(rc.LocalIssuesDir) {
 		t.Errorf("LocalIssuesDir = %q, want an absolute path", rc.LocalIssuesDir)
@@ -1563,6 +1564,22 @@ func TestValidateCodeForge_RejectsUnknown(t *testing.T) {
 	}
 }
 
+// TestValidateCodeForge_RejectsUnknown_ExactMessage verifies validate()'s
+// exact CODE_FORGE-invalid error string, so a registry-driven rewrite of the
+// CODE_FORGE switch (issue #2267) can't silently drift the message text.
+func TestValidateCodeForge_RejectsUnknown_ExactMessage(t *testing.T) {
+	c := minimalValidConfig()
+	c.codeForge = "gitlab"
+	err := validate(c)
+	if err == nil {
+		t.Fatal("validate() should reject unrecognised CODE_FORGE")
+	}
+	want := `CODE_FORGE="gitlab" is not valid; must be github, git, local, or forgejo`
+	if err.Error() != want {
+		t.Errorf("validate() error = %q, want %q", err.Error(), want)
+	}
+}
+
 // TestValidateCodeForge_Git_RequiresRemoteURL verifies that validate() fails
 // fast when CODE_FORGE=git but no remote URL is configured — the git Code
 // Forge has nothing to clone from or push to without one.
@@ -1830,6 +1847,50 @@ func TestNewCodeForge_ForgejoReadWrite_DoesNotImplementBundleRelayOrDraftPRCreat
 	}
 	if _, ok := cf.(forge.DraftPRCreator); ok {
 		t.Error("newCodeForge(CODE_FORGE=forgejo, BOX_FORGE_AND_ISSUE_ACCESS=read-write) satisfies forge.DraftPRCreator, want it hidden")
+	}
+}
+
+// TestNewCodeForge_LocalReadOnly_ReturnsPlainAdapter verifies that
+// CODE_FORGE=local ignores BOX_FORGE_AND_ISSUE_ACCESS=read-only entirely:
+// local never had a distinct read-only CodeForge constructor, so read-only
+// falls through to the same plain adapter as read-write (unlike github and
+// forgejo, which swap in a dedicated read-only wrapper).
+func TestNewCodeForge_LocalReadOnly_ReturnsPlainAdapter(t *testing.T) {
+	c := minimalValidConfig()
+	c.codeForge = "local"
+	c.codeForgeAccumulationRepoDir = filepath.Join(t.TempDir(), "repo.git")
+	c.boxForgeAndIssueAccess = "read-only"
+
+	cf := newCodeForge(c, local.ResolveParent("1694", ""), nil)
+
+	if cf == nil {
+		t.Fatal("newCodeForge(CODE_FORGE=local, BOX_FORGE_AND_ISSUE_ACCESS=read-only) returned nil")
+	}
+	if _, ok := cf.(forge.BundleRelay); !ok {
+		t.Error("newCodeForge(CODE_FORGE=local, BOX_FORGE_AND_ISSUE_ACCESS=read-only) does not satisfy forge.BundleRelay")
+	}
+	if _, ok := cf.(forge.PRForge); ok {
+		t.Error("newCodeForge(CODE_FORGE=local, BOX_FORGE_AND_ISSUE_ACCESS=read-only) satisfies PRForge, want a push-only adapter")
+	}
+}
+
+// TestNewCodeForge_GitReadOnly_ReturnsPlainAdapter mirrors
+// TestNewCodeForge_LocalReadOnly_ReturnsPlainAdapter for CODE_FORGE=git:
+// git also has no distinct read-only CodeForge constructor, so read-only
+// falls through to the same push-only adapter as read-write.
+func TestNewCodeForge_GitReadOnly_ReturnsPlainAdapter(t *testing.T) {
+	c := minimalValidConfig()
+	c.codeForge = "git"
+	c.codeForgeRemoteURL = "https://git.example.com/owner/repo.git"
+	c.boxForgeAndIssueAccess = "read-only"
+
+	cf := newCodeForge(c, local.SanitizedParent{}, nil)
+
+	if cf == nil {
+		t.Fatal("newCodeForge(CODE_FORGE=git, BOX_FORGE_AND_ISSUE_ACCESS=read-only) returned nil")
+	}
+	if _, ok := cf.(forge.PRForge); ok {
+		t.Error("newCodeForge(CODE_FORGE=git, BOX_FORGE_AND_ISSUE_ACCESS=read-only) satisfies PRForge, want a push-only adapter")
 	}
 }
 
@@ -2232,6 +2293,25 @@ func TestDispatchConfig_ResolveEnv_BoxForgejoTokenDoesNotAffectOtherNames(t *tes
 	}
 }
 
+// TestDispatchConfig_ResolveEnv_JiraTokenFallsThroughUntouched verifies
+// boxTokenResolver's registry walk (issue #2267) leaves a token name with no
+// registered boxTokenEnvVar -- jira's row carries a tokenEnvVar but no
+// boxTokenEnvVar, since jira is tracker-only and has no Box-side override
+// knob -- to fall straight through to next unchanged, exactly like any other
+// non-overridden name.
+func TestDispatchConfig_ResolveEnv_JiraTokenFallsThroughUntouched(t *testing.T) {
+	c := minimalValidConfig()
+	c.codeForge = "github"
+	t.Setenv("JIRA_TOKEN", "launcher-jira-tok")
+	cf := forge.NewFake()
+
+	cfg := dispatchConfig(c, cf, testWired(forge.NewFake()), cf)
+
+	if got := cfg.ResolveEnv("1", "JIRA_TOKEN"); got != "launcher-jira-tok" {
+		t.Errorf("ResolveEnv(1, JIRA_TOKEN) = %q, want %q", got, "launcher-jira-tok")
+	}
+}
+
 // TestDispatchConfig_Local_ResolveEnv_BoxGHTokenOverridesGHToken verifies
 // the BOX_GH_TOKEN override applies under CODE_FORGE=local too -- it is a
 // host-side control signal independent of Code Forge, unlike BASE_BRANCH's
@@ -2571,6 +2651,24 @@ func TestDoctor_RepoNotFound_Forgejo(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), "REPO_SLUG") {
 		t.Errorf("want error to not mention REPO_SLUG, got: %v", err)
+	}
+}
+
+// TestDoctor_AuthFailure_Local pins today's behavior for ISSUE_TRACKER=local:
+// the backend registry carries no doctor hint override for "local" (it falls
+// through to the github-shaped default), so the auth-failure remediation
+// text still names GH_TOKEN / --repo-slug, not a local-specific hint.
+func TestDoctor_AuthFailure_Local(t *testing.T) {
+	f := forge.NewFake()
+	f.ProbeErr = forge.ErrAuthFailure
+
+	var buf bytes.Buffer
+	err := runDoctor(f, f, config{issueTracker: "local"}, &buf, strings.NewReader(""), false)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "GH_TOKEN") {
+		t.Errorf("want error to mention GH_TOKEN, got: %v", err)
 	}
 }
 
@@ -3161,6 +3259,42 @@ func TestDoctor_ReadOnlyForgejoTokenGate_DistinctTokenWarns(t *testing.T) {
 	}
 	if strings.Contains(out, "confirmed not write-capable") {
 		t.Errorf("doctor claimed write-capability was confirmed for a forgejo token, got %q", out)
+	}
+}
+
+// TestDoctor_ReadOnlyTokenGates_BothBackendsActiveOnDifferentAxes verifies
+// runDoctor reports both the github and forgejo read-only token gates in a
+// single call when the two backends are active on different axes at once
+// (CODE_FORGE=github, ISSUE_TRACKER=forgejo) — a regression pin for the
+// loop over backendRows in reportReadOnlyTokenGates, which must run every
+// matching row's gate rather than stopping after the first.
+func TestDoctor_ReadOnlyTokenGates_BothBackendsActiveOnDifferentAxes(t *testing.T) {
+	it := forge.NewFake()
+	it.ProbeRepo = "PROJ"
+	it.Labels = []string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}
+	cf := forge.NewFake()
+	cf.ProbeRepo = "owner/repo"
+
+	c := defaultLabelConfig()
+	c.codeForge = "github"
+	c.issueTracker = "forgejo"
+	c.boxForgeAndIssueAccess = "read-only"
+	c.ghToken = "launcher-token"
+	c.repoSlug = "owner/repo"
+	c.forgejoToken = "forgejo-launcher-token"
+	t.Setenv("BOX_GH_TOKEN", "box-gh-token")
+	t.Setenv("BOX_FORGEJO_TOKEN", "box-forgejo-token")
+
+	var buf bytes.Buffer
+	if err := runDoctor(it, cf, c, &buf, strings.NewReader(""), false); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "BOX_GH_TOKEN is set and distinct") {
+		t.Errorf("want the github gate's success line, got %q", out)
+	}
+	if !strings.Contains(out, "BOX_FORGEJO_TOKEN is set and distinct") {
+		t.Errorf("want the forgejo gate's success line, got %q", out)
 	}
 }
 

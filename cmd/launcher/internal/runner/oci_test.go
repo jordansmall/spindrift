@@ -412,10 +412,10 @@ func TestBuildRunArgs_SkillsMountTarget_FromDriverDeclaration(t *testing.T) {
 func TestBuildRunArgs_IssuesDirMounted(t *testing.T) {
 	dir := t.TempDir()
 	a := &ociAdapter{
-		cli:            "podman",
-		image:          "spindrift:test",
-		issueTracker:   "local",
-		localIssuesDir: dir,
+		cli:                      "podman",
+		image:                    "spindrift:test",
+		hostMediatedIssueTracker: true,
+		localIssuesDir:           dir,
 	}
 	box := Box{Name: "agent-issue-1", Env: map[string]string{}}
 	args := a.buildRunArgs(box)
@@ -431,10 +431,10 @@ func TestBuildRunArgs_IssuesDirMounted(t *testing.T) {
 func TestBuildRunArgs_IssuesDirNonLocalTracker_NoMount(t *testing.T) {
 	dir := t.TempDir()
 	a := &ociAdapter{
-		cli:            "podman",
-		image:          "spindrift:test",
-		issueTracker:   "github",
-		localIssuesDir: dir,
+		cli:                      "podman",
+		image:                    "spindrift:test",
+		hostMediatedIssueTracker: false,
+		localIssuesDir:           dir,
 	}
 	box := Box{Name: "agent-issue-1", Env: map[string]string{}}
 	args := a.buildRunArgs(box)

@@ -1155,7 +1155,11 @@ run_driver_in_env() {
 # retry branching, and the single synthetic status=blocked SPINDRIFT_OUTCOME
 # line -- now lives in the driver-exec `outcome-backstop` verb (issue #2157,
 # ADR 0036). This function is just linear exec glue: it hands the verb the
-# inputs it needs and lets it own the decision.
+# inputs it needs and lets it own the decision. BOX_HOST_MEDIATED_REMOTE and
+# BOX_OUTBOX_RELAY_CAPABLE are the two backend-capability facts that decision
+# keys off (issue #2267) -- forwarded here as presence flags the launcher's
+# dispatch.buildBoxEnv already resolved host-side from the backend registry,
+# not re-derived in-box from CODE_FORGE's name.
 emit_outcome_backstop() {
   driver-exec outcome-backstop \
     --repo "$WORK_DIR" \
@@ -1163,7 +1167,8 @@ emit_outcome_backstop() {
     --branch "$BRANCH" \
     --base "origin/${BASE_BRANCH:-}" \
     --dispatch-kind "${DISPATCH_KIND:-work}" \
-    --code-forge "${CODE_FORGE:-github}" \
+    --host-mediated-remote "${BOX_HOST_MEDIATED_REMOTE:-}" \
+    --outbox-relay-capable "${BOX_OUTBOX_RELAY_CAPABLE:-}" \
     --box-write-enabled "${BOX_WRITE_ENABLED:-}" \
     --nonce "${RUN_NONCE:-}" \
     --recovery-attempted "${_recovery_attempted:-}" \

@@ -397,8 +397,11 @@ func runQuickstart(dir string, env Environment, runner CommandRunner, forgeBuild
 		}
 	}
 	it, cf := forgeBuilder(repoSlug, tracker, ghToken, "", a.forgejoToken)
+	tokenHint, slugHint := doctorHints(tracker.issueTracker)
 	if err := doctor.Run(it, cf, doctor.Config{
 		IssueTracker:    tracker.issueTracker,
+		TokenHint:       tokenHint,
+		SlugHint:        slugHint,
 		Label:           defaultDispatchLabels.Dispatchable,
 		InProgressLabel: defaultDispatchLabels.InProgress,
 		FailedLabel:     defaultDispatchLabels.Failed,
@@ -558,6 +561,21 @@ harness.env
 `
 
 const quickstartEnvrc = "use flake\n"
+
+// doctorHints resolves doctor.Config's TokenHint/SlugHint for the wizard's
+// own doctor.Run call. Quickstart is a standalone pre-CLI binary (it runs
+// before the `spindrift` binary/its backend registry exist, ADR 0027) so it
+// can't reach cmd/launcher's backendRows the way runDoctor does — it mirrors
+// just the two backend names the wizard ever drives (github, forgejo;
+// jira/local aren't wizard-driven paths, see trackerSettings) rather than
+// importing the registry. Empty return values mean "use doctor.Run's
+// github-shaped default".
+func doctorHints(issueTracker string) (tokenHint, slugHint string) {
+	if issueTracker == "forgejo" {
+		return "FORGEJO_TOKEN", "FORGEJO_BASE_URL"
+	}
+	return "", ""
+}
 
 // trackerSettings holds the fields buildForge needs to construct an Issue
 // Tracker adapter (ADR 0013): github needs none beyond repoSlug, jira adds

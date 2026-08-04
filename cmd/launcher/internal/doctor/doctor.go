@@ -68,9 +68,20 @@ func PriorityLabelNames() []string {
 }
 
 // Config is the minimal slice of launcher config Run needs: the Issue
-// Tracker kind (for error hints) and the four work-tier label names.
+// Tracker kind, the caller-resolved auth/repo hint strings for that tracker
+// (TokenHint/SlugHint — internal/doctor can't see package main's backend
+// registry that owns the "which backend names which env var" mapping, so
+// the caller resolves it and hands the strings in), and the four work-tier
+// label names.
 type Config struct {
-	IssueTracker    string
+	IssueTracker string
+
+	// TokenHint/SlugHint name the env var(s) Run points an operator at in
+	// its auth-failure/repo-not-found remediation text. Empty means "use
+	// the github-shaped default" (GH_TOKEN / --repo-slug REPO_SLUG).
+	TokenHint string
+	SlugHint  string
+
 	Label           string
 	InProgressLabel string
 	FailedLabel     string
@@ -89,11 +100,8 @@ type Config struct {
 // underlying reader and losing already-buffered input.
 func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, w io.Writer, stdin *bufio.Scanner, interactive bool) error {
 	tokenHint, slugHint := "GH_TOKEN", "--repo-slug / REPO_SLUG"
-	if c.IssueTracker == "jira" {
-		tokenHint, slugHint = "JIRA_TOKEN", "JIRA_BASE_URL / JIRA_PROJECT_KEY"
-	}
-	if c.IssueTracker == "forgejo" {
-		tokenHint, slugHint = "FORGEJO_TOKEN", "FORGEJO_BASE_URL"
+	if c.TokenHint != "" {
+		tokenHint, slugHint = c.TokenHint, c.SlugHint
 	}
 	repo, err := it.Probe()
 	if err != nil {
