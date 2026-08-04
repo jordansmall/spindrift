@@ -11,10 +11,11 @@ import (
 // claudeDriver is the host-side strategy for the claude Driver: a thin
 // adapter onto the driver/claude subpackage, which owns the Anthropic
 // transient taxonomy, stream-json heartbeat parsing, and usage-log parsing.
-// It cannot import this package (that would cycle back to here). Both
-// claude.Classification and this package's Classification are true aliases
-// of driverkit.Classification, so the vocabulary is shared by construction
-// and ClassifyTransient just returns claude.Classify's result.
+// It cannot import this package (that would cycle back to here).
+// claude.Classify returns driverkit.Classification directly, and this
+// package's Classification is a true alias of driverkit.Classification, so
+// the vocabulary is shared by construction and ClassifyTransient just
+// returns claude.Classify's result.
 type claudeDriver struct{}
 
 func (claudeDriver) Name() string { return "claude" }
