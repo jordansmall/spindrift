@@ -117,7 +117,7 @@ func preview(issueNums []string) error {
 		return err
 	}
 	it := newIssueTracker(c)
-	cf := newCodeForge(c, local.SanitizedParent{})
+	cf := newCodeForge(c, local.SanitizedParent{}, it)
 	if err := checkReadOnlyCapabilityGate(c, cf, it); err != nil {
 		return err
 	}

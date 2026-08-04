@@ -99,7 +99,7 @@ func surfaceAfterDispatch(c config, lw *localloop.Wired, pwd string, w io.Writer
 func cmdReconcile() int {
 	c := loadConfig()
 	it := newIssueTracker(c)
-	cf := newCodeForge(c, local.SanitizedParent{})
+	cf := newCodeForge(c, local.SanitizedParent{}, it)
 
 	pwd, err := os.Getwd()
 	if err != nil {

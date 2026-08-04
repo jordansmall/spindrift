@@ -100,7 +100,7 @@ func bootstrap(ensureReady bool, kind string, selfContained bool) (*launchContex
 	}
 
 	it := newIssueTracker(c)
-	cf := newCodeForge(c, local.SanitizedParent{})
+	cf := newCodeForge(c, local.SanitizedParent{}, it)
 	if err := checkReadOnlyCapabilityGate(c, cf, it); err != nil {
 		return nil, err
 	}
