@@ -20,7 +20,35 @@ import (
 func Refresh(tracker forge.IssueTracker) Msg {
 	issues, err := tracker.ListOpenIssues()
 	forge.SortByPriority(issues)
-	return IssuesLoadedMsg{Issues: issues, Err: err}
+	return IssuesLoadedMsg{Issues: issues, Err: err, RecoverableCount: countRecoverable(tracker, issues)}
+}
+
+// countRecoverable reports how many of issues carry tracker's Recoverable
+// dispatch-state label, resolved from the already-fetched ListOpenIssues
+// result rather than a second tracker query. Mirrors issueInState's
+// optional-interface idiom and its "unmapped label means never present"
+// caution (#1742): a tracker that doesn't implement forge.LabeledTracker, or
+// that leaves Recoverable unmapped (empty label string), reports zero rather
+// than matching every issue.
+func countRecoverable(tracker forge.IssueTracker, issues []forge.Issue) int {
+	lt, ok := tracker.(forge.LabeledTracker)
+	if !ok {
+		return 0
+	}
+	label := lt.StateLabels().Label(forge.Recoverable)
+	if label == "" {
+		return 0
+	}
+	count := 0
+	for _, iss := range issues {
+		for _, l := range iss.Labels {
+			if l == label {
+				count++
+				break
+			}
+		}
+	}
+	return count
 }
 
 // dogfoodPidFile is the pid-file dogfood.sh writes under .spindrift/ for the
