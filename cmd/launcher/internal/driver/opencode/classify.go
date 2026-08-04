@@ -60,7 +60,7 @@ func Classify(logPath string) (driverkit.Classification, error) {
 		if ev.Type != "error" {
 			return driverkit.ScanDecision{Skip: true}
 		}
-		return driverkit.ScanDecision{Text: s}
+		return driverkit.ScanDecision{Text: s, Overwrite: true}
 	}, transientExtras, nil)
 	if err != nil {
 		return driverkit.Classification{}, err

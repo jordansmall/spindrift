@@ -81,6 +81,26 @@ func TestClassify_ErrorEvent_LooseDigit429BeatsOverloaded(t *testing.T) {
 	}
 }
 
+// TestClassify_LastErrorEventWins verifies that when multiple type:"error"
+// events carry differing transient markers, the LAST event's reason wins
+// (pre-refactor opencode semantics), not the first — a regression the
+// driverkit.ClassifyScan refactor (issue #2269) introduced by latching
+// first-match-wins with no opt-out.
+func TestClassify_LastErrorEventWins(t *testing.T) {
+	logPath := opencode.WriteLog(t,
+		`{"type":"error","error":"rate_limit_error: 429 Too Many Requests"}`,
+		`{"type":"error","error":"overloaded_error: upstream unavailable"}`,
+	)
+
+	got, err := opencode.Classify(logPath)
+	if err != nil {
+		t.Fatalf("Classify: %v", err)
+	}
+	if got.Class != driverkit.Transient || got.Reason != driverkit.Overloaded {
+		t.Errorf("Class/Reason: got %s/%s, want %s/%s", got.Class, got.Reason, driverkit.Transient, driverkit.Overloaded)
+	}
+}
+
 // TestClassify_MissingFile_IsTerminal verifies the missing-log-file contract
 // shared with the claude Driver's Classify.
 func TestClassify_MissingFile_IsTerminal(t *testing.T) {
