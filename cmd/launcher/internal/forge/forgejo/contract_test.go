@@ -136,10 +136,39 @@ func (h *forgejoHarness) handle(w http.ResponseWriter, r *http.Request) {
 			}
 			out = append(out, h.issuePayload(rec))
 		}
-		if out == nil {
-			out = []map[string]any{}
+
+		// Genuinely paginate on page/limit (issue #2265): production code
+		// always sends both, 1-indexed, so an out-of-range page must come
+		// back as an empty page rather than an error — that's the real
+		// Forgejo API's behavior, and it's what makes listIssues' short-page
+		// "done" detection work correctly here too.
+		page := 1
+		if p := r.URL.Query().Get("page"); p != "" {
+			if v, err := strconv.Atoi(p); err == nil && v > 0 {
+				page = v
+			}
 		}
-		json.NewEncoder(w).Encode(out)
+		limit := len(out)
+		if l := r.URL.Query().Get("limit"); l != "" {
+			if v, err := strconv.Atoi(l); err == nil && v > 0 {
+				limit = v
+			}
+		}
+		var windowed []map[string]any
+		if limit > 0 {
+			start := (page - 1) * limit
+			if start < len(out) {
+				end := start + limit
+				if end > len(out) {
+					end = len(out)
+				}
+				windowed = out[start:end]
+			}
+		}
+		if windowed == nil {
+			windowed = []map[string]any{}
+		}
+		json.NewEncoder(w).Encode(windowed)
 		return
 
 	case r.Method == http.MethodGet && issueDepsRe.MatchString(r.URL.Path):
@@ -232,4 +261,36 @@ func contains(ss []string, s string) bool {
 
 func TestForgejoClient_TrackerContract(t *testing.T) {
 	forgetest.RunTrackerContract(t, newForgejoHarness(t))
+}
+
+// TestForgejoClient_ListIssues_PaginatesAcrossMultipleRealPages seeds more
+// than forge.ResultPageLimit issues so listIssues (issue #2265) must walk at
+// least two real pages of the harness's now-genuinely-paginating issue-list
+// endpoint to see them all, then asserts every seeded issue comes back, in
+// strict ascending issue-number order.
+func TestForgejoClient_ListIssues_PaginatesAcrossMultipleRealPages(t *testing.T) {
+	h := newForgejoHarness(t)
+	const seeded = forge.ResultPageLimit + 30
+
+	for i := 1; i <= seeded; i++ {
+		h.SeedIssue(forge.Issue{
+			Number: strconv.Itoa(i),
+			Title:  "paged",
+			Labels: []string{testLabels.Dispatchable},
+		})
+	}
+
+	issues, err := h.Tracker().ListIssues(forge.Dispatchable)
+	if err != nil {
+		t.Fatalf("ListIssues(Dispatchable): %v", err)
+	}
+	if len(issues) != seeded {
+		t.Fatalf("ListIssues(Dispatchable) returned %d issues, want %d", len(issues), seeded)
+	}
+	for i, iss := range issues {
+		want := strconv.Itoa(i + 1)
+		if iss.Number != want {
+			t.Fatalf("ListIssues(Dispatchable)[%d].Number = %q, want %q (order not ascending)", i, iss.Number, want)
+		}
+	}
 }

@@ -167,33 +167,40 @@ func (c *forgejoClient) ListOpenIssues() ([]forge.Issue, error) {
 }
 
 // listIssues is the shared implementation behind ListIssues and
-// ListOpenIssues: GET the open-issue page, optionally scoped by label, sort
-// ascending by numeric issue number (Forgejo's own sort order is not
-// guaranteed to be number-ascending), and warn if the page may have
-// truncated the backlog.
+// ListOpenIssues: walk every page of the open-issue listing via
+// c.rest.Paginate (issue #2265), optionally scoped by label, merge every
+// page's issues, and sort the merged set ascending by numeric issue number
+// (Forgejo's own sort order is not guaranteed to be number-ascending, and
+// merging pages doesn't preserve one either).
 func (c *forgejoClient) listIssues(label string) ([]forge.Issue, error) {
-	q := url.Values{
-		"state": {"open"},
-		"type":  {"issues"},
-		"limit": {strconv.Itoa(forge.ResultPageLimit)},
-	}
-	if label != "" {
-		q.Set("labels", label)
-	}
-	var payload []forgejoIssuePayload
-	if err := c.rest.Do(http.MethodGet, c.repoPath()+"/issues?"+q.Encode(), nil, &payload); err != nil {
+	var issues []forge.Issue
+	err := c.rest.Paginate(func(page int) (bool, error) {
+		q := url.Values{
+			"state": {"open"},
+			"type":  {"issues"},
+			"limit": {strconv.Itoa(forge.ResultPageLimit)},
+			"page":  {strconv.Itoa(page)},
+		}
+		if label != "" {
+			q.Set("labels", label)
+		}
+		var payload []forgejoIssuePayload
+		if err := c.rest.Do(http.MethodGet, c.repoPath()+"/issues?"+q.Encode(), nil, &payload); err != nil {
+			return false, err
+		}
+		for _, p := range payload {
+			issues = append(issues, toForgeIssue(p))
+		}
+		return len(payload) < forge.ResultPageLimit, nil
+	})
+	if err != nil {
 		return nil, err
-	}
-	issues := make([]forge.Issue, len(payload))
-	for i, p := range payload {
-		issues[i] = toForgeIssue(p)
 	}
 	sort.Slice(issues, func(i, j int) bool {
 		ni, _ := strconv.Atoi(issues[i].Number)
 		nj, _ := strconv.Atoi(issues[j].Number)
 		return ni < nj
 	})
-	forge.WarnPageMayTruncateBacklog("forgejo issue list", len(issues))
 	return issues, nil
 }
 
@@ -385,6 +392,15 @@ func (c *forgejoClient) PostIssue(title, body string, labels []string) (string, 
 // c resolves DispatchState values through.
 func (c *forgejoClient) StateLabels() forge.DispatchLabels {
 	return c.cfg.Labels
+}
+
+// WalksAllPages implements forge.FullyPaginated: listIssues (behind both
+// ListIssues and ListOpenIssues) walks every page of the Forgejo issue
+// listing via c.rest.Paginate (#2265), so its results are never truncated
+// at forge.ResultPageLimit — a caller like issueInState's page-limit
+// fail-safe can trust a full-looking result as complete.
+func (c *forgejoClient) WalksAllPages() bool {
+	return true
 }
 
 // ListLabels returns the repository's defined label names.

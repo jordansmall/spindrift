@@ -138,18 +138,29 @@ func (f *forgejoCodeForge) Mergeable(prURL string) (forge.MergeableState, error)
 	return forge.MergeableConflicting, nil
 }
 
-// listPulls fetches a page of pulls in the given state ("open" or "all")
-// from the configured repo, bounded by forge.ResultPageLimit.
+// listPulls walks every page of the pulls listing in the given state ("open"
+// or "all") from the configured repo via f.rest.Paginate (issue #2265),
+// merging every page's pulls, rather than fetching a single page bounded by
+// forge.ResultPageLimit.
 func (f *forgejoCodeForge) listPulls(state string) ([]forgejoPullPayload, error) {
-	q := url.Values{
-		"state": {state},
-		"limit": {strconv.Itoa(forge.ResultPageLimit)},
-	}
-	var payload []forgejoPullPayload
-	if err := f.rest.Do(http.MethodGet, f.repoPath()+"/pulls?"+q.Encode(), nil, &payload); err != nil {
+	var pulls []forgejoPullPayload
+	err := f.rest.Paginate(func(page int) (bool, error) {
+		q := url.Values{
+			"state": {state},
+			"limit": {strconv.Itoa(forge.ResultPageLimit)},
+			"page":  {strconv.Itoa(page)},
+		}
+		var payload []forgejoPullPayload
+		if err := f.rest.Do(http.MethodGet, f.repoPath()+"/pulls?"+q.Encode(), nil, &payload); err != nil {
+			return false, err
+		}
+		pulls = append(pulls, payload...)
+		return len(payload) < forge.ResultPageLimit, nil
+	})
+	if err != nil {
 		return nil, err
 	}
-	return payload, nil
+	return pulls, nil
 }
 
 // OpenPRForBranch returns the open, non-draft pull whose head matches
