@@ -38,14 +38,6 @@ type Config struct {
 	// status=ready claim against an empty range is the contradiction Run
 	// corrects.
 	PriorOutcomeLine string
-	// Nonce is this run's own control nonce (RUN_NONCE, issue #1939),
-	// carried into the corrective outcome line below. The launcher's
-	// outcome.Resolve scan gates candidacy on this same nonce, so a
-	// corrective line printed without it would be silently excluded — the
-	// Agent's own stale status=ready claim would win last-wins instead of
-	// the correction, reopening the exact false-ready-with-no-commits gap
-	// this package exists to close (issue #1808).
-	Nonce string
 }
 
 // Run bundles Base..Branch from Repo into OutboxDir/seambundle.FileName.
@@ -83,11 +75,7 @@ func Run(cfg Config, w io.Writer) error {
 			Status:  "blocked",
 			Note:    fmt.Sprintf("agent reported ready but no commits exist on %s", cfg.Branch),
 		}
-		line := corrective.Line()
-		if cfg.Nonce != "" {
-			line += " nonce=" + cfg.Nonce
-		}
-		if _, err := fmt.Fprintln(w, line); err != nil {
+		if _, err := fmt.Fprintln(w, corrective.Line()); err != nil {
 			return err
 		}
 	}
