@@ -1331,7 +1331,6 @@ emit_outcome_backstop() {
     --host-mediated-remote "${BOX_HOST_MEDIATED_REMOTE:-}" \
     --outbox-relay-capable "${BOX_OUTBOX_RELAY_CAPABLE:-}" \
     --box-write-enabled "${BOX_WRITE_ENABLED:-}" \
-    --nonce "${RUN_NONCE:-}" \
     --recovery-attempted "${_recovery_attempted:-}" \
     --max-attempts "$MAX_REBASE_ATTEMPTS" \
     --backoff-secs "$TRANSIENT_BACKOFF_SECS" \
@@ -1521,7 +1520,7 @@ main() {
   local recovery_prompt
   if [ -n "$_last_near_miss_line" ]; then
     recovery_prompt="Your last message printed a line that looks like a SPINDRIFT_OUTCOME marker but does not parse, so the run has no usable outcome: ${_last_near_miss_line}
-Print the required line exactly once as your final message, using this grammar -- one line, space-delimited fields, note then nonce last: SPINDRIFT_OUTCOME issue=${ISSUE_NUMBER:-} landing=<landing-ref> status=<status> note=<short reason> nonce=${RUN_NONCE:-}. The only valid status values are ready and blocked. Run any remaining checks/gates in the foreground first, then print that line."
+Print the required line exactly once as your final message, using this grammar -- one line, space-delimited fields: SPINDRIFT_OUTCOME issue=${ISSUE_NUMBER:-} landing=<landing-ref> status=<status> note=<short reason>. The only valid status values are ready and blocked. Run any remaining checks/gates in the foreground first, then print that line."
   else
     recovery_prompt="The run ended without printing a SPINDRIFT_OUTCOME line. Finish the workflow: run any remaining checks/gates in the foreground, then print the required SPINDRIFT_OUTCOME line as your final message."
   fi
@@ -1659,8 +1658,7 @@ Print the required line exactly once as your final message, using this grammar -
       --branch "$BRANCH" \
       --outbox "$OUTBOX_DIR" \
       --issue "$ISSUE_NUMBER" \
-      --prior-outcome-line "$_last_outcome_line" \
-      --nonce "${RUN_NONCE:-}"
+      --prior-outcome-line "$_last_outcome_line"
   fi
 
   echo "==> entrypoint complete for issue #$ISSUE_NUMBER"
