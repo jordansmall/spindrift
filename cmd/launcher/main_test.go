@@ -2703,6 +2703,34 @@ func TestDoctor_LabelsAllPresent(t *testing.T) {
 	}
 }
 
+// TestDoctor_ReportsRecoverableCount verifies doctor prints a count of
+// issues in the Recoverable dispatch state (ADR 0039 slice S4, #2255) as its
+// own line, counting only issues carrying the Recoverable label and not
+// issues in other states.
+func TestDoctor_ReportsRecoverableCount(t *testing.T) {
+	f := forge.NewFake(forge.DispatchLabels{
+		Dispatchable: "ready-for-agent",
+		InProgress:   "agent-in-progress",
+		Complete:     "agent-complete",
+		Failed:       "agent-failed",
+		Recoverable:  "agent-recoverable",
+	})
+	f.ProbeRepo = "owner/repo"
+	f.Labels = []string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}
+	f.SetIssue(forge.Issue{Number: "5", State: forge.IssueOpen, Labels: []string{"agent-recoverable"}})
+	f.SetIssue(forge.Issue{Number: "6", State: forge.IssueOpen, Labels: []string{"agent-recoverable"}})
+	f.SetIssue(forge.Issue{Number: "7", State: forge.IssueOpen, Labels: []string{"agent-failed"}})
+
+	var buf bytes.Buffer
+	if err := runDoctor(f, f, defaultLabelConfig(), &buf, strings.NewReader(""), false); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "2 recoverable issue(s)") {
+		t.Errorf("want output to report 2 recoverable issue(s), got:\n%s", out)
+	}
+}
+
 // TestDoctor_AllLabelsPresent_PrintsSuccess verifies the early-return path
 // taken when both work and research labels are already present prints an
 // explicit success confirmation, mirroring the post-creation success line

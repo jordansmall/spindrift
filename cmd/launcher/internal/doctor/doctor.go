@@ -120,6 +120,12 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, w io.Writer, stdin
 	}
 	fmt.Fprintf(w, "ok: code forge confirmed — %s is reachable\n", cfRepo)
 
+	recoverable, err := it.ListIssues(forge.Recoverable)
+	if err != nil {
+		return fmt.Errorf("recoverable issue check failed: %w", err)
+	}
+	fmt.Fprintf(w, "ok: %d recoverable issue(s) — run `spindrift recover` to land them\n", len(recoverable))
+
 	checkLabelSet := func(names []string, present map[string]bool) []string {
 		var missing []string
 		for _, label := range names {
