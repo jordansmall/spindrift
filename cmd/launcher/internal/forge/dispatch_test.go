@@ -19,8 +19,9 @@ func TestDispatchLabels_Untriaged_HasNoLabel(t *testing.T) {
 
 // TestDispatchLabels_ClaimRemoveLabels_ClaimStripsStaleTerminals verifies a
 // claim (to == InProgress) removes the from-state label plus both terminal
-// labels, deduplicated — the single source of truth github's execClient and
-// forge.Fake both call, so the two can't drift apart (#1985).
+// labels and the fixed SpecMismatchLabel, deduplicated — the single source
+// of truth github's execClient and forge.Fake both call, so the two can't
+// drift apart (#1985, #2275).
 func TestDispatchLabels_ClaimRemoveLabels_ClaimStripsStaleTerminals(t *testing.T) {
 	d := DispatchLabels{
 		Dispatchable: "ready-for-agent",
@@ -29,7 +30,7 @@ func TestDispatchLabels_ClaimRemoveLabels_ClaimStripsStaleTerminals(t *testing.T
 		Failed:       "agent-failed",
 	}
 	got := d.ClaimRemoveLabels(Dispatchable, InProgress)
-	want := []string{"ready-for-agent", "agent-complete", "agent-failed"}
+	want := []string{"ready-for-agent", "agent-complete", "agent-failed", SpecMismatchLabel}
 	if len(got) != len(want) {
 		t.Fatalf("ClaimRemoveLabels = %v, want %v", got, want)
 	}
@@ -37,6 +38,31 @@ func TestDispatchLabels_ClaimRemoveLabels_ClaimStripsStaleTerminals(t *testing.T
 		if got[i] != l {
 			t.Errorf("ClaimRemoveLabels[%d] = %q, want %q", i, got[i], l)
 		}
+	}
+}
+
+// TestDispatchLabels_ClaimRemoveLabels_ClaimStripsStaleSpecMismatch verifies
+// a claim (to == InProgress) includes the fixed, non-configurable
+// SpecMismatchLabel in its removal set, alongside Complete/Failed -- so a
+// human re-triggering an issue halted by the #2275 SPEC CHECK gate lands
+// cleanly on agent-in-progress without a stale agent-spec-mismatch label
+// still attached.
+func TestDispatchLabels_ClaimRemoveLabels_ClaimStripsStaleSpecMismatch(t *testing.T) {
+	d := DispatchLabels{
+		Dispatchable: "ready-for-agent",
+		InProgress:   "agent-in-progress",
+		Complete:     "agent-complete",
+		Failed:       "agent-failed",
+	}
+	got := d.ClaimRemoveLabels(Dispatchable, InProgress)
+	found := false
+	for _, l := range got {
+		if l == SpecMismatchLabel {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("ClaimRemoveLabels(Dispatchable, InProgress) = %v, want it to include %q", got, SpecMismatchLabel)
 	}
 }
 

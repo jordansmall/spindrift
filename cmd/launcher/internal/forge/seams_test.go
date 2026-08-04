@@ -36,6 +36,12 @@ func TestDispatchLabels_Label(t *testing.T) {
 	if got := d.Label(forge.Failed); got != "agent-failed" {
 		t.Errorf("Label(Failed) = %q", got)
 	}
+	// SpecMismatch's label is a hardcoded literal, not sourced from a
+	// DispatchLabels struct field (there is no such field) -- this must
+	// hold regardless of testLabels' four configured fields (#2275).
+	if got := d.Label(forge.SpecMismatch); got != forge.SpecMismatchLabel {
+		t.Errorf("Label(SpecMismatch) = %q, want %q", got, forge.SpecMismatchLabel)
+	}
 }
 
 func TestDispatchLabels_AllLabels(t *testing.T) {
