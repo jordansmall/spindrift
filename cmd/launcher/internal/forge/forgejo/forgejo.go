@@ -37,8 +37,12 @@ type ForgejoConfig struct {
 	VerdictLabels forge.VerdictLabels
 
 	// HTTPClient overrides the HTTP client used for Forgejo REST calls; nil
-	// uses http.DefaultClient. Tests inject a client pointed at a fake
-	// server.
+	// uses a client with a default 30s timeout (defaultForgejoHTTPTimeout) —
+	// never the untimed http.DefaultClient, since this default also backs
+	// the CodeForge adapter's Probe/Merge calls when the two seams share one
+	// *rest.Client (issue #2256's shared-client seam; see
+	// defaultForgejoHTTPTimeout's doc comment). Tests inject a client
+	// pointed at a fake server.
 	HTTPClient *http.Client
 }
 
@@ -72,7 +76,7 @@ func NewForgejoClient(cfg ForgejoConfig) forge.IssueTracker {
 	cfg.BaseURL = strings.TrimSuffix(cfg.BaseURL, "/")
 	hc := cfg.HTTPClient
 	if hc == nil {
-		hc = http.DefaultClient
+		hc = &http.Client{Timeout: defaultForgejoHTTPTimeout}
 	}
 	// The 405/409 -> errMergeRefused entries only ever matter on the merge
 	// endpoint (forgejo_codeforge.go's postMerge), which this IssueTracker
