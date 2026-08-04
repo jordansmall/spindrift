@@ -1200,12 +1200,14 @@ func TestRunQuickstart_FinishLine_ProbesForgeThenCreatesLabelsThenBuilds(t *test
 	env := fakeEnvironment{env: map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "claude-oauth-faketoken"}, runtimes: map[string]bool{"podman": true}}
 
 	research := doctor.ResearchLabelNames()
+	priority := doctor.PriorityLabelNames()
 	f := forge.NewFake()
 	f.ProbeRepo = "jordansmall/spindrift"
-	f.Labels = []string{"ready-for-agent"} // three work labels missing; research all present
+	// three work labels missing; research and priority labels all present
+	f.Labels = append(append([]string{"ready-for-agent"}, research...), priority...)
 	f.LabelsSeq = [][]string{
-		append([]string{"ready-for-agent"}, research...),
-		append([]string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}, research...),
+		append(append([]string{"ready-for-agent"}, research...), priority...),
+		append(append([]string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}, research...), priority...),
 	}
 	runner := &fakeCommandRunner{}
 
