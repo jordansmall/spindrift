@@ -21,10 +21,11 @@ const (
 type Reason = driverkit.Reason
 
 const (
-	RateLimit  = driverkit.RateLimit  // API rate limit
-	Overloaded = driverkit.Overloaded // API overload / capacity error
-	Network    = driverkit.Network    // transient network failure
-	TaskFailed = driverkit.TaskFailed // agent ran but produced no valid result
+	RateLimit       = driverkit.RateLimit       // API rate limit
+	Overloaded      = driverkit.Overloaded      // API overload / capacity error
+	Network         = driverkit.Network         // transient network failure
+	TaskFailed      = driverkit.TaskFailed      // agent ran but produced no valid result
+	UnsupportedFlag = driverkit.UnsupportedFlag // driver rejected a CLI option we passed (version skew)
 )
 
 // Classification is the result of a Driver's ClassifyTransient, in this

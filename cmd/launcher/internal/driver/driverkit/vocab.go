@@ -31,6 +31,13 @@ const (
 	UnsupportedFlag Reason = "unsupportedFlag" // driver rejected a CLI option we passed (version skew)
 )
 
+// AllReasons enumerates every Reason this package declares, in declaration
+// order. A completeness-pinning test on the launcher-facing re-export
+// surface (driver.classification.go) walks this slice so a new Reason added
+// here without a matching alias there fails that test instead of silently
+// vanishing from launcher-facing code (issue #2269).
+var AllReasons = []Reason{RateLimit, Overloaded, Network, TaskFailed, UnsupportedFlag}
+
 // Classification is the result of a Driver's ClassifyTransient, in this
 // Driver seam's shared vocabulary — every Driver strategy reports through
 // these Class/Reason values, translating its own tool's error taxonomy at
