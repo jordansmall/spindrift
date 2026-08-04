@@ -143,16 +143,12 @@ func (d *Dispatch) dispatchWithRetry(logPath string, once func(resumeAfterHold b
 // unparseable line is reported via ParseErr without attempting
 // classification; a missing outcome line (a box that exited zero without
 // reporting one) falls back to a best-effort classification so the caller
-// can explain what happened. The scan is gated on this run's own nonce
-// (issue #1939): a SPINDRIFT_OUTCOME-shaped line that doesn't carry it is
-// not a candidate, so an untrusted issue/comment author's echoed line can't
-// win last-wins over the Box's genuine outcome. A skipped line still logs a
-// warning so a spoof attempt or misconfigured run is visible.
+// can explain what happened. The scan is no longer nonce-gated (ADR 0039,
+// docs/adr/0039-*.md): the freshness boundary for this line is now purely
+// structural — it must be the leading line of the box's log, a guarantee
+// the upstream in-box extractor enforces before this scan ever runs.
 func (d *Dispatch) successResult(logPath string) Result {
-	resolved, err := outcome.Resolve([]outcome.PassLog{{Path: logPath}}, d.nonce, d.cfg.Kind)
-	if resolved.Skipped {
-		fmt.Fprintf(os.Stderr, "    ?? #%s: outcome scan: skipped a SPINDRIFT_OUTCOME-shaped line without this run's nonce\n", d.number)
-	}
+	resolved, err := outcome.Resolve([]outcome.PassLog{{Path: logPath}}, d.cfg.Kind)
 	if err != nil {
 		return Result{Success: true, ParseErr: err}
 	}
@@ -210,13 +206,10 @@ func (d *Dispatch) outcomeResult(logPath string, o outcome.Outcome) Result {
 // the resume preserved. ok=false means no genuine outcome was printed (a
 // limit-hit box prints none, and a near-miss/unparseable line is left to the
 // caller's transient classification), so the caller proceeds to classify. The
-// scan is nonce-gated exactly like successResult's: a SPINDRIFT_OUTCOME-shaped
-// line without this run's nonce is not a candidate and only logs a warning.
+// scan is no longer nonce-gated (ADR 0039): the same structural, leading-line
+// freshness boundary as successResult's applies here too.
 func (d *Dispatch) settledOutcome(logPath string) (Result, bool) {
-	resolved, err := outcome.Resolve([]outcome.PassLog{{Path: logPath}}, d.nonce, d.cfg.Kind)
-	if resolved.Skipped {
-		fmt.Fprintf(os.Stderr, "    ?? #%s: outcome scan: skipped a SPINDRIFT_OUTCOME-shaped line without this run's nonce\n", d.number)
-	}
+	resolved, err := outcome.Resolve([]outcome.PassLog{{Path: logPath}}, d.cfg.Kind)
 	// Provenance != ProvenanceSelfReport: see successResult's identical
 	// reasoning above -- a self-report-only match must still read as
 	// ok=false here, so the caller proceeds to classification exactly as it
