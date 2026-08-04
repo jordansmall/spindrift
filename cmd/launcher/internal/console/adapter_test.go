@@ -79,6 +79,47 @@ func TestRefresh_TrackerErr_WrapsErr(t *testing.T) {
 	}
 }
 
+// TestRefresh_CountsRecoverableFromFetchedIssues verifies Refresh derives
+// RecoverableCount from the same ListOpenIssues call it already makes — no
+// extra tracker round trip — by resolving the Recoverable state's own label
+// (forge.LabeledTracker.StateLabels) and counting how many of the fetched
+// issues carry it (issue #2255, ADR 0039 slice S4).
+func TestRefresh_CountsRecoverableFromFetchedIssues(t *testing.T) {
+	f := forge.NewFake(forge.DispatchLabels{Recoverable: "agent-recoverable"})
+	f.SetIssue(forge.Issue{Number: "1", Title: "recoverable one", State: forge.IssueOpen, Labels: []string{"agent-recoverable"}})
+	f.SetIssue(forge.Issue{Number: "2", Title: "plain", State: forge.IssueOpen})
+	f.SetIssue(forge.Issue{Number: "3", Title: "recoverable two", State: forge.IssueOpen, Labels: []string{"agent-recoverable"}})
+
+	msg := Refresh(f)
+
+	loaded, ok := msg.(IssuesLoadedMsg)
+	if !ok {
+		t.Fatalf("Refresh() = %T, want IssuesLoadedMsg", msg)
+	}
+	if loaded.RecoverableCount != 2 {
+		t.Errorf("RecoverableCount = %d, want 2", loaded.RecoverableCount)
+	}
+}
+
+// TestRefresh_RecoverableCount_UnmappedLabelIsZero verifies a tracker whose
+// label family leaves Recoverable unmapped (empty label string) reports zero
+// rather than matching every issue — the same "unmapped state matches
+// everything, so treat as zero" caution issueInState documents (#1742).
+func TestRefresh_RecoverableCount_UnmappedLabelIsZero(t *testing.T) {
+	f := forge.NewFake(forge.DispatchLabels{})
+	f.SetIssue(forge.Issue{Number: "1", Title: "no marker", State: forge.IssueOpen})
+
+	msg := Refresh(f)
+
+	loaded, ok := msg.(IssuesLoadedMsg)
+	if !ok {
+		t.Fatalf("Refresh() = %T, want IssuesLoadedMsg", msg)
+	}
+	if loaded.RecoverableCount != 0 {
+		t.Errorf("RecoverableCount = %d, want 0", loaded.RecoverableCount)
+	}
+}
+
 // TestDogfoodNotice_PresentVsAbsent verifies DogfoodNotice reports Live true
 // when .spindrift/dogfood.pid names a running process under the given
 // directory, and false when the file doesn't exist — the pair dogfood.sh's

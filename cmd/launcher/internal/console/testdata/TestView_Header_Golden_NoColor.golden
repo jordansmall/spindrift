@@ -1,5 +1,5 @@
 +- spindrift ------------------------------------------------------------------+
-|running 1/3 · waiting 1 · held 1 · settled 1 · failed 1                       |
+|running 1/3 · waiting 1 · held 1 · settled 1 · failed 1 · recoverable 0       |
 |⚠ image stale: rebuild needed — new launches held; press [b] to rebuild       |
 |ℹ notice: a live dogfood loop (.spindrift/dogfood.pid) is competing for the   |
 |same queue                                                                    |

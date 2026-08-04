@@ -56,6 +56,13 @@ type Model struct {
 	// refreshPickDecorations never sends a CapMsg when there is no Launcher
 	// to read them from.
 	Cap, Live int
+	// RecoverableCount is how many open issues carry the tracker's
+	// Recoverable dispatch-state label — pre-existing terminal state from a
+	// prior run's stranded work, distinct from Picks-derived failed/held/
+	// settled counts, which are this session's own launches (issue #2255,
+	// ADR 0039 slice S4). Set from IssuesLoadedMsg on the same refresh
+	// cadence as All, never recomputed here.
+	RecoverableCount int
 	// RebuildStatus is the launcher's live image-freshness/rebuild state —
 	// new launches hold while Stale is true; a running Box rides it out
 	// (issue #652). One value replaces the six scalar fields this used to
@@ -479,6 +486,7 @@ func Update(m Model, msg Msg) Model {
 		m.Err = msg.Err
 		if msg.Err == nil {
 			m.All = msg.Issues
+			m.RecoverableCount = msg.RecoverableCount
 		}
 	case FilterChangedMsg:
 		m.Filter = msg.Filter

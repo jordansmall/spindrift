@@ -264,6 +264,20 @@ func TestView_Header_StatusLine_ShowsRunningWaitingHeldSettledFailed(t *testing.
 	}
 }
 
+// TestView_Header_StatusLine_ShowsRecoverable verifies the header's status
+// line reports RecoverableCount as its own "recoverable N" segment —
+// pre-existing terminal state from a prior run, distinct from the
+// Picks-derived failed count above (issue #2255, ADR 0039 slice S4).
+func TestView_Header_StatusLine_ShowsRecoverable(t *testing.T) {
+	m := NewModel()
+	m = Update(m, IssuesLoadedMsg{RecoverableCount: 2})
+
+	out := View(m)
+	if !strings.Contains(out, "recoverable 2") {
+		t.Errorf("View() = %q, want it to contain status segment %q", out, "recoverable 2")
+	}
+}
+
 // TestView_Header_StatusLine_StyledByRole verifies the status line renders
 // with ANSI color codes on a color-capable terminal — colour applied by
 // semantic role, per ADR 0031 — rather than as bare text.

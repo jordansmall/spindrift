@@ -57,6 +57,20 @@ func TestUpdate_IssuesLoadedMsg_ErrKeepsStaleListAndRecordsErr(t *testing.T) {
 	}
 }
 
+// TestUpdate_IssuesLoadedMsg_SetsRecoverableCount verifies Update applies the
+// adapter-computed RecoverableCount straight onto Model — Update stays pure
+// and doesn't recompute it from Issues itself (issue #2255, ADR 0039 slice
+// S4).
+func TestUpdate_IssuesLoadedMsg_SetsRecoverableCount(t *testing.T) {
+	m := NewModel()
+
+	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{{Number: "1"}}, RecoverableCount: 3})
+
+	if m.RecoverableCount != 3 {
+		t.Errorf("RecoverableCount = %d, want 3", m.RecoverableCount)
+	}
+}
+
 // TestUpdate_FilterChangedMsg_NarrowsAndClearingRestores verifies a label
 // filter narrows Visible() to issues carrying a matching label, and setting
 // the filter back to "" restores the full backlog — the two acceptance
