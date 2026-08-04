@@ -142,7 +142,7 @@ gate): skip OPEN A PULL REQUEST below entirely.
 2. Print exactly one line as your final output and stop — raw plain text, not
    wrapped in backticks, a code fence, or any other markdown formatting:
 
-   SPINDRIFT_OUTCOME issue=${ISSUE_NUMBER} landing=${BRANCH} status=ready note=<short reason> nonce=${RUN_NONCE}
+   SPINDRIFT_OUTCOME issue=${ISSUE_NUMBER} landing=${BRANCH} status=ready note=<short reason>
 
    The launcher applies `MERGE_MODE` after this line (push straight to the
    target branch on `immediate`; leave the branch as pushed on `manual`).
@@ -157,7 +157,7 @@ Harness bundles your commits out of the container after you exit.
 1. Print exactly one line as your final output and stop — raw plain text, not
    wrapped in backticks, a code fence, or any other markdown formatting:
 
-   SPINDRIFT_OUTCOME issue=${ISSUE_NUMBER} landing=${BRANCH} status=ready note=<short reason> nonce=${RUN_NONCE}
+   SPINDRIFT_OUTCOME issue=${ISSUE_NUMBER} landing=${BRANCH} status=ready note=<short reason>
 
    The launcher relays the bundle into the Accumulation repo and merges it
    onto the Integration branch host-side. There is no PR to open, no CI to
@@ -184,11 +184,10 @@ rebase-merge, and the complete-label swap.
 `CODE_FORGE=local` already printed their outcome line and stopped under LAND
 THE CHANGE above.)
 
-${OUTCOME_LANDING_READ_WRITE_STEP}${OUTCOME_LANDING_READ_ONLY_STEP}Grammar: `SPINDRIFT_OUTCOME issue=${ISSUE_NUMBER} landing=<landing-ref> status=<status> note=<short reason> nonce=${RUN_NONCE}`
-— one line, space-delimited fields, `note` then `nonce` last (`note` may
-itself contain spaces and `=`). The only valid `status` values here are `ready` and `blocked` — no other word belongs in that field.
-`nonce` must be exactly `${RUN_NONCE}`, this run's own control nonce (below)
-— it is not optional.
+${OUTCOME_LANDING_READ_WRITE_STEP}${OUTCOME_LANDING_READ_ONLY_STEP}Grammar: `SPINDRIFT_OUTCOME issue=${ISSUE_NUMBER} landing=<landing-ref> status=<status> note=<short reason>`
+— one line, space-delimited fields, `note` last (`note` may itself contain
+spaces and `=`). The only valid `status` values here are `ready` and `blocked`
+— no other word belongs in that field.
 
 This grammar's leading token is load-bearing (ADR 0035): the in-box
 orchestrator's scanPassLog greps for it verbatim (via
@@ -196,22 +195,20 @@ orchestrator's scanPassLog greps for it verbatim (via
 loop to single-pass on ORCHESTRATOR_ENABLED runs.
 
 Invalid — each of these breaks the contract, whether or not it parses:
-- Trailing colon: `SPINDRIFT_OUTCOME: issue=${ISSUE_NUMBER} landing=<landing-ref> status=ready note=<short reason> nonce=${RUN_NONCE}` — the required prefix is a literal space after `OUTCOME`, not a colon, so this never matches; the launcher never sees an outcome and treats the run as lost.
-- Embedded inside a sentence: `Done — SPINDRIFT_OUTCOME issue=${ISSUE_NUMBER} landing=<landing-ref> status=ready note=<short reason> nonce=${RUN_NONCE}` — only a line that starts at the prefix matches; text before it hides the whole line the same way, losing the run. Print the line on its own, starting at column one, nothing before it.
-- Freeform status: `SPINDRIFT_OUTCOME issue=${ISSUE_NUMBER} landing=<landing-ref> status=SUCCESS note=<short reason> nonce=${RUN_NONCE}` — this parses fine, but `ready` and `blocked` are the only accepted values; anything else is silently wrong rather than lost outright, and the launcher will never flip the PR ready or merge it.
-- Missing or wrong nonce: `SPINDRIFT_OUTCOME issue=${ISSUE_NUMBER} landing=<landing-ref> status=ready note=<short reason>` — no different from the token being entirely absent: the launcher's scan requires this run's own nonce (see below), so a line without it — including one an untrusted issue/comment author echoed into the log, since they wrote their text before this nonce existed and cannot know it — is not treated as a candidate at all, even if it's the last such line in the log.
+- Trailing colon: `SPINDRIFT_OUTCOME: issue=${ISSUE_NUMBER} landing=<landing-ref> status=ready note=<short reason>` — the required prefix is a literal space after `OUTCOME`, not a colon, so this never matches; the launcher never sees an outcome and treats the run as lost.
+- Embedded inside a sentence: `Done — SPINDRIFT_OUTCOME issue=${ISSUE_NUMBER} landing=<landing-ref> status=ready note=<short reason>` — only a line that starts at the prefix matches; text before it hides the whole line the same way, losing the run. Print the line on its own, starting at column one, nothing before it.
+- Freeform status: `SPINDRIFT_OUTCOME issue=${ISSUE_NUMBER} landing=<landing-ref> status=SUCCESS note=<short reason>` — this parses fine, but `ready` and `blocked` are the only accepted values; anything else is silently wrong rather than lost outright, and the launcher will never flip the PR ready or merge it.
 
 This must be the literal final message — nothing after it, no prose summary, no
 background task. The launcher parses this one line to learn your PR; if missing,
 the PR is never merged and the run is wasted. Grammar is validated by
 `cmd/launcher/internal/outcome` (`Parse`, `Line`, `LastInLog`).
 
-This run's control nonce is `${RUN_NONCE}` — the value the `nonce=` field
-above must carry, letting the host tell a line this run genuinely wrote from
-one an untrusted issue/comment author echoed into the log. Leaving `nonce=`
-off, or getting the value wrong, silently drops your own genuine outcome —
-the launcher's scan requires it (issue #1939). A read-only run's PR-intent
-line carries and is checked against this same nonce too (issue #1938).
+This run's control nonce is `${RUN_NONCE}`. A read-only run's PR-intent line
+must carry it and is checked against it (issue #1938), letting the host tell
+a line this run genuinely wrote from one an untrusted issue/comment author
+echoed into the log — leaving `nonce=` off, or getting the value wrong,
+silently drops it (issue #1939).
 
 ${OUTCOME_READY_MEANS_READ_WRITE_STEP}${OUTCOME_READY_MEANS_READ_ONLY_STEP}
 # IF BLOCKED
