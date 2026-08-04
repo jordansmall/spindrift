@@ -18,8 +18,8 @@ func runDoctor(it forge.IssueTracker, cf forge.CodeForge, c config, w io.Writer,
 	row, _ := backendByName(c.issueTracker)
 	if err := doctor.Run(it, cf, doctor.Config{
 		IssueTracker:    c.issueTracker,
-		TokenHint:       row.doctorTokenHint,
-		SlugHint:        row.doctorSlugHint,
+		TokenHint:       row.DoctorTokenHint,
+		SlugHint:        row.DoctorSlugHint,
 		Label:           c.label,
 		InProgressLabel: c.inProgressLabel,
 		FailedLabel:     c.failedLabel,
@@ -63,7 +63,7 @@ func reportReadOnlyTokenGates(c config, w io.Writer) error {
 		if row.readOnlyTokenGate == nil {
 			continue
 		}
-		if c.codeForge != row.name && c.issueTracker != row.name {
+		if c.codeForge != row.Name && c.issueTracker != row.Name {
 			continue
 		}
 		verified, err := row.readOnlyTokenGate(c, w)

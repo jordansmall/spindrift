@@ -477,7 +477,7 @@ func validate(c config) error {
 	// would trade a clear launcher error for a downstream Box crash.
 	codeForgeRow, codeForgeRowOK := backendByName(c.codeForge)
 	trackerRow, trackerRowOK := backendByName(c.issueTracker)
-	fullyLocal := codeForgeRow.hostMediatedRemote && trackerRow.inBoxUnreachableTracker
+	fullyLocal := codeForgeRow.HostMediatedRemote && trackerRow.inBoxUnreachableTracker
 	noRepoResearch := c.dispatchKind == dispatchKindResearch && c.selfContained && trackerRow.inBoxUnreachableTracker
 	if !fullyLocal && !noRepoResearch && c.repoSlug == "" {
 		return fmt.Errorf("set REPO_SLUG=owner/repo (the target GitHub repository)")
@@ -526,7 +526,7 @@ func validate(c config) error {
 	default:
 		return fmt.Errorf("OVERLAP_GATE=%q is not valid; must be defer or off", c.overlapGate)
 	}
-	if !trackerRowOK || !trackerRow.validAsTracker {
+	if !trackerRowOK || !trackerRow.ValidAsTracker {
 		return fmt.Errorf("ISSUE_TRACKER=%q is not valid; must be github, local, jira, or forgejo", c.issueTracker)
 	}
 	if trackerRow.validateTracker != nil {
@@ -534,7 +534,7 @@ func validate(c config) error {
 			return err
 		}
 	}
-	if !codeForgeRowOK || !codeForgeRow.validAsCodeForge {
+	if !codeForgeRowOK || !codeForgeRow.ValidAsCodeForge {
 		return fmt.Errorf("CODE_FORGE=%q is not valid; must be github, git, local, or forgejo", c.codeForge)
 	}
 	if codeForgeRow.validateCodeForge != nil {
@@ -730,7 +730,7 @@ func runnerConfig(c config) runner.Config {
 		DriverSessionCacheDir:    c.driverSessionCacheDir,
 		HostMediatedIssueTracker: trackerRow.inBoxUnreachableTracker,
 		LocalIssuesDir:           absLocalIssuesDir(c.localIssuesDir),
-		HostMediatedRemote:       codeForgeRow.hostMediatedRemote,
+		HostMediatedRemote:       codeForgeRow.HostMediatedRemote,
 		AccumulationRepoDir:      c.codeForgeAccumulationRepoDir,
 		OutboxRelayCapable:       codeForgeRow.outboxRelayCapable,
 		BoxForgeAndIssueAccess:   c.boxForgeAndIssueAccess,
@@ -831,7 +831,7 @@ func localBaseBranchResolver(c config, it forge.IssueTracker, lw *localloop.Wire
 func boxTokenResolver(next func(num, name string) string) func(num, name string) string {
 	return func(num, name string) string {
 		for _, row := range backendRows {
-			if row.tokenEnvVar == "" || row.boxTokenEnvVar == "" || name != row.tokenEnvVar {
+			if row.TokenEnvVar == "" || row.boxTokenEnvVar == "" || name != row.TokenEnvVar {
 				continue
 			}
 			if v := os.Getenv(row.boxTokenEnvVar); v != "" {
@@ -855,7 +855,7 @@ func dispatchConfig(c config, it forge.IssueTracker, lw *localloop.Wired, cf for
 		ResolveEnv:             boxTokenResolver(localBaseBranchResolver(c, it, lw, cf)),
 		Kind:                   c.dispatchKind,
 		SelfContained:          c.selfContained,
-		HostMediatedRemote:     codeForgeRow.hostMediatedRemote,
+		HostMediatedRemote:     codeForgeRow.HostMediatedRemote,
 		OutboxRelayCapable:     codeForgeRow.outboxRelayCapable,
 		BoxForgeAndIssueAccess: c.boxForgeAndIssueAccess,
 		TransientRetryMax:      c.transientRetryMax,
