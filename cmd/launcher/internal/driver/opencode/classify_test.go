@@ -4,6 +4,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"spindrift.dev/launcher/internal/driver/driverkit"
 	"spindrift.dev/launcher/internal/driver/opencode"
 )
 
@@ -19,8 +20,8 @@ func TestClassify_ErrorEvent_RateLimit_IsTransient(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Classify: %v", err)
 	}
-	if got.Class != opencode.Transient || got.Reason != opencode.RateLimit {
-		t.Errorf("Class/Reason: got %s/%s, want %s/%s", got.Class, got.Reason, opencode.Transient, opencode.RateLimit)
+	if got.Class != driverkit.Transient || got.Reason != driverkit.RateLimit {
+		t.Errorf("Class/Reason: got %s/%s, want %s/%s", got.Class, got.Reason, driverkit.Transient, driverkit.RateLimit)
 	}
 }
 
@@ -37,8 +38,8 @@ func TestClassify_TextEvent_QuotingRateLimit_IsNotAttributed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Classify: %v", err)
 	}
-	if got.Class != opencode.Terminal || got.Reason != opencode.TaskFailed {
-		t.Errorf("Class/Reason: got %s/%s, want %s/%s", got.Class, got.Reason, opencode.Terminal, opencode.TaskFailed)
+	if got.Class != driverkit.Terminal || got.Reason != driverkit.TaskFailed {
+		t.Errorf("Class/Reason: got %s/%s, want %s/%s", got.Class, got.Reason, driverkit.Terminal, driverkit.TaskFailed)
 	}
 }
 
@@ -53,8 +54,8 @@ func TestClassify_NoErrorEvent_IsTerminal(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Classify: %v", err)
 	}
-	if got.Class != opencode.Terminal || got.Reason != opencode.TaskFailed {
-		t.Errorf("Class/Reason: got %s/%s, want %s/%s", got.Class, got.Reason, opencode.Terminal, opencode.TaskFailed)
+	if got.Class != driverkit.Terminal || got.Reason != driverkit.TaskFailed {
+		t.Errorf("Class/Reason: got %s/%s, want %s/%s", got.Class, got.Reason, driverkit.Terminal, driverkit.TaskFailed)
 	}
 }
 
@@ -75,8 +76,8 @@ func TestClassify_ErrorEvent_LooseDigit429BeatsOverloaded(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Classify: %v", err)
 	}
-	if got.Class != opencode.Transient || got.Reason != opencode.RateLimit {
-		t.Errorf("Class/Reason: got %s/%s, want %s/%s", got.Class, got.Reason, opencode.Transient, opencode.RateLimit)
+	if got.Class != driverkit.Transient || got.Reason != driverkit.RateLimit {
+		t.Errorf("Class/Reason: got %s/%s, want %s/%s", got.Class, got.Reason, driverkit.Transient, driverkit.RateLimit)
 	}
 }
 
@@ -89,7 +90,7 @@ func TestClassify_MissingFile_IsTerminal(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Classify: %v", err)
 	}
-	if got.Class != opencode.Terminal || got.Reason != opencode.TaskFailed {
-		t.Errorf("Class/Reason: got %s/%s, want %s/%s", got.Class, got.Reason, opencode.Terminal, opencode.TaskFailed)
+	if got.Class != driverkit.Terminal || got.Reason != driverkit.TaskFailed {
+		t.Errorf("Class/Reason: got %s/%s, want %s/%s", got.Class, got.Reason, driverkit.Terminal, driverkit.TaskFailed)
 	}
 }
