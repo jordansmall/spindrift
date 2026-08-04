@@ -1858,6 +1858,27 @@ gh label create agent-research-failed      --repo owner/repo --color b60205 --de
 If a custom `RESEARCH_VERDICTS` set is configured, create its labels
 instead of (or alongside, if some overlap) the three above.
 
+#### Create the spec-mismatch label on the Target repo
+
+A dispatched issue's own SPEC CHECK step (issue #2275, `issue-prompt.md`)
+compares its title against its body before scouting or implementing
+anything. When they describe materially unrelated work, the run halts
+there — no scout, no implement, no PR — and emits a third outcome status,
+`spec-mismatch`, alongside the ordinary `ready`/`blocked` pair. The
+launcher swaps the issue onto `agent-spec-mismatch`: a fixed,
+non-configurable label (like the research family above) distinct from
+`agent-failed` — a successful "needs a human decision" stop, not a crash,
+mirroring `agent-research-unclear`. `spindrift doctor` checks and, in
+interactive mode, offers to create it too, and treats it the same way as
+the research labels: advisory, so a missing label never fails the check.
+Re-triggering a halted issue (`agent-trigger`) strips this label along with
+any stale `agent-complete`/`agent-failed`, same as any other reclaim. To
+create it manually:
+
+```sh
+gh label create agent-spec-mismatch --repo owner/repo --color d4c5f9 --description "Title and body describe unrelated work — needs a human decision"
+```
+
 #### Configuring the research verdict vocabulary (`RESEARCH_VERDICTS`)
 
 By default the research kind's verdict terminals are the fixed three above:
