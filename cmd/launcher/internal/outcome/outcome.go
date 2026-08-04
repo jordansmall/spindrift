@@ -19,7 +19,7 @@ import (
 // verbatim -- rewording either side without the other silently collapses the
 // multi-pass loop to single-pass on ORCHESTRATOR_ENABLED runs. Exported so
 // that guard (cmd/launcher/orchestrator's TestPromptMarkersMatchScanner) and
-// this package's own Parse/ParseAnywhere/LastInLog share one literal instead
+// this package's own Parse/ParseAnywhere/lastInLog share one literal instead
 // of each redeclaring it.
 const Token = "SPINDRIFT_OUTCOME"
 
@@ -71,7 +71,7 @@ func IsNearMiss(err error) bool {
 // landing or status fields. The latter case, and a line where the token
 // appears but not as a standalone-line prefix, are wrapped in ErrNearMiss
 // (see IsNearMiss). Parse alone doesn't require a field marker for the
-// mid-sentence case — that extra gate belongs to LastInLog, which scans
+// mid-sentence case — that extra gate belongs to lastInLog, which scans
 // whole logs and needs it to avoid mistaking a bare mention in prose for an
 // attempt; a caller handing Parse a single already-selected line doesn't.
 func Parse(line string) (Outcome, error) {
@@ -132,7 +132,7 @@ func ParseAnywhere(line string) (Outcome, bool) {
 	return o, true
 }
 
-// LastInLog scans the file at path for the SPINDRIFT_OUTCOME token and
+// lastInLog scans the file at path for the SPINDRIFT_OUTCOME token and
 // parses the result via Parse, so the same colon/whitespace tolerance and
 // near-miss classification apply. It prefers the last line that leads with
 // the token (a genuine attempt at the grammar, however it fares in Parse)
@@ -169,7 +169,7 @@ func ParseAnywhere(line string) (Outcome, bool) {
 // empty nonce= field — never sets skipped (issue #2088): such a line is
 // never a plausible spoof, so warning about it would be noise. It is still
 // excluded from candidacy either way; only the warning is suppressed.
-func LastInLog(path string, expectedNonce string) (o Outcome, found bool, skipped bool, err error) {
+func lastInLog(path string, expectedNonce string) (o Outcome, found bool, skipped bool, err error) {
 	var lastLeading, lastMention string
 	scanErr := logscan.ForEachLine(path, logscan.SkipOversized, func(line string) {
 		if _, ok := stripToken(strings.TrimSpace(line), Token); ok {
@@ -226,7 +226,7 @@ func LastInLog(path string, expectedNonce string) (o Outcome, found bool, skippe
 // `SPINDRIFT_OUTCOME: success` a model emits when it paraphrases the grammar.
 // Outcome and Parsed are set only when the line parsed the full grammar.
 //
-// Unlike LastInLog, LastSelfReportInLog applies NO nonce gate: the motivating
+// Unlike lastInLog, lastSelfReportInLog applies NO nonce gate: the motivating
 // near-miss carries no nonce at all (the paraphrasing model dropped every
 // field), so gating would discard the very signal this surfaces. The
 // self-report is therefore unauthenticated and advisory — a consumer that
@@ -239,18 +239,18 @@ type SelfReport struct {
 	Parsed  bool    // whether Raw parsed the full SPINDRIFT_OUTCOME grammar
 }
 
-// LastSelfReportInLog returns the driver's last genuine (non-synthetic)
+// lastSelfReportInLog returns the driver's last genuine (non-synthetic)
 // leading-token SPINDRIFT_OUTCOME self-report from the log at path. It scans
 // for the last line that leads with the token (stripToken tolerance: `TOKEN `
 // or `TOKEN:`) and is NOT flagged synthetic=true, so the backstop's own
-// appended synthetic line — which wins LastInLog's last-line-wins — is
+// appended synthetic line — which wins lastInLog's last-line-wins — is
 // skipped here and the driver's real signal survives. See SelfReport for the
 // trust caveat (no nonce gate).
 //
 // Returns (SelfReport{}, false, nil) when no non-synthetic leading-token line
 // exists, or the file does not exist. Returns (SelfReport{}, false, err) only
 // on an I/O error other than file-not-found or an oversized skipped line.
-func LastSelfReportInLog(path string) (report SelfReport, found bool, err error) {
+func lastSelfReportInLog(path string) (report SelfReport, found bool, err error) {
 	var last string
 	scanErr := logscan.ForEachLine(path, logscan.SkipOversized, func(line string) {
 		trimmed := strings.TrimSpace(line)
@@ -274,6 +274,31 @@ func LastSelfReportInLog(path string) (report SelfReport, found bool, err error)
 	return selfReportFromLine(last), true, nil
 }
 
+// LastSelfReport returns the driver's last genuine (non-synthetic)
+// leading-token SPINDRIFT_OUTCOME self-report from the log at path -- the
+// same self-report tier lastSelfReportInLog backs, kept reachable from
+// outside this package under its own name because a caller legitimately
+// wants this signal unconditionally, alongside a possibly-also-present
+// genuine outcome, rather than only as Resolve's own last-resort fallback
+// when the genuine tier comes up empty (Resolve's self-report tier is only
+// reachable when the genuine tier found nothing at all). dispatch's
+// Result.SelfReport (retry.go's outcomeResult, one log) and `spindrift
+// recover`'s LastSelfReportFromLogs (multiple logs, its own last-pass-wins
+// walk) are exactly this: an independent signal read alongside
+// Result.Outcome, never an either/or against it. Exposing this single tier
+// on its own does not let a caller reimplement, or diverge from, the
+// genuine-vs-synthetic-vs-self-report PRECEDENCE Resolve exists to guard --
+// this always returns the self-report signal, full stop, never adjudicating
+// it against a genuine or synthetic outcome the way Resolve's tier walk
+// does.
+//
+// Returns (SelfReport{}, false, nil) when no non-synthetic leading-token line
+// exists, or the file does not exist. Returns (SelfReport{}, false, err) only
+// on an I/O error other than file-not-found or an oversized skipped line.
+func LastSelfReport(path string) (report SelfReport, found bool, err error) {
+	return lastSelfReportInLog(path)
+}
+
 // selfReportFromLine builds a SelfReport from a leading-token line: a full
 // parse when the grammar holds, otherwise a best-effort bare status word
 // (the first whitespace-delimited field after the token delimiter that is
@@ -295,10 +320,198 @@ func selfReportFromLine(line string) SelfReport {
 	return r
 }
 
+// Provenance identifies which tier of the SPINDRIFT_OUTCOME selection policy
+// produced a Resolved value: an authored line the driver itself emitted
+// (ProvenanceGenuine), the outcome backstop's own appended line when the
+// driver never emitted one (ProvenanceSynthetic, ADR 0036), or the driver's
+// unauthenticated self-report fallback (ProvenanceSelfReport) — the last
+// resort Resolve falls back to only when no nonce-gated outcome line was
+// found at all.
+type Provenance string
+
+const (
+	// ProvenanceGenuine is a driver-authored, non-synthetic outcome line.
+	ProvenanceGenuine Provenance = "genuine"
+	// ProvenanceSynthetic is the outcome backstop's appended line (ADR 0036,
+	// issue #2223) — the driver itself never emitted an outcome.
+	ProvenanceSynthetic Provenance = "synthetic"
+	// ProvenanceSelfReport is the driver's unauthenticated self-report
+	// fallback (see SelfReport) — not yet produced by Resolve.
+	ProvenanceSelfReport Provenance = "self-report"
+)
+
+// PassLog names one pass's log file for Resolve to scan, in the order the
+// passes ran. It mirrors dispatch.PassLog's {Label, Path} shape: outcome
+// cannot import dispatch (that would cycle back through outcome), so this is
+// its own copy of that shape and a dispatch caller converts its own
+// []dispatch.PassLog to []outcome.PassLog, field for field, at the call
+// site.
+type PassLog struct {
+	Label string
+	Path  string
+}
+
+// Resolved is the result of Resolve: the outcome Resolve selected, which
+// tier of the selection policy produced it, and the normalized dispatch
+// kind the caller asked about.
+type Resolved struct {
+	Outcome    Outcome
+	Provenance Provenance
+	// Kind is the normalized dispatch kind ("" input becomes "work"). It is
+	// carried through unchanged and does not affect selection: ADR 0022
+	// rejected a kind-specific outcome grammar, so Resolve is kind-agnostic
+	// by design.
+	Kind  string
+	Found bool
+	// Skipped reports whether Resolve's genuine/synthetic tier walk (see
+	// lastInLog) excluded at least one SPINDRIFT_OUTCOME-shaped line, across
+	// every log scanned, for failing the nonce gate -- regardless of whether
+	// Resolve still went on to find a match via a later log or the
+	// self-report tier. A caller can use this to warn about a spoof attempt
+	// or misconfigured run even on an otherwise-successful Resolve, the same
+	// diagnostic lastInLog's own skipped return offered a direct caller.
+	Skipped bool
+}
+
+// Resolve is the single seam that picks among the tiers of the
+// SPINDRIFT_OUTCOME selection policy — a genuine driver-authored line, the
+// outcome backstop's synthetic line, and, as a last resort, the driver's
+// unauthenticated self-report fallback — and returns which tier won as
+// Resolved.Provenance. It exists so no caller has to reimplement, or
+// accidentally diverge from, that precedence by calling the underlying
+// per-log scanners directly.
+//
+// Resolve walks logs in order calling lastInLog(log.Path, nonce), keeping
+// the last log that reports a match ("last pass wins", the same precedence
+// LastSelfReportFromLogs already applies across passes). A parse error on
+// the chosen candidate line (lastInLog's own near-miss contract) propagates
+// as Resolve's error. If a match was found, Resolved.Provenance is
+// ProvenanceSynthetic when the winning line's Outcome.Synthetic is true,
+// otherwise ProvenanceGenuine. Resolved.Skipped reports whether any log's
+// scan excluded a candidate line for failing the nonce gate, regardless of
+// which tier (or neither) ultimately wins.
+//
+// If no genuine/synthetic match was found anywhere, Resolve does not give up:
+// it walks logs a second time calling lastSelfReportInLog(log.Path) — no
+// nonce, since the self-report tier is intentionally ungated (see
+// SelfReport) — again keeping the last log with a report. When one is found
+// and report.Parsed is true, Resolved.Outcome is report.Outcome in full and
+// Provenance is ProvenanceSelfReport. When one is found but NOT Parsed (the
+// bare-word near-miss a model produces when it paraphrases the grammar, e.g.
+// "SPINDRIFT_OUTCOME: success" with no other fields), Resolve still reports
+// Found: true and Provenance: ProvenanceSelfReport, but Resolved.Outcome only
+// has Status populated from report.Status — Issue, Landing, and Note stay
+// zero, since a bare word carries no other field to fill them from. This is
+// a deliberate, if thin, edge case: a caller reading Resolved.Outcome.Status
+// after a ProvenanceSelfReport result must not assume the rest of Outcome is
+// meaningful.
+//
+// Only when neither tier yields anything does Resolve return
+// Resolved{Found: false} with no error — matching this package's existing
+// not-found-is-not-an-error convention throughout.
+//
+// kind is normalized ("" becomes "work") and stored on Resolved.Kind
+// regardless of which tier won; it never changes selection.
+func Resolve(logs []PassLog, nonce string, kind string) (Resolved, error) {
+	if kind == "" {
+		kind = "work"
+	}
+
+	var (
+		winner  Outcome
+		found   bool
+		lastErr error
+		skipped bool
+	)
+	for _, log := range logs {
+		o, ok, skip, err := lastInLog(log.Path, nonce)
+		if skip {
+			skipped = true
+		}
+		switch {
+		case err != nil:
+			// A later log's near-miss candidate (issue-shaped line present,
+			// but unparseable) overrides an earlier log's successful match,
+			// same as a later log's successful match would — last pass wins
+			// applies to a failed attempt too, not only a clean one.
+			lastErr = err
+			found = false
+		case ok:
+			winner = o
+			found = true
+			lastErr = nil
+		}
+		// Neither case: this log had no candidate at all, so it leaves the
+		// running state from prior logs untouched.
+	}
+	if lastErr != nil {
+		return Resolved{Kind: kind, Skipped: skipped}, lastErr
+	}
+	if found {
+		provenance := ProvenanceGenuine
+		if winner.Synthetic {
+			provenance = ProvenanceSynthetic
+		}
+		return Resolved{
+			Outcome:    winner,
+			Provenance: provenance,
+			Kind:       kind,
+			Found:      true,
+			Skipped:    skipped,
+		}, nil
+	}
+
+	report, reportFound := lastSelfReportAcrossLogs(logs)
+	if !reportFound {
+		return Resolved{Kind: kind, Skipped: skipped}, nil
+	}
+	if report.Parsed {
+		return Resolved{
+			Outcome:    report.Outcome,
+			Provenance: ProvenanceSelfReport,
+			Kind:       kind,
+			Found:      true,
+			Skipped:    skipped,
+		}, nil
+	}
+	return Resolved{
+		Outcome:    Outcome{Status: report.Status},
+		Provenance: ProvenanceSelfReport,
+		Kind:       kind,
+		Found:      true,
+		Skipped:    skipped,
+	}, nil
+}
+
+// lastSelfReportAcrossLogs walks logs in order calling
+// lastSelfReportInLog(log.Path) for each, keeping the last one that reports a
+// match — the same "last pass wins" precedence Resolve's genuine/synthetic
+// walk and dispatch.LastSelfReportFromLogs both apply. Unlike that walk, an
+// I/O error here is not propagated to the caller: lastSelfReportInLog only
+// errors on a genuine I/O failure (never a parse failure — a self-report has
+// no near-miss shape to fail), and this is already the last-resort fallback
+// tier, so a single unreadable log is silently skipped rather than aborting
+// the whole selection.
+func lastSelfReportAcrossLogs(logs []PassLog) (SelfReport, bool) {
+	var (
+		winner SelfReport
+		found  bool
+	)
+	for _, log := range logs {
+		report, ok, err := lastSelfReportInLog(log.Path)
+		if err != nil || !ok {
+			continue
+		}
+		winner = report
+		found = true
+	}
+	return winner, found
+}
+
 // LastCommentLineInLog scans the file at path for the last line carrying the
 // SPINDRIFT_COMMENT token and decodes its single-line grammar: SPINDRIFT_COMMENT
 // <nonce> <base64-encoded-body> (issue #1940). See lastVerifiedSignalInLog for
-// the verify-then-prefer selection semantics, which differ from LastInLog's
+// the verify-then-prefer selection semantics, which differ from lastInLog's
 // always-take-the-last-line behavior for SPINDRIFT_OUTCOME.
 //
 // A stream-json JSONL box log collapses a printed line's trailing newline
