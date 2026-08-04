@@ -13,6 +13,19 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
+
+	"spindrift.dev/launcher/internal/retry"
+)
+
+// Default retry knobs applied by New: a bounded linear backoff (behind the
+// injectable Clock seam) and a fixed attempt ceiling for transient (429/5xx)
+// responses. defaultMaxAttempts is referenced directly by client_test.go
+// instead of a magic number.
+const (
+	defaultBackoffUnit = 200 * time.Millisecond
+	defaultBackoffCap  = 2 * time.Second
+	defaultMaxAttempts = 3
 )
 
 // AuthStrategy mutates an outgoing request to add whatever authentication
@@ -46,11 +59,13 @@ type StatusMap map[int]error
 // Client is a generic REST client for a single forge backend. Construct one
 // with New; issue requests with Do.
 type Client struct {
-	baseURL  string
-	auth     AuthStrategy
-	backend  string
-	statuses StatusMap
-	hc       *http.Client
+	baseURL     string
+	auth        AuthStrategy
+	backend     string
+	statuses    StatusMap
+	hc          *http.Client
+	backoff     retry.LinearBackoff
+	maxAttempts int
 }
 
 // New returns a Client for baseURL (a trailing "/" is trimmed), using auth
@@ -63,12 +78,20 @@ func New(baseURL string, auth AuthStrategy, backend string, statuses StatusMap, 
 		hc = http.DefaultClient
 	}
 	return &Client{
-		baseURL:  strings.TrimSuffix(baseURL, "/"),
-		auth:     auth,
-		backend:  backend,
-		statuses: statuses,
-		hc:       hc,
+		baseURL:     strings.TrimSuffix(baseURL, "/"),
+		auth:        auth,
+		backend:     backend,
+		statuses:    statuses,
+		hc:          hc,
+		backoff:     retry.LinearBackoff{Unit: defaultBackoffUnit, Cap: defaultBackoffCap, Clock: retry.RealClock()},
+		maxAttempts: defaultMaxAttempts,
 	}
+}
+
+// isTransientStatus reports whether status is a transient failure worth
+// retrying: 429 (Too Many Requests) or any 5xx server error.
+func isTransientStatus(status int) bool {
+	return status == http.StatusTooManyRequests || (status >= 500 && status < 600)
 }
 
 // HTTPClientForTest returns the underlying *http.Client Do issues requests
@@ -87,43 +110,61 @@ func (c *Client) HTTPClientForTest() *http.Client {
 // from the map returns a generic error naming the backend, method, path,
 // and raw status code. Do returns nil on success.
 func (c *Client) Do(method, path string, body, out any) error {
-	var reqBody io.Reader
+	var b []byte
 	if body != nil {
-		b, err := json.Marshal(body)
+		var err error
+		b, err = json.Marshal(body)
 		if err != nil {
 			return fmt.Errorf("%s: marshal request: %w", c.backend, err)
 		}
-		reqBody = bytes.NewReader(b)
 	}
 
-	req, err := http.NewRequest(method, c.baseURL+path, reqBody)
-	if err != nil {
-		return fmt.Errorf("%s: build request: %w", c.backend, err)
-	}
-	if c.auth != nil {
-		c.auth.Apply(req)
-	}
-	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
+	for attempt := 1; attempt <= c.maxAttempts; attempt++ {
+		var reqBody io.Reader
+		if body != nil {
+			reqBody = bytes.NewReader(b)
+		}
 
-	resp, err := c.hc.Do(req)
-	if err != nil {
-		return fmt.Errorf("%s: %s %s: %w", c.backend, method, path, err)
-	}
-	defer resp.Body.Close()
+		req, err := http.NewRequest(method, c.baseURL+path, reqBody)
+		if err != nil {
+			return fmt.Errorf("%s: build request: %w", c.backend, err)
+		}
+		if c.auth != nil {
+			c.auth.Apply(req)
+		}
+		if body != nil {
+			req.Header.Set("Content-Type", "application/json")
+		}
 
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		resp, err := c.hc.Do(req)
+		if err != nil {
+			return fmt.Errorf("%s: %s %s: %w", c.backend, method, path, err)
+		}
+
+		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+			if out != nil {
+				if err := json.NewDecoder(resp.Body).Decode(out); err != nil && err != io.EOF {
+					resp.Body.Close()
+					return fmt.Errorf("%s: decode response from %s %s: %w", c.backend, method, path, err)
+				}
+			}
+			resp.Body.Close()
+			return nil
+		}
+
+		if isTransientStatus(resp.StatusCode) && attempt < c.maxAttempts {
+			io.Copy(io.Discard, resp.Body) //nolint:errcheck // draining to allow keep-alive reuse; a drain error is not actionable here
+			resp.Body.Close()
+			c.backoff.Do(attempt)
+			continue
+		}
+
 		if sentinel, ok := c.statuses[resp.StatusCode]; ok {
+			resp.Body.Close()
 			return fmt.Errorf("%s: %s %s: %w (status %d)", c.backend, method, path, sentinel, resp.StatusCode)
 		}
+		resp.Body.Close()
 		return fmt.Errorf("%s: %s %s: unexpected status %d", c.backend, method, path, resp.StatusCode)
 	}
-
-	if out != nil {
-		if err := json.NewDecoder(resp.Body).Decode(out); err != nil && err != io.EOF {
-			return fmt.Errorf("%s: decode response from %s %s: %w", c.backend, method, path, err)
-		}
-	}
-	return nil
+	return fmt.Errorf("%s: %s %s: maxAttempts must be >= 1 (got %d)", c.backend, method, path, c.maxAttempts)
 }

@@ -7,6 +7,9 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
+
+	"spindrift.dev/launcher/internal/retry"
 )
 
 // TestDoDecodesJSONResponse covers the success path where the server returns
@@ -141,6 +144,158 @@ func TestDoAppliesAuthStrategy(t *testing.T) {
 	}
 	if want := "token s3cr3t"; gotAuth != want {
 		t.Fatalf("server observed Authorization header %q, want %q", gotAuth, want)
+	}
+}
+
+// TestDoRetriesTransientThenSucceeds covers that Do retries a transient
+// (429) response, sleeping a single backoff via the injected Clock, and
+// succeeds once the server returns 200 on the second attempt.
+func TestDoRetriesTransientThenSucceeds(t *testing.T) {
+	var requests int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		if requests == 1 {
+			w.WriteHeader(http.StatusTooManyRequests)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, nil, "testbackend", nil, nil)
+
+	var recorded []time.Duration
+	c.backoff.Clock = retry.Clock{
+		Now: time.Now,
+		Sleep: func(d time.Duration) {
+			recorded = append(recorded, d)
+		},
+	}
+
+	if err := c.Do(http.MethodGet, "/widgets/1", nil, nil); err != nil {
+		t.Fatalf("Do returned unexpected error: %v", err)
+	}
+	if requests != 2 {
+		t.Fatalf("server saw %d requests, want 2", requests)
+	}
+	if len(recorded) != 1 {
+		t.Fatalf("recorded sleeps = %v, want exactly one sleep", recorded)
+	}
+}
+
+// TestDoRetries5xxThenSucceeds covers that Do retries a transient 5xx
+// (503) response the same way it retries 429, sleeping a single backoff via
+// the injected Clock, and succeeds once the server returns 200 on the
+// second attempt.
+func TestDoRetries5xxThenSucceeds(t *testing.T) {
+	var requests int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		if requests == 1 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, nil, "testbackend", nil, nil)
+
+	var recorded []time.Duration
+	c.backoff.Clock = retry.Clock{
+		Now: time.Now,
+		Sleep: func(d time.Duration) {
+			recorded = append(recorded, d)
+		},
+	}
+
+	if err := c.Do(http.MethodGet, "/widgets/1", nil, nil); err != nil {
+		t.Fatalf("Do returned unexpected error: %v", err)
+	}
+	if requests != 2 {
+		t.Fatalf("server saw %d requests, want 2", requests)
+	}
+	if len(recorded) != 1 {
+		t.Fatalf("recorded sleeps = %v, want exactly one sleep", recorded)
+	}
+}
+
+// TestDoDoesNotRetryNonTransient4xx covers that Do does not retry a
+// non-transient status such as 404: the server should see exactly one
+// request, no sleep should be recorded, and the existing mapped-status
+// behavior (errors.Is against the configured sentinel) still applies.
+func TestDoDoesNotRetryNonTransient4xx(t *testing.T) {
+	var requests int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, nil, "testbackend", StatusMap{http.StatusNotFound: errNotFoundStub}, nil)
+
+	var recorded []time.Duration
+	c.backoff.Clock = retry.Clock{
+		Now: time.Now,
+		Sleep: func(d time.Duration) {
+			recorded = append(recorded, d)
+		},
+	}
+
+	err := c.Do(http.MethodGet, "/widgets/1", nil, nil)
+	if err == nil {
+		t.Fatal("Do returned nil error, want a mapped sentinel error")
+	}
+	if !errors.Is(err, errNotFoundStub) {
+		t.Fatalf("Do error = %v, want errors.Is match against errNotFoundStub", err)
+	}
+	if requests != 1 {
+		t.Fatalf("server saw %d requests, want 1 (no retry for non-transient status)", requests)
+	}
+	if len(recorded) != 0 {
+		t.Fatalf("recorded sleeps = %v, want no sleeps for non-transient status", recorded)
+	}
+}
+
+// TestDoExhaustsRetriesOnPersistentTransient covers that Do gives up after
+// maxAttempts when a transient status (429) never clears: the server should
+// see exactly defaultMaxAttempts requests, sleep exactly
+// defaultMaxAttempts-1 times between them, and return a non-nil error that
+// falls through to the generic unmapped-status path (this Client's
+// StatusMap doesn't map 429).
+func TestDoExhaustsRetriesOnPersistentTransient(t *testing.T) {
+	var requests int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		w.WriteHeader(http.StatusTooManyRequests)
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, nil, "testbackend", StatusMap{http.StatusNotFound: errNotFoundStub}, nil)
+
+	var recorded []time.Duration
+	c.backoff.Clock = retry.Clock{
+		Now: time.Now,
+		Sleep: func(d time.Duration) {
+			recorded = append(recorded, d)
+		},
+	}
+
+	err := c.Do(http.MethodGet, "/widgets/1", nil, nil)
+	if err == nil {
+		t.Fatal("Do returned nil error, want a non-nil error after exhausting retries")
+	}
+	if errors.Is(err, errNotFoundStub) {
+		t.Fatalf("Do error = %v, unexpectedly matched errNotFoundStub", err)
+	}
+	if !strings.Contains(err.Error(), strconv.Itoa(http.StatusTooManyRequests)) {
+		t.Fatalf("Do error = %v, want it to mention status code %d", err, http.StatusTooManyRequests)
+	}
+	if requests != defaultMaxAttempts {
+		t.Fatalf("server saw %d requests, want %d (defaultMaxAttempts)", requests, defaultMaxAttempts)
+	}
+	if len(recorded) != defaultMaxAttempts-1 {
+		t.Fatalf("recorded sleeps = %v, want exactly %d sleeps", recorded, defaultMaxAttempts-1)
 	}
 }
 
