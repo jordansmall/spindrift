@@ -84,7 +84,7 @@ jobs:
           issue-number: ${{ github.event.issue.number }}
           repo: ${{ github.repository }}
           claim-add-label: agent-in-progress
-          claim-remove-labels: agent-recover agent-failed agent-complete ready-for-agent agent-trigger
+          claim-remove-labels: agent-recover agent-failed agent-complete ready-for-agent agent-trigger agent-spec-mismatch
           git-user-name: ${{ vars.AGENT_GIT_USER_NAME }}
           git-user-email: ${{ vars.AGENT_GIT_USER_EMAIL }}
 
