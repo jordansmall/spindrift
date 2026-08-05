@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 
 	"spindrift.dev/launcher/internal/dispatch"
@@ -56,6 +57,7 @@ func (s *Settle) hostMediateDraftPR(num string, result dispatch.Result) (string,
 	if !ok {
 		return s.blockHandoff(num, branch, errors.New("no usable PR-intent line found in the box's log"))
 	}
+	body = ensureClosesReference(body, num, s.it)
 
 	if s.cfg.OutboxDir == nil {
 		return s.blockHandoff(num, branch, errors.New("settle: Config.OutboxDir is unset but the Code Forge implements forge.BundleRelay"))
@@ -113,6 +115,7 @@ func (s *Settle) relayBlockedWork(num string, result dispatch.Result) {
 	if !ok {
 		return
 	}
+	body = ensureClosesReference(body, num, s.it)
 	dpc, ok := cf.(forge.DraftPRCreator)
 	if !ok {
 		return
@@ -146,6 +149,49 @@ func (s *Settle) blockHandoff(num, branch string, err error) (string, bool) {
 	fmt.Printf("    #%s  landing=%s  status=merge-blocked  !! %v\n", num, branch, err)
 	s.it.Comment(num, fmt.Sprintf("merge blocked: %v", err))
 	return "", false
+}
+
+// closingKeywordPattern matches GitHub's recognized closing keywords
+// (close/closes/closed, fix/fixes/fixed, resolve/resolves/resolved),
+// case-insensitively, followed by whitespace and a "#<digits>" issue
+// reference, capturing the digits. Compiled once at package scope; the
+// digits capture is compared against the specific num a call cares about
+// rather than interpolated into the pattern, so e.g. "#1919" never matches
+// as a reference to "191" the way naive substring interpolation could, and
+// "#19195" never matches as a reference to "1919".
+var closingKeywordPattern = regexp.MustCompile(`(?i)\b(?:close|closes|closed|fix|fixes|fixed|resolve|resolves|resolved)\s+#(\d+)\b`)
+
+// hasClosingReference reports whether body already carries a
+// GitHub-recognized closing keyword referencing issue num.
+func hasClosingReference(body, num string) bool {
+	for _, match := range closingKeywordPattern.FindAllStringSubmatch(body, -1) {
+		if match[1] == num {
+			return true
+		}
+	}
+	return false
+}
+
+// ensureClosesReference returns body unchanged when it's not this Launcher's
+// job to guarantee a closing reference: either it is a LandingRecorder-shaped
+// (local) tracker — the local adapter closes issues through its own axis
+// (ADR 0029), never GitHub's auto-close-on-merge keyword convention — or body
+// already carries a GitHub-recognized closing keyword (close/fix/resolve and
+// their inflections) referencing #num. Otherwise it appends a literal
+// "Closes #<num>" so a merge auto-closes the issue, matching the convention
+// defaultAdoptPRText already uses: a blank-line separator when body is
+// non-empty, or just "Closes #<num>" when body is empty.
+func ensureClosesReference(body, num string, it forge.IssueTracker) string {
+	if _, ok := it.(forge.LandingRecorder); ok {
+		return body
+	}
+	if hasClosingReference(body, num) {
+		return body
+	}
+	if strings.TrimSpace(body) == "" {
+		return "Closes #" + num
+	}
+	return body + "\n\nCloses #" + num
 }
 
 // parsePRIntent extracts a title and body from result's decoded PR-intent
