@@ -21,13 +21,6 @@ type Result struct {
 	// must not retry (issue #562).
 	AlreadyInFlight bool
 
-	// Outcome is populated when OutcomeFound is true.
-	Outcome outcome.Outcome
-
-	// OutcomeFound reports whether a SPINDRIFT_OUTCOME line was present in
-	// the box's log.
-	OutcomeFound bool
-
 	// Comment is the decoded body of the box log's last verified
 	// SPINDRIFT_COMMENT line — a single nonce-bearing, base64-encoded
 	// control signal (issue #1940) — populated when CommentFound is true
@@ -58,18 +51,15 @@ type Result struct {
 	// surfaced here.
 	PRIntentFound bool
 
-	// SelfReport is the driver's last genuine (non-synthetic) leading-token
-	// SPINDRIFT_OUTCOME self-report, surfaced distinctly from the
-	// authoritative parsed Outcome so a synthetic backstop line (ADR 0036)
-	// can never shadow it via last-line-wins (issue #2223/#2224). Populated
-	// when SelfReportFound is true. Unlike Outcome, this carries NO nonce
-	// gate and is unauthenticated and advisory — a consumer that acts on it
-	// owns weighing that trust, mirroring outcome.SelfReport's own doc.
-	SelfReport outcome.SelfReport
-
-	// SelfReportFound reports whether a non-synthetic leading-token
-	// SPINDRIFT_OUTCOME self-report was present in the box's log.
-	SelfReportFound bool
+	// Resolved is dispatch's own single outcome.Resolve-seam result for this
+	// Result (issue #2268 slice 2). It replaces the former separate
+	// Outcome/OutcomeFound/SelfReport/SelfReportFound fields:
+	// Resolved.Found replaces OutcomeFound, Resolved.Outcome replaces
+	// Outcome, Resolved.SelfReport/Resolved.SelfReportFound replace
+	// SelfReport/SelfReportFound, and Resolved.Provenance ==
+	// outcome.ProvenanceSynthetic replaces the old Outcome.Synthetic check
+	// callers used.
+	Resolved outcome.Resolved
 
 	// IssueIntents holds the decoded payload of every nonce-verified
 	// SPINDRIFT_ISSUE_INTENT line in the box log, in encounter order —

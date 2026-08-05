@@ -51,7 +51,7 @@ func (d *Dispatch) dispatchWithRetry(logPath string, once func(resumeAfterHold b
 		var cls driver.Classification
 		if err == nil {
 			result := d.successResult(logPath)
-			if result.OutcomeFound || result.ParseErr != nil || result.ClassifyErr != nil {
+			if result.Resolved.Found || result.ParseErr != nil || result.ClassifyErr != nil {
 				return result
 			}
 			if result.Classification.Class != driver.Transient {
@@ -159,7 +159,7 @@ func (d *Dispatch) successResult(logPath string) Result {
 	// self-report-only match here must still fall through to classification
 	// below, unchanged from before.
 	if resolved.Found && resolved.Provenance != outcome.ProvenanceSelfReport {
-		return d.outcomeResult(logPath, resolved.Outcome)
+		return d.outcomeResult(logPath, resolved)
 	}
 	cls, clsErr := d.driver.ClassifyTransient(logPath)
 	return Result{Success: true, Classification: cls, ClassifyErr: clsErr}
@@ -170,7 +170,7 @@ func (d *Dispatch) successResult(logPath string) Result {
 // signals from logPath. Shared by the zero-exit success path (successResult)
 // and the non-zero-exit settled-outcome path (settledOutcome, issue #2075) so
 // both surface the identical signals.
-func (d *Dispatch) outcomeResult(logPath string, o outcome.Outcome) Result {
+func (d *Dispatch) outcomeResult(logPath string, resolved outcome.Resolved) Result {
 	comment, commentFound, commentErr := outcome.LastCommentLineInLog(logPath, d.nonce)
 	if commentErr != nil {
 		fmt.Fprintf(os.Stderr, "    ?? #%s: comment scan: %v\n", d.number, commentErr)
@@ -183,16 +183,11 @@ func (d *Dispatch) outcomeResult(logPath string, o outcome.Outcome) Result {
 	if issueIntentsErr != nil {
 		fmt.Fprintf(os.Stderr, "    ?? #%s: issue-intent scan: %v\n", d.number, issueIntentsErr)
 	}
-	selfReport, selfReportFound, selfReportErr := outcome.LastSelfReport(logPath)
-	if selfReportErr != nil {
-		fmt.Fprintf(os.Stderr, "    ?? #%s: self-report scan: %v\n", d.number, selfReportErr)
-	}
 	return Result{
-		Success: true, Outcome: o, OutcomeFound: true,
+		Success: true, Resolved: resolved,
 		Comment: comment, CommentFound: commentFound,
 		PRIntent: prIntent, PRIntentFound: prIntentFound,
 		IssueIntents: issueIntents, IssueIntentsFound: len(issueIntents) > 0,
-		SelfReport: selfReport, SelfReportFound: selfReportFound,
 	}
 }
 
@@ -217,5 +212,5 @@ func (d *Dispatch) settledOutcome(logPath string) (Result, bool) {
 	if err != nil || !resolved.Found || resolved.Provenance == outcome.ProvenanceSelfReport {
 		return Result{}, false
 	}
-	return d.outcomeResult(logPath, resolved.Outcome), true
+	return d.outcomeResult(logPath, resolved), true
 }
