@@ -36,7 +36,11 @@ func (e *execClient) OpenPRForBranch(branch string) (forge.PR, bool, error) {
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
 	if err != nil {
-		return forge.PR{}, false, fmt.Errorf("gh pr list: %w: %s", err, strings.TrimSpace(stderr.String()))
+		suffix := ""
+		if s := strings.TrimSpace(stderr.String()); s != "" {
+			suffix = ": " + s
+		}
+		return forge.PR{}, false, fmt.Errorf("gh pr list: %w%s", err, suffix)
 	}
 	url := strings.TrimSpace(string(out))
 	if url == "" {
