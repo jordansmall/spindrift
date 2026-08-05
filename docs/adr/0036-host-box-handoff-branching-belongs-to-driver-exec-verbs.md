@@ -154,28 +154,19 @@ lookup, JSON rendering, and so on are that verb's own concern — it only
 records that the verb is governed by the rule this ADR names, generalized past
 the seam where the rule was first drawn.
 
-A sibling in-box binary — a second standalone in-box binary just for prompt
-assembly, separate from `driver-exec` — was considered for `assemble-prompt`
-and rejected for the same reason this ADR's Considered Options section already
-gives for the outcome-backstop's sibling-binary option: "A new standalone
-host-side or in-box binary just for the backstop. Rejected as needless
-surface: `driver-exec` already owns process mechanics at this exact seam and
-already carries the `bundle-out` precedent, so a verb reuses its dispatch, its
-build closure, and its test harness rather than minting a third binary the
-image must bake." Substituting `assemble-prompt` for the backstop, the
-argument carries unchanged: `driver-exec` already owns process mechanics at
-the point where prompt assembly happens (it is, after all, what runs the
-Driver against the assembled prompt), and it already carries two verb
-precedents, so a third verb reuses the same dispatch, build closure, and test
-harness rather than the image baking a fourth binary to do the same job.
+A sibling in-box binary just for prompt assembly was considered for
+`assemble-prompt` and rejected for the same reason this ADR's Considered
+Options section already gives for the outcome-backstop's sibling-binary
+option: `driver-exec` already owns process mechanics at this seam and already
+carries two verb precedents, so a third verb reuses its dispatch, build
+closure, and test harness rather than the image baking a fourth binary to do
+the same job.
 
-This is the same argument ADR 0035 made one seam over: ADR 0035 moved the
-box's review loop out of prose in `issue-prompt.md` and into a Go binary
-(`cmd/launcher/orchestrator`) precisely because a state machine, caps, and
-log-scanning are the "graph and poll code" tier ADR 0007 found bash — and
-prose — unfit for. This ADR's own Decision section named that same move for
-the host/box hand-off. The amendment recognizes both as the same principle,
-now stated at its true level of generality: an in-box decision tree over
+This is the same argument ADR 0035 made one seam over, moving the box's
+review loop out of prose in `issue-prompt.md` and into a Go binary
+(`cmd/launcher/orchestrator`) because a state machine, caps, and log-scanning
+are the "graph and poll code" tier ADR 0007 found bash — and prose — unfit
+for. The amendment states both as one principle: an in-box decision tree over
 launcher-delivered plumbing gets a named Go owner — a `driver-exec` verb, or,
 where ADR 0035 already applies, the orchestrator itself — rather than living
 as ad hoc logic wherever in the entrypoint or its prose it happens to land.
