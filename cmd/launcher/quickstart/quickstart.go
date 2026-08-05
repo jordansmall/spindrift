@@ -208,7 +208,8 @@ type TokenAcquirer func(ctx tokenAcquireContext) (string, error)
 // tokenAcquirers dispatches token acquisition by backend name. A new
 // QuickstartEligible backend registers its own entry here (and in
 // backend.Registry) — runQuickstart itself never branches on backend name to
-// acquire a token.
+// acquire a token. Package-global and unsynchronized — fine here since
+// quickstart is a single-threaded CLI that never mutates it after init.
 var tokenAcquirers = map[string]TokenAcquirer{
 	"github": func(ctx tokenAcquireContext) (string, error) {
 		token, err := acquireGHToken(ctx.env, ctx.w, ctx.promptMasked, ctx.desc.TokenEnvVar)
@@ -387,11 +388,11 @@ func runQuickstart(dir string, env Environment, runner CommandRunner, forgeBuild
 	gitUserName := promptDefault("Git user name", env.GitConfig("user.name"))
 	gitUserEmail := promptDefault("Git user email", env.GitConfig("user.email"))
 
-	// Quickstart detects github vs. forgejo from the git remote host (a
-	// codeberg.org remote or an explicit "forgejo" backend answer above); no
-	// Jira/local sub-prompts either way. The Jira/local adapters and runtime
-	// ISSUE_TRACKER validation stay in place for an operator who hand-edits
-	// the generated flake.
+	// Quickstart derives backendName from the git remote host (a codeberg.org
+	// remote or an explicit backend answer above) rather than prompting for
+	// it directly; no Jira/local sub-prompts either way. The Jira/local
+	// adapters and runtime ISSUE_TRACKER validation stay in place for an
+	// operator who hand-edits the generated flake.
 	tracker := trackerSettings{issueTracker: backendName, forgejoBaseURL: forgejoBaseURL}
 
 	desc, ok := backend.ByName(backendName)
