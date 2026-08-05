@@ -7,6 +7,125 @@ import (
 	"strconv"
 )
 
+// IssueTrackerFake is the tracker-capability slice of Fake, holding every
+// field the IssueTracker surface (plus its optional LandingRecorder,
+// IssueCloser, MergeCloser, and AbandonedFlagger surfaces) reads or writes.
+// It embeds *core — see core's doc comment for the admission rule — so its
+// methods can reach mu/prStates/etc. directly.
+type IssueTrackerFake struct {
+	// *core is the shared substrate promoted through to IssueTrackerFake —
+	// see core's doc comment for the admission rule.
+	*core
+
+	labels DispatchLabels
+	// VerdictLabels configures the Verdict-to-label mapping CompleteVerdict
+	// uses, the same way labels configures TransitionState; set directly
+	// (there is no constructor argument for it) since only research-kind
+	// tests exercise it.
+	VerdictLabels VerdictLabels
+	issues        map[string]Issue
+	// NativeDeps, when set for an issue number, is returned by DepsOf as
+	// DepSourceNative and takes precedence over body parsing — the
+	// native-wins-when-non-empty rule forgetest.RunTrackerContract's DepsOf
+	// scenario pins across every adapter, so tests can script native-sourced,
+	// body-sourced, and mixed-batch blockers.
+	NativeDeps map[string][]string
+	// NativeDepsErr, keyed by issue number, is returned by DepsOf for that
+	// number instead of consulting NativeDeps — scripts the native-API
+	// failure DepsOf falls back to body parsing for (forgetest's
+	// NativeFailureIsolatable scenario, issue #1544).
+	NativeDepsErr map[string]error
+
+	// TouchesOfErr, keyed by issue number, is returned by TouchesOf for that
+	// number instead of parsing its body. Per-number (not blanket, unlike
+	// PRFilesErr) because a single overlap-gate check calls TouchesOf for
+	// both an in-progress issue and the candidate being checked against it —
+	// a blanket error couldn't isolate which side failed.
+	TouchesOfErr map[string]error
+
+	// TransitionStateCalls records all TransitionState invocations in order.
+	TransitionStateCalls []TransitionStateCall
+	// TransitionStateErr, if non-nil, is returned by every TransitionState call.
+	TransitionStateErr error
+	// CompleteVerdictCalls records all CompleteVerdict invocations in order.
+	CompleteVerdictCalls []CompleteVerdictCall
+	// CompleteVerdictErr, if non-nil, is returned by every CompleteVerdict call.
+	CompleteVerdictErr error
+	// CommentCalls records all Comment invocations in order.
+	CommentCalls []CommentCall
+	// CommentErr, if non-nil, is returned by every Comment call.
+	CommentErr error
+
+	// ListIssuesErr, if non-nil, is returned by every ListIssues call.
+	ListIssuesErr error
+	// ListIssuesCalls records the state argument of every ListIssues
+	// invocation in order — lets a test assert call count directly instead
+	// of inferring it from side effects (#987).
+	ListIssuesCalls []DispatchState
+
+	// IssueCalls records the issue number argument of every Issue
+	// invocation in order — lets a test assert call count directly instead
+	// of inferring it from side effects (#1098).
+	IssueCalls []string
+	// IssueErr, if non-nil, is returned by every Issue call instead of the
+	// looked-up issue — a blanket override (ListIssuesErr's own pattern),
+	// letting a test simulate a body-fetch failure independently of
+	// ListOpenIssues/ListIssues, which read the same issues map but never
+	// consult this field (issue #1632).
+	IssueErr error
+
+	// DepsOfCalls records the issue number argument of every DepsOf
+	// invocation in order — mirrors IssueCalls, letting a test assert a
+	// dependency-graph build's exact call count (e.g. a whole-backlog
+	// NewReadiness sweep) instead of inferring it from side effects
+	// (issue #1632).
+	DepsOfCalls []string
+
+	// Labels is the list of label names returned by ListLabels on success.
+	// When LabelsSeq is non-empty, each call pops the next entry from it
+	// instead (falling back to Labels once the sequence is exhausted).
+	Labels []string
+	// LabelsSeq, when non-empty, is a per-call queue drained by ListLabels.
+	// Each call pops the first slice; when exhausted, Labels is used.
+	LabelsSeq [][]string
+	// ListLabelsErr, if non-nil, is returned by ListLabels.
+	ListLabelsErr error
+
+	// CreateLabelCalls records all CreateLabel invocations in order.
+	CreateLabelCalls []CreateLabelCall
+	// CreateLabelErr, if non-nil, is returned by every CreateLabel call.
+	CreateLabelErr error
+
+	// RecordLandingCalls records all RecordLanding invocations in order.
+	RecordLandingCalls []RecordLandingCall
+	// RecordLandingErr, if non-nil, is returned by every RecordLanding call.
+	RecordLandingErr error
+
+	// CloseIssueCalls records the issue number argument of every CloseIssue
+	// invocation in order.
+	CloseIssueCalls []string
+	// CloseIssueErr, if non-nil, is returned by every CloseIssue call.
+	CloseIssueErr error
+
+	// CloseMergedIssueCalls records the issue number argument of every
+	// CloseMergedIssue invocation in order — the optional MergeCloser
+	// surface's own call log (issue #1892), kept separate from
+	// CloseIssueCalls so a test can tell settle's post-merge backstop apart
+	// from reconcile's closed: axis write.
+	CloseMergedIssueCalls []string
+	// CloseMergedIssueErr, if non-nil, is returned by every CloseMergedIssue
+	// call.
+	CloseMergedIssueErr error
+
+	// FlagAbandonedCalls records the issue number argument of every
+	// FlagAbandoned invocation in order.
+	FlagAbandonedCalls []string
+	// FlagAbandonedErr, if non-nil, is returned by every FlagAbandoned call.
+	FlagAbandonedErr error
+}
+
+var _ IssueTracker = (*IssueTrackerFake)(nil)
+
 // TransitionStateCall records a single TransitionState invocation.
 type TransitionStateCall struct {
 	Num      string
@@ -29,16 +148,16 @@ type CommentCall struct {
 	Num, Body string
 }
 
-func (f *Fake) ListIssues(state DispatchState) ([]Issue, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.ListIssuesCalls = append(f.ListIssuesCalls, state)
-	if f.ListIssuesErr != nil {
-		return nil, f.ListIssuesErr
+func (tf *IssueTrackerFake) ListIssues(state DispatchState) ([]Issue, error) {
+	tf.mu.Lock()
+	defer tf.mu.Unlock()
+	tf.ListIssuesCalls = append(tf.ListIssuesCalls, state)
+	if tf.ListIssuesErr != nil {
+		return nil, tf.ListIssuesErr
 	}
-	label := f.labels.Label(state)
+	label := tf.labels.Label(state)
 	var out []Issue
-	for _, iss := range f.issues {
+	for _, iss := range tf.issues {
 		if iss.State == IssueClosed {
 			continue
 		}
@@ -73,11 +192,11 @@ func (f *Fake) ListIssues(state DispatchState) ([]Issue, error) {
 
 // ListOpenIssues returns every non-closed issue regardless of dispatch
 // label, ascending by number — mirroring ListIssues' canonical order.
-func (f *Fake) ListOpenIssues() ([]Issue, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
+func (tf *IssueTrackerFake) ListOpenIssues() ([]Issue, error) {
+	tf.mu.Lock()
+	defer tf.mu.Unlock()
 	var out []Issue
-	for _, iss := range f.issues {
+	for _, iss := range tf.issues {
 		if iss.State == IssueClosed {
 			continue
 		}
@@ -94,14 +213,14 @@ func (f *Fake) ListOpenIssues() ([]Issue, error) {
 	return out, nil
 }
 
-func (f *Fake) Issue(num string) (Issue, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.IssueCalls = append(f.IssueCalls, num)
-	if f.IssueErr != nil {
-		return Issue{}, f.IssueErr
+func (tf *IssueTrackerFake) Issue(num string) (Issue, error) {
+	tf.mu.Lock()
+	defer tf.mu.Unlock()
+	tf.IssueCalls = append(tf.IssueCalls, num)
+	if tf.IssueErr != nil {
+		return Issue{}, tf.IssueErr
 	}
-	iss, ok := f.issues[num]
+	iss, ok := tf.issues[num]
 	if !ok {
 		return Issue{}, fmt.Errorf("issue %s not found", num)
 	}
@@ -117,20 +236,20 @@ func (f *Fake) Issue(num string) (Issue, error) {
 // label the issue still carries from a prior run, mirroring the github
 // adapter's TransitionState (exec_issues.go) so a launcher-level test built
 // on the Fake can't pass while the real adapter still misbehaves (#1985).
-func (f *Fake) TransitionState(num string, from, to DispatchState) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.TransitionStateCalls = append(f.TransitionStateCalls, TransitionStateCall{num, from, to})
-	if f.TransitionStateErr != nil {
-		return f.TransitionStateErr
+func (tf *IssueTrackerFake) TransitionState(num string, from, to DispatchState) error {
+	tf.mu.Lock()
+	defer tf.mu.Unlock()
+	tf.TransitionStateCalls = append(tf.TransitionStateCalls, TransitionStateCall{num, from, to})
+	if tf.TransitionStateErr != nil {
+		return tf.TransitionStateErr
 	}
-	iss, ok := f.issues[num]
+	iss, ok := tf.issues[num]
 	if !ok {
 		return nil // best-effort
 	}
-	add := f.labels.Label(to)
+	add := tf.labels.Label(to)
 	remove := map[string]bool{}
-	for _, l := range f.labels.ClaimRemoveLabels(from, to) {
+	for _, l := range tf.labels.ClaimRemoveLabels(from, to) {
 		remove[l] = true
 	}
 	var next []string
@@ -141,7 +260,7 @@ func (f *Fake) TransitionState(num string, from, to DispatchState) error {
 	}
 	next = append(next, add)
 	iss.Labels = next
-	f.issues[num] = iss
+	tf.issues[num] = iss
 	return nil
 }
 
@@ -152,22 +271,22 @@ func (f *Fake) TransitionState(num string, from, to DispatchState) error {
 // (#701) forgetest.RunTrackerContract's DoubleDispatchGuard scenario pins
 // across every adapter — and errors without mutating labels when it's
 // absent.
-func (f *Fake) CompleteVerdict(num string, verdict Verdict) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.CompleteVerdictCalls = append(f.CompleteVerdictCalls, CompleteVerdictCall{num, verdict})
-	if f.CompleteVerdictErr != nil {
-		return f.CompleteVerdictErr
+func (tf *IssueTrackerFake) CompleteVerdict(num string, verdict Verdict) error {
+	tf.mu.Lock()
+	defer tf.mu.Unlock()
+	tf.CompleteVerdictCalls = append(tf.CompleteVerdictCalls, CompleteVerdictCall{num, verdict})
+	if tf.CompleteVerdictErr != nil {
+		return tf.CompleteVerdictErr
 	}
-	iss, ok := f.issues[num]
+	iss, ok := tf.issues[num]
 	if !ok {
 		return nil // best-effort
 	}
-	add := f.VerdictLabels.Label(verdict)
+	add := tf.VerdictLabels.Label(verdict)
 	if add == "" {
 		return fmt.Errorf("issue %s: no label configured for verdict %v", num, verdict)
 	}
-	remove := f.labels.Label(InProgress)
+	remove := tf.labels.Label(InProgress)
 	if remove != "" && !slices.Contains(iss.Labels, remove) {
 		return fmt.Errorf("issue %s: expected %q label, issue has %v", num, remove, iss.Labels)
 	}
@@ -179,22 +298,22 @@ func (f *Fake) CompleteVerdict(num string, verdict Verdict) error {
 	}
 	next = append(next, add)
 	iss.Labels = next
-	f.issues[num] = iss
+	tf.issues[num] = iss
 	return nil
 }
 
 // DepsOf returns num's scripted NativeDeps (DepSourceNative) when set,
 // otherwise the dependency IDs parsed from the issue body (DepSourceBody).
-func (f *Fake) DepsOf(num string) ([]Dependency, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.DepsOfCalls = append(f.DepsOfCalls, num)
-	if err := f.NativeDepsErr[num]; err == nil {
-		if native, ok := f.NativeDeps[num]; ok && len(native) > 0 {
+func (tf *IssueTrackerFake) DepsOf(num string) ([]Dependency, error) {
+	tf.mu.Lock()
+	defer tf.mu.Unlock()
+	tf.DepsOfCalls = append(tf.DepsOfCalls, num)
+	if err := tf.NativeDepsErr[num]; err == nil {
+		if native, ok := tf.NativeDeps[num]; ok && len(native) > 0 {
 			return WithSource(native, DepSourceNative), nil
 		}
 	}
-	iss, ok := f.issues[num]
+	iss, ok := tf.issues[num]
 	if !ok {
 		return nil, fmt.Errorf("issue %s not found", num)
 	}
@@ -211,11 +330,11 @@ func (f *Fake) DepsOf(num string) ([]Dependency, error) {
 // promise of its own, NativeDeps is an unordered map with no natural
 // "response order" to preserve, so a real github/jira adapter's own
 // BlocksOf may legitimately return the same set in a different order.
-func (f *Fake) BlocksOf(num string) ([]Dependency, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
+func (tf *IssueTrackerFake) BlocksOf(num string) ([]Dependency, error) {
+	tf.mu.Lock()
+	defer tf.mu.Unlock()
 	var ids []string
-	for child, blockers := range f.NativeDeps {
+	for child, blockers := range tf.NativeDeps {
 		if slices.Contains(blockers, num) {
 			ids = append(ids, child)
 		}
@@ -233,45 +352,67 @@ func (f *Fake) BlocksOf(num string) ([]Dependency, error) {
 
 // TouchesOf returns the touch-set parsed from num's issue body, mirroring
 // the real adapters' shared body-grammar default.
-func (f *Fake) TouchesOf(num string) ([]string, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if err, ok := f.TouchesOfErr[num]; ok {
+func (tf *IssueTrackerFake) TouchesOf(num string) ([]string, error) {
+	tf.mu.Lock()
+	defer tf.mu.Unlock()
+	if err, ok := tf.TouchesOfErr[num]; ok {
 		return nil, err
 	}
-	iss, ok := f.issues[num]
+	iss, ok := tf.issues[num]
 	if !ok {
 		return nil, fmt.Errorf("issue %s not found", num)
 	}
 	return ParseTouchPaths(iss.Body), nil
 }
 
-func (f *Fake) Comment(num, body string) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.CommentCalls = append(f.CommentCalls, CommentCall{num, body})
-	return f.CommentErr
+func (tf *IssueTrackerFake) Comment(num, body string) error {
+	tf.mu.Lock()
+	defer tf.mu.Unlock()
+	tf.CommentCalls = append(tf.CommentCalls, CommentCall{num, body})
+	return tf.CommentErr
 }
 
-func (f *Fake) ListLabels() ([]string, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if f.ListLabelsErr != nil {
-		return nil, f.ListLabelsErr
+func (tf *IssueTrackerFake) ListLabels() ([]string, error) {
+	tf.mu.Lock()
+	defer tf.mu.Unlock()
+	if tf.ListLabelsErr != nil {
+		return nil, tf.ListLabelsErr
 	}
-	src := f.Labels
-	if len(f.LabelsSeq) > 0 {
-		src = f.LabelsSeq[0]
-		f.LabelsSeq = f.LabelsSeq[1:]
+	src := tf.Labels
+	if len(tf.LabelsSeq) > 0 {
+		src = tf.LabelsSeq[0]
+		tf.LabelsSeq = tf.LabelsSeq[1:]
 	}
 	out := make([]string, len(src))
 	copy(out, src)
 	return out, nil
 }
 
-func (f *Fake) CreateLabel(name, description, color string) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.CreateLabelCalls = append(f.CreateLabelCalls, CreateLabelCall{name, description, color})
-	return f.CreateLabelErr
+func (tf *IssueTrackerFake) CreateLabel(name, description, color string) error {
+	tf.mu.Lock()
+	defer tf.mu.Unlock()
+	tf.CreateLabelCalls = append(tf.CreateLabelCalls, CreateLabelCall{name, description, color})
+	return tf.CreateLabelErr
+}
+
+// SetIssue upserts an issue into the fake store.
+func (tf *IssueTrackerFake) SetIssue(iss Issue) {
+	tf.mu.Lock()
+	defer tf.mu.Unlock()
+	tf.issues[iss.Number] = iss
+}
+
+func (tf *IssueTrackerFake) Probe() (string, error) {
+	tf.mu.Lock()
+	defer tf.mu.Unlock()
+	if tf.ProbeErr != nil {
+		return "", tf.ProbeErr
+	}
+	return tf.ProbeRepo, nil
+}
+
+// StateLabels implements LabeledTracker, returning the DispatchLabels the
+// Fake was constructed with.
+func (tf *IssueTrackerFake) StateLabels() DispatchLabels {
+	return tf.labels
 }
