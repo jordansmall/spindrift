@@ -520,76 +520,106 @@ _validate_marker_row() {
 # than re-deriving the gating condition from raw env vars -- the actual
 # source of truth for what got rendered, so this can never silently drift
 # from the real fragment-gating logic (see brief for #2249).
+#
+# Dispatches on each row's `when` field (pipe position 5) to decide whether
+# its gate is active and which rendered text to scan, then on its `severity`
+# field (pipe position 4) to decide whether a missing marker under an active
+# gate is fatal ("reject": print and exit 1) or advisory ("warn": print and
+# continue) -- a single loop over the four known ids instead of four
+# hand-copied if-blocks, so severity/when actually come from
+# _VALIDATE_MARKER_ROWS's data rather than being re-decided in bash for each
+# row id (issue #2318).
 _validate_prompt_contract() {
-  local _marker _row
+  local _id _row _marker _carrier _severity _when _gate _haystack _msg
 
-  # reject verdict-comment-relay: a read-only research dispatch's only path
-  # to post its verdict is the SPINDRIFT_COMMENT relay (research-prompt.md's
-  # POST THE VERDICT section) -- missing it here means the verdict can never
-  # reach the launcher.
-  if _is_research_kind && [ -n "$BOX_ACCESS_READ_ONLY" ]; then
-    _row="$(_validate_marker_row verdict-comment-relay)" || exit 1
-    IFS='|' read -r _ _marker _ <<<"$_row"
-    if [[ "$prompt" != *"$_marker"* ]]; then
-      echo "_validate_prompt_contract: read-only research dispatch's rendered prompt is missing the required '$_marker' marker -- this belongs in research-prompt.md's (or a SPINDRIFT_PROMPT_DIR override's) POST THE VERDICT section; without it a read-only Box has no way to hand its verdict to the launcher. Refusing to invoke the Driver." >&2
-      exit 1
+  for _id in verdict-comment-relay reviewer-verdict pr-intent issue-intent; do
+    _row="$(_validate_marker_row "$_id")" || exit 1
+    IFS='|' read -r _ _marker _carrier _severity _when <<<"$_row"
+
+    case "$_when" in
+      readOnlyResearch)
+        # A read-only research dispatch's only path to post its verdict is
+        # the SPINDRIFT_COMMENT relay (research-prompt.md's POST THE VERDICT
+        # section) -- missing it here means the verdict can never reach the
+        # launcher.
+        if _is_research_kind && [ -n "$BOX_ACCESS_READ_ONLY" ]; then
+          _gate=1
+        else
+          _gate=0
+        fi
+        _haystack="$prompt"
+        _msg="_validate_prompt_contract: read-only research dispatch's rendered prompt is missing the required '$_marker' marker -- this belongs in research-prompt.md's (or a SPINDRIFT_PROMPT_DIR override's) POST THE VERDICT section; without it a read-only Box has no way to hand its verdict to the launcher. Refusing to invoke the Driver."
+        ;;
+      orchestratorEnabled)
+        # review_prompt_rendered is only non-empty for a fresh, non-research,
+        # non-FIX_PASS dispatch with the orchestrator on -- exactly the case
+        # where a missing VERDICT: line would leave the multi-pass review
+        # loop with nothing to gate on. Orchestrator off, or
+        # review_prompt_rendered empty (research/FIX_PASS dispatch), is
+        # correctly a no-op here: the inline reviewer-subagent loop (or the
+        # research/fix pass's own contract) governs verdict-gating instead
+        # (orchestrator-fork-well-formed, issue #2047).
+        if [ -n "$ORCHESTRATOR" ] && [ -n "$review_prompt_rendered" ]; then
+          _gate=1
+        else
+          _gate=0
+        fi
+        _haystack="$review_prompt_rendered"
+        _msg="_validate_prompt_contract: the orchestrator's rendered review prompt is missing the required '$_marker' marker -- this belongs in review-prompt.md's (or a SPINDRIFT_PROMPT_DIR override's) verdict line; without it the code-owned review loop has nothing to gate on. Refusing to invoke the Driver."
+        ;;
+      boxAccessReadOnly)
+        # A read-only, non-research dispatch relies on the SPINDRIFT_PR_INTENT
+        # relay (issue-prompt.md's OPEN A PULL REQUEST section) to hand its
+        # finished branch to the launcher's host-mediated draft-PR step.
+        # Already has a working non-fatal backstop (the required-marker
+        # gate's pr-intent-recovery nudge below, plus settle's bundle-adopt
+        # salvage path), so a missing marker here is advisory only.
+        if [ -n "$BOX_ACCESS_READ_ONLY" ] && ! _is_research_kind; then
+          _gate=1
+        else
+          _gate=0
+        fi
+        _haystack="$prompt"
+        _msg="_validate_prompt_contract: warning -- read-only dispatch's rendered prompt is missing the '$_marker' marker (belongs in issue-prompt.md's, or fix-prompt.md's injected, OPEN A PULL REQUEST section). Proceeding: a status=ready run with no PR-intent line still gets one resume-nudge attempt post-driver, and a genuinely exhausted attempt falls back to the merge-blocked report rather than losing the branch."
+        ;;
+      filerFileRelay)
+        # A filer-relay dispatch relies on the SPINDRIFT_ISSUE_INTENT relay
+        # (filer-file-relay.md) to hand its filed issues to the launcher's
+        # host-mediated create step -- checked against the filer's own
+        # rendered prompt inside agents_json, not $prompt, since that's where
+        # filer-prompt.md's substituted text actually lands. Already has a
+        # working non-fatal backstop (the filer's best-effort PR-body
+        # fallback), so a missing marker here is advisory only.
+        if [ -n "$FILER_FILE_RELAY" ]; then
+          _gate=1
+        else
+          _gate=0
+        fi
+        _haystack="$(printf '%s' "${agents_json:-}" | jq -r '.filer.prompt // empty')"
+        _msg="_validate_prompt_contract: warning -- filer-relay dispatch's rendered filer prompt is missing the '$_marker' marker (belongs in filer-prompt.md's, or a SPINDRIFT_PROMPT_DIR override's, filer-file-relay.md-injected section). Proceeding: the filer's own best-effort PR-body fallback still records the issue reference even without the relay."
+        ;;
+      *)
+        echo "_validate_prompt_contract: no known gate for when '$_when' (row '$_id')" >&2
+        exit 1
+        ;;
+    esac
+
+    if [ "$_gate" -eq 1 ] && [[ "$_haystack" != *"$_marker"* ]]; then
+      case "$_severity" in
+        reject)
+          echo "$_msg" >&2
+          exit 1
+          ;;
+        warn)
+          echo "$_msg" >&2
+          ;;
+        *)
+          echo "_validate_prompt_contract: unknown severity '$_severity' for row '$_id'" >&2
+          exit 1
+          ;;
+      esac
     fi
-  fi
-
-  # reject reviewer-verdict: review_prompt_rendered is only non-empty for a
-  # fresh, non-research, non-FIX_PASS dispatch with the orchestrator on (see
-  # the if/elif/else above) -- exactly the case where a missing VERDICT:
-  # line would leave the multi-pass review loop with nothing to gate on. The
-  # marker lookup happens unconditionally, ahead of the $ORCHESTRATOR test
-  # below, so that test stays a single flat if/else with no nested fi ahead
-  # of its else -- the shape orchestrator-fork-well-formed's line-scan
-  # (nix/checks/prompts.nix) requires of every $ORCHESTRATOR conditional.
-  _row="$(_validate_marker_row reviewer-verdict)" || exit 1
-  IFS='|' read -r _ _marker _ <<<"$_row"
-  if [ -n "$ORCHESTRATOR" ] && [ -n "$review_prompt_rendered" ] \
-    && [[ "$review_prompt_rendered" != *"$_marker"* ]]; then
-    echo "_validate_prompt_contract: the orchestrator's rendered review prompt is missing the required '$_marker' marker -- this belongs in review-prompt.md's (or a SPINDRIFT_PROMPT_DIR override's) verdict line; without it the code-owned review loop has nothing to gate on. Refusing to invoke the Driver." >&2
-    exit 1
-  else
-    # Off-row (orchestrator-fork-well-formed, issue #2047): orchestrator off,
-    # review_prompt_rendered empty (research/FIX_PASS dispatch), or the
-    # marker is present -- the inline reviewer-subagent loop (or the
-    # research/fix pass's own contract) governs verdict-gating instead in
-    # the first two cases, so this row's reject condition is correctly a
-    # no-op here, not merely implicit.
-    :
-  fi
-
-  # warn pr-intent: a read-only, non-research dispatch relies on the
-  # SPINDRIFT_PR_INTENT relay (issue-prompt.md's OPEN A PULL REQUEST section)
-  # to hand its finished branch to the launcher's host-mediated draft-PR
-  # step. Already has a working non-fatal backstop (the required-marker
-  # gate's pr-intent-recovery nudge below, plus settle's bundle-adopt salvage
-  # path), so a missing marker here is advisory only.
-  if [ -n "$BOX_ACCESS_READ_ONLY" ] && ! _is_research_kind; then
-    _row="$(_validate_marker_row pr-intent)" || exit 1
-    IFS='|' read -r _ _marker _ <<<"$_row"
-    if [[ "$prompt" != *"$_marker"* ]]; then
-      echo "_validate_prompt_contract: warning -- read-only dispatch's rendered prompt is missing the '$_marker' marker (belongs in issue-prompt.md's, or fix-prompt.md's injected, OPEN A PULL REQUEST section). Proceeding: a status=ready run with no PR-intent line still gets one resume-nudge attempt post-driver, and a genuinely exhausted attempt falls back to the merge-blocked report rather than losing the branch." >&2
-    fi
-  fi
-
-  # warn issue-intent: a filer-relay dispatch relies on the
-  # SPINDRIFT_ISSUE_INTENT relay (filer-file-relay.md) to hand its filed
-  # issues to the launcher's host-mediated create step -- checked against the
-  # filer's own rendered prompt inside agents_json, not $prompt, since that's
-  # where filer-prompt.md's substituted text actually lands. Already has a
-  # working non-fatal backstop (the filer's best-effort PR-body fallback), so
-  # a missing marker here is advisory only.
-  if [ -n "$FILER_FILE_RELAY" ]; then
-    _row="$(_validate_marker_row issue-intent)" || exit 1
-    IFS='|' read -r _ _marker _ <<<"$_row"
-    local _filer_prompt
-    _filer_prompt="$(printf '%s' "${agents_json:-}" | jq -r '.filer.prompt // empty')"
-    if [[ "$_filer_prompt" != *"$_marker"* ]]; then
-      echo "_validate_prompt_contract: warning -- filer-relay dispatch's rendered filer prompt is missing the '$_marker' marker (belongs in filer-prompt.md's, or a SPINDRIFT_PROMPT_DIR override's, filer-file-relay.md-injected section). Proceeding: the filer's own best-effort PR-body fallback still records the issue reference even without the relay." >&2
-    fi
-  fi
+  done
 }
 
 # A SPINDRIFT_PROMPT_DIR mount replaces the whole prompt dir, so a rendered
