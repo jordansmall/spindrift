@@ -118,7 +118,7 @@ func (s *Settle) adoptAndGate(d dispatch.Dispatcher, num string, gen uint64, res
 // SettleRelayedBranch is spindrift recover's adopt-a-relayed-branch arm
 // (issue #2225). With no open PR on num, recover consults the driver's own
 // last genuine success self-report (result.Resolved.SelfReport, issue #2223 —
-// recovered from disk by dispatch.LastSelfReportFromLogs) for evidence a
+// recovered from disk by dispatch.ResolveFromLogs) for evidence a
 // prior run finished the work and relayed its branch to the outbox before
 // stranding without a PR. Unlike tryAdoptRelayedBranch, this does NOT
 // require result.Resolved.Provenance == outcome.ProvenanceSynthetic or

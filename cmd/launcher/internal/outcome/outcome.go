@@ -261,7 +261,7 @@ func lastSelfReportInLog(path string) (report SelfReport, found bool, err error)
 // when the genuine tier comes up empty (Resolve's self-report tier is only
 // reachable when the genuine tier found nothing at all). dispatch's
 // Result.SelfReport (retry.go's outcomeResult, one log) and `spindrift
-// recover`'s LastSelfReportFromLogs (multiple logs, its own last-pass-wins
+// recover`'s ResolveFromLogs (multiple logs, its own last-pass-wins
 // walk) are exactly this: an independent signal read alongside
 // Result.Outcome, never an either/or against it. Exposing this single tier
 // on its own does not let a caller reimplement, or diverge from, the
@@ -369,7 +369,7 @@ type Resolved struct {
 //
 // Resolve walks logs in order calling lastInLog(log.Path), keeping
 // the last log that reports a match ("last pass wins", the same precedence
-// LastSelfReportFromLogs already applies across passes). A parse error on
+// ResolveFromLogs already applies across passes). A parse error on
 // the chosen candidate line (lastInLog's own near-miss contract) propagates
 // as Resolve's error. If a match was found, Resolved.Provenance is
 // ProvenanceSynthetic when the winning line's Outcome.Synthetic is true,
@@ -490,7 +490,7 @@ func Resolve(logs []PassLog, kind string) (Resolved, error) {
 // lastSelfReportAcrossLogs walks logs in order calling
 // lastSelfReportInLog(log.Path) for each, keeping the last one that reports a
 // match — the same "last pass wins" precedence Resolve's genuine/synthetic
-// walk and dispatch.LastSelfReportFromLogs both apply. Unlike that walk, an
+// walk and dispatch.ResolveFromLogs both apply. Unlike that walk, an
 // I/O error here is not propagated to the caller: lastSelfReportInLog only
 // errors on a genuine I/O failure (never a parse failure — a self-report has
 // no near-miss shape to fail), and this is already the last-resort fallback
