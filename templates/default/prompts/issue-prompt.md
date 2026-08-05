@@ -9,6 +9,39 @@ Fresh clone, new branch `${BRANCH}` cut from `${BASE_BRANCH}`. This issue only.
 Read first (run these yourself):
 
 ${ISSUE_READ_GITHUB_STEP}${ISSUE_READ_LOCAL_STEP}${ISSUE_READ_FORGEJO_STEP}
+# ISSUE COHERENCE GATE
+
+Before scouting or implementing anything, compare the issue's title against
+its body.
+
+Materially unrelated means the body describes a different, contradictory
+piece of work than the title — not a body that merely elaborates, restates,
+or adds detail or acceptance criteria to the title's own topic. A body that
+narrows, explains, or expands on what the title already says is well-formed
+and must pass through untouched — this check exists to catch a genuine
+title/body mismatch, not to second-guess a normal issue; halting on a normal
+issue is itself a failure of this gate.
+
+On a genuine mismatch: halt immediately. Do not scout, do not open a
+branch's worth of commits, do not write any diff.
+
+Put the escalation — naming both interpretations, what the title implies and
+what the body implies, and asking a human which one governs — in the
+SPINDRIFT_OUTCOME line's `note=` field below. Do nothing else to post it
+yourself: the launcher posts that note as the issue comment, host-side, once
+you exit.
+
+Print exactly one line and stop — raw plain text, not wrapped in backticks,
+a code fence, or any other markdown formatting, nothing after it:
+
+SPINDRIFT_OUTCOME issue=${ISSUE_NUMBER} landing=${BRANCH} status=ambiguous note=<escalation naming both interpretations>
+
+`status=ambiguous` is a distinct, successful, non-crash stop — never
+`status=blocked`, and never a signal that implementation itself failed.
+
+If title and body agree — the common case — proceed straight into # SCOUT
+below with no further comment about this gate.
+
 # COMMS
 
 ${CAVEMAN_STEP}Your text output is a machine-parsed log, not a conversation.
@@ -187,7 +220,9 @@ THE CHANGE above.)
 ${OUTCOME_LANDING_READ_WRITE_STEP}${OUTCOME_LANDING_READ_ONLY_STEP}Grammar: `SPINDRIFT_OUTCOME issue=${ISSUE_NUMBER} landing=<landing-ref> status=<status> note=<short reason>`
 — one line, space-delimited fields, `note` last (`note` may itself contain
 spaces and `=`). The only valid `status` values here are `ready` and `blocked`
-— no other word belongs in that field.
+— no other word belongs in that field (`status=ambiguous` is a distinct,
+earlier CHECK ISSUE COHERENCE gate that exits the run before ever reaching
+this OUTCOME section, not a third option here).
 
 This grammar's leading token is load-bearing (ADR 0035): the in-box
 orchestrator's scanPassLog greps for it verbatim (via
