@@ -7,7 +7,9 @@ import "fmt"
 // error: <err>" when a CheckState call itself errored (stateErr non-nil,
 // checked first since it fires ahead of any deadline check), otherwise
 // "ci-timeout: CI-watch deadline reached after <deadline>s" for the plain
-// poll-loop-ran-out-the-clock case.
+// poll-loop-ran-out-the-clock case. deadline is MergePollTimeout, which is
+// documented and stored in seconds — the hardcoded "s" suffix below tracks
+// that unit and must move with any future change to the field's unit.
 func gateTerminalReason(stateErr error, deadline int) string {
 	if stateErr != nil {
 		return fmt.Sprintf("ci-check-error: %v", stateErr)
