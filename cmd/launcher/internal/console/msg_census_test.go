@@ -1,6 +1,7 @@
 package console
 
 import (
+	"reflect"
 	"sort"
 	"strings"
 	"testing"
@@ -43,6 +44,9 @@ func TestMsgCensusMatchesDeclaredMsgTypes(t *testing.T) {
 	sort.Strings(extra)
 
 	if len(missing) == 0 && len(extra) == 0 {
+		if !reflect.DeepEqual(declared, msgCensus) {
+			t.Errorf("msgCensus lists the same Msg types as declared but out of sorted order: want %v, got %v. Regenerate with `go generate ./cmd/launcher/internal/console`.", declared, msgCensus)
+		}
 		return
 	}
 
