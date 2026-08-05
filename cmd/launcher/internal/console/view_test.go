@@ -278,6 +278,28 @@ func TestView_Header_StatusLine_ShowsRecoverable(t *testing.T) {
 	}
 }
 
+// TestView_Header_StatusLine_RecoverableStyledDistinctFromHeld verifies the
+// "recoverable N" segment renders with RoleRecoverable's cyan ANSI slot
+// (\x1b[36m), not RoleHeld's yellow (\x1b[33m) — held and recoverable are
+// distinct session axes (issue #2255) and must be visually distinguishable
+// (issue #2314).
+func TestView_Header_StatusLine_RecoverableStyledDistinctFromHeld(t *testing.T) {
+	t.Setenv("NO_COLOR", "")
+	t.Setenv("TERM", "xterm-256color")
+
+	m := NewModel()
+	m = Update(m, IssuesLoadedMsg{RecoverableCount: 2})
+	m.Picks = []Pick{{Number: "1", State: PickHeld}}
+
+	out := View(m)
+	if !strings.Contains(out, "\x1b[36mrecoverable 2\x1b[0m") {
+		t.Errorf("View() = %q, want the recoverable segment styled with RoleRecoverable's cyan (\\x1b[36m), not RoleHeld's yellow", out)
+	}
+	if !strings.Contains(out, "\x1b[33mheld 1\x1b[0m") {
+		t.Errorf("View() = %q, want the held segment styled with RoleHeld's yellow (\\x1b[33m)", out)
+	}
+}
+
 // TestView_Header_StatusLine_StyledByRole verifies the status line renders
 // with ANSI color codes on a color-capable terminal — colour applied by
 // semantic role, per ADR 0031 — rather than as bare text.
