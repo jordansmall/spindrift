@@ -28,6 +28,13 @@ var ErrMergeBlockedByChecks = errors.New("merge blocked by checks")
 // non-fast-forward rejection. Callers may retry a bounded number of times.
 var ErrTransientPushFailure = errors.New("transient push failure")
 
+// ErrMergeTransient is returned by Merge when the merge call itself fails
+// for a transient transport/server reason — an HTTP 5xx from the forge, a
+// network timeout, or similar — as opposed to a genuine merge rejection
+// (conflict, blocked by checks, branch protection). Callers may retry a
+// bounded number of times with backoff.
+var ErrMergeTransient = errors.New("transient merge failure")
+
 // ErrAuthFailure is returned by Probe when the forge credentials are missing
 // or invalid. Callers should advise the user to check GH_TOKEN.
 var ErrAuthFailure = errors.New("forge auth failure")

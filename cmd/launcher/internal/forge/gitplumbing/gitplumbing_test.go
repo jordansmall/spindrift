@@ -24,6 +24,43 @@ func TestIsMergeConflict_IgnoresUnrelatedError(t *testing.T) {
 	}
 }
 
+func TestIsMergeTransient(t *testing.T) {
+	cases := []struct {
+		name   string
+		stderr string
+		want   bool
+	}{
+		{
+			name:   "502 bad gateway",
+			stderr: "HTTP 502: Bad Gateway (https://api.github.com/repos/org/repo/pulls/1/merge)",
+			want:   true,
+		},
+		{
+			name:   "timeout",
+			stderr: "error: context deadline exceeded: request timeout",
+			want:   true,
+		},
+		{
+			name:   "genuine merge conflict",
+			stderr: "error: merge conflict in file.go: not mergeable",
+			want:   false,
+		},
+		{
+			name:   "unrelated auth failure",
+			stderr: "error: permission denied: bad credentials",
+			want:   false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := IsMergeTransient(tc.stderr); got != tc.want {
+				t.Fatalf("IsMergeTransient(%q) = %v, want %v", tc.stderr, got, tc.want)
+			}
+		})
+	}
+}
+
 // TestGitForcePush_StaleLeaseIsNotTransient verifies that a genuine
 // stale-lease rejection — the branch moved since the last fetch, so the
 // rebase really is out of date — is NOT classified as transient: retrying it
