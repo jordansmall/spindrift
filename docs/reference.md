@@ -1872,6 +1872,21 @@ gh label create agent-priority-high     --repo owner/repo --color ff8c00 --descr
 gh label create agent-priority-low      --repo owner/repo --color 8a9ba8 --description "Dispatch behind normal-priority issues"
 ```
 
+#### Create the ambiguous-spec label on the Target repo
+
+The `agent-ambiguous-spec` label (issue #2275) is a single fixed,
+non-configurable label the pre-implement gate applies when an issue is
+internally contradictory rather than merely hard — a distinct terminal from
+`agent-failed`, since the Box halted deliberately rather than crashing.
+`spindrift doctor` checks and, in interactive mode, offers to create it too,
+but treats it as advisory: like the research and priority labels above, a
+missing `agent-ambiguous-spec` label never fails the check. To create it
+manually:
+
+```sh
+gh label create agent-ambiguous-spec --repo owner/repo --color e0cffc --description "An internally-contradictory issue; needs a human decision — not a crash"
+```
+
 #### Configuring the research verdict vocabulary (`RESEARCH_VERDICTS`)
 
 By default the research kind's verdict terminals are the fixed three above:
