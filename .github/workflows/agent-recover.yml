@@ -111,10 +111,12 @@ jobs:
       # agent-in-progress with nothing running.
       - name: Park if nothing to recover
         if: always() && steps.recover.outcome == 'failure'
+        env:
+          RECOVER_REASON: ${{ steps.recover.outputs.recover-reason || 'unknown error — see run logs' }}
         run: |
           gh issue comment "${{ github.event.issue.number }}" \
             --repo "${{ github.repository }}" \
-            --body "⚠️ \`spindrift recover\` could not adopt anything for \`agent/issue-${{ github.event.issue.number }}\`: ${{ steps.recover.outputs.recover-reason || 'unknown error — see run logs' }}. Parked to \`agent-failed\`; re-label \`agent-recover\` once an open PR exists, or \`ready-for-agent\` to re-dispatch from scratch."
+            --body "⚠️ \`spindrift recover\` could not adopt anything for \`agent/issue-${{ github.event.issue.number }}\`: $RECOVER_REASON. Parked to \`agent-failed\`; re-label \`agent-recover\` once an open PR exists, or \`ready-for-agent\` to re-dispatch from scratch."
           gh issue edit "${{ github.event.issue.number }}" \
             --repo "${{ github.repository }}" \
             --add-label agent-failed \
