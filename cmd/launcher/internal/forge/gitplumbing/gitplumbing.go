@@ -24,7 +24,9 @@ func IsMergeConflict(stderr string) bool {
 // IsMergeTransient returns true when gh's stderr indicates a transient
 // transport/server failure — an HTTP 5xx from the forge, a network timeout,
 // or similar — as opposed to a genuine merge rejection (conflict, blocked by
-// checks, branch protection).
+// checks, branch protection). The "timeout"/"eof" markers are broad enough
+// to appear in unrelated stderr; callers must check IsMergeConflict first so
+// a genuine conflict is never misclassified as transient.
 func IsMergeTransient(stderr string) bool {
 	s := strings.ToLower(stderr)
 	markers := []string{
