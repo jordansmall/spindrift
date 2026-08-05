@@ -83,6 +83,11 @@ setup_fakes() {
   : "${DRIVER:=claude}"
   cp "$FAKES_DIR/gh" "$FAKES_DIR/$DRIVER" "$FAKES_DIR/nix" \
      "$FAKES_DIR/driver-exec" "$FAKES_DIR/orchestrator" "$FAKE_BIN/"
+  # tests/fakes/claude and tests/fakes/opencode both source their shared
+  # control-flow block from tests/fakes/_driver-common.bash (relative to
+  # their own directory at runtime) -- copy it alongside the driver fake
+  # above so that resolves.
+  cp "$FAKES_DIR/_driver-common.bash" "$FAKE_BIN/"
   chmod +x "$FAKE_BIN"/*
   export PATH="$FAKE_BIN:$PATH"
 
