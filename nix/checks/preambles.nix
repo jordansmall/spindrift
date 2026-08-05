@@ -355,6 +355,7 @@ in
         "DRIVER_SESSION_CACHE_DIR"
         "DRIVER_SKILLS_DIR"
         "FLAKE_IMAGE_ATTR"
+        "GITHUB_OUTPUT"
         "IMAGE"
         "IMAGE_ARCHIVE"
         "IMAGE_DRV"
@@ -365,7 +366,7 @@ in
       ];
     in
     assert assertMsg (out == expected)
-      "documentArtifactKeys must be the sorted union of runArtifacts/buildArtifacts output keys (both runnerKinds) plus the manual IMAGE escape hatch, got: ${builtins.toJSON out}";
+      "documentArtifactKeys must be the sorted union of runArtifacts/buildArtifacts output keys (both runnerKinds) plus the manual IMAGE and GITHUB_OUTPUT escape hatches, got: ${builtins.toJSON out}";
     pkgs.runCommand "preambles-document-artifact-keys" { } "touch $out";
 
   # renderInputDocumentJSON must combine settings + artifacts into the

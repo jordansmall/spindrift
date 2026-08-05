@@ -175,9 +175,11 @@ rec {
   # what actually gets rendered, instead of hand-maintaining a parallel list
   # that can silently drift from it (issue #810). Called with placeholder
   # args at eval time: only each function's output *keys* matter here, not
-  # the values. IMAGE is the one exception: a manual escape hatch read via
+  # the values. IMAGE and GITHUB_OUTPUT are manual escape hatches read via
   # getenvArtifact's env-only fallback, never emitted by either function, so
-  # it's added explicitly rather than derived.
+  # they're added explicitly rather than derived. GITHUB_OUTPUT is GitHub
+  # Actions' own ambient step-output file path (#2324), not spindrift
+  # plumbing, but the same env-only-escape-hatch shape as IMAGE.
   documentArtifactKeys =
     let
       dummyDriverEntry = {
@@ -225,7 +227,10 @@ rec {
           "bwrap"
           "oci"
         ]
-        ++ [ "IMAGE" ];
+        ++ [
+          "IMAGE"
+          "GITHUB_OUTPUT"
+        ];
     in
     builtins.sort builtins.lessThan (unique allKeys);
 
