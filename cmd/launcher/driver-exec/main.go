@@ -6,10 +6,11 @@
 // (absorbing the former standalone spindrift-heartbeat-filter binary), and
 // returns the Driver's exit code.
 //
-// It owns process mechanics: invocation data stays registry-supplied by
-// agent/entrypoint.sh, and outcome extraction stays the Driver's nix-half
-// shell function applied to the log path afterward. Its `bundle-out` verb
-// (issue #1808) additionally owns CODE_FORGE=local's harness-side code-out:
+// It owns process mechanics: the fragment registry stays nix-supplied; the
+// verb owns gate computation and assembly over it. Outcome extraction stays
+// the Driver's nix-half shell function applied to the log path afterward.
+// Its `bundle-out` verb (issue #1808) additionally owns CODE_FORGE=local's
+// harness-side code-out:
 // bundling the base..agent-branch range into the outbox after the Driver
 // exits, so the Agent's contract there shrinks to "commit on the branch,"
 // the same as every other Code Forge.
