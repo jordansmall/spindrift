@@ -111,6 +111,7 @@ in
           ${../../tests/fakes/gh} \
           ${../../tests/fakes/claude} \
           ${../../tests/fakes/opencode} \
+          ${../../tests/fakes/_driver-common.bash} \
           ${../../tests/fakes/nix} \
           ${../../tests/fakes/driver-exec} \
           ${../../tests/helper.bash} \
