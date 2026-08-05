@@ -34,9 +34,11 @@ func TestSettle_PostsUsageComment_Blocked(t *testing.T) {
 	d := dispatch.NewFake()
 	d.UsageReportBody = "## Run usage\n\ncost: 0.25"
 	result := dispatch.Result{
-		Success:      true,
-		OutcomeFound: true,
-		Outcome:      outcome.Outcome{Issue: issNum, Landing: prURL, Status: "blocked", Note: "tests failing"},
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: issNum, Landing: prURL, Status: "blocked", Note: "tests failing"},
+		},
 	}
 
 	s := New(baseConfig(), fc.AsNoLandingRecorder(), fc)
@@ -63,9 +65,11 @@ func TestSettle_BlockedOutcome_DemotesToFailed(t *testing.T) {
 
 	d := dispatch.NewFake()
 	result := dispatch.Result{
-		Success:      true,
-		OutcomeFound: true,
-		Outcome:      outcome.Outcome{Issue: issNum, Landing: prURL, Status: "blocked", Note: "tests failing"},
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: issNum, Landing: prURL, Status: "blocked", Note: "tests failing"},
+		},
 	}
 
 	s := New(baseConfig(), fc, fc)
@@ -93,9 +97,11 @@ func TestSettle_ConsoleUsesLandingLabel(t *testing.T) {
 
 	d := dispatch.NewFake()
 	result := dispatch.Result{
-		Success:      true,
-		OutcomeFound: true,
-		Outcome:      outcome.Outcome{Issue: issNum, Landing: prURL, Status: "blocked", Note: "tests failing; expr=1 mismatch"},
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: issNum, Landing: prURL, Status: "blocked", Note: "tests failing; expr=1 mismatch"},
+		},
 	}
 
 	s := New(baseConfig(), fc, fc)
@@ -125,9 +131,11 @@ func TestSettle_UsageMissing_NoCrash(t *testing.T) {
 	d := dispatch.NewFake()
 	d.UsageReportBody = "## Run usage\n\nModel: `unknown`\n\nUsage data unavailable (no result event in log)."
 	result := dispatch.Result{
-		Success:      true,
-		OutcomeFound: true,
-		Outcome:      outcome.Outcome{Issue: issNum, Landing: prURL, Status: "blocked", Note: "no result"},
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: issNum, Landing: prURL, Status: "blocked", Note: "no result"},
+		},
 	}
 
 	s := New(baseConfig(), fc.AsNoLandingRecorder(), fc)
@@ -154,9 +162,11 @@ func TestSettle_PostsUsageComment_Ready(t *testing.T) {
 	d := dispatch.NewFake()
 	d.UsageReportBody = "## Run usage\n\nbreakdown included"
 	result := dispatch.Result{
-		Success:      true,
-		OutcomeFound: true,
-		Outcome:      outcome.Outcome{Issue: issNum, Landing: prURL, Status: "ready", Note: "ok"},
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: issNum, Landing: prURL, Status: "ready", Note: "ok"},
+		},
 	}
 
 	c := baseConfig()
@@ -185,9 +195,11 @@ func TestSettle_ImmediateMergeClosesIssue(t *testing.T) {
 	fc.SetCheckStates(prURL, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
 
 	result := dispatch.Result{
-		Success:      true,
-		OutcomeFound: true,
-		Outcome:      outcome.Outcome{Issue: issNum, Landing: prURL, Status: "ready", Note: "ok"},
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: issNum, Landing: prURL, Status: "ready", Note: "ok"},
+		},
 	}
 
 	s := New(baseConfig(), fc, fc)
@@ -214,9 +226,11 @@ func TestSettle_LocalTrackerWithPRForgeDoesNotClose(t *testing.T) {
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
 
 	result := dispatch.Result{
-		Success:      true,
-		OutcomeFound: true,
-		Outcome:      outcome.Outcome{Issue: issNum, Landing: testPR, Status: "ready", Note: "ok"},
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: issNum, Landing: testPR, Status: "ready", Note: "ok"},
+		},
 	}
 
 	s := New(baseConfig(), fc.AsLocalShaped(), fc)
@@ -247,9 +261,11 @@ func TestSettle_ManualModeDoesNotCloseIssue(t *testing.T) {
 			c := baseConfig()
 			c.MergeMode = mode
 			result := dispatch.Result{
-				Success:      true,
-				OutcomeFound: true,
-				Outcome:      outcome.Outcome{Issue: issNum, Landing: testPR, Status: "ready", Note: "ok"},
+				Success: true,
+				Resolved: outcome.Resolved{
+					Found:   true,
+					Outcome: outcome.Outcome{Issue: issNum, Landing: testPR, Status: "ready", Note: "ok"},
+				},
 			}
 
 			s := New(c, fc, fc)
@@ -277,9 +293,11 @@ func TestSettle_RedCIDoesNotCloseIssue(t *testing.T) {
 	c := baseConfig()
 	c.MaxFixAttempts = 0
 	result := dispatch.Result{
-		Success:      true,
-		OutcomeFound: true,
-		Outcome:      outcome.Outcome{Issue: issNum, Landing: testPR, Status: "ready", Note: "ok"},
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: issNum, Landing: testPR, Status: "ready", Note: "ok"},
+		},
 	}
 
 	s := New(c, fc, fc)
@@ -380,9 +398,11 @@ func TestSettle_GitForge_MergedStatusSkipsVerify(t *testing.T) {
 
 	d := dispatch.NewFake()
 	result := dispatch.Result{
-		Success:      true,
-		OutcomeFound: true,
-		Outcome:      outcome.Outcome{Issue: "1", Landing: branch, Status: "merged", Note: "ok"},
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: "1", Landing: branch, Status: "merged", Note: "ok"},
+		},
 	}
 
 	s := New(baseConfig(), fc, fc.AsPushOnly())
@@ -537,9 +557,11 @@ func TestSettle_RecordsLanding_WhenTrackerImplementsIt(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
 
 	result := dispatch.Result{
-		Success:      true,
-		OutcomeFound: true,
-		Outcome:      outcome.Outcome{Issue: issNum, Landing: prURL, Status: "blocked", Note: "tests failing"},
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: issNum, Landing: prURL, Status: "blocked", Note: "tests failing"},
+		},
 	}
 
 	s := New(baseConfig(), fc, fc)
@@ -566,9 +588,11 @@ func TestSettle_RecordsLanding_OnReadyOutcome(t *testing.T) {
 	fc.SetCheckStates(prURL, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
 
 	result := dispatch.Result{
-		Success:      true,
-		OutcomeFound: true,
-		Outcome:      outcome.Outcome{Issue: issNum, Landing: prURL, Status: "ready", Note: "ok"},
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: issNum, Landing: prURL, Status: "ready", Note: "ok"},
+		},
 	}
 
 	s := New(baseConfig(), fc, fc)
@@ -594,9 +618,11 @@ func TestSettle_RecordLanding_NoOpWhenTrackerDoesNotImplementIt(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
 
 	result := dispatch.Result{
-		Success:      true,
-		OutcomeFound: true,
-		Outcome:      outcome.Outcome{Issue: issNum, Landing: prURL, Status: "blocked", Note: "tests failing"},
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: issNum, Landing: prURL, Status: "blocked", Note: "tests failing"},
+		},
 	}
 
 	s := New(baseConfig(), fc.AsNoLandingRecorder(), fc)

@@ -82,11 +82,11 @@ func NewResearchSettleReadOnly(it forge.IssueTracker, verdicts forge.VerdictLabe
 // posted host-side via Comment before the verdict label is applied — a
 // missing or malformed block is treated the same as a missing outcome line.
 func (r *ResearchSettle) Settle(d dispatch.Dispatcher, num string, gen uint64, result dispatch.Result) {
-	if !result.OutcomeFound {
+	if !result.Resolved.Found {
 		r.fail(num, "no verdict outcome line")
 		return
 	}
-	o := result.Outcome
+	o := result.Resolved.Outcome
 	verdict, ok := r.verdicts.Parse(o.Status)
 	if !ok {
 		r.fail(num, o.Note)

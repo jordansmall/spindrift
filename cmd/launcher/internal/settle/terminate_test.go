@@ -351,9 +351,11 @@ func TestSettle_AbandonedSkipsUsageComment(t *testing.T) {
 
 	d := dispatch.NewFake()
 	s.Settle(d, "1", 0, dispatch.Result{
-		Success:      true,
-		OutcomeFound: true,
-		Outcome:      outcome.Outcome{Issue: "1", Landing: testPR, Status: "ready", Note: "ok"},
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: "1", Landing: testPR, Status: "ready", Note: "ok"},
+		},
 	})
 
 	if len(fc.CommentCalls) != 0 {

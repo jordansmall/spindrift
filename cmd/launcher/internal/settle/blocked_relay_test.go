@@ -34,9 +34,11 @@ func TestSettle_GithubReadOnly_BlockedRelaysBundleAndCreatesDraftPR(t *testing.T
 
 	d := dispatch.NewFake()
 	result := dispatch.Result{
-		Success:       true,
-		OutcomeFound:  true,
-		Outcome:       outcome.Outcome{Issue: issNum, Landing: branch, Status: "blocked", Note: "review never cleared"},
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: issNum, Landing: branch, Status: "blocked", Note: "review never cleared"},
+		},
 		PRIntent:      "feat: add widget\n\nAdds a widget.",
 		PRIntentFound: true,
 	}
@@ -68,7 +70,7 @@ func TestSettle_GithubReadOnly_BlockedRelaysBundleAndCreatesDraftPR(t *testing.T
 	}
 	var noteCalls []forge.CommentCall
 	for _, call := range fc.CommentCalls {
-		if call.Body == result.Outcome.Note {
+		if call.Body == result.Resolved.Outcome.Note {
 			noteCalls = append(noteCalls, call)
 		}
 	}
@@ -92,9 +94,11 @@ func TestSettle_GithubReadOnly_BlockedRelaysBundleWithoutPRIntent(t *testing.T) 
 
 	d := dispatch.NewFake()
 	result := dispatch.Result{
-		Success:      true,
-		OutcomeFound: true,
-		Outcome:      outcome.Outcome{Issue: issNum, Landing: branch, Status: "blocked", Note: "push rejected"},
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: issNum, Landing: branch, Status: "blocked", Note: "push rejected"},
+		},
 		// PRIntentFound left false: the box's log had no PR-intent line.
 	}
 
@@ -134,9 +138,11 @@ func TestSettle_LocalReadOnly_BlockedRelaysBundleWithoutDraftPR(t *testing.T) {
 
 	d := dispatch.NewFake()
 	result := dispatch.Result{
-		Success:       true,
-		OutcomeFound:  true,
-		Outcome:       outcome.Outcome{Issue: issNum, Landing: branch, Status: "blocked", Note: "review never cleared"},
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: issNum, Landing: branch, Status: "blocked", Note: "review never cleared"},
+		},
 		PRIntent:      "feat: add widget\n\nAdds a widget.",
 		PRIntentFound: true,
 	}
@@ -161,7 +167,7 @@ func TestSettle_LocalReadOnly_BlockedRelaysBundleWithoutDraftPR(t *testing.T) {
 	}
 	var noteCalls []forge.CommentCall
 	for _, call := range fc.CommentCalls {
-		if call.Body == result.Outcome.Note {
+		if call.Body == result.Resolved.Outcome.Note {
 			noteCalls = append(noteCalls, call)
 		}
 	}
@@ -184,9 +190,11 @@ func TestSettle_GithubReadWrite_BlockedUnaffectedByHostMediation(t *testing.T) {
 
 	d := dispatch.NewFake()
 	result := dispatch.Result{
-		Success:       true,
-		OutcomeFound:  true,
-		Outcome:       outcome.Outcome{Issue: issNum, Landing: "https://github.com/owner/repo/pull/1933", Status: "blocked", Note: "push rejected"},
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: issNum, Landing: "https://github.com/owner/repo/pull/1933", Status: "blocked", Note: "push rejected"},
+		},
 		PRIntent:      "feat: add widget\n\nAdds a widget.",
 		PRIntentFound: true,
 	}
@@ -221,9 +229,11 @@ func TestSettle_LocalReadWrite_BlockedUnaffectedByHostMediation(t *testing.T) {
 
 	d := dispatch.NewFake()
 	result := dispatch.Result{
-		Success:       true,
-		OutcomeFound:  true,
-		Outcome:       outcome.Outcome{Issue: issNum, Landing: fc.AgentBranch(issNum), Status: "blocked", Note: "push rejected"},
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: issNum, Landing: fc.AgentBranch(issNum), Status: "blocked", Note: "push rejected"},
+		},
 		PRIntent:      "feat: add widget\n\nAdds a widget.",
 		PRIntentFound: true,
 	}
@@ -254,9 +264,11 @@ func TestSettle_GithubReadOnly_BlockedRelayFailureSkipsDraftPRButStaysBlocked(t 
 
 	d := dispatch.NewFake()
 	result := dispatch.Result{
-		Success:       true,
-		OutcomeFound:  true,
-		Outcome:       outcome.Outcome{Issue: issNum, Landing: branch, Status: "blocked", Note: "review never cleared"},
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: issNum, Landing: branch, Status: "blocked", Note: "review never cleared"},
+		},
 		PRIntent:      "feat: add widget\n\nAdds a widget.",
 		PRIntentFound: true,
 	}
@@ -296,9 +308,11 @@ func TestSettle_GithubReadOnly_BlockedRelayAbsentBundleLogsBenign(t *testing.T) 
 
 	d := dispatch.NewFake()
 	result := dispatch.Result{
-		Success:       true,
-		OutcomeFound:  true,
-		Outcome:       outcome.Outcome{Issue: issNum, Landing: branch, Status: "blocked", Note: "review never cleared"},
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: issNum, Landing: branch, Status: "blocked", Note: "review never cleared"},
+		},
 		PRIntent:      "feat: add widget\n\nAdds a widget.",
 		PRIntentFound: true,
 	}
@@ -363,9 +377,11 @@ func TestSettle_LocalReadOnly_BlockedRelayFailureStaysBlocked(t *testing.T) {
 
 	d := dispatch.NewFake()
 	result := dispatch.Result{
-		Success:      true,
-		OutcomeFound: true,
-		Outcome:      outcome.Outcome{Issue: issNum, Landing: branch, Status: "blocked", Note: "review never cleared"},
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: issNum, Landing: branch, Status: "blocked", Note: "review never cleared"},
+		},
 	}
 
 	c := baseConfig()
@@ -401,9 +417,11 @@ func TestSettle_LocalReadOnly_BlockedRelayAbsentBundleLogsBenign(t *testing.T) {
 
 	d := dispatch.NewFake()
 	result := dispatch.Result{
-		Success:      true,
-		OutcomeFound: true,
-		Outcome:      outcome.Outcome{Issue: issNum, Landing: branch, Status: "blocked", Note: "review never cleared"},
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: issNum, Landing: branch, Status: "blocked", Note: "review never cleared"},
+		},
 	}
 
 	c := baseConfig()
@@ -461,9 +479,11 @@ func TestSettle_GithubReadOnly_BlockedDraftPRFailureStillReportsBlocked(t *testi
 
 	d := dispatch.NewFake()
 	result := dispatch.Result{
-		Success:       true,
-		OutcomeFound:  true,
-		Outcome:       outcome.Outcome{Issue: issNum, Landing: branch, Status: "blocked", Note: "review never cleared"},
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: issNum, Landing: branch, Status: "blocked", Note: "review never cleared"},
+		},
 		PRIntent:      "feat: add widget\n\nAdds a widget.",
 		PRIntentFound: true,
 	}

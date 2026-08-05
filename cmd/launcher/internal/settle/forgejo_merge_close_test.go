@@ -125,9 +125,11 @@ func TestSettle_ImmediateMergeClosesForgejoIssue(t *testing.T) {
 	cf.SetCheckStates(prURL, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
 
 	result := dispatch.Result{
-		Success:      true,
-		OutcomeFound: true,
-		Outcome:      outcome.Outcome{Issue: issNum, Landing: prURL, Status: "ready", Note: "ok"},
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: issNum, Landing: prURL, Status: "ready", Note: "ok"},
+		},
 	}
 
 	s := New(baseConfig(), it, cf)

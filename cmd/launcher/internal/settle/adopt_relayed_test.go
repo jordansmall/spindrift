@@ -33,19 +33,22 @@ func TestSettle_GithubReadOnly_AdoptsBackstopSyntheticSuccess(t *testing.T) {
 
 	d := dispatch.NewFake()
 	result := dispatch.Result{
-		Success:      true,
-		OutcomeFound: true,
-		Outcome: outcome.Outcome{
-			Issue:     issNum,
-			Landing:   branch,
-			Status:    "blocked",
-			Synthetic: true,
-			Note:      "driver exited without emitting an outcome",
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:      true,
+			Provenance: outcome.ProvenanceSynthetic,
+			Outcome: outcome.Outcome{
+				Issue:     issNum,
+				Landing:   branch,
+				Status:    "blocked",
+				Synthetic: true,
+				Note:      "driver exited without emitting an outcome",
+			},
+			SelfReportFound: true,
+			SelfReport:      outcome.SelfReport{Status: "success"},
 		},
-		SelfReportFound: true,
-		SelfReport:      outcome.SelfReport{Status: "success"},
-		PRIntent:        "feat: add widget\n\nAdds a widget.",
-		PRIntentFound:   true,
+		PRIntent:      "feat: add widget\n\nAdds a widget.",
+		PRIntentFound: true,
 	}
 
 	c := baseConfig()
@@ -79,7 +82,7 @@ func TestSettle_GithubReadOnly_AdoptsBackstopSyntheticSuccess(t *testing.T) {
 
 // TestSettle_GithubReadOnly_AdoptsNoOutcomeSuccess is the positive case for
 // issue #2253's auto-adoption: a read-only github run that exited with no
-// parseable outcome line at all (!result.OutcomeFound) — distinct from
+// parseable outcome line at all (!result.Resolved.Found) — distinct from
 // #2224's synthetic status=blocked backstop — but whose driver self-report
 // says the work actually succeeded (issue #2223) must not be parked
 // agent-failed either. Instead settle relays the finished branch, opens a PR
@@ -100,12 +103,14 @@ func TestSettle_GithubReadOnly_AdoptsNoOutcomeSuccess(t *testing.T) {
 
 	d := dispatch.NewFake()
 	result := dispatch.Result{
-		Success:         true,
-		OutcomeFound:    false,
-		SelfReportFound: true,
-		SelfReport:      outcome.SelfReport{Status: "success"},
-		PRIntent:        "feat: add widget\n\nAdds a widget.",
-		PRIntentFound:   true,
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:           false,
+			SelfReportFound: true,
+			SelfReport:      outcome.SelfReport{Status: "success"},
+		},
+		PRIntent:      "feat: add widget\n\nAdds a widget.",
+		PRIntentFound: true,
 	}
 
 	c := baseConfig()
@@ -156,18 +161,21 @@ func TestSettle_GithubReadOnly_AdoptsWithDefaultPRBodyWhenNoIntent(t *testing.T)
 
 	d := dispatch.NewFake()
 	result := dispatch.Result{
-		Success:      true,
-		OutcomeFound: true,
-		Outcome: outcome.Outcome{
-			Issue:     issNum,
-			Landing:   branch,
-			Status:    "blocked",
-			Synthetic: true,
-			Note:      "driver exited without emitting an outcome",
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:      true,
+			Provenance: outcome.ProvenanceSynthetic,
+			Outcome: outcome.Outcome{
+				Issue:     issNum,
+				Landing:   branch,
+				Status:    "blocked",
+				Synthetic: true,
+				Note:      "driver exited without emitting an outcome",
+			},
+			SelfReportFound: true,
+			SelfReport:      outcome.SelfReport{Status: "success"},
 		},
-		SelfReportFound: true,
-		SelfReport:      outcome.SelfReport{Status: "success"},
-		PRIntentFound:   false,
+		PRIntentFound: false,
 	}
 
 	c := baseConfig()
@@ -224,19 +232,22 @@ func TestSettle_GithubReadOnly_AdoptedPRWithRedCIDoesNotMerge(t *testing.T) {
 
 	d := dispatch.NewFake()
 	result := dispatch.Result{
-		Success:      true,
-		OutcomeFound: true,
-		Outcome: outcome.Outcome{
-			Issue:     issNum,
-			Landing:   branch,
-			Status:    "blocked",
-			Synthetic: true,
-			Note:      "driver exited without emitting an outcome",
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:      true,
+			Provenance: outcome.ProvenanceSynthetic,
+			Outcome: outcome.Outcome{
+				Issue:     issNum,
+				Landing:   branch,
+				Status:    "blocked",
+				Synthetic: true,
+				Note:      "driver exited without emitting an outcome",
+			},
+			SelfReportFound: true,
+			SelfReport:      outcome.SelfReport{Status: "success"},
 		},
-		SelfReportFound: true,
-		SelfReport:      outcome.SelfReport{Status: "success"},
-		PRIntent:        "feat: add widget\n\nAdds a widget.",
-		PRIntentFound:   true,
+		PRIntent:      "feat: add widget\n\nAdds a widget.",
+		PRIntentFound: true,
 	}
 
 	c := baseConfig()
@@ -297,18 +308,21 @@ func TestSettle_GithubReadOnly_NonSyntheticBlockedDoesNotAdopt(t *testing.T) {
 
 	d := dispatch.NewFake()
 	result := dispatch.Result{
-		Success:      true,
-		OutcomeFound: true,
-		Outcome: outcome.Outcome{
-			Issue:     issNum,
-			Landing:   branch,
-			Status:    "blocked",
-			Synthetic: false,
-			Note:      "driver reported blocked",
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:      true,
+			Provenance: outcome.ProvenanceGenuine,
+			Outcome: outcome.Outcome{
+				Issue:     issNum,
+				Landing:   branch,
+				Status:    "blocked",
+				Synthetic: false,
+				Note:      "driver reported blocked",
+			},
+			SelfReportFound: true,
+			SelfReport:      outcome.SelfReport{Status: "success"},
 		},
-		SelfReportFound: true,
-		SelfReport:      outcome.SelfReport{Status: "success"},
-		PRIntentFound:   false,
+		PRIntentFound: false,
 	}
 
 	c := baseConfig()
@@ -347,17 +361,20 @@ func TestSettle_GithubReadOnly_SyntheticBlockedNoSelfReportDoesNotAdopt(t *testi
 
 	d := dispatch.NewFake()
 	result := dispatch.Result{
-		Success:      true,
-		OutcomeFound: true,
-		Outcome: outcome.Outcome{
-			Issue:     issNum,
-			Landing:   branch,
-			Status:    "blocked",
-			Synthetic: true,
-			Note:      "driver exited without emitting an outcome",
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:      true,
+			Provenance: outcome.ProvenanceSynthetic,
+			Outcome: outcome.Outcome{
+				Issue:     issNum,
+				Landing:   branch,
+				Status:    "blocked",
+				Synthetic: true,
+				Note:      "driver exited without emitting an outcome",
+			},
+			SelfReportFound: false,
 		},
-		SelfReportFound: false,
-		PRIntentFound:   false,
+		PRIntentFound: false,
 	}
 
 	c := baseConfig()
@@ -394,18 +411,21 @@ func TestSettle_GithubReadOnly_SyntheticBlockedSelfReportBlockedDoesNotAdopt(t *
 
 	d := dispatch.NewFake()
 	result := dispatch.Result{
-		Success:      true,
-		OutcomeFound: true,
-		Outcome: outcome.Outcome{
-			Issue:     issNum,
-			Landing:   branch,
-			Status:    "blocked",
-			Synthetic: true,
-			Note:      "driver exited without emitting an outcome",
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:      true,
+			Provenance: outcome.ProvenanceSynthetic,
+			Outcome: outcome.Outcome{
+				Issue:     issNum,
+				Landing:   branch,
+				Status:    "blocked",
+				Synthetic: true,
+				Note:      "driver exited without emitting an outcome",
+			},
+			SelfReportFound: true,
+			SelfReport:      outcome.SelfReport{Status: "blocked"},
 		},
-		SelfReportFound: true,
-		SelfReport:      outcome.SelfReport{Status: "blocked"},
-		PRIntentFound:   false,
+		PRIntentFound: false,
 	}
 
 	c := baseConfig()
@@ -449,18 +469,21 @@ func TestSettle_GithubReadOnly_AdoptionFingerprintButBundleMissingFallsBackToBlo
 
 	d := dispatch.NewFake()
 	result := dispatch.Result{
-		Success:      true,
-		OutcomeFound: true,
-		Outcome: outcome.Outcome{
-			Issue:     issNum,
-			Landing:   branch,
-			Status:    "blocked",
-			Synthetic: true,
-			Note:      "driver exited without emitting an outcome",
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:      true,
+			Provenance: outcome.ProvenanceSynthetic,
+			Outcome: outcome.Outcome{
+				Issue:     issNum,
+				Landing:   branch,
+				Status:    "blocked",
+				Synthetic: true,
+				Note:      "driver exited without emitting an outcome",
+			},
+			SelfReportFound: true,
+			SelfReport:      outcome.SelfReport{Status: "success"},
 		},
-		SelfReportFound: true,
-		SelfReport:      outcome.SelfReport{Status: "success"},
-		PRIntentFound:   false,
+		PRIntentFound: false,
 	}
 
 	c := baseConfig()
@@ -502,17 +525,20 @@ func TestSettle_GithubReadWrite_SyntheticSuccessDoesNotAdopt(t *testing.T) {
 
 	d := dispatch.NewFake()
 	result := dispatch.Result{
-		Success:      true,
-		OutcomeFound: true,
-		Outcome: outcome.Outcome{
-			Issue:     issNum,
-			Landing:   branch,
-			Status:    "blocked",
-			Synthetic: true,
-			Note:      "driver exited without emitting an outcome",
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:      true,
+			Provenance: outcome.ProvenanceSynthetic,
+			Outcome: outcome.Outcome{
+				Issue:     issNum,
+				Landing:   branch,
+				Status:    "blocked",
+				Synthetic: true,
+				Note:      "driver exited without emitting an outcome",
+			},
+			SelfReportFound: true,
+			SelfReport:      outcome.SelfReport{Status: "success"},
 		},
-		SelfReportFound: true,
-		SelfReport:      outcome.SelfReport{Status: "success"},
 	}
 
 	c := baseConfig()
@@ -535,7 +561,7 @@ func TestSettle_GithubReadWrite_SyntheticSuccessDoesNotAdopt(t *testing.T) {
 
 // TestSettle_GithubReadOnly_NoOutcomeNoSelfReportDoesNotAdopt covers
 // tryAdoptRelayedBranchNoOutcome's own fingerprint (issue #2253) in the
-// !result.OutcomeFound arm: a Box that crashed and never self-reported at
+// !result.Resolved.Found arm: a Box that crashed and never self-reported at
 // all has no evidence at all that the run succeeded, so adoption must not
 // fire and settle must fall back to its normal no-outcome handling
 // (settleUnresolved), which — with no PR ever opened for ResolveOpenPR to
@@ -551,9 +577,11 @@ func TestSettle_GithubReadOnly_NoOutcomeNoSelfReportDoesNotAdopt(t *testing.T) {
 
 	d := dispatch.NewFake()
 	result := dispatch.Result{
-		Success:         true,
-		OutcomeFound:    false,
-		SelfReportFound: false,
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:           false,
+			SelfReportFound: false,
+		},
 	}
 
 	c := baseConfig()
@@ -579,7 +607,7 @@ func TestSettle_GithubReadOnly_NoOutcomeNoSelfReportDoesNotAdopt(t *testing.T) {
 }
 
 // TestSettle_GithubReadOnly_NoOutcomeSelfReportBlockedDoesNotAdopt covers a
-// Box that did self-report in the !result.OutcomeFound arm (issue #2253),
+// Box that did self-report in the !result.Resolved.Found arm (issue #2253),
 // but self-reported blocked rather than success — isSuccessSelfReport must
 // reject it, so no PR is opened at all and settle falls back to
 // settleUnresolved's agent-failed park.
@@ -594,10 +622,12 @@ func TestSettle_GithubReadOnly_NoOutcomeSelfReportBlockedDoesNotAdopt(t *testing
 
 	d := dispatch.NewFake()
 	result := dispatch.Result{
-		Success:         true,
-		OutcomeFound:    false,
-		SelfReportFound: true,
-		SelfReport:      outcome.SelfReport{Status: "blocked"},
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:           false,
+			SelfReportFound: true,
+			SelfReport:      outcome.SelfReport{Status: "blocked"},
+		},
 	}
 
 	c := baseConfig()
@@ -623,7 +653,7 @@ func TestSettle_GithubReadOnly_NoOutcomeSelfReportBlockedDoesNotAdopt(t *testing
 }
 
 // TestSettle_GithubReadOnly_NoOutcomeBundleMissingFallsBackToBlocked covers
-// the fingerprint condition (c) in the !result.OutcomeFound arm (issue
+// the fingerprint condition (c) in the !result.Resolved.Found arm (issue
 // #2253): a full success fingerprint (no outcome line + success self-report)
 // can still fail to actually adopt if RelayBundle itself errors — no bundle
 // means no finished branch to open a PR on, so
@@ -641,10 +671,12 @@ func TestSettle_GithubReadOnly_NoOutcomeBundleMissingFallsBackToBlocked(t *testi
 
 	d := dispatch.NewFake()
 	result := dispatch.Result{
-		Success:         true,
-		OutcomeFound:    false,
-		SelfReportFound: true,
-		SelfReport:      outcome.SelfReport{Status: "success"},
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:           false,
+			SelfReportFound: true,
+			SelfReport:      outcome.SelfReport{Status: "success"},
+		},
 	}
 
 	c := baseConfig()
@@ -687,9 +719,10 @@ func TestSettle_SettleRelayedBranch_AdoptsSuccessSelfReport(t *testing.T) {
 	fc.CreateDraftPRURL = prURL
 	fc.SetCheckStates(prURL, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
 
-	result := dispatch.Result{
+	result := dispatch.Result{Resolved: outcome.Resolved{
 		SelfReportFound: true,
 		SelfReport:      outcome.SelfReport{Status: "success"},
+	},
 	}
 
 	c := baseConfig()
@@ -741,9 +774,10 @@ func TestSettle_SettleRelayedBranch_NonSuccessSelfReportDoesNotAdopt(t *testing.
 	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
 	fc.CreateDraftPRURL = prURL
 
-	result := dispatch.Result{
+	result := dispatch.Result{Resolved: outcome.Resolved{
 		SelfReportFound: true,
 		SelfReport:      outcome.SelfReport{Status: "blocked"},
+	},
 	}
 
 	c := baseConfig()
@@ -788,9 +822,10 @@ func TestSettle_SettleRelayedBranch_BundleMissingDoesNotAdopt(t *testing.T) {
 	fc.CreateDraftPRURL = prURL
 	fc.RelayBundleErr = errors.New("bundle missing")
 
-	result := dispatch.Result{
+	result := dispatch.Result{Resolved: outcome.Resolved{
 		SelfReportFound: true,
 		SelfReport:      outcome.SelfReport{Status: "success"},
+	},
 	}
 
 	c := baseConfig()
