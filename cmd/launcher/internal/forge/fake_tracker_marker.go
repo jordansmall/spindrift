@@ -1,8 +1,6 @@
 package forge
 
-import (
-	"fmt"
-)
+import "fmt"
 
 // RecordLandingCall records a single RecordLanding invocation.
 type RecordLandingCall struct {
