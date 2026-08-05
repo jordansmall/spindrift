@@ -319,4 +319,58 @@ rec {
           };
     in
     map verdictFor rejectRows;
+
+  # Fold from a buildTimeRejectVerdicts verdict to "must the runtime bash
+  # validator NOT block" (issue #2320, parent #2244): the runtime validator
+  # (agent/entrypoint.sh's _validate_prompt_contract) only ever has a
+  # resolved gate (0/1) at runtime, so it only ever blocks or doesn't --
+  # there is no runtime "advise" state. "ok" and "advise" both fold to "must
+  # not block"; only "reject" folds to "must block". `true` means "must not
+  # block at runtime", `false` means "must block at runtime".
+  parityFold = verdict: verdict != "reject";
+
+  # Build-time/runtime parity fixtures (issue #2320, parent #2244): one
+  # fixture per (severity=="reject" row) x (gate in [true false]) x
+  # (markerPresent in [true false]) combination, each pre-resolved to the
+  # buildTimeRejectVerdicts verdict for that combo. Iterates validateMarkers
+  # itself -- filtered to severity == "reject" -- rather than a hand-
+  # duplicated id list, mirroring buildTimeRejectVerdicts/
+  # injectBlocksBashRows above, so a future third reject row is picked up
+  # automatically. A following slice renders these as a JSON fixture file a
+  # bats/bash parity check reads, checking the runtime validator's actual
+  # exit status against `parityFold verdict` for each fixture instead of
+  # reimplementing this fold by hand in bash.
+  parityFixtures =
+    let
+      rejectRows = builtins.filter (row: row.severity == "reject") validateMarkers;
+      fixturesFor =
+        row:
+        map
+          (
+            { gate, markerPresent }:
+            let
+              content = if markerPresent then "before ${row.marker} after" else "no marker here";
+              verdicts = buildTimeRejectVerdicts {
+                staticGates = {
+                  ${row.when} = gate;
+                };
+                contentByRowId = {
+                  ${row.id} = content;
+                };
+              };
+              verdict = (builtins.head (builtins.filter (r: r.id == row.id) verdicts)).verdict;
+            in
+            {
+              inherit (row) id;
+              inherit gate markerPresent verdict;
+            }
+          )
+          [
+            { gate = true; markerPresent = true; }
+            { gate = true; markerPresent = false; }
+            { gate = false; markerPresent = true; }
+            { gate = false; markerPresent = false; }
+          ];
+    in
+    builtins.concatMap fixturesFor rejectRows;
 }

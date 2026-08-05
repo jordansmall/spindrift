@@ -30,6 +30,7 @@ let
     // (import ./drivers.nix common)
     // (import ./prompt-inject.nix common)
     // (import ./prompt-contract.nix common)
+    // (import ./prompt-contract-parity.nix common)
     // (import ./research-verdicts.nix common)
     // (import ./prompts.nix common)
     // (import ./schema-drift.nix common)
