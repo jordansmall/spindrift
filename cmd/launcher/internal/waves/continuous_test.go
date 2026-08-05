@@ -1132,9 +1132,9 @@ func TestRunContinuous_PollRefillsSlotLeftIdleByTransientMiss(t *testing.T) {
 
 // TestRunContinuous_RefillDispatchesInPriorityOrder verifies the #2281
 // review finding: continuous.go's refill closure sorts the discovered pool
-// by Priority (sortByPriority) before picking the next launch, so the
+// by Priority (forge.SortByPriority) before picking the next launch, so the
 // refill loop actually dispatches in priority order end to end — not just
-// in the isolated sortByPriority/NewPlan unit coverage in plan_test.go.
+// in the isolated forge.SortByPriority/NewPlan unit coverage in plan_test.go.
 // MaxParallel=1 forces strictly one-at-a-time dispatch, so fr.RunCalls'
 // order is the observed launch order; five issues spanning every tier are
 // seeded out of priority order (deliberately, so a passing result can only
