@@ -1,5 +1,20 @@
 package settle
 
+import "fmt"
+
+// gateTerminalReason classifies why gateToGreen returned gateTerminal into a
+// short, prefixed reason string a caller can surface verbatim: "ci-check-
+// error: <err>" when a CheckState call itself errored (stateErr non-nil,
+// checked first since it fires ahead of any deadline check), otherwise
+// "ci-timeout: CI-watch deadline reached after <deadline>s" for the plain
+// poll-loop-ran-out-the-clock case.
+func gateTerminalReason(stateErr error, deadline int) string {
+	if stateErr != nil {
+		return fmt.Sprintf("ci-check-error: %v", stateErr)
+	}
+	return fmt.Sprintf("ci-timeout: CI-watch deadline reached after %ds", deadline)
+}
+
 // gateResult names gateToGreen's outcome, replacing the (green, genuineRed
 // bool) pair whose third combination meant "terminal" only by doc-comment
 // convention.

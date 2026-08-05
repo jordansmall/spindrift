@@ -2,6 +2,7 @@ package settle
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"spindrift.dev/launcher/internal/forge"
@@ -42,6 +43,7 @@ func TestGateToGreen(t *testing.T) {
 		checkStateErrs      []error
 		requireRegistration bool
 		want                gateResult
+		wantReasonContains  string
 	}{
 		{
 			name:        "SUCCESS on first poll reaches green without a swap",
@@ -68,10 +70,11 @@ func TestGateToGreen(t *testing.T) {
 			want:        gateRedRetry,
 		},
 		{
-			name:        "NONE times out — non-genuine failure without swap",
-			timeout:     0,
-			checkStates: nil,
-			want:        gateTerminal,
+			name:               "NONE times out — non-genuine failure without swap",
+			timeout:            0,
+			checkStates:        nil,
+			want:               gateTerminal,
+			wantReasonContains: "ci-timeout:",
 		},
 		{
 			// A partial check snapshot can briefly show SUCCESS before all jobs
@@ -92,19 +95,21 @@ func TestGateToGreen(t *testing.T) {
 		{
 			// A 403 or other API error on the first poll must not be silently
 			// dropped as StateNone.
-			name:           "CheckState API error on first poll is non-retriable",
-			timeout:        100,
-			checkStateErrs: []error{errors.New("gh api graphql: 403 Forbidden")},
-			checkStates:    []forge.RollupState{forge.StateSuccess, forge.StateSuccess},
-			want:           gateTerminal,
+			name:               "CheckState API error on first poll is non-retriable",
+			timeout:            100,
+			checkStateErrs:     []error{errors.New("gh api graphql: 403 Forbidden")},
+			checkStates:        []forge.RollupState{forge.StateSuccess, forge.StateSuccess},
+			want:               gateTerminal,
+			wantReasonContains: "ci-check-error:",
 		},
 		{
 			// A 403 on the confirmation poll must surface as non-retriable.
-			name:           "CheckState API error on confirmation poll is non-retriable",
-			timeout:        100,
-			checkStateErrs: []error{nil, errors.New("gh api graphql: 403 Forbidden")},
-			checkStates:    []forge.RollupState{forge.StateSuccess, forge.StateSuccess, forge.StateSuccess},
-			want:           gateTerminal,
+			name:               "CheckState API error on confirmation poll is non-retriable",
+			timeout:            100,
+			checkStateErrs:     []error{nil, errors.New("gh api graphql: 403 Forbidden")},
+			checkStates:        []forge.RollupState{forge.StateSuccess, forge.StateSuccess, forge.StateSuccess},
+			want:               gateTerminal,
+			wantReasonContains: "ci-check-error:",
 		},
 		{
 			// issue #1652: an unchanged head SHA can carry a terminal SUCCESS
@@ -127,6 +132,7 @@ func TestGateToGreen(t *testing.T) {
 			requireRegistration: true,
 			checkStates:         []forge.RollupState{forge.StateSuccess, forge.StateSuccess, forge.StateSuccess, forge.StateSuccess, forge.StateSuccess},
 			want:                gateTerminal,
+			wantReasonContains:  "ci-timeout:",
 		},
 	}
 	for _, tc := range cases {
@@ -144,10 +150,17 @@ func TestGateToGreen(t *testing.T) {
 			}
 			s := New(c, fc, fc)
 
-			got := s.gateToGreen("1", 0, testPR, tc.requireRegistration)
+			got, reason := s.gateToGreen("1", 0, testPR, tc.requireRegistration)
 
 			if got != tc.want {
 				t.Errorf("gateToGreen = %v, want %v", got, tc.want)
+			}
+			if tc.wantReasonContains != "" {
+				if !strings.Contains(reason, tc.wantReasonContains) {
+					t.Errorf("gateToGreen reason = %q, want a substring containing %q", reason, tc.wantReasonContains)
+				}
+			} else if reason != "" {
+				t.Errorf("gateToGreen reason = %q, want empty for a non-terminal outcome", reason)
 			}
 			if len(fc.TransitionStateCalls) > 0 {
 				t.Errorf("gateToGreen must never swap state itself; got %d calls: %+v", len(fc.TransitionStateCalls), fc.TransitionStateCalls)

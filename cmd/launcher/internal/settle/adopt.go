@@ -20,7 +20,8 @@ import (
 func (s *Settle) SettleAdopted(d dispatch.Dispatcher, num string, gen uint64, prURL string) {
 	branch := s.cf.AgentBranch(num)
 	fmt.Printf("    #%s  landing=%s  status=adopted  note=no outcome line; PR discovered on %s\n", num, prURL, branch)
-	switch s.selfHealAdopted(d, num, gen, prURL) {
+	landing, reason := s.selfHealAdopted(d, num, gen, prURL)
+	switch landing {
 	case landingMerged:
 		// verifyMerged reads PR state, which a push-only Code Forge does not
 		// have (mirrors gate.go's "ready" case guard: silent skip, no
@@ -29,7 +30,7 @@ func (s *Settle) SettleAdopted(d dispatch.Dispatcher, num string, gen uint64, pr
 			s.verifyMerged(num, prURL)
 		}
 	case landingFailed:
-		fmt.Printf("    #%s  landing=%s  status=failed  !! CI or merge failed\n", num, prURL)
+		fmt.Printf("    #%s  landing=%s  status=failed  !! %s\n", num, prURL, reason)
 	case landingAbandoned:
 		// Terminate already recorded its own comment and log line.
 	}

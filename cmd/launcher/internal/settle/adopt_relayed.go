@@ -92,7 +92,8 @@ func (s *Settle) adoptAndGate(d dispatch.Dispatcher, num string, gen uint64, res
 
 	fmt.Printf("    #%s  landing=%s  status=adopted  note=%s\n", num, pr, note)
 	s.recordLanding(num, pr)
-	switch s.selfHeal(d, num, gen, pr) {
+	landing, reason := s.selfHeal(d, num, gen, pr)
+	switch landing {
 	case landingMerged:
 		// s.pr is guaranteed non-nil by tryAdoptRelayedBranch's fingerprint
 		// gate, but SettleRelayedBranch carries no such guarantee (recover
@@ -102,7 +103,7 @@ func (s *Settle) adoptAndGate(d dispatch.Dispatcher, num string, gen uint64, res
 			s.verifyMerged(num, pr)
 		}
 	case landingFailed:
-		fmt.Printf("    #%s  landing=%s  status=failed  !! CI or merge failed\n", num, pr)
+		fmt.Printf("    #%s  landing=%s  status=failed  !! %s\n", num, pr, reason)
 	case landingAbandoned:
 		// Terminate already recorded its own comment and log line; a usage
 		// comment here would be noise on an issue it reclaimed.
@@ -158,9 +159,10 @@ func (s *Settle) landRelayedBranchPushOnly(d dispatch.Dispatcher, num string, ge
 	branch := s.cfForNum(num).AgentBranch(num)
 	fmt.Printf("    #%s  landing=%s  status=adopted  note=genuine success self-report; relayed branch landed\n", num, branch)
 	s.recordLanding(num, branch)
-	switch s.selfHeal(d, num, gen, branch) {
+	landing, reason := s.selfHeal(d, num, gen, branch)
+	switch landing {
 	case landingFailed:
-		fmt.Printf("    #%s  landing=%s  status=failed  !! CI or merge failed\n", num, branch)
+		fmt.Printf("    #%s  landing=%s  status=failed  !! %s\n", num, branch, reason)
 	case landingAbandoned:
 		return true
 	}
