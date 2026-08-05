@@ -193,6 +193,31 @@ func TestSelfHeal_MergeGuardCheckError_FailsSafe(t *testing.T) {
 	}
 }
 
+// TestSelfHeal_MergeGuardCheckError_FlipsReadyBeforeHandoff verifies that a
+// merge-guard check error still flips the PR out of draft before downgrading
+// to manual — matching the guard-hit case, MarkReady must run unconditionally
+// on green so a human reviewing the fail-safe hand-off can actually see and
+// merge the PR.
+func TestSelfHeal_MergeGuardCheckError_FlipsReadyBeforeHandoff(t *testing.T) {
+	c := baseConfig()
+	c.MergeMode = "immediate"
+	c.MergeGuardPaths = ".github/**"
+	fc := forge.NewFake(testDispatchLabels)
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
+	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
+	fc.PRFilesErr = errors.New("gh api pulls files: 403 Forbidden")
+	s := New(c, fc, fc)
+
+	landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR)
+
+	if landing != landingManual {
+		t.Errorf("selfHeal = %v, want landingManual (guard check errored)", landing)
+	}
+	if len(fc.MarkReadyCalls) != 1 {
+		t.Errorf("guard-check error must still call MarkReady exactly once; calls=%v", fc.MarkReadyCalls)
+	}
+}
+
 // TestSelfHeal_ConflictResolveFailure_EndsFailed verifies that a failed
 // conflict-resolve dispatch (the box exits non-zero, leaving the rebase
 // conflict unresolved) ends the issue at agent-failed, not agent-complete
@@ -526,11 +551,12 @@ func TestSelfHeal_MarksReadyBeforeManualHandoff(t *testing.T) {
 	}
 }
 
-// TestSelfHeal_MergeGuardHit_SkipsMarkReady verifies that a merge-guard hit
-// downgrades to manual without flipping the PR ready — the guard's
-// hold-for-human-review intent (issue #1651 must not undermine it by
-// publishing the PR as ready right before declining to land it).
-func TestSelfHeal_MergeGuardHit_SkipsMarkReady(t *testing.T) {
+// TestSelfHeal_MergeGuardHit_FlipsReadyBeforeHandoff verifies that a
+// merge-guard hit still flips the PR out of draft before downgrading to
+// manual — the launcher's unconditional MarkReady-at-green (issue #1651)
+// must run even on a guard hit, otherwise the PR is stranded as a draft and
+// no human can see or merge it despite the manual hand-off comment.
+func TestSelfHeal_MergeGuardHit_FlipsReadyBeforeHandoff(t *testing.T) {
 	c := baseConfig()
 	c.MergeMode = "immediate"
 	c.MergeGuardPaths = ".github/**"
@@ -545,8 +571,8 @@ func TestSelfHeal_MergeGuardHit_SkipsMarkReady(t *testing.T) {
 	if landing != landingManual {
 		t.Fatalf("selfHeal = %v, want landingManual (guard hit)", landing)
 	}
-	if len(fc.MarkReadyCalls) != 0 {
-		t.Errorf("guard hit must skip MarkReady; calls=%v", fc.MarkReadyCalls)
+	if len(fc.MarkReadyCalls) != 1 {
+		t.Errorf("guard hit must still call MarkReady exactly once; calls=%v", fc.MarkReadyCalls)
 	}
 }
 

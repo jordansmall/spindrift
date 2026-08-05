@@ -81,6 +81,21 @@ func (s *Settle) selfHealGate(d dispatch.Dispatcher, num string, gen uint64, pr 
 		case gateAbandoned:
 			return landingAbandoned, ""
 		case gateGreen:
+			// The launcher owns the draft->ready flip at green, ahead of the
+			// merge itself (issue #1651) — the Driver itself never flips a PR
+			// ready anymore (#1653), and a no-outcome run is never adopted as
+			// ready off draft-ness either (#1654), completing the inversion
+			// of the old draft-until-ready invariant (#1614/#1625). MarkReady
+			// is idempotent, so this runs unconditionally — including on a
+			// merge-guard hit or check error below, so a PR downgraded to
+			// manual hand-off is still visible and mergeable by a human,
+			// rather than stranded as a draft. A failure only reaches the
+			// console log below (never a public issue comment), so it never
+			// blocks the merge, matching EnqueueAutoMerge's own best-effort
+			// precedent further down.
+			if err := s.pr.MarkReady(pr); err != nil {
+				fmt.Printf("    #%s  landing=%s  status=mark-ready-failed  !! %v\n", num, pr, err)
+			}
 			matched, guardErr := s.mergeGuardHit(pr)
 			if guardErr != nil {
 				fmt.Printf("    #%s  landing=%s  status=merge-guard-check-error  !! %v\n", num, pr, guardErr)
@@ -93,18 +108,6 @@ func (s *Settle) selfHealGate(d dispatch.Dispatcher, num string, gen uint64, pr 
 				s.it.Comment(num, mergeGuardComment(matched))
 				s.transitionState(num, forge.InProgress, forge.Complete)
 				return landingManual, ""
-			}
-			// The launcher owns the draft->ready flip at green, ahead of the
-			// merge itself (issue #1651) — the Driver itself never flips a PR
-			// ready anymore (#1653), and a no-outcome run is never adopted as
-			// ready off draft-ness either (#1654), completing the inversion
-			// of the old draft-until-ready invariant (#1614/#1625). MarkReady
-			// is idempotent, so this runs unconditionally; a failure only
-			// reaches the console log below (never a public issue comment),
-			// so it never blocks the merge, matching EnqueueAutoMerge's
-			// best-effort precedent below.
-			if err := s.pr.MarkReady(pr); err != nil {
-				fmt.Printf("    #%s  landing=%s  status=mark-ready-failed  !! %v\n", num, pr, err)
 			}
 			if err := s.applyMergeMode(num, gen, pr, d); err != nil {
 				if errors.Is(err, errAbandoned) {
