@@ -107,9 +107,11 @@ func TestSettle_GithubReadOnly_ReadyRelaysThenCreatesDraftPRThenMerges_ClosesAlr
 
 	d := dispatch.NewFake()
 	result := dispatch.Result{
-		Success:       true,
-		OutcomeFound:  true,
-		Outcome:       outcome.Outcome{Issue: issNum, Landing: branch, Status: "ready", Note: "ok"},
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: issNum, Landing: branch, Status: "ready", Note: "ok"},
+		},
 		PRIntent:      "feat: add widget\n\nAdds a widget. Closes #1919",
 		PRIntentFound: true,
 	}
@@ -149,9 +151,11 @@ func TestSettle_GithubReadOnly_ReadyRelaysThenCreatesDraftPRThenMerges_LocalTrac
 
 	d := dispatch.NewFake()
 	result := dispatch.Result{
-		Success:       true,
-		OutcomeFound:  true,
-		Outcome:       outcome.Outcome{Issue: issNum, Landing: branch, Status: "ready", Note: "ok"},
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: issNum, Landing: branch, Status: "ready", Note: "ok"},
+		},
 		PRIntent:      "feat: add widget\n\nAdds a widget.",
 		PRIntentFound: true,
 	}
