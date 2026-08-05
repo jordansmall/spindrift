@@ -22,9 +22,11 @@ func TestSettle_LocalForge_BlockedPostsNoteAsComment(t *testing.T) {
 
 	d := dispatch.NewFake()
 	result := dispatch.Result{
-		Success:      true,
-		OutcomeFound: true,
-		Outcome:      outcome.Outcome{Issue: issNum, Landing: "agent/issue-42", Status: "blocked", Note: "push rejected; PR opened as draft"},
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: issNum, Landing: "agent/issue-42", Status: "blocked", Note: "push rejected; PR opened as draft"},
+		},
 	}
 
 	s := New(baseConfig(), fc, fc)
@@ -32,7 +34,7 @@ func TestSettle_LocalForge_BlockedPostsNoteAsComment(t *testing.T) {
 
 	var noteCalls []forge.CommentCall
 	for _, c := range fc.CommentCalls {
-		if c.Body == result.Outcome.Note {
+		if c.Body == result.Resolved.Outcome.Note {
 			noteCalls = append(noteCalls, c)
 		}
 	}
@@ -302,9 +304,11 @@ func TestSettle_LocalForge_HostileLandingIgnored_UsesAgentBranch(t *testing.T) {
 
 	d := dispatch.NewFake()
 	result := dispatch.Result{
-		Success:      true,
-		OutcomeFound: true,
-		Outcome:      outcome.Outcome{Issue: issNum, Landing: hostileLanding, Status: "ready", Note: "ok"},
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: issNum, Landing: hostileLanding, Status: "ready", Note: "ok"},
+		},
 	}
 
 	s := New(c, fc, fc.AsLocal())

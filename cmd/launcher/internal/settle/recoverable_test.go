@@ -40,10 +40,12 @@ func TestSettle_LocalPushOnly_NoOutcomeBundlePresentMarksRecoverable(t *testing.
 
 	d := dispatch.NewFake()
 	result := dispatch.Result{
-		Success:         true,
-		OutcomeFound:    false,
-		SelfReportFound: true,
-		SelfReport:      outcome.SelfReport{Status: "success"},
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:           false,
+			SelfReportFound: true,
+			SelfReport:      outcome.SelfReport{Status: "success"},
+		},
 	}
 
 	c := baseConfig()
@@ -84,17 +86,20 @@ func TestSettle_LocalPushOnly_SyntheticBlockedBundlePresentMarksRecoverable(t *t
 
 	d := dispatch.NewFake()
 	result := dispatch.Result{
-		Success:      true,
-		OutcomeFound: true,
-		Outcome: outcome.Outcome{
-			Issue:     issNum,
-			Landing:   branch,
-			Status:    "blocked",
-			Synthetic: true,
-			Note:      "driver exited without emitting an outcome",
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:      true,
+			Provenance: outcome.ProvenanceSynthetic,
+			Outcome: outcome.Outcome{
+				Issue:     issNum,
+				Landing:   branch,
+				Status:    "blocked",
+				Synthetic: true,
+				Note:      "driver exited without emitting an outcome",
+			},
+			SelfReportFound: true,
+			SelfReport:      outcome.SelfReport{Status: "success"},
 		},
-		SelfReportFound: true,
-		SelfReport:      outcome.SelfReport{Status: "success"},
 	}
 
 	c := baseConfig()
@@ -133,17 +138,20 @@ func TestSettle_LocalPushOnly_GenuineBlockedDoesNotMarkRecoverable(t *testing.T)
 
 	d := dispatch.NewFake()
 	result := dispatch.Result{
-		Success:      true,
-		OutcomeFound: true,
-		Outcome: outcome.Outcome{
-			Issue:     issNum,
-			Landing:   branch,
-			Status:    "blocked",
-			Synthetic: false,
-			Note:      "driver reported blocked",
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:      true,
+			Provenance: outcome.ProvenanceGenuine,
+			Outcome: outcome.Outcome{
+				Issue:     issNum,
+				Landing:   branch,
+				Status:    "blocked",
+				Synthetic: false,
+				Note:      "driver reported blocked",
+			},
+			SelfReportFound: true,
+			SelfReport:      outcome.SelfReport{Status: "success"},
 		},
-		SelfReportFound: true,
-		SelfReport:      outcome.SelfReport{Status: "success"},
 	}
 
 	c := baseConfig()
@@ -178,10 +186,12 @@ func TestSettle_LocalPushOnly_NoOutcomeBundleMissingFallsBackToFailed(t *testing
 
 	d := dispatch.NewFake()
 	result := dispatch.Result{
-		Success:         true,
-		OutcomeFound:    false,
-		SelfReportFound: true,
-		SelfReport:      outcome.SelfReport{Status: "success"},
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:           false,
+			SelfReportFound: true,
+			SelfReport:      outcome.SelfReport{Status: "success"},
+		},
 	}
 
 	c := baseConfig()
@@ -216,9 +226,11 @@ func TestSettle_LocalPushOnly_NoSelfReportFallsBackToFailed(t *testing.T) {
 
 	d := dispatch.NewFake()
 	result := dispatch.Result{
-		Success:         true,
-		OutcomeFound:    false,
-		SelfReportFound: false,
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:           false,
+			SelfReportFound: false,
+		},
 	}
 
 	c := baseConfig()
@@ -256,9 +268,11 @@ func TestSettle_SettleRelayedBranch_LocalPushOnlyLandsRelayedBranch(t *testing.T
 
 	d := dispatch.NewFake()
 	result := dispatch.Result{
-		Success:         true,
-		SelfReportFound: true,
-		SelfReport:      outcome.SelfReport{Status: "success"},
+		Success: true,
+		Resolved: outcome.Resolved{
+			SelfReportFound: true,
+			SelfReport:      outcome.SelfReport{Status: "success"},
+		},
 	}
 
 	c := baseConfig()
@@ -307,9 +321,11 @@ func TestSettle_SettleRelayedBranch_GitPushOnlyStillReturnsFalse(t *testing.T) {
 
 	d := dispatch.NewFake()
 	result := dispatch.Result{
-		Success:         true,
-		SelfReportFound: true,
-		SelfReport:      outcome.SelfReport{Status: "success"},
+		Success: true,
+		Resolved: outcome.Resolved{
+			SelfReportFound: true,
+			SelfReport:      outcome.SelfReport{Status: "success"},
+		},
 	}
 
 	c := baseConfig()
@@ -342,10 +358,12 @@ func TestSettle_LocalPushOnly_SelfReportBlockedFallsBackToFailed(t *testing.T) {
 
 	d := dispatch.NewFake()
 	result := dispatch.Result{
-		Success:         true,
-		OutcomeFound:    false,
-		SelfReportFound: true,
-		SelfReport:      outcome.SelfReport{Status: "blocked"},
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:           false,
+			SelfReportFound: true,
+			SelfReport:      outcome.SelfReport{Status: "blocked"},
+		},
 	}
 
 	c := baseConfig()

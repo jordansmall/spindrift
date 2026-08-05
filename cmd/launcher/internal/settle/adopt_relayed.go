@@ -8,6 +8,7 @@ import (
 
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/outcome"
 	"spindrift.dev/launcher/internal/seambundle"
 )
 
@@ -18,7 +19,7 @@ import (
 // stitched in host-side — normally an honest "never finished" signal that
 // belongs on the park-agent-failed path below. But the same driver log can
 // also carry the driver's own last genuine (non-synthetic) leading-token
-// self-report (issue #2223), surfaced separately as Result.SelfReport
+// self-report (issue #2223), surfaced separately as Result.Resolved.SelfReport
 // precisely so it is never shadowed by the backstop's last-line-wins. When
 // that self-report says the run actually succeeded, the backstop's
 // "blocked" is a false negative: the Box likely did finish its work and
@@ -39,8 +40,8 @@ import (
 // genuinely never finished (no self-report, or one that itself reports
 // something other than success) is never granted this override.
 func (s *Settle) tryAdoptRelayedBranch(d dispatch.Dispatcher, num string, gen uint64, result dispatch.Result) bool {
-	if !result.Outcome.Synthetic || !s.readOnly || s.pr == nil ||
-		!result.SelfReportFound || !isSuccessSelfReport(result.SelfReport.Status) {
+	if result.Resolved.Provenance != outcome.ProvenanceSynthetic || !s.readOnly || s.pr == nil ||
+		!result.Resolved.SelfReportFound || !isSuccessSelfReport(result.Resolved.SelfReport.Status) {
 		return false
 	}
 
@@ -50,25 +51,26 @@ func (s *Settle) tryAdoptRelayedBranch(d dispatch.Dispatcher, num string, gen ui
 // tryAdoptRelayedBranchNoOutcome is gate.go's "no outcome line at all" arm's
 // first move (issue #2253): a read-only Box that crashed, hung, or was
 // killed before it ever emitted a parseable SPINDRIFT_OUTCOME line leaves
-// result.OutcomeFound false — no synthetic status=blocked backstop gets
+// result.Resolved.Found false — no synthetic status=blocked backstop gets
 // stitched in for this case the way ADR 0036 does when a driver log carries
 // at least a trailing partial line, so tryAdoptRelayedBranch's own
-// Outcome.Synthetic gate never fires here. This is otherwise the same
-// fingerprint and the same false-negative risk tryAdoptRelayedBranch guards
-// against: the driver's own last genuine self-report (Result.SelfReport,
-// issue #2223) may still say the run succeeded, and a real branch may still
-// be sitting in the outbox waiting to be relayed. Rather than park that as
-// agent-failed, this reuses adoptAndGate's exact same adopt-then-gate tail —
-// see tryAdoptRelayedBranch's own doc comment for the full reasoning behind
-// the self-report trust boundary and the remaining gate conditions, which
-// this function mirrors unchanged apart from the outcome-line check itself.
+// Provenance == ProvenanceSynthetic gate never fires here. This is otherwise
+// the same fingerprint and the same false-negative risk tryAdoptRelayedBranch
+// guards against: the driver's own last genuine self-report
+// (Result.Resolved.SelfReport, issue #2223) may still say the run succeeded,
+// and a real branch may still be sitting in the outbox waiting to be
+// relayed. Rather than park that as agent-failed, this reuses adoptAndGate's
+// exact same adopt-then-gate tail — see tryAdoptRelayedBranch's own doc
+// comment for the full reasoning behind the self-report trust boundary and
+// the remaining gate conditions, which this function mirrors unchanged apart
+// from the outcome-line check itself.
 //
-// No explicit !result.OutcomeFound guard here: gate.go's sole caller already
-// sits inside the `!result.OutcomeFound` branch, so OutcomeFound is always
-// false on entry.
+// No explicit !result.Resolved.Found guard here: gate.go's sole caller
+// already sits inside the `!result.Resolved.Found` branch, so
+// Resolved.Found is always false on entry.
 func (s *Settle) tryAdoptRelayedBranchNoOutcome(d dispatch.Dispatcher, num string, gen uint64, result dispatch.Result) bool {
 	if !s.readOnly || s.pr == nil ||
-		!result.SelfReportFound || !isSuccessSelfReport(result.SelfReport.Status) {
+		!result.Resolved.SelfReportFound || !isSuccessSelfReport(result.Resolved.SelfReport.Status) {
 		return false
 	}
 
@@ -115,12 +117,12 @@ func (s *Settle) adoptAndGate(d dispatch.Dispatcher, num string, gen uint64, res
 
 // SettleRelayedBranch is spindrift recover's adopt-a-relayed-branch arm
 // (issue #2225). With no open PR on num, recover consults the driver's own
-// last genuine success self-report (result.SelfReport, issue #2223 —
+// last genuine success self-report (result.Resolved.SelfReport, issue #2223 —
 // recovered from disk by dispatch.LastSelfReportFromLogs) for evidence a
 // prior run finished the work and relayed its branch to the outbox before
 // stranding without a PR. Unlike tryAdoptRelayedBranch, this does NOT
-// require result.Outcome.Synthetic or s.readOnly — recover is
-// operator-driven and runs read-write.
+// require result.Resolved.Provenance == outcome.ProvenanceSynthetic or
+// s.readOnly — recover is operator-driven and runs read-write.
 //
 // Two shapes fall out of the same self-report fingerprint. A CODE_FORGE=local
 // push-only run (ADR 0039, issue #2254) has no PR surface to adopt at all —
@@ -137,7 +139,7 @@ func (s *Settle) adoptAndGate(d dispatch.Dispatcher, num string, gen uint64, res
 // false — leaving recover's unchanged "no open PR" exit — the moment the
 // self-report isn't a genuine success or nothing was actually relayable.
 func (s *Settle) SettleRelayedBranch(d dispatch.Dispatcher, num string, gen uint64, result dispatch.Result) bool {
-	if !result.SelfReportFound || !isSuccessSelfReport(result.SelfReport.Status) {
+	if !result.Resolved.SelfReportFound || !isSuccessSelfReport(result.Resolved.SelfReport.Status) {
 		return false
 	}
 	cf := s.cfForNum(num)
@@ -175,7 +177,7 @@ func (s *Settle) landRelayedBranchPushOnly(d dispatch.Dispatcher, num string, ge
 // relay-then-create shape hostMediateDraftPR uses for a genuine
 // status=ready outcome.
 //
-// branch is derived from cf.AgentBranch(num), never result.Outcome.Landing
+// branch is derived from cf.AgentBranch(num), never result.Resolved.Outcome.Landing
 // (issue #1949, same reasoning as hostMediateDraftPR/relayBlockedWork): a
 // prompt-injected read-only Box controls the outcome line's landing= field,
 // but not the one ref its own bundle is actually keyed to host-side.
@@ -259,7 +261,7 @@ func (s *Settle) defaultAdoptPRText(num string) (title, body string) {
 func (s *Settle) tryMarkRecoverable(num string, result dispatch.Result) bool {
 	cf := s.cfForNum(num)
 	if _, ok := cf.(forge.BundleRelay); !ok || s.pr != nil ||
-		!result.SelfReportFound || !isSuccessSelfReport(result.SelfReport.Status) ||
+		!result.Resolved.SelfReportFound || !isSuccessSelfReport(result.Resolved.SelfReport.Status) ||
 		!s.bundlePresent(num) {
 		return false
 	}

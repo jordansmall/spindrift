@@ -31,9 +31,11 @@ func newResearchFake(num string) *forge.Fake {
 func TestResearchSettle_Recommend(t *testing.T) {
 	fc := newResearchFake("42")
 	result := dispatch.Result{
-		Success:      true,
-		OutcomeFound: true,
-		Outcome:      outcome.Outcome{Issue: "42", Landing: "https://github.com/owner/repo/issues/42#issuecomment-1", Status: "recommend", Note: "grounded in code"},
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: "42", Landing: "https://github.com/owner/repo/issues/42#issuecomment-1", Status: "recommend", Note: "grounded in code"},
+		},
 	}
 
 	s := NewResearchSettle(fc.AsNoLandingRecorder(), researchVerdictLabels)
@@ -57,9 +59,11 @@ func TestResearchSettle_Recommend(t *testing.T) {
 func TestResearchSettle_Reject(t *testing.T) {
 	fc := newResearchFake("7")
 	result := dispatch.Result{
-		Success:      true,
-		OutcomeFound: true,
-		Outcome:      outcome.Outcome{Issue: "7", Landing: "https://github.com/owner/repo/issues/7#issuecomment-2", Status: "reject", Note: "duplicate of #3"},
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: "7", Landing: "https://github.com/owner/repo/issues/7#issuecomment-2", Status: "reject", Note: "duplicate of #3"},
+		},
 	}
 
 	s := NewResearchSettle(fc.AsNoLandingRecorder(), researchVerdictLabels)
@@ -75,9 +79,11 @@ func TestResearchSettle_Reject(t *testing.T) {
 func TestResearchSettle_Unclear(t *testing.T) {
 	fc := newResearchFake("8")
 	result := dispatch.Result{
-		Success:      true,
-		OutcomeFound: true,
-		Outcome:      outcome.Outcome{Issue: "8", Landing: "https://github.com/owner/repo/issues/8#issuecomment-3", Status: "unclear", Note: "needs answers"},
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: "8", Landing: "https://github.com/owner/repo/issues/8#issuecomment-3", Status: "unclear", Note: "needs answers"},
+		},
 	}
 
 	s := NewResearchSettle(fc.AsNoLandingRecorder(), researchVerdictLabels)
@@ -95,9 +101,11 @@ func TestResearchSettle_CompleteVerdictError(t *testing.T) {
 	fc := newResearchFake("42")
 	fc.CompleteVerdictErr = errors.New("label API down")
 	result := dispatch.Result{
-		Success:      true,
-		OutcomeFound: true,
-		Outcome:      outcome.Outcome{Issue: "42", Landing: "https://github.com/owner/repo/issues/42#issuecomment-1", Status: "recommend", Note: "grounded in code"},
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: "42", Landing: "https://github.com/owner/repo/issues/42#issuecomment-1", Status: "recommend", Note: "grounded in code"},
+		},
 	}
 
 	s := NewResearchSettle(fc.AsNoLandingRecorder(), researchVerdictLabels)
@@ -125,9 +133,11 @@ func TestResearchSettle_CompleteVerdictError_MissingInProgress(t *testing.T) {
 	fc.VerdictLabels = researchVerdictLabels
 	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{"agent-research-recommend"}})
 	result := dispatch.Result{
-		Success:      true,
-		OutcomeFound: true,
-		Outcome:      outcome.Outcome{Issue: "42", Landing: "https://github.com/owner/repo/issues/42#issuecomment-1", Status: "recommend", Note: "grounded in code"},
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: "42", Landing: "https://github.com/owner/repo/issues/42#issuecomment-1", Status: "recommend", Note: "grounded in code"},
+		},
 	}
 
 	s := NewResearchSettle(fc.AsNoLandingRecorder(), researchVerdictLabels)
@@ -151,9 +161,11 @@ func TestResearchSettle_CompleteVerdictError_MissingInProgress(t *testing.T) {
 func TestResearchSettle_Local_PostsCommentBlockThenVerdict(t *testing.T) {
 	fc := newResearchFake("42")
 	result := dispatch.Result{
-		Success:      true,
-		OutcomeFound: true,
-		Outcome:      outcome.Outcome{Issue: "42", Landing: "none", Status: "recommend", Note: "grounded in code"},
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: "42", Landing: "none", Status: "recommend", Note: "grounded in code"},
+		},
 		Comment:      "**Verdict** — recommend\n\n<!-- spindrift-research -->",
 		CommentFound: true,
 	}
@@ -179,9 +191,11 @@ func TestResearchSettle_Local_PostsCommentBlockThenVerdict(t *testing.T) {
 func TestResearchSettle_Local_MissingCommentBlockTreatedAsBlocked(t *testing.T) {
 	fc := newResearchFake("42")
 	result := dispatch.Result{
-		Success:      true,
-		OutcomeFound: true,
-		Outcome:      outcome.Outcome{Issue: "42", Landing: "none", Status: "recommend", Note: "grounded in code"},
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: "42", Landing: "none", Status: "recommend", Note: "grounded in code"},
+		},
 		CommentFound: false,
 	}
 
@@ -211,9 +225,11 @@ func TestResearchSettle_Local_MissingCommentBlockTreatedAsBlocked(t *testing.T) 
 func TestResearchSettle_Local_EmptyCommentBlockTreatedAsBlocked(t *testing.T) {
 	fc := newResearchFake("42")
 	result := dispatch.Result{
-		Success:      true,
-		OutcomeFound: true,
-		Outcome:      outcome.Outcome{Issue: "42", Landing: "none", Status: "recommend", Note: "grounded in code"},
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: "42", Landing: "none", Status: "recommend", Note: "grounded in code"},
+		},
 		Comment:      "",
 		CommentFound: true,
 	}
@@ -240,9 +256,11 @@ func TestResearchSettle_Github_NeverPostsComment(t *testing.T) {
 	fc := newResearchFake("42")
 	ghLike := fc.AsNoLandingRecorder()
 	result := dispatch.Result{
-		Success:      true,
-		OutcomeFound: true,
-		Outcome:      outcome.Outcome{Issue: "42", Landing: "https://github.com/owner/repo/issues/42#issuecomment-1", Status: "recommend", Note: "grounded in code"},
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: "42", Landing: "https://github.com/owner/repo/issues/42#issuecomment-1", Status: "recommend", Note: "grounded in code"},
+		},
 	}
 
 	s := NewResearchSettle(ghLike, researchVerdictLabels)
@@ -262,9 +280,11 @@ func TestResearchSettle_Github_NeverPostsComment(t *testing.T) {
 func TestResearchSettle_Blocked(t *testing.T) {
 	fc := newResearchFake("9")
 	result := dispatch.Result{
-		Success:      true,
-		OutcomeFound: true,
-		Outcome:      outcome.Outcome{Issue: "9", Landing: "https://github.com/owner/repo/issues/9#issuecomment-4", Status: "blocked", Note: "push rejected"},
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: "9", Landing: "https://github.com/owner/repo/issues/9#issuecomment-4", Status: "blocked", Note: "push rejected"},
+		},
 	}
 
 	s := NewResearchSettle(fc, researchVerdictLabels)
@@ -312,9 +332,11 @@ func TestResearchSettle_GithubReadOnly_PostsCommentBlockThenVerdict(t *testing.T
 	fc := newResearchFake("42")
 	ghLike := fc.AsNoLandingRecorder()
 	result := dispatch.Result{
-		Success:      true,
-		OutcomeFound: true,
-		Outcome:      outcome.Outcome{Issue: "42", Landing: "https://github.com/owner/repo/issues/42#issuecomment-1", Status: "recommend", Note: "grounded in code"},
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: "42", Landing: "https://github.com/owner/repo/issues/42#issuecomment-1", Status: "recommend", Note: "grounded in code"},
+		},
 		Comment:      "**Verdict** — recommend\n\n<!-- spindrift-research -->",
 		CommentFound: true,
 	}
@@ -341,9 +363,11 @@ func TestResearchSettle_GithubReadOnly_MissingCommentBlockTreatedAsBlocked(t *te
 	fc := newResearchFake("42")
 	ghLike := fc.AsNoLandingRecorder()
 	result := dispatch.Result{
-		Success:      true,
-		OutcomeFound: true,
-		Outcome:      outcome.Outcome{Issue: "42", Landing: "https://github.com/owner/repo/issues/42#issuecomment-1", Status: "recommend", Note: "grounded in code"},
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: "42", Landing: "https://github.com/owner/repo/issues/42#issuecomment-1", Status: "recommend", Note: "grounded in code"},
+		},
 		CommentFound: false,
 	}
 
@@ -379,9 +403,11 @@ func TestResearchSettle_CustomVerdictSet(t *testing.T) {
 	fc.VerdictLabels = custom
 	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{"agent-research-in-progress"}})
 	result := dispatch.Result{
-		Success:      true,
-		OutcomeFound: true,
-		Outcome:      outcome.Outcome{Issue: "42", Landing: "https://github.com/owner/repo/issues/42#issuecomment-1", Status: "approve", Note: "looks good"},
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: "42", Landing: "https://github.com/owner/repo/issues/42#issuecomment-1", Status: "approve", Note: "looks good"},
+		},
 	}
 
 	s := NewResearchSettle(fc.AsNoLandingRecorder(), custom)
@@ -410,9 +436,11 @@ func TestResearchSettle_CustomVerdictSet_DefaultTokenNotRecognized(t *testing.T)
 	fc.VerdictLabels = custom
 	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{"agent-research-in-progress"}})
 	result := dispatch.Result{
-		Success:      true,
-		OutcomeFound: true,
-		Outcome:      outcome.Outcome{Issue: "42", Landing: "https://github.com/owner/repo/issues/42#issuecomment-1", Status: "recommend", Note: "grounded in code"},
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: "42", Landing: "https://github.com/owner/repo/issues/42#issuecomment-1", Status: "recommend", Note: "grounded in code"},
+		},
 	}
 
 	s := NewResearchSettle(fc.AsNoLandingRecorder(), custom)

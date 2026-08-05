@@ -22,9 +22,11 @@ func TestSettle_GithubReadOnly_BlockedPostsNoteAsComment(t *testing.T) {
 
 	d := dispatch.NewFake()
 	result := dispatch.Result{
-		Success:      true,
-		OutcomeFound: true,
-		Outcome:      outcome.Outcome{Issue: issNum, Landing: "https://github.com/owner/repo/pull/99", Status: "blocked", Note: "push rejected; PR opened as draft"},
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: issNum, Landing: "https://github.com/owner/repo/pull/99", Status: "blocked", Note: "push rejected; PR opened as draft"},
+		},
 	}
 
 	c := baseConfig()
@@ -34,7 +36,7 @@ func TestSettle_GithubReadOnly_BlockedPostsNoteAsComment(t *testing.T) {
 
 	var noteCalls []forge.CommentCall
 	for _, call := range fc.CommentCalls {
-		if call.Body == result.Outcome.Note {
+		if call.Body == result.Resolved.Outcome.Note {
 			noteCalls = append(noteCalls, call)
 		}
 	}

@@ -2434,9 +2434,11 @@ func TestNewSettle_ResearchReadOnly_RelaysVerdictComment(t *testing.T) {
 
 	s := newSettle(c, ghLike, nil, nil)
 	result := dispatch.Result{
-		Success:      true,
-		OutcomeFound: true,
-		Outcome:      outcome.Outcome{Issue: "42", Landing: "none", Status: "recommend", Note: "grounded in code"},
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: "42", Landing: "none", Status: "recommend", Note: "grounded in code"},
+		},
 		Comment:      "**Verdict** — recommend",
 		CommentFound: true,
 	}

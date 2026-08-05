@@ -36,9 +36,11 @@ func TestSettle_AmbiguousOutcome_PostsNoteAndTransitions(t *testing.T) {
 
 	d := dispatch.NewFake()
 	result := dispatch.Result{
-		Success:      true,
-		OutcomeFound: true,
-		Outcome:      outcome.Outcome{Issue: issNum, Landing: "", Status: "ambiguous", Note: note},
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: issNum, Landing: "", Status: "ambiguous", Note: note},
+		},
 	}
 
 	// A read-write github-shaped tracker (no landing recorder, not
@@ -91,9 +93,11 @@ func TestSettle_AmbiguousOutcome_EmptyNoteSkipsComment(t *testing.T) {
 
 	d := dispatch.NewFake()
 	result := dispatch.Result{
-		Success:      true,
-		OutcomeFound: true,
-		Outcome:      outcome.Outcome{Issue: issNum, Landing: "", Status: "ambiguous", Note: ""},
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: issNum, Landing: "", Status: "ambiguous", Note: ""},
+		},
 	}
 
 	s := New(baseConfig(), fc.AsNoLandingRecorder(), fc)
@@ -131,9 +135,11 @@ func TestSettle_AmbiguousOutcome_NoMergeMachineryRuns(t *testing.T) {
 
 	d := dispatch.NewFake()
 	result := dispatch.Result{
-		Success:      true,
-		OutcomeFound: true,
-		Outcome:      outcome.Outcome{Issue: issNum, Landing: testPR, Status: "ambiguous", Note: "unrelated work"},
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: issNum, Landing: testPR, Status: "ambiguous", Note: "unrelated work"},
+		},
 	}
 
 	s := New(baseConfig(), fc.AsNoLandingRecorder(), fc)

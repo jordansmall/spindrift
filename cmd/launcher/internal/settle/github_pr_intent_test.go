@@ -55,9 +55,11 @@ func TestSettle_GithubReadOnly_ReadyRelaysThenCreatesDraftPRThenMerges(t *testin
 
 	d := dispatch.NewFake()
 	result := dispatch.Result{
-		Success:       true,
-		OutcomeFound:  true,
-		Outcome:       outcome.Outcome{Issue: issNum, Landing: branch, Status: "ready", Note: "ok"},
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: issNum, Landing: branch, Status: "ready", Note: "ok"},
+		},
 		PRIntent:      "feat: add widget\n\nAdds a widget.",
 		PRIntentFound: true,
 	}
@@ -107,9 +109,11 @@ func TestSettle_GithubReadOnly_MissingPRIntentBlocksNotFails(t *testing.T) {
 
 	d := dispatch.NewFake()
 	result := dispatch.Result{
-		Success:      true,
-		OutcomeFound: true,
-		Outcome:      outcome.Outcome{Issue: issNum, Landing: branch, Status: "ready", Note: "ok"},
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: issNum, Landing: branch, Status: "ready", Note: "ok"},
+		},
 		// PRIntentFound left false: the box's log had no PR-intent line.
 	}
 
@@ -163,9 +167,11 @@ func TestSettle_GithubReadOnly_RelayFailureBlocksBeforeCreatingPR(t *testing.T) 
 
 	d := dispatch.NewFake()
 	result := dispatch.Result{
-		Success:       true,
-		OutcomeFound:  true,
-		Outcome:       outcome.Outcome{Issue: issNum, Landing: branch, Status: "ready", Note: "ok"},
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: issNum, Landing: branch, Status: "ready", Note: "ok"},
+		},
 		PRIntent:      "feat: add widget\n\nAdds a widget.",
 		PRIntentFound: true,
 	}
@@ -204,9 +210,11 @@ func TestSettle_GithubReadWrite_UnaffectedByHostMediation(t *testing.T) {
 
 	d := dispatch.NewFake()
 	result := dispatch.Result{
-		Success:      true,
-		OutcomeFound: true,
-		Outcome:      outcome.Outcome{Issue: issNum, Landing: prURL, Status: "ready", Note: "ok"},
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: issNum, Landing: prURL, Status: "ready", Note: "ok"},
+		},
 	}
 
 	c := baseConfig() // Config.ReadOnly defaults false
@@ -244,9 +252,11 @@ func TestSettle_GithubReadOnly_HostileLandingIgnored_UsesAgentBranch(t *testing.
 
 	d := dispatch.NewFake()
 	result := dispatch.Result{
-		Success:       true,
-		OutcomeFound:  true,
-		Outcome:       outcome.Outcome{Issue: issNum, Landing: hostileLanding, Status: "ready", Note: "ok"},
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: issNum, Landing: hostileLanding, Status: "ready", Note: "ok"},
+		},
 		PRIntent:      "feat: add widget\n\nAdds a widget.",
 		PRIntentFound: true,
 	}
@@ -290,9 +300,11 @@ func TestSettle_GithubReadOnly_MergedStatus_HostileLandingIgnored_UsesAgentBranc
 
 	d := dispatch.NewFake()
 	result := dispatch.Result{
-		Success:      true,
-		OutcomeFound: true,
-		Outcome:      outcome.Outcome{Issue: issNum, Landing: hostileLanding, Status: "merged", Note: "ok"},
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: issNum, Landing: hostileLanding, Status: "merged", Note: "ok"},
+		},
 	}
 
 	c := baseConfig()

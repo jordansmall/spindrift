@@ -7,6 +7,7 @@ import (
 
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/outcome"
 )
 
 // Settle interprets result (a Dispatcher's Run outcome) and drives num to its
@@ -26,7 +27,7 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, gen uint64, result di
 		s.settleUnresolved(num, "", fmt.Sprintf("unparseable outcome line: %v", result.ParseErr))
 		return
 	}
-	if !result.OutcomeFound {
+	if !result.Resolved.Found {
 		clsNote := ""
 		if result.ClassifyErr != nil {
 			fmt.Fprintf(os.Stderr, "    ?? #%s: classify: %v\n", num, result.ClassifyErr)
@@ -59,7 +60,7 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, gen uint64, result di
 		return
 	}
 
-	o := result.Outcome
+	o := result.Resolved.Outcome
 	s.recordLanding(num, o.Landing)
 	// Best-effort, ahead of the status switch so it runs on every outcome
 	// status alike (issue #2019, wiring #2018's dormant fileIssueIntents into
@@ -97,7 +98,7 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, gen uint64, result di
 		// (non-synthetic) status=blocked is the driver's own authoritative
 		// outcome line, not the ADR 0036 backstop this override exists to
 		// second-guess — it must still park Failed below.
-		if result.Outcome.Synthetic && s.tryMarkRecoverable(num, result) {
+		if result.Resolved.Provenance == outcome.ProvenanceSynthetic && s.tryMarkRecoverable(num, result) {
 			return
 		}
 		fmt.Printf("    #%s  landing=%s  status=%s  !! %s\n", num, o.Landing, o.Status, o.Note)

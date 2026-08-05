@@ -189,9 +189,11 @@ func TestSettle_FilesIssueIntents_OnReadyOutcome(t *testing.T) {
 	fc.PostIssueURL = "https://github.com/owner/repo/issues/77"
 
 	result := dispatch.Result{
-		Success:           true,
-		OutcomeFound:      true,
-		Outcome:           outcome.Outcome{Issue: issNum, Landing: prURL, Status: "ready", Note: "ok"},
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: issNum, Landing: prURL, Status: "ready", Note: "ok"},
+		},
 		IssueIntentsFound: true,
 		IssueIntents: []string{
 			`{"title":"fix(auth): validate token expiry","body":"body"}`,
@@ -218,9 +220,11 @@ func TestSettle_FilesIssueIntents_OnBlockedOutcome(t *testing.T) {
 	fc.PostIssueURL = "https://github.com/owner/repo/issues/78"
 
 	result := dispatch.Result{
-		Success:           true,
-		OutcomeFound:      true,
-		Outcome:           outcome.Outcome{Issue: issNum, Landing: prURL, Status: "blocked", Note: "tests failing"},
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: issNum, Landing: prURL, Status: "blocked", Note: "tests failing"},
+		},
 		IssueIntentsFound: true,
 		IssueIntents: []string{
 			`{"title":"fix(auth): validate token expiry","body":"body"}`,
@@ -248,9 +252,11 @@ func TestSettle_NoIssueIntentsFound_NoFilingAttempted(t *testing.T) {
 	fc.SetCheckStates(prURL, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
 
 	result := dispatch.Result{
-		Success:      true,
-		OutcomeFound: true,
-		Outcome:      outcome.Outcome{Issue: issNum, Landing: prURL, Status: "ready", Note: "ok"},
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: issNum, Landing: prURL, Status: "ready", Note: "ok"},
+		},
 	}
 
 	s := New(baseConfig(), fc.AsIssueFiler(), fc)
@@ -275,9 +281,11 @@ func TestSettle_IssueIntentFilingFailure_DoesNotBlockOutcome(t *testing.T) {
 	fc.PostIssueErr = errFake
 
 	result := dispatch.Result{
-		Success:           true,
-		OutcomeFound:      true,
-		Outcome:           outcome.Outcome{Issue: issNum, Landing: prURL, Status: "ready", Note: "ok"},
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: issNum, Landing: prURL, Status: "ready", Note: "ok"},
+		},
 		IssueIntentsFound: true,
 		IssueIntents: []string{
 			`{"title":"fix(auth): validate token expiry","body":"body"}`,
