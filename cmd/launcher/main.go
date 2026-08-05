@@ -1476,7 +1476,7 @@ func cmdConsole(lc *launchContext, stdin io.Reader, stdout io.Writer) int {
 		Fresh:           fresh,
 		RebuildFn:       rebuild,
 		RecoverFn: func(issueNum string) error {
-			return recoverByNumber(lc.config, lc.issueTracker, lc.codeForge, lc.pwd, lc.factory, lc.settle.(settle.WorkSettler), issueNum)
+			return recoverByNumber(lc.config, lc.issueTracker, lc.codeForge, lc.pwd, lc.factory, lc.workSettle(), issueNum)
 		},
 	}
 	if err := console.Run(lc.issueTracker, lc.pwd, stdin, stdout, launch); err != nil {
@@ -1512,7 +1512,7 @@ func writeGithubOutput(key, value string) error {
 // fakes (and a spy cleanup) to exercise the cleanup-on-every-exit contract.
 func cmdRecover(lc *launchContext, issueNum string) int {
 	defer lc.cleanup()
-	if err := recoverByNumber(lc.config, lc.issueTracker, lc.codeForge, lc.pwd, lc.factory, lc.settle.(settle.WorkSettler), issueNum); err != nil {
+	if err := recoverByNumber(lc.config, lc.issueTracker, lc.codeForge, lc.pwd, lc.factory, lc.workSettle(), issueNum); err != nil {
 		if writeErr := writeGithubOutput("recover-reason", err.Error()); writeErr != nil {
 			fmt.Fprintf(os.Stderr, "warning: writing recover-reason output: %v\n", writeErr)
 		}
