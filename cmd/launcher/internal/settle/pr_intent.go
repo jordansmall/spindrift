@@ -173,16 +173,20 @@ func hasClosingReference(body, num string) bool {
 }
 
 // ensureClosesReference returns body unchanged when it's not this Launcher's
-// job to guarantee a closing reference: either it is a LandingRecorder-shaped
-// (local) tracker — the local adapter closes issues through its own axis
-// (ADR 0029), never GitHub's auto-close-on-merge keyword convention — or body
-// already carries a GitHub-recognized closing keyword (close/fix/resolve and
-// their inflections) referencing #num. Otherwise it appends a literal
-// "Closes #<num>" so a merge auto-closes the issue, matching the convention
-// defaultAdoptPRText already uses: a blank-line separator when body is
-// non-empty, or just "Closes #<num>" when body is empty.
+// job to guarantee a closing reference: either it is not a GithubTracker-
+// shaped tracker (issue #2341) — a positive allow-list scoped to the github
+// adapter specifically, not merely "not LandingRecorder-shaped (local)",
+// since a forgejo tracker also fails a LandingRecorder check yet must never
+// get a GitHub Closes-keyword injected: forgejo issue numbers are a foreign
+// namespace from GitHub's, so "Closes #N" on a GitHub PR would falsely
+// reference (and could auto-close) an unrelated real GitHub issue #N — or
+// body already carries a GitHub-recognized closing keyword (close/fix/
+// resolve and their inflections) referencing #num. Otherwise it appends a
+// literal "Closes #<num>" so a merge auto-closes the issue, matching the
+// convention defaultAdoptPRText already uses: a blank-line separator when
+// body is non-empty, or just "Closes #<num>" when body is empty.
 func ensureClosesReference(body, num string, it forge.IssueTracker) string {
-	if _, ok := it.(forge.LandingRecorder); ok {
+	if _, ok := it.(forge.GithubTracker); !ok {
 		return body
 	}
 	if hasClosingReference(body, num) {

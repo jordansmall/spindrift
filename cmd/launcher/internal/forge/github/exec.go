@@ -65,3 +65,10 @@ func NewExecClient(repo string, labels forge.DispatchLabels, branchPrefix string
 func (e *execClient) AgentBranch(num string) string {
 	return e.branchPrefix + num
 }
+
+// IsGithubTracker implements the optional forge.GithubTracker marker (issue
+// #2341), letting settle's ensureClosesReference discover that this
+// specific adapter — and not e.g. forgejo, whose issue numbers are a
+// foreign namespace from GitHub's — owns the GitHub Closes-keyword
+// convention.
+func (e *execClient) IsGithubTracker() bool { return true }

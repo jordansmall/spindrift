@@ -1168,6 +1168,14 @@ func TestExecClient_ImplementsHostPostedIssueFiler(t *testing.T) {
 	var _ forge.HostPostedIssueFiler = NewExecClient("owner/repo", testLabels, "agent/issue-")
 }
 
+// TestExecClient_ImplementsGithubTracker verifies the github adapter
+// satisfies forge.GithubTracker (issue #2341) — the positive marker
+// settle's ensureClosesReference uses to scope its "Closes #N" injection to
+// GitHub-hosted PRs only, never forgejo (a foreign issue-number namespace).
+func TestExecClient_ImplementsGithubTracker(t *testing.T) {
+	var _ forge.GithubTracker = NewExecClient("owner/repo", testLabels, "agent/issue-")
+}
+
 // TestExecClient_ImplementsMergeCloser verifies the github adapter satisfies
 // forge.MergeCloser (issue #1892) — settle's deterministic post-merge close
 // backstop. It must NOT satisfy forge.IssueCloser (that surface is reserved
