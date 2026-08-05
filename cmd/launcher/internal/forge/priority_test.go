@@ -120,13 +120,12 @@ func issueNumber(i forge.Issue) string { return i.Number }
 // string via the caller-supplied extractor, preserving input order and
 // length — including an empty input mapping to an empty (non-nil-length)
 // slice — the direct unit coverage for this exported helper, generic over
-// any item type (here a non-forge.Issue prioritizedThing-shaped type) so
-// waves' own Issue type is covered by the same contract without a
-// forge.Issue-specific test.
+// any item type (here the same non-forge.Issue prioritizedThing-shaped type
+// TestSortByPriority_GenericOverNonIssueType above uses) so waves' own Issue
+// type is covered by the same contract without a forge.Issue-specific test.
 func TestNumbers_MapsInOrder(t *testing.T) {
-	type numbered struct{ id string }
-	items := []numbered{{id: "3"}, {id: "1"}, {id: "2"}}
-	got := forge.Numbers(items, func(n numbered) string { return n.id })
+	items := []prioritizedThing{{name: "3"}, {name: "1"}, {name: "2"}}
+	got := forge.Numbers(items, func(t prioritizedThing) string { return t.name })
 	want := []string{"3", "1", "2"}
 	if len(got) != len(want) {
 		t.Fatalf("Numbers(...) = %v, want %v", got, want)
@@ -143,8 +142,7 @@ func TestNumbers_MapsInOrder(t *testing.T) {
 // (zero-length) slice rather than panicking or returning nil-vs-non-nil in
 // a way callers need to special-case.
 func TestNumbers_Empty(t *testing.T) {
-	type numbered struct{ id string }
-	got := forge.Numbers([]numbered{}, func(n numbered) string { return n.id })
+	got := forge.Numbers([]prioritizedThing{}, func(t prioritizedThing) string { return t.name })
 	if len(got) != 0 {
 		t.Errorf("Numbers([]) = %v, want empty", got)
 	}
