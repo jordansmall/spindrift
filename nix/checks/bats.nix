@@ -30,6 +30,17 @@ let
     builtins.toJSON driverOutcomeManifest
   );
 
+  # Build-time/runtime parity fixtures (issue #2320, parent #2244):
+  # lib/prompt-contract.nix's `parityFixtures` -- one record per (severity==
+  # "reject" validateMarkers row) x (gate) x (markerPresent) combination,
+  # each pre-resolved to the real `buildTimeRejectVerdicts` verdict --
+  # rendered as JSON so tests/prompt-contract-parity.bats can drive the
+  # actual runtime validator against every fixture without hand-duplicating
+  # the fold logic in bash.
+  promptContractParityFixtureFile = pkgs.writeText "prompt-contract-parity-fixtures.json" (
+    builtins.toJSON (import ../../lib/prompt-contract.nix).parityFixtures
+  );
+
   # Registry-driven (issue #2261 slices 4-6): runs the *unchanged*
   # entrypoint-outcome-{contract,recovery,backstop}.bats suites end-to-end
   # against every non-claude registered Driver's own fake binary
@@ -278,6 +289,53 @@ in
         cp -r ${../../tests} tests
         chmod -R +w tests
         bats --print-output-on-failure tests/driver-registry-outcome-extraction.bats
+        touch $out
+      '';
+
+  # Build-time/runtime parity check (issue #2320, parent #2244): drives the
+  # actual agent/entrypoint.sh runtime validator (_validate_prompt_contract)
+  # against every lib/prompt-contract.nix parityFixtures row and asserts its
+  # exit code matches parityFold(fixture.verdict) -- the real cross-language
+  # proof that nix/checks/prompt-contract-parity.nix's pure-Nix pinning of
+  # the fold (slice 1) actually matches what the runtime bash validator
+  # does. Lightweight/non-image-dependent, same shape as
+  # driver-registry-outcome-extraction above: no batsHarness.run/build/
+  # spindrift/imagePath reference, so this never forces the OCI image build.
+  "bats-prompt-contract-parity" =
+    pkgs.runCommand "bats-prompt-contract-parity"
+      {
+        nativeBuildInputs = [
+          pkgs.bats
+          pkgs.bash
+          pkgs.git
+          pkgs.gettext
+          pkgs.coreutils
+          pkgs.gnugrep
+          pkgs.gnused
+          pkgs.jq
+        ];
+        ENTRYPOINT = ../../agent/entrypoint.sh;
+        PROMPTS_DIR = ../../templates/default/prompts;
+        OUTCOME_CONTRACT_FILE = batsHarness.outcomeContractFile;
+        COMMS_CONTRACT_FILE = batsHarness.commsContractFile;
+        CHECK_CONTRACT_FILE = batsHarness.checkContractFile;
+        RESEARCH_OUTCOME_CONTRACT_FILE = batsHarness.researchOutcomeContractFile;
+        DRIVER_PREAMBLE_FILE = batsHarness.driverPreambleFile;
+        FRAGMENT_REGISTRY_FILE = batsHarness.fragmentRegistryFile;
+        CONTRACT_REGISTRY_FILE = batsHarness.contractRegistryFile;
+        PROMPT_CONTRACT_PARITY_FIXTURE = promptContractParityFixtureFile;
+      }
+      ''
+        export HOME="$TMPDIR/home"
+        mkdir -p "$HOME"
+        cp -r ${../../tests} tests
+        chmod -R +w tests
+        for f in tests/fakes/*; do
+          substituteInPlace "$f" \
+            --replace '#!/usr/bin/env bash' "#!${pkgs.bash}/bin/bash"
+        done
+        export FAKES_DIR="$PWD/tests/fakes"
+        bats --print-output-on-failure tests/prompt-contract-parity.bats
         touch $out
       '';
 }
