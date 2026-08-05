@@ -189,6 +189,26 @@ type LandingRecorder interface {
 	RecordLanding(num, landing string) error
 }
 
+// GithubTracker is the optional IssueTracker capability marking the github
+// adapter specifically (issue #2341) — narrower than "not LandingRecorder,"
+// which local excludes but forgejo would still pass, even though forgejo
+// issue numbers are a foreign namespace from GitHub's: injecting a GitHub
+// `Closes #N` keyword against a forgejo-tracked issue would falsely
+// reference (and could auto-close) an unrelated real GitHub issue #N.
+// Callers discover it with a type assertion — `_, ok :=
+// it.(GithubTracker)` — the same optional-interface pattern LandingRecorder
+// uses. Only the github adapter implements it. IsGithubTracker is exported
+// (unlike a bare unexported marker method) because the implementer lives in
+// a different package (forge/github): an unexported interface method can
+// only be satisfied by types declared in the interface's own package, so a
+// sealed-style unexported marker would make it impossible for execClient to
+// ever implement this interface.
+type GithubTracker interface {
+	// IsGithubTracker is a no-op marker; its only purpose is to exist so a
+	// type assertion against GithubTracker succeeds. It always returns true.
+	IsGithubTracker() bool
+}
+
 // IssueCloser is the optional IssueTracker surface for adapters with a
 // native open/closed axis reconcile can flip (ADR 0029). Only the local
 // adapter implements it — a github/jira issue closes through the forge's own

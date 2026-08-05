@@ -13,11 +13,12 @@ import (
 // auto-close-on-merge keyword convention.
 func TestEnsureClosesReference(t *testing.T) {
 	tests := []struct {
-		name  string
-		body  string
-		num   string
-		local bool
-		want  string
+		name    string
+		body    string
+		num     string
+		local   bool
+		forgejo bool
+		want    string
 	}{
 		{
 			name: "non-local, no closes reference, appends",
@@ -50,14 +51,24 @@ func TestEnsureClosesReference(t *testing.T) {
 			local: true,
 			want:  "Adds a widget.",
 		},
+		{
+			name:    "forgejo tracker, no closes reference, unchanged",
+			body:    "Adds a widget.",
+			num:     "1919",
+			forgejo: true,
+			want:    "Adds a widget.",
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var it forge.IssueTracker
-			if tt.local {
+			switch {
+			case tt.local:
 				it = forge.NewFake(testDispatchLabels).AsLocalShaped()
-			} else {
+			case tt.forgejo:
+				it = forge.NewFake(testDispatchLabels).AsForgejoShaped()
+			default:
 				it = forge.NewFake(testDispatchLabels).AsNoLandingRecorder()
 			}
 			got := ensureClosesReference(tt.body, tt.num, it)

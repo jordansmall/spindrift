@@ -1138,8 +1138,18 @@ var _ AbandonedFlagger = (*Fake)(nil)
 // implements the optional local-only write surfaces.
 type noLandingIssueTracker struct{ IssueTracker }
 
-// AsNoLandingRecorder returns f wrapped so it satisfies IssueTracker but
-// neither LandingRecorder nor IssueCloser.
+// IsGithubTracker implements the optional GithubTracker marker (issue
+// #2341) so noLandingIssueTracker keeps standing in for "github-shaped"
+// across the ~40 settle tests already built on AsNoLandingRecorder() —
+// those tests expect a Closes #N reference to be injected, the github-only
+// behavior GithubTracker now gates. *Fake itself has no such method (only
+// the real github execClient does), so it must be added here explicitly
+// rather than promoted through the embedded IssueTracker.
+func (noLandingIssueTracker) IsGithubTracker() bool { return true }
+
+// AsNoLandingRecorder returns f wrapped so it satisfies IssueTracker and
+// GithubTracker (the github adapter's shape) but neither LandingRecorder
+// nor IssueCloser.
 func (f *Fake) AsNoLandingRecorder() IssueTracker { return noLandingIssueTracker{f} }
 
 // localShapedIssueTracker adapts a Fake to expose IssueTracker plus the
@@ -1168,6 +1178,31 @@ func (l localShapedIssueTracker) CloseIssue(num string) error {
 // MergeCloser, which only github and forgejo implement.
 func (f *Fake) AsLocalShaped() IssueTracker {
 	return localShapedIssueTracker{IssueTracker: f, f: f}
+}
+
+// forgejoShapedIssueTracker adapts a Fake to expose IssueTracker plus
+// MergeCloser — one surface the real forgejo adapter implements (see
+// forgejo.go) — but hides LandingRecorder and IssueCloser (embedding the
+// IssueTracker interface value, not *Fake directly, the same trick
+// noLandingIssueTracker uses, since RecordLanding/CloseIssue are methods on
+// *Fake but not part of the IssueTracker interface) and does NOT implement
+// GithubTracker — forgejo issue numbers are foreign to GitHub's
+// Closes-keyword namespace (issue #2341), the exact gap this double closes
+// for ensureClosesReference's test coverage.
+type forgejoShapedIssueTracker struct {
+	IssueTracker
+	f *Fake
+}
+
+func (fs forgejoShapedIssueTracker) CloseMergedIssue(num string) error {
+	return fs.f.CloseMergedIssue(num)
+}
+
+// AsForgejoShaped returns f wrapped so it satisfies IssueTracker and
+// MergeCloser — the real forgejo adapter's shape — but not LandingRecorder,
+// IssueCloser, or GithubTracker.
+func (f *Fake) AsForgejoShaped() IssueTracker {
+	return forgejoShapedIssueTracker{IssueTracker: f, f: f}
 }
 
 // pushOnlyForge adapts a Fake to expose only the core CodeForge surface,
