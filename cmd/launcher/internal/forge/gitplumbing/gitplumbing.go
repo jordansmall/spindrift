@@ -21,6 +21,34 @@ func IsMergeConflict(stderr string) bool {
 		strings.Contains(s, "not mergeable")
 }
 
+// IsMergeTransient returns true when gh's stderr indicates a transient
+// transport/server failure — an HTTP 5xx from the forge, a network timeout,
+// or similar — as opposed to a genuine merge rejection (conflict, blocked by
+// checks, branch protection).
+func IsMergeTransient(stderr string) bool {
+	s := strings.ToLower(stderr)
+	markers := []string{
+		"502",
+		"503",
+		"504",
+		"bad gateway",
+		"service unavailable",
+		"gateway timeout",
+		"timeout",
+		"connection reset",
+		"eof",
+		"i/o timeout",
+		"temporary failure in name resolution",
+		"context deadline exceeded",
+	}
+	for _, marker := range markers {
+		if strings.Contains(s, marker) {
+			return true
+		}
+	}
+	return false
+}
+
 // GitForcePush force-with-lease-pushes the current branch of the repo
 // checked out at dir, capturing git's stderr into the returned error so
 // callers can tell a stale lease apart from an auth or network fault. A
