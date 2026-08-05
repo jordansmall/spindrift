@@ -186,6 +186,23 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, gen uint64, result di
 			fmt.Printf("    #%s  landing=%s  status=%s\n", num, branch, o.Status)
 		}
 		s.postUsageComment(num, d)
+	case "ambiguous":
+		// The Box detected an internally-contradictory issue and halted
+		// before scouting/implementing, per issue #2275 — this is a
+		// successful, non-crash stop (mirrors agent-research-unclear), so it
+		// must never fall through to agent-failed. The Box never posts this
+		// comment itself in-box (no per-forge fragment for it, unlike IF
+		// BLOCKED's in-box comment), so settle always posts o.Note as the
+		// escalation comment host-side, unconditionally — unlike
+		// postBlockedNoteComment's landing/readOnly-gated relay.
+		if o.Note != "" {
+			if err := s.it.Comment(num, o.Note); err != nil {
+				fmt.Fprintf(os.Stderr, "    ?? #%s: could not post ambiguous-spec comment: %v\n", num, err)
+			}
+		}
+		fmt.Printf("    #%s  landing=%s  status=%s  note=%s\n", num, o.Landing, o.Status, o.Note)
+		s.transitionState(num, forge.InProgress, forge.Ambiguous)
+		s.postUsageComment(num, d)
 	default:
 		fmt.Printf("    #%s  landing=%s  status=%s\n", num, o.Landing, o.Status)
 		s.postUsageComment(num, d)
