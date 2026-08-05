@@ -7,8 +7,8 @@ terminal theme and force a config surface to make it adjustable.
 **Decision: the Console styles by semantic role against the 16 ANSI palette
 slots, so it adopts whatever theme the terminal is set to; an optional base16
 override can bake an exact palette for operators who want precise control.**
-Colors are assigned to roles — running, held, settled, failed, accent,
-dim/borders — each mapped to an ANSI slot rather than a hex value, so the
+Colors are assigned to roles — running, held, recoverable, settled, failed,
+accent, dim/borders — each mapped to an ANSI slot rather than a hex value, so the
 terminal owns the palette. Because Stylix themes the terminal's ANSI colors from
 its base16 scheme, the Console inherits Stylix transitively with no
 spindrift-side code. A single palette-resolver seam — "use ANSI slot N" by
