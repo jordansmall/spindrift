@@ -10,6 +10,7 @@ import (
 
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/localloop"
 	"spindrift.dev/launcher/internal/settle"
 	"spindrift.dev/launcher/internal/testutil"
 )
@@ -27,6 +28,15 @@ func reconcileConfig() config {
 	c.branchPrefix = "agent/issue-"
 	c.maxFixAttempts = 3
 	return c
+}
+
+// newWorkSettle builds a settle via newSettle and asserts the result
+// satisfies settle.WorkSettler, the narrow interface recoverByNumber needs.
+// Every recoverByNumber test in this file goes through dispatchKindWork, so
+// the assertion always succeeds; it saves repeating the same type assertion
+// at each call site.
+func newWorkSettle(c config, it forge.IssueTracker, lw *localloop.Wired, cf forge.CodeForge) settle.WorkSettler {
+	return newSettle(c, it, lw, cf).(settle.WorkSettler)
 }
 
 // --- recoverByNumber tests ----------------------------------------------------
@@ -51,7 +61,7 @@ func TestRecoverByNumber_GreenMergesAndCompletes(t *testing.T) {
 	fc.SetCheckStates(testReconcilePR, []forge.RollupState{forge.StatePending, forge.StateSuccess, forge.StateSuccess})
 
 	dir := tempLogDir(t)
-	err := recoverByNumber(c, fc, fc, dir, testFactory(t, dir, nil), newSettle(c, fc, testWired(fc), fc).(settle.WorkSettler), "42")
+	err := recoverByNumber(c, fc, fc, dir, testFactory(t, dir, nil), newWorkSettle(c, fc, testWired(fc), fc), "42")
 
 	if err != nil {
 		t.Errorf("expected nil error on green path; got %v", err)
@@ -87,7 +97,7 @@ func TestRecoverByNumber_RetriesTransientPRLookupError(t *testing.T) {
 	fc.OpenPRForBranchErrs = []error{errors.New("HTTP 502: Bad Gateway"), nil}
 
 	dir := tempLogDir(t)
-	err := recoverByNumber(c, fc, fc, dir, testFactory(t, dir, nil), newSettle(c, fc, testWired(fc), fc).(settle.WorkSettler), "42")
+	err := recoverByNumber(c, fc, fc, dir, testFactory(t, dir, nil), newWorkSettle(c, fc, testWired(fc), fc), "42")
 
 	if err != nil {
 		t.Errorf("expected nil error after retrying transient PR lookup error; got %v", err)
@@ -116,7 +126,7 @@ func TestRecoverByNumber_RetryMaxOneStillRetriesOnce(t *testing.T) {
 	fc.OpenPRForBranchErrs = []error{errors.New("HTTP 502: Bad Gateway"), nil}
 
 	dir := tempLogDir(t)
-	err := recoverByNumber(c, fc, fc, dir, testFactory(t, dir, nil), newSettle(c, fc, testWired(fc), fc).(settle.WorkSettler), "42")
+	err := recoverByNumber(c, fc, fc, dir, testFactory(t, dir, nil), newWorkSettle(c, fc, testWired(fc), fc), "42")
 
 	if err != nil {
 		t.Errorf("expected nil error after one retry with transientRetryMax=1; got %v", err)
@@ -138,7 +148,7 @@ func TestRecoverByNumber_DraftPRSkipped(t *testing.T) {
 	dir := tempLogDir(t)
 	var err error
 	out := testutil.CaptureStdout(t, func() {
-		err = recoverByNumber(c, fc, fc, dir, testFactory(t, dir, nil), newSettle(c, fc, testWired(fc), fc).(settle.WorkSettler), "42")
+		err = recoverByNumber(c, fc, fc, dir, testFactory(t, dir, nil), newWorkSettle(c, fc, testWired(fc), fc), "42")
 	})
 
 	if err == nil {
@@ -186,7 +196,7 @@ func TestRecoverByNumber_RelayedBranchAdoptedMergesAndCompletes(t *testing.T) {
 	}
 
 	cf := fc.AsGithubReadOnly()
-	err := recoverByNumber(c, fc, cf, dir, testFactory(t, dir, nil), newSettle(c, fc, testWired(fc), cf).(settle.WorkSettler), "42")
+	err := recoverByNumber(c, fc, cf, dir, testFactory(t, dir, nil), newWorkSettle(c, fc, testWired(fc), cf), "42")
 
 	if err != nil {
 		t.Errorf("expected nil error on relayed-branch adopt path; got %v", err)
@@ -222,7 +232,7 @@ func TestRecoverByNumber_NoPRNoSelfReportStillNoOps(t *testing.T) {
 	// dir stays empty, so dispatch.LastSelfReportFromLogs finds nothing.
 
 	dir := tempLogDir(t)
-	err := recoverByNumber(c, fc, fc, dir, testFactory(t, dir, nil), newSettle(c, fc, testWired(fc), fc).(settle.WorkSettler), "42")
+	err := recoverByNumber(c, fc, fc, dir, testFactory(t, dir, nil), newWorkSettle(c, fc, testWired(fc), fc), "42")
 
 	if err == nil {
 		t.Error("expected error for no-PR, no-self-report case; got nil")
@@ -247,7 +257,7 @@ func TestRecoverByNumber_NoPRSkipped(t *testing.T) {
 	// No PR registered for the branch.
 
 	dir := tempLogDir(t)
-	err := recoverByNumber(c, fc, fc, dir, testFactory(t, dir, nil), newSettle(c, fc, testWired(fc), fc).(settle.WorkSettler), "42")
+	err := recoverByNumber(c, fc, fc, dir, testFactory(t, dir, nil), newWorkSettle(c, fc, testWired(fc), fc), "42")
 
 	if err == nil {
 		t.Error("expected error for no-PR case; got nil")
@@ -272,7 +282,7 @@ func TestRecoverByNumber_RedFollowsSelfHeal(t *testing.T) {
 	fc.SetCheckStates(testReconcilePR, []forge.RollupState{forge.StateFailure})
 
 	dir := tempLogDir(t)
-	err := recoverByNumber(c, fc, fc, dir, testFactory(t, dir, nil), newSettle(c, fc, testWired(fc), fc).(settle.WorkSettler), "42")
+	err := recoverByNumber(c, fc, fc, dir, testFactory(t, dir, nil), newWorkSettle(c, fc, testWired(fc), fc), "42")
 
 	if err != nil {
 		t.Errorf("expected nil error (gate result expressed via labels); got %v", err)

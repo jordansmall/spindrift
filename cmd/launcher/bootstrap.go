@@ -126,6 +126,18 @@ func bootstrap(ensureReady bool, kind string, selfContained bool) (*launchContex
 	}, nil
 }
 
+// workSettle asserts that lc.settle satisfies settle.WorkSettler. Both
+// callers (console, recover) always bootstrap with dispatchKindWork, so
+// this always succeeds in practice; a clear panic beats a generic
+// "interface conversion" one if that invariant is ever broken.
+func (lc *launchContext) workSettle() settle.WorkSettler {
+	ws, ok := lc.settle.(settle.WorkSettler)
+	if !ok {
+		panic("lc.settle does not implement settle.WorkSettler (bootstrap wiring bug)")
+	}
+	return ws
+}
+
 // seedAccumulationRepoIfLocal creates and seeds the bare Accumulation repo
 // (ADR 0033) from pwd's checkout before any Box runs, when c.codeForge is
 // "local" and the dispatch kind is work — a no-op for github/git, which use
