@@ -182,6 +182,49 @@ var spindriftBuildArgs = []string{"nix", "develop", "--command", "spindrift", "b
 // shelling out to gh/Jira for real.
 type ForgeBuilder func(repoSlug string, tracker trackerSettings, token string) (forge.IssueTracker, forge.CodeForge)
 
+// tokenAcquireContext bundles everything a TokenAcquirer needs — different
+// backends validate their token completely differently (GitHub: local
+// prefix/scope audit; Forgejo: live Probe call against a constructed
+// IssueTracker), so this can't collapse to a single field lookup.
+type tokenAcquireContext struct {
+	env          Environment
+	w            io.Writer
+	promptMasked func(string) string
+	prompt       func(string) string
+	forgeBuilder ForgeBuilder
+	repoSlug     string
+	baseURL      string
+	desc         backend.Descriptor
+}
+
+// TokenAcquirer prompts for (or reuses an ambient) bearer token for one
+// registered backend, validating it however that backend requires, before
+// quickstart embeds it in flake.nix/harness.env. Registered per backend name
+// in tokenAcquirers below — mirrors the ForgeBuilder seam — so a new
+// QuickstartEligible backend needs its own acquirer wired in there, but
+// requires zero changes to runQuickstart itself.
+type TokenAcquirer func(ctx tokenAcquireContext) (string, error)
+
+// tokenAcquirers dispatches token acquisition by backend name. A new
+// QuickstartEligible backend registers its own entry here (and in
+// backend.Registry) — runQuickstart itself never branches on backend name to
+// acquire a token.
+var tokenAcquirers = map[string]TokenAcquirer{
+	"github": func(ctx tokenAcquireContext) (string, error) {
+		token, err := acquireGHToken(ctx.env, ctx.w, ctx.promptMasked, ctx.desc.TokenEnvVar)
+		if err != nil {
+			return "", err
+		}
+		if err := auditGHToken(token, ctx.env, ctx.w, ctx.prompt); err != nil {
+			return "", err
+		}
+		return token, nil
+	},
+	"forgejo": func(ctx tokenAcquireContext) (string, error) {
+		return acquireForgejoToken(ctx.w, ctx.promptMasked, ctx.forgeBuilder, ctx.repoSlug, ctx.baseURL, ctx.desc.TokenEnvVar)
+	},
+}
+
 // forgejoProbeTimeout bounds the HTTP client the forgejo IssueTracker uses
 // for the interactive token-validation ping (acquireForgejoToken's Probe
 // call), so an unreachable or hung Forgejo host can't block the wizard
@@ -327,8 +370,9 @@ func runQuickstart(dir string, env Environment, runner CommandRunner, forgeBuild
 		if err != nil {
 			return err
 		}
+		backendName = b
 		if b == "forgejo" {
-			backendName, forgejoBaseURL, repoSlugDefault = "forgejo", "https://"+host, remoteSlug
+			forgejoBaseURL, repoSlugDefault = "https://"+host, remoteSlug
 		}
 	}
 
@@ -355,20 +399,22 @@ func runQuickstart(dir string, env Environment, runner CommandRunner, forgeBuild
 		return fmt.Errorf("unregistered backend %q", backendName)
 	}
 
-	var ghToken, forgejoToken string
-	if backendName == "forgejo" {
-		forgejoToken, err = acquireForgejoToken(w, promptMasked, forgeBuilder, repoSlug, forgejoBaseURL, desc.TokenEnvVar)
-		if err != nil {
-			return err
-		}
-	} else {
-		ghToken, err = acquireGHToken(env, w, promptMasked, desc.TokenEnvVar)
-		if err != nil {
-			return err
-		}
-		if err := auditGHToken(ghToken, env, w, prompt); err != nil {
-			return err
-		}
+	acquirer, ok := tokenAcquirers[backendName]
+	if !ok {
+		return fmt.Errorf("no token acquirer registered for backend %q", backendName)
+	}
+	token, err := acquirer(tokenAcquireContext{
+		env:          env,
+		w:            w,
+		promptMasked: promptMasked,
+		prompt:       prompt,
+		forgeBuilder: forgeBuilder,
+		repoSlug:     repoSlug,
+		baseURL:      forgejoBaseURL,
+		desc:         desc,
+	})
+	if err != nil {
+		return err
 	}
 
 	claudeOAuthToken := ""
@@ -391,11 +437,6 @@ func runQuickstart(dir string, env Environment, runner CommandRunner, forgeBuild
 		anthropicAPIKey = promptMasked("Anthropic API key (ANTHROPIC_API_KEY)")
 	}
 
-	token := ghToken
-	if forgejoToken != "" {
-		token = forgejoToken
-	}
-
 	a := answers{
 		repoSlug:         repoSlug,
 		runtime:          runtime,
@@ -414,10 +455,13 @@ func runQuickstart(dir string, env Environment, runner CommandRunner, forgeBuild
 	}
 
 	// The gh CLI (used by the github Code Forge, and by the github Issue
-	// Tracker branch) reads auth from GH_TOKEN in the process environment —
-	// only relevant on the github path.
-	if backendName != "forgejo" {
-		if err := os.Setenv("GH_TOKEN", ghToken); err != nil {
+	// Tracker branch) reads auth from GH_TOKEN in the process environment.
+	// Keyed off the acquired token's own descriptor rather than a
+	// backend-name branch: only export GH_TOKEN when the acquired credential
+	// IS a GH_TOKEN, so a third backend's credential is never exported under
+	// GitHub's well-known env var name.
+	if desc.TokenEnvVar == "GH_TOKEN" {
+		if err := os.Setenv("GH_TOKEN", token); err != nil {
 			return fmt.Errorf("set GH_TOKEN: %w", err)
 		}
 	}
