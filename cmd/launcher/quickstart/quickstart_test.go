@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -1661,6 +1662,69 @@ func TestRunQuickstart_SelfHostedForgejo_AsksBackendAndEmitsBaseURL(t *testing.T
 	}
 	if !strings.Contains(string(flakeNix), `forge.backend = "forgejo"`) {
 		t.Errorf("expected flake.nix to set codeForge to forgejo, got:\n%s", flakeNix)
+	}
+}
+
+// TestRunQuickstart_NewBackend_TokenAcquisitionNeedsNoRunQuickstartEdit pins
+// that a QuickstartEligible backend registered only in backend.Registry, with
+// its own TokenAcquirer registered in tokenAcquirers, can acquire its token
+// end-to-end through runQuickstart with zero edits to runQuickstart itself:
+// the operator picks the fake "gitlab" backend at the prompt (proving the
+// backendName-discard bug is fixed), the fake gitlab TokenAcquirer is
+// dispatched (not the github or forgejo path), and the resulting token lands
+// in harness.env under the descriptor's own TokenEnvVar — with no GH_TOKEN
+// line at all, proving the export at the bottom of runQuickstart is keyed off
+// the acquired token's descriptor rather than a "!= forgejo" backend-name
+// guard.
+func TestRunQuickstart_NewBackend_TokenAcquisitionNeedsNoRunQuickstartEdit(t *testing.T) {
+	originalRegistry := backend.Registry
+	backend.Registry = append(append([]backend.Descriptor{}, originalRegistry...), backend.Descriptor{
+		Name:             "gitlab",
+		ValidAsTracker:   true,
+		ValidAsCodeForge: true,
+		TokenEnvVar:      "GITLAB_TOKEN",
+	})
+	defer func() { backend.Registry = originalRegistry }()
+
+	originalAcquirers := tokenAcquirers
+	tokenAcquirers = make(map[string]TokenAcquirer, len(originalAcquirers)+1)
+	for k, v := range originalAcquirers {
+		tokenAcquirers[k] = v
+	}
+	tokenAcquirers["gitlab"] = func(ctx tokenAcquireContext) (string, error) {
+		return ctx.promptMasked(fmt.Sprintf("GitLab token (%s)", ctx.desc.TokenEnvVar)), nil
+	}
+	defer func() { tokenAcquirers = originalAcquirers }()
+
+	dir := t.TempDir()
+	var out bytes.Buffer
+	env := fakeEnvironment{
+		remoteURL: "https://gitlab.example.com/team/proj.git",
+		env:       map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "claude-oauth-faketoken"},
+		runtimes:  map[string]bool{"podman": true},
+	}
+	stdin := strings.NewReader(strings.Join([]string{
+		"gitlab",           // backend
+		"team/proj",        // repoSlug (no ambient default for gitlab)
+		"",                 // runtime default podman
+		"Ada Lovelace",     // git user name
+		"ada@example.com",  // git user email
+		"gitlab-faketoken", // GitLab token
+	}, "\n") + "\n")
+
+	if err := runQuickstart(dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false); err != nil {
+		t.Fatalf("runQuickstart: %v", err)
+	}
+
+	harnessEnv, err := os.ReadFile(filepath.Join(dir, "harness.env"))
+	if err != nil {
+		t.Fatalf("read harness.env: %v", err)
+	}
+	if !strings.Contains(string(harnessEnv), "GITLAB_TOKEN=gitlab-faketoken") {
+		t.Errorf("expected harness.env to carry the acquired token under GITLAB_TOKEN, got:\n%s", harnessEnv)
+	}
+	if strings.Contains(string(harnessEnv), "GH_TOKEN=") {
+		t.Errorf("expected harness.env NOT to carry a GH_TOKEN line for a non-github backend, got:\n%s", harnessEnv)
 	}
 }
 
