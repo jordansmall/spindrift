@@ -43,6 +43,13 @@ type Config struct {
 	// dispatch.Config.HoldJitterSecs.
 	HoldJitterSecs int
 
+	// TransientRetryMax caps merge-transient retries (forge.ErrMergeTransient,
+	// issue #2325) — the same TRANSIENT_RETRY_MAX knob dispatch.Config's own
+	// exit-retry loop honors, reused here rather than overloading
+	// MaxRebaseAttempts (a merge-conflict-retry budget with a different
+	// meaning) for an unrelated failure class.
+	TransientRetryMax int
+
 	// Clock is the injectable sleep seam the rebase-push backoff sleeps
 	// through — defaults to dispatch.RealClock() when unset (its Sleep
 	// field left nil).

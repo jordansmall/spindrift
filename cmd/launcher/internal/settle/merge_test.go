@@ -20,6 +20,7 @@ func TestMergeImmediate(t *testing.T) {
 	cases := []struct {
 		name                      string
 		maxRebaseAttempts         int
+		transientRetryMax         int
 		mergeErr                  error
 		mergeErrs                 []error
 		rebaseErr                 error
@@ -64,6 +65,7 @@ func TestMergeImmediate(t *testing.T) {
 		{
 			name:              "transient merge failure retried then succeeds",
 			maxRebaseAttempts: 3,
+			transientRetryMax: 3,
 			mergeErrs:         []error{forge.ErrMergeTransient, nil},
 			wantErr:           false,
 			wantMerged:        true,
@@ -71,9 +73,24 @@ func TestMergeImmediate(t *testing.T) {
 		{
 			name:              "transient merge failure persists → retries exhausted, error returned",
 			maxRebaseAttempts: 3,
+			transientRetryMax: 3,
 			mergeErrs: []error{
 				forge.ErrMergeTransient,
 				forge.ErrMergeTransient,
+				forge.ErrMergeTransient,
+				forge.ErrMergeTransient,
+			},
+			wantErr:    true,
+			wantMerged: false,
+		},
+		{
+			// TRANSIENT_RETRY_MAX, not MaxRebaseAttempts, must bound the
+			// merge-transient retry loop (issue #2325 AC #4): a much larger
+			// MaxRebaseAttempts must not mask a small TransientRetryMax.
+			name:              "transient merge failure honors TransientRetryMax independent of MaxRebaseAttempts",
+			maxRebaseAttempts: 10,
+			transientRetryMax: 1,
+			mergeErrs: []error{
 				forge.ErrMergeTransient,
 				forge.ErrMergeTransient,
 			},
@@ -174,6 +191,9 @@ func TestMergeImmediate(t *testing.T) {
 			c := baseConfig()
 			if tc.maxRebaseAttempts != 0 {
 				c.MaxRebaseAttempts = tc.maxRebaseAttempts
+			}
+			if tc.transientRetryMax != 0 {
+				c.TransientRetryMax = tc.transientRetryMax
 			}
 			fc := forge.NewFake()
 			if len(tc.mergeErrs) > 0 {

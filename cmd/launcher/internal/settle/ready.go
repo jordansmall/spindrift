@@ -484,12 +484,12 @@ func (s *Settle) mergeImmediate(num string, gen uint64, pr string, d dispatch.Di
 			continue
 		}
 		if errors.Is(err, forge.ErrMergeTransient) {
-			if mergeTransientAttempts >= s.cfg.MaxRebaseAttempts {
+			if mergeTransientAttempts >= s.cfg.TransientRetryMax {
 				return err
 			}
 			mergeTransientAttempts++
 			fmt.Printf("    #%s  landing=%s  status=merge-transient-retry  attempt=%d/%d  !! %v\n",
-				num, pr, mergeTransientAttempts, s.cfg.MaxRebaseAttempts, err)
+				num, pr, mergeTransientAttempts, s.cfg.TransientRetryMax, err)
 			s.rebasePushBackoff().Do(mergeTransientAttempts)
 			continue
 		}
