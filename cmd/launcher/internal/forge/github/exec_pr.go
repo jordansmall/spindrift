@@ -25,6 +25,7 @@ import (
 const rebaseForcePushTimeout = 5 * time.Minute
 
 func (e *execClient) OpenPRForBranch(branch string) (forge.PR, bool, error) {
+	var stderr bytes.Buffer
 	cmd := exec.Command("gh", "pr", "list",
 		"--repo", e.repo,
 		"--head", branch,
@@ -32,19 +33,22 @@ func (e *execClient) OpenPRForBranch(branch string) (forge.PR, bool, error) {
 		"--json", "url",
 		"--jq", `.[0].url // ""`,
 	)
+	cmd.Stderr = &stderr
 	out, err := cmd.Output()
 	if err != nil {
-		return forge.PR{}, false, fmt.Errorf("gh pr list: %w", err)
+		return forge.PR{}, false, fmt.Errorf("gh pr list: %w: %s", err, strings.TrimSpace(stderr.String()))
 	}
 	url := strings.TrimSpace(string(out))
 	if url == "" {
 		return forge.PR{}, false, nil
 	}
+	var viewStderr bytes.Buffer
 	viewCmd := exec.Command("gh", "pr", "view", url, "--json", "isDraft", "--jq", ".isDraft")
+	viewCmd.Stderr = &viewStderr
 	out, err = viewCmd.Output()
 	if err != nil {
 		// Cannot determine draft status — do not adopt.
-		return forge.PR{}, false, fmt.Errorf("gh pr view %s isDraft: %w", url, err)
+		return forge.PR{}, false, fmt.Errorf("gh pr view %s isDraft: %w: %s", url, err, strings.TrimSpace(viewStderr.String()))
 	}
 	isDraft := strings.TrimSpace(string(out)) == "true"
 	return forge.PR{URL: url, IsDraft: isDraft}, true, nil

@@ -103,8 +103,13 @@ type Fake struct {
 
 	// OpenPRForBranchErr, if non-nil, is returned by every OpenPRForBranch
 	// call (simulating a transient forge lookup failure, distinct from "no
-	// open PR yet").
+	// open PR yet") after OpenPRForBranchErrs is drained.
 	OpenPRForBranchErr error
+
+	// OpenPRForBranchErrs is a per-call queue drained before
+	// OpenPRForBranchErr is checked. A nil entry means "fall through to the
+	// normal branch->PR lookup"; a non-nil entry is returned as the error.
+	OpenPRForBranchErrs []error
 
 	// BranchExistsErr, if non-nil, is returned by every BranchExists call.
 	BranchExistsErr error
@@ -679,7 +684,13 @@ func (f *Fake) Comment(num, body string) error {
 func (f *Fake) OpenPRForBranch(branch string) (PR, bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if f.OpenPRForBranchErr != nil {
+	if len(f.OpenPRForBranchErrs) > 0 {
+		err := f.OpenPRForBranchErrs[0]
+		f.OpenPRForBranchErrs = f.OpenPRForBranchErrs[1:]
+		if err != nil {
+			return PR{}, false, err
+		}
+	} else if f.OpenPRForBranchErr != nil {
 		return PR{}, false, f.OpenPRForBranchErr
 	}
 	url, ok := f.branchPRs[branch]

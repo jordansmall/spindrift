@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -62,6 +63,65 @@ func TestRecoverByNumber_GreenMergesAndCompletes(t *testing.T) {
 	}
 	if last := fc.TransitionStateCalls[len(fc.TransitionStateCalls)-1]; last.To != forge.Complete {
 		t.Errorf("last transition To=%v, want Complete", last.To)
+	}
+}
+
+// TestRecoverByNumber_RetriesTransientPRLookupError proves recoverByNumber's
+// PR lookup survives a single transient forge error (issue #2323): the fake
+// returns an HTTP 5xx error on the first OpenPRForBranch call, then falls
+// through to the normal branch->PR lookup on the retry, and recoverByNumber
+// still adopts and completes the PR rather than propagating the transient
+// error.
+func TestRecoverByNumber_RetriesTransientPRLookupError(t *testing.T) {
+	c := reconcileConfig()
+	c.transientRetryMax = 2
+	c.transientBackoffSecs = 0
+	fc := forge.NewFake(dispatchLabels(c))
+	fc.BranchPrefix = c.branchPrefix
+
+	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.inProgressLabel}})
+	branch := fc.AgentBranch("42")
+	fc.SetPR(branch, forge.PR{URL: testReconcilePR, IsDraft: false})
+	fc.SetCheckStates(testReconcilePR, []forge.RollupState{forge.StatePending, forge.StateSuccess, forge.StateSuccess})
+	fc.OpenPRForBranchErrs = []error{errors.New("HTTP 502: Bad Gateway"), nil}
+
+	dir := tempLogDir(t)
+	err := recoverByNumber(c, fc, fc, dir, testFactory(t, dir, nil), newSettle(c, fc, testWired(fc), fc), "42")
+
+	if err != nil {
+		t.Errorf("expected nil error after retrying transient PR lookup error; got %v", err)
+	}
+	if fc.Merged != testReconcilePR {
+		t.Errorf("expected PR to be merged; fc.Merged=%q", fc.Merged)
+	}
+}
+
+// TestRecoverByNumber_RetryMaxOneStillRetriesOnce guards the off-by-one in
+// issue #2323: transientRetryMax is documented (flagtable_gen.go) as a max
+// *retries* count, matching dispatch/retry.go's transientCount check, so
+// TRANSIENT_RETRY_MAX=1 must still allow one retry (two attempts total) —
+// not degrade to zero retries by treating the knob as a total attempt count.
+func TestRecoverByNumber_RetryMaxOneStillRetriesOnce(t *testing.T) {
+	c := reconcileConfig()
+	c.transientRetryMax = 1
+	c.transientBackoffSecs = 0
+	fc := forge.NewFake(dispatchLabels(c))
+	fc.BranchPrefix = c.branchPrefix
+
+	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.inProgressLabel}})
+	branch := fc.AgentBranch("42")
+	fc.SetPR(branch, forge.PR{URL: testReconcilePR, IsDraft: false})
+	fc.SetCheckStates(testReconcilePR, []forge.RollupState{forge.StatePending, forge.StateSuccess, forge.StateSuccess})
+	fc.OpenPRForBranchErrs = []error{errors.New("HTTP 502: Bad Gateway"), nil}
+
+	dir := tempLogDir(t)
+	err := recoverByNumber(c, fc, fc, dir, testFactory(t, dir, nil), newSettle(c, fc, testWired(fc), fc), "42")
+
+	if err != nil {
+		t.Errorf("expected nil error after one retry with transientRetryMax=1; got %v", err)
+	}
+	if fc.Merged != testReconcilePR {
+		t.Errorf("expected PR to be merged; fc.Merged=%q", fc.Merged)
 	}
 }
 

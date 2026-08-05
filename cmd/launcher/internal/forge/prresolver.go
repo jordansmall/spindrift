@@ -1,5 +1,7 @@
 package forge
 
+import "spindrift.dev/launcher/internal/retry"
+
 // PRForIssue is the result of resolving the open PR for a dispatch issue's
 // agent branch — the shared "does this forge have PRs, and what is the open
 // PR for issue N" answer every call site across dispatch, settle, and the
@@ -28,6 +30,35 @@ func ResolveOpenPR(cf CodeForge, num string) (PRForIssue, error) {
 		return PRForIssue{}, err
 	}
 	return PRForIssue{Found: true, URL: got.URL, IsDraft: got.IsDraft}, nil
+}
+
+// ResolveOpenPRWithRetry resolves num's open PR like ResolveOpenPR, but
+// retries a transient lookup failure (5xx, network blip — see
+// isTransientForgeError) with backoff instead of propagating it immediately
+// (issue #2323). A definitive "no open PR" result (Found: false, nil error)
+// and any non-transient error both return on the first attempt. maxAttempts
+// is clamped to at least 1. backoff.Do runs between attempts, never after
+// the last one, so a caller with maxAttempts attempts sees at most
+// maxAttempts-1 sleeps.
+func ResolveOpenPRWithRetry(cf CodeForge, num string, backoff retry.LinearBackoff, maxAttempts int) (PRForIssue, error) {
+	attempts := maxAttempts
+	if attempts < 1 {
+		attempts = 1
+	}
+
+	var res PRForIssue
+	var err error
+	for attempt := 1; attempt <= attempts; attempt++ {
+		res, err = ResolveOpenPR(cf, num)
+		if err == nil || !isTransientForgeError(err) {
+			return res, err
+		}
+		if attempt >= attempts {
+			return res, err
+		}
+		backoff.Do(attempt)
+	}
+	return res, err
 }
 
 // ResolveOpenPRFiles resolves num's open PR and returns the paths it

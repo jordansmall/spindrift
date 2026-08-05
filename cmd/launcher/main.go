@@ -17,6 +17,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"spindrift.dev/launcher/internal/console"
 	"spindrift.dev/launcher/internal/dispatch"
@@ -26,6 +27,7 @@ import (
 	"spindrift.dev/launcher/internal/freshness"
 	"spindrift.dev/launcher/internal/localloop"
 	"spindrift.dev/launcher/internal/reconcile"
+	"spindrift.dev/launcher/internal/retry"
 	"spindrift.dev/launcher/internal/runner"
 	"spindrift.dev/launcher/internal/settle"
 	"spindrift.dev/launcher/internal/waves"
@@ -1199,7 +1201,10 @@ func recoverByNumber(c config, it forge.IssueTracker, cf forge.CodeForge, pwd st
 	}
 	iss := issue{number: fi.Number, title: fi.Title, priority: fi.Priority}
 	branch := cf.AgentBranch(iss.number)
-	res, prErr := forge.ResolveOpenPR(cf, iss.number)
+	backoff := retry.LinearBackoff{Unit: time.Duration(c.transientBackoffSecs) * time.Second, Clock: retry.RealClock()}
+	// transientRetryMax is a max-retries knob everywhere else (dispatch/retry.go),
+	// so the first attempt is on top of it: maxAttempts = retries + 1.
+	res, prErr := forge.ResolveOpenPRWithRetry(cf, iss.number, backoff, c.transientRetryMax+1)
 	if prErr != nil {
 		return fmt.Errorf("issue %s: resolve PR: %w", issueNum, prErr)
 	}
