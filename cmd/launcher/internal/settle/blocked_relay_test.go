@@ -96,9 +96,11 @@ func TestSettle_GithubReadOnly_BlockedRelaysBundleAndCreatesDraftPR_ClosesAlread
 
 	d := dispatch.NewFake()
 	result := dispatch.Result{
-		Success:       true,
-		OutcomeFound:  true,
-		Outcome:       outcome.Outcome{Issue: issNum, Landing: branch, Status: "blocked", Note: "review never cleared"},
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: issNum, Landing: branch, Status: "blocked", Note: "review never cleared"},
+		},
 		PRIntent:      "feat: add widget\n\nAdds a widget. Closes #1933",
 		PRIntentFound: true,
 	}
@@ -138,9 +140,11 @@ func TestSettle_GithubReadOnly_BlockedRelaysBundleAndCreatesDraftPR_LocalTracker
 
 	d := dispatch.NewFake()
 	result := dispatch.Result{
-		Success:       true,
-		OutcomeFound:  true,
-		Outcome:       outcome.Outcome{Issue: issNum, Landing: branch, Status: "blocked", Note: "review never cleared"},
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: issNum, Landing: branch, Status: "blocked", Note: "review never cleared"},
+		},
 		PRIntent:      "feat: add widget\n\nAdds a widget.",
 		PRIntentFound: true,
 	}
