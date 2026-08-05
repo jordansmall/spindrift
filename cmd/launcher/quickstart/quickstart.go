@@ -156,15 +156,20 @@ const defaultBranchPrefix = "agent/issue-"
 // flake.
 const codebergBaseURL = "https://codeberg.org"
 
-// defaultDispatchLabels are the four triage labels Quickstart's generated
-// flake relies on implicitly (the launcher's own LABEL/IN_PROGRESS_LABEL/
-// FAILED_LABEL/COMPLETE_LABEL defaults) — the wizard never prompts for
-// custom label names.
+// defaultDispatchLabels are the four operator-visible triage labels
+// Quickstart's generated flake relies on implicitly (the launcher's own
+// LABEL/IN_PROGRESS_LABEL/FAILED_LABEL/COMPLETE_LABEL defaults) — the wizard
+// never prompts for custom label names — plus the fixed, non-configurable
+// Ambiguous label (#2275), which matters for the trackers this struct feeds
+// (github.NewExecClient / local.NewLocalTracker) even though it's not one of
+// the four the wizard prompts for or doctor.Config validates via this
+// struct.
 var defaultDispatchLabels = forge.DispatchLabels{
 	Dispatchable: "ready-for-agent",
 	InProgress:   "agent-in-progress",
 	Complete:     "agent-complete",
 	Failed:       "agent-failed",
+	Ambiguous:    "agent-ambiguous-spec",
 }
 
 // spindriftBuildArgs is the subprocess the finish line shells out to build

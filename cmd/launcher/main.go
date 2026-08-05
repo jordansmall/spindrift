@@ -573,6 +573,10 @@ func repoBanner(c config) string {
 // local frontmatter marker, never a real GitHub label, so it doesn't need
 // an env-configurable knob (which would also mean touching the
 // Nix-generated lib/env-schema.nix / flagtable_gen.go files) (#2254).
+// Ambiguous is likewise a fixed string literal: unlike Recoverable it is a
+// real GitHub label (the advisory tier doctor.AmbiguousLabelNames() checks
+// for), but issue #2275 doesn't ask for it to be operator-configurable
+// either, so it gets the same fixed treatment.
 func dispatchLabels(c config) forge.DispatchLabels {
 	return forge.DispatchLabels{
 		Dispatchable: c.label,
@@ -580,6 +584,7 @@ func dispatchLabels(c config) forge.DispatchLabels {
 		Complete:     c.completeLabel,
 		Failed:       c.failedLabel,
 		Recoverable:  "agent-recoverable",
+		Ambiguous:    "agent-ambiguous-spec",
 	}
 }
 
