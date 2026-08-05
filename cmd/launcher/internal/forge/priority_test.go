@@ -76,14 +76,78 @@ func TestPriorityLabelNames(t *testing.T) {
 	}
 }
 
-// issueNums returns the Number field of each issue in order, for concise
-// ordering assertions below.
-func issueNums(issues []forge.Issue) []string {
-	nums := make([]string, len(issues))
-	for i, iss := range issues {
-		nums[i] = iss.Number
+// prioritizedThing is a non-forge.Issue type used to verify SortByPriority
+// is generic over any type with an extractable Priority, not hardcoded to
+// forge.Issue.
+type prioritizedThing struct {
+	name     string
+	priority forge.Priority
+}
+
+// TestSortByPriority_GenericOverNonIssueType verifies SortByPriority sorts
+// any []T given a priority-extractor func(T) forge.Priority, stably, not
+// just []forge.Issue — the generic signature this slice introduces.
+func TestSortByPriority_GenericOverNonIssueType(t *testing.T) {
+	things := []prioritizedThing{
+		{name: "a", priority: forge.PriorityNormal},
+		{name: "b", priority: forge.PriorityCritical},
+		{name: "c", priority: forge.PriorityLow},
+		{name: "d", priority: forge.PriorityHigh},
+		{name: "e", priority: forge.PriorityNormal},
 	}
-	return nums
+	forge.SortByPriority(things, func(t prioritizedThing) forge.Priority { return t.priority })
+	want := []string{"b", "d", "a", "e", "c"}
+	got := make([]string, len(things))
+	for i, th := range things {
+		got[i] = th.name
+	}
+	if len(got) != len(want) {
+		t.Fatalf("order = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("order = %v, want %v", got, want)
+			break
+		}
+	}
+}
+
+// issueNumber extracts an Issue's Number field, passed to forge.Numbers
+// below for concise ordering assertions.
+func issueNumber(i forge.Issue) string { return i.Number }
+
+// TestNumbers_MapsInOrder verifies Numbers maps each item to its number
+// string via the caller-supplied extractor, preserving input order and
+// length — including an empty input mapping to an empty (non-nil-length)
+// slice — the direct unit coverage for this exported helper, generic over
+// any item type (here a non-forge.Issue prioritizedThing-shaped type) so
+// waves' own Issue type is covered by the same contract without a
+// forge.Issue-specific test.
+func TestNumbers_MapsInOrder(t *testing.T) {
+	type numbered struct{ id string }
+	items := []numbered{{id: "3"}, {id: "1"}, {id: "2"}}
+	got := forge.Numbers(items, func(n numbered) string { return n.id })
+	want := []string{"3", "1", "2"}
+	if len(got) != len(want) {
+		t.Fatalf("Numbers(...) = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("Numbers(...) = %v, want %v", got, want)
+			break
+		}
+	}
+}
+
+// TestNumbers_Empty verifies Numbers on an empty slice returns an empty
+// (zero-length) slice rather than panicking or returning nil-vs-non-nil in
+// a way callers need to special-case.
+func TestNumbers_Empty(t *testing.T) {
+	type numbered struct{ id string }
+	got := forge.Numbers([]numbered{}, func(n numbered) string { return n.id })
+	if len(got) != 0 {
+		t.Errorf("Numbers([]) = %v, want empty", got)
+	}
 }
 
 // TestSortByPriority_SortsDescending verifies a mixed-priority batch sorts
@@ -96,8 +160,8 @@ func TestSortByPriority_SortsDescending(t *testing.T) {
 		{Number: "3", Priority: forge.PriorityLow},
 		{Number: "4", Priority: forge.PriorityHigh},
 	}
-	forge.SortByPriority(issues)
-	got := issueNums(issues)
+	forge.SortByPriority(issues, func(i forge.Issue) forge.Priority { return i.Priority })
+	got := forge.Numbers(issues, issueNumber)
 	want := []string{"2", "4", "1", "3"}
 	if len(got) != len(want) {
 		t.Fatalf("issue order = %v, want %v", got, want)
@@ -119,8 +183,8 @@ func TestSortByPriority_StableWithinTier(t *testing.T) {
 		{Number: "5", Priority: forge.PriorityNormal},
 		{Number: "2", Priority: forge.PriorityNormal},
 	}
-	forge.SortByPriority(issues)
-	got := issueNums(issues)
+	forge.SortByPriority(issues, func(i forge.Issue) forge.Priority { return i.Priority })
+	got := forge.Numbers(issues, issueNumber)
 	want := []string{"5", "2"}
 	for i := range want {
 		if got[i] != want[i] {
@@ -138,9 +202,9 @@ func TestSortByPriority_AllNormalUnchanged(t *testing.T) {
 		{Number: "2"},
 		{Number: "3"},
 	}
-	want := issueNums(issues)
-	forge.SortByPriority(issues)
-	got := issueNums(issues)
+	want := forge.Numbers(issues, issueNumber)
+	forge.SortByPriority(issues, func(i forge.Issue) forge.Priority { return i.Priority })
+	got := forge.Numbers(issues, issueNumber)
 	if len(got) != len(want) {
 		t.Fatalf("issue order = %v, want %v", got, want)
 	}

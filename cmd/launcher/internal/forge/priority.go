@@ -60,13 +60,31 @@ func ResolvePriority(labels []string) Priority {
 	return priority
 }
 
-// SortByPriority stably orders issues by Priority descending (Critical >
-// High > Normal > Low); a stable sort means equal-priority issues keep
+// SortByPriority stably orders items by Priority descending (Critical >
+// High > Normal > Low), extracting each item's Priority via the caller-
+// supplied priority func; a stable sort means equal-priority items keep
 // their input relative order, which — since every Issue Tracker adapter
 // already returns issues oldest-first — makes oldest-first the natural,
-// zero-extra-code tiebreaker within a tier (ADR 0040).
-func SortByPriority(issues []Issue) {
-	sort.SliceStable(issues, func(i, j int) bool {
-		return issues[i].Priority > issues[j].Priority
+// zero-extra-code tiebreaker within a tier (ADR 0040). Generic over any
+// item type so both forge (sorting []Issue) and other packages that
+// prioritize their own types (e.g. waves) share this one implementation
+// instead of each maintaining a byte-identical copy of the sort.
+func SortByPriority[T any](items []T, priority func(T) Priority) {
+	sort.SliceStable(items, func(i, j int) bool {
+		return priority(items[i]) > priority(items[j])
 	})
+}
+
+// Numbers maps items to their number strings via the caller-supplied number
+// func, preserving input order. Generic over any item type so both forge
+// (mapping []Issue) and other packages that carry their own issue-shaped
+// type (e.g. waves.Issue) share this one implementation instead of each
+// maintaining a byte-identical copy of the map, mirroring SortByPriority's
+// rationale.
+func Numbers[T any](items []T, number func(T) string) []string {
+	nums := make([]string, len(items))
+	for i, item := range items {
+		nums[i] = number(item)
+	}
+	return nums
 }
