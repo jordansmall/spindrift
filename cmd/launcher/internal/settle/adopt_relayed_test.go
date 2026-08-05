@@ -292,7 +292,7 @@ func TestSettle_GithubReadOnly_AdoptedPRWithRedCIDoesNotMerge(t *testing.T) {
 }
 
 // TestSettle_GithubReadOnly_NonSyntheticBlockedDoesNotAdopt covers a driver
-// that genuinely blocked (Resolved.Provenance=ProvenanceGenuine) — even
+// that genuinely blocked (Resolved.Provenance == outcome.ProvenanceGenuine) — even
 // with a self-report that says success, adoption must not fire: a
 // non-synthetic status=blocked is the driver's own authoritative outcome
 // line, not the ADR 0036 backstop this override exists to second-guess.
