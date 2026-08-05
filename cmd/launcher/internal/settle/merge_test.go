@@ -62,6 +62,25 @@ func TestMergeImmediate(t *testing.T) {
 			wantRebaseCalled:  1,
 		},
 		{
+			name:              "transient merge failure retried then succeeds",
+			maxRebaseAttempts: 3,
+			mergeErrs:         []error{forge.ErrMergeTransient, nil},
+			wantErr:           false,
+			wantMerged:        true,
+		},
+		{
+			name:              "transient merge failure persists → retries exhausted, error returned",
+			maxRebaseAttempts: 3,
+			mergeErrs: []error{
+				forge.ErrMergeTransient,
+				forge.ErrMergeTransient,
+				forge.ErrMergeTransient,
+				forge.ErrMergeTransient,
+			},
+			wantErr:    true,
+			wantMerged: false,
+		},
+		{
 			name:              "conflict exhausts maxRebaseAttempts → error returned",
 			maxRebaseAttempts: 1,
 			mergeErrs:         []error{forge.ErrMergeConflict, forge.ErrMergeConflict},
