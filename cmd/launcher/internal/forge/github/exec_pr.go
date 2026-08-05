@@ -298,6 +298,9 @@ func mergeMethodFlag(method string) string {
 // its own error rather than folded into ErrMergeConflict.
 func (e *execClient) classifyMergeFailure(url string, mergeErr error, stderr string) error {
 	if !gitplumbing.IsMergeConflict(stderr) {
+		if gitplumbing.IsMergeTransient(stderr) {
+			return fmt.Errorf("gh pr merge %s: %w: %s: %w", url, mergeErr, strings.TrimSpace(stderr), forge.ErrMergeTransient)
+		}
 		return fmt.Errorf("gh pr merge %s: %w: %s", url, mergeErr, strings.TrimSpace(stderr))
 	}
 	state, err := e.Mergeable(url)

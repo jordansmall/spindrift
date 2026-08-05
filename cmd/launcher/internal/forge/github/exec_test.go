@@ -983,6 +983,32 @@ fi
 	}
 }
 
+// TestClassifyMergeFailure_TransientStderrWrapsErrMergeTransient verifies that
+// a non-conflict gh pr merge failure whose stderr indicates a transient
+// failure (e.g. a 502 from GitHub) is wrapped so callers can detect it via
+// errors.Is(err, forge.ErrMergeTransient), without needing to query the PR's
+// mergeable state.
+func TestClassifyMergeFailure_TransientStderrWrapsErrMergeTransient(t *testing.T) {
+	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	mergeErr := errors.New("exit status 1")
+	err := c.classifyMergeFailure("https://github.com/owner/repo/pull/42", mergeErr, "HTTP 502: Bad Gateway (https://api.github.com/graphql)\n")
+	if !errors.Is(err, forge.ErrMergeTransient) {
+		t.Fatalf("want forge.ErrMergeTransient, got: %v", err)
+	}
+}
+
+// TestClassifyMergeFailure_NonTransientNonConflictStderrDoesNotWrapErrMergeTransient
+// verifies that a genuine non-retryable, non-conflict gh pr merge failure
+// (e.g. an auth error) is not misclassified as forge.ErrMergeTransient.
+func TestClassifyMergeFailure_NonTransientNonConflictStderrDoesNotWrapErrMergeTransient(t *testing.T) {
+	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	mergeErr := errors.New("exit status 1")
+	err := c.classifyMergeFailure("https://github.com/owner/repo/pull/42", mergeErr, "HTTP 401: Bad credentials (https://api.github.com/graphql)\n")
+	if errors.Is(err, forge.ErrMergeTransient) {
+		t.Fatalf("non-transient auth failure must not classify as forge.ErrMergeTransient, got: %v", err)
+	}
+}
+
 // TestMarkReady_AlreadyReadyIsIdempotentNoOp verifies that MarkReady on a PR
 // gh already reports as ready for review is treated as success (issue
 // #1651). This mirrors gh's actual behavior: `gh pr ready` on an
