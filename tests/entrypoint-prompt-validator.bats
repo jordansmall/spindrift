@@ -149,6 +149,43 @@ _stub_prompt_dir() {
   grep -q 'SPINDRIFT_ISSUE_INTENT' <<<"$output"
 }
 
+# Data-driven proof (issue #2318): _validate_prompt_contract must decide
+# reject-vs-warn (and its gating condition) from the `severity`/`when` fields
+# it reads off each row (pipe positions 4/5) in _VALIDATE_MARKER_ROWS --
+# lib/prompt-contract.nix's validateMarkers registry, rendered by
+# validateMarkersBashPreamble -- not from bash if/else blocks hand-written
+# per row id. This case takes the exact "warn pr-intent" fixture from the
+# case above (read-only, non-research, issue prompt missing
+# SPINDRIFT_PR_INTENT), but patches the *rendered* pr-intent row's severity
+# field from "warn" to "reject" before invoking the entrypoint. A registry
+# lookup that actually reads the row's severity field must then treat this
+# as a reject row: exit non-zero, Driver never invoked -- exactly like the
+# verdict-comment-relay/reviewer-verdict reject cases above. A hardcoded
+# per-id if/else block ignores the patched field entirely and keeps
+# behaving like the unpatched "warn: ... -> exit 0" case, so this proves the
+# hardcoding rather than a setup mistake.
+@test "data-driven: pr-intent row patched to severity=reject -> non-zero exit, Driver never invoked" {
+  local prompt_dir
+  prompt_dir="$(_stub_prompt_dir)"
+  printf 'issue stub, no PR-intent marker here\n' >"$prompt_dir/issue-prompt.md"
+  export PROMPTS_DIR="$prompt_dir"
+  unset BOX_WRITE_ENABLED
+
+  local patched="$BATS_TEST_TMPDIR/entrypoint-severity-patched.sh"
+  sed "s/'pr-intent|SPINDRIFT_PR_INTENT|fragment-body|warn|boxAccessReadOnly'/'pr-intent|SPINDRIFT_PR_INTENT|fragment-body|reject|boxAccessReadOnly'/" \
+    "$ENTRYPOINT" >"$patched"
+  chmod +x "$patched"
+  # Guard the patch actually landed, so a future rename of the row's rendered
+  # text fails this test loudly instead of silently degrading to a no-op
+  # sed and a green test for the wrong reason.
+  grep -q "'pr-intent|SPINDRIFT_PR_INTENT|fragment-body|reject|boxAccessReadOnly'" "$patched"
+
+  run bash "$patched"
+  [ "$status" -ne 0 ]
+  [ ! -s "$DRIVER_LOG" ]
+  [ ! -s "$DRIVER_PROMPT_FILE" ]
+}
+
 # A reworded-but-marker-present section is respected (issue #2249 acceptance
 # criterion): the reject fires on the literal marker string only, not on any
 # particular surrounding prose/heading -- rewording the section around the
