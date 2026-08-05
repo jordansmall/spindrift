@@ -153,15 +153,9 @@ func TestNewPlan_FailedPropagates(t *testing.T) {
 	}
 }
 
-// planIssueNums returns the Number field of each issue in order, for
-// concise ordering assertions below.
-func planIssueNums(issues []Issue) []string {
-	nums := make([]string, len(issues))
-	for i, iss := range issues {
-		nums[i] = iss.Number
-	}
-	return nums
-}
+// planIssueNumber extracts an Issue's Number field, passed to
+// forge.Numbers below for concise ordering assertions.
+func planIssueNumber(i Issue) string { return i.Number }
 
 // TestNewPlan_SortsByPriorityDescending verifies a mixed-priority
 // OriginDiscovered batch sorts to Critical, High, Normal, Low regardless of
@@ -181,7 +175,7 @@ func TestNewPlan_SortsByPriorityDescending(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewPlan: %v", err)
 	}
-	got := planIssueNums(plan.Issues)
+	got := forge.Numbers(plan.Issues, planIssueNumber)
 	want := []string{"2", "4", "1", "3"}
 	if len(got) != len(want) {
 		t.Fatalf("Issues order = %v, want %v", got, want)
@@ -211,7 +205,7 @@ func TestNewPlan_SortIsStableWithinTier(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewPlan: %v", err)
 	}
-	got := planIssueNums(plan.Issues)
+	got := forge.Numbers(plan.Issues, planIssueNumber)
 	want := []string{"10", "5", "7"}
 	for i := range want {
 		if got[i] != want[i] {
@@ -241,7 +235,7 @@ func TestNewPlan_LowSortsLast(t *testing.T) {
 	seenLow := false
 	for _, iss := range plan.Issues {
 		if iss.Priority == forge.PriorityNormal && seenLow {
-			t.Fatalf("Normal issue #%s sorted after a Low issue: %v", iss.Number, planIssueNums(plan.Issues))
+			t.Fatalf("Normal issue #%s sorted after a Low issue: %v", iss.Number, forge.Numbers(plan.Issues, planIssueNumber))
 		}
 		if iss.Priority == forge.PriorityLow {
 			seenLow = true
@@ -298,7 +292,7 @@ func TestNewPlan_EdgesCarriedThroughUnchangedByPrioritySort(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewPlan: %v", err)
 	}
-	got := planIssueNums(plan.Issues)
+	got := forge.Numbers(plan.Issues, planIssueNumber)
 	if len(got) != 2 || got[0] != "2" || got[1] != "1" {
 		t.Fatalf("Issues order = %v, want [2 1] (Critical dependent sorts ahead of its Low blocker)", got)
 	}
@@ -328,7 +322,7 @@ func TestNewPlan_UnlabeledBatchByteIdenticalOrder(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewPlan: %v", err)
 	}
-	got := planIssueNums(plan.Issues)
+	got := forge.Numbers(plan.Issues, planIssueNumber)
 	for i := range want {
 		if got[i] != want[i] {
 			t.Errorf("Issues order = %v, want %v (byte-identical to input)", got, want)
@@ -355,7 +349,7 @@ func TestNewPlan_SelectiveNeverReordersByPriority(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewPlan: %v", err)
 	}
-	got := planIssueNums(plan.Issues)
+	got := forge.Numbers(plan.Issues, planIssueNumber)
 	for i := range want {
 		if got[i] != want[i] {
 			t.Errorf("Issues order = %v, want %v (selective order untouched)", got, want)

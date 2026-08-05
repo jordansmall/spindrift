@@ -153,7 +153,7 @@ func TestDrainMaxJobs_HoldsDependentWhenBlockerFails(t *testing.T) {
 
 // TestDrainMaxJobs_PriorityOrderDoesNotBypassBlocker verifies that a
 // priority-sorted Issues slice — where a Critical-priority dependent leads a
-// Low-priority blocker, as NewPlan's sortByPriority would produce (#2281) —
+// Low-priority blocker, as NewPlan's forge.SortByPriority call would produce (#2281) —
 // still holds the dependent back: drainMaxJobs' own blocker gate is blind to
 // list position, so the still-unready dependent is skipped regardless of
 // where the priority sort placed it, and the ready blocker dispatches on its

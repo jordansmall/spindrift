@@ -11,7 +11,6 @@ package waves
 import (
 	"errors"
 	"fmt"
-	"sort"
 	"time"
 
 	"spindrift.dev/launcher/internal/forge"
@@ -68,8 +67,8 @@ type Issue struct {
 
 	// Priority is the issue's own agent-priority-{critical,high,low} tier
 	// (ADR 0040), carried through from forge.Issue.Priority by every caller
-	// that builds an Issue from a tracker query. sortByPriority is the only
-	// thing that reads it.
+	// that builds an Issue from a tracker query. forge.SortByPriority is the
+	// only thing that reads it.
 	Priority forge.Priority
 }
 
@@ -164,33 +163,12 @@ type Config struct {
 // dispatch, and preview all consume its result instead of repeating it.
 func NewPlan(cfg Config, in Input) (Plan, error) {
 	if len(in.Edges) > 0 {
-		if node, cycle := detectCycle(in.Edges, issueNums(in.Issues)); cycle {
+		if node, cycle := detectCycle(in.Edges, forge.Numbers(in.Issues, func(i Issue) string { return i.Number })); cycle {
 			return Plan{}, fmt.Errorf("ERROR: dependency cycle detected (issue #%s is in the cycle)", node)
 		}
 	}
 	if in.Origin != OriginSelective {
-		sortByPriority(in.Issues)
+		forge.SortByPriority(in.Issues, func(i Issue) forge.Priority { return i.Priority })
 	}
 	return Plan{Mode: ModeDrain, Origin: in.Origin, Issues: in.Issues, Edges: in.Edges, Sources: in.Sources, Failed: in.Failed}, nil
-}
-
-// sortByPriority stably orders issues by Priority descending (Critical >
-// High > Normal > Low); a stable sort means equal-priority issues keep
-// their input relative order, which — since every Issue Tracker adapter
-// already returns issues oldest-first — makes oldest-first the natural,
-// zero-extra-code tiebreaker within a tier (ADR 0040), and an all-Normal
-// batch (today's default) sorts byte-identical to its input order.
-func sortByPriority(issues []Issue) {
-	sort.SliceStable(issues, func(i, j int) bool {
-		return issues[i].Priority > issues[j].Priority
-	})
-}
-
-// issueNums returns the number strings from a slice of issues.
-func issueNums(issues []Issue) []string {
-	nums := make([]string, len(issues))
-	for i, iss := range issues {
-		nums[i] = iss.Number
-	}
-	return nums
 }
