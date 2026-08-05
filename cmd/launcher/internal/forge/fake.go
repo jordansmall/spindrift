@@ -19,42 +19,10 @@ type Fake struct {
 	// IssueTrackerFake's comment.
 	*CodeForgeFake
 
-	prs             map[string]PR             // URL → PR
-	branchPRs       map[string]string         // branch → PR URL
-	mergeableStates map[string]MergeableState // URL → scripted Mergeable result
-	needsUpdate     map[string]bool           // URL → scripted NeedsUpdate result
-	checkQ          map[string][]RollupState
-	checkErrQ       map[string][]error  // per-call error queue; nil entry = consult checkQ
-	prFiles         map[string][]string // URL → scripted ListPRFiles result
-	headSHAQ        map[string][]string // URL → scripted HeadCommitSHA queue
-	headSHACounter  int                 // used to synthesize a fresh SHA once headSHAQ[url] is exhausted
-
-	// HeadCommitSHAErr, if non-nil, is returned by every HeadCommitSHA call.
-	HeadCommitSHAErr error
-
-	failureDetail map[string]string // URL → scripted FailureDetail result
-	// FailureDetailErr, if non-nil, is returned by every FailureDetail call.
-	FailureDetailErr error
-
-	// PRStateErr, if non-nil, is returned by every PRState call (simulating a
-	// push-only Code Forge, where PR state has no meaning).
-	PRStateErr error
-
-	// PRFilesErr, if non-nil, is returned by every ListPRFiles call.
-	PRFilesErr error
-
-	// OpenPRForBranchErr, if non-nil, is returned by every OpenPRForBranch
-	// call (simulating a transient forge lookup failure, distinct from "no
-	// open PR yet") after OpenPRForBranchErrs is drained.
-	OpenPRForBranchErr error
-
-	// OpenPRForBranchErrs is a per-call queue drained before
-	// OpenPRForBranchErr is checked. A nil entry means "fall through to the
-	// normal branch->PR lookup"; a non-nil entry is returned as the error.
-	OpenPRForBranchErrs []error
-
-	// NeedsUpdateErr, if non-nil, is returned by every NeedsUpdate call.
-	NeedsUpdateErr error
+	// *PRForgeFake is the PR-forge-capability slice, embedded alongside
+	// *core, *IssueTrackerFake, and *CodeForgeFake above for the same reason
+	// — see IssueTrackerFake's comment.
+	*PRForgeFake
 
 	// RelayBundleErr, if non-nil, is returned by every RelayBundle call —
 	// scripts CODE_FORGE=local's missing/malformed-bundle failure mode (ADR
@@ -105,25 +73,6 @@ type Fake struct {
 	IntegrationTipErr error
 	// IntegrationTipCalls records every IntegrationTip invocation in order.
 	IntegrationTipCalls []string
-
-	// AutoMergeAllowed controls what CanAutoMerge returns (default false).
-	AutoMergeAllowed bool
-	// AutoMergeErr, if non-nil, is returned by CanAutoMerge.
-	AutoMergeErr error
-	// EnqueueAutoMergeErr, if non-nil, is returned by EnqueueAutoMerge.
-	EnqueueAutoMergeErr error
-	// EnqueueAutoMergeCalls records all PR URLs passed to EnqueueAutoMerge.
-	EnqueueAutoMergeCalls []string
-
-	// MarkReadyErr, if non-nil, is returned by MarkReady.
-	MarkReadyErr error
-	// MarkReadyCalls records all PR URLs passed to MarkReady, in order.
-	MarkReadyCalls []string
-
-	// MarkDraftErr, if non-nil, is returned by MarkDraft.
-	MarkDraftErr error
-	// MarkDraftCalls records all PR URLs passed to MarkDraft, in order.
-	MarkDraftCalls []string
 }
 
 // NewFake returns an empty Fake client. labels configures the
@@ -147,35 +96,19 @@ func NewFake(labels ...DispatchLabels) *Fake {
 			core:         c,
 			branchExists: map[string]bool{},
 		},
-		prs:             map[string]PR{},
-		branchPRs:       map[string]string{},
-		mergeableStates: map[string]MergeableState{},
-		needsUpdate:     map[string]bool{},
-		checkQ:          map[string][]RollupState{},
-		checkErrQ:       map[string][]error{},
-		prFiles:         map[string][]string{},
-		headSHAQ:        map[string][]string{},
-
-		failureDetail: map[string]string{},
+		PRForgeFake: &PRForgeFake{
+			core:            c,
+			prs:             map[string]PR{},
+			branchPRs:       map[string]string{},
+			mergeableStates: map[string]MergeableState{},
+			needsUpdate:     map[string]bool{},
+			checkQ:          map[string][]RollupState{},
+			checkErrQ:       map[string][]error{},
+			prFiles:         map[string][]string{},
+			headSHAQ:        map[string][]string{},
+			failureDetail:   map[string]string{},
+		},
 	}
-}
-
-// SetPR registers a PR reachable by the given head branch name.
-func (f *Fake) SetPR(branch string, pr PR) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.prs[pr.URL] = pr
-	f.branchPRs[branch] = pr.URL
-	if _, ok := f.prStates[pr.URL]; !ok {
-		f.prStates[pr.URL] = PROpen
-	}
-}
-
-// SetPRState overrides the canonical state of a known PR.
-func (f *Fake) SetPRState(url string, state PRState) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.prStates[url] = state
 }
 
 // Probe is the composite's sole hand-written method: it disambiguates the
