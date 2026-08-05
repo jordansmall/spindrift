@@ -54,7 +54,7 @@ func TestSettle_GithubReadOnly_BlockedRelaysBundleAndCreatesDraftPR(t *testing.T
 	if len(fc.CreateDraftPRCalls) != 1 {
 		t.Fatalf("CreateDraftPRCalls = %+v, want exactly 1", fc.CreateDraftPRCalls)
 	}
-	want := forge.CreateDraftPRCall{Title: "feat: add widget", Body: "Adds a widget.", Base: "main", Head: branch}
+	want := forge.CreateDraftPRCall{Title: "feat: add widget", Body: "Adds a widget.\n\nCloses #1933", Base: "main", Head: branch}
 	if fc.CreateDraftPRCalls[0] != want {
 		t.Errorf("CreateDraftPRCalls[0] = %+v, want %+v", fc.CreateDraftPRCalls[0], want)
 	}
@@ -74,6 +74,88 @@ func TestSettle_GithubReadOnly_BlockedRelaysBundleAndCreatesDraftPR(t *testing.T
 	}
 	if len(noteCalls) != 1 {
 		t.Fatalf("want 1 comment posting the blocked note, got %d (all calls: %+v)", len(noteCalls), fc.CommentCalls)
+	}
+}
+
+// TestSettle_GithubReadOnly_BlockedRelaysBundleAndCreatesDraftPR_ClosesAlreadyPresent
+// asserts ensureClosesReference's dedup on the blocked hand-off path: when
+// the box's own PR-intent body already carries a GitHub-recognized closing
+// keyword referencing the issue, settle must not append a second
+// "Closes #<num>".
+func TestSettle_GithubReadOnly_BlockedRelaysBundleAndCreatesDraftPR_ClosesAlreadyPresent(t *testing.T) {
+	const issNum = "1933"
+	const prURL = "https://github.com/owner/repo/pull/1933"
+
+	fc := forge.NewFake(testDispatchLabels)
+	fc.BranchPrefix = "agent/issue-"
+	branch := fc.AgentBranch(issNum)
+	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
+	fc.CreateDraftPRURL = prURL
+
+	d := dispatch.NewFake()
+	result := dispatch.Result{
+		Success:       true,
+		OutcomeFound:  true,
+		Outcome:       outcome.Outcome{Issue: issNum, Landing: branch, Status: "blocked", Note: "review never cleared"},
+		PRIntent:      "feat: add widget\n\nAdds a widget. Closes #1933",
+		PRIntentFound: true,
+	}
+
+	c := baseConfig()
+	c.ReadOnly = true
+	c.OutboxDir = func(num string) string { return "/outbox/" + num }
+	c.BaseBranch = "main"
+	s := New(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
+	s.Settle(d, issNum, 0, result)
+
+	if len(fc.CreateDraftPRCalls) != 1 {
+		t.Fatalf("CreateDraftPRCalls = %+v, want exactly 1", fc.CreateDraftPRCalls)
+	}
+	want := forge.CreateDraftPRCall{Title: "feat: add widget", Body: "Adds a widget. Closes #1933", Base: "main", Head: branch}
+	if fc.CreateDraftPRCalls[0] != want {
+		t.Errorf("CreateDraftPRCalls[0] = %+v, want %+v", fc.CreateDraftPRCalls[0], want)
+	}
+}
+
+// TestSettle_GithubReadOnly_BlockedRelaysBundleAndCreatesDraftPR_LocalTrackerNotInjected
+// asserts ensureClosesReference's LandingRecorder short-circuit on the
+// blocked hand-off path: when the IssueTracker is local-shaped
+// (ISSUE_TRACKER=local, CODE_FORGE=github -- a valid real combination),
+// settle must not append a "Closes #<num>" since the local adapter closes
+// issues through its own axis (ADR 0029), never GitHub's
+// auto-close-on-merge convention.
+func TestSettle_GithubReadOnly_BlockedRelaysBundleAndCreatesDraftPR_LocalTrackerNotInjected(t *testing.T) {
+	const issNum = "1933"
+	const prURL = "https://github.com/owner/repo/pull/1933"
+
+	fc := forge.NewFake(testDispatchLabels)
+	fc.BranchPrefix = "agent/issue-"
+	branch := fc.AgentBranch(issNum)
+	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
+	fc.CreateDraftPRURL = prURL
+
+	d := dispatch.NewFake()
+	result := dispatch.Result{
+		Success:       true,
+		OutcomeFound:  true,
+		Outcome:       outcome.Outcome{Issue: issNum, Landing: branch, Status: "blocked", Note: "review never cleared"},
+		PRIntent:      "feat: add widget\n\nAdds a widget.",
+		PRIntentFound: true,
+	}
+
+	c := baseConfig()
+	c.ReadOnly = true
+	c.OutboxDir = func(num string) string { return "/outbox/" + num }
+	c.BaseBranch = "main"
+	s := New(c, fc.AsLocalShaped(), fc.AsGithubReadOnly())
+	s.Settle(d, issNum, 0, result)
+
+	if len(fc.CreateDraftPRCalls) != 1 {
+		t.Fatalf("CreateDraftPRCalls = %+v, want exactly 1", fc.CreateDraftPRCalls)
+	}
+	want := forge.CreateDraftPRCall{Title: "feat: add widget", Body: "Adds a widget.", Base: "main", Head: branch}
+	if fc.CreateDraftPRCalls[0] != want {
+		t.Errorf("CreateDraftPRCalls[0] = %+v, want %+v", fc.CreateDraftPRCalls[0], want)
 	}
 }
 
