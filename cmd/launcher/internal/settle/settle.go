@@ -109,8 +109,10 @@ type Config struct {
 	BaseBranch string
 }
 
-// Settler is the seam callers depend on so tests can inject a Fake instead of
-// a real Settle.
+// Settler is the narrow "settle a dispatch result" surface every generic
+// caller depends on — the waves engine, the Console's queue hook, and
+// newSettle all hold a Settler, not the work-only adopt/relay surface below.
+// Tests can inject a Fake instead of a real Settle.
 type Settler interface {
 	// Settle interprets result (a Dispatcher's Run outcome) and drives num to
 	// its terminal label: CI-watch, self-heal fix passes via d, merge modes,
@@ -123,6 +125,19 @@ type Settler interface {
 	// which never matches a real mark.
 	Settle(d dispatch.Dispatcher, num string, gen uint64, result dispatch.Result)
 
+	// Fail records a Box that ran and exited non-zero (result.Success ==
+	// false). Unlike Settle, it runs no merge-gate machinery — the caller
+	// already transitioned the tracker issue to Failed itself — this hook
+	// exists solely so a wrapper (e.g. the Console's queueSettler) can react
+	// to a natural Box failure the same way it reacts to a settle (issue
+	// #705). gen is as in Settle.
+	Fail(num string, gen uint64, result dispatch.Result)
+}
+
+// WorkSettler is the work-only adopt/relay surface, consumed only by
+// recover's adopt path (cmd/launcher/main.go's recoverByNumber) — research
+// never touches the Code Forge, so ResearchSettle never needs it.
+type WorkSettler interface {
 	// SettleAdopted runs the same merge gate as Settle, for an
 	// already-discovered open non-draft PR with no outcome line (the
 	// reconcile/recover entry point). gen is as in Settle.
@@ -135,14 +150,6 @@ type Settler interface {
 	// Returns false when there is no relayable evidence, leaving the caller's
 	// own "no open PR" handling unchanged. gen is as in Settle.
 	SettleRelayedBranch(d dispatch.Dispatcher, num string, gen uint64, result dispatch.Result) bool
-
-	// Fail records a Box that ran and exited non-zero (result.Success ==
-	// false). Unlike Settle, it runs no merge-gate machinery — the caller
-	// already transitioned the tracker issue to Failed itself — this hook
-	// exists solely so a wrapper (e.g. the Console's queueSettler) can react
-	// to a natural Box failure the same way it reacts to a settle (issue
-	// #705). gen is as in Settle.
-	Fail(num string, gen uint64, result dispatch.Result)
 }
 
 // Settle is the prod adapter: constructed once per top-level dispatch entry
@@ -200,6 +207,7 @@ func (s *Settle) terminated(num string, gen uint64) bool {
 func (s *Settle) Fail(num string, gen uint64, result dispatch.Result) {}
 
 var _ Settler = (*Settle)(nil)
+var _ WorkSettler = (*Settle)(nil)
 
 // New constructs a Settle. pr is resolved from cf once via a type assertion
 // (nil when cf is push-only, e.g. the git adapter).
