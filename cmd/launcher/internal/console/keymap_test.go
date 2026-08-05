@@ -18,3 +18,31 @@ func TestKeymapParity(t *testing.T) {
 		}
 	}
 }
+
+// TestKeymapUniqueness fails if any (Mode, key) pair is claimed by more than
+// one keymap entry — dispatchKey (tea.go) looks a keypress up by exactly
+// that pair, so a collision would make one of the two entries permanently
+// unreachable under that mode. Several entries legitimately share a Keys
+// value across different Modes (e.g. "esc" appears under ModeFilterEdit,
+// ModeDetailModal, ModeHelp, and paired with ModeSidebar/ModeList
+// elsewhere) — that's fine, since dispatchKey scopes its lookup by mode.
+// It's the narrower (mode, key) pair that must stay unique.
+func TestKeymapUniqueness(t *testing.T) {
+	type pair struct {
+		mode Mode
+		key  string
+	}
+	seen := make(map[pair]int)
+	for i, b := range keymap {
+		for _, mode := range b.Modes {
+			for _, key := range b.Keys {
+				p := pair{mode: mode, key: key}
+				if j, ok := seen[p]; ok {
+					t.Errorf("keymap[%d] and keymap[%d] both claim (Mode=%v, Key=%q)", j, i, mode, key)
+					continue
+				}
+				seen[p] = i
+			}
+		}
+	}
+}
