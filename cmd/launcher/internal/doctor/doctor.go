@@ -201,7 +201,7 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, w io.Writer, stdin
 	}
 	missing := append(append(append(append([]string{}, workMissing...), researchMissing...), priorityMissing...), ambiguousMissing...)
 	if len(missing) == 0 {
-		fmt.Fprintln(w, "ok: all triage, research, and priority labels present")
+		fmt.Fprintln(w, "ok: all triage, research, priority, and ambiguous-spec labels present")
 		return nil
 	}
 
@@ -244,7 +244,7 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, w io.Writer, stdin
 	// ambiguous-spec labels are advisory (ADR 0022 / ADR 0040 / #2275), so
 	// each advisory tier gets its own wrap-up line here: an advisory note if
 	// that tier is still short after creation, or a single success line
-	// naming all three tiers once none is.
+	// naming all four tiers once none is.
 	stillMissing := false
 	if len(researchMissing) > 0 {
 		fmt.Fprintf(w, "advisory: %d research label(s) still missing after creation (ADR 0022) — does not fail this check: %s\n", len(researchMissing), strings.Join(researchMissing, ", "))
@@ -261,6 +261,6 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, w io.Writer, stdin
 	if stillMissing {
 		return nil
 	}
-	fmt.Fprintln(w, "ok: all triage, research, and priority labels present")
+	fmt.Fprintln(w, "ok: all triage, research, priority, and ambiguous-spec labels present")
 	return nil
 }

@@ -221,7 +221,7 @@ ${OUTCOME_LANDING_READ_WRITE_STEP}${OUTCOME_LANDING_READ_ONLY_STEP}Grammar: `SPI
 — one line, space-delimited fields, `note` last (`note` may itself contain
 spaces and `=`). The only valid `status` values here are `ready` and `blocked`
 — no other word belongs in that field (`status=ambiguous` is a distinct,
-earlier CHECK ISSUE COHERENCE gate that exits the run before ever reaching
+earlier ISSUE COHERENCE GATE that exits the run before ever reaching
 this OUTCOME section, not a third option here).
 
 This grammar's leading token is load-bearing (ADR 0035): the in-box
