@@ -47,3 +47,16 @@ func TestRoleStyle_Render_PlainOnDumbTerminal(t *testing.T) {
 		t.Errorf("roleStyle(RoleFailed).Render(...) on TERM=dumb = %q, want plain %q", out, "failed 1")
 	}
 }
+
+// TestAnsiSlot_RoleRecoverable_ResolvesToCyanDistinctFromHeld verifies
+// RoleRecoverable resolves to ANSI slot 6 (cyan), distinct from RoleHeld's
+// slot 3 (yellow) — the previously-unused cyan slot ADR 0031 reserves for a
+// recoverable-state role.
+func TestAnsiSlot_RoleRecoverable_ResolvesToCyanDistinctFromHeld(t *testing.T) {
+	if got := ansiSlot(RoleRecoverable); got != 6 {
+		t.Errorf("ansiSlot(RoleRecoverable) = %d, want 6 (cyan)", got)
+	}
+	if ansiSlot(RoleRecoverable) == ansiSlot(RoleHeld) {
+		t.Errorf("ansiSlot(RoleRecoverable) = %d, want it distinct from ansiSlot(RoleHeld) = %d", ansiSlot(RoleRecoverable), ansiSlot(RoleHeld))
+	}
+}
