@@ -41,7 +41,7 @@ func TestRunOnce_PreservesPriorAttemptLogOnRetry(t *testing.T) {
 	if !result.Success {
 		t.Fatalf("Run: want Success=true, got %+v", result)
 	}
-	if !result.OutcomeFound || result.Outcome.Status != "ready" {
+	if !result.Resolved.Found || result.Resolved.Outcome.Status != "ready" {
 		t.Fatalf("Run: want ready outcome, got %+v", result)
 	}
 	if calls != 2 {

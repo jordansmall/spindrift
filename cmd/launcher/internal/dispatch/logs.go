@@ -40,37 +40,18 @@ func LogPaths(pwd, number string) []PassLog {
 	return out
 }
 
-// LastSelfReportFromLogs recovers, from disk, the driver's last genuine
-// (non-synthetic) leading-token SPINDRIFT_OUTCOME self-report for issue
-// number under pwd — the same signal outcomeResult (retry.go) surfaces as
-// Result.SelfReport for a live dispatch, but reconstructed after the fact for
-// callers like `spindrift recover` (issue #2225) whose original run's Box
-// has long since exited.
-//
-// It walks LogPaths(pwd, num) in chronological order and keeps the last
-// self-report found across all pass logs, so a later pass (e.g. a fix pass)
-// overrides an earlier one exactly as outcomeResult does within one log.
-// A per-pass scan error is reported to stderr in the house diagnostic style
-// and does not abort the walk — later passes are still consulted. Returns
-// (SelfReport{}, false) when no pass log carried a non-synthetic
-// leading-token line at all.
-func LastSelfReportFromLogs(pwd, num string) (outcome.SelfReport, bool) {
-	var (
-		last  outcome.SelfReport
-		found bool
-	)
+// ResolveFromLogs recovers, from disk, the single Resolved outcome for issue
+// number under pwd by walking every pass log through the same outcome.Resolve
+// seam a live dispatch's outcomeResult already applies to one log --
+// reconstructed after the fact for callers like `spindrift recover` (issue
+// #2225) whose original run's Box has long since exited. kind is forwarded to
+// outcome.Resolve unchanged ("" normalizes to "work").
+func ResolveFromLogs(pwd, num, kind string) (outcome.Resolved, error) {
+	var logs []outcome.PassLog
 	for _, pl := range LogPaths(pwd, num) {
-		report, ok, err := outcome.LastSelfReport(pl.Path)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "    ?? #%s: self-report scan: %v\n", num, err)
-			continue
-		}
-		if ok {
-			last = report
-			found = true
-		}
+		logs = append(logs, outcome.PassLog{Label: pl.Label, Path: pl.Path})
 	}
-	return last, found
+	return outcome.Resolve(logs, kind)
 }
 
 func fileExists(path string) bool {
