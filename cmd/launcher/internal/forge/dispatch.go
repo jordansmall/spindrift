@@ -9,6 +9,7 @@ const (
 	Complete                          // agent work merged and green
 	Failed                            // box exited non-zero; needs human triage
 	Recoverable                       // work is salvageable; needs recovery, not a fresh dispatch
+	Ambiguous                         // title/body describe materially unrelated work; needs human triage
 	// Untriaged is not a real tracker state — it is the "from" state a
 	// promotion TransitionState(Untriaged, Dispatchable) call names for an
 	// issue that has never carried a dispatch label. Its Label is "", so
@@ -27,6 +28,10 @@ type DispatchLabels struct {
 	Complete     string // default "agent-complete"
 	Failed       string // default "agent-failed"
 	Recoverable  string // local-only frontmatter marker; not a real GitHub label
+	// Ambiguous is, unlike Recoverable, a real issue-tracker label: the fixed
+	// literal "agent-ambiguous-spec", wired at construction sites in a later
+	// slice (main.go/quickstart.go) — this file only defines the seam.
+	Ambiguous string
 }
 
 // Label returns the native label string for state s.
@@ -42,18 +47,21 @@ func (d DispatchLabels) Label(s DispatchState) string {
 		return d.Failed
 	case Recoverable:
 		return d.Recoverable
+	case Ambiguous:
+		return d.Ambiguous
 	default:
 		return ""
 	}
 }
 
-// AllLabels returns all four dispatch label strings that back a real
+// AllLabels returns all five dispatch label strings that back a real
 // GitHub label. Recoverable is deliberately excluded: it is a local-only
 // frontmatter marker (never a real GitHub label), so it must not appear in
 // the registry-membership set adapters like the local tracker's ListLabels
-// report as present.
+// report as present. Ambiguous, unlike Recoverable, IS a real label, so it
+// is included.
 func (d DispatchLabels) AllLabels() []string {
-	return []string{d.Dispatchable, d.InProgress, d.Complete, d.Failed}
+	return []string{d.Dispatchable, d.InProgress, d.Complete, d.Failed, d.Ambiguous}
 }
 
 // ClaimRemoveLabels returns the labels a from -> to TransitionState call

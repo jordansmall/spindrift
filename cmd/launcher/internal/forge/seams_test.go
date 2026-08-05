@@ -41,8 +41,8 @@ func TestDispatchLabels_Label(t *testing.T) {
 func TestDispatchLabels_AllLabels(t *testing.T) {
 	d := testLabels
 	all := d.AllLabels()
-	if len(all) != 4 {
-		t.Fatalf("AllLabels len = %d, want 4", len(all))
+	if len(all) != 5 {
+		t.Fatalf("AllLabels len = %d, want 5", len(all))
 	}
 }
 

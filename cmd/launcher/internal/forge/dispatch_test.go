@@ -34,13 +34,44 @@ func TestDispatchLabels_Recoverable_LabelAndAllLabels(t *testing.T) {
 		t.Fatalf("Label(Recoverable): got %q, want %q", got, "agent-recoverable")
 	}
 	all := d.AllLabels()
-	if len(all) != 4 {
-		t.Fatalf("AllLabels len = %d, want 4 (Recoverable excluded)", len(all))
+	if len(all) != 5 {
+		t.Fatalf("AllLabels len = %d, want 5 (Recoverable excluded, Ambiguous included)", len(all))
 	}
 	for _, l := range all {
 		if l == "agent-recoverable" {
 			t.Fatalf("AllLabels = %v, must not contain the Recoverable marker", all)
 		}
+	}
+}
+
+// TestDispatchLabels_Ambiguous_LabelAndAllLabels verifies Ambiguous maps to
+// its configured label via Label and, unlike Recoverable, is included in
+// AllLabels: it IS a real issue-tracker label (fixed literal
+// "agent-ambiguous-spec", wired at construction sites in a later slice),
+// not a local-only marker (#2275).
+func TestDispatchLabels_Ambiguous_LabelAndAllLabels(t *testing.T) {
+	d := DispatchLabels{
+		Dispatchable: "ready-for-agent",
+		InProgress:   "agent-in-progress",
+		Complete:     "agent-complete",
+		Failed:       "agent-failed",
+		Ambiguous:    "agent-ambiguous-spec",
+	}
+	if got := d.Label(Ambiguous); got != "agent-ambiguous-spec" {
+		t.Fatalf("Label(Ambiguous): got %q, want %q", got, "agent-ambiguous-spec")
+	}
+	all := d.AllLabels()
+	if len(all) != 5 {
+		t.Fatalf("AllLabels len = %d, want 5 (Ambiguous included)", len(all))
+	}
+	found := false
+	for _, l := range all {
+		if l == "agent-ambiguous-spec" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("AllLabels = %v, must contain the Ambiguous label", all)
 	}
 }
 
