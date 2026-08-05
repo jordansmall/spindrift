@@ -1265,6 +1265,20 @@ run_driver_in_env() {
     _devshell_flags=(--devshell --devshell-name "${DEV_SHELL_NAME:-default}")
   fi
 
+  # driver-exec/orchestrator both default --heartbeat-log to the shared,
+  # host-wide /tmp/heartbeat.log -- fine for a real Box (one per container,
+  # nothing else touches its /tmp), but a bats suite invokes this entrypoint
+  # directly on the nix build host, where several derivations can build
+  # concurrently as distinct sandbox users and collide on that one path
+  # (issue #2320: a second builder's append to a file the first already
+  # created hits EACCES). HEARTBEAT_LOG lets a caller opt into a
+  # collision-free path; unset (the real-Box default) leaves the binaries'
+  # own /tmp/heartbeat.log default untouched.
+  local -a _heartbeat_flags=()
+  if [ -n "${HEARTBEAT_LOG:-}" ]; then
+    _heartbeat_flags=(--heartbeat-log "$HEARTBEAT_LOG")
+  fi
+
   local _driver_invoker
   if [ -n "$ORCHESTRATOR" ]; then
     _driver_invoker=orchestrator
@@ -1304,6 +1318,7 @@ run_driver_in_env() {
     --issue "$ISSUE_NUMBER" \
     --log-path "$stream_log" \
     "${_devshell_flags[@]}" \
+    "${_heartbeat_flags[@]}" \
     "${_review_prompt_flags[@]}" \
     "${_review_model_flags[@]}"
   claude_rc=$?

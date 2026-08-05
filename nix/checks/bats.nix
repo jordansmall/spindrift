@@ -247,6 +247,12 @@ in
         # fixture -- proof the entrypoint's rewrite loop works against actual
         # baked bytes, not just a fixture shaped to look like them.
         OPENCODE_AGENT_FILES = opencodeHarness.agentFiles;
+        # tests/prompt-contract-parity.bats lives under tests/ like every
+        # other suite, so this catch-all `bats tests/` run picks it up too
+        # (mirrors the DRIVER_OUTCOME_MANIFEST comment above) -- export the
+        # same fixture file the dedicated bats-prompt-contract-parity check
+        # below exports, or that suite's required-var guard fails here.
+        PROMPT_CONTRACT_PARITY_FIXTURE = promptContractParityFixtureFile;
       }
       ''
         export HOME="$TMPDIR/home"

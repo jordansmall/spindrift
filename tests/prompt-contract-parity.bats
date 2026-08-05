@@ -34,6 +34,14 @@ load helper
 setup() {
   setup_entrypoint_env
   : "${PROMPT_CONTRACT_PARITY_FIXTURE:?PROMPT_CONTRACT_PARITY_FIXTURE must be set (JSON fixture file rendered from lib/prompt-contract.nix parityFixtures)}"
+  # Route driver-exec/orchestrator's heartbeat write into this test's own
+  # tmpdir instead of the shared /tmp/heartbeat.log default (issue #2320):
+  # this suite invokes the real entrypoint.sh -> driver-exec path 8 times
+  # per run, directly on the nix build host, where a concurrently-building
+  # derivation running as a different sandbox user can already own that
+  # shared path and turn every one of this suite's fixtures into a spurious
+  # EACCES-driven "block".
+  export HEARTBEAT_LOG="$BATS_TEST_TMPDIR/heartbeat.log"
 }
 
 # Same stub shape as tests/entrypoint-prompt-validator.bats's own
