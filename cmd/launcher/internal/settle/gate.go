@@ -37,7 +37,7 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, gen uint64, result di
 				clsNote += "  resetsAt=" + result.Classification.ResetAt.UTC().Format(time.RFC3339)
 			}
 		}
-		// A read-only run's !OutcomeFound here may just mean the Box crashed
+		// A read-only run's !Resolved.Found here may just mean the Box crashed
 		// or was cut short before it ever printed a parseable outcome line
 		// at all — no ADR 0036 synthetic backstop line to key off of, unlike
 		// the "blocked" arm below (issue #2253). tryAdoptRelayedBranchNoOutcome
@@ -67,7 +67,7 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, gen uint64, result di
 	// this entry point): a run's own findings are worth tracking whether that
 	// run itself landed ready or blocked, and a filing failure must never
 	// change the switch below's own landing decision. Only reachable once a
-	// SPINDRIFT_OUTCOME line was actually parsed (the ParseErr/!OutcomeFound
+	// SPINDRIFT_OUTCOME line was actually parsed (the ParseErr/!Resolved.Found
 	// branches above both return first) -- a crashed or outcome-less run
 	// never reaches FILE ISSUES in its own prompt either, so there is
 	// nothing for this call to find in that case.
@@ -78,7 +78,7 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, gen uint64, result di
 		// synthetic backstop stitched in over a Box that crashed or was cut
 		// short before its own final print — not a genuine "never
 		// finished" (issue #2224). tryAdoptRelayedBranch checks the driver's
-		// own last genuine self-report (Result.SelfReport, issue #2223) for
+		// own last genuine self-report (Result.Resolved.SelfReport, issue #2223) for
 		// evidence the run actually succeeded and, if the fingerprint holds
 		// and a branch was actually relayable, opens a PR on the relayed
 		// branch and drives the normal merge lifecycle in place of the
@@ -213,7 +213,7 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, gen uint64, result di
 
 // settleUnresolved is the shared safety net for a box result that carries no
 // usable outcome line — either an unparseable SPINDRIFT_OUTCOME (ParseErr)
-// or none at all (!OutcomeFound). clsNote is classification detail to log
+// or none at all (!Resolved.Found). clsNote is classification detail to log
 // alongside a confirmed-missing PR (empty for the ParseErr case, which never
 // attempts classification); missingNote explains why no outcome was usable.
 func (s *Settle) settleUnresolved(num, clsNote, missingNote string) {

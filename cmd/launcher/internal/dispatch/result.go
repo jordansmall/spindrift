@@ -80,7 +80,7 @@ type Result struct {
 	// classification is attempted in this case.
 	ParseErr error
 
-	// Classification and ClassifyErr are populated only when OutcomeFound is
+	// Classification and ClassifyErr are populated only when Resolved.Found is
 	// false and ParseErr is nil, to explain what the box did instead of
 	// reporting an outcome.
 	Classification driver.Classification
