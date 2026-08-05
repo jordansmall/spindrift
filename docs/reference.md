@@ -1231,6 +1231,38 @@ the orchestrator only ever talks to `driver-exec` through the same
 `--prompt-file`/`--agents-file`/`--session-file`/`--log-path` surface (plus
 the devshell pair) `entrypoint.sh`'s direct call already used.
 
+### Prompt contract build-time/runtime parity
+
+The Box's own contract with the launcher/host — e.g. a read-only research
+run's verdict must reach the launcher via a `SPINDRIFT_COMMENT` marker, an
+orchestrator-on run's review pass must emit a `VERDICT:` line — is declared
+once, as data, in `lib/prompt-contract.nix`'s `validateMarkers` registry
+(id/marker/carrier/severity/`when`-gate per row). Two independent arms
+resolve that same registry into a verdict:
+
+- **Build time** (Nix): `buildTimeRejectVerdicts` folds each `severity ==
+  "reject"` row into `ok`/`reject`/`advise` from whatever gate/content
+  knowledge is available while `mkHarness` renders the prompt — `reject`
+  fails the build outright; `advise` defers to the runtime arm below when a
+  gate or its content isn't yet knowable.
+- **Runtime** (bash): `agent/entrypoint.sh`'s `_validate_prompt_contract`
+  re-checks the same rows against the fully-rendered prompt just before the
+  Driver runs, once every gate is a resolved boolean — there's no build
+  time's "unresolved" state, so it only ever blocks (`exit 1`) or doesn't.
+
+Because these are two hand-written implementations of the same predicate,
+`lib/prompt-contract.nix`'s `parityFixtures` (one record per reject-severity
+row × gate × marker-present combination, each pre-resolved via the real
+`buildTimeRejectVerdicts`) and `parityFold` (`verdict != "reject"`) pin the
+semantic mapping between them: a Nix `reject` verdict must correspond to the
+runtime validator blocking; `ok`/`advise` must both correspond to it not
+blocking. `nix/checks/prompt-contract-parity.nix` asserts the fold holds in
+pure Nix; `tests/prompt-contract-parity.bats` (wired as the `checks-inbox`
+member `bats-prompt-contract-parity`, `nix/checks/bats.nix`) drives the same
+fixtures — rendered to JSON — through the real `agent/entrypoint.sh` and
+asserts its exit code agrees. A future row added to `validateMarkers` is
+picked up by both without further edits.
+
 ### Hermetic git config
 
 The entrypoint sets `GIT_USER_NAME`/`GIT_USER_EMAIL` as **repo-local** git
