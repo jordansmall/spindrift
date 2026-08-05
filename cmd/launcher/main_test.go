@@ -2770,7 +2770,8 @@ func TestDoctor_AllLabelsPresent_PrintsSuccess(t *testing.T) {
 	f.ProbeRepo = "owner/repo"
 	research := doctor.ResearchLabelNames()
 	priority := doctor.PriorityLabelNames()
-	f.Labels = append(append([]string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}, research...), priority...)
+	ambiguous := doctor.AmbiguousLabelNames()
+	f.Labels = append(append(append([]string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}, research...), priority...), ambiguous...)
 
 	var buf bytes.Buffer
 	if err := runDoctor(f, f, defaultLabelConfig(), &buf, strings.NewReader(""), false); err != nil {
@@ -2879,15 +2880,16 @@ func TestDoctor_TTY_Confirm(t *testing.T) {
 	f.ProbeRepo = "owner/repo"
 	research := doctor.ResearchLabelNames()
 	priority := doctor.PriorityLabelNames()
-	// Two work labels missing: agent-failed and agent-complete. Research and
-	// priority labels are all present throughout, so this test stays scoped
-	// to work label creation.
-	f.Labels = append(append([]string{"ready-for-agent", "agent-in-progress"}, research...), priority...)
+	ambiguous := doctor.AmbiguousLabelNames()
+	// Two work labels missing: agent-failed and agent-complete. Research,
+	// priority, and ambiguous-spec labels are all present throughout, so
+	// this test stays scoped to work label creation.
+	f.Labels = append(append(append([]string{"ready-for-agent", "agent-in-progress"}, research...), priority...), ambiguous...)
 	// After creation the fake doesn't auto-add to Labels, so script the
 	// second ListLabels call (re-verify) to return all four work labels.
 	f.LabelsSeq = [][]string{
-		append(append([]string{"ready-for-agent", "agent-in-progress"}, research...), priority...),                                   // first check
-		append(append([]string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}, research...), priority...), // re-verify
+		append(append(append([]string{"ready-for-agent", "agent-in-progress"}, research...), priority...), ambiguous...),                                   // first check
+		append(append(append([]string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}, research...), priority...), ambiguous...), // re-verify
 	}
 
 	var buf bytes.Buffer
@@ -2924,12 +2926,14 @@ func TestDoctor_TTY_Confirm_ResearchLabels(t *testing.T) {
 	work := []string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}
 	research := doctor.ResearchLabelNames()
 	priority := doctor.PriorityLabelNames()
-	// All work and priority labels present; all six research labels missing,
-	// so this test stays scoped to research label creation.
-	f.Labels = append(append([]string{}, work...), priority...)
+	ambiguous := doctor.AmbiguousLabelNames()
+	// All work, priority, and ambiguous-spec labels present; all six
+	// research labels missing, so this test stays scoped to research label
+	// creation.
+	f.Labels = append(append(append([]string{}, work...), priority...), ambiguous...)
 	f.LabelsSeq = [][]string{
-		append(append([]string{}, work...), priority...),
-		append(append(append([]string{}, work...), priority...), research...), // re-verify: research now created too
+		append(append(append([]string{}, work...), priority...), ambiguous...),
+		append(append(append(append([]string{}, work...), priority...), ambiguous...), research...), // re-verify: research now created too
 	}
 
 	var buf bytes.Buffer
@@ -3027,12 +3031,14 @@ func TestDoctor_TTY_Confirm_PriorityLabels(t *testing.T) {
 	work := []string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}
 	research := doctor.ResearchLabelNames()
 	priority := doctor.PriorityLabelNames()
-	// All work and research labels present; all three priority labels
-	// missing, so this test stays scoped to priority label creation.
-	f.Labels = append(append([]string{}, work...), research...)
+	ambiguous := doctor.AmbiguousLabelNames()
+	// All work, research, and ambiguous-spec labels present; all three
+	// priority labels missing, so this test stays scoped to priority label
+	// creation.
+	f.Labels = append(append(append([]string{}, work...), research...), ambiguous...)
 	f.LabelsSeq = [][]string{
-		append(append([]string{}, work...), research...),
-		append(append(append([]string{}, work...), research...), priority...), // re-verify: priority now created too
+		append(append(append([]string{}, work...), research...), ambiguous...),
+		append(append(append(append([]string{}, work...), research...), ambiguous...), priority...), // re-verify: priority now created too
 	}
 
 	var buf bytes.Buffer
@@ -3092,6 +3098,115 @@ func TestDoctor_TTY_Confirm_PriorityStillMissing_Advisory(t *testing.T) {
 	}
 	if strings.Contains(out, "ok: all triage, research, and priority labels present") {
 		t.Errorf("must not print success message when priority labels are still missing, got:\n%s", out)
+	}
+}
+
+// TestDoctor_NoTTY_AmbiguousLabelMissing_ExitZero verifies the missing
+// agent-ambiguous-spec label (issue #2275) is advisory only: doctor reports
+// it MISSING but exits zero as long as the fatal work labels are all
+// present, mirroring the research/priority tiers' non-fatal treatment.
+func TestDoctor_NoTTY_AmbiguousLabelMissing_ExitZero(t *testing.T) {
+	f := forge.NewFake()
+	f.ProbeRepo = "owner/repo"
+	f.Labels = []string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}
+
+	var buf bytes.Buffer
+	err := runDoctor(f, f, defaultLabelConfig(), &buf, strings.NewReader(""), false)
+	if err != nil {
+		t.Fatalf("missing ambiguous-spec label must not fail doctor, got: %v", err)
+	}
+	out := buf.String()
+	for _, label := range doctor.AmbiguousLabelNames() {
+		if !strings.Contains(out, "MISSING: label \""+label+"\"") {
+			t.Errorf("want MISSING line for ambiguous-spec label %q, got:\n%s", label, out)
+		}
+	}
+	wantAdvisory := "advisory: " + strconv.Itoa(len(doctor.AmbiguousLabelNames())) + " ambiguous-spec label(s) missing"
+	if !strings.Contains(out, wantAdvisory) {
+		t.Errorf("want advisory line %q, got:\n%s", wantAdvisory, out)
+	}
+}
+
+// TestDoctor_TTY_Confirm_AmbiguousLabel verifies interactive doctor also
+// offers to create the missing agent-ambiguous-spec label (advisory tier,
+// issue #2275) alongside work/research/priority labels, and creates it with
+// a real color/description — never the "ededed" gray fallback.
+func TestDoctor_TTY_Confirm_AmbiguousLabel(t *testing.T) {
+	f := forge.NewFake()
+	f.ProbeRepo = "owner/repo"
+	work := []string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}
+	research := doctor.ResearchLabelNames()
+	priority := doctor.PriorityLabelNames()
+	ambiguous := doctor.AmbiguousLabelNames()
+	// All work, research, and priority labels present; the ambiguous-spec
+	// label missing, so this test stays scoped to ambiguous-spec label
+	// creation.
+	f.Labels = append(append(append([]string{}, work...), research...), priority...)
+	f.LabelsSeq = [][]string{
+		append(append(append([]string{}, work...), research...), priority...),
+		append(append(append(append([]string{}, work...), research...), priority...), ambiguous...), // re-verify: ambiguous-spec now created too
+	}
+
+	var buf bytes.Buffer
+	err := runDoctor(f, f, defaultLabelConfig(), &buf, strings.NewReader("y\n"), true)
+	if err != nil {
+		t.Fatalf("unexpected error after confirm: %v", err)
+	}
+	if len(f.CreateLabelCalls) != len(ambiguous) {
+		t.Fatalf("want %d CreateLabel calls, got %d", len(ambiguous), len(f.CreateLabelCalls))
+	}
+	for _, call := range f.CreateLabelCalls {
+		if call.Color == "" || call.Color == "ededed" {
+			t.Errorf("ambiguous-spec label %q should use a named color, got %q", call.Name, call.Color)
+		}
+		if call.Description == "" {
+			t.Errorf("ambiguous-spec label %q should have a description", call.Name)
+		}
+	}
+}
+
+// TestDoctor_TTY_Confirm_AmbiguousStillMissing_Advisory verifies that when a
+// create run's re-verify still finds the ambiguous-spec label missing (e.g.
+// eventual consistency on the forge side), doctor prints a non-fatal
+// advisory summary instead of silently returning nil — mirroring the
+// research/priority tiers' analogous message but never failing the check.
+func TestDoctor_TTY_Confirm_AmbiguousStillMissing_Advisory(t *testing.T) {
+	f := forge.NewFake()
+	f.ProbeRepo = "owner/repo"
+	work := []string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}
+	research := doctor.ResearchLabelNames()
+	priority := doctor.PriorityLabelNames()
+	// All work, research, and priority labels present, the ambiguous-spec
+	// label missing.
+	f.Labels = append(append(append([]string{}, work...), research...), priority...)
+	f.LabelsSeq = [][]string{
+		append(append(append([]string{}, work...), research...), priority...),
+		append(append(append([]string{}, work...), research...), priority...), // re-verify: ambiguous-spec still missing despite CreateLabel "succeeding"
+	}
+
+	var buf bytes.Buffer
+	err := runDoctor(f, f, defaultLabelConfig(), &buf, strings.NewReader("y\n"), true)
+	if err != nil {
+		t.Fatalf("ambiguous-spec label still missing after creation must not fail doctor, got: %v", err)
+	}
+	out := buf.String()
+	var advisoryLine string
+	for _, line := range strings.Split(out, "\n") {
+		if strings.HasPrefix(line, "advisory: 1 ambiguous-spec label(s) still missing after creation") {
+			advisoryLine = line
+			break
+		}
+	}
+	if advisoryLine == "" {
+		t.Fatalf("want advisory summary after incomplete ambiguous-spec creation, got:\n%s", out)
+	}
+	for _, name := range doctor.AmbiguousLabelNames() {
+		if !strings.Contains(advisoryLine, name) {
+			t.Errorf("want advisory line to name missing label %q, got:\n%s", name, advisoryLine)
+		}
+	}
+	if strings.Contains(out, "ok: all triage, research, and priority labels present") {
+		t.Errorf("must not print success message when ambiguous-spec label is still missing, got:\n%s", out)
 	}
 }
 

@@ -45,6 +45,13 @@ var TriageLabelMeta = map[string]LabelMeta{
 	"agent-priority-critical": {Description: "Drop everything — highest dispatch priority", Color: "d73a4a"},
 	"agent-priority-high":     {Description: "Dispatch ahead of normal-priority issues", Color: "ff8c00"},
 	"agent-priority-low":      {Description: "Dispatch behind normal-priority issues", Color: "8a9ba8"},
+
+	// Same "needs a human answer" semantic family as agent-research-unclear,
+	// but a distinct shade (e0cffc vs. d4c5f9) so the two never collide in
+	// the GitHub label UI (TestTriageLabelMeta_ColorsAreDistinct) — the
+	// choice of exact hex isn't load-bearing beyond staying visually
+	// adjacent and distinct.
+	"agent-ambiguous-spec": {Description: "An internally-contradictory issue; needs a human decision — not a crash", Color: "e0cffc"},
 }
 
 // ResearchLabelNames returns the six fixed research-tier label names (ADR
@@ -65,6 +72,14 @@ func ResearchLabelNames() []string {
 // string literals.
 func PriorityLabelNames() []string {
 	return forge.PriorityLabelNames()
+}
+
+// AmbiguousLabelNames returns the single fixed ambiguous-spec-tier label
+// name. There's no forge.AmbiguousDispatchLabels() helper — the fixed
+// literal "agent-ambiguous-spec" mirrors forge.DispatchLabels.Ambiguous's
+// own fixed-literal doc comment.
+func AmbiguousLabelNames() []string {
+	return []string{"agent-ambiguous-spec"}
 }
 
 // Config is the minimal slice of launcher config Run needs: the Issue
@@ -149,15 +164,16 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, w io.Writer, stdin
 		return missing
 	}
 
-	// checkLabels reports on all three label tiers: work (fatal if missing),
+	// checkLabels reports on all four label tiers: work (fatal if missing),
 	// research (advisory — ADR 0022's agent-research family is reported but
 	// never fails the check, so CI doctor runs stay green for deployments
-	// that don't use research yet), and priority (advisory — ADR 0040's
-	// agent-priority-* family, same treatment).
-	checkLabels := func() (workMissing, researchMissing, priorityMissing []string, err error) {
+	// that don't use research yet), priority (advisory — ADR 0040's
+	// agent-priority-* family, same treatment), and ambiguous-spec (advisory
+	// — issue #2275's single agent-ambiguous-spec label, same treatment).
+	checkLabels := func() (workMissing, researchMissing, priorityMissing, ambiguousMissing []string, err error) {
 		existing, lerr := it.ListLabels()
 		if lerr != nil {
-			return nil, nil, nil, fmt.Errorf("label check failed: %w", lerr)
+			return nil, nil, nil, nil, fmt.Errorf("label check failed: %w", lerr)
 		}
 		present := make(map[string]bool, len(existing))
 		for _, l := range existing {
@@ -166,10 +182,11 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, w io.Writer, stdin
 		workMissing = checkLabelSet([]string{c.Label, c.InProgressLabel, c.FailedLabel, c.CompleteLabel}, present)
 		researchMissing = checkLabelSet(ResearchLabelNames(), present)
 		priorityMissing = checkLabelSet(PriorityLabelNames(), present)
-		return workMissing, researchMissing, priorityMissing, nil
+		ambiguousMissing = checkLabelSet(AmbiguousLabelNames(), present)
+		return workMissing, researchMissing, priorityMissing, ambiguousMissing, nil
 	}
 
-	workMissing, researchMissing, priorityMissing, err := checkLabels()
+	workMissing, researchMissing, priorityMissing, ambiguousMissing, err := checkLabels()
 	if err != nil {
 		return err
 	}
@@ -179,7 +196,10 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, w io.Writer, stdin
 	if len(priorityMissing) > 0 {
 		fmt.Fprintf(w, "advisory: %d priority label(s) missing (ADR 0040) — does not fail this check\n", len(priorityMissing))
 	}
-	missing := append(append(append([]string{}, workMissing...), researchMissing...), priorityMissing...)
+	if len(ambiguousMissing) > 0 {
+		fmt.Fprintf(w, "advisory: %d ambiguous-spec label(s) missing — does not fail this check\n", len(ambiguousMissing))
+	}
+	missing := append(append(append(append([]string{}, workMissing...), researchMissing...), priorityMissing...), ambiguousMissing...)
 	if len(missing) == 0 {
 		fmt.Fprintln(w, "ok: all triage, research, and priority labels present")
 		return nil
@@ -213,18 +233,18 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, w io.Writer, stdin
 	}
 
 	// Re-verify after creation.
-	workMissing, researchMissing, priorityMissing, err = checkLabels()
+	workMissing, researchMissing, priorityMissing, ambiguousMissing, err = checkLabels()
 	if err != nil {
 		return err
 	}
 	if len(workMissing) > 0 {
 		return fmt.Errorf("one or more triage labels are still missing after creation")
 	}
-	// Work labels are fatal (handled above) and research/priority labels
-	// are advisory (ADR 0022 / ADR 0040), so each advisory tier gets its
-	// own wrap-up line here: an advisory note if that tier is still short
-	// after creation, or a single success line naming all three tiers
-	// once none is.
+	// Work labels are fatal (handled above) and research/priority/
+	// ambiguous-spec labels are advisory (ADR 0022 / ADR 0040 / #2275), so
+	// each advisory tier gets its own wrap-up line here: an advisory note if
+	// that tier is still short after creation, or a single success line
+	// naming all three tiers once none is.
 	stillMissing := false
 	if len(researchMissing) > 0 {
 		fmt.Fprintf(w, "advisory: %d research label(s) still missing after creation (ADR 0022) — does not fail this check: %s\n", len(researchMissing), strings.Join(researchMissing, ", "))
@@ -232,6 +252,10 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, w io.Writer, stdin
 	}
 	if len(priorityMissing) > 0 {
 		fmt.Fprintf(w, "advisory: %d priority label(s) still missing after creation (ADR 0040) — does not fail this check: %s\n", len(priorityMissing), strings.Join(priorityMissing, ", "))
+		stillMissing = true
+	}
+	if len(ambiguousMissing) > 0 {
+		fmt.Fprintf(w, "advisory: %d ambiguous-spec label(s) still missing after creation — does not fail this check: %s\n", len(ambiguousMissing), strings.Join(ambiguousMissing, ", "))
 		stillMissing = true
 	}
 	if stillMissing {
