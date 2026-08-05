@@ -19,7 +19,7 @@ import (
 // without Update or the view re-deriving it.
 func Refresh(tracker forge.IssueTracker) Msg {
 	issues, err := tracker.ListOpenIssues()
-	forge.SortByPriority(issues)
+	forge.SortByPriority(issues, func(i forge.Issue) forge.Priority { return i.Priority })
 	return IssuesLoadedMsg{Issues: issues, Err: err, RecoverableCount: countRecoverable(tracker, issues)}
 }
 
