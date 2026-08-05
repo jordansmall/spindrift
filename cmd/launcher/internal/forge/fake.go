@@ -1,14 +1,12 @@
 package forge
 
-import (
-	"sync"
-)
-
 // Fake is an in-memory Client for unit tests. All methods are safe for
 // concurrent use. CheckState pops from a scripted RollupState queue so polling
 // tests need no real sleeps.
 type Fake struct {
-	mu sync.Mutex
+	// *core is the shared substrate promoted through to Fake — see core's
+	// doc comment for the admission rule.
+	*core
 
 	labels DispatchLabels
 	// VerdictLabels configures the Verdict-to-label mapping CompleteVerdict
@@ -31,7 +29,6 @@ type Fake struct {
 	prs             map[string]PR             // URL → PR
 	branchPRs       map[string]string         // branch → PR URL
 	branchExists    map[string]bool           // branch → scripted BranchExists result
-	prStates        map[string]PRState        // URL → canonical PR state
 	mergeableStates map[string]MergeableState // URL → scripted Mergeable result
 	needsUpdate     map[string]bool           // URL → scripted NeedsUpdate result
 	checkQ          map[string][]RollupState
@@ -177,22 +174,6 @@ type Fake struct {
 	// MarkDraftCalls records all PR URLs passed to MarkDraft, in order.
 	MarkDraftCalls []string
 
-	// LandingCallLog records, in order, every call to MarkReady, MarkDraft,
-	// Merge, and EnqueueAutoMerge as "Method:url" — the landing-path methods
-	// a caller can reorder relative to each other. A per-method Calls slice
-	// alone can't distinguish "MarkReady then Merge" from "Merge then
-	// MarkReady": both leave the same final Calls-slice contents, so a test
-	// asserting call presence on each slice separately passes either way.
-	// This single, cross-method log is what lets a test assert genuine
-	// ordering (issue #1651's "ready-flip precedes the merge/enqueue call").
-	LandingCallLog []string
-
-	// ProbeErr, if non-nil, is returned by Probe. Use ErrAuthFailure or
-	// ErrRepoNotFound to simulate specific failure modes.
-	ProbeErr error
-	// ProbeRepo is the resolved repo slug returned by Probe on success.
-	ProbeRepo string
-
 	// Labels is the list of label names returned by ListLabels on success.
 	// When LabelsSeq is non-empty, each call pops the next entry from it
 	// instead (falling back to Labels once the sequence is exhausted).
@@ -271,12 +252,12 @@ func NewFake(labels ...DispatchLabels) *Fake {
 		l = labels[0]
 	}
 	return &Fake{
+		core:            &core{prStates: map[string]PRState{}},
 		labels:          l,
 		issues:          map[string]Issue{},
 		prs:             map[string]PR{},
 		branchPRs:       map[string]string{},
 		branchExists:    map[string]bool{},
-		prStates:        map[string]PRState{},
 		mergeableStates: map[string]MergeableState{},
 		needsUpdate:     map[string]bool{},
 		checkQ:          map[string][]RollupState{},
