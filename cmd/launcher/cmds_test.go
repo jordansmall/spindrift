@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -10,6 +12,37 @@ import (
 	"spindrift.dev/launcher/internal/runner"
 	"spindrift.dev/launcher/internal/settle"
 )
+
+// TestWriteGithubOutput_AppendsKeyValueLine asserts writeGithubOutput appends
+// a "key=value\n" line to the file named by GITHUB_OUTPUT.
+func TestWriteGithubOutput_AppendsKeyValueLine(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "output")
+	t.Setenv("GITHUB_OUTPUT", path)
+
+	if err := writeGithubOutput("recover-reason", "issue 42: no open PR"); err != nil {
+		t.Fatalf("writeGithubOutput() error = %v, want nil", err)
+	}
+
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("os.ReadFile(%q) error = %v", path, err)
+	}
+	want := "recover-reason=issue 42: no open PR\n"
+	if string(got) != want {
+		t.Errorf("file contents = %q, want %q", got, want)
+	}
+}
+
+// TestWriteGithubOutput_NoopWhenUnset asserts writeGithubOutput is a no-op
+// returning nil when GITHUB_OUTPUT is unset/empty.
+func TestWriteGithubOutput_NoopWhenUnset(t *testing.T) {
+	t.Setenv("GITHUB_OUTPUT", "")
+
+	if err := writeGithubOutput("k", "v"); err != nil {
+		t.Errorf("writeGithubOutput() error = %v, want nil", err)
+	}
+}
 
 // TestCmdRecover_RunsCleanupOnEveryExit asserts cmdRecover runs the launch
 // context's cleanup hook (driver-cache cleanup) even on the error exit path
@@ -39,6 +72,86 @@ func TestCmdRecover_RunsCleanupOnEveryExit(t *testing.T) {
 	}
 	if !called {
 		t.Error("cmdRecover did not run lc.cleanup()")
+	}
+}
+
+// TestCmdRecover_WritesReasonToGithubOutput asserts cmdRecover writes the
+// recoverByNumber error text to the GITHUB_OUTPUT file under the
+// "recover-reason" key on the no-open-PR error exit path.
+func TestCmdRecover_WritesReasonToGithubOutput(t *testing.T) {
+	outputPath := filepath.Join(t.TempDir(), "output")
+	t.Setenv("GITHUB_OUTPUT", outputPath)
+
+	c := reconcileConfig()
+	fc := forge.NewFake()
+	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.inProgressLabel}})
+	// No PR registered for the branch -- recoverByNumber returns an error.
+	dir := tempLogDir(t)
+	lc := &launchContext{
+		config:       c,
+		pwd:          dir,
+		issueTracker: fc,
+		codeForge:    fc,
+		factory:      testFactory(t, dir, nil),
+		settle:       newSettle(c, fc, testWired(fc), fc),
+		cleanup:      func() {},
+	}
+
+	got := cmdRecover(lc, "42")
+
+	if got != 1 {
+		t.Errorf("cmdRecover(lc, \"42\") = %d, want 1 (no PR)", got)
+	}
+
+	out, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatalf("os.ReadFile(%q) error = %v", outputPath, err)
+	}
+	want := "recover-reason=issue 42: no open PR"
+	if !strings.Contains(string(out), want) {
+		t.Errorf("GITHUB_OUTPUT contents = %q, want to contain %q", out, want)
+	}
+}
+
+// TestCmdRecover_WritesDraftPRReasonToGithubOutput asserts cmdRecover writes
+// the draft-PR error text to the GITHUB_OUTPUT file under the
+// "recover-reason" key on the draft-PR error exit path.
+func TestCmdRecover_WritesDraftPRReasonToGithubOutput(t *testing.T) {
+	outputPath := filepath.Join(t.TempDir(), "output")
+	t.Setenv("GITHUB_OUTPUT", outputPath)
+
+	c := reconcileConfig()
+	fc := forge.NewFake()
+	fc.BranchPrefix = c.branchPrefix
+
+	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.inProgressLabel}})
+	branch := fc.AgentBranch("42")
+	fc.SetPR(branch, forge.PR{URL: testReconcilePR, IsDraft: true})
+
+	dir := tempLogDir(t)
+	lc := &launchContext{
+		config:       c,
+		pwd:          dir,
+		issueTracker: fc,
+		codeForge:    fc,
+		factory:      testFactory(t, dir, nil),
+		settle:       newSettle(c, fc, testWired(fc), fc),
+		cleanup:      func() {},
+	}
+
+	got := cmdRecover(lc, "42")
+
+	if got != 1 {
+		t.Errorf("cmdRecover(lc, \"42\") = %d, want 1 (draft PR)", got)
+	}
+
+	out, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatalf("os.ReadFile(%q) error = %v", outputPath, err)
+	}
+	want := "recover-reason=issue 42: draft PR"
+	if !strings.Contains(string(out), want) {
+		t.Errorf("GITHUB_OUTPUT contents = %q, want to contain %q", out, want)
 	}
 }
 
