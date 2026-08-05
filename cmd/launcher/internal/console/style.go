@@ -17,6 +17,7 @@ type Role int
 const (
 	RoleRunning Role = iota
 	RoleHeld
+	RoleRecoverable
 	RoleSettled
 	RoleFailed
 	RoleAccent
@@ -41,6 +42,8 @@ func ansiSlot(r Role) int {
 		return 5 // magenta
 	case RoleDim:
 		return 8 // bright black
+	case RoleRecoverable:
+		return 6 // cyan
 	default:
 		return 7 // white
 	}
