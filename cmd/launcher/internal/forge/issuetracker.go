@@ -194,7 +194,10 @@ type LandingRecorder interface {
 // which local excludes but forgejo would still pass, even though forgejo
 // issue numbers are a foreign namespace from GitHub's: injecting a GitHub
 // `Closes #N` keyword against a forgejo-tracked issue would falsely
-// reference (and could auto-close) an unrelated real GitHub issue #N.
+// reference (and could auto-close) an unrelated real GitHub issue #N. The
+// prompt-side PR_BODY_CLOSES gate this marker backs also covers jira, but
+// jira can't host-mediate a draft PR and its issue keys aren't bare digits,
+// so this narrower github-only marker is sufficient here.
 // Callers discover it with a type assertion — `_, ok :=
 // it.(GithubTracker)` — the same optional-interface pattern LandingRecorder
 // uses. Only the github adapter implements it. IsGithubTracker is exported
