@@ -341,6 +341,22 @@ type Resolved struct {
 	// by design.
 	Kind  string
 	Found bool
+	// SelfReport and SelfReportFound carry the driver's unauthenticated
+	// self-report signal alongside whichever tier actually won the outcome
+	// above. They are populated on every Resolved with Found true —
+	// including when Provenance is ProvenanceGenuine or ProvenanceSynthetic
+	// and the self-report tier was never consulted for Outcome/Provenance
+	// itself — not only when the self-report tier is Resolve's own
+	// last-resort fallback (Provenance == ProvenanceSelfReport). This lets a
+	// caller see both signals at once: e.g. a later synthetic backstop line
+	// can win the Outcome/Provenance above while an earlier driver-authored
+	// self-report line (parsed or not) is still available via SelfReport for
+	// adoption logic that weighs the two against each other. SelfReportFound
+	// is false, and SelfReport is its zero value, when no self-report line
+	// was found in any log, and both stay zero-valued on a Resolved with
+	// Found false (neither tier found anything).
+	SelfReport      SelfReport
+	SelfReportFound bool
 }
 
 // Resolve is the single seam that picks among the tiers of the
@@ -362,19 +378,26 @@ type Resolved struct {
 // leading-token or field-bearing line is a candidate regardless of any
 // nonce= field it carries.
 //
+// Regardless of whether the genuine/synthetic tier found a winner, Resolve
+// also always walks logs calling lastSelfReportInLog(log.Path) — the
+// self-report tier is likewise ungated (see SelfReport) — keeping the last
+// log with a report ("last pass wins", same precedence as the
+// genuine/synthetic walk). That report is populated on Resolved.SelfReport /
+// Resolved.SelfReportFound on every Found-true return, whether or not it also
+// drove Resolved.Outcome/Provenance below.
+//
 // If the genuine/synthetic tier found no leading-token line at all (neither a
-// clean match nor a near-miss), Resolve does not give up: it walks logs a
-// second time calling lastSelfReportInLog(log.Path) — the self-report tier is
-// likewise ungated (see SelfReport) — again keeping the last log with a
-// report. When one is found and report.Parsed is true, Resolved.Outcome is
-// report.Outcome in full and Provenance is ProvenanceSelfReport. When one is
-// found but NOT Parsed, Resolved.Outcome only has Status populated from
-// report.Status — Issue, Landing, and Note stay zero. A caller reading
-// Resolved.Outcome.Status after a ProvenanceSelfReport result must not assume
-// the rest of Outcome is meaningful. Note that with the nonce gate retired
-// (ADR 0039, issue #2274) a bare-word leading line like "SPINDRIFT_OUTCOME:
-// success" is now lastInLog's own near-miss, so it surfaces as Resolve's
-// near-miss error above rather than reaching this self-report fallback.
+// clean match nor a near-miss), Resolve does not give up: the self-report
+// walk above becomes Resolve's own last-resort tier too. When a report was
+// found and report.Parsed is true, Resolved.Outcome is report.Outcome in
+// full and Provenance is ProvenanceSelfReport. When one is found but NOT
+// Parsed, Resolved.Outcome only has Status populated from report.Status —
+// Issue, Landing, and Note stay zero. A caller reading Resolved.Outcome.Status
+// after a ProvenanceSelfReport result must not assume the rest of Outcome is
+// meaningful. Note that with the nonce gate retired (ADR 0039, issue #2274) a
+// bare-word leading line like "SPINDRIFT_OUTCOME: success" is now
+// lastInLog's own near-miss, so it surfaces as Resolve's near-miss error
+// above rather than reaching this self-report fallback.
 //
 // Only when neither tier yields anything does Resolve return
 // Resolved{Found: false} with no error — matching this package's existing
@@ -410,39 +433,57 @@ func Resolve(logs []PassLog, kind string) (Resolved, error) {
 		// Neither case: this log had no candidate at all, so it leaves the
 		// running state from prior logs untouched.
 	}
+	// The self-report walk runs unconditionally, regardless of whether the
+	// genuine/synthetic tier above found a winner or errored on a near-miss,
+	// so Resolved always carries the driver's self-report signal alongside
+	// whichever tier won -- not only as this function's own last-resort
+	// fallback tier (issue #2268 slice 1). A caller that only cares about the
+	// self-report signal (e.g. `spindrift recover`'s relayed-branch adopt
+	// arm) can read Resolved.SelfReport/SelfReportFound off the zero-Outcome
+	// Resolved this function returns alongside a near-miss error, rather than
+	// losing that signal entirely just because the authoritative tier
+	// couldn't settle on a clean winner.
+	report, reportFound := lastSelfReportAcrossLogs(logs)
+
 	if lastErr != nil {
-		return Resolved{Kind: kind}, lastErr
+		return Resolved{Kind: kind, SelfReport: report, SelfReportFound: reportFound}, lastErr
 	}
+
 	if found {
 		provenance := ProvenanceGenuine
 		if winner.Synthetic {
 			provenance = ProvenanceSynthetic
 		}
 		return Resolved{
-			Outcome:    winner,
-			Provenance: provenance,
-			Kind:       kind,
-			Found:      true,
+			Outcome:         winner,
+			Provenance:      provenance,
+			Kind:            kind,
+			Found:           true,
+			SelfReport:      report,
+			SelfReportFound: reportFound,
 		}, nil
 	}
 
-	report, reportFound := lastSelfReportAcrossLogs(logs)
 	if !reportFound {
 		return Resolved{Kind: kind}, nil
 	}
 	if report.Parsed {
 		return Resolved{
-			Outcome:    report.Outcome,
-			Provenance: ProvenanceSelfReport,
-			Kind:       kind,
-			Found:      true,
+			Outcome:         report.Outcome,
+			Provenance:      ProvenanceSelfReport,
+			Kind:            kind,
+			Found:           true,
+			SelfReport:      report,
+			SelfReportFound: true,
 		}, nil
 	}
 	return Resolved{
-		Outcome:    Outcome{Status: report.Status},
-		Provenance: ProvenanceSelfReport,
-		Kind:       kind,
-		Found:      true,
+		Outcome:         Outcome{Status: report.Status},
+		Provenance:      ProvenanceSelfReport,
+		Kind:            kind,
+		Found:           true,
+		SelfReport:      report,
+		SelfReportFound: true,
 	}, nil
 }
 

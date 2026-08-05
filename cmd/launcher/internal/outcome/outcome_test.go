@@ -1230,3 +1230,65 @@ func TestResolve_BareWordLeadingLineIsNearMiss(t *testing.T) {
 		t.Error("Found: got true, want false on a near-miss")
 	}
 }
+
+// TestResolve_SelfReportAlwaysPopulated pins that Resolved.SelfReport /
+// Resolved.SelfReportFound carry the self-report signal alongside whichever
+// tier actually won Outcome/Provenance -- not only when the self-report tier
+// is Resolve's own last-resort fallback (issue #2268 slice 1).
+func TestResolve_SelfReportAlwaysPopulated(t *testing.T) {
+	t.Run("later synthetic backstop wins but earlier self-report survives", func(t *testing.T) {
+		path := writeLog(t,
+			"SPINDRIFT_OUTCOME: success",
+			"SPINDRIFT_OUTCOME issue=9 landing=agent/issue-9 status=blocked synthetic=true note=driver exited nonce=the-nonce",
+		)
+		logs := []outcome.PassLog{{Label: "pass-1", Path: path}}
+
+		got, err := outcome.Resolve(logs, "")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !got.Found {
+			t.Fatal("Found: got false, want true")
+		}
+		if got.Provenance != outcome.ProvenanceSynthetic {
+			t.Errorf("Provenance: got %q, want %q", got.Provenance, outcome.ProvenanceSynthetic)
+		}
+		if got.Outcome.Status != "blocked" {
+			t.Errorf("Outcome.Status: got %q, want %q", got.Outcome.Status, "blocked")
+		}
+		if !got.SelfReportFound {
+			t.Fatal("SelfReportFound: got false, want true")
+		}
+		if got.SelfReport.Status != "success" {
+			t.Errorf("SelfReport.Status: got %q, want %q", got.SelfReport.Status, "success")
+		}
+	})
+
+	t.Run("no self-report line at all leaves SelfReportFound false", func(t *testing.T) {
+		// The only leading-token line is the synthetic backstop itself, which
+		// lastSelfReportInLog explicitly excludes (synthetic=true), so there
+		// is no non-synthetic self-report line anywhere in the log.
+		path := writeLog(t,
+			"some output",
+			"SPINDRIFT_OUTCOME issue=9 landing=agent/issue-9 status=blocked synthetic=true note=driver exited nonce=the-nonce",
+		)
+		logs := []outcome.PassLog{{Label: "pass-1", Path: path}}
+
+		got, err := outcome.Resolve(logs, "")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !got.Found {
+			t.Fatal("Found: got false, want true")
+		}
+		if got.Provenance != outcome.ProvenanceSynthetic {
+			t.Errorf("Provenance: got %q, want %q", got.Provenance, outcome.ProvenanceSynthetic)
+		}
+		if got.SelfReportFound {
+			t.Errorf("SelfReportFound: got true, want false")
+		}
+		if got.SelfReport != (outcome.SelfReport{}) {
+			t.Errorf("SelfReport: got %+v, want zero value", got.SelfReport)
+		}
+	})
+}
