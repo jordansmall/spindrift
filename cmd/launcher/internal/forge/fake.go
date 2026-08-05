@@ -8,27 +8,19 @@ type Fake struct {
 	// doc comment for the admission rule.
 	*core
 
-	labels DispatchLabels
-	// VerdictLabels configures the Verdict-to-label mapping CompleteVerdict
-	// uses, the same way labels configures TransitionState; set directly
-	// (there is no constructor argument for it) since only research-kind
-	// tests exercise it.
-	VerdictLabels VerdictLabels
-	issues        map[string]Issue
-	// NativeDeps, when set for an issue number, is returned by DepsOf as
-	// DepSourceNative and takes precedence over body parsing — the
-	// native-wins-when-non-empty rule forgetest.RunTrackerContract's DepsOf
-	// scenario pins across every adapter, so tests can script native-sourced,
-	// body-sourced, and mixed-batch blockers.
-	NativeDeps map[string][]string
-	// NativeDepsErr, keyed by issue number, is returned by DepsOf for that
-	// number instead of consulting NativeDeps — scripts the native-API
-	// failure DepsOf falls back to body parsing for (forgetest's
-	// NativeFailureIsolatable scenario, issue #1544).
-	NativeDepsErr   map[string]error
+	// *IssueTrackerFake is the tracker-capability slice, embedded (in
+	// addition to *core above) so Fake's own direct *core embed stays the
+	// unambiguous shallowest path to core's fields — see the fake.go package
+	// doc comment on Fake for why both embeds are required.
+	*IssueTrackerFake
+
+	// *CodeForgeFake is the code-forge-capability slice, embedded alongside
+	// *core and *IssueTrackerFake above for the same reason — see
+	// IssueTrackerFake's comment.
+	*CodeForgeFake
+
 	prs             map[string]PR             // URL → PR
 	branchPRs       map[string]string         // branch → PR URL
-	branchExists    map[string]bool           // branch → scripted BranchExists result
 	mergeableStates map[string]MergeableState // URL → scripted Mergeable result
 	needsUpdate     map[string]bool           // URL → scripted NeedsUpdate result
 	checkQ          map[string][]RollupState
@@ -61,49 +53,8 @@ type Fake struct {
 	// normal branch->PR lookup"; a non-nil entry is returned as the error.
 	OpenPRForBranchErrs []error
 
-	// BranchExistsErr, if non-nil, is returned by every BranchExists call.
-	BranchExistsErr error
-
-	// TouchesOfErr, keyed by issue number, is returned by TouchesOf for that
-	// number instead of parsing its body. Per-number (not blanket, unlike
-	// PRFilesErr) because a single overlap-gate check calls TouchesOf for
-	// both an in-progress issue and the candidate being checked against it —
-	// a blanket error couldn't isolate which side failed.
-	TouchesOfErr map[string]error
-
-	// MergeErr, if non-nil, is returned by every Merge call (after MergeErrs is drained).
-	MergeErr error
 	// NeedsUpdateErr, if non-nil, is returned by every NeedsUpdate call.
 	NeedsUpdateErr error
-	// MergeErrs is a per-call queue drained before MergeErr is checked.
-	// A nil entry means success; a non-nil entry is returned as the error.
-	MergeErrs []error
-	// Merged is set to the URL of the last successful Merge call.
-	Merged string
-	// RebaseErr, if non-nil, is returned by every Rebase call (after
-	// RebaseErrs is drained).
-	RebaseErr error
-	// RebaseErrs is a per-call queue drained before RebaseErr is checked.
-	// A nil entry means success; a non-nil entry is returned as the error.
-	RebaseErrs []error
-	// RebasedURLs records all URLs passed to Rebase in order.
-	RebasedURLs []string
-	// TransitionStateCalls records all TransitionState invocations in order.
-	TransitionStateCalls []TransitionStateCall
-	// TransitionStateErr, if non-nil, is returned by every TransitionState call.
-	TransitionStateErr error
-	// CompleteVerdictCalls records all CompleteVerdict invocations in order.
-	CompleteVerdictCalls []CompleteVerdictCall
-	// CompleteVerdictErr, if non-nil, is returned by every CompleteVerdict call.
-	CompleteVerdictErr error
-	// CommentCalls records all Comment invocations in order.
-	CommentCalls []CommentCall
-	// CommentErr, if non-nil, is returned by every Comment call.
-	CommentErr error
-	// RecordLandingCalls records all RecordLanding invocations in order.
-	RecordLandingCalls []RecordLandingCall
-	// RecordLandingErr, if non-nil, is returned by every RecordLanding call.
-	RecordLandingErr error
 
 	// RelayBundleErr, if non-nil, is returned by every RelayBundle call —
 	// scripts CODE_FORGE=local's missing/malformed-bundle failure mode (ADR
@@ -173,73 +124,6 @@ type Fake struct {
 	MarkDraftErr error
 	// MarkDraftCalls records all PR URLs passed to MarkDraft, in order.
 	MarkDraftCalls []string
-
-	// Labels is the list of label names returned by ListLabels on success.
-	// When LabelsSeq is non-empty, each call pops the next entry from it
-	// instead (falling back to Labels once the sequence is exhausted).
-	Labels []string
-	// LabelsSeq, when non-empty, is a per-call queue drained by ListLabels.
-	// Each call pops the first slice; when exhausted, Labels is used.
-	LabelsSeq [][]string
-	// ListLabelsErr, if non-nil, is returned by ListLabels.
-	ListLabelsErr error
-
-	// CreateLabelCalls records all CreateLabel invocations in order.
-	CreateLabelCalls []CreateLabelCall
-	// CreateLabelErr, if non-nil, is returned by every CreateLabel call.
-	CreateLabelErr error
-
-	// BranchPrefix is baked into AgentBranch's output. Zero value "" matches
-	// an unconfigured config.branchPrefix; set explicitly to exercise a real
-	// prefix (e.g. "agent/issue-").
-	BranchPrefix string
-
-	// ListIssuesErr, if non-nil, is returned by every ListIssues call.
-	ListIssuesErr error
-	// ListIssuesCalls records the state argument of every ListIssues
-	// invocation in order — lets a test assert call count directly instead
-	// of inferring it from side effects (#987).
-	ListIssuesCalls []DispatchState
-
-	// IssueCalls records the issue number argument of every Issue
-	// invocation in order — lets a test assert call count directly instead
-	// of inferring it from side effects (#1098).
-	IssueCalls []string
-	// IssueErr, if non-nil, is returned by every Issue call instead of the
-	// looked-up issue — a blanket override (ListIssuesErr's own pattern),
-	// letting a test simulate a body-fetch failure independently of
-	// ListOpenIssues/ListIssues, which read the same issues map but never
-	// consult this field (issue #1632).
-	IssueErr error
-
-	// DepsOfCalls records the issue number argument of every DepsOf
-	// invocation in order — mirrors IssueCalls, letting a test assert a
-	// dependency-graph build's exact call count (e.g. a whole-backlog
-	// NewReadiness sweep) instead of inferring it from side effects
-	// (issue #1632).
-	DepsOfCalls []string
-
-	// CloseIssueCalls records the issue number argument of every CloseIssue
-	// invocation in order.
-	CloseIssueCalls []string
-	// CloseIssueErr, if non-nil, is returned by every CloseIssue call.
-	CloseIssueErr error
-
-	// CloseMergedIssueCalls records the issue number argument of every
-	// CloseMergedIssue invocation in order — the optional MergeCloser
-	// surface's own call log (issue #1892), kept separate from
-	// CloseIssueCalls so a test can tell settle's post-merge backstop apart
-	// from reconcile's closed: axis write.
-	CloseMergedIssueCalls []string
-	// CloseMergedIssueErr, if non-nil, is returned by every CloseMergedIssue
-	// call.
-	CloseMergedIssueErr error
-
-	// FlagAbandonedCalls records the issue number argument of every
-	// FlagAbandoned invocation in order.
-	FlagAbandonedCalls []string
-	// FlagAbandonedErr, if non-nil, is returned by every FlagAbandoned call.
-	FlagAbandonedErr error
 }
 
 // NewFake returns an empty Fake client. labels configures the
@@ -251,13 +135,20 @@ func NewFake(labels ...DispatchLabels) *Fake {
 	if len(labels) > 0 {
 		l = labels[0]
 	}
+	c := &core{prStates: map[string]PRState{}}
 	return &Fake{
-		core:            &core{prStates: map[string]PRState{}},
-		labels:          l,
-		issues:          map[string]Issue{},
+		core: c,
+		IssueTrackerFake: &IssueTrackerFake{
+			core:   c,
+			labels: l,
+			issues: map[string]Issue{},
+		},
+		CodeForgeFake: &CodeForgeFake{
+			core:         c,
+			branchExists: map[string]bool{},
+		},
 		prs:             map[string]PR{},
 		branchPRs:       map[string]string{},
-		branchExists:    map[string]bool{},
 		mergeableStates: map[string]MergeableState{},
 		needsUpdate:     map[string]bool{},
 		checkQ:          map[string][]RollupState{},
@@ -267,13 +158,6 @@ func NewFake(labels ...DispatchLabels) *Fake {
 
 		failureDetail: map[string]string{},
 	}
-}
-
-// SetIssue upserts an issue into the fake store.
-func (f *Fake) SetIssue(iss Issue) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.issues[iss.Number] = iss
 }
 
 // SetPR registers a PR reachable by the given head branch name.
@@ -294,6 +178,11 @@ func (f *Fake) SetPRState(url string, state PRState) {
 	f.prStates[url] = state
 }
 
+// Probe is the composite's sole hand-written method: it disambiguates the
+// Probe collision between the embedded *IssueTrackerFake and *CodeForgeFake
+// (both define Probe at equal depth, an ambiguous selector without this
+// override) by resolving through Fake's own direct *core embed, the
+// shallowest path both capability slices' Probe implementations also read.
 func (f *Fake) Probe() (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -301,12 +190,6 @@ func (f *Fake) Probe() (string, error) {
 		return "", f.ProbeErr
 	}
 	return f.ProbeRepo, nil
-}
-
-// StateLabels implements LabeledTracker, returning the DispatchLabels the
-// Fake was constructed with.
-func (f *Fake) StateLabels() DispatchLabels {
-	return f.labels
 }
 
 var _ LandingRecorder = (*Fake)(nil)

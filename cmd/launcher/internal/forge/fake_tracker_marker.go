@@ -15,11 +15,11 @@ type PostIssueCall struct {
 
 // RecordLanding implements the optional LandingRecorder surface (ADR 0029),
 // recording each call for tests to assert against.
-func (f *Fake) RecordLanding(num, landing string) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.RecordLandingCalls = append(f.RecordLandingCalls, RecordLandingCall{num, landing})
-	return f.RecordLandingErr
+func (tf *IssueTrackerFake) RecordLanding(num, landing string) error {
+	tf.mu.Lock()
+	defer tf.mu.Unlock()
+	tf.RecordLandingCalls = append(tf.RecordLandingCalls, RecordLandingCall{num, landing})
+	return tf.RecordLandingErr
 }
 
 // postIssue backs the optional HostPostedIssueFiler surface (issue #2018),
@@ -41,56 +41,56 @@ func (f *Fake) postIssue(title, body string, labels []string) (string, error) {
 // CloseIssue implements the optional IssueCloser surface (ADR 0029), setting
 // the issue's State to IssueClosed and recording the call for tests to
 // assert against.
-func (f *Fake) CloseIssue(num string) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.CloseIssueCalls = append(f.CloseIssueCalls, num)
-	if f.CloseIssueErr != nil {
-		return f.CloseIssueErr
+func (tf *IssueTrackerFake) CloseIssue(num string) error {
+	tf.mu.Lock()
+	defer tf.mu.Unlock()
+	tf.CloseIssueCalls = append(tf.CloseIssueCalls, num)
+	if tf.CloseIssueErr != nil {
+		return tf.CloseIssueErr
 	}
-	iss, ok := f.issues[num]
+	iss, ok := tf.issues[num]
 	if !ok {
 		return fmt.Errorf("issue %s not found", num)
 	}
 	iss.State = IssueClosed
-	f.issues[num] = iss
+	tf.issues[num] = iss
 	return nil
 }
 
 // CloseMergedIssue implements the optional MergeCloser surface (issue
 // #1892), setting the issue's State to IssueClosed and recording the call
 // (separately from CloseIssueCalls) for tests to assert against.
-func (f *Fake) CloseMergedIssue(num string) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.CloseMergedIssueCalls = append(f.CloseMergedIssueCalls, num)
-	if f.CloseMergedIssueErr != nil {
-		return f.CloseMergedIssueErr
+func (tf *IssueTrackerFake) CloseMergedIssue(num string) error {
+	tf.mu.Lock()
+	defer tf.mu.Unlock()
+	tf.CloseMergedIssueCalls = append(tf.CloseMergedIssueCalls, num)
+	if tf.CloseMergedIssueErr != nil {
+		return tf.CloseMergedIssueErr
 	}
-	iss, ok := f.issues[num]
+	iss, ok := tf.issues[num]
 	if !ok {
 		return fmt.Errorf("issue %s not found", num)
 	}
 	iss.State = IssueClosed
-	f.issues[num] = iss
+	tf.issues[num] = iss
 	return nil
 }
 
 // FlagAbandoned implements the optional AbandonedFlagger surface (ADR 0029),
 // setting the issue's Abandoned field and recording the call for tests to
 // assert against.
-func (f *Fake) FlagAbandoned(num string) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.FlagAbandonedCalls = append(f.FlagAbandonedCalls, num)
-	if f.FlagAbandonedErr != nil {
-		return f.FlagAbandonedErr
+func (tf *IssueTrackerFake) FlagAbandoned(num string) error {
+	tf.mu.Lock()
+	defer tf.mu.Unlock()
+	tf.FlagAbandonedCalls = append(tf.FlagAbandonedCalls, num)
+	if tf.FlagAbandonedErr != nil {
+		return tf.FlagAbandonedErr
 	}
-	iss, ok := f.issues[num]
+	iss, ok := tf.issues[num]
 	if !ok {
 		return fmt.Errorf("issue %s not found", num)
 	}
 	iss.Abandoned = true
-	f.issues[num] = iss
+	tf.issues[num] = iss
 	return nil
 }
