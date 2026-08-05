@@ -418,6 +418,7 @@ func (s *Settle) mergeImmediate(num string, gen uint64, pr string, d dispatch.Di
 	rebaseAttempts := 0
 	pushRetries := 0
 	checksBlockedAttempts := 0
+	mergeTransientAttempts := 0
 	skipRebase := false
 	if s.terminated(num, gen) {
 		return errAbandoned
@@ -480,6 +481,16 @@ func (s *Settle) mergeImmediate(num string, gen uint64, pr string, d dispatch.Di
 			fmt.Printf("    #%s  landing=%s  status=merge-blocked-by-checks  attempt=%d/%d\n",
 				num, pr, checksBlockedAttempts, s.cfg.MaxRebaseAttempts)
 			time.Sleep(time.Duration(s.cfg.MergePollInterval) * time.Second)
+			continue
+		}
+		if errors.Is(err, forge.ErrMergeTransient) {
+			if mergeTransientAttempts >= s.cfg.MaxRebaseAttempts {
+				return err
+			}
+			mergeTransientAttempts++
+			fmt.Printf("    #%s  landing=%s  status=merge-transient-retry  attempt=%d/%d  !! %v\n",
+				num, pr, mergeTransientAttempts, s.cfg.MaxRebaseAttempts, err)
+			s.rebasePushBackoff().Do(mergeTransientAttempts)
 			continue
 		}
 		if !errors.Is(err, forge.ErrMergeConflict) {
