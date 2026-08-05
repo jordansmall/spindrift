@@ -292,10 +292,10 @@ func TestSettle_GithubReadOnly_AdoptedPRWithRedCIDoesNotMerge(t *testing.T) {
 }
 
 // TestSettle_GithubReadOnly_NonSyntheticBlockedDoesNotAdopt covers a driver
-// that genuinely blocked (Outcome.Synthetic=false) — even with a self-report
-// that says success, adoption must not fire: a non-synthetic status=blocked
-// is the driver's own authoritative outcome line, not the ADR 0036 backstop
-// this override exists to second-guess.
+// that genuinely blocked (Resolved.Provenance=ProvenanceGenuine) — even
+// with a self-report that says success, adoption must not fire: a
+// non-synthetic status=blocked is the driver's own authoritative outcome
+// line, not the ADR 0036 backstop this override exists to second-guess.
 func TestSettle_GithubReadOnly_NonSyntheticBlockedDoesNotAdopt(t *testing.T) {
 	const issNum = "2224"
 	const prURL = "https://github.com/owner/repo/pull/2224"
@@ -706,8 +706,8 @@ func TestSettle_GithubReadOnly_NoOutcomeBundleMissingFallsBackToBlocked(t *testi
 // success self-report on record, SettleRelayedBranch adopts the relayed
 // branch into a real PR and drives it through the normal merge gate, exactly
 // like tryAdoptRelayedBranch's own override — but it needs neither
-// Outcome.Synthetic nor a read-only Code Forge, since recover is
-// operator-driven and runs read-write.
+// Resolved.Provenance == outcome.ProvenanceSynthetic nor a read-only Code
+// Forge, since recover is operator-driven and runs read-write.
 func TestSettle_SettleRelayedBranch_AdoptsSuccessSelfReport(t *testing.T) {
 	const issNum = "2225"
 	const prURL = "https://github.com/owner/repo/pull/2225"

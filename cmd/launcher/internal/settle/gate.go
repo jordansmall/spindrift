@@ -93,11 +93,11 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, gen uint64, result di
 		// CODE_FORGE=local push-only counterpart to the adopt call above
 		// (ADR 0039): local has no PR-shaped adopt path at all, so
 		// tryAdoptRelayedBranch's own s.pr != nil gate always returns false
-		// here. The Outcome.Synthetic guard is repeated explicitly here
-		// (rather than left to tryMarkRecoverable) because a genuine
-		// (non-synthetic) status=blocked is the driver's own authoritative
-		// outcome line, not the ADR 0036 backstop this override exists to
-		// second-guess — it must still park Failed below.
+		// here. The Resolved.Provenance == ProvenanceSynthetic guard is
+		// repeated explicitly here (rather than left to tryMarkRecoverable)
+		// because a genuine (non-synthetic) status=blocked is the driver's
+		// own authoritative outcome line, not the ADR 0036 backstop this
+		// override exists to second-guess — it must still park Failed below.
 		if result.Resolved.Provenance == outcome.ProvenanceSynthetic && s.tryMarkRecoverable(num, result) {
 			return
 		}
