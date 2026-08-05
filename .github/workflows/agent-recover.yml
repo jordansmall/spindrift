@@ -125,5 +125,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: agent-recover-logs-${{ github.event.issue.number }}
-          path: logs/
+          path: .spindrift/logs/
           if-no-files-found: ignore
