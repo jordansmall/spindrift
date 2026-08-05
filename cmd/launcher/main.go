@@ -1476,6 +1476,26 @@ func cmdConsole(lc *launchContext, stdin io.Reader, stdout io.Writer) int {
 	return 0
 }
 
+// writeGithubOutput appends a "key=value\n" line to the file named by the
+// GITHUB_OUTPUT environment variable, the mechanism GitHub Actions uses for
+// step outputs. It is a no-op returning nil when GITHUB_OUTPUT is unset or
+// empty (local runs, tests). value is sanitized by replacing any newline
+// with a space so it can't corrupt the single-line key=value format.
+func writeGithubOutput(key, value string) error {
+	path := getenvArtifact("GITHUB_OUTPUT", "")
+	if path == "" {
+		return nil
+	}
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	value = strings.ReplaceAll(value, "\n", " ")
+	_, err = fmt.Fprintf(f, "%s=%s\n", key, value)
+	return err
+}
+
 // cmdRecover is the `recover` subcommand: adopt an already-discovered open
 // non-draft PR with no outcome line and drive it through the merge gate. lc
 // is wired by bootstrap in production; tests construct it directly with
@@ -1483,6 +1503,9 @@ func cmdConsole(lc *launchContext, stdin io.Reader, stdout io.Writer) int {
 func cmdRecover(lc *launchContext, issueNum string) int {
 	defer lc.cleanup()
 	if err := recoverByNumber(lc.config, lc.issueTracker, lc.codeForge, lc.pwd, lc.factory, lc.settle, issueNum); err != nil {
+		if writeErr := writeGithubOutput("recover-reason", err.Error()); writeErr != nil {
+			fmt.Fprintf(os.Stderr, "warning: writing recover-reason output: %v\n", writeErr)
+		}
 		fmt.Fprintf(os.Stderr, "%s\n", err)
 		return 1
 	}
