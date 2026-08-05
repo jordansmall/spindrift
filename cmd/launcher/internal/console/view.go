@@ -982,7 +982,7 @@ func renderHeader(m Model) string {
 		roleStyle(RoleHeld).Render(fmt.Sprintf("held %d", held)),
 		roleStyle(RoleSettled).Render(fmt.Sprintf("settled %d", settled)),
 		roleStyle(RoleFailed).Render(fmt.Sprintf("failed %d", failed)),
-		roleStyle(RoleHeld).Render(fmt.Sprintf("recoverable %d", m.RecoverableCount)))
+		roleStyle(RoleRecoverable).Render(fmt.Sprintf("recoverable %d", m.RecoverableCount)))
 	if m.RebuildStatus.Stale {
 		b.WriteString(roleStyle(RoleHeld).Render(fmt.Sprintf("%s image stale: %s — new launches held; press [b] to rebuild", glyphWarning, m.RebuildStatus.Message)))
 		b.WriteString("\n")
