@@ -124,3 +124,66 @@ too — each behind the smallest interface the entrypoint can call.
 - The rule is now citable: a future in-box hand-off feature that needs to
   branch has a named owner (`driver-exec` verb) instead of a default landing
   spot (the entrypoint).
+
+## Amendment (issue #2348): the verb rule generalizes past the host/box hand-off to in-box decision trees over launcher-delivered plumbing
+
+The Decision above scoped the rule to one seam: the entrypoint's own branching
+between hand-off strategies — push vs. relay vs. note — with `bundle-out` and
+`outcome-backstop` as its two named instances. That framing undersold the
+rule's actual shape. Both verbs share a pattern that has nothing intrinsically
+to do with the host/box hand-off: each owns an in-box decision tree computed
+over plumbing the launcher delivers into the Box (`bundle-out`'s Code Forge
+and branch state, `outcome-backstop`'s Dispatch kind, Code Forge, write-enable
+signal, and commit count), rather than leaving that decision tree to bash or
+to ad hoc logic wherever it happens to land. The hand-off seam was where the
+rule was first named, not the boundary of what it governs.
+
+`assemble-prompt` is the third instance of the rule, and it sits at a
+different seam entirely: entrypoint.sh's prompt/`--agents` assembly, not the
+host/box hand-off. As a `driver-exec assemble-prompt` verb, it owns gate
+computation and assembly over the nix-supplied fragment registry — deciding,
+for a given run's inputs, which fragment rows render and how they compose
+into the final prompt and `--agents` JSON — the same shape of in-box decision
+tree `bundle-out` and `outcome-backstop` already established, now applied to
+prompt assembly instead of hand-off branching. The `driver-exec` package doc
+(`cmd/launcher/driver-exec/main.go`) already states this charter in exactly
+those terms: "the fragment registry stays nix-supplied; the verb owns gate
+computation and assembly over it." This ADR does not design
+`assemble-prompt`'s own internal implementation — gate representation, fragment
+lookup, JSON rendering, and so on are that verb's own concern — it only
+records that the verb is governed by the rule this ADR names, generalized past
+the seam where the rule was first drawn.
+
+A sibling in-box binary — a second standalone in-box binary just for prompt
+assembly, separate from `driver-exec` — was considered for `assemble-prompt`
+and rejected for the same reason this ADR's Considered Options section already
+gives for the outcome-backstop's sibling-binary option: "A new standalone
+host-side or in-box binary just for the backstop. Rejected as needless
+surface: `driver-exec` already owns process mechanics at this exact seam and
+already carries the `bundle-out` precedent, so a verb reuses its dispatch, its
+build closure, and its test harness rather than minting a third binary the
+image must bake." Substituting `assemble-prompt` for the backstop, the
+argument carries unchanged: `driver-exec` already owns process mechanics at
+the point where prompt assembly happens (it is, after all, what runs the
+Driver against the assembled prompt), and it already carries two verb
+precedents, so a third verb reuses the same dispatch, build closure, and test
+harness rather than the image baking a fourth binary to do the same job.
+
+This is the same argument ADR 0035 made one seam over: ADR 0035 moved the
+box's review loop out of prose in `issue-prompt.md` and into a Go binary
+(`cmd/launcher/orchestrator`) precisely because a state machine, caps, and
+log-scanning are the "graph and poll code" tier ADR 0007 found bash — and
+prose — unfit for. This ADR's own Decision section named that same move for
+the host/box hand-off. The amendment recognizes both as the same principle,
+now stated at its true level of generality: an in-box decision tree over
+launcher-delivered plumbing gets a named Go owner — a `driver-exec` verb, or,
+where ADR 0035 already applies, the orchestrator itself — rather than living
+as ad hoc logic wherever in the entrypoint or its prose it happens to land.
+
+This is an amendment to the rule's scope, not a reversal of the original
+decision. The `bundle-out` and `outcome-backstop` reasoning, and the Decision,
+Considered Options, and Consequences sections above, stand as originally
+written for the host/box hand-off seam; only the boundary of what seams the
+rule governs is broadened to cover `assemble-prompt` and, by the same
+reasoning, whatever in-box decision tree over launcher-delivered plumbing
+comes after it.
