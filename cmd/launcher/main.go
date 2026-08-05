@@ -1203,7 +1203,7 @@ func logDiscoveryPoll(c config, issues []issue, first bool, seen map[string]bool
 // be fetched, the PR is a draft, or neither an open PR nor an adoptable
 // relayed-branch success exists (labels untouched in that last case); the
 // caller should treat those as non-success exits.
-func recoverByNumber(c config, it forge.IssueTracker, cf forge.CodeForge, pwd string, f *dispatch.Factory, s settle.Settler, issueNum string) error {
+func recoverByNumber(c config, it forge.IssueTracker, cf forge.CodeForge, pwd string, f *dispatch.Factory, s settle.WorkSettler, issueNum string) error {
 	fi, err := it.Issue(issueNum)
 	if err != nil {
 		return fmt.Errorf("issue %s: %w", issueNum, err)
@@ -1476,7 +1476,7 @@ func cmdConsole(lc *launchContext, stdin io.Reader, stdout io.Writer) int {
 		Fresh:           fresh,
 		RebuildFn:       rebuild,
 		RecoverFn: func(issueNum string) error {
-			return recoverByNumber(lc.config, lc.issueTracker, lc.codeForge, lc.pwd, lc.factory, lc.settle, issueNum)
+			return recoverByNumber(lc.config, lc.issueTracker, lc.codeForge, lc.pwd, lc.factory, lc.settle.(settle.WorkSettler), issueNum)
 		},
 	}
 	if err := console.Run(lc.issueTracker, lc.pwd, stdin, stdout, launch); err != nil {
@@ -1512,7 +1512,7 @@ func writeGithubOutput(key, value string) error {
 // fakes (and a spy cleanup) to exercise the cleanup-on-every-exit contract.
 func cmdRecover(lc *launchContext, issueNum string) int {
 	defer lc.cleanup()
-	if err := recoverByNumber(lc.config, lc.issueTracker, lc.codeForge, lc.pwd, lc.factory, lc.settle, issueNum); err != nil {
+	if err := recoverByNumber(lc.config, lc.issueTracker, lc.codeForge, lc.pwd, lc.factory, lc.settle.(settle.WorkSettler), issueNum); err != nil {
 		if writeErr := writeGithubOutput("recover-reason", err.Error()); writeErr != nil {
 			fmt.Fprintf(os.Stderr, "warning: writing recover-reason output: %v\n", writeErr)
 		}
