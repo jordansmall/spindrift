@@ -34,6 +34,28 @@ func TestWriteGithubOutput_AppendsKeyValueLine(t *testing.T) {
 	}
 }
 
+// TestWriteGithubOutput_SanitizesNewlines asserts writeGithubOutput replaces
+// embedded newlines in value with spaces so a multi-line error text can't
+// break the single-line key=value GITHUB_OUTPUT format.
+func TestWriteGithubOutput_SanitizesNewlines(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "output")
+	t.Setenv("GITHUB_OUTPUT", path)
+
+	if err := writeGithubOutput("recover-reason", "issue 42: no open PR\nEXTRA=injected"); err != nil {
+		t.Fatalf("writeGithubOutput() error = %v, want nil", err)
+	}
+
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("os.ReadFile(%q) error = %v", path, err)
+	}
+	want := "recover-reason=issue 42: no open PR EXTRA=injected\n"
+	if string(got) != want {
+		t.Errorf("file contents = %q, want %q", got, want)
+	}
+}
+
 // TestWriteGithubOutput_NoopWhenUnset asserts writeGithubOutput is a no-op
 // returning nil when GITHUB_OUTPUT is unset/empty.
 func TestWriteGithubOutput_NoopWhenUnset(t *testing.T) {
