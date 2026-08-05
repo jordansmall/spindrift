@@ -7,12 +7,6 @@ type RecordLandingCall struct {
 	Num, Landing string
 }
 
-// PostIssueCall records a single PostIssue invocation.
-type PostIssueCall struct {
-	Title, Body string
-	Labels      []string
-}
-
 // RecordLanding implements the optional LandingRecorder surface (ADR 0029),
 // recording each call for tests to assert against.
 func (tf *IssueTrackerFake) RecordLanding(num, landing string) error {
@@ -20,22 +14,6 @@ func (tf *IssueTrackerFake) RecordLanding(num, landing string) error {
 	defer tf.mu.Unlock()
 	tf.RecordLandingCalls = append(tf.RecordLandingCalls, RecordLandingCall{num, landing})
 	return tf.RecordLandingErr
-}
-
-// postIssue backs the optional HostPostedIssueFiler surface (issue #2018),
-// recording each call for tests to assert against. Deliberately unexported,
-// the same reasoning as createDraftPR: only issueFilerTracker's own exported
-// PostIssue (reachable exclusively through AsIssueFiler()) calls it, so a
-// bare *Fake used as an IssueTracker in every other test never silently
-// starts satisfying forge.HostPostedIssueFiler.
-func (f *Fake) postIssue(title, body string, labels []string) (string, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.PostIssueCalls = append(f.PostIssueCalls, PostIssueCall{Title: title, Body: body, Labels: labels})
-	if f.PostIssueErr != nil {
-		return "", f.PostIssueErr
-	}
-	return f.PostIssueURL, nil
 }
 
 // CloseIssue implements the optional IssueCloser surface (ADR 0029), setting

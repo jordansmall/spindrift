@@ -3,6 +3,17 @@ package forge
 // Fake is an in-memory Client for unit tests. All methods are safe for
 // concurrent use. CheckState pops from a scripted RollupState queue so polling
 // tests need no real sleeps.
+//
+// Fake is a composite of five structs: *core plus the four
+// capability slices embedded below (*IssueTrackerFake, *CodeForgeFake,
+// *PRForgeFake, *HostMediationFake). No two of those five may declare a
+// field or method with the same name, except where Probe's hand-written
+// override below resolves the one existing collision (IssueTrackerFake and
+// CodeForgeFake both define Probe at equal depth). Any other collision
+// either fails to compile as an ambiguous selector, or — if the names happen
+// to sit at different embedding depths — silently shadows the promoted
+// field instead, the way a prior slice's Mark/EnqueueAutoMerge fields
+// briefly did before being hoisted into core.
 type Fake struct {
 	// *core is the shared substrate promoted through to Fake — see core's
 	// doc comment for the admission rule.
@@ -24,55 +35,13 @@ type Fake struct {
 	// — see IssueTrackerFake's comment.
 	*PRForgeFake
 
-	// RelayBundleErr, if non-nil, is returned by every RelayBundle call —
-	// scripts CODE_FORGE=local's missing/malformed-bundle failure mode (ADR
-	// 0033). Only reachable through AsLocal(), the only wrapper implementing
-	// forge.BundleRelay.
-	RelayBundleErr error
-	// RelayBundleCalls records all RelayBundle invocations in order.
-	RelayBundleCalls []RelayBundleCall
-
-	// CreateDraftPRURL is returned by every CreateDraftPR call on success —
-	// scripts the URL of the draft PR the github read-only adapter opens
-	// host-side (issue #1919). Only reachable through AsGithubReadOnly().
-	CreateDraftPRURL string
-	// CreateDraftPRErr, if non-nil, is returned by every CreateDraftPR call.
-	CreateDraftPRErr error
-	// CreateDraftPRCalls records all CreateDraftPR invocations in order.
-	CreateDraftPRCalls []CreateDraftPRCall
-
-	// PostIssueURL is returned by every PostIssue call on success — scripts
-	// the URL of the issue the Launcher files host-side (issue #2018). Only
-	// reachable through AsIssueFiler().
-	PostIssueURL string
-	// PostIssueErr, if non-nil, is returned by every PostIssue call.
-	PostIssueErr error
-	// PostIssueCalls records all PostIssue invocations in order.
-	PostIssueCalls []PostIssueCall
-	// LandingRefValue is returned by LandingRef on success.
-	LandingRefValue string
-	// LandingRefErr, if non-nil, is returned by every LandingRef call.
-	LandingRefErr error
-	// LandingRefCallCount counts every LandingRef invocation.
-	LandingRefCallCount int
-
-	// landingContainedResults scripts LandingContained's result per
-	// (landing string, parent) pair, defaulting to contained=false, nil when
-	// unscripted — the same "stays open" default the three predecessors this
-	// issue collapsed used. Only reachable through AsLocal(), the only
-	// wrapper implementing forge.LandingContainmentQuery.
-	landingContainedResults map[landingParentKey]landingContainedResult
-	// LandingContainedCalls records every LandingContained invocation in
-	// order.
-	LandingContainedCalls []LandingContainedCall
-
-	// integrationTipResults scripts IntegrationTip's success result per
-	// parent. Only reachable through AsLocal().
-	integrationTipResults map[string]string
-	// IntegrationTipErr, if non-nil, is returned by every IntegrationTip call.
-	IntegrationTipErr error
-	// IntegrationTipCalls records every IntegrationTip invocation in order.
-	IntegrationTipCalls []string
+	// *HostMediationFake is the host-mediation-capability slice — the
+	// relay/draft-PR/post-issue/landing-ref/landing-containment/
+	// integration-tip surfaces only reachable through the AsLocal(),
+	// AsGithubReadOnly(), and AsIssueFiler() wrappers below — embedded
+	// alongside *core, *IssueTrackerFake, *CodeForgeFake, and *PRForgeFake
+	// above for the same reason — see IssueTrackerFake's comment.
+	*HostMediationFake
 }
 
 // NewFake returns an empty Fake client. labels configures the
@@ -108,6 +77,7 @@ func NewFake(labels ...DispatchLabels) *Fake {
 			headSHAQ:        map[string][]string{},
 			failureDetail:   map[string]string{},
 		},
+		HostMediationFake: &HostMediationFake{core: c},
 	}
 }
 

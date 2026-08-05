@@ -1,5 +1,78 @@
 package forge
 
+// HostMediationFake is the host-mediation-capability slice of Fake, holding
+// every field the optional BundleRelay, DraftPRCreator, HostPostedIssueFiler,
+// LandingRef, LandingRepair, and LandingContainmentQuery surfaces read or
+// write. It embeds *core — see core's doc comment for the admission rule —
+// so its methods can reach mu/etc. directly.
+//
+// Every backing method below (relayBundle, createDraftPR, postIssue,
+// landingRef, landingContained, integrationTip) is deliberately unexported:
+// these must NOT be methods Go's type-assertion machinery can see directly
+// on *Fake, or a bare *Fake used as a CodeForge/IssueTracker elsewhere (the
+// majority of settle/reconcile tests) would silently start satisfying the
+// gated interfaces (BundleRelay, DraftPRCreator, HostPostedIssueFiler,
+// LandingRef, LandingRepair, LandingContainmentQuery) too. Only the wrapper
+// types in fake.go — localForge, githubReadOnlyForge, issueFilerTracker,
+// reachable exclusively through AsLocal(), AsGithubReadOnly(), and
+// AsIssueFiler() — call these methods by name, resolving them through
+// promotion from Fake's embedded *HostMediationFake.
+type HostMediationFake struct {
+	// *core is the shared substrate promoted through to HostMediationFake —
+	// see core's doc comment for the admission rule.
+	*core
+
+	// RelayBundleErr, if non-nil, is returned by every RelayBundle call —
+	// scripts CODE_FORGE=local's missing/malformed-bundle failure mode (ADR
+	// 0033). Only reachable through AsLocal(), the only wrapper implementing
+	// forge.BundleRelay.
+	RelayBundleErr error
+	// RelayBundleCalls records all RelayBundle invocations in order.
+	RelayBundleCalls []RelayBundleCall
+
+	// CreateDraftPRURL is returned by every CreateDraftPR call on success —
+	// scripts the URL of the draft PR the github read-only adapter opens
+	// host-side (issue #1919). Only reachable through AsGithubReadOnly().
+	CreateDraftPRURL string
+	// CreateDraftPRErr, if non-nil, is returned by every CreateDraftPR call.
+	CreateDraftPRErr error
+	// CreateDraftPRCalls records all CreateDraftPR invocations in order.
+	CreateDraftPRCalls []CreateDraftPRCall
+
+	// PostIssueURL is returned by every PostIssue call on success — scripts
+	// the URL of the issue the Launcher files host-side (issue #2018). Only
+	// reachable through AsIssueFiler().
+	PostIssueURL string
+	// PostIssueErr, if non-nil, is returned by every PostIssue call.
+	PostIssueErr error
+	// PostIssueCalls records all PostIssue invocations in order.
+	PostIssueCalls []PostIssueCall
+	// LandingRefValue is returned by LandingRef on success.
+	LandingRefValue string
+	// LandingRefErr, if non-nil, is returned by every LandingRef call.
+	LandingRefErr error
+	// LandingRefCallCount counts every LandingRef invocation.
+	LandingRefCallCount int
+
+	// landingContainedResults scripts LandingContained's result per
+	// (landing string, parent) pair, defaulting to contained=false, nil when
+	// unscripted — the same "stays open" default the three predecessors this
+	// issue collapsed used. Only reachable through AsLocal(), the only
+	// wrapper implementing forge.LandingContainmentQuery.
+	landingContainedResults map[landingParentKey]landingContainedResult
+	// LandingContainedCalls records every LandingContained invocation in
+	// order.
+	LandingContainedCalls []LandingContainedCall
+
+	// integrationTipResults scripts IntegrationTip's success result per
+	// parent. Only reachable through AsLocal().
+	integrationTipResults map[string]string
+	// IntegrationTipErr, if non-nil, is returned by every IntegrationTip call.
+	IntegrationTipErr error
+	// IntegrationTipCalls records every IntegrationTip invocation in order.
+	IntegrationTipCalls []string
+}
+
 // RelayBundleCall records a single RelayBundle invocation.
 type RelayBundleCall struct {
 	OutboxDir, Ref string
@@ -10,6 +83,12 @@ type CreateDraftPRCall struct {
 	Title, Body, Base, Head string
 }
 
+// PostIssueCall records a single PostIssue invocation.
+type PostIssueCall struct {
+	Title, Body string
+	Labels      []string
+}
+
 // relayBundle backs the optional BundleRelay surface (ADR 0033), recording
 // each call for tests to assert against. Deliberately unexported: unlike
 // Merge/Rebase/RecordLanding, this must NOT be a method Go's type-assertion
@@ -18,11 +97,11 @@ type CreateDraftPRCall struct {
 // would silently start satisfying forge.BundleRelay too. Only localForge's
 // own exported RelayBundle (reachable exclusively through AsLocal()) calls
 // this.
-func (f *Fake) relayBundle(outboxDir, ref string) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.RelayBundleCalls = append(f.RelayBundleCalls, RelayBundleCall{OutboxDir: outboxDir, Ref: ref})
-	return f.RelayBundleErr
+func (hm *HostMediationFake) relayBundle(outboxDir, ref string) error {
+	hm.mu.Lock()
+	defer hm.mu.Unlock()
+	hm.RelayBundleCalls = append(hm.RelayBundleCalls, RelayBundleCall{OutboxDir: outboxDir, Ref: ref})
+	return hm.RelayBundleErr
 }
 
 // createDraftPR backs the optional DraftPRCreator surface (issue #1919),
@@ -31,26 +110,26 @@ func (f *Fake) relayBundle(outboxDir, ref string) error {
 // CreateDraftPR (reachable exclusively through AsGithubReadOnly()) calls it,
 // so a bare *Fake used as a github-shaped CodeForge in every other settle
 // test never silently starts satisfying forge.DraftPRCreator.
-func (f *Fake) createDraftPR(title, body, base, head string) (string, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.CreateDraftPRCalls = append(f.CreateDraftPRCalls, CreateDraftPRCall{Title: title, Body: body, Base: base, Head: head})
-	if f.CreateDraftPRErr != nil {
-		return "", f.CreateDraftPRErr
+func (hm *HostMediationFake) createDraftPR(title, body, base, head string) (string, error) {
+	hm.mu.Lock()
+	defer hm.mu.Unlock()
+	hm.CreateDraftPRCalls = append(hm.CreateDraftPRCalls, CreateDraftPRCall{Title: title, Body: body, Base: base, Head: head})
+	if hm.CreateDraftPRErr != nil {
+		return "", hm.CreateDraftPRErr
 	}
-	return f.CreateDraftPRURL, nil
+	return hm.CreateDraftPRURL, nil
 }
 
 // landingRef backs the optional LandingRef surface (ADR 0033), the same
 // AsLocal()-only restriction as relayBundle above, for the same reason.
-func (f *Fake) landingRef() (string, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.LandingRefCallCount++
-	if f.LandingRefErr != nil {
-		return "", f.LandingRefErr
+func (hm *HostMediationFake) landingRef() (string, error) {
+	hm.mu.Lock()
+	defer hm.mu.Unlock()
+	hm.LandingRefCallCount++
+	if hm.LandingRefErr != nil {
+		return "", hm.LandingRefErr
 	}
-	return f.LandingRefValue, nil
+	return hm.LandingRefValue, nil
 }
 
 // landingParentKey keys landingContainedResults on the (landing string,
@@ -74,13 +153,13 @@ type LandingContainedCall struct {
 // genuine error distinct from the normal "not contained" (malformed landing,
 // conflicting/unlanded merge) outcome, which callers script as
 // contained=false, err=nil instead.
-func (f *Fake) SetLandingContained(landing, parent string, contained bool, err error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if f.landingContainedResults == nil {
-		f.landingContainedResults = map[landingParentKey]landingContainedResult{}
+func (hm *HostMediationFake) SetLandingContained(landing, parent string, contained bool, err error) {
+	hm.mu.Lock()
+	defer hm.mu.Unlock()
+	if hm.landingContainedResults == nil {
+		hm.landingContainedResults = map[landingParentKey]landingContainedResult{}
 	}
-	f.landingContainedResults[landingParentKey{landing, parent}] = landingContainedResult{contained: contained, err: err}
+	hm.landingContainedResults[landingParentKey{landing, parent}] = landingContainedResult{contained: contained, err: err}
 }
 
 // landingContained backs the optional LandingContainmentQuery surface (ADR
@@ -88,12 +167,12 @@ func (f *Fake) SetLandingContained(landing, parent string, contained bool, err e
 // AsLocal()-only restriction as relayBundle above. An unscripted
 // (landing.String(), scope.Parent()) pair defaults to contained=false, nil —
 // the same posture as a malformed or not-yet-merged landing in production.
-func (f *Fake) landingContained(landing Landing, scope SeedScope) (bool, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
+func (hm *HostMediationFake) landingContained(landing Landing, scope SeedScope) (bool, error) {
+	hm.mu.Lock()
+	defer hm.mu.Unlock()
 	key := landingParentKey{landing.String(), scope.Parent()}
-	f.LandingContainedCalls = append(f.LandingContainedCalls, LandingContainedCall{Landing: key.landing, Parent: key.parent})
-	res := f.landingContainedResults[key]
+	hm.LandingContainedCalls = append(hm.LandingContainedCalls, LandingContainedCall{Landing: key.landing, Parent: key.parent})
+	res := hm.landingContainedResults[key]
 	return res.contained, res.err
 }
 
@@ -101,24 +180,40 @@ func (f *Fake) landingContained(landing Landing, scope SeedScope) (bool, error) 
 // resolved landing-ready "<branch>@<sha>" reference IntegrationTipErr's
 // precedence overrides for every call, mirroring LandingRefErr over
 // LandingRefValue.
-func (f *Fake) SetIntegrationTip(parent, ref string) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if f.integrationTipResults == nil {
-		f.integrationTipResults = map[string]string{}
+func (hm *HostMediationFake) SetIntegrationTip(parent, ref string) {
+	hm.mu.Lock()
+	defer hm.mu.Unlock()
+	if hm.integrationTipResults == nil {
+		hm.integrationTipResults = map[string]string{}
 	}
-	f.integrationTipResults[parent] = ref
+	hm.integrationTipResults[parent] = ref
 }
 
 // integrationTip backs the optional LandingRepair surface (ADR 0029, ADR
 // 0033, issue #1809), the same AsLocal()-only restriction as relayBundle
 // above.
-func (f *Fake) integrationTip(parent string) (string, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.IntegrationTipCalls = append(f.IntegrationTipCalls, parent)
-	if f.IntegrationTipErr != nil {
-		return "", f.IntegrationTipErr
+func (hm *HostMediationFake) integrationTip(parent string) (string, error) {
+	hm.mu.Lock()
+	defer hm.mu.Unlock()
+	hm.IntegrationTipCalls = append(hm.IntegrationTipCalls, parent)
+	if hm.IntegrationTipErr != nil {
+		return "", hm.IntegrationTipErr
 	}
-	return f.integrationTipResults[parent], nil
+	return hm.integrationTipResults[parent], nil
+}
+
+// postIssue backs the optional HostPostedIssueFiler surface (issue #2018),
+// recording each call for tests to assert against. Deliberately unexported,
+// the same reasoning as createDraftPR: only issueFilerTracker's own exported
+// PostIssue (reachable exclusively through AsIssueFiler()) calls it, so a
+// bare *Fake used as an IssueTracker in every other test never silently
+// starts satisfying forge.HostPostedIssueFiler.
+func (hm *HostMediationFake) postIssue(title, body string, labels []string) (string, error) {
+	hm.mu.Lock()
+	defer hm.mu.Unlock()
+	hm.PostIssueCalls = append(hm.PostIssueCalls, PostIssueCall{Title: title, Body: body, Labels: labels})
+	if hm.PostIssueErr != nil {
+		return "", hm.PostIssueErr
+	}
+	return hm.PostIssueURL, nil
 }
