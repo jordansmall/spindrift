@@ -2778,7 +2778,7 @@ func TestDoctor_AllLabelsPresent_PrintsSuccess(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	out := buf.String()
-	if !strings.Contains(out, "ok: all triage, research, and priority labels present") {
+	if !strings.Contains(out, "ok: all triage, research, priority, and ambiguous-spec labels present") {
 		t.Errorf("want success confirmation, got:\n%s", out)
 	}
 }
@@ -2911,7 +2911,7 @@ func TestDoctor_TTY_Confirm(t *testing.T) {
 		}
 	}
 	out := buf.String()
-	if !strings.Contains(out, "ok: all triage, research, and priority labels present") {
+	if !strings.Contains(out, "ok: all triage, research, priority, and ambiguous-spec labels present") {
 		t.Errorf("want success message after creation, got:\n%s", out)
 	}
 }
@@ -2990,7 +2990,7 @@ func TestDoctor_TTY_Confirm_ResearchStillMissing_Advisory(t *testing.T) {
 			t.Errorf("want advisory line to name missing label %q, got:\n%s", name, advisoryLine)
 		}
 	}
-	if strings.Contains(out, "ok: all triage, research, and priority labels present") {
+	if strings.Contains(out, "ok: all triage, research, priority, and ambiguous-spec labels present") {
 		t.Errorf("must not print success message when research labels are still missing, got:\n%s", out)
 	}
 }
@@ -3096,7 +3096,7 @@ func TestDoctor_TTY_Confirm_PriorityStillMissing_Advisory(t *testing.T) {
 			t.Errorf("want advisory line to name missing label %q, got:\n%s", name, advisoryLine)
 		}
 	}
-	if strings.Contains(out, "ok: all triage, research, and priority labels present") {
+	if strings.Contains(out, "ok: all triage, research, priority, and ambiguous-spec labels present") {
 		t.Errorf("must not print success message when priority labels are still missing, got:\n%s", out)
 	}
 }
@@ -3205,7 +3205,7 @@ func TestDoctor_TTY_Confirm_AmbiguousStillMissing_Advisory(t *testing.T) {
 			t.Errorf("want advisory line to name missing label %q, got:\n%s", name, advisoryLine)
 		}
 	}
-	if strings.Contains(out, "ok: all triage, research, and priority labels present") {
+	if strings.Contains(out, "ok: all triage, research, priority, and ambiguous-spec labels present") {
 		t.Errorf("must not print success message when ambiguous-spec label is still missing, got:\n%s", out)
 	}
 }
