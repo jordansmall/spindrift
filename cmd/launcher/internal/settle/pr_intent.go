@@ -153,13 +153,14 @@ func (s *Settle) blockHandoff(num, branch string, err error) (string, bool) {
 
 // closingKeywordPattern matches GitHub's recognized closing keywords
 // (close/closes/closed, fix/fixes/fixed, resolve/resolves/resolved),
-// case-insensitively, followed by whitespace and a "#<digits>" issue
-// reference, capturing the digits. Compiled once at package scope; the
-// digits capture is compared against the specific num a call cares about
-// rather than interpolated into the pattern, so e.g. "#1919" never matches
-// as a reference to "191" the way naive substring interpolation could, and
-// "#19195" never matches as a reference to "1919".
-var closingKeywordPattern = regexp.MustCompile(`(?i)\b(?:close|closes|closed|fix|fixes|fixed|resolve|resolves|resolved)\s+#(\d+)\b`)
+// case-insensitively, followed by an optional colon (GitHub also recognizes
+// the "Closes: #N" colon form boxes sometimes emit) and whitespace, then a
+// "#<digits>" issue reference, capturing the digits. Compiled once at
+// package scope; the digits capture is compared against the specific num a
+// call cares about rather than interpolated into the pattern, so e.g.
+// "#1919" never matches as a reference to "191" the way naive substring
+// interpolation could, and "#19195" never matches as a reference to "1919".
+var closingKeywordPattern = regexp.MustCompile(`(?i)\b(?:close|closes|closed|fix|fixes|fixed|resolve|resolves|resolved):?\s+#(\d+)\b`)
 
 // hasClosingReference reports whether body already carries a
 // GitHub-recognized closing keyword referencing issue num.

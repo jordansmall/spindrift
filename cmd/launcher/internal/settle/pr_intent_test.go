@@ -39,6 +39,24 @@ func TestEnsureClosesReference(t *testing.T) {
 			want: "Adds a widget.\n\nFixes #1919",
 		},
 		{
+			name: "non-local, already has colon-form Closes, unchanged",
+			body: "Adds a widget.\n\nCloses: #1919",
+			num:  "1919",
+			want: "Adds a widget.\n\nCloses: #1919",
+		},
+		{
+			name: "non-local, closes references a different number, appends",
+			body: "Adds a widget.\n\nCloses #191",
+			num:  "1919",
+			want: "Adds a widget.\n\nCloses #191\n\nCloses #1919",
+		},
+		{
+			name: "non-local, closes references a longer number, appends",
+			body: "Adds a widget.\n\nCloses #19195",
+			num:  "1919",
+			want: "Adds a widget.\n\nCloses #19195\n\nCloses #1919",
+		},
+		{
 			name: "non-local, empty body, becomes exactly Closes",
 			body: "",
 			num:  "1919",
