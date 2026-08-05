@@ -287,9 +287,11 @@ func TestWire_ComposedLoop_HappyPath(t *testing.T) {
 	}
 	s := settle.New(cfg, it, cf)
 	result := dispatch.Result{
-		Success:      true,
-		OutcomeFound: true,
-		Outcome:      outcome.Outcome{Issue: num, Landing: branch, Status: "ready"},
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: num, Landing: branch, Status: "ready"},
+		},
 	}
 	s.Settle(dispatch.NewFake(), num, 0, result)
 
@@ -376,9 +378,11 @@ func TestWire_ComposedLoop_EmptyTitleSanitizesToSlug(t *testing.T) {
 	}
 	s := settle.New(cfg, it, cf)
 	result := dispatch.Result{
-		Success:      true,
-		OutcomeFound: true,
-		Outcome:      outcome.Outcome{Issue: num, Landing: branch, Status: "ready"},
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: num, Landing: branch, Status: "ready"},
+		},
 	}
 	s.Settle(dispatch.NewFake(), num, 0, result)
 
@@ -452,9 +456,11 @@ func TestWire_ComposedLoop_GarbageParentUsesTitleNaming(t *testing.T) {
 	}
 	s := settle.New(cfg, it, cf)
 	result := dispatch.Result{
-		Success:      true,
-		OutcomeFound: true,
-		Outcome:      outcome.Outcome{Issue: num, Landing: branch, Status: "ready"},
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: num, Landing: branch, Status: "ready"},
+		},
 	}
 	s.Settle(dispatch.NewFake(), num, 0, result)
 
@@ -603,9 +609,11 @@ func TestWire_ComposedLoop_MissingBundleBlocksNotFailed(t *testing.T) {
 	}
 	s := settle.New(cfg, it, cf)
 	result := dispatch.Result{
-		Success:      true,
-		OutcomeFound: true,
-		Outcome:      outcome.Outcome{Issue: num, Landing: branch, Status: "ready"},
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: num, Landing: branch, Status: "ready"},
+		},
 	}
 	s.Settle(dispatch.NewFake(), num, 0, result)
 
@@ -647,9 +655,9 @@ func TestWire_ComposedLoop_MissingBundleBlocksNotFailed(t *testing.T) {
 // TestWire_ComposedLoop_NoOutcomeBundlePresentRecoversAndLands drives ADR
 // 0039's local push-only recovery path end to end through the composed
 // wiring (issue #2254): a Box that never emitted a parseable SPINDRIFT_OUTCOME
-// line at all (OutcomeFound: false) but did leave a genuine success
+// line at all (Resolved.Found: false) but did leave a genuine success
 // self-report and a real bundle in the outbox must not be parked
-// agent-failed. settle.Settle's tryMarkRecoverable (gate.go's !OutcomeFound
+// agent-failed. settle.Settle's tryMarkRecoverable (gate.go's !Resolved.Found
 // arm) promotes the issue to Recoverable instead — neither agent-complete
 // nor agent-failed — and only `spindrift recover`'s own
 // Settler.SettleRelayedBranch call (landRelayedBranchPushOnly, the same
@@ -697,9 +705,11 @@ func TestWire_ComposedLoop_NoOutcomeBundlePresentRecoversAndLands(t *testing.T) 
 	}
 	s := settle.New(cfg, it, cf)
 	result := dispatch.Result{
-		OutcomeFound:    false,
-		SelfReportFound: true,
-		SelfReport:      outcome.SelfReport{Status: "ready"},
+		Resolved: outcome.Resolved{
+			Found:           false,
+			SelfReportFound: true,
+			SelfReport:      outcome.SelfReport{Status: "ready"},
+		},
 	}
 	s.Settle(dispatch.NewFake(), num, 0, result)
 
@@ -720,7 +730,7 @@ func TestWire_ComposedLoop_NoOutcomeBundlePresentRecoversAndLands(t *testing.T) 
 	// Drive the recover path: the same Settler method and dispatch.Result
 	// shape recoverByNumber (main.go) builds when it recovers the driver's
 	// last genuine self-report from the issue's on-disk pass logs.
-	recoverResult := dispatch.Result{SelfReport: outcome.SelfReport{Status: "ready"}, SelfReportFound: true}
+	recoverResult := dispatch.Result{Resolved: outcome.Resolved{SelfReport: outcome.SelfReport{Status: "ready"}, SelfReportFound: true}}
 	if !s.SettleRelayedBranch(dispatch.NewFake(), num, 0, recoverResult) {
 		t.Fatalf("SettleRelayedBranch(%s) = false, want true", num)
 	}
@@ -803,9 +813,11 @@ func TestWire_ComposedLoop_OneOpenSiblingNotSurfaced(t *testing.T) {
 	}
 	s := settle.New(cfg, it, cf)
 	result := dispatch.Result{
-		Success:      true,
-		OutcomeFound: true,
-		Outcome:      outcome.Outcome{Issue: landedNum, Landing: branch, Status: "ready"},
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: landedNum, Landing: branch, Status: "ready"},
+		},
 	}
 	s.Settle(dispatch.NewFake(), landedNum, 0, result)
 
@@ -889,13 +901,19 @@ func TestWire_ComposedLoop_MixedParentBatch_EachOwnIntegrationBranch(t *testing.
 	}
 	sA := settle.New(cfg, it, cfA)
 	sA.Settle(dispatch.NewFake(), numA, 0, dispatch.Result{
-		Success: true, OutcomeFound: true,
-		Outcome: outcome.Outcome{Issue: numA, Landing: branchA, Status: "ready"},
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: numA, Landing: branchA, Status: "ready"},
+		},
 	})
 	sB := settle.New(cfg, it, cfB)
 	sB.Settle(dispatch.NewFake(), numB, 0, dispatch.Result{
-		Success: true, OutcomeFound: true,
-		Outcome: outcome.Outcome{Issue: numB, Landing: branchB, Status: "ready"},
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: numB, Landing: branchB, Status: "ready"},
+		},
 	})
 
 	res, err := reconcile.Run(it, cfA, nil, func(num string) forge.SeedScope {
@@ -1001,8 +1019,11 @@ func TestWire_ComposedLoop_SameParentBlockerChainLandsInOneRun(t *testing.T) {
 	}
 	s01 := settle.New(cfg01, it, cf01)
 	s01.Settle(dispatch.NewFake(), blockerNum, 0, dispatch.Result{
-		Success: true, OutcomeFound: true,
-		Outcome: outcome.Outcome{Issue: blockerNum, Landing: branch01, Status: "ready"},
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: blockerNum, Landing: branch01, Status: "ready"},
+		},
 	})
 
 	// Sanity: the blocker's commit really is on the shared parent's
@@ -1089,8 +1110,11 @@ func TestWire_ComposedLoop_SameParentBlockerChainLandsInOneRun(t *testing.T) {
 	}
 	s02 := settle.New(cfg02, it, cf02)
 	s02.Settle(dispatch.NewFake(), dependentNum, 0, dispatch.Result{
-		Success: true, OutcomeFound: true,
-		Outcome: outcome.Outcome{Issue: dependentNum, Landing: branch02, Status: "ready"},
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: dependentNum, Landing: branch02, Status: "ready"},
+		},
 	})
 
 	res, err := reconcile.Run(it, cf02, nil, func(num string) forge.SeedScope {
@@ -1229,8 +1253,11 @@ func TestWire_ComposedLoop_CrossParentBlockerHoldsLoudly(t *testing.T) {
 	}
 	s11 := settle.New(cfg11, it, cf11)
 	s11.Settle(dispatch.NewFake(), blockerNum, 0, dispatch.Result{
-		Success: true, OutcomeFound: true,
-		Outcome: outcome.Outcome{Issue: blockerNum, Landing: branch11, Status: "ready"},
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: blockerNum, Landing: branch11, Status: "ready"},
+		},
 	})
 
 	// Sanity: the blocker really did land on ITS OWN Integration branch in
