@@ -917,10 +917,14 @@ func settleConfig(c config, lw *localloop.Wired, cf forge.CodeForge) settle.Conf
 		// Clock is left zero here; settle.New defaults it to RealClock.
 		TransientBackoffSecs: c.transientBackoffSecs,
 		HoldJitterSecs:       c.holdJitterSecs,
-		MaxBudgetTokens:      c.maxBudgetTokens,
-		MaxBudgetUSD:         c.maxBudgetUSD,
-		PreflightStaleBase:   c.preflightStaleBase,
-		OutboxDir:            lw.OutboxDir,
+		// TransientRetryMax caps merge-transient retries (issue #2325) on
+		// the same TRANSIENT_RETRY_MAX knob dispatch's exit-retry path
+		// reads, not MaxRebaseAttempts (a merge-conflict budget).
+		TransientRetryMax:  c.transientRetryMax,
+		MaxBudgetTokens:    c.maxBudgetTokens,
+		MaxBudgetUSD:       c.maxBudgetUSD,
+		PreflightStaleBase: c.preflightStaleBase,
+		OutboxDir:          lw.OutboxDir,
 		CodeForgeForIssue: func(num string) forge.CodeForge {
 			if c.codeForge != "local" {
 				return cf
