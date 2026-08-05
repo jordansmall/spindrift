@@ -24,7 +24,7 @@ func TestSelfHeal_MergeFailureAfterGreenKeepsComplete(t *testing.T) {
 	fc.MergeErr = errors.New("required review missing")
 	s := New(c, fc, fc)
 
-	landing := s.selfHeal(dispatch.NewFake(), "1", 0, testPR)
+	landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR)
 	if landing != landingManual {
 		t.Errorf("selfHeal = %v, want landingManual (CI green, merge failed)", landing)
 	}
@@ -51,7 +51,7 @@ func TestSelfHeal_MergeGuardHit_DowngradesToManual(t *testing.T) {
 	fc.SetPRFiles(testPR, []string{"src/main.go", ".github/workflows/ci.yml"})
 	s := New(c, fc, fc)
 
-	landing := s.selfHeal(dispatch.NewFake(), "1", 0, testPR)
+	landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR)
 	if landing != landingManual {
 		t.Errorf("selfHeal = %v, want landingManual (merge guard hit)", landing)
 	}
@@ -88,7 +88,7 @@ func TestSelfHeal_MergeGuardHit_ForgejoPath(t *testing.T) {
 	fc.SetPRFiles(testPR, []string{"src/main.go", ".forgejo/workflows/ci.yml"})
 	s := New(c, fc, fc)
 
-	landing := s.selfHeal(dispatch.NewFake(), "1", 0, testPR)
+	landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR)
 	if landing != landingManual {
 		t.Errorf("selfHeal = %v, want landingManual (merge guard hit on .forgejo/ path)", landing)
 	}
@@ -124,7 +124,7 @@ func TestSelfHeal_MergeGuardHit_AutoMode(t *testing.T) {
 	fc.SetPRFiles(testPR, []string{".github/workflows/ci.yml"})
 	s := New(c, fc, fc)
 
-	landing := s.selfHeal(dispatch.NewFake(), "1", 0, testPR)
+	landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR)
 	if landing != landingManual {
 		t.Errorf("selfHeal = %v, want landingManual for a guard-hit auto-mode PR", landing)
 	}
@@ -148,7 +148,7 @@ func TestSelfHeal_MergeGuardMiss_MergesNormally(t *testing.T) {
 	fc.SetPRFiles(testPR, []string{"src/main.go"})
 	s := New(c, fc, fc)
 
-	landing := s.selfHeal(dispatch.NewFake(), "1", 0, testPR)
+	landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR)
 	if landing != landingMerged {
 		t.Errorf("selfHeal = %v, want landingMerged for a non-guarded green PR", landing)
 	}
@@ -174,7 +174,7 @@ func TestSelfHeal_MergeGuardCheckError_FailsSafe(t *testing.T) {
 	fc.PRFilesErr = errors.New("gh api pulls files: 403 Forbidden")
 	s := New(c, fc, fc)
 
-	landing := s.selfHeal(dispatch.NewFake(), "1", 0, testPR)
+	landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR)
 	if landing != landingManual {
 		t.Errorf("selfHeal = %v, want landingManual (guard check errored)", landing)
 	}
@@ -210,10 +210,13 @@ func TestSelfHeal_ConflictResolveFailure_EndsFailed(t *testing.T) {
 	d := dispatch.NewFake()
 	d.ResolveConflictErr = errors.New("conflict-resolve box exited 1")
 
-	landing := s.selfHeal(d, "1", 0, testPR)
+	landing, reason := s.selfHeal(d, "1", 0, testPR)
 
 	if landing != landingFailed {
 		t.Errorf("selfHeal = %v, want landingFailed (conflict-resolve dispatch failed)", landing)
+	}
+	if !strings.Contains(reason, "conflict-resolve dispatch failed") {
+		t.Errorf("selfHeal reason = %q, want a substring containing %q", reason, "conflict-resolve dispatch failed")
 	}
 	iss, _ := fc.Issue("1")
 	if !containsLabel(iss.Labels, "agent-failed") {
@@ -275,10 +278,13 @@ func TestSelfHeal_RewaitAfterForcePush_NeverGreen_EndsFailed(t *testing.T) {
 			d := dispatch.NewFake()
 			d.ResolveConflictErr = tc.resolveErr
 
-			landing := s.selfHeal(d, "1", 0, testPR)
+			landing, reason := s.selfHeal(d, "1", 0, testPR)
 
 			if landing != landingFailed {
 				t.Errorf("selfHeal = %v, want landingFailed (force-pushed head never went green)", landing)
+			}
+			if !strings.Contains(reason, errLandingNeverGreen.Error()) {
+				t.Errorf("selfHeal reason = %q, want a substring containing %q", reason, errLandingNeverGreen.Error())
 			}
 			iss, _ := fc.Issue("1")
 			if !containsLabel(iss.Labels, "agent-failed") {
@@ -311,7 +317,7 @@ func TestRewaitGateResultErr_ExplicitCases(t *testing.T) {
 	for _, tc := range cases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			err := rewaitGateResultErr(tc.g, testPR)
+			err := rewaitGateResultErr(tc.g, "", testPR)
 			if tc.wantNil {
 				if err != nil {
 					t.Errorf("rewaitGateResultErr(%v) = %v, want nil", tc.g, err)
@@ -336,7 +342,7 @@ func TestRewaitGateResultErr_UnhandledVariantPanics(t *testing.T) {
 			t.Error("rewaitGateResultErr(unknown variant) did not panic")
 		}
 	}()
-	rewaitGateResultErr(gateResult(99), testPR)
+	rewaitGateResultErr(gateResult(99), "", testPR)
 }
 
 // TestSelfHeal_UnresolvableConflictNoForcePush_KeepsComplete verifies that a
@@ -356,7 +362,7 @@ func TestSelfHeal_UnresolvableConflictNoForcePush_KeepsComplete(t *testing.T) {
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
 	s := New(c, fc, fc)
 
-	landing := s.selfHeal(dispatch.NewFake(), "1", 0, testPR)
+	landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR)
 
 	if landing != landingManual {
 		t.Errorf("selfHeal = %v, want landingManual (unresolvable conflict, no force-push attempted)", landing)
@@ -414,7 +420,7 @@ func TestSelfHeal_LabelStaysInProgressThroughConflictResolve(t *testing.T) {
 	s := New(c, fc, fc)
 	d := &labelSnapshotDispatcher{Fake: dispatch.NewFake(), fc: fc, num: "1"}
 
-	landing := s.selfHeal(d, "1", 0, testPR)
+	landing, _ := s.selfHeal(d, "1", 0, testPR)
 
 	if landing != landingMerged {
 		t.Fatalf("selfHeal = %v, want landingMerged", landing)
@@ -456,7 +462,7 @@ func TestSelfHeal_MarksReadyBeforeMerge(t *testing.T) {
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
 	s := New(c, fc, fc)
 
-	landing := s.selfHeal(dispatch.NewFake(), "1", 0, testPR)
+	landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR)
 
 	if landing != landingMerged {
 		t.Fatalf("selfHeal = %v, want landingMerged", landing)
@@ -481,7 +487,7 @@ func TestSelfHeal_MarksReadyBeforeEnqueueAutoMerge(t *testing.T) {
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
 	s := New(c, fc, fc)
 
-	landing := s.selfHeal(dispatch.NewFake(), "1", 0, testPR)
+	landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR)
 
 	if landing != landingManual {
 		t.Fatalf("selfHeal = %v, want landingManual (auto mode)", landing)
@@ -507,7 +513,7 @@ func TestSelfHeal_MarksReadyBeforeManualHandoff(t *testing.T) {
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
 	s := New(c, fc, fc)
 
-	landing := s.selfHeal(dispatch.NewFake(), "1", 0, testPR)
+	landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR)
 
 	if landing != landingManual {
 		t.Fatalf("selfHeal = %v, want landingManual", landing)
@@ -534,7 +540,7 @@ func TestSelfHeal_MergeGuardHit_SkipsMarkReady(t *testing.T) {
 	fc.SetPRFiles(testPR, []string{".github/workflows/ci.yml"})
 	s := New(c, fc, fc)
 
-	landing := s.selfHeal(dispatch.NewFake(), "1", 0, testPR)
+	landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR)
 
 	if landing != landingManual {
 		t.Fatalf("selfHeal = %v, want landingManual (guard hit)", landing)
@@ -557,7 +563,7 @@ func TestSelfHeal_MarkReadyFailureDoesNotBlockMerge(t *testing.T) {
 	fc.MarkReadyErr = errors.New("HTTP 403: Resource not accessible by integration")
 	s := New(c, fc, fc)
 
-	landing := s.selfHeal(dispatch.NewFake(), "1", 0, testPR)
+	landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR)
 
 	if landing != landingMerged {
 		t.Fatalf("selfHeal = %v, want landingMerged despite MarkReady failure", landing)
@@ -590,7 +596,7 @@ func TestSelfHeal_GitForge_PushOnlyLanding(t *testing.T) {
 			branch := "agent/issue-1"
 			s := New(c, fc, fc.AsPushOnly())
 
-			landing := s.selfHeal(dispatch.NewFake(), "1", 0, branch)
+			landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, branch)
 
 			if landing != tc.wantLanding {
 				t.Errorf("selfHeal = %v, want %v", landing, tc.wantLanding)
@@ -623,7 +629,7 @@ func TestSelfHeal_GitForge_PushFailureStaysCompleteNotFailed(t *testing.T) {
 	branch := "agent/issue-1"
 	s := New(c, fc, fc.AsPushOnly())
 
-	landing := s.selfHeal(dispatch.NewFake(), "1", 0, branch)
+	landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, branch)
 
 	if landing != landingManual {
 		t.Errorf("selfHeal = %v, want landingManual when the push fails", landing)

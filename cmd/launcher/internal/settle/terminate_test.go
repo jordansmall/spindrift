@@ -28,7 +28,7 @@ func TestGateToGreen_TerminatedAbandonsWithoutTransition(t *testing.T) {
 	s.SetTerminated(reg)
 	reg.Mark("1")
 
-	got := s.gateToGreen("1", 0, testPR, false)
+	got, _ := s.gateToGreen("1", 0, testPR, false)
 
 	if got != gateAbandoned {
 		t.Errorf("gateToGreen = %v, want gateAbandoned", got)
@@ -263,7 +263,7 @@ func TestSelfHeal_TerminatedDuringFixPass_StopsRetryLoop(t *testing.T) {
 	s.SetTerminated(reg)
 	d := terminatingDispatcher{Fake: dispatch.NewFake(), reg: reg, num: "1"}
 
-	landing := s.selfHeal(d, "1", 0, testPR)
+	landing, _ := s.selfHeal(d, "1", 0, testPR)
 
 	if landing != landingAbandoned {
 		t.Errorf("selfHeal = %v, want landingAbandoned", landing)
@@ -292,7 +292,7 @@ func TestSelfHeal_TerminatedDuringRewaitAfterForcePush_ReportsAbandoned(t *testi
 	s := New(c, tf, tf)
 	s.SetTerminated(reg)
 
-	landing := s.selfHeal(dispatch.NewFake(), "1", 0, testPR)
+	landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR)
 
 	if landing != landingAbandoned {
 		t.Errorf("selfHeal = %v, want landingAbandoned", landing)
@@ -324,7 +324,7 @@ func TestGateToGreen_RepickDoesNotClearAnAbandonedSettlesMark(t *testing.T) {
 	reg.Mark("1")            // Terminate marks that generation dead
 	newGen := reg.Begin("1") // a re-pick's discover claims a fresh incarnation, mid-race
 
-	if got := s.gateToGreen("1", oldGen, testPR, false); got != gateAbandoned {
+	if got, _ := s.gateToGreen("1", oldGen, testPR, false); got != gateAbandoned {
 		t.Errorf("gateToGreen(oldGen) = %v, want gateAbandoned — a re-pick must not erase an in-flight settle's own mark", got)
 	}
 	if len(fc.TransitionStateCalls) != 0 {

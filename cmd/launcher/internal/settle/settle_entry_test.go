@@ -1,6 +1,8 @@
 package settle
 
 import (
+	"io"
+	"os"
 	"regexp"
 	"strings"
 	"testing"
@@ -261,7 +263,10 @@ func TestSettle_ManualModeDoesNotCloseIssue(t *testing.T) {
 }
 
 // TestSettle_RedCIDoesNotCloseIssue verifies that an outcome which never
-// reaches green CI (landingFailed) never closes the issue.
+// reaches green CI (landingFailed) never closes the issue. Also asserts
+// (issue #2328) that the "ready" case's landingFailed print carries
+// selfHeal's own classified reason rather than the old hardcoded "CI or
+// merge failed" literal.
 func TestSettle_RedCIDoesNotCloseIssue(t *testing.T) {
 	const issNum = "57"
 
@@ -278,10 +283,30 @@ func TestSettle_RedCIDoesNotCloseIssue(t *testing.T) {
 	}
 
 	s := New(c, fc, fc)
+
+	old := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
+	os.Stdout = w
 	s.Settle(dispatch.NewFake(), issNum, 0, result)
+	w.Close()
+	os.Stdout = old
+	captured, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("read captured stdout: %v", err)
+	}
+	stdout := string(captured)
 
 	if len(fc.CloseMergedIssueCalls) != 0 {
 		t.Errorf("CloseMergedIssueCalls = %v, want none", fc.CloseMergedIssueCalls)
+	}
+	if strings.Contains(stdout, "CI or merge failed") {
+		t.Errorf("stdout must not contain the old hardcoded literal, got: %s", stdout)
+	}
+	if !strings.Contains(stdout, "ci-red: still red after exhausting 0 fix pass(es)") {
+		t.Errorf("stdout must contain selfHeal's classified reason, got: %s", stdout)
 	}
 }
 

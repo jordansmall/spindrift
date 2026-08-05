@@ -2,6 +2,8 @@ package settle
 
 import (
 	"errors"
+	"io"
+	"os"
 	"strings"
 	"testing"
 
@@ -90,7 +92,10 @@ func TestSettleAdopted_ManualModeStaysComplete(t *testing.T) {
 }
 
 // TestSettleAdopted_RedFollowsSelfHeal verifies that a red CI on an adopted
-// PR is demoted to agent-failed once fix passes are exhausted.
+// PR is demoted to agent-failed once fix passes are exhausted. Also asserts
+// (issue #2328) that SettleAdopted's landingFailed print carries
+// selfHealAdopted's own classified reason rather than the old hardcoded "CI
+// or merge failed" literal.
 func TestSettleAdopted_RedFollowsSelfHeal(t *testing.T) {
 	c := baseConfig()
 	c.MaxFixAttempts = 0 // no fix passes — just mark failed
@@ -99,7 +104,20 @@ func TestSettleAdopted_RedFollowsSelfHeal(t *testing.T) {
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateFailure})
 	s := New(c, fc, fc)
 
+	old := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
+	os.Stdout = w
 	s.SettleAdopted(dispatch.NewFake(), "77", 0, testPR)
+	w.Close()
+	os.Stdout = old
+	captured, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("read captured stdout: %v", err)
+	}
+	stdout := string(captured)
 
 	if fc.Merged != "" {
 		t.Errorf("expected no merge on red CI; fc.Merged=%q", fc.Merged)
@@ -109,6 +127,12 @@ func TestSettleAdopted_RedFollowsSelfHeal(t *testing.T) {
 	}
 	if last := fc.TransitionStateCalls[len(fc.TransitionStateCalls)-1]; last.To != forge.Failed {
 		t.Errorf("last transition To=%v, want Failed", last.To)
+	}
+	if strings.Contains(stdout, "CI or merge failed") {
+		t.Errorf("stdout must not contain the old hardcoded literal, got: %s", stdout)
+	}
+	if !strings.Contains(stdout, "ci-red: still red after exhausting 0 fix pass(es)") {
+		t.Errorf("stdout must contain selfHealAdopted's classified reason, got: %s", stdout)
 	}
 }
 

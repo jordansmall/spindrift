@@ -2,6 +2,8 @@ package settle
 
 import (
 	"errors"
+	"io"
+	"os"
 	"strings"
 	"testing"
 
@@ -242,7 +244,21 @@ func TestSettle_GithubReadOnly_AdoptedPRWithRedCIDoesNotMerge(t *testing.T) {
 	c.OutboxDir = func(num string) string { return "/outbox/" + num }
 	c.BaseBranch = "main"
 	s := New(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
+
+	old := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
+	os.Stdout = w
 	s.Settle(d, issNum, 0, result)
+	w.Close()
+	os.Stdout = old
+	captured, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("read captured stdout: %v", err)
+	}
+	stdout := string(captured)
 
 	if len(fc.CreateDraftPRCalls) != 1 {
 		t.Fatalf("adoption must still open the PR before CI judges it; CreateDraftPRCalls=%+v", fc.CreateDraftPRCalls)
@@ -253,6 +269,14 @@ func TestSettle_GithubReadOnly_AdoptedPRWithRedCIDoesNotMerge(t *testing.T) {
 	iss, _ := fc.Issue(issNum)
 	if containsLabel(iss.Labels, "agent-complete") {
 		t.Errorf("issue must not carry agent-complete when the adopted PR's CI is red; labels=%v", iss.Labels)
+	}
+	// issue #2328: adoptAndGate's landingFailed print must carry selfHeal's
+	// own classified reason, not the old hardcoded "CI or merge failed".
+	if strings.Contains(stdout, "CI or merge failed") {
+		t.Errorf("stdout must not contain the old hardcoded literal, got: %s", stdout)
+	}
+	if !strings.Contains(stdout, "ci-red: still red after exhausting 0 fix pass(es)") {
+		t.Errorf("stdout must contain selfHeal's classified reason, got: %s", stdout)
 	}
 }
 

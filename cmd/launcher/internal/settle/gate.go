@@ -139,7 +139,8 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, gen uint64, result di
 			// reaches this branch (s.pr is nil for its push-only forge).
 			s.recordLanding(num, pr)
 		}
-		switch s.selfHeal(d, num, gen, pr) {
+		landing, reason := s.selfHeal(d, num, gen, pr)
+		switch landing {
 		case landingMerged:
 			// verifyMerged reads PR state, which a push-only Code Forge
 			// does not have — landPushOnly's own cf.Merge success already
@@ -151,7 +152,7 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, gen uint64, result di
 				s.verifyMerged(num, pr)
 			}
 		case landingFailed:
-			fmt.Printf("    #%s  landing=%s  status=failed  !! CI or merge failed\n", num, pr)
+			fmt.Printf("    #%s  landing=%s  status=failed  !! %s\n", num, pr, reason)
 		case landingAbandoned:
 			// Terminate already recorded its own comment and log line; a
 			// usage comment here would be noise on an issue it reclaimed.
