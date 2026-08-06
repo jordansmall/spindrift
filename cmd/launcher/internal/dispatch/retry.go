@@ -84,11 +84,11 @@ func (d *Dispatch) dispatchWithRetry(logPath string, once func(resumeAfterHold b
 			cls, clsErr = d.driver.ClassifyTransient(logPath)
 			if clsErr != nil {
 				fmt.Fprintf(os.Stderr, "    ?? #%s: classify error: %v\n", d.number, clsErr)
-				return Result{Success: false}
+				return Result{Success: false, KilledBySignal: runner.KilledBySignal(err)}
 			}
 
 			if cls.Class == driver.Terminal {
-				return Result{Success: false}
+				return Result{Success: false, KilledBySignal: runner.KilledBySignal(err)}
 			}
 		}
 
