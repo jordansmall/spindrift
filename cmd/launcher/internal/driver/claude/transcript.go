@@ -160,6 +160,29 @@ func CollectTaskRoles(ev Event, taskRole map[string]string) {
 	}
 }
 
+// AttributionRoleForPass maps a pass_start SpindriftOp's Role field (the
+// orchestrator's own pass vocabulary: "implement", "review", "fix" — see
+// SpindriftOp.Role) to the attribution role constants console surfaces use
+// (ImplementorRole, ReviewerRole, DefaultRole): "review" becomes
+// ReviewerRole; "implement" and "fix" both become ImplementorRole, since a
+// fix pass is an implementor pass from the attribution surface's point of
+// view. An empty passRole (legacy pass_start with no role, or any op that
+// isn't a pass_start) and any unrecognized value both map to "" rather than
+// ImplementorRole — collapsing "no role info" into "explicitly implementor"
+// would make it impossible for a caller to tell "use the default" apart
+// from "the default was chosen"; the caller decides what "no change"/"use
+// default" means.
+func AttributionRoleForPass(passRole string) string {
+	switch passRole {
+	case "review":
+		return ReviewerRole
+	case "implement", "fix":
+		return ImplementorRole
+	default:
+		return ""
+	}
+}
+
 // ResolveRole returns the acting role for ev: when it has no
 // parent_tool_use_id (a top-level pass), topLevelRole if non-empty,
 // otherwise ImplementorRole — so an empty topLevelRole preserves the
