@@ -34,7 +34,7 @@ func main() {
 	maxSlices := flag.Int("max-slices", 5, "cap on total driver-exec invocations this run makes; 0 disables the cap")
 	reviewPromptFile := flag.String("review-prompt-file", "", "path to the code-owned review pass's own prompt text; empty disables the review pass")
 	reviewModel := flag.String("review-model", "", "value for the review pass's own --model flag, empty falls back to the coordinator's --model")
-	reviewEffort := flag.String("review-effort", "", "value for the review pass's own --effort flag, empty falls back to the coordinator's -effort")
+	reviewEffort := flag.String("review-effort", "", "value for the review pass's own --effort flag, empty falls back to the coordinator's --effort")
 	flag.Parse()
 
 	if *issue == "" {
