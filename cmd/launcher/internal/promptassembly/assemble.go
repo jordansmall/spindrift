@@ -1,0 +1,323 @@
+package promptassembly
+
+import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"regexp"
+	"strings"
+)
+
+// ErrUnsupportedCell marks an Env combination Assemble does not (yet) cover.
+// Assemble currently implements exactly one cell of agent/entrypoint.sh's
+// phase_prompt_assembly — see checkCoveredCell — and errors, wrapping this
+// sentinel, for anything outside it rather than silently mis-rendering a
+// prompt for a combination it hasn't been built (and tested) against.
+var ErrUnsupportedCell = errors.New("promptassembly: env combination not covered by Assemble")
+
+// Result is Assemble's rendered output: the final prompt text, the
+// (possibly empty) completed --agents JSON, and the driver hand-off facts
+// run_driver_in_env (entrypoint.sh: 1282-1310) derives from the same phase.
+type Result struct {
+	Prompt     string
+	AgentsJSON string
+	Handoff    Handoff
+}
+
+// Handoff mirrors the subset of run_driver_in_env's invoker/flag derivation
+// (entrypoint.sh: 1282-1310) that phase_prompt_assembly itself determines or
+// hands off a value for.
+type Handoff struct {
+	// SessionMode is "resume" or "initial" (entrypoint.sh: 1037-1052).
+	SessionMode string
+	// Invoker is "orchestrator" or "driver-exec" (entrypoint.sh: 1282-1286).
+	Invoker string
+	// ReviewPromptFile and ReviewModel are only ever populated when Invoker
+	// is "orchestrator" (entrypoint.sh: 1294, 1303); Assemble's covered
+	// cell always resolves to "driver-exec", so both stay empty here.
+	ReviewPromptFile string
+	ReviewModel      string
+}
+
+// checkCoveredCell validates that e is exactly the one Env cell Assemble
+// implements: IssueTracker/CodeForge both (explicitly or by default) github,
+// a read-write box, dispatch kind "work" (not research), a fresh box
+// (FixPass == 0, not a warm fix pass), the orchestrator off, and every skill
+// baked (SkillsFound non-empty and all four per-skill gates on). Any other
+// combination is out of scope for this slice and returns an error wrapping
+// ErrUnsupportedCell.
+func checkCoveredCell(e Env) error {
+	tracker := e.IssueTracker
+	if tracker == "" {
+		tracker = "github"
+	}
+	if tracker != "github" {
+		return fmt.Errorf("issue tracker %q: %w", e.IssueTracker, ErrUnsupportedCell)
+	}
+
+	forge := e.CodeForge
+	if forge == "" {
+		forge = "github"
+	}
+	if forge != "github" {
+		return fmt.Errorf("code forge %q: %w", e.CodeForge, ErrUnsupportedCell)
+	}
+
+	if !e.BoxWriteEnabled {
+		return fmt.Errorf("box access is read-only: %w", ErrUnsupportedCell)
+	}
+
+	kind := e.DispatchKind
+	if kind == "" {
+		kind = "work"
+	}
+	if kind != "work" {
+		return fmt.Errorf("dispatch kind %q: %w", e.DispatchKind, ErrUnsupportedCell)
+	}
+
+	if e.FixPass > 0 {
+		return fmt.Errorf("fix pass %d: %w", e.FixPass, ErrUnsupportedCell)
+	}
+
+	if e.OrchestratorEnabled {
+		return fmt.Errorf("orchestrator enabled: %w", ErrUnsupportedCell)
+	}
+
+	if e.SkillsFound == "" || !e.CavemanSkillBaked || !e.TDDSkillBaked || !e.CommitSkillBaked || !e.CodeReviewSkillBaked {
+		return fmt.Errorf("skills not fully baked: %w", ErrUnsupportedCell)
+	}
+
+	return nil
+}
+
+// substTokenRe matches the braced ${NAME} substitution form _subst's
+// envsubst call recognizes (entrypoint.sh: 405-433); every template and
+// fragment file under templates/default/prompts references its
+// substitution variables this way, never bare $NAME (verified against the
+// tree, issue #2349).
+var substTokenRe = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)\}`)
+
+// substitute reproduces _subst's allowlisted envsubst call (entrypoint.sh:
+// 405-433) in a single pass over text: every ${NAME} whose NAME is a key of
+// allowlist is replaced by its value; anything else -- an unlisted ${OTHER}
+// or a literal bare $ -- passes through untouched. A single
+// ReplaceAllStringFunc pass over the original text (rather than sequential
+// per-name replacement) guarantees a substituted value that itself contains
+// ${NAME}-shaped text is never re-expanded.
+func substitute(text string, allowlist map[string]string) string {
+	return substTokenRe.ReplaceAllStringFunc(text, func(tok string) string {
+		name := tok[2 : len(tok)-1]
+		if v, ok := allowlist[name]; ok {
+			return v
+		}
+		return tok
+	})
+}
+
+// Assemble renders the covered Env cell's prompt, --agents JSON, and driver
+// hand-off facts, mirroring agent/entrypoint.sh's phase_prompt_assembly (see
+// checkCoveredCell for the exact cell). Any Env outside that cell is
+// rejected up front, before any file I/O, with an error wrapping
+// ErrUnsupportedCell.
+func Assemble(e Env, reg Registry) (Result, error) {
+	if err := checkCoveredCell(e); err != nil {
+		return Result{}, err
+	}
+
+	gates := Gates(e)
+	// SKILLS_FOUND is a filesystem-derived presence gate Gates itself never
+	// computes (I/O is out of its scope, see env.go's package doc) -- it's
+	// Assemble's own concern, resolved directly from the pre-resolved
+	// Env.SkillsFound field.
+	gates["SKILLS_FOUND"] = e.SkillsFound != ""
+
+	// The _subst allowlist (entrypoint.sh: 405-433): the seven fixed names
+	// plus the flat _FRAGMENT_SUBST_VARS list -- every registry row's var
+	// and extraSubstVars, concatenated once across all rows (identical for
+	// every _subst call in this function, never scoped per-fragment).
+	allowlist := map[string]string{
+		"ISSUE_NUMBER":      e.IssueNumber,
+		"ISSUE_TITLE":       e.IssueTitle,
+		"BRANCH":            e.Branch,
+		"BASE_BRANCH":       e.BaseBranch,
+		"IN_PROGRESS_LABEL": e.InProgressLabel,
+		"COMPLETE_LABEL":    e.CompleteLabel,
+		"RUN_NONCE":         e.RunNonce,
+	}
+
+	// extraSubstVars raw sources: as of issue #2349 the registry carries
+	// exactly two (SKILLS_FOUND, CI_FAILURE_SUMMARY -- see fragments.nix's
+	// header comment and registry_test.go's TestLoadRegistryParsesAllRows).
+	// SKILLS_FOUND's raw value is Env.SkillsFound; CI_FAILURE_SUMMARY is a
+	// launcher-forwarded env var Env carries no field for yet -- out of
+	// scope for this slice's covered cell, whose CI_FAILURE_SUMMARY gate is
+	// always off (Env has no field to turn it on), so it defaults to the
+	// zero-value empty string like any other unresolved extraSubstVars name.
+	extraRaw := map[string]string{
+		"SKILLS_FOUND": e.SkillsFound,
+	}
+	seenExtra := map[string]bool{}
+	for _, row := range reg.Rows {
+		for _, extra := range row.ExtraSubstVars {
+			if seenExtra[extra] {
+				continue
+			}
+			seenExtra[extra] = true
+			allowlist[extra] = extraRaw[extra]
+		}
+	}
+
+	// The fragment loop (entrypoint.sh: 1001-1009): for each row, in
+	// registry order, render its fragment when its gate is on and assign
+	// renderedText + "\n\n" to its var; assign empty when the gate is off.
+	// The "\n\n" is appended outside _subst -- entrypoint.sh: 694-710
+	// explains why: command substitution strips trailing newlines, so the
+	// blank-line separator can't be baked into the fragment file or the
+	// substitution result, only appended at the assignment site.
+	for _, row := range reg.Rows {
+		if gates[row.Gate] {
+			path := filepath.Join(e.PromptsDir, "fragments", row.Fragment)
+			data, err := os.ReadFile(path)
+			if err != nil {
+				return Result{}, fmt.Errorf("read fragment %s: %w", row.Fragment, err)
+			}
+			// TrimRight reproduces "$(_subst "$f")"'s command-substitution
+			// newline stripping (bash strips ALL trailing newlines from
+			// $(...) output, not just one) before the "\n\n" separator --
+			// itself never part of the fragment file or the substitution
+			// result -- is appended at this assignment site, per the
+			// comment above.
+			allowlist[row.Var] = strings.TrimRight(substitute(string(data), allowlist), "\n") + "\n\n"
+		} else {
+			allowlist[row.Var] = ""
+		}
+	}
+
+	// Base template selection (entrypoint.sh: 1029-1063): the covered cell
+	// (DispatchKind == "work", FixPass == 0) always renders issue-prompt.md.
+	// Shared-block injection (_inject_shared_block, entrypoint.sh:
+	// 1064-1074) is skipped entirely, not merely a no-op call: outcome's
+	// marker "# LAND THE CHANGE", comms's "# COMMS", and check's "# CHECK"
+	// are all sliced FROM issue-prompt.md itself (lib/prompt-contract.nix
+	// injectBlocks), so issue-prompt.md always already contains its own
+	// marker -- injection's "if prompt does NOT already contain marker"
+	// guard (entrypoint.sh: 632-644) is never true for it. comms/check also
+	// list only "fix" in their kinds (never "issue"), confirming they exist
+	// to backfill fix-prompt.md, not this cell's issue-prompt.md.
+	basePath := filepath.Join(e.PromptsDir, "issue-prompt.md")
+	baseData, err := os.ReadFile(basePath)
+	if err != nil {
+		return Result{}, fmt.Errorf("read issue-prompt.md: %w", err)
+	}
+	// entrypoint.sh's equivalent, `prompt="$(_subst "${PROMPTS_DIR}/issue-prompt.md")"`,
+	// is itself inside a $(...) command substitution, so the fully
+	// substituted prompt has every trailing newline stripped too -- and
+	// nothing re-adds one later: write_prompt_and_run's `printf '%s'
+	// "$prompt" > "$_prompt_file"` (entrypoint.sh: 1244) writes $prompt
+	// raw, with no appended newline, so Result.Prompt must match that
+	// exact on-disk form.
+	promptText := strings.TrimRight(substitute(string(baseData), allowlist), "\n")
+
+	// Session mode (entrypoint.sh: 1037-1052) and invoker (entrypoint.sh:
+	// 1282-1286).
+	sessionMode := "initial"
+	if e.ResumeAfterHold {
+		sessionMode = "resume"
+	}
+	invoker := "driver-exec"
+	if gates["ORCHESTRATOR"] {
+		invoker = "orchestrator"
+	}
+
+	result := Result{
+		Prompt: promptText,
+		Handoff: Handoff{
+			SessionMode: sessionMode,
+			Invoker:     invoker,
+		},
+	}
+
+	// Agents JSON (entrypoint.sh: 1077-1116): orchestrator is off for the
+	// covered cell, so the inner del(.reviewer)/model-extraction branch
+	// (entrypoint.sh: 1088-1104) never applies -- only the generic
+	// per-agent injection loop (entrypoint.sh: 1105-1116) does. Empty
+	// template means no --agents flag at all: Result.AgentsJSON stays "".
+	if e.AgentsJSONTemplate != "" {
+		agentsJSON, err := renderAgentsJSON(e, allowlist)
+		if err != nil {
+			return Result{}, err
+		}
+		result.AgentsJSON = agentsJSON
+	}
+
+	return result, nil
+}
+
+// renderAgentsJSON implements entrypoint.sh's generic per-agent injection
+// loop (entrypoint.sh: 1105-1116): for every key in AgentsJSONTemplate,
+// look up its prompt file via AgentsPromptFiles[name], and when
+// PromptsDir/<file> exists, substitute it through the same allowlist and
+// set .{name}.prompt to the rendered text. DriverAgentFilesDir's on-disk
+// agent-files twin (entrypoint.sh: 1130+) is out of scope for this slice
+// (issue #2349) -- it only matters for a non-claude Driver, so a non-empty
+// value is silently ignored here, not an error.
+func renderAgentsJSON(e Env, allowlist map[string]string) (string, error) {
+	var template map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(e.AgentsJSONTemplate), &template); err != nil {
+		return "", fmt.Errorf("parse agents json template: %w", err)
+	}
+
+	var promptFiles map[string]string
+	if e.AgentsPromptFiles != "" {
+		if err := json.Unmarshal([]byte(e.AgentsPromptFiles), &promptFiles); err != nil {
+			return "", fmt.Errorf("parse agents prompt files: %w", err)
+		}
+	}
+
+	for name := range template {
+		promptFile := promptFiles[name]
+		if promptFile == "" {
+			continue
+		}
+		path := filepath.Join(e.PromptsDir, promptFile)
+		data, err := os.ReadFile(path)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return "", fmt.Errorf("read agent prompt file %s: %w", promptFile, err)
+		}
+		// entrypoint.sh's equivalent, `_p="$(_subst "${PROMPTS_DIR}/${_pf}")"`
+		// (entrypoint.sh: 1121), is itself inside a $(...) command
+		// substitution -- trim to match, same as the fragment loop and the
+		// base-template substitution above.
+		rendered := strings.TrimRight(substitute(string(data), allowlist), "\n")
+
+		var entry map[string]json.RawMessage
+		if err := json.Unmarshal(template[name], &entry); err != nil {
+			return "", fmt.Errorf("parse agents json entry %q: %w", name, err)
+		}
+		if entry == nil {
+			entry = map[string]json.RawMessage{}
+		}
+		renderedJSON, err := json.Marshal(rendered)
+		if err != nil {
+			return "", fmt.Errorf("marshal rendered prompt for %q: %w", name, err)
+		}
+		entry["prompt"] = renderedJSON
+
+		entryJSON, err := json.Marshal(entry)
+		if err != nil {
+			return "", fmt.Errorf("marshal agents json entry %q: %w", name, err)
+		}
+		template[name] = entryJSON
+	}
+
+	out, err := json.Marshal(template)
+	if err != nil {
+		return "", fmt.Errorf("marshal agents json: %w", err)
+	}
+	return string(out), nil
+}
