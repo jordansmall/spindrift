@@ -45,7 +45,9 @@ func Gates(e Env) map[string]bool {
 	// ISSUE_TRACKER -> per-axis descriptor (entrypoint.sh: 801-814): itRead
 	// is the issue-read step suffix (always one of GITHUB/LOCAL/FORGEJO).
 	// jira shares github's arm since it rides the same in-box reachability.
-	itRead, _, _ := issueTrackerAxis(e.IssueTracker)
+	// One call binds all three axis names; each is read below by the gate
+	// family it feeds.
+	itRead, itWrite, itFiler := issueTrackerAxis(e.IssueTracker)
 
 	// The issue-read step gate (entrypoint.sh: 891-904): exactly one of
 	// ISSUE_TRACKER_GITHUB/ISSUE_TRACKER_LOCAL/ISSUE_TRACKER_FORGEJO fires,
@@ -53,8 +55,6 @@ func Gates(e Env) map[string]bool {
 	g["ISSUE_TRACKER_GITHUB"] = itRead == "GITHUB"
 	g["ISSUE_TRACKER_LOCAL"] = itRead == "LOCAL"
 	g["ISSUE_TRACKER_FORGEJO"] = itRead == "FORGEJO"
-
-	_, itWrite, _ := issueTrackerAxis(e.IssueTracker)
 
 	// The issue-blocked-comment/research-verdict write-step gates
 	// (entrypoint.sh: 906-938): a tracker with a direct write-step path
@@ -66,8 +66,6 @@ func Gates(e Env) map[string]bool {
 	g["ISSUE_TRACKER_GITHUB_READONLY"] = itWrite == "GITHUB" && !e.BoxWriteEnabled
 	g["ISSUE_TRACKER_FORGEJO_READWRITE"] = itWrite == "FORGEJO" && e.BoxWriteEnabled
 	g["ISSUE_TRACKER_FORGEJO_READONLY"] = itWrite == "FORGEJO" && !e.BoxWriteEnabled
-
-	_, _, itFiler := issueTrackerAxis(e.IssueTracker)
 
 	// The filer's write-mechanism gates (entrypoint.sh: 816-860): relay
 	// only activates on read-only (BOX_WRITE_ENABLED absent) + the
@@ -99,7 +97,7 @@ func Gates(e Env) map[string]bool {
 	// jira falls into the same else branch as github here.
 	tracker := e.IssueTracker
 	if tracker == "" {
-		tracker = "github"
+		tracker = defaultIssueTracker
 	}
 	prBodyLocalRef := false
 	prBodyLocalNoref := false
@@ -128,7 +126,7 @@ func Gates(e Env) map[string]bool {
 	// the GH arm), matching "${CODE_FORGE:-github}".
 	codeForge := e.CodeForge
 	if codeForge == "" {
-		codeForge = "github"
+		codeForge = defaultCodeForge
 	}
 	backend := "GH"
 	if codeForge == "forgejo" {
@@ -161,7 +159,7 @@ func Gates(e Env) map[string]bool {
 func issueTrackerAxis(issueTracker string) (itRead, itWrite, itFiler string) {
 	tracker := issueTracker
 	if tracker == "" {
-		tracker = "github"
+		tracker = defaultIssueTracker
 	}
 	switch tracker {
 	case "local":

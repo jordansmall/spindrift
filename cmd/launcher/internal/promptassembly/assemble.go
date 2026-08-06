@@ -51,17 +51,17 @@ type Handoff struct {
 func checkCoveredCell(e Env) error {
 	tracker := e.IssueTracker
 	if tracker == "" {
-		tracker = "github"
+		tracker = defaultIssueTracker
 	}
-	if tracker != "github" {
+	if tracker != defaultIssueTracker {
 		return fmt.Errorf("issue tracker %q: %w", e.IssueTracker, ErrUnsupportedCell)
 	}
 
 	forge := e.CodeForge
 	if forge == "" {
-		forge = "github"
+		forge = defaultCodeForge
 	}
-	if forge != "github" {
+	if forge != defaultCodeForge {
 		return fmt.Errorf("code forge %q: %w", e.CodeForge, ErrUnsupportedCell)
 	}
 
@@ -71,9 +71,9 @@ func checkCoveredCell(e Env) error {
 
 	kind := e.DispatchKind
 	if kind == "" {
-		kind = "work"
+		kind = defaultDispatchKind
 	}
-	if kind != "work" {
+	if kind != defaultDispatchKind {
 		return fmt.Errorf("dispatch kind %q: %w", e.DispatchKind, ErrUnsupportedCell)
 	}
 
@@ -114,6 +114,20 @@ func substitute(text string, allowlist map[string]string) string {
 		}
 		return tok
 	})
+}
+
+// renderFile reads path, substitutes it through allowlist, and trims the
+// trailing newlines a $(...) command substitution would strip -- the same
+// three-step sequence entrypoint.sh's _subst call performs at every one of
+// its call sites (fragment rows, the base template, and per-agent prompt
+// files), centralized here so that "command-sub strips trailing newlines"
+// invariant lives in one place.
+func renderFile(path string, allowlist map[string]string) (string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimRight(substitute(string(data), allowlist), "\n"), nil
 }
 
 // Assemble renders the covered Env cell's prompt, --agents JSON, and driver
@@ -179,17 +193,17 @@ func Assemble(e Env, reg Registry) (Result, error) {
 	for _, row := range reg.Rows {
 		if gates[row.Gate] {
 			path := filepath.Join(e.PromptsDir, "fragments", row.Fragment)
-			data, err := os.ReadFile(path)
-			if err != nil {
-				return Result{}, fmt.Errorf("read fragment %s: %w", row.Fragment, err)
-			}
-			// TrimRight reproduces "$(_subst "$f")"'s command-substitution
+			// renderFile reproduces "$(_subst "$f")"'s command-substitution
 			// newline stripping (bash strips ALL trailing newlines from
 			// $(...) output, not just one) before the "\n\n" separator --
 			// itself never part of the fragment file or the substitution
 			// result -- is appended at this assignment site, per the
 			// comment above.
-			allowlist[row.Var] = strings.TrimRight(substitute(string(data), allowlist), "\n") + "\n\n"
+			rendered, err := renderFile(path, allowlist)
+			if err != nil {
+				return Result{}, fmt.Errorf("read fragment %s: %w", row.Fragment, err)
+			}
+			allowlist[row.Var] = rendered + "\n\n"
 		} else {
 			allowlist[row.Var] = ""
 		}
@@ -206,11 +220,6 @@ func Assemble(e Env, reg Registry) (Result, error) {
 	// guard (entrypoint.sh: 632-644) is never true for it. comms/check also
 	// list only "fix" in their kinds (never "issue"), confirming they exist
 	// to backfill fix-prompt.md, not this cell's issue-prompt.md.
-	basePath := filepath.Join(e.PromptsDir, "issue-prompt.md")
-	baseData, err := os.ReadFile(basePath)
-	if err != nil {
-		return Result{}, fmt.Errorf("read issue-prompt.md: %w", err)
-	}
 	// entrypoint.sh's equivalent, `prompt="$(_subst "${PROMPTS_DIR}/issue-prompt.md")"`,
 	// is itself inside a $(...) command substitution, so the fully
 	// substituted prompt has every trailing newline stripped too -- and
@@ -218,7 +227,11 @@ func Assemble(e Env, reg Registry) (Result, error) {
 	// "$prompt" > "$_prompt_file"` (entrypoint.sh: 1244) writes $prompt
 	// raw, with no appended newline, so Result.Prompt must match that
 	// exact on-disk form.
-	promptText := strings.TrimRight(substitute(string(baseData), allowlist), "\n")
+	basePath := filepath.Join(e.PromptsDir, "issue-prompt.md")
+	promptText, err := renderFile(basePath, allowlist)
+	if err != nil {
+		return Result{}, fmt.Errorf("read issue-prompt.md: %w", err)
+	}
 
 	// Session mode (entrypoint.sh: 1037-1052) and invoker (entrypoint.sh:
 	// 1282-1286).
@@ -282,18 +295,17 @@ func renderAgentsJSON(e Env, allowlist map[string]string) (string, error) {
 			continue
 		}
 		path := filepath.Join(e.PromptsDir, promptFile)
-		data, err := os.ReadFile(path)
+		// entrypoint.sh's equivalent, `_p="$(_subst "${PROMPTS_DIR}/${_pf}")"`
+		// (entrypoint.sh: 1121), is itself inside a $(...) command
+		// substitution -- trim to match, same as the fragment loop and the
+		// base-template substitution above.
+		rendered, err := renderFile(path, allowlist)
 		if err != nil {
 			if os.IsNotExist(err) {
 				continue
 			}
 			return "", fmt.Errorf("read agent prompt file %s: %w", promptFile, err)
 		}
-		// entrypoint.sh's equivalent, `_p="$(_subst "${PROMPTS_DIR}/${_pf}")"`
-		// (entrypoint.sh: 1121), is itself inside a $(...) command
-		// substitution -- trim to match, same as the fragment loop and the
-		// base-template substitution above.
-		rendered := strings.TrimRight(substitute(string(data), allowlist), "\n")
 
 		var entry map[string]json.RawMessage
 		if err := json.Unmarshal(template[name], &entry); err != nil {
