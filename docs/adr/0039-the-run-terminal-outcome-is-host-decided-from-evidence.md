@@ -168,13 +168,16 @@ land pass killed mid-check (`exit 143`) that had already written a complete,
 `checks-inbox`-green bundle to the outbox (#2363).
 
 The Host consume-gate now reads: with `!OutcomeFound` and a bundle present,
-`Recoverable` (`CODE_FORGE=local` push-only) or the PR-shaped auto-adopt arm
-fires on **either** a genuine success self-report **or** a signal-killed
-exit — both are host-observed, unauthenticated advisory evidence in the same
-trust posture `SelfReport` already documents, not a driver-controlled claim.
-Only with **no** bundle, or with neither leg of that evidence, does the run
-still park `Failed`: a clean (non-signal) exit with nothing self-reported and
-nothing killed still means "never finished," so it is unchanged.
+the local push-only `Recoverable` arm fires on **either** a genuine success
+self-report **or** a signal-killed exit — both are host-observed,
+unauthenticated advisory evidence in the same trust posture `SelfReport`
+already documents, not a driver-controlled claim. The PR-shaped auto-adopt
+arm is unchanged: it still requires a genuine success self-report, since a
+signal-killed pass never got the chance to report the PR-relevant state that
+arm consumes. Only with **no** bundle, or with neither leg of that evidence
+on the local push-only arm, does the run still park `Failed`: a clean
+(non-signal) exit with nothing self-reported and nothing killed still means
+"never finished," so it is unchanged.
 
 The exit signal is process-lifetime evidence, not log content — it lives in
 the same run's `runner.Run` error, never persisted to disk. `spindrift
