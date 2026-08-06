@@ -15,6 +15,17 @@
 // directory and AGENTS_JSON_TEMPLATE-adjacent files before constructing Env.
 package promptassembly
 
+// Default values entrypoint.sh's "${VAR:-default}" bash parameter expansion
+// applies when the corresponding Env field arrives empty. Named once here so
+// checkCoveredCell (assemble.go), Gates, and issueTrackerAxis (gates.go)
+// resolve the same default rather than each restating its own "github"/
+// "work" literal.
+const (
+	defaultIssueTracker = "github"
+	defaultCodeForge    = "github"
+	defaultDispatchKind = "work"
+)
+
 // Env is the full set of raw inputs agent/entrypoint.sh's
 // phase_prompt_assembly reads. Only a subset feeds Gates's computed
 // booleans today; the rest (contract file paths, prompt dirs, and similar
