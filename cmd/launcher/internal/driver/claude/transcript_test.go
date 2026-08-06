@@ -59,6 +59,24 @@ func TestResolveRole_TopLevelRoleDoesNotAffectRealParent(t *testing.T) {
 	}
 }
 
+func TestAttributionRoleForPass(t *testing.T) {
+	cases := []struct {
+		passRole string
+		want     string
+	}{
+		{"review", ReviewerRole},
+		{"implement", ImplementorRole},
+		{"fix", ImplementorRole},
+		{"", ""},
+		{"unrecognized", ""},
+	}
+	for _, tc := range cases {
+		if got := AttributionRoleForPass(tc.passRole); got != tc.want {
+			t.Errorf("AttributionRoleForPass(%q) = %q, want %q", tc.passRole, got, tc.want)
+		}
+	}
+}
+
 func TestCollectTaskRoles_RecordsSubagentTypeFromTaskInput(t *testing.T) {
 	ev := Event{
 		Type: "assistant",
