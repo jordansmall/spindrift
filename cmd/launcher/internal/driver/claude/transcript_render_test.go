@@ -176,6 +176,64 @@ func TestRenderTranscriptWithRole_TopLevelEventsUseGivenRole(t *testing.T) {
 	}
 }
 
+func TestRenderTranscriptWithRole_PassStartSwitchesActiveRole(t *testing.T) {
+	lines := []string{
+		`{"type":"assistant","message":{"content":[{"type":"text","text":"Starting the change."}]}}`,
+		`{"type":"spindrift_op","spindrift_op":{"op":"pass_start","pass":2,"role":"review"}}`,
+		`{"type":"assistant","message":{"content":[{"type":"text","text":"Looks good overall."}]}}`,
+	}
+	path := claude.WriteLog(t, lines...)
+
+	got, err := claude.RenderTranscriptWithRole(path, "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := "[implementor] Starting the change.\n[reviewer] Looks good overall.\n"
+	if got != want {
+		t.Errorf("RenderTranscriptWithRole = %q, want %q", got, want)
+	}
+}
+
+func TestRenderTranscriptWithRole_PassStartSequence_ImplementReviewFix(t *testing.T) {
+	lines := []string{
+		`{"type":"assistant","message":{"content":[{"type":"text","text":"Implementing the fix."}]}}`,
+		`{"type":"spindrift_op","spindrift_op":{"op":"pass_start","pass":2,"role":"review"}}`,
+		`{"type":"assistant","message":{"content":[{"type":"text","text":"Found an issue."}]}}`,
+		`{"type":"spindrift_op","spindrift_op":{"op":"pass_start","pass":3,"role":"fix"}}`,
+		`{"type":"assistant","message":{"content":[{"type":"text","text":"Fixing the issue."}]}}`,
+	}
+	path := claude.WriteLog(t, lines...)
+
+	got, err := claude.RenderTranscriptWithRole(path, "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := "[implementor] Implementing the fix.\n" +
+		"[reviewer] Found an issue.\n" +
+		"[implementor] Fixing the issue.\n"
+	if got != want {
+		t.Errorf("RenderTranscriptWithRole = %q, want %q", got, want)
+	}
+}
+
+func TestRenderTranscriptWithRole_PassStartWithEmptyRole_LeavesActiveRoleUnchanged(t *testing.T) {
+	lines := []string{
+		`{"type":"assistant","message":{"content":[{"type":"text","text":"Before the legacy pass_start."}]}}`,
+		`{"type":"spindrift_op","spindrift_op":{"op":"pass_start","pass":2}}`,
+		`{"type":"assistant","message":{"content":[{"type":"text","text":"After the legacy pass_start."}]}}`,
+	}
+	path := claude.WriteLog(t, lines...)
+
+	got, err := claude.RenderTranscriptWithRole(path, "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := "[implementor] Before the legacy pass_start.\n[implementor] After the legacy pass_start.\n"
+	if got != want {
+		t.Errorf("RenderTranscriptWithRole = %q, want %q", got, want)
+	}
+}
+
 func TestRenderTranscript_MissingFile_ReturnsEmpty(t *testing.T) {
 	got, err := claude.RenderTranscript(filepath.Join(t.TempDir(), "missing.log"))
 	if err != nil {
