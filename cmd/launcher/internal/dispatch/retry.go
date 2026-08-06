@@ -183,6 +183,9 @@ func (d *Dispatch) outcomeResult(logPath string, resolved outcome.Resolved) Resu
 	if issueIntentsErr != nil {
 		fmt.Fprintf(os.Stderr, "    ?? #%s: issue-intent scan: %v\n", d.number, issueIntentsErr)
 	}
+	if resolved.SelfReportError != nil {
+		fmt.Fprintf(os.Stderr, "    ?? #%s: self-report scan: %v\n", d.number, resolved.SelfReportError)
+	}
 	return Result{
 		Success: true, Resolved: resolved,
 		Comment: comment, CommentFound: commentFound,
