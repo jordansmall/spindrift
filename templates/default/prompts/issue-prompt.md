@@ -97,11 +97,14 @@ If the repo has a `flake.nix` devShell, prefer its pinned toolchain:
 
   nix develop -c <check-command>   # run any check inside the devShell
 
-Prefer a scoped check target (e.g. `checks-inbox`) over a bare
-`nix flake check` in-box, if the flake exposes one — a full flake check also
-evaluates checks that build/inspect the box's own image, which are heavy and
-unreliable to re-run from inside the box itself. Fall back to `nix flake
-check` only if no scoped target exists.
+Use a scoped check target (e.g. `checks-inbox`) if the flake exposes one, and
+do not run a full `nix flake check` in-box unless the diff changes what gets
+baked into the box's own image — concretely, unless it touches
+`nix/checks/image.nix` or `lib/image.nix`, the definitions that build and
+inspect that image and are heavy and unreliable to re-run from inside the box
+itself. This is a firm rule, and it **overrides** any acceptance criteria in
+the issue that ask for `nix flake check` more loosely. Fall back to `nix
+flake check` only if no scoped target exists.
 
 If `nix develop` is unavailable or fails, fall back to the baked toolchain and
 log the fallback. Go module without a devShell:
