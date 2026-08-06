@@ -31,6 +31,7 @@ func RenderTranscript(logPath string) (string, error) {
 func RenderTranscriptWithRole(logPath, topLevelRole string) (string, error) {
 	var lines []string
 	taskRole := make(map[string]string)
+	activeTopLevelRole := topLevelRole
 	err := logscan.ForEachLine(logPath, logscan.SkipOversized, func(line string) {
 		s := strings.TrimSpace(line)
 		if s == "" {
@@ -40,13 +41,21 @@ func RenderTranscriptWithRole(logPath, topLevelRole string) (string, error) {
 		if jsonErr := json.Unmarshal([]byte(s), &ev); jsonErr != nil {
 			return
 		}
+		if ev.Type == "spindrift_op" {
+			if ev.SpindriftOp != nil && ev.SpindriftOp.Op == "pass_start" {
+				if role := AttributionRoleForPass(ev.SpindriftOp.Role); role != "" {
+					activeTopLevelRole = role
+				}
+			}
+			return
+		}
 		if ev.Message == nil {
 			return
 		}
 		switch ev.Type {
 		case "assistant":
 			CollectTaskRoles(ev, taskRole)
-			role := ResolveRole(ev, taskRole, topLevelRole)
+			role := ResolveRole(ev, taskRole, activeTopLevelRole)
 			for _, block := range ev.Message.Content {
 				switch block.Type {
 				case "text":
@@ -58,7 +67,7 @@ func RenderTranscriptWithRole(logPath, topLevelRole string) (string, error) {
 				}
 			}
 		case "user":
-			role := ResolveRole(ev, taskRole, topLevelRole)
+			role := ResolveRole(ev, taskRole, activeTopLevelRole)
 			for _, block := range ev.Message.Content {
 				if block.Type != "tool_result" {
 					continue
