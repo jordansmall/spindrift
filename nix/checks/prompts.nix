@@ -321,6 +321,22 @@ in
         touch $out
       '';
 
+  # Issue #2377: the scoped-check-target steering above must be a firm rule,
+  # not a soft preference -- an explicit prohibition on running the full
+  # `nix flake check` in-box, overriding any issue acceptance criteria that
+  # loosely ask for it, with the one legitimate exception (the diff touches
+  # what's baked into the image) spelled out by file reference. Same
+  # CHECK-section scoping as the never-background/vanished-marker/git-add/
+  # no-cat-log checks above.
+  mkharness-prompt-check-full-flake-check-firm-rule =
+    pkgs.runCommand "mkharness-prompt-check-full-flake-check-firm-rule" { }
+      ''
+        grep -Pzoqi '(?s)(do not|must not) run.{0,80}full.{0,80}nix flake check' \
+          ${checkSectionSlices}/issue-check.txt
+        grep -qi 'nix/checks/image.nix\|lib/image.nix' ${checkSectionSlices}/issue-check.txt
+        touch $out
+      '';
+
   mkharness-prompt-fix-outcome-no-drift =
     pkgs.runCommand "mkharness-prompt-fix-outcome-no-drift" { }
       ''
