@@ -84,6 +84,14 @@ type config struct {
 	// pre-#2277 behavior of the review pass silently reusing the
 	// coordinator's model.
 	reviewModel string
+	// reviewEffort is the code-owned review pass's own --effort value (issue
+	// #2387): when set, runWithReviewPass forwards it as the review pass's
+	// driver-exec --effort flag instead of the coordinator's own effort,
+	// letting a reviewer effort be configured distinctly from the
+	// implementor/coordinator one. Empty falls back to cfg.effort, matching
+	// pre-#2387 behavior of the review pass silently reusing the
+	// coordinator's effort.
+	reviewEffort string
 }
 
 // run loops driver-exec for as many passes as the implementor's own
@@ -302,6 +310,14 @@ func runWithReviewPass(cfg config, stdout io.Writer) (int, error) {
 		// the review pass falls back to the coordinator's own model.
 		if cfg.reviewModel != "" {
 			reviewCfg.model = cfg.reviewModel
+		}
+		// Issue #2387: a configured reviewer effort overrides the
+		// coordinator effort reviewCfg otherwise inherited via `reviewCfg :=
+		// cfg` above; an unset reviewEffort leaves that inherited
+		// cfg.effort in place, so the review pass falls back to the
+		// coordinator's own effort.
+		if cfg.reviewEffort != "" {
+			reviewCfg.effort = cfg.reviewEffort
 		}
 
 		rc, err = invokeDriverExec(reviewCfg, stdout)
