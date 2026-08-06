@@ -1114,16 +1114,21 @@ func TestFormatSpindriftOpPassStartWithRole(t *testing.T) {
 // pass_start ops) switches its active top-level role mid-stream when it
 // consumes a pass_start spindrift_op whose Role is non-empty: a review
 // pass's pass_start attributes subsequent top-level assistant turns to
-// reviewer, not the ImplementorRole default (issue #2382).
+// reviewer, not the ImplementorRole default, across the switch-header,
+// count, and heartbeat lines alike (issue #2382).
 func TestWriterPassStartSwitchesActiveTopLevelRole(t *testing.T) {
 	const rule = "\xe2\x94\x80\xe2\x94\x80" // ──
 	var status bytes.Buffer
 	w := claude.New(&bytes.Buffer{}, "2382", &status)
 
 	passStart := `{"type":"spindrift_op","spindrift_op":{"op":"pass_start","pass":2,"role":"review"}}` + "\n"
+	toolEv := `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read","input":{"file_path":"a.go"}}]}}` + "\n"
 	narEv := `{"type":"assistant","message":{"content":[{"type":"text","text":"Reviewing the change."}]}}` + "\n"
+	resultEv := `{"type":"result","num_turns":3}` + "\n"
 	fmt.Fprint(w, passStart)
+	fmt.Fprint(w, toolEv)
 	fmt.Fprint(w, narEv)
+	fmt.Fprint(w, resultEv)
 
 	out := status.String()
 	if !strings.Contains(out, rule+" reviewer ") {
@@ -1131,6 +1136,12 @@ func TestWriterPassStartSwitchesActiveTopLevelRole(t *testing.T) {
 	}
 	if strings.Contains(out, rule+" implementor ") {
 		t.Errorf("must not emit an implementor header after review pass_start: %q", out)
+	}
+	if !strings.Contains(out, "1 read") {
+		t.Errorf("count line missing '1 read' bucketed under reviewer: %q", out)
+	}
+	if !strings.Contains(out, "#2382 reviewer") || !strings.Contains(out, "3 turns") {
+		t.Errorf("missing reviewer-attributed heartbeat line with turn count: %q", out)
 	}
 }
 

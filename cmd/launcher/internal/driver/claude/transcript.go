@@ -163,7 +163,7 @@ func CollectTaskRoles(ev Event, taskRole map[string]string) {
 // AttributionRoleForPass maps a pass_start SpindriftOp's Role field (the
 // orchestrator's own pass vocabulary: "implement", "review", "fix" — see
 // SpindriftOp.Role) to the attribution role constants console surfaces use
-// (ImplementorRole, ReviewerRole, DefaultRole): "review" becomes
+// (ImplementorRole or ReviewerRole): "review" becomes
 // ReviewerRole; "implement" and "fix" both become ImplementorRole, since a
 // fix pass is an implementor pass from the attribution surface's point of
 // view. An empty passRole (legacy pass_start with no role, or any op that
@@ -181,6 +181,23 @@ func AttributionRoleForPass(passRole string) string {
 	default:
 		return ""
 	}
+}
+
+// nextActiveTopLevelRole returns the top-level attribution role that should
+// be active after observing op, given the role currently in effect
+// (issue #2382). A pass_start op whose Role maps to a non-empty attribution
+// role (via AttributionRoleForPass) switches to that role; every other case —
+// a different op kind, a nil op, or a pass_start whose Role maps to ""—
+// leaves current unchanged. Both the heartbeat Writer and the transcript
+// renderer drive their live activeTopLevelRole through this one function.
+func nextActiveTopLevelRole(current string, op *SpindriftOp) string {
+	if op == nil || op.Op != "pass_start" {
+		return current
+	}
+	if role := AttributionRoleForPass(op.Role); role != "" {
+		return role
+	}
+	return current
 }
 
 // ResolveRole returns the acting role for ev: when it has no
