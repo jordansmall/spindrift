@@ -312,6 +312,13 @@
     # #712: a single `nix build .#checks-inbox` peaks near 3.7 GiB RSS
     # (agent-issue-640 dmesg); 4g left ~300MiB headroom and got cgroup
     # OOM-killed. 5g gives real headroom above the observed peak.
+    #
+    # #2379: this cap only matters where podman runs inside a fixed-RAM VM
+    # (macOS/Windows) — on native Linux the container shares host RAM
+    # directly, so a per-container cap is a self-imposed constraint with no
+    # upside there. That's why spindrift's own dogfood config
+    # (nix/dogfood-defaults.nix) leaves it unset on native Linux; this "5g"
+    # default remains unchanged for every other Consumer.
     default = "5g";
     doc = "max memory per agent container (--memory); empty string disables the limit";
     flakeOption = true;
