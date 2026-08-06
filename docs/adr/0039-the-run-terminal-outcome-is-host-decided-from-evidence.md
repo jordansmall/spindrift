@@ -152,3 +152,39 @@ This amends ADR 0036 and builds on ADR 0035; it references ADR 0017, 0029, and
 implementation is sliced into vertical tracer-bullet issues: the in-box
 reorder, the github auto-adopt-on-`!OutcomeFound` arm, and the local
 `Recoverable` state and its settle/Reconcile/recover/doctor wiring.
+
+## Amendment (issue #2378): the exit signal joins the evidence set
+
+The Decision's evidence list (outbox bundle presence, `LastSelfReportInLog`,
+the possibly-synthetic outcome line, the exit classification) missed one
+signal the host already has for free: whether the box's own process exited
+via an external kill signal (SIGTERM/143, SIGKILL/137 — the 128+signal
+convention `driver-exec` already uses in-box) rather than a clean or
+driver-decided exit. A box killed mid-work never gets the chance to print
+anything — not even the advisory `SelfReport` the Host consume-gate's
+`!OutcomeFound` arm otherwise leans on — so the existing gate's "no bundle,
+or no success self-report" fallback to `Failed` discarded a real incident: a
+land pass killed mid-check (`exit 143`) that had already written a complete,
+`checks-inbox`-green bundle to the outbox (#2363).
+
+The Host consume-gate now reads: with `!OutcomeFound` and a bundle present,
+`Recoverable` (`CODE_FORGE=local` push-only) or the PR-shaped auto-adopt arm
+fires on **either** a genuine success self-report **or** a signal-killed
+exit — both are host-observed, unauthenticated advisory evidence in the same
+trust posture `SelfReport` already documents, not a driver-controlled claim.
+Only with **no** bundle, or with neither leg of that evidence, does the run
+still park `Failed`: a clean (non-signal) exit with nothing self-reported and
+nothing killed still means "never finished," so it is unchanged.
+
+The exit signal is process-lifetime evidence, not log content — it lives in
+the same run's `runner.Run` error, never persisted to disk. `spindrift
+recover`'s later, separate invocation has no way to re-derive it the way it
+re-derives self-report from `dispatch.ResolveFromLogs`. Rather than invent a
+new on-disk artifact just to carry a boolean forward, `recover`'s local
+push-only landing arm (`SettleRelayedBranch`) instead trusts the same bundle
+presence check `tryMarkRecoverable` already required as a hard precondition:
+once an issue reaches `Recoverable`, recovering it needs no independent proof
+of *why* it got there, only confirmation the bundle is still sitting in the
+outbox. This leniency is scoped to the local push-only shape alone; every
+other shape (PR-shaped adopt) keeps requiring a self-report exactly as
+before — this amendment widens no other consume-gate arm.
