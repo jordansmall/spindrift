@@ -171,4 +171,33 @@ in
       result.value == [ ]
     ) "normalizeRoster [] must return [], got: ${builtins.toJSON result.value}";
     pkgs.runCommand "roster-normalize-allows-empty" { } "touch $out";
+
+  # Issue #2386: defaultRoster ships a fixed default `effort` per agent
+  # (scout=medium, reviewer=high, filer=medium, worker=high) as a literal on
+  # each entry.
+  roster-default-roster-ships-effort-defaults =
+    let
+      roster = rosterLib.defaultRoster {
+        scoutModel = "m";
+        reviewModel = "m";
+        filerModel = "m";
+        workerModel = "m";
+      };
+      byName = name: builtins.head (builtins.filter (e: e.name == name) roster);
+      expected = {
+        scout = "medium";
+        reviewer = "high";
+        filer = "medium";
+        worker = "high";
+      };
+      mismatches = builtins.filter (n: (byName n).effort != expected.${n}) [
+        "scout"
+        "reviewer"
+        "filer"
+        "worker"
+      ];
+    in
+    assert assertMsg (mismatches == [ ])
+      "defaultRoster must ship the fixed default effort per agent (scout=medium, reviewer=high, filer=medium, worker=high), mismatched: ${builtins.toJSON mismatches}";
+    pkgs.runCommand "roster-default-roster-ships-effort-defaults" { } "touch $out";
 }

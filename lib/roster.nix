@@ -12,8 +12,13 @@
 # always `null` here -- entrypoint.sh injects each agent's rendered prompt at
 # runtime from `promptFile`, never at eval time (see agent/entrypoint.sh's
 # generic prompt-injection loop). `effort`, like `model`, is an optional
-# pass-through -- no normalization, no default -- that each Driver forwards
-# verbatim when set (issue #2242).
+# pass-through on the general roster schema -- no normalization -- that each
+# Driver forwards verbatim when set (issue #2242). `defaultRoster`
+# additionally ships a fixed default `effort` per agent (scout=medium,
+# reviewer=high, filer=medium, worker=high; issue #2386) as a literal on
+# each entry below -- a caller assembling a custom roster by hand still gets
+# no injected default, since that stays specific to `defaultRoster`'s own
+# literals, not a `normalizeRoster`-level behavior.
 { lib }:
 {
   # Normalizes a roster list before any Driver consumes it (issue #2152 slice
@@ -64,6 +69,7 @@
       {
         name = "scout";
         model = scoutModel;
+        effort = "medium";
         mode = "subagent";
         description = "Map relevant files, seams, and tests; return a structured brief";
         tools = [
@@ -80,6 +86,7 @@
       {
         name = "reviewer";
         model = reviewModel;
+        effort = "high";
         mode = "subagent";
         description = "Review the branch diff for spec compliance and coding standards";
         tools = [
@@ -94,6 +101,7 @@
       {
         name = "filer";
         model = filerModel;
+        effort = "medium";
         mode = "subagent";
         description = "File issues from a review's non-blocking findings, best-effort";
         tools = [
@@ -107,6 +115,7 @@
       {
         name = "worker";
         model = workerModel;
+        effort = "high";
         mode = "subagent";
         description = "Implement a scoped slice of work delegated to it, with full implement-capable tools";
         tools = [

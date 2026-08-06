@@ -192,6 +192,16 @@ JSON object; the opencode Driver emits it as a `reasoningEffort:` key beside
 key/line entirely on both Drivers — the same inherit-session-effort behavior
 as today.
 
+`defaultRoster` itself now ships a fixed default `effort` per agent (issue
+#2386): `scout`/`filer` at `"medium"`, `reviewer`/`worker` at `"high"`. This
+is a literal on each of `defaultRoster`'s four built-in entries, not a
+`normalizeRoster`-level default — a freshly-baked image that omits `roster`
+entirely (and so falls back to `defaultRoster`) runs each subagent at a
+differentiated effort out of the box, with no Consumer hand-authoring one. A
+hand-authored custom `roster` entry still gets no `effort` injected; it must
+set `effort` itself to get anything beyond the target driver's inherited
+session effort.
+
 The legacy knobs map onto the default roster's entry names:
 
 | Legacy knob    | Roster entry `name` |
