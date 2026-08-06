@@ -508,9 +508,9 @@ func Resolve(logs []PassLog, kind string) (Resolved, error) {
 // tier, so a single unreadable log is still silently skipped here rather than
 // aborting the whole selection — the walk keeps trying later logs exactly as
 // before. The one change is that the error is no longer discarded outright:
-// the last I/O error seen (same "last pass wins" precedence as the winning
-// report) is now returned to the caller instead, so it's observable rather
-// than lost.
+// the last I/O error seen anywhere in the walk (independent of which log,
+// if any, ultimately wins) is now returned to the caller instead, so it's
+// observable rather than lost.
 func lastSelfReportAcrossLogs(logs []PassLog) (SelfReport, bool, error) {
 	var (
 		winner  SelfReport
