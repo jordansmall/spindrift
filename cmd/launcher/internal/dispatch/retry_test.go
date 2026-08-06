@@ -404,6 +404,50 @@ func TestDispatchWithRetry_TerminalNeverRetried(t *testing.T) {
 	}
 }
 
+// TestDispatchWithRetry_TerminalWithoutKillSignalLeavesKilledBySignalFalse
+// verifies that a terminal failure from an ordinary (non-signal) error, such
+// as TerminalNeverRetried's plain boxErr, leaves KilledBySignal false.
+func TestDispatchWithRetry_TerminalWithoutKillSignalLeavesKilledBySignalFalse(t *testing.T) {
+	fr := runner.NewFake()
+	fr.RunErr = boxErr
+	drv := fakeDriver{ClassifyFn: func(string) (driver.Classification, error) {
+		return driver.Classification{Class: driver.Terminal, Reason: driver.TaskFailed}, nil
+	}}
+	var sleeps []time.Duration
+	d := newTestDispatch(t, retryConfig(3, 0, 0), fr, drv, fakeClock(time.Time{}, &sleeps))
+
+	result := d.Run()
+
+	if result.Success {
+		t.Error("want Success=false (terminal failure), got true")
+	}
+	if result.KilledBySignal {
+		t.Error("want KilledBySignal=false (plain error, not a signal kill), got true")
+	}
+}
+
+// TestDispatchWithRetry_TerminalWithKillSignalSetsKilledBySignal verifies
+// that a terminal failure whose underlying error is a *runner.RunError with
+// a signal-kill exit code (issue #2378) sets Result.KilledBySignal.
+func TestDispatchWithRetry_TerminalWithKillSignalSetsKilledBySignal(t *testing.T) {
+	fr := runner.NewFake()
+	fr.RunErr = &runner.RunError{ExitCode: 143}
+	drv := fakeDriver{ClassifyFn: func(string) (driver.Classification, error) {
+		return driver.Classification{Class: driver.Terminal, Reason: driver.TaskFailed}, nil
+	}}
+	var sleeps []time.Duration
+	d := newTestDispatch(t, retryConfig(3, 0, 0), fr, drv, fakeClock(time.Time{}, &sleeps))
+
+	result := d.Run()
+
+	if result.Success {
+		t.Error("want Success=false (terminal failure), got true")
+	}
+	if !result.KilledBySignal {
+		t.Error("want KilledBySignal=true (RunError ExitCode=143, SIGTERM), got false")
+	}
+}
+
 // TestDispatchWithRetry_HoldThenSuccess verifies that a 429 with resetsAt
 // causes a hold sleep and re-dispatch, and that the hold does not consume
 // the retry cap when the re-dispatch succeeds.

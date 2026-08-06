@@ -85,6 +85,15 @@ type Result struct {
 	// reporting an outcome.
 	Classification driver.Classification
 	ClassifyErr    error
+
+	// KilledBySignal reports whether the box's process exited via an external
+	// kill signal (SIGTERM/143, SIGKILL/137 — runner.KilledBySignal's
+	// convention) on this attempt, rather than a clean or driver-decided exit.
+	// Populated only on a Terminal classification after a non-zero exit (issue
+	// #2378) — settle uses it as recoverable evidence (alongside a bundle
+	// actually sitting in the outbox) even when the driver never got to print
+	// any self-report at all.
+	KilledBySignal bool
 }
 
 // Dispatcher is the seam callers depend on so tests can inject a Fake
