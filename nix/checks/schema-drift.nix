@@ -50,6 +50,62 @@ let
       }";
     schema;
 
+  # Marker consistency for lib/env-schema.nix's intKind/hostConfig/hostDerived
+  # fields (issue #2363), factored like schemaChoiceIssues/nixPathIssues so
+  # the guard can exercise this exact predicate against a synthetic/injected
+  # schema, not only the real one. "Int member" here mirrors the isInt
+  # default test used elsewhere in this file (and lib/flakeModule.nix:109),
+  # narrowed to the one known non-membership exclusion (boxEnvOnly, e.g.
+  # devShellProbeTimeout) — the real host-config membership derivation is
+  # narrative-only as of this issue and lands in a later slice.
+  markerConsistencyIssues =
+    schema:
+    let
+      inherit (pkgs.lib) filter attrValues;
+      entries = attrValues schema;
+      isIntTyped = e: builtins.isInt (e.default or null);
+      isIntMember = e: isIntTyped e && !(e.boxEnvOnly or false);
+    in
+    {
+      # Every int-typed, non-boxEnvOnly (host-config) member must declare
+      # intKind so loadConfig() knows which parser (atoiSchema vs
+      # atoiNonnegSchema) it takes.
+      missingIntKind = filter (e: isIntMember e && !(e ? intKind)) entries;
+      # intKind must never decorate a member whose default isn't int-typed.
+      intKindOnNonInt = filter (e: (e ? intKind) && !(isIntTyped e)) entries;
+      # hostDerived implies host-config membership — it must not also carry
+      # one of the schema's two known non-membership signals (secret,
+      # boxEnvOnly).
+      hostDerivedExcluded = filter (
+        e: (e.hostDerived or false) && ((e.secret or false) || (e.boxEnvOnly or false))
+      ) entries;
+    };
+
+  # Throws via markerConsistencyIssues on a bad schema, else returns it
+  # unchanged. Shared so marker-consistency-guard exercises this exact
+  # assertion path (not just markerConsistencyIssues in isolation) — dropping
+  # any one of the three asserts here would make that guard fail too, not
+  # stay silently green.
+  assertMarkerConsistencyOk =
+    schema:
+    let
+      inherit (pkgs.lib) assertMsg concatStringsSep;
+      issues = markerConsistencyIssues schema;
+    in
+    assert assertMsg (issues.missingIntKind == [ ])
+      "lib/env-schema.nix: every int-typed, non-boxEnvOnly member must declare intKind: ${
+        concatStringsSep ", " (map (e: e.env) issues.missingIntKind)
+      }";
+    assert assertMsg (issues.intKindOnNonInt == [ ])
+      "lib/env-schema.nix: intKind must only appear on int-typed members: ${
+        concatStringsSep ", " (map (e: e.env) issues.intKindOnNonInt)
+      }";
+    assert assertMsg (issues.hostDerivedExcluded == [ ])
+      "lib/env-schema.nix: hostDerived implies host-config membership — must not also be secret or boxEnvOnly: ${
+        concatStringsSep ", " (map (e: e.env) issues.hostDerivedExcluded)
+      }";
+    schema;
+
   structuralPaths = import ../../lib/structural-paths.nix;
   resolveNixPath = import ../../lib/nixpath.nix;
 
@@ -923,4 +979,59 @@ in
     assert assertMsg (!result.success)
       "flake-nixpath-disjointness-collision-guard: expected assertNixPathsOk to reject a synthetic path nesting under the structural leaf agents.driver, but it evaluated successfully";
     pkgs.runCommand "flake-nixpath-disjointness-collision-guard" { } "touch $out";
+
+  # lib/env-schema.nix's intKind/hostConfig/hostDerived markers (issue #2363)
+  # must stay internally consistent: every int-typed, non-boxEnvOnly member
+  # declares intKind; intKind never decorates a non-int member; and
+  # hostDerived never contradicts host-config membership (secret or
+  # boxEnvOnly). Runs assertMarkerConsistencyOk against the real schema.
+  marker-consistency =
+    let
+      schema = import ../../lib/env-schema.nix;
+    in
+    assert (assertMarkerConsistencyOk schema) == schema;
+    pkgs.runCommand "marker-consistency" { } "touch $out";
+
+  # Regression guard (issue #2363): the marker-consistency check above must
+  # actually detect a violation of each of its three invariants, not just
+  # pass vacuously because the real schema already satisfies them. Runs
+  # assertMarkerConsistencyOk — the exact function marker-consistency calls —
+  # against three independently-mutated copies of the real schema, each
+  # violating exactly one invariant, via tryEval, so this fails if any one of
+  # the three asserts is ever dropped from assertMarkerConsistencyOk (not
+  # just from markerConsistencyIssues).
+  marker-consistency-guard =
+    let
+      schema = import ../../lib/env-schema.nix;
+      inherit (pkgs.lib) assertMsg;
+      # maxParallel is a real int-typed, non-boxEnvOnly member (intKind =
+      # "positive") — stripping intKind must be caught by missingIntKind.
+      missingIntKindSchema = schema // {
+        maxParallel = builtins.removeAttrs schema.maxParallel [ "intKind" ];
+      };
+      # label is a real string-typed member — decorating it with an intKind
+      # it has no business carrying must be caught by intKindOnNonInt.
+      intKindOnNonIntSchema = schema // {
+        label = schema.label // {
+          intKind = "nonneg";
+        };
+      };
+      # gitUserName is a real hostDerived member — marking it boxEnvOnly (a
+      # non-membership signal) must be caught by hostDerivedExcluded.
+      hostDerivedExcludedSchema = schema // {
+        gitUserName = schema.gitUserName // {
+          boxEnvOnly = true;
+        };
+      };
+      missingIntKindResult = builtins.tryEval (assertMarkerConsistencyOk missingIntKindSchema);
+      intKindOnNonIntResult = builtins.tryEval (assertMarkerConsistencyOk intKindOnNonIntSchema);
+      hostDerivedExcludedResult = builtins.tryEval (assertMarkerConsistencyOk hostDerivedExcludedSchema);
+    in
+    assert assertMsg (!missingIntKindResult.success)
+      "marker-consistency-guard: expected assertMarkerConsistencyOk to reject maxParallel with intKind removed, but it evaluated successfully";
+    assert assertMsg (!intKindOnNonIntResult.success)
+      "marker-consistency-guard: expected assertMarkerConsistencyOk to reject label decorated with an injected intKind, but it evaluated successfully";
+    assert assertMsg (!hostDerivedExcludedResult.success)
+      "marker-consistency-guard: expected assertMarkerConsistencyOk to reject gitUserName (hostDerived) decorated with an injected boxEnvOnly, but it evaluated successfully";
+    pkgs.runCommand "marker-consistency-guard" { } "touch $out";
 }
