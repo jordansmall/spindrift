@@ -36,6 +36,7 @@ set_box_env() {
   export OPENCODE_AUTH_CONTENT=""
   export ORCHESTRATOR_ENABLED=""
   export REPO_SLUG="owner/repo"
+  export REVIEW_EFFORT=""
   export REVIEW_MODEL="claude-opus-4-8"
   export SCOUT_MODEL="claude-haiku-4-5-20251001"
   export TRANSIENT_BACKOFF_SECS=30
