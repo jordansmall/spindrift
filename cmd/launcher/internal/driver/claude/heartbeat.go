@@ -20,19 +20,29 @@ type Writer struct {
 	issue string
 	out   io.Writer
 	// topLevelRole is the role for top-level (empty parent_tool_use_id)
-	// messages; empty means the ImplementorRole default (issue #2092).
+	// messages; empty means the ImplementorRole default (issue #2092). This
+	// is the construction-time default and is never mutated after New /
+	// NewWithTopLevelRole return — activeTopLevelRole is the live value
+	// ResolveRole consults.
 	topLevelRole string
 
-	mu              sync.Mutex
-	frame           driverkit.LineFramer
-	turns           int
-	taskRole        map[string]string         // Task tool-use id → subagent role
-	currentRole     string                    // role of the message being parsed
-	currentModel    string                    // shortened model family of the current message
-	lastHeader      string                    // role of last emitted switch header
-	lastHeaderModel string                    // model of last emitted switch header
-	roleCounts      map[string]map[string]int // tool counts per role
-	rolePhase       map[string]string         // current phase per role
+	mu sync.Mutex
+	// activeTopLevelRole is the live role ResolveRole uses for top-level
+	// (empty parent_tool_use_id) messages. It starts out equal to
+	// topLevelRole but a pass_start spindrift_op with a non-empty Role
+	// (issue #2382) updates it mid-stream, so an orchestrator review pass
+	// attributes its top-level turns to reviewer rather than staying
+	// pinned to the construction-time default.
+	activeTopLevelRole string
+	frame              driverkit.LineFramer
+	turns              int
+	taskRole           map[string]string         // Task tool-use id → subagent role
+	currentRole        string                    // role of the message being parsed
+	currentModel       string                    // shortened model family of the current message
+	lastHeader         string                    // role of last emitted switch header
+	lastHeaderModel    string                    // model of last emitted switch header
+	roleCounts         map[string]map[string]int // tool counts per role
+	rolePhase          map[string]string         // current phase per role
 }
 
 // New returns a Writer that passes all bytes to raw unchanged and emits
@@ -48,13 +58,14 @@ func New(raw io.Writer, issue string, out io.Writer) *Writer {
 // topLevelRole preserves New's ImplementorRole default.
 func NewWithTopLevelRole(raw io.Writer, issue string, out io.Writer, topLevelRole string) *Writer {
 	return &Writer{
-		raw:          raw,
-		issue:        issue,
-		out:          out,
-		topLevelRole: topLevelRole,
-		taskRole:     make(map[string]string),
-		roleCounts:   make(map[string]map[string]int),
-		rolePhase:    make(map[string]string),
+		raw:                raw,
+		issue:              issue,
+		out:                out,
+		topLevelRole:       topLevelRole,
+		activeTopLevelRole: topLevelRole,
+		taskRole:           make(map[string]string),
+		roleCounts:         make(map[string]map[string]int),
+		rolePhase:          make(map[string]string),
 	}
 }
 
@@ -91,7 +102,7 @@ func (w *Writer) parseLine(line string) {
 			CollectTaskRoles(ev, w.taskRole)
 
 			// Resolve acting role from parent_tool_use_id.
-			role := ResolveRole(ev, w.taskRole, w.topLevelRole)
+			role := ResolveRole(ev, w.taskRole, w.activeTopLevelRole)
 			// The live heartbeat deliberately groups by family, not exact
 			// model id: it's a coarse in-flight signal, so collapsing minor
 			// ids into one family row keeps it readable. The final per-model
@@ -161,6 +172,11 @@ func (w *Writer) parseLine(line string) {
 	case "spindrift_op":
 		if ev.SpindriftOp != nil {
 			fmt.Fprintln(w.out, FormatSpindriftOp(w.issue, *ev.SpindriftOp))
+			if ev.SpindriftOp.Op == "pass_start" {
+				if role := AttributionRoleForPass(ev.SpindriftOp.Role); role != "" {
+					w.activeTopLevelRole = role
+				}
+			}
 		}
 		return
 	}
