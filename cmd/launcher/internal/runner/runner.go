@@ -96,6 +96,7 @@ var ErrAlreadyRunning = errors.New("box: a container/sandbox for this issue is a
 type RunError struct {
 	ExitCode int
 	Msg      string
+	Err      error
 }
 
 func (e *RunError) Error() string {
@@ -103,6 +104,10 @@ func (e *RunError) Error() string {
 		return e.Msg
 	}
 	return fmt.Sprintf("box exited with code %d", e.ExitCode)
+}
+
+func (e *RunError) Unwrap() error {
+	return e.Err
 }
 
 // asRunError translates a non-nil error into *RunError when it unwraps to
@@ -119,16 +124,19 @@ func asRunError(err error) error {
 	}
 	var exitErr *exec.ExitError
 	if errors.As(err, &exitErr) {
-		return &RunError{ExitCode: exitErr.ExitCode(), Msg: err.Error()}
+		return &RunError{ExitCode: exitErr.ExitCode(), Msg: err.Error(), Err: exitErr}
 	}
 	return err
 }
 
 // KilledBySignal reports whether err unwraps to a *RunError whose ExitCode
-// matches the 128+N convention for SIGKILL (137) or SIGTERM (143) — the two
-// signals the launcher itself sends a box (Kill/Terminate) or that an
-// external actor (OOM killer, operator) might send. Returns false for a nil
-// error, a non-RunError, or any other exit code.
+// matches the 128+N convention for SIGKILL (137) or SIGTERM (143). Podman
+// and docker surface that convention faithfully for both an external kill
+// (OOM killer, operator) and the launcher's own Kill/Terminate. bwrap does
+// not: its Kill sends SIGKILL directly to the tracked child process, which
+// Go reports as ExitCode() == -1, not 137 — so a bwrap Terminate/Kill is
+// never detected here, only an externally-signalled bwrap child. Returns
+// false for a nil error, a non-RunError, or any other exit code.
 func KilledBySignal(err error) bool {
 	var runErr *RunError
 	if !errors.As(err, &runErr) {
