@@ -1107,3 +1107,87 @@ func TestFormatSpindriftOpPassStartWithRole(t *testing.T) {
 		t.Errorf("FormatSpindriftOp = %q, want it to contain %q", got, "pass 2 (review) started")
 	}
 }
+
+// TestWriterPassStartSwitchesActiveTopLevelRole verifies a Writer built via
+// plain New (no static topLevelRole — the common case for a legacy stream
+// that carries no role info until the orchestrator starts emitting
+// pass_start ops) switches its active top-level role mid-stream when it
+// consumes a pass_start spindrift_op whose Role is non-empty: a review
+// pass's pass_start attributes subsequent top-level assistant turns to
+// reviewer, not the ImplementorRole default (issue #2382).
+func TestWriterPassStartSwitchesActiveTopLevelRole(t *testing.T) {
+	const rule = "\xe2\x94\x80\xe2\x94\x80" // ──
+	var status bytes.Buffer
+	w := claude.New(&bytes.Buffer{}, "2382", &status)
+
+	passStart := `{"type":"spindrift_op","spindrift_op":{"op":"pass_start","pass":2,"role":"review"}}` + "\n"
+	narEv := `{"type":"assistant","message":{"content":[{"type":"text","text":"Reviewing the change."}]}}` + "\n"
+	fmt.Fprint(w, passStart)
+	fmt.Fprint(w, narEv)
+
+	out := status.String()
+	if !strings.Contains(out, rule+" reviewer ") {
+		t.Errorf("missing reviewer switch header after review pass_start: %q", out)
+	}
+	if strings.Contains(out, rule+" implementor ") {
+		t.Errorf("must not emit an implementor header after review pass_start: %q", out)
+	}
+}
+
+// TestWriterPassStartSwitchesBackToImplementorOnFix verifies a Writer
+// switches its active top-level role back to implementor when a "fix"
+// pass_start follows a "review" pass_start — the implement → review → fix
+// sequence a code-owned review's BLOCK verdict drives (issue #2382).
+func TestWriterPassStartSwitchesBackToImplementorOnFix(t *testing.T) {
+	const rule = "\xe2\x94\x80\xe2\x94\x80" // ──
+	var status bytes.Buffer
+	w := claude.New(&bytes.Buffer{}, "2382", &status)
+
+	reviewStart := `{"type":"spindrift_op","spindrift_op":{"op":"pass_start","pass":2,"role":"review"}}` + "\n"
+	reviewNar := `{"type":"assistant","message":{"content":[{"type":"text","text":"Reviewing the change."}]}}` + "\n"
+	fixStart := `{"type":"spindrift_op","spindrift_op":{"op":"pass_start","pass":3,"role":"fix"}}` + "\n"
+	fixNar := `{"type":"assistant","message":{"content":[{"type":"text","text":"Applying the fix."}]}}` + "\n"
+	fmt.Fprint(w, reviewStart)
+	fmt.Fprint(w, reviewNar)
+	fmt.Fprint(w, fixStart)
+	fmt.Fprint(w, fixNar)
+
+	out := status.String()
+	if !strings.Contains(out, rule+" reviewer ") {
+		t.Errorf("missing reviewer switch header after review pass_start: %q", out)
+	}
+	if !strings.Contains(out, rule+" implementor ") {
+		t.Errorf("missing implementor switch header after fix pass_start: %q", out)
+	}
+	if !strings.Contains(out, "Reviewing the change.") {
+		t.Errorf("missing review narration: %q", out)
+	}
+	if !strings.Contains(out, "Applying the fix.") {
+		t.Errorf("missing fix narration: %q", out)
+	}
+}
+
+// TestWriterPassStartEmptyRoleDoesNotChangeActiveRole verifies a pass_start
+// spindrift_op with no Role (the legacy single-loop dispatch shape, matching
+// TestFormatSpindriftOpPassStart) leaves the active top-level role
+// unchanged: a Writer built via plain New still attributes a subsequent
+// top-level turn to implementor, exactly as if the pass_start were absent
+// (issue #2382).
+func TestWriterPassStartEmptyRoleDoesNotChangeActiveRole(t *testing.T) {
+	const rule = "\xe2\x94\x80\xe2\x94\x80" // ──
+	var status bytes.Buffer
+	w := claude.New(&bytes.Buffer{}, "2382", &status)
+
+	passStart := `{"type":"spindrift_op","spindrift_op":{"op":"pass_start","pass":1}}` + "\n"
+	narEv := `{"type":"assistant","message":{"content":[{"type":"text","text":"Implementing the change."}]}}` + "\n"
+	fmt.Fprint(w, passStart)
+	fmt.Fprint(w, narEv)
+
+	out := status.String()
+	if !strings.Contains(out, rule+" implementor ") {
+		t.Errorf("missing implementor switch header after roleless pass_start: %q", out)
+	}
+	if strings.Contains(out, rule+" reviewer ") {
+		t.Errorf("must not emit a reviewer header after roleless pass_start: %q", out)
+	}
+}
