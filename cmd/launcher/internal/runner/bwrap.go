@@ -260,7 +260,7 @@ func (a *bwrapAdapter) Run(box Box) error {
 	}
 	a.trackRunning(box.Name, cmd.Process)
 	defer a.untrackRunning(box.Name)
-	return cmd.Wait()
+	return asRunError(cmd.Wait())
 }
 
 // trackRunning records proc as the live process for name, so a concurrent

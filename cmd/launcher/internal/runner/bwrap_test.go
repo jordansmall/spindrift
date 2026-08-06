@@ -1,6 +1,7 @@
 package runner
 
 import (
+	"errors"
 	"os/exec"
 	"reflect"
 	"strings"
@@ -33,6 +34,33 @@ func TestBwrapRun_LaunchesViaSeamAndSurfacesFailure(t *testing.T) {
 	}
 	if got := callCount(t, dir); got != 1 {
 		t.Errorf("callCount = %d, want 1", got)
+	}
+}
+
+// TestBwrapRun_ExitCodeSurfacedAsRunError verifies that a non-zero exit from
+// the scripted bwrap invocation surfaces as a *RunError carrying that exit
+// code, so later slices can detect signal-kill exit codes (128+N) through a
+// runtime-agnostic type instead of a raw *exec.ExitError.
+func TestBwrapRun_ExitCodeSurfacedAsRunError(t *testing.T) {
+	script, _ := newFakeCLI(t, fakeCall{exit: 137})
+	orig := execCommand
+	t.Cleanup(func() { execCommand = orig })
+	execCommand = func(name string, args ...string) *exec.Cmd {
+		return exec.Command(script, args...)
+	}
+
+	a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok"}
+	err := a.Run(Box{Env: map[string]string{}})
+
+	if err == nil {
+		t.Fatal("Run: want error, got nil")
+	}
+	var runErr *RunError
+	if !errors.As(err, &runErr) {
+		t.Fatalf("Run: want error to unwrap to *RunError, got %v (%T)", err, err)
+	}
+	if runErr.ExitCode != 137 {
+		t.Errorf("RunError.ExitCode: want 137, got %d", runErr.ExitCode)
 	}
 }
 

@@ -635,6 +635,38 @@ func TestRun_ExitedContainerReapedThenLaunches(t *testing.T) {
 	}
 }
 
+// TestRun_ExitCodeSurfacedAsRunError verifies that a non-zero exit from the
+// scripted `podman/docker run` invocation surfaces as a *RunError carrying
+// that exit code, so later slices can detect signal-kill exit codes (128+N)
+// through a runtime-agnostic type instead of a raw *exec.ExitError.
+func TestRun_ExitCodeSurfacedAsRunError(t *testing.T) {
+	dir := t.TempDir()
+	script := filepath.Join(dir, "fake-podman")
+	scriptContent := "#!/bin/sh\ncase \"$1\" in\n" +
+		"  inspect) echo exited ;;\n" +
+		"  rm) : ;;\n" +
+		"  run) exit 143 ;;\n" +
+		"esac\n"
+	if err := os.WriteFile(script, []byte(scriptContent), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	a := &ociAdapter{cli: script, image: "spindrift:test"}
+	box := Box{Name: "agent-issue-1", Env: map[string]string{}}
+
+	err := a.Run(box)
+	if err == nil {
+		t.Fatal("Run: want error, got nil")
+	}
+	var runErr *RunError
+	if !errors.As(err, &runErr) {
+		t.Fatalf("Run: want error to unwrap to *RunError, got %v (%T)", err, err)
+	}
+	if runErr.ExitCode != 143 {
+		t.Errorf("RunError.ExitCode: want 143, got %d", runErr.ExitCode)
+	}
+}
+
 func TestReapAfterSuccess(t *testing.T) {
 	if !reapAfterSuccess(nil) {
 		t.Error("exit 0 (nil error) must reap the container")
