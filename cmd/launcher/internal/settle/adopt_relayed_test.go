@@ -24,6 +24,38 @@ func TestSettle_GithubReadOnly_AdoptsBackstopSyntheticSuccess(t *testing.T) {
 	const issNum = "2224"
 	const prURL = "https://github.com/owner/repo/pull/2224"
 
+	fc, branch := newAdoptBackstopFixture(t, issNum, prURL, "feat: add widget\n\nAdds a widget.")
+
+	if len(fc.RelayBundleCalls) != 1 || fc.RelayBundleCalls[0] != (forge.RelayBundleCall{OutboxDir: "/outbox/2224", Ref: branch}) {
+		t.Fatalf("RelayBundleCalls = %+v, want one call with outbox=/outbox/2224 ref=%s", fc.RelayBundleCalls, branch)
+	}
+	if len(fc.CreateDraftPRCalls) != 1 {
+		t.Fatalf("CreateDraftPRCalls = %+v, want exactly 1", fc.CreateDraftPRCalls)
+	}
+	want := forge.CreateDraftPRCall{Title: "feat: add widget", Body: "Adds a widget.\n\nCloses #" + issNum, Base: "main", Head: branch}
+	if fc.CreateDraftPRCalls[0] != want {
+		t.Errorf("CreateDraftPRCalls[0] = %+v, want %+v", fc.CreateDraftPRCalls[0], want)
+	}
+	if fc.Merged != prURL {
+		t.Errorf("expected Merge(%q) to have run; fc.Merged=%q", prURL, fc.Merged)
+	}
+	iss, _ := fc.Issue(issNum)
+	if !containsLabel(iss.Labels, "agent-complete") {
+		t.Errorf("issue must carry agent-complete after an adopted-and-merged landing; labels=%v", iss.Labels)
+	}
+	if containsLabel(iss.Labels, "agent-failed") {
+		t.Errorf("issue must not carry agent-failed after an adopted-and-merged landing; labels=%v", iss.Labels)
+	}
+}
+
+// newAdoptBackstopFixture builds the forge/dispatch/config fixture shared by
+// TestSettle_GithubReadOnly_AdoptsBackstopSyntheticSuccess and its dedup
+// sibling below: a synthetic-backstop result with a self-reported success,
+// carrying prIntent as the box's own PR-intent body. It runs Settle and
+// returns the fake forge and the relayed branch for callers to assert
+// against.
+func newAdoptBackstopFixture(t *testing.T, issNum, prURL, prIntent string) (*forge.Fake, string) {
+	t.Helper()
 	fc := forge.NewFake(testDispatchLabels)
 	fc.BranchPrefix = "agent/issue-"
 	branch := fc.AgentBranch(issNum)
@@ -47,7 +79,7 @@ func TestSettle_GithubReadOnly_AdoptsBackstopSyntheticSuccess(t *testing.T) {
 			SelfReportFound: true,
 			SelfReport:      outcome.SelfReport{Status: "success"},
 		},
-		PRIntent:      "feat: add widget\n\nAdds a widget.",
+		PRIntent:      prIntent,
 		PRIntentFound: true,
 	}
 
@@ -57,26 +89,27 @@ func TestSettle_GithubReadOnly_AdoptsBackstopSyntheticSuccess(t *testing.T) {
 	c.BaseBranch = "main"
 	s := New(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
 	s.Settle(d, issNum, 0, result)
+	return fc, branch
+}
 
-	if len(fc.RelayBundleCalls) != 1 || fc.RelayBundleCalls[0] != (forge.RelayBundleCall{OutboxDir: "/outbox/2224", Ref: branch}) {
-		t.Fatalf("RelayBundleCalls = %+v, want one call with outbox=/outbox/2224 ref=%s", fc.RelayBundleCalls, branch)
-	}
+// TestSettle_GithubReadOnly_AdoptsBackstopSyntheticSuccess_DedupsExistingCloses
+// covers issue #2345: adoptRelayedBranch's ensureClosesReference call must
+// not duplicate a closing reference the box's own PR-intent body already
+// carries — mirroring TestEnsureClosesReference's own "non-local, already
+// has Closes, unchanged" case, but exercised through the full adopt-relayed
+// flow rather than calling ensureClosesReference directly.
+func TestSettle_GithubReadOnly_AdoptsBackstopSyntheticSuccess_DedupsExistingCloses(t *testing.T) {
+	const issNum = "2345"
+	const prURL = "https://github.com/owner/repo/pull/2345"
+
+	fc, branch := newAdoptBackstopFixture(t, issNum, prURL, "feat: add widget\n\nCloses #"+issNum)
+
 	if len(fc.CreateDraftPRCalls) != 1 {
 		t.Fatalf("CreateDraftPRCalls = %+v, want exactly 1", fc.CreateDraftPRCalls)
 	}
-	want := forge.CreateDraftPRCall{Title: "feat: add widget", Body: "Adds a widget.", Base: "main", Head: branch}
+	want := forge.CreateDraftPRCall{Title: "feat: add widget", Body: "Closes #" + issNum, Base: "main", Head: branch}
 	if fc.CreateDraftPRCalls[0] != want {
 		t.Errorf("CreateDraftPRCalls[0] = %+v, want %+v", fc.CreateDraftPRCalls[0], want)
-	}
-	if fc.Merged != prURL {
-		t.Errorf("expected Merge(%q) to have run; fc.Merged=%q", prURL, fc.Merged)
-	}
-	iss, _ := fc.Issue(issNum)
-	if !containsLabel(iss.Labels, "agent-complete") {
-		t.Errorf("issue must carry agent-complete after an adopted-and-merged landing; labels=%v", iss.Labels)
-	}
-	if containsLabel(iss.Labels, "agent-failed") {
-		t.Errorf("issue must not carry agent-failed after an adopted-and-merged landing; labels=%v", iss.Labels)
 	}
 }
 
@@ -126,7 +159,7 @@ func TestSettle_GithubReadOnly_AdoptsNoOutcomeSuccess(t *testing.T) {
 	if len(fc.CreateDraftPRCalls) != 1 {
 		t.Fatalf("CreateDraftPRCalls = %+v, want exactly 1", fc.CreateDraftPRCalls)
 	}
-	want := forge.CreateDraftPRCall{Title: "feat: add widget", Body: "Adds a widget.", Base: "main", Head: branch}
+	want := forge.CreateDraftPRCall{Title: "feat: add widget", Body: "Adds a widget.\n\nCloses #" + issNum, Base: "main", Head: branch}
 	if fc.CreateDraftPRCalls[0] != want {
 		t.Errorf("CreateDraftPRCalls[0] = %+v, want %+v", fc.CreateDraftPRCalls[0], want)
 	}

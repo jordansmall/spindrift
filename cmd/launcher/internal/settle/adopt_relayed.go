@@ -245,6 +245,7 @@ func (s *Settle) adoptRelayedBranch(num string, result dispatch.Result) (string,
 	if !ok {
 		title, body = s.defaultAdoptPRText(num)
 	}
+	body = ensureClosesReference(body, num, s.it)
 
 	url, err := dpc.CreateDraftPR(title, body, s.cfg.BaseBranch, branch)
 	if err != nil {
@@ -259,17 +260,15 @@ func (s *Settle) adoptRelayedBranch(num string, result dispatch.Result) (string,
 // print. title prefers the tracker issue's own title when available, falling
 // back to a generic "Adopt agent work for #<num>" when the issue lookup
 // fails or the issue carries no title. body explains the adoption's
-// provenance and appends a literal "Closes #<num>" so a merge auto-closes
-// the issue the same way an agent-authored PR body normally would.
+// provenance; adoptRelayedBranch's unconditional ensureClosesReference call
+// is what guarantees the "Closes #<num>" reference, the same way an
+// agent-authored PR body normally gets one.
 func (s *Settle) defaultAdoptPRText(num string) (title, body string) {
 	title = fmt.Sprintf("Adopt agent work for #%s", num)
 	if iss, err := s.it.Issue(num); err == nil && strings.TrimSpace(iss.Title) != "" {
 		title = iss.Title
 	}
-	body = fmt.Sprintf(
-		"Auto-adopted PR for the relayed agent branch: the run's driver self-reported success but its outcome line was missing or degraded to the synthetic backstop (ADR 0036/0039); this PR was opened host-side from the relayed outbox bundle.\n\nCloses #%s",
-		num,
-	)
+	body = "Auto-adopted PR for the relayed agent branch: the run's driver self-reported success but its outcome line was missing or degraded to the synthetic backstop (ADR 0036/0039); this PR was opened host-side from the relayed outbox bundle."
 	return title, body
 }
 
