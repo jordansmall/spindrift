@@ -249,6 +249,87 @@ func TestSettle_LocalPushOnly_NoSelfReportFallsBackToFailed(t *testing.T) {
 	}
 }
 
+// TestSettle_LocalPushOnly_KilledBySignalBundlePresentMarksRecoverable is
+// Slice 3's positive case for the signal-kill evidence leg (issue #2378): a
+// local run killed by an external signal before it ever printed an outcome
+// or self-report line has no self-report evidence at all, but a bundle
+// actually sitting in the outbox is still real work worth recovering — the
+// issue must be promoted to Recoverable rather than parked agent-failed.
+func TestSettle_LocalPushOnly_KilledBySignalBundlePresentMarksRecoverable(t *testing.T) {
+	const issNum = "1"
+	outbox := t.TempDir()
+	writeBundle(t, outbox)
+
+	fc := forge.NewFake(testDispatchLabels)
+	fc.BranchPrefix = "agent/issue-"
+	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
+
+	d := dispatch.NewFake()
+	result := dispatch.Result{
+		Success:        false,
+		KilledBySignal: true,
+		Resolved: outcome.Resolved{
+			Found: false,
+		},
+	}
+
+	c := baseConfig()
+	c.OutboxDir = func(num string) string { return outbox }
+	s := New(c, fc, fc.AsLocal())
+	s.Settle(d, issNum, 0, result)
+
+	found := false
+	for _, call := range fc.TransitionStateCalls {
+		if call.Num == issNum && call.To == forge.Recoverable {
+			found = true
+		}
+		if call.Num == issNum && call.To == forge.Failed {
+			t.Errorf("issue must not transition to Failed; TransitionStateCalls=%+v", fc.TransitionStateCalls)
+		}
+	}
+	if !found {
+		t.Errorf("expected a TransitionState(..., Recoverable) call; TransitionStateCalls=%+v", fc.TransitionStateCalls)
+	}
+}
+
+// TestSettle_LocalPushOnly_KilledBySignalBundleMissingFallsBackToFailed
+// covers the unchanged fallback: a signal-killed run alone is not enough — no
+// bundle actually sitting in the outbox means there is nothing for `spindrift
+// recover` to land, so the issue still falls through to the normal no-outcome
+// handling (settleUnresolved), which parks it agent-failed.
+func TestSettle_LocalPushOnly_KilledBySignalBundleMissingFallsBackToFailed(t *testing.T) {
+	const issNum = "1"
+	outbox := t.TempDir() // no bundle written
+
+	fc := forge.NewFake(testDispatchLabels)
+	fc.BranchPrefix = "agent/issue-"
+	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
+
+	d := dispatch.NewFake()
+	result := dispatch.Result{
+		Success:        false,
+		KilledBySignal: true,
+		Resolved: outcome.Resolved{
+			Found: false,
+		},
+	}
+
+	c := baseConfig()
+	c.OutboxDir = func(num string) string { return outbox }
+	s := New(c, fc, fc.AsLocal())
+	s.Settle(d, issNum, 0, result)
+
+	iss, _ := fc.Issue(issNum)
+	if !containsLabel(iss.Labels, "agent-failed") {
+		t.Errorf("issue must carry agent-failed when no bundle is present in the outbox; labels=%v", iss.Labels)
+	}
+	for _, call := range fc.TransitionStateCalls {
+		if call.Num == issNum && call.To == forge.Recoverable {
+			t.Errorf("issue must not transition to Recoverable when no bundle is present; TransitionStateCalls=%+v", fc.TransitionStateCalls)
+		}
+	}
+}
+
 // TestSettle_SettleRelayedBranch_LocalPushOnlyLandsRelayedBranch is Slice C's
 // positive case for ADR 0039's `spindrift recover` local push-only landing
 // arm: a Recoverable issue's relayed branch (bundle present in the outbox,
@@ -335,6 +416,98 @@ func TestSettle_SettleRelayedBranch_GitPushOnlyStillReturnsFalse(t *testing.T) {
 	got := s.SettleRelayedBranch(d, issNum, 0, result)
 	if got {
 		t.Fatalf("SettleRelayedBranch = true, want false for a git-shaped push-only forge")
+	}
+	if fc.Merged != "" {
+		t.Errorf("expected no merge to have run; fc.Merged=%q", fc.Merged)
+	}
+}
+
+// TestSettle_SettleRelayedBranch_LocalPushOnlyBundleAloneLandsRelayedBranch
+// is Slice 4's positive case for the recover-time bundle-alone leniency
+// (issue #2378): a signal-killed Box never gets the chance to print an
+// outcome or self-report line at all, so recover — a separate, later process
+// with no access to the original run's in-memory KilledBySignal bit — has no
+// self-report evidence to consult from disk. A bundle actually sitting in
+// the outbox is the same hard physical precondition tryMarkRecoverable
+// already required before ever promoting the issue to Recoverable, so for
+// the local push-only shape it must be sufficient on its own to land the
+// relayed branch here too.
+func TestSettle_SettleRelayedBranch_LocalPushOnlyBundleAloneLandsRelayedBranch(t *testing.T) {
+	const issNum = "1"
+	outbox := t.TempDir()
+	writeBundle(t, outbox)
+
+	fc := forge.NewFake(testDispatchLabels)
+	fc.BranchPrefix = "agent/issue-"
+	branch := fc.AgentBranch(issNum)
+	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-recoverable"}})
+
+	d := dispatch.NewFake()
+	result := dispatch.Result{
+		Success: false,
+		Resolved: outcome.Resolved{
+			SelfReportFound: false,
+		},
+	}
+
+	c := baseConfig()
+	c.MergeMode = "immediate"
+	c.OutboxDir = func(num string) string { return outbox }
+	s := New(c, fc, fc.AsLocal())
+
+	got := s.SettleRelayedBranch(d, issNum, 0, result)
+	if !got {
+		t.Fatalf("SettleRelayedBranch = false, want true")
+	}
+	if fc.Merged != branch {
+		t.Errorf("expected Merge(%q) to have run; fc.Merged=%q", branch, fc.Merged)
+	}
+
+	found := false
+	for _, call := range fc.TransitionStateCalls {
+		if call.Num == issNum && call.To == forge.Complete {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected a TransitionState(..., Complete) call; TransitionStateCalls=%+v", fc.TransitionStateCalls)
+	}
+	iss, _ := fc.Issue(issNum)
+	if !containsLabel(iss.Labels, "agent-complete") {
+		t.Errorf("issue must carry agent-complete after a landed relayed branch; labels=%v", iss.Labels)
+	}
+	if containsLabel(iss.Labels, "agent-failed") {
+		t.Errorf("issue must not carry agent-failed after a landed relayed branch; labels=%v", iss.Labels)
+	}
+}
+
+// TestSettle_SettleRelayedBranch_LocalPushOnlyNoBundleNoSelfReportReturnsFalse
+// is Slice 4's true-negative regression: local push-only with neither a
+// bundle in the outbox nor a self-report has no evidence at all to recover
+// from — SettleRelayedBranch must return false and no merge may run.
+func TestSettle_SettleRelayedBranch_LocalPushOnlyNoBundleNoSelfReportReturnsFalse(t *testing.T) {
+	const issNum = "1"
+	outbox := t.TempDir() // no bundle written
+
+	fc := forge.NewFake(testDispatchLabels)
+	fc.BranchPrefix = "agent/issue-"
+	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
+
+	d := dispatch.NewFake()
+	result := dispatch.Result{
+		Success: false,
+		Resolved: outcome.Resolved{
+			SelfReportFound: false,
+		},
+	}
+
+	c := baseConfig()
+	c.OutboxDir = func(num string) string { return outbox }
+	s := New(c, fc, fc.AsLocal())
+
+	got := s.SettleRelayedBranch(d, issNum, 0, result)
+	if got {
+		t.Fatalf("SettleRelayedBranch = true, want false with neither a bundle nor a self-report")
 	}
 	if fc.Merged != "" {
 		t.Errorf("expected no merge to have run; fc.Merged=%q", fc.Merged)

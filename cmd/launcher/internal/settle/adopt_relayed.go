@@ -135,16 +135,39 @@ func (s *Settle) adoptAndGate(d dispatch.Dispatcher, num string, gen uint64, res
 // git push-only (s.pr == nil but no BundleRelay) — falls through to
 // adoptAndGate unchanged; the capability gate inside adoptRelayedBranch
 // (BundleRelay + DraftPRCreator + OutboxDir) is what still scopes that path,
-// correctly returning false for git the same way it always has. Returns
-// false — leaving recover's unchanged "no open PR" exit — the moment the
-// self-report isn't a genuine success or nothing was actually relayable.
+// correctly returning false for git the same way it always has, and it keeps
+// requiring a genuine success self-report exactly as before.
+//
+// The local push-only shape alone gets one further leniency (issue #2378): a
+// signal-killed Box never gets the chance to print an outcome or self-report
+// line at all, so recover — a separate, later process with no access to the
+// original dispatch.Result.KilledBySignal bit tryMarkRecoverable observed
+// live — cannot re-derive "killed by signal" from disk the way it re-derives
+// a self-report via dispatch.ResolveFromLogs. Since a bundle actually sitting
+// in the outbox is the same hard physical precondition tryMarkRecoverable
+// already required alongside either kind of evidence before ever promoting
+// the issue to Recoverable in the first place, and since `spindrift recover
+// <n>` targeting one specific issue is itself a deliberate operator act
+// gated upstream by the agent-recover label workflow, s.bundlePresent(num)
+// alone is accepted as sufficient evidence for this shape when there is no
+// self-report to fall back on. Returns false — leaving recover's unchanged
+// "no open PR" exit — the moment neither a genuine success self-report nor a
+// present bundle backs the local push-only shape, or (for every other shape)
+// the self-report isn't a genuine success.
 func (s *Settle) SettleRelayedBranch(d dispatch.Dispatcher, num string, gen uint64, result dispatch.Result) bool {
-	if !result.Resolved.SelfReportFound || !isSuccessSelfReport(result.Resolved.SelfReport.Status) {
-		return false
-	}
+	selfReportOK := result.Resolved.SelfReportFound && isSuccessSelfReport(result.Resolved.SelfReport.Status)
 	cf := s.cfForNum(num)
 	if _, ok := cf.(forge.BundleRelay); ok && s.pr == nil {
-		return s.landRelayedBranchPushOnly(d, num, gen)
+		if selfReportOK {
+			return s.landRelayedBranchPushOnly(d, num, gen, "genuine success self-report; relayed branch landed")
+		}
+		if s.bundlePresent(num) {
+			return s.landRelayedBranchPushOnly(d, num, gen, "bundle present in outbox; relayed branch landed")
+		}
+		return false
+	}
+	if !selfReportOK {
+		return false
 	}
 	return s.adoptAndGate(d, num, gen, result, "genuine success self-report; PR opened on relayed branch")
 }
@@ -156,10 +179,13 @@ func (s *Settle) SettleRelayedBranch(d dispatch.Dispatcher, num string, gen uint
 // RelayBundle+merge landing path a genuine status=ready outcome uses
 // (selfHealGate's landPushOnly arm), keyed off the issue's own derived
 // agent branch — never any outcome-line field (issue #1949 provenance
-// discipline; there may be no parsed outcome line at all on this path).
-func (s *Settle) landRelayedBranchPushOnly(d dispatch.Dispatcher, num string, gen uint64) bool {
+// discipline; there may be no parsed outcome line at all on this path). note
+// is printed verbatim in the status=adopted line, distinguishing the two
+// kinds of evidence SettleRelayedBranch may have accepted to reach here — a
+// genuine self-report, or (issue #2378) a bundle present in the outbox alone.
+func (s *Settle) landRelayedBranchPushOnly(d dispatch.Dispatcher, num string, gen uint64, note string) bool {
 	branch := s.cfForNum(num).AgentBranch(num)
-	fmt.Printf("    #%s  landing=%s  status=adopted  note=genuine success self-report; relayed branch landed\n", num, branch)
+	fmt.Printf("    #%s  landing=%s  status=adopted  note=%s\n", num, branch, note)
 	s.recordLanding(num, branch)
 	landing, reason := s.selfHeal(d, num, gen, branch)
 	switch landing {
@@ -251,21 +277,28 @@ func (s *Settle) defaultAdoptPRText(num string) (title, body string) {
 // tryAdoptRelayedBranch/tryAdoptRelayedBranchNoOutcome (ADR 0039): a
 // CODE_FORGE=local push-only run has no PR-shaped adopt path at all
 // (adoptRelayedBranch's DraftPRCreator assertion always fails for it, since
-// local never implements it) — instead of parking Failed, a genuine success
-// self-report plus a bundle actually sitting in the outbox promotes the
-// issue to Recoverable, leaving the actual land (RelayBundle + fast-forward
-// merge into the Integration branch) to the operator-driven `spindrift
-// recover`. This function only stats the outbox — it never calls
-// RelayBundle/Merge itself, so a local issue is never auto-fast-forwarded on
-// an unauthenticated self-report alone.
+// local never implements it) — instead of parking Failed, either a genuine
+// success self-report or an external signal kill (SIGTERM/SIGKILL, issue
+// #2378 — the box died before it ever got to print an outcome or self-report
+// line) plus a bundle actually sitting in the outbox promotes the issue to
+// Recoverable, leaving the actual land (RelayBundle + fast-forward merge
+// into the Integration branch) to the operator-driven `spindrift recover`.
+// This function only stats the outbox — it never calls RelayBundle/Merge
+// itself, so a local issue is never auto-fast-forwarded on unauthenticated
+// evidence alone.
 func (s *Settle) tryMarkRecoverable(num string, result dispatch.Result) bool {
 	cf := s.cfForNum(num)
+	selfReportOK := result.Resolved.SelfReportFound && isSuccessSelfReport(result.Resolved.SelfReport.Status)
 	if _, ok := cf.(forge.BundleRelay); !ok || s.pr != nil ||
-		!result.Resolved.SelfReportFound || !isSuccessSelfReport(result.Resolved.SelfReport.Status) ||
+		(!selfReportOK && !result.KilledBySignal) ||
 		!s.bundlePresent(num) {
 		return false
 	}
-	fmt.Printf("    #%s  status=recoverable  note=genuine success self-report; bundle present in outbox; run `spindrift recover %s` to land it\n", num, num)
+	reason := "genuine success self-report"
+	if !selfReportOK {
+		reason = "killed by signal"
+	}
+	fmt.Printf("    #%s  status=recoverable  note=%s; bundle present in outbox; run `spindrift recover %s` to land it\n", num, reason, num)
 	s.transitionState(num, forge.InProgress, forge.Recoverable)
 	return true
 }
