@@ -331,9 +331,9 @@ in
   mkharness-prompt-check-full-flake-check-firm-rule =
     pkgs.runCommand "mkharness-prompt-check-full-flake-check-firm-rule" { }
       ''
-        grep -Pzoqi '(?s)(do not|must not) run.{0,80}full.{0,80}nix flake check' \
+        grep -Pzqi \
+          '(?s)(do not|must not) run.{0,80}full.{0,80}nix flake check.{0,300}(nix/checks/image\.nix|lib/image\.nix)' \
           ${checkSectionSlices}/issue-check.txt
-        grep -qi 'nix/checks/image.nix\|lib/image.nix' ${checkSectionSlices}/issue-check.txt
         touch $out
       '';
 
