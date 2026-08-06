@@ -2,12 +2,15 @@ package dispatch
 
 import (
 	"encoding/base64"
+	"errors"
 	"io"
+	"os"
 	"strings"
 	"testing"
 	"time"
 
 	"spindrift.dev/launcher/internal/driver"
+	"spindrift.dev/launcher/internal/outcome"
 	"spindrift.dev/launcher/internal/runner"
 	"spindrift.dev/launcher/internal/testutil"
 )
@@ -230,6 +233,59 @@ func TestDispatchWithRetry_SelfReportSurvivesSyntheticBackstop(t *testing.T) {
 	}
 	if result.Resolved.SelfReport.Parsed {
 		t.Error("SelfReport.Parsed: got true, want false (near-miss line does not parse the full grammar)")
+	}
+}
+
+// TestDispatchOutcomeResult_SelfReportErrorLoggedToStderr verifies that
+// outcomeResult surfaces resolved.SelfReportError (issue #2343 slice 1's
+// previously-swallowed self-report I/O error) to stderr with the
+// "self-report scan" message — restoring, on the live dispatch path, the
+// exact operator-visible warning the pre-refactor code printed. A single log
+// file can't make the genuine/synthetic tier succeed while the self-report
+// tier independently hits an I/O error (same file, same read shape), so this
+// exercises outcomeResult directly with an injected Resolved rather than
+// driving it through d.Run().
+func TestDispatchOutcomeResult_SelfReportErrorLoggedToStderr(t *testing.T) {
+	fr := runner.NewFake()
+	drv := fakeDriver{ClassifyFn: func(string) (driver.Classification, error) {
+		return driver.Classification{}, nil
+	}}
+	var sleeps []time.Duration
+	d := newTestDispatch(t, retryConfig(3, 0, 0), fr, drv, fakeClock(time.Time{}, &sleeps))
+
+	logPath := d.logPath()
+	if err := os.WriteFile(logPath, nil, 0o644); err != nil {
+		t.Fatalf("write empty log: %v", err)
+	}
+
+	selfReportErr := errors.New("self-report boom")
+	resolved := outcome.Resolved{
+		Found:           true,
+		Provenance:      outcome.ProvenanceGenuine,
+		Outcome:         outcome.Outcome{Status: "ready"},
+		SelfReportError: selfReportErr,
+	}
+
+	old := os.Stderr
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
+	os.Stderr = w
+	d.outcomeResult(logPath, resolved)
+	w.Close()
+	os.Stderr = old
+	captured, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("read captured stderr: %v", err)
+	}
+	stderr := string(captured)
+
+	if !strings.Contains(stderr, "self-report scan") {
+		t.Errorf("stderr must contain %q, got: %s", "self-report scan", stderr)
+	}
+	if !strings.Contains(stderr, selfReportErr.Error()) {
+		t.Errorf("stderr must contain the injected error text %q, got: %s", selfReportErr.Error(), stderr)
 	}
 }
 
