@@ -48,6 +48,23 @@
 #   boxEnvOnly   bool    boxEnv knob the Go launcher never reads directly (forwarded
 #                        to the Box only); excluded from launcher-env-coverage's
 #                        main.go presence requirement
+#   intKind      string  one of "positive" / "nonneg"; declares which int parser
+#                        a config member takes: "positive" for atoiSchema (zero
+#                        or negative falls back to default -- use where zero
+#                        would break something, e.g. semaphore capacity),
+#                        "nonneg" for atoiNonnegSchema (zero is a valid value --
+#                        use for timeouts/poll intervals/counts where 0 means
+#                        "disabled"/"uncapped"). Required on every int-typed
+#                        schema member loadConfig() reads via atoiSchema/
+#                        atoiNonnegSchema; must not appear on non-int members.
+#                        Enforced by the schema-drift check (nix/checks/
+#                        schema-drift.nix)
+#   hostConfig   bool    overrides the derived host-config membership rule
+#                        (member iff not secret and not boxEnvOnly) for knobs
+#                        where that derivation gives the wrong answer
+#   hostDerived  bool    marks a field that is generated but whose loader is
+#                        hand-written (not a plain getenvSchema/atoiSchema
+#                        call); implies host-config membership
 {
   # ── Consumer-tunable (flakeOption = true) ──────────────────────────────────
   label = {
@@ -117,6 +134,7 @@
     default = 3;
     doc = "maximum concurrent agent containers";
     flakeOption = true;
+    intKind = "positive";
     boxEnv = false;
   };
   branchPrefix = {
@@ -220,6 +238,7 @@
     default = "claude-sonnet-5";
     doc = "main/coordinator Claude model for the agent (zero-rebuild runtime switch); worker-tier defaults are unaffected";
     flakeOption = true;
+    hostConfig = true;
     nixSubPath = "models.default";
     boxEnv = true;
     boxEnvOnly = true;
@@ -409,6 +428,7 @@
     env = "GH_TOKEN";
     required = true;
     secret = true;
+    hostConfig = true;
     placeholder = "fake-token";
     doc = "fine-grained PAT scoped to the target repo — Contents/PR/Issues/Metadata RW; required unless CODE_FORGE and ISSUE_TRACKER are both local";
     boxEnv = true;
@@ -429,6 +449,7 @@
   claudeOAuthToken = {
     env = "CLAUDE_CODE_OAUTH_TOKEN";
     secret = true;
+    hostConfig = true;
     placeholder = "fake-oauth";
     doc = "Claude Code OAuth token (run 'claude setup-token'); set this or ANTHROPIC_API_KEY";
     boxEnv = true;
@@ -436,24 +457,28 @@
   opencodeAuthContent = {
     env = "OPENCODE_AUTH_CONTENT";
     secret = true;
+    hostConfig = true;
     doc = "opencode github-copilot Provider auth store (JSON) — the whole auth slice opencode reads natively (ADR 0009 amendment, #260); the github-copilot Provider is OAuth-only. Mint once on a host with 'opencode auth login -p github-copilot', then export the github-copilot slice of ~/.local/share/opencode/auth.json (exact jq recipe in docs/reference.md). Required when DRIVER=opencode and MODEL=github-copilot/<model>; ignored under the claude Driver";
     boxEnv = true;
   };
   anthropicAPIKey = {
     env = "ANTHROPIC_API_KEY";
     secret = true;
+    hostConfig = true;
     doc = "Anthropic API key; set this or CLAUDE_CODE_OAUTH_TOKEN";
     boxEnv = true;
   };
   jiraToken = {
     env = "JIRA_TOKEN";
     secret = true;
+    hostConfig = true;
     doc = "Jira API token (Cloud: paired with JIRA_EMAIL for Basic auth; Server/Data Center: used alone as a Bearer PAT); required when ISSUE_TRACKER=jira";
     boxEnv = false;
   };
   forgejoToken = {
     env = "FORGEJO_TOKEN";
     secret = true;
+    hostConfig = true;
     doc = "Forgejo/Gitea API token (Bearer/token scheme); required when ISSUE_TRACKER=forgejo";
     boxEnv = true;
   };
@@ -470,6 +495,7 @@
     placeholder = "Test Bot";
     doc = "commit identity name; falls back to host git config user.name";
     flakeOption = true;
+    hostDerived = true;
     nixSubPath = "user.name";
     boxEnv = true;
   };
@@ -480,6 +506,7 @@
     placeholder = "bot@example.com";
     doc = "commit identity email; falls back to host git config user.email";
     flakeOption = true;
+    hostDerived = true;
     nixSubPath = "user.email";
     boxEnv = true;
   };
@@ -514,6 +541,7 @@
     flag = "accumulation-repo-dir";
     doc = "host path to the bare Accumulation repo (ADR 0033), mounted read-only into the Box and landed into host-side; when CODE_FORGE=local, defaults to .spindrift/accum.git under the launcher's working directory (auto-created and seeded) and an explicit value still overrides it; unused otherwise";
     flakeOption = true;
+    hostDerived = true;
     nixSubPath = "accumulationRepoDir";
     boxEnv = false;
   };
@@ -551,6 +579,7 @@
     default = 3;
     doc = "fix-agent passes when CI is genuinely red before marking agent-failed; 0 disables self-healing";
     flakeOption = true;
+    intKind = "nonneg";
     nixSubPath = "retry.maxFix";
     boxEnv = false;
   };
@@ -560,6 +589,7 @@
     default = 3;
     doc = "rebase-and-retry passes when a green PR conflicts with the base after a sibling merge; 0 disables rebase retries";
     flakeOption = true;
+    intKind = "nonneg";
     nixSubPath = "retry.maxRebase";
     # Forwarded into the Box so the driver-exec outcome-backstop verb reads
     # this bound for its own best-effort push retry from launcher-delivered
@@ -572,6 +602,7 @@
     default = 0;
     doc = "cumulative tokens across the initial run and every fix pass before selfHealGate stops dispatching further fix passes (issue #2001); 0 disables the token budget cap";
     flakeOption = true;
+    intKind = "nonneg";
     nixSubPath = "budget.tokens";
     boxEnv = false;
   };
@@ -607,6 +638,7 @@
     default = 0;
     doc = "caps the wave size; 0 means uncapped";
     flakeOption = true;
+    intKind = "nonneg";
     boxEnv = false;
   };
   continuousDispatch = {
@@ -638,6 +670,7 @@
     default = 30;
     doc = "seconds between merge-gate poll iterations";
     flakeOption = true;
+    intKind = "nonneg";
     nixSubPath = "merge.pollInterval";
     boxEnv = false;
   };
@@ -647,6 +680,7 @@
     default = 1800;
     doc = "total seconds to wait for CI green before abandoning the merge attempt";
     flakeOption = true;
+    intKind = "nonneg";
     nixSubPath = "merge.pollTimeout";
     boxEnv = false;
   };
@@ -713,6 +747,7 @@
     default = 5;
     doc = "jitter seconds added to 429 hold duration to spread re-dispatch";
     flakeOption = true;
+    intKind = "nonneg";
     nixSubPath = "retry.holdJitter";
     # Forwarded into the Box for the outcome-backstop verb's push-retry
     # jitter (issue #2157); see maxRebaseAttempts.
@@ -724,6 +759,7 @@
     default = 30;
     doc = "base backoff seconds per retry for 529/overloaded and network transients";
     flakeOption = true;
+    intKind = "positive";
     nixSubPath = "retry.transientBackoff";
     # Forwarded into the Box for the outcome-backstop verb's push-retry
     # linear backoff unit (issue #2157); see maxRebaseAttempts.
@@ -735,6 +771,7 @@
     default = 3;
     doc = "max retries for transient exits (529/network backoff; consecutive 429 holds)";
     flakeOption = true;
+    intKind = "positive";
     nixSubPath = "retry.transientMax";
     boxEnv = false;
   };
