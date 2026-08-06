@@ -183,9 +183,9 @@ func hasClosingReference(body, num string) bool {
 // reference (and could auto-close) an unrelated real GitHub issue #N — or
 // body already carries a GitHub-recognized closing keyword (close/fix/
 // resolve and their inflections) referencing #num. Otherwise it appends a
-// literal "Closes #<num>" so a merge auto-closes the issue, matching the
-// convention defaultAdoptPRText already uses: a blank-line separator when
-// body is non-empty, or just "Closes #<num>" when body is empty.
+// literal "Closes #<num>" so a merge auto-closes the issue: a blank-line
+// separator when body is non-empty, or just "Closes #<num>" when body is
+// empty.
 func ensureClosesReference(body, num string, it forge.IssueTracker) string {
 	if _, ok := it.(forge.GithubTracker); !ok {
 		return body
