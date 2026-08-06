@@ -70,7 +70,7 @@
         }:
         let
           revision = inputs.self.shortRev or inputs.self.dirtyShortRev or "unknown";
-          dogfoodDefaults = import ./nix/dogfood-defaults.nix;
+          dogfoodDefaults = import ./nix/dogfood-defaults.nix { inherit system; };
           dogfoodSkills = import ./nix/dogfood-skills.nix {
             inherit caveman matt-skills jordan-skills;
           };
@@ -110,6 +110,7 @@
             infra.image.packages = dogfoodDefaults.packages;
             infra.image.extraClosures = dogfoodDefaults.extraClosures;
             infra.nix.storeWritable = dogfoodDefaults.nixStoreWritable;
+            infra.limits.memory = dogfoodDefaults.defaults.memoryLimit;
             agents.skills = dogfoodSkills;
             git.merge.policy = dogfoodDefaults.defaults.mergeMode;
             forge.boxAccess = dogfoodDefaults.defaults.boxForgeAndIssueAccess;

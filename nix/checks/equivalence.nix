@@ -734,6 +734,26 @@ in
       "dogfood leaf value(s) hand-restated outside nix/dogfood-defaults.nix: ${concatStringsSep ", " leaked}";
     pkgs.runCommand "dogfood-leaf-values-single-source" { } "touch $out";
 
+  # The dogfood's `memoryLimit` leaf must resolve differently per Consumer
+  # host platform (issue #2379): native Linux runs the container directly on
+  # host RAM, so no `--memory` cap is warranted there, while darwin runs
+  # podman inside a fixed-RAM VM where the historical 5g cap (issue #712)
+  # still applies. Same cross-system-at-pure-eval-time technique as
+  # skills-content-form-drvpath-host-independent below — import
+  # nix/dogfood-defaults.nix twice, differing only in `system`, and assert
+  # on the resulting `defaults.memoryLimit` split.
+  dogfood-memory-limit-platform-aware =
+    let
+      inherit (pkgs.lib) assertMsg;
+      defaultsLinux = import ../dogfood-defaults.nix { system = "aarch64-linux"; };
+      defaultsDarwin = import ../dogfood-defaults.nix { system = "aarch64-darwin"; };
+    in
+    assert assertMsg (defaultsLinux.defaults.memoryLimit == "")
+      ''dogfood memoryLimit must be unset ("") on native Linux (issue #2379): got "${defaultsLinux.defaults.memoryLimit}"'';
+    assert assertMsg (defaultsDarwin.defaults.memoryLimit == "5g")
+      ''dogfood memoryLimit must stay "5g" on darwin/podman-in-VM (issue #2379): got "${defaultsDarwin.defaults.memoryLimit}"'';
+    pkgs.runCommand "dogfood-memory-limit-platform-aware" { } "touch $out";
+
   # driverExecBin.src must not contain *_test.go — the image drvPath
   # must be invariant under host-side launcher test churn (issue #474).
   # A tight fileset is the invariant; adding a new import outside it fails

@@ -2,6 +2,10 @@
 # flake.nix's `spindrift` module config and nix/fixtures.nix's direct
 # mkHarness mirror, so the flakemodule-equivalence check verifies the two
 # wiring paths rather than two hand-copied value sets (issue #459).
+{ system }:
+let
+  isLinux = builtins.match ".*-linux" system != null;
+in
 {
   # `nix flake archive` warms flake inputs alongside the Go module cache, so
   # a subsequent in-box `nix flake check` doesn't hit the network cold
@@ -38,5 +42,9 @@
     # 2026-07-09): non-blocking review findings become tracked
     # `agent-review-finding` issues instead of staying stuck in PR bodies.
     filerModel = "claude-haiku-4-5-20251001";
+    # Cap podman's container memory on darwin/windows, where podman runs in a
+    # fixed-RAM VM (issue #712's original rationale); native Linux shares host
+    # RAM with the container directly, so no cap is needed there (issue #2379).
+    memoryLimit = if isLinux then "" else "5g";
   };
 }
