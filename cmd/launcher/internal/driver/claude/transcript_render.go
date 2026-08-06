@@ -42,11 +42,7 @@ func RenderTranscriptWithRole(logPath, topLevelRole string) (string, error) {
 			return
 		}
 		if ev.Type == "spindrift_op" {
-			if ev.SpindriftOp != nil && ev.SpindriftOp.Op == "pass_start" {
-				if role := AttributionRoleForPass(ev.SpindriftOp.Role); role != "" {
-					activeTopLevelRole = role
-				}
-			}
+			activeTopLevelRole = nextActiveTopLevelRole(activeTopLevelRole, ev.SpindriftOp)
 			return
 		}
 		if ev.Message == nil {

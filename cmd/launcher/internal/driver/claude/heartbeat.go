@@ -19,12 +19,6 @@ type Writer struct {
 	raw   io.Writer
 	issue string
 	out   io.Writer
-	// topLevelRole is the role for top-level (empty parent_tool_use_id)
-	// messages; empty means the ImplementorRole default (issue #2092). This
-	// is the construction-time default and is never mutated after New /
-	// NewWithTopLevelRole return — activeTopLevelRole is the live value
-	// ResolveRole consults.
-	topLevelRole string
 
 	mu sync.Mutex
 	// activeTopLevelRole is the live role ResolveRole uses for top-level
@@ -61,7 +55,6 @@ func NewWithTopLevelRole(raw io.Writer, issue string, out io.Writer, topLevelRol
 		raw:                raw,
 		issue:              issue,
 		out:                out,
-		topLevelRole:       topLevelRole,
 		activeTopLevelRole: topLevelRole,
 		taskRole:           make(map[string]string),
 		roleCounts:         make(map[string]map[string]int),
@@ -172,11 +165,7 @@ func (w *Writer) parseLine(line string) {
 	case "spindrift_op":
 		if ev.SpindriftOp != nil {
 			fmt.Fprintln(w.out, FormatSpindriftOp(w.issue, *ev.SpindriftOp))
-			if ev.SpindriftOp.Op == "pass_start" {
-				if role := AttributionRoleForPass(ev.SpindriftOp.Role); role != "" {
-					w.activeTopLevelRole = role
-				}
-			}
+			w.activeTopLevelRole = nextActiveTopLevelRole(w.activeTopLevelRole, ev.SpindriftOp)
 		}
 		return
 	}
