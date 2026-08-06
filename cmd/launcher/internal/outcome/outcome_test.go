@@ -1292,3 +1292,87 @@ func TestResolve_SelfReportAlwaysPopulated(t *testing.T) {
 		}
 	})
 }
+
+// TestResolve_SelfReportErrorPopulated pins Resolved.SelfReportError (issue
+// #2343 slice 1): when the self-report tier's log walk hits a genuine I/O
+// error on one log, the error is now surfaced on Resolved.SelfReportError
+// while Found/Provenance/Outcome selection -- driven entirely by the
+// genuine/synthetic tier here -- is unaffected. This is purely additive: a
+// caller that ignores SelfReportError sees identical Found/Provenance/Outcome
+// behavior to before this field existed.
+func TestResolve_SelfReportErrorPopulated(t *testing.T) {
+	badDir := t.TempDir()
+	goodPath := writeLog(t,
+		"SPINDRIFT_OUTCOME issue=9 landing=https://github.com/o/r/pull/9 status=ready note=all good",
+	)
+	logs := []outcome.PassLog{
+		{Label: "bad", Path: badDir},
+		{Label: "good", Path: goodPath},
+	}
+
+	got, err := outcome.Resolve(logs, "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !got.Found {
+		t.Fatal("Found: got false, want true")
+	}
+	if got.Provenance != outcome.ProvenanceGenuine {
+		t.Errorf("Provenance: got %q, want %q", got.Provenance, outcome.ProvenanceGenuine)
+	}
+	if got.Outcome.Status != "ready" {
+		t.Errorf("Outcome.Status: got %q, want %q", got.Outcome.Status, "ready")
+	}
+	if got.SelfReportError == nil {
+		t.Fatal("SelfReportError: got nil, want a non-nil I/O error from the bad log")
+	}
+}
+
+// TestResolve_MultiLogSelfReportErrorDoesNotAbortWalk pins the existing
+// silent-skip guarantee (issue #2343 slice 1): a bad log sandwiched between
+// two good ones does not abort the self-report walk -- it is skipped and the
+// walk keeps going, same as before this field existed. Here pass-1 supplies
+// an early self-report, pass-2 (a directory) errors, and pass-3 supplies both
+// the authoritative genuine outcome and a later self-report that overwrites
+// pass-1's as the winner (last pass wins, unaffected by pass-2's error in
+// between). Found/Provenance/Outcome are driven entirely by pass-3's clean
+// genuine match; SelfReportError still surfaces pass-2's I/O error even
+// though the self-report walk's very next pass succeeded -- the error field
+// is its own last-seen tracker, independent of the winning report. A caller
+// who ignores SelfReportError sees identical Found/Provenance/Outcome/
+// SelfReport/SelfReportFound behavior to before this field existed.
+func TestResolve_MultiLogSelfReportErrorDoesNotAbortWalk(t *testing.T) {
+	pass1 := writeLog(t, "SPINDRIFT_OUTCOME: success")
+	badDir := t.TempDir()
+	pass3 := writeLog(t,
+		"SPINDRIFT_OUTCOME issue=9 landing=https://github.com/o/r/pull/9 status=ready note=all good",
+	)
+	logs := []outcome.PassLog{
+		{Label: "pass-1", Path: pass1},
+		{Label: "pass-2-bad", Path: badDir},
+		{Label: "pass-3", Path: pass3},
+	}
+
+	got, err := outcome.Resolve(logs, "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !got.Found {
+		t.Fatal("Found: got false, want true: the walk must not abort because of the bad middle log")
+	}
+	if got.Provenance != outcome.ProvenanceGenuine {
+		t.Errorf("Provenance: got %q, want %q", got.Provenance, outcome.ProvenanceGenuine)
+	}
+	if got.Outcome.Status != "ready" {
+		t.Errorf("Outcome.Status: got %q, want %q", got.Outcome.Status, "ready")
+	}
+	if !got.SelfReportFound {
+		t.Fatal("SelfReportFound: got false, want true")
+	}
+	if got.SelfReport.Status != "ready" {
+		t.Errorf("SelfReport.Status: got %q, want %q (pass-3's later self-report wins)", got.SelfReport.Status, "ready")
+	}
+	if got.SelfReportError == nil {
+		t.Fatal("SelfReportError: got nil, want the bad middle log's I/O error to still surface")
+	}
+}

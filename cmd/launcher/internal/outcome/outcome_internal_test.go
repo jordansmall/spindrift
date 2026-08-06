@@ -338,6 +338,36 @@ func TestLastSelfReportInLog_NoOutcome(t *testing.T) {
 	}
 }
 
+// --- lastSelfReportAcrossLogs tests (issue #2343 slice 1) ---
+
+// TestLastSelfReportAcrossLogs_SkipsBadLogButReturnsError pins that a log
+// whose scan hits a genuine I/O error (here: Path pointing at a directory,
+// so os.Open succeeds but the subsequent bufio read fails with "is a
+// directory") is skipped just like before -- the walk still finds the good
+// log's report and never aborts -- but the error is no longer discarded: it
+// comes back to the caller instead of being swallowed.
+func TestLastSelfReportAcrossLogs_SkipsBadLogButReturnsError(t *testing.T) {
+	badDir := t.TempDir()
+	goodPath := writeLog(t,
+		"SPINDRIFT_OUTCOME: success",
+	)
+	logs := []PassLog{
+		{Label: "bad", Path: badDir},
+		{Label: "good", Path: goodPath},
+	}
+
+	report, found, err := lastSelfReportAcrossLogs(logs)
+	if err == nil {
+		t.Fatal("expected a non-nil error from the bad log, got nil")
+	}
+	if !found {
+		t.Fatal("expected found=true: the good log's report must still win")
+	}
+	if report.Status != "success" {
+		t.Errorf("Status: got %q, want %q", report.Status, "success")
+	}
+}
+
 // TestLastSelfReportInLog_SkipsSyntheticOnlyLog verifies that when the ONLY
 // leading-token line in the log is the backstop's own synthetic line, the
 // self-report is genuinely absent — only the backstop spoke, the driver

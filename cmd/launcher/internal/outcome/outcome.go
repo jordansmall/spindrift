@@ -357,6 +357,15 @@ type Resolved struct {
 	// Found false (neither tier found anything).
 	SelfReport      SelfReport
 	SelfReportFound bool
+	// SelfReportError carries the last I/O error lastSelfReportAcrossLogs hit
+	// while scanning logs for the self-report tier (issue #2343 slice 1). It
+	// is distinct from Resolve's own returned error, which reflects only the
+	// genuine/synthetic tier's near-miss/error -- the self-report walk still
+	// never aborts on this error and keeps trying later logs (see
+	// lastSelfReportAcrossLogs), so this field is purely observability: it
+	// does not change which report, if any, ends up on SelfReport above. Nil
+	// when no I/O error occurred while scanning for a self-report.
+	SelfReportError error
 }
 
 // Resolve is the single seam that picks among the tiers of the
@@ -443,10 +452,10 @@ func Resolve(logs []PassLog, kind string) (Resolved, error) {
 	// Resolved this function returns alongside a near-miss error, rather than
 	// losing that signal entirely just because the authoritative tier
 	// couldn't settle on a clean winner.
-	report, reportFound := lastSelfReportAcrossLogs(logs)
+	report, reportFound, reportErr := lastSelfReportAcrossLogs(logs)
 
 	if lastErr != nil {
-		return Resolved{Kind: kind, SelfReport: report, SelfReportFound: reportFound}, lastErr
+		return Resolved{Kind: kind, SelfReport: report, SelfReportFound: reportFound, SelfReportError: reportErr}, lastErr
 	}
 
 	if found {
@@ -461,11 +470,12 @@ func Resolve(logs []PassLog, kind string) (Resolved, error) {
 			Found:           true,
 			SelfReport:      report,
 			SelfReportFound: reportFound,
+			SelfReportError: reportErr,
 		}, nil
 	}
 
 	if !reportFound {
-		return Resolved{Kind: kind}, nil
+		return Resolved{Kind: kind, SelfReportError: reportErr}, nil
 	}
 	if report.Parsed {
 		return Resolved{
@@ -475,6 +485,7 @@ func Resolve(logs []PassLog, kind string) (Resolved, error) {
 			Found:           true,
 			SelfReport:      report,
 			SelfReportFound: true,
+			SelfReportError: reportErr,
 		}, nil
 	}
 	return Resolved{
@@ -484,32 +495,40 @@ func Resolve(logs []PassLog, kind string) (Resolved, error) {
 		Found:           true,
 		SelfReport:      report,
 		SelfReportFound: true,
+		SelfReportError: reportErr,
 	}, nil
 }
 
 // lastSelfReportAcrossLogs walks logs in order calling
 // lastSelfReportInLog(log.Path) for each, keeping the last one that reports a
 // match — the same "last pass wins" precedence Resolve's genuine/synthetic
-// walk and dispatch.ResolveFromLogs both apply. Unlike that walk, an
-// I/O error here is not propagated to the caller: lastSelfReportInLog only
+// walk and dispatch.ResolveFromLogs both apply. lastSelfReportInLog only
 // errors on a genuine I/O failure (never a parse failure — a self-report has
 // no near-miss shape to fail), and this is already the last-resort fallback
-// tier, so a single unreadable log is silently skipped rather than aborting
-// the whole selection.
-func lastSelfReportAcrossLogs(logs []PassLog) (SelfReport, bool) {
+// tier, so a single unreadable log is still silently skipped here rather than
+// aborting the whole selection — the walk keeps trying later logs exactly as
+// before. The one change is that the error is no longer discarded outright:
+// the last I/O error seen (same "last pass wins" precedence as the winning
+// report) is now returned to the caller instead, so it's observable rather
+// than lost.
+func lastSelfReportAcrossLogs(logs []PassLog) (SelfReport, bool, error) {
 	var (
-		winner SelfReport
-		found  bool
+		winner  SelfReport
+		found   bool
+		lastErr error
 	)
 	for _, log := range logs {
 		report, ok, err := lastSelfReportInLog(log.Path)
+		if err != nil {
+			lastErr = err
+		}
 		if err != nil || !ok {
 			continue
 		}
 		winner = report
 		found = true
 	}
-	return winner, found
+	return winner, found, lastErr
 }
 
 // LastCommentLineInLog scans the file at path for the last line carrying the
