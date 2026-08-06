@@ -55,24 +55,37 @@ let
   # the guard can exercise this exact predicate against a synthetic/injected
   # schema, not only the real one. "Int member" here mirrors the isInt
   # default test used elsewhere in this file (and lib/flakeModule.nix:109),
-  # narrowed to the one known non-membership exclusion (boxEnvOnly, e.g.
-  # devShellProbeTimeout) — the real host-config membership derivation is
-  # narrative-only as of this issue and lands in a later slice.
+  # narrowed to the schema's two known non-membership signals (secret,
+  # boxEnvOnly — the same pair the header's hostConfig doc and
+  # hostDerivedExcluded below use to define host-config membership) — the
+  # real host-config membership derivation is narrative-only as of this issue
+  # and lands in a later slice.
   markerConsistencyIssues =
     schema:
     let
-      inherit (pkgs.lib) filter attrValues;
+      inherit (pkgs.lib) filter attrValues elem;
       entries = attrValues schema;
       isIntTyped = e: builtins.isInt (e.default or null);
-      isIntMember = e: isIntTyped e && !(e.boxEnvOnly or false);
+      isIntMember = e: isIntTyped e && !(e.secret or false) && !(e.boxEnvOnly or false);
     in
     {
-      # Every int-typed, non-boxEnvOnly (host-config) member must declare
-      # intKind so loadConfig() knows which parser (atoiSchema vs
+      # Every int-typed, non-secret, non-boxEnvOnly (host-config) member must
+      # declare intKind so loadConfig() knows which parser (atoiSchema vs
       # atoiNonnegSchema) it takes.
       missingIntKind = filter (e: isIntMember e && !(e ? intKind)) entries;
       # intKind must never decorate a member whose default isn't int-typed.
       intKindOnNonInt = filter (e: (e ? intKind) && !(isIntTyped e)) entries;
+      # intKind, when present, must be exactly one of the two documented enum
+      # values (lib/env-schema.nix header) — a typo (e.g. "positve") would
+      # otherwise silently pass presence/int-typedness checks.
+      badIntKindValue = filter (
+        e:
+        (e ? intKind)
+        && !(elem e.intKind [
+          "positive"
+          "nonneg"
+        ])
+      ) entries;
       # hostDerived implies host-config membership — it must not also carry
       # one of the schema's two known non-membership signals (secret,
       # boxEnvOnly).
@@ -84,7 +97,7 @@ let
   # Throws via markerConsistencyIssues on a bad schema, else returns it
   # unchanged. Shared so marker-consistency-guard exercises this exact
   # assertion path (not just markerConsistencyIssues in isolation) — dropping
-  # any one of the three asserts here would make that guard fail too, not
+  # any one of the four asserts here would make that guard fail too, not
   # stay silently green.
   assertMarkerConsistencyOk =
     schema:
@@ -93,12 +106,16 @@ let
       issues = markerConsistencyIssues schema;
     in
     assert assertMsg (issues.missingIntKind == [ ])
-      "lib/env-schema.nix: every int-typed, non-boxEnvOnly member must declare intKind: ${
+      "lib/env-schema.nix: every int-typed, non-secret, non-boxEnvOnly member must declare intKind: ${
         concatStringsSep ", " (map (e: e.env) issues.missingIntKind)
       }";
     assert assertMsg (issues.intKindOnNonInt == [ ])
       "lib/env-schema.nix: intKind must only appear on int-typed members: ${
         concatStringsSep ", " (map (e: e.env) issues.intKindOnNonInt)
+      }";
+    assert assertMsg (issues.badIntKindValue == [ ])
+      "lib/env-schema.nix: intKind must be exactly \"positive\" or \"nonneg\": ${
+        concatStringsSep ", " (map (e: e.env) issues.badIntKindValue)
       }";
     assert assertMsg (issues.hostDerivedExcluded == [ ])
       "lib/env-schema.nix: hostDerived implies host-config membership — must not also be secret or boxEnvOnly: ${
@@ -981,10 +998,12 @@ in
     pkgs.runCommand "flake-nixpath-disjointness-collision-guard" { } "touch $out";
 
   # lib/env-schema.nix's intKind/hostConfig/hostDerived markers (issue #2363)
-  # must stay internally consistent: every int-typed, non-boxEnvOnly member
-  # declares intKind; intKind never decorates a non-int member; and
-  # hostDerived never contradicts host-config membership (secret or
-  # boxEnvOnly). Runs assertMarkerConsistencyOk against the real schema.
+  # must stay internally consistent: every int-typed, non-secret,
+  # non-boxEnvOnly member declares intKind; intKind never decorates a
+  # non-int member; intKind, when present, is exactly "positive" or
+  # "nonneg"; and hostDerived never contradicts host-config membership
+  # (secret or boxEnvOnly). Runs assertMarkerConsistencyOk against the real
+  # schema.
   marker-consistency =
     let
       schema = import ../../lib/env-schema.nix;
@@ -993,12 +1012,12 @@ in
     pkgs.runCommand "marker-consistency" { } "touch $out";
 
   # Regression guard (issue #2363): the marker-consistency check above must
-  # actually detect a violation of each of its three invariants, not just
+  # actually detect a violation of each of its four invariants, not just
   # pass vacuously because the real schema already satisfies them. Runs
   # assertMarkerConsistencyOk — the exact function marker-consistency calls —
-  # against three independently-mutated copies of the real schema, each
+  # against four independently-mutated copies of the real schema, each
   # violating exactly one invariant, via tryEval, so this fails if any one of
-  # the three asserts is ever dropped from assertMarkerConsistencyOk (not
+  # the four asserts is ever dropped from assertMarkerConsistencyOk (not
   # just from markerConsistencyIssues).
   marker-consistency-guard =
     let
@@ -1023,9 +1042,19 @@ in
           boxEnvOnly = true;
         };
       };
+      # maxParallel again — this time with a typo'd intKind value. intKind is
+      # documented (lib/env-schema.nix header) as an enum of exactly
+      # "positive" / "nonneg"; a typo like "positve" must be caught by
+      # badIntKindValue.
+      badIntKindValueSchema = schema // {
+        maxParallel = schema.maxParallel // {
+          intKind = "positve";
+        };
+      };
       missingIntKindResult = builtins.tryEval (assertMarkerConsistencyOk missingIntKindSchema);
       intKindOnNonIntResult = builtins.tryEval (assertMarkerConsistencyOk intKindOnNonIntSchema);
       hostDerivedExcludedResult = builtins.tryEval (assertMarkerConsistencyOk hostDerivedExcludedSchema);
+      badIntKindValueResult = builtins.tryEval (assertMarkerConsistencyOk badIntKindValueSchema);
     in
     assert assertMsg (!missingIntKindResult.success)
       "marker-consistency-guard: expected assertMarkerConsistencyOk to reject maxParallel with intKind removed, but it evaluated successfully";
@@ -1033,5 +1062,7 @@ in
       "marker-consistency-guard: expected assertMarkerConsistencyOk to reject label decorated with an injected intKind, but it evaluated successfully";
     assert assertMsg (!hostDerivedExcludedResult.success)
       "marker-consistency-guard: expected assertMarkerConsistencyOk to reject gitUserName (hostDerived) decorated with an injected boxEnvOnly, but it evaluated successfully";
+    assert assertMsg (!badIntKindValueResult.success)
+      "marker-consistency-guard: expected assertMarkerConsistencyOk to reject maxParallel with intKind mistyped as \"positve\", but it evaluated successfully";
     pkgs.runCommand "marker-consistency-guard" { } "touch $out";
 }
