@@ -455,9 +455,12 @@ let
   # (CODE_FORGE=local's harness-owned code-out step bundle-out wraps),
   # internal/seambundle (the bundle filename constant bundleout and the
   # launcher's local Code Forge both share), internal/outcomebackstop (issue
-  # #2157's outcome-backstop verb decision), and internal/retry (the shared
-  # linear-backoff leaf that verb's push retry rides) only, with *_test.go
-  # excluded. If
+  # #2157's outcome-backstop verb decision), internal/retry (the shared
+  # linear-backoff leaf that verb's push retry rides), and
+  # internal/promptassembly (issue #2349's assemble-prompt verb: the pure
+  # gate computation, fragment registry loader, and prompt assembly logic
+  # that mirrors agent/entrypoint.sh's phase_prompt_assembly) only, with
+  # *_test.go excluded. If
   # a new import is added outside this closure the build fails loudly
   # (missing package) — that is the intended failure mode (#474).
   driverExecBin = pkgs.buildGoModule {
@@ -501,6 +504,9 @@ let
         (lib.fileset.fileFilter (
           f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
         ) ../cmd/launcher/internal/retry)
+        (lib.fileset.fileFilter (
+          f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
+        ) ../cmd/launcher/internal/promptassembly)
       ];
     };
     # Same go.mod/go.sum as launcherBin above, but NOT the same vendorHash:
