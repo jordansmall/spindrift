@@ -1,0 +1,309 @@
+[
+  {
+    "gate": "SKILLS_FOUND",
+    "fragment": "skill-preamble.md",
+    "var": "SKILL_PREAMBLE",
+    "extraSubstVars": ["SKILLS_FOUND"]
+  },
+  {
+    "gate": "CAVEMAN_BAKED",
+    "fragment": "caveman-default.md",
+    "var": "CAVEMAN_STEP"
+  },
+  {
+    "gate": "TDD_BAKED",
+    "fragment": "tdd-default.md",
+    "var": "TDD_STEP"
+  },
+  {
+    "gate": "COMMIT_BAKED",
+    "fragment": "commit-default.md",
+    "var": "COMMIT_STEP"
+  },
+  {
+    "gate": "CODE_REVIEW_BAKED",
+    "fragment": "code-review-default.md",
+    "var": "CODE_REVIEW_STEP"
+  },
+  {
+    "gate": "REVIEW_LOOP_INLINE",
+    "fragment": "review-loop-inline.md",
+    "var": "REVIEW_LOOP_INLINE_STEP"
+  },
+  {
+    "gate": "REVIEW_LOOP_ORCHESTRATOR",
+    "fragment": "review-loop-orchestrator.md",
+    "var": "REVIEW_LOOP_ORCHESTRATOR_STEP"
+  },
+  {
+    "gate": "WORKER_PROVISIONED",
+    "fragment": "coordinator.md",
+    "var": "COORDINATOR_STEP"
+  },
+  {
+    "gate": "FILER_FILE_DIRECT_ANY",
+    "fragment": "file-issues-direct.md",
+    "var": "FILE_ISSUES_DIRECT_STEP"
+  },
+  {
+    "gate": "FILER_FILE_RELAY",
+    "fragment": "file-issues-relay.md",
+    "var": "FILE_ISSUES_RELAY_STEP"
+  },
+  {
+    "gate": "FILER_FILE_DIRECT_GH",
+    "fragment": "filer-label-direct.md",
+    "var": "FILER_LABEL_DIRECT_STEP"
+  },
+  {
+    "gate": "FILER_FILE_DIRECT_FORGEJO",
+    "fragment": "filer-label-direct-forgejo.md",
+    "var": "FILER_LABEL_DIRECT_FORGEJO_STEP"
+  },
+  {
+    "gate": "FILER_FILE_RELAY",
+    "fragment": "filer-label-relay.md",
+    "var": "FILER_LABEL_RELAY_STEP"
+  },
+  {
+    "gate": "FILER_FILE_DIRECT_GH",
+    "fragment": "filer-file-direct.md",
+    "var": "FILER_FILE_DIRECT_STEP"
+  },
+  {
+    "gate": "FILER_FILE_DIRECT_FORGEJO",
+    "fragment": "filer-file-direct-forgejo.md",
+    "var": "FILER_FILE_DIRECT_FORGEJO_STEP"
+  },
+  {
+    "gate": "FILER_FILE_RELAY",
+    "fragment": "filer-file-relay.md",
+    "var": "FILER_FILE_RELAY_STEP"
+  },
+  {
+    "gate": "AUTO_FORMAT",
+    "fragment": "auto-format.md",
+    "var": "AUTO_FORMAT_STEP"
+  },
+  {
+    "gate": "AUTO_LINT",
+    "fragment": "auto-lint.md",
+    "var": "AUTO_LINT_STEP"
+  },
+  {
+    "gate": "CI_FAILURE_SUMMARY",
+    "fragment": "ci-failure.md",
+    "var": "CI_FAILURE_STEP",
+    "extraSubstVars": ["CI_FAILURE_SUMMARY"]
+  },
+  {
+    "gate": "FIX_CI_READ_GH",
+    "fragment": "fix-ci-read-github.md",
+    "var": "FIX_CI_READ_GITHUB_STEP"
+  },
+  {
+    "gate": "FIX_CI_READ_FORGEJO",
+    "fragment": "fix-ci-read-forgejo.md",
+    "var": "FIX_CI_READ_FORGEJO_STEP"
+  },
+  {
+    "gate": "PR_BODY_CLOSES",
+    "fragment": "pr-body-closes.md",
+    "var": "PR_BODY_CLOSES_STEP"
+  },
+  {
+    "gate": "PR_BODY_LOCAL_REF",
+    "fragment": "pr-body-local-ref.md",
+    "var": "PR_BODY_LOCAL_REF_STEP"
+  },
+  {
+    "gate": "PR_BODY_LOCAL_NOREF",
+    "fragment": "pr-body-local-noref.md",
+    "var": "PR_BODY_LOCAL_NOREF_STEP"
+  },
+  {
+    "gate": "ISSUE_TRACKER_GITHUB",
+    "fragment": "issue-read-github.md",
+    "var": "ISSUE_READ_GITHUB_STEP"
+  },
+  {
+    "gate": "ISSUE_TRACKER_LOCAL",
+    "fragment": "issue-read-local.md",
+    "var": "ISSUE_READ_LOCAL_STEP"
+  },
+  {
+    "gate": "ISSUE_TRACKER_FORGEJO",
+    "fragment": "issue-read-forgejo.md",
+    "var": "ISSUE_READ_FORGEJO_STEP"
+  },
+  {
+    "gate": "ISSUE_TRACKER_GITHUB",
+    "fragment": "research-issue-read-github.md",
+    "var": "RESEARCH_ISSUE_READ_GITHUB_STEP"
+  },
+  {
+    "gate": "ISSUE_TRACKER_LOCAL",
+    "fragment": "research-issue-read-local.md",
+    "var": "RESEARCH_ISSUE_READ_LOCAL_STEP"
+  },
+  {
+    "gate": "ISSUE_TRACKER_FORGEJO",
+    "fragment": "research-issue-read-forgejo.md",
+    "var": "RESEARCH_ISSUE_READ_FORGEJO_STEP"
+  },
+  {
+    "gate": "ISSUE_TRACKER_GITHUB",
+    "fragment": "scout-issue-read-github.md",
+    "var": "SCOUT_ISSUE_READ_GITHUB_STEP"
+  },
+  {
+    "gate": "ISSUE_TRACKER_LOCAL",
+    "fragment": "scout-issue-read-local.md",
+    "var": "SCOUT_ISSUE_READ_LOCAL_STEP"
+  },
+  {
+    "gate": "ISSUE_TRACKER_FORGEJO",
+    "fragment": "scout-issue-read-forgejo.md",
+    "var": "SCOUT_ISSUE_READ_FORGEJO_STEP"
+  },
+  {
+    "gate": "ISSUE_TRACKER_GITHUB",
+    "fragment": "review-issue-read-github.md",
+    "var": "REVIEW_ISSUE_READ_GITHUB_STEP"
+  },
+  {
+    "gate": "ISSUE_TRACKER_LOCAL",
+    "fragment": "review-issue-read-local.md",
+    "var": "REVIEW_ISSUE_READ_LOCAL_STEP"
+  },
+  {
+    "gate": "ISSUE_TRACKER_FORGEJO",
+    "fragment": "review-issue-read-forgejo.md",
+    "var": "REVIEW_ISSUE_READ_FORGEJO_STEP"
+  },
+  {
+    "gate": "ISSUE_TRACKER_GITHUB_READWRITE",
+    "fragment": "research-verdict-github.md",
+    "var": "RESEARCH_VERDICT_GITHUB_STEP"
+  },
+  {
+    "gate": "ISSUE_TRACKER_GITHUB_READONLY",
+    "fragment": "research-verdict-github-readonly.md",
+    "var": "RESEARCH_VERDICT_GITHUB_READONLY_STEP"
+  },
+  {
+    "gate": "ISSUE_TRACKER_LOCAL",
+    "fragment": "research-verdict-local.md",
+    "var": "RESEARCH_VERDICT_LOCAL_STEP"
+  },
+  {
+    "gate": "ISSUE_TRACKER_FORGEJO_READWRITE",
+    "fragment": "research-verdict-forgejo.md",
+    "var": "RESEARCH_VERDICT_FORGEJO_STEP"
+  },
+  {
+    "gate": "ISSUE_TRACKER_FORGEJO_READONLY",
+    "fragment": "research-verdict-forgejo-readonly.md",
+    "var": "RESEARCH_VERDICT_FORGEJO_READONLY_STEP"
+  },
+  {
+    "gate": "ISSUE_TRACKER_GITHUB_READWRITE",
+    "fragment": "issue-blocked-comment-github.md",
+    "var": "ISSUE_BLOCKED_COMMENT_GITHUB_STEP"
+  },
+  {
+    "gate": "ISSUE_TRACKER_GITHUB_READONLY",
+    "fragment": "issue-blocked-comment-github-readonly.md",
+    "var": "ISSUE_BLOCKED_COMMENT_GITHUB_READONLY_STEP"
+  },
+  {
+    "gate": "ISSUE_TRACKER_LOCAL",
+    "fragment": "issue-blocked-comment-local.md",
+    "var": "ISSUE_BLOCKED_COMMENT_LOCAL_STEP"
+  },
+  {
+    "gate": "ISSUE_TRACKER_FORGEJO_READWRITE",
+    "fragment": "issue-blocked-comment-forgejo.md",
+    "var": "ISSUE_BLOCKED_COMMENT_FORGEJO_STEP"
+  },
+  {
+    "gate": "ISSUE_TRACKER_FORGEJO_READONLY",
+    "fragment": "issue-blocked-comment-forgejo-readonly.md",
+    "var": "ISSUE_BLOCKED_COMMENT_FORGEJO_READONLY_STEP"
+  },
+  {
+    "gate": "BOX_ACCESS_READ_WRITE",
+    "fragment": "open-pr-push-git.md",
+    "var": "OPEN_PR_PUSH_READ_WRITE_STEP"
+  },
+  {
+    "gate": "BOX_ACCESS_READ_ONLY",
+    "fragment": "open-pr-push-outbox.md",
+    "var": "OPEN_PR_PUSH_READ_ONLY_STEP"
+  },
+  {
+    "gate": "OPEN_PR_CREATE_RW_GH",
+    "fragment": "open-pr-create-git.md",
+    "var": "OPEN_PR_CREATE_READ_WRITE_STEP"
+  },
+  {
+    "gate": "OPEN_PR_CREATE_RW_FORGEJO",
+    "fragment": "open-pr-create-forgejo.md",
+    "var": "OPEN_PR_CREATE_READ_WRITE_FORGEJO_STEP"
+  },
+  {
+    "gate": "BOX_ACCESS_READ_ONLY",
+    "fragment": "open-pr-create-outbox.md",
+    "var": "OPEN_PR_CREATE_READ_ONLY_STEP"
+  },
+  {
+    "gate": "BOX_ACCESS_READ_WRITE",
+    "fragment": "outcome-landing-git.md",
+    "var": "OUTCOME_LANDING_READ_WRITE_STEP"
+  },
+  {
+    "gate": "BOX_ACCESS_READ_ONLY",
+    "fragment": "outcome-landing-outbox.md",
+    "var": "OUTCOME_LANDING_READ_ONLY_STEP"
+  },
+  {
+    "gate": "BOX_ACCESS_READ_WRITE",
+    "fragment": "outcome-ready-means-git.md",
+    "var": "OUTCOME_READY_MEANS_READ_WRITE_STEP"
+  },
+  {
+    "gate": "BOX_ACCESS_READ_ONLY",
+    "fragment": "outcome-ready-means-outbox.md",
+    "var": "OUTCOME_READY_MEANS_READ_ONLY_STEP"
+  },
+  {
+    "gate": "BOX_ACCESS_READ_WRITE",
+    "fragment": "if-blocked-push-git.md",
+    "var": "IF_BLOCKED_PUSH_READ_WRITE_STEP"
+  },
+  {
+    "gate": "BOX_ACCESS_READ_ONLY",
+    "fragment": "if-blocked-push-outbox.md",
+    "var": "IF_BLOCKED_PUSH_READ_ONLY_STEP"
+  },
+  {
+    "gate": "BOX_ACCESS_READ_WRITE",
+    "fragment": "if-blocked-pr-git.md",
+    "var": "IF_BLOCKED_PR_READ_WRITE_STEP"
+  },
+  {
+    "gate": "BOX_ACCESS_READ_ONLY",
+    "fragment": "if-blocked-pr-outbox.md",
+    "var": "IF_BLOCKED_PR_READ_ONLY_STEP"
+  },
+  {
+    "gate": "BOX_ACCESS_READ_WRITE",
+    "fragment": "if-blocked-outcome-landing-git.md",
+    "var": "IF_BLOCKED_OUTCOME_LANDING_READ_WRITE_STEP"
+  },
+  {
+    "gate": "BOX_ACCESS_READ_ONLY",
+    "fragment": "if-blocked-outcome-landing-outbox.md",
+    "var": "IF_BLOCKED_OUTCOME_LANDING_READ_ONLY_STEP"
+  }
+]
