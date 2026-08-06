@@ -1224,20 +1224,29 @@ func recoverByNumber(c config, it forge.IssueTracker, cf forge.CodeForge, pwd st
 		// genuine/synthetic tier (issue #2268), so a driver's genuine but
 		// unparseable success report must still be adoptable here exactly as
 		// it was before this recovered through the shared Resolve seam.
+		//
+		// SettleRelayedBranch is always attempted here, even when the log
+		// carried no self-report at all: for the local push-only shape it
+		// also accepts a bundle actually sitting in the outbox as sufficient
+		// evidence on its own (issue #2378 — a signal-killed Box never gets
+		// the chance to print a self-report, and this later, separate
+		// recover process has no access to the original run's in-memory
+		// KilledBySignal bit to re-derive that from disk). Its own gate
+		// decides whether there is actually anything recoverable; the
+		// unchanged "no open PR" exit below still fires whenever it returns
+		// false.
 		resolved, resolveErr := dispatch.ResolveFromLogs(pwd, iss.number, "")
 		if resolveErr != nil {
 			fmt.Fprintf(os.Stderr, "    ?? #%s: resolve pass logs: %v\n", issueNum, resolveErr)
 		}
-		if resolved.SelfReportFound {
-			if err := os.MkdirAll(dispatch.HostLogDirFor(pwd), 0o755); err != nil {
-				return fmt.Errorf("mkdir logs: %w", err)
-			}
-			d := f.New(iss.number, iss.title)
-			defer d.Close()
-			result := dispatch.Result{Resolved: resolved}
-			if s.SettleRelayedBranch(d, iss.number, 0, result) {
-				return nil
-			}
+		if err := os.MkdirAll(dispatch.HostLogDirFor(pwd), 0o755); err != nil {
+			return fmt.Errorf("mkdir logs: %w", err)
+		}
+		d := f.New(iss.number, iss.title)
+		defer d.Close()
+		result := dispatch.Result{Resolved: resolved}
+		if s.SettleRelayedBranch(d, iss.number, 0, result) {
+			return nil
 		}
 		fmt.Printf("    #%s  status=skipped  note=no open PR on %s\n", issueNum, branch)
 		return fmt.Errorf("issue %s: no open PR", issueNum)
