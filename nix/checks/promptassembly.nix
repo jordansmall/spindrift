@@ -17,9 +17,10 @@
 # simultaneously a `gate` name for its own row, so grepping it as a "var"
 # would false-positive against gates.go's legitimate SKILLS_FOUND gate
 # hardcoding.
-{ pkgs, ... }:
+{ pkgs, fixtures, ... }:
 let
   inherit (pkgs.lib) unique concatMapStringsSep;
+  inherit (fixtures) batsHarness;
 
   # lib/fragments.nix is a bare list of attrsets, pure builtins (no pkgs.lib
   # needed to evaluate it) -- see its own header comment.
@@ -99,6 +100,58 @@ in
           echo "promptassembly-registry-drift: lib/fragments.nix and cmd/launcher/internal/promptassembly/testdata/registry.json have diverged -- regenerate the testdata fixture" >&2
           exit 1
         fi
+        touch $out
+      '';
+
+  # Byte-parity harness (issue #2349, slice 6): runs the SAME env through
+  # both agent/entrypoint.sh's real bash phase_prompt_assembly and the new
+  # Go `driver-exec assemble-prompt` verb, and asserts they produce
+  # equivalent output for the one Env cell promptassembly.Assemble covers.
+  # Same lightweight/non-image-dependent shape as bats.nix's
+  # "bats-prompt-contract-parity" (no batsHarness.run/build/spindrift/
+  # imagePath reference -- driverExecBin is a plain `buildGoModule` package,
+  # not the OCI image, see equivalence.nix's driver-exec-src-excludes-tests
+  # for the same driverExecBin-as-package precedent) -- reuses batsHarness
+  # rather than introducing a new harness instance, since it needs no
+  # non-default run knobs of its own.
+  promptassembly-parity =
+    pkgs.runCommand "promptassembly-parity"
+      {
+        nativeBuildInputs = [
+          pkgs.bats
+          pkgs.bash
+          pkgs.git
+          pkgs.gettext
+          pkgs.coreutils
+          pkgs.gnugrep
+          pkgs.gnused
+          pkgs.jq
+        ];
+        ENTRYPOINT = ../../agent/entrypoint.sh;
+        PROMPTS_DIR = ../../templates/default/prompts;
+        OUTCOME_CONTRACT_FILE = batsHarness.outcomeContractFile;
+        COMMS_CONTRACT_FILE = batsHarness.commsContractFile;
+        CHECK_CONTRACT_FILE = batsHarness.checkContractFile;
+        RESEARCH_OUTCOME_CONTRACT_FILE = batsHarness.researchOutcomeContractFile;
+        DRIVER_PREAMBLE_FILE = batsHarness.driverPreambleFile;
+        FRAGMENT_REGISTRY_FILE = batsHarness.fragmentRegistryFile;
+        CONTRACT_REGISTRY_FILE = batsHarness.contractRegistryFile;
+        DRIVER_EXEC_BIN = "${batsHarness.driverExecBin}/bin/driver-exec";
+        # Reuses the same nix-rendered lib/fragments.nix JSON the drift
+        # check above already built -- no second render of the registry.
+        PROMPTASSEMBLY_REGISTRY_FILE = fragmentsRegistryJsonFile;
+      }
+      ''
+        export HOME="$TMPDIR/home"
+        mkdir -p "$HOME"
+        cp -r ${../../tests} tests
+        chmod -R +w tests
+        for f in tests/fakes/*; do
+          substituteInPlace "$f" \
+            --replace '#!/usr/bin/env bash' "#!${pkgs.bash}/bin/bash"
+        done
+        export FAKES_DIR="$PWD/tests/fakes"
+        bats --print-output-on-failure tests/prompt-assembly-parity.bats
         touch $out
       '';
 }

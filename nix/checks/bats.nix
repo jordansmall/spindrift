@@ -41,6 +41,17 @@ let
     builtins.toJSON (import ../../lib/prompt-contract.nix).parityFixtures
   );
 
+  # tests/prompt-assembly-parity.bats (issue #2349) lives under tests/ like
+  # every other suite, so this catch-all `bats tests/` run picks it up too
+  # (mirrors the DRIVER_OUTCOME_MANIFEST/PROMPT_CONTRACT_PARITY_FIXTURE
+  # comments above) -- export the same driver-exec binary and nix-rendered
+  # lib/fragments.nix JSON the dedicated promptassembly-parity check
+  # (nix/checks/promptassembly.nix) exports, or that suite's required-var
+  # guard fails here.
+  promptassemblyRegistryJsonFile = pkgs.writeText "fragments-registry.json" (
+    builtins.toJSON (import ../../lib/fragments.nix)
+  );
+
   # Registry-driven (issue #2261 slices 4-6): runs the *unchanged*
   # entrypoint-outcome-{contract,recovery,backstop}.bats suites end-to-end
   # against every non-claude registered Driver's own fake binary
@@ -253,6 +264,10 @@ in
         # same fixture file the dedicated bats-prompt-contract-parity check
         # below exports, or that suite's required-var guard fails here.
         PROMPT_CONTRACT_PARITY_FIXTURE = promptContractParityFixtureFile;
+        # tests/prompt-assembly-parity.bats's required env (see comment above
+        # promptassemblyRegistryJsonFile).
+        DRIVER_EXEC_BIN = "${batsHarness.driverExecBin}/bin/driver-exec";
+        PROMPTASSEMBLY_REGISTRY_FILE = promptassemblyRegistryJsonFile;
       }
       ''
         export HOME="$TMPDIR/home"

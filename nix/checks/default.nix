@@ -66,14 +66,19 @@ let
   # A narrower axis than imageOnlyCheckNames: source checks whose *build*
   # closure embeds the aarch64-linux image — `bats` pulls it in through
   # batsHarness.run/build/spindrift and skillsBwrapHarness.agentFiles
-  # (nix/checks/bats.nix). `nix flake check` builds the whole checkset for the
-  # current system, so on darwin these fail with "Required system:
-  # aarch64-linux" (there is no Linux builder). Dropped from the darwin
-  # checkset below; still run on both Linux arches. Distinct from
-  # imageOnlyCheckNames: the `*-baked-in-dogfood` asserts there build natively
-  # on darwin (hostPkgs skillsDir / eval-only), so `bats` is the only truly
-  # Linux-bound source check.
-  linuxOnlyCheckNames = [ "bats" ];
+  # (nix/checks/bats.nix); `promptassembly-parity` pulls in the same
+  # batsHarness's driverExecBin (nix/checks/promptassembly.nix) — mkHarness.nix
+  # always re-instantiates pkgs for the Linux twin of the host system, so
+  # either derivation is Linux-only regardless of which system evaluates it.
+  # `nix flake check` builds the whole checkset for the current system, so on
+  # darwin these fail with "Required system: aarch64-linux" (there is no
+  # Linux builder). Dropped from the darwin checkset below; still run on both
+  # Linux arches. Distinct from imageOnlyCheckNames: the `*-baked-in-dogfood`
+  # asserts there build natively on darwin (hostPkgs skillsDir / eval-only).
+  linuxOnlyCheckNames = [
+    "bats"
+    "promptassembly-parity"
+  ];
 
   # The darwin checkset drops the Linux-bound checks; Linux keeps everything.
   portableSourceChecks =
