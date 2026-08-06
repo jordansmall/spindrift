@@ -435,7 +435,7 @@ func (a *ociAdapter) Run(box Box) error {
 	if reapAfterSuccess(err) {
 		_ = a.Reap(box.Name)
 	}
-	return err
+	return asRunError(err)
 }
 
 // reapAfterSuccess reports whether the container should be reaped based on the

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os/exec"
 )
 
 // Box describes a single disposable agent sandbox.
@@ -102,4 +103,36 @@ func (e *RunError) Error() string {
 		return e.Msg
 	}
 	return fmt.Sprintf("box exited with code %d", e.ExitCode)
+}
+
+// asRunError translates a non-nil error into *RunError when it unwraps to
+// *exec.ExitError, carrying the numeric exit code out of the box's process
+// in a runtime-agnostic form. Podman/docker and bwrap both already surface
+// the 128+N (killed-by-signal-N) convention as their own ordinary process
+// exit code, so no raw signal/syscall.WaitStatus extraction happens here —
+// this only lifts the number already present in ExitCode() into RunError.
+// Any other non-nil error (e.g. a mkdir/exec.Start failure that never
+// produced an exit code) passes through unchanged. A nil error stays nil.
+func asRunError(err error) error {
+	if err == nil {
+		return nil
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		return &RunError{ExitCode: exitErr.ExitCode(), Msg: err.Error()}
+	}
+	return err
+}
+
+// KilledBySignal reports whether err unwraps to a *RunError whose ExitCode
+// matches the 128+N convention for SIGKILL (137) or SIGTERM (143) — the two
+// signals the launcher itself sends a box (Kill/Terminate) or that an
+// external actor (OOM killer, operator) might send. Returns false for a nil
+// error, a non-RunError, or any other exit code.
+func KilledBySignal(err error) bool {
+	var runErr *RunError
+	if !errors.As(err, &runErr) {
+		return false
+	}
+	return runErr.ExitCode == 137 || runErr.ExitCode == 143
 }

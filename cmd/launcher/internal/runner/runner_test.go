@@ -1,6 +1,7 @@
 package runner_test
 
 import (
+	"errors"
 	"fmt"
 	"testing"
 
@@ -98,5 +99,29 @@ func TestFake_IsReadyRecordsCalls(t *testing.T) {
 	}
 	if f.IsReadyCalls != 2 {
 		t.Errorf("IsReadyCalls: want 2, got %d", f.IsReadyCalls)
+	}
+}
+
+// TestKilledBySignal verifies KilledBySignal recognizes the 128+N exit-code
+// convention for SIGKILL (137) and SIGTERM (143), and reports false for any
+// other exit code, a non-RunError, or a nil error.
+func TestKilledBySignal(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"SIGKILL exit code 137", &runner.RunError{ExitCode: 137}, true},
+		{"SIGTERM exit code 143", &runner.RunError{ExitCode: 143}, true},
+		{"ordinary non-zero exit code", &runner.RunError{ExitCode: 1}, false},
+		{"non-RunError", errors.New("boom"), false},
+		{"nil error", nil, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := runner.KilledBySignal(tt.err); got != tt.want {
+				t.Errorf("KilledBySignal(%v) = %v, want %v", tt.err, got, tt.want)
+			}
+		})
 	}
 }
