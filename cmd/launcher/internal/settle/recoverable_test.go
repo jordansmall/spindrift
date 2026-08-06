@@ -330,6 +330,45 @@ func TestSettle_LocalPushOnly_KilledBySignalBundleMissingFallsBackToFailed(t *te
 	}
 }
 
+// TestSettle_LocalPushOnly_CleanFailureBundlePresentFallsBackToFailed pins
+// AC3 (issue #2378): a clean, non-signal exit with a bundle present but no
+// self-report is unchanged by the signal-kill evidence leg added alongside
+// it — KilledBySignal false and no self-report together still park the
+// issue agent-failed, the same as before this leg existed.
+func TestSettle_LocalPushOnly_CleanFailureBundlePresentFallsBackToFailed(t *testing.T) {
+	const issNum = "1"
+	outbox := t.TempDir()
+	writeBundle(t, outbox)
+
+	fc := forge.NewFake(testDispatchLabels)
+	fc.BranchPrefix = "agent/issue-"
+	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
+
+	d := dispatch.NewFake()
+	result := dispatch.Result{
+		Success:        false,
+		KilledBySignal: false,
+		Resolved: outcome.Resolved{
+			Found: false,
+		},
+	}
+
+	c := baseConfig()
+	c.OutboxDir = func(num string) string { return outbox }
+	s := New(c, fc, fc.AsLocal())
+	s.Settle(d, issNum, 0, result)
+
+	iss, _ := fc.Issue(issNum)
+	if !containsLabel(iss.Labels, "agent-failed") {
+		t.Errorf("issue must carry agent-failed on a clean non-signal exit with no self-report; labels=%v", iss.Labels)
+	}
+	for _, call := range fc.TransitionStateCalls {
+		if call.Num == issNum && call.To == forge.Recoverable {
+			t.Errorf("issue must not transition to Recoverable on a clean non-signal exit with no self-report; TransitionStateCalls=%+v", fc.TransitionStateCalls)
+		}
+	}
+}
+
 // TestSettle_SettleRelayedBranch_LocalPushOnlyLandsRelayedBranch is Slice C's
 // positive case for ADR 0039's `spindrift recover` local push-only landing
 // arm: a Recoverable issue's relayed branch (bundle present in the outbox,
