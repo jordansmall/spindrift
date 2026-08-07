@@ -734,6 +734,11 @@ run_driver_in_env() {
     review_model="$(_handoff_field "$handoff_json" ReviewModel)"
   fi
 
+  # review_effort has no Handoff descriptor field (issue #2390) -- unlike
+  # review_prompt/review_model above, it comes straight off the environment,
+  # the same way --effort reads $EFFORT directly further down.
+  local review_effort="${REVIEW_EFFORT:-}"
+
   local _review_prompt_file=""
   if [ -n "$review_prompt" ]; then
     _review_prompt_file="$(mktemp)"
@@ -796,6 +801,15 @@ run_driver_in_env() {
     _review_model_flags=(--review-model "$review_model")
   fi
 
+  # --review-effort, same orchestrator-only shape as --review-model just
+  # above (issue #2390): the reviewer's own configured effort, read straight
+  # off REVIEW_EFFORT (no Handoff field, unlike review_model) since it's not
+  # baked into the reviewer's own AGENTS_JSON_TEMPLATE entry.
+  local -a _review_effort_flags=()
+  if [ "$_driver_invoker" = orchestrator ] && [ -n "$review_effort" ]; then
+    _review_effort_flags=(--review-effort "$review_effort")
+  fi
+
   local claude_rc=0
   set +e
   "$_driver_invoker" \
@@ -812,7 +826,8 @@ run_driver_in_env() {
     "${_devshell_flags[@]}" \
     "${_heartbeat_flags[@]}" \
     "${_review_prompt_flags[@]}" \
-    "${_review_model_flags[@]}"
+    "${_review_model_flags[@]}" \
+    "${_review_effort_flags[@]}"
   claude_rc=$?
   set -e
   rm -f "$_prompt_file" "$_agents_file" "$_session_file" "$_review_prompt_file"
