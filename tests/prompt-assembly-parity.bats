@@ -1,27 +1,41 @@
 #!/usr/bin/env bats
-# Byte-parity harness (issue #2349 slice 6, extended by issue #2350 and
-# #2351): runs the SAME env through both agent/entrypoint.sh's real bash
-# phase_prompt_assembly (via $ENTRYPOINT and the fake driver/driver-exec
-# chain, tests/helper.bash's setup_entrypoint_env) and the new Go
-# `driver-exec assemble-prompt` verb (cmd/launcher/internal/promptassembly +
-# driver-exec/assembleprompt_cmd.go), and asserts the two produce equivalent
-# output across every Env cell promptassembly.Assemble covers. All cells
-# share ISSUE_TRACKER=github, the orchestrator off, and every skill baked --
-# exactly tests/box_env_gen.bash's set_box_env schema-default cell, plus
-# setup_entrypoint_env's own BOX_WRITE_ENABLED=1 default -- and differ only
-# on the DISPATCH_KIND/SELF_CONTAINED/FIX_PASS/RESUME_AFTER_HOLD axes and the
-# CODE_FORGE/BOX_WRITE_ENABLED access/forge axis that select among the cells
-# below:
-#   1. plain work (DISPATCH_KIND unset, FIX_PASS 0) -- the original covered
-#      cell, exercised with both a populated and an empty agent roster. Also
-#      the github read-write cell on the access/forge axis (the schema
-#      default).
-#   2. research (DISPATCH_KIND=research)
-#   3. self-contained research (DISPATCH_KIND=research, SELF_CONTAINED=1)
-#   4. fix-pass (FIX_PASS>0)
-#   5. github read-only (CODE_FORGE=github, BOX_WRITE_ENABLED unset)
-#   6. forgejo read-write (CODE_FORGE=forgejo, BOX_WRITE_ENABLED=1)
-#   7. forgejo read-only (CODE_FORGE=forgejo, BOX_WRITE_ENABLED unset)
+# Byte-parity harness (issue #2349 slice 6, extended by issue #2350, #2351,
+# and by issue #2352 with the tracker cells below): runs the SAME env
+# through both agent/entrypoint.sh's real bash phase_prompt_assembly (via
+# $ENTRYPOINT and the fake driver/driver-exec chain, tests/helper.bash's
+# setup_entrypoint_env) and the new Go `driver-exec assemble-prompt` verb
+# (cmd/launcher/internal/promptassembly + driver-exec/assembleprompt_cmd.go),
+# and asserts the two produce equivalent output across every Env cell
+# promptassembly.Assemble covers. All cells share the orchestrator off and
+# every skill baked -- exactly tests/box_env_gen.bash's set_box_env
+# schema-default cell, plus setup_entrypoint_env's own BOX_WRITE_ENABLED=1
+# default -- and differ only on three orthogonal axes:
+#
+#   DISPATCH_KIND/SELF_CONTAINED/FIX_PASS/RESUME_AFTER_HOLD, with
+#   ISSUE_TRACKER/CODE_FORGE/BOX_WRITE_ENABLED held at their defaults:
+#     1. plain work (DISPATCH_KIND unset, FIX_PASS 0) -- the original
+#        covered cell, exercised with both a populated and an empty agent
+#        roster. Also the github read-write cell on the access/forge axis
+#        (the schema default).
+#     2. research (DISPATCH_KIND=research)
+#     3. self-contained research (DISPATCH_KIND=research, SELF_CONTAINED=1)
+#     4. fix-pass (FIX_PASS>0)
+#
+#   CODE_FORGE/BOX_WRITE_ENABLED access/forge axis, with dispatch
+#   kind/fix-pass/ISSUE_TRACKER untouched:
+#     5. github read-only (CODE_FORGE=github, BOX_WRITE_ENABLED unset)
+#     6. forgejo read-write (CODE_FORGE=forgejo, BOX_WRITE_ENABLED=1)
+#     7. forgejo read-only (CODE_FORGE=forgejo, BOX_WRITE_ENABLED unset)
+#
+#   ISSUE_TRACKER, with SessionMode held at "initial" (dispatch kind/fix-pass
+#   untouched):
+#     8. local, no issue reference (ISSUE_TRACKER=local)
+#     9. local, issue-reference knob on (ISSUE_TRACKER=local,
+#        LOCAL_ISSUE_REFERENCE=1)
+#     10. forgejo, read-write (ISSUE_TRACKER=forgejo)
+#     11. jira, which rides the github prompt-selection arms
+#         (ISSUE_TRACKER=jira)
+#
 # Every cell test funnels through the shared assert_cell_parity helper below,
 # so the prompt/agents/handoff comparison logic lives in exactly one place.
 #
@@ -248,4 +262,39 @@ AGENTS_ROSTER='{"scout":{"description":"Map relevant files, seams, and tests; re
   assemble_go --agents-json-template "$AGENTS_JSON_TEMPLATE" --resume-after-hold
   [ "$status" -eq 0 ]
   jq -e '.SessionMode == "resume"' "$BATS_TEST_TMPDIR/go-handoff.json"
+}
+
+@test "bash and Go agree byte-for-byte on prompt/agents/handoff for the local tracker cell, no issue reference" {
+  # AGENTS_JSON_TEMPLATE deliberately left unset: this cell is about the
+  # tracker axis, not roster interaction, which the two dispatch-kind cells
+  # above already cover independently. SessionMode stays "initial" --
+  # ISSUE_TRACKER is orthogonal to dispatch kind/fix-pass.
+  export ISSUE_TRACKER="local"
+
+  assert_cell_parity initial
+}
+
+@test "bash and Go agree byte-for-byte on prompt/agents/handoff for the local tracker cell, issue reference on" {
+  export ISSUE_TRACKER="local"
+  export LOCAL_ISSUE_REFERENCE="1"
+
+  assert_cell_parity initial --local-issue-reference
+}
+
+@test "bash and Go agree byte-for-byte on prompt/agents/handoff for the forgejo tracker cell" {
+  export ISSUE_TRACKER="forgejo"
+
+  assert_cell_parity initial
+}
+
+@test "bash and Go agree byte-for-byte on prompt/agents/handoff for the jira tracker cell" {
+  # jira rides the same prompt-selection arms as github (assemble.go's
+  # checkCoveredCell). The Go side's byte-identity between jira and github
+  # is already pinned by a Go unit test in
+  # cmd/launcher/internal/promptassembly; this cell additionally proves the
+  # BASH side renders jira through that same github arm, so parity holds at
+  # the bash/Go boundary too, not just within the Go package.
+  export ISSUE_TRACKER="jira"
+
+  assert_cell_parity initial
 }
