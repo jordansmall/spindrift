@@ -215,6 +215,25 @@ setup_rebase_conflict() {
   ! grep -q "Implement GitHub issue #7" "$DRIVER_PROMPT_FILE"
 }
 
+# Pins the hoist (issue #2354 slice 3): phase_conflict_resolve's call site
+# now runs in main() BEFORE phase_prompt_assembly, so the CONFLICT_RESOLVE_PR_URL
+# early exit fires before driver-exec assemble-prompt is ever invoked at all --
+# not merely before its output is used. Pointing PROMPTASSEMBLY_REGISTRY_FILE
+# at a nonexistent path makes any assemble-prompt call fail loudly (the verb
+# requires --registry to exist, and entrypoint.sh's bare call has no error
+# handling of its own, so a nonzero exit there would propagate straight
+# through `set -euo pipefail` and abort the whole run non-zero). A green
+# `status -eq 0` here is only possible if the verb is never called.
+@test "CONFLICT_RESOLVE_PR_URL: exits before phase_prompt_assembly ever invokes driver-exec assemble-prompt" {
+  setup_rebase_conflict
+  export FAKE_DRIVER_RESOLVE_CONFLICT=1
+  export CONFLICT_RESOLVE_PR_URL="https://github.com/owner/repo/pull/7"
+  export PROMPTASSEMBLY_REGISTRY_FILE="$BATS_TEST_TMPDIR/does-not-exist-registry.json"
+
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+}
+
 @test "CONFLICT_RESOLVE_PR_URL read-only: bundles resolved branch to outbox instead of force-pushing" {
   # This box never reaches phase_prework_rebase's own publish step (a
   # conflict was hit) and exits without running the main agent afterward

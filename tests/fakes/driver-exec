@@ -15,7 +15,17 @@
 # real git plumbing, not a Driver invocation -- so it is dispatched off a
 # bare first arg before the flag loop below ever runs. The `outcome-backstop`
 # verb (issue #2157) is a third such entry point, dispatched the same way.
+# The `assemble-prompt` verb (issue #2354) is a fourth: unlike the other two,
+# it delegates straight to the real Go binary (DRIVER_EXEC_BIN, exported by
+# the nix bats derivation, nix/checks/bats.nix) instead of reimplementing its
+# gate logic here -- promptassembly is the source of truth and this fake has
+# no bash re-derivation to keep in lockstep with it.
 set -euo pipefail
+
+if [ "${1:-}" = "assemble-prompt" ]; then
+  shift
+  exec "$DRIVER_EXEC_BIN" assemble-prompt "$@"
+fi
 
 if [ "${1:-}" = "bundle-out" ]; then
   shift

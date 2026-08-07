@@ -72,11 +72,10 @@ configure_env() {
   # 0009, issue #624) via the nix-rendered preamble prepended ahead of this
   # file at image build time. No fallback literal lives here: a Box built
   # without that preamble dies loudly instead of silently impersonating the
-  # claude Driver. Checked ahead of phase_prompt_assembly's
-  # _inject_shared_block calls (which resolve their markers via
-  # _contract_marker) so a Box missing every nix-rendered preamble dies
-  # naming the Driver preamble, not the unrelated contract-registry one
-  # (issue #2246).
+  # claude Driver. Checked ahead of phase_prompt_assembly's driver-exec
+  # assemble-prompt call (issue #2354) so a Box missing every nix-rendered
+  # preamble dies naming the Driver preamble, not some unrelated failure deep
+  # inside the verb (issue #2246).
   : "${DRIVER_BIN:?DRIVER_BIN not set -- the nix-rendered Driver preamble did not run}"
   : "${DRIVER_FLAGS_COMMON:?DRIVER_FLAGS_COMMON not set -- the nix-rendered Driver preamble did not run}"
   : "${DRIVER_SKILLS_DIR:?DRIVER_SKILLS_DIR not set -- the nix-rendered Driver preamble did not run}"
@@ -85,10 +84,10 @@ configure_env() {
   # The canonical SPINDRIFT_OUTCOME contract (issue #419), baked at a sibling
   # path to /agent/prompts so a SPINDRIFT_PROMPT_DIR mount -- which shadows only
   # /agent/prompts -- never hides it (issue #420).
-  # Only the file-path default lives here; _inject_shared_block resolves the
-  # id's marker itself via _contract_marker against the registry-rendered
-  # _INJECT_BLOCK_ROWS (lib/prompt-contract.nix's injectBlocks, issue #2246),
-  # so it cannot drift from the block's canonical source-file heading.
+  # Only the file-path default lives here; the driver-exec assemble-prompt
+  # verb (issue #2354) reads the marker straight off the contract file's own
+  # first line (injectSharedBlock, cmd/launcher/internal/promptassembly) so
+  # it cannot drift from the block's canonical source-file heading.
   OUTCOME_CONTRACT_FILE="${OUTCOME_CONTRACT_FILE:-/agent/outcome-contract.md}"
 
   # The COMMS and CHECK/COMMIT blocks fix-prompt.md shares with issue-prompt.md
@@ -103,6 +102,11 @@ configure_env() {
   # Baked and injected the same way as the work contract above, so a
   # SPINDRIFT_PROMPT_DIR override of research-prompt.md gets it too.
   RESEARCH_OUTCOME_CONTRACT_FILE="${RESEARCH_OUTCOME_CONTRACT_FILE:-/agent/research-outcome-contract.md}"
+
+  # The Conditional fragment registry as JSON (issue #622, #2354), baked at
+  # the same sibling-of-/agent/prompts path as the contract files above, for
+  # the `driver-exec assemble-prompt` verb's `--registry` flag.
+  PROMPTASSEMBLY_REGISTRY_FILE="${PROMPTASSEMBLY_REGISTRY_FILE:-/agent/fragments-registry.json}"
 
   # _driver_extract_outcome and _driver_session_flags are defined by the Driver
   # registry (lib/drivers/<name>.nix); a nix-built image prepends them via
@@ -457,36 +461,17 @@ _is_readonly_github() {
   [ -z "${BOX_WRITE_ENABLED:-}" ] && [ "${CODE_FORGE:-github}" = "github" ]
 }
 
-# _contract_marker reads the marker field (pipe position 2) out of the
-# registry-rendered _INJECT_BLOCK_ROWS row whose id (pipe position 1) matches
-# $1 -- sourced from lib/prompt-contract.nix's injectBlocks via
-# contract-registry.sh (mirrors the _FRAGMENT_ROWS mechanism above, issue
-# #2246). A nix-built image prepends _INJECT_BLOCK_ROWS via
-# contractRegistryPreamble (lib/mkHarness.nix), and the bats harness sources
-# the same registry-rendered rows via CONTRACT_REGISTRY_FILE. Called from
-# exactly one place -- _inject_shared_block below -- so no per-block marker
-# variable can drift from this single resolution point (issue #2248).
-_contract_marker() {
-  local _id="$1" _crow _cid _cmarker _rest
-  for _crow in "${_INJECT_BLOCK_ROWS[@]}"; do
-    IFS='|' read -r _cid _cmarker _rest <<<"$_crow"
-    if [ "$_cid" = "$_id" ]; then
-      printf '%s' "$_cmarker"
-      return 0
-    fi
-  done
-  echo "_contract_marker: no row for id '$_id' in _INJECT_BLOCK_ROWS" >&2
-  return 1
-}
-
-# _validate_marker_row mirrors _contract_marker above, but scans
-# _VALIDATE_MARKER_ROWS (lib/prompt-contract.nix's validateMarkers registry,
-# rendered by validateMarkersBashPreamble, issue #2249) instead of
-# _INJECT_BLOCK_ROWS: prints the row whose id (pipe position 1) matches $1,
-# unparsed, so the one caller below (_validate_prompt_contract) can split it
-# with `IFS='|' read -r` for whichever of marker/carrier/severity/when it
-# needs -- unlike _contract_marker, callers here need more than just the
-# marker field.
+# _validate_marker_row scans _VALIDATE_MARKER_ROWS (lib/prompt-contract.nix's
+# validateMarkers registry, rendered by validateMarkersBashPreamble, issue
+# #2249): prints the row whose id (pipe position 1) matches $1, unparsed, so
+# the one caller below (_validate_prompt_contract) can split it with
+# `IFS='|' read -r` for whichever of marker/carrier/severity/when it needs.
+# Its erstwhile sibling, _contract_marker (which scanned _INJECT_BLOCK_ROWS
+# for the COMMS/CHECK/OUTCOME shared-block injection's marker), was retired
+# along with its one caller, _inject_shared_block, by issue #2354 -- both
+# superseded by the driver-exec assemble-prompt verb's own injectSharedBlock
+# (cmd/launcher/internal/promptassembly), which resolves a contract file's
+# marker off its own first line instead of a separate registry lookup.
 _validate_marker_row() {
   local _id="$1" _vrow _vid _rest
   for _vrow in "${_VALIDATE_MARKER_ROWS[@]}"; do
@@ -622,30 +607,15 @@ _validate_prompt_contract() {
   done
 }
 
-# A SPINDRIFT_PROMPT_DIR mount replaces the whole prompt dir, so a rendered
-# prompt that dropped a shared block (issue #419, extended to COMMS/CHECK by
-# #455) never gets the build-time injection; append the canonical block here,
-# at run time, unless it is already present (idempotent, mirrors
-# lib/mkHarness.nix). Takes the block's registry id (not a pre-resolved
-# marker) and looks the marker up itself via _contract_marker, so this is the
-# only call site in the runtime path that resolves a marker (issue #2248).
-_inject_shared_block() {
-  local id="$1" file="$2" marker
-  marker="$(_contract_marker "$id")"
-  if [[ "$prompt" != *"$marker"* ]]; then
-    # A direct assignment from the substitution (rather than nesting it as a
-    # printf argument) so a missing/unreadable contract file fails loudly
-    # under `set -e` instead of silently rendering an empty block.
-    local block
-    block="$(_subst "$file")"
-    prompt="$(printf '%s\n\n%s' "${prompt%$'\n'}" "$block")"
-  fi
-}
-
 # phase_conflict_resolve spawns a conflict-resolve agent when
 # phase_prework_rebase hit a conflict, and handles the CONFLICT_RESOLVE_PR_URL
 # resolve-only dispatch mode. Reads _had_rebase_conflict and
-# _rebase_and_publish.
+# _rebase_and_publish. Called from main(), right before phase_prompt_assembly
+# (issue #2354 slice 3 hoisted the call site out of phase_prompt_assembly),
+# so its two early-exit paths (CONFLICT_RESOLVE_PR_URL's `exit 0` and the
+# unresolvable-conflict `exit 1`) fire before the driver-exec assemble-prompt
+# verb is ever invoked, instead of after it wastefully ran and its output was
+# discarded.
 phase_conflict_resolve() {
   # When the pre-work rebase produced conflicts, spawn a conflict-resolve agent to
   # re-map the branch onto current main.  Only escalate to exit 1 if the agent
@@ -686,31 +656,26 @@ phase_conflict_resolve() {
   fi
 }
 
-# phase_prompt_assembly renders the conditional opt-in prompt fragments,
-# runs phase_conflict_resolve, selects the issue/fix prompt, injects the
-# shared COMMS/CHECK/OUTCOME blocks, and builds the --agents JSON. Sets
-# prompt, _driver_session_mode, and agents_json, all read by
-# run_driver_in_env in main.
+# phase_prompt_assembly delegates prompt/roster assembly to the driver-exec
+# assemble-prompt verb (ADR 0036, ADR 0007's thin-exec-glue tier, issue
+# #2354): rather than bash computing every fragment gate, selecting the base
+# prompt, and rewriting the roster inline, this collects the handful of facts
+# only bash can supply (filesystem-derived skill discovery at DRIVER_SKILLS_DIR)
+# and forwards every already-available env knob as a flag, then reads back the
+# three files the verb writes. cmd/launcher/internal/promptassembly (issues
+# #2349-#2353) owns the gate/fragment/base-prompt/roster-injection logic that
+# used to live here -- this function is now the same bare-`driver-exec`-on-
+# $PATH exec-glue shape publish_rebased_branch/emit_outcome_backstop already
+# use for their own verbs, just with three output files instead of stdout.
+# phase_conflict_resolve now runs from main(), before this function is ever
+# called (issue #2354 slice 3), so its early exits skip the verb call
+# entirely rather than discarding its output. This function still sets
+# prompt, _driver_session_mode, agents_json, review_prompt_rendered, and
+# review_model_rendered, all read by run_driver_in_env in main.
 phase_prompt_assembly() {
-  # The conditional prompt steps below are rendered from fragment files under
-  # PROMPTS_DIR/fragments (issue #463) instead of heredocs authored in this
-  # script, so all instruction prose lives with the rest of the prompt surface
-  # and a SPINDRIFT_PROMPT_DIR override supplies its own fragment for any knob
-  # it enables, exactly as it already must supply filer-prompt.md when the
-  # filer is configured (documented in docs/reference.md).
-  #
-  # Each fragment file ends with the blank line that separates it from the
-  # heading it precedes in the rendered prompt (e.g. issue-prompt.md's
-  # `${AUTO_FORMAT_STEP}${AUTO_LINT_STEP}# COMMIT`), but `$(...)` command
-  # substitution strips every trailing newline, blank line included -- and
-  # stripping happens again at the OUTER `$(...)` around any function that
-  # tries to reappend it internally, so the concatenation has to happen at the
-  # assignment site itself, outside every command substitution: `"$(_subst
-  # "$f")"$'\n\n'`, never `"$(some_wrapper "$f")"`.
-
   # Discover available skills at DRIVER_SKILLS_DIR and build a directive to
-  # prefer them over the inline guidance where they apply -- the gate
-  # variable the skill-preamble registry row (lib/fragments.nix) names.
+  # prefer them over the inline guidance where they apply -- filesystem I/O
+  # only bash can do; the verb takes the result as its --skills-found flag.
   # Claude Code discovers a skill as a directory holding a SKILL.md
   # (DRIVER_SKILLS_DIR/<name>/SKILL.md), never a flat <name>.md file, so the
   # skill name advertised in SKILLS_FOUND is the directory basename.
@@ -724,471 +689,133 @@ phase_prompt_assembly() {
     done
   fi
 
-  # One-liners setting the computed gates the caveman-default,
-  # tdd-default, commit-default, code-review-default, and
-  # file-issues registry rows name: each per-skill gate is
-  # the specific skill actually baked at DRIVER_SKILLS_DIR/<name>/SKILL.md, so
-  # the prompt step directing the agent to that skill renders only when it is
-  # present (issue #487); and the filer opt-in provisioned in
-  # AGENTS_JSON_TEMPLATE. These sit alongside the generic SKILLS_FOUND preamble:
-  # that lists every baked skill, while these place a deferral at the exact
-  # section whose inline guidance the named skill supersedes.
-  local CAVEMAN_BAKED=""
-  # shellcheck disable=SC2034 # read indirectly via "${!_fgate}" in the loop below
-  [ -f "${DRIVER_SKILLS_DIR}/caveman/SKILL.md" ] && CAVEMAN_BAKED=1
-  local TDD_BAKED=""
-  # shellcheck disable=SC2034 # read indirectly via "${!_fgate}" in the loop below
-  [ -f "${DRIVER_SKILLS_DIR}/tdd/SKILL.md" ] && TDD_BAKED=1
-  local COMMIT_BAKED=""
-  # shellcheck disable=SC2034 # read indirectly via "${!_fgate}" in the loop below
-  [ -f "${DRIVER_SKILLS_DIR}/commit/SKILL.md" ] && COMMIT_BAKED=1
-  local CODE_REVIEW_BAKED=""
-  # shellcheck disable=SC2034 # read indirectly via "${!_fgate}" in the loop below
-  [ -f "${DRIVER_SKILLS_DIR}/code-review/SKILL.md" ] && CODE_REVIEW_BAKED=1
+  # Build the assemble-prompt invocation. Every string flag maps 1:1 onto a
+  # bash env var this Box already carries -- no gate computation here
+  # anymore, just forwarding (assembleprompt_cmd.go re-derives every gate the
+  # old inline precompute/fragment-loop/roster-injection blocks used to).
+  # Boolean gates ride bare flags (`flag.Bool` on the verb side), appended
+  # only when true; the verb's own zero-value default covers the rest, so an
+  # unset knob here is indistinguishable from an explicit off.
+  local -a _ap_args=(
+    --registry "$PROMPTASSEMBLY_REGISTRY_FILE"
+    --agents-json-template "${AGENTS_JSON_TEMPLATE:-}"
+    --issue-tracker "${ISSUE_TRACKER:-}"
+    --code-forge "${CODE_FORGE:-}"
+    --dispatch-kind "${DISPATCH_KIND:-}"
+    --fix-pass "${FIX_PASS:-0}"
+    --prompts-dir "$PROMPTS_DIR"
+    --agents-prompt-files "${AGENTS_PROMPT_FILES:-}"
+    --driver-agent-files-dir "${DRIVER_AGENT_FILES_DIR:-}"
+    --comms-contract-file "$COMMS_CONTRACT_FILE"
+    --check-contract-file "$CHECK_CONTRACT_FILE"
+    --outcome-contract-file "$OUTCOME_CONTRACT_FILE"
+    --research-outcome-contract-file "$RESEARCH_OUTCOME_CONTRACT_FILE"
+    --skills-found "$SKILLS_FOUND"
+    --issue-number "$ISSUE_NUMBER"
+    --issue-title "$ISSUE_TITLE"
+    --branch "$BRANCH"
+    --base-branch "${BASE_BRANCH:-}"
+    --in-progress-label "${IN_PROGRESS_LABEL:-}"
+    --complete-label "${COMPLETE_LABEL:-}"
+    --run-nonce "${RUN_NONCE:-}"
+    --ci-failure-summary "${CI_FAILURE_SUMMARY:-}"
+  )
+  [ -f "${DRIVER_SKILLS_DIR}/caveman/SKILL.md" ] && _ap_args+=(--caveman-skill-baked)
+  [ -f "${DRIVER_SKILLS_DIR}/tdd/SKILL.md" ] && _ap_args+=(--tdd-skill-baked)
+  [ -f "${DRIVER_SKILLS_DIR}/commit/SKILL.md" ] && _ap_args+=(--commit-skill-baked)
+  [ -f "${DRIVER_SKILLS_DIR}/code-review/SKILL.md" ] && _ap_args+=(--code-review-skill-baked)
+  # Reads $ORCHESTRATOR (main's early ORCHESTRATOR_ENABLED-derived cross-phase
+  # sentinel, issue #2354 slice 3), not ORCHESTRATOR_ENABLED directly -- the
+  # orchestrator-fork-well-formed check (nix/checks/prompts.nix) pins exactly
+  # one raw ORCHESTRATOR_ENABLED test in this file (main's own early
+  # computation); every fork downstream, this one included, reads that one
+  # computed gate instead. Still the value the Handoff-based reassignment
+  # below (line ~779) is about to overwrite for the *next* pass
+  # (run_driver_in_env's own invoker fork) -- this flag only ever needs the
+  # value as of the verb call, which is identical either way.
+  [ -n "$ORCHESTRATOR" ] && _ap_args+=(--orchestrator-enabled)
+  [ -n "${BOX_WRITE_ENABLED:-}" ] && _ap_args+=(--box-write-enabled)
+  [ -n "${LOCAL_ISSUE_REFERENCE:-}" ] && _ap_args+=(--local-issue-reference)
+  _is_self_contained && _ap_args+=(--self-contained)
+  [ -n "${RESUME_AFTER_HOLD:-}" ] && _ap_args+=(--resume-after-hold)
+  [ -n "${AUTO_FORMAT:-}" ] && _ap_args+=(--auto-format)
+  [ -n "${AUTO_LINT:-}" ] && _ap_args+=(--auto-lint)
 
-  # ORCHESTRATOR (issue #2047, ADR 0035 amendment): the single canonical
-  # master-switch gate every orchestrator-conditioned prompt/--agents fork
-  # reads -- the filer-relay compound condition just below and
-  # run_driver_in_env's driver-invoker binary swap -- instead of each site
-  # testing the launcher-delivered ORCHESTRATOR_ENABLED env var
-  # independently. This is the one line that reads it; every fork
-  # downstream reads $ORCHESTRATOR. Assigned here by plain (non-local)
-  # assignment, not `local` like the gates below it, so it escapes to
-  # run_driver_in_env via main's cross-phase sentinel -- the same
-  # dynamic-scoping shape _use_dev_shell already uses (issue #515) -- since
-  # that function, unlike the fragment loop's `"${!_fgate}"` gates, runs
-  # outside phase_prompt_assembly's own call frame.
+  local _prompt_out _agents_out _handoff_out
+  _prompt_out="$(mktemp)"
+  _agents_out="$(mktemp)"
+  _handoff_out="$(mktemp)"
+
+  # Bare `driver-exec`, resolved via $PATH -- the same convention
+  # publish_rebased_branch's `driver-exec bundle-out` and
+  # emit_outcome_backstop's `driver-exec outcome-backstop` calls already use:
+  # the real in-box binary in prod, the bats fake's own assemble-prompt
+  # branch (which itself execs the real Go binary, not a bash
+  # reimplementation) under test. A nonzero exit here propagates straight
+  # through `set -euo pipefail` at the top of this script -- no explicit
+  # error handling needed, mirroring emit_outcome_backstop's own bare-call
+  # shape.
+  driver-exec assemble-prompt "${_ap_args[@]}" \
+    --prompt-output "$_prompt_out" \
+    --agents-json-output "$_agents_out" \
+    --handoff-output "$_handoff_out"
+
+  # $(...) strips the file's trailing newline exactly the way it always
+  # stripped a command substitution's -- Assemble already trims one from its
+  # own Prompt/AgentsJSON output the same way the old `$(_subst ...)`/
+  # `$(printf ... | jq ...)` chains did, so this stays byte-identical.
+  prompt="$(cat "$_prompt_out")"
+  agents_json="$(cat "$_agents_out")"
+  local _handoff
+  _handoff="$(cat "$_handoff_out")"
+  rm -f "$_prompt_out" "$_agents_out" "$_handoff_out"
+
+  _driver_session_mode="$(printf '%s' "$_handoff" | jq -r '.SessionMode')"
+  review_prompt_rendered="$(printf '%s' "$_handoff" | jq -r '.ReviewPromptFile // empty')"
+  review_model_rendered="$(printf '%s' "$_handoff" | jq -r '.ReviewModel // empty')"
+
+  # ORCHESTRATOR (issue #2047, ADR 0035 amendment; issue #2354 moves its
+  # source to the verb's own Handoff.Invoker field, spec #2347 story 6): the
+  # single canonical master-switch gate run_driver_in_env's driver-invoker
+  # binary swap reads. Assigned here by plain (non-local) assignment, not
+  # `local`, so it escapes to run_driver_in_env via main's cross-phase
+  # sentinel -- the same dynamic-scoping shape _use_dev_shell already uses
+  # (issue #515) -- since that function runs outside phase_prompt_assembly's
+  # own call frame. Mathematically identical to `[ -n
+  # "${ORCHESTRATOR_ENABLED:-}" ]` (the --orchestrator-enabled flag fed the
+  # verb above, which the same env var also gates) -- the two can never
+  # disagree.
   ORCHESTRATOR=""
-  [ -n "${ORCHESTRATOR_ENABLED:-}" ] && ORCHESTRATOR=1
+  [ "$(printf '%s' "$_handoff" | jq -r '.Invoker')" = "orchestrator" ] && ORCHESTRATOR=1
 
-  # The REVIEW section gate (issue #2037): off, the implementor still spawns
-  # a fresh `reviewer` subagent inline and loops until no blocking findings
-  # remain, exactly as before. On, that review runs as the orchestrator's own
-  # code-owned pass instead -- this pass's own prompt stops after COMMIT
-  # unless a prior review pass's APPROVE is already visible in the seeded
-  # run-state handoff (agent's REVIEW step, review-loop-orchestrator.md). No
-  # separate sub-knob (ADR 0035): reads $ORCHESTRATOR, the one computed gate.
-  local REVIEW_LOOP_INLINE=""
-  local REVIEW_LOOP_ORCHESTRATOR=""
-  if [ -n "$ORCHESTRATOR" ]; then
-    # shellcheck disable=SC2034 # read indirectly via "${!_fgate}" in the loop below
-    REVIEW_LOOP_ORCHESTRATOR=1
-  else
-    # shellcheck disable=SC2034 # read indirectly via "${!_fgate}" in the loop below
-    REVIEW_LOOP_INLINE=1
-  fi
-
-  local FILER_ENABLED=""
-  if [ -n "${AGENTS_JSON_TEMPLATE:-}" ] && printf '%s' "$AGENTS_JSON_TEMPLATE" | jq -e 'has("filer")' >/dev/null 2>&1; then
-    # shellcheck disable=SC2034 # read indirectly via "${!_fgate}" in the loop below
-    FILER_ENABLED=1
-  fi
-
-  # The IMPLEMENT coordinator gate (issue #2056): a `worker` subagent baked
-  # into AGENTS_JSON_TEMPLATE (WORKER_MODEL set, issue #2054) turns the main
-  # session's IMPLEMENT section into a coordinator that delegates each slice to
-  # the worker (coordinator.md). Detected the same way FILER_ENABLED is -- a
-  # "worker" key in the nix-baked template -- so it stays orthogonal to
-  # $ORCHESTRATOR: a worker can be provisioned with the orchestrator on or off,
-  # and with none provisioned the step renders empty and the section is
-  # byte-identical to today's single-implementor prompt.
-  local WORKER_PROVISIONED=""
-  if [ -n "${AGENTS_JSON_TEMPLATE:-}" ] && printf '%s' "$AGENTS_JSON_TEMPLATE" | jq -e 'has("worker")' >/dev/null 2>&1; then
-    # shellcheck disable=SC2034 # read indirectly via "${!_fgate}" in the loop below
-    WORKER_PROVISIONED=1
-  fi
-
-  # ISSUE_TRACKER -> per-axis descriptor for its gate families. Coverage
-  # differs by family, hence three fields: _it_read (issue-read step suffix,
-  # always one of GITHUB/LOCAL/FORGEJO), _it_write (direct write-step suffix,
-  # empty when the tracker has no in-box direct-write path -- local always
-  # relays), _it_filer (filer direct-write suffix). jira shares github's
-  # in-box reachability, so it rides the GITHUB/GH arms. ADR 0013 keeps this
-  # axis independent of CODE_FORGE. A new tracker (gitlab, bitbucket) adds one
-  # arm here, not an elif in each block below.
-  local _it_read _it_write _it_filer
-  case "${ISSUE_TRACKER:-github}" in
-    local)   _it_read=LOCAL   _it_write=""        _it_filer=GH ;;
-    forgejo) _it_read=FORGEJO _it_write=FORGEJO   _it_filer=FORGEJO ;;
-    *)       _it_read=GITHUB  _it_write=GITHUB    _it_filer=GH ;;
-  esac
-
-  # The filer's write-mechanism gates (issue #2019): relay only activates on
-  # read-only (BOX_WRITE_ENABLED absent) + the orchestrator gate -- every
-  # other combination (read-write regardless of orchestrator, or read-only
-  # with the orchestrator off) keeps today's direct `gh issue create` path,
-  # unchanged, so the read-only+orchestrator-off case still degrades to the
-  # pre-existing PR-body paste on filer failure rather than gaining a new
-  # relay behavior. Both stay off (no FILE ISSUES step at all) when the
-  # filer isn't configured -- the same "off means off" shape FILER_ENABLED
-  # alone gave this step before this ticket. Reads $ORCHESTRATOR (computed
-  # once above), not ORCHESTRATOR_ENABLED directly -- this compound
-  # condition keeps its exact pre-#2047 truth table, only the predicate's
-  # source changes.
-  #
-  # The direct case forks further on ISSUE_TRACKER (issue #1963): fj has no
-  # label verb and `fj issue create` has no --label flag, so a forgejo
-  # tracker's direct filer writes render FILER_LABEL_DIRECT_FORGEJO_STEP/
-  # FILER_FILE_DIRECT_FORGEJO_STEP (curl against the REST API for the label)
-  # instead of the gh-flavored FILER_LABEL_DIRECT_STEP/FILER_FILE_DIRECT_STEP
-  # rows (now gated FILER_FILE_DIRECT_GH). The relay path (FILER_FILE_RELAY,
-  # SPINDRIFT_ISSUE_INTENT) never shells out to gh/fj directly, so it stays
-  # forge-agnostic and unchanged.
-  # shellcheck disable=SC2034 # read indirectly via "${!_fgate}" in the loop below
-  local FILER_FILE_DIRECT_GH=""
-  # shellcheck disable=SC2034 # read indirectly via "${!_fgate}" in the loop below
-  local FILER_FILE_DIRECT_FORGEJO=""
-  local FILER_FILE_RELAY=""
-  if [ -n "$FILER_ENABLED" ]; then
-    if [ -z "${BOX_WRITE_ENABLED:-}" ] && [ -n "$ORCHESTRATOR" ]; then
-      # shellcheck disable=SC2034 # read indirectly via "${!_fgate}" in the loop below
-      FILER_FILE_RELAY=1
-    else
-      printf -v "FILER_FILE_DIRECT_${_it_filer}" '%s' 1
-    fi
-  fi
-
-  # file-issues-direct.md (the orchestrator's own intro to delegating findings
-  # to the filer subagent) carries no gh/fj command -- it's forge-agnostic
-  # guidance -- so it must render whenever either direct fork above is on,
-  # not just the gh one. FILER_FILE_DIRECT itself is no longer a gate (split
-  # above); this combined var is its narrow replacement for that one row.
-  local FILER_FILE_DIRECT_ANY=""
-  if [ -n "$FILER_FILE_DIRECT_GH" ] || [ -n "$FILER_FILE_DIRECT_FORGEJO" ]; then
-    # shellcheck disable=SC2034 # read indirectly via "${!_fgate}" in the loop below
-    FILER_FILE_DIRECT_ANY=1
-  fi
-
-  # The PR-body ticket-reference gates the pr-body-closes/pr-body-local-ref/
-  # pr-body-local-noref registry rows name (issue #1429, ADR 0029): exactly
-  # one is ever on, picked from ISSUE_TRACKER x LOCAL_ISSUE_REFERENCE (both
-  # launcher-delivered knobs) rather than a single knob's presence, since no
-  # one knob alone selects among three cases. github always keeps the
-  # unconditional `Closes #ISSUE_NUMBER`; local's default is no reference to
-  # the (private, possibly numeric-slugged) ticket at all, closing the
-  # Closes-#<slug> auto-close footgun; local's opt-in swaps in a non-auto-
-  # closing `Local-issue: <slug>` breadcrumb instead. jira falls into the
-  # same `else` branch as github here -- issue #1429's footgun is
-  # local-only (a jira key isn't a bare number GitHub's auto-close syntax
-  # would match), so jira's `Closes #ISSUE_NUMBER` stays exactly as it was
-  # pre-#1429, unconditional and out of this issue's scope.
-  local PR_BODY_CLOSES=""
-  local PR_BODY_LOCAL_REF=""
-  local PR_BODY_LOCAL_NOREF=""
-  if [ "${ISSUE_TRACKER:-github}" = "local" ]; then
-    if [ -n "${LOCAL_ISSUE_REFERENCE:-}" ]; then
-      # shellcheck disable=SC2034 # read indirectly via "${!_fgate}" in the loop below
-      PR_BODY_LOCAL_REF=1
-    else
-      # shellcheck disable=SC2034 # read indirectly via "${!_fgate}" in the loop below
-      PR_BODY_LOCAL_NOREF=1
-    fi
-  else
-    # shellcheck disable=SC2034 # read indirectly via "${!_fgate}" in the loop below
-    PR_BODY_CLOSES=1
-  fi
-
-  # The issue-read step gate (issue #1691, ADR 0032; forgejo added #1963):
-  # local issues have no in-box reachability -- there is no server to reach
-  # and gh issue view ${ISSUE_NUMBER} either fails or, for a numeric slug,
-  # silently fetches an unrelated real issue -- so the read step branches on
-  # ISSUE_TRACKER between gh issue view (github, and jira, which shares
-  # github's in-box reachability), fj issue view (forgejo), and the
-  # read-only /issues mount (local).
-  # shellcheck disable=SC2034 # read indirectly via "${!_fgate}" in the loop below
-  local ISSUE_TRACKER_GITHUB=""
-  # shellcheck disable=SC2034 # read indirectly via "${!_fgate}" in the loop below
-  local ISSUE_TRACKER_LOCAL=""
-  # shellcheck disable=SC2034 # read indirectly via "${!_fgate}" in the loop below
-  local ISSUE_TRACKER_FORGEJO=""
-  printf -v "ISSUE_TRACKER_${_it_read}" '%s' 1
-
-  # The issue-blocked-comment/research-verdict write-step gates (issue #1917;
-  # forgejo mirror added #1963): a read-only Box (BOX_WRITE_ENABLED absent,
-  # issue #1951) holds no write token, so a github/jira/forgejo Dispatch's
-  # blocked-note and verdict comment need the same host-mediated relay form
-  # local's write step always renders -- distinct from ISSUE_TRACKER_GITHUB/
-  # ISSUE_TRACKER_LOCAL/ISSUE_TRACKER_FORGEJO above, which stay unaffected by
-  # read-only mode (a read-only token still permits gh/fj issue view for the
-  # read step those gate). local has no direct write-step path (_it_write
-  # empty above), so it renders neither pair here -- its blocked-note/verdict
-  # always goes through the relay form regardless of BOX_WRITE_ENABLED.
-  #
-  # BOX_WRITE_ENABLED is the single explicit write-enable signal the
-  # launcher resolves once, host-side, from BOX_FORGE_AND_ISSUE_ACCESS
-  # (dispatch.buildBoxEnv, issue #1951) and forwards into the Box only when
-  # writes are permitted. Its *presence*, not a string comparison against a
-  # defaultable BOX_FORGE_AND_ISSUE_ACCESS, is the gate below -- an unset,
-  # typo'd, or forwarding-glitched value renders the no-write path, never
-  # the write-capable one.
-  # shellcheck disable=SC2034 # read indirectly via "${!_fgate}" in the loop below
-  local ISSUE_TRACKER_GITHUB_READWRITE=""
-  # shellcheck disable=SC2034 # read indirectly via "${!_fgate}" in the loop below
-  local ISSUE_TRACKER_GITHUB_READONLY=""
-  # shellcheck disable=SC2034 # read indirectly via "${!_fgate}" in the loop below
-  local ISSUE_TRACKER_FORGEJO_READWRITE=""
-  # shellcheck disable=SC2034 # read indirectly via "${!_fgate}" in the loop below
-  local ISSUE_TRACKER_FORGEJO_READONLY=""
-  if [ -n "$_it_write" ]; then
-    if [ -n "${BOX_WRITE_ENABLED:-}" ]; then
-      printf -v "ISSUE_TRACKER_${_it_write}_READWRITE" '%s' 1
-    else
-      printf -v "ISSUE_TRACKER_${_it_write}_READONLY" '%s' 1
-    fi
-  fi
-
-  # The OPEN A PULL REQUEST push step gate (issue #1918,
-  # open-pr-push-git.md/open-pr-push-outbox.md registry rows): read-only
-  # holds no push-capable token, so the step leaves the branch committed for
-  # the harness to bundle to the outbox post-driver (issue #2082) instead of
-  # the agent running git push directly. Computed independently of
-  # ISSUE_TRACKER_GITHUB above (not nested under it, unlike the write-step
-  # gates just above) -- CODE_FORGE and ISSUE_TRACKER are independent axes,
-  # so a github push step must reflect BOX_WRITE_ENABLED regardless of which
-  # tracker is selected.
-  local BOX_ACCESS_READ_WRITE=""
+  # _validate_prompt_contract (below, unchanged since issue #2249) still
+  # reads BOX_ACCESS_READ_ONLY and FILER_FILE_RELAY by dynamic scoping from
+  # this function's own call frame. The gate precompute block that used to
+  # compute them (among many others) for the now-deleted fragment loop is
+  # gone, but these two remain load-bearing inputs to the reject/warn marker
+  # matrix -- recomputed here, directly from the same env vars the verb
+  # itself gates on (mirrors gates.go's own derivation), rather than
+  # resurrecting the rest of the deleted precompute block.
   local BOX_ACCESS_READ_ONLY=""
-  if [ -n "${BOX_WRITE_ENABLED:-}" ]; then
-    # shellcheck disable=SC2034 # read indirectly via "${!_fgate}" in the loop below
-    BOX_ACCESS_READ_WRITE=1
+  [ -z "${BOX_WRITE_ENABLED:-}" ] && BOX_ACCESS_READ_ONLY=1
+  local _vc_filer_enabled=""
+  if [ -n "${AGENTS_JSON_TEMPLATE:-}" ] && printf '%s' "$AGENTS_JSON_TEMPLATE" | jq -e 'has("filer")' >/dev/null 2>&1; then
+    _vc_filer_enabled=1
+  fi
+  local FILER_FILE_RELAY=""
+  if [ -n "$_vc_filer_enabled" ] && [ -z "${BOX_WRITE_ENABLED:-}" ] && [ -n "$ORCHESTRATOR" ]; then
+    FILER_FILE_RELAY=1
   else
-    # shellcheck disable=SC2034 # read indirectly via "${!_fgate}" in the loop below
-    BOX_ACCESS_READ_ONLY=1
+    # Off-row (orchestrator-fork-well-formed, issue #2047/#2354): every
+    # $ORCHESTRATOR conditional declares both an on-row and an off-row, even
+    # when, as here, the off-row is a no-op -- FILER_FILE_RELAY already
+    # defaults to empty above.
+    :
   fi
 
-  # CODE_FORGE -> backend suffix its gate families (OPEN_PR_CREATE_RW_*,
-  # FIX_CI_READ_*) carry. Only forgejo diverges; github/git/local share the
-  # gh-flavored path. Per-axis dispatch (ADR 0013): a new code forge
-  # (gitlab, bitbucket) adds one arm here, not an elif in each family below.
-  local _code_forge_backend
-  case "${CODE_FORGE:-github}" in
-    forgejo) _code_forge_backend=FORGEJO ;;
-    *)       _code_forge_backend=GH ;;
-  esac
-
-  # The OPEN A PULL REQUEST create step forks the read-write case on
-  # CODE_FORGE (issue #1963): a forgejo Box opens its draft PR with fj pr
-  # create, a github Box with gh pr create. Read-only stays forge-agnostic
-  # (SPINDRIFT_PR_INTENT relay), so only the read-write create splits here.
-  # shellcheck disable=SC2034 # read indirectly via "${!_fgate}" in the loop below
-  local OPEN_PR_CREATE_RW_GH=""
-  # shellcheck disable=SC2034 # read indirectly via "${!_fgate}" in the loop below
-  local OPEN_PR_CREATE_RW_FORGEJO=""
-  if [ -n "$BOX_ACCESS_READ_WRITE" ]; then
-    printf -v "OPEN_PR_CREATE_RW_${_code_forge_backend}" '%s' 1
-  fi
-
-  # The fix-pass CONTEXT CI-read step forks on CODE_FORGE (issue #1963):
-  # fix-prompt.md's CI-read bullets shelled out unconditionally to `gh pr
-  # view`/`gh run list`/`gh run view`, which don't exist against a Forgejo
-  # remote -- a forgejo fix pass reads CI via `fj pr status` instead.
-  # shellcheck disable=SC2034 # read indirectly via "${!_fgate}" in the loop below
-  local FIX_CI_READ_GH=""
-  # shellcheck disable=SC2034 # read indirectly via "${!_fgate}" in the loop below
-  local FIX_CI_READ_FORGEJO=""
-  printf -v "FIX_CI_READ_${_code_forge_backend}" '%s' 1
-
-  # One loop over the Conditional fragment registry (lib/fragments.nix, issue
-  # #622), rendered into _FRAGMENT_ROWS by lib/mkHarness.nix's
-  # fragmentRegistryPreamble: each row's gate variable (a knob env var for
-  # auto-format/auto-lint/CI-failure, or one of the precompute
-  # variables set above) controls whether its fragment renders into its
-  # substitution variable or is left empty -- the same conditional-residue
-  # mechanism the six blocks this replaced each had: a default box's
-  # rendered prompt carries no trace of a step whose gate is off. Adding a
-  # row is a nix-only change (lib/fragments.nix): no edit here.
-  local _frow _fgate _ffile _fvar
-  for _frow in "${_FRAGMENT_ROWS[@]}"; do
-    IFS='|' read -r _fgate _ffile _fvar <<<"$_frow"
-    local "$_fvar"
-    if [ -n "${!_fgate:-}" ]; then
-      printf -v "$_fvar" '%s' "$(_subst "${PROMPTS_DIR}/fragments/${_ffile}")"$'\n\n'
-    else
-      printf -v "$_fvar" '%s' ""
-    fi
-  done
-
-  phase_conflict_resolve
-
-  # DISPATCH_KIND=research (ADR 0022, issue #640) selects the research prompt
-  # instead of the work issue-prompt.md; it takes precedence over FIX_PASS
-  # since a research dispatch never has a warm fix pass. Kind is forwarded by
-  # the launcher (cmd/launcher/internal/dispatch); defaults to "work" so every
-  # pre-existing (kind-unaware) construction site is unaffected.
-  #
-  # FIX_PASS is set by the launcher on a fix box (dispatched when CI comes back
-  # red on an already-open PR, ADR: selfHeal/runFix in cmd/launcher). A warm fix
-  # pass already has the branch checked out and prior work in place, so it runs
-  # a dedicated fix-prompt instead of the cold issue-prompt a fresh run uses.
-  # review_prompt_rendered is the code-owned review pass's own prompt text
-  # (issue #2037), threaded through run_driver_in_env to the orchestrator's
-  # --review-prompt-file below -- only for this fresh-issue work dispatch,
-  # and only when $ORCHESTRATOR is on: a research dispatch never reviews
-  # (ADR 0022), and a warm FIX_PASS box already has its own pre-existing,
-  # review-less warm-fix flow (fix-prompt.md), orthogonal to this loop.
-  review_prompt_rendered=""
-  review_model_rendered=""
-  if _is_research_kind; then
-    if _is_self_contained; then
-      prompt="$(_subst "${PROMPTS_DIR}/research-self-contained-prompt.md")"
-    else
-      prompt="$(_subst "${PROMPTS_DIR}/research-prompt.md")"
-    fi
-    _driver_session_mode="initial"
-  elif [ -n "${FIX_PASS:-}" ] && [ "${FIX_PASS}" -gt 0 ]; then
-    prompt="$(_subst "${PROMPTS_DIR}/fix-prompt.md")"
-    _driver_session_mode="resume"
-  else
-    prompt="$(_subst "${PROMPTS_DIR}/issue-prompt.md")"
-    # A box re-dispatched after any transient re-dispatch — a 429
-    # rate-limit hold or a 529/overloaded/network backoff
-    # (RESUME_AFTER_HOLD set by the launcher's dispatch retry loop,
-    # issue #2226 broadened this from the 429-hold-only #2075
-    # behavior) — resumes its pinned Driver session instead of
-    # re-pinning it, so the recovered run continues the same
-    # conversation rather than restarting cold and re-spending the
-    # already-spent tokens. Orthogonal to FIX_PASS: still the cold
-    # issue-prompt.md and the same review pass, only the session
-    # mode changes.
-    if [ -n "${RESUME_AFTER_HOLD:-}" ]; then
-      _driver_session_mode="resume"
-    else
-      _driver_session_mode="initial"
-    fi
-    if [ -n "$ORCHESTRATOR" ]; then
-      review_prompt_rendered="$(_subst "${PROMPTS_DIR}/review-prompt.md")"
-    else
-      review_prompt_rendered=""
-    fi
-  fi
-  # Applied in COMMS, CHECK, OUTCOME order so a prompt missing all three (e.g.
-  # fix-prompt.md's fix-specific-preamble-only default) ends up with them in
-  # the same order the issue prompt carries them. The research prompt carries
-  # none of these work-only blocks -- it gets its own outcome contract instead.
-  if _is_research_kind; then
-    _inject_shared_block "research-verdict" "$RESEARCH_OUTCOME_CONTRACT_FILE"
-  else
-    _inject_shared_block "comms" "$COMMS_CONTRACT_FILE"
-    _inject_shared_block "check" "$CHECK_CONTRACT_FILE"
-    _inject_shared_block "outcome" "$OUTCOME_CONTRACT_FILE"
-  fi
-
-  # Forward the nix-baked --agents JSON to the Agent. AGENTS_JSON_TEMPLATE is
-  # computed by nix (builtins.toJSON) and set to empty when no subagent model is
-  # configured, so the conditional is resolved at build time, not here. Each
-  # subagent is baked independently, so the template may carry scout only,
-  # reviewer only, both, or (empty string) neither.
-  # When the template is present, inject the runtime-substituted prompt for
-  # whichever agents it actually carries and forward the completed JSON;
-  # otherwise omit the flag entirely.
-  if [ -n "${AGENTS_JSON_TEMPLATE:-}" ]; then
-    agents_json="$AGENTS_JSON_TEMPLATE"
-    if [ -n "$ORCHESTRATOR" ]; then
-      # Issue #2277: extract the reviewer's own configured model into the
-      # review_model_rendered global (declared in main; plain assignment,
-      # not local -- same pattern as review_prompt_rendered elsewhere in
-      # this function) before the del(.reviewer) line below drops the
-      # reviewer entry from the template entirely. Once dropped, its model
-      # is unrecoverable -- threading it through run_driver_in_env to the
-      # orchestrator's own --review-model flag is the only way the review
-      # pass still learns the configured model instead of silently falling
-      # back to the coordinator model.
-      review_model_rendered="$(printf '%s' "$agents_json" | jq -r '.reviewer.model // empty')"
-      # The code-owned review pass replaces the implementor's own inline
-      # reviewer subagent entirely on this path (issue #2037) -- drop it
-      # from the template so it's never provisioned into --agents at all,
-      # not merely muted; verdict authority moves fully to the review pass.
-      agents_json="$(printf '%s' "$agents_json" | jq 'del(.reviewer)')"
-    else
-      # Off-row (orchestrator-fork-well-formed, issue #2047): no reviewer
-      # drop -- the generic injection loop below still provisions reviewer
-      # like any other roster entry when the orchestrator is off.
-      :
-    fi
-    # Inject each present agent's runtime-substituted prompt. The prompt file
-    # for an agent is AGENTS_PROMPT_FILES[name] (nix-baked from the
-    # normalized roster, which guarantees every entry a promptFile -- issue
-    # #2152 slice B). Generic over the roster: a custom Nth agent's prompt is
-    # injected the same way, no per-name branch (#264).
-    local _agent_name _pf _p
-    while IFS= read -r _agent_name; do
-      [ -n "$_agent_name" ] || continue
-      _pf=""
-      if [ -n "${AGENTS_PROMPT_FILES:-}" ]; then
-        _pf="$(printf '%s' "$AGENTS_PROMPT_FILES" | jq -r --arg n "$_agent_name" '.[$n] // empty')"
-      fi
-      [ -f "${PROMPTS_DIR}/${_pf}" ] || continue
-      _p="$(_subst "${PROMPTS_DIR}/${_pf}")"
-      agents_json="$(printf '%s' "$agents_json" | jq --arg n "$_agent_name" --arg p "$_p" '.[$n].prompt = $p')"
-    done < <(printf '%s' "$agents_json" | jq -r 'keys[]')
-  else
-    agents_json=""
-  fi
-
-  # File-rewrite twin of the agents-JSON injection loop above, for a Driver
-  # (opencode) whose subagents ride on-disk agent files instead of the
-  # --agents JSON flag. DRIVER_AGENT_FILES_DIR is baked non-empty only for
-  # such a Driver (lib/drivers/default.nix renderPreamble); claude leaves it
-  # unset, so this block is a no-op there -- no per-Driver-name branch. For
-  # each nix-baked roster agent, the agent's baked file's body is overwritten
-  # with the same runtime-substituted prompt the JSON loop injects, so the
-  # same roster yields the same effective subagent prompt under either Driver
-  # (issue #2153). Generic over N agents, keyed off the same
-  # AGENTS_PROMPT_FILES map, no per-name branch (#264).
-  if [ -n "${DRIVER_AGENT_FILES_DIR:-}" ]; then
-    if [ -n "$ORCHESTRATOR" ]; then
-      # Issue #2278: file-based twin of the JSON loop's #2277 extraction
-      # above -- the same reasoning applies here, only the source is a baked
-      # agent file's `model:` frontmatter scalar instead of a JSON template's
-      # .reviewer.model. Extraction must happen before the `rm -f` just below,
-      # since once the file is removed its configured model is unrecoverable;
-      # threading it through run_driver_in_env to the orchestrator's own
-      # --review-model flag is the only way the review pass still learns the
-      # configured model instead of silently falling back to the coordinator
-      # model. Mirrors the claude path's `// empty` fallback: no reviewer.md
-      # (opencode drops the file outright when the reviewer has no configured
-      # model, #392) leaves review_model_rendered at its already-initialized
-      # empty default rather than erroring.
-      [ -f "${DRIVER_AGENT_FILES_DIR}/reviewer.md" ] &&
-        review_model_rendered="$(awk '{ print } /^---$/ { if (++_c == 2) exit }' "${DRIVER_AGENT_FILES_DIR}/reviewer.md" | sed -n 's/^model: //p' | jq -r '.')"
-      # Mechanism parity with the JSON loop's `del(.reviewer)`: the code-owned
-      # review pass owns verdict authority (issue #2037), so the reviewer's
-      # baked agent file is removed outright rather than rewritten.
-      rm -f "${DRIVER_AGENT_FILES_DIR}/reviewer.md"
-    else
-      # Off-row (mirrors the JSON loop's own off-row above): no reviewer
-      # drop -- the generic rewrite loop below still rewrites reviewer's
-      # baked agent file like any other roster entry when the orchestrator
-      # is off.
-      :
-    fi
-    if [ -n "${AGENTS_PROMPT_FILES:-}" ]; then
-      local _af_name _af_pf _af_file _af_prompt _af_frontmatter
-      while IFS= read -r _af_name; do
-        [ -n "$_af_name" ] || continue
-        _af_file="${DRIVER_AGENT_FILES_DIR}/${_af_name}.md"
-        # An entry with an empty model gets no baked file (opencode drops it),
-        # and a reviewer file just removed above is likewise gone -- skip both.
-        [ -f "$_af_file" ] || continue
-        _af_pf="$(printf '%s' "$AGENTS_PROMPT_FILES" | jq -r --arg n "$_af_name" '.[$n] // empty')"
-        [ -f "${PROMPTS_DIR}/${_af_pf}" ] || continue
-        _af_prompt="$(_subst "${PROMPTS_DIR}/${_af_pf}")"
-        # Preserve the baked YAML frontmatter (every line up to and including
-        # the second `---`) and replace only the body beneath it. This relies
-        # on every baked agent file carrying two `---` delimiters -- guaranteed
-        # by opencode's agentFilesTemplate (lib/drivers/opencode.nix), which
-        # always emits an opening and a closing frontmatter fence; a file
-        # missing the second fence would fall through to `print`ing the whole
-        # file as frontmatter.
-        _af_frontmatter="$(awk '{ print } /^---$/ { if (++_c == 2) exit }' "$_af_file")"
-        printf '%s\n%s\n' "$_af_frontmatter" "$_af_prompt" >"$_af_file"
-      done < <(printf '%s' "$AGENTS_PROMPT_FILES" | jq -r 'keys[]')
-    fi
-  fi
-
-  # Reject/warn marker matrix (issue #2249): runs last, after every fragment
-  # is rendered/injected and $prompt/$agents_json are fully assembled, and
-  # strictly before run_driver_in_env is ever called from main.
+  # Reject/warn marker matrix (issue #2249): runs last, after $prompt and
+  # $agents_json are fully assembled, and strictly before run_driver_in_env
+  # is ever called from main.
   _validate_prompt_contract
 }
 
@@ -1507,6 +1134,21 @@ main() {
   local ORCHESTRATOR
 
   configure_env
+
+  # Early ORCHESTRATOR (issue #2354 slice 3): phase_conflict_resolve, hoisted
+  # below to run ahead of phase_prompt_assembly, calls run_driver_in_env,
+  # which reads this cross-phase sentinel directly -- but the verb's own
+  # Handoff.Invoker field (phase_prompt_assembly's canonical source, set
+  # further down at that function's own ORCHESTRATOR reassignment) isn't
+  # available until after the verb call. Mathematically identical to that
+  # later assignment ([ -n "${ORCHESTRATOR_ENABLED:-}" ] is exactly what the
+  # verb's own --orchestrator-enabled flag and gates.go's
+  # g["ORCHESTRATOR"] = e.OrchestratorEnabled both reduce to), so there's no
+  # divergence risk -- this one-liner exists purely to give
+  # phase_conflict_resolve a value to read before that reassignment runs.
+  ORCHESTRATOR=""
+  [ -n "${ORCHESTRATOR_ENABLED:-}" ] && ORCHESTRATOR=1
+
   if _is_self_contained; then
     # No repo to clone or explore (issue #2202): stand up an empty working
     # directory for the Driver, wire fj for a forgejo verdict post, and skip
@@ -1527,6 +1169,14 @@ main() {
     phase_devshell_probe
     phase_prefetch
   fi
+  # phase_conflict_resolve runs before phase_prompt_assembly (issue #2354
+  # slice 3), unconditionally for every dispatch kind -- self-contained,
+  # research, and fresh work alike -- exactly as it did nested inside
+  # phase_prompt_assembly before this hoist. Its two early-exit paths
+  # (CONFLICT_RESOLVE_PR_URL's resolve-only dispatch, and an unresolvable
+  # pre-work rebase conflict) now skip the driver-exec assemble-prompt verb
+  # call entirely instead of running it and discarding the result.
+  phase_conflict_resolve
   phase_prompt_assembly
 
   if _is_research_kind; then
