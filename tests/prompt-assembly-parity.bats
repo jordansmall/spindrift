@@ -1,15 +1,15 @@
 #!/usr/bin/env bats
 # Byte-parity harness (issue #2349 slice 6, extended by issue #2350, #2351,
-# and by issue #2352 with the tracker cells below): runs the SAME env
-# through both agent/entrypoint.sh's real bash phase_prompt_assembly (via
-# $ENTRYPOINT and the fake driver/driver-exec chain, tests/helper.bash's
-# setup_entrypoint_env) and the new Go `driver-exec assemble-prompt` verb
-# (cmd/launcher/internal/promptassembly + driver-exec/assembleprompt_cmd.go),
-# and asserts the two produce equivalent output across every Env cell
-# promptassembly.Assemble covers. All cells share the orchestrator off and
-# every skill baked -- exactly tests/box_env_gen.bash's set_box_env
-# schema-default cell, plus setup_entrypoint_env's own BOX_WRITE_ENABLED=1
-# default -- and differ only on three orthogonal axes:
+# #2352, and #2353): runs the SAME env through both agent/entrypoint.sh's
+# real bash phase_prompt_assembly (via $ENTRYPOINT and the fake driver/
+# driver-exec chain, tests/helper.bash's setup_entrypoint_env) and the new Go
+# `driver-exec assemble-prompt` verb (cmd/launcher/internal/promptassembly +
+# driver-exec/assembleprompt_cmd.go), and asserts the two produce equivalent
+# output across every Env cell promptassembly.Assemble covers. The
+# orchestrator-off cells 1-11 share the orchestrator off and every skill
+# baked -- exactly tests/box_env_gen.bash's set_box_env schema-default cell,
+# plus setup_entrypoint_env's own BOX_WRITE_ENABLED=1 default -- and differ
+# only on three orthogonal axes:
 #
 #   DISPATCH_KIND/SELF_CONTAINED/FIX_PASS/RESUME_AFTER_HOLD, with
 #   ISSUE_TRACKER/CODE_FORGE/BOX_WRITE_ENABLED held at their defaults:
@@ -35,6 +35,17 @@
 #     10. forgejo, read-write (ISSUE_TRACKER=forgejo)
 #     11. jira, which rides the github prompt-selection arms
 #         (ISSUE_TRACKER=jira)
+#
+# The orchestrator-on cells 12-14 (issue #2353) all share dispatch kind
+# "work" (default) with FIX_PASS unset -- the only path checkCoveredCell
+# covers combined with the orchestrator on -- and differ only on the
+# roster/skills axes:
+#   12. orchestrator on, filer-on -- roster carries a "filer" key alongside
+#       reviewer and scout (FILER_ENABLED on).
+#   13. orchestrator on, filer-off -- roster carries reviewer and scout but
+#       no "filer" key (FILER_ENABLED off).
+#   14. orchestrator on, skills-absent -- no skill baked at all, contrasting
+#       setup()'s unconditional 4-skill baking every other cell relies on.
 #
 # Every cell test funnels through the shared assert_cell_parity helper below,
 # so the prompt/agents/handoff comparison logic lives in exactly one place.
@@ -101,16 +112,34 @@ SKILL
 # flag mapped from this test's own exported env, writing its three outputs
 # under $BATS_TEST_TMPDIR. Extra args (e.g. --resume-after-hold or
 # --agents-json-template) are appended after the fixed flag set.
+#
+# PARITY_SKILLS_BAKED gates the four --*-skill-baked bool flags and the
+# non-empty --skills-found value below. Left unset (or "1"), every existing
+# cell gets today's unchanged behavior: all four skills baked. Go's flag
+# package has no "--no-caveman-skill-baked" form to un-set a bool flag once
+# passed (unlike a string flag's value, which "$@" can override last-wins),
+# so the skills-absent cell can't turn these off by appending an override --
+# instead, a caller exports PARITY_SKILLS_BAKED=0 before calling, and this
+# function omits the flags entirely, leaving every one at the CLI's own
+# false/"" default.
 assemble_go() {
+  local skill_flags=()
+  if [ "${PARITY_SKILLS_BAKED:-1}" = "1" ]; then
+    skill_flags=(
+      --caveman-skill-baked
+      --tdd-skill-baked
+      --commit-skill-baked
+      --code-review-skill-baked
+      --skills-found "caveman, code-review, commit, tdd"
+    )
+  fi
+
   run "$DRIVER_EXEC_BIN" assemble-prompt \
     --registry "$PROMPTASSEMBLY_REGISTRY_FILE" \
     --prompt-output "$BATS_TEST_TMPDIR/go-prompt.txt" \
     --agents-json-output "$BATS_TEST_TMPDIR/go-agents.json" \
     --handoff-output "$BATS_TEST_TMPDIR/go-handoff.json" \
-    --caveman-skill-baked \
-    --tdd-skill-baked \
-    --commit-skill-baked \
-    --code-review-skill-baked \
+    "${skill_flags[@]}" \
     --issue-tracker "$ISSUE_TRACKER" \
     --box-write-enabled \
     --code-forge "$CODE_FORGE" \
@@ -120,7 +149,6 @@ assemble_go() {
     --check-contract-file "$CHECK_CONTRACT_FILE" \
     --outcome-contract-file "$OUTCOME_CONTRACT_FILE" \
     --research-outcome-contract-file "$RESEARCH_OUTCOME_CONTRACT_FILE" \
-    --skills-found "caveman, code-review, commit, tdd" \
     --issue-number "$ISSUE_NUMBER" \
     --issue-title "$ISSUE_TITLE" \
     --branch "$BRANCH" \
@@ -159,6 +187,32 @@ assert_cell_parity() {
   jq -e --arg m "$expected_session_mode" '.SessionMode == $m' "$BATS_TEST_TMPDIR/go-handoff.json"
 }
 
+# assert_review_handoff_parity: for the orchestrator-on cells (issue #2353),
+# asserts the Handoff facts assert_cell_parity's own prompt/agents-JSON/
+# SessionMode checks don't cover -- Invoker, ReviewPromptFile, and
+# ReviewModel, all only ever populated with the orchestrator on. ReviewModel
+# is a genuine byte-exact parity assertion: both sides recover the same
+# short literal model name (bash from $ORCHESTRATOR_LOG's recorded argv, Go
+# from its own handoff JSON). ReviewPromptFile can only be asserted non-empty
+# on both sides -- run_driver_in_env writes and deletes its temp file
+# entirely inside a single phase downstream of phase_prompt_assembly, so its
+# content is already gone by the time bats inspects anything (the same
+# constraint entrypoint-orchestrator-handoff.bats's own
+# "--review-prompt-file carrying a real path" test documents).
+assert_review_handoff_parity() {
+  jq -e '.Invoker == "orchestrator"' "$BATS_TEST_TMPDIR/go-handoff.json"
+  jq -e '.ReviewPromptFile != ""' "$BATS_TEST_TMPDIR/go-handoff.json"
+
+  grep -q -- '--review-prompt-file' "$ORCHESTRATOR_LOG"
+  local bash_review_prompt_file
+  bash_review_prompt_file="$(grep -oE -- '--review-prompt-file [^ ]+' "$ORCHESTRATOR_LOG" | awk '{print $2}')"
+  [ -n "$bash_review_prompt_file" ]
+
+  local bash_review_model
+  bash_review_model="$(grep -oE -- '--review-model [^ ]+' "$ORCHESTRATOR_LOG" | awk '{print $2}')"
+  [ "$bash_review_model" = "$(jq -r '.ReviewModel' "$BATS_TEST_TMPDIR/go-handoff.json")" ]
+}
+
 # issue #2349: a realistic multi-agent roster -- scout, reviewer (present, not
 # dropped: the orchestrator is off in the covered cell), and worker (the
 # WORKER_PROVISIONED gate's partner axis to "skills baked" in the covered
@@ -166,6 +220,13 @@ assert_cell_parity() {
 # WORKER_AGENTS_JSON_TEMPLATE/"entrypoint includes a read-only tools
 # whitelist" fixtures.
 AGENTS_ROSTER='{"scout":{"description":"Map relevant files, seams, and tests; return a structured brief","model":"opus","prompt":"","tools":["Read","Bash","WebFetch","WebSearch","Glob","Grep"]},"reviewer":{"description":"Review the branch diff for spec compliance and coding standards","model":"haiku","prompt":"","tools":["Read","Bash","WebFetch"]},"worker":{"description":"Implement a scoped slice of work delegated to it","model":"sonnet","prompt":"","tools":["Read","Bash","Edit","Write","Glob","Grep","WebFetch"]}}'
+
+# issue #2353: AGENTS_ROSTER plus a "filer" entry (the shape
+# tests/entrypoint-agents-json.bats:64 already exercises -- "File issues from
+# a review's non-blocking findings, best-effort"), so the orchestrator-on
+# filer-on cell below actually flips the FILER_ENABLED gate on, unlike
+# AGENTS_ROSTER alone (the filer-off cell's roster).
+AGENTS_ROSTER_WITH_FILER='{"scout":{"description":"Map relevant files, seams, and tests; return a structured brief","model":"opus","prompt":"","tools":["Read","Bash","WebFetch","WebSearch","Glob","Grep"]},"reviewer":{"description":"Review the branch diff for spec compliance and coding standards","model":"haiku","prompt":"","tools":["Read","Bash","WebFetch"]},"worker":{"description":"Implement a scoped slice of work delegated to it","model":"sonnet","prompt":"","tools":["Read","Bash","Edit","Write","Glob","Grep","WebFetch"]},"filer":{"description":"File issues from a review'"'"'s non-blocking findings, best-effort","model":"haiku","prompt":"","tools":["Read","Bash","WebFetch"]}}'
 
 @test "bash and Go agree byte-for-byte on prompt/agents/handoff for the covered cell, with a populated roster" {
   export AGENTS_JSON_TEMPLATE="$AGENTS_ROSTER"
@@ -297,4 +358,52 @@ AGENTS_ROSTER='{"scout":{"description":"Map relevant files, seams, and tests; re
   export ISSUE_TRACKER="jira"
 
   assert_cell_parity initial
+}
+
+# issue #2353: three orchestrator-on cells (dispatch kind "work", FIX_PASS
+# unset -- the only orchestrator-on path checkCoveredCell covers). Unlike
+# cells 1-4 above, ORCHESTRATOR_ENABLED must be exported so the bash side
+# takes run_driver_in_env's orchestrator invocation path (entrypoint.sh:
+# 1282-1286, tests/entrypoint-orchestrator-handoff.bats), and
+# --orchestrator-enabled forwarded to assemble_go so the Go side matches.
+
+@test "bash and Go agree byte-for-byte on prompt/agents/handoff for the orchestrator-on filer-on cell" {
+  export ORCHESTRATOR_ENABLED=1
+  export AGENTS_JSON_TEMPLATE="$AGENTS_ROSTER_WITH_FILER"
+
+  assert_cell_parity initial --orchestrator-enabled --agents-json-template "$AGENTS_JSON_TEMPLATE"
+
+  assert_review_handoff_parity
+}
+
+@test "bash and Go agree byte-for-byte on prompt/agents/handoff for the orchestrator-on filer-off cell" {
+  export ORCHESTRATOR_ENABLED=1
+  # AGENTS_ROSTER (not the _WITH_FILER variant above): scout+reviewer, no
+  # "filer" key -- the FILER_ENABLED-off half of the roster axis. Reviewer is
+  # present in both filer-on and filer-off (filer-on/off forks only on
+  # whether "filer" itself is in the roster), so both cells assert
+  # ReviewModel parity the same way via assert_review_handoff_parity.
+  export AGENTS_JSON_TEMPLATE="$AGENTS_ROSTER"
+
+  assert_cell_parity initial --orchestrator-enabled --agents-json-template "$AGENTS_JSON_TEMPLATE"
+
+  assert_review_handoff_parity
+}
+
+@test "bash and Go agree byte-for-byte on prompt/agents/handoff for the orchestrator-on skills-absent cell" {
+  export ORCHESTRATOR_ENABLED=1
+  export AGENTS_JSON_TEMPLATE="$AGENTS_ROSTER"
+
+  # Contrast setup()'s unconditional 4-skill baking: this cell is the
+  # "SkillsFound == "" and every *SkillBaked flag false" branch
+  # checkCoveredCell also covers. Remove the skill dirs setup() just baked
+  # under $HOME (rather than restructuring setup() itself, which every other
+  # cell in this suite still relies on baking unconditionally), and tell
+  # assemble_go to omit its own skill-baked flags/value the same way.
+  rm -rf "$HOME/.claude/skills"
+  export PARITY_SKILLS_BAKED=0
+
+  assert_cell_parity initial --orchestrator-enabled --agents-json-template "$AGENTS_JSON_TEMPLATE"
+
+  assert_review_handoff_parity
 }
