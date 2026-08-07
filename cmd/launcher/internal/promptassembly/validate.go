@@ -9,9 +9,8 @@ import (
 )
 
 // The When values a ValidateMarkerRow's When field is compared against in
-// Validate and validateMarkerMessage, named so a row-value typo is a
-// compile-time/IDE-assisted mismatch rather than only a runtime fallback-arm
-// error.
+// Validate, named so a row-value typo is a compile-time/IDE-assisted
+// mismatch rather than only a runtime fallback-arm error.
 const (
 	whenReadOnlyResearch    = "readOnlyResearch"
 	whenOrchestratorEnabled = "orchestratorEnabled"
@@ -50,6 +49,9 @@ type ValidateMarkerRow struct {
 	// "filerFileRelay". See Validate's switch for exactly what each resolves
 	// to.
 	When string `json:"when"`
+	// Message is the row's fully pre-rendered diagnostic prose, marker
+	// already interpolated by the nix registry.
+	Message string `json:"message"`
 }
 
 // LoadValidateMarkers reads and parses a validateMarkers registry JSON
@@ -138,7 +140,7 @@ func Validate(e Env, result Result, rows []ValidateMarkerRow) (warnings []string
 			continue
 		}
 
-		message := validateMarkerMessage(row)
+		message := row.Message
 
 		switch row.Severity {
 		case severityReject:
@@ -165,31 +167,4 @@ func filerPromptFrom(agentsJSON string) string {
 	}
 	_ = json.Unmarshal([]byte(agentsJSON), &parsed)
 	return parsed.Filer.Prompt
-}
-
-// validateMarkerMessage builds row's diagnostic message, reusing the exact
-// text agent/entrypoint.sh's _validate_prompt_contract uses for each row id
-// (entrypoint.sh: 536, 553, 568, 584), including the
-// "_validate_prompt_contract: ..." prefix -- now a stable message-tag, not a
-// claim this package has a function of that name. Three of the four rows
-// reuse that text byte-for-byte; the fourth (filerFileRelay) deliberately
-// elides bash's ".md" suffix on "filer-file-relay" -- unlike the other
-// fragments this text names (research-prompt.md, review-prompt.md,
-// issue-prompt.md, fix-prompt.md), "filer-file-relay.md" is itself a
-// protected identifier in lib/fragments.nix's Conditional fragment registry,
-// so spelling it out here would trip promptassembly-registry-ownership
-// (nix/checks/promptassembly.nix), which forbids hardcoding a registry
-// fragment/var literal in this package's non-test Go source.
-func validateMarkerMessage(row ValidateMarkerRow) string {
-	switch row.When {
-	case whenReadOnlyResearch:
-		return fmt.Sprintf("_validate_prompt_contract: read-only research dispatch's rendered prompt is missing the required '%s' marker -- this belongs in research-prompt.md's (or a SPINDRIFT_PROMPT_DIR override's) POST THE VERDICT section; without it a read-only Box has no way to hand its verdict to the launcher. Refusing to invoke the Driver.", row.Marker)
-	case whenOrchestratorEnabled:
-		return fmt.Sprintf("_validate_prompt_contract: the orchestrator's rendered review prompt is missing the required '%s' marker -- this belongs in review-prompt.md's (or a SPINDRIFT_PROMPT_DIR override's) verdict line; without it the code-owned review loop has nothing to gate on. Refusing to invoke the Driver.", row.Marker)
-	case whenBoxAccessReadOnly:
-		return fmt.Sprintf("_validate_prompt_contract: warning -- read-only dispatch's rendered prompt is missing the '%s' marker (belongs in issue-prompt.md's, or fix-prompt.md's injected, OPEN A PULL REQUEST section). Proceeding: a status=ready run with no PR-intent line still gets one resume-nudge attempt post-driver, and a genuinely exhausted attempt falls back to the merge-blocked report rather than losing the branch.", row.Marker)
-	case whenFilerFileRelay:
-		return fmt.Sprintf("_validate_prompt_contract: warning -- filer-relay dispatch's rendered filer prompt is missing the '%s' marker (belongs in filer-prompt.md's, or a SPINDRIFT_PROMPT_DIR override's, filer-file-relay-injected section). Proceeding: the filer's own best-effort PR-body fallback still records the issue reference even without the relay.", row.Marker)
-	}
-	return fmt.Sprintf("_validate_prompt_contract: missing '%s' marker", row.Marker)
 }

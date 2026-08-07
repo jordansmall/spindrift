@@ -159,6 +159,11 @@ rec {
   #   when     -- a symbolic gating-condition name, not yet consumed by any
   #               bash/Nix logic -- wiring `when` to an actual runtime
   #               condition is future work, out of scope for this issue.
+  #   message  -- the row's fully pre-rendered diagnostic prose (marker
+  #               already interpolated), surfaced verbatim as the reject-
+  #               error or warn-entry text by promptassembly.Validate's
+  #               data-driven dispatch (issue #2405) -- no runtime %s/
+  #               Sprintf substitution needed.
   validateMarkers = [
     {
       id = "verdict-comment-relay";
@@ -166,6 +171,7 @@ rec {
       carrier = "fragment-body";
       severity = "reject";
       when = "readOnlyResearch";
+      message = "_validate_prompt_contract: read-only research dispatch's rendered prompt is missing the required 'SPINDRIFT_COMMENT' marker -- this belongs in research-prompt.md's (or a SPINDRIFT_PROMPT_DIR override's) POST THE VERDICT section; without it a read-only Box has no way to hand its verdict to the launcher. Refusing to invoke the Driver.";
     }
     {
       id = "reviewer-verdict";
@@ -173,6 +179,7 @@ rec {
       carrier = "subagent-first-line";
       severity = "reject";
       when = "orchestratorEnabled";
+      message = "_validate_prompt_contract: the orchestrator's rendered review prompt is missing the required 'VERDICT:' marker -- this belongs in review-prompt.md's (or a SPINDRIFT_PROMPT_DIR override's) verdict line; without it the code-owned review loop has nothing to gate on. Refusing to invoke the Driver.";
     }
     {
       id = "pr-intent";
@@ -180,6 +187,7 @@ rec {
       carrier = "fragment-body";
       severity = "warn";
       when = "boxAccessReadOnly";
+      message = "_validate_prompt_contract: warning -- read-only dispatch's rendered prompt is missing the 'SPINDRIFT_PR_INTENT' marker (belongs in issue-prompt.md's, or fix-prompt.md's injected, OPEN A PULL REQUEST section). Proceeding: a status=ready run with no PR-intent line still gets one resume-nudge attempt post-driver, and a genuinely exhausted attempt falls back to the merge-blocked report rather than losing the branch.";
     }
     {
       id = "issue-intent";
@@ -187,6 +195,7 @@ rec {
       carrier = "fragment-body";
       severity = "warn";
       when = "filerFileRelay";
+      message = "_validate_prompt_contract: warning -- filer-relay dispatch's rendered filer prompt is missing the 'SPINDRIFT_ISSUE_INTENT' marker (belongs in filer-prompt.md's, or a SPINDRIFT_PROMPT_DIR override's, filer-file-relay-injected section). Proceeding: the filer's own best-effort PR-body fallback still records the issue reference even without the relay.";
     }
   ];
 

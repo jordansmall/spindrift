@@ -209,41 +209,99 @@ func TestLoadValidateMarkersFileNonexistent(t *testing.T) {
 	}
 }
 
-// TestValidateMarkerMessageVerbatim guards validateMarkerMessage's per-row
-// text against the exact strings agent/entrypoint.sh's _validate_prompt_contract
-// used for each row id (origin/main entrypoint.sh:536, 553, 568, 584).
-// Three rows must match byte-for-byte; filerFileRelay's expected text
-// deliberately elides bash's ".md" suffix on "filer-file-relay" -- see
-// validateMarkerMessage's doc comment for why spelling it out would trip
-// promptassembly-registry-ownership.
+// TestValidateMarkerMessageVerbatim guards each row's pre-rendered Message
+// field surfacing verbatim (byte-for-byte, marker already interpolated by
+// the nix registry) as Validate's reject-error/warn-entry text -- the
+// data-driven successor to the hardcoded per-When switch this test used to
+// drive directly (issue #2318 parent; message text moved to the registry by
+// #2405). Each case is a scenario tuned so exactly one row's gate is active
+// with its marker missing, isolating that row's message in the outcome.
 func TestValidateMarkerMessageVerbatim(t *testing.T) {
-	cases := []struct {
-		row  ValidateMarkerRow
-		want string
-	}{
-		{
-			ValidateMarkerRow{Marker: "SPINDRIFT_COMMENT", When: "readOnlyResearch"},
-			"_validate_prompt_contract: read-only research dispatch's rendered prompt is missing the required 'SPINDRIFT_COMMENT' marker -- this belongs in research-prompt.md's (or a SPINDRIFT_PROMPT_DIR override's) POST THE VERDICT section; without it a read-only Box has no way to hand its verdict to the launcher. Refusing to invoke the Driver.",
-		},
-		{
-			ValidateMarkerRow{Marker: "VERDICT:", When: "orchestratorEnabled"},
-			"_validate_prompt_contract: the orchestrator's rendered review prompt is missing the required 'VERDICT:' marker -- this belongs in review-prompt.md's (or a SPINDRIFT_PROMPT_DIR override's) verdict line; without it the code-owned review loop has nothing to gate on. Refusing to invoke the Driver.",
-		},
-		{
-			ValidateMarkerRow{Marker: "SPINDRIFT_PR_INTENT", When: "boxAccessReadOnly"},
-			"_validate_prompt_contract: warning -- read-only dispatch's rendered prompt is missing the 'SPINDRIFT_PR_INTENT' marker (belongs in issue-prompt.md's, or fix-prompt.md's injected, OPEN A PULL REQUEST section). Proceeding: a status=ready run with no PR-intent line still gets one resume-nudge attempt post-driver, and a genuinely exhausted attempt falls back to the merge-blocked report rather than losing the branch.",
-		},
-		{
-			ValidateMarkerRow{Marker: "SPINDRIFT_ISSUE_INTENT", When: "filerFileRelay"},
-			"_validate_prompt_contract: warning -- filer-relay dispatch's rendered filer prompt is missing the 'SPINDRIFT_ISSUE_INTENT' marker (belongs in filer-prompt.md's, or a SPINDRIFT_PROMPT_DIR override's, filer-file-relay-injected section). Proceeding: the filer's own best-effort PR-body fallback still records the issue reference even without the relay.",
-		},
+	rows := testValidateMarkerRows()
+	rowMessage := func(id string) string {
+		for _, r := range rows {
+			if r.ID == id {
+				return r.Message
+			}
+		}
+		t.Fatalf("no row with id %q", id)
+		return ""
 	}
 
-	for _, c := range cases {
-		if got := validateMarkerMessage(c.row); got != c.want {
-			t.Errorf("validateMarkerMessage(When: %q) =\n%q\nwant\n%q", c.row.When, got, c.want)
+	t.Run("readOnlyResearch reject", func(t *testing.T) {
+		e := Env{DispatchKind: "research", BoxWriteEnabled: false}
+		result := Result{Prompt: "research stub, no verdict-comment marker here"}
+
+		_, err := Validate(e, result, rows)
+		if err == nil {
+			t.Fatal("Validate() error = nil, want non-nil")
 		}
-	}
+		want := rowMessage("verdict-comment-relay")
+		if err.Error() != want {
+			t.Errorf("Validate() error =\n%q\nwant\n%q", err.Error(), want)
+		}
+	})
+
+	t.Run("orchestratorEnabled reject", func(t *testing.T) {
+		e := Env{OrchestratorEnabled: true}
+		result := Result{
+			Handoff: Handoff{ReviewPromptFile: "reviewer stub, no verdict line here"},
+		}
+
+		_, err := Validate(e, result, rows)
+		if err == nil {
+			t.Fatal("Validate() error = nil, want non-nil")
+		}
+		want := rowMessage("reviewer-verdict")
+		if err.Error() != want {
+			t.Errorf("Validate() error =\n%q\nwant\n%q", err.Error(), want)
+		}
+	})
+
+	t.Run("boxAccessReadOnly warn", func(t *testing.T) {
+		e := Env{DispatchKind: "work", BoxWriteEnabled: false}
+		result := Result{Prompt: "issue stub, no PR-intent marker here"}
+
+		warnings, err := Validate(e, result, rows)
+		if err != nil {
+			t.Fatalf("Validate() error = %v, want nil", err)
+		}
+		if len(warnings) != 1 {
+			t.Fatalf("Validate() warnings = %v, want exactly one entry", warnings)
+		}
+		want := rowMessage("pr-intent")
+		if warnings[0] != want {
+			t.Errorf("Validate() warnings[0] =\n%q\nwant\n%q", warnings[0], want)
+		}
+	})
+
+	t.Run("filerFileRelay warn", func(t *testing.T) {
+		e := Env{
+			DispatchKind:        "work",
+			BoxWriteEnabled:     false,
+			OrchestratorEnabled: true,
+			AgentsJSONTemplate:  `{"filer":{"model":"m"}}`,
+		}
+		result := Result{
+			// Already carries SPINDRIFT_PR_INTENT so the boxAccessReadOnly
+			// row's gate, also active under this Env, doesn't also warn --
+			// isolates this case to the filerFileRelay row alone.
+			Prompt:     "issue stub with SPINDRIFT_PR_INTENT already present",
+			AgentsJSON: `{"filer":{"prompt":"no marker here"}}`,
+		}
+
+		warnings, err := Validate(e, result, rows)
+		if err != nil {
+			t.Fatalf("Validate() error = %v, want nil", err)
+		}
+		if len(warnings) != 1 {
+			t.Fatalf("Validate() warnings = %v, want exactly one entry", warnings)
+		}
+		want := rowMessage("issue-intent")
+		if warnings[0] != want {
+			t.Errorf("Validate() warnings[0] =\n%q\nwant\n%q", warnings[0], want)
+		}
+	})
 }
 
 // testValidateMarkerRows returns the four validateMarkers rows in
@@ -251,10 +309,38 @@ func TestValidateMarkerMessageVerbatim(t *testing.T) {
 // them from testdata/validate-markers.json.
 func testValidateMarkerRows() []ValidateMarkerRow {
 	return []ValidateMarkerRow{
-		{ID: "verdict-comment-relay", Marker: "SPINDRIFT_COMMENT", Carrier: "fragment-body", Severity: "reject", When: "readOnlyResearch"},
-		{ID: "reviewer-verdict", Marker: "VERDICT:", Carrier: "subagent-first-line", Severity: "reject", When: "orchestratorEnabled"},
-		{ID: "pr-intent", Marker: "SPINDRIFT_PR_INTENT", Carrier: "fragment-body", Severity: "warn", When: "boxAccessReadOnly"},
-		{ID: "issue-intent", Marker: "SPINDRIFT_ISSUE_INTENT", Carrier: "fragment-body", Severity: "warn", When: "filerFileRelay"},
+		{
+			ID:       "verdict-comment-relay",
+			Marker:   "SPINDRIFT_COMMENT",
+			Carrier:  "fragment-body",
+			Severity: "reject",
+			When:     "readOnlyResearch",
+			Message:  "_validate_prompt_contract: read-only research dispatch's rendered prompt is missing the required 'SPINDRIFT_COMMENT' marker -- this belongs in research-prompt.md's (or a SPINDRIFT_PROMPT_DIR override's) POST THE VERDICT section; without it a read-only Box has no way to hand its verdict to the launcher. Refusing to invoke the Driver.",
+		},
+		{
+			ID:       "reviewer-verdict",
+			Marker:   "VERDICT:",
+			Carrier:  "subagent-first-line",
+			Severity: "reject",
+			When:     "orchestratorEnabled",
+			Message:  "_validate_prompt_contract: the orchestrator's rendered review prompt is missing the required 'VERDICT:' marker -- this belongs in review-prompt.md's (or a SPINDRIFT_PROMPT_DIR override's) verdict line; without it the code-owned review loop has nothing to gate on. Refusing to invoke the Driver.",
+		},
+		{
+			ID:       "pr-intent",
+			Marker:   "SPINDRIFT_PR_INTENT",
+			Carrier:  "fragment-body",
+			Severity: "warn",
+			When:     "boxAccessReadOnly",
+			Message:  "_validate_prompt_contract: warning -- read-only dispatch's rendered prompt is missing the 'SPINDRIFT_PR_INTENT' marker (belongs in issue-prompt.md's, or fix-prompt.md's injected, OPEN A PULL REQUEST section). Proceeding: a status=ready run with no PR-intent line still gets one resume-nudge attempt post-driver, and a genuinely exhausted attempt falls back to the merge-blocked report rather than losing the branch.",
+		},
+		{
+			ID:       "issue-intent",
+			Marker:   "SPINDRIFT_ISSUE_INTENT",
+			Carrier:  "fragment-body",
+			Severity: "warn",
+			When:     "filerFileRelay",
+			Message:  "_validate_prompt_contract: warning -- filer-relay dispatch's rendered filer prompt is missing the 'SPINDRIFT_ISSUE_INTENT' marker (belongs in filer-prompt.md's, or a SPINDRIFT_PROMPT_DIR override's, filer-file-relay-injected section). Proceeding: the filer's own best-effort PR-body fallback still records the issue reference even without the relay.",
+		},
 	}
 }
 
