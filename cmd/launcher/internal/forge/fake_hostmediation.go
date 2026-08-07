@@ -34,8 +34,21 @@ type HostMediationFake struct {
 	// scripts the URL of the draft PR the github read-only adapter opens
 	// host-side (issue #1919). Only reachable through AsGithubReadOnly().
 	CreateDraftPRURL string
-	// CreateDraftPRErr, if non-nil, is returned by every CreateDraftPR call.
+	// CreateDraftPRErr, if non-nil, is returned by every CreateDraftPR call,
+	// unless head == CreateDraftPRAdoptHead (checked first).
 	CreateDraftPRErr error
+	// CreateDraftPRAdoptHead, if non-empty, is the head a CreateDraftPR call
+	// adopts rather than failing (issue #2407 slice 3): a call for this
+	// exact head returns CreateDraftPRAdoptedURL with no error, even when
+	// CreateDraftPRErr is set, mirroring github/forgejo's CreateDraftPR
+	// catching an already-exists/409 create refusal and adopting the
+	// branch's existing open PR via OpenPRForBranch instead of surfacing
+	// it. Checked before CreateDraftPRErr, since the real adapters only
+	// ever reach adoption after the create call itself already failed.
+	CreateDraftPRAdoptHead string
+	// CreateDraftPRAdoptedURL is returned instead of CreateDraftPRErr when
+	// head == CreateDraftPRAdoptHead.
+	CreateDraftPRAdoptedURL string
 	// CreateDraftPRCalls records all CreateDraftPR invocations in order.
 	CreateDraftPRCalls []CreateDraftPRCall
 
@@ -114,6 +127,9 @@ func (hm *HostMediationFake) createDraftPR(title, body, base, head string) (stri
 	hm.mu.Lock()
 	defer hm.mu.Unlock()
 	hm.CreateDraftPRCalls = append(hm.CreateDraftPRCalls, CreateDraftPRCall{Title: title, Body: body, Base: base, Head: head})
+	if hm.CreateDraftPRAdoptHead != "" && head == hm.CreateDraftPRAdoptHead {
+		return hm.CreateDraftPRAdoptedURL, nil
+	}
 	if hm.CreateDraftPRErr != nil {
 		return "", hm.CreateDraftPRErr
 	}

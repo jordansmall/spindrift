@@ -35,6 +35,17 @@ type HostMediationHarness interface {
 	// PR for; !failing selects an ordinary head ref.
 	SeedDraftPRHead(failing bool) (head string)
 
+	// SeedExistingOpenPR pre-seeds an OPEN PR for a head ref such that a
+	// subsequent CreateDraftPR(head) call hits the backend's own
+	// already-exists/409 "a PR for this branch already exists" refusal (a
+	// retried host-mediated create after an earlier one already succeeded),
+	// and CreateDraftPR is expected to adopt it -- resolving the existing
+	// open PR the same way OpenPRForBranch would and returning its URL with
+	// no error, rather than surfacing the refusal as a failure (issue #2407
+	// slices 1-3). Returns the head to call CreateDraftPR with and the URL
+	// it must return.
+	SeedExistingOpenPR() (head, wantURL string)
+
 	// SeedCommentTarget returns an issue number Comment should be called
 	// against: failing selects a target the backend will refuse to post to;
 	// !failing selects an ordinary, seeded issue.
@@ -75,6 +86,7 @@ func RunHostMediationContract(t *testing.T, h HostMediationHarness) {
 	t.Run("BundleRelayMissingBundleErrors", func(t *testing.T) { testBundleRelayMissingBundleErrors(t, h) })
 	t.Run("DraftPRCreation", func(t *testing.T) { testDraftPRCreation(t, h) })
 	t.Run("DraftPRCreationFails", func(t *testing.T) { testDraftPRCreationFails(t, h) })
+	t.Run("DraftPRCreationAdoptsExisting", func(t *testing.T) { testDraftPRCreationAdoptsExisting(t, h) })
 	t.Run("HostPostedComment", func(t *testing.T) { testHostPostedComment(t, h) })
 	t.Run("HostPostedCommentFails", func(t *testing.T) { testHostPostedCommentFails(t, h) })
 
@@ -174,6 +186,24 @@ func testDraftPRCreationFails(t *testing.T, h HostMediationHarness) {
 
 	if _, err := dpc.CreateDraftPR("feat: add widget", "body", "main", head); err == nil {
 		t.Fatal("CreateDraftPR with a failing backend: got nil error, want one")
+	}
+}
+
+// testDraftPRCreationAdoptsExisting verifies CreateDraftPR adopts an already
+// -open PR for head rather than surfacing the backend's already-exists/409
+// refusal as a failure -- a retried host-mediated create for a branch an
+// earlier call already opened a PR for must settle idempotently, not block
+// the seam (issue #2407 slices 1-3).
+func testDraftPRCreationAdoptsExisting(t *testing.T, h HostMediationHarness) {
+	dpc := mustDraftPRCreator(t, h)
+	head, wantURL := h.SeedExistingOpenPR()
+
+	url, err := dpc.CreateDraftPR("feat: add widget", "body", "main", head)
+	if err != nil {
+		t.Fatalf("CreateDraftPR(...): %v", err)
+	}
+	if url != wantURL {
+		t.Errorf("CreateDraftPR(...) url = %q, want %q", url, wantURL)
 	}
 }
 

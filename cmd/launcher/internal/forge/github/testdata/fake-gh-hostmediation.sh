@@ -7,7 +7,12 @@
 # one label per remaining line) for IssuePosted to read back. A magic PR head
 # "fail-head", a magic issue number "fail-comment", and a magic issue title
 # "fail-issue" make their respective calls fail, mirroring
-# fake-gh-codeforge.sh's own "fail-head" convention for pr-create.
+# fake-gh-codeforge.sh's own "fail-head" convention for pr-create. A magic PR
+# head "agent/issue-2407-adopt" makes pr-create fail with gh's own
+# already-exists stderr (relay.go's CreateDraftPR matches "already exists"),
+# and pr-list/pr-view resolve that head's already-open PR -- the
+# host-mediation contract's DraftPRCreationAdoptsExisting scenario (issue
+# #2407 slice 3).
 
 case "$1-$2" in
 repo-clone)
@@ -27,7 +32,17 @@ pr-create)
 		printf 'could not create pull request\n' >&2
 		exit 1
 	fi
+	if [ "$head" = "agent/issue-2407-adopt" ]; then
+		printf 'a pull request for branch "agent/issue-2407-adopt" into branch "main" already exists: https://github.com/owner/repo/pull/2407\n' >&2
+		exit 1
+	fi
 	printf 'https://github.com/owner/repo/pull/999\n'
+	;;
+pr-list)
+	printf 'https://github.com/owner/repo/pull/2407\n'
+	;;
+pr-view)
+	printf 'false\n'
 	;;
 issue-comment)
 	num="$3"

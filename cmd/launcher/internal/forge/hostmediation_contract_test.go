@@ -60,6 +60,13 @@ func (h *fakeHostMediationHarness) SeedDraftPRHead(failing bool) (head string) {
 	return "agent/issue-999"
 }
 
+func (h *fakeHostMediationHarness) SeedExistingOpenPR() (head, wantURL string) {
+	h.f.CreateDraftPRErr = errors.New("simulated already-exists create failure")
+	h.f.CreateDraftPRAdoptHead = "agent/issue-2407-adopt"
+	h.f.CreateDraftPRAdoptedURL = "https://github.com/owner/repo/pull/2407"
+	return h.f.CreateDraftPRAdoptHead, h.f.CreateDraftPRAdoptedURL
+}
+
 func (h *fakeHostMediationHarness) SeedCommentTarget(failing bool) (num string) {
 	if failing {
 		h.f.CommentErr = errors.New("simulated comment failure")
