@@ -24,6 +24,7 @@ func isAssemblePromptInvocation(args []string) bool {
 // Returns the process exit code.
 func runAssemblePrompt(args []string, stdout io.Writer) int {
 	fs := flag.NewFlagSet("assemble-prompt", flag.ContinueOnError)
+	fs.SetOutput(stdout)
 
 	// Skill-baking presence flags.
 	cavemanSkillBaked := fs.Bool("caveman-skill-baked", false, "true when DRIVER_SKILLS_DIR/caveman/SKILL.md was baked")
@@ -65,6 +66,7 @@ func runAssemblePrompt(args []string, stdout io.Writer) int {
 	runNonce := fs.String("run-nonce", "", "RUN_NONCE")
 
 	registryPath := fs.String("registry", "", "path to the fragment registry JSON file (required)")
+	validateMarkersRegistryPath := fs.String("validate-markers-registry", "", "path to the prompt-contract validateMarkers registry JSON file (required)")
 	promptOutput := fs.String("prompt-output", "", "path to write the assembled prompt text to (required)")
 	agentsJSONOutput := fs.String("agents-json-output", "", "path to write the (possibly empty) --agents JSON to (required)")
 	handoffOutput := fs.String("handoff-output", "", "path to write the driver hand-off facts as JSON to (required)")
@@ -73,12 +75,18 @@ func runAssemblePrompt(args []string, stdout io.Writer) int {
 		return 1
 	}
 
-	if *registryPath == "" || *promptOutput == "" || *agentsJSONOutput == "" || *handoffOutput == "" {
-		fmt.Fprintln(fs.Output(), "driver-exec assemble-prompt: -registry, -prompt-output, -agents-json-output, and -handoff-output are all required")
+	if *registryPath == "" || *validateMarkersRegistryPath == "" || *promptOutput == "" || *agentsJSONOutput == "" || *handoffOutput == "" {
+		fmt.Fprintln(fs.Output(), "driver-exec assemble-prompt: -registry, -validate-markers-registry, -prompt-output, -agents-json-output, and -handoff-output are all required")
 		return 1
 	}
 
 	registry, err := promptassembly.LoadRegistryFile(*registryPath)
+	if err != nil {
+		fmt.Fprintln(fs.Output(), "driver-exec assemble-prompt:", err)
+		return 1
+	}
+
+	validateMarkerRows, err := promptassembly.LoadValidateMarkersFile(*validateMarkersRegistryPath)
 	if err != nil {
 		fmt.Fprintln(fs.Output(), "driver-exec assemble-prompt:", err)
 		return 1
@@ -134,6 +142,15 @@ func runAssemblePrompt(args []string, stdout io.Writer) int {
 	result, err := promptassembly.Assemble(env, registry)
 	if err != nil {
 		fmt.Fprintln(fs.Output(), "driver-exec assemble-prompt:", err)
+		return 1
+	}
+
+	warnings, err := promptassembly.Validate(env, result, validateMarkerRows)
+	for _, w := range warnings {
+		fmt.Fprintln(fs.Output(), w)
+	}
+	if err != nil {
+		fmt.Fprintln(fs.Output(), err)
 		return 1
 	}
 

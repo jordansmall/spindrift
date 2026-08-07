@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -17,6 +18,11 @@ const promptsDirForTest = "../../../templates/default/prompts"
 // registryPathForTest reuses promptassembly's own testdata registry fixture
 // rather than duplicating it by hand.
 const registryPathForTest = "../internal/promptassembly/testdata/registry.json"
+
+// validateMarkersRegistryPathForTest reuses promptassembly's own testdata
+// validateMarkers registry fixture (slice A, issue #2356) rather than
+// duplicating it by hand.
+const validateMarkersRegistryPathForTest = "../internal/promptassembly/testdata/validate-markers.json"
 
 // coveredCellArgs returns the flag set that puts runAssemblePrompt's Env
 // squarely in promptassembly.Assemble's one covered cell (see
@@ -46,6 +52,7 @@ func coveredCellArgs(t *testing.T, promptOutput, agentsJSONOutput, handoffOutput
 		"--complete-label", "agent-complete",
 		"--run-nonce", "run-nonce-abc123",
 		"--registry", registryPathForTest,
+		"--validate-markers-registry", validateMarkersRegistryPathForTest,
 		"--prompt-output", promptOutput,
 		"--agents-json-output", agentsJSONOutput,
 		"--handoff-output", handoffOutput,
@@ -134,6 +141,169 @@ func TestRunAssemblePrompt_MissingRequiredFlagReturnsNonZero(t *testing.T) {
 	}, &stdout)
 	if rc == 0 {
 		t.Fatal("runAssemblePrompt exit = 0, want non-zero for a missing -handoff-output")
+	}
+}
+
+// TestRunAssemblePrompt_ValidateMarkersRegistryRequired verifies a missing
+// -validate-markers-registry flag fails loudly (exit 1) instead of running
+// Assemble/Validate against a zero-value registry path (issue #2356).
+func TestRunAssemblePrompt_ValidateMarkersRegistryRequired(t *testing.T) {
+	dir := t.TempDir()
+	promptOutput := filepath.Join(dir, "prompt.txt")
+	agentsJSONOutput := filepath.Join(dir, "agents.json")
+	handoffOutput := filepath.Join(dir, "handoff.json")
+
+	args := coveredCellArgs(t, promptOutput, agentsJSONOutput, handoffOutput)
+	filtered := make([]string, 0, len(args))
+	for i := 0; i < len(args); i++ {
+		if args[i] == "--validate-markers-registry" {
+			i++ // also skip its value
+			continue
+		}
+		filtered = append(filtered, args[i])
+	}
+
+	var stdout bytes.Buffer
+	rc := runAssemblePrompt(filtered, &stdout)
+	if rc == 0 {
+		t.Fatal("runAssemblePrompt exit = 0, want non-zero for a missing -validate-markers-registry")
+	}
+	if !strings.Contains(stdout.String(), "validate-markers-registry") {
+		t.Errorf("stdout = %q, want it to mention validate-markers-registry", stdout.String())
+	}
+}
+
+// researchPromptDirLackingSpindriftComment builds a temp prompts dir whose
+// research-prompt.md renders without any SPINDRIFT_COMMENT marker (and
+// without a fragments subdir at all -- Assemble swallows a missing fragment
+// file as an empty render, see assemble.go's fragment loop), so the
+// readOnlyResearch validate row's marker is guaranteed missing.
+func researchPromptDirLackingSpindriftComment(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	content := "# TASK\n\nResearch issue #${ISSUE_NUMBER}: ${ISSUE_TITLE}\n\nNo verdict marker here.\n"
+	if err := os.WriteFile(filepath.Join(dir, "research-prompt.md"), []byte(content), 0o644); err != nil {
+		t.Fatalf("write research-prompt.md: %v", err)
+	}
+	return dir
+}
+
+// issuePromptDirLackingSpindriftPRIntent builds a temp prompts dir whose
+// issue-prompt.md renders without any SPINDRIFT_PR_INTENT marker (and
+// without a fragments subdir at all), so the boxAccessReadOnly validate
+// row's marker is guaranteed missing.
+func issuePromptDirLackingSpindriftPRIntent(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	content := "# TASK\n\nWork issue #${ISSUE_NUMBER}: ${ISSUE_TITLE}\n\nNo PR-intent marker here.\n"
+	if err := os.WriteFile(filepath.Join(dir, "issue-prompt.md"), []byte(content), 0o644); err != nil {
+		t.Fatalf("write issue-prompt.md: %v", err)
+	}
+	return dir
+}
+
+// replaceArg overwrites, or appends, flag's value in args, returning the new
+// slice -- a small test helper so each Validate-wiring test can start from
+// coveredCellArgs and move only the axes it needs off the covered cell. It
+// drops any existing occurrence of flag, in either the two-token
+// ("--flag", "value") or single-token ("--flag=value") form
+// coveredCellArgs mixes (string flags use the former, bool flags the
+// latter -- Go's flag package requires "=" for an explicit bool value,
+// since a bare "--flag next-token" reads next-token as a positional
+// argument and halts flag parsing entirely), and always re-adds it as a
+// single "--flag=value" token, which both flag kinds accept.
+func replaceArg(args []string, flag, value string) []string {
+	out := make([]string, 0, len(args)+1)
+	for i := 0; i < len(args); i++ {
+		if args[i] == flag && i+1 < len(args) {
+			i++ // drop its paired value token too
+			continue
+		}
+		if strings.HasPrefix(args[i], flag+"=") {
+			continue
+		}
+		out = append(out, args[i])
+	}
+	out = append(out, flag+"="+value)
+	return out
+}
+
+// TestRunAssemblePrompt_ValidatorRejectBlocksOutputs verifies a reject-severity
+// validate row whose gate is active and marker missing (readOnlyResearch: a
+// research, read-only cell whose rendered prompt lacks SPINDRIFT_COMMENT)
+// makes runAssemblePrompt return non-zero and write none of the three
+// output files -- the Driver must never run against an unmet contract
+// (issue #2356).
+func TestRunAssemblePrompt_ValidatorRejectBlocksOutputs(t *testing.T) {
+	dir := t.TempDir()
+	promptOutput := filepath.Join(dir, "prompt.txt")
+	agentsJSONOutput := filepath.Join(dir, "agents.json")
+	handoffOutput := filepath.Join(dir, "handoff.json")
+
+	args := coveredCellArgs(t, promptOutput, agentsJSONOutput, handoffOutput)
+	args = replaceArg(args, "--dispatch-kind", "research")
+	args = replaceArg(args, "--box-write-enabled", "false")
+	args = replaceArg(args, "--prompts-dir", researchPromptDirLackingSpindriftComment(t))
+
+	var stdout bytes.Buffer
+	rc := runAssemblePrompt(args, &stdout)
+	if rc == 0 {
+		t.Fatalf("runAssemblePrompt exit = 0, want non-zero for a reject-gate missing marker (stdout=%q)", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "SPINDRIFT_COMMENT") {
+		t.Errorf("stdout = %q, want it to mention SPINDRIFT_COMMENT", stdout.String())
+	}
+
+	for _, p := range []string{promptOutput, agentsJSONOutput, handoffOutput} {
+		if info, err := os.Stat(p); err == nil {
+			t.Errorf("output file %s exists (size %d), want it never written on reject", p, info.Size())
+		} else if !os.IsNotExist(err) {
+			t.Errorf("stat %s: %v", p, err)
+		}
+	}
+}
+
+// TestRunAssemblePrompt_ValidatorWarnStillWritesOutputs verifies a
+// warn-severity validate row whose gate is active and marker missing
+// (boxAccessReadOnly: a read-only, non-research work cell whose rendered
+// prompt lacks SPINDRIFT_PR_INTENT) still lets runAssemblePrompt succeed and
+// write all three output files -- a warn is advisory, never blocks the
+// Driver (issue #2356).
+func TestRunAssemblePrompt_ValidatorWarnStillWritesOutputs(t *testing.T) {
+	dir := t.TempDir()
+	promptOutput := filepath.Join(dir, "prompt.txt")
+	agentsJSONOutput := filepath.Join(dir, "agents.json")
+	handoffOutput := filepath.Join(dir, "handoff.json")
+
+	args := coveredCellArgs(t, promptOutput, agentsJSONOutput, handoffOutput)
+	args = replaceArg(args, "--box-write-enabled", "false")
+	args = replaceArg(args, "--prompts-dir", issuePromptDirLackingSpindriftPRIntent(t))
+
+	var stdout bytes.Buffer
+	rc := runAssemblePrompt(args, &stdout)
+	if rc != 0 {
+		t.Fatalf("runAssemblePrompt exit = %d, want 0 for a warn-gate missing marker (stdout=%q)", rc, stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "SPINDRIFT_PR_INTENT") {
+		t.Errorf("stdout = %q, want it to mention SPINDRIFT_PR_INTENT", stdout.String())
+	}
+
+	// agentsJSONOutput is only Stat-checked, not size-checked: with no
+	// --agents-json-template configured (as here) Assemble's own AgentsJSON
+	// legitimately renders empty -- TestRunAssemblePrompt_CoveredCellWritesOutputs
+	// makes the same distinction. promptOutput/handoffOutput are always
+	// non-empty in the covered cell.
+	if _, err := os.Stat(agentsJSONOutput); err != nil {
+		t.Fatalf("agents json output not written: %v", err)
+	}
+	for _, p := range []string{promptOutput, handoffOutput} {
+		info, err := os.Stat(p)
+		if err != nil {
+			t.Fatalf("output file %s not written: %v", p, err)
+		}
+		if info.Size() == 0 {
+			t.Errorf("output file %s is empty, want non-empty", p)
+		}
 	}
 }
 
