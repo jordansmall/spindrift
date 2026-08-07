@@ -93,12 +93,13 @@ func TestRun_ResearchKind(t *testing.T) {
 	}
 }
 
-// TestRun_EmitsSyntheticFlag verifies every backstop-emitted line carries
-// synthetic=true (issue #2223), and that it round-trips through
-// outcome.Parse as Outcome.Synthetic == true alongside Status == "blocked".
-func TestRun_EmitsSyntheticFlag(t *testing.T) {
+// TestRun_EmitsSyntheticFlagOnBlocked verifies every backstop-emitted line
+// carries synthetic=true (issue #2223), and that it round-trips through
+// outcome.Parse as Outcome.Synthetic == true alongside Status == "blocked"
+// for a genuinely-blocked scenario (no commits to preserve).
+func TestRun_EmitsSyntheticFlagOnBlocked(t *testing.T) {
 	git := &fakeGit{responses: map[string]fakeResult{
-		"rev-list": {stdout: "1\n"},
+		"rev-list": {stdout: "0\n"},
 	}}
 	clk := &fakeClock{}
 	cfg := baseConfig(git, clk)
@@ -124,6 +125,37 @@ func TestRun_EmitsSyntheticFlag(t *testing.T) {
 	}
 }
 
+// TestRun_EmitsSyntheticFlagOnReady pins that Synthetic is unconditional
+// regardless of Status: a status=ready line (driver pushed successfully)
+// still parses with Synthetic == true, since Synthetic marks who emitted
+// the line (the backstop, not the driver), not what it says.
+func TestRun_EmitsSyntheticFlagOnReady(t *testing.T) {
+	git := &fakeGit{responses: map[string]fakeResult{
+		"rev-list": {stdout: "1\n"},
+	}}
+	clk := &fakeClock{}
+	cfg := baseConfig(git, clk)
+	cfg.WriteEnabled = true
+	cfg.OutboxRelayCapable = true
+	cfg.MaxAttempts = 3
+
+	var buf bytes.Buffer
+	if err := Run(cfg, &buf); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	line := strings.TrimSpace(buf.String())
+	o, err := outcome.Parse(line)
+	if err != nil {
+		t.Fatalf("outcome.Parse(%q): %v", line, err)
+	}
+	if !o.Synthetic {
+		t.Fatalf("expected Synthetic == true, got %+v", o)
+	}
+	if o.Status != "ready" {
+		t.Fatalf("expected Status == ready, got %+v", o)
+	}
+}
+
 func TestRun_NoCommits(t *testing.T) {
 	git := &fakeGit{responses: map[string]fakeResult{
 		"rev-list": {stdout: "0\n"},
@@ -139,6 +171,9 @@ func TestRun_NoCommits(t *testing.T) {
 	line := buf.String()
 	if !strings.Contains(line, "no work to preserve") {
 		t.Fatalf("expected 'no work to preserve' note, got %q", line)
+	}
+	if !strings.Contains(line, "status=blocked") {
+		t.Fatalf("expected status=blocked, got %q", line)
 	}
 	if git.countCalls("push") != 0 {
 		t.Fatalf("expected no push, got %v", git.calls)
@@ -162,6 +197,9 @@ func TestRun_CodeForgeLocal(t *testing.T) {
 	if !strings.Contains(line, "branch relayed via outbox bundle (no writable remote under CODE_FORGE=local)") {
 		t.Fatalf("unexpected note: %q", line)
 	}
+	if !strings.Contains(line, "status=ready") {
+		t.Fatalf("expected status=ready, got %q", line)
+	}
 	if git.countCalls("push") != 0 {
 		t.Fatalf("expected no push, got %v", git.calls)
 	}
@@ -183,6 +221,9 @@ func TestRun_ReadOnlyGithub(t *testing.T) {
 	line := buf.String()
 	if !strings.Contains(line, "branch relayed via outbox bundle (read-only Box)") {
 		t.Fatalf("unexpected note: %q", line)
+	}
+	if !strings.Contains(line, "status=ready") {
+		t.Fatalf("expected status=ready, got %q", line)
 	}
 	if git.countCalls("push") != 0 {
 		t.Fatalf("expected no push, got %v", git.calls)
@@ -213,6 +254,9 @@ func TestRun_WritablePushSuccess(t *testing.T) {
 	if !strings.Contains(line, "landing=agent/issue-42") {
 		t.Fatalf("expected landing=branch, got %q", line)
 	}
+	if !strings.Contains(line, "status=ready") {
+		t.Fatalf("expected status=ready, got %q", line)
+	}
 }
 
 func TestRun_PushFailsEveryAttempt(t *testing.T) {
@@ -236,6 +280,9 @@ func TestRun_PushFailsEveryAttempt(t *testing.T) {
 	}
 	if !strings.Contains(line, "push failed after 2 attempt(s): fatal: some failure") {
 		t.Fatalf("unexpected note: %q", line)
+	}
+	if !strings.Contains(line, "status=blocked") {
+		t.Fatalf("expected status=blocked, got %q", line)
 	}
 	if len(clk.slept) != 1 {
 		t.Fatalf("expected exactly one sleep between the two attempts, got %v", clk.slept)
@@ -281,6 +328,9 @@ func TestRun_PushTransientThenSucceeds(t *testing.T) {
 	if strings.Contains(line, "push failed") {
 		t.Fatalf("unexpected push failure note: %q", line)
 	}
+	if !strings.Contains(line, "status=ready") {
+		t.Fatalf("expected status=ready, got %q", line)
+	}
 	if len(clk.slept) != 1 {
 		t.Fatalf("expected one sleep before the retry, got %v", clk.slept)
 	}
@@ -307,6 +357,9 @@ func TestRun_MaxAttemptsClampsToOne(t *testing.T) {
 	}
 	if !strings.Contains(line, "push failed after 1 attempt(s): nope") {
 		t.Fatalf("unexpected note: %q", line)
+	}
+	if !strings.Contains(line, "status=blocked") {
+		t.Fatalf("expected status=blocked, got %q", line)
 	}
 	if len(clk.slept) != 0 {
 		t.Fatalf("expected no sleep on a single-attempt clamp, got %v", clk.slept)
@@ -355,6 +408,9 @@ func TestRun_SalvageFails(t *testing.T) {
 	if !strings.Contains(line, "failed to salvage uncommitted work") {
 		t.Fatalf("expected salvage-failed note, got %q", line)
 	}
+	if !strings.Contains(line, "status=blocked") {
+		t.Fatalf("expected status=blocked (tree left dirty), got %q", line)
+	}
 }
 
 func TestRun_SalvageAddFailsSkipsCommit(t *testing.T) {
@@ -375,6 +431,9 @@ func TestRun_SalvageAddFailsSkipsCommit(t *testing.T) {
 	line := buf.String()
 	if !strings.Contains(line, "failed to salvage uncommitted work") {
 		t.Fatalf("expected salvage-failed note, got %q", line)
+	}
+	if !strings.Contains(line, "status=blocked") {
+		t.Fatalf("expected status=blocked (tree left dirty), got %q", line)
 	}
 	if git.countCalls("commit") != 0 {
 		t.Fatalf("expected commit to be skipped after add failed, got %v", git.calls)
@@ -398,6 +457,9 @@ func TestRun_RevListErrorTreatedAsWorkExists(t *testing.T) {
 	if strings.Contains(line, "no work to preserve") {
 		t.Fatalf("did not expect 'no work to preserve' note: %q", line)
 	}
+	if !strings.Contains(line, "status=ready") {
+		t.Fatalf("expected status=ready (push succeeds by default), got %q", line)
+	}
 	if git.countCalls("push") != 1 {
 		t.Fatalf("expected a push attempt when rev-list errors, got %v", git.calls)
 	}
@@ -420,6 +482,9 @@ func TestRun_RevListUnparseableTreatedAsWorkExists(t *testing.T) {
 	if strings.Contains(line, "no work to preserve") {
 		t.Fatalf("did not expect 'no work to preserve' note: %q", line)
 	}
+	if !strings.Contains(line, "status=ready") {
+		t.Fatalf("expected status=ready (push succeeds by default), got %q", line)
+	}
 	if git.countCalls("push") != 1 {
 		t.Fatalf("expected a push attempt when rev-list is unparseable, got %v", git.calls)
 	}
@@ -440,6 +505,44 @@ func TestRun_RecoveryAttempted(t *testing.T) {
 	line := buf.String()
 	if !strings.Contains(line, "a resume attempt also produced no outcome") {
 		t.Fatalf("expected resume-attempt note, got %q", line)
+	}
+}
+
+// TestRun_Issue2380_LandedAndPushedResolvesReady reproduces the #2349 shape
+// that motivated issue #2380: a driver finished a clean, checked, pushed
+// run but left backstop to run anyway because its own final self-report
+// line was malformed (e.g. "SPINDRIFT_OUTCOME: MERGED", missing
+// landing=/status= fields). Backstop must resolve status=ready from its own
+// already-verified git evidence -- a clean tree (nothing to salvage),
+// commits on base..branch, and a successful push -- not from the driver's
+// garbled text, which it never reads at all.
+func TestRun_Issue2380_LandedAndPushedResolvesReady(t *testing.T) {
+	git := &fakeGit{responses: map[string]fakeResult{
+		"status":   {stdout: ""},
+		"rev-list": {stdout: "3\n"},
+	}}
+	clk := &fakeClock{}
+	cfg := baseConfig(git, clk)
+	cfg.WriteEnabled = true
+	cfg.OutboxRelayCapable = true
+
+	var buf bytes.Buffer
+	if err := Run(cfg, &buf); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	line := strings.TrimSpace(buf.String())
+	o, err := outcome.Parse(line)
+	if err != nil {
+		t.Fatalf("outcome.Parse(%q): %v", line, err)
+	}
+	if o.Status != "ready" {
+		t.Fatalf("expected Status == ready, got %+v", o)
+	}
+	if !o.Synthetic {
+		t.Fatalf("expected Synthetic == true, got %+v", o)
+	}
+	if o.Landing != cfg.Branch {
+		t.Fatalf("expected Landing == %q, got %+v", cfg.Branch, o)
 	}
 }
 
