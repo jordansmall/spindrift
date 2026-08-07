@@ -1,12 +1,14 @@
 package forgejo
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"os/exec"
 
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/bundlerelay"
+	"spindrift.dev/launcher/internal/forge/rest"
 )
 
 // readOnlyCodeForge wraps *forgejoCodeForge with forge.BundleRelay and
@@ -73,6 +75,23 @@ func (c *readOnlyCodeForge) RelayBundle(outboxDir, ref string) error {
 // state as a title prefix rather than a first-class create-time field
 // (forgejoWIPPrefix), the same convention MarkReady/MarkDraft read and
 // write; MarkReady strips it before merge.
+//
+// Idempotent against a retried call for the same head (issue #2407 slice
+// 2, mirroring github's CreateDraftPR, relay.go): a create that races or
+// repeats an earlier host-mediated create for the same branch fails with
+// 409 Conflict -- Forgejo's "a pull request for this head already exists"
+// signal on this endpoint. That status is shared, via forgejoStatusMap,
+// with the merge endpoint's own "not mergeable" refusal (errMergeRefused),
+// so this checks the create call's own rest.StatusError rather than
+// errors.Is against errMergeRefused, which would also match a 405 and would
+// conflate two endpoints' unrelated meanings for the same status. On a
+// precise 409, this resolves the branch's own open PR via OpenPRForBranch
+// and returns that PR's URL with no error -- adoption, not failure. If
+// OpenPRForBranch can't resolve an open PR for that head (e.g. only a
+// closed/merged PR exists, or the lookup itself errors), the original
+// create error is returned unmasked -- adoption is only ever additive,
+// never a way to swallow a genuine failure. Any other (non-409) failure is
+// returned exactly as before.
 func (c *readOnlyCodeForge) CreateDraftPR(title, body, base, head string) (string, error) {
 	reqBody := map[string]any{
 		"title": forgejoWIPPrefix + " " + title,
@@ -81,10 +100,18 @@ func (c *readOnlyCodeForge) CreateDraftPR(title, body, base, head string) (strin
 		"body":  body,
 	}
 	var payload forgejoPullPayload
-	if err := c.rest.Do(http.MethodPost, c.repoPath()+"/pulls", reqBody, &payload); err != nil {
-		return "", fmt.Errorf("forgejo: create draft PR: %w", err)
+	err := c.rest.Do(http.MethodPost, c.repoPath()+"/pulls", reqBody, &payload)
+	if err == nil {
+		return payload.HTMLURL, nil
 	}
-	return payload.HTMLURL, nil
+	createErr := fmt.Errorf("forgejo: create draft PR: %w", err)
+	var statusErr rest.StatusError
+	if errors.As(err, &statusErr) && statusErr.Status == http.StatusConflict {
+		if pr, ok, openErr := c.OpenPRForBranch(head); openErr == nil && ok {
+			return pr.URL, nil
+		}
+	}
+	return "", createErr
 }
 
 var _ forge.BundleRelay = (*readOnlyCodeForge)(nil)
