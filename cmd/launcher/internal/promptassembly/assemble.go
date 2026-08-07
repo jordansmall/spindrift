@@ -73,7 +73,7 @@ func checkCoveredCell(e Env) error {
 	if forge == "" {
 		forge = defaultCodeForge
 	}
-	if forge != "github" && forge != "forgejo" {
+	if forge != defaultCodeForge && forge != "forgejo" {
 		return fmt.Errorf("code forge %q: %w", e.CodeForge, ErrUnsupportedCell)
 	}
 
