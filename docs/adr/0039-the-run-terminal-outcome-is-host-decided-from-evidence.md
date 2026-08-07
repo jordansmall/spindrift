@@ -191,3 +191,50 @@ of *why* it got there, only confirmation the bundle is still sitting in the
 outbox. This leniency is scoped to the local push-only shape alone; every
 other shape (PR-shaped adopt) keeps requiring a self-report exactly as
 before — this amendment widens no other consume-gate arm.
+
+## Amendment (issue #2380): `outcomebackstop.Run` derives `ready` from its own already-verified evidence
+
+The Context section above named the defect directly — "`outcomebackstop.Run`
+holds the commit count and forge but discards them to emit an
+always-`status=blocked` synthetic line" — but the original Decision left it
+in place, routing the fix instead through the host-side self-report/bundle
+consume-gate above. That gate only covers a **read-only PR-shaped** forge
+(`tryAdoptRelayedBranch`/`tryAdoptRelayedBranchNoOutcome`, gated on
+`s.readOnly`) and the **local push-only** `Recoverable` arm
+(`tryMarkRecoverable`); a write-enabled push-only run (`CODE_FORGE=git`) that
+finishes clean, commits, and pushes, but mangles its own final self-report
+into an unparseable near-miss (issue #2349's motivating shape), has no
+consume-gate arm to fall into at all and parks `agent-failed` with real,
+pushed work sitting on the remote.
+
+`outcomebackstop.Run` now derives `Status` mechanically from the same
+git-observed evidence it already gathers while salvaging and pushing —
+never from the driver's own text, and no new evidence field on the outcome
+grammar (unchanged from the original Decision's "no outcome-line grammar
+change"):
+
+- `status=ready` when the tree ended up clean (nothing to salvage, or
+  salvage's own add+commit succeeded), there is at least one commit on
+  `base..branch`, and the branch was actually handed off — either pushed
+  successfully, or one of the two structural relay arms applies
+  (`CODE_FORGE=local`'s host-mediated bundle, or a read-only forge's outbox
+  relay) — both of which the harness performs unconditionally once commits
+  exist, exactly the "bundle-out writes only when `commits > 0`" evidence
+  this ADR's own Decision already names.
+- `status=blocked`, unchanged, when there is no work (`count == 0`), the
+  tree could not be cleaned (salvage's own add/commit failed), or a push
+  attempt exhausted its retries.
+
+This is not the rejected "in-box finalizer" option from the Considered
+Options above: no LLM-authored claim is ever read or trusted here, and the
+line still flows through the exact same host consume path (`selfHeal`,
+`hostMediateDraftPR`, `landPushOnly`) a genuine driver-authored `status=ready`
+line already does — receiving no more host trust than that line already
+gets. `driver-exec` verbs are already the host's own trusted, git-only
+branching logic executed in-box (ADR 0036); this extends that verb's
+existing evidence-gathering into the one decision it was, until now,
+computing and then discarding. The self-report/bundle consume-gate above is
+unchanged and remains the sole rescue for the narrower case this mechanical
+check cannot reach at all: a driver killed or crashed before the backstop
+verb itself ever ran (`claude_rc != 0`, or the container never reached the
+hand-off).
