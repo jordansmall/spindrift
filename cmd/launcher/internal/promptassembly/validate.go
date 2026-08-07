@@ -151,9 +151,17 @@ func filerPromptFrom(agentsJSON string) string {
 
 // validateMarkerMessage builds row's diagnostic message, reusing the exact
 // text agent/entrypoint.sh's _validate_prompt_contract uses for each row id
-// (entrypoint.sh: 536, 553, 568, 584) verbatim, including the
+// (entrypoint.sh: 536, 553, 568, 584), including the
 // "_validate_prompt_contract: ..." prefix -- now a stable message-tag, not a
-// claim this package has a function of that name.
+// claim this package has a function of that name. Three of the four rows
+// reuse that text byte-for-byte; the fourth (filerFileRelay) deliberately
+// elides bash's ".md" suffix on "filer-file-relay" -- unlike the other
+// fragments this text names (research-prompt.md, review-prompt.md,
+// issue-prompt.md, fix-prompt.md), "filer-file-relay.md" is itself a
+// protected identifier in lib/fragments.nix's Conditional fragment registry,
+// so spelling it out here would trip promptassembly-registry-ownership
+// (nix/checks/promptassembly.nix), which forbids hardcoding a registry
+// fragment/var literal in this package's non-test Go source.
 func validateMarkerMessage(row ValidateMarkerRow) string {
 	switch row.When {
 	case "readOnlyResearch":

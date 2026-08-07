@@ -209,6 +209,43 @@ func TestLoadValidateMarkersFileNonexistent(t *testing.T) {
 	}
 }
 
+// TestValidateMarkerMessageVerbatim guards validateMarkerMessage's per-row
+// text against the exact strings agent/entrypoint.sh's _validate_prompt_contract
+// used for each row id (origin/main entrypoint.sh:536, 553, 568, 584).
+// Three rows must match byte-for-byte; filerFileRelay's expected text
+// deliberately elides bash's ".md" suffix on "filer-file-relay" -- see
+// validateMarkerMessage's doc comment for why spelling it out would trip
+// promptassembly-registry-ownership.
+func TestValidateMarkerMessageVerbatim(t *testing.T) {
+	cases := []struct {
+		row  ValidateMarkerRow
+		want string
+	}{
+		{
+			ValidateMarkerRow{Marker: "SPINDRIFT_COMMENT", When: "readOnlyResearch"},
+			"_validate_prompt_contract: read-only research dispatch's rendered prompt is missing the required 'SPINDRIFT_COMMENT' marker -- this belongs in research-prompt.md's (or a SPINDRIFT_PROMPT_DIR override's) POST THE VERDICT section; without it a read-only Box has no way to hand its verdict to the launcher. Refusing to invoke the Driver.",
+		},
+		{
+			ValidateMarkerRow{Marker: "VERDICT:", When: "orchestratorEnabled"},
+			"_validate_prompt_contract: the orchestrator's rendered review prompt is missing the required 'VERDICT:' marker -- this belongs in review-prompt.md's (or a SPINDRIFT_PROMPT_DIR override's) verdict line; without it the code-owned review loop has nothing to gate on. Refusing to invoke the Driver.",
+		},
+		{
+			ValidateMarkerRow{Marker: "SPINDRIFT_PR_INTENT", When: "boxAccessReadOnly"},
+			"_validate_prompt_contract: warning -- read-only dispatch's rendered prompt is missing the 'SPINDRIFT_PR_INTENT' marker (belongs in issue-prompt.md's, or fix-prompt.md's injected, OPEN A PULL REQUEST section). Proceeding: a status=ready run with no PR-intent line still gets one resume-nudge attempt post-driver, and a genuinely exhausted attempt falls back to the merge-blocked report rather than losing the branch.",
+		},
+		{
+			ValidateMarkerRow{Marker: "SPINDRIFT_ISSUE_INTENT", When: "filerFileRelay"},
+			"_validate_prompt_contract: warning -- filer-relay dispatch's rendered filer prompt is missing the 'SPINDRIFT_ISSUE_INTENT' marker (belongs in filer-prompt.md's, or a SPINDRIFT_PROMPT_DIR override's, filer-file-relay-injected section). Proceeding: the filer's own best-effort PR-body fallback still records the issue reference even without the relay.",
+		},
+	}
+
+	for _, c := range cases {
+		if got := validateMarkerMessage(c.row); got != c.want {
+			t.Errorf("validateMarkerMessage(When: %q) =\n%q\nwant\n%q", c.row.When, got, c.want)
+		}
+	}
+}
+
 // testValidateMarkerRows returns the four validateMarkers rows in
 // lib/prompt-contract.nix's own order, for tests that don't need to load
 // them from testdata/validate-markers.json.
@@ -221,10 +258,10 @@ func testValidateMarkerRows() []ValidateMarkerRow {
 	}
 }
 
-// mustContain is a small helper asserting substr appears in s, for error
-// messages the exact byte-for-byte text of which is verified elsewhere by
-// the entrypoint.sh message comparisons this package's Validate doc comment
-// links to.
+// mustContain is a small helper asserting substr appears in s; the marker
+// alone suffices for the gate-logic tests above, since
+// TestValidateMarkerMessageVerbatim separately guards each row's exact
+// message text against entrypoint.sh's.
 func mustContain(t *testing.T, s, substr string) {
 	t.Helper()
 	if !strings.Contains(s, substr) {
