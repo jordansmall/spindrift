@@ -101,6 +101,12 @@ setup_fakes() {
   export ORCHESTRATOR_LOG="$BATS_TEST_TMPDIR/orchestrator.log"
   export DRIVER_PROMPT_FILE="$BATS_TEST_TMPDIR/$DRIVER-prompt.txt"
   export DRIVER_AGENTS_FILE="$BATS_TEST_TMPDIR/$DRIVER-agents.json"
+  # Test-only hook (issue #2395 slice 1): entrypoint.sh's phase_prompt_assembly
+  # copies the raw Handoff JSON `driver-exec assemble-prompt --handoff-output`
+  # produced here, right before it `rm -f`s its own tempfile, mirroring
+  # DRIVER_PROMPT_FILE/DRIVER_AGENTS_FILE above -- a no-op in production,
+  # where this var is never set.
+  export DRIVER_HANDOFF_FILE="$BATS_TEST_TMPDIR/$DRIVER-handoff.json"
   : >"$PODMAN_LOG"
   : >"$DOCKER_LOG"
   : >"$BWRAP_LOG"
