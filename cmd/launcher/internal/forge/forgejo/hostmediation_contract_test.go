@@ -101,9 +101,26 @@ func (h *hostMediationHarness) handle(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusInternalServerError)
 			return
 		}
+		if body.Head == "agent/issue-2407-adopt" {
+			w.WriteHeader(http.StatusConflict)
+			return
+		}
 		json.NewEncoder(w).Encode(map[string]any{
 			"number":   999,
 			"html_url": "https://forge.test/owner/repo/pulls/999",
+		})
+	case r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/owner/repo/pulls":
+		// Only reachable via OpenPRForBranch, itself only reached after the
+		// already-exists-adopt head's 409 create above -- the
+		// DraftPRCreationAdoptsExisting scenario (issue #2407 slice 3).
+		json.NewEncoder(w).Encode([]map[string]any{
+			{
+				"number":   2407,
+				"html_url": "https://forge.test/owner/repo/pulls/2407",
+				"draft":    false,
+				"title":    "feat: add widget",
+				"head":     map[string]any{"ref": "agent/issue-2407-adopt"},
+			},
 		})
 	case r.Method == http.MethodPost && hostMediationCommentRe.MatchString(r.URL.Path):
 		num := hostMediationCommentRe.FindStringSubmatch(r.URL.Path)[1]
@@ -188,6 +205,10 @@ func (h *hostMediationHarness) SeedDraftPRHead(failing bool) (head string) {
 		return "fail-head"
 	}
 	return "agent/issue-hmpr1"
+}
+
+func (h *hostMediationHarness) SeedExistingOpenPR() (head, wantURL string) {
+	return "agent/issue-2407-adopt", "https://forge.test/owner/repo/pulls/2407"
 }
 
 func (h *hostMediationHarness) SeedCommentTarget(failing bool) (num string) {

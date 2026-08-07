@@ -85,6 +85,10 @@ func (h *hostMediationHarness) SeedDraftPRHead(failing bool) (head string) {
 	return "agent/issue-hmpr1"
 }
 
+func (h *hostMediationHarness) SeedExistingOpenPR() (head, wantURL string) {
+	return "agent/issue-2407-adopt", "https://github.com/owner/repo/pull/2407"
+}
+
 func (h *hostMediationHarness) SeedCommentTarget(failing bool) (num string) {
 	if failing {
 		return "fail-comment"
