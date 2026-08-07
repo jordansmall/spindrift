@@ -250,8 +250,8 @@ rec {
 
   # Each validateMarkers row rendered into a pipe-joined string, in row
   # order -- mirrors injectBlocksBashRows above, minus the injectBlocks-only
-  # fields (source/startMarker/endMarker/kinds): validateMarkers rows only
-  # ever need id/marker/carrier/severity/when.
+  # fields (source/startMarker/endMarker/kinds) and minus message, which
+  # bash rows don't need since only the Go decoder consumes it.
   validateMarkersBashRows = map (
     row: "${row.id}|${row.marker}|${row.carrier}|${row.severity}|${row.when}"
   ) validateMarkers;
