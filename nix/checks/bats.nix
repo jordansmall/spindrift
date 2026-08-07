@@ -30,13 +30,14 @@ let
     builtins.toJSON driverOutcomeManifest
   );
 
-  # Build-time/runtime parity fixtures (issue #2320, parent #2244):
-  # lib/prompt-contract.nix's `parityFixtures` -- one record per (severity==
-  # "reject" validateMarkers row) x (gate) x (markerPresent) combination,
-  # each pre-resolved to the real `buildTimeRejectVerdicts` verdict --
-  # rendered as JSON so tests/prompt-contract-parity.bats can drive the
-  # actual runtime validator against every fixture without hand-duplicating
-  # the fold logic in bash.
+  # Build-time/runtime parity fixtures (issue #2320, parent #2244; widened to
+  # every row by issue #2356): lib/prompt-contract.nix's `parityFixtures` --
+  # one record per (validateMarkers row) x (gate) x (markerPresent)
+  # combination, each pre-resolved to the real `buildTimeRejectVerdicts`
+  # verdict for severity=="reject" rows, or "advise" by construction for
+  # severity=="warn" rows -- rendered as JSON so tests/prompt-contract-
+  # parity.bats can drive the actual runtime validator against every fixture
+  # without hand-duplicating the fold logic in bash.
   promptContractParityFixtureFile = pkgs.writeText "prompt-contract-parity-fixtures.json" (
     builtins.toJSON (import ../../lib/prompt-contract.nix).parityFixtures
   );
@@ -50,6 +51,10 @@ let
   # guard fails here.
   promptassemblyRegistryJsonFile = pkgs.writeText "fragments-registry.json" (
     builtins.toJSON (import ../../lib/fragments.nix)
+  );
+
+  promptContractRegistryJsonFile = pkgs.writeText "prompt-contract-registry.json" (
+    builtins.toJSON (import ../../lib/prompt-contract.nix).validateMarkers
   );
 
   # Registry-driven (issue #2261 slices 4-6): runs the *unchanged*
@@ -96,6 +101,7 @@ let
           # derivation's own entrypoint-outcome-*.bats run is no exception.
           DRIVER_EXEC_BIN = "${batsHarness.driverExecBin}/bin/driver-exec";
           PROMPTASSEMBLY_REGISTRY_FILE = promptassemblyRegistryJsonFile;
+          PROMPT_CONTRACT_REGISTRY_FILE = promptContractRegistryJsonFile;
         }
         ''
           export HOME="$TMPDIR/home"
@@ -276,6 +282,7 @@ in
         # promptassemblyRegistryJsonFile).
         DRIVER_EXEC_BIN = "${batsHarness.driverExecBin}/bin/driver-exec";
         PROMPTASSEMBLY_REGISTRY_FILE = promptassemblyRegistryJsonFile;
+        PROMPT_CONTRACT_REGISTRY_FILE = promptContractRegistryJsonFile;
       }
       ''
         export HOME="$TMPDIR/home"
@@ -358,6 +365,7 @@ in
         # now (issue #2354).
         DRIVER_EXEC_BIN = "${batsHarness.driverExecBin}/bin/driver-exec";
         PROMPTASSEMBLY_REGISTRY_FILE = promptassemblyRegistryJsonFile;
+        PROMPT_CONTRACT_REGISTRY_FILE = promptContractRegistryJsonFile;
       }
       ''
         export HOME="$TMPDIR/home"

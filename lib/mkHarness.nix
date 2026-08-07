@@ -394,6 +394,12 @@ let
   # until a later slice flips that call site onto the verb.
   fragmentsRegistryJson = builtins.toJSON fragments;
 
+  # lib/prompt-contract.nix's validateMarkers list, as JSON rather than a
+  # bash preamble (issue #2356): baked into the image for the Go
+  # `driver-exec assemble-prompt` verb's `--validate-markers-registry` flag
+  # (lib/image.nix), a sibling of fragmentsRegistryJson above.
+  promptContractRegistryJson = builtins.toJSON promptContract.validateMarkers;
+
   # The shared prompt block registry (lib/prompt-contract.nix, issue #2245),
   # rendered into agent/entrypoint.sh's `_INJECT_BLOCK_ROWS` array the same
   # way fragmentRegistryPreamble above renders `_FRAGMENT_ROWS` -- already
@@ -598,6 +604,7 @@ let
       driverPreamble
       fragmentRegistryPreamble
       fragmentsRegistryJson
+      promptContractRegistryJson
       contractRegistryPreamble
       prompt
       scoutPrompt
