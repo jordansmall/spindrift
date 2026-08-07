@@ -70,7 +70,10 @@
         }:
         let
           revision = inputs.self.shortRev or inputs.self.dirtyShortRev or "unknown";
-          dogfoodDefaults = import ./nix/dogfood-defaults.nix { inherit system; };
+          dogfoodDefaults = import ./nix/dogfood-defaults.nix {
+            inherit system;
+            lib = pkgs.lib;
+          };
           dogfoodSkills = import ./nix/dogfood-skills.nix {
             inherit caveman matt-skills jordan-skills;
           };
@@ -116,7 +119,8 @@
             forge.boxAccess = dogfoodDefaults.defaults.boxForgeAndIssueAccess;
             agents.format.enable = dogfoodDefaults.defaults.autoFormat;
             agents.lint.enable = dogfoodDefaults.defaults.autoLint;
-            agents.models.filer = dogfoodDefaults.defaults.filerModel;
+            roster = dogfoodDefaults.roster;
+            agents.models.reviewEffort = dogfoodDefaults.defaults.reviewEffort;
           };
 
           checks = checksResult.checks;
