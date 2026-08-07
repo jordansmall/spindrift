@@ -157,14 +157,6 @@ assert_cell_golden() {
     [ ! -s "$DRIVER_AGENTS_FILE" ]
   fi
 
-  case "$expected_session_mode" in
-    initial | resume) ;;
-    *)
-      echo "assert_cell_golden: unknown expected_session_mode '$expected_session_mode'" >&2
-      return 1
-      ;;
-  esac
-
   [ "$(jq -r .SessionMode "$DRIVER_HANDOFF_FILE")" = "$expected_session_mode" ]
 }
 
