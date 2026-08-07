@@ -8,6 +8,55 @@ load helper
 
 setup() {
   setup_entrypoint_env
+  : "${DRIVER_EXEC_BIN:?DRIVER_EXEC_BIN must be set (the real driver-exec Go binary, nix/checks/promptassembly.nix)}"
+  : "${PROMPTASSEMBLY_REGISTRY_FILE:?PROMPTASSEMBLY_REGISTRY_FILE must be set (lib/fragments.nix rendered to JSON, nix/checks/promptassembly.nix)}"
+
+  # BRANCH is computed inside entrypoint.sh's main (BRANCH="${BRANCH_PREFIX:-}${ISSUE_NUMBER}",
+  # entrypoint.sh:55), not exported by set_box_env/setup_entrypoint_env --
+  # reproduce the same computation here so the Go side's --branch flag
+  # matches what the bash side derives at runtime (tests/prompt-assembly-parity.bats's setup()).
+  BRANCH="${BRANCH_PREFIX:-}${ISSUE_NUMBER}"
+
+  # Bake all four skills (tests/prompt-assembly-parity.bats's setup()
+  # pattern): the covered cell requires every per-skill gate on and a
+  # non-empty SKILLS_FOUND (assemble.go's checkCoveredCell), for both the
+  # orchestrator-off and orchestrator-on cells this file's Go-side byte-parity
+  # tests exercise below.
+  mkdir -p "$HOME/.claude/skills/caveman"
+  cat >"$HOME/.claude/skills/caveman/SKILL.md" <<'SKILL'
+---
+name: caveman
+description: Ultra-compressed communication mode.
+---
+Respond terse like smart caveman.
+SKILL
+
+  mkdir -p "$HOME/.claude/skills/tdd"
+  cat >"$HOME/.claude/skills/tdd/SKILL.md" <<'SKILL'
+---
+name: tdd
+description: Test-driven development.
+---
+Red, green, refactor.
+SKILL
+
+  mkdir -p "$HOME/.claude/skills/commit"
+  cat >"$HOME/.claude/skills/commit/SKILL.md" <<'SKILL'
+---
+name: commit
+description: Write git commit messages in Conventional Commits style.
+---
+Hard-wrapped Conventional Commits.
+SKILL
+
+  mkdir -p "$HOME/.claude/skills/code-review"
+  cat >"$HOME/.claude/skills/code-review/SKILL.md" <<'SKILL'
+---
+name: code-review
+description: Review code changes for standards and spec compliance.
+---
+Two-axis review: Standards + Spec.
+SKILL
 }
 
 # Extracts the body of a baked opencode agent file: every line after the
@@ -43,6 +92,54 @@ placeholder body for $desc
 EOF
 }
 
+# assemble_go_agent_files: invokes the real driver-exec assemble-prompt verb
+# with the fixed flag set the covered cell needs (mirrors
+# tests/prompt-assembly-parity.bats's assemble_go(), simplified for this
+# file's job -- proving the ON-DISK agent-file rewrite is byte-identical, not
+# the prompt/agents-JSON parity that file already covers). --prompt-output/
+# --agents-json-output/--handoff-output all land on throwaway paths under
+# $BATS_TEST_TMPDIR (the CLI still requires all four output flags, but
+# nothing here diffs the prompt/agents-JSON bytes against the bash side).
+# $1 is the on-disk agent-files dir this invocation rewrites in place
+# (--driver-agent-files-dir); --agents-prompt-files "$AGENTS_PROMPT_FILES"
+# feeds the same roster-keyed rewrite loop the bash side reads. Every skill
+# is baked (setup() above), matching the covered cell's skills-fully-baked
+# rule. Extra args (e.g. --orchestrator-enabled, --agents-json-template ...)
+# are appended after the fixed flag set.
+assemble_go_agent_files() {
+  local dir="$1"
+  shift
+
+  run "$DRIVER_EXEC_BIN" assemble-prompt \
+    --registry "$PROMPTASSEMBLY_REGISTRY_FILE" \
+    --prompt-output "$BATS_TEST_TMPDIR/go-prompt.txt" \
+    --agents-json-output "$BATS_TEST_TMPDIR/go-agents.json" \
+    --handoff-output "$BATS_TEST_TMPDIR/go-handoff.json" \
+    --caveman-skill-baked \
+    --tdd-skill-baked \
+    --commit-skill-baked \
+    --code-review-skill-baked \
+    --skills-found "caveman, code-review, commit, tdd" \
+    --issue-tracker "$ISSUE_TRACKER" \
+    --box-write-enabled \
+    --code-forge "$CODE_FORGE" \
+    --prompts-dir "$PROMPTS_DIR" \
+    --agents-prompt-files "$AGENTS_PROMPT_FILES" \
+    --driver-agent-files-dir "$dir" \
+    --comms-contract-file "$COMMS_CONTRACT_FILE" \
+    --check-contract-file "$CHECK_CONTRACT_FILE" \
+    --outcome-contract-file "$OUTCOME_CONTRACT_FILE" \
+    --research-outcome-contract-file "$RESEARCH_OUTCOME_CONTRACT_FILE" \
+    --issue-number "$ISSUE_NUMBER" \
+    --issue-title "$ISSUE_TITLE" \
+    --branch "$BRANCH" \
+    --base-branch "$BASE_BRANCH" \
+    --in-progress-label "$IN_PROGRESS_LABEL" \
+    --complete-label "$COMPLETE_LABEL" \
+    --run-nonce "$RUN_NONCE" \
+    "$@"
+}
+
 @test "entrypoint rewrites a single baked opencode agent file's body with the rendered prompt" {
   local dir="$BATS_TEST_TMPDIR/agent-files"
   mkdir -p "$dir"
@@ -60,6 +157,28 @@ EOF
   [ "$body" != "placeholder body for scout" ]
   [[ "$body" == *"Return only the brief"* ]]
   [ "$(agent_file_frontmatter "$dir/scout.md")" = "$frontmatter_before" ]
+}
+
+# Byte-parity twin of the test just above (issue #2353): the SAME fixture
+# rewritten independently by both the bash entrypoint and the Go
+# `driver-exec assemble-prompt` verb must land on byte-identical output, not
+# just "changed from the placeholder" like the bash-only test above already
+# checks.
+@test "bash and Go rewrite a single baked opencode agent file byte-identically" {
+  local dir_bash="$BATS_TEST_TMPDIR/agent-files-bash"
+  local dir_go="$BATS_TEST_TMPDIR/agent-files-go"
+  mkdir -p "$dir_bash" "$dir_go"
+  write_agent_file "$dir_bash/scout.md" "scout"
+  write_agent_file "$dir_go/scout.md" "scout"
+
+  export DRIVER_AGENT_FILES_DIR="$dir_bash"
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+
+  assemble_go_agent_files "$dir_go"
+  [ "$status" -eq 0 ]
+
+  diff "$dir_bash/scout.md" "$dir_go/scout.md"
 }
 
 @test "entrypoint rewrites multiple baked opencode agent files generically" {
@@ -131,6 +250,37 @@ EOF
   [[ "$scout_body" == *"Return only the brief"* ]]
 }
 
+# Byte-parity twin of the reviewer-drop test just above plus the
+# --review-model forwarding test below (issue #2353): both bash and Go must
+# drop reviewer.md, rewrite the remaining roster file byte-identically, and
+# recover the SAME review model -- bash from $ORCHESTRATOR_LOG's recorded
+# argv, Go from its own handoff JSON's .ReviewModel.
+@test "bash and Go drop reviewer.md and recover the same --review-model when the orchestrator is on" {
+  local dir_bash="$BATS_TEST_TMPDIR/agent-files-bash"
+  local dir_go="$BATS_TEST_TMPDIR/agent-files-go"
+  mkdir -p "$dir_bash" "$dir_go"
+  write_agent_file "$dir_bash/scout.md" "scout"
+  write_agent_file "$dir_bash/reviewer.md" "reviewer"
+  write_agent_file "$dir_go/scout.md" "scout"
+  write_agent_file "$dir_go/reviewer.md" "reviewer"
+
+  export DRIVER_AGENT_FILES_DIR="$dir_bash"
+  export ORCHESTRATOR_ENABLED=1
+  export WORK_DIR="$BATS_TEST_TMPDIR/work-agent-files-orch-on-parity"
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+
+  assemble_go_agent_files "$dir_go" --orchestrator-enabled
+  [ "$status" -eq 0 ]
+
+  [ ! -f "$dir_bash/reviewer.md" ]
+  [ ! -f "$dir_go/reviewer.md" ]
+  diff "$dir_bash/scout.md" "$dir_go/scout.md"
+
+  grep -q -- '--review-model opus' "$ORCHESTRATOR_LOG"
+  jq -e '.ReviewModel == "opus"' "$BATS_TEST_TMPDIR/go-handoff.json"
+}
+
 # Issue #2278: file-based twin of entrypoint-orchestrator-handoff.bats's
 # "orchestrator path forwards --review-model from the reviewer's configured
 # model" (issue #2277, JSON path). Here the reviewer's configured model rides
@@ -187,6 +337,28 @@ EOF
   reviewer_body="$(agent_file_body "$dir/reviewer.md")"
   [ -n "$reviewer_body" ]
   [ "$reviewer_body" != "placeholder body for reviewer" ]
+}
+
+# Byte-parity twin of the test just above (issue #2353): with the
+# orchestrator off, neither side drops reviewer.md -- both must rewrite its
+# body byte-identically, like any other roster entry.
+@test "bash and Go rewrite the reviewer's baked opencode agent file byte-identically when the orchestrator is off" {
+  local dir_bash="$BATS_TEST_TMPDIR/agent-files-bash"
+  local dir_go="$BATS_TEST_TMPDIR/agent-files-go"
+  mkdir -p "$dir_bash" "$dir_go"
+  write_agent_file "$dir_bash/reviewer.md" "reviewer"
+  write_agent_file "$dir_go/reviewer.md" "reviewer"
+
+  export DRIVER_AGENT_FILES_DIR="$dir_bash"
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+
+  assemble_go_agent_files "$dir_go"
+  [ "$status" -eq 0 ]
+
+  [ -f "$dir_bash/reviewer.md" ]
+  [ -f "$dir_go/reviewer.md" ]
+  diff "$dir_bash/reviewer.md" "$dir_go/reviewer.md"
 }
 
 @test "entrypoint skips a roster agent with no baked opencode agent file without error" {
