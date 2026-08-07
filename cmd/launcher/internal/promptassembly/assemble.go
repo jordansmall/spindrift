@@ -42,12 +42,14 @@ type Handoff struct {
 }
 
 // checkCoveredCell validates that e sits in one of the Env cells Assemble
-// implements: IssueTracker (explicitly or by default) github, CodeForge
-// (explicitly or by default) either "github" or "forgejo", either box
-// access state (BoxWriteEnabled true or false), the orchestrator off, and
-// every skill baked (SkillsFound non-empty and all four per-skill gates on)
-// are common to all covered cells; the dispatch-kind/fix-pass axis then
-// forks into:
+// implements: IssueTracker one of "github" (explicit or default), "jira",
+// "local", or "forgejo" (issue #2352 -- jira rides github's arm end to end,
+// since it shares github's in-box reachability, see gates_tracker.go's
+// issueTrackerAxis), CodeForge (explicitly or by default) either "github"
+// or "forgejo", either box access state (BoxWriteEnabled true or false),
+// the orchestrator off, and every skill baked (SkillsFound non-empty and
+// all four per-skill gates on) are common to all covered cells; the
+// dispatch-kind/fix-pass axis then forks into:
 //   - dispatch kind "work" (explicit or default), FixPass == 0 -- a fresh
 //     work dispatch (issue-prompt.md).
 //   - dispatch kind "work" (explicit or default), FixPass > 0 -- a warm fix
@@ -65,7 +67,10 @@ func checkCoveredCell(e Env) error {
 	if tracker == "" {
 		tracker = defaultIssueTracker
 	}
-	if tracker != defaultIssueTracker {
+	switch tracker {
+	case defaultIssueTracker, "jira", "local", "forgejo":
+		// covered
+	default:
 		return fmt.Errorf("issue tracker %q: %w", e.IssueTracker, ErrUnsupportedCell)
 	}
 

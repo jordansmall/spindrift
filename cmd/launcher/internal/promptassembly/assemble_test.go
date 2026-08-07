@@ -44,6 +44,15 @@ func coveredEnv() Env {
 	}
 }
 
+// localTrackerEnv returns a copy of coveredEnv with IssueTracker set to
+// "local" -- otherwise identical, still a read-write box with every other
+// axis at its covered-cell value.
+func localTrackerEnv() Env {
+	env := coveredEnv()
+	env.IssueTracker = "local"
+	return env
+}
+
 func loadTestRegistry(t *testing.T) Registry {
 	t.Helper()
 	reg, err := LoadRegistryFile("testdata/registry.json")
@@ -272,7 +281,7 @@ func TestAssembleUnsupportedCell(t *testing.T) {
 		name   string
 		mutate func(*Env)
 	}{
-		{name: "wrong issue tracker", mutate: func(e *Env) { e.IssueTracker = "forgejo" }},
+		{name: "wrong issue tracker", mutate: func(e *Env) { e.IssueTracker = "bitbucket" }},
 		{name: "unrecognized code forge", mutate: func(e *Env) { e.CodeForge = "bogus" }},
 		{name: "unrecognized dispatch kind", mutate: func(e *Env) { e.DispatchKind = "bogus" }},
 		{name: "orchestrator on", mutate: func(e *Env) { e.OrchestratorEnabled = true }},
@@ -623,6 +632,134 @@ func TestAssembleInjectedBlockSubstitutesTokens(t *testing.T) {
 	}
 	if strings.Contains(result.Prompt, "${ISSUE_NUMBER}") {
 		t.Errorf("Prompt contains unsubstituted ${ISSUE_NUMBER} in injected outcome block:\n%s", result.Prompt)
+	}
+}
+
+// TestAssembleLocalTracker covers the local-tracker cell (issue #2352):
+// Assemble accepts IssueTracker == "local" and renders issue-read-local.md's
+// fragment text, never issue-read-github.md's "gh issue view".
+func TestAssembleLocalTracker(t *testing.T) {
+	reg := loadTestRegistry(t)
+	env := localTrackerEnv()
+
+	result, err := Assemble(env, reg)
+	if err != nil {
+		t.Fatalf("Assemble: %v", err)
+	}
+
+	if !strings.Contains(result.Prompt, "This is a local issue with no GitHub-side counterpart") {
+		t.Errorf("Prompt missing ISSUE_TRACKER_LOCAL fragment text (issue-read-local.md):\n%s", result.Prompt)
+	}
+	if strings.Contains(result.Prompt, "gh issue view") {
+		t.Errorf("Prompt contains ISSUE_TRACKER_GITHUB fragment text (issue-read-github.md), want local tracker's fragment only")
+	}
+}
+
+// TestAssembleLocalTrackerWithLocalIssueReference covers the local-tracker
+// cell with LocalIssueReference == true: the PR body must carry the
+// "Local-issue:" breadcrumb (pr-body-local-ref.md), never the local-noref
+// cell's marker text (pr-body-local-noref.md).
+func TestAssembleLocalTrackerWithLocalIssueReference(t *testing.T) {
+	reg := loadTestRegistry(t)
+	env := localTrackerEnv()
+	env.LocalIssueReference = true
+
+	result, err := Assemble(env, reg)
+	if err != nil {
+		t.Fatalf("Assemble: %v", err)
+	}
+
+	if !strings.Contains(result.Prompt, "Local-issue: 2349") {
+		t.Errorf("Prompt missing PR_BODY_LOCAL_REF fragment text (pr-body-local-ref.md):\n%s", result.Prompt)
+	}
+	if strings.Contains(result.Prompt, "Body must NOT reference the local ticket by slug or number") {
+		t.Errorf("Prompt contains PR_BODY_LOCAL_NOREF fragment text (pr-body-local-noref.md), want local-ref only")
+	}
+}
+
+// TestAssembleLocalTrackerWithoutLocalIssueReference covers the
+// local-tracker cell with LocalIssueReference left at its default (false):
+// the PR body must carry PR_BODY_LOCAL_NOREF's marker text
+// (pr-body-local-noref.md), never the "Local-issue:" breadcrumb
+// (pr-body-local-ref.md).
+func TestAssembleLocalTrackerWithoutLocalIssueReference(t *testing.T) {
+	reg := loadTestRegistry(t)
+	env := localTrackerEnv()
+
+	result, err := Assemble(env, reg)
+	if err != nil {
+		t.Fatalf("Assemble: %v", err)
+	}
+
+	if !strings.Contains(result.Prompt, "Body must NOT reference the local ticket by slug or number") {
+		t.Errorf("Prompt missing PR_BODY_LOCAL_NOREF fragment text (pr-body-local-noref.md):\n%s", result.Prompt)
+	}
+	if strings.Contains(result.Prompt, "Local-issue:") {
+		t.Errorf("Prompt contains PR_BODY_LOCAL_REF fragment text (pr-body-local-ref.md), want local-noref only")
+	}
+}
+
+// TestAssembleForgejoTrackerReadWrite covers the forgejo-tracker cell,
+// read-write box (issue #2352, ADR 0022's read-write-only acceptance
+// criterion -- read-only tracker cells are out of scope): Assemble accepts
+// IssueTracker == "forgejo" and renders issue-read-forgejo.md's
+// distinguishing "fj issue view" text, never issue-read-github.md's "gh
+// issue view".
+func TestAssembleForgejoTrackerReadWrite(t *testing.T) {
+	reg := loadTestRegistry(t)
+	env := coveredEnv()
+	env.IssueTracker = "forgejo"
+
+	result, err := Assemble(env, reg)
+	if err != nil {
+		t.Fatalf("Assemble: %v", err)
+	}
+
+	if !strings.Contains(result.Prompt, "fj issue view") {
+		t.Errorf("Prompt missing ISSUE_TRACKER_FORGEJO fragment text (issue-read-forgejo.md):\n%s", result.Prompt)
+	}
+	if strings.Contains(result.Prompt, "gh issue view") {
+		t.Errorf("Prompt contains ISSUE_TRACKER_GITHUB fragment text (issue-read-github.md), want forgejo tracker's fragment only")
+	}
+}
+
+// TestAssembleJiraTracker covers the jira-tracker cell (issue #2352): jira
+// shares github's arm end to end (gates_tracker.go's issueTrackerAxis), so
+// Assemble accepts it and does not return ErrUnsupportedCell.
+func TestAssembleJiraTracker(t *testing.T) {
+	reg := loadTestRegistry(t)
+	env := coveredEnv()
+	env.IssueTracker = "jira"
+
+	if _, err := Assemble(env, reg); err != nil {
+		t.Errorf("Assemble with jira tracker: %v, want nil error", err)
+	}
+}
+
+// TestAssembleJiraRidesGithubArms pins this issue's explicit acceptance
+// criterion: jira really does render through github's arm end-to-end at the
+// Assemble level (not just at Gates()'s gate-map level, already covered by
+// gates_tracker_test.go). Two Envs, identical except for IssueTracker
+// ("jira" vs "github"), must produce byte-identical Result.Prompt.
+func TestAssembleJiraRidesGithubArms(t *testing.T) {
+	reg := loadTestRegistry(t)
+
+	jiraEnv := coveredEnv()
+	jiraEnv.IssueTracker = "jira"
+	githubEnv := coveredEnv()
+	githubEnv.IssueTracker = "github"
+
+	jiraResult, err := Assemble(jiraEnv, reg)
+	if err != nil {
+		t.Fatalf("Assemble(jira): %v", err)
+	}
+	githubResult, err := Assemble(githubEnv, reg)
+	if err != nil {
+		t.Fatalf("Assemble(github): %v", err)
+	}
+
+	if jiraResult.Prompt != githubResult.Prompt {
+		t.Errorf("jira Prompt != github Prompt, want byte-identical (jira rides github's arm end-to-end):\njira:\n%s\n\ngithub:\n%s", jiraResult.Prompt, githubResult.Prompt)
 	}
 }
 
