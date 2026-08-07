@@ -108,6 +108,12 @@ configure_env() {
   # the `driver-exec assemble-prompt` verb's `--registry` flag.
   PROMPTASSEMBLY_REGISTRY_FILE="${PROMPTASSEMBLY_REGISTRY_FILE:-/agent/fragments-registry.json}"
 
+  # lib/prompt-contract.nix's validateMarkers list as JSON (issue #2356),
+  # baked at the same sibling-of-/agent/prompts path as the contract files
+  # above, for the `driver-exec assemble-prompt` verb's
+  # `--validate-markers-registry` flag.
+  PROMPT_CONTRACT_REGISTRY_FILE="${PROMPT_CONTRACT_REGISTRY_FILE:-/agent/prompt-contract-registry.json}"
+
   # _driver_extract_outcome and _driver_session_flags are defined by the Driver
   # registry (lib/drivers/<name>.nix); a nix-built image prepends them via
   # driverPreamble (lib/mkHarness.nix), and the bats harness sources the same
@@ -470,157 +476,6 @@ _handoff_field() {
   printf '%s' "$1" | jq -r ".$2 // empty"
 }
 
-# _validate_marker_row scans _VALIDATE_MARKER_ROWS (lib/prompt-contract.nix's
-# validateMarkers registry, rendered by validateMarkersBashPreamble, issue
-# #2249): prints the row whose id (pipe position 1) matches $1, unparsed, so
-# the one caller below (_validate_prompt_contract) can split it with
-# `IFS='|' read -r` for whichever of marker/carrier/severity/when it needs.
-# Its erstwhile sibling, _contract_marker (which scanned _INJECT_BLOCK_ROWS
-# for the COMMS/CHECK/OUTCOME shared-block injection's marker), was retired
-# along with its one caller, _inject_shared_block, by issue #2354 -- both
-# superseded by the driver-exec assemble-prompt verb's own injectSharedBlock
-# (cmd/launcher/internal/promptassembly), which resolves a contract file's
-# marker off its own first line instead of a separate registry lookup.
-_validate_marker_row() {
-  local _id="$1" _vrow _vid _rest
-  for _vrow in "${_VALIDATE_MARKER_ROWS[@]}"; do
-    _vid="${_vrow%%|*}"
-    if [ "$_vid" = "$_id" ]; then
-      printf '%s' "$_vrow"
-      return 0
-    fi
-  done
-  echo "_validate_marker_row: no row for id '$_id' in _VALIDATE_MARKER_ROWS" >&2
-  return 1
-}
-
-# _validate_prompt_contract is the in-box reject/warn matrix (issue #2249):
-# run once, at the very end of phase_prompt_assembly -- after every fragment
-# has been rendered/injected and $prompt/$agents_json are fully assembled,
-# strictly before run_driver_in_env is ever called (main calls
-# phase_prompt_assembly before run_driver_in_env, so no separate call site is
-# needed) -- it scans for the markers lib/prompt-contract.nix's
-# validateMarkers registry names, each gated on the exact same condition
-# that gated the fragment/step supposed to carry it. A "reject" row's marker
-# missing under its gate condition means the Box's own contract with the
-# launcher/host is unmet in a way nothing downstream can recover from, so it
-# exits non-zero before the Driver ever runs (saving the wasted turn); a
-# "warn" row already has a working non-fatal backstop, so its marker missing
-# is only ever advisory, never fatal.
-#
-# Reuses the same local gate variables (ORCHESTRATOR, BOX_ACCESS_READ_ONLY,
-# FILER_FILE_RELAY, _handoff, prompt, agents_json) phase_prompt_assembly
-# already computed to decide what to render, rather than re-deriving the
-# gating condition from raw env vars -- the actual source of truth for what
-# got rendered, so this can never silently drift from the real
-# fragment-gating logic (see brief for #2249). The orchestratorEnabled row
-# below reads its review-prompt haystack straight off $_handoff's own
-# ReviewPromptFile field (issue #2355) rather than a separately-extracted
-# review_prompt_rendered sentinel.
-#
-# Dispatches on each row's `when` field (pipe position 5) to decide whether
-# its gate is active and which rendered text to scan, then on its `severity`
-# field (pipe position 4) to decide whether a missing marker under an active
-# gate is fatal ("reject": print and exit 1) or advisory ("warn": print and
-# continue) -- a single loop over the four known ids instead of four
-# hand-copied if-blocks, so severity/when actually come from
-# _VALIDATE_MARKER_ROWS's data rather than being re-decided in bash for each
-# row id (issue #2318).
-_validate_prompt_contract() {
-  local _id _row _marker _carrier _severity _when _gate _haystack _msg
-
-  for _id in verdict-comment-relay reviewer-verdict pr-intent issue-intent; do
-    _row="$(_validate_marker_row "$_id")" || exit 1
-    IFS='|' read -r _ _marker _carrier _severity _when <<<"$_row"
-
-    case "$_when" in
-      readOnlyResearch)
-        # A read-only research dispatch's only path to post its verdict is
-        # the SPINDRIFT_COMMENT relay (research-prompt.md's POST THE VERDICT
-        # section) -- missing it here means the verdict can never reach the
-        # launcher.
-        if _is_research_kind && [ -n "$BOX_ACCESS_READ_ONLY" ]; then
-          _gate=1
-        else
-          _gate=0
-        fi
-        _haystack="$prompt"
-        _msg="_validate_prompt_contract: read-only research dispatch's rendered prompt is missing the required '$_marker' marker -- this belongs in research-prompt.md's (or a SPINDRIFT_PROMPT_DIR override's) POST THE VERDICT section; without it a read-only Box has no way to hand its verdict to the launcher. Refusing to invoke the Driver."
-        ;;
-      orchestratorEnabled)
-        # $_handoff's ReviewPromptFile field (misleadingly named -- it
-        # actually carries the rendered review-prompt.md text, not a path;
-        # see assemble.go's Handoff doc comment) is only non-empty for a
-        # fresh, non-research, non-FIX_PASS dispatch with the orchestrator on
-        # -- exactly the case where a missing VERDICT: line would leave the
-        # multi-pass review loop with nothing to gate on. Orchestrator off,
-        # or ReviewPromptFile empty (research/FIX_PASS dispatch), is
-        # correctly a no-op here: the inline reviewer-subagent loop (or the
-        # research/fix pass's own contract) governs verdict-gating instead
-        # (orchestrator-fork-well-formed, issue #2047).
-        _haystack="$(_handoff_field "$_handoff" ReviewPromptFile)"
-        if [ -n "$ORCHESTRATOR" ] && [ -n "$_haystack" ]; then
-          _gate=1
-        else
-          _gate=0
-        fi
-        _msg="_validate_prompt_contract: the orchestrator's rendered review prompt is missing the required '$_marker' marker -- this belongs in review-prompt.md's (or a SPINDRIFT_PROMPT_DIR override's) verdict line; without it the code-owned review loop has nothing to gate on. Refusing to invoke the Driver."
-        ;;
-      boxAccessReadOnly)
-        # A read-only, non-research dispatch relies on the SPINDRIFT_PR_INTENT
-        # relay (issue-prompt.md's OPEN A PULL REQUEST section) to hand its
-        # finished branch to the launcher's host-mediated draft-PR step.
-        # Already has a working non-fatal backstop (the required-marker
-        # gate's pr-intent-recovery nudge below, plus settle's bundle-adopt
-        # salvage path), so a missing marker here is advisory only.
-        if [ -n "$BOX_ACCESS_READ_ONLY" ] && ! _is_research_kind; then
-          _gate=1
-        else
-          _gate=0
-        fi
-        _haystack="$prompt"
-        _msg="_validate_prompt_contract: warning -- read-only dispatch's rendered prompt is missing the '$_marker' marker (belongs in issue-prompt.md's, or fix-prompt.md's injected, OPEN A PULL REQUEST section). Proceeding: a status=ready run with no PR-intent line still gets one resume-nudge attempt post-driver, and a genuinely exhausted attempt falls back to the merge-blocked report rather than losing the branch."
-        ;;
-      filerFileRelay)
-        # A filer-relay dispatch relies on the SPINDRIFT_ISSUE_INTENT relay
-        # (filer-file-relay.md) to hand its filed issues to the launcher's
-        # host-mediated create step -- checked against the filer's own
-        # rendered prompt inside agents_json, not $prompt, since that's where
-        # filer-prompt.md's substituted text actually lands. Already has a
-        # working non-fatal backstop (the filer's best-effort PR-body
-        # fallback), so a missing marker here is advisory only.
-        if [ -n "$FILER_FILE_RELAY" ]; then
-          _gate=1
-        else
-          _gate=0
-        fi
-        _haystack="$(printf '%s' "${agents_json:-}" | jq -r '.filer.prompt // empty')"
-        _msg="_validate_prompt_contract: warning -- filer-relay dispatch's rendered filer prompt is missing the '$_marker' marker (belongs in filer-prompt.md's, or a SPINDRIFT_PROMPT_DIR override's, filer-file-relay.md-injected section). Proceeding: the filer's own best-effort PR-body fallback still records the issue reference even without the relay."
-        ;;
-      *)
-        echo "_validate_prompt_contract: no known gate for when '$_when' (row '$_id')" >&2
-        exit 1
-        ;;
-    esac
-
-    if [ "$_gate" -eq 1 ] && [[ "$_haystack" != *"$_marker"* ]]; then
-      case "$_severity" in
-        reject)
-          echo "$_msg" >&2
-          exit 1
-          ;;
-        warn)
-          echo "$_msg" >&2
-          ;;
-        *)
-          echo "_validate_prompt_contract: unknown severity '$_severity' for row '$_id'" >&2
-          exit 1
-          ;;
-      esac
-    fi
-  done
-}
-
 # phase_conflict_resolve spawns a conflict-resolve agent when
 # phase_prework_rebase hit a conflict, and handles the CONFLICT_RESOLVE_PR_URL
 # resolve-only dispatch mode. Reads _had_rebase_conflict and
@@ -716,6 +571,7 @@ phase_prompt_assembly() {
   # unset knob here is indistinguishable from an explicit off.
   local -a _ap_args=(
     --registry "$PROMPTASSEMBLY_REGISTRY_FILE"
+    --validate-markers-registry "$PROMPT_CONTRACT_REGISTRY_FILE"
     --agents-json-template "${AGENTS_JSON_TEMPLATE:-}"
     --issue-tracker "${ISSUE_TRACKER:-}"
     --code-forge "${CODE_FORGE:-}"
@@ -753,8 +609,9 @@ phase_prompt_assembly() {
   # reassigns $ORCHESTRATOR from the resulting Handoff either: the two are
   # always mathematically identical, so main's one early computation is
   # $ORCHESTRATOR's value for this entire run, read as-is by every consumer
-  # (this flag, the FILER_FILE_RELAY/_validate_prompt_contract gates below,
-  # and run_driver_in_env's own pre-Handoff conflict-resolve fallback).
+  # (this flag, and run_driver_in_env's own pre-Handoff conflict-resolve
+  # fallback -- the reject/warn marker matrix these gates used to also feed
+  # moved into the Go verb itself, issue #2356).
   [ -n "$ORCHESTRATOR" ] && _ap_args+=(--orchestrator-enabled)
   [ -n "${BOX_WRITE_ENABLED:-}" ] && _ap_args+=(--box-write-enabled)
   [ -n "${LOCAL_ISSUE_REFERENCE:-}" ] && _ap_args+=(--local-issue-reference)
@@ -802,40 +659,6 @@ phase_prompt_assembly() {
   # in main, near its early ORCHESTRATOR computation (line ~1185).
   _handoff="$(cat "$_handoff_out")"
   rm -f "$_prompt_out" "$_agents_out" "$_handoff_out"
-
-  # _validate_prompt_contract (below, unchanged since issue #2249) still
-  # reads BOX_ACCESS_READ_ONLY and FILER_FILE_RELAY by dynamic scoping from
-  # this function's own call frame. The gate precompute block that used to
-  # compute them (among many others) for the now-deleted fragment loop is
-  # gone, but these two remain load-bearing inputs to the reject/warn marker
-  # matrix -- recomputed here, directly from the same env vars the verb
-  # itself gates on (mirrors gates.go's own derivation), rather than
-  # resurrecting the rest of the deleted precompute block.
-  local BOX_ACCESS_READ_ONLY=""
-  [ -z "${BOX_WRITE_ENABLED:-}" ] && BOX_ACCESS_READ_ONLY=1
-  local _vc_filer_enabled=""
-  if [ -n "${AGENTS_JSON_TEMPLATE:-}" ] && printf '%s' "$AGENTS_JSON_TEMPLATE" | jq -e 'has("filer")' >/dev/null 2>&1; then
-    _vc_filer_enabled=1
-  fi
-  # Matches the adjacent orchestratorEnabled gate in _validate_prompt_contract
-  # (see the ORCHESTRATOR/Handoff.Invoker equivalence note in main, near its
-  # early ORCHESTRATOR computation, line ~1185): $ORCHESTRATOR and Handoff.Invoker ==
-  # "orchestrator" are always the same value, so this reads $ORCHESTRATOR
-  # too, saving a jq subprocess.
-  local FILER_FILE_RELAY=""
-  if [ -n "$_vc_filer_enabled" ] && [ -z "${BOX_WRITE_ENABLED:-}" ] && [ -n "$ORCHESTRATOR" ]; then
-    FILER_FILE_RELAY=1
-  else
-    # Off-row: every conditional forking on orchestrator status declares
-    # both an on-row and an off-row, even when, as here, the off-row is a
-    # no-op -- FILER_FILE_RELAY already defaults to empty above.
-    :
-  fi
-
-  # Reject/warn marker matrix (issue #2249): runs last, after $prompt and
-  # $agents_json are fully assembled, and strictly before run_driver_in_env
-  # is ever called from main.
-  _validate_prompt_contract
 }
 
 # run_driver_in_env runs the Driver against $1 (the assembled prompt), with
@@ -1188,8 +1011,7 @@ main() {
   # ORCHESTRATOR_ENABLED env var -- the orchestrator-fork-well-formed check
   # (nix/checks/prompts.nix) pins this as the one non-comment
   # ORCHESTRATOR_ENABLED test allowed in this file; every fork downstream
-  # (phase_prompt_assembly's --orchestrator-enabled flag,
-  # FILER_FILE_RELAY/_validate_prompt_contract gates, and
+  # (phase_prompt_assembly's --orchestrator-enabled flag, and
   # run_driver_in_env's own pre-Handoff invoker fallback) reads this one
   # computed value instead of re-testing the env var. Computed here, before
   # phase_conflict_resolve, so that pass's run_driver_in_env call -- which

@@ -46,6 +46,10 @@ let
 
   fragmentsRegistryJsonFile = pkgs.writeText "fragments-registry.json" (builtins.toJSON registry);
 
+  promptContractRegistryJsonFile = pkgs.writeText "prompt-contract-registry.json" (
+    builtins.toJSON (import ../../lib/prompt-contract.nix).validateMarkers
+  );
+
   testdataRegistryJson = ../../cmd/launcher/internal/promptassembly/testdata/registry.json;
 in
 {
@@ -140,6 +144,7 @@ in
         # Reuses the same nix-rendered lib/fragments.nix JSON the drift
         # check above already built -- no second render of the registry.
         PROMPTASSEMBLY_REGISTRY_FILE = fragmentsRegistryJsonFile;
+        PROMPT_CONTRACT_REGISTRY_FILE = promptContractRegistryJsonFile;
       }
       ''
         export HOME="$TMPDIR/home"
