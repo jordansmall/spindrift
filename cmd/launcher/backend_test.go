@@ -175,12 +175,12 @@ func TestJiraNewIssueTrackerMalformedStatusMapping(t *testing.T) {
 	if row.newIssueTracker == nil {
 		t.Fatal("jira row.newIssueTracker is nil")
 	}
-	c := config{
+	c := config{schemaConfig: schemaConfig{
 		jiraBaseURL:       "https://example.atlassian.net",
 		jiraProjectKey:    "PROJ",
 		jiraToken:         "tok",
 		jiraStatusMapping: "{not valid json",
-	}
+	}}
 	defer func() {
 		if r := recover(); r != nil {
 			t.Fatalf("newIssueTracker panicked: %v", r)

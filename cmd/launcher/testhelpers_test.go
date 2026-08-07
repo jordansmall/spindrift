@@ -30,7 +30,7 @@ var testDispatchLabels = forge.DispatchLabels{
 // baseConfig returns a config suitable for merge-gate-adjacent tests
 // (preflight, wiring through settle).
 func baseConfig() config {
-	return config{
+	return config{schemaConfig: schemaConfig{
 		inProgressLabel:   "agent-in-progress",
 		failedLabel:       "agent-failed",
 		completeLabel:     "agent-complete",
@@ -38,7 +38,7 @@ func baseConfig() config {
 		mergePollTimeout:  100, // large enough for multi-poll tests
 		mergeMode:         "immediate",
 		codeForge:         "github",
-	}
+	}}
 }
 
 // withSchemaFlags installs flags as the package-level schemaFlags table for

@@ -695,6 +695,35 @@ func TestApplyDispatchKind_Work_LeavesConfiguredLabelsAlone(t *testing.T) {
 	}
 }
 
+// TestApplyDispatchKind_ValueEmbed_DoesNotAliasOriginal verifies that
+// config's by-value embed of schemaConfig means applyDispatchKind's
+// copy-and-mutate (main.go) mutates only the returned copy — the caller's
+// original config, including its nested schemaConfig, is left untouched.
+// A pointer embed would let the label swap alias and corrupt the caller's
+// struct; this test pins the value-embed guarantee explicitly.
+func TestApplyDispatchKind_ValueEmbed_DoesNotAliasOriginal(t *testing.T) {
+	orig := config{schemaConfig: schemaConfig{
+		label:           "orig-label",
+		inProgressLabel: "orig-in-progress",
+		completeLabel:   "orig-complete",
+		failedLabel:     "orig-failed",
+	}}
+	origCopy := orig
+
+	got := applyDispatchKind(orig, dispatchKindResearch)
+	rl := forge.ResearchDispatchLabels()
+
+	if orig != origCopy {
+		t.Errorf("applyDispatchKind mutated the caller's original config: got %+v, want unchanged %+v", orig, origCopy)
+	}
+	if orig.label != "orig-label" || orig.inProgressLabel != "orig-in-progress" || orig.completeLabel != "orig-complete" || orig.failedLabel != "orig-failed" {
+		t.Errorf("original config's label fields changed: %+v", orig)
+	}
+	if got.label != rl.Dispatchable || got.inProgressLabel != rl.InProgress || got.failedLabel != rl.Failed || got.completeLabel != "" {
+		t.Errorf("returned copy does not carry the research label family: %+v", got)
+	}
+}
+
 // TestNewIssueTracker_ResearchKind_WiresVerdictLabels verifies that a
 // research-kind config's IssueTracker actually resolves verdict labels
 // (CompleteVerdict), while a work-kind config's does not — the kind-aware
@@ -2515,19 +2544,21 @@ func minimalValidLocalConfig() config {
 
 func minimalValidConfig() config {
 	return config{
-		repoSlug:               "owner/repo",
-		gitUserName:            "bot",
-		gitUserEmail:           "bot@example.com",
-		ghToken:                "ghp_test",
-		claudeOAuthToken:       "tok",
-		runtime:                "echo", // echo is always on PATH
-		mergeMode:              "manual",
-		mergeMethod:            "rebase",
-		syncMethod:             "rebase",
-		issueTracker:           "github",
-		codeForge:              "github",
-		overlapGate:            "defer",
-		boxForgeAndIssueAccess: "read-write",
+		runtime: "echo", // echo is always on PATH
+		schemaConfig: schemaConfig{
+			repoSlug:               "owner/repo",
+			gitUserName:            "bot",
+			gitUserEmail:           "bot@example.com",
+			ghToken:                "ghp_test",
+			claudeOAuthToken:       "tok",
+			mergeMode:              "manual",
+			mergeMethod:            "rebase",
+			syncMethod:             "rebase",
+			issueTracker:           "github",
+			codeForge:              "github",
+			overlapGate:            "defer",
+			boxForgeAndIssueAccess: "read-write",
+		},
 	}
 }
 
@@ -2593,7 +2624,7 @@ func TestDoctor_AuthFailure_Jira(t *testing.T) {
 	f.ProbeErr = forge.ErrAuthFailure
 
 	var buf bytes.Buffer
-	err := runDoctor(f, f, config{issueTracker: "jira"}, &buf, strings.NewReader(""), false)
+	err := runDoctor(f, f, config{schemaConfig: schemaConfig{issueTracker: "jira"}}, &buf, strings.NewReader(""), false)
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -2624,7 +2655,7 @@ func TestDoctor_AuthFailure_Forgejo(t *testing.T) {
 	f.ProbeErr = forge.ErrAuthFailure
 
 	var buf bytes.Buffer
-	err := runDoctor(f, f, config{issueTracker: "forgejo"}, &buf, strings.NewReader(""), false)
+	err := runDoctor(f, f, config{schemaConfig: schemaConfig{issueTracker: "forgejo"}}, &buf, strings.NewReader(""), false)
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -2644,7 +2675,7 @@ func TestDoctor_RepoNotFound_Forgejo(t *testing.T) {
 	f.ProbeErr = forge.ErrRepoNotFound
 
 	var buf bytes.Buffer
-	err := runDoctor(f, f, config{issueTracker: "forgejo"}, &buf, strings.NewReader(""), false)
+	err := runDoctor(f, f, config{schemaConfig: schemaConfig{issueTracker: "forgejo"}}, &buf, strings.NewReader(""), false)
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -2665,7 +2696,7 @@ func TestDoctor_AuthFailure_Local(t *testing.T) {
 	f.ProbeErr = forge.ErrAuthFailure
 
 	var buf bytes.Buffer
-	err := runDoctor(f, f, config{issueTracker: "local"}, &buf, strings.NewReader(""), false)
+	err := runDoctor(f, f, config{schemaConfig: schemaConfig{issueTracker: "local"}}, &buf, strings.NewReader(""), false)
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -2675,14 +2706,14 @@ func TestDoctor_AuthFailure_Local(t *testing.T) {
 }
 
 func defaultLabelConfig() config {
-	return config{
+	return config{schemaConfig: schemaConfig{
 		label:           "ready-for-agent",
 		inProgressLabel: "agent-in-progress",
 		failedLabel:     "agent-failed",
 		completeLabel:   "agent-complete",
 		codeForge:       "github",
 		issueTracker:    "github",
-	}
+	}}
 }
 
 func TestDoctor_LabelsAllPresent(t *testing.T) {

@@ -34,6 +34,13 @@ import (
 )
 
 type config struct {
+	// schemaConfig carries every schema-derived member (issue #2364,
+	// #2365): one field per lib/env-schema.nix host-config entry, loaded by
+	// loadSchemaConfig(). Embedded by value (not pointer) so a
+	// copy-and-mutate helper like applyDispatchKind can never alias the
+	// caller's config through the embedded struct.
+	schemaConfig
+
 	// OCI image config (baked by nix wrapper; empty for bwrap)
 	imageArchive    string
 	imageTag        string
@@ -60,167 +67,16 @@ type config struct {
 	// image is the runtime image reference; defaults to imageTag
 	image string
 
-	// Run defaults (overrideable via env / harness.env)
-	repoSlug        string
-	label           string
-	issueNumber     string
-	baseBranch      string
-	maxParallel     int
-	branchPrefix    string
-	inProgressLabel string
-	failedLabel     string
-	completeLabel   string
-	maxJobs         int
-
-	// continuousDispatch opts into the slot-refill dispatch mode (#527):
-	// instead of a single wave, the launcher runs long enough to refill each
-	// freed slot from a live re-discovery, gated by the image-freshness
-	// probe before every launch. Off by default; the queue-discovery path
-	// only (ISSUE_NUMBER-claimed and selective dispatch ignore it).
-	continuousDispatch bool
-
-	// issueTracker selects the IssueTracker adapter: "github" (default),
-	// "local", "jira", or "forgejo". localIssuesDir is the local adapter's
-	// issue directory; the jira* fields are only consulted when issueTracker
-	// == "jira", and the forgejo* fields only when issueTracker ==
-	// "forgejo". The Code Forge (PR/CI/merge) stays github regardless.
-	issueTracker   string
-	localIssuesDir string
-
-	jiraBaseURL         string
-	jiraProjectKey      string
-	jiraEmail           string
-	jiraToken           string
-	jiraStatusMapping   string
-	jiraIncludeComments bool
-
-	forgejoBaseURL string
-	forgejoToken   string
-
-	// researchVerdicts is the RESEARCH_VERDICTS knob: a JSON array
-	// overriding the built-in research verdict vocabulary and its
-	// terminal labels (ADR 0022). Consulted only when dispatchKind ==
-	// dispatchKindResearch; see researchVerdictLabels.
-	researchVerdicts string
-
-	// Transient-exit retry knobs
-	transientRetryMax    int
-	transientBackoffSecs int
-	holdJitterSecs       int
-
-	// overlapGate controls the declared-## Touches overlap check: "defer"
-	// holds a Dispatchable issue whose touch-set intersects an InProgress
-	// issue's, retrying once the collider completes; "off" disables the
-	// check entirely.
-	overlapGate string
-
-	// Merge gate polling knobs
-	mergePollInterval int
-	mergePollTimeout  int
-	maxFixAttempts    int
-	maxRebaseAttempts int
-
-	// maxBudgetTokens and maxBudgetUSD cap cumulative usage (issue #2001)
-	// before selfHealGate dispatches another fix pass; 0 means "no cap" for
-	// that dimension.
-	maxBudgetTokens int
-	maxBudgetUSD    float64
-
-	// preflightStaleBase opts into ADR 0026's proactive stale-base rebase:
-	// a green PR that is behind its base (no textual conflict) is rebased and
-	// re-greened before merging. Off by default — a green-but-behind PR
-	// merges as-is (ADR 0028).
-	preflightStaleBase bool
-
-	// Secrets / identity
-	ghToken          string
-	claudeOAuthToken string
-	anthropicAPIKey  string
-	// opencodeAuthContent carries the opencode Driver's github-copilot
-	// Provider credential (OAuth-only, ADR 0009 amendment #260): opencode
-	// reads it from OPENCODE_AUTH_CONTENT rather than an apiKey.
-	opencodeAuthContent string
-	gitUserName         string
-	gitUserEmail        string
-
-	// model mirrors the MODEL knob (Provider-namespaced, e.g.
-	// "github-copilot/claude-opus-4-8") so validate() can detect which
-	// Provider is selected under the opencode Driver.
-	model string
-
-	// ghTokenRefreshFile, when set, names a file the launcher polls for the
-	// remainder of the run, swapping its trimmed contents into GH_TOKEN
-	// whenever they change (issue #1027) — lets an external minter (e.g. a
-	// workflow step re-minting a GitHub App installation token) keep the
-	// launcher's credential fresh past the token's ~1h lifetime, without the
-	// App private key ever reaching the launcher itself.
-	ghTokenRefreshFile string
-
-	// Optional prompt override
-	spindriftPromptDir string
-	// Optional skills override
-	spindriftSkillsDir string
-
 	// In-box mount targets declared by the selected Driver (ADR 0009),
 	// nix-baked at wrap time. driverSessionCacheDir is empty when the
 	// Driver declares no session-state dir.
 	driverSkillsDir       string
 	driverSessionCacheDir string
 
-	// Network egress restriction knobs
-	podmanNetwork   string // optional --network value for podman run
-	bwrapUnshareNet bool   // when true, adds --unshare-net to bwrap
-
-	// OCI container resource / security caps
-	pidsLimit   string // --pids-limit value; empty omits the flag
-	memoryLimit string // --memory value; empty omits the flag
-
 	// Space-separated list of env var names to forward into each Box container.
 	// Set by the nix-rendered preamble from the schema's boxEnv=true entries so
 	// the Go source never needs to enumerate them by hand.
 	boxEnvVars string
-
-	// mergeMode controls post-green behavior: "immediate" merges the PR,
-	// "manual" leaves it open, "auto" enqueues GitHub's native auto-merge.
-	mergeMode string
-
-	// mergeGuardPaths is a comma-separated list of globs matched against every
-	// changed path in the PR; a hit downgrades the merge to manual regardless
-	// of mergeMode. Empty disables the guard.
-	mergeGuardPaths string
-
-	// mergeMethod maps to GitHub's native merge_method: "merge", "squash", or
-	// "rebase" (default). github Code Forge merge path only.
-	mergeMethod string
-
-	// syncMethod chooses how the github Code Forge brings a PR branch
-	// current with its base: "rebase" (default) or "merge". Governs both
-	// the preflight-stale-base bring-current and the reactive on-conflict
-	// resync.
-	syncMethod string
-
-	// codeForge selects the Code Forge adapter: "github" (open PR, watch CI,
-	// merge) or "git" (push-only to codeForgeRemoteURL; no PR, CI-watch, or
-	// merge gate).
-	codeForge string
-
-	// codeForgeRemoteURL is the plain git remote URL the Box clones from and
-	// pushes to when codeForge is "git". Unused (and unrequired) otherwise.
-	codeForgeRemoteURL string
-
-	// codeForgeAccumulationRepoDir is the host path to the bare Accumulation
-	// repo (ADR 0033) newCodeForge lands seams into when codeForge is
-	// "local". Unused (and unrequired) otherwise.
-	codeForgeAccumulationRepoDir string
-
-	// boxForgeAndIssueAccess selects whether the Box writes to the Code
-	// Forge and Issue Tracker directly ("read-write", the default) or the
-	// Launcher host-mediates every write instead ("read-only") — a third
-	// axis orthogonal to codeForge and issueTracker (issue #1914). Gated at
-	// startup by checkReadOnlyCapabilityGate: "read-only" is only permitted
-	// when the selected forge/tracker pair implements the host-mediation
-	// seams it requires.
-	boxForgeAndIssueAccess string
 
 	// dispatchKind is "work" (the default, zero value) or "research" (ADR
 	// 0022). Set once by bootstrap via applyDispatchKind, never read from
@@ -373,8 +229,15 @@ func gitIdentityField(env, gitConfigKey string) string {
 func loadConfig() config {
 	imageTag := getenvArtifact("IMAGE_TAG", "spindrift:latest")
 	image := getenvArtifact("IMAGE", imageTag)
-	codeForge := getenvSchema("CODE_FORGE")
+
+	sc := loadSchemaConfig()
+	sc.gitUserName = gitIdentityField("GIT_USER_NAME", "user.name")
+	sc.gitUserEmail = gitIdentityField("GIT_USER_EMAIL", "user.email")
+	sc.codeForgeAccumulationRepoDir = absCodeForgeAccumulationRepoDir(sc.codeForge, getenvSchema("CODE_FORGE_ACCUMULATION_REPO_DIR"))
+
 	return config{
+		schemaConfig: sc,
+
 		imageArchive:    getenvArtifact("IMAGE_ARCHIVE", ""),
 		imageTag:        imageTag,
 		imageDrv:        getenvArtifact("IMAGE_DRV", ""),
@@ -390,76 +253,10 @@ func loadConfig() config {
 		driver:          getenvArtifact("DRIVER", ""),
 		image:           image,
 
-		repoSlug:           getenvSchema("REPO_SLUG"),
-		label:              getenvSchema("LABEL"),
-		issueNumber:        os.Getenv("ISSUE_NUMBER"),
-		baseBranch:         getenvSchema("BASE_BRANCH"),
-		maxParallel:        atoiSchema("MAX_PARALLEL"),
-		branchPrefix:       getenvSchema("BRANCH_PREFIX"),
-		inProgressLabel:    getenvSchema("IN_PROGRESS_LABEL"),
-		failedLabel:        getenvSchema("FAILED_LABEL"),
-		completeLabel:      getenvSchema("COMPLETE_LABEL"),
-		maxJobs:            atoiNonnegSchema("MAX_JOBS"),
-		continuousDispatch: getenvSchema("CONTINUOUS_DISPATCH") != "",
-
-		issueTracker:        getenvSchema("ISSUE_TRACKER"),
-		localIssuesDir:      getenvSchema("LOCAL_ISSUES_DIR"),
-		jiraBaseURL:         getenvSchema("JIRA_BASE_URL"),
-		jiraProjectKey:      getenvSchema("JIRA_PROJECT_KEY"),
-		jiraEmail:           getenvSchema("JIRA_EMAIL"),
-		jiraToken:           os.Getenv("JIRA_TOKEN"),
-		jiraStatusMapping:   getenvSchema("JIRA_STATUS_MAPPING"),
-		jiraIncludeComments: getenvSchema("JIRA_INCLUDE_COMMENTS") != "",
-		forgejoBaseURL:      getenvSchema("FORGEJO_BASE_URL"),
-		forgejoToken:        os.Getenv("FORGEJO_TOKEN"),
-
-		researchVerdicts: getenvSchema("RESEARCH_VERDICTS"),
-
-		transientRetryMax:    atoiSchema("TRANSIENT_RETRY_MAX"),
-		transientBackoffSecs: atoiSchema("TRANSIENT_BACKOFF_SECS"),
-		holdJitterSecs:       atoiNonnegSchema("HOLD_JITTER_SECS"),
-
-		overlapGate: getenvSchema("OVERLAP_GATE"),
-
-		mergePollInterval:  atoiNonnegSchema("MERGE_POLL_INTERVAL"),
-		mergePollTimeout:   atoiNonnegSchema("MERGE_POLL_TIMEOUT"),
-		maxFixAttempts:     atoiNonnegSchema("MAX_FIX_ATTEMPTS"),
-		maxRebaseAttempts:  atoiNonnegSchema("MAX_REBASE_ATTEMPTS"),
-		maxBudgetTokens:    atoiNonnegSchema("MAX_BUDGET_TOKENS"),
-		maxBudgetUSD:       floatNonnegSchema("MAX_BUDGET_USD"),
-		preflightStaleBase: getenvSchema("PREFLIGHT_STALE_BASE") != "",
-
-		ghToken:             os.Getenv("GH_TOKEN"),
-		claudeOAuthToken:    os.Getenv("CLAUDE_CODE_OAUTH_TOKEN"),
-		anthropicAPIKey:     os.Getenv("ANTHROPIC_API_KEY"),
-		opencodeAuthContent: os.Getenv("OPENCODE_AUTH_CONTENT"),
-		model:               getenvSchema("MODEL"),
-		gitUserName:         gitIdentityField("GIT_USER_NAME", "user.name"),
-		gitUserEmail:        gitIdentityField("GIT_USER_EMAIL", "user.email"),
-		ghTokenRefreshFile:  getenvSchema("GH_TOKEN_REFRESH_FILE"),
-
-		spindriftPromptDir: getenvSchema("SPINDRIFT_PROMPT_DIR"),
-		spindriftSkillsDir: getenvSchema("SPINDRIFT_SKILLS_DIR"),
-
 		driverSkillsDir:       getenvArtifact("DRIVER_SKILLS_DIR", ""),
 		driverSessionCacheDir: getenvArtifact("DRIVER_SESSION_CACHE_DIR", ""),
 
-		podmanNetwork:   getenvSchema("PODMAN_NETWORK"),
-		bwrapUnshareNet: getenvSchema("BWRAP_UNSHARE_NET") != "",
-		pidsLimit:       getenvSchema("PIDS_LIMIT"),
-		memoryLimit:     getenvSchema("MEMORY_LIMIT"),
-
 		boxEnvVars: getenvArtifact("BOX_ENV_VARS", ""),
-
-		mergeMode:       getenvSchema("MERGE_MODE"),
-		mergeGuardPaths: getenvSchema("MERGE_GUARD_PATHS"),
-		mergeMethod:     getenvSchema("MERGE_METHOD"),
-		syncMethod:      getenvSchema("SYNC_METHOD"),
-
-		codeForge:                    codeForge,
-		codeForgeRemoteURL:           getenvSchema("CODE_FORGE_REMOTE_URL"),
-		codeForgeAccumulationRepoDir: absCodeForgeAccumulationRepoDir(codeForge, getenvSchema("CODE_FORGE_ACCUMULATION_REPO_DIR")),
-		boxForgeAndIssueAccess:       getenvSchema("BOX_FORGE_AND_ISSUE_ACCESS"),
 	}
 }
 
