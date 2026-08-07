@@ -1,12 +1,32 @@
 #!/usr/bin/env bats
-# Byte-parity harness (issue #2349 slice 6, extended by issue #2350, #2351,
-# #2352, and #2353): runs the SAME env through both agent/entrypoint.sh's
-# real bash phase_prompt_assembly (via $ENTRYPOINT and the fake driver/
-# driver-exec chain, tests/helper.bash's setup_entrypoint_env) and the new Go
-# `driver-exec assemble-prompt` verb (cmd/launcher/internal/promptassembly +
-# driver-exec/assembleprompt_cmd.go), and asserts the two produce equivalent
-# output across every Env cell promptassembly.Assemble covers. The
-# orchestrator-off cells 1-11 share the orchestrator off and every skill
+# Production-path golden harness (issue #2349 slice 6, extended by issue
+# #2350, #2351, #2352, #2353, and re-pointed at the production path by issue
+# #2354 slice 4): agent/entrypoint.sh's phase_prompt_assembly now shells out
+# to the real `driver-exec assemble-prompt` verb directly (ADR 0036) --
+# there is no separate bash-side rendering path left to diff against a
+# second, independently-built Go invocation. This suite instead runs
+# $ENTRYPOINT (via the fake driver/driver-exec chain,
+# tests/helper.bash's setup_entrypoint_env -- tests/fakes/driver-exec's own
+# `assemble-prompt` branch execs the real Go binary, not a bash
+# reimplementation) and diffs its own captured production artifacts
+# ($DRIVER_PROMPT_FILE, $DRIVER_AGENTS_FILE) against a checked-in golden
+# fixture under tests/testdata/prompt-assembly-golden/<cell-name>.{prompt.txt,
+# agents.json}, git-blame-friendly per cell. Session mode
+# (initial vs resume) is asserted against $DRIVER_LOG's own recorded --session-id/
+# --resume flags (tests/entrypoint-driver-session.bats's own convention), and
+# the three orchestrator-only Handoff facts (Invoker, ReviewPromptFile,
+# ReviewModel) are asserted against $ORCHESTRATOR_LOG's own recorded argv
+# (tests/entrypoint-orchestrator-handoff.bats's own convention) -- no second
+# Go call, no Go-side handoff JSON to read, anywhere in this file.
+#
+# Each golden fixture was captured from this branch's own already-verified
+# bash entrypoint output (every other slice of issue #2354 is green), not
+# hand-authored -- a full-text diff is a strictly stronger regression net
+# than hand-picked marker strings, catching any unintended byte change to the
+# rendered prompt or roster, not just the specific facts someone thought to
+# check.
+#
+# The orchestrator-off cells 1-11 share the orchestrator off and every skill
 # baked -- exactly tests/box_env_gen.bash's set_box_env schema-default cell,
 # plus setup_entrypoint_env's own BOX_WRITE_ENABLED=1 default -- and differ
 # only on three orthogonal axes:
@@ -47,26 +67,24 @@
 #   14. orchestrator on, skills-absent -- no skill baked at all, contrasting
 #       setup()'s unconditional 4-skill baking every other cell relies on.
 #
-# Every cell test funnels through the shared assert_cell_parity helper below,
-# so the prompt/agents/handoff comparison logic lives in exactly one place.
-#
-# Neither side is the reference for the other: this suite is a regression
-# net for the two representations drifting apart, not a source of truth for
-# either one's own correctness (that's tests/entrypoint-*.bats for the bash
-# side and cmd/launcher/internal/promptassembly/*_test.go for the Go side).
+# Every cell test funnels through the shared assert_cell_golden helper below,
+# so the prompt/agents/session-mode comparison logic lives in exactly one
+# place. This suite is not a source of truth for either representation's own
+# correctness -- that's tests/entrypoint-*.bats for the bash/production path
+# and cmd/launcher/internal/promptassembly/*_test.go for the Go package's own
+# unit coverage -- it is a regression net pinning the production path's own
+# byte-exact output per cell.
 
 load helper
 
 setup() {
   setup_entrypoint_env
-  : "${DRIVER_EXEC_BIN:?DRIVER_EXEC_BIN must be set (the real driver-exec Go binary, nix/checks/promptassembly.nix)}"
-  : "${PROMPTASSEMBLY_REGISTRY_FILE:?PROMPTASSEMBLY_REGISTRY_FILE must be set (lib/fragments.nix rendered to JSON, nix/checks/promptassembly.nix)}"
 
   # BRANCH is computed inside entrypoint.sh's main (BRANCH="${BRANCH_PREFIX:-}${ISSUE_NUMBER}",
-  # entrypoint.sh:55), not exported by set_box_env/setup_entrypoint_env --
-  # reproduce the same computation here so the Go side's --branch flag
-  # matches what the bash side derives at runtime.
-  BRANCH="${BRANCH_PREFIX:-}${ISSUE_NUMBER}"
+  # entrypoint.sh:55), not exported by set_box_env/setup_entrypoint_env, but
+  # nothing here needs to reproduce that computation anymore -- $ENTRYPOINT
+  # derives it itself now that there's no second, independently-built Go
+  # invocation to hand a --branch flag to.
 
   # Bake all four skills (entrypoint-prompt-fragments.bats:660-730's pattern):
   # the covered cell requires every per-skill gate on and a non-empty
@@ -108,109 +126,72 @@ Two-axis review: Standards + Spec.
 SKILL
 }
 
-# assemble_go: invokes the real driver-exec assemble-prompt verb with every
-# flag mapped from this test's own exported env, writing its three outputs
-# under $BATS_TEST_TMPDIR. Extra args (e.g. --resume-after-hold or
-# --agents-json-template) are appended after the fixed flag set.
-#
-# PARITY_SKILLS_BAKED gates the four --*-skill-baked bool flags and the
-# non-empty --skills-found value below. Left unset (or "1"), every existing
-# cell gets today's unchanged behavior: all four skills baked. Go's flag
-# package has no "--no-caveman-skill-baked" form to un-set a bool flag once
-# passed (unlike a string flag's value, which "$@" can override last-wins),
-# so the skills-absent cell can't turn these off by appending an override --
-# instead, a caller exports PARITY_SKILLS_BAKED=0 before calling, and this
-# function omits the flags entirely, leaving every one at the CLI's own
-# false/"" default.
-assemble_go() {
-  local skill_flags=()
-  if [ "${PARITY_SKILLS_BAKED:-1}" = "1" ]; then
-    skill_flags=(
-      --caveman-skill-baked
-      --tdd-skill-baked
-      --commit-skill-baked
-      --code-review-skill-baked
-      --skills-found "caveman, code-review, commit, tdd"
-    )
-  fi
+GOLDEN_DIR="${BATS_TEST_DIRNAME}/testdata/prompt-assembly-golden"
 
-  run "$DRIVER_EXEC_BIN" assemble-prompt \
-    --registry "$PROMPTASSEMBLY_REGISTRY_FILE" \
-    --prompt-output "$BATS_TEST_TMPDIR/go-prompt.txt" \
-    --agents-json-output "$BATS_TEST_TMPDIR/go-agents.json" \
-    --handoff-output "$BATS_TEST_TMPDIR/go-handoff.json" \
-    "${skill_flags[@]}" \
-    --issue-tracker "$ISSUE_TRACKER" \
-    --box-write-enabled \
-    --code-forge "$CODE_FORGE" \
-    --prompts-dir "$PROMPTS_DIR" \
-    --agents-prompt-files "$AGENTS_PROMPT_FILES" \
-    --comms-contract-file "$COMMS_CONTRACT_FILE" \
-    --check-contract-file "$CHECK_CONTRACT_FILE" \
-    --outcome-contract-file "$OUTCOME_CONTRACT_FILE" \
-    --research-outcome-contract-file "$RESEARCH_OUTCOME_CONTRACT_FILE" \
-    --issue-number "$ISSUE_NUMBER" \
-    --issue-title "$ISSUE_TITLE" \
-    --branch "$BRANCH" \
-    --base-branch "$BASE_BRANCH" \
-    --in-progress-label "$IN_PROGRESS_LABEL" \
-    --complete-label "$COMPLETE_LABEL" \
-    --run-nonce "$RUN_NONCE" \
-    "$@"
-}
-
-# assert_cell_parity: runs the bash entrypoint and the Go assemble-prompt
-# verb over whatever env the calling test has already exported, then asserts
-# three-way parity: byte-identical prompt, byte-identical agents JSON (or
-# both sides agreeing the roster is empty), and a handoff whose SessionMode
-# matches the cell's expected value. Every extra arg after the expected
-# session mode is forwarded to assemble_go (e.g. --dispatch-kind research).
-assert_cell_parity() {
-  local expected_session_mode="$1"
-  shift
+# assert_cell_golden: runs the real bash entrypoint over whatever env the
+# calling test has already exported, then asserts its own captured
+# production artifacts against a checked-in golden fixture: byte-identical
+# prompt ($DRIVER_PROMPT_FILE vs <golden_name>.prompt.txt), byte-identical
+# agents JSON when a roster was rendered ($DRIVER_AGENTS_FILE vs
+# <golden_name>.agents.json, both canonicalized via `jq -S` first), and a
+# session mode that matches the cell's expected value -- read from
+# $DRIVER_LOG's own recorded Driver invocation flags, not a second Go
+# handoff file: _driver_session_flags (lib/drivers/claude.nix) always emits
+# --session-id on the "initial" arm and never emits --session-id on the
+# "resume" arm (it emits --resume only when a prior session transcript
+# happens to be present under $HOME/.claude/projects, which no cell here
+# seeds -- tests/entrypoint-driver-session.bats's "fix pass with no prior
+# session data falls back with no --resume flag" test already covers that
+# fallback in detail), so --session-id's presence/absence alone
+# distinguishes the two arms cleanly regardless of prior-session state.
+assert_cell_golden() {
+  local golden_name="$1" expected_session_mode="$2"
 
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
 
-  assemble_go "$@"
-  [ "$status" -eq 0 ]
-
-  diff "$DRIVER_PROMPT_FILE" "$BATS_TEST_TMPDIR/go-prompt.txt"
+  diff "$GOLDEN_DIR/${golden_name}.prompt.txt" "$DRIVER_PROMPT_FILE"
 
   if [ -s "$DRIVER_AGENTS_FILE" ]; then
-    [ -s "$BATS_TEST_TMPDIR/go-agents.json" ]
-    diff <(jq -S . "$DRIVER_AGENTS_FILE") <(jq -S . "$BATS_TEST_TMPDIR/go-agents.json")
+    diff <(jq -S . "$GOLDEN_DIR/${golden_name}.agents.json") <(jq -S . "$DRIVER_AGENTS_FILE")
   else
-    [ ! -s "$BATS_TEST_TMPDIR/go-agents.json" ]
+    [ ! -s "$DRIVER_AGENTS_FILE" ]
   fi
 
-  jq -e --arg m "$expected_session_mode" '.SessionMode == $m' "$BATS_TEST_TMPDIR/go-handoff.json"
+  case "$expected_session_mode" in
+    initial)
+      grep -qE -- '--session-id [0-9a-f-]+' "$DRIVER_LOG"
+      ;;
+    resume)
+      ! grep -qE -- '--session-id [0-9a-f-]+' "$DRIVER_LOG"
+      ;;
+    *)
+      echo "assert_cell_golden: unknown expected_session_mode '$expected_session_mode'" >&2
+      return 1
+      ;;
+  esac
 }
 
-# assert_review_handoff_parity: for the orchestrator-on cells (issue #2353),
-# asserts the Handoff facts assert_cell_parity's own prompt/agents-JSON/
-# SessionMode checks don't cover -- Invoker, ReviewPromptFile, and
-# ReviewModel, all only ever populated with the orchestrator on. ReviewModel
-# is a genuine byte-exact parity assertion: both sides recover the same
-# short literal model name (bash from $ORCHESTRATOR_LOG's recorded argv, Go
-# from its own handoff JSON). ReviewPromptFile can only be asserted non-empty
-# on both sides -- run_driver_in_env writes and deletes its temp file
-# entirely inside a single phase downstream of phase_prompt_assembly, so its
-# content is already gone by the time bats inspects anything (the same
-# constraint entrypoint-orchestrator-handoff.bats's own
-# "--review-prompt-file carrying a real path" test documents).
-assert_review_handoff_parity() {
-  jq -e '.Invoker == "orchestrator"' "$BATS_TEST_TMPDIR/go-handoff.json"
-  jq -e '.ReviewPromptFile != ""' "$BATS_TEST_TMPDIR/go-handoff.json"
-
+# assert_review_handoff_golden: for the orchestrator-on cells (issue #2353),
+# asserts the Handoff facts assert_cell_golden's own prompt/agents-JSON/
+# session-mode checks don't cover -- Invoker, ReviewPromptFile, and
+# ReviewModel, all only ever populated with the orchestrator on -- against
+# $ORCHESTRATOR_LOG's own recorded argv (the fake orchestrator echoes its raw
+# argv there, issue #1996), the same convention
+# tests/entrypoint-orchestrator-handoff.bats already uses. A non-empty
+# $ORCHESTRATOR_LOG is itself proof the orchestrator (not driver-exec) was
+# the invoker for this pass. ReviewModel is asserted as the literal "haiku"
+# -- both AGENTS_ROSTER and AGENTS_ROSTER_WITH_FILER below configure the
+# reviewer's model as "haiku", so this is a genuine byte-exact production
+# assertion, not a hand-picked marker.
+assert_review_handoff_golden() {
+  [ -s "$ORCHESTRATOR_LOG" ]
   grep -q -- '--review-prompt-file' "$ORCHESTRATOR_LOG"
-  local bash_review_prompt_file
-  bash_review_prompt_file="$(grep -oE -- '--review-prompt-file [^ ]+' "$ORCHESTRATOR_LOG" | awk '{print $2}')"
-  [ -n "$bash_review_prompt_file" ]
+  local review_prompt_file
+  review_prompt_file="$(grep -oE -- '--review-prompt-file [^ ]+' "$ORCHESTRATOR_LOG" | awk '{print $2}')"
+  [ -n "$review_prompt_file" ]
 
-  local bash_review_model
-  bash_review_model="$(grep -oE -- '--review-model [^ ]+' "$ORCHESTRATOR_LOG" | awk '{print $2}')"
-  [ "$bash_review_model" = "$(jq -r '.ReviewModel' "$BATS_TEST_TMPDIR/go-handoff.json")" ]
+  grep -q -- '--review-model haiku' "$ORCHESTRATOR_LOG"
 }
 
 # issue #2349: a realistic multi-agent roster -- scout, reviewer (present, not
@@ -228,61 +209,59 @@ AGENTS_ROSTER='{"scout":{"description":"Map relevant files, seams, and tests; re
 # AGENTS_ROSTER alone (the filer-off cell's roster).
 AGENTS_ROSTER_WITH_FILER='{"scout":{"description":"Map relevant files, seams, and tests; return a structured brief","model":"opus","prompt":"","tools":["Read","Bash","WebFetch","WebSearch","Glob","Grep"]},"reviewer":{"description":"Review the branch diff for spec compliance and coding standards","model":"haiku","prompt":"","tools":["Read","Bash","WebFetch"]},"worker":{"description":"Implement a scoped slice of work delegated to it","model":"sonnet","prompt":"","tools":["Read","Bash","Edit","Write","Glob","Grep","WebFetch"]},"filer":{"description":"File issues from a review'"'"'s non-blocking findings, best-effort","model":"haiku","prompt":"","tools":["Read","Bash","WebFetch"]}}'
 
-@test "bash and Go agree byte-for-byte on prompt/agents/handoff for the covered cell, with a populated roster" {
+@test "production path matches the golden fixture for the covered cell, with a populated roster" {
   export AGENTS_JSON_TEMPLATE="$AGENTS_ROSTER"
 
-  assert_cell_parity initial --agents-json-template "$AGENTS_JSON_TEMPLATE"
+  assert_cell_golden "covered-cell-populated-roster" initial
 
   # Structurally guaranteed by the covered cell, not reverse-engineered from
   # the bash fake's capture files (entrypoint.sh:1282-1310): the orchestrator
-  # gate is off, so the invoker is always "driver-exec" and both
-  # orchestrator-only review fields always stay empty.
-  jq -e '.Invoker == "driver-exec"' "$BATS_TEST_TMPDIR/go-handoff.json"
-  jq -e '.ReviewPromptFile == ""' "$BATS_TEST_TMPDIR/go-handoff.json"
-  jq -e '.ReviewModel == ""' "$BATS_TEST_TMPDIR/go-handoff.json"
+  # gate is off, so the invoker is always "driver-exec" and the orchestrator
+  # is never invoked at all.
+  [ ! -s "$ORCHESTRATOR_LOG" ]
 }
 
-@test "bash and Go agree on omitting the agents flag entirely with no roster" {
-  # AGENTS_JSON_TEMPLATE deliberately left unset: proves parity on the
-  # "omit the --agents flag/output stays empty" branch, not just the
-  # populated-roster branch above.
+@test "production path matches the golden fixture for omitting the agents flag entirely with no roster" {
+  # AGENTS_JSON_TEMPLATE deliberately left unset: proves the "omit the
+  # --agents flag/output stays empty" branch, not just the populated-roster
+  # branch above.
   unset AGENTS_JSON_TEMPLATE
 
-  assert_cell_parity initial
+  assert_cell_golden "no-roster" initial
 }
 
-@test "bash and Go agree byte-for-byte on prompt/agents/handoff for the research cell" {
+@test "production path matches the golden fixture for the research cell" {
   # AGENTS_JSON_TEMPLATE deliberately left unset: this cell is about the
   # prompt-selection/session-mode axis, not roster interaction, which the
   # two tests above already cover independently.
   export DISPATCH_KIND="research"
 
-  assert_cell_parity initial --dispatch-kind research
+  assert_cell_golden "research" initial
 }
 
-@test "bash and Go agree byte-for-byte on prompt/agents/handoff for the self-contained research cell" {
+@test "production path matches the golden fixture for the self-contained research cell" {
   export DISPATCH_KIND="research"
   export SELF_CONTAINED="1"
 
-  assert_cell_parity initial --dispatch-kind research --self-contained
+  assert_cell_golden "self-contained-research" initial
 }
 
-@test "bash and Go agree byte-for-byte on prompt/agents/handoff for the fix-pass cell" {
+@test "production path matches the golden fixture for the fix-pass cell" {
   export FIX_PASS="1"
 
-  assert_cell_parity resume --fix-pass 1
+  assert_cell_golden "fix-pass" resume
 }
 
-@test "bash and Go agree byte-for-byte on prompt/agents/handoff for the github read-only cell" {
+@test "production path matches the golden fixture for the github read-only cell" {
   # AGENTS_JSON_TEMPLATE deliberately left unset: this cell is about the
   # access/forge axis, not roster interaction, which the two tests at the
   # top of this file already cover independently.
   unset BOX_WRITE_ENABLED
 
-  assert_cell_parity initial --box-write-enabled=false
+  assert_cell_golden "github-read-only" initial
 }
 
-@test "bash and Go agree byte-for-byte on prompt/agents/handoff for the forgejo read-write cell" {
+@test "production path matches the golden fixture for the forgejo read-write cell" {
   # AGENTS_JSON_TEMPLATE deliberately left unset, same reasoning as above.
   # BOX_WRITE_ENABLED stays at setup_entrypoint_env's read-write default, so
   # no extra flag override is needed here.
@@ -295,10 +274,10 @@ AGENTS_ROSTER_WITH_FILER='{"scout":{"description":"Map relevant files, seams, an
   # tests/entrypoint-prompt-assembly.bats's CODE_FORGE=forgejo fix-pass test).
   git config --global "url.file://$REMOTE_ROOT/.insteadOf" "https://fjtok@forge.test/"
 
-  assert_cell_parity initial
+  assert_cell_golden "forgejo-read-write" initial
 }
 
-@test "bash and Go agree byte-for-byte on prompt/agents/handoff for the forgejo read-only cell" {
+@test "production path matches the golden fixture for the forgejo read-only cell" {
   # AGENTS_JSON_TEMPLATE deliberately left unset, same reasoning as above.
   export CODE_FORGE="forgejo"
   export FORGEJO_BASE_URL="https://forge.test"
@@ -310,87 +289,74 @@ AGENTS_ROSTER_WITH_FILER='{"scout":{"description":"Map relevant files, seams, an
   # tests/entrypoint-prompt-assembly.bats's CODE_FORGE=forgejo fix-pass test).
   git config --global "url.file://$REMOTE_ROOT/.insteadOf" "https://fjtok@forge.test/"
 
-  assert_cell_parity initial --box-write-enabled=false
+  assert_cell_golden "forgejo-read-only" initial
 }
 
-@test "RESUME_AFTER_HOLD flips the Go side's session mode to resume" {
-  # The bash side's RESUME_AFTER_HOLD behavior is already covered by
-  # tests/entrypoint-driver-session.bats ("RESUME_AFTER_HOLD resumes the
-  # pinned session on the work path") -- re-running $ENTRYPOINT here would
-  # not add coverage this suite doesn't already get from the primary case
-  # above, so this asserts the Go side alone.
-  export AGENTS_JSON_TEMPLATE="$AGENTS_ROSTER"
-  assemble_go --agents-json-template "$AGENTS_JSON_TEMPLATE" --resume-after-hold
-  [ "$status" -eq 0 ]
-  jq -e '.SessionMode == "resume"' "$BATS_TEST_TMPDIR/go-handoff.json"
-}
-
-@test "bash and Go agree byte-for-byte on prompt/agents/handoff for the local tracker cell, no issue reference" {
+@test "production path matches the golden fixture for the local tracker cell, no issue reference" {
   # AGENTS_JSON_TEMPLATE deliberately left unset: this cell is about the
   # tracker axis, not roster interaction, which the two dispatch-kind cells
   # above already cover independently. SessionMode stays "initial" --
   # ISSUE_TRACKER is orthogonal to dispatch kind/fix-pass.
   export ISSUE_TRACKER="local"
 
-  assert_cell_parity initial
+  assert_cell_golden "local-tracker-no-issue-ref" initial
 }
 
-@test "bash and Go agree byte-for-byte on prompt/agents/handoff for the local tracker cell, issue reference on" {
+@test "production path matches the golden fixture for the local tracker cell, issue reference on" {
   export ISSUE_TRACKER="local"
   export LOCAL_ISSUE_REFERENCE="1"
 
-  assert_cell_parity initial --local-issue-reference
+  assert_cell_golden "local-tracker-issue-ref-on" initial
 }
 
-@test "bash and Go agree byte-for-byte on prompt/agents/handoff for the forgejo tracker cell" {
+@test "production path matches the golden fixture for the forgejo tracker cell" {
   export ISSUE_TRACKER="forgejo"
 
-  assert_cell_parity initial
+  assert_cell_golden "forgejo-tracker" initial
 }
 
-@test "bash and Go agree byte-for-byte on prompt/agents/handoff for the jira tracker cell" {
+@test "production path matches the golden fixture for the jira tracker cell" {
   # jira rides the same prompt-selection arms as github (assemble.go's
   # checkCoveredCell). The Go side's byte-identity between jira and github
   # is already pinned by a Go unit test in
   # cmd/launcher/internal/promptassembly; this cell additionally proves the
-  # BASH side renders jira through that same github arm, so parity holds at
-  # the bash/Go boundary too, not just within the Go package.
+  # production BASH path renders jira through that same github arm, not just
+  # within the Go package.
   export ISSUE_TRACKER="jira"
 
-  assert_cell_parity initial
+  assert_cell_golden "jira-tracker" initial
 }
 
 # issue #2353: three orchestrator-on cells (dispatch kind "work", FIX_PASS
 # unset -- the only orchestrator-on path checkCoveredCell covers). Unlike
 # cells 1-4 above, ORCHESTRATOR_ENABLED must be exported so the bash side
 # takes run_driver_in_env's orchestrator invocation path (entrypoint.sh:
-# 1282-1286, tests/entrypoint-orchestrator-handoff.bats), and
-# --orchestrator-enabled forwarded to assemble_go so the Go side matches.
+# 1282-1286, tests/entrypoint-orchestrator-handoff.bats).
 
-@test "bash and Go agree byte-for-byte on prompt/agents/handoff for the orchestrator-on filer-on cell" {
+@test "production path matches the golden fixture for the orchestrator-on filer-on cell" {
   export ORCHESTRATOR_ENABLED=1
   export AGENTS_JSON_TEMPLATE="$AGENTS_ROSTER_WITH_FILER"
 
-  assert_cell_parity initial --orchestrator-enabled --agents-json-template "$AGENTS_JSON_TEMPLATE"
+  assert_cell_golden "orchestrator-filer-on" initial
 
-  assert_review_handoff_parity
+  assert_review_handoff_golden
 }
 
-@test "bash and Go agree byte-for-byte on prompt/agents/handoff for the orchestrator-on filer-off cell" {
+@test "production path matches the golden fixture for the orchestrator-on filer-off cell" {
   export ORCHESTRATOR_ENABLED=1
   # AGENTS_ROSTER (not the _WITH_FILER variant above): scout+reviewer, no
   # "filer" key -- the FILER_ENABLED-off half of the roster axis. Reviewer is
   # present in both filer-on and filer-off (filer-on/off forks only on
   # whether "filer" itself is in the roster), so both cells assert
-  # ReviewModel parity the same way via assert_review_handoff_parity.
+  # ReviewModel the same way via assert_review_handoff_golden.
   export AGENTS_JSON_TEMPLATE="$AGENTS_ROSTER"
 
-  assert_cell_parity initial --orchestrator-enabled --agents-json-template "$AGENTS_JSON_TEMPLATE"
+  assert_cell_golden "orchestrator-filer-off" initial
 
-  assert_review_handoff_parity
+  assert_review_handoff_golden
 }
 
-@test "bash and Go agree byte-for-byte on prompt/agents/handoff for the orchestrator-on skills-absent cell" {
+@test "production path matches the golden fixture for the orchestrator-on skills-absent cell" {
   export ORCHESTRATOR_ENABLED=1
   export AGENTS_JSON_TEMPLATE="$AGENTS_ROSTER"
 
@@ -398,12 +364,10 @@ AGENTS_ROSTER_WITH_FILER='{"scout":{"description":"Map relevant files, seams, an
   # "SkillsFound == "" and every *SkillBaked flag false" branch
   # checkCoveredCell also covers. Remove the skill dirs setup() just baked
   # under $HOME (rather than restructuring setup() itself, which every other
-  # cell in this suite still relies on baking unconditionally), and tell
-  # assemble_go to omit its own skill-baked flags/value the same way.
+  # cell in this suite still relies on baking unconditionally).
   rm -rf "$HOME/.claude/skills"
-  export PARITY_SKILLS_BAKED=0
 
-  assert_cell_parity initial --orchestrator-enabled --agents-json-template "$AGENTS_JSON_TEMPLATE"
+  assert_cell_golden "orchestrator-skills-absent" initial
 
-  assert_review_handoff_parity
+  assert_review_handoff_golden
 }
