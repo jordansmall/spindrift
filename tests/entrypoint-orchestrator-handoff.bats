@@ -135,3 +135,27 @@ setup() {
   [ "$status" -eq 0 ]
   ! grep -q -- '--review-model' "$ORCHESTRATOR_LOG"
 }
+
+# Issue #2390: REVIEW_EFFORT threads through to the orchestrator's own
+# --review-effort flag, mirroring EFFORT -> --effort above. Unlike
+# review_model/review_prompt, REVIEW_EFFORT has no Handoff descriptor field --
+# it comes straight off the environment, so it's set here as a plain exported
+# var rather than via AGENTS_JSON_TEMPLATE/handoff_json.
+@test "orchestrator path forwards REVIEW_EFFORT to the orchestrator as --review-effort" {
+  export ORCHESTRATOR_ENABLED=1
+  export REVIEW_EFFORT="high"
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -q -- '--review-effort high' "$ORCHESTRATOR_LOG"
+}
+
+# Without REVIEW_EFFORT set, there's nothing to override the orchestrator's
+# own default review effort with -- entrypoint.sh must omit --review-effort
+# entirely rather than pass it empty, mirroring the --review-model omit test
+# above.
+@test "orchestrator path omits --review-effort when REVIEW_EFFORT is not set" {
+  export ORCHESTRATOR_ENABLED=1
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  ! grep -q -- '--review-effort' "$ORCHESTRATOR_LOG"
+}
