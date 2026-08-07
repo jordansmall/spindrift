@@ -12,7 +12,9 @@
 # already-exists stderr (relay.go's CreateDraftPR matches "already exists"),
 # and pr-list/pr-view resolve that head's already-open PR -- the
 # host-mediation contract's DraftPRCreationAdoptsExisting scenario (issue
-# #2407 slice 3).
+# #2407 slice 3). pr-view reports isDraft=true for that adopted PR's URL
+# specifically (matching CreateDraftPR's own `gh pr create --draft` output)
+# and isDraft=false for every other PR view.
 
 case "$1-$2" in
 repo-clone)
@@ -42,7 +44,15 @@ pr-list)
 	printf 'https://github.com/owner/repo/pull/2407\n'
 	;;
 pr-view)
-	printf 'false\n'
+	url="$3"
+	if [ "$url" = "https://github.com/owner/repo/pull/2407" ]; then
+		# The adopted PR from the "agent/issue-2407-adopt" scenario: github's
+		# own CreateDraftPR always runs `gh pr create --draft`, so a leftover
+		# adopted PR is always a draft too.
+		printf 'true\n'
+	else
+		printf 'false\n'
+	fi
 	;;
 issue-comment)
 	num="$3"
