@@ -139,7 +139,7 @@ type Settler interface {
 // never touches the Code Forge, so ResearchSettle never needs it.
 type WorkSettler interface {
 	// SettleAdopted runs the same merge gate as Settle, for an
-	// already-discovered open non-draft PR with no outcome line (the
+	// already-discovered open PR (draft or not) with no outcome line (the
 	// reconcile/recover entry point). gen is as in Settle.
 	SettleAdopted(d dispatch.Dispatcher, num string, gen uint64, prURL string)
 

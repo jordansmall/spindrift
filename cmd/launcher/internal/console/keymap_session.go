@@ -12,7 +12,7 @@ var sessionBindings = []Binding{
 		Keys: []string{"A"}, Modes: []Mode{ModeList},
 		Help: "  A           adopt the highlighted orphan-flagged Backlog row (a\n" +
 			"              running sandbox this session didn't launch); reports\n" +
-			"              why and changes nothing without a non-draft open PR",
+			"              why and changes nothing without an open PR",
 		Action: func(t teaModel, msg tea.KeyMsg, mode Mode) (teaModel, tea.Cmd) {
 			if t.m.ActiveSection == SectionBacklog && t.launch != nil && t.launch.RecoverFn != nil {
 				if iss, ok := t.highlightedIssue(); ok && t.m.IsOrphan(iss.Number) && !t.m.IsAdoptingOrphan(iss.Number) {
