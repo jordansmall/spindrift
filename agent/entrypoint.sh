@@ -500,11 +500,14 @@ _validate_marker_row() {
 # is only ever advisory, never fatal.
 #
 # Reuses the same local gate variables (ORCHESTRATOR, BOX_ACCESS_READ_ONLY,
-# FILER_FILE_RELAY, review_prompt_rendered, prompt, agents_json)
-# phase_prompt_assembly already computed to decide what to render, rather
-# than re-deriving the gating condition from raw env vars -- the actual
-# source of truth for what got rendered, so this can never silently drift
-# from the real fragment-gating logic (see brief for #2249).
+# FILER_FILE_RELAY, _handoff, prompt, agents_json) phase_prompt_assembly
+# already computed to decide what to render, rather than re-deriving the
+# gating condition from raw env vars -- the actual source of truth for what
+# got rendered, so this can never silently drift from the real
+# fragment-gating logic (see brief for #2249). The orchestratorEnabled row
+# below reads its review-prompt haystack straight off $_handoff's own
+# ReviewPromptFile field (issue #2355) rather than a separately-extracted
+# review_prompt_rendered sentinel.
 #
 # Dispatches on each row's `when` field (pipe position 5) to decide whether
 # its gate is active and which rendered text to scan, then on its `severity`
@@ -536,20 +539,22 @@ _validate_prompt_contract() {
         _msg="_validate_prompt_contract: read-only research dispatch's rendered prompt is missing the required '$_marker' marker -- this belongs in research-prompt.md's (or a SPINDRIFT_PROMPT_DIR override's) POST THE VERDICT section; without it a read-only Box has no way to hand its verdict to the launcher. Refusing to invoke the Driver."
         ;;
       orchestratorEnabled)
-        # review_prompt_rendered is only non-empty for a fresh, non-research,
-        # non-FIX_PASS dispatch with the orchestrator on -- exactly the case
-        # where a missing VERDICT: line would leave the multi-pass review
-        # loop with nothing to gate on. Orchestrator off, or
-        # review_prompt_rendered empty (research/FIX_PASS dispatch), is
+        # $_handoff's ReviewPromptFile field (misleadingly named -- it
+        # actually carries the rendered review-prompt.md text, not a path;
+        # see assemble.go's Handoff doc comment) is only non-empty for a
+        # fresh, non-research, non-FIX_PASS dispatch with the orchestrator on
+        # -- exactly the case where a missing VERDICT: line would leave the
+        # multi-pass review loop with nothing to gate on. Orchestrator off,
+        # or ReviewPromptFile empty (research/FIX_PASS dispatch), is
         # correctly a no-op here: the inline reviewer-subagent loop (or the
         # research/fix pass's own contract) governs verdict-gating instead
         # (orchestrator-fork-well-formed, issue #2047).
-        if [ -n "$ORCHESTRATOR" ] && [ -n "$review_prompt_rendered" ]; then
+        _haystack="$(printf '%s' "$_handoff" | jq -r '.ReviewPromptFile // empty')"
+        if [ -n "$ORCHESTRATOR" ] && [ -n "$_haystack" ]; then
           _gate=1
         else
           _gate=0
         fi
-        _haystack="$review_prompt_rendered"
         _msg="_validate_prompt_contract: the orchestrator's rendered review prompt is missing the required '$_marker' marker -- this belongs in review-prompt.md's (or a SPINDRIFT_PROMPT_DIR override's) verdict line; without it the code-owned review loop has nothing to gate on. Refusing to invoke the Driver."
         ;;
       boxAccessReadOnly)
@@ -632,7 +637,7 @@ phase_conflict_resolve() {
     # this pass ran outside the devShell before the two invocations were
     # unified, and stays there — only the main run enters it.
     local _use_dev_shell=0
-    run_driver_in_env "$_cr_prompt" "" "" || true
+    run_driver_in_env "$_cr_prompt" "" "" "" || true
     if [ -d ".git/rebase-merge" ] || [ -d ".git/rebase-apply" ]; then
       git rebase --abort 2>/dev/null || true
       echo "==> pre-work rebase onto origin/${BASE_BRANCH:-} failed — conflict agent could not resolve"
@@ -670,8 +675,12 @@ phase_conflict_resolve() {
 # phase_conflict_resolve now runs from main(), before this function is ever
 # called (issue #2354 slice 3), so its early exits skip the verb call
 # entirely rather than discarding its output. This function still sets
-# prompt, _driver_session_mode, agents_json, review_prompt_rendered, and
-# review_model_rendered, all read by run_driver_in_env in main.
+# prompt, agents_json, and _handoff (the raw Handoff descriptor JSON) --
+# run_driver_in_env and required_marker_gate's corrective resume now read
+# session mode/invoker/review-prompt/review-model straight off $_handoff at
+# their own call sites instead of from separately-extracted sentinels (issue
+# #2355 drained _driver_session_mode/review_prompt_rendered/
+# review_model_rendered onto the descriptor itself).
 phase_prompt_assembly() {
   # Discover available skills at DRIVER_SKILLS_DIR and build a directive to
   # prefer them over the inline guidance where they apply -- filesystem I/O
@@ -729,10 +738,14 @@ phase_prompt_assembly() {
   # orchestrator-fork-well-formed check (nix/checks/prompts.nix) pins exactly
   # one raw ORCHESTRATOR_ENABLED test in this file (main's own early
   # computation); every fork downstream, this one included, reads that one
-  # computed gate instead. Still the value the Handoff-based reassignment
-  # below (line ~779) is about to overwrite for the *next* pass
-  # (run_driver_in_env's own invoker fork) -- this flag only ever needs the
-  # value as of the verb call, which is identical either way.
+  # computed gate instead. This call happens before the driver-exec
+  # assemble-prompt verb runs, so no Handoff exists yet to read Invoker from
+  # regardless -- and unlike before issue #2355, nothing downstream ever
+  # reassigns $ORCHESTRATOR from the resulting Handoff either: the two are
+  # always mathematically identical, so main's one early computation is
+  # $ORCHESTRATOR's value for this entire run, read as-is by every consumer
+  # (this flag, the FILER_FILE_RELAY/_validate_prompt_contract gates below,
+  # and run_driver_in_env's own pre-Handoff conflict-resolve fallback).
   [ -n "$ORCHESTRATOR" ] && _ap_args+=(--orchestrator-enabled)
   [ -n "${BOX_WRITE_ENABLED:-}" ] && _ap_args+=(--box-write-enabled)
   [ -n "${LOCAL_ISSUE_REFERENCE:-}" ] && _ap_args+=(--local-issue-reference)
@@ -766,27 +779,26 @@ phase_prompt_assembly() {
   # `$(printf ... | jq ...)` chains did, so this stays byte-identical.
   prompt="$(cat "$_prompt_out")"
   agents_json="$(cat "$_agents_out")"
-  local _handoff
+  # _handoff is assigned here by plain (non-local) assignment, not `local`,
+  # so it escapes to run_driver_in_env and required_marker_gate via main's
+  # cross-phase sentinel -- the same dynamic-scoping shape _use_dev_shell
+  # already uses (issue #515) -- since those callers run outside this
+  # function's own call frame. Issue #2355 drains run_driver_in_env's
+  # session-mode/invoker/review-prompt/review-model derivation onto this raw
+  # descriptor directly, read at each call site, rather than pre-extracting
+  # each field into its own cross-phase sentinel (_driver_session_mode/
+  # review_prompt_rendered/review_model_rendered, all retired). ORCHESTRATOR
+  # (issue #2047, ADR 0035 amendment) is the one exception, deliberately left
+  # untouched here: main's own early computation (just above
+  # phase_conflict_resolve's call) already holds the correct value for this
+  # entire run -- Handoff.Invoker == "orchestrator" iff ORCHESTRATOR_ENABLED
+  # is set (gates.go's g["ORCHESTRATOR"] = e.OrchestratorEnabled), so a
+  # second, Handoff-sourced reassignment here would just be a
+  # mathematically-identical no-op, and the orchestrator-fork-well-formed
+  # check (nix/checks/prompts.nix) pins exactly one raw ORCHESTRATOR_ENABLED
+  # test in this file for that one early computation to be it.
   _handoff="$(cat "$_handoff_out")"
   rm -f "$_prompt_out" "$_agents_out" "$_handoff_out"
-
-  _driver_session_mode="$(printf '%s' "$_handoff" | jq -r '.SessionMode')"
-  review_prompt_rendered="$(printf '%s' "$_handoff" | jq -r '.ReviewPromptFile // empty')"
-  review_model_rendered="$(printf '%s' "$_handoff" | jq -r '.ReviewModel // empty')"
-
-  # ORCHESTRATOR (issue #2047, ADR 0035 amendment; issue #2354 moves its
-  # source to the verb's own Handoff.Invoker field, spec #2347 story 6): the
-  # single canonical master-switch gate run_driver_in_env's driver-invoker
-  # binary swap reads. Assigned here by plain (non-local) assignment, not
-  # `local`, so it escapes to run_driver_in_env via main's cross-phase
-  # sentinel -- the same dynamic-scoping shape _use_dev_shell already uses
-  # (issue #515) -- since that function runs outside phase_prompt_assembly's
-  # own call frame. Mathematically identical to `[ -n
-  # "${ORCHESTRATOR_ENABLED:-}" ]` (the --orchestrator-enabled flag fed the
-  # verb above, which the same env var also gates) -- the two can never
-  # disagree.
-  ORCHESTRATOR=""
-  [ "$(printf '%s' "$_handoff" | jq -r '.Invoker')" = "orchestrator" ] && ORCHESTRATOR=1
 
   # _validate_prompt_contract (below, unchanged since issue #2249) still
   # reads BOX_ACCESS_READ_ONLY and FILER_FILE_RELAY by dynamic scoping from
@@ -802,14 +814,18 @@ phase_prompt_assembly() {
   if [ -n "${AGENTS_JSON_TEMPLATE:-}" ] && printf '%s' "$AGENTS_JSON_TEMPLATE" | jq -e 'has("filer")' >/dev/null 2>&1; then
     _vc_filer_enabled=1
   fi
+  # Reads Invoker straight off $_handoff (already parsed by this point in
+  # this function, issue #2355) rather than the cross-phase $ORCHESTRATOR
+  # sentinel the gates above still use -- mathematically identical either
+  # way (see main's early ORCHESTRATOR computation), but the real descriptor
+  # is already on hand here.
   local FILER_FILE_RELAY=""
-  if [ -n "$_vc_filer_enabled" ] && [ -z "${BOX_WRITE_ENABLED:-}" ] && [ -n "$ORCHESTRATOR" ]; then
+  if [ -n "$_vc_filer_enabled" ] && [ -z "${BOX_WRITE_ENABLED:-}" ] && [ "$(printf '%s' "$_handoff" | jq -r '.Invoker')" = "orchestrator" ]; then
     FILER_FILE_RELAY=1
   else
-    # Off-row (orchestrator-fork-well-formed, issue #2047/#2354): every
-    # $ORCHESTRATOR conditional declares both an on-row and an off-row, even
-    # when, as here, the off-row is a no-op -- FILER_FILE_RELAY already
-    # defaults to empty above.
+    # Off-row: every conditional forking on orchestrator status declares
+    # both an on-row and an off-row, even when, as here, the off-row is a
+    # no-op -- FILER_FILE_RELAY already defaults to empty above.
     :
   fi
 
@@ -823,17 +839,27 @@ phase_prompt_assembly() {
 # $2 (--agents JSON, or "" to omit the flag), $3 (session mode, forwarded
 # verbatim to the nix-supplied _driver_session_flags — "initial"/"resume" pin
 # or resume the issue's session id; any other value, e.g. "" for the
-# conflict-resolve pass, yields no session flags), and $4 (the code-owned
-# review pass's own rendered prompt text, issue #2037; "" to omit
-# --review-prompt-file, the only case driver-exec itself ever sees since it
-# declares no such flag -- only $ORCHESTRATOR's orchestrator invoker below
-# understands it, and entrypoint.sh only ever renders $4 non-empty when
-# $ORCHESTRATOR is already on), and $5 (the reviewer's own configured model,
-# issue #2277; "" to omit --review-model and let the orchestrator's review
-# pass fall back to the coordinator model, same "only meaningful under
-# $ORCHESTRATOR" shape as $4 -- extracted in phase_prompt_assembly from the
-# --agents JSON template's .reviewer.model before that same reviewer entry
-# is dropped from the template). Delegates to driver-exec
+# conflict-resolve pass, yields no session flags), and $4 (the raw Handoff
+# descriptor JSON phase_prompt_assembly's driver-exec assemble-prompt call
+# produced, or "" for the one pass that predates it -- phase_conflict_resolve's
+# conflict-resolve call, which runs before any Handoff exists; the corrective
+# resume required_marker_gate fires deliberately narrows $4 to
+# `{"Invoker": ...}` only, carrying issue #2065's deliberate omission of the
+# review fields forward). Below derives the invoker fork and the code-owned
+# review pass's own rendered prompt text/model (issues #2037, #2277) straight
+# from $4's Invoker/ReviewPromptFile/ReviewModel fields when $4 is non-empty;
+# when $4 is empty (the pre-Handoff conflict-resolve pass) the invoker fork
+# instead falls back to $ORCHESTRATOR, main's early ORCHESTRATOR_ENABLED-
+# derived cross-phase sentinel, and the review fields stay empty. Issue
+# #2355 drained the session-mode/invoker/review-prompt/review-model
+# sentinels (_driver_session_mode/review_prompt_rendered/
+# review_model_rendered) this function used to be handed as separate
+# params/globals onto this one descriptor param instead; $ORCHESTRATOR alone
+# survives, as the unavoidable pre-Handoff fallback -- the
+# orchestrator-fork-well-formed check (nix/checks/prompts.nix) pins it to
+# exactly one raw ORCHESTRATOR_ENABLED test in this file (main's own early
+# computation), so this function reads that one computed gate rather than
+# re-testing the env var itself. Delegates to driver-exec
 # (issue #626), the in-box Go unit that owns "run the Driver, optionally
 # inside the Project devShell" as one code path: it takes the prompt/agents/
 # session as file paths (a compiled binary crosses the devShell process
@@ -844,18 +870,15 @@ phase_prompt_assembly() {
 # function), tees the stream to a log path, filters heartbeats in-process,
 # and returns the Driver's exit status.
 #
-# The $ORCHESTRATOR gate (default off, issue #1996; canonicalized #2047)
-# swaps which binary receives that exact flag set: off takes today's direct
+# The invoker fork (default off, issue #1996; canonicalized #2047) swaps
+# which binary receives that exact flag set: off takes today's direct
 # driver-exec path unchanged; on hands the same invocation to the in-box Go
 # orchestrator, which forwards it to driver-exec itself for its own
 # single-pass tracer bullet. Neither branch changes the flags built below --
 # this is the reusable seam the orchestrator drives, so a later multi-pass
-# loop only ever touches the orchestrator side of it. Reads the same
-# $ORCHESTRATOR local phase_prompt_assembly computed (main's cross-phase
-# sentinel, issue #515's dynamic-scoping shape), not ORCHESTRATOR_ENABLED
-# directly -- the one authority for orchestrator-conditioned divergence.
+# loop only ever touches the orchestrator side of it.
 run_driver_in_env() {
-  local prompt="$1" agents_json="$2" session_mode="$3" review_prompt="${4:-}" review_model="${5:-}"
+  local prompt="$1" agents_json="$2" session_mode="$3" handoff_json="${4:-}"
 
   # An unrecognized session_mode (e.g. "" for the conflict-resolve pass, which
   # pins/resumes no session) falls through _driver_session_flags' case with no
@@ -875,6 +898,17 @@ run_driver_in_env() {
   fi
   _session_file="$(mktemp)"
   printf '%s' "$_driver_session_flags_rendered" > "$_session_file"
+
+  # review_prompt/review_model come straight from the Handoff descriptor's
+  # own ReviewPromptFile/ReviewModel fields (issue #2355) -- empty whenever
+  # handoff_json itself is empty (the pre-Handoff conflict-resolve pass) or
+  # the keys are simply absent (required_marker_gate's corrective resume
+  # narrows handoff_json to {"Invoker": ...} only, issue #2065).
+  local review_prompt="" review_model=""
+  if [ -n "$handoff_json" ]; then
+    review_prompt="$(printf '%s' "$handoff_json" | jq -r '.ReviewPromptFile // empty')"
+    review_model="$(printf '%s' "$handoff_json" | jq -r '.ReviewModel // empty')"
+  fi
 
   local _review_prompt_file=""
   if [ -n "$review_prompt" ]; then
@@ -906,17 +940,24 @@ run_driver_in_env() {
     _heartbeat_flags=(--heartbeat-log "$HEARTBEAT_LOG")
   fi
 
-  local _driver_invoker
-  if [ -n "$ORCHESTRATOR" ]; then
-    _driver_invoker=orchestrator
+  # Invoker comes from handoff_json's own Invoker field when a Handoff
+  # exists (issue #2355); the one pass with no Handoff yet
+  # (phase_conflict_resolve's pre-Handoff call) falls back to $ORCHESTRATOR,
+  # main's early ORCHESTRATOR_ENABLED-derived cross-phase sentinel --
+  # mathematically identical to what the Handoff's own Invoker field would
+  # say once one existed.
+  local _driver_invoker=driver-exec
+  if [ -n "$handoff_json" ]; then
+    [ "$(printf '%s' "$handoff_json" | jq -r '.Invoker // empty')" = "orchestrator" ] && _driver_invoker=orchestrator
   else
-    _driver_invoker=driver-exec
+    [ -n "$ORCHESTRATOR" ] && _driver_invoker=orchestrator
   fi
 
   # --review-prompt-file only ever means something to the orchestrator
   # binary (driver-exec declares no such flag, and would hard-fail on an
   # unknown one) -- guarded on $_driver_invoker, itself already derived from
-  # $ORCHESTRATOR just above, rather than a second raw test of the gate.
+  # handoff_json (or $ORCHESTRATOR when no Handoff exists yet) just above,
+  # rather than a second raw test of the gate.
   local -a _review_prompt_flags=()
   if [ "$_driver_invoker" = orchestrator ] && [ -n "$_review_prompt_file" ]; then
     _review_prompt_flags=(--review-prompt-file "$_review_prompt_file")
@@ -1028,9 +1069,9 @@ emit_outcome_backstop() {
 #   $3 - name of a required-predicate function: called with the scanned
 #        value as $1, returns success if the gate is already satisfied
 #
-# Reads/writes claude_rc, agents_json, and _recovery_attempted by dynamic
-# scoping from main, the same idiom every other phase function here uses
-# (issue #515) -- there is no separate return value; a caller re-scans its
+# Reads/writes claude_rc, agents_json, _handoff, and _recovery_attempted by
+# dynamic scoping from main, the same idiom every other phase function here
+# uses (issue #515) -- there is no separate return value; a caller re-scans its
 # own marker after this returns to see whether the resume changed anything.
 required_marker_gate() {
   local _scanner="$1" _corrective_prompt="$2" _predicate="$3"
@@ -1044,7 +1085,12 @@ required_marker_gate() {
 
   echo "==> required marker missing — resuming the session once with a nudge"
   _recovery_attempted=1
-  run_driver_in_env "$_corrective_prompt" "$agents_json" "resume" || claude_rc=$?
+  # Narrows handoff_json to {"Invoker": ...} only (jq's `{Invoker}` object-
+  # construction shorthand) -- no ReviewPromptFile/ReviewModel key at all, so
+  # run_driver_in_env's own `// empty` jq defaults leave both empty,
+  # preserving issue #2065's deliberate single-pass-nudge omission (see the
+  # comment on the primary run_driver_in_env call in main for why).
+  run_driver_in_env "$_corrective_prompt" "$agents_json" "resume" "$(printf '%s' "$_handoff" | jq -c '{Invoker}')" || claude_rc=$?
 }
 
 # The SPINDRIFT_OUTCOME row on the required-marker gate above -- the scanner
@@ -1129,23 +1175,30 @@ main() {
   # keeping them out of true global scope (issue #515).
   local _rebase_and_publish _had_rebase_conflict
   local _use_dev_shell _harness_path
-  local prompt agents_json _driver_session_mode review_prompt_rendered review_model_rendered
+  local prompt agents_json _handoff
   local _last_outcome_line _last_near_miss_line _last_pr_intent_line _recovery_attempted
   local ORCHESTRATOR
 
   configure_env
 
-  # Early ORCHESTRATOR (issue #2354 slice 3): phase_conflict_resolve, hoisted
-  # below to run ahead of phase_prompt_assembly, calls run_driver_in_env,
-  # which reads this cross-phase sentinel directly -- but the verb's own
-  # Handoff.Invoker field (phase_prompt_assembly's canonical source, set
-  # further down at that function's own ORCHESTRATOR reassignment) isn't
-  # available until after the verb call. Mathematically identical to that
-  # later assignment ([ -n "${ORCHESTRATOR_ENABLED:-}" ] is exactly what the
-  # verb's own --orchestrator-enabled flag and gates.go's
-  # g["ORCHESTRATOR"] = e.OrchestratorEnabled both reduce to), so there's no
-  # divergence risk -- this one-liner exists purely to give
-  # phase_conflict_resolve a value to read before that reassignment runs.
+  # ORCHESTRATOR (issue #2047, ADR 0035 amendment; issue #2354 slice 3 hoisted
+  # phase_conflict_resolve here, ahead of phase_prompt_assembly): the single
+  # canonical master-switch gate, computed exactly once from the raw
+  # ORCHESTRATOR_ENABLED env var -- the orchestrator-fork-well-formed check
+  # (nix/checks/prompts.nix) pins this as the one non-comment
+  # ORCHESTRATOR_ENABLED test allowed in this file; every fork downstream
+  # (phase_prompt_assembly's --orchestrator-enabled flag,
+  # FILER_FILE_RELAY/_validate_prompt_contract gates, and
+  # run_driver_in_env's own pre-Handoff invoker fallback) reads this one
+  # computed value instead of re-testing the env var. Computed here, before
+  # phase_conflict_resolve, so that pass's run_driver_in_env call -- which
+  # predates any Handoff, so it cannot read Invoker off one -- has a value to
+  # fall back to. Issue #2355 retired phase_prompt_assembly's own
+  # Handoff-sourced reassignment of this same variable: Handoff.Invoker ==
+  # "orchestrator" iff ORCHESTRATOR_ENABLED is set (gates.go's
+  # g["ORCHESTRATOR"] = e.OrchestratorEnabled), so the two were always
+  # mathematically identical -- this one computation is $ORCHESTRATOR's value
+  # for main()'s entire run, not just an early placeholder.
   ORCHESTRATOR=""
   [ -n "${ORCHESTRATOR_ENABLED:-}" ] && ORCHESTRATOR=1
 
@@ -1186,17 +1239,20 @@ main() {
   fi
   local claude_rc=0
   _recovery_attempted=""
-  run_driver_in_env "$prompt" "$agents_json" "$_driver_session_mode" "$review_prompt_rendered" "$review_model_rendered" || claude_rc=$?
+  run_driver_in_env "$prompt" "$agents_json" "$(printf '%s' "$_handoff" | jq -r '.SessionMode')" "$_handoff" || claude_rc=$?
 
   # Resume-once-then-fall-through via the required-marker gate (issue
   # #2044). The same --agents JSON as the first pass rides along on any
   # resume -- the run may still need to reach the scout/filer step it never
   # got to, and the pinned session has no other way to learn about them.
-  # Carries no review_prompt_rendered (this call's 4th run_driver_in_env arg
-  # is omitted, so it's always empty): under the orchestrator, this one
-  # corrective nudge stays a narrow single-pass resume rather than
-  # re-entering the full implement/review/fix loop (issue #2037) a second
-  # time from whatever cap or park stopped the first attempt. Issue #2065
+  # required_marker_gate's own corrective-resume call narrows its
+  # run_driver_in_env handoff_json argument to `{"Invoker": ...}` only (jq's
+  # `{Invoker}` object-construction shorthand) -- no ReviewPromptFile or
+  # ReviewModel key at all, so run_driver_in_env's own `// empty` jq defaults
+  # leave both empty: under the orchestrator, this one corrective nudge
+  # stays a narrow single-pass resume rather than re-entering the full
+  # implement/review/fix loop (issue #2037) a second time from whatever cap
+  # or park stopped the first attempt. Issue #2065
   # reviewed this deliberate downgrade and kept the single-pass fallback:
   # each run_driver_in_env call spawns a fresh orchestrator process whose
   # --max-review-rounds/--max-slices budgets reset to their binary defaults
