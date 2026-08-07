@@ -273,8 +273,7 @@ func TestAssembleUnsupportedCell(t *testing.T) {
 		mutate func(*Env)
 	}{
 		{name: "wrong issue tracker", mutate: func(e *Env) { e.IssueTracker = "forgejo" }},
-		{name: "wrong code forge", mutate: func(e *Env) { e.CodeForge = "forgejo" }},
-		{name: "box read-only", mutate: func(e *Env) { e.BoxWriteEnabled = false }},
+		{name: "unrecognized code forge", mutate: func(e *Env) { e.CodeForge = "bogus" }},
 		{name: "unrecognized dispatch kind", mutate: func(e *Env) { e.DispatchKind = "bogus" }},
 		{name: "orchestrator on", mutate: func(e *Env) { e.OrchestratorEnabled = true }},
 		{name: "skills not fully baked", mutate: func(e *Env) { e.TDDSkillBaked = false }},
@@ -292,6 +291,35 @@ func TestAssembleUnsupportedCell(t *testing.T) {
 			}
 			if !errors.Is(err, ErrUnsupportedCell) {
 				t.Errorf("Assemble error = %v, want it to wrap ErrUnsupportedCell", err)
+			}
+		})
+	}
+}
+
+// TestAssembleAccessForgeCellsCovered covers the three new CodeForge x
+// BoxWriteEnabled cells this issue adds to checkCoveredCell's covered set
+// (github+read-write was already covered): github+read-only,
+// forgejo+read-write, and forgejo+read-only. Each must render without
+// error.
+func TestAssembleAccessForgeCellsCovered(t *testing.T) {
+	reg := loadTestRegistry(t)
+
+	cases := []struct {
+		name   string
+		mutate func(*Env)
+	}{
+		{name: "forgejo read-write", mutate: func(e *Env) { e.CodeForge = "forgejo" }},
+		{name: "forgejo read-only", mutate: func(e *Env) { e.CodeForge = "forgejo"; e.BoxWriteEnabled = false }},
+		{name: "github read-only", mutate: func(e *Env) { e.BoxWriteEnabled = false }},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			env := coveredEnv()
+			tc.mutate(&env)
+
+			if _, err := Assemble(env, reg); err != nil {
+				t.Fatalf("Assemble: %v, want nil (cell should now be covered)", err)
 			}
 		})
 	}
