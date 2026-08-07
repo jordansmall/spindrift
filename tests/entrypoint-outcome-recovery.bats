@@ -58,7 +58,7 @@ pinned_session_id() {
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   [ "$(grep -c '^SPINDRIFT_OUTCOME ' <<<"$output")" -eq 1 ]
-  grep -q '^SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=blocked' <<<"$output"
+  grep -q '^SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready' <<<"$output"
   [ "$(grep -c '^driver invoked for issue' "$DRIVER_LOG")" -eq 2 ]
   git -C "$BATS_TEST_TMPDIR" ls-remote "https://github.com/owner/repo.git" "agent/issue-7" | grep -q .
 }
