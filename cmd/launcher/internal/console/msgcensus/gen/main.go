@@ -26,6 +26,10 @@ package console
 var msgCensus = []string{
 `
 
+// writeFile is os.WriteFile by default; tests override it to capture the
+// generated output without touching disk.
+var writeFile = os.WriteFile
+
 func main() {
 	if err := run(); err != nil {
 		fmt.Fprintln(os.Stderr, "msgcensus/gen:", err)
@@ -34,18 +38,47 @@ func main() {
 }
 
 func run() error {
+	consoleDir, err := resolveConsoleDir()
+	if err != nil {
+		return err
+	}
+
+	formatted, err := generate(consoleDir)
+	if err != nil {
+		return err
+	}
+
+	outPath := filepath.Join(consoleDir, "msg_census_gen.go")
+	if err := writeFile(outPath, formatted, 0o644); err != nil {
+		return fmt.Errorf("writing %s: %w", outPath, err)
+	}
+
+	return nil
+}
+
+// resolveConsoleDir locates the console package directory by inspecting this
+// file's own location at runtime.
+func resolveConsoleDir() (string, error) {
 	_, thisFile, _, ok := runtime.Caller(0)
 	if !ok {
-		return fmt.Errorf("could not determine caller file location")
+		// Defensive branch: runtime.Caller(0) never fails in practice, so
+		// this is effectively untestable.
+		return "", fmt.Errorf("could not determine caller file location")
 	}
 
 	// thisFile is .../internal/console/msgcensus/gen/main.go; the console
 	// package directory is two levels up.
-	consoleDir := filepath.Dir(filepath.Dir(filepath.Dir(thisFile)))
+	return filepath.Dir(filepath.Dir(filepath.Dir(thisFile))), nil
+}
 
-	names, err := msgcensus.Collect(consoleDir)
+// generate builds the formatted contents of msg_census_gen.go for the
+// package directory dir: it collects every Msg-implementing type name via
+// msgcensus.Collect, renders them into the generated-file header, and runs
+// the result through gofmt.
+func generate(dir string) ([]byte, error) {
+	names, err := msgcensus.Collect(dir)
 	if err != nil {
-		return fmt.Errorf("collecting Msg census: %w", err)
+		return nil, fmt.Errorf("collecting Msg census: %w", err)
 	}
 
 	var b strings.Builder
@@ -57,13 +90,8 @@ func run() error {
 
 	formatted, err := format.Source([]byte(b.String()))
 	if err != nil {
-		return fmt.Errorf("formatting generated source: %w", err)
+		return nil, fmt.Errorf("formatting generated source: %w", err)
 	}
 
-	outPath := filepath.Join(consoleDir, "msg_census_gen.go")
-	if err := os.WriteFile(outPath, formatted, 0o644); err != nil {
-		return fmt.Errorf("writing %s: %w", outPath, err)
-	}
-
-	return nil
+	return formatted, nil
 }
