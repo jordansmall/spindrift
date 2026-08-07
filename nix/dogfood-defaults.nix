@@ -2,9 +2,10 @@
 # flake.nix's `spindrift` module config and nix/fixtures.nix's direct
 # mkHarness mirror, so the flakemodule-equivalence check verifies the two
 # wiring paths rather than two hand-copied value sets (issue #459).
-{ system }:
+{ system, lib }:
 let
   isLinux = builtins.match ".*-linux" system != null;
+  rosterLib = import ../lib/roster.nix { inherit lib; };
 in
 {
   # `nix flake archive` warms flake inputs alongside the Go module cache, so
@@ -30,6 +31,21 @@ in
     p.nixfmt
     p.mandoc
   ];
+  # Source spindrift's own dogfood agent models/efforts from the explicit
+  # default roster (issue #2388) instead of the legacy per-agent model knobs.
+  # The `filerModel` arg below carries forward the Filer's (#393, landed
+  # 2026-07-09) tuned model onto the roster's `filer` entry, so non-blocking
+  # review findings still become tracked `agent-review-finding` issues
+  # instead of staying stuck in PR bodies; the other three legacy knobs are
+  # left blank since dogfood doesn't otherwise pin scout/review/worker
+  # models. `defaultRoster` also ships this roster's fixed per-agent efforts
+  # (issue #2386).
+  roster = rosterLib.defaultRoster {
+    scoutModel = "";
+    reviewModel = "";
+    filerModel = "claude-haiku-4-5-20251001";
+    workerModel = "";
+  };
   defaults = {
     mergeMode = "immediate";
     autoFormat = true;
@@ -38,10 +54,10 @@ in
     # Box makes no forge/tracker writes; the launcher relays branch, draft PR,
     # and comment writes host-side. github satisfies the capability gate.
     boxForgeAndIssueAccess = "read-only";
-    # Opt spindrift's own dogfood run into the Filer (#393, landed
-    # 2026-07-09): non-blocking review findings become tracked
-    # `agent-review-finding` issues instead of staying stuck in PR bodies.
-    filerModel = "claude-haiku-4-5-20251001";
+    # Drive the orchestrator's code-owned review pass (issue #2387's
+    # REVIEW_EFFORT/--review-effort knob) at the same effort as the roster's
+    # `reviewer` entry above.
+    reviewEffort = "high";
     # Cap podman's container memory on darwin/windows, where podman runs in a
     # fixed-RAM VM (issue #712's original rationale); native Linux shares host
     # RAM with the container directly, so no cap is needed there (issue #2379).

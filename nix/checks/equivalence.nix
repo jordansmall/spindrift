@@ -745,14 +745,64 @@ in
   dogfood-memory-limit-platform-aware =
     let
       inherit (pkgs.lib) assertMsg;
-      defaultsLinux = import ../dogfood-defaults.nix { system = "aarch64-linux"; };
-      defaultsDarwin = import ../dogfood-defaults.nix { system = "aarch64-darwin"; };
+      defaultsLinux = import ../dogfood-defaults.nix {
+        system = "aarch64-linux";
+        lib = pkgs.lib;
+      };
+      defaultsDarwin = import ../dogfood-defaults.nix {
+        system = "aarch64-darwin";
+        lib = pkgs.lib;
+      };
     in
     assert assertMsg (defaultsLinux.defaults.memoryLimit == "")
       ''dogfood memoryLimit must be unset ("") on native Linux (issue #2379): got "${defaultsLinux.defaults.memoryLimit}"'';
     assert assertMsg (defaultsDarwin.defaults.memoryLimit == "5g")
       ''dogfood memoryLimit must stay "5g" on darwin/podman-in-VM (issue #2379): got "${defaultsDarwin.defaults.memoryLimit}"'';
     pkgs.runCommand "dogfood-memory-limit-platform-aware" { } "touch $out";
+
+  # The dogfood Consumer config sources agent models/efforts from an explicit
+  # roster (lib/roster.nix's defaultRoster) instead of the legacy `filerModel`
+  # knob (issue #2388): `defaults` must no longer carry `filerModel` directly,
+  # `defaults.reviewEffort` must drive the orchestrator's code-owned review
+  # pass (issue #2387) at the same effort as the roster's `reviewer` entry,
+  # and the roster's `filer` entry must still carry the Filer's (#393) tuned
+  # model. Also pins the roster's fixed per-agent efforts (issue #2386):
+  # scout=medium, reviewer=high, filer=medium, worker=high.
+  dogfood-roster-and-review-effort =
+    let
+      inherit (pkgs.lib)
+        assertMsg
+        filterAttrs
+        listToAttrs
+        nameValuePair
+        ;
+      defaults = import ../dogfood-defaults.nix {
+        system = "aarch64-linux";
+        lib = pkgs.lib;
+      };
+      rosterByName = listToAttrs (map (e: nameValuePair e.name e) defaults.roster);
+      expectedEfforts = {
+        scout = "medium";
+        reviewer = "high";
+        filer = "medium";
+        worker = "high";
+      };
+      effortMismatches = filterAttrs (
+        name: effort: rosterByName.${name}.effort or null != effort
+      ) expectedEfforts;
+    in
+    assert assertMsg (!(defaults.defaults ? filerModel))
+      "dogfood defaults must not carry the deprecated filerModel knob once a roster is set (issue #2388)";
+    assert assertMsg (defaults.defaults.reviewEffort or null == "high")
+      ''dogfood defaults.reviewEffort must be "high" (issue #2388/#2387): got "${
+        toString (defaults.defaults.reviewEffort or null)
+      }"'';
+    assert assertMsg (rosterByName ? filer && rosterByName.filer.model == "claude-haiku-4-5-20251001")
+      "dogfood roster's filer entry must keep the tuned Filer model claude-haiku-4-5-20251001 (issue #2388, was #393)";
+    assert assertMsg (
+      effortMismatches == { }
+    ) "dogfood roster per-agent effort mismatch(es): ${builtins.toJSON effortMismatches}";
+    pkgs.runCommand "dogfood-roster-and-review-effort" { } "touch $out";
 
   # driverExecBin.src must not contain *_test.go — the image drvPath
   # must be invariant under host-side launcher test churn (issue #474).

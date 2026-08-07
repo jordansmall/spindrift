@@ -11,7 +11,10 @@
 let
   # The dogfood's tuned leaf values, shared with flake.nix's `spindrift`
   # module config so the two wiring paths below can never drift (issue #459).
-  dogfoodDefaults = import ./dogfood-defaults.nix { inherit system; };
+  dogfoodDefaults = import ./dogfood-defaults.nix {
+    inherit system;
+    lib = pkgs.lib;
+  };
 
   # The dogfood's baked skills, shared with flake.nix's `spindrift` module
   # config the same way (issue #486).
@@ -55,6 +58,7 @@ let
       defaults
       nixStoreWritable
       extraClosures
+      roster
       ;
     skills = dogfoodSkills;
   };
