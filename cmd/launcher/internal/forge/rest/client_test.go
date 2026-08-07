@@ -127,6 +127,55 @@ func TestDoMappedStatusMessageIncludesRawStatusCode(t *testing.T) {
 	}
 }
 
+// TestDoChainsStatusErrorMappedStatus covers that Do's error for a mapped
+// status still chains a StatusError carrying the raw status code, so a
+// caller that needs to disambiguate by endpoint (rather than the shared
+// sentinel) can recover it via errors.As.
+func TestDoChainsStatusErrorMappedStatus(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusConflict)
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, nil, "testbackend", StatusMap{http.StatusConflict: errNotFoundStub}, nil)
+
+	err := c.Do(http.MethodGet, "/widgets/1", nil, nil)
+	if err == nil {
+		t.Fatal("Do returned nil error, want a mapped sentinel error")
+	}
+	var statusErr StatusError
+	if !errors.As(err, &statusErr) {
+		t.Fatalf("Do error = %v, want errors.As match against StatusError", err)
+	}
+	if statusErr.Status != http.StatusConflict {
+		t.Fatalf("StatusError.Status = %d, want %d", statusErr.Status, http.StatusConflict)
+	}
+}
+
+// TestDoChainsStatusErrorUnmappedStatus covers that Do's error for a status
+// absent from the Client's StatusMap still chains a StatusError carrying the
+// raw status code, recoverable via errors.As.
+func TestDoChainsStatusErrorUnmappedStatus(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusTeapot)
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, nil, "testbackend", StatusMap{http.StatusNotFound: errNotFoundStub}, nil)
+
+	err := c.Do(http.MethodGet, "/widgets/1", nil, nil)
+	if err == nil {
+		t.Fatal("Do returned nil error, want a plain error for an unmapped status")
+	}
+	var statusErr StatusError
+	if !errors.As(err, &statusErr) {
+		t.Fatalf("Do error = %v, want errors.As match against StatusError", err)
+	}
+	if statusErr.Status != http.StatusTeapot {
+		t.Fatalf("StatusError.Status = %d, want %d", statusErr.Status, http.StatusTeapot)
+	}
+}
+
 // TestDoAppliesAuthStrategy covers that Do invokes the configured
 // AuthStrategy on the outgoing request — asserted here via TokenAuth setting
 // the Authorization header the server observes.

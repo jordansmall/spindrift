@@ -181,7 +181,7 @@ func (c *Client) Do(method, path string, body, out any) error {
 
 		if sentinel, ok := c.statuses[resp.StatusCode]; ok {
 			resp.Body.Close()
-			return fmt.Errorf("%s: %s %s: %w (status %d): %w", c.backend, method, path, sentinel, resp.StatusCode, StatusError{Status: resp.StatusCode})
+			return fmt.Errorf("%s: %s %s: %w: %w", c.backend, method, path, sentinel, StatusError{Status: resp.StatusCode})
 		}
 		resp.Body.Close()
 		return fmt.Errorf("%s: %s %s: unexpected status %d: %w", c.backend, method, path, resp.StatusCode, StatusError{Status: resp.StatusCode})
