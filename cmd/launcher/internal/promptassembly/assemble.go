@@ -11,9 +11,9 @@ import (
 )
 
 // ErrUnsupportedCell marks an Env combination Assemble does not (yet) cover.
-// Assemble currently implements exactly one cell of agent/entrypoint.sh's
+// Assemble currently implements four cells of agent/entrypoint.sh's
 // phase_prompt_assembly — see checkCoveredCell — and errors, wrapping this
-// sentinel, for anything outside it rather than silently mis-rendering a
+// sentinel, for anything outside them rather than silently mis-rendering a
 // prompt for a combination it hasn't been built (and tested) against.
 var ErrUnsupportedCell = errors.New("promptassembly: env combination not covered by Assemble")
 
@@ -41,13 +41,23 @@ type Handoff struct {
 	ReviewModel      string
 }
 
-// checkCoveredCell validates that e is exactly the one Env cell Assemble
-// implements: IssueTracker/CodeForge both (explicitly or by default) github,
-// a read-write box, dispatch kind "work" (not research), a fresh box
-// (FixPass == 0, not a warm fix pass), the orchestrator off, and every skill
-// baked (SkillsFound non-empty and all four per-skill gates on). Any other
-// combination is out of scope for this slice and returns an error wrapping
-// ErrUnsupportedCell.
+// checkCoveredCell validates that e sits in one of the four Env cells
+// Assemble implements: IssueTracker/CodeForge both (explicitly or by
+// default) github, a read-write box, the orchestrator off, and every skill
+// baked (SkillsFound non-empty and all four per-skill gates on) are common
+// to all four; the dispatch-kind/fix-pass axis then forks into:
+//   - dispatch kind "work" (explicit or default), FixPass == 0 -- a fresh
+//     work dispatch (issue-prompt.md).
+//   - dispatch kind "work" (explicit or default), FixPass > 0 -- a warm fix
+//     pass (fix-prompt.md).
+//   - dispatch kind "research", SelfContained == false -- a repo-backed
+//     research dispatch (research-prompt.md).
+//   - dispatch kind "research", SelfContained == true -- a self-contained
+//     research dispatch (research-self-contained-prompt.md).
+//
+// A DispatchKind that is neither "work" nor "research" is out of scope, as
+// is any other combination outside these four cells; each returns an error
+// wrapping ErrUnsupportedCell.
 func checkCoveredCell(e Env) error {
 	tracker := e.IssueTracker
 	if tracker == "" {
@@ -73,12 +83,8 @@ func checkCoveredCell(e Env) error {
 	if kind == "" {
 		kind = defaultDispatchKind
 	}
-	if kind != defaultDispatchKind {
+	if kind != defaultDispatchKind && kind != "research" {
 		return fmt.Errorf("dispatch kind %q: %w", e.DispatchKind, ErrUnsupportedCell)
-	}
-
-	if e.FixPass > 0 {
-		return fmt.Errorf("fix pass %d: %w", e.FixPass, ErrUnsupportedCell)
 	}
 
 	if e.OrchestratorEnabled {
@@ -130,10 +136,43 @@ func renderFile(path string, allowlist map[string]string) (string, error) {
 	return strings.TrimRight(substitute(string(data), allowlist), "\n"), nil
 }
 
+// injectSharedBlock mirrors _inject_shared_block (entrypoint.sh: 632-643),
+// called once per contract file from Assemble's injection step
+// (entrypoint.sh: 1064-1074). An empty contractPath is a silent no-op --
+// Assemble's covered cells only ever populate the contract-file Env fields
+// a given cell actually needs. Otherwise contractPath is rendered through
+// renderFile (the same allowlist substitution and trailing-newline trim as
+// every other file Assemble reads), and its first line -- the marker each
+// contract file is pre-sliced to start with, e.g. "# COMMS" -- is checked
+// against prompt: already present, prompt is returned unchanged (the
+// idempotent skip); otherwise the rendered block is appended, separated by
+// a blank line.
+func injectSharedBlock(prompt, contractPath string, allowlist map[string]string) (string, error) {
+	if contractPath == "" {
+		return prompt, nil
+	}
+
+	block, err := renderFile(contractPath, allowlist)
+	if err != nil {
+		return "", fmt.Errorf("read contract file %s: %w", contractPath, err)
+	}
+
+	marker := block
+	if idx := strings.IndexByte(block, '\n'); idx != -1 {
+		marker = block[:idx]
+	}
+
+	if strings.Contains(prompt, marker) {
+		return prompt, nil
+	}
+
+	return prompt + "\n\n" + block, nil
+}
+
 // Assemble renders the covered Env cell's prompt, --agents JSON, and driver
 // hand-off facts, mirroring agent/entrypoint.sh's phase_prompt_assembly (see
-// checkCoveredCell for the exact cell). Any Env outside that cell is
-// rejected up front, before any file I/O, with an error wrapping
+// checkCoveredCell for the exact covered cells). Any Env outside those
+// cells is rejected up front, before any file I/O, with an error wrapping
 // ErrUnsupportedCell.
 func Assemble(e Env, reg Registry) (Result, error) {
 	if err := checkCoveredCell(e); err != nil {
@@ -209,36 +248,80 @@ func Assemble(e Env, reg Registry) (Result, error) {
 		}
 	}
 
-	// Base template selection (entrypoint.sh: 1029-1063): the covered cell
-	// (DispatchKind == "work", FixPass == 0) always renders issue-prompt.md.
-	// Shared-block injection (_inject_shared_block, entrypoint.sh:
-	// 1064-1074) is skipped entirely, not merely a no-op call: outcome's
-	// marker "# LAND THE CHANGE", comms's "# COMMS", and check's "# CHECK"
-	// are all sliced FROM issue-prompt.md itself (lib/prompt-contract.nix
-	// injectBlocks), so issue-prompt.md always already contains its own
-	// marker -- injection's "if prompt does NOT already contain marker"
-	// guard (entrypoint.sh: 632-644) is never true for it. comms/check also
-	// list only "fix" in their kinds (never "issue"), confirming they exist
-	// to backfill fix-prompt.md, not this cell's issue-prompt.md.
-	// entrypoint.sh's equivalent, `prompt="$(_subst "${PROMPTS_DIR}/issue-prompt.md")"`,
-	// is itself inside a $(...) command substitution, so the fully
-	// substituted prompt has every trailing newline stripped too -- and
-	// nothing re-adds one later: write_prompt_and_run's `printf '%s'
-	// "$prompt" > "$_prompt_file"` (entrypoint.sh: 1244) writes $prompt
-	// raw, with no appended newline, so Result.Prompt must match that
-	// exact on-disk form.
-	basePath := filepath.Join(e.PromptsDir, "issue-prompt.md")
-	promptText, err := renderFile(basePath, allowlist)
-	if err != nil {
-		return Result{}, fmt.Errorf("read issue-prompt.md: %w", err)
+	// Base template selection (entrypoint.sh: 1029-1063) and session mode
+	// (entrypoint.sh: 1037-1052): mirrors the if/elif/else precedence
+	// exactly -- research first (regardless of FixPass), then a warm fix
+	// pass, then the default work/issue cell. Shared-block injection
+	// (_inject_shared_block, entrypoint.sh: 1064-1074) follows base-template
+	// selection below.
+	//
+	// For the work/issue-prompt.md cell specifically, injection is a no-op:
+	// outcome's marker "# LAND THE CHANGE",
+	// comms's "# COMMS", and check's "# CHECK" are all sliced FROM
+	// issue-prompt.md itself (lib/prompt-contract.nix injectBlocks), so
+	// issue-prompt.md always already contains its own marker -- injection's
+	// "if prompt does NOT already contain marker" guard (entrypoint.sh:
+	// 632-644) is never true for it. comms/check also list only "fix" in
+	// their kinds (never "issue"), confirming they exist to backfill
+	// fix-prompt.md, not issue-prompt.md.
+	//
+	// Every branch's entrypoint.sh equivalent, e.g.
+	// `prompt="$(_subst "${PROMPTS_DIR}/issue-prompt.md")"`, is itself
+	// inside a $(...) command substitution, so the fully substituted
+	// prompt has every trailing newline stripped too -- and nothing
+	// re-adds one later: write_prompt_and_run's `printf '%s' "$prompt" >
+	// "$_prompt_file"` (entrypoint.sh: 1244) writes $prompt raw, with no
+	// appended newline, so Result.Prompt must match that exact on-disk
+	// form.
+	kind := e.DispatchKind
+	if kind == "" {
+		kind = defaultDispatchKind
 	}
 
-	// Session mode (entrypoint.sh: 1037-1052) and invoker (entrypoint.sh:
-	// 1282-1286).
-	sessionMode := "initial"
-	if e.ResumeAfterHold {
+	var baseName, sessionMode string
+	switch {
+	case kind == "research":
+		if e.SelfContained {
+			baseName = "research-self-contained-prompt.md"
+		} else {
+			baseName = "research-prompt.md"
+		}
+		sessionMode = "initial"
+	case e.FixPass > 0:
+		baseName = "fix-prompt.md"
 		sessionMode = "resume"
+	default:
+		baseName = "issue-prompt.md"
+		sessionMode = "initial"
+		if e.ResumeAfterHold {
+			sessionMode = "resume"
+		}
 	}
+
+	basePath := filepath.Join(e.PromptsDir, baseName)
+	promptText, err := renderFile(basePath, allowlist)
+	if err != nil {
+		return Result{}, fmt.Errorf("read %s: %w", baseName, err)
+	}
+
+	// Shared-block injection (entrypoint.sh: 1064-1074): the research branch
+	// only ever injects research-verdict; every other covered cell injects
+	// comms, then check, then outcome, in that order.
+	if kind == "research" {
+		promptText, err = injectSharedBlock(promptText, e.ResearchOutcomeContractFile, allowlist)
+		if err != nil {
+			return Result{}, err
+		}
+	} else {
+		for _, contractFile := range []string{e.CommsContractFile, e.CheckContractFile, e.OutcomeContractFile} {
+			promptText, err = injectSharedBlock(promptText, contractFile, allowlist)
+			if err != nil {
+				return Result{}, err
+			}
+		}
+	}
+
+	// Invoker (entrypoint.sh: 1282-1286).
 	invoker := "driver-exec"
 	if gates["ORCHESTRATOR"] {
 		invoker = "orchestrator"
