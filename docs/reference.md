@@ -220,6 +220,16 @@ image rebuild (`SCOUT_MODEL=...` at dispatch time, no `spindrift build`),
 adding an arbitrary Nth custom agent via `roster` is a `mkHarness`/image-time
 decision and requires a rebuild.
 
+spindrift's own dogfood Consumer config (`nix/dogfood-defaults.nix`) is a
+concrete `roster` user: it sets `roster = rosterLib.defaultRoster { scoutModel
+= ""; reviewModel = ""; filerModel = "claude-haiku-4-5-20251001"; workerModel
+= ""; }`, pinning only the filer's model — the other three entries carry no
+`model` and so inherit the Driver's session default — and inherits
+`defaultRoster`'s built-in scout=medium/reviewer=high/filer=medium/worker=high
+efforts unchanged (issue #2386). It separately sets `defaults.reviewEffort =
+"high"` so the orchestrator's own code-owned review pass (issue #2387) runs
+at the same effort as the roster's `reviewer` entry.
+
 The **prompt is baked into the image**: changing `prompts/issue-prompt.md`
 requires an image rebuild (`spindrift build`). Point `SPINDRIFT_PROMPT_DIR`
 at any directory to override it at runtime for zero-rebuild iteration.
@@ -2772,6 +2782,11 @@ driving loop other than `dogfood.sh`; see `lib/env-schema.nix`'s
 its `--continuous` alias — turns the loop on, and `--continuous-dispatch=0`
 turns it off; both `spindrift dispatch` and `spindrift research` accept
 either form.
+
+**Subagent roster.** The dogfood Consumer config's subagent models and
+efforts, and its orchestrator review effort, are set via `roster` and
+`defaults.reviewEffort` in `nix/dogfood-defaults.nix` — see [Subagent
+roster](#subagent-roster) for the mechanism and dogfood's specific values.
 
 **Research.** `dogfood.sh` drives `spindrift dispatch` (the work kind) by
 default; set `DOGFOOD_KIND=research` to drive `spindrift research` instead —
