@@ -119,7 +119,7 @@
             forge.boxAccess = dogfoodDefaults.defaults.boxForgeAndIssueAccess;
             agents.format.enable = dogfoodDefaults.defaults.autoFormat;
             agents.lint.enable = dogfoodDefaults.defaults.autoLint;
-            roster = dogfoodDefaults.roster;
+            agents.models.roster = dogfoodDefaults.roster;
             agents.models.reviewEffort = dogfoodDefaults.defaults.reviewEffort;
           };
 
