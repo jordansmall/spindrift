@@ -163,44 +163,24 @@ func (f *forgejoCodeForge) listPulls(state string) ([]forgejoPullPayload, error)
 	return pulls, nil
 }
 
-// openPRForBranch returns the open pull whose head matches branch, if any.
-// includeDrafts controls whether a draft match (per isDraftPull) is
-// eligible: false gives OpenPRForBranch's draft-excluding contract, true
-// gives openAnyPRForBranch's draft-inclusive one. Shared by both since they
-// otherwise differ only in that one filter.
-func (f *forgejoCodeForge) openPRForBranch(branch string, includeDrafts bool) (forge.PR, bool, error) {
+// OpenPRForBranch returns the open pull whose head matches branch, if any —
+// draft or not (issue #2408: Forgejo's lookup used to exclude drafts;
+// recover's stranded-draft-PR adoption and CreateDraftPR's own
+// conflict-adoption call site both need it to include them, matching
+// GitHub's OpenPRForBranch). IsDraft reports the pull's draft state, read
+// from either the pull's draft field or its WIP-title convention
+// (isDraftPull).
+func (f *forgejoCodeForge) OpenPRForBranch(branch string) (forge.PR, bool, error) {
 	pulls, err := f.listPulls("open")
 	if err != nil {
 		return forge.PR{}, false, err
 	}
 	for _, p := range pulls {
-		if p.Head.Ref != branch {
-			continue
+		if p.Head.Ref == branch {
+			return forge.PR{URL: p.HTMLURL, IsDraft: isDraftPull(p)}, true, nil
 		}
-		if !includeDrafts && isDraftPull(p) {
-			continue
-		}
-		return forge.PR{URL: p.HTMLURL, IsDraft: isDraftPull(p)}, true, nil
 	}
 	return forge.PR{}, false, nil
-}
-
-// OpenPRForBranch returns the open, non-draft pull whose head matches
-// branch, if any. Draft status is read from either the pull's draft field
-// or its WIP-title convention (isDraftPull) — a draft match is never
-// adopted.
-func (f *forgejoCodeForge) OpenPRForBranch(branch string) (forge.PR, bool, error) {
-	return f.openPRForBranch(branch, false)
-}
-
-// openAnyPRForBranch returns the open pull whose head matches branch,
-// regardless of draft status, unlike OpenPRForBranch (which must stay
-// draft-excluding for its other caller, prresolver.go). CreateDraftPR's own
-// adoption target on a 409 Conflict is always a draft -- CreateDraftPR
-// itself always creates one -- so resolving that PR needs a lookup that
-// does not filter drafts out.
-func (f *forgejoCodeForge) openAnyPRForBranch(branch string) (forge.PR, bool, error) {
-	return f.openPRForBranch(branch, true)
 }
 
 // PRForBranch returns the URL of any pull (any state, any draft status)

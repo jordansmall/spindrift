@@ -64,7 +64,7 @@ help
               q/ctrl+c decline and quit)
   A           adopt the highlighted orphan-flagged Backlog row (a
               running sandbox this session didn't launch); reports
-              why and changes nothing without a non-draft open PR
+              why and changes nothing without an open PR
   +           raise the live parallelism cap
   -           lower the live parallelism cap
   b           rebuild the stale image in-session

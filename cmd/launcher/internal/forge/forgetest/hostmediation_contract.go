@@ -40,7 +40,7 @@ type HostMediationHarness interface {
 	// already-exists/409 "a PR for this branch already exists" refusal (a
 	// retried host-mediated create after an earlier one already succeeded),
 	// and CreateDraftPR is expected to adopt it -- resolving the existing
-	// open PR (draft or not) the same way forgejo's openAnyPRForBranch would
+	// open PR (draft or not) the same way forgejo's OpenPRForBranch would
 	// and returning its URL with no error, rather than surfacing the refusal
 	// as a failure (issue #2407 slices 1-3). Returns the head to call
 	// CreateDraftPR with and the URL it must return.

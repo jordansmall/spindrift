@@ -4,23 +4,15 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"regexp"
-	"strings"
 	"testing"
 
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/localloop"
 	"spindrift.dev/launcher/internal/settle"
-	"spindrift.dev/launcher/internal/testutil"
 )
 
 const testReconcilePR = "https://github.com/owner/repo/pull/77"
-
-// stalePRLabel matches a genuine stale pr= field (issue #892) without
-// tripping on a benign substring like expr= or repr= inside free-text
-// note/error interpolations.
-var stalePRLabel = regexp.MustCompile(`\bpr=`)
 
 // reconcileConfig returns a config suitable for reconcile tests.
 func reconcileConfig() config {
@@ -136,37 +128,40 @@ func TestRecoverByNumber_RetryMaxOneStillRetriesOnce(t *testing.T) {
 	}
 }
 
-func TestRecoverByNumber_DraftPRSkipped(t *testing.T) {
+// TestRecoverByNumber_DraftPRAdoptedMergesAndCompletes proves a discovered
+// draft PR is routed through the exact same adopt-and-gate path as a
+// non-draft PR (issue #2408): recoverByNumber no longer refuses to adopt a
+// draft PR outright. The shared SettleAdopted path flips draft->ready at
+// green via an idempotent MarkReady call before merging.
+func TestRecoverByNumber_DraftPRAdoptedMergesAndCompletes(t *testing.T) {
 	c := reconcileConfig()
-	fc := forge.NewFake()
+	fc := forge.NewFake(dispatchLabels(c))
 	fc.BranchPrefix = c.branchPrefix
 
 	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.inProgressLabel}})
 	branch := fc.AgentBranch("42")
 	fc.SetPR(branch, forge.PR{URL: testReconcilePR, IsDraft: true})
+	// A leading PENDING proves this run's own checks registered — issue
+	// #1652's adopted-path gate does not trust an immediate SUCCESS alone.
+	fc.SetCheckStates(testReconcilePR, []forge.RollupState{forge.StatePending, forge.StateSuccess, forge.StateSuccess})
 
 	dir := tempLogDir(t)
-	var err error
-	out := testutil.CaptureStdout(t, func() {
-		err = recoverByNumber(c, fc, fc, dir, testFactory(t, dir, nil), newWorkSettle(c, fc, testWired(fc), fc), "42")
-	})
+	err := recoverByNumber(c, fc, fc, dir, testFactory(t, dir, nil), newWorkSettle(c, fc, testWired(fc), fc), "42")
 
-	if err == nil {
-		t.Error("expected error for draft PR; got nil")
+	if err != nil {
+		t.Errorf("expected nil error on draft-PR adopt path; got %v", err)
 	}
-	if fc.Merged != "" {
-		t.Errorf("draft PR must not be merged; fc.Merged=%q", fc.Merged)
+	if fc.Merged != testReconcilePR {
+		t.Errorf("expected PR to be merged; fc.Merged=%q", fc.Merged)
 	}
-	if len(fc.TransitionStateCalls) != 0 {
-		t.Errorf("draft PR must not trigger label churn; got %v", fc.TransitionStateCalls)
+	if len(fc.TransitionStateCalls) == 0 {
+		t.Fatal("expected TransitionState call for completeLabel")
 	}
-	// operator-report console prints use landing=, not the stale pr= label
-	// (issue #655), even for a genuine forge.ResolveOpenPR lookup.
-	if !strings.Contains(out, "landing="+testReconcilePR) {
-		t.Errorf("console output must print landing=%s; got: %q", testReconcilePR, out)
+	if last := fc.TransitionStateCalls[len(fc.TransitionStateCalls)-1]; last.To != forge.Complete {
+		t.Errorf("last transition To=%v, want Complete", last.To)
 	}
-	if stalePRLabel.MatchString(out) {
-		t.Errorf("console output must not use the stale pr= label; got: %q", out)
+	if len(fc.MarkReadyCalls) == 0 {
+		t.Error("expected MarkReady to be called to flip the draft PR to ready")
 	}
 }
 

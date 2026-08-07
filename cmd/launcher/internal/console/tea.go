@@ -1067,7 +1067,7 @@ func orphanDetectCmd(launch *Launcher) tea.Cmd {
 // adoptOrphanCmd adopts num through launch's RecoverFn in the background —
 // the operator's explicit gesture on an orphan-flagged Backlog row (issue
 // #1619), the same settle-adoption path startup used to invoke on its own.
-// A failure (no open PR, a draft PR, or a resolve error) surfaces through
+// A failure (no open PR, or a resolve error) surfaces through
 // the returned OrphanRecoveryMsg exactly as a startup adopt failure used to
 // (issue #1218) — Update threads it onto Model.OrphanRecoveryErr — and
 // changes nothing else. A success returns OrphanAdoptedMsg, clearing num's

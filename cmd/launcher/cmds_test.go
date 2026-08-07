@@ -135,20 +135,26 @@ func TestCmdRecover_WritesReasonToGithubOutput(t *testing.T) {
 	}
 }
 
-// TestCmdRecover_WritesDraftPRReasonToGithubOutput asserts cmdRecover writes
-// the draft-PR error text to the GITHUB_OUTPUT file under the
-// "recover-reason" key on the draft-PR error exit path.
-func TestCmdRecover_WritesDraftPRReasonToGithubOutput(t *testing.T) {
+// TestCmdRecover_DraftPRAdoptedSucceeds asserts cmdRecover no longer treats
+// a discovered draft PR as a rejection (issue #2408): recoverByNumber routes
+// a draft PR through the same adopt-and-gate path as a non-draft one, so
+// with green checks it adopts, gates, and merges the PR. cmdRecover must
+// therefore return 0 and never write a "draft PR" rejection reason to
+// GITHUB_OUTPUT.
+func TestCmdRecover_DraftPRAdoptedSucceeds(t *testing.T) {
 	outputPath := filepath.Join(t.TempDir(), "output")
 	t.Setenv("GITHUB_OUTPUT", outputPath)
 
 	c := reconcileConfig()
-	fc := forge.NewFake()
+	fc := forge.NewFake(dispatchLabels(c))
 	fc.BranchPrefix = c.branchPrefix
 
 	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.inProgressLabel}})
 	branch := fc.AgentBranch("42")
 	fc.SetPR(branch, forge.PR{URL: testReconcilePR, IsDraft: true})
+	// A leading PENDING proves this run's own checks registered — issue
+	// #1652's adopted-path gate does not trust an immediate SUCCESS alone.
+	fc.SetCheckStates(testReconcilePR, []forge.RollupState{forge.StatePending, forge.StateSuccess, forge.StateSuccess})
 
 	dir := tempLogDir(t)
 	lc := &launchContext{
@@ -163,17 +169,15 @@ func TestCmdRecover_WritesDraftPRReasonToGithubOutput(t *testing.T) {
 
 	got := cmdRecover(lc, "42")
 
-	if got != 1 {
-		t.Errorf("cmdRecover(lc, \"42\") = %d, want 1 (draft PR)", got)
+	if got != 0 {
+		t.Errorf("cmdRecover(lc, \"42\") = %d, want 0 (draft PR adopted and merged)", got)
+	}
+	if fc.Merged != testReconcilePR {
+		t.Errorf("expected PR to be merged; fc.Merged=%q", fc.Merged)
 	}
 
-	out, err := os.ReadFile(outputPath)
-	if err != nil {
-		t.Fatalf("os.ReadFile(%q) error = %v", outputPath, err)
-	}
-	want := "recover-reason=issue 42: draft PR"
-	if !strings.Contains(string(out), want) {
-		t.Errorf("GITHUB_OUTPUT contents = %q, want to contain %q", out, want)
+	if out, err := os.ReadFile(outputPath); err == nil && strings.Contains(string(out), "draft PR") {
+		t.Errorf("GITHUB_OUTPUT must not contain a draft-PR rejection reason; got %q", out)
 	}
 }
 

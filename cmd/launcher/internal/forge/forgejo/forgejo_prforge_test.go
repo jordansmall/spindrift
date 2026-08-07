@@ -193,19 +193,47 @@ func TestOpenPRForBranch_Found(t *testing.T) {
 	}
 }
 
-// TestOpenPRForBranch_DraftSkipped verifies OpenPRForBranch does not adopt a
-// draft pull (title-prefixed "WIP:" or draft=true), even when its head
-// branch matches.
-func TestOpenPRForBranch_DraftSkipped(t *testing.T) {
+// TestOpenPRForBranch_DraftAdopted verifies OpenPRForBranch returns a draft
+// pull (title-prefixed "WIP:" or draft=true) whose head branch matches, with
+// IsDraft set to true, so recover can adopt a stranded draft PR (issue
+// #2408) on Forgejo the same way it already does on GitHub.
+func TestOpenPRForBranch_DraftAdopted(t *testing.T) {
 	pr := newPRForgeTestForge(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("[" + pullJSON(206, "open", false, true, true, "WIP: add feature", "agent/issue-206", "abc123", "main") + "]"))
 	})
-	_, ok, err := pr.OpenPRForBranch("agent/issue-206")
+	got, ok, err := pr.OpenPRForBranch("agent/issue-206")
 	if err != nil {
 		t.Fatalf("OpenPRForBranch(...) unexpected error: %v", err)
 	}
-	if ok {
-		t.Fatal("OpenPRForBranch(...) ok = true, want false (draft pull must not be adopted)")
+	if !ok {
+		t.Fatal("OpenPRForBranch(...) ok = false, want true (draft pull must be adopted)")
+	}
+	if !got.IsDraft {
+		t.Fatal("OpenPRForBranch(...) IsDraft = false, want true")
+	}
+	if got.URL != "https://forge.test/owner/repo/pulls/206" {
+		t.Fatalf("OpenPRForBranch(...) URL = %q, want %q", got.URL, "https://forge.test/owner/repo/pulls/206")
+	}
+}
+
+// TestOpenPRForBranch_DraftFieldAdopted verifies OpenPRForBranch returns a
+// draft pull signaled solely via the draft=true field (no WIP title prefix)
+// whose head branch matches, with IsDraft set to true — covering the other
+// of the two draft signals isDraftPull reads, alongside the WIP-title
+// convention covered by TestOpenPRForBranch_DraftAdopted.
+func TestOpenPRForBranch_DraftFieldAdopted(t *testing.T) {
+	pr := newPRForgeTestForge(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("[" + pullJSON(206, "open", false, true, true, "add feature", "agent/issue-206", "abc123", "main") + "]"))
+	})
+	got, ok, err := pr.OpenPRForBranch("agent/issue-206")
+	if err != nil {
+		t.Fatalf("OpenPRForBranch(...) unexpected error: %v", err)
+	}
+	if !ok {
+		t.Fatal("OpenPRForBranch(...) ok = false, want true (draft pull must be adopted)")
+	}
+	if !got.IsDraft {
+		t.Fatal("OpenPRForBranch(...) IsDraft = false, want true")
 	}
 }
 
