@@ -8,6 +8,24 @@ import (
 	"strings"
 )
 
+// The When values a ValidateMarkerRow's When field is compared against in
+// Validate and validateMarkerMessage, named so a row-value typo is a
+// compile-time/IDE-assisted mismatch rather than only a runtime fallback-arm
+// error.
+const (
+	whenReadOnlyResearch    = "readOnlyResearch"
+	whenOrchestratorEnabled = "orchestratorEnabled"
+	whenBoxAccessReadOnly   = "boxAccessReadOnly"
+	whenFilerFileRelay      = "filerFileRelay"
+)
+
+// The Severity values a ValidateMarkerRow's Severity field is compared
+// against in Validate.
+const (
+	severityReject = "reject"
+	severityWarn   = "warn"
+)
+
 // ValidateMarkerRow is the Go mirror of one row in
 // lib/prompt-contract.nix's validateMarkers registry. JSON tags mirror the
 // nix attrset's field names literally, the same convention FragmentRow
@@ -100,16 +118,16 @@ func Validate(e Env, result Result, rows []ValidateMarkerRow) (warnings []string
 		var haystack string
 
 		switch row.When {
-		case "readOnlyResearch":
+		case whenReadOnlyResearch:
 			gateActive = kind == "research" && gates["BOX_ACCESS_READ_ONLY"]
 			haystack = result.Prompt
-		case "orchestratorEnabled":
+		case whenOrchestratorEnabled:
 			gateActive = gates["ORCHESTRATOR"] && result.Handoff.ReviewPromptFile != ""
 			haystack = result.Handoff.ReviewPromptFile
-		case "boxAccessReadOnly":
+		case whenBoxAccessReadOnly:
 			gateActive = gates["BOX_ACCESS_READ_ONLY"] && kind != "research"
 			haystack = result.Prompt
-		case "filerFileRelay":
+		case whenFilerFileRelay:
 			gateActive = gates["FILER_FILE_RELAY"]
 			haystack = filerPromptFrom(result.AgentsJSON)
 		default:
@@ -123,9 +141,9 @@ func Validate(e Env, result Result, rows []ValidateMarkerRow) (warnings []string
 		message := validateMarkerMessage(row)
 
 		switch row.Severity {
-		case "reject":
+		case severityReject:
 			return warnings, fmt.Errorf("%s", message)
-		case "warn":
+		case severityWarn:
 			warnings = append(warnings, message)
 		default:
 			return warnings, fmt.Errorf("promptassembly: validate: unknown severity %q for row %q", row.Severity, row.ID)
@@ -164,13 +182,13 @@ func filerPromptFrom(agentsJSON string) string {
 // fragment/var literal in this package's non-test Go source.
 func validateMarkerMessage(row ValidateMarkerRow) string {
 	switch row.When {
-	case "readOnlyResearch":
+	case whenReadOnlyResearch:
 		return fmt.Sprintf("_validate_prompt_contract: read-only research dispatch's rendered prompt is missing the required '%s' marker -- this belongs in research-prompt.md's (or a SPINDRIFT_PROMPT_DIR override's) POST THE VERDICT section; without it a read-only Box has no way to hand its verdict to the launcher. Refusing to invoke the Driver.", row.Marker)
-	case "orchestratorEnabled":
+	case whenOrchestratorEnabled:
 		return fmt.Sprintf("_validate_prompt_contract: the orchestrator's rendered review prompt is missing the required '%s' marker -- this belongs in review-prompt.md's (or a SPINDRIFT_PROMPT_DIR override's) verdict line; without it the code-owned review loop has nothing to gate on. Refusing to invoke the Driver.", row.Marker)
-	case "boxAccessReadOnly":
+	case whenBoxAccessReadOnly:
 		return fmt.Sprintf("_validate_prompt_contract: warning -- read-only dispatch's rendered prompt is missing the '%s' marker (belongs in issue-prompt.md's, or fix-prompt.md's injected, OPEN A PULL REQUEST section). Proceeding: a status=ready run with no PR-intent line still gets one resume-nudge attempt post-driver, and a genuinely exhausted attempt falls back to the merge-blocked report rather than losing the branch.", row.Marker)
-	case "filerFileRelay":
+	case whenFilerFileRelay:
 		return fmt.Sprintf("_validate_prompt_contract: warning -- filer-relay dispatch's rendered filer prompt is missing the '%s' marker (belongs in filer-prompt.md's, or a SPINDRIFT_PROMPT_DIR override's, filer-file-relay-injected section). Proceeding: the filer's own best-effort PR-body fallback still records the issue reference even without the relay.", row.Marker)
 	}
 	return fmt.Sprintf("_validate_prompt_contract: missing '%s' marker", row.Marker)
