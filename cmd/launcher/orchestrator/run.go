@@ -117,6 +117,16 @@ type config struct {
 // a terminal SPINDRIFT_OUTCOME line, or its verdict is anything but BLOCK
 // (APPROVE, or no verdict at all -- the S1 single-pass shape), or either
 // numeric cap is reached.
+// overrideIfSet writes src into *dst when src is non-empty, leaving *dst
+// untouched otherwise -- the shared shape behind every per-pass config field
+// (reviewModel, reviewEffort, ...) that overrides a coordinator-inherited
+// value only when explicitly configured.
+func overrideIfSet(dst *string, src string) {
+	if src != "" {
+		*dst = src
+	}
+}
+
 func run(cfg config, stdout io.Writer) (int, error) {
 	if cfg.reviewPromptFile != "" {
 		return runWithReviewPass(cfg, stdout)
@@ -304,21 +314,13 @@ func runWithReviewPass(cfg config, stdout io.Writer) (int, error) {
 		reviewCfg.promptFile = cfg.reviewPromptFile
 		reviewCfg.sessionFile = ""
 		reviewCfg.topLevelRole = driverkit.ReviewerRole
-		// Issue #2277: a configured reviewer model overrides the coordinator
-		// model reviewCfg otherwise inherited via `reviewCfg := cfg` above;
-		// an unset reviewModel leaves that inherited cfg.model in place, so
-		// the review pass falls back to the coordinator's own model.
-		if cfg.reviewModel != "" {
-			reviewCfg.model = cfg.reviewModel
-		}
-		// Issue #2387: a configured reviewer effort overrides the
-		// coordinator effort reviewCfg otherwise inherited via `reviewCfg :=
-		// cfg` above; an unset reviewEffort leaves that inherited
-		// cfg.effort in place, so the review pass falls back to the
-		// coordinator's own effort.
-		if cfg.reviewEffort != "" {
-			reviewCfg.effort = cfg.reviewEffort
-		}
+		// Issue #2277 / #2387: a configured reviewer model/effort overrides
+		// the coordinator value reviewCfg otherwise inherited via
+		// `reviewCfg := cfg` above; an unset override leaves that inherited
+		// cfg value in place, so the review pass falls back to the
+		// coordinator's own model/effort.
+		overrideIfSet(&reviewCfg.model, cfg.reviewModel)
+		overrideIfSet(&reviewCfg.effort, cfg.reviewEffort)
 
 		rc, err = invokeDriverExec(reviewCfg, stdout)
 		if err != nil {
