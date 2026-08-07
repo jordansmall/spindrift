@@ -549,11 +549,17 @@ in
       exit 1
     }
 
-    sites=$(grep -n 'if .*\$ORCHESTRATOR\b' "$entrypoint" | cut -d: -f1)
-    [ -n "$sites" ] || {
-      echo "expected at least one \$ORCHESTRATOR conditional in agent/entrypoint.sh, found none" >&2
-      exit 1
-    }
+    # Issue #2356 deleted the one bash if/else $ORCHESTRATOR conditional
+    # this loop used to always find (_validate_prompt_contract's
+    # orchestratorEnabled row) along with the rest of the reject/warn
+    # matrix -- the Go verb now owns that fork's gating end to end, covered
+    # by its own unit tests, not this grep. Every remaining $ORCHESTRATOR
+    # read left in entrypoint.sh is the bare `[ -n "$ORCHESTRATOR" ] && ...`
+    # form, which this pattern doesn't match, so zero sites is now the
+    # expected steady state -- this loop still catches a *future* if/else
+    # $ORCHESTRATOR conditional missing its off-row, it just no longer
+    # requires one to exist.
+    sites=$(grep -n 'if .*\$ORCHESTRATOR\b' "$entrypoint" | cut -d: -f1 || true)
     for start in $sites; do
       branch=$(awk -v start="$start" '
         NR <= start { next }
