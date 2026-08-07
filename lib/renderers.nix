@@ -352,9 +352,9 @@ rec {
   # Which schema members belong to the launcher's host-config surface: not
   # secret and not boxEnvOnly, or explicitly hostConfig-overridden (the model
   # knob plus the six host-held secrets) — mirrors lib/env-schema.nix's
-  # hostConfig header doc. Shared by renderSchemaConfigGo below and its
-  # drift check (nix/checks/schema-drift.nix) so struct membership can't
-  # drift from the check.
+  # hostConfig header doc. Feeds renderSchemaConfigGo below, which its
+  # drift check (nix/checks/schema-drift.nix) calls too, so struct
+  # membership can't drift from the check.
   isHostConfigMember = e: ((!(e.secret or false)) && !(e.boxEnvOnly or false)) || (e.hostConfig or false);
 
   # cmd/launcher/schemaconfig_gen.go content: the dark, unreferenced
@@ -368,16 +368,30 @@ rec {
     let
       members = filterAttrs (_: isHostConfigMember) schema;
       isFloatTyped = e: builtins.isFloat (e.default or null);
-      goType =
+      # Single source of truth for the flag's Go-side type shape; goType
+      # and loaderLine both dispatch on this instead of repeating the
+      # bool/int/float/string cascade, so they can't drift apart.
+      typeClass =
         e:
         if flagKind e == "bool" then
           "bool"
         else if flagKind e == "int" then
           "int"
         else if isFloatTyped e then
-          "float64"
+          "float"
         else
           "string";
+      # Secrets are always string-typed in schemaConfig regardless of
+      # typeClass — none are int/bool/float-typed today, but a secret
+      # ever becoming one must not silently mismatch its os.Getenv loader.
+      goType =
+        e:
+        if e.secret or false then
+          "string"
+        else if typeClass e == "float" then
+          "float64"
+        else
+          typeClass e;
       fieldLine = key: e: "\t${key} ${goType e}\n";
       fields = concatStrings (mapAttrsToList fieldLine members);
       loaderLine =
@@ -386,11 +400,11 @@ rec {
           ""
         else if e.secret or false then
           "\t\t${key}: os.Getenv(\"${e.env}\"),\n"
-        else if flagKind e == "bool" then
+        else if typeClass e == "bool" then
           "\t\t${key}: getenvSchema(\"${e.env}\") != \"\",\n"
-        else if flagKind e == "int" then
+        else if typeClass e == "int" then
           "\t\t${key}: ${if e.intKind == "positive" then "atoiSchema" else "atoiNonnegSchema"}(\"${e.env}\"),\n"
-        else if isFloatTyped e then
+        else if typeClass e == "float" then
           "\t\t${key}: floatNonnegSchema(\"${e.env}\"),\n"
         else
           "\t\t${key}: getenvSchema(\"${e.env}\"),\n";
