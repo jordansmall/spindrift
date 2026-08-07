@@ -77,7 +77,10 @@ let
       intKindOnNonInt = filter (e: (e ? intKind) && !(isIntTyped e)) entries;
       # intKind, when present, must be exactly one of the two documented enum
       # values (lib/env-schema.nix header) — a typo (e.g. "positve") would
-      # otherwise silently pass presence/int-typedness checks.
+      # otherwise silently pass presence/int-typedness checks. A fourth
+      # invariant beyond missingIntKind/intKindOnNonInt/hostDerivedExcluded,
+      # added defensively since presence+int-typedness checks alone don't
+      # catch a misspelled enum value.
       badIntKindValue = filter (
         e:
         (e ? intKind)

@@ -55,10 +55,10 @@
 #                        "nonneg" for atoiNonnegSchema (zero is a valid value --
 #                        use for timeouts/poll intervals/counts where 0 means
 #                        "disabled"/"uncapped"). Required on every int-typed
-#                        schema member loadConfig() reads via atoiSchema/
-#                        atoiNonnegSchema; must not appear on non-int members.
-#                        Enforced by the schema-drift check (nix/checks/
-#                        schema-drift.nix)
+#                        host-config member (not secret, not boxEnvOnly) that
+#                        loadConfig() reads via atoiSchema/atoiNonnegSchema;
+#                        must not appear on non-int members. Enforced by the
+#                        schema-drift check (nix/checks/schema-drift.nix)
 #   hostConfig   bool    overrides the derived host-config membership rule
 #                        (member iff not secret and not boxEnvOnly) for knobs
 #                        where that derivation gives the wrong answer
