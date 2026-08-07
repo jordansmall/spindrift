@@ -386,6 +386,14 @@ let
     + lib.concatMapStrings (v: "  " + lib.escapeShellArg v + "\n") fragmentSubstVars
     + ")\n";
 
+  # The same Conditional fragment registry, as JSON rather than a bash
+  # preamble (issue #2354): baked into the image for the Go
+  # `driver-exec assemble-prompt` verb's `--registry` flag (lib/image.nix), a
+  # sibling of fragmentRegistryPreamble above rather than a replacement for
+  # it -- the bash preamble still drives entrypoint.sh's own fragment loop
+  # until a later slice flips that call site onto the verb.
+  fragmentsRegistryJson = builtins.toJSON fragments;
+
   # The shared prompt block registry (lib/prompt-contract.nix, issue #2245),
   # rendered into agent/entrypoint.sh's `_INJECT_BLOCK_ROWS` array the same
   # way fragmentRegistryPreamble above renders `_FRAGMENT_ROWS` -- already
@@ -589,6 +597,7 @@ let
       driverAgentFiles
       driverPreamble
       fragmentRegistryPreamble
+      fragmentsRegistryJson
       contractRegistryPreamble
       prompt
       scoutPrompt

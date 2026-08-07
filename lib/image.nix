@@ -73,6 +73,11 @@
   # agent/entrypoint.sh's _FRAGMENT_ROWS loop input and _FRAGMENT_SUBST_VARS
   # substitution allowlist.
   fragmentRegistryPreamble,
+  # The same Conditional fragment registry as JSON (issue #2354): baked into
+  # the image at $out/agent/fragments-registry.json for the Go
+  # `driver-exec assemble-prompt` verb's `--registry` flag -- a sibling of
+  # fragmentRegistryPreamble above, not a replacement for it.
+  fragmentsRegistryJson,
   # The shared prompt block registry (lib/prompt-contract.nix, issue #2245)
   # rendered into agent/entrypoint.sh's _INJECT_BLOCK_ROWS array, the
   # `_contract_marker` lookup's data source (issue #2246). Mirrors
@@ -352,6 +357,7 @@ let
     cp ${pkgs.writeText "comms-contract.md" commsBlock} $out/agent/comms-contract.md
     cp ${pkgs.writeText "check-contract.md" checkBlock} $out/agent/check-contract.md
     cp ${pkgs.writeText "research-outcome-contract.md" researchOutcomeContract} $out/agent/research-outcome-contract.md
+    cp ${pkgs.writeText "fragments-registry.json" fragmentsRegistryJson} $out/agent/fragments-registry.json
     cp ${pkgs.writeText "issue-prompt.md" (injectOutcomeContract prompt)} $out/agent/prompts/issue-prompt.md
     cp ${pkgs.writeText "scout-prompt.md" scoutPrompt} $out/agent/prompts/scout-prompt.md
     cp ${pkgs.writeText "review-prompt.md" reviewPrompt} $out/agent/prompts/review-prompt.md
