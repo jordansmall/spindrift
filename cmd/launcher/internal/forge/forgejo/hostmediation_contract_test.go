@@ -110,14 +110,17 @@ func (h *hostMediationHarness) handle(w http.ResponseWriter, r *http.Request) {
 			"html_url": "https://forge.test/owner/repo/pulls/999",
 		})
 	case r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/owner/repo/pulls":
-		// Only reachable via OpenPRForBranch, itself only reached after the
-		// already-exists-adopt head's 409 create above -- the
-		// DraftPRCreationAdoptsExisting scenario (issue #2407 slice 3).
+		// Only reachable via openAnyPRForBranch, itself only reached after
+		// the already-exists-adopt head's 409 create above -- the
+		// DraftPRCreationAdoptsExisting scenario (issue #2407 slice 3). The
+		// seeded PR is a draft, matching CreateDraftPR's own real output
+		// (forgejo always creates a "WIP:"-prefixed draft PR), so this
+		// exercises the draft-inclusive adoption path.
 		json.NewEncoder(w).Encode([]map[string]any{
 			{
 				"number":   2407,
 				"html_url": "https://forge.test/owner/repo/pulls/2407",
-				"draft":    false,
+				"draft":    true,
 				"title":    "feat: add widget",
 				"head":     map[string]any{"ref": "agent/issue-2407-adopt"},
 			},
