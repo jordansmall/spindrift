@@ -53,5 +53,18 @@ func Gates(e Env) map[string]bool {
 		g[k] = v
 	}
 
+	// AUTO_FORMAT/AUTO_LINT (lib/fragments.nix ~152-159): plain passthrough
+	// presence gates, not derived from any other state -- Env.AutoFormat/
+	// Env.AutoLint already carry entrypoint.sh's old
+	// "[ -n "${AUTO_FORMAT:-}" ]"/"[ -n "${AUTO_LINT:-}" ]" checks verbatim.
+	g["AUTO_FORMAT"] = e.AutoFormat
+	g["AUTO_LINT"] = e.AutoLint
+
+	// CI_FAILURE_SUMMARY (lib/fragments.nix ~162-166): fires exactly when
+	// the launcher forwarded a non-empty CI_FAILURE_SUMMARY (issue #426),
+	// mirroring entrypoint.sh's old "[ -n "${CI_FAILURE_SUMMARY:-}" ]"
+	// presence check on the value itself, not a separate boolean knob.
+	g["CI_FAILURE_SUMMARY"] = e.CIFailureSummary != ""
+
 	return g
 }

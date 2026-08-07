@@ -107,6 +107,198 @@ func TestAssembleCoveredCellRendersPrompt(t *testing.T) {
 	}
 }
 
+// TestAssembleAutoFormatGate covers issue #2354's AUTO_FORMAT wiring
+// (lib/fragments.nix: gate = "AUTO_FORMAT", var = "AUTO_FORMAT_STEP"): the
+// gate is a plain passthrough of Env.AutoFormat (entrypoint.sh's old
+// `[ -n "${AUTO_FORMAT:-}" ]` presence check, ported verbatim as a bool field
+// rather than restated as a second string-presence field), so auto-format.md
+// renders into the prompt when it's true and stays absent when it's false.
+func TestAssembleAutoFormatGate(t *testing.T) {
+	reg := loadTestRegistry(t)
+
+	cases := []struct {
+		name       string
+		autoFormat bool
+	}{
+		{name: "unset", autoFormat: false},
+		{name: "set", autoFormat: true},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			env := coveredEnv()
+			env.AutoFormat = tc.autoFormat
+
+			result, err := Assemble(env, reg)
+			if err != nil {
+				t.Fatalf("Assemble: %v", err)
+			}
+
+			const marker = "Before committing, auto-format the files you changed"
+			got := strings.Contains(result.Prompt, marker)
+			if got != tc.autoFormat {
+				t.Errorf("Prompt contains auto-format.md text = %v, want %v:\n%s", got, tc.autoFormat, result.Prompt)
+			}
+		})
+	}
+}
+
+// TestAssembleAutoLintGate covers issue #2354's AUTO_LINT wiring
+// (lib/fragments.nix: gate = "AUTO_LINT", var = "AUTO_LINT_STEP"): same
+// plain-passthrough presence semantics as AUTO_FORMAT above.
+func TestAssembleAutoLintGate(t *testing.T) {
+	reg := loadTestRegistry(t)
+
+	cases := []struct {
+		name     string
+		autoLint bool
+	}{
+		{name: "unset", autoLint: false},
+		{name: "set", autoLint: true},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			env := coveredEnv()
+			env.AutoLint = tc.autoLint
+
+			result, err := Assemble(env, reg)
+			if err != nil {
+				t.Fatalf("Assemble: %v", err)
+			}
+
+			const marker = "Before committing, lint the files you changed"
+			got := strings.Contains(result.Prompt, marker)
+			if got != tc.autoLint {
+				t.Errorf("Prompt contains auto-lint.md text = %v, want %v:\n%s", got, tc.autoLint, result.Prompt)
+			}
+		})
+	}
+}
+
+// TestAssembleCIFailureSummaryGate covers issue #2354's CI_FAILURE_SUMMARY
+// wiring (lib/fragments.nix: gate = "CI_FAILURE_SUMMARY", var =
+// "CI_FAILURE_STEP", extraSubstVars = [ "CI_FAILURE_SUMMARY" ]) on a fix-pass
+// Env (the only cell that renders fix-prompt.md, which is the only base
+// template referencing ${CI_FAILURE_STEP}): the gate mirrors entrypoint.sh's
+// old `[ -n "${CI_FAILURE_SUMMARY:-}" ]` presence check on the *value*, not a
+// separate bool field, so a non-empty CIFailureSummary both turns the gate on
+// and substitutes its own text into ci-failure.md's ${CI_FAILURE_SUMMARY}
+// token; an empty CIFailureSummary (the default, non-fix-pass, or a fix pass
+// where CI didn't fail) leaves ci-failure.md's marker text out of the prompt
+// entirely.
+func TestAssembleCIFailureSummaryGate(t *testing.T) {
+	reg := loadTestRegistry(t)
+
+	cases := []struct {
+		name             string
+		ciFailureSummary string
+		wantRendered     bool
+	}{
+		{name: "unset on a fix pass", ciFailureSummary: "", wantRendered: false},
+		{name: "set on a fix pass", ciFailureSummary: "go test ./... failed: TestFoo", wantRendered: true},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			env := coveredEnv()
+			env.FixPass = 1
+			env.CIFailureSummary = tc.ciFailureSummary
+
+			result, err := Assemble(env, reg)
+			if err != nil {
+				t.Fatalf("Assemble: %v", err)
+			}
+
+			const marker = "The launcher captured this from the failing PR checks"
+			got := strings.Contains(result.Prompt, marker)
+			if got != tc.wantRendered {
+				t.Errorf("Prompt contains ci-failure.md text = %v, want %v:\n%s", got, tc.wantRendered, result.Prompt)
+			}
+			if tc.wantRendered && !strings.Contains(result.Prompt, tc.ciFailureSummary) {
+				t.Errorf("Prompt missing substituted CI_FAILURE_SUMMARY value %q:\n%s", tc.ciFailureSummary, result.Prompt)
+			}
+		})
+	}
+}
+
+// promptsDirMissingFragment symlinks a fixture PromptsDir alongside the real
+// templates/default/prompts tree (base templates plus every fragments/*
+// file) EXCEPT the named fragment, which it omits entirely -- the exact
+// on-disk shape TestAssembleMissingGatedFragmentFileIsSwallowed needs to
+// observe the fragment loop's missing-file handling in isolation, without
+// hand-building a whole prompts fixture of its own.
+func promptsDirMissingFragment(t *testing.T, omit string) string {
+	t.Helper()
+	dir := t.TempDir()
+	realDir, err := filepath.Abs(promptsDir)
+	if err != nil {
+		t.Fatalf("Abs: %v", err)
+	}
+
+	entries, err := os.ReadDir(realDir)
+	if err != nil {
+		t.Fatalf("ReadDir(%s): %v", realDir, err)
+	}
+	for _, entry := range entries {
+		if entry.Name() == "fragments" {
+			continue
+		}
+		if err := os.Symlink(filepath.Join(realDir, entry.Name()), filepath.Join(dir, entry.Name())); err != nil {
+			t.Fatalf("Symlink(%s): %v", entry.Name(), err)
+		}
+	}
+
+	realFragments := filepath.Join(realDir, "fragments")
+	fragmentsDir := filepath.Join(dir, "fragments")
+	if err := os.Mkdir(fragmentsDir, 0o755); err != nil {
+		t.Fatalf("Mkdir(%s): %v", fragmentsDir, err)
+	}
+	fragEntries, err := os.ReadDir(realFragments)
+	if err != nil {
+		t.Fatalf("ReadDir(%s): %v", realFragments, err)
+	}
+	for _, entry := range fragEntries {
+		if entry.Name() == omit {
+			continue
+		}
+		if err := os.Symlink(filepath.Join(realFragments, entry.Name()), filepath.Join(fragmentsDir, entry.Name())); err != nil {
+			t.Fatalf("Symlink(%s): %v", entry.Name(), err)
+		}
+	}
+
+	return dir
+}
+
+// TestAssembleMissingGatedFragmentFileIsSwallowed covers old bash's
+// documented quirk (entrypoint.sh: 1001-1009's fragment loop, e.g.
+// `printf -v "$_fvar" '%s' "$(_subst "${PROMPTS_DIR}/fragments/${_ffile}")"`):
+// because the failed command substitution sits as a printf argument rather
+// than a bare assignment, `set -e` never sees a non-zero exit and the
+// missing/unreadable fragment silently resolves to an empty string instead
+// of aborting the script. Assemble's fragment loop must reproduce that
+// specific swallow -- CAVEMAN_BAKED is on in coveredEnv, but its backing
+// fragment file is absent here, so Assemble must still succeed, with
+// CAVEMAN_STEP resolving to empty rather than the file's real text or a
+// literal unsubstituted token.
+func TestAssembleMissingGatedFragmentFileIsSwallowed(t *testing.T) {
+	reg := loadTestRegistry(t)
+	env := coveredEnv()
+	env.PromptsDir = promptsDirMissingFragment(t, "caveman-default.md")
+
+	result, err := Assemble(env, reg)
+	if err != nil {
+		t.Fatalf("Assemble: %v, want nil (a missing gated fragment file must be swallowed, not hard-fail)", err)
+	}
+
+	if strings.Contains(result.Prompt, "Default to the `/caveman` skill") {
+		t.Errorf("Prompt contains caveman-default.md's fragment text despite the file being absent from PromptsDir/fragments:\n%s", result.Prompt)
+	}
+	if strings.Contains(result.Prompt, "${CAVEMAN_STEP}") {
+		t.Errorf("Prompt still contains a literal unsubstituted ${CAVEMAN_STEP} token, want empty-string substitution:\n%s", result.Prompt)
+	}
+}
+
 // TestAssembleSkillPreambleSelfSubstitution covers a fragment substituting
 // its own extraSubstVars entry: skill-preamble.md's ${SKILLS_FOUND} must
 // resolve to Env.SkillsFound's actual value, not stay literal or empty.
@@ -284,25 +476,6 @@ func TestAssembleUnsupportedCell(t *testing.T) {
 		{name: "wrong issue tracker", mutate: func(e *Env) { e.IssueTracker = "bitbucket" }},
 		{name: "unrecognized code forge", mutate: func(e *Env) { e.CodeForge = "bogus" }},
 		{name: "unrecognized dispatch kind", mutate: func(e *Env) { e.DispatchKind = "bogus" }},
-		{name: "skills not fully baked", mutate: func(e *Env) { e.TDDSkillBaked = false }},
-		{name: "no skills found", mutate: func(e *Env) { e.SkillsFound = "" }},
-		{name: "orchestrator on, research kind", mutate: func(e *Env) {
-			e.OrchestratorEnabled = true
-			e.DispatchKind = "research"
-		}},
-		{name: "orchestrator on, fix pass", mutate: func(e *Env) {
-			e.OrchestratorEnabled = true
-			e.FixPass = 1
-		}},
-		{name: "orchestrator on, partial skills (found but not all baked)", mutate: func(e *Env) {
-			e.OrchestratorEnabled = true
-			e.TDDSkillBaked = false
-		}},
-		{name: "orchestrator on, partial skills (none found but one baked)", mutate: func(e *Env) {
-			e.OrchestratorEnabled = true
-			e.SkillsFound = ""
-			e.TDDSkillBaked = true
-		}},
 	}
 	for _, tc := range cases {
 		tc := tc
@@ -321,11 +494,15 @@ func TestAssembleUnsupportedCell(t *testing.T) {
 	}
 }
 
-// TestAssembleAccessForgeCellsCovered covers the three new CodeForge x
+// TestAssembleAccessForgeCellsCovered covers the CodeForge x
 // BoxWriteEnabled cells this issue adds to checkCoveredCell's covered set
 // (github+read-write was already covered): github+read-only,
-// forgejo+read-write, and forgejo+read-only. Each must render without
-// error.
+// forgejo+read-write, forgejo+read-only, plus (issue #2354) the "git" and
+// "local" CodeForge values -- both schema-documented (lib/env-schema.nix)
+// and already handled identically to "github" by Gates()
+// (gates_access_forge.go: "only forgejo diverges from the shared gh-flavored
+// path"), so checkCoveredCell's allowlist must accept them too. Each must
+// render without error.
 func TestAssembleAccessForgeCellsCovered(t *testing.T) {
 	reg := loadTestRegistry(t)
 
@@ -336,6 +513,8 @@ func TestAssembleAccessForgeCellsCovered(t *testing.T) {
 		{name: "forgejo read-write", mutate: func(e *Env) { e.CodeForge = "forgejo" }},
 		{name: "forgejo read-only", mutate: func(e *Env) { e.CodeForge = "forgejo"; e.BoxWriteEnabled = false }},
 		{name: "github read-only", mutate: func(e *Env) { e.BoxWriteEnabled = false }},
+		{name: "git forge", mutate: func(e *Env) { e.CodeForge = "git" }},
+		{name: "local forge", mutate: func(e *Env) { e.CodeForge = "local" }},
 	}
 	for _, tc := range cases {
 		tc := tc
@@ -928,6 +1107,170 @@ func TestAssembleOrchestratorSkillsAbsentCovered(t *testing.T) {
 
 	if strings.Contains(result.Prompt, "Skills available:") {
 		t.Errorf("Prompt contains skill-preamble.md fragment text, want it absent (SKILLS_FOUND gate off):\n%s", result.Prompt)
+	}
+}
+
+// TestAssembleOrchestratorOffSkillsAbsentCovered mirrors
+// TestAssembleOrchestratorSkillsAbsentCovered for the orchestrator-off
+// branch (issue #2354): SkillsFound == "" and every *SkillBaked flag false
+// ("skills-absent") is covered when the orchestrator is off too, not just
+// when it's on -- most real bats fixtures and many real Consumers bake zero
+// skills, and there's no reason skills-absent should only be safe when the
+// orchestrator happens to be on.
+func TestAssembleOrchestratorOffSkillsAbsentCovered(t *testing.T) {
+	reg := loadTestRegistry(t)
+	env := coveredEnv()
+	env.SkillsFound = ""
+	env.CavemanSkillBaked = false
+	env.TDDSkillBaked = false
+	env.CommitSkillBaked = false
+	env.CodeReviewSkillBaked = false
+
+	result, err := Assemble(env, reg)
+	if err != nil {
+		t.Fatalf("Assemble: %v, want nil error (orchestrator off + skills fully absent is covered)", err)
+	}
+
+	if strings.Contains(result.Prompt, "Skills available:") {
+		t.Errorf("Prompt contains skill-preamble.md fragment text, want it absent (SKILLS_FOUND gate off):\n%s", result.Prompt)
+	}
+}
+
+// TestAssemblePartialSkillsCovered covers that a PARTIAL skill-baked
+// combination -- here, only the tdd skill baked, the other three not -- is a
+// covered cell for the orchestrator-off branch, not rejected by
+// checkCoveredCell (issue #2354): each of the four per-skill gates
+// (CAVEMAN_BAKED, TDD_BAKED, COMMIT_BAKED, CODE_REVIEW_BAKED) is a fully
+// independent boolean with no cross-dependency, matching Gates()'s own
+// implementation and lib/image.nix's per-skill baking -- a real Consumer can
+// legitimately bake any subset of the four. Only TDD_STEP's fragment text
+// must render; CAVEMAN_STEP/COMMIT_STEP/CODE_REVIEW_STEP must not.
+func TestAssemblePartialSkillsCovered(t *testing.T) {
+	reg := loadTestRegistry(t)
+	env := coveredEnv()
+	env.SkillsFound = "tdd"
+	env.CavemanSkillBaked = false
+	env.TDDSkillBaked = true
+	env.CommitSkillBaked = false
+	env.CodeReviewSkillBaked = false
+
+	result, err := Assemble(env, reg)
+	if err != nil {
+		t.Fatalf("Assemble: %v, want nil error (partial skill-baked combination is covered)", err)
+	}
+
+	if !strings.Contains(result.Prompt, "Use the `/tdd` skill to run the test-first loop") {
+		t.Errorf("Prompt missing tdd-default.md fragment text (TDD_BAKED gate on):\n%s", result.Prompt)
+	}
+	for _, unwanted := range []string{
+		"Default to the `/caveman` skill",
+		"Use the `/commit` skill to write every commit message",
+		"Run the `/code-review` skill FIRST",
+	} {
+		if strings.Contains(result.Prompt, unwanted) {
+			t.Errorf("Prompt contains %q, want only TDD_STEP to render (partial skill-baked combination)", unwanted)
+		}
+	}
+}
+
+// TestAssembleOrchestratorPartialSkillsCovered mirrors
+// TestAssemblePartialSkillsCovered for the orchestrator-on branch (issue
+// #2354): a partial skill-baked combination is covered there too, not just
+// when the orchestrator is off.
+func TestAssembleOrchestratorPartialSkillsCovered(t *testing.T) {
+	reg := loadTestRegistry(t)
+	env := coveredEnv()
+	env.OrchestratorEnabled = true
+	env.SkillsFound = "tdd"
+	env.CavemanSkillBaked = false
+	env.TDDSkillBaked = true
+	env.CommitSkillBaked = false
+	env.CodeReviewSkillBaked = false
+
+	result, err := Assemble(env, reg)
+	if err != nil {
+		t.Fatalf("Assemble: %v, want nil error (orchestrator on + partial skill-baked combination is covered)", err)
+	}
+
+	if !strings.Contains(result.Prompt, "Use the `/tdd` skill to run the test-first loop") {
+		t.Errorf("Prompt missing tdd-default.md fragment text (TDD_BAKED gate on):\n%s", result.Prompt)
+	}
+	for _, unwanted := range []string{
+		"Default to the `/caveman` skill",
+		"Use the `/commit` skill to write every commit message",
+		"Run the `/code-review` skill FIRST",
+	} {
+		if strings.Contains(result.Prompt, unwanted) {
+			t.Errorf("Prompt contains %q, want only TDD_STEP to render (partial skill-baked combination)", unwanted)
+		}
+	}
+}
+
+// TestAssembleOrchestratorFixPassCovered covers that OrchestratorEnabled ==
+// true combined with FixPass > 0 is a covered cell (issue #2354): Gates()'s
+// own implementation and Assemble's base-template switch already handle
+// this combination correctly regardless of the orchestrator flag, and it is
+// reachable in real production (ORCHESTRATOR_ENABLED is a static
+// per-Consumer knob forwarded unchanged to fix-pass Boxes). Assemble must
+// succeed and render fix-prompt.md, and Handoff.ReviewPromptFile must stay
+// empty -- review_prompt_rendered only ever populates on the default
+// fresh-work-dispatch path (kind "work", FixPass == 0), never a warm fix
+// pass. Handoff.ReviewModel, by contrast, is a separate, unconditional
+// extraction from AgentsJSONTemplate's "reviewer" key whenever the
+// orchestrator is on (entrypoint.sh: 1086-1101, see Handoff's doc comment)
+// -- it is NOT gated to the fresh-work-dispatch path, so with a reviewer
+// configured it still populates here.
+func TestAssembleOrchestratorFixPassCovered(t *testing.T) {
+	reg := loadTestRegistry(t)
+	env := coveredEnv()
+	env.OrchestratorEnabled = true
+	env.FixPass = 1
+	env.AgentsJSONTemplate = `{"reviewer":{"model":"review-model-x"}}`
+
+	result, err := Assemble(env, reg)
+	if err != nil {
+		t.Fatalf("Assemble: %v, want nil error (orchestrator on + fix pass is covered)", err)
+	}
+
+	if !strings.Contains(result.Prompt, "This is a warm fix pass, not a fresh implementation") {
+		t.Errorf("Prompt missing fix-prompt.md's distinguishing text:\n%s", result.Prompt)
+	}
+	if result.Handoff.ReviewPromptFile != "" {
+		t.Errorf("Handoff.ReviewPromptFile = %q, want empty (fix pass, not the default fresh-work-dispatch path)", result.Handoff.ReviewPromptFile)
+	}
+	if result.Handoff.ReviewModel != "review-model-x" {
+		t.Errorf("Handoff.ReviewModel = %q, want %q (extraction is unconditional whenever the orchestrator is on)", result.Handoff.ReviewModel, "review-model-x")
+	}
+}
+
+// TestAssembleOrchestratorResearchCovered covers that OrchestratorEnabled ==
+// true combined with DispatchKind == "research" is a covered cell (issue
+// #2354), for the same reasons as TestAssembleOrchestratorFixPassCovered:
+// Assemble must succeed and render research-prompt.md, and
+// Handoff.ReviewPromptFile must stay empty -- a research dispatch never
+// reviews (ADR 0022). Handoff.ReviewModel still populates from a configured
+// reviewer, same as the fix-pass cell (see that test's comment and
+// Handoff's doc comment).
+func TestAssembleOrchestratorResearchCovered(t *testing.T) {
+	reg := loadTestRegistry(t)
+	env := coveredEnv()
+	env.OrchestratorEnabled = true
+	env.DispatchKind = "research"
+	env.AgentsJSONTemplate = `{"reviewer":{"model":"review-model-x"}}`
+
+	result, err := Assemble(env, reg)
+	if err != nil {
+		t.Fatalf("Assemble: %v, want nil error (orchestrator on + research kind is covered)", err)
+	}
+
+	if !strings.Contains(result.Prompt, "This is a research\ndispatch (ADR 0022)") {
+		t.Errorf("Prompt missing research-prompt.md's distinguishing text:\n%s", result.Prompt)
+	}
+	if result.Handoff.ReviewPromptFile != "" {
+		t.Errorf("Handoff.ReviewPromptFile = %q, want empty (research dispatch, not the default fresh-work-dispatch path)", result.Handoff.ReviewPromptFile)
+	}
+	if result.Handoff.ReviewModel != "review-model-x" {
+		t.Errorf("Handoff.ReviewModel = %q, want %q (extraction is unconditional whenever the orchestrator is on)", result.Handoff.ReviewModel, "review-model-x")
 	}
 }
 

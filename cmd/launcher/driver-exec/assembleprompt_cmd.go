@@ -41,6 +41,9 @@ func runAssemblePrompt(args []string, stdout io.Writer) int {
 	selfContained := fs.Bool("self-contained", false, "true when SELF_CONTAINED == 1")
 	fixPass := fs.Int("fix-pass", 0, "FIX_PASS number; >0 selects fix-prompt.md")
 	resumeAfterHold := fs.Bool("resume-after-hold", false, "true when RESUME_AFTER_HOLD is set")
+	autoFormat := fs.Bool("auto-format", false, "true when AUTO_FORMAT is set")
+	autoLint := fs.Bool("auto-lint", false, "true when AUTO_LINT is set")
+	ciFailureSummary := fs.String("ci-failure-summary", "", "CI_FAILURE_SUMMARY value, launcher-forwarded on a fix pass (issue #426)")
 
 	promptsDir := fs.String("prompts-dir", "", "PROMPTS_DIR, default /agent/prompts")
 	agentsPromptFiles := fs.String("agents-prompt-files", "", "nix-baked agent-name -> promptFile JSON map")
@@ -103,6 +106,10 @@ func runAssemblePrompt(args []string, stdout io.Writer) int {
 		SelfContained:   *selfContained,
 		FixPass:         *fixPass,
 		ResumeAfterHold: *resumeAfterHold,
+
+		AutoFormat:       *autoFormat,
+		AutoLint:         *autoLint,
+		CIFailureSummary: *ciFailureSummary,
 
 		PromptsDir:          *promptsDir,
 		AgentsPromptFiles:   *agentsPromptFiles,

@@ -106,6 +106,25 @@ type Env struct {
 	// substitution.
 	SkillsFound string // entrypoint.sh: local SKILLS_FOUND
 
+	// AutoFormat and AutoLint mirror lib/env-schema.nix's AUTO_FORMAT/
+	// AUTO_LINT Consumer-facing knobs (env-schema.nix:670,681), forwarded
+	// into the Box unchanged. entrypoint.sh's fragment loop reads each as a
+	// plain passthrough-env-var presence gate ("[ -n "${AUTO_FORMAT:-}" ]"
+	// / "[ -n "${AUTO_LINT:-}" ]", not a strict boolean parse -- see git
+	// history b84c05bc/54b22cf3), so a bool field here (true only when the
+	// knob was set) reproduces that presence semantics exactly.
+	AutoFormat bool // entrypoint.sh: $AUTO_FORMAT knob presence
+	AutoLint   bool // entrypoint.sh: $AUTO_LINT knob presence
+
+	// CIFailureSummary is the launcher-forwarded CI failure text set only on
+	// a fix-pass Box when CI failed (issue #426). It doubles as both the
+	// CI_FAILURE_SUMMARY gate's own presence check (entrypoint.sh: old
+	// "[ -n "${CI_FAILURE_SUMMARY:-}" ]") and the ci-failure.md fragment's
+	// own ${CI_FAILURE_SUMMARY} extraSubstVars substitution value -- unlike
+	// AutoFormat/AutoLint above, there is no separate raw value to carry:
+	// the string's own presence is the gate.
+	CIFailureSummary string // entrypoint.sh: $CI_FAILURE_SUMMARY
+
 	// The seven fixed _subst allowlist names every _subst call carries
 	// alongside the fragment registry's per-row vars (entrypoint.sh:
 	// 405-420) — not fragment-registry-derived, so they live on Env rather
