@@ -658,6 +658,13 @@ phase_prompt_assembly() {
   # untouched here -- see the ORCHESTRATOR/Handoff.Invoker equivalence note
   # in main, near its early ORCHESTRATOR computation (line ~1185).
   _handoff="$(cat "$_handoff_out")"
+  # Test-only hook (issue #2395 slice 1): when a bats test has exported
+  # DRIVER_HANDOFF_FILE (tests/helper.bash), persist the raw Handoff JSON
+  # there before the tempfile below is removed -- mirrors how
+  # DRIVER_PROMPT_FILE/DRIVER_AGENTS_FILE already let tests/fakes/claude
+  # capture the prompt/agents JSON verbatim for golden-fixture diffing. A
+  # no-op in production, where this var is never set.
+  [ -n "${DRIVER_HANDOFF_FILE:-}" ] && cp "$_handoff_out" "$DRIVER_HANDOFF_FILE"
   rm -f "$_prompt_out" "$_agents_out" "$_handoff_out"
 }
 
