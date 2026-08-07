@@ -347,7 +347,7 @@ func testValidateMarkerRows() []ValidateMarkerRow {
 // mustContain is a small helper asserting substr appears in s; the marker
 // alone suffices for the gate-logic tests above, since
 // TestValidateMarkerMessageVerbatim separately guards each row's exact
-// message text against entrypoint.sh's.
+// message text against the registry's Message field.
 func mustContain(t *testing.T, s, substr string) {
 	t.Helper()
 	if !strings.Contains(s, substr) {
