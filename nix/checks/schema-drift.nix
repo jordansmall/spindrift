@@ -274,10 +274,15 @@ in
         subtractLists
         ;
       launcherDir = ../../cmd/launcher;
+      # schemaconfig_gen.go (issue #2364) lands here early — before config/
+      # loadConfig embeds schemaConfig — so a later slice wiring it in
+      # doesn't fail this check for dozens of knobs whose env-var literal
+      # would otherwise only live in the generated file.
       mainGoSrc = concatStringsSep "\n" (
         map (name: builtins.readFile (launcherDir + "/${name}")) [
           "main.go"
           "backend.go"
+          "schemaconfig_gen.go"
         ]
       );
       # Document artifact keys: nix-computed plumbing main.go reads via
@@ -441,6 +446,31 @@ in
       ''
         diff "$generated" "$committed" \
           || { echo "cmd/launcher/flagtable_gen.go is out of sync with lib/env-schema.nix — regenerate it" >&2; exit 1; }
+        touch $out
+      '';
+
+  # cmd/launcher/schemaconfig_gen.go must match the content generated from
+  # env-schema.nix by lib/renderers.nix renderSchemaConfigGo, gofmt-
+  # normalized the same way `nix run .#regen` normalizes it (the raw
+  # renderer output is intentionally unaligned; gofmt owns column
+  # alignment for the struct/composite-literal blocks, issue #2364).
+  # Fails when a host-config schema member changes but the committed
+  # generated file is not regenerated.
+  launcher-schema-config =
+    let
+      schema = import ../../lib/env-schema.nix;
+      raw = pkgs.writeText "schemaconfig_gen.go.raw" (renderers.renderSchemaConfigGo schema);
+    in
+    pkgs.runCommand "launcher-schema-config"
+      {
+        nativeBuildInputs = [ pkgs.go ];
+        inherit raw;
+        committed = ../../cmd/launcher/schemaconfig_gen.go;
+      }
+      ''
+        gofmt "$raw" > generated.go
+        diff generated.go "$committed" \
+          || { echo "cmd/launcher/schemaconfig_gen.go is out of sync with lib/env-schema.nix — regenerate it" >&2; exit 1; }
         touch $out
       '';
 
