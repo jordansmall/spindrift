@@ -163,12 +163,14 @@ func (f *forgejoCodeForge) listPulls(state string) ([]forgejoPullPayload, error)
 	return pulls, nil
 }
 
-// openPRForBranch returns the open pull whose head matches branch, if any,
-// draft or not. Shared by OpenPRForBranch and openAnyPRForBranch, which are
-// now identical wrappers: Forgejo's OpenPRForBranch used to exclude drafts,
-// but recover's stranded-draft-PR adoption (issue #2408) needs it to adopt
-// them too, matching GitHub's OpenPRForBranch.
-func (f *forgejoCodeForge) openPRForBranch(branch string) (forge.PR, bool, error) {
+// OpenPRForBranch returns the open pull whose head matches branch, if any —
+// draft or not (issue #2408: Forgejo's lookup used to exclude drafts;
+// recover's stranded-draft-PR adoption and CreateDraftPR's own
+// conflict-adoption call site both need it to include them, matching
+// GitHub's OpenPRForBranch). IsDraft reports the pull's draft state, read
+// from either the pull's draft field or its WIP-title convention
+// (isDraftPull).
+func (f *forgejoCodeForge) OpenPRForBranch(branch string) (forge.PR, bool, error) {
 	pulls, err := f.listPulls("open")
 	if err != nil {
 		return forge.PR{}, false, err
@@ -179,21 +181,6 @@ func (f *forgejoCodeForge) openPRForBranch(branch string) (forge.PR, bool, error
 		}
 	}
 	return forge.PR{}, false, nil
-}
-
-// OpenPRForBranch returns the open pull whose head matches branch, if any —
-// draft or not. IsDraft reports the pull's draft state, read from either the
-// pull's draft field or its WIP-title convention (isDraftPull).
-func (f *forgejoCodeForge) OpenPRForBranch(branch string) (forge.PR, bool, error) {
-	return f.openPRForBranch(branch)
-}
-
-// openAnyPRForBranch returns the open pull whose head matches branch,
-// regardless of draft status. Now identical to OpenPRForBranch (both adopt
-// drafts, issue #2408) but kept as its own name for CreateDraftPR's
-// conflict-adoption call site.
-func (f *forgejoCodeForge) openAnyPRForBranch(branch string) (forge.PR, bool, error) {
-	return f.openPRForBranch(branch)
 }
 
 // PRForBranch returns the URL of any pull (any state, any draft status)

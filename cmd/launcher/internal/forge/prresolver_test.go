@@ -26,9 +26,8 @@ func (r *recordingClock) Clock() retry.Clock {
 }
 
 // TestResolveOpenPR verifies forge.ResolveOpenPR's single documented
-// draft/absent policy: a push-only Code Forge (no PRForge) and "no open PR
-// yet" both resolve to Found: false with no error; a found PR reports its
-// URL and draft flag, leaving callers to decide what to do with IsDraft.
+// absent policy: a push-only Code Forge (no PRForge) and "no open PR yet"
+// both resolve to Found: false with no error; a found PR reports its URL.
 func TestResolveOpenPR(t *testing.T) {
 	t.Run("push-only forge has no PR to discover", func(t *testing.T) {
 		f := forge.NewFake()
@@ -51,14 +50,14 @@ func TestResolveOpenPR(t *testing.T) {
 		}
 	})
 
-	t.Run("open PR found reports URL and draft flag", func(t *testing.T) {
+	t.Run("open PR found reports its URL", func(t *testing.T) {
 		f := forge.NewFake()
 		f.BranchPrefix = "agent/issue-"
 		f.SetPR("agent/issue-42", forge.PR{URL: "https://github.com/o/r/pull/7", IsDraft: true})
 
 		res, err := forge.ResolveOpenPR(f, "42")
-		if err != nil || !res.Found || res.URL != "https://github.com/o/r/pull/7" || !res.IsDraft {
-			t.Fatalf("want {Found:true URL:.../pull/7 IsDraft:true} nil; got %+v, err=%v", res, err)
+		if err != nil || !res.Found || res.URL != "https://github.com/o/r/pull/7" {
+			t.Fatalf("want {Found:true URL:.../pull/7} nil; got %+v, err=%v", res, err)
 		}
 	})
 }
@@ -134,8 +133,8 @@ func TestResolveOpenPRWithRetry(t *testing.T) {
 		if err != nil {
 			t.Fatalf("want nil error; got %v", err)
 		}
-		if !res.Found || res.URL != "https://github.com/o/r/pull/7" || !res.IsDraft {
-			t.Fatalf("want {Found:true URL:.../pull/7 IsDraft:true}; got %+v", res)
+		if !res.Found || res.URL != "https://github.com/o/r/pull/7" {
+			t.Fatalf("want {Found:true URL:.../pull/7}; got %+v", res)
 		}
 		if len(rc.sleeps) != 2 {
 			t.Fatalf("want 2 sleeps (backoff before attempts 2 and 3); got %v", rc.sleeps)
