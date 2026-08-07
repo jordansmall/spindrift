@@ -972,3 +972,219 @@ func TestAssembleOrchestratorOffReviewerFlowsThroughGenericLoop(t *testing.T) {
 		t.Errorf("Handoff.ReviewPromptFile = %q, want empty (orchestrator off)", result.Handoff.ReviewPromptFile)
 	}
 }
+
+// writeAgentFile writes a baked opencode agent file fixture with real
+// frontmatter shape and a placeholder body distinguishable from any real
+// rendered prompt -- the Go-side twin of
+// tests/entrypoint-opencode-agent-files.bats's write_agent_file.
+func writeAgentFile(t *testing.T, path, desc string) {
+	t.Helper()
+	content := "---\n" +
+		"description: \"" + desc + "\"\n" +
+		"mode: \"subagent\"\n" +
+		"model: \"opus\"\n" +
+		"---\n" +
+		"placeholder body for " + desc + "\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("WriteFile %s: %v", path, err)
+	}
+}
+
+// agentFileFrontmatter returns every line up to and including the second
+// "---" fence line, the Go-side twin of the bats helper of the same name.
+func agentFileFrontmatter(t *testing.T, path string) string {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile %s: %v", path, err)
+	}
+	lines := strings.Split(string(data), "\n")
+	fences := 0
+	for i, line := range lines {
+		if line == "---" {
+			fences++
+			if fences == 2 {
+				return strings.Join(lines[:i+1], "\n")
+			}
+		}
+	}
+	return string(data)
+}
+
+// agentFileBody returns everything after the second "---" fence line.
+func agentFileBody(t *testing.T, path string) string {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile %s: %v", path, err)
+	}
+	lines := strings.Split(string(data), "\n")
+	fences := 0
+	for i, line := range lines {
+		if line == "---" {
+			fences++
+			if fences == 2 {
+				return strings.Join(lines[i+1:], "\n")
+			}
+		}
+	}
+	return ""
+}
+
+// TestAssembleDriverAgentFilesRewrite covers entrypoint.sh's
+// DRIVER_AGENT_FILES_DIR-gated file-rewrite twin of the --agents JSON
+// injection loop (entrypoint.sh: 1128-1187): with the orchestrator off, a
+// baked agent file's frontmatter is preserved and its body is overwritten
+// with the substituted prompt file text.
+func TestAssembleDriverAgentFilesRewrite(t *testing.T) {
+	reg := loadTestRegistry(t)
+	dir := t.TempDir()
+	writeAgentFile(t, filepath.Join(dir, "scout.md"), "scout")
+	frontmatterBefore := agentFileFrontmatter(t, filepath.Join(dir, "scout.md"))
+
+	env := coveredEnv()
+	env.DriverAgentFilesDir = dir
+	env.AgentsPromptFiles = `{"scout":"fragments/tdd-default.md"}`
+
+	if _, err := Assemble(env, reg); err != nil {
+		t.Fatalf("Assemble: %v", err)
+	}
+
+	body := agentFileBody(t, filepath.Join(dir, "scout.md"))
+	if body == "placeholder body for scout\n" || strings.TrimSpace(body) == "" {
+		t.Errorf("scout.md body not rewritten: %q", body)
+	}
+	if !strings.Contains(body, "/tdd") {
+		t.Errorf("scout.md body missing substituted tdd-default.md content: %q", body)
+	}
+	if agentFileFrontmatter(t, filepath.Join(dir, "scout.md")) != frontmatterBefore {
+		t.Errorf("scout.md frontmatter changed, want unchanged")
+	}
+}
+
+// TestAssembleDriverAgentFilesReviewerDropOrchestratorOn covers
+// entrypoint.sh's file-based reviewer-drop/model-extraction twin
+// (entrypoint.sh: 1141-1156): with the orchestrator on, reviewer.md's
+// `model:` frontmatter scalar populates Handoff.ReviewModel and the file is
+// then removed, while a non-reviewer roster file (scout.md) still gets its
+// body rewritten.
+func TestAssembleDriverAgentFilesReviewerDropOrchestratorOn(t *testing.T) {
+	reg := loadTestRegistry(t)
+	dir := t.TempDir()
+	writeAgentFile(t, filepath.Join(dir, "scout.md"), "scout")
+	writeAgentFile(t, filepath.Join(dir, "reviewer.md"), "reviewer")
+
+	env := coveredEnv()
+	env.OrchestratorEnabled = true
+	env.DriverAgentFilesDir = dir
+	env.AgentsPromptFiles = `{"scout":"fragments/tdd-default.md","reviewer":"fragments/tdd-default.md"}`
+
+	result, err := Assemble(env, reg)
+	if err != nil {
+		t.Fatalf("Assemble: %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(dir, "reviewer.md")); !os.IsNotExist(err) {
+		t.Errorf("reviewer.md still exists (or unexpected stat error %v), want removed", err)
+	}
+	body := agentFileBody(t, filepath.Join(dir, "scout.md"))
+	if !strings.Contains(body, "/tdd") {
+		t.Errorf("scout.md body missing substituted tdd-default.md content: %q", body)
+	}
+	if result.Handoff.ReviewModel != "opus" {
+		t.Errorf("Handoff.ReviewModel = %q, want %q", result.Handoff.ReviewModel, "opus")
+	}
+}
+
+// TestAssembleDriverAgentFilesReviewModelPrecedence covers the exact
+// overwrite-precedence rule between the two reviewer-model extraction paths
+// (entrypoint.sh: 1096 JSON path, then 1152-1153 file path): when
+// DriverAgentFilesDir's reviewer.md exists, its frontmatter model wins over
+// whatever AgentsJSONTemplate's .reviewer.model already set -- the file path
+// runs after the JSON path and unconditionally overwrites.
+func TestAssembleDriverAgentFilesReviewModelPrecedence(t *testing.T) {
+	reg := loadTestRegistry(t)
+
+	t.Run("reviewer.md present overwrites the JSON-path value", func(t *testing.T) {
+		dir := t.TempDir()
+		writeAgentFile(t, filepath.Join(dir, "reviewer.md"), "reviewer")
+
+		env := coveredEnv()
+		env.OrchestratorEnabled = true
+		env.DriverAgentFilesDir = dir
+		env.AgentsJSONTemplate = `{"reviewer":{"model":"haiku"}}`
+
+		result, err := Assemble(env, reg)
+		if err != nil {
+			t.Fatalf("Assemble: %v", err)
+		}
+		if result.Handoff.ReviewModel != "opus" {
+			t.Errorf("Handoff.ReviewModel = %q, want %q (file path wins)", result.Handoff.ReviewModel, "opus")
+		}
+	})
+
+	t.Run("reviewer.md absent leaves the JSON-path value unchanged", func(t *testing.T) {
+		dir := t.TempDir()
+		writeAgentFile(t, filepath.Join(dir, "scout.md"), "scout")
+
+		env := coveredEnv()
+		env.OrchestratorEnabled = true
+		env.DriverAgentFilesDir = dir
+		env.AgentsJSONTemplate = `{"reviewer":{"model":"haiku"}}`
+
+		result, err := Assemble(env, reg)
+		if err != nil {
+			t.Fatalf("Assemble: %v", err)
+		}
+		if result.Handoff.ReviewModel != "haiku" {
+			t.Errorf("Handoff.ReviewModel = %q, want %q (JSON value survives)", result.Handoff.ReviewModel, "haiku")
+		}
+	})
+}
+
+// TestAssembleDriverAgentFilesSkipsMissingBakedFile covers that a roster
+// name with no baked .md file on disk (opencode's empty-model-drops-the-file
+// semantics, or a reviewer.md just removed above) is silently skipped, not
+// an error.
+func TestAssembleDriverAgentFilesSkipsMissingBakedFile(t *testing.T) {
+	reg := loadTestRegistry(t)
+	dir := t.TempDir()
+	// No worker.md on disk at all.
+
+	env := coveredEnv()
+	env.DriverAgentFilesDir = dir
+	env.AgentsPromptFiles = `{"worker":"fragments/tdd-default.md"}`
+
+	if _, err := Assemble(env, reg); err != nil {
+		t.Fatalf("Assemble: %v, want nil error (missing baked file is a silent skip)", err)
+	}
+}
+
+// TestAssembleDriverAgentFilesSkipsMissingPromptFile covers that a roster
+// entry whose looked-up prompt file doesn't exist under PromptsDir leaves
+// the on-disk agent file untouched, without error.
+func TestAssembleDriverAgentFilesSkipsMissingPromptFile(t *testing.T) {
+	reg := loadTestRegistry(t)
+	dir := t.TempDir()
+	writeAgentFile(t, filepath.Join(dir, "scout.md"), "scout")
+	before, err := os.ReadFile(filepath.Join(dir, "scout.md"))
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+
+	env := coveredEnv()
+	env.DriverAgentFilesDir = dir
+	env.AgentsPromptFiles = `{"scout":"fragments/does-not-exist.md"}`
+
+	if _, err := Assemble(env, reg); err != nil {
+		t.Fatalf("Assemble: %v, want nil error (missing prompt file is a silent skip)", err)
+	}
+
+	after, err := os.ReadFile(filepath.Join(dir, "scout.md"))
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if string(after) != string(before) {
+		t.Errorf("scout.md changed, want untouched:\nbefore: %q\nafter:  %q", before, after)
+	}
+}

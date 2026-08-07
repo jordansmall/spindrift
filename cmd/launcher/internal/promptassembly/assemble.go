@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 )
 
@@ -428,6 +429,21 @@ func Assemble(e Env, reg Registry) (Result, error) {
 		result.AgentsJSON = agentsJSON
 	}
 
+	// On-disk opencode agent-file rewrite (entrypoint.sh: 1128-1187) -- the
+	// file-rewrite twin of the --agents JSON injection loop above, for a
+	// Driver whose subagents ride baked agent files instead of the --agents
+	// flag. A no-op when DriverAgentFilesDir is unset (claude). Runs after
+	// the JSON-path reviewer-drop above: when reviewer.md exists, its
+	// frontmatter model overwrites whatever the JSON path already set in
+	// result.Handoff.ReviewModel (entrypoint.sh: 1152-1153 runs after 1096
+	// and unconditionally overwrites); when it doesn't exist, the JSON-path
+	// value (if any) survives unchanged.
+	if e.DriverAgentFilesDir != "" {
+		if err := rewriteAgentFiles(e, allowlist, gates["ORCHESTRATOR"], &result.Handoff.ReviewModel); err != nil {
+			return Result{}, err
+		}
+	}
+
 	return result, nil
 }
 
@@ -443,9 +459,8 @@ func Assemble(e Env, reg Registry) (Result, error) {
 // e.AgentsJSONTemplate through unmodified, and a reviewer key (if any)
 // flows through this loop like any other agent, unchanged from issue
 // #2349's original behavior. DriverAgentFilesDir's on-disk agent-files twin
-// (entrypoint.sh: 1130+) is out of scope for this slice -- it only matters
-// for a non-claude Driver, so a non-empty value is silently ignored here,
-// not an error.
+// (entrypoint.sh: 1130+) is a separate loop entirely -- see
+// rewriteAgentFiles, called from Assemble after this function returns.
 func renderAgentsJSON(e Env, agentsTemplate string, allowlist map[string]string) (string, error) {
 	var template map[string]json.RawMessage
 	if err := json.Unmarshal([]byte(agentsTemplate), &template); err != nil {
@@ -502,4 +517,123 @@ func renderAgentsJSON(e Env, agentsTemplate string, allowlist map[string]string)
 		return "", fmt.Errorf("marshal agents json: %w", err)
 	}
 	return string(out), nil
+}
+
+// frontmatterOf returns every line of data up to and including the second
+// "---" fence line -- the same slice awk '{ print } /^---$/ { if (++_c ==
+// 2) exit }' produces (entrypoint.sh: 1170, 1177). A file missing a second
+// fence (never true for a real opencode-baked agent file, whose
+// agentFilesTemplate always emits both fences) falls through to returning
+// the entire file, matching awk's own behavior in that case.
+func frontmatterOf(data []byte) string {
+	lines := strings.Split(string(data), "\n")
+	fences := 0
+	for i, line := range lines {
+		if line == "---" {
+			fences++
+			if fences == 2 {
+				return strings.Join(lines[:i+1], "\n")
+			}
+		}
+	}
+	return string(data)
+}
+
+// reviewerModelFrontmatter extracts the `model:` YAML scalar from a baked
+// opencode reviewer.md's frontmatter (entrypoint.sh: 1152-1153: `awk ... |
+// sed -n 's/^model: //p' | jq -r '.'`). The baked shape is always a
+// double-quoted scalar, e.g. `model: "opus"` -- jq -r unwraps the JSON
+// string; TrimPrefix plus a bare quote trim reproduces that here without a
+// JSON parse. Returns "" if no `model:` line is present in the frontmatter,
+// mirroring sed -n finding no match.
+func reviewerModelFrontmatter(frontmatter string) string {
+	for _, line := range strings.Split(frontmatter, "\n") {
+		if v, ok := strings.CutPrefix(line, "model: "); ok {
+			return strings.Trim(v, `"`)
+		}
+	}
+	return ""
+}
+
+// rewriteAgentFiles implements entrypoint.sh's DRIVER_AGENT_FILES_DIR-gated
+// block (entrypoint.sh: 1128-1187), the file-rewrite twin of
+// renderAgentsJSON's --agents JSON injection loop for a Driver (opencode)
+// whose subagents ride on-disk agent files instead of the --agents JSON
+// flag. Callers must only invoke this when e.DriverAgentFilesDir != "" (the
+// zero-value early-return this function's caller in Assemble already
+// applies).
+//
+// When orchestratorOn, reviewer.md's `model:` frontmatter scalar overwrites
+// *reviewModel (entrypoint.sh: 1152-1153) -- deliberately unconditional, not
+// merged with whatever renderAgentsJSON's JSON-path reviewer-drop already
+// set, matching bash's sequential assignment -- before the file is removed
+// (entrypoint.sh: 1156); a missing reviewer.md leaves *reviewModel
+// untouched, mirroring the `[ -f ... ] &&` guard. When orchestratorOn is
+// false, neither extraction nor removal happens, matching the bash off-row.
+//
+// Regardless of orchestratorOn, the generic per-agent rewrite loop
+// (entrypoint.sh: 1165-1186) then iterates e.AgentsPromptFiles in sorted key
+// order (bash iterates AGENTS_JSON_TEMPLATE's own key order via jq; sorting
+// here trades exact bash parity for Go-map-iteration determinism, since each
+// name's rewrite only ever touches its own independent file, so order never
+// affects the end state -- see the slice's task description). For each
+// name -> promptFile: skip if DriverAgentFilesDir/<name>.md doesn't exist
+// (covers both "opencode never baked this file" and "the reviewer file just
+// removed above"); skip if PromptsDir/<promptFile> doesn't exist; otherwise
+// preserve the agent file's existing frontmatter and overwrite it with
+// frontmatter + "\n" + the rendered prompt + "\n" (entrypoint.sh: 1186's
+// `printf '%s\n%s\n' "$_af_frontmatter" "$_af_prompt" >"$_af_file"`).
+func rewriteAgentFiles(e Env, allowlist map[string]string, orchestratorOn bool, reviewModel *string) error {
+	if orchestratorOn {
+		reviewerPath := filepath.Join(e.DriverAgentFilesDir, "reviewer.md")
+		if data, err := os.ReadFile(reviewerPath); err == nil {
+			*reviewModel = reviewerModelFrontmatter(frontmatterOf(data))
+			if err := os.Remove(reviewerPath); err != nil {
+				return fmt.Errorf("remove %s: %w", reviewerPath, err)
+			}
+		} else if !os.IsNotExist(err) {
+			return fmt.Errorf("read %s: %w", reviewerPath, err)
+		}
+	}
+
+	var promptFiles map[string]string
+	if e.AgentsPromptFiles != "" {
+		if err := json.Unmarshal([]byte(e.AgentsPromptFiles), &promptFiles); err != nil {
+			return fmt.Errorf("parse agents prompt files: %w", err)
+		}
+	}
+
+	names := make([]string, 0, len(promptFiles))
+	for name := range promptFiles {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	for _, name := range names {
+		agentFilePath := filepath.Join(e.DriverAgentFilesDir, name+".md")
+		agentFileData, err := os.ReadFile(agentFilePath)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return fmt.Errorf("read agent file %s: %w", agentFilePath, err)
+		}
+
+		promptPath := filepath.Join(e.PromptsDir, promptFiles[name])
+		rendered, err := renderFile(promptPath, allowlist)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return fmt.Errorf("read agent prompt file %s: %w", promptFiles[name], err)
+		}
+
+		frontmatter := frontmatterOf(agentFileData)
+		out := frontmatter + "\n" + rendered + "\n"
+		if err := os.WriteFile(agentFilePath, []byte(out), 0o644); err != nil {
+			return fmt.Errorf("write agent file %s: %w", agentFilePath, err)
+		}
+	}
+
+	return nil
 }
