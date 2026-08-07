@@ -11,11 +11,12 @@ import (
 	"strings"
 )
 
-// ErrUnsupportedCell marks an Env combination Assemble does not (yet) cover.
-// Assemble currently implements seven cells of agent/entrypoint.sh's
-// phase_prompt_assembly — see checkCoveredCell — and errors, wrapping this
-// sentinel, for anything outside them rather than silently mis-rendering a
-// prompt for a combination it hasn't been built (and tested) against.
+// ErrUnsupportedCell marks an Env combination Assemble does not know how to
+// render: an unrecognized IssueTracker, CodeForge, or DispatchKind value —
+// see checkCoveredCell for the exact set each is checked against. Every
+// other axis (orchestrator on/off, dispatch-kind/fix-pass, per-skill baked
+// flags, access/forge) is handled by Assemble's own logic regardless of how
+// the others are set, so no combination of them is rejected here.
 var ErrUnsupportedCell = errors.New("promptassembly: env combination not covered by Assemble")
 
 // Result is Assemble's rendered output: the final prompt text, the
@@ -35,11 +36,20 @@ type Handoff struct {
 	SessionMode string
 	// Invoker is "orchestrator" or "driver-exec" (entrypoint.sh: 1282-1286).
 	Invoker string
-	// ReviewPromptFile and ReviewModel are only ever populated when Invoker
-	// is "orchestrator" (entrypoint.sh: 1294, 1303) and the cell is the
-	// default fresh-work dispatch (kind "work", FixPass == 0) -- research
-	// and fix-pass cells leave both empty even with the orchestrator on.
-	// ReviewModel further stays empty when AgentsJSONTemplate carries no
+	// ReviewPromptFile is only ever populated when Invoker is "orchestrator"
+	// (entrypoint.sh: 1294) and the cell is the default fresh-work dispatch
+	// (kind "work", FixPass == 0) -- research and fix-pass cells leave it
+	// empty even with the orchestrator on, per entrypoint.sh's if/elif/else
+	// (entrypoint.sh: 1029-1062): review_prompt_rendered is only ever
+	// assigned inside that chain's final "else" branch.
+	//
+	// ReviewModel, by contrast, is extracted from AgentsJSONTemplate's own
+	// "reviewer" key (entrypoint.sh: 1096) whenever Invoker is
+	// "orchestrator", regardless of dispatch kind or FixPass -- that
+	// extraction is a separate, unconditional step inside the --agents JSON
+	// block (entrypoint.sh: 1086-1101), not gated by the dispatch-kind/
+	// fix-pass if/elif/else chain ReviewPromptFile is. It stays empty when
+	// Invoker is "driver-exec", or when AgentsJSONTemplate carries no
 	// "reviewer" key (or a reviewer entry with no "model" field), mirroring
 	// jq's `.reviewer.model // empty` (entrypoint.sh: 1096).
 	ReviewPromptFile string
@@ -47,43 +57,33 @@ type Handoff struct {
 }
 
 // checkCoveredCell validates that e sits in one of Assemble's covered Env
-// cells. IssueTracker one of "github" (explicit or default), "jira",
-// "local", or "forgejo" (issue #2352 -- see gates_tracker.go's
-// issueTrackerAxis for how each maps onto its gate-family suffixes), and
-// CodeForge (explicitly or by default) either "github" or "forgejo", are
-// common to every cell. From there, the orchestrator axis forks the
-// remaining rules:
+// cells. Three axes are checked against a fixed allowlist, since each
+// value takes a genuinely different code path (or is simply invalid/
+// typo'd) and an unrecognized one is a real "Assemble doesn't know how to
+// render this" case:
 //
-// Orchestrator off -- the original four cells (issue #2349) crossed with
-// the access/forge axis (issue #2352, BoxWriteEnabled true or false):
-// every skill baked (SkillsFound non-empty and all four per-skill gates on)
-// is common to all of them; the dispatch-kind/fix-pass axis then forks into:
-//   - dispatch kind "work" (explicit or default), FixPass == 0 -- a fresh
-//     work dispatch (issue-prompt.md).
-//   - dispatch kind "work" (explicit or default), FixPass > 0 -- a warm fix
-//     pass (fix-prompt.md).
-//   - dispatch kind "research", SelfContained == false -- a repo-backed
-//     research dispatch (research-prompt.md).
-//   - dispatch kind "research", SelfContained == true -- a self-contained
-//     research dispatch (research-self-contained-prompt.md).
+//   - IssueTracker one of "github" (explicit or default), "jira", "local",
+//     or "forgejo" (issue #2352 -- see gates_tracker.go's issueTrackerAxis
+//     for how each maps onto its gate-family suffixes).
+//   - CodeForge (explicitly or by default) one of "github", "git", "local",
+//     or "forgejo" (issue #2354 -- gates_access_forge.go's Gates() already
+//     treats github/git/local identically, "only forgejo diverges from the
+//     shared gh-flavored path"; checkCoveredCell's allowlist mirrors that,
+//     not just github/forgejo).
+//   - DispatchKind (explicitly or by default) one of "work" or "research".
 //
-// Orchestrator on -- three more cells (issue #2353), all sharing dispatch
-// kind "work" (explicit or default) with FixPass == 0 -- the same fresh
-// work dispatch as above, since review_prompt_rendered only ever populates
-// on that path (entrypoint.sh: 1029-1062); research and fix-pass combined
-// with orchestrator-on are out of scope for this slice:
-//   - BoxWriteEnabled true, skills fully baked -- "filer-off" (the same
-//     skills rule as the orchestrator-off cells, orchestrator on instead).
-//   - BoxWriteEnabled false, skills fully baked -- "filer-on", the shape
-//     that lets FILER_FILE_RELAY (Gates) actually fire.
-//   - BoxWriteEnabled either, SkillsFound == "" and all four per-skill
-//     gates off -- "skills-absent". A partial combination (SkillsFound
-//     non-empty but not all four flags true, or SkillsFound empty but some
-//     flag true) is not covered.
-//
-// A DispatchKind that is neither "work" nor "research" is out of scope, as
-// is any other combination outside these cells; each returns an error
-// wrapping ErrUnsupportedCell.
+// Every other axis -- the orchestrator flag, FixPass, the four per-skill
+// baked flags, BoxWriteEnabled -- is handled by Assemble's own rendering
+// logic regardless of how the others are set, so no combination of them is
+// rejected here (issue #2354): a partial skill-baked combination (any
+// subset of the four per-skill gates, matching lib/image.nix's per-skill
+// baking) renders exactly the fragments whose gate is on, and
+// OrchestratorEnabled combined with FixPass > 0 or DispatchKind ==
+// "research" renders the same fix-prompt.md/research-prompt.md any other
+// cell on that dispatch-kind/fix-pass axis would, with
+// Handoff.ReviewPromptFile only ever populated on the default
+// fresh-work-dispatch path regardless of the orchestrator flag (see
+// Handoff's doc comment).
 func checkCoveredCell(e Env) error {
 	tracker := e.IssueTracker
 	if tracker == "" {
@@ -100,7 +100,10 @@ func checkCoveredCell(e Env) error {
 	if forge == "" {
 		forge = defaultCodeForge
 	}
-	if forge != defaultCodeForge && forge != "forgejo" {
+	switch forge {
+	case defaultCodeForge, "git", "local", "forgejo":
+		// covered
+	default:
 		return fmt.Errorf("code forge %q: %w", e.CodeForge, ErrUnsupportedCell)
 	}
 
@@ -108,28 +111,8 @@ func checkCoveredCell(e Env) error {
 	if kind == "" {
 		kind = defaultDispatchKind
 	}
-
-	skillsFullyBaked := e.SkillsFound != "" && e.CavemanSkillBaked && e.TDDSkillBaked && e.CommitSkillBaked && e.CodeReviewSkillBaked
-	skillsFullyAbsent := e.SkillsFound == "" && !e.CavemanSkillBaked && !e.TDDSkillBaked && !e.CommitSkillBaked && !e.CodeReviewSkillBaked
-
-	if e.OrchestratorEnabled {
-		if kind != defaultDispatchKind || e.FixPass > 0 {
-			return fmt.Errorf("orchestrator enabled with dispatch kind %q, fix pass %d: %w", e.DispatchKind, e.FixPass, ErrUnsupportedCell)
-		}
-
-		if !skillsFullyBaked && !skillsFullyAbsent {
-			return fmt.Errorf("skills partially baked: %w", ErrUnsupportedCell)
-		}
-
-		return nil
-	}
-
 	if kind != defaultDispatchKind && kind != "research" {
 		return fmt.Errorf("dispatch kind %q: %w", e.DispatchKind, ErrUnsupportedCell)
-	}
-
-	if !skillsFullyBaked {
-		return fmt.Errorf("skills not fully baked: %w", ErrUnsupportedCell)
 	}
 
 	return nil
@@ -240,13 +223,13 @@ func Assemble(e Env, reg Registry) (Result, error) {
 	// extraSubstVars raw sources: as of issue #2349 the registry carries
 	// exactly two (SKILLS_FOUND, CI_FAILURE_SUMMARY -- see fragments.nix's
 	// header comment and registry_test.go's TestLoadRegistryParsesAllRows).
-	// SKILLS_FOUND's raw value is Env.SkillsFound; CI_FAILURE_SUMMARY is a
-	// launcher-forwarded env var Env carries no field for yet -- out of
-	// scope for this slice's covered cell, whose CI_FAILURE_SUMMARY gate is
-	// always off (Env has no field to turn it on), so it defaults to the
-	// zero-value empty string like any other unresolved extraSubstVars name.
+	// SKILLS_FOUND's raw value is Env.SkillsFound; CI_FAILURE_SUMMARY's raw
+	// value is Env.CIFailureSummary (issue #2354) -- the same field that
+	// also drives the CI_FAILURE_SUMMARY gate above (Gates), since its own
+	// presence is the gate.
 	extraRaw := map[string]string{
-		"SKILLS_FOUND": e.SkillsFound,
+		"SKILLS_FOUND":       e.SkillsFound,
+		"CI_FAILURE_SUMMARY": e.CIFailureSummary,
 	}
 	seenExtra := map[string]bool{}
 	for _, row := range reg.Rows {
@@ -277,7 +260,24 @@ func Assemble(e Env, reg Registry) (Result, error) {
 			// comment above.
 			rendered, err := renderFile(path, allowlist)
 			if err != nil {
-				return Result{}, fmt.Errorf("read fragment %s: %w", row.Fragment, err)
+				// entrypoint.sh's own equivalent of this call,
+				// `printf -v "$_fvar" '%s' "$(_subst "${PROMPTS_DIR}/fragments/${_ffile}")"`
+				// (entrypoint.sh: 1001-1009), sits as a printf argument
+				// rather than a bare assignment -- a failed command
+				// substitution there never trips `set -e` (bash only
+				// checks the exit status of the printf itself, which
+				// still runs and succeeds), so a missing/unreadable
+				// fragment file silently resolves to an empty string
+				// instead of aborting the script. A missing file
+				// reproduces that exact swallow; any other read error
+				// (e.g. permission denied) is not something old bash's
+				// quirk would have swallowed either, so it still
+				// hard-fails here.
+				if !errors.Is(err, os.ErrNotExist) {
+					return Result{}, fmt.Errorf("read fragment %s: %w", row.Fragment, err)
+				}
+				allowlist[row.Var] = ""
+				continue
 			}
 			allowlist[row.Var] = rendered + "\n\n"
 		} else {
