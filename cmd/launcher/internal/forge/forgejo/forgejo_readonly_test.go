@@ -315,6 +315,53 @@ func TestReadOnlyForgejoCodeForge_CreateDraftPR_AdoptsExistingOnConflict(t *test
 	}
 }
 
+// TestReadOnlyForgejoCodeForge_CreateDraftPR_AdoptsExistingDraftOnConflict
+// asserts that CreateDraftPR's adoption path finds a DRAFT PR for the head,
+// not just a non-draft one. CreateDraftPR itself always creates a draft
+// (forgejoWIPPrefix-titled) PR, so the PR a retried call collides with on
+// 409 is always a draft -- OpenPRForBranch's draft-excluding contract (kept
+// for its other caller, prresolver.go) must not be the lookup CreateDraftPR
+// uses to resolve its own adoption target (issue #2407 follow-up).
+func TestReadOnlyForgejoCodeForge_CreateDraftPR_AdoptsExistingDraftOnConflict(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/repos/owner/repo/pulls":
+			w.WriteHeader(http.StatusConflict)
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/owner/repo/pulls":
+			if err := json.NewEncoder(w).Encode([]map[string]any{
+				{
+					"number":   1964,
+					"html_url": "https://forge.test/owner/repo/pulls/1964",
+					"draft":    true,
+					"title":    "WIP: feat: add widget",
+					"head":     map[string]any{"ref": "agent/issue-1964"},
+				},
+			}); err != nil {
+				t.Fatal(err)
+			}
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	cf := forgejo.NewReadOnlyForgejoCodeForge(forgejo.ForgejoCodeForgeConfig{
+		BaseURL: srv.URL,
+		Repo:    "owner/repo",
+		Token:   "tok",
+	}, nil)
+	dpc := cf.(forge.DraftPRCreator)
+
+	url, err := dpc.CreateDraftPR("feat: add widget", "Adds a widget.", "main", "agent/issue-1964")
+	if err != nil {
+		t.Fatalf("CreateDraftPR: %v", err)
+	}
+	want := "https://forge.test/owner/repo/pulls/1964"
+	if url != want {
+		t.Errorf("CreateDraftPR url = %q, want %q", url, want)
+	}
+}
+
 // TestReadOnlyForgejoCodeForge_CreateDraftPR_ConflictWithoutOpenPRReturnsOriginalError
 // asserts that when the create call fails with 409 but OpenPRForBranch finds
 // no open PR for that head (e.g. only a closed/merged PR exists), CreateDraftPR

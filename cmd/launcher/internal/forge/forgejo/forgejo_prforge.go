@@ -180,6 +180,26 @@ func (f *forgejoCodeForge) OpenPRForBranch(branch string) (forge.PR, bool, error
 	return forge.PR{}, false, nil
 }
 
+// openAnyPRForBranch returns the open pull whose head matches branch,
+// regardless of draft status, unlike OpenPRForBranch (which must stay
+// draft-excluding for its other caller, prresolver.go). CreateDraftPR's own
+// adoption target on a 409 Conflict is always a draft -- CreateDraftPR
+// itself always creates one -- so resolving that PR needs a lookup that
+// does not filter drafts out; this mirrors OpenPRForBranch's body but
+// reports IsDraft from isDraftPull instead of hard-coding false.
+func (f *forgejoCodeForge) openAnyPRForBranch(branch string) (forge.PR, bool, error) {
+	pulls, err := f.listPulls("open")
+	if err != nil {
+		return forge.PR{}, false, err
+	}
+	for _, p := range pulls {
+		if p.Head.Ref == branch {
+			return forge.PR{URL: p.HTMLURL, IsDraft: isDraftPull(p)}, true, nil
+		}
+	}
+	return forge.PR{}, false, nil
+}
+
 // PRForBranch returns the URL of any pull (any state, any draft status)
 // whose head matches branch, if any.
 func (f *forgejoCodeForge) PRForBranch(branch string) (string, bool, error) {
