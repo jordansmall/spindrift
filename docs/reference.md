@@ -1253,7 +1253,7 @@ The Box's own contract with the launcher/host — e.g. a read-only research
 run's verdict must reach the launcher via a `SPINDRIFT_COMMENT` marker, an
 orchestrator-on run's review pass must emit a `VERDICT:` line — is declared
 once, as data, in `lib/prompt-contract.nix`'s `validateMarkers` registry
-(id/marker/carrier/severity/`when`-gate per row). Two independent arms
+(id/marker/carrier/severity/`when`-gate/`message` per row). Two independent arms
 resolve that same registry into a verdict:
 
 - **Build time** (Nix): `buildTimeRejectVerdicts` folds each `severity ==
