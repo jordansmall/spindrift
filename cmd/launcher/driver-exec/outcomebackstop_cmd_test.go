@@ -9,8 +9,10 @@ import (
 // TestRunOutcomeBackstop_ParsesFlagsAndEmits verifies the outcome-backstop
 // subcommand's flag parsing reaches outcomebackstop.Run with the right
 // Config: a CODE_FORGE=local repo with a base and a branch commit emits a
-// single status=blocked SPINDRIFT_OUTCOME line carrying landing=<branch>,
-// without ever attempting a push (issue #2157).
+// single SPINDRIFT_OUTCOME line carrying landing=<branch>, without ever
+// attempting a push (issue #2157). The commit on the branch and the
+// host-mediated relay are real, git-verified evidence, so Run now resolves
+// status=ready rather than the always-blocked default (issue #2380).
 func TestRunOutcomeBackstop_ParsesFlagsAndEmits(t *testing.T) {
 	dir := t.TempDir()
 	runGitCmd(t, dir, "init", "-b", "main")
@@ -43,8 +45,8 @@ func TestRunOutcomeBackstop_ParsesFlagsAndEmits(t *testing.T) {
 	if !bytes.Contains([]byte(out), []byte("SPINDRIFT_OUTCOME")) {
 		t.Fatalf("expected SPINDRIFT_OUTCOME line, got %q", out)
 	}
-	if !bytes.Contains([]byte(out), []byte("status=blocked")) {
-		t.Fatalf("expected status=blocked, got %q", out)
+	if !bytes.Contains([]byte(out), []byte("status=ready")) {
+		t.Fatalf("expected status=ready, got %q", out)
 	}
 	if !bytes.Contains([]byte(out), []byte("landing=agent/issue-42")) {
 		t.Fatalf("expected landing=agent/issue-42, got %q", out)
