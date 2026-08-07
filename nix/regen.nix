@@ -30,6 +30,7 @@ let
   schema = import ../lib/env-schema.nix;
   envExample = renderers.renderHarnessEnvExample schema;
   flagTable = renderers.renderFlagTableGo schema;
+  schemaConfigFile = renderers.renderSchemaConfigGo schema;
   flakeOptionsDoc = renderers.renderFlakeOptionsDoc schema;
   boxEnvFixture = renderers.renderSetBoxEnvFixture schema;
   templateSettingsBlock = renderers.renderTemplateSettingsBlock schema;
@@ -44,6 +45,7 @@ pkgs.writeShellApplication {
   runtimeInputs = [
     pkgs.git
     pkgs.gawk
+    pkgs.go
   ];
   text = ''
     root="$(git rev-parse --show-toplevel)"
@@ -73,6 +75,8 @@ pkgs.writeShellApplication {
 
     write templates/default/harness.env.example ${escapeShellArg envExample}
     write cmd/launcher/flagtable_gen.go ${escapeShellArg flagTable}
+    write cmd/launcher/schemaconfig_gen.go ${escapeShellArg schemaConfigFile}
+    gofmt -w "$root/cmd/launcher/schemaconfig_gen.go"
     write docs/flake-options.md ${escapeShellArg flakeOptionsDoc}
     write cmd/launcher/internal/driver/drivernames_gen.go ${escapeShellArg driverNamesFile}
     write cmd/launcher/subcommands_gen.go ${escapeShellArg subcommandsFile}
