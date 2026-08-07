@@ -6,6 +6,11 @@
 // the launcher's own SPINDRIFT_OUTCOME grammar and last-line-wins log scan
 // depend on the exact wording only insofar as callers/tests pin it, but
 // changing it needlessly would break any such pinned assertion or dashboard.
+// The emitted status is derived mechanically from the git-observed evidence
+// Run itself gathers while salvaging and pushing — never by reading or
+// interpreting the driver's own (possibly malformed) final text — so a run
+// that actually finished clean and landed still resolves to status=ready
+// even when the driver's self-report line was garbled (issue #2380).
 package outcomebackstop
 
 import (
@@ -67,8 +72,15 @@ type Config struct {
 // salvage any dirty working tree into a commit, decide whether Branch has
 // anything worth preserving over Base, best-effort push it (bounded retry on
 // a transient failure) when there's a writable remote to push it to, and
-// finally emit a single synthetic status=blocked SPINDRIFT_OUTCOME line to w
-// so the launcher always gets a terminal signal to classify (issue #593).
+// finally emit a single synthetic SPINDRIFT_OUTCOME line to w so the
+// launcher always gets a terminal signal to classify (issue #593). Status is
+// derived mechanically from that same git-observed evidence -- never from
+// the driver's own text -- landing on "ready" only when the tree ended up
+// clean (or was already clean), there was work to preserve, and it was
+// either relayed via an outbox bundle or actually pushed; every other case
+// stays "blocked" (issue #2380). This is driver-exec's own git-verified
+// facts, the same trust level ADR 0036 already gives this verb for
+// host/box handoff branching decisions -- not the driver claiming ready.
 func Run(cfg Config, w io.Writer) error {
 	git := cfg.Git
 	if git == nil {
@@ -85,10 +97,10 @@ func Run(cfg Config, w io.Writer) error {
 	}
 
 	if cfg.Kind == "research" {
-		return emit(w, cfg.Issue, "none", note)
+		return emit(w, cfg.Issue, "none", "blocked", note)
 	}
 
-	note = salvage(git, note)
+	note, salvageOK := salvage(git, note)
 
 	count, err := commitCount(git, cfg.Base, cfg.Branch)
 	if err != nil {
@@ -99,28 +111,38 @@ func Run(cfg Config, w io.Writer) error {
 		count = 1
 	}
 
+	status := "blocked"
 	switch {
+	case !salvageOK:
+		// Tree could not be cleaned -- genuinely not a landed state.
 	case count == 0:
 		note += "; no work to preserve"
 	case cfg.HostMediatedRemote:
+		status = "ready"
 		note += "; branch relayed via outbox bundle (no writable remote under CODE_FORGE=local)"
 	case !cfg.WriteEnabled && cfg.OutboxRelayCapable:
+		status = "ready"
 		note += "; branch relayed via outbox bundle (read-only Box)"
 	default:
-		note = pushWithRetry(git, clock, cfg, note)
+		var pushed bool
+		note, pushed = pushWithRetry(git, clock, cfg, note)
+		if pushed {
+			status = "ready"
+		}
 	}
 
-	return emit(w, cfg.Issue, cfg.Branch, note)
+	return emit(w, cfg.Issue, cfg.Branch, status, note)
 }
 
 // emit builds and writes the final SPINDRIFT_OUTCOME line for w, flagged
 // synthetic=true (issue #2223) since it's the backstop's own manufactured
-// terminal signal, not one the driver emitted.
-func emit(w io.Writer, issue, landing, note string) error {
+// terminal signal, not one the driver emitted. status is unconditional on
+// synthetic -- Synthetic only marks who emitted the line, not what it says.
+func emit(w io.Writer, issue, landing, status, note string) error {
 	o := outcome.Outcome{
 		Issue:     issue,
 		Landing:   landing,
-		Status:    "blocked",
+		Status:    status,
 		Note:      note,
 		Synthetic: true,
 	}
@@ -132,19 +154,21 @@ func emit(w io.Writer, issue, landing, note string) error {
 // salvage commits any dirty working tree/index before the commit-count
 // check runs, so that check sees the salvaged state too. A salvage failure
 // never aborts the caller -- a needless note beats skipping the always-emit
-// outcome invariant (#593).
-func salvage(git func(args ...string) (string, string, error), note string) string {
+// outcome invariant (#593). ok is true when the tree ended up clean (nothing
+// to salvage, or add+commit both succeeded); false when add/commit failed
+// and the tree is still dirty.
+func salvage(git func(args ...string) (string, string, error), note string) (string, bool) {
 	stdout, _, err := git("status", "--porcelain")
 	if err != nil || strings.TrimSpace(stdout) == "" {
-		return note
+		return note, true
 	}
 	if _, _, addErr := git("add", "-A"); addErr != nil {
-		return note + "; failed to salvage uncommitted work"
+		return note + "; failed to salvage uncommitted work", false
 	}
 	if _, _, commitErr := git("commit", "-m", "chore: salvage uncommitted work before exiting without an outcome"); commitErr != nil {
-		return note + "; failed to salvage uncommitted work"
+		return note + "; failed to salvage uncommitted work", false
 	}
-	return note + "; salvaged uncommitted work into a commit"
+	return note + "; salvaged uncommitted work into a commit", true
 }
 
 // commitCount returns the number of commits on base..branch.
@@ -163,7 +187,9 @@ func commitCount(git func(args ...string) (string, string, error), base, branch 
 // pushWithRetry best-effort pushes Branch with bounded retry-with-backoff on
 // a transient failure (issue #2095), appending a "push failed" note only
 // once every attempt is exhausted; a successful push adds no note at all.
-func pushWithRetry(git func(args ...string) (string, string, error), clock retry.Clock, cfg Config, note string) string {
+// pushed is true the moment any attempt's git push returns no error; false
+// if every attempt in the retry loop failed.
+func pushWithRetry(git func(args ...string) (string, string, error), clock retry.Clock, cfg Config, note string) (string, bool) {
 	attempts := cfg.MaxAttempts
 	if attempts < 1 {
 		attempts = 1
@@ -173,10 +199,10 @@ func pushWithRetry(git func(args ...string) (string, string, error), clock retry
 	for attempt := 1; ; attempt++ {
 		_, stderr, err := git("push", "--force-with-lease", "origin", cfg.Branch)
 		if err == nil {
-			return note
+			return note, true
 		}
 		if attempt >= attempts {
-			return note + fmt.Sprintf("; push failed after %d attempt(s): %s", attempt, lastLine(stderr))
+			return note + fmt.Sprintf("; push failed after %d attempt(s): %s", attempt, lastLine(stderr)), false
 		}
 		b.Do(attempt)
 	}
