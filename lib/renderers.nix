@@ -357,8 +357,8 @@ rec {
   # membership can't drift from the check.
   isHostConfigMember = e: ((!(e.secret or false)) && !(e.boxEnvOnly or false)) || (e.hostConfig or false);
 
-  # cmd/launcher/schemaconfig_gen.go content: the dark, unreferenced
-  # counterpart to config's schema-derived members (issue #2364) — an
+  # cmd/launcher/schemaconfig_gen.go content: config's schema-derived
+  # members (issue #2364), embedded by value in config (issue #2365) — an
   # unexported schemaConfig struct plus its loader, one field/loader line
   # per host-config member (isHostConfigMember above). Emits unaligned Go;
   # nix/regen.nix and this renderer's drift check both gofmt the output, so
@@ -417,10 +417,11 @@ rec {
     + importBlock
     + "\n"
     + "// schemaConfig is the generated counterpart to config's schema-derived\n"
-    + "// members (issue #2364): one field per host-config schema member\n"
+    + "// members (issue #2364, #2365): one field per host-config schema member\n"
     + "// (lib/env-schema.nix — not secret and not boxEnvOnly, or hostConfig\n"
-    + "// overridden). Not yet embedded by config; compiled but unreferenced\n"
-    + "// until a later slice wires it in.\n"
+    + "// overridden). Embedded by value in config so a copy-and-mutate helper\n"
+    + "// like applyDispatchKind can never alias the caller's config through\n"
+    + "// this struct.\n"
     + "type schemaConfig struct {\n"
     + fields
     + "}\n"

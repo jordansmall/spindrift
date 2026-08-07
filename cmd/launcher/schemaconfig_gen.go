@@ -4,10 +4,11 @@ package main
 import "os"
 
 // schemaConfig is the generated counterpart to config's schema-derived
-// members (issue #2364): one field per host-config schema member
+// members (issue #2364, #2365): one field per host-config schema member
 // (lib/env-schema.nix — not secret and not boxEnvOnly, or hostConfig
-// overridden). Not yet embedded by config; compiled but unreferenced
-// until a later slice wires it in.
+// overridden). Embedded by value in config so a copy-and-mutate helper
+// like applyDispatchKind can never alias the caller's config through
+// this struct.
 type schemaConfig struct {
 	anthropicAPIKey              string
 	baseBranch                   string
