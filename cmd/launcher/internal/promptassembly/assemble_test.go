@@ -1188,3 +1188,90 @@ func TestAssembleDriverAgentFilesSkipsMissingPromptFile(t *testing.T) {
 		t.Errorf("scout.md changed, want untouched:\nbefore: %q\nafter:  %q", before, after)
 	}
 }
+
+// TestAssembleDriverAgentFilesFrontmatterFallbackTrimsTrailingNewlines
+// covers frontmatterOf's no-second-fence fallback (a file with only one
+// "---" fence line): bash's equivalent captures the frontmatter via
+// $(awk ...) command substitution, which strips every trailing newline, so
+// the fallback must too, rather than returning the file's raw trailing
+// newline(s) verbatim -- otherwise rewriteAgentFiles' `frontmatter + "\n" +
+// rendered + "\n"` join produces a spurious blank line the bash original
+// never would have.
+func TestAssembleDriverAgentFilesFrontmatterFallbackTrimsTrailingNewlines(t *testing.T) {
+	reg := loadTestRegistry(t)
+	dir := t.TempDir()
+
+	const markerLine = "no second fence here"
+	// Only one "---" fence line -- frontmatterOf never reaches its second
+	// fence, so it falls through to the fallback branch. Two trailing
+	// newlines exercise that the fallback strips all of them, not just one.
+	fixture := "---\n" +
+		"description: \"scout\"\n" +
+		"\n" +
+		markerLine + "\n" +
+		"\n"
+	agentFilePath := filepath.Join(dir, "scout.md")
+	if err := os.WriteFile(agentFilePath, []byte(fixture), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	env := coveredEnv()
+	env.DriverAgentFilesDir = dir
+	env.AgentsPromptFiles = `{"scout":"fragments/tdd-default.md"}`
+
+	if _, err := Assemble(env, reg); err != nil {
+		t.Fatalf("Assemble: %v", err)
+	}
+
+	after, err := os.ReadFile(agentFilePath)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	lines := strings.Split(string(after), "\n")
+	found := false
+	for i, line := range lines {
+		if line != markerLine {
+			continue
+		}
+		found = true
+		if i+1 >= len(lines) || lines[i+1] == "" {
+			t.Errorf("blank line after fallback frontmatter, want the rendered prompt to follow immediately: %q", after)
+		}
+		break
+	}
+	if !found {
+		t.Fatalf("fallback frontmatter marker line %q not found in rewritten file: %q", markerLine, after)
+	}
+}
+
+// TestAssembleDriverAgentFilesReviewerModelMissingFallback covers
+// reviewerModelFrontmatter's no-`model:`-line fallback (entrypoint.sh's
+// `sed -n 's/^model: //p'` finding no match): with the orchestrator on and
+// a baked reviewer.md whose frontmatter has no `model:` line,
+// Handoff.ReviewModel stays "".
+func TestAssembleDriverAgentFilesReviewerModelMissingFallback(t *testing.T) {
+	reg := loadTestRegistry(t)
+	dir := t.TempDir()
+
+	fixture := "---\n" +
+		"description: \"reviewer\"\n" +
+		"mode: \"subagent\"\n" +
+		"---\n" +
+		"placeholder body for reviewer\n"
+	if err := os.WriteFile(filepath.Join(dir, "reviewer.md"), []byte(fixture), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	env := coveredEnv()
+	env.OrchestratorEnabled = true
+	env.DriverAgentFilesDir = dir
+	env.AgentsPromptFiles = `{"reviewer":"fragments/tdd-default.md"}`
+
+	result, err := Assemble(env, reg)
+	if err != nil {
+		t.Fatalf("Assemble: %v", err)
+	}
+	if result.Handoff.ReviewModel != "" {
+		t.Errorf("Handoff.ReviewModel = %q, want empty (no model: line in reviewer.md frontmatter)", result.Handoff.ReviewModel)
+	}
+}

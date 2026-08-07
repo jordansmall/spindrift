@@ -524,7 +524,9 @@ func renderAgentsJSON(e Env, agentsTemplate string, allowlist map[string]string)
 // 2) exit }' produces (entrypoint.sh: 1170, 1177). A file missing a second
 // fence (never true for a real opencode-baked agent file, whose
 // agentFilesTemplate always emits both fences) falls through to returning
-// the entire file, matching awk's own behavior in that case.
+// the entire file with its trailing newline(s) stripped, matching bash's
+// own behavior in that case: the awk output there is captured via
+// $(...) command substitution, which strips all trailing newlines.
 func frontmatterOf(data []byte) string {
 	lines := strings.Split(string(data), "\n")
 	fences := 0
@@ -536,7 +538,7 @@ func frontmatterOf(data []byte) string {
 			}
 		}
 	}
-	return string(data)
+	return strings.TrimRight(string(data), "\n")
 }
 
 // reviewerModelFrontmatter extracts the `model:` YAML scalar from a baked
@@ -573,7 +575,7 @@ func reviewerModelFrontmatter(frontmatter string) string {
 //
 // Regardless of orchestratorOn, the generic per-agent rewrite loop
 // (entrypoint.sh: 1165-1186) then iterates e.AgentsPromptFiles in sorted key
-// order (bash iterates AGENTS_JSON_TEMPLATE's own key order via jq; sorting
+// order (bash iterates AGENTS_PROMPT_FILES's own key order via jq; sorting
 // here trades exact bash parity for Go-map-iteration determinism, since each
 // name's rewrite only ever touches its own independent file, so order never
 // affects the end state -- see the slice's task description). For each
