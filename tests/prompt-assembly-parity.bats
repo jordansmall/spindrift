@@ -1,16 +1,23 @@
 #!/usr/bin/env bats
-# Byte-parity harness (issue #2349, slice 6): runs the SAME env through both
-# agent/entrypoint.sh's real bash phase_prompt_assembly (via $ENTRYPOINT and
-# the fake driver/driver-exec chain, tests/helper.bash's setup_entrypoint_env)
-# and the new Go `driver-exec assemble-prompt` verb
+# Byte-parity harness (issue #2349 slice 6, extended by issue #2350): runs the
+# SAME env through both agent/entrypoint.sh's real bash phase_prompt_assembly
+# (via $ENTRYPOINT and the fake driver/driver-exec chain, tests/helper.bash's
+# setup_entrypoint_env) and the new Go `driver-exec assemble-prompt` verb
 # (cmd/launcher/internal/promptassembly + driver-exec/assembleprompt_cmd.go),
-# and asserts the two produce equivalent output for the one Env cell
-# promptassembly.Assemble covers (see assemble.go's checkCoveredCell):
-# ISSUE_TRACKER=github, CODE_FORGE=github, a read-write box, DISPATCH_KIND
-# "work", FIX_PASS 0, the orchestrator off, and every skill baked. That
-# combination, plus setup_entrypoint_env's own BOX_WRITE_ENABLED=1, is
-# exactly tests/box_env_gen.bash's set_box_env schema-default cell with zero
-# overrides.
+# and asserts the two produce equivalent output across every Env cell
+# promptassembly.Assemble covers. All cells share ISSUE_TRACKER=github,
+# CODE_FORGE=github, a read-write box, the orchestrator off, and every skill
+# baked -- exactly tests/box_env_gen.bash's set_box_env schema-default cell,
+# plus setup_entrypoint_env's own BOX_WRITE_ENABLED=1 -- and differ only on
+# the DISPATCH_KIND/SELF_CONTAINED/FIX_PASS/RESUME_AFTER_HOLD axes that select
+# among the four cells below:
+#   1. plain work (DISPATCH_KIND unset, FIX_PASS 0) -- the original covered
+#      cell, exercised with both a populated and an empty agent roster.
+#   2. research (DISPATCH_KIND=research)
+#   3. self-contained research (DISPATCH_KIND=research, SELF_CONTAINED=1)
+#   4. fix-pass (FIX_PASS>0)
+# Every cell test funnels through the shared assert_cell_parity helper below,
+# so the prompt/agents/handoff comparison logic lives in exactly one place.
 #
 # Neither side is the reference for the other: this suite is a regression
 # net for the two representations drifting apart, not a source of truth for
@@ -104,6 +111,34 @@ assemble_go() {
     "$@"
 }
 
+# assert_cell_parity: runs the bash entrypoint and the Go assemble-prompt
+# verb over whatever env the calling test has already exported, then asserts
+# three-way parity: byte-identical prompt, byte-identical agents JSON (or
+# both sides agreeing the roster is empty), and a handoff whose SessionMode
+# matches the cell's expected value. Every extra arg after the expected
+# session mode is forwarded to assemble_go (e.g. --dispatch-kind research).
+assert_cell_parity() {
+  local expected_session_mode="$1"
+  shift
+
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+
+  assemble_go "$@"
+  [ "$status" -eq 0 ]
+
+  diff "$DRIVER_PROMPT_FILE" "$BATS_TEST_TMPDIR/go-prompt.txt"
+
+  if [ -s "$DRIVER_AGENTS_FILE" ]; then
+    [ -s "$BATS_TEST_TMPDIR/go-agents.json" ]
+    diff <(jq -S . "$DRIVER_AGENTS_FILE") <(jq -S . "$BATS_TEST_TMPDIR/go-agents.json")
+  else
+    [ ! -s "$BATS_TEST_TMPDIR/go-agents.json" ]
+  fi
+
+  jq -e --arg m "$expected_session_mode" '.SessionMode == $m' "$BATS_TEST_TMPDIR/go-handoff.json"
+}
+
 # issue #2349: a realistic multi-agent roster -- scout, reviewer (present, not
 # dropped: the orchestrator is off in the covered cell), and worker (the
 # WORKER_PROVISIONED gate's partner axis to "skills baked" in the covered
@@ -115,29 +150,15 @@ AGENTS_ROSTER='{"scout":{"description":"Map relevant files, seams, and tests; re
 @test "bash and Go agree byte-for-byte on prompt/agents/handoff for the covered cell, with a populated roster" {
   export AGENTS_JSON_TEMPLATE="$AGENTS_ROSTER"
 
-  run bash "$ENTRYPOINT"
-  [ "$status" -eq 0 ]
-
-  assemble_go --agents-json-template "$AGENTS_JSON_TEMPLATE"
-  [ "$status" -eq 0 ]
-
-  diff "$DRIVER_PROMPT_FILE" "$BATS_TEST_TMPDIR/go-prompt.txt"
-
-  [ -s "$DRIVER_AGENTS_FILE" ]
-  [ -s "$BATS_TEST_TMPDIR/go-agents.json" ]
-  diff <(jq -S . "$DRIVER_AGENTS_FILE") <(jq -S . "$BATS_TEST_TMPDIR/go-agents.json")
+  assert_cell_parity initial --agents-json-template "$AGENTS_JSON_TEMPLATE"
 
   # Structurally guaranteed by the covered cell, not reverse-engineered from
   # the bash fake's capture files (entrypoint.sh:1282-1310): the orchestrator
   # gate is off, so the invoker is always "driver-exec" and both
-  # orchestrator-only review fields always stay empty. No RESUME_AFTER_HOLD
-  # override in this case, so the session mode is this cell's default
-  # "initial" (entrypoint.sh:1037-1052) -- same reasoning assemble.go's own
-  # comments already use.
+  # orchestrator-only review fields always stay empty.
   jq -e '.Invoker == "driver-exec"' "$BATS_TEST_TMPDIR/go-handoff.json"
   jq -e '.ReviewPromptFile == ""' "$BATS_TEST_TMPDIR/go-handoff.json"
   jq -e '.ReviewModel == ""' "$BATS_TEST_TMPDIR/go-handoff.json"
-  jq -e '.SessionMode == "initial"' "$BATS_TEST_TMPDIR/go-handoff.json"
 }
 
 @test "bash and Go agree on omitting the agents flag entirely with no roster" {
@@ -146,16 +167,29 @@ AGENTS_ROSTER='{"scout":{"description":"Map relevant files, seams, and tests; re
   # populated-roster branch above.
   unset AGENTS_JSON_TEMPLATE
 
-  run bash "$ENTRYPOINT"
-  [ "$status" -eq 0 ]
+  assert_cell_parity initial
+}
 
-  assemble_go
-  [ "$status" -eq 0 ]
+@test "bash and Go agree byte-for-byte on prompt/agents/handoff for the research cell" {
+  # AGENTS_JSON_TEMPLATE deliberately left unset: this cell is about the
+  # prompt-selection/session-mode axis, not roster interaction, which the
+  # two tests above already cover independently.
+  export DISPATCH_KIND="research"
 
-  diff "$DRIVER_PROMPT_FILE" "$BATS_TEST_TMPDIR/go-prompt.txt"
+  assert_cell_parity initial --dispatch-kind research
+}
 
-  [ ! -s "$DRIVER_AGENTS_FILE" ]
-  [ ! -s "$BATS_TEST_TMPDIR/go-agents.json" ]
+@test "bash and Go agree byte-for-byte on prompt/agents/handoff for the self-contained research cell" {
+  export DISPATCH_KIND="research"
+  export SELF_CONTAINED="1"
+
+  assert_cell_parity initial --dispatch-kind research --self-contained
+}
+
+@test "bash and Go agree byte-for-byte on prompt/agents/handoff for the fix-pass cell" {
+  export FIX_PASS="1"
+
+  assert_cell_parity resume --fix-pass 1
 }
 
 @test "RESUME_AFTER_HOLD flips the Go side's session mode to resume" {
