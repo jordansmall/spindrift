@@ -56,6 +56,26 @@ func (a TokenAuth) Apply(req *http.Request) {
 // codes at each call site.
 type StatusMap map[int]error
 
+// StatusError carries the raw HTTP status code of a non-2xx response. Do
+// chains one into every error it returns for a failed request (both a
+// status mapped by StatusMap and an unmapped one) via %w, alongside any
+// mapped sentinel. A single status code can carry different meanings across
+// different endpoints of the same backend (e.g. Forgejo's 409 means "not
+// mergeable" on the merge endpoint but "already exists" on the pulls-create
+// endpoint) -- StatusMap's sentinel is necessarily shared across every call
+// through a Client, so a caller that needs to disambiguate by endpoint
+// recovers the exact wire status with errors.As(err, &StatusError{})
+// instead of parsing it back out of the error string or overloading the
+// shared sentinel.
+type StatusError struct {
+	Status int
+}
+
+// Error renders the status code, e.g. "status 409".
+func (e StatusError) Error() string {
+	return fmt.Sprintf("status %d", e.Status)
+}
+
 // Client is a generic REST client for a single forge backend. Construct one
 // with New; issue requests with Do.
 type Client struct {
@@ -161,10 +181,10 @@ func (c *Client) Do(method, path string, body, out any) error {
 
 		if sentinel, ok := c.statuses[resp.StatusCode]; ok {
 			resp.Body.Close()
-			return fmt.Errorf("%s: %s %s: %w (status %d)", c.backend, method, path, sentinel, resp.StatusCode)
+			return fmt.Errorf("%s: %s %s: %w (status %d): %w", c.backend, method, path, sentinel, resp.StatusCode, StatusError{Status: resp.StatusCode})
 		}
 		resp.Body.Close()
-		return fmt.Errorf("%s: %s %s: unexpected status %d", c.backend, method, path, resp.StatusCode)
+		return fmt.Errorf("%s: %s %s: unexpected status %d: %w", c.backend, method, path, resp.StatusCode, StatusError{Status: resp.StatusCode})
 	}
 	return fmt.Errorf("%s: %s %s: maxAttempts must be >= 1 (got %d)", c.backend, method, path, c.maxAttempts)
 }

@@ -266,3 +266,82 @@ func TestReadOnlyForgejoCodeForge_CreateDraftPR_Errors(t *testing.T) {
 		t.Fatal("CreateDraftPR with a failing create: got nil error, want one")
 	}
 }
+
+// TestReadOnlyForgejoCodeForge_CreateDraftPR_AdoptsExistingOnConflict asserts
+// that when Forgejo's pulls-create endpoint fails with 409 Conflict --
+// Forgejo's "a pull request for this head already exists" signal on this
+// endpoint, semantically distinct from the same status's "not mergeable"
+// meaning on the merge endpoint (forgejoStatusMap/errMergeRefused) --
+// CreateDraftPR resolves the branch's own open PR via OpenPRForBranch and
+// returns that PR's URL with no error, mirroring github's CreateDraftPR
+// adoption (relay.go, issue #2407 slice 1/2).
+func TestReadOnlyForgejoCodeForge_CreateDraftPR_AdoptsExistingOnConflict(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/repos/owner/repo/pulls":
+			w.WriteHeader(http.StatusConflict)
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/owner/repo/pulls":
+			if err := json.NewEncoder(w).Encode([]map[string]any{
+				{
+					"number":   1964,
+					"html_url": "https://forge.test/owner/repo/pulls/1964",
+					"draft":    false,
+					"title":    "feat: add widget",
+					"head":     map[string]any{"ref": "agent/issue-1964"},
+				},
+			}); err != nil {
+				t.Fatal(err)
+			}
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	cf := forgejo.NewReadOnlyForgejoCodeForge(forgejo.ForgejoCodeForgeConfig{
+		BaseURL: srv.URL,
+		Repo:    "owner/repo",
+		Token:   "tok",
+	}, nil)
+	dpc := cf.(forge.DraftPRCreator)
+
+	url, err := dpc.CreateDraftPR("feat: add widget", "Adds a widget.", "main", "agent/issue-1964")
+	if err != nil {
+		t.Fatalf("CreateDraftPR: %v", err)
+	}
+	want := "https://forge.test/owner/repo/pulls/1964"
+	if url != want {
+		t.Errorf("CreateDraftPR url = %q, want %q", url, want)
+	}
+}
+
+// TestReadOnlyForgejoCodeForge_CreateDraftPR_ConflictWithoutOpenPRReturnsOriginalError
+// asserts that when the create call fails with 409 but OpenPRForBranch finds
+// no open PR for that head (e.g. only a closed/merged PR exists), CreateDraftPR
+// returns the original create error unmasked, rather than swallowing it.
+func TestReadOnlyForgejoCodeForge_CreateDraftPR_ConflictWithoutOpenPRReturnsOriginalError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/repos/owner/repo/pulls":
+			w.WriteHeader(http.StatusConflict)
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/owner/repo/pulls":
+			if err := json.NewEncoder(w).Encode([]map[string]any{}); err != nil {
+				t.Fatal(err)
+			}
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	cf := forgejo.NewReadOnlyForgejoCodeForge(forgejo.ForgejoCodeForgeConfig{
+		BaseURL: srv.URL,
+		Repo:    "owner/repo",
+		Token:   "tok",
+	}, nil)
+	dpc := cf.(forge.DraftPRCreator)
+
+	if _, err := dpc.CreateDraftPR("feat: add widget", "body", "main", "agent/issue-1964"); err == nil {
+		t.Fatal("CreateDraftPR with 409 and no open PR to adopt: got nil error, want the original create error")
+	}
+}
