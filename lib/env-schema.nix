@@ -266,7 +266,7 @@
   reviewEffort = {
     env = "REVIEW_EFFORT";
     group = "agents";
-    doc = "value for the orchestrator's code-owned review pass's own --effort flag (issue #2387); pass-through only, no normalization, same accepted values as EFFORT for the active Driver; empty falls back to the coordinator's EFFORT value, so default behavior is unchanged for anyone not setting it. Meaningful only under ORCHESTRATOR -- entrypoint.sh threading this value to the orchestrator's --review-effort flag is a separate follow-on, not yet wired.";
+    doc = "value for the orchestrator's code-owned review pass's own --effort flag (issue #2387); pass-through only, no normalization, same accepted values as EFFORT for the active Driver; empty falls back to the coordinator's EFFORT value, so default behavior is unchanged for anyone not setting it. Meaningful only under ORCHESTRATOR: entrypoint.sh threads this value to the orchestrator's --review-effort flag.";
     flakeOption = true;
     nixSubPath = "models.reviewEffort";
     boxEnv = true;
