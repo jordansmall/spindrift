@@ -11,13 +11,14 @@
 # reimplementation) and diffs its own captured production artifacts
 # ($DRIVER_PROMPT_FILE, $DRIVER_AGENTS_FILE) against a checked-in golden
 # fixture under tests/testdata/prompt-assembly-golden/<cell-name>.{prompt.txt,
-# agents.json}, git-blame-friendly per cell. Session mode
-# (initial vs resume) is asserted against $DRIVER_LOG's own recorded --session-id/
-# --resume flags (tests/entrypoint-driver-session.bats's own convention), and
-# the three orchestrator-only Handoff facts (Invoker, ReviewPromptFile,
-# ReviewModel) are asserted against $ORCHESTRATOR_LOG's own recorded argv
-# (tests/entrypoint-orchestrator-handoff.bats's own convention) -- no second
-# Go call, no Go-side handoff JSON to read, anywhere in this file.
+# agents.json}, git-blame-friendly per cell. Session mode (initial vs resume)
+# and the three orchestrator-only Handoff facts (Invoker, ReviewPromptFile,
+# ReviewModel) are asserted against the real Handoff JSON itself
+# ($DRIVER_HANDOFF_FILE, tests/helper.bash's test-only capture hook, issue
+# #2395 slice 2) -- SessionMode directly against the cell's own expected
+# value, the orchestrator-only facts via a `jq -S` diff against a checked-in
+# <cell-name>.handoff.json golden fixture, the same pattern as the prompt/
+# agents fixtures above.
 #
 # Each golden fixture was captured from this branch's own already-verified
 # bash entrypoint output (every other slice of issue #2354 is green), not
@@ -134,16 +135,14 @@ GOLDEN_DIR="${BATS_TEST_DIRNAME}/testdata/prompt-assembly-golden"
 # prompt ($DRIVER_PROMPT_FILE vs <golden_name>.prompt.txt), byte-identical
 # agents JSON when a roster was rendered ($DRIVER_AGENTS_FILE vs
 # <golden_name>.agents.json, both canonicalized via `jq -S` first), and a
-# session mode that matches the cell's expected value -- read from
-# $DRIVER_LOG's own recorded Driver invocation flags, not a second Go
-# handoff file: _driver_session_flags (lib/drivers/claude.nix) always emits
-# --session-id on the "initial" arm and never emits --session-id on the
-# "resume" arm (it emits --resume only when a prior session transcript
-# happens to be present under $HOME/.claude/projects, which no cell here
-# seeds -- tests/entrypoint-driver-session.bats's "fix pass with no prior
-# session data falls back with no --resume flag" test already covers that
-# fallback in detail), so --session-id's presence/absence alone
-# distinguishes the two arms cleanly regardless of prior-session state.
+# session mode that matches the cell's expected value -- read directly from
+# the real Handoff JSON's own SessionMode field ($DRIVER_HANDOFF_FILE,
+# tests/helper.bash's test-only DRIVER_HANDOFF_FILE hook, issue #2395 slice
+# 1), which entrypoint.sh's phase_prompt_assembly sets to exactly "initial"
+# or "resume" (assemble.go's Handoff.SessionMode). expected_session_mode is
+# reused as-is rather than round-tripped through a separate golden fixture:
+# it's already the deterministic value the calling test itself asserts,
+# there's no independent fact left to pin.
 assert_cell_golden() {
   local golden_name="$1" expected_session_mode="$2"
 
@@ -159,39 +158,35 @@ assert_cell_golden() {
   fi
 
   case "$expected_session_mode" in
-    initial)
-      grep -qE -- '--session-id [0-9a-f-]+' "$DRIVER_LOG"
-      ;;
-    resume)
-      ! grep -qE -- '--session-id [0-9a-f-]+' "$DRIVER_LOG"
-      ;;
+    initial | resume) ;;
     *)
       echo "assert_cell_golden: unknown expected_session_mode '$expected_session_mode'" >&2
       return 1
       ;;
   esac
+
+  [ "$(jq -r .SessionMode "$DRIVER_HANDOFF_FILE")" = "$expected_session_mode" ]
 }
 
 # assert_review_handoff_golden: for the orchestrator-on cells (issue #2353),
 # asserts the Handoff facts assert_cell_golden's own prompt/agents-JSON/
 # session-mode checks don't cover -- Invoker, ReviewPromptFile, and
-# ReviewModel, all only ever populated with the orchestrator on -- against
-# $ORCHESTRATOR_LOG's own recorded argv (the fake orchestrator echoes its raw
-# argv there, issue #1996), the same convention
-# tests/entrypoint-orchestrator-handoff.bats already uses. A non-empty
-# $ORCHESTRATOR_LOG is itself proof the orchestrator (not driver-exec) was
-# the invoker for this pass. ReviewModel is asserted as the literal "haiku"
-# -- both AGENTS_ROSTER and AGENTS_ROSTER_WITH_FILER below configure the
-# reviewer's model as "haiku", so this is a genuine byte-exact production
-# assertion, not a hand-picked marker.
+# ReviewModel, all only ever populated with the orchestrator on -- via a
+# `jq -S` diff of the real Handoff JSON ($DRIVER_HANDOFF_FILE) against a
+# checked-in <golden_name>.handoff.json fixture, the same
+# canonicalize-then-diff pattern assert_cell_golden already uses for
+# <golden_name>.agents.json. A non-empty $ORCHESTRATOR_LOG is separately kept
+# as a cheap, independent proof the orchestrator (not driver-exec) was the
+# invoker for this pass -- Invoker itself is asserted byte-exact by the diff
+# below, but this catches a run that skipped the orchestrator entirely
+# (e.g. a caller forgetting to export ORCHESTRATOR_ENABLED) with a clearer
+# failure than a JSON diff would.
 assert_review_handoff_golden() {
-  [ -s "$ORCHESTRATOR_LOG" ]
-  grep -q -- '--review-prompt-file' "$ORCHESTRATOR_LOG"
-  local review_prompt_file
-  review_prompt_file="$(grep -oE -- '--review-prompt-file [^ ]+' "$ORCHESTRATOR_LOG" | awk '{print $2}')"
-  [ -n "$review_prompt_file" ]
+  local golden_name="$1"
 
-  grep -q -- '--review-model haiku' "$ORCHESTRATOR_LOG"
+  [ -s "$ORCHESTRATOR_LOG" ]
+
+  diff <(jq -S . "$GOLDEN_DIR/${golden_name}.handoff.json") <(jq -S . "$DRIVER_HANDOFF_FILE")
 }
 
 # issue #2349: a realistic multi-agent roster -- scout, reviewer (present, not
@@ -339,7 +334,7 @@ AGENTS_ROSTER_WITH_FILER='{"scout":{"description":"Map relevant files, seams, an
 
   assert_cell_golden "orchestrator-filer-on" initial
 
-  assert_review_handoff_golden
+  assert_review_handoff_golden "orchestrator-filer-on"
 }
 
 @test "production path matches the golden fixture for the orchestrator-on filer-off cell" {
@@ -353,7 +348,7 @@ AGENTS_ROSTER_WITH_FILER='{"scout":{"description":"Map relevant files, seams, an
 
   assert_cell_golden "orchestrator-filer-off" initial
 
-  assert_review_handoff_golden
+  assert_review_handoff_golden "orchestrator-filer-off"
 }
 
 @test "production path matches the golden fixture for the orchestrator-on skills-absent cell" {
@@ -369,5 +364,5 @@ AGENTS_ROSTER_WITH_FILER='{"scout":{"description":"Map relevant files, seams, an
 
   assert_cell_golden "orchestrator-skills-absent" initial
 
-  assert_review_handoff_golden
+  assert_review_handoff_golden "orchestrator-skills-absent"
 }
