@@ -461,6 +461,15 @@ _is_readonly_github() {
   [ -z "${BOX_WRITE_ENABLED:-}" ] && [ "${CODE_FORGE:-github}" = "github" ]
 }
 
+# _handoff_field extracts field $2 from the raw Handoff descriptor JSON $1
+# (phase_prompt_assembly's driver-exec assemble-prompt call produces it,
+# issue #2355), defaulting to empty when the field is absent or null -- the
+# `jq -r ".$2 // empty"` shape every call site below already used inline
+# before this was pulled out as one shared helper.
+_handoff_field() {
+  printf '%s' "$1" | jq -r ".$2 // empty"
+}
+
 # _validate_marker_row scans _VALIDATE_MARKER_ROWS (lib/prompt-contract.nix's
 # validateMarkers registry, rendered by validateMarkersBashPreamble, issue
 # #2249): prints the row whose id (pipe position 1) matches $1, unparsed, so
@@ -549,7 +558,7 @@ _validate_prompt_contract() {
         # correctly a no-op here: the inline reviewer-subagent loop (or the
         # research/fix pass's own contract) governs verdict-gating instead
         # (orchestrator-fork-well-formed, issue #2047).
-        _haystack="$(printf '%s' "$_handoff" | jq -r '.ReviewPromptFile // empty')"
+        _haystack="$(_handoff_field "$_handoff" ReviewPromptFile)"
         if [ -n "$ORCHESTRATOR" ] && [ -n "$_haystack" ]; then
           _gate=1
         else
@@ -789,14 +798,8 @@ phase_prompt_assembly() {
   # each field into its own cross-phase sentinel (_driver_session_mode/
   # review_prompt_rendered/review_model_rendered, all retired). ORCHESTRATOR
   # (issue #2047, ADR 0035 amendment) is the one exception, deliberately left
-  # untouched here: main's own early computation (just above
-  # phase_conflict_resolve's call) already holds the correct value for this
-  # entire run -- Handoff.Invoker == "orchestrator" iff ORCHESTRATOR_ENABLED
-  # is set (gates.go's g["ORCHESTRATOR"] = e.OrchestratorEnabled), so a
-  # second, Handoff-sourced reassignment here would just be a
-  # mathematically-identical no-op, and the orchestrator-fork-well-formed
-  # check (nix/checks/prompts.nix) pins exactly one raw ORCHESTRATOR_ENABLED
-  # test in this file for that one early computation to be it.
+  # untouched here -- see the ORCHESTRATOR/Handoff.Invoker equivalence note
+  # in main, near its early ORCHESTRATOR computation (line ~1185).
   _handoff="$(cat "$_handoff_out")"
   rm -f "$_prompt_out" "$_agents_out" "$_handoff_out"
 
@@ -814,13 +817,13 @@ phase_prompt_assembly() {
   if [ -n "${AGENTS_JSON_TEMPLATE:-}" ] && printf '%s' "$AGENTS_JSON_TEMPLATE" | jq -e 'has("filer")' >/dev/null 2>&1; then
     _vc_filer_enabled=1
   fi
-  # Reads Invoker straight off $_handoff (already parsed by this point in
-  # this function, issue #2355) rather than the cross-phase $ORCHESTRATOR
-  # sentinel the gates above still use -- mathematically identical either
-  # way (see main's early ORCHESTRATOR computation), but the real descriptor
-  # is already on hand here.
+  # Matches the adjacent orchestratorEnabled gate in _validate_prompt_contract
+  # (see the ORCHESTRATOR/Handoff.Invoker equivalence note in main, near its
+  # early ORCHESTRATOR computation, line ~1185): $ORCHESTRATOR and Handoff.Invoker ==
+  # "orchestrator" are always the same value, so this reads $ORCHESTRATOR
+  # too, saving a jq subprocess.
   local FILER_FILE_RELAY=""
-  if [ -n "$_vc_filer_enabled" ] && [ -z "${BOX_WRITE_ENABLED:-}" ] && [ "$(printf '%s' "$_handoff" | jq -r '.Invoker')" = "orchestrator" ]; then
+  if [ -n "$_vc_filer_enabled" ] && [ -z "${BOX_WRITE_ENABLED:-}" ] && [ -n "$ORCHESTRATOR" ]; then
     FILER_FILE_RELAY=1
   else
     # Off-row: every conditional forking on orchestrator status declares
@@ -855,11 +858,9 @@ phase_prompt_assembly() {
 # sentinels (_driver_session_mode/review_prompt_rendered/
 # review_model_rendered) this function used to be handed as separate
 # params/globals onto this one descriptor param instead; $ORCHESTRATOR alone
-# survives, as the unavoidable pre-Handoff fallback -- the
-# orchestrator-fork-well-formed check (nix/checks/prompts.nix) pins it to
-# exactly one raw ORCHESTRATOR_ENABLED test in this file (main's own early
-# computation), so this function reads that one computed gate rather than
-# re-testing the env var itself. Delegates to driver-exec
+# survives, as the unavoidable pre-Handoff fallback -- see the
+# ORCHESTRATOR/Handoff.Invoker equivalence note in main, near its early
+# ORCHESTRATOR computation (line ~1185). Delegates to driver-exec
 # (issue #626), the in-box Go unit that owns "run the Driver, optionally
 # inside the Project devShell" as one code path: it takes the prompt/agents/
 # session as file paths (a compiled binary crosses the devShell process
@@ -906,8 +907,8 @@ run_driver_in_env() {
   # narrows handoff_json to {"Invoker": ...} only, issue #2065).
   local review_prompt="" review_model=""
   if [ -n "$handoff_json" ]; then
-    review_prompt="$(printf '%s' "$handoff_json" | jq -r '.ReviewPromptFile // empty')"
-    review_model="$(printf '%s' "$handoff_json" | jq -r '.ReviewModel // empty')"
+    review_prompt="$(_handoff_field "$handoff_json" ReviewPromptFile)"
+    review_model="$(_handoff_field "$handoff_json" ReviewModel)"
   fi
 
   local _review_prompt_file=""
@@ -948,7 +949,7 @@ run_driver_in_env() {
   # say once one existed.
   local _driver_invoker=driver-exec
   if [ -n "$handoff_json" ]; then
-    [ "$(printf '%s' "$handoff_json" | jq -r '.Invoker // empty')" = "orchestrator" ] && _driver_invoker=orchestrator
+    [ "$(_handoff_field "$handoff_json" Invoker)" = "orchestrator" ] && _driver_invoker=orchestrator
   else
     [ -n "$ORCHESTRATOR" ] && _driver_invoker=orchestrator
   fi
