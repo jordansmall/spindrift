@@ -284,9 +284,25 @@ func TestAssembleUnsupportedCell(t *testing.T) {
 		{name: "wrong issue tracker", mutate: func(e *Env) { e.IssueTracker = "bitbucket" }},
 		{name: "unrecognized code forge", mutate: func(e *Env) { e.CodeForge = "bogus" }},
 		{name: "unrecognized dispatch kind", mutate: func(e *Env) { e.DispatchKind = "bogus" }},
-		{name: "orchestrator on", mutate: func(e *Env) { e.OrchestratorEnabled = true }},
 		{name: "skills not fully baked", mutate: func(e *Env) { e.TDDSkillBaked = false }},
 		{name: "no skills found", mutate: func(e *Env) { e.SkillsFound = "" }},
+		{name: "orchestrator on, research kind", mutate: func(e *Env) {
+			e.OrchestratorEnabled = true
+			e.DispatchKind = "research"
+		}},
+		{name: "orchestrator on, fix pass", mutate: func(e *Env) {
+			e.OrchestratorEnabled = true
+			e.FixPass = 1
+		}},
+		{name: "orchestrator on, partial skills (found but not all baked)", mutate: func(e *Env) {
+			e.OrchestratorEnabled = true
+			e.TDDSkillBaked = false
+		}},
+		{name: "orchestrator on, partial skills (none found but one baked)", mutate: func(e *Env) {
+			e.OrchestratorEnabled = true
+			e.SkillsFound = ""
+			e.TDDSkillBaked = true
+		}},
 	}
 	for _, tc := range cases {
 		tc := tc
@@ -772,5 +788,187 @@ func TestAssembleUnsupportedCellDefaultsCovered(t *testing.T) {
 
 	if _, err := Assemble(env, reg); err != nil {
 		t.Errorf("Assemble with defaulted tracker/forge/kind: %v, want nil error", err)
+	}
+}
+
+// TestAssembleOrchestratorReviewerDrop covers entrypoint.sh's
+// orchestrator-on reviewer-drop / review-model-extraction / review-prompt
+// rendering (entrypoint.sh: 1029-1062, 1086-1107): review_prompt_rendered is
+// populated with review-prompt.md's substituted text, review_model_rendered
+// is extracted from .reviewer.model before the reviewer key is deleted from
+// the agents JSON template, and the generic per-agent injection loop still
+// runs for every other agent.
+func TestAssembleOrchestratorReviewerDrop(t *testing.T) {
+	reg := loadTestRegistry(t)
+	env := coveredEnv()
+	env.OrchestratorEnabled = true
+	env.AgentsJSONTemplate = `{"reviewer":{"model":"review-model-x"},"scout":{"model":"scout-model-y"}}`
+	env.AgentsPromptFiles = `{"scout":"fragments/tdd-default.md"}`
+
+	result, err := Assemble(env, reg)
+	if err != nil {
+		t.Fatalf("Assemble: %v", err)
+	}
+
+	if result.Handoff.Invoker != "orchestrator" {
+		t.Errorf("Handoff.Invoker = %q, want orchestrator", result.Handoff.Invoker)
+	}
+	if result.Handoff.ReviewModel != "review-model-x" {
+		t.Errorf("Handoff.ReviewModel = %q, want %q", result.Handoff.ReviewModel, "review-model-x")
+	}
+	if result.Handoff.ReviewPromptFile == "" {
+		t.Fatal("Handoff.ReviewPromptFile is empty, want non-empty")
+	}
+	if !strings.Contains(result.Handoff.ReviewPromptFile, "#2349") {
+		t.Errorf("Handoff.ReviewPromptFile missing substituted ISSUE_NUMBER:\n%s", result.Handoff.ReviewPromptFile)
+	}
+
+	var parsed map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(result.AgentsJSON), &parsed); err != nil {
+		t.Fatalf("unmarshal AgentsJSON: %v\n%s", err, result.AgentsJSON)
+	}
+	if _, ok := parsed["reviewer"]; ok {
+		t.Errorf("AgentsJSON still contains reviewer key, want it dropped: %s", result.AgentsJSON)
+	}
+
+	var scout struct {
+		Model  string `json:"model"`
+		Prompt string `json:"prompt"`
+	}
+	if err := json.Unmarshal(parsed["scout"], &scout); err != nil {
+		t.Fatalf("unmarshal scout entry: %v", err)
+	}
+	if !strings.Contains(scout.Prompt, "/tdd") {
+		t.Errorf("scout.prompt missing substituted tdd-default.md content: %q", scout.Prompt)
+	}
+}
+
+// TestAssembleOrchestratorNoReviewerKey covers that ReviewModel stays empty
+// (mirroring jq's `.reviewer.model // empty`) when the template carries no
+// reviewer key at all, while review-prompt.md rendering is unaffected --
+// it's independent of whether a reviewer is configured.
+func TestAssembleOrchestratorNoReviewerKey(t *testing.T) {
+	reg := loadTestRegistry(t)
+	env := coveredEnv()
+	env.OrchestratorEnabled = true
+	env.AgentsJSONTemplate = `{"scout":{"model":"scout-model-y"}}`
+
+	result, err := Assemble(env, reg)
+	if err != nil {
+		t.Fatalf("Assemble: %v", err)
+	}
+
+	if result.Handoff.ReviewModel != "" {
+		t.Errorf("Handoff.ReviewModel = %q, want empty", result.Handoff.ReviewModel)
+	}
+	if result.Handoff.ReviewPromptFile == "" {
+		t.Error("Handoff.ReviewPromptFile is empty, want non-empty even with no reviewer configured")
+	}
+}
+
+// TestAssembleOrchestratorEmptyAgentsTemplate covers the orchestrator-on
+// cell with no AgentsJSONTemplate at all: AgentsJSON stays empty (no
+// --agents flag), ReviewModel stays empty, and ReviewPromptFile is still
+// rendered (it doesn't depend on AgentsJSONTemplate at all).
+func TestAssembleOrchestratorEmptyAgentsTemplate(t *testing.T) {
+	reg := loadTestRegistry(t)
+	env := coveredEnv()
+	env.OrchestratorEnabled = true
+
+	result, err := Assemble(env, reg)
+	if err != nil {
+		t.Fatalf("Assemble: %v", err)
+	}
+
+	if result.AgentsJSON != "" {
+		t.Errorf("AgentsJSON = %q, want empty", result.AgentsJSON)
+	}
+	if result.Handoff.ReviewModel != "" {
+		t.Errorf("Handoff.ReviewModel = %q, want empty", result.Handoff.ReviewModel)
+	}
+	if result.Handoff.ReviewPromptFile == "" {
+		t.Error("Handoff.ReviewPromptFile is empty, want non-empty")
+	}
+}
+
+// TestAssembleOrchestratorBoxReadOnlyCovered covers that
+// OrchestratorEnabled + BoxWriteEnabled == false is a covered cell now
+// (the "filer relay" precondition axis, issue #2353), not rejected by
+// checkCoveredCell.
+func TestAssembleOrchestratorBoxReadOnlyCovered(t *testing.T) {
+	reg := loadTestRegistry(t)
+	env := coveredEnv()
+	env.OrchestratorEnabled = true
+	env.BoxWriteEnabled = false
+
+	if _, err := Assemble(env, reg); err != nil {
+		t.Errorf("Assemble: %v, want nil error (orchestrator on + box read-only is covered)", err)
+	}
+}
+
+// TestAssembleOrchestratorSkillsAbsentCovered covers that
+// OrchestratorEnabled with SkillsFound == "" and every *SkillBaked flag
+// false ("skills-absent" cell, issue #2353) is covered, and that the
+// rendered prompt omits the skill-preamble fragment text -- mirroring
+// TestAssembleCoveredCellRendersPrompt's fragment-gate-off assertions.
+func TestAssembleOrchestratorSkillsAbsentCovered(t *testing.T) {
+	reg := loadTestRegistry(t)
+	env := coveredEnv()
+	env.OrchestratorEnabled = true
+	env.SkillsFound = ""
+	env.CavemanSkillBaked = false
+	env.TDDSkillBaked = false
+	env.CommitSkillBaked = false
+	env.CodeReviewSkillBaked = false
+
+	result, err := Assemble(env, reg)
+	if err != nil {
+		t.Fatalf("Assemble: %v", err)
+	}
+
+	if strings.Contains(result.Prompt, "Skills available:") {
+		t.Errorf("Prompt contains skill-preamble.md fragment text, want it absent (SKILLS_FOUND gate off):\n%s", result.Prompt)
+	}
+}
+
+// TestAssembleOrchestratorOffReviewerFlowsThroughGenericLoop is a
+// regression guard for renderAgentsJSON's signature change (issue #2353):
+// with the orchestrator off, a reviewer key in AgentsJSONTemplate is NOT
+// dropped -- it flows through the generic per-agent injection loop like any
+// other roster entry, same as before this slice.
+func TestAssembleOrchestratorOffReviewerFlowsThroughGenericLoop(t *testing.T) {
+	reg := loadTestRegistry(t)
+	env := coveredEnv()
+	env.AgentsJSONTemplate = `{"reviewer":{"model":"review-model-x"}}`
+	env.AgentsPromptFiles = `{"reviewer":"fragments/tdd-default.md"}`
+
+	result, err := Assemble(env, reg)
+	if err != nil {
+		t.Fatalf("Assemble: %v", err)
+	}
+
+	var parsed map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(result.AgentsJSON), &parsed); err != nil {
+		t.Fatalf("unmarshal AgentsJSON: %v\n%s", err, result.AgentsJSON)
+	}
+	reviewerRaw, ok := parsed["reviewer"]
+	if !ok {
+		t.Fatal("AgentsJSON missing reviewer key, want it present (orchestrator off, no reviewer-drop)")
+	}
+	var reviewer struct {
+		Model  string `json:"model"`
+		Prompt string `json:"prompt"`
+	}
+	if err := json.Unmarshal(reviewerRaw, &reviewer); err != nil {
+		t.Fatalf("unmarshal reviewer entry: %v", err)
+	}
+	if !strings.Contains(reviewer.Prompt, "/tdd") {
+		t.Errorf("reviewer.prompt missing substituted tdd-default.md content: %q", reviewer.Prompt)
+	}
+	if result.Handoff.ReviewModel != "" {
+		t.Errorf("Handoff.ReviewModel = %q, want empty (orchestrator off)", result.Handoff.ReviewModel)
+	}
+	if result.Handoff.ReviewPromptFile != "" {
+		t.Errorf("Handoff.ReviewPromptFile = %q, want empty (orchestrator off)", result.Handoff.ReviewPromptFile)
 	}
 }

@@ -11,7 +11,7 @@ import (
 )
 
 // ErrUnsupportedCell marks an Env combination Assemble does not (yet) cover.
-// Assemble currently implements four cells of agent/entrypoint.sh's
+// Assemble currently implements seven cells of agent/entrypoint.sh's
 // phase_prompt_assembly — see checkCoveredCell — and errors, wrapping this
 // sentinel, for anything outside them rather than silently mis-rendering a
 // prompt for a combination it hasn't been built (and tested) against.
@@ -35,21 +35,28 @@ type Handoff struct {
 	// Invoker is "orchestrator" or "driver-exec" (entrypoint.sh: 1282-1286).
 	Invoker string
 	// ReviewPromptFile and ReviewModel are only ever populated when Invoker
-	// is "orchestrator" (entrypoint.sh: 1294, 1303); Assemble's covered
-	// cell always resolves to "driver-exec", so both stay empty here.
+	// is "orchestrator" (entrypoint.sh: 1294, 1303) and the cell is the
+	// default fresh-work dispatch (kind "work", FixPass == 0) -- research
+	// and fix-pass cells leave both empty even with the orchestrator on.
+	// ReviewModel further stays empty when AgentsJSONTemplate carries no
+	// "reviewer" key (or a reviewer entry with no "model" field), mirroring
+	// jq's `.reviewer.model // empty` (entrypoint.sh: 1096).
 	ReviewPromptFile string
 	ReviewModel      string
 }
 
-// checkCoveredCell validates that e sits in one of the Env cells Assemble
-// implements: IssueTracker one of "github" (explicit or default), "jira",
+// checkCoveredCell validates that e sits in one of Assemble's covered Env
+// cells. IssueTracker one of "github" (explicit or default), "jira",
 // "local", or "forgejo" (issue #2352 -- see gates_tracker.go's
-// issueTrackerAxis for how each maps onto its gate-family suffixes),
-// CodeForge (explicitly or by default) either "github" or "forgejo", either
-// box access state (BoxWriteEnabled true or false), the orchestrator off,
-// and every skill baked (SkillsFound non-empty and all four per-skill gates
-// on) are common to all covered cells; the dispatch-kind/fix-pass axis then
-// forks into:
+// issueTrackerAxis for how each maps onto its gate-family suffixes), and
+// CodeForge (explicitly or by default) either "github" or "forgejo", are
+// common to every cell. From there, the orchestrator axis forks the
+// remaining rules:
+//
+// Orchestrator off -- the original four cells (issue #2349) crossed with
+// the access/forge axis (issue #2352, BoxWriteEnabled true or false):
+// every skill baked (SkillsFound non-empty and all four per-skill gates on)
+// is common to all of them; the dispatch-kind/fix-pass axis then forks into:
 //   - dispatch kind "work" (explicit or default), FixPass == 0 -- a fresh
 //     work dispatch (issue-prompt.md).
 //   - dispatch kind "work" (explicit or default), FixPass > 0 -- a warm fix
@@ -58,6 +65,20 @@ type Handoff struct {
 //     research dispatch (research-prompt.md).
 //   - dispatch kind "research", SelfContained == true -- a self-contained
 //     research dispatch (research-self-contained-prompt.md).
+//
+// Orchestrator on -- three more cells (issue #2353), all sharing dispatch
+// kind "work" (explicit or default) with FixPass == 0 -- the same fresh
+// work dispatch as above, since review_prompt_rendered only ever populates
+// on that path (entrypoint.sh: 1029-1062); research and fix-pass combined
+// with orchestrator-on are out of scope for this slice:
+//   - BoxWriteEnabled true, skills fully baked -- "filer-off" (the same
+//     skills rule as the orchestrator-off cells, orchestrator on instead).
+//   - BoxWriteEnabled false, skills fully baked -- "filer-on", the shape
+//     that lets FILER_FILE_RELAY (Gates) actually fire.
+//   - BoxWriteEnabled either, SkillsFound == "" and all four per-skill
+//     gates off -- "skills-absent". A partial combination (SkillsFound
+//     non-empty but not all four flags true, or SkillsFound empty but some
+//     flag true) is not covered.
 //
 // A DispatchKind that is neither "work" nor "research" is out of scope, as
 // is any other combination outside these cells; each returns an error
@@ -86,15 +107,27 @@ func checkCoveredCell(e Env) error {
 	if kind == "" {
 		kind = defaultDispatchKind
 	}
+
+	skillsFullyBaked := e.SkillsFound != "" && e.CavemanSkillBaked && e.TDDSkillBaked && e.CommitSkillBaked && e.CodeReviewSkillBaked
+	skillsFullyAbsent := e.SkillsFound == "" && !e.CavemanSkillBaked && !e.TDDSkillBaked && !e.CommitSkillBaked && !e.CodeReviewSkillBaked
+
+	if e.OrchestratorEnabled {
+		if kind != defaultDispatchKind || e.FixPass > 0 {
+			return fmt.Errorf("orchestrator enabled with dispatch kind %q, fix pass %d: %w", e.DispatchKind, e.FixPass, ErrUnsupportedCell)
+		}
+
+		if !skillsFullyBaked && !skillsFullyAbsent {
+			return fmt.Errorf("skills partially baked: %w", ErrUnsupportedCell)
+		}
+
+		return nil
+	}
+
 	if kind != defaultDispatchKind && kind != "research" {
 		return fmt.Errorf("dispatch kind %q: %w", e.DispatchKind, ErrUnsupportedCell)
 	}
 
-	if e.OrchestratorEnabled {
-		return fmt.Errorf("orchestrator enabled: %w", ErrUnsupportedCell)
-	}
-
-	if e.SkillsFound == "" || !e.CavemanSkillBaked || !e.TDDSkillBaked || !e.CommitSkillBaked || !e.CodeReviewSkillBaked {
+	if !skillsFullyBaked {
 		return fmt.Errorf("skills not fully baked: %w", ErrUnsupportedCell)
 	}
 
@@ -338,13 +371,57 @@ func Assemble(e Env, reg Registry) (Result, error) {
 		},
 	}
 
-	// Agents JSON (entrypoint.sh: 1077-1116): orchestrator is off for the
-	// covered cell, so the inner del(.reviewer)/model-extraction branch
-	// (entrypoint.sh: 1088-1104) never applies -- only the generic
-	// per-agent injection loop (entrypoint.sh: 1105-1116) does. Empty
-	// template means no --agents flag at all: Result.AgentsJSON stays "".
+	// review_prompt_rendered (entrypoint.sh: 1029-1062): only ever populated
+	// on the default fresh-work-dispatch path (kind == "work", FixPass ==
+	// 0) and only when the orchestrator is on -- a research dispatch never
+	// reviews (ADR 0022), and a warm FIX_PASS box has its own review-less
+	// warm-fix flow. review-prompt.md is rendered through the same
+	// allowlist as every other file this function reads.
+	if gates["ORCHESTRATOR"] && kind == defaultDispatchKind && e.FixPass == 0 {
+		reviewPromptPath := filepath.Join(e.PromptsDir, "review-prompt.md")
+		reviewPromptText, err := renderFile(reviewPromptPath, allowlist)
+		if err != nil {
+			return Result{}, fmt.Errorf("read review-prompt.md: %w", err)
+		}
+		result.Handoff.ReviewPromptFile = reviewPromptText
+	}
+
+	// Agents JSON (entrypoint.sh: 1077-1116). Empty template means no
+	// --agents flag at all: Result.AgentsJSON stays "".
 	if e.AgentsJSONTemplate != "" {
-		agentsJSON, err := renderAgentsJSON(e, allowlist)
+		agentsTemplate := e.AgentsJSONTemplate
+
+		if gates["ORCHESTRATOR"] {
+			// Issue #2277 (entrypoint.sh: 1086-1101): extract the
+			// reviewer's own configured model into Handoff.ReviewModel
+			// before dropping the reviewer key from the template entirely
+			// -- the code-owned review pass replaces the implementor's own
+			// inline reviewer subagent, so it's never provisioned into
+			// --agents at all, not merely muted.
+			var agentsKeys map[string]json.RawMessage
+			if err := json.Unmarshal([]byte(agentsTemplate), &agentsKeys); err != nil {
+				return Result{}, fmt.Errorf("parse agents json template: %w", err)
+			}
+			if reviewerRaw, ok := agentsKeys["reviewer"]; ok {
+				var reviewer struct {
+					Model string `json:"model"`
+				}
+				// A malformed reviewer entry (not an object, or one with no
+				// model field) mirrors jq's `.reviewer.model // empty`:
+				// Unmarshal error or a zero-value Model both leave
+				// ReviewModel at its empty default rather than failing.
+				_ = json.Unmarshal(reviewerRaw, &reviewer)
+				result.Handoff.ReviewModel = reviewer.Model
+			}
+			delete(agentsKeys, "reviewer")
+			strippedJSON, err := json.Marshal(agentsKeys)
+			if err != nil {
+				return Result{}, fmt.Errorf("marshal reviewer-stripped agents json: %w", err)
+			}
+			agentsTemplate = string(strippedJSON)
+		}
+
+		agentsJSON, err := renderAgentsJSON(e, agentsTemplate, allowlist)
 		if err != nil {
 			return Result{}, err
 		}
@@ -355,16 +432,23 @@ func Assemble(e Env, reg Registry) (Result, error) {
 }
 
 // renderAgentsJSON implements entrypoint.sh's generic per-agent injection
-// loop (entrypoint.sh: 1105-1116): for every key in AgentsJSONTemplate,
-// look up its prompt file via AgentsPromptFiles[name], and when
-// PromptsDir/<file> exists, substitute it through the same allowlist and
-// set .{name}.prompt to the rendered text. DriverAgentFilesDir's on-disk
-// agent-files twin (entrypoint.sh: 1130+) is out of scope for this slice
-// (issue #2349) -- it only matters for a non-claude Driver, so a non-empty
-// value is silently ignored here, not an error.
-func renderAgentsJSON(e Env, allowlist map[string]string) (string, error) {
+// loop (entrypoint.sh: 1105-1116): for every key in agentsTemplate, look up
+// its prompt file via AgentsPromptFiles[name], and when PromptsDir/<file>
+// exists, substitute it through the same allowlist and set .{name}.prompt
+// to the rendered text. agentsTemplate is an explicit parameter, rather
+// than e.AgentsJSONTemplate read internally, so the caller can hand this
+// function the reviewer-stripped template the orchestrator-on
+// del(.reviewer)/model-extraction branch (entrypoint.sh: 1086-1101)
+// produces (issue #2353) -- when the orchestrator is off, the caller passes
+// e.AgentsJSONTemplate through unmodified, and a reviewer key (if any)
+// flows through this loop like any other agent, unchanged from issue
+// #2349's original behavior. DriverAgentFilesDir's on-disk agent-files twin
+// (entrypoint.sh: 1130+) is out of scope for this slice -- it only matters
+// for a non-claude Driver, so a non-empty value is silently ignored here,
+// not an error.
+func renderAgentsJSON(e Env, agentsTemplate string, allowlist map[string]string) (string, error) {
 	var template map[string]json.RawMessage
-	if err := json.Unmarshal([]byte(e.AgentsJSONTemplate), &template); err != nil {
+	if err := json.Unmarshal([]byte(agentsTemplate), &template); err != nil {
 		return "", fmt.Errorf("parse agents json template: %w", err)
 	}
 
