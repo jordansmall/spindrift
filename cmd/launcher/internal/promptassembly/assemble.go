@@ -41,11 +41,13 @@ type Handoff struct {
 	ReviewModel      string
 }
 
-// checkCoveredCell validates that e sits in one of the four Env cells
-// Assemble implements: IssueTracker/CodeForge both (explicitly or by
-// default) github, a read-write box, the orchestrator off, and every skill
-// baked (SkillsFound non-empty and all four per-skill gates on) are common
-// to all four; the dispatch-kind/fix-pass axis then forks into:
+// checkCoveredCell validates that e sits in one of the Env cells Assemble
+// implements: IssueTracker (explicitly or by default) github, CodeForge
+// (explicitly or by default) either "github" or "forgejo", either box
+// access state (BoxWriteEnabled true or false), the orchestrator off, and
+// every skill baked (SkillsFound non-empty and all four per-skill gates on)
+// are common to all covered cells; the dispatch-kind/fix-pass axis then
+// forks into:
 //   - dispatch kind "work" (explicit or default), FixPass == 0 -- a fresh
 //     work dispatch (issue-prompt.md).
 //   - dispatch kind "work" (explicit or default), FixPass > 0 -- a warm fix
@@ -56,7 +58,7 @@ type Handoff struct {
 //     research dispatch (research-self-contained-prompt.md).
 //
 // A DispatchKind that is neither "work" nor "research" is out of scope, as
-// is any other combination outside these four cells; each returns an error
+// is any other combination outside these cells; each returns an error
 // wrapping ErrUnsupportedCell.
 func checkCoveredCell(e Env) error {
 	tracker := e.IssueTracker
@@ -71,12 +73,8 @@ func checkCoveredCell(e Env) error {
 	if forge == "" {
 		forge = defaultCodeForge
 	}
-	if forge != defaultCodeForge {
+	if forge != "github" && forge != "forgejo" {
 		return fmt.Errorf("code forge %q: %w", e.CodeForge, ErrUnsupportedCell)
-	}
-
-	if !e.BoxWriteEnabled {
-		return fmt.Errorf("box access is read-only: %w", ErrUnsupportedCell)
 	}
 
 	kind := e.DispatchKind
