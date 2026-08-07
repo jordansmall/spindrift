@@ -1,21 +1,27 @@
 #!/usr/bin/env bats
-# Byte-parity harness (issue #2349 slice 6, extended by issue #2350): runs the
-# SAME env through both agent/entrypoint.sh's real bash phase_prompt_assembly
-# (via $ENTRYPOINT and the fake driver/driver-exec chain, tests/helper.bash's
-# setup_entrypoint_env) and the new Go `driver-exec assemble-prompt` verb
-# (cmd/launcher/internal/promptassembly + driver-exec/assembleprompt_cmd.go),
-# and asserts the two produce equivalent output across every Env cell
-# promptassembly.Assemble covers. All cells share ISSUE_TRACKER=github,
-# CODE_FORGE=github, a read-write box, the orchestrator off, and every skill
-# baked -- exactly tests/box_env_gen.bash's set_box_env schema-default cell,
-# plus setup_entrypoint_env's own BOX_WRITE_ENABLED=1 -- and differ only on
-# the DISPATCH_KIND/SELF_CONTAINED/FIX_PASS/RESUME_AFTER_HOLD axes that select
-# among the four cells below:
+# Byte-parity harness (issue #2349 slice 6, extended by issue #2350 and
+# #2351): runs the SAME env through both agent/entrypoint.sh's real bash
+# phase_prompt_assembly (via $ENTRYPOINT and the fake driver/driver-exec
+# chain, tests/helper.bash's setup_entrypoint_env) and the new Go
+# `driver-exec assemble-prompt` verb (cmd/launcher/internal/promptassembly +
+# driver-exec/assembleprompt_cmd.go), and asserts the two produce equivalent
+# output across every Env cell promptassembly.Assemble covers. All cells
+# share ISSUE_TRACKER=github, the orchestrator off, and every skill baked --
+# exactly tests/box_env_gen.bash's set_box_env schema-default cell, plus
+# setup_entrypoint_env's own BOX_WRITE_ENABLED=1 default -- and differ only
+# on the DISPATCH_KIND/SELF_CONTAINED/FIX_PASS/RESUME_AFTER_HOLD axes and the
+# CODE_FORGE/BOX_WRITE_ENABLED access/forge axis that select among the cells
+# below:
 #   1. plain work (DISPATCH_KIND unset, FIX_PASS 0) -- the original covered
-#      cell, exercised with both a populated and an empty agent roster.
+#      cell, exercised with both a populated and an empty agent roster. Also
+#      the github read-write cell on the access/forge axis (the schema
+#      default).
 #   2. research (DISPATCH_KIND=research)
 #   3. self-contained research (DISPATCH_KIND=research, SELF_CONTAINED=1)
 #   4. fix-pass (FIX_PASS>0)
+#   5. github read-only (CODE_FORGE=github, BOX_WRITE_ENABLED unset)
+#   6. forgejo read-write (CODE_FORGE=forgejo, BOX_WRITE_ENABLED=1)
+#   7. forgejo read-only (CODE_FORGE=forgejo, BOX_WRITE_ENABLED unset)
 # Every cell test funnels through the shared assert_cell_parity helper below,
 # so the prompt/agents/handoff comparison logic lives in exactly one place.
 #
@@ -190,6 +196,46 @@ AGENTS_ROSTER='{"scout":{"description":"Map relevant files, seams, and tests; re
   export FIX_PASS="1"
 
   assert_cell_parity resume --fix-pass 1
+}
+
+@test "bash and Go agree byte-for-byte on prompt/agents/handoff for the github read-only cell" {
+  # AGENTS_JSON_TEMPLATE deliberately left unset: this cell is about the
+  # access/forge axis, not roster interaction, which the two tests at the
+  # top of this file already cover independently.
+  unset BOX_WRITE_ENABLED
+
+  assert_cell_parity initial --box-write-enabled=false
+}
+
+@test "bash and Go agree byte-for-byte on prompt/agents/handoff for the forgejo read-write cell" {
+  # AGENTS_JSON_TEMPLATE deliberately left unset, same reasoning as above.
+  # BOX_WRITE_ENABLED stays at setup_entrypoint_env's read-write default, so
+  # no extra flag override is needed here.
+  export CODE_FORGE="forgejo"
+  export FORGEJO_BASE_URL="https://forge.test"
+  export FORGEJO_TOKEN="fjtok"
+  # clone_repo requires FORGEJO_TOKEN and builds the clone URL as
+  # https://<token>@<host>/<slug>.git; redirect that exact URL to the bare
+  # repo setup_bare_repo already seeded so the clone stays offline (mirrors
+  # tests/entrypoint-prompt-assembly.bats's CODE_FORGE=forgejo fix-pass test).
+  git config --global "url.file://$REMOTE_ROOT/.insteadOf" "https://fjtok@forge.test/"
+
+  assert_cell_parity initial
+}
+
+@test "bash and Go agree byte-for-byte on prompt/agents/handoff for the forgejo read-only cell" {
+  # AGENTS_JSON_TEMPLATE deliberately left unset, same reasoning as above.
+  export CODE_FORGE="forgejo"
+  export FORGEJO_BASE_URL="https://forge.test"
+  export FORGEJO_TOKEN="fjtok"
+  unset BOX_WRITE_ENABLED
+  # clone_repo requires FORGEJO_TOKEN and builds the clone URL as
+  # https://<token>@<host>/<slug>.git; redirect that exact URL to the bare
+  # repo setup_bare_repo already seeded so the clone stays offline (mirrors
+  # tests/entrypoint-prompt-assembly.bats's CODE_FORGE=forgejo fix-pass test).
+  git config --global "url.file://$REMOTE_ROOT/.insteadOf" "https://fjtok@forge.test/"
+
+  assert_cell_parity initial --box-write-enabled=false
 }
 
 @test "RESUME_AFTER_HOLD flips the Go side's session mode to resume" {
