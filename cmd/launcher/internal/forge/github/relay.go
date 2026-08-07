@@ -61,6 +61,18 @@ func (c *readOnlyCodeForge) RelayBundle(outboxDir, ref string) error {
 // host-side create. Runs cwd-independently (no local clone required): head
 // and base are branch names in c.repo itself, never a fork's owner:branch
 // form, matching every agent PR branch's own in-repo convention.
+//
+// Idempotent against a retried call for the same head (issue #2407 slice
+// 1): a create that races or repeats an earlier host-mediated create for
+// the same branch fails with gh's "a pull request ... already exists"
+// stderr, not a distinct sentinel error. Rather than surface that as a
+// failure -- which would wrongly report a settled hand-off as blocked --
+// this treats it as a signal to adopt: it resolves the branch's own open
+// PR via OpenPRForBranch (embedded from execClient) and returns that PR's
+// URL with no error. If OpenPRForBranch can't resolve an open PR for that
+// head (e.g. only a closed/merged PR exists, or the lookup itself errors),
+// the original create error is returned unmasked -- adoption is only ever
+// additive, never a way to swallow a genuine failure.
 func (c *readOnlyCodeForge) CreateDraftPR(title, body, base, head string) (string, error) {
 	var stderr bytes.Buffer
 	cmd := exec.Command("gh", "pr", "create",
@@ -74,7 +86,13 @@ func (c *readOnlyCodeForge) CreateDraftPR(title, body, base, head string) (strin
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
 	if err != nil {
-		return "", fmt.Errorf("github: create draft PR: gh pr create: %w: %s", err, strings.TrimSpace(stderr.String()))
+		createErr := fmt.Errorf("github: create draft PR: gh pr create: %w: %s", err, strings.TrimSpace(stderr.String()))
+		if strings.Contains(stderr.String(), "already exists") {
+			if pr, ok, openErr := c.OpenPRForBranch(head); openErr == nil && ok {
+				return pr.URL, nil
+			}
+		}
+		return "", createErr
 	}
 	return strings.TrimSpace(string(out)), nil
 }
