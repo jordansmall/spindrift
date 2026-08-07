@@ -1,0 +1,6 @@
+[
+  { "id": "verdict-comment-relay", "marker": "SPINDRIFT_COMMENT", "carrier": "fragment-body", "severity": "reject", "when": "readOnlyResearch" },
+  { "id": "reviewer-verdict", "marker": "VERDICT:", "carrier": "subagent-first-line", "severity": "reject", "when": "orchestratorEnabled" },
+  { "id": "pr-intent", "marker": "SPINDRIFT_PR_INTENT", "carrier": "fragment-body", "severity": "warn", "when": "boxAccessReadOnly" },
+  { "id": "issue-intent", "marker": "SPINDRIFT_ISSUE_INTENT", "carrier": "fragment-body", "severity": "warn", "when": "filerFileRelay" }
+]
