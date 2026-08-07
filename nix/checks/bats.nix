@@ -88,6 +88,14 @@ let
           CONTRACT_REGISTRY_FILE = batsHarness.contractRegistryFile;
           DRIVER = name;
           DRIVER_SESSION_RESUMABLE = pkgs.lib.optionalString (entry ? sessionCacheDirRelative) "1";
+          # entrypoint.sh's phase_prompt_assembly now unconditionally shells
+          # out to `driver-exec assemble-prompt` (issue #2354) regardless of
+          # which Driver is selected, so every suite that drives $ENTRYPOINT
+          # needs the same two vars the main `bats` derivation exports (see
+          # its own comment above promptassemblyRegistryJsonFile) -- this
+          # derivation's own entrypoint-outcome-*.bats run is no exception.
+          DRIVER_EXEC_BIN = "${batsHarness.driverExecBin}/bin/driver-exec";
+          PROMPTASSEMBLY_REGISTRY_FILE = promptassemblyRegistryJsonFile;
         }
         ''
           export HOME="$TMPDIR/home"
@@ -345,6 +353,11 @@ in
         FRAGMENT_REGISTRY_FILE = batsHarness.fragmentRegistryFile;
         CONTRACT_REGISTRY_FILE = batsHarness.contractRegistryFile;
         PROMPT_CONTRACT_PARITY_FIXTURE = promptContractParityFixtureFile;
+        # Same reason as outcomeBatsChecks' own copy of these two vars above:
+        # $ENTRYPOINT unconditionally calls `driver-exec assemble-prompt`
+        # now (issue #2354).
+        DRIVER_EXEC_BIN = "${batsHarness.driverExecBin}/bin/driver-exec";
+        PROMPTASSEMBLY_REGISTRY_FILE = promptassemblyRegistryJsonFile;
       }
       ''
         export HOME="$TMPDIR/home"

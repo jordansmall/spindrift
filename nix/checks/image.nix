@@ -262,15 +262,17 @@ in
 
   # The idempotency check (issue #420) hinges on the entrypoint sourcing its
   # marker from the same registry row lib/mkHarness.nix now looks up from
-  # lib/prompt-contract.nix (issue #2246 slice 1). Since slice 2,
-  # agent/entrypoint.sh no longer materializes a per-block *_CONTRACT_MARKER
-  # variable at all: `_inject_shared_block` resolves the marker internally
-  # via `_contract_marker "$id"` against the registry-rendered
-  # _INJECT_BLOCK_ROWS array (contract-registry.sh, baked ahead of it at
-  # image-build time), so the entrypoint.sh-side half of this check confirms
-  # the call site passes the bare id through to that single resolution point,
-  # rather than re-asserting a marker literal that no longer appears in the
-  # source.
+  # lib/prompt-contract.nix (issue #2246 slice 1). Since issue #2354's flip,
+  # shared-block injection no longer lives in agent/entrypoint.sh's
+  # `_inject_shared_block` (deleted, along with the rest of the inline gate/
+  # fragment/injection precompute) -- it lives in
+  # cmd/launcher/internal/promptassembly/assemble.go's `injectSharedBlock`,
+  # called with each contract file's Env field directly (no id lookup at all;
+  # Go derives the marker from the block's own first line rather than
+  # resolving an id against a registry). So the runtime-wiring half of this
+  # check now confirms the Go verb's shared-block-injection call site still
+  # references the right contract-file field, instead of grepping the
+  # (now-removed) bash call site.
   outcome-contract-marker-parity =
     let
       row = byId "outcome";
@@ -279,7 +281,7 @@ in
       row.marker == "# LAND THE CHANGE"
     ) "prompt-contract.nix outcome row's marker must be '# LAND THE CHANGE', got: ${row.marker}";
     pkgs.runCommand "outcome-contract-marker-parity" { } ''
-      grep -qF '_inject_shared_block "outcome" "$OUTCOME_CONTRACT_FILE"' ${../../agent/entrypoint.sh}
+      grep -qF 'e.CommsContractFile, e.CheckContractFile, e.OutcomeContractFile' ${../../cmd/launcher/internal/promptassembly/assemble.go}
       touch $out
     '';
 
@@ -296,8 +298,7 @@ in
       checkRow.marker == "# CHECK"
     ) "prompt-contract.nix check row's marker must be '# CHECK', got: ${checkRow.marker}";
     pkgs.runCommand "comms-check-contract-marker-parity" { } ''
-      grep -qF '_inject_shared_block "comms" "$COMMS_CONTRACT_FILE"' ${../../agent/entrypoint.sh}
-      grep -qF '_inject_shared_block "check" "$CHECK_CONTRACT_FILE"' ${../../agent/entrypoint.sh}
+      grep -qF 'e.CommsContractFile, e.CheckContractFile, e.OutcomeContractFile' ${../../cmd/launcher/internal/promptassembly/assemble.go}
       touch $out
     '';
 
@@ -311,7 +312,7 @@ in
     assert pkgs.lib.assertMsg (row.marker == "# POST THE VERDICT")
       "prompt-contract.nix research-verdict row's marker must be '# POST THE VERDICT', got: ${row.marker}";
     pkgs.runCommand "research-outcome-contract-marker-parity" { } ''
-      grep -qF '_inject_shared_block "research-verdict" "$RESEARCH_OUTCOME_CONTRACT_FILE"' ${../../agent/entrypoint.sh}
+      grep -qF 'injectSharedBlock(promptText, e.ResearchOutcomeContractFile, allowlist)' ${../../cmd/launcher/internal/promptassembly/assemble.go}
       touch $out
     '';
 

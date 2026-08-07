@@ -867,34 +867,17 @@ EOF
   ! grep -q 'status=merged' "$DRIVER_PROMPT_FILE"
 }
 
-# issue #622: the fragment loop and its substitution allowlist are rendered
-# from the nix-owned registry (lib/fragments.nix), not hardcoded per-step in
-# agent/entrypoint.sh -- proven here by hand-appending one extra row to the
-# real, nix-rendered registry data and confirming it renders with zero edits
-# to the entrypoint source itself.
-@test "a hand-appended registry row renders without any entrypoint edit" {
-  local prompt_dir="$BATS_TEST_TMPDIR/fixture-prompts"
-  mkdir -p "$prompt_dir/fragments"
-  printf 'fixture stub ${FIXTURE_ROW_STEP}end\n' >"$prompt_dir/issue-prompt.md"
-  printf '# FIXTURE ROW\n\nFIXTURE-ROW-MARKER\n\n' >"$prompt_dir/fragments/fixture-row.md"
-  export PROMPTS_DIR="$prompt_dir"
-
-  local wrapped="$BATS_TEST_TMPDIR/fixture-entrypoint.sh"
-  {
-    cat "$DRIVER_PREAMBLE_FILE"
-    cat "$FRAGMENT_REGISTRY_FILE"
-    cat "$CONTRACT_REGISTRY_FILE"
-    printf '_FRAGMENT_ROWS+=("FIXTURE_ROW_ON|fixture-row.md|FIXTURE_ROW_STEP")\n'
-    printf '_FRAGMENT_SUBST_VARS+=("FIXTURE_ROW_STEP")\n'
-    tail -n +2 "$ENTRYPOINT_SRC"
-  } >"$wrapped"
-  chmod +x "$wrapped"
-
-  export FIXTURE_ROW_ON=1
-  run bash "$wrapped"
-  [ "$status" -eq 0 ]
-  grep -q 'FIXTURE-ROW-MARKER' "$DRIVER_PROMPT_FILE"
-}
+# issue #622 used to prove here, by hand-appending one extra row to the
+# real, nix-rendered registry data and re-sourcing entrypoint.sh, that the
+# bash fragment loop was generic over the registry with zero entrypoint
+# edits. Retired by issue #2354: that mechanism (bash reading
+# `_FRAGMENT_ROWS` directly) no longer exists post-flip -- fragment
+# rendering now lives entirely in the Go assemble-prompt verb, which loops
+# over `reg.Rows` read from a nix-baked JSON registry file. Genericity is now
+# proven by construction (the same Go loop, package
+# cmd/launcher/internal/promptassembly) and guarded by the
+# promptassembly-registry-ownership/promptassembly-registry-drift nix checks
+# (nix/checks/promptassembly.nix), both part of `checks-inbox`.
 
 # issue #2019: the filer's write-mechanism gates (FILER_FILE_DIRECT/
 # FILER_FILE_RELAY, agent/entrypoint.sh's phase_prompt_assembly precompute
