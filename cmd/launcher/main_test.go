@@ -716,9 +716,6 @@ func TestApplyDispatchKind_ValueEmbed_DoesNotAliasOriginal(t *testing.T) {
 	if orig != origCopy {
 		t.Errorf("applyDispatchKind mutated the caller's original config: got %+v, want unchanged %+v", orig, origCopy)
 	}
-	if orig.label != "orig-label" || orig.inProgressLabel != "orig-in-progress" || orig.completeLabel != "orig-complete" || orig.failedLabel != "orig-failed" {
-		t.Errorf("original config's label fields changed: %+v", orig)
-	}
 	if got.label != rl.Dispatchable || got.inProgressLabel != rl.InProgress || got.failedLabel != rl.Failed || got.completeLabel != "" {
 		t.Errorf("returned copy does not carry the research label family: %+v", got)
 	}
