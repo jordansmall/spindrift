@@ -1,21 +1,27 @@
 #!/usr/bin/env bats
-# Build-time/runtime parity check (issue #2320, parent #2244): drives the
-# ACTUAL agent/entrypoint.sh runtime validator (_validate_prompt_contract)
-# against the same 8 fixtures lib/prompt-contract.nix's `parityFixtures`
-# already resolved via the real `buildTimeRejectVerdicts` function -- proof
-# the runtime bash validator's exit code agrees with `parityFold(verdict)`
-# for every (severity=="reject" row) x (gate) x (markerPresent) combination,
-# not just that Nix's own pinning of the fold (nix/checks/prompt-contract-
+# Build-time/runtime parity check (issue #2320, parent #2244; widened to
+# every validateMarkers row, including severity=="warn" ones, by issue
+# #2356): drives the ACTUAL runtime validator (agent/entrypoint.sh's
+# phase_prompt_assembly, which since issue #2356 forwards to the real Go
+# `driver-exec assemble-prompt` verb's promptassembly.Validate, the
+# successor to the old bash _validate_prompt_contract) against the same 16
+# fixtures lib/prompt-contract.nix's `parityFixtures` already resolved --
+# for severity=="reject" rows, via the real `buildTimeRejectVerdicts`
+# function; for severity=="warn" rows, by construction, since a warn row's
+# runtime validator never blocks regardless of gate/markerPresent -- proof
+# the runtime validator's exit code agrees with `parityFold(verdict)` for
+# every (validateMarkers row) x (gate) x (markerPresent) combination, not
+# just that Nix's own pinning of the fold (nix/checks/prompt-contract-
 # parity.nix, slice 1) is self-consistent.
 #
-# A single @test loops over all 8 fixture rows read from
+# A single @test loops over all 16 fixture rows read from
 # PROMPT_CONTRACT_PARITY_FIXTURE (a JSON file nix/checks/bats.nix renders
 # from lib/prompt-contract.nix's parityFixtures) rather than one @test per
 # row: bats has no built-in data-driven-@test-generation this repo already
 # uses elsewhere (tests/entrypoint-prompt-validator.bats's own "data-driven"
 # case patches a single field and asserts a single outcome, it doesn't loop
 # over a fixture list), so a hand-rolled per-@test-per-row split would mean
-# hardcoding the 8 (id, gate, markerPresent) combinations a second time in
+# hardcoding the 16 (id, gate, markerPresent) combinations a second time in
 # bash -- exactly the duplication this slice exists to avoid. The loop
 # accumulates every failing fixture's id/gate/markerPresent/verdict before
 # failing once at the end, so a broken row is still individually legible in
@@ -24,10 +30,11 @@
 #
 # Deliberately does NOT re-derive parityFold in bash: each fixture's
 # `verdict` field is already lib/prompt-contract.nix's own precomputed
-# buildTimeRejectVerdicts result, so this test only reads the fold's
-# *result* ("reject" -> must block, anything else -> must not block) off
-# each row, never reimplementing the fold logic as a second copy that could
-# silently drift from the Nix source of truth.
+# result (buildTimeRejectVerdicts for reject rows, "advise" by construction
+# for warn rows), so this test only reads the fold's *result* ("reject" ->
+# must block, anything else -> must not block) off each row, never
+# reimplementing the fold logic as a second copy that could silently drift
+# from the Nix source of truth.
 
 load helper
 
@@ -111,6 +118,42 @@ _parity_stub_prompt_dir() {
           export ORCHESTRATOR_ENABLED=1
         else
           unset ORCHESTRATOR_ENABLED
+        fi
+        ;;
+      pr-intent)
+        if [ "$markerPresent" = true ]; then
+          printf 'issue stub with SPINDRIFT_PR_INTENT here\n' >"$prompt_dir/issue-prompt.md"
+        else
+          printf 'issue stub, no PR-intent marker here\n' >"$prompt_dir/issue-prompt.md"
+        fi
+        if [ "$gate" = true ]; then
+          unset BOX_WRITE_ENABLED
+        else
+          export BOX_WRITE_ENABLED=1
+        fi
+        ;;
+      issue-intent)
+        if [ "$markerPresent" = true ]; then
+          printf 'filer stub with SPINDRIFT_ISSUE_INTENT here\n' >"$prompt_dir/filer-prompt.md"
+        else
+          printf 'filer stub, no issue-intent marker here\n' >"$prompt_dir/filer-prompt.md"
+        fi
+        if [ "$gate" = true ]; then
+          export AGENTS_JSON_TEMPLATE='{"filer":{"description":"filer","model":"haiku","prompt":"","tools":["Read","Bash","WebFetch"]}}'
+          export ORCHESTRATOR_ENABLED=1
+          unset BOX_WRITE_ENABLED
+        else
+          # FILER_FILE_RELAY (cmd/launcher/internal/promptassembly/
+          # gates_tracker.go) requires filerEnabled (AGENTS_JSON_TEMPLATE has
+          # a "filer" key) AND !BOX_WRITE_ENABLED AND ORCHESTRATOR_ENABLED all
+          # at once -- toggle only BOX_WRITE_ENABLED off->on here (matching
+          # this suite's existing one-knob-per-row style) so the gate goes
+          # false while AGENTS_JSON_TEMPLATE/ORCHESTRATOR_ENABLED stay set,
+          # keeping .filer.prompt populated so markerPresent is still
+          # meaningfully exercised even though the gate itself is off.
+          export AGENTS_JSON_TEMPLATE='{"filer":{"description":"filer","model":"haiku","prompt":"","tools":["Read","Bash","WebFetch"]}}'
+          export ORCHESTRATOR_ENABLED=1
+          export BOX_WRITE_ENABLED=1
         fi
         ;;
       *)

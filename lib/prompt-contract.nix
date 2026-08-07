@@ -329,36 +329,47 @@ rec {
   # block at runtime", `false` means "must block at runtime".
   parityFold = verdict: verdict != "reject";
 
-  # Build-time/runtime parity fixtures (issue #2320, parent #2244): one
-  # fixture per (severity=="reject" row) x (gate in [true false]) x
-  # (markerPresent in [true false]) combination, each pre-resolved to the
-  # buildTimeRejectVerdicts verdict for that combo. Iterates validateMarkers
-  # itself -- filtered to severity == "reject" -- rather than a hand-
-  # duplicated id list, mirroring buildTimeRejectVerdicts/
-  # injectBlocksBashRows above, so a future third reject row is picked up
-  # automatically. A following slice renders these as a JSON fixture file a
-  # bats/bash parity check reads, checking the runtime validator's actual
-  # exit status against `parityFold verdict` for each fixture instead of
-  # reimplementing this fold by hand in bash.
+  # Build-time/runtime parity fixtures (issue #2320, parent #2244; widened to
+  # every row by issue #2356): one fixture per (validateMarkers row) x (gate
+  # in [true false]) x (markerPresent in [true false]) combination. Iterates
+  # ALL of validateMarkers now, not just the severity=="reject" rows --
+  # buildTimeRejectVerdicts itself stays scoped to reject rows by design (see
+  # its own doc comment above), but fixturesFor branches internally so a
+  # severity=="warn" row still gets a fixture per combo: since a warn row's
+  # runtime validator (promptassembly.Validate, issue #2356) never blocks
+  # regardless of gate/markerPresent -- that is the whole point of
+  # severity=="warn" already having a working non-fatal backstop -- its
+  # verdict is always "advise" (the same non-fatal vocabulary
+  # buildTimeRejectVerdicts already uses), by construction rather than by
+  # calling buildTimeRejectVerdicts at all. This lets
+  # tests/prompt-contract-parity.bats drive the real runtime validator
+  # against every row, including warn ones, proving a warn row's actual
+  # runtime behavior (never blocks) matches its always-non-"reject"
+  # build-time verdict too, not just that reject rows fold correctly.
   parityFixtures =
     let
-      rejectRows = builtins.filter (row: row.severity == "reject") validateMarkers;
       fixturesFor =
         row:
         map
           (
             { gate, markerPresent }:
             let
-              content = if markerPresent then "before ${row.marker} after" else "no marker here";
-              verdicts = buildTimeRejectVerdicts {
-                staticGates = {
-                  ${row.when} = gate;
-                };
-                contentByRowId = {
-                  ${row.id} = content;
-                };
-              };
-              verdict = (builtins.head (builtins.filter (r: r.id == row.id) verdicts)).verdict;
+              verdict =
+                if row.severity == "reject" then
+                  let
+                    content = if markerPresent then "before ${row.marker} after" else "no marker here";
+                    verdicts = buildTimeRejectVerdicts {
+                      staticGates = {
+                        ${row.when} = gate;
+                      };
+                      contentByRowId = {
+                        ${row.id} = content;
+                      };
+                    };
+                  in
+                  (builtins.head (builtins.filter (r: r.id == row.id) verdicts)).verdict
+                else
+                  "advise";
             in
             {
               inherit (row) id;
@@ -372,5 +383,5 @@ rec {
             { gate = false; markerPresent = false; }
           ];
     in
-    builtins.concatMap fixturesFor rejectRows;
+    builtins.concatMap fixturesFor validateMarkers;
 }
