@@ -83,11 +83,15 @@ if [ "${1:-}" = "outcome-backstop" ]; then
       "$ob_issue" "$note" "$nonce"
     exit 0
   fi
+  status="blocked"
   if [ -n "$(git status --porcelain 2>/dev/null)" ]; then
     if git add -A && git commit -m "chore: salvage uncommitted work before exiting without an outcome" >/dev/null 2>&1; then
       note="${note}; salvaged uncommitted work into a commit"
     else
       note="${note}; failed to salvage uncommitted work"
+      printf 'SPINDRIFT_OUTCOME issue=%s landing=%s status=%s note=%s nonce=%s\n' \
+        "$ob_issue" "$branch" "$status" "$note" "$nonce"
+      exit 0
     fi
   fi
   commit_count="$(git rev-list --count "$base..$branch" 2>/dev/null)" || commit_count=1
@@ -95,16 +99,20 @@ if [ "${1:-}" = "outcome-backstop" ]; then
     note="${note}; no work to preserve"
   elif [ -n "$host_mediated_remote" ]; then
     note="${note}; branch relayed via outbox bundle (no writable remote under CODE_FORGE=local)"
+    status="ready"
   elif [ -z "$write" ] && [ -n "$outbox_relay_capable" ]; then
     note="${note}; branch relayed via outbox bundle (read-only Box)"
+    status="ready"
   else
     [ "$attempts" -lt 1 ] && attempts=1
     [ "$backoff" -lt 0 ] && backoff=0
     [ "$jitter" -lt 0 ] && jitter=0
     push_log="$(mktemp)"
     attempt=1
+    pushed=""
     while true; do
       if git push --force-with-lease origin "$branch" 2>"$push_log"; then
+        pushed=1
         break
       fi
       if [ "$attempt" -ge "$attempts" ]; then
@@ -115,9 +123,10 @@ if [ "${1:-}" = "outcome-backstop" ]; then
       attempt=$(( attempt + 1 ))
     done
     rm -f "$push_log"
+    [ -n "$pushed" ] && status="ready"
   fi
-  printf 'SPINDRIFT_OUTCOME issue=%s landing=%s status=blocked note=%s nonce=%s\n' \
-    "$ob_issue" "$branch" "$note" "$nonce"
+  printf 'SPINDRIFT_OUTCOME issue=%s landing=%s status=%s note=%s nonce=%s\n' \
+    "$ob_issue" "$branch" "$status" "$note" "$nonce"
   exit 0
 fi
 

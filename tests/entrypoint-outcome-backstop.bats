@@ -12,13 +12,13 @@ setup() {
 
 # The fake claude commits work (so there is something to push) but is told to
 # suppress its own outcome line, simulating a driver that forgot to emit one.
-@test "driver exits with no outcome line -> entrypoint emits a synthetic blocked outcome" {
+@test "driver exits with no outcome line -> entrypoint emits a synthetic ready outcome" {
   export FAKE_DRIVER_COMMIT=1
   export FAKE_DRIVER_NO_OUTCOME=1
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   [ "$(grep -c '^SPINDRIFT_OUTCOME ' <<<"$output")" -eq 1 ]
-  grep -q '^SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=blocked note=.*driver exited without emitting an outcome' <<<"$output"
+  grep -q '^SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=.*driver exited without emitting an outcome' <<<"$output"
   # The commit the fake driver made must have reached the remote branch.
   git -C "$BATS_TEST_TMPDIR" ls-remote "https://github.com/owner/repo.git" "agent/issue-7" | grep -q .
 }
@@ -49,7 +49,7 @@ setup() {
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   [ "$(grep -c '^SPINDRIFT_OUTCOME ' <<<"$output")" -eq 1 ]
-  grep -q '^SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=blocked note=.*salvaged uncommitted work' <<<"$output"
+  grep -q '^SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=.*salvaged uncommitted work' <<<"$output"
   ! grep -q 'no work to preserve' <<<"$output"
   git -C "$BATS_TEST_TMPDIR" ls-remote "https://github.com/owner/repo.git" "agent/issue-7" | grep -q .
 }
@@ -177,7 +177,7 @@ EOF
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   [ "$(grep -c '^SPINDRIFT_OUTCOME ' <<<"$output")" -eq 1 ]
-  grep -q '^SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=blocked note=.*driver exited without emitting an outcome' <<<"$output"
+  grep -q '^SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=.*driver exited without emitting an outcome' <<<"$output"
   ! grep -q 'push failed' <<<"$output"
   git -C "$BATS_TEST_TMPDIR" ls-remote "https://github.com/owner/repo.git" "agent/issue-7" | grep -q .
 }
@@ -203,14 +203,14 @@ EOF
 # Driver reached status=ready and merely lost the line -- the launcher's own
 # no-outcome path never adopts off draft-ness either, so both sides agree a
 # lost outcome line always synthesizes status=blocked.
-@test "no outcome line + open non-draft PR on branch -> synthetic blocked" {
+@test "no outcome line + open non-draft PR on branch -> synthetic ready" {
   export FAKE_DRIVER_COMMIT=1
   export FAKE_DRIVER_NO_OUTCOME=1
   export FAKE_GH_PR_LIST_7='[{"isDraft":false}]'
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   [ "$(grep -c '^SPINDRIFT_OUTCOME ' <<<"$output")" -eq 1 ]
-  grep -q '^SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=blocked note=.*driver exited without emitting an outcome' <<<"$output"
+  grep -q '^SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=.*driver exited without emitting an outcome' <<<"$output"
 }
 
 # A non-draft PR is not a salvage signal (issue #1654) -- the backstop must
@@ -228,14 +228,14 @@ EOF
   grep -q '^SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=blocked note=.*no work to preserve' <<<"$output"
 }
 
-@test "no outcome line + draft PR on branch -> synthetic blocked, same as no PR" {
+@test "no outcome line + draft PR on branch -> synthetic ready, same as no PR" {
   export FAKE_DRIVER_COMMIT=1
   export FAKE_DRIVER_NO_OUTCOME=1
   export FAKE_GH_PR_LIST_7='[{"isDraft":true}]'
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   [ "$(grep -c '^SPINDRIFT_OUTCOME ' <<<"$output")" -eq 1 ]
-  grep -q '^SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=blocked note=.*driver exited without emitting an outcome' <<<"$output"
+  grep -q '^SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=.*driver exited without emitting an outcome' <<<"$output"
 }
 
 # Regression for the #1582 shape end-to-end: the driver's own outcome line
@@ -282,7 +282,7 @@ EOF
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   [ "$(grep -c '^SPINDRIFT_OUTCOME ' <<<"$output")" -eq 1 ]
-  grep -q '^SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=blocked note=.*salvaged uncommitted work' <<<"$output"
+  grep -q '^SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=.*salvaged uncommitted work' <<<"$output"
   ! grep -q 'no work to preserve' <<<"$output"
   git -C "$BATS_TEST_TMPDIR" ls-remote "https://github.com/owner/repo.git" "agent/issue-7" | grep -q .
 }
@@ -304,14 +304,14 @@ EOF
 # CLAUDE_CODE_DISABLE_BACKGROUND_TASKS (this issue's structural fix) closes
 # the parking vector itself, but this test is the last-resort net for
 # whatever still gets through it -- a run must never exit silently.
-@test "orchestrator path: driver parks with no outcome line -> entrypoint still emits a synthetic blocked outcome" {
+@test "orchestrator path: driver parks with no outcome line -> entrypoint still emits a synthetic ready outcome" {
   export ORCHESTRATOR_ENABLED=1
   export FAKE_DRIVER_COMMIT=1
   export FAKE_DRIVER_NO_OUTCOME=1
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   [ "$(grep -c '^SPINDRIFT_OUTCOME ' <<<"$output")" -eq 1 ]
-  grep -q '^SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=blocked note=.*driver exited without emitting an outcome' <<<"$output"
+  grep -q '^SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=.*driver exited without emitting an outcome' <<<"$output"
   git -C "$BATS_TEST_TMPDIR" ls-remote "https://github.com/owner/repo.git" "agent/issue-7" | grep -q .
 }
 
@@ -338,7 +338,7 @@ EOF
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   [ "$(grep -c '^SPINDRIFT_OUTCOME ' <<<"$output")" -eq 1 ]
-  grep -q '^SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=blocked note=.*relayed via outbox bundle' <<<"$output"
+  grep -q '^SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=.*relayed via outbox bundle' <<<"$output"
   ! grep -q 'push failed' <<<"$output"
   # The branch was relayed through the outbox bundle, never force-pushed.
   [ -f "$OUTBOX_DIR/seam.bundle" ]
@@ -364,7 +364,7 @@ EOF
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   [ "$(grep -c '^SPINDRIFT_OUTCOME ' <<<"$output")" -eq 1 ]
-  grep -q '^SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=blocked note=.*branch relayed via outbox bundle.*no writable remote under CODE_FORGE=local' <<<"$output"
+  grep -q '^SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=.*branch relayed via outbox bundle.*no writable remote under CODE_FORGE=local' <<<"$output"
   [ -f "$OUTBOX_DIR/seam.bundle" ]
   run git -C "$WORK_DIR" bundle verify "$OUTBOX_DIR/seam.bundle"
   [ "$status" -eq 0 ]
