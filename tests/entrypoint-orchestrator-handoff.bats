@@ -159,3 +159,14 @@ setup() {
   [ "$status" -eq 0 ]
   ! grep -q -- '--review-effort' "$ORCHESTRATOR_LOG"
 }
+
+# The --review-effort gate is on _driver_invoker = orchestrator, not on
+# REVIEW_EFFORT alone -- the direct driver-exec path has no review pass of
+# its own to configure, so it must omit --review-effort even with
+# REVIEW_EFFORT set, mirroring the orchestrator-path omit test above.
+@test "direct driver-exec path omits --review-effort even with REVIEW_EFFORT set" {
+  export REVIEW_EFFORT="high"
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  ! grep -q -- '--review-effort' "$DRIVER_LOG"
+}
