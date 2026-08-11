@@ -125,12 +125,13 @@ in
     grep -q '"effort":"high"' <<<"$worker_line" \
       || { echo "worker-only harness missing default worker effort in baked template" >&2; exit 1; }
 
-    # The dogfood harness itself opts into the Filer (issue #616): the
-    # baked template must carry a filer entry at the recommended model.
-    # Scout also defaults to claude-haiku-4-5-20251001 (see agents-json-baked
-    # above), so the model literal is matched against the filer object only
-    # -- it has no nested braces (tools is an array), so `[^}]*` can't
-    # overrun into the next top-level key -- not the whole template line.
+    # The dogfood harness (issue #2435 AC3): filer is the sole explicit pin
+    # (issue #616); scout, reviewer, and worker are all unmentioned in the
+    # roster and must still show up in the baked template, inherited from
+    # their lib/env-schema.nix schema defaults. Each model literal is matched
+    # against its own agent object, not the whole template line -- none of
+    # these objects nest braces (tools is an array), so `[^}]*` can't overrun
+    # into the next top-level key.
     dogfood_line=$(grep '^AGENTS_JSON_TEMPLATE=' ${harness.agentFiles}/agent/entrypoint.sh)
     filer_entry=$(grep -oE '"filer":\{[^}]*\}' <<<"$dogfood_line" || true)
     [ -n "$filer_entry" ] \
@@ -138,20 +139,29 @@ in
     grep -q 'claude-haiku-4-5-20251001' <<<"$filer_entry" \
       || { echo "dogfood harness filer entry missing the configured model" >&2; exit 1; }
 
-    # The dogfood harness's reviewer entry is no longer a local pin: it
-    # inherits reviewModel's schema default (issue #2435), same as any other
-    # Consumer that leaves reviewer unmentioned. The orchestrator's
-    # code-owned review pass (issue #2427) still runs on that model, so the
-    # baked template must carry a reviewer entry at the schema default.
-    # Anchored to the literal "claude-opus-5", not reviewModelSchemaDefault:
-    # the code-owned review pass binds to this exact model, so this guard
-    # must catch a schema-default regression away from it, not just confirm
-    # the bake mirrors whatever the schema currently says.
+    scout_entry=$(grep -oE '"scout":\{[^}]*\}' <<<"$dogfood_line" || true)
+    [ -n "$scout_entry" ] \
+      || { echo "dogfood harness missing scout entry in baked template" >&2; exit 1; }
+    grep -q 'claude-haiku-4-5-20251001' <<<"$scout_entry" \
+      || { echo "dogfood harness scout entry missing the inherited model" >&2; exit 1; }
+
+    # Anchored to the literal "claude-opus-5", not reviewModelSchemaDefault --
+    # same rationale as nix/checks/equivalence.nix's
+    # dogfood-roster-and-review-effort reviewer assertion: the code-owned
+    # review pass binds to this exact model, so the guard must catch a
+    # schema-default regression away from it, not just confirm the bake
+    # mirrors whatever the schema currently says.
     reviewer_entry=$(grep -oE '"reviewer":\{[^}]*\}' <<<"$dogfood_line" || true)
     [ -n "$reviewer_entry" ] \
       || { echo "dogfood harness missing reviewer entry in baked template" >&2; exit 1; }
     grep -q 'claude-opus-5' <<<"$reviewer_entry" \
-      || { echo "dogfood harness reviewer entry missing the claude-opus-5 schema default" >&2; exit 1; }
+      || { echo "dogfood harness reviewer entry missing the anchored claude-opus-5 model" >&2; exit 1; }
+
+    worker_entry=$(grep -oE '"worker":\{[^}]*\}' <<<"$dogfood_line" || true)
+    [ -n "$worker_entry" ] \
+      || { echo "dogfood harness missing worker entry in baked template" >&2; exit 1; }
+    grep -q 'claude-sonnet-5' <<<"$worker_entry" \
+      || { echo "dogfood harness worker entry missing the inherited model" >&2; exit 1; }
 
     # A Consumer that sets no model knobs and passes no roster (bats harness:
     # no `defaults`, no `roster`) must still get a reviewer on the schema

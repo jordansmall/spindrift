@@ -722,6 +722,7 @@ in
         ;
       flakeSrc = builtins.readFile ../../flake.nix;
       fixturesSrc = builtins.readFile ../../nix/fixtures.nix;
+      defaultsSrc = builtins.readFile ../dogfood-defaults.nix;
       literals = [
         ''mergeMode = "immediate"''
         "autoFormat = true"
@@ -729,7 +730,14 @@ in
         ''filer = "claude-haiku-4-5-20251001"''
       ];
       leaked = filter (l: hasInfix l flakeSrc || hasInfix l fixturesSrc) literals;
+      missing = filter (l: !hasInfix l defaultsSrc) literals;
     in
+    # A respelling in nix/dogfood-defaults.nix (e.g. reformatted quoting)
+    # would make `leaked` vacuously empty without the value having moved
+    # anywhere -- assert the tracked literal still lives where it's supposed
+    # to, not just that it's absent from the two hand-restatement sites.
+    assert assertMsg (missing == [ ])
+      "dogfood leaf value(s) not found in nix/dogfood-defaults.nix -- literals list is stale, update it to match: ${concatStringsSep ", " missing}";
     assert assertMsg (leaked == [ ])
       "dogfood leaf value(s) hand-restated outside nix/dogfood-defaults.nix: ${concatStringsSep ", " leaked}";
     pkgs.runCommand "dogfood-leaf-values-single-source" { } "touch $out";
@@ -767,12 +775,15 @@ in
   # pass (issue #2387) at the same effort the roster's `reviewer` entry
   # resolves to, and the roster's `filer` entry must still carry the Filer's
   # (#393) tuned model as the roster's sole local pin. scout, reviewer, and
-  # worker are all left unmentioned in the roster's `models` and must inherit
-  # their `lib/env-schema.nix` schema defaults (issue #2434/#2435) -- for
-  # `reviewer` that now resolves to `claude-opus-5` via the schema default
-  # (issue #2433), not a local pin. Also pins the roster's fixed per-agent
-  # efforts (issue #2386): scout=medium, reviewer=high, filer=medium,
-  # worker=high.
+  # worker are all left unmentioned in the roster's `models` (issue #2435) and
+  # must resolve to their `lib/env-schema.nix` schema defaults as of this
+  # writing -- claude-haiku-4-5-20251001, claude-opus-5, and claude-sonnet-5
+  # respectively (issue #2434/#2433). Each assertion below is anchored to
+  # that literal rather than re-derived from the schema: comparing against
+  # e.g. `schema.reviewModel.default` would pass no matter what the schema
+  # default drifted to, defeating the point of a regression guard (issue
+  # #2435 AC2). Also pins the roster's fixed per-agent efforts (issue #2386):
+  # scout=medium, reviewer=high, filer=medium, worker=high.
   dogfood-roster-and-review-effort =
     let
       inherit (pkgs.lib)
@@ -785,7 +796,6 @@ in
         system = "aarch64-linux";
         lib = pkgs.lib;
       };
-      schema = import ../../lib/env-schema.nix;
       rosterByName = listToAttrs (map (e: nameValuePair e.name e) defaults.roster);
       expectedEfforts = {
         scout = "medium";
@@ -805,27 +815,60 @@ in
       }"'';
     assert assertMsg (rosterByName ? filer && rosterByName.filer.model == "claude-haiku-4-5-20251001")
       "dogfood roster's filer entry must keep the tuned Filer model claude-haiku-4-5-20251001 (issue #2388, was #393)";
-    # Anchored to the literal "claude-opus-5", not schema.reviewModel.default:
-    # the code-owned review pass binds to this exact model (issue #2427), so
-    # the guard must catch a schema-default regression away from it, not
-    # just confirm the roster mirrors whatever the schema currently says
-    # (issue #2435).
     assert assertMsg (rosterByName ? reviewer && rosterByName.reviewer.model == "claude-opus-5")
-      "dogfood roster's unmentioned reviewer entry must inherit the lib/env-schema.nix default of claude-opus-5 (issue #2435), got: ${
+      "dogfood roster's unmentioned reviewer entry must resolve to claude-opus-5, the model the code-owned review pass binds to (issue #2435), got: ${
         builtins.toJSON (rosterByName.reviewer.model or null)
       }";
-    assert assertMsg (rosterByName ? scout && rosterByName.scout.model == schema.scoutModel.default)
-      "dogfood roster's unmentioned scout entry must inherit the lib/env-schema.nix default (issue #2434), got: ${
+    assert assertMsg (rosterByName ? scout && rosterByName.scout.model == "claude-haiku-4-5-20251001")
+      "dogfood roster's unmentioned scout entry must resolve to claude-haiku-4-5-20251001 (issue #2435 AC2), got: ${
         builtins.toJSON (rosterByName.scout.model or null)
       }";
-    assert assertMsg (rosterByName ? worker && rosterByName.worker.model == schema.workerModel.default)
-      "dogfood roster's unmentioned worker entry must inherit the lib/env-schema.nix default (issue #2434), got: ${
+    assert assertMsg (rosterByName ? worker && rosterByName.worker.model == "claude-sonnet-5")
+      "dogfood roster's unmentioned worker entry must resolve to claude-sonnet-5 (issue #2435 AC2), got: ${
         builtins.toJSON (rosterByName.worker.model or null)
       }";
     assert assertMsg (
       effortMismatches == { }
     ) "dogfood roster per-agent effort mismatch(es): ${builtins.toJSON effortMismatches}";
     pkgs.runCommand "dogfood-roster-and-review-effort" { } "touch $out";
+
+  # AC1 (issue #2435): the dogfood's roster must name only the Filer -- scout,
+  # reviewer, and worker inherit their schema defaults by staying unmentioned.
+  # The assertions above only see the *resolved* roster, which can't tell a
+  # genuinely-unmentioned agent from one re-pinned to the same value its
+  # schema default already produces (e.g. re-adding `reviewer =
+  # "claude-opus-5"` to `models` would still pass every assertion above).
+  # Grep dogfood-defaults.nix's own `models` attrset source instead, so a
+  # config-time regression toward re-pinning is caught even when it happens
+  # to match the current schema default.
+  dogfood-roster-names-only-filer =
+    let
+      inherit (pkgs.lib)
+        assertMsg
+        concatStringsSep
+        filter
+        hasInfix
+        head
+        splitString
+        ;
+      src = builtins.readFile ../dogfood-defaults.nix;
+      afterModels = splitString "models = {" src;
+      modelsBlock =
+        if builtins.length afterModels < 2 then
+          ""
+        else
+          head (splitString "};" (builtins.elemAt afterModels 1));
+      named = filter (name: hasInfix "${name} =" modelsBlock) [
+        "scout"
+        "reviewer"
+        "worker"
+      ];
+    in
+    assert assertMsg (modelsBlock != "")
+      "dogfood-roster-names-only-filer couldn't find a `models = { ... }` block in nix/dogfood-defaults.nix -- check moved or renamed";
+    assert assertMsg (named == [ ])
+      "dogfood roster's models attrset must name only filer (issue #2435 AC1); found: ${concatStringsSep ", " named}";
+    pkgs.runCommand "dogfood-roster-names-only-filer" { } "touch $out";
 
   # driverExecBin.src must not contain *_test.go — the image drvPath
   # must be invariant under host-side launcher test churn (issue #474).
