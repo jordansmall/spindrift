@@ -104,6 +104,16 @@ flake surface is self-documenting and stays in lockstep with the CLI help.
 Sections and knobs derive from `lib/env-schema.nix`; unknown section or knob
 names are rejected at eval time by the NixOS module system.
 
+Every `settings.<section>.<knob>` is generated from that schema and appears
+in [`docs/flake-options.md`](flake-options.md). A *structural* option —
+`roster`, `skills`, `packages`, `prefetch`, `driver`, `prompt`,
+`extraClosures`, `runtime`, and the rest of `lib/structural-paths.nix` — is a
+different, disjoint surface: it's hand-declared directly on the domain tree
+(e.g. `perSystem.spindrift.agents.*`, `perSystem.spindrift.infra.*`) rather
+than generated from the env-schema registry, so it's absent from the
+generated reference for that reason, not because it's unreachable from the
+flake module.
+
 ```nix
 settings = {
   issueDiscovery  = { label          = "ready-for-agent"; };
@@ -160,14 +170,24 @@ as `MODEL` so `MODEL=...` switches models at runtime with no image rebuild.
 same way; each is composed into `--agents` independently by its own knob, so
 emptying one drops only that subagent, never both. `filerModel` is the same
 shape but opt-in — empty by default, so the filer is not provisioned at all
-until a model is set; see [Filer](#filer).
+until a model is set; see [Filer](#filer). `filerModel` is **deprecated** in
+favor of the structural [`roster`](#subagent-roster) option.
 
 #### Subagent roster
 
-`roster` is a `mkHarness` argument (issue #264) — not a `settings` knob, so it
-never appears in [`docs/flake-options.md`](flake-options.md) — that takes a
-list of subagent entries, each shaped `{ name; model; mode; description;
-tools; promptFile; prompt }`. It supersedes the four fixed
+`roster` (issue #264) is a *structural* option: a flakeModule Consumer sets
+it directly at `perSystem.spindrift.agents.models.roster`, declared as a real
+`mkOption` in `lib/flakeModule.nix` at the domain-tree path registered for
+`roster` in `lib/structural-paths.nix`. It is also forwarded through as a
+`mkHarness` argument of the same name — `mkHarness` passes the Consumer's
+`roster` value straight through — but it is not `mkHarness`-only the way
+`scoutPrompt`/`reviewPrompt`/`filerPrompt`/`nixBuilderImage` are (see above):
+it's reachable from the flake module itself. It never appears in
+[`docs/flake-options.md`](flake-options.md) because that file is generated
+from the `settings` schema (`lib/env-schema.nix`) only, not from structural
+options — see [Discovering flake options](#discovering-flake-options) above.
+`roster` takes a list of subagent entries, each shaped `{ name; model; mode;
+description; tools; promptFile; prompt }`. It supersedes the four fixed
 `scoutModel`/`reviewModel`/`filerModel`/`workerModel` args: instead of one
 knob per hardcoded agent, a Consumer flake can pass any number of roster
 entries, including a custom Nth agent beyond the historical four. When
@@ -1834,9 +1854,12 @@ downgrading every stale PR to manual, and [ADR
 An opt-in subagent, alongside the scout and reviewer, that turns the
 non-blocking findings a review surfaces into tracked issues — but only the
 ones the work loop escalated for a human, not the whole Non-blocking section.
-Off by default; setting `FILER_MODEL` (empty by default, recommended
-`claude-haiku-4-5-20251001`) is the opt-in — an unset `FILER_MODEL` means zero
-behavior change and zero prompt residue in the rendered issue prompt.
+Off by default; the current, non-deprecated way to opt in is a
+[`roster`](#subagent-roster) entry named `filer` with a non-empty `model`.
+Setting `FILER_MODEL` (empty by default, recommended
+`claude-haiku-4-5-20251001`) is the older, **deprecated** opt-in — it still
+works but is superseded by `roster`. Either way, when neither is set, that's
+zero behavior change and zero prompt residue in the rendered issue prompt.
 
 The work loop triages Non-blocking findings before the filer ever runs: it
 fixes inline, in the same effort, every finding whose fix is cheap and in
