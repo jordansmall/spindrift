@@ -200,4 +200,43 @@ in
     assert assertMsg (mismatches == [ ])
       "defaultRoster must ship the fixed default effort per agent (scout=medium, reviewer=high, filer=medium, worker=high), mismatched: ${builtins.toJSON mismatches}";
     pkgs.runCommand "roster-default-roster-ships-effort-defaults" { } "touch $out";
+
+  # Issue #2426: defaultRoster's models attrset sets a named agent's model
+  # and leaves every unmentioned agent at its existing empty-model default.
+  roster-default-roster-models-by-name =
+    let
+      roster = rosterLib.defaultRoster {
+        models = {
+          filer = "claude-haiku-4-5-20251001";
+        };
+      };
+      byName = name: builtins.head (builtins.filter (e: e.name == name) roster);
+    in
+    assert assertMsg ((byName "filer").model == "claude-haiku-4-5-20251001")
+      "defaultRoster models.filer must set the filer entry's model, got: ${builtins.toJSON (byName "filer").model}";
+    assert assertMsg ((byName "scout").model == "")
+      "defaultRoster must leave an unmentioned name's model empty, got: ${builtins.toJSON (byName "scout").model}";
+    assert assertMsg ((byName "reviewer").model == "")
+      "defaultRoster must leave an unmentioned name's model empty, got: ${builtins.toJSON (byName "reviewer").model}";
+    assert assertMsg ((byName "worker").model == "")
+      "defaultRoster must leave an unmentioned name's model empty, got: ${builtins.toJSON (byName "worker").model}";
+    pkgs.runCommand "roster-default-roster-models-by-name" { } "touch $out";
+
+  roster-default-roster-rejects-unknown-model-name =
+    let
+      result = builtins.tryEval (
+        let
+          r = rosterLib.defaultRoster {
+            models = {
+              typo-agent = "m";
+            };
+          };
+        in
+        builtins.deepSeq r r
+      );
+    in
+    assert assertMsg (
+      !result.success
+    ) "defaultRoster must throw when models names an agent absent from the roster";
+    pkgs.runCommand "roster-default-roster-rejects-unknown-model-name" { } "touch $out";
 }
