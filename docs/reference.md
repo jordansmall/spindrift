@@ -176,6 +176,19 @@ entries, including a custom Nth agent beyond the historical four. When
 defaults) and reproducing today's scout/reviewer/filer/worker composition
 exactly.
 
+`defaultRoster`'s own roster-native surface for setting models is its
+`models` argument (issue #2426): an attrset keyed by roster entry name
+(`scout`/`reviewer`/`filer`/`worker`), e.g. `defaultRoster { models = {
+filer = "claude-haiku-4-5-20251001"; }; }`. A name absent from `models`
+keeps today's empty-model default (dropped from the rendered agent config,
+see below); a name in `models` that isn't one of the four roster entries
+throws at eval time, the same way an invalid `roster` entry name does. The
+four legacy positional knobs still work as a lower-precedence fallback per
+name — `models` wins over the matching legacy knob when both are set for
+the same name — since `mkHarness` resolves its deprecated
+`scoutModel`/`reviewModel`/`filerModel`/`workerModel` args through
+`defaultRoster` unchanged.
+
 An entry with an empty (or absent) `model` is dropped from both Drivers'
 rendered config, the same per-agent omission the four legacy knobs give today
 (#392). `lib/drivers/claude.nix` renders the roster into the `--agents` JSON
@@ -212,23 +225,23 @@ The legacy knobs map onto the default roster's entry names:
 | `WORKER_MODEL` | `worker`              |
 
 `scoutModel`/`reviewModel`/`filerModel`/`workerModel` are **deprecated**: they
-still work — the default roster derives from them unchanged — but a `nix
-eval` warning fires whenever any of them is set, whether via the `mkHarness`
-`defaults` argument or a Consumer's `settings.models.*`, pointing at this
-section. Unlike those knobs, which retier or add/drop a subagent with no
-image rebuild (`SCOUT_MODEL=...` at dispatch time, no `spindrift build`),
-adding an arbitrary Nth custom agent via `roster` is a `mkHarness`/image-time
-decision and requires a rebuild.
+still work — the default roster derives from them unchanged, as a fallback
+under `models` — but a `nix eval` warning fires whenever any of them is set,
+whether via the `mkHarness` `defaults` argument or a Consumer's
+`settings.models.*`, pointing at this section. Unlike those knobs, which
+retier or add/drop a subagent with no image rebuild (`SCOUT_MODEL=...` at
+dispatch time, no `spindrift build`), adding an arbitrary Nth custom agent
+via `roster` is a `mkHarness`/image-time decision and requires a rebuild.
 
 spindrift's own dogfood Consumer config (`nix/dogfood-defaults.nix`) is a
-concrete `roster` user: it sets `roster = rosterLib.defaultRoster { scoutModel
-= ""; reviewModel = ""; filerModel = "claude-haiku-4-5-20251001"; workerModel
-= ""; }`, pinning only the filer's model — the other three entries carry no
-`model` and so inherit the Driver's session default — and inherits
-`defaultRoster`'s built-in scout=medium/reviewer=high/filer=medium/worker=high
-efforts unchanged (issue #2386). It separately sets `defaults.reviewEffort =
-"high"` so the orchestrator's own code-owned review pass (issue #2387) runs
-at the same effort as the roster's `reviewer` entry.
+concrete `roster` user: it sets `roster = rosterLib.defaultRoster { models =
+{ filer = "claude-haiku-4-5-20251001"; }; }`, pinning only the filer's model
+— the other three entries carry no `model` and so inherit the Driver's
+session default — and inherits `defaultRoster`'s built-in
+scout=medium/reviewer=high/filer=medium/worker=high efforts unchanged (issue
+#2386). It separately sets `defaults.reviewEffort = "high"` so the
+orchestrator's own code-owned review pass (issue #2387) runs at the same
+effort as the roster's `reviewer` entry.
 
 The **prompt is baked into the image**: changing `prompts/issue-prompt.md`
 requires an image rebuild (`spindrift build`). Point `SPINDRIFT_PROMPT_DIR`
