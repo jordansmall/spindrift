@@ -41,8 +41,9 @@ in
   # the orchestrator's code-owned review pass -- the highest-leverage read in
   # the loop, and already run at `high` effort below -- instead of letting it
   # inherit the coordinator's own model; scout/worker are left unmentioned
-  # since dogfood doesn't otherwise pin their models. `defaultRoster` also
-  # ships this roster's fixed per-agent efforts (issue #2386).
+  # since dogfood doesn't otherwise pin their models, so they inherit their
+  # `lib/env-schema.nix` defaults instead (issue #2434). `defaultRoster`
+  # also ships this roster's fixed per-agent efforts (issue #2386).
   roster = rosterLib.defaultRoster {
     models = {
       reviewer = "claude-opus-5";
