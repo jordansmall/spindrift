@@ -142,19 +142,20 @@ func (lc *launchContext) workSettle() settle.WorkSettler {
 // (ADR 0033) from pwd's checkout before any Box runs, when c.codeForge is
 // "local" and the run isn't research's no-repo self-contained sub-mode —
 // a no-op for github/git, which use no Accumulation repo, and for
-// self-contained research, which never mounts /repo or lands code (it
-// posts one verdict comment and stops), so seeding for it would be pure
-// waste and a needless new failure surface. Non-self-contained research
-// still needs seeding: it clones and explores /repo in-box just like work
-// does (agent/entrypoint.sh's clone_repo() under CODE_FORGE=local), so
-// skipping it there left the clone with nothing to mount against (issue
-// #2439). Wired into bootstrap's prologue (issue #1726) rather than left
-// for the mount or landing forge to discover on demand: a
-// defaulted-but-nonexistent AccumulationRepoDir otherwise makes
-// candidateMount silently skip the /repo mount, and host-side landing then
-// fails against a repo that was never created.
-// c.codeForgeAccumulationRepoDir is already resolved to an absolute path by
-// loadConfig, matching SeedAccumulationRepo's requirement.
+// self-contained research (validate() in main.go rejects selfContained
+// outside dispatchKindResearch, so this combination only arises there),
+// which never clones or lands code (it posts one verdict comment and
+// stops), so seeding for it would be pure waste and a needless new failure
+// surface. Non-self-contained research still needs seeding: it clones and
+// explores /repo in-box just like work does (agent/entrypoint.sh's
+// clone_repo() under CODE_FORGE=local), so skipping it there left the
+// clone with nothing to mount against (issue #2439). Wired into
+// bootstrap's prologue (issue #1726) rather than left for the mount or
+// landing forge to discover on demand: a defaulted-but-nonexistent
+// AccumulationRepoDir otherwise makes candidateMount silently skip the
+// /repo mount, and host-side landing then fails against a repo that was
+// never created. c.codeForgeAccumulationRepoDir is already resolved to an
+// absolute path by loadConfig, matching SeedAccumulationRepo's requirement.
 func seedAccumulationRepoIfLocal(c config, pwd string) error {
 	if c.codeForge != "local" || c.selfContained {
 		return nil
