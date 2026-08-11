@@ -1017,7 +1017,7 @@ in
         if builtins.length afterHeading < 3 then
           throw "docs/reference.md: missing the \"#### Subagent roster\" heading"
         else
-          builtins.elemAt (builtins.split "\n#### " (builtins.elemAt afterHeading 2)) 0;
+          builtins.elemAt (builtins.split "\n#+ " (builtins.elemAt afterHeading 2)) 0;
     in
     assert assertMsg (hasInfix wantPath rosterSection)
       "docs/reference.md: Subagent roster section must state roster's flake path as `${wantPath}` (derived from lib/structural-paths.nix's roster entry) — it has drifted from the registry, update the doc (issue #2436)";
