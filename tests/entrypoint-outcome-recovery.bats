@@ -113,6 +113,9 @@ pinned_session_id() {
   # offending near-miss text verbatim and restates the grammar + status values.
   grep -q 'SPINDRIFT_OUTCOME: SUCCESS' "$DRIVER_PROMPT_FILE"
   grep -q 'valid status values are ready and blocked' "$DRIVER_PROMPT_FILE"
+  # The ready-to-copy example line substitutes the real issue/landing values,
+  # leaving only status/note as placeholders (issue #2449).
+  grep -q 'SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=' "$DRIVER_PROMPT_FILE"
 }
 
 # A near-miss on every call: the single corrective resume still fires exactly
@@ -130,4 +133,7 @@ pinned_session_id() {
   [ "$(grep -c '^driver invoked for issue' "$DRIVER_LOG")" -eq 2 ]
   # The one resume it did fire quoted the offending near-miss text.
   grep -q 'SPINDRIFT_OUTCOME: SUCCESS' "$DRIVER_PROMPT_FILE"
+  # The ready-to-copy example line substitutes the real issue/landing values,
+  # leaving only status/note as placeholders (issue #2449).
+  grep -q 'SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=' "$DRIVER_PROMPT_FILE"
 }
