@@ -987,19 +987,20 @@ func logDiscoveryPoll(c config, issues []issue, first bool, seen map[string]bool
 	}
 }
 
-// recoverByNumber resolves the open non-draft PR for the issue numbered issueNum
-// and drives the adopt-and-gate path: the sole way an agent-in-progress issue
-// is ever adopted, gated on the operator's explicit agent-recover label (see
-// .github/workflows/agent-recover.yml) rather than any automatic sweep (#600).
-// When no open PR exists, recover falls back to a second adopt arm (issue
-// #2225): it recovers the driver's last genuine self-report from the issue's
-// on-disk pass logs, and — when that report is a genuine success and the
-// prior run left a relayable finished branch in the outbox — opens the PR on
-// that relayed branch itself and drives it through the same merge gate,
-// rather than immediately giving up. Returns an error when the issue cannot
-// be fetched, the PR is a draft, or neither an open PR nor an adoptable
-// relayed-branch success exists (labels untouched in that last case); the
-// caller should treat those as non-success exits.
+// recoverByNumber resolves the open PR for the issue numbered issueNum,
+// draft or not, and drives it through the adopt-and-gate path: the sole way
+// an agent-in-progress issue is ever adopted, gated on the operator's
+// explicit agent-recover label (see .github/workflows/agent-recover.yml)
+// rather than any automatic sweep (#600). When no open PR exists, recover
+// falls back to a second adopt arm (issue #2225): it recovers the driver's
+// last genuine self-report from the issue's on-disk pass logs, and — when
+// that report is a genuine success and the prior run left a relayable
+// finished branch in the outbox — opens the PR on that relayed branch
+// itself and drives it through the same merge gate, rather than immediately
+// giving up. Returns an error when the issue cannot be fetched, or neither
+// an open PR nor an adoptable relayed-branch success exists (labels
+// untouched in that last case); the caller should treat those as
+// non-success exits.
 func recoverByNumber(c config, it forge.IssueTracker, cf forge.CodeForge, pwd string, f *dispatch.Factory, s settle.WorkSettler, issueNum string) error {
 	fi, err := it.Issue(issueNum)
 	if err != nil {
@@ -1047,10 +1048,6 @@ func recoverByNumber(c config, it forge.IssueTracker, cf forge.CodeForge, pwd st
 		}
 		fmt.Printf("    #%s  status=skipped  note=no open PR on %s\n", issueNum, branch)
 		return fmt.Errorf("issue %s: no open PR", issueNum)
-	}
-	if res.IsDraft {
-		fmt.Printf("    #%s  landing=%s  status=skipped  note=draft PR; recover operates on non-draft PRs only\n", issueNum, res.URL)
-		return fmt.Errorf("issue %s: draft PR", issueNum)
 	}
 	if err := os.MkdirAll(dispatch.HostLogDirFor(pwd), 0o755); err != nil {
 		return fmt.Errorf("mkdir logs: %w", err)
@@ -1313,9 +1310,10 @@ func writeGithubOutput(key, value string) error {
 }
 
 // cmdRecover is the `recover` subcommand: adopt an already-discovered open
-// non-draft PR with no outcome line and drive it through the merge gate. lc
-// is wired by bootstrap in production; tests construct it directly with
-// fakes (and a spy cleanup) to exercise the cleanup-on-every-exit contract.
+// PR (draft or not) with no outcome line and drive it through the merge
+// gate. lc is wired by bootstrap in production; tests construct it directly
+// with fakes (and a spy cleanup) to exercise the cleanup-on-every-exit
+// contract.
 func cmdRecover(lc *launchContext, issueNum string) int {
 	defer lc.cleanup()
 	if err := recoverByNumber(lc.config, lc.issueTracker, lc.codeForge, lc.pwd, lc.factory, lc.workSettle(), issueNum); err != nil {
