@@ -180,14 +180,24 @@ exactly.
 `models` argument (issue #2426): an attrset keyed by roster entry name
 (`scout`/`reviewer`/`filer`/`worker`), e.g. `defaultRoster { models = {
 filer = "claude-haiku-4-5-20251001"; }; }`. A name absent from `models`
-keeps today's empty-model default (dropped from the rendered agent config,
-see below); a name in `models` that isn't one of the four roster entries
-throws at eval time, the same way an invalid `roster` entry name does. The
-four legacy positional knobs still work as a lower-precedence fallback per
-name — `models` wins over the matching legacy knob when both are set for
-the same name — since `mkHarness` resolves its deprecated
+inherits that agent's `lib/env-schema.nix` default (issue #2434) —
+the same default `mkHarness`'s no-roster fallback path resolves through
+`mergedDefaults` — so `defaultRoster { }` composes spindrift's own
+defaults (scout/reviewer/worker provisioned; `filerModel`'s own schema
+default stays empty, so the filer is still opt-in). Setting `models.<name>
+= ""` explicitly is a distinct, still-supported opt-out (#392): it drops
+that entry's model (see below) even though the name would otherwise
+inherit a non-empty schema default — only an *unmentioned* name inherits.
+A name in `models` that isn't one of the four roster entries throws at
+eval time, the same way an invalid `roster` entry name does. The four
+legacy positional knobs still work as a lower-precedence fallback per
+name — `models` wins over the matching legacy knob, which wins over the
+schema default, when more than one is set for the same name — since
+`mkHarness` resolves its deprecated
 `scoutModel`/`reviewModel`/`filerModel`/`workerModel` args through
-`defaultRoster` unchanged.
+`defaultRoster` unchanged. A caller relying on the old blank-by-default
+behavior for an unmentioned name must switch to explicit
+`models.<name> = ""`.
 
 An entry with an empty (or absent) `model` is dropped from both Drivers'
 rendered config, the same per-agent omission the four legacy knobs give today
@@ -236,14 +246,15 @@ via `roster` is a `mkHarness`/image-time decision and requires a rebuild.
 spindrift's own dogfood Consumer config (`nix/dogfood-defaults.nix`) is a
 concrete `roster` user: it sets `roster = rosterLib.defaultRoster { models =
 { reviewer = "claude-opus-5"; filer = "claude-haiku-4-5-20251001"; }; }`,
-pinning the reviewer's and filer's models — the remaining two entries carry
-no `model` and so inherit the Driver's session default — and inherits
-`defaultRoster`'s built-in scout=medium/reviewer=high/filer=medium/worker=high
-efforts unchanged (issue #2386). It separately sets `defaults.reviewEffort =
-"high"` so the orchestrator's own code-owned review pass (issue #2387) runs
-at the same effort as the roster's `reviewer` entry, on the same model (issue
-#2427): the orchestrator captures the reviewer entry's model into the
-handoff before deleting that entry in favour of the code-owned pass.
+pinning the reviewer's and filer's models — the remaining two entries
+are unmentioned and so inherit their `lib/env-schema.nix` defaults
+(issue #2434) instead — and inherits `defaultRoster`'s built-in
+scout=medium/reviewer=high/filer=medium/worker=high efforts unchanged
+(issue #2386). It separately sets `defaults.reviewEffort = "high"` so the
+orchestrator's own code-owned review pass (issue #2387) runs at the same
+effort as the roster's `reviewer` entry, on the same model (issue #2427):
+the orchestrator captures the reviewer entry's model into the handoff before
+deleting that entry in favour of the code-owned pass.
 
 The **prompt is baked into the image**: changing `prompts/issue-prompt.md`
 requires an image rebuild (`spindrift build`). Point `SPINDRIFT_PROMPT_DIR`
