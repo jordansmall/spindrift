@@ -63,7 +63,9 @@ EOF
   run "$RUN_CMD"
   [ "$status" -eq 0 ]
   grep -q 'SCOUT_MODEL=claude-haiku-4-5-20251001' "$PODMAN_LOG"
-  grep -q 'REVIEW_MODEL=claude-opus-5' "$PODMAN_LOG"
+  # Anchored on a trailing non-word char so a future claude-opus-5-N default
+  # can't false-match this claude-opus-5 assertion.
+  grep -qE 'REVIEW_MODEL=claude-opus-5( |$)' "$PODMAN_LOG"
 }
 
 @test "MODEL env overrides the baked default into the container" {
