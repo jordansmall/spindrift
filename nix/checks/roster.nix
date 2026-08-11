@@ -239,4 +239,21 @@ in
       !result.success
     ) "defaultRoster must throw when models names an agent absent from the roster";
     pkgs.runCommand "roster-default-roster-rejects-unknown-model-name" { } "touch $out";
+
+  # Issue #2426: when both the legacy per-agent knob and models name the same
+  # agent, models wins -- the higher-precedence source, per lib/roster.nix's
+  # modelFor.
+  roster-default-roster-models-overrides-legacy =
+    let
+      roster = rosterLib.defaultRoster {
+        filerModel = "legacy-model";
+        models = {
+          filer = "models-model";
+        };
+      };
+      byName = name: builtins.head (builtins.filter (e: e.name == name) roster);
+    in
+    assert assertMsg ((byName "filer").model == "models-model")
+      "defaultRoster models.filer must win over a same-named legacy filerModel, got: ${builtins.toJSON (byName "filer").model}";
+    pkgs.runCommand "roster-default-roster-models-overrides-legacy" { } "touch $out";
 }
