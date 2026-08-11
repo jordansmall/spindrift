@@ -92,7 +92,7 @@ setup() {
   # recover adopts the discovered PR, so its gate (issue #1652) will not
   # trust an immediate SUCCESS until a non-terminal state proves this run's
   # checks registered — lead with a PENDING and bound the poll so a misscript
-  # can't real-sleep out the baked MERGE_POLL_TIMEOUT (3600s).
+  # can't real-sleep out the baked MERGE_POLL_TIMEOUT (1800s).
   export MERGE_POLL_INTERVAL=0
   export MERGE_POLL_TIMEOUT=100
   export FAKE_GH_GRAPHQL_ROLLUP_SEQ_1="PENDING,SUCCESS,SUCCESS"
@@ -100,9 +100,10 @@ setup() {
   [ "$status" -eq 0 ]
   [[ "$output" == *"status=adopted"* ]]
   [[ "$output" == *"status=verified-merged"* ]]
-  grep -q 'pr ready' "$GH_LOG"
+  grep -q 'pr ready https://github.com/owner/repo/pull/1' "$GH_LOG"
   grep -q 'pr merge' "$GH_LOG"
   grep -q -- 'issue edit 1 --repo owner/repo --add-label agent-complete --remove-label agent-in-progress' "$GH_LOG"
+  ! grep -q -- 'agent-failed' "$GH_LOG"
 }
 
 @test "recover: no open PR exits non-zero without label churn (via issue #195)" {
@@ -151,7 +152,7 @@ setup() {
   # recover adopts the discovered PR, so its gate (issue #1652) will not
   # trust an immediate SUCCESS until a non-terminal state proves this run's
   # checks registered — lead with a PENDING and bound the poll so a misscript
-  # can't real-sleep out the baked MERGE_POLL_TIMEOUT (3600s).
+  # can't real-sleep out the baked MERGE_POLL_TIMEOUT (1800s).
   export MERGE_POLL_INTERVAL=0
   export MERGE_POLL_TIMEOUT=100
   export FAKE_GH_GRAPHQL_ROLLUP_SEQ_1="PENDING,SUCCESS,SUCCESS"
@@ -159,9 +160,10 @@ setup() {
   [ "$status" -eq 0 ]
   [[ "$output" == *"status=adopted"* ]]
   [[ "$output" == *"status=verified-merged"* ]]
-  grep -q 'pr ready' "$GH_LOG"
+  grep -q 'pr ready https://github.com/owner/repo/pull/1' "$GH_LOG"
   grep -q 'pr merge' "$GH_LOG"
   grep -q -- 'issue edit 1 --repo owner/repo --add-label agent-complete --remove-label agent-in-progress' "$GH_LOG"
+  ! grep -q -- 'agent-failed' "$GH_LOG"
 }
 
 @test "recover: no open PR exits non-zero without label churn" {
