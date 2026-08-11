@@ -203,6 +203,48 @@ EOF
   ! grep -q 'SPINDRIFT_PR_INTENT' <<<"$output"
 }
 
+# Issue #2448: the synthetic outcome backstop (entrypoint-outcome-backstop.bats
+# line 332's read-only + no-outcome-line setup) only ever printed its
+# SPINDRIFT_OUTCOME line -- it never assigned $_last_outcome_line -- so a
+# status=ready reached only via that backstop left this gate's own read below
+# looking at an empty variable and the nudge silently never fired.
+@test "PR-intent gate: fires on a status=ready reached only via the synthetic backstop" {
+  export RUN_NONCE="deadbeefcafe1234"
+  unset BOX_WRITE_ENABLED     # read-only Box: no push token
+  unset CODE_FORGE            # default github
+  export OUTBOX_DIR="$BATS_TEST_TMPDIR/outbox"
+  export FAKE_DRIVER_COMMIT=1
+  export FAKE_DRIVER_NO_OUTCOME=1   # every call (initial + the outcome gate's own resume) produces no outcome line, forcing the synthetic backstop to fire
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+
+  # Exactly three Driver invocations: call 1 (initial) and call 2 (the
+  # SPINDRIFT_OUTCOME required-marker gate's own one resume) are both still
+  # no-outcome under FAKE_DRIVER_NO_OUTCOME, so the backstop fires a
+  # synthetic status=ready line; call 3 is the PR-intent nudge gate's own
+  # resume attempt (which this bug currently skips entirely -- today only 2
+  # calls happen).
+  [ "$(grep -c '^driver invoked for issue' "$DRIVER_LOG")" -eq 3 ]
+
+  # FAKE_DRIVER_NO_OUTCOME is unconditional (not _FIRST_CALL_ONLY), so the
+  # third (nudge) call also produces no PR-intent marker -- the nudge is
+  # exhausted, and the gate's own "resumed pass did not repeat the original
+  # line" fallback reprints the synthetic backstop line, so it appears twice
+  # (same shape as entrypoint-outcome-backstop.bats' line-332 fixture, fixed
+  # alongside this test for the same reason).
+  [ "$(grep -c '^SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=.*relayed via outbox bundle' <<<"$output")" -eq 2 ]
+
+  # The give-up heartbeat op fires (same assertions as "an exhausted nudge
+  # emits a heartbeat give-up op" above).
+  grep -q '"type":"spindrift_op"' <<<"$output"
+  grep -q '"op":"decision"' <<<"$output"
+  grep -q '"decision":"stop"' <<<"$output"
+  grep -q 'nudge exhausted after 1 attempt' <<<"$output"
+
+  # The bundle relay still happened -- unaffected by the fix.
+  [ -f "$OUTBOX_DIR/seam.bundle" ]
+}
+
 @test "PR-intent gate: never fires on a read-write run" {
   # setup_entrypoint_env's default BOX_WRITE_ENABLED=1 stands -- a read-write
   # Box opens its own PR in-box (gh pr create) and never prints PR-intent at

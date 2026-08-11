@@ -1132,7 +1132,11 @@ Print the required line exactly once as your final message, using this grammar -
   # transient failure into a terminal synthetic status=blocked (issue #593).
   if [ "$claude_rc" -eq 0 ] && [ -z "$_last_outcome_line" ]; then
     echo "==> driver produced no SPINDRIFT_OUTCOME line — emitting synthetic backstop"
-    emit_outcome_backstop
+    # Capture into $_last_outcome_line (issue #2448): the PR-intent nudge gate
+    # below reads it, and a bare `emit_outcome_backstop` left it empty,
+    # silently skipping the nudge on every backstopped run.
+    _last_outcome_line="$(emit_outcome_backstop)"
+    printf '%s\n' "$_last_outcome_line"
     # A read-only github Box (BOX_WRITE_ENABLED unset) holds no push token, so
     # emit_outcome_backstop could not push $BRANCH itself. Fall through
     # unconditionally to the harness-owned bundle-out step below, which
