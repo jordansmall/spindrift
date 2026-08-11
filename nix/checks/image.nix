@@ -144,6 +144,22 @@ in
     grep -q 'claude-opus-5' <<<"$reviewer_entry" \
       || { echo "dogfood harness reviewer entry missing the configured model" >&2; exit 1; }
 
+    # The dogfood harness also provisions the scout and worker (issue #2428):
+    # without a model, every Driver drops those entries from the rendered
+    # agent config, so the baked template must carry both at their pinned
+    # models.
+    scout_entry=$(grep -oE '"scout":\{[^}]*\}' <<<"$dogfood_line" || true)
+    [ -n "$scout_entry" ] \
+      || { echo "dogfood harness missing scout entry in baked template" >&2; exit 1; }
+    grep -q 'claude-haiku-4-5-20251001' <<<"$scout_entry" \
+      || { echo "dogfood harness scout entry missing the configured model" >&2; exit 1; }
+
+    worker_entry=$(grep -oE '"worker":\{[^}]*\}' <<<"$dogfood_line" || true)
+    [ -n "$worker_entry" ] \
+      || { echo "dogfood harness missing worker entry in baked template" >&2; exit 1; }
+    grep -q 'claude-sonnet-5' <<<"$worker_entry" \
+      || { echo "dogfood harness worker entry missing the configured model" >&2; exit 1; }
+
     touch $out
   '';
 

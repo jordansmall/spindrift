@@ -803,6 +803,12 @@ in
       rosterByName ? reviewer && rosterByName.reviewer.model == "claude-opus-5"
     ) "dogfood roster's reviewer entry must run the review pass on claude-opus-5 (issue #2427)";
     assert assertMsg (
+      rosterByName ? scout && rosterByName.scout.model == "claude-haiku-4-5-20251001"
+    ) "dogfood roster's scout entry must run on claude-haiku-4-5-20251001 (issue #2428)";
+    assert assertMsg (
+      rosterByName ? worker && rosterByName.worker.model == "claude-sonnet-5"
+    ) "dogfood roster's worker entry must run on claude-sonnet-5 (issue #2428)";
+    assert assertMsg (
       effortMismatches == { }
     ) "dogfood roster per-agent effort mismatch(es): ${builtins.toJSON effortMismatches}";
     pkgs.runCommand "dogfood-roster-and-review-effort" { } "touch $out";
