@@ -36,12 +36,16 @@ in
   # #2426) rather than the legacy per-agent model knobs. The `filer` entry
   # below carries forward the Filer's (#393, landed 2026-07-09) tuned model,
   # so non-blocking review findings still become tracked
-  # `agent-review-finding` issues instead of staying stuck in PR bodies;
-  # scout/reviewer/worker are left unmentioned since dogfood doesn't
-  # otherwise pin their models. `defaultRoster` also ships this roster's
-  # fixed per-agent efforts (issue #2386).
+  # `agent-review-finding` issues instead of staying stuck in PR bodies. The
+  # `reviewer` entry (issue #2427) puts the strongest available model behind
+  # the orchestrator's code-owned review pass -- the highest-leverage read in
+  # the loop, and already run at `high` effort below -- instead of letting it
+  # inherit the coordinator's own model; scout/worker are left unmentioned
+  # since dogfood doesn't otherwise pin their models. `defaultRoster` also
+  # ships this roster's fixed per-agent efforts (issue #2386).
   roster = rosterLib.defaultRoster {
     models = {
+      reviewer = "claude-opus-5";
       filer = "claude-haiku-4-5-20251001";
     };
   };
