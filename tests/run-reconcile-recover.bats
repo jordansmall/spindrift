@@ -100,8 +100,8 @@ setup() {
   [ "$status" -eq 0 ]
   [[ "$output" == *"status=adopted"* ]]
   [[ "$output" == *"status=verified-merged"* ]]
-  grep -q 'pr merge' "$GH_LOG"
   grep -q 'pr ready' "$GH_LOG"
+  grep -q 'pr merge' "$GH_LOG"
   grep -q -- 'issue edit 1 --repo owner/repo --add-label agent-complete --remove-label agent-in-progress' "$GH_LOG"
 }
 
@@ -159,8 +159,8 @@ setup() {
   [ "$status" -eq 0 ]
   [[ "$output" == *"status=adopted"* ]]
   [[ "$output" == *"status=verified-merged"* ]]
-  grep -q 'pr merge' "$GH_LOG"
   grep -q 'pr ready' "$GH_LOG"
+  grep -q 'pr merge' "$GH_LOG"
   grep -q -- 'issue edit 1 --repo owner/repo --add-label agent-complete --remove-label agent-in-progress' "$GH_LOG"
 }
 
