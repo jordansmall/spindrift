@@ -805,9 +805,13 @@ in
       }"'';
     assert assertMsg (rosterByName ? filer && rosterByName.filer.model == "claude-haiku-4-5-20251001")
       "dogfood roster's filer entry must keep the tuned Filer model claude-haiku-4-5-20251001 (issue #2388, was #393)";
-    assert assertMsg
-      (rosterByName ? reviewer && rosterByName.reviewer.model == schema.reviewModel.default)
-      "dogfood roster's unmentioned reviewer entry must inherit the lib/env-schema.nix default (issue #2435), got: ${
+    # Anchored to the literal "claude-opus-5", not schema.reviewModel.default:
+    # the code-owned review pass binds to this exact model (issue #2427), so
+    # the guard must catch a schema-default regression away from it, not
+    # just confirm the roster mirrors whatever the schema currently says
+    # (issue #2435).
+    assert assertMsg (rosterByName ? reviewer && rosterByName.reviewer.model == "claude-opus-5")
+      "dogfood roster's unmentioned reviewer entry must inherit the lib/env-schema.nix default of claude-opus-5 (issue #2435), got: ${
         builtins.toJSON (rosterByName.reviewer.model or null)
       }";
     assert assertMsg (rosterByName ? scout && rosterByName.scout.model == schema.scoutModel.default)

@@ -143,11 +143,15 @@ in
     # Consumer that leaves reviewer unmentioned. The orchestrator's
     # code-owned review pass (issue #2427) still runs on that model, so the
     # baked template must carry a reviewer entry at the schema default.
+    # Anchored to the literal "claude-opus-5", not reviewModelSchemaDefault:
+    # the code-owned review pass binds to this exact model, so this guard
+    # must catch a schema-default regression away from it, not just confirm
+    # the bake mirrors whatever the schema currently says.
     reviewer_entry=$(grep -oE '"reviewer":\{[^}]*\}' <<<"$dogfood_line" || true)
     [ -n "$reviewer_entry" ] \
       || { echo "dogfood harness missing reviewer entry in baked template" >&2; exit 1; }
-    grep -q '${reviewModelSchemaDefault}' <<<"$reviewer_entry" \
-      || { echo "dogfood harness reviewer entry missing the ${reviewModelSchemaDefault} schema default" >&2; exit 1; }
+    grep -q 'claude-opus-5' <<<"$reviewer_entry" \
+      || { echo "dogfood harness reviewer entry missing the claude-opus-5 schema default" >&2; exit 1; }
 
     # A Consumer that sets no model knobs and passes no roster (bats harness:
     # no `defaults`, no `roster`) must still get a reviewer on the schema
