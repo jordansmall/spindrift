@@ -29,6 +29,10 @@ let
   # hand-wired `lib/mkHarness.nix` literal (issue #2246 slice 1).
   promptContract = import ../../lib/prompt-contract.nix;
   inherit (promptContract) byId;
+  # Single source of truth for the literal asserted below (issue #2433):
+  # read reviewModel's default straight from the schema instead of
+  # restating it by hand, so a future bump only edits lib/env-schema.nix.
+  reviewModelSchemaDefault = (import ../../lib/env-schema.nix).reviewModel.default;
 in
 {
   # The baked entrypoint must carry a store-path shebang, not the
@@ -144,18 +148,18 @@ in
     grep -q 'claude-opus-5' <<<"$reviewer_entry" \
       || { echo "dogfood harness reviewer entry missing the configured model" >&2; exit 1; }
 
-    # A Consumer that sets no model knobs and passes no roster (batsHarness:
+    # A Consumer that sets no model knobs and passes no roster (bats harness:
     # no `defaults`, no `roster`) must still get a reviewer on the schema
     # default (issue #2433) via the roster==null fallback
     # (lib/mkHarness.nix:317-327) -- reviewModel's default moved to
-    # claude-opus-5 so every Consumer's reviewer runs on the strongest
-    # available model without configuring anything.
-    default_line=$(grep '^AGENTS_JSON_TEMPLATE=' ${batsHarness.agentFiles}/agent/entrypoint.sh)
-    default_reviewer_entry=$(grep -oE '"reviewer":\{[^}]*\}' <<<"$default_line" || true)
-    [ -n "$default_reviewer_entry" ] \
-      || { echo "no-override harness missing reviewer entry in baked template" >&2; exit 1; }
-    grep -q 'claude-opus-5' <<<"$default_reviewer_entry" \
-      || { echo "no-override harness reviewer entry missing the default claude-opus-5 model" >&2; exit 1; }
+    # ${reviewModelSchemaDefault} so every Consumer's reviewer runs on the
+    # strongest available model without configuring anything.
+    bats_line=$(grep '^AGENTS_JSON_TEMPLATE=' ${batsHarness.agentFiles}/agent/entrypoint.sh)
+    bats_reviewer_entry=$(grep -oE '"reviewer":\{[^}]*\}' <<<"$bats_line" || true)
+    [ -n "$bats_reviewer_entry" ] \
+      || { echo "bats harness missing reviewer entry in baked template" >&2; exit 1; }
+    grep -q '${reviewModelSchemaDefault}' <<<"$bats_reviewer_entry" \
+      || { echo "bats harness reviewer entry missing the default ${reviewModelSchemaDefault} model" >&2; exit 1; }
 
     touch $out
   '';
