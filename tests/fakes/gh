@@ -193,8 +193,19 @@ EOF
             fi
             ;;
           isDraft)
-            draftvar="FAKE_GH_PR_DRAFT_${pr_num}"
-            printf '%s\n' "${!draftvar:-false}"
+            # Dynamic flip written by `gh pr ready` takes precedence.
+            dyn_state=""
+            if [ -f "$GH_STATE" ]; then
+              while IFS=$'\t' read -r k v; do
+                [ "$k" = "pr-draft-$pr_num" ] && dyn_state="$v"
+              done <"$GH_STATE"
+            fi
+            if [ -n "$dyn_state" ]; then
+              printf '%s\n' "$dyn_state"
+            else
+              draftvar="FAKE_GH_PR_DRAFT_${pr_num}"
+              printf '%s\n' "${!draftvar:-false}"
+            fi
             ;;
           headRefName,baseRefName)
             headvar="FAKE_GH_PR_HEAD_${pr_num}"
@@ -246,6 +257,14 @@ EOF
           skipping) printf 'CI\tskipping\thttps://example.com\n' ;;
           none)     ;; # no output — "not started"
         esac
+        ;;
+      ready)
+        # Models the launcher's MarkReady shelling out to `gh pr ready
+        # <prURL>` (no extra flags) to flip a draft PR to ready. MarkDraft's
+        # `--undo` variant is out of scope here (issue #2423).
+        pr_ref="${3:-}"
+        pr_num="${pr_ref##*/}"
+        printf 'pr-draft-%s\tfalse\n' "$pr_num" >>"$GH_STATE"
         ;;
       merge)
         pr_ref="${3:-}"
