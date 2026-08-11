@@ -7,13 +7,18 @@
 # agents byte-for-byte (same descriptions/tools/promptFile names as the
 # templates previously baked in). Its primary, roster-native surface is the
 # `models` attrset (issue #2426), keyed by roster entry name (scout/
-# reviewer/filer/worker) -- a name absent from `models` keeps today's empty
-# model. An unknown name in `models` throws at eval time, the same way
+# reviewer/filer/worker). A name absent from `models` inherits that agent's
+# `lib/env-schema.nix` default (issue #2434) -- the same default
+# `mkHarness`'s no-roster fallback path resolves through `mergedDefaults`.
+# An unknown name in `models` throws at eval time, the same way
 # `normalizeRoster` rejects an invalid entry name. The four legacy
-# positional knobs (scoutModel/reviewModel/filerModel/workerModel) still
-# work as a lower-precedence fallback per name, since lib/mkHarness.nix
-# resolves its deprecated `settings.*Model` knobs through them; `models`
-# wins over the matching legacy knob when both are set for the same name.
+# positional knobs (scoutModel/reviewModel/filerModel/workerModel) default
+# to `null` -- a sentinel distinguishing "not supplied" from "supplied as
+# empty" -- and still work as a lower-precedence fallback per name, since
+# lib/mkHarness.nix resolves its deprecated `settings.*Model` knobs through
+# them, always supplying an explicit (non-null) value. Precedence per name:
+# `models.<name>` (including an explicit `""` opt-out) wins over an
+# explicitly supplied legacy knob, which wins over the schema default.
 # `prompt` is
 # always `null` here -- entrypoint.sh injects each agent's rendered prompt at
 # runtime from `promptFile`, never at eval time (see agent/entrypoint.sh's
@@ -66,13 +71,20 @@
 
   defaultRoster =
     {
-      scoutModel ? "",
-      reviewModel ? "",
-      filerModel ? "",
-      workerModel ? "",
+      scoutModel ? null,
+      reviewModel ? null,
+      filerModel ? null,
+      workerModel ? null,
       models ? { },
     }:
     let
+      schema = import ./env-schema.nix;
+      schemaDefaults = {
+        scout = schema.scoutModel.default;
+        reviewer = schema.reviewModel.default;
+        filer = schema.filerModel.default;
+        worker = schema.workerModel.default;
+      };
       legacyModels = {
         scout = scoutModel;
         reviewer = reviewModel;
@@ -80,75 +92,82 @@
         worker = workerModel;
       };
       unknownNames = builtins.filter (n: !(legacyModels ? ${n})) (builtins.attrNames models);
-      modelFor = name: models.${name} or legacyModels.${name};
+      modelFor =
+        name:
+        if models ? ${name} then
+          models.${name}
+        else if legacyModels.${name} != null then
+          legacyModels.${name}
+        else
+          schemaDefaults.${name};
     in
     if unknownNames != [ ] then
       throw "defaultRoster: models names unknown agent(s) ${builtins.toJSON unknownNames} -- expected one of ${builtins.toJSON (builtins.attrNames legacyModels)}"
     else
-    [
-      {
-        name = "scout";
-        model = modelFor "scout";
-        effort = "medium";
-        mode = "subagent";
-        description = "Map relevant files, seams, and tests; return a structured brief";
-        tools = [
-          "Read"
-          "Bash"
-          "WebFetch"
-          "WebSearch"
-          "Glob"
-          "Grep"
-        ];
-        promptFile = "scout-prompt.md";
-        prompt = null;
-      }
-      {
-        name = "reviewer";
-        model = modelFor "reviewer";
-        effort = "high";
-        mode = "subagent";
-        description = "Review the branch diff for spec compliance and coding standards";
-        tools = [
-          "Read"
-          "Bash"
-          "WebFetch"
-          "Agent"
-        ];
-        promptFile = "review-prompt.md";
-        prompt = null;
-      }
-      {
-        name = "filer";
-        model = modelFor "filer";
-        effort = "medium";
-        mode = "subagent";
-        description = "File issues from a review's non-blocking findings, best-effort";
-        tools = [
-          "Read"
-          "Bash"
-          "WebFetch"
-        ];
-        promptFile = "filer-prompt.md";
-        prompt = null;
-      }
-      {
-        name = "worker";
-        model = modelFor "worker";
-        effort = "high";
-        mode = "subagent";
-        description = "Implement a scoped slice of work delegated to it, with full implement-capable tools";
-        tools = [
-          "Read"
-          "Bash"
-          "Edit"
-          "Write"
-          "Glob"
-          "Grep"
-          "WebFetch"
-        ];
-        promptFile = "worker-prompt.md";
-        prompt = null;
-      }
-    ];
+      [
+        {
+          name = "scout";
+          model = modelFor "scout";
+          effort = "medium";
+          mode = "subagent";
+          description = "Map relevant files, seams, and tests; return a structured brief";
+          tools = [
+            "Read"
+            "Bash"
+            "WebFetch"
+            "WebSearch"
+            "Glob"
+            "Grep"
+          ];
+          promptFile = "scout-prompt.md";
+          prompt = null;
+        }
+        {
+          name = "reviewer";
+          model = modelFor "reviewer";
+          effort = "high";
+          mode = "subagent";
+          description = "Review the branch diff for spec compliance and coding standards";
+          tools = [
+            "Read"
+            "Bash"
+            "WebFetch"
+            "Agent"
+          ];
+          promptFile = "review-prompt.md";
+          prompt = null;
+        }
+        {
+          name = "filer";
+          model = modelFor "filer";
+          effort = "medium";
+          mode = "subagent";
+          description = "File issues from a review's non-blocking findings, best-effort";
+          tools = [
+            "Read"
+            "Bash"
+            "WebFetch"
+          ];
+          promptFile = "filer-prompt.md";
+          prompt = null;
+        }
+        {
+          name = "worker";
+          model = modelFor "worker";
+          effort = "high";
+          mode = "subagent";
+          description = "Implement a scoped slice of work delegated to it, with full implement-capable tools";
+          tools = [
+            "Read"
+            "Bash"
+            "Edit"
+            "Write"
+            "Glob"
+            "Grep"
+            "WebFetch"
+          ];
+          promptFile = "worker-prompt.md";
+          prompt = null;
+        }
+      ];
 }

@@ -780,6 +780,7 @@ in
         system = "aarch64-linux";
         lib = pkgs.lib;
       };
+      schema = import ../../lib/env-schema.nix;
       rosterByName = listToAttrs (map (e: nameValuePair e.name e) defaults.roster);
       expectedEfforts = {
         scout = "medium";
@@ -802,6 +803,14 @@ in
     assert assertMsg (
       rosterByName ? reviewer && rosterByName.reviewer.model == "claude-opus-5"
     ) "dogfood roster's reviewer entry must run the review pass on claude-opus-5 (issue #2427)";
+    assert assertMsg (rosterByName ? scout && rosterByName.scout.model == schema.scoutModel.default)
+      "dogfood roster's unmentioned scout entry must inherit the lib/env-schema.nix default (issue #2434), got: ${
+        builtins.toJSON (rosterByName.scout.model or null)
+      }";
+    assert assertMsg (rosterByName ? worker && rosterByName.worker.model == schema.workerModel.default)
+      "dogfood roster's unmentioned worker entry must inherit the lib/env-schema.nix default (issue #2434), got: ${
+        builtins.toJSON (rosterByName.worker.model or null)
+      }";
     assert assertMsg (
       effortMismatches == { }
     ) "dogfood roster per-agent effort mismatch(es): ${builtins.toJSON effortMismatches}";
