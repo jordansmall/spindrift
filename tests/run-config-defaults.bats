@@ -63,7 +63,7 @@ EOF
   run "$RUN_CMD"
   [ "$status" -eq 0 ]
   grep -q 'SCOUT_MODEL=claude-haiku-4-5-20251001' "$PODMAN_LOG"
-  grep -q 'REVIEW_MODEL=claude-opus-4-8' "$PODMAN_LOG"
+  grep -q 'REVIEW_MODEL=claude-opus-5' "$PODMAN_LOG"
 }
 
 @test "MODEL env overrides the baked default into the container" {
