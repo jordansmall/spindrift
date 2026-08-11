@@ -82,18 +82,27 @@ setup() {
   grep -q -- 'issue edit 1 --repo owner/repo --add-label agent-complete --remove-label agent-in-progress' "$GH_LOG"
 }
 
-@test "recover: draft PR is skipped and exits non-zero (via issue #195)" {
+@test "recover: draft PR is adopted and merged (via issue #195)" {
+  export MERGE_MODE=immediate
   export FAKE_PODMAN_IMAGE_PRESENT=1
   export FAKE_GH_ISSUES=$'1\tStranded issue'
   printf '1\tagent-in-progress\n' >> "$GH_LOG.state"
   export FAKE_GH_PR_LIST_1="https://github.com/owner/repo/pull/1"
   export FAKE_GH_PR_DRAFT_1="true"
+  # recover adopts the discovered PR, so its gate (issue #1652) will not
+  # trust an immediate SUCCESS until a non-terminal state proves this run's
+  # checks registered — lead with a PENDING and bound the poll so a misscript
+  # can't real-sleep out the baked MERGE_POLL_TIMEOUT (3600s).
+  export MERGE_POLL_INTERVAL=0
+  export MERGE_POLL_TIMEOUT=100
+  export FAKE_GH_GRAPHQL_ROLLUP_SEQ_1="PENDING,SUCCESS,SUCCESS"
   run "$SPINDRIFT_CMD" recover 1
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"status=skipped"* ]]
-  ! grep -q 'pr merge' "$GH_LOG"
-  ! grep -q 'agent-complete' "$GH_LOG"
-  ! grep -q -- 'agent-failed' "$GH_LOG"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"status=adopted"* ]]
+  [[ "$output" == *"status=verified-merged"* ]]
+  grep -q 'pr merge' "$GH_LOG"
+  grep -q 'pr ready' "$GH_LOG"
+  grep -q -- 'issue edit 1 --repo owner/repo --add-label agent-complete --remove-label agent-in-progress' "$GH_LOG"
 }
 
 @test "recover: no open PR exits non-zero without label churn (via issue #195)" {
@@ -132,18 +141,27 @@ setup() {
   grep -q -- 'issue edit 1 --repo owner/repo --add-label agent-complete --remove-label agent-in-progress' "$GH_LOG"
 }
 
-@test "recover: draft PR is skipped and exits non-zero" {
+@test "recover: draft PR is adopted and merged" {
+  export MERGE_MODE=immediate
   export FAKE_PODMAN_IMAGE_PRESENT=1
   export FAKE_GH_ISSUES=$'1\tStranded issue'
   printf '1\tagent-in-progress\n' >> "$GH_LOG.state"
   export FAKE_GH_PR_LIST_1="https://github.com/owner/repo/pull/1"
   export FAKE_GH_PR_DRAFT_1="true"
+  # recover adopts the discovered PR, so its gate (issue #1652) will not
+  # trust an immediate SUCCESS until a non-terminal state proves this run's
+  # checks registered — lead with a PENDING and bound the poll so a misscript
+  # can't real-sleep out the baked MERGE_POLL_TIMEOUT (3600s).
+  export MERGE_POLL_INTERVAL=0
+  export MERGE_POLL_TIMEOUT=100
+  export FAKE_GH_GRAPHQL_ROLLUP_SEQ_1="PENDING,SUCCESS,SUCCESS"
   run "$SPINDRIFT_CMD" recover 1
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"status=skipped"* ]]
-  ! grep -q 'pr merge' "$GH_LOG"
-  ! grep -q 'agent-complete' "$GH_LOG"
-  ! grep -q -- 'agent-failed' "$GH_LOG"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"status=adopted"* ]]
+  [[ "$output" == *"status=verified-merged"* ]]
+  grep -q 'pr merge' "$GH_LOG"
+  grep -q 'pr ready' "$GH_LOG"
+  grep -q -- 'issue edit 1 --repo owner/repo --add-label agent-complete --remove-label agent-in-progress' "$GH_LOG"
 }
 
 @test "recover: no open PR exits non-zero without label churn" {
