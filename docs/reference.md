@@ -235,9 +235,11 @@ via `roster` is a `mkHarness`/image-time decision and requires a rebuild.
 
 spindrift's own dogfood Consumer config (`nix/dogfood-defaults.nix`) is a
 concrete `roster` user: it sets `roster = rosterLib.defaultRoster { models =
-{ reviewer = "claude-opus-5"; filer = "claude-haiku-4-5-20251001"; }; }`,
-pinning the reviewer's and filer's models — the remaining two entries carry
-no `model` and so inherit the Driver's session default — and inherits
+{ scout = "claude-haiku-4-5-20251001"; reviewer = "claude-opus-5"; filer =
+"claude-haiku-4-5-20251001"; worker = "claude-sonnet-5"; }; }`, pinning all
+four entries' models (issue #2428 provisioned the scout and worker; without a
+model, every Driver drops those entries from the rendered agent config, so a
+dogfood Box had only the filer and reviewer before) — and inherits
 `defaultRoster`'s built-in scout=medium/reviewer=high/filer=medium/worker=high
 efforts unchanged (issue #2386). It separately sets `defaults.reviewEffort =
 "high"` so the orchestrator's own code-owned review pass (issue #2387) runs
