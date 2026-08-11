@@ -203,8 +203,9 @@ EOF
   ! grep -q 'SPINDRIFT_PR_INTENT' <<<"$output"
 }
 
-# Issue #2448: the synthetic outcome backstop (entrypoint-outcome-backstop.bats
-# line 332's read-only + no-outcome-line setup) only ever printed its
+# Issue #2448: the synthetic outcome backstop (entrypoint-outcome-backstop.bats'
+# "read-only github + no outcome line -> branch relayed via outbox bundle, no
+# force-push" test's read-only + no-outcome-line setup) only ever printed its
 # SPINDRIFT_OUTCOME line -- it never assigned $_last_outcome_line -- so a
 # status=ready reached only via that backstop left this gate's own read below
 # looking at an empty variable and the nudge silently never fired.
@@ -222,17 +223,19 @@ EOF
   # SPINDRIFT_OUTCOME required-marker gate's own one resume) are both still
   # no-outcome under FAKE_DRIVER_NO_OUTCOME, so the backstop fires a
   # synthetic status=ready line; call 3 is the PR-intent nudge gate's own
-  # resume attempt (which this bug currently skips entirely -- today only 2
-  # calls happen).
+  # resume attempt, now reachable thanks to the #2448 fix that carries the
+  # backstop's synthetic line into $_last_outcome_line.
   [ "$(grep -c '^driver invoked for issue' "$DRIVER_LOG")" -eq 3 ]
 
   # FAKE_DRIVER_NO_OUTCOME is unconditional (not _FIRST_CALL_ONLY), so the
   # third (nudge) call also produces no PR-intent marker -- the nudge is
-  # exhausted, and the gate's own "resumed pass did not repeat the original
-  # line" fallback reprints the synthetic backstop line, so it appears twice
+  # exhausted. But that resumed pass's result text carries no
+  # SPINDRIFT_OUTCOME token at all (not even a garbled one), so nothing
+  # shadowed the original line in the container log -- the gate's own
+  # fallback must not reprint it, and the line still appears exactly once
   # (same shape as entrypoint-outcome-backstop.bats' line-332 fixture, fixed
   # alongside this test for the same reason).
-  [ "$(grep -c '^SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=.*relayed via outbox bundle' <<<"$output")" -eq 2 ]
+  [ "$(grep -c '^SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=.*relayed via outbox bundle' <<<"$output")" -eq 1 ]
 
   # The give-up heartbeat op fires (same assertions as "an exhausted nudge
   # emits a heartbeat give-up op" above).
@@ -243,6 +246,136 @@ EOF
 
   # The bundle relay still happened -- unaffected by the fix.
   [ -f "$OUTBOX_DIR/seam.bundle" ]
+}
+
+# Issue #2448 AC2: "When the nudged pass supplies a usable PR-intent line,
+# that run hands off a draft PR exactly as a genuinely-ready run does." The
+# test above only exercises the *exhausted* nudge (FAKE_DRIVER_NO_OUTCOME is
+# unconditional there, so the nudge's own resume also produces nothing) --
+# this test instead lets the nudge's own resume succeed.
+@test "PR-intent gate: a backstop-derived status=ready run's nudge succeeds when the resumed pass supplies PR-intent" {
+  export RUN_NONCE="deadbeefcafe1234"
+  unset BOX_WRITE_ENABLED     # read-only Box: no push token
+  unset CODE_FORGE            # default github
+  export OUTBOX_DIR="$BATS_TEST_TMPDIR/outbox"
+  export FAKE_DRIVER_COMMIT=1
+  # call_index 0 (initial) and call_index 1 (the SPINDRIFT_OUTCOME
+  # required-marker gate's own one resume) are both no-outcome, forcing the
+  # synthetic backstop to fire after those two calls -- same setup as "fires
+  # on a status=ready reached only via the synthetic backstop" above. Unlike
+  # that test, call_index 2 (the PR-intent nudge gate's own resume) falls
+  # through to this fake's normal scripted output, which supplies a genuine
+  # SPINDRIFT_PR_INTENT line plus a fresh status=ready outcome line.
+  export FAKE_DRIVER_NO_OUTCOME_BEFORE_CALL=2
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+
+  # Three Driver invocations: initial, the SPINDRIFT_OUTCOME gate's resume,
+  # and the PR-intent nudge's own (this time successful) resume.
+  [ "$(grep -c '^driver invoked for issue' "$DRIVER_LOG")" -eq 3 ]
+
+  # The resumed pass's own canned output actually supplies the marker --
+  # visible in the raw teed Driver stream, not just believed.
+  grep -q 'SPINDRIFT_PR_INTENT deadbeefcafe1234' <<<"$output"
+
+  # The nudge succeeded, so no exhausted-nudge give-up op is emitted (mirrors
+  # the non-backstop success test's own assertion above) -- that op fires
+  # only on the genuinely-exhausted path.
+  ! grep -q '"op":"decision"' <<<"$output"
+}
+
+# Issue #2448 finding 3: before the #2448 fix above, a backstop-derived
+# status=ready run's $_last_outcome_line was left empty, so the
+# _is_readonly_github + status=ready guard around the PR-intent nudge was
+# always false on that path -- the nudge never got a chance to run at all.
+# Now that the fix makes the nudge reach a backstop-derived run (the whole
+# point of #2448), a new hazard opens up: if the nudge's own corrective
+# resume (required_marker_gate's one resume attempt) itself crashes or
+# otherwise exits non-zero, that failure lands in main()'s own $claude_rc,
+# and the unconditional `exit "$claude_rc"` at the bottom of main() would
+# send this already-backstopped, already-relayed run to the launcher's
+# ClassifyTransient/retry path -- exactly the outcome the backstop's own
+# comment (issue #593) says forcing a terminal exit 0 must prevent, except
+# here the failure is in a later, best-effort nudge, not the driver's actual
+# work. The backstop already committed to a terminal status=ready verdict
+# earlier in this same run; a transient failure in the nudge that follows it
+# must not retroactively undo that.
+@test "PR-intent gate: a crashed resume after a backstop-declared ready outcome stays terminal (exit 0)" {
+  export RUN_NONCE="deadbeefcafe1234"
+  unset BOX_WRITE_ENABLED     # read-only Box: no push token
+  unset CODE_FORGE            # default github
+  export OUTBOX_DIR="$BATS_TEST_TMPDIR/outbox"
+  export FAKE_DRIVER_COMMIT=1
+  # call_index 0 (initial) and call_index 1 (the SPINDRIFT_OUTCOME
+  # required-marker gate's own one resume) both produce no outcome line,
+  # forcing the synthetic backstop to fire after those two calls -- same
+  # setup as "fires on a status=ready reached only via the synthetic
+  # backstop" above. call_index 2 (the PR-intent nudge gate's own resume)
+  # instead crashes with a transient-looking non-zero exit, simulating an
+  # infrastructure failure mid-nudge.
+  export FAKE_DRIVER_NO_OUTCOME=1
+  export FAKE_DRIVER_CRASH_EXIT=17
+  export FAKE_DRIVER_CRASH_EXIT_FROM_CALL=2
+  run bash "$ENTRYPOINT"
+
+  # The crash in the PR-intent nudge's own resume must not flip the
+  # entrypoint's own exit status away from the terminal 0 the backstop
+  # already committed to -- not the crash's exit code (17), and not any
+  # other non-zero value.
+  [ "$status" -eq 0 ]
+
+  # All three calls happened: initial, the SPINDRIFT_OUTCOME gate's resume,
+  # and the PR-intent nudge's own (crashing) resume.
+  [ "$(grep -c '^driver invoked for issue' "$DRIVER_LOG")" -eq 3 ]
+
+  # The synthetic backstop's status=ready line was still emitted exactly
+  # once -- the crash happened after it, and must not have erased or
+  # duplicated it.
+  [ "$(grep -c '^SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=.*relayed via outbox bundle' <<<"$output")" -eq 1 ]
+
+  # The bundle relay still happened -- unaffected by the crash.
+  [ -f "$OUTBOX_DIR/seam.bundle" ]
+}
+
+# Issue #2448 finding 2: the gate's "resumed pass did not repeat the original
+# SPINDRIFT_OUTCOME line — restoring it" fallback used to restore
+# unconditionally whenever the resumed line differed from the original ready
+# line -- including when the resumed pass supplied its own genuine, valid,
+# differently-shaped verdict (e.g. deciding mid-nudge that the run is
+# actually status=blocked). Restoring in that case clobbered the driver's
+# own honest final word with the earlier synthetic/original ready line, both
+# in $_last_outcome_line bookkeeping and reprinted into the container log --
+# exactly the line the launcher's own last-line-wins outcome.LastInLog scan
+# would then see, hiding a genuinely blocked run behind a manufactured
+# status=ready. A non-empty, differently-shaped resumed outcome line must be
+# left completely alone.
+@test "PR-intent gate: a genuine status=blocked verdict from the resumed pass is never clobbered back to ready" {
+  export RUN_NONCE="deadbeefcafe1234"
+  unset BOX_WRITE_ENABLED
+  # Unconditional (not _FIRST_CALL_ONLY): neither call ever supplies a
+  # PR-intent marker, so the gate's nudge fires on the initial genuine
+  # status=ready pass and is exhausted from the PR-intent marker's own
+  # perspective, even though the resumed pass's own outcome verdict changes.
+  export FAKE_DRIVER_NO_PR_INTENT=1
+  # Only the resume call (call_index >= 1) reports status=blocked -- the
+  # initial call stays at the default status=ready, so the gate's own
+  # status=ready trigger condition still fires in the first place.
+  export FAKE_DRIVER_OUTCOME_STATUS_ON_RESUME=blocked
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+
+  [ "$(grep -c '^driver invoked for issue' "$DRIVER_LOG")" -eq 2 ]
+
+  # The final (last-line-wins) SPINDRIFT_OUTCOME line in the container log is
+  # the resumed pass's own genuine status=blocked verdict, not the original
+  # status=ready line the gate captured before nudging.
+  last_outcome_line="$(grep '^SPINDRIFT_OUTCOME ' <<<"$output" | tail -n1)"
+  [[ "$last_outcome_line" == *"status=blocked"* ]]
+
+  # Nothing after that final blocked line resurrects the original ready
+  # line's text -- the fallback must not have reprinted it.
+  after_last_blocked="$(awk '/^SPINDRIFT_OUTCOME .*status=blocked/{found=1; next} found' <<<"$output")"
+  ! grep -q 'status=ready' <<<"$after_last_blocked"
 }
 
 @test "PR-intent gate: never fires on a read-write run" {
@@ -294,4 +427,89 @@ EOF
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   [ "$(grep -c '^driver invoked for issue' "$DRIVER_LOG")" -eq 1 ]
+}
+
+# Issue #2448 AC4: "The nudge's existing scoping is unchanged... including
+# when those runs reach their status via the backstop rather than a real
+# outcome line." The four scoping tests above only ever exercise a genuine,
+# driver-supplied outcome line ($_last_outcome_line valid straight from the
+# first call); none of them route status through the synthetic backstop,
+# which #2448 made a newly-reachable input to this same gate. The four
+# companion tests below force every run through the backstop (two calls, via
+# FAKE_DRIVER_NO_OUTCOME) and assert the same scoping still holds on that
+# path.
+
+@test "PR-intent gate: never fires on a read-write run reached via the synthetic backstop" {
+  # setup_entrypoint_env's default BOX_WRITE_ENABLED=1 stands -- a read-write
+  # Box opens its own PR in-box and never prints PR-intent, so a missing one
+  # here is expected regardless of how status=ready was reached.
+  export RUN_NONCE="deadbeefcafe1234"
+  export FAKE_DRIVER_COMMIT=1
+  export FAKE_DRIVER_NO_OUTCOME=1
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+
+  # Exactly two Driver invocations: initial + the SPINDRIFT_OUTCOME
+  # required-marker gate's own resume force the backstop to fire; never a
+  # third for the PR-intent nudge.
+  [ "$(grep -c '^driver invoked for issue' "$DRIVER_LOG")" -eq 2 ]
+
+  # The backstop path was actually exercised, not skipped for some other
+  # reason -- a synthetic status=ready line is present.
+  grep -q '^SPINDRIFT_OUTCOME .*status=ready' <<<"$output"
+}
+
+@test "PR-intent gate: never fires under CODE_FORGE=git reached via the synthetic backstop" {
+  # A push-only Code Forge never reaches OPEN A PULL REQUEST at all (ADR
+  # 0034) -- there is no PR-intent contract to nudge, backstop or not.
+  export RUN_NONCE="deadbeefcafe1234"
+  export CODE_FORGE="git"
+  export CODE_FORGE_REMOTE_URL="$REMOTE_ROOT/owner/repo.git"
+  unset BOX_WRITE_ENABLED
+  export OUTBOX_DIR="$BATS_TEST_TMPDIR/outbox"
+  export FAKE_DRIVER_COMMIT=1
+  export FAKE_DRIVER_NO_OUTCOME=1
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  [ "$(grep -c '^driver invoked for issue' "$DRIVER_LOG")" -eq 2 ]
+}
+
+@test "PR-intent gate: never fires under CODE_FORGE=local reached via the synthetic backstop" {
+  # The harness-mediated Code Forge (ADR 0033) never reaches OPEN A PULL
+  # REQUEST either -- same exclusion as CODE_FORGE=git above, backstop or not.
+  export RUN_NONCE="deadbeefcafe1234"
+  export CODE_FORGE="local"
+  export REPO_MOUNT_DIR="$REMOTE_ROOT/owner/repo.git"
+  unset BOX_WRITE_ENABLED
+  export OUTBOX_DIR="$BATS_TEST_TMPDIR/outbox"
+  export FAKE_DRIVER_COMMIT=1
+  export FAKE_DRIVER_NO_OUTCOME=1
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  [ "$(grep -c '^driver invoked for issue' "$DRIVER_LOG")" -eq 2 ]
+}
+
+@test "PR-intent gate: never fires on a status=blocked run reached via the synthetic backstop" {
+  # Deliberately no FAKE_DRIVER_COMMIT: with nothing on BRANCH to preserve,
+  # the backstop's own commit-count check (cmd/launcher/internal/outcomebackstop
+  # Run(): count == 0 -> note gets "; no work to preserve", status stays
+  # "blocked") lands on status=blocked mechanically from git state, not from
+  # a driver-supplied field -- mirroring the non-backstop
+  # FAKE_DRIVER_OUTCOME_STATUS=blocked scoping test above without that knob.
+  export RUN_NONCE="deadbeefcafe1234"
+  unset BOX_WRITE_ENABLED
+  unset CODE_FORGE            # default github
+  export OUTBOX_DIR="$BATS_TEST_TMPDIR/outbox"
+  export FAKE_DRIVER_NO_OUTCOME=1
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+
+  # Exactly two Driver invocations: never a third for the PR-intent nudge,
+  # which only ever fires on status=ready.
+  [ "$(grep -c '^driver invoked for issue' "$DRIVER_LOG")" -eq 2 ]
+
+  # The backstop path was actually exercised and landed on status=blocked --
+  # proving this test reached the blocked-via-backstop path, not some other
+  # skip reason.
+  grep -q '^SPINDRIFT_OUTCOME .*status=blocked' <<<"$output"
 }

@@ -340,10 +340,12 @@ EOF
   # This exact fixture -- read-only + github + backstop-derived status=ready
   # -- is also the PR-intent nudge gate's own trigger condition (issue
   # #2448): since FAKE_DRIVER_NO_OUTCOME never supplies a PR-intent marker
-  # either, that nudge fires, is exhausted, and its own "resumed pass did not
-  # repeat the original line" fallback reprints the synthetic line -- so two
-  # occurrences, not one, both carrying the same backstop verdict.
-  [ "$(grep -c '^SPINDRIFT_OUTCOME ' <<<"$output")" -eq 2 ]
+  # either, that nudge fires and is exhausted. But the resumed pass's result
+  # text under FAKE_DRIVER_NO_OUTCOME carries no SPINDRIFT_OUTCOME token at
+  # all (not even a garbled one), so nothing shadowed the original line in
+  # the container log -- the gate's own fallback must not reprint it, and
+  # the line still appears exactly once.
+  [ "$(grep -c '^SPINDRIFT_OUTCOME ' <<<"$output")" -eq 1 ]
   grep -q '^SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=.*relayed via outbox bundle' <<<"$output"
   ! grep -q 'push failed' <<<"$output"
   # The branch was relayed through the outbox bundle, never force-pushed.
