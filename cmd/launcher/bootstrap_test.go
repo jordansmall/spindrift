@@ -81,23 +81,60 @@ func TestSeedAccumulationRepoIfLocal_NonLocal_NoOp(t *testing.T) {
 	}
 }
 
-// TestSeedAccumulationRepoIfLocal_ResearchKind_NoOp verifies
-// seedAccumulationRepoIfLocal skips seeding for the research dispatch kind
-// even under CODE_FORGE=local: research never mounts /repo or lands code
-// (it posts one verdict comment and stops), so seeding would be pure waste
-// and a needless new failure surface (a missing baseBranch in pwd) for a
-// run that never uses the repo it seeded. Passing a nonexistent pwd would
-// fail SeedAccumulationRepo's git push if it were invoked, so a nil error
-// proves the no-op.
-func TestSeedAccumulationRepoIfLocal_ResearchKind_NoOp(t *testing.T) {
+// TestSeedAccumulationRepoIfLocal_ResearchKind_SeedsFromPwd verifies
+// seedAccumulationRepoIfLocal now seeds for the research dispatch kind under
+// CODE_FORGE=local, as long as c.selfContained is false (issue #2439):
+// non-self-contained research still clones and explores the repo in-box
+// (agent/entrypoint.sh's clone_repo() under CODE_FORGE=local), so it needs
+// /repo mounted just like work does. Only the no-repo selfContained
+// sub-mode stays a no-op (see
+// TestSeedAccumulationRepoIfLocal_ResearchSelfContained_NoOp).
+func TestSeedAccumulationRepoIfLocal_ResearchKind_SeedsFromPwd(t *testing.T) {
+	checkout := t.TempDir()
+	mustRunGit(t, checkout, "init", "-b", "main")
+	mustRunGit(t, checkout, "config", "user.email", "test@example.com")
+	mustRunGit(t, checkout, "config", "user.name", "Test")
+	if err := os.WriteFile(filepath.Join(checkout, "base.txt"), []byte("base"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mustRunGit(t, checkout, "add", "base.txt")
+	mustRunGit(t, checkout, "commit", "-m", "base")
+
+	repoPath := filepath.Join(t.TempDir(), "accum.git")
 	c := baseConfig()
 	c.codeForge = "local"
 	c.dispatchKind = dispatchKindResearch
+	c.codeForgeAccumulationRepoDir = repoPath
+	c.baseBranch = "main"
+
+	if err := seedAccumulationRepoIfLocal(c, checkout); err != nil {
+		t.Fatalf("seedAccumulationRepoIfLocal: %v", err)
+	}
+
+	if _, err := os.Stat(repoPath); err != nil {
+		t.Fatalf("Accumulation repo not created: %v", err)
+	}
+}
+
+// TestSeedAccumulationRepoIfLocal_ResearchSelfContained_NoOp verifies
+// seedAccumulationRepoIfLocal skips seeding for the research dispatch kind's
+// self-contained sub-mode (c.selfContained = true) even under
+// CODE_FORGE=local: self-contained research never mounts /repo or clones
+// anything (it posts one verdict comment and stops), so seeding would be
+// pure waste and a needless new failure surface (a missing baseBranch in
+// pwd) for a run that never uses the repo it seeded. Passing a nonexistent
+// pwd would fail SeedAccumulationRepo's git push if it were invoked, so a
+// nil error proves the no-op.
+func TestSeedAccumulationRepoIfLocal_ResearchSelfContained_NoOp(t *testing.T) {
+	c := baseConfig()
+	c.codeForge = "local"
+	c.dispatchKind = dispatchKindResearch
+	c.selfContained = true
 	c.codeForgeAccumulationRepoDir = filepath.Join(t.TempDir(), "accum.git")
 	c.baseBranch = "main"
 
 	if err := seedAccumulationRepoIfLocal(c, "/nonexistent/pwd"); err != nil {
-		t.Errorf("seedAccumulationRepoIfLocal(research kind) = %v, want nil (no-op)", err)
+		t.Errorf("seedAccumulationRepoIfLocal(research kind, selfContained) = %v, want nil (no-op)", err)
 	}
 }
 
