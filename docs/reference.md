@@ -239,7 +239,12 @@ concrete `roster` user: it sets `roster = rosterLib.defaultRoster { models =
 "claude-haiku-4-5-20251001"; worker = "claude-sonnet-5"; }; }`, pinning all
 four entries' models (issue #2428 provisioned the scout and worker; without a
 model, every Driver drops those entries from the rendered agent config, so a
-dogfood Box had only the filer and reviewer before) — and inherits
+dogfood Box had only the filer and reviewer before). Provisioning the worker
+also flips the WORKER_PROVISIONED gate (issue #2056) on for every dogfood
+Box: IMPLEMENT now runs as a coordinator delegating each slice to the
+worker instead of a single implementor editing directly, a run-cost and
+behaviour change alongside the pin itself, not just added capability sitting
+unused — and inherits
 `defaultRoster`'s built-in scout=medium/reviewer=high/filer=medium/worker=high
 efforts unchanged (issue #2386). It separately sets `defaults.reviewEffort =
 "high"` so the orchestrator's own code-owned review pass (issue #2387) runs

@@ -147,7 +147,11 @@ in
     # The dogfood harness also provisions the scout and worker (issue #2428):
     # without a model, every Driver drops those entries from the rendered
     # agent config, so the baked template must carry both at their pinned
-    # models.
+    # models. The worker_entry check below is also the proof that
+    # entrypoint.sh's WORKER_PROVISIONED gate (issue #2056) fires for every
+    # dogfood Box from this pin on: that gate is exactly "worker" key present
+    # in this same baked template, which is what switches IMPLEMENT from
+    # single-implementor to coordinator-delegates-each-slice.
     scout_entry=$(grep -oE '"scout":\{[^}]*\}' <<<"$dogfood_line" || true)
     [ -n "$scout_entry" ] \
       || { echo "dogfood harness missing scout entry in baked template" >&2; exit 1; }

@@ -43,8 +43,15 @@ in
   # inherit the coordinator's own model. The `scout` and `worker` entries
   # (issue #2428) provision those subagents at all: without a model, every
   # Driver drops them from the rendered agent config and neither is ever
-  # provisioned. `defaultRoster` also ships this roster's fixed per-agent
-  # efforts (issue #2386).
+  # provisioned. Provisioning the worker is not merely passive availability:
+  # entrypoint.sh's WORKER_PROVISIONED gate (issue #2056,
+  # lib/fragments.nix's coordinator.md row) fires whenever the baked agent
+  # config carries a "worker" key at all, regardless of model, so this pin
+  # also switches every dogfood Box's IMPLEMENT phase from single-implementor
+  # to coordinator-delegates-each-slice, automatically -- a run-cost and
+  # behaviour change on every dogfood Box from here on, not something a
+  # future prompt change opts into later. `defaultRoster` also ships this
+  # roster's fixed per-agent efforts (issue #2386).
   roster = rosterLib.defaultRoster {
     models = {
       scout = "claude-haiku-4-5-20251001";
