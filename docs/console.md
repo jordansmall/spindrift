@@ -37,7 +37,7 @@ list) toggles a help overlay listing every binding across every view.
 | `R` | refresh the backlog |
 | `u` | unpick the highlighted queued pick |
 | `X` | terminate the highlighted live Dispatch (confirm `y`/`N`, `q`/`ctrl+c` decline and quit) |
-| `A` | adopt the highlighted orphan-flagged Backlog row (a running sandbox this session didn't launch); reports why and changes nothing without a non-draft open PR |
+| `A` | adopt the highlighted orphan-flagged Backlog row (a running sandbox this session didn't launch); reports why and changes nothing without an open PR |
 | `+`/`-` | raise/lower the live parallelism cap |
 | `b` | rebuild the stale image in-session |
 | `o` | open the rebuild output pane (once a rebuild has run); scrolls with the same keys as the sidebar below |
@@ -248,6 +248,6 @@ and flags its Backlog row as an orphan; nothing is asked at startup, and the
 Console never blocks on it. `A` on a highlighted orphan-flagged row adopts it
 through the existing recover path (the same adoption `spindrift recover <n>`
 and a re-pick after Terminate both use), reporting why and changing nothing
-if the orphan has no non-draft open PR to adopt. `enter` on an orphan row
+if the orphan has no open PR to adopt. `enter` on an orphan row
 opens its live-tail sidebar instead of the ticket detail modal, so an
 ungraceful end is a speed bump, not a cleanup chore.

@@ -4,7 +4,7 @@ package console
 
 // OrphanRecoveryMsg carries the explicit adopt gesture's failure into the
 // pure core — RecoverFn failing to adopt an orphan-flagged issue (no open
-// PR, a draft PR, or a resolve error), leaving the operator with no visible
+// PR, or a resolve error), leaving the operator with no visible
 // reason otherwise (issue #1218). Formerly startup's own signal too before
 // issue #1619 retired startup auto-adopt; adoptOrphanCmd is the sole
 // producer now. Err is "" only in the zero Model, never a value this
