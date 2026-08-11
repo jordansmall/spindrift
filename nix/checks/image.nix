@@ -144,6 +144,19 @@ in
     grep -q 'claude-opus-5' <<<"$reviewer_entry" \
       || { echo "dogfood harness reviewer entry missing the configured model" >&2; exit 1; }
 
+    # A Consumer that sets no model knobs and passes no roster (batsHarness:
+    # no `defaults`, no `roster`) must still get a reviewer on the schema
+    # default (issue #2433) via the roster==null fallback
+    # (lib/mkHarness.nix:317-327) -- reviewModel's default moved to
+    # claude-opus-5 so every Consumer's reviewer runs on the strongest
+    # available model without configuring anything.
+    default_line=$(grep '^AGENTS_JSON_TEMPLATE=' ${batsHarness.agentFiles}/agent/entrypoint.sh)
+    default_reviewer_entry=$(grep -oE '"reviewer":\{[^}]*\}' <<<"$default_line" || true)
+    [ -n "$default_reviewer_entry" ] \
+      || { echo "no-override harness missing reviewer entry in baked template" >&2; exit 1; }
+    grep -q 'claude-opus-5' <<<"$default_reviewer_entry" \
+      || { echo "no-override harness reviewer entry missing the default claude-opus-5 model" >&2; exit 1; }
+
     touch $out
   '';
 
