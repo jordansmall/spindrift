@@ -38,9 +38,9 @@ setup_entrypoint_env() {
   # backstop's switch, so this value becomes irrelevant there, same as
   # BOX_WRITE_ENABLED already staying set-but-irrelevant in that test today).
   export BOX_OUTBOX_RELAY_CAPABLE=1
-  # Pinned to a value distinct from the schema default (issue #2055: now
-  # claude-opus-4-8) so the MODEL-flag assertions below stay stable
-  # regardless of what the schema defaults to.
+  # Pinned to a value distinct from the schema default (issue #2055; the
+  # schema default has since moved on to claude-sonnet-5) so the MODEL-flag
+  # assertions below stay stable regardless of what the schema defaults to.
   export MODEL="claude-test-model"
   # Nix-baked from the roster (lib/mkHarness.nix): maps each --agents JSON
   # entry name to its prompt file under PROMPTS_DIR, so entrypoint.sh's
