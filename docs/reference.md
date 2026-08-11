@@ -245,16 +245,20 @@ via `roster` is a `mkHarness`/image-time decision and requires a rebuild.
 
 spindrift's own dogfood Consumer config (`nix/dogfood-defaults.nix`) is a
 concrete `roster` user: it sets `roster = rosterLib.defaultRoster { models =
-{ reviewer = "claude-opus-5"; filer = "claude-haiku-4-5-20251001"; }; }`,
-pinning the reviewer's and filer's models — the remaining two entries
-are unmentioned and so inherit their `lib/env-schema.nix` defaults
-(issue #2434) instead — and inherits `defaultRoster`'s built-in
-scout=medium/reviewer=high/filer=medium/worker=high efforts unchanged
-(issue #2386). It separately sets `defaults.reviewEffort = "high"` so the
-orchestrator's own code-owned review pass (issue #2387) runs at the same
-effort as the roster's `reviewer` entry, on the same model (issue #2427):
-the orchestrator captures the reviewer entry's model into the handoff before
-deleting that entry in favour of the code-owned pass.
+{ filer = "claude-haiku-4-5-20251001"; }; }`, naming only the Filer. Filer
+stays a local pin because it's opt-in by design (`filerModel`'s schema
+default is empty) and the dogfood genuinely depends on it for #393's
+`agent-review-finding` filing. Scout, reviewer, and worker are all
+unmentioned and so inherit their `lib/env-schema.nix` defaults (issue
+#2434) instead: `claude-haiku-4-5-20251001`, `claude-opus-5` (issue #2433),
+and `claude-sonnet-5` respectively. The dogfood still inherits
+`defaultRoster`'s built-in scout=medium/reviewer=high/filer=medium/worker=high
+efforts unchanged (issue #2386), and separately sets
+`defaults.reviewEffort = "high"` so the orchestrator's own code-owned review
+pass (issue #2387) runs at the same effort as the roster's `reviewer` entry,
+on the same model (issue #2427): the orchestrator captures the reviewer
+entry's model into the handoff before deleting that entry in favour of the
+code-owned pass.
 
 The **prompt is baked into the image**: changing `prompts/issue-prompt.md`
 requires an image rebuild (`spindrift build`). Point `SPINDRIFT_PROMPT_DIR`
