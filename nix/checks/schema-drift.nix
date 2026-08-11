@@ -999,6 +999,30 @@ in
     assert (assertNixPathsOk allNixPaths) == allNixPaths;
     pkgs.runCommand "flake-nixpath-exhaustive-disjoint" { } "touch $out";
 
+  # docs/reference.md's Subagent roster section states roster's flake path
+  # as literal prose (`perSystem.spindrift.agents.models.roster`); this pins
+  # that string to lib/structural-paths.nix's actual `roster` entry instead
+  # of letting the two drift silently — a rename of any of roster's path
+  # segments in the registry fails this check instead of leaving the doc
+  # wrong (issue #2436). Isolates the "#### Subagent roster" section before
+  # running the regex-based `hasInfix` (builtins.match ".*x.*") — running
+  # that over the whole ~190KB doc blows the evaluator's stack.
+  roster-doc-flake-path =
+    let
+      inherit (pkgs.lib) assertMsg concatStringsSep hasInfix;
+      wantPath = "perSystem.spindrift.${concatStringsSep "." structuralPaths.roster}";
+      doc = builtins.readFile ../../docs/reference.md;
+      afterHeading = builtins.split "\n#### Subagent roster\n" doc;
+      rosterSection =
+        if builtins.length afterHeading < 3 then
+          throw "docs/reference.md: missing the \"#### Subagent roster\" heading"
+        else
+          builtins.elemAt (builtins.split "\n#### " (builtins.elemAt afterHeading 2)) 0;
+    in
+    assert assertMsg (hasInfix wantPath rosterSection)
+      "docs/reference.md: Subagent roster section must state roster's flake path as `${wantPath}` (derived from lib/structural-paths.nix's roster entry) — it has drifted from the registry, update the doc (issue #2436)";
+    pkgs.runCommand "roster-doc-flake-path" { } "touch $out";
+
   # Regression guard (issue #2184, ADR 0037): the disjointness assertion must
   # cover the structural domain-tree paths too, not just the flakeOption
   # nixPaths — a future structural-vs-flakeOption prefix collision otherwise
