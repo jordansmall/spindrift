@@ -800,6 +800,9 @@ in
     assert assertMsg (rosterByName ? filer && rosterByName.filer.model == "claude-haiku-4-5-20251001")
       "dogfood roster's filer entry must keep the tuned Filer model claude-haiku-4-5-20251001 (issue #2388, was #393)";
     assert assertMsg (
+      rosterByName ? reviewer && rosterByName.reviewer.model == "claude-opus-5"
+    ) "dogfood roster's reviewer entry must run the review pass on claude-opus-5 (issue #2427)";
+    assert assertMsg (
       effortMismatches == { }
     ) "dogfood roster per-agent effort mismatch(es): ${builtins.toJSON effortMismatches}";
     pkgs.runCommand "dogfood-roster-and-review-effort" { } "touch $out";
