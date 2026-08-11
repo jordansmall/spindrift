@@ -201,8 +201,10 @@ in
       "defaultRoster must ship the fixed default effort per agent (scout=medium, reviewer=high, filer=medium, worker=high), mismatched: ${builtins.toJSON mismatches}";
     pkgs.runCommand "roster-default-roster-ships-effort-defaults" { } "touch $out";
 
-  # Issue #2426: defaultRoster's models attrset sets a named agent's model
-  # and leaves every unmentioned agent at its existing empty-model default.
+  # Issue #2426: defaultRoster's models attrset sets a named agent's model.
+  # Issue #2434: every unmentioned agent instead inherits its
+  # lib/env-schema.nix default (filer's own schema default stays empty, so
+  # naming a different agent in `models` doesn't accidentally provision it).
   roster-default-roster-models-by-name =
     let
       roster = rosterLib.defaultRoster {
@@ -211,15 +213,16 @@ in
         };
       };
       byName = name: builtins.head (builtins.filter (e: e.name == name) roster);
+      schema = import ../../lib/env-schema.nix;
     in
     assert assertMsg ((byName "filer").model == "claude-haiku-4-5-20251001")
       "defaultRoster models.filer must set the filer entry's model, got: ${builtins.toJSON (byName "filer").model}";
-    assert assertMsg ((byName "scout").model == "")
-      "defaultRoster must leave an unmentioned name's model empty, got: ${builtins.toJSON (byName "scout").model}";
-    assert assertMsg ((byName "reviewer").model == "")
-      "defaultRoster must leave an unmentioned name's model empty, got: ${builtins.toJSON (byName "reviewer").model}";
-    assert assertMsg ((byName "worker").model == "")
-      "defaultRoster must leave an unmentioned name's model empty, got: ${builtins.toJSON (byName "worker").model}";
+    assert assertMsg ((byName "scout").model == schema.scoutModel.default)
+      "defaultRoster must inherit an unmentioned name's schema default, got: ${builtins.toJSON (byName "scout").model}";
+    assert assertMsg ((byName "reviewer").model == schema.reviewModel.default)
+      "defaultRoster must inherit an unmentioned name's schema default, got: ${builtins.toJSON (byName "reviewer").model}";
+    assert assertMsg ((byName "worker").model == schema.workerModel.default)
+      "defaultRoster must inherit an unmentioned name's schema default, got: ${builtins.toJSON (byName "worker").model}";
     pkgs.runCommand "roster-default-roster-models-by-name" { } "touch $out";
 
   roster-default-roster-rejects-unknown-model-name =
@@ -256,4 +259,73 @@ in
     assert assertMsg ((byName "filer").model == "models-model")
       "defaultRoster models.filer must win over a same-named legacy filerModel, got: ${builtins.toJSON (byName "filer").model}";
     pkgs.runCommand "roster-default-roster-models-overrides-legacy" { } "touch $out";
+
+  # Issue #2434: an explicitly supplied legacy positional argument still
+  # wins over the schema default -- the sentinel-`null` default on
+  # scoutModel/reviewModel/filerModel/workerModel only defers to the schema
+  # when the caller truly supplied nothing, never when it supplied a value.
+  roster-default-roster-legacy-wins-over-schema-default =
+    let
+      roster = rosterLib.defaultRoster { scoutModel = "explicit-legacy"; };
+      byName = name: builtins.head (builtins.filter (e: e.name == name) roster);
+    in
+    assert assertMsg ((byName "scout").model == "explicit-legacy")
+      "defaultRoster must let an explicitly supplied legacy scoutModel win over the schema default, got: ${builtins.toJSON (byName "scout").model}";
+    pkgs.runCommand "roster-default-roster-legacy-wins-over-schema-default" { } "touch $out";
+
+  # Issue #2434 (was #392): an explicit empty string on a legacy positional
+  # knob is itself a supplied value, not "not supplied" -- it must keep
+  # opting the entry out, the same rung mkHarness.nix's deprecated
+  # settings.*Model resolution relies on, even though the name is now
+  # eligible to inherit a non-empty schema default.
+  roster-default-roster-legacy-explicit-empty-opts-out =
+    let
+      roster = rosterLib.defaultRoster { scoutModel = ""; };
+      byName = name: builtins.head (builtins.filter (e: e.name == name) roster);
+    in
+    assert assertMsg ((byName "scout").model == "")
+      "defaultRoster must let an explicit empty legacy scoutModel opt-out win over the schema default, got: ${builtins.toJSON (byName "scout").model}";
+    pkgs.runCommand "roster-default-roster-legacy-explicit-empty-opts-out" { } "touch $out";
+
+  # Issue #2434: models.<name> = "" is the explicit opt-out (#392) and must
+  # keep dropping that entry's model even though the name is now eligible
+  # to inherit a non-empty schema default.
+  roster-default-roster-explicit-empty-opts-out =
+    let
+      roster = rosterLib.defaultRoster {
+        models = {
+          scout = "";
+        };
+      };
+      byName = name: builtins.head (builtins.filter (e: e.name == name) roster);
+    in
+    assert assertMsg ((byName "scout").model == "")
+      "defaultRoster must let an explicit models.scout = \"\" opt-out win over the schema default, got: ${builtins.toJSON (byName "scout").model}";
+    pkgs.runCommand "roster-default-roster-explicit-empty-opts-out" { } "touch $out";
+
+  # Issue #2434: an agent unmentioned in `models` and with no legacy
+  # positional argument supplied inherits its model from
+  # lib/env-schema.nix's default -- the same default mkHarness's no-roster
+  # fallback resolves through `mergedDefaults`.
+  roster-default-roster-inherits-schema-default =
+    let
+      roster = rosterLib.defaultRoster { };
+      byName = name: builtins.head (builtins.filter (e: e.name == name) roster);
+      schema = import ../../lib/env-schema.nix;
+      expected = {
+        scout = schema.scoutModel.default;
+        reviewer = schema.reviewModel.default;
+        filer = schema.filerModel.default;
+        worker = schema.workerModel.default;
+      };
+      mismatches = builtins.filter (n: (byName n).model != expected.${n}) [
+        "scout"
+        "reviewer"
+        "filer"
+        "worker"
+      ];
+    in
+    assert assertMsg (mismatches == [ ])
+      "defaultRoster {} must inherit each unmentioned agent's model from lib/env-schema.nix's default, mismatched: ${builtins.toJSON mismatches}";
+    pkgs.runCommand "roster-default-roster-inherits-schema-default" { } "touch $out";
 }
