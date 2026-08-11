@@ -134,6 +134,16 @@ in
     grep -q 'claude-haiku-4-5-20251001' <<<"$filer_entry" \
       || { echo "dogfood harness filer entry missing the configured model" >&2; exit 1; }
 
+    # The dogfood harness also pins the reviewer's model (issue #2427): the
+    # orchestrator's code-owned review pass runs on the strongest available
+    # model instead of inheriting the coordinator's, so the baked template
+    # must carry a reviewer entry at that model too.
+    reviewer_entry=$(grep -oE '"reviewer":\{[^}]*\}' <<<"$dogfood_line" || true)
+    [ -n "$reviewer_entry" ] \
+      || { echo "dogfood harness missing reviewer entry in baked template" >&2; exit 1; }
+    grep -q 'claude-opus-5' <<<"$reviewer_entry" \
+      || { echo "dogfood harness reviewer entry missing the configured model" >&2; exit 1; }
+
     touch $out
   '';
 
