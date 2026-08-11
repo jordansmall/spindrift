@@ -32,19 +32,18 @@ in
     p.mandoc
   ];
   # Source spindrift's own dogfood agent models/efforts from the explicit
-  # default roster (issue #2388) instead of the legacy per-agent model knobs.
-  # The `filerModel` arg below carries forward the Filer's (#393, landed
-  # 2026-07-09) tuned model onto the roster's `filer` entry, so non-blocking
-  # review findings still become tracked `agent-review-finding` issues
-  # instead of staying stuck in PR bodies; the other three legacy knobs are
-  # left blank since dogfood doesn't otherwise pin scout/review/worker
-  # models. `defaultRoster` also ships this roster's fixed per-agent efforts
-  # (issue #2386).
+  # default roster (issue #2388), configured by roster entry name (issue
+  # #2426) rather than the legacy per-agent model knobs. The `filer` entry
+  # below carries forward the Filer's (#393, landed 2026-07-09) tuned model,
+  # so non-blocking review findings still become tracked
+  # `agent-review-finding` issues instead of staying stuck in PR bodies;
+  # scout/reviewer/worker are left unmentioned since dogfood doesn't
+  # otherwise pin their models. `defaultRoster` also ships this roster's
+  # fixed per-agent efforts (issue #2386).
   roster = rosterLib.defaultRoster {
-    scoutModel = "";
-    reviewModel = "";
-    filerModel = "claude-haiku-4-5-20251001";
-    workerModel = "";
+    models = {
+      filer = "claude-haiku-4-5-20251001";
+    };
   };
   defaults = {
     mergeMode = "immediate";
