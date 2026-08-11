@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -35,13 +36,10 @@ func mustRunGit(t *testing.T, dir string, args ...string) {
 	}
 }
 
-// TestSeedAccumulationRepoIfLocal_Local_SeedsFromPwd verifies
-// seedAccumulationRepoIfLocal wires local.SeedAccumulationRepo (ADR 0033)
-// against config's already-resolved codeForgeAccumulationRepoDir and
-// baseBranch, seeding the bare Accumulation repo from pwd's checkout (issue
-// #1726: seeding must happen before any Box runs, since a defaulted-but-
-// nonexistent path makes the /repo mount silently skip).
-func TestSeedAccumulationRepoIfLocal_Local_SeedsFromPwd(t *testing.T) {
+// mustSeedableCheckout creates a throwaway git checkout with a single commit
+// on "main", suitable as the pwd argument to seedAccumulationRepoIfLocal.
+func mustSeedableCheckout(t *testing.T) string {
+	t.Helper()
 	checkout := t.TempDir()
 	mustRunGit(t, checkout, "init", "-b", "main")
 	mustRunGit(t, checkout, "config", "user.email", "test@example.com")
@@ -51,6 +49,39 @@ func TestSeedAccumulationRepoIfLocal_Local_SeedsFromPwd(t *testing.T) {
 	}
 	mustRunGit(t, checkout, "add", "base.txt")
 	mustRunGit(t, checkout, "commit", "-m", "base")
+	return checkout
+}
+
+// assertClonableAccumulationRepo verifies repoPath is not just present on
+// disk but actually clonable: HEAD resolves to a real ref (rather than the
+// dangling one git init --bare would leave behind, see SeedAccumulationRepo's
+// symbolic-ref step) and that ref has a commit, which is what the "cloning
+// and exploring" acceptance criterion turns on.
+func assertClonableAccumulationRepo(t *testing.T, repoPath, baseBranch string) {
+	t.Helper()
+	if _, err := os.Stat(repoPath); err != nil {
+		t.Fatalf("Accumulation repo not created: %v", err)
+	}
+	if err := runGit(repoPath, "rev-parse", "--verify", "refs/heads/"+baseBranch); err != nil {
+		t.Errorf("Accumulation repo has no %s ref: %v", baseBranch, err)
+	}
+	head, err := exec.Command("git", "-C", repoPath, "symbolic-ref", "HEAD").Output()
+	if err != nil {
+		t.Fatalf("symbolic-ref HEAD: %v", err)
+	}
+	if got := strings.TrimSpace(string(head)); got != "refs/heads/"+baseBranch {
+		t.Errorf("Accumulation repo HEAD = %s, want refs/heads/%s", got, baseBranch)
+	}
+}
+
+// TestSeedAccumulationRepoIfLocal_Local_SeedsFromPwd verifies
+// seedAccumulationRepoIfLocal wires local.SeedAccumulationRepo (ADR 0033)
+// against config's already-resolved codeForgeAccumulationRepoDir and
+// baseBranch, seeding the bare Accumulation repo from pwd's checkout (issue
+// #1726: seeding must happen before any Box runs, since a defaulted-but-
+// nonexistent path makes the /repo mount silently skip).
+func TestSeedAccumulationRepoIfLocal_Local_SeedsFromPwd(t *testing.T) {
+	checkout := mustSeedableCheckout(t)
 
 	repoPath := filepath.Join(t.TempDir(), "accum.git")
 	c := baseConfig()
@@ -62,9 +93,7 @@ func TestSeedAccumulationRepoIfLocal_Local_SeedsFromPwd(t *testing.T) {
 		t.Fatalf("seedAccumulationRepoIfLocal: %v", err)
 	}
 
-	if _, err := os.Stat(repoPath); err != nil {
-		t.Fatalf("Accumulation repo not created: %v", err)
-	}
+	assertClonableAccumulationRepo(t, repoPath, "main")
 }
 
 // TestSeedAccumulationRepoIfLocal_NonLocal_NoOp verifies
@@ -90,15 +119,7 @@ func TestSeedAccumulationRepoIfLocal_NonLocal_NoOp(t *testing.T) {
 // sub-mode stays a no-op (see
 // TestSeedAccumulationRepoIfLocal_ResearchSelfContained_NoOp).
 func TestSeedAccumulationRepoIfLocal_ResearchKind_SeedsFromPwd(t *testing.T) {
-	checkout := t.TempDir()
-	mustRunGit(t, checkout, "init", "-b", "main")
-	mustRunGit(t, checkout, "config", "user.email", "test@example.com")
-	mustRunGit(t, checkout, "config", "user.name", "Test")
-	if err := os.WriteFile(filepath.Join(checkout, "base.txt"), []byte("base"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	mustRunGit(t, checkout, "add", "base.txt")
-	mustRunGit(t, checkout, "commit", "-m", "base")
+	checkout := mustSeedableCheckout(t)
 
 	repoPath := filepath.Join(t.TempDir(), "accum.git")
 	c := baseConfig()
@@ -111,9 +132,7 @@ func TestSeedAccumulationRepoIfLocal_ResearchKind_SeedsFromPwd(t *testing.T) {
 		t.Fatalf("seedAccumulationRepoIfLocal: %v", err)
 	}
 
-	if _, err := os.Stat(repoPath); err != nil {
-		t.Fatalf("Accumulation repo not created: %v", err)
-	}
+	assertClonableAccumulationRepo(t, repoPath, "main")
 }
 
 // TestSeedAccumulationRepoIfLocal_ResearchSelfContained_NoOp verifies
