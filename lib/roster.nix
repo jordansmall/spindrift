@@ -5,10 +5,16 @@
 # four hardcoded scout/reviewer/filer/worker model-knob args each Driver
 # template used to take directly. `defaultRoster` reproduces today's four
 # agents byte-for-byte (same descriptions/tools/promptFile names as the
-# templates previously baked in), parameterized only by the four legacy
-# model knobs so lib/mkHarness.nix can keep exposing them
-# (scoutModel/reviewModel/filerModel/workerModel, deprecated but still
-# supported) while resolving them into a roster under the hood. `prompt` is
+# templates previously baked in). Its primary, roster-native surface is the
+# `models` attrset (issue #2426), keyed by roster entry name (scout/
+# reviewer/filer/worker) -- a name absent from `models` keeps today's empty
+# model. An unknown name in `models` throws at eval time, the same way
+# `normalizeRoster` rejects an invalid entry name. The four legacy
+# positional knobs (scoutModel/reviewModel/filerModel/workerModel) still
+# work as a lower-precedence fallback per name, since lib/mkHarness.nix
+# resolves its deprecated `settings.*Model` knobs through them; `models`
+# wins over the matching legacy knob when both are set for the same name.
+# `prompt` is
 # always `null` here -- entrypoint.sh injects each agent's rendered prompt at
 # runtime from `promptFile`, never at eval time (see agent/entrypoint.sh's
 # generic prompt-injection loop). `effort`, like `model`, is an optional
@@ -60,15 +66,29 @@
 
   defaultRoster =
     {
-      scoutModel,
-      reviewModel,
-      filerModel,
-      workerModel,
+      scoutModel ? "",
+      reviewModel ? "",
+      filerModel ? "",
+      workerModel ? "",
+      models ? { },
     }:
+    let
+      legacyModels = {
+        scout = scoutModel;
+        reviewer = reviewModel;
+        filer = filerModel;
+        worker = workerModel;
+      };
+      unknownNames = builtins.filter (n: !(legacyModels ? ${n})) (builtins.attrNames models);
+      modelFor = name: models.${name} or legacyModels.${name};
+    in
+    if unknownNames != [ ] then
+      throw "defaultRoster: models names unknown agent(s) ${builtins.toJSON unknownNames} -- expected one of ${builtins.toJSON (builtins.attrNames legacyModels)}"
+    else
     [
       {
         name = "scout";
-        model = scoutModel;
+        model = modelFor "scout";
         effort = "medium";
         mode = "subagent";
         description = "Map relevant files, seams, and tests; return a structured brief";
@@ -85,7 +105,7 @@
       }
       {
         name = "reviewer";
-        model = reviewModel;
+        model = modelFor "reviewer";
         effort = "high";
         mode = "subagent";
         description = "Review the branch diff for spec compliance and coding standards";
@@ -100,7 +120,7 @@
       }
       {
         name = "filer";
-        model = filerModel;
+        model = modelFor "filer";
         effort = "medium";
         mode = "subagent";
         description = "File issues from a review's non-blocking findings, best-effort";
@@ -114,7 +134,7 @@
       }
       {
         name = "worker";
-        model = workerModel;
+        model = modelFor "worker";
         effort = "high";
         mode = "subagent";
         description = "Implement a scoped slice of work delegated to it, with full implement-capable tools";
