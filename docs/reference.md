@@ -235,13 +235,15 @@ via `roster` is a `mkHarness`/image-time decision and requires a rebuild.
 
 spindrift's own dogfood Consumer config (`nix/dogfood-defaults.nix`) is a
 concrete `roster` user: it sets `roster = rosterLib.defaultRoster { models =
-{ filer = "claude-haiku-4-5-20251001"; }; }`, pinning only the filer's model
-— the other three entries carry no `model` and so inherit the Driver's
-session default — and inherits `defaultRoster`'s built-in
-scout=medium/reviewer=high/filer=medium/worker=high efforts unchanged (issue
-#2386). It separately sets `defaults.reviewEffort = "high"` so the
-orchestrator's own code-owned review pass (issue #2387) runs at the same
-effort as the roster's `reviewer` entry.
+{ reviewer = "claude-opus-5"; filer = "claude-haiku-4-5-20251001"; }; }`,
+pinning the reviewer's and filer's models — the remaining two entries carry
+no `model` and so inherit the Driver's session default — and inherits
+`defaultRoster`'s built-in scout=medium/reviewer=high/filer=medium/worker=high
+efforts unchanged (issue #2386). It separately sets `defaults.reviewEffort =
+"high"` so the orchestrator's own code-owned review pass (issue #2387) runs
+at the same effort as the roster's `reviewer` entry, on the same model (issue
+#2427): the orchestrator captures the reviewer entry's model into the
+handoff before deleting that entry in favour of the code-owned pass.
 
 The **prompt is baked into the image**: changing `prompts/issue-prompt.md`
 requires an image rebuild (`spindrift build`). Point `SPINDRIFT_PROMPT_DIR`
