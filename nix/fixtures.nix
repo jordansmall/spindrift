@@ -80,8 +80,11 @@ let
     inherit nixpkgs system;
     # Empty subagent tiers keep this a genuine no-model harness so the
     # agents-json-baked check can assert an empty AGENTS_JSON_TEMPLATE.
-    # workerModel must be pinned to empty too — its schema default is
-    # non-empty (claude-sonnet-5, issue #2054), unlike scout/reviewer/filer.
+    # scoutModel, reviewModel, and workerModel must all be pinned to empty
+    # here — their schema defaults are non-empty (claude-haiku-4-5-20251001,
+    # claude-opus-5 issue #2433, and claude-sonnet-5 issue #2054
+    # respectively); filerModel is the only one whose schema default is
+    # already empty.
     defaults = {
       scoutModel = "";
       reviewModel = "";
