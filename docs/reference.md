@@ -1417,7 +1417,7 @@ ready-for-agent ──dispatch──▶ agent-in-progress ───landing settl
   dispatch` never adopts on the strength of the label alone. The unstick is the
   `agent-recover` label (`agent-recover.yml` → `spindrift recover <n>`): an
   operator's explicit assertion that the issue is no longer owned by a live
-  runner, re-running the merge gate on its open non-draft PR.
+  runner, re-running the merge gate on its open PR (draft or not).
 
 Rename any of these with the `inProgressLabel` / `failedLabel` / `completeLabel`
 knobs under `settings.lifecycleLabels` (baked) or the
@@ -2088,12 +2088,12 @@ runner is still working, so automatic adoption would risk force-pushing or
 merging over that runner's in-flight commits (#600). Recovery is always an
 explicit, opt-in operator action:
 
-- **An open non-draft PR already exists** — label the issue `agent-recover`.
-  `agent-recover.yml` claims it and runs `spindrift recover <n>`, re-running the
-  merge gate on that PR.
-- **No PR was opened yet (or only a draft PR)** — there is nothing to adopt.
-  Move it back to `ready-for-agent` to re-dispatch (or to `agent-failed` to park
-  it).
+- **An open PR already exists (draft or not)** — label the issue
+  `agent-recover`. `agent-recover.yml` claims it and runs `spindrift recover
+  <n>`, driving that PR through the same adopt-and-gate path (flipping a
+  draft to ready before re-running the merge gate).
+- **No PR was opened yet** — there is nothing to adopt. Move it back to
+  `ready-for-agent` to re-dispatch (or to `agent-failed` to park it).
 
 ```sh
 gh issue edit <n> --repo owner/repo --add-label ready-for-agent --remove-label agent-in-progress
