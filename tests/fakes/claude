@@ -71,6 +71,16 @@ source "$(dirname "${BASH_SOURCE[0]}")/_driver-common.bash"
 # call after — for exercising the resume-once recovery pass's near-miss-aware
 # prompt (issue #1900), mirroring FAKE_DRIVER_NO_OUTCOME_FIRST_CALL_ONLY above.
 #
+# FAKE_DRIVER_NO_OUTCOME_BEFORE_CALL=<n> simulates the same forgetful driver
+# on every call while call_index < n, then falls through to normal scripted
+# output (including the default PR-intent + outcome line below) from call_index
+# n onward. Unlike FAKE_DRIVER_NO_OUTCOME_FIRST_CALL_ONLY, which only ever
+# covers call_index 0, this lets a test force two consecutive no-outcome calls
+# -- e.g. the initial pass and the SPINDRIFT_OUTCOME required-marker gate's
+# own resume -- so the synthetic backstop fires, and then have a *later*
+# resume call (the PR-intent nudge gate's own resume, issue #2448 AC2) succeed
+# with a genuine PR-intent line instead of also going no-outcome.
+#
 # FAKE_DRIVER_WRAP_OUTCOME selects a markdown-wrapped outcome line (issue
 # #1611's #1582 repro): claude's own stream-json result text sometimes wraps
 # the line in inline backticks, bold markers, or pads it with whitespace, so
@@ -116,7 +126,9 @@ if [ "${FAKE_DRIVER_NEAR_MISS:-0}" = "1" ] || { [ "${FAKE_DRIVER_NEAR_MISS_FIRST
   # landing=/status= fields (issue #1900): parses nowhere, so it is a
   # near-miss the recovery nudge must quote back, not a valid outcome.
   printf '{"type":"result","subtype":"success","is_error":false,"result":"SPINDRIFT_OUTCOME: SUCCESS"}\n'
-elif [ "${FAKE_DRIVER_NO_OUTCOME:-0}" = "1" ] || { [ "${FAKE_DRIVER_NO_OUTCOME_FIRST_CALL_ONLY:-0}" = "1" ] && [ "${call_index:-0}" = "0" ]; }; then
+elif [ "${FAKE_DRIVER_NO_OUTCOME:-0}" = "1" ] \
+  || { [ "${FAKE_DRIVER_NO_OUTCOME_FIRST_CALL_ONLY:-0}" = "1" ] && [ "${call_index:-0}" = "0" ]; } \
+  || { [ -n "${FAKE_DRIVER_NO_OUTCOME_BEFORE_CALL:-}" ] && [ "${call_index:-0}" -lt "$FAKE_DRIVER_NO_OUTCOME_BEFORE_CALL" ]; }; then
   printf '{"type":"result","subtype":"success","is_error":false,"result":"done, but forgot to report back"}\n'
 else
   case "${FAKE_DRIVER_WRAP_OUTCOME:-}" in
@@ -164,8 +176,21 @@ else
       # "ready") -- e.g. exercising the PR-intent required-marker gate row
       # (issue #2045), which must fire only on status=ready and never on a
       # blocked run.
+      #
+      # FAKE_DRIVER_OUTCOME_STATUS_ON_RESUME overrides the status field only
+      # on a resume call (call_index >= 1), leaving call_index 0 at
+      # FAKE_DRIVER_OUTCOME_STATUS/"ready" -- for exercising a resumed pass
+      # that emits its own genuine, differently-shaped verdict (e.g. the
+      # PR-intent nudge gate's own resume deciding mid-nudge that the run is
+      # actually status=blocked, issue #2448), unlike
+      # FAKE_DRIVER_OUTCOME_STATUS, which would also change the first call
+      # and prevent a status=ready-only gate from ever firing.
+      fake_status="${FAKE_DRIVER_OUTCOME_STATUS:-ready}"
+      if [ -n "${FAKE_DRIVER_OUTCOME_STATUS_ON_RESUME:-}" ] && [ "${call_index:-0}" != "0" ]; then
+        fake_status="$FAKE_DRIVER_OUTCOME_STATUS_ON_RESUME"
+      fi
       printf '{"type":"result","subtype":"success","is_error":false,"result":"%sSPINDRIFT_OUTCOME issue=%s landing=https://github.com/%s/pull/1 status=%s note=fake"}\n' \
-        "$pr_intent_line" "${ISSUE_NUMBER:-0}" "${REPO_SLUG:-owner/repo}" "${FAKE_DRIVER_OUTCOME_STATUS:-ready}"
+        "$pr_intent_line" "${ISSUE_NUMBER:-0}" "${REPO_SLUG:-owner/repo}" "$fake_status"
       ;;
   esac
 fi
@@ -175,7 +200,20 @@ fi
 # line: the launcher's own ClassifyTransient/retry path -- not the
 # entrypoint's outcome backstop -- owns this case (issue #593), so the
 # entrypoint must propagate this exit code untouched.
-if [ -n "${FAKE_DRIVER_CRASH_EXIT:-}" ]; then
+#
+# FAKE_DRIVER_CRASH_EXIT_FROM_CALL=<n>, paired with FAKE_DRIVER_CRASH_EXIT
+# for the exit code, narrows that crash to calls at or past call_index >= n
+# only -- earlier calls (call_index < n) fall through to the normal
+# FAKE_DRIVER_NO_OUTCOME/etc. output above untouched instead of crashing.
+# Unlike bare FAKE_DRIVER_CRASH_EXIT alone (unconditional on every call,
+# which would prevent a multi-call sequence like the synthetic backstop --
+# itself needing an initial claude_rc of 0 -- from ever firing at all), this
+# lets a test drive the first N calls into some other scripted shape and
+# only crash a later one, e.g. exercising a PR-intent nudge resume (issue
+# #2448 finding 3) that crashes after an earlier synthetic backstop already
+# ran.
+if [ -n "${FAKE_DRIVER_CRASH_EXIT:-}" ] \
+  && { [ -z "${FAKE_DRIVER_CRASH_EXIT_FROM_CALL:-}" ] || [ "${call_index:-0}" -ge "$FAKE_DRIVER_CRASH_EXIT_FROM_CALL" ]; }; then
   exit "$FAKE_DRIVER_CRASH_EXIT"
 fi
 

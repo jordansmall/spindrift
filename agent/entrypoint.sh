@@ -1025,6 +1025,12 @@ main() {
   local _use_dev_shell _harness_path
   local prompt agents_json _handoff
   local _last_outcome_line _last_near_miss_line _last_pr_intent_line _recovery_attempted
+  # Initialized empty here, unlike the sibling vars above (which are always
+  # assigned unconditionally by run_driver_in_env before any read) -- this
+  # one is only ever assigned inside the backstop `if` block below, and
+  # `set -u` treats a bare `local x` with no value as unbound, not empty
+  # (issue #2448 finding 3).
+  local _outcome_via_backstop=""
   local ORCHESTRATOR
 
   configure_env
@@ -1137,6 +1143,12 @@ Print the required line exactly once as your final message, using this grammar -
     # silently skipping the nudge on every backstopped run.
     _last_outcome_line="$(emit_outcome_backstop)"
     printf '%s\n' "$_last_outcome_line"
+    # Remembered for the PR-intent nudge gate below (issue #2448 finding 3):
+    # this run's ready status was manufactured by the backstop, not reported
+    # by the driver itself, so a later crash in the nudge's own best-effort
+    # resume must not be allowed to undo the terminal verdict already
+    # committed to here.
+    _outcome_via_backstop=1
     # A read-only github Box (BOX_WRITE_ENABLED unset) holds no push token, so
     # emit_outcome_backstop could not push $BRANCH itself. Fall through
     # unconditionally to the harness-owned bundle-out step below, which
@@ -1199,6 +1211,28 @@ Print the required line exactly once as your final message, using this grammar -
       local _original_ready_outcome_line="$_last_outcome_line"
       local pr_intent_recovery_prompt="Your last message ended with a status=ready SPINDRIFT_OUTCOME line but printed no SPINDRIFT_PR_INTENT line, so the launcher has no draft PR to open. Print exactly one SPINDRIFT_PR_INTENT line, grammar: SPINDRIFT_PR_INTENT ${RUN_NONCE:-} <base64-encoded title, a blank line, then the body>, built by joining the PR title, a blank line, and the PR body, then base64-encoding the result into one unbroken token with no embedded newlines or spaces. Then repeat this exact line as your final message: ${_last_outcome_line}"
       required_marker_gate _scan_pr_intent "$pr_intent_recovery_prompt" _require_nonempty
+      # issue #2448 finding 3: this whole block only runs on a status=ready
+      # outcome, which may have been reached genuinely or, since the
+      # #2448 fix above made $_last_outcome_line carry the backstop's own
+      # line, via the synthetic backstop a few lines up. In the backstop
+      # case the "ready" verdict is already the terminal signal issue #593
+      # guarantees a cleanly-exited, no-outcome driver -- required_marker_gate's
+      # own corrective resume just above is a later, best-effort nudge for a
+      # missing PR-intent marker, not a re-run of the work itself. If that
+      # resume's own driver invocation crashes or otherwise exits non-zero,
+      # required_marker_gate has already folded that into $claude_rc, and
+      # letting it reach the unconditional `exit "$claude_rc"` at the bottom
+      # of this function would retroactively hand an already-backstopped,
+      # already-relayed run to the launcher's ClassifyTransient/retry path --
+      # exactly the outcome the backstop's own comment above says exit 0 must
+      # prevent. So: only when this run's ready status came from the
+      # backstop (not a genuine one, which keeps today's existing behavior of
+      # letting a crashed nudge propagate to retry, unchanged) and the nudge
+      # left $claude_rc non-zero, log why and restore the terminal exit 0.
+      if [ -n "$_outcome_via_backstop" ] && [ "$claude_rc" -ne 0 ]; then
+        echo "==> PR-intent nudge resume failed (rc=$claude_rc) after a backstop-declared ready outcome — staying terminal (issue #593, #2448)"
+        claude_rc=0
+      fi
       # The nudge is exhausted: required_marker_gate resumed the session once
       # and the resumed pass still left no usable PR-intent line, so settle's
       # host-mediated draft-PR step will find nothing to relay and report this
@@ -1223,10 +1257,31 @@ Print the required line exactly once as your final message, using this grammar -
       # genuinely finished ready) and the container log the launcher's own
       # last-line-wins outcome.LastInLog scans (so a garbled resumed line
       # never shadows the good one there either).
-      if [ "$_last_outcome_line" != "$_original_ready_outcome_line" ]; then
-        echo "==> resumed pass did not repeat the original SPINDRIFT_OUTCOME line — restoring it"
+      #
+      # Restore only when the resume left NO valid outcome of its own
+      # ($_last_outcome_line empty, issue #2448 finding 2): a non-empty,
+      # differently-shaped $_last_outcome_line is the resumed pass's own
+      # genuine, valid verdict (e.g. it decided mid-nudge that the run is
+      # actually status=blocked) -- that is the pass's own final word and
+      # must be left completely alone, never clobbered back to the earlier
+      # ready line, or a genuinely blocked run would hand off as a
+      # manufactured status=ready.
+      #
+      # Within that empty case, only reprint into the container log when the
+      # resume actually shadowed the original line with a near-miss
+      # (garbled) SPINDRIFT_OUTCOME-shaped line of its own (issue #2448
+      # finding 1): $_last_near_miss_line non-empty. A resume whose result
+      # text carries no SPINDRIFT_OUTCOME token at all (e.g. plain prose)
+      # leaves both vars empty and shadows nothing in the log, so reprinting
+      # then would be pure duplication -- AC5 requires the line stay emitted
+      # exactly once.
+      if [ "$_last_outcome_line" != "$_original_ready_outcome_line" ] \
+        && [ -z "$_last_outcome_line" ]; then
+        if [ -n "$_last_near_miss_line" ]; then
+          echo "==> resumed pass did not repeat the original SPINDRIFT_OUTCOME line — restoring it"
+          printf '%s\n' "$_original_ready_outcome_line"
+        fi
         _last_outcome_line="$_original_ready_outcome_line"
-        printf '%s\n' "$_last_outcome_line"
       fi
     fi
   fi
