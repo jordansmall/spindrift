@@ -260,9 +260,11 @@ EOF
         ;;
       ready)
         # Models the launcher's MarkReady shelling out to `gh pr ready
-        # <prURL>` (no extra flags) to flip a draft PR to ready. MarkDraft's
-        # `--undo` variant is out of scope here (issue #2423).
-        pr_ref="${3:-}"
+        # <prURL>` to flip a draft PR to ready, and MarkDraft's `gh pr ready
+        # --undo <prURL>` variant, which shifts the URL one slot further
+        # right. The URL is always the last argument either way, so parse it
+        # from there rather than a fixed positional index (issue #2423).
+        pr_ref="${*: -1}"
         pr_num="${pr_ref##*/}"
         printf 'pr-draft-%s\tfalse\n' "$pr_num" >>"$GH_STATE"
         ;;
