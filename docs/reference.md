@@ -95,6 +95,7 @@ would.
 | `nixStoreWritable` | shared  | bool                 | `false`            | self-test mode (ADR 0018): make `/nix/store` itself (not its existing contents) agent-writable so in-box `nix flake check` can substitute/build new paths instead of hitting EACCES; new paths live only in the container's ephemeral copy-on-write layer. Not hermetic — the entrypoint prints a loud `==> WARNING`; OCI runners only, the bwrap runner keeps its read-only store bind |
 | `extraClosures` | shared     | `pkgs -> [pkg]`         | `[]`               | extra derivations, as a function of the (Linux) `pkgs` (like `packages`), whose closures are baked into the image and registered in the store DB alongside the runtime closure, so in-box nix sees them as already present (ADR 0018) |
 | `nixBuilderImage` | **`mkHarness` only** | string        | `"docker.io/nixos/nix@sha256:bf1d938835ab96312f098fa6c2e9cab367728e0aad0646ee3e02a787c80d8fb8"` | Nix image `spindrift build` uses as a fallback Linux builder when the host can't realize the image; pinned by digest for supply-chain safety (see [Building on macOS](#building-on-macos)) |
+| `roster`    | shared         | list of subagent-entry attrs | `lib/roster.nix`'s `defaultRoster` | supersedes the four legacy model knobs; see [Subagent roster](#subagent-roster) |
 
 The `settings` submodule bakes run knobs into the Launcher input document the
 `spindrift` CLI passes to the launcher binary via `--input`; an explicit
@@ -170,26 +171,25 @@ as `MODEL` so `MODEL=...` switches models at runtime with no image rebuild.
 same way; each is composed into `--agents` independently by its own knob, so
 emptying one drops only that subagent, never both. `filerModel` is the same
 shape but opt-in — empty by default, so the filer is not provisioned at all
-until a model is set; see [Filer](#filer). `filerModel` is **deprecated** in
-favor of the structural [`roster`](#subagent-roster) option.
+until a model is set; see [Filer](#filer). `scoutModel`/`reviewModel`/
+`filerModel`/`workerModel` are all **deprecated** in favor of the structural
+[`roster`](#subagent-roster) option.
 
 #### Subagent roster
 
 `roster` (issue #264) is a *structural* option: a flakeModule Consumer sets
 it directly at `perSystem.spindrift.agents.models.roster`, declared as a real
 `mkOption` in `lib/flakeModule.nix` at the domain-tree path registered for
-`roster` in `lib/structural-paths.nix` (the `roster-doc-flake-path` check in
-`nix/checks/schema-drift.nix` pins this sentence's path string against that
-registry entry, so a renamed segment fails the check here instead of
-leaving this stale). `mkHarness` also takes a `roster` argument of the same
-name, forwarded from the Consumer's value only when the Consumer sets it
-(`lib/flakeModule.nix:607`) — unlike
+`roster` in `lib/structural-paths.nix` (pinned against that registry by the
+`roster-doc-flake-path` check in `nix/checks/schema-drift.nix`). `mkHarness`
+also takes a `roster` argument, forwarded from the Consumer's value only
+when the Consumer sets it (`lib/flakeModule.nix`) — unlike
 `scoutPrompt`/`reviewPrompt`/`filerPrompt`/`nixBuilderImage`, which are
 declared only as `mkHarness` arguments with no flake-module path at all,
 `roster` is reachable from the flake module itself. It never appears in
-[`docs/flake-options.md`](flake-options.md) because that file is generated
-from the `settings` schema (`lib/env-schema.nix`) only, not from structural
-options — see [Discovering flake options](#discovering-flake-options) above.
+[`docs/flake-options.md`](flake-options.md) for the same settings-vs-structural
+reason given under [Option surface](#option-surface) above, not because it's
+unreachable from the flake module.
 `roster` takes a list of subagent entries, each shaped `{ name; model; mode;
 description; tools; promptFile; prompt; effort }`. It supersedes the four fixed
 `scoutModel`/`reviewModel`/`filerModel`/`workerModel` args: instead of one
@@ -1858,12 +1858,18 @@ downgrading every stale PR to manual, and [ADR
 An opt-in subagent, alongside the scout and reviewer, that turns the
 non-blocking findings a review surfaces into tracked issues — but only the
 ones the work loop escalated for a human, not the whole Non-blocking section.
-Off by default; the current, non-deprecated way to opt in is a
-[`roster`](#subagent-roster) entry named `filer` with a non-empty `model`.
-Setting `FILER_MODEL` (empty by default, recommended
-`claude-haiku-4-5-20251001`) is the older, **deprecated** opt-in — it still
-works but is superseded by `roster`. Either way, when neither is set, that's
-zero behavior change and zero prompt residue in the rendered issue prompt.
+Off by default; the current, non-deprecated way to opt in is
+`defaultRoster { models = { filer = "claude-haiku-4-5-20251001"; }; }`
+(see [`roster`](#subagent-roster)) — setting `models.filer` opts the filer in
+while leaving scout/reviewer/worker at their defaults. Setting `roster`
+itself to a hand-authored list instead of going through `defaultRoster`
+replaces the whole default roster, not just the filer entry, so a literal
+`roster = [ { name = "filer"; ... } ]` silently drops scout/reviewer/worker
+too; reach for that only when authoring a full custom roster. Setting
+`FILER_MODEL` (empty by default, recommended `claude-haiku-4-5-20251001`) is
+the older, **deprecated** opt-in — it still works but is superseded by
+`roster`. Either way, when neither is set, that's zero behavior change and
+zero prompt residue in the rendered issue prompt.
 
 The work loop triages Non-blocking findings before the filer ever runs: it
 fixes inline, in the same effort, every finding whose fix is cheap and in
