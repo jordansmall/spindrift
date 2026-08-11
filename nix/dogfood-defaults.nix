@@ -33,20 +33,23 @@ in
   ];
   # Source spindrift's own dogfood agent models/efforts from the explicit
   # default roster (issue #2388), configured by roster entry name (issue
-  # #2426) rather than the legacy per-agent model knobs. The `filer` entry
-  # below carries forward the Filer's (#393, landed 2026-07-09) tuned model,
-  # so non-blocking review findings still become tracked
-  # `agent-review-finding` issues instead of staying stuck in PR bodies. The
-  # `reviewer` entry (issue #2427) puts the strongest available model behind
-  # the orchestrator's code-owned review pass -- the highest-leverage read in
-  # the loop, and already run at `high` effort below -- instead of letting it
-  # inherit the coordinator's own model; scout/worker are left unmentioned
-  # since dogfood doesn't otherwise pin their models, so they inherit their
-  # `lib/env-schema.nix` defaults instead (issue #2434). `defaultRoster`
-  # also ships this roster's fixed per-agent efforts (issue #2386).
+  # #2426) rather than the legacy per-agent model knobs. The roster now names
+  # exactly one deliberate exception: `filer` carries forward the Filer's
+  # (#393, landed 2026-07-09) tuned model, so non-blocking review findings
+  # still become tracked `agent-review-finding` issues instead of staying
+  # stuck in PR bodies -- `filerModel`'s `lib/env-schema.nix` default is
+  # empty, so this is an opt-in the dogfood genuinely depends on, not a
+  # tuning choice like the others were. scout, reviewer, and worker are left
+  # unmentioned and inherit entirely from their `lib/env-schema.nix` schema
+  # defaults (issue #2434) rather than being locally pinned (issue #2435):
+  # reviewer's schema default is now `claude-opus-5` (issue #2433), so the
+  # orchestrator's code-owned review pass (issue #2387, run at `high` effort
+  # via `defaults.reviewEffort` below) still runs on the strongest available
+  # model without a local pin duplicating the schema's own value.
+  # `defaultRoster` also ships this roster's fixed per-agent efforts (issue
+  # #2386).
   roster = rosterLib.defaultRoster {
     models = {
-      reviewer = "claude-opus-5";
       filer = "claude-haiku-4-5-20251001";
     };
   };

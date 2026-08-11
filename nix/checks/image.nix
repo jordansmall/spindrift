@@ -138,15 +138,16 @@ in
     grep -q 'claude-haiku-4-5-20251001' <<<"$filer_entry" \
       || { echo "dogfood harness filer entry missing the configured model" >&2; exit 1; }
 
-    # The dogfood harness also pins the reviewer's model (issue #2427): the
-    # orchestrator's code-owned review pass runs on the strongest available
-    # model instead of inheriting the coordinator's, so the baked template
-    # must carry a reviewer entry at that model too.
+    # The dogfood harness's reviewer entry is no longer a local pin: it
+    # inherits reviewModel's schema default (issue #2435), same as any other
+    # Consumer that leaves reviewer unmentioned. The orchestrator's
+    # code-owned review pass (issue #2427) still runs on that model, so the
+    # baked template must carry a reviewer entry at the schema default.
     reviewer_entry=$(grep -oE '"reviewer":\{[^}]*\}' <<<"$dogfood_line" || true)
     [ -n "$reviewer_entry" ] \
       || { echo "dogfood harness missing reviewer entry in baked template" >&2; exit 1; }
-    grep -q 'claude-opus-5' <<<"$reviewer_entry" \
-      || { echo "dogfood harness reviewer entry missing the configured model" >&2; exit 1; }
+    grep -q '${reviewModelSchemaDefault}' <<<"$reviewer_entry" \
+      || { echo "dogfood harness reviewer entry missing the ${reviewModelSchemaDefault} schema default" >&2; exit 1; }
 
     # A Consumer that sets no model knobs and passes no roster (bats harness:
     # no `defaults`, no `roster`) must still get a reviewer on the schema

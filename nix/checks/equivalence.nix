@@ -703,15 +703,15 @@ in
     ) "flakeModule must throw on unknown knob 'typoKnob' in settings.branches";
     pkgs.runCommand "flakemodule-rejects-unknown-settings" { } "touch $out";
 
-  # The dogfood's tuned leaf values (mergeMode, autoFormat, autoLint,
-  # filerModel) must be defined exactly once, in nix/dogfood-defaults.nix,
-  # and consumed by both flake.nix's `spindrift` module config and
-  # fixtures.nix's direct mkHarness mirror — not hand-restated at each site
-  # (issue #459). Commit faf8d2d is that hand-restatement drifting once
-  # already. `prefetch` is not pinned here: fixtures.nix's
-  # harnessNoRevision legitimately reuses the same command string for the
-  # (out-of-scope, per issue #459) template mirror, so it isn't a safe
-  # drift discriminant.
+  # The dogfood's tuned leaf values (mergeMode, autoFormat, autoLint, the
+  # roster's `filer` model) must be defined exactly once, in
+  # nix/dogfood-defaults.nix, and consumed by both flake.nix's `spindrift`
+  # module config and fixtures.nix's direct mkHarness mirror — not
+  # hand-restated at each site (issue #459). Commit faf8d2d is that
+  # hand-restatement drifting once already. `prefetch` is not pinned here:
+  # fixtures.nix's harnessNoRevision legitimately reuses the same command
+  # string for the (out-of-scope, per issue #459) template mirror, so it
+  # isn't a safe drift discriminant.
   dogfood-leaf-values-single-source =
     let
       inherit (pkgs.lib)
@@ -726,7 +726,7 @@ in
         ''mergeMode = "immediate"''
         "autoFormat = true"
         "autoLint = true"
-        ''filerModel = "claude-haiku-4-5-20251001"''
+        ''filer = "claude-haiku-4-5-20251001"''
       ];
       leaked = filter (l: hasInfix l flakeSrc || hasInfix l fixturesSrc) literals;
     in
@@ -764,10 +764,15 @@ in
   # roster (lib/roster.nix's defaultRoster) instead of the legacy `filerModel`
   # knob (issue #2388): `defaults` must no longer carry `filerModel` directly,
   # `defaults.reviewEffort` must drive the orchestrator's code-owned review
-  # pass (issue #2387) at the same effort as the roster's `reviewer` entry,
-  # and the roster's `filer` entry must still carry the Filer's (#393) tuned
-  # model. Also pins the roster's fixed per-agent efforts (issue #2386):
-  # scout=medium, reviewer=high, filer=medium, worker=high.
+  # pass (issue #2387) at the same effort the roster's `reviewer` entry
+  # resolves to, and the roster's `filer` entry must still carry the Filer's
+  # (#393) tuned model as the roster's sole local pin. scout, reviewer, and
+  # worker are all left unmentioned in the roster's `models` and must inherit
+  # their `lib/env-schema.nix` schema defaults (issue #2434/#2435) -- for
+  # `reviewer` that now resolves to `claude-opus-5` via the schema default
+  # (issue #2433), not a local pin. Also pins the roster's fixed per-agent
+  # efforts (issue #2386): scout=medium, reviewer=high, filer=medium,
+  # worker=high.
   dogfood-roster-and-review-effort =
     let
       inherit (pkgs.lib)
@@ -800,9 +805,11 @@ in
       }"'';
     assert assertMsg (rosterByName ? filer && rosterByName.filer.model == "claude-haiku-4-5-20251001")
       "dogfood roster's filer entry must keep the tuned Filer model claude-haiku-4-5-20251001 (issue #2388, was #393)";
-    assert assertMsg (
-      rosterByName ? reviewer && rosterByName.reviewer.model == "claude-opus-5"
-    ) "dogfood roster's reviewer entry must run the review pass on claude-opus-5 (issue #2427)";
+    assert assertMsg
+      (rosterByName ? reviewer && rosterByName.reviewer.model == schema.reviewModel.default)
+      "dogfood roster's unmentioned reviewer entry must inherit the lib/env-schema.nix default (issue #2435), got: ${
+        builtins.toJSON (rosterByName.reviewer.model or null)
+      }";
     assert assertMsg (rosterByName ? scout && rosterByName.scout.model == schema.scoutModel.default)
       "dogfood roster's unmentioned scout entry must inherit the lib/env-schema.nix default (issue #2434), got: ${
         builtins.toJSON (rosterByName.scout.model or null)
