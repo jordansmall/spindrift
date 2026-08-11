@@ -178,16 +178,20 @@ favor of the structural [`roster`](#subagent-roster) option.
 `roster` (issue #264) is a *structural* option: a flakeModule Consumer sets
 it directly at `perSystem.spindrift.agents.models.roster`, declared as a real
 `mkOption` in `lib/flakeModule.nix` at the domain-tree path registered for
-`roster` in `lib/structural-paths.nix`. It is also forwarded through as a
-`mkHarness` argument of the same name — `mkHarness` passes the Consumer's
-`roster` value straight through — but it is not `mkHarness`-only the way
-`scoutPrompt`/`reviewPrompt`/`filerPrompt`/`nixBuilderImage` are (see above):
-it's reachable from the flake module itself. It never appears in
+`roster` in `lib/structural-paths.nix` (the `roster-doc-flake-path` check in
+`nix/checks/schema-drift.nix` pins this sentence's path string against that
+registry entry, so a renamed segment fails the check here instead of
+leaving this stale). `mkHarness` also takes a `roster` argument of the same
+name, forwarded from the Consumer's value only when the Consumer sets it
+(`lib/flakeModule.nix:607`) — unlike
+`scoutPrompt`/`reviewPrompt`/`filerPrompt`/`nixBuilderImage`, which are
+declared only as `mkHarness` arguments with no flake-module path at all,
+`roster` is reachable from the flake module itself. It never appears in
 [`docs/flake-options.md`](flake-options.md) because that file is generated
 from the `settings` schema (`lib/env-schema.nix`) only, not from structural
 options — see [Discovering flake options](#discovering-flake-options) above.
 `roster` takes a list of subagent entries, each shaped `{ name; model; mode;
-description; tools; promptFile; prompt }`. It supersedes the four fixed
+description; tools; promptFile; prompt; effort }`. It supersedes the four fixed
 `scoutModel`/`reviewModel`/`filerModel`/`workerModel` args: instead of one
 knob per hardcoded agent, a Consumer flake can pass any number of roster
 entries, including a custom Nth agent beyond the historical four. When
