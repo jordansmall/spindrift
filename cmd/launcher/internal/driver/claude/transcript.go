@@ -83,8 +83,12 @@ type SpindriftOp struct {
 	// Role names the pass's own role on a pass_start op (issue #2037):
 	// "implement" for the first pass, "review" for a code-owned review
 	// pass, "fix" for an implement/fix pass a review's BLOCK (or APPROVE,
-	// to land) triggered. Empty on every other op kind, and on a pass_start
-	// from the legacy single-loop path that never distinguishes roles.
+	// to land) triggered, or "land" for a terminal, cap-triggered
+	// implement-role pass (issue #2457) that runs exactly once per run and
+	// cannot re-enter the review cycle -- distinct from "fix", which is a
+	// review-BLOCK/APPROVE-triggered pass that can loop further under
+	// BLOCK. Empty on every other op kind, and on a pass_start from the
+	// legacy single-loop path that never distinguishes roles.
 	Role     string `json:"role,omitempty"`
 	Verdict  string `json:"verdict,omitempty"`
 	Decision string `json:"decision,omitempty"` // "continue" or "stop"
