@@ -316,6 +316,143 @@ esac`)
 	}
 }
 
+// TestExecClient_ImplementsPriorClaimStateReader verifies the github adapter
+// satisfies forge.PriorClaimStateReader (issue #2477) — a terminal recover
+// failure must not downgrade an already-successful issue, and this surface
+// is how recover learns what the issue's terminal state was immediately
+// before its most recent claim.
+func TestExecClient_ImplementsPriorClaimStateReader(t *testing.T) {
+	var _ forge.PriorClaimStateReader = NewExecClient("owner/repo", testLabels, "agent/issue-")
+}
+
+// TestExecClient_PriorClaimState_FindsComplete verifies PriorClaimState
+// reads the issue timeline for the most recent "unlabeled" event naming a
+// terminal label and reports it — here, the fake gh script stands in for
+// `gh api .../timeline --jq '... | .label.name'`'s already-filtered output,
+// one label name per line.
+func TestExecClient_PriorClaimState_FindsComplete(t *testing.T) {
+	prependFakeGH(t, `case "$*" in
+*timeline*)
+	printf 'ready-for-agent\nagent-complete\n'
+	;;
+*)
+	exit 1
+	;;
+esac`)
+
+	c := NewExecClient("owner/repo", testLabels, "agent/issue-")
+	state, ok, err := c.PriorClaimState("10")
+	if err != nil {
+		t.Fatalf("PriorClaimState: %v", err)
+	}
+	if !ok {
+		t.Fatal("PriorClaimState: ok = false, want true")
+	}
+	if state != forge.Complete {
+		t.Fatalf("PriorClaimState state = %v, want forge.Complete", state)
+	}
+}
+
+// TestExecClient_PriorClaimState_MostRecentWins verifies that when the
+// timeline shows both terminal labels unlabeled (a Failed run later
+// recovered into a Complete one, or vice versa), PriorClaimState reports
+// the most recent one — the last matching line in the chronological
+// (oldest-first) stream — not simply the first match found.
+func TestExecClient_PriorClaimState_MostRecentWins(t *testing.T) {
+	prependFakeGH(t, `case "$*" in
+*timeline*)
+	printf 'agent-failed\nagent-complete\n'
+	;;
+*)
+	exit 1
+	;;
+esac`)
+
+	c := NewExecClient("owner/repo", testLabels, "agent/issue-")
+	state, ok, err := c.PriorClaimState("10")
+	if err != nil {
+		t.Fatalf("PriorClaimState: %v", err)
+	}
+	if !ok {
+		t.Fatal("PriorClaimState: ok = false, want true")
+	}
+	if state != forge.Complete {
+		t.Fatalf("PriorClaimState state = %v, want forge.Complete (the most recent unlabeled event)", state)
+	}
+}
+
+// TestExecClient_PriorClaimState_NoTerminalLabelReturnsNotFound verifies
+// PriorClaimState reports ok=false when the timeline names no terminal
+// label at all — e.g. a first-ever dispatch, with no prior claim to recall.
+func TestExecClient_PriorClaimState_NoTerminalLabelReturnsNotFound(t *testing.T) {
+	prependFakeGH(t, `case "$*" in
+*timeline*)
+	printf 'ready-for-agent\n'
+	;;
+*)
+	exit 1
+	;;
+esac`)
+
+	c := NewExecClient("owner/repo", testLabels, "agent/issue-")
+	_, ok, err := c.PriorClaimState("10")
+	if err != nil {
+		t.Fatalf("PriorClaimState: %v", err)
+	}
+	if ok {
+		t.Fatal("PriorClaimState: ok = true, want false")
+	}
+}
+
+// TestExecClient_PriorClaimState_GenuineFailureSurfaced verifies
+// PriorClaimState surfaces a genuine gh api failure rather than silently
+// reporting not-found.
+func TestExecClient_PriorClaimState_GenuineFailureSurfaced(t *testing.T) {
+	prependFakeGH(t, `case "$*" in
+*timeline*)
+	printf 'HTTP 404: Not Found\n' >&2
+	exit 1
+	;;
+esac`)
+
+	c := NewExecClient("owner/repo", testLabels, "agent/issue-")
+	_, _, err := c.PriorClaimState("10")
+	if err == nil {
+		t.Fatal("PriorClaimState: want error, got nil")
+	}
+	if !strings.Contains(err.Error(), "404") {
+		t.Fatalf("PriorClaimState error = %q, want it to mention the gh api failure", err.Error())
+	}
+}
+
+// TestExecClient_PriorClaimState_UsesTimelineEndpointPaginated verifies
+// PriorClaimState queries the issue timeline endpoint with --paginate, so a
+// long label history spanning multiple result pages is scanned in full
+// rather than only its first page.
+func TestExecClient_PriorClaimState_UsesTimelineEndpointPaginated(t *testing.T) {
+	dir := prependFakeGH(t, `case "$*" in
+*timeline*)
+	printf 'agent-complete\n'
+	;;
+*)
+	exit 1
+	;;
+esac`)
+
+	c := NewExecClient("owner/repo", testLabels, "agent/issue-")
+	if _, _, err := c.PriorClaimState("10"); err != nil {
+		t.Fatalf("PriorClaimState: %v", err)
+	}
+
+	args := readCallArgs(t, dir, 0)
+	if !strings.Contains(args, "repos/owner/repo/issues/10/timeline") {
+		t.Fatalf("gh api call args = %q, want it to query the issue timeline endpoint", args)
+	}
+	if !strings.Contains(args, "--paginate") {
+		t.Fatalf("gh api call args = %q, want --paginate", args)
+	}
+}
+
 // TestExecClient_BranchExists_ExactMatch verifies BranchExists returns true
 // when the matching-refs endpoint reports the exact ref.
 func TestExecClient_BranchExists_ExactMatch(t *testing.T) {
