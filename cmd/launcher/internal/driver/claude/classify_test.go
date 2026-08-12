@@ -348,11 +348,11 @@ var classifyTests = []struct {
 	},
 	// RateLimit_OAuthSessionLimit_PlainText, RateLimit_OAuthWeeklyLimit_PlainText,
 	// and RateLimit_OAuthOpusLimit_PlainText — the same three OAuth plain-text
-	// "resets ... (UTC)" markers — live in TestClassify_OAuthPlainTextResetsAt_RollsForward
-	// instead of this table: parseResetsAtText rolls the reset time forward
-	// from time.Now() when the message carries no date, so ResetAt is no
-	// longer a fixed epoch this table's exact-equality check can pin without
-	// flaking near a day/week boundary.
+	// "resets ... (UTC)" markers — live in
+	// TestClassify_OAuthPlainTextResetsAt_ExactEpoch instead of this table:
+	// this runner uses Classify/the real wall clock, so ResetAt's fixed epoch
+	// can't be pinned here without flaking near a day/week boundary; that other
+	// test uses ClassifyAt with a fixed now instead.
 	{
 		// Same synthetic-terminator shape as SyntheticTerminator below, but
 		// with no top-level "error" field — isAgentContentEvent then treats
@@ -598,47 +598,46 @@ func TestClassify(t *testing.T) {
 	}
 }
 
-// TestClassify_OAuthPlainTextResetsAt_RollsForward covers the three OAuth
+// TestClassify_OAuthPlainTextResetsAt_ExactEpoch covers the three OAuth
 // plain-text rate-limit markers whose "resets ... (UTC)" suffix carries a
 // clock time (and, for the weekly variant, a weekday) but no date:
 // extractResetsAt falls back to parseResetsAtText, which rolls the next
-// occurrence of that clock time forward from time.Now(). Because the
-// resulting ResetAt depends on wall-clock time at test-run time, this
-// asserts the clock components and forward-of-now/bounded properties
-// instead of pinning a fixed epoch (which would flake near a day/week
-// boundary) — see classifyTests for the fixed-epoch table this doesn't fit.
-func TestClassify_OAuthPlainTextResetsAt_RollsForward(t *testing.T) {
+// occurrence of that clock time forward from now. This uses claude.ClassifyAt
+// with a fixed reference now (2026-08-12 10:00:00 UTC, a Wednesday — the same
+// reference classify_internal_test.go's TestParseResetsAtText uses) rather
+// than the real wall clock, so each case's resolved ResetAt is fully
+// deterministic and can be asserted against an exact epoch instead of loose
+// clock/weekday/bounds checks — see classifyTests for the fixed-epoch table
+// this doesn't fit (its runner uses Classify/real-clock, not ClassifyAt).
+func TestClassify_OAuthPlainTextResetsAt_ExactEpoch(t *testing.T) {
+	now := time.Date(2026, 8, 12, 10, 0, 0, 0, time.UTC)
+
 	tests := []struct {
 		name        string
 		line        string
-		wantHour    int
-		wantMinute  int
-		wantWeekday *time.Weekday // nil means don't check
+		wantResetAt time.Time
 	}{
 		{
 			// Claude Code OAuth/subscription session-limit: plain-text notice
 			// carried in the CLI's synthetic-terminator assistant event (issue
 			// #1539) — distinct wording from the API-key usage_limit_reached form.
-			name:       "RateLimit_OAuthSessionLimit_PlainText",
-			line:       `You've hit your session limit · resets 6:30pm (UTC)`,
-			wantHour:   18,
-			wantMinute: 30,
+			name:        "RateLimit_OAuthSessionLimit_PlainText",
+			line:        `You've hit your session limit · resets 6:30pm (UTC)`,
+			wantResetAt: time.Date(2026, 8, 12, 18, 30, 0, 0, time.UTC),
 		},
 		{
-			// Sibling wording for the weekly-quota variant of the same OAuth notice.
+			// Sibling wording for the weekly-quota variant of the same OAuth
+			// notice. Aug 12 2026 is a Wednesday; the next Monday is Aug 17 2026.
 			name:        "RateLimit_OAuthWeeklyLimit_PlainText",
 			line:        `You've hit your weekly limit · resets Mon 12:00am (UTC)`,
-			wantHour:    0,
-			wantMinute:  0,
-			wantWeekday: func() *time.Weekday { w := time.Monday; return &w }(),
+			wantResetAt: time.Date(2026, 8, 17, 0, 0, 0, 0, time.UTC),
 		},
 		{
 			// Sibling wording for the per-model Opus-quota variant of the same
 			// OAuth notice.
-			name:       "RateLimit_OAuthOpusLimit_PlainText",
-			line:       `You've hit your Opus limit · resets 6:30pm (UTC)`,
-			wantHour:   18,
-			wantMinute: 30,
+			name:        "RateLimit_OAuthOpusLimit_PlainText",
+			line:        `You've hit your Opus limit · resets 6:30pm (UTC)`,
+			wantResetAt: time.Date(2026, 8, 12, 18, 30, 0, 0, time.UTC),
 		},
 	}
 
@@ -646,10 +645,9 @@ func TestClassify_OAuthPlainTextResetsAt_RollsForward(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			logPath := claude.WriteLog(t, tc.line)
 
-			before := time.Now().UTC()
-			c, err := claude.Classify(logPath)
+			c, err := claude.ClassifyAt(logPath, now)
 			if err != nil {
-				t.Fatalf("Classify() error: %v", err)
+				t.Fatalf("ClassifyAt() error: %v", err)
 			}
 
 			if c.Class != driverkit.Transient {
@@ -662,18 +660,47 @@ func TestClassify_OAuthPlainTextResetsAt_RollsForward(t *testing.T) {
 			if c.ResetAt == nil {
 				t.Fatal("ResetAt: got nil, want non-nil")
 			}
-			if c.ResetAt.Hour() != tc.wantHour || c.ResetAt.Minute() != tc.wantMinute {
-				t.Errorf("ResetAt clock: got %02d:%02d, want %02d:%02d", c.ResetAt.Hour(), c.ResetAt.Minute(), tc.wantHour, tc.wantMinute)
-			}
-			if !c.ResetAt.After(before) {
-				t.Errorf("ResetAt: got %v, want strictly after %v", *c.ResetAt, before)
-			}
-			if c.ResetAt.After(before.AddDate(0, 0, 8)) {
-				t.Errorf("ResetAt: got %v, want within 8 days of %v", *c.ResetAt, before)
-			}
-			if tc.wantWeekday != nil && c.ResetAt.Weekday() != *tc.wantWeekday {
-				t.Errorf("ResetAt weekday: got %v, want %v", c.ResetAt.Weekday(), *tc.wantWeekday)
+			if !c.ResetAt.Equal(tc.wantResetAt) {
+				t.Errorf("ResetAt: got %v, want %v", *c.ResetAt, tc.wantResetAt)
 			}
 		})
+	}
+}
+
+// TestClassify_OAuthSessionLimit_TaskNotification covers issue #2443's exact
+// captured log shape: an OAuth session-limit run with no paired
+// rate_limit_event JSON line, so ResetAt can only come from the plain-text
+// "resets 11:10pm (UTC)" fallback. The synthetic-terminator assistant event
+// (line 3) re-populates resetsAt via that fallback after the preceding
+// tool_result turn (line 2) clears any candidate under the #579 self-poison
+// guard. Uses ClassifyAt with a fixed now (rather than the classifyTests
+// table's Classify/real-clock runner) since the fallback's resolved ResetAt
+// depends on now.
+func TestClassify_OAuthSessionLimit_TaskNotification(t *testing.T) {
+	logPath := claude.WriteLog(t,
+		`{"type":"system","subtype":"task_notification","task_id":"aa24ca2b1b465489b","tool_use_id":"toolu_01DkvcwtBco2hyARyZuhFqax","status":"failed","output_file":"/tmp/claude-1000/-work/1b098c96-0158-f1c7-e7da-777c6edcf041/tasks/aa24ca2b1b465489b.output","summary":"Agent terminated early due to an API error: You've hit your session limit · resets 11:10pm (UTC)","uuid":"7e18a671-13d9-4b65-9400-fb5193cac2bd","session_id":"1b098c96-0158-f1c7-e7da-777c6edcf041"}`,
+		`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","content":"Agent terminated early due to an API error: You've hit your session limit · resets 11:10pm (UTC)","is_error":true,"tool_use_id":"toolu_01DkvcwtBco2hyARyZuhFqax"}]},"parent_tool_use_id":null,"session_id":"1b098c96-0158-f1c7-e7da-777c6edcf041","uuid":"99cb046f-7c27-4fe7-a652-718254b32cd6","timestamp":"2026-08-11T19:01:33.187Z","tool_use_result":"Error: Agent terminated early due to an API error: You've hit your session limit · resets 11:10pm (UTC)"}`,
+		`{"type":"assistant","message":{"id":"38ef7ec2-9b5b-4559-85fe-d33bf40f34ad","container":null,"model":"<synthetic>","role":"assistant","stop_details":null,"stop_reason":"stop_sequence","stop_sequence":"","type":"message","usage":{"input_tokens":0,"output_tokens":0,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"server_tool_use":{"web_search_requests":0,"web_fetch_requests":0},"service_tier":null,"cache_creation":{"ephemeral_1h_input_tokens":0,"ephemeral_5m_input_tokens":0},"inference_geo":null,"iterations":null,"speed":null},"content":[{"type":"text","text":"You've hit your session limit · resets 11:10pm (UTC)"}],"context_management":null},"parent_tool_use_id":null,"session_id":"1b098c96-0158-f1c7-e7da-777c6edcf041","uuid":"5f02bbf1-98b0-486c-a4a7-b6da7bbe854b","timestamp":"2026-08-11T19:01:33.866Z","error":"rate_limit","request_id":"req_011CdwUgS12SHFzdzvKPu7X1","is_api_error_message":true}`,
+		`{"is_error":true,"duration_api_ms":1792383,"num_turns":67,"stop_reason":"stop_sequence","session_id":"1b098c96-0158-f1c7-e7da-777c6edcf041","total_cost_usd":6.753610549999998,"usage":{"input_tokens":132,"cache_creation_input_tokens":122537,"cache_read_input_tokens":6694041,"output_tokens":52972,"server_tool_use":{"web_search_requests":0,"web_fetch_requests":0},"service_tier":"standard","cache_creation":{"ephemeral_1h_input_tokens":122537,"ephemeral_5m_input_tokens":0},"inference_geo":"not_available","iterations":[{"input_tokens":2,"output_tokens":628,"cache_read_input_tokens":143245,"cache_creation_input_tokens":722,"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":722},"speed":"standard"}]},"modelUsage":{},"permission_denials":[],"terminal_reason":"api_error","fast_mode_state":"off","fast_mode_disabled_reason":"sdk_opt_in_required","subtype":"success","api_error_status":429,"result":"You've hit your session limit · resets 11:10pm (UTC)","type":"result","duration_ms":2206065,"uuid":"a5971787-0e52-4c8d-a23d-e9213753db23"}`,
+	)
+
+	now := time.Date(2026, 8, 11, 19, 5, 0, 0, time.UTC)
+	c, err := claude.ClassifyAt(logPath, now)
+	if err != nil {
+		t.Fatalf("ClassifyAt() error: %v", err)
+	}
+
+	if c.Class != driverkit.Transient {
+		t.Errorf("Class: got %q, want %q", c.Class, driverkit.Transient)
+	}
+	if c.Reason != driverkit.RateLimit {
+		t.Errorf("Reason: got %q, want %q", c.Reason, driverkit.RateLimit)
+	}
+	if c.ResetAt == nil {
+		t.Fatal("ResetAt: got nil, want non-nil")
+	}
+	wantResetAt := time.Date(2026, 8, 11, 23, 10, 0, 0, time.UTC)
+	if !c.ResetAt.Equal(wantResetAt) {
+		t.Errorf("ResetAt: got %v, want %v", *c.ResetAt, wantResetAt)
 	}
 }
