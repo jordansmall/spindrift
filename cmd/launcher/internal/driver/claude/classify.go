@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
 	"spindrift.dev/launcher/internal/driver/driverkit"
@@ -20,6 +21,25 @@ import (
 
 // resetsAtRe matches the JSON field "resetsAt":UNIX_TIMESTAMP (integer).
 var resetsAtRe = regexp.MustCompile(`"resetsAt"\s*:\s*(\d+)`)
+
+// resetsTextRe matches the human-readable reset suffix claude emits on
+// plain-text rate-limit messages, e.g. "resets 6:30pm (UTC)" or
+// "resets Mon 12:00am (UTC)". The weekday abbreviation is optional; when
+// present it is a 3-letter prefix (e.g. "Mon") followed by any remaining
+// letters of the full weekday name.
+var resetsTextRe = regexp.MustCompile(`resets\s+(?:([A-Za-z]{3})\w*\s+)?(\d{1,2}):(\d{2})(am|pm)\s*\(UTC\)`)
+
+// weekdayAbbrs maps a 3-letter weekday abbreviation (as emitted in claude's
+// reset text) to its time.Weekday value.
+var weekdayAbbrs = map[string]time.Weekday{
+	"sun": time.Sunday,
+	"mon": time.Monday,
+	"tue": time.Tuesday,
+	"wed": time.Wednesday,
+	"thu": time.Thursday,
+	"fri": time.Friday,
+	"sat": time.Saturday,
+}
 
 // transientExtras holds claude's complete ordered API-error marker list,
 // checked before the shared driverkit.BaseTransientPatterns network suffix.
@@ -255,17 +275,77 @@ func resultEventText(chunk string) (string, bool) {
 }
 
 // extractResetsAt parses the first "resetsAt":UNIX_TIMESTAMP occurrence in
-// content and returns a UTC time, or nil if none is found or the value is
-// unparseable.
+// content and returns a UTC time. When no such JSON field is present (or its
+// value fails to parse as an integer), it falls back to parsing claude's
+// human-readable "resets <clock-time> (UTC)" / "resets <Weekday> <clock-time>
+// (UTC)" suffix via parseResetsAtText, rolling forward from time.Now(). It
+// returns nil if neither form matches.
 func extractResetsAt(content string) *time.Time {
-	m := resetsAtRe.FindStringSubmatch(content)
+	if m := resetsAtRe.FindStringSubmatch(content); m != nil {
+		if secs, err := strconv.ParseInt(m[1], 10, 64); err == nil {
+			t := time.Unix(secs, 0).UTC()
+			return &t
+		}
+	}
+	return parseResetsAtText(content, time.Now())
+}
+
+// parseResetsAtText parses claude's human-readable "resets <clock-time>
+// (UTC)" or "resets <Weekday> <clock-time> (UTC)" suffix and returns the
+// next future occurrence (strictly after now, which the caller supplies in
+// UTC) as a UTC time, or nil if no such suffix is found or it is
+// unparseable. It never calls time.Now(); the caller is responsible for
+// supplying a reference time.
+func parseResetsAtText(content string, now time.Time) *time.Time {
+	m := resetsTextRe.FindStringSubmatch(content)
 	if m == nil {
 		return nil
 	}
-	secs, err := strconv.ParseInt(m[1], 10, 64)
-	if err != nil {
+
+	weekdayAbbr, hourStr, minuteStr, meridiem := m[1], m[2], m[3], m[4]
+
+	hour, err := strconv.Atoi(hourStr)
+	if err != nil || hour < 1 || hour > 12 {
 		return nil
 	}
-	t := time.Unix(secs, 0).UTC()
-	return &t
+	minute, err := strconv.Atoi(minuteStr)
+	if err != nil || minute < 0 || minute > 59 {
+		return nil
+	}
+
+	switch meridiem {
+	case "am":
+		if hour == 12 {
+			hour = 0
+		}
+	case "pm":
+		if hour != 12 {
+			hour += 12
+		}
+	default:
+		return nil
+	}
+
+	now = now.UTC()
+
+	if weekdayAbbr == "" {
+		candidate := time.Date(now.Year(), now.Month(), now.Day(), hour, minute, 0, 0, time.UTC)
+		if !candidate.After(now) {
+			candidate = candidate.AddDate(0, 0, 1)
+		}
+		return &candidate
+	}
+
+	wantWeekday, ok := weekdayAbbrs[strings.ToLower(weekdayAbbr)]
+	if !ok {
+		return nil
+	}
+
+	candidate := time.Date(now.Year(), now.Month(), now.Day(), hour, minute, 0, 0, time.UTC)
+	daysUntil := (int(wantWeekday) - int(candidate.Weekday()) + 7) % 7
+	candidate = candidate.AddDate(0, 0, daysUntil)
+	if !candidate.After(now) {
+		candidate = candidate.AddDate(0, 0, 7)
+	}
+	return &candidate
 }
