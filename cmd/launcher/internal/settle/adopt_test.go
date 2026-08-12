@@ -146,7 +146,7 @@ func TestSettleAdopted_RedFollowsSelfHeal(t *testing.T) {
 // and demotes the issue the way issue #1652's original absolute guard did.
 func TestSettleAdopted_StaleSuccessMergesAfterWindow(t *testing.T) {
 	c := baseConfig()
-	c.MergePollTimeout = 3
+	c.MergePollTimeout = 10 // comfortably longer than registrationWindowPolls(3) * actualIv(1)
 	c.MaxFixAttempts = 0
 	fc := forge.NewFake(testDispatchLabels)
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
@@ -172,8 +172,8 @@ func TestSettleAdopted_StaleSuccessMergesAfterWindow(t *testing.T) {
 // deadline (MergePollTimeout==1) is shorter than the registration window
 // (registrationWindowPolls(3) * actualIv(1) == 3), so the guard must still be
 // withholding trust when the deadline is hit, unlike the sibling test where
-// MergePollTimeout(3) is long enough for the window to elapse and the
-// SUCCESS gets accepted. An all-SUCCESS rollup that hasn't yet cleared the
+// MergePollTimeout(10) leaves comfortable slack past the window for the
+// SUCCESS to get accepted. An all-SUCCESS rollup that hasn't yet cleared the
 // registration window must be rejected (times out, demotes to
 // agent-failed), not merged.
 func TestSettleAdopted_StaleSuccessStillTimesOutWithinWindow(t *testing.T) {

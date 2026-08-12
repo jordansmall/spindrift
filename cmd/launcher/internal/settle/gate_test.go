@@ -39,12 +39,13 @@ func TestGateToGreen(t *testing.T) {
 	cases := []struct {
 		name                string
 		timeout             int
+		pollInterval        int // 0 means "use baseConfig's default (0)"
 		checkStates         []forge.RollupState
 		checkStateErrs      []error
 		requireRegistration bool
 		want                gateResult
 		wantReasonContains  string
-		wantCheckStateCalls int // 0 means "don't check"
+		wantCheckStateCalls *int // nil means "don't check"
 	}{
 		{
 			name:        "SUCCESS on first poll reaches green without a swap",
@@ -131,7 +132,7 @@ func TestGateToGreen(t *testing.T) {
 			// the trailing SUCCESS pair — consuming all 5. Pinning the call
 			// count is what actually distinguishes the two implementations;
 			// the final verdict alone does not.
-			wantCheckStateCalls: 5,
+			wantCheckStateCalls: func() *int { n := 5; return &n }(),
 		},
 		{
 			// issue #2475: a PR whose checks settled to SUCCESS long ago never
@@ -139,6 +140,11 @@ func TestGateToGreen(t *testing.T) {
 			// must not withhold trust forever — after registrationWindowPolls
 			// intervals of nothing but SUCCESS, gateToGreen treats that as
 			// proof CI already finished and accepts it.
+			// timeout: 3 is the boundary case — deadline == the unclamped
+			// window here (registrationWindowPolls(3) * actualIv(1), where
+			// actualIv floors baseConfig's MergePollInterval:0 to 1), so the
+			// window elapses right as the deadline is hit rather than well
+			// before it.
 			name:                "requireRegistration accepts a settled SUCCESS once the registration window elapses",
 			timeout:             3,
 			requireRegistration: true,
@@ -156,20 +162,32 @@ func TestGateToGreen(t *testing.T) {
 			want:                gateGreen,
 		},
 		{
-			// issue #2475: pins registrationWindowPolls' lower bound. With
-			// baseConfig's MergePollInterval:0 (actualIv floors to 1) and
-			// registrationWindowPolls==3, the registration window is 3
-			// poll-intervals wide, but MergePollTimeout(deadline) here is
-			// only 1 — the deadline is hit while the rollup has read nothing
-			// but SUCCESS and the window has NOT yet elapsed, so the guard
-			// must still be withholding trust and the loop must time out
-			// rather than accept. This catches two specific regressions: (a)
-			// registrationWindowPolls being weakened toward 0 (which would
-			// make the window elapse on the very first poll and wrongly
-			// return gateGreen instead of gateTerminal), and (b) the guard
-			// being bypassed entirely via `registered := true` at the top of
-			// gateToGreen (same wrong gateGreen outcome).
-			name:                "requireRegistration still withholds trust before the window elapses",
+			// issue #2475 follow-up: when MergePollTimeout is smaller than
+			// registrationWindowPolls*MergePollInterval (here 3*1=3 unclamped,
+			// vs a 2s deadline), the unclamped window never elapses before the
+			// ci-timeout deadline hits — a legitimately-already-green adopted
+			// PR would livelock into gateTerminal instead of being accepted.
+			// gateToGreen must clamp the window to the deadline so a settled
+			// SUCCESS is still accepted once the (now-clamped) window elapses,
+			// same as the large-deadline case above.
+			name:                "requireRegistration clamps the window to a deadline smaller than the unclamped window",
+			timeout:             2,
+			pollInterval:        1,
+			requireRegistration: true,
+			checkStates:         []forge.RollupState{forge.StateSuccess, forge.StateSuccess, forge.StateSuccess, forge.StateSuccess, forge.StateSuccess},
+			want:                gateGreen,
+		},
+		{
+			// issue #2475: does not pin registrationWindowPolls' unclamped
+			// value — with timeout: 1, the registration window itself gets
+			// clamped down to 1 poll-interval too (see the clamp above), so
+			// this only proves two coarser things: (a) registrationWindowPolls
+			// isn't weakened all the way to 0 (which would make the window
+			// elapse on the very first poll and wrongly return gateGreen
+			// instead of gateTerminal), and (b) the guard isn't bypassed
+			// entirely via `registered := true` at the top of gateToGreen
+			// (same wrong gateGreen outcome).
+			name:                "requireRegistration does not disable the window or bypass the guard entirely",
 			timeout:             1,
 			requireRegistration: true,
 			checkStates:         []forge.RollupState{forge.StateSuccess, forge.StateSuccess},
@@ -182,6 +200,9 @@ func TestGateToGreen(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			c := baseConfig()
 			c.MergePollTimeout = tc.timeout
+			if tc.pollInterval != 0 {
+				c.MergePollInterval = tc.pollInterval
+			}
 			fc := forge.NewFake()
 			fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
 			if len(tc.checkStates) > 0 {
@@ -197,8 +218,8 @@ func TestGateToGreen(t *testing.T) {
 			if got != tc.want {
 				t.Errorf("gateToGreen = %v, want %v", got, tc.want)
 			}
-			if tc.wantCheckStateCalls != 0 && fc.CheckStateCalls != tc.wantCheckStateCalls {
-				t.Errorf("CheckStateCalls = %d, want %d", fc.CheckStateCalls, tc.wantCheckStateCalls)
+			if tc.wantCheckStateCalls != nil && fc.CheckStateCallCount != *tc.wantCheckStateCalls {
+				t.Errorf("CheckStateCallCount = %d, want %d", fc.CheckStateCallCount, *tc.wantCheckStateCalls)
 			}
 			if tc.wantReasonContains != "" {
 				if !strings.Contains(reason, tc.wantReasonContains) {
