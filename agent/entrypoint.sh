@@ -226,6 +226,7 @@ clone_repo() {
   # auth setup-git's placement earlier in this function for the github case.
   configure_forgejo_cli
   install_readonly_push_hook
+  install_readonly_gh_shim
 }
 
 # install_readonly_push_hook makes `git push` fail locally, cheaply, when
@@ -296,6 +297,102 @@ echo "read-only Box: your committed branch is relayed via the outbox; do not pus
 exit 1
 EOF
   chmod +x "$hook"
+}
+
+# install_readonly_gh_shim puts a `gh` shim ahead of the real `gh` binary on
+# PATH when this is a read-only github Box (issue #2465), rejecting write
+# subcommands so the agent gets a clear local error naming the relay that
+# replaces the write, instead of the real `gh` reaching the network and
+# 403ing there (the same "catch it locally, cheaply" shape as
+# install_readonly_push_hook above -- gated on _is_readonly_github, defined
+# later in this file (~line 537); bash resolves function bodies at call
+# time, so this forward reference is safe, same as every other phase
+# function's use of it). A read-write Box, or a Box whose Code Forge isn't
+# github (gh has nothing to guard there -- see clone_repo's own
+# CODE_FORGE-keyed skip of `gh auth setup-git`), installs no shim and the
+# real `gh` behaves exactly as before this change. This covers `gh pr
+# create`, `gh pr ready`, `gh pr merge`, `gh issue comment`, `gh issue
+# create`, and `gh api` with a mutating method (POST/PATCH/PUT/DELETE); every
+# other subcommand -- reads included -- falls through to the real `gh`
+# untouched.
+install_readonly_gh_shim() {
+  if ! _is_readonly_github; then
+    return 0
+  fi
+  # Resolve the real `gh`'s absolute path BEFORE prepending the shim dir to
+  # PATH below -- the shim itself must never re-resolve `gh` off its own
+  # runtime PATH (which, by then, has the shim dir in front of it too): a
+  # naive re-resolve would recurse into itself instead of reaching the real
+  # binary.
+  local real_gh
+  real_gh="$(command -v gh)"
+  # A deterministic location derived from $WORK_DIR's own parent, not a
+  # mktemp path: entrypoint.sh's PATH mutation below is local to this
+  # subprocess and never survives back to a caller inspecting the Box after
+  # it exits, so the install location has to be predictable from a value the
+  # caller already knows ($WORK_DIR) instead of discovered.
+  local shim_dir
+  shim_dir="$(dirname "$WORK_DIR")/readonly-gh-shim"
+  mkdir -p "$shim_dir"
+  # The real gh's path is stored in a file, not inlined into the heredoc
+  # below, so the shim script never has to shell-quote an arbitrary
+  # filesystem path into a literal script body (the push-hook's heredocs
+  # above only ever emit a fixed, argument-free message, so they never faced
+  # this problem).
+  printf '%s' "$real_gh" >"$shim_dir/.real-gh"
+  cat >"$shim_dir/gh" <<'EOF'
+#!/bin/sh
+# Read-only Box gh shim (issue #2465): rejects gh write subcommands locally,
+# naming the relay that replaces each one, instead of letting the real gh
+# reach the network and 403 there. Everything else -- reads, and any write
+# subcommand this slice doesn't cover yet -- falls through to the real gh.
+real_gh="$(cat "$(dirname "$0")/.real-gh")"
+if [ "$1" = "pr" ] && [ "$2" = "create" ]; then
+  echo "read-only Box: PRs are opened via the PR-intent relay (SPINDRIFT_PR_INTENT); do not run \`gh pr create\` -- this call has been blocked locally." >&2
+  exit 1
+fi
+if [ "$1" = "pr" ] && [ "$2" = "ready" ]; then
+  echo "read-only Box: the launcher flips the PR ready once CI is green; do not run \`gh pr ready\` -- this call has been blocked locally." >&2
+  exit 1
+fi
+if [ "$1" = "pr" ] && [ "$2" = "merge" ]; then
+  echo "read-only Box: the launcher merges the PR once CI is green; do not run \`gh pr merge\` -- this call has been blocked locally." >&2
+  exit 1
+fi
+if [ "$1" = "issue" ] && [ "$2" = "comment" ]; then
+  echo "read-only Box: issue comments are relayed via the outcome note= field; do not run \`gh issue comment\` -- this call has been blocked locally." >&2
+  exit 1
+fi
+if [ "$1" = "issue" ] && [ "$2" = "create" ]; then
+  echo "read-only Box: issues are filed via the issue-intent relay (SPINDRIFT_ISSUE_INTENT); do not run \`gh issue create\` -- this call has been blocked locally." >&2
+  exit 1
+fi
+if [ "$1" = "api" ]; then
+  # `gh api` with no -X/--method flag defaults to GET (safe, must pass
+  # through). A `for` loop over "$@" -- rather than shift -- so this scan
+  # never consumes the positional params the final exec below still needs.
+  method="GET"
+  prev=""
+  for arg in "$@"; do
+    if [ "$prev" = "-X" ] || [ "$prev" = "--method" ]; then
+      method="$arg"
+    fi
+    case "$arg" in
+      --method=*) method="${arg#--method=}" ;;
+    esac
+    prev="$arg"
+  done
+  case "$method" in
+    [Pp][Oo][Ss][Tt] | [Pp][Aa][Tt][Cc][Hh] | [Pp][Uu][Tt] | [Dd][Ee][Ll][Ee][Tt][Ee])
+      echo "read-only Box: gh api does not accept a mutating method under read-only; make this change through the same relay a \`gh pr create\`/\`gh issue create\`/\`gh issue comment\` write would use -- this call has been blocked locally." >&2
+      exit 1
+      ;;
+  esac
+fi
+exec "$real_gh" "$@"
+EOF
+  chmod +x "$shim_dir/gh"
+  export PATH="$shim_dir:$PATH"
 }
 
 # phase_branch_recovery adopts prior work on an open PR or force-resets a
