@@ -2397,6 +2397,19 @@ This guard installs only for a backend whose read-only hand-off is genuinely
 relay-based (`github`, `local`) — a backend like `forgejo`, where a real `git
 push` is itself the hand-off mechanism, installs neither.
 
+The other three rows above get the same local-guard treatment, but via a `gh`
+shim rather than a push hook (issue #2465): for a read-only `github` Box (the
+same `_is_readonly_github` gate the push guard above uses), the Box installs a
+`gh` shim ahead of the real `gh` binary on `PATH` that rejects `gh pr create`,
+`gh pr ready`, `gh pr merge`, `gh issue comment`, `gh issue create`, and `gh
+api` calls with a mutating method (`POST`/`PATCH`/`PUT`/`DELETE`), each
+rejection naming the relay that replaces it — the PR-intent line, the
+Launcher's own ready/merge once CI is green, the outcome `note=` field, or the
+issue-intent line, as appropriate. Reads (`gh issue view`, `gh pr view`, `gh
+run view`, `gh run list`, a plain `gh api` `GET`, and so on) pass through to
+the real `gh` untouched. Like the push guard above, this is a cheap interim
+guard, not adversary-proof.
+
 The issue-filing row is additionally gated on `ORCHESTRATOR_ENABLED` (issue
 #2019), unlike the three rows above it: `read-only` with the orchestrator off
 keeps the Filer's pre-existing degraded behavior (it still attempts `gh issue
