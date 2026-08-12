@@ -18,39 +18,55 @@ func normalizeWhitespace(s string) string {
 	return strings.Join(strings.Fields(s), " ")
 }
 
-// TestReviewPromptClassifiesProseFindingsNonBlocking is a content-invariant
-// guard (issue #2458): the severity contract must state, discretion-free,
-// that wording/style/redundancy/ordering findings on prose the diff touches
-// are always Non-blocking, never one of the Blocking categories.
-func TestReviewPromptClassifiesProseFindingsNonBlocking(t *testing.T) {
+// TestReviewPromptSeverityContract is a content-invariant guard (issue
+// #2458) for the Blocking/Non-blocking severity contract in
+// review-prompt.md. Each case is a load-bearing clause the prose must keep
+// verbatim (modulo line-wrap whitespace); asserting them separately, rather
+// than pinning the whole paragraph as one string, lets a harmless reword of
+// one clause fail only that case instead of the entire brittle sentence.
+func TestReviewPromptSeverityContract(t *testing.T) {
 	repoRoot := filepath.Join("..", "..", "..")
+	normalized := normalizeWhitespace(readPromptFile(t, repoRoot, "review-prompt.md"))
 
-	reviewPrompt := readPromptFile(t, repoRoot, "review-prompt.md")
-	const proseNonBlockingRule = "Wording, style, redundancy, and ordering findings on prose the diff touches — commit messages, comments, and docs — are always Non-blocking, never one of the Blocking categories above"
-	if !strings.Contains(normalizeWhitespace(reviewPrompt), normalizeWhitespace(proseNonBlockingRule)) {
-		t.Errorf("review-prompt.md no longer states %q, the discretion-free rule keeping prose wording/style/redundancy/ordering findings Non-blocking", proseNonBlockingRule)
+	cases := []struct {
+		name   string
+		clause string
+	}{
+		{
+			name:   "default is BLOCK prior",
+			clause: "your default is BLOCK, and APPROVE must be earned",
+		},
+		{
+			name:   "rubber-stamp warning",
+			clause: "A rubber-stamp that misses a real defect is a worse failure than a false alarm",
+		},
+		{
+			name:   "BLOCK reserved for categories above",
+			clause: "BLOCK stays reserved for the categories above",
+		},
+		{
+			name:   "prose findings are Non-blocking, discretion-free",
+			clause: "wording, style, redundancy, and ordering findings on prose the diff touches — commit messages, comments, and docs — are always Non-blocking",
+		},
+		{
+			name:   "#2436 example: repeated phrase",
+			clause: "a phrase repeated within one sentence",
+		},
+		{
+			name:   "#2436 example: tautological clause",
+			clause: "a tautological clause",
+		},
+		{
+			name:   "#2436 example: trailer placement",
+			clause: "where a trailer sits among the commits",
+		},
 	}
-}
 
-// TestReviewPromptKeepsProseExamples guards the three concrete #2436
-// examples named in the severity contract's prose-non-blocking rule -- a
-// phrase repeated within one sentence, a tautological clause, and where a
-// trailer sits among the commits -- so those can't be silently deleted
-// while the general rule sentence survives.
-func TestReviewPromptKeepsProseExamples(t *testing.T) {
-	repoRoot := filepath.Join("..", "..", "..")
-
-	reviewPrompt := readPromptFile(t, repoRoot, "review-prompt.md")
-	normalized := normalizeWhitespace(reviewPrompt)
-
-	examples := []string{
-		"a phrase repeated within one sentence",
-		"a tautological clause",
-		"where a trailer sits among the commits",
-	}
-	for _, example := range examples {
-		if !strings.Contains(normalized, normalizeWhitespace(example)) {
-			t.Errorf("review-prompt.md no longer contains the #2436 example %q in its prose-non-blocking rule", example)
-		}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if !strings.Contains(normalized, normalizeWhitespace(c.clause)) {
+				t.Errorf("review-prompt.md no longer states %q", c.clause)
+			}
+		})
 	}
 }

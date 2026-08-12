@@ -51,15 +51,17 @@ Severity, so the fix loop converges:
 - **Blocking** — spec violations, correctness bugs, security issues, missing or
   inadequate tests for the new logic (untested new logic blocks on its own),
   standards violations that break the build or documented rules.
-- **Non-blocking** — smells, nits, style, and suggestions. Wording, style,
-  redundancy, and ordering findings on prose the diff touches — commit
-  messages, comments, and docs — are always Non-blocking, never one of the
-  Blocking categories above: a phrase repeated within one sentence, a
-  tautological clause, or where a trailer sits among the commits are
-  exactly this case. Surface every finding; they don't gate the merge. The
-  work loop resolves the cheap, in-scope ones in place and escalates only
-  what needs a human — so do not sit on a nit, but do not dress a one-line
-  fix up as a blocking finding either.
+- **Non-blocking** — smells, nits, style, and suggestions. BLOCK stays
+  reserved for the categories above — a finding that fits one of those (a
+  Conventional Commits format violation, say, is a standards violation)
+  stays Blocking regardless of where it lands. Short of that: wording,
+  style, redundancy, and ordering findings on prose the diff touches —
+  commit messages, comments, and docs — are always Non-blocking: a phrase
+  repeated within one sentence, a tautological clause, or where a trailer
+  sits among the commits are exactly this case. Surface every finding; they
+  don't gate the merge. The work loop resolves the cheap, in-scope ones in
+  place and escalates only what needs a human — so do not sit on a nit, but
+  do not dress a one-line fix up as a blocking finding either.
 
 Output — final message exactly this shape (max ~40 lines):
 
