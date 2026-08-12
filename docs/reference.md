@@ -171,9 +171,13 @@ as `MODEL` so `MODEL=...` switches models at runtime with no image rebuild.
 same way; each is composed into `--agents` independently by its own knob, so
 emptying one drops only that subagent, never both. `filerModel` is the same
 shape but opt-in — empty by default, so the filer is not provisioned at all
-until a model is set; see [Filer](#filer). `scoutModel`/`reviewModel`/
-`filerModel`/`workerModel` are all **deprecated** in favor of the structural
-[`roster`](#subagent-roster) option.
+until a model is set; see [Filer](#filer). `scoutModel`/`filerModel`/
+`workerModel` are all **deprecated** in favor of the structural
+[`roster`](#subagent-roster) option. `reviewModel` is **deprecated for
+non-orchestrator use** only — superseded by `roster` there, but under
+`ORCHESTRATOR` the roster reviewer entry is itself superseded by the
+code-owned review pass, which binds its model from `reviewModel` instead
+(falling back to the coordinator model when unset).
 
 #### Subagent roster
 
