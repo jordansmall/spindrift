@@ -65,6 +65,25 @@ func (c *readOnlyCodeForge) RelayBundle(outboxDir, ref string) error {
 	})
 }
 
+// CommitSubjects returns the one-line commit subjects the bundle at
+// outboxDir/seambundle.FileName carries for ref, relative to base, oldest
+// first -- settle's read-only PR-intent-fallback hook (issue #2447), reusing
+// the same token-authenticated clone closure (and its credential-redaction-
+// on-error handling) RelayBundle uses. Unlike RelayBundle it never checks
+// anything out or pushes, so it cannot mutate the remote -- a read path only.
+func (c *readOnlyCodeForge) CommitSubjects(outboxDir, base, ref string) ([]string, error) {
+	return bundlerelay.CommitSubjects("forgejo", outboxDir, base, ref, func(dir string) error {
+		// c.remote carries the token as userinfo; CombinedOutput is deliberately
+		// discarded from the returned error (unlike the git-in-dir calls inside
+		// bundlerelay.CommitSubjects) since git's own clone diagnostics can echo
+		// the tokened URL back verbatim on failure.
+		if _, err := exec.Command("git", "clone", "--no-single-branch", c.remote, dir).CombinedOutput(); err != nil {
+			return fmt.Errorf("forgejo: relay bundle: git clone %s: %w", forge.RedactURLCredentials(c.remote), err)
+		}
+		return nil
+	})
+}
+
 // CreateDraftPR opens a draft PR from head onto base via Forgejo's REST pull
 // create endpoint -- the host-side counterpart to a Box's own in-box PR
 // creation under read-write, only reachable here because
@@ -122,3 +141,4 @@ func (c *readOnlyCodeForge) CreateDraftPR(title, body, base, head string) (strin
 
 var _ forge.BundleRelay = (*readOnlyCodeForge)(nil)
 var _ forge.DraftPRCreator = (*readOnlyCodeForge)(nil)
+var _ forge.BundleCommitSubjects = (*readOnlyCodeForge)(nil)

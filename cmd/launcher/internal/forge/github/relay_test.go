@@ -3,6 +3,7 @@ package github
 import (
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -30,6 +31,17 @@ func newRelayHarness(t *testing.T) *forgetest.GitRepoFixture {
 	t.Setenv("PATH", scriptDir+":"+os.Getenv("PATH"))
 	t.Setenv("REMOTE", repo.Bare)
 	t.Setenv("STATE_DIR", t.TempDir())
+
+	// forgetest.NewGitRepoFixture's first push (of "main") never updates the
+	// bare repo's own HEAD symref away from git-init's default (typically
+	// "master", which doesn't exist here), so a fresh clone otherwise has no
+	// local "main" branch to check out -- only refs/remotes/origin/main.
+	// CommitSubjects's base argument needs "main" itself to resolve for
+	// `git log base..ref` to work, the same way it would against a real
+	// forge clone.
+	if out, err := exec.Command("git", "-C", repo.Bare, "symbolic-ref", "HEAD", "refs/heads/main").CombinedOutput(); err != nil {
+		t.Fatalf("set bare repo HEAD to refs/heads/main: %v: %s", err, out)
+	}
 	return repo
 }
 
@@ -118,6 +130,77 @@ func TestReadOnlyCodeForge_RelayBundle_MalformedBundleErrors(t *testing.T) {
 	}
 	if errors.Is(err, forge.ErrBundleNotFound) {
 		t.Errorf("RelayBundle with a malformed bundle file: err = %v, want a generic error, not forge.ErrBundleNotFound", err)
+	}
+}
+
+// TestReadOnlyCodeForge_CommitSubjects_ReturnsSubjectsReadOnly asserts
+// CommitSubjects returns the seeded bundle's commit subjects, oldest first,
+// and — unlike RelayBundle — never mutates the real remote: no ref for
+// branch appears on repo.Bare afterward.
+func TestReadOnlyCodeForge_CommitSubjects_ReturnsSubjectsReadOnly(t *testing.T) {
+	repo := newRelayHarness(t)
+	outbox := t.TempDir()
+	branch := "agent/issue-1918"
+	forgetest.SeedRelayBundle(t, repo.Bare, "main", outbox, branch)
+
+	cf := NewReadOnlyCodeForge("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	cs, ok := cf.(forge.BundleCommitSubjects)
+	if !ok {
+		t.Fatal("github read-only CodeForge does not implement forge.BundleCommitSubjects")
+	}
+
+	subjects, err := cs.CommitSubjects(outbox, "main", branch)
+	if err != nil {
+		t.Fatalf("CommitSubjects: %v", err)
+	}
+	want := []string{"feature"}
+	if len(subjects) != len(want) || subjects[0] != want[0] {
+		t.Errorf("CommitSubjects = %v, want %v", subjects, want)
+	}
+
+	cmd := exec.Command("git", "-C", repo.Bare, "show-ref", "--verify", "--quiet", "refs/heads/"+branch)
+	if err := cmd.Run(); err == nil {
+		t.Errorf("refs/heads/%s exists on the real remote after CommitSubjects, want no push side effect", branch)
+	}
+}
+
+// TestReadOnlyCodeForge_CommitSubjects_MissingBundleErrors mirrors
+// TestReadOnlyCodeForge_RelayBundle_MissingBundleErrors: an empty outbox (the
+// Box never wrote a bundle) surfaces forge.ErrBundleNotFound.
+func TestReadOnlyCodeForge_CommitSubjects_MissingBundleErrors(t *testing.T) {
+	newRelayHarness(t)
+	outbox := t.TempDir()
+
+	cf := NewReadOnlyCodeForge("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	cs := cf.(forge.BundleCommitSubjects)
+
+	_, err := cs.CommitSubjects(outbox, "main", "agent/issue-1918")
+	if err == nil {
+		t.Fatal("CommitSubjects with no bundle file present: got nil error, want one")
+	}
+	if !errors.Is(err, forge.ErrBundleNotFound) {
+		t.Errorf("CommitSubjects with no bundle file present: err = %v, want errors.Is(err, forge.ErrBundleNotFound)", err)
+	}
+}
+
+// TestReadOnlyCodeForge_CommitSubjects_MalformedBundleErrors mirrors
+// TestReadOnlyCodeForge_RelayBundle_MalformedBundleErrors: a corrupt bundle
+// file is rejected by `git bundle verify` and surfaces a generic error, not
+// forge.ErrBundleNotFound.
+func TestReadOnlyCodeForge_CommitSubjects_MalformedBundleErrors(t *testing.T) {
+	newRelayHarness(t)
+	outbox := t.TempDir()
+	forgetest.WriteFile(t, filepath.Join(outbox, seambundle.FileName), "not a bundle")
+
+	cf := NewReadOnlyCodeForge("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	cs := cf.(forge.BundleCommitSubjects)
+
+	_, err := cs.CommitSubjects(outbox, "main", "agent/issue-1918")
+	if err == nil {
+		t.Fatal("CommitSubjects with a malformed bundle file: got nil error, want one")
+	}
+	if errors.Is(err, forge.ErrBundleNotFound) {
+		t.Errorf("CommitSubjects with a malformed bundle file: err = %v, want a generic error, not forge.ErrBundleNotFound", err)
 	}
 }
 

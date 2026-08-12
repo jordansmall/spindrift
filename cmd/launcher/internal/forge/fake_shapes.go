@@ -153,10 +153,15 @@ func (g githubReadOnlyForge) CreateDraftPR(title, body, base, head string) (stri
 	return g.Fake.createDraftPR(title, body, base, head)
 }
 
+func (g githubReadOnlyForge) CommitSubjects(outboxDir, base, ref string) ([]string, error) {
+	return g.Fake.commitSubjects(outboxDir, base, ref)
+}
+
 var _ CodeForge = githubReadOnlyForge{}
 var _ PRForge = githubReadOnlyForge{}
 var _ BundleRelay = githubReadOnlyForge{}
 var _ DraftPRCreator = githubReadOnlyForge{}
+var _ BundleCommitSubjects = githubReadOnlyForge{}
 var _ LandingRef = localForge{}
 var _ LandingRepair = localForge{}
 var _ LandingContainmentQuery = localForge{}
