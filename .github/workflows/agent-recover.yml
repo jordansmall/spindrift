@@ -88,11 +88,12 @@ jobs:
           git-user-name: ${{ vars.AGENT_GIT_USER_NAME }}
           git-user-email: ${{ vars.AGENT_GIT_USER_EMAIL }}
 
-      # recover exits non-zero ONLY when there is nothing to adopt (no open PR
-      # or the issue can't be fetched) — and in that case it
-      # leaves labels untouched. Every path where a PR exists (green->complete,
-      # red-exhausted->failed, merge-blocked->complete) exits 0 with the label
-      # already swapped, so the park step below stays dormant.
+      # recover exits non-zero, in practice, when there is nothing to adopt
+      # (no open PR or the issue can't be fetched) — and in that case it
+      # leaves labels untouched. Every path where a PR exists
+      # (green->complete, red-exhausted->failed, merge-blocked->complete)
+      # exits 0 with the label already swapped, so the park step below
+      # stays dormant.
       - name: Recover the issue
         id: recover
         run: |
