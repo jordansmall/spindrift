@@ -159,13 +159,41 @@ setup() {
   export FAKE_GH_PR_LIST_1="https://github.com/owner/repo/pull/1"
   export MERGE_POLL_INTERVAL=0
   export MERGE_POLL_TIMEOUT=100
-  export FAKE_GH_GRAPHQL_ROLLUP_SEQ_1="SUCCESS,SUCCESS,SUCCESS,SUCCESS,SUCCESS"
+  export FAKE_GH_GRAPHQL_ROLLUP_SEQ_1="SUCCESS"
   run "$SPINDRIFT_CMD" recover 1
   [ "$status" -eq 0 ]
   [[ "$output" == *"status=adopted"* ]]
   [[ "$output" == *"status=verified-merged"* ]]
   grep -q 'pr merge' "$GH_LOG"
   grep -q -- 'issue edit 1 --repo owner/repo --add-label agent-complete --remove-label agent-in-progress' "$GH_LOG"
+  ! grep -q -- 'agent-failed' "$GH_LOG"
+}
+
+@test "recover: draft PR that never re-registers is adopted, readied, and merged" {
+  # issue #2475 AC5: the never-re-registers (all-SUCCESS) sequence combined
+  # with a draft PR — every other never-re-registers scenario in this file
+  # exercises only a non-draft PR, and the draft-PR sibling above only
+  # exercises a PENDING-leading sequence, so this is the one case that
+  # proves gateToGreen's registration-window bound (see "recover:
+  # settled-green PR (never re-registers) is adopted and merged" above)
+  # also holds when recover must first flip the PR out of draft (`pr ready`).
+  export MERGE_MODE=immediate
+  export FAKE_PODMAN_IMAGE_PRESENT=1
+  export FAKE_GH_ISSUES=$'1\tStranded issue'
+  printf '1\tagent-in-progress\n' >> "$GH_LOG.state"
+  export FAKE_GH_PR_LIST_1="https://github.com/owner/repo/pull/1"
+  export FAKE_GH_PR_DRAFT_1="true"
+  export MERGE_POLL_INTERVAL=0
+  export MERGE_POLL_TIMEOUT=100
+  export FAKE_GH_GRAPHQL_ROLLUP_SEQ_1="SUCCESS"
+  run "$SPINDRIFT_CMD" recover 1
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"status=adopted"* ]]
+  [[ "$output" == *"status=verified-merged"* ]]
+  grep -q 'pr ready https://github.com/owner/repo/pull/1' "$GH_LOG"
+  grep -q 'pr merge' "$GH_LOG"
+  grep -q -- 'issue edit 1 --repo owner/repo --add-label agent-complete --remove-label agent-in-progress' "$GH_LOG"
+  ! grep -q -- 'agent-failed' "$GH_LOG"
 }
 
 @test "recover: draft PR is adopted and merged" {
