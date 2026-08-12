@@ -2277,8 +2277,41 @@ dispatches, not just the initial seed. A second process that tries to seed
 the same Accumulation repo while the first still holds the lock fails fast
 with a clear error naming the repo path, rather than blocking or silently
 racing the first process's mount; the operator re-runs once the first
-process exits. The lock is advisory and per-`CODE_FORGE_ACCUMULATION_REPO_DIR`
-— unrelated tickets with different Accumulation repos never contend.
+process exits. `console` is the one case where "the whole run" is a full
+interactive session, not a single seed-and-dispatch: it holds the lock from
+startup until the operator quits, so a `dispatch`/`research` process against
+the same Accumulation repo fails fast for as long as a `console` session
+stays open. The lock is advisory and per-`CODE_FORGE_ACCUMULATION_REPO_DIR`
+path, but that default resolves to one shared `.spindrift/accum.git` under
+the launcher's working directory (not one per ticket) — so, by default, two
+unrelated tickets dispatched from the same checkout now contend for the same
+lock too, serializing what used to run concurrently; give each its own
+`CODE_FORGE_ACCUMULATION_REPO_DIR` to keep them independent.
+
+Edge cases:
+
+- **The lock file is never deleted.** `AcquireAccumulationLock` creates
+  `<accum-repo-path>.lock` on first use and only ever unlocks/closes it on
+  release — a leftover `accum.git.lock` sitting next to `accum.git` between
+  runs is normal, not a sign of a stale or crashed process. `rm -rf
+  .spindrift/accum.git` removes the repo but leaves its sibling `.lock` file
+  in place; that's harmless, since the next run reopens and re-locks the
+  same file.
+- **A killed process can't strand the lock.** `SIGKILL` or a crash never
+  runs `Release`, but the kernel drops the underlying `flock` when the
+  holding process's file descriptors close on exit either way, so the next
+  acquire succeeds immediately — there is no stale-lock recovery step for an
+  operator to run.
+- **Self-contained research and the remote Code Forges take no lock at
+  all.** `--self-contained` research and `CODE_FORGE=github`/`git` never
+  call `seedAccumulationRepoIfLocal`'s seeding path, so nothing acquires the
+  lock for them; only non-self-contained runs under `CODE_FORGE=local` do.
+- **`flock` is advisory-only, and unreliable over a network filesystem.**
+  A process that doesn't check the lock can still write through it, and on
+  NFS or similar, `flock` semantics aren't guaranteed at all — this
+  serialization assumes `CODE_FORGE_ACCUMULATION_REPO_DIR` lives on a local
+  filesystem, the same assumption ADR 0033's host-mediated design already
+  makes for the Accumulation repo itself.
 
 **Code-in / code-out.** The launcher RO bind-mounts the Accumulation repo
 into the Box at `/repo`; the agent clones it read-only and works in the
