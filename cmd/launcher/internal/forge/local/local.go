@@ -555,17 +555,20 @@ func (li localIssue) render() string {
 // single YAML "key: value" line: leading/trailing whitespace, an embedded
 // newline or carriage return (both of which would otherwise fragment into
 // extra physical lines parseLocalIssue re-reads as frontmatter — the
-// injection this guards against), or a leading quote character that would
-// otherwise be misread as opening a quoted scalar. Plain values like "Fix
+// injection this guards against), a leading quote character that would
+// otherwise be misread as opening a quoted scalar, or a colon anywhere in
+// the value (a bare "key: value: rest" line is invalid YAML — a colon is a
+// mapping separator — even though parseLocalIssue's own tolerant
+// first-colon-split re-read happens to survive it). Plain values like "Fix
 // the Thing" and RFC3339 timestamps stay bare, unchanged from before.
 //
 // Scope: this guards only parseLocalIssue's own re-read vectors, not a
-// general YAML reader. A value with a leading "#", "[", or ":" stays bare
-// and would mis-parse under a real YAML parser — acceptable because the
-// custom parser here reads the whole "key: value" line verbatim.
+// general YAML reader. A value with a leading "#" or "[" stays bare and
+// would mis-parse under a real YAML parser — acceptable because the custom
+// parser here reads the whole "key: value" line verbatim.
 func scalarNeedsQuoting(s string) bool {
 	return s != strings.TrimSpace(s) ||
-		strings.ContainsAny(s, "\n\r") ||
+		strings.ContainsAny(s, "\n\r:") ||
 		strings.HasPrefix(s, `"`) || strings.HasPrefix(s, "'")
 }
 

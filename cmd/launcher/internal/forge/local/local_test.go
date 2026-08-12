@@ -170,8 +170,9 @@ func TestLocalIssue_RenderParseRoundTrip_Abandoned(t *testing.T) {
 
 // TestLocalIssue_RenderParseRoundTrip_ScalarEscaping covers the remaining
 // scalarNeedsQuoting/renderScalar/unquote escaping vectors — a tab, a
-// carriage return, a leading double-quote, and an embedded double-quote —
-// each carried through render() then parseLocalIssue as the Title field.
+// carriage return, a leading double-quote, an embedded double-quote, and an
+// embedded colon-space — each carried through render() then parseLocalIssue
+// as the Title field.
 func TestLocalIssue_RenderParseRoundTrip_ScalarEscaping(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -181,6 +182,7 @@ func TestLocalIssue_RenderParseRoundTrip_ScalarEscaping(t *testing.T) {
 		{name: "carriage return", title: "a\rb"},
 		{name: "leading double-quote", title: `"leading`},
 		{name: "embedded double-quote", title: `a"b`},
+		{name: "embedded colon-space", title: "feat: implementing a thing"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -202,6 +204,20 @@ func TestLocalIssue_RenderParseRoundTrip_ScalarEscaping(t *testing.T) {
 			}
 			if !reflect.DeepEqual(got, li) {
 				t.Errorf("round trip = %+v, want %+v", got, li)
+			}
+			// A colon-space is a YAML mapping separator; a title containing
+			// one must render quoted or the frontmatter is invalid YAML even
+			// though this package's own tolerant first-colon-split parser
+			// happens to round-trip it anyway.
+			if strings.Contains(tc.title, ": ") {
+				for _, line := range strings.Split(li.render(), "\n") {
+					if rest, ok := strings.CutPrefix(line, "title: "); ok {
+						if !strings.HasPrefix(rest, `"`) {
+							t.Errorf("title line %q not quoted; unquoted colon-space produces invalid YAML", line)
+						}
+						break
+					}
+				}
 			}
 		})
 	}
