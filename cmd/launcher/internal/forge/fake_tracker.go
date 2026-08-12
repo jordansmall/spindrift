@@ -122,6 +122,15 @@ type IssueTrackerFake struct {
 	FlagAbandonedCalls []string
 	// FlagAbandonedErr, if non-nil, is returned by every FlagAbandoned call.
 	FlagAbandonedErr error
+
+	// PriorClaimStates, keyed by issue number, scripts what a real tracker's
+	// optional PriorClaimStateReader surface would read back from the issue's
+	// timeline for the terminal label a claim stripped immediately before —
+	// unset (key absent) means "not found" (ok=false), matching a fresh
+	// dispatch that carries no prior terminal label at all.
+	PriorClaimStates map[string]DispatchState
+	// PriorClaimStateErr, if non-nil, is returned by every PriorClaimState call.
+	PriorClaimStateErr error
 }
 
 var _ IssueTracker = (*IssueTrackerFake)(nil)

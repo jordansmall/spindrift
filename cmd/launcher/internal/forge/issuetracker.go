@@ -270,6 +270,29 @@ type SeamLister interface {
 	AllIssues() ([]Issue, error)
 }
 
+// PriorClaimStateReader is the optional IssueTracker surface for adapters
+// that can look up the terminal dispatch state (Complete or Failed) an issue
+// carried immediately before its most recent claim onto InProgress — state a
+// TransitionState(_, InProgress) call's ClaimRemoveLabels strip destroys from
+// the issue's current label set the instant the claim runs. recoverByNumber
+// (cmd/launcher/main.go) is the intended caller: agent-recover.yml's claim
+// step runs host-side, ahead of the launcher, so by the time recoverByNumber
+// ever sees the issue, its current labels already read agent-in-progress
+// regardless of what came before — this is the launcher's only route back to
+// "what was this issue before the claim wiped it," letting a terminal
+// recover failure restore a prior agent-complete rather than downgrade it to
+// agent-failed (issue #2477). Callers discover it with a type assertion —
+// `pr, ok := it.(PriorClaimStateReader)` — the same optional-interface
+// pattern LandingRecorder and IssueCloser use.
+type PriorClaimStateReader interface {
+	// PriorClaimState returns the terminal DispatchState (Complete or
+	// Failed) the issue carried immediately before its most recent claim
+	// onto InProgress, and whether one was found at all — false when the
+	// issue's history carries no terminal-label removal (e.g. a fresh
+	// dispatch that was never previously terminal).
+	PriorClaimState(num string) (DispatchState, bool, error)
+}
+
 // LabeledTracker is the optional IssueTracker surface for adapters whose
 // entire DispatchState space reduces to one DispatchLabels value (github,
 // local, and the Fake test double). PickIssue's double-box guard (#1742)
