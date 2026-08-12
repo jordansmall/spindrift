@@ -570,6 +570,59 @@ func TestFake_TouchesOf_ParsesBody(t *testing.T) {
 	}
 }
 
+// --- PriorClaimState tests ---
+
+// TestFake_ImplementsPriorClaimStateReader asserts that *Fake satisfies the
+// optional PriorClaimStateReader surface (issue #2477).
+func TestFake_ImplementsPriorClaimStateReader(t *testing.T) {
+	var _ forge.PriorClaimStateReader = forge.NewFake()
+}
+
+// TestFake_PriorClaimState_UnscriptedReturnsNotFound verifies that an issue
+// number with no PriorClaimStates entry reports ok=false, err=nil — the
+// "fresh dispatch, never previously terminal" case.
+func TestFake_PriorClaimState_UnscriptedReturnsNotFound(t *testing.T) {
+	f := forge.NewFake()
+
+	_, ok, err := f.PriorClaimState("42")
+	if err != nil {
+		t.Fatalf("PriorClaimState: %v", err)
+	}
+	if ok {
+		t.Error("want ok=false for unscripted issue, got true")
+	}
+}
+
+// TestFake_PriorClaimState_ScriptedReturnsState verifies that a scripted
+// PriorClaimStates entry is returned with ok=true.
+func TestFake_PriorClaimState_ScriptedReturnsState(t *testing.T) {
+	f := forge.NewFake()
+	f.PriorClaimStates = map[string]forge.DispatchState{"42": forge.Complete}
+
+	state, ok, err := f.PriorClaimState("42")
+	if err != nil {
+		t.Fatalf("PriorClaimState: %v", err)
+	}
+	if !ok {
+		t.Fatal("want ok=true for scripted issue, got false")
+	}
+	if state != forge.Complete {
+		t.Errorf("state = %v, want Complete", state)
+	}
+}
+
+// TestFake_PriorClaimState_Err verifies that a non-nil PriorClaimStateErr is
+// returned instead of consulting PriorClaimStates.
+func TestFake_PriorClaimState_Err(t *testing.T) {
+	f := forge.NewFake()
+	f.PriorClaimStateErr = forge.ErrAuthFailure
+
+	_, _, err := f.PriorClaimState("42")
+	if err == nil {
+		t.Fatal("want error, got nil")
+	}
+}
+
 // --- ParseBlockerRefs tests (moved from main package) ---
 
 func TestParseBlockerRefs_Empty(t *testing.T) {

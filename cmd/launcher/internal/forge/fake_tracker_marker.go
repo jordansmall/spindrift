@@ -72,3 +72,15 @@ func (tf *IssueTrackerFake) FlagAbandoned(num string) error {
 	tf.issues[num] = iss
 	return nil
 }
+
+// PriorClaimState implements the optional PriorClaimStateReader surface,
+// returning the issue's scripted PriorClaimStates entry.
+func (tf *IssueTrackerFake) PriorClaimState(num string) (DispatchState, bool, error) {
+	tf.mu.Lock()
+	defer tf.mu.Unlock()
+	if tf.PriorClaimStateErr != nil {
+		return Untriaged, false, tf.PriorClaimStateErr
+	}
+	state, ok := tf.PriorClaimStates[num]
+	return state, ok, nil
+}
