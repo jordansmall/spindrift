@@ -136,29 +136,34 @@ func TestSettleAdopted_RedFollowsSelfHeal(t *testing.T) {
 	}
 }
 
-// TestSettleAdopted_StaleSuccessNeverMerges verifies the issue #1652 fix
-// directly at the SettleAdopted seam: an adopted PR whose rollup reads
+// TestSettleAdopted_StaleSuccessMergesAfterWindow verifies the issue #2475
+// fix directly at the SettleAdopted seam: an adopted PR whose rollup reads
 // SUCCESS on every poll, with no PENDING/EXPECTED/NONE ever proving this
-// run's own checks registered, must never merge — the gate cannot tell it
-// apart from a rollup inherited from an earlier attempt, so it times out and
-// demotes the issue instead of trusting the inherited green.
-func TestSettleAdopted_StaleSuccessNeverMerges(t *testing.T) {
+// run's own checks registered, still merges once the bounded registration
+// window (registrationWindowPolls) elapses — a settled SUCCESS that never
+// produces a fresh non-terminal poll is treated as proof CI already
+// finished, not proof it's still mid-registration, so it no longer times out
+// and demotes the issue the way issue #1652's original absolute guard did.
+func TestSettleAdopted_StaleSuccessMergesAfterWindow(t *testing.T) {
 	c := baseConfig()
 	c.MergePollTimeout = 3
 	c.MaxFixAttempts = 0
 	fc := forge.NewFake(testDispatchLabels)
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
-	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
+	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess, forge.StateSuccess, forge.StateSuccess, forge.StateSuccess})
 	s := New(c, fc, fc)
 
 	s.SettleAdopted(dispatch.NewFake(), "1", 0, testPR)
 
-	if fc.Merged != "" {
-		t.Errorf("expected no merge on an unregistered SUCCESS-only rollup; fc.Merged=%q", fc.Merged)
+	if fc.Merged != testPR {
+		t.Errorf("expected the settled SUCCESS rollup to merge once the registration window elapses; fc.Merged=%q, want %q", fc.Merged, testPR)
 	}
 	iss, _ := fc.Issue("1")
-	if !containsLabel(iss.Labels, "agent-failed") {
-		t.Errorf("issue must be demoted to agent-failed; labels=%v", iss.Labels)
+	if !containsLabel(iss.Labels, "agent-complete") {
+		t.Errorf("issue must reach agent-complete after the window-elapsed merge; labels=%v", iss.Labels)
+	}
+	if containsLabel(iss.Labels, "agent-failed") {
+		t.Errorf("issue must NOT be demoted to agent-failed; labels=%v", iss.Labels)
 	}
 }
 

@@ -124,15 +124,26 @@ func TestGateToGreen(t *testing.T) {
 			want:                gateGreen,
 		},
 		{
-			// Without ever observing a non-terminal state, requireRegistration
-			// never trusts the stale SUCCESS and times out rather than merging
-			// on unconfirmed evidence.
-			name:                "requireRegistration never trusts a SUCCESS that never re-registers",
+			// issue #2475: a PR whose checks settled to SUCCESS long ago never
+			// produces a non-terminal poll again, so the registration guard
+			// must not withhold trust forever — after registrationWindowPolls
+			// intervals of nothing but SUCCESS, gateToGreen treats that as
+			// proof CI already finished and accepts it.
+			name:                "requireRegistration accepts a settled SUCCESS once the registration window elapses",
 			timeout:             3,
 			requireRegistration: true,
 			checkStates:         []forge.RollupState{forge.StateSuccess, forge.StateSuccess, forge.StateSuccess, forge.StateSuccess, forge.StateSuccess},
-			want:                gateTerminal,
-			wantReasonContains:  "ci-timeout:",
+			want:                gateGreen,
+		},
+		{
+			// The registration window is a small, bounded number of polls, not
+			// a side effect of a tight deadline: a settled SUCCESS resolves to
+			// green long before a large MergePollTimeout would ever be hit.
+			name:                "requireRegistration accepts a settled SUCCESS well before a large deadline elapses",
+			timeout:             100,
+			requireRegistration: true,
+			checkStates:         []forge.RollupState{forge.StateSuccess, forge.StateSuccess, forge.StateSuccess, forge.StateSuccess, forge.StateSuccess},
+			want:                gateGreen,
 		},
 	}
 	for _, tc := range cases {
