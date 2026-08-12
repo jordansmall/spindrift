@@ -30,6 +30,7 @@ func TestParseResetsAtText(t *testing.T) {
 	tests := []struct {
 		name    string
 		content string
+		now     time.Time // zero value means "use the shared Wednesday-10am now above"
 		want    *time.Time
 	}{
 		{
@@ -38,9 +39,9 @@ func TestParseResetsAtText(t *testing.T) {
 			want:    timePtr(time.Date(2026, 8, 12, 18, 30, 0, 0, time.UTC)),
 		},
 		{
-			name:    "bare clock time earlier today rolls to tomorrow",
+			name:    "bare clock time earlier today is stale, no reset time",
 			content: "You've hit your session limit · resets 5:00am (UTC)",
-			want:    timePtr(time.Date(2026, 8, 13, 5, 0, 0, 0, time.UTC)),
+			want:    nil,
 		},
 		{
 			name:    "weekday matches now's weekday, time later today",
@@ -48,14 +49,26 @@ func TestParseResetsAtText(t *testing.T) {
 			want:    timePtr(time.Date(2026, 8, 12, 18, 30, 0, 0, time.UTC)),
 		},
 		{
-			name:    "weekday matches now's weekday, time earlier today rolls a full week",
+			name:    "weekday matches now's weekday, time earlier today is stale, no reset time",
 			content: "You've hit your weekly limit · resets Wed 5:00am (UTC)",
-			want:    timePtr(time.Date(2026, 8, 19, 5, 0, 0, 0, time.UTC)),
+			want:    nil,
 		},
 		{
 			name:    "weekday different from now's weekday",
 			content: "You've hit your weekly limit · resets Mon 12:00am (UTC)",
 			want:    timePtr(time.Date(2026, 8, 17, 0, 0, 0, 0, time.UTC)),
+		},
+		{
+			name:    "bare clock time just missed by minutes is stale, no reset time",
+			content: "You've hit your session limit · resets 11:10pm (UTC)",
+			now:     time.Date(2026, 8, 12, 23, 15, 0, 0, time.UTC),
+			want:    nil,
+		},
+		{
+			name:    "weekday time just missed on the target weekday is stale, no reset time",
+			content: "You've hit your weekly limit · resets Mon 12:00am (UTC)",
+			now:     time.Date(2026, 8, 17, 0, 1, 0, 0, time.UTC),
+			want:    nil,
 		},
 		{
 			name:    "12:00am edge case parses to 00:00",
@@ -96,9 +109,37 @@ func TestParseResetsAtText(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := parseResetsAtText(tt.content, now)
+			rowNow := now
+			if !tt.now.IsZero() {
+				rowNow = tt.now
+			}
+			got := parseResetsAtText(tt.content, rowNow)
 			assertTimePtrEqual(t, got, tt.want)
 		})
+	}
+}
+
+// TestClassifyAt_PinnedClock_PlainTextResetsAt pins classifyAt's now
+// parameter to a fixed instant and asserts an exact non-nil ResetAt epoch
+// for a plain-text OAuth reset marker with no date component (issue #2443).
+// Sibling to TestClassify_OAuthPlainTextResetsAt_ExactEpoch (which covers all
+// three OAuth plain-text markers via the exported claude.ClassifyAt); this
+// one exercises the unexported classifyAt directly for the session-limit case.
+func TestClassifyAt_PinnedClock_PlainTextResetsAt(t *testing.T) {
+	now := time.Date(2026, 8, 12, 10, 0, 0, 0, time.UTC)
+	logPath := WriteLog(t, `You've hit your session limit · resets 6:30pm (UTC)`)
+
+	c, err := classifyAt(logPath, now)
+	if err != nil {
+		t.Fatalf("classifyAt() error: %v", err)
+	}
+
+	want := time.Date(2026, 8, 12, 18, 30, 0, 0, time.UTC)
+	if c.ResetAt == nil {
+		t.Fatal("ResetAt: got nil, want non-nil")
+	}
+	if !c.ResetAt.Equal(want) {
+		t.Errorf("ResetAt: got %v, want %v", *c.ResetAt, want)
 	}
 }
 
