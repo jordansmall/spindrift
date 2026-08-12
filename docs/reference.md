@@ -1275,14 +1275,18 @@ artifact, not a growing transcript:
   pass left off without reading its transcript.
 - **Code-owned caps.** `--max-review-rounds` (default 3) caps additional
   passes a `BLOCK` verdict may trigger; `--max-slices` (default 9) caps the
-  total `driver-exec` invocation count regardless of verdict; either set to
+  implement/fix/review invocation count regardless of verdict; either set to
   `0` disables that cap. Every `driver-exec` invocation this loop makes —
   implement, fix, review, and the terminal land pass alike — increments the
-  same pass counter and counts identically toward `--max-slices`;
-  `--max-review-rounds` tracks a separate `reviewRounds` counter that only
-  increments when a review pass's verdict is `BLOCK`. The loop stops the
-  instant a pass's log carries a terminal `SPINDRIFT_OUTCOME` line —
-  unconditionally, ahead of either cap.
+  same pass counter, but `--max-slices` only bounds the passes that precede
+  the cap firing: the case fires once that counter reaches `--max-slices`,
+  and rather than stopping there it commits the run to one further pass
+  beyond the cap — the terminal land pass (issue #2457) — so a run whose
+  `--max-slices` cap fires makes `--max-slices + 1` total `driver-exec`
+  invocations, not `--max-slices`. `--max-review-rounds` tracks a separate
+  `reviewRounds` counter that only increments when a review pass's verdict is
+  `BLOCK`. The loop stops the instant a pass's log carries a terminal
+  `SPINDRIFT_OUTCOME` line — unconditionally, ahead of either cap.
 
   Because both counters advance over the same pass sequence,
   `--max-review-rounds` can only actually reach `N` rounds — rather than
