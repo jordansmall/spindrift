@@ -142,6 +142,32 @@ setup() {
   grep -q -- 'issue edit 1 --repo owner/repo --add-label agent-complete --remove-label agent-in-progress' "$GH_LOG"
 }
 
+@test "recover: settled-green PR (never re-registers) is adopted and merged" {
+  # issue #2475: recover adopting a PR whose checks settled to SUCCESS well
+  # before this run started watching used to burn the full
+  # MERGE_POLL_TIMEOUT waiting for a non-terminal state that never comes
+  # (issue #1652's guard) and park the issue agent-failed. gateToGreen now
+  # bounds that wait to a small registration window (registrationWindowPolls
+  # poll-intervals): a rollup that reads SUCCESS on every single poll — never
+  # PENDING/EXPECTED/NONE — reaches green once the window elapses. Unlike the
+  # sibling "green PR is adopted and merged" test above, this sequence never
+  # leads with PENDING.
+  export MERGE_MODE=immediate
+  export FAKE_PODMAN_IMAGE_PRESENT=1
+  export FAKE_GH_ISSUES=$'1\tStranded issue'
+  printf '1\tagent-in-progress\n' >> "$GH_LOG.state"
+  export FAKE_GH_PR_LIST_1="https://github.com/owner/repo/pull/1"
+  export MERGE_POLL_INTERVAL=0
+  export MERGE_POLL_TIMEOUT=100
+  export FAKE_GH_GRAPHQL_ROLLUP_SEQ_1="SUCCESS,SUCCESS,SUCCESS,SUCCESS,SUCCESS"
+  run "$SPINDRIFT_CMD" recover 1
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"status=adopted"* ]]
+  [[ "$output" == *"status=verified-merged"* ]]
+  grep -q 'pr merge' "$GH_LOG"
+  grep -q -- 'issue edit 1 --repo owner/repo --add-label agent-complete --remove-label agent-in-progress' "$GH_LOG"
+}
+
 @test "recover: draft PR is adopted and merged" {
   export MERGE_MODE=immediate
   export FAKE_PODMAN_IMAGE_PRESENT=1
