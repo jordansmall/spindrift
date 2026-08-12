@@ -38,6 +38,21 @@ type RunState struct {
 	// so the next fix pass's seeded prompt can carry the reviewer's actual
 	// findings, not just the fact that it blocked (issue #2037).
 	ReviewFindings string `json:"review_findings"`
+	// TerminalLand is true once this run has committed to running its one
+	// allowed terminal land pass -- set when a cap (maxSlices,
+	// maxReviewRounds, or a review pass producing no verdict) would
+	// otherwise stop the loop with no terminal outcome. Instead of exiting
+	// outcome-less, the loop runs exactly one more implement/fix-role pass
+	// seeded with this flag, so a run that exhausts its budget still lands
+	// and reports an honest outcome rather than stopping silently (issue
+	// #2457).
+	TerminalLand bool `json:"terminal_land"`
+	// CapFired is a short human-readable name of which cap or condition
+	// triggered TerminalLand (e.g. "max slices reached", "max review
+	// rounds reached", "no verdict") -- carried into the seeded prompt so
+	// the terminal pass can name the reason it is running instead of the
+	// usual next step. Empty when TerminalLand is false (issue #2457).
+	CapFired string `json:"cap_fired"`
 }
 
 // ReadRunState reads and parses the run-state artifact at path. An empty

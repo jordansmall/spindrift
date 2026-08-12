@@ -286,6 +286,14 @@ func runWithReviewPass(cfg config, stdout io.Writer) (int, error) {
 		switch {
 		case hasOutcome:
 			decision, reason = "stop", "outcome reached"
+		// state.TerminalLand is already true only when this very pass WAS the
+		// terminal land pass a prior iteration of this loop committed to (see
+		// the cap case below) and it still produced no outcome. That bounds
+		// the mechanism at exactly one extra pass -- without this case the
+		// loop would keep re-entering the maxSlices case below forever, since
+		// TerminalLand alone doesn't stop it.
+		case state.TerminalLand:
+			decision, reason = "stop", "terminal land pass reached no outcome"
 		// After an APPROVE verdict the land pass above runs exactly once (see
 		// the review decision block below): a land pass cut off before its
 		// own terminal SPINDRIFT_OUTCOME is recovered by the within-pass
@@ -298,12 +306,27 @@ func runWithReviewPass(cfg config, stdout io.Writer) (int, error) {
 		// why the run ended.
 		case state.LastVerdict == "APPROVE":
 			decision, reason = "stop", "land pass reached no terminal outcome after APPROVE"
+		// Issue #2457: rather than exiting outcome-less the first time the
+		// coarse maxSlices budget runs out mid-cycle, commit this run to one
+		// more terminal "land" pass instead of stopping outright -- the case
+		// above is what actually bounds it to exactly one.
 		case cfg.maxSlices > 0 && pass >= cfg.maxSlices:
-			decision, reason = "stop", "max slices reached"
+			state.TerminalLand = true
+			state.CapFired = "max slices reached"
+			decision, reason = "continue", "max slices reached; running terminal land pass"
 		}
 		fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "decision", Decision: decision, Reason: reason}))
 		if decision == "stop" {
 			break
+		}
+		if state.TerminalLand {
+			// The cap already used up this run's budget -- skip the review
+			// pass this iteration entirely rather than spending one more
+			// driver-exec invocation on it; the loop's own bound (the
+			// state.TerminalLand case above) guarantees this land pass is
+			// the run's last one regardless of what it finds.
+			implRole = "land"
+			continue
 		}
 
 		// ---- review pass: cfg.reviewPromptFile, always a fresh session ----
@@ -345,12 +368,29 @@ func runWithReviewPass(cfg config, stdout io.Writer) (int, error) {
 		// #2069).
 		decision, reason = "continue", ""
 		switch {
+		// Issue #2457: a review pass that never resolved into a verdict at
+		// all (a malfunctioning/truncated review session), the coarse
+		// maxSlices backstop, and the maxReviewRounds cap all used to stop
+		// the run outright here. Now each commits the run to one more
+		// terminal "land" pass instead -- mirroring the implement/fix
+		// block's own maxSlices case above -- so a run that exhausts its
+		// budget still gets a chance to land and report an honest outcome
+		// rather than exiting outcome-less. The implement/fix block's own
+		// state.TerminalLand case (already true by the time this land pass's
+		// own iteration reaches it) is what actually bounds this to exactly
+		// one extra pass.
 		case reviewVerdict == "":
-			decision, reason = "stop", "no verdict"
+			state.TerminalLand = true
+			state.CapFired = "no verdict"
+			decision, reason = "continue", "no verdict; running terminal land pass"
 		case cfg.maxSlices > 0 && pass >= cfg.maxSlices:
-			decision, reason = "stop", "max slices reached"
+			state.TerminalLand = true
+			state.CapFired = "max slices reached"
+			decision, reason = "continue", "max slices reached; running terminal land pass"
 		case reviewVerdict == "BLOCK" && cfg.maxReviewRounds > 0 && reviewRounds >= cfg.maxReviewRounds:
-			decision, reason = "stop", "max review rounds reached"
+			state.TerminalLand = true
+			state.CapFired = "max review rounds reached"
+			decision, reason = "continue", "max review rounds reached; running terminal land pass"
 		}
 		fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "decision", Decision: decision, Reason: reason}))
 		if decision == "stop" {
@@ -359,7 +399,11 @@ func runWithReviewPass(cfg config, stdout io.Writer) (int, error) {
 		if reviewVerdict == "BLOCK" {
 			reviewRounds++
 		}
-		implRole = "fix"
+		if state.TerminalLand {
+			implRole = "land"
+		} else {
+			implRole = "fix"
+		}
 	}
 
 	return rc, nil
@@ -377,7 +421,7 @@ func runWithReviewPass(cfg config, stdout io.Writer) (int, error) {
 // pass, nothing carried forward yet) this returns promptFile unchanged and
 // creates no temp file.
 func seedPromptFromState(promptFile string, state RunState) (string, error) {
-	if state.LastVerdict == "" && len(state.DoneSlices) == 0 && len(state.RemainingSlices) == 0 && state.ScoutBriefPath == "" && state.ReviewFindings == "" {
+	if state.LastVerdict == "" && len(state.DoneSlices) == 0 && len(state.RemainingSlices) == 0 && state.ScoutBriefPath == "" && state.ReviewFindings == "" && !state.TerminalLand {
 		return promptFile, nil
 	}
 
@@ -404,6 +448,17 @@ func seedPromptFromState(promptFile string, state RunState) (string, error) {
 	}
 	if state.ReviewFindings != "" {
 		fmt.Fprintf(&b, "- Reviewer findings:\n\n%s\n", state.ReviewFindings)
+	}
+	if state.TerminalLand {
+		b.WriteString("\n")
+		fmt.Fprintf(&b, "This is the run's terminal pass: %s, and the run has\n", state.CapFired)
+		b.WriteString("committed to this one last implement/fix pass instead of stopping\n")
+		b.WriteString("outcome-less. This overrides review-loop-orchestrator.md's \"stop your\n")
+		b.WriteString("turn now, right after COMMIT\" instruction for a non-APPROVE-seeded\n")
+		b.WriteString("pass -- on this pass, proceed through FILE ISSUES, LAND THE CHANGE,\n")
+		b.WriteString("OPEN A PULL REQUEST, and OUTCOME regardless of verdict. If blocking\n")
+		b.WriteString("review findings remain unresolved, land anyway and report that\n")
+		b.WriteString("plainly in the OUTCOME note as a real status, not a bare success.\n")
 	}
 	b.WriteString("\n---\n\n")
 	b.Write(original)

@@ -1435,9 +1435,14 @@ exit 0
 
 // TestRunWithReviewPassTerminatesOnMaxReviewRoundsCap verifies maxReviewRounds
 // (issue #2037) bounds the review-pass loop the same way it already bounds
-// the legacy single loop: a review pass that BLOCKs every time stops once
-// that many additional BLOCK-triggered fix passes have run, each still
-// paired with its own review pass.
+// the legacy single loop: a review pass that BLOCKs every time no longer
+// stops the run outright once that many additional BLOCK-triggered fix
+// passes have run -- issue #2457 commits it to one more terminal "land" pass
+// instead (call 7, pass 7), skipping the review pass for that extra lap; this
+// fake driver never emits SPINDRIFT_OUTCOME on any call, so that land pass
+// itself produces no outcome either, and the run's own bound (exactly one
+// land pass, enforced by the implement/fix block's own state.TerminalLand
+// case) stops it there.
 func TestRunWithReviewPassTerminatesOnMaxReviewRoundsCap(t *testing.T) {
 	dir := t.TempDir()
 	callLog := filepath.Join(dir, "calls.log")
@@ -1480,19 +1485,126 @@ exit 0
 		t.Fatalf("read callLog: %v", err)
 	}
 	lines := strings.Split(strings.TrimRight(string(calls), "\n"), "\n")
-	// implement1, review1(BLOCK), fix2, review2(BLOCK), fix3, review3(BLOCK, cap hit)
-	if len(lines) != 6 {
-		t.Fatalf("driver-exec invocation count = %d, want 6 (log: %q)", len(lines), calls)
+	// implement1, review1(BLOCK), fix2, review2(BLOCK), fix3, review3(BLOCK,
+	// cap hit -> continue), land4 (no outcome -> stop)
+	if len(lines) != 7 {
+		t.Fatalf("driver-exec invocation count = %d, want 7 (log: %q)", len(lines), calls)
 	}
-	if !strings.Contains(stdout.String(), `"decision":"stop","reason":"max review rounds reached"`) {
-		t.Errorf("stdout = %q, want the cap-reached stop reason", stdout.String())
+	if !strings.Contains(stdout.String(), `"decision":"continue","reason":"max review rounds reached; running terminal land pass"`) {
+		t.Errorf("stdout = %q, want the cap-fired continue reason naming the cap and the land pass that follows", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), `"spindrift_op":{"op":"pass_start","pass":7,"role":"land"}`) {
+		t.Errorf("stdout = %q, want the terminal land pass's own pass_start with role \"land\"", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), `"decision":"stop","reason":"terminal land pass reached no outcome"`) {
+		t.Errorf("stdout = %q, want the terminal-land-pass-no-outcome stop reason", stdout.String())
+	}
+}
+
+// TestRunWithReviewPassTerminalLandSeededWithUnresolvedBlockingFindings
+// verifies the issue #2457 acceptance criterion directly: a run that
+// exhausts its budget with the reviewer's own blocking findings still
+// unresolved must land seeded with enough information to say so honestly in
+// its own outcome, rather than landing blind or exiting outcome-less. The
+// review pass BLOCKs with real findings text on every round until
+// maxReviewRounds fires; the terminal land pass's own seeded --prompt-file
+// (the run's last driver-exec invocation) must carry both the terminal-land
+// directive (naming the cap and overriding the stop-after-COMMIT
+// instruction) and the reviewer's actual "## Blocking" findings text
+// (state.ReviewFindings flowing through seedPromptFromState), not just a
+// bare "land anyway" instruction with no findings context at all.
+func TestRunWithReviewPassTerminalLandSeededWithUnresolvedBlockingFindings(t *testing.T) {
+	dir := t.TempDir()
+	callLog := filepath.Join(dir, "calls.log")
+	body := `: > "$DRIVER_LOG_PATH"
+n=$(wc -l < "` + callLog + `")
+if [ $((n % 2)) -eq 0 ]; then
+  printf '%s' '` + streamJSONOutcomeLine("VERDICT: BLOCK\\n\\n## Blocking\\n- run.go:1 -- bug\\n\\n## Non-blocking\\n- none") + `' | tee -a "$DRIVER_LOG_PATH"
+fi
+exit 0
+`
+	writeFakeDriverExec(t, dir, callLog, body)
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	promptFile := filepath.Join(dir, "prompt.txt")
+	if err := os.WriteFile(promptFile, []byte("ORIGINAL PROMPT TEXT"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	reviewPromptFile := filepath.Join(dir, "review-prompt.txt")
+	if err := os.WriteFile(reviewPromptFile, []byte("review prompt"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config{
+		promptFile:       promptFile,
+		reviewPromptFile: reviewPromptFile,
+		driverBin:        "claude",
+		issue:            "7",
+		logPath:          filepath.Join(dir, "stream.log"),
+		heartbeatLog:     filepath.Join(dir, "heartbeat.log"),
+		stateFile:        filepath.Join(dir, "run-state.json"),
+		maxReviewRounds:  1,
+		maxSlices:        0,
+	}
+
+	var stdout bytes.Buffer
+	if _, err := run(cfg, &stdout); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	calls, err := os.ReadFile(callLog)
+	if err != nil {
+		t.Fatalf("read callLog: %v", err)
+	}
+	lines := strings.Split(strings.TrimRight(string(calls), "\n"), "\n")
+	// pass1 implement, pass2 review(BLOCK, round 1), pass3 fix,
+	// pass4 review(BLOCK, cap hit -> continue), pass5 land (under test).
+	if len(lines) != 5 {
+		t.Fatalf("driver-exec invocation count = %d, want 5 (log: %q)", len(lines), calls)
+	}
+	if !strings.Contains(stdout.String(), `"decision":"continue","reason":"max review rounds reached; running terminal land pass"`) {
+		t.Errorf("stdout = %q, want the cap-fired continue reason naming the cap and the land pass that follows", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), `"spindrift_op":{"op":"pass_start","pass":5,"role":"land"}`) {
+		t.Errorf("stdout = %q, want the terminal land pass's own pass_start with role \"land\"", stdout.String())
+	}
+
+	landPromptFile := flagValue(lines[4], "--prompt-file")
+	if landPromptFile == "" || landPromptFile == promptFile {
+		t.Fatalf("land pass --prompt-file = %q, want a fresh seeded file distinct from %q", landPromptFile, promptFile)
+	}
+	seeded, err := os.ReadFile(landPromptFile)
+	if err != nil {
+		t.Fatalf("read seeded land prompt: %v", err)
+	}
+	gotStr := string(seeded)
+	for _, want := range []string{
+		// The terminal-land directive: names the cap, overrides stop-after-COMMIT.
+		"max review rounds reached",
+		"terminal pass",
+		"COMMIT",
+		"OUTCOME",
+		// The reviewer's own unresolved blocking findings, carried through
+		// state.ReviewFindings -- not just a bare "land anyway" instruction.
+		"## Blocking",
+		"run.go:1 -- bug",
+	} {
+		if !strings.Contains(gotStr, want) {
+			t.Errorf("land pass seeded prompt = %q, want it to contain %q", gotStr, want)
+		}
 	}
 }
 
 // TestRunWithReviewPassTerminatesOnMaxSlicesCap verifies maxSlices (issue
 // #2037) is a coarser backstop on the review-pass loop too, counted across
 // both implement/fix and review invocations -- not reset or doubled by the
-// new pass kind.
+// new pass kind. With this fake driver's alternating BLOCK-on-even-call
+// shape, the cap first bites on call 3, an implement/fix ("fix" role) pass
+// (pass 3, odd): rather than stopping outright, issue #2457 commits the run
+// to one more terminal "land" pass (call 4) instead of exiting outcome-less
+// -- and since this fake driver never emits SPINDRIFT_OUTCOME on any call,
+// that land pass itself produces no outcome either, so the run's own bound
+// (exactly one land pass) stops it there instead of looping forever.
 func TestRunWithReviewPassTerminatesOnMaxSlicesCap(t *testing.T) {
 	dir := t.TempDir()
 	callLog := filepath.Join(dir, "calls.log")
@@ -1535,19 +1647,121 @@ exit 0
 		t.Fatalf("read callLog: %v", err)
 	}
 	lines := strings.Split(strings.TrimRight(string(calls), "\n"), "\n")
-	if len(lines) != 3 {
-		t.Fatalf("driver-exec invocation count = %d, want 3 (maxSlices cap, log: %q)", len(lines), calls)
+	if len(lines) != 4 {
+		t.Fatalf("driver-exec invocation count = %d, want 4 (maxSlices cap on pass 3, plus its terminal land pass, log: %q)", len(lines), calls)
 	}
-	if !strings.Contains(stdout.String(), `"decision":"stop","reason":"max slices reached"`) {
-		t.Errorf("stdout = %q, want the cap-reached stop reason", stdout.String())
+	if !strings.Contains(stdout.String(), `"decision":"continue","reason":"max slices reached; running terminal land pass"`) {
+		t.Errorf("stdout = %q, want the cap-fired continue reason naming the cap and the land pass that follows", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), `"spindrift_op":{"op":"pass_start","pass":4,"role":"land"}`) {
+		t.Errorf("stdout = %q, want the terminal land pass's own pass_start with role \"land\"", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), `"decision":"stop","reason":"terminal land pass reached no outcome"`) {
+		t.Errorf("stdout = %q, want the terminal-land-pass-no-outcome stop reason", stdout.String())
+	}
+}
+
+// TestRunWithReviewPassRunsTerminalLandPassWhenMaxSlicesCapHitsImplementPass
+// verifies issue #2457's core mechanism: when the maxSlices cap first fires
+// on the implement/fix pass block itself (rather than the review pass
+// block, which is a separate, later slice's cap check), the loop does not
+// exit outcome-less. It commits to exactly one more implement-role pass --
+// a terminal "land" pass -- skipping the review pass entirely for that
+// extra lap, and stops cleanly once that land pass reports its own outcome.
+// maxSlices is tuned to 1 so the cap already fires on pass 1, the very
+// first implement pass, before a review pass ever runs.
+func TestRunWithReviewPassRunsTerminalLandPassWhenMaxSlicesCapHitsImplementPass(t *testing.T) {
+	dir := t.TempDir()
+	callLog := filepath.Join(dir, "calls.log")
+	body := `: > "$DRIVER_LOG_PATH"
+n=$(wc -l < "` + callLog + `")
+if [ "$n" -eq 2 ]; then
+  printf '%s' '` + streamJSONOutcomeLine("SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=done nonce=abc") + `' | tee -a "$DRIVER_LOG_PATH"
+fi
+exit 0
+`
+	writeFakeDriverExec(t, dir, callLog, body)
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	promptFile := filepath.Join(dir, "prompt.txt")
+	if err := os.WriteFile(promptFile, []byte("prompt"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	reviewPromptFile := filepath.Join(dir, "review-prompt.txt")
+	if err := os.WriteFile(reviewPromptFile, []byte("review prompt"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stateFile := filepath.Join(dir, "run-state.json")
+
+	cfg := config{
+		promptFile:       promptFile,
+		reviewPromptFile: reviewPromptFile,
+		driverBin:        "claude",
+		issue:            "7",
+		logPath:          filepath.Join(dir, "stream.log"),
+		heartbeatLog:     filepath.Join(dir, "heartbeat.log"),
+		stateFile:        stateFile,
+		maxReviewRounds:  0,
+		maxSlices:        1,
+	}
+
+	var stdout bytes.Buffer
+	rc, err := run(cfg, &stdout)
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if rc != 0 {
+		t.Errorf("exit code = %d, want 0", rc)
+	}
+
+	calls, err := os.ReadFile(callLog)
+	if err != nil {
+		t.Fatalf("read callLog: %v", err)
+	}
+	lines := strings.Split(strings.TrimRight(string(calls), "\n"), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("driver-exec invocation count = %d, want 2 (cap-hitting implement pass, plus its terminal land pass, log: %q)", len(lines), calls)
+	}
+
+	if !strings.Contains(stdout.String(), `"spindrift_op":{"op":"pass_start","pass":1,"role":"implement"}`) {
+		t.Errorf("stdout = %q, want pass 1's own pass_start", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), `"decision":"continue","reason":"max slices reached; running terminal land pass"`) {
+		t.Errorf("stdout = %q, want the cap-fired continue reason naming the cap and the land pass that follows", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), `"spindrift_op":{"op":"pass_start","pass":2,"role":"land"}`) {
+		t.Errorf("stdout = %q, want the terminal land pass's own pass_start with role \"land\"", stdout.String())
+	}
+	// No review pass ever runs -- the budget the cap already used up is not
+	// spent on one more driver-exec invocation.
+	if strings.Contains(stdout.String(), `"role":"review"`) {
+		t.Errorf("stdout = %q, want no review pass_start (cap skips straight to the land pass)", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), `"decision":"stop","reason":"outcome reached"`) {
+		t.Errorf("stdout = %q, want the final outcome-reached stop reason", stdout.String())
+	}
+
+	got, err := ReadRunState(stateFile)
+	if err != nil {
+		t.Fatalf("ReadRunState: %v", err)
+	}
+	if !got.TerminalLand {
+		t.Errorf("TerminalLand = %v, want true", got.TerminalLand)
+	}
+	if got.CapFired != "max slices reached" {
+		t.Errorf("CapFired = %q, want %q", got.CapFired, "max slices reached")
 	}
 }
 
 // TestRunWithReviewPassStopsWithNoVerdictStopReason verifies a review pass
 // that produces no VERDICT line at all (a malfunctioning or truncated review
-// session) stops the loop immediately with a "no verdict" reason, the same
-// fail-stop the legacy loop gives an implementor pass with no verdict --
-// rather than looping forever or silently treating it as an APPROVE.
+// session) no longer stops the loop immediately -- issue #2457 commits it to
+// one more terminal "land" pass instead (call 3, pass 3, role "land"), the
+// same mechanism as the maxSlices/maxReviewRounds caps below. This fake
+// driver never emits SPINDRIFT_OUTCOME on any call, so that land pass itself
+// produces no outcome either, and the run's own bound (exactly one land
+// pass) stops it there -- rather than looping forever or silently treating a
+// no-verdict review as an APPROVE.
 func TestRunWithReviewPassStopsWithNoVerdictStopReason(t *testing.T) {
 	dir := t.TempDir()
 	callLog := filepath.Join(dir, "calls.log")
@@ -1583,11 +1797,17 @@ exit 0
 		t.Fatalf("read callLog: %v", err)
 	}
 	lines := strings.Split(strings.TrimRight(string(calls), "\n"), "\n")
-	if len(lines) != 2 {
-		t.Fatalf("driver-exec invocation count = %d, want 2 (implement, review), log: %q", len(lines), calls)
+	if len(lines) != 3 {
+		t.Fatalf("driver-exec invocation count = %d, want 3 (implement, review, land), log: %q", len(lines), calls)
 	}
-	if !strings.Contains(stdout.String(), `"decision":"stop","reason":"no verdict"`) {
-		t.Errorf("stdout = %q, want the no-verdict stop reason", stdout.String())
+	if !strings.Contains(stdout.String(), `"decision":"continue","reason":"no verdict; running terminal land pass"`) {
+		t.Errorf("stdout = %q, want the no-verdict continue reason naming the land pass that follows", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), `"spindrift_op":{"op":"pass_start","pass":3,"role":"land"}`) {
+		t.Errorf("stdout = %q, want the terminal land pass's own pass_start with role \"land\"", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), `"decision":"stop","reason":"terminal land pass reached no outcome"`) {
+		t.Errorf("stdout = %q, want the terminal-land-pass-no-outcome stop reason", stdout.String())
 	}
 }
 
@@ -1769,6 +1989,55 @@ func TestSeedPromptFromStateIncludesReviewFindings(t *testing.T) {
 	}
 	if !strings.Contains(string(got), "## Blocking\n- run.go:42 -- missing nil check") {
 		t.Errorf("seeded prompt = %q, want it to carry the reviewer's findings verbatim", got)
+	}
+}
+
+// TestSeedPromptFromStateTerminalLandOverridesStopAfterCommit verifies
+// seedPromptFromState (issue #2457) renders an explicit terminal-land
+// directive when state.TerminalLand is set -- even with every other field at
+// its zero value, since a cap can fire on the very first review round before
+// any DoneSlices/RemainingSlices/ReviewFindings exist. The directive must
+// name the cap reason, override review-loop-orchestrator.md's "stop after
+// COMMIT" instruction for this one pass, and tell the pass to land and report
+// honestly even with blocking findings unresolved.
+func TestSeedPromptFromStateTerminalLandOverridesStopAfterCommit(t *testing.T) {
+	dir := t.TempDir()
+	promptFile := filepath.Join(dir, "prompt.txt")
+	if err := os.WriteFile(promptFile, []byte("ORIGINAL PROMPT TEXT"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	state := RunState{
+		TerminalLand: true,
+		CapFired:     "max slices reached",
+	}
+
+	seeded, err := seedPromptFromState(promptFile, state)
+	if err != nil {
+		t.Fatalf("seedPromptFromState: %v", err)
+	}
+	if seeded == promptFile {
+		t.Fatalf("seedPromptFromState returned the original file unchanged, want a fresh seeded file carrying the terminal-land directive")
+	}
+	got, err := os.ReadFile(seeded)
+	if err != nil {
+		t.Fatalf("read seeded prompt: %v", err)
+	}
+	gotStr := string(got)
+	if !strings.Contains(gotStr, "max slices reached") {
+		t.Errorf("seeded prompt = %q, want it to name the cap reason %q", gotStr, "max slices reached")
+	}
+	if !strings.Contains(gotStr, "terminal") {
+		t.Errorf("seeded prompt = %q, want it to identify this as the run's terminal pass", gotStr)
+	}
+	if !strings.Contains(gotStr, "COMMIT") {
+		t.Errorf("seeded prompt = %q, want it to override the stop-after-COMMIT instruction", gotStr)
+	}
+	if !strings.Contains(gotStr, "OUTCOME") {
+		t.Errorf("seeded prompt = %q, want it to instruct the pass through to OUTCOME", gotStr)
+	}
+	if !strings.Contains(gotStr, "ORIGINAL PROMPT TEXT") {
+		t.Errorf("seeded prompt = %q, want it to still carry the original prompt text", gotStr)
 	}
 }
 
