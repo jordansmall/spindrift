@@ -193,19 +193,22 @@ func TestOpenPRForBranch_Found(t *testing.T) {
 	}
 }
 
-// TestOpenPRForBranch_DraftSkipped verifies OpenPRForBranch does not adopt a
-// draft pull (title-prefixed "WIP:" or draft=true), even when its head
-// branch matches.
-func TestOpenPRForBranch_DraftSkipped(t *testing.T) {
+// TestOpenPRForBranch_DraftIncluded verifies OpenPRForBranch adopts a draft
+// pull (title-prefixed "WIP:" or draft=true) precisely as it adopts a
+// non-draft one (issue #2408), reporting IsDraft=true on the match.
+func TestOpenPRForBranch_DraftIncluded(t *testing.T) {
 	pr := newPRForgeTestForge(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("[" + pullJSON(206, "open", false, true, true, "WIP: add feature", "agent/issue-206", "abc123", "main") + "]"))
 	})
-	_, ok, err := pr.OpenPRForBranch("agent/issue-206")
+	got, ok, err := pr.OpenPRForBranch("agent/issue-206")
 	if err != nil {
 		t.Fatalf("OpenPRForBranch(...) unexpected error: %v", err)
 	}
-	if ok {
-		t.Fatal("OpenPRForBranch(...) ok = true, want false (draft pull must not be adopted)")
+	if !ok {
+		t.Fatal("OpenPRForBranch(...) ok = false, want true (a draft pull must be adopted)")
+	}
+	if !got.IsDraft {
+		t.Fatal("OpenPRForBranch(...) IsDraft = false, want true")
 	}
 }
 

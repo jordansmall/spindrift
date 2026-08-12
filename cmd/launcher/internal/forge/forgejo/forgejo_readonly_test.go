@@ -354,7 +354,7 @@ func TestReadOnlyForgejoCodeForge_CreateDraftPR_Errors(t *testing.T) {
 // Forgejo's "a pull request for this head already exists" signal on this
 // endpoint, semantically distinct from the same status's "not mergeable"
 // meaning on the merge endpoint (forgejoStatusMap/errMergeRefused) --
-// CreateDraftPR resolves the branch's own open PR via openAnyPRForBranch and
+// CreateDraftPR resolves the branch's own open PR via OpenPRForBranch and
 // returns that PR's URL with no error and created=false, mirroring github's
 // CreateDraftPR adoption (relay.go, issue #2407 slice 1/2; created=false per
 // issue #2447).
@@ -405,10 +405,9 @@ func TestReadOnlyForgejoCodeForge_CreateDraftPR_AdoptsExistingOnConflict(t *test
 // asserts that CreateDraftPR's adoption path finds a DRAFT PR for the head,
 // not just a non-draft one. CreateDraftPR itself always creates a draft
 // (forgejoWIPPrefix-titled) PR, so the PR a retried call collides with on
-// 409 is always a draft -- openAnyPRForBranch, not OpenPRForBranch, does the
-// lookup: OpenPRForBranch's draft-excluding contract (kept for its other
-// caller, prresolver.go) must not be the lookup CreateDraftPR uses to
-// resolve its own adoption target (issue #2407 follow-up).
+// 409 is always a draft itself -- OpenPRForBranch's draft-inclusive
+// contract (issue #2408) is what makes this adoption target resolvable at
+// all (issue #2407 follow-up).
 func TestReadOnlyForgejoCodeForge_CreateDraftPR_AdoptsExistingDraftOnConflict(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
