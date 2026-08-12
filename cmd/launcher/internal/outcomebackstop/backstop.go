@@ -66,6 +66,12 @@ type Config struct {
 	// Git runs `git -C Repo <args>` and returns (stdout, stderr, err); a nil
 	// Git defaults to a real exec.Command runner.
 	Git func(args ...string) (string, string, error)
+	// RunStateFilePath is the path to the run-state handoff artifact the
+	// orchestrator writes (see cmd/launcher/orchestrator/runstate.go),
+	// carrying the reviewer's last verdict word. Empty, missing, unreadable,
+	// or unparseable all quietly mean "no verdict known" -- never an error
+	// (issue #2459).
+	RunStateFilePath string
 }
 
 // Run reproduces the retired entrypoint.sh emit_outcome_backstop decision:
@@ -100,6 +106,11 @@ func Run(cfg Config, w io.Writer) error {
 		return emit(w, cfg.Issue, "none", "blocked", note)
 	}
 
+	unresolvedBlock := readLastVerdict(cfg.RunStateFilePath) == "BLOCK"
+	if unresolvedBlock {
+		note += "; reviewer's blocking findings were never cleared"
+	}
+
 	note, salvageOK := salvage(git, note)
 
 	count, err := commitCount(git, cfg.Base, cfg.Branch)
@@ -118,15 +129,19 @@ func Run(cfg Config, w io.Writer) error {
 	case count == 0:
 		note += "; no work to preserve"
 	case cfg.HostMediatedRemote:
-		status = "ready"
 		note += "; branch relayed via outbox bundle (no writable remote under CODE_FORGE=local)"
+		if !unresolvedBlock {
+			status = "ready"
+		}
 	case !cfg.WriteEnabled && cfg.OutboxRelayCapable:
-		status = "ready"
 		note += "; branch relayed via outbox bundle (read-only Box)"
+		if !unresolvedBlock {
+			status = "ready"
+		}
 	default:
 		var pushed bool
 		note, pushed = pushWithRetry(git, clock, cfg, note)
-		if pushed {
+		if pushed && !unresolvedBlock {
 			status = "ready"
 		}
 	}

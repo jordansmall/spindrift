@@ -3,6 +3,8 @@ package outcomebackstop
 import (
 	"bytes"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -543,6 +545,156 @@ func TestRun_Issue2380_LandedAndPushedResolvesReady(t *testing.T) {
 	}
 	if o.Landing != cfg.Branch {
 		t.Fatalf("expected Landing == %q, got %+v", cfg.Branch, o)
+	}
+}
+
+// TestRun_UnresolvedBlockOverridesHostMediatedRemote pins issue #2459: an
+// unresolved BLOCK verdict recorded in the run-state artifact must keep
+// status=blocked even under otherwise-ready conditions (host-mediated
+// remote, commits present) -- the reviewer's last word overrides the
+// git-observed-only backstop decision.
+func TestRun_UnresolvedBlockOverridesHostMediatedRemote(t *testing.T) {
+	dir := t.TempDir()
+	runStatePath := filepath.Join(dir, "run-state.json")
+	if err := os.WriteFile(runStatePath, []byte(`{"last_verdict": "BLOCK"}`), 0o644); err != nil {
+		t.Fatalf("write run state: %v", err)
+	}
+
+	git := &fakeGit{responses: map[string]fakeResult{
+		"rev-list": {stdout: "1\n"},
+	}}
+	clk := &fakeClock{}
+	cfg := baseConfig(git, clk)
+	cfg.HostMediatedRemote = true
+	cfg.WriteEnabled = true
+	cfg.RunStateFilePath = runStatePath
+
+	var buf bytes.Buffer
+	if err := Run(cfg, &buf); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	line := buf.String()
+	if !strings.Contains(line, "status=blocked") {
+		t.Fatalf("expected status=blocked despite host-mediated remote, got %q", line)
+	}
+	if !strings.Contains(line, "reviewer's blocking findings were never cleared") {
+		t.Fatalf("expected reviewer-blocking-findings note, got %q", line)
+	}
+}
+
+// TestRun_MissingRunStateFileBehavesAsUnset pins that a RunStateFilePath
+// pointing at a nonexistent file degrades to "no verdict known" -- identical
+// status/note to leaving RunStateFilePath unset entirely, never an error or
+// crash.
+func TestRun_MissingRunStateFileBehavesAsUnset(t *testing.T) {
+	git := &fakeGit{responses: map[string]fakeResult{
+		"rev-list": {stdout: "1\n"},
+	}}
+	clk := &fakeClock{}
+	cfg := baseConfig(git, clk)
+	cfg.HostMediatedRemote = true
+	cfg.WriteEnabled = true
+	cfg.RunStateFilePath = filepath.Join(t.TempDir(), "does-not-exist.json")
+
+	var buf bytes.Buffer
+	if err := Run(cfg, &buf); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	line := buf.String()
+
+	git2 := &fakeGit{responses: map[string]fakeResult{
+		"rev-list": {stdout: "1\n"},
+	}}
+	clk2 := &fakeClock{}
+	cfg2 := baseConfig(git2, clk2)
+	cfg2.HostMediatedRemote = true
+	cfg2.WriteEnabled = true
+
+	var buf2 bytes.Buffer
+	if err := Run(cfg2, &buf2); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	line2 := buf2.String()
+
+	if line != line2 {
+		t.Fatalf("expected missing run-state file to behave as unset:\n  with path:    %q\n  without path: %q", line, line2)
+	}
+}
+
+// TestRun_ApproveVerdictBehavesAsUnset pins that a run-state artifact
+// recording an APPROVE verdict leaves status selection unchanged from
+// today's git-observed-only logic -- only an unresolved BLOCK verdict
+// changes behavior.
+func TestRun_ApproveVerdictBehavesAsUnset(t *testing.T) {
+	dir := t.TempDir()
+	runStatePath := filepath.Join(dir, "run-state.json")
+	if err := os.WriteFile(runStatePath, []byte(`{"last_verdict": "APPROVE"}`), 0o644); err != nil {
+		t.Fatalf("write run state: %v", err)
+	}
+
+	git := &fakeGit{responses: map[string]fakeResult{
+		"rev-list": {stdout: "1\n"},
+	}}
+	clk := &fakeClock{}
+	cfg := baseConfig(git, clk)
+	cfg.HostMediatedRemote = true
+	cfg.WriteEnabled = true
+	cfg.RunStateFilePath = runStatePath
+
+	var buf bytes.Buffer
+	if err := Run(cfg, &buf); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	line := buf.String()
+
+	git2 := &fakeGit{responses: map[string]fakeResult{
+		"rev-list": {stdout: "1\n"},
+	}}
+	clk2 := &fakeClock{}
+	cfg2 := baseConfig(git2, clk2)
+	cfg2.HostMediatedRemote = true
+	cfg2.WriteEnabled = true
+
+	var buf2 bytes.Buffer
+	if err := Run(cfg2, &buf2); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	line2 := buf2.String()
+
+	if line != line2 {
+		t.Fatalf("expected APPROVE verdict to behave as unset:\n  with path:    %q\n  without path: %q", line, line2)
+	}
+}
+
+// TestRun_UnresolvedBlockNoteIsAdditive pins that the reviewer-blocking-
+// findings fragment is additive: it appears alongside the existing
+// relay/push detail fragment, not in place of it.
+func TestRun_UnresolvedBlockNoteIsAdditive(t *testing.T) {
+	dir := t.TempDir()
+	runStatePath := filepath.Join(dir, "run-state.json")
+	if err := os.WriteFile(runStatePath, []byte(`{"last_verdict": "BLOCK"}`), 0o644); err != nil {
+		t.Fatalf("write run state: %v", err)
+	}
+
+	git := &fakeGit{responses: map[string]fakeResult{
+		"rev-list": {stdout: "1\n"},
+	}}
+	clk := &fakeClock{}
+	cfg := baseConfig(git, clk)
+	cfg.HostMediatedRemote = true
+	cfg.WriteEnabled = true
+	cfg.RunStateFilePath = runStatePath
+
+	var buf bytes.Buffer
+	if err := Run(cfg, &buf); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	line := buf.String()
+	if !strings.Contains(line, "reviewer's blocking findings were never cleared") {
+		t.Fatalf("expected reviewer-blocking-findings note, got %q", line)
+	}
+	if !strings.Contains(line, "branch relayed via outbox bundle (no writable remote under CODE_FORGE=local)") {
+		t.Fatalf("expected relay note still present alongside verdict note, got %q", line)
 	}
 }
 
