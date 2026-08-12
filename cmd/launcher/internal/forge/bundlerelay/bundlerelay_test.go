@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -25,13 +26,45 @@ func localClone(bare string) func(dir string) error {
 	}
 }
 
+// seedRelayBundleCommits mirrors forgetest.SeedRelayBundle but seeds branch
+// with one commit per subject in subjects, in order, then writes a bundle of
+// base..branch -- letting a test prove CommitSubjects preserves oldest-first
+// order across more than one commit, not just the trivial single-commit case.
+func seedRelayBundleCommits(t *testing.T, bare, base, outboxDir, branch string, subjects ...string) {
+	t.Helper()
+	work := t.TempDir()
+	forgetest.Run(t, "", "clone", bare, work)
+	forgetest.Run(t, work, "checkout", base)
+	forgetest.Run(t, work, "checkout", "-b", branch)
+	for _, subject := range subjects {
+		forgetest.WriteFile(t, filepath.Join(work, "feature.txt"), subject+"\n")
+		forgetest.Run(t, work, "add", "feature.txt")
+		forgetest.Run(t, work, "commit", "-m", subject)
+	}
+	forgetest.Run(t, work, "bundle", "create", filepath.Join(outboxDir, seambundle.FileName), base+".."+branch)
+}
+
 func newBundleRelayHarness(t *testing.T) *forgetest.GitRepoFixture {
 	t.Helper()
 	t.Setenv("GIT_AUTHOR_NAME", "Test Bot")
 	t.Setenv("GIT_AUTHOR_EMAIL", "bot@example.com")
 	t.Setenv("GIT_COMMITTER_NAME", "Test Bot")
 	t.Setenv("GIT_COMMITTER_EMAIL", "bot@example.com")
-	return forgetest.NewGitRepoFixture(t, "main")
+	repo := forgetest.NewGitRepoFixture(t, "main")
+	// A raw `git init --bare` leaves HEAD pointing at whatever
+	// init.defaultBranch happened to be at creation time (often "master"),
+	// regardless of which branch NewGitRepoFixture actually pushed -- unlike
+	// a real forge remote, which always keeps HEAD correctly pointed at its
+	// actual default branch. Point it at "main" explicitly so a
+	// --no-single-branch clone of repo.Bare (localClone) resolves "main" as
+	// a local branch, not just the remote-tracking "origin/main" --
+	// CommitSubjects's base argument needs "main" itself to resolve for
+	// `git log base..ref` to work, the same way it would against a real
+	// forge clone.
+	if out, err := exec.Command("git", "-C", repo.Bare, "symbolic-ref", "HEAD", "refs/heads/main").CombinedOutput(); err != nil {
+		t.Fatalf("set bare repo HEAD to refs/heads/main: %v: %s", err, out)
+	}
+	return repo
 }
 
 // TestRelay_PushesRefToOrigin asserts a valid bundle relays ref to origin
@@ -140,5 +173,96 @@ func TestRelay_CloneErrorPropagatesVerbatim(t *testing.T) {
 	}
 	if err != sentinel {
 		t.Errorf("Relay with a failing clone closure: err = %v (%T), want the exact sentinel value unwrapped", err, sentinel)
+	}
+}
+
+// TestCommitSubjects_ReturnsSubjectOldestFirst asserts a single-commit branch
+// yields that one commit's subject.
+func TestCommitSubjects_ReturnsSubjectOldestFirst(t *testing.T) {
+	repo := newBundleRelayHarness(t)
+	outbox := t.TempDir()
+	branch := "agent/issue-2447"
+	forgetest.SeedRelayBundle(t, repo.Bare, "main", outbox, branch)
+
+	got, err := CommitSubjects("test", outbox, "main", branch, localClone(repo.Bare))
+	if err != nil {
+		t.Fatalf("CommitSubjects: %v", err)
+	}
+	want := []string{"feature"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("CommitSubjects = %v, want %v", got, want)
+	}
+}
+
+// TestCommitSubjects_MultipleCommitsOldestFirst asserts a multi-commit branch
+// returns subjects in commit order (oldest first), not reversed -- proving
+// the --reverse flag on the underlying `git log` actually took effect rather
+// than happening to pass with a single commit where order is unobservable.
+func TestCommitSubjects_MultipleCommitsOldestFirst(t *testing.T) {
+	repo := newBundleRelayHarness(t)
+	outbox := t.TempDir()
+	branch := "agent/issue-2447"
+	seedRelayBundleCommits(t, repo.Bare, "main", outbox, branch, "first", "second")
+
+	got, err := CommitSubjects("test", outbox, "main", branch, localClone(repo.Bare))
+	if err != nil {
+		t.Fatalf("CommitSubjects: %v", err)
+	}
+	want := []string{"first", "second"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("CommitSubjects = %v, want %v", got, want)
+	}
+}
+
+// TestCommitSubjects_MissingBundleErrors asserts an empty outbox (the Box
+// never wrote a bundle) errors via forge.ErrBundleNotFound, mirroring Relay's
+// own TestRelay_MissingBundleErrors.
+func TestCommitSubjects_MissingBundleErrors(t *testing.T) {
+	repo := newBundleRelayHarness(t)
+	outbox := t.TempDir()
+
+	_, err := CommitSubjects("test", outbox, "main", "agent/issue-2447", localClone(repo.Bare))
+	if err == nil {
+		t.Fatal("CommitSubjects with no bundle file present: got nil error, want one")
+	}
+	if !errors.Is(err, forge.ErrBundleNotFound) {
+		t.Errorf("CommitSubjects with no bundle file present: err = %v, want errors.Is(err, forge.ErrBundleNotFound)", err)
+	}
+}
+
+// TestCommitSubjects_MalformedBundleErrors asserts a corrupt bundle file is
+// rejected by `git bundle verify` with a generic error, not
+// forge.ErrBundleNotFound, mirroring Relay's own
+// TestRelay_MalformedBundleErrors.
+func TestCommitSubjects_MalformedBundleErrors(t *testing.T) {
+	repo := newBundleRelayHarness(t)
+	outbox := t.TempDir()
+	forgetest.WriteFile(t, filepath.Join(outbox, seambundle.FileName), "not a bundle")
+
+	_, err := CommitSubjects("test", outbox, "main", "agent/issue-2447", localClone(repo.Bare))
+	if err == nil {
+		t.Fatal("CommitSubjects with a malformed bundle file: got nil error, want one")
+	}
+	if errors.Is(err, forge.ErrBundleNotFound) {
+		t.Errorf("CommitSubjects with a malformed bundle file: err = %v, want a generic error, not forge.ErrBundleNotFound", err)
+	}
+}
+
+// TestCommitSubjects_DoesNotMutateOrigin asserts CommitSubjects never pushes
+// or otherwise mutates repo.Bare -- unlike Relay, whose whole job is to land
+// ref there, CommitSubjects only reads what the bundle carries.
+func TestCommitSubjects_DoesNotMutateOrigin(t *testing.T) {
+	repo := newBundleRelayHarness(t)
+	outbox := t.TempDir()
+	branch := "agent/issue-2447"
+	forgetest.SeedRelayBundle(t, repo.Bare, "main", outbox, branch)
+
+	if _, err := CommitSubjects("test", outbox, "main", branch, localClone(repo.Bare)); err != nil {
+		t.Fatalf("CommitSubjects: %v", err)
+	}
+
+	out, err := exec.Command("git", "-C", repo.Bare, "rev-parse", "--verify", "refs/heads/"+branch).CombinedOutput()
+	if err == nil {
+		t.Errorf("CommitSubjects must not push to origin: refs/heads/%s exists in repo.Bare: %s", branch, out)
 	}
 }
