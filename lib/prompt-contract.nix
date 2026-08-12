@@ -405,25 +405,6 @@ rec {
     }
   ];
 
-  # Each forbiddenMarkers row rendered into a pipe-joined string, in row
-  # order -- mirrors validateMarkersBashRows above, same field subset (minus
-  # message, which bash rows don't need since only the Go decoder consumes
-  # it).
-  forbiddenMarkersBashRows = map (
-    row: "${row.id}|${row.marker}|${row.carrier}|${row.severity}|${row.when}"
-  ) forbiddenMarkers;
-
-  # forbiddenMarkersBashRows wrapped into a bash array literal, formatted
-  # exactly like validateMarkersBashPreamble above renders
-  # validateMarkersBashRows into `_VALIDATE_MARKER_ROWS` -- same "parallel,
-  # not-yet-wired data source" status as injectBlocksBashPreamble/
-  # validateMarkersBashPreamble above: not yet consumed by any bash runtime
-  # validator, just kept consistent in shape for whoever wires it later.
-  forbiddenMarkersBashPreamble =
-    "_FORBIDDEN_MARKER_ROWS=(\n"
-    + builtins.concatStringsSep "" (map (row: "  " + escapeShellArg row + "\n") forbiddenMarkersBashRows)
-    + ")\n";
-
   # Build-time reject arm (issue #2250, parent #2244): resolves each
   # validateMarkers "reject" row into one of ok/reject/advise from whatever
   # static gate/content knowledge a caller (lib/mkHarness.nix, a later slice)
