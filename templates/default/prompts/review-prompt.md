@@ -51,10 +51,18 @@ Severity, so the fix loop converges:
 - **Blocking** — spec violations, correctness bugs, security issues, missing or
   inadequate tests for the new logic (untested new logic blocks on its own),
   standards violations that break the build or documented rules.
-- **Non-blocking** — smells, nits, style, and suggestions. Surface every one;
-  they don't gate the merge. The work loop resolves the cheap, in-scope ones in
-  place and escalates only what needs a human — so do not sit on a nit, but do
-  not dress a one-line fix up as a blocking finding either.
+- **Non-blocking** — smells, nits, style, and suggestions. On prose the diff
+  touches — commit messages, comments, docs, and this prompt's own wording —
+  wording, style, redundancy, and ordering findings are always Non-blocking:
+  a phrase repeated within one sentence, a tautological clause, or where a
+  trailer sits among the commits are exactly this case, never Blocking. A
+  prose-only diff can accumulate Non-blocking findings without limit and
+  still APPROVE. BLOCK is reserved for spec violations, correctness bugs,
+  security issues, and unmet acceptance criteria — never for how well-worded
+  the prose is. Surface every finding; they don't gate the merge. The work
+  loop resolves the cheap, in-scope ones in place and escalates only what
+  needs a human — so do not sit on a nit, but do not dress a one-line fix up
+  as a blocking finding either.
 
 Output — final message exactly this shape (max ~40 lines):
 
