@@ -11,6 +11,23 @@ setup() {
   setup_entrypoint_env
 }
 
+@test "read-only Box installs the gh shim under \$HOME, never \$WORK_DIR's parent" {
+  unset BOX_WRITE_ENABLED # issue #2465: read-only Box
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+
+  [ -d "$HOME/.spindrift/readonly-gh-shim" ]
+  [ -x "$HOME/.spindrift/readonly-gh-shim/gh" ]
+
+  # Regression guard: production WORK_DIR is /work, so a $WORK_DIR-derived
+  # location resolves to `/` -- root-owned, and the Box runs as uid 1000
+  # (lib/image.nix), so the install `mkdir` fails and `set -e` kills the Box
+  # mid-clone. This suite's own $WORK_DIR sits in a writable tmpdir, which is
+  # exactly what hid the failure, so assert the parent stays untouched rather
+  # than trusting the tmpdir to fail the way `/` does.
+  [ ! -e "$(dirname "$WORK_DIR")/readonly-gh-shim" ]
+}
+
 @test "read-only Box's gh shim rejects gh pr create, naming the PR-intent relay" {
   unset BOX_WRITE_ENABLED # issue #2465: read-only Box
   run bash "$ENTRYPOINT"
@@ -19,9 +36,9 @@ setup() {
   # The shim's PATH mutation is local to the entrypoint subprocess and does not
   # survive back to this shell -- reproduce production's PATH ordering (shim in
   # front of the fake `gh` setup_fakes already put on $FAKE_BIN) by prepending
-  # the same deterministic, $WORK_DIR-derived shim dir the brief specifies.
+  # the same deterministic, $HOME-derived shim dir the entrypoint installs to.
   local shim_dir
-  shim_dir="$(dirname "$WORK_DIR")/readonly-gh-shim"
+  shim_dir="$HOME/.spindrift/readonly-gh-shim"
   [ -d "$shim_dir" ]
 
   PATH="$shim_dir:$PATH" run gh pr create --title "x" --body "y"
@@ -35,7 +52,7 @@ setup() {
   [ "$status" -eq 0 ]
 
   local shim_dir
-  shim_dir="$(dirname "$WORK_DIR")/readonly-gh-shim"
+  shim_dir="$HOME/.spindrift/readonly-gh-shim"
   [ -d "$shim_dir" ]
 
   PATH="$shim_dir:$PATH" run gh pr ready 1
@@ -50,7 +67,7 @@ setup() {
   [ "$status" -eq 0 ]
 
   local shim_dir
-  shim_dir="$(dirname "$WORK_DIR")/readonly-gh-shim"
+  shim_dir="$HOME/.spindrift/readonly-gh-shim"
   [ -d "$shim_dir" ]
 
   PATH="$shim_dir:$PATH" run gh pr merge 1
@@ -65,7 +82,7 @@ setup() {
   [ "$status" -eq 0 ]
 
   local shim_dir
-  shim_dir="$(dirname "$WORK_DIR")/readonly-gh-shim"
+  shim_dir="$HOME/.spindrift/readonly-gh-shim"
   [ -d "$shim_dir" ]
 
   PATH="$shim_dir:$PATH" run gh issue comment 1 --body "hi"
@@ -79,7 +96,7 @@ setup() {
   [ "$status" -eq 0 ]
 
   local shim_dir
-  shim_dir="$(dirname "$WORK_DIR")/readonly-gh-shim"
+  shim_dir="$HOME/.spindrift/readonly-gh-shim"
   [ -d "$shim_dir" ]
 
   PATH="$shim_dir:$PATH" run gh issue create --title "x" --body "y"
@@ -93,7 +110,7 @@ setup() {
   [ "$status" -eq 0 ]
 
   local shim_dir
-  shim_dir="$(dirname "$WORK_DIR")/readonly-gh-shim"
+  shim_dir="$HOME/.spindrift/readonly-gh-shim"
   [ -d "$shim_dir" ]
 
   PATH="$shim_dir:$PATH" run gh api -X POST repos/owner/repo/issues/1/comments
@@ -107,7 +124,7 @@ setup() {
   [ "$status" -eq 0 ]
 
   local shim_dir
-  shim_dir="$(dirname "$WORK_DIR")/readonly-gh-shim"
+  shim_dir="$HOME/.spindrift/readonly-gh-shim"
   [ -d "$shim_dir" ]
 
   PATH="$shim_dir:$PATH" run gh api -X post repos/owner/repo/issues/1/comments
@@ -121,7 +138,7 @@ setup() {
   [ "$status" -eq 0 ]
 
   local shim_dir
-  shim_dir="$(dirname "$WORK_DIR")/readonly-gh-shim"
+  shim_dir="$HOME/.spindrift/readonly-gh-shim"
   [ -d "$shim_dir" ]
 
   PATH="$shim_dir:$PATH" run gh api --method PATCH repos/owner/repo/issues/1
@@ -135,7 +152,7 @@ setup() {
   [ "$status" -eq 0 ]
 
   local shim_dir
-  shim_dir="$(dirname "$WORK_DIR")/readonly-gh-shim"
+  shim_dir="$HOME/.spindrift/readonly-gh-shim"
   [ -d "$shim_dir" ]
 
   PATH="$shim_dir:$PATH" run gh api repos/owner/repo/issues
@@ -149,7 +166,7 @@ setup() {
   [ "$status" -eq 0 ]
 
   local shim_dir
-  shim_dir="$(dirname "$WORK_DIR")/readonly-gh-shim"
+  shim_dir="$HOME/.spindrift/readonly-gh-shim"
   [ -d "$shim_dir" ]
 
   PATH="$shim_dir:$PATH" run gh issue view 1
@@ -172,7 +189,7 @@ setup() {
 @test "read-write Box installs no gh shim" {
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  [ ! -d "$(dirname "$WORK_DIR")/readonly-gh-shim" ]
+  [ ! -e "$HOME/.spindrift/readonly-gh-shim" ]
 
   run gh pr create --title "x" --body "y"
   [ "$status" -eq 0 ]

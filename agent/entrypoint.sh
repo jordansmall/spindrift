@@ -332,13 +332,17 @@ install_readonly_gh_shim() {
   # binary.
   local real_gh
   real_gh="$(command -v gh)"
-  # A deterministic location derived from $WORK_DIR's own parent, not a
-  # mktemp path: entrypoint.sh's PATH mutation below is local to this
-  # subprocess and never survives back to a caller inspecting the Box after
-  # it exits, so the install location has to be predictable from a value the
-  # caller already knows ($WORK_DIR) instead of discovered.
+  # A deterministic location under $HOME, not a mktemp path: entrypoint.sh's
+  # PATH mutation below is local to this subprocess and never survives back to
+  # a caller inspecting the Box after it exits, so the install location has to
+  # be predictable from a value the caller already knows instead of discovered.
+  # $HOME, not $WORK_DIR's parent: production WORK_DIR is /work, whose parent
+  # is the root-owned `/`, while the Box runs as uid 1000 -- so a
+  # $WORK_DIR-derived path fails this mkdir with EACCES and `set -e` kills the
+  # Box mid-clone. $HOME is /home/agent, which lib/image.nix chowns to that
+  # same uid alongside /work.
   local shim_dir
-  shim_dir="$(dirname "$WORK_DIR")/readonly-gh-shim"
+  shim_dir="$HOME/.spindrift/readonly-gh-shim"
   mkdir -p "$shim_dir"
   # The real gh's path is stored in a file, not inlined into the heredoc
   # below, so the shim script never has to shell-quote an arbitrary
