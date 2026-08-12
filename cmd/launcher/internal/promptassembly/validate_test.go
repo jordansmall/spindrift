@@ -14,7 +14,7 @@ func TestValidateNoGatesActive(t *testing.T) {
 	e := Env{DispatchKind: "work", BoxWriteEnabled: true, OrchestratorEnabled: false}
 	result := Result{Prompt: "no markers anywhere", AgentsJSON: ""}
 
-	warnings, err := Validate(e, result, testValidateMarkerRows())
+	warnings, err := Validate(e, result, testValidateMarkerRows(), nil)
 	if err != nil {
 		t.Fatalf("Validate() error = %v, want nil", err)
 	}
@@ -30,7 +30,7 @@ func TestValidateReadOnlyResearchReject(t *testing.T) {
 	e := Env{DispatchKind: "research", BoxWriteEnabled: false}
 	result := Result{Prompt: "research stub, no verdict-comment marker here"}
 
-	warnings, err := Validate(e, result, testValidateMarkerRows())
+	warnings, err := Validate(e, result, testValidateMarkerRows(), nil)
 	if err == nil {
 		t.Fatal("Validate() error = nil, want non-nil")
 	}
@@ -46,7 +46,7 @@ func TestValidateReadOnlyResearchPass(t *testing.T) {
 	e := Env{DispatchKind: "research", BoxWriteEnabled: false}
 	result := Result{Prompt: "research stub\n\nPost your verdict with SPINDRIFT_COMMENT here"}
 
-	_, err := Validate(e, result, testValidateMarkerRows())
+	_, err := Validate(e, result, testValidateMarkerRows(), nil)
 	if err != nil {
 		t.Fatalf("Validate() error = %v, want nil", err)
 	}
@@ -61,7 +61,7 @@ func TestValidateOrchestratorEnabledReject(t *testing.T) {
 		Handoff: Handoff{ReviewPromptFile: "reviewer stub, no verdict line here"},
 	}
 
-	warnings, err := Validate(e, result, testValidateMarkerRows())
+	warnings, err := Validate(e, result, testValidateMarkerRows(), nil)
 	if err == nil {
 		t.Fatal("Validate() error = nil, want non-nil")
 	}
@@ -79,7 +79,7 @@ func TestValidateOrchestratorEnabledNoFalsePositive(t *testing.T) {
 	e := Env{OrchestratorEnabled: true, BoxWriteEnabled: true}
 	result := Result{Handoff: Handoff{ReviewPromptFile: ""}}
 
-	warnings, err := Validate(e, result, testValidateMarkerRows())
+	warnings, err := Validate(e, result, testValidateMarkerRows(), nil)
 	if err != nil {
 		t.Fatalf("Validate() error = %v, want nil", err)
 	}
@@ -94,7 +94,7 @@ func TestValidateBoxAccessReadOnlyWarn(t *testing.T) {
 	e := Env{DispatchKind: "work", BoxWriteEnabled: false}
 	result := Result{Prompt: "issue stub, no PR-intent marker here"}
 
-	warnings, err := Validate(e, result, testValidateMarkerRows())
+	warnings, err := Validate(e, result, testValidateMarkerRows(), nil)
 	if err != nil {
 		t.Fatalf("Validate() error = %v, want nil", err)
 	}
@@ -120,7 +120,7 @@ func TestValidateFilerFileRelayWarn(t *testing.T) {
 		AgentsJSON: `{"filer":{"prompt":"no marker here"}}`,
 	}
 
-	warnings, err := Validate(e, result, testValidateMarkerRows())
+	warnings, err := Validate(e, result, testValidateMarkerRows(), nil)
 	if err != nil {
 		t.Fatalf("Validate() error = %v, want nil", err)
 	}
@@ -143,7 +143,7 @@ func TestValidateDataDrivenSeverity(t *testing.T) {
 		}
 	}
 
-	warnings, err := Validate(e, result, rows)
+	warnings, err := Validate(e, result, rows, nil)
 	if err == nil {
 		t.Fatal("Validate() error = nil, want non-nil (severity patched to reject)")
 	}
@@ -232,7 +232,7 @@ func TestValidateMarkerMessageVerbatim(t *testing.T) {
 		e := Env{DispatchKind: "research", BoxWriteEnabled: false}
 		result := Result{Prompt: "research stub, no verdict-comment marker here"}
 
-		_, err := Validate(e, result, rows)
+		_, err := Validate(e, result, rows, nil)
 		if err == nil {
 			t.Fatal("Validate() error = nil, want non-nil")
 		}
@@ -248,7 +248,7 @@ func TestValidateMarkerMessageVerbatim(t *testing.T) {
 			Handoff: Handoff{ReviewPromptFile: "reviewer stub, no verdict line here"},
 		}
 
-		_, err := Validate(e, result, rows)
+		_, err := Validate(e, result, rows, nil)
 		if err == nil {
 			t.Fatal("Validate() error = nil, want non-nil")
 		}
@@ -262,7 +262,7 @@ func TestValidateMarkerMessageVerbatim(t *testing.T) {
 		e := Env{DispatchKind: "work", BoxWriteEnabled: false}
 		result := Result{Prompt: "issue stub, no PR-intent marker here"}
 
-		warnings, err := Validate(e, result, rows)
+		warnings, err := Validate(e, result, rows, nil)
 		if err != nil {
 			t.Fatalf("Validate() error = %v, want nil", err)
 		}
@@ -290,7 +290,7 @@ func TestValidateMarkerMessageVerbatim(t *testing.T) {
 			AgentsJSON: `{"filer":{"prompt":"no marker here"}}`,
 		}
 
-		warnings, err := Validate(e, result, rows)
+		warnings, err := Validate(e, result, rows, nil)
 		if err != nil {
 			t.Fatalf("Validate() error = %v, want nil", err)
 		}
@@ -302,6 +302,83 @@ func TestValidateMarkerMessageVerbatim(t *testing.T) {
 			t.Errorf("Validate() warnings[0] =\n%q\nwant\n%q", warnings[0], want)
 		}
 	})
+}
+
+// TestValidateForbiddenMarkerRejectsImperativeUnderActiveGate covers the
+// forbiddenMarkers row wiring (issue #2464): a read-only, non-research
+// dispatch whose rendered prompt orders `git push` as an un-negated
+// numbered-list instruction must reject, with the forbidden-git-push row's
+// own Message surfacing verbatim.
+func TestValidateForbiddenMarkerRejectsImperativeUnderActiveGate(t *testing.T) {
+	e := Env{BoxWriteEnabled: false, DispatchKind: "work"}
+	result := Result{Prompt: "1. Push your branch with `git push` before you finish.\n"}
+
+	_, err := Validate(e, result, nil, testForbiddenMarkerRows())
+	if err == nil {
+		t.Fatal("Validate() error = nil, want non-nil")
+	}
+	want := forbiddenMarkerMessage(t, "forbidden-git-push")
+	if err.Error() != want {
+		t.Errorf("Validate() error =\n%q\nwant\n%q", err.Error(), want)
+	}
+}
+
+// TestValidateForbiddenMarkerPassesOnNegation covers the false-positive
+// guard: the shipped if-blocked-push-outbox.md fragment's own negated
+// `git push` list item (a read-only Box is explicitly told NOT to push) must
+// never trip the forbidden-git-push row.
+func TestValidateForbiddenMarkerPassesOnNegation(t *testing.T) {
+	e := Env{BoxWriteEnabled: false, DispatchKind: "work"}
+	result := Result{Prompt: "1. Your token is read-only and you take no code-out action yourself — do NOT\n" +
+		"   `git push` and do NOT run `git bundle create` (or note if you have nothing\n" +
+		"   committed to hand off). Leave what you have committed on the branch: after\n" +
+		"   you exit the harness relays your committed branch out and the launcher\n" +
+		"   pushes it host-side with its own token.\n"}
+
+	_, err := Validate(e, result, nil, testForbiddenMarkerRows())
+	if err != nil {
+		t.Fatalf("Validate() error = %v, want nil", err)
+	}
+}
+
+// TestValidateForbiddenMarkerInactiveUnderReadWrite covers the read-write
+// path being unaffected: with BoxWriteEnabled true, the boxAccessReadOnly
+// gate is never active, so an un-negated imperative `git push` in the
+// rendered prompt is never even evaluated.
+func TestValidateForbiddenMarkerInactiveUnderReadWrite(t *testing.T) {
+	e := Env{BoxWriteEnabled: true}
+	result := Result{Prompt: "1. Push your branch with `git push` before you finish.\n"}
+
+	_, err := Validate(e, result, nil, testForbiddenMarkerRows())
+	if err != nil {
+		t.Fatalf("Validate() error = %v, want nil", err)
+	}
+}
+
+// TestValidateForbiddenMarkerAbsentPasses covers the gate-active-but-marker-
+// nowhere case: no forbidden marker text anywhere in the prompt is never a
+// reject regardless of gate state.
+func TestValidateForbiddenMarkerAbsentPasses(t *testing.T) {
+	e := Env{BoxWriteEnabled: false, DispatchKind: "work"}
+	result := Result{Prompt: "no forbidden markers anywhere in this prompt"}
+
+	_, err := Validate(e, result, nil, testForbiddenMarkerRows())
+	if err != nil {
+		t.Fatalf("Validate() error = %v, want nil", err)
+	}
+}
+
+// forbiddenMarkerMessage returns testForbiddenMarkerRows()'s Message field
+// for the row with the given id, failing the test if no such row exists.
+func forbiddenMarkerMessage(t *testing.T, id string) string {
+	t.Helper()
+	for _, r := range testForbiddenMarkerRows() {
+		if r.ID == id {
+			return r.Message
+		}
+	}
+	t.Fatalf("no forbidden marker row with id %q", id)
+	return ""
 }
 
 // testValidateMarkerRows returns the four validateMarkers rows in

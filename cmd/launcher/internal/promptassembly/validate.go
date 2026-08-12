@@ -80,6 +80,61 @@ func LoadValidateMarkersFile(path string) ([]ValidateMarkerRow, error) {
 	return LoadValidateMarkers(f)
 }
 
+// ForbiddenMarkerRow is the Go mirror of one row in
+// lib/prompt-contract.nix's forbiddenMarkers registry (issue #2464), same
+// six fields/JSON tags as ValidateMarkerRow -- id/marker/carrier/severity/
+// when/message -- decoded from nix-rendered JSON built via the same
+// builtins.toJSON convention. Unlike validateMarkers, which asserts a
+// marker is present under an active gate, forbiddenMarkers asserts a
+// marker is absent -- specifically, never rendered as an imperative
+// telling a read-only Box to perform the operation -- under an active
+// gate.
+type ForbiddenMarkerRow struct {
+	// ID names the row, e.g. "forbidden-git-push".
+	ID string `json:"id"`
+	// Marker is the literal marker text a Box's rendered prompt must not
+	// carry as an imperative.
+	Marker string `json:"marker"`
+	// Carrier documents (informationally only) where Marker would appear
+	// if it were (wrongly) present, e.g. "fragment-body".
+	Carrier string `json:"carrier"`
+	// Severity is "reject" or "warn", same vocabulary as
+	// ValidateMarkerRow.Severity.
+	Severity string `json:"severity"`
+	// When names which gate condition activates this row, same vocabulary
+	// as ValidateMarkerRow.When.
+	When string `json:"when"`
+	// Message is the row's fully pre-rendered diagnostic prose, marker
+	// already interpolated by the nix registry.
+	Message string `json:"message"`
+}
+
+// LoadForbiddenMarkers reads and parses a forbiddenMarkers registry JSON
+// document (a bare JSON array of ForbiddenMarkerRow objects, matching
+// lib/prompt-contract.nix's builtins.toJSON shape) from r. Malformed JSON is
+// reported as a wrapped error, never a panic.
+func LoadForbiddenMarkers(r io.Reader) ([]ForbiddenMarkerRow, error) {
+	var rows []ForbiddenMarkerRow
+	if err := json.NewDecoder(r).Decode(&rows); err != nil {
+		return nil, fmt.Errorf("decode forbidden markers registry: %w", err)
+	}
+	return rows, nil
+}
+
+// LoadForbiddenMarkersFile opens path and loads it via LoadForbiddenMarkers
+// -- a convenience wrapper for callers working from a filesystem path (e.g.
+// the nix-baked registry file a later slice's CLI verb reads) rather than an
+// already-open reader. A missing or unreadable file is reported as a wrapped
+// error, never a panic.
+func LoadForbiddenMarkersFile(path string) ([]ForbiddenMarkerRow, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("open forbidden markers registry %s: %w", path, err)
+	}
+	defer f.Close()
+	return LoadForbiddenMarkers(f)
+}
+
 // Validate is the Go successor to agent/entrypoint.sh's
 // _validate_prompt_contract (issue #2249), moved here by issue #2356: the
 // in-box reject/warn matrix run once, at the tail of prompt assembly, after
@@ -108,7 +163,12 @@ func LoadValidateMarkersFile(path string) ([]ValidateMarkerRow, error) {
 // whether a missing marker under an active gate is fatal or advisory --
 // driven by rows' own data rather than a hardcoded per-id switch (issue
 // #2318).
-func Validate(e Env, result Result, rows []ValidateMarkerRow) (warnings []string, err error) {
+//
+// Validate also checks forbiddenRows (issue #2464): for each row whose gate
+// is active, it rejects/warns if ForbiddenMarkerIsImperative reports the
+// row's Marker was rendered as an imperative instruction rather than an
+// absent or merely-mentioned one.
+func Validate(e Env, result Result, rows []ValidateMarkerRow, forbiddenRows []ForbiddenMarkerRow) (warnings []string, err error) {
 	gates := Gates(e)
 	kind := e.DispatchKind
 	if kind == "" {
@@ -137,6 +197,34 @@ func Validate(e Env, result Result, rows []ValidateMarkerRow) (warnings []string
 		}
 
 		if !gateActive || strings.Contains(haystack, row.Marker) {
+			continue
+		}
+
+		message := row.Message
+
+		switch row.Severity {
+		case severityReject:
+			return warnings, fmt.Errorf("%s", message)
+		case severityWarn:
+			warnings = append(warnings, message)
+		default:
+			return warnings, fmt.Errorf("promptassembly: validate: unknown severity %q for row %q", row.Severity, row.ID)
+		}
+	}
+
+	for _, row := range forbiddenRows {
+		var gateActive bool
+		var haystack string
+
+		switch row.When {
+		case whenBoxAccessReadOnly:
+			gateActive = gates["BOX_ACCESS_READ_ONLY"] && kind != "research"
+			haystack = result.Prompt
+		default:
+			return warnings, fmt.Errorf("promptassembly: validate: no known gate for when %q (row %q)", row.When, row.ID)
+		}
+
+		if !gateActive || !ForbiddenMarkerIsImperative(row.Marker, haystack) {
 			continue
 		}
 

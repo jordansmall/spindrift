@@ -24,6 +24,11 @@ const registryPathForTest = "../internal/promptassembly/testdata/registry.json"
 // duplicating it by hand.
 const validateMarkersRegistryPathForTest = "../internal/promptassembly/testdata/validate-markers.json"
 
+// forbiddenMarkersRegistryPathForTest reuses promptassembly's own testdata
+// forbiddenMarkers registry fixture (issue #2464) rather than duplicating it
+// by hand.
+const forbiddenMarkersRegistryPathForTest = "../internal/promptassembly/testdata/forbidden-markers.json"
+
 // coveredCellArgs returns the flag set that puts runAssemblePrompt's Env
 // squarely in promptassembly.Assemble's one covered cell (see
 // promptassembly's checkCoveredCell): github tracker, github forge, a
@@ -53,6 +58,7 @@ func coveredCellArgs(t *testing.T, promptOutput, agentsJSONOutput, handoffOutput
 		"--run-nonce", "run-nonce-abc123",
 		"--registry", registryPathForTest,
 		"--validate-markers-registry", validateMarkersRegistryPathForTest,
+		"--forbidden-markers-registry", forbiddenMarkersRegistryPathForTest,
 		"--prompt-output", promptOutput,
 		"--agents-json-output", agentsJSONOutput,
 		"--handoff-output", handoffOutput,
@@ -170,6 +176,35 @@ func TestRunAssemblePrompt_ValidateMarkersRegistryRequired(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "validate-markers-registry") {
 		t.Errorf("stdout = %q, want it to mention validate-markers-registry", stdout.String())
+	}
+}
+
+// TestRunAssemblePrompt_ForbiddenMarkersRegistryRequired verifies a missing
+// -forbidden-markers-registry flag fails loudly (exit 1) instead of running
+// Assemble/Validate against a zero-value registry path (issue #2464).
+func TestRunAssemblePrompt_ForbiddenMarkersRegistryRequired(t *testing.T) {
+	dir := t.TempDir()
+	promptOutput := filepath.Join(dir, "prompt.txt")
+	agentsJSONOutput := filepath.Join(dir, "agents.json")
+	handoffOutput := filepath.Join(dir, "handoff.json")
+
+	args := coveredCellArgs(t, promptOutput, agentsJSONOutput, handoffOutput)
+	filtered := make([]string, 0, len(args))
+	for i := 0; i < len(args); i++ {
+		if args[i] == "--forbidden-markers-registry" {
+			i++ // also skip its value
+			continue
+		}
+		filtered = append(filtered, args[i])
+	}
+
+	var stdout bytes.Buffer
+	rc := runAssemblePrompt(filtered, &stdout)
+	if rc == 0 {
+		t.Fatal("runAssemblePrompt exit = 0, want non-zero for a missing -forbidden-markers-registry")
+	}
+	if !strings.Contains(stdout.String(), "forbidden-markers-registry") {
+		t.Errorf("stdout = %q, want it to mention forbidden-markers-registry", stdout.String())
 	}
 }
 
@@ -304,6 +339,137 @@ func TestRunAssemblePrompt_ValidatorWarnStillWritesOutputs(t *testing.T) {
 		if info.Size() == 0 {
 			t.Errorf("output file %s is empty, want non-empty", p)
 		}
+	}
+}
+
+// TestRunAssemblePrompt_ForbiddenMarkersShippedReadOnlyPromptClean proves
+// issue #2464's headline acceptance criterion: the shipped, real
+// templates/default/prompts tree assembles clean under a read-only,
+// otherwise-covered-cell dispatch (github tracker, github forge, work
+// dispatch) -- including issue-prompt.md's literal, always-rendered
+// CODE_FORGE=git branch, which mentions `git push` and `gh pr create`
+// unconditionally as its own instructions. That branch text is exempted by
+// ForbiddenMarkerIsImperative's conditional-branch-header shape (slice 3):
+// the branch's instructions apply only when CODE_FORGE resolves to git at
+// runtime, something this Box's own launcher-side gate decides, not
+// Assemble.
+func TestRunAssemblePrompt_ForbiddenMarkersShippedReadOnlyPromptClean(t *testing.T) {
+	dir := t.TempDir()
+	promptOutput := filepath.Join(dir, "prompt.txt")
+	agentsJSONOutput := filepath.Join(dir, "agents.json")
+	handoffOutput := filepath.Join(dir, "handoff.json")
+
+	args := coveredCellArgs(t, promptOutput, agentsJSONOutput, handoffOutput)
+	args = replaceArg(args, "--box-write-enabled", "false")
+
+	var stdout bytes.Buffer
+	rc := runAssemblePrompt(args, &stdout)
+	if rc != 0 {
+		t.Fatalf("runAssemblePrompt exit = %d, want 0 for the real shipped prompts tree under read-only (stdout=%q)", rc, stdout.String())
+	}
+}
+
+// forbiddenReintroducedPushPromptDir builds a temp prompts dir whose
+// issue-prompt.md reproduces the shape of the pre-#2462 ungated push
+// instruction: a plain paragraph introducing a numbered list whose first
+// item is an unconditional (no "do NOT", no conditional-branch header)
+// `git push` imperative.
+func forbiddenReintroducedPushPromptDir(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	content := "# TASK\n\n" +
+		"Work issue #${ISSUE_NUMBER}: ${ISSUE_TITLE}\n\n" +
+		"Re-run the repo's checks after rebasing, then push:\n\n" +
+		"1. `git fetch origin`\n" +
+		"2. `git rebase origin/${BASE_BRANCH}` — resolve any conflicts, re-run checks.\n" +
+		"3. `git push --force-with-lease` — one retry only.\n"
+	if err := os.WriteFile(filepath.Join(dir, "issue-prompt.md"), []byte(content), 0o644); err != nil {
+		t.Fatalf("write issue-prompt.md: %v", err)
+	}
+	return dir
+}
+
+// TestRunAssemblePrompt_ForbiddenMarkersReintroducedPushInstructionFailsReadOnlyPassesReadWrite
+// proves the "re-introducing the pre-#2462 ungated push instruction fails
+// under read-only, passes under read-write" acceptance criterion (issue
+// #2464).
+func TestRunAssemblePrompt_ForbiddenMarkersReintroducedPushInstructionFailsReadOnlyPassesReadWrite(t *testing.T) {
+	t.Run("read-only rejects", func(t *testing.T) {
+		dir := t.TempDir()
+		promptOutput := filepath.Join(dir, "prompt.txt")
+		agentsJSONOutput := filepath.Join(dir, "agents.json")
+		handoffOutput := filepath.Join(dir, "handoff.json")
+
+		args := coveredCellArgs(t, promptOutput, agentsJSONOutput, handoffOutput)
+		args = replaceArg(args, "--box-write-enabled", "false")
+		args = replaceArg(args, "--prompts-dir", forbiddenReintroducedPushPromptDir(t))
+
+		var stdout bytes.Buffer
+		rc := runAssemblePrompt(args, &stdout)
+		if rc == 0 {
+			t.Fatalf("runAssemblePrompt exit = 0, want non-zero for a reintroduced ungated git push under read-only (stdout=%q)", stdout.String())
+		}
+		if !strings.Contains(stdout.String(), "git push") {
+			t.Errorf("stdout = %q, want it to mention git push", stdout.String())
+		}
+	})
+
+	t.Run("read-write passes", func(t *testing.T) {
+		dir := t.TempDir()
+		promptOutput := filepath.Join(dir, "prompt.txt")
+		agentsJSONOutput := filepath.Join(dir, "agents.json")
+		handoffOutput := filepath.Join(dir, "handoff.json")
+
+		args := coveredCellArgs(t, promptOutput, agentsJSONOutput, handoffOutput)
+		args = replaceArg(args, "--box-write-enabled", "true")
+		args = replaceArg(args, "--prompts-dir", forbiddenReintroducedPushPromptDir(t))
+
+		var stdout bytes.Buffer
+		rc := runAssemblePrompt(args, &stdout)
+		if rc != 0 {
+			t.Fatalf("runAssemblePrompt exit = %d, want 0 for the same prompt under read-write -- the forbiddenMarkers gate is inactive there (stdout=%q)", rc, stdout.String())
+		}
+	})
+}
+
+// TestRunAssemblePrompt_ForbiddenMarkersConsumerOverrideRejected proves "a
+// Consumer prompt override carrying an imperative write under read-only is
+// rejected the same way the shipped prompt would be." Validate runs on
+// result.Prompt post-assembly regardless of whether that text came from the
+// shipped default tree or a --prompts-dir override -- there is no separate
+// "override" code path to exercise differently, so the read-only case in
+// TestRunAssemblePrompt_ForbiddenMarkersReintroducedPushInstructionFailsReadOnlyPassesReadWrite
+// (itself already built on a synthetic --prompts-dir, exactly what a
+// Consumer override looks like) already covers this criterion structurally.
+// This test adds a little incremental coverage with a different marker
+// (`gh pr create`) in a bulleted, not numbered, list, still with no
+// negation, to confirm the list-item detection isn't numbered-list-only.
+func TestRunAssemblePrompt_ForbiddenMarkersConsumerOverrideRejected(t *testing.T) {
+	dir := t.TempDir()
+	overrideDir := t.TempDir()
+	content := "# TASK\n\n" +
+		"Work issue #${ISSUE_NUMBER}: ${ISSUE_TITLE}\n\n" +
+		"Once your commits are ready, open the PR:\n\n" +
+		"- `gh pr create --base ${BASE_BRANCH} --head ${BRANCH} --title \"<title>\" --body \"<summary>\"`\n"
+	if err := os.WriteFile(filepath.Join(overrideDir, "issue-prompt.md"), []byte(content), 0o644); err != nil {
+		t.Fatalf("write issue-prompt.md: %v", err)
+	}
+
+	promptOutput := filepath.Join(dir, "prompt.txt")
+	agentsJSONOutput := filepath.Join(dir, "agents.json")
+	handoffOutput := filepath.Join(dir, "handoff.json")
+
+	args := coveredCellArgs(t, promptOutput, agentsJSONOutput, handoffOutput)
+	args = replaceArg(args, "--box-write-enabled", "false")
+	args = replaceArg(args, "--prompts-dir", overrideDir)
+
+	var stdout bytes.Buffer
+	rc := runAssemblePrompt(args, &stdout)
+	if rc == 0 {
+		t.Fatalf("runAssemblePrompt exit = 0, want non-zero for a Consumer override carrying an ungated gh pr create under read-only (stdout=%q)", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "gh pr create") {
+		t.Errorf("stdout = %q, want it to mention gh pr create", stdout.String())
 	}
 }
 
