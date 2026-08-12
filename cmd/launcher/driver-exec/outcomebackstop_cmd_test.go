@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"os"
 	"path/filepath"
 	"testing"
 )
@@ -34,6 +33,7 @@ func TestRunOutcomeBackstop_ParsesFlagsAndEmits(t *testing.T) {
 		"--branch", "agent/issue-42",
 		"--base", "main",
 		"--host-mediated-remote", "1",
+		"--run-state-file", filepath.Join(t.TempDir(), "no-run-state.json"),
 	}, &stdout)
 	if rc != 0 {
 		t.Fatalf("runOutcomeBackstop exit = %d, want 0 (stdout=%q)", rc, stdout.String())
@@ -105,49 +105,26 @@ func TestRunOutcomeBackstop_RunStateFileFlagBlocksVerdict(t *testing.T) {
 }
 
 // TestRunOutcomeBackstop_DefaultRunStateFilePathIsTmpRunState verifies that
-// omitting -run-state-file falls back to /tmp/run-state.json, matching the
+// omitting -run-state-file defaults to /tmp/run-state.json, matching the
 // orchestrator's own --state-file default (issue #1997), rather than
 // leaving the backstop with no verdict-known path at all (issue #2459).
+//
+// This asserts the default via the flag.FlagSet's DefValue rather than by
+// invoking runOutcomeBackstop against the real path: the Box this test runs
+// in bakes sandbox = false (lib/image.nix:456), so a real orchestrator on
+// the same host could have a live /tmp/run-state.json artifact mid-write,
+// and a prior version of this test raced clobbering it (issue #2459 review
+// finding). This test never opens, reads, or writes any file at
+// /tmp/run-state.json.
 func TestRunOutcomeBackstop_DefaultRunStateFilePathIsTmpRunState(t *testing.T) {
-	const defaultPath = "/tmp/run-state.json"
-	// This path is shared with a real orchestrator run on the same host
-	// (issue #1997's default --state-file); save and restore whatever is
-	// there rather than blindly overwriting/deleting it, so this test can
-	// never clobber a live run's own handoff artifact.
-	if prior, err := os.ReadFile(defaultPath); err == nil {
-		t.Cleanup(func() { os.WriteFile(defaultPath, prior, 0o644) })
-	} else {
-		t.Cleanup(func() { os.Remove(defaultPath) })
+	fs, _ := newOutcomeBackstopFlagSet()
+
+	got := fs.Lookup("run-state-file")
+	if got == nil {
+		t.Fatal("run-state-file flag not registered")
 	}
-	writeTestFile(t, defaultPath, `{"last_verdict":"BLOCK"}`)
-
-	dir := t.TempDir()
-	runGitCmd(t, dir, "init", "-b", "main")
-	runGitCmd(t, dir, "config", "user.name", "Test Bot")
-	runGitCmd(t, dir, "config", "user.email", "bot@example.com")
-	writeTestFile(t, filepath.Join(dir, "base.txt"), "base\n")
-	runGitCmd(t, dir, "add", "base.txt")
-	runGitCmd(t, dir, "commit", "-m", "base")
-	runGitCmd(t, dir, "checkout", "-b", "agent/issue-42")
-	writeTestFile(t, filepath.Join(dir, "feature.txt"), "feature\n")
-	runGitCmd(t, dir, "add", "feature.txt")
-	runGitCmd(t, dir, "commit", "-m", "feature")
-
-	var stdout bytes.Buffer
-	rc := runOutcomeBackstop([]string{
-		"--repo", dir,
-		"--issue", "42",
-		"--branch", "agent/issue-42",
-		"--base", "main",
-		"--host-mediated-remote", "1",
-	}, &stdout)
-	if rc != 0 {
-		t.Fatalf("runOutcomeBackstop exit = %d, want 0 (stdout=%q)", rc, stdout.String())
-	}
-
-	out := stdout.String()
-	if !bytes.Contains([]byte(out), []byte("status=blocked")) {
-		t.Fatalf("expected the default run-state path to be read and block the verdict, got %q", out)
+	if want := "/tmp/run-state.json"; got.DefValue != want {
+		t.Fatalf("run-state-file default = %q, want %q", got.DefValue, want)
 	}
 }
 
