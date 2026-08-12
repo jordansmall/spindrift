@@ -2263,6 +2263,23 @@ it and seeds its base ref from `BASE_BRANCH` in the operator's own checkout,
 offline, before any Box runs — idempotently on every run thereafter, so
 there is no operator setup step.
 
+**Seeding is cross-process locked (issue #2441).** Seeding force-pushes the
+base branch into the Accumulation repo — a full mirror, including a rewind
+if the operator's checkout moved backwards — which is safe within one
+launcher process (seeding runs once, before any Box), but not across two:
+a second, independent `spindrift` process (e.g. a `research` run and a
+`dispatch` run against the same `CODE_FORGE_ACCUMULATION_REPO_DIR`) seeding
+while the first process still has a Box mounted against it could rewind the
+ref out from under that Box mid-flight. The launcher guards this with a
+non-blocking exclusive file lock (`<accum-repo-path>.lock`), held from
+seeding through the end of the whole process's run — every Box it
+dispatches, not just the initial seed. A second process that tries to seed
+the same Accumulation repo while the first still holds the lock fails fast
+with a clear error naming the repo path, rather than blocking or silently
+racing the first process's mount; the operator re-runs once the first
+process exits. The lock is advisory and per-`CODE_FORGE_ACCUMULATION_REPO_DIR`
+— unrelated tickets with different Accumulation repos never contend.
+
 **Code-in / code-out.** The launcher RO bind-mounts the Accumulation repo
 into the Box at `/repo`; the agent clones it read-only and works in the
 tmpfs work dir, exactly as it would clone a real remote. The Box can't push
