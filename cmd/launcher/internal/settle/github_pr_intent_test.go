@@ -307,6 +307,106 @@ func TestSettle_GithubReadOnly_MissingPRIntentReconstructsFromCommits(t *testing
 	}
 }
 
+// TestSettle_GithubReadOnly_MissingPRIntentReconstructsFromCommits_CallsCommitSubjectsWithOutboxBaseAndBranch
+// asserts reconstructPRText's CommitSubjects call is wired correctly (issue
+// #2447): nothing else in this file asserts against fc.CommitSubjectsCalls
+// on a success path, so a swap of s.cfg.BaseBranch and the agent branch (or a
+// wrong outbox dir) would still pass every other test here. Pins the single
+// recorded call's OutboxDir/Base/Ref to exactly the outbox dir for this
+// issue, the configured base branch (never the head branch), and the agent
+// branch for this issue (never swapped with base).
+func TestSettle_GithubReadOnly_MissingPRIntentReconstructsFromCommits_CallsCommitSubjectsWithOutboxBaseAndBranch(t *testing.T) {
+	const issNum = "1919"
+	const prURL = "https://github.com/owner/repo/pull/1919"
+
+	fc := forge.NewFake(testDispatchLabels)
+	fc.BranchPrefix = "agent/issue-"
+	branch := fc.AgentBranch(issNum)
+	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
+	fc.CreateDraftPRURL = prURL
+	fc.SetCheckStates(prURL, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
+	fc.CommitSubjectsResult = []string{"feat: add widget", "fix: typo"}
+
+	d := dispatch.NewFake()
+	result := dispatch.Result{
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: issNum, Landing: branch, Status: "ready", Note: "ok"},
+		},
+		// PRIntentFound left false: the box's log had no PR-intent line.
+	}
+
+	c := baseConfig()
+	c.ReadOnly = true
+	c.OutboxDir = func(num string) string { return "/outbox/" + num }
+	c.BaseBranch = "main"
+	s := New(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
+	s.Settle(d, issNum, 0, result)
+
+	if len(fc.CommitSubjectsCalls) != 1 {
+		t.Fatalf("CommitSubjectsCalls = %+v, want exactly 1", fc.CommitSubjectsCalls)
+	}
+	want := forge.CommitSubjectsCall{OutboxDir: "/outbox/1919", Base: "main", Ref: branch}
+	if fc.CommitSubjectsCalls[0] != want {
+		t.Errorf("CommitSubjectsCalls[0] = %+v, want %+v", fc.CommitSubjectsCalls[0], want)
+	}
+}
+
+// TestSettle_GithubReadOnly_MissingPRIntentReconstructsFromCommits_DefusesInjectedClosingKeyword
+// asserts the fix for the closing-keyword injection hazard reconstructPRText
+// otherwise carries (issue #2447 follow-up): a box-authored commit subject
+// that happens to be shaped like a GitHub closing keyword referencing some
+// OTHER issue must not survive verbatim into the bulleted commit list —
+// GitHub's own PR-body scanner would auto-close that unrelated issue on
+// merge, a hand-off the host never intended. The one real "Closes #<num>"
+// line ensureClosesReference appends for the issue actually being landed
+// must still be present and untouched.
+func TestSettle_GithubReadOnly_MissingPRIntentReconstructsFromCommits_DefusesInjectedClosingKeyword(t *testing.T) {
+	const issNum = "1919"
+	const otherNum = "999"
+	const prURL = "https://github.com/owner/repo/pull/1919"
+
+	fc := forge.NewFake(testDispatchLabels)
+	fc.BranchPrefix = "agent/issue-"
+	branch := fc.AgentBranch(issNum)
+	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
+	fc.CreateDraftPRURL = prURL
+	fc.SetCheckStates(prURL, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
+	fc.CommitSubjectsResult = []string{"feat: add widget", "fix: closes #" + otherNum}
+
+	d := dispatch.NewFake()
+	result := dispatch.Result{
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: issNum, Landing: branch, Status: "ready", Note: "ok"},
+		},
+		// PRIntentFound left false: the box's log had no PR-intent line.
+	}
+
+	c := baseConfig()
+	c.ReadOnly = true
+	c.OutboxDir = func(num string) string { return "/outbox/" + num }
+	c.BaseBranch = "main"
+	s := New(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
+	s.Settle(d, issNum, 0, result)
+
+	if len(fc.CreateDraftPRCalls) != 1 {
+		t.Fatalf("CreateDraftPRCalls = %+v, want exactly 1", fc.CreateDraftPRCalls)
+	}
+	body := fc.CreateDraftPRCalls[0].Body
+	if hasClosingReference(body, otherNum) {
+		t.Errorf("Body = %q, must not carry a live closing reference to unrelated issue #%s", body, otherNum)
+	}
+	if !strings.Contains(body, otherNum) || !strings.Contains(body, "closes") {
+		t.Errorf("Body = %q, want the defused subject to still be visually recognizable (contain %q and \"closes\")", body, otherNum)
+	}
+	if !hasClosingReference(body, issNum) {
+		t.Errorf("Body = %q, want a live Closes reference to the landed issue #%s", body, issNum)
+	}
+}
+
 // TestSettle_GithubReadOnly_MissingPRIntentReconstructsFromCommits_PostsIssueComment
 // asserts AC5 of issue #2447: a reconstructed hand-off must be distinguishable
 // from a normal one by an operator reading only the GitHub issue (not the
@@ -351,6 +451,141 @@ func TestSettle_GithubReadOnly_MissingPRIntentReconstructsFromCommits_PostsIssue
 	}
 	if len(reconstructedCalls) != 1 {
 		t.Fatalf("expected exactly one reconstructed-hand-off comment, got %d: %+v", len(reconstructedCalls), fc.CommentCalls)
+	}
+}
+
+// TestSettle_GithubReadOnly_MissingPRIntentReconstructsButCreateDraftPRFailsBlocksNoReconstructedComment
+// asserts that when PR-intent is missing and reconstruction itself succeeds
+// (relay succeeds, CommitSubjects returns subjects), but the CreateDraftPR
+// call that follows fails, hostMediateDraftPR blocks the hand-off — via the
+// same blockHandoff path a genuine relay failure takes — before ever
+// reaching the "reconstructed && created" comment-posting block a few lines
+// below the CreateDraftPR call (issue #2447 follow-up). Critically, only the
+// merge-blocked comment must be posted: the reconstruction succeeding must
+// never itself cause the reconstructed-hand-off comment to fire when the
+// draft PR create that was supposed to consume that reconstructed text never
+// actually succeeded.
+func TestSettle_GithubReadOnly_MissingPRIntentReconstructsButCreateDraftPRFailsBlocksNoReconstructedComment(t *testing.T) {
+	const issNum = "1919"
+	branch := "agent/issue-1919"
+
+	fc := forge.NewFake(testDispatchLabels)
+	fc.BranchPrefix = "agent/issue-"
+	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
+	fc.CommitSubjectsResult = []string{"feat: add widget", "fix: typo"}
+	fc.CreateDraftPRErr = errors.New("create draft PR: 500")
+
+	d := dispatch.NewFake()
+	result := dispatch.Result{
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: issNum, Landing: branch, Status: "ready", Note: "ok"},
+		},
+		// PRIntentFound left false: the box's log had no PR-intent line.
+	}
+
+	c := baseConfig()
+	c.ReadOnly = true
+	c.OutboxDir = func(num string) string { return "/outbox/" + num }
+	c.BaseBranch = "main"
+	s := New(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
+	s.Settle(d, issNum, 0, result)
+
+	if len(fc.CreateDraftPRCalls) != 1 {
+		t.Fatalf("CreateDraftPRCalls = %+v, want exactly 1 (reconstruction must have succeeded and CreateDraftPR must have been attempted)", fc.CreateDraftPRCalls)
+	}
+	if fc.Merged != "" {
+		t.Errorf("Merge must not be called when CreateDraftPR itself failed; fc.Merged=%q", fc.Merged)
+	}
+	iss, _ := fc.Issue(issNum)
+	if containsLabel(iss.Labels, "agent-complete") {
+		t.Errorf("a blocked draft-PR-create must NOT carry agent-complete — it reads as merged/done (#2046); labels=%v", iss.Labels)
+	}
+	if !containsLabel(iss.Labels, "agent-in-progress") {
+		t.Errorf("a blocked draft-PR-create is left in-progress, visibly not-done; labels=%v", iss.Labels)
+	}
+	if containsLabel(iss.Labels, "agent-failed") {
+		t.Errorf("issue must NOT carry agent-failed after a blocked draft-PR-create; labels=%v", iss.Labels)
+	}
+	var blockedCalls []forge.CommentCall
+	for _, c := range fc.CommentCalls {
+		if strings.Contains(c.Body, "merge blocked") {
+			blockedCalls = append(blockedCalls, c)
+		}
+	}
+	if len(blockedCalls) != 1 {
+		t.Fatalf("expected exactly one merge-blocked comment, got %d: %+v", len(blockedCalls), fc.CommentCalls)
+	}
+	for _, c := range fc.CommentCalls {
+		if strings.Contains(c.Body, "reconstructed") {
+			t.Errorf("a failed CreateDraftPR must not get a reconstructed-hand-off comment (the reconstructed text was never applied to any PR), got %+v", fc.CommentCalls)
+		}
+	}
+}
+
+// TestSettle_GithubReadOnly_MissingPRIntentReconstructsButAdoptsExistingPR_NoReconstructedComment
+// asserts the fix for the bug this test is named after (issue #2447 follow-
+// up): when PR-intent is missing and reconstruction succeeds, but
+// CreateDraftPR *adopts* a pre-existing PR (issue #2407's retry path, so
+// created=false) instead of creating a fresh one, the reconstructed
+// title/body were never actually applied to that PR — hostMediateDraftPR
+// must not then claim, via either the stdout log or an issue comment, that
+// the hand-off was reconstructed. The call itself still happens (and still
+// carries the reconstructed title/body — nothing here skips *building*
+// them), and the overall hand-off still succeeds normally (the PR still
+// gets watched and merged); only the reconstructed-hand-off signaling is
+// suppressed.
+func TestSettle_GithubReadOnly_MissingPRIntentReconstructsButAdoptsExistingPR_NoReconstructedComment(t *testing.T) {
+	const issNum = "1919"
+	const prURL = "https://github.com/owner/repo/pull/1919"
+
+	fc := forge.NewFake(testDispatchLabels)
+	fc.BranchPrefix = "agent/issue-"
+	branch := fc.AgentBranch(issNum)
+	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
+	fc.CreateDraftPRAdoptHead = branch
+	fc.CreateDraftPRAdoptedURL = prURL
+	fc.SetCheckStates(prURL, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
+	fc.CommitSubjectsResult = []string{"feat: add widget", "fix: typo"}
+
+	d := dispatch.NewFake()
+	result := dispatch.Result{
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: issNum, Landing: branch, Status: "ready", Note: "ok"},
+		},
+		// PRIntentFound left false: the box's log had no PR-intent line.
+	}
+
+	c := baseConfig()
+	c.ReadOnly = true
+	c.OutboxDir = func(num string) string { return "/outbox/" + num }
+	c.BaseBranch = "main"
+	s := New(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
+	s.Settle(d, issNum, 0, result)
+
+	if len(fc.CreateDraftPRCalls) != 1 {
+		t.Fatalf("CreateDraftPRCalls = %+v, want exactly 1", fc.CreateDraftPRCalls)
+	}
+	call := fc.CreateDraftPRCalls[0]
+	if call.Title != "feat: add widget" {
+		t.Errorf("Title = %q, want first commit subject %q (reconstruction must still run even though the PR is adopted, not created)", call.Title, "feat: add widget")
+	}
+
+	for _, c := range fc.CommentCalls {
+		if strings.Contains(c.Body, "reconstructed") {
+			t.Errorf("adopting a pre-existing PR must not get a reconstructed-hand-off comment (the reconstructed text was never applied to it), got %+v", fc.CommentCalls)
+		}
+	}
+
+	if fc.Merged != prURL {
+		t.Errorf("expected Merge(%q) to have run; the hand-off itself must still succeed normally even though no reconstructed-hand-off comment is posted; fc.Merged=%q", prURL, fc.Merged)
+	}
+	iss, _ := fc.Issue(issNum)
+	if !containsLabel(iss.Labels, "agent-complete") {
+		t.Errorf("issue must carry agent-complete after a merged hand-off; labels=%v", iss.Labels)
 	}
 }
 
