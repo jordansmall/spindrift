@@ -178,6 +178,59 @@ func TestExecClient_PRForgeContract(t *testing.T) {
 	forgetest.RunPRForgeContract(t, newPRForgeHarness(t))
 }
 
+// TestExecClient_MarkReadyClearsDraft verifies MarkReady's `gh pr ready`
+// call actually flips the fake script's scripted draft state, so a later
+// OpenPRForBranch/isDraft read reflects it — the fake gh script's pr-ready
+// case previously just `exit 0`'d without touching the draft state file,
+// making it unfaithful to real `gh pr ready`'s effect on GitHub's draft
+// state (issue #2408).
+func TestExecClient_MarkReadyClearsDraft(t *testing.T) {
+	h := newPRForgeHarness(t)
+	const num = "220"
+	url := h.SeedDraftPR(num)
+	branch := h.branchName(num)
+
+	if err := h.Forge().MarkReady(url); err != nil {
+		t.Fatalf("MarkReady(%q): %v", url, err)
+	}
+
+	pr, ok, err := h.Forge().OpenPRForBranch(branch)
+	if err != nil {
+		t.Fatalf("OpenPRForBranch(%q): %v", branch, err)
+	}
+	if !ok {
+		t.Fatalf("OpenPRForBranch(%q) = not found, want found", branch)
+	}
+	if pr.IsDraft {
+		t.Fatalf("OpenPRForBranch(%q).IsDraft = true after MarkReady, want false", branch)
+	}
+}
+
+// TestExecClient_MarkDraftSetsDraft is the inverse of
+// TestExecClient_MarkReadyClearsDraft: MarkDraft's `gh pr ready --undo` call
+// must flip an open PR back to draft.
+func TestExecClient_MarkDraftSetsDraft(t *testing.T) {
+	h := newPRForgeHarness(t)
+	const num = "221"
+	url := h.SeedOpenPR(num)
+	branch := h.branchName(num)
+
+	if err := h.Forge().MarkDraft(url); err != nil {
+		t.Fatalf("MarkDraft(%q): %v", url, err)
+	}
+
+	pr, ok, err := h.Forge().OpenPRForBranch(branch)
+	if err != nil {
+		t.Fatalf("OpenPRForBranch(%q): %v", branch, err)
+	}
+	if !ok {
+		t.Fatalf("OpenPRForBranch(%q) = not found, want found", branch)
+	}
+	if !pr.IsDraft {
+		t.Fatalf("OpenPRForBranch(%q).IsDraft = false after MarkDraft, want true", branch)
+	}
+}
+
 // TestExecClient_HeadCommitSHA verifies the real adapter's HeadCommitSHA
 // (gh pr view --json headRefOid) reports the branch's actual current tip,
 // and that the value changes once a new commit genuinely lands on it — the

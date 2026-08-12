@@ -96,6 +96,20 @@ pr-merge)
 	exit 1
 	;;
 pr-ready)
+	shift 2
+	undo=0 url=""
+	for a in "$@"; do
+		case "$a" in
+		--undo) undo=1 ;;
+		*) url="$a" ;;
+		esac
+	done
+	num=$(pr_num "$url")
+	if [ "$undo" = "1" ]; then
+		printf 'true\n' > "$STATE_DIR/prs/$num/draft"
+	else
+		printf 'false\n' > "$STATE_DIR/prs/$num/draft"
+	fi
 	exit 0
 	;;
 api-graphql)
