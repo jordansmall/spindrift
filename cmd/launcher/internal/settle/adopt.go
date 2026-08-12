@@ -16,7 +16,9 @@ import (
 // status=blocked instead of adopting off draft-ness. Unlike Settle's own
 // "ready" path, this PR's head SHA was not necessarily pushed by this
 // process, so the gate cannot trust an immediately-green rollup without
-// first seeing evidence it registered (issue #1652) — see selfHealAdopted.
+// first seeing evidence it registered (issue #1652) — bounded, not withheld
+// forever (issue #2475) — see selfHealAdopted, gateToGreen, and
+// registrationWindowPolls.
 func (s *Settle) SettleAdopted(d dispatch.Dispatcher, num string, gen uint64, prURL string) {
 	branch := s.cf.AgentBranch(num)
 	fmt.Printf("    #%s  landing=%s  status=adopted  note=no outcome line; PR discovered on %s\n", num, prURL, branch)

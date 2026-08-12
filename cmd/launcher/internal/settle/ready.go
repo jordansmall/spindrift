@@ -62,7 +62,8 @@ func (s *Settle) selfHeal(d dispatch.Dispatcher, num string, gen uint64, pr stri
 // exited with no outcome line). Unlike selfHeal, it cannot assume the PR's
 // current head SHA is one this process just pushed, so its first CI gate
 // poll requires evidence this run's checks registered before trusting a
-// SUCCESS rollup (issue #1652).
+// SUCCESS rollup, within a bounded window (issue #1652, #2475) — see
+// gateToGreen.
 func (s *Settle) selfHealAdopted(d dispatch.Dispatcher, num string, gen uint64, pr string) (landingResult, string) {
 	return s.selfHealGate(d, num, gen, pr, true)
 }
@@ -305,10 +306,17 @@ func (s *Settle) gateToGreen(num string, gen uint64, pr string, requireRegistrat
 	if actualIv <= 0 {
 		actualIv = 1
 	}
-	// registrationWindow bounds how long gateToGreen withholds trust in an
-	// inherited SUCCESS while requireRegistration is set — see
-	// registrationWindowPolls.
+	// registrationWindow — see registrationWindowPolls's doc.
 	registrationWindow := registrationWindowPolls * actualIv
+	// A deadline smaller than the unclamped window (e.g. MERGE_POLL_TIMEOUT <
+	// registrationWindowPolls*MERGE_POLL_INTERVAL) would otherwise never let
+	// the window elapse before the ci-timeout deadline hits, livelocking a
+	// legitimately-already-green adopted PR into gateTerminal instead of
+	// accepting it (issue #2475 follow-up). deadline 0 (the "NONE times out
+	// immediately" case) already makes this a no-op-safe 0.
+	if registrationWindow > deadline {
+		registrationWindow = deadline
+	}
 	elapsed := 0
 	registered := !requireRegistration
 
@@ -324,7 +332,7 @@ func (s *Settle) gateToGreen(num string, gen uint64, pr string, requireRegistrat
 		if state != forge.StateSuccess && state != forge.StateFailure && state != forge.StateError {
 			registered = true
 		}
-		if requireRegistration && !registered && elapsed >= registrationWindow {
+		if !registered && elapsed >= registrationWindow {
 			// The registration window elapsed with only a terminal state
 			// (SUCCESS, in practice — FAILURE/ERROR return immediately
 			// below) ever observed. Treat that as proof CI already
