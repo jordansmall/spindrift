@@ -169,23 +169,22 @@ func LoadForbiddenMarkersFile(path string) ([]ForbiddenMarkerRow, error) {
 // row's Marker was rendered as an imperative instruction rather than an
 // absent or merely-mentioned one.
 //
-// One combination the forbiddenRows loop below deterministically rejects:
-// e.CodeForge == "git" together with an active whenBoxAccessReadOnly gate.
-// templates/default/prompts/issue-prompt.md's `**`CODE_FORGE=git`**` branch
-// (a push-only Code Forge with no PR mechanism) contains a genuine, ungated,
-// un-negated "git push" numbered-list instruction -- correct content for
-// that branch, since a CODE_FORGE=git Box must push directly to land its
-// work. ForbiddenMarkerIsImperative treats that branch as "live" (scanned,
-// not exempted) whenever liveCodeForge == "git", so this row rejects every
-// time the two conditions coincide. That is expected and safe rather than a
-// bug this loop needs to special-case: cmd/launcher/main.go's
-// checkReadOnlyCapabilityGate refuses at launcher startup to ever dispatch
-// BOX_FORGE_AND_ISSUE_ACCESS=read-only with CODE_FORGE=git, because
-// CODE_FORGE=git doesn't implement forge.BundleRelay (only CODE_FORGE=local
-// does today) -- so this promptassembly-package combination can never
-// actually arise from a real launcher invocation. See
-// TestValidateForbiddenMarkerRejectsGitForgeBranchUnderReadOnly_KnownUnreachableInProduction
-// (validate_test.go), which pins this exact cell's behavior.
+// liveCodeForge == "git" is excluded from the whenBoxAccessReadOnly
+// forbidden-row gate entirely (both loops below). templates/default/
+// prompts/issue-prompt.md's `**`CODE_FORGE=git`**` branch (a push-only Code
+// Forge with no PR mechanism) contains a genuine, ungated, un-negated "git
+// push" numbered-list instruction -- correct, load-bearing content for that
+// branch, since a CODE_FORGE=git Box must push directly to land its work;
+// it is never a drifted-fragment bug this check needs to catch. Unlike
+// cmd/launcher/main.go's checkReadOnlyCapabilityGate (which separately
+// refuses at launcher startup to ever dispatch
+// BOX_FORGE_AND_ISSUE_ACCESS=read-only with CODE_FORGE=git, since
+// CODE_FORGE=git doesn't implement forge.BundleRelay), this
+// promptassembly-package Validate call has no such protection of its own --
+// entrypoint.sh's bats coverage exercises read-only + CODE_FORGE=git
+// directly (e.g. tests/entrypoint-pr-intent-nudge.bats's "PR-intent gate:
+// never fires under CODE_FORGE=git"), so this package must tolerate the
+// combination rather than assume it away.
 func Validate(e Env, result Result, rows []ValidateMarkerRow, forbiddenRows []ForbiddenMarkerRow) (warnings []string, err error) {
 	gates := Gates(e)
 	kind := e.DispatchKind
@@ -241,15 +240,28 @@ func Validate(e Env, result Result, rows []ValidateMarkerRow, forbiddenRows []Fo
 
 		switch row.When {
 		case whenBoxAccessReadOnly:
-			gateActive = gates["BOX_ACCESS_READ_ONLY"] && kind != "research"
+			gateActive = gates["BOX_ACCESS_READ_ONLY"] && kind != "research" && liveCodeForge != "git"
 			// Three possible rendered texts a read-only Box's contract
 			// spans -- the main prompt, the filer sub-agent's own prompt,
 			// and the orchestrator's review prompt file -- mirroring the
 			// three haystacks the validateRows loop above already
 			// dispatches across per-When (issue #2464 follow-up: "gh issue
 			// create"/"gh issue comment" only ever render inside the filer
-			// prompt, never result.Prompt).
-			haystacks = []string{result.Prompt, filerPromptFrom(result.AgentsJSON), result.Handoff.ReviewPromptFile}
+			// prompt, never result.Prompt). The filer prompt haystack is
+			// dropped when the filer is legitimately using its own direct
+			// gh/fj write path (FILER_FILE_DIRECT_GH/FORGEJO) rather than
+			// the host-mediated relay -- that path's own token is
+			// independent of the main Box's BOX_ACCESS_READ_ONLY status
+			// (issue #2019), so "gh issue create" there is expected
+			// content, not a violation (issue #2464 follow-up: today's
+			// degraded direct-file path, tests/entrypoint-prompt-
+			// fragments.bats's "filer write step: read-only with
+			// orchestrator off keeps today's degraded direct-file path
+			// unchanged").
+			haystacks = []string{result.Prompt, result.Handoff.ReviewPromptFile}
+			if !gates["FILER_FILE_DIRECT_ANY"] {
+				haystacks = append(haystacks, filerPromptFrom(result.AgentsJSON))
+			}
 		default:
 			return warnings, fmt.Errorf("promptassembly: validate: no known gate for when %q (row %q)", row.When, row.ID)
 		}

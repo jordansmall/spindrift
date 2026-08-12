@@ -417,19 +417,20 @@ func TestValidateForbiddenMarkerRejectsImperativeInReviewPromptFile(t *testing.T
 	}
 }
 
-// TestValidateForbiddenMarkerRejectsGitForgeBranchUnderReadOnly_KnownUnreachableInProduction
-// pins a known-unreachable-in-production rejection (Validate's doc comment,
-// validate.go): the shipped templates/default/prompts/issue-prompt.md's
-// `**`CODE_FORGE=git`**` branch carries a genuine, ungated, un-negated
-// numbered-list "git push" instruction, and ForbiddenMarkerIsImperative
-// treats that branch as live (scanned, not exempted) whenever
-// e.CodeForge == "git". So Validate deterministically rejects here. This is
-// not a bug: cmd/launcher/main.go's checkReadOnlyCapabilityGate refuses at
-// launcher startup to ever dispatch BOX_FORGE_AND_ISSUE_ACCESS=read-only
-// with CODE_FORGE=git (it doesn't implement forge.BundleRelay), so this
-// combination never arises from a real launcher invocation. If this test
-// starts failing, check main.go's gate before assuming this test is wrong.
-func TestValidateForbiddenMarkerRejectsGitForgeBranchUnderReadOnly_KnownUnreachableInProduction(t *testing.T) {
+// TestValidateForbiddenMarkerToleratesGitForgeBranchUnderReadOnly covers
+// liveCodeForge == "git" excluded from the whenBoxAccessReadOnly
+// forbidden-row gate entirely (Validate's doc comment, validate.go): the
+// shipped templates/default/prompts/issue-prompt.md's `**`CODE_FORGE=git`**`
+// branch carries a genuine, ungated, un-negated numbered-list "git push"
+// instruction -- correct, load-bearing content for that branch, never a
+// drifted-fragment bug to catch. cmd/launcher/main.go's
+// checkReadOnlyCapabilityGate separately refuses at launcher startup to
+// ever dispatch BOX_FORGE_AND_ISSUE_ACCESS=read-only with CODE_FORGE=git,
+// but this promptassembly-package Validate call has no such protection of
+// its own -- entrypoint.sh's bats coverage exercises this exact combination
+// directly (tests/entrypoint-pr-intent-nudge.bats's "PR-intent gate: never
+// fires under CODE_FORGE=git"), so Validate must tolerate it.
+func TestValidateForbiddenMarkerToleratesGitForgeBranchUnderReadOnly(t *testing.T) {
 	e := Env{BoxWriteEnabled: false, DispatchKind: "work", CodeForge: "git"}
 	result := Result{Prompt: "**`CODE_FORGE=git`** (push-only Code Forge — no PR, no CI-watch, no merge\n" +
 		"gate): skip OPEN A PULL REQUEST below entirely.\n" +
@@ -438,12 +439,8 @@ func TestValidateForbiddenMarkerRejectsGitForgeBranchUnderReadOnly_KnownUnreacha
 		"2. Print exactly one line as your final output and stop.\n"}
 
 	_, err := Validate(e, result, nil, testForbiddenMarkerRows())
-	if err == nil {
-		t.Fatal("Validate() error = nil, want non-nil")
-	}
-	want := forbiddenMarkerMessage(t, "forbidden-git-push")
-	if err.Error() != want {
-		t.Errorf("Validate() error =\n%q\nwant\n%q", err.Error(), want)
+	if err != nil {
+		t.Fatalf("Validate() error = %v, want nil", err)
 	}
 }
 
