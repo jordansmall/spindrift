@@ -31,7 +31,7 @@ func main() {
 	stateFile := flag.String("state-file", "/tmp/run-state.json", "path to the run-state handoff artifact (issue #1997); empty disables it")
 	scoutBriefPath := flag.String("scout-brief-path", "/tmp/brief.md", "path to the scout brief, recorded into the run-state artifact")
 	maxReviewRounds := flag.Int("max-review-rounds", 3, "cap on additional fresh-session passes a BLOCK verdict may trigger; 0 disables the cap")
-	maxSlices := flag.Int("max-slices", 5, "cap on total driver-exec invocations this run makes; 0 disables the cap")
+	maxSlices := flag.Int("max-slices", 9, "cap on total driver-exec invocations this run makes; 0 disables the cap")
 	reviewPromptFile := flag.String("review-prompt-file", "", "path to the code-owned review pass's own prompt text; empty disables the review pass")
 	reviewModel := flag.String("review-model", "", "value for the review pass's own --model flag, empty falls back to the coordinator's --model")
 	reviewEffort := flag.String("review-effort", "", "value for the review pass's own --effort flag, empty falls back to the coordinator's --effort")
@@ -50,6 +50,10 @@ func main() {
 	}
 	if *logPath == "" {
 		fmt.Fprintln(os.Stderr, "orchestrator: -log-path is required")
+		os.Exit(1)
+	}
+	if err := validateCaps(*maxReviewRounds, *maxSlices); err != nil {
+		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 
