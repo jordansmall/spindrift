@@ -223,6 +223,46 @@ func TestLocalIssue_RenderParseRoundTrip_ScalarEscaping(t *testing.T) {
 	}
 }
 
+// TestLocalIssue_Render_QuotesColonBearingFields pins that scalarNeedsQuoting's
+// colon check (widened in the frontmatter-colon-escaping fix) applies to every
+// scalar frontmatter field rendered through renderScalar, not just Title: an
+// RFC3339 Created timestamp and colon-bearing Landing/Parent values must all
+// render as quoted "key: value" lines, and round-trip back through
+// parseLocalIssue unchanged.
+func TestLocalIssue_Render_QuotesColonBearingFields(t *testing.T) {
+	li := localIssue{
+		frontmatter: localFrontmatter{
+			Title:   "Fix the thing",
+			State:   "ready-for-agent",
+			Labels:  []string{"bug"},
+			Created: "2026-07-09T12:00:00Z",
+			Parent:  "parent:42",
+			Landing: "https://github.com/o/r/pull/7",
+		},
+		body: "## What to build\n\nDo the thing.\n",
+	}
+
+	rendered := li.render()
+
+	for _, want := range []string{
+		`created: "2026-07-09T12:00:00Z"` + "\n",
+		`parent: "parent:42"` + "\n",
+		`landing: "https://github.com/o/r/pull/7"` + "\n",
+	} {
+		if !strings.Contains(rendered, want) {
+			t.Errorf("render() missing expected line %q; got:\n%s", want, rendered)
+		}
+	}
+
+	got, err := parseLocalIssue([]byte(rendered))
+	if err != nil {
+		t.Fatalf("parseLocalIssue(render()): %v", err)
+	}
+	if !reflect.DeepEqual(got, li) {
+		t.Errorf("round trip = %+v, want %+v", got, li)
+	}
+}
+
 func TestLocalTracker_ListIssues_OrderedByCreated(t *testing.T) {
 	dir := t.TempDir()
 	labels := testLabels
