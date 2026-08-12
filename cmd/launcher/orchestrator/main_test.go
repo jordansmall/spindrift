@@ -46,6 +46,60 @@ exit 0
 	}
 }
 
+// reviewPassFakeDriverArgv is singlePassFakeDriverArgv plus -review-prompt-file,
+// so mainRun dispatches to runWithReviewPass (run.go:131) and validateCaps
+// sees reviewPassEnabled=true instead of false.
+func reviewPassFakeDriverArgv(dir string, capFlags ...string) []string {
+	argv := []string{
+		"-prompt-file", filepath.Join(dir, "prompt.txt"),
+		"-review-prompt-file", filepath.Join(dir, "review-prompt.txt"),
+		"-driver-bin", "claude",
+		"-log-path", filepath.Join(dir, "stream.log"),
+		"-heartbeat-log", filepath.Join(dir, "heartbeat.log"),
+		"-state-file", filepath.Join(dir, "run-state.json"),
+	}
+	return append(argv, capFlags...)
+}
+
+// TestMainRunReviewPassEnabledUsesReviewPassFormula pins the exact bug
+// 698b5f3b fixed: mainRun must pass reviewPassEnabled = (*reviewPromptFile
+// != "") to validateCaps, not its inverse. A (3, 5) -max-review-rounds/
+// -max-slices pair is coherent under the legacy N+2 formula (5 == 3+2) but
+// incoherent under the review-pass 2N+3 formula (needs -max-slices >= 9) --
+// so setting -review-prompt-file must flip the warning on for this exact
+// pair. Neither TestMainRunCoherentCapsNoWarning nor
+// TestMainRunIncoherentCapsWarnsButProceeds sets -review-prompt-file, so
+// both only ever exercise reviewPassEnabled=false; this test is the only
+// one that would catch the wiring flipped to `== ""`.
+func TestMainRunReviewPassEnabledUsesReviewPassFormula(t *testing.T) {
+	dir := t.TempDir()
+	callLog := filepath.Join(dir, "calls.log")
+	// The implement/fix pass's own decision switch (run.go:286-317) has no
+	// "no verdict" fallback like the legacy loop's does -- it stops only on
+	// hasOutcome, so the outcome must land in $DRIVER_LOG_PATH as a real
+	// stream-json line (matching run_test.go's streamJSONOutcomeLine), not
+	// just printed to stdout, or pass 1 falls through to a review pass and
+	// beyond it, into a land pass that needs a real prompt.txt on disk.
+	writeFakeDriverExec(t, dir, callLog, `printf '%s' '`+streamJSONOutcomeLine("SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=done nonce=abc")+`' | tee -a "$DRIVER_LOG_PATH"
+exit 0
+`)
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	if err := os.WriteFile(filepath.Join(dir, "review-prompt.txt"), []byte("review prompt"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	rc := mainRun(reviewPassFakeDriverArgv(dir, "-max-review-rounds=3", "-max-slices=5"), &stdout, &stderr)
+
+	if rc != 0 {
+		t.Fatalf("mainRun exit code = %d, want 0 (stderr: %q)", rc, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "need -max-slices >= 9") {
+		t.Errorf("stderr = %q, want the review-pass formula's minimum (9 = 2*3+3) -- a -max-review-rounds=3/-max-slices=5 pair is coherent under the legacy N+2 formula and must only warn once -review-prompt-file selects the review-pass formula", stderr.String())
+	}
+}
+
 // TestMainRunIncoherentCapsWarnsButProceeds verifies the issue #2460 fix:
 // an unsatisfiable (-max-review-rounds, -max-slices) pair is surfaced as a
 // stderr warning ("cannot reach"), but does NOT abort the run -- mainRun
