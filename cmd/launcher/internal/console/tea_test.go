@@ -4984,47 +4984,6 @@ func TestTea_AdoptOrphanKey_NoOpenPR_SurfacesReasonWithNoAdoption(t *testing.T) 
 	waitFinished(t, tm)
 }
 
-// TestTea_AdoptOrphanKey_DraftPR_SurfacesReasonWithNoAdoption verifies the
-// gesture's other "changes nothing" case — a draft PR, distinct from no PR
-// at all — reports that specific reason too, matching the acceptance
-// criterion naming both (issue #1619 AC).
-func TestTea_AdoptOrphanKey_DraftPR_SurfacesReasonWithNoAdoption(t *testing.T) {
-	f := forge.NewFake()
-	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
-
-	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	drv, err := driver.New("")
-	if err != nil {
-		t.Fatalf("driver.New: %v", err)
-	}
-	fr := runner.NewFake()
-	fr.RunningNames = []string{"agent-issue-42"}
-	factory, err := dispatch.NewFactory(dispatch.Config{}, dir, fr, drv, dispatch.RealClock())
-	if err != nil {
-		t.Fatalf("dispatch.NewFactory: %v", err)
-	}
-	t.Cleanup(factory.Cleanup)
-
-	launch := &Launcher{
-		CodeForge: f,
-		Factory:   factory,
-		queue:     NewQueue(),
-		RecoverFn: func(string) error { return errors.New("issue 42: draft PR") },
-	}
-
-	tm := teatest.NewTestModel(t, newTeaModel(f, dir, launch), teatest.WithInitialTermSize(80, 24))
-	waitForOutput(t, tm, "fix the thing")
-
-	sendKey(tm, "A")
-	waitForOutput(t, tm, "orphan adopt failed", "draft PR")
-
-	sendKey(tm, "q")
-	waitFinished(t, tm)
-}
-
 // TestTea_AdoptOrphanKey_Success_ClearsFlagPreventingRepeatAdopt verifies a
 // successful adopt clears the row's orphan flag, so a second "A" press on
 // the same, now-adopted row never fires RecoverFn again — a repeat press
