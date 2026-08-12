@@ -68,7 +68,8 @@ func bootstrap(ensureReady bool, kind string, selfContained bool) (*launchContex
 	if err := dispatch.MigrateLegacyLogDir(pwd); err != nil {
 		return nil, err
 	}
-	if err := seedAccumulationRepoIfLocal(c, pwd); err != nil {
+	accumLock, err := seedAccumulationRepoIfLocal(c, pwd)
+	if err != nil {
 		return nil, err
 	}
 
@@ -122,7 +123,20 @@ func bootstrap(ensureReady bool, kind string, selfContained bool) (*launchContex
 		codeForge:    cf,
 		factory:      f,
 		settle:       s,
-		cleanup:      f.Cleanup,
+		cleanup: func() {
+			f.Cleanup()
+			// Held from the seed (seedAccumulationRepoIfLocal, above) through
+			// the whole run — every Box this process dispatches, not just the
+			// initial seed+mount — so a concurrent process can't seed/mount
+			// the same Accumulation repo while this one still has it in use
+			// (issue #2441). Release is a best-effort, process-exit-time
+			// advisory unlock; the OS releases the underlying flock on
+			// process exit regardless, so an error here has nowhere useful
+			// to go and is ignored, same as other best-effort cleanup here.
+			if accumLock != nil {
+				_ = accumLock.Release()
+			}
+		},
 	}, nil
 }
 
@@ -156,11 +170,33 @@ func (lc *launchContext) workSettle() settle.WorkSettler {
 // /repo mount, and host-side landing then fails against a repo that was
 // never created. c.codeForgeAccumulationRepoDir is already resolved to an
 // absolute path by loadConfig, matching SeedAccumulationRepo's requirement.
-func seedAccumulationRepoIfLocal(c config, pwd string) error {
+//
+// Also acquires and returns an exclusive, non-blocking AccumulationLock
+// (issue #2441) on the Accumulation repo path before seeding it, so a
+// second, independent `spindrift` process (e.g. a concurrent research and
+// dispatch run) can't seed/mount the same repo at the same time — a
+// corruption hazard the seed-then-push race alone didn't guard against.
+// The lock is acquired before, not after, SeedAccumulationRepo runs, so a
+// concurrent process's in-flight seed is what actually blocks or rejects a
+// second attempt, rather than racing it. The caller (bootstrap) folds the
+// returned lock's Release into the launch context's cleanup, holding it for
+// the whole run rather than just this seed. Returns a nil lock for the
+// no-op cases above, and releases the lock without returning it if
+// SeedAccumulationRepo itself fails, so a failed seed never leaks a held
+// lock.
+func seedAccumulationRepoIfLocal(c config, pwd string) (*local.AccumulationLock, error) {
 	if c.codeForge != "local" || c.selfContained {
-		return nil
+		return nil, nil
 	}
-	return local.SeedAccumulationRepo(c.codeForgeAccumulationRepoDir, pwd, c.baseBranch)
+	lock, err := local.AcquireAccumulationLock(c.codeForgeAccumulationRepoDir)
+	if err != nil {
+		return nil, err
+	}
+	if err := local.SeedAccumulationRepo(c.codeForgeAccumulationRepoDir, pwd, c.baseBranch); err != nil {
+		_ = lock.Release()
+		return nil, err
+	}
+	return lock, nil
 }
 
 // researchLaunchStack builds the research-kind tracker, dispatch factory,
