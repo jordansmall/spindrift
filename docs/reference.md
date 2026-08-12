@@ -1287,13 +1287,22 @@ artifact, not a growing transcript:
   Because both counters advance over the same pass sequence,
   `--max-review-rounds` can only actually reach `N` rounds — rather than
   being silently shadowed by `--max-slices` firing first — if `--max-slices`
-  is at least `2N + 3`: 1 initial implement pass + (`N`+1) review passes +
-  `N` fix passes + 1 terminal land pass. The shipped defaults are exactly
-  this minimum for `N=3`: `--max-slices=9` is `2*3+3`. When both caps are
-  non-zero, the orchestrator now rejects an incoherent pair outright at
-  startup, printing an error to stderr naming the minimum `--max-slices` the
-  given `--max-review-rounds` needs, rather than letting `--max-slices`
-  shadow `--max-review-rounds` silently.
+  is large enough, and the minimum depends on which driver loop is running.
+  With the code-owned review pass enabled (`--review-prompt-file` set, the
+  default — see below), implement and review are separate `driver-exec`
+  invocations, so the minimum is `2N + 3`: 1 initial implement pass +
+  (`N`+1) review passes + `N` fix passes + 1 terminal land pass. Without a
+  review pass (the legacy single-loop path, reached only when
+  `--review-prompt-file` is unset), each pass folds its own review in
+  inline instead of splitting implement/review into separate invocations,
+  so the minimum is one less than half: `N + 2`. The shipped defaults sit
+  exactly at the review-pass loop's minimum for `N=3`: `--max-slices=9` is
+  `2*3+3`. When both caps are non-zero and `--max-slices` falls below
+  whichever minimum applies, the orchestrator surfaces the incoherence as a
+  warning printed to stderr naming the minimum `--max-slices` the given
+  `--max-review-rounds` needs — the run still proceeds, with
+  `--max-slices` shadowing `--max-review-rounds` exactly as it would have
+  gone unwarned before.
 
 **Code-owned review pass (issue #2037).** `--review-prompt-file` names a
 distinct prompt (`review-prompt.md`) the orchestrator invokes as its own
