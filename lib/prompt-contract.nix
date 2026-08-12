@@ -308,6 +308,122 @@ rec {
     + builtins.concatStringsSep "" (map (row: "  " + escapeShellArg row + "\n") validateMarkersBashRows)
     + ")\n";
 
+  # Third pure-data registry (issue #2464): the OPPOSITE direction from
+  # validateMarkers above. validateMarkers asserts a marker is *present* in a
+  # rendered prompt under an active gate; forbiddenMarkers asserts a marker is
+  # *absent* -- specifically, never rendered as an imperative telling a
+  # read-only Box to perform the operation -- under an active gate. Every row
+  # here names a write-capable git/gh operation a read-only Box's rendered
+  # prompt must never order the Driver to run, since a read-only Box holds no
+  # write-capable token for it.
+  #
+  # Same row shape as validateMarkers (id/marker/carrier/severity/when/
+  # message), with one difference in how "present" is decided at validation
+  # time: unlike validateMarkers, where a bare substring scan is sufficient
+  # (any occurrence of the marker means it's present), whether a
+  # forbiddenMarkers row's marker counts as a forbidden *occurrence* is
+  # decided by the Go-side promptassembly.Validate function's shape-aware
+  # imperative-vs-negation check (a later slice) -- e.g. "never run git push"
+  # mentioning the marker in a negation is not itself a violation, while "run
+  # git push now" is. This Nix list stays pure data either way, same as
+  # validateMarkers -- it names the marker/carrier/severity/when/message per
+  # row; it does not itself decide presence.
+  #   id       -- short, stable identifier for the forbidden marker.
+  #   marker   -- the literal marker text a Box's rendered prompt must not
+  #               carry as an imperative.
+  #   carrier  -- where the marker would appear if it were (wrongly) present;
+  #               every row here is "fragment-body" (embedded anywhere in the
+  #               body of a rendered prompt fragment), mirroring the
+  #               validateMarkers carrier vocabulary above.
+  #   severity -- "reject" for every row here: a read-only Box's rendered
+  #               prompt ordering one of these write-capable operations is
+  #               always fatal, never a soft warn -- there is no non-fatal
+  #               backstop for a read-only Box being told to push or open a
+  #               PR with no write-capable token to do it with.
+  #   when     -- a symbolic gating-condition name, same vocabulary as
+  #               validateMarkers' `when` -- every row here gates on
+  #               "boxAccessReadOnly".
+  #   message  -- the row's fully pre-rendered diagnostic prose (marker
+  #               already interpolated), same "no runtime templating needed"
+  #               contract as validateMarkers' `message` field.
+  forbiddenMarkers = [
+    {
+      id = "forbidden-git-push";
+      marker = "git push";
+      carrier = "fragment-body";
+      severity = "reject";
+      when = "boxAccessReadOnly";
+      message = "_validate_prompt_contract: read-only dispatch's rendered prompt orders a read-only Box to run 'git push' -- gated under boxAccessReadOnly, a read-only Box holds no write-capable token for this operation. Refusing to invoke the Driver.";
+    }
+    {
+      id = "forbidden-gh-pr-create";
+      marker = "gh pr create";
+      carrier = "fragment-body";
+      severity = "reject";
+      when = "boxAccessReadOnly";
+      message = "_validate_prompt_contract: read-only dispatch's rendered prompt orders a read-only Box to run 'gh pr create' -- gated under boxAccessReadOnly, a read-only Box holds no write-capable token for this operation. Refusing to invoke the Driver.";
+    }
+    {
+      id = "forbidden-gh-pr-ready";
+      marker = "gh pr ready";
+      carrier = "fragment-body";
+      severity = "reject";
+      when = "boxAccessReadOnly";
+      message = "_validate_prompt_contract: read-only dispatch's rendered prompt orders a read-only Box to run 'gh pr ready' -- gated under boxAccessReadOnly, a read-only Box holds no write-capable token for this operation. Refusing to invoke the Driver.";
+    }
+    {
+      id = "forbidden-gh-pr-merge";
+      marker = "gh pr merge";
+      carrier = "fragment-body";
+      severity = "reject";
+      when = "boxAccessReadOnly";
+      message = "_validate_prompt_contract: read-only dispatch's rendered prompt orders a read-only Box to run 'gh pr merge' -- gated under boxAccessReadOnly, a read-only Box holds no write-capable token for this operation. Refusing to invoke the Driver.";
+    }
+    {
+      id = "forbidden-gh-issue-comment";
+      marker = "gh issue comment";
+      carrier = "fragment-body";
+      severity = "reject";
+      when = "boxAccessReadOnly";
+      message = "_validate_prompt_contract: read-only dispatch's rendered prompt orders a read-only Box to run 'gh issue comment' -- gated under boxAccessReadOnly, a read-only Box holds no write-capable token for this operation. Refusing to invoke the Driver.";
+    }
+    {
+      id = "forbidden-gh-issue-create";
+      marker = "gh issue create";
+      carrier = "fragment-body";
+      severity = "reject";
+      when = "boxAccessReadOnly";
+      message = "_validate_prompt_contract: read-only dispatch's rendered prompt orders a read-only Box to run 'gh issue create' -- gated under boxAccessReadOnly, a read-only Box holds no write-capable token for this operation. Refusing to invoke the Driver.";
+    }
+    {
+      id = "forbidden-git-bundle-create";
+      marker = "git bundle create";
+      carrier = "fragment-body";
+      severity = "reject";
+      when = "boxAccessReadOnly";
+      message = "_validate_prompt_contract: read-only dispatch's rendered prompt orders a read-only Box to run 'git bundle create' -- gated under boxAccessReadOnly, a read-only Box holds no write-capable token for this operation. Refusing to invoke the Driver.";
+    }
+  ];
+
+  # Each forbiddenMarkers row rendered into a pipe-joined string, in row
+  # order -- mirrors validateMarkersBashRows above, same field subset (minus
+  # message, which bash rows don't need since only the Go decoder consumes
+  # it).
+  forbiddenMarkersBashRows = map (
+    row: "${row.id}|${row.marker}|${row.carrier}|${row.severity}|${row.when}"
+  ) forbiddenMarkers;
+
+  # forbiddenMarkersBashRows wrapped into a bash array literal, formatted
+  # exactly like validateMarkersBashPreamble above renders
+  # validateMarkersBashRows into `_VALIDATE_MARKER_ROWS` -- same "parallel,
+  # not-yet-wired data source" status as injectBlocksBashPreamble/
+  # validateMarkersBashPreamble above: not yet consumed by any bash runtime
+  # validator, just kept consistent in shape for whoever wires it later.
+  forbiddenMarkersBashPreamble =
+    "_FORBIDDEN_MARKER_ROWS=(\n"
+    + builtins.concatStringsSep "" (map (row: "  " + escapeShellArg row + "\n") forbiddenMarkersBashRows)
+    + ")\n";
+
   # Build-time reject arm (issue #2250, parent #2244): resolves each
   # validateMarkers "reject" row into one of ok/reject/advise from whatever
   # static gate/content knowledge a caller (lib/mkHarness.nix, a later slice)

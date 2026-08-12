@@ -14,6 +14,7 @@ let
   inherit (pkgs.lib) assertMsg concatStringsSep hasSuffix removeSuffix;
   inherit (promptContract) byId;
   markerById = id: builtins.head (builtins.filter (r: r.id == id) promptContract.validateMarkers);
+  forbiddenMarkerById = id: builtins.head (builtins.filter (r: r.id == id) promptContract.forbiddenMarkers);
   issuePromptSource = builtins.readFile ../../templates/default/prompts/issue-prompt.md;
   researchPromptSource = builtins.readFile ../../templates/default/prompts/research-prompt.md;
 in
@@ -252,6 +253,102 @@ in
     assert assertMsg (row.when == "filerFileRelay")
       "issue-intent row's when must be 'filerFileRelay', got: ${row.when}";
     pkgs.runCommand "prompt-contract-issue-intent-row-shape" { } "touch $out";
+
+  # Pins forbiddenMarkers (issue #2464): the opposite-direction registry from
+  # validateMarkers above -- every row here names a write-capable git/gh
+  # operation a read-only Box's rendered prompt must never order the Driver
+  # to run.
+  prompt-contract-forbidden-markers-has-seven-rows =
+    let
+      out = builtins.length promptContract.forbiddenMarkers;
+    in
+    assert assertMsg (out == 7)
+      "forbiddenMarkers must have exactly 7 rows (forbidden-git-push, forbidden-gh-pr-create, forbidden-gh-pr-ready, forbidden-gh-pr-merge, forbidden-gh-issue-comment, forbidden-gh-issue-create, forbidden-git-bundle-create), got: ${toString out}";
+    pkgs.runCommand "prompt-contract-forbidden-markers-has-seven-rows" { } "touch $out";
+
+  prompt-contract-forbidden-markers-row-order =
+    let
+      out = map (r: r.id) promptContract.forbiddenMarkers;
+      expected = [
+        "forbidden-git-push"
+        "forbidden-gh-pr-create"
+        "forbidden-gh-pr-ready"
+        "forbidden-gh-pr-merge"
+        "forbidden-gh-issue-comment"
+        "forbidden-gh-issue-create"
+        "forbidden-git-bundle-create"
+      ];
+    in
+    assert assertMsg (out == expected)
+      "forbiddenMarkers rows must appear in order [${concatStringsSep ", " expected}], got: [${concatStringsSep ", " out}]";
+    pkgs.runCommand "prompt-contract-forbidden-markers-row-order" { } "touch $out";
+
+  prompt-contract-forbidden-markers-markers-in-order =
+    let
+      out = map (r: r.marker) promptContract.forbiddenMarkers;
+      expected = [
+        "git push"
+        "gh pr create"
+        "gh pr ready"
+        "gh pr merge"
+        "gh issue comment"
+        "gh issue create"
+        "git bundle create"
+      ];
+    in
+    assert assertMsg (out == expected)
+      "forbiddenMarkers rows' markers must appear in order [${concatStringsSep ", " expected}], got: [${concatStringsSep ", " out}]";
+    pkgs.runCommand "prompt-contract-forbidden-markers-markers-in-order" { } "touch $out";
+
+  prompt-contract-forbidden-markers-every-row-carrier-fragment-body =
+    let
+      bad = builtins.filter (r: r.carrier != "fragment-body") promptContract.forbiddenMarkers;
+      badIds = map (r: r.id) bad;
+    in
+    assert assertMsg (bad == [ ])
+      "every forbiddenMarkers row's carrier must be 'fragment-body', offending ids: [${concatStringsSep ", " badIds}]";
+    pkgs.runCommand "prompt-contract-forbidden-markers-every-row-carrier-fragment-body" { } "touch $out";
+
+  prompt-contract-forbidden-markers-every-row-severity-reject =
+    let
+      bad = builtins.filter (r: r.severity != "reject") promptContract.forbiddenMarkers;
+      badIds = map (r: r.id) bad;
+    in
+    assert assertMsg (bad == [ ])
+      "every forbiddenMarkers row's severity must be 'reject', offending ids: [${concatStringsSep ", " badIds}]";
+    pkgs.runCommand "prompt-contract-forbidden-markers-every-row-severity-reject" { } "touch $out";
+
+  prompt-contract-forbidden-markers-every-row-when-box-access-read-only =
+    let
+      bad = builtins.filter (r: r.when != "boxAccessReadOnly") promptContract.forbiddenMarkers;
+      badIds = map (r: r.id) bad;
+    in
+    assert assertMsg (bad == [ ])
+      "every forbiddenMarkers row's when must be 'boxAccessReadOnly', offending ids: [${concatStringsSep ", " badIds}]";
+    pkgs.runCommand "prompt-contract-forbidden-markers-every-row-when-box-access-read-only" { } "touch $out";
+
+  prompt-contract-forbidden-markers-every-row-message-mentions-own-marker =
+    let
+      bad = builtins.filter (r: !(pkgs.lib.hasInfix r.marker r.message)) promptContract.forbiddenMarkers;
+      badIds = map (r: r.id) bad;
+    in
+    assert assertMsg (bad == [ ])
+      "every forbiddenMarkers row's message must contain its own marker substring, offending ids: [${concatStringsSep ", " badIds}]";
+    pkgs.runCommand "prompt-contract-forbidden-markers-every-row-message-mentions-own-marker" { } "touch $out";
+
+  prompt-contract-forbidden-git-push-row-shape =
+    let
+      row = forbiddenMarkerById "forbidden-git-push";
+    in
+    assert assertMsg (row.marker == "git push")
+      "forbidden-git-push row's marker must be 'git push', got: ${row.marker}";
+    assert assertMsg (row.carrier == "fragment-body")
+      "forbidden-git-push row's carrier must be 'fragment-body', got: ${row.carrier}";
+    assert assertMsg (row.severity == "reject")
+      "forbidden-git-push row's severity must be 'reject', got: ${row.severity}";
+    assert assertMsg (row.when == "boxAccessReadOnly")
+      "forbidden-git-push row's when must be 'boxAccessReadOnly', got: ${row.when}";
+    pkgs.runCommand "prompt-contract-forbidden-git-push-row-shape" { } "touch $out";
 
   prompt-contract-inject-blocks-bash-rows-has-four-entries =
     let
