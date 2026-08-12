@@ -883,6 +883,13 @@ run_driver_in_env() {
 # dispatch.buildBoxEnv already resolved host-side from the backend registry,
 # not re-derived in-box from CODE_FORGE's name.
 emit_outcome_backstop() {
+  # --run-state-file is a fixed path, not forwarded from any launcher-set
+  # env var: it mirrors the orchestrator's own --state-file default
+  # (issue #1997), the same fixed path the orchestrator process running
+  # alongside the Driver already writes its run-state handoff artifact to.
+  # A missing file -- a non-orchestrator run, or a run that never reached a
+  # review pass -- is handled by the backstop's own graceful degrade
+  # (issue #2459), not by anything here.
   driver-exec outcome-backstop \
     --repo "$WORK_DIR" \
     --issue "$ISSUE_NUMBER" \
@@ -895,7 +902,8 @@ emit_outcome_backstop() {
     --recovery-attempted "${_recovery_attempted:-}" \
     --max-attempts "$MAX_REBASE_ATTEMPTS" \
     --backoff-secs "$TRANSIENT_BACKOFF_SECS" \
-    --jitter-secs "$HOLD_JITTER_SECS"
+    --jitter-secs "$HOLD_JITTER_SECS" \
+    --run-state-file "/tmp/run-state.json"
 }
 
 # required_marker_gate is the reusable shape issue #1607 hardwired to
