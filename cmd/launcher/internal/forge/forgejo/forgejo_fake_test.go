@@ -20,7 +20,6 @@ type fakePull struct {
 	State     string
 	Merged    bool
 	Mergeable bool
-	Draft     bool
 	Title     string
 	HeadRef   string
 	HeadSHA   string
@@ -133,14 +132,17 @@ func (f *fakeForgejo) seedPull(num string, draft bool) string {
 	n, _ := strconv.Atoi(num)
 	url := "https://forge.test/owner/repo/pulls/" + num
 	sha := "sha" + num
+	title := "Issue " + num
+	if draft {
+		title = "WIP: " + title
+	}
 	f.pulls[num] = &fakePull{
 		Number:    n,
 		HTMLURL:   url,
 		State:     "open",
 		Merged:    false,
 		Mergeable: true,
-		Draft:     draft,
-		Title:     "Issue " + num,
+		Title:     title,
 		HeadRef:   "agent/issue-" + num,
 		HeadSHA:   sha,
 		BaseRef:   "main",
@@ -215,6 +217,29 @@ func (f *fakeForgejo) AutoMergeEnqueued(url string) bool {
 	return f.enqueued[prNumFromURL(url)]
 }
 
+// fakeWIPPrefixes lists the WIP-title draft markers fakeIsDraftTitle
+// recognizes, mirroring real Forgejo's default
+// WORK_IN_PROGRESS_PREFIXES config ("WIP:,[WIP]:"). Deliberately not
+// shared with the adapter-under-test's own forgejoWIPPrefixes
+// (forgejo_prforge.go) — this fake stands in for a real server, which
+// derives its own draft field independently of this codebase's adapter.
+var fakeWIPPrefixes = []string{"WIP:", "[WIP]:"}
+
+// fakeIsDraftTitle reports whether title carries a WIP-prefix draft
+// marker, case-insensitively — mirroring how real Forgejo derives a pull's
+// served "draft" field entirely from its title (services/convert/pull.go:
+// Draft is pr.IsWorkInProgress(ctx), never an independently-settable
+// flag).
+func fakeIsDraftTitle(title string) bool {
+	upper := strings.ToUpper(strings.TrimSpace(title))
+	for _, prefix := range fakeWIPPrefixes {
+		if strings.HasPrefix(upper, strings.ToUpper(prefix)) {
+			return true
+		}
+	}
+	return false
+}
+
 func pullPayload(p *fakePull) map[string]any {
 	return map[string]any{
 		"number":    p.Number,
@@ -222,7 +247,7 @@ func pullPayload(p *fakePull) map[string]any {
 		"state":     p.State,
 		"merged":    p.Merged,
 		"mergeable": p.Mergeable,
-		"draft":     p.Draft,
+		"draft":     fakeIsDraftTitle(p.Title),
 		"title":     p.Title,
 		"head":      map[string]any{"ref": p.HeadRef, "sha": p.HeadSHA},
 		"base":      map[string]any{"ref": p.BaseRef},
