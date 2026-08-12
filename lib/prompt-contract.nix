@@ -42,6 +42,48 @@ let
       ) text
     ) > 1;
 
+  # Byte-for-byte copies of lib/prompt-inject.nix's own private hasSuffix/
+  # removeSuffix (not exported there, and this file stays pure-builtins per
+  # the header comment above, same reasoning as escapeShellArg/hasInfix
+  # above) -- needed only by ensureTrailingBlankLine below.
+  hasSuffix =
+    suffix: content:
+    let
+      lenContent = builtins.stringLength content;
+      lenSuffix = builtins.stringLength suffix;
+    in
+    lenContent >= lenSuffix && builtins.substring (lenContent - lenSuffix) lenSuffix content == suffix;
+
+  removeSuffix =
+    suffix: content:
+    if hasSuffix suffix content then
+      builtins.substring 0 (builtins.stringLength content - builtins.stringLength suffix) content
+    else
+      content;
+
+  # sliceBetween's own doc comment (lib/prompt-inject.nix) notes "a sliced
+  # shared block already ends with the blank line that separated it from the
+  # next heading in its source file" -- true of every row until issue #2462's
+  # COMMIT_PUSH_READ_WRITE_STEP/COMMIT_PUSH_READ_ONLY_STEP pair, whose gate is
+  # never off (exactly one of the pair always renders, the same
+  # BOX_ACCESS_READ_WRITE/BOX_ACCESS_READ_ONLY exactly-one-on invariant every
+  # other paired gate in lib/fragments.nix carries), so
+  # templates/default/prompts/issue-prompt.md glues that placeholder directly
+  # onto the "# REVIEW" endMarker with no blank line in between -- the only
+  # way to keep the *rendered* prompt byte-identical, since the registry's
+  # own fragment loop already appends the block's "\n\n" separator (see
+  # lib/mkHarness.nix's fragmentRegistryPreamble /
+  # cmd/launcher/internal/promptassembly's Assemble, both driven from this
+  # same lib/fragments.nix registry) -- a template-level blank line on top of
+  # that would double it up. That leaves the raw (unrendered) slice ending
+  # exactly at the placeholder token, with no trailing blank line at all, so
+  # this normalizes the sliceBetween case back onto the doc comment's
+  # documented invariant a no-op for every row that already carried the
+  # invariant naturally (the "check" block's comms sibling included), and a
+  # single appended "\n\n" for a row -- like "check" now -- whose source text
+  # doesn't.
+  ensureTrailingBlankLine = s: if hasSuffix "\n\n" s then s else removeSuffix "\n" s + "\n\n";
+
   # Slices one injectBlocks row's canonical text live from its declared
   # `source` prompt file -- never a standalone contract file, so this can
   # never drift from the default prompt's own copy (issue #419). Re-derives,
@@ -56,7 +98,7 @@ let
     if row.endMarker == null then
       promptInject.sliceFromMarker row.startMarker sourceText
     else
-      promptInject.sliceBetween row.startMarker row.endMarker sourceText;
+      ensureTrailingBlankLine (promptInject.sliceBetween row.startMarker row.endMarker sourceText);
 in
 rec {
   # Each row describes one shared block:

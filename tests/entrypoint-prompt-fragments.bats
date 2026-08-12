@@ -440,6 +440,78 @@ setup() {
   ! grep -qF 'gh pr create --draft --base' "$DRIVER_PROMPT_FILE"
 }
 
+# issue #2462: the COMMIT section's push step has the same BOX_ACCESS_READ_
+# WRITE/BOX_ACCESS_READ_ONLY gate need as the OPEN A PULL REQUEST push step
+# above -- a read-only Box holds no push-capable token at commit time either,
+# so the unconditional rebase+push+retry block must not render a `git push`
+# for it. helper.bash's setup_entrypoint_env already exports
+# BOX_WRITE_ENABLED=1 (mirroring the BOX_FORGE_AND_ISSUE_ACCESS=read-write
+# schema default), so the first case needs no override.
+@test "COMMIT push step: read-write keeps git push and the retry loop unchanged" {
+  export WORK_DIR="$BATS_TEST_TMPDIR/work-commit-push-read-write"
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  local commit_section
+  commit_section="$(awk '/^# COMMIT/,/^# REVIEW/' "$DRIVER_PROMPT_FILE")"
+  grep -qF 'git push --force-with-lease -u origin' <<<"$commit_section"
+  grep -qF 'one retry only' <<<"$commit_section"
+}
+
+@test "COMMIT push step: read-only takes no push/retry action -- harness lands the committed branch" {
+  unset BOX_WRITE_ENABLED
+  export WORK_DIR="$BATS_TEST_TMPDIR/work-commit-push-read-only"
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+
+  # Scoped to the COMMIT section itself -- the later OPEN A PULL REQUEST and
+  # IF BLOCKED sections share both the 'git push --force-with-lease -u
+  # origin' string and the 'harness relays your committed branch out' phrase
+  # (issue #1918/#1933), so a whole-file grep would false-pass even if this
+  # section's own fragment failed to render.
+  local commit_section
+  commit_section="$(awk '/^# COMMIT/,/^# REVIEW/' "$DRIVER_PROMPT_FILE")"
+  grep -qF 'harness relays your committed branch out' <<<"$commit_section"
+  ! grep -qF 'git push --force-with-lease -u origin' <<<"$commit_section"
+  grep -qF 'git rebase origin/' <<<"$commit_section"
+}
+
+# issue #2462: the IF BLOCKED section's push-failure triage block (right
+# after the "If you can't finish (...)" paragraph) has the same
+# BOX_ACCESS_READ_WRITE/BOX_ACCESS_READ_ONLY gate need as the COMMIT section's
+# push step above -- a read-only Box never attempts a `git push` in the
+# failure path either, so a denied push is the expected outcome, not evidence
+# of a broken/under-scoped token, and the `.github/workflows/` diff triage
+# (which presupposes a push was attempted) must not render for it.
+@test "IF BLOCKED triage step: read-write keeps the push-failure triage block unchanged" {
+  export WORK_DIR="$BATS_TEST_TMPDIR/work-if-blocked-triage-read-write"
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  local if_blocked_section
+  if_blocked_section="$(awk '/^# IF BLOCKED/,/^# OUTCOME/' "$DRIVER_PROMPT_FILE")"
+  grep -qF 'Push failure — check the actual cause before reporting it' <<<"$if_blocked_section"
+  grep -qF ".github/workflows/" <<<"$if_blocked_section"
+}
+
+@test "IF BLOCKED triage step: read-only treats a denied push as expected, never a token problem" {
+  unset BOX_WRITE_ENABLED
+  export WORK_DIR="$BATS_TEST_TMPDIR/work-if-blocked-triage-read-only"
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  local if_blocked_section
+  if_blocked_section="$(awk '/^# IF BLOCKED/,/^# OUTCOME/' "$DRIVER_PROMPT_FILE")"
+  grep -qF 'denied' <<<"$if_blocked_section"
+  grep -qF '`git push` here is expected' <<<"$if_blocked_section"
+  ! grep -qF 'Push failure — check the actual cause before reporting it' <<<"$if_blocked_section"
+  # Not a bare no-`.github/workflows/`-anywhere check: the read-only
+  # fragment itself names that path in passing, explaining that the diff
+  # triage is skipped (same "name the forbidden thing" pattern the OPEN A
+  # PULL REQUEST/IF BLOCKED PR step's own read-only tests above use for `gh
+  # pr create`). Pin the two read-write-only artifacts that must be absent
+  # instead: the actual diff command and the "Genuine ... change" bullet.
+  ! grep -qF "git diff origin/" <<<"$if_blocked_section"
+  ! grep -qF '**Genuine `.github/workflows/` change:**' <<<"$if_blocked_section"
+}
+
 # issue #1933: the IF BLOCKED section's push step (step 1) has the same
 # BOX_ACCESS_READ_WRITE/BOX_ACCESS_READ_ONLY gate need as the OPEN A PULL
 # REQUEST push step above -- a read-only Box holds no push-capable token

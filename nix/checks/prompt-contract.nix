@@ -11,7 +11,7 @@
 let
   promptContract = import ../../lib/prompt-contract.nix;
   promptInject = import ../../lib/prompt-inject.nix;
-  inherit (pkgs.lib) assertMsg concatStringsSep;
+  inherit (pkgs.lib) assertMsg concatStringsSep hasSuffix removeSuffix;
   inherit (promptContract) byId;
   markerById = id: builtins.head (builtins.filter (r: r.id == id) promptContract.validateMarkers);
   issuePromptSource = builtins.readFile ../../templates/default/prompts/issue-prompt.md;
@@ -48,12 +48,26 @@ in
 
   prompt-contract-canonical-text-check-matches-live-slice =
     let
-      expected = promptInject.sliceBetween "# CHECK" "# REVIEW" issuePromptSource;
+      rawSlice = promptInject.sliceBetween "# CHECK" "# REVIEW" issuePromptSource;
+      # issue #2462: the CHECK block's own endMarker ("# REVIEW") is now
+      # glued directly onto the COMMIT_PUSH_READ_WRITE_STEP/
+      # COMMIT_PUSH_READ_ONLY_STEP placeholder pair in issue-prompt.md's raw
+      # source (no blank line in between) -- the only way to keep the
+      # *rendered* prompt byte-identical, since the fragment loop's own
+      # per-row "\n\n" append already supplies the separator (a template-
+      # level blank line on top of that would double it up, see
+      # lib/prompt-contract.nix's ensureTrailingBlankLine comment). That
+      # leaves the raw slice ending exactly at the placeholder token with no
+      # trailing blank line, so this reproduces lib/prompt-contract.nix's own
+      # ensureTrailingBlankLine normalization here too -- a no-op for every
+      # other row (comms/outcome/research-verdict), whose own endMarker is
+      # still naturally preceded by a real blank line in source.
+      expected = if hasSuffix "\n\n" rawSlice then rawSlice else removeSuffix "\n" rawSlice + "\n\n";
       out = promptContract.canonicalText.check;
       startMarker = "# CHECK";
     in
     assert assertMsg (out == expected)
-      "canonicalText.check must equal a from-scratch sliceBetween of issue-prompt.md's own text";
+      "canonicalText.check must equal a from-scratch sliceBetween of issue-prompt.md's own text, normalized to guarantee a trailing blank line (issue #2462's ensureTrailingBlankLine)";
     assert assertMsg (builtins.stringLength out > 0)
       "canonicalText.check must be non-empty";
     assert assertMsg (builtins.substring 0 (builtins.stringLength startMarker) out == startMarker)

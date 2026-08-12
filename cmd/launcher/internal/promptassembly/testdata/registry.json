@@ -278,6 +278,26 @@
   },
   {
     "gate": "BOX_ACCESS_READ_WRITE",
+    "fragment": "commit-push-git.md",
+    "var": "COMMIT_PUSH_READ_WRITE_STEP"
+  },
+  {
+    "gate": "BOX_ACCESS_READ_ONLY",
+    "fragment": "commit-push-outbox.md",
+    "var": "COMMIT_PUSH_READ_ONLY_STEP"
+  },
+  {
+    "gate": "BOX_ACCESS_READ_WRITE",
+    "fragment": "if-blocked-triage-git.md",
+    "var": "IF_BLOCKED_TRIAGE_READ_WRITE_STEP"
+  },
+  {
+    "gate": "BOX_ACCESS_READ_ONLY",
+    "fragment": "if-blocked-triage-outbox.md",
+    "var": "IF_BLOCKED_TRIAGE_READ_ONLY_STEP"
+  },
+  {
+    "gate": "BOX_ACCESS_READ_WRITE",
     "fragment": "if-blocked-push-git.md",
     "var": "IF_BLOCKED_PUSH_READ_WRITE_STEP"
   },
