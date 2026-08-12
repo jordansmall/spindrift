@@ -253,6 +253,17 @@ func (s *Settle) landPushOnly(num string, gen uint64, branch string) landingResu
 	return landingManual
 }
 
+// registrationWindowPolls bounds how many poll intervals gateToGreen
+// withholds trust in an inherited SUCCESS while requireRegistration is set
+// (issue #2475). After this many intervals elapse with the rollup reading
+// SUCCESS the whole time and no non-terminal state ever observed, that is
+// treated as proof CI already finished — not proof it's still
+// mid-registration — and the SUCCESS is accepted. A stale SUCCESS followed
+// by a non-terminal state observed within the window must still wait for
+// that fresh registration; issue #1652's original protection stays intact
+// for that case.
+const registrationWindowPolls = 3
+
 // gateToGreen polls CheckState on the PR's head commit until the state
 // reaches confirmed SUCCESS, a terminal failure, or MergePollTimeout seconds
 // elapse. It performs no label swap itself — the caller (selfHeal) owns
@@ -265,10 +276,16 @@ func (s *Settle) landPushOnly(num string, gen uint64, branch string) landingResu
 // terminal SUCCESS inherited from an earlier attempt, so when set, a
 // first-poll SUCCESS is not accepted until a non-terminal state
 // (PENDING/EXPECTED/NONE) has been observed first — proof this run's own
-// checks are alive on the head commit. A caller that just performed the
-// push itself (the normal ready path, and any post-force-push rewait) has
-// no such ambiguity and passes false, preserving the original trust-on-
-// first-poll behavior.
+// checks are alive on the head commit. That protection holds for a bounded
+// registrationWindow at the start of the watch (issue #2475): a non-terminal
+// state observed within the window still resets the guard exactly as
+// before, but if the rollup reads SUCCESS for the whole window and no
+// non-terminal state ever appears — the ordinary shape of a PR whose CI
+// settled green well before this run started watching — the window elapsing
+// is itself accepted as proof CI already finished, rather than withheld
+// forever. A caller that just performed the push itself (the normal ready
+// path, and any post-force-push rewait) has no such ambiguity and passes
+// false, preserving the original trust-on-first-poll behavior.
 //
 // Returns:
 //   - gateGreen     — CI confirmed green. reason is "".
@@ -288,6 +305,10 @@ func (s *Settle) gateToGreen(num string, gen uint64, pr string, requireRegistrat
 	if actualIv <= 0 {
 		actualIv = 1
 	}
+	// registrationWindow bounds how long gateToGreen withholds trust in an
+	// inherited SUCCESS while requireRegistration is set — see
+	// registrationWindowPolls.
+	registrationWindow := registrationWindowPolls * actualIv
 	elapsed := 0
 	registered := !requireRegistration
 
@@ -301,6 +322,14 @@ func (s *Settle) gateToGreen(num string, gen uint64, pr string, requireRegistrat
 			return gateTerminal, gateTerminalReason(stateErr, deadline)
 		}
 		if state != forge.StateSuccess && state != forge.StateFailure && state != forge.StateError {
+			registered = true
+		}
+		if requireRegistration && !registered && elapsed >= registrationWindow {
+			// The registration window elapsed with only a terminal state
+			// (SUCCESS, in practice — FAILURE/ERROR return immediately
+			// below) ever observed. Treat that as proof CI already
+			// finished, not proof it's still mid-registration (issue
+			// #2475).
 			registered = true
 		}
 
