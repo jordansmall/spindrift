@@ -166,6 +166,61 @@ func TestForbiddenMarkerIsImperative_LiveConditionalBranchScanned(t *testing.T) 
 	}
 }
 
+// TestForbiddenMarkerIsImperative_MustNotCuePasses covers the "must not"
+// negation cue, which negationCueRE did not originally recognize (issue
+// #2464 follow-up) -- a list item negated with "must not" rather than "do
+// not"/"don't"/"never" must not trip the check.
+func TestForbiddenMarkerIsImperative_MustNotCuePasses(t *testing.T) {
+	text := "1. You must not run `git push` here.\n"
+	if ForbiddenMarkerIsImperative("git push", text, "github") {
+		t.Fatalf("ForbiddenMarkerIsImperative(%q, text) = true, want false", "git push")
+	}
+}
+
+// TestForbiddenMarkerIsImperative_CannotCuePasses covers the "cannot"
+// negation cue (issue #2464 follow-up). Deliberately avoids also including
+// the pre-existing "never" cue in the same clause, so this test actually
+// exercises the "cannot" addition rather than passing for an unrelated
+// reason.
+func TestForbiddenMarkerIsImperative_CannotCuePasses(t *testing.T) {
+	text := "2. You cannot `gh pr merge` right now.\n"
+	if ForbiddenMarkerIsImperative("gh pr merge", text, "github") {
+		t.Fatalf("ForbiddenMarkerIsImperative(%q, text) = true, want false", "gh pr merge")
+	}
+}
+
+// TestForbiddenMarkerIsImperative_NoNeedToCuePasses covers the "no need to"
+// negation cue (issue #2464 follow-up).
+func TestForbiddenMarkerIsImperative_NoNeedToCuePasses(t *testing.T) {
+	text := "3. No need to `gh pr create` yet.\n"
+	if ForbiddenMarkerIsImperative("gh pr create", text, "github") {
+		t.Fatalf("ForbiddenMarkerIsImperative(%q, text) = true, want false", "gh pr create")
+	}
+}
+
+// TestForbiddenMarkerIsImperative_AvoidCuePasses covers the "avoid"
+// negation cue (issue #2464 follow-up).
+func TestForbiddenMarkerIsImperative_AvoidCuePasses(t *testing.T) {
+	text := "4. Avoid `git push` at this stage.\n"
+	if ForbiddenMarkerIsImperative("git push", text, "github") {
+		t.Fatalf("ForbiddenMarkerIsImperative(%q, text) = true, want false", "git push")
+	}
+}
+
+// TestForbiddenMarkerIsImperative_AbbreviationPeriodDoesNotSplitClause covers
+// a list item whose negation cue and marker share one logical clause, but an
+// abbreviation ("e.g.") sits between them -- the abbreviation's period must
+// not be mistaken for a clause/sentence boundary (which would sever the "Do
+// not" cue from the marker and produce a false positive), even though
+// clause-splitting still needs to treat an ordinary sentence-ending period as
+// a real boundary elsewhere (issue #2464 follow-up).
+func TestForbiddenMarkerIsImperative_AbbreviationPeriodDoesNotSplitClause(t *testing.T) {
+	text := "1. Do not run any write command, e.g. `git push`, here.\n"
+	if ForbiddenMarkerIsImperative("git push", text, "github") {
+		t.Fatalf("ForbiddenMarkerIsImperative(%q, text) = true, want false", "git push")
+	}
+}
+
 // TestForbiddenMarkerIsImperative_SuppressedBranchFenceDoesNotCorruptState
 // covers the bug-3 fix: a suppressed (dead) conditional branch containing a
 // fenced code block with a `#`-prefixed shell-comment line inside it (shape

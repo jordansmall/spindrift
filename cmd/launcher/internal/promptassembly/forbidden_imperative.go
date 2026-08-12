@@ -34,7 +34,7 @@ var listItemStartRE = regexp.MustCompile(`^[ \t]*(?:[-*]|\d+\.)[ \t]+`)
 
 // negationCueRE matches an explicit negation cue word/phrase, case
 // insensitive, as a whole word/phrase boundary.
-var negationCueRE = regexp.MustCompile(`(?i)\b(do not|don't|never)\b`)
+var negationCueRE = regexp.MustCompile(`(?i)\b(do not|don't|never|must not|cannot|can't|no need to|avoid)\b`)
 
 // clauseSplitRE splits a list item's joined text into clauses/sentences on
 // `.`/`!`/`?` boundaries, so the negation exemption is checked per-clause
@@ -42,6 +42,37 @@ var negationCueRE = regexp.MustCompile(`(?i)\b(do not|don't|never)\b`)
 // unrelated clause must not exempt a later, un-negated clause containing the
 // marker (issue #2464 follow-up).
 var clauseSplitRE = regexp.MustCompile(`[.!?]`)
+
+// abbreviationRE matches a known abbreviation ("e.g.", "i.e.", "etc.",
+// "vs."), case insensitive, as a whole word. Note "e.g" and "i.e" each
+// contain an internal period in addition to the trailing one -- both must be
+// protected, not just the trailing one, or clauseSplitRE would still split on
+// the internal period.
+var abbreviationRE = regexp.MustCompile(`(?i)\b(?:e\.g|i\.e|etc|vs)\.`)
+
+// abbreviationSentinel stands in for a period that is part of a known
+// abbreviation, so clauseSplitRE (which matches any bare `.`) doesn't treat
+// it as a clause/sentence boundary. Chosen to be a character that can never
+// appear in ordinary prompt text or collide with a real clause boundary.
+const abbreviationSentinel = "\x00"
+
+// splitClauses splits text into clauses/sentences the same way clauseSplitRE
+// would, except a period that's part of a known abbreviation (see
+// abbreviationRE) is never treated as a boundary -- only an ordinary
+// sentence-ending `.`/`!`/`?` is. RE2 (Go's regexp) has no lookbehind, so
+// clauseSplitRE alone can't distinguish an abbreviation's period from a real
+// sentence-ending one; this swaps every period inside a matched abbreviation
+// for a sentinel byte before running clauseSplitRE, so only genuine clause
+// boundaries survive to split on. Leaving the sentinel in place afterwards
+// (rather than restoring the period) is fine because every caller of the
+// resulting clause text only ever does substring/regex matching against it,
+// never exact reconstruction.
+func splitClauses(text string) []string {
+	protected := abbreviationRE.ReplaceAllStringFunc(text, func(m string) string {
+		return strings.ReplaceAll(m, ".", abbreviationSentinel)
+	})
+	return clauseSplitRE.Split(protected, -1)
+}
 
 // blankLineRE matches a line that is empty or all whitespace.
 var blankLineRE = regexp.MustCompile(`^[ \t]*$`)
@@ -154,7 +185,7 @@ func ForbiddenMarkerIsImperative(marker, text, liveCodeForge string) bool {
 			}
 			itemText := strings.Join(trimEach(itemLines), " ")
 			if strings.Contains(itemText, marker) {
-				for _, clause := range clauseSplitRE.Split(itemText, -1) {
+				for _, clause := range splitClauses(itemText) {
 					if strings.Contains(clause, marker) && !negationCueRE.MatchString(clause) {
 						return true
 					}
