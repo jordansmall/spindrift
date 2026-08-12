@@ -89,9 +89,14 @@ func TestSeedAccumulationRepoIfLocal_Local_SeedsFromPwd(t *testing.T) {
 	c.codeForgeAccumulationRepoDir = repoPath
 	c.baseBranch = "main"
 
-	if err := seedAccumulationRepoIfLocal(c, checkout); err != nil {
+	lock, err := seedAccumulationRepoIfLocal(c, checkout)
+	if err != nil {
 		t.Fatalf("seedAccumulationRepoIfLocal: %v", err)
 	}
+	if lock == nil {
+		t.Fatal("seedAccumulationRepoIfLocal lock = nil, want a held *local.AccumulationLock (issue #2441)")
+	}
+	t.Cleanup(func() { _ = lock.Release() })
 
 	assertClonableAccumulationRepo(t, repoPath, "main")
 }
@@ -105,8 +110,12 @@ func TestSeedAccumulationRepoIfLocal_NonLocal_NoOp(t *testing.T) {
 	c := baseConfig()
 	c.codeForge = "github"
 
-	if err := seedAccumulationRepoIfLocal(c, "/nonexistent/pwd"); err != nil {
+	lock, err := seedAccumulationRepoIfLocal(c, "/nonexistent/pwd")
+	if err != nil {
 		t.Errorf("seedAccumulationRepoIfLocal(CODE_FORGE=github) = %v, want nil (no-op)", err)
+	}
+	if lock != nil {
+		t.Errorf("seedAccumulationRepoIfLocal(CODE_FORGE=github) lock = %v, want nil (no-op)", lock)
 	}
 }
 
@@ -128,9 +137,14 @@ func TestSeedAccumulationRepoIfLocal_ResearchKind_SeedsFromPwd(t *testing.T) {
 	c.codeForgeAccumulationRepoDir = repoPath
 	c.baseBranch = "main"
 
-	if err := seedAccumulationRepoIfLocal(c, checkout); err != nil {
+	lock, err := seedAccumulationRepoIfLocal(c, checkout)
+	if err != nil {
 		t.Fatalf("seedAccumulationRepoIfLocal: %v", err)
 	}
+	if lock == nil {
+		t.Fatal("seedAccumulationRepoIfLocal lock = nil, want a held *local.AccumulationLock (issue #2441)")
+	}
+	t.Cleanup(func() { _ = lock.Release() })
 
 	assertClonableAccumulationRepo(t, repoPath, "main")
 }
@@ -152,9 +166,59 @@ func TestSeedAccumulationRepoIfLocal_ResearchSelfContained_NoOp(t *testing.T) {
 	c.codeForgeAccumulationRepoDir = filepath.Join(t.TempDir(), "accum.git")
 	c.baseBranch = "main"
 
-	if err := seedAccumulationRepoIfLocal(c, "/nonexistent/pwd"); err != nil {
+	lock, err := seedAccumulationRepoIfLocal(c, "/nonexistent/pwd")
+	if err != nil {
 		t.Errorf("seedAccumulationRepoIfLocal(research kind, selfContained) = %v, want nil (no-op)", err)
 	}
+	if lock != nil {
+		t.Errorf("seedAccumulationRepoIfLocal(research kind, selfContained) lock = %v, want nil (no-op)", lock)
+	}
+}
+
+// TestSeedAccumulationRepoIfLocal_ConcurrentCallSameRepo_FailsUntilReleased
+// is the core regression test for issue #2441: a second, independent
+// seedAccumulationRepoIfLocal call against the same repoPath — simulating a
+// second `spindrift` process (e.g. a concurrent research and dispatch run)
+// — must fail while the first call's returned lock is still held, rather
+// than silently racing SeedAccumulationRepo's seed+mount window. Once the
+// first lock is released, a third call against the same repoPath succeeds
+// again, proving the lock is per-run rather than a permanent wedge.
+func TestSeedAccumulationRepoIfLocal_ConcurrentCallSameRepo_FailsUntilReleased(t *testing.T) {
+	checkout := mustSeedableCheckout(t)
+	repoPath := filepath.Join(t.TempDir(), "accum.git")
+	c := baseConfig()
+	c.codeForge = "local"
+	c.codeForgeAccumulationRepoDir = repoPath
+	c.baseBranch = "main"
+
+	firstLock, err := seedAccumulationRepoIfLocal(c, checkout)
+	if err != nil {
+		t.Fatalf("first seedAccumulationRepoIfLocal: %v", err)
+	}
+	if firstLock == nil {
+		t.Fatal("first seedAccumulationRepoIfLocal lock = nil, want a held *local.AccumulationLock")
+	}
+
+	secondLock, err := seedAccumulationRepoIfLocal(c, checkout)
+	if err == nil {
+		t.Error("second seedAccumulationRepoIfLocal while first lock held = nil error, want contention error (issue #2441)")
+	}
+	if secondLock != nil {
+		t.Errorf("second seedAccumulationRepoIfLocal while first lock held = %v, want nil lock on error", secondLock)
+	}
+
+	if err := firstLock.Release(); err != nil {
+		t.Fatalf("firstLock.Release(): %v", err)
+	}
+
+	thirdLock, err := seedAccumulationRepoIfLocal(c, checkout)
+	if err != nil {
+		t.Fatalf("third seedAccumulationRepoIfLocal after release: %v", err)
+	}
+	if thirdLock == nil {
+		t.Fatal("third seedAccumulationRepoIfLocal after release lock = nil, want a held *local.AccumulationLock")
+	}
+	t.Cleanup(func() { _ = thirdLock.Release() })
 }
 
 // TestResearchLaunchStack_WiresResearchLabelsAndSettle verifies
