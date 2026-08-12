@@ -294,6 +294,11 @@ let
 
   # Built-in run defaults derived from the schema; the Consumer's `defaults` arg
   # overrides them per key, and a matching env var overrides those again at runtime.
+  # Deliberately generic (`or ""`) rather than reusing lib/roster-schema-defaults.nix
+  # (issue #2437): flakeOptionEntries spans every flakeOption-flagged schema key,
+  # most of which have no model concept at all (e.g. devShellName) and so can't
+  # guarantee a `.default`, unlike the roster helper's four model keys, which are
+  # all asserted to carry one.
   schemaDefaults = lib.mapAttrs (_: e: e.default or "") flakeOptionEntries;
   mergedDefaults = schemaDefaults // defaults;
 

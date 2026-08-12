@@ -78,13 +78,7 @@
       models ? { },
     }:
     let
-      schema = import ./env-schema.nix;
-      schemaDefaults = {
-        scout = schema.scoutModel.default;
-        reviewer = schema.reviewModel.default;
-        filer = schema.filerModel.default;
-        worker = schema.workerModel.default;
-      };
+      schemaDefaults = (import ./roster-schema-defaults.nix { inherit lib; }).schemaDefaults;
       legacyModels = {
         scout = scoutModel;
         reviewer = reviewModel;
