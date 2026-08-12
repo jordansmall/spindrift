@@ -739,6 +739,55 @@ func TestMarkReady_AlreadyReadyNoOp(t *testing.T) {
 	}
 }
 
+// TestMarkReady_ActsOnDraftFieldWithBracketedWIPTitle verifies MarkReady
+// PATCHes the title with the "[WIP]:" prefix stripped when the pull's
+// draft field is true even though the title carries the "[WIP]:"
+// convention rather than the narrower "WIP:" one — MarkReady must gate on
+// isDraftPull (draft field OR either WIP-title convention), not on
+// isDraftTitle's narrower "WIP:"-only check, so a stranded "[WIP]:"-titled
+// draft PR (see OpenPRForBranch's adoption of any draft PR) can still be
+// marked ready.
+func TestMarkReady_ActsOnDraftFieldWithBracketedWIPTitle(t *testing.T) {
+	var gotPath, gotMethod string
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/owner/repo/pulls/206":
+			w.Write([]byte(pullJSON(206, "open", false, true, true, "[WIP]: add feature", "agent/issue-206", "abc123", "main")))
+		case r.Method == http.MethodPatch:
+			gotPath = r.URL.Path
+			gotMethod = r.Method
+			json.NewDecoder(r.Body).Decode(&gotBody)
+			w.WriteHeader(http.StatusOK)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	cf := forgejo.NewForgejoCodeForgeForTest(forgejo.ForgejoCodeForgeConfig{
+		BaseURL:      srv.URL,
+		Repo:         "owner/repo",
+		Token:        "tok",
+		BranchPrefix: "agent/issue-",
+	}, nil, "unused")
+	pr, ok := cf.(prReader)
+	if !ok {
+		t.Fatalf("forgejoCodeForge does not satisfy prReader (methods not yet implemented)")
+	}
+	if err := pr.MarkReady("https://forge.test/owner/repo/pulls/206"); err != nil {
+		t.Fatalf("MarkReady(...) unexpected error: %v", err)
+	}
+	if gotMethod != http.MethodPatch {
+		t.Fatalf("method = %q, want PATCH", gotMethod)
+	}
+	if gotPath != "/api/v1/repos/owner/repo/pulls/206" {
+		t.Fatalf("path = %q, want %q", gotPath, "/api/v1/repos/owner/repo/pulls/206")
+	}
+	if gotBody["title"] != "add feature" {
+		t.Fatalf("body[title] = %v, want %q", gotBody["title"], "add feature")
+	}
+}
+
 // TestMarkDraft_AddsWIPPrefix verifies MarkDraft PATCHes the title with a
 // leading "WIP: " when the PR is currently ready (not draft).
 func TestMarkDraft_AddsWIPPrefix(t *testing.T) {
