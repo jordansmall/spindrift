@@ -7,14 +7,31 @@ import "fmt"
 // error: <err>" when a CheckState call itself errored (stateErr non-nil,
 // checked first since it fires ahead of any deadline check), otherwise
 // "ci-timeout: CI-watch deadline reached after <deadline>s" for the plain
-// poll-loop-ran-out-the-clock case. deadline is MergePollTimeout, which is
-// documented and stored in seconds — the hardcoded "s" suffix below tracks
-// that unit and must move with any future change to the field's unit.
+// poll-loop-ran-out-the-clock case. A third prefix,
+// "ci-timeout: registration guard never cleared after <deadline>s", is
+// produced by the sibling gateTerminalReasonRegistration when the deadline
+// is instead reached with the issue #1652/#2475 registration guard still
+// unsatisfied. deadline is MergePollTimeout, which is documented and stored
+// in seconds — the hardcoded "s" suffix below tracks that unit and must move
+// with any future change to the field's unit.
 func gateTerminalReason(stateErr error, deadline int) string {
 	if stateErr != nil {
 		return fmt.Sprintf("ci-check-error: %v", stateErr)
 	}
 	return fmt.Sprintf("ci-timeout: CI-watch deadline reached after %ds", deadline)
+}
+
+// gateTerminalReasonRegistration is gateTerminalReason's sibling for the case
+// where gateToGreen's poll loop reaches its deadline with the requireRegistration
+// guard (issue #1652, bounded by registrationWindowPolls per issue #2475)
+// still unsatisfied — i.e. this run never observed proof its own checks
+// registered on the head commit. Naming the guard explicitly here, instead of
+// folding it into the generic ci-timeout case, lets a caller (and a human
+// reading the failedLabel comment) tell that apart from an ordinary
+// ran-out-the-clock timeout. deadline carries the same seconds unit as
+// gateTerminalReason's.
+func gateTerminalReasonRegistration(deadline int) string {
+	return fmt.Sprintf("ci-timeout: registration guard never cleared after %ds", deadline)
 }
 
 // gateResult names gateToGreen's outcome, replacing the (green, genuineRed
