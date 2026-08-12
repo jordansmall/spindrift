@@ -112,7 +112,9 @@ type LandingContainmentQuery interface {
 // `pr, ok := cf.(PRForge)` — the standard Go optional-interface pattern,
 // rather than a PushOnly capability flag.
 type PRForge interface {
-	// OpenPRForBranch returns the open non-draft PR for branch, if any.
+	// OpenPRForBranch returns the open PR for branch, if any, draft or not
+	// (issue #2408) — a stranded draft is exactly as adoptable as a ready
+	// PR. Draft status is still reported via the returned PR.IsDraft.
 	OpenPRForBranch(branch string) (PR, bool, error)
 	// PRForBranch returns the URL of any PR (any state) for branch, if any.
 	PRForBranch(branch string) (string, bool, error)

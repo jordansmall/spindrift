@@ -627,19 +627,21 @@ func TestForgejoIntegration_DispatchLifecycle(t *testing.T) {
 	branch := cf.AgentBranch(numStr)
 	seedBranchWithCommit(t, baseURL, token, repo, branch)
 
-	// PR: open as a draft (WIP-title convention), confirm it's never
-	// adopted by OpenPRForBranch while draft, then mark it ready and
-	// confirm it now is.
+	// PR: open as a draft (WIP-title convention), confirm OpenPRForBranch
+	// adopts it while still draft (issue #2408), then mark it ready and
+	// confirm it's still found.
 	prURL := openPR(t, baseURL, token, repo, branch, "main", "WIP: harness")
 	if state, err := prf.PRState(prURL); err != nil {
 		t.Fatalf("PRState (open): %v", err)
 	} else if state != forge.PROpen {
 		t.Fatalf("PRState (open) = %v, want %v", state, forge.PROpen)
 	}
-	if _, found, err := prf.OpenPRForBranch(branch); err != nil {
+	if pr, found, err := prf.OpenPRForBranch(branch); err != nil {
 		t.Fatalf("OpenPRForBranch (draft): %v", err)
-	} else if found {
-		t.Fatalf("OpenPRForBranch (draft): found=true, want false (a draft PR is never adopted)")
+	} else if !found {
+		t.Fatalf("OpenPRForBranch (draft): found=false, want true (a draft PR is adopted like any other)")
+	} else if !pr.IsDraft {
+		t.Fatalf("OpenPRForBranch (draft): IsDraft = false, want true")
 	}
 	if err := prf.MarkReady(prURL); err != nil {
 		t.Fatalf("MarkReady: %v", err)

@@ -104,22 +104,19 @@ func (c *readOnlyCodeForge) CommitSubjects(outboxDir, base, ref string) ([]strin
 // so this checks the create call's own rest.StatusError rather than
 // errors.Is against errMergeRefused, which would also match a 405 and would
 // conflate two endpoints' unrelated meanings for the same status. On a
-// precise 409, this resolves the branch's own open PR via
-// openAnyPRForBranch and returns that PR's URL with no error -- adoption,
-// not failure. openAnyPRForBranch, not OpenPRForBranch, does the lookup:
-// CreateDraftPR always creates a draft (the forgejoWIPPrefix title above),
-// so the PR a retried call collides with on 409 is always a draft itself,
-// and OpenPRForBranch's contract deliberately excludes drafts for its other
-// caller (prresolver.go) -- using it here would make this adoption path
-// unreachable for its own real-world trigger. If openAnyPRForBranch can't
-// resolve an open PR for that head (e.g. only a closed/merged PR exists, or
-// the lookup itself errors), the original create error is returned
-// unmasked -- adoption is only ever additive, never a way to swallow a
-// genuine failure. Any other (non-409) failure is returned exactly as
-// before. The adoption path returns created=false, distinct from the
-// fresh-create success below, so a caller like settle's reconstructed-PR
-// path (issue #2447) can tell it must not treat this PR's title/body as the
-// ones just supplied.
+// precise 409, this resolves the branch's own open PR via OpenPRForBranch
+// and returns that PR's URL with no error -- adoption, not failure.
+// OpenPRForBranch is draft-inclusive (issue #2408), so it resolves the PR a
+// retried call collides with on 409 even though that PR is always a draft
+// itself (CreateDraftPR always creates one, per the forgejoWIPPrefix title
+// above). If OpenPRForBranch can't resolve an open PR for that head (e.g.
+// only a closed/merged PR exists, or the lookup itself errors), the
+// original create error is returned unmasked -- adoption is only ever
+// additive, never a way to swallow a genuine failure. Any other (non-409)
+// failure is returned exactly as before. The adoption path returns
+// created=false, distinct from the fresh-create success below, so a caller
+// like settle's reconstructed-PR path (issue #2447) can tell it must not
+// treat this PR's title/body as the ones just supplied.
 func (c *readOnlyCodeForge) CreateDraftPR(title, body, base, head string) (string, bool, error) {
 	reqBody := map[string]any{
 		"title": forgejoWIPPrefix + " " + title,
@@ -135,7 +132,7 @@ func (c *readOnlyCodeForge) CreateDraftPR(title, body, base, head string) (strin
 	createErr := fmt.Errorf("forgejo: create draft PR: %w", err)
 	var statusErr rest.StatusError
 	if errors.As(err, &statusErr) && statusErr.Status == http.StatusConflict {
-		if pr, ok, openErr := c.openAnyPRForBranch(head); openErr == nil && ok {
+		if pr, ok, openErr := c.OpenPRForBranch(head); openErr == nil && ok {
 			return pr.URL, false, nil
 		}
 	}
