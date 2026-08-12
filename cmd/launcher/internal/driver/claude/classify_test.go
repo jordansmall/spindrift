@@ -346,39 +346,13 @@ var classifyTests = []struct {
 		wantReason:  driverkit.RateLimit,
 		wantResetAt: nil,
 	},
-	{
-		// Claude Code OAuth/subscription session-limit: plain-text notice
-		// carried in the CLI's synthetic-terminator assistant event (issue
-		// #1539) — distinct wording from the API-key usage_limit_reached form.
-		name: "RateLimit_OAuthSessionLimit_PlainText",
-		lines: []string{
-			`You've hit your session limit · resets 6:30pm (UTC)`,
-		},
-		wantClass:   driverkit.Transient,
-		wantReason:  driverkit.RateLimit,
-		wantResetAt: nil,
-	},
-	{
-		// Sibling wording for the weekly-quota variant of the same OAuth notice.
-		name: "RateLimit_OAuthWeeklyLimit_PlainText",
-		lines: []string{
-			`You've hit your weekly limit · resets Mon 12:00am (UTC)`,
-		},
-		wantClass:   driverkit.Transient,
-		wantReason:  driverkit.RateLimit,
-		wantResetAt: nil,
-	},
-	{
-		// Sibling wording for the per-model Opus-quota variant of the same
-		// OAuth notice.
-		name: "RateLimit_OAuthOpusLimit_PlainText",
-		lines: []string{
-			`You've hit your Opus limit · resets 6:30pm (UTC)`,
-		},
-		wantClass:   driverkit.Transient,
-		wantReason:  driverkit.RateLimit,
-		wantResetAt: nil,
-	},
+	// RateLimit_OAuthSessionLimit_PlainText, RateLimit_OAuthWeeklyLimit_PlainText,
+	// and RateLimit_OAuthOpusLimit_PlainText — the same three OAuth plain-text
+	// "resets ... (UTC)" markers — live in TestClassify_OAuthPlainTextResetsAt_RollsForward
+	// instead of this table: parseResetsAtText rolls the reset time forward
+	// from time.Now() when the message carries no date, so ResetAt is no
+	// longer a fixed epoch this table's exact-equality check can pin without
+	// flaking near a day/week boundary.
 	{
 		// Same synthetic-terminator shape as SyntheticTerminator below, but
 		// with no top-level "error" field — isAgentContentEvent then treats
@@ -619,6 +593,86 @@ func TestClassify(t *testing.T) {
 				if !c.ResetAt.Equal(*tc.wantResetAt) {
 					t.Errorf("ResetAt: got %v, want %v", *c.ResetAt, *tc.wantResetAt)
 				}
+			}
+		})
+	}
+}
+
+// TestClassify_OAuthPlainTextResetsAt_RollsForward covers the three OAuth
+// plain-text rate-limit markers whose "resets ... (UTC)" suffix carries a
+// clock time (and, for the weekly variant, a weekday) but no date:
+// extractResetsAt falls back to parseResetsAtText, which rolls the next
+// occurrence of that clock time forward from time.Now(). Because the
+// resulting ResetAt depends on wall-clock time at test-run time, this
+// asserts the clock components and forward-of-now/bounded properties
+// instead of pinning a fixed epoch (which would flake near a day/week
+// boundary) — see classifyTests for the fixed-epoch table this doesn't fit.
+func TestClassify_OAuthPlainTextResetsAt_RollsForward(t *testing.T) {
+	tests := []struct {
+		name        string
+		line        string
+		wantHour    int
+		wantMinute  int
+		wantWeekday *time.Weekday // nil means don't check
+	}{
+		{
+			// Claude Code OAuth/subscription session-limit: plain-text notice
+			// carried in the CLI's synthetic-terminator assistant event (issue
+			// #1539) — distinct wording from the API-key usage_limit_reached form.
+			name:       "RateLimit_OAuthSessionLimit_PlainText",
+			line:       `You've hit your session limit · resets 6:30pm (UTC)`,
+			wantHour:   18,
+			wantMinute: 30,
+		},
+		{
+			// Sibling wording for the weekly-quota variant of the same OAuth notice.
+			name:        "RateLimit_OAuthWeeklyLimit_PlainText",
+			line:        `You've hit your weekly limit · resets Mon 12:00am (UTC)`,
+			wantHour:    0,
+			wantMinute:  0,
+			wantWeekday: func() *time.Weekday { w := time.Monday; return &w }(),
+		},
+		{
+			// Sibling wording for the per-model Opus-quota variant of the same
+			// OAuth notice.
+			name:       "RateLimit_OAuthOpusLimit_PlainText",
+			line:       `You've hit your Opus limit · resets 6:30pm (UTC)`,
+			wantHour:   18,
+			wantMinute: 30,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			logPath := claude.WriteLog(t, tc.line)
+
+			before := time.Now().UTC()
+			c, err := claude.Classify(logPath)
+			if err != nil {
+				t.Fatalf("Classify() error: %v", err)
+			}
+
+			if c.Class != driverkit.Transient {
+				t.Errorf("Class: got %q, want %q", c.Class, driverkit.Transient)
+			}
+			if c.Reason != driverkit.RateLimit {
+				t.Errorf("Reason: got %q, want %q", c.Reason, driverkit.RateLimit)
+			}
+
+			if c.ResetAt == nil {
+				t.Fatal("ResetAt: got nil, want non-nil")
+			}
+			if c.ResetAt.Hour() != tc.wantHour || c.ResetAt.Minute() != tc.wantMinute {
+				t.Errorf("ResetAt clock: got %02d:%02d, want %02d:%02d", c.ResetAt.Hour(), c.ResetAt.Minute(), tc.wantHour, tc.wantMinute)
+			}
+			if !c.ResetAt.After(before) {
+				t.Errorf("ResetAt: got %v, want strictly after %v", *c.ResetAt, before)
+			}
+			if c.ResetAt.After(before.AddDate(0, 0, 8)) {
+				t.Errorf("ResetAt: got %v, want within 8 days of %v", *c.ResetAt, before)
+			}
+			if tc.wantWeekday != nil && c.ResetAt.Weekday() != *tc.wantWeekday {
+				t.Errorf("ResetAt weekday: got %v, want %v", c.ResetAt.Weekday(), *tc.wantWeekday)
 			}
 		})
 	}
