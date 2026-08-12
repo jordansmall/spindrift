@@ -304,6 +304,73 @@ func TestBootstrap_EarlyErrorAfterAccumLockAcquired_ReleasesLock(t *testing.T) {
 	t.Cleanup(func() { _ = reacquired.Release() })
 }
 
+// TestBootstrap_Success_HoldsAccumLockUntilCleanup is the regression test for
+// the fix's actual load-bearing property (issue #2441): the accum lock must
+// stay held across a *successful* bootstrap() return — released only when
+// the caller later invokes lc.cleanup() — not just on the early-error paths
+// TestBootstrap_EarlyErrorAfterAccumLockAcquired_ReleasesLock and
+// TestSeedAccumulationRepoIfLocal_SeedFailure_ReleasesLock already cover. A
+// mutation that deletes cleanup's `accumLock.Release()` call leaves every
+// other test green (nothing else calls lc.cleanup() and then reacquires),
+// silently reopening #2441; this test drives bootstrap all the way to a
+// successful launchContext, proves the lock is still contended before
+// cleanup runs, then proves it's free again after.
+func TestBootstrap_Success_HoldsAccumLockUntilCleanup(t *testing.T) {
+	checkout := mustSeedableCheckout(t)
+	repoPath := filepath.Join(t.TempDir(), "accum.git")
+
+	issuesDir := t.TempDir()
+	issueFile := `---
+title: Some issue
+state: untriaged
+labels: []
+created: 2026-07-09T12:00:00Z
+---
+body
+`
+	if err := os.WriteFile(filepath.Join(issuesDir, "42.md"), []byte(issueFile), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("REPO_SLUG", "owner/repo")
+	t.Setenv("GH_TOKEN", "test-token")
+	t.Setenv("GIT_USER_NAME", "Test")
+	t.Setenv("GIT_USER_EMAIL", "test@example.com")
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "test-oauth-token")
+	t.Setenv("CODE_FORGE", "local")
+	t.Setenv("CODE_FORGE_ACCUMULATION_REPO_DIR", repoPath)
+	t.Setenv("BASE_BRANCH", "main")
+	t.Setenv("MERGE_MODE", "immediate")
+	t.Setenv("RUNTIME", "bwrap")
+	t.Setenv("ISSUE_TRACKER", "local")
+	t.Setenv("LOCAL_ISSUES_DIR", issuesDir)
+	t.Chdir(checkout)
+
+	lc, err := bootstrap(true, dispatchKindWork, false)
+	if err != nil {
+		t.Fatalf("bootstrap() = %v, want a successful launch context", err)
+	}
+	if lc == nil {
+		t.Fatal("bootstrap() launch context = nil, want a non-nil *launchContext on success")
+	}
+
+	// Before cleanup: the lock must still be held, proving it survives past
+	// a successful bootstrap() return rather than being released somewhere
+	// on the success path before launchContext is even handed back.
+	if _, err := local.AcquireAccumulationLock(repoPath); err == nil {
+		t.Error("AcquireAccumulationLock before lc.cleanup() = nil error, want contention (accum lock should still be held after a successful bootstrap())")
+	}
+
+	lc.cleanup()
+
+	// After cleanup: the lock must now be free.
+	reacquired, err := local.AcquireAccumulationLock(repoPath)
+	if err != nil {
+		t.Fatalf("AcquireAccumulationLock after lc.cleanup(): %v, want the lock to have been released", err)
+	}
+	t.Cleanup(func() { _ = reacquired.Release() })
+}
+
 // TestResearchLaunchStack_WiresResearchLabelsAndSettle verifies
 // researchLaunchStack (cmdConsole's research-kind mirror of bootstrap's own
 // work-kind wiring, issue #1708) returns a tracker carrying the fixed
