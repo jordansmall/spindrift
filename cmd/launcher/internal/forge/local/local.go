@@ -560,7 +560,8 @@ func (li localIssue) render() string {
 // the value (a bare "key: value: rest" line is invalid YAML — a colon is a
 // mapping separator — even though parseLocalIssue's own tolerant
 // first-colon-split re-read happens to survive it). Plain values like "Fix
-// the Thing" and RFC3339 timestamps stay bare, unchanged from before.
+// the Thing" stay bare; RFC3339 timestamps and anything else with a colon
+// now render quoted.
 //
 // Scope: this guards only parseLocalIssue's own re-read vectors, not a
 // general YAML reader. A value with a leading "#" or "[" stays bare and
