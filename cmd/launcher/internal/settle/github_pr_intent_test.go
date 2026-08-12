@@ -307,6 +307,92 @@ func TestSettle_GithubReadOnly_MissingPRIntentReconstructsFromCommits(t *testing
 	}
 }
 
+// TestSettle_GithubReadOnly_MissingPRIntentReconstructsFromCommits_PostsIssueComment
+// asserts AC5 of issue #2447: a reconstructed hand-off must be distinguishable
+// from a normal one by an operator reading only the GitHub issue (not the
+// launcher's own stdout log) — so hostMediateDraftPR must post a comment on
+// the issue itself, alongside the PR body's own "Reconstructed host-side"
+// note, explaining that the box's own hand-off carried no usable PR-intent
+// line and that the PR was derived host-side from the branch's commits.
+func TestSettle_GithubReadOnly_MissingPRIntentReconstructsFromCommits_PostsIssueComment(t *testing.T) {
+	const issNum = "1919"
+	const prURL = "https://github.com/owner/repo/pull/1919"
+
+	fc := forge.NewFake(testDispatchLabels)
+	fc.BranchPrefix = "agent/issue-"
+	branch := fc.AgentBranch(issNum)
+	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
+	fc.CreateDraftPRURL = prURL
+	fc.SetCheckStates(prURL, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
+	fc.CommitSubjectsResult = []string{"feat: add widget", "fix: typo"}
+
+	d := dispatch.NewFake()
+	result := dispatch.Result{
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: issNum, Landing: branch, Status: "ready", Note: "ok"},
+		},
+		// PRIntentFound left false: the box's log had no PR-intent line.
+	}
+
+	c := baseConfig()
+	c.ReadOnly = true
+	c.OutboxDir = func(num string) string { return "/outbox/" + num }
+	c.BaseBranch = "main"
+	s := New(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
+	s.Settle(d, issNum, 0, result)
+
+	var reconstructedCalls []forge.CommentCall
+	for _, c := range fc.CommentCalls {
+		if strings.Contains(c.Body, "reconstructed") {
+			reconstructedCalls = append(reconstructedCalls, c)
+		}
+	}
+	if len(reconstructedCalls) != 1 {
+		t.Fatalf("expected exactly one reconstructed-hand-off comment, got %d: %+v", len(reconstructedCalls), fc.CommentCalls)
+	}
+}
+
+// TestSettle_GithubReadOnly_ReadyRelaysThenCreatesDraftPRThenMerges_NoReconstructedComment
+// asserts the normal, PR-intent-found path must NOT get the reconstructed-
+// hand-off comment new to issue #2447 — only the reconstructed path should.
+func TestSettle_GithubReadOnly_ReadyRelaysThenCreatesDraftPRThenMerges_NoReconstructedComment(t *testing.T) {
+	const issNum = "1919"
+	const prURL = "https://github.com/owner/repo/pull/1919"
+
+	fc := forge.NewFake(testDispatchLabels)
+	fc.BranchPrefix = "agent/issue-"
+	branch := fc.AgentBranch(issNum)
+	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
+	fc.CreateDraftPRURL = prURL
+	fc.SetCheckStates(prURL, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
+
+	d := dispatch.NewFake()
+	result := dispatch.Result{
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: issNum, Landing: branch, Status: "ready", Note: "ok"},
+		},
+		PRIntent:      "feat: add widget\n\nAdds a widget.",
+		PRIntentFound: true,
+	}
+
+	c := baseConfig()
+	c.ReadOnly = true
+	c.OutboxDir = func(num string) string { return "/outbox/" + num }
+	c.BaseBranch = "main"
+	s := New(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
+	s.Settle(d, issNum, 0, result)
+
+	for _, c := range fc.CommentCalls {
+		if strings.Contains(c.Body, "reconstructed") {
+			t.Errorf("normal PR-intent-found hand-off must not get a reconstructed-hand-off comment, got %+v", fc.CommentCalls)
+		}
+	}
+}
+
 // TestSettle_GithubReadOnly_MissingPRIntentReconstructsFromCommits_LocalTrackerNotInjected
 // mirrors TestSettle_GithubReadOnly_ReadyRelaysThenCreatesDraftPRThenMerges_LocalTrackerNotInjected
 // for the reconstructed path: when the IssueTracker is local-shaped, the
@@ -385,6 +471,155 @@ func TestSettle_GithubReadOnly_MissingPRIntentAndReconstructionFailsBlocksNotFai
 	}
 	if len(fc.CreateDraftPRCalls) != 0 {
 		t.Errorf("CreateDraftPR must not be called when reconstruction fails, got %+v", fc.CreateDraftPRCalls)
+	}
+	iss, _ := fc.Issue(issNum)
+	if containsLabel(iss.Labels, "agent-complete") {
+		t.Errorf("a blocked reconstruction must NOT carry agent-complete; labels=%v", iss.Labels)
+	}
+	if !containsLabel(iss.Labels, "agent-in-progress") {
+		t.Errorf("a blocked reconstruction is left in-progress, visibly not-done; labels=%v", iss.Labels)
+	}
+	if containsLabel(iss.Labels, "agent-failed") {
+		t.Errorf("issue must NOT carry agent-failed after a blocked reconstruction; labels=%v", iss.Labels)
+	}
+	var blockedCalls []forge.CommentCall
+	for _, c := range fc.CommentCalls {
+		if strings.Contains(c.Body, "merge blocked") {
+			blockedCalls = append(blockedCalls, c)
+		}
+	}
+	if len(blockedCalls) != 1 {
+		t.Fatalf("expected exactly one merge-blocked comment, got %d: %+v", len(blockedCalls), fc.CommentCalls)
+	}
+}
+
+// TestSettle_GithubReadOnly_MissingPRIntentAndZeroCommitSubjectsBlocksNotFails
+// asserts that when PR-intent is missing, relay succeeds, but the relayed
+// branch carries zero commits to reconstruct from (CommitSubjects succeeds
+// with an empty/nil result), the hand-off still safely blocks rather than
+// opening an empty-titled PR — the "nothing to reconstruct from" branch of
+// reconstructPRText, distinct from a CommitSubjects error.
+func TestSettle_GithubReadOnly_MissingPRIntentAndZeroCommitSubjectsBlocksNotFails(t *testing.T) {
+	const issNum = "1919"
+	branch := "agent/issue-1919"
+
+	fc := forge.NewFake(testDispatchLabels)
+	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
+	// CommitSubjectsResult left nil (its zero value) and CommitSubjectsErr
+	// left nil: CommitSubjects succeeds but returns zero subjects.
+
+	d := dispatch.NewFake()
+	result := dispatch.Result{
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: issNum, Landing: branch, Status: "ready", Note: "ok"},
+		},
+		// PRIntentFound left false: the box's log had no PR-intent line.
+	}
+
+	c := baseConfig()
+	c.ReadOnly = true
+	c.OutboxDir = func(num string) string { return "/outbox/" + num }
+	c.BaseBranch = "main"
+	s := New(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
+	s.Settle(d, issNum, 0, result)
+
+	if len(fc.RelayBundleCalls) != 1 {
+		t.Errorf("RelayBundle must have been attempted, got %+v", fc.RelayBundleCalls)
+	}
+	if len(fc.CreateDraftPRCalls) != 0 {
+		t.Errorf("CreateDraftPR must not be called when there are zero commits to reconstruct from, got %+v", fc.CreateDraftPRCalls)
+	}
+	iss, _ := fc.Issue(issNum)
+	if containsLabel(iss.Labels, "agent-complete") {
+		t.Errorf("a blocked reconstruction must NOT carry agent-complete; labels=%v", iss.Labels)
+	}
+	if !containsLabel(iss.Labels, "agent-in-progress") {
+		t.Errorf("a blocked reconstruction is left in-progress, visibly not-done; labels=%v", iss.Labels)
+	}
+	if containsLabel(iss.Labels, "agent-failed") {
+		t.Errorf("issue must NOT carry agent-failed after a blocked reconstruction; labels=%v", iss.Labels)
+	}
+	var blockedCalls []forge.CommentCall
+	for _, c := range fc.CommentCalls {
+		if strings.Contains(c.Body, "merge blocked") {
+			blockedCalls = append(blockedCalls, c)
+		}
+	}
+	if len(blockedCalls) != 1 {
+		t.Fatalf("expected exactly one merge-blocked comment, got %d: %+v", len(blockedCalls), fc.CommentCalls)
+	}
+}
+
+// readOnlyForgeWithoutCommitSubjects wraps a github-read-only Fake in a
+// struct that embeds only forge.CodeForge, forge.PRForge, forge.BundleRelay,
+// and forge.DraftPRCreator — deliberately not forge.BundleCommitSubjects.
+// Embedding interface types (not the concrete githubReadOnlyForge) means
+// Go's method-set promotion only picks up exactly those four interfaces'
+// methods: even though the underlying *Fake-backed value also happens to
+// implement CommitSubjects, that method is not promoted onto this wrapper
+// type, since promotion follows the static field type, not the dynamic
+// value. A type assertion to forge.BundleCommitSubjects on a value of this
+// type therefore correctly fails, exercising the "Code Forge doesn't
+// implement forge.BundleCommitSubjects at all" branch of reconstructPRText.
+type readOnlyForgeWithoutCommitSubjects struct {
+	forge.CodeForge
+	forge.PRForge
+	forge.BundleRelay
+	forge.DraftPRCreator
+}
+
+// TestSettle_GithubReadOnly_CodeForgeLacksCommitSubjectsBlocksNotFails
+// asserts that when PR-intent is missing, relay succeeds, but the Code Forge
+// itself doesn't implement forge.BundleCommitSubjects at all (a real,
+// reachable gap: unlike BundleRelay/DraftPRCreator, nothing guarantees every
+// implementor of those two also implements this newer, independently
+// optional capability), the hand-off still safely blocks. Also asserts
+// CommitSubjects itself is never called — the type assertion fails first.
+func TestSettle_GithubReadOnly_CodeForgeLacksCommitSubjectsBlocksNotFails(t *testing.T) {
+	const issNum = "1919"
+	branch := "agent/issue-1919"
+
+	fc := forge.NewFake(testDispatchLabels)
+	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
+
+	readOnly := fc.AsGithubReadOnly()
+	wrapper := readOnlyForgeWithoutCommitSubjects{
+		CodeForge:      readOnly,
+		PRForge:        readOnly.(forge.PRForge),
+		BundleRelay:    readOnly.(forge.BundleRelay),
+		DraftPRCreator: readOnly.(forge.DraftPRCreator),
+	}
+	if _, ok := any(wrapper).(forge.BundleCommitSubjects); ok {
+		t.Fatal("readOnlyForgeWithoutCommitSubjects must not satisfy forge.BundleCommitSubjects")
+	}
+
+	d := dispatch.NewFake()
+	result := dispatch.Result{
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: issNum, Landing: branch, Status: "ready", Note: "ok"},
+		},
+		// PRIntentFound left false: the box's log had no PR-intent line.
+	}
+
+	c := baseConfig()
+	c.ReadOnly = true
+	c.OutboxDir = func(num string) string { return "/outbox/" + num }
+	c.BaseBranch = "main"
+	s := New(c, fc.AsNoLandingRecorder(), wrapper)
+	s.Settle(d, issNum, 0, result)
+
+	if len(fc.RelayBundleCalls) != 1 {
+		t.Errorf("RelayBundle must have been attempted, got %+v", fc.RelayBundleCalls)
+	}
+	if len(fc.CreateDraftPRCalls) != 0 {
+		t.Errorf("CreateDraftPR must not be called when the Code Forge lacks forge.BundleCommitSubjects, got %+v", fc.CreateDraftPRCalls)
+	}
+	if len(fc.CommitSubjectsCalls) != 0 {
+		t.Errorf("CommitSubjects must never be called when the type assertion to forge.BundleCommitSubjects itself fails, got %+v", fc.CommitSubjectsCalls)
 	}
 	iss, _ := fc.Issue(issNum)
 	if containsLabel(iss.Labels, "agent-complete") {
