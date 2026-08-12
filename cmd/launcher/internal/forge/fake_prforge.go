@@ -69,6 +69,12 @@ type PRForgeFake struct {
 	MarkDraftErr error
 	// MarkDraftCalls records all PR URLs passed to MarkDraft, in order.
 	MarkDraftCalls []string
+
+	// CheckStateCalls counts every CheckState invocation across all URLs, so
+	// a test can prove the poll loop consumed (or didn't consume) a scripted
+	// sequence, not just that it landed on the same final verdict a shorter
+	// or longer sequence would also produce.
+	CheckStateCalls int
 }
 
 // SetPR registers a PR reachable by the given head branch name.
@@ -216,6 +222,7 @@ func (pf *PRForgeFake) PRState(url string) (PRState, error) {
 func (pf *PRForgeFake) CheckState(url string) (RollupState, error) {
 	pf.mu.Lock()
 	defer pf.mu.Unlock()
+	pf.CheckStateCalls++
 	if eq := pf.checkErrQ[url]; len(eq) > 0 {
 		entry := eq[0]
 		pf.checkErrQ[url] = eq[1:]
