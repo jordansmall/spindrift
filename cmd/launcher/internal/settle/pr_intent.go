@@ -28,7 +28,12 @@ import (
 // from a normal one (issue #2447, AC5): besides the "Reconstructed host-side"
 // note already in the PR body itself, this also posts a comment on the issue
 // explaining the box's own hand-off was incomplete — an operator reading only
-// the issue, not the launcher's own stdout log, can still tell.
+// the issue, not the launcher's own stdout log, can still tell. That
+// stdout line and comment only fire when CreateDraftPR actually created a
+// fresh PR (issue #2407's adopt-existing retry path returns created=false):
+// when it instead adopts a pre-existing box-authored PR, the reconstructed
+// title/body were never applied to it, so claiming the hand-off was
+// reconstructed would be false.
 //
 // Returns the resolved PR URL and true on success. Any failure along the
 // way — a missing/malformed bundle, a missing/malformed PR-intent line with
@@ -89,11 +94,11 @@ func (s *Settle) hostMediateDraftPR(num string, result dispatch.Result) (string,
 	}
 	body = ensureClosesReference(body, num, s.it)
 
-	url, err := dpc.CreateDraftPR(title, body, s.cfg.BaseBranch, branch)
+	url, created, err := dpc.CreateDraftPR(title, body, s.cfg.BaseBranch, branch)
 	if err != nil {
 		return s.blockHandoff(num, branch, fmt.Errorf("draft PR create: %w", err))
 	}
-	if reconstructed {
+	if reconstructed && created {
 		fmt.Printf("    #%s  landing=%s  status=reconstructed  note=no PR-intent line found in the box's log; description derived host-side from the relayed branch's commits\n", num, branch)
 		// Posted alongside the stdout log line above so both settle's own
 		// console log and the issue itself tell the same story (issue #2447,
@@ -143,7 +148,12 @@ func (s *Settle) reconstructPRText(num, branch string) (title, body string, err 
 	b.WriteString("Reconstructed host-side: the box's log carried no usable PR-intent line, so this description was derived from the relayed branch's own commits.\n\nCommits:\n")
 	for _, subject := range subjects {
 		b.WriteString("- ")
-		b.WriteString(subject)
+		// subject is box-authored, untrusted text (issue #2447): defuse any
+		// closing-keyword-shaped reference before it's embedded in the body
+		// so it can't auto-close an unrelated issue on merge. Not applied to
+		// subjects[0] used as the PR title above — GitHub's closing-keyword
+		// scanner only scans the PR body, never the title.
+		b.WriteString(defuseClosingKeywords(subject))
 		b.WriteString("\n")
 	}
 	return subjects[0], strings.TrimRight(b.String(), "\n"), nil
@@ -196,7 +206,7 @@ func (s *Settle) relayBlockedWork(num string, result dispatch.Result) {
 	if !ok {
 		return
 	}
-	if _, err := dpc.CreateDraftPR(title, body, s.cfg.BaseBranch, branch); err != nil {
+	if _, _, err := dpc.CreateDraftPR(title, body, s.cfg.BaseBranch, branch); err != nil {
 		fmt.Fprintf(os.Stderr, "    ?? #%s: could not create draft PR for blocked hand-off: %v\n", num, err)
 	}
 }
@@ -237,6 +247,33 @@ func (s *Settle) blockHandoff(num, branch string, err error) (string, bool) {
 // "#1919" never matches as a reference to "191" the way naive substring
 // interpolation could, and "#19195" never matches as a reference to "1919".
 var closingKeywordPattern = regexp.MustCompile(`(?i)\b(?:close|closes|closed|fix|fixes|fixed|resolve|resolves|resolved):?\s+#(\d+)\b`)
+
+// defuseClosingKeywords neutralizes any GitHub-recognized closing-keyword
+// reference inside s without visibly mangling it, so it's safe to embed
+// verbatim in a reconstructed PR body (issue #2447). s comes from the
+// relayed branch's own commit subjects — box-authored, untrusted text a
+// prompt-injected Box fully controls — and reconstructPRText otherwise
+// bullets every subject straight into the body. A subject shaped like "fix:
+// closes #999" would then be picked up by GitHub's own closing-keyword
+// scanner and auto-close an entirely unrelated issue #999 on merge, exactly
+// the hazard ensureClosesReference exists to guard against for the
+// host-synthesized "Closes #<num>" line — reconstructPRText's verbatim
+// embedding would otherwise reopen that same hole from the commit list
+// itself.
+//
+// For every match of closingKeywordPattern, a zero-width space (U+200B) is
+// inserted immediately after the "#" and before the digits. Both
+// closingKeywordPattern and GitHub's real scanner require "#" to be
+// immediately followed by a digit, so the inserted character breaks the
+// match for either; U+200B has no visible glyph, so the subject still reads
+// the same to a human reviewer.
+func defuseClosingKeywords(s string) string {
+	const zeroWidthSpace = "​" // U+200B ZERO WIDTH SPACE
+	return closingKeywordPattern.ReplaceAllStringFunc(s, func(match string) string {
+		hashIdx := strings.IndexByte(match, '#')
+		return match[:hashIdx+1] + zeroWidthSpace + match[hashIdx+1:]
+	})
+}
 
 // hasClosingReference reports whether body already carries a
 // GitHub-recognized closing keyword referencing issue num.
