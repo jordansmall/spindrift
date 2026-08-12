@@ -167,6 +167,35 @@ func TestSettleAdopted_StaleSuccessMergesAfterWindow(t *testing.T) {
 	}
 }
 
+// TestSettleAdopted_StaleSuccessStillTimesOutWithinWindow is the "still
+// waits" counterpart to TestSettleAdopted_StaleSuccessMergesAfterWindow: the
+// deadline (MergePollTimeout==1) is shorter than the registration window
+// (registrationWindowPolls(3) * actualIv(1) == 3), so the guard must still be
+// withholding trust when the deadline is hit, unlike the sibling test where
+// MergePollTimeout(3) is long enough for the window to elapse and the
+// SUCCESS gets accepted. An all-SUCCESS rollup that hasn't yet cleared the
+// registration window must be rejected (times out, demotes to
+// agent-failed), not merged.
+func TestSettleAdopted_StaleSuccessStillTimesOutWithinWindow(t *testing.T) {
+	c := baseConfig()
+	c.MergePollTimeout = 1 // less than registrationWindowPolls(3) * actualIv(1)
+	c.MaxFixAttempts = 0
+	fc := forge.NewFake(testDispatchLabels)
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
+	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
+	s := New(c, fc, fc)
+
+	s.SettleAdopted(dispatch.NewFake(), "1", 0, testPR)
+
+	if fc.Merged != "" {
+		t.Errorf("expected no merge before the registration window elapses; fc.Merged=%q", fc.Merged)
+	}
+	iss, _ := fc.Issue("1")
+	if !containsLabel(iss.Labels, "agent-failed") {
+		t.Errorf("issue must be demoted to agent-failed when the deadline is hit before the registration window elapses; labels=%v", iss.Labels)
+	}
+}
+
 // TestSettleAdopted_PushOnlyForgeSkipsVerify verifies that SettleAdopted's
 // landingMerged case guards the verifyMerged call against a push-only
 // forge's nil s.pr (issue #697), mirroring gate.go's "ready" case guard
