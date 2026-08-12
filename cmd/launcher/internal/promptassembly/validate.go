@@ -175,6 +175,11 @@ func Validate(e Env, result Result, rows []ValidateMarkerRow, forbiddenRows []Fo
 		kind = defaultDispatchKind
 	}
 
+	liveCodeForge := e.CodeForge
+	if liveCodeForge == "" {
+		liveCodeForge = defaultCodeForge
+	}
+
 	for _, row := range rows {
 		var gateActive bool
 		var haystack string
@@ -224,7 +229,7 @@ func Validate(e Env, result Result, rows []ValidateMarkerRow, forbiddenRows []Fo
 			return warnings, fmt.Errorf("promptassembly: validate: no known gate for when %q (row %q)", row.When, row.ID)
 		}
 
-		if !gateActive || !ForbiddenMarkerIsImperative(row.Marker, haystack) {
+		if !gateActive || !ForbiddenMarkerIsImperative(row.Marker, haystack, liveCodeForge) {
 			continue
 		}
 

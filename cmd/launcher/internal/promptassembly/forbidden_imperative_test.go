@@ -8,7 +8,7 @@ import "testing"
 // run.
 func TestForbiddenMarkerIsImperative_FencedCodeBlock(t *testing.T) {
 	text := "Run this:\n```\ngit push\n```\n"
-	if !ForbiddenMarkerIsImperative("git push", text) {
+	if !ForbiddenMarkerIsImperative("git push", text, "github") {
 		t.Fatalf("ForbiddenMarkerIsImperative(%q, %q) = false, want true", "git push", text)
 	}
 }
@@ -22,7 +22,7 @@ func TestForbiddenMarkerIsImperative_NumberedStepNoNegation(t *testing.T) {
 	text := "1. `git fetch origin`\n" +
 		"2. `git rebase origin/${BASE_BRANCH}` -- resolve any conflicts, re-run checks.\n" +
 		"3. `git push --force-with-lease` -- one retry only.\n"
-	if !ForbiddenMarkerIsImperative("git push", text) {
+	if !ForbiddenMarkerIsImperative("git push", text, "github") {
 		t.Fatalf("ForbiddenMarkerIsImperative(%q, %q) = false, want true", "git push", text)
 	}
 }
@@ -33,7 +33,7 @@ func TestForbiddenMarkerIsImperative_BulletedStepNoNegation(t *testing.T) {
 	text := "- `git fetch origin`\n" +
 		"- `git rebase origin/${BASE_BRANCH}` -- resolve any conflicts, re-run checks.\n" +
 		"- `git push --force-with-lease` -- one retry only.\n"
-	if !ForbiddenMarkerIsImperative("git push", text) {
+	if !ForbiddenMarkerIsImperative("git push", text, "github") {
 		t.Fatalf("ForbiddenMarkerIsImperative(%q, %q) = false, want true", "git push", text)
 	}
 }
@@ -49,7 +49,7 @@ func TestForbiddenMarkerIsImperative_NegatedNumberedStepPasses(t *testing.T) {
 		"   committed to hand off). Leave what you have committed on the branch: after\n" +
 		"   you exit the harness relays your committed branch out and the launcher\n" +
 		"   pushes it host-side with its own token.\n"
-	if ForbiddenMarkerIsImperative("git push", text) {
+	if ForbiddenMarkerIsImperative("git push", text, "github") {
 		t.Fatalf("ForbiddenMarkerIsImperative(%q, text) = true, want false", "git push")
 	}
 }
@@ -66,7 +66,7 @@ func TestForbiddenMarkerIsImperative_PlainProseNeverImperative(t *testing.T) {
 		"were always going to get — never diagnose it as a broken or under-scoped\n" +
 		"token, and never report it to a human as a token-permission problem needing\n" +
 		"`workflow` or any other scope.\n"
-	if ForbiddenMarkerIsImperative("git push", text) {
+	if ForbiddenMarkerIsImperative("git push", text, "github") {
 		t.Fatalf("ForbiddenMarkerIsImperative(%q, text) = true, want false", "git push")
 	}
 }
@@ -95,8 +95,34 @@ func TestForbiddenMarkerIsImperative_ConditionalBranchExemption(t *testing.T) {
 		"   The launcher applies `MERGE_MODE` after this line (push straight to the\n" +
 		"   target branch on `immediate`; leave the branch as pushed on `manual`).\n" +
 		"   Do NOT run `gh pr create` and do NOT attempt to merge.\n"
-	if ForbiddenMarkerIsImperative("git push", text) {
+	if ForbiddenMarkerIsImperative("git push", text, "github") {
 		t.Fatalf("ForbiddenMarkerIsImperative(%q, text) = true, want false", "git push")
+	}
+}
+
+// TestForbiddenMarkerIsImperative_NegationDoesNotBleedAcrossClause covers a
+// list item where a negation cue appears in an earlier clause/sentence,
+// unrelated to the marker's own later, un-negated clause -- the negation
+// exemption must not bleed across clause boundaries within the item.
+func TestForbiddenMarkerIsImperative_NegationDoesNotBleedAcrossClause(t *testing.T) {
+	text := "1. Do not skip the checks. Then run `git push --force-with-lease -u origin ${BRANCH}`.\n"
+	if !ForbiddenMarkerIsImperative("git push", text, "github") {
+		t.Fatalf("ForbiddenMarkerIsImperative(%q, text) = false, want true", "git push")
+	}
+}
+
+// TestForbiddenMarkerIsImperative_IndentedFenceUnderListItem covers a fenced
+// code block indented under a list item (common markdown: a fence indented 3
+// spaces to nest under "1. Run:") -- the fence delimiter must still be
+// recognized even though it isn't at column 0.
+func TestForbiddenMarkerIsImperative_IndentedFenceUnderListItem(t *testing.T) {
+	text := "1. Run:\n" +
+		"\n" +
+		"   ```\n" +
+		"   git push\n" +
+		"   ```\n"
+	if !ForbiddenMarkerIsImperative("git push", text, "github") {
+		t.Fatalf("ForbiddenMarkerIsImperative(%q, text) = false, want true", "git push")
 	}
 }
 
@@ -104,7 +130,7 @@ func TestForbiddenMarkerIsImperative_ConditionalBranchExemption(t *testing.T) {
 // doesn't appear anywhere in text.
 func TestForbiddenMarkerIsImperative_AbsentMarkerFalse(t *testing.T) {
 	text := "Nothing forbidden here, just ordinary prose.\n"
-	if ForbiddenMarkerIsImperative("git push", text) {
+	if ForbiddenMarkerIsImperative("git push", text, "github") {
 		t.Fatalf("ForbiddenMarkerIsImperative(%q, text) = true, want false", "git push")
 	}
 }
@@ -120,7 +146,47 @@ func TestForbiddenMarkerIsImperative_MultilineNegationAcrossWrap(t *testing.T) {
 		"   your intended draft PR's title and body as a single nonce-guarded line\n" +
 		"   instead — the launcher finds it by this run's nonce, decodes it, and\n" +
 		"   opens the draft PR host-side, once you exit:\n"
-	if ForbiddenMarkerIsImperative("gh pr create", text) {
+	if ForbiddenMarkerIsImperative("gh pr create", text, "github") {
 		t.Fatalf("ForbiddenMarkerIsImperative(%q, text) = true, want false", "gh pr create")
+	}
+}
+
+// TestForbiddenMarkerIsImperative_LiveConditionalBranchScanned covers the
+// bug-2 fix: the CODE_FORGE branch that IS live for this Box (its header
+// value matches liveCodeForge) must NOT be exempted -- its content applies
+// to this Box exactly like any other prompt text, so an un-negated `git
+// push` list item inside the live branch must still be caught.
+func TestForbiddenMarkerIsImperative_LiveConditionalBranchScanned(t *testing.T) {
+	text := "**`CODE_FORGE=git`** (push-only Code Forge — no PR, no CI-watch, no merge\n" +
+		"gate): skip OPEN A PULL REQUEST below entirely.\n" +
+		"\n" +
+		"1. `git push --force-with-lease -u origin ${BRANCH}` (if not already pushed).\n"
+	if !ForbiddenMarkerIsImperative("git push", text, "git") {
+		t.Fatalf("ForbiddenMarkerIsImperative(%q, text, %q) = false, want true", "git push", "git")
+	}
+}
+
+// TestForbiddenMarkerIsImperative_SuppressedBranchFenceDoesNotCorruptState
+// covers the bug-3 fix: a suppressed (dead) conditional branch containing a
+// fenced code block with a `#`-prefixed shell-comment line inside it (shape
+// modeled on templates/default/prompts/fragments/commit-push-git.md:16, a
+// `git push` fragment potentially interpolated into a conditional branch)
+// must not let fence state leak out of sync once the branch closes -- a
+// legitimately negated "do NOT `git push`" list item that follows, well
+// outside any real fence, must not be corrupted into a false positive by
+// fence-state confusion inherited from the suppressed branch.
+func TestForbiddenMarkerIsImperative_SuppressedBranchFenceDoesNotCorruptState(t *testing.T) {
+	text := "**`CODE_FORGE=git`** (push-only Code Forge):\n" +
+		"\n" +
+		"```\n" +
+		"# first push\n" +
+		"git push --force-with-lease -u origin ${BRANCH}\n" +
+		"```\n" +
+		"\n" +
+		"# OUTCOME\n" +
+		"\n" +
+		"1. Your token is read-only — do NOT `git push` under any circumstances.\n"
+	if ForbiddenMarkerIsImperative("git push", text, "github") {
+		t.Fatalf("ForbiddenMarkerIsImperative(%q, text, %q) = true, want false", "git push", "github")
 	}
 }
