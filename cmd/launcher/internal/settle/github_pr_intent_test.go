@@ -176,22 +176,24 @@ func TestSettle_GithubReadOnly_ReadyRelaysThenCreatesDraftPRThenMerges_LocalTrac
 	}
 }
 
-// TestSettle_GithubReadOnly_MissingPRIntentBlocksNotFails asserts a
-// status=ready Box that left no PR-intent line blocks the hand-off before
-// any real host write — no bundle relay (a real force-push to origin), no
-// draft PR created, CI never watched. The nudge-exhausted hand-off is left
-// visibly not-done (#2046): the issue stays agent-in-progress rather than
-// being marked agent-complete, which reads as merged/green to an operator
-// (the exact #2036 confusion), yet is never demoted to agent-failed either.
-// Parsing the PR-intent line first, ahead of the relay, matters here:
-// relaying is a genuine side effect against the remote, and a box that left
-// no PR-intent has nothing worth relaying a branch for.
-func TestSettle_GithubReadOnly_MissingPRIntentBlocksNotFails(t *testing.T) {
+// TestSettle_GithubReadOnly_MissingPRIntentAndRelayFailureBlocksNotFails
+// asserts a status=ready Box that left no PR-intent line AND whose relay
+// itself fails still blocks the hand-off before any draft PR is created —
+// no draft PR, CI never watched. Since issue #2447, RelayBundle is always
+// attempted regardless of PR-intent presence (a Box can finish real,
+// mergeable work and simply fail to print its last line), so this is the
+// genuinely-nothing-to-hand-off case: PR-intent missing AND the relay of
+// the branch itself fails. The nudge-exhausted hand-off is left visibly
+// not-done (#2046): the issue stays agent-in-progress rather than being
+// marked agent-complete, which reads as merged/green to an operator (the
+// exact #2036 confusion), yet is never demoted to agent-failed either.
+func TestSettle_GithubReadOnly_MissingPRIntentAndRelayFailureBlocksNotFails(t *testing.T) {
 	const issNum = "1919"
 	branch := "agent/issue-1919"
 
 	fc := forge.NewFake(testDispatchLabels)
 	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
+	fc.RelayBundleErr = errors.New("bundle missing")
 
 	d := dispatch.NewFake()
 	result := dispatch.Result{
@@ -210,8 +212,8 @@ func TestSettle_GithubReadOnly_MissingPRIntentBlocksNotFails(t *testing.T) {
 	s := New(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
 	s.Settle(d, issNum, 0, result)
 
-	if len(fc.RelayBundleCalls) != 0 {
-		t.Errorf("RelayBundle must not be called with no PR-intent line, got %+v", fc.RelayBundleCalls)
+	if len(fc.RelayBundleCalls) != 1 {
+		t.Errorf("RelayBundle must be attempted even with no PR-intent line (issue #2447), got %+v", fc.RelayBundleCalls)
 	}
 	if len(fc.CreateDraftPRCalls) != 0 {
 		t.Errorf("CreateDraftPR must not be called with no PR-intent line, got %+v", fc.CreateDraftPRCalls)
@@ -228,6 +230,171 @@ func TestSettle_GithubReadOnly_MissingPRIntentBlocksNotFails(t *testing.T) {
 	}
 	if containsLabel(iss.Labels, "agent-failed") {
 		t.Errorf("issue must NOT carry agent-failed after a blocked hand-off; labels=%v", iss.Labels)
+	}
+	var blockedCalls []forge.CommentCall
+	for _, c := range fc.CommentCalls {
+		if strings.Contains(c.Body, "merge blocked") {
+			blockedCalls = append(blockedCalls, c)
+		}
+	}
+	if len(blockedCalls) != 1 {
+		t.Fatalf("expected exactly one merge-blocked comment, got %d: %+v", len(blockedCalls), fc.CommentCalls)
+	}
+}
+
+// TestSettle_GithubReadOnly_MissingPRIntentReconstructsFromCommits asserts
+// the new fallback behavior (issue #2447): a status=ready Box that left no
+// usable PR-intent line but whose relay succeeds gets its branch handed off
+// anyway — settle reconstructs a title/body from the relayed branch's own
+// commits (forge.BundleCommitSubjects) and opens the draft PR from that,
+// rather than blocking a hand-off with nothing actually wrong with it. The
+// full merge lifecycle proceeds exactly as the normal PR-intent-found path
+// does once the draft PR is open.
+func TestSettle_GithubReadOnly_MissingPRIntentReconstructsFromCommits(t *testing.T) {
+	const issNum = "1919"
+	const prURL = "https://github.com/owner/repo/pull/1919"
+
+	fc := forge.NewFake(testDispatchLabels)
+	fc.BranchPrefix = "agent/issue-"
+	branch := fc.AgentBranch(issNum)
+	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
+	fc.CreateDraftPRURL = prURL
+	fc.SetCheckStates(prURL, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
+	fc.CommitSubjectsResult = []string{"feat: add widget", "fix: typo"}
+
+	d := dispatch.NewFake()
+	result := dispatch.Result{
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: issNum, Landing: branch, Status: "ready", Note: "ok"},
+		},
+		// PRIntentFound left false: the box's log had no PR-intent line.
+	}
+
+	c := baseConfig()
+	c.ReadOnly = true
+	c.OutboxDir = func(num string) string { return "/outbox/" + num }
+	c.BaseBranch = "main"
+	s := New(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
+	s.Settle(d, issNum, 0, result)
+
+	if len(fc.RelayBundleCalls) != 1 {
+		t.Fatalf("RelayBundleCalls = %+v, want exactly 1", fc.RelayBundleCalls)
+	}
+	if len(fc.CreateDraftPRCalls) != 1 {
+		t.Fatalf("CreateDraftPRCalls = %+v, want exactly 1", fc.CreateDraftPRCalls)
+	}
+	call := fc.CreateDraftPRCalls[0]
+	if call.Title != "feat: add widget" {
+		t.Errorf("Title = %q, want first commit subject %q", call.Title, "feat: add widget")
+	}
+	if !strings.Contains(call.Body, "Reconstructed host-side") {
+		t.Errorf("Body = %q, want it to contain the reconstructed-host-side explanation", call.Body)
+	}
+	if !strings.Contains(call.Body, "- feat: add widget") || !strings.Contains(call.Body, "- fix: typo") {
+		t.Errorf("Body = %q, want it to bullet both commit subjects", call.Body)
+	}
+	if !strings.HasSuffix(strings.TrimRight(call.Body, "\n"), "Closes #1919") {
+		t.Errorf("Body = %q, want it to end with Closes #1919", call.Body)
+	}
+	if fc.Merged != prURL {
+		t.Errorf("expected Merge(%q) to have run; fc.Merged=%q", prURL, fc.Merged)
+	}
+	iss, _ := fc.Issue(issNum)
+	if !containsLabel(iss.Labels, "agent-complete") {
+		t.Errorf("issue must carry agent-complete after a merged reconstructed hand-off; labels=%v", iss.Labels)
+	}
+}
+
+// TestSettle_GithubReadOnly_MissingPRIntentReconstructsFromCommits_LocalTrackerNotInjected
+// mirrors TestSettle_GithubReadOnly_ReadyRelaysThenCreatesDraftPRThenMerges_LocalTrackerNotInjected
+// for the reconstructed path: when the IssueTracker is local-shaped, the
+// reconstructed body must not get a "Closes #<num>" appended either.
+func TestSettle_GithubReadOnly_MissingPRIntentReconstructsFromCommits_LocalTrackerNotInjected(t *testing.T) {
+	const issNum = "1919"
+	const prURL = "https://github.com/owner/repo/pull/1919"
+
+	fc := forge.NewFake(testDispatchLabels)
+	fc.BranchPrefix = "agent/issue-"
+	branch := fc.AgentBranch(issNum)
+	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
+	fc.CreateDraftPRURL = prURL
+	fc.SetCheckStates(prURL, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
+	fc.CommitSubjectsResult = []string{"feat: add widget", "fix: typo"}
+
+	d := dispatch.NewFake()
+	result := dispatch.Result{
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: issNum, Landing: branch, Status: "ready", Note: "ok"},
+		},
+		// PRIntentFound left false: the box's log had no PR-intent line.
+	}
+
+	c := baseConfig()
+	c.ReadOnly = true
+	c.OutboxDir = func(num string) string { return "/outbox/" + num }
+	c.BaseBranch = "main"
+	s := New(c, fc.AsLocalShaped(), fc.AsGithubReadOnly())
+	s.Settle(d, issNum, 0, result)
+
+	if len(fc.CreateDraftPRCalls) != 1 {
+		t.Fatalf("CreateDraftPRCalls = %+v, want exactly 1", fc.CreateDraftPRCalls)
+	}
+	call := fc.CreateDraftPRCalls[0]
+	if strings.Contains(call.Body, "Closes #") {
+		t.Errorf("Body = %q, must not carry a Closes reference for a local-shaped tracker", call.Body)
+	}
+}
+
+// TestSettle_GithubReadOnly_MissingPRIntentAndReconstructionFailsBlocksNotFails
+// asserts that when PR-intent is missing, relay succeeds, but reconstruction
+// itself fails (e.g. CommitSubjects errors), the hand-off still safely
+// blocks rather than opening an empty-titled PR — proving the "genuinely
+// nothing to hand off" posture degrades correctly even after a successful
+// relay.
+func TestSettle_GithubReadOnly_MissingPRIntentAndReconstructionFailsBlocksNotFails(t *testing.T) {
+	const issNum = "1919"
+	branch := "agent/issue-1919"
+
+	fc := forge.NewFake(testDispatchLabels)
+	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
+	fc.CommitSubjectsErr = errors.New("commit subjects: git log failed")
+
+	d := dispatch.NewFake()
+	result := dispatch.Result{
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: issNum, Landing: branch, Status: "ready", Note: "ok"},
+		},
+		// PRIntentFound left false: the box's log had no PR-intent line.
+	}
+
+	c := baseConfig()
+	c.ReadOnly = true
+	c.OutboxDir = func(num string) string { return "/outbox/" + num }
+	c.BaseBranch = "main"
+	s := New(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
+	s.Settle(d, issNum, 0, result)
+
+	if len(fc.RelayBundleCalls) != 1 {
+		t.Errorf("RelayBundle must have been attempted, got %+v", fc.RelayBundleCalls)
+	}
+	if len(fc.CreateDraftPRCalls) != 0 {
+		t.Errorf("CreateDraftPR must not be called when reconstruction fails, got %+v", fc.CreateDraftPRCalls)
+	}
+	iss, _ := fc.Issue(issNum)
+	if containsLabel(iss.Labels, "agent-complete") {
+		t.Errorf("a blocked reconstruction must NOT carry agent-complete; labels=%v", iss.Labels)
+	}
+	if !containsLabel(iss.Labels, "agent-in-progress") {
+		t.Errorf("a blocked reconstruction is left in-progress, visibly not-done; labels=%v", iss.Labels)
+	}
+	if containsLabel(iss.Labels, "agent-failed") {
+		t.Errorf("issue must NOT carry agent-failed after a blocked reconstruction; labels=%v", iss.Labels)
 	}
 	var blockedCalls []forge.CommentCall
 	for _, c := range fc.CommentCalls {

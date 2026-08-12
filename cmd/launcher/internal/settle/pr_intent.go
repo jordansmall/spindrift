@@ -16,15 +16,24 @@ import (
 // #1919): the Box holds no push or PR-create token, so before selfHeal can
 // watch CI on a PR, settle must relay the Box's finished branch (its
 // forge.BundleRelay hook) and open the draft PR itself (its
-// forge.DraftPRCreator hook) from the Box's PR-intent line.
+// forge.DraftPRCreator hook), ordinarily from the Box's own PR-intent line.
+//
+// RelayBundle always runs, whether or not a usable PR-intent line was found
+// (issue #2447): a Box can finish real, mergeable work and simply fail to
+// print its last line, leaving the branch itself fine — only the wording is
+// missing. When PR-intent is missing but the relay succeeds, title/body are
+// reconstructed host-side from the relayed branch's own commits
+// (reconstructPRText) rather than blocking a hand-off with nothing actually
+// wrong with it.
 //
 // Returns the resolved PR URL and true on success. Any failure along the
-// way — a missing/malformed bundle, a missing/malformed PR-intent line, or
-// the draft-PR-create call itself failing — posts a comment and leaves the
-// issue in-progress (blockHandoff: a blocked hand-off, visibly not-done,
-// never demoted to agent-failed and never mistakable for agent-complete —
-// see issue #2046), then returns ok=false so the caller skips CI-watch
-// entirely rather than polling a PR that was never opened.
+// way — a missing/malformed bundle, a missing/malformed PR-intent line with
+// no commits to reconstruct from either, or the draft-PR-create call itself
+// failing — posts a comment and leaves the issue in-progress (blockHandoff: a
+// blocked hand-off, visibly not-done, never demoted to agent-failed and
+// never mistakable for agent-complete — see issue #2046), then returns
+// ok=false so the caller skips CI-watch entirely rather than polling a PR
+// that was never opened.
 //
 // branch is derived from cf.AgentBranch(num), never from the outcome line's
 // own landing= field (issue #1949): a prompt-injected read-only Box holds no
@@ -49,15 +58,14 @@ func (s *Settle) hostMediateDraftPR(num string, result dispatch.Result) (string,
 		return s.blockHandoff(num, branch, errors.New("settle: Code Forge does not implement forge.DraftPRCreator"))
 	}
 
-	// Parsed and type-asserted before RelayBundle runs: RelayBundle is a
-	// genuine side effect against the remote (a real force-push), and a box
-	// that left no usable PR-intent line has nothing worth relaying a
-	// branch for.
-	title, body, ok := parsePRIntent(result)
-	if !ok {
-		return s.blockHandoff(num, branch, errors.New("no usable PR-intent line found in the box's log"))
-	}
-	body = ensureClosesReference(body, num, s.it)
+	// Parsed ahead of RelayBundle, but a missing/malformed line no longer
+	// blocks by itself (issue #2447): a Box can finish real, mergeable work
+	// and simply fail to print its last line, leaving the branch itself
+	// perfectly fine — only the PR wording is missing. RelayBundle runs
+	// regardless of whether title/body were found; only a genuine relay
+	// failure (missing bundle, force-push failure, ...) means there really
+	// is nothing to hand off.
+	title, body, foundIntent := parsePRIntent(result)
 
 	if s.cfg.OutboxDir == nil {
 		return s.blockHandoff(num, branch, errors.New("settle: Config.OutboxDir is unset but the Code Forge implements forge.BundleRelay"))
@@ -66,11 +74,65 @@ func (s *Settle) hostMediateDraftPR(num string, result dispatch.Result) (string,
 		return s.blockHandoff(num, branch, err)
 	}
 
+	reconstructed := false
+	if !foundIntent {
+		var err error
+		title, body, err = s.reconstructPRText(num, branch)
+		if err != nil {
+			return s.blockHandoff(num, branch, fmt.Errorf("no usable PR-intent line found in the box's log; reconstructing from the relayed branch's commits also failed: %w", err))
+		}
+		reconstructed = true
+	}
+	body = ensureClosesReference(body, num, s.it)
+
 	url, err := dpc.CreateDraftPR(title, body, s.cfg.BaseBranch, branch)
 	if err != nil {
 		return s.blockHandoff(num, branch, fmt.Errorf("draft PR create: %w", err))
 	}
+	if reconstructed {
+		fmt.Printf("    #%s  landing=%s  status=reconstructed  note=no PR-intent line found in the box's log; description derived host-side from the relayed branch's commits\n", num, branch)
+	}
 	return url, true
+}
+
+// reconstructPRText builds a title/body for num's already-relayed branch
+// when the Box's own log carried no usable SPINDRIFT_PR_INTENT line (issue
+// #2447): the branch itself may still be perfectly fine, mergeable work —
+// only the wording is missing — so rather than block a hand-off that has
+// nothing wrong with it, settle derives a title/body from the branch's own
+// commits via the Code Forge's forge.BundleCommitSubjects hook. title is the
+// first (oldest) commit subject; body opens with a short note explaining the
+// description was reconstructed host-side, followed by a bulleted list of
+// every commit subject relayed, oldest first — enough for a human reviewer
+// to see at a glance what the branch actually contains.
+//
+// Returns an error — which the caller folds into the same blockHandoff path
+// as a genuine relay failure — when the Code Forge doesn't implement
+// forge.BundleCommitSubjects, the CommitSubjects call itself fails, or it
+// returns zero subjects: all three mean there is nothing to reconstruct
+// from, the same "genuinely nothing to hand off" posture a failed relay
+// gets.
+func (s *Settle) reconstructPRText(num, branch string) (title, body string, err error) {
+	bcs, ok := s.cfForNum(num).(forge.BundleCommitSubjects)
+	if !ok {
+		return "", "", errors.New("settle: Code Forge does not implement forge.BundleCommitSubjects")
+	}
+	subjects, err := bcs.CommitSubjects(s.cfg.OutboxDir(num), s.cfg.BaseBranch, branch)
+	if err != nil {
+		return "", "", err
+	}
+	if len(subjects) == 0 {
+		return "", "", errors.New("relayed branch carries no commits to reconstruct a PR description from")
+	}
+
+	var b strings.Builder
+	b.WriteString("Reconstructed host-side: the box's log carried no usable PR-intent line, so this description was derived from the relayed branch's own commits.\n\nCommits:\n")
+	for _, subject := range subjects {
+		b.WriteString("- ")
+		b.WriteString(subject)
+		b.WriteString("\n")
+	}
+	return subjects[0], strings.TrimRight(b.String(), "\n"), nil
 }
 
 // relayBlockedWork gives a read-only Box's finished-but-blocked branch the
