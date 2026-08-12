@@ -1,9 +1,9 @@
 name: Agent recover
 
 # Adding the `agent-recover` label to an issue re-runs the merge gate on it:
-# `spindrift recover <n>` finds the open non-draft PR for the issue's branch and
-# drives it to green (self-healing red CI up to MAX_FIX_ATTEMPTS), then applies
-# MERGE_MODE. It is the manual unstick for an issue stranded in
+# `spindrift recover <n>` finds the issue's branch's open PR -- draft or not --
+# and drives it to green (self-healing red CI up to MAX_FIX_ATTEMPTS), then
+# applies MERGE_MODE. It is the manual unstick for an issue stranded in
 # `agent-in-progress` after a killed launcher — the case `spindrift dispatch`
 # can't reconcile on its own — and the retry path for an `agent-failed` PR.
 #
