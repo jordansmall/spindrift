@@ -70,6 +70,7 @@ func RunPRForgeContract(t *testing.T, h PRForgeHarness) {
 	t.Run("OptionalInterfaceDiscovery", func(t *testing.T) { testOptionalInterfaceDiscovery(t, h) })
 	t.Run("PRForBranchResolution", func(t *testing.T) { testPRForBranchResolution(t, h) })
 	t.Run("OpenPRForBranchAdoptsDraft", func(t *testing.T) { testOpenPRForBranchAdoptsDraft(t, h) })
+	t.Run("MarkReadyClearsAdoptedDraftThenMerges", func(t *testing.T) { testMarkReadyClearsAdoptedDraftThenMerges(t, h) })
 	t.Run("CheckStateSequence", func(t *testing.T) { testCheckStateSequence(t, h) })
 	t.Run("MergeTransitionsPRState", func(t *testing.T) { testMergeTransitionsPRState(t, h) })
 	t.Run("AutoMergeEligibility", func(t *testing.T) { testAutoMergeEligibility(t, h) })
@@ -150,6 +151,51 @@ func testOpenPRForBranchAdoptsDraft(t *testing.T, h PRForgeHarness) {
 	}
 }
 
+// testMarkReadyClearsAdoptedDraftThenMerges verifies the companion behavior
+// to testOpenPRForBranchAdoptsDraft (issue #2408): once OpenPRForBranch has
+// adopted a stranded draft PR, MarkReady must actually flip it out of draft
+// state — clearing whatever draft signal the adapter uses — so the PR
+// becomes mergeable, and Merge must then succeed on it.
+func testMarkReadyClearsAdoptedDraftThenMerges(t *testing.T, h PRForgeHarness) {
+	const num = "214"
+	branch := h.CodeForge().AgentBranch(num)
+	wantURL := h.SeedDraftPR(num)
+
+	pr, ok, err := h.Forge().OpenPRForBranch(branch)
+	if err != nil {
+		t.Fatalf("OpenPRForBranch(%q): %v", branch, err)
+	}
+	if !ok || pr.URL != wantURL {
+		t.Fatalf("OpenPRForBranch(%q) = (%+v, %v), want URL %q", branch, pr, ok, wantURL)
+	}
+	if !pr.IsDraft {
+		t.Fatalf("OpenPRForBranch(%q) IsDraft = false, want true before MarkReady", branch)
+	}
+
+	if err := h.Forge().MarkReady(wantURL); err != nil {
+		t.Fatalf("MarkReady(%q): %v", wantURL, err)
+	}
+
+	pr, ok, err = h.Forge().OpenPRForBranch(branch)
+	if err != nil {
+		t.Fatalf("OpenPRForBranch(%q) after MarkReady: %v", branch, err)
+	}
+	if !ok || pr.URL != wantURL {
+		t.Fatalf("OpenPRForBranch(%q) after MarkReady = (%+v, %v), want URL %q", branch, pr, ok, wantURL)
+	}
+	if pr.IsDraft {
+		t.Fatalf("OpenPRForBranch(%q) IsDraft = true after MarkReady, want false", branch)
+	}
+
+	if err := h.CodeForge().Merge(wantURL); err != nil {
+		t.Fatalf("Merge(%q) after MarkReady: %v", wantURL, err)
+	}
+
+	if got, err := h.Forge().PRState(wantURL); err != nil || got != forge.PRMerged {
+		t.Fatalf("PRState(%q) after Merge = (%q, %v), want (%q, nil)", wantURL, got, err, forge.PRMerged)
+	}
+}
+
 // testCheckStateSequence verifies CheckState pops a scripted rollup sequence
 // in order for three shapes settle's gate-to-green polling loop actually
 // meets: green (immediate SUCCESS), red (immediate FAILURE), and
@@ -161,7 +207,7 @@ func testCheckStateSequence(t *testing.T, h PRForgeHarness) {
 		num    string
 		states []forge.RollupState
 	}{
-		{"green", "202", []forge.RollupState{forge.StateSuccess}},
+		{"green", "210", []forge.RollupState{forge.StateSuccess}},
 		{"red", "203", []forge.RollupState{forge.StateFailure}},
 		{"blocked-then-green", "204", []forge.RollupState{forge.StatePending, forge.StatePending, forge.StateSuccess}},
 	}
