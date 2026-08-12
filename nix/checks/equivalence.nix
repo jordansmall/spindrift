@@ -711,7 +711,10 @@ in
   # hand-restatement drifting once already. `prefetch` is not pinned here:
   # fixtures.nix's harnessNoRevision legitimately reuses the same command
   # string for the (out-of-scope, per issue #459) template mirror, so it
-  # isn't a safe drift discriminant.
+  # isn't a safe drift discriminant. The legacy `filerModel` knob the roster
+  # superseded (issue #2388/#2435) gets the same hand-restatement guard even
+  # though it's gone from nix/dogfood-defaults.nix on purpose: see
+  # `leakOnlyLiterals` below, checked for leakage but never required present.
   dogfood-leaf-values-single-source =
     let
       inherit (pkgs.lib)
@@ -729,7 +732,17 @@ in
         "autoLint = true"
         ''filer = "claude-haiku-4-5-20251001"''
       ];
-      leaked = filter (l: hasInfix l flakeSrc || hasInfix l fixturesSrc) literals;
+      # The legacy `filerModel` knob (superseded by the roster's `models.filer`
+      # per issue #2388/#2435) is deliberately absent from
+      # nix/dogfood-defaults.nix now -- it must not be asserted `missing`
+      # there. But a hand-restatement of the old positional knob at either
+      # consumption site (e.g. reverting to `filerModel = "..."` instead of
+      # the roster) is exactly the kind of drift this check exists to catch,
+      # so it stays tracked for `leaked` only.
+      leakOnlyLiterals = [
+        ''filerModel = "claude-haiku-4-5-20251001"''
+      ];
+      leaked = filter (l: hasInfix l flakeSrc || hasInfix l fixturesSrc) (literals ++ leakOnlyLiterals);
       missing = filter (l: !hasInfix l defaultsSrc) literals;
     in
     # A respelling in nix/dogfood-defaults.nix (e.g. reformatted quoting)
@@ -797,6 +810,24 @@ in
         lib = pkgs.lib;
       };
       rosterByName = listToAttrs (map (e: nameValuePair e.name e) defaults.roster);
+      # Per-agent rationale for the expected models below (folded out of the
+      # individual asserts this table replaced): filer keeps its tuned model
+      # claude-haiku-4-5-20251001 (issue #2388, was #393) as the roster's sole
+      # local pin. reviewer, scout, and worker are all left unmentioned in the
+      # roster's `models` and must resolve to their `lib/env-schema.nix`
+      # schema defaults as of this writing -- reviewer to claude-opus-5, the
+      # model the code-owned review pass binds to (issue #2435); scout to
+      # claude-haiku-4-5-20251001 (issue #2435 AC2); worker to
+      # claude-sonnet-5 (issue #2435 AC2).
+      expectedModels = {
+        filer = "claude-haiku-4-5-20251001";
+        reviewer = "claude-opus-5";
+        scout = "claude-haiku-4-5-20251001";
+        worker = "claude-sonnet-5";
+      };
+      modelMismatches = filterAttrs (
+        name: model: rosterByName.${name}.model or null != model
+      ) expectedModels;
       expectedEfforts = {
         scout = "medium";
         reviewer = "high";
@@ -813,20 +844,9 @@ in
       ''dogfood defaults.reviewEffort must be "high" (issue #2388/#2387): got "${
         toString (defaults.defaults.reviewEffort or null)
       }"'';
-    assert assertMsg (rosterByName ? filer && rosterByName.filer.model == "claude-haiku-4-5-20251001")
-      "dogfood roster's filer entry must keep the tuned Filer model claude-haiku-4-5-20251001 (issue #2388, was #393)";
-    assert assertMsg (rosterByName ? reviewer && rosterByName.reviewer.model == "claude-opus-5")
-      "dogfood roster's unmentioned reviewer entry must resolve to claude-opus-5, the model the code-owned review pass binds to (issue #2435), got: ${
-        builtins.toJSON (rosterByName.reviewer.model or null)
-      }";
-    assert assertMsg (rosterByName ? scout && rosterByName.scout.model == "claude-haiku-4-5-20251001")
-      "dogfood roster's unmentioned scout entry must resolve to claude-haiku-4-5-20251001 (issue #2435 AC2), got: ${
-        builtins.toJSON (rosterByName.scout.model or null)
-      }";
-    assert assertMsg (rosterByName ? worker && rosterByName.worker.model == "claude-sonnet-5")
-      "dogfood roster's unmentioned worker entry must resolve to claude-sonnet-5 (issue #2435 AC2), got: ${
-        builtins.toJSON (rosterByName.worker.model or null)
-      }";
+    assert assertMsg (
+      modelMismatches == { }
+    ) "dogfood roster per-agent model mismatch(es): ${builtins.toJSON modelMismatches}";
     assert assertMsg (
       effortMismatches == { }
     ) "dogfood roster per-agent effort mismatch(es): ${builtins.toJSON effortMismatches}";
@@ -840,7 +860,19 @@ in
   # "claude-opus-5"` to `models` would still pass every assertion above).
   # Grep dogfood-defaults.nix's own `models` attrset source instead, so a
   # config-time regression toward re-pinning is caught even when it happens
-  # to match the current schema default.
+  # to match the current schema default. The `${name}[[:space:]]*=` match
+  # (rather than a whitespace-exact `${name} =`) tolerates a respelling like
+  # `reviewer="claude-opus-5"` that would otherwise evade a plain substring
+  # check. This is still a textual check, not a parser -- it can't tell code
+  # from a comment, same inherent limitation as
+  # dogfood-leaf-values-single-source above. `lib/roster.nix`'s
+  # `defaultRoster` also accepts four legacy positional knobs
+  # (scoutModel/reviewModel/filerModel/workerModel) that take the same
+  # precedence as an entry in `models`, so a regression could re-pin an agent
+  # through one of those instead of `models` -- scan the whole file's source
+  # (not just the `models` block) for the three that would violate AC1;
+  # `filerModel` is deliberately excluded since `filer` is the one agent this
+  # roster is allowed to pin.
   dogfood-roster-names-only-filer =
     let
       inherit (pkgs.lib)
@@ -858,16 +890,23 @@ in
           ""
         else
           head (splitString "};" (builtins.elemAt afterModels 1));
-      named = filter (name: hasInfix "${name} =" modelsBlock) [
+      named = filter (name: builtins.match ".*${name}[[:space:]]*=.*" modelsBlock != null) [
         "scout"
         "reviewer"
         "worker"
+      ];
+      legacyKnobsFound = filter (knob: hasInfix knob src) [
+        "scoutModel ="
+        "reviewModel ="
+        "workerModel ="
       ];
     in
     assert assertMsg (modelsBlock != "")
       "dogfood-roster-names-only-filer couldn't find a `models = { ... }` block in nix/dogfood-defaults.nix -- check moved or renamed";
     assert assertMsg (named == [ ])
       "dogfood roster's models attrset must name only filer (issue #2435 AC1); found: ${concatStringsSep ", " named}";
+    assert assertMsg (legacyKnobsFound == [ ])
+      "dogfood-defaults.nix must not pass the legacy scoutModel/reviewModel/workerModel knobs to defaultRoster -- they take the same precedence as a `models` entry and would re-pin an agent that must stay unmentioned (issue #2435 AC1); found: ${concatStringsSep ", " legacyKnobsFound}";
     pkgs.runCommand "dogfood-roster-names-only-filer" { } "touch $out";
 
   # driverExecBin.src must not contain *_test.go — the image drvPath

@@ -55,6 +55,23 @@ in
   # the template carries whichever of scout/reviewer have a model configured,
   # and is the empty string only when neither does.
   agents-json-baked = pkgs.runCommand "agents-json-baked" { } ''
+    # Shared shape for the dogfood/bats per-agent entry checks below: extract
+    # the named agent's JSON object out of an AGENTS_JSON_TEMPLATE line,
+    # assert it's present, then assert its model field matches exactly --
+    # anchored on the full `"model":"<value>"` key:value pair (including the
+    # closing quote) so a superstring like claude-opus-5-1 can't false-match
+    # a claude-opus-5 expectation. None of these objects nest braces (tools
+    # is an array), so `[^}]*` can't overrun into the next top-level key.
+    assert_agent_model() {
+      local line="$1" name="$2" model="$3" label="$4" mismatch_msg="$5"
+      local entry
+      entry=$(grep -oE "\"$name\":\{[^}]*\}" <<<"$line" || true)
+      [ -n "$entry" ] \
+        || { echo "$label missing $name entry in baked template" >&2; exit 1; }
+      grep -q "\"model\":\"$model\"" <<<"$entry" \
+        || { echo "$label $name entry $mismatch_msg" >&2; exit 1; }
+    }
+
     ep=${customHarness.agentFiles}/agent/entrypoint.sh
 
     # The custom harness bakes both models — template must contain them.
@@ -133,17 +150,11 @@ in
     # these objects nest braces (tools is an array), so `[^}]*` can't overrun
     # into the next top-level key.
     dogfood_line=$(grep '^AGENTS_JSON_TEMPLATE=' ${harness.agentFiles}/agent/entrypoint.sh)
-    filer_entry=$(grep -oE '"filer":\{[^}]*\}' <<<"$dogfood_line" || true)
-    [ -n "$filer_entry" ] \
-      || { echo "dogfood harness missing filer entry in baked template" >&2; exit 1; }
-    grep -q 'claude-haiku-4-5-20251001' <<<"$filer_entry" \
-      || { echo "dogfood harness filer entry missing the configured model" >&2; exit 1; }
+    assert_agent_model "$dogfood_line" filer claude-haiku-4-5-20251001 \
+      "dogfood harness" "missing the configured model"
 
-    scout_entry=$(grep -oE '"scout":\{[^}]*\}' <<<"$dogfood_line" || true)
-    [ -n "$scout_entry" ] \
-      || { echo "dogfood harness missing scout entry in baked template" >&2; exit 1; }
-    grep -q 'claude-haiku-4-5-20251001' <<<"$scout_entry" \
-      || { echo "dogfood harness scout entry missing the inherited model" >&2; exit 1; }
+    assert_agent_model "$dogfood_line" scout claude-haiku-4-5-20251001 \
+      "dogfood harness" "missing the inherited model"
 
     # Anchored to the literal "claude-opus-5", not reviewModelSchemaDefault --
     # same rationale as nix/checks/equivalence.nix's
@@ -151,17 +162,11 @@ in
     # review pass binds to this exact model, so the guard must catch a
     # schema-default regression away from it, not just confirm the bake
     # mirrors whatever the schema currently says.
-    reviewer_entry=$(grep -oE '"reviewer":\{[^}]*\}' <<<"$dogfood_line" || true)
-    [ -n "$reviewer_entry" ] \
-      || { echo "dogfood harness missing reviewer entry in baked template" >&2; exit 1; }
-    grep -q 'claude-opus-5' <<<"$reviewer_entry" \
-      || { echo "dogfood harness reviewer entry missing the anchored claude-opus-5 model" >&2; exit 1; }
+    assert_agent_model "$dogfood_line" reviewer claude-opus-5 \
+      "dogfood harness" "missing the anchored claude-opus-5 model"
 
-    worker_entry=$(grep -oE '"worker":\{[^}]*\}' <<<"$dogfood_line" || true)
-    [ -n "$worker_entry" ] \
-      || { echo "dogfood harness missing worker entry in baked template" >&2; exit 1; }
-    grep -q 'claude-sonnet-5' <<<"$worker_entry" \
-      || { echo "dogfood harness worker entry missing the inherited model" >&2; exit 1; }
+    assert_agent_model "$dogfood_line" worker claude-sonnet-5 \
+      "dogfood harness" "missing the inherited model"
 
     # A Consumer that sets no model knobs and passes no roster (bats harness:
     # no `defaults`, no `roster`) must still get a reviewer on the schema
@@ -170,11 +175,8 @@ in
     # ${reviewModelSchemaDefault} so every Consumer's reviewer runs on the
     # strongest available model without configuring anything.
     bats_line=$(grep '^AGENTS_JSON_TEMPLATE=' ${batsHarness.agentFiles}/agent/entrypoint.sh)
-    bats_reviewer_entry=$(grep -oE '"reviewer":\{[^}]*\}' <<<"$bats_line" || true)
-    [ -n "$bats_reviewer_entry" ] \
-      || { echo "bats harness missing reviewer entry in baked template" >&2; exit 1; }
-    grep -q '${reviewModelSchemaDefault}' <<<"$bats_reviewer_entry" \
-      || { echo "bats harness reviewer entry missing the default ${reviewModelSchemaDefault} model" >&2; exit 1; }
+    assert_agent_model "$bats_line" reviewer '${reviewModelSchemaDefault}' \
+      "bats harness" "missing the default ${reviewModelSchemaDefault} model"
 
     touch $out
   '';
