@@ -50,8 +50,15 @@ type launchContext struct {
 // --self-contained) is the research kind's no-repo sub-mode: set only by the
 // research subcommand handler, false everywhere else. No step here can fail
 // after the dispatch factory is constructed, so an error return never
-// carries a launch context that still needs cleanup.
-func bootstrap(ensureReady bool, kind string, selfContained bool) (*launchContext, error) {
+// carries a launch context that still needs cleanup. The one thing that can
+// still be outstanding on an early error return is the accumulation lock
+// (issue #2441): it's acquired well before the factory exists, so a bare
+// `return nil, err` from any step between acquisition and launchContext's
+// construction would otherwise leak a held lock for the rest of the
+// process. A single deferred release, registered right after acquisition,
+// covers that whole window instead of relying on every such return site to
+// remember it.
+func bootstrap(ensureReady bool, kind string, selfContained bool) (lc *launchContext, err error) {
 	pwd, err := os.Getwd()
 	if err != nil {
 		return nil, err
@@ -71,6 +78,18 @@ func bootstrap(ensureReady bool, kind string, selfContained bool) (*launchContex
 	accumLock, err := seedAccumulationRepoIfLocal(c, pwd)
 	if err != nil {
 		return nil, err
+	}
+	if accumLock != nil {
+		// Covers every early `return nil, err` between here and
+		// launchContext's construction below (see the doc comment above):
+		// once that construction succeeds, the final `return ..., nil`
+		// leaves err nil, so this is a no-op and cleanup (below) becomes the
+		// lock's sole owner from then on.
+		defer func() {
+			if err != nil {
+				_ = accumLock.Release()
+			}
+		}()
 	}
 
 	// A run that outlives GH_TOKEN_REFRESH_FILE's minter's token lifetime
