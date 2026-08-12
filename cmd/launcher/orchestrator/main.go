@@ -11,50 +11,65 @@ package main
 import (
 	"flag"
 	"fmt"
+	"io"
 	"os"
 )
 
-func main() {
-	driverName := flag.String("driver", "claude", "the Driver's registry name (ADR 0009), forwarded to every driver-exec pass this run invokes")
-	promptFile := flag.String("prompt-file", "", "path to the assembled prompt text (required)")
-	agentsFile := flag.String("agents-file", "", "path to --agents JSON, empty to omit the flag")
-	sessionFile := flag.String("session-file", "", "path to pre-rendered session pin/resume flags, empty for none")
-	driverBin := flag.String("driver-bin", "", "the Driver's binary name or path (required)")
-	driverFlags := flag.String("driver-flags", "", "space-separated flags common to every Driver invocation")
-	model := flag.String("model", "", "value for the Driver's --model flag")
-	effort := flag.String("effort", "", "value for the Driver's --effort flag (claude) or --variant flag (opencode); empty omits it")
-	devshell := flag.Bool("devshell", false, "run the Driver inside `nix develop` instead of directly")
-	devshellName := flag.String("devshell-name", "default", "the devShell flake output to enter when --devshell is set")
-	issue := flag.String("issue", os.Getenv("ISSUE_NUMBER"), "issue number, for the heartbeat log prefix")
-	logPath := flag.String("log-path", "", "path to tee the raw Driver stream to, for outcome extraction (required)")
-	heartbeatLog := flag.String("heartbeat-log", "/tmp/heartbeat.log", "path to write coarse heartbeat status lines")
-	stateFile := flag.String("state-file", "/tmp/run-state.json", "path to the run-state handoff artifact (issue #1997); empty disables it")
-	scoutBriefPath := flag.String("scout-brief-path", "/tmp/brief.md", "path to the scout brief, recorded into the run-state artifact")
-	maxReviewRounds := flag.Int("max-review-rounds", 3, "cap on additional fresh-session passes a BLOCK verdict may trigger; 0 disables the cap")
-	maxSlices := flag.Int("max-slices", 9, "cap on total driver-exec invocations this run makes; 0 disables the cap")
-	reviewPromptFile := flag.String("review-prompt-file", "", "path to the code-owned review pass's own prompt text; empty disables the review pass")
-	reviewModel := flag.String("review-model", "", "value for the review pass's own --model flag, empty falls back to the coordinator's --model")
-	reviewEffort := flag.String("review-effort", "", "value for the review pass's own --effort flag, empty falls back to the coordinator's --effort")
-	flag.Parse()
+// mainRun parses argv against a scoped FlagSet (rather than the global flag
+// package, which panics on re-registering flags across repeated calls in the
+// same test binary) and drives one orchestrator invocation end to end,
+// returning the process exit code instead of calling os.Exit directly so
+// tests can exercise it repeatedly with different argv.
+func mainRun(argv []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("orchestrator", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+
+	driverName := fs.String("driver", "claude", "the Driver's registry name (ADR 0009), forwarded to every driver-exec pass this run invokes")
+	promptFile := fs.String("prompt-file", "", "path to the assembled prompt text (required)")
+	agentsFile := fs.String("agents-file", "", "path to --agents JSON, empty to omit the flag")
+	sessionFile := fs.String("session-file", "", "path to pre-rendered session pin/resume flags, empty for none")
+	driverBin := fs.String("driver-bin", "", "the Driver's binary name or path (required)")
+	driverFlags := fs.String("driver-flags", "", "space-separated flags common to every Driver invocation")
+	model := fs.String("model", "", "value for the Driver's --model flag")
+	effort := fs.String("effort", "", "value for the Driver's --effort flag (claude) or --variant flag (opencode); empty omits it")
+	devshell := fs.Bool("devshell", false, "run the Driver inside `nix develop` instead of directly")
+	devshellName := fs.String("devshell-name", "default", "the devShell flake output to enter when --devshell is set")
+	issue := fs.String("issue", os.Getenv("ISSUE_NUMBER"), "issue number, for the heartbeat log prefix")
+	logPath := fs.String("log-path", "", "path to tee the raw Driver stream to, for outcome extraction (required)")
+	heartbeatLog := fs.String("heartbeat-log", "/tmp/heartbeat.log", "path to write coarse heartbeat status lines")
+	stateFile := fs.String("state-file", "/tmp/run-state.json", "path to the run-state handoff artifact (issue #1997); empty disables it")
+	scoutBriefPath := fs.String("scout-brief-path", "/tmp/brief.md", "path to the scout brief, recorded into the run-state artifact")
+	maxReviewRounds := fs.Int("max-review-rounds", defaultMaxReviewRounds, "cap on additional fresh-session passes a BLOCK verdict may trigger; 0 disables the cap")
+	maxSlices := fs.Int("max-slices", defaultMaxSlices, "cap on total driver-exec invocations this run makes; 0 disables the cap")
+	reviewPromptFile := fs.String("review-prompt-file", "", "path to the code-owned review pass's own prompt text; empty disables the review pass")
+	reviewModel := fs.String("review-model", "", "value for the review pass's own --model flag, empty falls back to the coordinator's --model")
+	reviewEffort := fs.String("review-effort", "", "value for the review pass's own --effort flag, empty falls back to the coordinator's --effort")
+	if err := fs.Parse(argv); err != nil {
+		return 2
+	}
 
 	if *issue == "" {
 		*issue = "0"
 	}
 	if *promptFile == "" {
-		fmt.Fprintln(os.Stderr, "orchestrator: -prompt-file is required")
-		os.Exit(1)
+		fmt.Fprintln(stderr, "orchestrator: -prompt-file is required")
+		return 1
 	}
 	if *driverBin == "" {
-		fmt.Fprintln(os.Stderr, "orchestrator: -driver-bin is required")
-		os.Exit(1)
+		fmt.Fprintln(stderr, "orchestrator: -driver-bin is required")
+		return 1
 	}
 	if *logPath == "" {
-		fmt.Fprintln(os.Stderr, "orchestrator: -log-path is required")
-		os.Exit(1)
+		fmt.Fprintln(stderr, "orchestrator: -log-path is required")
+		return 1
 	}
-	if err := validateCaps(*maxReviewRounds, *maxSlices); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+	// An incoherent cap pair is surfaced as a warning, not a fatal error
+	// (issue #2460): the run still proceeds with the loop behaving the way
+	// it did pre-#2460 (the review-round cap simply never fires; maxSlices
+	// shadows it), just now with the misconfiguration visibly flagged
+	// instead of silently swallowed.
+	if err := validateCaps(*maxReviewRounds, *maxSlices, *reviewPromptFile != ""); err != nil {
+		fmt.Fprintln(stderr, err)
 	}
 
 	rc, err := run(config{
@@ -78,10 +93,14 @@ func main() {
 		reviewPromptFile: *reviewPromptFile,
 		reviewModel:      *reviewModel,
 		reviewEffort:     *reviewEffort,
-	}, os.Stdout)
+	}, stdout)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "orchestrator:", err)
-		os.Exit(1)
+		fmt.Fprintln(stderr, "orchestrator:", err)
+		return 1
 	}
-	os.Exit(rc)
+	return rc
+}
+
+func main() {
+	os.Exit(mainRun(os.Args[1:], os.Stdout, os.Stderr))
 }

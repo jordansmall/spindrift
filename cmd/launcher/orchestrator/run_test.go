@@ -1501,6 +1501,83 @@ exit 0
 	}
 }
 
+// TestRunWithReviewPassReachesConfiguredReviewRoundsAtShippedDefaults pins
+// issue #2460's acceptance criterion 1 directly: with the orchestrator's
+// actual shipped --max-review-rounds/--max-slices defaults
+// (defaultMaxReviewRounds, defaultMaxSlices, both in caps.go), a run whose
+// review pass BLOCKs every round must be able to reach maxReviewRounds
+// before any cap stops it -- not get shadowed by maxSlices firing first
+// (the bug #2460 fixes). Unlike
+// TestRunWithReviewPassTerminatesOnMaxReviewRoundsCap, which hardcodes an
+// arbitrary maxReviewRounds=2/maxSlices=0 pair, this test uses the real
+// constants so a future change to either shipped default that reintroduces
+// the shadowing bug fails here.
+func TestRunWithReviewPassReachesConfiguredReviewRoundsAtShippedDefaults(t *testing.T) {
+	dir := t.TempDir()
+	callLog := filepath.Join(dir, "calls.log")
+	body := `: > "$DRIVER_LOG_PATH"
+n=$(wc -l < "` + callLog + `")
+if [ $((n % 2)) -eq 0 ]; then
+  printf '%s' '` + streamJSONOutcomeLine("VERDICT: BLOCK") + `' | tee -a "$DRIVER_LOG_PATH"
+fi
+exit 0
+`
+	writeFakeDriverExec(t, dir, callLog, body)
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	promptFile := filepath.Join(dir, "prompt.txt")
+	if err := os.WriteFile(promptFile, []byte("prompt"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	reviewPromptFile := filepath.Join(dir, "review-prompt.txt")
+	if err := os.WriteFile(reviewPromptFile, []byte("review prompt"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config{
+		promptFile:       promptFile,
+		reviewPromptFile: reviewPromptFile,
+		driverBin:        "claude",
+		logPath:          filepath.Join(dir, "stream.log"),
+		heartbeatLog:     filepath.Join(dir, "heartbeat.log"),
+		maxReviewRounds:  defaultMaxReviewRounds,
+		maxSlices:        defaultMaxSlices,
+	}
+
+	var stdout bytes.Buffer
+	if _, err := run(cfg, &stdout); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	calls, err := os.ReadFile(callLog)
+	if err != nil {
+		t.Fatalf("read callLog: %v", err)
+	}
+	lines := strings.Split(strings.TrimRight(string(calls), "\n"), "\n")
+	// caps.go's own minSlices formula for the review-pass loop is
+	// 2*maxReviewRounds+3 (1 initial implement pass + (maxReviewRounds+1)
+	// review passes + maxReviewRounds fix passes + 1 terminal land pass).
+	// With defaultMaxReviewRounds == 3, that's 2*3+3 == 9, which is exactly
+	// defaultMaxSlices -- the shipped defaults sit right at the coherence
+	// boundary caps.go's validateCaps requires. Walking through the actual
+	// pass sequence: implement1, review1(BLOCK), fix2, review2(BLOCK),
+	// fix3, review3(BLOCK), fix4, review4(BLOCK, round 3 == cap hit ->
+	// continue), land5 (no outcome -> stop) -- 9 invocations.
+	wantInvocations := 2*defaultMaxReviewRounds + 3
+	if wantInvocations != defaultMaxSlices {
+		t.Fatalf("wantInvocations = %d, defaultMaxSlices = %d -- shipped defaults no longer sit at the reachability boundary this test assumes", wantInvocations, defaultMaxSlices)
+	}
+	if len(lines) != wantInvocations {
+		t.Fatalf("driver-exec invocation count = %d, want %d (log: %q)", len(lines), wantInvocations, calls)
+	}
+	if !strings.Contains(stdout.String(), `"decision":"continue","reason":"max review rounds reached; running terminal land pass"`) {
+		t.Errorf("stdout = %q, want the max-review-rounds cap-fired continue reason, proving the review-round cap (not maxSlices) is what stopped the loop", stdout.String())
+	}
+	if strings.Contains(stdout.String(), "max slices reached") {
+		t.Errorf("stdout = %q, must not contain \"max slices reached\" -- that would mean maxSlices shadowed the review-round cap, exactly the issue #2460 bug", stdout.String())
+	}
+}
+
 // TestRunWithReviewPassTerminalLandSeededWithUnresolvedBlockingFindings
 // verifies the issue #2457 acceptance criterion directly: a run that
 // exhausts its budget with the reviewer's own blocking findings still

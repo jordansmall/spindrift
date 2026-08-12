@@ -13,47 +13,48 @@ import "testing"
 // in run.go's own comments; this test just pins the boundary.
 func TestValidateCaps(t *testing.T) {
 	tests := []struct {
-		name            string
-		maxReviewRounds int
-		maxSlices       int
-		wantErr         bool
+		name              string
+		maxReviewRounds   int
+		maxSlices         int
+		reviewPassEnabled bool
+		wantErr           bool
 	}{
-		{"both disabled", 0, 0, false},
-		{"only maxReviewRounds set", 3, 0, false},
-		{"only maxSlices set", 0, 5, false},
-		{"coherent pair", 3, 9, false},
-		{"incoherent pair, today's shipped defaults", 3, 5, true},
-		{"boundary: exactly 2N+3 is coherent", 3, 2*3 + 3, false},
-		{"boundary: one less than 2N+3 is incoherent", 3, 2*3 + 3 - 1, true},
+		{"both disabled", 0, 0, true, false},
+		{"only maxReviewRounds set", 3, 0, true, false},
+		{"only maxSlices set", 0, 5, true, false},
+		{"coherent pair", 3, 9, true, false},
+		{"incoherent pair, today's shipped defaults", 3, 5, true, true},
+		{"boundary: exactly 2N+3 is coherent", 3, 2*3 + 3, true, false},
+		{"boundary: one less than 2N+3 is incoherent", 3, 2*3 + 3 - 1, true, true},
+		{"legacy: coherent pair matching real loop math", 3, 5, false, false},
+		{"legacy: boundary exactly N+2 is coherent", 3, 5, false, false},
+		{"legacy: boundary one less than N+2 is incoherent", 3, 4, false, true},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := validateCaps(tt.maxReviewRounds, tt.maxSlices)
+			err := validateCaps(tt.maxReviewRounds, tt.maxSlices, tt.reviewPassEnabled)
 			if tt.wantErr && err == nil {
-				t.Errorf("validateCaps(%d, %d) = nil, want error", tt.maxReviewRounds, tt.maxSlices)
+				t.Errorf("validateCaps(%d, %d, %v) = nil, want error", tt.maxReviewRounds, tt.maxSlices, tt.reviewPassEnabled)
 			}
 			if !tt.wantErr && err != nil {
-				t.Errorf("validateCaps(%d, %d) = %v, want nil", tt.maxReviewRounds, tt.maxSlices, err)
+				t.Errorf("validateCaps(%d, %d, %v) = %v, want nil", tt.maxReviewRounds, tt.maxSlices, tt.reviewPassEnabled, err)
 			}
 		})
 	}
 }
 
 // TestValidateCapsAcceptsShippedDefaults pins the actual --max-review-rounds
-// / --max-slices defaults main.go flag.Int calls ship (issue #2460): a fresh
-// run with no flags overridden must not fail validateCaps at startup. These
-// values are hardcoded rather than read from main.go's flag package state
-// (unexported flag.Int locals aren't reachable from this test binary without
-// exporting a shared constant, which is out of scope here) -- if main.go's
-// -max-review-rounds or -max-slices default ever changes, update the
-// hardcoded values below to match, or this test breaks loudly.
+// / --max-slices defaults main.go's flag.Int calls ship (issue #2460): a
+// fresh run with no flags overridden must not fail validateCaps at startup.
+// It references defaultMaxReviewRounds / defaultMaxSlices directly (caps.go,
+// same package) rather than hardcoding duplicate values, so a future change
+// to those constants can't drift out of sync with this test silently -- a
+// later slice wires main.go's flag.Int calls to the same constants.
 func TestValidateCapsAcceptsShippedDefaults(t *testing.T) {
-	const (
-		shippedMaxReviewRounds = 3 // must match main.go's -max-review-rounds default
-		shippedMaxSlices       = 9 // must match main.go's -max-slices default
-	)
-	if err := validateCaps(shippedMaxReviewRounds, shippedMaxSlices); err != nil {
-		t.Errorf("validateCaps(%d, %d) = %v, want nil (shipped defaults must be coherent)", shippedMaxReviewRounds, shippedMaxSlices, err)
+	// true: the shipped defaults are tuned for the review-pass loop, which
+	// is what ships by default.
+	if err := validateCaps(defaultMaxReviewRounds, defaultMaxSlices, true); err != nil {
+		t.Errorf("validateCaps(%d, %d, true) = %v, want nil (shipped defaults must be coherent)", defaultMaxReviewRounds, defaultMaxSlices, err)
 	}
 }
