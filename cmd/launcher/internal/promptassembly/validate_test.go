@@ -368,6 +368,85 @@ func TestValidateForbiddenMarkerAbsentPasses(t *testing.T) {
 	}
 }
 
+// TestValidateForbiddenMarkerRejectsImperativeInFilerPrompt covers the
+// filer-prompt haystack gap (issue #2464 follow-up): "gh issue create" only
+// ever renders inside the filer's own rendered prompt (extracted from
+// AgentsJSON via filerPromptFrom), never result.Prompt. A read-only,
+// non-research dispatch whose filer prompt orders it as an un-negated
+// numbered-list instruction must reject, even though result.Prompt itself
+// carries nothing relevant.
+func TestValidateForbiddenMarkerRejectsImperativeInFilerPrompt(t *testing.T) {
+	e := Env{BoxWriteEnabled: false, DispatchKind: "work"}
+	result := Result{
+		Prompt:     "issue stub, nothing forbidden here",
+		AgentsJSON: `{"filer":{"prompt":"1. File the issue via ` + "`gh issue create --title ...`" + ` before you finish.\n"}}`,
+	}
+
+	_, err := Validate(e, result, nil, testForbiddenMarkerRows())
+	if err == nil {
+		t.Fatal("Validate() error = nil, want non-nil")
+	}
+	want := forbiddenMarkerMessage(t, "forbidden-gh-issue-create")
+	if err.Error() != want {
+		t.Errorf("Validate() error =\n%q\nwant\n%q", err.Error(), want)
+	}
+}
+
+// TestValidateForbiddenMarkerRejectsImperativeInReviewPromptFile covers the
+// review-prompt-file haystack gap (issue #2464 follow-up), symmetric with
+// the filer-prompt case above: a read-only, non-research dispatch whose
+// orchestrator review prompt file orders "gh pr merge" as an un-negated
+// numbered-list instruction must reject, even though result.Prompt itself
+// carries nothing relevant.
+func TestValidateForbiddenMarkerRejectsImperativeInReviewPromptFile(t *testing.T) {
+	e := Env{BoxWriteEnabled: false, DispatchKind: "work"}
+	result := Result{
+		Prompt: "issue stub, nothing forbidden here",
+		Handoff: Handoff{
+			ReviewPromptFile: "1. Merge the PR via `gh pr merge` before you finish.\n",
+		},
+	}
+
+	_, err := Validate(e, result, nil, testForbiddenMarkerRows())
+	if err == nil {
+		t.Fatal("Validate() error = nil, want non-nil")
+	}
+	want := forbiddenMarkerMessage(t, "forbidden-gh-pr-merge")
+	if err.Error() != want {
+		t.Errorf("Validate() error =\n%q\nwant\n%q", err.Error(), want)
+	}
+}
+
+// TestValidateForbiddenMarkerRejectsGitForgeBranchUnderReadOnly_KnownUnreachableInProduction
+// pins a known-unreachable-in-production rejection (Validate's doc comment,
+// validate.go): the shipped templates/default/prompts/issue-prompt.md's
+// `**`CODE_FORGE=git`**` branch carries a genuine, ungated, un-negated
+// numbered-list "git push" instruction, and ForbiddenMarkerIsImperative
+// treats that branch as live (scanned, not exempted) whenever
+// e.CodeForge == "git". So Validate deterministically rejects here. This is
+// not a bug: cmd/launcher/main.go's checkReadOnlyCapabilityGate refuses at
+// launcher startup to ever dispatch BOX_FORGE_AND_ISSUE_ACCESS=read-only
+// with CODE_FORGE=git (it doesn't implement forge.BundleRelay), so this
+// combination never arises from a real launcher invocation. If this test
+// starts failing, check main.go's gate before assuming this test is wrong.
+func TestValidateForbiddenMarkerRejectsGitForgeBranchUnderReadOnly_KnownUnreachableInProduction(t *testing.T) {
+	e := Env{BoxWriteEnabled: false, DispatchKind: "work", CodeForge: "git"}
+	result := Result{Prompt: "**`CODE_FORGE=git`** (push-only Code Forge — no PR, no CI-watch, no merge\n" +
+		"gate): skip OPEN A PULL REQUEST below entirely.\n" +
+		"\n" +
+		"1. `git push --force-with-lease -u origin ${BRANCH}` (if not already pushed).\n" +
+		"2. Print exactly one line as your final output and stop.\n"}
+
+	_, err := Validate(e, result, nil, testForbiddenMarkerRows())
+	if err == nil {
+		t.Fatal("Validate() error = nil, want non-nil")
+	}
+	want := forbiddenMarkerMessage(t, "forbidden-git-push")
+	if err.Error() != want {
+		t.Errorf("Validate() error =\n%q\nwant\n%q", err.Error(), want)
+	}
+}
+
 // forbiddenMarkerMessage returns testForbiddenMarkerRows()'s Message field
 // for the row with the given id, failing the test if no such row exists.
 func forbiddenMarkerMessage(t *testing.T, id string) string {
