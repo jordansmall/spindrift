@@ -240,28 +240,49 @@ clone_repo() {
 # repo, so every push resolves over the local-filesystem transport -- no
 # network call, ever -- and the pre-push hook installed below (which does
 # fire before a local transport's cheap, non-network ref listing) is what
-# actually stops it and prints the message. A read-write Box, or a read-only
-# Box whose actual hand-off IS a real push (BOX_OUTBOX_RELAY_CAPABLE unset
-# and not CODE_FORGE=local -- e.g. forgejo, where pushWithRetry/
+# actually stops it and prints the message. The decoy also carries a
+# server-side pre-receive hook with the same message, so `git push
+# --no-verify` -- which skips only the client-side pre-push hook -- still
+# gets rejected by the decoy itself instead of silently landing the ref
+# there and exiting 0. A read-write Box, or a read-only Box whose actual
+# hand-off IS a real push (both BOX_HOST_MEDIATED_REMOTE and
+# BOX_OUTBOX_RELAY_CAPABLE unset -- e.g. forgejo, where pushWithRetry/
 # publish_rebased_branch's push path is the only way this Box's work ever
 # lands), installs neither and pushes exactly as before this change. This is
-# a cheap interim guard, not an adversary-proof one (`--no-verify`,
-# `-c remote.origin.pushurl=...`, or `-c core.hooksPath=...` all bypass it);
-# it exists to catch the agent guessing at the old read-write workflow, not
-# a hostile one.
+# a cheap interim guard, not an adversary-proof one
+# (`-c remote.origin.pushurl=...` or `-c core.hooksPath=...` bypass it); it
+# exists to catch the agent guessing at the old read-write workflow, not a
+# hostile one.
 install_readonly_push_hook() {
   if [ -n "${BOX_WRITE_ENABLED:-}" ]; then
     return 0
   fi
-  if [ -z "${BOX_OUTBOX_RELAY_CAPABLE:-}" ] && [ "${CODE_FORGE:-github}" != "local" ]; then
+  if [ -z "${BOX_HOST_MEDIATED_REMOTE:-}" ] && [ -z "${BOX_OUTBOX_RELAY_CAPABLE:-}" ]; then
     return 0
   fi
-  # A fresh, empty bare repo outside WORK_DIR (never inside the clone, so it
-  # never shows up in `git status`/`git add -A`) that every push now targets
-  # instead of the real remote -- see the function comment above for why.
+  # A path outside WORK_DIR (never inside the clone, so it never shows up in
+  # `git status`/`git add -A`) that every push now targets instead of the
+  # real remote -- see the function comment above for why. Created as a real
+  # bare repo (not just a bare path) so the local-filesystem transport's
+  # cheap, non-network ref listing succeeds and the client-side pre-push hook
+  # below actually fires and delivers its message on the normal push path.
   local decoy
   decoy="$(mktemp -d)/readonly-push-guard.git"
   git init --bare -q "$decoy"
+  # `git push --no-verify` skips the client-side pre-push hook below, but it
+  # has no effect on the *receiving* repo's pre-receive hook -- git still
+  # runs that (locally, no network -- the decoy is a local filesystem path)
+  # before accepting any ref update. Without this, --no-verify would land
+  # the ref in the decoy and exit 0: a silent fake success, worse than the
+  # 403 this issue exists to replace, since the agent would believe its work
+  # was safely handed off when it went nowhere real. Message text matches
+  # the pre-push hook's below verbatim.
+  cat >"$decoy/hooks/pre-receive" <<'EOF'
+#!/bin/sh
+echo "read-only Box: your committed branch is relayed via the outbox; do not push -- this push has been blocked locally." >&2
+exit 1
+EOF
+  chmod +x "$decoy/hooks/pre-receive"
   git -C "$WORK_DIR" config remote.origin.pushurl "$decoy"
   # /bin/sh, not /usr/bin/env bash: git execs the hook's shebang directly,
   # and /usr/bin/env is not guaranteed to resolve in every sandbox this
@@ -271,7 +292,7 @@ install_readonly_push_hook() {
   mkdir -p "$(dirname "$hook")"
   cat >"$hook" <<'EOF'
 #!/bin/sh
-echo "read-only Box: this push has been blocked locally -- do not push; your committed work is picked up after this run exits, not pushed by you." >&2
+echo "read-only Box: your committed branch is relayed via the outbox; do not push -- this push has been blocked locally." >&2
 exit 1
 EOF
   chmod +x "$hook"

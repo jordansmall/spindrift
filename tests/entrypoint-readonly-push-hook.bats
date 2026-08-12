@@ -18,7 +18,22 @@ setup() {
 
   run git -C "$WORK_DIR" push origin HEAD:some-branch
   [ "$status" -ne 0 ]
-  [[ "$output" == *"blocked locally"* ]]
+  [[ "$output" == *"outbox"* ]]
+  [[ "$output" == *"relayed"* ]]
+
+  run git -C "$REMOTE_ROOT/owner/repo.git" rev-parse --verify some-branch
+  [ "$status" -ne 0 ]
+}
+
+@test "read-only Box's guard still blocks git push --no-verify (hook bypass) locally" {
+  unset BOX_WRITE_ENABLED # issue #2463: read-only Box
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  [ -d "$WORK_DIR/.git" ]
+  [ -x "$WORK_DIR/.git/hooks/pre-push" ]
+
+  run git -C "$WORK_DIR" push origin HEAD:some-branch --no-verify
+  [ "$status" -ne 0 ]
 
   run git -C "$REMOTE_ROOT/owner/repo.git" rev-parse --verify some-branch
   [ "$status" -ne 0 ]
@@ -40,7 +55,8 @@ setup() {
   git -C "$WORK_DIR" remote set-url origin https://readonly-push-hook-test.invalid/owner/repo.git
   run git -C "$WORK_DIR" push origin HEAD:some-branch
   [ "$status" -ne 0 ]
-  [[ "$output" == *"blocked locally"* ]]
+  [[ "$output" == *"outbox"* ]]
+  [[ "$output" == *"relayed"* ]]
   [[ "$output" != *"Could not resolve host"* ]]
   [[ "$output" != *"Failed to connect"* ]]
   [[ "$output" != *"unable to access"* ]]
@@ -58,6 +74,37 @@ setup() {
 
   run git -C "$REMOTE_ROOT/owner/repo.git" rev-parse --verify some-other-branch
   [ "$status" -eq 0 ]
+}
+
+@test "read-only Box with BOX_HOST_MEDIATED_REMOTE set installs the guard even when BOX_OUTBOX_RELAY_CAPABLE is unset" {
+  # Issue #2463 finding: install_readonly_push_hook's gate used to re-derive
+  # "does this Box have an outbox" from CODE_FORGE=="local" instead of
+  # consulting the already-forwarded BOX_HOST_MEDIATED_REMOTE var directly
+  # (the same fact emit_outcome_backstop's needsOutbox-equivalent switch
+  # already keys off, 680+ lines later in this same file). A Box using a
+  # different/future host-mediated backend name (BOX_HOST_MEDIATED_REMOTE=1
+  # forwarded, but CODE_FORGE left at its default "github", not "local") is
+  # exactly the case that separates the old, CODE_FORGE-keyed gate (which
+  # would wrongly skip installing the guard here, since CODE_FORGE !=
+  # "local" and BOX_OUTBOX_RELAY_CAPABLE is unset) from the new,
+  # BOX_HOST_MEDIATED_REMOTE-keyed one (which correctly installs it): this
+  # Box's hand-off is host-mediated, not a real push, so a `git push` must
+  # still be blocked locally.
+  unset BOX_WRITE_ENABLED # issue #2463: read-only Box
+  unset BOX_OUTBOX_RELAY_CAPABLE
+  export BOX_HOST_MEDIATED_REMOTE=1
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  [ -d "$WORK_DIR/.git" ]
+  [ -x "$WORK_DIR/.git/hooks/pre-push" ]
+
+  run git -C "$WORK_DIR" push origin HEAD:some-host-mediated-branch
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"outbox"* ]]
+  [[ "$output" == *"relayed"* ]]
+
+  run git -C "$REMOTE_ROOT/owner/repo.git" rev-parse --verify some-host-mediated-branch
+  [ "$status" -ne 0 ]
 }
 
 @test "read-only Box whose hand-off is a real push (not outbox-relay-capable) installs no guard" {
