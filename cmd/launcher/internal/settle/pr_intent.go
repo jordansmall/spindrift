@@ -24,7 +24,11 @@ import (
 // missing. When PR-intent is missing but the relay succeeds, title/body are
 // reconstructed host-side from the relayed branch's own commits
 // (reconstructPRText) rather than blocking a hand-off with nothing actually
-// wrong with it.
+// wrong with it. A reconstructed hand-off is never silently indistinguishable
+// from a normal one (issue #2447, AC5): besides the "Reconstructed host-side"
+// note already in the PR body itself, this also posts a comment on the issue
+// explaining the box's own hand-off was incomplete — an operator reading only
+// the issue, not the launcher's own stdout log, can still tell.
 //
 // Returns the resolved PR URL and true on success. Any failure along the
 // way — a missing/malformed bundle, a missing/malformed PR-intent line with
@@ -91,6 +95,16 @@ func (s *Settle) hostMediateDraftPR(num string, result dispatch.Result) (string,
 	}
 	if reconstructed {
 		fmt.Printf("    #%s  landing=%s  status=reconstructed  note=no PR-intent line found in the box's log; description derived host-side from the relayed branch's commits\n", num, branch)
+		// Posted alongside the stdout log line above so both settle's own
+		// console log and the issue itself tell the same story (issue #2447,
+		// AC5): an operator reading only the issue — never the launcher's own
+		// log — must still be able to tell the box's own hand-off was
+		// incomplete. Best-effort, matching postUsageComment's log-but-don't-
+		// propagate contract: a failure here never un-does the draft PR
+		// already opened above.
+		if commentErr := s.it.Comment(num, "This PR was reconstructed host-side: the box's own hand-off was incomplete (no usable PR-intent line found in its log), so the title/body above were derived from the relayed branch's own commits instead of the box's own description."); commentErr != nil {
+			fmt.Fprintf(os.Stderr, "    ?? #%s: could not post reconstructed-hand-off comment: %v\n", num, commentErr)
+		}
 	}
 	return url, true
 }
