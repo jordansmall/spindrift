@@ -30,6 +30,36 @@ func TestParsePRIndex_RejectsNonNumeric(t *testing.T) {
 	}
 }
 
+// TestIsDraftTitle_RecognizesBothWIPPrefixes verifies isDraftTitle
+// recognizes both Forgejo default WIP prefixes ("WIP:" and "[WIP]:"),
+// case-insensitively, and returns false for a plain title.
+func TestIsDraftTitle_RecognizesBothWIPPrefixes(t *testing.T) {
+	tests := []struct {
+		title string
+		want  bool
+	}{
+		{"[WIP]: add feature", true},
+		{"[wip]: add feature", true},
+		{"WIP: add feature", true},
+		{"add feature", false},
+	}
+	for _, tt := range tests {
+		if got := isDraftTitle(tt.title); got != tt.want {
+			t.Errorf("isDraftTitle(%q) = %v, want %v", tt.title, got, tt.want)
+		}
+	}
+}
+
+// TestStripWIPPrefix_StripsBracketedPrefix verifies stripWIPPrefix strips
+// the "[WIP]:" convention down to the bare title, mirroring its existing
+// "WIP:" handling.
+func TestStripWIPPrefix_StripsBracketedPrefix(t *testing.T) {
+	got := stripWIPPrefix("[WIP]: add feature")
+	if got != "add feature" {
+		t.Fatalf("stripWIPPrefix(...) = %q, want %q", got, "add feature")
+	}
+}
+
 // TestForgejoMergeDo verifies forgejoMergeDo maps the MergeMethod knob's
 // value onto the "Do" field value Forgejo's merge endpoint expects, with an
 // empty (unset) method defaulting to "rebase" — mirroring the github

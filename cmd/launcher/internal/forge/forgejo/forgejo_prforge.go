@@ -51,27 +51,45 @@ func parsePRIndex(prURL string) (string, error) {
 }
 
 // forgejoWIPPrefix is the title prefix Forgejo's WIP-title draft convention
-// uses; isDraftTitle/stripWIPPrefix/MarkDraft all key off this one constant
-// so the marker stays consistent everywhere it's read or written.
+// uses; MarkDraft (the write side) keys off this one constant, mirroring
+// CreateDraftPR's existing convention (forgejo_readonly.go), so a PR this
+// adapter flips to draft is always written with this canonical prefix.
 const forgejoWIPPrefix = "WIP:"
 
-// isDraftTitle reports whether title carries Forgejo's WIP-prefix draft
-// marker ("WIP:" or "WIP: ...", case-insensitive) — Forgejo encodes draft
-// state as a title prefix rather than a first-class field alone.
+// forgejoWIPPrefixes lists every WIP-title draft marker isDraftTitle and
+// stripWIPPrefix (the read side) recognize, matching Forgejo's real default
+// `setting.Repository.PullRequest.WorkInProgressPrefixes` config ("WIP:" and
+// "[WIP]:", both case-insensitive) — a Forgejo instance may format a draft
+// PR's title with either convention, so the read side must recognize both
+// even though the write side only ever produces forgejoWIPPrefix.
+var forgejoWIPPrefixes = []string{forgejoWIPPrefix, "[WIP]:"}
+
+// isDraftTitle reports whether title carries one of Forgejo's WIP-prefix
+// draft markers (see forgejoWIPPrefixes), case-insensitively — Forgejo
+// encodes draft state as a title prefix rather than a first-class field
+// alone.
 func isDraftTitle(title string) bool {
-	return strings.HasPrefix(strings.ToUpper(strings.TrimSpace(title)), forgejoWIPPrefix)
+	upper := strings.ToUpper(strings.TrimSpace(title))
+	for _, prefix := range forgejoWIPPrefixes {
+		if strings.HasPrefix(upper, strings.ToUpper(prefix)) {
+			return true
+		}
+	}
+	return false
 }
 
-// stripWIPPrefix removes a leading, case-insensitive "WIP:" (plus any
-// following spaces) from title. Titles without the prefix are returned
-// unchanged.
+// stripWIPPrefix removes a leading, case-insensitive WIP-title draft marker
+// (see forgejoWIPPrefixes; plus any following spaces) from title. Titles
+// without any recognized prefix are returned unchanged.
 func stripWIPPrefix(title string) string {
 	trimmed := strings.TrimSpace(title)
-	if !isDraftTitle(trimmed) {
-		return title
+	upper := strings.ToUpper(trimmed)
+	for _, prefix := range forgejoWIPPrefixes {
+		if strings.HasPrefix(upper, strings.ToUpper(prefix)) {
+			return strings.TrimLeft(trimmed[len(prefix):], " ")
+		}
 	}
-	rest := trimmed[len(forgejoWIPPrefix):]
-	return strings.TrimLeft(rest, " ")
+	return title
 }
 
 // isDraftPull reports whether p represents a draft pull, ORing its draft
@@ -383,13 +401,17 @@ func (f *forgejoCodeForge) EnqueueAutoMerge(prURL string) error {
 // WIP-prefix stripped. Idempotent: a PR that is already not a draft is a
 // no-op that issues no request, mirroring the github adapter's
 // `gh pr ready` idempotency without relying on Forgejo returning a
-// particular status for a redundant call.
+// particular status for a redundant call. Gates on isDraftPull rather than
+// isDraftTitle alone: a pull's draft field can be true while its title
+// carries a WIP-title convention isDraftTitle doesn't (yet) recognize, and
+// OpenPRForBranch already adopts any draft PR by that broader signal — this
+// keeps MarkReady able to act on everything OpenPRForBranch can adopt.
 func (f *forgejoCodeForge) MarkReady(prURL string) error {
 	p, err := f.getPull(prURL)
 	if err != nil {
 		return err
 	}
-	if !isDraftTitle(p.Title) {
+	if !isDraftPull(p) {
 		return nil
 	}
 	index, err := parsePRIndex(prURL)
