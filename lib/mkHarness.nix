@@ -1067,6 +1067,11 @@ else
       buildInputDocumentFile
       ;
 
+    # Exposed for nix/checks/roster.nix's issue #2437 drift guard, which
+    # compares this against lib/roster-schema-defaults.nix's independent
+    # derivation — not a public/stable API surface.
+    inherit schemaDefaults;
+
     packages = {
       inherit spindrift;
       spindrift-manpage = manpage;
