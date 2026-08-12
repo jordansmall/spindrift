@@ -1,6 +1,8 @@
 package settle
 
 import (
+	"regexp"
+	"strings"
 	"testing"
 
 	"spindrift.dev/launcher/internal/forge"
@@ -95,4 +97,57 @@ func TestEnsureClosesReference(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestDefuseClosingKeywords covers defuseClosingKeywords' guarantee that a
+// box-authored string embedded verbatim in a reconstructed PR body (issue
+// #2447) never carries a live GitHub closing-keyword reference: a
+// prompt-injected Box controls its own commit subjects, and a subject
+// shaped like "fix: closes #999" would otherwise auto-close an unrelated
+// issue #999 on merge.
+func TestDefuseClosingKeywords(t *testing.T) {
+	tests := []struct {
+		name    string
+		subject string
+	}{
+		{
+			name:    "closes keyword, no colon",
+			subject: "fix: closes #999",
+		},
+		{
+			name:    "colon-form Closes keyword",
+			subject: "Closes: #1234",
+		},
+		{
+			name:    "Fixes keyword",
+			subject: "Fixes #42",
+		},
+		{
+			name:    "Resolved keyword",
+			subject: "resolved #7",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := defuseClosingKeywords(tt.subject)
+			if closingKeywordPattern.MatchString(got) {
+				t.Errorf("defuseClosingKeywords(%q) = %q, still matches closingKeywordPattern", tt.subject, got)
+			}
+			// The subject must still be visually recognizable — every digit
+			// and the keyword text itself must survive, only made invisible
+			// to the closing-keyword scanner via a zero-width space.
+			digitsOnly := regexp.MustCompile(`\d+`).FindString(tt.subject)
+			if digitsOnly == "" || !strings.Contains(got, digitsOnly) {
+				t.Errorf("defuseClosingKeywords(%q) = %q, want it to still contain the digits %q", tt.subject, got, digitsOnly)
+			}
+		})
+	}
+
+	t.Run("no closing keyword, unchanged", func(t *testing.T) {
+		subject := "feat: add a widget"
+		got := defuseClosingKeywords(subject)
+		if got != subject {
+			t.Errorf("defuseClosingKeywords(%q) = %q, want unchanged", subject, got)
+		}
+	})
 }
