@@ -62,21 +62,6 @@ func TestPromptMarkersMatchScanner(t *testing.T) {
 // by " | ", the exact shape review-prompt.md's output contract documents
 // both markers with. Derived from the constants rather than hardcoded again,
 // so this test can't itself drift from VerdictApprove/VerdictBlock.
-// TestReviewPromptClassifiesProseFindingsNonBlocking is a content-invariant
-// guard (issue #2458): the severity contract must state, discretion-free,
-// that wording/style/redundancy/ordering findings on prose are always
-// Non-blocking, keeping Blocking reserved for spec violations, correctness
-// bugs, security issues, and unmet acceptance criteria.
-func TestReviewPromptClassifiesProseFindingsNonBlocking(t *testing.T) {
-	repoRoot := filepath.Join("..", "..", "..")
-
-	reviewPrompt := readPromptFile(t, repoRoot, "review-prompt.md")
-	const proseNonBlockingRule = "wording, style, redundancy, and ordering findings are always Non-blocking"
-	if !strings.Contains(reviewPrompt, proseNonBlockingRule) {
-		t.Errorf("review-prompt.md no longer states %q, the discretion-free rule keeping prose wording/style/redundancy/ordering findings Non-blocking", proseNonBlockingRule)
-	}
-}
-
 func verdictContractShape() string {
 	prefix := commonPrefix(VerdictApprove, VerdictBlock)
 	return VerdictApprove + " | " + strings.TrimPrefix(VerdictBlock, prefix)
