@@ -110,7 +110,15 @@ type scanResult struct {
 // 4 MiB scan buffer are processed in chunks, matching the same resilience
 // contract as lastInLog.
 func Classify(logPath string) (driverkit.Classification, error) {
-	sr, err := scanLog(logPath)
+	return classifyAt(logPath, time.Now())
+}
+
+// classifyAt is Classify's implementation with an explicit now, so tests can
+// pin the clock instead of leaking the real wall clock into the parsed
+// resetsAt fallback (issue #2443). See testhelpers_test.go's exported
+// ClassifyAt seam for how package claude_test reaches this.
+func classifyAt(logPath string, now time.Time) (driverkit.Classification, error) {
+	sr, err := scanLog(logPath, now)
 	if err != nil {
 		return driverkit.Classification{}, err
 	}
@@ -145,7 +153,7 @@ func Classify(logPath string) (driverkit.Classification, error) {
 // The pending echo survives any number of intervening non-content lines and
 // is only cleared by the type:"result" line itself or by a second genuine
 // agent-content event (issue #1197).
-func scanLog(logPath string) (scanResult, error) {
+func scanLog(logPath string, now time.Time) (scanResult, error) {
 	var resetsAt *time.Time
 	var echoReason driverkit.Reason
 	var echoPending bool
@@ -182,7 +190,7 @@ func scanLog(logPath string) (scanResult, error) {
 		// that CLI-usage error aborts the run before any API call, so no
 		// transient marker can precede it in a genuine failure log.
 		if resetsAt == nil {
-			if t := extractResetsAt(chunk); t != nil {
+			if t := extractResetsAt(chunk, now); t != nil {
 				resetsAt = t
 			}
 		}
@@ -278,24 +286,28 @@ func resultEventText(chunk string) (string, bool) {
 // content and returns a UTC time. When no such JSON field is present (or its
 // value fails to parse as an integer), it falls back to parsing claude's
 // human-readable "resets <clock-time> (UTC)" / "resets <Weekday> <clock-time>
-// (UTC)" suffix via parseResetsAtText, rolling forward from time.Now(). It
-// returns nil if neither form matches.
-func extractResetsAt(content string) *time.Time {
+// (UTC)" suffix via parseResetsAtText, rolling forward from the caller-supplied
+// now. It returns nil if neither form matches.
+func extractResetsAt(content string, now time.Time) *time.Time {
 	if m := resetsAtRe.FindStringSubmatch(content); m != nil {
 		if secs, err := strconv.ParseInt(m[1], 10, 64); err == nil {
 			t := time.Unix(secs, 0).UTC()
 			return &t
 		}
 	}
-	return parseResetsAtText(content, time.Now())
+	return parseResetsAtText(content, now)
 }
 
 // parseResetsAtText parses claude's human-readable "resets <clock-time>
 // (UTC)" or "resets <Weekday> <clock-time> (UTC)" suffix and returns the
-// next future occurrence (strictly after now, which the caller supplies in
-// UTC) as a UTC time, or nil if no such suffix is found or it is
-// unparseable. It never calls time.Now(); the caller is responsible for
-// supplying a reference time.
+// occurrence of that clock-time today (bare form) or on the next matching
+// weekday (weekday form) as a UTC time, provided it is strictly after now
+// (which the caller supplies in UTC). It returns nil if no such suffix is
+// found, it is unparseable, or the computed occurrence has already passed —
+// a stale candidate is not rolled forward a full extra day/week (issue
+// #2443 review); the caller falls back to its own generic backoff instead.
+// It never calls time.Now(); the caller is responsible for supplying a
+// reference time.
 func parseResetsAtText(content string, now time.Time) *time.Time {
 	m := resetsTextRe.FindStringSubmatch(content)
 	if m == nil {
@@ -328,24 +340,26 @@ func parseResetsAtText(content string, now time.Time) *time.Time {
 
 	now = now.UTC()
 
+	var candidate time.Time
 	if weekdayAbbr == "" {
-		candidate := time.Date(now.Year(), now.Month(), now.Day(), hour, minute, 0, 0, time.UTC)
-		if !candidate.After(now) {
-			candidate = candidate.AddDate(0, 0, 1)
+		candidate = time.Date(now.Year(), now.Month(), now.Day(), hour, minute, 0, 0, time.UTC)
+	} else {
+		wantWeekday, ok := weekdayAbbrs[strings.ToLower(weekdayAbbr)]
+		if !ok {
+			return nil
 		}
-		return &candidate
+		candidate = time.Date(now.Year(), now.Month(), now.Day(), hour, minute, 0, 0, time.UTC)
+		daysUntil := (int(wantWeekday) - int(candidate.Weekday()) + 7) % 7
+		candidate = candidate.AddDate(0, 0, daysUntil)
 	}
 
-	wantWeekday, ok := weekdayAbbrs[strings.ToLower(weekdayAbbr)]
-	if !ok {
-		return nil
-	}
-
-	candidate := time.Date(now.Year(), now.Month(), now.Day(), hour, minute, 0, 0, time.UTC)
-	daysUntil := (int(wantWeekday) - int(candidate.Weekday()) + 7) % 7
-	candidate = candidate.AddDate(0, 0, daysUntil)
+	// A candidate that has already passed is stale, not a signal to wait a
+	// full extra day/week: rolling forward blindly turns a several-minute
+	// miss into a near-full-cycle hold that can outlast a job's timeout
+	// (issue #2443 review). Report no reset time and let the caller fall
+	// back to its generic bounded backoff instead.
 	if !candidate.After(now) {
-		candidate = candidate.AddDate(0, 0, 7)
+		return nil
 	}
 	return &candidate
 }

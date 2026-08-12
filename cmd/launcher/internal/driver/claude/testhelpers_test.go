@@ -4,6 +4,9 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
+
+	"spindrift.dev/launcher/internal/driver/driverkit"
 )
 
 // WriteLog writes lines to a temp log file and returns its path. Exported so
@@ -22,4 +25,11 @@ func WriteLog(t *testing.T, lines ...string) string {
 		}
 	}
 	return path
+}
+
+// ClassifyAt exposes classifyAt to external test files in package
+// claude_test, so they can pin the clock instead of leaking the real
+// wall-clock time.Now() into a parsed resetsAt fallback (issue #2443).
+func ClassifyAt(logPath string, now time.Time) (driverkit.Classification, error) {
+	return classifyAt(logPath, now)
 }
