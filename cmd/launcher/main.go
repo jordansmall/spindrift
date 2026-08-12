@@ -1004,7 +1004,7 @@ func logDiscoveryPoll(c config, issues []issue, first bool, seen map[string]bool
 func recoverByNumber(c config, it forge.IssueTracker, cf forge.CodeForge, pwd string, f *dispatch.Factory, s settle.WorkSettler, issueNum string) error {
 	fi, err := it.Issue(issueNum)
 	if err != nil {
-		return fmt.Errorf("issue %s: %w", issueNum, err)
+		return recoverFailed(it, issueNum, fmt.Errorf("issue %s: %w", issueNum, err))
 	}
 	iss := issue{number: fi.Number, title: fi.Title, priority: fi.Priority}
 	branch := cf.AgentBranch(iss.number)
@@ -1013,7 +1013,7 @@ func recoverByNumber(c config, it forge.IssueTracker, cf forge.CodeForge, pwd st
 	// so the first attempt is on top of it: maxAttempts = retries + 1.
 	res, prErr := forge.ResolveOpenPRWithRetry(cf, iss.number, backoff, c.transientRetryMax+1)
 	if prErr != nil {
-		return fmt.Errorf("issue %s: resolve PR: %w", issueNum, prErr)
+		return recoverFailed(it, issueNum, fmt.Errorf("issue %s: resolve PR: %w", issueNum, prErr))
 	}
 	if !res.Found {
 		// resolved.SelfReportFound is consulted even on a near-miss resolveErr
@@ -1047,7 +1047,7 @@ func recoverByNumber(c config, it forge.IssueTracker, cf forge.CodeForge, pwd st
 			return nil
 		}
 		fmt.Printf("    #%s  status=skipped  note=no open PR on %s\n", issueNum, branch)
-		return fmt.Errorf("issue %s: no open PR", issueNum)
+		return recoverFailed(it, issueNum, fmt.Errorf("issue %s: no open PR", issueNum))
 	}
 	if err := os.MkdirAll(dispatch.HostLogDirFor(pwd), 0o755); err != nil {
 		return fmt.Errorf("mkdir logs: %w", err)
@@ -1055,6 +1055,47 @@ func recoverByNumber(c config, it forge.IssueTracker, cf forge.CodeForge, pwd st
 	d := f.New(iss.number, iss.title)
 	defer d.Close()
 	s.SettleAdopted(d, iss.number, 0, res.URL)
+	return nil
+}
+
+// recoverFailed is recoverByNumber's single terminal-failure exit: every
+// return-error path in recoverByNumber funnels through it so a recover
+// attempt that claimed an issue already in a successful terminal state
+// (agent-complete) can never downgrade it to agent-failed (issue #2477). The
+// claim itself runs host-side in the dispatch workflow
+// (.github/workflows/agent-recover.yml), ahead of this process, stripping
+// the prior terminal label before recoverByNumber ever sees the issue's
+// current labels — so the pre-claim state has to be read back out of the
+// issue's timeline instead, through the optional PriorClaimStateReader
+// surface (only the github adapter implements it today; other trackers fall
+// straight through to origErr below, unchanged). Every issue with no prior
+// terminal label, or whose prior terminal label was agent-failed (not
+// agent-complete), also falls straight through to origErr, preserving
+// today's park-to-agent-failed behavior — the workflow's own "Park if
+// nothing to recover" step, gated on this process's exit code, still fires
+// for those exactly as before.
+func recoverFailed(it forge.IssueTracker, num string, origErr error) error {
+	pr, ok := it.(forge.PriorClaimStateReader)
+	if !ok {
+		return origErr
+	}
+	prior, found, err := pr.PriorClaimState(num)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "    ?? #%s: could not determine pre-claim state: %v\n", num, err)
+		return origErr
+	}
+	if !found || prior != forge.Complete {
+		return origErr
+	}
+	if err := it.TransitionState(num, forge.InProgress, forge.Complete); err != nil {
+		fmt.Fprintf(os.Stderr, "    ?? #%s: could not restore agent-complete: %v\n", num, err)
+		return origErr
+	}
+	note := fmt.Sprintf("recover attempted and declined to change anything: %v. This issue was already `agent-complete` before recover claimed it — that state is restored rather than parking `agent-failed`.", origErr)
+	if commentErr := it.Comment(num, note); commentErr != nil {
+		fmt.Fprintf(os.Stderr, "    ?? #%s: could not post recover-declined comment: %v\n", num, commentErr)
+	}
+	fmt.Printf("    #%s  status=recover-declined  note=%v\n", num, origErr)
 	return nil
 }
 

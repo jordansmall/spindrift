@@ -265,6 +265,70 @@ func TestRecoverByNumber_NoPRSkipped(t *testing.T) {
 	}
 }
 
+// TestRecoverByNumber_NoPRRestoresPriorComplete proves issue #2477's fix: a
+// no-PR, no-self-report recover attempt against an issue that was
+// agent-complete before the workflow's host-side claim stripped that label
+// must restore agent-complete rather than let the caller's non-nil error
+// drive the workflow's blind park-to-agent-failed step.
+func TestRecoverByNumber_NoPRRestoresPriorComplete(t *testing.T) {
+	c := reconcileConfig()
+	fc := forge.NewFake(dispatchLabels(c))
+	fc.BranchPrefix = c.branchPrefix
+
+	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.inProgressLabel}})
+	// No PR registered for the branch, and no log written -- tempLogDir's
+	// dir stays empty, so dispatch.LastSelfReportFromLogs finds nothing.
+	fc.PriorClaimStates = map[string]forge.DispatchState{"42": forge.Complete}
+
+	dir := tempLogDir(t)
+	err := recoverByNumber(c, fc, fc, dir, testFactory(t, dir, nil), newWorkSettle(c, fc, testWired(fc), fc), "42")
+
+	if err != nil {
+		t.Errorf("expected nil error when restoring a prior agent-complete state; got %v", err)
+	}
+	iss, issErr := fc.Issue("42")
+	if issErr != nil {
+		t.Fatalf("fc.Issue(42): %v", issErr)
+	}
+	if !containsLabel(iss.Labels, c.completeLabel) {
+		t.Errorf("expected issue to carry %q after restore; got labels %v", c.completeLabel, iss.Labels)
+	}
+	if containsLabel(iss.Labels, c.failedLabel) {
+		t.Errorf("expected issue to not carry %q after restore; got labels %v", c.failedLabel, iss.Labels)
+	}
+	if len(fc.CommentCalls) < 1 {
+		t.Error("expected an explanatory comment to be posted")
+	}
+}
+
+// TestRecoverByNumber_NoPRPriorFailedStillErrors proves recoverFailed only
+// restores a prior agent-complete state, never a prior agent-failed one --
+// an issue that was already agent-failed before the claim must still park
+// agent-failed exactly as before issue #2477.
+func TestRecoverByNumber_NoPRPriorFailedStillErrors(t *testing.T) {
+	c := reconcileConfig()
+	fc := forge.NewFake(dispatchLabels(c))
+	fc.BranchPrefix = c.branchPrefix
+
+	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.inProgressLabel}})
+	// No PR registered for the branch, and no log written.
+	fc.PriorClaimStates = map[string]forge.DispatchState{"42": forge.Failed}
+
+	dir := tempLogDir(t)
+	err := recoverByNumber(c, fc, fc, dir, testFactory(t, dir, nil), newWorkSettle(c, fc, testWired(fc), fc), "42")
+
+	if err == nil {
+		t.Error("expected error for no-PR case with prior agent-failed state; got nil")
+	}
+	iss, issErr := fc.Issue("42")
+	if issErr != nil {
+		t.Fatalf("fc.Issue(42): %v", issErr)
+	}
+	if containsLabel(iss.Labels, c.completeLabel) {
+		t.Errorf("expected issue to not carry %q; got labels %v", c.completeLabel, iss.Labels)
+	}
+}
+
 func TestRecoverByNumber_RedFollowsSelfHeal(t *testing.T) {
 	c := reconcileConfig()
 	c.maxFixAttempts = 0
