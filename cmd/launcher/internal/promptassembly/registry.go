@@ -27,8 +27,8 @@ type FragmentRow struct {
 	Var string `json:"var"`
 	// ExtraSubstVars lists additional substitution-allowlist entries the
 	// fragment's own body references, beyond Var itself. Empty for all but
-	// two of the 61 rows (skill-preamble.md, ci-failure.md) as of issue
-	// #2349 — see fragments.nix's header comment.
+	// two of the 65 rows (skill-preamble.md, ci-failure.md) as of issue
+	// #2462 — see fragments.nix's header comment.
 	ExtraSubstVars []string `json:"extraSubstVars,omitempty"`
 }
 

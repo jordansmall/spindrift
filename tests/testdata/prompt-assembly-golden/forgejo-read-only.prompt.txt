@@ -157,10 +157,10 @@ Prefer several small focused commits over one big one — commit each logical
 unit (domain change, then wiring, then tests) so each stands alone. Add a body
 only when the change isn't self-evident.
 
-**Always rebase onto the latest base immediately before every push** — never
-push from a stale base. This keeps the branch's tested tree current with any
-siblings that landed while you worked: the launcher merges a green PR as-is and
-does not re-rebase it for you, so a fresh base at push time is the branch's
+**Always rebase onto the latest base immediately before finishing** — never
+leave the branch on a stale base. This keeps the branch's tested tree current
+with any siblings that landed while you worked: the launcher merges a green PR
+as-is and does not re-rebase it for you, so a fresh base is the branch's
 freshness guarantee (a stale base also produces phantom diffs that trip push
 guards):
 
@@ -169,21 +169,12 @@ git fetch origin
 git rebase origin/main
 ```
 
-Re-run the repo's checks after rebasing, then push:
+Re-run the repo's checks after rebasing.
 
-```
-git push --force-with-lease -u origin agent/issue-7   # first push
-git push --force-with-lease                        # subsequent
-```
-
-**If a push is rejected**, do NOT silently strand the commits. Retry exactly
-once:
-
-1. `git fetch origin`
-2. `git rebase origin/main` — resolve any conflicts, re-run checks.
-3. `git push --force-with-lease` — one retry only.
-
-If the push still fails after the retry, follow IF BLOCKED.
+Your token is read-only and you take no code-out action yourself — do NOT
+`git push` and do NOT run `git bundle create`. Leave your work committed on
+the branch: after you exit the harness relays your committed branch out and
+the launcher pushes it host-side with its own token.
 
 # REVIEW
 
@@ -352,23 +343,16 @@ token cannot.
 If you can't finish (review never clears, CI stays red after repeated fixes,
 push still fails after the one retry, or any other blocker):
 
-**Push failure — check the actual cause before reporting it.** Do not guess.
-Run:
-
-```
-git diff origin/main -- '.github/workflows/'
-```
-
-- **No diff (phantom delta):** The pre-push rebase-and-retry above should have
-  cleared this. If the push still fails, capture and report the actual push
-  error output.
-- **Genuine `.github/workflows/` change:** The agent's token intentionally
-  lacks `workflow` scope — this is a deliberate security boundary. Do NOT
-  attempt to acquire broader scope or route around it. Comment on the issue
-  explaining what changes were made and why they require human review with
-  `workflow` scope, then emit `status=blocked`.
-- **Any other rejection:** Report the literal push error output. Never
-  attribute a failure to a cause you have not verified.
+**A denied `git push` here is expected, not itself the blocker.** A read-only
+Box holds no push-capable token in the failure path any more than in the
+happy path, so a 403 or other permission denial on a write is the outcome you
+were always going to get — never diagnose it as a broken or under-scoped
+token, and never report it to a human as a token-permission problem needing
+`workflow` or any other scope. Skip the `.github/workflows/` diff and the
+comment-the-issue triage the read-write path runs; step 4 below already
+covers reporting what's done and what remains. Look instead for the actual
+reason you can't finish — review never clearing, CI staying red after
+repeated fixes, or similar — and report that.
 
 Then:
 

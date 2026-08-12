@@ -136,35 +136,7 @@ Prefer several small focused commits over one big one — commit each logical
 unit (domain change, then wiring, then tests) so each stands alone. Add a body
 only when the change isn't self-evident.
 
-**Always rebase onto the latest base immediately before every push** — never
-push from a stale base. This keeps the branch's tested tree current with any
-siblings that landed while you worked: the launcher merges a green PR as-is and
-does not re-rebase it for you, so a fresh base at push time is the branch's
-freshness guarantee (a stale base also produces phantom diffs that trip push
-guards):
-
-```
-git fetch origin
-git rebase origin/${BASE_BRANCH}
-```
-
-Re-run the repo's checks after rebasing, then push:
-
-```
-git push --force-with-lease -u origin ${BRANCH}   # first push
-git push --force-with-lease                        # subsequent
-```
-
-**If a push is rejected**, do NOT silently strand the commits. Retry exactly
-once:
-
-1. `git fetch origin`
-2. `git rebase origin/${BASE_BRANCH}` — resolve any conflicts, re-run checks.
-3. `git push --force-with-lease` — one retry only.
-
-If the push still fails after the retry, follow IF BLOCKED.
-
-# REVIEW
+${COMMIT_PUSH_READ_WRITE_STEP}${COMMIT_PUSH_READ_ONLY_STEP}# REVIEW
 
 ${REVIEW_LOOP_INLINE_STEP}${REVIEW_LOOP_ORCHESTRATOR_STEP}${FILE_ISSUES_DIRECT_STEP}${FILE_ISSUES_RELAY_STEP}# LAND THE CHANGE
 
@@ -254,25 +226,7 @@ ${OUTCOME_READY_MEANS_READ_WRITE_STEP}${OUTCOME_READY_MEANS_READ_ONLY_STEP}
 If you can't finish (review never clears, CI stays red after repeated fixes,
 push still fails after the one retry, or any other blocker):
 
-**Push failure — check the actual cause before reporting it.** Do not guess.
-Run:
-
-```
-git diff origin/${BASE_BRANCH} -- '.github/workflows/'
-```
-
-- **No diff (phantom delta):** The pre-push rebase-and-retry above should have
-  cleared this. If the push still fails, capture and report the actual push
-  error output.
-- **Genuine `.github/workflows/` change:** The agent's token intentionally
-  lacks `workflow` scope — this is a deliberate security boundary. Do NOT
-  attempt to acquire broader scope or route around it. Comment on the issue
-  explaining what changes were made and why they require human review with
-  `workflow` scope, then emit `status=blocked`.
-- **Any other rejection:** Report the literal push error output. Never
-  attribute a failure to a cause you have not verified.
-
-Then:
+${IF_BLOCKED_TRIAGE_READ_WRITE_STEP}${IF_BLOCKED_TRIAGE_READ_ONLY_STEP}Then:
 
 ${IF_BLOCKED_PUSH_READ_WRITE_STEP}${IF_BLOCKED_PUSH_READ_ONLY_STEP}${IF_BLOCKED_PR_READ_WRITE_STEP}${IF_BLOCKED_PR_READ_ONLY_STEP}3. Leave the issue in-progress — do NOT close it.
 ${ISSUE_BLOCKED_COMMENT_GITHUB_STEP}${ISSUE_BLOCKED_COMMENT_GITHUB_READONLY_STEP}${ISSUE_BLOCKED_COMMENT_LOCAL_STEP}${ISSUE_BLOCKED_COMMENT_FORGEJO_STEP}${ISSUE_BLOCKED_COMMENT_FORGEJO_READONLY_STEP}5. Print exactly one line and stop — raw plain text, not wrapped in

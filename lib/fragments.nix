@@ -431,6 +431,40 @@
     fragment = "outcome-ready-means-outbox.md";
     var = "OUTCOME_READY_MEANS_READ_ONLY_STEP";
   }
+  # The COMMIT section's push step (issue #2462, same BOX_ACCESS_READ_WRITE/
+  # BOX_ACCESS_READ_ONLY gates as the OPEN A PULL REQUEST push step above): a
+  # read-only Box has no push-capable token, so the unconditional
+  # rebase+push+retry block must not render for it -- but the pre-commit
+  # rebase-and-recheck step must still render either way, since a stale base
+  # is still a stale base regardless of write access.
+  {
+    gate = "BOX_ACCESS_READ_WRITE";
+    fragment = "commit-push-git.md";
+    var = "COMMIT_PUSH_READ_WRITE_STEP";
+  }
+  {
+    gate = "BOX_ACCESS_READ_ONLY";
+    fragment = "commit-push-outbox.md";
+    var = "COMMIT_PUSH_READ_ONLY_STEP";
+  }
+  # The IF BLOCKED section's push-failure triage block (issue #2462, same
+  # BOX_ACCESS_READ_WRITE/BOX_ACCESS_READ_ONLY gates as the COMMIT section's
+  # push step above): the triage block presupposes a push was attempted and
+  # its "Genuine .github/workflows/ change" branch tells the agent to
+  # comment on the issue -- neither applies to a read-only Box, which never
+  # pushes and never comments directly. A denied push there is the expected
+  # outcome of holding no write-capable token, not evidence of a broken or
+  # under-scoped one, so it must never be triaged or escalated as such.
+  {
+    gate = "BOX_ACCESS_READ_WRITE";
+    fragment = "if-blocked-triage-git.md";
+    var = "IF_BLOCKED_TRIAGE_READ_WRITE_STEP";
+  }
+  {
+    gate = "BOX_ACCESS_READ_ONLY";
+    fragment = "if-blocked-triage-outbox.md";
+    var = "IF_BLOCKED_TRIAGE_READ_ONLY_STEP";
+  }
   # The IF BLOCKED section's push step (issue #1933, same BOX_ACCESS_READ_
   # WRITE/BOX_ACCESS_READ_ONLY gates as the OPEN A PULL REQUEST push step
   # above): a read-only Box holds no push-capable token whether it reaches
