@@ -225,6 +225,56 @@ clone_repo() {
   # so GIT_USER_NAME is available for its (cosmetic) key label -- mirrors gh
   # auth setup-git's placement earlier in this function for the github case.
   configure_forgejo_cli
+  install_readonly_push_hook
+}
+
+# install_readonly_push_hook makes `git push` fail locally, cheaply, when
+# this is a read-only Box whose read-only hand-off is relay-based, not a
+# real push (issue #2463). A plain pre-push hook alone cannot do this for a
+# network remote: git's push machinery lists the remote's refs (an
+# authenticated network round trip) before it ever runs the pre-push hook,
+# so on the http(s) transport this Box actually clones over, a hook-only
+# guard still lets the agent's push attempt reach the forge and 403 there --
+# exactly the round trip this issue exists to avoid. Instead, this repoints
+# `origin`'s *push* URL (leaving fetch untouched) at a throwaway local bare
+# repo, so every push resolves over the local-filesystem transport -- no
+# network call, ever -- and the pre-push hook installed below (which does
+# fire before a local transport's cheap, non-network ref listing) is what
+# actually stops it and prints the message. A read-write Box, or a read-only
+# Box whose actual hand-off IS a real push (BOX_OUTBOX_RELAY_CAPABLE unset
+# and not CODE_FORGE=local -- e.g. forgejo, where pushWithRetry/
+# publish_rebased_branch's push path is the only way this Box's work ever
+# lands), installs neither and pushes exactly as before this change. This is
+# a cheap interim guard, not an adversary-proof one (`--no-verify`,
+# `-c remote.origin.pushurl=...`, or `-c core.hooksPath=...` all bypass it);
+# it exists to catch the agent guessing at the old read-write workflow, not
+# a hostile one.
+install_readonly_push_hook() {
+  if [ -n "${BOX_WRITE_ENABLED:-}" ]; then
+    return 0
+  fi
+  if [ -z "${BOX_OUTBOX_RELAY_CAPABLE:-}" ] && [ "${CODE_FORGE:-github}" != "local" ]; then
+    return 0
+  fi
+  # A fresh, empty bare repo outside WORK_DIR (never inside the clone, so it
+  # never shows up in `git status`/`git add -A`) that every push now targets
+  # instead of the real remote -- see the function comment above for why.
+  local decoy
+  decoy="$(mktemp -d)/readonly-push-guard.git"
+  git init --bare -q "$decoy"
+  git -C "$WORK_DIR" config remote.origin.pushurl "$decoy"
+  # /bin/sh, not /usr/bin/env bash: git execs the hook's shebang directly,
+  # and /usr/bin/env is not guaranteed to resolve in every sandbox this
+  # entrypoint runs under (e.g. the nix-sandboxed bats check), while /bin/sh
+  # is.
+  local hook="$WORK_DIR/.git/hooks/pre-push"
+  mkdir -p "$(dirname "$hook")"
+  cat >"$hook" <<'EOF'
+#!/bin/sh
+echo "read-only Box: this push has been blocked locally -- do not push; your committed work is picked up after this run exits, not pushed by you." >&2
+exit 1
+EOF
+  chmod +x "$hook"
 }
 
 # phase_branch_recovery adopts prior work on an open PR or force-resets a
