@@ -406,6 +406,11 @@ func TestSelfHeal_ErrorStateTriggersFixPass(t *testing.T) {
 	}
 }
 
+// TestSelfHeal_PendingTimeoutNoFix also verifies (issue #2476) that the
+// generic ci-timeout reason — not just the registration-guard flavor — is
+// posted as an issue comment on gate-terminal failure, not just logged to
+// the console: singling out only the new registration flavor would be an
+// inconsistent, surprising carve-out.
 func TestSelfHeal_PendingTimeoutNoFix(t *testing.T) {
 	c := fixConfig(3)
 	c.MergePollTimeout = 0 // expire immediately
@@ -431,5 +436,11 @@ func TestSelfHeal_PendingTimeoutNoFix(t *testing.T) {
 	}
 	if last := fc.TransitionStateCalls[len(fc.TransitionStateCalls)-1]; last.To != forge.Failed {
 		t.Errorf("last transition To=%v, want Failed", last.To)
+	}
+	if len(fc.CommentCalls) != 1 {
+		t.Fatalf("expected exactly one comment posted on gate-terminal failure, got %d: %+v", len(fc.CommentCalls), fc.CommentCalls)
+	}
+	if !strings.Contains(fc.CommentCalls[0].Body, "ci-timeout:") {
+		t.Errorf("comment body = %q, want a substring containing %q", fc.CommentCalls[0].Body, "ci-timeout:")
 	}
 }

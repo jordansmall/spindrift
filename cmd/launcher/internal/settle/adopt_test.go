@@ -175,7 +175,10 @@ func TestSettleAdopted_StaleSuccessMergesAfterWindow(t *testing.T) {
 // MergePollTimeout(10) leaves comfortable slack past the window for the
 // SUCCESS to get accepted. An all-SUCCESS rollup that hasn't yet cleared the
 // registration window must be rejected (times out, demotes to
-// agent-failed), not merged.
+// agent-failed), not merged. It also verifies the registration-guard-specific
+// terminal reason (issue #2476) reaches the issue comment, not just the
+// console log — gateTerminalReasonRegistration's distinct wording must be
+// visible wherever the caller (a human triaging agent-failed) looks.
 func TestSettleAdopted_StaleSuccessStillTimesOutWithinWindow(t *testing.T) {
 	c := baseConfig()
 	c.MergePollTimeout = 1 // less than registrationWindowPolls(3) * actualIv(1)
@@ -193,6 +196,12 @@ func TestSettleAdopted_StaleSuccessStillTimesOutWithinWindow(t *testing.T) {
 	iss, _ := fc.Issue("1")
 	if !containsLabel(iss.Labels, "agent-failed") {
 		t.Errorf("issue must be demoted to agent-failed when the deadline is hit before the registration window elapses; labels=%v", iss.Labels)
+	}
+	if len(fc.CommentCalls) != 1 {
+		t.Fatalf("expected exactly one comment posted on gate-terminal failure, got %d: %+v", len(fc.CommentCalls), fc.CommentCalls)
+	}
+	if !strings.Contains(fc.CommentCalls[0].Body, "registration guard never cleared") {
+		t.Errorf("comment body = %q, want a substring containing %q", fc.CommentCalls[0].Body, "registration guard never cleared")
 	}
 }
 

@@ -187,12 +187,35 @@ func TestGateToGreen(t *testing.T) {
 			// instead of gateTerminal), and (b) the guard isn't bypassed
 			// entirely via `registered := true` at the top of gateToGreen
 			// (same wrong gateGreen outcome).
+			//
+			// issue #2476: SUCCESS is the only state ever observed on a real
+			// poll here — the only thing that ever "cleared" registered was
+			// the window-elapsed synthetic fallback, never genuine evidence
+			// (a real PENDING/EXPECTED/NONE poll). That is exactly the
+			// registration-guard flavour of timeout, distinct from an
+			// ordinary ran-out-the-clock one, so the reason must name the
+			// guard explicitly.
 			name:                "requireRegistration does not disable the window or bypass the guard entirely",
 			timeout:             1,
 			requireRegistration: true,
 			checkStates:         []forge.RollupState{forge.StateSuccess, forge.StateSuccess},
 			want:                gateTerminal,
-			wantReasonContains:  "ci-timeout:",
+			wantReasonContains:  "registration guard never cleared",
+		},
+		{
+			// issue #2476 boundary: unlike the case above, a genuine
+			// PENDING is actually observed on a real poll here — real
+			// evidence the guard cleared for a legitimate reason, not just
+			// the window-elapsed fallback. A timeout that follows must
+			// still get the generic ci-timeout reason, not the
+			// registration-guard one, even though requireRegistration was
+			// set.
+			name:                "requireRegistration timeout after genuine pending evidence gets the generic reason",
+			timeout:             0,
+			requireRegistration: true,
+			checkStates:         []forge.RollupState{forge.StatePending},
+			want:                gateTerminal,
+			wantReasonContains:  "ci-timeout: CI-watch deadline reached",
 		},
 	}
 	for _, tc := range cases {
