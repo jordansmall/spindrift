@@ -25,6 +25,12 @@ type PRForgeHarness interface {
 	// returns its URL — the ref Merge and every other PRForge method below
 	// expect.
 	SeedOpenPR(num string) string
+	// SeedDraftPR opens a draft PR for issue num's agent branch and returns
+	// its URL, mirroring SeedOpenPR — the regression coverage for issue
+	// #2408: OpenPRForBranch must adopt a stranded draft PR exactly as it
+	// adopts a non-draft one, on every PRForge-capable adapter, not just the
+	// Fake.
+	SeedDraftPR(num string) string
 	// SeedCheckStates scripts the sequence of RollupState values CheckState
 	// returns for url on successive calls, in order.
 	SeedCheckStates(url string, states []forge.RollupState)
@@ -63,6 +69,7 @@ type PushOnlyCodeForgeProvider interface {
 func RunPRForgeContract(t *testing.T, h PRForgeHarness) {
 	t.Run("OptionalInterfaceDiscovery", func(t *testing.T) { testOptionalInterfaceDiscovery(t, h) })
 	t.Run("PRForBranchResolution", func(t *testing.T) { testPRForBranchResolution(t, h) })
+	t.Run("OpenPRForBranchAdoptsDraft", func(t *testing.T) { testOpenPRForBranchAdoptsDraft(t, h) })
 	t.Run("CheckStateSequence", func(t *testing.T) { testCheckStateSequence(t, h) })
 	t.Run("MergeTransitionsPRState", func(t *testing.T) { testMergeTransitionsPRState(t, h) })
 	t.Run("AutoMergeEligibility", func(t *testing.T) { testAutoMergeEligibility(t, h) })
@@ -119,6 +126,27 @@ func testPRForBranchResolution(t *testing.T, h PRForgeHarness) {
 	}
 	if _, ok, err := h.Forge().PRForBranch(unknownBranch); ok || err != nil {
 		t.Fatalf("PRForBranch(%q) = (_, %v, %v), want (_, false, nil)", unknownBranch, ok, err)
+	}
+}
+
+// testOpenPRForBranchAdoptsDraft verifies OpenPRForBranch resolves a draft
+// PR precisely as it resolves a non-draft one (issue #2408): a stranded
+// draft is exactly as adoptable as a ready PR, so this must hold on every
+// PRForge-capable adapter, not just the Fake.
+func testOpenPRForBranchAdoptsDraft(t *testing.T, h PRForgeHarness) {
+	const num = "202"
+	branch := h.CodeForge().AgentBranch(num)
+	wantURL := h.SeedDraftPR(num)
+
+	pr, ok, err := h.Forge().OpenPRForBranch(branch)
+	if err != nil {
+		t.Fatalf("OpenPRForBranch(%q): %v", branch, err)
+	}
+	if !ok || pr.URL != wantURL {
+		t.Fatalf("OpenPRForBranch(%q) = (%+v, %v), want URL %q", branch, pr, ok, wantURL)
+	}
+	if !pr.IsDraft {
+		t.Fatalf("OpenPRForBranch(%q) IsDraft = false, want true", branch)
 	}
 }
 
