@@ -52,6 +52,17 @@ type HostMediationFake struct {
 	// CreateDraftPRCalls records all CreateDraftPR invocations in order.
 	CreateDraftPRCalls []CreateDraftPRCall
 
+	// CommitSubjectsResult is returned by every CommitSubjects call on
+	// success — scripts the commit subjects settle's PR-intent-fallback path
+	// (issue #2447) reconstructs a draft PR's title/body from. Only
+	// reachable through AsGithubReadOnly().
+	CommitSubjectsResult []string
+	// CommitSubjectsErr, if non-nil, is returned by every CommitSubjects
+	// call.
+	CommitSubjectsErr error
+	// CommitSubjectsCalls records all CommitSubjects invocations in order.
+	CommitSubjectsCalls []CommitSubjectsCall
+
 	// PostIssueURL is returned by every PostIssue call on success — scripts
 	// the URL of the issue the Launcher files host-side (issue #2018). Only
 	// reachable through AsIssueFiler().
@@ -96,6 +107,11 @@ type CreateDraftPRCall struct {
 	Title, Body, Base, Head string
 }
 
+// CommitSubjectsCall records a single CommitSubjects invocation.
+type CommitSubjectsCall struct {
+	OutboxDir, Base, Ref string
+}
+
 // PostIssueCall records a single PostIssue invocation.
 type PostIssueCall struct {
 	Title, Body string
@@ -134,6 +150,23 @@ func (hm *HostMediationFake) createDraftPR(title, body, base, head string) (stri
 		return "", hm.CreateDraftPRErr
 	}
 	return hm.CreateDraftPRURL, nil
+}
+
+// commitSubjects backs the optional BundleCommitSubjects surface (issue
+// #2447), recording each call for tests to assert against. Deliberately
+// unexported, the same reasoning as relayBundle: only githubReadOnlyForge's
+// own exported CommitSubjects (reachable exclusively through
+// AsGithubReadOnly()) calls it, so a bare *Fake used as a github-shaped
+// CodeForge in every other settle test never silently starts satisfying
+// forge.BundleCommitSubjects.
+func (hm *HostMediationFake) commitSubjects(outboxDir, base, ref string) ([]string, error) {
+	hm.mu.Lock()
+	defer hm.mu.Unlock()
+	hm.CommitSubjectsCalls = append(hm.CommitSubjectsCalls, CommitSubjectsCall{OutboxDir: outboxDir, Base: base, Ref: ref})
+	if hm.CommitSubjectsErr != nil {
+		return nil, hm.CommitSubjectsErr
+	}
+	return hm.CommitSubjectsResult, nil
 }
 
 // landingRef backs the optional LandingRef surface (ADR 0033), the same

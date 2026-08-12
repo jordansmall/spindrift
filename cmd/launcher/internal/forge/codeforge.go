@@ -172,3 +172,18 @@ type DraftPRCreator interface {
 	// title and body, and returns its URL.
 	CreateDraftPR(title, body, base, head string) (url string, err error)
 }
+
+// BundleCommitSubjects is settle's read-only PR-intent-fallback hook (issue
+// #2447): when a read-only Box's status=ready outcome carries no usable
+// SPINDRIFT_PR_INTENT line, settle still has the relayed branch's own
+// commits to reconstruct a draft PR's title/body from host-side, rather than
+// blocking a genuinely finished hand-off. Only meaningful alongside
+// BundleRelay + DraftPRCreator — a Code Forge with no PR concept at all
+// (local) never opens a PR to word in the first place, so it has no need for
+// this either. Discovered via type assertion, like BundleRelay/DraftPRCreator.
+type BundleCommitSubjects interface {
+	// CommitSubjects returns the one-line commit subjects the bundle at
+	// outboxDir/seambundle.FileName carries for ref, relative to base,
+	// oldest first.
+	CommitSubjects(outboxDir, base, ref string) ([]string, error)
+}

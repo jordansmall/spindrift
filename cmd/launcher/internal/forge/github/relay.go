@@ -52,6 +52,23 @@ func (c *readOnlyCodeForge) RelayBundle(outboxDir, ref string) error {
 	})
 }
 
+// CommitSubjects returns the one-line commit subjects the bundle at
+// outboxDir/seambundle.FileName carries for ref, relative to base, oldest
+// first -- settle's read-only PR-intent-fallback hook (issue #2447), reusing
+// the same gh-cli-authenticated clone closure RelayBundle uses. Unlike
+// RelayBundle it never checks anything out or pushes, so it cannot mutate
+// the remote -- a read path only.
+func (c *readOnlyCodeForge) CommitSubjects(outboxDir, base, ref string) ([]string, error) {
+	return bundlerelay.CommitSubjects("github", outboxDir, base, ref, func(dir string) error {
+		if out, err := exec.Command("gh", "repo", "clone", c.repo, dir, "--", "--no-single-branch").CombinedOutput(); err != nil {
+			return fmt.Errorf("github: relay bundle: gh repo clone: %w: %s", err, out)
+		}
+		return nil
+	})
+}
+
+var _ forge.BundleCommitSubjects = (*readOnlyCodeForge)(nil)
+
 // CreateDraftPR opens a draft PR from head onto base via `gh pr create` --
 // the host-side counterpart to the Box's own in-box `gh pr create` under
 // read-write (issue #1919), only reachable here because
