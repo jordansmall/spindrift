@@ -79,6 +79,17 @@ func (h *prforgeHarness) prURL(num string) string {
 // mappings the fake gh script's `pr list`/`pr view`/`pr merge` handlers
 // look up. Returns the PR URL every PRForge method expects.
 func (h *prforgeHarness) SeedOpenPR(num string) string {
+	return h.seedPR(num, false)
+}
+
+// SeedDraftPR mirrors SeedOpenPR but marks the PR draft (isDraft=true) —
+// the regression coverage for issue #2408: OpenPRForBranch must adopt a
+// draft PR precisely as it adopts a non-draft one.
+func (h *prforgeHarness) SeedDraftPR(num string) string {
+	return h.seedPR(num, true)
+}
+
+func (h *prforgeHarness) seedPR(num string, draft bool) string {
 	branch := h.branchName(num)
 	h.repo.SeedBranch(branch, num)
 
@@ -90,6 +101,7 @@ func (h *prforgeHarness) SeedOpenPR(num string) string {
 	writeFile(h.t, filepath.Join(prDir, "base"), h.base)
 	writeFile(h.t, filepath.Join(prDir, "prstate"), "OPEN")
 	writeFile(h.t, filepath.Join(prDir, "url"), h.prURL(num))
+	writeFile(h.t, filepath.Join(prDir, "draft"), strconv.FormatBool(draft))
 
 	branchFile := filepath.Join(h.stateDir, "branches", branch)
 	if err := os.MkdirAll(filepath.Dir(branchFile), 0o755); err != nil {

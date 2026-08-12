@@ -1,9 +1,9 @@
 #!/bin/sh
 # Stateful stand-in for the gh CLI, used by prforge_contract_test.go's
 # forgetest.RunPRForgeContract harness. STATE_DIR/prs/<num>/{head,base,
-# prstate,checks,contexts.json} record each seeded PR's scripted state;
-# STATE_DIR/branches/<branch> maps a branch back to its PR number for the
-# `pr list` lookups OpenPRForBranch/PRForBranch issue.
+# prstate,draft,checks,contexts.json} record each seeded PR's scripted
+# state; STATE_DIR/branches/<branch> maps a branch back to its PR number for
+# the `pr list` lookups OpenPRForBranch/PRForBranch issue.
 #
 # `pr merge` (without --auto) performs a genuine git merge against REMOTE,
 # same as fake-gh-codeforge.sh, and flips prstate to MERGED on success — the
@@ -60,7 +60,7 @@ pr-view)
 		cat "$STATE_DIR/prs/$num/prstate" 2>/dev/null || echo OPEN
 		;;
 	isDraft)
-		printf 'false\n'
+		cat "$STATE_DIR/prs/$num/draft" 2>/dev/null || printf 'false\n'
 		;;
 	headRefOid)
 		head=$(cat "$STATE_DIR/prs/$num/head")

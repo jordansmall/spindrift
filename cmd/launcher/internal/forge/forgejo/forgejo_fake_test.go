@@ -116,6 +116,17 @@ func prNumFromURL(prURL string) string {
 // is the agent branch for num ("agent/issue-"+num) and head SHA is a
 // per-PR synthetic value, and returns its html_url.
 func (f *fakeForgejo) SeedOpenPR(num string) string {
+	return f.seedPull(num, false)
+}
+
+// SeedDraftPR mirrors SeedOpenPR but marks the pull draft (draft=true) —
+// the regression coverage for issue #2408: OpenPRForBranch must adopt a
+// draft pull precisely as it adopts a non-draft one.
+func (f *fakeForgejo) SeedDraftPR(num string) string {
+	return f.seedPull(num, true)
+}
+
+func (f *fakeForgejo) seedPull(num string, draft bool) string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
@@ -128,7 +139,7 @@ func (f *fakeForgejo) SeedOpenPR(num string) string {
 		State:     "open",
 		Merged:    false,
 		Mergeable: true,
-		Draft:     false,
+		Draft:     draft,
 		Title:     "Issue " + num,
 		HeadRef:   "agent/issue-" + num,
 		HeadSHA:   sha,

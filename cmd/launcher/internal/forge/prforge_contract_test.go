@@ -33,6 +33,13 @@ func (h *fakePRForgeHarness) SeedOpenPR(num string) string {
 	return url
 }
 
+func (h *fakePRForgeHarness) SeedDraftPR(num string) string {
+	branch := h.f.AgentBranch(num)
+	url := "https://github.com/owner/repo/pull/" + num
+	h.f.SetPR(branch, forge.PR{URL: url, IsDraft: true})
+	return url
+}
+
 func (h *fakePRForgeHarness) SeedCheckStates(url string, states []forge.RollupState) {
 	h.f.SetCheckStates(url, states)
 }
