@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/forge/local"
 	"spindrift.dev/launcher/internal/settle"
 )
 
@@ -219,6 +220,88 @@ func TestSeedAccumulationRepoIfLocal_ConcurrentCallSameRepo_FailsUntilReleased(t
 		t.Fatal("third seedAccumulationRepoIfLocal after release lock = nil, want a held *local.AccumulationLock")
 	}
 	t.Cleanup(func() { _ = thirdLock.Release() })
+}
+
+// TestSeedAccumulationRepoIfLocal_SeedFailure_ReleasesLock is the regression
+// test for the seed-failure path's `_ = lock.Release()` at
+// seedAccumulationRepoIfLocal (bootstrap.go): a checkout with no commit on
+// baseBranch makes SeedAccumulationRepo's push fail after the lock is
+// already held, and that failure must release the lock rather than leak it
+// — a one-call regression there would wedge the repo for the rest of the
+// process with nothing catching it. Checking the returned lock is nil isn't
+// enough to prove that (a caller could nil it out without releasing), so
+// this proves the underlying flock is actually gone by reacquiring it
+// directly against the same repoPath.
+func TestSeedAccumulationRepoIfLocal_SeedFailure_ReleasesLock(t *testing.T) {
+	checkout := t.TempDir()
+	mustRunGit(t, checkout, "init", "-b", "main")
+	// No commit: baseBranch has no ref yet, so SeedAccumulationRepo's push
+	// fails after the lock is already acquired.
+
+	repoPath := filepath.Join(t.TempDir(), "accum.git")
+	c := baseConfig()
+	c.codeForge = "local"
+	c.codeForgeAccumulationRepoDir = repoPath
+	c.baseBranch = "main"
+
+	lock, err := seedAccumulationRepoIfLocal(c, checkout)
+	if err == nil {
+		t.Fatal("seedAccumulationRepoIfLocal with an empty checkout = nil error, want a seed failure")
+	}
+	if lock != nil {
+		t.Fatalf("seedAccumulationRepoIfLocal on seed failure lock = %v, want nil", lock)
+	}
+
+	reacquired, err := local.AcquireAccumulationLock(repoPath)
+	if err != nil {
+		t.Fatalf("AcquireAccumulationLock after seed failure: %v, want the failed attempt's lock to have been released", err)
+	}
+	t.Cleanup(func() { _ = reacquired.Release() })
+}
+
+// TestBootstrap_EarlyErrorAfterAccumLockAcquired_ReleasesLock is the
+// regression test for bootstrap's own early-return window (issue #2441):
+// once seedAccumulationRepoIfLocal hands back a held lock, every remaining
+// step before launchContext is built can still fail (readiness, the
+// read-only gates), and each of those bare `return nil, err` sites used to
+// leak the lock rather than release it — only process exit dropped the
+// flock. RUNTIME=bwrap keeps r.EnsureReady() a trivial no-op (bwrapAdapter
+// never builds or shells out), so BOX_FORGE_AND_ISSUE_ACCESS=read-only
+// against the default (github) issue tracker deterministically fails
+// checkReadOnlyCapabilityGate instead — offline, past accumLock's
+// acquisition, exactly the window in question. Proves the fix the same way
+// as the seed-failure test above: by reacquiring the lock directly, rather
+// than trusting a nil return alone.
+func TestBootstrap_EarlyErrorAfterAccumLockAcquired_ReleasesLock(t *testing.T) {
+	checkout := mustSeedableCheckout(t)
+	repoPath := filepath.Join(t.TempDir(), "accum.git")
+
+	t.Setenv("REPO_SLUG", "owner/repo")
+	t.Setenv("GH_TOKEN", "test-token")
+	t.Setenv("GIT_USER_NAME", "Test")
+	t.Setenv("GIT_USER_EMAIL", "test@example.com")
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "test-oauth-token")
+	t.Setenv("CODE_FORGE", "local")
+	t.Setenv("CODE_FORGE_ACCUMULATION_REPO_DIR", repoPath)
+	t.Setenv("BASE_BRANCH", "main")
+	t.Setenv("MERGE_MODE", "immediate")
+	t.Setenv("RUNTIME", "bwrap")
+	t.Setenv("BOX_FORGE_AND_ISSUE_ACCESS", "read-only")
+	t.Chdir(checkout)
+
+	lc, err := bootstrap(true, dispatchKindWork, false)
+	if err == nil {
+		t.Fatal("bootstrap() with BOX_FORGE_AND_ISSUE_ACCESS=read-only against the github tracker = nil error, want checkReadOnlyCapabilityGate to reject it")
+	}
+	if lc != nil {
+		t.Fatalf("bootstrap() on early error = %+v, want nil launch context", lc)
+	}
+
+	reacquired, err := local.AcquireAccumulationLock(repoPath)
+	if err != nil {
+		t.Fatalf("AcquireAccumulationLock after bootstrap's early error: %v, want the held lock to have been released", err)
+	}
+	t.Cleanup(func() { _ = reacquired.Release() })
 }
 
 // TestResearchLaunchStack_WiresResearchLabelsAndSettle verifies
