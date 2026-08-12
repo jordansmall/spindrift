@@ -332,7 +332,12 @@ in
   # Issue #2437: lib/roster-schema-defaults.nix is the single source of
   # truth for defaultRoster's roster-name -> schema-key model defaults.
   # Pin its schemaDefaults output directly against lib/env-schema.nix's
-  # four current defaults so the two can never silently drift.
+  # four current defaults so the two can never silently drift. `expected`
+  # below mirrors roster-default-roster-inherits-schema-default's mapping
+  # on purpose: that check pins defaultRoster's output, this one pins the
+  # helper's output one level down, so together they also catch a
+  # rosterModelKeys roster-name -> schema-key mis-mapping that either
+  # check alone, or defaultRoster routing through the helper, could hide.
   roster-schema-defaults-helper-matches-env-schema =
     let
       helper = import ../../lib/roster-schema-defaults.nix { inherit (pkgs) lib; };
@@ -343,12 +348,9 @@ in
         filer = schema.filerModel.default;
         worker = schema.workerModel.default;
       };
-      mismatches = builtins.filter (n: helper.schemaDefaults.${n} != expected.${n}) [
-        "scout"
-        "reviewer"
-        "filer"
-        "worker"
-      ];
+      mismatches = builtins.filter (
+        n: helper.schemaDefaults.${n} != expected.${n}
+      ) (builtins.attrNames helper.rosterModelKeys);
     in
     assert assertMsg (mismatches == [ ])
       "lib/roster-schema-defaults.nix schemaDefaults must match lib/env-schema.nix's four current defaults, mismatched: ${builtins.toJSON mismatches}";
@@ -373,7 +375,7 @@ in
       harness = import ../../lib/mkHarness.nix { inherit nixpkgs system; };
       mismatches = builtins.filter (
         n: rosterHelper.schemaDefaults.${n} != harness.schemaDefaults.${rosterHelper.rosterModelKeys.${n}}
-      ) [ "scout" "reviewer" "filer" "worker" ];
+      ) (builtins.attrNames rosterHelper.rosterModelKeys);
     in
     assert assertMsg (mismatches == [ ])
       "lib/roster-schema-defaults.nix schemaDefaults must match lib/mkHarness.nix's independently-computed generic schemaDefaults for the same schema keys, mismatched: ${builtins.toJSON mismatches}";
