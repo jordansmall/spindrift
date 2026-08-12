@@ -2338,6 +2338,15 @@ the Launcher to apply with its own, separately-scoped write token:
 | post a comment     | `gh issue comment`       | a single nonce-guarded `SPINDRIFT_COMMENT` line; the Launcher verifies the nonce, decodes it, and posts it host-side (ADR 0032's mechanism, reused) |
 | file an issue (Filer, opt-in) | `gh label create` / `gh issue create` | one nonce-guarded, base64-encoded `SPINDRIFT_ISSUE_INTENT` stdout line per issue; the Launcher files each one host-side (issue #2018) — see [Filer](#filer) |
 
+A stray `git push` in the "land the branch" row above — the agent guessing at
+the read-write workflow — fails locally instead of reaching the forge and
+403ing there (issue #2463): the Box repoints `origin`'s push URL at a
+throwaway local repo and installs a `pre-push` hook that always refuses, so
+the failure is instant and names the actual hand-off instead of a bare 403.
+This guard installs only for a backend whose read-only hand-off is genuinely
+relay-based (`github`, `local`) — a backend like `forgejo`, where a real `git
+push` is itself the hand-off mechanism, installs neither.
+
 The issue-filing row is additionally gated on `ORCHESTRATOR_ENABLED` (issue
 #2019), unlike the three rows above it: `read-only` with the orchestrator off
 keeps the Filer's pre-existing degraded behavior (it still attempts `gh issue
