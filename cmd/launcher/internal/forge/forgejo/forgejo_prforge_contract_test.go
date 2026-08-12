@@ -35,3 +35,42 @@ func (h *prforgeHarness) CodeForge() forge.CodeForge { return h.cf }
 func TestForgejoCodeForge_PRForgeContract(t *testing.T) {
 	forgetest.RunPRForgeContract(t, newPRForgeHarness(t))
 }
+
+// TestFakeForgejo_SeedDraftPR_DraftDerivedFromTitle verifies the fake
+// derives the served "draft" field from the pull's title, mirroring real
+// Forgejo (services/convert/pull.go: Draft is pr.IsWorkInProgress(ctx),
+// never an independently-settable flag) rather than an independent
+// fakePull.Draft bool disconnected from the title. SeedDraftPR must seed a
+// WIP-prefixed title so a read reports draft=true, and MarkReady — which
+// PATCHes the title with the WIP prefix stripped — must flip a subsequent
+// read's draft field to false.
+func TestFakeForgejo_SeedDraftPR_DraftDerivedFromTitle(t *testing.T) {
+	h := newPRForgeHarness(t)
+	url := h.SeedDraftPR("300")
+
+	pr, ok, err := h.Forge().OpenPRForBranch("agent/issue-300")
+	if err != nil {
+		t.Fatalf("OpenPRForBranch: %v", err)
+	}
+	if !ok {
+		t.Fatalf("OpenPRForBranch(%q): not found", "agent/issue-300")
+	}
+	if !pr.IsDraft {
+		t.Fatalf("OpenPRForBranch(%q) IsDraft = false, want true (fake's draft field must derive from its WIP-prefixed title)", "agent/issue-300")
+	}
+
+	if err := h.Forge().MarkReady(url); err != nil {
+		t.Fatalf("MarkReady(%q): %v", url, err)
+	}
+
+	pr, ok, err = h.Forge().OpenPRForBranch("agent/issue-300")
+	if err != nil {
+		t.Fatalf("OpenPRForBranch after MarkReady: %v", err)
+	}
+	if !ok {
+		t.Fatalf("OpenPRForBranch(%q) after MarkReady: not found", "agent/issue-300")
+	}
+	if pr.IsDraft {
+		t.Fatalf("OpenPRForBranch(%q) IsDraft = true after MarkReady, want false (fake's draft field must track the WIP-stripped title)", "agent/issue-300")
+	}
+}
