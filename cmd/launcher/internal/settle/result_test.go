@@ -51,3 +51,37 @@ func TestGateTerminalReason_DeadlineReached(t *testing.T) {
 		t.Errorf("gateTerminalReason(nil, 300) = %q, want %q", got, want)
 	}
 }
+
+// TestGateTerminalReasonRegistration_NamesGuard verifies the dedicated
+// registration-guard timeout reason names the guard explicitly, distinct
+// from the generic ci-timeout deadline-reached message — so a caller (and a
+// human reading the failedLabel comment) can tell "the registration guard
+// never cleared" apart from "CI just never finished" (issues #1652/#2475).
+func TestGateTerminalReasonRegistration_NamesGuard(t *testing.T) {
+	got := gateTerminalReasonRegistration(300)
+	if !strings.HasPrefix(got, "ci-timeout:") {
+		t.Errorf("gateTerminalReasonRegistration(300) = %q, want prefix %q", got, "ci-timeout:")
+	}
+	if !strings.Contains(got, "registration guard") {
+		t.Errorf("gateTerminalReasonRegistration(300) = %q, want it to name the registration guard", got)
+	}
+	want := "ci-timeout: registration guard never cleared after 300s"
+	if got != want {
+		t.Errorf("gateTerminalReasonRegistration(300) = %q, want %q", got, want)
+	}
+}
+
+// TestGateTerminalReason_DiffersFromRegistrationVariant verifies the two
+// ci-timeout flavours produce different reason strings for the same
+// deadline — the generic CI-watch-deadline reason from gateTerminalReason
+// must never collide with the dedicated registration-guard reason from
+// gateTerminalReasonRegistration, since selfHealGate's failedLabel comment
+// (#2476) relies on the text to tell the two timeout causes apart.
+func TestGateTerminalReason_DiffersFromRegistrationVariant(t *testing.T) {
+	const deadline = 300
+	generic := gateTerminalReason(nil, deadline)
+	registration := gateTerminalReasonRegistration(deadline)
+	if generic == registration {
+		t.Errorf("gateTerminalReason(nil, %d) and gateTerminalReasonRegistration(%d) produced the same reason %q, want different reasons for the two timeout flavours", deadline, deadline, generic)
+	}
+}
