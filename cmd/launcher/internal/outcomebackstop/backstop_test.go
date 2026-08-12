@@ -698,6 +698,89 @@ func TestRun_UnresolvedBlockNoteIsAdditive(t *testing.T) {
 	}
 }
 
+// TestRun_UnresolvedBlockOverridesSuccessfulPush pins issue #2459 for the
+// default (writable-remote push) arm: a push that succeeds outright must
+// still leave status=blocked when the run-state artifact records an
+// unresolved BLOCK verdict -- the reviewer's last word overrides even an
+// actually-landed push, mirroring the coverage already pinned for the
+// HostMediatedRemote arm in TestRun_UnresolvedBlockOverridesHostMediatedRemote.
+func TestRun_UnresolvedBlockOverridesSuccessfulPush(t *testing.T) {
+	dir := t.TempDir()
+	runStatePath := filepath.Join(dir, "run-state.json")
+	if err := os.WriteFile(runStatePath, []byte(`{"last_verdict": "BLOCK"}`), 0o644); err != nil {
+		t.Fatalf("write run state: %v", err)
+	}
+
+	git := &fakeGit{responses: map[string]fakeResult{
+		"rev-list": {stdout: "1\n"},
+	}}
+	clk := &fakeClock{}
+	cfg := baseConfig(git, clk)
+	cfg.WriteEnabled = true
+	cfg.OutboxRelayCapable = true
+	cfg.MaxAttempts = 3
+	cfg.RunStateFilePath = runStatePath
+
+	var buf bytes.Buffer
+	if err := Run(cfg, &buf); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	line := buf.String()
+	if git.countCalls("push") != 1 {
+		t.Fatalf("expected exactly one push, got %v", git.calls)
+	}
+	if strings.Contains(line, "push failed") {
+		t.Fatalf("unexpected push failure note: %q", line)
+	}
+	if !strings.Contains(line, "status=blocked") {
+		t.Fatalf("expected status=blocked despite successful push, got %q", line)
+	}
+	if !strings.Contains(line, "reviewer's blocking findings were never cleared") {
+		t.Fatalf("expected reviewer-blocking-findings note, got %q", line)
+	}
+}
+
+// TestRun_UnresolvedBlockOverridesOutboxRelay pins issue #2459 for the
+// read-only outbox-relay arm (!cfg.WriteEnabled && cfg.OutboxRelayCapable):
+// an unresolved BLOCK verdict must keep status=blocked even under the
+// otherwise-ready read-only-Box relay conditions, mirroring the coverage
+// already pinned for the HostMediatedRemote arm in
+// TestRun_UnresolvedBlockOverridesHostMediatedRemote.
+func TestRun_UnresolvedBlockOverridesOutboxRelay(t *testing.T) {
+	dir := t.TempDir()
+	runStatePath := filepath.Join(dir, "run-state.json")
+	if err := os.WriteFile(runStatePath, []byte(`{"last_verdict": "BLOCK"}`), 0o644); err != nil {
+		t.Fatalf("write run state: %v", err)
+	}
+
+	git := &fakeGit{responses: map[string]fakeResult{
+		"rev-list": {stdout: "1\n"},
+	}}
+	clk := &fakeClock{}
+	cfg := baseConfig(git, clk)
+	cfg.WriteEnabled = false
+	cfg.OutboxRelayCapable = true
+	cfg.RunStateFilePath = runStatePath
+
+	var buf bytes.Buffer
+	if err := Run(cfg, &buf); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	line := buf.String()
+	if !strings.Contains(line, "branch relayed via outbox bundle (read-only Box)") {
+		t.Fatalf("expected relay note, got %q", line)
+	}
+	if !strings.Contains(line, "status=blocked") {
+		t.Fatalf("expected status=blocked despite read-only relay conditions, got %q", line)
+	}
+	if !strings.Contains(line, "reviewer's blocking findings were never cleared") {
+		t.Fatalf("expected reviewer-blocking-findings note, got %q", line)
+	}
+	if git.countCalls("push") != 0 {
+		t.Fatalf("expected no push attempt on the read-only relay path, got %v", git.calls)
+	}
+}
+
 func TestRun_NegativeBackoffJitterClampsAndDoesNotPanic(t *testing.T) {
 	git := &fakeGit{responses: map[string]fakeResult{
 		"rev-list": {stdout: "1\n"},
