@@ -29,6 +29,16 @@ var resetsAtRe = regexp.MustCompile(`"resetsAt"\s*:\s*(\d+)`)
 // letters of the full weekday name.
 var resetsTextRe = regexp.MustCompile(`resets\s+(?:([A-Za-z]{3})\w*\s+)?(\d{1,2}):(\d{2})(am|pm)\s*\(UTC\)`)
 
+// staleGraceWindow bounds how stale a bare-form (no weekday) reset-time
+// candidate can be while still being returned as-is instead of rolled
+// forward a full day. retry.go's hold path (dispatch/retry.go:109-112)
+// already clamps a past ResetAt's wait to HoldJitterSecs, so a candidate
+// that's only trivially stale — likely just clock/processing skew, or the
+// limit genuinely refreshed moments ago — should fall through to that
+// existing clamp and produce a short near-immediate retry, rather than be
+// rolled a needless ~24h forward.
+const staleGraceWindow = 5 * time.Minute
+
 // weekdayAbbrs maps a 3-letter weekday abbreviation (as emitted in claude's
 // reset text) to its time.Weekday value.
 var weekdayAbbrs = map[string]time.Weekday{
@@ -301,11 +311,21 @@ func extractResetsAt(content string, now time.Time) *time.Time {
 // parseResetsAtText parses claude's human-readable "resets <clock-time>
 // (UTC)" or "resets <Weekday> <clock-time> (UTC)" suffix and returns the
 // occurrence of that clock-time today (bare form) or on the next matching
-// weekday (weekday form) as a UTC time, provided it is strictly after now
-// (which the caller supplies in UTC). It returns nil if no such suffix is
-// found, it is unparseable, or the computed occurrence has already passed —
-// a stale candidate is not rolled forward a full extra day/week (issue
-// #2443 review); the caller falls back to its own generic backoff instead.
+// weekday (weekday form) as a UTC time (which the caller supplies in UTC).
+// It returns nil only when the suffix is absent or unparseable (regex
+// no-match, unrecognized weekday abbreviation, out-of-range hour/minute, or
+// missing am/pm) — never merely because the computed occurrence is stale
+// relative to now. When the candidate is not after now:
+//
+//   - Weekday form: always rolls forward 7 days, regardless of how stale,
+//     since a weekly-cadence marker that's off by even a few minutes still
+//     means "next week", and falling back to a short generic backoff on a
+//     weekly-scale reset is far worse than one correct week-long hold
+//     (issue #2443 review).
+//   - Bare form: rolls forward 1 day, unless the candidate is stale by no
+//     more than staleGraceWindow, in which case it is returned unchanged
+//     (still in the past) — see staleGraceWindow's doc comment for why.
+//
 // It never calls time.Now(); the caller is responsible for supplying a
 // reference time.
 func parseResetsAtText(content string, now time.Time) *time.Time {
@@ -340,8 +360,10 @@ func parseResetsAtText(content string, now time.Time) *time.Time {
 
 	now = now.UTC()
 
+	isWeekdayForm := weekdayAbbr != ""
+
 	var candidate time.Time
-	if weekdayAbbr == "" {
+	if !isWeekdayForm {
 		candidate = time.Date(now.Year(), now.Month(), now.Day(), hour, minute, 0, 0, time.UTC)
 	} else {
 		wantWeekday, ok := weekdayAbbrs[strings.ToLower(weekdayAbbr)]
@@ -353,13 +375,26 @@ func parseResetsAtText(content string, now time.Time) *time.Time {
 		candidate = candidate.AddDate(0, 0, daysUntil)
 	}
 
-	// A candidate that has already passed is stale, not a signal to wait a
-	// full extra day/week: rolling forward blindly turns a several-minute
-	// miss into a near-full-cycle hold that can outlast a job's timeout
-	// (issue #2443 review). Report no reset time and let the caller fall
-	// back to its generic bounded backoff instead.
-	if !candidate.After(now) {
-		return nil
+	if candidate.After(now) {
+		return &candidate
 	}
+
+	// The candidate is stale (at or before now).
+	if isWeekdayForm {
+		// Weekly-cadence marker: always roll to next week, no grace window.
+		// Falling back to a short generic backoff on a weekly-scale reset is
+		// far worse than one correct week-long hold (issue #2443 review).
+		candidate = candidate.AddDate(0, 0, 7)
+		return &candidate
+	}
+
+	if now.Sub(candidate) <= staleGraceWindow {
+		// Only trivially stale: return as-is (still in the past) so the
+		// caller's existing past-ResetAt clamp produces a short near-
+		// immediate retry instead of a needless ~24h wait.
+		return &candidate
+	}
+
+	candidate = candidate.AddDate(0, 0, 1)
 	return &candidate
 }

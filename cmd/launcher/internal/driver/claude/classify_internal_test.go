@@ -39,9 +39,9 @@ func TestParseResetsAtText(t *testing.T) {
 			want:    timePtr(time.Date(2026, 8, 12, 18, 30, 0, 0, time.UTC)),
 		},
 		{
-			name:    "bare clock time earlier today is stale, no reset time",
+			name:    "bare clock time well past due rolls forward to tomorrow",
 			content: "You've hit your session limit · resets 5:00am (UTC)",
-			want:    nil,
+			want:    timePtr(time.Date(2026, 8, 13, 5, 0, 0, 0, time.UTC)),
 		},
 		{
 			name:    "weekday matches now's weekday, time later today",
@@ -49,9 +49,9 @@ func TestParseResetsAtText(t *testing.T) {
 			want:    timePtr(time.Date(2026, 8, 12, 18, 30, 0, 0, time.UTC)),
 		},
 		{
-			name:    "weekday matches now's weekday, time earlier today is stale, no reset time",
+			name:    "weekday matches today, time already passed rolls to next week",
 			content: "You've hit your weekly limit · resets Wed 5:00am (UTC)",
-			want:    nil,
+			want:    timePtr(time.Date(2026, 8, 19, 5, 0, 0, 0, time.UTC)),
 		},
 		{
 			name:    "weekday different from now's weekday",
@@ -59,16 +59,22 @@ func TestParseResetsAtText(t *testing.T) {
 			want:    timePtr(time.Date(2026, 8, 17, 0, 0, 0, 0, time.UTC)),
 		},
 		{
-			name:    "bare clock time just missed by minutes is stale, no reset time",
+			name:    "bare clock time missed within grace window stays unrolled",
 			content: "You've hit your session limit · resets 11:10pm (UTC)",
 			now:     time.Date(2026, 8, 12, 23, 15, 0, 0, time.UTC),
-			want:    nil,
+			want:    timePtr(time.Date(2026, 8, 12, 23, 10, 0, 0, time.UTC)),
 		},
 		{
-			name:    "weekday time just missed on the target weekday is stale, no reset time",
+			name:    "weekday time just missed on the target weekday still rolls to next week",
 			content: "You've hit your weekly limit · resets Mon 12:00am (UTC)",
 			now:     time.Date(2026, 8, 17, 0, 1, 0, 0, time.UTC),
-			want:    nil,
+			want:    timePtr(time.Date(2026, 8, 24, 0, 0, 0, 0, time.UTC)),
+		},
+		{
+			name:    "cross-midnight reset time rolls to tomorrow",
+			content: "You've hit your session limit · resets 1:00am (UTC)",
+			now:     time.Date(2026, 8, 12, 22, 30, 0, 0, time.UTC),
+			want:    timePtr(time.Date(2026, 8, 13, 1, 0, 0, 0, time.UTC)),
 		},
 		{
 			name:    "12:00am edge case parses to 00:00",
