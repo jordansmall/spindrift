@@ -301,6 +301,43 @@ func (e *execClient) nativeDependencyIDs(num, direction string) ([]string, error
 	return deps, nil
 }
 
+// PriorClaimState implements the optional forge.PriorClaimStateReader
+// surface (issue #2477): it reads issue num's timeline for the most recent
+// "unlabeled" event naming either the Complete or Failed terminal label —
+// the label a claim's TransitionState(_, InProgress) call (ClaimRemoveLabels)
+// stripped immediately before recoverByNumber ever runs, and so the only
+// route back to what the issue was before that claim. Timeline events are
+// chronological (oldest first, preserved across --paginate pages), so the
+// last matching event seen while scanning is the most recent one.
+func (e *execClient) PriorClaimState(num string) (forge.DispatchState, bool, error) {
+	cmd := exec.Command("gh", "api",
+		fmt.Sprintf("repos/%s/issues/%s/timeline", e.repo, num),
+		"--paginate",
+		"--jq", `.[] | select(.event == "unlabeled") | .label.name`,
+	)
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err != nil {
+		if msg := strings.TrimSpace(stderr.String()); msg != "" {
+			return forge.Untriaged, false, fmt.Errorf("gh api timeline %s: %w: %s", num, err, msg)
+		}
+		return forge.Untriaged, false, fmt.Errorf("gh api timeline %s: %w", num, err)
+	}
+	var prior forge.DispatchState
+	found := false
+	scanner := bufio.NewScanner(strings.NewReader(string(out)))
+	for scanner.Scan() {
+		switch strings.TrimSpace(scanner.Text()) {
+		case e.labels.Complete:
+			prior, found = forge.Complete, true
+		case e.labels.Failed:
+			prior, found = forge.Failed, true
+		}
+	}
+	return prior, found, nil
+}
+
 // TouchesOf returns the declared touch-set parsed from issue num's body —
 // the shared body-grammar default (forge.ParseTouchPaths); this adapter has
 // no native touch-set concept to prefer over it.
