@@ -134,6 +134,8 @@ func (s *Settle) selfHealGate(d dispatch.Dispatcher, num string, gen uint64, pr 
 			}
 			return landingManual, ""
 		case gateTerminal:
+			fmt.Printf("    #%s  landing=%s  status=gate-terminal  !! %s\n", num, pr, gateReason)
+			s.it.Comment(num, fmt.Sprintf("landing failed: %s", gateReason))
 			s.transitionState(num, forge.InProgress, forge.Failed)
 			return landingFailed, gateReason
 		case gateRedRetry:
@@ -293,8 +295,13 @@ const registrationWindowPolls = 3
 //   - gateRedRetry  — CI red (FAILURE or ERROR); caller decides whether to
 //     dispatch a fix box. reason is "".
 //   - gateTerminal  — non-retriable outcome (timeout, API error). Caller
-//     must swap to failedLabel. reason is a classified, prefixed string
-//     (gateTerminalReason) — "ci-check-error: ..." or "ci-timeout: ...".
+//     must swap to failedLabel. reason is a classified, prefixed string —
+//     "ci-check-error: ..." (gateTerminalReason), "ci-timeout: CI-watch
+//     deadline reached..." (gateTerminalReason, the ordinary timeout), or
+//     "ci-timeout: registration guard never cleared..."
+//     (gateTerminalReasonRegistration, issue #2476) when the deadline was
+//     reached with requireRegistration set and no genuine non-terminal poll
+//     ever observed.
 //   - gateAbandoned — reason is "".
 func (s *Settle) gateToGreen(num string, gen uint64, pr string, requireRegistration bool) (gateResult, string) {
 	pollIv := s.cfg.MergePollInterval
@@ -319,6 +326,14 @@ func (s *Settle) gateToGreen(num string, gen uint64, pr string, requireRegistrat
 	}
 	elapsed := 0
 	registered := !requireRegistration
+	// sawNonTerminal tracks only genuine evidence that a real poll observed a
+	// non-terminal state (PENDING/EXPECTED/NONE) — unlike registered, it is
+	// never flipped by the registrationWindow-elapsed fallback below, so it
+	// stays false when a deadline is reached with nothing but SUCCESS ever
+	// actually observed. That distinguishes an ordinary ran-out-the-clock
+	// timeout from one where the requireRegistration guard itself never
+	// cleared on real evidence (issue #2476).
+	sawNonTerminal := false
 
 	for {
 		if s.terminated(num, gen) {
@@ -331,6 +346,7 @@ func (s *Settle) gateToGreen(num string, gen uint64, pr string, requireRegistrat
 		}
 		if state != forge.StateSuccess && state != forge.StateFailure && state != forge.StateError {
 			registered = true
+			sawNonTerminal = true
 		}
 		if !registered && elapsed >= registrationWindow {
 			// The registration window elapsed with only a terminal state
@@ -380,6 +396,14 @@ func (s *Settle) gateToGreen(num string, gen uint64, pr string, requireRegistrat
 		// delays; actualIv still advances elapsed to prevent a tight loop.
 		time.Sleep(time.Duration(pollIv) * time.Second)
 		elapsed += actualIv
+	}
+	if requireRegistration && !sawNonTerminal {
+		// The deadline was reached with the requireRegistration guard still
+		// unsatisfied by any genuine evidence — only the registrationWindow's
+		// own elapsed-fallback (if it fired at all) ever set registered.
+		// Name that flavour explicitly rather than folding it into the
+		// generic ci-timeout reason (issue #2476).
+		return gateTerminal, gateTerminalReasonRegistration(deadline)
 	}
 	return gateTerminal, gateTerminalReason(nil, deadline)
 }
