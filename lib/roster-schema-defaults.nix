@@ -9,8 +9,9 @@
 # itself) because that file's returned attrset is iterated uniformly as
 # "one entry per knob" by other generators (lib/renderers.nix, the
 # harness.env.example generator, ...) -- adding a non-knob key there
-# would corrupt those iterations. mkHarness.nix cannot import roster.nix
-# for this either (lib/mkHarness.nix:316 already imports roster.nix ->
+# would corrupt those iterations. roster.nix cannot import mkHarness.nix
+# for this either (mkHarness.nix already imports roster.nix, to resolve
+# the legacy-knob-derived roster -- the reverse import would be
 # circular), so this third file is what lib/roster.nix imports directly.
 # lib/mkHarness.nix deliberately does NOT reuse this helper -- it keeps its
 # own separate generic, `or ""`-tolerant schemaDefaults derivation instead
