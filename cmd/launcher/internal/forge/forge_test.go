@@ -199,6 +199,56 @@ func TestFake_OpenPRForBranch(t *testing.T) {
 	}
 }
 
+// TestFake_MarkReady verifies MarkReady flips the stored PR's IsDraft to
+// false, observable afterward via OpenPRForBranch — mirroring the real
+// adapters, where MarkReady (`gh pr ready`) actually takes the PR out of
+// draft rather than merely being recorded as a call.
+func TestFake_MarkReady(t *testing.T) {
+	f := forge.NewFake()
+	const branch = "agent/issue-7"
+	const url = "https://github.com/o/r/pull/99"
+	f.SetPR(branch, forge.PR{URL: url, IsDraft: true})
+
+	if err := f.MarkReady(url); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	pr, ok, err := f.OpenPRForBranch(branch)
+	if err != nil || !ok {
+		t.Fatalf("want (pr,true,nil); got ok=%v err=%v", ok, err)
+	}
+	if pr.IsDraft {
+		t.Fatalf("want IsDraft=false after MarkReady, got true")
+	}
+	if len(f.MarkReadyCalls) != 1 || f.MarkReadyCalls[0] != url {
+		t.Fatalf("want MarkReadyCalls=[%q], got %v", url, f.MarkReadyCalls)
+	}
+}
+
+// TestFake_MarkDraft verifies MarkDraft flips the stored PR's IsDraft to
+// true — the inverse of TestFake_MarkReady.
+func TestFake_MarkDraft(t *testing.T) {
+	f := forge.NewFake()
+	const branch = "agent/issue-7"
+	const url = "https://github.com/o/r/pull/99"
+	f.SetPR(branch, forge.PR{URL: url, IsDraft: false})
+
+	if err := f.MarkDraft(url); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	pr, ok, err := f.OpenPRForBranch(branch)
+	if err != nil || !ok {
+		t.Fatalf("want (pr,true,nil); got ok=%v err=%v", ok, err)
+	}
+	if !pr.IsDraft {
+		t.Fatalf("want IsDraft=true after MarkDraft, got false")
+	}
+	if len(f.MarkDraftCalls) != 1 || f.MarkDraftCalls[0] != url {
+		t.Fatalf("want MarkDraftCalls=[%q], got %v", url, f.MarkDraftCalls)
+	}
+}
+
 // TestFake_FailureDetail verifies that FailureDetail returns the scripted
 // detail for a PR URL, and "" (no error) for a URL with nothing scripted —
 // the fetch is best-effort, so an unscripted PR must not look like a hard

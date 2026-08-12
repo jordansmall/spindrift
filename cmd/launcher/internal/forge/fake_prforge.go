@@ -298,18 +298,32 @@ func (pf *PRForgeFake) EnqueueAutoMerge(prURL string) error {
 	return pf.EnqueueAutoMergeErr
 }
 
+// MarkReady records the call and, if prURL names a known PR, flips its
+// stored IsDraft to false — mirroring the real adapters, where MarkReady
+// (`gh pr ready`) actually takes the PR out of draft rather than merely
+// being observable as a call.
 func (pf *PRForgeFake) MarkReady(prURL string) error {
 	pf.mu.Lock()
 	defer pf.mu.Unlock()
 	pf.LandingCallLog = append(pf.LandingCallLog, "MarkReady:"+prURL)
 	pf.MarkReadyCalls = append(pf.MarkReadyCalls, prURL)
+	if pr, ok := pf.prs[prURL]; ok {
+		pr.IsDraft = false
+		pf.prs[prURL] = pr
+	}
 	return pf.MarkReadyErr
 }
 
+// MarkDraft records the call and, if prURL names a known PR, flips its
+// stored IsDraft to true — the inverse of MarkReady.
 func (pf *PRForgeFake) MarkDraft(prURL string) error {
 	pf.mu.Lock()
 	defer pf.mu.Unlock()
 	pf.LandingCallLog = append(pf.LandingCallLog, "MarkDraft:"+prURL)
 	pf.MarkDraftCalls = append(pf.MarkDraftCalls, prURL)
+	if pr, ok := pf.prs[prURL]; ok {
+		pr.IsDraft = true
+		pf.prs[prURL] = pr
+	}
 	return pf.MarkDraftErr
 }
