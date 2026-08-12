@@ -86,11 +86,14 @@ var _ forge.BundleCommitSubjects = (*readOnlyCodeForge)(nil)
 // failure -- which would wrongly report a settled hand-off as blocked --
 // this treats it as a signal to adopt: it resolves the branch's own open
 // PR via OpenPRForBranch (embedded from execClient) and returns that PR's
-// URL with no error. If OpenPRForBranch can't resolve an open PR for that
-// head (e.g. only a closed/merged PR exists, or the lookup itself errors),
-// the original create error is returned unmasked -- adoption is only ever
+// URL with no error, and created=false -- distinct from the fresh-create
+// success below, so a caller like settle's reconstructed-PR path (issue
+// #2447) can tell it must not treat this PR's title/body as the ones just
+// supplied. If OpenPRForBranch can't resolve an open PR for that head (e.g.
+// only a closed/merged PR exists, or the lookup itself errors), the
+// original create error is returned unmasked -- adoption is only ever
 // additive, never a way to swallow a genuine failure.
-func (c *readOnlyCodeForge) CreateDraftPR(title, body, base, head string) (string, error) {
+func (c *readOnlyCodeForge) CreateDraftPR(title, body, base, head string) (string, bool, error) {
 	var stderr bytes.Buffer
 	cmd := exec.Command("gh", "pr", "create",
 		"--repo", c.repo,
@@ -106,10 +109,10 @@ func (c *readOnlyCodeForge) CreateDraftPR(title, body, base, head string) (strin
 		createErr := fmt.Errorf("github: create draft PR: gh pr create: %w: %s", err, strings.TrimSpace(stderr.String()))
 		if strings.Contains(stderr.String(), "already exists") {
 			if pr, ok, openErr := c.OpenPRForBranch(head); openErr == nil && ok {
-				return pr.URL, nil
+				return pr.URL, false, nil
 			}
 		}
-		return "", createErr
+		return "", false, createErr
 	}
-	return strings.TrimSpace(string(out)), nil
+	return strings.TrimSpace(string(out)), true, nil
 }

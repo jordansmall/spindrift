@@ -247,7 +247,7 @@ func (s *Settle) adoptRelayedBranch(num string, result dispatch.Result) (string,
 	}
 	body = ensureClosesReference(body, num, s.it)
 
-	url, err := dpc.CreateDraftPR(title, body, s.cfg.BaseBranch, branch)
+	url, _, err := dpc.CreateDraftPR(title, body, s.cfg.BaseBranch, branch)
 	if err != nil {
 		return "", false
 	}

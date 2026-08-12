@@ -139,17 +139,17 @@ func (hm *HostMediationFake) relayBundle(outboxDir, ref string) error {
 // CreateDraftPR (reachable exclusively through AsGithubReadOnly()) calls it,
 // so a bare *Fake used as a github-shaped CodeForge in every other settle
 // test never silently starts satisfying forge.DraftPRCreator.
-func (hm *HostMediationFake) createDraftPR(title, body, base, head string) (string, error) {
+func (hm *HostMediationFake) createDraftPR(title, body, base, head string) (string, bool, error) {
 	hm.mu.Lock()
 	defer hm.mu.Unlock()
 	hm.CreateDraftPRCalls = append(hm.CreateDraftPRCalls, CreateDraftPRCall{Title: title, Body: body, Base: base, Head: head})
 	if hm.CreateDraftPRAdoptHead != "" && head == hm.CreateDraftPRAdoptHead {
-		return hm.CreateDraftPRAdoptedURL, nil
+		return hm.CreateDraftPRAdoptedURL, false, nil
 	}
 	if hm.CreateDraftPRErr != nil {
-		return "", hm.CreateDraftPRErr
+		return "", false, hm.CreateDraftPRErr
 	}
-	return hm.CreateDraftPRURL, nil
+	return hm.CreateDraftPRURL, true, nil
 }
 
 // commitSubjects backs the optional BundleCommitSubjects surface (issue

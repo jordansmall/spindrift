@@ -116,8 +116,11 @@ func (c *readOnlyCodeForge) CommitSubjects(outboxDir, base, ref string) ([]strin
 // the lookup itself errors), the original create error is returned
 // unmasked -- adoption is only ever additive, never a way to swallow a
 // genuine failure. Any other (non-409) failure is returned exactly as
-// before.
-func (c *readOnlyCodeForge) CreateDraftPR(title, body, base, head string) (string, error) {
+// before. The adoption path returns created=false, distinct from the
+// fresh-create success below, so a caller like settle's reconstructed-PR
+// path (issue #2447) can tell it must not treat this PR's title/body as the
+// ones just supplied.
+func (c *readOnlyCodeForge) CreateDraftPR(title, body, base, head string) (string, bool, error) {
 	reqBody := map[string]any{
 		"title": forgejoWIPPrefix + " " + title,
 		"head":  head,
@@ -127,16 +130,16 @@ func (c *readOnlyCodeForge) CreateDraftPR(title, body, base, head string) (strin
 	var payload forgejoPullPayload
 	err := c.rest.Do(http.MethodPost, c.repoPath()+"/pulls", reqBody, &payload)
 	if err == nil {
-		return payload.HTMLURL, nil
+		return payload.HTMLURL, true, nil
 	}
 	createErr := fmt.Errorf("forgejo: create draft PR: %w", err)
 	var statusErr rest.StatusError
 	if errors.As(err, &statusErr) && statusErr.Status == http.StatusConflict {
 		if pr, ok, openErr := c.openAnyPRForBranch(head); openErr == nil && ok {
-			return pr.URL, nil
+			return pr.URL, false, nil
 		}
 	}
-	return "", createErr
+	return "", false, createErr
 }
 
 var _ forge.BundleRelay = (*readOnlyCodeForge)(nil)

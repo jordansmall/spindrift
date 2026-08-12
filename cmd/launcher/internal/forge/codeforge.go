@@ -169,8 +169,20 @@ type PRForge interface {
 // capability gate (issue #1916) name it as the missing seam.
 type DraftPRCreator interface {
 	// CreateDraftPR opens a draft PR from head onto base with the given
-	// title and body, and returns its URL.
-	CreateDraftPR(title, body, base, head string) (url string, err error)
+	// title and body, and returns its URL. created reports whether this call
+	// actually opened a fresh PR (true) or instead adopted a pre-existing
+	// open PR for head after the underlying create call refused it as a
+	// duplicate (false) -- both real adapters treat that refusal as
+	// idempotent success rather than a failure (issue #2407). A caller
+	// cannot always treat the two the same: settle's read-only reconstructed
+	// -PR path (issue #2447) derives title/body host-side from the branch's
+	// own commits only when no PR-intent line survived, and adopting a PR
+	// some earlier call already opened means that PR's title/body were
+	// already set then -- writing the reconstructed text over it would only
+	// be correct if this call created it fresh. created lets a caller like
+	// that one tell the two cases apart instead of silently treating an
+	// adopted box-authored PR as if this call had just worded it.
+	CreateDraftPR(title, body, base, head string) (url string, created bool, err error)
 }
 
 // BundleCommitSubjects is settle's read-only PR-intent-fallback hook (issue
