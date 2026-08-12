@@ -114,6 +114,12 @@ configure_env() {
   # `--validate-markers-registry` flag.
   PROMPT_CONTRACT_REGISTRY_FILE="${PROMPT_CONTRACT_REGISTRY_FILE:-/agent/prompt-contract-registry.json}"
 
+  # lib/prompt-contract.nix's forbiddenMarkers list as JSON (issue #2464),
+  # baked at the same sibling-of-/agent/prompts path as the contract files
+  # above, for the `driver-exec assemble-prompt` verb's
+  # `--forbidden-markers-registry` flag.
+  FORBIDDEN_MARKERS_REGISTRY_FILE="${FORBIDDEN_MARKERS_REGISTRY_FILE:-/agent/forbidden-markers-registry.json}"
+
   # _driver_extract_outcome and _driver_session_flags are defined by the Driver
   # registry (lib/drivers/<name>.nix); a nix-built image prepends them via
   # driverPreamble (lib/mkHarness.nix), and the bats harness sources the same
@@ -740,6 +746,7 @@ phase_prompt_assembly() {
   local -a _ap_args=(
     --registry "$PROMPTASSEMBLY_REGISTRY_FILE"
     --validate-markers-registry "$PROMPT_CONTRACT_REGISTRY_FILE"
+    --forbidden-markers-registry "$FORBIDDEN_MARKERS_REGISTRY_FILE"
     --agents-json-template "${AGENTS_JSON_TEMPLATE:-}"
     --issue-tracker "${ISSUE_TRACKER:-}"
     --code-forge "${CODE_FORGE:-}"

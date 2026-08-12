@@ -50,6 +50,15 @@ let
     builtins.toJSON (import ../../lib/prompt-contract.nix).validateMarkers
   );
 
+  # lib/prompt-contract.nix's forbiddenMarkers list, rendered the same way as
+  # promptContractRegistryJsonFile above (issue #2464): entrypoint.sh's
+  # phase_prompt_assembly now unconditionally passes
+  # `--forbidden-markers-registry` too, so this lightweight check needs its
+  # own JSON file alongside promptContractRegistryJsonFile.
+  forbiddenMarkersRegistryJsonFile = pkgs.writeText "forbidden-markers-registry.json" (
+    builtins.toJSON (import ../../lib/prompt-contract.nix).forbiddenMarkers
+  );
+
   testdataRegistryJson = ../../cmd/launcher/internal/promptassembly/testdata/registry.json;
 in
 {
@@ -145,6 +154,7 @@ in
         # check above already built -- no second render of the registry.
         PROMPTASSEMBLY_REGISTRY_FILE = fragmentsRegistryJsonFile;
         PROMPT_CONTRACT_REGISTRY_FILE = promptContractRegistryJsonFile;
+        FORBIDDEN_MARKERS_REGISTRY_FILE = forbiddenMarkersRegistryJsonFile;
       }
       ''
         export HOME="$TMPDIR/home"

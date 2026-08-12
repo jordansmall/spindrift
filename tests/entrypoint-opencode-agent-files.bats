@@ -11,6 +11,7 @@ setup() {
   : "${DRIVER_EXEC_BIN:?DRIVER_EXEC_BIN must be set (the real driver-exec Go binary, nix/checks/promptassembly.nix)}"
   : "${PROMPTASSEMBLY_REGISTRY_FILE:?PROMPTASSEMBLY_REGISTRY_FILE must be set (lib/fragments.nix rendered to JSON, nix/checks/promptassembly.nix)}"
   : "${PROMPT_CONTRACT_REGISTRY_FILE:?PROMPT_CONTRACT_REGISTRY_FILE must be set (lib/prompt-contract.nix validateMarkers rendered to JSON, nix/checks/promptassembly.nix)}"
+  : "${FORBIDDEN_MARKERS_REGISTRY_FILE:?FORBIDDEN_MARKERS_REGISTRY_FILE must be set (lib/prompt-contract.nix forbiddenMarkers rendered to JSON, nix/checks/promptassembly.nix)}"
 
   # BRANCH is computed inside entrypoint.sh's main (BRANCH="${BRANCH_PREFIX:-}${ISSUE_NUMBER}",
   # entrypoint.sh:55), not exported by set_box_env/setup_entrypoint_env --
@@ -114,6 +115,7 @@ assemble_go_agent_files() {
   run "$DRIVER_EXEC_BIN" assemble-prompt \
     --registry "$PROMPTASSEMBLY_REGISTRY_FILE" \
     --validate-markers-registry "$PROMPT_CONTRACT_REGISTRY_FILE" \
+    --forbidden-markers-registry "$FORBIDDEN_MARKERS_REGISTRY_FILE" \
     --prompt-output "$BATS_TEST_TMPDIR/go-prompt.txt" \
     --agents-json-output "$BATS_TEST_TMPDIR/go-agents.json" \
     --handoff-output "$BATS_TEST_TMPDIR/go-handoff.json" \
