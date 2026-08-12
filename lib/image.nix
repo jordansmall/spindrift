@@ -83,6 +83,12 @@
   # Go `driver-exec assemble-prompt` verb's `--validate-markers-registry`
   # flag -- a sibling of fragmentsRegistryJson above.
   promptContractRegistryJson,
+  # lib/prompt-contract.nix's forbiddenMarkers list as JSON (issue #2464):
+  # baked into the image at $out/agent/forbidden-markers-registry.json for
+  # the Go `driver-exec assemble-prompt` verb's
+  # `--forbidden-markers-registry` flag -- a sibling of
+  # promptContractRegistryJson above.
+  forbiddenMarkersRegistryJson,
   # The shared prompt block registry (lib/prompt-contract.nix, issue #2245)
   # rendered into agent/entrypoint.sh's _INJECT_BLOCK_ROWS array, the
   # `_contract_marker` lookup's data source (issue #2246). Mirrors
@@ -364,6 +370,7 @@ let
     cp ${pkgs.writeText "research-outcome-contract.md" researchOutcomeContract} $out/agent/research-outcome-contract.md
     cp ${pkgs.writeText "fragments-registry.json" fragmentsRegistryJson} $out/agent/fragments-registry.json
     cp ${pkgs.writeText "prompt-contract-registry.json" promptContractRegistryJson} $out/agent/prompt-contract-registry.json
+    cp ${pkgs.writeText "forbidden-markers-registry.json" forbiddenMarkersRegistryJson} $out/agent/forbidden-markers-registry.json
     cp ${pkgs.writeText "issue-prompt.md" (injectOutcomeContract prompt)} $out/agent/prompts/issue-prompt.md
     cp ${pkgs.writeText "scout-prompt.md" scoutPrompt} $out/agent/prompts/scout-prompt.md
     cp ${pkgs.writeText "review-prompt.md" reviewPrompt} $out/agent/prompts/review-prompt.md

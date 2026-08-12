@@ -57,6 +57,15 @@ let
     builtins.toJSON (import ../../lib/prompt-contract.nix).validateMarkers
   );
 
+  # lib/prompt-contract.nix's forbiddenMarkers list, rendered the same way as
+  # promptContractRegistryJsonFile above (issue #2464): entrypoint.sh's
+  # phase_prompt_assembly now unconditionally passes
+  # `--forbidden-markers-registry` too, so every suite exporting
+  # PROMPT_CONTRACT_REGISTRY_FILE below needs this sibling var as well.
+  forbiddenMarkersRegistryJsonFile = pkgs.writeText "forbidden-markers-registry.json" (
+    builtins.toJSON (import ../../lib/prompt-contract.nix).forbiddenMarkers
+  );
+
   # Registry-driven (issue #2261 slices 4-6): runs the *unchanged*
   # entrypoint-outcome-{contract,recovery,backstop}.bats suites end-to-end
   # against every non-claude registered Driver's own fake binary
@@ -102,6 +111,7 @@ let
           DRIVER_EXEC_BIN = "${batsHarness.driverExecBin}/bin/driver-exec";
           PROMPTASSEMBLY_REGISTRY_FILE = promptassemblyRegistryJsonFile;
           PROMPT_CONTRACT_REGISTRY_FILE = promptContractRegistryJsonFile;
+          FORBIDDEN_MARKERS_REGISTRY_FILE = forbiddenMarkersRegistryJsonFile;
         }
         ''
           export HOME="$TMPDIR/home"
@@ -283,6 +293,7 @@ in
         DRIVER_EXEC_BIN = "${batsHarness.driverExecBin}/bin/driver-exec";
         PROMPTASSEMBLY_REGISTRY_FILE = promptassemblyRegistryJsonFile;
         PROMPT_CONTRACT_REGISTRY_FILE = promptContractRegistryJsonFile;
+        FORBIDDEN_MARKERS_REGISTRY_FILE = forbiddenMarkersRegistryJsonFile;
       }
       ''
         export HOME="$TMPDIR/home"
@@ -366,6 +377,7 @@ in
         DRIVER_EXEC_BIN = "${batsHarness.driverExecBin}/bin/driver-exec";
         PROMPTASSEMBLY_REGISTRY_FILE = promptassemblyRegistryJsonFile;
         PROMPT_CONTRACT_REGISTRY_FILE = promptContractRegistryJsonFile;
+        FORBIDDEN_MARKERS_REGISTRY_FILE = forbiddenMarkersRegistryJsonFile;
       }
       ''
         export HOME="$TMPDIR/home"

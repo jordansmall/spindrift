@@ -405,6 +405,12 @@ let
   # (lib/image.nix), a sibling of fragmentsRegistryJson above.
   promptContractRegistryJson = builtins.toJSON promptContract.validateMarkers;
 
+  # lib/prompt-contract.nix's forbiddenMarkers list, as JSON rather than a
+  # bash preamble (issue #2464): baked into the image for the Go
+  # `driver-exec assemble-prompt` verb's `--forbidden-markers-registry` flag
+  # (lib/image.nix), a sibling of promptContractRegistryJson above.
+  forbiddenMarkersRegistryJson = builtins.toJSON promptContract.forbiddenMarkers;
+
   # The shared prompt block registry (lib/prompt-contract.nix, issue #2245),
   # rendered into agent/entrypoint.sh's `_INJECT_BLOCK_ROWS` array the same
   # way fragmentRegistryPreamble above renders `_FRAGMENT_ROWS` -- already
@@ -610,6 +616,7 @@ let
       fragmentRegistryPreamble
       fragmentsRegistryJson
       promptContractRegistryJson
+      forbiddenMarkersRegistryJson
       contractRegistryPreamble
       prompt
       scoutPrompt
