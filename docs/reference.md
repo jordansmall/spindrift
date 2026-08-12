@@ -1418,6 +1418,17 @@ ready-for-agent ──dispatch──▶ agent-in-progress ───landing settl
   `agent-recover` label (`agent-recover.yml` → `spindrift recover <n>`): an
   operator's explicit assertion that the issue is no longer owned by a live
   runner, re-running the merge gate on its open PR (draft or not).
+- **A terminal recover failure never downgrades an already-successful issue.**
+  The claim above strips whatever terminal label the issue carried (including
+  `agent-complete`) before `spindrift recover` ever runs, so a recover attempt
+  that then fails to find anything to adopt — leaving no open PR and no
+  recoverable self-report — reads the issue's timeline for the terminal label
+  that claim just removed. When that was `agent-complete`, recover restores
+  it and comments that a recover was attempted and declined to change
+  anything, rather than letting the workflow's unconditional park step demote
+  the issue to `agent-failed` (issue #2477). An issue with no prior terminal
+  label, or whose prior label was `agent-failed`, still parks `agent-failed`
+  exactly as before.
 
 Rename any of these with the `inProgressLabel` / `failedLabel` / `completeLabel`
 knobs under `settings.lifecycleLabels` (baked) or the
