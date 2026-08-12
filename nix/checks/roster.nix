@@ -328,4 +328,56 @@ in
     assert assertMsg (mismatches == [ ])
       "defaultRoster {} must inherit each unmentioned agent's model from lib/env-schema.nix's default, mismatched: ${builtins.toJSON mismatches}";
     pkgs.runCommand "roster-default-roster-inherits-schema-default" { } "touch $out";
+
+  # Issue #2437: lib/roster-schema-defaults.nix is the single source of
+  # truth for defaultRoster's roster-name -> schema-key model defaults.
+  # Pin its schemaDefaults output directly against lib/env-schema.nix's
+  # four current defaults so the two can never silently drift.
+  roster-schema-defaults-helper-matches-env-schema =
+    let
+      helper = import ../../lib/roster-schema-defaults.nix { inherit (pkgs) lib; };
+      schema = import ../../lib/env-schema.nix;
+      expected = {
+        scout = schema.scoutModel.default;
+        reviewer = schema.reviewModel.default;
+        filer = schema.filerModel.default;
+        worker = schema.workerModel.default;
+      };
+      mismatches = builtins.filter (n: helper.schemaDefaults.${n} != expected.${n}) [
+        "scout"
+        "reviewer"
+        "filer"
+        "worker"
+      ];
+    in
+    assert assertMsg (mismatches == [ ])
+      "lib/roster-schema-defaults.nix schemaDefaults must match lib/env-schema.nix's four current defaults, mismatched: ${builtins.toJSON mismatches}";
+    pkgs.runCommand "roster-schema-defaults-helper-matches-env-schema" { } "touch $out";
+
+  # Issue #2437: lib/roster-schema-defaults.nix's throw-on-missing
+  # schemaDefaults and lib/mkHarness.nix's independently-computed, `or
+  # ""`-tolerant generic schemaDefaults are two separate derivations over
+  # the same lib/env-schema.nix. A schema-key rename or a changed `.default`
+  # could be caught by one (the roster helper throws on a missing key) and
+  # silently swallowed by the other (mkHarness falls back to ""), or vice
+  # versa, with nothing today pinning the two to agree. Reproduce
+  # mkHarness.nix's exact one-liner here (it isn't exposed in mkHarness's
+  # output attrset) and assert the roster helper's four per-agent defaults
+  # match mkHarness's generic defaults for the same underlying schema keys,
+  # looked up via rosterModelKeys rather than a third hardcoded mapping.
+  roster-schema-defaults-matches-mkharness-schema-defaults =
+    let
+      lib = pkgs.lib;
+      schema = import ../../lib/env-schema.nix;
+      flakeOptionEntries = lib.filterAttrs (_: e: e.flakeOption or false) schema;
+      mkHarnessSchemaDefaults = lib.mapAttrs (_: e: e.default or "") flakeOptionEntries;
+      rosterHelper = import ../../lib/roster-schema-defaults.nix { inherit lib; };
+      mismatches = builtins.filter (
+        n:
+        rosterHelper.schemaDefaults.${n} != mkHarnessSchemaDefaults.${rosterHelper.rosterModelKeys.${n}}
+      ) [ "scout" "reviewer" "filer" "worker" ];
+    in
+    assert assertMsg (mismatches == [ ])
+      "lib/roster-schema-defaults.nix schemaDefaults must match lib/mkHarness.nix's independently-computed generic schemaDefaults for the same schema keys, mismatched: ${builtins.toJSON mismatches}";
+    pkgs.runCommand "roster-schema-defaults-matches-mkharness-schema-defaults" { } "touch $out";
 }
