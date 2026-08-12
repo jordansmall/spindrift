@@ -2,6 +2,7 @@ package bundlerelay
 
 import (
 	"errors"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"reflect"
@@ -214,6 +215,42 @@ func TestCommitSubjects_MultipleCommitsOldestFirst(t *testing.T) {
 	}
 }
 
+// TestCommitSubjects_ResolvesNonDefaultBaseBranch asserts CommitSubjects
+// resolves base even when base is not the scratch clone's default (HEAD)
+// branch -- "non-default" here meaning whatever branch the clone's HEAD
+// actually points at, "main" in this harness. A --no-single-branch clone
+// (localClone) only checks out a local branch for the clone's default
+// branch; every other branch is fetched as a remote-tracking
+// origin/<branch>, never a local branch of the same name. This matters
+// because a Target's BASE_BRANCH config need not be its default branch --
+// before the fix, `git log base..ref` against the bare base name failed for
+// any such non-default base with an "unknown revision" error, since base
+// only existed as origin/base in the scratch clone.
+func TestCommitSubjects_ResolvesNonDefaultBaseBranch(t *testing.T) {
+	repo := newBundleRelayHarness(t)
+	outbox := t.TempDir()
+	branch := "agent/issue-2447"
+
+	// Push "release" as a second branch off "main" directly into repo.Bare,
+	// without ever touching HEAD there -- "main" stays the clone's default
+	// branch and "release" is a genuine non-default one.
+	work := t.TempDir()
+	forgetest.Run(t, "", "clone", repo.Bare, work)
+	forgetest.Run(t, work, "checkout", "-b", "release")
+	forgetest.Run(t, work, "push", "origin", "release")
+
+	forgetest.SeedRelayBundle(t, repo.Bare, "release", outbox, branch)
+
+	got, err := CommitSubjects("test", outbox, "release", branch, localClone(repo.Bare))
+	if err != nil {
+		t.Fatalf("CommitSubjects: %v", err)
+	}
+	want := []string{"feature"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("CommitSubjects = %v, want %v", got, want)
+	}
+}
+
 // TestCommitSubjects_MissingBundleErrors asserts an empty outbox (the Box
 // never wrote a bundle) errors via forge.ErrBundleNotFound, mirroring Relay's
 // own TestRelay_MissingBundleErrors.
@@ -264,5 +301,57 @@ func TestCommitSubjects_DoesNotMutateOrigin(t *testing.T) {
 	out, err := exec.Command("git", "-C", repo.Bare, "rev-parse", "--verify", "refs/heads/"+branch).CombinedOutput()
 	if err == nil {
 		t.Errorf("CommitSubjects must not push to origin: refs/heads/%s exists in repo.Bare: %s", branch, out)
+	}
+}
+
+// installGitLogStderrNoiseShim puts a "git" shim ahead of the real one on
+// PATH that, for a `git ... log ...` invocation only (matching CommitSubjects'
+// own `git -C dir log ...` shape, where $3 is the subcommand), first writes
+// noise to stderr and then execs the real git log with the same arguments
+// unchanged, so stdout still carries the genuine commit subject(s). Every
+// other subcommand (clone, rev-parse, bundle, fetch, checkout) delegates to
+// the real git binary untouched -- this mirrors
+// git_test.go's installHangingGitRebaseShim.
+func installGitLogStderrNoiseShim(t *testing.T, noise string) {
+	t.Helper()
+	realGit, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatalf("look up real git: %v", err)
+	}
+	shimDir := t.TempDir()
+	script := "#!/bin/sh\n" +
+		"if [ \"$3\" = \"log\" ]; then\n" +
+		"  echo '" + noise + "' >&2\n" +
+		"fi\n" +
+		"exec " + realGit + " \"$@\"\n"
+	shim := filepath.Join(shimDir, "git")
+	forgetest.WriteFile(t, shim, script)
+	if err := os.Chmod(shim, 0o755); err != nil {
+		t.Fatalf("chmod git shim: %v", err)
+	}
+	t.Setenv("PATH", shimDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
+// TestCommitSubjects_IgnoresGitStderrNoise asserts that ambient stderr noise
+// from the underlying `git log` invocation (e.g. an advice/hint message)
+// never leaks into the parsed subjects slice -- that slice becomes the
+// reconstructed PR's title (first subject) and body bullet list in settle's
+// reconstructPRText, so stderr noise sorting first would otherwise become a
+// bogus fake PR title.
+func TestCommitSubjects_IgnoresGitStderrNoise(t *testing.T) {
+	repo := newBundleRelayHarness(t)
+	outbox := t.TempDir()
+	branch := "agent/issue-2447"
+	forgetest.SeedRelayBundle(t, repo.Bare, "main", outbox, branch)
+
+	installGitLogStderrNoiseShim(t, "hint: this is not a commit subject")
+
+	got, err := CommitSubjects("test", outbox, "main", branch, localClone(repo.Bare))
+	if err != nil {
+		t.Fatalf("CommitSubjects: %v", err)
+	}
+	want := []string{"feature"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("CommitSubjects = %v, want %v (git log stderr noise must not leak into parsed subjects)", got, want)
 	}
 }

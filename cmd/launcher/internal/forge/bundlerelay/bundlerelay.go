@@ -13,6 +13,7 @@ package bundlerelay
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -97,9 +98,33 @@ func CommitSubjects(backend, outboxDir, base, ref string, clone func(dir string)
 	}
 	defer cleanup()
 
-	out, err := gitIn("log", "--format=%s", "--reverse", base+".."+ref).CombinedOutput()
+	// A --no-single-branch clone (every real clone closure) only checks out a
+	// local branch for the clone's own default branch (wherever its HEAD
+	// points); every other branch -- including base, whenever a Target's
+	// BASE_BRANCH config differs from its default branch -- exists only as
+	// the remote-tracking origin/base, never a local branch of the same
+	// name. Prefer origin/base when it resolves; fall back to the bare base
+	// name for a clone that isn't a full --no-single-branch clone, or that
+	// genuinely already has base as a local branch.
+	baseRef := base
+	if _, err := gitIn("rev-parse", "--verify", "origin/"+base).CombinedOutput(); err == nil {
+		baseRef = "origin/" + base
+	}
+
+	// .Output(), not .CombinedOutput(): the returned bytes are parsed
+	// line-by-line as data (commit subjects) below, so stdout must never be
+	// conflated with stderr the way .CombinedOutput() would -- any ambient
+	// warning/hint git prints on stderr would otherwise silently become a
+	// bogus fake subject, which becomes the reconstructed PR's title
+	// (settle's reconstructPRText) whenever it sorts first.
+	out, err := gitIn("log", "--format=%s", "--reverse", baseRef+".."+ref).Output()
 	if err != nil {
-		return nil, fmt.Errorf("%s: relay bundle: git log %s..%s: %w: %s", backend, base, ref, err, out)
+		var stderr []byte
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			stderr = exitErr.Stderr
+		}
+		return nil, fmt.Errorf("%s: relay bundle: git log %s..%s: %w: %s", backend, baseRef, ref, err, stderr)
 	}
 	var subjects []string
 	for _, line := range strings.Split(string(out), "\n") {
