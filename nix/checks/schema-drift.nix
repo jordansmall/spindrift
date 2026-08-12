@@ -179,6 +179,30 @@ let
         concatStringsSep ", " (map (p: "${p.a} vs ${p.b}") issues.collidingPairs)
       }";
     nixPaths;
+
+  # Isolates the "#### Subagent roster" section of a docs/reference.md-shaped
+  # doc string and asserts it states the given flake path, else throws.
+  # Factored out (like assertSchemaChoicesOk/assertNixPathsOk above) so
+  # roster-doc-flake-path-guard can exercise this exact assertion path
+  # against a synthetic doc, not only the real docs/reference.md content —
+  # dropping the hasInfix assert here would make that guard fail too, not
+  # stay silently green. Isolating the section before running the
+  # regex-based `hasInfix` (builtins.match ".*x.*") matters: running that
+  # over the whole ~190KB doc blows the evaluator's stack (issue #2436).
+  assertRosterDocFlakePathOk =
+    { doc, wantPath }:
+    let
+      inherit (pkgs.lib) assertMsg hasInfix;
+      afterHeading = builtins.split "\n#### Subagent roster\n" doc;
+      rosterSection =
+        if builtins.length afterHeading < 3 then
+          throw "docs/reference.md: missing the \"#### Subagent roster\" heading"
+        else
+          builtins.elemAt (builtins.split "\n#+ " (builtins.elemAt afterHeading 2)) 0;
+    in
+    assert assertMsg (hasInfix wantPath rosterSection)
+      "docs/reference.md: Subagent roster section must state roster's flake path as `${wantPath}` (derived from lib/structural-paths.nix's roster entry) — it has drifted from the registry, update the doc (issue #2436)";
+    doc;
 in
 {
   # cmd/launcher/internal/driver/drivernames_gen.go must match the key list
@@ -1009,19 +1033,47 @@ in
   # that over the whole ~190KB doc blows the evaluator's stack.
   roster-doc-flake-path =
     let
-      inherit (pkgs.lib) assertMsg concatStringsSep hasInfix;
+      inherit (pkgs.lib) concatStringsSep;
       wantPath = "perSystem.spindrift.${concatStringsSep "." structuralPaths.roster}";
       doc = builtins.readFile ../../docs/reference.md;
-      afterHeading = builtins.split "\n#### Subagent roster\n" doc;
-      rosterSection =
-        if builtins.length afterHeading < 3 then
-          throw "docs/reference.md: missing the \"#### Subagent roster\" heading"
-        else
-          builtins.elemAt (builtins.split "\n#+ " (builtins.elemAt afterHeading 2)) 0;
     in
-    assert assertMsg (hasInfix wantPath rosterSection)
-      "docs/reference.md: Subagent roster section must state roster's flake path as `${wantPath}` (derived from lib/structural-paths.nix's roster entry) — it has drifted from the registry, update the doc (issue #2436)";
+    assert (assertRosterDocFlakePathOk { inherit doc wantPath; }) == doc;
     pkgs.runCommand "roster-doc-flake-path" { } "touch $out";
+
+  # Regression guard (issue #2436): the doc-drift assertion above must
+  # actually detect a wrong flake path, not just pass vacuously because
+  # docs/reference.md's Subagent roster section currently agrees with the
+  # registry. Runs assertRosterDocFlakePathOk — the exact function
+  # roster-doc-flake-path calls — against a synthetic doc whose Subagent
+  # roster section states the real wantPath with one segment renamed
+  # ("models" -> "model", a plausible drift a registry rename could leave
+  # behind), via tryEval, so this fails if the hasInfix assert is ever
+  # dropped from assertRosterDocFlakePathOk. The renamed segment sits before
+  # "roster", not appended after it, so the drifted string can never
+  # accidentally contain wantPath as a substring (which a suffix-only change
+  # like "roster" -> "rosterOld" would).
+  roster-doc-flake-path-guard =
+    let
+      inherit (pkgs.lib) assertMsg concatStringsSep replaceStrings;
+      wantPath = "perSystem.spindrift.${concatStringsSep "." structuralPaths.roster}";
+      driftedPath = replaceStrings [ "models" ] [ "model" ] wantPath;
+      badDoc = ''
+        intro text
+
+        #### Subagent roster
+
+        The roster's flake path is `${driftedPath}`.
+
+        #### Next heading
+      '';
+      result = builtins.tryEval (assertRosterDocFlakePathOk {
+        doc = badDoc;
+        inherit wantPath;
+      });
+    in
+    assert assertMsg (!result.success)
+      "roster-doc-flake-path-guard: expected assertRosterDocFlakePathOk to reject a synthetic doc whose Subagent roster section states a wrong flake path, but it evaluated successfully";
+    pkgs.runCommand "roster-doc-flake-path-guard" { } "touch $out";
 
   # Regression guard (issue #2184, ADR 0037): the disjointness assertion must
   # cover the structural domain-tree paths too, not just the flakeOption
