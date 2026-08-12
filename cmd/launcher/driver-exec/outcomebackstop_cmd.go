@@ -36,6 +36,7 @@ func runOutcomeBackstop(args []string, stdout io.Writer) int {
 	maxAttempts := fs.Int("max-attempts", 1, "bounds the push retry loop")
 	backoffSecs := fs.Int("backoff-secs", 0, "linear backoff unit, in seconds, between push retries")
 	jitterSecs := fs.Int("jitter-secs", 0, "linear backoff jitter, in seconds, added to each push retry wait")
+	runStateFile := fs.String("run-state-file", "/tmp/run-state.json", "path to the run-state handoff artifact recording the reviewer's last verdict (issue #2459); empty or unreadable degrades to no-verdict-known")
 	if err := fs.Parse(args); err != nil {
 		return 1
 	}
@@ -59,6 +60,7 @@ func runOutcomeBackstop(args []string, stdout io.Writer) int {
 		Backoff:            time.Duration(*backoffSecs) * time.Second,
 		Jitter:             time.Duration(*jitterSecs) * time.Second,
 		Clock:              retry.RealClock(),
+		RunStateFilePath:   *runStateFile,
 	}, stdout)
 	if err != nil {
 		fmt.Fprintln(fs.Output(), "driver-exec outcome-backstop:", err)
