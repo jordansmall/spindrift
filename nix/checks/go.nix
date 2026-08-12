@@ -77,8 +77,15 @@ in
   # go test must stay green: unit tests catch config-parsing bugs
   # before they reach the binary (see issue #112, 9494fc1-class).
   # forge's tests shell out to git (TestGitForcePush_CapturesStderr), so
-  # git must be on PATH in the sandbox alongside go. CGO_ENABLED=0 for
-  # the same reason as launcher-go-vet above.
+  # git must be on PATH in the sandbox alongside go. bootstrap_test.go's
+  # RUNTIME=bwrap cases (e.g. TestBootstrap_Success_HoldsAccumLockUntilCleanup,
+  # issue #2441) run bootstrap()'s validate() step for real, which calls
+  # runner.ValidateRuntime and LookPath's the "bwrap" binary — it must be on
+  # PATH too, even though these tests never actually launch a sandbox. Real
+  # pkgs.bubblewrap only builds on Linux (nixpkgs restricts it to Linux
+  # hostPlatforms), so on darwin a real package isn't even evaluable; a stub
+  # script is enough on every system since LookPath only checks for the name.
+  # CGO_ENABLED=0 for the same reason as launcher-go-vet above.
   # docs/ is copied alongside cmd/launcher, mirroring the repo layout,
   # so TestReferenceDocLabelSnippetMatchesTriageDefaults can resolve its
   # ../../docs/reference.md path (#611). .github/ is copied the same way so
@@ -109,6 +116,14 @@ in
         export GOMODCACHE="$TMPDIR/gomodcache"
         export GOCACHE="$TMPDIR/gocache"
         export CGO_ENABLED=0
+        mkdir -p "$TMPDIR/fakebin"
+        cat > "$TMPDIR/fakebin/bwrap" <<'EOF'
+        #!/bin/sh
+        echo "fakebin/bwrap: stub for LookPath only, tests never invoke it for real" >&2
+        exit 1
+        EOF
+        chmod +x "$TMPDIR/fakebin/bwrap"
+        export PATH="$TMPDIR/fakebin:$PATH"
         cd src/cmd/launcher
         go test ./...
         touch $out
