@@ -239,14 +239,16 @@ for configuration):
   comment host-side — a second, alternative route to the guarantee two-actor
   separation provides, without a second GitHub user. See [Read-only
   Box](docs/reference.md#read-only-box-box_forge_and_issue_accessread-only).
-- **Filer.** Set `FILER_MODEL` to file the non-blocking review findings the work
-  loop escalates into `agent-review-finding`-labelled issues for human triage —
+- **Filer.** Set `FILER_MODEL` (deprecated), or opt in via the `roster` option
+  covered next, to file the non-blocking review findings the work loop
+  escalates into `agent-review-finding`-labelled issues for human triage —
   see [Filer](docs/reference.md#filer).
 - **Subagent roster.** The scout/reviewer/filer/worker subagents (tiered above by
   `SCOUT_MODEL`/`REVIEW_MODEL`/`FILER_MODEL`/`WORKER_MODEL`, now deprecated) are
-  driven by a `roster` `mkHarness` argument that accepts an arbitrary list of
-  subagents, including custom ones beyond the historical four — see [Subagent
-  roster](docs/reference.md#subagent-roster).
+  driven by `roster`, a structural flakeModule option
+  (`perSystem.spindrift.agents.models.roster`) also forwarded as a `mkHarness`
+  argument, that accepts an arbitrary list of subagents, including custom ones
+  beyond the historical four — see [Subagent roster](docs/reference.md#subagent-roster).
 - **Auto-format / auto-lint.** Set `AUTO_FORMAT=1` / `AUTO_LINT=1` to format or
   lint changed files before each commit; the tool is detected automatically.
 - **Blockers.** An issue's blockers gate its dispatch until each reaches

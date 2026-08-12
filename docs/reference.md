@@ -1858,18 +1858,29 @@ downgrading every stale PR to manual, and [ADR
 An opt-in subagent, alongside the scout and reviewer, that turns the
 non-blocking findings a review surfaces into tracked issues — but only the
 ones the work loop escalated for a human, not the whole Non-blocking section.
-Off by default; the current, non-deprecated way to opt in is
-`defaultRoster { models = { filer = "claude-haiku-4-5-20251001"; }; }`
-(see [`roster`](#subagent-roster)) — setting `models.filer` opts the filer in
-while leaving scout/reviewer/worker at their defaults. Setting `roster`
-itself to a hand-authored list instead of going through `defaultRoster`
-replaces the whole default roster, not just the filer entry, so a literal
-`roster = [ { name = "filer"; ... } ]` silently drops scout/reviewer/worker
-too; reach for that only when authoring a full custom roster. Setting
-`FILER_MODEL` (empty by default, recommended `claude-haiku-4-5-20251001`) is
-the older, **deprecated** opt-in — it still works but is superseded by
-`roster`. Either way, when neither is set, that's zero behavior change and
-zero prompt residue in the rendered issue prompt.
+Off by default; the current, non-deprecated way to opt in sets
+`perSystem.spindrift.agents.models.roster` (see [`roster`](#subagent-roster))
+to `lib/roster.nix`'s `defaultRoster` with `models.filer` set, e.g. in a
+Consumer flake:
+
+```nix
+perSystem = { inputs, lib, ... }: {
+  spindrift.agents.models.roster =
+    (import "${inputs.spindrift}/lib/roster.nix" { inherit lib; }).defaultRoster {
+      models.filer = "claude-haiku-4-5-20251001";
+    };
+};
+```
+
+Setting `models.filer` opts the filer in while leaving scout/reviewer/worker
+at their defaults. Setting `roster` itself to a hand-authored list instead of
+going through `defaultRoster` replaces the whole default roster, not just the
+filer entry, so a literal `roster = [ { name = "filer"; ... } ]` silently
+drops scout/reviewer/worker too; reach for that only when authoring a full
+custom roster. Setting `FILER_MODEL` (empty by default, recommended
+`claude-haiku-4-5-20251001`) is the older, **deprecated** opt-in — it still
+works but is superseded by `roster`. Either way, when neither is set, that's
+zero behavior change and zero prompt residue in the rendered issue prompt.
 
 The work loop triages Non-blocking findings before the filer ever runs: it
 fixes inline, in the same effort, every finding whose fix is cheap and in
