@@ -2082,9 +2082,9 @@ refs, branch names, log file names):
 title: Fix the thing
 state: ready-for-agent
 labels: [bug, priority-high]
-created: 2026-07-09T12:00:00Z
+created: "2026-07-09T12:00:00Z"
 parent: some-upstream-slug
-landing: https://github.com/owner/repo/pull/123
+landing: "https://github.com/owner/repo/pull/123"
 ---
 ## What to build
 
