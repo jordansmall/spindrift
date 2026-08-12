@@ -1274,10 +1274,26 @@ artifact, not a growing transcript:
   to the original prompt, so a fresh implementor pass knows where a prior
   pass left off without reading its transcript.
 - **Code-owned caps.** `--max-review-rounds` (default 3) caps additional
-  passes a `BLOCK` verdict may trigger; `--max-slices` (default 5) caps the
+  passes a `BLOCK` verdict may trigger; `--max-slices` (default 9) caps the
   total `driver-exec` invocation count regardless of verdict; either set to
-  `0` disables that cap. The loop stops the instant a pass's log carries a
-  terminal `SPINDRIFT_OUTCOME` line — unconditionally, ahead of either cap.
+  `0` disables that cap. Every `driver-exec` invocation this loop makes —
+  implement, fix, review, and the terminal land pass alike — increments the
+  same pass counter and counts identically toward `--max-slices`;
+  `--max-review-rounds` tracks a separate `reviewRounds` counter that only
+  increments when a review pass's verdict is `BLOCK`. The loop stops the
+  instant a pass's log carries a terminal `SPINDRIFT_OUTCOME` line —
+  unconditionally, ahead of either cap.
+
+  Because both counters advance over the same pass sequence,
+  `--max-review-rounds` can only actually reach `N` rounds — rather than
+  being silently shadowed by `--max-slices` firing first — if `--max-slices`
+  is at least `2N + 3`: 1 initial implement pass + (`N`+1) review passes +
+  `N` fix passes + 1 terminal land pass. The shipped defaults are exactly
+  this minimum for `N=3`: `--max-slices=9` is `2*3+3`. When both caps are
+  non-zero, the orchestrator now rejects an incoherent pair outright at
+  startup, printing an error to stderr naming the minimum `--max-slices` the
+  given `--max-review-rounds` needs, rather than letting `--max-slices`
+  shadow `--max-review-rounds` silently.
 
 **Code-owned review pass (issue #2037).** `--review-prompt-file` names a
 distinct prompt (`review-prompt.md`) the orchestrator invokes as its own
