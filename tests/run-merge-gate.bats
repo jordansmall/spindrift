@@ -235,6 +235,29 @@ setup() {
   [[ "$output" == *"status=rebase-retry"* ]]
 }
 
+# Guard (issue #2424): setup_run_env's own default poll interval/timeout must
+# bound the merge gate even when a test does NOT set MERGE_POLL_INTERVAL /
+# MERGE_POLL_TIMEOUT itself -- prove that by NOT exporting either here and
+# reaching the poll loop via a non-terminal PENDING rollup. Wrap the run in
+# the `timeout` coreutil so a regression back to the launcher's real
+# production default (MERGE_POLL_TIMEOUT=1800s) fails fast here instead of
+# hanging this test for 30 minutes: pre-fix, the outer `timeout 5` kills the
+# launcher first (status=124, no launcher-authored deadline message);
+# post-fix, the launcher's own small default deadline fires well inside the
+# 5s bound and exits 0 with its own "ci-timeout:" deadline message.
+@test "no explicit poll override → setup_run_env default still bounds the gate" {
+  export FAKE_PODMAN_IMAGE_PRESENT=1
+  export FAKE_GH_ISSUES=$'1\tFirst issue'
+  export FAKE_PODMAN_OUTCOME_1="SPINDRIFT_OUTCOME issue=1 landing=https://github.com/owner/repo/pull/1 status=ready note=ci-pending"
+  export FAKE_GH_GRAPHQL_ROLLUP_1="PENDING"
+  run timeout 5 "$RUN_CMD"
+  [ "$status" -eq 0 ]
+  ! grep -q 'pr merge' "$GH_LOG"
+  grep -q -- 'issue edit 1 --repo owner/repo --add-label agent-failed --remove-label agent-in-progress' "$GH_LOG"
+  [[ "$output" == *"status=failed"* ]]
+  [[ "$output" == *"ci-timeout:"* ]]
+}
+
 # Pending-timeout: no fix passes consumed, gate timeout marks agent-failed.
 @test "self-heal: pending timeout does not consume fix passes" {
   export FAKE_PODMAN_IMAGE_PRESENT=1

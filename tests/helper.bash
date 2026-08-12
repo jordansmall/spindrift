@@ -71,6 +71,18 @@ setup_run_env() {
   set_run_env
   cd "$BATS_TEST_TMPDIR" || exit
   export FAKE_GH_ISSUES=$'1\tFirst issue\n2\tSecond issue'
+  # Guard (issue #2424): bound the merge gate's poll loop by default so any
+  # test that reaches it without setting its own MERGE_POLL_INTERVAL /
+  # MERGE_POLL_TIMEOUT can't inherit the launcher's real production default
+  # (MERGE_POLL_TIMEOUT=1800s, MERGE_POLL_INTERVAL=30s) and real-sleep for up
+  # to 30 minutes before failing (as happened in CI on PR #2410). A poll
+  # interval of 0 keeps iterations instant; a small nonzero timeout still
+  # lets a poll loop actually iterate at least once before its own deadline
+  # fires. Individual tests (e.g. tests/run-merge-gate.bats,
+  # tests/run-reconcile-recover.bats) override both explicitly where the
+  # scenario needs a different bound -- leave those overrides as-is.
+  export MERGE_POLL_INTERVAL=0
+  export MERGE_POLL_TIMEOUT=2
 }
 
 setup_fakes() {
