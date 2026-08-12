@@ -205,9 +205,10 @@ func TestReadOnlyCodeForge_CommitSubjects_MalformedBundleErrors(t *testing.T) {
 }
 
 // TestReadOnlyCodeForge_CreateDraftPR_ReturnsURL asserts CreateDraftPR opens
-// a draft PR via `gh pr create` and returns its URL — the host-side
-// counterpart to the Box's own in-box `gh pr create` under read-write (issue
-// #1919).
+// a draft PR via `gh pr create`, returns its URL, and reports created=true
+// — the host-side counterpart to the Box's own in-box `gh pr create` under
+// read-write (issue #1919). created=true distinguishes this fresh-create
+// success from the adoption path below (issue #2447).
 func TestReadOnlyCodeForge_CreateDraftPR_ReturnsURL(t *testing.T) {
 	newRelayHarness(t)
 
@@ -217,13 +218,16 @@ func TestReadOnlyCodeForge_CreateDraftPR_ReturnsURL(t *testing.T) {
 		t.Fatal("github read-only CodeForge does not implement forge.DraftPRCreator")
 	}
 
-	url, err := dpc.CreateDraftPR("feat: add widget", "Adds a widget.", "main", "agent/issue-1919")
+	url, created, err := dpc.CreateDraftPR("feat: add widget", "Adds a widget.", "main", "agent/issue-1919")
 	if err != nil {
 		t.Fatalf("CreateDraftPR: %v", err)
 	}
 	want := "https://github.com/owner/repo/pull/1919"
 	if url != want {
 		t.Errorf("CreateDraftPR url = %q, want %q", url, want)
+	}
+	if !created {
+		t.Error("CreateDraftPR created = false, want true for a fresh create")
 	}
 }
 
@@ -235,7 +239,7 @@ func TestReadOnlyCodeForge_CreateDraftPR_Errors(t *testing.T) {
 	cf := NewReadOnlyCodeForge("owner/repo", forge.DispatchLabels{}, "agent/issue-")
 	dpc := cf.(forge.DraftPRCreator)
 
-	if _, err := dpc.CreateDraftPR("feat: add widget", "body", "main", "fail-head"); err == nil {
+	if _, _, err := dpc.CreateDraftPR("feat: add widget", "body", "main", "fail-head"); err == nil {
 		t.Fatal("CreateDraftPR with a failing gh pr create: got nil error, want one")
 	}
 }
@@ -244,8 +248,10 @@ func TestReadOnlyCodeForge_CreateDraftPR_Errors(t *testing.T) {
 // that when `gh pr create` fails because a PR for this head already exists
 // (e.g. a retried fix pass after an earlier host-mediated create already
 // succeeded), CreateDraftPR adopts the existing open PR via
-// OpenPRForBranch and returns its URL with no error, rather than surfacing
-// the create failure as blocked (issue #2407 slice 1).
+// OpenPRForBranch and returns its URL with no error and created=false,
+// rather than surfacing the create failure as blocked (issue #2407 slice
+// 1). created=false lets a caller like settle's reconstructed-PR path
+// (issue #2447) tell this call did not itself open the PR.
 func TestReadOnlyCodeForge_CreateDraftPR_AdoptsExistingOnAlreadyExists(t *testing.T) {
 	prependFakeGH(t, `case "$1-$2" in
 pr-create)
@@ -264,13 +270,16 @@ esac
 	cf := NewReadOnlyCodeForge("owner/repo", forge.DispatchLabels{}, "agent/issue-")
 	dpc := cf.(forge.DraftPRCreator)
 
-	url, err := dpc.CreateDraftPR("feat: add widget", "body", "main", "agent/issue-2407")
+	url, created, err := dpc.CreateDraftPR("feat: add widget", "body", "main", "agent/issue-2407")
 	if err != nil {
 		t.Fatalf("CreateDraftPR: %v", err)
 	}
 	want := "https://github.com/owner/repo/pull/2407"
 	if url != want {
 		t.Errorf("CreateDraftPR url = %q, want %q", url, want)
+	}
+	if created {
+		t.Error("CreateDraftPR created = true, want false for an adopted pre-existing PR")
 	}
 }
 
@@ -294,7 +303,7 @@ esac
 	cf := NewReadOnlyCodeForge("owner/repo", forge.DispatchLabels{}, "agent/issue-")
 	dpc := cf.(forge.DraftPRCreator)
 
-	_, err := dpc.CreateDraftPR("feat: add widget", "body", "main", "agent/issue-2407")
+	_, _, err := dpc.CreateDraftPR("feat: add widget", "body", "main", "agent/issue-2407")
 	if err == nil {
 		t.Fatal("CreateDraftPR with already-exists failure but no open PR found: got nil error, want the original create error")
 	}

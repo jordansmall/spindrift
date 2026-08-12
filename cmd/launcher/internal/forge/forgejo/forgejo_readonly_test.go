@@ -272,8 +272,8 @@ func TestReadOnlyForgejoCodeForge_RelayBundle_InvalidRefRejected(t *testing.T) {
 }
 
 // TestReadOnlyForgejoCodeForge_CreateDraftPR_ReturnsURL asserts CreateDraftPR
-// POSTs a WIP-prefixed draft PR to Forgejo's REST pull-create endpoint and
-// returns its html_url.
+// POSTs a WIP-prefixed draft PR to Forgejo's REST pull-create endpoint,
+// returns its html_url, and reports created=true (issue #2447).
 func TestReadOnlyForgejoCodeForge_CreateDraftPR_ReturnsURL(t *testing.T) {
 	var gotBody map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -301,13 +301,16 @@ func TestReadOnlyForgejoCodeForge_CreateDraftPR_ReturnsURL(t *testing.T) {
 		t.Fatal("forgejo read-only CodeForge does not implement forge.DraftPRCreator")
 	}
 
-	url, err := dpc.CreateDraftPR("feat: add widget", "Adds a widget.", "main", "agent/issue-1964")
+	url, created, err := dpc.CreateDraftPR("feat: add widget", "Adds a widget.", "main", "agent/issue-1964")
 	if err != nil {
 		t.Fatalf("CreateDraftPR: %v", err)
 	}
 	want := "https://forge.test/owner/repo/pulls/1964"
 	if url != want {
 		t.Errorf("CreateDraftPR url = %q, want %q", url, want)
+	}
+	if !created {
+		t.Error("CreateDraftPR created = false, want true for a fresh create")
 	}
 
 	wantTitle := "WIP: feat: add widget"
@@ -341,7 +344,7 @@ func TestReadOnlyForgejoCodeForge_CreateDraftPR_Errors(t *testing.T) {
 	}, nil)
 	dpc := cf.(forge.DraftPRCreator)
 
-	if _, err := dpc.CreateDraftPR("feat: add widget", "body", "main", "fail-head"); err == nil {
+	if _, _, err := dpc.CreateDraftPR("feat: add widget", "body", "main", "fail-head"); err == nil {
 		t.Fatal("CreateDraftPR with a failing create: got nil error, want one")
 	}
 }
@@ -352,8 +355,9 @@ func TestReadOnlyForgejoCodeForge_CreateDraftPR_Errors(t *testing.T) {
 // endpoint, semantically distinct from the same status's "not mergeable"
 // meaning on the merge endpoint (forgejoStatusMap/errMergeRefused) --
 // CreateDraftPR resolves the branch's own open PR via openAnyPRForBranch and
-// returns that PR's URL with no error, mirroring github's CreateDraftPR
-// adoption (relay.go, issue #2407 slice 1/2).
+// returns that PR's URL with no error and created=false, mirroring github's
+// CreateDraftPR adoption (relay.go, issue #2407 slice 1/2; created=false per
+// issue #2447).
 func TestReadOnlyForgejoCodeForge_CreateDraftPR_AdoptsExistingOnConflict(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
@@ -384,13 +388,16 @@ func TestReadOnlyForgejoCodeForge_CreateDraftPR_AdoptsExistingOnConflict(t *test
 	}, nil)
 	dpc := cf.(forge.DraftPRCreator)
 
-	url, err := dpc.CreateDraftPR("feat: add widget", "Adds a widget.", "main", "agent/issue-1964")
+	url, created, err := dpc.CreateDraftPR("feat: add widget", "Adds a widget.", "main", "agent/issue-1964")
 	if err != nil {
 		t.Fatalf("CreateDraftPR: %v", err)
 	}
 	want := "https://forge.test/owner/repo/pulls/1964"
 	if url != want {
 		t.Errorf("CreateDraftPR url = %q, want %q", url, want)
+	}
+	if created {
+		t.Error("CreateDraftPR created = true, want false for an adopted pre-existing PR")
 	}
 }
 
@@ -432,13 +439,16 @@ func TestReadOnlyForgejoCodeForge_CreateDraftPR_AdoptsExistingDraftOnConflict(t 
 	}, nil)
 	dpc := cf.(forge.DraftPRCreator)
 
-	url, err := dpc.CreateDraftPR("feat: add widget", "Adds a widget.", "main", "agent/issue-1964")
+	url, created, err := dpc.CreateDraftPR("feat: add widget", "Adds a widget.", "main", "agent/issue-1964")
 	if err != nil {
 		t.Fatalf("CreateDraftPR: %v", err)
 	}
 	want := "https://forge.test/owner/repo/pulls/1964"
 	if url != want {
 		t.Errorf("CreateDraftPR url = %q, want %q", url, want)
+	}
+	if created {
+		t.Error("CreateDraftPR created = true, want false for an adopted pre-existing PR")
 	}
 }
 
@@ -468,7 +478,7 @@ func TestReadOnlyForgejoCodeForge_CreateDraftPR_ConflictWithoutOpenPRReturnsOrig
 	}, nil)
 	dpc := cf.(forge.DraftPRCreator)
 
-	if _, err := dpc.CreateDraftPR("feat: add widget", "body", "main", "agent/issue-1964"); err == nil {
+	if _, _, err := dpc.CreateDraftPR("feat: add widget", "body", "main", "agent/issue-1964"); err == nil {
 		t.Fatal("CreateDraftPR with 409 and no open PR to adopt: got nil error, want the original create error")
 	}
 }

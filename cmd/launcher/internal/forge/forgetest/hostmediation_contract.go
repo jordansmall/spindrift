@@ -162,19 +162,24 @@ func testBundleRelayMissingBundleErrors(t *testing.T, h HostMediationHarness) {
 	}
 }
 
-// testDraftPRCreation verifies CreateDraftPR opens a draft PR and returns a
-// non-empty URL -- the host-side counterpart to a read-only Box's own in-box
-// `gh pr create` (issue #1919).
+// testDraftPRCreation verifies CreateDraftPR opens a draft PR, returns a
+// non-empty URL, and reports created=true -- the host-side counterpart to a
+// read-only Box's own in-box `gh pr create` (issue #1919). created=true
+// distinguishes this fresh-create success from the adoption path below
+// (issue #2447).
 func testDraftPRCreation(t *testing.T, h HostMediationHarness) {
 	dpc := mustDraftPRCreator(t, h)
 	head := h.SeedDraftPRHead(false)
 
-	url, err := dpc.CreateDraftPR("feat: add widget", "Adds a widget.", "main", head)
+	url, created, err := dpc.CreateDraftPR("feat: add widget", "Adds a widget.", "main", head)
 	if err != nil {
 		t.Fatalf("CreateDraftPR(...): %v", err)
 	}
 	if url == "" {
 		t.Fatal("CreateDraftPR(...) returned an empty URL")
+	}
+	if !created {
+		t.Error("CreateDraftPR(...) created = false, want true for a fresh create")
 	}
 }
 
@@ -184,7 +189,7 @@ func testDraftPRCreationFails(t *testing.T, h HostMediationHarness) {
 	dpc := mustDraftPRCreator(t, h)
 	head := h.SeedDraftPRHead(true)
 
-	if _, err := dpc.CreateDraftPR("feat: add widget", "body", "main", head); err == nil {
+	if _, _, err := dpc.CreateDraftPR("feat: add widget", "body", "main", head); err == nil {
 		t.Fatal("CreateDraftPR with a failing backend: got nil error, want one")
 	}
 }
@@ -193,17 +198,21 @@ func testDraftPRCreationFails(t *testing.T, h HostMediationHarness) {
 // -open PR for head rather than surfacing the backend's already-exists/409
 // refusal as a failure -- a retried host-mediated create for a branch an
 // earlier call already opened a PR for must settle idempotently, not block
-// the seam (issue #2407 slices 1-3).
+// the seam (issue #2407 slices 1-3) -- and reports created=false, since this
+// call did not itself open the PR (issue #2447).
 func testDraftPRCreationAdoptsExisting(t *testing.T, h HostMediationHarness) {
 	dpc := mustDraftPRCreator(t, h)
 	head, wantURL := h.SeedExistingOpenPR()
 
-	url, err := dpc.CreateDraftPR("feat: add widget", "body", "main", head)
+	url, created, err := dpc.CreateDraftPR("feat: add widget", "body", "main", head)
 	if err != nil {
 		t.Fatalf("CreateDraftPR(...): %v", err)
 	}
 	if url != wantURL {
 		t.Errorf("CreateDraftPR(...) url = %q, want %q", url, wantURL)
+	}
+	if created {
+		t.Error("CreateDraftPR(...) created = true, want false for an adopted pre-existing PR")
 	}
 }
 

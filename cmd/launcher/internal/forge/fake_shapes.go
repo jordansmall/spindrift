@@ -149,7 +149,7 @@ func (g githubReadOnlyForge) RelayBundle(outboxDir, ref string) error {
 	return g.Fake.relayBundle(outboxDir, ref)
 }
 
-func (g githubReadOnlyForge) CreateDraftPR(title, body, base, head string) (string, error) {
+func (g githubReadOnlyForge) CreateDraftPR(title, body, base, head string) (string, bool, error) {
 	return g.Fake.createDraftPR(title, body, base, head)
 }
 
