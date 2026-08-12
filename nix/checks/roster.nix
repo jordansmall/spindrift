@@ -360,21 +360,19 @@ in
   # the same lib/env-schema.nix. A schema-key rename or a changed `.default`
   # could be caught by one (the roster helper throws on a missing key) and
   # silently swallowed by the other (mkHarness falls back to ""), or vice
-  # versa, with nothing today pinning the two to agree. Reproduce
-  # mkHarness.nix's exact one-liner here (it isn't exposed in mkHarness's
-  # output attrset) and assert the roster helper's four per-agent defaults
-  # match mkHarness's generic defaults for the same underlying schema keys,
-  # looked up via rosterModelKeys rather than a third hardcoded mapping.
+  # versa, with nothing today pinning the two to agree. Import
+  # lib/mkHarness.nix directly (same pattern as equivalence.nix's
+  # mkharness-rejects-unknown-key) so this pins mkHarness's actual computed
+  # `schemaDefaults`, not a local reimplementation of its one-liner, and
+  # assert the roster helper's four per-agent defaults match mkHarness's
+  # generic defaults for the same underlying schema keys, looked up via
+  # rosterModelKeys rather than a third hardcoded mapping.
   roster-schema-defaults-matches-mkharness-schema-defaults =
     let
-      lib = pkgs.lib;
-      schema = import ../../lib/env-schema.nix;
-      flakeOptionEntries = lib.filterAttrs (_: e: e.flakeOption or false) schema;
-      mkHarnessSchemaDefaults = lib.mapAttrs (_: e: e.default or "") flakeOptionEntries;
-      rosterHelper = import ../../lib/roster-schema-defaults.nix { inherit lib; };
+      rosterHelper = import ../../lib/roster-schema-defaults.nix { inherit (pkgs) lib; };
+      harness = import ../../lib/mkHarness.nix { inherit nixpkgs system; };
       mismatches = builtins.filter (
-        n:
-        rosterHelper.schemaDefaults.${n} != mkHarnessSchemaDefaults.${rosterHelper.rosterModelKeys.${n}}
+        n: rosterHelper.schemaDefaults.${n} != harness.schemaDefaults.${rosterHelper.rosterModelKeys.${n}}
       ) [ "scout" "reviewer" "filer" "worker" ];
     in
     assert assertMsg (mismatches == [ ])
