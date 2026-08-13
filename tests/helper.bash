@@ -14,6 +14,83 @@ issue_prompt_outcome_section() {
   sed -n '/^# OUTCOME$/,/^# IF BLOCKED$/p' "$prompts/issue-prompt.md"
 }
 
+# Polls "$file" for a line count matching "$pattern" (grep -c), instead of
+# sampling it once (issue #2450 asked for exactly this: "make the assertion
+# wait for the dispatches it expects rather than sampling the log at a
+# moment that is not guaranteed to be after both writes"). The precise
+# mechanism behind #2450's original flaky CI failure was never pinned down:
+# a later investigation (commit 9e724bab, reverting an earlier attempted
+# fix) found dispatchWave's wg.Wait() already blocks until every dispatch
+# subprocess exits and its output is flushed, so by the time a test's `run
+# "$RUN_CMD"` returns there is no late writer left to race a single sample
+# against -- and an independent stress test (300 concurrent invocations of
+# tests/fakes/runtime, plus 30 rounds of 40 concurrent invocations) found
+# zero lost or interleaved log lines. So treat this as a defensive
+# belt-and-suspenders wait, not a proven fix for a root cause that remains
+# unidentified. Bounded by a timeout so a genuine under-count -- the log
+# will never reach expected_count -- still fails, rather than hanging:
+# default 2s, or an explicit 4th arg (kept short in tests that intentionally
+# exercise the timeout path).
+#
+# Reaching expected_count mid-poll is not itself proof the count has
+# settled: it may just be passing through on its way to a higher, wrong
+# count (e.g. a genuine over-dispatch regression). So once a poll first
+# observes expected_count, this does a handful of short additional confirm
+# polls (fixed at ~150ms total, independent of the main timeout) before
+# declaring success, and fails immediately -- without waiting out the
+# timeout -- if the count ever exceeds expected_count, at any point.
+#
+# Missing/unreadable file reads as count 0, not an empty string, so callers'
+# arithmetic comparisons never throw an integer-expression error.
+_count_matches() {
+  local file="$1" pattern="$2" count
+  if [ -r "$file" ]; then
+    count="$(grep -c "$pattern" "$file" 2>/dev/null)" || count=0
+  else
+    count=0
+  fi
+  echo "$count"
+}
+
+# Usage: wait_for_log_lines <file> <pattern> <expected_count> [timeout_seconds=2]
+wait_for_log_lines() {
+  local file="$1" pattern="$2" expected="$3" timeout="${4:-2}"
+  local interval="0.05"
+  local confirm_tries=3
+  local tries=$((timeout * 20)) # 20 == 1/interval (0.05s); keep in sync if interval changes
+  local actual i confirm
+
+  for ((i = 0; i <= tries; i++)); do
+    actual="$(_count_matches "$file" "$pattern")"
+    if [ "$actual" -gt "$expected" ]; then
+      echo "wait_for_log_lines: overshot -- $actual line(s) matching" \
+        "'$pattern' in $file, expected $expected" >&2
+      return 1
+    fi
+    if [ "$actual" -eq "$expected" ]; then
+      # Reaching expected is not proof it has settled -- it may just be
+      # passing through on its way to a higher, wrong count -- so run a
+      # short, bounded confirmation before declaring success: a handful of
+      # extra polls, not the full remaining timeout.
+      for ((confirm = 0; confirm < confirm_tries; confirm++)); do
+        sleep "$interval"
+        actual="$(_count_matches "$file" "$pattern")"
+        if [ "$actual" -gt "$expected" ]; then
+          echo "wait_for_log_lines: overshot during confirmation --" \
+            "$actual line(s) matching '$pattern' in $file, expected $expected" >&2
+          return 1
+        fi
+      done
+      return 0
+    fi
+    [ "$i" -lt "$tries" ] && sleep "$interval"
+  done
+
+  echo "wait_for_log_lines: timed out after ${timeout}s waiting for" \
+    "$expected line(s) matching '$pattern' in $file (got $actual)" >&2
+  return 1
+}
+
 # Shared setup for the split entrypoint-*.bats suites (issue #518): every
 # concern file needs its own setup() hook per bats semantics, so the body
 # entrypoint.bats used to run once now lives here instead.
