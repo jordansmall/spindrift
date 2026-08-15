@@ -674,12 +674,16 @@ setup() {
   ! grep -q '`nix fmt` when the target flake defines a formatter' "$DRIVER_PROMPT_FILE"
 }
 
-@test "AUTO-FORMAT step explains why nix fmt is unavailable in-box" {
+# issue #2489: the full nix-fmt rationale moved out of the always-rendered
+# prompt and into the harness-owned /auto-format skill's own SKILL.md, read
+# only when the agent actually reaches this step — the rendered prompt now
+# just points at the skill by name instead of explaining it inline.
+@test "AUTO-FORMAT step points to the skill instead of explaining nix fmt inline" {
   export AUTO_FORMAT=1
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  grep -q 'nix fmt' "$DRIVER_PROMPT_FILE"
-  grep -qi 'permission' "$DRIVER_PROMPT_FILE"
+  grep -qF '`/auto-format`' "$DRIVER_PROMPT_FILE"
+  ! grep -qF 'store-lock permission error' "$DRIVER_PROMPT_FILE"
 }
 
 # issue #463: the conditional prompt steps above (SKILL_PREAMBLE,

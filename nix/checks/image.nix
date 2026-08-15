@@ -14,6 +14,7 @@ let
     promptHarness
     batsHarness
     skillsHarness
+    noSkillsHarness
     nixStoreWritableHarness
     extraClosuresHarness
     harness
@@ -397,14 +398,24 @@ in
     '';
 
   # Skills configured at build time must land in the agent-files layer at the
-  # Driver's declared skills dir (ADR 0009) so the Box is self-contained.
-  # Derives the expected path from skillsHarness.driverEntry rather than a
-  # literal, so the check tracks whichever Driver the image is built with
-  # (issue #448). Realizes the agent-files layer; Linux-gated like the other
-  # image checks.
+  # fixed /agent/skills path (issue #2489), alongside the harness-owned
+  # skills, so the Box is self-contained; agent/entrypoint.sh copies from
+  # there into the Driver's actual runtime skills dir at box startup.
+  # Realizes the agent-files layer; Linux-gated like the other image checks.
   skills-baked-into-image = pkgs.runCommand "skills-baked-into-image" { } ''
     grep -q 'BAKED-SKILL-MARKER' \
-      ${skillsHarness.agentFiles}/home/agent/${skillsHarness.driverEntry.skillsDirRelative}/baked-skill/SKILL.md
+      ${skillsHarness.agentFiles}/agent/skills/baked-skill/SKILL.md
+    touch $out
+  '';
+
+  # The harness-owned auto-format skill (issue #2489) must bake into every
+  # image at a fixed /agent/skills path unconditionally -- independent of
+  # whatever the Consumer's own `skills` list contains. Built against
+  # noSkillsHarness, which configures zero consumer skills, to prove this.
+  auto-format-skill-baked-into-image = pkgs.runCommand "auto-format-skill-baked-into-image" { } ''
+    skill=${noSkillsHarness.agentFiles}/agent/skills/auto-format/SKILL.md
+    [ -s "$skill" ]
+    grep -q 'Never .nix fmt.' "$skill"
     touch $out
   '';
 

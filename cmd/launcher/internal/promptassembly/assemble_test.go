@@ -134,7 +134,7 @@ func TestAssembleAutoFormatGate(t *testing.T) {
 				t.Fatalf("Assemble: %v", err)
 			}
 
-			const marker = "Before committing, auto-format the files you changed"
+			const marker = "invoke the `/auto-format` skill"
 			got := strings.Contains(result.Prompt, marker)
 			if got != tc.autoFormat {
 				t.Errorf("Prompt contains auto-format.md text = %v, want %v:\n%s", got, tc.autoFormat, result.Prompt)
