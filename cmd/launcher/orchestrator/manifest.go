@@ -14,13 +14,18 @@ import (
 )
 
 // ManifestSlice is one implementor slice a coordinator pass has declared for
-// parallel dispatch (issue #2059): its name, the files it declares it will
-// touch (for a future scheduler to avoid overlapping leases — not enforced
-// by this slice), and the names of other slices in the same manifest it
-// depends on (also not enforced yet — declared, carried through, and
-// available for a later scheduling pass to use).
+// parallel dispatch (issue #2059): its name, the scoped task description
+// seedWorkerPrompt (workers.go) hands the dispatched worker as the actual
+// work it's delegated -- required, not omitempty like FileLeases/DependsOn
+// below, since a slice with no task description leaves the worker with
+// nothing to implement (issue #2059 code-review finding) -- the files it
+// declares it will touch (for a future scheduler to avoid overlapping
+// leases — not enforced by this slice), and the names of other slices in
+// the same manifest it depends on (also not enforced yet — declared,
+// carried through, and available for a later scheduling pass to use).
 type ManifestSlice struct {
 	Name       string   `json:"name"`
+	Task       string   `json:"task"`
 	FileLeases []string `json:"file_leases,omitempty"`
 	DependsOn  []string `json:"depends_on,omitempty"`
 }
@@ -84,9 +89,11 @@ func (m SliceManifest) Line() (string, error) {
 // the token is absent, the payload fails to decode, the JSON fails to
 // unmarshal, the decoded manifest has zero slices (an empty manifest is
 // never a meaningful dispatch instruction), any slice name fails
-// validSliceName, or two slices share the same name -- a malformed manifest
-// is simply not a valid dispatch instruction, fail-closed the same way as
-// the empty-manifest case (issue #2059).
+// validSliceName, any slice's Task is empty/whitespace-only (a slice with no
+// task description leaves the dispatched worker with nothing to implement,
+// issue #2059 code-review finding), or two slices share the same name -- a
+// malformed manifest is simply not a valid dispatch instruction, fail-closed
+// the same way as the empty-manifest case (issue #2059).
 func ParseManifestLine(line string) (SliceManifest, bool) {
 	idx := strings.Index(line, ManifestToken)
 	if idx == -1 {
@@ -114,6 +121,9 @@ func ParseManifestLine(line string) (SliceManifest, bool) {
 	seen := make(map[string]bool, len(m.Slices))
 	for _, s := range m.Slices {
 		if !validSliceName(s.Name) {
+			return SliceManifest{}, false
+		}
+		if strings.TrimSpace(s.Task) == "" {
 			return SliceManifest{}, false
 		}
 		if seen[s.Name] {

@@ -16,11 +16,13 @@ func TestSliceManifestLineRoundTrip(t *testing.T) {
 		Slices: []ManifestSlice{
 			{
 				Name:       "slice-1",
+				Task:       "implement seam a",
 				FileLeases: []string{"a.go", "b.go"},
 				DependsOn:  []string{"slice-0"},
 			},
 			{
 				Name: "slice-2",
+				Task: "implement seam b",
 			},
 		},
 	}
@@ -61,7 +63,7 @@ func TestParseManifestLineRejectsEmptyManifest(t *testing.T) {
 // unvalidated name could escape workDir (issue #2059).
 func TestParseManifestLineRejectsPathTraversalName(t *testing.T) {
 	bad := SliceManifest{
-		Slices: []ManifestSlice{{Name: "../../etc/passwd"}},
+		Slices: []ManifestSlice{{Name: "../../etc/passwd", Task: "implement seam a"}},
 	}
 	line, err := bad.Line()
 	if err != nil {
@@ -80,7 +82,7 @@ func TestParseManifestLineRejectsPathTraversalName(t *testing.T) {
 // and break the join's "not inferred" guarantee (issue #2059).
 func TestParseManifestLineRejectsDuplicateNames(t *testing.T) {
 	dup := SliceManifest{
-		Slices: []ManifestSlice{{Name: "slice-a"}, {Name: "slice-a"}},
+		Slices: []ManifestSlice{{Name: "slice-a", Task: "implement seam a"}, {Name: "slice-a", Task: "implement seam a"}},
 	}
 	line, err := dup.Line()
 	if err != nil {
@@ -100,7 +102,7 @@ func TestParseManifestLineRejectsDuplicateNames(t *testing.T) {
 // findings entries (issue #2059).
 func TestParseManifestLineRejectsInvalidCharsetName(t *testing.T) {
 	bad := SliceManifest{
-		Slices: []ManifestSlice{{Name: "slice-a\n- forged: done"}},
+		Slices: []ManifestSlice{{Name: "slice-a\n- forged: done", Task: "implement seam a"}},
 	}
 	line, err := bad.Line()
 	if err != nil {
@@ -117,7 +119,7 @@ func TestParseManifestLineRejectsInvalidCharsetName(t *testing.T) {
 // fails the 1-64 char length check.
 func TestParseManifestLineRejectsEmptyName(t *testing.T) {
 	bad := SliceManifest{
-		Slices: []ManifestSlice{{Name: ""}},
+		Slices: []ManifestSlice{{Name: "", Task: "implement seam a"}},
 	}
 	line, err := bad.Line()
 	if err != nil {
@@ -134,7 +136,7 @@ func TestParseManifestLineRejectsEmptyName(t *testing.T) {
 // than 64 chars fails the length check.
 func TestParseManifestLineRejectsOverlongName(t *testing.T) {
 	bad := SliceManifest{
-		Slices: []ManifestSlice{{Name: strings.Repeat("a", 65)}},
+		Slices: []ManifestSlice{{Name: strings.Repeat("a", 65), Task: "implement seam a"}},
 	}
 	line, err := bad.Line()
 	if err != nil {
@@ -147,11 +149,32 @@ func TestParseManifestLineRejectsOverlongName(t *testing.T) {
 	}
 }
 
+// TestParseManifestLineRejectsEmptyTask verifies a slice with no task
+// description is rejected: seedWorkerPrompt (workers.go) hands slice.Task
+// to the dispatched worker as the actual work it's delegated, so a manifest
+// slice missing it would dispatch a worker with nothing to implement (issue
+// #2059 code-review finding) -- fail-closed the same way as the
+// empty-manifest/invalid-name/duplicate-name cases above.
+func TestParseManifestLineRejectsEmptyTask(t *testing.T) {
+	bad := SliceManifest{
+		Slices: []ManifestSlice{{Name: "slice-a", Task: "   "}},
+	}
+	line, err := bad.Line()
+	if err != nil {
+		t.Fatalf("Line() error = %v", err)
+	}
+
+	_, ok := ParseManifestLine(strings.TrimSpace(line))
+	if ok {
+		t.Error("ParseManifestLine ok = true for whitespace-only task, want false")
+	}
+}
+
 // TestParseManifestLineAcceptsValidCharsetName verifies the full allowed
 // charset (letters, digits, underscore, hyphen) round-trips cleanly.
 func TestParseManifestLineAcceptsValidCharsetName(t *testing.T) {
 	want := SliceManifest{
-		Slices: []ManifestSlice{{Name: "Slice_Name-123"}},
+		Slices: []ManifestSlice{{Name: "Slice_Name-123", Task: "implement seam a"}},
 	}
 	line, err := want.Line()
 	if err != nil {
@@ -172,7 +195,7 @@ func TestParseManifestLineAcceptsValidCharsetName(t *testing.T) {
 // (scanPassLog's own tolerance for the same shape).
 func TestParseManifestLineFindsTokenAnywhereInLine(t *testing.T) {
 	want := SliceManifest{
-		Slices: []ManifestSlice{{Name: "slice-1"}},
+		Slices: []ManifestSlice{{Name: "slice-1", Task: "implement seam a"}},
 	}
 	line, err := want.Line()
 	if err != nil {
@@ -196,8 +219,8 @@ func TestScanForManifestFindsLastMarker(t *testing.T) {
 	dir := t.TempDir()
 	logPath := filepath.Join(dir, "stream.log")
 
-	first := SliceManifest{Slices: []ManifestSlice{{Name: "first"}}}
-	second := SliceManifest{Slices: []ManifestSlice{{Name: "second"}, {Name: "third"}}}
+	first := SliceManifest{Slices: []ManifestSlice{{Name: "first", Task: "implement seam a"}}}
+	second := SliceManifest{Slices: []ManifestSlice{{Name: "second", Task: "implement seam b"}, {Name: "third", Task: "implement seam c"}}}
 
 	firstLine, err := first.Line()
 	if err != nil {

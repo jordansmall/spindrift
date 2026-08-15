@@ -80,7 +80,7 @@ func TestRunWithReviewPassDispatchesManifestThenContinuesImplementFixLoop(t *tes
 	t.Setenv("WORKER_WORK_DIR", workerWorkDir)
 	t.Setenv("COORD_COUNT_FILE", coordCountFile)
 
-	manifest := SliceManifest{Slices: []ManifestSlice{{Name: "slice-a"}}}
+	manifest := SliceManifest{Slices: []ManifestSlice{{Name: "slice-a", Task: "implement seam a"}}}
 	manifestLine, err := manifest.Line()
 	if err != nil {
 		t.Fatalf("Line() error = %v", err)
@@ -213,7 +213,7 @@ func TestRunWithReviewPassMaxSlicesCapNotShadowedByRepeatedManifestDispatch(t *t
 	t.Setenv("WORKER_WORK_DIR", workerWorkDir)
 	t.Setenv("COORD_COUNT_FILE", coordCountFile)
 
-	manifest := SliceManifest{Slices: []ManifestSlice{{Name: "slice-a"}}}
+	manifest := SliceManifest{Slices: []ManifestSlice{{Name: "slice-a", Task: "implement seam a"}}}
 	manifestLine, err := manifest.Line()
 	if err != nil {
 		t.Fatalf("Line() error = %v", err)
@@ -313,8 +313,8 @@ func TestDispatchManifestIfPresentDispatchesAndMergesResults(t *testing.T) {
 
 	dir := t.TempDir()
 	manifest := SliceManifest{Slices: []ManifestSlice{
-		{Name: "done-fast"},
-		{Name: "crash-now"},
+		{Name: "done-fast", Task: "implement seam a"},
+		{Name: "crash-now", Task: "implement seam b"},
 	}}
 	line, err := manifest.Line()
 	if err != nil {
@@ -386,7 +386,7 @@ exit 0
 	t.Setenv("PATH", fakeDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
 	dir := t.TempDir()
-	manifest := SliceManifest{Slices: []ManifestSlice{{Name: "slice-a"}}}
+	manifest := SliceManifest{Slices: []ManifestSlice{{Name: "slice-a", Task: "implement seam a"}}}
 	line, err := manifest.Line()
 	if err != nil {
 		t.Fatalf("Line() error = %v", err)
@@ -433,7 +433,7 @@ func TestDispatchManifestIfPresentReportsCrashErrNotMisleadingExitCode(t *testin
 	chdirToFreshWorkerRepo(t)
 
 	dir := t.TempDir()
-	manifest := SliceManifest{Slices: []ManifestSlice{{Name: "slice-a"}}}
+	manifest := SliceManifest{Slices: []ManifestSlice{{Name: "slice-a", Task: "implement seam a"}}}
 	line, err := manifest.Line()
 	if err != nil {
 		t.Fatalf("Line() error = %v", err)
@@ -493,7 +493,7 @@ exit 0
 	t.Setenv("PATH", fakeDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
 	dir := t.TempDir()
-	manifest := SliceManifest{Slices: []ManifestSlice{{Name: "slice-a"}}}
+	manifest := SliceManifest{Slices: []ManifestSlice{{Name: "slice-a", Task: "implement seam a"}}}
 	line, err := manifest.Line()
 	if err != nil {
 		t.Fatalf("Line() error = %v", err)
