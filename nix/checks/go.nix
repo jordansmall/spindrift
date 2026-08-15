@@ -93,7 +93,11 @@ in
   # resolve its ../../../../../.github/workflows/agent-dispatch.yml path
   # (#1985). templates/ is copied the same way so
   # TestPromptMarkersMatchScanner can resolve its own
-  # ../../../templates/default/prompts path (#2038).
+  # ../../../templates/default/prompts path (#2038). .forgejo/ is copied the
+  # same way so TestClaimStripParity_AllWorkflows can resolve its
+  # ../../../../.forgejo/workflows/{agent-dispatch,agent-recover}.yml paths
+  # (#2507), alongside the .github/ copy above for the .github-side halves
+  # of that same test.
   launcher-go-test =
     pkgs.runCommand "launcher-go-test"
       {
@@ -107,6 +111,7 @@ in
         cp -r ${../../cmd/launcher} src/cmd/launcher
         cp -r ${../../docs} src/docs
         cp -r ${../../.github} src/.github
+        cp -r ${../../.forgejo} src/.forgejo
         cp -r ${../../templates} src/templates
         chmod -R +w src
         cp -r ${launcherGoModules} src/cmd/launcher/vendor
