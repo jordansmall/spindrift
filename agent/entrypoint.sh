@@ -67,6 +67,18 @@ configure_env() {
   # otherwise.
   OUTBOX_DIR="${OUTBOX_DIR:-/outbox}"
 
+  # HARNESS_SKILLS_DIR is where harness-owned and build-time
+  # Consumer-configured skills are baked (lib/image.nix), a sibling of
+  # PROMPTS_DIR. OPERATOR_SKILLS_DIR is where SPINDRIFT_SKILLS_DIR's
+  # runtime override is mounted (issue #2489) -- a fixed path distinct
+  # from DRIVER_SKILLS_DIR itself, since a mount directly onto
+  # DRIVER_SKILLS_DIR would replace its entire contents and hide the
+  # harness-owned skill(s) baked at HARNESS_SKILLS_DIR. Both get copied
+  # into DRIVER_SKILLS_DIR below instead of being mounted there
+  # directly, since copying merges and mounting replaces.
+  HARNESS_SKILLS_DIR="${HARNESS_SKILLS_DIR:-/agent/skills}"
+  OPERATOR_SKILLS_DIR="${OPERATOR_SKILLS_DIR:-/operator-skills}"
+
   # DRIVER_NAME, DRIVER_BIN, DRIVER_FLAGS_COMMON, and DRIVER_SKILLS_DIR are
   # baked by the selected Driver's lib/drivers/<name>.nix registry entry (ADR
   # 0009, issue #624) via the nix-rendered preamble prepended ahead of this
@@ -730,6 +742,18 @@ phase_prompt_assembly() {
   # Claude Code discovers a skill as a directory holding a SKILL.md
   # (DRIVER_SKILLS_DIR/<name>/SKILL.md), never a flat <name>.md file, so the
   # skill name advertised in SKILLS_FOUND is the directory basename.
+  # Populate DRIVER_SKILLS_DIR by copying, not mounting (issue #2489):
+  # baked skills first, then any operator override layered on top by
+  # name, so an operator-supplied skill wins on a name collision but a
+  # harness-owned skill the operator didn't override survives.
+  mkdir -p "$DRIVER_SKILLS_DIR"
+  if [ -d "$HARNESS_SKILLS_DIR" ]; then
+    cp -r "$HARNESS_SKILLS_DIR"/. "$DRIVER_SKILLS_DIR"/
+  fi
+  if [ -d "$OPERATOR_SKILLS_DIR" ]; then
+    cp -r "$OPERATOR_SKILLS_DIR"/. "$DRIVER_SKILLS_DIR"/
+  fi
+
   local SKILLS_FOUND=""
   if [ -d "$DRIVER_SKILLS_DIR" ]; then
     local _sf _sn
