@@ -864,3 +864,43 @@ func TestMarkDraft_AlreadyDraftNoOp(t *testing.T) {
 		t.Fatal("MarkDraft(...) issued a PATCH for an already-draft PR, want no-op")
 	}
 }
+
+// TestMarkDraft_AlreadyDraftFieldNoOpWithoutWIPTitle verifies MarkDraft
+// issues no PATCH and returns nil when the pull's draft field is already
+// true even though the title carries no WIP-title convention — the
+// symmetric case to TestMarkReady_ActsOnDraftFieldWithBracketedWIPTitle.
+// MarkDraft must gate on isDraftPull (draft field OR either WIP-title
+// convention), the same predicate MarkReady uses, not on isDraftTitle's
+// narrower title-only check: otherwise a pull that's already draft by field
+// but plainly titled would be redundantly PATCHed back to draft.
+func TestMarkDraft_AlreadyDraftFieldNoOpWithoutWIPTitle(t *testing.T) {
+	patched := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/owner/repo/pulls/206":
+			w.Write([]byte(pullJSON(206, "open", false, true, true, "add feature", "agent/issue-206", "abc123", "main")))
+		case r.Method == http.MethodPatch:
+			patched = true
+			w.WriteHeader(http.StatusOK)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	cf := forgejo.NewForgejoCodeForgeForTest(forgejo.ForgejoCodeForgeConfig{
+		BaseURL:      srv.URL,
+		Repo:         "owner/repo",
+		Token:        "tok",
+		BranchPrefix: "agent/issue-",
+	}, nil, "unused")
+	pr, ok := cf.(prReader)
+	if !ok {
+		t.Fatalf("forgejoCodeForge does not satisfy prReader (methods not yet implemented)")
+	}
+	if err := pr.MarkDraft("https://forge.test/owner/repo/pulls/206"); err != nil {
+		t.Fatalf("MarkDraft(...) unexpected error: %v", err)
+	}
+	if patched {
+		t.Fatal("MarkDraft(...) issued a PATCH for a pull already draft by field, want no-op")
+	}
+}
