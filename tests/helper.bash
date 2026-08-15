@@ -349,6 +349,19 @@ seed_flake_repo() {
   git -C "$seed" push -q origin HEAD:main
 }
 
+# Push main to a same-named remote branch, e.g. so a non-default BASE_BRANCH
+# resolves to a real origin/${BASE_BRANCH} ref. phase_branch_recovery checks
+# that ref out before the prompt is ever assembled (setup_bare_repo only
+# seeds main), so any test setting BASE_BRANCH to something other than
+# "main" needs this first. Call after setup_bare_repo.
+# Usage: seed_release_branch "release-42" "seed-name"
+seed_release_branch() {
+  local branch="$1" seed_name="$2"
+  local seed="$BATS_TEST_TMPDIR/$seed_name"
+  git clone -q "https://github.com/owner/repo.git" "$seed"
+  git -C "$seed" push -q origin "main:$branch"
+}
+
 # Push a named lockfile to the remote's main branch. Call after setup_bare_repo.
 # Usage: seed_lockfile "go.sum"
 seed_lockfile() {

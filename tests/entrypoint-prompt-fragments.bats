@@ -1072,12 +1072,7 @@ WORKER_AGENTS_JSON_TEMPLATE='{"worker":{"description":"Implement a scoped slice 
   export AGENTS_JSON_TEMPLATE="$WORKER_AGENTS_JSON_TEMPLATE"
   export BASE_BRANCH="release-42"
   export WORK_DIR="$BATS_TEST_TMPDIR/work-coordinator-base-branch"
-  # phase_branch_recovery checks out real origin/${BASE_BRANCH} before the
-  # prompt is ever assembled, so the remote needs an actual release-42 ref --
-  # seed one from main (setup_bare_repo only seeds main).
-  local seed="$BATS_TEST_TMPDIR/seed-release-42"
-  git clone -q "https://github.com/owner/repo.git" "$seed"
-  git -C "$seed" push -q origin main:release-42
+  seed_release_branch "release-42" "seed-release-42"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   # The Agent tool's isolation:"worktree" mechanism cuts a worker's worktree
@@ -1103,9 +1098,12 @@ WORKER_AGENTS_JSON_TEMPLATE='{"worker":{"description":"Implement a scoped slice 
   # substitution allowlist, and appears in no env-schema/launcher file, so it
   # rendered as a literal, broken reference; mutating the consumer repo's
   # .gitignore in every coordinator PR was also scope creep issue #2058
-  # never asked for.
-  ! grep -qF 'gitignore' "$DRIVER_PROMPT_FILE"
-  ! grep -qF 'WORK_DIR' "$DRIVER_PROMPT_FILE"
+  # never asked for. Scoped to the IMPLEMENT section itself, not the whole
+  # rendered prompt -- an unrelated future fragment elsewhere is free to
+  # mention either word without tripping this test.
+  implement_section="$(awk '/^# IMPLEMENT/,/^# CHECK/' "$DRIVER_PROMPT_FILE")"
+  [[ "$implement_section" != *'gitignore'* ]]
+  [[ "$implement_section" != *'WORK_DIR'* ]]
 }
 
 @test "IMPLEMENT section: coordinator grounds branch discovery in the worker's own report, not the Agent-tool result" {
@@ -1138,12 +1136,7 @@ WORKER_AGENTS_JSON_TEMPLATE='{"worker":{"description":"Implement a scoped slice 
   export AGENTS_JSON_TEMPLATE="$WORKER_AGENTS_JSON_TEMPLATE"
   export BASE_BRANCH="release-42"
   export WORK_DIR="$BATS_TEST_TMPDIR/work-coordinator-no-base-branch-interp"
-  # phase_branch_recovery checks out real origin/${BASE_BRANCH} before the
-  # prompt is ever assembled, so the remote needs an actual release-42 ref --
-  # seed one from main (setup_bare_repo only seeds main).
-  local seed="$BATS_TEST_TMPDIR/seed-release-42-no-interp"
-  git clone -q "https://github.com/owner/repo.git" "$seed"
-  git -C "$seed" push -q origin main:release-42
+  seed_release_branch "release-42" "seed-release-42-no-interp"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   # coordinator.md declares no extraSubstVars in lib/fragments.nix's
