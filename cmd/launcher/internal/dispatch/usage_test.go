@@ -422,6 +422,128 @@ func TestUsageReport_FullFormatLocksExactMarkdown(t *testing.T) {
 	}
 }
 
+// TestUsageReport_MergesPerModelTokensAcrossPasses verifies that the SAME
+// model appearing in two different passes' logs is merged into ONE row
+// summing both passes' token figures, not rendered as two separate rows
+// (issue #2575's per-model acceptance criterion).
+func TestUsageReport_MergesPerModelTokensAcrossPasses(t *testing.T) {
+	dir := tempLogDir(t)
+	f, err := NewFactory(Config{}, dir, runner.NewFake(), fakeDriver{}, RealClock())
+	if err != nil {
+		t.Fatalf("NewFactory: %v", err)
+	}
+	defer f.Cleanup()
+	d := f.New("17", "test issue")
+
+	pass1 := []string{
+		`{"type":"assistant","message":{"model":"claude-opus-4-8","content":[],"usage":{"input_tokens":100,"output_tokens":50}}}`,
+		`{"type":"result","num_turns":1,"total_cost_usd":0.10,"usage":{"input_tokens":100,"output_tokens":50}}`,
+	}
+	if err := writeFile(d.logPath(), strings.Join(pass1, "\n")+"\n"); err != nil {
+		t.Fatal(err)
+	}
+	pass2 := []string{
+		`{"type":"assistant","message":{"model":"claude-opus-4-8","content":[],"usage":{"input_tokens":40,"output_tokens":20}}}`,
+		`{"type":"result","num_turns":1,"total_cost_usd":0.10,"usage":{"input_tokens":40,"output_tokens":20}}`,
+	}
+	if err := writeFile(d.fixLogPath(1), strings.Join(pass2, "\n")+"\n"); err != nil {
+		t.Fatal(err)
+	}
+
+	body := d.UsageReport()
+	if strings.Count(body, "claude-opus-4-8") != 1 {
+		t.Fatalf("report should merge the shared model into one row; got: %q", body)
+	}
+	if !strings.Contains(body, "| claude-opus-4-8 | 140 | 70 | 0 | 0 | 0 |") {
+		t.Errorf("report should sum the shared model's tokens across both passes (140/70); got: %q", body)
+	}
+}
+
+// TestUsageReport_MergedModelOrderIsDeterministicNotAppearanceOrder verifies
+// that when different passes contribute different models, the merged
+// per-model table orders rows by family rank (opus, haiku, sonnet, then
+// the rest) rather than by which pass happened to run first -- a run whose
+// initial pass used haiku and fix pass used opus must still render
+// opus-first, matching a single-log run's own convention, not
+// haiku-first (issue #2575).
+func TestUsageReport_MergedModelOrderIsDeterministicNotAppearanceOrder(t *testing.T) {
+	dir := tempLogDir(t)
+	f, err := NewFactory(Config{}, dir, runner.NewFake(), fakeDriver{}, RealClock())
+	if err != nil {
+		t.Fatalf("NewFactory: %v", err)
+	}
+	defer f.Cleanup()
+	d := f.New("18", "test issue")
+
+	// Initial pass uses haiku only; fix pass uses opus only -- haiku appears
+	// first chronologically.
+	pass1 := []string{
+		`{"type":"assistant","message":{"model":"claude-haiku-4-5-20251001","content":[],"usage":{"input_tokens":10,"output_tokens":5}}}`,
+		`{"type":"result","num_turns":1,"total_cost_usd":0.10,"usage":{"input_tokens":10,"output_tokens":5}}`,
+	}
+	if err := writeFile(d.logPath(), strings.Join(pass1, "\n")+"\n"); err != nil {
+		t.Fatal(err)
+	}
+	pass2 := []string{
+		`{"type":"assistant","message":{"model":"claude-opus-4-8","content":[],"usage":{"input_tokens":100,"output_tokens":50}}}`,
+		`{"type":"result","num_turns":1,"total_cost_usd":0.10,"usage":{"input_tokens":100,"output_tokens":50}}`,
+	}
+	if err := writeFile(d.fixLogPath(1), strings.Join(pass2, "\n")+"\n"); err != nil {
+		t.Fatal(err)
+	}
+
+	body := d.UsageReport()
+	opusIdx := strings.Index(body, "claude-opus-4-8")
+	haikuIdx := strings.Index(body, "claude-haiku-4-5-20251001")
+	if opusIdx == -1 || haikuIdx == -1 {
+		t.Fatalf("report should contain both models; got: %q", body)
+	}
+	if opusIdx > haikuIdx {
+		t.Errorf("report should render opus before haiku (family rank), regardless of appearance order; got: %q", body)
+	}
+}
+
+// TestSpanDurationMs_NoUsableSpanFallsBackToLongestReportDuration verifies
+// that when NO found report carries a usable event span (HasEventSpan is
+// false on every one), spanDurationMs falls back to the largest single
+// report's own Totals.DurationMs -- not zero, and not a naive sum of every
+// report's duration (issue #2575).
+func TestSpanDurationMs_NoUsableSpanFallsBackToLongestReportDuration(t *testing.T) {
+	found := []usage.Report{
+		{Totals: usage.Usage{DurationMs: 1000}, Found: true},
+		{Totals: usage.Usage{DurationMs: 5000}, Found: true},
+	}
+
+	got := spanDurationMs(found)
+	if got != 5000 {
+		t.Errorf("spanDurationMs = %d, want 5000 (max own duration, not sum or zero)", got)
+	}
+}
+
+// TestSpanDurationMs_LatestNotAfterEarliestFallsBackToLongestReportDuration
+// verifies the latestMs > earliestMs guard: a report whose earliest and
+// latest event timestamps land on the same instant (or are otherwise not
+// strictly increasing) contributes a zero span, so spanDurationMs must still
+// fall back to the largest single report's own Totals.DurationMs rather than
+// reporting that degenerate zero span (issue #2575).
+func TestSpanDurationMs_LatestNotAfterEarliestFallsBackToLongestReportDuration(t *testing.T) {
+	found := []usage.Report{
+		{
+			Totals:          usage.Usage{DurationMs: 2000},
+			Found:           true,
+			HasEventSpan:    true,
+			EarliestEventMs: 1000,
+			LatestEventMs:   1000,
+		},
+		{Totals: usage.Usage{DurationMs: 7000}, Found: true},
+	}
+
+	got := spanDurationMs(found)
+	if got != 7000 {
+		t.Errorf("spanDurationMs = %d, want 7000 (max own duration, not the degenerate zero span)", got)
+	}
+}
+
 // TestModelBreakdownSection verifies the per-model token breakdown table
 // renders one row per model with all six token categories, and that an
 // empty models slice renders no section at all.
