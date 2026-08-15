@@ -87,6 +87,20 @@ setup() {
   # derives it itself now that there's no second, independently-built Go
   # invocation to hand a --branch flag to.
 
+  # phase_prompt_assembly copies HARNESS_SKILLS_DIR (default /agent/skills)
+  # and OPERATOR_SKILLS_DIR (default /operator-skills) into DRIVER_SKILLS_DIR
+  # before the SKILLS_FOUND discovery scan runs (entrypoint.sh:756-762) --
+  # real, absolute host paths outside this test's $BATS_TEST_TMPDIR/$HOME
+  # sandbox. Left unset, whatever this suite happens to run on leaks into
+  # SKILLS_FOUND: a Box with its own skills baked at /agent/skills silently
+  # widens every cell's roster past the four skills setup() bakes below,
+  # producing a golden fixture that only matches that one contaminated
+  # environment (issue #2059 CI regression -- f8385e60 regenerated the
+  # golden fixtures on such a Box). Point both at guaranteed-empty
+  # directories so SKILLS_FOUND reflects only what this test controls.
+  export HARNESS_SKILLS_DIR="$BATS_TEST_TMPDIR/no-harness-skills"
+  export OPERATOR_SKILLS_DIR="$BATS_TEST_TMPDIR/no-operator-skills"
+
   # Bake all four skills (entrypoint-prompt-fragments.bats:660-730's pattern):
   # the covered cell requires every per-skill gate on and a non-empty
   # SKILLS_FOUND (assemble.go's checkCoveredCell).

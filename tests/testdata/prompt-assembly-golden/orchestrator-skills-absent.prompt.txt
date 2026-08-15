@@ -51,11 +51,6 @@ below with no further comment about this gate.
 
 # COMMS
 
-Default to the `/caveman` skill for all narration and prose output this run.
-Code, commands, error messages, and commit messages are exempt and stay
-verbatim. Never route a commit message through `/caveman` or otherwise
-compress it — commit messages are always full human-quality prose.
-
 Your text output is a machine-parsed log, not a conversation.
 
 - No pleasantries, acknowledgements, praise, or apologies.
@@ -190,12 +185,6 @@ wastes a batch slot rather than losing work — but the surest way to make
 forward progress is to cherry-pick each done slice's branch as soon as you
 see it and never re-declare that name again.
 
-Skills available: auto-format, caveman, code-review, commit, tdd, to-tickets. Prefer invoking with /skill-name; the inline guidance below is the fallback when a skill is absent.
-
-Use the `/tdd` skill to run the test-first loop below — its
-red-green-refactor discipline is authoritative and supersedes the inline
-steps.
-
 Work test-first, one slice at a time. Hard rule:
 
 1. RED: write ONE failing test, run it, confirm it fails for the right reason.
@@ -256,9 +245,6 @@ moment the marker fails to show up, emit a `status=blocked`
 `SPINDRIFT_OUTCOME` instead of looping.
 
 # COMMIT
-
-Use the `/commit` skill to write every commit message; it is authoritative
-and supersedes the inline format rules below.
 
 Strict Conventional Commits v1.0.0, hard-wrapped (subject ≤50, body ≤72).
 Prefer several small focused commits over one big one — commit each logical
