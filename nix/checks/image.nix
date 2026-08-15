@@ -33,6 +33,8 @@ let
   # Single source of truth for the literal asserted below (issue #2433):
   # read reviewModel's default straight from the schema instead of
   # restating it by hand, so a future bump only edits lib/env-schema.nix.
+  # Deliberate carve-out from readSchemaDefaults (issue #2506 AC5): this
+  # pin needs the raw schema, not the helper under test elsewhere.
   reviewModelSchemaDefault = (import ../../lib/env-schema.nix).reviewModel.default;
   # Single source of truth for the per-agent effort literals asserted below
   # (issue #2506): read them from lib/roster-schema-defaults.nix instead of
@@ -100,11 +102,12 @@ in
     ! grep -q '"reviewer"' <<<"$scout_line" \
       || { echo "scout-only harness unexpectedly bakes a reviewer entry" >&2; exit 1; }
     # defaultRoster's fixed default effort (issue #2386) must survive the
-    # roster==null fallback (lib/mkHarness.nix:317-327) end-to-end: the
-    # driver-level checks (nix/checks/drivers.nix) pin the effort literal
-    # render but bypass that fallback by feeding a hand-built roster straight
-    # to the driver renderer, so only this fixture (no `roster` arg) proves
-    # the wiring from lib/roster.nix's literal through to the baked template.
+    # roster==null fallback (lib/mkHarness.nix:326-336) end-to-end: the
+    # driver-level checks (nix/checks/drivers.nix) pin the effort table
+    # lookup's render but bypass that fallback by feeding a hand-built
+    # roster straight to the driver renderer, so only this fixture (no
+    # `roster` arg) proves the wiring from lib/roster.nix's rosterDefaults
+    # lookup through to the baked template.
     grep -q '"effort":"${rosterDefaults.scout.effort}"' <<<"$scout_line" \
       || { echo "scout-only harness missing default scout effort in baked template" >&2; exit 1; }
 

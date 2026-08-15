@@ -319,11 +319,9 @@ let
   # building the exact same four agents it always has.
   rosterLib = import ./roster.nix { inherit lib; };
   # The one schema-defaults reader (issue #2506), reused above in non-strict
-  # mode for schemaDefaults; lib/roster-schema-defaults.nix only imports
-  # lib/env-schema.nix, never lib/mkHarness.nix, so this import is safe --
-  # the reverse (mkHarness.nix importing lib/roster.nix, which already
-  # imports lib/mkHarness.nix, would be circular) is what roster.nix avoids
-  # by going through this same helper file instead.
+  # mode for schemaDefaults; see lib/roster-schema-defaults.nix's own doc
+  # comment for why it's a separate file both this and roster.nix import
+  # directly, rather than roster.nix importing mkHarness.nix for it.
   rosterSchemaDefaults = import ./roster-schema-defaults.nix { inherit lib; };
   resolvedRoster = rosterLib.normalizeRoster (
     if roster != null then

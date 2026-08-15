@@ -25,11 +25,11 @@
 # generic prompt-injection loop). `effort`, like `model`, is an optional
 # pass-through on the general roster schema -- no normalization -- that each
 # Driver forwards verbatim when set (issue #2242). `defaultRoster`
-# additionally ships a fixed default `effort` per agent (scout=medium,
-# reviewer=high, filer=medium, worker=high; issue #2386) as a literal on
-# each entry below -- a caller assembling a custom roster by hand still gets
-# no injected default, since that stays specific to `defaultRoster`'s own
-# literals, not a `normalizeRoster`-level behavior.
+# additionally ships a fixed default `effort` per agent, looked up per name
+# from `rosterDefaults` (lib/roster-schema-defaults.nix; issue #2386/#2506)
+# -- a caller assembling a custom roster by hand still gets no injected
+# default, since that stays specific to `defaultRoster`'s own lookup, not a
+# `normalizeRoster`-level behavior.
 { lib }:
 {
   # Normalizes a roster list before any Driver consumes it (issue #2152 slice
@@ -79,8 +79,7 @@
     }:
     let
       rosterHelper = import ./roster-schema-defaults.nix { inherit lib; };
-      schemaDefaults = rosterHelper.schemaDefaults;
-      rosterDefaults = rosterHelper.rosterDefaults;
+      inherit (rosterHelper) schemaDefaults rosterDefaults;
       legacyModels = {
         scout = scoutModel;
         reviewer = reviewModel;

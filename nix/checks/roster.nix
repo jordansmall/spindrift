@@ -7,7 +7,7 @@
 }:
 let
   rosterLib = import ../../lib/roster.nix { inherit (pkgs) lib; };
-  inherit (pkgs.lib) assertMsg;
+  inherit (pkgs.lib) assertMsg mapAttrs;
 in
 {
   roster-normalize-rejects-invalid-name =
@@ -186,7 +186,7 @@ in
           effort = "high";
         };
       };
-      mismatches = builtins.filter (n: !(rosterDefaults ? ${n}) || rosterDefaults.${n} != expected.${n}) [
+      mismatches = builtins.filter (n: rosterDefaults.${n} != expected.${n}) [
         "scout"
         "reviewer"
         "filer"
@@ -247,9 +247,9 @@ in
       "readSchemaDefaults { strict = false; } must fall back to \"\" on an entry missing .default, got: ${builtins.toJSON result.value.missing}";
     pkgs.runCommand "roster-schema-defaults-tolerant-falls-back-on-missing-default" { } "touch $out";
 
-  # Issue #2386: defaultRoster ships a fixed default `effort` per agent
-  # (scout=medium, reviewer=high, filer=medium, worker=high) as a literal on
-  # each entry.
+  # Issue #2386: defaultRoster ships a fixed default `effort` per agent,
+  # looked up per name from rosterDefaults (issue #2506) rather than a
+  # literal on each entry.
   roster-default-roster-ships-effort-defaults =
     let
       roster = rosterLib.defaultRoster {
@@ -260,7 +260,7 @@ in
       };
       byName = name: builtins.head (builtins.filter (e: e.name == name) roster);
       expected =
-        builtins.mapAttrs (_: v: v.effort)
+        mapAttrs (_: v: v.effort)
           (import ../../lib/roster-schema-defaults.nix { inherit (pkgs) lib; }).rosterDefaults;
       mismatches = builtins.filter (n: (byName n).effort != expected.${n}) [
         "scout"
@@ -270,7 +270,7 @@ in
       ];
     in
     assert assertMsg (mismatches == [ ])
-      "defaultRoster must ship the fixed default effort per agent (scout=medium, reviewer=high, filer=medium, worker=high), mismatched: ${builtins.toJSON mismatches}";
+      "defaultRoster must ship the fixed default effort per agent from rosterDefaults (expected: ${builtins.toJSON expected}), mismatched: ${builtins.toJSON mismatches}";
     pkgs.runCommand "roster-default-roster-ships-effort-defaults" { } "touch $out";
 
   # Issue #2426: defaultRoster's models attrset sets a named agent's model.
@@ -285,6 +285,9 @@ in
         };
       };
       byName = name: builtins.head (builtins.filter (e: e.name == name) roster);
+      # Deliberate carve-out (issue #2506 AC5): reads the schema directly
+      # rather than through readSchemaDefaults, so this pin can't go
+      # vacuous by comparing the helper under test against itself.
       schema = import ../../lib/env-schema.nix;
     in
     assert assertMsg ((byName "filer").model == "claude-haiku-4-5-20251001")
@@ -383,6 +386,9 @@ in
     let
       roster = rosterLib.defaultRoster { };
       byName = name: builtins.head (builtins.filter (e: e.name == name) roster);
+      # Deliberate carve-out (issue #2506 AC5), same rationale as
+      # roster-default-roster-models-by-name above: reads the schema
+      # directly instead of through readSchemaDefaults.
       schema = import ../../lib/env-schema.nix;
       expected = {
         scout = schema.scoutModel.default;
@@ -411,6 +417,8 @@ in
   roster-schema-defaults-helper-matches-env-schema =
     let
       helper = import ../../lib/roster-schema-defaults.nix { inherit (pkgs) lib; };
+      # Same carve-out as above: a direct schema read, not through
+      # readSchemaDefaults, so this pin can't go vacuous.
       schema = import ../../lib/env-schema.nix;
       expected = {
         scout = schema.scoutModel.default;
