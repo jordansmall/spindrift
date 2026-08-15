@@ -69,6 +69,20 @@ func (d *Dispatch) dispatchWithRetry(logPath string, once func(resumeAfterHold b
 				return Result{AlreadyInFlight: true}
 			}
 
+			var qErr quarantineErr
+			if errors.As(err, &qErr) {
+				// quarantinePriorRunLogs failed before this attempt ever
+				// dispatched anything, so logPath may still hold the exact
+				// prior run's content it was trying to move aside. Neither
+				// settledOutcome nor ClassifyTransient may be trusted
+				// against it here (issue #2575): report a definite failure
+				// instead of risking a silent settle on someone else's
+				// verdict, and don't retry -- a quarantine failure is a
+				// local filesystem problem, not a transient box/API one.
+				fmt.Fprintf(os.Stderr, "    ?? #%s: %v\n", d.number, qErr)
+				return Result{Success: false}
+			}
+
 			if result, ok := d.settledOutcome(logPath); ok {
 				// A non-zero exit still settles on a genuine, nonce-gated
 				// outcome the box printed before dying (issue #2075): a run
