@@ -55,7 +55,7 @@ type stepTokenCache struct {
 // occurrence of a non-empty messageID wins and every later line sharing
 // that id is skipped; a line with an empty messageID is always counted,
 // since there is nothing to dedup it against. Reasoning tokens fold into
-// OutputTokens, matching FinalSnapshot's aggregate. opencode's tokens.cache
+// OutputTokens, matching Totals's aggregate. opencode's tokens.cache
 // carries a single collapsed write total with no TTL split (unlike
 // claude-code's ephemeral_5m/1h split), so the whole write total is
 // attributed to the 5-minute bucket — the Anthropic-backed default TTL is
@@ -145,7 +145,7 @@ var breakdownByModel = breakdownByModelFile
 // 5-minute cache-write bucket since opencode reports no TTL split. A
 // breakdownByModel I/O error degrades only the per-model section
 // (SummedByModel is set to nil with a stderr warning), not the aggregate
-// FinalSnapshot already summed above.
+// Totals already summed above.
 //
 // Returns usage.Report{Found: false} when the log contains no step_finish
 // event or does not exist. Returns (usage.Report{}, err) on other I/O
@@ -203,5 +203,5 @@ func ExtractUsage(logPath string) (usage.Report, error) {
 		fmt.Fprintf(os.Stderr, "WARNING: breakdown by model failed for %s: %v\n", logPath, err)
 		models = nil
 	}
-	return usage.Report{FinalSnapshot: u, Found: true, SummedByModel: models}, nil
+	return usage.Report{Totals: u, Found: true, SummedByModel: models}, nil
 }

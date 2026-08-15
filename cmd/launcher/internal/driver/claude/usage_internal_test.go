@@ -41,8 +41,8 @@ func TestExtractUsage_BreakdownByModelError(t *testing.T) {
 	if !report.Found {
 		t.Fatal("expected Found=true")
 	}
-	if report.FinalSnapshot.InputTokens != 100 || report.FinalSnapshot.OutputTokens != 50 {
-		t.Errorf("Usage: got %+v, want InputTokens=100 OutputTokens=50", report.FinalSnapshot)
+	if report.Totals.InputTokens != 100 || report.Totals.OutputTokens != 50 {
+		t.Errorf("Usage: got %+v, want InputTokens=100 OutputTokens=50", report.Totals)
 	}
 	if report.SummedByModel != nil {
 		t.Errorf("Models: got %+v, want nil", report.SummedByModel)
