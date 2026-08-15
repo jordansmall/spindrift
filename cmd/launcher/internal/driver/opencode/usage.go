@@ -203,5 +203,14 @@ func ExtractUsage(logPath string) (usage.Report, error) {
 		fmt.Fprintf(os.Stderr, "WARNING: breakdown by model failed for %s: %v\n", logPath, err)
 		models = nil
 	}
-	return usage.Report{Totals: u, Found: true, SummedByModel: models}, nil
+	report := usage.Report{Totals: u, Found: true, SummedByModel: models}
+	// Mirror the haveStart guard above: EarliestEventMs/LatestEventMs are
+	// only meaningful when a step_start anchored the window, matching
+	// DurationMs's own condition exactly.
+	if haveStart {
+		report.EarliestEventMs = firstStart
+		report.LatestEventMs = lastFinish
+		report.HasEventSpan = true
+	}
+	return report, nil
 }
