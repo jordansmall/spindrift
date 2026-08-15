@@ -207,6 +207,46 @@ in
       "rosterDefaults entries must match the expected schemaKey/effort per agent, mismatched: ${builtins.toJSON mismatches}";
     pkgs.runCommand "roster-schema-defaults-exports-roster-defaults" { } "touch $out";
 
+  # Issue #2506: readSchemaDefaults' `strict` flag must actually discriminate
+  # -- `strict = true` throws on an entry missing `.default` (the contract
+  # the roster's four schemaDefaults callers depend on). Without this
+  # fixture, a reader that ignored `strict` and always fell back to `or ""`
+  # would still pass every other check in the repo.
+  roster-schema-defaults-strict-throws-on-missing-default =
+    let
+      helper = import ../../lib/roster-schema-defaults.nix { inherit (pkgs) lib; };
+      result = builtins.tryEval (
+        let
+          r = helper.readSchemaDefaults { strict = true; } { missing = { }; };
+        in
+        builtins.deepSeq r r
+      );
+    in
+    assert assertMsg (
+      !result.success
+    ) "readSchemaDefaults { strict = true; } must throw on an entry missing .default";
+    pkgs.runCommand "roster-schema-defaults-strict-throws-on-missing-default" { } "touch $out";
+
+  # Issue #2506: the other half of the same contract -- `strict = false`
+  # must fall back to `""` on an entry missing `.default` instead of
+  # throwing, the tolerance mkHarness's flakeOption sweep depends on since
+  # most flakeOption-flagged schema entries carry no model concept at all.
+  roster-schema-defaults-tolerant-falls-back-on-missing-default =
+    let
+      helper = import ../../lib/roster-schema-defaults.nix { inherit (pkgs) lib; };
+      result = builtins.tryEval (
+        let
+          r = helper.readSchemaDefaults { strict = false; } { missing = { }; };
+        in
+        builtins.deepSeq r r
+      );
+    in
+    assert assertMsg (result.success
+    ) "readSchemaDefaults { strict = false; } must not throw on an entry missing .default";
+    assert assertMsg (result.value.missing == "")
+      "readSchemaDefaults { strict = false; } must fall back to \"\" on an entry missing .default, got: ${builtins.toJSON result.value.missing}";
+    pkgs.runCommand "roster-schema-defaults-tolerant-falls-back-on-missing-default" { } "touch $out";
+
   # Issue #2386: defaultRoster ships a fixed default `effort` per agent
   # (scout=medium, reviewer=high, filer=medium, worker=high) as a literal on
   # each entry.
