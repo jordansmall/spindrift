@@ -482,6 +482,35 @@ func TestValidateForbiddenMarkerFjRowStillRejectsImperative(t *testing.T) {
 	}
 }
 
+// TestValidateForbiddenMarkerUnknownKindFailsClosed covers issue #2499's
+// fail-closed fix: the forbiddenRows loop's Kind dispatch is an allowlist
+// switch, not a `!= forbiddenKindGhAPIMutation` denylist, so a typo'd or
+// otherwise unrecognized Kind value must return a wrapped, non-nil error
+// naming the offending row's ID rather than silently falling through to the
+// substring/imperative scan.
+func TestValidateForbiddenMarkerUnknownKindFailsClosed(t *testing.T) {
+	e := Env{BoxWriteEnabled: false, DispatchKind: "work"}
+	result := Result{Prompt: "prompt text unrelated to the row's marker"}
+	rows := []ForbiddenMarkerRow{
+		{
+			ID:       "test-unknown-kind",
+			Marker:   "some marker",
+			Severity: "reject",
+			When:     "boxAccessReadOnly",
+			Kind:     "bogus-kind",
+			Message:  "unused",
+		},
+	}
+
+	_, err := Validate(e, result, nil, rows)
+	if err == nil {
+		t.Fatal("Validate() error = nil, want non-nil")
+	}
+	if !strings.Contains(err.Error(), "test-unknown-kind") {
+		t.Errorf("Validate() error = %q, want it to mention row ID %q", err.Error(), "test-unknown-kind")
+	}
+}
+
 // forbiddenMarkerMessage returns testForbiddenMarkerRows()'s Message field
 // for the row with the given id, failing the test if no such row exists.
 func forbiddenMarkerMessage(t *testing.T, id string) string {
