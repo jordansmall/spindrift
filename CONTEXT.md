@@ -758,15 +758,8 @@ within a settle.
 _Avoid_: gate (a checkpoint — narrower than the whole settle), finalize, report.
 
 **Mediation**:
-Settle's host-mediated PR hand-off module (`settle.Mediation`), built fresh per
-attempt via `NewMediation(cf, it, outboxDir, baseBranch)`: it discovers cf's
-optional bundle-relay, draft-PR-create, and commit-subjects capabilities once,
-then its `Open` method relays the bundle, resolves a title/body from the Box's
-own PR-intent line (or a caller-selected fallback), ensures the "Closes #N"
-reference, and creates-or-adopts the draft PR. The one seam all four hand-off
-call sites — `hostMediateDraftPR`, `relayBlockedWork`, `adoptRelayedBranch`,
-and recover's `SettleRelayedBranch` — now drive, each keeping only its own
-differing failure policy around it.
+Settle's host-mediated PR hand-off module (`settle.Mediation`) — relay,
+intent, closes-ref, create/adopt behind one interface.
 _Avoid_: Handoff (the prompt-assembly descriptor), relay (the bundle act).
 
 **Merge guard**:
