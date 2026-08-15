@@ -17,18 +17,23 @@
 # that made the old form unsound. See tests/entrypoint-clone.bats for the
 # repo's established style of real git init/branch fixtures in bats.
 #
-# extract_cherry_pick_cmd (below) pulls the command straight out of the
-# fragment rather than letting each test hand-type it, so a future edit to
-# the fragment's actual command breaks these tests instead of leaving them
-# silently green against stale wording.
+# extract_cherry_pick_cmd (below) matches the fragment's command line against
+# a literal grep pattern (still hand-typed once, here, rather than at every
+# call site) and substitutes in the real branch name; if a future edit
+# changes the fragment's actual command text, the grep stops matching and
+# extraction fails loud, instead of these tests staying silently green
+# against stale wording. The extracted string is later executed via
+# `bash -c` (below) -- real, not eval'd fragment prose.
 
 COORDINATOR_FRAGMENT="${PROMPTS_DIR:-$BATS_TEST_DIRNAME/../templates/default/prompts}/fragments/coordinator.md"
 
 # Extracts the fragment's prescribed cherry-pick command, with the literal
 # `<branch>` placeholder substituted for $1. Greps the fragment for the one
-# line containing "git cherry-pick --no-commit", strips the surrounding
-# markdown backticks/punctuation, and swaps in the real branch name via a
-# shell parameter substitution -- never eval-ing fragment content.
+# line containing "git cherry-pick --no-commit" via a literal pattern that
+# must match the fragment's exact syntax, then swaps in the real branch name
+# via a shell parameter substitution. The result is a real shell command
+# string, later run with `bash -c` -- this function only locates and
+# parameterizes it, it doesn't itself execute anything.
 extract_cherry_pick_cmd() {
   local branch="$1"
   local line
