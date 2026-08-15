@@ -161,8 +161,13 @@ func killWorkerProcessGroup(cmd *exec.Cmd, doneCh <-chan error) {
 }
 
 // WorkerOptions configures LaunchWorkers. Every path here is independent of
-// the coordinator's own cfg.logPath/cfg.stateFile, so a worker structurally
-// cannot write either (issue #2059 AC4/AC6).
+// the coordinator's own cfg.logPath/cfg.stateFile (AC4/AC6) -- but note the
+// structural guarantee behind AC4 lives in buildDriverExecCmd itself
+// (run.go:728-753), not here: it never emits a --state-file or
+// --review-prompt-file flag for ANY cfg, worker or coordinator pass, so no
+// driver-exec invocation is ever told the run-state path in the first
+// place. See the passCfg comment in launchOneWorker below (issue #2059
+// review finding).
 type WorkerOptions struct {
 	// PromptFile is the base worker prompt seedWorkerPrompt composes each
 	// slice's own addendum onto.
@@ -213,25 +218,50 @@ func LaunchWorkers(cfg config, manifest SliceManifest, opts WorkerOptions, stdou
 		pollInterval = defaultWorkerPollInterval
 	}
 
-	results := make([]WorkerResult, len(manifest.Slices))
+	var mu sync.Mutex
 
-	if err := os.MkdirAll(opts.WorkDir, 0o755); err != nil {
-		for i, s := range manifest.Slices {
-			results[i] = WorkerResult{Slice: s.Name, Status: WorkerCrashed, Err: fmt.Errorf("create worker workdir: %w", err)}
-		}
-		return results
+	// Absolutize WorkDir up front so every path launchOneWorker derives from
+	// it (result/sentinel/log files, the worktree dir) is unambiguous
+	// regardless of cwd -- the orchestrator polls resultPath/sentinelPath
+	// from its own process cwd, while the worker's driver-exec subprocess
+	// runs with cmd.Dir set to its own worktree; a relative WORKER_WORK_DIR
+	// would make the two sides resolve the same string to two different
+	// files, silently burning the worker's full timeout waiting for a
+	// sentinel that already exists, just not where it's looking (issue
+	// #2059 review finding, workers.go:248).
+	absWorkDir, err := filepath.Abs(opts.WorkDir)
+	if err != nil {
+		return crashAllSlices(stdout, &mu, manifest, fmt.Errorf("resolve worker workdir: %w", err))
 	}
 
-	var mu sync.Mutex
+	if err := os.MkdirAll(absWorkDir, 0o755); err != nil {
+		return crashAllSlices(stdout, &mu, manifest, fmt.Errorf("create worker workdir: %w", err))
+	}
+
+	results := make([]WorkerResult, len(manifest.Slices))
 	var wg sync.WaitGroup
 	for i, slice := range manifest.Slices {
 		wg.Add(1)
 		go func(i int, slice ManifestSlice) {
 			defer wg.Done()
-			results[i] = launchOneWorker(cfg, slice, opts.PromptFile, opts.WorkDir, timeout, pollInterval, stdout, &mu)
+			results[i] = launchOneWorker(cfg, slice, opts.PromptFile, absWorkDir, timeout, pollInterval, stdout, &mu)
 		}(i, slice)
 	}
 	wg.Wait()
+	return results
+}
+
+// crashAllSlices reports every slice in manifest as WorkerCrashed with err,
+// emitting a worker_start/worker_finish pair for each (AC5) -- used when
+// LaunchWorkers fails before any worker can even be dispatched, so every
+// slice in manifest.Slices still gets exactly one WorkerResult (AC2).
+func crashAllSlices(stdout io.Writer, mu *sync.Mutex, manifest SliceManifest, err error) []WorkerResult {
+	results := make([]WorkerResult, len(manifest.Slices))
+	for i, s := range manifest.Slices {
+		writeWorkerOp(stdout, mu, claude.SpindriftOp{Op: "worker_start", Worker: s.Name})
+		writeWorkerOp(stdout, mu, claude.SpindriftOp{Op: "worker_finish", Worker: s.Name, WorkerStatus: string(WorkerCrashed), Reason: err.Error()})
+		results[i] = WorkerResult{Slice: s.Name, Status: WorkerCrashed, Err: err}
+	}
 	return results
 }
 
@@ -288,20 +318,15 @@ func launchOneWorker(cfg config, slice ManifestSlice, promptFile, workDir string
 	// A coordinator can legitimately dispatch the same slice name again on
 	// a later pass (e.g. a manifest re-emitted across passes) -- since the
 	// branch itself is deliberately left behind after a prior dispatch's
-	// worktree is removed (below), that recurrence must reuse the
-	// existing branch rather than fail: only "git worktree add -b" (create
-	// a fresh branch) errors on an already-existing branch name, so check
-	// for it first and drop -b when it's already there.
-	addArgs := []string{"worktree", "add", worktreePath}
-	verifyCmd := exec.Command("git", "rev-parse", "--verify", "--quiet", "refs/heads/"+worktreeBranch)
-	verifyCmd.Dir = repoRoot
-	if verifyCmd.Run() == nil {
-		addArgs = append(addArgs, worktreeBranch)
-	} else {
-		addArgs = append(addArgs, "-b", worktreeBranch, "HEAD")
-	}
-
-	addCmd := exec.Command("git", addArgs...)
+	// worktree is removed (below), that recurrence must reuse the branch
+	// name rather than fail. "git worktree add -B <branch>" both creates
+	// the branch on first use and, on reuse, forcibly resets it to HEAD --
+	// unlike a plain reuse of the existing branch tip, this guarantees a
+	// retried (e.g. previously timed-out, partially-committed) slice always
+	// starts fresh off the orchestrator's own current HEAD, never off
+	// whatever commit a prior, possibly-killed worker left the branch at
+	// (issue #2059 review finding).
+	addCmd := exec.Command("git", "worktree", "add", "-B", worktreeBranch, worktreePath, "HEAD")
 	addCmd.Dir = repoRoot
 	if out, err := addCmd.CombinedOutput(); err != nil {
 		err = fmt.Errorf("create worker worktree: %w: %s", err, strings.TrimSpace(string(out)))
@@ -340,6 +365,16 @@ func launchOneWorker(cfg config, slice ManifestSlice, promptFile, workDir string
 	passCfg.sessionFile = ""
 	passCfg.logPath = logPath
 	passCfg.heartbeatLog = heartbeatLogPath
+	// Belt-and-suspenders, not the actual enforcement mechanism:
+	// buildDriverExecCmd (run.go:728-753) never reads cfg.stateFile or
+	// cfg.reviewPromptFile into argv for ANY cfg, so a worker's driver-exec
+	// invocation is already structurally unable to discover the run-state
+	// path regardless of what these two fields hold. Clearing them here
+	// only guards against a future buildDriverExecCmd change starting to
+	// wire one of them in -- see TestBuildDriverExecCmdNeverForwardsStateOrReviewPromptFile
+	// in run_test.go, which pins the real invariant (issue #2059 review
+	// finding: this comment previously implied clearing these fields was
+	// itself what made AC4/AC6 hold).
 	passCfg.stateFile = ""
 	passCfg.reviewPromptFile = ""
 
@@ -395,8 +430,17 @@ func launchOneWorker(cfg config, slice ManifestSlice, promptFile, workDir string
 			case procErr = <-doneCh:
 				exitCode = workerExitCode(procErr)
 			case <-time.After(workerSentinelGrace):
-				// sentinel is authoritative; the process lingering past
-				// grace doesn't change the outcome (see workerSentinelGrace).
+				// The sentinel is authoritative, so status stays WorkerDone
+				// regardless -- but the process itself is still running,
+				// and the worktree-removal defer above is about to run
+				// against its cwd. Kill the group so that removal never
+				// races a process the kernel hasn't torn down yet, the
+				// same race killWorkerProcessGroup exists to close on the
+				// WorkerTimedOut path below (issue #2059 review finding,
+				// workers.go:397). doneCh is consumed inside
+				// killWorkerProcessGroup, so it must not be read again on
+				// this return path.
+				killWorkerProcessGroup(cmd, doneCh)
 			}
 		} else {
 			status = WorkerTimedOut
