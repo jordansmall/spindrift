@@ -184,10 +184,10 @@ func (f *forgejoCodeForge) listPulls(state string) ([]forgejoPullPayload, error)
 // OpenPRForBranch returns the open pull whose head matches branch, if any,
 // draft or not (issue #2408): a stranded draft is exactly as adoptable as a
 // ready one, since SettleAdopted already flips draft->ready at green via an
-// idempotent MarkReady call. Draft status is still read (from either the
-// pull's draft field or its WIP-title convention, isDraftPull) and reported
-// via the returned forge.PR's IsDraft field, but it never gates whether a
-// match is returned.
+// idempotent MarkReady call. Draft status (from either the pull's draft
+// field or its WIP-title convention, isDraftPull) is not reported through
+// the returned forge.PR — adoption stays draft-blind; isDraftPull is still
+// used internally by MarkReady/MarkDraft's idempotency guards.
 func (f *forgejoCodeForge) OpenPRForBranch(branch string) (forge.PR, bool, error) {
 	pulls, err := f.listPulls("open")
 	if err != nil {
@@ -197,7 +197,7 @@ func (f *forgejoCodeForge) OpenPRForBranch(branch string) (forge.PR, bool, error
 		if p.Head.Ref != branch {
 			continue
 		}
-		return forge.PR{URL: p.HTMLURL, IsDraft: isDraftPull(p)}, true, nil
+		return forge.PR{URL: p.HTMLURL}, true, nil
 	}
 	return forge.PR{}, false, nil
 }
