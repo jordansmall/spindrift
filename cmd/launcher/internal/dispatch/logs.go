@@ -50,6 +50,16 @@ func LogPaths(pwd, number string) []PassLog {
 // current log (if it exists) with the same bare label LogPaths uses. A pass
 // with neither a rotated sibling nor a current log on disk contributes
 // nothing -- existence on disk is the only source of truth (#648).
+//
+// Every P.N sibling this walk finds is guaranteed to be an attempt THIS run
+// itself produced, never a leftover from an unrelated earlier run at the
+// same path (a re-dispatch of the same issue in a persistent pwd -- agent-
+// failed -> re-label, waves/continuous -- or issue #561's own "duplicate/
+// collided launch" case): Dispatch.Run quarantines any pre-existing log for
+// this issue out of this naming pattern before its very first attempt
+// (box.go's quarantinePriorRunLogs), so by the time a P.N sibling exists
+// under this scheme, only this run's own hold/backoff rotations could have
+// put it there.
 func AllAttemptLogPaths(pwd, number string) []PassLog {
 	var out []PassLog
 
