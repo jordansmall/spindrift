@@ -15,6 +15,15 @@ import (
 	"spindrift.dev/launcher/internal/driver/claude"
 )
 
+// workerBranchName returns the deterministic branch name launchOneWorker
+// commits a slice's work onto: "orchestrator-worker/<name>". Shared with
+// dispatch.go so a coordinator pass's seeded findings can name the exact
+// branch to cherry-pick, rather than the coordinator having to reconstruct
+// or guess it (issue #2059 review finding).
+func workerBranchName(sliceName string) string {
+	return "orchestrator-worker/" + sliceName
+}
+
 // WorkerStatus is the terminal state the orchestrator's own join code
 // assigns to one worker's dispatch (issue #2059) -- never inferred from
 // model memory: a worker is Done only once its own done-sentinel file is
@@ -268,11 +277,9 @@ func crashAllSlices(stdout io.Writer, mu *sync.Mutex, manifest SliceManifest, er
 func launchOneWorker(cfg config, slice ManifestSlice, promptFile, workDir string, timeout, pollInterval time.Duration, stdout io.Writer, mu *sync.Mutex) WorkerResult {
 	// Emitted before anything else can fail, so every slice gets both a
 	// worker_start and a worker_finish op regardless of which return path
-	// this call takes (issue #2059 AC5 review finding) -- previously the
-	// three launch-failure paths below (seedWorkerPrompt,
-	// buildDriverExecCmd, cmd.Start) all returned before worker_start was
-	// ever written, so a launch failure was logged as neither started nor
-	// finished.
+	// this call takes -- including the seedWorkerPrompt, buildDriverExecCmd,
+	// and cmd.Start launch-failure paths below, which would otherwise log a
+	// launch failure as neither started nor finished (issue #2059 AC5).
 	writeWorkerOp(stdout, mu, claude.SpindriftOp{Op: "worker_start", Worker: slice.Name})
 
 	resultPath := filepath.Join(workDir, slice.Name+".result")
@@ -313,7 +320,7 @@ func launchOneWorker(cfg config, slice ManifestSlice, promptFile, workDir string
 		return WorkerResult{Slice: slice.Name, Status: WorkerCrashed, Err: err}
 	}
 	worktreePath := filepath.Join(workDir, slice.Name+".worktree")
-	worktreeBranch := "orchestrator-worker/" + slice.Name
+	worktreeBranch := workerBranchName(slice.Name)
 
 	// A coordinator can legitimately dispatch the same slice name again on
 	// a later pass (e.g. a manifest re-emitted across passes) -- since the

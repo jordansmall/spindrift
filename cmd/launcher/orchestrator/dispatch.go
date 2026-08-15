@@ -81,7 +81,7 @@ func dispatchManifestIfPresent(cfg config, state *runstate.RunState, stdout io.W
 	dispatchSlices := make([]ManifestSlice, 0, len(manifest.Slices))
 	for _, s := range manifest.Slices {
 		if containsSlice(state.DoneSlices, s.Name) {
-			fmt.Fprintf(&findings, "- %s: already done, skipped redispatch\n", s.Name)
+			fmt.Fprintf(&findings, "- %s: already done, skipped redispatch (branch %s still needs cherry-picking)\n", s.Name, workerBranchName(s.Name))
 			continue
 		}
 		dispatchSlices = append(dispatchSlices, s)
@@ -109,10 +109,10 @@ func dispatchManifestIfPresent(cfg config, state *runstate.RunState, stdout io.W
 			state.DoneSlices = appendUnique(state.DoneSlices, r.Slice)
 			result := strings.TrimSpace(r.Result)
 			if result == "" {
-				fmt.Fprintf(&findings, "- %s: done (no result reported)\n", r.Slice)
+				fmt.Fprintf(&findings, "- %s: done (no result reported; branch %s ready to cherry-pick)\n", r.Slice, workerBranchName(r.Slice))
 			} else {
 				result = truncateRunes(result, maxWorkerResultInFindings)
-				fmt.Fprintf(&findings, "- %s: done\n  %s\n", r.Slice, strings.ReplaceAll(result, "\n", "\n  "))
+				fmt.Fprintf(&findings, "- %s: done (branch %s ready to cherry-pick)\n  %s\n", r.Slice, workerBranchName(r.Slice), strings.ReplaceAll(result, "\n", "\n  "))
 			}
 		case WorkerTimedOut, WorkerCrashed:
 			// Defensive mirror of the WorkerDone case above -- this

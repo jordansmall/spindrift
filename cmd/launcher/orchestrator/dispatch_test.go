@@ -848,6 +848,10 @@ exit 0
 	if !strings.Contains(state.WorkerFindings, want) {
 		t.Errorf("state.WorkerFindings = %q, want it to contain the worker's own reported result %q", state.WorkerFindings, want)
 	}
+	wantBranch := "orchestrator-worker/slice-a"
+	if !strings.Contains(state.WorkerFindings, wantBranch) {
+		t.Errorf("state.WorkerFindings = %q, want it to name the branch %q to cherry-pick (issue #2059 review finding)", state.WorkerFindings, wantBranch)
+	}
 }
 
 // TestDispatchManifestIfPresentReportsCrashErrNotMisleadingExitCode
