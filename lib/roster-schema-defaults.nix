@@ -29,8 +29,30 @@ let
     filer = "filerModel";
     worker = "workerModel";
   };
+  # Issue #2506: the roster's single root -- each default-roster agent
+  # name's lib/env-schema.nix model key and its fixed default effort
+  # (issue #2386), previously restated ad hoc across lib/roster.nix and
+  # the roster/driver/image/equivalence checks.
+  rosterDefaults = {
+    scout = {
+      schemaKey = "scoutModel";
+      effort = "medium";
+    };
+    reviewer = {
+      schemaKey = "reviewModel";
+      effort = "high";
+    };
+    filer = {
+      schemaKey = "filerModel";
+      effort = "medium";
+    };
+    worker = {
+      schemaKey = "workerModel";
+      effort = "high";
+    };
+  };
 in
 {
-  inherit rosterModelKeys;
+  inherit rosterModelKeys rosterDefaults;
   schemaDefaults = lib.mapAttrs (_: schemaKey: schema.${schemaKey}.default) rosterModelKeys;
 }
