@@ -46,16 +46,7 @@ func (e *execClient) OpenPRForBranch(branch string) (forge.PR, bool, error) {
 	if url == "" {
 		return forge.PR{}, false, nil
 	}
-	var viewStderr bytes.Buffer
-	viewCmd := exec.Command("gh", "pr", "view", url, "--json", "isDraft", "--jq", ".isDraft")
-	viewCmd.Stderr = &viewStderr
-	out, err = viewCmd.Output()
-	if err != nil {
-		// Cannot determine draft status — do not adopt.
-		return forge.PR{}, false, fmt.Errorf("gh pr view %s isDraft: %w: %s", url, err, strings.TrimSpace(viewStderr.String()))
-	}
-	isDraft := strings.TrimSpace(string(out)) == "true"
-	return forge.PR{URL: url, IsDraft: isDraft}, true, nil
+	return forge.PR{URL: url}, true, nil
 }
 
 // BranchExists reports whether branch exists on the remote, independent of
