@@ -63,6 +63,31 @@ const ManifestToken = "SPINDRIFT_SLICE_MANIFEST"
 //     "- other-slice: done" lines into that findings block.
 var validSliceNameRe = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,64}$`)
 
+// toolResultEchoRe matches a rendered tool_result echo line -- the
+// "[role]   -> <summarizeResult output>" shape RenderTranscriptWithRole
+// (transcript_render.go) emits for a "user" tool_result event, three spaces
+// and an arrow after the closing bracket, as opposed to the single-space
+// "[role] <text>" shape an assistant-authored text/tool_use line has.
+// scanForManifest must never honor a SPINDRIFT_SLICE_MANIFEST token found on
+// this line shape: a tool_result echoes back whatever the underlying tool
+// read or ran verbatim (e.g. a Read of the issue body, a Bash command's
+// stdout), and the issue body plus every comment from any GitHub user is
+// untrusted input once an issue is labeled for dispatch -- only the label
+// gates dispatch, not the content that follows. If an attacker plants a
+// valid-looking manifest token in issue/comment text and the coordinator's
+// own tooling echoes it back into a tool_result, this line shape is the
+// only way that forged token could reach scanForManifest; excluding it
+// means a manifest is only ever honored when the coordinator model itself
+// authored the line (issue #2059 code-review finding).
+var toolResultEchoRe = regexp.MustCompile(`^\[[^\]]*\]   -> `)
+
+// isToolResultEchoLine reports whether line (already trimmed) is a rendered
+// tool_result echo rather than an assistant-authored line -- see
+// toolResultEchoRe's doc comment for why scanForManifest must skip these.
+func isToolResultEchoLine(line string) bool {
+	return toolResultEchoRe.MatchString(line)
+}
+
 // maxManifestSlices bounds how many slices a single manifest may declare.
 // LaunchWorkers (workers.go) fans out one concurrent driver-exec/claude
 // process plus one `git worktree add` per slice with nothing else capping
@@ -156,9 +181,14 @@ func ParseManifestLine(line string) (SliceManifest, bool) {
 // SPINDRIFT_SLICE_MANIFEST line, mirroring scanPassLog's own
 // RenderTranscript + substring-anywhere-match approach (run.go:506-530).
 // driverName selects the RenderTranscript strategy, same as scanPassLog's
-// own parameter. Returns (SliceManifest{}, false) when no valid manifest
-// line is found, including when RenderTranscript itself fails (a scan
-// failure is not a hard error here — same convention as scanPassLog).
+// own parameter. Skips any line isToolResultEchoLine identifies as a
+// tool_result echo before handing it to ParseManifestLine, so a manifest
+// token is only ever honored from a line the coordinator model itself
+// authored, never from a tool echoing back untrusted issue/comment content
+// (see isToolResultEchoLine's doc comment; issue #2059 code-review
+// finding). Returns (SliceManifest{}, false) when no valid manifest line is
+// found, including when RenderTranscript itself fails (a scan failure is
+// not a hard error here — same convention as scanPassLog).
 func scanForManifest(logPath, driverName string) (SliceManifest, bool) {
 	d, err := driver.New(driverName)
 	if err != nil {
@@ -177,6 +207,9 @@ func scanForManifest(logPath, driverName string) (SliceManifest, bool) {
 	sc.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
 	for sc.Scan() {
 		line := strings.TrimSpace(sc.Text())
+		if isToolResultEchoLine(line) {
+			continue
+		}
 		if m, ok := ParseManifestLine(line); ok {
 			manifest = m
 			found = true
