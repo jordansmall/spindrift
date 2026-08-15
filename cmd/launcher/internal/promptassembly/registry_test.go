@@ -7,9 +7,9 @@ import (
 )
 
 // TestLoadRegistryParsesAllRows loads testdata/registry.json — the hand
-// transcription of every row in lib/fragments.nix (65 rows as of issue
-// #2462) — and spot-checks a handful of known rows rather than asserting the
-// full 65-row payload verbatim, so this test doesn't itself become the thing
+// transcription of every row in lib/fragments.nix (66 rows as of issue
+// #2059) — and spot-checks a handful of known rows rather than asserting the
+// full 66-row payload verbatim, so this test doesn't itself become the thing
 // that silently drifts from fragments.nix.
 func TestLoadRegistryParsesAllRows(t *testing.T) {
 	f, err := os.Open("testdata/registry.json")
@@ -23,7 +23,7 @@ func TestLoadRegistryParsesAllRows(t *testing.T) {
 		t.Fatalf("LoadRegistry: %v", err)
 	}
 
-	const wantRows = 65
+	const wantRows = 66
 	if len(reg.Rows) != wantRows {
 		t.Fatalf("len(reg.Rows) = %d, want %d", len(reg.Rows), wantRows)
 	}

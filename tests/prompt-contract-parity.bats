@@ -56,12 +56,16 @@ setup() {
 # one file per suite and this stub is a handful of lines) -- review-
 # prompt.md carries a VERDICT: line by default so a fixture iteration that
 # doesn't target the reviewer-verdict row never incidentally trips it.
+# worker-prompt.md (issue #2059, #2058) is read unconditionally alongside
+# review-prompt.md by the same gate, so it needs a stub too or Assemble
+# hard-fails on every fixture this path exercises.
 _parity_stub_prompt_dir() {
   local dir="$1"
   mkdir -p "$dir"
   printf 'issue stub\n' >"$dir/issue-prompt.md"
   printf 'scout stub\n' >"$dir/scout-prompt.md"
   printf 'reviewer stub\n\nVERDICT: APPROVE or BLOCK\n' >"$dir/review-prompt.md"
+  printf 'worker stub\n' >"$dir/worker-prompt.md"
 }
 
 @test "build-time/runtime parity: every fixture's exit code matches parityFold(verdict)" {
