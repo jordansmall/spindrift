@@ -364,7 +364,21 @@ func TestSettle_GithubReadOnly_BlockedRelayFailureSkipsDraftPRButStaysBlocked(t 
 	c.OutboxDir = func(num string) string { return "/outbox/" + num }
 	c.BaseBranch = "main"
 	s := New(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
+
+	old := os.Stderr
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
+	os.Stderr = w
 	s.Settle(d, issNum, 0, result)
+	w.Close()
+	os.Stderr = old
+	captured, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("read captured stderr: %v", err)
+	}
+	stderr := string(captured)
 
 	if len(fc.CreateDraftPRCalls) != 0 {
 		t.Errorf("CreateDraftPR must not be called when the relay fails, got %+v", fc.CreateDraftPRCalls)
@@ -372,6 +386,15 @@ func TestSettle_GithubReadOnly_BlockedRelayFailureSkipsDraftPRButStaysBlocked(t 
 	iss, _ := fc.Issue(issNum)
 	if !containsLabel(iss.Labels, "agent-failed") {
 		t.Errorf("issue must still carry agent-failed after a failed relay; labels=%v", iss.Labels)
+	}
+	if !strings.Contains(stderr, "could not relay blocked-hand-off bundle") {
+		t.Errorf("stderr must contain the relay-failure phrase, got: %s", stderr)
+	}
+	if !strings.Contains(stderr, fc.RelayBundleErr.Error()) {
+		t.Errorf("stderr must contain the real relay error text %q (not <nil>), got: %s", fc.RelayBundleErr.Error(), stderr)
+	}
+	if strings.Contains(stderr, "<nil>") {
+		t.Errorf("stderr must not print <nil> in place of the real relay error, got: %s", stderr)
 	}
 }
 
@@ -579,7 +602,21 @@ func TestSettle_GithubReadOnly_BlockedDraftPRFailureStillReportsBlocked(t *testi
 	c.OutboxDir = func(num string) string { return "/outbox/" + num }
 	c.BaseBranch = "main"
 	s := New(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
+
+	old := os.Stderr
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
+	os.Stderr = w
 	s.Settle(d, issNum, 0, result)
+	w.Close()
+	os.Stderr = old
+	captured, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("read captured stderr: %v", err)
+	}
+	stderr := string(captured)
 
 	if len(fc.RelayBundleCalls) != 1 {
 		t.Errorf("RelayBundle must still run ahead of the failed CreateDraftPR, got %+v", fc.RelayBundleCalls)
@@ -587,5 +624,14 @@ func TestSettle_GithubReadOnly_BlockedDraftPRFailureStillReportsBlocked(t *testi
 	iss, _ := fc.Issue(issNum)
 	if !containsLabel(iss.Labels, "agent-failed") {
 		t.Errorf("issue must still carry agent-failed after a failed draft-PR create; labels=%v", iss.Labels)
+	}
+	if !strings.Contains(stderr, "could not create draft PR for blocked hand-off") {
+		t.Errorf("stderr must contain the draft-PR-failure phrase, got: %s", stderr)
+	}
+	if !strings.Contains(stderr, fc.CreateDraftPRErr.Error()) {
+		t.Errorf("stderr must contain the real create-draft-PR error text %q (not <nil>), got: %s", fc.CreateDraftPRErr.Error(), stderr)
+	}
+	if strings.Contains(stderr, "<nil>") {
+		t.Errorf("stderr must not print <nil> in place of the real create-draft-PR error, got: %s", stderr)
 	}
 }

@@ -55,13 +55,15 @@ func (s *Settle) hostMediateDraftPR(num string, result dispatch.Result) (string,
 	branch := cf.AgentBranch(num)
 	m := NewMediation(cf, s.it, s.cfg.OutboxDir, s.cfg.BaseBranch)
 
-	// Mediation.Open's own upfront capability/config checks (steps 1-3)
-	// return the exact same unwrapped error strings the inline checks here
-	// used to produce directly — the startup capability gate (main.go, issue
-	// #1916) guarantees a read-only PR-shaped Code Forge always implements
-	// both BundleRelay and DraftPRCreator, so these are unreachable outside a
-	// misconfigured test double, and block rather than silently stranding
-	// the issue in agent-in-progress.
+	// Mediation.Open's own upfront capability/config checks (m.br == nil,
+	// m.dpc == nil, m.outboxDir == nil) guard the same preconditions the
+	// inline checks here used to guard directly — the startup capability
+	// gate (main.go, issue #1916) guarantees a read-only PR-shaped Code
+	// Forge always implements both BundleRelay and DraftPRCreator, so these
+	// are unreachable outside a misconfigured test double. Any failure Open
+	// returns (including a relay or draft-PR-create failure, both now
+	// sentinel-wrapped rather than passed through verbatim) blocks here
+	// rather than silently stranding the issue in agent-in-progress.
 	url, created, source, err := m.Open(num, branch, result, FallbackReconstruct)
 	if err != nil {
 		return s.blockHandoff(num, branch, err)
@@ -125,7 +127,7 @@ func (s *Settle) relayBlockedWork(num string, result dispatch.Result) {
 				// not as a relay failure. A blocked run with nothing to hand
 				// off also has no branch to open a draft PR against, so stop
 				// here as the error path does.
-				fmt.Fprintf(os.Stderr, "    .. #%s: no blocked-hand-off bundle to relay (empty branch range; nothing to preserve)\n", num)
+				logNoBlockedHandoffBundle(num)
 				return
 			}
 			fmt.Fprintf(os.Stderr, "    ?? #%s: could not relay blocked-hand-off bundle: %v\n", num, err)
@@ -142,13 +144,20 @@ func (s *Settle) relayBlockedWork(num string, result dispatch.Result) {
 			// !ok-from-parsePRIntent early return).
 			return
 		case errors.Is(err, forge.ErrBundleNotFound):
-			fmt.Fprintf(os.Stderr, "    .. #%s: no blocked-hand-off bundle to relay (empty branch range; nothing to preserve)\n", num)
-		case strings.HasPrefix(err.Error(), "relay bundle:"):
-			fmt.Fprintf(os.Stderr, "    ?? #%s: could not relay blocked-hand-off bundle: %v\n", num, errors.Unwrap(err))
+			logNoBlockedHandoffBundle(num)
+		case errors.Is(err, errRelayBundle):
+			fmt.Fprintf(os.Stderr, "    ?? #%s: could not relay blocked-hand-off bundle: %v\n", num, err)
 		default:
-			fmt.Fprintf(os.Stderr, "    ?? #%s: could not create draft PR for blocked hand-off: %v\n", num, errors.Unwrap(err))
+			fmt.Fprintf(os.Stderr, "    ?? #%s: could not create draft PR for blocked hand-off: %v\n", num, err)
 		}
 	}
+}
+
+// logNoBlockedHandoffBundle reports the doubly-benign case where a blocked
+// run's outbox held nothing to relay (issue #2096): an empty branch range
+// left no bundle behind, not a relay failure.
+func logNoBlockedHandoffBundle(num string) {
+	fmt.Fprintf(os.Stderr, "    .. #%s: no blocked-hand-off bundle to relay (empty branch range; nothing to preserve)\n", num)
 }
 
 // blockHandoff posts a merge-blocked comment and leaves num visibly not-done
