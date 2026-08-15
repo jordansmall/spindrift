@@ -810,6 +810,12 @@ in
         lib = pkgs.lib;
       };
       rosterByName = listToAttrs (map (e: nameValuePair e.name e) defaults.roster);
+      # Single source of truth for the per-agent effort literals below
+      # (issue #2506): read from lib/roster-schema-defaults.nix instead of
+      # restating them by hand. Deliberately does NOT extend to
+      # expectedModels above -- see its own comment for why (issue #2435
+      # AC2).
+      rosterHelper = import ../../lib/roster-schema-defaults.nix { inherit (pkgs) lib; };
       # Per-agent rationale for the expected models below (folded out of the
       # individual asserts this table replaced): filer keeps its tuned model
       # claude-haiku-4-5-20251001 (issue #2388, was #393) as the roster's sole
@@ -828,12 +834,7 @@ in
       modelMismatches = filterAttrs (
         name: model: rosterByName.${name}.model or null != model
       ) expectedModels;
-      expectedEfforts = {
-        scout = "medium";
-        reviewer = "high";
-        filer = "medium";
-        worker = "high";
-      };
+      expectedEfforts = builtins.mapAttrs (_: v: v.effort) rosterHelper.rosterDefaults;
       effortMismatches = filterAttrs (
         name: effort: rosterByName.${name}.effort or null != effort
       ) expectedEfforts;
