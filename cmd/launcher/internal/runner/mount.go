@@ -5,6 +5,15 @@ import (
 	"os"
 )
 
+// operatorSkillsDir is the fixed in-box path SPINDRIFT_SKILLS_DIR mounts
+// onto (issue #2489) — NOT the Driver's actual skills dir (DRIVER_SKILLS_DIR)
+// directly, since a mount placed there would replace its whole contents and
+// erase the harness-owned skill(s) baked alongside it. agent/entrypoint.sh's
+// phase_prompt_assembly copies both this staging path and the baked skills
+// into the real DRIVER_SKILLS_DIR at box startup instead, which merges
+// rather than replaces.
+const operatorSkillsDir = "/operator-skills"
+
 // MountSpec describes a single host-to-box mount: what to mount, where, and
 // under what read-only policy. The decision of whether a mount applies —
 // gate, existence guard, operator message — is computed once by
@@ -24,7 +33,6 @@ type MountSpec struct {
 type MountParams struct {
 	PromptDir             string
 	SkillsDir             string
-	DriverSkillsDir       string
 	DriverSessionCacheDir string
 
 	// HostMediatedRemote reports whether this run's CODE_FORGE has no
@@ -81,7 +89,7 @@ func buildMountSpecs(p MountParams, box Box) []MountSpec {
 		}
 	}
 
-	if spec, ok := candidateMount(p.SkillsDir, p.DriverSkillsDir, true); ok {
+	if spec, ok := candidateMount(p.SkillsDir, operatorSkillsDir, true); ok {
 		spec.Message = fmt.Sprintf("==> SPINDRIFT_SKILLS_DIR set; mounting %s over %s\n", spec.Source, spec.Target)
 		specs = append(specs, spec)
 	}

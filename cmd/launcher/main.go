@@ -67,10 +67,9 @@ type config struct {
 	// image is the runtime image reference; defaults to imageTag
 	image string
 
-	// In-box mount targets declared by the selected Driver (ADR 0009),
-	// nix-baked at wrap time. driverSessionCacheDir is empty when the
-	// Driver declares no session-state dir.
-	driverSkillsDir       string
+	// driverSessionCacheDir is the in-box mount target for the selected
+	// Driver's session-state dir (ADR 0009), nix-baked at wrap time. Empty
+	// when the Driver declares no session-state dir.
 	driverSessionCacheDir string
 
 	// Space-separated list of env var names to forward into each Box container.
@@ -253,7 +252,6 @@ func loadConfig() config {
 		driver:          getenvArtifact("DRIVER", ""),
 		image:           image,
 
-		driverSkillsDir:       getenvArtifact("DRIVER_SKILLS_DIR", ""),
 		driverSessionCacheDir: getenvArtifact("DRIVER_SESSION_CACHE_DIR", ""),
 
 		boxEnvVars: getenvArtifact("BOX_ENV_VARS", ""),
@@ -530,7 +528,6 @@ func runnerConfig(c config) runner.Config {
 		BwrapUnshareNet:          c.bwrapUnshareNet,
 		PromptDir:                c.spindriftPromptDir,
 		SkillsDir:                c.spindriftSkillsDir,
-		DriverSkillsDir:          c.driverSkillsDir,
 		DriverSessionCacheDir:    c.driverSessionCacheDir,
 		HostMediatedIssueTracker: trackerRow.inBoxUnreachableTracker,
 		LocalIssuesDir:           absLocalIssuesDir(c.localIssuesDir),

@@ -36,12 +36,11 @@ type Config struct {
 	PromptDir string
 	SkillsDir string
 
-	// In-box mount targets declared by the selected Driver (ADR 0009; baked
-	// by nix at wrap time), shared by the OCI and bwrap run adapters.
-	// DriverSessionCacheDir is empty when the Driver declares no
+	// DriverSessionCacheDir is the in-box mount target for the Driver's
+	// session-state dir (ADR 0009; baked by nix at wrap time), shared by the
+	// OCI and bwrap run adapters. Empty when the Driver declares no
 	// session-state dir, in which case the driver-cache dir is never
 	// mounted regardless of Box.DriverCacheDir.
-	DriverSkillsDir       string
 	DriverSessionCacheDir string
 
 	// HostMediatedRemote reports whether the active CODE_FORGE backend has no

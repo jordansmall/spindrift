@@ -79,16 +79,16 @@ func TestBuildMountSpecs_DriverSessionCacheDirUndeclared_NoMount(t *testing.T) {
 }
 
 // TestBuildMountSpecs_SkillsDirMounted verifies that a runtime SkillsDir
-// override plus a declared DriverSkillsDir produce a read-only MountSpec with
-// the SPINDRIFT_SKILLS_DIR operator message — computed once, independent of
-// backend.
+// override produces a read-only MountSpec at the fixed operatorSkillsDir
+// target with the SPINDRIFT_SKILLS_DIR operator message — computed once,
+// independent of backend.
 func TestBuildMountSpecs_SkillsDirMounted(t *testing.T) {
 	dir := t.TempDir()
-	specs := buildMountSpecs(MountParams{SkillsDir: dir, DriverSkillsDir: "/home/agent/.claude/skills"}, Box{})
+	specs := buildMountSpecs(MountParams{SkillsDir: dir}, Box{})
 
 	var found *MountSpec
 	for i := range specs {
-		if specs[i].Target == "/home/agent/.claude/skills" {
+		if specs[i].Target == "/operator-skills" {
 			found = &specs[i]
 		}
 	}
@@ -101,7 +101,7 @@ func TestBuildMountSpecs_SkillsDirMounted(t *testing.T) {
 	if !found.ReadOnly {
 		t.Errorf("skills-dir mount must be read-only")
 	}
-	want := "==> SPINDRIFT_SKILLS_DIR set; mounting " + dir + " over /home/agent/.claude/skills\n"
+	want := "==> SPINDRIFT_SKILLS_DIR set; mounting " + dir + " over /operator-skills\n"
 	if found.Message != want {
 		t.Errorf("Message = %q, want %q", found.Message, want)
 	}
@@ -110,10 +110,10 @@ func TestBuildMountSpecs_SkillsDirMounted(t *testing.T) {
 // TestBuildMountSpecs_SkillsDirUnset_NoMount verifies that omitting SkillsDir
 // produces no skills spec.
 func TestBuildMountSpecs_SkillsDirUnset_NoMount(t *testing.T) {
-	specs := buildMountSpecs(MountParams{DriverSkillsDir: "/home/agent/.claude/skills"}, Box{})
+	specs := buildMountSpecs(MountParams{}, Box{})
 
 	for _, s := range specs {
-		if s.Target == "/home/agent/.claude/skills" {
+		if s.Target == "/operator-skills" {
 			t.Errorf("unexpected skills-dir spec when SkillsDir is empty: %+v", specs)
 		}
 	}
@@ -372,7 +372,6 @@ func TestMountSpecs_RenderedIdenticallyAcrossBackends(t *testing.T) {
 		image:                 "spindrift:test",
 		promptDir:             promptDir,
 		skillsDir:             skillsDir,
-		driverSkillsDir:       "/home/agent/.claude/skills",
 		driverSessionCacheDir: "/home/agent/.claude/projects",
 	}
 	bwrap := &bwrapAdapter{
@@ -381,7 +380,6 @@ func TestMountSpecs_RenderedIdenticallyAcrossBackends(t *testing.T) {
 		bakedPrefetch:         "echo ok",
 		promptDir:             promptDir,
 		skillsDir:             skillsDir,
-		driverSkillsDir:       "/home/agent/.claude/skills",
 		driverSessionCacheDir: "/home/agent/.claude/projects",
 	}
 	box := Box{Name: "agent-issue-1", Env: map[string]string{}, DriverCacheDir: cacheDir}
@@ -391,7 +389,7 @@ func TestMountSpecs_RenderedIdenticallyAcrossBackends(t *testing.T) {
 
 	for _, mount := range []struct{ source, target string }{
 		{promptDir, "/agent/prompts"},
-		{skillsDir, "/home/agent/.claude/skills"},
+		{skillsDir, "/operator-skills"},
 		{cacheDir, "/home/agent/.claude/projects"},
 	} {
 		if !strings.Contains(ociArgs, mount.source+":"+mount.target) {
