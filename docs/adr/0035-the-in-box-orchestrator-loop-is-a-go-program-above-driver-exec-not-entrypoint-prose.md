@@ -38,7 +38,7 @@ Concretely:
   so a long issue never runs one 200k+-token session to exhaustion (#1627
   user stories 2, 7, 11).
 - **State handoff through a tmp file, not a resumed transcript.** `RunState`
-  (`cmd/launcher/orchestrator/runstate.go`) is a compact JSON artifact — done
+  (`cmd/launcher/internal/runstate/runstate.go`) is a compact JSON artifact — done
   slices, remaining slices, the last reviewer verdict, and the scout-brief
   path — written outside the repo the same way `/tmp/brief.md` already
   survives context compaction today. Each pass reads it before running and

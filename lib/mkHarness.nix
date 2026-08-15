@@ -475,10 +475,9 @@ let
   # gate computation, fragment registry loader, and prompt assembly logic
   # that mirrors agent/entrypoint.sh's phase_prompt_assembly), and
   # internal/runstate (issue #2505's shared RunState type/read/write,
-  # imported by outcomebackstop's readLastVerdict) only, with
-  # *_test.go excluded. If
-  # a new import is added outside this closure the build fails loudly
-  # (missing package) — that is the intended failure mode (#474).
+  # imported by outcomebackstop's readLastVerdict) only, with *_test.go
+  # excluded. If a new import is added outside this closure the build fails
+  # loudly (missing package) — that is the intended failure mode (#474).
   driverExecBin = pkgs.buildGoModule {
     pname = "driver-exec";
     version = spindriftVersion;
@@ -546,7 +545,9 @@ let
   # internal/driver/opencode, which pull internal/usage) to turn it back into
   # readable text, then internal/outcome (which pulls internal/logscan) for the
   # SPINDRIFT_OUTCOME grammar -- the same import closure driverExecBin
-  # already needs, for the same reason (it also calls driver.New).
+  # already needs, for the same reason (it also calls driver.New) -- plus
+  # internal/runstate (issue #2505's shared RunState type/read/write) for its
+  # own state handoff between passes.
   orchestratorBin = pkgs.buildGoModule {
     pname = "orchestrator";
     version = spindriftVersion;

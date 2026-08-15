@@ -1,8 +1,5 @@
-// Package runstate owns the compact run-state handoff artifact the
-// orchestrator uses (issue #1997, parent #1627): a tmp file outside the
-// repo -- the same durability convention SCOUT's /tmp/brief.md already
-// relies on to survive context compaction -- recording what a fresh
-// implementor pass needs to continue without reading a transcript.
+// Package runstate owns the RunState handoff artifact; see RunState for
+// what it carries and why.
 package runstate
 
 import (
