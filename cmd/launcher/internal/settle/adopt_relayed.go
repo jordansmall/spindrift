@@ -42,11 +42,13 @@ func (s *Settle) tryAdoptRelayedBranch(d dispatch.Dispatcher, num string, gen ui
 	if result.Resolved.Provenance != outcome.ProvenanceSynthetic || !s.readOnly || s.pr == nil {
 		return false
 	}
-	// sit reads the shared adoption-evidence fingerprint (issue #2501),
-	// deferred until after the cheap checks above so the stat inside
-	// bundlePresent never runs on a call this function was always going to
-	// decline anyway; openPRFound is false here — this function never
-	// checks for one, see Situation's own doc comment.
+	// sit reads the shared adoption-evidence fingerprint, deferred until
+	// after the cheap provenance/readOnly/pr checks above so the stat inside
+	// bundlePresent never runs on a call those cheap checks already decline.
+	// Once situationFor does run, though, its stat is not further gated: a
+	// call that goes on to decline just below via !sit.SelfReportSuccess
+	// still pays for the stat. openPRFound is false here — this function
+	// never checks for one, see Situation's own doc comment.
 	sit := s.situationFor(num, false, result)
 	if !sit.SelfReportSuccess {
 		return false
@@ -79,11 +81,13 @@ func (s *Settle) tryAdoptRelayedBranchNoOutcome(d dispatch.Dispatcher, num strin
 	if !s.readOnly || s.pr == nil {
 		return false
 	}
-	// sit reads the shared adoption-evidence fingerprint (issue #2501),
-	// deferred until after the cheap checks above so the stat inside
-	// bundlePresent never runs on a call this function was always going to
-	// decline anyway; openPRFound is false here — this function never
-	// checks for one, see Situation's own doc comment.
+	// sit reads the shared adoption-evidence fingerprint, deferred until
+	// after the cheap readOnly/pr checks above so the stat inside
+	// bundlePresent never runs on a call those cheap checks already decline.
+	// Once situationFor does run, though, its stat is not further gated: a
+	// call that goes on to decline just below via !sit.SelfReportSuccess
+	// still pays for the stat. openPRFound is false here — this function
+	// never checks for one, see Situation's own doc comment.
 	sit := s.situationFor(num, false, result)
 	if !sit.SelfReportSuccess {
 		return false
