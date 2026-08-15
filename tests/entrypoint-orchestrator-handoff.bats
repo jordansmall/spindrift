@@ -170,3 +170,57 @@ setup() {
   [ "$status" -eq 0 ]
   ! grep -q -- '--review-effort' "$DRIVER_LOG"
 }
+
+# The parallel worker dispatch (issue #2059, #2058): entrypoint.sh renders
+# worker-prompt.md and threads it to the orchestrator's own
+# --worker-prompt-file, mirroring --review-prompt-file above -- same gate
+# (fresh-issue work-dispatch path), same Handoff descriptor mechanism.
+@test "orchestrator path forwards --worker-prompt-file carrying a real path" {
+  export ORCHESTRATOR_ENABLED=1
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -q -- '--worker-prompt-file' "$ORCHESTRATOR_LOG"
+  local worker_prompt_file
+  worker_prompt_file="$(grep -oE -- '--worker-prompt-file [^ ]+' "$ORCHESTRATOR_LOG" | awk '{print $2}')"
+  # run_driver_in_env removes its own temp files once the pass returns, so the
+  # path itself no longer exists by the time bats inspects it here -- assert
+  # it was a real, non-empty flag value (not an omitted/empty flag), which is
+  # what proves entrypoint.sh actually rendered and threaded worker-prompt.md
+  # through, rather than skipping the flag or passing it empty.
+  [ -n "$worker_prompt_file" ]
+}
+
+# The --worker-prompt-file gate is on _driver_invoker = orchestrator -- the
+# direct driver-exec path declares no such flag and would hard-fail on it,
+# mirroring the --review-effort omit test above.
+@test "direct driver-exec path omits --worker-prompt-file" {
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  ! grep -q -- '--worker-prompt-file' "$DRIVER_LOG"
+}
+
+# Issue #2059, #2058: WORKER_WORK_DIR/WORKER_TIMEOUT thread through to the
+# orchestrator's own --worker-work-dir/--worker-timeout flags, mirroring
+# REVIEW_EFFORT -> --review-effort above. Like REVIEW_EFFORT, neither has a
+# Handoff descriptor field -- both come straight off the environment.
+@test "orchestrator path forwards WORKER_WORK_DIR/WORKER_TIMEOUT to the orchestrator" {
+  export ORCHESTRATOR_ENABLED=1
+  export WORKER_WORK_DIR="/tmp/spindrift-workers-test"
+  export WORKER_TIMEOUT="15m"
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -q -- '--worker-work-dir /tmp/spindrift-workers-test' "$ORCHESTRATOR_LOG"
+  grep -q -- '--worker-timeout 15m' "$ORCHESTRATOR_LOG"
+}
+
+# Without WORKER_WORK_DIR/WORKER_TIMEOUT set, there's nothing to override the
+# orchestrator's own defaults with -- entrypoint.sh must omit both flags
+# entirely rather than pass them empty, mirroring the --review-effort omit
+# test above.
+@test "orchestrator path omits --worker-work-dir/--worker-timeout when unset" {
+  export ORCHESTRATOR_ENABLED=1
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  ! grep -q -- '--worker-work-dir' "$ORCHESTRATOR_LOG"
+  ! grep -q -- '--worker-timeout' "$ORCHESTRATOR_LOG"
+}
