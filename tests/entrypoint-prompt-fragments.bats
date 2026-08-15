@@ -1068,16 +1068,42 @@ WORKER_AGENTS_JSON_TEMPLATE='{"worker":{"description":"Implement a scoped slice 
   grep -qF 'delegate each slice' "$DRIVER_PROMPT_FILE"
 }
 
-@test "IMPLEMENT section: coordinator's cherry-pick instruction names the real base branch" {
+@test "IMPLEMENT section: coordinator's cherry-pick instruction uses a merge-base range, not a specific base ref" {
   export AGENTS_JSON_TEMPLATE="$WORKER_AGENTS_JSON_TEMPLATE"
   export BASE_BRANCH="release-42"
   export WORK_DIR="$BATS_TEST_TMPDIR/work-coordinator-base-branch"
+  # phase_branch_recovery checks out real origin/${BASE_BRANCH} before the
+  # prompt is ever assembled, so the remote needs an actual release-42 ref --
+  # seed one from main (setup_bare_repo only seeds main).
+  local seed="$BATS_TEST_TMPDIR/seed-release-42"
+  git clone -q "https://github.com/owner/repo.git" "$seed"
+  git -C "$seed" push -q origin main:release-42
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  # BASE_BRANCH must land in the rendered cherry-pick range, not survive as
-  # a literal, unsubstituted ${BASE_BRANCH} placeholder (issue #2058).
-  grep -qF 'git cherry-pick --no-commit origin/release-42..<branch>' "$DRIVER_PROMPT_FILE"
-  ! grep -qF '${BASE_BRANCH}' "$DRIVER_PROMPT_FILE"
+  # The Agent tool's isolation:"worktree" mechanism cuts a worker's worktree
+  # from the harness's own default, never from ${BASE_BRANCH} (which is a
+  # spindrift-specific env var and can differ from the repo's default
+  # branch) -- so the integration instruction must not assume any specific
+  # base ref and must use a merge-base range instead (issue #2058 review).
+  grep -qF 'git cherry-pick --no-commit $(git merge-base HEAD <branch>)..<branch>' "$DRIVER_PROMPT_FILE"
+  # Scoped to the cherry-pick line itself, not the whole rendered prompt --
+  # other, unrelated steps (e.g. the COMMIT section's own rebase-onto-base
+  # instruction) legitimately reference origin/${BASE_BRANCH} elsewhere.
+  cherry_pick_line=$(grep -F 'git cherry-pick --no-commit' "$DRIVER_PROMPT_FILE")
+  [[ "$cherry_pick_line" != *'origin/'* ]]
+}
+
+@test "IMPLEMENT section: coordinator is told to gitignore .claude/ before its first git add" {
+  export AGENTS_JSON_TEMPLATE="$WORKER_AGENTS_JSON_TEMPLATE"
+  export WORK_DIR="$BATS_TEST_TMPDIR/work-coordinator-gitignore"
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  # Worker worktrees materialize under $WORK_DIR/.claude/worktrees/ inside
+  # the coordinator's own tree; nothing guarantees a consumer repo's
+  # .gitignore excludes .claude, so the coordinator must confirm/add it
+  # before any git add (issue #2058 review).
+  grep -qF '.claude/' "$DRIVER_PROMPT_FILE"
+  grep -qF 'gitignore' "$DRIVER_PROMPT_FILE"
 }
 
 @test "IMPLEMENT section: no worker leaves the single-implementor prompt unchanged" {
