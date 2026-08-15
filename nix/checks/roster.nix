@@ -3,8 +3,6 @@
 # default-injection contract before any Driver ever consumes a roster.
 {
   pkgs,
-  nixpkgs,
-  system,
   ...
 }:
 let
