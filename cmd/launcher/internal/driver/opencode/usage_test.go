@@ -158,6 +158,96 @@ func TestExtractUsage_AggregatesStepFinishEvents(t *testing.T) {
 	}
 }
 
+// TestExtractUsage_EventSpan verifies that ExtractUsage populates
+// EarliestEventMs/LatestEventMs/HasEventSpan from the same step_start and
+// step_finish timestamps DurationMs is already derived from, when at least
+// one step_start anchors the window.
+func TestExtractUsage_EventSpan(t *testing.T) {
+	logPath := opencode.WriteLog(t,
+		`{"type":"step_start","timestamp":1000,"part":{"messageID":"msg_1"}}`,
+		`{"type":"step_finish","timestamp":1500,"part":{"messageID":"msg_1","modelID":"gpt-5","tokens":{"input":3,"output":120,"reasoning":0,"cache":{"write":800,"read":6400}},"cost":0.012}}`,
+		`{"type":"step_start","timestamp":2000,"part":{"messageID":"msg_2"}}`,
+		`{"type":"step_finish","timestamp":2500,"part":{"messageID":"msg_2","modelID":"claude-sonnet-4","tokens":{"input":5,"output":80,"reasoning":40,"cache":{"write":200,"read":1600}},"cost":0.008}}`,
+	)
+
+	report, err := opencode.ExtractUsage(logPath)
+	if err != nil {
+		t.Fatalf("ExtractUsage: %v", err)
+	}
+	if !report.Found {
+		t.Fatalf("Found: got false, want true")
+	}
+	if !report.HasEventSpan {
+		t.Fatalf("HasEventSpan: got false, want true")
+	}
+	if got, want := report.EarliestEventMs, int64(1000); got != want {
+		t.Errorf("EarliestEventMs: got %d, want %d", got, want)
+	}
+	if got, want := report.LatestEventMs, int64(2500); got != want {
+		t.Errorf("LatestEventMs: got %d, want %d", got, want)
+	}
+	if got, want := report.LatestEventMs-report.EarliestEventMs, report.Totals.DurationMs; got != want {
+		t.Errorf("LatestEventMs - EarliestEventMs = %d, want DurationMs %d", got, want)
+	}
+}
+
+// TestExtractUsage_EventSpan_NoStepStart verifies that ExtractUsage leaves
+// HasEventSpan false and EarliestEventMs/LatestEventMs at zero when the log
+// contains step_finish events but no preceding step_start — mirroring the
+// same "no anchor" condition DurationMs's own haveStart check guards
+// against.
+func TestExtractUsage_EventSpan_NoStepStart(t *testing.T) {
+	logPath := opencode.WriteLog(t,
+		`{"type":"step_finish","timestamp":1500,"part":{"messageID":"msg_1","modelID":"gpt-5","tokens":{"input":3,"output":120,"reasoning":0,"cache":{"write":800,"read":6400}},"cost":0.012}}`,
+	)
+
+	report, err := opencode.ExtractUsage(logPath)
+	if err != nil {
+		t.Fatalf("ExtractUsage: %v", err)
+	}
+	if !report.Found {
+		t.Fatalf("Found: got false, want true")
+	}
+	if report.HasEventSpan {
+		t.Errorf("HasEventSpan: got true, want false")
+	}
+	if got, want := report.EarliestEventMs, int64(0); got != want {
+		t.Errorf("EarliestEventMs: got %d, want %d", got, want)
+	}
+	if got, want := report.LatestEventMs, int64(0); got != want {
+		t.Errorf("LatestEventMs: got %d, want %d", got, want)
+	}
+	if got, want := report.Totals.DurationMs, int64(0); got != want {
+		t.Errorf("DurationMs: got %d, want %d", got, want)
+	}
+}
+
+// TestExtractUsage_EventSpan_NoStepFinish verifies that ExtractUsage returns
+// a zero-valued, unaffected Report (Found: false, HasEventSpan: false) for a
+// log with no step_finish events at all, even when a step_start is present.
+func TestExtractUsage_EventSpan_NoStepFinish(t *testing.T) {
+	logPath := opencode.WriteLog(t,
+		`{"type":"step_start","timestamp":1000,"part":{"messageID":"msg_1"}}`,
+	)
+
+	report, err := opencode.ExtractUsage(logPath)
+	if err != nil {
+		t.Fatalf("ExtractUsage: %v", err)
+	}
+	if report.Found {
+		t.Errorf("Found: got true, want false")
+	}
+	if report.HasEventSpan {
+		t.Errorf("HasEventSpan: got true, want false")
+	}
+	if got, want := report.EarliestEventMs, int64(0); got != want {
+		t.Errorf("EarliestEventMs: got %d, want %d", got, want)
+	}
+	if got, want := report.LatestEventMs, int64(0); got != want {
+		t.Errorf("LatestEventMs: got %d, want %d", got, want)
+	}
+}
+
 // TestExtractUsage_Fixture locks the aggregate totals against a committed
 // synthetic opencode NDJSON run log: testdata/run-usage-sample.jsonl.
 //
