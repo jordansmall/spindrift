@@ -77,8 +77,8 @@ func (s *Settle) selfHealGate(d dispatch.Dispatcher, num string, gen uint64, pr 
 		return s.landPushOnly(num, gen, pr), ""
 	}
 	for attempt := 0; ; attempt++ {
-		gate, gateReason := s.gateToGreen(num, gen, pr, requireRegistration && attempt == 0)
-		switch gate {
+		obs, gateReason := s.gateToGreen(num, gen, pr, requireRegistration && attempt == 0)
+		switch obs.outcome {
 		case gateAbandoned:
 			return landingAbandoned, ""
 		case gateGreen:
@@ -256,17 +256,6 @@ func (s *Settle) landPushOnly(num string, gen uint64, branch string) landingResu
 	return landingManual
 }
 
-// registrationWindowPolls bounds how many poll intervals gateToGreen
-// withholds trust in an inherited SUCCESS while requireRegistration is set
-// (issue #2475). After this many intervals elapse with the rollup reading
-// SUCCESS the whole time and no non-terminal state ever observed, that is
-// treated as proof CI already finished — not proof it's still
-// mid-registration — and the SUCCESS is accepted. A stale SUCCESS followed
-// by a non-terminal state observed within the window must still wait for
-// that fresh registration; issue #1652's original protection stays intact
-// for that case.
-const registrationWindowPolls = 3
-
 // gateToGreen polls CheckState on the PR's head commit until the state
 // reaches confirmed SUCCESS, a terminal failure, or MergePollTimeout seconds
 // elapse. It performs no label swap itself — the caller (selfHeal) owns
@@ -303,18 +292,7 @@ const registrationWindowPolls = 3
 //     reached with requireRegistration set and no genuine non-terminal poll
 //     ever observed.
 //   - gateAbandoned — reason is "".
-func (s *Settle) gateToGreen(num string, gen uint64, pr string, requireRegistration bool) (gateResult, string) {
-	obs, reason := s.gateToGreenObs(num, gen, pr, requireRegistration)
-	return obs.outcome, reason
-}
-
-// gateToGreenObs is gateToGreen's body, returning the full watchObservation
-// (not just its outcome) plus the formatted reason string, so same-package
-// tests can assert on the observation fields (sawNonTerminal, windowElapsed,
-// elapsed) directly instead of only indirectly via the reason string.
-// gateToGreen remains the production entrypoint; this is not itself called
-// outside this file.
-func (s *Settle) gateToGreenObs(num string, gen uint64, pr string, requireRegistration bool) (watchObservation, string) {
+func (s *Settle) gateToGreen(num string, gen uint64, pr string, requireRegistration bool) (watchObservation, string) {
 	deadline := s.cfg.MergePollTimeout
 	w := watch{
 		pollInterval:        s.cfg.MergePollInterval,
@@ -330,6 +308,10 @@ func (s *Settle) gateToGreenObs(num string, gen uint64, pr string, requireRegist
 	switch obs.outcome {
 	case gateGreen, gateRedRetry, gateAbandoned:
 		return obs, ""
+	case gateTerminal:
+		// fall through to reason formatting below.
+	default:
+		panic(fmt.Sprintf("settle: unhandled gateResult %v", obs.outcome))
 	}
 
 	// gateTerminal: format the operator-facing reason, logging the
@@ -738,8 +720,8 @@ func (s *Settle) rewaitAfterForcePush(num string, gen uint64, pr string) error {
 		return nil
 	}
 	fmt.Printf("    #%s  landing=%s  status=post-force-push-wait\n", num, pr)
-	g, gReason := s.gateToGreen(num, gen, pr, false)
-	if g == gateGreen {
+	obs, gReason := s.gateToGreen(num, gen, pr, false)
+	if obs.outcome == gateGreen {
 		// Restore ready (issue #1863): most rewaits here follow a conflict
 		// demote above; the stale-base clean-rebase path never demoted, but
 		// MarkReady is idempotent, so calling it unconditionally on green is
@@ -749,7 +731,7 @@ func (s *Settle) rewaitAfterForcePush(num string, gen uint64, pr string) error {
 			fmt.Printf("    #%s  landing=%s  status=mark-ready-failed  !! %v\n", num, pr, mrErr)
 		}
 	}
-	return rewaitGateResultErr(g, gReason, pr)
+	return rewaitGateResultErr(obs.outcome, gReason, pr)
 }
 
 // rewaitGateResultErr maps a gateToGreen outcome to rewaitAfterForcePush's

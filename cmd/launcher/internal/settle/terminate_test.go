@@ -30,8 +30,8 @@ func TestGateToGreen_TerminatedAbandonsWithoutTransition(t *testing.T) {
 
 	got, _ := s.gateToGreen("1", 0, testPR, false)
 
-	if got != gateAbandoned {
-		t.Errorf("gateToGreen = %v, want gateAbandoned", got)
+	if got.outcome != gateAbandoned {
+		t.Errorf("gateToGreen = %v, want gateAbandoned", got.outcome)
 	}
 	if len(fc.TransitionStateCalls) != 0 {
 		t.Errorf("TransitionState must not be called after termination; got %+v", fc.TransitionStateCalls)
@@ -324,8 +324,8 @@ func TestGateToGreen_RepickDoesNotClearAnAbandonedSettlesMark(t *testing.T) {
 	reg.Mark("1")            // Terminate marks that generation dead
 	newGen := reg.Begin("1") // a re-pick's discover claims a fresh incarnation, mid-race
 
-	if got, _ := s.gateToGreen("1", oldGen, testPR, false); got != gateAbandoned {
-		t.Errorf("gateToGreen(oldGen) = %v, want gateAbandoned — a re-pick must not erase an in-flight settle's own mark", got)
+	if got, _ := s.gateToGreen("1", oldGen, testPR, false); got.outcome != gateAbandoned {
+		t.Errorf("gateToGreen(oldGen) = %v, want gateAbandoned — a re-pick must not erase an in-flight settle's own mark", got.outcome)
 	}
 	if len(fc.TransitionStateCalls) != 0 {
 		t.Errorf("TransitionState must not be called for the abandoned generation; got %+v", fc.TransitionStateCalls)
