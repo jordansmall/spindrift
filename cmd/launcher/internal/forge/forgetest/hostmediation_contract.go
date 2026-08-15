@@ -83,6 +83,7 @@ type IssueFilerHarness interface {
 // own Seed*(failing bool) doc.
 func RunHostMediationContract(t *testing.T, h HostMediationHarness) {
 	t.Run("BundleRelayLandsRef", func(t *testing.T) { testBundleRelayLandsRef(t, h) })
+	t.Run("BundleRelayThenDraftPRCreate", func(t *testing.T) { testBundleRelayThenDraftPRCreate(t, h) })
 	t.Run("BundleRelayMissingBundleErrors", func(t *testing.T) { testBundleRelayMissingBundleErrors(t, h) })
 	t.Run("DraftPRCreation", func(t *testing.T) { testDraftPRCreation(t, h) })
 	t.Run("DraftPRCreationFails", func(t *testing.T) { testDraftPRCreationFails(t, h) })
@@ -146,6 +147,50 @@ func testBundleRelayLandsRef(t *testing.T, h HostMediationHarness) {
 	}
 	if !h.BundleLanded(ref) {
 		t.Fatalf("RelayBundle(%q, %q) reported success but %s never landed", outbox, ref, ref)
+	}
+}
+
+// testBundleRelayThenDraftPRCreate verifies the sequence settle.Mediation.Open
+// actually drives -- RelayBundle landing a ref, immediately followed by
+// CreateDraftPR opening a PR against that same just-relayed ref -- succeeds
+// end-to-end against a real harness backend, not just each seam in
+// isolation (issue #2501 review: the contract previously only exercised
+// BundleRelay and DraftPRCreator as two independent scenarios, never chained
+// the way the production caller actually chains them).
+//
+// SeedDraftPRHead(false) is still called here, but only for its side effect
+// of arming a fresh-create response on the Fake harness (whose CreateDraftPR
+// is otherwise scripted state, not a real backend, and defaults to an empty
+// URL until something seeds it) -- its returned head is discarded. head
+// passed to CreateDraftPR below is ref itself, the just-relayed branch, not
+// the harness's own unrelated seeded head: that's the whole point of
+// chaining onto the ref RelayBundle just landed rather than a fresh
+// independently-seeded one. The github and forgejo real-backend harnesses
+// don't need this priming (any non-magic head succeeds against their
+// scripted `gh`/HTTP backends), so the call is a no-op for them.
+func testBundleRelayThenDraftPRCreate(t *testing.T, h HostMediationHarness) {
+	br := mustBundleRelay(t, h)
+	dpc := mustDraftPRCreator(t, h)
+	h.SeedDraftPRHead(false)
+	const ref = "agent/issue-hm103"
+	outbox := h.SeedBundle(ref)
+
+	if err := br.RelayBundle(outbox, ref); err != nil {
+		t.Fatalf("RelayBundle(%q, %q): %v", outbox, ref, err)
+	}
+	if !h.BundleLanded(ref) {
+		t.Fatalf("RelayBundle(%q, %q) reported success but %s never landed", outbox, ref, ref)
+	}
+
+	url, created, err := dpc.CreateDraftPR("feat: add widget", "Adds a widget.", "main", ref)
+	if err != nil {
+		t.Fatalf("CreateDraftPR against just-relayed ref %q: %v", ref, err)
+	}
+	if url == "" {
+		t.Fatal("CreateDraftPR(...) returned an empty URL")
+	}
+	if !created {
+		t.Error("CreateDraftPR(...) created = false, want true for a fresh create against a freshly-relayed ref")
 	}
 }
 
