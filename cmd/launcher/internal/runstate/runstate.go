@@ -55,6 +55,13 @@ type RunState struct {
 	// the terminal pass can name the reason it is running instead of the
 	// usual next step. Empty when TerminalLand is false (issue #2457).
 	CapFired string `json:"cap_fired"`
+	// WorkerFindings summarizes the last parallel worker dispatch's
+	// per-slice outcome (issue #2059) -- one line per slice, e.g.
+	// "slice-a: done", "slice-b: timed out", "slice-c: crashed (exit 1)" --
+	// seeded into the next pass's prompt the same way ReviewFindings seeds a
+	// fix pass, so the coordinator can see what happened without reading any
+	// worker's own transcript.
+	WorkerFindings string `json:"worker_findings,omitempty"`
 }
 
 // ReadRunState reads and parses the run-state artifact at path. An empty

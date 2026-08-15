@@ -2071,6 +2071,40 @@ func TestSeedPromptFromStateIncludesReviewFindings(t *testing.T) {
 	}
 }
 
+// TestSeedPromptFromStateIncludesWorkerFindings verifies seedPromptFromState
+// (issue #2059) carries state.WorkerFindings into the seeded prompt the same
+// way it already carries state.ReviewFindings, and that WorkerFindings alone
+// (with every other state field at its zero value) is enough to trigger
+// seeding rather than returning promptFile unchanged.
+func TestSeedPromptFromStateIncludesWorkerFindings(t *testing.T) {
+	dir := t.TempDir()
+	promptFile := filepath.Join(dir, "prompt.txt")
+	if err := os.WriteFile(promptFile, []byte("ORIGINAL PROMPT TEXT"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	state := RunState{
+		WorkerFindings: "- slice-a: done\n- slice-b: timed out",
+	}
+
+	seeded, err := seedPromptFromState(promptFile, state)
+	if err != nil {
+		t.Fatalf("seedPromptFromState: %v", err)
+	}
+	if seeded == promptFile {
+		t.Fatalf("seedPromptFromState returned the original file unchanged, want a fresh seeded file")
+	}
+	got, err := os.ReadFile(seeded)
+	if err != nil {
+		t.Fatalf("read seeded prompt: %v", err)
+	}
+	for _, want := range []string{"Worker dispatch results", "slice-a: done", "slice-b: timed out"} {
+		if !strings.Contains(string(got), want) {
+			t.Errorf("seeded prompt = %q, want it to contain %q", got, want)
+		}
+	}
+}
+
 // TestSeedPromptFromStateTerminalLandOverridesStopAfterCommit verifies
 // seedPromptFromState (issue #2457) renders an explicit terminal-land
 // directive when state.TerminalLand is set -- even with every other field at
