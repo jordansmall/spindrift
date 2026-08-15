@@ -854,7 +854,7 @@ func checkAutoMergePreflight(c config, cf forge.CodeForge) error {
 // make, on both axes. read-write (the default) is a no-op — it never
 // inspects cf/it, so it changes nothing about today's flows.
 //
-// The cf-side checks are delegated to settle.Mediation.RequiredCapabilityError,
+// The cf-side checks are delegated to settle.RequiredCapabilityError,
 // which discovers cf's optional BundleRelay, DraftPRCreator, and
 // BundleCommitSubjects capabilities the same way Mediation's own call sites
 // do — BundleRelay unconditionally, and DraftPRCreator/BundleCommitSubjects
