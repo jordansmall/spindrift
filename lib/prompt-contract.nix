@@ -12,25 +12,12 @@
 let
   promptInject = import ./prompt-inject.nix;
 
-  # Matches `lib.escapeShellArg` byte for byte without depending on pkgs.lib
-  # (mirrors lib/preambles.nix's copy of the same logic, issue #513): a
-  # string of only shell-safe characters passes through unquoted; anything
-  # else gets single-quote-wrapped, with embedded `'` escaped as `'\''`.
-  escapeShellArg =
-    arg:
-    let
-      string = builtins.toString arg;
-    in
-    if builtins.match "[[:alnum:],._+:@%/-]+" string == null then
-      "'" + builtins.replaceStrings [ "'" ] [ "'\\''" ] string + "'"
-    else
-      string;
-
   # Does `text` contain the literal (non-regex) `needle` -- mirrors
   # lib/prompt-inject.nix's own splitOnce/injectSection idiom
   # (builtins.split on a regex-escaped literal, checking for more than the
   # one no-match part) without depending on that file's private, unexported
-  # escapeRegex (pure builtins only, same reasoning as escapeShellArg above).
+  # escapeRegex: reimplemented locally, same as hasSuffix/removeSuffix below,
+  # because this file stays pure-builtins per the header comment above.
   hasInfix =
     needle: text:
     builtins.length (
@@ -43,9 +30,9 @@ let
     ) > 1;
 
   # Byte-for-byte copies of lib/prompt-inject.nix's own private hasSuffix/
-  # removeSuffix (not exported there, and this file stays pure-builtins per
-  # the header comment above, same reasoning as escapeShellArg/hasInfix
-  # above) -- needed only by ensureTrailingBlankLine below.
+  # removeSuffix -- not exported there, so reimplemented locally rather than
+  # imported, same as hasInfix above -- needed only by ensureTrailingBlankLine
+  # below.
   hasSuffix =
     suffix: content:
     let
@@ -174,10 +161,10 @@ rec {
   # Box's own prompt output is expected to emit, so a later slice can drive a
   # post-run validation pass from this data instead of the omission going
   # unnoticed until something downstream (a merge, a comment relay) silently
-  # no-ops. validateMarkersBashRows/validateMarkersBashPreamble below render
-  # this list into the bash array a following slice's in-box validator reads
-  # (issue #2249) -- the list itself stays data-only; runtime consumption
-  # lives in agent/entrypoint.sh.
+  # no-ops. The list itself stays data-only; runtime consumption is the Go
+  # promptassembly.Validate function (issue #2405), driven from this data via
+  # lib/mkHarness.nix's promptContractRegistryJson (forbiddenMarkers below has
+  # its own sibling forbiddenMarkersRegistryJson).
   #   id       -- short, stable identifier for the expected marker.
   #   marker   -- the literal marker text a Box's output is scanned for.
   #   carrier  -- where the marker is expected to appear:
@@ -198,9 +185,11 @@ rec {
   #               intent: the existing nudge + bundle-adopt salvage path;
   #               issue intent: the filer's best-effort PR-body fallback), so
   #               treating their absence as fatal would be a false positive.
-  #   when     -- a symbolic gating-condition name, not yet consumed by any
-  #               bash/Nix logic -- wiring `when` to an actual runtime
-  #               condition is future work, out of scope for this issue.
+  #   when     -- a symbolic gating-condition name, resolved to an actual
+  #               runtime condition by cmd/launcher/internal/promptassembly's
+  #               Validate function (validate.go's row.When switch), which is
+  #               fed this data via lib/mkHarness.nix's
+  #               promptContractRegistryJson below.
   #   message  -- the row's fully pre-rendered diagnostic prose (marker
   #               already interpolated), surfaced verbatim as the reject-
   #               error or warn-entry text by promptassembly.Validate's
@@ -263,50 +252,6 @@ rec {
   # shares instead of each re-declaring the same filter-and-head one-liner
   # (issue #2246 review).
   byId = id: builtins.head (builtins.filter (r: r.id == id) injectBlocks);
-
-  # Each injectBlocks row rendered into a pipe-joined string, in row order --
-  # the same "row -> pipe-joined string" shape lib/mkHarness.nix's
-  # fragmentRegistryRows uses for the fragment registry (see
-  # fragmentRegistryRows/fragmentRegistryPreamble there). `endMarker` renders
-  # as the empty string for a null (slice-to-EOF) row, so the field is still
-  # present -- just empty -- rather than the whole row shrinking a field.
-  # `kinds` renders as a single space-joined field.
-  injectBlocksBashRows = map (
-    row:
-    let
-      endMarkerRendered = if row.endMarker == null then "" else row.endMarker;
-      kindsRendered = builtins.concatStringsSep " " row.kinds;
-    in
-    "${row.id}|${row.marker}|${row.source}|${row.startMarker}|${endMarkerRendered}|${kindsRendered}"
-  ) injectBlocks;
-
-  # injectBlocksBashRows wrapped into a bash array literal, formatted exactly
-  # like lib/mkHarness.nix's fragmentRegistryPreamble renders
-  # fragmentRegistryRows into `_FRAGMENT_ROWS`. Not yet consumed anywhere --
-  # same "parallel, not-yet-wired data source" status as injectBlocks/
-  # validateMarkers above.
-  injectBlocksBashPreamble =
-    "_INJECT_BLOCK_ROWS=(\n"
-    + builtins.concatStringsSep "" (map (row: "  " + escapeShellArg row + "\n") injectBlocksBashRows)
-    + ")\n";
-
-  # Each validateMarkers row rendered into a pipe-joined string, in row
-  # order -- mirrors injectBlocksBashRows above, minus the injectBlocks-only
-  # fields (source/startMarker/endMarker/kinds) and minus message, which
-  # bash rows don't need since only the Go decoder consumes it.
-  validateMarkersBashRows = map (
-    row: "${row.id}|${row.marker}|${row.carrier}|${row.severity}|${row.when}"
-  ) validateMarkers;
-
-  # validateMarkersBashRows wrapped into a bash array literal, formatted
-  # exactly like injectBlocksBashPreamble above renders injectBlocksBashRows
-  # into `_INJECT_BLOCK_ROWS` -- gives a following slice's in-box validator a
-  # `_VALIDATE_MARKER_ROWS` array to scan by id (issue #2249), the same way
-  # `_contract_marker`/`_INJECT_BLOCK_ROWS` already work for injectBlocks.
-  validateMarkersBashPreamble =
-    "_VALIDATE_MARKER_ROWS=(\n"
-    + builtins.concatStringsSep "" (map (row: "  " + escapeShellArg row + "\n") validateMarkersBashRows)
-    + ")\n";
 
   # Third pure-data registry (issue #2464): the OPPOSITE direction from
   # validateMarkers above. validateMarkers asserts a marker is *present* in a

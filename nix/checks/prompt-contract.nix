@@ -3,10 +3,11 @@
 # COMMS, CHECK/COMMIT, research verdict) that lib/mkHarness.nix now
 # slices/injects from instead of hand-wiring via lib/prompt-inject.nix
 # (issue #2246), plus (below) the registry of markers a Box's own output is
-# expected to emit (validateMarkers, not yet consumed by a post-run
-# validation pass). This check pins both registries' row shape and content
-# so a future consumer can't silently change which blocks go where or which
-# omissions matter.
+# expected to emit (validateMarkers, consumed by
+# cmd/launcher/internal/promptassembly's Validate function, issue #2405).
+# This check pins both registries' row shape and content so a future
+# consumer can't silently change which blocks go where or which omissions
+# matter.
 { pkgs, ... }:
 let
   promptContract = import ../../lib/prompt-contract.nix;
@@ -349,137 +350,6 @@ in
     assert assertMsg (row.when == "boxAccessReadOnly")
       "forbidden-git-push row's when must be 'boxAccessReadOnly', got: ${row.when}";
     pkgs.runCommand "prompt-contract-forbidden-git-push-row-shape" { } "touch $out";
-
-  prompt-contract-inject-blocks-bash-rows-has-four-entries =
-    let
-      out = builtins.length promptContract.injectBlocksBashRows;
-    in
-    assert assertMsg (out == 4)
-      "injectBlocksBashRows must have exactly 4 entries (one per injectBlocks row), got: ${toString out}";
-    assert assertMsg (out == builtins.length promptContract.injectBlocks)
-      "injectBlocksBashRows' length must equal injectBlocks' length (derived-from-injectBlocks property)";
-    pkgs.runCommand "prompt-contract-inject-blocks-bash-rows-has-four-entries" { } "touch $out";
-
-  prompt-contract-inject-blocks-bash-rows-order =
-    let
-      ids = map (row: builtins.head (pkgs.lib.splitString "|" row)) promptContract.injectBlocksBashRows;
-      expected = [ "outcome" "comms" "check" "research-verdict" ];
-    in
-    assert assertMsg (ids == expected)
-      "injectBlocksBashRows must appear in injectBlocks row order [outcome, comms, check, research-verdict], got: [${concatStringsSep ", " ids}]";
-    pkgs.runCommand "prompt-contract-inject-blocks-bash-rows-order" { } "touch $out";
-
-  prompt-contract-inject-blocks-bash-rows-outcome-exact-string =
-    let
-      out = builtins.elemAt promptContract.injectBlocksBashRows 0;
-      expected = "outcome|# LAND THE CHANGE|issue-prompt.md|# LAND THE CHANGE||issue fix";
-    in
-    assert assertMsg (out == expected)
-      "injectBlocksBashRows' outcome row must equal '${expected}' (empty endMarker field for the null-endMarker case), got: '${out}'";
-    pkgs.runCommand "prompt-contract-inject-blocks-bash-rows-outcome-exact-string" { } "touch $out";
-
-  prompt-contract-inject-blocks-bash-rows-comms-exact-string =
-    let
-      out = builtins.elemAt promptContract.injectBlocksBashRows 1;
-      expected = "comms|# COMMS|issue-prompt.md|# COMMS|# SCOUT|fix";
-    in
-    assert assertMsg (out == expected)
-      "injectBlocksBashRows' comms row must equal '${expected}' (non-null endMarker case), got: '${out}'";
-    pkgs.runCommand "prompt-contract-inject-blocks-bash-rows-comms-exact-string" { } "touch $out";
-
-  prompt-contract-inject-blocks-bash-preamble-starts-with-array-open =
-    let
-      out = promptContract.injectBlocksBashPreamble;
-      prefix = "_INJECT_BLOCK_ROWS=(\n";
-    in
-    assert assertMsg (builtins.substring 0 (builtins.stringLength prefix) out == prefix)
-      "injectBlocksBashPreamble must start with '_INJECT_BLOCK_ROWS=(\\n', got: '${builtins.substring 0 40 out}...'";
-    pkgs.runCommand "prompt-contract-inject-blocks-bash-preamble-starts-with-array-open" { } "touch $out";
-
-  prompt-contract-inject-blocks-bash-preamble-ends-with-array-close =
-    let
-      out = promptContract.injectBlocksBashPreamble;
-      suffix = ")\n";
-      len = builtins.stringLength out;
-      suffixLen = builtins.stringLength suffix;
-    in
-    assert assertMsg (builtins.substring (len - suffixLen) suffixLen out == suffix)
-      "injectBlocksBashPreamble must end with ')\\n', got tail: '${builtins.substring (len - 40) 40 out}'";
-    pkgs.runCommand "prompt-contract-inject-blocks-bash-preamble-ends-with-array-close" { } "touch $out";
-
-  prompt-contract-inject-blocks-bash-preamble-contains-every-quoted-row =
-    let
-      preamble = promptContract.injectBlocksBashPreamble;
-      # Every row's content (`#`, `|`, and space are all outside
-      # `[[:alnum:],._+:@%/-]+`) trips the quoted branch, so each row must
-      # appear single-quote-wrapped on its own indented line.
-      expectedLines = map (row: "  '${row}'\n") promptContract.injectBlocksBashRows;
-      missing = builtins.filter (line: !(pkgs.lib.hasInfix line preamble)) expectedLines;
-    in
-    assert assertMsg (missing == [ ])
-      "injectBlocksBashPreamble must contain every injectBlocksBashRows entry single-quote-wrapped and indented 2 spaces; missing: [${concatStringsSep ", " missing}]";
-    pkgs.runCommand "prompt-contract-inject-blocks-bash-preamble-contains-every-quoted-row" { } "touch $out";
-
-  prompt-contract-validate-markers-bash-rows-has-four-entries =
-    let
-      out = builtins.length promptContract.validateMarkersBashRows;
-    in
-    assert assertMsg (out == 4)
-      "validateMarkersBashRows must have exactly 4 entries (one per validateMarkers row), got: ${toString out}";
-    assert assertMsg (out == builtins.length promptContract.validateMarkers)
-      "validateMarkersBashRows' length must equal validateMarkers' length (derived-from-validateMarkers property)";
-    pkgs.runCommand "prompt-contract-validate-markers-bash-rows-has-four-entries" { } "touch $out";
-
-  prompt-contract-validate-markers-bash-rows-order =
-    let
-      ids = map (row: builtins.head (pkgs.lib.splitString "|" row)) promptContract.validateMarkersBashRows;
-      expected = [ "verdict-comment-relay" "reviewer-verdict" "pr-intent" "issue-intent" ];
-    in
-    assert assertMsg (ids == expected)
-      "validateMarkersBashRows must appear in validateMarkers row order [verdict-comment-relay, reviewer-verdict, pr-intent, issue-intent], got: [${concatStringsSep ", " ids}]";
-    pkgs.runCommand "prompt-contract-validate-markers-bash-rows-order" { } "touch $out";
-
-  prompt-contract-validate-markers-bash-rows-verdict-comment-relay-exact-string =
-    let
-      out = builtins.elemAt promptContract.validateMarkersBashRows 0;
-      expected = "verdict-comment-relay|SPINDRIFT_COMMENT|fragment-body|reject|readOnlyResearch";
-    in
-    assert assertMsg (out == expected)
-      "validateMarkersBashRows' verdict-comment-relay row must equal '${expected}', got: '${out}'";
-    pkgs.runCommand "prompt-contract-validate-markers-bash-rows-verdict-comment-relay-exact-string" { } "touch $out";
-
-  prompt-contract-validate-markers-bash-preamble-starts-with-array-open =
-    let
-      out = promptContract.validateMarkersBashPreamble;
-      prefix = "_VALIDATE_MARKER_ROWS=(\n";
-    in
-    assert assertMsg (builtins.substring 0 (builtins.stringLength prefix) out == prefix)
-      "validateMarkersBashPreamble must start with '_VALIDATE_MARKER_ROWS=(\\n', got: '${builtins.substring 0 40 out}...'";
-    pkgs.runCommand "prompt-contract-validate-markers-bash-preamble-starts-with-array-open" { } "touch $out";
-
-  prompt-contract-validate-markers-bash-preamble-ends-with-array-close =
-    let
-      out = promptContract.validateMarkersBashPreamble;
-      suffix = ")\n";
-      len = builtins.stringLength out;
-      suffixLen = builtins.stringLength suffix;
-    in
-    assert assertMsg (builtins.substring (len - suffixLen) suffixLen out == suffix)
-      "validateMarkersBashPreamble must end with ')\\n', got tail: '${builtins.substring (len - 40) 40 out}'";
-    pkgs.runCommand "prompt-contract-validate-markers-bash-preamble-ends-with-array-close" { } "touch $out";
-
-  prompt-contract-validate-markers-bash-preamble-contains-every-quoted-row =
-    let
-      preamble = promptContract.validateMarkersBashPreamble;
-      # Every row's content (`|` and space are both outside
-      # `[[:alnum:],._+:@%/-]+`) trips the quoted branch, so each row must
-      # appear single-quote-wrapped on its own indented line.
-      expectedLines = map (row: "  '${row}'\n") promptContract.validateMarkersBashRows;
-      missing = builtins.filter (line: !(pkgs.lib.hasInfix line preamble)) expectedLines;
-    in
-    assert assertMsg (missing == [ ])
-      "validateMarkersBashPreamble must contain every validateMarkersBashRows entry single-quote-wrapped and indented 2 spaces; missing: [${concatStringsSep ", " missing}]";
-    pkgs.runCommand "prompt-contract-validate-markers-bash-preamble-contains-every-quoted-row" { } "touch $out";
 
   # Pins buildTimeRejectVerdicts (issue #2250): the build-time reject arm that
   # resolves each validateMarkers "reject" row into one of ok/reject/advise,
