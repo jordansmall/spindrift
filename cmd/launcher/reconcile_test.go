@@ -128,12 +128,12 @@ func TestRecoverByNumber_RetryMaxOneStillRetriesOnce(t *testing.T) {
 	}
 }
 
-// TestRecoverByNumber_DraftPRAdoptedMergesAndCompletes proves a discovered
-// draft PR is routed through the exact same adopt-and-gate path as a
-// non-draft PR (issue #2408): recoverByNumber no longer refuses to adopt a
-// draft PR outright. The shared SettleAdopted path flips draft->ready at
-// green via an idempotent MarkReady call before merging.
-func TestRecoverByNumber_DraftPRAdoptedMergesAndCompletes(t *testing.T) {
+// TestRecoverByNumber_AdoptedPRAlwaysCallsMarkReadyThenMergesAndCompletes
+// proves recoverByNumber's adopt-and-gate path always issues an idempotent
+// MarkReady call before merging (issue #2408) — unconditionally, not gated
+// on any draft detection — since a stranded PR may be draft or not and the
+// shared SettleAdopted path treats both identically.
+func TestRecoverByNumber_AdoptedPRAlwaysCallsMarkReadyThenMergesAndCompletes(t *testing.T) {
 	c := reconcileConfig()
 	fc := forge.NewFake(dispatchLabels(c))
 	fc.BranchPrefix = c.branchPrefix
@@ -149,7 +149,7 @@ func TestRecoverByNumber_DraftPRAdoptedMergesAndCompletes(t *testing.T) {
 	err := recoverByNumber(c, fc, fc, dir, testFactory(t, dir, nil), newWorkSettle(c, fc, testWired(fc), fc), "42")
 
 	if err != nil {
-		t.Errorf("expected nil error on draft-PR adopt path; got %v", err)
+		t.Errorf("expected nil error on adopted-PR path; got %v", err)
 	}
 	if fc.Merged != testReconcilePR {
 		t.Errorf("expected PR to be merged; fc.Merged=%q", fc.Merged)
@@ -161,7 +161,7 @@ func TestRecoverByNumber_DraftPRAdoptedMergesAndCompletes(t *testing.T) {
 		t.Errorf("last transition To=%v, want Complete", last.To)
 	}
 	if len(fc.MarkReadyCalls) == 0 {
-		t.Error("expected MarkReady to be called to flip the draft PR to ready")
+		t.Error("expected MarkReady to be called unconditionally on the adopt path")
 	}
 }
 
