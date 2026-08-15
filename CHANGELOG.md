@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.10.0](https://github.com/jordansmall/spindrift/compare/v0.9.0...v0.10.0) (2026-08-13)
+## [0.10.0](https://github.com/jordansmall/spindrift/compare/v0.9.0...v0.10.0) (2026-08-15)
 
 
 ### ⚠ BREAKING CHANGES
@@ -273,7 +273,6 @@
 * **adr:** record dispatch-priority ordering ([ec84ea1](https://github.com/jordansmall/spindrift/commit/ec84ea1c11dd42ed83711fea02d05259208a56c3))
 * **adr:** record host-decided run outcome ([042084f](https://github.com/jordansmall/spindrift/commit/042084f5d55b302d34ea1a77048a94dcd5511cfe))
 * **adr:** record structural scoping as outcome freshness boundary ([90747fc](https://github.com/jordansmall/spindrift/commit/90747fca82d6c1808a252d7995cb7b1bacb47a8b))
-* **adr:** record the forgejo backend decision set ([5022ee1](https://github.com/jordansmall/spindrift/commit/5022ee1e8ac057e44c8777fd1c6a10c810da0d23)), closes [#1957](https://github.com/jordansmall/spindrift/issues/1957)
 * **adr:** record Tier 5 local-Provider research ([#269](https://github.com/jordansmall/spindrift/issues/269)) ([b66852a](https://github.com/jordansmall/spindrift/commit/b66852aea7564775118babf347e67cbd657f520f))
 * **adr:** scope ADR 0039's signal-kill leg to local recover ([347ef5e](https://github.com/jordansmall/spindrift/commit/347ef5edcfa19d31a13c515169a2d4cf96ba9383))
 * **adr:** scope the self-contained rejection to work verbs ([c26d82f](https://github.com/jordansmall/spindrift/commit/c26d82f82db77fdb182b8f33f2fe8739427e347c))
@@ -340,6 +339,7 @@
 * **reference:** reflect dogfood's filer-only roster ([8a33c83](https://github.com/jordansmall/spindrift/commit/8a33c831f3f5b1a1663bcefbf12961587606279d))
 * **reference:** tighten roster prose and fix Filer opt-in gap ([fd0c1c2](https://github.com/jordansmall/spindrift/commit/fd0c1c2d5f58fe745f6e9c65b4257164610c4f03))
 * **reference:** update reviewModel's default value ([3f421db](https://github.com/jordansmall/spindrift/commit/3f421dbe71a657995ae68766467e428be9a48256))
+* **release-notes:** add the 0.10.0 highlights ([49d9d83](https://github.com/jordansmall/spindrift/commit/49d9d83ad6e6bebed68f75cca8d9088a4af01373))
 * **research:** document configurable verdict set ([712e404](https://github.com/jordansmall/spindrift/commit/712e40436f4bee7f1049fe19a6b1bd2cf95a35c5))
 * **research:** document the self-contained research mode ([a15936d](https://github.com/jordansmall/spindrift/commit/a15936df1220d48f79ba76e0e4c0d5483af14381))
 * **roster:** document the per-agent effort field ([06aaa50](https://github.com/jordansmall/spindrift/commit/06aaa501479dd5f6fc14f319f685e504ae8111b4))
