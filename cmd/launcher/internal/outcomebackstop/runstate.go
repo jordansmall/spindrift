@@ -17,7 +17,10 @@ import (
 // that helper discards its partially-decoded RunState on any parse error,
 // but this backstop wants to still recover LastVerdict from an artifact
 // that only partially conforms (e.g. a sibling field with a JSON type
-// mismatch) rather than lose it.
+// mismatch) rather than lose it -- json.Unmarshal reports a type mismatch
+// on any one field as an error even though it has already populated every
+// other field it could decode, so a shared, growing RunState struct turns
+// what used to be a silently-ignored unknown field into an error here.
 func readLastVerdict(path string) string {
 	if path == "" {
 		return ""
@@ -27,6 +30,6 @@ func readLastVerdict(path string) string {
 		return ""
 	}
 	var s runstate.RunState
-	json.Unmarshal(data, &s)
+	_ = json.Unmarshal(data, &s)
 	return s.LastVerdict
 }

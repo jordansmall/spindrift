@@ -67,8 +67,8 @@ type Config struct {
 	// Git defaults to a real exec.Command runner.
 	Git func(args ...string) (string, string, error)
 	// RunStateFilePath is the path to the run-state handoff artifact the
-	// orchestrator writes (see cmd/launcher/orchestrator/runstate.go),
-	// carrying the reviewer's last verdict word. Empty, missing, unreadable,
+	// orchestrator writes (see internal/runstate), carrying the reviewer's
+	// last verdict word. Empty, missing, unreadable,
 	// or unparseable all quietly mean "no verdict known" -- never an error
 	// (issue #2459).
 	RunStateFilePath string

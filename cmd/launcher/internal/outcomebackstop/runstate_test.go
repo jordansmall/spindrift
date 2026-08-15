@@ -18,7 +18,7 @@ func TestReadLastVerdict_EmptyPathReturnsEmpty(t *testing.T) {
 // file degrade branch directly against readLastVerdict (the higher-level
 // TestRun_MissingRunStateFileBehavesAsUnset in backstop_test.go already
 // covers this via Run, but exercising the unexported function directly here
-// keeps all three degrade branches next to each other in one place).
+// keeps the degrade branches next to each other in one place).
 func TestReadLastVerdict_MissingFileReturnsEmpty(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "does-not-exist.json")
 	if got := readLastVerdict(path); got != "" {
@@ -26,10 +26,11 @@ func TestReadLastVerdict_MissingFileReturnsEmpty(t *testing.T) {
 	}
 }
 
-// TestReadLastVerdict_MalformedJSONReturnsEmpty pins the invalid-JSON
-// degrade branch: a run-state artifact containing malformed JSON must
-// quietly degrade to "" -- no verdict known -- rather than propagating an
-// error or panicking, per the backstop's always-emit invariant (#593).
+// TestReadLastVerdict_MalformedJSONReturnsEmpty pins that a run-state
+// artifact containing malformed JSON -- one json.Unmarshal can't decode any
+// field from at all -- must quietly degrade to "" -- no verdict known --
+// rather than propagating an error or panicking, per the backstop's
+// always-emit invariant (#593).
 func TestReadLastVerdict_MalformedJSONReturnsEmpty(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "run-state.json")
 	if err := os.WriteFile(path, []byte("not valid json at all"), 0o644); err != nil {
@@ -56,8 +57,8 @@ func TestReadLastVerdict_TruncatedJSONReturnsEmpty(t *testing.T) {
 // TestReadLastVerdict_JSONArrayReturnsEmpty pins that valid JSON of an
 // unexpected shape (a top-level array rather than an object) also degrades
 // to "" rather than panicking: json.Unmarshal into the RunState struct
-// errors on a non-object top-level value, landing in the same invalid-JSON
-// branch as malformed input.
+// errors on a non-object top-level value and leaves every field, including
+// LastVerdict, at its zero value.
 func TestReadLastVerdict_JSONArrayReturnsEmpty(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "run-state.json")
 	if err := os.WriteFile(path, []byte(`[1,2,3]`), 0o644); err != nil {
@@ -69,7 +70,7 @@ func TestReadLastVerdict_JSONArrayReturnsEmpty(t *testing.T) {
 }
 
 // TestReadLastVerdict_ValidJSONReturnsVerdict pins the happy path for
-// contrast with the degrade branches above: well-formed JSON matching the
+// contrast with the degrade cases above: well-formed JSON matching the
 // expected shape round-trips its LastVerdict field untouched.
 func TestReadLastVerdict_ValidJSONReturnsVerdict(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "run-state.json")

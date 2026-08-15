@@ -155,6 +155,44 @@ func TestWriteRunStateLeavesNoTempFileOnSuccess(t *testing.T) {
 	}
 }
 
+// TestReadRunStateParsesPreExtractionFixture verifies a literal JSON fixture
+// -- hand-written here rather than produced via WriteRunState, standing in
+// for a state file a prior pass wrote before this package existed -- still
+// loads correctly (AC2): every field the pre-extraction orchestrator wrote
+// round-trips, not just the ones exercised elsewhere in this file.
+func TestReadRunStateParsesPreExtractionFixture(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "run-state.json")
+	fixture := `{
+  "done_slices": ["scout", "implement seam A"],
+  "remaining_slices": ["implement seam B", "land"],
+  "last_verdict": "BLOCK",
+  "scout_brief_path": "/tmp/brief.md",
+  "review_findings": "## Blocking\n- run.go:42 -- missing nil check",
+  "terminal_land": true,
+  "cap_fired": "max slices reached"
+}`
+	if err := os.WriteFile(path, []byte(fixture), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := ReadRunState(path)
+	if err != nil {
+		t.Fatalf("ReadRunState: %v", err)
+	}
+	want := RunState{
+		DoneSlices:      []string{"scout", "implement seam A"},
+		RemainingSlices: []string{"implement seam B", "land"},
+		LastVerdict:     "BLOCK",
+		ScoutBriefPath:  "/tmp/brief.md",
+		ReviewFindings:  "## Blocking\n- run.go:42 -- missing nil check",
+		TerminalLand:    true,
+		CapFired:        "max slices reached",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("ReadRunState(fixture) = %+v, want %+v", got, want)
+	}
+}
+
 // TestReadRunStateCorruptFileReturnsError verifies a state file that exists
 // but fails to parse as JSON (a partial write from a killed prior pass, or
 // hand-edited garbage) surfaces as an error rather than silently discarding
