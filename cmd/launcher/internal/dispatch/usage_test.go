@@ -459,14 +459,15 @@ func TestUsageReport_MergesPerModelTokensAcrossPasses(t *testing.T) {
 	}
 }
 
-// TestUsageReport_MergedModelOrderIsDeterministicNotAppearanceOrder verifies
-// that when different passes contribute different models, the merged
-// per-model table orders rows by family rank (opus, haiku, sonnet, then
-// the rest) rather than by which pass happened to run first -- a run whose
-// initial pass used haiku and fix pass used opus must still render
-// opus-first, matching a single-log run's own convention, not
-// haiku-first (issue #2575).
-func TestUsageReport_MergedModelOrderIsDeterministicNotAppearanceOrder(t *testing.T) {
+// TestUsageReport_MergedModelOrderIsFirstAppearance verifies that when
+// different passes contribute different models, the merged per-model table
+// preserves first-appearance order across logs (not any family-rank
+// reordering) -- a run whose initial pass used haiku and fix pass used opus
+// must still render haiku-first, matching the order the underlying logs were
+// produced in (issue #2575, reverted from a family-rank sort that
+// mis-ordered opencode model ids -- see
+// TestUsageReport_MergedModelOrderSurvivesFamilySubstringCollision).
+func TestUsageReport_MergedModelOrderIsFirstAppearance(t *testing.T) {
 	dir := tempLogDir(t)
 	f, err := NewFactory(Config{}, dir, runner.NewFake(), fakeDriver{}, RealClock())
 	if err != nil {
@@ -476,7 +477,7 @@ func TestUsageReport_MergedModelOrderIsDeterministicNotAppearanceOrder(t *testin
 	d := f.New("18", "test issue")
 
 	// Initial pass uses haiku only; fix pass uses opus only -- haiku appears
-	// first chronologically.
+	// first chronologically and should render first.
 	pass1 := []string{
 		`{"type":"assistant","message":{"model":"claude-haiku-4-5-20251001","content":[],"usage":{"input_tokens":10,"output_tokens":5}}}`,
 		`{"type":"result","num_turns":1,"total_cost_usd":0.10,"usage":{"input_tokens":10,"output_tokens":5}}`,
@@ -498,8 +499,42 @@ func TestUsageReport_MergedModelOrderIsDeterministicNotAppearanceOrder(t *testin
 	if opusIdx == -1 || haikuIdx == -1 {
 		t.Fatalf("report should contain both models; got: %q", body)
 	}
-	if opusIdx > haikuIdx {
-		t.Errorf("report should render opus before haiku (family rank), regardless of appearance order; got: %q", body)
+	if haikuIdx > opusIdx {
+		t.Errorf("report should render haiku before opus (first appearance), got opus before haiku; body: %q", body)
+	}
+}
+
+// TestUsageReport_MergedModelOrderSurvivesFamilySubstringCollision pins down
+// the bug a prior family-rank sort introduced: an opencode-style model id
+// such as "claude-sonnet-4" contains the substring "sonnet" just like a
+// claude-driver id does, so a rank table keyed on opus/haiku/sonnet
+// substrings silently reordered it. Here the id appearing FIRST (rank
+// "sonnet", 2) and the id appearing SECOND (rank "haiku", 1) have ranks
+// that disagree with appearance order -- exactly the case a family-rank
+// sort gets wrong and first-appearance order gets right, regardless of
+// which family substring either id happens to contain (issue #2575).
+func TestUsageReport_MergedModelOrderSurvivesFamilySubstringCollision(t *testing.T) {
+	found := []usage.Report{
+		{
+			Totals:        usage.Usage{InputTokens: 10, OutputTokens: 5},
+			Found:         true,
+			SummedByModel: []usage.ModelUsage{{Model: "claude-sonnet-4", UncachedInputTokens: 10, OutputTokens: 5}},
+		},
+		{
+			Totals:        usage.Usage{InputTokens: 20, OutputTokens: 8},
+			Found:         true,
+			SummedByModel: []usage.ModelUsage{{Model: "claude-3-5-haiku-20241022", UncachedInputTokens: 20, OutputTokens: 8}},
+		},
+	}
+
+	got := aggregatedReport(found)
+
+	if len(got.SummedByModel) != 2 {
+		t.Fatalf("SummedByModel = %v, want 2 rows", got.SummedByModel)
+	}
+	if got.SummedByModel[0].Model != "claude-sonnet-4" || got.SummedByModel[1].Model != "claude-3-5-haiku-20241022" {
+		t.Errorf("SummedByModel order = %v, want [claude-sonnet-4, claude-3-5-haiku-20241022] (first appearance)",
+			got.SummedByModel)
 	}
 }
 
