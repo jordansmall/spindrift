@@ -6,6 +6,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"time"
 
 	"spindrift.dev/launcher/internal/driver/driverkit"
 	"spindrift.dev/launcher/internal/logscan"
@@ -28,31 +29,76 @@ type usageData struct {
 	CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
 }
 
-// lastInLog scans the file at path and returns the last result event parsed
-// as a usage.Usage. Lines larger than the 4 MiB scan buffer are skipped
-// rather than aborting the scan; the last result event wins.
+// timestampedEvent decodes just the top-level "timestamp" field carried by
+// real claude-code stream-json lines (assistant/user events, RFC3339 with
+// milliseconds, e.g. "2026-08-11T19:01:33.187Z"). Used to derive wall-clock
+// span across every session in a log, since sessions can run concurrently
+// (issue #2058) and result events' own duration_ms is not additive.
+type timestampedEvent struct {
+	Timestamp string `json:"timestamp"`
+}
+
+// sumInLog scans the file at path and returns a usage.Usage aggregated
+// across every "type":"result" event in the log. Lines larger than the 4
+// MiB scan buffer are skipped rather than aborting the scan.
+//
+// Orchestrator mode invokes the claude-code driver repeatedly, so a single
+// Box log can hold several distinct sessions, each emitting exactly one
+// result event — summing every result event in the log therefore sums
+// every session, with no session-boundary detection required. InputTokens,
+// OutputTokens, CacheReadInputTokens, CacheCreationInputTokens,
+// TotalCostUSD, DurationApiMs, and NumTurns are all additive this way.
+//
+// DurationMs (wall time) is NOT additive: concurrent sessions would
+// overstate wall time if each session's own duration_ms were summed.
+// Instead it is derived from the span between the earliest and latest
+// top-level "timestamp" field seen across every line in the log (not just
+// result events). When no timestamp is found anywhere in the log (e.g. a
+// minimal fixture with only bare result events), it falls back to summing
+// each result event's own duration_ms, so a single-result-event log with
+// no timestamps produces output identical to before this aggregation
+// change.
 //
 // Returns (usage.Usage{}, false, nil) when no result event is present or the
 // file does not exist. Returns (usage.Usage{}, false, err) on I/O errors
 // other than file-not-found or oversized lines.
-func lastInLog(path string) (usage.Usage, bool, error) {
-	var last *usage.Usage
+func sumInLog(path string) (usage.Usage, bool, error) {
+	var sum usage.Usage
+	found := false
+	var durationMsSum int64
+	var earliest, latest time.Time
+	haveTimestamp := false
+
 	err := driverkit.ScanLog(path, logscan.SkipOversized, func(line string) {
 		s := strings.TrimSpace(line)
+
+		if strings.Contains(s, `"timestamp"`) {
+			var ts timestampedEvent
+			if jsonErr := json.Unmarshal([]byte(s), &ts); jsonErr == nil && ts.Timestamp != "" {
+				if t, parseErr := time.Parse(time.RFC3339Nano, ts.Timestamp); parseErr == nil {
+					if !haveTimestamp || t.Before(earliest) {
+						earliest = t
+					}
+					if !haveTimestamp || t.After(latest) {
+						latest = t
+					}
+					haveTimestamp = true
+				}
+			}
+		}
+
 		if strings.Contains(s, `"type":"result"`) {
 			var ev resultEvent
 			if jsonErr := json.Unmarshal([]byte(s), &ev); jsonErr == nil && ev.Type == "result" {
-				u := usage.Usage{
-					InputTokens:              ev.UsageData.InputTokens,
-					OutputTokens:             ev.UsageData.OutputTokens,
-					CacheReadInputTokens:     ev.UsageData.CacheReadInputTokens,
-					CacheCreationInputTokens: ev.UsageData.CacheCreationInputTokens,
-					TotalCostUSD:             ev.TotalCostUSD,
-					DurationMs:               ev.DurationMs,
-					DurationApiMs:            ev.DurationApiMs,
-					NumTurns:                 ev.NumTurns,
-				}
-				last = &u
+				found = true
+				sum.InputTokens += ev.UsageData.InputTokens
+				sum.OutputTokens += ev.UsageData.OutputTokens
+				sum.CacheReadInputTokens += ev.UsageData.CacheReadInputTokens
+				sum.CacheCreationInputTokens += ev.UsageData.CacheCreationInputTokens
+				sum.TotalCostUSD += ev.TotalCostUSD
+				sum.DurationApiMs += ev.DurationApiMs
+				sum.NumTurns += ev.NumTurns
+				durationMsSum += ev.DurationMs
 			}
 		}
 	})
@@ -60,10 +106,16 @@ func lastInLog(path string) (usage.Usage, bool, error) {
 		return usage.Usage{}, false, err
 	}
 
-	if last == nil {
+	if !found {
 		return usage.Usage{}, false, nil
 	}
-	return *last, true, nil
+
+	if haveTimestamp {
+		sum.DurationMs = latest.Sub(earliest).Milliseconds()
+	} else {
+		sum.DurationMs = durationMsSum
+	}
+	return sum, true, nil
 }
 
 // assistantEvent decodes line as a claude-code stream-json assistant message
@@ -195,14 +247,14 @@ func breakdownByModelFile(path string) ([]usage.ModelUsage, error) {
 
 // breakdownByModel indirects to breakdownByModelFile so tests can simulate a
 // breakdownByModelFile I/O error without a real filesystem race between it
-// and the lastInLog scan.
+// and the sumInLog scan.
 var breakdownByModel = breakdownByModelFile
 
-// ExtractUsage scans logPath for its result event and, separately, its
+// ExtractUsage scans logPath for its result event(s) and, separately, its
 // per-model breakdown, returning both in one usage.Report — the claude
 // Driver's implementation of the Driver interface's ExtractUsage method.
 func ExtractUsage(logPath string) (usage.Report, error) {
-	u, found, err := lastInLog(logPath)
+	u, found, err := sumInLog(logPath)
 	if err != nil {
 		return usage.Report{}, err
 	}
