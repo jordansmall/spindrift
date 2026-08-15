@@ -34,9 +34,9 @@ func (d *Dispatch) UsageReport() string {
 			"| API time | %s |\n"+
 			"| Turns | %d |",
 		model,
-		usage.FormatDuration(r.FinalSnapshot.DurationMs),
-		usage.FormatDuration(r.FinalSnapshot.DurationApiMs),
-		r.FinalSnapshot.NumTurns,
+		usage.FormatDuration(r.Totals.DurationMs),
+		usage.FormatDuration(r.Totals.DurationApiMs),
+		r.Totals.NumTurns,
 	)
 	body += modelBreakdownSection(r.SummedByModel)
 	return body
@@ -58,11 +58,11 @@ func (d *Dispatch) CumulativeUsage() usage.Usage {
 		if err != nil || !r.Found {
 			continue
 		}
-		total.InputTokens += r.FinalSnapshot.InputTokens
-		total.OutputTokens += r.FinalSnapshot.OutputTokens
-		total.CacheReadInputTokens += r.FinalSnapshot.CacheReadInputTokens
-		total.CacheCreationInputTokens += r.FinalSnapshot.CacheCreationInputTokens
-		total.TotalCostUSD += r.FinalSnapshot.TotalCostUSD
+		total.InputTokens += r.Totals.InputTokens
+		total.OutputTokens += r.Totals.OutputTokens
+		total.CacheReadInputTokens += r.Totals.CacheReadInputTokens
+		total.CacheCreationInputTokens += r.Totals.CacheCreationInputTokens
+		total.TotalCostUSD += r.Totals.TotalCostUSD
 	}
 	return total
 }

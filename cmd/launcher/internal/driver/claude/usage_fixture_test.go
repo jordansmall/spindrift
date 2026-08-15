@@ -23,7 +23,7 @@ func TestExtractUsage_MultiSessionFixture(t *testing.T) {
 		t.Fatalf("ExtractUsage(%s).Found = false, want true", path)
 	}
 
-	u := report.FinalSnapshot
+	u := report.Totals
 	if u.NumTurns != 565 {
 		t.Errorf("NumTurns: got %d, want 565", u.NumTurns)
 	}

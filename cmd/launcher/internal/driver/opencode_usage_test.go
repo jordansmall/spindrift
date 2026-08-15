@@ -15,9 +15,9 @@ import (
 // The log carries three step_finish events across two distinct modelIDs
 // (gpt-5, claude-sonnet-4), plus one re-emit of msg_1's messageID under
 // gpt-5 to prove SummedByModel's dedup-by-messageID rule flows through the
-// Driver seam: the re-emit is folded into FinalSnapshot's plain sum (no
+// Driver seam: the re-emit is folded into Totals's plain sum (no
 // dedup there) but excluded from SummedByModel's per-model sum (issue
-// #2085's documented FinalSnapshot vs. SummedByModel divergence).
+// #2085's documented Totals vs. SummedByModel divergence).
 //
 // Hand-computed expectations:
 //
@@ -26,7 +26,7 @@ import (
 //	msg_2 (claude-sonnet-4):  input=200 output=100 reasoning=0 cache.write=30 cache.read=300 cost=0.02
 //	msg_3 (gpt-5):            input=300 output=150 reasoning=5 cache.write=50 cache.read=500 cost=0.03
 //
-//	FinalSnapshot (plain sum over all 4 step_finish events, no dedup):
+//	Totals (plain sum over all 4 step_finish events, no dedup):
 //	  NumTurns=4
 //	  InputTokens = 100+5+200+300 = 605
 //	  OutputTokens = (50+10)+(5+0)+(100+0)+(150+5) = 320
@@ -66,8 +66,8 @@ func TestOpencodeDriverExtractUsage(t *testing.T) {
 	if !report.Found {
 		t.Fatal("Found: got false, want true")
 	}
-	if report.FinalSnapshot.NumTurns != 4 {
-		t.Errorf("NumTurns: got %d, want 4", report.FinalSnapshot.NumTurns)
+	if report.Totals.NumTurns != 4 {
+		t.Errorf("NumTurns: got %d, want 4", report.Totals.NumTurns)
 	}
 
 	if len(report.SummedByModel) != 2 {

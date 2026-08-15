@@ -80,13 +80,13 @@ func TestExtractUsage_SkipsMalformedLines(t *testing.T) {
 	if !report.Found {
 		t.Fatalf("Found: got false, want true")
 	}
-	if got, want := report.FinalSnapshot.NumTurns, 2; got != want {
+	if got, want := report.Totals.NumTurns, 2; got != want {
 		t.Errorf("NumTurns: got %d, want %d", got, want)
 	}
-	if got, want := report.FinalSnapshot.InputTokens, 8; got != want {
+	if got, want := report.Totals.InputTokens, 8; got != want {
 		t.Errorf("InputTokens: got %d, want %d", got, want)
 	}
-	if got, want := report.FinalSnapshot.OutputTokens, 240; got != want {
+	if got, want := report.Totals.OutputTokens, 240; got != want {
 		t.Errorf("OutputTokens: got %d, want %d", got, want)
 	}
 }
@@ -112,25 +112,25 @@ func TestExtractUsage_AggregatesStepFinishEvents(t *testing.T) {
 	if !report.Found {
 		t.Fatalf("Found: got false, want true")
 	}
-	if got, want := report.FinalSnapshot.InputTokens, 8; got != want {
+	if got, want := report.Totals.InputTokens, 8; got != want {
 		t.Errorf("InputTokens: got %d, want %d", got, want)
 	}
-	if got, want := report.FinalSnapshot.OutputTokens, 240; got != want {
+	if got, want := report.Totals.OutputTokens, 240; got != want {
 		t.Errorf("OutputTokens: got %d, want %d", got, want)
 	}
-	if got, want := report.FinalSnapshot.CacheReadInputTokens, 8000; got != want {
+	if got, want := report.Totals.CacheReadInputTokens, 8000; got != want {
 		t.Errorf("CacheReadInputTokens: got %d, want %d", got, want)
 	}
-	if got, want := report.FinalSnapshot.CacheCreationInputTokens, 1000; got != want {
+	if got, want := report.Totals.CacheCreationInputTokens, 1000; got != want {
 		t.Errorf("CacheCreationInputTokens: got %d, want %d", got, want)
 	}
-	if got, want := report.FinalSnapshot.TotalCostUSD, 0.02; math.Abs(got-want) > costEpsilon {
+	if got, want := report.Totals.TotalCostUSD, 0.02; math.Abs(got-want) > costEpsilon {
 		t.Errorf("TotalCostUSD: got %v, want %v", got, want)
 	}
-	if got, want := report.FinalSnapshot.DurationMs, int64(1500); got != want {
+	if got, want := report.Totals.DurationMs, int64(1500); got != want {
 		t.Errorf("DurationMs: got %d, want %d", got, want)
 	}
-	if got, want := report.FinalSnapshot.NumTurns, 2; got != want {
+	if got, want := report.Totals.NumTurns, 2; got != want {
 		t.Errorf("NumTurns: got %d, want %d", got, want)
 	}
 	if got, want := len(report.SummedByModel), 2; got != want {
@@ -193,25 +193,25 @@ func TestExtractUsage_Fixture(t *testing.T) {
 	if !report.Found {
 		t.Fatalf("Found: got false, want true")
 	}
-	if got, want := report.FinalSnapshot.InputTokens, 600; got != want {
+	if got, want := report.Totals.InputTokens, 600; got != want {
 		t.Errorf("InputTokens: got %d, want %d", got, want)
 	}
-	if got, want := report.FinalSnapshot.OutputTokens, 315; got != want {
+	if got, want := report.Totals.OutputTokens, 315; got != want {
 		t.Errorf("OutputTokens: got %d, want %d", got, want)
 	}
-	if got, want := report.FinalSnapshot.CacheReadInputTokens, 1000; got != want {
+	if got, want := report.Totals.CacheReadInputTokens, 1000; got != want {
 		t.Errorf("CacheReadInputTokens: got %d, want %d", got, want)
 	}
-	if got, want := report.FinalSnapshot.CacheCreationInputTokens, 100; got != want {
+	if got, want := report.Totals.CacheCreationInputTokens, 100; got != want {
 		t.Errorf("CacheCreationInputTokens: got %d, want %d", got, want)
 	}
-	if got, want := report.FinalSnapshot.TotalCostUSD, 0.06; math.Abs(got-want) > costEpsilon {
+	if got, want := report.Totals.TotalCostUSD, 0.06; math.Abs(got-want) > costEpsilon {
 		t.Errorf("TotalCostUSD: got %v, want %v", got, want)
 	}
-	if got, want := report.FinalSnapshot.DurationMs, int64(3000); got != want {
+	if got, want := report.Totals.DurationMs, int64(3000); got != want {
 		t.Errorf("DurationMs: got %d, want %d", got, want)
 	}
-	if got, want := report.FinalSnapshot.NumTurns, 3; got != want {
+	if got, want := report.Totals.NumTurns, 3; got != want {
 		t.Errorf("NumTurns: got %d, want %d", got, want)
 	}
 
