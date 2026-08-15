@@ -85,18 +85,21 @@ false ready.
 _Avoid_: runner (that is the Box isolation seam), wrapper, shim.
 
 **Filer**:
-The opt-in subagent role (beside the scout and reviewer) that turns into issues
-on the Issue Tracker the non-blocking findings the work loop escalated for a
-human — not the whole Non-blocking section: cheap, in-scope findings are fixed
-inline in the same effort, and only design trade-offs, out-of-scope work, or
-too-large changes reach the Filer. One issue per surviving finding, merging
-only findings that are the same change, after a dedup search over previously
-filed findings in any state (a closed finding is a human triage decision, never
-refiled). Its issues carry the
-`agent-review-finding` label and are never dispatchable by its own hand — a
-human promotes them, preserving the rule that a human is the launch button.
-Filing is best-effort: a Filer failure never blocks the PR or alters the
-outcome. Off by default.
+The opt-in subagent role (beside the scout and reviewer) that turns findings
+into issues on the Issue Tracker. Two callers: the work loop hands it the
+non-blocking review findings escalated for a human — not the whole
+Non-blocking section: cheap, in-scope findings are fixed inline in the same
+effort, and only design trade-offs, out-of-scope work, or too-large changes
+reach the Filer — and a [[Research dispatch]] hands it the run's [[Research
+finding]]s. One issue per surviving finding, merging only findings that are
+the same change, after a dedup search over previously filed findings in any
+state (a closed finding is a human triage decision, never refiled). Its
+issues carry a provenance label naming the caller — `agent-review-finding`
+from the work loop, `agent-research-finding` from research — and are never
+dispatchable by its own hand: a human promotes them, preserving the rule
+that a human is the launch button. Filing is best-effort: a Filer failure
+never blocks the PR or alters the outcome. Provisioning it (a roster model)
+is the sole switch for both callers. Off by default.
 _Avoid_: triager (it does not triage), reporter (collides with outcome
 reporting).
 
@@ -392,18 +395,39 @@ _Avoid_: mode, dispatch type, pipeline.
 **Research dispatch**:
 A Dispatch whose Agent (the "researcher") reviews a posted issue from inside
 the Box — exploring the Target repo for real context — then posts an
-enrichment comment and a verdict. Advise-only: it never promotes an issue to
-dispatchable, never closes one; a human acts on the verdict, preserving the
-rule that a human is the launch button. Verdicts are a closed set carried by
-`Complete`: `recommend` (relevant, enriched, ready to promote), `reject`
-(false positive, not worth doing, or duplicate — reason in the comment),
+enrichment comment and a verdict. Advise-only for code and for the source
+issue: it never promotes an issue to dispatchable, never closes one; a human
+acts on the verdict, preserving the rule that a human is the launch button.
+Its one write power beyond the verdict comment is filing [[Research
+finding]]s as new issues through the [[Filer]] — host-mediated, never a
+Box-side tracker write. Verdicts are a closed set carried by `Complete`:
+`recommend` (relevant, enriched, ready to promote), `reject` (false
+positive, not worth doing, or duplicate — reason in the comment; also the
+natural close for a survey-style ticket whose deliverable was its filings),
 `unclear` (relevance needs answers only a human has; answer, then re-apply
-the trigger label to re-research). A crashed or verdict-less Box is `Failed`,
-never a verdict. On `github` the label family is `agent-research` (dual-role:
-standing state and trigger) → `agent-research-in-progress` → terminals
-`agent-research-recommend` / `-reject` / `-unclear` / `-failed`.
+the trigger label to re-research). Filing is orthogonal to the verdict — any
+verdict may carry filings, enumerated in the verdict comment. A crashed or
+verdict-less Box is `Failed`, never a verdict; a filing failure never is —
+the finding falls back inline into the comment. On `github` the label family
+is `agent-research` (dual-role: standing state and trigger) →
+`agent-research-in-progress` → terminals `agent-research-recommend` /
+`-reject` / `-unclear` / `-failed`.
 _Avoid_: triage (the human action on `Failed` issues), scout (the in-box
 subagent role).
+
+**Research finding**:
+A discovery a [[Research dispatch]] makes beyond its verdict — a bug, a
+missing feature, a chore — durably visible in exactly one of two places:
+filed as its own issue through the [[Filer]], or, when filing fails, inline
+in the verdict comment (title and summary), so no finding is ever silently
+lost. A filed finding carries the `agent-research-finding` provenance label,
+an optional type from a closed set (bug / enhancement / chore) mapped to
+labels by the host — the Box never names a label — and a backlink to the
+source research issue. Like every agent-filed issue it is never
+dispatchable by the agent's own hand; a human promotes it.
+_Avoid_: research issue (ambiguous with the issue being researched),
+side-effect issue, enrichment (that is the comment's context, not a new
+issue).
 
 **Dispatch lifecycle**:
 The canonical dispatch states the launcher reasons in, independent of how any
