@@ -59,13 +59,16 @@ type timestampedEvent struct {
 // derived from the span between the earliest and latest top-level
 // "timestamp" field seen across every driver session line (assistant/user/
 // system events; a line without a "type" field is not one, so it can't
-// widen the span). A single-session log (at most one result event) always
-// reports that session's own duration_ms directly, timestamps or not —
-// never the span — matching output from before this aggregation change:
-// the assistant/user timestamps bracketing a session don't capture the
-// process's full wall time (startup, network, render), so the span
-// systematically understates it, and a log with only one timestamped line
-// would otherwise collapse to a 0s span.
+// widen the span), floored to the longest individual session's own
+// duration_ms. The floor matters two ways: a log whose timestamped lines all
+// land on the same instant (or carries none at all) would otherwise report a
+// span of 0, and a span narrower than some session's own duration_ms (the
+// assistant/user timestamps bracketing a session don't capture its full wall
+// time — startup, network, render) would otherwise report a wall time
+// shorter than a session that provably ran that long. A single-session log
+// (at most one result event) always reports that session's own duration_ms
+// directly, timestamps or not — never the span — matching output from
+// before this aggregation change.
 //
 // Returns (usage.Usage{}, false, nil) when no result event is present or the
 // file does not exist. Returns (usage.Usage{}, false, err) on I/O errors
@@ -73,7 +76,7 @@ type timestampedEvent struct {
 func sumInLog(path string) (usage.Usage, bool, error) {
 	var sum usage.Usage
 	resultCount := 0
-	var durationMsSum int64
+	var maxDurationMs int64
 	var earliest, latest time.Time
 	haveTimestamp := false
 
@@ -106,7 +109,9 @@ func sumInLog(path string) (usage.Usage, bool, error) {
 				sum.TotalCostUSD += ev.TotalCostUSD
 				sum.DurationApiMs += ev.DurationApiMs
 				sum.NumTurns += ev.NumTurns
-				durationMsSum += ev.DurationMs
+				if ev.DurationMs > maxDurationMs {
+					maxDurationMs = ev.DurationMs
+				}
 			}
 		}
 	})
@@ -118,10 +123,17 @@ func sumInLog(path string) (usage.Usage, bool, error) {
 		return usage.Usage{}, false, nil
 	}
 
-	if haveTimestamp && resultCount > 1 {
-		sum.DurationMs = latest.Sub(earliest).Milliseconds()
+	if resultCount > 1 {
+		var spanMs int64
+		if haveTimestamp && latest.After(earliest) {
+			spanMs = latest.Sub(earliest).Milliseconds()
+		}
+		sum.DurationMs = spanMs
+		if maxDurationMs > sum.DurationMs {
+			sum.DurationMs = maxDurationMs
+		}
 	} else {
-		sum.DurationMs = durationMsSum
+		sum.DurationMs = maxDurationMs
 	}
 	return sum, true, nil
 }
