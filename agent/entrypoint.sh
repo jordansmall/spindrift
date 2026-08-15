@@ -948,10 +948,11 @@ run_driver_in_env() {
   # handoff_json itself is empty (the pre-Handoff conflict-resolve pass) or
   # the keys are simply absent (required_marker_gate's corrective resume
   # narrows handoff_json to {"Invoker": ...} only, issue #2065).
-  local review_prompt="" review_model=""
+  local review_prompt="" review_model="" worker_prompt=""
   if [ -n "$handoff_json" ]; then
     review_prompt="$(_handoff_field "$handoff_json" ReviewPromptFile)"
     review_model="$(_handoff_field "$handoff_json" ReviewModel)"
+    worker_prompt="$(_handoff_field "$handoff_json" WorkerPromptFile)"
   fi
 
   # review_effort has no Handoff descriptor field (issue #2390) -- unlike
@@ -959,10 +960,22 @@ run_driver_in_env() {
   # the same way --effort reads $EFFORT directly further down.
   local review_effort="${REVIEW_EFFORT:-}"
 
+  # worker_work_dir/worker_timeout have no Handoff descriptor field either
+  # (issue #2059, #2058), same shape as review_effort above -- plain strings
+  # read straight off the environment, no Go-side rendering needed.
+  local worker_work_dir="${WORKER_WORK_DIR:-}"
+  local worker_timeout="${WORKER_TIMEOUT:-}"
+
   local _review_prompt_file=""
   if [ -n "$review_prompt" ]; then
     _review_prompt_file="$(mktemp)"
     printf '%s' "$review_prompt" > "$_review_prompt_file"
+  fi
+
+  local _worker_prompt_file=""
+  if [ -n "$worker_prompt" ]; then
+    _worker_prompt_file="$(mktemp)"
+    printf '%s' "$worker_prompt" > "$_worker_prompt_file"
   fi
 
   # stream_log is driver-exec's teed copy of the Driver's raw stdout, read
@@ -1030,6 +1043,32 @@ run_driver_in_env() {
     _review_effort_flags=(--review-effort "$review_effort")
   fi
 
+  # --worker-prompt-file, same orchestrator-only shape as --review-prompt-file
+  # above (issue #2059, #2058): the parallel worker's own base prompt text,
+  # threaded through so dispatchManifestIfPresent has a non-empty prompt to
+  # dispatch a manifest slice against -- without it, worker dispatch is a
+  # permanent no-op regardless of what the coordinator emits.
+  local -a _worker_prompt_flags=()
+  if [ "$_driver_invoker" = orchestrator ] && [ -n "$_worker_prompt_file" ]; then
+    _worker_prompt_flags=(--worker-prompt-file "$_worker_prompt_file")
+  fi
+
+  # --worker-work-dir, same orchestrator-only shape as --review-effort above
+  # (issue #2059, #2058): the directory holding each dispatched worker's own
+  # quarantined log/heartbeat/result/sentinel files.
+  local -a _worker_work_dir_flags=()
+  if [ "$_driver_invoker" = orchestrator ] && [ -n "$worker_work_dir" ]; then
+    _worker_work_dir_flags=(--worker-work-dir "$worker_work_dir")
+  fi
+
+  # --worker-timeout, same orchestrator-only shape as --review-effort above
+  # (issue #2059, #2058): the per-worker join timeout for a parallel
+  # dispatch.
+  local -a _worker_timeout_flags=()
+  if [ "$_driver_invoker" = orchestrator ] && [ -n "$worker_timeout" ]; then
+    _worker_timeout_flags=(--worker-timeout "$worker_timeout")
+  fi
+
   local claude_rc=0
   set +e
   "$_driver_invoker" \
@@ -1047,10 +1086,13 @@ run_driver_in_env() {
     "${_heartbeat_flags[@]}" \
     "${_review_prompt_flags[@]}" \
     "${_review_model_flags[@]}" \
-    "${_review_effort_flags[@]}"
+    "${_review_effort_flags[@]}" \
+    "${_worker_prompt_flags[@]}" \
+    "${_worker_work_dir_flags[@]}" \
+    "${_worker_timeout_flags[@]}"
   claude_rc=$?
   set -e
-  rm -f "$_prompt_file" "$_agents_file" "$_session_file" "$_review_prompt_file"
+  rm -f "$_prompt_file" "$_agents_file" "$_session_file" "$_review_prompt_file" "$_worker_prompt_file"
 
   # The launcher greps '^SPINDRIFT_OUTCOME ' from the container log, but the
   # Driver's raw transcript format buries it (claude wraps it in a stream-json
