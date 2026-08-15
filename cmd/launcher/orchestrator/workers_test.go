@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -446,6 +447,47 @@ func TestLaunchWorkersReturnsOneResultPerSliceEvenWhenWorkDirUncreatable(t *test
 		}
 		if r.Err == nil {
 			t.Errorf("results[%d].Err = nil, want non-nil", i)
+		}
+	}
+}
+
+// TestLaunchOneWorkerEmitsStartAndFinishOpsOnBuildDriverExecCmdFailure
+// verifies launchOneWorker emits both worker_start and worker_finish
+// SpindriftOp lines even when the worker never actually launches --
+// buildDriverExecCmd fails here because "driver-exec" isn't on PATH -- so
+// AC5's "worker start/finish/timeout events are logged" holds for every
+// early-return failure path, not just the success/crash/timeout paths
+// reached after cmd.Start() succeeds (issue #2059 review finding).
+func TestLaunchOneWorkerEmitsStartAndFinishOpsOnBuildDriverExecCmdFailure(t *testing.T) {
+	emptyPathDir := t.TempDir()
+	t.Setenv("PATH", emptyPathDir)
+
+	promptDir := t.TempDir()
+	promptFile := filepath.Join(promptDir, "worker-prompt.txt")
+	if err := os.WriteFile(promptFile, []byte("BASE WORKER PROMPT"), 0o644); err != nil {
+		t.Fatalf("WriteFile(promptFile): %v", err)
+	}
+
+	workDir := t.TempDir()
+	var stdout bytes.Buffer
+	var mu sync.Mutex
+
+	cfg := config{driver: "claude"}
+	slice := ManifestSlice{Name: "no-driver-exec"}
+
+	result := launchOneWorker(cfg, slice, promptFile, workDir, time.Second, 5*time.Millisecond, &stdout, &mu)
+
+	if result.Status != WorkerCrashed {
+		t.Errorf("result.Status = %q, want WorkerCrashed", result.Status)
+	}
+	if result.Err == nil {
+		t.Error("result.Err = nil, want non-nil (driver-exec not on PATH)")
+	}
+
+	out := stdout.String()
+	for _, want := range []string{"worker_start", "worker_finish", "no-driver-exec"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("stdout missing %q for a launch failure before cmd.Start(); got:\n%s", want, out)
 		}
 	}
 }
