@@ -4,20 +4,32 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
+	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/forge"
 )
 
 func baseConfig() Config {
 	return Config{
 		CompleteLabel:     "agent-complete",
-		MergePollInterval: 1,   // nonzero — recordingClock's Sleep doesn't block
+		MergePollInterval: 1,   // real, safe interval — baseConfig's Clock below never sleeps for real, so this doesn't slow tests
 		MergePollTimeout:  100, // large enough for multi-poll tests
 		MergeMode:         "immediate",
+		// Non-sleeping by default so every caller of baseConfig() is safe
+		// without having to inject its own recordingClock: settle.New()
+		// only falls back to dispatch.RealClock() when Clock.Sleep is nil.
+		// Callers that need to observe/assert sleep durations still inject
+		// their own recordingClock() and overwrite this field per-test.
+		Clock: dispatch.Clock{Now: time.Now, Sleep: func(time.Duration) {}},
 	}
 }
 
 const testPR = "https://github.com/owner/repo/pull/42"
+
+// boolPtr returns a pointer to b, for table cases that need to distinguish
+// "assert false" from "don't care" in an optional *bool field.
+func boolPtr(b bool) *bool { return &b }
 
 // testDispatchLabels is the conventional lifecycle-label set, mirrored from
 // lib/env-schema.nix and pinned against the agent workflows by
@@ -45,6 +57,8 @@ func TestGateToGreen(t *testing.T) {
 		requireRegistration bool
 		want                gateResult
 		wantReasonContains  string
+		wantSawNonTerminal  *bool
+		wantWindowElapsed   *bool
 	}{
 		{
 			name:        "SUCCESS on first poll reaches green without a swap",
@@ -123,6 +137,7 @@ func TestGateToGreen(t *testing.T) {
 			requireRegistration: true,
 			checkStates:         []forge.RollupState{forge.StateSuccess, forge.StateSuccess, forge.StatePending, forge.StateSuccess, forge.StateSuccess},
 			want:                gateGreen,
+			wantSawNonTerminal:  boolPtr(true),
 		},
 		{
 			// issue #2475: a PR whose checks settled to SUCCESS long ago never
@@ -132,7 +147,8 @@ func TestGateToGreen(t *testing.T) {
 			// proof CI already finished and accepts it.
 			// timeout: 3 is the boundary case — deadline == the unclamped
 			// window here (registrationWindowPolls(3) * actualIv(1), where
-			// actualIv is baseConfig's MergePollInterval:1), so the window
+			// actualIv is baseConfig's MergePollInterval:1 directly — no
+			// flooring needed since it's already nonzero), so the window
 			// elapses right as the deadline is hit rather than well before
 			// it.
 			name:                "requireRegistration accepts a settled SUCCESS once the registration window elapses",
@@ -140,6 +156,8 @@ func TestGateToGreen(t *testing.T) {
 			requireRegistration: true,
 			checkStates:         []forge.RollupState{forge.StateSuccess, forge.StateSuccess, forge.StateSuccess, forge.StateSuccess, forge.StateSuccess},
 			want:                gateGreen,
+			wantSawNonTerminal:  boolPtr(false),
+			wantWindowElapsed:   boolPtr(true),
 		},
 		{
 			// The registration window is a small, bounded number of polls, not
@@ -150,6 +168,8 @@ func TestGateToGreen(t *testing.T) {
 			requireRegistration: true,
 			checkStates:         []forge.RollupState{forge.StateSuccess, forge.StateSuccess, forge.StateSuccess, forge.StateSuccess, forge.StateSuccess},
 			want:                gateGreen,
+			wantSawNonTerminal:  boolPtr(false),
+			wantWindowElapsed:   boolPtr(true),
 		},
 		{
 			// issue #2475 follow-up: when MergePollTimeout is smaller than
@@ -166,6 +186,8 @@ func TestGateToGreen(t *testing.T) {
 			requireRegistration: true,
 			checkStates:         []forge.RollupState{forge.StateSuccess, forge.StateSuccess, forge.StateSuccess, forge.StateSuccess, forge.StateSuccess},
 			want:                gateGreen,
+			wantSawNonTerminal:  boolPtr(false),
+			wantWindowElapsed:   boolPtr(true),
 		},
 		{
 			// issue #2475: does not pin registrationWindowPolls' unclamped
@@ -191,6 +213,8 @@ func TestGateToGreen(t *testing.T) {
 			checkStates:         []forge.RollupState{forge.StateSuccess, forge.StateSuccess},
 			want:                gateTerminal,
 			wantReasonContains:  "registration guard never cleared",
+			wantSawNonTerminal:  boolPtr(false),
+			wantWindowElapsed:   boolPtr(true),
 		},
 		{
 			// issue #2476 boundary: unlike the case above, a genuine
@@ -206,6 +230,8 @@ func TestGateToGreen(t *testing.T) {
 			checkStates:         []forge.RollupState{forge.StatePending},
 			want:                gateTerminal,
 			wantReasonContains:  "ci-timeout: CI-watch deadline reached",
+			wantSawNonTerminal:  boolPtr(true),
+			wantWindowElapsed:   boolPtr(false),
 		},
 	}
 	for _, tc := range cases {
@@ -228,10 +254,10 @@ func TestGateToGreen(t *testing.T) {
 			}
 			s := New(c, fc, fc)
 
-			got, reason := s.gateToGreen("1", 0, testPR, tc.requireRegistration)
+			obs, reason := s.gateToGreenObs("1", 0, testPR, tc.requireRegistration)
 
-			if got != tc.want {
-				t.Errorf("gateToGreen = %v, want %v", got, tc.want)
+			if obs.outcome != tc.want {
+				t.Errorf("gateToGreen = %v, want %v", obs.outcome, tc.want)
 			}
 			if tc.wantReasonContains != "" {
 				if !strings.Contains(reason, tc.wantReasonContains) {
@@ -239,6 +265,12 @@ func TestGateToGreen(t *testing.T) {
 				}
 			} else if reason != "" {
 				t.Errorf("gateToGreen reason = %q, want empty for a non-terminal outcome", reason)
+			}
+			if tc.wantSawNonTerminal != nil && obs.sawNonTerminal != *tc.wantSawNonTerminal {
+				t.Errorf("obs.sawNonTerminal = %v, want %v", obs.sawNonTerminal, *tc.wantSawNonTerminal)
+			}
+			if tc.wantWindowElapsed != nil && obs.windowElapsed != *tc.wantWindowElapsed {
+				t.Errorf("obs.windowElapsed = %v, want %v", obs.windowElapsed, *tc.wantWindowElapsed)
 			}
 			if len(fc.TransitionStateCalls) > 0 {
 				t.Errorf("gateToGreen must never swap state itself; got %d calls: %+v", len(fc.TransitionStateCalls), fc.TransitionStateCalls)
