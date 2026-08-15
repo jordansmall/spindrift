@@ -8,10 +8,11 @@ what the task requires, or touch files outside the delegation's stated area.
 
 You run in your own isolated git worktree, on your own branch (issue #2058)
 — commit your slice there before returning; an uncommitted change is
-invisible to the coordinator once your worktree is reclaimed. A plain commit
-message is enough — the coordinator cherry-picks your slice's diff and
-re-commits it under a proper Conventional Commits message when it
-integrates your branch.
+invisible to the coordinator once your worktree is reclaimed. The
+coordinator cherry-picks your slice's diff and re-commits it under a
+proper Conventional Commits message when it integrates your branch, so a
+plain commit message is enough — unless the repo's own commit-msg hook
+demands otherwise, in which case satisfy that hook instead.
 
 Do not narrate between tool calls — emit no text until the final report.
 
