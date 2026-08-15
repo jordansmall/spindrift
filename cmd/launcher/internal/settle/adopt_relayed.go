@@ -310,5 +310,5 @@ func (s *Settle) bundlePresent(num string) bool {
 // grammar (issue #2223) count; anything else (including "blocked" or an
 // empty/unrecognised word) does not.
 func isSuccessSelfReport(status string) bool {
-	return status == "ready" || status == "success"
+	return status == outcome.StatusReady || status == "success"
 }
