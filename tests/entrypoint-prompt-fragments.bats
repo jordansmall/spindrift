@@ -1068,6 +1068,18 @@ WORKER_AGENTS_JSON_TEMPLATE='{"worker":{"description":"Implement a scoped slice 
   grep -qF 'delegate each slice' "$DRIVER_PROMPT_FILE"
 }
 
+@test "IMPLEMENT section: coordinator's cherry-pick instruction names the real base branch" {
+  export AGENTS_JSON_TEMPLATE="$WORKER_AGENTS_JSON_TEMPLATE"
+  export BASE_BRANCH="release-42"
+  export WORK_DIR="$BATS_TEST_TMPDIR/work-coordinator-base-branch"
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  # BASE_BRANCH must land in the rendered cherry-pick range, not survive as
+  # a literal, unsubstituted ${BASE_BRANCH} placeholder (issue #2058).
+  grep -qF 'git cherry-pick --no-commit origin/release-42..<branch>' "$DRIVER_PROMPT_FILE"
+  ! grep -qF '${BASE_BRANCH}' "$DRIVER_PROMPT_FILE"
+}
+
 @test "IMPLEMENT section: no worker leaves the single-implementor prompt unchanged" {
   export WORK_DIR="$BATS_TEST_TMPDIR/work-coordinator-off"
   run bash "$ENTRYPOINT"
