@@ -126,6 +126,79 @@ func TestSumInLog_DurationMsFromTimestampSpanWhenPresent(t *testing.T) {
 	}
 }
 
+// TestSumInLog_SingleSessionDurationMsUnaffectedByTimestamps covers AC-4: a
+// real single-session claude-code log carries a top-level "timestamp" on its
+// user/assistant lines (see classify_test.go's captured-log fixtures) even
+// though it is only one session. The span between those timestamps (5s here)
+// is not the session's actual wall time (300s, the result event's own
+// duration_ms) — a real process has startup/network/render time the
+// assistant-to-assistant timestamps don't bracket. A single-session log must
+// report the result event's own duration_ms unchanged, never the span.
+func TestSumInLog_SingleSessionDurationMsUnaffectedByTimestamps(t *testing.T) {
+	assistantStart := `{"type":"assistant","timestamp":"2026-08-11T19:00:00.000Z"}`
+	assistantEnd := `{"type":"assistant","timestamp":"2026-08-11T19:00:05.000Z"}`
+	result := `{"type":"result","num_turns":4,"total_cost_usd":0.1,"duration_ms":300000,"usage":{"input_tokens":10,"output_tokens":5}}`
+	path := WriteLog(t, assistantStart, assistantEnd, result)
+
+	u, found, err := sumInLog(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !found {
+		t.Fatal("expected found=true")
+	}
+	if u.DurationMs != 300000 {
+		t.Errorf("DurationMs: got %d, want 300000 (single session's own duration_ms, not the 5s timestamp span)", u.DurationMs)
+	}
+}
+
+// TestSumInLog_SingleTimestampLineDoesNotCollapseDuration covers the
+// zero-span case named in review: a single-session log with exactly one
+// timestamped line (a plausible single-turn session) must not report 0s wall
+// time by taking earliest==latest as the span.
+func TestSumInLog_SingleTimestampLineDoesNotCollapseDuration(t *testing.T) {
+	assistantOnly := `{"type":"assistant","timestamp":"2026-08-11T19:00:00.000Z"}`
+	result := `{"type":"result","num_turns":1,"total_cost_usd":0.02,"duration_ms":300000,"usage":{"input_tokens":10,"output_tokens":5}}`
+	path := WriteLog(t, assistantOnly, result)
+
+	u, found, err := sumInLog(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !found {
+		t.Fatal("expected found=true")
+	}
+	if u.DurationMs != 300000 {
+		t.Errorf("DurationMs: got %d, want 300000 (single session's own duration_ms, not a collapsed 0s span)", u.DurationMs)
+	}
+}
+
+// TestSumInLog_StrayTimestampLineIgnoredInSpan covers the sanity-bound
+// finding: a bare line carrying only a top-level "timestamp" field (no
+// "type", so it is not a driver session event — e.g. content dumped into a
+// tool_result) must not widen the earliest/latest span used for multi-session
+// wall time.
+func TestSumInLog_StrayTimestampLineIgnoredInSpan(t *testing.T) {
+	stray := `{"timestamp":"1970-01-01T00:00:00.000Z"}`
+	assistantStart := `{"type":"assistant","timestamp":"2026-08-11T19:00:00.000Z"}`
+	resultOne := `{"type":"result","num_turns":1,"total_cost_usd":0.01,"duration_ms":600000,"usage":{"input_tokens":10,"output_tokens":5}}`
+	assistantEnd := `{"type":"assistant","timestamp":"2026-08-11T19:45:00.000Z"}`
+	resultTwo := `{"type":"result","num_turns":2,"total_cost_usd":0.02,"duration_ms":600000,"usage":{"input_tokens":20,"output_tokens":10}}`
+	path := WriteLog(t, stray, assistantStart, resultOne, assistantEnd, resultTwo)
+
+	u, found, err := sumInLog(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !found {
+		t.Fatal("expected found=true")
+	}
+	wantMs := int64(45 * 60 * 1000)
+	if u.DurationMs != wantMs {
+		t.Errorf("DurationMs: got %d, want %d (span across typed events only, stray untyped timestamp ignored)", u.DurationMs, wantMs)
+	}
+}
+
 func TestLastInLog_NoCacheFields(t *testing.T) {
 	line := `{"type":"result","num_turns":3,"total_cost_usd":0.05,"duration_ms":2000,"usage":{"input_tokens":100,"output_tokens":40}}`
 	path := WriteLog(t, line)
