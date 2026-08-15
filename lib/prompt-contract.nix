@@ -592,4 +592,50 @@ rec {
           ];
     in
     builtins.concatMap fixturesFor validateMarkers;
+
+  # Per-kind agent-emittable SPINDRIFT_OUTCOME status sets (issue #2504,
+  # parent #2498 campaign V). The single source of truth for "what status=
+  # words a Box may legitimately print" for each dispatch kind -- regen
+  # renders these into typed Go constants (lib/renderers.nix's
+  # renderOutcomeStatusGo -> cmd/launcher/internal/outcome/status_gen.go)
+  # and into every prompt/template/nudge spelling of the valid values, so
+  # none of them can drift from another by a hand-typed edit to just one
+  # side.
+  #
+  # Host-side dispositions (failed, merge verification) are a separate typed
+  # family (ADR 0039: the Box advises, the host decides) and are
+  # deliberately absent here -- this registry is scoped to what a Box itself
+  # may emit. `merged` is also deliberately absent: settle's switch
+  # (cmd/launcher/internal/settle/gate.go) tolerates it as an off-script,
+  # unprovenanced arm -- no prompt fragment ever instructs a Box to print
+  # it, so it is never a documented, emittable value.
+  #
+  # The research row's statuses are the compiled-DEFAULT research verdict
+  # vocabulary (cmd/launcher/internal/forge/verdict.go's
+  # ResearchVerdictLabels): research verdicts are actually
+  # operator-configurable via RESEARCH_VERDICTS, so this row is the fallback
+  # default set, not a closed enum -- read forge/verdict.go before touching
+  # this row.
+  #
+  #   kind     -- the dispatch kind this status set applies to ("work",
+  #               "research").
+  #   statuses -- the ordered list of valid status= words for that kind.
+  #               `blocked` legitimately appears in both -- a real,
+  #               independent escape-hatch word for each kind, not a
+  #               collision.
+  outcomeStatusSets = [
+    {
+      kind = "work";
+      statuses = [ "ready" "blocked" "ambiguous" ];
+    }
+    {
+      kind = "research";
+      statuses = [ "recommend" "reject" "unclear" "blocked" ];
+    }
+  ];
+
+  # Look up one outcomeStatusSets row's statuses by kind -- mirrors byId
+  # above.
+  outcomeStatusesFor =
+    kind: (builtins.head (builtins.filter (r: r.kind == kind) outcomeStatusSets)).statuses;
 }
