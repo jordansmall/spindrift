@@ -348,6 +348,15 @@ let
     packages = p: [ p.hello ];
   };
 
+  # No consumer `skills` configured at all -- proves the harness-owned skill
+  # (issue #2489) bakes into the image regardless of Consumer config, unlike
+  # bakedSkillFixture above which is explicitly Consumer-supplied.
+  noSkillsHarness = import ../lib/mkHarness.nix {
+    inherit nixpkgs system;
+    overlays = [ ghFakeOverlay ];
+    packages = p: [ p.hello ];
+  };
+
   # The bwrap variant of the skills harness: same baked skills but with the
   # daemonless bwrap runner so bats can verify the bind-mount path.
   skillsBwrapHarness = import ../lib/mkHarness.nix {
@@ -427,6 +436,7 @@ in
     researchPromptHarness
     researchVerdictsHarness
     skillsHarness
+    noSkillsHarness
     skillsBwrapHarness
     minimalDirect
     consumerPkgs

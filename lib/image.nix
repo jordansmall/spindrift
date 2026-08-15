@@ -334,6 +334,17 @@ let
   # podman machine cannot bind-mount the host /nix/store into its Linux VM.
   # SPINDRIFT_PROMPT_DIR still mounts an override dir for zero-rebuild iteration
   # (the Go launcher mounts it in cmd/launcher/internal/runner).
+  # The first harness-owned skill (issue #2489): baked into every image
+  # unconditionally, independent of the Consumer's own `skills` list, so
+  # a Box built with the AUTO_FORMAT knob on always has something at
+  # /auto-format to invoke regardless of consumer skills config.
+  harnessSkills = [
+    {
+      name = "auto-format";
+      src = builtins.readFile ../templates/default/skills/auto-format/SKILL.md;
+    }
+  ];
+
   agentFiles = pkgs.runCommand "spindrift-agent-files" { } ''
     mkdir -p $out/agent/prompts
     ${lib.optionalString (driverEntry ? sessionCacheDirRelative) ''
@@ -382,8 +393,8 @@ let
     cp ${pkgs.writeText "research-prompt.md" (injectResearchOutcomeContract researchPrompt)} $out/agent/prompts/research-prompt.md
     cp ${pkgs.writeText "research-self-contained-prompt.md" (injectResearchOutcomeContract researchSelfContainedPrompt)} $out/agent/prompts/research-self-contained-prompt.md
     cp -r ${fragmentsSourceDir} $out/agent/prompts/fragments
-    ${lib.optionalString (skills != [ ]) ''
-      mkdir -p $out/home/agent/${driverEntry.skillsDirRelative}
+    ${lib.optionalString ((harnessSkills ++ skills) != [ ]) ''
+      mkdir -p $out/agent/skills
       ${lib.concatMapStrings (
         f:
         # Claude Code discovers a skill only as a directory holding a SKILL.md
@@ -394,19 +405,23 @@ let
         # mirroring the prompts above) rather than copied as a pre-built
         # derivation, so the skill never carries a consumer host's system into
         # the image's derivation graph (#597); a path/derivation entry is a
-        # skill directory copied verbatim under its own basename.
+        # skill directory copied verbatim under its own basename. Baked to
+        # the fixed /agent/skills path (a sibling of /agent/prompts), not
+        # under the Driver's declared skills dir, so harnessSkills (always
+        # present) and any Consumer-configured skills land together
+        # regardless of Driver; agent/entrypoint.sh's phase_prompt_assembly
+        # copies from here into the Driver's actual runtime skills dir at
+        # box startup.
         if builtins.isAttrs f && !(lib.isDerivation f) then
           ''
-            mkdir -p $out/home/agent/${driverEntry.skillsDirRelative}/${f.name}
-            cp ${pkgs.writeText "SKILL.md" f.src} $out/home/agent/${driverEntry.skillsDirRelative}/${f.name}/SKILL.md
+            mkdir -p $out/agent/skills/${f.name}
+            cp ${pkgs.writeText "SKILL.md" f.src} $out/agent/skills/${f.name}/SKILL.md
           ''
         else
           ''
-            cp -r ${f} $out/home/agent/${driverEntry.skillsDirRelative}/${
-              if lib.isDerivation f then f.name else builtins.baseNameOf f
-            }
+            cp -r ${f} $out/agent/skills/${if lib.isDerivation f then f.name else builtins.baseNameOf f}
           ''
-      ) skills}
+      ) (harnessSkills ++ skills)}
     ''}
     ${lib.concatStrings (
       lib.mapAttrsToList (relPath: content: ''
