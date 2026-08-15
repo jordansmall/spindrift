@@ -1,6 +1,7 @@
 package github
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -26,26 +27,36 @@ fi
 	}
 }
 
-// TestOpenPRForBranch_PRViewFailureSurfacesStderr verifies that when `gh pr
-// view` (the isDraft lookup) fails, the error OpenPRForBranch returns
-// includes gh's actual stderr for the same reason.
-func TestOpenPRForBranch_PRViewFailureSurfacesStderr(t *testing.T) {
-	prependFakeGH(t, `if [ "$1" = "pr" ] && [ "$2" = "list" ]; then
+// TestOpenPRForBranch_SingleGHCall verifies OpenPRForBranch resolves a found
+// PR with exactly one `gh` invocation. It used to make a second `gh pr view
+// --json isDraft` call solely to populate the (now unused here) IsDraft
+// field; that call is gone, so a single `gh pr list` must be enough to
+// report the PR as found.
+func TestOpenPRForBranch_SingleGHCall(t *testing.T) {
+	dir := prependFakeGH(t, `if [ "$1" = "pr" ] && [ "$2" = "list" ]; then
   echo "https://github.com/owner/repo/pull/42"
   exit 0
 fi
-if [ "$1" = "pr" ] && [ "$2" = "view" ]; then
-  printf 'HTTP 502: Bad Gateway\n' >&2
-  exit 1
-fi
+exit 1
 `)
 
 	c := NewExecClient("owner/repo", testLabels, "agent/issue-")
-	_, _, err := c.OpenPRForBranch("agent/issue-1")
-	if err == nil {
-		t.Fatal("want error, got nil")
+	pr, ok, err := c.OpenPRForBranch("agent/issue-1")
+	if err != nil {
+		t.Fatalf("OpenPRForBranch: %v", err)
 	}
-	if !strings.Contains(err.Error(), "HTTP 502: Bad Gateway") {
-		t.Fatalf("error must surface gh's stderr; got: %v", err)
+	if !ok {
+		t.Fatal("OpenPRForBranch: want found, got not found")
+	}
+	if pr.URL != "https://github.com/owner/repo/pull/42" {
+		t.Fatalf("OpenPRForBranch URL = %q, want the listed PR URL", pr.URL)
+	}
+
+	matches, err := filepath.Glob(filepath.Join(dir, "call-*.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(matches) != 1 {
+		t.Fatalf("OpenPRForBranch made %d gh calls, want exactly 1", len(matches))
 	}
 }
