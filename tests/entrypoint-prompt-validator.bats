@@ -23,9 +23,12 @@ setup() {
 }
 
 # A stub prompt dir with just the files phase_prompt_assembly's default
-# (non-research, non-fix) path reads: issue-prompt.md (the main prompt) and
+# (non-research, non-fix) path reads: issue-prompt.md (the main prompt),
 # scout/review-prompt.md (read whenever a scout/reviewer subagent is
-# provisioned or the orchestrator's own review pass renders).
+# provisioned or the orchestrator's own review pass renders), and
+# worker-prompt.md (issue #2059, #2058 -- read unconditionally alongside
+# review-prompt.md, same gate: Assemble hard-fails if either is missing on
+# this path).
 #
 # review-prompt.md's stub carries a VERDICT: line by default so a test that
 # turns ORCHESTRATOR_ENABLED on for an unrelated reason (e.g. the
@@ -38,6 +41,7 @@ _stub_prompt_dir() {
   printf 'issue stub\n' >"$dir/issue-prompt.md"
   printf 'scout stub\n' >"$dir/scout-prompt.md"
   printf 'reviewer stub\n\nVERDICT: APPROVE or BLOCK\n' >"$dir/review-prompt.md"
+  printf 'worker stub\n' >"$dir/worker-prompt.md"
   printf '%s' "$dir"
 }
 
