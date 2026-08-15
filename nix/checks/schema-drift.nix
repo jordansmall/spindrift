@@ -1209,7 +1209,15 @@ in
           "worker"
         ]
       );
-      driftedEfforts = replaceStrings [ "reviewer=high" ] [ "reviewer=medium" ] wantEfforts;
+      reviewerEffort = rosterDefaults.reviewer.effort;
+      driftedReviewerEffort = if reviewerEffort == "high" then "medium" else "high";
+      driftedEfforts =
+        replaceStrings
+          [ "reviewer=${reviewerEffort}" ]
+          [
+            "reviewer=${driftedReviewerEffort}"
+          ]
+          wantEfforts;
       badDoc = ''
         intro text
 
