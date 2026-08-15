@@ -81,10 +81,11 @@ func LoadValidateMarkersFile(path string) ([]ValidateMarkerRow, error) {
 }
 
 // ForbiddenMarkerRow is the Go mirror of one row in
-// lib/prompt-contract.nix's forbiddenMarkers registry (issue #2464), same
-// six fields/JSON tags as ValidateMarkerRow -- id/marker/carrier/severity/
-// when/message -- decoded from nix-rendered JSON built via the same
-// builtins.toJSON convention. Unlike validateMarkers, which asserts a
+// lib/prompt-contract.nix's forbiddenMarkers registry (issue #2464), sharing
+// ValidateMarkerRow's six fields/JSON tags -- id/marker/carrier/severity/
+// when/message -- plus two more of its own, kind and enforce (issue #2499),
+// decoded from nix-rendered JSON built via the same builtins.toJSON
+// convention. Unlike validateMarkers, which asserts a
 // marker is present under an active gate, forbiddenMarkers asserts a
 // marker is absent -- specifically, never rendered as an imperative
 // telling a read-only Box to perform the operation -- under an active
@@ -104,6 +105,18 @@ type ForbiddenMarkerRow struct {
 	// When names which gate condition activates this row, same vocabulary
 	// as ValidateMarkerRow.When.
 	When string `json:"when"`
+	// Kind is "substring" (the default meaning) for a row whose Marker is
+	// checked as literal rendered text, or "gh-api-mutation" for the one
+	// row backed by entrypoint.sh's `gh api` argument-scan shim, whose
+	// Marker is display-only (not scanned as a prompt substring).
+	Kind string `json:"kind"`
+	// Enforce names which runtime mechanism actually stops this
+	// operation: "command-shim" (a PATH-shadowing wrapper, e.g. the
+	// read-only `gh` shim), "git-hook" (a pre-push/pre-receive hook), or
+	// "prompt-only" (no runtime guard exists -- enforcement is solely
+	// "the rendered prompt must not order this imperatively", checked by
+	// promptassembly.Validate itself).
+	Enforce string `json:"enforce"`
 	// Message is the row's fully pre-rendered diagnostic prose, marker
 	// already interpolated by the nix registry.
 	Message string `json:"message"`
