@@ -303,19 +303,15 @@ func runWithReviewPass(cfg config, stdout io.Writer) (int, error) {
 		switch {
 		case hasOutcome:
 			decision, reason = "stop", "outcome reached"
-		// A manifest dispatch always keeps the loop going, taking priority
-		// over every other case below -- those are all about ending the run,
-		// and a pass that just dispatched workers isn't done yet regardless
-		// of what verdict state happens to be sitting around from a prior
-		// pass (issue #2059 AC1).
-		case manifestDispatched:
-			decision, reason = "continue", "slice manifest dispatched"
 		// state.TerminalLand is already true only when this very pass WAS the
 		// terminal land pass a prior iteration of this loop committed to (see
 		// the cap case below) and it still produced no outcome. That bounds
 		// the mechanism at exactly one extra pass -- without this case the
 		// loop would keep re-entering the maxSlices case below forever, since
-		// TerminalLand alone doesn't stop it.
+		// TerminalLand alone doesn't stop it. Checking this before
+		// manifestDispatched below matters too: a coordinator that re-emits a
+		// manifest on that same extra pass must not re-extend the run past
+		// its one committed land pass (issue #2058 review).
 		case state.TerminalLand:
 			decision, reason = "stop", "terminal land pass reached no outcome"
 		// After an APPROVE verdict the land pass above runs exactly once (see
@@ -333,11 +329,22 @@ func runWithReviewPass(cfg config, stdout io.Writer) (int, error) {
 		// Issue #2457: rather than exiting outcome-less the first time the
 		// coarse maxSlices budget runs out mid-cycle, commit this run to one
 		// more terminal "land" pass instead of stopping outright -- the case
-		// above is what actually bounds it to exactly one.
+		// above is what actually bounds it to exactly one. This case must
+		// come before manifestDispatched below: the cap is a hard ceiling on
+		// total driver-exec invocations (issue #2457), and a coordinator that
+		// re-emits a slice manifest every single pass must not be able to
+		// keep matching manifestDispatched first forever and defeat it
+		// (issue #2058 review).
 		case cfg.maxSlices > 0 && pass >= cfg.maxSlices:
 			state.TerminalLand = true
 			state.CapFired = "max slices reached"
 			decision, reason = "continue", "max slices reached; running terminal land pass"
+		// A manifest dispatch keeps the loop going when none of the stop/cap
+		// cases above already fired this pass -- a pass that just dispatched
+		// workers isn't done yet regardless of what verdict state happens to
+		// be sitting around from a prior pass (issue #2059 AC1).
+		case manifestDispatched:
+			decision, reason = "continue", "slice manifest dispatched"
 		}
 		fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "decision", Decision: decision, Reason: reason}))
 		if decision == "stop" {
