@@ -135,13 +135,13 @@ func TestCmdRecover_WritesReasonToGithubOutput(t *testing.T) {
 	}
 }
 
-// TestCmdRecover_DraftPRAdoptedSucceeds asserts cmdRecover no longer treats
-// a discovered draft PR as a rejection (issue #2408): recoverByNumber routes
-// a draft PR through the same adopt-and-gate path as a non-draft one, so
-// with green checks it adopts, gates, and merges the PR. cmdRecover must
+// TestCmdRecover_AdoptedPRSucceeds asserts cmdRecover no longer treats a
+// discovered PR as a draft-PR rejection (issue #2408): recoverByNumber
+// routes any stranded PR through the same adopt-and-gate path, so with
+// green checks it adopts, gates, and merges the PR. cmdRecover must
 // therefore return 0 and never write a "draft PR" rejection reason to
 // GITHUB_OUTPUT.
-func TestCmdRecover_DraftPRAdoptedSucceeds(t *testing.T) {
+func TestCmdRecover_AdoptedPRSucceeds(t *testing.T) {
 	outputPath := filepath.Join(t.TempDir(), "output")
 	t.Setenv("GITHUB_OUTPUT", outputPath)
 
@@ -170,7 +170,7 @@ func TestCmdRecover_DraftPRAdoptedSucceeds(t *testing.T) {
 	got := cmdRecover(lc, "42")
 
 	if got != 0 {
-		t.Errorf("cmdRecover(lc, \"42\") = %d, want 0 (draft PR adopted and merged)", got)
+		t.Errorf("cmdRecover(lc, \"42\") = %d, want 0 (PR adopted and merged)", got)
 	}
 	if fc.Merged != testReconcilePR {
 		t.Errorf("expected PR to be merged; fc.Merged=%q", fc.Merged)

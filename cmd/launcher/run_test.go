@@ -364,7 +364,7 @@ func TestRun_DoesNotAdoptLiveRunnersInProgressIssue(t *testing.T) {
 	fc := forge.NewFake(testDispatchLabels)
 	fc.BranchPrefix = c.branchPrefix
 	// Issue #5: another runner's live work — agent-in-progress with an open
-	// non-draft PR, no explicit recovery signal.
+	// PR, no explicit recovery signal.
 	fc.SetIssue(forge.Issue{Number: "5", Labels: []string{c.inProgressLabel}})
 	fc.SetPR(fc.AgentBranch("5"), forge.PR{URL: "https://github.com/owner/repo/pull/5"})
 
