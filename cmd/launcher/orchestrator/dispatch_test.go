@@ -184,6 +184,110 @@ exit 0
 	}
 }
 
+// TestRunWithReviewPassMaxSlicesCapNotShadowedByRepeatedManifestDispatch
+// verifies the maxSlices cap (issue #2457) takes priority over a slice
+// manifest dispatch in the pass-decision switch (issue #2058 review
+// finding): a coordinator that re-emits a slice manifest on every single
+// pass must not defeat the cap by matching the manifestDispatched case
+// first, forever. With maxSlices tuned to 2, the loop must stop after
+// exactly 3 coordinator invocations (2 manifest-dispatch passes, plus the
+// terminal land pass the cap commits to) -- not run unbounded past that,
+// even though this fake coordinator keeps declaring a manifest well past
+// pass 3 (it only gives up and emits a terminal outcome on pass 7, purely
+// as a backstop so a still-buggy case ordering doesn't hang this test
+// forever).
+func TestRunWithReviewPassMaxSlicesCapNotShadowedByRepeatedManifestDispatch(t *testing.T) {
+	dir := t.TempDir()
+	callLog := filepath.Join(dir, "calls.log")
+	coordCountFile := filepath.Join(dir, "coord-count")
+	workerWorkDir := filepath.Join(dir, "worker-work-dir")
+	if err := os.MkdirAll(workerWorkDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("WORKER_WORK_DIR", workerWorkDir)
+	t.Setenv("COORD_COUNT_FILE", coordCountFile)
+
+	manifest := SliceManifest{Slices: []ManifestSlice{{Name: "slice-a"}}}
+	manifestLine, err := manifest.Line()
+	if err != nil {
+		t.Fatalf("Line() error = %v", err)
+	}
+
+	body := `case "$DRIVER_LOG_PATH" in
+  "$WORKER_WORK_DIR"*)
+    : > "$DRIVER_LOG_PATH"
+    sentinel="${DRIVER_LOG_PATH%.log}.done"
+    : > "$sentinel"
+    exit 0
+    ;;
+esac
+: > "$DRIVER_LOG_PATH"
+n=$(cat "$COORD_COUNT_FILE" 2>/dev/null || echo 0)
+n=$((n+1))
+echo "$n" > "$COORD_COUNT_FILE"
+if [ "$n" -le 6 ]; then
+  printf '%s' '` + streamJSONOutcomeLine(strings.TrimSpace(manifestLine)) + `' >> "$DRIVER_LOG_PATH"
+else
+  printf '%s' '` + streamJSONOutcomeLine("SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=done nonce=abc") + `' | tee -a "$DRIVER_LOG_PATH"
+fi
+exit 0
+`
+	writeFakeDriverExec(t, dir, callLog, body)
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	promptFile := filepath.Join(dir, "prompt.txt")
+	if err := os.WriteFile(promptFile, []byte("ORIGINAL PROMPT TEXT"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	reviewPromptFile := filepath.Join(dir, "review-prompt.txt")
+	if err := os.WriteFile(reviewPromptFile, []byte("REVIEW PROMPT TEXT"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	workerPromptFile := filepath.Join(dir, "worker-prompt.txt")
+	if err := os.WriteFile(workerPromptFile, []byte("BASE WORKER PROMPT"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config{
+		promptFile:       promptFile,
+		reviewPromptFile: reviewPromptFile,
+		driverBin:        "claude",
+		issue:            "7",
+		logPath:          filepath.Join(dir, "stream.log"),
+		heartbeatLog:     filepath.Join(dir, "heartbeat.log"),
+		stateFile:        filepath.Join(dir, "run-state.json"),
+		maxReviewRounds:  3,
+		maxSlices:        2,
+		workerPromptFile: workerPromptFile,
+		workerWorkDir:    workerWorkDir,
+		workerTimeout:    2 * time.Second,
+	}
+
+	var stdout strings.Builder
+	if _, err := run(cfg, &stdout); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	coordCount, err := os.ReadFile(coordCountFile)
+	if err != nil {
+		t.Fatalf("read coordCountFile: %v", err)
+	}
+	if got := strings.TrimSpace(string(coordCount)); got != "3" {
+		t.Fatalf("coordinator invocation count = %s, want 3 (maxSlices=2 cap plus its terminal land pass -- a repeated manifest dispatch must not shadow the cap and run it unbounded)", got)
+	}
+
+	got, err := ReadRunState(cfg.stateFile)
+	if err != nil {
+		t.Fatalf("ReadRunState: %v", err)
+	}
+	if !got.TerminalLand {
+		t.Errorf("TerminalLand = %v, want true (the cap must still fire and win, even though this pass also dispatched a manifest)", got.TerminalLand)
+	}
+	if got.CapFired != "max slices reached" {
+		t.Errorf("CapFired = %q, want %q", got.CapFired, "max slices reached")
+	}
+}
+
 // TestDispatchManifestIfPresentDispatchesAndMergesResults verifies
 // dispatchManifestIfPresent, when the pass's own log carries a manifest,
 // dispatches LaunchWorkers and merges every WorkerResult into state: done
