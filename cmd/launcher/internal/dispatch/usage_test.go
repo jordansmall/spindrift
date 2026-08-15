@@ -199,6 +199,41 @@ func TestCumulativeUsage_PassWithNoResultEventContributesNothing(t *testing.T) {
 	}
 }
 
+// TestCumulativeUsage_ChargesRotatedAsideRetryAttempt verifies CumulativeUsage
+// counts a hold/backoff-retried attempt that rotateStaleLog moved aside to
+// logPath().1 (issue #561), not just the current attempt at the bare
+// logPath() -- so the budget gate sees a run's full spend even when the
+// overrun happened entirely inside an abandoned, retried attempt (issue
+// #2575).
+func TestCumulativeUsage_ChargesRotatedAsideRetryAttempt(t *testing.T) {
+	dir := tempLogDir(t)
+	f, err := NewFactory(Config{}, dir, runner.NewFake(), fakeDriver{}, RealClock())
+	if err != nil {
+		t.Fatalf("NewFactory: %v", err)
+	}
+	defer f.Cleanup()
+	d := f.New("12", "test issue")
+
+	// Simulate what rotateStaleLog would have produced: the abandoned first
+	// attempt rotated aside to logPath().1, and the current attempt left at
+	// the bare logPath().
+	if err := writeFile(d.logPath()+".1", `{"type":"result","num_turns":1,"total_cost_usd":3.00,"usage":{"input_tokens":5000,"output_tokens":250}}`+"\n"); err != nil {
+		t.Fatal(err)
+	}
+	writeRunLog(t, d, `{"type":"result","num_turns":1,"total_cost_usd":0.10,"usage":{"input_tokens":100,"output_tokens":50}}`)
+
+	got := d.CumulativeUsage()
+	if diff := got.TotalCostUSD - 3.10; diff > 0.0001 || diff < -0.0001 {
+		t.Errorf("TotalCostUSD = %v, want ~3.10 (rotated-aside retry attempt plus current attempt)", got.TotalCostUSD)
+	}
+	if got.InputTokens != 5100 {
+		t.Errorf("InputTokens = %d, want 5100 (rotated-aside retry attempt plus current attempt)", got.InputTokens)
+	}
+	if got.OutputTokens != 300 {
+		t.Errorf("OutputTokens = %d, want 300 (rotated-aside retry attempt plus current attempt)", got.OutputTokens)
+	}
+}
+
 // TestUsageReport_FullFormatLocksExactMarkdown locks the exact Markdown
 // UsageReport renders for a log carrying two model families (opus and
 // haiku) plus a result event: the metadata table (Model/Wall time/API
