@@ -1,6 +1,9 @@
 #!/usr/bin/env bats
 # The skills dir is empty by default; it is only bind-mounted when
-# SPINDRIFT_SKILLS_DIR points at an existing directory.
+# SPINDRIFT_SKILLS_DIR points at an existing directory. That mount now lands
+# at the fixed staging path /operator-skills rather than directly on the
+# Driver's skills dir; agent/entrypoint.sh merges it (and the image's own
+# baked skills) into the real skills dir at box startup (issue #2489).
 # Driven through the fake podman (OCI) and fake bwrap.
 
 load helper
@@ -21,7 +24,7 @@ setup() {
   [[ "$output" != *"SPINDRIFT_SKILLS_DIR"* ]]
 }
 
-@test "SPINDRIFT_SKILLS_DIR mounts over /home/agent/.claude/skills (OCI)" {
+@test "SPINDRIFT_SKILLS_DIR mounts over /operator-skills (OCI)" {
   local skills="$BATS_TEST_TMPDIR/myskills"
   mkdir -p "$skills"
   echo '#!/bin/bash' >"$skills/my-skill.sh"
@@ -29,7 +32,7 @@ setup() {
   run "$RUN_CMD"
   [ "$status" -eq 0 ]
   [[ "$output" == *"SPINDRIFT_SKILLS_DIR"* ]]
-  grep -q -- "-v $skills:/home/agent/.claude/skills:ro" "$PODMAN_LOG"
+  grep -q -- "-v $skills:/operator-skills:ro" "$PODMAN_LOG"
 }
 
 @test "SPINDRIFT_SKILLS_DIR pointing at a missing dir uses no mount (OCI)" {
@@ -39,14 +42,14 @@ setup() {
   ! grep -q -- '/.claude/skills' "$PODMAN_LOG"
 }
 
-@test "SPINDRIFT_SKILLS_DIR mounts read-only over /home/agent/.claude/skills (bwrap)" {
+@test "SPINDRIFT_SKILLS_DIR mounts read-only over /operator-skills (bwrap)" {
   local skills="$BATS_TEST_TMPDIR/myskills-bwrap"
   mkdir -p "$skills"
   echo '#!/bin/bash' >"$skills/my-skill.sh"
   export SPINDRIFT_SKILLS_DIR="$skills"
   run "$BWRAP_RUN_CMD"
   [ "$status" -eq 0 ]
-  grep -q -- "--ro-bind $skills /home/agent/.claude/skills" "$BWRAP_LOG"
+  grep -q -- "--ro-bind $skills /operator-skills" "$BWRAP_LOG"
 }
 
 @test "run mounts no skills dir by default (bwrap)" {
@@ -56,27 +59,30 @@ setup() {
   [[ "$output" != *"SPINDRIFT_SKILLS_DIR"* ]]
 }
 
-# --- baked skills (issue #119) ------------------------------------------------
-# Skills baked into the image at build time are exposed in the bwrap sandbox
-# via a --ro-bind even without SPINDRIFT_SKILLS_DIR. For OCI the skills are
-# in the image layer; no extra mount is added by the launcher.
+# --- baked skills (issue #119; mount mechanism updated by issue #2489) -------
+# Skills baked into the image at build time reach the box without any
+# launcher-issued mount at all: they land under /agent/skills (bwrap: via the
+# existing top-level /agent ro-bind; OCI: already in the image layer), and
+# agent/entrypoint.sh's own copy step merges /agent/skills into the real
+# Driver skills dir at box startup (see tests/entrypoint-skills.bats). The
+# launcher itself only ever mounts the SPINDRIFT_SKILLS_DIR operator override,
+# at the fixed staging path /operator-skills -- never anything targeting
+# ".claude/skills" directly, baked or not.
 
-@test "baked skills: mounted in bwrap sandbox without SPINDRIFT_SKILLS_DIR" {
+@test "baked skills: no launcher-issued .claude/skills mount in bwrap sandbox without SPINDRIFT_SKILLS_DIR" {
   unset SPINDRIFT_SKILLS_DIR
   run "$SKILLS_BWRAP_RUN_CMD"
   [ "$status" -eq 0 ]
-  grep -q -- "--ro-bind.*home/agent/.claude/skills /home/agent/.claude/skills" "$BWRAP_LOG"
+  ! grep -q -- '/.claude/skills' "$BWRAP_LOG"
 }
 
-@test "baked skills: SPINDRIFT_SKILLS_DIR takes precedence over baked skills (bwrap)" {
-  # Runtime mount is applied; that it shadows baked skills is proven by
-  # TestBwrapArgs_RuntimeSkillsTakePrecedence in the Go unit suite.
+@test "baked skills: SPINDRIFT_SKILLS_DIR still mounts override over /operator-skills (bwrap)" {
   local skills="$BATS_TEST_TMPDIR/runtime-override-bwrap"
   mkdir -p "$skills"
   export SPINDRIFT_SKILLS_DIR="$skills"
   run "$SKILLS_BWRAP_RUN_CMD"
   [ "$status" -eq 0 ]
-  grep -q -- "--ro-bind $skills /home/agent/.claude/skills" "$BWRAP_LOG"
+  grep -q -- "--ro-bind $skills /operator-skills" "$BWRAP_LOG"
 }
 
 @test "baked skills: no extra mount added for OCI (skills are in image)" {
@@ -95,5 +101,5 @@ setup() {
   export SPINDRIFT_SKILLS_DIR="$skills"
   run "$SKILLS_RUN_CMD"
   [ "$status" -eq 0 ]
-  grep -q -- "-v $skills:/home/agent/.claude/skills:ro" "$PODMAN_LOG"
+  grep -q -- "-v $skills:/operator-skills:ro" "$PODMAN_LOG"
 }

@@ -416,20 +416,21 @@ func TestConfigHasNoModelFields(t *testing.T) {
 	}
 }
 
-// TestRunnerConfig_DriverMountTargets verifies DRIVER_SKILLS_DIR and
-// DRIVER_SESSION_CACHE_DIR (nix-baked from the Driver declaration, ADR 0009)
-// reach runner.Config, so the OCI/bwrap adapters mount over the Driver's
-// declared paths instead of a hardcoded ".claude" literal (issue #448).
+// TestRunnerConfig_DriverMountTargets verifies DRIVER_SESSION_CACHE_DIR
+// (nix-baked from the Driver declaration, ADR 0009) reaches runner.Config, so
+// the OCI/bwrap adapters mount the Driver's session-cache dir at its declared
+// path instead of a hardcoded ".claude" literal (issue #448).
+// DRIVER_SKILLS_DIR is no longer part of this Go-side plumbing (issue
+// #2489): the operator-override skills mount now always lands at the fixed
+// /operator-skills staging path (see operatorSkillsDir in mount.go), and
+// DRIVER_SKILLS_DIR itself is read only by entrypoint.sh's own bash-level
+// copy step at box startup, not by the launcher.
 func TestRunnerConfig_DriverMountTargets(t *testing.T) {
-	t.Setenv("DRIVER_SKILLS_DIR", "/home/agent/.claude/skills")
 	t.Setenv("DRIVER_SESSION_CACHE_DIR", "/home/agent/.claude/projects")
 
 	c := loadConfig()
 	rc := runnerConfig(c)
 
-	if rc.DriverSkillsDir != "/home/agent/.claude/skills" {
-		t.Errorf("DriverSkillsDir = %q, want /home/agent/.claude/skills", rc.DriverSkillsDir)
-	}
 	if rc.DriverSessionCacheDir != "/home/agent/.claude/projects" {
 		t.Errorf("DriverSessionCacheDir = %q, want /home/agent/.claude/projects", rc.DriverSessionCacheDir)
 	}

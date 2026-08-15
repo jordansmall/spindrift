@@ -371,40 +371,24 @@ func TestBuildRunArgsImageIsLast(t *testing.T) {
 func TestBuildRunArgs_SkillsDirMounted(t *testing.T) {
 	dir := t.TempDir()
 	a := &ociAdapter{
-		cli:             "podman",
-		image:           "spindrift:test",
-		skillsDir:       dir,
-		driverSkillsDir: "/home/agent/.claude/skills",
+		cli:       "podman",
+		image:     "spindrift:test",
+		skillsDir: dir,
 	}
 	box := Box{Name: "agent-issue-1", Env: map[string]string{}}
 	args := a.buildRunArgs(box)
 
-	want := dir + ":/home/agent/.claude/skills:ro"
+	want := dir + ":/operator-skills:ro"
 	if !containsArg(args, want) {
 		t.Errorf("skills mount %q not found in args: %v", want, args)
 	}
 }
 
-// TestBuildRunArgs_SkillsMountTarget_FromDriverDeclaration verifies the
-// box-side skills mount target comes from the adapter's driverSkillsDir
-// field (populated by the Driver declaration, ADR 0009) rather than a
-// hardcoded ".claude/skills" literal.
-func TestBuildRunArgs_SkillsMountTarget_FromDriverDeclaration(t *testing.T) {
-	dir := t.TempDir()
-	a := &ociAdapter{
-		cli:             "podman",
-		image:           "spindrift:test",
-		skillsDir:       dir,
-		driverSkillsDir: "/home/agent/custom-driver/skills",
-	}
-	box := Box{Name: "agent-issue-1", Env: map[string]string{}}
-	args := a.buildRunArgs(box)
-
-	want := dir + ":/home/agent/custom-driver/skills:ro"
-	if !containsArg(args, want) {
-		t.Errorf("skills mount %q not found in args: %v", want, args)
-	}
-}
+// TestBuildRunArgs_SkillsMountTarget_FromDriverDeclaration is gone (issue
+// #2489): the operator-override skills mount now always lands at the fixed
+// /operator-skills staging path (see operatorSkillsDir in mount.go),
+// independent of the Driver's declared skills dir, so there is no longer a
+// driver-declaration-driven mount target for this test to exercise.
 
 // TestBuildRunArgs_IssuesDirMounted verifies that ISSUE_TRACKER=local plus a
 // resolved localIssuesDir renders a read-only -v <dir>:/issues:ro entry

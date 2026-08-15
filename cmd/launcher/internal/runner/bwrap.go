@@ -30,12 +30,11 @@ var bwrapSecrets = map[string]bool{
 // bwrapAdapter implements Runner for the daemonless bubblewrap sandbox.
 // EnsureReady is a no-op — store closures are realized by the build command.
 type bwrapAdapter struct {
-	agentFiles      string // baked nix store path for agent files (/agent/…)
-	agentEnv        string // baked nix store path for the agent env (PATH, SSL, …)
-	bakedPrefetch   string // baked prefetch snippet fed to the entrypoint
-	promptDir       string // optional host path to bind-mount over /agent/prompts
-	skillsDir       string // optional host path to bind-mount over driverSkillsDir
-	driverSkillsDir string // in-box skills bind target (Driver declaration, ADR 0009)
+	agentFiles    string // baked nix store path for agent files (/agent/…)
+	agentEnv      string // baked nix store path for the agent env (PATH, SSL, …)
+	bakedPrefetch string // baked prefetch snippet fed to the entrypoint
+	promptDir     string // optional host path to bind-mount over /agent/prompts
+	skillsDir     string // optional host path to bind-mount over operatorSkillsDir (issue #2489)
 	// driverSessionCacheDir is the in-box bind target for the Driver's
 	// session-state dir (Driver declaration, ADR 0009); empty when the
 	// selected Driver declares no session-state dir, in which case
@@ -75,7 +74,6 @@ func NewBwrap(cfg Config) Runner {
 		bakedPrefetch:            cfg.BakedPrefetch,
 		promptDir:                cfg.PromptDir,
 		skillsDir:                cfg.SkillsDir,
-		driverSkillsDir:          cfg.DriverSkillsDir,
 		driverSessionCacheDir:    cfg.DriverSessionCacheDir,
 		hostMediatedRemote:       cfg.HostMediatedRemote,
 		accumulationRepoDir:      cfg.AccumulationRepoDir,
@@ -101,7 +99,6 @@ func (a *bwrapAdapter) mountSpecs(box Box) []MountSpec {
 	return buildMountSpecs(MountParams{
 		PromptDir:                a.promptDir,
 		SkillsDir:                a.skillsDir,
-		DriverSkillsDir:          a.driverSkillsDir,
 		DriverSessionCacheDir:    a.driverSessionCacheDir,
 		HostMediatedRemote:       a.hostMediatedRemote,
 		AccumulationRepoDir:      a.accumulationRepoDir,
@@ -154,18 +151,6 @@ func (a *bwrapAdapter) buildArgs(etcDir string, box Box) []string {
 			continue
 		}
 		args = append(args, "--ro-bind", m.Source, m.Target)
-	}
-	// buildMountSpecs only covers the runtime skills override; the image's
-	// own baked skills (no host-side equivalent for OCI, so this fallback
-	// stays bwrap-only) fill in only when no runtime override was requested
-	// at all. An override that was requested but doesn't resolve to a
-	// directory yields no skills mount — it must not silently fall through
-	// to the baked skills.
-	if a.skillsDir == "" && a.driverSkillsDir != "" {
-		bakedSkillsPath := filepath.Join(a.agentFiles, a.driverSkillsDir)
-		if spec, ok := candidateMount(bakedSkillsPath, a.driverSkillsDir, true); ok {
-			args = append(args, "--ro-bind", spec.Source, spec.Target)
-		}
 	}
 	// --clearenv is intentionally absent: secrets (GH_TOKEN, auth tokens) reach
 	// the sandbox by inheriting the launcher's process environment. Values on

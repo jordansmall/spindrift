@@ -23,8 +23,7 @@ type ociAdapter struct {
 	flakeImageAttr  string // nix flake attr for the image (.#packages.x.agent-image)
 	pwd             string // $PWD; container-fallback mounts this as /workspace
 	promptDir       string // optional host path to mount over /agent/prompts
-	skillsDir       string // optional host path to mount over driverSkillsDir
-	driverSkillsDir string // in-box skills mount target (Driver declaration, ADR 0009)
+	skillsDir       string // optional host path to mount over operatorSkillsDir (issue #2489)
 	// driverSessionCacheDir is the in-box mount target for the Driver's
 	// session-state dir (Driver declaration, ADR 0009); empty when the
 	// selected Driver declares no session-state dir, in which case
@@ -74,7 +73,6 @@ func NewOCI(cfg Config, pwd string) Runner {
 		pwd:                      pwd,
 		promptDir:                cfg.PromptDir,
 		skillsDir:                cfg.SkillsDir,
-		driverSkillsDir:          cfg.DriverSkillsDir,
 		driverSessionCacheDir:    cfg.DriverSessionCacheDir,
 		hostMediatedRemote:       cfg.HostMediatedRemote,
 		accumulationRepoDir:      cfg.AccumulationRepoDir,
@@ -336,7 +334,6 @@ func (a *ociAdapter) mountSpecs(box Box) []MountSpec {
 	return buildMountSpecs(MountParams{
 		PromptDir:                a.promptDir,
 		SkillsDir:                a.skillsDir,
-		DriverSkillsDir:          a.driverSkillsDir,
 		DriverSessionCacheDir:    a.driverSessionCacheDir,
 		HostMediatedRemote:       a.hostMediatedRemote,
 		AccumulationRepoDir:      a.accumulationRepoDir,
