@@ -3,6 +3,7 @@ package dispatch
 import (
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 
 	"spindrift.dev/launcher/internal/usage"
@@ -86,9 +87,12 @@ func (d *Dispatch) CumulativeUsage() usage.Usage {
 // CacheReadInputTokens, CacheCreationInputTokens, TotalCostUSD,
 // DurationApiMs, and NumTurns all sum across every found report;
 // DurationMs (wall time) does not sum -- see spanDurationMs; SummedByModel
-// buckets merge by exact model id, summed, preserving each id's
-// first-appearance order walking found in AllAttemptLogPaths order. found
-// must contain only reports with Found == true.
+// buckets merge by exact model id, summed, then reordered by modelRank --
+// NOT left in first-appearance-across-logs order, which would render a run
+// whose initial pass used haiku and fix pass used opus haiku-first, and
+// would render two runs with identical totals in different orders depending
+// on which pass happened to run first. found must contain only reports with
+// Found == true.
 //
 // The single-report case (the common case -- one pass, no retries) returns
 // found[0] completely unchanged, bypassing every rule above: this is the
@@ -129,15 +133,45 @@ func aggregatedReport(found []usage.Report) usage.Report {
 
 	total.DurationMs = spanDurationMs(found)
 
+	sort.Slice(models, func(i, j int) bool {
+		if ri, rj := modelRank(models[i].Model), modelRank(models[j].Model); ri != rj {
+			return ri < rj
+		}
+		return models[i].Model < models[j].Model
+	})
+
 	return usage.Report{Totals: total, Found: true, SummedByModel: models}
+}
+
+// modelRank returns aggregatedReport's merge-order rank for a model id:
+// opus, haiku, sonnet families first (0-2, matching claude driver's own
+// breakdownByModelFile family-rank order), then everything else (3),
+// alphabetical by id within a rank. Every non-claude id -- including every
+// opencode model id, which never contains any of these three substrings --
+// falls into the default rank and so sorts purely alphabetically, matching
+// opencode driver's own breakdownByModelFile convention (sort.Strings)
+// exactly. Duplicating this small rank table here (rather than importing
+// claude's own ModelFamily) keeps dispatch, which is driver-agnostic,
+// decoupled from any one driver package.
+func modelRank(id string) int {
+	switch {
+	case strings.Contains(id, "opus"):
+		return 0
+	case strings.Contains(id, "haiku"):
+		return 1
+	case strings.Contains(id, "sonnet"):
+		return 2
+	default:
+		return 3
+	}
 }
 
 // spanDurationMs derives the combined wall-time span across every report in
 // found, generalizing claude driver's sumInLog floor-to-longest-session rule
 // (see its doc comment) from sessions within one log to logs within a run:
 // the span between the earliest EarliestEventMs and the latest
-// LatestEventMs among reports with HasEventSpan (0 if fewer than one report
-// has a usable span, or the max isn't after the min), floored to the
+// LatestEventMs among reports with HasEventSpan (0 if no report has a
+// usable span, or the max isn't after the min), floored to the
 // largest single found report's own Totals.DurationMs -- so a span narrower
 // than a report that provably ran that long (its own timestamped lines
 // don't capture the full wall time: startup, network, render) is never
