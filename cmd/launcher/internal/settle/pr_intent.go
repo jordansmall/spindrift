@@ -22,8 +22,8 @@ import (
 // (issue #2447): a Box can finish real, mergeable work and simply fail to
 // print its last line, leaving the branch itself fine — only the wording is
 // missing. When PR-intent is missing but the relay succeeds, title/body are
-// reconstructed host-side from the relayed branch's own commits
-// (reconstructPRText) rather than blocking a hand-off with nothing actually
+// reconstructed host-side from the relayed branch's own commits (Mediation's
+// reconstructPRText) rather than blocking a hand-off with nothing actually
 // wrong with it. A reconstructed hand-off is never silently indistinguishable
 // from a normal one (issue #2447, AC5): besides the "Reconstructed host-side"
 // note already in the PR body itself, this also posts a comment on the issue
@@ -126,7 +126,7 @@ func (s *Settle) relayBlockedWork(num string, result dispatch.Result) {
 				logNoBlockedHandoffBundle(num)
 				return
 			}
-			fmt.Fprintf(os.Stderr, "    ?? #%s: could not relay blocked-hand-off bundle: %v\n", num, err)
+			logBlockedHandoffRelayFailure(num, err)
 		}
 		return
 	}
@@ -141,7 +141,7 @@ func (s *Settle) relayBlockedWork(num string, result dispatch.Result) {
 		case errors.Is(err, forge.ErrBundleNotFound):
 			logNoBlockedHandoffBundle(num)
 		case errors.Is(err, errRelayBundle):
-			fmt.Fprintf(os.Stderr, "    ?? #%s: could not relay blocked-hand-off bundle: %v\n", num, err)
+			logBlockedHandoffRelayFailure(num, err)
 		default:
 			fmt.Fprintf(os.Stderr, "    ?? #%s: could not create draft PR for blocked hand-off: %v\n", num, err)
 		}
@@ -153,6 +153,12 @@ func (s *Settle) relayBlockedWork(num string, result dispatch.Result) {
 // left no bundle behind, not a relay failure.
 func logNoBlockedHandoffBundle(num string) {
 	fmt.Fprintf(os.Stderr, "    .. #%s: no blocked-hand-off bundle to relay (empty branch range; nothing to preserve)\n", num)
+}
+
+// logBlockedHandoffRelayFailure reports a genuine relay failure during the
+// blocked hand-off — the alarming counterpart to logNoBlockedHandoffBundle.
+func logBlockedHandoffRelayFailure(num string, err error) {
+	fmt.Fprintf(os.Stderr, "    ?? #%s: could not relay blocked-hand-off bundle: %v\n", num, err)
 }
 
 // blockHandoff posts a merge-blocked comment and leaves num visibly not-done
