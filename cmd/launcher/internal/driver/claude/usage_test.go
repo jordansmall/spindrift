@@ -247,6 +247,33 @@ func TestSumInLog_StrayTimestampLineIgnoredInSpan(t *testing.T) {
 	}
 }
 
+// TestSumInLog_NestedTimestampInToolResultIgnoredInSpan covers the doc
+// comment's central safety claim: a "timestamp" string nested inside a
+// tool_result dump, on a line that DOES carry a top-level "type" (unlike
+// the stray-line case above), must still not widen the span -- because
+// json.Unmarshal into timestampedEvent only ever reads the top-level
+// "timestamp" key, never one buried inside message.content.
+func TestSumInLog_NestedTimestampInToolResultIgnoredInSpan(t *testing.T) {
+	assistantStart := `{"type":"assistant","timestamp":"2026-08-11T19:00:00.000Z"}`
+	resultOne := `{"type":"result","num_turns":1,"total_cost_usd":0.01,"duration_ms":600000,"usage":{"input_tokens":10,"output_tokens":5}}`
+	toolResultDump := `{"type":"user","message":{"role":"user","content":[{"type":"tool_result","content":"log line: {\"timestamp\":\"1970-01-01T00:00:00.000Z\"}"}]}}`
+	assistantEnd := `{"type":"assistant","timestamp":"2026-08-11T19:45:00.000Z"}`
+	resultTwo := `{"type":"result","num_turns":2,"total_cost_usd":0.02,"duration_ms":600000,"usage":{"input_tokens":20,"output_tokens":10}}`
+	path := WriteLog(t, assistantStart, resultOne, toolResultDump, assistantEnd, resultTwo)
+
+	u, found, err := sumInLog(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !found {
+		t.Fatal("expected found=true")
+	}
+	wantMs := int64(45 * 60 * 1000)
+	if u.DurationMs != wantMs {
+		t.Errorf("DurationMs: got %d, want %d (nested tool_result timestamp ignored)", u.DurationMs, wantMs)
+	}
+}
+
 func TestSumInLog_NoCacheFields(t *testing.T) {
 	line := `{"type":"result","num_turns":3,"total_cost_usd":0.05,"duration_ms":2000,"usage":{"input_tokens":100,"output_tokens":40}}`
 	path := WriteLog(t, line)
