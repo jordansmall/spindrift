@@ -16,7 +16,7 @@ import (
 // RenderTranscriptWithRole with an empty topLevelRole (the ImplementorRole
 // default).
 //
-// Returns ("", nil) when logPath does not exist, matching lastInLog and
+// Returns ("", nil) when logPath does not exist, matching sumInLog and
 // breakdownByModelFile's not-found contract.
 func RenderTranscript(logPath string) (string, error) {
 	return RenderTranscriptWithRole(logPath, "")

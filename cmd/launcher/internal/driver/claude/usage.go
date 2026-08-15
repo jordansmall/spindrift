@@ -31,15 +31,13 @@ type usageData struct {
 
 // timestampedEvent decodes the top-level "type" and "timestamp" fields
 // carried by real claude-code stream-json lines (assistant/user events,
-// timestamp RFC3339 with milliseconds, e.g. "2026-08-11T19:01:33.187Z").
-// Used to derive wall-clock span across every session in a log, since
-// sessions can run sequentially with idle gaps between them or
-// concurrently (issue #2058), and result events' own duration_ms is
-// neither additive nor gap-aware. Unmarshaling only reads top-level keys,
-// so a "timestamp" string nested inside non-driver content (e.g. a
-// tool_result dump) is never captured here regardless of Type; Type is
-// required non-empty only to skip a line that happens to carry a top-level
-// "timestamp" without an identifiable event type.
+// timestamp RFC3339 with milliseconds, e.g. "2026-08-11T19:01:33.187Z"),
+// used by sumInLog to derive wall-clock span across every session in a
+// log. Unmarshaling only reads top-level keys, so a "timestamp" string
+// nested inside non-driver content (e.g. a tool_result dump) is never
+// captured here regardless of Type; Type is required non-empty only to
+// skip a line that happens to carry a top-level "timestamp" without an
+// identifiable event type.
 type timestampedEvent struct {
 	Type      string `json:"type"`
 	Timestamp string `json:"timestamp"`
@@ -57,24 +55,27 @@ type timestampedEvent struct {
 // TotalCostUSD, DurationApiMs, and NumTurns are all additive this way.
 //
 // DurationMs (wall time) is NOT additive when a log holds more than one
-// session: concurrent sessions would overstate wall time if each session's
-// own duration_ms were summed, and sequential sessions with idle gaps
-// between them (waiting on review, orchestrator handoff, ...) would
-// understate it. For that multi-session case, it is instead derived from
-// the span between the earliest and latest top-level "timestamp" field
-// seen across the log's assistant/user lines -- in real claude-code
-// stream-json, system/init and result lines don't carry a top-level
-// timestamp, so in practice only assistant/user events contribute --
-// floored to the longest individual session's own duration_ms. The floor
-// matters two ways: a log whose timestamped lines all
-// land on the same instant (or carries none at all) would otherwise report a
-// span of 0, and a span narrower than some session's own duration_ms (the
-// assistant/user timestamps bracketing a session don't capture its full wall
-// time — startup, network, render) would otherwise report a wall time
-// shorter than a session that provably ran that long. A single-session log
-// (at most one result event) always reports that session's own duration_ms
-// directly, timestamps or not — never the span — matching output from
-// before this aggregation change.
+// session: sessions can run sequentially with idle gaps between them
+// (waiting on review, orchestrator handoff, ...) or concurrently (issue
+// #2058), and result events' own duration_ms is neither additive nor
+// gap-aware — concurrent sessions would overstate wall time if each
+// session's own duration_ms were summed, and sequential sessions with idle
+// gaps would understate it. For that multi-session case, it is instead
+// derived from the span between the earliest and latest top-level
+// "timestamp" field seen across the log's assistant/user lines — in real
+// claude-code stream-json, system/init and result lines don't carry a
+// top-level timestamp, so in practice only assistant/user events
+// contribute — floored to the longest individual session's own
+// duration_ms. The floor matters three ways: a log whose timestamped
+// lines all land on the same instant would otherwise report a span of 0;
+// a log that carries no timestamped lines at all would otherwise report
+// the same zero span; and a span narrower than some session's own
+// duration_ms (the assistant/user timestamps bracketing a session don't
+// capture its full wall time — startup, network, render) would otherwise
+// report a wall time shorter than a session that provably ran that long.
+// A single-session log (at most one result event) always reports that
+// session's own duration_ms directly, timestamps or not — never the
+// span — matching output from before this aggregation change.
 //
 // Returns (usage.Usage{}, false, nil) when no result event is present or the
 // file does not exist. Returns (usage.Usage{}, false, err) on I/O errors

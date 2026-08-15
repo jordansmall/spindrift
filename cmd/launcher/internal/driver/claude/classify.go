@@ -118,7 +118,7 @@ type scanResult struct {
 //
 // A missing log file is treated as terminal/taskFailed. Lines larger than the
 // 4 MiB scan buffer are processed in chunks, matching the same resilience
-// contract as lastInLog.
+// contract as sumInLog.
 func Classify(logPath string) (driverkit.Classification, error) {
 	return classifyAt(logPath, time.Now())
 }
