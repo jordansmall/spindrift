@@ -353,3 +353,167 @@ func TestDispatchManifestIfPresentDispatchesAndMergesResults(t *testing.T) {
 		}
 	}
 }
+
+// TestDispatchManifestIfPresentIncludesWorkerResultInFindings verifies
+// dispatchManifestIfPresent's WorkerDone findings line includes the
+// worker's own reported Result text, not just the literal word "done" --
+// otherwise the next coordinator pass never sees what a worker actually
+// reported (issue #2059 review finding).
+func TestDispatchManifestIfPresentIncludesWorkerResultInFindings(t *testing.T) {
+	fakeDir := t.TempDir()
+	callLog := filepath.Join(fakeDir, "calls.log")
+	if err := os.WriteFile(callLog, nil, 0o644); err != nil {
+		t.Fatalf("WriteFile(callLog): %v", err)
+	}
+	body := `: > "$DRIVER_LOG_PATH"
+result="${DRIVER_LOG_PATH%.log}.result"
+printf '%s' 'REPORT: slice-a implemented the parser fix.' > "$result"
+sentinel="${DRIVER_LOG_PATH%.log}.done"
+: > "$sentinel"
+exit 0
+`
+	writeFakeDriverExec(t, fakeDir, callLog, body)
+	t.Setenv("PATH", fakeDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	dir := t.TempDir()
+	manifest := SliceManifest{Slices: []ManifestSlice{{Name: "slice-a"}}}
+	line, err := manifest.Line()
+	if err != nil {
+		t.Fatalf("Line() error = %v", err)
+	}
+	logPath := filepath.Join(dir, "stream.log")
+	content := streamJSONOutcomeLine(strings.TrimSpace(line))
+	if err := os.WriteFile(logPath, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	workerPromptFile := filepath.Join(dir, "worker-prompt.txt")
+	if err := os.WriteFile(workerPromptFile, []byte("BASE WORKER PROMPT"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config{
+		driver:           "claude",
+		logPath:          logPath,
+		workerPromptFile: workerPromptFile,
+		workerWorkDir:    t.TempDir(),
+		workerTimeout:    2 * time.Second,
+	}
+	state := RunState{}
+
+	var stdout strings.Builder
+	got := dispatchManifestIfPresent(cfg, &state, &stdout)
+	if !got {
+		t.Fatalf("dispatchManifestIfPresent() = false, want true")
+	}
+
+	want := "REPORT: slice-a implemented the parser fix."
+	if !strings.Contains(state.WorkerFindings, want) {
+		t.Errorf("state.WorkerFindings = %q, want it to contain the worker's own reported result %q", state.WorkerFindings, want)
+	}
+}
+
+// TestDispatchManifestIfPresentReportsCrashErrNotMisleadingExitCode
+// verifies dispatchManifestIfPresent's WorkerCrashed findings line
+// surfaces r.Err (the orchestrator-side launch/join error) when present,
+// rather than falsely reporting "exit 0" -- workers.go's own early
+// launch-failure paths (e.g. seedWorkerPrompt) set Err but leave ExitCode
+// at its zero value (issue #2059 review finding).
+func TestDispatchManifestIfPresentReportsCrashErrNotMisleadingExitCode(t *testing.T) {
+	dir := t.TempDir()
+	manifest := SliceManifest{Slices: []ManifestSlice{{Name: "slice-a"}}}
+	line, err := manifest.Line()
+	if err != nil {
+		t.Fatalf("Line() error = %v", err)
+	}
+	logPath := filepath.Join(dir, "stream.log")
+	content := streamJSONOutcomeLine(strings.TrimSpace(line))
+	if err := os.WriteFile(logPath, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config{
+		driver:  "claude",
+		logPath: logPath,
+		// A nonexistent workerPromptFile makes seedWorkerPrompt fail before
+		// any process is ever launched, setting WorkerResult.Err with
+		// ExitCode left at 0.
+		workerPromptFile: filepath.Join(dir, "nonexistent-worker-prompt.txt"),
+		workerWorkDir:    t.TempDir(),
+		workerTimeout:    2 * time.Second,
+	}
+	state := RunState{}
+
+	var stdout strings.Builder
+	got := dispatchManifestIfPresent(cfg, &state, &stdout)
+	if !got {
+		t.Fatalf("dispatchManifestIfPresent() = false, want true")
+	}
+
+	if strings.Contains(state.WorkerFindings, "exit 0") {
+		t.Errorf("state.WorkerFindings = %q, want no misleading \"exit 0\" when r.Err is set", state.WorkerFindings)
+	}
+	if !strings.Contains(state.WorkerFindings, "seed worker prompt") {
+		t.Errorf("state.WorkerFindings = %q, want it to contain the orchestrator-side error message", state.WorkerFindings)
+	}
+}
+
+// TestDispatchManifestIfPresentTruncatesLongWorkerResult verifies
+// dispatchManifestIfPresent caps how much of a worker's own reported
+// Result text it includes in findings, so one runaway worker report can't
+// blow out the next pass's prompt size (issue #2059 review finding).
+func TestDispatchManifestIfPresentTruncatesLongWorkerResult(t *testing.T) {
+	fakeDir := t.TempDir()
+	callLog := filepath.Join(fakeDir, "calls.log")
+	if err := os.WriteFile(callLog, nil, 0o644); err != nil {
+		t.Fatalf("WriteFile(callLog): %v", err)
+	}
+	body := `: > "$DRIVER_LOG_PATH"
+result="${DRIVER_LOG_PATH%.log}.result"
+awk 'BEGIN { for (i = 0; i < 6000; i++) printf "a" }' > "$result"
+sentinel="${DRIVER_LOG_PATH%.log}.done"
+: > "$sentinel"
+exit 0
+`
+	writeFakeDriverExec(t, fakeDir, callLog, body)
+	t.Setenv("PATH", fakeDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	dir := t.TempDir()
+	manifest := SliceManifest{Slices: []ManifestSlice{{Name: "slice-a"}}}
+	line, err := manifest.Line()
+	if err != nil {
+		t.Fatalf("Line() error = %v", err)
+	}
+	logPath := filepath.Join(dir, "stream.log")
+	content := streamJSONOutcomeLine(strings.TrimSpace(line))
+	if err := os.WriteFile(logPath, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	workerPromptFile := filepath.Join(dir, "worker-prompt.txt")
+	if err := os.WriteFile(workerPromptFile, []byte("BASE WORKER PROMPT"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config{
+		driver:           "claude",
+		logPath:          logPath,
+		workerPromptFile: workerPromptFile,
+		workerWorkDir:    t.TempDir(),
+		workerTimeout:    2 * time.Second,
+	}
+	state := RunState{}
+
+	var stdout strings.Builder
+	got := dispatchManifestIfPresent(cfg, &state, &stdout)
+	if !got {
+		t.Fatalf("dispatchManifestIfPresent() = false, want true")
+	}
+
+	if len(state.WorkerFindings) >= 6000 {
+		t.Errorf("len(state.WorkerFindings) = %d, want it capped well under the 6000-byte raw result", len(state.WorkerFindings))
+	}
+	if !strings.Contains(state.WorkerFindings, "(truncated)") {
+		t.Errorf("state.WorkerFindings = %q, want a truncation marker", state.WorkerFindings)
+	}
+}
