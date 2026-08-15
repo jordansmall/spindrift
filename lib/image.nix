@@ -89,11 +89,6 @@
   # `--forbidden-markers-registry` flag -- a sibling of
   # promptContractRegistryJson above.
   forbiddenMarkersRegistryJson,
-  # The shared prompt block registry (lib/prompt-contract.nix, issue #2245)
-  # rendered into agent/entrypoint.sh's _INJECT_BLOCK_ROWS array, the
-  # `_contract_marker` lookup's data source (issue #2246). Mirrors
-  # fragmentRegistryPreamble above.
-  contractRegistryPreamble,
   # The schema-derived defaults block (mkHarness's `renderDefaultsPreamble { }`),
   # prepended to the entrypoint so it carries the baked values without
   # hardcoding them in the source script.
@@ -220,7 +215,6 @@ let
       + "\n"
       + driverPreamble
       + fragmentRegistryPreamble
-      + contractRegistryPreamble
       + entrypointDefaultsPreamble
       + stripShebang (builtins.readFile ../agent/entrypoint.sh);
   };

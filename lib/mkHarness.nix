@@ -411,17 +411,6 @@ let
   # (lib/image.nix), a sibling of promptContractRegistryJson above.
   forbiddenMarkersRegistryJson = builtins.toJSON promptContract.forbiddenMarkers;
 
-  # The shared prompt block registry (lib/prompt-contract.nix, issue #2245),
-  # rendered into agent/entrypoint.sh's `_INJECT_BLOCK_ROWS` array the same
-  # way fragmentRegistryPreamble above renders `_FRAGMENT_ROWS` -- already
-  # derived by prompt-contract.nix itself, so no re-derivation needed here
-  # (issue #2246). Also carries the reject/warn marker matrix (issue #2249
-  # slice 1) as a second `_VALIDATE_MARKER_ROWS` array, concatenated onto
-  # the same preamble string so both registries are baked into
-  # contract-registry.sh from one source.
-  contractRegistryPreamble =
-    promptContract.injectBlocksBashPreamble + promptContract.validateMarkersBashPreamble;
-
   # Build-time reject arm (issue #2250, parent #2244): resolves both
   # validateMarkers "reject" rows against this build's own static knowledge.
   # `reviewer-verdict` is gated on whether the orchestrator is enabled
@@ -617,7 +606,6 @@ let
       fragmentsRegistryJson
       promptContractRegistryJson
       forbiddenMarkersRegistryJson
-      contractRegistryPreamble
       prompt
       scoutPrompt
       reviewPrompt
@@ -670,12 +658,6 @@ let
   # exec-ing the entrypoint so tests exercise the same registry-rendered loop
   # input and substitution allowlist that mkHarness bakes into the image.
   fragmentRegistryFile = hostPkgs.writeText "fragment-registry.sh" fragmentRegistryPreamble;
-
-  # The shared prompt block registry as a host store-path file (issue #2246,
-  # mirrors fragmentRegistryFile above). The bats harness prepends this
-  # before exec-ing the entrypoint so tests exercise the same
-  # `_INJECT_BLOCK_ROWS` data that mkHarness bakes into the image.
-  contractRegistryFile = hostPkgs.writeText "contract-registry.sh" contractRegistryPreamble;
 
   # The rendered prompt directory as a host store path (native-buildable on
   # darwin, so it needs no Linux builder). The prompt is normally baked into
@@ -1067,7 +1049,6 @@ else
       researchOutcomeContractFile
       driverPreambleFile
       fragmentRegistryFile
-      contractRegistryFile
       driverExecBin
       driverEntry
       runInputDocumentFile
