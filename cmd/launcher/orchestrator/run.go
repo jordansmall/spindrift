@@ -13,6 +13,7 @@ import (
 	"spindrift.dev/launcher/internal/driver/claude"
 	"spindrift.dev/launcher/internal/driver/driverkit"
 	"spindrift.dev/launcher/internal/outcome"
+	"spindrift.dev/launcher/internal/runstate"
 )
 
 // config is the data one implementor pass needs to hand off to driver-exec
@@ -132,11 +133,11 @@ func run(cfg config, stdout io.Writer) (int, error) {
 		return runWithReviewPass(cfg, stdout)
 	}
 
-	state, err := ReadRunState(cfg.stateFile)
+	state, err := runstate.ReadRunState(cfg.stateFile)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "orchestrator: read run state:", err)
 		fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "run_state_error", Phase: "read", Error: err.Error()}))
-		state = RunState{}
+		state = runstate.RunState{}
 	}
 
 	rc := 0
@@ -181,7 +182,7 @@ func run(cfg config, stdout io.Writer) (int, error) {
 		if !hasOutcome {
 			fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "pass_no_outcome", Pass: pass, Verdict: verdict, Reason: fmt.Sprintf("exit %d", rc)}))
 		}
-		if writeErr := WriteRunState(cfg.stateFile, state); writeErr != nil {
+		if writeErr := runstate.WriteRunState(cfg.stateFile, state); writeErr != nil {
 			fmt.Fprintln(os.Stderr, "orchestrator: write run state:", writeErr)
 			fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "run_state_error", Phase: "write", Error: writeErr.Error()}))
 		}
@@ -241,11 +242,11 @@ func runWithReviewPass(cfg config, stdout io.Writer) (int, error) {
 	// #2092).
 	cfg.topLevelRole = driverkit.ImplementorRole
 
-	state, err := ReadRunState(cfg.stateFile)
+	state, err := runstate.ReadRunState(cfg.stateFile)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "orchestrator: read run state:", err)
 		fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "run_state_error", Phase: "read", Error: err.Error()}))
-		state = RunState{}
+		state = runstate.RunState{}
 	}
 
 	rc := 0
@@ -277,7 +278,7 @@ func runWithReviewPass(cfg config, stdout io.Writer) (int, error) {
 		if !hasOutcome {
 			fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "pass_no_outcome", Pass: pass, Reason: fmt.Sprintf("exit %d", rc)}))
 		}
-		if writeErr := WriteRunState(cfg.stateFile, state); writeErr != nil {
+		if writeErr := runstate.WriteRunState(cfg.stateFile, state); writeErr != nil {
 			fmt.Fprintln(os.Stderr, "orchestrator: write run state:", writeErr)
 			fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "run_state_error", Phase: "write", Error: writeErr.Error()}))
 		}
@@ -356,7 +357,7 @@ func runWithReviewPass(cfg config, stdout io.Writer) (int, error) {
 			fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "verdict", Verdict: reviewVerdict}))
 		}
 		state.ReviewFindings = findings
-		if writeErr := WriteRunState(cfg.stateFile, state); writeErr != nil {
+		if writeErr := runstate.WriteRunState(cfg.stateFile, state); writeErr != nil {
 			fmt.Fprintln(os.Stderr, "orchestrator: write run state:", writeErr)
 			fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "run_state_error", Phase: "write", Error: writeErr.Error()}))
 		}
@@ -420,7 +421,7 @@ func runWithReviewPass(cfg config, stdout io.Writer) (int, error) {
 // AC2's exact shape. When state is the zero value (the common cold-start
 // pass, nothing carried forward yet) this returns promptFile unchanged and
 // creates no temp file.
-func seedPromptFromState(promptFile string, state RunState) (string, error) {
+func seedPromptFromState(promptFile string, state runstate.RunState) (string, error) {
 	if state.LastVerdict == "" && len(state.DoneSlices) == 0 && len(state.RemainingSlices) == 0 && state.ScoutBriefPath == "" && state.ReviewFindings == "" && !state.TerminalLand {
 		return promptFile, nil
 	}
@@ -661,7 +662,7 @@ func invokeDriverExec(cfg config, stdout io.Writer) (int, error) {
 // bookkeeping identical between them; each keeps its own scan-and-decide
 // logic afterward, since a legacy pass's own verdict drives its loop while
 // an implement/fix pass's does not.
-func seedAndInvokePass(cfg config, state RunState, prevSeededPromptFile string, pass int, stdout io.Writer) (rc int, seededPromptFile string, err error) {
+func seedAndInvokePass(cfg config, state runstate.RunState, prevSeededPromptFile string, pass int, stdout io.Writer) (rc int, seededPromptFile string, err error) {
 	seededPromptFile, err = seedPromptFromState(cfg.promptFile, state)
 	if err != nil {
 		return 0, "", err

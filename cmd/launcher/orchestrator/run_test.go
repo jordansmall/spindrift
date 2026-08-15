@@ -8,6 +8,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"spindrift.dev/launcher/internal/runstate"
 )
 
 // writeFakeDriverExec writes an executable shell script standing in for the
@@ -355,12 +357,12 @@ func TestRunReadsAndWritesRunState(t *testing.T) {
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
 	stateFile := filepath.Join(dir, "run-state.json")
-	prior := RunState{
+	prior := runstate.RunState{
 		DoneSlices:      []string{"scout"},
 		RemainingSlices: []string{"implement"},
 		LastVerdict:     "BLOCK",
 	}
-	if err := WriteRunState(stateFile, prior); err != nil {
+	if err := runstate.WriteRunState(stateFile, prior); err != nil {
 		t.Fatalf("seed WriteRunState: %v", err)
 	}
 
@@ -383,7 +385,7 @@ func TestRunReadsAndWritesRunState(t *testing.T) {
 		t.Fatalf("run: %v", err)
 	}
 
-	got, err := ReadRunState(stateFile)
+	got, err := runstate.ReadRunState(stateFile)
 	if err != nil {
 		t.Fatalf("ReadRunState: %v", err)
 	}
@@ -542,8 +544,8 @@ func TestRunKeepsPriorScoutBriefPathWhenConfigOmitsIt(t *testing.T) {
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
 	stateFile := filepath.Join(dir, "run-state.json")
-	prior := RunState{ScoutBriefPath: "/tmp/brief.md"}
-	if err := WriteRunState(stateFile, prior); err != nil {
+	prior := runstate.RunState{ScoutBriefPath: "/tmp/brief.md"}
+	if err := runstate.WriteRunState(stateFile, prior); err != nil {
 		t.Fatal(err)
 	}
 
@@ -565,7 +567,7 @@ func TestRunKeepsPriorScoutBriefPathWhenConfigOmitsIt(t *testing.T) {
 		t.Fatalf("run: %v", err)
 	}
 
-	got, err := ReadRunState(stateFile)
+	got, err := runstate.ReadRunState(stateFile)
 	if err != nil {
 		t.Fatalf("ReadRunState: %v", err)
 	}
@@ -937,7 +939,7 @@ func TestRunWithReviewPassSequenceOnBlockThenApprove(t *testing.T) {
 		}
 	}
 
-	got, err := ReadRunState(stateFile)
+	got, err := runstate.ReadRunState(stateFile)
 	if err != nil {
 		t.Fatalf("ReadRunState: %v", err)
 	}
@@ -1353,7 +1355,7 @@ func TestRunWithReviewPassStopsWhenLandPassProducesNoOutcomeAfterApprove(t *test
 		t.Errorf("stdout = %q, want no pass 4 (no re-loop into another review pass)", stdout.String())
 	}
 
-	got, err := ReadRunState(stateFile)
+	got, err := runstate.ReadRunState(stateFile)
 	if err != nil {
 		t.Fatalf("ReadRunState: %v", err)
 	}
@@ -1818,7 +1820,7 @@ exit 0
 		t.Errorf("stdout = %q, want the final outcome-reached stop reason", stdout.String())
 	}
 
-	got, err := ReadRunState(stateFile)
+	got, err := runstate.ReadRunState(stateFile)
 	if err != nil {
 		t.Fatalf("ReadRunState: %v", err)
 	}
@@ -1949,7 +1951,7 @@ func TestRunLoopsOnBlockThenApproveWithFreshSessionPerPass(t *testing.T) {
 		t.Errorf("pass 2 argv = %q, want it NOT to carry pass 1's pinned session file", lines[1])
 	}
 
-	got, err := ReadRunState(stateFile)
+	got, err := runstate.ReadRunState(stateFile)
 	if err != nil {
 		t.Fatalf("ReadRunState: %v", err)
 	}
@@ -2048,7 +2050,7 @@ func TestSeedPromptFromStateIncludesReviewFindings(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	state := RunState{
+	state := runstate.RunState{
 		LastVerdict:    "BLOCK",
 		ReviewFindings: "VERDICT: BLOCK\n\n## Blocking\n- run.go:42 -- missing nil check",
 	}
@@ -2084,7 +2086,7 @@ func TestSeedPromptFromStateTerminalLandOverridesStopAfterCommit(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	state := RunState{
+	state := runstate.RunState{
 		TerminalLand: true,
 		CapFired:     "max slices reached",
 	}
@@ -2137,7 +2139,7 @@ func TestRunSeedsFixBriefWithDoneWorkAndVerdictAfterBlock(t *testing.T) {
 	}
 
 	stateFile := filepath.Join(dir, "run-state.json")
-	if err := WriteRunState(stateFile, RunState{DoneSlices: []string{"scout", "implement seam A"}}); err != nil {
+	if err := runstate.WriteRunState(stateFile, runstate.RunState{DoneSlices: []string{"scout", "implement seam A"}}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -2376,7 +2378,7 @@ exit 0
 		t.Fatalf("driver-exec invocation count = %d, want 3 (log: %q)", len(lines), calls)
 	}
 
-	got, err := ReadRunState(cfg.stateFile)
+	got, err := runstate.ReadRunState(cfg.stateFile)
 	if err != nil {
 		t.Fatalf("ReadRunState: %v", err)
 	}
@@ -2538,7 +2540,7 @@ exit 0
 		t.Fatal(err)
 	}
 	stateFile := filepath.Join(dir, "run-state.json")
-	if err := WriteRunState(stateFile, RunState{LastVerdict: "BLOCK"}); err != nil {
+	if err := runstate.WriteRunState(stateFile, runstate.RunState{LastVerdict: "BLOCK"}); err != nil {
 		t.Fatal(err)
 	}
 
