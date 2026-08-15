@@ -143,6 +143,35 @@ func TestCumulativeUsage_SumsAcrossInitialAndFixPasses(t *testing.T) {
 	}
 }
 
+// TestCumulativeUsage_SumsMultipleSessionsWithinOnePassLog verifies that
+// CumulativeUsage charges a run for the FULL summed spend of a single pass
+// log that contains multiple driver sessions (multiple "result" events) —
+// the actual #2574 scenario where the orchestrator invokes the driver
+// repeatedly within one Box run. A last-wins bug would report only the
+// second session's numbers (cost 5.00, input tokens 9000); the correct sum
+// is 5.10 / 9100.
+func TestCumulativeUsage_SumsMultipleSessionsWithinOnePassLog(t *testing.T) {
+	dir := tempLogDir(t)
+	f, err := NewFactory(Config{}, dir, runner.NewFake(), fakeDriver{}, RealClock())
+	if err != nil {
+		t.Fatalf("NewFactory: %v", err)
+	}
+	defer f.Cleanup()
+	d := f.New("11", "test issue")
+
+	session1 := `{"type":"result","num_turns":1,"total_cost_usd":0.10,"usage":{"input_tokens":100,"output_tokens":50}}`
+	session2 := `{"type":"result","num_turns":1,"total_cost_usd":5.00,"usage":{"input_tokens":9000,"output_tokens":500}}`
+	writeRunLog(t, d, session1, session2)
+
+	got := d.CumulativeUsage()
+	if diff := got.TotalCostUSD - 5.10; diff > 0.0001 || diff < -0.0001 {
+		t.Errorf("TotalCostUSD = %v, want ~5.10 (sum of both sessions, not just the last)", got.TotalCostUSD)
+	}
+	if got.InputTokens != 9100 {
+		t.Errorf("InputTokens = %d, want 9100 (sum of both sessions, not just the last)", got.InputTokens)
+	}
+}
+
 // TestCumulativeUsage_PassWithNoResultEventContributesNothing verifies that
 // a fix-pass log with no result event (a crashed or still-running pass)
 // degrades to contributing zero rather than aborting the whole sum — the
