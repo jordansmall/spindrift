@@ -565,6 +565,76 @@ func TestDispatchWithRetry_HoldReDispatchSetsResumeAfterHold(t *testing.T) {
 	}
 }
 
+// TestDispatchWithRetry_HoldResumeCountsBothAttemptsUsage drives a real
+// Run() through an actual hold-then-resume cycle (like
+// TestDispatchWithRetry_HoldReDispatchSetsResumeAfterHold above), except the
+// held first attempt itself writes genuine, non-empty result-bearing content
+// before dying with no parseable outcome -- mirroring a box that burned real
+// tokens before hitting the rate limit. It then verifies that content is
+// still visible to AllAttemptLogPaths/CumulativeUsage after Run() returns,
+// proving Run's `!resumeAfterHold` guard on quarantinePriorRunLogs (box.go)
+// held: the resumed second attempt's own dispatch must NOT re-fire
+// quarantine and rename the first attempt's just-rotated .1 sibling log out
+// of scanning range, which would silently drop it from both the run-usage
+// comment and the self-heal budget gate (issue #2575 AC3/AC4).
+func TestDispatchWithRetry_HoldResumeCountsBothAttemptsUsage(t *testing.T) {
+	fixedNow := time.Unix(1_000_000, 0).UTC()
+	resetAt := fixedNow.Add(2 * time.Hour)
+
+	fr := runner.NewFake()
+	drv := fakeDriver{ClassifyFn: func(string) (driver.Classification, error) {
+		return driver.Classification{Class: driver.Transient, Reason: driver.RateLimit, ResetAt: &resetAt}, nil
+	}}
+	var sleeps []time.Duration
+	d := newTestDispatch(t, retryConfig(3, 0, 0), fr, drv, fakeClock(fixedNow, &sleeps)) // holdJitter=0 for determinism
+
+	firstAttemptResult := []byte(`{"type":"result","num_turns":1,"total_cost_usd":3.00,"usage":{"input_tokens":5000,"output_tokens":250}}` + "\n")
+	secondAttemptOutcome := nonceLine(d, "SPINDRIFT_OUTCOME issue=1 landing=https://github.com/o/r/pull/1 status=ready note=ok")
+
+	calls := 0
+	fr.RunFunc = func(box runner.Box) error {
+		i := calls
+		calls++
+		if i == 0 {
+			// First (held) attempt: writes real result-bearing content, so
+			// it has genuine, non-empty usage data, but exits non-zero with
+			// no parseable outcome -- the rate limit killed the box before
+			// it could print a verdict -- so the hold path fires.
+			box.Output.Write(firstAttemptResult) //nolint:errcheck
+			return boxErr
+		}
+		// Second (resumed) attempt: succeeds with a genuine, nonce-bearing
+		// outcome.
+		box.Output.Write(secondAttemptOutcome) //nolint:errcheck
+		return nil
+	}
+
+	result := d.Run()
+
+	if len(fr.RunCalls) != 2 {
+		t.Fatalf("RunCalls: got %d, want 2 (initial + hold re-dispatch)", len(fr.RunCalls))
+	}
+	if !result.Success || !result.Resolved.Found {
+		t.Fatalf("want a settled, successful outcome from the resumed attempt; got: %+v", result)
+	}
+
+	paths := AllAttemptLogPaths(d.pwd, d.number)
+	if len(paths) != 2 {
+		t.Fatalf("AllAttemptLogPaths: got %d entries, want 2 (the held first attempt's rotated .1 sibling plus the resumed second attempt's bare log): %+v", len(paths), paths)
+	}
+
+	got := d.CumulativeUsage()
+	if diff := got.TotalCostUSD - 3.00; diff > 0.0001 || diff < -0.0001 {
+		t.Errorf("TotalCostUSD = %v, want ~3.00 (the held first attempt's spend must still be counted, not lost to a wrongly re-fired quarantine)", got.TotalCostUSD)
+	}
+	if got.InputTokens != 5000 {
+		t.Errorf("InputTokens = %d, want 5000 (the held first attempt's tokens must still be counted)", got.InputTokens)
+	}
+	if got.OutputTokens != 250 {
+		t.Errorf("OutputTokens = %d, want 250 (the held first attempt's tokens must still be counted)", got.OutputTokens)
+	}
+}
+
 // TestDispatchWithRetry_TransientBackoffReDispatchSetsResumeAfterHold verifies
 // that the re-dispatch following a 529/backoff transient (not a 429 hold)
 // ALSO carries RESUME_AFTER_HOLD=1 in the box env, so a cold restart on the
