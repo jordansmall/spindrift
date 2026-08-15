@@ -414,9 +414,8 @@ func TestMergeImmediate_StaleConflictRetryDoesNotRedemoteAfterRestore(t *testing
 	// #2502): a recordingClock only records what is actually routed through
 	// it, so a bare time.Sleep would leave sleeps empty here even though a
 	// real sleep happened. The rewaitAfterForcePush confirm-poll ahead of it
-	// (gateToGreen's own SUCCESS confirm-sleep, already routed through
-	// s.clock since slice 2) records the same MergePollInterval duration
-	// first.
+	// (gateToGreen's own SUCCESS confirm-sleep, also routed through s.clock)
+	// records the same MergePollInterval duration first.
 	pollSleep := time.Duration(c.MergePollInterval) * time.Second
 	wantSleeps := []time.Duration{pollSleep, pollSleep}
 	if !slices.Equal(*sleeps, wantSleeps) {
