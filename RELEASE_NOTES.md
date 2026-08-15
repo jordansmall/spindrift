@@ -10,6 +10,68 @@ depending on how you use spindrift; it won't affect everyone.
 
 ---
 
+## 0.10.0 — 2026-08-15
+
+spindrift stops being GitHub-only, and stops losing runs that actually did the
+work. A full Forgejo backend lands (Codeberg included), and the host now decides
+a run's final verdict from the evidence it can see instead of trusting whatever
+the agent managed to say on its way out.
+
+**⚠ Breaking changes** this release: an agent you don't mention in the roster now
+inherits a default model instead of staying blank.
+
+- **Forgejo and Codeberg are supported backends.** Set `CODE_FORGE=forgejo` with
+  `FORGEJO_BASE_URL` and `FORGEJO_TOKEN` and the whole loop works against a
+  Forgejo host: reading issues, pushing branches, opening and merging PRs,
+  swapping labels, reading CI status, and auto-closing the issue after merge. The
+  `fj` CLI is baked into the Box with its token wired, there are
+  `.forgejo/workflows` control-plane templates to copy in, `spindrift doctor`
+  probes the new backend, and the quickstart walks the setup.
+- **A run that did the work no longer gets lost.** When a Box exits without a
+  clean outcome, the host reconstructs the real self-report from the on-disk
+  logs, marks the run `Recoverable` instead of failed, and can adopt the branch
+  into an open PR on its own. Work that landed on a branch but never became a PR
+  gets a draft reconstructed from the commits; an already-open or stranded draft
+  gets adopted rather than erroring. Runs whose outcome genuinely can't be pinned
+  down get an explicit `ambiguous` status and label instead of a wrong one, and a
+  locally killed run is parked as recoverable. Recoverable counts show up in the
+  console header and in `doctor`.
+- **⚠ Breaking: the roster picks models by name.** `models` is now a name-keyed
+  attrset, and each entry can carry its own `effort`. An agent you don't mention
+  (or whose legacy positional knob is unset) now inherits its schema default
+  instead of staying blank, so set `models.<name> = ""` explicitly to keep an
+  agent opted out. `REVIEW_EFFORT` is wired for real now, the reviewer model is
+  configurable and pinned to Opus 5, and the coordinator defaults to Sonnet 5.
+- **Fewer runs fail for reasons that aren't their fault.** Forge API calls retry
+  through rate limits and 5xx responses, merges retry within a bounded budget
+  instead of sinking the run, and a transient merge failure is now told apart
+  from a real conflict. Rate-limit reset times parse correctly, so a held run
+  waits the right amount of time. Issue, PR, and Jira JQL listings walk every
+  page, so a large backlog is no longer silently cut off at the first one.
+- **Issues get dispatched in priority order.** `agent-priority-*` labels control
+  which issue a free slot picks up, and the console Backlog sorts to match.
+  `doctor` creates the labels for you, and treats them as advisory so a missing
+  one never fails the check.
+- **Research can answer without a repo.** A `--self-contained` research run skips
+  the clone entirely, which suits advice-only questions that aren't about code.
+  The verdict set and the labels it maps to are configurable now rather than
+  hard-coded, and the contract the researcher sees is rendered from that config.
+- **Read-only mode actually blocks writes.** A read-only Box rejects `gh` write
+  subcommands locally instead of letting them travel and fail at the API,
+  remote-URL credentials are redacted from logs, and Forgejo gets the same
+  host-mediated write relay GitHub has. Prompts are validated against a baked
+  contract registry at build and startup, so a misassembled prompt fails loudly
+  instead of producing a confusing run.
+- **Outcome reporting got quieter and more reliable.** The `SPINDRIFT_OUTCOME`
+  line no longer carries a nonce (a stray one is still tolerated if you have
+  custom prompts emitting it), the agent's self-report is always carried
+  alongside the host's verdict with its provenance recorded, and `Closes #N`
+  reliably links a merged PR back to its issue on host-mediated, adopted, and
+  relayed PRs alike. Recover comments now name the actual reason a run was
+  parked instead of a placeholder.
+
+---
+
 ## 0.9.0 — 2026-07-30
 
 A consistency release. The same six-domain taxonomy (agents, git, issues, forge,
