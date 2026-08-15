@@ -269,6 +269,20 @@ func (e quarantineErr) Unwrap() error { return e.err }
 // territory): that log belongs to a live, possibly orphaned run and must
 // not be touched.
 //
+// That IsRunning check only reports whether a container/sandbox is running
+// RIGHT NOW -- it cannot distinguish "no run in progress for this issue"
+// from "a run for this same issue is between attempts (e.g. mid
+// dispatchWithRetry's hold sleep after a 429, retry.go) with no container
+// currently running." A second, genuinely colliding Run() for the same
+// issue number started in that window would see IsRunning == false and
+// quarantine the first run's own still-live logs as if they belonged to a
+// wholly unrelated stale run. This is the same blind spot runOnce's own
+// IsRunning check already has (issue #562), not a new one introduced here,
+// and closing it needs a real cross-process lock -- out of scope for this
+// change. Concurrent dispatch of the same issue is otherwise guarded
+// against only at the orchestrator/waves level, not by anything in this
+// file.
+//
 // Nothing can be on disk for this issue that this run produced at the
 // moment Run is entered -- this run hasn't dispatched anything yet. Left in
 // place, that content would still survive rotateStaleLog's own
