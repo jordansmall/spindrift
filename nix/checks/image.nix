@@ -34,6 +34,12 @@ let
   # read reviewModel's default straight from the schema instead of
   # restating it by hand, so a future bump only edits lib/env-schema.nix.
   reviewModelSchemaDefault = (import ../../lib/env-schema.nix).reviewModel.default;
+  # Single source of truth for the per-agent effort literals asserted below
+  # (issue #2506): read them from lib/roster-schema-defaults.nix instead of
+  # restating them by hand. Deliberately does NOT extend to the model
+  # literals nearby (issue #2435 AC2) -- see that fixture's own comments.
+  rosterDefaults =
+    (import ../../lib/roster-schema-defaults.nix { inherit (pkgs) lib; }).rosterDefaults;
 in
 {
   # The baked entrypoint must carry a store-path shebang, not the
@@ -99,7 +105,7 @@ in
     # render but bypass that fallback by feeding a hand-built roster straight
     # to the driver renderer, so only this fixture (no `roster` arg) proves
     # the wiring from lib/roster.nix's literal through to the baked template.
-    grep -q '"effort":"medium"' <<<"$scout_line" \
+    grep -q '"effort":"${rosterDefaults.scout.effort}"' <<<"$scout_line" \
       || { echo "scout-only harness missing default scout effort in baked template" >&2; exit 1; }
 
     # The reviewer-only mirror.
@@ -110,7 +116,7 @@ in
       || { echo "reviewer-only harness unexpectedly bakes a scout entry" >&2; exit 1; }
     # See the scout-only comment above: same roster==null fallback proof, for
     # reviewer's default effort.
-    grep -q '"effort":"high"' <<<"$reviewer_line" \
+    grep -q '"effort":"${rosterDefaults.reviewer.effort}"' <<<"$reviewer_line" \
       || { echo "reviewer-only harness missing default reviewer effort in baked template" >&2; exit 1; }
 
     # The filer-only mirror (opt-in, default empty — issue #393): composed
@@ -124,7 +130,7 @@ in
       || { echo "filer-only harness unexpectedly bakes a reviewer entry" >&2; exit 1; }
     # See the scout-only comment above: same roster==null fallback proof, for
     # filer's default effort.
-    grep -q '"effort":"medium"' <<<"$filer_line" \
+    grep -q '"effort":"${rosterDefaults.filer.effort}"' <<<"$filer_line" \
       || { echo "filer-only harness missing default filer effort in baked template" >&2; exit 1; }
 
     # The worker-only mirror (issue #2054): composed independently like
@@ -140,7 +146,7 @@ in
       || { echo "worker-only harness unexpectedly bakes a filer entry" >&2; exit 1; }
     # See the scout-only comment above: same roster==null fallback proof, for
     # worker's default effort.
-    grep -q '"effort":"high"' <<<"$worker_line" \
+    grep -q '"effort":"${rosterDefaults.worker.effort}"' <<<"$worker_line" \
       || { echo "worker-only harness missing default worker effort in baked template" >&2; exit 1; }
 
     # The dogfood harness (issue #2435 AC3): filer is the sole explicit pin
@@ -208,7 +214,7 @@ in
     # agent-files mechanism too, not just the --agents JSON one, since
     # nix/checks/drivers.nix's driver-level effort checks bypass that
     # fallback by feeding a hand-built roster straight to the renderer.
-    grep -q 'reasoningEffort: "medium"' "$scout" \
+    grep -q 'reasoningEffort: "${rosterDefaults.scout.effort}"' "$scout" \
       || { echo "opencode scout.md missing default scout effort in baked frontmatter" >&2; exit 1; }
 
     reviewer=${opencodeHarness.agentFiles}/home/agent/.config/opencode/agents/reviewer.md
@@ -220,7 +226,7 @@ in
       || { echo "opencode reviewer.md missing its configured model (JSON-encoded, issue #2152 slice C)" >&2; exit 1; }
     # See the scout comment above: same roster==null fallback proof, for
     # reviewer's default effort.
-    grep -q 'reasoningEffort: "high"' "$reviewer" \
+    grep -q 'reasoningEffort: "${rosterDefaults.reviewer.effort}"' "$reviewer" \
       || { echo "opencode reviewer.md missing default reviewer effort in baked frontmatter" >&2; exit 1; }
 
     worker=${opencodeHarness.agentFiles}/home/agent/.config/opencode/agents/worker.md
@@ -232,7 +238,7 @@ in
       || { echo "opencode worker.md missing its configured model (JSON-encoded, issue #2152 slice C)" >&2; exit 1; }
     # See the scout comment above: same roster==null fallback proof, for
     # worker's default effort.
-    grep -q 'reasoningEffort: "high"' "$worker" \
+    grep -q 'reasoningEffort: "${rosterDefaults.worker.effort}"' "$worker" \
       || { echo "opencode worker.md missing default worker effort in baked frontmatter" >&2; exit 1; }
 
     filer=${opencodeHarness.agentFiles}/home/agent/.config/opencode/agents/filer.md
