@@ -12,6 +12,29 @@ import (
 	"spindrift.dev/launcher/internal/outcome"
 )
 
+// captureStderr redirects os.Stderr for the duration of fn and returns
+// everything written to it. fn runs synchronously to completion before the
+// capture is read back, so this is only safe for output that stays well
+// under the pipe's 64KB buffer.
+func captureStderr(t *testing.T, fn func()) string {
+	t.Helper()
+	old := os.Stderr
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
+	os.Stderr = w
+	fn()
+	w.Close()
+	os.Stderr = old
+	defer r.Close()
+	captured, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("read captured stderr: %v", err)
+	}
+	return string(captured)
+}
+
 // TestSettle_GithubReadOnly_BlockedRelaysBundleAndCreatesDraftPR asserts issue
 // #1933's fix: a read-only Box that reaches IF BLOCKED has its finished branch
 // bundled to the outbox by the harness post-driver (issue #2082; the agent no
@@ -365,20 +388,7 @@ func TestSettle_GithubReadOnly_BlockedRelayFailureSkipsDraftPRButStaysBlocked(t 
 	c.BaseBranch = "main"
 	s := New(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
 
-	old := os.Stderr
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatalf("os.Pipe: %v", err)
-	}
-	os.Stderr = w
-	s.Settle(d, issNum, 0, result)
-	w.Close()
-	os.Stderr = old
-	captured, err := io.ReadAll(r)
-	if err != nil {
-		t.Fatalf("read captured stderr: %v", err)
-	}
-	stderr := string(captured)
+	stderr := captureStderr(t, func() { s.Settle(d, issNum, 0, result) })
 
 	if len(fc.CreateDraftPRCalls) != 0 {
 		t.Errorf("CreateDraftPR must not be called when the relay fails, got %+v", fc.CreateDraftPRCalls)
@@ -432,20 +442,7 @@ func TestSettle_GithubReadOnly_BlockedRelayAbsentBundleLogsBenign(t *testing.T) 
 	c.BaseBranch = "main"
 	s := New(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
 
-	old := os.Stderr
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatalf("os.Pipe: %v", err)
-	}
-	os.Stderr = w
-	s.Settle(d, issNum, 0, result)
-	w.Close()
-	os.Stderr = old
-	captured, err := io.ReadAll(r)
-	if err != nil {
-		t.Fatalf("read captured stderr: %v", err)
-	}
-	stderr := string(captured)
+	stderr := captureStderr(t, func() { s.Settle(d, issNum, 0, result) })
 
 	if strings.Contains(stderr, "could not relay blocked-hand-off bundle") {
 		t.Errorf("stderr must not contain the alarming relay-failure phrase, got: %s", stderr)
@@ -539,20 +536,7 @@ func TestSettle_LocalReadOnly_BlockedRelayAbsentBundleLogsBenign(t *testing.T) {
 	c.BaseBranch = "main"
 	s := New(c, fc, fc.AsLocal())
 
-	old := os.Stderr
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatalf("os.Pipe: %v", err)
-	}
-	os.Stderr = w
-	s.Settle(d, issNum, 0, result)
-	w.Close()
-	os.Stderr = old
-	captured, err := io.ReadAll(r)
-	if err != nil {
-		t.Fatalf("read captured stderr: %v", err)
-	}
-	stderr := string(captured)
+	stderr := captureStderr(t, func() { s.Settle(d, issNum, 0, result) })
 
 	if strings.Contains(stderr, "could not relay blocked-hand-off bundle") {
 		t.Errorf("stderr must not contain the alarming relay-failure phrase, got: %s", stderr)
@@ -603,20 +587,7 @@ func TestSettle_GithubReadOnly_BlockedDraftPRFailureStillReportsBlocked(t *testi
 	c.BaseBranch = "main"
 	s := New(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
 
-	old := os.Stderr
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatalf("os.Pipe: %v", err)
-	}
-	os.Stderr = w
-	s.Settle(d, issNum, 0, result)
-	w.Close()
-	os.Stderr = old
-	captured, err := io.ReadAll(r)
-	if err != nil {
-		t.Fatalf("read captured stderr: %v", err)
-	}
-	stderr := string(captured)
+	stderr := captureStderr(t, func() { s.Settle(d, issNum, 0, result) })
 
 	if len(fc.RelayBundleCalls) != 1 {
 		t.Errorf("RelayBundle must still run ahead of the failed CreateDraftPR, got %+v", fc.RelayBundleCalls)
