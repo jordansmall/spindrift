@@ -150,6 +150,7 @@ To dispatch a parallel batch, compose a JSON object of this exact shape:
   "slices": [
     {
       "name": "<slice-name>",
+      "task": "<the scoped work this slice's worker must implement>",
       "file_leases": ["<path>", "..."],
       "depends_on": ["<other-slice-name>", "..."]
     }
@@ -157,7 +158,10 @@ To dispatch a parallel batch, compose a JSON object of this exact shape:
 }
 ```
 
-`name` is required and must match `^[a-zA-Z0-9_-]{1,64}$`. `file_leases` and
+`name` is required and must match `^[a-zA-Z0-9_-]{1,64}$`. `task` is
+required and must be non-empty — it is the only description of the slice's
+work the dispatched worker ever receives, so write it the same way you'd
+write a `worker` delegation's own instructions. `file_leases` and
 `depends_on` are both optional. Base64-standard-encode the JSON, then print
 exactly one line to stdout:
 

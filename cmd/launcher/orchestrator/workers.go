@@ -51,7 +51,10 @@ const defaultWorkerTimeout = 20 * time.Minute
 
 // seedWorkerPrompt composes a fresh prompt file for one worker: promptFile's
 // own content, with a "## Parallel worker dispatch" section prepended
-// naming slice.Name and instructing the worker to write its final report to
+// naming slice.Name, stating slice.Task as the worker's own scoped
+// delegated work (issue #2059 code-review finding -- previously only the
+// bare slice name reached the worker, leaving it with nothing to
+// implement), and instructing the worker to write its final report to
 // resultPath and then create sentinelPath as its very last action -- the
 // deterministic, file-based completion signal the orchestrator's join polls
 // for (issue #2059 AC3/AC4), replacing the "return your report as your
@@ -71,6 +74,7 @@ func seedWorkerPrompt(promptFile string, slice ManifestSlice, resultPath, sentin
 	fmt.Fprintf(&b, "You are the worker for slice %q, running fully concurrently\n", slice.Name)
 	b.WriteString("alongside other workers on other slices of the same manifest -- never\n")
 	b.WriteString("touch the orchestrator's own run-state file.\n\n")
+	fmt.Fprintf(&b, "Your slice of work:\n\n%s\n\n", slice.Task)
 	fmt.Fprintf(&b, "When you finish, write your final report to %s, then\n", resultPath)
 	fmt.Fprintf(&b, "create %s as your very last action -- this is the only\n", sentinelPath)
 	b.WriteString("signal the orchestrator's join waits for.\n")

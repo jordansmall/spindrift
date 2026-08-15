@@ -51,7 +51,7 @@ func TestSeedWorkerPromptComposesAddendumOverOriginal(t *testing.T) {
 		t.Fatalf("WriteFile: %v", err)
 	}
 
-	seeded, err := seedWorkerPrompt(promptPath, ManifestSlice{Name: "slice-a"}, "/tmp/slice-a.result", "/tmp/slice-a.done")
+	seeded, err := seedWorkerPrompt(promptPath, ManifestSlice{Name: "slice-a", Task: "implement seam a"}, "/tmp/slice-a.result", "/tmp/slice-a.done")
 	if err != nil {
 		t.Fatalf("seedWorkerPrompt() error = %v", err)
 	}
@@ -65,7 +65,10 @@ func TestSeedWorkerPromptComposesAddendumOverOriginal(t *testing.T) {
 		t.Fatalf("ReadFile(seeded): %v", err)
 	}
 	got := string(seededContent)
-	for _, want := range []string{"ORIGINAL WORKER PROMPT", "slice-a", "/tmp/slice-a.result", "/tmp/slice-a.done"} {
+	// "implement seam a" (slice.Task) proves the worker's own scoped task
+	// description reaches its prompt, not just the bare slice name (issue
+	// #2059 code-review finding).
+	for _, want := range []string{"ORIGINAL WORKER PROMPT", "slice-a", "implement seam a", "/tmp/slice-a.result", "/tmp/slice-a.done"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("seeded prompt missing substring %q; got:\n%s", want, got)
 		}
@@ -83,7 +86,7 @@ func TestSeedWorkerPromptComposesAddendumOverOriginal(t *testing.T) {
 // TestSeedWorkerPromptErrorsOnMissingPromptFile verifies seedWorkerPrompt
 // surfaces a non-nil error when promptFile can't be read (issue #2059).
 func TestSeedWorkerPromptErrorsOnMissingPromptFile(t *testing.T) {
-	_, err := seedWorkerPrompt("/nonexistent/prompt.txt", ManifestSlice{Name: "slice-a"}, "/tmp/slice-a.result", "/tmp/slice-a.done")
+	_, err := seedWorkerPrompt("/nonexistent/prompt.txt", ManifestSlice{Name: "slice-a", Task: "implement seam a"}, "/tmp/slice-a.result", "/tmp/slice-a.done")
 	if err == nil {
 		t.Fatal("seedWorkerPrompt() error = nil, want non-nil")
 	}
@@ -234,9 +237,9 @@ func TestLaunchWorkersJoinsDoneCrashedAndTimedOutDeterministically(t *testing.T)
 
 	cfg := config{driver: "claude"}
 	manifest := SliceManifest{Slices: []ManifestSlice{
-		{Name: "done-fast"},
-		{Name: "crash-now"},
-		{Name: "hang-forever"},
+		{Name: "done-fast", Task: "implement seam a"},
+		{Name: "crash-now", Task: "implement seam b"},
+		{Name: "hang-forever", Task: "implement seam c"},
 	}}
 
 	start := time.Now()
@@ -314,7 +317,7 @@ func TestLaunchOneWorkerKillsOrphanedChildProcessOnTimeout(t *testing.T) {
 	var mu sync.Mutex
 
 	cfg := config{driver: "claude"}
-	slice := ManifestSlice{Name: "orphan-check"}
+	slice := ManifestSlice{Name: "orphan-check", Task: "implement seam a"}
 
 	result := launchOneWorker(cfg, slice, promptFile, workDir, 80*time.Millisecond, 5*time.Millisecond, &stdout, &mu)
 
@@ -381,7 +384,7 @@ func TestLaunchWorkersEachWorkerGetsOwnQuarantinedLogAndFreshSession(t *testing.
 		logPath:   coordinatorLogPath,
 		stateFile: coordinatorStateFile,
 	}
-	manifest := SliceManifest{Slices: []ManifestSlice{{Name: "done-fast"}}}
+	manifest := SliceManifest{Slices: []ManifestSlice{{Name: "done-fast", Task: "implement seam a"}}}
 
 	LaunchWorkers(cfg, manifest, WorkerOptions{
 		PromptFile:   promptFile,
@@ -451,7 +454,7 @@ func TestLaunchWorkersIgnoresStaleSentinelFromPriorRun(t *testing.T) {
 
 	var stdout bytes.Buffer
 	cfg := config{driver: "claude"}
-	manifest := SliceManifest{Slices: []ManifestSlice{{Name: "delayed-worker"}}}
+	manifest := SliceManifest{Slices: []ManifestSlice{{Name: "delayed-worker", Task: "implement seam a"}}}
 
 	const workerTimeout = 100 * time.Millisecond
 	start := time.Now()
@@ -509,7 +512,7 @@ func TestLaunchWorkersRemovesSeededPromptTempFile(t *testing.T) {
 	}
 
 	cfg := config{driver: "claude"}
-	manifest := SliceManifest{Slices: []ManifestSlice{{Name: "done-fast"}, {Name: "crash-now"}}}
+	manifest := SliceManifest{Slices: []ManifestSlice{{Name: "done-fast", Task: "implement seam a"}, {Name: "crash-now", Task: "implement seam b"}}}
 
 	LaunchWorkers(cfg, manifest, WorkerOptions{
 		PromptFile:   promptFile,
@@ -546,7 +549,7 @@ func TestLaunchWorkersReturnsOneResultPerSliceEvenWhenWorkDirUncreatable(t *test
 
 	var stdout bytes.Buffer
 	cfg := config{driver: "claude"}
-	manifest := SliceManifest{Slices: []ManifestSlice{{Name: "slice-a"}, {Name: "slice-b"}}}
+	manifest := SliceManifest{Slices: []ManifestSlice{{Name: "slice-a", Task: "implement seam a"}, {Name: "slice-b", Task: "implement seam b"}}}
 
 	results := LaunchWorkers(cfg, manifest, WorkerOptions{
 		PromptFile: promptFile,
@@ -590,7 +593,7 @@ func TestLaunchOneWorkerEmitsStartAndFinishOpsOnBuildDriverExecCmdFailure(t *tes
 	var mu sync.Mutex
 
 	cfg := config{driver: "claude"}
-	slice := ManifestSlice{Name: "no-driver-exec"}
+	slice := ManifestSlice{Name: "no-driver-exec", Task: "implement seam a"}
 
 	result := launchOneWorker(cfg, slice, promptFile, workDir, time.Second, 5*time.Millisecond, &stdout, &mu)
 
@@ -645,7 +648,7 @@ func TestLaunchOneWorkerRunsInDedicatedGitWorktree(t *testing.T) {
 	var mu sync.Mutex
 
 	cfg := config{driver: "claude"}
-	slice := ManifestSlice{Name: "worker-a"}
+	slice := ManifestSlice{Name: "worker-a", Task: "implement seam a"}
 
 	result := launchOneWorker(cfg, slice, promptFile, workDir, time.Second, 5*time.Millisecond, &stdout, &mu)
 
@@ -737,7 +740,7 @@ func TestLaunchOneWorkerEmitsStartAndFinishOpsOnWorktreeAddFailure(t *testing.T)
 	var mu sync.Mutex
 
 	cfg := config{driver: "claude"}
-	slice := ManifestSlice{Name: "blocked-worktree"}
+	slice := ManifestSlice{Name: "blocked-worktree", Task: "implement seam a"}
 
 	result := launchOneWorker(cfg, slice, promptFile, workDir, time.Second, 5*time.Millisecond, &stdout, &mu)
 
@@ -787,7 +790,7 @@ func TestLaunchOneWorkerReusesExistingWorktreeBranchAcrossDispatches(t *testing.
 	workDir := t.TempDir()
 	var mu sync.Mutex
 	cfg := config{driver: "claude"}
-	slice := ManifestSlice{Name: "repeat-slice"}
+	slice := ManifestSlice{Name: "repeat-slice", Task: "implement seam a"}
 
 	for i := 0; i < 2; i++ {
 		var stdout bytes.Buffer
