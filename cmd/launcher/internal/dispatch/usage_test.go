@@ -234,6 +234,142 @@ func TestCumulativeUsage_ChargesRotatedAsideRetryAttempt(t *testing.T) {
 	}
 }
 
+// TestUsageReport_SumsAcrossFixPasses verifies UsageReport's Turns/API
+// time/token figures sum across the initial run's log AND every fix-pass
+// log on disk (issue #2575), not just the initial pass's own result event —
+// the report-comment counterpart of CumulativeUsage's existing multi-pass
+// sum.
+func TestUsageReport_SumsAcrossFixPasses(t *testing.T) {
+	dir := tempLogDir(t)
+	f, err := NewFactory(Config{}, dir, runner.NewFake(), fakeDriver{}, RealClock())
+	if err != nil {
+		t.Fatalf("NewFactory: %v", err)
+	}
+	defer f.Cleanup()
+	d := f.New("13", "test issue")
+
+	writeRunLog(t, d, `{"type":"result","num_turns":2,"total_cost_usd":0.10,"duration_ms":1000,"duration_api_ms":500,"usage":{"input_tokens":100,"output_tokens":50}}`)
+	if err := writeFile(d.fixLogPath(1), `{"type":"result","num_turns":3,"total_cost_usd":0.20,"duration_ms":2000,"duration_api_ms":700,"usage":{"input_tokens":200,"output_tokens":75}}`+"\n"); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeFile(d.fixLogPath(2), `{"type":"result","num_turns":4,"total_cost_usd":0.30,"duration_ms":3000,"duration_api_ms":900,"usage":{"input_tokens":300,"output_tokens":90}}`+"\n"); err != nil {
+		t.Fatal(err)
+	}
+
+	body := d.UsageReport()
+	if !strings.Contains(body, "| Turns | 9 |") {
+		t.Errorf("report should sum Turns across all three passes to 9; got: %q", body)
+	}
+	// API time sums 500+700+900=2100ms -> "2s"
+	if !strings.Contains(body, "| API time | 2s |") {
+		t.Errorf("report should sum API time across all three passes to 2s; got: %q", body)
+	}
+}
+
+// TestUsageReport_ChargesRotatedAsideRetryAttempt verifies UsageReport
+// includes a hold/backoff-retried attempt's spend (rotated aside to
+// logPath().1 per issue #561) alongside the current attempt at the bare
+// logPath(), mirroring CumulativeUsage_ChargesRotatedAsideRetryAttempt but
+// asserting on the rendered comment body (issue #2575).
+func TestUsageReport_ChargesRotatedAsideRetryAttempt(t *testing.T) {
+	dir := tempLogDir(t)
+	f, err := NewFactory(Config{}, dir, runner.NewFake(), fakeDriver{}, RealClock())
+	if err != nil {
+		t.Fatalf("NewFactory: %v", err)
+	}
+	defer f.Cleanup()
+	d := f.New("14", "test issue")
+
+	if err := writeFile(d.logPath()+".1", `{"type":"result","num_turns":1,"total_cost_usd":3.00,"duration_ms":5000,"duration_api_ms":1000,"usage":{"input_tokens":5000,"output_tokens":250}}`+"\n"); err != nil {
+		t.Fatal(err)
+	}
+	writeRunLog(t, d, `{"type":"result","num_turns":2,"total_cost_usd":0.10,"duration_ms":1000,"duration_api_ms":500,"usage":{"input_tokens":100,"output_tokens":50}}`)
+
+	body := d.UsageReport()
+	if !strings.Contains(body, "| Turns | 3 |") {
+		t.Errorf("report should sum Turns across the rotated attempt and current attempt to 3; got: %q", body)
+	}
+	if !strings.Contains(body, "| API time | 1s |") {
+		t.Errorf("report should sum API time across the rotated attempt and current attempt to 1s; got: %q", body)
+	}
+}
+
+// TestUsageReport_MissingFixPassDegrades verifies UsageReport still renders
+// using only the found log(s) when a fix-pass log doesn't exist at all
+// (never ran, or crashed before writing anything) — a missing pass never
+// aborts the whole report back to "unavailable" as long as at least one log
+// was found (issue #2575).
+func TestUsageReport_MissingFixPassDegrades(t *testing.T) {
+	dir := tempLogDir(t)
+	f, err := NewFactory(Config{}, dir, runner.NewFake(), fakeDriver{}, RealClock())
+	if err != nil {
+		t.Fatalf("NewFactory: %v", err)
+	}
+	defer f.Cleanup()
+	d := f.New("15", "test issue")
+
+	writeRunLog(t, d, `{"type":"result","num_turns":2,"total_cost_usd":0.10,"duration_ms":1000,"duration_api_ms":500,"usage":{"input_tokens":100,"output_tokens":50}}`)
+	// fix-1 exists but has no result event (crashed before finishing).
+	if err := writeFile(d.fixLogPath(1), `{"type":"assistant","message":{"content":[]}}`+"\n"); err != nil {
+		t.Fatal(err)
+	}
+	// fix-2 never ran at all -- no file on disk.
+
+	body := d.UsageReport()
+	if strings.Contains(body, "unavailable") {
+		t.Errorf("report should not say unavailable when at least one log was found; got: %q", body)
+	}
+	if !strings.Contains(body, "| Turns | 2 |") {
+		t.Errorf("report should reflect only the found initial log's Turns (2); got: %q", body)
+	}
+}
+
+// TestUsageReport_WallTimeSpansAcrossPasses verifies Wall time reflects the
+// span-floor combination across two DIFFERENT passes' logs — the true
+// combined span between the earliest timestamped event in pass 1 and the
+// latest timestamped event in pass 2 — rather than a naive sum of the two
+// passes' own duration_ms values, and rather than just one pass's own value
+// (issue #2575).
+func TestUsageReport_WallTimeSpansAcrossPasses(t *testing.T) {
+	dir := tempLogDir(t)
+	f, err := NewFactory(Config{}, dir, runner.NewFake(), fakeDriver{}, RealClock())
+	if err != nil {
+		t.Fatalf("NewFactory: %v", err)
+	}
+	defer f.Cleanup()
+	d := f.New("16", "test issue")
+
+	// Pass 1: two timestamped assistant/user lines an hour apart, but its
+	// own duration_ms only claims 10 minutes.
+	pass1 := []string{
+		`{"type":"assistant","timestamp":"2026-08-11T10:00:00.000Z","message":{"model":"claude-opus-4-8","content":[],"usage":{"input_tokens":10,"output_tokens":5}}}`,
+		`{"type":"user","timestamp":"2026-08-11T11:00:00.000Z","message":{"content":[]}}`,
+		`{"type":"result","num_turns":1,"total_cost_usd":0.10,"duration_ms":600000,"duration_api_ms":500,"usage":{"input_tokens":100,"output_tokens":50}}`,
+	}
+	if err := writeFile(d.logPath(), strings.Join(pass1, "\n")+"\n"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Pass 2 (fix-1): starts 3 hours after pass 1 began, runs another hour;
+	// its own duration_ms also only claims 10 minutes. True combined span
+	// (pass1 earliest to pass2 latest) is 4 hours -- far longer than either
+	// pass's own duration_ms and far longer than a naive sum (1200000ms =
+	// 20m).
+	pass2 := []string{
+		`{"type":"assistant","timestamp":"2026-08-11T13:00:00.000Z","message":{"model":"claude-opus-4-8","content":[],"usage":{"input_tokens":10,"output_tokens":5}}}`,
+		`{"type":"user","timestamp":"2026-08-11T14:00:00.000Z","message":{"content":[]}}`,
+		`{"type":"result","num_turns":1,"total_cost_usd":0.10,"duration_ms":600000,"duration_api_ms":500,"usage":{"input_tokens":100,"output_tokens":50}}`,
+	}
+	if err := writeFile(d.fixLogPath(1), strings.Join(pass2, "\n")+"\n"); err != nil {
+		t.Fatal(err)
+	}
+
+	body := d.UsageReport()
+	if !strings.Contains(body, "| Wall time | 4h 0m 0s |") {
+		t.Errorf("report should reflect the 4h combined span across both passes; got: %q", body)
+	}
+}
+
 // TestUsageReport_FullFormatLocksExactMarkdown locks the exact Markdown
 // UsageReport renders for a log carrying two model families (opus and
 // haiku) plus a result event: the metadata table (Model/Wall time/API
