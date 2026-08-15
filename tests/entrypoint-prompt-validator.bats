@@ -5,9 +5,12 @@
 # for the markers named in lib/prompt-contract.nix's validateMarkers and
 # forbiddenMarkers registries. The Go validator
 # (cmd/launcher/internal/promptassembly/validate.go) reads those registries
-# from JSON baked by lib/image.nix (promptContractRegistryJson,
-# forbiddenMarkersRegistryJson), not a bash array, gated on the same
-# condition that gated the fragment/step that's supposed to carry each one.
+# from JSON (promptContractRegistryJson, forbiddenMarkersRegistryJson) --
+# baked into the real image by lib/image.nix, but supplied here as plain
+# files via nix/checks/bats.nix's PROMPT_CONTRACT_REGISTRY_FILE/
+# FORBIDDEN_MARKERS_REGISTRY_FILE env vars -- not a bash array, gated on the
+# same condition that gated the fragment/step that's supposed to carry each
+# one.
 #
 # Full-script style (mirrors tests/entrypoint-outcome-contract.bats): a
 # minimal hand-written PROMPTS_DIR stub, not the real templates, gives exact
