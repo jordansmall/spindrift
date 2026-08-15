@@ -228,6 +228,63 @@ func launchOneWorker(cfg config, slice ManifestSlice, promptFile, workDir string
 		return WorkerResult{Slice: slice.Name, Status: WorkerCrashed, Err: err}
 	}
 
+	// Give this worker its own dedicated git worktree, checked out onto its
+	// own branch off the orchestrator's own HEAD, so its driver-exec
+	// subprocess never shares (and mutates) the orchestrator's own working
+	// tree with any other concurrently-dispatched worker -- the isolation
+	// worker-prompt.md already promises ("You run in your own isolated git
+	// worktree") but the Go code never enforced (issue #2059 code-review
+	// finding). The repo root is the orchestrator process's own cwd, the
+	// same assumption buildDriverExecCmd already makes implicitly today
+	// (it never sets cmd.Dir either); there's no separate repo-root config
+	// field to thread through instead.
+	repoRoot, err := os.Getwd()
+	if err != nil {
+		err = fmt.Errorf("determine repo root for worker worktree: %w", err)
+		writeWorkerOp(stdout, mu, claude.SpindriftOp{Op: "worker_finish", Worker: slice.Name, WorkerStatus: string(WorkerCrashed), Reason: err.Error()})
+		return WorkerResult{Slice: slice.Name, Status: WorkerCrashed, Err: err}
+	}
+	worktreePath := filepath.Join(workDir, slice.Name+".worktree")
+	worktreeBranch := "orchestrator-worker/" + slice.Name
+
+	// A coordinator can legitimately dispatch the same slice name again on
+	// a later pass (e.g. a manifest re-emitted across passes) -- since the
+	// branch itself is deliberately left behind after a prior dispatch's
+	// worktree is removed (below), that recurrence must reuse the
+	// existing branch rather than fail: only "git worktree add -b" (create
+	// a fresh branch) errors on an already-existing branch name, so check
+	// for it first and drop -b when it's already there.
+	addArgs := []string{"worktree", "add", worktreePath}
+	verifyCmd := exec.Command("git", "rev-parse", "--verify", "--quiet", "refs/heads/"+worktreeBranch)
+	verifyCmd.Dir = repoRoot
+	if verifyCmd.Run() == nil {
+		addArgs = append(addArgs, worktreeBranch)
+	} else {
+		addArgs = append(addArgs, "-b", worktreeBranch, "HEAD")
+	}
+
+	addCmd := exec.Command("git", addArgs...)
+	addCmd.Dir = repoRoot
+	if out, err := addCmd.CombinedOutput(); err != nil {
+		err = fmt.Errorf("create worker worktree: %w: %s", err, strings.TrimSpace(string(out)))
+		writeWorkerOp(stdout, mu, claude.SpindriftOp{Op: "worker_finish", Worker: slice.Name, WorkerStatus: string(WorkerCrashed), Reason: err.Error()})
+		return WorkerResult{Slice: slice.Name, Status: WorkerCrashed, Err: err}
+	}
+	// Best-effort cleanup: the worktree directory is removed once this
+	// worker's join is fully decided (success, timeout, or crash), on
+	// every return path from here on -- but the branch itself is left
+	// alone for a human/reviewer to inspect after a crash. A cleanup
+	// failure never overrides the join's own already-decided status,
+	// matching this file's existing convention (the seeded-prompt-file
+	// cleanup above ignores its own error too).
+	defer func() {
+		rmCmd := exec.Command("git", "worktree", "remove", "--force", worktreePath)
+		rmCmd.Dir = repoRoot
+		if err := rmCmd.Run(); err != nil {
+			fmt.Fprintln(os.Stderr, "orchestrator: remove worker worktree:", err)
+		}
+	}()
+
 	seededPromptFile, err := seedWorkerPrompt(promptFile, slice, resultPath, sentinelPath)
 	if err != nil {
 		writeWorkerOp(stdout, mu, claude.SpindriftOp{Op: "worker_finish", Worker: slice.Name, WorkerStatus: string(WorkerCrashed), Reason: err.Error()})
@@ -253,6 +310,9 @@ func launchOneWorker(cfg config, slice ManifestSlice, promptFile, workDir string
 		writeWorkerOp(stdout, mu, claude.SpindriftOp{Op: "worker_finish", Worker: slice.Name, WorkerStatus: string(WorkerCrashed), Reason: err.Error()})
 		return WorkerResult{Slice: slice.Name, Status: WorkerCrashed, Err: err}
 	}
+	// Run the worker's driver-exec subprocess (and everything it spawns)
+	// inside its own dedicated worktree, never the orchestrator's own tree.
+	cmd.Dir = worktreePath
 	cmd.Stdout = io.Discard
 	cmd.Stderr = io.Discard
 
