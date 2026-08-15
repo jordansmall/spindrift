@@ -627,6 +627,7 @@ _subst() {
     IN_PROGRESS_LABEL
     COMPLETE_LABEL
     RUN_NONCE
+    RESEARCH_STATUS_ENUM
     "${_FRAGMENT_SUBST_VARS[@]}"
   )
   local -a _assign=()
@@ -802,6 +803,7 @@ phase_prompt_assembly() {
     --complete-label "${COMPLETE_LABEL:-}"
     --run-nonce "${RUN_NONCE:-}"
     --ci-failure-summary "${CI_FAILURE_SUMMARY:-}"
+    --research-status-enum "${RESEARCH_STATUS_ENUM:-}"
   )
   [ -f "${DRIVER_SKILLS_DIR}/caveman/SKILL.md" ] && _ap_args+=(--caveman-skill-baked)
   [ -f "${DRIVER_SKILLS_DIR}/tdd/SKILL.md" ] && _ap_args+=(--tdd-skill-baked)

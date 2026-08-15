@@ -58,7 +58,7 @@ Once the comment is posted, print exactly one line as your final output —
 raw plain text, not wrapped in backticks, a code fence, or any other
 markdown formatting:
 
-SPINDRIFT_OUTCOME issue=${ISSUE_NUMBER} landing=<verdict-comment-url> status=<recommend|reject|unclear> note=<one-line rationale>
+SPINDRIFT_OUTCOME issue=${ISSUE_NUMBER} landing=<verdict-comment-url> status=<${RESEARCH_STATUS_ENUM}> note=<one-line rationale>
 
 This must be the literal final message — nothing after it, no prose summary.
 For github, `landing` is the URL of the comment you just posted

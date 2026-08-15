@@ -65,6 +65,8 @@ in
       "custom render must rewrite the backtick enumeration";
     assert assertMsg (!(hasInfix "status=<recommend|reject|unclear>" customRendered))
       "custom render must not leave the default status alternation";
+    assert assertMsg (!(hasInfix "\${RESEARCH_STATUS_ENUM}" customRendered))
+      "custom render must not leave the RESEARCH_STATUS_ENUM placeholder token unresolved (issue #2504)";
     pkgs.runCommand "research-verdicts-render-custom" { } "touch $out";
 
   # Rendering a prompt that lacks the VERDICT markers (a Consumer research

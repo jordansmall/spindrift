@@ -64,6 +64,7 @@ func runAssemblePrompt(args []string, stdout io.Writer) int {
 	inProgressLabel := fs.String("in-progress-label", "", "IN_PROGRESS_LABEL")
 	completeLabel := fs.String("complete-label", "", "COMPLETE_LABEL")
 	runNonce := fs.String("run-nonce", "", "RUN_NONCE")
+	researchStatusEnum := fs.String("research-status-enum", "", "RESEARCH_STATUS_ENUM (regen-generated research-kind verdict enumeration, issue #2504)")
 
 	registryPath := fs.String("registry", "", "path to the fragment registry JSON file (required)")
 	validateMarkersRegistryPath := fs.String("validate-markers-registry", "", "path to the prompt-contract validateMarkers registry JSON file (required)")
@@ -144,6 +145,8 @@ func runAssemblePrompt(args []string, stdout io.Writer) int {
 		InProgressLabel: *inProgressLabel,
 		CompleteLabel:   *completeLabel,
 		RunNonce:        *runNonce,
+
+		ResearchStatusEnum: *researchStatusEnum,
 	}
 
 	result, err := promptassembly.Assemble(env, registry)

@@ -541,6 +541,7 @@ func TestAssembleResearchKindRendersResearchPrompt(t *testing.T) {
 	env.DispatchKind = "research"
 	env.SelfContained = false
 	env.ResumeAfterHold = true
+	env.ResearchStatusEnum = "recommend|reject|unclear"
 
 	result, err := Assemble(env, reg)
 	if err != nil {
@@ -556,6 +557,15 @@ func TestAssembleResearchKindRendersResearchPrompt(t *testing.T) {
 	if strings.Contains(result.Prompt, "self-contained research dispatch") {
 		t.Errorf("Prompt contains research-self-contained-prompt.md's text, want research-prompt.md:\n%s", result.Prompt)
 	}
+	// The OUTCOME grammar line's verdict enumeration renders from
+	// Env.ResearchStatusEnum via the RESEARCH_STATUS_ENUM allowlist entry
+	// (issue #2504), not a hand-typed literal in the template.
+	if !strings.Contains(result.Prompt, "status=<recommend|reject|unclear>") {
+		t.Errorf("Prompt missing substituted RESEARCH_STATUS_ENUM in the OUTCOME grammar line:\n%s", result.Prompt)
+	}
+	if strings.Contains(result.Prompt, "${RESEARCH_STATUS_ENUM}") {
+		t.Errorf("Prompt contains an unsubstituted RESEARCH_STATUS_ENUM token:\n%s", result.Prompt)
+	}
 	if result.Handoff.SessionMode != "initial" {
 		t.Errorf("Handoff.SessionMode = %q, want %q even with ResumeAfterHold set", result.Handoff.SessionMode, "initial")
 	}
@@ -570,6 +580,7 @@ func TestAssembleResearchSelfContainedRendersSelfContainedPrompt(t *testing.T) {
 	env := coveredEnv()
 	env.DispatchKind = "research"
 	env.SelfContained = true
+	env.ResearchStatusEnum = "recommend|reject|unclear"
 
 	result, err := Assemble(env, reg)
 	if err != nil {
@@ -578,6 +589,14 @@ func TestAssembleResearchSelfContainedRendersSelfContainedPrompt(t *testing.T) {
 
 	if !strings.Contains(result.Prompt, "self-contained research dispatch (ADR 0022, issue #2202)") {
 		t.Errorf("Prompt missing research-self-contained-prompt.md's distinguishing text:\n%s", result.Prompt)
+	}
+	// Same RESEARCH_STATUS_ENUM substitution as research-prompt.md's OUTCOME
+	// section (issue #2504).
+	if !strings.Contains(result.Prompt, "status=<recommend|reject|unclear>") {
+		t.Errorf("Prompt missing substituted RESEARCH_STATUS_ENUM in the OUTCOME grammar line:\n%s", result.Prompt)
+	}
+	if strings.Contains(result.Prompt, "${RESEARCH_STATUS_ENUM}") {
+		t.Errorf("Prompt contains an unsubstituted RESEARCH_STATUS_ENUM token:\n%s", result.Prompt)
 	}
 	if result.Handoff.SessionMode != "initial" {
 		t.Errorf("Handoff.SessionMode = %q, want %q", result.Handoff.SessionMode, "initial")
