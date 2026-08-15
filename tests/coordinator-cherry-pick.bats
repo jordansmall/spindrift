@@ -224,3 +224,87 @@ extract_cherry_pick_cmd() {
   [ "$status" -eq 0 ]
   [ -z "$output" ]
 }
+
+@test "coordinator cherry-pick: concurrent worktrees isolate uncommitted changes (AC2)" {
+  cd "$BATS_TEST_TMPDIR" || return 1
+  git init -q -b main repo
+  cd repo || return 1
+  git config user.email "test@example.com"
+  git config user.name "Test"
+
+  # 1. Initial commit -- the shared fork point both workers' worktrees branch
+  # from, and the shared object database (.git) both worktrees below point at.
+  echo base >base.txt
+  git add -A
+  git commit -q -m "base"
+
+  # 2. Two "concurrent workers", each a real `git worktree add -b <branch>
+  # <path> <base>` off THIS SAME repo -- the exact git mechanism the Agent
+  # tool's `isolation: "worktree"` relies on (coordinator.md) when the
+  # coordinator delegates two slices "at once". Both cut from main, exactly
+  # as two simultaneous delegations would, and both live alongside the main
+  # checkout sharing one .git object database.
+  git worktree add -q -b worker-a-branch ../worker-a main
+  git worktree add -q -b worker-b-branch ../worker-b main
+
+  # 3. Worker A makes an UNCOMMITTED change in its own worktree: one new file
+  # staged, one existing file edited but left unstaged -- covering both halves
+  # of "staged and/or unstaged, not committed".
+  (
+    cd ../worker-a || exit 1
+    echo worker-a-new >worker-a-only.txt
+    git add worker-a-only.txt
+    echo worker-a-edit >>base.txt
+  )
+
+  # 4. Worker B makes its own, DIFFERENT uncommitted change in its own
+  # worktree, concurrently with (i.e. without any dependency on) step 3 --
+  # simulating the two workers running at the same time.
+  (
+    cd ../worker-b || exit 1
+    echo worker-b-new >worker-b-only.txt
+    git add worker-b-only.txt
+    echo worker-b-edit >>base.txt
+  )
+
+  # 5. Worker A's own working directory and index show ONLY worker A's
+  # changes -- worker B's staged file and edit never crossed over, even
+  # though both worktrees share the same .git object database.
+  run git -C ../worker-a status --porcelain
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"A  worker-a-only.txt"* ]]
+  [[ "$output" == *" M base.txt"* ]]
+  [[ "$output" != *"worker-b-only.txt"* ]]
+  [ ! -e ../worker-a/worker-b-only.txt ]
+  run cat ../worker-a/base.txt
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"worker-a-edit"* ]]
+  [[ "$output" != *"worker-b-edit"* ]]
+
+  # 6. ...and, symmetrically, worker B's working directory and index show
+  # ONLY worker B's changes -- worker A's uncommitted work never leaked the
+  # other way either.
+  run git -C ../worker-b status --porcelain
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"A  worker-b-only.txt"* ]]
+  [[ "$output" == *" M base.txt"* ]]
+  [[ "$output" != *"worker-a-only.txt"* ]]
+  [ ! -e ../worker-b/worker-a-only.txt ]
+  run cat ../worker-b/base.txt
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"worker-b-edit"* ]]
+  [[ "$output" != *"worker-a-edit"* ]]
+
+  # 7. Belt and suspenders: the coordinator's own main checkout -- the shared
+  # tree both worktrees were cut from -- is untouched by either worker's
+  # uncommitted work, confirming isolation runs both worktree-to-worktree AND
+  # worktree-to-main-checkout.
+  run git status --porcelain
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  [ ! -e worker-a-only.txt ]
+  [ ! -e worker-b-only.txt ]
+  run cat base.txt
+  [ "$status" -eq 0 ]
+  [ "$output" = "base" ]
+}
