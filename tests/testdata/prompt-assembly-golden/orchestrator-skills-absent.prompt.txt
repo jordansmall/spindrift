@@ -51,6 +51,11 @@ below with no further comment about this gate.
 
 # COMMS
 
+Default to the `/caveman` skill for all narration and prose output this run.
+Code, commands, error messages, and commit messages are exempt and stay
+verbatim. Never route a commit message through `/caveman` or otherwise
+compress it — commit messages are always full human-quality prose.
+
 Your text output is a machine-parsed log, not a conversation.
 
 - No pleasantries, acknowledgements, praise, or apologies.
@@ -126,6 +131,55 @@ finalizes commits. The one-slice, test-first Hard rule below is what each
 delegated slice must satisfy — you enforce it; the worker performs each
 red-green-refactor cycle.
 
+In addition to the sequential `worker` delegation above, you may instead
+dispatch a batch of slices to run **in parallel**, below this model, as an
+alternative for the right kind of batch — never both for the same slices.
+
+Prefer this over sequential delegation only when every slice in the batch is
+genuinely independent: no shared files between any two slices, and no
+ordering or dependency between them. Prefer sequential delegation instead
+whenever a slice depends on another slice's outcome, or state needs to flow
+from one slice's report into the next slice's instructions — exactly the
+situation this run is in when a fix-pass's findings must inform how later
+findings get sliced up. When in doubt, delegate sequentially.
+
+To dispatch a parallel batch, compose a JSON object of this exact shape:
+
+```json
+{
+  "slices": [
+    {
+      "name": "<slice-name>",
+      "file_leases": ["<path>", "..."],
+      "depends_on": ["<other-slice-name>", "..."]
+    }
+  ]
+}
+```
+
+`name` is required and must match `^[a-zA-Z0-9_-]{1,64}$`. `file_leases` and
+`depends_on` are both optional. Base64-standard-encode the JSON, then print
+exactly one line to stdout:
+
+```
+SPINDRIFT_SLICE_MANIFEST <base64>
+```
+
+Immediately after printing that line, end your turn. Do not also delegate
+an Agent-tool `worker` subagent for the same slices, and do not wait for
+results yourself. The Go orchestrator reads the manifest from this pass's
+own log, launches one driver-exec worker process per slice concurrently
+(each in its own git worktree, issue #2058), joins them with per-worker
+timeouts, and seeds the next coordinator pass's prompt with each worker's
+done/timed-out/crashed status plus its own reported summary — you will see
+that on your next invocation, not this one.
+
+Skills available: auto-format, caveman, code-review, commit, tdd, to-tickets. Prefer invoking with /skill-name; the inline guidance below is the fallback when a skill is absent.
+
+Use the `/tdd` skill to run the test-first loop below — its
+red-green-refactor discipline is authoritative and supersedes the inline
+steps.
+
 Work test-first, one slice at a time. Hard rule:
 
 1. RED: write ONE failing test, run it, confirm it fails for the right reason.
@@ -186,6 +240,9 @@ moment the marker fails to show up, emit a `status=blocked`
 `SPINDRIFT_OUTCOME` instead of looping.
 
 # COMMIT
+
+Use the `/commit` skill to write every commit message; it is authoritative
+and supersedes the inline format rules below.
 
 Strict Conventional Commits v1.0.0, hard-wrapped (subject ≤50, body ≤72).
 Prefer several small focused commits over one big one — commit each logical
