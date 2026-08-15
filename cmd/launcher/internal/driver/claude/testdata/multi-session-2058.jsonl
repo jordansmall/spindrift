@@ -1,20 +1,36 @@
-{"type":"system","subtype":"init","session_id":"session-1"}
-{"type":"assistant","message":{"content":[]},"timestamp":"2026-08-11T15:00:00.000Z"}
-{"type":"result","num_turns":60,"total_cost_usd":2.00,"duration_ms":500000,"duration_api_ms":500000,"usage":{"input_tokens":1000,"output_tokens":200,"cache_read_input_tokens":5000,"cache_creation_input_tokens":100}}
-{"type":"system","subtype":"init","session_id":"session-2"}
-{"type":"result","num_turns":45,"total_cost_usd":3.50,"duration_ms":900000,"duration_api_ms":900000,"usage":{"input_tokens":1000,"output_tokens":200,"cache_read_input_tokens":5000,"cache_creation_input_tokens":100}}
-{"type":"system","subtype":"init","session_id":"session-3"}
-{"type":"result","num_turns":70,"total_cost_usd":4.10,"duration_ms":1200000,"duration_api_ms":1200000,"usage":{"input_tokens":1000,"output_tokens":200,"cache_read_input_tokens":5000,"cache_creation_input_tokens":100}}
-{"type":"system","subtype":"init","session_id":"session-4"}
-{"type":"result","num_turns":55,"total_cost_usd":2.75,"duration_ms":700000,"duration_api_ms":700000,"usage":{"input_tokens":1000,"output_tokens":200,"cache_read_input_tokens":5000,"cache_creation_input_tokens":100}}
-{"type":"system","subtype":"init","session_id":"session-5"}
-{"type":"result","num_turns":65,"total_cost_usd":3.30,"duration_ms":850000,"duration_api_ms":850000,"usage":{"input_tokens":1000,"output_tokens":200,"cache_read_input_tokens":5000,"cache_creation_input_tokens":100}}
-{"type":"system","subtype":"init","session_id":"session-6"}
-{"type":"result","num_turns":50,"total_cost_usd":5.01,"duration_ms":1300000,"duration_api_ms":1300000,"usage":{"input_tokens":1000,"output_tokens":200,"cache_read_input_tokens":5000,"cache_creation_input_tokens":100}}
-{"type":"system","subtype":"init","session_id":"session-7"}
-{"type":"result","num_turns":75,"total_cost_usd":4.90,"duration_ms":760000,"duration_api_ms":760000,"usage":{"input_tokens":1000,"output_tokens":200,"cache_read_input_tokens":5000,"cache_creation_input_tokens":100}}
-{"type":"system","subtype":"init","session_id":"session-8"}
-{"type":"result","num_turns":60,"total_cost_usd":4.40,"duration_ms":900000,"duration_api_ms":900000,"usage":{"input_tokens":1000,"output_tokens":200,"cache_read_input_tokens":5000,"cache_creation_input_tokens":100}}
-{"type":"system","subtype":"init","session_id":"session-9"}
-{"type":"assistant","message":{"content":[]},"timestamp":"2026-08-11T18:14:52.000Z"}
-{"type":"result","num_turns":85,"total_cost_usd":15.38,"duration_ms":526000,"duration_api_ms":526000,"usage":{"input_tokens":1000,"output_tokens":200,"cache_read_input_tokens":5000,"cache_creation_input_tokens":100}}
+{"type":"system","subtype":"init","session_id":"session-1-worker"}
+{"type":"user","message":{"role":"user","content":[{"type":"text","text":"Continue the assigned slice."}]},"session_id":"session-1-worker","timestamp":"2026-08-11T15:00:00.000Z"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Implementing the change now."}]},"session_id":"session-1-worker","timestamp":"2026-08-11T15:01:00.000Z"}
+{"type":"result","num_turns":60,"total_cost_usd":2.00,"duration_ms":540000,"duration_api_ms":500000,"usage":{"input_tokens":420,"output_tokens":95,"cache_read_input_tokens":1850000,"cache_creation_input_tokens":42000}}
+{"type":"system","subtype":"init","session_id":"session-2-reviewer"}
+{"type":"user","message":{"role":"user","content":[{"type":"text","text":"Review the worker's diff."}]},"session_id":"session-2-reviewer","timestamp":"2026-08-11T15:12:45.000Z"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Findings noted, requesting changes."}]},"session_id":"session-2-reviewer","timestamp":"2026-08-11T15:13:45.000Z"}
+{"type":"result","num_turns":45,"total_cost_usd":3.50,"duration_ms":960000,"duration_api_ms":900000,"usage":{"input_tokens":610,"output_tokens":140,"cache_read_input_tokens":3120000,"cache_creation_input_tokens":71000}}
+{"type":"system","subtype":"init","session_id":"session-3-worker"}
+{"type":"user","message":{"role":"user","content":[{"type":"text","text":"Address the review findings."}]},"session_id":"session-3-worker","timestamp":"2026-08-11T15:35:30.000Z"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Findings fixed, re-running checks."}]},"session_id":"session-3-worker","timestamp":"2026-08-11T15:36:30.000Z"}
+{"type":"result","num_turns":70,"total_cost_usd":4.10,"duration_ms":1290000,"duration_api_ms":1200000,"usage":{"input_tokens":380,"output_tokens":88,"cache_read_input_tokens":4780000,"cache_creation_input_tokens":95000}}
+{"type":"system","subtype":"init","session_id":"session-4-reviewer"}
+{"type":"user","message":{"role":"user","content":[{"type":"text","text":"Re-review the updated diff."}]},"session_id":"session-4-reviewer","timestamp":"2026-08-11T16:06:05.000Z"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Approved, one nit remains."}]},"session_id":"session-4-reviewer","timestamp":"2026-08-11T16:07:05.000Z"}
+{"type":"result","num_turns":55,"total_cost_usd":2.75,"duration_ms":750000,"duration_api_ms":700000,"usage":{"input_tokens":290,"output_tokens":64,"cache_read_input_tokens":2340000,"cache_creation_input_tokens":53000}}
+{"type":"system","subtype":"init","session_id":"session-5-worker"}
+{"type":"user","message":{"role":"user","content":[{"type":"text","text":"Fold in the nit and commit."}]},"session_id":"session-5-worker","timestamp":"2026-08-11T16:23:50.000Z"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Nit fixed, committing the slice."}]},"session_id":"session-5-worker","timestamp":"2026-08-11T16:24:50.000Z"}
+{"type":"result","num_turns":65,"total_cost_usd":3.30,"duration_ms":915000,"duration_api_ms":850000,"usage":{"input_tokens":505,"output_tokens":118,"cache_read_input_tokens":3960000,"cache_creation_input_tokens":88000}}
+{"type":"system","subtype":"init","session_id":"session-6-reviewer"}
+{"type":"user","message":{"role":"user","content":[{"type":"text","text":"Review the next slice."}]},"session_id":"session-6-reviewer","timestamp":"2026-08-11T16:45:30.000Z"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Blocking finding: missing test coverage."}]},"session_id":"session-6-reviewer","timestamp":"2026-08-11T16:46:30.000Z"}
+{"type":"result","num_turns":50,"total_cost_usd":5.01,"duration_ms":1390000,"duration_api_ms":1300000,"usage":{"input_tokens":340,"output_tokens":77,"cache_read_input_tokens":2150000,"cache_creation_input_tokens":61000}}
+{"type":"system","subtype":"init","session_id":"session-7-worker"}
+{"type":"user","message":{"role":"user","content":[{"type":"text","text":"Add the missing test coverage."}]},"session_id":"session-7-worker","timestamp":"2026-08-11T17:18:25.000Z"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Coverage added, checks are green."}]},"session_id":"session-7-worker","timestamp":"2026-08-11T17:19:25.000Z"}
+{"type":"result","num_turns":75,"total_cost_usd":4.90,"duration_ms":815000,"duration_api_ms":760000,"usage":{"input_tokens":460,"output_tokens":103,"cache_read_input_tokens":3500000,"cache_creation_input_tokens":79000}}
+{"type":"system","subtype":"init","session_id":"session-8-reviewer"}
+{"type":"user","message":{"role":"user","content":[{"type":"text","text":"Final review pass."}]},"session_id":"session-8-reviewer","timestamp":"2026-08-11T17:37:45.000Z"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Approved."}]},"session_id":"session-8-reviewer","timestamp":"2026-08-11T17:38:45.000Z"}
+{"type":"result","num_turns":60,"total_cost_usd":4.40,"duration_ms":960000,"duration_api_ms":900000,"usage":{"input_tokens":275,"output_tokens":61,"cache_read_input_tokens":1800000,"cache_creation_input_tokens":48000}}
+{"type":"system","subtype":"init","session_id":"session-9-worker"}
+{"type":"user","message":{"role":"user","content":[{"type":"text","text":"Land the change."}]},"session_id":"session-9-worker","timestamp":"2026-08-11T18:13:52.000Z"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Merged."}]},"session_id":"session-9-worker","timestamp":"2026-08-11T18:14:52.000Z"}
+{"type":"result","num_turns":85,"total_cost_usd":15.38,"duration_ms":565000,"duration_api_ms":526000,"usage":{"input_tokens":512,"output_tokens":131,"cache_read_input_tokens":29300000,"cache_creation_input_tokens":132000}}

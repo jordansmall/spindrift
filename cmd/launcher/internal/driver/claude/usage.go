@@ -30,13 +30,16 @@ type usageData struct {
 }
 
 // timestampedEvent decodes the top-level "type" and "timestamp" fields
-// carried by real claude-code stream-json lines (assistant/user/system
-// events, timestamp RFC3339 with milliseconds, e.g.
-// "2026-08-11T19:01:33.187Z"). Used to derive wall-clock span across every
-// session in a log, since sessions can run concurrently (issue #2058) and
-// result events' own duration_ms is not additive. Type is required non-empty
-// so a line that merely contains the substring "timestamp" somewhere in
-// nested, non-driver content (e.g. a tool_result dump) can't widen the span.
+// carried by real claude-code stream-json lines (assistant/user events,
+// timestamp RFC3339 with milliseconds, e.g. "2026-08-11T19:01:33.187Z").
+// Used to derive wall-clock span across every session in a log, since
+// sessions can run sequentially with idle gaps between them or
+// concurrently (issue #2058), and result events' own duration_ms is
+// neither additive nor gap-aware. Unmarshaling only reads top-level keys,
+// so a "timestamp" string nested inside non-driver content (e.g. a
+// tool_result dump) is never captured here regardless of Type; Type is
+// required non-empty only to skip a line that happens to carry a top-level
+// "timestamp" without an identifiable event type.
 type timestampedEvent struct {
 	Type      string `json:"type"`
 	Timestamp string `json:"timestamp"`
@@ -55,12 +58,15 @@ type timestampedEvent struct {
 //
 // DurationMs (wall time) is NOT additive when a log holds more than one
 // session: concurrent sessions would overstate wall time if each session's
-// own duration_ms were summed. For that multi-session case, it is instead
-// derived from the span between the earliest and latest top-level
-// "timestamp" field seen across every driver session line (assistant/user/
-// system events; a line without a "type" field is not one, so it can't
-// widen the span), floored to the longest individual session's own
-// duration_ms. The floor matters two ways: a log whose timestamped lines all
+// own duration_ms were summed, and sequential sessions with idle gaps
+// between them (waiting on review, orchestrator handoff, ...) would
+// understate it. For that multi-session case, it is instead derived from
+// the span between the earliest and latest top-level "timestamp" field
+// seen across the log's assistant/user lines -- in real claude-code
+// stream-json, system/init and result lines don't carry a top-level
+// timestamp, so in practice only assistant/user events contribute --
+// floored to the longest individual session's own duration_ms. The floor
+// matters two ways: a log whose timestamped lines all
 // land on the same instant (or carries none at all) would otherwise report a
 // span of 0, and a span narrower than some session's own duration_ms (the
 // assistant/user timestamps bracketing a session don't capture its full wall
