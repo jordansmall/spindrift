@@ -33,6 +33,12 @@ fi
 : "${GIT_USER_NAME:?GIT_USER_NAME is required}"
 : "${GIT_USER_EMAIL:?GIT_USER_EMAIL is required}"
 
+# BEGIN GENERATED OUTCOME STATUS WORDS -- nix run .#regen -- DO NOT EDIT
+WORK_STATUS_PROSE="ready, blocked, or ambiguous"
+# shellcheck disable=SC2034 # consumed by _subst's envsubst allowlist, wired in a later slice (issue #2504)
+RESEARCH_STATUS_ENUM="recommend|reject|unclear"
+# END GENERATED OUTCOME STATUS WORDS
+
 # configure_env sets up the config/env-derived globals every later phase
 # reads; it is not itself a numbered phase, just the setup every phase shares.
 configure_env() {
@@ -1335,7 +1341,7 @@ main() {
   local recovery_prompt
   if [ -n "$_last_near_miss_line" ]; then
     recovery_prompt="Your last message printed a line that looks like a SPINDRIFT_OUTCOME marker but does not parse, so the run has no usable outcome: ${_last_near_miss_line}
-Print the required line exactly once as your final message, using this grammar -- one line, space-delimited fields: SPINDRIFT_OUTCOME issue=<issue> landing=<landing-ref> status=<status> note=<short reason>. For this run, that is: SPINDRIFT_OUTCOME issue=${ISSUE_NUMBER:-} landing=${BRANCH} status=<status> note=<short reason> -- only fill in status and note. The only valid status values are ready and blocked. Run any remaining checks/gates in the foreground first, then print that line."
+Print the required line exactly once as your final message, using this grammar -- one line, space-delimited fields: SPINDRIFT_OUTCOME issue=<issue> landing=<landing-ref> status=<status> note=<short reason>. For this run, that is: SPINDRIFT_OUTCOME issue=${ISSUE_NUMBER:-} landing=${BRANCH} status=<status> note=<short reason> -- only fill in status and note. The only valid status values are ${WORK_STATUS_PROSE}. Run any remaining checks/gates in the foreground first, then print that line."
   else
     recovery_prompt="The run ended without printing a SPINDRIFT_OUTCOME line. Finish the workflow: run any remaining checks/gates in the foreground, then print the required SPINDRIFT_OUTCOME line as your final message."
   fi
