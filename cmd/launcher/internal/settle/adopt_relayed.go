@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/forge"
@@ -40,8 +39,12 @@ import (
 // genuinely never finished (no self-report, or one that itself reports
 // something other than success) is never granted this override.
 func (s *Settle) tryAdoptRelayedBranch(d dispatch.Dispatcher, num string, gen uint64, result dispatch.Result) bool {
+	// sit reads the shared adoption-evidence fingerprint (issue #2501);
+	// openPRFound is false here -- this function never checks for one, see
+	// Situation's own doc comment.
+	sit := s.situationFor(num, false, result)
 	if result.Resolved.Provenance != outcome.ProvenanceSynthetic || !s.readOnly || s.pr == nil ||
-		!result.Resolved.SelfReportFound || !isSuccessSelfReport(result.Resolved.SelfReport.Status) {
+		!sit.SelfReportSuccess {
 		return false
 	}
 
@@ -69,8 +72,11 @@ func (s *Settle) tryAdoptRelayedBranch(d dispatch.Dispatcher, num string, gen ui
 // already sits inside the `!result.Resolved.Found` branch, so
 // Resolved.Found is always false on entry.
 func (s *Settle) tryAdoptRelayedBranchNoOutcome(d dispatch.Dispatcher, num string, gen uint64, result dispatch.Result) bool {
-	if !s.readOnly || s.pr == nil ||
-		!result.Resolved.SelfReportFound || !isSuccessSelfReport(result.Resolved.SelfReport.Status) {
+	// sit reads the shared adoption-evidence fingerprint (issue #2501);
+	// openPRFound is false here -- this function never checks for one, see
+	// Situation's own doc comment.
+	sit := s.situationFor(num, false, result)
+	if !s.readOnly || s.pr == nil || !sit.SelfReportSuccess {
 		return false
 	}
 
@@ -155,18 +161,22 @@ func (s *Settle) adoptAndGate(d dispatch.Dispatcher, num string, gen uint64, res
 // present bundle backs the local push-only shape, or (for every other shape)
 // the self-report isn't a genuine success.
 func (s *Settle) SettleRelayedBranch(d dispatch.Dispatcher, num string, gen uint64, result dispatch.Result) bool {
-	selfReportOK := result.Resolved.SelfReportFound && isSuccessSelfReport(result.Resolved.SelfReport.Status)
+	// sit reads the shared adoption-evidence fingerprint (issue #2501);
+	// openPRFound is false -- by the time recover calls this its own caller
+	// already established no open PR exists, but that fact isn't threaded
+	// into this function's signature, see Situation's own doc comment.
+	sit := s.situationFor(num, false, result)
 	cf := s.cfForNum(num)
 	if _, ok := cf.(forge.BundleRelay); ok && s.pr == nil {
-		if selfReportOK {
+		if sit.SelfReportSuccess {
 			return s.landRelayedBranchPushOnly(d, num, gen, "genuine success self-report; relayed branch landed")
 		}
-		if s.bundlePresent(num) {
+		if sit.BundlePresent {
 			return s.landRelayedBranchPushOnly(d, num, gen, "bundle present in outbox; relayed branch landed")
 		}
 		return false
 	}
-	if !selfReportOK {
+	if !sit.SelfReportSuccess {
 		return false
 	}
 	return s.adoptAndGate(d, num, gen, result, "genuine success self-report; PR opened on relayed branch")
@@ -199,9 +209,9 @@ func (s *Settle) landRelayedBranchPushOnly(d dispatch.Dispatcher, num string, ge
 }
 
 // adoptRelayedBranch is tryAdoptRelayedBranch's PR-opening step: relay num's
-// finished branch out of the outbox and open a real PR on it, the same
-// relay-then-create shape hostMediateDraftPR uses for a genuine
-// status=ready outcome.
+// finished branch out of the outbox and open a real PR on it, delegating to
+// Mediation.Open — the same relay-then-create shape hostMediateDraftPR uses
+// for a genuine status=ready outcome.
 //
 // branch is derived from cf.AgentBranch(num), never result.Resolved.Outcome.Landing
 // (issue #1949, same reasoning as hostMediateDraftPR/relayBlockedWork): a
@@ -209,67 +219,30 @@ func (s *Settle) landRelayedBranchPushOnly(d dispatch.Dispatcher, num string, ge
 // but not the one ref its own bundle is actually keyed to host-side.
 //
 // Returns ok=false — with no PR opened and no side effect the caller must
-// unwind — whenever the Code Forge lacks either capability, OutboxDir is
-// unset, or RelayBundle itself fails (an absent/empty bundle means there is
-// no finished branch to adopt at all, so the caller falls back to the
-// normal blocked handling rather than open an empty PR on nothing).
-//
-// Unlike hostMediateDraftPR, a missing or malformed PR-intent line does NOT
-// block here: hostMediateDraftPR's Box printed status=ready and had every
+// unwind — whenever Open fails for any reason: the Code Forge lacks either
+// capability, OutboxDir is unset, or RelayBundle itself fails (an
+// absent/empty bundle means there is no finished branch to adopt at all, so
+// the caller falls back to the normal blocked handling rather than open an
+// empty PR on nothing). No error inspection is needed here — unlike
+// hostMediateDraftPR, this call passes FallbackDefault, so Open never
+// returns ErrNoPRIntent: a missing or malformed PR-intent line does NOT
+// block here. hostMediateDraftPR's Box printed status=ready and had every
 // opportunity (including issue #2045's nudge) to leave a usable intent line,
 // so a missing one there is treated as a genuine hand-off failure. This
 // path's Box instead crashed or was cut short before its final print — it
 // may never have reached the PR-intent step at all — so a missing line here
-// falls back to an issue-derived default rather than blocking the one
-// signal (a genuine success self-report) that got the run this far.
+// falls back to an issue-derived default (Mediation.defaultAdoptPRText)
+// rather than blocking the one signal (a genuine success self-report) that
+// got the run this far.
 func (s *Settle) adoptRelayedBranch(num string, result dispatch.Result) (string, bool) {
 	cf := s.cfForNum(num)
 	branch := cf.AgentBranch(num)
-
-	br, ok := cf.(forge.BundleRelay)
-	if !ok {
-		return "", false
-	}
-	dpc, ok := cf.(forge.DraftPRCreator)
-	if !ok {
-		return "", false
-	}
-	if s.cfg.OutboxDir == nil {
-		return "", false
-	}
-	if err := br.RelayBundle(s.cfg.OutboxDir(num), branch); err != nil {
-		return "", false
-	}
-
-	title, body, ok := parsePRIntent(result)
-	if !ok {
-		title, body = s.defaultAdoptPRText(num)
-	}
-	body = ensureClosesReference(body, num, s.it)
-
-	url, _, err := dpc.CreateDraftPR(title, body, s.cfg.BaseBranch, branch)
+	m := NewMediation(cf, s.it, s.cfg.OutboxDir, s.cfg.BaseBranch)
+	url, _, _, err := m.Open(num, branch, result, FallbackDefault)
 	if err != nil {
 		return "", false
 	}
 	return url, true
-}
-
-// defaultAdoptPRText builds the fallback title/body adoptRelayedBranch uses
-// when the box's log carried no usable PR-intent line — a real possibility
-// here, since this path's box may have crashed before ever reaching that
-// print. title prefers the tracker issue's own title when available, falling
-// back to a generic "Adopt agent work for #<num>" when the issue lookup
-// fails or the issue carries no title. body explains the adoption's
-// provenance; adoptRelayedBranch's unconditional ensureClosesReference call
-// is what guarantees the "Closes #<num>" reference, the same way an
-// agent-authored PR body normally gets one.
-func (s *Settle) defaultAdoptPRText(num string) (title, body string) {
-	title = fmt.Sprintf("Adopt agent work for #%s", num)
-	if iss, err := s.it.Issue(num); err == nil && strings.TrimSpace(iss.Title) != "" {
-		title = iss.Title
-	}
-	body = "Auto-adopted PR for the relayed agent branch: the run's driver self-reported success but its outcome line was missing or degraded to the synthetic backstop (ADR 0036/0039); this PR was opened host-side from the relayed outbox bundle."
-	return title, body
 }
 
 // tryMarkRecoverable is settle's local push-only counterpart to
