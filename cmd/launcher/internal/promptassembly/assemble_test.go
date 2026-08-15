@@ -407,6 +407,9 @@ func TestAssembleHandoff(t *testing.T) {
 			if result.Handoff.ReviewModel != "" {
 				t.Errorf("Handoff.ReviewModel = %q, want empty", result.Handoff.ReviewModel)
 			}
+			if result.Handoff.WorkerPromptFile != "" {
+				t.Errorf("Handoff.WorkerPromptFile = %q, want empty (issue #2059)", result.Handoff.WorkerPromptFile)
+			}
 		})
 	}
 }
@@ -1020,6 +1023,9 @@ func TestAssembleOrchestratorReviewerDrop(t *testing.T) {
 	if !strings.Contains(result.Handoff.ReviewPromptFile, "#2349") {
 		t.Errorf("Handoff.ReviewPromptFile missing substituted ISSUE_NUMBER:\n%s", result.Handoff.ReviewPromptFile)
 	}
+	if result.Handoff.WorkerPromptFile == "" {
+		t.Fatal("Handoff.WorkerPromptFile is empty, want non-empty (issue #2059)")
+	}
 
 	var parsed map[string]json.RawMessage
 	if err := json.Unmarshal([]byte(result.AgentsJSON), &parsed); err != nil {
@@ -1062,6 +1068,9 @@ func TestAssembleOrchestratorNoReviewerKey(t *testing.T) {
 	if result.Handoff.ReviewPromptFile == "" {
 		t.Error("Handoff.ReviewPromptFile is empty, want non-empty even with no reviewer configured")
 	}
+	if result.Handoff.WorkerPromptFile == "" {
+		t.Error("Handoff.WorkerPromptFile is empty, want non-empty even with no reviewer configured (issue #2059)")
+	}
 }
 
 // TestAssembleOrchestratorEmptyAgentsTemplate covers the orchestrator-on
@@ -1086,6 +1095,9 @@ func TestAssembleOrchestratorEmptyAgentsTemplate(t *testing.T) {
 	}
 	if result.Handoff.ReviewPromptFile == "" {
 		t.Error("Handoff.ReviewPromptFile is empty, want non-empty")
+	}
+	if result.Handoff.WorkerPromptFile == "" {
+		t.Error("Handoff.WorkerPromptFile is empty, want non-empty (issue #2059)")
 	}
 }
 
@@ -1260,6 +1272,9 @@ func TestAssembleOrchestratorFixPassCovered(t *testing.T) {
 	if result.Handoff.ReviewModel != "review-model-x" {
 		t.Errorf("Handoff.ReviewModel = %q, want %q (extraction is unconditional whenever the orchestrator is on)", result.Handoff.ReviewModel, "review-model-x")
 	}
+	if result.Handoff.WorkerPromptFile != "" {
+		t.Errorf("Handoff.WorkerPromptFile = %q, want empty (fix pass, not the default fresh-work-dispatch path, issue #2059)", result.Handoff.WorkerPromptFile)
+	}
 }
 
 // TestAssembleOrchestratorResearchCovered covers that OrchestratorEnabled ==
@@ -1290,6 +1305,9 @@ func TestAssembleOrchestratorResearchCovered(t *testing.T) {
 	}
 	if result.Handoff.ReviewModel != "review-model-x" {
 		t.Errorf("Handoff.ReviewModel = %q, want %q (extraction is unconditional whenever the orchestrator is on)", result.Handoff.ReviewModel, "review-model-x")
+	}
+	if result.Handoff.WorkerPromptFile != "" {
+		t.Errorf("Handoff.WorkerPromptFile = %q, want empty (research dispatch, not the default fresh-work-dispatch path, issue #2059)", result.Handoff.WorkerPromptFile)
 	}
 }
 
@@ -1332,6 +1350,9 @@ func TestAssembleOrchestratorOffReviewerFlowsThroughGenericLoop(t *testing.T) {
 	}
 	if result.Handoff.ReviewPromptFile != "" {
 		t.Errorf("Handoff.ReviewPromptFile = %q, want empty (orchestrator off)", result.Handoff.ReviewPromptFile)
+	}
+	if result.Handoff.WorkerPromptFile != "" {
+		t.Errorf("Handoff.WorkerPromptFile = %q, want empty (orchestrator off, issue #2059)", result.Handoff.WorkerPromptFile)
 	}
 }
 

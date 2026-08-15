@@ -54,6 +54,17 @@ type Handoff struct {
 	// jq's `.reviewer.model // empty` (entrypoint.sh: 1096).
 	ReviewPromptFile string
 	ReviewModel      string
+
+	// WorkerPromptFile is the Go orchestrator's own driver-exec-spawned
+	// parallel worker prompt (issue #2059, #2058) -- the base prompt a
+	// coordinator's manifest-emission dispatches into one worktree per
+	// slice. It is populated under the exact same condition as
+	// ReviewPromptFile above (Invoker "orchestrator", kind "work",
+	// FixPass == 0): only the default fresh-work dispatch cell ever
+	// fans out slices this way -- research and fix-pass cells leave it
+	// empty even with the orchestrator on, for the same reasons
+	// ReviewPromptFile does.
+	WorkerPromptFile string
 }
 
 // checkCoveredCell validates that e sits in one of Assemble's covered Env
@@ -387,6 +398,16 @@ func Assemble(e Env, reg Registry) (Result, error) {
 			return Result{}, fmt.Errorf("read review-prompt.md: %w", err)
 		}
 		result.Handoff.ReviewPromptFile = reviewPromptText
+
+		// worker_prompt_rendered (issue #2059, #2058): the Go
+		// orchestrator's own driver-exec worker prompt, gated and
+		// rendered identically to review-prompt.md above.
+		workerPromptPath := filepath.Join(e.PromptsDir, "worker-prompt.md")
+		workerPromptText, err := renderFile(workerPromptPath, allowlist)
+		if err != nil {
+			return Result{}, fmt.Errorf("read worker-prompt.md: %w", err)
+		}
+		result.Handoff.WorkerPromptFile = workerPromptText
 	}
 
 	// Agents JSON (entrypoint.sh: 1077-1116). Empty template means no
