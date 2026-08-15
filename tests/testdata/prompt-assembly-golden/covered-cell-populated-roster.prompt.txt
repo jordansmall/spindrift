@@ -131,7 +131,7 @@ finalizes commits. The one-slice, test-first Hard rule below is what each
 delegated slice must satisfy — you enforce it; the worker performs each
 red-green-refactor cycle.
 
-Skills available: caveman, code-review, commit, tdd. Prefer invoking with /skill-name; the inline guidance below is the fallback when a skill is absent.
+Skills available: auto-format, caveman, code-review, commit, tdd, to-tickets. Prefer invoking with /skill-name; the inline guidance below is the fallback when a skill is absent.
 
 Use the `/tdd` skill to run the test-first loop below — its
 red-green-refactor discipline is authoritative and supersedes the inline
