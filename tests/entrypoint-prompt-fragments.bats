@@ -731,8 +731,8 @@ setup() {
   export AUTO_LINT=1
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  ! grep -q 'run\.# AUTO-LINT' "$DRIVER_PROMPT_FILE"
-  ! grep -q 'run\.# COMMIT' "$DRIVER_PROMPT_FILE"
+  ! grep -q 'changed\.# AUTO-LINT' "$DRIVER_PROMPT_FILE"
+  ! grep -q 'changed\.# COMMIT' "$DRIVER_PROMPT_FILE"
 }
 
 @test "FILE ISSUES step stays separated from LAND THE CHANGE" {
