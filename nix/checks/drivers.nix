@@ -10,6 +10,7 @@
 let
   driverRegistry = import ../../lib/drivers/default.nix { inherit (pkgs) lib; };
   rosterLib = import ../../lib/roster.nix { inherit (pkgs) lib; };
+  rosterHelper = import ../../lib/roster-schema-defaults.nix { inherit (pkgs) lib; };
   inherit (pkgs.lib)
     assertMsg
     hasInfix
@@ -985,14 +986,14 @@ in
       rendered = claudeEntry.agentsJsonTemplate { inherit roster; };
       parsed = builtins.fromJSON rendered;
     in
-    assert assertMsg (parsed.scout.effort or "" == "medium")
-      "claude agentsJsonTemplate must render defaultRoster's scout effort default (medium), got: ${builtins.toJSON (parsed.scout or { })}";
-    assert assertMsg (parsed.reviewer.effort or "" == "high")
-      "claude agentsJsonTemplate must render defaultRoster's reviewer effort default (high), got: ${builtins.toJSON (parsed.reviewer or { })}";
-    assert assertMsg (parsed.filer.effort or "" == "medium")
-      "claude agentsJsonTemplate must render defaultRoster's filer effort default (medium), got: ${builtins.toJSON (parsed.filer or { })}";
-    assert assertMsg (parsed.worker.effort or "" == "high")
-      "claude agentsJsonTemplate must render defaultRoster's worker effort default (high), got: ${builtins.toJSON (parsed.worker or { })}";
+    assert assertMsg (parsed.scout.effort or "" == rosterHelper.rosterDefaults.scout.effort)
+      "claude agentsJsonTemplate must render defaultRoster's scout effort default (${rosterHelper.rosterDefaults.scout.effort}), got: ${builtins.toJSON (parsed.scout or { })}";
+    assert assertMsg (parsed.reviewer.effort or "" == rosterHelper.rosterDefaults.reviewer.effort)
+      "claude agentsJsonTemplate must render defaultRoster's reviewer effort default (${rosterHelper.rosterDefaults.reviewer.effort}), got: ${builtins.toJSON (parsed.reviewer or { })}";
+    assert assertMsg (parsed.filer.effort or "" == rosterHelper.rosterDefaults.filer.effort)
+      "claude agentsJsonTemplate must render defaultRoster's filer effort default (${rosterHelper.rosterDefaults.filer.effort}), got: ${builtins.toJSON (parsed.filer or { })}";
+    assert assertMsg (parsed.worker.effort or "" == rosterHelper.rosterDefaults.worker.effort)
+      "claude agentsJsonTemplate must render defaultRoster's worker effort default (${rosterHelper.rosterDefaults.worker.effort}), got: ${builtins.toJSON (parsed.worker or { })}";
     pkgs.runCommand "drivers-claude-agents-json-default-roster-effort" { } "touch $out";
 
   # Same defaultRoster defaults as drivers-claude-agents-json-default-roster-effort
@@ -1008,13 +1009,13 @@ in
       filerFile = rendered.".config/opencode/agents/filer.md" or "";
       workerFile = rendered.".config/opencode/agents/worker.md" or "";
     in
-    assert assertMsg (hasInfix ''reasoningEffort: "medium"'' scoutFile)
-      "opencode agentFilesTemplate must render defaultRoster's scout effort default (medium), got: ${scoutFile}";
-    assert assertMsg (hasInfix ''reasoningEffort: "high"'' reviewerFile)
-      "opencode agentFilesTemplate must render defaultRoster's reviewer effort default (high), got: ${reviewerFile}";
-    assert assertMsg (hasInfix ''reasoningEffort: "medium"'' filerFile)
-      "opencode agentFilesTemplate must render defaultRoster's filer effort default (medium), got: ${filerFile}";
-    assert assertMsg (hasInfix ''reasoningEffort: "high"'' workerFile)
-      "opencode agentFilesTemplate must render defaultRoster's worker effort default (high), got: ${workerFile}";
+    assert assertMsg (hasInfix ''reasoningEffort: "${rosterHelper.rosterDefaults.scout.effort}"'' scoutFile)
+      "opencode agentFilesTemplate must render defaultRoster's scout effort default (${rosterHelper.rosterDefaults.scout.effort}), got: ${scoutFile}";
+    assert assertMsg (hasInfix ''reasoningEffort: "${rosterHelper.rosterDefaults.reviewer.effort}"'' reviewerFile)
+      "opencode agentFilesTemplate must render defaultRoster's reviewer effort default (${rosterHelper.rosterDefaults.reviewer.effort}), got: ${reviewerFile}";
+    assert assertMsg (hasInfix ''reasoningEffort: "${rosterHelper.rosterDefaults.filer.effort}"'' filerFile)
+      "opencode agentFilesTemplate must render defaultRoster's filer effort default (${rosterHelper.rosterDefaults.filer.effort}), got: ${filerFile}";
+    assert assertMsg (hasInfix ''reasoningEffort: "${rosterHelper.rosterDefaults.worker.effort}"'' workerFile)
+      "opencode agentFilesTemplate must render defaultRoster's worker effort default (${rosterHelper.rosterDefaults.worker.effort}), got: ${workerFile}";
     pkgs.runCommand "drivers-opencode-agent-files-default-roster-effort" { } "touch $out";
 }
