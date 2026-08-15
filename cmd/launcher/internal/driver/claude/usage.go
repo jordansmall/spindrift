@@ -29,12 +29,16 @@ type usageData struct {
 	CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
 }
 
-// timestampedEvent decodes just the top-level "timestamp" field carried by
-// real claude-code stream-json lines (assistant/user events, RFC3339 with
-// milliseconds, e.g. "2026-08-11T19:01:33.187Z"). Used to derive wall-clock
-// span across every session in a log, since sessions can run concurrently
-// (issue #2058) and result events' own duration_ms is not additive.
+// timestampedEvent decodes the top-level "type" and "timestamp" fields
+// carried by real claude-code stream-json lines (assistant/user/system
+// events, timestamp RFC3339 with milliseconds, e.g.
+// "2026-08-11T19:01:33.187Z"). Used to derive wall-clock span across every
+// session in a log, since sessions can run concurrently (issue #2058) and
+// result events' own duration_ms is not additive. Type is required non-empty
+// so a line that merely contains the substring "timestamp" somewhere in
+// nested, non-driver content (e.g. a tool_result dump) can't widen the span.
 type timestampedEvent struct {
+	Type      string `json:"type"`
 	Timestamp string `json:"timestamp"`
 }
 
@@ -49,22 +53,26 @@ type timestampedEvent struct {
 // OutputTokens, CacheReadInputTokens, CacheCreationInputTokens,
 // TotalCostUSD, DurationApiMs, and NumTurns are all additive this way.
 //
-// DurationMs (wall time) is NOT additive: concurrent sessions would
-// overstate wall time if each session's own duration_ms were summed.
-// Instead it is derived from the span between the earliest and latest
-// top-level "timestamp" field seen across every line in the log (not just
-// result events). When no timestamp is found anywhere in the log (e.g. a
-// minimal fixture with only bare result events), it falls back to summing
-// each result event's own duration_ms, so a single-result-event log with
-// no timestamps produces output identical to before this aggregation
-// change.
+// DurationMs (wall time) is NOT additive when a log holds more than one
+// session: concurrent sessions would overstate wall time if each session's
+// own duration_ms were summed. For that multi-session case, it is instead
+// derived from the span between the earliest and latest top-level
+// "timestamp" field seen across every driver session line (assistant/user/
+// system events; a line without a "type" field is not one, so it can't
+// widen the span). A single-session log (at most one result event) always
+// reports that session's own duration_ms directly, timestamps or not —
+// never the span — matching output from before this aggregation change:
+// the assistant/user timestamps bracketing a session don't capture the
+// process's full wall time (startup, network, render), so the span
+// systematically understates it, and a log with only one timestamped line
+// would otherwise collapse to a 0s span.
 //
 // Returns (usage.Usage{}, false, nil) when no result event is present or the
 // file does not exist. Returns (usage.Usage{}, false, err) on I/O errors
 // other than file-not-found or oversized lines.
 func sumInLog(path string) (usage.Usage, bool, error) {
 	var sum usage.Usage
-	found := false
+	resultCount := 0
 	var durationMsSum int64
 	var earliest, latest time.Time
 	haveTimestamp := false
@@ -74,7 +82,7 @@ func sumInLog(path string) (usage.Usage, bool, error) {
 
 		if strings.Contains(s, `"timestamp"`) {
 			var ts timestampedEvent
-			if jsonErr := json.Unmarshal([]byte(s), &ts); jsonErr == nil && ts.Timestamp != "" {
+			if jsonErr := json.Unmarshal([]byte(s), &ts); jsonErr == nil && ts.Type != "" && ts.Timestamp != "" {
 				if t, parseErr := time.Parse(time.RFC3339Nano, ts.Timestamp); parseErr == nil {
 					if !haveTimestamp || t.Before(earliest) {
 						earliest = t
@@ -90,7 +98,7 @@ func sumInLog(path string) (usage.Usage, bool, error) {
 		if strings.Contains(s, `"type":"result"`) {
 			var ev resultEvent
 			if jsonErr := json.Unmarshal([]byte(s), &ev); jsonErr == nil && ev.Type == "result" {
-				found = true
+				resultCount++
 				sum.InputTokens += ev.UsageData.InputTokens
 				sum.OutputTokens += ev.UsageData.OutputTokens
 				sum.CacheReadInputTokens += ev.UsageData.CacheReadInputTokens
@@ -106,11 +114,11 @@ func sumInLog(path string) (usage.Usage, bool, error) {
 		return usage.Usage{}, false, err
 	}
 
-	if !found {
+	if resultCount == 0 {
 		return usage.Usage{}, false, nil
 	}
 
-	if haveTimestamp {
+	if haveTimestamp && resultCount > 1 {
 		sum.DurationMs = latest.Sub(earliest).Milliseconds()
 	} else {
 		sum.DurationMs = durationMsSum
