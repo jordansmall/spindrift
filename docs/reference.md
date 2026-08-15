@@ -244,8 +244,9 @@ key/line entirely on both Drivers — the same inherit-session-effort behavior
 as today.
 
 `defaultRoster` itself now ships a fixed default `effort` per agent (issue
-#2386): `scout`/`filer` at `"medium"`, `reviewer`/`worker` at `"high"`. This
-is a literal on each of `defaultRoster`'s four built-in entries, not a
+#2386), from `lib/roster-schema-defaults.nix`'s `rosterDefaults` table:
+`scout=medium/reviewer=high/filer=medium/worker=high`. This is a per-name
+table lookup on each of `defaultRoster`'s four built-in entries, not a
 `normalizeRoster`-level default — a freshly-baked image that omits `roster`
 entirely (and so falls back to `defaultRoster`) runs each subagent at a
 differentiated effort out of the box, with no Consumer hand-authoring one. A
@@ -280,8 +281,8 @@ default is empty) and the dogfood genuinely depends on it for #393's
 unmentioned and so inherit their `lib/env-schema.nix` defaults (issue
 #2434) instead: `claude-haiku-4-5-20251001`, `claude-opus-5` (issue #2433),
 and `claude-sonnet-5` respectively. The dogfood still inherits
-`defaultRoster`'s built-in scout=medium/reviewer=high/filer=medium/worker=high
-efforts unchanged (issue #2386), and separately sets
+`defaultRoster`'s built-in per-agent effort defaults unchanged (issue #2386,
+stated once above), and separately sets
 `defaults.reviewEffort = "high"` so the orchestrator's own code-owned review
 pass (issue #2387) runs at the same effort as the roster's `reviewer` entry,
 on the same model (issue #2427): the orchestrator captures the reviewer
