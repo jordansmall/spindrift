@@ -51,9 +51,7 @@ import (
 // force-push and draft-PR head at will. Deriving branch host-side pins both
 // to the one ref the Box's PR is actually expected to hand off on.
 func (s *Settle) hostMediateDraftPR(num string, result dispatch.Result) (string, bool) {
-	cf := s.cfForNum(num)
-	branch := cf.AgentBranch(num)
-	m := NewMediation(cf, s.it, s.cfg.OutboxDir, s.cfg.BaseBranch)
+	branch, m := s.mediationFor(num)
 
 	// Mediation.Open's own upfront capability/config checks (m.br == nil,
 	// m.dpc == nil, m.outboxDir == nil) guard the same preconditions the
@@ -110,16 +108,14 @@ func (s *Settle) hostMediateDraftPR(num string, result dispatch.Result) (string,
 // that must also serve a push-only forge with nothing to create a PR
 // against, so that shape keeps its own direct RelayBundle call instead.
 func (s *Settle) relayBlockedWork(num string, result dispatch.Result) {
-	cf := s.cfForNum(num)
-	branch := cf.AgentBranch(num)
-	br, ok := cf.(forge.BundleRelay)
-	if !ok || s.cfg.OutboxDir == nil {
+	branch, m := s.mediationFor(num)
+	if m.br == nil || s.cfg.OutboxDir == nil {
 		return
 	}
 
-	if _, ok := cf.(forge.DraftPRCreator); !ok {
+	if m.dpc == nil {
 		// Push-only shape: no draft-PR step to unify, so relay directly.
-		if err := br.RelayBundle(s.cfg.OutboxDir(num), branch); err != nil {
+		if err := m.br.RelayBundle(s.cfg.OutboxDir(num), branch); err != nil {
 			if errors.Is(err, forge.ErrBundleNotFound) {
 				// An absent outbox bundle on the blocked path means the
 				// branch range was empty — there was simply no work to
@@ -135,7 +131,6 @@ func (s *Settle) relayBlockedWork(num string, result dispatch.Result) {
 		return
 	}
 
-	m := NewMediation(cf, s.it, s.cfg.OutboxDir, s.cfg.BaseBranch)
 	if _, _, _, err := m.Open(num, branch, result, FallbackNone); err != nil {
 		switch {
 		case errors.Is(err, ErrNoPRIntent):

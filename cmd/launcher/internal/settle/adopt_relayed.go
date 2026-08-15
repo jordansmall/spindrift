@@ -250,9 +250,7 @@ func (s *Settle) landRelayedBranchPushOnly(d dispatch.Dispatcher, num string, ge
 // rather than blocking the one signal (a genuine success self-report) that
 // got the run this far.
 func (s *Settle) adoptRelayedBranch(num string, result dispatch.Result) (string, bool) {
-	cf := s.cfForNum(num)
-	branch := cf.AgentBranch(num)
-	m := NewMediation(cf, s.it, s.cfg.OutboxDir, s.cfg.BaseBranch)
+	branch, m := s.mediationFor(num)
 	url, _, _, err := m.Open(num, branch, result, FallbackDefault)
 	if err != nil {
 		return "", false

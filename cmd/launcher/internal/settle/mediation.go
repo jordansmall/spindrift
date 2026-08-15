@@ -37,8 +37,10 @@ const (
 
 // ErrNoPRIntent is Open's sentinel for FallbackNone (and FallbackReconstruct
 // when reconstruction also fails) -- callers use errors.Is to distinguish
-// this from a genuine relay/create failure.
-var ErrNoPRIntent = errors.New("settle: no usable PR-intent line found")
+// this from a genuine relay/create failure. Its text is also the operator-
+// facing message blockHandoff posts verbatim (via %v), so it carries no
+// "settle:" package prefix that would otherwise stutter into that comment.
+var ErrNoPRIntent = errors.New("no usable PR-intent line found in the box's log")
 
 // errRelayBundle wraps Open's RelayBundle-failure return, letting callers
 // distinguish it from a draft-PR-create failure via errors.Is instead of
@@ -46,7 +48,7 @@ var ErrNoPRIntent = errors.New("settle: no usable PR-intent line found")
 var errRelayBundle = errors.New("settle: relay bundle failed")
 
 // errCreateDraftPR wraps Open's CreateDraftPR-failure return, the
-// errCreateDraftPR analog to errRelayBundle above.
+// CreateDraftPR analog to errRelayBundle above.
 var errCreateDraftPR = errors.New("settle: draft PR create failed")
 
 // Mediation coordinates the host-mediated relay-then-create-PR hand-off
@@ -62,6 +64,15 @@ type Mediation struct {
 	br  forge.BundleRelay
 	dpc forge.DraftPRCreator
 	bcs forge.BundleCommitSubjects
+}
+
+// mediationFor resolves num's own Code Forge (s.cfForNum) and builds the
+// branch and Mediation every host-mediated hand-off call site
+// (hostMediateDraftPR, relayBlockedWork, adoptRelayedBranch) shares, instead
+// of each repeating the same NewMediation construction inline.
+func (s *Settle) mediationFor(num string) (branch string, m *Mediation) {
+	cf := s.cfForNum(num)
+	return cf.AgentBranch(num), NewMediation(cf, s.it, s.cfg.OutboxDir, s.cfg.BaseBranch)
 }
 
 // NewMediation builds a Mediation over cf/it, discovering cf's optional
