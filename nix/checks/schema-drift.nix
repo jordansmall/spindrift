@@ -10,6 +10,17 @@ let
   schema = import ../../lib/env-schema.nix;
   rosterDefaults =
     (import ../../lib/roster-schema-defaults.nix { inherit (pkgs) lib; }).rosterDefaults;
+  # Shared by roster-doc-efforts and roster-doc-efforts-guard so the doc's
+  # expected effort string and its name list/format can't drift between the
+  # check and its regression guard.
+  wantEfforts = pkgs.lib.concatStringsSep "/" (
+    map (n: "${n}=${rosterDefaults.${n}.effort}") [
+      "scout"
+      "reviewer"
+      "filer"
+      "worker"
+    ]
+  );
 
   # Shared by schema-choices and schema-secret-choices-guard (issue #872) so
   # the guard predicate is defined exactly once and can be exercised against
@@ -184,10 +195,10 @@ let
 
   # Isolates the "#### Subagent roster" section of a docs/reference.md-shaped
   # doc string, else throws. Shared by assertRosterDocFlakePathOk and
-  # assertRosterDocEffortsOk so the stack-overflow-sensitive split (running
-  # the regex-based `hasInfix`, i.e. `builtins.match ".*x.*"`, over the whole
-  # ~190KB doc blows the evaluator's stack, issue #2436) is defined once, not
-  # once per assertion.
+  # assertRosterDocEffortsOk so the split -- needed because running the
+  # regex-based `hasInfix`, i.e. `builtins.match ".*x.*"`, over the whole
+  # ~190KB doc blows the evaluator's stack (issue #2436) -- is defined once,
+  # not once per assertion.
   rosterDocSection =
     doc:
     let
@@ -1168,22 +1179,13 @@ in
     pkgs.runCommand "roster-doc-flake-path-guard" { } "touch $out";
 
   # docs/reference.md's Subagent roster section restates
-  # lib/roster-schema-defaults.nix's rosterDefaults effort literals as prose
-  # (`scout=medium/reviewer=high/filer=medium/worker=high`); this pins that
-  # string to rosterDefaults' actual effort values instead of letting the two
-  # drift silently (issue #2506), the same way roster-doc-flake-path pins the
+  # lib/roster-schema-defaults.nix's rosterDefaults effort values as prose
+  # (name=effort per agent, slash-separated); this pins that string to
+  # rosterDefaults' actual effort values instead of letting the two drift
+  # silently (issue #2506), the same way roster-doc-flake-path pins the
   # section's flake-path prose to lib/structural-paths.nix.
   roster-doc-efforts =
     let
-      inherit (pkgs.lib) concatStringsSep;
-      wantEfforts = concatStringsSep "/" (
-        map (n: "${n}=${rosterDefaults.${n}.effort}") [
-          "scout"
-          "reviewer"
-          "filer"
-          "worker"
-        ]
-      );
       doc = builtins.readFile ../../docs/reference.md;
     in
     assert (assertRosterDocEffortsOk { inherit doc wantEfforts; }) == doc;
@@ -1200,15 +1202,7 @@ in
   # ever dropped from assertRosterDocEffortsOk.
   roster-doc-efforts-guard =
     let
-      inherit (pkgs.lib) assertMsg concatStringsSep replaceStrings;
-      wantEfforts = concatStringsSep "/" (
-        map (n: "${n}=${rosterDefaults.${n}.effort}") [
-          "scout"
-          "reviewer"
-          "filer"
-          "worker"
-        ]
-      );
+      inherit (pkgs.lib) assertMsg replaceStrings;
       reviewerEffort = rosterDefaults.reviewer.effort;
       driftedReviewerEffort = if reviewerEffort == "high" then "medium" else "high";
       driftedEfforts =
@@ -1235,6 +1229,21 @@ in
     assert assertMsg (!result.success)
       "roster-doc-efforts-guard: expected assertRosterDocEffortsOk to reject a synthetic doc whose Subagent roster section states a wrong effort restatement, but it evaluated successfully";
     pkgs.runCommand "roster-doc-efforts-guard" { } "touch $out";
+
+  # Regression guard: rosterDocSection's own throw branch (missing "####
+  # Subagent roster" heading) is otherwise never exercised -- every other
+  # fixture in this file, real or synthetic, feeds a doc that contains the
+  # heading. Runs rosterDocSection directly against a doc without it, via
+  # tryEval, so this fails if that throw is ever dropped or the heading
+  # match silently starts tolerating its absence.
+  roster-doc-section-throws-on-missing-heading =
+    let
+      inherit (pkgs.lib) assertMsg;
+      result = builtins.tryEval (rosterDocSection "intro text with no roster heading at all");
+    in
+    assert assertMsg (!result.success)
+      "roster-doc-section-throws-on-missing-heading: expected rosterDocSection to throw on a doc missing the \"#### Subagent roster\" heading, but it evaluated successfully";
+    pkgs.runCommand "roster-doc-section-throws-on-missing-heading" { } "touch $out";
 
   # Regression guard (issue #2184, ADR 0037): the disjointness assertion must
   # cover the structural domain-tree paths too, not just the flakeOption

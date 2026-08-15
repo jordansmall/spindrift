@@ -972,9 +972,10 @@ in
       "opencode agentFilesTemplate's auditor.md must carry the JSON-encoded description, got: ${auditorFile}";
     pkgs.runCommand "drivers-render-custom-roster-both" { } "touch $out";
 
-  # Issue #2386: defaultRoster ships a fixed default `effort` per agent
-  # (scout=medium, reviewer=high, filer=medium, worker=high) as a literal on
-  # each entry, on top of the general roster effort pass-through plumbing
+  # Issue #2386: defaultRoster ships a fixed default `effort` per agent,
+  # looked up per name from rosterDefaults (issue #2506) rather than a
+  # literal on each entry, on top of the general roster effort pass-through
+  # plumbing
   # already pinned above (drivers-claude-agents-json-effort-present) for
   # ad-hoc roster entries. Assert the defaults actually render end-to-end
   # through claude's --agents JSON for all four built-in agents, not just

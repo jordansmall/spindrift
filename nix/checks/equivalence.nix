@@ -795,14 +795,15 @@ in
   # that literal rather than re-derived from the schema: comparing against
   # e.g. `schema.reviewModel.default` would pass no matter what the schema
   # default drifted to, defeating the point of a regression guard (issue
-  # #2435 AC2). Also pins the roster's fixed per-agent efforts (issue #2386):
-  # scout=medium, reviewer=high, filer=medium, worker=high.
+  # #2435 AC2). Also pins the roster's fixed per-agent efforts (issue #2386),
+  # read from rosterDefaults below rather than restated here.
   dogfood-roster-and-review-effort =
     let
       inherit (pkgs.lib)
         assertMsg
         filterAttrs
         listToAttrs
+        mapAttrs
         nameValuePair
         ;
       defaults = import ../dogfood-defaults.nix {
@@ -834,7 +835,7 @@ in
       modelMismatches = filterAttrs (
         name: model: rosterByName.${name}.model or null != model
       ) expectedModels;
-      expectedEfforts = builtins.mapAttrs (_: v: v.effort) rosterHelper.rosterDefaults;
+      expectedEfforts = mapAttrs (_: v: v.effort) rosterHelper.rosterDefaults;
       effortMismatches = filterAttrs (
         name: effort: rosterByName.${name}.effort or null != effort
       ) expectedEfforts;

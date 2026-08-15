@@ -2,7 +2,7 @@
 # defaults (lib/roster.nix) -- issues #2386/#2437/#2506. `rosterDefaults`
 # maps each default-roster agent name to its lib/env-schema.nix model key
 # and its fixed default effort. `readSchemaDefaults` is the one
-# schema-defaults reader both tolerance policies this repo needs go
+# schema-defaults reader both tolerance policies this repo needs to go
 # through: `strict = true` throws on a missing `.default` (the roster's
 # four model keys are expected to carry one); `strict = false` falls back
 # to `""` (lib/mkHarness.nix's generic sweep over every flakeOption-flagged
