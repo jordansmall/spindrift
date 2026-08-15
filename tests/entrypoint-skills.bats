@@ -31,6 +31,40 @@ SKILL
   grep -q "skill discovered: test-skill" "$DRIVER_LOG"
 }
 
+# A bind mount placed directly onto DRIVER_SKILLS_DIR (how SPINDRIFT_SKILLS_DIR's
+# runtime override works) always REPLACES its entire contents -- there's no
+# union mount available in bwrap or a plain OCI volume mount. So a harness-owned
+# skill baked at HARNESS_SKILLS_DIR would otherwise vanish entirely under an
+# operator override. entrypoint.sh instead COPIES both HARNESS_SKILLS_DIR and
+# OPERATOR_SKILLS_DIR into DRIVER_SKILLS_DIR before the discovery scan runs --
+# copying is naturally additive/mergeable, mounts are not (issue #2489).
+@test "harness-owned skill survives an operator skills override (issue #2489)" {
+  export HARNESS_SKILLS_DIR="$BATS_TEST_TMPDIR/harness-skills"
+  mkdir -p "$HARNESS_SKILLS_DIR/auto-format"
+  cat >"$HARNESS_SKILLS_DIR/auto-format/SKILL.md" <<'SKILL'
+---
+name: auto-format
+description: Auto-format the files changed in this run before committing.
+---
+Before committing, auto-format the files you changed.
+SKILL
+
+  export OPERATOR_SKILLS_DIR="$BATS_TEST_TMPDIR/operator-skills"
+  mkdir -p "$OPERATOR_SKILLS_DIR/my-skill"
+  cat >"$OPERATOR_SKILLS_DIR/my-skill/SKILL.md" <<'SKILL'
+---
+name: my-skill
+description: An operator-supplied skill.
+---
+Do the operator thing.
+SKILL
+
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -q "skill discovered: auto-format" "$DRIVER_LOG"
+  grep -q "skill discovered: my-skill" "$DRIVER_LOG"
+}
+
 # --- prompt skill preference (issue #120) -------------------------------------
 # When a skill is present at HOME/.claude/skills/, the rendered prompt must
 # direct the agent to use it. When absent, the inline guidance stands alone
