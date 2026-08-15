@@ -86,7 +86,8 @@ branch inside its own git worktree, never the coordinator's own tree:
 
 > worker: implement <one slice, with the brief's relevant pointers>. Work
 > test-first, then commit your slice on your own branch. Return a concise
-> report — files touched, checks run, outcome — not the diffs.
+> report — files touched, checks run, outcome, and your branch name —
+> not the diffs.
 
 Hand the worker one slice at a time and wait for its report before starting
 the next. Keep only that summary in your own context — let the bulk diffs,
