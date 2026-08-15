@@ -424,13 +424,17 @@ func (f *forgejoCodeForge) MarkReady(prURL string) error {
 
 // MarkDraft flips the PR back to draft by PATCHing its title with a leading
 // WIP prefix — the inverse of MarkReady. Idempotent the same way: a PR
-// that's already draft (WIP-titled) is a no-op that issues no request.
+// that's already draft is a no-op that issues no request. Gates on
+// isDraftPull rather than isDraftTitle alone, mirroring MarkReady: a pull's
+// draft field can be true while its title carries no WIP-title convention
+// at all, and gating on the title-only check would redundantly PATCH such a
+// pull back to draft.
 func (f *forgejoCodeForge) MarkDraft(prURL string) error {
 	p, err := f.getPull(prURL)
 	if err != nil {
 		return err
 	}
-	if isDraftTitle(p.Title) {
+	if isDraftPull(p) {
 		return nil
 	}
 	index, err := parsePRIndex(prURL)
