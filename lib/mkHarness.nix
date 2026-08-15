@@ -470,10 +470,12 @@ let
   # internal/seambundle (the bundle filename constant bundleout and the
   # launcher's local Code Forge both share), internal/outcomebackstop (issue
   # #2157's outcome-backstop verb decision), internal/retry (the shared
-  # linear-backoff leaf that verb's push retry rides), and
+  # linear-backoff leaf that verb's push retry rides),
   # internal/promptassembly (issue #2349's assemble-prompt verb: the pure
   # gate computation, fragment registry loader, and prompt assembly logic
-  # that mirrors agent/entrypoint.sh's phase_prompt_assembly) only, with
+  # that mirrors agent/entrypoint.sh's phase_prompt_assembly), and
+  # internal/runstate (issue #2505's shared RunState type/read/write,
+  # imported by outcomebackstop's readLastVerdict) only, with
   # *_test.go excluded. If
   # a new import is added outside this closure the build fails loudly
   # (missing package) — that is the intended failure mode (#474).
@@ -521,6 +523,9 @@ let
         (lib.fileset.fileFilter (
           f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
         ) ../cmd/launcher/internal/promptassembly)
+        (lib.fileset.fileFilter (
+          f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
+        ) ../cmd/launcher/internal/runstate)
       ];
     };
     # Same go.mod/go.sum as launcherBin above, but NOT the same vendorHash:
@@ -571,6 +576,9 @@ let
         (lib.fileset.fileFilter (
           f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
         ) ../cmd/launcher/internal/logscan)
+        (lib.fileset.fileFilter (
+          f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
+        ) ../cmd/launcher/internal/runstate)
       ];
     };
     vendorHash = "sha256-uaAaQReAf8PCq/TNWetYyYinj+BeUaiaL4zm/fpJPBA=";
