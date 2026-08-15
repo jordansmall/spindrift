@@ -167,6 +167,43 @@ func TestBuildDriverExecCmdForwardsDriverFlag(t *testing.T) {
 	}
 }
 
+// TestBuildDriverExecCmdNeverForwardsStateOrReviewPromptFile pins the real
+// mechanism behind AC4 ("only the orchestrator writes run-state") and AC6:
+// buildDriverExecCmd's own argv assembly (run.go:728-753) never reads
+// cfg.stateFile or cfg.reviewPromptFile into a --state-file/
+// --review-prompt-file flag for ANY cfg -- not just a worker's passCfg.
+// workers.go's own passCfg.stateFile = "" / passCfg.reviewPromptFile = ""
+// are defense-in-depth on top of this, not the enforcement itself (issue
+// #2059 review finding: the prior comment there implied clearing those two
+// fields was what made a worker structurally unable to write run-state,
+// when the field was never wired into argv regardless).
+func TestBuildDriverExecCmdNeverForwardsStateOrReviewPromptFile(t *testing.T) {
+	dir := t.TempDir()
+	callLog := filepath.Join(dir, "calls.log")
+	writeFakeDriverExec(t, dir, callLog, "exit 0\n")
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	cfg := config{
+		driverBin:        "claude",
+		stateFile:        "/tmp/coordinator-run-state.json",
+		reviewPromptFile: "/tmp/coordinator-review-prompt.md",
+	}
+	cmd, err := buildDriverExecCmd(cfg)
+	if err != nil {
+		t.Fatalf("buildDriverExecCmd: %v", err)
+	}
+	got := strings.Join(cmd.Args, " ")
+	if strings.Contains(got, "--state-file") {
+		t.Errorf("driver-exec argv = %q, want no --state-file flag ever forwarded", got)
+	}
+	if strings.Contains(got, "--review-prompt-file") {
+		t.Errorf("driver-exec argv = %q, want no --review-prompt-file flag ever forwarded", got)
+	}
+	if strings.Contains(got, cfg.stateFile) {
+		t.Errorf("driver-exec argv = %q, want it to never mention cfg.stateFile at all", got)
+	}
+}
+
 // TestBuildDriverExecCmdForwardsEffortFlag verifies buildDriverExecCmd
 // forwards cfg.effort as driver-exec's own --effort flag unconditionally
 // (issue #2241 slice 3) -- driver-exec's own buildDriverArgs decides whether
