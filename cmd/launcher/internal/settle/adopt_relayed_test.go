@@ -763,7 +763,8 @@ func TestSettle_SettleRelayedBranch_AdoptsSuccessSelfReport(t *testing.T) {
 	c.BaseBranch = "main"
 	s := New(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
 
-	got := s.SettleRelayedBranch(dispatch.NewFake(), issNum, 0, result)
+	sit := s.situationFor(issNum, false, result)
+	got := s.SettleRelayedBranch(dispatch.NewFake(), issNum, 0, sit, result)
 	if !got {
 		t.Fatalf("SettleRelayedBranch = false, want true")
 	}
@@ -818,7 +819,8 @@ func TestSettle_SettleRelayedBranch_NonSuccessSelfReportDoesNotAdopt(t *testing.
 	c.BaseBranch = "main"
 	s := New(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
 
-	got := s.SettleRelayedBranch(dispatch.NewFake(), issNum, 0, result)
+	sit := s.situationFor(issNum, false, result)
+	got := s.SettleRelayedBranch(dispatch.NewFake(), issNum, 0, sit, result)
 	if got {
 		t.Fatalf("SettleRelayedBranch = true, want false")
 	}
@@ -866,7 +868,8 @@ func TestSettle_SettleRelayedBranch_BundleMissingDoesNotAdopt(t *testing.T) {
 	c.BaseBranch = "main"
 	s := New(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
 
-	got := s.SettleRelayedBranch(dispatch.NewFake(), issNum, 0, result)
+	sit := s.situationFor(issNum, false, result)
+	got := s.SettleRelayedBranch(dispatch.NewFake(), issNum, 0, sit, result)
 	if got {
 		t.Fatalf("SettleRelayedBranch = true, want false")
 	}

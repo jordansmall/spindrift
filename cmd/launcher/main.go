@@ -869,7 +869,7 @@ func checkReadOnlyCapabilityGate(c config, cf forge.CodeForge, it forge.IssueTra
 		return nil
 	}
 	_, isPRForge := cf.(forge.PRForge)
-	if err := settle.NewMediation(cf, it, nil, "").RequiredCapabilityError(c.codeForge, isPRForge); err != nil {
+	if err := settle.RequiredCapabilityError(cf, c.codeForge, isPRForge); err != nil {
 		return err
 	}
 	if _, ok := it.(forge.HostPostedCommenter); !ok {
@@ -1038,7 +1038,8 @@ func recoverByNumber(c config, it forge.IssueTracker, cf forge.CodeForge, pwd st
 		d := f.New(iss.number, iss.title)
 		defer d.Close()
 		result := dispatch.Result{Resolved: resolved}
-		if s.SettleRelayedBranch(d, iss.number, 0, result) {
+		sit := s.SituationFor(iss.number, res.Found, result)
+		if s.SettleRelayedBranch(d, iss.number, 0, sit, result) {
 			return nil
 		}
 		fmt.Printf("    #%s  status=skipped  note=no open PR on %s\n", issueNum, branch)

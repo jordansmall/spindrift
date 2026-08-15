@@ -39,12 +39,16 @@ import (
 // genuinely never finished (no self-report, or one that itself reports
 // something other than success) is never granted this override.
 func (s *Settle) tryAdoptRelayedBranch(d dispatch.Dispatcher, num string, gen uint64, result dispatch.Result) bool {
-	// sit reads the shared adoption-evidence fingerprint (issue #2501);
-	// openPRFound is false here -- this function never checks for one, see
-	// Situation's own doc comment.
+	if result.Resolved.Provenance != outcome.ProvenanceSynthetic || !s.readOnly || s.pr == nil {
+		return false
+	}
+	// sit reads the shared adoption-evidence fingerprint (issue #2501),
+	// deferred until after the cheap checks above so the stat inside
+	// bundlePresent never runs on a call this function was always going to
+	// decline anyway; openPRFound is false here — this function never
+	// checks for one, see Situation's own doc comment.
 	sit := s.situationFor(num, false, result)
-	if result.Resolved.Provenance != outcome.ProvenanceSynthetic || !s.readOnly || s.pr == nil ||
-		!sit.SelfReportSuccess {
+	if !sit.SelfReportSuccess {
 		return false
 	}
 
@@ -72,11 +76,16 @@ func (s *Settle) tryAdoptRelayedBranch(d dispatch.Dispatcher, num string, gen ui
 // already sits inside the `!result.Resolved.Found` branch, so
 // Resolved.Found is always false on entry.
 func (s *Settle) tryAdoptRelayedBranchNoOutcome(d dispatch.Dispatcher, num string, gen uint64, result dispatch.Result) bool {
-	// sit reads the shared adoption-evidence fingerprint (issue #2501);
-	// openPRFound is false here -- this function never checks for one, see
-	// Situation's own doc comment.
+	if !s.readOnly || s.pr == nil {
+		return false
+	}
+	// sit reads the shared adoption-evidence fingerprint (issue #2501),
+	// deferred until after the cheap checks above so the stat inside
+	// bundlePresent never runs on a call this function was always going to
+	// decline anyway; openPRFound is false here — this function never
+	// checks for one, see Situation's own doc comment.
 	sit := s.situationFor(num, false, result)
-	if !s.readOnly || s.pr == nil || !sit.SelfReportSuccess {
+	if !sit.SelfReportSuccess {
 		return false
 	}
 
@@ -122,13 +131,21 @@ func (s *Settle) adoptAndGate(d dispatch.Dispatcher, num string, gen uint64, res
 }
 
 // SettleRelayedBranch is spindrift recover's adopt-a-relayed-branch arm
-// (issue #2225). With no open PR on num, recover consults the driver's own
-// last genuine success self-report (result.Resolved.SelfReport, issue #2223 —
-// recovered from disk by dispatch.ResolveFromLogs) for evidence a
-// prior run finished the work and relayed its branch to the outbox before
-// stranding without a PR. Unlike tryAdoptRelayedBranch, this does NOT
-// require result.Resolved.Provenance == outcome.ProvenanceSynthetic or
-// s.readOnly — recover is operator-driven and runs read-write.
+// (issue #2225). sit is the caller's already-computed Situation (issue
+// #2501, via SituationFor) — the precondition this function's whole
+// contract rests on is "no open PR on num" (recoverByNumber's own caller
+// already resolved that fact via forge.ResolveOpenPRWithRetry before ever
+// reaching here), and sit.OpenPRFound is checked below as a hard guard
+// rather than merely trusted: an open PR already existing is SettleAdopted's
+// job, not this function's, so a caller that reaches here with
+// sit.OpenPRFound true gets an immediate false rather than a double-adopt.
+// With no open PR confirmed, recover consults the driver's own last genuine
+// success self-report (result.Resolved.SelfReport, issue #2223 — recovered
+// from disk by dispatch.ResolveFromLogs) for evidence a prior run finished
+// the work and relayed its branch to the outbox before stranding without a
+// PR. Unlike tryAdoptRelayedBranch, this does NOT require
+// result.Resolved.Provenance == outcome.ProvenanceSynthetic or s.readOnly —
+// recover is operator-driven and runs read-write.
 //
 // Two shapes fall out of the same self-report fingerprint. A CODE_FORGE=local
 // push-only run (ADR 0039, issue #2254) has no PR surface to adopt at all —
@@ -160,12 +177,10 @@ func (s *Settle) adoptAndGate(d dispatch.Dispatcher, num string, gen uint64, res
 // "no open PR" exit — the moment neither a genuine success self-report nor a
 // present bundle backs the local push-only shape, or (for every other shape)
 // the self-report isn't a genuine success.
-func (s *Settle) SettleRelayedBranch(d dispatch.Dispatcher, num string, gen uint64, result dispatch.Result) bool {
-	// sit reads the shared adoption-evidence fingerprint (issue #2501);
-	// openPRFound is false -- by the time recover calls this its own caller
-	// already established no open PR exists, but that fact isn't threaded
-	// into this function's signature, see Situation's own doc comment.
-	sit := s.situationFor(num, false, result)
+func (s *Settle) SettleRelayedBranch(d dispatch.Dispatcher, num string, gen uint64, sit Situation, result dispatch.Result) bool {
+	if sit.OpenPRFound {
+		return false
+	}
 	cf := s.cfForNum(num)
 	if _, ok := cf.(forge.BundleRelay); ok && s.pr == nil {
 		if sit.SelfReportSuccess {
