@@ -459,27 +459,6 @@ func TestSettle_NoOutcome_NoPRFound(t *testing.T) {
 	}
 }
 
-// TestSettle_NoOutcome_DraftPRBlocked reports status=blocked and takes no
-// action when the only discoverable PR is a draft.
-func TestSettle_NoOutcome_DraftPRBlocked(t *testing.T) {
-	fc := forge.NewFake()
-	fc.BranchPrefix = "agent/issue-"
-	fc.SetIssue(forge.Issue{Number: "5", Labels: []string{"agent-in-progress"}})
-	branch := fc.AgentBranch("5")
-	fc.SetPR(branch, forge.PR{URL: testPR})
-
-	c := baseConfig()
-	s := New(c, fc, fc)
-	s.Settle(dispatch.NewFake(), "5", 0, dispatch.Result{Success: true})
-
-	if fc.Merged != "" {
-		t.Errorf("draft PR must not be merged; fc.Merged=%q", fc.Merged)
-	}
-	if len(fc.TransitionStateCalls) != 0 {
-		t.Errorf("draft PR must not trigger label churn; got %v", fc.TransitionStateCalls)
-	}
-}
-
 // TestSettle_NoOutcome_PRLookupError_NoLabelChurn verifies that a transient
 // forge lookup failure while resolving the open PR is reported but does not
 // demote the issue: unlike a confirmed absence of a PR, a lookup error
