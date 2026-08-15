@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"io"
 	"strings"
+
+	"spindrift.dev/launcher/internal/runstate"
 )
 
 // maxWorkerResultInFindings caps how much of a single worker's own
@@ -25,7 +27,7 @@ const maxWorkerResultInFindings = 4000
 // its own verdict/outcome scan found, since the coordinator's only job on a
 // manifest-emitting pass is to declare the manifest and stop (issue #2059
 // AC1).
-func dispatchManifestIfPresent(cfg config, state *RunState, stdout io.Writer) bool {
+func dispatchManifestIfPresent(cfg config, state *runstate.RunState, stdout io.Writer) bool {
 	if cfg.workerPromptFile == "" {
 		return false
 	}
