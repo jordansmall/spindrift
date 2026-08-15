@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 
 	"spindrift.dev/launcher/internal/driver"
@@ -37,6 +38,33 @@ type SliceManifest struct {
 // load-bearing literal scanForManifest greps for.
 const ManifestToken = "SPINDRIFT_SLICE_MANIFEST"
 
+// validSliceNameRe is the sole allowed shape for a ManifestSlice.Name: 1-64
+// chars of letters, digits, underscore, and hyphen only. A manifest is
+// model-driven, untrusted-ish input (issue #2059), and slice.Name flows
+// into two places downstream that this charset/length check forecloses in
+// one move:
+//
+//   - launchOneWorker (workers.go) joins slice.Name straight into
+//     opts.WorkDir to build each worker's sentinel/result/log/heartbeat
+//     paths. Excluding "/" and "." rules out path traversal escaping
+//     workDir, and rejecting duplicate names (checked alongside this regex
+//     in ParseManifestLine) rules out two workers racing on the same
+//     sentinel/result files -- both would otherwise break the join's own
+//     "not inferred" completion guarantee.
+//   - dispatchManifestIfPresent (dispatch.go) writes slice.Name verbatim
+//     into state.WorkerFindings, which run.go's seedPromptFromState later
+//     injects into the next coordinator pass's seeded prompt. Excluding
+//     newlines/whitespace rules out a name forging extra
+//     "- other-slice: done" lines into that findings block.
+var validSliceNameRe = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,64}$`)
+
+// validSliceName reports whether name is safe to use as a filesystem
+// path component and as a single line of plain text (see
+// validSliceNameRe's doc comment for why).
+func validSliceName(name string) bool {
+	return validSliceNameRe.MatchString(name)
+}
+
 // Line encodes m as a single marker line: the token followed by its JSON
 // form, base64-standard-encoded, ready to print into a pass's own output.
 // Returns an error only if m fails to JSON-marshal (its fields are plain
@@ -54,8 +82,11 @@ func (m SliceManifest) Line() (string, error) {
 // scanPassLog's own tolerance for RenderTranscript's "[role] " prefix),
 // followed by its base64 JSON payload. Returns (SliceManifest{}, false) when
 // the token is absent, the payload fails to decode, the JSON fails to
-// unmarshal, or the decoded manifest has zero slices (an empty manifest is
-// never a meaningful dispatch instruction).
+// unmarshal, the decoded manifest has zero slices (an empty manifest is
+// never a meaningful dispatch instruction), any slice name fails
+// validSliceName, or two slices share the same name -- a malformed manifest
+// is simply not a valid dispatch instruction, fail-closed the same way as
+// the empty-manifest case (issue #2059).
 func ParseManifestLine(line string) (SliceManifest, bool) {
 	idx := strings.Index(line, ManifestToken)
 	if idx == -1 {
@@ -79,6 +110,18 @@ func ParseManifestLine(line string) (SliceManifest, bool) {
 	if len(m.Slices) == 0 {
 		return SliceManifest{}, false
 	}
+
+	seen := make(map[string]bool, len(m.Slices))
+	for _, s := range m.Slices {
+		if !validSliceName(s.Name) {
+			return SliceManifest{}, false
+		}
+		if seen[s.Name] {
+			return SliceManifest{}, false
+		}
+		seen[s.Name] = true
+	}
+
 	return m, true
 }
 
