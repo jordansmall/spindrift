@@ -726,6 +726,20 @@ func TestSettle_GithubReadOnly_MissingPRIntentAndReconstructionFailsBlocksNotFai
 	if len(blockedCalls) != 1 {
 		t.Fatalf("expected exactly one merge-blocked comment, got %d: %+v", len(blockedCalls), fc.CommentCalls)
 	}
+	// Pin the exact comment body (not just a substring) so a regression
+	// re-introducing the message-stutter bug a prior slice fixed in
+	// mediation.go's Open (ErrNoPRIntent's "no usable PR-intent line found"
+	// repeated twice across the wrap) is caught here. Composed from
+	// blockHandoff's "merge blocked: %v" format wrapping Open's actual
+	// FallbackReconstruct-fails-too error: ErrNoPRIntent wrapped together
+	// with reconstructPRText's CommitSubjects failure.
+	const wantBody = "merge blocked: settle: no usable PR-intent line found: reconstructing from the relayed branch's commits also failed: commit subjects: git log failed"
+	if got := blockedCalls[0].Body; got != wantBody {
+		t.Errorf("merge-blocked comment body = %q, want exactly %q", got, wantBody)
+	}
+	if strings.Contains(blockedCalls[0].Body, "found: no usable PR-intent line found") {
+		t.Errorf("merge-blocked comment body stutters ErrNoPRIntent's message twice: %q", blockedCalls[0].Body)
+	}
 }
 
 // TestSettle_GithubReadOnly_MissingPRIntentAndZeroCommitSubjectsBlocksNotFails
