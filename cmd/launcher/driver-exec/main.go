@@ -37,6 +37,9 @@ func main() {
 	if isAssemblePromptInvocation(os.Args[1:]) {
 		os.Exit(runAssemblePrompt(os.Args[2:], os.Stdout))
 	}
+	if isReadonlyGuardsInvocation(os.Args[1:]) {
+		os.Exit(runReadonlyGuards(os.Args[2:], os.Stdout))
+	}
 
 	driverName := flag.String("driver", "claude", "the Driver's registry name (ADR 0009), selecting its argv shape and exit-code handling")
 	promptFile := flag.String("prompt-file", "", "path to the assembled prompt text (required)")

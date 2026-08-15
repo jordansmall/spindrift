@@ -554,11 +554,16 @@ let
   # gate computation, fragment registry loader, and prompt assembly logic
   # that mirrors agent/entrypoint.sh's phase_prompt_assembly),
   # internal/runstate (issue #2505's shared RunState type/read/write,
-  # imported by outcomebackstop's readLastVerdict), and internal/markergate
+  # imported by outcomebackstop's readLastVerdict), internal/markergate
   # (issue #2511's marker-gate verb: the outcome/pr-intent required-marker
-  # gate's nudge-prompt/resolve decision logic) only, with *_test.go
-  # excluded. If a new import is added outside this closure the build fails
-  # loudly (missing package) — that is the intended failure mode (#474).
+  # gate's nudge-prompt/resolve decision logic), and internal/readonlyguards
+  # (issue #2509's readonly-guards verb: renders and installs the runtime
+  # read-only guards named by the forbiddenMarkers registry, the Go
+  # successor to agent/entrypoint.sh's
+  # install_readonly_push_hook/install_readonly_gh_shim) only, with
+  # *_test.go excluded. If a new import is added outside this closure the
+  # build fails loudly (missing package) — that is the intended failure mode
+  # (#474).
   driverExecBin = pkgs.buildGoModule {
     pname = "driver-exec";
     version = spindriftVersion;
@@ -609,6 +614,9 @@ let
         (lib.fileset.fileFilter (
           f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
         ) ../cmd/launcher/internal/markergate)
+        (lib.fileset.fileFilter (
+          f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
+        ) ../cmd/launcher/internal/readonlyguards)
       ];
     };
     # Same go.mod/go.sum as launcherBin above, but NOT the same vendorHash:
