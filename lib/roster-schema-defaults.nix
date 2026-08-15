@@ -46,8 +46,7 @@ let
   # shape.
   readSchemaDefaults =
     { strict }:
-    entries:
-    lib.mapAttrs (_: e: if strict then e.default else e.default or "") entries;
+    entries: lib.mapAttrs (_: e: if strict then e.default else e.default or "") entries;
 in
 {
   inherit rosterDefaults rosterModelKeys readSchemaDefaults;
