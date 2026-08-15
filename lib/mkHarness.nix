@@ -294,12 +294,11 @@ let
 
   # Built-in run defaults derived from the schema; the Consumer's `defaults` arg
   # overrides them per key, and a matching env var overrides those again at runtime.
-  # Deliberately generic (`or ""`) rather than reusing lib/roster-schema-defaults.nix
-  # (issue #2437): flakeOptionEntries spans every flakeOption-flagged schema key,
-  # most of which have no model concept at all (e.g. devShellName) and so can't
-  # guarantee a `.default`, unlike the roster helper's four model keys, which
-  # are expected to carry one (throw-on-missing, not asserted up front).
-  schemaDefaults = lib.mapAttrs (_: e: e.default or "") flakeOptionEntries;
+  # Non-strict (issue #2506): flakeOptionEntries spans every flakeOption-flagged
+  # schema key, most of which have no model concept at all (e.g. devShellName)
+  # and so can't guarantee a `.default`, unlike the roster helper's four model
+  # keys, which are expected to carry one (strict mode there throws on a miss).
+  schemaDefaults = rosterSchemaDefaults.readSchemaDefaults { strict = false; } flakeOptionEntries;
   mergedDefaults = schemaDefaults // defaults;
 
   # Whether either backend knob selects forgejo (issue #1963): drives
@@ -319,6 +318,13 @@ let
   # deprecated -- see the lib.warnIf below) so an existing Consumer keeps
   # building the exact same four agents it always has.
   rosterLib = import ./roster.nix { inherit lib; };
+  # The one schema-defaults reader (issue #2506), reused above in non-strict
+  # mode for schemaDefaults; lib/roster-schema-defaults.nix only imports
+  # lib/env-schema.nix, never lib/mkHarness.nix, so this import is safe --
+  # the reverse (mkHarness.nix importing lib/roster.nix, which already
+  # imports lib/mkHarness.nix, would be circular) is what roster.nix avoids
+  # by going through this same helper file instead.
+  rosterSchemaDefaults = import ./roster-schema-defaults.nix { inherit lib; };
   resolvedRoster = rosterLib.normalizeRoster (
     if roster != null then
       roster
@@ -1063,11 +1069,6 @@ else
       runInputDocumentFile
       buildInputDocumentFile
       ;
-
-    # Exposed for nix/checks/roster.nix's issue #2437 drift guard, which
-    # compares this against lib/roster-schema-defaults.nix's independent
-    # derivation — not a public/stable API surface.
-    inherit schemaDefaults;
 
     packages = {
       inherit spindrift;
