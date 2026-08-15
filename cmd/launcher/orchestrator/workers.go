@@ -203,10 +203,28 @@ func launchOneWorker(cfg config, slice ManifestSlice, promptFile, workDir string
 	logPath := filepath.Join(workDir, slice.Name+".log")
 	heartbeatLogPath := filepath.Join(workDir, slice.Name+".heartbeat.log")
 
+	// Remove any pre-existing result/sentinel files before the worker is
+	// ever launched -- a leftover <slice>.done from a prior run, or another
+	// slice that reused the same workDir, must never be mistaken for this
+	// worker's own completion signal (issue #2059 AC3 review finding).
+	// os.IsNotExist is expected and ignored; these usually don't exist.
+	if err := os.Remove(resultPath); err != nil && !os.IsNotExist(err) {
+		return WorkerResult{Slice: slice.Name, Status: WorkerCrashed, Err: fmt.Errorf("remove stale result file: %w", err)}
+	}
+	if err := os.Remove(sentinelPath); err != nil && !os.IsNotExist(err) {
+		return WorkerResult{Slice: slice.Name, Status: WorkerCrashed, Err: fmt.Errorf("remove stale sentinel file: %w", err)}
+	}
+
 	seededPromptFile, err := seedWorkerPrompt(promptFile, slice, resultPath, sentinelPath)
 	if err != nil {
 		return WorkerResult{Slice: slice.Name, Status: WorkerCrashed, Err: err}
 	}
+	// Mirrors run.go's own prevSeededPromptFile cleanup: the file is fully
+	// written by the time seedWorkerPrompt returns, so it's safe to remove
+	// on any return path once this worker is done with it (issue #2059
+	// review finding, workers.go:206) -- otherwise every worker dispatched
+	// leaks an unbounded temp file.
+	defer os.Remove(seededPromptFile)
 
 	passCfg := cfg
 	passCfg.promptFile = seededPromptFile

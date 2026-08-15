@@ -298,6 +298,118 @@ func TestLaunchWorkersEachWorkerGetsOwnQuarantinedLogAndFreshSession(t *testing.
 	}
 }
 
+// TestLaunchWorkersIgnoresStaleSentinelFromPriorRun verifies a leftover
+// done-sentinel file already sitting in workDir before a worker is even
+// launched (e.g. from a prior run, or another slice that reused the same
+// workDir) is never mistaken for the just-started worker's own completion
+// signal (issue #2059 review finding, workers.go:238): waitForSentinel must
+// only ever observe a sentinel the worker itself wrote after starting. The
+// fake worker here never writes a real sentinel at all (it just hangs), so
+// a join that's fooled by the stale file would report WorkerDone for a
+// worker that never did any real work; the correct outcome is
+// WorkerTimedOut once opts.Timeout elapses.
+func TestLaunchWorkersIgnoresStaleSentinelFromPriorRun(t *testing.T) {
+	fakeDir := t.TempDir()
+	callLog := filepath.Join(fakeDir, "calls.log")
+	if err := os.WriteFile(callLog, nil, 0o644); err != nil {
+		t.Fatalf("WriteFile(callLog): %v", err)
+	}
+	// A worker that hangs well past the test's own timeout without ever
+	// touching a real sentinel file.
+	writeFakeDriverExec(t, fakeDir, callLog, "sleep 30\n")
+	t.Setenv("PATH", fakeDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	promptDir := t.TempDir()
+	promptFile := filepath.Join(promptDir, "worker-prompt.txt")
+	if err := os.WriteFile(promptFile, []byte("BASE WORKER PROMPT"), 0o644); err != nil {
+		t.Fatalf("WriteFile(promptFile): %v", err)
+	}
+
+	workDir := t.TempDir()
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll(workDir): %v", err)
+	}
+	// Plant a stale sentinel before the worker is ever launched.
+	stalePath := filepath.Join(workDir, "delayed-worker.done")
+	if err := os.WriteFile(stalePath, []byte("stale"), 0o644); err != nil {
+		t.Fatalf("WriteFile(stalePath): %v", err)
+	}
+
+	var stdout bytes.Buffer
+	cfg := config{driver: "claude"}
+	manifest := SliceManifest{Slices: []ManifestSlice{{Name: "delayed-worker"}}}
+
+	const workerTimeout = 100 * time.Millisecond
+	start := time.Now()
+	results := LaunchWorkers(cfg, manifest, WorkerOptions{
+		PromptFile:   promptFile,
+		WorkDir:      workDir,
+		Timeout:      workerTimeout,
+		PollInterval: 5 * time.Millisecond,
+	}, &stdout)
+	elapsed := time.Since(start)
+
+	if elapsed >= time.Second {
+		t.Fatalf("LaunchWorkers took %v, want well under 1s (fake worker sleeps 30s)", elapsed)
+	}
+
+	if len(results) != 1 {
+		t.Fatalf("len(results) = %d, want 1", len(results))
+	}
+	if results[0].Status != WorkerTimedOut {
+		t.Errorf("results[0].Status = %q, want WorkerTimedOut -- a stale pre-existing sentinel must never cause WorkerDone to be reported for a worker that hasn't done any real work", results[0].Status)
+	}
+}
+
+// TestLaunchWorkersRemovesSeededPromptTempFile verifies launchOneWorker
+// cleans up the temp file seedWorkerPrompt wrote for it once the worker is
+// done, mirroring run.go's own prevSeededPromptFile cleanup convention
+// (issue #2059 review finding, workers.go:206) -- otherwise every worker
+// dispatched, across every pass, leaks an unbounded "orchestrator-worker-
+// prompt-*.txt" file into the OS temp dir.
+func TestLaunchWorkersRemovesSeededPromptTempFile(t *testing.T) {
+	fakeDir := t.TempDir()
+	callLog := filepath.Join(fakeDir, "calls.log")
+	if err := os.WriteFile(callLog, nil, 0o644); err != nil {
+		t.Fatalf("WriteFile(callLog): %v", err)
+	}
+	writeFakeWorkerDriverExec(t, fakeDir, callLog)
+	t.Setenv("PATH", fakeDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	promptDir := t.TempDir()
+	promptFile := filepath.Join(promptDir, "worker-prompt.txt")
+	if err := os.WriteFile(promptFile, []byte("BASE WORKER PROMPT"), 0o644); err != nil {
+		t.Fatalf("WriteFile(promptFile): %v", err)
+	}
+
+	workDir := t.TempDir()
+	var stdout bytes.Buffer
+
+	pattern := filepath.Join(os.TempDir(), "orchestrator-worker-prompt-*.txt")
+	before, _ := filepath.Glob(pattern)
+	beforeSet := make(map[string]bool, len(before))
+	for _, f := range before {
+		beforeSet[f] = true
+	}
+
+	cfg := config{driver: "claude"}
+	manifest := SliceManifest{Slices: []ManifestSlice{{Name: "done-fast"}, {Name: "crash-now"}}}
+
+	LaunchWorkers(cfg, manifest, WorkerOptions{
+		PromptFile:   promptFile,
+		WorkDir:      workDir,
+		Timeout:      time.Second,
+		PollInterval: 5 * time.Millisecond,
+	}, &stdout)
+
+	after, _ := filepath.Glob(pattern)
+	for _, f := range after {
+		if !beforeSet[f] {
+			t.Errorf("seeded worker prompt temp file leaked: %s", f)
+		}
+	}
+}
+
 // TestLaunchWorkersReturnsOneResultPerSliceEvenWhenWorkDirUncreatable
 // verifies LaunchWorkers degrades to one WorkerCrashed result per slice,
 // each carrying a non-nil Err, rather than panicking, when opts.WorkDir
