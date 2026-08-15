@@ -73,7 +73,7 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, gen uint64, result di
 	// nothing for this call to find in that case.
 	s.fileIssueIntents(num, result)
 	switch o.Status {
-	case "blocked":
+	case outcome.StatusBlocked:
 		// A read-only run's status=blocked here may just be the ADR 0036
 		// synthetic backstop stitched in over a Box that crashed or was cut
 		// short before its own final print — not a genuine "never
@@ -119,7 +119,7 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, gen uint64, result di
 		}
 		s.postBlockedNoteComment(num, o.Note)
 		s.postUsageComment(num, d)
-	case "ready":
+	case outcome.StatusReady:
 		pr := o.Landing
 		// A read-only PR-shaped Code Forge (github, issue #1919) never opens
 		// its own PR in-box, so o.Landing carries the branch name, not a PR
@@ -164,7 +164,11 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, gen uint64, result di
 		// status=merged is off-script — no prompt fragment instructs a Box
 		// to print it (issue-prompt.md documents only "ready"/"blocked"), so
 		// o.Landing here carries Agent-controlled input with no legitimate
-		// provenance. Resolve the ref verifyMerged reads host-side from the
+		// provenance. It is deliberately absent from lib/prompt-contract.nix's
+		// outcomeStatusSets registry (issue #2504) and has no outcome.Status*
+		// constant of its own -- unlike the typed cases above, this arm stays
+		// a bare string literal because there is nothing to generate a
+		// constant from. Resolve the ref verifyMerged reads host-side from the
 		// Code Forge's own AgentBranch (issue #1955) rather than forwarding
 		// o.Landing straight into a forge read — the same host-derived-ref
 		// discipline #1949 gave the "ready" arm and settleUnresolved/
@@ -188,7 +192,7 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, gen uint64, result di
 			fmt.Printf("    #%s  landing=%s  status=%s\n", num, branch, o.Status)
 		}
 		s.postUsageComment(num, d)
-	case "ambiguous":
+	case outcome.StatusAmbiguous:
 		// The Box detected an internally-contradictory issue and halted
 		// before scouting/implementing, per issue #2275 — this is a
 		// successful, non-crash stop (mirrors agent-research-unclear), so it
