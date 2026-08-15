@@ -151,6 +151,14 @@ func FormatSpindriftOp(issue string, op SpindriftOp) string {
 		}
 	case "run_state_error":
 		fmt.Fprintf(&sb, "run-state %s failed: %s", sanitizeRole(op.Phase), sanitizeRole(op.Error))
+	case "worker_start":
+		fmt.Fprintf(&sb, "worker %s started", sanitizeRole(op.Worker))
+	case "worker_finish":
+		if op.Reason != "" {
+			fmt.Fprintf(&sb, "worker %s finished: %s (%s)", sanitizeRole(op.Worker), sanitizeRole(op.WorkerStatus), sanitizeRole(op.Reason))
+		} else {
+			fmt.Fprintf(&sb, "worker %s finished: %s", sanitizeRole(op.Worker), sanitizeRole(op.WorkerStatus))
+		}
 	default:
 		sb.WriteString(sanitizeRole(op.Op))
 	}

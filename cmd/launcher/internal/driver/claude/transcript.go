@@ -77,7 +77,7 @@ type CacheCreation struct {
 // interleaved with driver-exec's own stream-json lines forwarded unchanged.
 type SpindriftOp struct {
 	// Op names the operation kind: "pass_start", "verdict", "pass_no_outcome",
-	// "decision", or "run_state_error".
+	// "decision", "run_state_error", "worker_start", or "worker_finish".
 	Op   string `json:"op"`
 	Pass int    `json:"pass,omitempty"`
 	// Role names the pass's own role on a pass_start op (issue #2037):
@@ -95,6 +95,12 @@ type SpindriftOp struct {
 	Reason   string `json:"reason,omitempty"`
 	Phase    string `json:"phase,omitempty"` // "read" or "write", for run_state_error
 	Error    string `json:"error,omitempty"`
+	// Worker names the slice a worker_start/worker_finish op concerns
+	// (issue #2059) -- empty on every other op kind.
+	Worker string `json:"worker,omitempty"`
+	// WorkerStatus is the WorkerStatus word ("done", "timed_out", "crashed")
+	// on a worker_finish op -- empty on worker_start and every other op kind.
+	WorkerStatus string `json:"worker_status,omitempty"`
 }
 
 // EncodeSpindriftOp returns a single newline-terminated stream-json line

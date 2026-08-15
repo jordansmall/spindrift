@@ -3,9 +3,15 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
+	"sync"
 	"time"
+
+	"spindrift.dev/launcher/internal/driver/claude"
 )
 
 // WorkerStatus is the terminal state the orchestrator's own join code
@@ -102,4 +108,199 @@ func waitForSentinel(ctx context.Context, path string, pollInterval time.Duratio
 		case <-timer.C:
 		}
 	}
+}
+
+// defaultWorkerPollInterval is LaunchWorkers' own default sentinel-poll
+// cadence when WorkerOptions.PollInterval is unset.
+const defaultWorkerPollInterval = 500 * time.Millisecond
+
+// workerSentinelGrace is how long LaunchWorkers waits for a worker process
+// to actually exit after its done-sentinel appears, before giving up on
+// capturing its exit code -- the sentinel write and the process's own exit
+// are not perfectly synchronized, but the sentinel itself is the
+// authoritative completion signal (issue #2059 AC3), so a process that
+// lingers past this grace period is still reported WorkerDone.
+const workerSentinelGrace = 2 * time.Second
+
+// WorkerOptions configures LaunchWorkers. Every path here is independent of
+// the coordinator's own cfg.logPath/cfg.stateFile, so a worker structurally
+// cannot write either (issue #2059 AC4/AC6).
+type WorkerOptions struct {
+	// PromptFile is the base worker prompt seedWorkerPrompt composes each
+	// slice's own addendum onto.
+	PromptFile string
+	// WorkDir holds every worker's own quarantined log, heartbeat log,
+	// result, and done-sentinel files, namespaced by slice name -- never
+	// cfg.logPath/cfg.heartbeatLog, so a worker's raw driver stream can
+	// never reach the log the orchestrator's own loop scans for outcome/
+	// verdict markers (AC6), and concurrent workers never race on the same
+	// file.
+	WorkDir string
+	// Timeout bounds each worker's own join; <= 0 falls back to
+	// defaultWorkerTimeout (AC2: a worker join is never allowed to wait
+	// forever).
+	Timeout time.Duration
+	// PollInterval is how often LaunchWorkers checks each worker's
+	// sentinel; <= 0 falls back to defaultWorkerPollInterval.
+	PollInterval time.Duration
+}
+
+// LaunchWorkers dispatches one driver-exec subprocess per manifest.Slices
+// entry, all running fully concurrently (issue #2059): no model/Claude
+// session is ever invoked to perform the join itself -- the join is this
+// Go function, waiting on OS-level process/file-system signals only. Each
+// worker gets its own fresh, sessionless config copy (own seeded prompt,
+// own quarantined --log-path/--heartbeat-log under opts.WorkDir, no
+// --state-file at all) built via buildDriverExecCmd, so a worker
+// structurally cannot write run-state or pollute the coordinator's own log.
+//
+// A worker's terminal status is decided purely by which of two OS-level
+// signals arrives first, bounded by opts.Timeout: its own done-sentinel
+// file appearing (WorkerDone), or its process exiting without ever writing
+// one (WorkerCrashed) -- with the timeout itself, when neither happens in
+// time, forcibly ending the wait and killing the process (WorkerTimedOut).
+// This is why no worker can ever leave the join unaccounted for (AC2): every
+// slice in manifest.Slices gets exactly one WorkerResult, always.
+//
+// worker_start and worker_finish SpindriftOp lines are written to stdout for
+// every worker (AC5), guarded by a shared mutex since goroutines write
+// concurrently.
+func LaunchWorkers(cfg config, manifest SliceManifest, opts WorkerOptions, stdout io.Writer) []WorkerResult {
+	timeout := opts.Timeout
+	if timeout <= 0 {
+		timeout = defaultWorkerTimeout
+	}
+	pollInterval := opts.PollInterval
+	if pollInterval <= 0 {
+		pollInterval = defaultWorkerPollInterval
+	}
+
+	results := make([]WorkerResult, len(manifest.Slices))
+
+	if err := os.MkdirAll(opts.WorkDir, 0o755); err != nil {
+		for i, s := range manifest.Slices {
+			results[i] = WorkerResult{Slice: s.Name, Status: WorkerCrashed, Err: fmt.Errorf("create worker workdir: %w", err)}
+		}
+		return results
+	}
+
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	for i, slice := range manifest.Slices {
+		wg.Add(1)
+		go func(i int, slice ManifestSlice) {
+			defer wg.Done()
+			results[i] = launchOneWorker(cfg, slice, opts.PromptFile, opts.WorkDir, timeout, pollInterval, stdout, &mu)
+		}(i, slice)
+	}
+	wg.Wait()
+	return results
+}
+
+func launchOneWorker(cfg config, slice ManifestSlice, promptFile, workDir string, timeout, pollInterval time.Duration, stdout io.Writer, mu *sync.Mutex) WorkerResult {
+	resultPath := filepath.Join(workDir, slice.Name+".result")
+	sentinelPath := filepath.Join(workDir, slice.Name+".done")
+	logPath := filepath.Join(workDir, slice.Name+".log")
+	heartbeatLogPath := filepath.Join(workDir, slice.Name+".heartbeat.log")
+
+	seededPromptFile, err := seedWorkerPrompt(promptFile, slice, resultPath, sentinelPath)
+	if err != nil {
+		return WorkerResult{Slice: slice.Name, Status: WorkerCrashed, Err: err}
+	}
+
+	passCfg := cfg
+	passCfg.promptFile = seededPromptFile
+	passCfg.sessionFile = ""
+	passCfg.logPath = logPath
+	passCfg.heartbeatLog = heartbeatLogPath
+	passCfg.stateFile = ""
+	passCfg.reviewPromptFile = ""
+
+	cmd, err := buildDriverExecCmd(passCfg)
+	if err != nil {
+		return WorkerResult{Slice: slice.Name, Status: WorkerCrashed, Err: err}
+	}
+	cmd.Stdout = io.Discard
+	cmd.Stderr = io.Discard
+
+	if err := cmd.Start(); err != nil {
+		return WorkerResult{Slice: slice.Name, Status: WorkerCrashed, Err: err}
+	}
+
+	writeWorkerOp(stdout, mu, claude.SpindriftOp{Op: "worker_start", Worker: slice.Name})
+
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	doneCh := make(chan error, 1)
+	go func() { doneCh <- cmd.Wait() }()
+
+	sentinelCh := make(chan bool, 1)
+	go func() { sentinelCh <- waitForSentinel(ctx, sentinelPath, pollInterval) }()
+
+	var status WorkerStatus
+	var exitCode int
+	var procErr error
+
+	select {
+	case procErr = <-doneCh:
+		cancel() // let the sentinel-poll goroutine return promptly
+		if _, statErr := os.Stat(sentinelPath); statErr == nil {
+			status = WorkerDone
+		} else {
+			status = WorkerCrashed
+		}
+		exitCode = workerExitCode(procErr)
+	case sentinelOK := <-sentinelCh:
+		if sentinelOK {
+			status = WorkerDone
+			select {
+			case procErr = <-doneCh:
+				exitCode = workerExitCode(procErr)
+			case <-time.After(workerSentinelGrace):
+				// sentinel is authoritative; the process lingering past
+				// grace doesn't change the outcome (see workerSentinelGrace).
+			}
+		} else {
+			status = WorkerTimedOut
+			if cmd.Process != nil {
+				cmd.Process.Kill()
+			}
+		}
+	}
+
+	resultBytes, _ := os.ReadFile(resultPath)
+
+	reason := ""
+	switch status {
+	case WorkerTimedOut:
+		reason = fmt.Sprintf("timeout after %s", timeout)
+	case WorkerCrashed:
+		if procErr != nil {
+			reason = procErr.Error()
+		} else {
+			reason = fmt.Sprintf("exit %d", exitCode)
+		}
+	}
+	writeWorkerOp(stdout, mu, claude.SpindriftOp{Op: "worker_finish", Worker: slice.Name, WorkerStatus: string(status), Reason: reason})
+
+	return WorkerResult{Slice: slice.Name, Status: status, ExitCode: exitCode, Result: string(resultBytes)}
+}
+
+// workerExitCode mirrors invokeDriverExec's own *exec.ExitError translation
+// (run.go:634-650): a clean exit or a non-ExitError is 0.
+func workerExitCode(err error) int {
+	if exitErr, ok := err.(*exec.ExitError); ok {
+		return exitErr.ExitCode()
+	}
+	return 0
+}
+
+// writeWorkerOp writes op to stdout under mu -- worker goroutines write
+// concurrently, and most io.Writers (including the *bytes.Buffer the test
+// suite uses) are not safe for concurrent Write calls.
+func writeWorkerOp(stdout io.Writer, mu *sync.Mutex, op claude.SpindriftOp) {
+	mu.Lock()
+	defer mu.Unlock()
+	fmt.Fprint(stdout, claude.EncodeSpindriftOp(op))
 }
