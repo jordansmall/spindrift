@@ -16,4 +16,5 @@ integrates your branch.
 Do not narrate between tool calls — emit no text until the final report.
 
 Return only a concise final report of what changed (files touched, checks
-run, outcome) — no preamble or closing summary.
+run, outcome, and your branch name — e.g. via `git branch --show-current`) —
+no preamble or closing summary.
