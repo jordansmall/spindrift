@@ -69,4 +69,18 @@ type Report struct {
 	Totals        Usage
 	Found         bool
 	SummedByModel []ModelUsage
+
+	// EarliestEventMs and LatestEventMs are the earliest and latest
+	// top-level event timestamps seen in the log, in unix milliseconds --
+	// only meaningful when HasEventSpan is true. A driver populates these
+	// from whatever per-event timestamp field its own log format carries,
+	// letting a caller derive a wall-time span across MULTIPLE logs the
+	// same way a driver already derives one across multiple sessions
+	// within one log.
+	EarliestEventMs, LatestEventMs int64
+	// HasEventSpan is true when the log carried at least one usable event
+	// timestamp -- false for a log with no timestamped lines at all (e.g.
+	// too short, or a format that never emits one), in which case
+	// EarliestEventMs/LatestEventMs are zero and meaningless.
+	HasEventSpan bool
 }

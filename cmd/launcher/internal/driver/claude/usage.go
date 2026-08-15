@@ -43,9 +43,22 @@ type timestampedEvent struct {
 	Timestamp string `json:"timestamp"`
 }
 
+// eventSpan carries the earliest/latest top-level event timestamp seen
+// across a sumInLog scan, and whether any usable timestamp was seen at
+// all -- the raw span data sumInLog derives its own DurationMs floor from,
+// also returned to ExtractUsage so a caller can derive a wall-time span
+// across MULTIPLE logs the same way sumInLog derives one across multiple
+// sessions within a single log (see usage.Report's EarliestEventMs,
+// LatestEventMs, HasEventSpan).
+type eventSpan struct {
+	earliest, latest time.Time
+	have             bool
+}
+
 // sumInLog scans the file at path and returns a usage.Usage aggregated
-// across every "type":"result" event in the log. Lines larger than the 4
-// MiB scan buffer are skipped rather than aborting the scan.
+// across every "type":"result" event in the log, together with the
+// eventSpan of top-level event timestamps seen along the way. Lines larger
+// than the 4 MiB scan buffer are skipped rather than aborting the scan.
 //
 // Orchestrator mode invokes the claude-code driver repeatedly, so a single
 // Box log can hold several distinct sessions, each emitting exactly one
@@ -77,10 +90,10 @@ type timestampedEvent struct {
 // session's own duration_ms directly, timestamps or not — never the
 // span — matching output from before this aggregation change.
 //
-// Returns (usage.Usage{}, false, nil) when no result event is present or the
-// file does not exist. Returns (usage.Usage{}, false, err) on I/O errors
-// other than file-not-found or oversized lines.
-func sumInLog(path string) (usage.Usage, bool, error) {
+// Returns (usage.Usage{}, eventSpan{}, false, nil) when no result event is
+// present or the file does not exist. Returns (usage.Usage{}, eventSpan{},
+// false, err) on I/O errors other than file-not-found or oversized lines.
+func sumInLog(path string) (usage.Usage, eventSpan, bool, error) {
 	var sum usage.Usage
 	resultCount := 0
 	var maxDurationMs int64
@@ -123,11 +136,11 @@ func sumInLog(path string) (usage.Usage, bool, error) {
 		}
 	})
 	if err != nil {
-		return usage.Usage{}, false, err
+		return usage.Usage{}, eventSpan{}, false, err
 	}
 
 	if resultCount == 0 {
-		return usage.Usage{}, false, nil
+		return usage.Usage{}, eventSpan{}, false, nil
 	}
 
 	if resultCount > 1 {
@@ -142,7 +155,8 @@ func sumInLog(path string) (usage.Usage, bool, error) {
 	} else {
 		sum.DurationMs = maxDurationMs
 	}
-	return sum, true, nil
+	span := eventSpan{earliest: earliest, latest: latest, have: haveTimestamp}
+	return sum, span, true, nil
 }
 
 // assistantEvent decodes line as a claude-code stream-json assistant message
@@ -281,7 +295,7 @@ var breakdownByModel = breakdownByModelFile
 // per-model breakdown, returning both in one usage.Report — the claude
 // Driver's implementation of the Driver interface's ExtractUsage method.
 func ExtractUsage(logPath string) (usage.Report, error) {
-	u, found, err := sumInLog(logPath)
+	u, span, found, err := sumInLog(logPath)
 	if err != nil {
 		return usage.Report{}, err
 	}
@@ -295,5 +309,11 @@ func ExtractUsage(logPath string) (usage.Report, error) {
 		fmt.Fprintf(os.Stderr, "WARNING: breakdown by model failed for %s: %v\n", logPath, err)
 		models = nil
 	}
-	return usage.Report{Totals: u, Found: true, SummedByModel: models}, nil
+	report := usage.Report{Totals: u, Found: true, SummedByModel: models}
+	if span.have {
+		report.EarliestEventMs = span.earliest.UnixMilli()
+		report.LatestEventMs = span.latest.UnixMilli()
+		report.HasEventSpan = true
+	}
+	return report, nil
 }

@@ -10,7 +10,7 @@ func TestSumInLog_FullResultEvent(t *testing.T) {
 	line := `{"type":"result","num_turns":7,"total_cost_usd":0.1234,"duration_ms":5000,"duration_api_ms":3000,"usage":{"input_tokens":800,"output_tokens":200,"cache_read_input_tokens":150,"cache_creation_input_tokens":50}}`
 	path := WriteLog(t, "some output", line)
 
-	u, found, err := sumInLog(path)
+	u, _, found, err := sumInLog(path)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -48,7 +48,7 @@ func TestSumInLog_SumsAcrossMultipleResultEvents(t *testing.T) {
 	last := `{"type":"result","num_turns":9,"total_cost_usd":0.99,"duration_ms":9000,"usage":{"input_tokens":900,"output_tokens":90}}`
 	path := WriteLog(t, first, "some other output", last)
 
-	u, found, err := sumInLog(path)
+	u, _, found, err := sumInLog(path)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -65,7 +65,7 @@ func TestSumInLog_AdditiveFieldsSumAcrossResultEvents(t *testing.T) {
 	second := `{"type":"result","num_turns":3,"total_cost_usd":0.25,"duration_ms":2000,"duration_api_ms":700,"usage":{"input_tokens":200,"output_tokens":30,"cache_read_input_tokens":6,"cache_creation_input_tokens":4}}`
 	path := WriteLog(t, first, second)
 
-	u, found, err := sumInLog(path)
+	u, _, found, err := sumInLog(path)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -113,7 +113,7 @@ func TestSumInLog_IdenticalTimestampsDoesNotCollapseMultiSessionDuration(t *test
 	resultTwo := `{"type":"result","num_turns":2,"total_cost_usd":0.02,"duration_ms":500000,"usage":{"input_tokens":20,"output_tokens":10}}`
 	path := WriteLog(t, sameInstant, resultOne, resultTwo)
 
-	u, found, err := sumInLog(path)
+	u, _, found, err := sumInLog(path)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -137,7 +137,7 @@ func TestSumInLog_SpanFlooredToLongestSessionDuration(t *testing.T) {
 	resultTwo := `{"type":"result","num_turns":2,"total_cost_usd":0.02,"duration_ms":600000,"usage":{"input_tokens":20,"output_tokens":10}}`
 	path := WriteLog(t, start, resultOne, end, resultTwo)
 
-	u, found, err := sumInLog(path)
+	u, _, found, err := sumInLog(path)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -161,7 +161,7 @@ func TestSumInLog_DurationMsFromTimestampSpanWhenPresent(t *testing.T) {
 	assistantEnd := `{"type":"assistant","timestamp":"2026-08-11T19:45:00.000Z"}`
 	path := WriteLog(t, assistantStart, resultOne, userMid, resultTwo, assistantEnd)
 
-	u, found, err := sumInLog(path)
+	u, _, found, err := sumInLog(path)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -188,7 +188,7 @@ func TestSumInLog_SingleSessionDurationMsUnaffectedByTimestamps(t *testing.T) {
 	result := `{"type":"result","num_turns":4,"total_cost_usd":0.1,"duration_ms":300000,"usage":{"input_tokens":10,"output_tokens":5}}`
 	path := WriteLog(t, assistantStart, assistantEnd, result)
 
-	u, found, err := sumInLog(path)
+	u, _, found, err := sumInLog(path)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -209,7 +209,7 @@ func TestSumInLog_SingleTimestampLineDoesNotCollapseDuration(t *testing.T) {
 	result := `{"type":"result","num_turns":1,"total_cost_usd":0.02,"duration_ms":300000,"usage":{"input_tokens":10,"output_tokens":5}}`
 	path := WriteLog(t, assistantOnly, result)
 
-	u, found, err := sumInLog(path)
+	u, _, found, err := sumInLog(path)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -234,7 +234,7 @@ func TestSumInLog_StrayTimestampLineIgnoredInSpan(t *testing.T) {
 	resultTwo := `{"type":"result","num_turns":2,"total_cost_usd":0.02,"duration_ms":600000,"usage":{"input_tokens":20,"output_tokens":10}}`
 	path := WriteLog(t, stray, assistantStart, resultOne, assistantEnd, resultTwo)
 
-	u, found, err := sumInLog(path)
+	u, _, found, err := sumInLog(path)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -261,7 +261,7 @@ func TestSumInLog_NestedTimestampInToolResultIgnoredInSpan(t *testing.T) {
 	resultTwo := `{"type":"result","num_turns":2,"total_cost_usd":0.02,"duration_ms":600000,"usage":{"input_tokens":20,"output_tokens":10}}`
 	path := WriteLog(t, assistantStart, resultOne, toolResultDump, assistantEnd, resultTwo)
 
-	u, found, err := sumInLog(path)
+	u, _, found, err := sumInLog(path)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -278,7 +278,7 @@ func TestSumInLog_NoCacheFields(t *testing.T) {
 	line := `{"type":"result","num_turns":3,"total_cost_usd":0.05,"duration_ms":2000,"usage":{"input_tokens":100,"output_tokens":40}}`
 	path := WriteLog(t, line)
 
-	u, found, err := sumInLog(path)
+	u, _, found, err := sumInLog(path)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -295,7 +295,7 @@ func TestSumInLog_NoCacheFields(t *testing.T) {
 
 func TestSumInLog_NotFound(t *testing.T) {
 	path := WriteLog(t, "some output", "no result event here")
-	_, found, err := sumInLog(path)
+	_, _, found, err := sumInLog(path)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -305,7 +305,7 @@ func TestSumInLog_NotFound(t *testing.T) {
 }
 
 func TestSumInLog_FileNotFound(t *testing.T) {
-	_, found, err := sumInLog("/nonexistent/path/test.log")
+	_, _, found, err := sumInLog("/nonexistent/path/test.log")
 	if err != nil {
 		t.Fatalf("unexpected error for missing file: %v", err)
 	}
@@ -316,7 +316,7 @@ func TestSumInLog_FileNotFound(t *testing.T) {
 
 func TestSumInLog_MalformedJSON(t *testing.T) {
 	path := WriteLog(t, `{"type":"result","num_turns":INVALID}`)
-	_, found, err := sumInLog(path)
+	_, _, found, err := sumInLog(path)
 	if err != nil {
 		t.Fatalf("unexpected error for malformed JSON: %v", err)
 	}
@@ -342,7 +342,7 @@ func TestSumInLog_OversizedLine(t *testing.T) {
 	f.WriteString(`{"type":"result","num_turns":2,"total_cost_usd":0.02,"duration_ms":200,"usage":{"input_tokens":20,"output_tokens":10}}` + "\n")
 	f.Close()
 
-	u, found, err := sumInLog(path)
+	u, _, found, err := sumInLog(path)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
