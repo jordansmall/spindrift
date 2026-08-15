@@ -170,7 +170,7 @@ func TestWaitForSentinelReturnsTrueImmediatelyWhenFileAlreadyExists(t *testing.T
 
 // writeFakeWorkerDriverExec writes a fake driver-exec that branches on the
 // basename of its own --log-path flag (derived by writeFakeDriverExec's
-// preamble into $DRIVER_LOG_PATH) to play one of four worker behaviors: a
+// preamble into $DRIVER_LOG_PATH) to play one of five worker behaviors: a
 // "done-fast" slice writes to its log then creates its own sentinel (derived
 // from DRIVER_LOG_PATH by replacing ".log" with ".done", matching
 // launchOneWorker's own sentinel/log naming convention) and exits 0; a
@@ -183,7 +183,11 @@ func TestWaitForSentinelReturnsTrueImmediatelyWhenFileAlreadyExists(t *testing.T
 // itself sleeps well past any test's own short timeout without ever
 // touching a sentinel -- letting a test prove a timeout kill reaches the
 // whole process group, not just this top-level driver-exec process (issue
-// #2059 code-review finding).
+// #2059 code-review finding); a "lingers-after-sentinel" slice creates its
+// sentinel immediately but then, like "orphan-check", spawns and records a
+// background child and sleeps well past the timeout -- letting a test prove
+// a worker that already signaled completion still gets its process group
+// reaped rather than left running.
 func writeFakeWorkerDriverExec(t *testing.T, dir, callLog string) string {
 	t.Helper()
 	body := `echo "worker log" > "$DRIVER_LOG_PATH"

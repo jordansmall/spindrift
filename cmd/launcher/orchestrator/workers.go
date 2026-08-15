@@ -367,14 +367,16 @@ func launchOneWorker(cfg config, slice ManifestSlice, promptFile, workDir string
 	passCfg.heartbeatLog = heartbeatLogPath
 	// Belt-and-suspenders, not the actual enforcement mechanism:
 	// buildDriverExecCmd (run.go:728-753) never reads cfg.stateFile or
-	// cfg.reviewPromptFile into argv for ANY cfg, so a worker's driver-exec
-	// invocation is already structurally unable to discover the run-state
-	// path regardless of what these two fields hold. Clearing them here
-	// only guards against a future buildDriverExecCmd change starting to
-	// wire one of them in -- see TestBuildDriverExecCmdNeverForwardsStateOrReviewPromptFile
-	// in run_test.go, which pins the real invariant (issue #2059 review
-	// finding: this comment previously implied clearing these fields was
-	// itself what made AC4/AC6 hold).
+	// cfg.reviewPromptFile into argv for ANY cfg, so clearing them here only
+	// guards against a future buildDriverExecCmd change starting to wire one
+	// of them in -- see TestBuildDriverExecCmdNeverForwardsStateOrReviewPromptFile
+	// in run_test.go, which pins the real invariant. This does NOT make a
+	// worker structurally unable to discover the run-state path: it lives at
+	// the fixed literal "/tmp/run-state.json" (main.go's own --state-file
+	// default, entrypoint.sh:1159's --run-state-file), and a worker holds
+	// Bash/Write like any other pass -- AC4/AC6 rest on the worker prompt's
+	// own instruction not to touch it, not on any structural barrier (issue
+	// #2059 review finding).
 	passCfg.stateFile = ""
 	passCfg.reviewPromptFile = ""
 

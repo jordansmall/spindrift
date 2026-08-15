@@ -29,7 +29,8 @@ To dispatch a parallel batch, compose a JSON object of this exact shape:
 required and must be non-empty — it is the only description of the slice's
 work the dispatched worker ever receives, so write it the same way you'd
 write a `worker` delegation's own instructions. `file_leases` and
-`depends_on` are both optional. Base64-standard-encode the JSON, then print
+`depends_on` are both optional. A manifest may declare **at most 8 slices**
+— more than that is rejected outright and nothing is dispatched. Base64-standard-encode the JSON, then print
 exactly one line to stdout:
 
 ```
@@ -44,3 +45,14 @@ own log, launches one driver-exec worker process per slice concurrently
 timeouts, and seeds the next coordinator pass's prompt with each worker's
 done/timed-out/crashed status plus its own reported summary — you will see
 that on your next invocation, not this one.
+
+Each worker commits its slice on its own `orchestrator-worker/<name>`
+branch, left behind after its worktree is removed. Once you see a slice
+reported done, cherry-pick that branch into your own tree the same way you
+integrate a sequential `worker` delegation's branch — before re-declaring
+that same slice name in a later manifest. A slice name still present in
+`state.DoneSlices` when you re-declare it is skipped rather than
+re-dispatched, so re-declaring an already-done, not-yet-integrated slice
+wastes a batch slot rather than losing work — but the surest way to make
+forward progress is to cherry-pick each done slice's branch as soon as you
+see it and never re-declare that name again.

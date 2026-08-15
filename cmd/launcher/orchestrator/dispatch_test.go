@@ -12,6 +12,23 @@ import (
 	"spindrift.dev/launcher/internal/runstate"
 )
 
+// TestTruncateRunesNeverSplitsAMultiByteRune verifies truncateRunes cuts on
+// a rune boundary rather than a byte index: a naive s[:max] byte slice can
+// land mid-way through a multi-byte UTF-8 rune, producing an invalid
+// encoding that decodes as U+FFFD once written out (issue #2059 review
+// finding).
+func TestTruncateRunesNeverSplitsAMultiByteRune(t *testing.T) {
+	// "café" is 4 runes but 5 bytes -- the trailing "é" is a 2-byte rune, so
+	// a byte cutoff at 4 would split it.
+	got := truncateRunes("café", 4)
+	if !strings.HasPrefix(got, "café") {
+		t.Fatalf("truncateRunes(%q, 4) = %q, want a valid, unsplit \"café\" prefix", "café", got)
+	}
+	if strings.ContainsRune(got, '�') {
+		t.Errorf("truncateRunes(%q, 4) = %q, want no replacement-character corruption", "café", got)
+	}
+}
+
 // TestDispatchManifestIfPresentNoopWhenWorkerPromptFileUnset verifies
 // dispatchManifestIfPresent is a no-op -- returning false and leaving state
 // untouched -- when cfg.workerPromptFile is unset, matching every other
