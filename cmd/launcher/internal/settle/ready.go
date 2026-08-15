@@ -304,6 +304,17 @@ const registrationWindowPolls = 3
 //     ever observed.
 //   - gateAbandoned — reason is "".
 func (s *Settle) gateToGreen(num string, gen uint64, pr string, requireRegistration bool) (gateResult, string) {
+	obs, reason := s.gateToGreenObs(num, gen, pr, requireRegistration)
+	return obs.outcome, reason
+}
+
+// gateToGreenObs is gateToGreen's body, returning the full watchObservation
+// (not just its outcome) plus the formatted reason string, so same-package
+// tests can assert on the observation fields (sawNonTerminal, windowElapsed,
+// elapsed) directly instead of only indirectly via the reason string.
+// gateToGreen remains the production entrypoint; this is not itself called
+// outside this file.
+func (s *Settle) gateToGreenObs(num string, gen uint64, pr string, requireRegistration bool) (watchObservation, string) {
 	deadline := s.cfg.MergePollTimeout
 	w := watch{
 		pollInterval:        s.cfg.MergePollInterval,
@@ -318,7 +329,7 @@ func (s *Settle) gateToGreen(num string, gen uint64, pr string, requireRegistrat
 
 	switch obs.outcome {
 	case gateGreen, gateRedRetry, gateAbandoned:
-		return obs.outcome, ""
+		return obs, ""
 	}
 
 	// gateTerminal: format the operator-facing reason, logging the
@@ -326,7 +337,7 @@ func (s *Settle) gateToGreen(num string, gen uint64, pr string, requireRegistrat
 	// print.
 	if obs.err != nil {
 		fmt.Printf("    #%s  landing=%s  status=check-state-error  !! %v\n", num, pr, obs.err)
-		return gateTerminal, gateTerminalReason(obs.err, deadline)
+		return obs, gateTerminalReason(obs.err, deadline)
 	}
 	if requireRegistration && !obs.sawNonTerminal {
 		// The deadline was reached with the requireRegistration guard still
@@ -334,9 +345,9 @@ func (s *Settle) gateToGreen(num string, gen uint64, pr string, requireRegistrat
 		// own elapsed-fallback (if it fired at all) ever set registered.
 		// Name that flavour explicitly rather than folding it into the
 		// generic ci-timeout reason (issue #2476).
-		return gateTerminal, gateTerminalReasonRegistration(deadline)
+		return obs, gateTerminalReasonRegistration(deadline)
 	}
-	return gateTerminal, gateTerminalReason(nil, deadline)
+	return obs, gateTerminalReason(nil, deadline)
 }
 
 // mergeGuardHit checks a green PR's changed files against MergeGuardPaths,
