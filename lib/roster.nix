@@ -78,7 +78,9 @@
       models ? { },
     }:
     let
-      schemaDefaults = (import ./roster-schema-defaults.nix { inherit lib; }).schemaDefaults;
+      rosterHelper = import ./roster-schema-defaults.nix { inherit lib; };
+      schemaDefaults = rosterHelper.schemaDefaults;
+      rosterDefaults = rosterHelper.rosterDefaults;
       legacyModels = {
         scout = scoutModel;
         reviewer = reviewModel;
@@ -102,7 +104,7 @@
         {
           name = "scout";
           model = modelFor "scout";
-          effort = "medium";
+          effort = rosterDefaults.scout.effort;
           mode = "subagent";
           description = "Map relevant files, seams, and tests; return a structured brief";
           tools = [
@@ -119,7 +121,7 @@
         {
           name = "reviewer";
           model = modelFor "reviewer";
-          effort = "high";
+          effort = rosterDefaults.reviewer.effort;
           mode = "subagent";
           description = "Review the branch diff for spec compliance and coding standards";
           tools = [
@@ -134,7 +136,7 @@
         {
           name = "filer";
           model = modelFor "filer";
-          effort = "medium";
+          effort = rosterDefaults.filer.effort;
           mode = "subagent";
           description = "File issues from a review's non-blocking findings, best-effort";
           tools = [
@@ -148,7 +150,7 @@
         {
           name = "worker";
           model = modelFor "worker";
-          effort = "high";
+          effort = rosterDefaults.worker.effort;
           mode = "subagent";
           description = "Implement a scoped slice of work delegated to it, with full implement-capable tools";
           tools = [

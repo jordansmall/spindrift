@@ -50,9 +50,7 @@ in
         builtins.deepSeq r r
       );
     in
-    assert assertMsg (
-      !result.success
-    ) "normalizeRoster must throw on an entry that omits name";
+    assert assertMsg (!result.success) "normalizeRoster must throw on an entry that omits name";
     pkgs.runCommand "roster-normalize-rejects-missing-name" { } "touch $out";
 
   roster-normalize-accepts-valid-name =
@@ -72,8 +70,7 @@ in
         builtins.deepSeq r r
       );
     in
-    assert assertMsg (
-      result.success
+    assert assertMsg (result.success
     ) "normalizeRoster must not throw on a valid lowercase-alnum-dash name";
     pkgs.runCommand "roster-normalize-accepts-valid-name" { } "touch $out";
 
@@ -101,9 +98,7 @@ in
         builtins.deepSeq r r
       );
     in
-    assert assertMsg (
-      !result.success
-    ) "normalizeRoster must throw when two entries share a name";
+    assert assertMsg (!result.success) "normalizeRoster must throw when two entries share a name";
     pkgs.runCommand "roster-normalize-rejects-duplicate-name" { } "touch $out";
 
   roster-normalize-injects-promptfile-default =
@@ -123,9 +118,7 @@ in
         builtins.deepSeq r r
       );
     in
-    assert assertMsg (
-      result.success
-    ) "normalizeRoster must not throw on an entry omitting promptFile";
+    assert assertMsg (result.success) "normalizeRoster must not throw on an entry omitting promptFile";
     assert assertMsg ((builtins.elemAt result.value 0).promptFile == "scout-prompt.md")
       "normalizeRoster must inject promptFile as <name>-prompt.md when omitted, got: ${builtins.toJSON result.value}";
     pkgs.runCommand "roster-normalize-injects-promptfile-default" { } "touch $out";
@@ -148,11 +141,11 @@ in
         builtins.deepSeq r r
       );
     in
-    assert assertMsg (
-      result.success
+    assert assertMsg (result.success
     ) "normalizeRoster must not throw on an entry with explicit promptFile";
-    assert assertMsg ((builtins.elemAt result.value 0).promptFile == "custom-scout.md")
-      "normalizeRoster must preserve an explicit promptFile, got: ${builtins.toJSON result.value}";
+    assert assertMsg (
+      (builtins.elemAt result.value 0).promptFile == "custom-scout.md"
+    ) "normalizeRoster must preserve an explicit promptFile, got: ${builtins.toJSON result.value}";
     pkgs.runCommand "roster-normalize-preserves-promptfile" { } "touch $out";
 
   roster-normalize-allows-empty =
@@ -164,13 +157,57 @@ in
         builtins.deepSeq r r
       );
     in
-    assert assertMsg (
-      result.success
-    ) "normalizeRoster must not throw on an empty roster";
+    assert assertMsg (result.success) "normalizeRoster must not throw on an empty roster";
     assert assertMsg (
       result.value == [ ]
     ) "normalizeRoster [] must return [], got: ${builtins.toJSON result.value}";
     pkgs.runCommand "roster-normalize-allows-empty" { } "touch $out";
+
+  # Issue #2506: lib/roster-schema-defaults.nix's rosterDefaults table is the
+  # roster's single root -- each default-roster agent name maps to its
+  # lib/env-schema.nix schemaKey and its fixed default effort (issue #2386).
+  roster-schema-defaults-exports-roster-defaults =
+    let
+      rosterDefaults =
+        (import ../../lib/roster-schema-defaults.nix { inherit (pkgs) lib; }).rosterDefaults;
+      expected = {
+        scout = {
+          schemaKey = "scoutModel";
+          effort = "medium";
+        };
+        reviewer = {
+          schemaKey = "reviewModel";
+          effort = "high";
+        };
+        filer = {
+          schemaKey = "filerModel";
+          effort = "medium";
+        };
+        worker = {
+          schemaKey = "workerModel";
+          effort = "high";
+        };
+      };
+      mismatches = builtins.filter (n: !(rosterDefaults ? ${n}) || rosterDefaults.${n} != expected.${n}) [
+        "scout"
+        "reviewer"
+        "filer"
+        "worker"
+      ];
+    in
+    assert assertMsg
+      (
+        builtins.attrNames rosterDefaults == [
+          "filer"
+          "reviewer"
+          "scout"
+          "worker"
+        ]
+      )
+      "rosterDefaults must have exactly the four keys scout/reviewer/filer/worker, got: ${builtins.toJSON (builtins.attrNames rosterDefaults)}";
+    assert assertMsg (mismatches == [ ])
+      "rosterDefaults entries must match the expected schemaKey/effort per agent, mismatched: ${builtins.toJSON mismatches}";
+    pkgs.runCommand "roster-schema-defaults-exports-roster-defaults" { } "touch $out";
 
   # Issue #2386: defaultRoster ships a fixed default `effort` per agent
   # (scout=medium, reviewer=high, filer=medium, worker=high) as a literal on
@@ -184,12 +221,9 @@ in
         workerModel = "m";
       };
       byName = name: builtins.head (builtins.filter (e: e.name == name) roster);
-      expected = {
-        scout = "medium";
-        reviewer = "high";
-        filer = "medium";
-        worker = "high";
-      };
+      expected =
+        builtins.mapAttrs (_: v: v.effort)
+          (import ../../lib/roster-schema-defaults.nix { inherit (pkgs) lib; }).rosterDefaults;
       mismatches = builtins.filter (n: (byName n).effort != expected.${n}) [
         "scout"
         "reviewer"
@@ -348,9 +382,9 @@ in
         filer = schema.filerModel.default;
         worker = schema.workerModel.default;
       };
-      mismatches = builtins.filter (
-        n: helper.schemaDefaults.${n} != expected.${n}
-      ) (builtins.attrNames helper.rosterModelKeys);
+      mismatches = builtins.filter (n: helper.schemaDefaults.${n} != expected.${n}) (
+        builtins.attrNames helper.rosterModelKeys
+      );
     in
     assert assertMsg (mismatches == [ ])
       "lib/roster-schema-defaults.nix schemaDefaults must match lib/env-schema.nix's four current defaults, mismatched: ${builtins.toJSON mismatches}";
