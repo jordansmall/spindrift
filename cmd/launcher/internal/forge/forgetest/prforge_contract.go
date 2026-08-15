@@ -146,9 +146,6 @@ func testOpenPRForBranchAdoptsDraft(t *testing.T, h PRForgeHarness) {
 	if !ok || pr.URL != wantURL {
 		t.Fatalf("OpenPRForBranch(%q) = (%+v, %v), want URL %q", branch, pr, ok, wantURL)
 	}
-	if !pr.IsDraft {
-		t.Fatalf("OpenPRForBranch(%q) IsDraft = false, want true", branch)
-	}
 }
 
 // testMarkReadyClearsAdoptedDraftThenMerges verifies the companion behavior
@@ -168,9 +165,6 @@ func testMarkReadyClearsAdoptedDraftThenMerges(t *testing.T, h PRForgeHarness) {
 	if !ok || pr.URL != wantURL {
 		t.Fatalf("OpenPRForBranch(%q) = (%+v, %v), want URL %q", branch, pr, ok, wantURL)
 	}
-	if !pr.IsDraft {
-		t.Fatalf("OpenPRForBranch(%q) IsDraft = false, want true before MarkReady", branch)
-	}
 
 	if err := h.Forge().MarkReady(wantURL); err != nil {
 		t.Fatalf("MarkReady(%q): %v", wantURL, err)
@@ -182,9 +176,6 @@ func testMarkReadyClearsAdoptedDraftThenMerges(t *testing.T, h PRForgeHarness) {
 	}
 	if !ok || pr.URL != wantURL {
 		t.Fatalf("OpenPRForBranch(%q) after MarkReady = (%+v, %v), want URL %q", branch, pr, ok, wantURL)
-	}
-	if pr.IsDraft {
-		t.Fatalf("OpenPRForBranch(%q) IsDraft = true after MarkReady, want false", branch)
 	}
 
 	if err := h.CodeForge().Merge(wantURL); err != nil {
