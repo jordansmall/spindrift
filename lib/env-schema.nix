@@ -275,7 +275,7 @@
   workerWorkDir = {
     env = "WORKER_WORK_DIR";
     group = "agents";
-    doc = "worktree directory the orchestrator hands each parallel worker subagent (issue #2059); pass-through only, no normalization. Meaningful only under ORCHESTRATOR: entrypoint.sh threads this value to the orchestrator's --worker-work-dir flag.";
+    doc = "directory the orchestrator uses for each parallel worker's log, heartbeat, result, and sentinel files (issue #2059); pass-through only, no normalization. Meaningful only under ORCHESTRATOR: entrypoint.sh threads this value to the orchestrator's --worker-work-dir flag.";
     flakeOption = true;
     nixSubPath = "models.workerWorkDir";
     boxEnv = true;
@@ -284,7 +284,7 @@
   workerTimeout = {
     env = "WORKER_TIMEOUT";
     group = "agents";
-    doc = "timeout applied to each parallel worker subagent's run (issue #2059); pass-through only, no normalization. Meaningful only under ORCHESTRATOR: entrypoint.sh threads this value to the orchestrator's --worker-timeout flag.";
+    doc = "timeout applied to each parallel worker subagent's run (issue #2059); must be a Go duration string (e.g. 20m, 1h) -- a bare number fails fs.Duration parsing and aborts the whole run with exit 2. Pass-through only, no normalization. Meaningful only under ORCHESTRATOR: entrypoint.sh threads this value to the orchestrator's --worker-timeout flag.";
     flakeOption = true;
     nixSubPath = "models.workerTimeout";
     boxEnv = true;

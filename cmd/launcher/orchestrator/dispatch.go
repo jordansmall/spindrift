@@ -14,6 +14,19 @@ import (
 // own seeded prompt size (issue #2059 review finding).
 const maxWorkerResultInFindings = 4000
 
+// truncateRunes caps s at max runes, appending "... (truncated)" when it
+// does. Slices on the rune boundary rather than the byte index a bare
+// s[:max] would use, so a multi-byte UTF-8 rune straddling that cutoff is
+// never split into an invalid U+FFFD-producing partial encoding (issue
+// #2059 review finding).
+func truncateRunes(s string, max int) string {
+	runes := []rune(s)
+	if len(runes) <= max {
+		return s
+	}
+	return string(runes[:max]) + "... (truncated)"
+}
+
 // dispatchManifestIfPresent scans cfg.logPath (the pass that just ran) for a
 // slice manifest; if cfg.workerPromptFile is unset, it is a no-op returning
 // false without touching state (a static run-wide "worker dispatch
@@ -21,7 +34,7 @@ const maxWorkerResultInFindings = 4000
 // If no manifest is present, it clears state.WorkerFindings and returns
 // false -- a pass that dispatched nothing must not leave a stale findings
 // report from an earlier dispatch sitting in state for a later pass to seed
-// as though still fresh (issue #2058 review finding A). Otherwise, every
+// as though still fresh (issue #2059 review finding A). Otherwise, every
 // slice already present in state.DoneSlices is filtered out before
 // LaunchWorkers is ever called: launchOneWorker's own `git worktree add -B
 // <branch>` (workers.go) unconditionally force-resets that slice's branch to
@@ -39,7 +52,7 @@ const maxWorkerResultInFindings = 4000
 // WorkerResult into state: WorkerDone slices move from RemainingSlices (if
 // present) into DoneSlices, WorkerTimedOut/WorkerCrashed slices move the
 // other way, and each move is deduped so a slice name never appears twice in
-// the same list nor in both lists at once (issue #2058 review finding B). It
+// the same list nor in both lists at once (issue #2059 review finding B). It
 // composes state.WorkerFindings as one line (plus, for a WorkerDone result,
 // its own indented result block, capped at maxWorkerResultInFindings) per
 // dispatched slice, plus one skip-notice line per already-done slice, and
@@ -58,7 +71,7 @@ func dispatchManifestIfPresent(cfg config, state *runstate.RunState, stdout io.W
 		// unconditional per-pass state.ReviewFindings reassignment --
 		// otherwise a stale worker report would keep being seeded into
 		// every later pass's prompt as though it were still fresh (issue
-		// #2058 review finding A).
+		// #2059 review finding A).
 		state.WorkerFindings = ""
 		return false
 	}
@@ -91,16 +104,14 @@ func dispatchManifestIfPresent(cfg config, state *runstate.RunState, stdout io.W
 			// before recording success, and dedup the append, so a
 			// retried-then-successful slice never ends up listed in both
 			// DoneSlices and RemainingSlices at once, nor duplicated within
-			// DoneSlices itself (issue #2058 review finding B).
+			// DoneSlices itself (issue #2059 review finding B).
 			state.RemainingSlices = removeSlice(state.RemainingSlices, r.Slice)
 			state.DoneSlices = appendUnique(state.DoneSlices, r.Slice)
 			result := strings.TrimSpace(r.Result)
 			if result == "" {
 				fmt.Fprintf(&findings, "- %s: done (no result reported)\n", r.Slice)
 			} else {
-				if len(result) > maxWorkerResultInFindings {
-					result = result[:maxWorkerResultInFindings] + "... (truncated)"
-				}
+				result = truncateRunes(result, maxWorkerResultInFindings)
 				fmt.Fprintf(&findings, "- %s: done\n  %s\n", r.Slice, strings.ReplaceAll(result, "\n", "\n  "))
 			}
 		case WorkerTimedOut, WorkerCrashed:
@@ -108,7 +119,7 @@ func dispatchManifestIfPresent(cfg config, state *runstate.RunState, stdout io.W
 			// direction (a slice already recorded done regressing to
 			// timed-out/crashed) shouldn't normally occur, but keeping the
 			// same-invariant removal here means DoneSlices/RemainingSlices
-			// never disagree regardless of dispatch order (issue #2058
+			// never disagree regardless of dispatch order (issue #2059
 			// review finding B).
 			state.DoneSlices = removeSlice(state.DoneSlices, r.Slice)
 			state.RemainingSlices = appendUnique(state.RemainingSlices, r.Slice)
@@ -141,7 +152,7 @@ func containsSlice(slices []string, name string) bool {
 // appendUnique appends name to slices only if it is not already present,
 // keeping a slice name listed at most once per merge -- otherwise
 // dispatching the same slice with the same outcome across two passes would
-// duplicate its entry (issue #2058 review finding B).
+// duplicate its entry (issue #2059 review finding B).
 func appendUnique(slices []string, name string) []string {
 	for _, s := range slices {
 		if s == name {
@@ -154,7 +165,7 @@ func appendUnique(slices []string, name string) []string {
 // removeSlice returns slices with every occurrence of name removed, so a
 // slice's name never appears in both state.DoneSlices and
 // state.RemainingSlices at once when a merge moves it from one list to the
-// other (issue #2058 review finding B).
+// other (issue #2059 review finding B).
 func removeSlice(slices []string, name string) []string {
 	out := slices[:0]
 	for _, s := range slices {
