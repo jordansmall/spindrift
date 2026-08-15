@@ -198,6 +198,15 @@ func LaunchWorkers(cfg config, manifest SliceManifest, opts WorkerOptions, stdou
 }
 
 func launchOneWorker(cfg config, slice ManifestSlice, promptFile, workDir string, timeout, pollInterval time.Duration, stdout io.Writer, mu *sync.Mutex) WorkerResult {
+	// Emitted before anything else can fail, so every slice gets both a
+	// worker_start and a worker_finish op regardless of which return path
+	// this call takes (issue #2059 AC5 review finding) -- previously the
+	// three launch-failure paths below (seedWorkerPrompt,
+	// buildDriverExecCmd, cmd.Start) all returned before worker_start was
+	// ever written, so a launch failure was logged as neither started nor
+	// finished.
+	writeWorkerOp(stdout, mu, claude.SpindriftOp{Op: "worker_start", Worker: slice.Name})
+
 	resultPath := filepath.Join(workDir, slice.Name+".result")
 	sentinelPath := filepath.Join(workDir, slice.Name+".done")
 	logPath := filepath.Join(workDir, slice.Name+".log")
@@ -209,14 +218,19 @@ func launchOneWorker(cfg config, slice ManifestSlice, promptFile, workDir string
 	// worker's own completion signal (issue #2059 AC3 review finding).
 	// os.IsNotExist is expected and ignored; these usually don't exist.
 	if err := os.Remove(resultPath); err != nil && !os.IsNotExist(err) {
-		return WorkerResult{Slice: slice.Name, Status: WorkerCrashed, Err: fmt.Errorf("remove stale result file: %w", err)}
+		err = fmt.Errorf("remove stale result file: %w", err)
+		writeWorkerOp(stdout, mu, claude.SpindriftOp{Op: "worker_finish", Worker: slice.Name, WorkerStatus: string(WorkerCrashed), Reason: err.Error()})
+		return WorkerResult{Slice: slice.Name, Status: WorkerCrashed, Err: err}
 	}
 	if err := os.Remove(sentinelPath); err != nil && !os.IsNotExist(err) {
-		return WorkerResult{Slice: slice.Name, Status: WorkerCrashed, Err: fmt.Errorf("remove stale sentinel file: %w", err)}
+		err = fmt.Errorf("remove stale sentinel file: %w", err)
+		writeWorkerOp(stdout, mu, claude.SpindriftOp{Op: "worker_finish", Worker: slice.Name, WorkerStatus: string(WorkerCrashed), Reason: err.Error()})
+		return WorkerResult{Slice: slice.Name, Status: WorkerCrashed, Err: err}
 	}
 
 	seededPromptFile, err := seedWorkerPrompt(promptFile, slice, resultPath, sentinelPath)
 	if err != nil {
+		writeWorkerOp(stdout, mu, claude.SpindriftOp{Op: "worker_finish", Worker: slice.Name, WorkerStatus: string(WorkerCrashed), Reason: err.Error()})
 		return WorkerResult{Slice: slice.Name, Status: WorkerCrashed, Err: err}
 	}
 	// Mirrors run.go's own prevSeededPromptFile cleanup: the file is fully
@@ -236,16 +250,16 @@ func launchOneWorker(cfg config, slice ManifestSlice, promptFile, workDir string
 
 	cmd, err := buildDriverExecCmd(passCfg)
 	if err != nil {
+		writeWorkerOp(stdout, mu, claude.SpindriftOp{Op: "worker_finish", Worker: slice.Name, WorkerStatus: string(WorkerCrashed), Reason: err.Error()})
 		return WorkerResult{Slice: slice.Name, Status: WorkerCrashed, Err: err}
 	}
 	cmd.Stdout = io.Discard
 	cmd.Stderr = io.Discard
 
 	if err := cmd.Start(); err != nil {
+		writeWorkerOp(stdout, mu, claude.SpindriftOp{Op: "worker_finish", Worker: slice.Name, WorkerStatus: string(WorkerCrashed), Reason: err.Error()})
 		return WorkerResult{Slice: slice.Name, Status: WorkerCrashed, Err: err}
 	}
-
-	writeWorkerOp(stdout, mu, claude.SpindriftOp{Op: "worker_start", Worker: slice.Name})
 
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
