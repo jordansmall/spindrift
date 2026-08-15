@@ -259,13 +259,13 @@ in
   # validateMarkers above -- every row here names a write-capable git/gh
   # operation a read-only Box's rendered prompt must never order the Driver
   # to run.
-  prompt-contract-forbidden-markers-has-seven-rows =
+  prompt-contract-forbidden-markers-row-count =
     let
       out = builtins.length promptContract.forbiddenMarkers;
     in
-    assert assertMsg (out == 7)
-      "forbiddenMarkers must have exactly 7 rows (forbidden-git-push, forbidden-gh-pr-create, forbidden-gh-pr-ready, forbidden-gh-pr-merge, forbidden-gh-issue-comment, forbidden-gh-issue-create, forbidden-git-bundle-create), got: ${toString out}";
-    pkgs.runCommand "prompt-contract-forbidden-markers-has-seven-rows" { } "touch $out";
+    assert assertMsg (out == 13)
+      "forbiddenMarkers must have exactly 13 rows (forbidden-git-push, forbidden-gh-pr-create, forbidden-gh-pr-ready, forbidden-gh-pr-merge, forbidden-gh-issue-comment, forbidden-gh-issue-create, forbidden-git-bundle-create, forbidden-gh-api-mutation, forbidden-fj-pr-create, forbidden-fj-pr-ready, forbidden-fj-pr-merge, forbidden-fj-issue-comment, forbidden-fj-issue-create), got: ${toString out}";
+    pkgs.runCommand "prompt-contract-forbidden-markers-row-count" { } "touch $out";
 
   prompt-contract-forbidden-markers-row-order =
     let
@@ -278,6 +278,12 @@ in
         "forbidden-gh-issue-comment"
         "forbidden-gh-issue-create"
         "forbidden-git-bundle-create"
+        "forbidden-gh-api-mutation"
+        "forbidden-fj-pr-create"
+        "forbidden-fj-pr-ready"
+        "forbidden-fj-pr-merge"
+        "forbidden-fj-issue-comment"
+        "forbidden-fj-issue-create"
       ];
     in
     assert assertMsg (out == expected)
@@ -295,6 +301,12 @@ in
         "gh issue comment"
         "gh issue create"
         "git bundle create"
+        "gh api"
+        "fj pr create"
+        "fj pr ready"
+        "fj pr merge"
+        "fj issue comment"
+        "fj issue create"
       ];
     in
     assert assertMsg (out == expected)
@@ -337,6 +349,40 @@ in
       "every forbiddenMarkers row's message must contain its own marker substring, offending ids: [${concatStringsSep ", " badIds}]";
     pkgs.runCommand "prompt-contract-forbidden-markers-every-row-message-mentions-own-marker" { } "touch $out";
 
+  # issue #2499: every row's kind must be a known value. "gh-api-mutation" is
+  # accepted here even though no row uses it yet -- a later slice adds that
+  # row and this check should already accept it without another edit.
+  prompt-contract-forbidden-markers-every-row-kind-known-value =
+    let
+      knownKinds = [
+        "substring"
+        "gh-api-mutation"
+      ];
+      bad = builtins.filter (r: !(builtins.elem r.kind knownKinds)) promptContract.forbiddenMarkers;
+      badIds = map (r: r.id) bad;
+    in
+    assert assertMsg (bad == [ ])
+      "every forbiddenMarkers row's kind must be one of [${concatStringsSep ", " knownKinds}], offending ids: [${concatStringsSep ", " badIds}]";
+    pkgs.runCommand "prompt-contract-forbidden-markers-every-row-kind-known-value" { } "touch $out";
+
+  # issue #2499: every row's enforce must be a known value naming which
+  # runtime layer (if any) backstops the row -- "prompt-only" for rows with
+  # no runtime backstop, since a runtime guard would collide with a
+  # legitimate in-box use of the same operation.
+  prompt-contract-forbidden-markers-every-row-enforce-known-value =
+    let
+      knownEnforce = [
+        "command-shim"
+        "git-hook"
+        "prompt-only"
+      ];
+      bad = builtins.filter (r: !(builtins.elem r.enforce knownEnforce)) promptContract.forbiddenMarkers;
+      badIds = map (r: r.id) bad;
+    in
+    assert assertMsg (bad == [ ])
+      "every forbiddenMarkers row's enforce must be one of [${concatStringsSep ", " knownEnforce}], offending ids: [${concatStringsSep ", " badIds}]";
+    pkgs.runCommand "prompt-contract-forbidden-markers-every-row-enforce-known-value" { } "touch $out";
+
   prompt-contract-forbidden-git-push-row-shape =
     let
       row = forbiddenMarkerById "forbidden-git-push";
@@ -349,7 +395,185 @@ in
       "forbidden-git-push row's severity must be 'reject', got: ${row.severity}";
     assert assertMsg (row.when == "boxAccessReadOnly")
       "forbidden-git-push row's when must be 'boxAccessReadOnly', got: ${row.when}";
+    assert assertMsg (row.enforce == "git-hook")
+      "forbidden-git-push row's enforce must be 'git-hook', got: ${row.enforce}";
     pkgs.runCommand "prompt-contract-forbidden-git-push-row-shape" { } "touch $out";
+
+  # issue #2499: git bundle create's row is enforced only at the prompt level
+  # (see the rationale comment on the row itself in lib/prompt-contract.nix)
+  # since driver-exec's bundle-out step legitimately runs `git bundle create`
+  # in-box as the harness's own code-out mechanism -- a runtime backstop would
+  # sabotage that use, so this is the one row pinned to enforce=="prompt-only".
+  prompt-contract-forbidden-git-bundle-create-row-shape =
+    let
+      row = forbiddenMarkerById "forbidden-git-bundle-create";
+    in
+    assert assertMsg (row.marker == "git bundle create")
+      "forbidden-git-bundle-create row's marker must be 'git bundle create', got: ${row.marker}";
+    assert assertMsg (row.carrier == "fragment-body")
+      "forbidden-git-bundle-create row's carrier must be 'fragment-body', got: ${row.carrier}";
+    assert assertMsg (row.severity == "reject")
+      "forbidden-git-bundle-create row's severity must be 'reject', got: ${row.severity}";
+    assert assertMsg (row.when == "boxAccessReadOnly")
+      "forbidden-git-bundle-create row's when must be 'boxAccessReadOnly', got: ${row.when}";
+    assert assertMsg (row.enforce == "prompt-only")
+      "forbidden-git-bundle-create row's enforce must be 'prompt-only', got: ${row.enforce}";
+    pkgs.runCommand "prompt-contract-forbidden-git-bundle-create-row-shape" { } "touch $out";
+
+  # issue #2499: documents the bespoke bash argument-scanner in
+  # agent/entrypoint.sh's install_readonly_gh_shim, which rejects `gh api`
+  # calls carrying a mutating HTTP method (-X/--method POST/PATCH/PUT/DELETE)
+  # -- kind "gh-api-mutation" rather than "substring" because the real
+  # enforcement is that argument-scan, not a literal `gh api` substring
+  # match (a Box may legitimately run read-only `gh api` calls).
+  prompt-contract-forbidden-gh-api-mutation-row-shape =
+    let
+      row = forbiddenMarkerById "forbidden-gh-api-mutation";
+    in
+    assert assertMsg (row.marker == "gh api")
+      "forbidden-gh-api-mutation row's marker must be 'gh api', got: ${row.marker}";
+    assert assertMsg (row.carrier == "fragment-body")
+      "forbidden-gh-api-mutation row's carrier must be 'fragment-body', got: ${row.carrier}";
+    assert assertMsg (row.severity == "reject")
+      "forbidden-gh-api-mutation row's severity must be 'reject', got: ${row.severity}";
+    assert assertMsg (row.when == "boxAccessReadOnly")
+      "forbidden-gh-api-mutation row's when must be 'boxAccessReadOnly', got: ${row.when}";
+    assert assertMsg (row.kind == "gh-api-mutation")
+      "forbidden-gh-api-mutation row's kind must be 'gh-api-mutation', got: ${row.kind}";
+    assert assertMsg (row.enforce == "command-shim")
+      "forbidden-gh-api-mutation row's enforce must be 'command-shim', got: ${row.enforce}";
+    pkgs.runCommand "prompt-contract-forbidden-gh-api-mutation-row-shape" { } "touch $out";
+
+  prompt-contract-inject-blocks-bash-rows-has-four-entries =
+    let
+      out = builtins.length promptContract.injectBlocksBashRows;
+    in
+    assert assertMsg (out == 4)
+      "injectBlocksBashRows must have exactly 4 entries (one per injectBlocks row), got: ${toString out}";
+    assert assertMsg (out == builtins.length promptContract.injectBlocks)
+      "injectBlocksBashRows' length must equal injectBlocks' length (derived-from-injectBlocks property)";
+    pkgs.runCommand "prompt-contract-inject-blocks-bash-rows-has-four-entries" { } "touch $out";
+
+  prompt-contract-inject-blocks-bash-rows-order =
+    let
+      ids = map (row: builtins.head (pkgs.lib.splitString "|" row)) promptContract.injectBlocksBashRows;
+      expected = [ "outcome" "comms" "check" "research-verdict" ];
+    in
+    assert assertMsg (ids == expected)
+      "injectBlocksBashRows must appear in injectBlocks row order [outcome, comms, check, research-verdict], got: [${concatStringsSep ", " ids}]";
+    pkgs.runCommand "prompt-contract-inject-blocks-bash-rows-order" { } "touch $out";
+
+  prompt-contract-inject-blocks-bash-rows-outcome-exact-string =
+    let
+      out = builtins.elemAt promptContract.injectBlocksBashRows 0;
+      expected = "outcome|# LAND THE CHANGE|issue-prompt.md|# LAND THE CHANGE||issue fix";
+    in
+    assert assertMsg (out == expected)
+      "injectBlocksBashRows' outcome row must equal '${expected}' (empty endMarker field for the null-endMarker case), got: '${out}'";
+    pkgs.runCommand "prompt-contract-inject-blocks-bash-rows-outcome-exact-string" { } "touch $out";
+
+  prompt-contract-inject-blocks-bash-rows-comms-exact-string =
+    let
+      out = builtins.elemAt promptContract.injectBlocksBashRows 1;
+      expected = "comms|# COMMS|issue-prompt.md|# COMMS|# SCOUT|fix";
+    in
+    assert assertMsg (out == expected)
+      "injectBlocksBashRows' comms row must equal '${expected}' (non-null endMarker case), got: '${out}'";
+    pkgs.runCommand "prompt-contract-inject-blocks-bash-rows-comms-exact-string" { } "touch $out";
+
+  prompt-contract-inject-blocks-bash-preamble-starts-with-array-open =
+    let
+      out = promptContract.injectBlocksBashPreamble;
+      prefix = "_INJECT_BLOCK_ROWS=(\n";
+    in
+    assert assertMsg (builtins.substring 0 (builtins.stringLength prefix) out == prefix)
+      "injectBlocksBashPreamble must start with '_INJECT_BLOCK_ROWS=(\\n', got: '${builtins.substring 0 40 out}...'";
+    pkgs.runCommand "prompt-contract-inject-blocks-bash-preamble-starts-with-array-open" { } "touch $out";
+
+  prompt-contract-inject-blocks-bash-preamble-ends-with-array-close =
+    let
+      out = promptContract.injectBlocksBashPreamble;
+      suffix = ")\n";
+      len = builtins.stringLength out;
+      suffixLen = builtins.stringLength suffix;
+    in
+    assert assertMsg (builtins.substring (len - suffixLen) suffixLen out == suffix)
+      "injectBlocksBashPreamble must end with ')\\n', got tail: '${builtins.substring (len - 40) 40 out}'";
+    pkgs.runCommand "prompt-contract-inject-blocks-bash-preamble-ends-with-array-close" { } "touch $out";
+
+  prompt-contract-inject-blocks-bash-preamble-contains-every-quoted-row =
+    let
+      preamble = promptContract.injectBlocksBashPreamble;
+      # Every row's content (`#`, `|`, and space are all outside
+      # `[[:alnum:],._+:@%/-]+`) trips the quoted branch, so each row must
+      # appear single-quote-wrapped on its own indented line.
+      expectedLines = map (row: "  '${row}'\n") promptContract.injectBlocksBashRows;
+      missing = builtins.filter (line: !(pkgs.lib.hasInfix line preamble)) expectedLines;
+    in
+    assert assertMsg (missing == [ ])
+      "injectBlocksBashPreamble must contain every injectBlocksBashRows entry single-quote-wrapped and indented 2 spaces; missing: [${concatStringsSep ", " missing}]";
+    pkgs.runCommand "prompt-contract-inject-blocks-bash-preamble-contains-every-quoted-row" { } "touch $out";
+
+  prompt-contract-validate-markers-bash-rows-has-four-entries =
+    let
+      out = builtins.length promptContract.validateMarkersBashRows;
+    in
+    assert assertMsg (out == 4)
+      "validateMarkersBashRows must have exactly 4 entries (one per validateMarkers row), got: ${toString out}";
+    assert assertMsg (out == builtins.length promptContract.validateMarkers)
+      "validateMarkersBashRows' length must equal validateMarkers' length (derived-from-validateMarkers property)";
+    pkgs.runCommand "prompt-contract-validate-markers-bash-rows-has-four-entries" { } "touch $out";
+
+  prompt-contract-validate-markers-bash-rows-order =
+    let
+      ids = map (row: builtins.head (pkgs.lib.splitString "|" row)) promptContract.validateMarkersBashRows;
+      expected = [ "verdict-comment-relay" "reviewer-verdict" "pr-intent" "issue-intent" ];
+    in
+    assert assertMsg (ids == expected)
+      "validateMarkersBashRows must appear in validateMarkers row order [verdict-comment-relay, reviewer-verdict, pr-intent, issue-intent], got: [${concatStringsSep ", " ids}]";
+    pkgs.runCommand "prompt-contract-validate-markers-bash-rows-order" { } "touch $out";
+
+  prompt-contract-validate-markers-bash-rows-verdict-comment-relay-exact-string =
+    let
+      out = builtins.elemAt promptContract.validateMarkersBashRows 0;
+      expected = "verdict-comment-relay|SPINDRIFT_COMMENT|fragment-body|reject|readOnlyResearch";
+    in
+    assert assertMsg (out == expected)
+      "validateMarkersBashRows' verdict-comment-relay row must equal '${expected}', got: '${out}'";
+    pkgs.runCommand "prompt-contract-validate-markers-bash-rows-verdict-comment-relay-exact-string" { } "touch $out";
+
+  prompt-contract-validate-markers-bash-preamble-starts-with-array-open =
+    let
+      out = promptContract.validateMarkersBashPreamble;
+      prefix = "_VALIDATE_MARKER_ROWS=(\n";
+    in
+    assert assertMsg (builtins.substring 0 (builtins.stringLength prefix) out == prefix)
+      "validateMarkersBashPreamble must start with '_VALIDATE_MARKER_ROWS=(\\n', got: '${builtins.substring 0 40 out}...'";
+    pkgs.runCommand "prompt-contract-validate-markers-bash-preamble-starts-with-array-open" { } "touch $out";
+
+  prompt-contract-validate-markers-bash-preamble-ends-with-array-close =
+    let
+      out = promptContract.validateMarkersBashPreamble;
+      suffix = ")\n";
+      len = builtins.stringLength out;
+      suffixLen = builtins.stringLength suffix;
+    in
+    assert assertMsg (builtins.substring (len - suffixLen) suffixLen out == suffix)
+      "validateMarkersBashPreamble must end with ')\\n', got tail: '${builtins.substring (len - 40) 40 out}'";
+    pkgs.runCommand "prompt-contract-validate-markers-bash-preamble-ends-with-array-close" { } "touch $out";
+
+  prompt-contract-validate-markers-bash-preamble-contains-every-quoted-row =
+    let
+      preamble = promptContract.validateMarkersBashPreamble;
+      # Every row's content (`|` and space are both outside
+      # `[[:alnum:],._+:@%/-]+`) trips the quoted branch, so each row must
+      # appear single-quote-wrapped on its own indented line.
+      expectedLines = map (row: "  '${row}'\n") promptContract.validateMarkersBashRows;
+      missing = builtins.filter (line: !(pkgs.lib.hasInfix line preamble)) expectedLines;
+    in
+    assert assertMsg (missing == [ ])
+      "validateMarkersBashPreamble must contain every validateMarkersBashRows entry single-quote-wrapped and indented 2 spaces; missing: [${concatStringsSep ", " missing}]";
+    pkgs.runCommand "prompt-contract-validate-markers-bash-preamble-contains-every-quoted-row" { } "touch $out";
 
   # Pins buildTimeRejectVerdicts (issue #2250): the build-time reject arm that
   # resolves each validateMarkers "reject" row into one of ok/reject/advise,
