@@ -292,10 +292,12 @@ rec {
   #               already interpolated), same "no runtime templating needed"
   #               contract as validateMarkers' `message` field.
   #   kind     -- how the marker is matched against the rendered prompt: a
-  #               plain "substring" scan for every row here, or
-  #               "gh-api-mutation" for a row keyed off a `gh api` mutating
-  #               verb+endpoint pair instead of a literal command string (a
-  #               later slice adds the first such row).
+  #               plain "substring" scan for most rows here, or
+  #               "gh-api-mutation" for the row keyed off a `gh api` mutating
+  #               verb+endpoint pair (entrypoint.sh's argument-scan shim)
+  #               instead of a literal command string -- that row's marker
+  #               is display-only, never scanned as a prompt substring
+  #               (promptassembly.Validate skips it for this kind).
   #   enforce  -- which layer (if any) backstops this row at runtime, beyond
   #               the prompt-level check every row gets: "git-hook" or
   #               "command-shim" name a runtime guard that also blocks the
@@ -400,6 +402,17 @@ rec {
       kind = "gh-api-mutation";
       enforce = "command-shim";
     }
+    # The five fj rows below are prompt-only, not command-shim, even though
+    # they mirror the gh rows above them one-for-one: no fj command-shim
+    # exists in agent/entrypoint.sh today (only install_readonly_push_hook,
+    # a git-hook, and install_readonly_gh_shim, a command-shim gated on
+    # _is_readonly_github and scoped to `gh ...` subcommands, exist there).
+    # Issue #2509 (driver-exec's readonly-guards verb, blocked by this
+    # issue) will read this registry's command-shim rows to install real
+    # runtime shims for both gh and fj; once that lands and installs an
+    # actual fj shim, these five rows' enforce should flip to
+    # "command-shim" to match reality. Until then, prompt-only is the
+    # honest current state: enforcement is solely the prompt-level check.
     {
       id = "forbidden-fj-pr-create";
       marker = "fj pr create";
@@ -408,7 +421,7 @@ rec {
       when = "boxAccessReadOnly";
       message = "_validate_prompt_contract: read-only dispatch's rendered prompt orders a read-only Box to run 'fj pr create' -- gated under boxAccessReadOnly, a read-only Box holds no write-capable token for this operation; forgejo PRs are opened via the PR-intent relay (SPINDRIFT_PR_INTENT), the same host-mediated relay a read-only github Box uses for `gh pr create`, applied over the forgejo relay path. Refusing to invoke the Driver.";
       kind = "substring";
-      enforce = "command-shim";
+      enforce = "prompt-only";
     }
     {
       id = "forbidden-fj-pr-ready";
@@ -418,7 +431,7 @@ rec {
       when = "boxAccessReadOnly";
       message = "_validate_prompt_contract: read-only dispatch's rendered prompt orders a read-only Box to run 'fj pr ready' -- gated under boxAccessReadOnly, a read-only Box holds no write-capable token for this operation; the launcher flips the PR ready once CI is green over the forgejo relay path, so a Box must never run 'fj pr ready' itself. Refusing to invoke the Driver.";
       kind = "substring";
-      enforce = "command-shim";
+      enforce = "prompt-only";
     }
     {
       id = "forbidden-fj-pr-merge";
@@ -428,7 +441,7 @@ rec {
       when = "boxAccessReadOnly";
       message = "_validate_prompt_contract: read-only dispatch's rendered prompt orders a read-only Box to run 'fj pr merge' -- gated under boxAccessReadOnly, a read-only Box holds no write-capable token for this operation; the launcher merges the PR once CI is green over the forgejo relay path, so a Box must never run 'fj pr merge' itself. Refusing to invoke the Driver.";
       kind = "substring";
-      enforce = "command-shim";
+      enforce = "prompt-only";
     }
     {
       id = "forbidden-fj-issue-comment";
@@ -438,7 +451,7 @@ rec {
       when = "boxAccessReadOnly";
       message = "_validate_prompt_contract: read-only dispatch's rendered prompt orders a read-only Box to run 'fj issue comment' -- gated under boxAccessReadOnly, a read-only Box holds no write-capable token for this operation; issue comments are relayed via the outcome contract's `note=` field, the same relay a read-only github Box uses for `gh issue comment`, applied over the forgejo path. Refusing to invoke the Driver.";
       kind = "substring";
-      enforce = "command-shim";
+      enforce = "prompt-only";
     }
     {
       id = "forbidden-fj-issue-create";
@@ -448,7 +461,7 @@ rec {
       when = "boxAccessReadOnly";
       message = "_validate_prompt_contract: read-only dispatch's rendered prompt orders a read-only Box to run 'fj issue create' -- gated under boxAccessReadOnly, a read-only Box holds no write-capable token for this operation; issues are filed via the issue-intent relay (SPINDRIFT_ISSUE_INTENT), the same relay a read-only github Box uses for `gh issue create`, applied over the forgejo path. Refusing to invoke the Driver.";
       kind = "substring";
-      enforce = "command-shim";
+      enforce = "prompt-only";
     }
   ];
 
