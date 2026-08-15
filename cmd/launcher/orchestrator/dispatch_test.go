@@ -469,6 +469,241 @@ exit 0
 	}
 }
 
+// TestDispatchManifestIfPresentSkipsRedispatchOfAlreadyDoneSlice verifies a
+// manifest slice whose name already appears in state.DoneSlices is filtered
+// out before LaunchWorkers is ever called -- launchOneWorker's own `git
+// worktree add -B <branch>` unconditionally force-resets that slice's
+// branch to the orchestrator's current HEAD (workers.go), which would
+// silently destroy a completed worker's commits if re-dispatched (issue
+// #2059 review finding). A second, genuinely-new slice name in the same
+// manifest must still dispatch normally, and the skipped slice gets a
+// skip-notice line in state.WorkerFindings instead.
+func TestDispatchManifestIfPresentSkipsRedispatchOfAlreadyDoneSlice(t *testing.T) {
+	chdirToFreshWorkerRepo(t)
+
+	fakeDir := t.TempDir()
+	callLog := filepath.Join(fakeDir, "calls.log")
+	if err := os.WriteFile(callLog, nil, 0o644); err != nil {
+		t.Fatalf("WriteFile(callLog): %v", err)
+	}
+	writeFakeWorkerDriverExec(t, fakeDir, callLog)
+	t.Setenv("PATH", fakeDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	dir := t.TempDir()
+	manifest := SliceManifest{Slices: []ManifestSlice{
+		{Name: "already-done", Task: "implement seam a"},
+		{Name: "done-fast", Task: "implement seam b"},
+	}}
+	line, err := manifest.Line()
+	if err != nil {
+		t.Fatalf("Line() error = %v", err)
+	}
+	logPath := filepath.Join(dir, "stream.log")
+	content := streamJSONOutcomeLine(strings.TrimSpace(line))
+	if err := os.WriteFile(logPath, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	workerPromptFile := filepath.Join(dir, "worker-prompt.txt")
+	if err := os.WriteFile(workerPromptFile, []byte("BASE WORKER PROMPT"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config{
+		driver:           "claude",
+		logPath:          logPath,
+		workerPromptFile: workerPromptFile,
+		workerWorkDir:    t.TempDir(),
+		workerTimeout:    2 * time.Second,
+	}
+	state := runstate.RunState{DoneSlices: []string{"already-done"}}
+
+	var stdout strings.Builder
+	got := dispatchManifestIfPresent(cfg, &state, &stdout)
+	if !got {
+		t.Fatalf("dispatchManifestIfPresent() = false, want true")
+	}
+
+	calls, err := os.ReadFile(callLog)
+	if err != nil {
+		t.Fatalf("read callLog: %v", err)
+	}
+	if strings.Contains(string(calls), "already-done") {
+		t.Errorf("callLog = %q, want no invocation for the already-done slice (its worktree/branch must never be touched)", calls)
+	}
+	if !strings.Contains(string(calls), "done-fast") {
+		t.Errorf("callLog = %q, want an invocation for the genuinely-new done-fast slice", calls)
+	}
+
+	if !reflect.DeepEqual(state.DoneSlices, []string{"already-done", "done-fast"}) {
+		t.Errorf("state.DoneSlices = %v, want [already-done done-fast]", state.DoneSlices)
+	}
+	if !strings.Contains(state.WorkerFindings, "already-done: already done, skipped redispatch") {
+		t.Errorf("state.WorkerFindings = %q, want a skip notice for already-done", state.WorkerFindings)
+	}
+	if !strings.Contains(state.WorkerFindings, "done-fast: done") {
+		t.Errorf("state.WorkerFindings = %q, want a done notice for done-fast", state.WorkerFindings)
+	}
+}
+
+// TestDispatchManifestIfPresentSkipsLaunchWorkersWhenAllSlicesAlreadyDone
+// verifies dispatchManifestIfPresent never calls LaunchWorkers at all when
+// every slice in the manifest is already in state.DoneSlices (issue #2059
+// review finding) -- LaunchWorkers' first action is to create
+// cfg.workerWorkDir, so asserting that directory is never created proves it
+// was never invoked. dispatchManifestIfPresent still returns true (a
+// manifest was present) and still records the skip-notice findings.
+func TestDispatchManifestIfPresentSkipsLaunchWorkersWhenAllSlicesAlreadyDone(t *testing.T) {
+	dir := t.TempDir()
+	manifest := SliceManifest{Slices: []ManifestSlice{{Name: "already-done", Task: "implement seam a"}}}
+	line, err := manifest.Line()
+	if err != nil {
+		t.Fatalf("Line() error = %v", err)
+	}
+	logPath := filepath.Join(dir, "stream.log")
+	content := streamJSONOutcomeLine(strings.TrimSpace(line))
+	if err := os.WriteFile(logPath, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	workerWorkDir := filepath.Join(dir, "workdir-that-should-not-be-created")
+	cfg := config{
+		driver:           "claude",
+		logPath:          logPath,
+		workerPromptFile: filepath.Join(dir, "worker-prompt.txt"),
+		workerWorkDir:    workerWorkDir,
+		workerTimeout:    2 * time.Second,
+	}
+	state := runstate.RunState{DoneSlices: []string{"already-done"}}
+
+	got := dispatchManifestIfPresent(cfg, &state, io.Discard)
+	if !got {
+		t.Fatalf("dispatchManifestIfPresent() = false, want true")
+	}
+	if !strings.Contains(state.WorkerFindings, "already-done: already done, skipped redispatch") {
+		t.Errorf("state.WorkerFindings = %q, want a skip notice for already-done", state.WorkerFindings)
+	}
+	if _, err := os.Stat(workerWorkDir); !os.IsNotExist(err) {
+		t.Errorf("workerWorkDir exists (stat err = %v), want it never created -- LaunchWorkers must never run when every slice is already done", err)
+	}
+}
+
+// TestRunWithReviewPassSkipsManifestDispatchWhenPassAlreadyReachedOutcome
+// verifies a pass whose log carries both a valid SPINDRIFT_OUTCOME line AND a
+// valid SPINDRIFT_SLICE_MANIFEST line never invokes the worker-dispatch path
+// at all (issue #2059 review finding): dispatchManifestIfPresent (which
+// blocks for up to the full worker timeout) previously ran unconditionally,
+// before the loop's own switch decided the pass had already reached a
+// terminal outcome -- wasting a full worker fan-out on a pass the loop was
+// about to stop on anyway. The fake driver-exec used for a dispatched worker
+// would append to workerCallLog if ever invoked; asserting it stays empty
+// proves LaunchWorkers, and therefore launchOneWorker's own `git worktree
+// add`, never ran.
+func TestRunWithReviewPassSkipsManifestDispatchWhenPassAlreadyReachedOutcome(t *testing.T) {
+	chdirToFreshWorkerRepo(t)
+
+	dir := t.TempDir()
+	callLog := filepath.Join(dir, "calls.log")
+	workerCallLog := filepath.Join(dir, "worker-calls.log")
+	if err := os.WriteFile(workerCallLog, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	workerWorkDir := filepath.Join(dir, "worker-work-dir")
+	if err := os.MkdirAll(workerWorkDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("WORKER_WORK_DIR", workerWorkDir)
+	t.Setenv("WORKER_CALL_LOG", workerCallLog)
+
+	manifest := SliceManifest{Slices: []ManifestSlice{{Name: "slice-a", Task: "implement seam a"}}}
+	manifestLine, err := manifest.Line()
+	if err != nil {
+		t.Fatalf("Line() error = %v", err)
+	}
+
+	// A single coordinator pass whose own log carries BOTH a manifest and a
+	// terminal outcome line. If a worker were ever dispatched, it would
+	// exec through this same fake driver-exec with a --log-path under
+	// WORKER_WORK_DIR, and record itself into WORKER_CALL_LOG.
+	body := `case "$DRIVER_LOG_PATH" in
+  "$WORKER_WORK_DIR"*)
+    echo "$@" >> "$WORKER_CALL_LOG"
+    : > "$DRIVER_LOG_PATH"
+    sentinel="${DRIVER_LOG_PATH%.log}.done"
+    : > "$sentinel"
+    exit 0
+    ;;
+esac
+: > "$DRIVER_LOG_PATH"
+printf '%s%s' '` + streamJSONOutcomeLine(strings.TrimSpace(manifestLine)) + `' '` + streamJSONOutcomeLine("SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=done nonce=abc") + `' | tee -a "$DRIVER_LOG_PATH"
+exit 0
+`
+	writeFakeDriverExec(t, dir, callLog, body)
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	promptFile := filepath.Join(dir, "prompt.txt")
+	if err := os.WriteFile(promptFile, []byte("ORIGINAL PROMPT TEXT"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	reviewPromptFile := filepath.Join(dir, "review-prompt.txt")
+	if err := os.WriteFile(reviewPromptFile, []byte("REVIEW PROMPT TEXT"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	workerPromptFile := filepath.Join(dir, "worker-prompt.txt")
+	if err := os.WriteFile(workerPromptFile, []byte("BASE WORKER PROMPT"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config{
+		promptFile:       promptFile,
+		reviewPromptFile: reviewPromptFile,
+		driverBin:        "claude",
+		issue:            "7",
+		logPath:          filepath.Join(dir, "stream.log"),
+		heartbeatLog:     filepath.Join(dir, "heartbeat.log"),
+		stateFile:        filepath.Join(dir, "run-state.json"),
+		maxReviewRounds:  3,
+		maxSlices:        10,
+		workerPromptFile: workerPromptFile,
+		workerWorkDir:    workerWorkDir,
+		workerTimeout:    2 * time.Second,
+	}
+
+	var stdout strings.Builder
+	rc, err := run(cfg, &stdout)
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if rc != 0 {
+		t.Errorf("exit code = %d, want 0", rc)
+	}
+
+	calls, err := os.ReadFile(callLog)
+	if err != nil {
+		t.Fatalf("read callLog: %v", err)
+	}
+	lines := strings.Split(strings.TrimRight(string(calls), "\n"), "\n")
+	if len(lines) != 1 {
+		t.Fatalf("driver-exec invocation count = %d, want 1 (the loop must stop right after this pass's own outcome, never fanning out a worker) (log: %q)", len(lines), calls)
+	}
+
+	workerCalls, err := os.ReadFile(workerCallLog)
+	if err != nil {
+		t.Fatalf("read workerCallLog: %v", err)
+	}
+	if len(strings.TrimSpace(string(workerCalls))) != 0 {
+		t.Errorf("workerCallLog = %q, want empty -- a pass that already reached its own outcome must never dispatch a worker", workerCalls)
+	}
+
+	out := stdout.String()
+	if !strings.Contains(out, "SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=done nonce=abc") {
+		t.Errorf("stdout = %q, want the pass's own outcome line present unchanged", out)
+	}
+	if !strings.Contains(out, `"spindrift_op":{"op":"decision","decision":"stop","reason":"outcome reached"}`) {
+		t.Errorf("stdout = %q, want a stop decision with reason \"outcome reached\"", out)
+	}
+}
+
 // TestDispatchManifestIfPresentDispatchesAndMergesResults verifies
 // dispatchManifestIfPresent, when the pass's own log carries a manifest,
 // dispatches LaunchWorkers and merges every WorkerResult into state: done

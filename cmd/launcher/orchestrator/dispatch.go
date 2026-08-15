@@ -21,14 +21,28 @@ const maxWorkerResultInFindings = 4000
 // If no manifest is present, it clears state.WorkerFindings and returns
 // false -- a pass that dispatched nothing must not leave a stale findings
 // report from an earlier dispatch sitting in state for a later pass to seed
-// as though still fresh (issue #2058 review finding A). Otherwise it
-// dispatches LaunchWorkers and merges every WorkerResult into state:
-// WorkerDone slices move from RemainingSlices (if present) into DoneSlices,
-// WorkerTimedOut/WorkerCrashed slices move the other way, and each move is
-// deduped so a slice name never appears twice in the same list nor in both
-// lists at once (issue #2058 review finding B). It composes
-// state.WorkerFindings as one line (plus, for a WorkerDone result, its own
-// indented result block, capped at maxWorkerResultInFindings) per slice, and
+// as though still fresh (issue #2058 review finding A). Otherwise, every
+// slice already present in state.DoneSlices is filtered out before
+// LaunchWorkers is ever called: launchOneWorker's own `git worktree add -B
+// <branch>` (workers.go) unconditionally force-resets that slice's branch to
+// the orchestrator's current HEAD, which is correct for retrying a
+// genuinely timed-out/crashed slice but would silently destroy a completed
+// worker's commits if the coordinator re-declares an already-done slice
+// name before cherry-picking its branch (issue #2059 review finding). Each
+// skipped slice gets its own "already done, skipped redispatch" line in
+// state.WorkerFindings instead, so the next coordinator pass's seeded
+// prompt tells it the slice's branch is still waiting to be cherry-picked.
+// If every slice in the manifest is filtered out this way, LaunchWorkers is
+// never called at all.
+//
+// For whatever slices remain, it dispatches LaunchWorkers and merges every
+// WorkerResult into state: WorkerDone slices move from RemainingSlices (if
+// present) into DoneSlices, WorkerTimedOut/WorkerCrashed slices move the
+// other way, and each move is deduped so a slice name never appears twice in
+// the same list nor in both lists at once (issue #2058 review finding B). It
+// composes state.WorkerFindings as one line (plus, for a WorkerDone result,
+// its own indented result block, capped at maxWorkerResultInFindings) per
+// dispatched slice, plus one skip-notice line per already-done slice, and
 // returns true -- letting the caller's own loop treat this pass as "more
 // work to do" regardless of what its own verdict/outcome scan found, since
 // the coordinator's only job on a manifest-emitting pass is to declare the
@@ -49,13 +63,26 @@ func dispatchManifestIfPresent(cfg config, state *runstate.RunState, stdout io.W
 		return false
 	}
 
-	results := LaunchWorkers(cfg, manifest, WorkerOptions{
-		PromptFile: cfg.workerPromptFile,
-		WorkDir:    cfg.workerWorkDir,
-		Timeout:    cfg.workerTimeout,
-	}, stdout)
-
 	var findings strings.Builder
+
+	dispatchSlices := make([]ManifestSlice, 0, len(manifest.Slices))
+	for _, s := range manifest.Slices {
+		if containsSlice(state.DoneSlices, s.Name) {
+			fmt.Fprintf(&findings, "- %s: already done, skipped redispatch\n", s.Name)
+			continue
+		}
+		dispatchSlices = append(dispatchSlices, s)
+	}
+
+	var results []WorkerResult
+	if len(dispatchSlices) > 0 {
+		results = LaunchWorkers(cfg, SliceManifest{Slices: dispatchSlices}, WorkerOptions{
+			PromptFile: cfg.workerPromptFile,
+			WorkDir:    cfg.workerWorkDir,
+			Timeout:    cfg.workerTimeout,
+		}, stdout)
+	}
+
 	for _, r := range results {
 		switch r.Status {
 		case WorkerDone:
@@ -96,6 +123,19 @@ func dispatchManifestIfPresent(cfg config, state *runstate.RunState, stdout io.W
 	}
 	state.WorkerFindings = strings.TrimSpace(findings.String())
 	return true
+}
+
+// containsSlice reports whether name is present anywhere in slices -- used
+// by dispatchManifestIfPresent to check state.DoneSlices before ever
+// dispatching a manifest slice, so an already-done slice's branch is never
+// touched by a redispatch (issue #2059 review finding).
+func containsSlice(slices []string, name string) bool {
+	for _, s := range slices {
+		if s == name {
+			return true
+		}
+	}
+	return false
 }
 
 // appendUnique appends name to slices only if it is not already present,

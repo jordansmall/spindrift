@@ -73,12 +73,10 @@ var validSliceNameRe = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,64}$`)
 // read or ran verbatim (e.g. a Read of the issue body, a Bash command's
 // stdout), and the issue body plus every comment from any GitHub user is
 // untrusted input once an issue is labeled for dispatch -- only the label
-// gates dispatch, not the content that follows. If an attacker plants a
-// valid-looking manifest token in issue/comment text and the coordinator's
-// own tooling echoes it back into a tool_result, this line shape is the
-// only way that forged token could reach scanForManifest; excluding it
-// means a manifest is only ever honored when the coordinator model itself
-// authored the line (issue #2059 code-review finding).
+// gates dispatch, not the content that follows. Excluding this shape is one
+// of two checks scanForManifest applies before honoring a line -- see
+// renderedRolePrefixRe's doc comment for the other (issue #2059 code-review
+// finding).
 var toolResultEchoRe = regexp.MustCompile(`^\[[^\]]*\]   -> `)
 
 // isToolResultEchoLine reports whether line (already trimmed) is a rendered
@@ -87,6 +85,24 @@ var toolResultEchoRe = regexp.MustCompile(`^\[[^\]]*\]   -> `)
 func isToolResultEchoLine(line string) bool {
 	return toolResultEchoRe.MatchString(line)
 }
+
+// renderedRolePrefixRe extracts the bracketed role name RenderTranscriptWithRole
+// (transcript_render.go) leads a rendered line with -- "[role] text" for an
+// assistant-authored text/tool_use event, "[role]   -> summary" for a
+// tool_result echo. Capture group 1 is the role name.
+//
+// A line with no match at all is a bare physical-line continuation of a
+// prior multi-line rendered entry: RenderTranscriptWithRole appends
+// "["+role+"] "+text as ONE entry in its own lines slice, but text itself is
+// only strings.TrimSpace-trimmed at its outer ends, so an embedded "\n"
+// inside it survives into that entry verbatim. scanForManifest's own
+// bufio.Scanner then splits that "\n"-joined rendered transcript back into
+// separate physical lines -- so line 2+ of a multi-line assistant text block
+// carries no "[role] " prefix at all, and must never be honored (issue
+// #2059 code-review finding: a manifest token sitting in the middle of the
+// coordinator's own multi-line text, e.g. relayed/quoted issue-comment
+// content, must not be mistaken for a dispatch instruction).
+var renderedRolePrefixRe = regexp.MustCompile(`^\[([^\]]*)\]`)
 
 // maxManifestSlices bounds how many slices a single manifest may declare.
 // LaunchWorkers (workers.go) fans out one concurrent driver-exec/claude
@@ -181,14 +197,24 @@ func ParseManifestLine(line string) (SliceManifest, bool) {
 // SPINDRIFT_SLICE_MANIFEST line, mirroring scanPassLog's own
 // RenderTranscript + substring-anywhere-match approach (run.go:506-530).
 // driverName selects the RenderTranscript strategy, same as scanPassLog's
-// own parameter. Skips any line isToolResultEchoLine identifies as a
-// tool_result echo before handing it to ParseManifestLine, so a manifest
-// token is only ever honored from a line the coordinator model itself
-// authored, never from a tool echoing back untrusted issue/comment content
-// (see isToolResultEchoLine's doc comment; issue #2059 code-review
-// finding). Returns (SliceManifest{}, false) when no valid manifest line is
-// found, including when RenderTranscript itself fails (a scan failure is
-// not a hard error here — same convention as scanPassLog).
+// own parameter.
+//
+// A manifest token is honored ONLY on a line that (1) carries a "[role] "
+// prefix at all (renderedRolePrefixRe; see its doc comment for why a bare
+// continuation line never matches), (2) that role is exactly
+// driverkit.ImplementorRole -- the top-level coordinator itself, never a
+// subagent's own rendered role (e.g. a scout relaying issue/comment text
+// verbatim in its own report) -- and (3) the line is not a tool_result echo
+// (isToolResultEchoLine; a tool_result echoes back whatever the underlying
+// tool read or ran verbatim, and the issue body plus every comment from any
+// GitHub user is untrusted input once an issue is labeled for dispatch --
+// only the label gates dispatch, not the content that follows). Together
+// these three checks mean a manifest is only ever honored when the
+// coordinator model itself authored the line, on a single physical line of
+// its own (issue #2059 code-review finding). Returns (SliceManifest{},
+// false) when no valid manifest line is found, including when
+// RenderTranscript itself fails (a scan failure is not a hard error here —
+// same convention as scanPassLog).
 func scanForManifest(logPath, driverName string) (SliceManifest, bool) {
 	d, err := driver.New(driverName)
 	if err != nil {
@@ -208,6 +234,14 @@ func scanForManifest(logPath, driverName string) (SliceManifest, bool) {
 	for sc.Scan() {
 		line := strings.TrimSpace(sc.Text())
 		if isToolResultEchoLine(line) {
+			continue
+		}
+		match := renderedRolePrefixRe.FindStringSubmatch(line)
+		if match == nil || match[1] != driverkit.ImplementorRole {
+			// No "[role] " prefix at all (a bare continuation line of a
+			// multi-line rendered entry) or a role other than the top-level
+			// coordinator's own -- never honored (issue #2059 code-review
+			// finding: trust-boundary gap).
 			continue
 		}
 		if m, ok := ParseManifestLine(line); ok {
