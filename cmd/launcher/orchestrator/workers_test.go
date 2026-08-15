@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -347,6 +348,44 @@ func TestLaunchOneWorkerKillsOrphanedChildProcessOnTimeout(t *testing.T) {
 			t.Fatalf("child process %s (spawned by the timed-out worker) is still alive under /proc after launchOneWorker returned -- want the whole process GROUP killed, not just the driver-exec parent", childPID)
 		}
 		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// TestKillWorkerProcessGroupWaitsForReapBeforeReturning verifies
+// killWorkerProcessGroup does not return until cmd.Wait() has actually
+// observed the killed process exit (issue #2059 review finding,
+// workers.go:374): the previous inline code sent SIGKILL and fell straight
+// through to the caller's own worktree-removal cleanup without ever
+// confirming the kernel had finished reaping the process group, so a
+// caller could race a not-yet-dead process. SIGKILL reaping is too fast to
+// observe reliably through the full LaunchWorkers integration path, so this
+// unit-tests killWorkerProcessGroup directly against a real `sleep 5`
+// subprocess, using the exact doneCh pattern launchOneWorker itself uses.
+func TestKillWorkerProcessGroupWaitsForReapBeforeReturning(t *testing.T) {
+	cmd := exec.Command("sleep", "5")
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("cmd.Start(): %v", err)
+	}
+
+	if cmd.ProcessState != nil {
+		t.Fatalf("cmd.ProcessState = %+v, want nil (process still running)", cmd.ProcessState)
+	}
+
+	doneCh := make(chan error, 1)
+	go func() { doneCh <- cmd.Wait() }()
+
+	killWorkerProcessGroup(cmd, doneCh)
+
+	if cmd.ProcessState == nil {
+		t.Fatal("cmd.ProcessState is nil after killWorkerProcessGroup returned -- want it to block until cmd.Wait() completes")
+	}
+	// ProcessState.Exited() is specifically false for a signal-terminated
+	// process (it reports true only for a program that called exit itself)
+	// -- so a killed process's own terminal state is confirmed via its
+	// String() representation instead ("signal: killed").
+	if !strings.Contains(cmd.ProcessState.String(), "killed") {
+		t.Errorf("cmd.ProcessState.String() = %q, want it to mention \"killed\"", cmd.ProcessState.String())
 	}
 }
 
