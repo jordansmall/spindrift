@@ -9,6 +9,31 @@ import (
 	"spindrift.dev/launcher/internal/forge"
 )
 
+// TestTextSourceUnknown_IsZeroValue asserts TextSourceUnknown, not
+// TextSourceIntent, is TextSource's zero value -- an unset/error-path source
+// must not read as "the box's own PR-intent line", which never happened.
+func TestTextSourceUnknown_IsZeroValue(t *testing.T) {
+	var s TextSource
+	if s != TextSourceUnknown {
+		t.Errorf("zero value of TextSource = %v, want TextSourceUnknown", s)
+	}
+	if TextSourceUnknown == TextSourceIntent {
+		t.Errorf("TextSourceUnknown must be distinct from TextSourceIntent")
+	}
+}
+
+// TestRequiredCapabilityError_PackageLevel_AllPresent asserts the
+// package-level RequiredCapabilityError (main.go's construction-free startup
+// gate entry point) applies the same checks as the Mediation method form
+// without needing an IssueTracker, outbox resolver, or base branch.
+func TestRequiredCapabilityError_PackageLevel_AllPresent(t *testing.T) {
+	fc := forge.NewFake(testDispatchLabels)
+
+	if err := RequiredCapabilityError(fc.AsGithubReadOnly(), "github", true); err != nil {
+		t.Errorf("expected nil error when every required capability is present, got %v", err)
+	}
+}
+
 // TestMediation_RequiredCapabilityError_NoBundleRelay asserts the
 // unconditional bundle-relay check fires first, regardless of prShaped, when
 // the underlying Code Forge implements neither BundleRelay nor PRForge (the
@@ -182,9 +207,18 @@ func TestMediation_Open_FallbackReconstruct_NoIntent_ReconstructionFails(t *test
 	m := NewMediation(fc.AsGithubReadOnly(), fc.AsNoLandingRecorder(), func(num string) string { return "/outbox/" + num }, "main")
 	result := dispatch.Result{PRIntentFound: false}
 
-	_, _, _, err := m.Open(issNum, branch, result, FallbackReconstruct)
+	_, _, source, err := m.Open(issNum, branch, result, FallbackReconstruct)
 	if !errors.Is(err, ErrNoPRIntent) {
 		t.Fatalf("err = %v, want errors.Is(err, ErrNoPRIntent)", err)
+	}
+	if !errors.Is(err, fc.CommitSubjectsErr) {
+		t.Errorf("err = %v, want errors.Is(err, %v) (the underlying reconstruction failure)", err, fc.CommitSubjectsErr)
+	}
+	if strings.Contains(err.Error(), "found: no usable PR-intent line found") {
+		t.Errorf("err.Error() = %q, want no stutter of ErrNoPRIntent's own text", err.Error())
+	}
+	if source != TextSourceUnknown {
+		t.Errorf("source = %v, want TextSourceUnknown on an error return", source)
 	}
 	if len(fc.CreateDraftPRCalls) != 0 {
 		t.Errorf("expected no CreateDraftPR calls when reconstruction fails, got %+v", fc.CreateDraftPRCalls)
@@ -265,12 +299,18 @@ func TestMediation_Open_RelayBundleFailure(t *testing.T) {
 	m := NewMediation(fc.AsGithubReadOnly(), fc.AsNoLandingRecorder(), func(num string) string { return "/outbox/" + num }, "main")
 	result := dispatch.Result{PRIntent: "feat: add widget\n\nAdds a widget.", PRIntentFound: true}
 
-	_, _, _, err := m.Open(issNum, branch, result, FallbackNone)
+	_, _, source, err := m.Open(issNum, branch, result, FallbackNone)
 	if err == nil {
 		t.Fatal("expected a non-nil error when RelayBundle fails")
 	}
 	if !errors.Is(err, fc.RelayBundleErr) {
 		t.Errorf("err = %v, want it to wrap %v", err, fc.RelayBundleErr)
+	}
+	if !errors.Is(err, errRelayBundle) {
+		t.Errorf("err = %v, want it to wrap errRelayBundle", err)
+	}
+	if source != TextSourceUnknown {
+		t.Errorf("source = %v, want TextSourceUnknown on an error return", source)
 	}
 	if len(fc.CreateDraftPRCalls) != 0 {
 		t.Errorf("expected no CreateDraftPR calls when the relay fails, got %+v", fc.CreateDraftPRCalls)
@@ -289,11 +329,17 @@ func TestMediation_Open_CreateDraftPRFailure(t *testing.T) {
 	m := NewMediation(fc.AsGithubReadOnly(), fc.AsNoLandingRecorder(), func(num string) string { return "/outbox/" + num }, "main")
 	result := dispatch.Result{PRIntent: "feat: add widget\n\nAdds a widget.", PRIntentFound: true}
 
-	_, _, _, err := m.Open(issNum, branch, result, FallbackNone)
+	_, _, source, err := m.Open(issNum, branch, result, FallbackNone)
 	if err == nil {
 		t.Fatal("expected a non-nil error when CreateDraftPR fails")
 	}
 	if !errors.Is(err, fc.CreateDraftPRErr) {
 		t.Errorf("err = %v, want it to wrap %v", err, fc.CreateDraftPRErr)
+	}
+	if !errors.Is(err, errCreateDraftPR) {
+		t.Errorf("err = %v, want it to wrap errCreateDraftPR", err)
+	}
+	if source != TextSourceUnknown {
+		t.Errorf("source = %v, want TextSourceUnknown on an error return", source)
 	}
 }
