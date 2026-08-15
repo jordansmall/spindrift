@@ -8,10 +8,23 @@ import (
 
 // TestExtractUsage_MultiSessionFixture pins ExtractUsage's aggregation
 // across testdata/multi-session-2058.jsonl -- a fixture modeled on the real
-// nine-session orchestrator log from issue #2058 -- to the exact totals
-// reported in that issue: 565 turns, $45.34, 2h7m16s of API time
-// (7,636,000 ms), and 3h14m52s of wall time (11,692,000 ms) derived from
-// the earliest/latest top-level "timestamp" span in the log.
+// nine-session orchestrator log from issue #2058: nine sessions, each with
+// its own system/init boundary and a pair of user/assistant lines carrying
+// RFC3339 timestamps, alternating worker and reviewer roles as the issue
+// describes. The real #2058 log is not available in this repo, so
+// per-session turns, cost, API time, and cache-read tokens are
+// hand-authored -- varied and scaled, not a uniform block replayed nine
+// times -- to land on the issue's own published aggregate figures: 565
+// turns, $45.34 total ($15.38 in the final session alone), 2h7m16s of API
+// time (7,636,000ms), and 52.8M cache-read tokens (29.3M in the final
+// session alone).
+//
+// The wall-time target, 3h14m52s (11,692,000ms), is the span between the
+// earliest and latest of those user/assistant timestamps. The issue also
+// reports a wider raw span for the same log, 3h15m26s -- this fixture
+// deliberately does not reproduce that wider figure, since it covers
+// additional non-turn timestamps sumInLog's span excludes (see its doc
+// comment); AC#3 asks for the narrower, turn-scoped figure.
 func TestExtractUsage_MultiSessionFixture(t *testing.T) {
 	path := filepath.Join("testdata", "multi-session-2058.jsonl")
 
@@ -37,16 +50,16 @@ func TestExtractUsage_MultiSessionFixture(t *testing.T) {
 	if u.DurationMs != 11692000 {
 		t.Errorf("DurationMs: got %d, want 11692000", u.DurationMs)
 	}
-	if u.InputTokens != 9000 {
-		t.Errorf("InputTokens: got %d, want 9000", u.InputTokens)
+	if u.InputTokens != 3792 {
+		t.Errorf("InputTokens: got %d, want 3792", u.InputTokens)
 	}
-	if u.OutputTokens != 1800 {
-		t.Errorf("OutputTokens: got %d, want 1800", u.OutputTokens)
+	if u.OutputTokens != 877 {
+		t.Errorf("OutputTokens: got %d, want 877", u.OutputTokens)
 	}
-	if u.CacheReadInputTokens != 45000 {
-		t.Errorf("CacheReadInputTokens: got %d, want 45000", u.CacheReadInputTokens)
+	if u.CacheReadInputTokens != 52800000 {
+		t.Errorf("CacheReadInputTokens: got %d, want 52800000", u.CacheReadInputTokens)
 	}
-	if u.CacheCreationInputTokens != 900 {
-		t.Errorf("CacheCreationInputTokens: got %d, want 900", u.CacheCreationInputTokens)
+	if u.CacheCreationInputTokens != 669000 {
+		t.Errorf("CacheCreationInputTokens: got %d, want 669000", u.CacheCreationInputTokens)
 	}
 }
