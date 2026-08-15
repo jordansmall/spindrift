@@ -731,7 +731,8 @@ func TestWire_ComposedLoop_NoOutcomeBundlePresentRecoversAndLands(t *testing.T) 
 	// shape recoverByNumber (main.go) builds when it recovers the driver's
 	// last genuine self-report from the issue's on-disk pass logs.
 	recoverResult := dispatch.Result{Resolved: outcome.Resolved{SelfReport: outcome.SelfReport{Status: "ready"}, SelfReportFound: true}}
-	if !s.SettleRelayedBranch(dispatch.NewFake(), num, 0, recoverResult) {
+	sit := s.SituationFor(num, false, recoverResult)
+	if !s.SettleRelayedBranch(dispatch.NewFake(), num, 0, sit, recoverResult) {
 		t.Fatalf("SettleRelayedBranch(%s) = false, want true", num)
 	}
 

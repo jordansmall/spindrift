@@ -400,7 +400,8 @@ func TestSettle_SettleRelayedBranch_LocalPushOnlyLandsRelayedBranch(t *testing.T
 	c.OutboxDir = func(num string) string { return outbox }
 	s := New(c, fc, fc.AsLocal())
 
-	got := s.SettleRelayedBranch(d, issNum, 0, result)
+	sit := s.situationFor(issNum, false, result)
+	got := s.SettleRelayedBranch(d, issNum, 0, sit, result)
 	if !got {
 		t.Fatalf("SettleRelayedBranch = false, want true")
 	}
@@ -452,7 +453,8 @@ func TestSettle_SettleRelayedBranch_GitPushOnlyStillReturnsFalse(t *testing.T) {
 	c.OutboxDir = func(num string) string { return t.TempDir() }
 	s := New(c, fc, fc.AsPushOnly())
 
-	got := s.SettleRelayedBranch(d, issNum, 0, result)
+	sit := s.situationFor(issNum, false, result)
+	got := s.SettleRelayedBranch(d, issNum, 0, sit, result)
 	if got {
 		t.Fatalf("SettleRelayedBranch = true, want false for a git-shaped push-only forge")
 	}
@@ -494,7 +496,8 @@ func TestSettle_SettleRelayedBranch_LocalPushOnlyBundleAloneLandsRelayedBranch(t
 	c.OutboxDir = func(num string) string { return outbox }
 	s := New(c, fc, fc.AsLocal())
 
-	got := s.SettleRelayedBranch(d, issNum, 0, result)
+	sit := s.situationFor(issNum, false, result)
+	got := s.SettleRelayedBranch(d, issNum, 0, sit, result)
 	if !got {
 		t.Fatalf("SettleRelayedBranch = false, want true")
 	}
@@ -544,7 +547,8 @@ func TestSettle_SettleRelayedBranch_LocalPushOnlyNoBundleNoSelfReportReturnsFals
 	c.OutboxDir = func(num string) string { return outbox }
 	s := New(c, fc, fc.AsLocal())
 
-	got := s.SettleRelayedBranch(d, issNum, 0, result)
+	sit := s.situationFor(issNum, false, result)
+	got := s.SettleRelayedBranch(d, issNum, 0, sit, result)
 	if got {
 		t.Fatalf("SettleRelayedBranch = true, want false with neither a bundle nor a self-report")
 	}

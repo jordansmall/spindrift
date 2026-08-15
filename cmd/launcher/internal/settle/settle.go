@@ -144,12 +144,24 @@ type WorkSettler interface {
 	SettleAdopted(d dispatch.Dispatcher, num string, gen uint64, prURL string)
 
 	// SettleRelayedBranch is recover's adopt-a-relayed-branch entry point
-	// (issue #2225): with no open PR discovered on num, consult result's
-	// self-report evidence and, if it is a genuine success, relay the
-	// branch, open a PR, and run the same merge gate as Settle/SettleAdopted.
-	// Returns false when there is no relayable evidence, leaving the caller's
-	// own "no open PR" handling unchanged. gen is as in Settle.
-	SettleRelayedBranch(d dispatch.Dispatcher, num string, gen uint64, result dispatch.Result) bool
+	// (issue #2225): sit is the caller's already-computed Situation (via
+	// SituationFor) carrying the real open-PR fact as a hard precondition —
+	// this function returns false immediately when sit.OpenPRFound is true,
+	// since that shape is SettleAdopted's job. With no open PR confirmed,
+	// consult result's self-report evidence and, if it is a genuine success,
+	// relay the branch, open a PR, and run the same merge gate as
+	// Settle/SettleAdopted. Returns false when there is no relayable
+	// evidence, leaving the caller's own "no open PR" handling unchanged.
+	// gen is as in Settle.
+	SettleRelayedBranch(d dispatch.Dispatcher, num string, gen uint64, sit Situation, result dispatch.Result) bool
+
+	// SituationFor computes num's shared adoption-evidence Situation (issue
+	// #2501) so a caller outside this package (main.go's recoverByNumber)
+	// can thread the same value into SettleRelayedBranch without
+	// duplicating situationFor's own logic. openPRFound is the caller's own
+	// resolved fact, passed through unchanged — see Situation's own doc
+	// comment.
+	SituationFor(num string, openPRFound bool, result dispatch.Result) Situation
 }
 
 // Settle is the prod adapter: constructed once per top-level dispatch entry

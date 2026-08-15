@@ -30,7 +30,15 @@ type FailCall struct {
 type SettleRelayedBranchCall struct {
 	Num    string
 	Gen    uint64
+	Sit    Situation
 	Result dispatch.Result
+}
+
+// SituationForCall records one SituationFor invocation.
+type SituationForCall struct {
+	Num         string
+	OpenPRFound bool
+	Result      dispatch.Result
 }
 
 // Fake is an in-memory Settler for unit tests that only need to assert
@@ -51,6 +59,10 @@ type Fake struct {
 	SettleRelayedBranchCalls []SettleRelayedBranchCall
 	// SettleRelayedBranchReturn is the value SettleRelayedBranch returns.
 	SettleRelayedBranchReturn bool
+	// SituationForCalls records all SituationFor invocations in order.
+	SituationForCalls []SituationForCall
+	// SituationForReturn is the value SituationFor returns.
+	SituationForReturn Situation
 }
 
 var _ Settler = (*Fake)(nil)
@@ -83,9 +95,17 @@ func (f *Fake) Fail(num string, gen uint64, result dispatch.Result) {
 }
 
 // SettleRelayedBranch records the call and returns SettleRelayedBranchReturn.
-func (f *Fake) SettleRelayedBranch(d dispatch.Dispatcher, num string, gen uint64, result dispatch.Result) bool {
+func (f *Fake) SettleRelayedBranch(d dispatch.Dispatcher, num string, gen uint64, sit Situation, result dispatch.Result) bool {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.SettleRelayedBranchCalls = append(f.SettleRelayedBranchCalls, SettleRelayedBranchCall{Num: num, Gen: gen, Result: result})
+	f.SettleRelayedBranchCalls = append(f.SettleRelayedBranchCalls, SettleRelayedBranchCall{Num: num, Gen: gen, Sit: sit, Result: result})
 	return f.SettleRelayedBranchReturn
+}
+
+// SituationFor records the call and returns SituationForReturn.
+func (f *Fake) SituationFor(num string, openPRFound bool, result dispatch.Result) Situation {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.SituationForCalls = append(f.SituationForCalls, SituationForCall{Num: num, OpenPRFound: openPRFound, Result: result})
+	return f.SituationForReturn
 }
