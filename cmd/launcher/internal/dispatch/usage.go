@@ -42,18 +42,19 @@ func (d *Dispatch) UsageReport() string {
 	return body
 }
 
-// CumulativeUsage sums token and cost usage across every pass log this
+// CumulativeUsage sums token and cost usage across every attempt log this
 // issue's Dispatch has produced so far — the initial run, each fix pass,
-// and (via LogPaths) a conflict-resolve pass if one ran — so selfHealGate's
-// budget gate (issue #2001) reads the run's total spend, not just its
-// initial pass. A pass log that fails to parse, or has no result event,
-// contributes nothing rather than aborting the sum, matching ExtractUsage's
-// own best-effort degrade — the same as a log LogPaths omits outright
-// because it was rotated aside (issue #561): the sum simply undercounts
-// rather than erroring, acceptable for a best-effort spend governor.
+// and a conflict-resolve pass if one ran, including any attempt a hold or
+// transient-backoff retry rotated aside (issue #561) — via
+// AllAttemptLogPaths, so selfHealGate's budget gate (issue #2001) reads the
+// run's true total spend, including a retried attempt's, not just the
+// spend of whichever attempt is current (issue #2575). An attempt log that
+// fails to parse, or has no result event, contributes nothing rather than
+// aborting the sum, matching ExtractUsage's own best-effort degrade —
+// acceptable for a best-effort spend governor.
 func (d *Dispatch) CumulativeUsage() usage.Usage {
 	var total usage.Usage
-	for _, pl := range LogPaths(d.pwd, d.number) {
+	for _, pl := range AllAttemptLogPaths(d.pwd, d.number) {
 		r, err := d.driver.ExtractUsage(pl.Path)
 		if err != nil || !r.Found {
 			continue
