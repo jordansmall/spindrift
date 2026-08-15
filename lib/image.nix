@@ -334,14 +334,18 @@ let
   # podman machine cannot bind-mount the host /nix/store into its Linux VM.
   # SPINDRIFT_PROMPT_DIR still mounts an override dir for zero-rebuild iteration
   # (the Go launcher mounts it in cmd/launcher/internal/runner).
-  # The first harness-owned skill (issue #2489): baked into every image
+  # Harness-owned skills (issues #2489, #2490): baked into every image
   # unconditionally, independent of the Consumer's own `skills` list, so
-  # a Box built with the AUTO_FORMAT knob on always has something at
-  # /auto-format to invoke regardless of consumer skills config.
+  # a Box always has something at /auto-format and /auto-lint to invoke
+  # regardless of consumer skills config.
   harnessSkills = [
     {
       name = "auto-format";
       src = builtins.readFile ../templates/default/skills/auto-format/SKILL.md;
+    }
+    {
+      name = "auto-lint";
+      src = builtins.readFile ../templates/default/skills/auto-lint/SKILL.md;
     }
   ];
 

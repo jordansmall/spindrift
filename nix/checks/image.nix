@@ -428,6 +428,17 @@ in
     touch $out
   '';
 
+  # The harness-owned auto-lint skill (issue #2490) must bake into every
+  # image at a fixed /agent/skills path unconditionally -- independent of
+  # whatever the Consumer's own `skills` list contains. Built against
+  # noSkillsHarness, which configures zero consumer skills, to prove this.
+  auto-lint-skill-baked-into-image = pkgs.runCommand "auto-lint-skill-baked-into-image" { } ''
+    skill=${noSkillsHarness.agentFiles}/agent/skills/auto-lint/SKILL.md
+    [ -s "$skill" ]
+    grep -q 'safe auto-fix mode where available' "$skill"
+    touch $out
+  '';
+
   # The Box's agent home ships no settings today (issue #1609); the
   # PreToolUse hook rejecting backgrounded Bash calls must be baked in as
   # both the hook script and the settings.json that registers it, so a real
