@@ -272,6 +272,24 @@
     boxEnv = true;
     boxEnvOnly = true;
   };
+  workerWorkDir = {
+    env = "WORKER_WORK_DIR";
+    group = "agents";
+    doc = "worktree directory the orchestrator hands each parallel worker subagent (issue #2059); pass-through only, no normalization. Meaningful only under ORCHESTRATOR: entrypoint.sh threads this value to the orchestrator's --worker-work-dir flag.";
+    flakeOption = true;
+    nixSubPath = "models.workerWorkDir";
+    boxEnv = true;
+    boxEnvOnly = true;
+  };
+  workerTimeout = {
+    env = "WORKER_TIMEOUT";
+    group = "agents";
+    doc = "timeout applied to each parallel worker subagent's run (issue #2059); pass-through only, no normalization. Meaningful only under ORCHESTRATOR: entrypoint.sh threads this value to the orchestrator's --worker-timeout flag.";
+    flakeOption = true;
+    nixSubPath = "models.workerTimeout";
+    boxEnv = true;
+    boxEnvOnly = true;
+  };
   filerModel = {
     env = "FILER_MODEL";
     group = "agents";

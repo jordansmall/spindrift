@@ -41,4 +41,6 @@ set_box_env() {
   export SCOUT_MODEL="claude-haiku-4-5-20251001"
   export TRANSIENT_BACKOFF_SECS=30
   export WORKER_MODEL="claude-sonnet-5"
+  export WORKER_TIMEOUT=""
+  export WORKER_WORK_DIR=""
 }
