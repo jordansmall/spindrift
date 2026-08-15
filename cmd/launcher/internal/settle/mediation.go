@@ -13,12 +13,13 @@ import (
 type TextSource int
 
 const (
-	// TextSourceUnknown is TextSource's zero value: it's what Open and
-	// reconstructPRText's error-path returns carry, since none of the three
-	// real sources below ever resolved. Keeping it distinct from
-	// TextSourceIntent (rather than letting the zero value alias it) avoids
-	// an error return being misread as "text came from the box's own
-	// PR-intent line", which never happened on an error path.
+	// TextSourceUnknown is TextSource's zero value: it's what Open's
+	// error-path returns carry, since none of the three real sources below
+	// ever resolved (reconstructPRText's own failure is one of the inputs
+	// that can lead Open there). Keeping it distinct from TextSourceIntent
+	// (rather than letting the zero value alias it) avoids an error return
+	// being misread as "text came from the box's own PR-intent line", which
+	// never happened on an error path.
 	TextSourceUnknown TextSource = iota
 	TextSourceIntent
 	TextSourceReconstructed
@@ -44,19 +45,18 @@ var ErrNoPRIntent = errors.New("no usable PR-intent line found in the box's log"
 
 // errRelayBundle wraps Open's RelayBundle-failure return, letting callers
 // distinguish it from a draft-PR-create failure via errors.Is instead of
-// matching mediation.go's own error-message text (issue #2501 review).
-var errRelayBundle = errors.New("settle: relay bundle failed")
+// matching mediation.go's own error-message text.
+var errRelayBundle = errors.New("relay bundle failed")
 
 // errCreateDraftPR wraps Open's CreateDraftPR-failure return, the
 // CreateDraftPR analog to errRelayBundle above.
-var errCreateDraftPR = errors.New("settle: draft PR create failed")
+var errCreateDraftPR = errors.New("draft PR create failed")
 
 // Mediation coordinates the host-mediated relay-then-create-PR hand-off
 // shared by settle's four call sites (pr_intent.go, adopt_relayed.go): relay
 // a Box's finished branch out of the outbox, resolve a PR title/body, ensure
 // a "Closes #N" reference, and create-or-adopt a draft PR.
 type Mediation struct {
-	cf         forge.CodeForge
 	it         forge.IssueTracker
 	outboxDir  func(num string) string
 	baseBranch string
@@ -79,7 +79,7 @@ func (s *Settle) mediationFor(num string) (branch string, m *Mediation) {
 // forge.BundleRelay, forge.DraftPRCreator, and forge.BundleCommitSubjects
 // capabilities via type assertion (standard optional-interface pattern).
 func NewMediation(cf forge.CodeForge, it forge.IssueTracker, outboxDir func(num string) string, baseBranch string) *Mediation {
-	m := &Mediation{cf: cf, it: it, outboxDir: outboxDir, baseBranch: baseBranch}
+	m := &Mediation{it: it, outboxDir: outboxDir, baseBranch: baseBranch}
 	m.br, _ = cf.(forge.BundleRelay)
 	m.dpc, _ = cf.(forge.DraftPRCreator)
 	m.bcs, _ = cf.(forge.BundleCommitSubjects)
@@ -113,6 +113,11 @@ func (m *Mediation) RequiredCapabilityError(codeForgeName string, prShaped bool)
 // NewMediation so the gate is derived from the exact same capability
 // resolution Open uses, instead of re-running its own type assertions that
 // could silently drift out of sync with Mediation's fields.
+//
+// The Mediation it builds is scoped to this one capability check: it is
+// constructed with a nil IssueTracker, outbox resolver, and base branch, so
+// it must never be reused to call Open, defaultAdoptPRText, or any other
+// method that touches Mediation's it field — those would nil-panic.
 func RequiredCapabilityError(cf forge.CodeForge, codeForgeName string, prShaped bool) error {
 	return NewMediation(cf, nil, nil, "").RequiredCapabilityError(codeForgeName, prShaped)
 }
