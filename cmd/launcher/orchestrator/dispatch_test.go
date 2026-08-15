@@ -59,6 +59,181 @@ func TestDispatchManifestIfPresentNoopWhenNoManifestInLog(t *testing.T) {
 	}
 }
 
+// TestDispatchManifestIfPresentClearsStaleWorkerFindingsWhenNoManifest
+// verifies that a pass with no manifest clears any state.WorkerFindings left
+// over from an earlier dispatch, mirroring run.go's own unconditional
+// per-pass state.ReviewFindings reassignment -- otherwise a later pass that
+// dispatches no manifest of its own would still seed the next prompt with a
+// stale worker report from a prior pass as though it were still fresh
+// (issue #2058 review finding A).
+func TestDispatchManifestIfPresentClearsStaleWorkerFindingsWhenNoManifest(t *testing.T) {
+	chdirToFreshWorkerRepo(t)
+
+	fakeDir := t.TempDir()
+	callLog := filepath.Join(fakeDir, "calls.log")
+	if err := os.WriteFile(callLog, nil, 0o644); err != nil {
+		t.Fatalf("WriteFile(callLog): %v", err)
+	}
+	writeFakeWorkerDriverExec(t, fakeDir, callLog)
+	t.Setenv("PATH", fakeDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	dir := t.TempDir()
+	manifest := SliceManifest{Slices: []ManifestSlice{{Name: "done-fast", Task: "implement seam a"}}}
+	line, err := manifest.Line()
+	if err != nil {
+		t.Fatalf("Line() error = %v", err)
+	}
+	manifestLogPath := filepath.Join(dir, "manifest-stream.log")
+	if err := os.WriteFile(manifestLogPath, []byte(streamJSONOutcomeLine(strings.TrimSpace(line))), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	workerPromptFile := filepath.Join(dir, "worker-prompt.txt")
+	if err := os.WriteFile(workerPromptFile, []byte("BASE WORKER PROMPT"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config{
+		driver:           "claude",
+		logPath:          manifestLogPath,
+		workerPromptFile: workerPromptFile,
+		workerWorkDir:    t.TempDir(),
+		workerTimeout:    2 * time.Second,
+	}
+	state := runstate.RunState{}
+
+	var stdout strings.Builder
+	if got := dispatchManifestIfPresent(cfg, &state, &stdout); !got {
+		t.Fatalf("dispatchManifestIfPresent() = false, want true")
+	}
+	if state.WorkerFindings == "" {
+		t.Fatal("state.WorkerFindings is empty after first dispatch, want non-empty")
+	}
+
+	noManifestLogPath := filepath.Join(dir, "no-manifest-stream.log")
+	if err := os.WriteFile(noManifestLogPath, []byte(streamJSONOutcomeLine("plain text, no manifest")), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg.logPath = noManifestLogPath
+
+	got := dispatchManifestIfPresent(cfg, &state, &stdout)
+	if got {
+		t.Errorf("dispatchManifestIfPresent() = true, want false (no manifest in second pass's log)")
+	}
+	if state.WorkerFindings != "" {
+		t.Errorf("state.WorkerFindings = %q after a no-manifest pass, want empty (stale findings must not survive a pass that dispatched nothing)", state.WorkerFindings)
+	}
+}
+
+// TestDispatchManifestIfPresentMovesRemainingSliceToDoneOnRetrySuccess
+// verifies a slice that timed out on a prior dispatch (already present in
+// state.RemainingSlices) is removed from RemainingSlices and appended to
+// DoneSlices -- not left in both lists simultaneously -- once a later
+// dispatch reports it WorkerDone (issue #2058 review finding B.1).
+func TestDispatchManifestIfPresentMovesRemainingSliceToDoneOnRetrySuccess(t *testing.T) {
+	chdirToFreshWorkerRepo(t)
+
+	fakeDir := t.TempDir()
+	callLog := filepath.Join(fakeDir, "calls.log")
+	if err := os.WriteFile(callLog, nil, 0o644); err != nil {
+		t.Fatalf("WriteFile(callLog): %v", err)
+	}
+	writeFakeWorkerDriverExec(t, fakeDir, callLog)
+	t.Setenv("PATH", fakeDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	dir := t.TempDir()
+	manifest := SliceManifest{Slices: []ManifestSlice{{Name: "done-fast", Task: "implement seam a"}}}
+	line, err := manifest.Line()
+	if err != nil {
+		t.Fatalf("Line() error = %v", err)
+	}
+	logPath := filepath.Join(dir, "stream.log")
+	if err := os.WriteFile(logPath, []byte(streamJSONOutcomeLine(strings.TrimSpace(line))), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	workerPromptFile := filepath.Join(dir, "worker-prompt.txt")
+	if err := os.WriteFile(workerPromptFile, []byte("BASE WORKER PROMPT"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config{
+		driver:           "claude",
+		logPath:          logPath,
+		workerPromptFile: workerPromptFile,
+		workerWorkDir:    t.TempDir(),
+		workerTimeout:    2 * time.Second,
+	}
+	// Seed state as though "done-fast" timed out on a prior dispatch pass.
+	state := runstate.RunState{RemainingSlices: []string{"done-fast"}}
+
+	var stdout strings.Builder
+	got := dispatchManifestIfPresent(cfg, &state, &stdout)
+	if !got {
+		t.Fatalf("dispatchManifestIfPresent() = false, want true")
+	}
+
+	if !reflect.DeepEqual(state.DoneSlices, []string{"done-fast"}) {
+		t.Errorf("state.DoneSlices = %v, want [done-fast]", state.DoneSlices)
+	}
+	if len(state.RemainingSlices) != 0 {
+		t.Errorf("state.RemainingSlices = %v, want empty (done-fast must not remain listed as still-remaining once it succeeds)", state.RemainingSlices)
+	}
+}
+
+// TestDispatchManifestIfPresentDoesNotDuplicateDoneSliceAcrossDispatches
+// verifies dispatching the same slice name as WorkerDone across two separate
+// calls appends it to state.DoneSlices exactly once, not twice (issue #2058
+// review finding B.2).
+func TestDispatchManifestIfPresentDoesNotDuplicateDoneSliceAcrossDispatches(t *testing.T) {
+	chdirToFreshWorkerRepo(t)
+
+	fakeDir := t.TempDir()
+	callLog := filepath.Join(fakeDir, "calls.log")
+	if err := os.WriteFile(callLog, nil, 0o644); err != nil {
+		t.Fatalf("WriteFile(callLog): %v", err)
+	}
+	writeFakeWorkerDriverExec(t, fakeDir, callLog)
+	t.Setenv("PATH", fakeDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	dir := t.TempDir()
+	manifest := SliceManifest{Slices: []ManifestSlice{{Name: "done-fast", Task: "implement seam a"}}}
+	line, err := manifest.Line()
+	if err != nil {
+		t.Fatalf("Line() error = %v", err)
+	}
+	logPath := filepath.Join(dir, "stream.log")
+	if err := os.WriteFile(logPath, []byte(streamJSONOutcomeLine(strings.TrimSpace(line))), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	workerPromptFile := filepath.Join(dir, "worker-prompt.txt")
+	if err := os.WriteFile(workerPromptFile, []byte("BASE WORKER PROMPT"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config{
+		driver:           "claude",
+		logPath:          logPath,
+		workerPromptFile: workerPromptFile,
+		workerWorkDir:    t.TempDir(),
+		workerTimeout:    2 * time.Second,
+	}
+	state := runstate.RunState{}
+
+	var stdout strings.Builder
+	if got := dispatchManifestIfPresent(cfg, &state, &stdout); !got {
+		t.Fatalf("dispatchManifestIfPresent() (first call) = false, want true")
+	}
+	if got := dispatchManifestIfPresent(cfg, &state, &stdout); !got {
+		t.Fatalf("dispatchManifestIfPresent() (second call) = false, want true")
+	}
+
+	if !reflect.DeepEqual(state.DoneSlices, []string{"done-fast"}) {
+		t.Errorf("state.DoneSlices = %v, want [done-fast] exactly once", state.DoneSlices)
+	}
+}
+
 // TestRunWithReviewPassDispatchesManifestThenContinuesImplementFixLoop
 // verifies runWithReviewPass wires dispatchManifestIfPresent into its own
 // implement/fix pass block end to end (issue #2059 AC1): a pass whose log
