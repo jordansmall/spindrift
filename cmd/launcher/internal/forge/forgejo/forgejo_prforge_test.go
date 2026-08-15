@@ -188,15 +188,13 @@ func TestOpenPRForBranch_Found(t *testing.T) {
 	if got.URL != "https://forge.test/owner/repo/pulls/206" {
 		t.Fatalf("OpenPRForBranch(...) URL = %q, want %q", got.URL, "https://forge.test/owner/repo/pulls/206")
 	}
-	if got.IsDraft {
-		t.Fatal("OpenPRForBranch(...) IsDraft = true, want false")
-	}
 }
 
-// TestOpenPRForBranch_DraftIncluded verifies OpenPRForBranch adopts a draft
+// TestOpenPRForBranch_AdoptsDraftPR verifies OpenPRForBranch adopts a draft
 // pull (title-prefixed "WIP:" or draft=true) precisely as it adopts a
-// non-draft one (issue #2408), reporting IsDraft=true on the match.
-func TestOpenPRForBranch_DraftIncluded(t *testing.T) {
+// non-draft one (issue #2408). Draft status is no longer reported through
+// the returned forge.PR, so this only asserts the adoption itself.
+func TestOpenPRForBranch_AdoptsDraftPR(t *testing.T) {
 	pr := newPRForgeTestForge(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("[" + pullJSON(206, "open", false, true, true, "WIP: add feature", "agent/issue-206", "abc123", "main") + "]"))
 	})
@@ -207,8 +205,8 @@ func TestOpenPRForBranch_DraftIncluded(t *testing.T) {
 	if !ok {
 		t.Fatal("OpenPRForBranch(...) ok = false, want true (a draft pull must be adopted)")
 	}
-	if !got.IsDraft {
-		t.Fatal("OpenPRForBranch(...) IsDraft = false, want true")
+	if got.URL != "https://forge.test/owner/repo/pulls/206" {
+		t.Fatalf("OpenPRForBranch(...) URL = %q, want %q", got.URL, "https://forge.test/owner/repo/pulls/206")
 	}
 }
 

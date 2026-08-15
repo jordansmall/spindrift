@@ -636,12 +636,10 @@ func TestForgejoIntegration_DispatchLifecycle(t *testing.T) {
 	} else if state != forge.PROpen {
 		t.Fatalf("PRState (open) = %v, want %v", state, forge.PROpen)
 	}
-	if pr, found, err := prf.OpenPRForBranch(branch); err != nil {
+	if _, found, err := prf.OpenPRForBranch(branch); err != nil {
 		t.Fatalf("OpenPRForBranch (draft): %v", err)
 	} else if !found {
 		t.Fatalf("OpenPRForBranch (draft): found=false, want true (a draft PR is adopted like any other)")
-	} else if !pr.IsDraft {
-		t.Fatalf("OpenPRForBranch (draft): IsDraft = false, want true")
 	}
 	if err := prf.MarkReady(prURL); err != nil {
 		t.Fatalf("MarkReady: %v", err)

@@ -217,6 +217,21 @@ func (f *fakeForgejo) AutoMergeEnqueued(url string) bool {
 	return f.enqueued[prNumFromURL(url)]
 }
 
+// IsDraftTitle reports whether num's currently-stored pull title carries a
+// WIP-prefix draft marker — the fake's own oracle for its served "draft"
+// field (pullPayload derives it the same way), read directly rather than
+// through the adapter's OpenPRForBranch, which no longer surfaces draft
+// status on the returned forge.PR.
+func (f *fakeForgejo) IsDraftTitle(num string) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	p, ok := f.pulls[num]
+	if !ok {
+		return false
+	}
+	return fakeIsDraftTitle(p.Title)
+}
+
 // fakeWIPPrefixes lists the WIP-title draft markers fakeIsDraftTitle
 // recognizes, mirroring real Forgejo's default
 // WORK_IN_PROGRESS_PREFIXES config ("WIP:,[WIP]:"). Deliberately not
