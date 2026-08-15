@@ -627,7 +627,7 @@
     env = "MAX_BUDGET_TOKENS";
     group = "dispatch";
     default = 0;
-    doc = "cumulative tokens across the initial run and every fix pass before selfHealGate stops dispatching further fix passes (issue #2001); 0 disables the token budget cap";
+    doc = "cumulative tokens across every attempt dispatched so far -- the initial run, every fix pass, and any retried attempt within each (issue #2575) -- before selfHealGate stops dispatching further fix passes (issue #2001); 0 disables the token budget cap";
     flakeOption = true;
     intKind = "nonneg";
     nixSubPath = "budget.tokens";
@@ -644,7 +644,7 @@
     env = "MAX_BUDGET_USD";
     group = "dispatch";
     default = 0.0;
-    doc = "cumulative cost in USD across the initial run and every fix pass before selfHealGate stops dispatching further fix passes (issue #2001); 0 disables the cost budget cap; give it as a quoted string in flake settings since it may be fractional, e.g. 4.44";
+    doc = "cumulative cost in USD across every attempt dispatched so far -- the initial run, every fix pass, and any retried attempt within each (issue #2575) -- before selfHealGate stops dispatching further fix passes (issue #2001); 0 disables the cost budget cap; give it as a quoted string in flake settings since it may be fractional, e.g. 4.44";
     flakeOption = true;
     nixSubPath = "budget.usd";
     boxEnv = false;

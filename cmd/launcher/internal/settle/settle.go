@@ -56,7 +56,8 @@ type Config struct {
 	Clock dispatch.Clock
 
 	// MaxBudgetTokens and MaxBudgetUSD cap cumulative usage (issue #2001) —
-	// summed across the initial run and every fix pass dispatched so far,
+	// summed across every attempt log dispatched so far (the initial run,
+	// every fix pass, and any retried attempt within each — issue #2575),
 	// via Dispatcher.CumulativeUsage — before selfHealGate launches another
 	// fix pass. Either reaching or exceeding its cap stops the run with a
 	// distinct budget-exhausted status, never merging partial work. Zero
