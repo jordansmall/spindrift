@@ -53,52 +53,20 @@ import (
 func (s *Settle) hostMediateDraftPR(num string, result dispatch.Result) (string, bool) {
 	cf := s.cfForNum(num)
 	branch := cf.AgentBranch(num)
-	br, ok := cf.(forge.BundleRelay)
-	if !ok {
-		// The startup capability gate (main.go, issue #1916) guarantees a
-		// read-only PR-shaped Code Forge always implements both BundleRelay
-		// and DraftPRCreator; unreachable outside a misconfigured test
-		// double, so it blocks rather than silently stranding the issue in
-		// agent-in-progress.
-		return s.blockHandoff(num, branch, errors.New("settle: Code Forge does not implement forge.BundleRelay"))
-	}
-	dpc, ok := cf.(forge.DraftPRCreator)
-	if !ok {
-		return s.blockHandoff(num, branch, errors.New("settle: Code Forge does not implement forge.DraftPRCreator"))
-	}
+	m := NewMediation(cf, s.it, s.cfg.OutboxDir, s.cfg.BaseBranch)
 
-	// Parsed ahead of RelayBundle, but a missing/malformed line no longer
-	// blocks by itself (issue #2447): a Box can finish real, mergeable work
-	// and simply fail to print its last line, leaving the branch itself
-	// perfectly fine — only the PR wording is missing. RelayBundle runs
-	// regardless of whether title/body were found; only a genuine relay
-	// failure (missing bundle, force-push failure, ...) means there really
-	// is nothing to hand off.
-	title, body, foundIntent := parsePRIntent(result)
-
-	if s.cfg.OutboxDir == nil {
-		return s.blockHandoff(num, branch, errors.New("settle: Config.OutboxDir is unset but the Code Forge implements forge.BundleRelay"))
-	}
-	if err := br.RelayBundle(s.cfg.OutboxDir(num), branch); err != nil {
+	// Mediation.Open's own upfront capability/config checks (steps 1-3)
+	// return the exact same unwrapped error strings the inline checks here
+	// used to produce directly — the startup capability gate (main.go, issue
+	// #1916) guarantees a read-only PR-shaped Code Forge always implements
+	// both BundleRelay and DraftPRCreator, so these are unreachable outside a
+	// misconfigured test double, and block rather than silently stranding
+	// the issue in agent-in-progress.
+	url, created, source, err := m.Open(num, branch, result, FallbackReconstruct)
+	if err != nil {
 		return s.blockHandoff(num, branch, err)
 	}
-
-	reconstructed := false
-	if !foundIntent {
-		var err error
-		title, body, err = s.reconstructPRText(num, branch)
-		if err != nil {
-			return s.blockHandoff(num, branch, fmt.Errorf("no usable PR-intent line found in the box's log; reconstructing from the relayed branch's commits also failed: %w", err))
-		}
-		reconstructed = true
-	}
-	body = ensureClosesReference(body, num, s.it)
-
-	url, created, err := dpc.CreateDraftPR(title, body, s.cfg.BaseBranch, branch)
-	if err != nil {
-		return s.blockHandoff(num, branch, fmt.Errorf("draft PR create: %w", err))
-	}
-	if reconstructed && created {
+	if source == TextSourceReconstructed && created {
 		fmt.Printf("    #%s  landing=%s  status=reconstructed  note=no PR-intent line found in the box's log; description derived host-side from the relayed branch's commits\n", num, branch)
 		// Posted alongside the stdout log line above so both settle's own
 		// console log and the issue itself tell the same story (issue #2447,
@@ -112,51 +80,6 @@ func (s *Settle) hostMediateDraftPR(num string, result dispatch.Result) (string,
 		}
 	}
 	return url, true
-}
-
-// reconstructPRText builds a title/body for num's already-relayed branch
-// when the Box's own log carried no usable SPINDRIFT_PR_INTENT line (issue
-// #2447): the branch itself may still be perfectly fine, mergeable work —
-// only the wording is missing — so rather than block a hand-off that has
-// nothing wrong with it, settle derives a title/body from the branch's own
-// commits via the Code Forge's forge.BundleCommitSubjects hook. title is the
-// first (oldest) commit subject; body opens with a short note explaining the
-// description was reconstructed host-side, followed by a bulleted list of
-// every commit subject relayed, oldest first — enough for a human reviewer
-// to see at a glance what the branch actually contains.
-//
-// Returns an error — which the caller folds into the same blockHandoff path
-// as a genuine relay failure — when the Code Forge doesn't implement
-// forge.BundleCommitSubjects, the CommitSubjects call itself fails, or it
-// returns zero subjects: all three mean there is nothing to reconstruct
-// from, the same "genuinely nothing to hand off" posture a failed relay
-// gets.
-func (s *Settle) reconstructPRText(num, branch string) (title, body string, err error) {
-	bcs, ok := s.cfForNum(num).(forge.BundleCommitSubjects)
-	if !ok {
-		return "", "", errors.New("settle: Code Forge does not implement forge.BundleCommitSubjects")
-	}
-	subjects, err := bcs.CommitSubjects(s.cfg.OutboxDir(num), s.cfg.BaseBranch, branch)
-	if err != nil {
-		return "", "", err
-	}
-	if len(subjects) == 0 {
-		return "", "", errors.New("relayed branch carries no commits to reconstruct a PR description from")
-	}
-
-	var b strings.Builder
-	b.WriteString("Reconstructed host-side: the box's log carried no usable PR-intent line, so this description was derived from the relayed branch's own commits.\n\nCommits:\n")
-	for _, subject := range subjects {
-		b.WriteString("- ")
-		// subject is box-authored, untrusted text (issue #2447): defuse any
-		// closing-keyword-shaped reference before it's embedded in the body
-		// so it can't auto-close an unrelated issue on merge. Not applied to
-		// subjects[0] used as the PR title above — GitHub's closing-keyword
-		// scanner only scans the PR body, never the title.
-		b.WriteString(defuseClosingKeywords(subject))
-		b.WriteString("\n")
-	}
-	return subjects[0], strings.TrimRight(b.String(), "\n"), nil
 }
 
 // relayBlockedWork gives a read-only Box's finished-but-blocked branch the
@@ -175,6 +98,15 @@ func (s *Settle) reconstructPRText(num, branch string) (title, body string, err 
 //
 // branch is derived from cf.AgentBranch(num), never o.Landing, for the same
 // reason hostMediateDraftPR derives it (issue #1949).
+//
+// A PR-shaped cf (forge.DraftPRCreator, e.g. github) delegates the relay,
+// intent parse, closes-ref, and create steps to Mediation.Open. A push-only
+// cf (forge.BundleRelay but not forge.DraftPRCreator, e.g. local) can't go
+// through Open at all — Open requires forge.DraftPRCreator unconditionally,
+// since every other caller (hostMediateDraftPR, adoptRelayedBranch) is only
+// ever reached for a PR-shaped forge. relayBlockedWork is the one caller
+// that must also serve a push-only forge with nothing to create a PR
+// against, so that shape keeps its own direct RelayBundle call instead.
 func (s *Settle) relayBlockedWork(num string, result dispatch.Result) {
 	cf := s.cfForNum(num)
 	branch := cf.AgentBranch(num)
@@ -182,32 +114,40 @@ func (s *Settle) relayBlockedWork(num string, result dispatch.Result) {
 	if !ok || s.cfg.OutboxDir == nil {
 		return
 	}
-	if err := br.RelayBundle(s.cfg.OutboxDir(num), branch); err != nil {
-		if errors.Is(err, forge.ErrBundleNotFound) {
-			// An absent outbox bundle on the blocked path means the branch
-			// range was empty — there was simply no work to preserve (issue
-			// #2096). Benign: report it informationally, not as a relay
-			// failure. A blocked run with nothing to hand off also has no
-			// branch to open a draft PR against, so stop here as the error
-			// path does.
-			fmt.Fprintf(os.Stderr, "    .. #%s: no blocked-hand-off bundle to relay (empty branch range; nothing to preserve)\n", num)
-			return
+
+	if _, ok := cf.(forge.DraftPRCreator); !ok {
+		// Push-only shape: no draft-PR step to unify, so relay directly.
+		if err := br.RelayBundle(s.cfg.OutboxDir(num), branch); err != nil {
+			if errors.Is(err, forge.ErrBundleNotFound) {
+				// An absent outbox bundle on the blocked path means the
+				// branch range was empty — there was simply no work to
+				// preserve (issue #2096). Benign: report it informationally,
+				// not as a relay failure. A blocked run with nothing to hand
+				// off also has no branch to open a draft PR against, so stop
+				// here as the error path does.
+				fmt.Fprintf(os.Stderr, "    .. #%s: no blocked-hand-off bundle to relay (empty branch range; nothing to preserve)\n", num)
+				return
+			}
+			fmt.Fprintf(os.Stderr, "    ?? #%s: could not relay blocked-hand-off bundle: %v\n", num, err)
 		}
-		fmt.Fprintf(os.Stderr, "    ?? #%s: could not relay blocked-hand-off bundle: %v\n", num, err)
 		return
 	}
 
-	title, body, ok := parsePRIntent(result)
-	if !ok {
-		return
-	}
-	body = ensureClosesReference(body, num, s.it)
-	dpc, ok := cf.(forge.DraftPRCreator)
-	if !ok {
-		return
-	}
-	if _, _, err := dpc.CreateDraftPR(title, body, s.cfg.BaseBranch, branch); err != nil {
-		fmt.Fprintf(os.Stderr, "    ?? #%s: could not create draft PR for blocked hand-off: %v\n", num, err)
+	m := NewMediation(cf, s.it, s.cfg.OutboxDir, s.cfg.BaseBranch)
+	if _, _, _, err := m.Open(num, branch, result, FallbackNone); err != nil {
+		switch {
+		case errors.Is(err, ErrNoPRIntent):
+			// No usable PR-intent line: the relay above already ran inside
+			// Open, so there is simply nothing more to do (same as the old
+			// !ok-from-parsePRIntent early return).
+			return
+		case errors.Is(err, forge.ErrBundleNotFound):
+			fmt.Fprintf(os.Stderr, "    .. #%s: no blocked-hand-off bundle to relay (empty branch range; nothing to preserve)\n", num)
+		case strings.HasPrefix(err.Error(), "relay bundle:"):
+			fmt.Fprintf(os.Stderr, "    ?? #%s: could not relay blocked-hand-off bundle: %v\n", num, errors.Unwrap(err))
+		default:
+			fmt.Fprintf(os.Stderr, "    ?? #%s: could not create draft PR for blocked hand-off: %v\n", num, errors.Unwrap(err))
+		}
 	}
 }
 
