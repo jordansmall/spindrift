@@ -20,7 +20,7 @@ Read first (run these yourself) — skip anything CI FAILURE above already answe
 
 # FIX
 
-Skills available: auto-format, caveman, code-review, commit, tdd, to-tickets. Prefer invoking with /skill-name; the inline guidance below is the fallback when a skill is absent.
+Skills available: caveman, code-review, commit, tdd. Prefer invoking with /skill-name; the inline guidance below is the fallback when a skill is absent.
 
 No SCOUT, no implement-from-scratch. Go straight to:
 
