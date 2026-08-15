@@ -56,6 +56,29 @@ func TestRunStateRoundTripIncludesReviewFindings(t *testing.T) {
 	}
 }
 
+// TestRunStateRoundTripIncludesWorkerFindings verifies WorkerFindings (issue
+// #2059: the last parallel worker dispatch's per-slice outcome summary,
+// distinct from ReviewFindings) survives a WriteRunState/ReadRunState round
+// trip like every other field.
+func TestRunStateRoundTripIncludesWorkerFindings(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "run-state.json")
+	want := RunState{
+		LastVerdict:    "BLOCK",
+		WorkerFindings: "- slice-a: done\n- slice-b: crashed (exit 1)",
+	}
+
+	if err := WriteRunState(path, want); err != nil {
+		t.Fatalf("WriteRunState: %v", err)
+	}
+	got, err := ReadRunState(path)
+	if err != nil {
+		t.Fatalf("ReadRunState: %v", err)
+	}
+	if got.WorkerFindings != want.WorkerFindings {
+		t.Errorf("WorkerFindings = %q, want %q", got.WorkerFindings, want.WorkerFindings)
+	}
+}
+
 // TestReadRunStateNoFileYetReturnsZeroValue verifies the actual pass-one
 // production path (issue #1997): --state-file defaults to a fixed tmp path
 // that has never been written, and ReadRunState must treat that as "no

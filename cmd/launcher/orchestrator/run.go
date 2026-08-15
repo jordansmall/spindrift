@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"regexp"
 	"strings"
+	"time"
 
 	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/driver/claude"
@@ -93,6 +94,20 @@ type config struct {
 	// pre-#2387 behavior of the review pass silently reusing the
 	// coordinator's effort.
 	reviewEffort string
+	// workerPromptFile is the base prompt seedWorkerPrompt composes each
+	// dispatched worker's own addendum onto (issue #2059). Empty disables
+	// parallel worker dispatch entirely: a coordinator pass's slice manifest
+	// is never dispatched, matching every other "empty disables this
+	// feature" field in this struct (reviewPromptFile, above).
+	workerPromptFile string
+	// workerWorkDir holds every dispatched worker's own quarantined log,
+	// heartbeat log, result, and done-sentinel files (WorkerOptions.WorkDir).
+	// Only meaningful when workerPromptFile is set.
+	workerWorkDir string
+	// workerTimeout bounds each dispatched worker's own join
+	// (WorkerOptions.Timeout); <= 0 falls back to LaunchWorkers' own
+	// defaultWorkerTimeout.
+	workerTimeout time.Duration
 }
 
 // run loops driver-exec for as many passes as the implementor's own
@@ -275,6 +290,7 @@ func runWithReviewPass(cfg config, stdout io.Writer) (int, error) {
 		// hasOutcome; any VERDICT-shaped text it happens to contain is not
 		// state.LastVerdict's source of truth here.
 		_, hasOutcome := scanPassLog(cfg.logPath, cfg.driver)
+		manifestDispatched := dispatchManifestIfPresent(cfg, &state, stdout)
 		if !hasOutcome {
 			fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "pass_no_outcome", Pass: pass, Reason: fmt.Sprintf("exit %d", rc)}))
 		}
@@ -287,6 +303,13 @@ func runWithReviewPass(cfg config, stdout io.Writer) (int, error) {
 		switch {
 		case hasOutcome:
 			decision, reason = "stop", "outcome reached"
+		// A manifest dispatch always keeps the loop going, taking priority
+		// over every other case below -- those are all about ending the run,
+		// and a pass that just dispatched workers isn't done yet regardless
+		// of what verdict state happens to be sitting around from a prior
+		// pass (issue #2059 AC1).
+		case manifestDispatched:
+			decision, reason = "continue", "slice manifest dispatched"
 		// state.TerminalLand is already true only when this very pass WAS the
 		// terminal land pass a prior iteration of this loop committed to (see
 		// the cap case below) and it still produced no outcome. That bounds
@@ -319,6 +342,14 @@ func runWithReviewPass(cfg config, stdout io.Writer) (int, error) {
 		fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "decision", Decision: decision, Reason: reason}))
 		if decision == "stop" {
 			break
+		}
+		if manifestDispatched {
+			// A manifest-dispatch pass's only job was to declare the
+			// manifest and stop (issue #2059 AC1) -- there is nothing yet
+			// for a review pass to review, so the next pass is another
+			// implement/fix pass, seeded with state.WorkerFindings above.
+			implRole = "fix"
+			continue
 		}
 		if state.TerminalLand {
 			// The cap already used up this run's budget -- skip the review
@@ -422,7 +453,7 @@ func runWithReviewPass(cfg config, stdout io.Writer) (int, error) {
 // pass, nothing carried forward yet) this returns promptFile unchanged and
 // creates no temp file.
 func seedPromptFromState(promptFile string, state runstate.RunState) (string, error) {
-	if state.LastVerdict == "" && len(state.DoneSlices) == 0 && len(state.RemainingSlices) == 0 && state.ScoutBriefPath == "" && state.ReviewFindings == "" && !state.TerminalLand {
+	if state.LastVerdict == "" && len(state.DoneSlices) == 0 && len(state.RemainingSlices) == 0 && state.ScoutBriefPath == "" && state.ReviewFindings == "" && state.WorkerFindings == "" && !state.TerminalLand {
 		return promptFile, nil
 	}
 
@@ -449,6 +480,9 @@ func seedPromptFromState(promptFile string, state runstate.RunState) (string, er
 	}
 	if state.ReviewFindings != "" {
 		fmt.Fprintf(&b, "- Reviewer findings:\n\n%s\n", state.ReviewFindings)
+	}
+	if state.WorkerFindings != "" {
+		fmt.Fprintf(&b, "- Worker dispatch results:\n\n%s\n", state.WorkerFindings)
 	}
 	if state.TerminalLand {
 		b.WriteString("\n")
