@@ -465,6 +465,70 @@ rec {
     }
   ];
 
+  # Fourth pure-data registry (issue #2491): records that the "worker" role
+  # (lib/roster.nix's roster entry `name = "worker"`, `promptFile =
+  # "worker-prompt.md"`) is forbidden from carrying either the
+  # SPINDRIFT_OUTCOME or VERDICT marker in its rendered prompt -- the
+  # worker's prompt contract carries no outcome grammar by design, so a
+  # stray marker from a misbehaving worker must never be able to terminate
+  # the run or satisfy the launcher's outcome scanner.
+  #
+  # Separate list from forbiddenMarkers above, not an addition to it: the two
+  # registries have different scoping semantics (forbiddenMarkers is
+  # exclusively boxAccessReadOnly-scoped -- every row's `when` is that one
+  # literal -- while this registry is role-scoped, keyed on the "worker"
+  # roster entry, with no `when`/boxAccessReadOnly gating concept at all),
+  # and nix/checks/prompt-contract.nix pins forbiddenMarkers' exact row
+  # count, id order, and per-row `when`/`carrier`/`severity` values for that
+  # unrelated boxAccessReadOnly purpose -- appending rows here would corrupt
+  # that pin. This registry is intentionally a lighter shape than
+  # forbiddenMarkers: no carrier/kind/enforce fields, since the worker role
+  # has no "read-only Box" runtime shim mechanism for those fields to
+  # describe.
+  #
+  # Data-only, same as the other three registries, but for a different
+  # reason: cmd/launcher/internal/promptassembly/validate.go's Validate
+  # function is the sole runtime consumer of forbiddenMarkers (via
+  # lib/mkHarness.nix's forbiddenMarkersRegistryJson, baked into the image by
+  # lib/image.nix), and Validate is invoked only from
+  # cmd/launcher/driver-exec/assembleprompt_cmd.go -- the coordinator/
+  # main-box prompt assembly path. The worker prompt is assembled by a
+  # wholly separate, simpler code path,
+  # cmd/launcher/orchestrator/workers.go's seedWorkerPrompt, which never
+  # calls promptassembly.Validate and is never fed through this (or any)
+  # nix-baked registry JSON -- a deliberate structural quarantine (issue
+  # #2059): worker logs live in their own workdir and are never scanned by
+  # the orchestrator's outcome scanner (scanPassLog in
+  # cmd/launcher/orchestrator/run.go), so there is no live enforcement point
+  # analogous to Validate for the worker path. So this registry is not wired
+  # into promptassembly.Validate or lib/mkHarness.nix/lib/image.nix; it is
+  # pinned by a Go test (a later slice) that checks these marker literals
+  # directly against the rendered templates/default/prompts/worker-prompt.md
+  # file, not by any runtime validation pass.
+  #
+  #   id      -- short, stable identifier for the forbidden marker.
+  #   role    -- the roster entry name this row applies to; every row here is
+  #              "worker", matching lib/roster.nix's `name = "worker"` entry.
+  #   marker  -- the literal marker text the worker role's rendered prompt
+  #              must never carry.
+  #   message -- the row's fully pre-rendered diagnostic prose (marker
+  #              already interpolated), same "no runtime templating needed"
+  #              contract as the other registries' `message` field.
+  workerForbiddenMarkers = [
+    {
+      id = "worker-role-forbids-outcome";
+      role = "worker";
+      marker = "SPINDRIFT_OUTCOME";
+      message = "prompt-contract: the worker role's rendered prompt (worker-prompt.md) must never carry the 'SPINDRIFT_OUTCOME' marker -- the worker's prompt contract carries no outcome grammar by design (issue #2491), so a stray marker from a misbehaving worker can never terminate the run or satisfy the launcher's outcome scanner.";
+    }
+    {
+      id = "worker-role-forbids-verdict";
+      role = "worker";
+      marker = "VERDICT";
+      message = "prompt-contract: the worker role's rendered prompt (worker-prompt.md) must never carry the 'VERDICT' marker -- the worker's prompt contract carries no outcome grammar by design (issue #2491), so a stray marker from a misbehaving worker can never terminate the run or satisfy the launcher's outcome scanner.";
+    }
+  ];
+
   # Build-time reject arm (issue #2250, parent #2244): resolves each
   # validateMarkers "reject" row into one of ok/reject/advise from whatever
   # static gate/content knowledge a caller (lib/mkHarness.nix, a later slice)
