@@ -221,9 +221,9 @@ func TestWatchPoll(t *testing.T) {
 			wantWindowElapsed:   false,
 		},
 		{
-			// Finding 4: abandonment after a couple of successful polls have
-			// already observed non-terminal evidence must carry that
-			// accumulated evidence through in the returned observation
+			// Abandonment after a couple of successful polls have already
+			// observed non-terminal evidence must carry that accumulated
+			// evidence through in the returned observation
 			// (sawNonTerminal=true, elapsed=2), not a zero-value literal.
 			name:               "abandonment after prior polls preserves accumulated evidence",
 			pollInterval:       1,
