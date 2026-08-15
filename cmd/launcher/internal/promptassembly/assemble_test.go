@@ -167,7 +167,7 @@ func TestAssembleAutoLintGate(t *testing.T) {
 				t.Fatalf("Assemble: %v", err)
 			}
 
-			const marker = "Before committing, lint the files you changed"
+			const marker = "invoke the `/auto-lint` skill"
 			got := strings.Contains(result.Prompt, marker)
 			if got != tc.autoLint {
 				t.Errorf("Prompt contains auto-lint.md text = %v, want %v:\n%s", got, tc.autoLint, result.Prompt)
