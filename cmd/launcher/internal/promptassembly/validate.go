@@ -25,8 +25,10 @@ const (
 	severityWarn   = "warn"
 )
 
-// The Kind values a ForbiddenMarkerRow's Kind field is compared against in
-// Validate's forbiddenRows loop.
+// The Kind values a ForbiddenMarkerRow's Kind field is switched on in
+// Validate's forbiddenRows loop -- an allowlist, so an unrecognized Kind
+// (e.g. a typo in the nix registry) fails closed with a wrapped error
+// rather than silently falling through to the substring/imperative scan.
 const (
 	// forbiddenKindSubstring is the default meaning: Marker is checked as
 	// literal rendered text.
@@ -294,22 +296,30 @@ func Validate(e Env, result Result, rows []ValidateMarkerRow, forbiddenRows []Fo
 		}
 
 		violated := false
-		// A gh-api-mutation-kind row's Marker ("gh api") is display-only
-		// (ForbiddenMarkerRow.Kind's doc comment): it documents the runtime
-		// argument-scan entrypoint.sh's install_readonly_gh_shim performs
-		// (only a mutating -X/--method verb is rejected there), not a
-		// literal prompt substring. A plain, read-only `gh api ...` call is
-		// legitimate content, so this loop must never scan for it -- the
-		// row's only real enforcement is that shim, not this Go code.
-		if gateActive && row.Kind != forbiddenKindGhAPIMutation {
-			for _, h := range haystacks {
-				if h == "" {
-					continue
+		if gateActive {
+			switch row.Kind {
+			case forbiddenKindSubstring:
+				for _, h := range haystacks {
+					if h == "" {
+						continue
+					}
+					if ForbiddenMarkerIsImperative(row.Marker, h, liveCodeForge) {
+						violated = true
+						break
+					}
 				}
-				if ForbiddenMarkerIsImperative(row.Marker, h, liveCodeForge) {
-					violated = true
-					break
-				}
+			case forbiddenKindGhAPIMutation:
+				// A gh-api-mutation-kind row's Marker ("gh api") is
+				// display-only (ForbiddenMarkerRow.Kind's doc comment): it
+				// documents the runtime argument-scan entrypoint.sh's
+				// install_readonly_gh_shim performs (only a mutating
+				// -X/--method verb is rejected there), not a literal prompt
+				// substring. A plain, read-only `gh api ...` call is
+				// legitimate content, so this loop must never scan for it --
+				// the row's only real enforcement is that shim, not this Go
+				// code.
+			default:
+				return warnings, fmt.Errorf("promptassembly: validate: unknown kind %q for row %q", row.Kind, row.ID)
 			}
 		}
 
