@@ -9,17 +9,16 @@ import "spindrift.dev/launcher/internal/retry"
 type PRForIssue struct {
 	// Found reports whether an open PR exists for the issue's agent branch.
 	Found bool
-	// URL and IsDraft are only meaningful when Found is true.
-	URL     string
-	IsDraft bool
+	// URL is only meaningful when Found is true.
+	URL string
 }
 
 // ResolveOpenPR resolves the open PR for issue num on cf's agent branch. A
 // push-only Code Forge (no PRForge surface) and "no open PR yet" both
 // resolve to a zero PRForIssue (Found: false) with no error — the single
 // absent policy every caller shares; only a genuine lookup failure returns a
-// non-nil error. Callers that need the draft flag read res.IsDraft; callers
-// that only care whether a PR exists check res.Found alone.
+// non-nil error. Callers that only care whether a PR exists check res.Found
+// alone.
 func ResolveOpenPR(cf CodeForge, num string) (PRForIssue, error) {
 	pr, ok := cf.(PRForge)
 	if !ok {
@@ -29,7 +28,7 @@ func ResolveOpenPR(cf CodeForge, num string) (PRForIssue, error) {
 	if err != nil || !found {
 		return PRForIssue{}, err
 	}
-	return PRForIssue{Found: true, URL: got.URL, IsDraft: got.IsDraft}, nil
+	return PRForIssue{Found: true, URL: got.URL}, nil
 }
 
 // ResolveOpenPRWithRetry resolves num's open PR like ResolveOpenPR, but

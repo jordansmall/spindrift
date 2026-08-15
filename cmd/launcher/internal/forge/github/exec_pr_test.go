@@ -29,9 +29,9 @@ fi
 
 // TestOpenPRForBranch_SingleGHCall verifies OpenPRForBranch resolves a found
 // PR with exactly one `gh` invocation. It used to make a second `gh pr view
-// --json isDraft` call solely to populate the (now unused here) IsDraft
-// field; that call is gone, so a single `gh pr list` must be enough to
-// report the PR as found.
+// --json isDraft` call solely to populate the (now-removed) draft field;
+// that call is gone, so a single `gh pr list` must be enough to report the
+// PR as found.
 func TestOpenPRForBranch_SingleGHCall(t *testing.T) {
 	dir := prependFakeGH(t, `if [ "$1" = "pr" ] && [ "$2" = "list" ]; then
   echo "https://github.com/owner/repo/pull/42"

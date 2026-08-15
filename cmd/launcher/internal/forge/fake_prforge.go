@@ -299,7 +299,7 @@ func (pf *PRForgeFake) EnqueueAutoMerge(prURL string) error {
 }
 
 // MarkReady records the call to MarkReadyCalls, observable in tests via
-// that log rather than a stored IsDraft flip (the Fake, like the real
+// that log rather than a stored draft-flag flip (the Fake, like the real
 // adapters, no longer tracks draft state on the stored PR).
 func (pf *PRForgeFake) MarkReady(prURL string) error {
 	pf.mu.Lock()

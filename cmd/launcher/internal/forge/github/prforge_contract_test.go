@@ -198,8 +198,8 @@ func (h *prforgeHarness) draftState(url string) string {
 // draft state file, making it unfaithful to real `gh pr ready`'s effect on
 // GitHub's draft state (issue #2408). The oracle reads the fake script's own
 // state file directly rather than round-tripping through
-// OpenPRForBranch/IsDraft, since the github adapter no longer populates
-// IsDraft from OpenPRForBranch (#2503).
+// OpenPRForBranch's draft field, since the github adapter no longer
+// populates a draft field on the PR it returns (#2503).
 func TestExecClient_MarkReadyClearsDraft(t *testing.T) {
 	h := newPRForgeHarness(t)
 	const num = "220"

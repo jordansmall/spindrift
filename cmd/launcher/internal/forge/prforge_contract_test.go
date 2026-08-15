@@ -29,14 +29,14 @@ func (h *fakePRForgeHarness) PushOnlyCodeForge() forge.CodeForge { return h.f.As
 func (h *fakePRForgeHarness) SeedOpenPR(num string) string {
 	branch := h.f.AgentBranch(num)
 	url := "https://github.com/owner/repo/pull/" + num
-	h.f.SetPR(branch, forge.PR{URL: url, IsDraft: false})
+	h.f.SetPR(branch, forge.PR{URL: url})
 	return url
 }
 
 func (h *fakePRForgeHarness) SeedDraftPR(num string) string {
 	branch := h.f.AgentBranch(num)
 	url := "https://github.com/owner/repo/pull/" + num
-	h.f.SetPR(branch, forge.PR{URL: url, IsDraft: true})
+	h.f.SetPR(branch, forge.PR{URL: url})
 	return url
 }
 
