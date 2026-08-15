@@ -87,7 +87,7 @@ would.
 | `prefetch`  | shared         | shell snippet               | `""`               | runs in the work tree after the clone, to warm dependency caches     |
 | `prompt`    | shared         | string                      | bundled starter    | agent prompt template baked into the image; changing it requires a rebuild (`spindrift build`). The SPINDRIFT_OUTCOME contract is harness-owned: `spindrift build` appends it automatically if a custom `prompt` omits it (idempotent — a prompt that already has it is untouched) |
 | `scoutPrompt` / `reviewPrompt` / `filerPrompt` | **`mkHarness` only** | string | bundled starters | system prompts for the read-only scout and reviewer subagents and the opt-in filer subagent (see [Filer](#filer)); not settable on `perSystem.spindrift.*` — override at runtime via `SPINDRIFT_PROMPT_DIR` regardless of which caller baked the image |
-| `skills`    | shared         | list of path/derivation/`{ name; src; }` | `[]`  | skills baked into the image at the fixed `/agent/skills` path alongside the harness-owned skills (e.g. `auto-format`, baked regardless of this list), each as a `<name>/SKILL.md` directory (the only layout Claude Code discovers — a flat `<name>.md` is ignored) so the headless agent can `/invoke` them; a `{ name; src; }` content entry (name + SKILL.md body) is realized with the image's own Linux `pkgs` rather than copied from a pre-built host derivation, keeping the agent-image drvPath host-independent (issue #597); `agent/entrypoint.sh` copies both into the Driver's actual runtime skills dir at box startup, then copies `SPINDRIFT_SKILLS_DIR` (staged at `/operator-skills`) over the top so runtime overrides win without erasing the baked set (issue #2489) |
+| `skills`    | shared         | list of path/derivation/`{ name; src; }` | `[]`  | skills baked into the image at the fixed `/agent/skills` path alongside the harness-owned skills (e.g. `auto-format`, `auto-lint`, baked regardless of this list), each as a `<name>/SKILL.md` directory (the only layout Claude Code discovers — a flat `<name>.md` is ignored) so the headless agent can `/invoke` them; a `{ name; src; }` content entry (name + SKILL.md body) is realized with the image's own Linux `pkgs` rather than copied from a pre-built host derivation, keeping the agent-image drvPath host-independent (issue #597); `agent/entrypoint.sh` copies both into the Driver's actual runtime skills dir at box startup, then copies `SPINDRIFT_SKILLS_DIR` (staged at `/operator-skills`) over the top so runtime overrides win without erasing the baked set (issue #2489) |
 | `settings`  | shared         | submodule, grouped by section (see below) | `{}` | non-secret run defaults baked into the `spindrift` CLI |
 | `runtime`   | shared         | `"podman"` \| `"docker"` \| `"rancher"` \| `"bwrap"` | `"podman"` | runner the `spindrift build`/`dispatch` commands drive: an OCI runtime (`"rancher"` is an alias for Rancher Desktop's containerd mode, driven via `nerdctl`), or the daemonless bubblewrap sandbox (`bwrap`, Linux-only, no image build/load) |
 | `driver`    | shared         | string                      | `"claude"`         | the agent CLI Driver baked into the image and threaded to the launcher (ADR 0009); `"claude"` (default) and `"opencode"` are the Drivers today. A non-`claude` Driver realises its own `spindrift-<driver>` image (e.g. `spindrift-opencode`) so per-Driver artifacts never collide |
@@ -3025,12 +3025,14 @@ would otherwise duplicate, gated on that skill being baked. The pins are
 non-flake `caveman` / `matt-skills` / `jordan-skills` inputs in `flake.nix`
 (`flake.lock` owns the revs); the baked set lives in `nix/dogfood-skills.nix`.
 See [Contributing](../CONTRIBUTING.md) for how it's wired. To opt out of a
-skill, drop it from the consumer's `skills` list; each per-skill deferral is
-rendered only when that skill's `SKILL.md` is actually present at the baked
-skills path, so a consumer that skips a skill gets prompts with zero residue
-for it. `auto-format` (see the `skills` row above) is the one harness-owned
-skill among the mix — it bakes into every image unconditionally, unlike the
-five Consumer-configured skills above which a Consumer can opt out of.
+skill, drop it from the consumer's `skills` list; each of the five
+Consumer-configured deferrals above is rendered only when that skill's
+`SKILL.md` is actually present at the baked skills path, so a consumer that
+skips a skill gets prompts with zero residue for it. `auto-format` and
+`auto-lint` (see the `skills` row above) are the harness-owned skills among
+the mix — they bake into every image unconditionally and their deferrals
+gate on the `AUTO_FORMAT`/`AUTO_LINT` knobs instead of presence, since
+presence is never in question.
 
 ## Shell completion
 
