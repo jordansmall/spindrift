@@ -583,6 +583,48 @@ in
         want: ${generated}'';
     pkgs.runCommand "template-settings-block" { } "touch $out";
 
+  # The generated status-word span between agent/entrypoint.sh's BEGIN/END
+  # GENERATED OUTCOME STATUS WORDS markers must match the content rendered
+  # from lib/prompt-contract.nix's outcomeStatusSets (issue #2504). Shares
+  # its renderers with `nix run .#regen` via lib/renderers.nix.
+  outcome-status-words =
+    let
+      promptContract = import ../../lib/prompt-contract.nix;
+      inherit (pkgs.lib) assertMsg;
+      workStatusProse = renderers.renderOutcomeStatusProse (promptContract.outcomeStatusesFor "work");
+      researchStatusPipe = renderers.renderOutcomeStatusPipe (
+        builtins.filter (s: s != "blocked") (promptContract.outcomeStatusesFor "research")
+      );
+      generated =
+        "WORK_STATUS_PROSE=\"${workStatusProse}\"\n"
+        + "# shellcheck disable=SC2034 # consumed by _subst's envsubst allowlist, wired in a later slice (issue #2504)\n"
+        + "RESEARCH_STATUS_ENUM=\"${researchStatusPipe}\"\n";
+      entrypointSrc = builtins.readFile ../../agent/entrypoint.sh;
+      beginMarker = "# BEGIN GENERATED OUTCOME STATUS WORDS -- nix run .#regen -- DO NOT EDIT\n";
+      endMarker = "# END GENERATED OUTCOME STATUS WORDS";
+      afterBegin =
+        let
+          parts = builtins.split beginMarker entrypointSrc;
+        in
+        if builtins.length parts >= 3 then
+          builtins.elemAt parts 2
+        else
+          throw "agent/entrypoint.sh: BEGIN GENERATED OUTCOME STATUS WORDS marker not found";
+      committed =
+        let
+          parts = builtins.split endMarker afterBegin;
+        in
+        if builtins.length parts >= 3 then
+          builtins.elemAt parts 0
+        else
+          throw "agent/entrypoint.sh: END GENERATED OUTCOME STATUS WORDS marker not found";
+    in
+    assert assertMsg (committed == generated) ''
+      agent/entrypoint.sh generated outcome-status-words block is out of sync with lib/prompt-contract.nix — regenerate it with `nix run .#regen`
+        got:  ${committed}
+        want: ${generated}'';
+    pkgs.runCommand "outcome-status-words" { } "touch $out";
+
   # cmd/launcher/flags.go's groupOrder must list the same groups, in the same
   # order, as lib/renderers.nix groupOrder. Go stays hand-written (issue #105:
   # generation was rejected) — this pins the copy instead of replacing it.

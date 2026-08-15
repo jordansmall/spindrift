@@ -41,6 +41,10 @@ let
   subcommandsFile = renderers.renderSubcommandsGo subcommands;
   promptContract = import ../lib/prompt-contract.nix;
   outcomeStatusGoFile = renderers.renderOutcomeStatusGo promptContract.outcomeStatusSets;
+  workStatusProse = renderers.renderOutcomeStatusProse (promptContract.outcomeStatusesFor "work");
+  researchStatusPipe = renderers.renderOutcomeStatusPipe (
+    builtins.filter (s: s != "blocked") (promptContract.outcomeStatusesFor "research")
+  );
   inherit (pkgs.lib) escapeShellArg;
 in
 pkgs.writeShellApplication {
@@ -90,5 +94,17 @@ pkgs.writeShellApplication {
       ${escapeShellArg "            # BEGIN GENERATED SETTINGS EXAMPLE -- nix run .#regen -- DO NOT EDIT"} \
       ${escapeShellArg "            # END GENERATED SETTINGS EXAMPLE"} \
       ${escapeShellArg templateSettingsBlock}
+    write_between agent/entrypoint.sh \
+      ${escapeShellArg "# BEGIN GENERATED OUTCOME STATUS WORDS -- nix run .#regen -- DO NOT EDIT"} \
+      ${escapeShellArg "# END GENERATED OUTCOME STATUS WORDS"} \
+      ${escapeShellArg (
+        "WORK_STATUS_PROSE=\""
+        + workStatusProse
+        + "\"\n"
+        + "# shellcheck disable=SC2034 # consumed by _subst's envsubst allowlist, wired in a later slice (issue #2504)\n"
+        + "RESEARCH_STATUS_ENUM=\""
+        + researchStatusPipe
+        + "\"\n"
+      )}
   '';
 }
