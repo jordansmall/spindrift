@@ -99,7 +99,6 @@ let
           RESEARCH_OUTCOME_CONTRACT_FILE = batsHarness.researchOutcomeContractFile;
           DRIVER_PREAMBLE_FILE = driverOutcomeManifest.${name}.preamble;
           FRAGMENT_REGISTRY_FILE = batsHarness.fragmentRegistryFile;
-          CONTRACT_REGISTRY_FILE = batsHarness.contractRegistryFile;
           DRIVER = name;
           DRIVER_SESSION_RESUMABLE = pkgs.lib.optionalString (entry ? sessionCacheDirRelative) "1";
           # entrypoint.sh's phase_prompt_assembly now unconditionally shells
@@ -244,10 +243,6 @@ in
         # substitution allowlist (issue #622); helper.bash prepends this
         # alongside DRIVER_PREAMBLE_FILE for the same reason.
         FRAGMENT_REGISTRY_FILE = batsHarness.fragmentRegistryFile;
-        # The shared prompt block registry's rendered `_INJECT_BLOCK_ROWS`
-        # array (issue #2246); helper.bash prepends this the same way, so
-        # entrypoint.sh's `_contract_marker` lookup has data to read.
-        CONTRACT_REGISTRY_FILE = batsHarness.contractRegistryFile;
         # tests/driver-registry-outcome-extraction.bats (issue #2261 slice 2)
         # lives under tests/ like every other suite, so this catch-all `bats
         # tests/` run picks it up too -- export the same registry-driven
@@ -369,7 +364,6 @@ in
         RESEARCH_OUTCOME_CONTRACT_FILE = batsHarness.researchOutcomeContractFile;
         DRIVER_PREAMBLE_FILE = batsHarness.driverPreambleFile;
         FRAGMENT_REGISTRY_FILE = batsHarness.fragmentRegistryFile;
-        CONTRACT_REGISTRY_FILE = batsHarness.contractRegistryFile;
         PROMPT_CONTRACT_PARITY_FIXTURE = promptContractParityFixtureFile;
         # Same reason as outcomeBatsChecks' own copy of these two vars above:
         # $ENTRYPOINT unconditionally calls `driver-exec assemble-prompt`

@@ -148,7 +148,6 @@ in
         RESEARCH_OUTCOME_CONTRACT_FILE = batsHarness.researchOutcomeContractFile;
         DRIVER_PREAMBLE_FILE = batsHarness.driverPreambleFile;
         FRAGMENT_REGISTRY_FILE = batsHarness.fragmentRegistryFile;
-        CONTRACT_REGISTRY_FILE = batsHarness.contractRegistryFile;
         DRIVER_EXEC_BIN = "${batsHarness.driverExecBin}/bin/driver-exec";
         # Reuses the same nix-rendered lib/fragments.nix JSON the drift
         # check above already built -- no second render of the registry.
