@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/forge"
@@ -380,6 +381,8 @@ func TestMergeImmediate_MarkReadyRestoreFailureIsBestEffort(t *testing.T) {
 func TestMergeImmediate_StaleConflictRetryDoesNotRedemoteAfterRestore(t *testing.T) {
 	c := baseConfig()
 	c.MaxRebaseAttempts = 3
+	sleeps, clock := recordingClock()
+	c.Clock = clock
 	fc := forge.NewFake()
 	fc.MergeErrs = []error{forge.ErrMergeConflict, forge.ErrMergeConflict, nil}
 	fc.RebaseErr = forge.ErrMergeConflict
@@ -405,6 +408,19 @@ func TestMergeImmediate_StaleConflictRetryDoesNotRedemoteAfterRestore(t *testing
 	}
 	if len(fc.MarkDraftCalls) != 1 {
 		t.Errorf("MarkDraft called %d times, want 1 (stale-snapshot retry must not re-demote); calls=%v", len(fc.MarkDraftCalls), fc.MarkDraftCalls)
+	}
+	// The stale-mergeability-snapshot retry (status=merge-retry-settle) must
+	// sleep through the injected clock rather than a bare time.Sleep (issue
+	// #2502): a recordingClock only records what is actually routed through
+	// it, so a bare time.Sleep would leave sleeps empty here even though a
+	// real sleep happened. The rewaitAfterForcePush confirm-poll ahead of it
+	// (gateToGreen's own SUCCESS confirm-sleep, already routed through
+	// s.clock since slice 2) records the same MergePollInterval duration
+	// first.
+	pollSleep := time.Duration(c.MergePollInterval) * time.Second
+	wantSleeps := []time.Duration{pollSleep, pollSleep}
+	if !slices.Equal(*sleeps, wantSleeps) {
+		t.Errorf("clock sleeps = %v, want %v (merge-retry-settle retry must sleep through s.clock)", *sleeps, wantSleeps)
 	}
 }
 
@@ -520,10 +536,16 @@ func TestMergeImmediate_RewaitGenuineRedNotTreatedAsConflict(t *testing.T) {
 // TestMergeImmediate_BlockedByChecks verifies that a merge refusal classified
 // as forge.ErrMergeBlockedByChecks (issue #566) triggers neither a rebase nor
 // a conflict-resolve dispatch, and that the status output names checks — not
-// a conflict — as the reason the merge is waiting.
+// a conflict — as the reason the merge is waiting. It also verifies the
+// blocked-by-checks retry sleeps through the injected clock rather than a
+// bare time.Sleep (issue #2502): a recordingClock only records what is
+// actually routed through it, so a bare time.Sleep would leave sleeps empty
+// here even though a real sleep happened.
 func TestMergeImmediate_BlockedByChecks(t *testing.T) {
 	c := baseConfig()
 	c.MaxRebaseAttempts = 3
+	sleeps, clock := recordingClock()
+	c.Clock = clock
 	fc := forge.NewFake()
 	fc.MergeErrs = []error{forge.ErrMergeBlockedByChecks, nil}
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-complete"}})
@@ -562,6 +584,10 @@ func TestMergeImmediate_BlockedByChecks(t *testing.T) {
 	}
 	if len(fc.MarkDraftCalls) != 0 {
 		t.Errorf("blocked-by-checks is not a content conflict and must not demote to draft; MarkDraftCalls=%v", fc.MarkDraftCalls)
+	}
+	wantSleeps := []time.Duration{time.Duration(c.MergePollInterval) * time.Second}
+	if !slices.Equal(*sleeps, wantSleeps) {
+		t.Errorf("clock sleeps = %v, want %v (blocked-by-checks retry must sleep through s.clock)", *sleeps, wantSleeps)
 	}
 }
 

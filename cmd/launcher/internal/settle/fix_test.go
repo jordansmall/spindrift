@@ -2,8 +2,10 @@ package settle
 
 import (
 	"errors"
+	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/forge"
@@ -330,9 +332,15 @@ func TestSelfHeal_FixFailureStopsImmediately(t *testing.T) {
 // fresh genuine red (issue #1980). The rollup is scripted FAILURE on every
 // poll — standing in for a head that never advances — so a buggy loop that
 // trusts the stale rollup would burn all 3 passes instead of stopping after
-// the first.
+// the first. It also verifies the no-op-confirm pause sleeps through the
+// injected clock rather than a bare time.Sleep (issue #2502): a
+// recordingClock only records what is actually routed through it, so a bare
+// time.Sleep would leave sleeps empty here even though a real sleep
+// happened.
 func TestSelfHeal_FixNoOpUnchangedHead(t *testing.T) {
 	c := fixConfig(3)
+	sleeps, clock := recordingClock()
+	c.Clock = clock
 	fc := forge.NewFake()
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
 	fc.SetCheckStates(testPR, []forge.RollupState{
@@ -357,6 +365,10 @@ func TestSelfHeal_FixNoOpUnchangedHead(t *testing.T) {
 	}
 	if last := fc.TransitionStateCalls[len(fc.TransitionStateCalls)-1]; last.To != forge.Failed {
 		t.Errorf("last transition To=%v, want Failed", last.To)
+	}
+	wantSleeps := []time.Duration{time.Duration(c.MergePollInterval) * time.Second}
+	if !slices.Equal(*sleeps, wantSleeps) {
+		t.Errorf("clock sleeps = %v, want %v (no-op-confirm pause must sleep through s.clock)", *sleeps, wantSleeps)
 	}
 }
 
