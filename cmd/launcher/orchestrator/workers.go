@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"spindrift.dev/launcher/internal/driver/claude"
@@ -315,6 +316,13 @@ func launchOneWorker(cfg config, slice ManifestSlice, promptFile, workDir string
 	cmd.Dir = worktreePath
 	cmd.Stdout = io.Discard
 	cmd.Stderr = io.Discard
+	// Start this worker as its own process group leader, so a timeout kill
+	// (below) can signal the whole group -- driver-exec spawns the actual
+	// claude/driver subprocess as its own child, and killing only the
+	// driver-exec parent would leave that child orphaned and still mutating
+	// this worker's own worktree after the join has already moved on (issue
+	// #2059 code-review finding).
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
 	if err := cmd.Start(); err != nil {
 		writeWorkerOp(stdout, mu, claude.SpindriftOp{Op: "worker_finish", Worker: slice.Name, WorkerStatus: string(WorkerCrashed), Reason: err.Error()})
@@ -355,8 +363,18 @@ func launchOneWorker(cfg config, slice ManifestSlice, promptFile, workDir string
 			}
 		} else {
 			status = WorkerTimedOut
+			// Kill the whole process GROUP (negative pid), not just
+			// driver-exec itself -- Setpgid above made this process its own
+			// group leader, so this also reaches any subprocess (e.g. the
+			// real claude driver) it spawned. Best-effort: the status is
+			// already decided as WorkerTimedOut regardless of whether the
+			// kill itself succeeds, matching this file's existing
+			// best-effort-cleanup convention (e.g. the worktree-removal
+			// defer above).
 			if cmd.Process != nil {
-				cmd.Process.Kill()
+				if err := syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL); err != nil {
+					fmt.Fprintln(os.Stderr, "orchestrator: kill timed-out worker process group:", err)
+				}
 			}
 		}
 	}

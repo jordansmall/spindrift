@@ -166,13 +166,20 @@ func TestWaitForSentinelReturnsTrueImmediatelyWhenFileAlreadyExists(t *testing.T
 
 // writeFakeWorkerDriverExec writes a fake driver-exec that branches on the
 // basename of its own --log-path flag (derived by writeFakeDriverExec's
-// preamble into $DRIVER_LOG_PATH) to play one of three worker behaviors: a
+// preamble into $DRIVER_LOG_PATH) to play one of four worker behaviors: a
 // "done-fast" slice writes to its log then creates its own sentinel (derived
 // from DRIVER_LOG_PATH by replacing ".log" with ".done", matching
 // launchOneWorker's own sentinel/log naming convention) and exits 0; a
 // "crash-now" slice exits 1 immediately without ever touching a sentinel;
 // a "hang-forever" slice sleeps well past any test's own short timeout,
-// also without touching a sentinel.
+// also without touching a sentinel; an "orphan-check" slice spawns its own
+// background child (a loop, standing in for the real claude subprocess
+// driver-exec spawns), records that child's pid to
+// "<slice>.childpid" (derived the same way as the sentinel path), and then
+// itself sleeps well past any test's own short timeout without ever
+// touching a sentinel -- letting a test prove a timeout kill reaches the
+// whole process group, not just this top-level driver-exec process (issue
+// #2059 code-review finding).
 func writeFakeWorkerDriverExec(t *testing.T, dir, callLog string) string {
 	t.Helper()
 	body := `echo "worker log" > "$DRIVER_LOG_PATH"
@@ -187,6 +194,11 @@ case "$base" in
     exit 1
     ;;
   hang-forever.log)
+    sleep 30
+    ;;
+  orphan-check.log)
+    ( while true; do sleep 0.05; done ) &
+    echo $! > "${DRIVER_LOG_PATH%.log}.childpid"
     sleep 30
     ;;
 esac
@@ -266,6 +278,72 @@ func TestLaunchWorkersJoinsDoneCrashedAndTimedOutDeterministically(t *testing.T)
 		if _, err := os.Stat(logPath); err != nil {
 			t.Errorf("expected quarantined log file %s to exist: %v", logPath, err)
 		}
+	}
+}
+
+// TestLaunchOneWorkerKillsOrphanedChildProcessOnTimeout verifies the timeout
+// branch of launchOneWorker kills the timed-out worker's entire process
+// GROUP, not just the driver-exec process itself (issue #2059 code-review
+// finding): driver-exec spawns the real claude/driver subprocess as its own
+// child, so killing only the parent leaves that child running -- still free
+// to mutate the worker's own git worktree -- even after launchOneWorker has
+// already returned WorkerTimedOut. The fake driver here plays the
+// "orphan-check" behavior (see writeFakeWorkerDriverExec): it spawns its own
+// background child and records that child's pid, then hangs past the
+// configured timeout without ever writing a sentinel. Once launchOneWorker
+// returns WorkerTimedOut, the recorded child pid must no longer be alive.
+func TestLaunchOneWorkerKillsOrphanedChildProcessOnTimeout(t *testing.T) {
+	chdirToFreshWorkerRepo(t)
+
+	fakeDir := t.TempDir()
+	callLog := filepath.Join(fakeDir, "calls.log")
+	if err := os.WriteFile(callLog, nil, 0o644); err != nil {
+		t.Fatalf("WriteFile(callLog): %v", err)
+	}
+	writeFakeWorkerDriverExec(t, fakeDir, callLog)
+	t.Setenv("PATH", fakeDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	promptDir := t.TempDir()
+	promptFile := filepath.Join(promptDir, "worker-prompt.txt")
+	if err := os.WriteFile(promptFile, []byte("BASE WORKER PROMPT"), 0o644); err != nil {
+		t.Fatalf("WriteFile(promptFile): %v", err)
+	}
+
+	workDir := t.TempDir()
+	var stdout bytes.Buffer
+	var mu sync.Mutex
+
+	cfg := config{driver: "claude"}
+	slice := ManifestSlice{Name: "orphan-check"}
+
+	result := launchOneWorker(cfg, slice, promptFile, workDir, 80*time.Millisecond, 5*time.Millisecond, &stdout, &mu)
+
+	if result.Status != WorkerTimedOut {
+		t.Fatalf("result.Status = %q, want WorkerTimedOut", result.Status)
+	}
+
+	childPIDPath := filepath.Join(workDir, "orphan-check.childpid")
+	pidBytes, err := os.ReadFile(childPIDPath)
+	if err != nil {
+		t.Fatalf("ReadFile(childPIDPath): %v -- the fake driver never recorded its child's pid", err)
+	}
+	childPID := strings.TrimSpace(string(pidBytes))
+	if childPID == "" {
+		t.Fatal("childpid file was empty")
+	}
+
+	// SIGKILL is immediate, but the kernel's own bookkeeping (and this
+	// test's own polling) can lag a hair behind -- poll briefly rather than
+	// asserting instantaneously.
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if _, err := os.Stat("/proc/" + childPID); os.IsNotExist(err) {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("child process %s (spawned by the timed-out worker) is still alive under /proc after launchOneWorker returned -- want the whole process GROUP killed, not just the driver-exec parent", childPID)
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }
 
