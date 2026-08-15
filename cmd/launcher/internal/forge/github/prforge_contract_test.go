@@ -178,56 +178,57 @@ func TestExecClient_PRForgeContract(t *testing.T) {
 	forgetest.RunPRForgeContract(t, newPRForgeHarness(t))
 }
 
+// draftState reads back the fake gh script's own scripted draft flag for PR
+// num — STATE_DIR/prs/<num>/draft, the file the script's pr-ready case
+// writes "true"/"false" to and its pr-view isDraft case reads from. Used as
+// the oracle for MarkReady/MarkDraft's effect now that OpenPRForBranch (the
+// github adapter's own call) no longer round-trips isDraft at all (#2503).
+func (h *prforgeHarness) draftState(url string) string {
+	h.t.Helper()
+	raw, err := os.ReadFile(filepath.Join(h.stateDir, "prs", prNum(url), "draft"))
+	if err != nil {
+		h.t.Fatalf("read draft state for %q: %v", url, err)
+	}
+	return strings.TrimSpace(string(raw))
+}
+
 // TestExecClient_MarkReadyClearsDraft verifies MarkReady's `gh pr ready`
-// call actually flips the fake script's scripted draft state, so a later
-// OpenPRForBranch/isDraft read reflects it — the fake gh script's pr-ready
-// case previously just `exit 0`'d without touching the draft state file,
-// making it unfaithful to real `gh pr ready`'s effect on GitHub's draft
-// state (issue #2408).
+// call actually flips the fake script's scripted draft state — the fake gh
+// script's pr-ready case previously just `exit 0`'d without touching the
+// draft state file, making it unfaithful to real `gh pr ready`'s effect on
+// GitHub's draft state (issue #2408). The oracle reads the fake script's own
+// state file directly rather than round-tripping through
+// OpenPRForBranch/IsDraft, since the github adapter no longer populates
+// IsDraft from OpenPRForBranch (#2503).
 func TestExecClient_MarkReadyClearsDraft(t *testing.T) {
 	h := newPRForgeHarness(t)
 	const num = "220"
 	url := h.SeedDraftPR(num)
-	branch := h.branchName(num)
 
 	if err := h.Forge().MarkReady(url); err != nil {
 		t.Fatalf("MarkReady(%q): %v", url, err)
 	}
 
-	pr, ok, err := h.Forge().OpenPRForBranch(branch)
-	if err != nil {
-		t.Fatalf("OpenPRForBranch(%q): %v", branch, err)
-	}
-	if !ok {
-		t.Fatalf("OpenPRForBranch(%q) = not found, want found", branch)
-	}
-	if pr.IsDraft {
-		t.Fatalf("OpenPRForBranch(%q).IsDraft = true after MarkReady, want false", branch)
+	if got := h.draftState(url); got != "false" {
+		t.Fatalf("draft state after MarkReady(%q) = %q, want %q", url, got, "false")
 	}
 }
 
 // TestExecClient_MarkDraftSetsDraft is the inverse of
 // TestExecClient_MarkReadyClearsDraft: MarkDraft's `gh pr ready --undo` call
-// must flip an open PR back to draft.
+// must flip an open PR back to draft, verified against the same fake-script
+// state file oracle.
 func TestExecClient_MarkDraftSetsDraft(t *testing.T) {
 	h := newPRForgeHarness(t)
 	const num = "221"
 	url := h.SeedOpenPR(num)
-	branch := h.branchName(num)
 
 	if err := h.Forge().MarkDraft(url); err != nil {
 		t.Fatalf("MarkDraft(%q): %v", url, err)
 	}
 
-	pr, ok, err := h.Forge().OpenPRForBranch(branch)
-	if err != nil {
-		t.Fatalf("OpenPRForBranch(%q): %v", branch, err)
-	}
-	if !ok {
-		t.Fatalf("OpenPRForBranch(%q) = not found, want found", branch)
-	}
-	if !pr.IsDraft {
-		t.Fatalf("OpenPRForBranch(%q).IsDraft = false after MarkDraft, want true", branch)
+	if got := h.draftState(url); got != "true" {
+		t.Fatalf("draft state after MarkDraft(%q) = %q, want %q", url, got, "true")
 	}
 }
 
