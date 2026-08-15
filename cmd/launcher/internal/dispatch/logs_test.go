@@ -84,6 +84,120 @@ func TestLogPaths_NoLogsOnDisk_ReturnsEmpty(t *testing.T) {
 	}
 }
 
+// TestAllAttemptLogPaths_NoRetries_MatchesLogPaths verifies a pass with only
+// its bare log on disk (no rotated attempts) behaves like LogPaths for that
+// pass -- a single entry with the bare label.
+func TestAllAttemptLogPaths_NoRetries_MatchesLogPaths(t *testing.T) {
+	dir := tempLogDir(t)
+	if err := os.WriteFile(filepath.Join(HostLogDirFor(dir), "issue-1.log"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got := AllAttemptLogPaths(dir, "1")
+	if len(got) != 1 {
+		t.Fatalf("AllAttemptLogPaths = %+v, want 1 entry", got)
+	}
+	if got[0].Label != "initial" {
+		t.Errorf("Label = %q, want %q", got[0].Label, "initial")
+	}
+	if got[0].Path != filepath.Join(HostLogDirFor(dir), "issue-1.log") {
+		t.Errorf("Path = %q, want the initial log path", got[0].Path)
+	}
+}
+
+// TestAllAttemptLogPaths_RotatedAttemptsThenCurrent verifies a pass with two
+// rotated-aside attempts (issue-1.log.1, issue-1.log.2) plus its current
+// bare log all appear, oldest first, labeled initial.1, initial.2, initial.
+func TestAllAttemptLogPaths_RotatedAttemptsThenCurrent(t *testing.T) {
+	dir := tempLogDir(t)
+	logsDir := HostLogDirFor(dir)
+	for _, name := range []string{"issue-1.log.1", "issue-1.log.2", "issue-1.log"} {
+		if err := os.WriteFile(filepath.Join(logsDir, name), []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	got := AllAttemptLogPaths(dir, "1")
+	wantLabels := []string{"initial.1", "initial.2", "initial"}
+	if len(got) != len(wantLabels) {
+		t.Fatalf("AllAttemptLogPaths = %+v, want %d entries", got, len(wantLabels))
+	}
+	for i, label := range wantLabels {
+		if got[i].Label != label {
+			t.Errorf("entry %d Label = %q, want %q", i, got[i].Label, label)
+		}
+	}
+	wantPaths := []string{
+		filepath.Join(logsDir, "issue-1.log.1"),
+		filepath.Join(logsDir, "issue-1.log.2"),
+		filepath.Join(logsDir, "issue-1.log"),
+	}
+	for i, p := range wantPaths {
+		if got[i].Path != p {
+			t.Errorf("entry %d Path = %q, want %q", i, got[i].Path, p)
+		}
+	}
+}
+
+// TestAllAttemptLogPaths_RotatedAttemptWithNoCurrentLog verifies a pass
+// mid-retry -- a rotated-aside attempt on disk but no fresh bare log yet
+// (the rotate happened but a new attempt hasn't started, or the run crashed
+// before creating one) -- still surfaces the rotated attempt rather than
+// dropping it because the bare log is missing.
+func TestAllAttemptLogPaths_RotatedAttemptWithNoCurrentLog(t *testing.T) {
+	dir := tempLogDir(t)
+	logsDir := HostLogDirFor(dir)
+	if err := os.WriteFile(filepath.Join(logsDir, "issue-1.log.1"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got := AllAttemptLogPaths(dir, "1")
+	if len(got) != 1 {
+		t.Fatalf("AllAttemptLogPaths = %+v, want 1 entry", got)
+	}
+	if got[0].Label != "initial.1" {
+		t.Errorf("Label = %q, want %q", got[0].Label, "initial.1")
+	}
+	if got[0].Path != filepath.Join(logsDir, "issue-1.log.1") {
+		t.Errorf("Path = %q, want the rotated attempt path", got[0].Path)
+	}
+}
+
+// TestAllAttemptLogPaths_MultiplePassesIndependentRotationHistory verifies
+// each pass's rotated attempts and current log stay grouped together in
+// order, even when only some passes were retried: initial has one rotated
+// attempt plus its current log, fix-1 has only its current log.
+func TestAllAttemptLogPaths_MultiplePassesIndependentRotationHistory(t *testing.T) {
+	dir := tempLogDir(t)
+	logsDir := HostLogDirFor(dir)
+	for _, name := range []string{"issue-1.log.1", "issue-1.log", "issue-1-fix-1.log"} {
+		if err := os.WriteFile(filepath.Join(logsDir, name), []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	got := AllAttemptLogPaths(dir, "1")
+	wantLabels := []string{"initial.1", "initial", "fix-1"}
+	if len(got) != len(wantLabels) {
+		t.Fatalf("AllAttemptLogPaths = %+v, want %d entries", got, len(wantLabels))
+	}
+	for i, label := range wantLabels {
+		if got[i].Label != label {
+			t.Errorf("entry %d Label = %q, want %q", i, got[i].Label, label)
+		}
+	}
+}
+
+// TestAllAttemptLogPaths_NoLogsOnDisk_ReturnsEmpty verifies an issue with no
+// Dispatch history yet returns an empty slice, not an error.
+func TestAllAttemptLogPaths_NoLogsOnDisk_ReturnsEmpty(t *testing.T) {
+	dir := tempLogDir(t)
+	got := AllAttemptLogPaths(dir, "999")
+	if len(got) != 0 {
+		t.Errorf("AllAttemptLogPaths = %+v, want empty", got)
+	}
+}
+
 // TestHostLogDirFor verifies HostLogDirFor is the single source of truth for
 // a pwd's log directory, and that logPathFor, fixLogPathFor, and
 // conflictLogPathFor all place their files inside it — so the directory can

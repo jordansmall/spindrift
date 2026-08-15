@@ -40,6 +40,45 @@ func LogPaths(pwd, number string) []PassLog {
 	return out
 }
 
+// AllAttemptLogPaths returns every attempt log a run produced for issue
+// number under pwd, in chronological order -- including attempts a hold or
+// transient-backoff retry rotated aside (issue #561), which LogPaths itself
+// omits. For each pass LogPaths' probe walks (initial, each fix pass, then
+// conflict-resolve), it first emits that pass's rotated-aside siblings
+// oldest first (P.1, P.2, ... probed consecutively, stopping at the first
+// missing suffix), labeled "<passLabel>.<N>", then the pass's own bare
+// current log (if it exists) with the same bare label LogPaths uses. A pass
+// with neither a rotated sibling nor a current log on disk contributes
+// nothing -- existence on disk is the only source of truth (#648).
+func AllAttemptLogPaths(pwd, number string) []PassLog {
+	var out []PassLog
+
+	appendPass := func(label, path string) {
+		for n := 1; ; n++ {
+			candidate := fmt.Sprintf("%s.%d", path, n)
+			if !fileExists(candidate) {
+				break
+			}
+			out = append(out, PassLog{Label: fmt.Sprintf("%s.%d", label, n), Path: candidate})
+		}
+		if fileExists(path) {
+			out = append(out, PassLog{Label: label, Path: path})
+		}
+	}
+
+	appendPass("initial", logPathFor(pwd, number))
+	for pass := 1; ; pass++ {
+		p := fixLogPathFor(pwd, number, pass)
+		if !fileExists(p) && !fileExists(fmt.Sprintf("%s.1", p)) {
+			break
+		}
+		appendPass(fmt.Sprintf("fix-%d", pass), p)
+	}
+	appendPass("conflict-resolve", conflictLogPathFor(pwd, number))
+
+	return out
+}
+
 // ResolveFromLogs recovers, from disk, the single Resolved outcome for issue
 // number under pwd by walking every pass log through the same outcome.Resolve
 // seam a live dispatch's outcomeResult already applies to one log --
