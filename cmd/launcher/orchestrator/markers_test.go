@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -68,6 +69,67 @@ func TestPromptMarkersMatchScanner(t *testing.T) {
 	if !strings.Contains(parallelDispatchFragment, ManifestToken) {
 		t.Errorf("fragments/coordinator-parallel-dispatch.md no longer emits %q, the exact literal scanForManifest's ParseManifestLine greps for", ManifestToken)
 	}
+}
+
+// TestWorkerPromptCarriesNoOutcomeGrammar is the marker-parity guard's
+// negative counterpart (issue #2491, the #2059 quarantine): every case in
+// TestPromptMarkersMatchScanner above pins that a writer-side prompt *does*
+// emit a marker the scanner greps for. worker-prompt.md must do the
+// opposite -- emit NEITHER outcome.Token NOR either verdict marker -- so a
+// worker's own prompt never teaches it the literal a misbehaving or
+// parroting worker could echo back into its transcript. An echoed line like
+// that could be mistaken, downstream, for the coordinator's own
+// SPINDRIFT_OUTCOME/VERDICT line, defeating the quarantine #2059 built
+// specifically to keep worker output out of the coordinator's outcome scan.
+//
+// checkNoOutcomeGrammar is exercised first against synthetic fixture strings
+// (a genuine red/green cycle on the check logic itself, since
+// worker-prompt.md already satisfies the invariant today and so can't supply
+// a naturally failing case), then against the real on-disk file.
+func TestWorkerPromptCarriesNoOutcomeGrammar(t *testing.T) {
+	forbidden := []string{outcome.Token, VerdictApprove, VerdictBlock}
+
+	cases := []struct {
+		name    string
+		content string
+		wantErr bool
+	}{
+		{"clean prompt has no forbidden marker", "Implement the change, run the checks, then open a PR.", false},
+		{"prompt leaking outcome.Token", "When finished, emit " + outcome.Token + " on its own line.", true},
+		{"prompt leaking VerdictApprove", "Then report " + VerdictApprove + " to the coordinator.", true},
+		{"prompt leaking VerdictBlock", "Then report " + VerdictBlock + " to the coordinator.", true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := checkNoOutcomeGrammar(tc.content, forbidden)
+			if tc.wantErr && err == nil {
+				t.Fatalf("checkNoOutcomeGrammar(%q) = nil, want an error flagging the forbidden marker", tc.content)
+			}
+			if !tc.wantErr && err != nil {
+				t.Fatalf("checkNoOutcomeGrammar(%q) = %v, want nil", tc.content, err)
+			}
+		})
+	}
+
+	t.Run("worker-prompt.md carries no outcome grammar", func(t *testing.T) {
+		repoRoot := filepath.Join("..", "..", "..")
+		workerPrompt := readPromptFile(t, repoRoot, "worker-prompt.md")
+		if err := checkNoOutcomeGrammar(workerPrompt, forbidden); err != nil {
+			t.Errorf("worker-prompt.md: %v", err)
+		}
+	})
+}
+
+// checkNoOutcomeGrammar returns an error describing the first marker in
+// forbidden that appears verbatim in content, or nil if none do.
+func checkNoOutcomeGrammar(content string, forbidden []string) error {
+	for _, marker := range forbidden {
+		if strings.Contains(content, marker) {
+			return fmt.Errorf("contains forbidden marker %q -- worker-prompt.md must carry no outcome grammar (issue #2059/#2491 quarantine): a worker prompt that itself instructs emitting this literal could let a misbehaving or parroting worker's output be mistaken for the launcher's own outcome/verdict scan target", marker)
+		}
+	}
+	return nil
 }
 
 // verdictContractShape is "VERDICT: APPROVE | BLOCK": VerdictApprove and
