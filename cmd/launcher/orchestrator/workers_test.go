@@ -4,12 +4,41 @@ import (
 	"bytes"
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 )
+
+// chdirToFreshWorkerRepo creates a fresh temp git repo with one commit (so
+// HEAD resolves) and chdirs the test into it via t.Chdir (restored
+// automatically on test completion) -- launchOneWorker now shells out to
+// `git worktree add`/`git worktree remove` against os.Getwd() as the repo
+// root (issue #2059 review finding: real per-worker git worktree
+// isolation), so every test that reaches that code path needs a real repo
+// to exercise against, isolated from the orchestrator package's own
+// checkout so a test run never mutates the actual spindrift repo or
+// collides with a stray branch/worktree left by a prior run.
+func chdirToFreshWorkerRepo(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	run := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	run("init")
+	run("config", "user.email", "worker-test@example.com")
+	run("config", "user.name", "Worker Test")
+	run("commit", "--allow-empty", "-m", "init")
+	t.Chdir(dir)
+	return dir
+}
 
 // TestSeedWorkerPromptComposesAddendumOverOriginal verifies seedWorkerPrompt
 // writes a fresh temp file carrying the original prompt content plus an
@@ -172,6 +201,8 @@ esac
 // bounded well under their own hang duration -- and every worker gets its
 // own quarantined --log-path, distinct from any other worker's.
 func TestLaunchWorkersJoinsDoneCrashedAndTimedOutDeterministically(t *testing.T) {
+	chdirToFreshWorkerRepo(t)
+
 	fakeDir := t.TempDir()
 	callLog := filepath.Join(fakeDir, "calls.log")
 	if err := os.WriteFile(callLog, nil, 0o644); err != nil {
@@ -244,6 +275,8 @@ func TestLaunchWorkersJoinsDoneCrashedAndTimedOutDeterministically(t *testing.T)
 // --state-file, so a worker structurally cannot pollute the coordinator's
 // own log or run-state (issue #2059 AC4/AC6).
 func TestLaunchWorkersEachWorkerGetsOwnQuarantinedLogAndFreshSession(t *testing.T) {
+	chdirToFreshWorkerRepo(t)
+
 	fakeDir := t.TempDir()
 	callLog := filepath.Join(fakeDir, "calls.log")
 	if err := os.WriteFile(callLog, nil, 0o644); err != nil {
@@ -310,6 +343,8 @@ func TestLaunchWorkersEachWorkerGetsOwnQuarantinedLogAndFreshSession(t *testing.
 // worker that never did any real work; the correct outcome is
 // WorkerTimedOut once opts.Timeout elapses.
 func TestLaunchWorkersIgnoresStaleSentinelFromPriorRun(t *testing.T) {
+	chdirToFreshWorkerRepo(t)
+
 	fakeDir := t.TempDir()
 	callLog := filepath.Join(fakeDir, "calls.log")
 	if err := os.WriteFile(callLog, nil, 0o644); err != nil {
@@ -369,6 +404,8 @@ func TestLaunchWorkersIgnoresStaleSentinelFromPriorRun(t *testing.T) {
 // dispatched, across every pass, leaks an unbounded "orchestrator-worker-
 // prompt-*.txt" file into the OS temp dir.
 func TestLaunchWorkersRemovesSeededPromptTempFile(t *testing.T) {
+	chdirToFreshWorkerRepo(t)
+
 	fakeDir := t.TempDir()
 	callLog := filepath.Join(fakeDir, "calls.log")
 	if err := os.WriteFile(callLog, nil, 0o644); err != nil {
@@ -459,6 +496,8 @@ func TestLaunchWorkersReturnsOneResultPerSliceEvenWhenWorkDirUncreatable(t *test
 // early-return failure path, not just the success/crash/timeout paths
 // reached after cmd.Start() succeeds (issue #2059 review finding).
 func TestLaunchOneWorkerEmitsStartAndFinishOpsOnBuildDriverExecCmdFailure(t *testing.T) {
+	chdirToFreshWorkerRepo(t)
+
 	emptyPathDir := t.TempDir()
 	t.Setenv("PATH", emptyPathDir)
 
@@ -488,6 +527,195 @@ func TestLaunchOneWorkerEmitsStartAndFinishOpsOnBuildDriverExecCmdFailure(t *tes
 	for _, want := range []string{"worker_start", "worker_finish", "no-driver-exec"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("stdout missing %q for a launch failure before cmd.Start(); got:\n%s", want, out)
+		}
+	}
+}
+
+// TestLaunchOneWorkerRunsInDedicatedGitWorktree verifies launchOneWorker's
+// core isolation contract (issue #2059 code-review finding): the worker's
+// driver-exec subprocess runs inside a dedicated `git worktree add`
+// checkout under opts.WorkDir, not the orchestrator's own repo root, so
+// concurrently-dispatched workers never share (and mutate) one working
+// tree -- the promise worker-prompt.md already makes but the Go code never
+// kept. Once the worker finishes, the worktree directory itself is removed
+// but its branch (orchestrator-worker/<slice>) survives for inspection.
+func TestLaunchOneWorkerRunsInDedicatedGitWorktree(t *testing.T) {
+	repoDir := chdirToFreshWorkerRepo(t)
+
+	fakeDir := t.TempDir()
+	callLog := filepath.Join(fakeDir, "calls.log")
+	if err := os.WriteFile(callLog, nil, 0o644); err != nil {
+		t.Fatalf("WriteFile(callLog): %v", err)
+	}
+	// Records its own $PWD (the worktree launchOneWorker set as cmd.Dir,
+	// if the fix is in place -- the repo root otherwise) alongside the
+	// quarantined log, then signals done.
+	body := `pwd > "${DRIVER_LOG_PATH%.log}.pwd"
+: > "${DRIVER_LOG_PATH%.log}.done"
+`
+	writeFakeDriverExec(t, fakeDir, callLog, body)
+	t.Setenv("PATH", fakeDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	promptDir := t.TempDir()
+	promptFile := filepath.Join(promptDir, "worker-prompt.txt")
+	if err := os.WriteFile(promptFile, []byte("BASE WORKER PROMPT"), 0o644); err != nil {
+		t.Fatalf("WriteFile(promptFile): %v", err)
+	}
+
+	workDir := t.TempDir()
+	var stdout bytes.Buffer
+	var mu sync.Mutex
+
+	cfg := config{driver: "claude"}
+	slice := ManifestSlice{Name: "worker-a"}
+
+	result := launchOneWorker(cfg, slice, promptFile, workDir, time.Second, 5*time.Millisecond, &stdout, &mu)
+
+	if result.Status != WorkerDone {
+		t.Fatalf("result.Status = %q, want WorkerDone (err=%v)", result.Status, result.Err)
+	}
+
+	wantWorktree := filepath.Join(workDir, "worker-a.worktree")
+	pwdBytes, err := os.ReadFile(filepath.Join(workDir, "worker-a.pwd"))
+	if err != nil {
+		t.Fatalf("ReadFile(worker-a.pwd): %v", err)
+	}
+	gotPWD := strings.TrimSpace(string(pwdBytes))
+	wantResolved, err := filepath.EvalSymlinks(wantWorktree)
+	if err != nil {
+		wantResolved = wantWorktree
+	}
+	if gotPWD != wantWorktree && gotPWD != wantResolved {
+		t.Errorf("fake driver-exec ran with PWD = %q, want the dedicated worker worktree %q (not the repo root %q)", gotPWD, wantWorktree, repoDir)
+	}
+
+	// (a) the worktree directory existed under workDir during dispatch --
+	// already proven above (the fake driver-exec wrote its .pwd file from
+	// inside it) -- and (c) it's gone again once the worker has finished.
+	if _, err := os.Stat(wantWorktree); !os.IsNotExist(err) {
+		t.Errorf("worktree dir %s still exists after launchOneWorker returned (stat err=%v), want removed", wantWorktree, err)
+	}
+
+	listCmd := exec.Command("git", "worktree", "list")
+	listCmd.Dir = repoDir
+	listOut, err := listCmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git worktree list: %v\n%s", err, listOut)
+	}
+	if strings.Contains(string(listOut), "worker-a.worktree") {
+		t.Errorf("git worktree list still shows worker-a.worktree:\n%s", listOut)
+	}
+
+	// The branch itself must survive removal -- left around for a human/
+	// reviewer to inspect after a crash.
+	branchCmd := exec.Command("git", "branch", "--list", "orchestrator-worker/worker-a")
+	branchCmd.Dir = repoDir
+	branchOut, err := branchCmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git branch --list: %v\n%s", err, branchOut)
+	}
+	if !strings.Contains(string(branchOut), "orchestrator-worker/worker-a") {
+		t.Errorf("git branch --list orchestrator-worker/worker-a = %q, want the branch to still exist", string(branchOut))
+	}
+}
+
+// TestLaunchOneWorkerEmitsStartAndFinishOpsOnWorktreeAddFailure verifies
+// launchOneWorker treats a `git worktree add` failure (e.g. a leftover
+// worktree destination from a stale prior run) exactly like the other
+// early-failure paths: worker_start/worker_finish are both still emitted,
+// the result is WorkerCrashed with a non-nil Err, and driver-exec is never
+// invoked at all (issue #2059 code-review finding). This forces the
+// failure via a blocking file already sitting at the worktree's own
+// destination path, rather than a pre-existing branch -- launchOneWorker
+// deliberately tolerates (reuses) an already-existing branch of the same
+// name, since a coordinator legitimately re-dispatching the same slice
+// name across passes must keep working, not crash the second time around.
+func TestLaunchOneWorkerEmitsStartAndFinishOpsOnWorktreeAddFailure(t *testing.T) {
+	chdirToFreshWorkerRepo(t)
+
+	// driver-exec deliberately absent from PATH: if launchOneWorker ever
+	// reached buildDriverExecCmd, this test would pass for the wrong
+	// reason (LookPath failure), masking a regression where the worktree
+	// failure no longer short-circuits before it.
+	t.Setenv("PATH", t.TempDir())
+
+	promptDir := t.TempDir()
+	promptFile := filepath.Join(promptDir, "worker-prompt.txt")
+	if err := os.WriteFile(promptFile, []byte("BASE WORKER PROMPT"), 0o644); err != nil {
+		t.Fatalf("WriteFile(promptFile): %v", err)
+	}
+
+	workDir := t.TempDir()
+	// Pre-create the worktree's own destination path as a regular file --
+	// `git worktree add` refuses to check out onto an existing non-empty
+	// path, exactly the class of failure a leftover directory from a
+	// stale/crashed prior run would produce.
+	blockedWorktreePath := filepath.Join(workDir, "blocked-worktree.worktree")
+	if err := os.WriteFile(blockedWorktreePath, []byte("stale"), 0o644); err != nil {
+		t.Fatalf("WriteFile(blockedWorktreePath): %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var mu sync.Mutex
+
+	cfg := config{driver: "claude"}
+	slice := ManifestSlice{Name: "blocked-worktree"}
+
+	result := launchOneWorker(cfg, slice, promptFile, workDir, time.Second, 5*time.Millisecond, &stdout, &mu)
+
+	if result.Status != WorkerCrashed {
+		t.Errorf("result.Status = %q, want WorkerCrashed", result.Status)
+	}
+	if result.Err == nil {
+		t.Error("result.Err = nil, want non-nil (git worktree add should fail: destination path already exists)")
+	}
+
+	out := stdout.String()
+	for _, want := range []string{"worker_start", "worker_finish", "blocked-worktree"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("stdout missing %q; got:\n%s", want, out)
+		}
+	}
+}
+
+// TestLaunchOneWorkerReusesExistingWorktreeBranchAcrossDispatches verifies
+// a second launchOneWorker call for the very same slice name -- e.g. a
+// coordinator re-dispatching the same slice on a later pass -- succeeds by
+// reusing the branch the first dispatch's own worktree left behind
+// (workers.go never deletes the branch itself, only the worktree
+// directory), rather than failing the second time around because `git
+// worktree add -b` refuses to recreate an already-existing branch (issue
+// #2059 code-review finding).
+func TestLaunchOneWorkerReusesExistingWorktreeBranchAcrossDispatches(t *testing.T) {
+	chdirToFreshWorkerRepo(t)
+
+	fakeDir := t.TempDir()
+	callLog := filepath.Join(fakeDir, "calls.log")
+	if err := os.WriteFile(callLog, nil, 0o644); err != nil {
+		t.Fatalf("WriteFile(callLog): %v", err)
+	}
+	body := `: > "$DRIVER_LOG_PATH"
+: > "${DRIVER_LOG_PATH%.log}.done"
+`
+	writeFakeDriverExec(t, fakeDir, callLog, body)
+	t.Setenv("PATH", fakeDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	promptDir := t.TempDir()
+	promptFile := filepath.Join(promptDir, "worker-prompt.txt")
+	if err := os.WriteFile(promptFile, []byte("BASE WORKER PROMPT"), 0o644); err != nil {
+		t.Fatalf("WriteFile(promptFile): %v", err)
+	}
+
+	workDir := t.TempDir()
+	var mu sync.Mutex
+	cfg := config{driver: "claude"}
+	slice := ManifestSlice{Name: "repeat-slice"}
+
+	for i := 0; i < 2; i++ {
+		var stdout bytes.Buffer
+		result := launchOneWorker(cfg, slice, promptFile, workDir, time.Second, 5*time.Millisecond, &stdout, &mu)
+		if result.Status != WorkerDone {
+			t.Fatalf("dispatch %d: result.Status = %q, want WorkerDone (err=%v)", i, result.Status, result.Err)
 		}
 	}
 }

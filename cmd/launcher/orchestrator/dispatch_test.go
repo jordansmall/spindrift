@@ -66,6 +66,8 @@ func TestDispatchManifestIfPresentNoopWhenNoManifestInLog(t *testing.T) {
 // as though it produced no outcome and stopping, or running a review pass
 // against a manifest declaration there is nothing yet to review.
 func TestRunWithReviewPassDispatchesManifestThenContinuesImplementFixLoop(t *testing.T) {
+	chdirToFreshWorkerRepo(t)
+
 	dir := t.TempDir()
 	callLog := filepath.Join(dir, "calls.log")
 	coordCountFile := filepath.Join(dir, "coord-count")
@@ -197,6 +199,8 @@ exit 0
 // as a backstop so a still-buggy case ordering doesn't hang this test
 // forever).
 func TestRunWithReviewPassMaxSlicesCapNotShadowedByRepeatedManifestDispatch(t *testing.T) {
+	chdirToFreshWorkerRepo(t)
+
 	dir := t.TempDir()
 	callLog := filepath.Join(dir, "calls.log")
 	coordCountFile := filepath.Join(dir, "coord-count")
@@ -295,6 +299,8 @@ exit 0
 // state.RemainingSlices, and a per-slice summary into state.WorkerFindings
 // (issue #2059).
 func TestDispatchManifestIfPresentDispatchesAndMergesResults(t *testing.T) {
+	chdirToFreshWorkerRepo(t)
+
 	fakeDir := t.TempDir()
 	callLog := filepath.Join(fakeDir, "calls.log")
 	if err := os.WriteFile(callLog, nil, 0o644); err != nil {
@@ -360,6 +366,8 @@ func TestDispatchManifestIfPresentDispatchesAndMergesResults(t *testing.T) {
 // otherwise the next coordinator pass never sees what a worker actually
 // reported (issue #2059 review finding).
 func TestDispatchManifestIfPresentIncludesWorkerResultInFindings(t *testing.T) {
+	chdirToFreshWorkerRepo(t)
+
 	fakeDir := t.TempDir()
 	callLog := filepath.Join(fakeDir, "calls.log")
 	if err := os.WriteFile(callLog, nil, 0o644); err != nil {
@@ -420,6 +428,8 @@ exit 0
 // launch-failure paths (e.g. seedWorkerPrompt) set Err but leave ExitCode
 // at its zero value (issue #2059 review finding).
 func TestDispatchManifestIfPresentReportsCrashErrNotMisleadingExitCode(t *testing.T) {
+	chdirToFreshWorkerRepo(t)
+
 	dir := t.TempDir()
 	manifest := SliceManifest{Slices: []ManifestSlice{{Name: "slice-a"}}}
 	line, err := manifest.Line()
@@ -463,6 +473,8 @@ func TestDispatchManifestIfPresentReportsCrashErrNotMisleadingExitCode(t *testin
 // Result text it includes in findings, so one runaway worker report can't
 // blow out the next pass's prompt size (issue #2059 review finding).
 func TestDispatchManifestIfPresentTruncatesLongWorkerResult(t *testing.T) {
+	chdirToFreshWorkerRepo(t)
+
 	fakeDir := t.TempDir()
 	callLog := filepath.Join(fakeDir, "calls.log")
 	if err := os.WriteFile(callLog, nil, 0o644); err != nil {
