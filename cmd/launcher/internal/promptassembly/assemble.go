@@ -206,18 +206,20 @@ func Assemble(e Env, reg Registry) (Result, error) {
 	// Env.SkillsFound field.
 	gates["SKILLS_FOUND"] = e.SkillsFound != ""
 
-	// The _subst allowlist (entrypoint.sh: 405-433): the seven fixed names
-	// plus the flat _FRAGMENT_SUBST_VARS list -- every registry row's var
-	// and extraSubstVars, concatenated once across all rows (identical for
+	// The _subst allowlist (entrypoint.sh: 405-433): the eight fixed names
+	// (the original seven, plus RESEARCH_STATUS_ENUM, issue #2504) plus the
+	// flat _FRAGMENT_SUBST_VARS list -- every registry row's var and
+	// extraSubstVars, concatenated once across all rows (identical for
 	// every _subst call in this function, never scoped per-fragment).
 	allowlist := map[string]string{
-		"ISSUE_NUMBER":      e.IssueNumber,
-		"ISSUE_TITLE":       e.IssueTitle,
-		"BRANCH":            e.Branch,
-		"BASE_BRANCH":       e.BaseBranch,
-		"IN_PROGRESS_LABEL": e.InProgressLabel,
-		"COMPLETE_LABEL":    e.CompleteLabel,
-		"RUN_NONCE":         e.RunNonce,
+		"ISSUE_NUMBER":         e.IssueNumber,
+		"ISSUE_TITLE":          e.IssueTitle,
+		"BRANCH":               e.Branch,
+		"BASE_BRANCH":          e.BaseBranch,
+		"IN_PROGRESS_LABEL":    e.InProgressLabel,
+		"COMPLETE_LABEL":       e.CompleteLabel,
+		"RUN_NONCE":            e.RunNonce,
+		"RESEARCH_STATUS_ENUM": e.ResearchStatusEnum,
 	}
 
 	// extraSubstVars raw sources: as of issue #2349 the registry carries

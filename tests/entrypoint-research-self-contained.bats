@@ -68,3 +68,13 @@ setup() {
   ! grep -qi "self-contained" "$DRIVER_PROMPT_FILE"
   [ -d "$WORK_DIR/.git" ]
 }
+
+# --- RESEARCH_STATUS_ENUM renders in the OUTCOME grammar line (issue #2504) -
+
+@test "SELF_CONTAINED=1's OUTCOME grammar line renders the registry status enum" {
+  export DISPATCH_KIND="research"
+  export SELF_CONTAINED="1"
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -qF 'SPINDRIFT_OUTCOME issue=7 landing=<verdict-comment-url> status=<recommend|reject|unclear> note=<one-line rationale>' "$DRIVER_PROMPT_FILE"
+}

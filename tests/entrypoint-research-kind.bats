@@ -108,6 +108,19 @@ setup() {
   [ "$status" -ne 0 ]
 }
 
+# --- RESEARCH_STATUS_ENUM renders in the OUTCOME grammar line (issue #2504) -
+# The OUTCOME section's SPINDRIFT_OUTCOME grammar line names its verdict
+# enumeration via the registry-generated ${RESEARCH_STATUS_ENUM} placeholder,
+# not a hand-typed literal -- this proves _subst actually substitutes it in
+# the real rendered prompt, not just that the template source references it.
+
+@test "research kind's OUTCOME grammar line renders the registry status enum" {
+  export DISPATCH_KIND="research"
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -qF 'SPINDRIFT_OUTCOME issue=7 landing=<verdict-comment-url> status=<recommend|reject|unclear> note=<one-line rationale>' "$DRIVER_PROMPT_FILE"
+}
+
 # --- research kind's own outcome backstop (issue #640) ----------------------
 # A research driver that exits with no outcome line has no branch to push
 # best-effort (there is none) -- the backstop must not attempt one, and must

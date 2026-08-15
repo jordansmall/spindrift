@@ -137,4 +137,13 @@ type Env struct {
 	InProgressLabel string // entrypoint.sh: $IN_PROGRESS_LABEL
 	CompleteLabel   string // entrypoint.sh: $COMPLETE_LABEL
 	RunNonce        string // entrypoint.sh: $RUN_NONCE
+
+	// ResearchStatusEnum is the regen-generated research-kind verdict
+	// enumeration (lib/prompt-contract.nix's outcomeStatusesFor "research",
+	// entrypoint.sh's generated RESEARCH_STATUS_ENUM span, issue #2504) --
+	// an eighth fixed _subst allowlist name, added alongside the other seven
+	// so research-prompt.md's and research-self-contained-prompt.md's OUTCOME
+	// grammar line renders the registry's status set instead of a hand-typed
+	// literal.
+	ResearchStatusEnum string // entrypoint.sh: $RESEARCH_STATUS_ENUM
 }

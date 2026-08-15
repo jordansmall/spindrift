@@ -65,10 +65,15 @@ rec {
 
   # Renders the verdict contract of `promptText` from `verdicts`: the VERDICT
   # section's enumerated bullet list, the `recommend / reject / unclear`
-  # enumeration, and the `status=<recommend|reject|unclear>` alternation of the
-  # outcome line. Each rewrite is guarded on the text it targets being present,
-  # so rendering a Consumer prompt that lacks the default markers/tokens (or the
-  # default set itself — see renderIfCustom) is a safe no-op.
+  # enumeration, and the `status=<${RESEARCH_STATUS_ENUM}>` alternation of the
+  # outcome line -- the OUTCOME grammar line's registry-generated placeholder
+  # (issue #2504), not a hand-typed literal, so a custom verdict set fully
+  # replaces the token rather than leaving it for the runtime substitution
+  # pass (agent/entrypoint.sh's RESEARCH_STATUS_ENUM span / driver-exec
+  # assemble-prompt) to fill in with the built-in default. Each rewrite is
+  # guarded on the text it targets being present, so rendering a Consumer
+  # prompt that lacks the default markers/tokens (or the default set itself —
+  # see renderIfCustom) is a safe no-op.
   renderPrompt =
     promptText: verdicts:
     let
@@ -90,7 +95,7 @@ rec {
           promptText;
     in
     builtins.replaceStrings
-      [ "status=<recommend|reject|unclear>" "`recommend` / `reject` / `unclear`" ]
+      [ "status=<\${RESEARCH_STATUS_ENUM}>" "`recommend` / `reject` / `unclear`" ]
       [ ("status=<" + pipeJoined + ">") backtickEnum ]
       withSection;
 
