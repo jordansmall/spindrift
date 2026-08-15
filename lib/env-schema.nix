@@ -310,6 +310,16 @@
     boxEnv = true;
     boxEnvOnly = true;
   };
+  maxParallelWorkers = {
+    env = "MAX_PARALLEL_WORKERS";
+    group = "agents";
+    default = 2;
+    doc = "cap on how many of a coordinator pass's slice-manifest workers the Go orchestrator dispatches concurrently (issue #2059, #2495); 2 is the no-tuning-safe default -- enough to capture most of the wall-clock win on small-slice-count issues while staying clear of the Box's memory-kill regime. Meaningful only under ORCHESTRATOR: entrypoint.sh threads this value to the orchestrator's --max-parallel-workers flag.";
+    flakeOption = true;
+    nixSubPath = "models.maxParallelWorkers";
+    boxEnv = true;
+    boxEnvOnly = true;
+  };
   devShellName = {
     env = "DEV_SHELL_NAME";
     group = "infra";
