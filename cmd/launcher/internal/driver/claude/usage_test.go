@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-func TestLastInLog_FullResultEvent(t *testing.T) {
+func TestSumInLog_FullResultEvent(t *testing.T) {
 	line := `{"type":"result","num_turns":7,"total_cost_usd":0.1234,"duration_ms":5000,"duration_api_ms":3000,"usage":{"input_tokens":800,"output_tokens":200,"cache_read_input_tokens":150,"cache_creation_input_tokens":50}}`
 	path := WriteLog(t, "some output", line)
 
@@ -247,7 +247,7 @@ func TestSumInLog_StrayTimestampLineIgnoredInSpan(t *testing.T) {
 	}
 }
 
-func TestLastInLog_NoCacheFields(t *testing.T) {
+func TestSumInLog_NoCacheFields(t *testing.T) {
 	line := `{"type":"result","num_turns":3,"total_cost_usd":0.05,"duration_ms":2000,"usage":{"input_tokens":100,"output_tokens":40}}`
 	path := WriteLog(t, line)
 
@@ -266,7 +266,7 @@ func TestLastInLog_NoCacheFields(t *testing.T) {
 	}
 }
 
-func TestLastInLog_NotFound(t *testing.T) {
+func TestSumInLog_NotFound(t *testing.T) {
 	path := WriteLog(t, "some output", "no result event here")
 	_, found, err := sumInLog(path)
 	if err != nil {
@@ -277,7 +277,7 @@ func TestLastInLog_NotFound(t *testing.T) {
 	}
 }
 
-func TestLastInLog_FileNotFound(t *testing.T) {
+func TestSumInLog_FileNotFound(t *testing.T) {
 	_, found, err := sumInLog("/nonexistent/path/test.log")
 	if err != nil {
 		t.Fatalf("unexpected error for missing file: %v", err)
@@ -287,7 +287,7 @@ func TestLastInLog_FileNotFound(t *testing.T) {
 	}
 }
 
-func TestLastInLog_MalformedJSON(t *testing.T) {
+func TestSumInLog_MalformedJSON(t *testing.T) {
 	path := WriteLog(t, `{"type":"result","num_turns":INVALID}`)
 	_, found, err := sumInLog(path)
 	if err != nil {
@@ -298,7 +298,7 @@ func TestLastInLog_MalformedJSON(t *testing.T) {
 	}
 }
 
-func TestLastInLog_OversizedLine(t *testing.T) {
+func TestSumInLog_OversizedLine(t *testing.T) {
 	const fiveMiB = 5 * 1024 * 1024
 	// Write an oversized line then a valid result event
 	path := filepath.Join(t.TempDir(), "big.log")
