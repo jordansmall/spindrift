@@ -94,10 +94,58 @@ func TestSumInLog_AdditiveFieldsSumAcrossResultEvents(t *testing.T) {
 	if u.CacheCreationInputTokens != 7 {
 		t.Errorf("CacheCreationInputTokens: got %d, want 7", u.CacheCreationInputTokens)
 	}
-	// No timestamps present anywhere in the log: fall back to summing each
-	// result event's own duration_ms.
-	if u.DurationMs != 3000 {
-		t.Errorf("DurationMs: got %d, want 3000 (sum of both events' duration_ms, no timestamps present)", u.DurationMs)
+	// No timestamps present anywhere in the log: summing per-session
+	// duration_ms would overstate concurrent wall time (AC#2), so fall back
+	// to the longest individual session's own duration_ms instead.
+	if u.DurationMs != 2000 {
+		t.Errorf("DurationMs: got %d, want 2000 (longest session's own duration_ms, no timestamps present)", u.DurationMs)
+	}
+}
+
+// TestSumInLog_IdenticalTimestampsDoesNotCollapseMultiSessionDuration covers
+// a multi-session log whose timestamped lines all land on the exact same
+// instant (earliest == latest): the span is 0, but the run's wall time is
+// not, so it must floor to the longest individual session's own duration_ms
+// rather than reporting a collapsed 0ms.
+func TestSumInLog_IdenticalTimestampsDoesNotCollapseMultiSessionDuration(t *testing.T) {
+	sameInstant := `{"type":"assistant","timestamp":"2026-08-11T19:00:00.000Z"}`
+	resultOne := `{"type":"result","num_turns":1,"total_cost_usd":0.01,"duration_ms":300000,"usage":{"input_tokens":10,"output_tokens":5}}`
+	resultTwo := `{"type":"result","num_turns":2,"total_cost_usd":0.02,"duration_ms":500000,"usage":{"input_tokens":20,"output_tokens":10}}`
+	path := WriteLog(t, sameInstant, resultOne, resultTwo)
+
+	u, found, err := sumInLog(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !found {
+		t.Fatal("expected found=true")
+	}
+	if u.DurationMs != 500000 {
+		t.Errorf("DurationMs: got %d, want 500000 (floor to longest session's own duration_ms, not a collapsed 0ms span)", u.DurationMs)
+	}
+}
+
+// TestSumInLog_SpanFlooredToLongestSessionDuration covers the sanity-relation
+// finding: a timestamp span far narrower than any individual session's own
+// duration_ms (bracketing timestamps that don't cover a session's full wall
+// time) must not report a wall time shorter than the longest session
+// actually ran.
+func TestSumInLog_SpanFlooredToLongestSessionDuration(t *testing.T) {
+	start := `{"type":"assistant","timestamp":"2026-08-11T19:00:00.000Z"}`
+	resultOne := `{"type":"result","num_turns":1,"total_cost_usd":0.01,"duration_ms":600000,"usage":{"input_tokens":10,"output_tokens":5}}`
+	end := `{"type":"assistant","timestamp":"2026-08-11T19:00:01.000Z"}`
+	resultTwo := `{"type":"result","num_turns":2,"total_cost_usd":0.02,"duration_ms":600000,"usage":{"input_tokens":20,"output_tokens":10}}`
+	path := WriteLog(t, start, resultOne, end, resultTwo)
+
+	u, found, err := sumInLog(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !found {
+		t.Fatal("expected found=true")
+	}
+	if u.DurationMs != 600000 {
+		t.Errorf("DurationMs: got %d, want 600000 (floored to longest session's own duration_ms; the 1s span alone would be impossible against 10min sessions)", u.DurationMs)
 	}
 }
 
