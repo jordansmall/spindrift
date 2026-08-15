@@ -854,11 +854,13 @@ func checkAutoMergePreflight(c config, cf forge.CodeForge) error {
 // make, on both axes. read-write (the default) is a no-op — it never
 // inspects cf/it, so it changes nothing about today's flows.
 //
-// The forge must implement BundleRelay (the pre-merge branch hand-off);
-// DraftPRCreator (host-side draft-PR creation) is additionally required only
-// when the forge is PR-shaped (implements PRForge) — a forge with no PR
-// concept at all (local) has nothing for DraftPRCreator to create. The
-// tracker must implement HostPostedCommenter and HostPostedIssueFiler
+// The cf-side checks are delegated to settle.Mediation.RequiredCapabilityError,
+// which discovers cf's optional BundleRelay, DraftPRCreator, and
+// BundleCommitSubjects capabilities the same way Mediation's own call sites
+// do — BundleRelay unconditionally, and DraftPRCreator/BundleCommitSubjects
+// only when the forge is PR-shaped (implements PRForge), since a forge with
+// no PR concept at all (local) has nothing for either to serve. The tracker
+// must separately implement HostPostedCommenter and HostPostedIssueFiler
 // (issue #2018's issue-filing relay channel). A missing capability is a
 // startup error naming the axis and the specific seam absent, rather than a
 // silently-degraded read-only deployment.
@@ -866,13 +868,9 @@ func checkReadOnlyCapabilityGate(c config, cf forge.CodeForge, it forge.IssueTra
 	if c.boxForgeAndIssueAccess != "read-only" {
 		return nil
 	}
-	if _, ok := cf.(forge.BundleRelay); !ok {
-		return fmt.Errorf("BOX_FORGE_AND_ISSUE_ACCESS=read-only: the selected CODE_FORGE=%q does not implement bundle-relay (forge.BundleRelay) for the Box's finished branch hand-off; only CODE_FORGE=local implements it today", c.codeForge)
-	}
-	if _, isPRForge := cf.(forge.PRForge); isPRForge {
-		if _, ok := cf.(forge.DraftPRCreator); !ok {
-			return fmt.Errorf("BOX_FORGE_AND_ISSUE_ACCESS=read-only: the selected CODE_FORGE=%q does not implement host-side draft-PR-create (forge.DraftPRCreator); not yet available on CODE_FORGE=github", c.codeForge)
-		}
+	_, isPRForge := cf.(forge.PRForge)
+	if err := settle.NewMediation(cf, it, nil, "").RequiredCapabilityError(c.codeForge, isPRForge); err != nil {
+		return err
 	}
 	if _, ok := it.(forge.HostPostedCommenter); !ok {
 		return fmt.Errorf("BOX_FORGE_AND_ISSUE_ACCESS=read-only: the selected ISSUE_TRACKER=%q does not implement host-posted comments (forge.HostPostedCommenter)", c.issueTracker)

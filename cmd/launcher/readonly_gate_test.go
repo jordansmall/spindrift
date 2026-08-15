@@ -139,6 +139,50 @@ func TestReadOnlyCapabilityGate_PRForgeWithBundleRelayButNoDraftPRCreatorFails(t
 	}
 }
 
+// prForgeWithBundleRelayAndDraftPR wraps *forge.Fake and adds both
+// RelayBundle and CreateDraftPR (but not CommitSubjects), giving a synthetic
+// Code Forge shape — PRForge, BundleRelay, and DraftPRCreator, but not
+// BundleCommitSubjects — so the gate's newest check (the reconstructed-PR
+// fallback seam) has a fixture to exercise once the first two checks fall
+// through.
+type prForgeWithBundleRelayAndDraftPR struct {
+	*forge.Fake
+}
+
+func (p prForgeWithBundleRelayAndDraftPR) RelayBundle(outboxDir, ref string) error { return nil }
+func (p prForgeWithBundleRelayAndDraftPR) CreateDraftPR(title, body, base, head string) (string, bool, error) {
+	return "", false, nil
+}
+
+// TestReadOnlyCapabilityGate_PRForgeWithDraftPRCreatorButNoBundleCommitSubjectsFails
+// verifies that a PR-shaped forge implementing both BundleRelay and
+// DraftPRCreator still fails the gate when it lacks BundleCommitSubjects:
+// without it, the host-mediated hand-off has no way to reconstruct a PR
+// title/body when a Box leaves no usable PR-intent line.
+func TestReadOnlyCapabilityGate_PRForgeWithDraftPRCreatorButNoBundleCommitSubjectsFails(t *testing.T) {
+	c := minimalValidConfig()
+	c.boxForgeAndIssueAccess = "read-only"
+	fc := forge.NewFake()
+	cf := prForgeWithBundleRelayAndDraftPR{fc}
+	if _, ok := any(cf).(forge.BundleCommitSubjects); ok {
+		t.Fatal("test fixture unexpectedly implements BundleCommitSubjects")
+	}
+
+	err := checkReadOnlyCapabilityGate(c, cf, fc)
+	if err == nil {
+		t.Fatal("checkReadOnlyCapabilityGate() = nil, want an error naming the missing seam")
+	}
+	if !strings.Contains(err.Error(), "commit-subjects") {
+		t.Errorf("error should name the missing commit-subjects seam, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "does not implement") {
+		t.Errorf("error should say the selected backend does not implement the seam, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "the selected CODE_FORGE=") {
+		t.Errorf("error should phrase the failure as the selected CODE_FORGE=, got: %v", err)
+	}
+}
+
 // TestReadOnlyCapabilityGate_GithubReadOnlyAdapterSatisfies verifies the
 // closing acceptance criterion of the read-only epic (issue #1919): the real
 // github.NewReadOnlyCodeForge adapter — not a synthetic test fixture — now
