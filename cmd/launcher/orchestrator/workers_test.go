@@ -170,7 +170,7 @@ func TestWaitForSentinelReturnsTrueImmediatelyWhenFileAlreadyExists(t *testing.T
 
 // writeFakeWorkerDriverExec writes a fake driver-exec that branches on the
 // basename of its own --log-path flag (derived by writeFakeDriverExec's
-// preamble into $DRIVER_LOG_PATH) to play one of five worker behaviors: a
+// preamble into $DRIVER_LOG_PATH) to play one of six worker behaviors: a
 // "done-fast" slice writes to its log then creates its own sentinel (derived
 // from DRIVER_LOG_PATH by replacing ".log" with ".done", matching
 // launchOneWorker's own sentinel/log naming convention) and exits 0; a
@@ -187,7 +187,14 @@ func TestWaitForSentinelReturnsTrueImmediatelyWhenFileAlreadyExists(t *testing.T
 // sentinel immediately but then, like "orphan-check", spawns and records a
 // background child and sleeps well past the timeout -- letting a test prove
 // a worker that already signaled completion still gets its process group
-// reaped rather than left running.
+// reaped rather than left running; an "emits-stray-outcome" slice writes a
+// bare SPINDRIFT_OUTCOME-shaped line to its own log (standing in for a
+// misbehaving or parroting worker that ignores its own prompt's grammar-free
+// contract) then, like "done-fast", creates its own sentinel and exits 0 --
+// letting a test prove that line, despite genuinely existing on disk in the
+// worker's own quarantined log, never reaches the coordinator's own pass log
+// and so is never seen by the launcher's outcome scanner or backstop (issue
+// #2491 AC2).
 func writeFakeWorkerDriverExec(t *testing.T, dir, callLog string) string {
 	t.Helper()
 	body := `echo "worker log" > "$DRIVER_LOG_PATH"
@@ -214,6 +221,12 @@ case "$base" in
     ( while true; do sleep 0.05; done ) &
     echo $! > "${DRIVER_LOG_PATH%.log}.childpid"
     sleep 30
+    ;;
+  emits-stray-outcome.log)
+    echo "SPINDRIFT_OUTCOME issue=9999 landing=bogus status=ready note=stray" >> "$DRIVER_LOG_PATH"
+    sentinel="${DRIVER_LOG_PATH%.log}.done"
+    : > "$sentinel"
+    exit 0
     ;;
 esac
 `
