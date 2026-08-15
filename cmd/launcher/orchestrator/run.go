@@ -290,7 +290,21 @@ func runWithReviewPass(cfg config, stdout io.Writer) (int, error) {
 		// hasOutcome; any VERDICT-shaped text it happens to contain is not
 		// state.LastVerdict's source of truth here.
 		_, hasOutcome := scanPassLog(cfg.logPath, cfg.driver)
-		manifestDispatched := dispatchManifestIfPresent(cfg, &state, stdout)
+		// dispatchManifestIfPresent (which calls LaunchWorkers and blocks for
+		// up to the full worker timeout) must never fire on a pass that has
+		// already reached a terminal outcome, nor on the already-committed
+		// terminal land pass (state.TerminalLand, set by a PRIOR iteration's
+		// maxSlices cap case below) -- either way the switch below is about
+		// to stop the loop a few lines down, so dispatching workers here
+		// would be wasted work that also defeats the maxSlices/TerminalLand
+		// cap's intent to bound total dispatch, not just pass count (issue
+		// #2059 review finding). state.TerminalLand at this point reflects
+		// only a prior pass's decision -- this switch's own maxSlices case
+		// sets it for THIS pass later, after this call already ran.
+		manifestDispatched := false
+		if !hasOutcome && !state.TerminalLand {
+			manifestDispatched = dispatchManifestIfPresent(cfg, &state, stdout)
+		}
 		if !hasOutcome {
 			fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "pass_no_outcome", Pass: pass, Reason: fmt.Sprintf("exit %d", rc)}))
 		}
