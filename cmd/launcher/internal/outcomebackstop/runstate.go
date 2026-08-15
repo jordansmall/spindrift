@@ -14,8 +14,10 @@ import (
 // always-emit invariant (#593) must never be put at risk by a malformed or
 // absent hand-off artifact. This deliberately reimplements the file read and
 // degrade-to-empty here rather than calling runstate.ReadRunState directly:
-// that helper returns an error on malformed JSON, which this backstop must
-// never propagate.
+// that helper discards its partially-decoded RunState on any parse error,
+// but this backstop wants to still recover LastVerdict from an artifact
+// that only partially conforms (e.g. a sibling field with a JSON type
+// mismatch) rather than lose it.
 func readLastVerdict(path string) string {
 	if path == "" {
 		return ""
@@ -25,8 +27,6 @@ func readLastVerdict(path string) string {
 		return ""
 	}
 	var s runstate.RunState
-	if json.Unmarshal(data, &s) != nil {
-		return ""
-	}
+	json.Unmarshal(data, &s)
 	return s.LastVerdict
 }
