@@ -334,6 +334,27 @@ rec {
     + "\n"
     + varBlocks;
 
+  # Oxford-joined "a, b, or c" prose rendering of an outcomeStatusSets row's
+  # statuses (issue #2504) -- e.g. for agent/entrypoint.sh's nudge prompt.
+  renderOutcomeStatusProse =
+    statuses:
+    let
+      n = builtins.length statuses;
+      allButLast = builtins.genList (i: builtins.elemAt statuses i) (n - 1);
+      lastWord = builtins.elemAt statuses (n - 1);
+    in
+    if n <= 1 then
+      concatStrings statuses
+    else if n == 2 then
+      "${builtins.elemAt statuses 0} or ${lastWord}"
+    else
+      builtins.concatStringsSep ", " allButLast + ", or " + lastWord;
+
+  # Pipe-joined "a|b|c" grammar-placeholder rendering of an
+  # outcomeStatusSets row's statuses (issue #2504) -- e.g. for a
+  # `status=<...>` grammar example.
+  renderOutcomeStatusPipe = statuses: builtins.concatStringsSep "|" statuses;
+
   # cmd/launcher/flagtable_gen.go content.
   renderFlagTableGo =
     schema:
