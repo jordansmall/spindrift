@@ -18,8 +18,10 @@ type watchObservation struct {
 	// sawNonTerminal is true iff a real poll observed PENDING/EXPECTED/NONE
 	// (never true from the window-elapsed fallback).
 	sawNonTerminal bool
-	// windowElapsed is true iff the registration window elapsed before
-	// genuine non-terminal evidence appeared.
+	// windowElapsed is true iff the registration-window-elapsed fallback is
+	// what established registration — i.e. the window ran out before any
+	// genuine non-terminal evidence arrived. Only ever set when
+	// requireRegistration was in play; stays false otherwise.
 	windowElapsed bool
 	// elapsed is poll-count * actualIv, in the same seconds unit as the
 	// deadline.
@@ -34,6 +36,17 @@ type watch struct {
 	requireRegistration bool
 	clock               dispatch.Clock
 }
+
+// registrationWindowPolls bounds how many poll intervals watch.poll
+// withholds trust in an inherited SUCCESS while requireRegistration is set
+// (issue #2475). After this many intervals elapse with the rollup reading
+// SUCCESS the whole time and no non-terminal state ever observed, that is
+// treated as proof CI already finished — not proof it's still
+// mid-registration — and the SUCCESS is accepted. A stale SUCCESS followed
+// by a non-terminal state observed within the window must still wait for
+// that fresh registration; issue #1652's original protection stays intact
+// for that case.
+const registrationWindowPolls = 3
 
 // actualInterval is pollInterval floored to 1, used for elapsed tracking so
 // the loop advances and terminates instead of hot-spinning forever. When
@@ -91,8 +104,8 @@ type pollState struct {
 // registered on the head commit: registration was never required, or real
 // evidence (sawNonTerminal) or the window-elapsed fallback (windowElapsed)
 // has since established it.
-func (s pollState) registered(requireRegistration bool) bool {
-	return !requireRegistration || s.sawNonTerminal || s.windowElapsed
+func (w watch) registered(s pollState) bool {
+	return !w.requireRegistration || s.sawNonTerminal || s.windowElapsed
 }
 
 // observation builds the watchObservation this pollState's accumulated
@@ -132,7 +145,7 @@ func (w watch) poll(terminated func() bool, checkState func() (forge.RollupState
 		if state != forge.StateSuccess && state != forge.StateFailure && state != forge.StateError {
 			st.sawNonTerminal = true
 		}
-		if !st.registered(w.requireRegistration) && st.elapsed >= registrationWindow {
+		if !w.registered(st) && st.elapsed >= registrationWindow {
 			// The registration window elapsed with only a terminal state
 			// (SUCCESS, in practice — FAILURE/ERROR return immediately
 			// below) ever observed. Treat that as proof CI already
@@ -143,7 +156,7 @@ func (w watch) poll(terminated func() bool, checkState func() (forge.RollupState
 
 		switch state {
 		case forge.StateSuccess:
-			if !st.registered(w.requireRegistration) {
+			if !w.registered(st) {
 				// No evidence yet that this run's own checks registered —
 				// wait rather than trust a possibly-inherited rollup.
 				break

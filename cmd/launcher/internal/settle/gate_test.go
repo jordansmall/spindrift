@@ -242,8 +242,6 @@ func TestGateToGreen(t *testing.T) {
 			if tc.pollInterval != 0 {
 				c.MergePollInterval = tc.pollInterval
 			}
-			_, clock := recordingClock()
-			c.Clock = clock
 			fc := forge.NewFake()
 			fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
 			if len(tc.checkStates) > 0 {
@@ -254,7 +252,7 @@ func TestGateToGreen(t *testing.T) {
 			}
 			s := New(c, fc, fc)
 
-			obs, reason := s.gateToGreenObs("1", 0, testPR, tc.requireRegistration)
+			obs, reason := s.gateToGreen("1", 0, testPR, tc.requireRegistration)
 
 			if obs.outcome != tc.want {
 				t.Errorf("gateToGreen = %v, want %v", obs.outcome, tc.want)
