@@ -209,7 +209,7 @@ func (s *Settle) selfHealGate(d dispatch.Dispatcher, num string, gen uint64, pr 
 					// briefly still serve the pre-push snapshot right after a
 					// genuine push (replication lag), mirroring gateToGreen's
 					// own confirm-poll pattern for a SUCCESS rollup above.
-					time.Sleep(time.Duration(s.cfg.MergePollInterval) * time.Second)
+					s.clock.Sleep(time.Duration(s.cfg.MergePollInterval) * time.Second)
 					confirmed, confirmErr := s.pr.HeadCommitSHA(pr)
 					if confirmErr == nil && confirmed == headBefore {
 						fmt.Printf("    #%s  landing=%s  status=fix-no-op  !! fix pass %d produced no new commit — aborting self-heal\n", num, pr, attempt+1)
@@ -478,7 +478,7 @@ func (s *Settle) mergeImmediate(num string, gen uint64, pr string, d dispatch.Di
 			checksBlockedAttempts++
 			fmt.Printf("    #%s  landing=%s  status=merge-blocked-by-checks  attempt=%d/%d\n",
 				num, pr, checksBlockedAttempts, s.cfg.MaxRebaseAttempts)
-			time.Sleep(time.Duration(s.cfg.MergePollInterval) * time.Second)
+			s.clock.Sleep(time.Duration(s.cfg.MergePollInterval) * time.Second)
 			continue
 		}
 		if errors.Is(err, forge.ErrMergeTransient) {
@@ -502,7 +502,7 @@ func (s *Settle) mergeImmediate(num string, gen uint64, pr string, d dispatch.Di
 			// Merge retry would be attempted against a draft PR.
 			skipRebase = false
 			fmt.Printf("    #%s  landing=%s  status=merge-retry-settle\n", num, pr)
-			time.Sleep(time.Duration(s.cfg.MergePollInterval) * time.Second)
+			s.clock.Sleep(time.Duration(s.cfg.MergePollInterval) * time.Second)
 			continue
 		}
 		// A genuine conflict: demote to draft (issue #1863) as a visible
