@@ -142,6 +142,84 @@ func TestDispatchManifestIfPresentClearsStaleWorkerFindingsWhenNoManifest(t *tes
 	}
 }
 
+// TestDispatchManifestIfPresentQuarantinesStrayWorkerOutcome proves issue
+// #2491 AC2: a misbehaving worker that ignores its own prompt (which, per
+// worker-prompt.md, teaches it no SPINDRIFT_OUTCOME grammar at all -- see
+// the sibling test pinning that) and emits a stray SPINDRIFT_OUTCOME-shaped
+// line into its own quarantined log anyway cannot terminate the run, cannot
+// satisfy the launcher's own outcome scanner, and -- by the same structural
+// argument, since the synthetic-outcome backstop in outcomebackstop.Run
+// reads only cfg.logPath just like scanPassLog does -- cannot trip the
+// backstop either. The stray line genuinely lands on disk in the worker's
+// own --log-path (proving this isn't a vacuous test: the worker really did
+// misbehave), but the coordinator's own pass log (cfg.logPath, the file
+// dispatchManifestIfPresent itself was invoked against) never contains it,
+// because launchOneWorker's structural quarantine (issue #2059) never
+// forwards a worker's log content into the coordinator's own log or gives
+// any worker a way to write to cfg.logPath. The join itself is unaffected:
+// the worker still resolves to WorkerDone, exactly like "done-fast".
+func TestDispatchManifestIfPresentQuarantinesStrayWorkerOutcome(t *testing.T) {
+	chdirToFreshWorkerRepo(t)
+
+	fakeDir := t.TempDir()
+	callLog := filepath.Join(fakeDir, "calls.log")
+	if err := os.WriteFile(callLog, nil, 0o644); err != nil {
+		t.Fatalf("WriteFile(callLog): %v", err)
+	}
+	writeFakeWorkerDriverExec(t, fakeDir, callLog)
+	t.Setenv("PATH", fakeDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	dir := t.TempDir()
+	manifest := SliceManifest{Slices: []ManifestSlice{{Name: "emits-stray-outcome", Task: "implement seam a"}}}
+	line, err := manifest.Line()
+	if err != nil {
+		t.Fatalf("Line() error = %v", err)
+	}
+	manifestLogPath := filepath.Join(dir, "manifest-stream.log")
+	if err := os.WriteFile(manifestLogPath, []byte(streamJSONOutcomeLine(strings.TrimSpace(line))), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	workerPromptFile := filepath.Join(dir, "worker-prompt.txt")
+	if err := os.WriteFile(workerPromptFile, []byte("BASE WORKER PROMPT"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config{
+		driver:           "claude",
+		logPath:          manifestLogPath,
+		workerPromptFile: workerPromptFile,
+		workerWorkDir:    t.TempDir(),
+		workerTimeout:    2 * time.Second,
+	}
+	state := runstate.RunState{}
+
+	var stdout strings.Builder
+	if got := dispatchManifestIfPresent(cfg, &state, &stdout); !got {
+		t.Fatalf("dispatchManifestIfPresent() = false, want true")
+	}
+	if state.WorkerFindings == "" {
+		t.Fatal("state.WorkerFindings is empty, want the stray-outcome worker's own summary (it must join as WorkerDone, not derail)")
+	}
+
+	workerLogPath := filepath.Join(cfg.workerWorkDir, "emits-stray-outcome.log")
+	workerLog, err := os.ReadFile(workerLogPath)
+	if err != nil {
+		t.Fatalf("ReadFile(workerLogPath): %v", err)
+	}
+	if !strings.Contains(string(workerLog), "SPINDRIFT_OUTCOME") {
+		t.Fatalf("worker's own log %q = %q, want it to contain the stray SPINDRIFT_OUTCOME line (otherwise this test proves nothing)", workerLogPath, workerLog)
+	}
+
+	verdict, hasOutcome := scanPassLog(cfg.logPath, cfg.driver)
+	if hasOutcome {
+		t.Errorf("scanPassLog(cfg.logPath) hasOutcome = true, want false -- the coordinator's own pass log must never see a worker's stray outcome line")
+	}
+	if verdict != "" {
+		t.Errorf("scanPassLog(cfg.logPath) verdict = %q, want empty", verdict)
+	}
+}
+
 // TestDispatchManifestIfPresentMovesRemainingSliceToDoneOnRetrySuccess
 // verifies a slice that timed out on a prior dispatch (already present in
 // state.RemainingSlices) is removed from RemainingSlices and appended to
