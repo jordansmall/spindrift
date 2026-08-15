@@ -25,6 +25,20 @@ const (
 	severityWarn   = "warn"
 )
 
+// The Kind values a ForbiddenMarkerRow's Kind field is compared against in
+// Validate's forbiddenRows loop.
+const (
+	// forbiddenKindSubstring is the default meaning: Marker is checked as
+	// literal rendered text.
+	forbiddenKindSubstring = "substring"
+	// forbiddenKindGhAPIMutation names the one row (forbidden-gh-api-
+	// mutation) whose Marker ("gh api") is display-only -- see
+	// ForbiddenMarkerRow.Kind's doc comment. Its real enforcement is
+	// entrypoint.sh's install_readonly_gh_shim argument-scan, not a
+	// prompt-level substring scan here.
+	forbiddenKindGhAPIMutation = "gh-api-mutation"
+)
+
 // ValidateMarkerRow is the Go mirror of one row in
 // lib/prompt-contract.nix's validateMarkers registry. JSON tags mirror the
 // nix attrset's field names literally, the same convention FragmentRow
@@ -280,7 +294,14 @@ func Validate(e Env, result Result, rows []ValidateMarkerRow, forbiddenRows []Fo
 		}
 
 		violated := false
-		if gateActive {
+		// A gh-api-mutation-kind row's Marker ("gh api") is display-only
+		// (ForbiddenMarkerRow.Kind's doc comment): it documents the runtime
+		// argument-scan entrypoint.sh's install_readonly_gh_shim performs
+		// (only a mutating -X/--method verb is rejected there), not a
+		// literal prompt substring. A plain, read-only `gh api ...` call is
+		// legitimate content, so this loop must never scan for it -- the
+		// row's only real enforcement is that shim, not this Go code.
+		if gateActive && row.Kind != forbiddenKindGhAPIMutation {
 			for _, h := range haystacks {
 				if h == "" {
 					continue

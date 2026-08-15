@@ -444,6 +444,44 @@ func TestValidateForbiddenMarkerToleratesGitForgeBranchUnderReadOnly(t *testing.
 	}
 }
 
+// TestValidateForbiddenMarkerGhAPIMutationKindNeverScannedAsSubstring covers
+// issue #2499: the forbidden-gh-api-mutation row's Kind is
+// "gh-api-mutation", meaning its Marker ("gh api") is display-only --
+// lib/prompt-contract.nix's own row doc comment says enforcement is
+// entrypoint.sh's install_readonly_gh_shim argument-scan (only a mutating
+// `-X`/`--method` verb is rejected), not a plain-substring scan here. A
+// read-only, non-research dispatch whose rendered prompt orders a plain,
+// un-negated, read-only `gh api rate_limit` call (no mutating method flag)
+// must never reject -- Validate must not treat "gh api" as a literal
+// forbidden substring for this row.
+func TestValidateForbiddenMarkerGhAPIMutationKindNeverScannedAsSubstring(t *testing.T) {
+	e := Env{BoxWriteEnabled: false, DispatchKind: "work"}
+	result := Result{Prompt: "1. Run `gh api rate_limit` to check your remaining quota before starting.\n"}
+
+	_, err := Validate(e, result, nil, testForbiddenMarkerRows())
+	if err != nil {
+		t.Fatalf("Validate() error = %v, want nil", err)
+	}
+}
+
+// TestValidateForbiddenMarkerFjRowStillRejectsImperative proves the
+// gh-api-mutation Kind fix above is narrowly scoped: a "substring"-kind row
+// (forbidden-fj-pr-create) must still reject an un-negated imperative
+// `fj pr create` exactly as before.
+func TestValidateForbiddenMarkerFjRowStillRejectsImperative(t *testing.T) {
+	e := Env{BoxWriteEnabled: false, DispatchKind: "work"}
+	result := Result{Prompt: "1. Open the PR with `fj pr create` before you finish.\n"}
+
+	_, err := Validate(e, result, nil, testForbiddenMarkerRows())
+	if err == nil {
+		t.Fatal("Validate() error = nil, want non-nil")
+	}
+	want := forbiddenMarkerMessage(t, "forbidden-fj-pr-create")
+	if err.Error() != want {
+		t.Errorf("Validate() error =\n%q\nwant\n%q", err.Error(), want)
+	}
+}
+
 // forbiddenMarkerMessage returns testForbiddenMarkerRows()'s Message field
 // for the row with the given id, failing the test if no such row exists.
 func forbiddenMarkerMessage(t *testing.T, id string) string {

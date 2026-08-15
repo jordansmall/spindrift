@@ -349,9 +349,15 @@ in
       "every forbiddenMarkers row's message must contain its own marker substring, offending ids: [${concatStringsSep ", " badIds}]";
     pkgs.runCommand "prompt-contract-forbidden-markers-every-row-message-mentions-own-marker" { } "touch $out";
 
-  # issue #2499: every row's kind must be a known value. "gh-api-mutation" is
-  # accepted here even though no row uses it yet -- a later slice adds that
-  # row and this check should already accept it without another edit.
+  # issue #2499: every row's kind must be a known value -- structural
+  # coverage only (does the field hold a value someone typo'd), not
+  # behavioral: this Nix check has no way to invoke promptassembly.Validate
+  # and confirm it actually branches on kind. That behavior -- a
+  # "gh-api-mutation" row's marker is display-only and never scanned as a
+  # forbidden substring, unlike a "substring" row -- is pinned Go-side by
+  # cmd/launcher/internal/promptassembly/validate_test.go's
+  # TestValidateForbiddenMarkerGhAPIMutationKindNeverScannedAsSubstring and
+  # TestValidateForbiddenMarkerFjRowStillRejectsImperative.
   prompt-contract-forbidden-markers-every-row-kind-known-value =
     let
       knownKinds = [
