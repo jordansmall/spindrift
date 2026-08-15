@@ -363,7 +363,7 @@ func TestSettle_MalformedOutcome_NonDraftPRBlocked(t *testing.T) {
 	fc.BranchPrefix = "agent/issue-"
 	fc.SetIssue(forge.Issue{Number: "9", Labels: []string{"agent-in-progress"}})
 	branch := fc.AgentBranch("9")
-	fc.SetPR(branch, forge.PR{URL: testPR, IsDraft: false})
+	fc.SetPR(branch, forge.PR{URL: testPR})
 
 	c := baseConfig()
 	s := New(c, fc, fc)
@@ -424,7 +424,7 @@ func TestSettle_NoOutcome_NonDraftPRBlocked(t *testing.T) {
 	fc.BranchPrefix = "agent/issue-"
 	fc.SetIssue(forge.Issue{Number: "3", Labels: []string{"agent-in-progress"}})
 	branch := fc.AgentBranch("3")
-	fc.SetPR(branch, forge.PR{URL: testPR, IsDraft: false})
+	fc.SetPR(branch, forge.PR{URL: testPR})
 
 	c := baseConfig()
 	s := New(c, fc, fc)
@@ -466,7 +466,7 @@ func TestSettle_NoOutcome_DraftPRBlocked(t *testing.T) {
 	fc.BranchPrefix = "agent/issue-"
 	fc.SetIssue(forge.Issue{Number: "5", Labels: []string{"agent-in-progress"}})
 	branch := fc.AgentBranch("5")
-	fc.SetPR(branch, forge.PR{URL: testPR, IsDraft: true})
+	fc.SetPR(branch, forge.PR{URL: testPR})
 
 	c := baseConfig()
 	s := New(c, fc, fc)

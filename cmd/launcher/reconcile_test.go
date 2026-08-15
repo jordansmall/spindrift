@@ -47,7 +47,7 @@ func TestRecoverByNumber_GreenMergesAndCompletes(t *testing.T) {
 
 	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.inProgressLabel}})
 	branch := fc.AgentBranch("42")
-	fc.SetPR(branch, forge.PR{URL: testReconcilePR, IsDraft: false})
+	fc.SetPR(branch, forge.PR{URL: testReconcilePR})
 	// A leading PENDING proves this run's own checks registered — issue
 	// #1652's adopted-path gate does not trust an immediate SUCCESS alone.
 	fc.SetCheckStates(testReconcilePR, []forge.RollupState{forge.StatePending, forge.StateSuccess, forge.StateSuccess})
@@ -84,7 +84,7 @@ func TestRecoverByNumber_RetriesTransientPRLookupError(t *testing.T) {
 
 	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.inProgressLabel}})
 	branch := fc.AgentBranch("42")
-	fc.SetPR(branch, forge.PR{URL: testReconcilePR, IsDraft: false})
+	fc.SetPR(branch, forge.PR{URL: testReconcilePR})
 	fc.SetCheckStates(testReconcilePR, []forge.RollupState{forge.StatePending, forge.StateSuccess, forge.StateSuccess})
 	fc.OpenPRForBranchErrs = []error{errors.New("HTTP 502: Bad Gateway"), nil}
 
@@ -113,7 +113,7 @@ func TestRecoverByNumber_RetryMaxOneStillRetriesOnce(t *testing.T) {
 
 	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.inProgressLabel}})
 	branch := fc.AgentBranch("42")
-	fc.SetPR(branch, forge.PR{URL: testReconcilePR, IsDraft: false})
+	fc.SetPR(branch, forge.PR{URL: testReconcilePR})
 	fc.SetCheckStates(testReconcilePR, []forge.RollupState{forge.StatePending, forge.StateSuccess, forge.StateSuccess})
 	fc.OpenPRForBranchErrs = []error{errors.New("HTTP 502: Bad Gateway"), nil}
 
@@ -140,7 +140,7 @@ func TestRecoverByNumber_DraftPRAdoptedMergesAndCompletes(t *testing.T) {
 
 	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.inProgressLabel}})
 	branch := fc.AgentBranch("42")
-	fc.SetPR(branch, forge.PR{URL: testReconcilePR, IsDraft: true})
+	fc.SetPR(branch, forge.PR{URL: testReconcilePR})
 	// A leading PENDING proves this run's own checks registered — issue
 	// #1652's adopted-path gate does not trust an immediate SUCCESS alone.
 	fc.SetCheckStates(testReconcilePR, []forge.RollupState{forge.StatePending, forge.StateSuccess, forge.StateSuccess})
@@ -337,7 +337,7 @@ func TestRecoverByNumber_RedFollowsSelfHeal(t *testing.T) {
 
 	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.inProgressLabel}})
 	branch := fc.AgentBranch("42")
-	fc.SetPR(branch, forge.PR{URL: testReconcilePR, IsDraft: false})
+	fc.SetPR(branch, forge.PR{URL: testReconcilePR})
 	fc.SetCheckStates(testReconcilePR, []forge.RollupState{forge.StateFailure})
 
 	dir := tempLogDir(t)

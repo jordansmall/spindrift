@@ -114,7 +114,7 @@ type LandingContainmentQuery interface {
 type PRForge interface {
 	// OpenPRForBranch returns the open PR for branch, if any, draft or not
 	// (issue #2408) — a stranded draft is exactly as adoptable as a ready
-	// PR. Draft status is still reported via the returned PR.IsDraft.
+	// PR.
 	OpenPRForBranch(branch string) (PR, bool, error)
 	// PRForBranch returns the URL of any PR (any state) for branch, if any.
 	PRForBranch(branch string) (string, bool, error)

@@ -150,8 +150,7 @@ const (
 
 // PR is a GitHub pull request as seen by the launcher.
 type PR struct {
-	URL     string
-	IsDraft bool
+	URL string
 }
 
 // PRState is the canonical state of a pull request. Each CodeForge adapter
