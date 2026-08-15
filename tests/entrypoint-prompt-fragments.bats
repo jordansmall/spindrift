@@ -686,6 +686,19 @@ setup() {
   ! grep -qF 'store-lock permission error' "$DRIVER_PROMPT_FILE"
 }
 
+# issue #2490: the full inline linting procedure moved out of the
+# always-rendered prompt and into the harness-owned /auto-lint skill's own
+# SKILL.md, read only when the agent actually reaches this step — the
+# rendered prompt now just points at the skill by name instead of
+# explaining it inline.
+@test "AUTO-LINT step points to the skill instead of explaining the linter procedure inline" {
+  export AUTO_LINT=1
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -qF '`/auto-lint`' "$DRIVER_PROMPT_FILE"
+  ! grep -qF "Apply the linter's safe auto-fix mode" "$DRIVER_PROMPT_FILE"
+}
+
 # issue #463: the conditional prompt steps above (SKILL_PREAMBLE,
 # FILE_ISSUES_DIRECT_STEP/FILE_ISSUES_RELAY_STEP, AUTO_FORMAT_STEP,
 # AUTO_LINT_STEP, CI_FAILURE_STEP) must be read from fragment files under
@@ -858,6 +871,21 @@ SKILL
   printf '# AUTO-FORMAT\n\nCUSTOM-FRAGMENT-MARKER\n\n' >"$prompt_dir/fragments/auto-format.md"
   export PROMPTS_DIR="$prompt_dir"
   export AUTO_FORMAT=1
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -q 'CUSTOM-FRAGMENT-MARKER' "$DRIVER_PROMPT_FILE"
+}
+
+# issue #2490: parallels "runtime prompt-dir override supplies its own
+# auto-format fragment" above, now that AUTO-LINT is a shrunk skill-invocation
+# fragment too.
+@test "runtime prompt-dir override supplies its own auto-lint fragment" {
+  local prompt_dir="$BATS_TEST_TMPDIR/custom-prompts"
+  cp -r "$PROMPTS_DIR" "$prompt_dir"
+  chmod -R u+w "$prompt_dir"
+  printf '# AUTO-LINT\n\nCUSTOM-FRAGMENT-MARKER\n\n' >"$prompt_dir/fragments/auto-lint.md"
+  export PROMPTS_DIR="$prompt_dir"
+  export AUTO_LINT=1
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   grep -q 'CUSTOM-FRAGMENT-MARKER' "$DRIVER_PROMPT_FILE"
