@@ -1093,17 +1093,70 @@ WORKER_AGENTS_JSON_TEMPLATE='{"worker":{"description":"Implement a scoped slice 
   [[ "$cherry_pick_line" != *'origin/'* ]]
 }
 
-@test "IMPLEMENT section: coordinator is told to gitignore .claude/ before its first git add" {
+@test "IMPLEMENT section: coordinator does not touch the consumer repo's .gitignore" {
   export AGENTS_JSON_TEMPLATE="$WORKER_AGENTS_JSON_TEMPLATE"
-  export WORK_DIR="$BATS_TEST_TMPDIR/work-coordinator-gitignore"
+  export WORK_DIR="$BATS_TEST_TMPDIR/work-coordinator-no-gitignore"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  # Worker worktrees materialize under $WORK_DIR/.claude/worktrees/ inside
-  # the coordinator's own tree; nothing guarantees a consumer repo's
-  # .gitignore excludes .claude, so the coordinator must confirm/add it
-  # before any git add (issue #2058 review).
-  grep -qF '.claude/' "$DRIVER_PROMPT_FILE"
-  grep -qF 'gitignore' "$DRIVER_PROMPT_FILE"
+  # The .gitignore/$WORK_DIR paragraph was removed (issue #2058 review):
+  # $WORK_DIR is never exported by entrypoint.sh, never in the envsubst
+  # substitution allowlist, and appears in no env-schema/launcher file, so it
+  # rendered as a literal, broken reference; mutating the consumer repo's
+  # .gitignore in every coordinator PR was also scope creep issue #2058
+  # never asked for.
+  ! grep -qF 'gitignore' "$DRIVER_PROMPT_FILE"
+  ! grep -qF 'WORK_DIR' "$DRIVER_PROMPT_FILE"
+}
+
+@test "IMPLEMENT section: coordinator grounds branch discovery in the worker's own report, not the Agent-tool result" {
+  export AGENTS_JSON_TEMPLATE="$WORKER_AGENTS_JSON_TEMPLATE"
+  export WORK_DIR="$BATS_TEST_TMPDIR/work-coordinator-report-branch"
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  # Nothing in this repo asserts what the Agent tool's own result carries;
+  # the worker's report contract (worker-prompt.md) is what actually
+  # requires the branch name, so the coordinator's instruction must cite
+  # that instead (issue #2058 review).
+  grep -qF "worker's own report names its worktree branch" "$DRIVER_PROMPT_FILE"
+  ! grep -qF 'Agent-tool result' "$DRIVER_PROMPT_FILE"
+}
+
+@test "IMPLEMENT section: coordinator fails closed on a missing or unclear branch name" {
+  export AGENTS_JSON_TEMPLATE="$WORKER_AGENTS_JSON_TEMPLATE"
+  export WORK_DIR="$BATS_TEST_TMPDIR/work-coordinator-fail-closed"
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  # A missing/garbled branch line must never be read as "no changes" -- a
+  # slice with real work could be silently dropped. The coordinator must
+  # stop and get the worker to confirm the branch before integrating
+  # (issue #2058 review).
+  ! grep -qF 'nothing to integrate' "$DRIVER_PROMPT_FILE"
+  grep -qF 'stop and get the worker to confirm it before integrating' "$DRIVER_PROMPT_FILE"
+}
+
+@test "IMPLEMENT section: coordinator's base-ref prose does not interpolate BASE_BRANCH" {
+  export AGENTS_JSON_TEMPLATE="$WORKER_AGENTS_JSON_TEMPLATE"
+  export BASE_BRANCH="release-42"
+  export WORK_DIR="$BATS_TEST_TMPDIR/work-coordinator-no-base-branch-interp"
+  # phase_branch_recovery checks out real origin/${BASE_BRANCH} before the
+  # prompt is ever assembled, so the remote needs an actual release-42 ref --
+  # seed one from main (setup_bare_repo only seeds main).
+  local seed="$BATS_TEST_TMPDIR/seed-release-42-no-interp"
+  git clone -q "https://github.com/owner/repo.git" "$seed"
+  git -C "$seed" push -q origin main:release-42
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  # coordinator.md declares no extraSubstVars in lib/fragments.nix's
+  # registry -- it is supposed to be static prose once its gate is on, so
+  # its base-ref sentence must not name ${BASE_BRANCH} or the rendered
+  # release-42 value at all (issue #2058 review).
+  base_ref_line=$(grep -F 'cut from whatever base' "$DRIVER_PROMPT_FILE")
+  [[ "$base_ref_line" != *'release-42'* ]]
+  [[ "$base_ref_line" != *'BASE_BRANCH'* ]]
+  # The merge-base is computed against the coordinator's own current HEAD
+  # each time, so it automatically accounts for every slice already
+  # integrated so far this run -- the piece the review flagged as missing.
+  grep -qF 'accounts for every slice already integrated so far this' "$DRIVER_PROMPT_FILE"
 }
 
 @test "IMPLEMENT section: no worker leaves the single-implementor prompt unchanged" {
