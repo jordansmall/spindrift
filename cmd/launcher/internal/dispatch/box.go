@@ -85,6 +85,14 @@ func (d *Dispatch) Run() Result {
 	logPath := d.logPath()
 	return d.dispatchWithRetry(logPath, func(resumeAfterHold bool) error {
 		fmt.Fprintf(d.humanOut(), "    -> #%s: %s\n", d.number, d.title)
+		if !resumeAfterHold {
+			// Only on this Run() call's very first attempt (never on a
+			// same-Run() hold/backoff re-dispatch) -- see
+			// quarantinePriorRunLogs.
+			if err := quarantinePriorRunLogs(d.pwd, d.number, d.runner); err != nil {
+				return fmt.Errorf("quarantine prior-run logs: %w", err)
+			}
+		}
 		env := buildBoxEnv(d.cfg, d.number, d.title, 0, "", d.nonce)
 		if resumeAfterHold {
 			env["RESUME_AFTER_HOLD"] = "1"
@@ -238,4 +246,45 @@ func rotateStaleLog(logPath string) error {
 			return os.Rename(logPath, candidate)
 		}
 	}
+}
+
+// quarantinePriorRunLogs moves aside every attempt log AllAttemptLogPaths
+// finds already on disk for this issue -- the bare initial/fix-N/
+// conflict-resolve logs and any rotated .N sibling -- before Run's very
+// first attempt this call, renaming each to a "<path>.prior-run.N" suffix
+// that AllAttemptLogPaths' own <path>.<N> probe never matches. Skipped
+// entirely when this issue's Box name is already running (issue #562
+// territory): that log belongs to a live, possibly orphaned run and must
+// not be touched.
+//
+// Nothing can be on disk for this issue that this run produced at the
+// moment Run is entered -- this run hasn't dispatched anything yet. Left in
+// place, that content would still survive rotateStaleLog's own
+// rotate-not-truncate preserve moments later (issue #561: "a retry within
+// this dispatch or a duplicate/collided launch") under the very same
+// <path>.N naming AllAttemptLogPaths scans for THIS run's own retry
+// history -- so a re-dispatch of the same issue in a persistent pwd
+// (agent-failed -> re-label, waves/continuous) would fold the earlier,
+// unrelated run's entire spend into this run's usage comment and self-heal
+// budget gate (issue #2575). Quarantining here, before that first rotation
+// ever happens, keeps the content on disk for forensic purposes -- never
+// destroyed, matching issue #561's own preserve intent -- while keeping it
+// out of the naming pattern AllAttemptLogPaths (and so CumulativeUsage and
+// UsageReport) scans.
+func quarantinePriorRunLogs(pwd, number string, r runner.Runner) error {
+	if r.IsRunning(BoxName(number)) {
+		return nil
+	}
+	for _, pl := range AllAttemptLogPaths(pwd, number) {
+		for n := 1; ; n++ {
+			dest := fmt.Sprintf("%s.prior-run.%d", pl.Path, n)
+			if _, err := os.Stat(dest); os.IsNotExist(err) {
+				if err := os.Rename(pl.Path, dest); err != nil {
+					return err
+				}
+				break
+			}
+		}
+	}
+	return nil
 }

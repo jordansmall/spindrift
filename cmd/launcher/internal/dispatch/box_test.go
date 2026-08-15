@@ -131,6 +131,83 @@ func TestRunOnce_RotatesPreExistingLogFromDuplicateLaunch(t *testing.T) {
 	}
 }
 
+// TestRun_QuarantinesPriorRunLogsBeforeFirstAttempt verifies that a fresh
+// Run() call does not charge this run for a wholly unrelated EARLIER run's
+// spend left on disk at the same log paths -- the scenario a re-dispatch of
+// the same issue in a persistent pwd produces (agent-failed -> re-label,
+// waves/continuous): the earlier run's bare initial log, its own rotated
+// retry sibling, and a leftover fix-pass log all pre-date this Run() call
+// entirely. AllAttemptLogPaths (and so CumulativeUsage/UsageReport) must
+// reflect only the usage this fresh attempt itself produced, not the prior
+// run's, even though the prior run's content still survives on disk
+// afterward (issue #561's preserve intent) under a different name (issue
+// #2575).
+func TestRun_QuarantinesPriorRunLogsBeforeFirstAttempt(t *testing.T) {
+	fr := runner.NewFake()
+
+	d := newTestDispatch(t, retryConfig(3, 0, 0), fr, fakeDriver{}, RealClock())
+	fr.WriteToOutput = nonceLine(d, "SPINDRIFT_OUTCOME issue=1 landing=https://github.com/o/r/pull/1 status=ready note=ok")
+
+	priorInitial := `{"type":"result","num_turns":1,"total_cost_usd":9.00,"usage":{"input_tokens":90000,"output_tokens":9000}}` + "\n"
+	priorRetry := `{"type":"result","num_turns":1,"total_cost_usd":5.00,"usage":{"input_tokens":50000,"output_tokens":5000}}` + "\n"
+	priorFix := `{"type":"result","num_turns":1,"total_cost_usd":3.00,"usage":{"input_tokens":30000,"output_tokens":3000}}` + "\n"
+	if err := writeFile(d.logPath(), priorInitial); err != nil {
+		t.Fatalf("seed prior initial log: %v", err)
+	}
+	if err := writeFile(d.logPath()+".1", priorRetry); err != nil {
+		t.Fatalf("seed prior retry log: %v", err)
+	}
+	if err := writeFile(d.fixLogPath(1), priorFix); err != nil {
+		t.Fatalf("seed prior fix log: %v", err)
+	}
+
+	drv, err := driver.New("claude")
+	if err != nil {
+		t.Fatalf("driver.New: %v", err)
+	}
+	d.driver = drv
+
+	result := d.Run()
+
+	if !result.Success {
+		t.Fatalf("Run: want Success=true, got %+v", result)
+	}
+
+	got := d.CumulativeUsage()
+	if got.InputTokens != 0 {
+		t.Errorf("CumulativeUsage.InputTokens = %d, want 0 (the fresh attempt's status-line-only log has no result event, and the prior run's usage must not be charged)", got.InputTokens)
+	}
+	if diff := got.TotalCostUSD; diff > 0.0001 || diff < -0.0001 {
+		t.Errorf("CumulativeUsage.TotalCostUSD = %v, want 0 (prior run's spend must not be charged to this run)", got.TotalCostUSD)
+	}
+
+	// The prior content must still be on disk somewhere -- quarantined, not
+	// destroyed.
+	dir := filepath.Dir(d.logPath())
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("read log dir: %v", err)
+	}
+	var foundInitial, foundRetry, foundFix bool
+	for _, e := range entries {
+		b, err := os.ReadFile(filepath.Join(dir, e.Name()))
+		if err != nil {
+			t.Fatalf("read %s: %v", e.Name(), err)
+		}
+		switch string(b) {
+		case priorInitial:
+			foundInitial = true
+		case priorRetry:
+			foundRetry = true
+		case priorFix:
+			foundFix = true
+		}
+	}
+	if !foundInitial || !foundRetry || !foundFix {
+		t.Errorf("prior run's logs were not preserved on disk: initial=%v retry=%v fix=%v", foundInitial, foundRetry, foundFix)
+	}
+}
+
 // TestRunOnce_SkipsAlreadyRunningContainerWithoutTouchingLog verifies that
 // when the runner reports the box's container/sandbox name is already
 // running, runOnce returns without ever rotating or creating the log file:
