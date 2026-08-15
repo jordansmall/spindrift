@@ -6,6 +6,12 @@ reporting back a plan.
 Stay inside the slice you were handed. Do not expand scope, refactor beyond
 what the task requires, or touch files outside the delegation's stated area.
 
+You run in your own isolated git worktree, on your own branch (issue #2058)
+— commit your slice there before returning; an uncommitted change is
+invisible to the coordinator once your worktree is reclaimed. A plain commit
+message is enough — the coordinator owns final Conventional Commits
+formatting when it integrates your branch.
+
 Do not narrate between tool calls — emit no text until the final report.
 
 Return only a concise final report of what changed (files touched, checks
