@@ -21,7 +21,11 @@ func recordingClock() (*[]time.Duration, dispatch.Clock) {
 // the preflightStaleBase push-retry loop sleeps a jittered linear backoff
 // between transient-failure retries — attempt N waits
 // TransientBackoffSecs*N + HoldJitterSecs — and that a success on the final
-// retry records exactly N-1 sleeps.
+// retry records exactly N-1 sleeps, plus one trailing MergePollInterval sleep
+// from rewaitAfterForcePush's own gateToGreen confirm-poll (issue #2502):
+// gateToGreen now sleeps through the same injected s.clock as the backoff
+// loop above, rather than a real time.Sleep decoupled from it, so its
+// confirm-sleep shows up in this recorder too.
 func TestPreflightStaleBaseRebasePushBackoff_SucceedsAfterRetries(t *testing.T) {
 	c := baseConfig()
 	c.TransientBackoffSecs = 2
@@ -53,7 +57,7 @@ func TestPreflightStaleBaseRebasePushBackoff_SucceedsAfterRetries(t *testing.T) 
 	if fc.Merged != testPR {
 		t.Errorf("Merge not called after the rebase eventually succeeded; fc.Merged=%q", fc.Merged)
 	}
-	want := []time.Duration{3 * time.Second, 5 * time.Second}
+	want := []time.Duration{3 * time.Second, 5 * time.Second, time.Duration(c.MergePollInterval) * time.Second}
 	if len(*sleeps) != len(want) {
 		t.Fatalf("recorded %d sleeps, want %d: got %v", len(*sleeps), len(want), *sleeps)
 	}
