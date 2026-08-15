@@ -127,6 +127,39 @@ const defaultWorkerPollInterval = 500 * time.Millisecond
 // lingers past this grace period is still reported WorkerDone.
 const workerSentinelGrace = 2 * time.Second
 
+// workerKillGrace bounds how long killWorkerProcessGroup waits for a killed
+// worker's process group to actually be reaped before giving up -- SIGKILL
+// itself is unmaskable and near-instant, but the caller's own goroutine
+// (doneCh) still needs to observe cmd.Wait() return before the caller's
+// worktree-removal cleanup is safe to run (issue #2059 review finding,
+// workers.go:374): the previous code sent the kill and returned immediately,
+// never confirming the group had actually exited first.
+const workerKillGrace = 2 * time.Second
+
+// killWorkerProcessGroup sends SIGKILL to cmd's own process group (Setpgid
+// above makes -cmd.Process.Pid reach every child the group leader spawned,
+// not just cmd itself) and waits, bounded by workerKillGrace, for doneCh to
+// report the process has been reaped -- so a caller's own subsequent
+// cleanup (removing this worker's worktree) never races a process the
+// kernel hasn't finished tearing down yet. Best-effort past the grace
+// period: if the wait times out, the function still returns rather than
+// blocking the join forever, matching this file's existing
+// best-effort-cleanup convention.
+func killWorkerProcessGroup(cmd *exec.Cmd, doneCh <-chan error) {
+	if cmd.Process == nil {
+		return
+	}
+	if err := syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL); err != nil {
+		fmt.Fprintln(os.Stderr, "orchestrator: kill timed-out worker process group:", err)
+		return
+	}
+	select {
+	case <-doneCh:
+	case <-time.After(workerKillGrace):
+		fmt.Fprintln(os.Stderr, "orchestrator: timed-out worker process group did not exit within grace period")
+	}
+}
+
 // WorkerOptions configures LaunchWorkers. Every path here is independent of
 // the coordinator's own cfg.logPath/cfg.stateFile, so a worker structurally
 // cannot write either (issue #2059 AC4/AC6).
@@ -374,12 +407,13 @@ func launchOneWorker(cfg config, slice ManifestSlice, promptFile, workDir string
 			// already decided as WorkerTimedOut regardless of whether the
 			// kill itself succeeds, matching this file's existing
 			// best-effort-cleanup convention (e.g. the worktree-removal
-			// defer above).
-			if cmd.Process != nil {
-				if err := syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL); err != nil {
-					fmt.Fprintln(os.Stderr, "orchestrator: kill timed-out worker process group:", err)
-				}
-			}
+			// defer above). killWorkerProcessGroup also blocks (bounded by
+			// workerKillGrace) until doneCh confirms the group has been
+			// reaped, so the worktree-removal defer above never races a
+			// process the kernel hasn't finished tearing down yet (issue
+			// #2059 review finding, workers.go:374) -- doneCh is consumed
+			// here, so it must not be read again on this return path.
+			killWorkerProcessGroup(cmd, doneCh)
 		}
 	}
 
