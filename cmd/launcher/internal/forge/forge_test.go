@@ -183,7 +183,7 @@ func TestFake_CreateLabel(t *testing.T) {
 // TestFake_OpenPRForBranch verifies the branch→PR lookup.
 func TestFake_OpenPRForBranch(t *testing.T) {
 	f := forge.NewFake()
-	f.SetPR("agent/issue-7", forge.PR{URL: "https://github.com/o/r/pull/99", IsDraft: false})
+	f.SetPR("agent/issue-7", forge.PR{URL: "https://github.com/o/r/pull/99"})
 
 	pr, ok, err := f.OpenPRForBranch("agent/issue-7")
 	if err != nil || !ok {
@@ -199,51 +199,36 @@ func TestFake_OpenPRForBranch(t *testing.T) {
 	}
 }
 
-// TestFake_MarkReady verifies MarkReady flips the stored PR's IsDraft to
-// false, observable afterward via OpenPRForBranch — mirroring the real
-// adapters, where MarkReady (`gh pr ready`) actually takes the PR out of
-// draft rather than merely being recorded as a call.
+// TestFake_MarkReady verifies MarkReady records the call in MarkReadyCalls
+// — the Fake, like the real adapters, no longer tracks draft state on the
+// stored PR, so the call log is the only observable oracle.
 func TestFake_MarkReady(t *testing.T) {
 	f := forge.NewFake()
 	const branch = "agent/issue-7"
 	const url = "https://github.com/o/r/pull/99"
-	f.SetPR(branch, forge.PR{URL: url, IsDraft: true})
+	f.SetPR(branch, forge.PR{URL: url})
 
 	if err := f.MarkReady(url); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	pr, ok, err := f.OpenPRForBranch(branch)
-	if err != nil || !ok {
-		t.Fatalf("want (pr,true,nil); got ok=%v err=%v", ok, err)
-	}
-	if pr.IsDraft {
-		t.Fatalf("want IsDraft=false after MarkReady, got true")
-	}
 	if len(f.MarkReadyCalls) != 1 || f.MarkReadyCalls[0] != url {
 		t.Fatalf("want MarkReadyCalls=[%q], got %v", url, f.MarkReadyCalls)
 	}
 }
 
-// TestFake_MarkDraft verifies MarkDraft flips the stored PR's IsDraft to
-// true — the inverse of TestFake_MarkReady.
+// TestFake_MarkDraft verifies MarkDraft records the call in MarkDraftCalls
+// — the inverse of TestFake_MarkReady.
 func TestFake_MarkDraft(t *testing.T) {
 	f := forge.NewFake()
 	const branch = "agent/issue-7"
 	const url = "https://github.com/o/r/pull/99"
-	f.SetPR(branch, forge.PR{URL: url, IsDraft: false})
+	f.SetPR(branch, forge.PR{URL: url})
 
 	if err := f.MarkDraft(url); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	pr, ok, err := f.OpenPRForBranch(branch)
-	if err != nil || !ok {
-		t.Fatalf("want (pr,true,nil); got ok=%v err=%v", ok, err)
-	}
-	if !pr.IsDraft {
-		t.Fatalf("want IsDraft=true after MarkDraft, got false")
-	}
 	if len(f.MarkDraftCalls) != 1 || f.MarkDraftCalls[0] != url {
 		t.Fatalf("want MarkDraftCalls=[%q], got %v", url, f.MarkDraftCalls)
 	}
