@@ -129,16 +129,16 @@ type ResolveConfig struct {
 type Resolution struct {
 	// OpLine is a single spindrift_op heartbeat JSON line to print, set iff
 	// the nudge is exhausted (PRIntentLine was empty).
-	OpLine string
+	OpLine string `json:"op_line,omitempty"`
 	// OutcomeLine is the original SPINDRIFT_OUTCOME line to reprint
 	// verbatim, set iff the resumed pass shadowed it with a near-miss and
 	// produced no valid outcome of its own.
-	OutcomeLine string
+	OutcomeLine string `json:"outcome_line,omitempty"`
 	// ForceExitZero reports whether the caller must force a non-zero
 	// ResumeExitCode back to zero: true only when OutcomeViaBackstop is set
 	// and ResumeExitCode != 0 (a crash in this best-effort nudge must never
 	// retroactively undo an already-terminal backstop-declared ready run).
-	ForceExitZero bool
+	ForceExitZero bool `json:"force_exit_zero,omitempty"`
 }
 
 // Resolve decides what to do with the corrective PR-intent resume's result.

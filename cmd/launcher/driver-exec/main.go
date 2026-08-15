@@ -31,6 +31,9 @@ func main() {
 	if isOutcomeBackstopInvocation(os.Args[1:]) {
 		os.Exit(runOutcomeBackstop(os.Args[2:], os.Stdout))
 	}
+	if isMarkerGateInvocation(os.Args[1:]) {
+		os.Exit(runMarkerGate(os.Args[2:], os.Stdout))
+	}
 	if isAssemblePromptInvocation(os.Args[1:]) {
 		os.Exit(runAssemblePrompt(os.Args[2:], os.Stdout))
 	}
