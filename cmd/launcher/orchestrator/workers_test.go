@@ -205,6 +205,12 @@ case "$base" in
     echo $! > "${DRIVER_LOG_PATH%.log}.childpid"
     sleep 30
     ;;
+  lingers-after-sentinel.log)
+    : > "${DRIVER_LOG_PATH%.log}.done"
+    ( while true; do sleep 0.05; done ) &
+    echo $! > "${DRIVER_LOG_PATH%.log}.childpid"
+    sleep 30
+    ;;
 esac
 `
 	return writeFakeDriverExec(t, dir, callLog, body)
@@ -348,6 +354,63 @@ func TestLaunchOneWorkerKillsOrphanedChildProcessOnTimeout(t *testing.T) {
 			t.Fatalf("child process %s (spawned by the timed-out worker) is still alive under /proc after launchOneWorker returned -- want the whole process GROUP killed, not just the driver-exec parent", childPID)
 		}
 		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// TestLaunchOneWorkerKillsLingeringProcessAfterSentinelGrace verifies that
+// once a worker's own done-sentinel appears but its process doesn't exit
+// within workerSentinelGrace, launchOneWorker kills the process's whole
+// group before returning -- rather than leaving it running while the
+// deferred worktree-removal cleanup runs against its still-live cwd (issue
+// #2059 review finding, workers.go:397): the same race
+// killWorkerProcessGroup was added to close on the WorkerTimedOut path, but
+// left open on this one. The fake driver here writes its sentinel
+// immediately, then spawns an orphan child (recording its pid) and hangs --
+// well past workerSentinelGrace, but comfortably under the timeout passed
+// to launchOneWorker, so the join takes the sentinel-then-grace-expiry path,
+// not the WorkerTimedOut path.
+func TestLaunchOneWorkerKillsLingeringProcessAfterSentinelGrace(t *testing.T) {
+	chdirToFreshWorkerRepo(t)
+
+	fakeDir := t.TempDir()
+	callLog := filepath.Join(fakeDir, "calls.log")
+	if err := os.WriteFile(callLog, nil, 0o644); err != nil {
+		t.Fatalf("WriteFile(callLog): %v", err)
+	}
+	writeFakeWorkerDriverExec(t, fakeDir, callLog)
+	t.Setenv("PATH", fakeDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	promptDir := t.TempDir()
+	promptFile := filepath.Join(promptDir, "worker-prompt.txt")
+	if err := os.WriteFile(promptFile, []byte("BASE WORKER PROMPT"), 0o644); err != nil {
+		t.Fatalf("WriteFile(promptFile): %v", err)
+	}
+
+	workDir := t.TempDir()
+	var stdout bytes.Buffer
+	var mu sync.Mutex
+
+	cfg := config{driver: "claude"}
+	slice := ManifestSlice{Name: "lingers-after-sentinel", Task: "implement seam a"}
+
+	result := launchOneWorker(cfg, slice, promptFile, workDir, 30*time.Second, 5*time.Millisecond, &stdout, &mu)
+
+	if result.Status != WorkerDone {
+		t.Fatalf("result.Status = %q, want WorkerDone (sentinel is authoritative even though the process lingered)", result.Status)
+	}
+
+	childPIDPath := filepath.Join(workDir, "lingers-after-sentinel.childpid")
+	pidBytes, err := os.ReadFile(childPIDPath)
+	if err != nil {
+		t.Fatalf("ReadFile(childPIDPath): %v -- the fake driver never recorded its child's pid", err)
+	}
+	childPID := strings.TrimSpace(string(pidBytes))
+	if childPID == "" {
+		t.Fatal("childpid file was empty")
+	}
+
+	if _, err := os.Stat("/proc/" + childPID); !os.IsNotExist(err) {
+		t.Fatalf("child process %s (spawned by the lingering worker) is still alive under /proc after launchOneWorker returned -- want the whole process GROUP killed once sentinel grace expired, not left running under the worktree-removal cleanup", childPID)
 	}
 }
 
@@ -568,6 +631,56 @@ func TestLaunchWorkersRemovesSeededPromptTempFile(t *testing.T) {
 	}
 }
 
+// TestLaunchWorkersResolvesRelativeWorkDirAbsolutely verifies a relative
+// opts.WorkDir is resolved to the same absolute location by both sides of
+// the join: the orchestrator, which stats resultPath/sentinelPath from its
+// own process cwd, and the worker's driver-exec subprocess, which runs with
+// cmd.Dir set to its own dedicated worktree -- a different cwd. Before this
+// fix, a relative WorkDir made the two sides resolve the identical path
+// string to two different files, so the orchestrator would poll forever
+// against a sentinel the worker had actually written elsewhere, silently
+// burning the full timeout (issue #2059 review finding, workers.go:248).
+func TestLaunchWorkersResolvesRelativeWorkDirAbsolutely(t *testing.T) {
+	repoDir := chdirToFreshWorkerRepo(t)
+
+	fakeDir := t.TempDir()
+	callLog := filepath.Join(fakeDir, "calls.log")
+	if err := os.WriteFile(callLog, nil, 0o644); err != nil {
+		t.Fatalf("WriteFile(callLog): %v", err)
+	}
+	body := `: > "$DRIVER_LOG_PATH"
+: > "${DRIVER_LOG_PATH%.log}.done"
+`
+	writeFakeDriverExec(t, fakeDir, callLog, body)
+	t.Setenv("PATH", fakeDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	promptDir := t.TempDir()
+	promptFile := filepath.Join(promptDir, "worker-prompt.txt")
+	if err := os.WriteFile(promptFile, []byte("BASE WORKER PROMPT"), 0o644); err != nil {
+		t.Fatalf("WriteFile(promptFile): %v", err)
+	}
+
+	var stdout bytes.Buffer
+	cfg := config{driver: "claude"}
+	manifest := SliceManifest{Slices: []ManifestSlice{{Name: "relative-slice", Task: "implement seam a"}}}
+
+	results := LaunchWorkers(cfg, manifest, WorkerOptions{
+		PromptFile:   promptFile,
+		WorkDir:      "relative-workdir",
+		Timeout:      2 * time.Second,
+		PollInterval: 5 * time.Millisecond,
+	}, &stdout)
+
+	if len(results) != 1 || results[0].Status != WorkerDone {
+		t.Fatalf("results = %+v, want a single WorkerDone result", results)
+	}
+
+	wantLogFile := filepath.Join(repoDir, "relative-workdir", "relative-slice.log")
+	if _, err := os.Stat(wantLogFile); err != nil {
+		t.Errorf("Stat(%s): %v -- want the relative WorkDir resolved against the orchestrator's own cwd (%s)", wantLogFile, err, repoDir)
+	}
+}
+
 // TestLaunchWorkersReturnsOneResultPerSliceEvenWhenWorkDirUncreatable
 // verifies LaunchWorkers degrades to one WorkerCrashed result per slice,
 // each carrying a non-nil Err, rather than panicking, when opts.WorkDir
@@ -605,6 +718,23 @@ func TestLaunchWorkersReturnsOneResultPerSliceEvenWhenWorkDirUncreatable(t *test
 		if r.Err == nil {
 			t.Errorf("results[%d].Err = nil, want non-nil", i)
 		}
+	}
+
+	// AC5: worker_start/worker_finish are still logged for every slice even
+	// though none of them ever got a chance to launch (issue #2059 review
+	// finding) -- WorkDir failing to create must not silently skip the
+	// heartbeat stream.
+	out := stdout.String()
+	for _, want := range []string{"worker_start", "worker_finish", "slice-a", "slice-b"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("stdout = %q, want it to contain %q", out, want)
+		}
+	}
+	if got := strings.Count(out, "worker_start"); got != 2 {
+		t.Errorf("worker_start count = %d, want 2", got)
+	}
+	if got := strings.Count(out, "worker_finish"); got != 2 {
+		t.Errorf("worker_finish count = %d, want 2", got)
 	}
 }
 
@@ -801,13 +931,27 @@ func TestLaunchOneWorkerEmitsStartAndFinishOpsOnWorktreeAddFailure(t *testing.T)
 // TestLaunchOneWorkerReusesExistingWorktreeBranchAcrossDispatches verifies
 // a second launchOneWorker call for the very same slice name -- e.g. a
 // coordinator re-dispatching the same slice on a later pass -- succeeds by
-// reusing the branch the first dispatch's own worktree left behind
+// reusing the branch name the first dispatch's own worktree left behind
 // (workers.go never deletes the branch itself, only the worktree
 // directory), rather than failing the second time around because `git
-// worktree add -b` refuses to recreate an already-existing branch (issue
-// #2059 code-review finding).
+// worktree add -b` refuses to recreate an already-existing branch name
+// (issue #2059 code-review finding). It also pins that the reused branch is
+// reset to the orchestrator's own current HEAD on every dispatch, not left
+// at whatever commit the prior dispatch's own worktree tip happened to
+// reach -- a retried slice must always start fresh off orchestrator HEAD
+// (issue #2059 review finding, workers.go:299).
 func TestLaunchOneWorkerReusesExistingWorktreeBranchAcrossDispatches(t *testing.T) {
-	chdirToFreshWorkerRepo(t)
+	repoDir := chdirToFreshWorkerRepo(t)
+	runGit := func(args ...string) string {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = repoDir
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
 
 	fakeDir := t.TempDir()
 	callLog := filepath.Join(fakeDir, "calls.log")
@@ -830,12 +974,27 @@ func TestLaunchOneWorkerReusesExistingWorktreeBranchAcrossDispatches(t *testing.
 	var mu sync.Mutex
 	cfg := config{driver: "claude"}
 	slice := ManifestSlice{Name: "repeat-slice", Task: "implement seam a"}
+	branchRef := "refs/heads/orchestrator-worker/repeat-slice"
 
 	for i := 0; i < 2; i++ {
+		if i == 1 {
+			// Advance orchestrator HEAD between dispatches, simulating a
+			// retry after other work landed -- the second dispatch must
+			// rebase the branch onto this new tip, not the first
+			// dispatch's now-stale one.
+			runGit("commit", "--allow-empty", "-m", "advance orchestrator HEAD")
+		}
+		wantHEAD := runGit("rev-parse", "HEAD")
+
 		var stdout bytes.Buffer
 		result := launchOneWorker(cfg, slice, promptFile, workDir, time.Second, 5*time.Millisecond, &stdout, &mu)
 		if result.Status != WorkerDone {
 			t.Fatalf("dispatch %d: result.Status = %q, want WorkerDone (err=%v)", i, result.Status, result.Err)
+		}
+
+		gotBranchTip := runGit("rev-parse", branchRef)
+		if gotBranchTip != wantHEAD {
+			t.Errorf("dispatch %d: branch tip = %s, want %s (orchestrator HEAD)", i, gotBranchTip, wantHEAD)
 		}
 	}
 }
