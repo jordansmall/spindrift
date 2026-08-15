@@ -90,7 +90,7 @@ func (d *Dispatch) Run() Result {
 			// same-Run() hold/backoff re-dispatch) -- see
 			// quarantinePriorRunLogs.
 			if err := quarantinePriorRunLogs(d.pwd, d.number, d.runner); err != nil {
-				return fmt.Errorf("quarantine prior-run logs: %w", err)
+				return quarantineErr{err: fmt.Errorf("quarantine prior-run logs: %w", err)}
 			}
 		}
 		env := buildBoxEnv(d.cfg, d.number, d.title, 0, "", d.nonce)
@@ -247,6 +247,18 @@ func rotateStaleLog(logPath string) error {
 		}
 	}
 }
+
+// quarantineErr wraps a quarantinePriorRunLogs failure so dispatchWithRetry
+// (retry.go) can tell it apart from every other once() failure via
+// errors.As: nothing this run produced is necessarily at logPath yet when
+// quarantine runs, so on this specific failure the caller must not consult
+// settledOutcome or ClassifyTransient against logPath at all -- either could
+// settle on, or reclassify, content left by the exact prior run quarantine
+// was trying to move aside (issue #2575), rather than failing outright.
+type quarantineErr struct{ err error }
+
+func (e quarantineErr) Error() string { return e.err.Error() }
+func (e quarantineErr) Unwrap() error { return e.err }
 
 // quarantinePriorRunLogs moves aside every attempt log AllAttemptLogPaths
 // finds already on disk for this issue -- the bare initial/fix-N/

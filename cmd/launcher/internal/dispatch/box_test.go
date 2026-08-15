@@ -208,6 +208,47 @@ func TestRun_QuarantinesPriorRunLogsBeforeFirstAttempt(t *testing.T) {
 	}
 }
 
+// TestRun_QuarantineFailureDoesNotSettleOnStaleLog verifies that when
+// quarantinePriorRunLogs itself fails (e.g. a filesystem permission
+// problem renaming a prior run's log aside), Run() does not fall through to
+// settledOutcome and parse whatever content is still sitting at logPath --
+// content this run never produced, left over from the exact prior run
+// quarantine was trying to move aside -- as if it were this run's own
+// verdict (issue #2575). It must instead report a definite failure with no
+// resolved outcome at all, and must never dispatch a box.
+func TestRun_QuarantineFailureDoesNotSettleOnStaleLog(t *testing.T) {
+	fr := runner.NewFake()
+
+	d := newTestDispatch(t, retryConfig(3, 0, 0), fr, fakeDriver{}, RealClock())
+
+	staleOutcome := nonceLine(d, "SPINDRIFT_OUTCOME issue=1 landing=https://github.com/o/r/pull/999 status=ready note=stale")
+	if err := writeFile(d.logPath(), string(staleOutcome)); err != nil {
+		t.Fatalf("seed stale prior-run log: %v", err)
+	}
+
+	logDir := HostLogDirFor(d.pwd)
+	if err := os.Chmod(logDir, 0o555); err != nil {
+		t.Fatalf("chmod log dir read-only: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chmod(logDir, 0o755); err != nil {
+			t.Fatalf("chmod log dir writable: %v", err)
+		}
+	})
+
+	result := d.Run()
+
+	if result.Success {
+		t.Errorf("Run: want Success=false on a quarantine failure, got %+v", result)
+	}
+	if result.Resolved.Found {
+		t.Errorf("Run: want Resolved.Found=false (must not settle on the stale prior run's outcome), got %+v", result.Resolved)
+	}
+	if len(fr.RunCalls) != 0 {
+		t.Errorf("runner.Run: want 0 calls when quarantine fails before dispatch, got %d", len(fr.RunCalls))
+	}
+}
+
 // TestRunOnce_SkipsAlreadyRunningContainerWithoutTouchingLog verifies that
 // when the runner reports the box's container/sandbox name is already
 // running, runOnce returns without ever rotating or creating the log file:
