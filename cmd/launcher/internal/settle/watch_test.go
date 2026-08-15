@@ -12,6 +12,20 @@ import (
 // for these tests, which are only about the poll-loop state machine itself.
 func neverTerminated() bool { return false }
 
+// alwaysTerminated is a terminated func that fires on its very first call.
+func alwaysTerminated() bool { return true }
+
+// terminatedAfter returns a terminated func that returns false for its
+// first n calls and true from call n+1 onward, letting a test allow exactly
+// n polls to happen (observing their evidence) before abandonment fires.
+func terminatedAfter(n int) func() bool {
+	calls := 0
+	return func() bool {
+		calls++
+		return calls > n
+	}
+}
+
 // scriptedCheckState returns a checkState func that walks states in order,
 // returning err (if non-nil) instead of a state on the given zero-based
 // call indices, and repeats the final entry once the script is exhausted so
@@ -31,202 +45,263 @@ func scriptedCheckState(states []forge.RollupState, errAt map[int]error) func() 
 	}
 }
 
-// TestWatchPoll_ActualIvFloor verifies that a zero pollInterval still floors
-// to 1 for elapsed tracking, so the loop advances and terminates at the
-// deadline instead of hot-spinning forever.
-func TestWatchPoll_ActualIvFloor(t *testing.T) {
-	_, clock := recordingClock()
-	w := watch{pollInterval: 0, deadline: 2, clock: clock}
-	check := scriptedCheckState([]forge.RollupState{forge.StatePending}, nil)
+// countingCheckState wraps a scripted checkState func, counting how many
+// times it was called so a test can assert checkState was (or was not)
+// invoked a specific number of times.
+type countingCheckState struct {
+	fn    func() (forge.RollupState, error)
+	calls int
+}
 
-	obs := w.poll(neverTerminated, check)
+func newCountingCheckState(states []forge.RollupState, errAt map[int]error) *countingCheckState {
+	return &countingCheckState{fn: scriptedCheckState(states, errAt)}
+}
 
-	if obs.outcome != gateTerminal {
-		t.Fatalf("outcome = %v, want gateTerminal", obs.outcome)
+func (c *countingCheckState) check() (forge.RollupState, error) {
+	c.calls++
+	return c.fn()
+}
+
+// watchPollCase is one table-driven scenario for watch.poll's state
+// machine: interval/window arithmetic, the registration split, error
+// propagation, and abandonment.
+type watchPollCase struct {
+	name string
+
+	pollInterval        int
+	deadline            int
+	requireRegistration bool
+
+	states []forge.RollupState
+	errAt  map[int]error
+
+	terminated func() bool // defaults to neverTerminated when nil
+
+	wantOutcome gateResult
+	wantErr     error
+
+	wantSawNonTerminal bool
+	wantWindowElapsed  bool
+
+	checkElapsed bool
+	wantElapsed  int
+
+	checkSleeps bool
+	wantSleeps  []time.Duration
+
+	// useCounting routes checkState through countingCheckState so
+	// wantCallCount can be asserted.
+	useCounting    bool
+	checkCallCount bool
+	wantCallCount  int
+}
+
+func TestWatchPoll(t *testing.T) {
+	cases := []watchPollCase{
+		{
+			// A zero pollInterval still floors to 1 for elapsed tracking, so
+			// the loop advances and terminates at the deadline instead of
+			// hot-spinning forever.
+			name:               "actualIv floors to 1 when pollInterval is 0",
+			pollInterval:       0,
+			deadline:           2,
+			states:             []forge.RollupState{forge.StatePending},
+			wantOutcome:        gateTerminal,
+			wantSawNonTerminal: true,
+			wantWindowElapsed:  false,
+			checkElapsed:       true,
+			wantElapsed:        2,
+		},
+		{
+			// A deadline smaller than registrationWindowPolls*actualIv still
+			// lets a settled-SUCCESS-only sequence resolve to gateGreen with
+			// windowElapsed true once the deadline-clamped window elapses,
+			// instead of falling through to gateTerminal (issue #2475
+			// follow-up).
+			name:                "registration window clamps to a smaller deadline",
+			pollInterval:        1,
+			deadline:            1,
+			requireRegistration: true,
+			states:              []forge.RollupState{forge.StateSuccess},
+			wantOutcome:         gateGreen,
+			wantSawNonTerminal:  false,
+			wantWindowElapsed:   true,
+			checkElapsed:        true,
+			wantElapsed:         1,
+			checkSleeps:         true,
+			wantSleeps:          []time.Duration{1 * time.Second, 1 * time.Second},
+		},
+		{
+			// The registration window elapsing on a SUCCESS-only sequence
+			// (windowElapsed true, sawNonTerminal false) is trusted as proof
+			// CI already finished.
+			name:                "window elapses on SUCCESS-only sequence",
+			pollInterval:        1,
+			deadline:            10,
+			requireRegistration: true,
+			states:              []forge.RollupState{forge.StateSuccess},
+			wantOutcome:         gateGreen,
+			wantSawNonTerminal:  false,
+			wantWindowElapsed:   true,
+		},
+		{
+			// A genuine non-terminal state observed before the window
+			// elapses registers this run's own checks on real evidence
+			// (sawNonTerminal true, windowElapsed false) rather than via the
+			// window fallback.
+			name:                "genuine PENDING observed before window elapses",
+			pollInterval:        1,
+			deadline:            10,
+			requireRegistration: true,
+			states:              []forge.RollupState{forge.StatePending, forge.StateSuccess, forge.StateSuccess},
+			wantOutcome:         gateGreen,
+			wantSawNonTerminal:  true,
+			wantWindowElapsed:   false,
+		},
+		{
+			// The ordinary requireRegistration=false path: a first-poll
+			// SUCCESS confirms green without any window logic getting
+			// involved.
+			name:               "no registration required confirms on first poll",
+			pollInterval:       1,
+			deadline:           10,
+			states:             []forge.RollupState{forge.StateSuccess, forge.StateSuccess},
+			wantOutcome:        gateGreen,
+			wantSawNonTerminal: false,
+			wantWindowElapsed:  false,
+			checkElapsed:       true,
+			wantElapsed:        0,
+		},
+		{
+			// A CheckState error on the very first poll surfaces as
+			// gateTerminal with the error attached.
+			name:         "CheckState error on first poll",
+			pollInterval: 1,
+			deadline:     10,
+			states:       []forge.RollupState{""},
+			errAt:        map[int]error{0: errFirstPollBoom},
+			wantOutcome:  gateTerminal,
+			wantErr:      errFirstPollBoom,
+		},
+		{
+			// A CheckState error on the confirmation re-poll (after an
+			// initial SUCCESS) also surfaces as gateTerminal with the error
+			// attached.
+			name:         "CheckState error on confirmation poll",
+			pollInterval: 1,
+			deadline:     10,
+			states:       []forge.RollupState{forge.StateSuccess, ""},
+			errAt:        map[int]error{1: errConfirmPollBoom},
+			wantOutcome:  gateTerminal,
+			wantErr:      errConfirmPollBoom,
+		},
+		{
+			// terminated() returning true immediately yields gateAbandoned
+			// without ever calling checkState.
+			name:           "terminated before any poll never calls checkState",
+			pollInterval:   1,
+			deadline:       10,
+			states:         []forge.RollupState{forge.StateSuccess},
+			terminated:     alwaysTerminated,
+			wantOutcome:    gateAbandoned,
+			useCounting:    true,
+			checkCallCount: true,
+			wantCallCount:  0,
+		},
+		{
+			// A FAILURE/ERROR rollup returns gateRedRetry immediately,
+			// without consulting the registration guard at all.
+			name:                "genuine red returns immediately",
+			pollInterval:        1,
+			deadline:            10,
+			requireRegistration: true,
+			states:              []forge.RollupState{forge.StateFailure},
+			wantOutcome:         gateRedRetry,
+			wantSawNonTerminal:  false,
+			wantWindowElapsed:   false,
+		},
+		{
+			// Finding 4: abandonment after a couple of successful polls have
+			// already observed non-terminal evidence must carry that
+			// accumulated evidence through in the returned observation
+			// (sawNonTerminal=true, elapsed=2), not a zero-value literal.
+			name:               "abandonment after prior polls preserves accumulated evidence",
+			pollInterval:       1,
+			deadline:           10,
+			states:             []forge.RollupState{forge.StatePending, forge.StatePending, forge.StatePending},
+			terminated:         terminatedAfter(2),
+			wantOutcome:        gateAbandoned,
+			wantSawNonTerminal: true,
+			wantWindowElapsed:  false,
+			checkElapsed:       true,
+			wantElapsed:        2,
+			useCounting:        true,
+			checkCallCount:     true,
+			wantCallCount:      2,
+		},
 	}
-	if obs.elapsed != 2 {
-		t.Fatalf("elapsed = %d, want 2 (actualIv floored to 1, deadline 2)", obs.elapsed)
-	}
-	if !obs.sawNonTerminal {
-		t.Errorf("sawNonTerminal = false, want true (PENDING observed every poll)")
-	}
-	if obs.windowElapsed {
-		t.Errorf("windowElapsed = true, want false (requireRegistration unset)")
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			sleeps, clock := recordingClock()
+			w := watch{
+				pollInterval:        tc.pollInterval,
+				deadline:            tc.deadline,
+				requireRegistration: tc.requireRegistration,
+				clock:               clock,
+			}
+
+			terminated := tc.terminated
+			if terminated == nil {
+				terminated = neverTerminated
+			}
+
+			var counter *countingCheckState
+			var check func() (forge.RollupState, error)
+			if tc.useCounting {
+				counter = newCountingCheckState(tc.states, tc.errAt)
+				check = counter.check
+			} else {
+				check = scriptedCheckState(tc.states, tc.errAt)
+			}
+
+			obs := w.poll(terminated, check)
+
+			if obs.outcome != tc.wantOutcome {
+				t.Fatalf("outcome = %v, want %v", obs.outcome, tc.wantOutcome)
+			}
+			if tc.wantErr != nil {
+				if !errors.Is(obs.err, tc.wantErr) {
+					t.Fatalf("err = %v, want %v", obs.err, tc.wantErr)
+				}
+			}
+			if obs.sawNonTerminal != tc.wantSawNonTerminal {
+				t.Errorf("sawNonTerminal = %v, want %v", obs.sawNonTerminal, tc.wantSawNonTerminal)
+			}
+			if obs.windowElapsed != tc.wantWindowElapsed {
+				t.Errorf("windowElapsed = %v, want %v", obs.windowElapsed, tc.wantWindowElapsed)
+			}
+			if tc.checkElapsed && obs.elapsed != tc.wantElapsed {
+				t.Errorf("elapsed = %d, want %d", obs.elapsed, tc.wantElapsed)
+			}
+			if tc.checkSleeps {
+				if len(*sleeps) != len(tc.wantSleeps) {
+					t.Fatalf("recorded %d sleeps, want %d: got %v", len(*sleeps), len(tc.wantSleeps), *sleeps)
+				}
+				for i, d := range tc.wantSleeps {
+					if (*sleeps)[i] != d {
+						t.Errorf("sleep[%d] = %v, want %v", i, (*sleeps)[i], d)
+					}
+				}
+			}
+			if tc.checkCallCount && counter.calls != tc.wantCallCount {
+				t.Errorf("checkState called %d times, want %d", counter.calls, tc.wantCallCount)
+			}
+		})
 	}
 }
 
-// TestWatchPoll_RegistrationWindowClamp verifies that a deadline smaller
-// than registrationWindowPolls*actualIv still lets a settled-SUCCESS-only
-// sequence resolve to gateGreen with windowElapsed true once the
-// deadline-clamped window elapses, instead of falling through to
-// gateTerminal (issue #2475 follow-up).
-func TestWatchPoll_RegistrationWindowClamp(t *testing.T) {
-	sleeps, clock := recordingClock()
-	w := watch{pollInterval: 1, deadline: 1, requireRegistration: true, clock: clock}
-	check := scriptedCheckState([]forge.RollupState{forge.StateSuccess}, nil)
-
-	obs := w.poll(neverTerminated, check)
-
-	if obs.outcome != gateGreen {
-		t.Fatalf("outcome = %v, want gateGreen", obs.outcome)
-	}
-	if !obs.windowElapsed {
-		t.Errorf("windowElapsed = false, want true (clamped window elapsed before any genuine evidence)")
-	}
-	if obs.sawNonTerminal {
-		t.Errorf("sawNonTerminal = true, want false (only SUCCESS was ever observed)")
-	}
-	if obs.elapsed != 1 {
-		t.Errorf("elapsed = %d, want 1", obs.elapsed)
-	}
-	want := []time.Duration{1 * time.Second, 1 * time.Second}
-	if len(*sleeps) != len(want) {
-		t.Fatalf("recorded %d sleeps, want %d: got %v", len(*sleeps), len(want), *sleeps)
-	}
-}
-
-// TestWatchPoll_WindowFallbackVsGenuineRegistration covers the split between
-// trusting SUCCESS because the registration window elapsed on nothing but
-// SUCCESS (windowElapsed true, sawNonTerminal false) versus trusting it
-// because a genuine non-terminal state registered this run's own checks
-// before the window elapsed (sawNonTerminal true, windowElapsed false).
-func TestWatchPoll_WindowFallbackVsGenuineRegistration(t *testing.T) {
-	t.Run("window elapses on SUCCESS-only sequence", func(t *testing.T) {
-		_, clock := recordingClock()
-		w := watch{pollInterval: 1, deadline: 10, requireRegistration: true, clock: clock}
-		check := scriptedCheckState([]forge.RollupState{forge.StateSuccess}, nil)
-
-		obs := w.poll(neverTerminated, check)
-
-		if obs.outcome != gateGreen {
-			t.Fatalf("outcome = %v, want gateGreen", obs.outcome)
-		}
-		if obs.sawNonTerminal {
-			t.Errorf("sawNonTerminal = true, want false")
-		}
-		if !obs.windowElapsed {
-			t.Errorf("windowElapsed = false, want true")
-		}
-	})
-
-	t.Run("genuine PENDING observed before window elapses", func(t *testing.T) {
-		_, clock := recordingClock()
-		w := watch{pollInterval: 1, deadline: 10, requireRegistration: true, clock: clock}
-		check := scriptedCheckState(
-			[]forge.RollupState{forge.StatePending, forge.StateSuccess, forge.StateSuccess},
-			nil,
-		)
-
-		obs := w.poll(neverTerminated, check)
-
-		if obs.outcome != gateGreen {
-			t.Fatalf("outcome = %v, want gateGreen", obs.outcome)
-		}
-		if !obs.sawNonTerminal {
-			t.Errorf("sawNonTerminal = false, want true (PENDING observed)")
-		}
-		if obs.windowElapsed {
-			t.Errorf("windowElapsed = true, want false (registered on genuine evidence, not the window fallback)")
-		}
-	})
-}
-
-// TestWatchPoll_NoRegistrationRequired_FirstPollConfirmsImmediately verifies
-// the ordinary requireRegistration=false path: a first-poll SUCCESS confirms
-// green without any window logic getting involved.
-func TestWatchPoll_NoRegistrationRequired_FirstPollConfirmsImmediately(t *testing.T) {
-	_, clock := recordingClock()
-	w := watch{pollInterval: 1, deadline: 10, clock: clock}
-	check := scriptedCheckState([]forge.RollupState{forge.StateSuccess, forge.StateSuccess}, nil)
-
-	obs := w.poll(neverTerminated, check)
-
-	if obs.outcome != gateGreen {
-		t.Fatalf("outcome = %v, want gateGreen", obs.outcome)
-	}
-	if obs.elapsed != 0 {
-		t.Errorf("elapsed = %d, want 0 (confirmed on the very first poll)", obs.elapsed)
-	}
-	if obs.sawNonTerminal || obs.windowElapsed {
-		t.Errorf("sawNonTerminal=%v windowElapsed=%v, want both false", obs.sawNonTerminal, obs.windowElapsed)
-	}
-}
-
-// TestWatchPoll_CheckStateError_FirstPoll verifies a CheckState error on the
-// very first poll surfaces as gateTerminal with the error attached.
-func TestWatchPoll_CheckStateError_FirstPoll(t *testing.T) {
-	_, clock := recordingClock()
-	w := watch{pollInterval: 1, deadline: 10, clock: clock}
-	wantErr := errors.New("boom")
-	check := scriptedCheckState([]forge.RollupState{""}, map[int]error{0: wantErr})
-
-	obs := w.poll(neverTerminated, check)
-
-	if obs.outcome != gateTerminal {
-		t.Fatalf("outcome = %v, want gateTerminal", obs.outcome)
-	}
-	if !errors.Is(obs.err, wantErr) {
-		t.Fatalf("err = %v, want %v", obs.err, wantErr)
-	}
-}
-
-// TestWatchPoll_CheckStateError_ConfirmationPoll verifies a CheckState error
-// on the confirmation re-poll (after an initial SUCCESS) also surfaces as
-// gateTerminal with the error attached.
-func TestWatchPoll_CheckStateError_ConfirmationPoll(t *testing.T) {
-	_, clock := recordingClock()
-	w := watch{pollInterval: 1, deadline: 10, clock: clock}
-	wantErr := errors.New("boom-confirm")
-	check := scriptedCheckState(
-		[]forge.RollupState{forge.StateSuccess, ""},
-		map[int]error{1: wantErr},
-	)
-
-	obs := w.poll(neverTerminated, check)
-
-	if obs.outcome != gateTerminal {
-		t.Fatalf("outcome = %v, want gateTerminal", obs.outcome)
-	}
-	if !errors.Is(obs.err, wantErr) {
-		t.Fatalf("err = %v, want %v", obs.err, wantErr)
-	}
-}
-
-// TestWatchPoll_Terminated verifies that terminated() returning true
-// immediately yields gateAbandoned without ever calling checkState.
-func TestWatchPoll_Terminated(t *testing.T) {
-	_, clock := recordingClock()
-	w := watch{pollInterval: 1, deadline: 10, clock: clock}
-	called := false
-	check := func() (forge.RollupState, error) {
-		called = true
-		return forge.StateSuccess, nil
-	}
-
-	obs := w.poll(func() bool { return true }, check)
-
-	if obs.outcome != gateAbandoned {
-		t.Fatalf("outcome = %v, want gateAbandoned", obs.outcome)
-	}
-	if called {
-		t.Errorf("checkState was called, want it never called once terminated fires")
-	}
-}
-
-// TestWatchPoll_GenuineRed verifies a FAILURE/ERROR rollup returns
-// gateRedRetry immediately, without consulting the registration guard at
-// all.
-func TestWatchPoll_GenuineRed(t *testing.T) {
-	_, clock := recordingClock()
-	w := watch{pollInterval: 1, deadline: 10, requireRegistration: true, clock: clock}
-	check := scriptedCheckState([]forge.RollupState{forge.StateFailure}, nil)
-
-	obs := w.poll(neverTerminated, check)
-
-	if obs.outcome != gateRedRetry {
-		t.Fatalf("outcome = %v, want gateRedRetry", obs.outcome)
-	}
-	if obs.sawNonTerminal || obs.windowElapsed {
-		t.Errorf("sawNonTerminal=%v windowElapsed=%v, want both false (returned before the window ever elapsed)", obs.sawNonTerminal, obs.windowElapsed)
-	}
-}
+var (
+	errFirstPollBoom   = errors.New("boom")
+	errConfirmPollBoom = errors.New("boom-confirm")
+)
