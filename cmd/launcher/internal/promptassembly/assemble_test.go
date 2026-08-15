@@ -1101,6 +1101,45 @@ func TestAssembleOrchestratorEmptyAgentsTemplate(t *testing.T) {
 	}
 }
 
+// TestAssembleOrchestratorWorkerPromptForbidsStoreBuild covers issue #2496:
+// worker-prompt.md must forbid a worker from invoking any Nix store build
+// (workers run fully concurrently -- issue #2059 -- so a store build in one
+// worker is a store build in K workers at once) and must instead prescribe
+// only fast per-file gates (nil diagnostics, shellcheck, scoped go vet/go
+// test) that stay on PATH without a store round-trip.
+func TestAssembleOrchestratorWorkerPromptForbidsStoreBuild(t *testing.T) {
+	reg := loadTestRegistry(t)
+	env := coveredEnv()
+	env.OrchestratorEnabled = true
+
+	result, err := Assemble(env, reg)
+	if err != nil {
+		t.Fatalf("Assemble: %v", err)
+	}
+
+	prompt := result.Handoff.WorkerPromptFile
+	if prompt == "" {
+		t.Fatal("Handoff.WorkerPromptFile is empty, want non-empty")
+	}
+
+	forbidding := []string{"nix build", "checks-inbox"}
+	for _, phrase := range forbidding {
+		if !strings.Contains(prompt, phrase) {
+			t.Errorf("WorkerPromptFile missing forbidding reference to %q, want it to name and forbid store builds:\n%s", phrase, prompt)
+		}
+	}
+	if !strings.Contains(strings.ToLower(prompt), "do not") && !strings.Contains(strings.ToLower(prompt), "never") && !strings.Contains(strings.ToLower(prompt), "must not") {
+		t.Errorf("WorkerPromptFile missing an unambiguous forbidding phrase (do not / never / must not) around store builds:\n%s", prompt)
+	}
+
+	prescriptive := []string{"nil diagnostics", "shellcheck", "go vet", "go test"}
+	for _, phrase := range prescriptive {
+		if !strings.Contains(prompt, phrase) {
+			t.Errorf("WorkerPromptFile missing sanctioned per-file gate %q, want it prescribed:\n%s", phrase, prompt)
+		}
+	}
+}
+
 // TestAssembleOrchestratorBoxReadOnlyCovered covers that
 // OrchestratorEnabled + BoxWriteEnabled == false is a covered cell now
 // (the "filer relay" precondition axis, issue #2353), not rejected by
