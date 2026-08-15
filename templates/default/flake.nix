@@ -74,6 +74,10 @@
             #     scout = "claude-haiku-4-5-20251001";
             #     # implement-capable worker subagent model tier; empty omits the worker entry from --agents; the implementor prompt does not delegate to it yet — this only provisions the subagent so it is invokable. DEPRECATED: superseded by the roster option (see docs/reference.md); these per-agent knobs still work but will be removed.
             #     worker = "claude-sonnet-5";
+            #     # timeout applied to each parallel worker subagent's run (issue #2059); pass-through only, no normalization. Meaningful only under ORCHESTRATOR: entrypoint.sh threads this value to the orchestrator's --worker-timeout flag.
+            #     workerTimeout = "";
+            #     # worktree directory the orchestrator hands each parallel worker subagent (issue #2059); pass-through only, no normalization. Meaningful only under ORCHESTRATOR: entrypoint.sh threads this value to the orchestrator's --worker-work-dir flag.
+            #     workerWorkDir = "";
             #   };
             #   # host directory mounted over /agent/prompts for zero-rebuild prompt iteration
             #   promptDir = "";
