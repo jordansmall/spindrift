@@ -87,7 +87,7 @@ would.
 | `prefetch`  | shared         | shell snippet               | `""`               | runs in the work tree after the clone, to warm dependency caches     |
 | `prompt`    | shared         | string                      | bundled starter    | agent prompt template baked into the image; changing it requires a rebuild (`spindrift build`). The SPINDRIFT_OUTCOME contract is harness-owned: `spindrift build` appends it automatically if a custom `prompt` omits it (idempotent — a prompt that already has it is untouched) |
 | `scoutPrompt` / `reviewPrompt` / `filerPrompt` | **`mkHarness` only** | string | bundled starters | system prompts for the read-only scout and reviewer subagents and the opt-in filer subagent (see [Filer](#filer)); not settable on `perSystem.spindrift.*` — override at runtime via `SPINDRIFT_PROMPT_DIR` regardless of which caller baked the image |
-| `skills`    | shared         | list of path/derivation/`{ name; src; }` | `[]`  | skills baked into the image at `/home/agent/.claude/skills`, each as a `<name>/SKILL.md` directory (the only layout Claude Code discovers — a flat `<name>.md` is ignored) so the headless agent can `/invoke` them; a `{ name; src; }` content entry (name + SKILL.md body) is realized with the image's own Linux `pkgs` rather than copied from a pre-built host derivation, keeping the agent-image drvPath host-independent (issue #597); `SPINDRIFT_SKILLS_DIR` mounts over them at runtime |
+| `skills`    | shared         | list of path/derivation/`{ name; src; }` | `[]`  | skills baked into the image at the fixed `/agent/skills` path alongside the harness-owned skills (e.g. `auto-format`, baked regardless of this list), each as a `<name>/SKILL.md` directory (the only layout Claude Code discovers — a flat `<name>.md` is ignored) so the headless agent can `/invoke` them; a `{ name; src; }` content entry (name + SKILL.md body) is realized with the image's own Linux `pkgs` rather than copied from a pre-built host derivation, keeping the agent-image drvPath host-independent (issue #597); `agent/entrypoint.sh` copies both into the Driver's actual runtime skills dir at box startup, then copies `SPINDRIFT_SKILLS_DIR` (staged at `/operator-skills`) over the top so runtime overrides win without erasing the baked set (issue #2489) |
 | `settings`  | shared         | submodule, grouped by section (see below) | `{}` | non-secret run defaults baked into the `spindrift` CLI |
 | `runtime`   | shared         | `"podman"` \| `"docker"` \| `"rancher"` \| `"bwrap"` | `"podman"` | runner the `spindrift build`/`dispatch` commands drive: an OCI runtime (`"rancher"` is an alias for Rancher Desktop's containerd mode, driven via `nerdctl`), or the daemonless bubblewrap sandbox (`bwrap`, Linux-only, no image build/load) |
 | `driver`    | shared         | string                      | `"claude"`         | the agent CLI Driver baked into the image and threaded to the launcher (ADR 0009); `"claude"` (default) and `"opencode"` are the Drivers today. A non-`claude` Driver realises its own `spindrift-<driver>` image (e.g. `spindrift-opencode`) so per-Driver artifacts never collide |
@@ -396,8 +396,12 @@ Driver entry declares:
   `sessionFlagsFnBody`, `agentsJsonTemplate` — the fields ADR 0009 already
   documents.
 - `skillsDirRelative` — where the agent CLI scans for skill files, relative
-  to `$HOME`. Required; the harness bakes skill files there and the runner
-  adapters mount `SPINDRIFT_SKILLS_DIR` overrides over the same path.
+  to `$HOME`. Required; the harness bakes skill files to the fixed,
+  Driver-independent `/agent/skills` path instead (see the `skills` row
+  above), and `agent/entrypoint.sh`'s `phase_prompt_assembly` copies them
+  (`HARNESS_SKILLS_DIR`, then `OPERATOR_SKILLS_DIR` on top) into
+  `$DRIVER_SKILLS_DIR` — rendered from this field — at box startup
+  (issue #2489).
 - `agentFilesTemplate` — a `{ roster }` function (see [Subagent
   roster](#subagent-roster)) returning an attrset of HOME-relative path →
   file content, for a Driver whose subagents land as on-disk files rather
@@ -438,15 +442,23 @@ message naming the missing variable rather than silently impersonating the
 claude Driver.
 
 `mkHarness` also derives from the two directory declarations above for the
-*host*-side half: the image bake pre-creates each declared directory
-agent-owned (so podman/bwrap never fabricate a root-owned parent when the
-launcher mounts over it), and both are exported as absolute paths
-(`DRIVER_SKILLS_DIR`, `DRIVER_SESSION_CACHE_DIR`, rendered by
+*host*-side half, though the two now diverge (issue #2489). The session
+cache half is unchanged: the image bake pre-creates
+`sessionCacheDirRelative` agent-owned (so podman/bwrap never fabricate a
+root-owned parent when the launcher mounts over it), exported as an
+absolute path (`DRIVER_SESSION_CACHE_DIR`, rendered by
 `lib/preambles.nix`'s `renderDriverMountPreamble` — a separate renderer from
 the registry's own `renderPreamble` above, consumed by the launcher wrapper
 process rather than the in-box entrypoint) that the Go launcher's OCI and
-bwrap adapters mount over — no Driver-specific path literal lives in the
-runner adapters or the image staging step.
+bwrap adapters mount over directly — no Driver-specific path literal lives
+in those runner adapters for session cache. Skills no longer follow this
+pattern: `DRIVER_SKILLS_DIR` is rendered the same way but is read only by
+`agent/entrypoint.sh` itself (see the `skillsDirRelative` and `skills`
+entries above), not by the Go launcher. The runner adapters instead mount
+`SPINDRIFT_SKILLS_DIR` onto a fixed, Driver-independent literal,
+`/operator-skills` (`operatorSkillsDir` in
+`cmd/launcher/internal/runner/mount.go`), which the entrypoint then copies
+into `DRIVER_SKILLS_DIR` at box startup.
 
 The SPINDRIFT_OUTCOME contract — the sections that instruct the agent to
 print the `SPINDRIFT_OUTCOME issue=… landing=… status=… note=…` line the
@@ -854,7 +866,7 @@ exceptions.
 | `WORKER_MODEL`            | `claude-sonnet-5` (baked) | implement-capable worker subagent model tier (empty drops the worker entry from `--agents`); the implementor prompt does not delegate to it yet. **Deprecated** — superseded by the [`roster`](#subagent-roster) option |
 | `IMAGE`                   | `spindrift:latest`     | image tag to run                         |
 | `SPINDRIFT_PROMPT_DIR`    | baked prompt store path | host directory mounted over `/agent/prompts` for zero-rebuild prompt iteration; declaratively configurable via the `perSystem.spindrift.agents.promptDir` flake option or `settings`, or hot-overridden at dispatch time via `--prompt-dir` / the env var |
-| `SPINDRIFT_SKILLS_DIR`    | baked skills store path | hot-override the mounted skills dir (not bakeable) |
+| `SPINDRIFT_SKILLS_DIR`    | baked skills store path | hot-override skills at dispatch time: mounted to `/operator-skills` and merged over the baked `/agent/skills` set at box startup (not bakeable) |
 
 Every `settings`-baked knob above can be re-pointed at dispatch time with its
 `--flag` (see `spindrift --help --all` / `man spindrift`); a knob env var
@@ -2985,10 +2997,13 @@ unchanged, since both kinds share `cmdDispatch`'s exit codes (ADR 0022). Kinds
 are homogeneous per invocation (`research` and `dispatch` never mix issues in
 one run) — run `dogfood.sh` twice, once per kind, to drive both queues.
 
-**Baked skills.** The dogfood Box bakes five pinned upstream skills into
-`/home/agent/.claude/skills`, each as a `<name>/SKILL.md` directory — the
-only layout Claude Code discovers, so a flat `<name>.md` file is silently
-ignored — so the in-box agent can invoke them as slash commands:
+**Baked skills.** The dogfood Box bakes five pinned upstream skills (via the
+Consumer-configured `skills` list — see the `skills` row and
+`skillsDirRelative` entry above for the build-time `/agent/skills` path and
+the runtime copy into the Driver's actual skills dir), each as a
+`<name>/SKILL.md` directory — the only layout Claude Code discovers, so a
+flat `<name>.md` file is silently ignored — so the in-box agent can invoke
+them as slash commands:
 
 - [`caveman`](https://github.com/juliusbrussee/caveman) — `/caveman`. The
   rendered issue-pass and fix-pass prompts direct the agent to default to it
@@ -3013,7 +3028,9 @@ See [Contributing](../CONTRIBUTING.md) for how it's wired. To opt out of a
 skill, drop it from the consumer's `skills` list; each per-skill deferral is
 rendered only when that skill's `SKILL.md` is actually present at the baked
 skills path, so a consumer that skips a skill gets prompts with zero residue
-for it.
+for it. `auto-format` (see the `skills` row above) is the one harness-owned
+skill among the mix — it bakes into every image unconditionally, unlike the
+five Consumer-configured skills above which a Consumer can opt out of.
 
 ## Shell completion
 
