@@ -249,6 +249,119 @@ func TestRun_QuarantineFailureDoesNotSettleOnStaleLog(t *testing.T) {
 	}
 }
 
+// TestQuarantinePriorRunLogs_NoOpWhenAlreadyRunning verifies the safe
+// direction of the IsRunning guard: when the runner reports this issue's Box
+// name is already running, quarantinePriorRunLogs must be a complete no-op
+// -- it must not rename, or otherwise touch, any pre-existing log or its
+// rotated .N sibling (issue #562 territory, mirrored by quarantine per its
+// own doc comment).
+func TestQuarantinePriorRunLogs_NoOpWhenAlreadyRunning(t *testing.T) {
+	fr := runner.NewFake()
+	fr.IsRunningRet = true
+
+	d := newTestDispatch(t, retryConfig(3, 0, 0), fr, fakeDriver{}, RealClock())
+
+	initialContent := "live run's initial attempt output\n"
+	rotatedContent := "live run's rotated retry sibling\n"
+	if err := writeFile(d.logPath(), initialContent); err != nil {
+		t.Fatalf("seed initial log: %v", err)
+	}
+	if err := writeFile(d.logPath()+".1", rotatedContent); err != nil {
+		t.Fatalf("seed rotated log: %v", err)
+	}
+
+	if err := quarantinePriorRunLogs(d.pwd, d.number, fr); err != nil {
+		t.Fatalf("quarantinePriorRunLogs: %v", err)
+	}
+
+	cur, err := os.ReadFile(d.logPath())
+	if err != nil {
+		t.Fatalf("read initial log: %v", err)
+	}
+	if string(cur) != initialContent {
+		t.Errorf("initial log was touched: got %q, want %q", cur, initialContent)
+	}
+	rotated, err := os.ReadFile(d.logPath() + ".1")
+	if err != nil {
+		t.Fatalf("read rotated log: %v", err)
+	}
+	if string(rotated) != rotatedContent {
+		t.Errorf("rotated log was touched: got %q, want %q", rotated, rotatedContent)
+	}
+
+	dir := filepath.Dir(d.logPath())
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("read log dir: %v", err)
+	}
+	for _, e := range entries {
+		if strings.Contains(e.Name(), "prior-run") {
+			t.Errorf("quarantine created a .prior-run.N file while a container was running: %s", e.Name())
+		}
+	}
+	if len(entries) != 2 {
+		t.Errorf("expected exactly the 2 seeded files untouched, got entries=%v", entries)
+	}
+}
+
+// TestQuarantinePriorRunLogs_HoldSleepBlindSpot pins a known, currently
+// unfixed limitation rather than asserting it is correct: IsRunning only
+// reports whether a container is running RIGHT NOW, so it cannot tell "no
+// run in progress for this issue" apart from "a run for this same issue is
+// between attempts (e.g. mid dispatchWithRetry hold-sleep after a 429, see
+// retry.go) with no container currently running." fr.IsRunningRet=false
+// here stands in for that mid-hold-sleep window. In that window a second,
+// genuinely colliding Run() for the SAME issue number would call
+// quarantinePriorRunLogs and -- exactly as this test verifies -- it
+// proceeds to rename the first, still-live run's own logs aside as if they
+// belonged to a wholly unrelated stale prior run. That is not correct
+// behaviour, but it is the current behaviour, inherited from the same
+// IsRunning blind spot runOnce already has (issue #562) and out of scope to
+// close here (it needs a real cross-process lock, a separate piece of
+// work). This test exists so a future change to this behaviour is a
+// deliberate decision, not an accidental regression nobody noticed.
+func TestQuarantinePriorRunLogs_HoldSleepBlindSpot(t *testing.T) {
+	fr := runner.NewFake()
+	fr.IsRunningRet = false
+
+	d := newTestDispatch(t, retryConfig(3, 0, 0), fr, fakeDriver{}, RealClock())
+
+	initialContent := "mid-hold-sleep run's initial attempt output\n"
+	if err := writeFile(d.logPath(), initialContent); err != nil {
+		t.Fatalf("seed initial log: %v", err)
+	}
+
+	if err := quarantinePriorRunLogs(d.pwd, d.number, fr); err != nil {
+		t.Fatalf("quarantinePriorRunLogs: %v", err)
+	}
+
+	if _, err := os.Stat(d.logPath()); !os.IsNotExist(err) {
+		t.Fatalf("logPath: want removed by quarantine (blind spot pinned), got err=%v", err)
+	}
+
+	dir := filepath.Dir(d.logPath())
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("read log dir: %v", err)
+	}
+	var found bool
+	for _, e := range entries {
+		if !strings.Contains(e.Name(), "prior-run") {
+			continue
+		}
+		b, err := os.ReadFile(filepath.Join(dir, e.Name()))
+		if err != nil {
+			t.Fatalf("read %s: %v", e.Name(), err)
+		}
+		if string(b) == initialContent {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected the live, mid-hold-sleep run's log to be quarantined to a .prior-run.N file (known blind spot)")
+	}
+}
+
 // TestRunOnce_SkipsAlreadyRunningContainerWithoutTouchingLog verifies that
 // when the runner reports the box's container/sandbox name is already
 // running, runOnce returns without ever rotating or creating the log file:
