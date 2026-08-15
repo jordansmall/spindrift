@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"spindrift.dev/launcher/internal/runstate"
 )
 
 // TestDispatchManifestIfPresentNoopWhenWorkerPromptFileUnset verifies
@@ -16,8 +18,8 @@ import (
 // "empty disables this feature" field on config (issue #2059).
 func TestDispatchManifestIfPresentNoopWhenWorkerPromptFileUnset(t *testing.T) {
 	cfg := config{workerPromptFile: "", logPath: filepath.Join(t.TempDir(), "nonexistent.log")}
-	state := RunState{}
-	want := RunState{}
+	state := runstate.RunState{}
+	want := runstate.RunState{}
 
 	got := dispatchManifestIfPresent(cfg, &state, io.Discard)
 	if got {
@@ -45,8 +47,8 @@ func TestDispatchManifestIfPresentNoopWhenNoManifestInLog(t *testing.T) {
 		logPath:          logPath,
 		driver:           "claude",
 	}
-	state := RunState{}
-	want := RunState{}
+	state := runstate.RunState{}
+	want := runstate.RunState{}
 
 	got := dispatchManifestIfPresent(cfg, &state, io.Discard)
 	if got {
@@ -280,7 +282,7 @@ exit 0
 		t.Fatalf("coordinator invocation count = %s, want 3 (maxSlices=2 cap plus its terminal land pass -- a repeated manifest dispatch must not shadow the cap and run it unbounded)", got)
 	}
 
-	got, err := ReadRunState(cfg.stateFile)
+	got, err := runstate.ReadRunState(cfg.stateFile)
 	if err != nil {
 		t.Fatalf("ReadRunState: %v", err)
 	}
@@ -336,7 +338,7 @@ func TestDispatchManifestIfPresentDispatchesAndMergesResults(t *testing.T) {
 		workerWorkDir:    t.TempDir(),
 		workerTimeout:    200 * time.Millisecond,
 	}
-	state := RunState{}
+	state := runstate.RunState{}
 
 	var stdout strings.Builder
 	got := dispatchManifestIfPresent(cfg, &state, &stdout)
@@ -407,7 +409,7 @@ exit 0
 		workerWorkDir:    t.TempDir(),
 		workerTimeout:    2 * time.Second,
 	}
-	state := RunState{}
+	state := runstate.RunState{}
 
 	var stdout strings.Builder
 	got := dispatchManifestIfPresent(cfg, &state, &stdout)
@@ -452,7 +454,7 @@ func TestDispatchManifestIfPresentReportsCrashErrNotMisleadingExitCode(t *testin
 		workerWorkDir:    t.TempDir(),
 		workerTimeout:    2 * time.Second,
 	}
-	state := RunState{}
+	state := runstate.RunState{}
 
 	var stdout strings.Builder
 	got := dispatchManifestIfPresent(cfg, &state, &stdout)
@@ -514,7 +516,7 @@ exit 0
 		workerWorkDir:    t.TempDir(),
 		workerTimeout:    2 * time.Second,
 	}
-	state := RunState{}
+	state := runstate.RunState{}
 
 	var stdout strings.Builder
 	got := dispatchManifestIfPresent(cfg, &state, &stdout)

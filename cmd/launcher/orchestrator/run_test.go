@@ -2083,7 +2083,7 @@ func TestSeedPromptFromStateIncludesWorkerFindings(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	state := RunState{
+	state := runstate.RunState{
 		WorkerFindings: "- slice-a: done\n- slice-b: timed out",
 	}
 
