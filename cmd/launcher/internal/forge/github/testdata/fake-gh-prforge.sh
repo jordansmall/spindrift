@@ -59,9 +59,6 @@ pr-view)
 	state)
 		cat "$STATE_DIR/prs/$num/prstate" 2>/dev/null || echo OPEN
 		;;
-	isDraft)
-		cat "$STATE_DIR/prs/$num/draft" 2>/dev/null || printf 'false\n'
-		;;
 	headRefOid)
 		head=$(cat "$STATE_DIR/prs/$num/head")
 		git -C "$REMOTE" rev-parse "refs/heads/$head"

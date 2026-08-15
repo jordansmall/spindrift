@@ -180,9 +180,9 @@ func TestExecClient_PRForgeContract(t *testing.T) {
 
 // draftState reads back the fake gh script's own scripted draft flag for PR
 // num — STATE_DIR/prs/<num>/draft, the file the script's pr-ready case
-// writes "true"/"false" to and its pr-view isDraft case reads from. Used as
-// the oracle for MarkReady/MarkDraft's effect now that OpenPRForBranch (the
-// github adapter's own call) no longer round-trips isDraft at all (#2503).
+// writes "true"/"false" to. Used as the oracle for MarkReady/MarkDraft's
+// effect now that OpenPRForBranch (the github adapter's own call) no longer
+// round-trips isDraft at all (#2503).
 func (h *prforgeHarness) draftState(url string) string {
 	h.t.Helper()
 	raw, err := os.ReadFile(filepath.Join(h.stateDir, "prs", prNum(url), "draft"))
