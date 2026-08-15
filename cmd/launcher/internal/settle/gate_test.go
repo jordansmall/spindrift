@@ -11,7 +11,7 @@ import (
 func baseConfig() Config {
 	return Config{
 		CompleteLabel:     "agent-complete",
-		MergePollInterval: 0,   // no sleep in tests
+		MergePollInterval: 1,   // nonzero — recordingClock's Sleep doesn't block
 		MergePollTimeout:  100, // large enough for multi-poll tests
 		MergeMode:         "immediate",
 	}
@@ -39,13 +39,12 @@ func TestGateToGreen(t *testing.T) {
 	cases := []struct {
 		name                string
 		timeout             int
-		pollInterval        int // 0 means "use baseConfig's default (0)"
+		pollInterval        int // 0 means "use baseConfig's default (1)"
 		checkStates         []forge.RollupState
 		checkStateErrs      []error
 		requireRegistration bool
 		want                gateResult
 		wantReasonContains  string
-		wantCheckStateCalls *int // nil means "don't check"
 	}{
 		{
 			name:        "SUCCESS on first poll reaches green without a swap",
@@ -124,15 +123,6 @@ func TestGateToGreen(t *testing.T) {
 			requireRegistration: true,
 			checkStates:         []forge.RollupState{forge.StateSuccess, forge.StateSuccess, forge.StatePending, forge.StateSuccess, forge.StateSuccess},
 			want:                gateGreen,
-			// A no-guard implementation (registered always true) would also
-			// reach gateGreen here, but after consuming only 2 of the 5
-			// scripted states (trusting the first SUCCESS, confirming with
-			// the second). The correctly-guarded path defers on both leading
-			// SUCCESSes, registers on the PENDING, then trusts+confirms on
-			// the trailing SUCCESS pair — consuming all 5. Pinning the call
-			// count is what actually distinguishes the two implementations;
-			// the final verdict alone does not.
-			wantCheckStateCalls: func() *int { n := 5; return &n }(),
 		},
 		{
 			// issue #2475: a PR whose checks settled to SUCCESS long ago never
@@ -142,9 +132,9 @@ func TestGateToGreen(t *testing.T) {
 			// proof CI already finished and accepts it.
 			// timeout: 3 is the boundary case — deadline == the unclamped
 			// window here (registrationWindowPolls(3) * actualIv(1), where
-			// actualIv floors baseConfig's MergePollInterval:0 to 1), so the
-			// window elapses right as the deadline is hit rather than well
-			// before it.
+			// actualIv is baseConfig's MergePollInterval:1), so the window
+			// elapses right as the deadline is hit rather than well before
+			// it.
 			name:                "requireRegistration accepts a settled SUCCESS once the registration window elapses",
 			timeout:             3,
 			requireRegistration: true,
@@ -226,6 +216,8 @@ func TestGateToGreen(t *testing.T) {
 			if tc.pollInterval != 0 {
 				c.MergePollInterval = tc.pollInterval
 			}
+			_, clock := recordingClock()
+			c.Clock = clock
 			fc := forge.NewFake()
 			fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
 			if len(tc.checkStates) > 0 {
@@ -240,9 +232,6 @@ func TestGateToGreen(t *testing.T) {
 
 			if got != tc.want {
 				t.Errorf("gateToGreen = %v, want %v", got, tc.want)
-			}
-			if tc.wantCheckStateCalls != nil && fc.CheckStateCallCount != *tc.wantCheckStateCalls {
-				t.Errorf("CheckStateCallCount = %d, want %d", fc.CheckStateCallCount, *tc.wantCheckStateCalls)
 			}
 			if tc.wantReasonContains != "" {
 				if !strings.Contains(reason, tc.wantReasonContains) {

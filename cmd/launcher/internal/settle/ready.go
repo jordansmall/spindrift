@@ -304,100 +304,31 @@ const registrationWindowPolls = 3
 //     ever observed.
 //   - gateAbandoned — reason is "".
 func (s *Settle) gateToGreen(num string, gen uint64, pr string, requireRegistration bool) (gateResult, string) {
-	pollIv := s.cfg.MergePollInterval
 	deadline := s.cfg.MergePollTimeout
-	// actualIv is used for elapsed tracking; floor to 1 so we don't
-	// hot-spin. When pollIv is 0 (test mode) the sleep duration is also 0,
-	// so elapsed still advances and the loop terminates.
-	actualIv := pollIv
-	if actualIv <= 0 {
-		actualIv = 1
+	w := watch{
+		pollInterval:        s.cfg.MergePollInterval,
+		deadline:            deadline,
+		requireRegistration: requireRegistration,
+		clock:               s.clock,
 	}
-	// registrationWindow — see registrationWindowPolls's doc.
-	registrationWindow := registrationWindowPolls * actualIv
-	// A deadline smaller than the unclamped window (e.g. MERGE_POLL_TIMEOUT <
-	// registrationWindowPolls*MERGE_POLL_INTERVAL) would otherwise never let
-	// the window elapse before the ci-timeout deadline hits, livelocking a
-	// legitimately-already-green adopted PR into gateTerminal instead of
-	// accepting it (issue #2475 follow-up). deadline 0 (the "NONE times out
-	// immediately" case) already makes this a no-op-safe 0.
-	if registrationWindow > deadline {
-		registrationWindow = deadline
+	obs := w.poll(
+		func() bool { return s.terminated(num, gen) },
+		func() (forge.RollupState, error) { return s.pr.CheckState(pr) },
+	)
+
+	switch obs.outcome {
+	case gateGreen, gateRedRetry, gateAbandoned:
+		return obs.outcome, ""
 	}
-	elapsed := 0
-	registered := !requireRegistration
-	// sawNonTerminal tracks only genuine evidence that a real poll observed a
-	// non-terminal state (PENDING/EXPECTED/NONE) — unlike registered, it is
-	// never flipped by the registrationWindow-elapsed fallback below, so it
-	// stays false when a deadline is reached with nothing but SUCCESS ever
-	// actually observed. That distinguishes an ordinary ran-out-the-clock
-	// timeout from one where the requireRegistration guard itself never
-	// cleared on real evidence (issue #2476).
-	sawNonTerminal := false
 
-	for {
-		if s.terminated(num, gen) {
-			return gateAbandoned, ""
-		}
-		state, stateErr := s.pr.CheckState(pr)
-		if stateErr != nil {
-			fmt.Printf("    #%s  landing=%s  status=check-state-error  !! %v\n", num, pr, stateErr)
-			return gateTerminal, gateTerminalReason(stateErr, deadline)
-		}
-		if state != forge.StateSuccess && state != forge.StateFailure && state != forge.StateError {
-			registered = true
-			sawNonTerminal = true
-		}
-		if !registered && elapsed >= registrationWindow {
-			// The registration window elapsed with only a terminal state
-			// (SUCCESS, in practice — FAILURE/ERROR return immediately
-			// below) ever observed. Treat that as proof CI already
-			// finished, not proof it's still mid-registration (issue
-			// #2475).
-			registered = true
-		}
-
-		switch state {
-		case forge.StateSuccess:
-			if !registered {
-				// No evidence yet that this run's own checks registered —
-				// wait rather than trust a possibly-inherited rollup.
-				break
-			}
-			// Pause before confirming — back-to-back GraphQL calls return the
-			// same snapshot, so a late-registered job would not yet appear.
-			time.Sleep(time.Duration(pollIv) * time.Second)
-			// Re-poll to confirm the snapshot is stable. A partial check
-			// registration can briefly show SUCCESS before all jobs appear.
-			confirm, confirmErr := s.pr.CheckState(pr)
-			if confirmErr != nil {
-				fmt.Printf("    #%s  landing=%s  status=check-state-error  !! %v\n", num, pr, confirmErr)
-				return gateTerminal, gateTerminalReason(confirmErr, deadline)
-			}
-			if confirm != forge.StateSuccess {
-				if confirm == forge.StateFailure || confirm == forge.StateError {
-					return gateRedRetry, ""
-				}
-				// PENDING/EXPECTED/NONE — keep waiting for checks to settle.
-				break
-			}
-			return gateGreen, ""
-		case forge.StateFailure, forge.StateError:
-			// Genuine red — signal caller so it can dispatch a fix pass.
-			return gateRedRetry, ""
-		}
-
-		// PENDING, EXPECTED, NONE (no checks yet), or unrecognised — keep
-		// waiting until timeout.
-		if elapsed >= deadline {
-			break
-		}
-		// Sleep 0 when pollIv is 0 (test mode) so tests run without real
-		// delays; actualIv still advances elapsed to prevent a tight loop.
-		time.Sleep(time.Duration(pollIv) * time.Second)
-		elapsed += actualIv
+	// gateTerminal: format the operator-facing reason, logging the
+	// check-state-error status line poll() itself no longer has the I/O to
+	// print.
+	if obs.err != nil {
+		fmt.Printf("    #%s  landing=%s  status=check-state-error  !! %v\n", num, pr, obs.err)
+		return gateTerminal, gateTerminalReason(obs.err, deadline)
 	}
-	if requireRegistration && !sawNonTerminal {
+	if requireRegistration && !obs.sawNonTerminal {
 		// The deadline was reached with the requireRegistration guard still
 		// unsatisfied by any genuine evidence — only the registrationWindow's
 		// own elapsed-fallback (if it fired at all) ever set registered.
