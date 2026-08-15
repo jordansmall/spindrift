@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -167,6 +168,42 @@ func TestParseManifestLineRejectsEmptyTask(t *testing.T) {
 	_, ok := ParseManifestLine(strings.TrimSpace(line))
 	if ok {
 		t.Error("ParseManifestLine ok = true for whitespace-only task, want false")
+	}
+}
+
+// TestParseManifestLineRejectsTooManySlices verifies a manifest declaring
+// more than maxManifestSlices slices is rejected: LaunchWorkers (workers.go)
+// fans out one concurrent driver-exec/claude process plus one `git worktree
+// add` per slice with nothing capping len(manifest.Slices), so an
+// attacker-influenced or buggy manifest could otherwise fork an unbounded
+// number of concurrent processes (issue #2059 code-review finding). It also
+// checks a manifest at exactly the cap still parses -- the check must
+// reject only what's over the limit, not the limit itself.
+func TestParseManifestLineRejectsTooManySlices(t *testing.T) {
+	makeSlices := func(n int) []ManifestSlice {
+		slices := make([]ManifestSlice, n)
+		for i := range slices {
+			slices[i] = ManifestSlice{Name: fmt.Sprintf("slice-%d", i), Task: "implement seam"}
+		}
+		return slices
+	}
+
+	atCap := SliceManifest{Slices: makeSlices(maxManifestSlices)}
+	line, err := atCap.Line()
+	if err != nil {
+		t.Fatalf("Line() error = %v", err)
+	}
+	if _, ok := ParseManifestLine(strings.TrimSpace(line)); !ok {
+		t.Errorf("ParseManifestLine ok = false for manifest at maxManifestSlices cap (%d), want true", maxManifestSlices)
+	}
+
+	overCap := SliceManifest{Slices: makeSlices(maxManifestSlices + 1)}
+	line, err = overCap.Line()
+	if err != nil {
+		t.Fatalf("Line() error = %v", err)
+	}
+	if _, ok := ParseManifestLine(strings.TrimSpace(line)); ok {
+		t.Errorf("ParseManifestLine ok = true for manifest with %d slices, want false (cap is %d)", maxManifestSlices+1, maxManifestSlices)
 	}
 }
 

@@ -63,6 +63,18 @@ const ManifestToken = "SPINDRIFT_SLICE_MANIFEST"
 //     "- other-slice: done" lines into that findings block.
 var validSliceNameRe = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,64}$`)
 
+// maxManifestSlices bounds how many slices a single manifest may declare.
+// LaunchWorkers (workers.go) fans out one concurrent driver-exec/claude
+// process plus one `git worktree add` per slice with nothing else capping
+// len(manifest.Slices) -- a model-driven, untrusted-ish manifest (see
+// validSliceNameRe's doc comment) declaring hundreds of slices would fork
+// that many concurrent processes and worktrees (issue #2059 code-review
+// finding). 8 is a generous bound on how many implementor seams a single
+// coordinator pass can meaningfully carve out of one issue while still
+// capping concurrent process/worktree fan-out to something a single Box's
+// CPU/memory/disk can sanely host.
+const maxManifestSlices = 8
+
 // validSliceName reports whether name is safe to use as a filesystem
 // path component and as a single line of plain text (see
 // validSliceNameRe's doc comment for why).
@@ -88,12 +100,14 @@ func (m SliceManifest) Line() (string, error) {
 // followed by its base64 JSON payload. Returns (SliceManifest{}, false) when
 // the token is absent, the payload fails to decode, the JSON fails to
 // unmarshal, the decoded manifest has zero slices (an empty manifest is
-// never a meaningful dispatch instruction), any slice name fails
-// validSliceName, any slice's Task is empty/whitespace-only (a slice with no
-// task description leaves the dispatched worker with nothing to implement,
-// issue #2059 code-review finding), or two slices share the same name -- a
-// malformed manifest is simply not a valid dispatch instruction, fail-closed
-// the same way as the empty-manifest case (issue #2059).
+// never a meaningful dispatch instruction), the manifest declares more than
+// maxManifestSlices slices (unbounded fan-out of concurrent worker
+// processes/worktrees, issue #2059 code-review finding), any slice name
+// fails validSliceName, any slice's Task is empty/whitespace-only (a slice
+// with no task description leaves the dispatched worker with nothing to
+// implement, issue #2059 code-review finding), or two slices share the same
+// name -- a malformed manifest is simply not a valid dispatch instruction,
+// fail-closed the same way as the empty-manifest case (issue #2059).
 func ParseManifestLine(line string) (SliceManifest, bool) {
 	idx := strings.Index(line, ManifestToken)
 	if idx == -1 {
@@ -115,6 +129,9 @@ func ParseManifestLine(line string) (SliceManifest, bool) {
 		return SliceManifest{}, false
 	}
 	if len(m.Slices) == 0 {
+		return SliceManifest{}, false
+	}
+	if len(m.Slices) > maxManifestSlices {
 		return SliceManifest{}, false
 	}
 
