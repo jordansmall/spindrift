@@ -6,11 +6,11 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"regexp"
 	"strings"
 	"testing"
 
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/forge/forgetest"
 	"spindrift.dev/launcher/internal/testutil"
 )
 
@@ -801,19 +801,9 @@ func TestExecClient_TransitionState_NormalClaimUnchanged(t *testing.T) {
 // with no forge.DispatchState equivalent, so they're outside what the Go
 // claim can strip.
 func TestExecClient_TransitionState_ClaimRemoveLabelsMatchDispatchWorkflow(t *testing.T) {
-	raw, err := os.ReadFile(filepath.Join("..", "..", "..", "..", "..", ".github", "workflows", "agent-dispatch.yml"))
-	if err != nil {
-		t.Fatalf("read agent-dispatch.yml: %v", err)
-	}
-	line := regexp.MustCompile(`claim-remove-labels:\s*(\S.*)`)
-	m := line.FindStringSubmatch(string(raw))
-	if m == nil {
-		t.Fatal("agent-dispatch.yml is missing a claim-remove-labels: line")
-	}
-	workflowSet := map[string]bool{}
-	for _, l := range strings.Fields(m[1]) {
-		workflowSet[l] = true
-	}
+	workflowSet, rawValue := forgetest.ParseWorkflowRemoveLabelSet(t,
+		filepath.Join("..", "..", "..", "..", "..", ".github", "workflows", "agent-dispatch.yml"),
+		"claim-remove-labels")
 
 	dir := prependFakeGH(t, "")
 	c := NewExecClient("owner/repo", testLabels, "agent/issue-")
@@ -831,7 +821,7 @@ func TestExecClient_TransitionState_ClaimRemoveLabelsMatchDispatchWorkflow(t *te
 		}
 		label := argv[i+1]
 		if !workflowSet[label] {
-			t.Errorf("claim removes label %q, not in agent-dispatch.yml's claim-remove-labels %q", label, m[1])
+			t.Errorf("claim removes label %q, not in agent-dispatch.yml's claim-remove-labels %q", label, rawValue)
 		}
 	}
 }
