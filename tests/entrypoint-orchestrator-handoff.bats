@@ -136,39 +136,30 @@ setup() {
   ! grep -q -- '--review-model' "$ORCHESTRATOR_LOG"
 }
 
-# Issue #2390: REVIEW_EFFORT threads through to the orchestrator's own
-# --review-effort flag, mirroring EFFORT -> --effort above. Unlike
-# review_model/review_prompt, REVIEW_EFFORT has no Handoff descriptor field --
-# it comes straight off the environment, so it's set here as a plain exported
-# var rather than via AGENTS_JSON_TEMPLATE/handoff_json.
-@test "orchestrator path forwards REVIEW_EFFORT to the orchestrator as --review-effort" {
+# Issue #2512: the reviewer's own configured effort (nix-baked into
+# AGENTS_JSON_TEMPLATE's .reviewer.effort) must reach the orchestrator's
+# --review-effort flag via the Handoff descriptor's own ReviewEffort field,
+# mirroring --review-model just above exactly -- extracted before
+# phase_prompt_assembly's del(.reviewer) drops the reviewer entry from
+# --agents entirely.
+@test "orchestrator path forwards --review-effort from the reviewer's configured effort" {
   export ORCHESTRATOR_ENABLED=1
-  export REVIEW_EFFORT="high"
+  export AGENTS_JSON_TEMPLATE='{"reviewer":{"description":"Review the branch diff for spec compliance and coding standards","model":"haiku","effort":"high","prompt":"","tools":["Read","Bash","WebFetch"]}}'
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   grep -q -- '--review-effort high' "$ORCHESTRATOR_LOG"
 }
 
-# Without REVIEW_EFFORT set, there's nothing to override the orchestrator's
-# own default review effort with -- entrypoint.sh must omit --review-effort
+# Without a reviewer entry in the template, there's no configured effort to
+# override with -- the orchestrator's review pass falls back to its own
+# default effort on its own, so entrypoint.sh must omit --review-effort
 # entirely rather than pass it empty, mirroring the --review-model omit test
 # above.
-@test "orchestrator path omits --review-effort when REVIEW_EFFORT is not set" {
+@test "orchestrator path omits --review-effort when no reviewer effort is configured" {
   export ORCHESTRATOR_ENABLED=1
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   ! grep -q -- '--review-effort' "$ORCHESTRATOR_LOG"
-}
-
-# The --review-effort gate is on _driver_invoker = orchestrator, not on
-# REVIEW_EFFORT alone -- the direct driver-exec path has no review pass of
-# its own to configure, so it must omit --review-effort even with
-# REVIEW_EFFORT set, mirroring the orchestrator-path omit test above.
-@test "direct driver-exec path omits --review-effort even with REVIEW_EFFORT set" {
-  export REVIEW_EFFORT="high"
-  run bash "$ENTRYPOINT"
-  [ "$status" -eq 0 ]
-  ! grep -q -- '--review-effort' "$DRIVER_LOG"
 }
 
 # The parallel worker dispatch (issue #2059, #2058): entrypoint.sh renders
@@ -200,9 +191,9 @@ setup() {
 }
 
 # Issue #2059, #2058: WORKER_WORK_DIR/WORKER_TIMEOUT thread through to the
-# orchestrator's own --worker-work-dir/--worker-timeout flags, mirroring
-# REVIEW_EFFORT -> --review-effort above. Like REVIEW_EFFORT, neither has a
-# Handoff descriptor field -- both come straight off the environment.
+# orchestrator's own --worker-work-dir/--worker-timeout flags. Unlike
+# review_effort (now Handoff-sourced, issue #2512), neither has a Handoff
+# descriptor field -- both come straight off the environment.
 @test "orchestrator path forwards WORKER_WORK_DIR/WORKER_TIMEOUT to the orchestrator" {
   export ORCHESTRATOR_ENABLED=1
   export WORKER_WORK_DIR="/tmp/spindrift-workers-test"
