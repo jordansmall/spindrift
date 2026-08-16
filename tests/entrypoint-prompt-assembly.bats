@@ -37,9 +37,14 @@ setup() {
 # trying to read /agent/prompts/issue-prompt.md. Assert only what must hold
 # in both: never "unbound variable", then branch on $status -- a successful
 # run must have actually rendered the prompt (same as the sibling test
-# above); a failing one must still show the resolved preamble default
-# (/agent/prompts) in its output, proving PROMPTS_DIR got there via the
-# preamble rather than by crashing unbound or resolving to something else.
+# above); a failing one must still name the resolved preamble default's own
+# base-prompt path in its output. Scoped to the full
+# "/agent/prompts/issue-prompt.md" path -- assemble.go's renderFile wraps a
+# failed os.ReadFile as "read issue-prompt.md: open <PromptsDir>/issue-
+# prompt.md: ..." -- not just the bare "/agent/prompts" directory, which an
+# unrelated failure (e.g. a usage/flag-parse message merely echoing the
+# --prompts-dir value) could also satisfy without proving the read actually
+# resolved through the preamble default.
 @test "PROMPTS_DIR unset still resolves via the preamble default (not unbound)" {
   unset PROMPTS_DIR
   run bash "$ENTRYPOINT"
@@ -47,7 +52,7 @@ setup() {
   if [ "$status" -eq 0 ]; then
     grep -q "Implement GitHub issue #7: Do the thing" "$DRIVER_PROMPT_FILE"
   else
-    [[ "$output" == *"/agent/prompts"* ]]
+    [[ "$output" == *"/agent/prompts/issue-prompt.md"* ]]
   fi
 }
 
