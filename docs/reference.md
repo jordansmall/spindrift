@@ -435,15 +435,40 @@ Driver entry declares:
 - `sessionCacheDirRelative` — where the agent CLI's session transcripts
   live, relative to `$HOME`. Optional; a Driver that omits it has no
   resumable session state (see above).
+- `argvShape` (ADR 0009, issue #2534) — the Driver's CLI argv-assembly
+  shape, an attrset the Go/bash side walks to build the CLI invocation:
+  `promptStyle` (`"flag"` or `"positional"`); `promptFlag` (required only
+  when `promptStyle` is `"flag"`); `modelFlag`; `modelOmitEmpty` (bool —
+  omit the model slot entirely when the model value is empty);
+  `agentsFlag` (optional — omit the attribute entirely for a Driver with
+  no `--agents` equivalent); `effortFlag`; and `order`, a permutation of
+  the 6 argv slots `prompt`/`model`/`agents`/`session`/`driverFlags`/
+  `effort`, restricted to whichever slots actually apply — `agents` is
+  excluded from the required permutation when `agentsFlag` itself is
+  omitted. See `claude.nix`'s (flag-style, with `--agents`) and
+  `opencode.nix`'s (positional-style, without `--agents`) own `argvShape`
+  blocks for the two worked examples.
 
 The registry validates every entry against this required-attribute list at
 eval time (`assertShape` in `lib/drivers/default.nix`): an entry missing one
 of the required fields above fails the build with a message naming the
 Driver and the missing attribute, before an image is ever produced.
-`sessionCacheDirRelative` is the one field this check treats as optional.
-Cross-half parity with the Go registry (`cmd/launcher/internal/driver`)
-stays name-only by design (ADR 0009) — each half enforces its own entries'
-completeness independently.
+`sessionCacheDirRelative` and, within `argvShape`, `promptFlag`/`agentsFlag`
+are the fields this check treats as optional (`argvShape` itself is still a
+required top-level attribute). Cross-half parity with the Go registry
+(`cmd/launcher/internal/driver`) stays name-only by design (ADR 0009) —
+each half enforces its own entries' completeness independently.
+
+A separate validator, `assertArgvShape`, checks `argvShape`'s internal
+structure — `assertShape` above only confirms the attribute is present, not
+that its contents are well-formed. `assertArgvShape` requires: `promptStyle`
+is `"flag"` or `"positional"`; `promptFlag` is a non-empty string when
+required; `modelFlag`/`effortFlag` are non-empty strings; `modelOmitEmpty`
+is a bool; `agentsFlag`, when present, is a non-empty string; and `order` is
+a list containing each applicable slot exactly once, with no missing, extra,
+or duplicate slots. Like `assertShape`, it collects every violation it finds
+into one `throw` message naming the Driver, rather than failing on just the
+first.
 
 The registry also owns rendering: `renderPreamble` turns a validated entry
 into the `DRIVER_*` variable block (`DRIVER_NAME` — the launcher selects its
