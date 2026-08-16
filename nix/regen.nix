@@ -7,8 +7,9 @@
 # cmd/launcher/internal/outcome/status_gen.go,
 # cmd/launcher/internal/backend/registry_gen.go,
 # tests/box_env_gen.bash, tests/default_models_gen.bash,
-# cmd/launcher/defaultmodels_gen.go, and the generated section of
-# templates/default/flake.nix's commented-out `settings` example, from their
+# cmd/launcher/defaultmodels_gen.go, the generated section of
+# templates/default/flake.nix's commented-out `settings` example, and the
+# generated section of docs/reference.md's Default models table, from their
 # respective Nix sources, and writes them into the working tree. Calls the
 # exact same renderers as the nix/checks.nix drift guards (lib/renderers.nix),
 # so resolving a source-edit conflict is: fix the Nix source, run this, commit.
@@ -54,6 +55,7 @@ let
   defaultModelFixture = import ../lib/default-model-fixture.nix;
   defaultModelFixtureBash = renderers.renderDefaultModelFixtureBash defaultModelFixture;
   defaultModelFixtureGo = renderers.renderDefaultModelFixtureGo defaultModelFixture;
+  defaultModelsDoc = renderers.renderDefaultModelsDoc defaultModelFixture;
   inherit (pkgs.lib) escapeShellArg;
 in
 pkgs.writeShellApplication {
@@ -118,5 +120,9 @@ pkgs.writeShellApplication {
         + researchStatusPipe
         + "\"\n"
       )}
+    write_between docs/reference.md \
+      ${escapeShellArg "<!-- BEGIN GENERATED DEFAULT MODELS -- nix run .#regen -- DO NOT EDIT -->"} \
+      ${escapeShellArg "<!-- END GENERATED DEFAULT MODELS -->"} \
+      ${escapeShellArg defaultModelsDoc}
   '';
 }
