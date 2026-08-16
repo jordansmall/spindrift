@@ -166,11 +166,14 @@ in
     grep -q '"RUNTIME":"rancher"' ${rancherHarness.internals.runInputDocumentFile}
 
     # RUNNER_KIND is forwarded as a document artifact (issue #2538): "oci" for
-    # any OCI runtime (podman here), "bwrap" for the bwrap harness below.
-    # Asserted on both the run and build documents — buildArtifacts carries
-    # its own RUNNER_KIND key, independent of runArtifacts.
+    # any OCI runtime (podman, docker, rancher here), "bwrap" for the bwrap
+    # harness below. Asserted on both the run and build documents —
+    # buildArtifacts carries its own RUNNER_KIND key, independent of
+    # runArtifacts.
     grep -q '"RUNNER_KIND":"oci"' ${harness.internals.runInputDocumentFile}
     grep -q '"RUNNER_KIND":"oci"' ${harness.internals.buildInputDocumentFile}
+    grep -q '"RUNNER_KIND":"oci"' ${dockerHarness.internals.runInputDocumentFile}
+    grep -q '"RUNNER_KIND":"oci"' ${rancherHarness.internals.runInputDocumentFile}
 
     # bwrap harness bakes bwrap runtime and agent store paths; no OCI store paths.
     grep -q '"RUNTIME":"bwrap"' ${bwrapHarness.internals.runInputDocumentFile}
