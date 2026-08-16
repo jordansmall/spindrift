@@ -361,11 +361,16 @@ rec {
     fixture:
     let
       inherit (fixture) schemaDefaults;
+      # builtins.toJSON, not a hand-wrapped "${value}", so a default
+      # containing `"` or `\` still renders as a syntactically valid quoted
+      # literal in the doc example -- the same escaping treatment
+      # renderAgentPathsGo's renderConst uses for Go string literals.
+      inherit (builtins) toJSON;
     in
-    "  models          = { model = \"${schemaDefaults.model}\";\n"
-    + "                      scoutModel  = \"${schemaDefaults.scoutModel}\";\n"
-    + "                      reviewModel = \"${schemaDefaults.reviewModel}\";\n"
-    + "                      filerModel  = \"${schemaDefaults.filerModel}\"; };\n";
+    "  models          = { model = ${toJSON schemaDefaults.model};\n"
+    + "                      scoutModel  = ${toJSON schemaDefaults.scoutModel};\n"
+    + "                      reviewModel = ${toJSON schemaDefaults.reviewModel};\n"
+    + "                      filerModel  = ${toJSON schemaDefaults.filerModel}; };\n";
 
   # docs/reference.md's generated `settings = { ... }` example's
   # `issueDiscovery`/`lifecycleLabels` lines (issue #2537): the four
@@ -384,10 +389,17 @@ rec {
   # plain env-schema.nix knobs with no dedicated fixture of their own.
   renderSettingsExampleLabelsDoc =
     schema:
-    "  issueDiscovery  = { label          = \"${schema.label.default}\"; };\n"
-    + "  lifecycleLabels = { inProgressLabel = \"${schema.inProgressLabel.default}\";\n"
-    + "                      failedLabel     = \"${schema.failedLabel.default}\";\n"
-    + "                      completeLabel   = \"${schema.completeLabel.default}\"; };\n";
+    let
+      # builtins.toJSON, not a hand-wrapped "${value}", so a default
+      # containing `"` or `\` still renders as a syntactically valid quoted
+      # literal in the doc example -- the same escaping treatment
+      # renderAgentPathsGo's renderConst uses for Go string literals.
+      inherit (builtins) toJSON;
+    in
+    "  issueDiscovery  = { label          = ${toJSON schema.label.default}; };\n"
+    + "  lifecycleLabels = { inProgressLabel = ${toJSON schema.inProgressLabel.default};\n"
+    + "                      failedLabel     = ${toJSON schema.failedLabel.default};\n"
+    + "                      completeLabel   = ${toJSON schema.completeLabel.default}; };\n";
 
   # docs/reference.md's generated `settings = { ... }` example's `branches`/
   # `concurrency` lines (issue #2537): the eight lib/env-schema.nix leaves
@@ -410,9 +422,16 @@ rec {
   # env-schema.nix knobs with no dedicated fixture of their own.
   renderSettingsExampleConfigDoc =
     schema:
-    "  branches        = { baseBranch = \"${schema.baseBranch.default}\"; branchPrefix = \"${schema.branchPrefix.default}\";\n"
-    + "                      mergeMode  = \"${schema.mergeMode.default}\";\n"
-    + "                      mergeGuardPaths = \"${schema.mergeGuardPaths.default}\";\n"
+    let
+      # builtins.toJSON, not a hand-wrapped "${value}", so a default
+      # containing `"` or `\` still renders as a syntactically valid quoted
+      # literal in the doc example -- the same escaping treatment
+      # renderAgentPathsGo's renderConst uses for Go string literals.
+      inherit (builtins) toJSON;
+    in
+    "  branches        = { baseBranch = ${toJSON schema.baseBranch.default}; branchPrefix = ${toJSON schema.branchPrefix.default};\n"
+    + "                      mergeMode  = ${toJSON schema.mergeMode.default};\n"
+    + "                      mergeGuardPaths = ${toJSON schema.mergeGuardPaths.default};\n"
     + "                      mergePollInterval = ${toString schema.mergePollInterval.default}; mergePollTimeout = ${toString schema.mergePollTimeout.default}; };\n"
     + "  concurrency     = { maxParallel = ${toString schema.maxParallel.default}; maxJobs = ${toString schema.maxJobs.default}; };\n";
 
