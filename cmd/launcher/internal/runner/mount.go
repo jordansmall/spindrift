@@ -123,8 +123,12 @@ func candidateFileMount(source, target string, readOnly bool) (MountSpec, bool) 
 }
 
 // buildMountSpecs computes the list of host-to-box mounts that apply for p
-// and box, independent of runtime backend.
-func buildMountSpecs(p MountParams, box Box) []MountSpec {
+// and box, independent of runtime backend. Every mount here is optional and
+// silent-when-absent except the issue-snapshot mount below: once
+// box.IssueSnapshotPath is non-empty, mounting it is required, so a stat
+// failure on it returns a descriptive error instead of silently dropping
+// the mount (issue #2547 review finding).
+func buildMountSpecs(p MountParams, box Box) ([]MountSpec, error) {
 	var specs []MountSpec
 
 	if spec, ok := candidateMount(p.PromptDir, agentpaths.PromptsDir, true); ok {
@@ -173,10 +177,26 @@ func buildMountSpecs(p MountParams, box Box) []MountSpec {
 	// once at Run's box start (issue #2547), silent like the /issues mount
 	// (this is a normal read path, not an operator override). An empty
 	// path -- research dispatches, and every pre-#2547 Box construction --
-	// yields no mount.
-	if spec, ok := candidateFileMount(box.IssueSnapshotPath, issueSnapshotTarget, true); ok {
-		specs = append(specs, spec)
+	// yields no mount, same as candidateFileMount's own contract. But once
+	// box.Run's writeIssueSnapshot step has set a non-empty path, that file
+	// is the box's sole source of issue text for implement/review/fix
+	// passes (the issue-read prompt fragments no longer do a live tracker
+	// read) -- candidateFileMount's fail-open behavior would otherwise leave
+	// the box silently starting with no issue text at all if the file were
+	// removed or made unreadable in the (tiny) window between the host
+	// write and this mount. So unlike every mount above, a non-empty
+	// IssueSnapshotPath that fails to stat is a hard error here, not a
+	// silently dropped mount.
+	if box.IssueSnapshotPath != "" {
+		if spec, ok := candidateFileMount(box.IssueSnapshotPath, issueSnapshotTarget, true); ok {
+			specs = append(specs, spec)
+		} else if _, err := os.Stat(box.IssueSnapshotPath); err != nil {
+			return nil, fmt.Errorf("issue snapshot %q: %w", box.IssueSnapshotPath, err)
+		}
+		// else: the path stats fine but isn't a regular file (e.g. a
+		// directory) -- candidateFileMount's existing silent contract for
+		// that case is unchanged; only the stat-failure case above is a bug.
 	}
 
-	return specs
+	return specs, nil
 }

@@ -105,12 +105,18 @@ func TestBwrapRun_PastaIsTopLevelProgramByDefault(t *testing.T) {
 func TestBwrapExecTarget_PidsLimitNoLongerWrapsWithPrlimit(t *testing.T) {
 	t.Run("bare bwrap", func(t *testing.T) {
 		a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok", networkMode: NetworkModeHost, pidsLimit: "512"}
-		program, args, _ := a.execTarget("", Box{Env: map[string]string{}})
+		program, args, _, err := a.execTarget("", Box{Env: map[string]string{}})
+		if err != nil {
+			t.Fatalf("execTarget: %v", err)
+		}
 
 		if program != "bwrap" {
 			t.Errorf("execTarget program = %q, want %q", program, "bwrap")
 		}
-		wantArgs := a.buildArgs("", Box{Env: map[string]string{}})
+		wantArgs, err := a.buildArgs("", Box{Env: map[string]string{}})
+		if err != nil {
+			t.Fatalf("buildArgs: %v", err)
+		}
 		if !reflect.DeepEqual(args, wantArgs) {
 			t.Errorf("execTarget args = %v, want %v", args, wantArgs)
 		}
@@ -124,14 +130,21 @@ func TestBwrapExecTarget_PidsLimitNoLongerWrapsWithPrlimit(t *testing.T) {
 
 	t.Run("pasta", func(t *testing.T) {
 		a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok", pidsLimit: "512"}
-		program, args, _ := a.execTarget("", Box{Env: map[string]string{}})
+		program, args, _, err := a.execTarget("", Box{Env: map[string]string{}})
+		if err != nil {
+			t.Fatalf("execTarget: %v", err)
+		}
 
 		if program != "pasta" {
 			t.Errorf("execTarget program = %q, want %q", program, "pasta")
 		}
 		wantArgs := append([]string{}, pastaHardenedFlags...)
 		wantArgs = append(wantArgs, "--dns-forward", pastaDNSForwardAddr, "-f", "--", "bwrap")
-		wantArgs = append(wantArgs, a.buildArgs("", Box{Env: map[string]string{}})...)
+		bwrapArgs, err := a.buildArgs("", Box{Env: map[string]string{}})
+		if err != nil {
+			t.Fatalf("buildArgs: %v", err)
+		}
+		wantArgs = append(wantArgs, bwrapArgs...)
 		if !reflect.DeepEqual(args, wantArgs) {
 			t.Errorf("execTarget args = %v, want %v", args, wantArgs)
 		}
@@ -1656,7 +1669,11 @@ func TestBwrapRun_OpencodeAuthContentOffArgvButInProcessEnv(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	for _, arg := range a.buildArgs("/tmp/fake-etc", box) {
+	args, err := a.buildArgs("/tmp/fake-etc", box)
+	if err != nil {
+		t.Fatalf("buildArgs: %v", err)
+	}
+	for _, arg := range args {
 		if strings.Contains(arg, sentinel) {
 			t.Errorf("OPENCODE_AUTH_CONTENT sentinel found in bwrap argv: %v", arg)
 		}
@@ -1697,7 +1714,11 @@ func TestBwrapRun_RegistryProxyTCPSecretOffArgvButInProcessEnv(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	for _, arg := range a.buildArgs("/tmp/fake-etc", box) {
+	builtArgs, err := a.buildArgs("/tmp/fake-etc", box)
+	if err != nil {
+		t.Fatalf("buildArgs: %v", err)
+	}
+	for _, arg := range builtArgs {
 		if strings.Contains(arg, sentinel) {
 			t.Errorf("REGISTRY_PROXY_TCP_SECRET sentinel found in bwrap argv: %v", arg)
 		}
@@ -3466,7 +3487,10 @@ func TestBuildArgs_ClosureGenerationAgentEnvOverridesSetenv(t *testing.T) {
 		ClosureGeneration: &AgentGeneration{AgentFiles: "/swapped/agent", AgentEnv: "/swapped/env", Generation: "swapped"},
 	}
 
-	args := a.buildArgs("", box)
+	args, err := a.buildArgs("", box)
+	if err != nil {
+		t.Fatalf("buildArgs: %v", err)
+	}
 
 	wantSetenvs := []string{
 		"PATH", "/swapped/env/bin",

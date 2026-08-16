@@ -423,8 +423,10 @@ func (a *bwrapAdapter) IsReady() error {
 }
 
 // mountSpecs computes the host-to-box mounts that apply for box, shared with
-// the OCI adapter (buildMountSpecs); only the rendering below differs.
-func (a *bwrapAdapter) mountSpecs(box Box) []MountSpec {
+// the OCI adapter (buildMountSpecs); only the rendering below differs. The
+// error return propagates buildMountSpecs's own required-mount failure (the
+// issue-snapshot mount, issue #2547 review finding).
+func (a *bwrapAdapter) mountSpecs(box Box) ([]MountSpec, error) {
 	return buildMountSpecs(a.mountParams, box)
 }
 
@@ -541,7 +543,9 @@ func (a *bwrapAdapter) snapshotDirFor(box Box) string {
 // the sandbox via inherited process environment (no --clearenv). Pasta
 // itself is never part of this return value -- see execTarget, which wraps
 // bwrap's own argv with pasta as the outer process when pastaPath applies.
-func (a *bwrapAdapter) buildArgs(etcDir string, box Box) []string {
+// Returns an error when mountSpecs does (the required issue-snapshot mount
+// failing to stat, issue #2547 review finding).
+func (a *bwrapAdapter) buildArgs(etcDir string, box Box) ([]string, error) {
 	isolateNet := a.isolateNet()
 	var args []string
 	if a.nixConfigFile != "" && a.nixStoreWritable {
@@ -606,7 +610,11 @@ func (a *bwrapAdapter) buildArgs(etcDir string, box Box) []string {
 	// than its parent so it can never shadow a sibling skills bind regardless
 	// of order, and the CODE_FORGE=local outbox spec (ADR 0033, issue #1697)
 	// are the only writable mounts buildMountSpecs ever produces.
-	for _, m := range a.mountSpecs(box) {
+	specs, err := a.mountSpecs(box)
+	if err != nil {
+		return nil, err
+	}
+	for _, m := range specs {
 		if m.Message != "" {
 			fmt.Print(m.Message)
 		}
@@ -665,7 +673,7 @@ func (a *bwrapAdapter) buildArgs(etcDir string, box Box) []string {
 		args = append(args, "--seccomp", strconv.Itoa(seccompFilterFD))
 	}
 	args = append(args, "--", "/agent/entrypoint.sh")
-	return args
+	return args, nil
 }
 
 // execTarget computes the top-level host-exec'd program and argv for box's
@@ -685,8 +693,11 @@ func (a *bwrapAdapter) buildArgs(etcDir string, box Box) []string {
 // re-deriving it off program names: a future wrapper added without updating
 // this flag fails closed (its child exec breaks loudly under test) instead
 // of silently inheriting forwarding.
-func (a *bwrapAdapter) execTarget(etcDir string, box Box) (string, []string, bool) {
-	bwrapArgs := a.buildArgs(etcDir, box)
+func (a *bwrapAdapter) execTarget(etcDir string, box Box) (string, []string, bool, error) {
+	bwrapArgs, err := a.buildArgs(etcDir, box)
+	if err != nil {
+		return "", nil, false, err
+	}
 	var program string
 	var args []string
 	if !a.pastaPath() {
@@ -705,7 +716,7 @@ func (a *bwrapAdapter) execTarget(etcDir string, box Box) (string, []string, boo
 		program, args = "pasta", pastaArgs
 	}
 	childExecsByName := program == "pasta"
-	return program, args, childExecsByName
+	return program, args, childExecsByName, nil
 }
 
 // pastaDNSForwardAddr is pasta's own documented default IPv4 gateway address
@@ -999,7 +1010,10 @@ func (a *bwrapAdapter) Run(box Box) error {
 			defer f.Close()
 		}
 	}
-	program, execArgs, childExecsByName := a.execTarget(etcDir, box)
+	program, execArgs, childExecsByName, err := a.execTarget(etcDir, box)
+	if err != nil {
+		return err
+	}
 	if syscallFilterOpenFailed {
 		// buildArgs (via execTarget) unconditionally appended "--seccomp
 		// <fd>" from a.syscallFilterPath alone, before the open above was

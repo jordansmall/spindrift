@@ -25,7 +25,10 @@ func TestBwrapArgs_NoSecretOnArgv(t *testing.T) {
 		},
 	}
 
-	args := a.buildArgs("/tmp/fake-etc", box)
+	args, err := a.buildArgs("/tmp/fake-etc", box)
+	if err != nil {
+		t.Fatalf("buildArgs: %v", err)
+	}
 
 	secrets := []string{"gh-secret-value", "claude-secret-value", "anthropic-secret-value"}
 	for _, arg := range args {
@@ -45,7 +48,10 @@ func TestBwrapArgs_NoClearEnv(t *testing.T) {
 		agentEnv:      "/fake/env",
 		bakedPrefetch: "echo ok",
 	}
-	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{"GH_TOKEN": "s"}})
+	args, err := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{"GH_TOKEN": "s"}})
+	if err != nil {
+		t.Fatalf("buildArgs: %v", err)
+	}
 	for _, arg := range args {
 		if arg == "--clearenv" {
 			t.Errorf("--clearenv found in bwrap argv; secrets would not reach sandbox")
@@ -63,7 +69,10 @@ func TestBwrapArgs_DieWithParent(t *testing.T) {
 		agentEnv:      "/fake/env",
 		bakedPrefetch: "echo ok",
 	}
-	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}})
+	args, err := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}})
+	if err != nil {
+		t.Fatalf("buildArgs: %v", err)
+	}
 
 	if !containsArg(args, "--die-with-parent") {
 		t.Errorf("expected --die-with-parent in args: %v", args)
@@ -83,7 +92,10 @@ func TestBwrapArgs_SkillsDirMounted(t *testing.T) {
 		bakedPrefetch: "echo ok",
 		mountParams:   MountParams{SkillsDir: dir},
 	}
-	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}})
+	args, err := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}})
+	if err != nil {
+		t.Fatalf("buildArgs: %v", err)
+	}
 
 	argStr := strings.Join(args, " ")
 	want := "--ro-bind " + dir + " /operator-skills"
@@ -102,7 +114,10 @@ func TestBwrapArgs_RegistryProxySocketMounted(t *testing.T) {
 		agentEnv:      "/fake/env",
 		bakedPrefetch: "echo ok",
 	}
-	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}, RegistryProxy: RegistryProxyLocation{Endpoint: registrymanifest.NewUnixEndpoint(sock)}})
+	args, err := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}, RegistryProxy: RegistryProxyLocation{Endpoint: registrymanifest.NewUnixEndpoint(sock)}})
+	if err != nil {
+		t.Fatalf("buildArgs: %v", err)
+	}
 
 	argStr := strings.Join(args, " ")
 	want := "--bind " + sock + " /registry-proxy.sock"
@@ -126,7 +141,10 @@ func TestBwrapArgs_HomeAgentStagingMounted(t *testing.T) {
 		agentEnv:      "/fake/env",
 		bakedPrefetch: "echo ok",
 	}
-	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}})
+	args, err := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}})
+	if err != nil {
+		t.Fatalf("buildArgs: %v", err)
+	}
 
 	if !wantTriple(args, "--ro-bind", "/fake/agent/home/agent", "/home-agent-staged") {
 		t.Errorf("expected --ro-bind /fake/agent/home/agent /home-agent-staged in args: %v", args)
@@ -147,7 +165,10 @@ func TestBwrapArgs_ClosureGenerationOverridesAgentFiles(t *testing.T) {
 		Env:               map[string]string{},
 		ClosureGeneration: &AgentGeneration{AgentFiles: "/gen2/agent-files"},
 	}
-	args := a.buildArgs("/tmp/fake-etc", box)
+	args, err := a.buildArgs("/tmp/fake-etc", box)
+	if err != nil {
+		t.Fatalf("buildArgs: %v", err)
+	}
 
 	if !wantTriple(args, "--ro-bind", "/gen2/agent-files/agent", "/agent") {
 		t.Errorf("expected --ro-bind /gen2/agent-files/agent /agent in args: %v", args)
@@ -179,7 +200,10 @@ func TestBwrapArgs_ClosureGenerationEmptyAgentFilesFallsBackToBaked(t *testing.T
 		Env:               map[string]string{},
 		ClosureGeneration: &AgentGeneration{Generation: "gen2"},
 	}
-	args := a.buildArgs("/tmp/fake-etc", box)
+	args, err := a.buildArgs("/tmp/fake-etc", box)
+	if err != nil {
+		t.Fatalf("buildArgs: %v", err)
+	}
 
 	if !wantTriple(args, "--ro-bind", "/baked/agent-files/agent", "/agent") {
 		t.Errorf("expected --ro-bind /baked/agent-files/agent /agent in args: %v", args)
@@ -205,7 +229,10 @@ func TestBwrapArgs_ClosureGenerationNilKeepsBakedAgentFiles(t *testing.T) {
 		agentEnv:      "/fake/env",
 		bakedPrefetch: "echo ok",
 	}
-	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}})
+	args, err := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}})
+	if err != nil {
+		t.Fatalf("buildArgs: %v", err)
+	}
 
 	if !wantTriple(args, "--ro-bind", "/baked/agent-files/agent", "/agent") {
 		t.Errorf("expected --ro-bind /baked/agent-files/agent /agent in args: %v", args)
@@ -226,7 +253,10 @@ func TestBwrapArgs_AccountFilesBindStorePaths(t *testing.T) {
 		passwdFile: "/nix/store/abc123-passwd/passwd",
 		groupFile:  "/nix/store/def456-group/group",
 	}
-	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}})
+	args, err := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}})
+	if err != nil {
+		t.Fatalf("buildArgs: %v", err)
+	}
 
 	if !wantTriple(args, "--ro-bind", "/nix/store/abc123-passwd/passwd", "/etc/passwd") {
 		t.Errorf("expected --ro-bind /nix/store/abc123-passwd/passwd /etc/passwd in args: %v", args)
@@ -261,7 +291,10 @@ func TestBwrapArgs_NetworkModeNoneUnsharesNet(t *testing.T) {
 		bakedPrefetch: "echo ok",
 		networkMode:   "none",
 	}
-	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}})
+	args, err := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}})
+	if err != nil {
+		t.Fatalf("buildArgs: %v", err)
+	}
 
 	if !containsArg(args, "--unshare-net") {
 		t.Errorf("--unshare-net missing for networkMode=none; args: %v", args)
@@ -282,8 +315,14 @@ func TestBwrapArgs_NetworkModeNoneUnsharesNet(t *testing.T) {
 // its COMMAND (bwrap) inside it (issue #2666).
 func assertPastaExecTarget(t *testing.T, a *bwrapAdapter, etcDir string, box Box) {
 	t.Helper()
-	bwrapArgs := a.buildArgs(etcDir, box)
-	program, args, childExecsByName := a.execTarget(etcDir, box)
+	bwrapArgs, err := a.buildArgs(etcDir, box)
+	if err != nil {
+		t.Fatalf("buildArgs: %v", err)
+	}
+	program, args, childExecsByName, err := a.execTarget(etcDir, box)
+	if err != nil {
+		t.Fatalf("execTarget: %v", err)
+	}
 
 	if program != "pasta" {
 		t.Fatalf("execTarget program = %q, want %q", program, "pasta")
@@ -310,8 +349,14 @@ func assertPastaExecTarget(t *testing.T, a *bwrapAdapter, etcDir string, box Box
 // involves pasta.
 func assertBareBwrapExecTarget(t *testing.T, a *bwrapAdapter, etcDir string, box Box) {
 	t.Helper()
-	bwrapArgs := a.buildArgs(etcDir, box)
-	program, args, childExecsByName := a.execTarget(etcDir, box)
+	bwrapArgs, err := a.buildArgs(etcDir, box)
+	if err != nil {
+		t.Fatalf("buildArgs: %v", err)
+	}
+	program, args, childExecsByName, err := a.execTarget(etcDir, box)
+	if err != nil {
+		t.Fatalf("execTarget: %v", err)
+	}
 
 	if program != "bwrap" {
 		t.Fatalf("execTarget program = %q, want %q", program, "bwrap")
@@ -348,7 +393,10 @@ func TestBwrapArgs_NetworkModeOpenOmitsBwrapSideUnshareNet(t *testing.T) {
 		bakedPrefetch: "echo ok",
 		networkMode:   "open",
 	}
-	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}})
+	args, err := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}})
+	if err != nil {
+		t.Fatalf("buildArgs: %v", err)
+	}
 
 	if containsArg(args, "--unshare-net") {
 		t.Errorf("--unshare-net must be absent from buildArgs' own return for networkMode=open; bwrap must inherit pasta's already-configured netns, not re-unshare into an empty one: args: %v", args)
@@ -382,7 +430,10 @@ func TestBwrapArgs_NetworkModeNoHostLoopbackDefaultsToIsolate(t *testing.T) {
 		bakedPrefetch: "echo ok",
 		networkMode:   "no-host-loopback",
 	}
-	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}})
+	args, err := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}})
+	if err != nil {
+		t.Fatalf("buildArgs: %v", err)
+	}
 
 	if containsArg(args, "--unshare-net") {
 		t.Errorf("--unshare-net must be absent from buildArgs' own return for networkMode=no-host-loopback; hazard reopened: args: %v", args)
@@ -407,7 +458,10 @@ func TestBwrapArgs_NetworkModeUnsetDefaultsToIsolate(t *testing.T) {
 		agentEnv:      "/fake/env",
 		bakedPrefetch: "echo ok",
 	}
-	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}})
+	args, err := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}})
+	if err != nil {
+		t.Fatalf("buildArgs: %v", err)
+	}
 
 	if containsArg(args, "--unshare-net") {
 		t.Errorf("--unshare-net must be absent from buildArgs' own return for zero-value networkMode; args: %v", args)
@@ -435,7 +489,10 @@ func TestBwrapArgs_NetworkModeHostSharesHostNetns(t *testing.T) {
 		bakedPrefetch: "echo ok",
 		networkMode:   "host",
 	}
-	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}})
+	args, err := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}})
+	if err != nil {
+		t.Fatalf("buildArgs: %v", err)
+	}
 
 	if containsArg(args, "--unshare-net") {
 		t.Errorf("--unshare-net must be absent for networkMode=host; args: %v", args)
@@ -463,7 +520,10 @@ func TestBwrapArgs_UnshareNetKnobOmitsBwrapSideUnshareNet(t *testing.T) {
 		bakedPrefetch: "echo ok",
 		unshareNet:    true,
 	}
-	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}})
+	args, err := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}})
+	if err != nil {
+		t.Fatalf("buildArgs: %v", err)
+	}
 
 	if containsArg(args, "--unshare-net") {
 		t.Errorf("--unshare-net must be absent from buildArgs' own return for unshareNet=true; args: %v", args)
@@ -579,7 +639,10 @@ func TestBwrapArgs_IssuesDirMounted(t *testing.T) {
 		bakedPrefetch: "echo ok",
 		mountParams:   MountParams{HostMediatedIssueTracker: true, LocalIssuesDir: dir},
 	}
-	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}})
+	args, err := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}})
+	if err != nil {
+		t.Fatalf("buildArgs: %v", err)
+	}
 
 	argStr := strings.Join(args, " ")
 	want := "--ro-bind " + dir + " /issues"
@@ -601,7 +664,10 @@ func TestBwrapArgs_IssuesDirUnset_NoMount(t *testing.T) {
 		bakedPrefetch: "echo ok",
 		mountParams:   MountParams{HostMediatedIssueTracker: false, LocalIssuesDir: dir},
 	}
-	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}})
+	args, err := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}})
+	if err != nil {
+		t.Fatalf("buildArgs: %v", err)
+	}
 
 	argStr := strings.Join(args, " ")
 	if strings.Contains(argStr, "/issues") {
@@ -620,7 +686,10 @@ func TestBwrapArgs_DriverCacheDirMountedWritable(t *testing.T) {
 		bakedPrefetch: "echo ok",
 		mountParams:   MountParams{DriverSessionCacheDir: "/home/agent/.claude/projects"},
 	}
-	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}, DriverCacheDir: dir})
+	args, err := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}, DriverCacheDir: dir})
+	if err != nil {
+		t.Fatalf("buildArgs: %v", err)
+	}
 
 	argStr := strings.Join(args, " ")
 	want := "--bind " + dir + " /home/agent/.claude/projects"
@@ -643,7 +712,10 @@ func TestBwrapArgs_DriverCacheDirMounted_HardeningPreserved(t *testing.T) {
 		bakedPrefetch: "echo ok",
 		mountParams:   MountParams{DriverSessionCacheDir: "/home/agent/.claude/projects"},
 	}
-	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}, DriverCacheDir: dir})
+	args, err := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}, DriverCacheDir: dir})
+	if err != nil {
+		t.Fatalf("buildArgs: %v", err)
+	}
 
 	for _, flag := range []string{"--unshare-user", "--unshare-pid", "--unshare-ipc", "--unshare-uts"} {
 		if !containsArg(args, flag) {
@@ -664,7 +736,10 @@ func TestBwrapArgs_DriverCacheDir_DotClaudeParentCreated(t *testing.T) {
 		bakedPrefetch: "echo ok",
 		mountParams:   MountParams{DriverSessionCacheDir: "/home/agent/.claude/projects"},
 	}
-	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}, DriverCacheDir: dir})
+	args, err := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}, DriverCacheDir: dir})
+	if err != nil {
+		t.Fatalf("buildArgs: %v", err)
+	}
 
 	dirIdx := -1
 	bindIdx := -1
@@ -700,7 +775,10 @@ func TestBwrapArgs_DriverCacheMountTarget_FromDriverDeclaration(t *testing.T) {
 		bakedPrefetch: "echo ok",
 		mountParams:   MountParams{DriverSessionCacheDir: "/home/agent/custom-driver/state"},
 	}
-	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}, DriverCacheDir: dir})
+	args, err := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}, DriverCacheDir: dir})
+	if err != nil {
+		t.Fatalf("buildArgs: %v", err)
+	}
 
 	argStr := strings.Join(args, " ")
 	wantBind := "--bind " + dir + " /home/agent/custom-driver/state"
@@ -724,7 +802,10 @@ func TestBwrapArgs_DriverSessionCacheDirUndeclared_NoMount(t *testing.T) {
 		agentEnv:      "/fake/env",
 		bakedPrefetch: "echo ok",
 	}
-	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}, DriverCacheDir: dir})
+	args, err := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}, DriverCacheDir: dir})
+	if err != nil {
+		t.Fatalf("buildArgs: %v", err)
+	}
 	for _, arg := range args {
 		if arg == dir {
 			t.Errorf("unexpected driver cache bind in args when Driver declares no session-cache dir: %v", args)
@@ -741,7 +822,10 @@ func TestBwrapArgs_DriverCacheDirUnset_NoMount(t *testing.T) {
 		bakedPrefetch: "echo ok",
 		mountParams:   MountParams{DriverSessionCacheDir: "/home/agent/.claude/projects"},
 	}
-	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}})
+	args, err := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}})
+	if err != nil {
+		t.Fatalf("buildArgs: %v", err)
+	}
 	argStr := strings.Join(args, " ")
 	if strings.Contains(argStr, "/home/agent/.claude/projects") {
 		t.Errorf("unexpected driver cache bind in args when DriverCacheDir is empty: %v", args)
@@ -757,7 +841,10 @@ func TestBwrapArgs_SkillsDirUnset_NoMount(t *testing.T) {
 		bakedPrefetch: "echo ok",
 		mountParams:   MountParams{SkillsDir: ""},
 	}
-	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}})
+	args, err := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}})
+	if err != nil {
+		t.Fatalf("buildArgs: %v", err)
+	}
 	argStr := strings.Join(args, " ")
 	if strings.Contains(argStr, ".claude/skills") {
 		t.Errorf("unexpected skills bind in args when skillsDir is empty: %v", args)
@@ -784,7 +871,10 @@ func TestBwrapArgs_MountsNixConfigAndStoreDBSnapshotWhenSet(t *testing.T) {
 		nixConfigFile:     "/nix/store/fake-hash-nix-conf/nix.conf",
 		nixVarSnapshotDir: "/fake/pwd/.spindrift/nix-var-snapshot",
 	}
-	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}})
+	args, err := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}})
+	if err != nil {
+		t.Fatalf("buildArgs: %v", err)
+	}
 
 	if !wantTriple(args, "--ro-bind", "/nix/store/fake-hash-nix-conf/nix.conf", "/etc/nix/nix.conf") {
 		t.Errorf("expected --ro-bind /nix/store/fake-hash-nix-conf/nix.conf /etc/nix/nix.conf in args: %v", args)
@@ -811,7 +901,10 @@ func TestBwrapArgs_ClosureGenerationOverridesNixVarSnapshotDir(t *testing.T) {
 		Env:               map[string]string{},
 		ClosureGeneration: &AgentGeneration{AgentFiles: "/gen2/agent-files", Generation: "gen2"},
 	}
-	args := a.buildArgs("/tmp/fake-etc", box)
+	args, err := a.buildArgs("/tmp/fake-etc", box)
+	if err != nil {
+		t.Fatalf("buildArgs: %v", err)
+	}
 
 	if !strings.Contains(strings.Join(args, " "), "--overlay-src /fake/pwd/.spindrift/nix-var-snapshot/gen2 --tmp-overlay /nix/var") {
 		t.Errorf("expected --overlay-src /fake/pwd/.spindrift/nix-var-snapshot/gen2 --tmp-overlay /nix/var in args: %v", args)
@@ -841,7 +934,10 @@ func TestBwrapArgs_ClosureGenerationEmptyGenerationFallsBackToBaked(t *testing.T
 		Env:               map[string]string{},
 		ClosureGeneration: &AgentGeneration{AgentFiles: "/gen2/agent-files"},
 	}
-	args := a.buildArgs("/tmp/fake-etc", box)
+	args, err := a.buildArgs("/tmp/fake-etc", box)
+	if err != nil {
+		t.Fatalf("buildArgs: %v", err)
+	}
 
 	argStr := strings.Join(args, " ")
 	if !strings.Contains(argStr, "--overlay-src /fake/pwd/.spindrift/nix-var-snapshot/gen1 --tmp-overlay /nix/var") {
@@ -870,7 +966,10 @@ func TestBwrapArgs_ClosureGenerationUnsafeGenerationFallsBackToBaked(t *testing.
 		Env:               map[string]string{},
 		ClosureGeneration: &AgentGeneration{AgentFiles: "/gen2/agent-files", Generation: ".."},
 	}
-	args := a.buildArgs("/tmp/fake-etc", box)
+	args, err := a.buildArgs("/tmp/fake-etc", box)
+	if err != nil {
+		t.Fatalf("buildArgs: %v", err)
+	}
 
 	argStr := strings.Join(args, " ")
 	if !strings.Contains(argStr, "--overlay-src /fake/pwd/.spindrift/nix-var-snapshot/gen1 --tmp-overlay /nix/var") {
@@ -893,7 +992,10 @@ func TestBwrapArgs_NoNixMountsWhenNixConfigFileEmpty(t *testing.T) {
 		agentEnv:          "/fake/env",
 		nixVarSnapshotDir: "/fake/pwd/.spindrift/nix-var-snapshot",
 	}
-	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}})
+	args, err := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}})
+	if err != nil {
+		t.Fatalf("buildArgs: %v", err)
+	}
 
 	argStr := strings.Join(args, " ")
 	for _, unwanted := range []string{"/etc/nix/nix.conf", "--overlay-src", "/nix/var"} {
@@ -915,7 +1017,10 @@ func TestBwrapArgs_StoreReadOnlyBindWhenNotWritable(t *testing.T) {
 		nixVarSnapshotDir: "/fake/snap",
 		nixStoreWritable:  false,
 	}
-	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}})
+	args, err := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}})
+	if err != nil {
+		t.Fatalf("buildArgs: %v", err)
+	}
 
 	if !wantTriple(args, "--ro-bind", "/nix/store", "/nix/store") {
 		t.Errorf("expected --ro-bind /nix/store /nix/store in args: %v", args)
@@ -938,7 +1043,10 @@ func TestBwrapArgs_StoreOverlayWhenWritable(t *testing.T) {
 		nixVarSnapshotDir: "/fake/snap",
 		nixStoreWritable:  true,
 	}
-	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}})
+	args, err := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}})
+	if err != nil {
+		t.Fatalf("buildArgs: %v", err)
+	}
 
 	if !strings.Contains(strings.Join(args, " "), "--overlay-src /nix/store --tmp-overlay /nix/store") {
 		t.Errorf("expected --overlay-src /nix/store --tmp-overlay /nix/store in args: %v", args)
@@ -958,7 +1066,10 @@ func TestBwrapArgs_StoreReadOnlyWhenConfigFileEmptyEvenIfWritable(t *testing.T) 
 		agentEnv:         "/fake/env",
 		nixStoreWritable: true,
 	}
-	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}})
+	args, err := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}})
+	if err != nil {
+		t.Fatalf("buildArgs: %v", err)
+	}
 
 	if !wantTriple(args, "--ro-bind", "/nix/store", "/nix/store") {
 		t.Errorf("expected --ro-bind /nix/store /nix/store in args: %v", args)
@@ -986,7 +1097,10 @@ func TestBwrapArgs_NonSecretOnArgv(t *testing.T) {
 		},
 	}
 
-	args := a.buildArgs("/tmp/fake-etc", box)
+	args, err := a.buildArgs("/tmp/fake-etc", box)
+	if err != nil {
+		t.Fatalf("buildArgs: %v", err)
+	}
 
 	argStr := strings.Join(args, " ")
 	for _, name := range []string{"REPO_SLUG", "ISSUE_NUMBER"} {
@@ -1006,7 +1120,10 @@ func TestBwrapArgs_SyscallFilterFlagWhenSet(t *testing.T) {
 		agentEnv:          "/fake/env",
 		syscallFilterPath: "/nix/store/fake-hash-seccomp/filter.bpf",
 	}
-	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}})
+	args, err := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}})
+	if err != nil {
+		t.Fatalf("buildArgs: %v", err)
+	}
 
 	if !strings.Contains(strings.Join(args, " "), "--seccomp 3") {
 		t.Errorf("expected --seccomp 3 in args: %v", args)
@@ -1022,7 +1139,10 @@ func TestBwrapArgs_NoSyscallFilterFlagWhenEmpty(t *testing.T) {
 		agentFiles: "/fake/agent",
 		agentEnv:   "/fake/env",
 	}
-	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}})
+	args, err := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}})
+	if err != nil {
+		t.Fatalf("buildArgs: %v", err)
+	}
 
 	for _, arg := range args {
 		if arg == "--seccomp" {

@@ -307,8 +307,10 @@ func (a *ociAdapter) ListRunning() ([]string, error) {
 }
 
 // mountSpecs computes the host-to-box mounts that apply for box, shared with
-// the bwrap adapter (buildMountSpecs); only the rendering below differs.
-func (a *ociAdapter) mountSpecs(box Box) []MountSpec {
+// the bwrap adapter (buildMountSpecs); only the rendering below differs. The
+// error return propagates buildMountSpecs's own required-mount failure (the
+// issue-snapshot mount, issue #2547 review finding).
+func (a *ociAdapter) mountSpecs(box Box) ([]MountSpec, error) {
 	return buildMountSpecs(a.mountParams, box)
 }
 
@@ -354,8 +356,10 @@ func (a *ociAdapter) networkArg() string {
 }
 
 // buildRunArgs assembles the argument slice for `podman/docker run`. Separated
-// from Run so the arg construction can be tested without exec.
-func (a *ociAdapter) buildRunArgs(box Box) []string {
+// from Run so the arg construction can be tested without exec. Returns an
+// error when mountSpecs does (the required issue-snapshot mount failing to
+// stat, issue #2547 review finding).
+func (a *ociAdapter) buildRunArgs(box Box) ([]string, error) {
 	args := []string{"run", "--name", box.Name}
 	if network := a.networkArg(); network != "" {
 		args = append(args, "--network", network)
@@ -381,7 +385,11 @@ func (a *ociAdapter) buildRunArgs(box Box) []string {
 	// bwrap's agentFiles fallback — so it is scoped to the Driver's declared
 	// session-cache dir, never the whole .claude, which would shadow the
 	// baked .claude/skills the image ships.
-	for _, m := range a.mountSpecs(box) {
+	specs, err := a.mountSpecs(box)
+	if err != nil {
+		return nil, err
+	}
+	for _, m := range specs {
 		if m.Message != "" {
 			fmt.Print(m.Message)
 		}
@@ -417,7 +425,7 @@ func (a *ociAdapter) buildRunArgs(box Box) []string {
 		args = append(args, "--memory="+a.memoryLimit)
 	}
 	args = append(args, a.image, "/agent/entrypoint.sh")
-	return args
+	return args, nil
 }
 
 // probeSocketDir returns a fresh, unique directory for RegistryProxyTransport's
@@ -493,11 +501,14 @@ const registryProbeEntrypoint = "driver-exec"
 // the trailing "<image> /agent/entrypoint.sh" for the probe verb, and adds
 // --rm right after "run" since a throwaway probe must never leave a stopped
 // container behind (unlike a real Box, which the caller reaps explicitly).
-func (a *ociAdapter) registrySocketProbeArgs(hostSocketPath, containerName string) []string {
+func (a *ociAdapter) registrySocketProbeArgs(hostSocketPath, containerName string) ([]string, error) {
 	box := Box{Name: containerName, RegistryProxy: RegistryProxyLocation{Endpoint: registrymanifest.NewUnixEndpoint(hostSocketPath)}}
-	full := a.buildRunArgs(box)
+	full, err := a.buildRunArgs(box)
+	if err != nil {
+		return nil, err
+	}
 	args := append([]string{full[0], "--rm", "--entrypoint", registryProbeEntrypoint}, probeArgsFromRunArgs(full)...)
-	return append(args, a.image, "probe-registry-socket", "-path", RegistryProxySocketTarget)
+	return append(args, a.image, "probe-registry-socket", "-path", RegistryProxySocketTarget), nil
 }
 
 // registryTCPProbeArgs assembles the argument slice for a throwaway probe
@@ -510,11 +521,14 @@ func (a *ociAdapter) registrySocketProbeArgs(hostSocketPath, containerName strin
 // real TCP-transport Box -- but overrides the image entrypoint and swaps the
 // trailing "<image> /agent/entrypoint.sh" for the probe-registry-tcp verb
 // instead of the socket one.
-func (a *ociAdapter) registryTCPProbeArgs(host string, port int, containerName string, addHost bool) []string {
+func (a *ociAdapter) registryTCPProbeArgs(host string, port int, containerName string, addHost bool) ([]string, error) {
 	box := Box{Name: containerName, RegistryProxy: RegistryProxyLocation{Endpoint: registrymanifest.NewTCPEndpoint(host, ""), TCPAddHost: addHost}}
-	full := a.buildRunArgs(box)
+	full, err := a.buildRunArgs(box)
+	if err != nil {
+		return nil, err
+	}
 	args := append([]string{full[0], "--rm", "--entrypoint", registryProbeEntrypoint}, probeArgsFromRunArgs(full)...)
-	return append(args, a.image, "probe-registry-tcp", "-host", host, "-port", strconv.Itoa(port))
+	return append(args, a.image, "probe-registry-tcp", "-host", host, "-port", strconv.Itoa(port)), nil
 }
 
 // registryProxyProbeTimeout bounds a single registry-proxy capability probe:
@@ -615,7 +629,10 @@ func (a *ociAdapter) probeRegistryProxyTransport() (registrymanifest.Endpoint, b
 	defer cancel()
 
 	containerName := fmt.Sprintf("spindrift-registry-probe-%d-%d", os.Getpid(), time.Now().UnixNano())
-	args := a.registrySocketProbeArgs(probeSocketPath, containerName)
+	args, err := a.registrySocketProbeArgs(probeSocketPath, containerName)
+	if err != nil {
+		return registrymanifest.Endpoint{}, false, fmt.Errorf("registry proxy transport probe: %w", err)
+	}
 	out, err := exec.CommandContext(ctx, a.cli, args...).CombinedOutput()
 	if err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
@@ -773,7 +790,10 @@ func (a *ociAdapter) probeRegistryTCPOnce(host string, addHost bool) error {
 	defer cancel()
 
 	containerName := fmt.Sprintf("spindrift-registry-tcp-probe-%d-%d", os.Getpid(), time.Now().UnixNano())
-	args := a.registryTCPProbeArgs(host, tcpAddr.Port, containerName, addHost)
+	args, err := a.registryTCPProbeArgs(host, tcpAddr.Port, containerName, addHost)
+	if err != nil {
+		return fmt.Errorf("registry proxy transport probe: tcp-reachability sub-probe: %w", err)
+	}
 	out, err := exec.CommandContext(ctx, a.cli, args...).CombinedOutput()
 	if err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
@@ -862,11 +882,16 @@ func (a *ociAdapter) Run(box Box) error {
 		out = io.Discard
 	}
 
-	cmd := exec.Command(a.cli, a.buildRunArgs(box)...)
+	args, err := a.buildRunArgs(box)
+	if err != nil {
+		return err
+	}
+
+	cmd := exec.Command(a.cli, args...)
 	cmd.Env = ociRunEnv(box.Env)
 	cmd.Stdout = out
 	cmd.Stderr = out
-	err := cmd.Run()
+	err = cmd.Run()
 	if reapAfterSuccess(err) {
 		_ = a.Reap(box.Name)
 	}
