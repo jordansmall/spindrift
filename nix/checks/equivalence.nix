@@ -1603,4 +1603,49 @@ in
 
       touch $out
     '';
+
+  # Issue #2533 (blocking review finding): the opencode Driver's
+  # agentsJsonTemplate always returns "" (lib/drivers/opencode.nix) -- it
+  # provisions subagents via on-disk agents/*.md files instead, not the
+  # --agents JSON mechanism FILER_ENABLED/WORKER_PROVISIONED key off. A
+  # finalRoster-only presence check would report WORKER_PROVISIONED=true
+  # here (a real, non-empty worker model), silently changing what the
+  # pre-#2533 in-box `jq -e 'has(...)'` reparse of AGENTS_JSON_TEMPLATE
+  # always reported for this Driver (false, since AGENTS_JSON_TEMPLATE was
+  # always empty for opencode too). This fixture pins the opencode driver
+  # cell directly, closing the coverage gap the mkharness-filer-worker-agree
+  # check above leaves (it only ever exercises the default claude Driver).
+  mkharness-filer-worker-false-for-opencode-driver =
+    let
+      roster = [
+        {
+          name = "filer";
+          model = "m";
+          mode = "subagent";
+          description = "";
+          tools = [ ];
+        }
+        {
+          name = "worker";
+          model = "m";
+          mode = "subagent";
+          description = "";
+          tools = [ ];
+        }
+      ];
+      direct = import ../../lib/mkHarness.nix {
+        inherit nixpkgs system;
+        packages = p: [ p.hello ];
+        driver = "opencode";
+        inherit roster;
+      };
+    in
+    pkgs.runCommand "mkharness-filer-worker-false-for-opencode-driver" { } ''
+      runDoc=${direct.internals.runInputDocumentFile}
+
+      grep -q '"FILER_ENABLED":"false"' "$runDoc"
+      grep -q '"WORKER_PROVISIONED":"false"' "$runDoc"
+
+      touch $out
+    '';
 }
