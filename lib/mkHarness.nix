@@ -787,7 +787,9 @@ let
   # SPINDRIFT_OUTCOME grammar -- the same import closure driverExecBin
   # already needs, for the same reason (it also calls driver.New) -- plus
   # internal/runstate (issue #2505's shared RunState type/read/write) for its
-  # own state handoff between passes.
+  # own state handoff between passes, plus internal/agentpaths (the
+  # single-sourced baked PROMPTS_DIR default, issue #2060) for the
+  # cherry-pick conflict template path.
   orchestratorBin = pkgs.buildGoModule {
     pname = "orchestrator";
     version = spindriftVersion;
@@ -826,6 +828,9 @@ let
         (lib.fileset.fileFilter (
           f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
         ) ../cmd/launcher/internal/promptassembly)
+        (lib.fileset.fileFilter (
+          f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
+        ) ../cmd/launcher/internal/agentpaths)
       ];
     };
     vendorHash = buildConstants.driverExecVendorHash;
