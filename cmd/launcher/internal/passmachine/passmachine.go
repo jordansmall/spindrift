@@ -78,7 +78,12 @@ const (
 // StopReason names why Transition decided to stop the loop -- the zero
 // value, StopNone, is only ever returned alongside a Continue: true
 // Decision (a review-pass decision, per run.go:461-487, never stops at
-// all, so every KindReview Decision carries StopNone).
+// all, so every KindReview Decision carries StopNone). This same type also
+// names which cap fired via Decision.Cap (below) -- reusing StopReason's
+// existing StopMaxSlicesReached/StopMaxReviewRoundsReached/StopNoVerdict
+// constants for both purposes, since the underlying cause is the same
+// whether it winds up stopping the loop outright (legacy) or committing it
+// to one terminal land pass (review loop).
 type StopReason int
 
 const (
@@ -89,7 +94,9 @@ const (
 	// terminal SPINDRIFT_OUTCOME line.
 	StopOutcomeReached
 	// StopNoVerdict fires on the legacy loop's own decision when the pass's
-	// log never scanned out a verdict word.
+	// log never scanned out a verdict word, and (as Decision.Cap) on the
+	// review loop's own review-pass decision when a review pass never
+	// resolved into a verdict word at all.
 	StopNoVerdict
 	// StopVerdictNotBlock fires on the legacy loop's own decision when the
 	// verdict was a non-empty, non-BLOCK word (i.e. APPROVE).
@@ -97,7 +104,7 @@ const (
 	// StopMaxSlicesReached fires when cfg.maxSlices is a positive cap and
 	// the pass count has reached or exceeded it -- on the legacy loop this
 	// is a hard stop; on the review loop's two decision points it instead
-	// commits the run to one terminal land pass (see SetTerminalLand).
+	// commits the run to one terminal land pass (see LandPhase).
 	StopMaxSlicesReached
 	// StopMaxReviewRoundsReached fires when cfg.maxReviewRounds is a
 	// positive cap and reviewRounds has reached or exceeded it -- on the
@@ -106,9 +113,9 @@ const (
 	StopMaxReviewRoundsReached
 	// StopTerminalLandNoOutcome fires on the review loop's implement/fix/
 	// land decision when the pass that just ran was itself the committed
-	// terminal land pass (state.TerminalLand was already true going in) and
-	// still produced no outcome -- the bound that caps the terminal-land
-	// mechanism at exactly one extra pass.
+	// terminal land pass (in.LandPhase was already LandPhaseTerminalCommitted
+	// going in) and still produced no outcome -- the bound that caps the
+	// terminal-land mechanism at exactly one extra pass.
 	StopTerminalLandNoOutcome
 	// StopApproveNoOutcome fires on the review loop's implement/fix/land
 	// decision when the pass that just ran followed an APPROVE verdict and
@@ -127,6 +134,33 @@ type Caps struct {
 	// MaxReviewRounds is the cap on review rounds elapsed (cfg.maxReviewRounds).
 	MaxReviewRounds int
 }
+
+// LandPhase names whether a prior decision has already committed this run
+// to a terminal land pass (issue #2548 AC2). Transition dispatches the
+// implement/fix/land decision point to one of two entirely separate
+// functions based on this field alone -- terminalLandTransition once
+// LandPhaseTerminalCommitted, implementFixTransition while still
+// LandPhaseActive -- so the two rule sets live in physically disjoint
+// functions and can never again be reordered against each other by a
+// future case added to either switch.
+type LandPhase int
+
+const (
+	// LandPhaseActive is the ordinary state: no prior decision has yet
+	// committed this run to a terminal land pass.
+	LandPhaseActive LandPhase = iota
+	// LandPhaseTerminalCommitted means a prior decision -- a maxSlices cap
+	// firing on the implement/fix/land decision point, or a no-verdict/
+	// maxSlices/maxReviewRounds cap firing on the review-pass decision
+	// point -- already committed this run to landing, regardless of the
+	// PassKind label the pass that just ran happens to carry. In
+	// particular, when a maxSlices cap and a manifest dispatch both fire on
+	// the same pass, the NextPass label stays KindFix (for pass_start's own
+	// Role display) even though LandPhase is already TerminalCommitted; the
+	// caller threads this field, not PassKind, back into the next call's
+	// Input.LandPhase.
+	LandPhaseTerminalCommitted
+)
 
 // Input is everything a single Transition call needs to reproduce one of
 // the three source switches' decisions -- no cfg, state, or I/O, so every
@@ -155,9 +189,12 @@ type Input struct {
 	ReviewRounds int
 	// Caps carries the two orchestrator-configured budget caps.
 	Caps Caps
-	// TerminalLand is state.TerminalLand's value going into this decision
-	// (before this call may set it).
-	TerminalLand bool
+	// LandPhase is state.TerminalLand's value going into this decision,
+	// converted to the machine's own LandPhase type (before this call may
+	// commit it to LandPhaseTerminalCommitted) -- see LandPhase's own doc
+	// comment for how Transition dispatches on it at the implement/fix/land
+	// decision point.
+	LandPhase LandPhase
 	// LastVerdict is state.LastVerdict going into this decision. Meaningful
 	// for KindImplement/KindFix/KindLand only (the "land pass reached no
 	// terminal outcome after APPROVE" check).
@@ -185,12 +222,23 @@ type Decision struct {
 	// NextPass names which pass kind runs next -- meaningful only when
 	// Continue is true.
 	NextPass PassKind
-	// SetTerminalLand is true when this decision sets state.TerminalLand =
-	// true (a cap committing the run to one terminal land pass).
-	SetTerminalLand bool
+	// LandPhase is LandPhaseTerminalCommitted when this decision commits
+	// the run to a terminal land pass (a cap firing) -- the caller persists
+	// this onto its own state so a LATER call's Input.LandPhase reflects
+	// it; LandPhaseActive (the zero value) otherwise.
+	LandPhase LandPhase
 	// CapFired is the exact state.CapFired text the source switch assigns
-	// -- set only when SetTerminalLand is true.
+	// -- set only when LandPhase is LandPhaseTerminalCommitted.
 	CapFired string
+	// Cap is the typed counterpart to CapFired: StopNone (the zero value)
+	// whenever LandPhase is LandPhaseActive, else the StopReason naming
+	// which cap fired (StopMaxSlicesReached, StopMaxReviewRoundsReached, or
+	// StopNoVerdict for the review pass's own "no verdict" case). Callers
+	// that need to detect a specific cap programmatically (e.g. caps.go's
+	// own simulateReviewRoundCapPass) compare against this instead of
+	// CapFired's prose string, which doubles as operator-facing prompt text
+	// (run.go's seedPromptFromState) and can be reworded independently.
+	Cap StopReason
 	// IncrementReviewRounds is true when this decision implies
 	// reviewRounds++ (unconditional on KindLegacy's own continue path;
 	// gated on reviewVerdict == BLOCK, regardless of which case matched,
@@ -200,7 +248,9 @@ type Decision struct {
 
 // Transition reproduces exactly one of the three orchestrator decision
 // switches, chosen by in.PassJustExecuted -- KindImplement, KindFix, and
-// KindLand all share the same implement/fix/land decision point.
+// KindLand all share the same implement/fix/land decision point, which
+// itself dispatches on in.LandPhase (issue #2548 AC2) between
+// implementFixTransition and terminalLandTransition.
 func Transition(in Input) Decision {
 	switch in.PassJustExecuted {
 	case KindLegacy:
@@ -209,6 +259,9 @@ func Transition(in Input) Decision {
 		return reviewTransition(in)
 	default:
 		// KindImplement, KindFix, KindLand.
+		if in.LandPhase == LandPhaseTerminalCommitted {
+			return terminalLandTransition(in)
+		}
 		return implementFixTransition(in)
 	}
 }
@@ -234,34 +287,53 @@ func legacyTransition(in Input) Decision {
 	return Decision{Continue: true, Reason: "", NextPass: KindLegacy, IncrementReviewRounds: true}
 }
 
-// implementFixTransition reproduces run.go:355-401, the review loop's
-// decision after an implement, fix, or land pass -- all three share this
-// exact code path in run.go today.
+// terminalLandTransition reproduces the in.LandPhase ==
+// LandPhaseTerminalCommitted half of what was previously a single switch at
+// run.go:355-401 (issue #2548 AC2): once a prior decision has already
+// committed this run to a terminal land pass, nothing else about the pass
+// that just ran matters except whether it finally reached its own outcome.
+// Kept as its own function, physically disjoint from implementFixTransition,
+// so the two rule sets can never again be reordered against each other by a
+// future case added to either one.
+func terminalLandTransition(in Input) Decision {
+	if in.HasOutcome {
+		return Decision{Continue: false, Reason: "outcome reached", Stop: StopOutcomeReached}
+	}
+	return Decision{Continue: false, Reason: "terminal land pass reached no outcome", Stop: StopTerminalLandNoOutcome}
+}
+
+// implementFixTransition reproduces the in.LandPhase == LandPhaseActive half
+// of what was previously a single switch at run.go:355-401 (issue #2548
+// AC2): the ordinary implement/fix/land decision rules (APPROVE, maxSlices,
+// manifest dispatch). It deliberately carries NO terminal-land case -- once
+// a prior decision commits this run to landing, Transition dispatches to
+// terminalLandTransition instead, so that commitment's own rule lives
+// somewhere this switch's case order can never reprioritize against it.
 func implementFixTransition(in Input) Decision {
 	switch {
 	case in.HasOutcome:
 		return Decision{Continue: false, Reason: "outcome reached", Stop: StopOutcomeReached}
-	case in.TerminalLand:
-		return Decision{Continue: false, Reason: "terminal land pass reached no outcome", Stop: StopTerminalLandNoOutcome}
 	case in.LastVerdict == VerdictApprove:
 		return Decision{Continue: false, Reason: "land pass reached no terminal outcome after APPROVE", Stop: StopApproveNoOutcome}
 	case in.Caps.MaxSlices > 0 && in.Pass >= in.Caps.MaxSlices:
 		// manifestDispatched is checked regardless of which case fired the
-		// continue -- so even when this maxSlices case is what set
-		// TerminalLand, if ManifestDispatched is ALSO true this same pass,
-		// the next pass is still Fix, not Land; TerminalLand stays true in
-		// the returned Decision and is caught by the "TerminalLand: stop"
-		// case the pass after next.
+		// continue -- so even when this maxSlices case is what committed
+		// LandPhase to LandPhaseTerminalCommitted, if ManifestDispatched is
+		// ALSO true this same pass, the next pass is still Fix, not Land;
+		// LandPhase stays TerminalCommitted in the returned Decision (the
+		// caller persists it onto state) and is caught by
+		// terminalLandTransition the pass after next.
 		next := KindLand
 		if in.ManifestDispatched {
 			next = KindFix
 		}
 		return Decision{
-			Continue:        true,
-			Reason:          "max slices reached; running terminal land pass",
-			NextPass:        next,
-			SetTerminalLand: true,
-			CapFired:        "max slices reached",
+			Continue:  true,
+			Reason:    "max slices reached; running terminal land pass",
+			NextPass:  next,
+			LandPhase: LandPhaseTerminalCommitted,
+			Cap:       StopMaxSlicesReached,
+			CapFired:  "max slices reached",
 		}
 	case in.ManifestDispatched:
 		return Decision{Continue: true, Reason: "slice manifest dispatched", NextPass: KindFix}
@@ -279,24 +351,27 @@ func reviewTransition(in Input) Decision {
 	switch {
 	case in.Verdict == VerdictNone:
 		d = Decision{
-			Continue:        true,
-			Reason:          "no verdict; running terminal land pass",
-			SetTerminalLand: true,
-			CapFired:        "no verdict",
+			Continue:  true,
+			Reason:    "no verdict; running terminal land pass",
+			LandPhase: LandPhaseTerminalCommitted,
+			Cap:       StopNoVerdict,
+			CapFired:  "no verdict",
 		}
 	case in.Caps.MaxSlices > 0 && in.Pass >= in.Caps.MaxSlices:
 		d = Decision{
-			Continue:        true,
-			Reason:          "max slices reached; running terminal land pass",
-			SetTerminalLand: true,
-			CapFired:        "max slices reached",
+			Continue:  true,
+			Reason:    "max slices reached; running terminal land pass",
+			LandPhase: LandPhaseTerminalCommitted,
+			Cap:       StopMaxSlicesReached,
+			CapFired:  "max slices reached",
 		}
 	case in.Verdict == VerdictBlock && in.Caps.MaxReviewRounds > 0 && in.ReviewRounds >= in.Caps.MaxReviewRounds:
 		d = Decision{
-			Continue:        true,
-			Reason:          "max review rounds reached; running terminal land pass",
-			SetTerminalLand: true,
-			CapFired:        "max review rounds reached",
+			Continue:  true,
+			Reason:    "max review rounds reached; running terminal land pass",
+			LandPhase: LandPhaseTerminalCommitted,
+			Cap:       StopMaxReviewRoundsReached,
+			CapFired:  "max review rounds reached",
 		}
 	default:
 		d = Decision{Continue: true, Reason: ""}
@@ -308,9 +383,9 @@ func reviewTransition(in Input) Decision {
 		d.IncrementReviewRounds = true
 	}
 
-	// TerminalLand true either from before, or just set above by this
-	// decision: next pass kind is Land; else Fix.
-	if in.TerminalLand || d.SetTerminalLand {
+	// LandPhase already TerminalCommitted from before, or just committed
+	// above by this decision: next pass kind is Land; else Fix.
+	if in.LandPhase == LandPhaseTerminalCommitted || d.LandPhase == LandPhaseTerminalCommitted {
 		d.NextPass = KindLand
 	} else {
 		d.NextPass = KindFix
