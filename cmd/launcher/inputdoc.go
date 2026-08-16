@@ -66,11 +66,17 @@ func getenvArtifact(key, def string) string {
 // section, returning "" when loadedDoc is nil or key is absent -- never
 // consulting os.Getenv. Unlike getenvArtifact's ambient-env-first escape
 // hatch (deliberate for genuine plumbing artifacts an operator may need to
-// override), the four capability-signal keys (HOST_MEDIATED_REMOTE,
-// OUTBOX_RELAY_CAPABLE, IN_BOX_UNREACHABLE_TRACKER, FULLY_LOCAL) are
+// override), the keys this backs (the four capability signals
+// HOST_MEDIATED_REMOTE/OUTBOX_RELAY_CAPABLE/IN_BOX_UNREACHABLE_TRACKER/
+// FULLY_LOCAL, the four tracker/forge signals TRACKER_AXIS_READ/WRITE/
+// FILER/FORGE_BACKEND, and the four agent-presence signals FILER_ENABLED/
+// WORKER_PROVISIONED/REVIEW_LOOP_INLINE/REVIEW_LOOP_ORCHESTRATOR) are all
 // nix-resolved policy, not operator knobs: a stray ambient env var must
 // never override what nix actually baked into the document (issue #2527
-// review). Used only by resolveCapabilitySignals's matching-document branch.
+// review). Called only from each matching-document trust branch --
+// resolveCapabilitySignals, resolveTrackerAndForgeSignals, and
+// resolveAgentPresenceSignals (issue #2533 review) -- never directly from
+// dispatchConfig, so an unguarded read can't reappear there.
 func docArtifact(key string) string {
 	if loadedDoc == nil {
 		return ""
