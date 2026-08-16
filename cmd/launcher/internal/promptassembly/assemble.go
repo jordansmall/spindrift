@@ -144,6 +144,25 @@ func substitute(text string, allowlist map[string]string) string {
 	})
 }
 
+// RenderText substitutes every ${NAME} token in text through vars, using
+// exactly the same regex-based substitution machinery (substitute) every
+// other prompt/fragment file in this package is rendered through, then
+// trims trailing newlines the same way renderFile does for an on-disk
+// file's contents. Exported so a caller outside this package that needs
+// this exact ${NAME}-substitution mechanism -- but not the rest of
+// Assemble's Env-driven cell-rendering pipeline -- can reuse it instead of
+// hand-rolling a bespoke strings.ReplaceAll pass. The orchestrator's own
+// cherry-pick conflict-resolve guidance is the first such caller (issue
+// #2060 review finding): it renders
+// templates/default/prompts/conflict-resolve-cherry-pick-prompt.md at
+// runtime with per-conflict values (the slice's own branch name and
+// revision range) that Assemble's own Env never carries, since they are
+// only known deep inside a dispatch pass long after any Env this package's
+// Assemble sees was built.
+func RenderText(text string, vars map[string]string) string {
+	return strings.TrimRight(substitute(text, vars), "\n")
+}
+
 // renderFile reads path, substitutes it through allowlist, and trims the
 // trailing newlines a $(...) command substitution would strip -- the same
 // three-step sequence entrypoint.sh's _subst call performs at every one of

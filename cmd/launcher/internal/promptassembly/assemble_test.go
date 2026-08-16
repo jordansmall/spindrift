@@ -358,6 +358,24 @@ func TestAssemblePromptHasNoTrailingNewline(t *testing.T) {
 	}
 }
 
+// TestRenderText verifies the exported RenderText helper (issue #2060
+// review finding: the orchestrator's own cherry-pick conflict-resolve
+// guidance reuses this exact ${NAME} substitution mechanism at runtime,
+// rather than hand-rolling a bespoke strings.ReplaceAll pass) substitutes
+// every ${NAME} token present in vars, leaves an unlisted ${OTHER} token
+// untouched, and trims trailing newlines the same way renderFile does for
+// an on-disk file's contents.
+func TestRenderText(t *testing.T) {
+	got := RenderText("A ${FOO} and a ${BAR}, but not ${BAZ}.\n\n", map[string]string{
+		"FOO": "one",
+		"BAR": "two",
+	})
+	want := "A one and a two, but not ${BAZ}."
+	if got != want {
+		t.Errorf("RenderText() = %q, want %q", got, want)
+	}
+}
+
 // TestAssembleFragmentSeparatorIsExactlyTwoNewlines covers the fragment
 // loop's "\n\n" separator (entrypoint.sh: 1001-1009): a fragment file that
 // itself ends with a blank line on disk (e.g. skill-preamble.md, which ends

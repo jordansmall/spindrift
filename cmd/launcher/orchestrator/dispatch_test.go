@@ -1305,8 +1305,21 @@ esac
 // themselves still succeeded (WorkerDone), so state.DoneSlices must list
 // both regardless -- but state.WorkerFindings must report the conflict
 // with manual-resolution guidance for the second slice, not silently
-// swallow it.
+// swallow it. That guidance is sourced from the real
+// conflict-resolve-cherry-pick-prompt.md template (issue #2060 review
+// finding), rendered via conflictResolveGuidance -- PROMPTS_DIR is pointed
+// at this repo's own templates/default/prompts dir (resolved to an
+// absolute path before chdirToFreshWorkerRepo below changes the process's
+// cwd out from under a relative lookup) so the test exercises that real
+// render path rather than conflictResolveGuidance's own missing-template
+// fallback string.
 func TestDispatchManifestIfPresentReportsIntegrationConflictWithoutLosingDoneSlice(t *testing.T) {
+	promptsDirAbs, err := filepath.Abs(filepath.Join("..", "..", "..", "templates", "default", "prompts"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PROMPTS_DIR", promptsDirAbs)
+
 	chdirToFreshWorkerRepo(t)
 
 	dir := t.TempDir()
@@ -1382,11 +1395,22 @@ esac
 	if !strings.Contains(state.WorkerFindings, "conflict-a: done, integrated") {
 		t.Errorf("state.WorkerFindings = %q, want conflict-a reported as cleanly integrated", state.WorkerFindings)
 	}
-	if !strings.Contains(state.WorkerFindings, "conflict-b: done, but integration conflicted -- resolve manually") {
-		t.Errorf("state.WorkerFindings = %q, want conflict-b reported as conflicted with manual-resolution guidance, not silently swallowed", state.WorkerFindings)
+	if !strings.Contains(state.WorkerFindings, "conflict-b: done, but integration conflicted") {
+		t.Errorf("state.WorkerFindings = %q, want conflict-b reported as conflicted", state.WorkerFindings)
 	}
 	if !strings.Contains(state.WorkerFindings, "orchestrator-worker/conflict-b") {
 		t.Errorf("state.WorkerFindings = %q, want it to name conflict-b's own branch", state.WorkerFindings)
+	}
+	// The manual-resolution guidance itself must be the real
+	// conflict-resolve-cherry-pick-prompt.md template's own rendered
+	// content -- a distinctive phrase from that file -- not a hand-written
+	// string that happens to describe similar steps (issue #2060 review
+	// finding).
+	if !strings.Contains(state.WorkerFindings, "Reproduce the cherry-pick, resolve the conflicts") {
+		t.Errorf("state.WorkerFindings = %q, want it to carry conflict-resolve-cherry-pick-prompt.md's own rendered guidance, not a hand-rolled string", state.WorkerFindings)
+	}
+	if !strings.Contains(state.WorkerFindings, "cherry-pick --continue") {
+		t.Errorf("state.WorkerFindings = %q, want the rendered guidance's own cherry-pick --continue step", state.WorkerFindings)
 	}
 }
 

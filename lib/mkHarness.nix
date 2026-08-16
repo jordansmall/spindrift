@@ -43,6 +43,15 @@
   # composition entirely; the legacy knobs are then ignored.
   roster ? null,
   conflictResolvePrompt ? builtins.readFile ../templates/default/prompts/conflict-resolve-prompt.md,
+  # The cherry-pick-flavored counterpart to conflictResolvePrompt above
+  # (issue #2060 review finding): conflictResolvePrompt is written for a
+  # `git rebase` conflict (${BASE_BRANCH}/${BRANCH} placeholders, `git
+  # rebase --continue`), so the Go orchestrator's own `git cherry-pick
+  # --no-commit` slice-integration conflict path (cmd/launcher/orchestrator)
+  # renders this counterpart instead, at runtime, substituting the
+  # conflicting slice's own branch name and revision range into its
+  # ${BRANCH}/${REV_RANGE} placeholders.
+  conflictResolveCherryPickPrompt ? builtins.readFile ../templates/default/prompts/conflict-resolve-cherry-pick-prompt.md,
   # Driven instead of `prompt` on a fix box (FIX_PASS>0, ADR: selfHeal/runFix
   # in cmd/launcher): the branch is already checked out, so this warm-fix
   # prompt skips scout/implement-from-scratch and goes straight to
@@ -814,6 +823,9 @@ let
         (lib.fileset.fileFilter (
           f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
         ) ../cmd/launcher/internal/passmachine)
+        (lib.fileset.fileFilter (
+          f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
+        ) ../cmd/launcher/internal/promptassembly)
       ];
     };
     vendorHash = buildConstants.driverExecVendorHash;
@@ -876,6 +888,7 @@ let
       filerPrompt
       workerPrompt
       conflictResolvePrompt
+      conflictResolveCherryPickPrompt
       fixPrompt
       fragmentsSourceDir
       fragmentRegistryPreamble
@@ -961,6 +974,7 @@ let
       "cp ${hostPkgs.writeText pf e.prompt} $out/${pf}\n"
     ) imageAgents.customRosterPromptFiles}
     cp ${hostPkgs.writeText "conflict-resolve-prompt.md" imagePrompts.conflictResolvePrompt} $out/conflict-resolve-prompt.md
+    cp ${hostPkgs.writeText "conflict-resolve-cherry-pick-prompt.md" imagePrompts.conflictResolveCherryPickPrompt} $out/conflict-resolve-cherry-pick-prompt.md
     cp ${hostPkgs.writeText "fix-prompt.md" (imageContracts.injectFixSharedBlocks imagePrompts.fixPrompt)} $out/fix-prompt.md
     cp ${hostPkgs.writeText "research-prompt.md" (imageContracts.injectResearchOutcomeContract imagePrompts.researchPrompt)} $out/research-prompt.md
     cp ${hostPkgs.writeText "research-self-contained-prompt.md" (imageContracts.injectResearchOutcomeContract imagePrompts.researchSelfContainedPrompt)} $out/research-self-contained-prompt.md
