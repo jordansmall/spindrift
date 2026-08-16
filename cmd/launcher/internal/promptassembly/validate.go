@@ -136,6 +136,18 @@ type ForbiddenMarkerRow struct {
 	// Message is the row's fully pre-rendered diagnostic prose, marker
 	// already interpolated by the nix registry.
 	Message string `json:"message"`
+	// RuntimeMessage is the distinct, runtime-facing wording rendered into
+	// the installed shim/hook script by
+	// cmd/launcher/internal/readonlyguards when Enforce is "git-hook" or
+	// "command-shim" (issue #2509). It is deliberately not Message: Message
+	// is written for this package's own Validate check at prompt-render
+	// time ("the rendered prompt orders...", "Refusing to invoke the
+	// Driver"), which is nonsensical printed by a runtime shim after the
+	// agent typed the offending command itself mid-run -- only that one
+	// command is rejected, the run itself continues. A "prompt-only" row
+	// carries no RuntimeMessage (never rendered anywhere but Validate's
+	// diagnostic), so it is empty for such rows.
+	RuntimeMessage string `json:"runtimeMessage"`
 }
 
 // LoadForbiddenMarkers reads and parses a forbiddenMarkers registry JSON

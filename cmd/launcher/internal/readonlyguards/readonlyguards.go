@@ -8,9 +8,12 @@
 // verb that calls Install, and another flips entrypoint.sh itself over.
 //
 // Every rejection message a guard prints comes verbatim from a row's
-// Message field, never a hand-copied string baked into this package's Go
-// source -- the entire point of this port is that "the registry is the one
-// place a rejection message's wording lives."
+// RuntimeMessage field, never a hand-copied string baked into this
+// package's Go source -- the entire point of this port is that "the
+// registry is the one place a rejection message's wording lives."
+// RuntimeMessage is deliberately distinct from the row's Message field,
+// which is written for promptassembly.Validate's prompt-time check and
+// would be nonsensical printed by a runtime shim (issue #2509 Finding 2).
 package readonlyguards
 
 import (
@@ -240,9 +243,9 @@ func renderShimScript(argv0 string, rows []promptassembly.ForbiddenMarkerRow) st
 		cond := subcommandCond(row.Marker)
 		switch row.Kind {
 		case kindGhAPIMutation:
-			b.WriteString(renderMutationGuard(cond, row.Message))
+			b.WriteString(renderMutationGuard(cond, row.RuntimeMessage))
 		default:
-			b.WriteString(renderSubstringGuard(cond, row.Message))
+			b.WriteString(renderSubstringGuard(cond, row.RuntimeMessage))
 		}
 	}
 
@@ -272,12 +275,12 @@ func subcommandCond(marker string) string {
 func renderSubstringGuard(cond, message string) string {
 	var b strings.Builder
 	if cond == "" {
-		fmt.Fprintf(&b, "echo %s >&2\n", shQuote(message))
+		fmt.Fprintf(&b, "printf '%%s\\n' %s >&2\n", shQuote(message))
 		fmt.Fprintf(&b, "exit 1\n")
 		return b.String()
 	}
 	fmt.Fprintf(&b, "if %s; then\n", cond)
-	fmt.Fprintf(&b, "  echo %s >&2\n", shQuote(message))
+	fmt.Fprintf(&b, "  printf '%%s\\n' %s >&2\n", shQuote(message))
 	fmt.Fprintf(&b, "  exit 1\n")
 	fmt.Fprintf(&b, "fi\n")
 	return b.String()
@@ -309,7 +312,7 @@ func renderMutationGuard(cond, message string) string {
 	b.WriteString("  done\n")
 	b.WriteString("  case \"$method\" in\n")
 	b.WriteString("    [Pp][Oo][Ss][Tt] | [Pp][Aa][Tt][Cc][Hh] | [Pp][Uu][Tt] | [Dd][Ee][Ll][Ee][Tt][Ee])\n")
-	fmt.Fprintf(&b, "      echo %s >&2\n", shQuote(message))
+	fmt.Fprintf(&b, "      printf '%%s\\n' %s >&2\n", shQuote(message))
 	b.WriteString("      exit 1\n")
 	b.WriteString("      ;;\n")
 	b.WriteString("  esac\n")
@@ -368,7 +371,7 @@ func renderGitHookScript(hookRows []promptassembly.ForbiddenMarkerRow) string {
 	fmt.Fprintf(&b, "# rejects this git operation locally. Rendered from the\n")
 	fmt.Fprintf(&b, "# forbiddenMarkers registry; do not edit by hand.\n")
 	for _, row := range hookRows {
-		fmt.Fprintf(&b, "echo %s >&2\n", shQuote(row.Message))
+		fmt.Fprintf(&b, "printf '%%s\\n' %s >&2\n", shQuote(row.RuntimeMessage))
 	}
 	fmt.Fprintf(&b, "exit 1\n")
 	return b.String()

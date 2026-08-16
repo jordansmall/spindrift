@@ -28,6 +28,25 @@ setup() {
   [ ! -e "$(dirname "$WORK_DIR")/readonly-gh-shim" ]
 }
 
+@test "read-only Box installs no fj shim alongside the gh shim" {
+  unset BOX_WRITE_ENABLED # issue #2465: read-only Box
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+
+  # lib/prompt-contract.nix's five fj rows stay enforce=="prompt-only"
+  # (issue #2509 Finding 1): driver-exec's readonly-guards verb can render a
+  # real fj shim, but install_readonly_guards's own gating condition
+  # (BOX_HOST_MEDIATED_REMOTE or BOX_OUTBOX_RELAY_CAPABLE) never fires for a
+  # real forgejo-backend dispatch, so no fj shim ever reaches production --
+  # this suite's own env (CODE_FORGE-default, github) is the one combination
+  # that can never co-occur with an fj binary in the first place. Assert the
+  # gh shim install this suite already exercises never installs an fj
+  # artifact alongside it, even though the registry's command-shim rows are
+  # read and grouped generically by argv0.
+  [ -d "$HOME/.spindrift/readonly-gh-shim" ]
+  [ ! -e "$HOME/.spindrift/readonly-gh-shim/fj" ]
+}
+
 @test "read-only Box's gh shim rejects gh pr create, naming the PR-intent relay" {
   unset BOX_WRITE_ENABLED # issue #2465: read-only Box
   run bash "$ENTRYPOINT"

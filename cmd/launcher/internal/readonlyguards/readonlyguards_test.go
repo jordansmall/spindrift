@@ -43,16 +43,20 @@ func runShim(t *testing.T, shimDir, argv0 string, args ...string) (string, int) 
 
 // TestInstall_CommandShimRejectsGuardedSubcommand covers the base case: a
 // single command-shim row installs a shim binary that, invoked with its
-// guarded subcommand, rejects with the row's exact message and a non-zero
-// exit code -- never reaching the real binary.
+// guarded subcommand, rejects with the row's exact RuntimeMessage -- never
+// its (prompt-validator-facing) Message -- and a non-zero exit code, never
+// reaching the real binary. Message and RuntimeMessage are deliberately
+// given distinct text here to pin that the renderer uses RuntimeMessage,
+// not Message (issue #2509 Finding 2).
 func TestInstall_CommandShimRejectsGuardedSubcommand(t *testing.T) {
 	rows := []promptassembly.ForbiddenMarkerRow{
 		{
-			ID:      "forbidden-gh-pr-create",
-			Marker:  "gh pr create",
-			Kind:    "substring",
-			Enforce: "command-shim",
-			Message: "read-only Box: PRs are opened via the PR-intent relay; do not run `gh pr create` -- this call has been blocked locally.",
+			ID:             "forbidden-gh-pr-create",
+			Marker:         "gh pr create",
+			Kind:           "substring",
+			Enforce:        "command-shim",
+			Message:        "_validate_prompt_contract: read-only dispatch's rendered prompt orders a read-only Box to run 'gh pr create'. Refusing to invoke the Driver.",
+			RuntimeMessage: "read-only Box: PRs are opened via the PR-intent relay; do not run `gh pr create` -- this call has been blocked locally.",
 		},
 	}
 
@@ -75,8 +79,11 @@ func TestInstall_CommandShimRejectsGuardedSubcommand(t *testing.T) {
 	if code == 0 {
 		t.Fatalf("shim exit code = 0, want non-zero; output=%q", got)
 	}
-	if !bytes.Contains([]byte(got), []byte(rows[0].Message)) {
-		t.Fatalf("shim output = %q, want it to contain %q", got, rows[0].Message)
+	if !bytes.Contains([]byte(got), []byte(rows[0].RuntimeMessage)) {
+		t.Fatalf("shim output = %q, want it to contain RuntimeMessage %q", got, rows[0].RuntimeMessage)
+	}
+	if bytes.Contains([]byte(got), []byte(rows[0].Message)) {
+		t.Fatalf("shim output = %q, want it to NOT contain the prompt-validator Message %q", got, rows[0].Message)
 	}
 }
 
@@ -100,11 +107,12 @@ func TestInstall_CommandShimPassesThroughUnguardedSubcommand(t *testing.T) {
 
 	rows := []promptassembly.ForbiddenMarkerRow{
 		{
-			ID:      "forbidden-gh-pr-create",
-			Marker:  "gh pr create",
-			Kind:    "substring",
-			Enforce: "command-shim",
-			Message: "blocked: gh pr create",
+			ID:             "forbidden-gh-pr-create",
+			Marker:         "gh pr create",
+			Kind:           "substring",
+			Enforce:        "command-shim",
+			Message:        "blocked: gh pr create",
+			RuntimeMessage: "blocked: gh pr create",
 		},
 	}
 
@@ -151,11 +159,12 @@ func TestInstall_GhAPIMutationRejectsMutatingMethod(t *testing.T) {
 
 	rows := []promptassembly.ForbiddenMarkerRow{
 		{
-			ID:      "forbidden-gh-api-mutation",
-			Marker:  "gh api",
-			Kind:    "gh-api-mutation",
-			Enforce: "command-shim",
-			Message: "blocked: gh api mutation",
+			ID:             "forbidden-gh-api-mutation",
+			Marker:         "gh api",
+			Kind:           "gh-api-mutation",
+			Enforce:        "command-shim",
+			Message:        "blocked: gh api mutation",
+			RuntimeMessage: "blocked: gh api mutation",
 		},
 	}
 
@@ -210,11 +219,12 @@ func TestInstall_GhAPIMutationRejectsMutatingMethod(t *testing.T) {
 func TestInstall_GitHookRow(t *testing.T) {
 	rows := []promptassembly.ForbiddenMarkerRow{
 		{
-			ID:      "forbidden-git-push",
-			Marker:  "git push",
-			Kind:    "substring",
-			Enforce: "git-hook",
-			Message: "read-only Box: do not run `git push` -- this push has been blocked locally.",
+			ID:             "forbidden-git-push",
+			Marker:         "git push",
+			Kind:           "substring",
+			Enforce:        "git-hook",
+			Message:        "read-only Box: do not run `git push` -- this push has been blocked locally.",
+			RuntimeMessage: "read-only Box: do not run `git push` -- this push has been blocked locally.",
 		},
 	}
 
@@ -258,11 +268,12 @@ func TestInstall_GitHookRow(t *testing.T) {
 func TestInstall_GitHookRow_BareRepo(t *testing.T) {
 	rows := []promptassembly.ForbiddenMarkerRow{
 		{
-			ID:      "forbidden-git-push",
-			Marker:  "git push",
-			Kind:    "substring",
-			Enforce: "git-hook",
-			Message: "read-only Box: do not run `git push` -- this push has been blocked locally.",
+			ID:             "forbidden-git-push",
+			Marker:         "git push",
+			Kind:           "substring",
+			Enforce:        "git-hook",
+			Message:        "read-only Box: do not run `git push` -- this push has been blocked locally.",
+			RuntimeMessage: "read-only Box: do not run `git push` -- this push has been blocked locally.",
 		},
 	}
 
@@ -359,18 +370,20 @@ func TestInstall_GroupsByArgv0Generically(t *testing.T) {
 
 	rows := []promptassembly.ForbiddenMarkerRow{
 		{
-			ID:      "forbidden-gh-pr-create",
-			Marker:  "gh pr create",
-			Kind:    "substring",
-			Enforce: "command-shim",
-			Message: "blocked: gh pr create",
+			ID:             "forbidden-gh-pr-create",
+			Marker:         "gh pr create",
+			Kind:           "substring",
+			Enforce:        "command-shim",
+			Message:        "blocked: gh pr create",
+			RuntimeMessage: "blocked: gh pr create",
 		},
 		{
-			ID:      "forbidden-widget-launch",
-			Marker:  "widget launch",
-			Kind:    "substring",
-			Enforce: "command-shim",
-			Message: "blocked: widget launch",
+			ID:             "forbidden-widget-launch",
+			Marker:         "widget launch",
+			Kind:           "substring",
+			Enforce:        "command-shim",
+			Message:        "blocked: widget launch",
+			RuntimeMessage: "blocked: widget launch",
 		},
 	}
 
@@ -447,25 +460,28 @@ func TestInstall_CommandShimSkipsMissingBinary(t *testing.T) {
 
 	rows := []promptassembly.ForbiddenMarkerRow{
 		{
-			ID:      "forbidden-gh-pr-create",
-			Marker:  "gh pr create",
-			Kind:    "substring",
-			Enforce: "command-shim",
-			Message: "blocked: gh pr create",
+			ID:             "forbidden-gh-pr-create",
+			Marker:         "gh pr create",
+			Kind:           "substring",
+			Enforce:        "command-shim",
+			Message:        "blocked: gh pr create",
+			RuntimeMessage: "blocked: gh pr create",
 		},
 		{
-			ID:      "forbidden-fj-pr-create",
-			Marker:  "fj pr create",
-			Kind:    "substring",
-			Enforce: "command-shim",
-			Message: "blocked: fj pr create",
+			ID:             "forbidden-fj-pr-create",
+			Marker:         "fj pr create",
+			Kind:           "substring",
+			Enforce:        "command-shim",
+			Message:        "blocked: fj pr create",
+			RuntimeMessage: "blocked: fj pr create",
 		},
 		{
-			ID:      "forbidden-git-push",
-			Marker:  "git push",
-			Kind:    "substring",
-			Enforce: "git-hook",
-			Message: "blocked: git push",
+			ID:             "forbidden-git-push",
+			Marker:         "git push",
+			Kind:           "substring",
+			Enforce:        "git-hook",
+			Message:        "blocked: git push",
+			RuntimeMessage: "blocked: git push",
 		},
 	}
 
@@ -514,10 +530,13 @@ func TestInstall_CommandShimSkipsMissingBinary(t *testing.T) {
 
 // TestInstall_FullRegistry loads the real thirteen-row forbiddenMarkers
 // fixture (promptassembly/testdata/forbidden-markers.json) and installs it
-// end to end: two command-shims (argv0 "gh" and argv0 "fj", both now
-// enforce=="command-shim" as of issue #2509) and the one git-hook guard,
-// with every "gh" and "fj" subcommand row's message reachable through its
-// own installed shim.
+// end to end: exactly one command-shim (argv0 "gh" -- every "fj ..." row
+// stays enforce=="prompt-only", per lib/prompt-contract.nix's rationale
+// comment on those rows: agent/entrypoint.sh's install_readonly_guards
+// gating condition never fires for a forgejo Box, so a real fj shim never
+// reaches production regardless of what this package can render) and the
+// one git-hook guard, with every "gh" subcommand row's message reachable
+// and no "fj" shim installed.
 func TestInstall_FullRegistry(t *testing.T) {
 	realTrue := requireExecutable(t, "true")
 
@@ -543,17 +562,14 @@ func TestInstall_FullRegistry(t *testing.T) {
 		t.Fatalf("Install: %v", err)
 	}
 
-	wantShims := []string{"fj", "gh"}
-	if len(result.Shims) != len(wantShims) {
-		t.Fatalf("result.Shims = %v, want %v (both fj and gh rows are command-shim)", result.Shims, wantShims)
-	}
-	for i, name := range wantShims {
-		if result.Shims[i] != name {
-			t.Fatalf("result.Shims = %v, want %v (both fj and gh rows are command-shim)", result.Shims, wantShims)
-		}
+	if want := []string{"gh"}; len(result.Shims) != len(want) || result.Shims[0] != want[0] {
+		t.Fatalf("result.Shims = %v, want %v (all fj rows are still prompt-only)", result.Shims, want)
 	}
 	if !result.HookInstalled {
 		t.Fatalf("result.HookInstalled = false, want true")
+	}
+	if _, err := os.Stat(filepath.Join(shimDir, "fj")); err == nil {
+		t.Fatalf("fj shim exists, want none installed (every fj row is prompt-only)")
 	}
 
 	for _, tc := range []struct {
@@ -583,36 +599,13 @@ func TestInstall_FullRegistry(t *testing.T) {
 		t.Errorf("gh api (read): exit code != 0, want passthrough")
 	}
 
-	for _, tc := range []struct {
-		args []string
-		want string
-	}{
-		{[]string{"pr", "create"}, "fj pr create"},
-		{[]string{"pr", "ready"}, "fj pr ready"},
-		{[]string{"pr", "merge"}, "fj pr merge"},
-		{[]string{"issue", "comment"}, "fj issue comment"},
-		{[]string{"issue", "create"}, "fj issue create"},
-	} {
-		got, code := runShim(t, shimDir, "fj", tc.args...)
-		if code == 0 {
-			t.Errorf("fj %v: exit code = 0, want non-zero; output=%q", tc.args, got)
-		}
-		if !bytes.Contains([]byte(got), []byte(tc.want)) {
-			t.Errorf("fj %v: output = %q, want it to mention %q", tc.args, got, tc.want)
-		}
-	}
-
-	if _, code := runShim(t, shimDir, "fj", "pr", "list"); code != 0 {
-		t.Errorf("fj pr list: exit code != 0, want passthrough")
-	}
-
 	hookPath := filepath.Join(repoDir, ".git", "hooks", "pre-push")
 	content, err := os.ReadFile(hookPath)
 	if err != nil {
 		t.Fatalf("read %s: %v", hookPath, err)
 	}
-	if !bytes.Contains(content, []byte("git push")) {
-		t.Fatalf("pre-push hook content = %q, want it to mention 'git push'", content)
+	if !bytes.Contains(content, []byte("outbox")) {
+		t.Fatalf("pre-push hook content = %q, want it to mention 'outbox' (the row's runtimeMessage)", content)
 	}
 }
 
@@ -622,11 +615,12 @@ func TestInstall_FullRegistry(t *testing.T) {
 func TestInstall_GitHookRowMissingRepoDir(t *testing.T) {
 	rows := []promptassembly.ForbiddenMarkerRow{
 		{
-			ID:      "forbidden-git-push",
-			Marker:  "git push",
-			Kind:    "substring",
-			Enforce: "git-hook",
-			Message: "blocked: git push",
+			ID:             "forbidden-git-push",
+			Marker:         "git push",
+			Kind:           "substring",
+			Enforce:        "git-hook",
+			Message:        "blocked: git push",
+			RuntimeMessage: "blocked: git push",
 		},
 	}
 
@@ -648,11 +642,12 @@ func TestInstall_GitHookRowMissingRepoDir(t *testing.T) {
 func TestInstall_CommandShimRowMissingShimDir(t *testing.T) {
 	rows := []promptassembly.ForbiddenMarkerRow{
 		{
-			ID:      "forbidden-gh-pr-create",
-			Marker:  "gh pr create",
-			Kind:    "substring",
-			Enforce: "command-shim",
-			Message: "blocked: gh pr create",
+			ID:             "forbidden-gh-pr-create",
+			Marker:         "gh pr create",
+			Kind:           "substring",
+			Enforce:        "command-shim",
+			Message:        "blocked: gh pr create",
+			RuntimeMessage: "blocked: gh pr create",
 		},
 	}
 

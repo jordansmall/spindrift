@@ -33,11 +33,11 @@ func stubBinOnPath(t *testing.T, name string) {
 // readonly-guards subcommand's flag parsing reaches
 // promptassembly.LoadForbiddenMarkersFile and readonlyguards.Install with the
 // right Config: the real 13-row forbiddenMarkers registry fixture installs
-// both the "gh" and "fj" command shims and the pre-push/pre-receive git hook
-// under -repo-dir, exit code 0 (issue #2509).
+// the one "gh" command shim (every "fj ..." row stays prompt-only per
+// lib/prompt-contract.nix's rationale comment on those rows) and the
+// pre-push/pre-receive git hook under -repo-dir, exit code 0 (issue #2509).
 func TestRunReadonlyGuards_FullRegistryInstallsShimAndHook(t *testing.T) {
 	stubBinOnPath(t, "gh")
-	stubBinOnPath(t, "fj")
 	repoDir := t.TempDir()
 	runGitCmd(t, repoDir, "init")
 	shimDir := t.TempDir()
@@ -58,11 +58,8 @@ func TestRunReadonlyGuards_FullRegistryInstallsShimAndHook(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(shimDir, ".real-gh")); err != nil {
 		t.Errorf(".real-gh not installed: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(shimDir, "fj")); err != nil {
-		t.Errorf("fj shim not installed: %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(shimDir, ".real-fj")); err != nil {
-		t.Errorf(".real-fj not installed: %v", err)
+	if _, err := os.Stat(filepath.Join(shimDir, "fj")); err == nil {
+		t.Error("fj shim installed, want none (every fj row is prompt-only)")
 	}
 
 	for _, name := range []string{"pre-push", "pre-receive"} {
@@ -86,15 +83,6 @@ func TestRunReadonlyGuards_FullRegistryInstallsShimAndHook(t *testing.T) {
 	}
 	if !bytes.Contains(shimOut, []byte("gh pr create")) {
 		t.Errorf("installed shim output = %q, want it to mention 'gh pr create'", shimOut)
-	}
-
-	fjCmd := exec.Command(filepath.Join(shimDir, "fj"), "pr", "create")
-	fjOut, err := fjCmd.CombinedOutput()
-	if err == nil {
-		t.Fatalf("fj pr create via installed shim exit = 0, want non-zero; output=%q", fjOut)
-	}
-	if !bytes.Contains(fjOut, []byte("fj pr create")) {
-		t.Errorf("installed shim output = %q, want it to mention 'fj pr create'", fjOut)
 	}
 }
 
