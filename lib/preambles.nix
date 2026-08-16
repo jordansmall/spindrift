@@ -12,18 +12,7 @@ let
   concatStrings = builtins.concatStringsSep "";
   mapAttrsToList = f: attrs: map (n: f n attrs.${n}) (builtins.attrNames attrs);
   unique = builtins.foldl' (acc: x: if builtins.elem x acc then acc else acc ++ [ x ]) [ ];
-  # Matches `lib.escapeShellArg` byte for byte without depending on pkgs.lib:
-  # a string of only shell-safe characters passes through unquoted; anything
-  # else gets single-quote-wrapped, with embedded `'` escaped as `'\''`.
-  escapeShellArg =
-    arg:
-    let
-      string = builtins.toString arg;
-    in
-    if builtins.match "[[:alnum:],._+:@%/-]+" string == null then
-      "'" + builtins.replaceStrings [ "'" ] [ "'\\''" ] string + "'"
-    else
-      string;
+  builtinsCompat = import ./builtins-compat.nix;
 in
 rec {
   # One renderer used by both the shell and Go preamble families: iterates
@@ -46,7 +35,7 @@ rec {
           prefix = if export then "export " else "";
         in
         ''
-          ${prefix}${entry.env}=''${${entry.env}:-${escapeShellArg value}}
+          ${prefix}${entry.env}=''${${entry.env}:-${builtinsCompat.escapeShellArg value}}
         ''
       ) flakeOptionEntries
     );
@@ -70,10 +59,10 @@ rec {
   renderDriverMountPreamble =
     driverEntry:
     "export DRIVER_SKILLS_DIR="
-    + escapeShellArg "/home/agent/${driverEntry.skillsDirRelative}"
+    + builtinsCompat.escapeShellArg "/home/agent/${driverEntry.skillsDirRelative}"
     + "\n"
     + "export DRIVER_SESSION_CACHE_DIR="
-    + escapeShellArg (
+    + builtinsCompat.escapeShellArg (
       if driverEntry ? sessionCacheDirRelative then
         "/home/agent/${driverEntry.sessionCacheDirRelative}"
       else
@@ -92,7 +81,7 @@ rec {
   renderAgentPathsPreamble =
     agentPaths:
     concatStrings (
-      mapAttrsToList (var: path: "${var}=\${${var}:-${escapeShellArg path}}\n") agentPaths
+      mapAttrsToList (var: path: "${var}=\${${var}:-${builtinsCompat.escapeShellArg path}}\n") agentPaths
     );
 
   # The Launcher input document's `artifacts` section for the `run` wrapper
