@@ -12,33 +12,16 @@ import (
 	"time"
 )
 
-// TestModelDefault_IsSonnet5 asserts that the main/coordinator session model
-// default matches expectedDefaultModels["MODEL"] (cmd/launcher/
-// defaultmodels_gen_test.go, regen-rendered from lib/default-model-fixture.nix),
-// not opus-4-8 or an older release (issue #2240).
-func TestModelDefault_IsSonnet5(t *testing.T) {
-	want := expectedDefaultModels["MODEL"]
-	for _, e := range schemaFlags {
-		if e.env == "MODEL" {
-			if e.dflt != want {
-				t.Errorf("MODEL default = %q, want %q", e.dflt, want)
-			}
-			return
-		}
-	}
-	t.Fatal("MODEL entry not found in schemaFlags")
-}
-
 // TestSchemaFlags_DefaultModelsMatchFixture asserts every
 // expectedDefaultModels entry (cmd/launcher/defaultmodels_gen_test.go,
 // regen-rendered from lib/default-model-fixture.nix's schemaDefaults) matches
-// its corresponding schemaFlags entry's default, not just MODEL -- closing
-// the dead-fixture-key gap flagged in the issue #2514 review (SCOUT_MODEL,
-// REVIEW_MODEL, FILER_MODEL, and WORKER_MODEL were generated but asserted
-// nowhere).
+// its corresponding schemaFlags entry's default -- including MODEL, which
+// must stay sonnet-5 and not regress to opus-4-8 or an older release (issue
+// #2240) -- closing the dead-fixture-key gap flagged in the issue #2514
+// review (SCOUT_MODEL, REVIEW_MODEL, FILER_MODEL, and WORKER_MODEL were
+// generated but asserted nowhere).
 func TestSchemaFlags_DefaultModelsMatchFixture(t *testing.T) {
 	for env, want := range expectedDefaultModels {
-		env, want := env, want
 		t.Run(env, func(t *testing.T) {
 			for _, e := range schemaFlags {
 				if e.env == env {
