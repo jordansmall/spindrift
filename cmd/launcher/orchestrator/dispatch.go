@@ -479,7 +479,7 @@ func dispatchManifestIfPresent(cfg config, state *runstate.RunState, stdout io.W
 	state.WorkerFindings = strings.TrimSpace(findings.String())
 	for _, r := range results {
 		pu := passUsage(filepath.Join(cfg.workerWorkDir, r.Slice+".log"), cfg.driver)
-		workerTokens += pu.InputTokens + pu.OutputTokens + pu.CacheReadInputTokens + pu.CacheCreationInputTokens
+		workerTokens += pu.TotalTokens()
 		workerUSD += pu.TotalCostUSD
 	}
 	return true, workerTokens, workerUSD
