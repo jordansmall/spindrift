@@ -243,6 +243,16 @@
   },
   {
     "gate": "BOX_ACCESS_READ_WRITE",
+    "fragment": "land-git-stop-read-write.md",
+    "var": "LAND_GIT_STOP_READ_WRITE_STEP"
+  },
+  {
+    "gate": "BOX_ACCESS_READ_ONLY",
+    "fragment": "land-git-stop-read-only.md",
+    "var": "LAND_GIT_STOP_READ_ONLY_STEP"
+  },
+  {
+    "gate": "BOX_ACCESS_READ_WRITE",
     "fragment": "open-pr-push-git.md",
     "var": "OPEN_PR_PUSH_READ_WRITE_STEP"
   },

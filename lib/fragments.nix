@@ -392,6 +392,27 @@
     fragment = "land-git-push-git.md";
     var = "LAND_GIT_PUSH_READ_WRITE_STEP";
   }
+  # The LAND THE CHANGE CODE_FORGE=git block's own final "Print exactly one
+  # line and stop" step: identical body text either way, but its leading
+  # list number depends on whether a numbered step precedes it in this
+  # block. Read-write follows the git-push step above ("1. `git push`
+  # ..."), so it must read "2."; read-only has no preceding step at all
+  # (the eval-time assert two rows up means there is no
+  # BOX_ACCESS_READ_ONLY arm for the push step), so it must read "1." --
+  # without this pair, BOX_ACCESS_READ_ONLY renders an orphaned "2." with
+  # nothing numbered "1." before it. Same BOX_ACCESS_READ_WRITE/
+  # BOX_ACCESS_READ_ONLY exactly-one-on pairing as OPEN_PR_PUSH_READ_WRITE_
+  # STEP/OPEN_PR_PUSH_READ_ONLY_STEP below.
+  {
+    gate = "BOX_ACCESS_READ_WRITE";
+    fragment = "land-git-stop-read-write.md";
+    var = "LAND_GIT_STOP_READ_WRITE_STEP";
+  }
+  {
+    gate = "BOX_ACCESS_READ_ONLY";
+    fragment = "land-git-stop-read-only.md";
+    var = "LAND_GIT_STOP_READ_ONLY_STEP";
+  }
   # The OPEN A PULL REQUEST push step (issue #1918, BOX_FORGE_AND_ISSUE_ACCESS):
   # a read-only github Box holds no push-capable token, so it writes its
   # finished branch as a seam bundle to the outbox instead of git push --

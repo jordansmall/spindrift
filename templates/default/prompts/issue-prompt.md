@@ -146,14 +146,7 @@ unsure):
 **`CODE_FORGE=git`** (push-only Code Forge — no PR, no CI-watch, no merge
 gate): skip OPEN A PULL REQUEST below entirely.
 
-${LAND_GIT_PUSH_READ_WRITE_STEP}2. Print exactly one line as your final output and stop — raw plain text, not
-   wrapped in backticks, a code fence, or any other markdown formatting:
-
-   SPINDRIFT_OUTCOME issue=${ISSUE_NUMBER} landing=${BRANCH} status=ready note=<short reason>
-
-   The launcher applies `MERGE_MODE` after this line (push straight to the
-   target branch on `immediate`; leave the branch as pushed on `manual`).
-   Do not open a pull request and do not attempt to merge.
+${LAND_GIT_PUSH_READ_WRITE_STEP}${LAND_GIT_STOP_READ_WRITE_STEP}${LAND_GIT_STOP_READ_ONLY_STEP}
 
 **`CODE_FORGE=local`** (host-mediated Code Forge — no PR, no CI-watch, no
 network; the launcher lands your branch after this container exits): skip

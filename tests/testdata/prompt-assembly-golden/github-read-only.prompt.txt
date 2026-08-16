@@ -223,7 +223,7 @@ unsure):
 **`CODE_FORGE=git`** (push-only Code Forge — no PR, no CI-watch, no merge
 gate): skip OPEN A PULL REQUEST below entirely.
 
-2. Print exactly one line as your final output and stop — raw plain text, not
+1. Print exactly one line as your final output and stop — raw plain text, not
    wrapped in backticks, a code fence, or any other markdown formatting:
 
    SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=<short reason>
