@@ -1363,6 +1363,192 @@ func TestResolveCapabilitySignals_MatchingDocumentPartialArtifactKeysFallsBack(t
 	}
 }
 
+// TestResolveTrackerAndForgeSignals_NoDocumentFallsBackToComputation verifies
+// that with no loaded document, resolveTrackerAndForgeSignals always derives
+// the tracker-axis/forge-backend strings fresh from the pure mirror of
+// lib/mkHarness.nix's trackerAxisRead/Write/Filer/forgeBackend computation
+// rather than reading an unpopulated docArtifact as "" (issue #2533 review).
+func TestResolveTrackerAndForgeSignals_NoDocumentFallsBackToComputation(t *testing.T) {
+	t.Cleanup(func() { loadedDoc = nil })
+	loadedDoc = nil
+
+	read, write, filer, forge := resolveTrackerAndForgeSignals("forgejo", "forgejo")
+	if read != "FORGEJO" || write != "FORGEJO" || filer != "FORGEJO" || forge != "FORGEJO" {
+		t.Errorf("forgejo/forgejo = (%q,%q,%q,%q), want all FORGEJO", read, write, filer, forge)
+	}
+
+	read, write, filer, forge = resolveTrackerAndForgeSignals("github", "local")
+	if read != "LOCAL" || write != "" || filer != "GH" || forge != "GH" {
+		t.Errorf("github/local = (%q,%q,%q,%q), want (LOCAL,\"\",GH,GH)", read, write, filer, forge)
+	}
+
+	read, write, filer, forge = resolveTrackerAndForgeSignals("github", "github")
+	if read != "GITHUB" || write != "GITHUB" || filer != "GH" || forge != "GH" {
+		t.Errorf("github/github = (%q,%q,%q,%q), want (GITHUB,GITHUB,GH,GH)", read, write, filer, forge)
+	}
+}
+
+// TestResolveTrackerAndForgeSignals_MatchingDocumentTrustsForwardedArtifact
+// verifies that when the resolved CODE_FORGE/ISSUE_TRACKER pairing matches
+// what was baked into the document's settings section, the forwarded
+// artifact strings are trusted directly instead of being recomputed --
+// asserted against values a fresh github/github computation would never
+// produce, so the test can't pass by coincidence.
+func TestResolveTrackerAndForgeSignals_MatchingDocumentTrustsForwardedArtifact(t *testing.T) {
+	t.Cleanup(func() { loadedDoc = nil })
+	loadedDoc = &inputDocument{
+		Settings: map[string]string{"CODE_FORGE": "github", "ISSUE_TRACKER": "github"},
+		Artifacts: map[string]string{
+			"TRACKER_AXIS_READ":  "WEIRD_READ",
+			"TRACKER_AXIS_WRITE": "WEIRD_WRITE",
+			"TRACKER_AXIS_FILER": "WEIRD_FILER",
+			"FORGE_BACKEND":      "WEIRD_FORGE",
+		},
+	}
+
+	read, write, filer, forge := resolveTrackerAndForgeSignals("github", "github")
+	if read != "WEIRD_READ" || write != "WEIRD_WRITE" || filer != "WEIRD_FILER" || forge != "WEIRD_FORGE" {
+		t.Errorf("got (%q,%q,%q,%q), want forwarded artifact values", read, write, filer, forge)
+	}
+}
+
+// TestResolveTrackerAndForgeSignals_OverrideAwayFromBakedDocumentFallsBack
+// verifies that when the pairing actually in effect diverges from what was
+// baked into the document (a dispatch-time --tracker/--forge-backend
+// override), the stale forwarded artifact is NOT trusted -- a
+// github-baked document overridden to forgejo/forgejo must not keep
+// reading the baked BOX_TRACKER_AXIS_READ=GITHUB (issue #2533 review).
+func TestResolveTrackerAndForgeSignals_OverrideAwayFromBakedDocumentFallsBack(t *testing.T) {
+	t.Cleanup(func() { loadedDoc = nil })
+	loadedDoc = &inputDocument{
+		Settings: map[string]string{"CODE_FORGE": "github", "ISSUE_TRACKER": "github"},
+		Artifacts: map[string]string{
+			"TRACKER_AXIS_READ":  "GITHUB",
+			"TRACKER_AXIS_WRITE": "GITHUB",
+			"TRACKER_AXIS_FILER": "GH",
+			"FORGE_BACKEND":      "GH",
+		},
+	}
+
+	read, write, filer, forge := resolveTrackerAndForgeSignals("forgejo", "forgejo")
+	if read != "FORGEJO" || write != "FORGEJO" || filer != "FORGEJO" || forge != "FORGEJO" {
+		t.Errorf("override to forgejo/forgejo = (%q,%q,%q,%q), want all FORGEJO (ignores stale github-baked artifact)", read, write, filer, forge)
+	}
+}
+
+// TestResolveTrackerAndForgeSignals_PartialArtifactKeysFallsBack verifies
+// that when the matching document's Artifacts section carries only some of
+// the four tracker/forge keys (e.g. 3 of 4), resolveTrackerAndForgeSignals
+// falls back to the fresh computation for all four, not just the missing
+// one (issue #2533 review, mirrors the capability-signals partial-key
+// guard).
+func TestResolveTrackerAndForgeSignals_PartialArtifactKeysFallsBack(t *testing.T) {
+	t.Cleanup(func() { loadedDoc = nil })
+	loadedDoc = &inputDocument{
+		Settings: map[string]string{"CODE_FORGE": "forgejo", "ISSUE_TRACKER": "forgejo"},
+		Artifacts: map[string]string{
+			"TRACKER_AXIS_READ":  "GITHUB",
+			"TRACKER_AXIS_WRITE": "GITHUB",
+			"TRACKER_AXIS_FILER": "GH",
+			// FORGE_BACKEND deliberately absent -- 3 of 4 keys present.
+		},
+	}
+
+	read, write, filer, forge := resolveTrackerAndForgeSignals("forgejo", "forgejo")
+	if read != "FORGEJO" || write != "FORGEJO" || filer != "FORGEJO" || forge != "FORGEJO" {
+		t.Errorf("partial keys = (%q,%q,%q,%q), want all FORGEJO (falls back to fresh computation for all four)", read, write, filer, forge)
+	}
+}
+
+// TestResolveAgentPresenceSignals_NoDocumentFallsBackToSchemaDefaults
+// verifies that with no loaded document, resolveAgentPresenceSignals
+// returns the schema-default-derived values instead of unconditionally
+// false: WORKER_MODEL's schema default is non-empty ("claude-sonnet-5"),
+// so WorkerProvisioned must default true, and ORCHESTRATOR_ENABLED's
+// schema default is false, so ReviewLoopInline/ReviewLoopOrchestrator must
+// default (true, false) -- exactly one true, never both false (issue #2533
+// review).
+func TestResolveAgentPresenceSignals_NoDocumentFallsBackToSchemaDefaults(t *testing.T) {
+	t.Cleanup(func() { loadedDoc = nil })
+	loadedDoc = nil
+
+	filerEnabled, workerProvisioned, reviewLoopInline, reviewLoopOrchestrator := resolveAgentPresenceSignals()
+	if filerEnabled {
+		t.Errorf("filerEnabled = true, want false (FILER_MODEL schema default is empty)")
+	}
+	if !workerProvisioned {
+		t.Errorf("workerProvisioned = false, want true (WORKER_MODEL schema default is non-empty)")
+	}
+	if !reviewLoopInline {
+		t.Errorf("reviewLoopInline = false, want true (ORCHESTRATOR_ENABLED schema default is false)")
+	}
+	if reviewLoopOrchestrator {
+		t.Errorf("reviewLoopOrchestrator = true, want false (ORCHESTRATOR_ENABLED schema default is false)")
+	}
+}
+
+// TestResolveAgentPresenceSignals_MatchingDocumentTrustsForwardedArtifact
+// verifies that when all four artifact keys are present, the forwarded
+// values are trusted directly -- asserted against values the schema-default
+// fallback would never produce, so the test can't pass by coincidence.
+func TestResolveAgentPresenceSignals_MatchingDocumentTrustsForwardedArtifact(t *testing.T) {
+	t.Cleanup(func() { loadedDoc = nil })
+	loadedDoc = &inputDocument{
+		Settings: map[string]string{},
+		Artifacts: map[string]string{
+			"FILER_ENABLED":            "true",
+			"WORKER_PROVISIONED":       "false",
+			"REVIEW_LOOP_INLINE":       "false",
+			"REVIEW_LOOP_ORCHESTRATOR": "true",
+		},
+	}
+
+	filerEnabled, workerProvisioned, reviewLoopInline, reviewLoopOrchestrator := resolveAgentPresenceSignals()
+	if !filerEnabled {
+		t.Errorf("filerEnabled = false, want true (forwarded artifact)")
+	}
+	if workerProvisioned {
+		t.Errorf("workerProvisioned = true, want false (forwarded artifact)")
+	}
+	if reviewLoopInline {
+		t.Errorf("reviewLoopInline = true, want false (forwarded artifact)")
+	}
+	if !reviewLoopOrchestrator {
+		t.Errorf("reviewLoopOrchestrator = false, want true (forwarded artifact)")
+	}
+}
+
+// TestResolveAgentPresenceSignals_PartialArtifactKeysFallsBack verifies
+// that when only some of the four artifact keys are present (e.g. 3 of 4),
+// resolveAgentPresenceSignals falls back to schema defaults for all four,
+// not just the missing one.
+func TestResolveAgentPresenceSignals_PartialArtifactKeysFallsBack(t *testing.T) {
+	t.Cleanup(func() { loadedDoc = nil })
+	loadedDoc = &inputDocument{
+		Settings: map[string]string{},
+		Artifacts: map[string]string{
+			"FILER_ENABLED":      "true",
+			"WORKER_PROVISIONED": "false",
+			"REVIEW_LOOP_INLINE": "false",
+			// REVIEW_LOOP_ORCHESTRATOR deliberately absent -- 3 of 4 keys present.
+		},
+	}
+
+	filerEnabled, workerProvisioned, reviewLoopInline, reviewLoopOrchestrator := resolveAgentPresenceSignals()
+	if filerEnabled {
+		t.Errorf("filerEnabled = true, want false (partial keys fall back to schema default)")
+	}
+	if !workerProvisioned {
+		t.Errorf("workerProvisioned = false, want true (partial keys fall back to schema default)")
+	}
+	if !reviewLoopInline {
+		t.Errorf("reviewLoopInline = false, want true (partial keys fall back to schema default)")
+	}
+	if reviewLoopOrchestrator {
+		t.Errorf("reviewLoopOrchestrator = true, want false (partial keys fall back to schema default)")
+	}
+}
+
 // TestValidate_FullyLocalExemptsRepoSlugAndGhToken verifies that validate()
 // does not require REPO_SLUG or GH_TOKEN when both CODE_FORGE and
 // ISSUE_TRACKER are local (issue #1895): the github gh-exec client that
@@ -2214,6 +2400,35 @@ func TestDispatchCompletionBanner_Local(t *testing.T) {
 	want := "==> all agents finished — seams landed host-side into their own Integration branches in the Accumulation repo.\n"
 	if got != want {
 		t.Errorf("dispatchCompletionBanner(local) = %q, want %q", got, want)
+	}
+}
+
+// TestDispatchConfig_NoDocument_UsesGuardedResolvers verifies dispatchConfig
+// wires resolveTrackerAndForgeSignals/resolveAgentPresenceSignals rather
+// than the old unguarded docArtifact(...) reads: with no loaded document,
+// WorkerProvisioned must come back true (WORKER_MODEL's schema default is
+// non-empty), not the old bug's unconditional false, and the tracker-axis/
+// forge-backend strings must come back the fresh github/github computation,
+// not empty (issue #2533 review).
+func TestDispatchConfig_NoDocument_UsesGuardedResolvers(t *testing.T) {
+	t.Cleanup(func() { loadedDoc = nil })
+	loadedDoc = nil
+
+	cf := forge.NewFake()
+	it := forge.NewFake()
+	cfg := dispatchConfig(minimalValidConfig(), it, testWired(it), cf)
+
+	if !cfg.WorkerProvisioned {
+		t.Error("WorkerProvisioned = false, want true (WORKER_MODEL schema default is non-empty)")
+	}
+	if !cfg.ReviewLoopInline || cfg.ReviewLoopOrchestrator {
+		t.Errorf("ReviewLoopInline=%v ReviewLoopOrchestrator=%v, want (true, false) (ORCHESTRATOR_ENABLED schema default is false)", cfg.ReviewLoopInline, cfg.ReviewLoopOrchestrator)
+	}
+	if cfg.TrackerAxisRead != "GITHUB" || cfg.TrackerAxisWrite != "GITHUB" || cfg.TrackerAxisFiler != "GH" {
+		t.Errorf("TrackerAxis = (%q,%q,%q), want (GITHUB,GITHUB,GH) for github/github", cfg.TrackerAxisRead, cfg.TrackerAxisWrite, cfg.TrackerAxisFiler)
+	}
+	if cfg.ForgeBackend != "GH" {
+		t.Errorf("ForgeBackend = %q, want GH for codeForge=github", cfg.ForgeBackend)
 	}
 }
 

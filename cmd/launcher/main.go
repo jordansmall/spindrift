@@ -329,6 +329,93 @@ func resolveCapabilitySignals(codeForge, issueTracker string) capabilitySignals 
 	}
 }
 
+// trackerAxisSignals mirrors lib/mkHarness.nix's trackerAxisRead/Write/
+// Filer let-bindings (issue #2533) as a launcher-side fallback for when the
+// nix-forwarded artifact can't be trusted (see resolveTrackerAndForgeSignals).
+func trackerAxisSignals(issueTracker string) (read, write, filer string) {
+	switch issueTracker {
+	case "local":
+		return "LOCAL", "", "GH"
+	case "forgejo":
+		return "FORGEJO", "FORGEJO", "FORGEJO"
+	default:
+		return "GITHUB", "GITHUB", "GH"
+	}
+}
+
+// forgeBackendSignal mirrors lib/mkHarness.nix's forgeBackend let-binding
+// (issue #2533).
+func forgeBackendSignal(codeForge string) string {
+	if codeForge == "forgejo" {
+		return "FORGEJO"
+	}
+	return "GH"
+}
+
+// resolveTrackerAndForgeSignals returns the tracker-axis/forge-backend
+// signals for the codeForge/issueTracker pairing actually in effect this
+// run, mirroring resolveCapabilitySignals's trust-then-fallback shape
+// (issue #2527) for exactly the same reason: TRACKER_AXIS_READ/WRITE/FILER
+// and FORGE_BACKEND are derived purely from ISSUE_TRACKER/CODE_FORGE, both
+// flakeOption (not boxEnvOnly) knobs an operator can override at dispatch
+// time independent of whatever pairing was baked into the --input document
+// at image-build time. Trust the document's forwarded artifacts only when
+// the resolved pairing matches what was baked in (loadedDoc.Settings) and
+// every needed artifact key is present; otherwise fall back to
+// trackerAxisSignals/forgeBackendSignal, the pure Go mirror of
+// lib/mkHarness.nix's own computation, rather than reading an absent
+// docArtifact key as "" (issue #2533 review).
+func resolveTrackerAndForgeSignals(codeForge, issueTracker string) (read, write, filer, forge string) {
+	if loadedDoc != nil && codeForge == loadedDoc.Settings["CODE_FORGE"] && issueTracker == loadedDoc.Settings["ISSUE_TRACKER"] {
+		_, readOK := loadedDoc.Artifacts["TRACKER_AXIS_READ"]
+		_, writeOK := loadedDoc.Artifacts["TRACKER_AXIS_WRITE"]
+		_, filerOK := loadedDoc.Artifacts["TRACKER_AXIS_FILER"]
+		_, forgeOK := loadedDoc.Artifacts["FORGE_BACKEND"]
+		if readOK && writeOK && filerOK && forgeOK {
+			return docArtifact("TRACKER_AXIS_READ"), docArtifact("TRACKER_AXIS_WRITE"), docArtifact("TRACKER_AXIS_FILER"), docArtifact("FORGE_BACKEND")
+		}
+	}
+	read, write, filer = trackerAxisSignals(issueTracker)
+	return read, write, filer, forgeBackendSignal(codeForge)
+}
+
+// resolveAgentPresenceSignals returns the roster/orchestration-derived gate
+// signals (FILER_ENABLED, WORKER_PROVISIONED, REVIEW_LOOP_INLINE,
+// REVIEW_LOOP_ORCHESTRATOR) for this run. Unlike resolveTrackerAndForgeSignals,
+// there's no independently-tracked live value to compare against the
+// document: filerModel/workerModel/orchestratorEnabled are boxEnvOnly (see
+// lib/env-schema.nix) — the launcher's own config struct never parses them
+// at all, so there is no override-mismatch scenario to guard against, only
+// an absent/partial document. When all four artifact keys are present,
+// trust them; otherwise fall back to the resolved schema defaults
+// (schemaDefault, which still reads WORKER_MODEL/FILER_MODEL/
+// ORCHESTRATOR_ENABLED from loadedDoc.Settings when a document is loaded,
+// since lib/mkHarness.nix's documentSettings renders every flakeOption key
+// regardless of boxEnvOnly) instead of silently reading false for all
+// four -- WorkerProvisioned in particular defaults false under the old
+// behavior even though workerModel's own schema default is non-empty (the
+// worker is provisioned by default), and defaulting both review-loop bools
+// false violates their exactly-one-true invariant (issue #2533 review).
+func resolveAgentPresenceSignals() (filerEnabled, workerProvisioned, reviewLoopInline, reviewLoopOrchestrator bool) {
+	if loadedDoc != nil {
+		_, filerOK := loadedDoc.Artifacts["FILER_ENABLED"]
+		_, workerOK := loadedDoc.Artifacts["WORKER_PROVISIONED"]
+		_, inlineOK := loadedDoc.Artifacts["REVIEW_LOOP_INLINE"]
+		_, orchOK := loadedDoc.Artifacts["REVIEW_LOOP_ORCHESTRATOR"]
+		if filerOK && workerOK && inlineOK && orchOK {
+			return docArtifact("FILER_ENABLED") == "true",
+				docArtifact("WORKER_PROVISIONED") == "true",
+				docArtifact("REVIEW_LOOP_INLINE") == "true",
+				docArtifact("REVIEW_LOOP_ORCHESTRATOR") == "true"
+		}
+	}
+	orchestratorOn := schemaDefault("ORCHESTRATOR_ENABLED") == "true"
+	return schemaDefault("FILER_MODEL") != "",
+		schemaDefault("WORKER_MODEL") != "",
+		!orchestratorOn,
+		orchestratorOn
+}
+
 func validate(c config) error {
 	if c.selfContained && c.dispatchKind != dispatchKindResearch {
 		return fmt.Errorf("--self-contained is only valid for the research dispatch kind")
@@ -752,6 +839,8 @@ func boxTokenResolver(next func(num, name string) string) func(num, name string)
 // Forge, so the retry proceeds unguarded there without any guard here.
 func dispatchConfig(c config, it forge.IssueTracker, lw *localloop.Wired, cf forge.CodeForge) dispatch.Config {
 	sig := resolveCapabilitySignals(c.codeForge, c.issueTracker)
+	trackerAxisRead, trackerAxisWrite, trackerAxisFiler, forgeBackend := resolveTrackerAndForgeSignals(c.codeForge, c.issueTracker)
+	filerEnabled, workerProvisioned, reviewLoopInline, reviewLoopOrchestrator := resolveAgentPresenceSignals()
 	return dispatch.Config{
 		BoxEnvVars:              c.boxEnvVars,
 		ResolveEnv:              boxTokenResolver(localBaseBranchResolver(c, it, lw, cf)),
@@ -762,14 +851,14 @@ func dispatchConfig(c config, it forge.IssueTracker, lw *localloop.Wired, cf for
 		FullyLocal:              sig.fullyLocal,
 		InBoxUnreachableTracker: sig.inBoxUnreachableTracker,
 		BoxForgeAndIssueAccess:  c.boxForgeAndIssueAccess,
-		TrackerAxisRead:         docArtifact("TRACKER_AXIS_READ"),
-		TrackerAxisWrite:        docArtifact("TRACKER_AXIS_WRITE"),
-		TrackerAxisFiler:        docArtifact("TRACKER_AXIS_FILER"),
-		ForgeBackend:            docArtifact("FORGE_BACKEND"),
-		FilerEnabled:            docArtifact("FILER_ENABLED") == "true",
-		WorkerProvisioned:       docArtifact("WORKER_PROVISIONED") == "true",
-		ReviewLoopInline:        docArtifact("REVIEW_LOOP_INLINE") == "true",
-		ReviewLoopOrchestrator:  docArtifact("REVIEW_LOOP_ORCHESTRATOR") == "true",
+		TrackerAxisRead:         trackerAxisRead,
+		TrackerAxisWrite:        trackerAxisWrite,
+		TrackerAxisFiler:        trackerAxisFiler,
+		ForgeBackend:            forgeBackend,
+		FilerEnabled:            filerEnabled,
+		WorkerProvisioned:       workerProvisioned,
+		ReviewLoopInline:        reviewLoopInline,
+		ReviewLoopOrchestrator:  reviewLoopOrchestrator,
 		TransientRetryMax:       c.transientRetryMax,
 		TransientBackoffSecs:    c.transientBackoffSecs,
 		HoldJitterSecs:          c.holdJitterSecs,
