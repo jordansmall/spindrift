@@ -390,35 +390,192 @@ func TestRunAssemblePrompt_ForgeBackendFlagReachesGates(t *testing.T) {
 	}
 }
 
-// TestRunAssemblePrompt_RosterAndReviewLoopFlagsReachEnv verifies the
-// --filer-enabled/--worker-provisioned/--review-loop-inline/
-// --review-loop-orchestrator boolean flags parse and reach
-// promptassembly.Env without error (issue #2533 slice 2). Gates.go treats
-// them as plain passthrough fields (no in-box re-derivation left to
-// exercise, unlike the tracker-axis/forge-backend flags above), so this
-// case only pins that the flags exist and runAssemblePrompt still succeeds
-// with them set -- a construction/wiring smoke test, not a gate-rendering
-// one.
-func TestRunAssemblePrompt_RosterAndReviewLoopFlagsReachEnv(t *testing.T) {
-	dir := t.TempDir()
-	promptOutput := filepath.Join(dir, "prompt.txt")
-	agentsJSONOutput := filepath.Join(dir, "agents.json")
-	handoffOutput := filepath.Join(dir, "handoff.json")
+// Distinctive, present-in-source literal strings used to prove each of the
+// four roster/review-loop flags reaches its own fragment and no other --
+// picked by reading the actual fragment files under
+// templates/default/prompts/fragments/ rather than guessed, and confirmed
+// (via a grep sweep across templates/default/prompts/) to appear nowhere
+// else in the prompt template tree, so a Contains/! Contains check on the
+// rendered prompt is unambiguous:
+//   - filerEnabledMarker is file-issues-direct.md's/file-issues-relay.md's
+//     shared heading (both render only when FILER_ENABLED gates a direct or
+//     relay write mechanism in gates_tracker.go -- either fork requires
+//     e.FilerEnabled, so the heading's presence pins FilerEnabled true
+//     regardless of which fork the covered cell's BOX_WRITE_ENABLED/
+//     ORCHESTRATOR combination picks).
+//   - workerProvisionedMarker is coordinator.md's (WORKER_PROVISIONED gate).
+//   - reviewLoopInlineMarker is review-loop-inline.md's (REVIEW_LOOP_INLINE
+//     gate).
+//   - reviewLoopOrchestratorMarker is review-loop-orchestrator.md's
+//     (REVIEW_LOOP_ORCHESTRATOR gate).
+const (
+	filerEnabledMarker           = "# FILE ISSUES"
+	workerProvisionedMarker      = "rather than editing the source yourself"
+	reviewLoopInlineMarker       = "Do NOT review inline"
+	reviewLoopOrchestratorMarker = "Review is handled by the orchestrator as a separate"
+)
 
-	args := coveredCellArgs(t, promptOutput, agentsJSONOutput, handoffOutput)
-	args = replaceArg(args, "--filer-enabled", "true")
-	args = replaceArg(args, "--worker-provisioned", "true")
-	args = replaceArg(args, "--review-loop-inline", "true")
-	args = replaceArg(args, "--review-loop-orchestrator", "false")
-
+// assemblePromptForTest runs runAssemblePrompt against args (built from
+// coveredCellArgs and mutated via replaceArg by callers) and returns the
+// rendered prompt output's content as a string, failing the test on a
+// non-zero exit or an unreadable output file.
+func assemblePromptForTest(t *testing.T, dir string, args []string) string {
+	t.Helper()
 	var stdout bytes.Buffer
 	rc := runAssemblePrompt(args, &stdout)
 	if rc != 0 {
 		t.Fatalf("runAssemblePrompt exit = %d, want 0 (stdout=%q)", rc, stdout.String())
 	}
-	if _, err := os.Stat(promptOutput); err != nil {
-		t.Fatalf("prompt output not written: %v", err)
+	promptBytes, err := os.ReadFile(filepath.Join(dir, "prompt.txt"))
+	if err != nil {
+		t.Fatalf("read prompt output: %v", err)
 	}
+	return string(promptBytes)
+}
+
+// TestRunAssemblePrompt_FilerEnabledFlagReachesPrompt verifies --filer-enabled
+// reaches promptassembly.Env.FilerEnabled and, through it, the FILER_ENABLED
+// gate: on, the rendered prompt carries the filer's FILE ISSUES heading; off
+// (coveredCellArgs' default -- the flag defaults to false and is never set
+// by coveredCellArgs itself), it does not (issue #2533 slice 2).
+func TestRunAssemblePrompt_FilerEnabledFlagReachesPrompt(t *testing.T) {
+	for _, enabled := range []bool{true, false} {
+		name := "disabled"
+		if enabled {
+			name = "enabled"
+		}
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			promptOutput := filepath.Join(dir, "prompt.txt")
+			agentsJSONOutput := filepath.Join(dir, "agents.json")
+			handoffOutput := filepath.Join(dir, "handoff.json")
+
+			args := coveredCellArgs(t, promptOutput, agentsJSONOutput, handoffOutput)
+			args = replaceArg(args, "--filer-enabled", boolFlagValue(enabled))
+
+			prompt := assemblePromptForTest(t, dir, args)
+			got := strings.Contains(prompt, filerEnabledMarker)
+			if got != enabled {
+				t.Errorf("prompt contains %q = %v, want %v (--filer-enabled=%v)", filerEnabledMarker, got, enabled, enabled)
+			}
+		})
+	}
+}
+
+// TestRunAssemblePrompt_WorkerProvisionedFlagReachesPrompt verifies
+// --worker-provisioned reaches promptassembly.Env.WorkerProvisioned and, through
+// it, the WORKER_PROVISIONED gate: on, the rendered prompt carries
+// coordinator.md's marker text; off, it does not (issue #2533 slice 2).
+func TestRunAssemblePrompt_WorkerProvisionedFlagReachesPrompt(t *testing.T) {
+	for _, provisioned := range []bool{true, false} {
+		name := "unprovisioned"
+		if provisioned {
+			name = "provisioned"
+		}
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			promptOutput := filepath.Join(dir, "prompt.txt")
+			agentsJSONOutput := filepath.Join(dir, "agents.json")
+			handoffOutput := filepath.Join(dir, "handoff.json")
+
+			args := coveredCellArgs(t, promptOutput, agentsJSONOutput, handoffOutput)
+			args = replaceArg(args, "--worker-provisioned", boolFlagValue(provisioned))
+
+			prompt := assemblePromptForTest(t, dir, args)
+			got := strings.Contains(prompt, workerProvisionedMarker)
+			if got != provisioned {
+				t.Errorf("prompt contains %q = %v, want %v (--worker-provisioned=%v)", workerProvisionedMarker, got, provisioned, provisioned)
+			}
+		})
+	}
+}
+
+// TestRunAssemblePrompt_ReviewLoopFlagsReachPrompt verifies
+// --review-loop-inline/--review-loop-orchestrator reach
+// promptassembly.Env.ReviewLoopInline/Env.ReviewLoopOrchestrator and, through
+// them, the REVIEW_LOOP_INLINE/REVIEW_LOOP_ORCHESTRATOR gates: each flag
+// combination renders exactly its own fragment's marker and never the
+// other's, proving the two flags aren't swapped or aliased (issue #2533
+// slice 2).
+func TestRunAssemblePrompt_ReviewLoopFlagsReachPrompt(t *testing.T) {
+	cases := []struct {
+		name         string
+		inline       bool
+		orchestrator bool
+	}{
+		{"inline on, orchestrator off", true, false},
+		{"inline off, orchestrator on", false, true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			dir := t.TempDir()
+			promptOutput := filepath.Join(dir, "prompt.txt")
+			agentsJSONOutput := filepath.Join(dir, "agents.json")
+			handoffOutput := filepath.Join(dir, "handoff.json")
+
+			args := coveredCellArgs(t, promptOutput, agentsJSONOutput, handoffOutput)
+			args = replaceArg(args, "--review-loop-inline", boolFlagValue(c.inline))
+			args = replaceArg(args, "--review-loop-orchestrator", boolFlagValue(c.orchestrator))
+
+			prompt := assemblePromptForTest(t, dir, args)
+			if gotInline := strings.Contains(prompt, reviewLoopInlineMarker); gotInline != c.inline {
+				t.Errorf("prompt contains %q = %v, want %v (--review-loop-inline=%v)", reviewLoopInlineMarker, gotInline, c.inline, c.inline)
+			}
+			if gotOrchestrator := strings.Contains(prompt, reviewLoopOrchestratorMarker); gotOrchestrator != c.orchestrator {
+				t.Errorf("prompt contains %q = %v, want %v (--review-loop-orchestrator=%v)", reviewLoopOrchestratorMarker, gotOrchestrator, c.orchestrator, c.orchestrator)
+			}
+		})
+	}
+}
+
+// TestRunAssemblePrompt_FilerAndWorkerFlagsNotCrossWired proves
+// --filer-enabled and --worker-provisioned reach their own, distinct Env
+// fields rather than being crossed (e.g. --filer-enabled accidentally
+// wired to Env.WorkerProvisioned, or vice versa): with exactly one of the
+// two flags on, only that flag's own marker appears in the rendered
+// prompt, never the other's -- a wiring bug that swapped the two flags'
+// destinations would show both markers together or neither, failing this
+// test (issue #2533 slice 2, the review finding this pins closed).
+func TestRunAssemblePrompt_FilerAndWorkerFlagsNotCrossWired(t *testing.T) {
+	cases := []struct {
+		name       string
+		filer      bool
+		worker     bool
+		wantFiler  bool
+		wantWorker bool
+	}{
+		{"filer on, worker off", true, false, true, false},
+		{"filer off, worker on", false, true, false, true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			dir := t.TempDir()
+			promptOutput := filepath.Join(dir, "prompt.txt")
+			agentsJSONOutput := filepath.Join(dir, "agents.json")
+			handoffOutput := filepath.Join(dir, "handoff.json")
+
+			args := coveredCellArgs(t, promptOutput, agentsJSONOutput, handoffOutput)
+			args = replaceArg(args, "--filer-enabled", boolFlagValue(c.filer))
+			args = replaceArg(args, "--worker-provisioned", boolFlagValue(c.worker))
+
+			prompt := assemblePromptForTest(t, dir, args)
+			if gotFiler := strings.Contains(prompt, filerEnabledMarker); gotFiler != c.wantFiler {
+				t.Errorf("prompt contains %q = %v, want %v (--filer-enabled=%v, --worker-provisioned=%v)", filerEnabledMarker, gotFiler, c.wantFiler, c.filer, c.worker)
+			}
+			if gotWorker := strings.Contains(prompt, workerProvisionedMarker); gotWorker != c.wantWorker {
+				t.Errorf("prompt contains %q = %v, want %v (--filer-enabled=%v, --worker-provisioned=%v)", workerProvisionedMarker, gotWorker, c.wantWorker, c.filer, c.worker)
+			}
+		})
+	}
+}
+
+// boolFlagValue renders b the way replaceArg/the flag package expect a bool
+// flag's value token ("true"/"false").
+func boolFlagValue(b bool) string {
+	if b {
+		return "true"
+	}
+	return "false"
 }
 
 // TestIsAssemblePromptInvocation verifies the assemble-prompt subcommand's
