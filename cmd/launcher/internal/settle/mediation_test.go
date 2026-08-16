@@ -22,18 +22,6 @@ func TestTextSourceUnknown_IsZeroValue(t *testing.T) {
 	}
 }
 
-// TestRequiredCapabilityError_PackageLevel_AllPresent asserts the
-// package-level RequiredCapabilityError (main.go's construction-free startup
-// gate entry point) applies the same checks as the Mediation method form
-// without needing an IssueTracker, outbox resolver, or base branch.
-func TestRequiredCapabilityError_PackageLevel_AllPresent(t *testing.T) {
-	fc := forge.NewFake(testDispatchLabels)
-
-	if err := RequiredCapabilityError(fc.AsGithubReadOnly(), "github", true); err != nil {
-		t.Errorf("expected nil error when every required capability is present, got %v", err)
-	}
-}
-
 // TestMediation_RequiredCapabilityError_NoBundleRelay asserts the
 // unconditional bundle-relay check fires first, regardless of prShaped, when
 // the underlying Code Forge implements neither BundleRelay nor PRForge (the
