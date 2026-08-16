@@ -530,6 +530,50 @@ let
         got:  ${committed}
         want: ${generated}'';
     docSrc;
+
+  # Asserts docSrc's generated settings example `branches`/`concurrency`
+  # sub-block (between its BEGIN/END GENERATED SETTINGS EXAMPLE CONFIG
+  # markers) matches generated, else throws (issue #2537): the example's
+  # baseBranch/branchPrefix/mergeMode/mergeGuardPaths/mergePollInterval/
+  # mergePollTimeout/maxParallel/maxJobs literals restate lib/env-schema.nix's
+  # schema.baseBranch.default, schema.branchPrefix.default,
+  # schema.mergeMode.default, schema.mergeGuardPaths.default,
+  # schema.mergePollInterval.default, schema.mergePollTimeout.default,
+  # schema.maxParallel.default, and schema.maxJobs.default verbatim, so a
+  # schema-default bump for any of those eight branch/merge/concurrency knobs
+  # must not be able to leave this illustrative example stale with no drift
+  # check. Factored out the same way assertSettingsExampleModelsDocOk is, so
+  # settings-example-config-doc-guard can exercise this exact marker-split +
+  # equality assertion path against a synthetic doc, not only the real
+  # docs/reference.md content.
+  assertSettingsExampleConfigDocOk =
+    { docSrc, generated }:
+    let
+      inherit (pkgs.lib) assertMsg;
+      beginMarker = "  # BEGIN GENERATED SETTINGS EXAMPLE CONFIG -- nix run .#regen -- DO NOT EDIT\n";
+      endMarker = "  # END GENERATED SETTINGS EXAMPLE CONFIG";
+      afterBegin =
+        let
+          parts = builtins.split beginMarker docSrc;
+        in
+        if builtins.length parts >= 3 then
+          builtins.elemAt parts 2
+        else
+          throw "docs/reference.md: BEGIN GENERATED SETTINGS EXAMPLE CONFIG marker not found";
+      committed =
+        let
+          parts = builtins.split endMarker afterBegin;
+        in
+        if builtins.length parts >= 3 then
+          builtins.elemAt parts 0
+        else
+          throw "docs/reference.md: END GENERATED SETTINGS EXAMPLE CONFIG marker not found";
+    in
+    assert assertMsg (committed == generated) ''
+      docs/reference.md generated settings example is out of sync with lib/env-schema.nix — regenerate it with `nix run .#regen`
+        got:  ${committed}
+        want: ${generated}'';
+    docSrc;
 in
 {
   # cmd/launcher/internal/driver/drivernames_gen.go must match the key list
@@ -1999,6 +2043,59 @@ in
     assert assertMsg (!result.success)
       "settings-example-labels-doc-guard: expected assertSettingsExampleLabelsDocOk to reject a synthetic doc whose labels sub-block has drifted, but it evaluated successfully";
     pkgs.runCommand "settings-example-labels-doc-guard" { } "touch $out";
+
+  # The generated `branches`/`concurrency` sub-block of docs/reference.md's
+  # illustrative `settings = { ... }` example (between its BEGIN/END
+  # GENERATED SETTINGS EXAMPLE CONFIG markers) must match the content
+  # rendered from lib/env-schema.nix (issue #2537): a schema-default bump to
+  # schema.baseBranch.default, schema.branchPrefix.default,
+  # schema.mergeMode.default, schema.mergeGuardPaths.default,
+  # schema.mergePollInterval.default, schema.mergePollTimeout.default,
+  # schema.maxParallel.default, or schema.maxJobs.default must not be able to
+  # leave this example's hand-typed baseBranch/branchPrefix/mergeMode/
+  # mergeGuardPaths/mergePollInterval/mergePollTimeout/maxParallel/maxJobs
+  # literals stale with no drift check, the exact failure mode this check
+  # closes. Shares its renderer with `nix run .#regen` via
+  # lib/renderers.nix, so guard and regenerator cannot drift from each other
+  # (issue #402). Mirrors settings-example-models-doc above.
+  settings-example-config-doc =
+    let
+      generated = renderers.renderSettingsExampleConfigDoc schema;
+      docSrc = builtins.readFile ../../docs/reference.md;
+    in
+    assert (assertSettingsExampleConfigDocOk { inherit docSrc generated; }) == docSrc;
+    pkgs.runCommand "settings-example-config-doc" { } "touch $out";
+
+  # Regression guard for settings-example-config-doc above: proves its
+  # equality assertion actually rejects a drifted value instead of passing
+  # vacuously (mirrors marker-consistency-guard's tryEval pattern). Runs
+  # assertSettingsExampleConfigDocOk — the exact function
+  # settings-example-config-doc calls — against a synthetic doc whose
+  # branches/concurrency sub-block carries a wrong baseBranch literal, via
+  # tryEval, so this fails if the equality assert is ever dropped from
+  # assertSettingsExampleConfigDocOk.
+  settings-example-config-doc-guard =
+    let
+      inherit (pkgs.lib) assertMsg;
+      generated = renderers.renderSettingsExampleConfigDoc schema;
+      beginMarker = "  # BEGIN GENERATED SETTINGS EXAMPLE CONFIG -- nix run .#regen -- DO NOT EDIT\n";
+      endMarker = "  # END GENERATED SETTINGS EXAMPLE CONFIG";
+      driftedBlock = ''
+        branches        = { baseBranch = "wrong-base-branch"; branchPrefix = "agent/issue-";
+                            mergeMode  = "manual";
+                            mergeGuardPaths = ".github/**,.forgejo/**,**/CLAUDE.md,**/AGENTS.md,.claude/**,.opencode/**";
+                            mergePollInterval = 30; mergePollTimeout = 1800; };
+        concurrency     = { maxParallel = 3; maxJobs = 0; };
+      '';
+      driftedDocSrc = beginMarker + driftedBlock + endMarker + "\n";
+      result = builtins.tryEval (assertSettingsExampleConfigDocOk {
+        docSrc = driftedDocSrc;
+        inherit generated;
+      });
+    in
+    assert assertMsg (!result.success)
+      "settings-example-config-doc-guard: expected assertSettingsExampleConfigDocOk to reject a synthetic doc whose branches/concurrency sub-block has drifted, but it evaluated successfully";
+    pkgs.runCommand "settings-example-config-doc-guard" { } "touch $out";
 
   # docs/reference.md's Subagent roster section's dogfood paragraph restates
   # lib/default-model-fixture.nix's schemaDefaults scout/reviewer/worker
