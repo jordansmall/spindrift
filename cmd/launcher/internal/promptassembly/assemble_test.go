@@ -372,7 +372,8 @@ func TestAssembleFragmentSeparatorIsExactlyTwoNewlines(t *testing.T) {
 
 // TestAssembleHandoff covers Result.Handoff for the covered cell: Invoker
 // is always "driver-exec" (orchestrator off), SessionMode follows
-// ResumeAfterHold, and ReviewPromptFile/ReviewModel both stay empty.
+// ResumeAfterHold, and ReviewPromptFile/ReviewModel/ReviewEffort all stay
+// empty.
 func TestAssembleHandoff(t *testing.T) {
 	reg := loadTestRegistry(t)
 
@@ -406,6 +407,9 @@ func TestAssembleHandoff(t *testing.T) {
 			}
 			if result.Handoff.ReviewModel != "" {
 				t.Errorf("Handoff.ReviewModel = %q, want empty", result.Handoff.ReviewModel)
+			}
+			if result.Handoff.ReviewEffort != "" {
+				t.Errorf("Handoff.ReviewEffort = %q, want empty", result.Handoff.ReviewEffort)
 			}
 			if result.Handoff.WorkerPromptFile != "" {
 				t.Errorf("Handoff.WorkerPromptFile = %q, want empty (issue #2059)", result.Handoff.WorkerPromptFile)
@@ -996,14 +1000,15 @@ func TestAssembleUnsupportedCellDefaultsCovered(t *testing.T) {
 // orchestrator-on reviewer-drop / review-model-extraction / review-prompt
 // rendering (entrypoint.sh: 1029-1062, 1086-1107): review_prompt_rendered is
 // populated with review-prompt.md's substituted text, review_model_rendered
-// is extracted from .reviewer.model before the reviewer key is deleted from
-// the agents JSON template, and the generic per-agent injection loop still
-// runs for every other agent.
+// is extracted from .reviewer.model (and, mirroring that same extraction,
+// Handoff.ReviewEffort is extracted from .reviewer.effort) before the
+// reviewer key is deleted from the agents JSON template, and the generic
+// per-agent injection loop still runs for every other agent.
 func TestAssembleOrchestratorReviewerDrop(t *testing.T) {
 	reg := loadTestRegistry(t)
 	env := coveredEnv()
 	env.OrchestratorEnabled = true
-	env.AgentsJSONTemplate = `{"reviewer":{"model":"review-model-x"},"scout":{"model":"scout-model-y"}}`
+	env.AgentsJSONTemplate = `{"reviewer":{"model":"review-model-x","effort":"review-effort-x"},"scout":{"model":"scout-model-y"}}`
 	env.AgentsPromptFiles = `{"scout":"fragments/tdd-default.md"}`
 
 	result, err := Assemble(env, reg)
@@ -1016,6 +1021,9 @@ func TestAssembleOrchestratorReviewerDrop(t *testing.T) {
 	}
 	if result.Handoff.ReviewModel != "review-model-x" {
 		t.Errorf("Handoff.ReviewModel = %q, want %q", result.Handoff.ReviewModel, "review-model-x")
+	}
+	if result.Handoff.ReviewEffort != "review-effort-x" {
+		t.Errorf("Handoff.ReviewEffort = %q, want %q", result.Handoff.ReviewEffort, "review-effort-x")
 	}
 	if result.Handoff.ReviewPromptFile == "" {
 		t.Fatal("Handoff.ReviewPromptFile is empty, want non-empty")
@@ -1047,9 +1055,10 @@ func TestAssembleOrchestratorReviewerDrop(t *testing.T) {
 	}
 }
 
-// TestAssembleOrchestratorNoReviewerKey covers that ReviewModel stays empty
-// (mirroring jq's `.reviewer.model // empty`) when the template carries no
-// reviewer key at all, while review-prompt.md rendering is unaffected --
+// TestAssembleOrchestratorNoReviewerKey covers that ReviewModel and
+// ReviewEffort both stay empty (mirroring jq's `.reviewer.model // empty`
+// and `.reviewer.effort // empty`) when the template carries no reviewer
+// key at all, while review-prompt.md rendering is unaffected --
 // it's independent of whether a reviewer is configured.
 func TestAssembleOrchestratorNoReviewerKey(t *testing.T) {
 	reg := loadTestRegistry(t)
@@ -1065,6 +1074,9 @@ func TestAssembleOrchestratorNoReviewerKey(t *testing.T) {
 	if result.Handoff.ReviewModel != "" {
 		t.Errorf("Handoff.ReviewModel = %q, want empty", result.Handoff.ReviewModel)
 	}
+	if result.Handoff.ReviewEffort != "" {
+		t.Errorf("Handoff.ReviewEffort = %q, want empty", result.Handoff.ReviewEffort)
+	}
 	if result.Handoff.ReviewPromptFile == "" {
 		t.Error("Handoff.ReviewPromptFile is empty, want non-empty even with no reviewer configured")
 	}
@@ -1075,8 +1087,9 @@ func TestAssembleOrchestratorNoReviewerKey(t *testing.T) {
 
 // TestAssembleOrchestratorEmptyAgentsTemplate covers the orchestrator-on
 // cell with no AgentsJSONTemplate at all: AgentsJSON stays empty (no
-// --agents flag), ReviewModel stays empty, and ReviewPromptFile is still
-// rendered (it doesn't depend on AgentsJSONTemplate at all).
+// --agents flag), ReviewModel and ReviewEffort both stay empty, and
+// ReviewPromptFile is still rendered (it doesn't depend on
+// AgentsJSONTemplate at all).
 func TestAssembleOrchestratorEmptyAgentsTemplate(t *testing.T) {
 	reg := loadTestRegistry(t)
 	env := coveredEnv()
@@ -1092,6 +1105,9 @@ func TestAssembleOrchestratorEmptyAgentsTemplate(t *testing.T) {
 	}
 	if result.Handoff.ReviewModel != "" {
 		t.Errorf("Handoff.ReviewModel = %q, want empty", result.Handoff.ReviewModel)
+	}
+	if result.Handoff.ReviewEffort != "" {
+		t.Errorf("Handoff.ReviewEffort = %q, want empty", result.Handoff.ReviewEffort)
 	}
 	if result.Handoff.ReviewPromptFile == "" {
 		t.Error("Handoff.ReviewPromptFile is empty, want non-empty")
@@ -1578,6 +1594,9 @@ func TestAssembleOrchestratorOffReviewerFlowsThroughGenericLoop(t *testing.T) {
 	}
 	if result.Handoff.ReviewModel != "" {
 		t.Errorf("Handoff.ReviewModel = %q, want empty (orchestrator off)", result.Handoff.ReviewModel)
+	}
+	if result.Handoff.ReviewEffort != "" {
+		t.Errorf("Handoff.ReviewEffort = %q, want empty (orchestrator off)", result.Handoff.ReviewEffort)
 	}
 	if result.Handoff.ReviewPromptFile != "" {
 		t.Errorf("Handoff.ReviewPromptFile = %q, want empty (orchestrator off)", result.Handoff.ReviewPromptFile)

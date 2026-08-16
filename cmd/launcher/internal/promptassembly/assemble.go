@@ -52,8 +52,16 @@ type Handoff struct {
 	// Invoker is "driver-exec", or when AgentsJSONTemplate carries no
 	// "reviewer" key (or a reviewer entry with no "model" field), mirroring
 	// jq's `.reviewer.model // empty` (entrypoint.sh: 1096).
+	//
+	// ReviewEffort mirrors ReviewModel exactly, extracted from the same
+	// "reviewer" key's "effort" field under the same condition (Invoker
+	// "orchestrator", unconditional on dispatch kind or FixPass). It stays
+	// empty when Invoker is "driver-exec", or when AgentsJSONTemplate
+	// carries no "reviewer" key (or a reviewer entry with no "effort"
+	// field), mirroring jq's `.reviewer.effort // empty`.
 	ReviewPromptFile string
 	ReviewModel      string
+	ReviewEffort     string
 
 	// WorkerPromptFile is the Go orchestrator's own driver-exec-spawned
 	// parallel worker prompt (issue #2059, #2058) -- the base prompt a
@@ -428,14 +436,17 @@ func Assemble(e Env, reg Registry) (Result, error) {
 			}
 			if reviewerRaw, ok := agentsKeys["reviewer"]; ok {
 				var reviewer struct {
-					Model string `json:"model"`
+					Model  string `json:"model"`
+					Effort string `json:"effort"`
 				}
 				// A malformed reviewer entry (not an object, or one with no
-				// model field) mirrors jq's `.reviewer.model // empty`:
-				// Unmarshal error or a zero-value Model both leave
-				// ReviewModel at its empty default rather than failing.
+				// model/effort field) mirrors jq's `.reviewer.model // empty`
+				// and `.reviewer.effort // empty`: Unmarshal error or a
+				// zero-value Model/Effort both leave ReviewModel/ReviewEffort
+				// at their empty default rather than failing.
 				_ = json.Unmarshal(reviewerRaw, &reviewer)
 				result.Handoff.ReviewModel = reviewer.Model
+				result.Handoff.ReviewEffort = reviewer.Effort
 			}
 			delete(agentsKeys, "reviewer")
 			strippedJSON, err := json.Marshal(agentsKeys)
