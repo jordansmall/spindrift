@@ -113,6 +113,40 @@ type config struct {
 	// to LaunchWorkers' own defaultMaxParallelWorkers. Only meaningful when
 	// workerPromptFile is set.
 	maxParallelWorkers int
+	// argvPromptStyle is forwarded verbatim as driver-exec's own
+	// --argv-prompt-style flag (issue #2534 follow-up): how the prompt is
+	// spliced into the Driver's argv ("flag" or "positional"). Empty falls
+	// back to driver-exec's own "flag" default.
+	argvPromptStyle string
+	// argvPromptFlag is forwarded verbatim as driver-exec's own
+	// --argv-prompt-flag flag: the flag preceding the prompt when
+	// argvPromptStyle is "flag" (e.g. claude's "-p"). Empty is a meaningful
+	// value here, not a sentinel -- it matches driver-exec's own "" default.
+	argvPromptFlag string
+	// argvModelFlag is forwarded verbatim as driver-exec's own
+	// --argv-model-flag flag: the flag preceding the model value. Empty
+	// falls back to driver-exec's own "--model" default.
+	argvModelFlag string
+	// argvModelOmitEmpty is forwarded as driver-exec's own bare
+	// --argv-model-omit-empty boolean flag, only when true (issue #2534
+	// follow-up, mirroring topLevelRole's "only append when set" pattern
+	// above): omits the model slot entirely when -model is empty, instead of
+	// emitting argvModelFlag with an empty value.
+	argvModelOmitEmpty bool
+	// argvAgentsFlag is forwarded verbatim as driver-exec's own
+	// --argv-agents-flag flag: the flag preceding --agents-file's content.
+	// Empty is a meaningful value here, not a sentinel -- it matches
+	// driver-exec's own "" default (no --agents equivalent for this Driver).
+	argvAgentsFlag string
+	// argvEffortFlag is forwarded verbatim as driver-exec's own
+	// --argv-effort-flag flag: the flag preceding the effort value. Empty
+	// falls back to driver-exec's own "--effort" default.
+	argvEffortFlag string
+	// argvOrder is forwarded verbatim as driver-exec's own --argv-order
+	// flag: the space-separated argv slot order (a permutation of prompt
+	// model agents session driverFlags effort). Empty falls back to
+	// driver-exec's own default order.
+	argvOrder string
 }
 
 // run loops driver-exec for as many passes as the implementor's own
@@ -761,12 +795,21 @@ func buildDriverExecCmd(cfg config) (*exec.Cmd, error) {
 		"--issue", cfg.issue,
 		"--log-path", cfg.logPath,
 		"--heartbeat-log", cfg.heartbeatLog,
+		"--argv-prompt-style", cfg.argvPromptStyle,
+		"--argv-prompt-flag", cfg.argvPromptFlag,
+		"--argv-model-flag", cfg.argvModelFlag,
+		"--argv-agents-flag", cfg.argvAgentsFlag,
+		"--argv-effort-flag", cfg.argvEffortFlag,
+		"--argv-order", cfg.argvOrder,
 	}
 	if cfg.devshell {
 		args = append(args, "--devshell", "--devshell-name", cfg.devshellName)
 	}
 	if cfg.topLevelRole != "" {
 		args = append(args, "--top-level-role", cfg.topLevelRole)
+	}
+	if cfg.argvModelOmitEmpty {
+		args = append(args, "--argv-model-omit-empty")
 	}
 	return exec.Command(bin, args...), nil
 }

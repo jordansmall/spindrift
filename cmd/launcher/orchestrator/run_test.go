@@ -275,6 +275,81 @@ func TestBuildDriverExecCmdForwardsTopLevelRoleFlag(t *testing.T) {
 	}
 }
 
+// TestBuildDriverExecCmdForwardsArgvShapeFlags verifies buildDriverExecCmd
+// forwards all 6 string argv-shape fields as driver-exec's own --argv-*
+// flags unconditionally (issue #2534 follow-up), the same way --driver-flags
+// is forwarded -- entrypoint.sh always passes these as non-optional values,
+// where an empty string is a valid, meaningful value (matching driver-exec's
+// own "" defaults for --argv-prompt-flag/--argv-agents-flag), not a sentinel
+// for "omit the flag."
+func TestBuildDriverExecCmdForwardsArgvShapeFlags(t *testing.T) {
+	dir := t.TempDir()
+	callLog := filepath.Join(dir, "calls.log")
+	writeFakeDriverExec(t, dir, callLog, "exit 0\n")
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	cfg := config{
+		driverBin:       "claude",
+		argvPromptStyle: "flag",
+		argvPromptFlag:  "-p",
+		argvModelFlag:   "--model",
+		argvAgentsFlag:  "--agents",
+		argvEffortFlag:  "--effort",
+		argvOrder:       "prompt model agents session driverFlags effort",
+	}
+	cmd, err := buildDriverExecCmd(cfg)
+	if err != nil {
+		t.Fatalf("buildDriverExecCmd: %v", err)
+	}
+	got := strings.Join(cmd.Args, " ")
+	for _, want := range []string{
+		"--argv-prompt-style flag",
+		"--argv-prompt-flag -p",
+		"--argv-model-flag --model",
+		"--argv-agents-flag --agents",
+		"--argv-effort-flag --effort",
+		"--argv-order prompt model agents session driverFlags effort",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("driver-exec argv = %q, want it to contain %q", got, want)
+		}
+	}
+}
+
+// TestBuildDriverExecCmdForwardsArgvModelOmitEmptyFlagOnlyWhenSet verifies
+// buildDriverExecCmd emits the bare --argv-model-omit-empty boolean flag only
+// when cfg.argvModelOmitEmpty is true (issue #2534 follow-up), mirroring the
+// --top-level-role pattern above and entrypoint.sh's own conditional-array
+// forwarding of the same flag.
+func TestBuildDriverExecCmdForwardsArgvModelOmitEmptyFlagOnlyWhenSet(t *testing.T) {
+	dir := t.TempDir()
+	callLog := filepath.Join(dir, "calls.log")
+	writeFakeDriverExec(t, dir, callLog, "exit 0\n")
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	cfg := config{
+		driverBin: "claude",
+	}
+	cmd, err := buildDriverExecCmd(cfg)
+	if err != nil {
+		t.Fatalf("buildDriverExecCmd: %v", err)
+	}
+	got := strings.Join(cmd.Args, " ")
+	if strings.Contains(got, "--argv-model-omit-empty") {
+		t.Errorf("driver-exec argv = %q, want no --argv-model-omit-empty flag when cfg.argvModelOmitEmpty is false", got)
+	}
+
+	cfg.argvModelOmitEmpty = true
+	cmd, err = buildDriverExecCmd(cfg)
+	if err != nil {
+		t.Fatalf("buildDriverExecCmd: %v", err)
+	}
+	got = strings.Join(cmd.Args, " ")
+	if !strings.Contains(got, "--argv-model-omit-empty") {
+		t.Errorf("driver-exec argv = %q, want it to contain %q when cfg.argvModelOmitEmpty is true", got, "--argv-model-omit-empty")
+	}
+}
+
 // TestRunEmitsPassStartMarkerOnStdout verifies run prints a machine-readable
 // "spindrift_op" pass_start marker to stdout before invoking driver-exec for
 // each pass (issue #2027), so the heartbeat parser can surface the

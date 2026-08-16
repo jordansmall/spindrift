@@ -48,6 +48,13 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 	workerWorkDir := fs.String("worker-work-dir", "/tmp/spindrift-workers", "directory holding each dispatched worker's own quarantined log/heartbeat/result/sentinel files")
 	workerTimeout := fs.Duration("worker-timeout", defaultWorkerTimeout, "per-worker join timeout for a parallel dispatch")
 	maxParallelWorkers := fs.Int("max-parallel-workers", defaultMaxParallelWorkers, "cap on how many manifest-dispatched workers LaunchWorkers runs concurrently")
+	argvPromptStyle := fs.String("argv-prompt-style", "flag", "how the prompt is spliced into argv: \"flag\" (argv-prompt-flag then the prompt) or \"positional\" (the prompt alone)")
+	argvPromptFlag := fs.String("argv-prompt-flag", "", "flag preceding the prompt when argv-prompt-style is \"flag\"")
+	argvModelFlag := fs.String("argv-model-flag", "--model", "flag preceding the model value")
+	argvModelOmitEmpty := fs.Bool("argv-model-omit-empty", false, "omit the model slot entirely when -model is empty, instead of emitting argv-model-flag with an empty value")
+	argvAgentsFlag := fs.String("argv-agents-flag", "", "flag preceding --agents-file's content, empty if this Driver has no --agents equivalent")
+	argvEffortFlag := fs.String("argv-effort-flag", "--effort", "flag preceding the effort value")
+	argvOrder := fs.String("argv-order", "prompt model agents session driverFlags effort", "space-separated argv slot order (permutation of: prompt model agents session driverFlags effort)")
 	if err := fs.Parse(argv); err != nil {
 		return 2
 	}
@@ -110,6 +117,13 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 		workerWorkDir:      *workerWorkDir,
 		workerTimeout:      *workerTimeout,
 		maxParallelWorkers: *maxParallelWorkers,
+		argvPromptStyle:    *argvPromptStyle,
+		argvPromptFlag:     *argvPromptFlag,
+		argvModelFlag:      *argvModelFlag,
+		argvModelOmitEmpty: *argvModelOmitEmpty,
+		argvAgentsFlag:     *argvAgentsFlag,
+		argvEffortFlag:     *argvEffortFlag,
+		argvOrder:          *argvOrder,
 	}, stdout)
 	if err != nil {
 		fmt.Fprintln(stderr, "orchestrator:", err)
