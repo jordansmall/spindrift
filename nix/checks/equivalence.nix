@@ -699,6 +699,52 @@ in
         touch $out
       '';
 
+  # ADR 0037 (issue #2522 slice 2): the structural-knob forwarding chain in
+  # config.perSystem (structuralArgs) must forward a knob reached via its NEW
+  # domain-tree path, not just the deprecated flat path flakemodule-alias-parity
+  # exercises above. Picks `extraClosures` (infra.image.extraClosures) since no
+  # other flakemodule-* check routes a structural knob through the new path.
+  # Pins the forwarding chain's derivation from `structuralPlacements` against
+  # a hand-written-chain regression.
+  flakemodule-structural-domaintree-parity =
+    let
+      testExtraClosures = p: [ p.cowsay ];
+      consumer107 =
+        flake-parts.lib.mkFlake
+          {
+            inputs = {
+              inherit nixpkgs;
+              self = {
+                outPath = ../../.;
+              };
+            };
+          }
+          {
+            systems = [ system ];
+            imports = [ ../../lib/flakeModule.nix ];
+            perSystem.spindrift = {
+              packages = p: [ p.hello ];
+              infra.image.extraClosures = testExtraClosures;
+            };
+          };
+      direct107 = import ../../lib/mkHarness.nix {
+        inherit nixpkgs system;
+        packages = p: [ p.hello ];
+        extraClosures = testExtraClosures;
+      };
+      consumerPkgs107 = consumer107.packages.${system};
+    in
+    pkgs.runCommand "flakemodule-structural-domaintree-parity"
+      {
+        moduleSpindrift = consumerPkgs107.spindrift;
+        directSpindrift = direct107.spindrift;
+      }
+      ''
+        [ "$moduleSpindrift" = "$directSpindrift" ] \
+          || { echo "spindrift mismatch: $moduleSpindrift != $directSpindrift" >&2; exit 1; }
+        touch $out
+      '';
+
   # Unknown section or knob keys in `settings` must throw at eval time; the
   # NixOS module system rejects undeclared option names.  We force evaluation
   # down to `.packages.${system}.spindrift` so the module config is actually
