@@ -11,8 +11,6 @@
 # testable with a bare `nix eval`, without a locked nixpkgs (mirrors
 # lib/prompt-inject.nix and lib/renderers.nix).
 let
-  inject = import ./prompt-inject.nix;
-
   # Escapes a literal string's regex metacharacters so builtins.split reads it
   # as a literal (same table as lib/prompt-inject.nix's private escapeRegex).
   escapeRegex = builtins.replaceStrings
@@ -116,8 +114,8 @@ rec {
   parse = s: if s == "" then defaultVerdicts else validate (builtins.fromJSON s);
 
   # Renders the verdict contract of `promptText` from `verdicts`: the VERDICT
-  # section's enumerated bullet list, the `recommend / reject / unclear`
-  # enumeration, and the `status=<${RESEARCH_STATUS_ENUM}>` alternation of the
+  # section's enumerated bullet list, the `<RESEARCH_VERDICT_ENUM>` nix-only
+  # placeholder, and the `status=<${RESEARCH_STATUS_ENUM}>` alternation of the
   # outcome line -- the OUTCOME grammar line's registry-generated placeholder
   # (issue #2504), not a hand-typed literal, so a custom verdict set fully
   # replaces the token rather than leaving it for the runtime substitution
@@ -136,18 +134,19 @@ rec {
       backtickEnum = concatSep " / " (map (t: "`" + t + "`") tokens);
       bullet = v: "- `" + v.verdict + "` — " + (v.description or "");
       bullets = concatSep "\n" (map bullet verdicts);
-      newSection = verdictMarker + "\n\nRender exactly one of these verdicts:\n\n" + bullets + "\n\n";
+      # Inserted immediately before postMarker rather than replacing the
+      # whole verdictMarker..postMarker span, so any prose already in that
+      # span (e.g. the self-contained prompt's "Judge relevance..." sentence)
+      # is left completely untouched.
+      injectedBlock = "Render exactly one of these verdicts:\n\n" + bullets + "\n\n";
       withSection =
         if present verdictMarker promptText && present postMarker promptText then
-          let
-            oldSection = inject.sliceBetween verdictMarker postMarker promptText;
-          in
-          builtins.replaceStrings [ oldSection ] [ newSection ] promptText
+          builtins.replaceStrings [ postMarker ] [ (injectedBlock + postMarker) ] promptText
         else
           promptText;
     in
     builtins.replaceStrings
-      [ "status=<\${RESEARCH_STATUS_ENUM}>" "`recommend` / `reject` / `unclear`" ]
+      [ "status=<\${RESEARCH_STATUS_ENUM}>" "`<RESEARCH_VERDICT_ENUM>`" ]
       [ ("status=<" + pipeJoined + ">") backtickEnum ]
       withSection;
 
