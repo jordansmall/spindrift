@@ -7,7 +7,7 @@
 # cmd/launcher/internal/outcome/status_gen.go,
 # cmd/launcher/internal/backend/registry_gen.go,
 # tests/box_env_gen.bash, tests/default_models_gen.bash,
-# cmd/launcher/defaultmodels_gen.go, the generated section of
+# cmd/launcher/defaultmodels_gen_test.go, the generated section of
 # templates/default/flake.nix's commented-out `settings` example, and the
 # generated section of docs/reference.md's Default models table, from their
 # respective Nix sources, and writes them into the working tree. Calls the
@@ -105,8 +105,8 @@ pkgs.writeShellApplication {
     gofmt -w "$root/cmd/launcher/internal/backend/registry_gen.go"
     write tests/box_env_gen.bash ${escapeShellArg boxEnvFixture}
     write tests/default_models_gen.bash ${escapeShellArg defaultModelFixtureBash}
-    write cmd/launcher/defaultmodels_gen.go ${escapeShellArg defaultModelFixtureGo}
-    gofmt -w "$root/cmd/launcher/defaultmodels_gen.go"
+    write cmd/launcher/defaultmodels_gen_test.go ${escapeShellArg defaultModelFixtureGo}
+    gofmt -w "$root/cmd/launcher/defaultmodels_gen_test.go"
     write_between templates/default/flake.nix \
       ${escapeShellArg "            # BEGIN GENERATED SETTINGS EXAMPLE -- nix run .#regen -- DO NOT EDIT"} \
       ${escapeShellArg "            # END GENERATED SETTINGS EXAMPLE"} \
