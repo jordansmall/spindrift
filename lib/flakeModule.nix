@@ -278,11 +278,21 @@ let
   };
 
   # Structural leaves: each structuralOptions entry, hand-placed at its new
-  # domain-tree path (slice 2's placement map).
-  structuralTreeEntries = lib.mapAttrsToList (flatName: opt: {
-    path = structuralPlacements.${flatName};
-    inherit opt;
-  }) structuralOptions;
+  # domain-tree path (slice 2's placement map). Asserted against
+  # structuralPlacements' own key set first — a row added to only one of the
+  # two maps would otherwise surface as an opaque `attribute 'X' missing`
+  # deep inside this mapAttrsToList rather than a named error.
+  structuralTreeEntries =
+    assert lib.assertMsg
+      (
+        (lib.sort builtins.lessThan (lib.attrNames structuralOptions))
+        == (lib.sort builtins.lessThan (lib.attrNames structuralPlacements))
+      )
+      "lib/flakeModule.nix: structuralOptions and lib/structural-paths.nix (structuralPlacements) must share the same key set";
+    lib.mapAttrsToList (flatName: opt: {
+      path = structuralPlacements.${flatName};
+      inherit opt;
+    }) structuralOptions;
 
   # The old flat path -> new dotted domain-tree path each structural knob
   # moved to (slice 2's placement map), keyed by the flat option name — used
@@ -302,13 +312,16 @@ let
   # path still throws instead of silently doing nothing.
   oldFlatShims = lib.mapAttrs (
     flatName: opt:
-    mkOption {
-      type = opt.type;
-      default = null;
-      description = "perSystem.spindrift.${flatName} is deprecated; use perSystem.spindrift.${
-        lib.concatStringsSep "." structuralPlacements.${flatName}
-      }.";
-    }
+    mkOption (
+      {
+        inherit (opt) type;
+        default = null;
+        description = "perSystem.spindrift.${flatName} is deprecated; use perSystem.spindrift.${
+          lib.concatStringsSep "." structuralPlacements.${flatName}
+        }.";
+      }
+      // lib.optionalAttrs (opt ? example) { inherit (opt) example; }
+    )
   ) structuralOptions;
 in
 {
