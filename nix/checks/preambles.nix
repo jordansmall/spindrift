@@ -474,6 +474,7 @@ in
         "NIX_BUILDER_IMAGE"
         "NIX_VOLUME"
         "OUTBOX_RELAY_CAPABLE"
+        "RUNNER_KIND"
         "RUNTIME"
       ];
     in
