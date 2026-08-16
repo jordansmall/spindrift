@@ -1,9 +1,12 @@
 package forge_test
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/forge/local"
 )
 
 // snapshotReaderFake wraps forge.Fake with a Snapshot method, so it
@@ -80,5 +83,46 @@ func TestSnapshot_FallsBackPropagatesIssueError(t *testing.T) {
 
 	if _, err := forge.Snapshot(tracker, "99"); err == nil {
 		t.Fatal("Snapshot: want error for unknown issue, got nil")
+	}
+}
+
+// TestSnapshot_LocalTrackerIncludesParent verifies forge.Snapshot against a
+// real local.LocalTracker (not forge.Fake) carries the issue's parent:
+// frontmatter field into the degrade text — local.LocalTracker doesn't
+// implement SnapshotReader, and Issue(num).Body alone is the Markdown body
+// with frontmatter already stripped (ADR 0013), so parent: would otherwise
+// never reach the box's frozen issue-read snapshot at all.
+func TestSnapshot_LocalTrackerIncludesParent(t *testing.T) {
+	dir := t.TempDir()
+	issue := "---\n" +
+		"title: Do the thing\n" +
+		"state: ready-for-agent\n" +
+		"labels: []\n" +
+		"created: 2026-01-01T00:00:00Z\n" +
+		"parent: 42\n" +
+		"---\n" +
+		"the issue body"
+	if err := os.WriteFile(filepath.Join(dir, "10.md"), []byte(issue), 0o644); err != nil {
+		t.Fatalf("write local issue: %v", err)
+	}
+	labels := forge.DispatchLabels{
+		Dispatchable: "ready-for-agent",
+		InProgress:   "agent-in-progress",
+		Complete:     "agent-complete",
+		Failed:       "agent-failed",
+	}
+	tracker := local.NewLocalTracker(dir, labels)
+
+	if _, ok := interface{}(tracker).(forge.SnapshotReader); ok {
+		t.Fatal("local.LocalTracker unexpectedly implements forge.SnapshotReader; test assumes it does not")
+	}
+
+	got, err := forge.Snapshot(tracker, "10")
+	if err != nil {
+		t.Fatalf("Snapshot: %v", err)
+	}
+	want := "the issue body\n\nparent: 42"
+	if got != want {
+		t.Errorf("Snapshot() = %q, want %q", got, want)
 	}
 }

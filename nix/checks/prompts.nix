@@ -1360,14 +1360,14 @@ in
   # #2547 and keep their own per-tracker live read, pinned by the four
   # checks above (each narrowed to just those two remaining live variants).
   #
-  # issue-read-local.md is the one exception to "identical content": the
-  # frozen snapshot only ever covers the one issue it was written for, so
-  # the local variant still needs to point at the read-only /issues mount
-  # (ADR 0032) to follow a local issue's Blocked-by/parent links into any
-  # issue file the snapshot itself doesn't cover -- and, per issue #1691,
-  # still needs to say so without inviting a live tracker fetch by number.
-  # The other five files in the loop below carry no such need and must stay
-  # snapshot-only.
+  # issue-read-local.md and review-issue-read-local.md are the two
+  # exceptions to "identical content": the frozen snapshot only ever covers
+  # the one issue it was written for, so both local variants still need to
+  # point at the read-only /issues mount (ADR 0032) to follow a local
+  # issue's Blocked-by/parent links into any issue file the snapshot itself
+  # doesn't cover -- and, per issue #1691, still need to say so without
+  # inviting a live tracker fetch by number. The other four files in the
+  # loop below carry no such need and must stay snapshot-only.
   issue-read-and-review-fragments-use-snapshot-file =
     pkgs.runCommand "issue-read-and-review-fragments-use-snapshot-file" { }
       ''
@@ -1385,7 +1385,7 @@ in
             echo "$f: still invokes fj issue view" >&2
             exit 1
           }
-          if [ "$f" != "issue-read-local.md" ]; then
+          if [ "$f" != "issue-read-local.md" ] && [ "$f" != "review-issue-read-local.md" ]; then
             ! grep -q '/issues/''${ISSUE_NUMBER}' ${../../templates/default/prompts/fragments}/"$f" || {
               echo "$f: still reads the local /issues mount directly" >&2
               exit 1
