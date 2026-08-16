@@ -31,12 +31,12 @@ in
         };
       };
     in
-    assert assertMsg (hasInfix ''MAX_PARALLEL=''${MAX_PARALLEL:-5}'' out)
+    assert assertMsg (hasInfix "MAX_PARALLEL=\${MAX_PARALLEL:-5}" out)
       "renderDefaultsPreamble must emit VAR=\${VAR:-<baked>} per flakeOption entry";
     assert assertMsg (
       !hasInfix "export " out
     ) "renderDefaultsPreamble export=false must not emit `export`";
-    assert assertMsg (hasInfix ''export MAX_PARALLEL=''${MAX_PARALLEL:-5}'' outExported)
+    assert assertMsg (hasInfix "export MAX_PARALLEL=\${MAX_PARALLEL:-5}" outExported)
       "renderDefaultsPreamble export=true must prefix each line with `export `";
     pkgs.runCommand "preambles-defaults-shape" { } "touch $out";
 
@@ -157,11 +157,11 @@ in
         OUTCOME_CONTRACT_FILE = "/agent/outcome-contract.md";
       };
     in
-    assert assertMsg (hasInfix ''PROMPTS_DIR=''${PROMPTS_DIR:-/agent/prompts}'' out)
+    assert assertMsg (hasInfix "PROMPTS_DIR=\${PROMPTS_DIR:-/agent/prompts}" out)
       "renderAgentPathsPreamble must emit VAR=\${VAR:-<baked-path>} per entry, got: ${out}";
-    assert assertMsg (
-      hasInfix ''OUTCOME_CONTRACT_FILE=''${OUTCOME_CONTRACT_FILE:-/agent/outcome-contract.md}'' out
-    ) "renderAgentPathsPreamble must emit one line per attrset entry, got: ${out}";
+    assert assertMsg
+      (hasInfix "OUTCOME_CONTRACT_FILE=\${OUTCOME_CONTRACT_FILE:-/agent/outcome-contract.md}" out)
+      "renderAgentPathsPreamble must emit one line per attrset entry, got: ${out}";
     pkgs.runCommand "preambles-agent-paths-shape" { } "touch $out";
 
   # A path value containing a shell-special character (a space) must
