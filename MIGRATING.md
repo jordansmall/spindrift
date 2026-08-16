@@ -8,9 +8,14 @@ launcher process. They are now `boxEnv` (`lib/env-schema.nix`), so
 `entrypoint.sh` forwards them into the Box unconditionally as the
 orchestrator's own `--max-budget-tokens`/`--max-budget-usd` flags, and the
 orchestrator's review-pass loop (`--review-prompt-file` set, the default
-under `ORCHESTRATOR_ENABLED`) now consults the same cumulative-spend figure
-to commit to a terminal land pass instead of a further `BLOCK`-triggered
-review round.
+under `ORCHESTRATOR_ENABLED`) now applies the same threshold to its own
+cumulative spend to commit to a terminal land pass instead of a further
+`BLOCK`-triggered review round. This is the same threshold, not the same
+running total: the in-Box sum starts fresh at zero each Box invocation
+(implement/fix/review passes plus dispatched workers in that Box only),
+distinct from `selfHealGate`'s own cross-Box figure that sums every
+attempt across the whole issue — a run spanning several fix-pass Boxes
+gets a fresh budget in each one.
 
 If you already set `MAX_BUDGET_TOKENS`/`MAX_BUDGET_USD` purely to bound
 host-side fix-pass retries, this is a behavior widening, not a breaking
