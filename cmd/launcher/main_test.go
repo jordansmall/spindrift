@@ -3836,54 +3836,35 @@ func TestDoctor_ReadOnlyTokenGates_BothBackendsActiveOnDifferentAxes(t *testing.
 	}
 }
 
-// TestLoadConfig_RunnerKind_FallsBackToRuntime_Bwrap covers the direct
-// binary invocation path (no --input document; inputdoc.go documents this as
-// supported for tests and manual debugging) where RUNTIME is set but
-// RUNNER_KIND is not: before issue #2538, runner selection compared
-// c.runtime == "bwrap" directly, so RUNTIME=bwrap alone was sufficient.
-// getenvArtifact("RUNNER_KIND", "") now falls through to "" with no fallback,
-// which runnerForKind treats as "not bwrap" -- a regression this test pins
-// the fix for (loadConfig must derive runnerKind from runtime when the
-// RUNNER_KIND artifact/env is genuinely absent).
-func TestLoadConfig_RunnerKind_FallsBackToRuntime_Bwrap(t *testing.T) {
+// TestLoadConfig_RunnerKind_NoRuntimeFallback_Bwrap pins issue #2538 AC1
+// ("the artifact rides the document; the launcher performs no runtime-name
+// comparison to determine kind"): RUNTIME=bwrap with RUNNER_KIND genuinely
+// absent must NOT derive runnerKind from the runtime name -- it resolves to
+// "", the same empty default every other absent getenvArtifact call gets.
+func TestLoadConfig_RunnerKind_NoRuntimeFallback_Bwrap(t *testing.T) {
 	t.Setenv("RUNTIME", "bwrap")
+	t.Setenv("RUNNER_KIND", "")
 	os.Unsetenv("RUNNER_KIND")
 
 	c := loadConfig()
 
-	if c.runnerKind != "bwrap" {
-		t.Errorf("loadConfig().runnerKind = %q, want %q (derived from RUNTIME=bwrap)", c.runnerKind, "bwrap")
+	if c.runnerKind != "" {
+		t.Errorf("loadConfig().runnerKind = %q, want %q (RUNTIME must not be consulted)", c.runnerKind, "")
 	}
 }
 
-// TestLoadConfig_RunnerKind_FallsBackToRuntime_Oci is
-// TestLoadConfig_RunnerKind_FallsBackToRuntime_Bwrap's non-bwrap
-// counterpart: RUNTIME=podman with no RUNNER_KIND set must resolve to "oci",
-// matching the old runtime == "bwrap" comparison's else-arm.
-func TestLoadConfig_RunnerKind_FallsBackToRuntime_Oci(t *testing.T) {
-	t.Setenv("RUNTIME", "podman")
-	os.Unsetenv("RUNNER_KIND")
-
-	c := loadConfig()
-
-	if c.runnerKind != "oci" {
-		t.Errorf("loadConfig().runnerKind = %q, want %q (derived from RUNTIME=podman)", c.runnerKind, "oci")
-	}
-}
-
-// TestLoadConfig_RunnerKind_ExplicitEnvWinsOverRuntimeFallback proves the
-// RUNNER_KIND artifact/env, when actually set, always wins over the
-// runtime-derived fallback -- the fallback only fires when RUNNER_KIND is
-// genuinely absent, never overriding an explicit value even when it
-// disagrees with RUNTIME (e.g. a real nix-rendered pipeline run).
-func TestLoadConfig_RunnerKind_ExplicitEnvWinsOverRuntimeFallback(t *testing.T) {
+// TestLoadConfig_RunnerKind_ReadsArtifactRegardlessOfRuntime proves
+// RUNNER_KIND is read verbatim from the artifact/env, independent of
+// RUNTIME's value -- including a RUNTIME=bwrap/RUNNER_KIND=oci combination
+// that a runtime-name comparison would get wrong.
+func TestLoadConfig_RunnerKind_ReadsArtifactRegardlessOfRuntime(t *testing.T) {
 	t.Setenv("RUNTIME", "bwrap")
 	t.Setenv("RUNNER_KIND", "oci")
 
 	c := loadConfig()
 
 	if c.runnerKind != "oci" {
-		t.Errorf("loadConfig().runnerKind = %q, want %q (explicit RUNNER_KIND must win over RUNTIME-derived fallback)", c.runnerKind, "oci")
+		t.Errorf("loadConfig().runnerKind = %q, want %q (RUNNER_KIND read verbatim)", c.runnerKind, "oci")
 	}
 }
 
