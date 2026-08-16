@@ -594,10 +594,21 @@ func seedPromptFromState(promptFile string, state runstate.RunState) (string, er
 // own final-message line (issue #1611) landing harmlessly in the discarded
 // nonce suffix once the token itself is found.
 //
-// Returns the last verdict seen ("" if none) and whether a valid outcome
-// line was present at all. driverName selects the RenderTranscript strategy
-// (issue #262 slice 4) -- the same Driver name this run's own cfg.driver
-// carries, not a hardcoded "claude".
+// Returns the BLOCK-dominant verdict ("" if none) and whether a valid
+// outcome line was present at all. driverName selects the RenderTranscript
+// strategy (issue #262 slice 4) -- the same Driver name this run's own
+// cfg.driver carries, not a hardcoded "claude".
+//
+// Aggregation is BLOCK-dominant, not last-match-wins (issue #2546): a
+// nested subagent's tool_result -- the only place a verdict ever reaches
+// this transcript -- can carry untrusted content (a finding's own quoted
+// text, a diff hunk, a tool's own output) that itself contains the
+// substring "VERDICT: APPROVE" anywhere after a genuine BLOCK line. A
+// naive last-match-wins scan would let that injected text silently flip
+// the aggregate result from BLOCK to APPROVE. Instead, a BLOCK match on
+// any line anywhere in the transcript wins outright, regardless of
+// ordering; only when no line ever matches BLOCK does an APPROVE match
+// count.
 func scanPassLog(logPath, driverName string) (verdict string, hasOutcome bool) {
 	d, err := driver.New(driverName)
 	if err != nil {
@@ -610,16 +621,28 @@ func scanPassLog(logPath, driverName string) (verdict string, hasOutcome bool) {
 		return "", false
 	}
 
+	var sawBlock, sawApprove bool
 	sc := bufio.NewScanner(strings.NewReader(rendered))
 	sc.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
 	for sc.Scan() {
 		line := strings.TrimSpace(sc.Text())
 		if v, ok := findVerdict(line); ok {
-			verdict = v
+			switch v {
+			case "BLOCK":
+				sawBlock = true
+			case "APPROVE":
+				sawApprove = true
+			}
 		}
 		if _, ok := outcome.ParseAnywhere(line); ok {
 			hasOutcome = true
 		}
+	}
+	switch {
+	case sawBlock:
+		verdict = "BLOCK"
+	case sawApprove:
+		verdict = "APPROVE"
 	}
 	return verdict, hasOutcome
 }
