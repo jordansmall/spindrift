@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -197,6 +198,47 @@ func resolveSecretCmd(env, cmd string) (string, error) {
 		return "", fmt.Errorf("%s: command produced no output — %s", env, secretCmdUnlockHint)
 	}
 	return trimmed, nil
+}
+
+// joinOxford joins words into an Oxford-comma "a, b, or c" list: empty input
+// yields "", a single word yields itself, two words join with a bare "or",
+// and three or more join with commas plus a comma before the trailing "or".
+func joinOxford(words []string) string {
+	switch len(words) {
+	case 0:
+		return ""
+	case 1:
+		return words[0]
+	case 2:
+		return words[0] + " or " + words[1]
+	default:
+		return strings.Join(words[:len(words)-1], ", ") + ", or " + words[len(words)-1]
+	}
+}
+
+// validateChoice validates a choice-knob's resolved value against the
+// schemaFlags row's declared choices (issue #2520 slice 2). It looks up the
+// schemaFlags row whose env matches env; when that row is absent, declares
+// no choices, or value is a member of its choices, validateChoice is a
+// no-op. Otherwise it reports the flag, the offending value, and every valid
+// choice in the same style as the launcher's existing bespoke choice
+// validators (e.g. MERGE_MODE=%q is not valid; must be immediate, auto, or
+// manual). Not yet wired into validate() — a later slice replaces the seven
+// bespoke validators with calls to this one.
+func validateChoice(env, value string) error {
+	for _, e := range schemaFlags {
+		if e.env != env {
+			continue
+		}
+		if len(e.choices) == 0 {
+			return nil
+		}
+		if slices.Contains(e.choices, value) {
+			return nil
+		}
+		return fmt.Errorf("%s=%q is not valid; must be %s", env, value, joinOxford(e.choices))
+	}
+	return nil
 }
 
 // subcommandEntry is one row of the subcommand listing.
