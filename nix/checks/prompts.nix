@@ -1092,15 +1092,18 @@ in
     pkgs.runCommand "build-time-reject-max-parallel-workers-orchestrator-off-worker-provisioned" { }
       "touch $out";
 
-  # The unset counterpart: MAX_PARALLEL_WORKERS is never set by the Consumer
-  # at all (only its schema default applies via mergedDefaults) -- that's not
-  # a Consumer request for anything, so the assert must not fire even with no
-  # worker provisioned. Only an explicit `defaults ? maxParallelWorkers`
-  # should trigger the reject.
-  build-time-reject-max-parallel-workers-unset-ok =
+  # The unset counterpart (issue #2495 review finding): MAX_PARALLEL_WORKERS
+  # is never set by the Consumer at all, only workerModel is cleared -- the
+  # schema still bakes its own default (env-schema.nix's maxParallelWorkers
+  # default = 2) into mergedDefaults regardless, so this is NOT "no request
+  # for parallelism" the way an untouched, still-provisioned-by-default
+  # workerModel would be. A prior revision of this assert checked only
+  # `defaults ? maxParallelWorkers` and kept a build like this one green --
+  # exactly the hole this fixture now pins shut.
+  build-time-reject-max-parallel-workers-unset-no-worker =
     let
       inherit (pkgs.lib) assertMsg;
-      ok = builtins.tryEval (
+      broken = builtins.tryEval (
         (import ../../lib/mkHarness.nix {
           inherit nixpkgs system;
           packages = p: [ p.hello ];
@@ -1110,9 +1113,10 @@ in
         }).spindrift
       );
     in
-    assert assertMsg ok.success
-      "mkHarness.nix must not throw when MAX_PARALLEL_WORKERS is never set, even with no worker provisioned";
-    pkgs.runCommand "build-time-reject-max-parallel-workers-unset-ok" { } "touch $out";
+    assert assertMsg (
+      !broken.success
+    ) "mkHarness.nix must throw when MAX_PARALLEL_WORKERS is never set (baked default still applies) and no worker subagent is provisioned";
+    pkgs.runCommand "build-time-reject-max-parallel-workers-unset-no-worker" { } "touch $out";
 
   # Build-time reject arm: a non-positive baked MAX_PARALLEL_WORKERS is
   # eval-time-decidable on its own, independent of worker provisioning --
