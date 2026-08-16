@@ -700,4 +700,22 @@ in
     assert assertMsg (outIds == expectedIds)
       "buildTimeRejectVerdicts must iterate validateMarkers' own severity==\"reject\" rows in order rather than a hand-duplicated list, expected ids [${concatStringsSep ", " expectedIds}], got: [${concatStringsSep ", " outIds}]";
     pkgs.runCommand "prompt-contract-build-time-reject-verdicts-covers-every-reject-row" { } "touch $out";
+
+  # Pins outcomeStatusSets' research row (issue #2524): the row must be
+  # derived from lib/research-verdicts.nix's defaultVerdicts (the single
+  # source of truth for the built-in research verdict tokens) plus the
+  # "blocked" crash/no-verdict escape hatch, never a hand-typed restatement
+  # of that list -- so the research vocabulary is rooted in exactly one
+  # place.
+  prompt-contract-outcome-status-sets-research-row-derives-from-verdict-registry =
+    let
+      researchVerdicts = import ../../lib/research-verdicts.nix;
+      out = promptContract.outcomeStatusesFor "research";
+      expected = (map (v: v.verdict) researchVerdicts.defaultVerdicts) ++ [ "blocked" ];
+    in
+    assert assertMsg (out == expected)
+      "outcomeStatusSets' research row's statuses must equal lib/research-verdicts.nix's defaultVerdicts' verdict tokens (in order) plus \"blocked\", got: [${concatStringsSep ", " out}]";
+    assert assertMsg (out == [ "recommend" "reject" "unclear" "blocked" ])
+      "outcomeStatusSets' research row's statuses must equal [recommend, reject, unclear, blocked] for the built-in default verdict set, got: [${concatStringsSep ", " out}]";
+    pkgs.runCommand "prompt-contract-outcome-status-sets-research-row-derives-from-verdict-registry" { } "touch $out";
 }
