@@ -5,9 +5,14 @@ import "strings"
 // Snapshot returns the frozen issue-read text for num against tracker: if
 // tracker implements SnapshotReader, its Snapshot(num) result verbatim —
 // including any error, which is returned as-is rather than masked by a
-// fallback; otherwise tracker.Issue(num).Body alone (the local/jira
-// degrade — no separate comments to append, either because they're already
-// inline in the body (local) or unavailable (jira)).
+// fallback; otherwise tracker.Issue(num).Body (the local/jira degrade — no
+// separate comments to append, either because they're already inline in the
+// body (local) or unavailable (jira)), plus a trailing "parent: <value>"
+// line when Issue.Parent is set. Issue(num).Body is the local adapter's
+// Markdown body alone, stripped of its YAML frontmatter (ADR 0013) — Parent
+// is a frontmatter-only field, so it would otherwise vanish from the
+// snapshot entirely, leaving a local issue-read fragment's "follow its
+// parent link" instruction unfollowable.
 func Snapshot(tracker IssueTracker, num string) (string, error) {
 	if sr, ok := tracker.(SnapshotReader); ok {
 		return sr.Snapshot(num)
@@ -16,7 +21,10 @@ func Snapshot(tracker IssueTracker, num string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return iss.Body, nil
+	if iss.Parent == "" {
+		return iss.Body, nil
+	}
+	return iss.Body + "\n\nparent: " + iss.Parent, nil
 }
 
 // CommentAttribution is one comment's author, timestamp, and body — the
