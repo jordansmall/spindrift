@@ -121,7 +121,7 @@ func bootstrap(ensureReady bool, kind string, selfContained bool) (lc *launchCon
 
 	it := newIssueTracker(c)
 	cf := newCodeForge(c, local.SanitizedParent{}, it)
-	if err := checkReadOnlyCapabilityGate(c, cf, it); err != nil {
+	if err := checkReadOnlyCapabilityGate(c); err != nil {
 		return nil, err
 	}
 	if _, err := checkReadOnlyTokenGate(c, ghTokenIntrospector, os.Stdout); err != nil {

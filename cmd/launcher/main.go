@@ -842,35 +842,33 @@ func checkAutoMergePreflight(c config, cf forge.CodeForge) error {
 }
 
 // checkReadOnlyCapabilityGate enforces BOX_FORGE_AND_ISSUE_ACCESS=read-only's
-// startup capability gate (issue #1916, ADR extending 0032/0033's
+// capability requirement (issue #1916, ADR extending 0032/0033's
 // host-mediated model to the github backends): the Box may only be denied a
 // write token when the Launcher can perform every write it would otherwise
-// make, on both axes. read-write (the default) is a no-op — it never
-// inspects cf/it, so it changes nothing about today's flows.
+// make, on both axes. read-write (the default) is a no-op.
 //
-// The cf-side checks are delegated to settle.RequiredCapabilityError,
-// which discovers cf's optional BundleRelay, DraftPRCreator, and
-// BundleCommitSubjects capabilities the same way Mediation's own call sites
-// do — BundleRelay unconditionally, and DraftPRCreator/BundleCommitSubjects
-// only when the forge is PR-shaped (implements PRForge), since a forge with
-// no PR concept at all (local) has nothing for either to serve. The tracker
-// must separately implement HostPostedCommenter and HostPostedIssueFiler
-// (issue #2018's issue-filing relay channel). A missing capability is a
-// startup error naming the axis and the specific seam absent, rather than a
-// silently-degraded read-only deployment.
-func checkReadOnlyCapabilityGate(c config, cf forge.CodeForge, it forge.IssueTracker) error {
+// mkHarness's readOnlyCapabilityOk eval assert (issue #2526) already proves
+// this coherent for every combination a Consumer can bake into an image: it
+// rejects an incoherent BOX_FORGE_AND_ISSUE_ACCESS/CODE_FORGE/ISSUE_TRACKER
+// pairing at `nix build` time, before an image can ever exist, reading the
+// same backend-registry RelayCapable/HostPostingCapable bits this gate
+// checks. This Go gate exists only as a backstop for a *runtime* override of
+// those three knobs (env var or CLI flag) past what nix validated at build
+// time — it looks up the final resolved config's CODE_FORGE/ISSUE_TRACKER by
+// name in the backend registry rather than inspecting live cf/it interfaces,
+// since the registry is the single source of truth the eval assert already
+// checked against.
+func checkReadOnlyCapabilityGate(c config) error {
 	if c.boxForgeAndIssueAccess != "read-only" {
 		return nil
 	}
-	_, isPRForge := cf.(forge.PRForge)
-	if err := settle.RequiredCapabilityError(cf, c.codeForge, isPRForge); err != nil {
-		return err
+	forgeRow, ok := backendByName(c.codeForge)
+	if !ok || !forgeRow.RelayCapable {
+		return fmt.Errorf("BOX_FORGE_AND_ISSUE_ACCESS=read-only: the selected CODE_FORGE=%q does not implement bundle-relay for the Box's finished branch hand-off", c.codeForge)
 	}
-	if _, ok := it.(forge.HostPostedCommenter); !ok {
-		return fmt.Errorf("BOX_FORGE_AND_ISSUE_ACCESS=read-only: the selected ISSUE_TRACKER=%q does not implement host-posted comments (forge.HostPostedCommenter)", c.issueTracker)
-	}
-	if _, ok := it.(forge.HostPostedIssueFiler); !ok {
-		return fmt.Errorf("BOX_FORGE_AND_ISSUE_ACCESS=read-only: the selected ISSUE_TRACKER=%q does not implement host-posted issue-filing (forge.HostPostedIssueFiler)", c.issueTracker)
+	trackerRow, ok := backendByName(c.issueTracker)
+	if !ok || !trackerRow.HostPostingCapable {
+		return fmt.Errorf("BOX_FORGE_AND_ISSUE_ACCESS=read-only: the selected ISSUE_TRACKER=%q does not implement host-posted comments and issue-filing", c.issueTracker)
 	}
 	return nil
 }
