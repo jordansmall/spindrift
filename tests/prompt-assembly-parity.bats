@@ -12,8 +12,8 @@
 # ($DRIVER_PROMPT_FILE, $DRIVER_AGENTS_FILE) against a checked-in golden
 # fixture under tests/testdata/prompt-assembly-golden/<cell-name>.{prompt.txt,
 # agents.json}, git-blame-friendly per cell. Session mode (initial vs resume)
-# and the three orchestrator-only Handoff facts (Invoker, ReviewPromptFile,
-# ReviewModel) are asserted against the real Handoff JSON itself
+# and the four orchestrator-only Handoff facts (Invoker, ReviewPromptFile,
+# ReviewModel, ReviewEffort) are asserted against the real Handoff JSON itself
 # ($DRIVER_HANDOFF_FILE, tests/helper.bash's test-only capture hook, issue
 # #2395 slice 2) -- SessionMode directly against the cell's own expected
 # value, the orchestrator-only facts via a `jq -S` diff against a checked-in
@@ -176,8 +176,9 @@ assert_cell_golden() {
 
 # assert_review_handoff_golden: for the orchestrator-on cells (issue #2353),
 # asserts the Handoff facts assert_cell_golden's own prompt/agents-JSON/
-# session-mode checks don't cover -- Invoker, ReviewPromptFile, and
-# ReviewModel, all only ever populated with the orchestrator on -- via a
+# session-mode checks don't cover -- Invoker, ReviewPromptFile, ReviewModel,
+# and ReviewEffort (issue #2512), all only ever populated with the
+# orchestrator on -- via a
 # `jq -S` diff of the real Handoff JSON ($DRIVER_HANDOFF_FILE) against a
 # checked-in <golden_name>.handoff.json fixture, the same
 # canonicalize-then-diff pattern assert_cell_golden already uses for
