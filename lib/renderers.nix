@@ -47,6 +47,29 @@ let
   # lives once.
   upperFirst =
     s: toUpper (builtins.substring 0 1 s) + builtins.substring 1 (builtins.stringLength s - 1) s;
+  # Right-pads a string with spaces to the given width (a no-op if the
+  # string is already that wide or wider). Shared by renderAlignedLines
+  # below.
+  padRight =
+    width: s:
+    let
+      pad = width - builtins.stringLength s;
+    in
+    s + concatStrings (builtins.genList (_: " ") (if pad > 0 then pad else 0));
+  # Renders `path = value;\n` lines with every `=` in the block aligned to
+  # the widest `path` (computed, not hand-typed -- issue #2557 review
+  # finding), one line per { path, value } item. Shared by
+  # renderSettingsExampleModelsDoc/LabelsDoc/ConfigDoc, whose flat
+  # domain-tree example blocks in docs/reference.md are hand-aligned per
+  # block.
+  renderAlignedLines =
+    items:
+    let
+      maxWidth = builtins.foldl' (
+        acc: item: if builtins.stringLength item.path > acc then builtins.stringLength item.path else acc
+      ) 0 items;
+    in
+    concatStrings (map (item: "${padRight maxWidth item.path} = ${item.value};\n") items);
 in
 rec {
   # Env var name -> flag name (e.g. MAX_PARALLEL -> max-parallel). Shared by
@@ -359,15 +382,21 @@ rec {
   # lines (issue #2514; ADR 0037 re-spelling, issue #2557): the same four
   # schemaDefaults leaves (model/scoutModel/reviewModel/filerModel)
   # renderDefaultModelsDoc's table already draws from, formatted as flat
-  # `agents.models.<name> = <literal>;` assignments (the domain path each
-  # knob resolves to via its `group`/`nixSubPath` -- lib/nixpath.nix) instead
-  # of a Markdown table row, so that second hand-typed default-model literal
-  # site regenerates from the same fixture instead of drifting independently.
-  # workerModel isn't part of this block -- the example only ever carried
-  # model/scoutModel/reviewModel/filerModel. No indentation: the example is a
-  # flat top-level literal, not nested inside a `settings = { ... }` wrapper.
+  # `agents.models.<name> = <literal>;` assignments -- the path derived via
+  # resolveNixPath from each knob's `schema` entry (issue #2557 review
+  # finding: previously hand-typed, so a `group`/`nixSubPath` rename could
+  # silently leave this example's paths stale with the drift check still
+  # green) -- instead of a Markdown table row, so this second hand-typed
+  # default-model literal site regenerates from the same fixture instead of
+  # drifting independently. workerModel isn't part of this block -- the
+  # example only ever carried model/scoutModel/reviewModel/filerModel. No
+  # indentation: the example is a flat top-level literal, not nested inside
+  # a `settings = { ... }` wrapper. Takes both `fixture` (the default
+  # *values*) and `schema` (the entries resolveNixPath resolves *paths*
+  # from) since lib/default-model-fixture.nix's schemaDefaults carries only
+  # values, no `group`/`nixSubPath`.
   renderSettingsExampleModelsDoc =
-    fixture:
+    fixture: schema:
     let
       inherit (fixture) schemaDefaults;
       # builtins.toJSON, not a hand-wrapped "${value}", so a default
@@ -375,27 +404,40 @@ rec {
       # literal in the doc example -- the same escaping treatment
       # renderAgentPathsGo's renderConst uses for Go string literals.
       inherit (builtins) toJSON;
+      # Each line's path is derived via resolveNixPath from the knob's own
+      # lib/env-schema.nix entry (`schema`), not hand-typed -- issue #2557
+      # review finding -- so a `group`/`nixSubPath` rename can't silently
+      # leave this example stale while the drift check stays green.
+      item = key: value: {
+        path = resolveNixPath key schema.${key};
+        inherit value;
+      };
     in
-    "agents.models.default = ${toJSON schemaDefaults.model};\n"
-    + "agents.models.scout   = ${toJSON schemaDefaults.scoutModel};\n"
-    + "agents.models.review  = ${toJSON schemaDefaults.reviewModel};\n"
-    + "agents.models.filer   = ${toJSON schemaDefaults.filerModel};\n";
+    renderAlignedLines [
+      (item "model" (toJSON schemaDefaults.model))
+      (item "scoutModel" (toJSON schemaDefaults.scoutModel))
+      (item "reviewModel" (toJSON schemaDefaults.reviewModel))
+      (item "filerModel" (toJSON schemaDefaults.filerModel))
+    ];
 
   # docs/reference.md's generated flat domain-tree example's
   # `issues.labels.*` lines (issue #2537; ADR 0037 re-spelling, issue
   # #2557): the four lib/env-schema.nix leaves that drive an issue's
   # dispatch label (label) and the three lifecycle labels the launcher
   # swaps it through (inProgressLabel/failedLabel/completeLabel), formatted
-  # as flat `issues.labels.<name> = <literal>;` assignments (the domain path
-  # each knob resolves to via its `group`/`nixSubPath` -- lib/nixpath.nix),
-  # so this hand-typed default-label literal site regenerates from the same
-  # schema docs/flake-options.md already draws from instead of drifting
-  # independently if one of those four defaults is ever changed. No
-  # indentation: the example is a flat top-level literal, not nested inside
-  # a `settings = { ... }` wrapper. Takes the whole schema attrset (unlike
-  # renderSettingsExampleModelsDoc, which takes the narrower default-model
-  # fixture) since label/inProgressLabel/failedLabel/completeLabel are
-  # plain env-schema.nix knobs with no dedicated fixture of their own.
+  # as flat `issues.labels.<name> = <literal>;` assignments -- the path
+  # derived via resolveNixPath from each knob's `schema` entry (issue #2557
+  # review finding: previously hand-typed, so a `group`/`nixSubPath` rename
+  # could silently leave this example's paths stale with the drift check
+  # still green) -- so this default-label literal site regenerates from the
+  # same schema docs/flake-options.md already draws from instead of
+  # drifting independently if one of those four defaults is ever changed.
+  # No indentation: the example is a flat top-level literal, not nested
+  # inside a `settings = { ... }` wrapper. Takes the whole schema attrset
+  # (unlike renderSettingsExampleModelsDoc, which additionally takes the
+  # narrower default-model fixture for its default *values*) since
+  # label/inProgressLabel/failedLabel/completeLabel are plain
+  # env-schema.nix knobs with no dedicated fixture of their own.
   renderSettingsExampleLabelsDoc =
     schema:
     let
@@ -404,11 +446,21 @@ rec {
       # literal in the doc example -- the same escaping treatment
       # renderAgentPathsGo's renderConst uses for Go string literals.
       inherit (builtins) toJSON;
+      # Each line's path is derived via resolveNixPath from the knob's own
+      # lib/env-schema.nix entry, not hand-typed -- issue #2557 review
+      # finding -- so a `group`/`nixSubPath` rename can't silently leave
+      # this example stale while the drift check stays green.
+      item = key: {
+        path = resolveNixPath key schema.${key};
+        value = toJSON schema.${key}.default;
+      };
     in
-    "issues.labels.dispatch   = ${toJSON schema.label.default};\n"
-    + "issues.labels.inProgress = ${toJSON schema.inProgressLabel.default};\n"
-    + "issues.labels.failed     = ${toJSON schema.failedLabel.default};\n"
-    + "issues.labels.complete   = ${toJSON schema.completeLabel.default};\n";
+    renderAlignedLines [
+      (item "label")
+      (item "inProgressLabel")
+      (item "failedLabel")
+      (item "completeLabel")
+    ];
 
   # docs/reference.md's generated flat domain-tree example's `git.*`/
   # `dispatch.*` lines (issue #2537; ADR 0037 re-spelling, issue #2557): the
@@ -419,8 +471,10 @@ rec {
   # MERGE_POLL_INTERVAL/MERGE_POLL_TIMEOUT env vars -- plus maxParallel/
   # maxJobs, the MAX_PARALLEL/MAX_JOBS dispatch-concurrency env vars),
   # formatted as flat `git.<path> = <literal>;` / `dispatch.<path> =
-  # <literal>;` assignments (the domain path each knob resolves to via its
-  # `group`/`nixSubPath` -- lib/nixpath.nix), so this hand-typed
+  # <literal>;` assignments -- the path derived via resolveNixPath from
+  # each knob's `schema` entry (issue #2557 review finding: previously
+  # hand-typed, so a `group`/`nixSubPath` rename could silently leave this
+  # example's paths stale with the drift check still green) -- so this
   # default-config literal site regenerates from the same schema
   # docs/flake-options.md already draws from instead of drifting
   # independently if one of those eight defaults is ever changed. No
@@ -428,26 +482,39 @@ rec {
   # a `settings = { ... }` wrapper. maxParallel/maxJobs/mergePollInterval/
   # mergePollTimeout are Nix ints in the schema and render unquoted via
   # toString, matching how they already appear in the doc. Takes the whole
-  # schema attrset (unlike renderSettingsExampleModelsDoc, which takes the
-  # narrower default-model fixture) since these are plain env-schema.nix
-  # knobs with no dedicated fixture of their own.
+  # schema attrset (unlike renderSettingsExampleModelsDoc, which
+  # additionally takes the narrower default-model fixture for its default
+  # *values*) since these are plain env-schema.nix knobs with no dedicated
+  # fixture of their own.
   renderSettingsExampleConfigDoc =
     schema:
     let
-      # builtins.toJSON, not a hand-wrapped "${value}", so a default
+      # builtins.toJSON, not a hand-wrapped "${value}", so a string default
       # containing `"` or `\` still renders as a syntactically valid quoted
       # literal in the doc example -- the same escaping treatment
-      # renderAgentPathsGo's renderConst uses for Go string literals.
+      # renderAgentPathsGo's renderConst uses for Go string literals. Int
+      # knobs render unquoted via toString, matching how they already
+      # appear in the doc.
       inherit (builtins) toJSON;
+      # Each line's path is derived via resolveNixPath from the knob's own
+      # lib/env-schema.nix entry, not hand-typed -- issue #2557 review
+      # finding -- so a `group`/`nixSubPath` rename can't silently leave
+      # this example stale while the drift check stays green.
+      item = key: render: {
+        path = resolveNixPath key schema.${key};
+        value = render schema.${key}.default;
+      };
     in
-    "git.baseBranch         = ${toJSON schema.baseBranch.default};\n"
-    + "git.branchPrefix       = ${toJSON schema.branchPrefix.default};\n"
-    + "git.merge.policy       = ${toJSON schema.mergeMode.default};\n"
-    + "git.merge.guardPaths   = ${toJSON schema.mergeGuardPaths.default};\n"
-    + "git.merge.pollInterval = ${toString schema.mergePollInterval.default};\n"
-    + "git.merge.pollTimeout  = ${toString schema.mergePollTimeout.default};\n"
-    + "dispatch.maxParallel   = ${toString schema.maxParallel.default};\n"
-    + "dispatch.maxJobs       = ${toString schema.maxJobs.default};\n";
+    renderAlignedLines [
+      (item "baseBranch" toJSON)
+      (item "branchPrefix" toJSON)
+      (item "mergeMode" toJSON)
+      (item "mergeGuardPaths" toJSON)
+      (item "mergePollInterval" toString)
+      (item "mergePollTimeout" toString)
+      (item "maxParallel" toString)
+      (item "maxJobs" toString)
+    ];
 
   # cmd/launcher/internal/driver/drivernames_gen.go content. driverEntries is
   # the registry's `entries` attrset (name -> Driver entry), not the whole
