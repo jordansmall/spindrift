@@ -355,17 +355,17 @@ rec {
     + "| \`filer\` | ${filerCell} |\n"
     + "| \`worker\` | \`${schemaDefaults.workerModel}\` |\n";
 
-  # docs/reference.md's generated `settings = { ... }` example's `models`
-  # sub-block (issue #2514): the same four schemaDefaults leaves (model/
-  # scoutModel/reviewModel/filerModel) renderDefaultModelsDoc's table
-  # already draws from, formatted as the illustrative Nix literal shown in
-  # the doc's fenced ```nix example instead of a Markdown table row, so that
-  # second hand-typed default-model literal site regenerates from the same
-  # fixture instead of drifting independently. workerModel isn't part of
-  # this sub-block — the example's `models` attrset only ever carried
-  # model/scoutModel/reviewModel/filerModel. Indentation is fixed to match
-  # the surrounding `settings = { ... }` example exactly, so the generated
-  # text is a byte-for-byte drop-in replacement.
+  # docs/reference.md's generated flat domain-tree example's `agents.models.*`
+  # lines (issue #2514; ADR 0037 re-spelling, issue #2557): the same four
+  # schemaDefaults leaves (model/scoutModel/reviewModel/filerModel)
+  # renderDefaultModelsDoc's table already draws from, formatted as flat
+  # `agents.models.<name> = <literal>;` assignments (the domain path each
+  # knob resolves to via its `group`/`nixSubPath` -- lib/nixpath.nix) instead
+  # of a Markdown table row, so that second hand-typed default-model literal
+  # site regenerates from the same fixture instead of drifting independently.
+  # workerModel isn't part of this block -- the example only ever carried
+  # model/scoutModel/reviewModel/filerModel. No indentation: the example is a
+  # flat top-level literal, not nested inside a `settings = { ... }` wrapper.
   renderSettingsExampleModelsDoc =
     fixture:
     let
@@ -376,23 +376,23 @@ rec {
       # renderAgentPathsGo's renderConst uses for Go string literals.
       inherit (builtins) toJSON;
     in
-    "  models          = { model = ${toJSON schemaDefaults.model};\n"
-    + "                      scoutModel  = ${toJSON schemaDefaults.scoutModel};\n"
-    + "                      reviewModel = ${toJSON schemaDefaults.reviewModel};\n"
-    + "                      filerModel  = ${toJSON schemaDefaults.filerModel}; };\n";
+    "agents.models.default = ${toJSON schemaDefaults.model};\n"
+    + "agents.models.scout   = ${toJSON schemaDefaults.scoutModel};\n"
+    + "agents.models.review  = ${toJSON schemaDefaults.reviewModel};\n"
+    + "agents.models.filer   = ${toJSON schemaDefaults.filerModel};\n";
 
-  # docs/reference.md's generated `settings = { ... }` example's
-  # `issueDiscovery`/`lifecycleLabels` lines (issue #2537): the four
-  # lib/env-schema.nix leaves that drive an issue's dispatch label
-  # (label) and the three lifecycle labels the launcher swaps it through
-  # (inProgressLabel/failedLabel/completeLabel), formatted as the
-  # illustrative Nix literal shown in the doc's fenced ```nix example, so
-  # this hand-typed default-label literal site regenerates from the same
+  # docs/reference.md's generated flat domain-tree example's
+  # `issues.labels.*` lines (issue #2537; ADR 0037 re-spelling, issue
+  # #2557): the four lib/env-schema.nix leaves that drive an issue's
+  # dispatch label (label) and the three lifecycle labels the launcher
+  # swaps it through (inProgressLabel/failedLabel/completeLabel), formatted
+  # as flat `issues.labels.<name> = <literal>;` assignments (the domain path
+  # each knob resolves to via its `group`/`nixSubPath` -- lib/nixpath.nix),
+  # so this hand-typed default-label literal site regenerates from the same
   # schema docs/flake-options.md already draws from instead of drifting
-  # independently if one of those four defaults is ever changed.
-  # Indentation is fixed to match the surrounding `settings = { ... }`
-  # example exactly, so the generated text is a byte-for-byte drop-in
-  # replacement. Takes the whole schema attrset (unlike
+  # independently if one of those four defaults is ever changed. No
+  # indentation: the example is a flat top-level literal, not nested inside
+  # a `settings = { ... }` wrapper. Takes the whole schema attrset (unlike
   # renderSettingsExampleModelsDoc, which takes the narrower default-model
   # fixture) since label/inProgressLabel/failedLabel/completeLabel are
   # plain env-schema.nix knobs with no dedicated fixture of their own.
@@ -405,30 +405,32 @@ rec {
       # renderAgentPathsGo's renderConst uses for Go string literals.
       inherit (builtins) toJSON;
     in
-    "  issueDiscovery  = { label          = ${toJSON schema.label.default}; };\n"
-    + "  lifecycleLabels = { inProgressLabel = ${toJSON schema.inProgressLabel.default};\n"
-    + "                      failedLabel     = ${toJSON schema.failedLabel.default};\n"
-    + "                      completeLabel   = ${toJSON schema.completeLabel.default}; };\n";
+    "issues.labels.dispatch   = ${toJSON schema.label.default};\n"
+    + "issues.labels.inProgress = ${toJSON schema.inProgressLabel.default};\n"
+    + "issues.labels.failed     = ${toJSON schema.failedLabel.default};\n"
+    + "issues.labels.complete   = ${toJSON schema.completeLabel.default};\n";
 
-  # docs/reference.md's generated `settings = { ... }` example's `branches`/
-  # `concurrency` lines (issue #2537): the eight lib/env-schema.nix leaves
-  # that drive branch naming and merge/dispatch behavior (baseBranch,
-  # branchPrefix, mergeMode, mergeGuardPaths, mergePollInterval,
-  # mergePollTimeout -- the BASE_BRANCH/BRANCH_PREFIX/MERGE_MODE/
-  # MERGE_GUARD_PATHS/MERGE_POLL_INTERVAL/MERGE_POLL_TIMEOUT env vars -- plus
-  # maxParallel/maxJobs, the MAX_PARALLEL/MAX_JOBS dispatch-concurrency env
-  # vars), formatted as the illustrative Nix literal shown in the doc's
-  # fenced ```nix example, so this hand-typed default-config literal site
-  # regenerates from the same schema docs/flake-options.md already draws
-  # from instead of drifting independently if one of those eight defaults is
-  # ever changed. Indentation is fixed to match the surrounding
-  # `settings = { ... }` example exactly, so the generated text is a
-  # byte-for-byte drop-in replacement. maxParallel/maxJobs/
-  # mergePollInterval/mergePollTimeout are Nix ints in the schema and render
-  # unquoted via toString, matching how they already appear in the doc.
-  # Takes the whole schema attrset (unlike renderSettingsExampleModelsDoc,
-  # which takes the narrower default-model fixture) since these are plain
-  # env-schema.nix knobs with no dedicated fixture of their own.
+  # docs/reference.md's generated flat domain-tree example's `git.*`/
+  # `dispatch.*` lines (issue #2537; ADR 0037 re-spelling, issue #2557): the
+  # eight lib/env-schema.nix leaves that drive branch naming and
+  # merge/dispatch behavior (baseBranch, branchPrefix, mergeMode,
+  # mergeGuardPaths, mergePollInterval, mergePollTimeout -- the
+  # BASE_BRANCH/BRANCH_PREFIX/MERGE_MODE/MERGE_GUARD_PATHS/
+  # MERGE_POLL_INTERVAL/MERGE_POLL_TIMEOUT env vars -- plus maxParallel/
+  # maxJobs, the MAX_PARALLEL/MAX_JOBS dispatch-concurrency env vars),
+  # formatted as flat `git.<path> = <literal>;` / `dispatch.<path> =
+  # <literal>;` assignments (the domain path each knob resolves to via its
+  # `group`/`nixSubPath` -- lib/nixpath.nix), so this hand-typed
+  # default-config literal site regenerates from the same schema
+  # docs/flake-options.md already draws from instead of drifting
+  # independently if one of those eight defaults is ever changed. No
+  # indentation: the example is a flat top-level literal, not nested inside
+  # a `settings = { ... }` wrapper. maxParallel/maxJobs/mergePollInterval/
+  # mergePollTimeout are Nix ints in the schema and render unquoted via
+  # toString, matching how they already appear in the doc. Takes the whole
+  # schema attrset (unlike renderSettingsExampleModelsDoc, which takes the
+  # narrower default-model fixture) since these are plain env-schema.nix
+  # knobs with no dedicated fixture of their own.
   renderSettingsExampleConfigDoc =
     schema:
     let
@@ -438,11 +440,14 @@ rec {
       # renderAgentPathsGo's renderConst uses for Go string literals.
       inherit (builtins) toJSON;
     in
-    "  branches        = { baseBranch = ${toJSON schema.baseBranch.default}; branchPrefix = ${toJSON schema.branchPrefix.default};\n"
-    + "                      mergeMode  = ${toJSON schema.mergeMode.default};\n"
-    + "                      mergeGuardPaths = ${toJSON schema.mergeGuardPaths.default};\n"
-    + "                      mergePollInterval = ${toString schema.mergePollInterval.default}; mergePollTimeout = ${toString schema.mergePollTimeout.default}; };\n"
-    + "  concurrency     = { maxParallel = ${toString schema.maxParallel.default}; maxJobs = ${toString schema.maxJobs.default}; };\n";
+    "git.baseBranch         = ${toJSON schema.baseBranch.default};\n"
+    + "git.branchPrefix       = ${toJSON schema.branchPrefix.default};\n"
+    + "git.merge.policy       = ${toJSON schema.mergeMode.default};\n"
+    + "git.merge.guardPaths   = ${toJSON schema.mergeGuardPaths.default};\n"
+    + "git.merge.pollInterval = ${toString schema.mergePollInterval.default};\n"
+    + "git.merge.pollTimeout  = ${toString schema.mergePollTimeout.default};\n"
+    + "dispatch.maxParallel   = ${toString schema.maxParallel.default};\n"
+    + "dispatch.maxJobs       = ${toString schema.maxJobs.default};\n";
 
   # cmd/launcher/internal/driver/drivernames_gen.go content. driverEntries is
   # the registry's `entries` attrset (name -> Driver entry), not the whole
