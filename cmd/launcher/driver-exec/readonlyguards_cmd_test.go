@@ -86,6 +86,42 @@ func TestRunReadonlyGuards_FullRegistryInstallsShimAndHook(t *testing.T) {
 	}
 }
 
+// TestRunReadonlyGuards_ExtraRepoDirAlsoGetsHook verifies -extra-repo-dir is
+// wired into readonlyguards.Config.ExtraRepoDirs: the git-hook guard lands
+// at BOTH -repo-dir and -extra-repo-dir, not just -repo-dir (issue #2509
+// Finding 1 -- agent/entrypoint.sh passes $WORK_DIR here, alongside the
+// decoy repo at -repo-dir, so a push to an explicit URL or non-origin
+// remote -- which never goes through the decoy's repointed pushurl -- is
+// still blocked locally).
+func TestRunReadonlyGuards_ExtraRepoDirAlsoGetsHook(t *testing.T) {
+	stubBinOnPath(t, "gh")
+	repoDir := t.TempDir()
+	runGitCmd(t, repoDir, "init", "--bare")
+	extraRepoDir := t.TempDir()
+	runGitCmd(t, extraRepoDir, "init")
+	shimDir := t.TempDir()
+
+	var stdout bytes.Buffer
+	rc := runReadonlyGuards([]string{
+		"--forbidden-markers-registry", forbiddenMarkersRegistryPathForReadonlyGuardsTest,
+		"--repo-dir", repoDir,
+		"--extra-repo-dir", extraRepoDir,
+		"--shim-dir", shimDir,
+	}, &stdout)
+	if rc != 0 {
+		t.Fatalf("runReadonlyGuards exit = %d, want 0 (stdout=%q)", rc, stdout.String())
+	}
+
+	for _, name := range []string{"pre-push", "pre-receive"} {
+		if _, err := os.Stat(filepath.Join(repoDir, "hooks", name)); err != nil {
+			t.Errorf("%s hook not installed at -repo-dir: %v", name, err)
+		}
+		if _, err := os.Stat(filepath.Join(extraRepoDir, ".git", "hooks", name)); err != nil {
+			t.Errorf("%s hook not installed at -extra-repo-dir: %v", name, err)
+		}
+	}
+}
+
 // TestRunReadonlyGuards_MissingRegistryFlagReturnsNonZero verifies a missing
 // -forbidden-markers-registry flag fails loudly (exit 1) instead of running
 // Install against a zero-value rows slice.
@@ -153,7 +189,7 @@ func TestIsReadonlyGuardsInvocation(t *testing.T) {
 func TestNewReadonlyGuardsFlagSet_DefaultsAreEmpty(t *testing.T) {
 	fs, _ := newReadonlyGuardsFlagSet()
 
-	for _, name := range []string{"forbidden-markers-registry", "repo-dir", "shim-dir"} {
+	for _, name := range []string{"forbidden-markers-registry", "repo-dir", "shim-dir", "extra-repo-dir"} {
 		got := fs.Lookup(name)
 		if got == nil {
 			t.Fatalf("%s flag not registered", name)
