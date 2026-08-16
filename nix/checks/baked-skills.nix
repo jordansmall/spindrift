@@ -83,28 +83,44 @@ let
     }:
     let
       raw = pkgs.writeText "${name}.raw" generated;
+      # The awk reconstruction below only ever *replaces* a span it finds
+      # between the begin/end marker lines -- if a marker line is missing
+      # entirely, awk just falls through printing the committed file
+      # unchanged, so reconstructed.go ends up identical to the committed
+      # file and the diff below reports no drift even though the generated
+      # content never got inserted. Force the same eval-time marker-presence
+      # check assertSpanOk gets via `between` (it throws when a marker is
+      # absent) before ever constructing the runCommand derivation below, so
+      # a missing marker fails loudly instead of silently passing.
+      markersPresent = between {
+        src = builtins.readFile file;
+        file = toString file;
+        inherit begin end;
+      };
     in
-    pkgs.runCommand name
-      {
-        nativeBuildInputs = [ pkgs.go ];
-        committed = file;
-        inherit raw;
-        beginMarker = begin;
-        endMarker = end;
-      }
-      ''
-        awk -v begin="$beginMarker" -v end="$endMarker" -v rawfile="$raw" '
-          BEGIN { while ((getline line < rawfile) > 0) content = content line "\n" }
-          $0 == begin { print; printf "%s", content; skip=1; next }
-          $0 == end { skip=0 }
-          skip { next }
-          { print }
-        ' "$committed" > reconstructed.go
-        gofmt -w reconstructed.go
-        diff reconstructed.go "$committed" \
-          || { echo "${toString file} generated skill-baked span (between \"${begin}\" / \"${end}\") is out of sync with lib/baked-skills.nix -- regenerate it with \`nix run .#regen\`" >&2; exit 1; }
-        touch $out
-      '';
+    builtins.seq markersPresent (
+      pkgs.runCommand name
+        {
+          nativeBuildInputs = [ pkgs.go ];
+          committed = file;
+          inherit raw;
+          beginMarker = begin;
+          endMarker = end;
+        }
+        ''
+          awk -v begin="$beginMarker" -v end="$endMarker" -v rawfile="$raw" '
+            BEGIN { while ((getline line < rawfile) > 0) content = content line "\n" }
+            $0 == begin { print; printf "%s", content; skip=1; next }
+            $0 == end { skip=0 }
+            skip { next }
+            { print }
+          ' "$committed" > reconstructed.go
+          gofmt -w reconstructed.go
+          diff reconstructed.go "$committed" \
+            || { echo "${toString file} generated skill-baked span (between \"${begin}\" / \"${end}\") is out of sync with lib/baked-skills.nix -- regenerate it with \`nix run .#regen\`" >&2; exit 1; }
+          touch $out
+        ''
+    );
 in
 {
   baked-skills-probes-gen =
@@ -184,4 +200,52 @@ in
       renderers.renderBakedSkillGatesGo withExtra
     )) "renderBakedSkillGatesGo did not render the injected row's gate assignment";
     pkgs.runCommand "baked-skills-add-row-guard" { } "touch $out";
+
+  # Regression guard for the marker-presence bug the two guards above (issue
+  # #2532 review) fixed: assertSpanOk already throws at eval time when a
+  # begin/end marker line is missing (via `between`), and assertGoSpanGofmtOk
+  # now forces that same `between` check before ever diffing its gofmt
+  # reconstruction -- without this guard, a future edit could silently drop
+  # that eval-time check again (exactly how the bug shipped undetected the
+  # first time) and no check would complain. Mirrors
+  # nix/checks/schema-drift.nix's default-models-doc-guard: build a synthetic
+  # copy of each real committed file with its BEGIN marker line stripped,
+  # run the real assertion function against it inside builtins.tryEval, and
+  # assert it throws (!result.success) rather than silently passing.
+  baked-skills-marker-guard =
+    let
+      inherit (pkgs.lib) assertMsg replaceStrings;
+
+      probesBegin = "  # BEGIN GENERATED SKILL-BAKED PROBES -- nix run .#regen -- DO NOT EDIT";
+      probesEnd = "  # END GENERATED SKILL-BAKED PROBES";
+      probesSrc = builtins.readFile ../../agent/entrypoint.sh;
+      probesSynthetic = pkgs.writeText "baked-skills-marker-guard-probes.sh" (
+        replaceStrings [ (probesBegin + "\n") ] [ "" ] probesSrc
+      );
+      spanResult = builtins.tryEval (assertSpanOk {
+        file = probesSynthetic;
+        begin = probesBegin;
+        end = probesEnd;
+        generated = renderers.renderBakedSkillProbesShell bakedSkills;
+      });
+
+      fieldsBegin = "\t// BEGIN GENERATED SKILL-BAKED FIELDS -- nix run .#regen -- DO NOT EDIT";
+      fieldsEnd = "\t// END GENERATED SKILL-BAKED FIELDS";
+      fieldsSrc = builtins.readFile ../../cmd/launcher/internal/promptassembly/env.go;
+      fieldsSynthetic = pkgs.writeText "baked-skills-marker-guard-env.go" (
+        replaceStrings [ (fieldsBegin + "\n") ] [ "" ] fieldsSrc
+      );
+      goSpanResult = builtins.tryEval (assertGoSpanGofmtOk {
+        name = "baked-skills-marker-guard-fields-gen";
+        file = fieldsSynthetic;
+        begin = fieldsBegin;
+        end = fieldsEnd;
+        generated = renderers.renderBakedSkillFieldsGo bakedSkills;
+      });
+    in
+    assert assertMsg (!spanResult.success)
+      "baked-skills-marker-guard: expected assertSpanOk to reject a synthetic file whose BEGIN GENERATED SKILL-BAKED PROBES marker is missing, but it evaluated successfully";
+    assert assertMsg (!goSpanResult.success)
+      "baked-skills-marker-guard: expected assertGoSpanGofmtOk to reject a synthetic file whose BEGIN GENERATED SKILL-BAKED FIELDS marker is missing, but it evaluated successfully";
+    pkgs.runCommand "baked-skills-marker-guard" { } "touch $out";
 }
