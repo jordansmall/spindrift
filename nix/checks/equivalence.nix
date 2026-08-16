@@ -615,6 +615,22 @@ in
           (mkRun {
             repository.repoSlug = "";
           }).moduleSpindrift;
+
+      # Capability-signal registry derivation (issue #2527 review fix): the
+      # four HOST_MEDIATED_REMOTE/OUTBOX_RELAY_CAPABLE/
+      # IN_BOX_UNREACHABLE_TRACKER/FULLY_LOCAL artifact keys mkHarness.nix
+      # derives from lib/backends/default.nix's codeForgeRow/issueTrackerRow
+      # lookup had no coverage exercising that lookup itself -- only
+      # runArtifacts (nix/checks/preambles.nix) with hand-written bool
+      # literals. defaultRun above (github/github, the schema default) pins
+      # one corner; this second run pins the opposite corner (local/local,
+      # the only backend with hostMediatedRemote/inBoxUnreachableTracker set)
+      # so the grep assertions below exercise the real registry rows, not
+      # a hand-picked bool.
+      localForgeAndTrackerRun = assertModuleMatchesDirect (mkRun {
+        repository.codeForge = "local";
+        issueDiscovery.issueTracker = "local";
+      });
     in
     assert assertMsg (
       !badIssueNumber.success
@@ -626,6 +642,7 @@ in
         behaviorDoc = behaviorRun.runInputDocumentFile;
         identityDoc = identityRun.runInputDocumentFile;
         defaultDoc = defaultRun.runInputDocumentFile;
+        localForgeAndTrackerDoc = localForgeAndTrackerRun.runInputDocumentFile;
       }
       ''
         grep -q '"MAX_FIX_ATTEMPTS":"5"' "$behaviorDoc" \
@@ -652,6 +669,30 @@ in
           || { echo "GIT_USER_EMAIL=bot@test.example not baked in the input document" >&2; exit 1; }
         grep -q '"REPO_SLUG":""' "$defaultDoc" \
           || { echo "REPO_SLUG must be empty in the document when not set; required validation must not be masked" >&2; exit 1; }
+
+        # Capability-signal registry derivation (issue #2527 review fix):
+        # github/github (the schema default, $defaultDoc) must resolve to
+        # lib/backends/default.nix's "github" row -- outboxRelayCapable
+        # only -- and local/local ($localForgeAndTrackerDoc) must resolve to
+        # its "local" row -- hostMediatedRemote and inBoxUnreachableTracker
+        # only, which is also the sole pairing where fullyLocal is true.
+        grep -q '"HOST_MEDIATED_REMOTE":"false"' "$defaultDoc" \
+          || { echo "HOST_MEDIATED_REMOTE must be false for CODE_FORGE=github, registry derivation broken?" >&2; exit 1; }
+        grep -q '"OUTBOX_RELAY_CAPABLE":"true"' "$defaultDoc" \
+          || { echo "OUTBOX_RELAY_CAPABLE must be true for CODE_FORGE=github, registry derivation broken?" >&2; exit 1; }
+        grep -q '"IN_BOX_UNREACHABLE_TRACKER":"false"' "$defaultDoc" \
+          || { echo "IN_BOX_UNREACHABLE_TRACKER must be false for ISSUE_TRACKER=github, registry derivation broken?" >&2; exit 1; }
+        grep -q '"FULLY_LOCAL":"false"' "$defaultDoc" \
+          || { echo "FULLY_LOCAL must be false for CODE_FORGE=github/ISSUE_TRACKER=github, registry derivation broken?" >&2; exit 1; }
+
+        grep -q '"HOST_MEDIATED_REMOTE":"true"' "$localForgeAndTrackerDoc" \
+          || { echo "HOST_MEDIATED_REMOTE must be true for CODE_FORGE=local, registry derivation broken?" >&2; exit 1; }
+        grep -q '"OUTBOX_RELAY_CAPABLE":"false"' "$localForgeAndTrackerDoc" \
+          || { echo "OUTBOX_RELAY_CAPABLE must be false for CODE_FORGE=local, registry derivation broken?" >&2; exit 1; }
+        grep -q '"IN_BOX_UNREACHABLE_TRACKER":"true"' "$localForgeAndTrackerDoc" \
+          || { echo "IN_BOX_UNREACHABLE_TRACKER must be true for ISSUE_TRACKER=local, registry derivation broken?" >&2; exit 1; }
+        grep -q '"FULLY_LOCAL":"true"' "$localForgeAndTrackerDoc" \
+          || { echo "FULLY_LOCAL must be true for CODE_FORGE=local/ISSUE_TRACKER=local, registry derivation broken?" >&2; exit 1; }
         touch $out
       '';
 
