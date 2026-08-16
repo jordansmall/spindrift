@@ -46,7 +46,7 @@ func Gates(e Env) map[string]bool {
 	// Issue-Tracker gate family (entrypoint.sh: 801-814, 816-860, 862-938):
 	// the tracker read/write/filer descriptor gates and the PR-body
 	// ticket-reference gates, computed in gates_tracker.go and merged in.
-	for k, v := range trackerGates(e, e.FilerEnabled, orchestrator) {
+	for k, v := range trackerGates(e, orchestrator) {
 		g[k] = v
 	}
 

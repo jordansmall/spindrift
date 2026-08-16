@@ -77,13 +77,16 @@ type Env struct {
 
 	// ReviewLoopInline and ReviewLoopOrchestrator are nix's precomputed
 	// equivalent of the REVIEW_LOOP_INLINE/REVIEW_LOOP_ORCHESTRATOR gates
-	// (entrypoint.sh: 771-779): exactly one is ever true, picked by
-	// OrchestratorEnabled alone -- ReviewLoopInline is
-	// !OrchestratorEnabled, ReviewLoopOrchestrator is OrchestratorEnabled
-	// verbatim. nix computes both directly from the same
-	// ORCHESTRATOR_ENABLED knob it already resolves OrchestratorEnabled
-	// from, rather than Gates negating/copying OrchestratorEnabled in-box
-	// (issue #2533).
+	// (entrypoint.sh: 771-779), picked by OrchestratorEnabled alone --
+	// ReviewLoopInline is !OrchestratorEnabled, ReviewLoopOrchestrator is
+	// OrchestratorEnabled verbatim. nix computes both directly from the
+	// same ORCHESTRATOR_ENABLED knob it already resolves OrchestratorEnabled
+	// from (lib/mkHarness.nix: reviewLoopInline = !orchestratorEnabled;
+	// reviewLoopOrchestrator = orchestratorEnabled), rather than Gates
+	// negating/copying OrchestratorEnabled in-box (issue #2533). nix
+	// guarantees exactly one is ever true; this package trusts that
+	// invariant rather than re-validating it -- nothing here rejects an
+	// Env with both true or both false.
 	ReviewLoopInline       bool // nix-resolved: !OrchestratorEnabled
 	ReviewLoopOrchestrator bool // nix-resolved: OrchestratorEnabled
 
