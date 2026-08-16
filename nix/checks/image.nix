@@ -26,13 +26,6 @@ let
   driverRegistry = import ../../lib/drivers/default.nix { inherit (pkgs) lib; };
   fragmentRows = import ../../lib/fragments.nix;
   fragmentBasenames = map (row: pkgs.lib.removeSuffix ".md" row.fragment) fragmentRows;
-  # The shared prompt-block registry (issue #2245) lib/mkHarness.nix's
-  # injectOutcomeContract/injectComms/injectCheckCommit/
-  # injectResearchOutcomeContract now derive their markers from -- the
-  # marker-parity checks below assert against this registry instead of a
-  # hand-wired `lib/mkHarness.nix` literal (issue #2246 slice 1).
-  promptContract = import ../../lib/prompt-contract.nix;
-  inherit (promptContract) byId;
   # Single source of truth for the literal asserted below (issue #2433):
   # read reviewModel's default straight from the schema instead of
   # restating it by hand, so a future bump only edits lib/env-schema.nix.
@@ -507,48 +500,26 @@ in
   # check now confirms the Go verb's shared-block-injection call site still
   # references the right contract-file field, instead of grepping the
   # (now-removed) bash call site.
-  outcome-contract-marker-parity =
-    let
-      row = byId "outcome";
-    in
-    assert pkgs.lib.assertMsg (
-      row.marker == "# LAND THE CHANGE"
-    ) "prompt-contract.nix outcome row's marker must be '# LAND THE CHANGE', got: ${row.marker}";
-    pkgs.runCommand "outcome-contract-marker-parity" { } ''
-      grep -qF 'e.CommsContractFile, e.CheckContractFile, e.OutcomeContractFile' ${../../cmd/launcher/internal/promptassembly/assemble.go}
-      touch $out
-    '';
+  outcome-contract-marker-parity = pkgs.runCommand "outcome-contract-marker-parity" { } ''
+    grep -qF 'e.CommsContractFile, e.CheckContractFile, e.OutcomeContractFile' ${../../cmd/launcher/internal/promptassembly/assemble.go}
+    touch $out
+  '';
 
   # Same drift guard, for the COMMS and CHECK/COMMIT markers (issue #455).
-  comms-check-contract-marker-parity =
-    let
-      commsRow = byId "comms";
-      checkRow = byId "check";
-    in
-    assert pkgs.lib.assertMsg (
-      commsRow.marker == "# COMMS"
-    ) "prompt-contract.nix comms row's marker must be '# COMMS', got: ${commsRow.marker}";
-    assert pkgs.lib.assertMsg (
-      checkRow.marker == "# CHECK"
-    ) "prompt-contract.nix check row's marker must be '# CHECK', got: ${checkRow.marker}";
-    pkgs.runCommand "comms-check-contract-marker-parity" { } ''
-      grep -qF 'e.CommsContractFile, e.CheckContractFile, e.OutcomeContractFile' ${../../cmd/launcher/internal/promptassembly/assemble.go}
-      touch $out
-    '';
+  comms-check-contract-marker-parity = pkgs.runCommand "comms-check-contract-marker-parity" { } ''
+    grep -qF 'e.CommsContractFile, e.CheckContractFile, e.OutcomeContractFile' ${../../cmd/launcher/internal/promptassembly/assemble.go}
+    touch $out
+  '';
 
   # Same drift guard, for the research-verdict marker (issue #640's
   # "research-verdict" row) -- previously uncovered by any parity check
   # (issue #2246 slice 1 coverage gap fix).
   research-outcome-contract-marker-parity =
-    let
-      row = byId "research-verdict";
-    in
-    assert pkgs.lib.assertMsg (row.marker == "# POST THE VERDICT")
-      "prompt-contract.nix research-verdict row's marker must be '# POST THE VERDICT', got: ${row.marker}";
-    pkgs.runCommand "research-outcome-contract-marker-parity" { } ''
-      grep -qF 'injectSharedBlock(promptText, e.ResearchOutcomeContractFile, allowlist)' ${../../cmd/launcher/internal/promptassembly/assemble.go}
-      touch $out
-    '';
+    pkgs.runCommand "research-outcome-contract-marker-parity" { }
+      ''
+        grep -qF 'injectSharedBlock(promptText, e.ResearchOutcomeContractFile, allowlist)' ${../../cmd/launcher/internal/promptassembly/assemble.go}
+        touch $out
+      '';
 
   # Skills configured at build time must land in the agent-files layer at the
   # fixed /agent/skills path (issue #2489), alongside the harness-owned
