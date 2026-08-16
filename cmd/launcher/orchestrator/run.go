@@ -2,8 +2,10 @@ package main
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"regexp"
@@ -269,7 +271,8 @@ func run(cfg config, stdout io.Writer) (int, error) {
 		// the box's own filesystem is destroyed with the container
 		// regardless.
 		var seededPromptFile string
-		rc, seededPromptFile, err = seedAndInvokePass(cfg, state, prevSeededPromptFile, pass, stdout)
+		var preStat *passSummarySnapshot
+		rc, seededPromptFile, preStat, err = seedAndInvokePass(cfg, state, prevSeededPromptFile, pass, stdout)
 		if err != nil {
 			return 0, err
 		}
@@ -281,7 +284,7 @@ func run(cfg config, stdout io.Writer) (int, error) {
 		if cfg.scoutBriefPath != "" {
 			state.ScoutBriefPath = cfg.scoutBriefPath
 		}
-		recordPassSummary(cfg, &state)
+		recordPassSummary(cfg, &state, preStat)
 		// driver-exec (re-)creates cfg.logPath fresh for this one pass
 		// (issue #626's run.go: os.Create truncates), so by the time it
 		// returns the file holds exactly this pass's own raw stream -- the
@@ -372,7 +375,8 @@ func runWithReviewPass(cfg config, stdout io.Writer) (int, error) {
 		fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "pass_start", Pass: pass, Role: passKind.String()}))
 
 		var seededPromptFile string
-		rc, seededPromptFile, err = seedAndInvokePass(cfg, state, prevSeededPromptFile, pass, stdout)
+		var preStat *passSummarySnapshot
+		rc, seededPromptFile, preStat, err = seedAndInvokePass(cfg, state, prevSeededPromptFile, pass, stdout)
 		if err != nil {
 			return 0, err
 		}
@@ -381,7 +385,7 @@ func runWithReviewPass(cfg config, stdout io.Writer) (int, error) {
 		if cfg.scoutBriefPath != "" {
 			state.ScoutBriefPath = cfg.scoutBriefPath
 		}
-		recordPassSummary(cfg, &state)
+		recordPassSummary(cfg, &state, preStat)
 		// Verdict authority belongs solely to the review pass below under
 		// this loop -- an implement/fix pass's own prompt has the
 		// self-review loop stripped, so its log is scanned only for
@@ -867,25 +871,50 @@ func invokeDriverExec(cfg config, stdout io.Writer) (int, error) {
 	return 0, nil
 }
 
+// passSummarySnapshot is the mtime+size seedAndInvokePass captures for
+// cfg.passSummaryPath immediately before invoking a pass it deliberately
+// left the file on disk for (state.PassSummaryPath != "" going in -- see
+// seedAndInvokePass's own doc comment); recordPassSummary compares this
+// against the same file's post-pass stat to tell "this pass wrote a fresh
+// summary" apart from "this pass never touched the file at all". nil when
+// seedAndInvokePass took the other branch (nothing to snapshot).
+type passSummarySnapshot struct {
+	modTime time.Time
+	size    int64
+}
+
 // recordPassSummary records cfg.passSummaryPath into state.PassSummaryPath
-// only when this pass's own invocation actually left a file there, verified
-// via os.Stat -- seedAndInvokePass's own guard only unlinks a leftover file
-// when state.PassSummaryPath was already "" going into this pass (nothing
-// this round referenced it), so a killed-mid-turn pass, or one that simply
-// never wrote a summary, can still leave the path missing here; the state
-// must not seed the next pass with a reference to a summary that doesn't
-// exist. An empty cfg.passSummaryPath means the caller didn't supply one
-// this pass, not that the prior path is now unknown, so it leaves the
-// carried-forward value alone rather than clobbering it with "". Shared by
-// run and runWithReviewPass, which otherwise duplicated this block
-// verbatim.
-func recordPassSummary(cfg config, state *runstate.RunState) {
+// only when this pass's own invocation actually left a fresh file there.
+// preStat is seedAndInvokePass's pre-pass snapshot of the same path (nil
+// when there was nothing to snapshot, i.e. no seeded reference was on disk
+// going into this pass) -- see passSummarySnapshot's doc comment for the
+// staleness check this enables. An empty cfg.passSummaryPath means the
+// caller didn't supply one this pass, not that the prior path is now
+// unknown, so it leaves the carried-forward value alone rather than
+// clobbering it with "". Only a stat error confirming the file is actually
+// absent (fs.ErrNotExist) clears state.PassSummaryPath -- any other stat
+// error (EACCES, EIO, ELOOP, ...) is not evidence the pass wrote nothing, so
+// it leaves the carried-forward value alone the same as an empty
+// cfg.passSummaryPath does (non-blocking review finding on an earlier
+// version of this function, issue #2549). When the post-pass file exists
+// but its mtime and size exactly match preStat, this pass never touched
+// it -- treated the same as "pass wrote nothing" rather than re-affirming a
+// now-stale summary from an earlier pass (a second non-blocking review
+// finding, issue #2549). Shared by run and runWithReviewPass, which
+// otherwise duplicated this block verbatim.
+func recordPassSummary(cfg config, state *runstate.RunState, preStat *passSummarySnapshot) {
 	if cfg.passSummaryPath == "" {
 		return
 	}
-	if _, statErr := os.Stat(cfg.passSummaryPath); statErr == nil {
+	info, statErr := os.Stat(cfg.passSummaryPath)
+	switch {
+	case statErr == nil:
+		if preStat != nil && info.ModTime().Equal(preStat.modTime) && info.Size() == preStat.size {
+			state.PassSummaryPath = ""
+			return
+		}
 		state.PassSummaryPath = cfg.passSummaryPath
-	} else {
+	case errors.Is(statErr, fs.ErrNotExist):
 		state.PassSummaryPath = ""
 	}
 }
@@ -898,32 +927,36 @@ func recordPassSummary(cfg config, state *runstate.RunState) {
 // after it sessionless, invokes driver-exec, and conditionally clears
 // cfg.passSummaryPath -- only when state.PassSummaryPath == "" going in
 // (nothing this round references it), matching recordPassSummary's own
-// guard for interpreting whatever file is left behind afterward. Returns
-// the pass's exit code and its own seeded prompt file, for the caller to
-// track as its next prevSeededPromptFile. Shared by run's legacy single
-// loop and runWithReviewPass's implement/fix pass -- the one piece of
-// per-pass bookkeeping identical between them; each keeps its own
-// scan-and-decide logic afterward, since a legacy pass's own verdict
-// drives its loop while an implement/fix pass's does not.
-func seedAndInvokePass(cfg config, state runstate.RunState, prevSeededPromptFile string, pass int, stdout io.Writer) (rc int, seededPromptFile string, err error) {
+// guard for interpreting whatever file is left behind afterward. When
+// state.PassSummaryPath != "" instead, the file is deliberately left alone
+// (this pass's own seeded prompt just told the agent to read it -- removing
+// it here would delete the file out from under that reference before the
+// agent gets to read it) but its pre-pass mtime+size is snapshotted into the
+// returned preStat, so the caller's post-pass recordPassSummary call can
+// tell a pass that left the file completely untouched apart from a
+// crashed/no-op one (passSummarySnapshot's doc comment has the full
+// staleness-detection rationale, issue #2549). Returns the pass's exit
+// code, its own seeded prompt file for the caller to track as its next
+// prevSeededPromptFile, and preStat (nil when there was nothing to
+// snapshot). Shared by run's legacy single loop and runWithReviewPass's
+// implement/fix pass -- the one piece of per-pass bookkeeping identical
+// between them; each keeps its own scan-and-decide logic afterward, since a
+// legacy pass's own verdict drives its loop while an implement/fix pass's
+// does not.
+func seedAndInvokePass(cfg config, state runstate.RunState, prevSeededPromptFile string, pass int, stdout io.Writer) (rc int, seededPromptFile string, preStat *passSummarySnapshot, err error) {
 	seededPromptFile, err = seedPromptFromState(cfg.promptFile, state)
 	if err != nil {
-		return 0, "", err
+		return 0, "", nil, err
 	}
 	if prevSeededPromptFile != "" && prevSeededPromptFile != cfg.promptFile {
 		os.Remove(prevSeededPromptFile)
 	}
-	// Only clear a leftover file when nothing this round references it
-	// (state.PassSummaryPath == ""): a killed-mid-turn pass with nothing to
-	// report can otherwise leave cfg.passSummaryPath holding pure orphaned
-	// garbage from an even-earlier pass, which the post-pass os.Stat check
-	// in run/runWithReviewPass would then wrongly attribute as this pass's
-	// own fresh summary. When state.PassSummaryPath != "", this pass's own
-	// seeded prompt (via seedPromptFromState above) just told the agent to
-	// read this exact file -- removing it here would delete the file out
-	// from under that reference before the agent ever gets to read it.
-	if cfg.passSummaryPath != "" && state.PassSummaryPath == "" {
-		os.Remove(cfg.passSummaryPath)
+	if cfg.passSummaryPath != "" {
+		if state.PassSummaryPath == "" {
+			os.Remove(cfg.passSummaryPath)
+		} else if info, statErr := os.Stat(cfg.passSummaryPath); statErr == nil {
+			preStat = &passSummarySnapshot{modTime: info.ModTime(), size: info.Size()}
+		}
 	}
 
 	passCfg := cfg
@@ -933,7 +966,7 @@ func seedAndInvokePass(cfg config, state runstate.RunState, prevSeededPromptFile
 	}
 
 	rc, err = invokeDriverExec(passCfg, stdout)
-	return rc, seededPromptFile, err
+	return rc, seededPromptFile, preStat, err
 }
 
 // buildDriverExecCmd resolves driver-exec on PATH and returns it invoked with
