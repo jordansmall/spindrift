@@ -5,13 +5,15 @@
 # (issue #2246), plus (below) the registry of markers a Box's own output is
 # expected to emit (validateMarkers, consumed by
 # cmd/launcher/internal/promptassembly's Validate function, issue #2405).
-# This file diffs each registry's canonicalText against a from-scratch
-# slice of the actual source .md files on disk, and asserts cross-row
-# invariants (e.g. every forbiddenMarkers row's severity/carrier/message
-# shape, every buildTimeRejectVerdicts branch) so a future consumer can't
-# silently break real behavior -- it no longer pins either registry's row
-# count, row order, or per-row literal field values, since those can only
-# ever fail on a deliberate data edit, not a real behavioral bug.
+# This file diffs each injectBlocks row's canonicalText against a
+# from-scratch slice of the actual source .md files on disk, and asserts
+# cross-row invariants across injectBlocks, validateMarkers,
+# forbiddenMarkers, and outcomeStatusSets (e.g. every forbiddenMarkers
+# row's severity/carrier/message shape, every buildTimeRejectVerdicts
+# branch) so a future consumer can't silently break real behavior -- it no
+# longer pins any of these registries' row count, row order, or per-row
+# literal field values, since those can only ever fail on a deliberate
+# data edit, not a real behavioral bug.
 { pkgs, ... }:
 let
   promptContract = import ../../lib/prompt-contract.nix;
@@ -305,7 +307,5 @@ in
     in
     assert assertMsg (out == expected)
       "outcomeStatusSets' research row's statuses must equal lib/research-verdicts.nix's defaultVerdicts' verdict tokens (in order) plus \"blocked\", got: [${concatStringsSep ", " out}]";
-    assert assertMsg (out == [ "recommend" "reject" "unclear" "blocked" ])
-      "outcomeStatusSets' research row's statuses must equal [recommend, reject, unclear, blocked] for the built-in default verdict set, got: [${concatStringsSep ", " out}]";
     pkgs.runCommand "prompt-contract-outcome-status-sets-research-row-derives-from-verdict-registry" { } "touch $out";
 }
