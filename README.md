@@ -81,13 +81,19 @@ nix flake init -t github:jordansmall/spindrift
 ```
 
 That drops a ready-to-edit starter: a `flake.nix` importing the harness (with
-a commented `forge.repoSlug` you uncomment and fill in), a
-`prompts/` directory, a `harness.env.example` (secrets only — see
-[Runtime configuration](docs/reference.md#runtime-configuration)), and a
-`.gitignore` for `harness.env`. Then:
+a fully-commented `forge = { ... };` block you uncomment and set `repoSlug`
+inside), a `prompts/` directory, a `skills/` directory with `auto-format` and
+`auto-lint` `SKILL.md` dirs (editable starter copies of the same
+harness-owned skills baked into every image regardless of the Consumer's own
+`skills` option), a `harness.env.example` (secrets only — see [Runtime
+configuration](docs/reference.md#runtime-configuration)), an `.envrc` (a
+`use flake` direnv file), and a `.gitignore` covering the Nix build output
+(`result`/`result-*`), `harness.env`, `.spindrift/`, `.direnv/`, the
+container-fallback build artifacts (`.spindrift-image.tar`,
+`.spindrift-image-path`), and `.DS_Store`. Then:
 
 ```sh
-$EDITOR flake.nix                        # set forge.repoSlug; tune toolchain/packages
+$EDITOR flake.nix                        # uncomment forge = { ... }; and set repoSlug; tune toolchain/packages
 $EDITOR prompts/issue-prompt.md          # tune the agent's workflow
 cp harness.env.example harness.env       # fill in GH_TOKEN, Claude auth (secrets only)
 
