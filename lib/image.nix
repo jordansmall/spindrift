@@ -9,132 +9,107 @@
 # reformatted. The context-discarded store-path trick that lets darwin build
 # launchers without a Linux builder stays on the mkHarness side, applied to
 # this module's outputs.
+#
+# The parameters below (issue #2530) are grouped into six attrsets — the
+# package-set pair, the driver entry, the resolved agents, the contract
+# files, the prompt tree, and the knob subset the image consumes — instead
+# of one loose parameter per value; `pkgs` and `lib` stay top-level as
+# module plumbing, not Consumer/mkHarness state. This stays a pure
+# signature refactor: mkHarness threads the same already-computed values in
+# through the groups below, and the `let` block right after immediately
+# destructures each group back to the bare names the (unchanged) body
+# refers to throughout.
 {
   pkgs,
   lib,
-  # Project-specific tools baked into the image on top of the harness plumbing,
-  # as a function of the (Linux) pkgs — the Consumer's language/toolchain surface.
-  packages,
-  # Optional shell snippet the entrypoint runs after cloning, to warm toolchain
-  # caches (e.g. fetch pinned deps). Baked into the image; default is a no-op.
-  prefetch,
-  nixInBox,
-  nixStoreWritable,
-  # Whether ISSUE_TRACKER or CODE_FORGE selects the forgejo backend; bakes fj
-  # (forgejo-cli) into the image when true, absent otherwise (issue #1963).
-  forgejoBackend ? false,
-  # Extra derivations whose closures are baked into the image contents and,
-  # when nixInBox is on, registered in the store DB alongside the runtime
-  # closure — so in-box nix sees them as already present instead of
-  # cold-substituting the world on every Box. A function of the (Linux) pkgs,
-  # like `packages`, so Consumer-supplied derivations stay correct on a
-  # darwin host. A generic Consumer knob, not a spindrift special case
-  # (issue #469).
-  extraClosures,
-  # The selected Driver's in-box half (ADR 0009): invocation binary/flags,
-  # skill wiring, and outcome extraction.
-  driverEntry,
-  # The OCI image name, scoped to the selected Driver (issue #262 AC1):
-  # "spindrift" for the default claude Driver, "spindrift-<driver>" otherwise.
-  # The buildLayeredImage name below, so `driver = "opencode"` realises a
-  # distinct spindrift-opencode artifact.
-  imageName,
-  # In-box Driver runner (#626), built for Linux by mkHarness: runs one
-  # Driver invocation direct or inside the devShell, tees the stream, and
-  # filters heartbeats in-process (absorbing the former standalone
-  # spindrift-heartbeat-filter binary, #183).
-  driverExecBin,
-  # In-box orchestrator (#1996), built for Linux by mkHarness: the binary
-  # entrypoint.sh hands the implementor pass off to instead of driver-exec
-  # when ORCHESTRATOR_ENABLED is set; forwards to driverExecBin itself for
-  # this tracer-bullet slice's single-pass loop.
-  orchestratorBin,
-  # --agents JSON, rendered by the selected Driver (ADR 0009).
-  agentsJsonTemplate,
-  # Nix-baked map (name -> prompt file basename under agent/prompts, JSON
-  # string) from the roster (issue #264): drives entrypoint.sh's generic
-  # per-agent prompt injection loop, so a custom Nth agent's prompt resolves
-  # the same way as the four built-in names.
-  agentsPromptFilesJson,
-  # Custom roster entries with their own prompt (issue #264): a list of
-  # { promptFile; prompt; } to bake under agent/prompts/, alongside the four
-  # fixed prompt files below (which are always baked regardless of roster).
-  customRosterPromptFiles,
-  # On-disk subagent files (AC4), rendered by the selected Driver: an attrset
-  # mapping a HOME-relative path to its file content. A Driver with no
-  # on-disk agent-config mechanism (claude.nix) supplies { }, so this bakes
-  # nothing for it -- byte-identical to the image before this attribute
-  # existed.
-  driverAgentFiles,
-  # The Driver's in-box half rendered into agent/entrypoint.sh's
-  # ${DRIVER_*:-<default>} vars and the Driver function definitions.
-  driverPreamble,
-  # The Conditional fragment registry (issue #622) rendered into
-  # agent/entrypoint.sh's _FRAGMENT_ROWS loop input and _FRAGMENT_SUBST_VARS
-  # substitution allowlist.
-  fragmentRegistryPreamble,
-  # The same Conditional fragment registry as JSON (issue #2354): baked into
-  # the image at $out/agent/fragments-registry.json for the Go
-  # `driver-exec assemble-prompt` verb's `--registry` flag -- a sibling of
-  # fragmentRegistryPreamble above, not a replacement for it.
-  fragmentsRegistryJson,
-  # lib/prompt-contract.nix's validateMarkers list as JSON (issue #2356):
-  # baked into the image at $out/agent/prompt-contract-registry.json for the
-  # Go `driver-exec assemble-prompt` verb's `--validate-markers-registry`
-  # flag -- a sibling of fragmentsRegistryJson above.
-  promptContractRegistryJson,
-  # lib/prompt-contract.nix's forbiddenMarkers list as JSON (issue #2464):
-  # baked into the image at $out/agent/forbidden-markers-registry.json for
-  # the Go `driver-exec readonly-guards` verb's
-  # `--forbidden-markers-registry` flag (issue #2513: assemble-prompt no
-  # longer takes this flag) -- a sibling of promptContractRegistryJson
-  # above.
-  forbiddenMarkersRegistryJson,
-  # The schema-derived defaults block (mkHarness's `renderDefaultsPreamble { }`),
-  # prepended to the entrypoint so it carries the baked values without
-  # hardcoding them in the source script.
-  entrypointDefaultsPreamble,
-  # The agent prompt template, a Consumer-owned artifact, and the subagent
-  # system prompts.
-  prompt,
-  scoutPrompt,
-  reviewPrompt,
-  filerPrompt,
-  workerPrompt,
-  conflictResolvePrompt,
-  fixPrompt,
-  # Driven instead of `prompt` when DISPATCH_KIND=research (ADR 0022, issue #640).
-  researchPrompt,
-  # Driven instead of `researchPrompt` when the research dispatch runs in its
-  # self-contained sub-mode (ADR 0022, issue #2202): no repo, no clone.
-  researchSelfContainedPrompt,
-  # The SPINDRIFT_OUTCOME / COMMS / CHECK-COMMIT shared blocks (issues #419,
-  # #455) and their injectors, sliced from issue-prompt.md by mkHarness so the
-  # host-side contract files (which stay in mkHarness) cannot drift from what
-  # gets baked here.
-  outcomeContract,
-  commsBlock,
-  checkBlock,
-  # The research dispatch kind's own outcome contract (issue #640), sliced
-  # from research-prompt.md the same way.
-  researchOutcomeContract,
-  injectOutcomeContract,
-  injectFixSharedBlocks,
-  injectResearchOutcomeContract,
-  # The conditional prompt fragments directory (issue #463).
-  fragmentsSourceDir,
-  # Skills baked into the image at /home/agent/.claude/skills. Each element is
-  # baked as a `<name>/SKILL.md` directory — Claude Code discovers skills only
-  # as directories, never flat `<name>.md` files. A { name; src; } content
-  # entry (issue #597) supplies the skill name and SKILL.md body, realized with
-  # this (image) pkgs; a path or derivation is a skill directory copied under
-  # its own basename.
-  skills,
+  # The Consumer's package set: project-specific tools baked into the image
+  # on top of the harness plumbing (`packages`), and extra derivations whose
+  # closures are baked into the image contents and, when nixInBox is on,
+  # registered in the store DB alongside the runtime closure (`extraClosures`,
+  # issue #469). Both are functions of the (Linux) pkgs, so a darwin-host
+  # Consumer's packages/closures stay correct.
+  packageSet,
+  # The selected Driver's in-box half (ADR 0009): the driver entry
+  # (invocation binary/flags, skill wiring, outcome extraction), the in-box
+  # Driver runner (#626), the in-box orchestrator (#1996), the Driver's
+  # entrypoint.sh preamble, and its on-disk subagent files (AC4).
+  driver,
+  # The resolved agent roster: --agents JSON (ADR 0009), the per-agent
+  # prompt-file map (issue #264), custom roster entries with their own
+  # inline prompt (issue #264), and the skills baked at
+  # /home/agent/.claude/skills (issue #597).
+  agents,
+  # The contract files sliced from issue-prompt.md / research-prompt.md by
+  # mkHarness (issues #419, #455, #640) and their injectors, plus the
+  # fragment/prompt-contract/forbidden-markers registries baked as JSON for
+  # the Go `driver-exec` verbs (issues #2354, #2356, #2464).
+  contracts,
+  # The prompt tree: the Consumer's agent prompt template and the subagent
+  # system prompts, the research prompts (ADR 0022, issues #640, #2202), the
+  # conditional fragments source dir (issue #463), and the fragment
+  # registry's entrypoint.sh preamble (issue #622).
+  prompts,
+  # The knob subset the image consumes: nix-in-box / writable-store wiring
+  # (ADR 0018), the forgejo-backend selector (issue #1963), the prefetch
+  # snippet, the Driver-scoped image name (issue #262 AC1), and the
+  # schema-derived entrypoint defaults preamble.
+  knobs,
 }:
 let
   # The baked-skill name list (issue #2532), single-sourced for harnessSkills
   # below so a skill's name is never hand-typed a second time here.
   bakedSkills = import ./baked-skills.nix;
+  inherit (packageSet) packages extraClosures;
+  inherit (driver)
+    driverEntry
+    driverExecBin
+    orchestratorBin
+    driverPreamble
+    driverAgentFiles
+    ;
+  inherit (agents)
+    agentsJsonTemplate
+    agentsPromptFilesJson
+    customRosterPromptFiles
+    skills
+    ;
+  inherit (contracts)
+    fragmentsRegistryJson
+    promptContractRegistryJson
+    forbiddenMarkersRegistryJson
+    outcomeContract
+    commsBlock
+    checkBlock
+    researchOutcomeContract
+    injectOutcomeContract
+    injectFixSharedBlocks
+    injectResearchOutcomeContract
+    ;
+  inherit (prompts)
+    prompt
+    scoutPrompt
+    reviewPrompt
+    filerPrompt
+    workerPrompt
+    conflictResolvePrompt
+    fixPrompt
+    researchPrompt
+    researchSelfContainedPrompt
+    fragmentsSourceDir
+    fragmentRegistryPreamble
+    ;
+  inherit (knobs)
+    nixInBox
+    nixStoreWritable
+    prefetch
+    imageName
+    entrypointDefaultsPreamble
+    ;
+  # Whether ISSUE_TRACKER or CODE_FORGE selects the forgejo backend; bakes fj
+  # (forgejo-cli) into the image when true, absent otherwise (issue #1963).
+  # Kept as an `or false` default, as the pre-grouping parameter carried,
+  # even though mkHarness's call site always supplies it explicitly.
+  forgejoBackend = knobs.forgejoBackend or false;
 
   # Drop a leading `#!...` line so a complete, standalone-runnable script can be
   # fed to writeShellApplication as its body (it supplies its own shebang).
