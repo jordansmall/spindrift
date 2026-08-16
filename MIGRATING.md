@@ -83,6 +83,28 @@ at 1.0. The env-var names are unchanged. The primary flake surface is the domain
 tree under `perSystem.spindrift.*` (see `docs/flake-options.md`); the
 `settings.<section>.*` paths above remain as deprecated aliases until 1.0.
 
+## `REVIEW_EFFORT` dispatch-time override removed (issue #2512)
+
+`REVIEW_EFFORT` (`--review-effort` / `perSystem.spindrift.agents.models.reviewEffort`)
+no longer takes effect as a live, per-dispatch Box-runtime override —
+`REVIEW_EFFORT=xhigh spindrift dispatch ...` (or `--review-effort xhigh`) is
+now a silent no-op against an already-built image. The knob now has the same
+shape `REVIEW_MODEL` already has: it only sets the roster `reviewer` entry's
+effort at nix build time, baked into the image before dispatch, which the
+orchestrator's code-owned review pass then reads via the prompt-assembly
+Handoff. Set `perSystem.spindrift.agents.models.reviewEffort` in your
+Consumer flake (or the roster's `reviewer` entry directly) and rebuild
+(`spindrift build`) instead.
+
+Under `DRIVER=opencode` specifically, the review pass's effort now always
+falls back to the coordinator's own `--effort`: opencode's `agentsJsonTemplate`
+never renders a `reviewer` key, so there is no roster value for the Handoff
+to extract — the same fallback `REVIEW_MODEL` already has on that Driver.
+
+| Removed capability | Replacement |
+|---|---|
+| Dispatch-time `REVIEW_EFFORT=...` / `--review-effort ...` override | `perSystem.spindrift.agents.models.reviewEffort` in your Consumer flake (image rebuild required) |
+
 ## `nix run .#run` / `nix run .#build` (removed in v0.5.0)
 
 spindrift 0.1.1 introduced a unified CLI. The `nix run .#run` and `nix run
