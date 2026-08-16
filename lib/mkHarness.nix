@@ -477,9 +477,11 @@ let
   # linear-backoff leaf that verb's push retry rides),
   # internal/promptassembly (issue #2349's assemble-prompt verb: the pure
   # gate computation, fragment registry loader, and prompt assembly logic
-  # that mirrors agent/entrypoint.sh's phase_prompt_assembly), and
+  # that mirrors agent/entrypoint.sh's phase_prompt_assembly),
   # internal/runstate (issue #2505's shared RunState type/read/write,
-  # imported by outcomebackstop's readLastVerdict) only, with *_test.go
+  # imported by outcomebackstop's readLastVerdict), and internal/markergate
+  # (issue #2511's marker-gate verb: the outcome/pr-intent required-marker
+  # gate's nudge-prompt/resolve decision logic) only, with *_test.go
   # excluded. If a new import is added outside this closure the build fails
   # loudly (missing package) — that is the intended failure mode (#474).
   driverExecBin = pkgs.buildGoModule {
@@ -529,6 +531,9 @@ let
         (lib.fileset.fileFilter (
           f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
         ) ../cmd/launcher/internal/runstate)
+        (lib.fileset.fileFilter (
+          f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
+        ) ../cmd/launcher/internal/markergate)
       ];
     };
     # Same go.mod/go.sum as launcherBin above, but NOT the same vendorHash:
