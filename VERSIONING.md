@@ -17,7 +17,7 @@ require a version bump per the policy below.
 | **CLI verbs** | `spindrift dispatch`, `spindrift build`, `spindrift preview` — verb names, flag names, exit codes |
 | **Flake options** | `perSystem.spindrift.*` and all named parameters of `mkHarness` |
 | **`env-schema.nix` variable names** | Every `SPINDRIFT_*` environment variable name listed in `lib/env-schema.nix` |
-| **Label lifecycle names** | Triage: `ready-for-agent`, `agent-in-progress`, `agent-complete`, `agent-failed`. Research: `agent-research`, `agent-research-in-progress`, `agent-research-recommend`, `agent-research-reject`, `agent-research-unclear`, `agent-research-failed`. Priority: `agent-priority-critical`, `agent-priority-high`, `agent-priority-low`. |
+| **Label lifecycle names** | Triage: `ready-for-agent`, `agent-in-progress`, `agent-complete`, `agent-failed`. Research: `agent-research`, `agent-research-in-progress`, `agent-research-recommend`, `agent-research-reject`, `agent-research-unclear`, `agent-research-failed`. Priority: `agent-priority-critical`, `agent-priority-high`, `agent-priority-low`. Ambiguous-spec: `agent-ambiguous-spec`. |
 
 "Flake options" covers `mkHarness`'s named *parameters* only, not the shape of
 its return value beyond `{ image, spindrift, packages, apps }`: the
