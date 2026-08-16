@@ -26,6 +26,12 @@ Read first (run these yourself):
 
 Judge relevance from the issue content alone — there is no repo to explore.
 
+Render exactly one of these verdicts:
+
+- `recommend` — relevant, now enriched with real context; promote it.
+- `reject` — false positive, not worth doing, or a duplicate. Name the duplicate issue by number in your rationale; duplicate is a reason under `reject`, not a separate verdict.
+- `unclear` — relevance can't be determined without a human's answer.
+
 # POST THE VERDICT
 
 Post exactly ONE comment on the issue (`gh issue comment 7
@@ -34,7 +40,7 @@ Post exactly ONE comment on the issue (`gh issue comment 7
 
 Structure the verdict in this order:
 
-1. **Verdict** — `<RESEARCH_VERDICT_ENUM>`, plus a one-line rationale.
+1. **Verdict** — `recommend` / `reject` / `unclear`, plus a one-line rationale.
 2. **Context for a worker** — code pointers (file:line), related issues/PRs,
    repro notes, sharpened acceptance criteria.
 3. **Open questions** — mandatory when the verdict is `unclear`: the concrete
