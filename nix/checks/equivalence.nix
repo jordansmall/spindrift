@@ -461,10 +461,14 @@ in
   # declaration as the domain-tree entries, not hand-copied — the shim's
   # description is a one-line auto-generated rename pointer (not the
   # domain-tree option's own doc text, which was the pre-#2522 verbatim
-  # copy). Pins the generated shape via one representative knob (driver) so a
-  # future hand-copy regression is caught at eval time.
+  # copy). Pins the generated shape across all 13 structural knobs (not just
+  # one representative) so a future hand-copy regression on any of them is
+  # caught at eval time; expected strings are derived from
+  # lib/structural-paths.nix, the same source oldFlatShims itself generates
+  # from, rather than hand-copied here too.
   flakemodule-legacy-shim-description-generated =
     let
+      inherit (pkgs.lib) assertMsg attrNames concatStringsSep;
       eval =
         flake-parts.lib.evalFlakeModule
           {
@@ -479,15 +483,20 @@ in
             systems = [ system ];
             imports = [ ../../lib/flakeModule.nix ];
           };
-      actual = (eval.options.perSystem.type.getSubOptions [ "perSystem" ]).spindrift.driver.description;
-      expected = "perSystem.spindrift.driver is deprecated; use perSystem.spindrift.agents.driver.";
+      subOptions = (eval.options.perSystem.type.getSubOptions [ "perSystem" ]).spindrift;
+      structuralPlacements = import ../../lib/structural-paths.nix;
+      expectedDescription =
+        flatName:
+        "perSystem.spindrift.${flatName} is deprecated; use perSystem.spindrift.${
+          concatStringsSep "." structuralPlacements.${flatName}
+        }.";
+      mismatches = pkgs.lib.filter (
+        flatName: subOptions.${flatName}.description != expectedDescription flatName
+      ) (attrNames structuralPlacements);
     in
-    pkgs.runCommand "flakemodule-legacy-shim-description-generated" { } (
-      if actual == expected then
-        "touch $out"
-      else
-        throw "oldFlatShims.driver.description mismatch: got `${actual}`, want `${expected}`"
-    );
+    assert assertMsg (mismatches == [ ])
+      "oldFlatShims description mismatch (hand-copy regression) for: ${concatStringsSep ", " mismatches}";
+    pkgs.runCommand "flakemodule-legacy-shim-description-generated" { } "touch $out";
 
   # Promoted operator-tunable knobs (issue #353): the 13 newly consumer-tunable
   # knobs appear under their correct settings section and bake the expected
