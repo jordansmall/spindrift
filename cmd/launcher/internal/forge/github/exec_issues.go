@@ -421,9 +421,11 @@ func (e *execClient) Snapshot(num string) (string, error) {
 		"--repo", e.repo,
 		"--json", "body,comments",
 	)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
 	out, err := cmd.Output()
 	if err != nil {
-		return "", fmt.Errorf("gh issue view %s: %w", num, err)
+		return "", fmt.Errorf("gh issue view %s: %w: %s", num, err, strings.TrimSpace(stderr.String()))
 	}
 	var raw struct {
 		Body     string `json:"body"`

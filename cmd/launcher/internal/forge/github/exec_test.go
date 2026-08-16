@@ -1488,3 +1488,26 @@ esac`, comments.String()))
 		t.Errorf("Snapshot() = %q, want chronological order (%s before user12)", got, wantOrder)
 	}
 }
+
+// TestExecClient_Snapshot_GenuineFailureSurfaced verifies that a real `gh
+// issue view` failure is returned as an error rather than swallowed — this
+// is the failure path dispatch's writeIssueSnapshot wraps as a quarantineErr
+// (issue #2547), so a masked failure here would silently change retry
+// behavior.
+func TestExecClient_Snapshot_GenuineFailureSurfaced(t *testing.T) {
+	prependFakeGH(t, `case "$*" in
+*"issue view"*)
+	printf 'HTTP 403: Resource not accessible by integration\n' >&2
+	exit 1
+	;;
+esac`)
+
+	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	_, err := c.Snapshot("10")
+	if err == nil {
+		t.Fatal("want error, got nil")
+	}
+	if !strings.Contains(err.Error(), "403") {
+		t.Errorf("error must surface gh's stderr, got: %v", err)
+	}
+}

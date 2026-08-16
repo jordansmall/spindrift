@@ -694,6 +694,26 @@ func TestForgejoClient_CloseMergedIssue_GenuineFailureSurfaced(t *testing.T) {
 	}
 }
 
+// TestForgejoClient_Issue_GenuineFailureSurfaced verifies that a real
+// GET-issue failure is returned as an error rather than swallowed —
+// TouchesOf, DepsOf, CloseMergedIssue, and Snapshot all build on Issue, so a
+// masked failure here would silently corrupt every one of them.
+func TestForgejoClient_Issue_GenuineFailureSurfaced(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	fc := forgejo.NewForgejoClient(forgejo.ForgejoConfig{BaseURL: srv.URL, Repo: "owner/repo", Token: "tok"})
+	_, err := fc.Issue("42")
+	if err == nil {
+		t.Fatal("want error, got nil")
+	}
+	if !strings.Contains(err.Error(), "500") {
+		t.Errorf("error must surface the unexpected status, got: %v", err)
+	}
+}
+
 // TestForgejoClient_ImplementsSnapshotReader verifies the forgejo adapter
 // satisfies forge.SnapshotReader (issue #2547) — forgejo has a genuine
 // separate comments endpoint for Snapshot to call.
@@ -884,5 +904,62 @@ func TestForgejoClient_Snapshot_PaginatesAcrossMultiplePages(t *testing.T) {
 		if strings.Contains(got, unwanted) {
 			t.Errorf("Snapshot() = %q, want comment %q dropped (older than the last 10 across all pages)", got, unwanted)
 		}
+	}
+}
+
+// TestForgejoClient_Snapshot_PropagatesIssueFailure verifies that Snapshot
+// surfaces a genuine error from its underlying Issue call rather than
+// masking it — the failure path dispatch's writeIssueSnapshot wraps as a
+// quarantineErr (issue #2547), so a masked failure here would silently
+// change retry behavior.
+func TestForgejoClient_Snapshot_PropagatesIssueFailure(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/api/v1/repos/owner/repo/issues/10":
+			w.WriteHeader(http.StatusInternalServerError)
+		case r.URL.Path == "/api/v1/repos/owner/repo/issues/10/comments":
+			t.Error("Snapshot must not fetch comments when the issue fetch already failed")
+			w.Write([]byte(`[]`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	fc := forgejo.NewForgejoClient(forgejo.ForgejoConfig{BaseURL: srv.URL, Repo: "owner/repo", Token: "tok"}).(forge.SnapshotReader)
+	_, err := fc.Snapshot("10")
+	if err == nil {
+		t.Fatal("want error, got nil")
+	}
+	if !strings.Contains(err.Error(), "500") {
+		t.Errorf("error must surface the unexpected status, got: %v", err)
+	}
+}
+
+// TestForgejoClient_Snapshot_PropagatesCommentsFailure verifies that
+// Snapshot surfaces a genuine error from its underlying listComments walk
+// rather than masking it — the failure path dispatch's writeIssueSnapshot
+// wraps as a quarantineErr (issue #2547), so a masked failure here would
+// silently change retry behavior.
+func TestForgejoClient_Snapshot_PropagatesCommentsFailure(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/api/v1/repos/owner/repo/issues/10":
+			w.Write([]byte(`{"number":10,"title":"t","body":"the body","state":"open","labels":[]}`))
+		case r.URL.Path == "/api/v1/repos/owner/repo/issues/10/comments":
+			w.WriteHeader(http.StatusInternalServerError)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	fc := forgejo.NewForgejoClient(forgejo.ForgejoConfig{BaseURL: srv.URL, Repo: "owner/repo", Token: "tok"}).(forge.SnapshotReader)
+	_, err := fc.Snapshot("10")
+	if err == nil {
+		t.Fatal("want error, got nil")
+	}
+	if !strings.Contains(err.Error(), "500") {
+		t.Errorf("error must surface the unexpected status, got: %v", err)
 	}
 }
