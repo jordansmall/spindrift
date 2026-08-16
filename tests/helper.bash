@@ -252,31 +252,37 @@ setup_fakes() {
   # #433) -- AGENT_PATHS_PREAMBLE_FILE is the rendered fallback-default
   # preamble for the 8 baked /agent/* path literals (issue #2531), and
   # FRAGMENT_REGISTRY_FILE is the registry-rendered Conditional fragment
-  # loop input and substitution allowlist (issue #622): prepend all three to
-  # the entrypoint, in the same order lib/image.nix concatenates them into
-  # the real image, so the suite exercises the same bytes and data the image
-  # bakes in, not any hand-copied duplicates. The nix check derivation sets
-  # these; a bare bats run outside nix leaves ENTRYPOINT as-is
-  # (functions/registry undefined → tests fail, by design: use nix flake
-  # check).
-  if [ -n "${DRIVER_PREAMBLE_FILE:-}" ]; then
+  # loop input and substitution allowlist (issue #622): prepend whichever of
+  # the three are set to the entrypoint, in the same order lib/image.nix
+  # concatenates them into the real image, so the suite exercises the same
+  # bytes and data the image bakes in, not any hand-copied duplicates. Each
+  # file has its own independent guard below, so a suite that sets only one
+  # or two of the three still gets that subset prepended, instead of
+  # silently getting none because it didn't also set DRIVER_PREAMBLE_FILE.
+  # The nix check derivation sets these; a bare bats run outside nix leaves
+  # ENTRYPOINT as-is (functions/registry undefined → tests fail, by design:
+  # use nix flake check).
+  if [ -n "${DRIVER_PREAMBLE_FILE:-}" ] || [ -n "${AGENT_PATHS_PREAMBLE_FILE:-}" ] \
+    || [ -n "${FRAGMENT_REGISTRY_FILE:-}" ]; then
     local _wrapped="$BATS_TEST_TMPDIR/entrypoint.sh"
     {
-      cat "$DRIVER_PREAMBLE_FILE"
-      # Test-only override, appended after the registry-rendered preamble
-      # above rather than folded into it (issue #624): the baked
-      # DRIVER_SKILLS_DIR is the absolute /home/agent path a real Box always
-      # has, byte-identical to what mkHarness.nix bakes into the image, but
-      # a bats sandbox has no such directory to write into. Redirect it at
-      # this test's own $HOME instead, by stripping the baked /home/agent/
-      # prefix the line just above sets and re-rooting the same relative
-      # suffix under $HOME -- no second hand-copied ".claude/skills" here,
-      # just the one the registry already rendered. Written as literal
-      # unexpanded text so it resolves against whatever HOME setup_bare_repo
-      # below sets, not whatever HOME happens to be while this file is
-      # assembled.
-      # shellcheck disable=SC2016 # intentionally unexpanded -- written verbatim into $_wrapped
-      echo 'DRIVER_SKILLS_DIR="$HOME/${DRIVER_SKILLS_DIR#/home/agent/}"'
+      if [ -n "${DRIVER_PREAMBLE_FILE:-}" ]; then
+        cat "$DRIVER_PREAMBLE_FILE"
+        # Test-only override, appended after the registry-rendered preamble
+        # above rather than folded into it (issue #624): the baked
+        # DRIVER_SKILLS_DIR is the absolute /home/agent path a real Box
+        # always has, byte-identical to what mkHarness.nix bakes into the
+        # image, but a bats sandbox has no such directory to write into.
+        # Redirect it at this test's own $HOME instead, by stripping the
+        # baked /home/agent/ prefix the line just above sets and re-rooting
+        # the same relative suffix under $HOME -- no second hand-copied
+        # ".claude/skills" here, just the one the registry already
+        # rendered. Written as literal unexpanded text so it resolves
+        # against whatever HOME setup_bare_repo below sets, not whatever
+        # HOME happens to be while this file is assembled.
+        # shellcheck disable=SC2016 # intentionally unexpanded -- written verbatim into $_wrapped
+        echo 'DRIVER_SKILLS_DIR="$HOME/${DRIVER_SKILLS_DIR#/home/agent/}"'
+      fi
       if [ -n "${AGENT_PATHS_PREAMBLE_FILE:-}" ]; then
         cat "$AGENT_PATHS_PREAMBLE_FILE"
       fi
