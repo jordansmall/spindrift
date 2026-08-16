@@ -108,6 +108,11 @@ type config struct {
 	// (WorkerOptions.Timeout); <= 0 falls back to LaunchWorkers' own
 	// defaultWorkerTimeout.
 	workerTimeout time.Duration
+	// maxParallelWorkers caps how many dispatched workers LaunchWorkers runs
+	// concurrently (WorkerOptions.MaxParallel, issue #2495); <= 0 falls back
+	// to LaunchWorkers' own defaultMaxParallelWorkers. Only meaningful when
+	// workerPromptFile is set.
+	maxParallelWorkers int
 }
 
 // run loops driver-exec for as many passes as the implementor's own

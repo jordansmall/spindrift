@@ -47,6 +47,7 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 	workerPromptFile := fs.String("worker-prompt-file", "", "path to the parallel worker's own base prompt text; empty disables parallel worker dispatch")
 	workerWorkDir := fs.String("worker-work-dir", "/tmp/spindrift-workers", "directory holding each dispatched worker's own quarantined log/heartbeat/result/sentinel files")
 	workerTimeout := fs.Duration("worker-timeout", defaultWorkerTimeout, "per-worker join timeout for a parallel dispatch")
+	maxParallelWorkers := fs.Int("max-parallel-workers", defaultMaxParallelWorkers, "cap on how many manifest-dispatched workers LaunchWorkers runs concurrently")
 	if err := fs.Parse(argv); err != nil {
 		return 2
 	}
@@ -76,29 +77,30 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 	}
 
 	rc, err := run(config{
-		driver:           *driverName,
-		promptFile:       *promptFile,
-		agentsFile:       *agentsFile,
-		sessionFile:      *sessionFile,
-		driverBin:        *driverBin,
-		driverFlags:      *driverFlags,
-		model:            *model,
-		effort:           *effort,
-		devshell:         *devshell,
-		devshellName:     *devshellName,
-		issue:            *issue,
-		logPath:          *logPath,
-		heartbeatLog:     *heartbeatLog,
-		stateFile:        *stateFile,
-		scoutBriefPath:   *scoutBriefPath,
-		maxReviewRounds:  *maxReviewRounds,
-		maxSlices:        *maxSlices,
-		reviewPromptFile: *reviewPromptFile,
-		reviewModel:      *reviewModel,
-		reviewEffort:     *reviewEffort,
-		workerPromptFile: *workerPromptFile,
-		workerWorkDir:    *workerWorkDir,
-		workerTimeout:    *workerTimeout,
+		driver:             *driverName,
+		promptFile:         *promptFile,
+		agentsFile:         *agentsFile,
+		sessionFile:        *sessionFile,
+		driverBin:          *driverBin,
+		driverFlags:        *driverFlags,
+		model:              *model,
+		effort:             *effort,
+		devshell:           *devshell,
+		devshellName:       *devshellName,
+		issue:              *issue,
+		logPath:            *logPath,
+		heartbeatLog:       *heartbeatLog,
+		stateFile:          *stateFile,
+		scoutBriefPath:     *scoutBriefPath,
+		maxReviewRounds:    *maxReviewRounds,
+		maxSlices:          *maxSlices,
+		reviewPromptFile:   *reviewPromptFile,
+		reviewModel:        *reviewModel,
+		reviewEffort:       *reviewEffort,
+		workerPromptFile:   *workerPromptFile,
+		workerWorkDir:      *workerWorkDir,
+		workerTimeout:      *workerTimeout,
+		maxParallelWorkers: *maxParallelWorkers,
 	}, stdout)
 	if err != nil {
 		fmt.Fprintln(stderr, "orchestrator:", err)
