@@ -1360,10 +1360,11 @@ artifact, not a growing transcript:
 - **Run-state handoff.** A JSON file (`/tmp/run-state.json` by default,
   outside the repo like `/tmp/brief.md`) records the last reviewer verdict,
   the reviewer's own findings text, the scout-brief path (`--scout-brief-path`,
-  default `/tmp/brief.md`), and the most recent pass's own pass-summary path
-  (`--pass-summary-path`, default `/tmp/pass-summary.md`). It also carries
-  dispatch-internal bookkeeping unrelated to any seeded prompt: the
-  done/remaining slice lists
+  default `/tmp/brief.md`), the most recent pass's own pass-summary path
+  (`--pass-summary-path`, default `/tmp/pass-summary.md`), and the most
+  recent fix pass's own dispositions path (`--dispositions-path`, default
+  `/tmp/dispositions.md`, issue #2550). It also carries dispatch-internal
+  bookkeeping unrelated to any seeded prompt: the done/remaining slice lists
   (`DoneSlices`/`RemainingSlices`) issue #2059's parallel worker dedup
   mechanism reads and writes to avoid re-dispatching an already-completed
   slice. Each pass reads it before running and writes it back after, through
@@ -1376,6 +1377,13 @@ artifact, not a growing transcript:
   last verdict, reviewer findings, scout-brief path, pass-summary path — to
   the original prompt, so a fresh implementor pass knows where a prior pass
   left off without reading its transcript.
+- **Round-N review-prompt seeding.** A round-N (N>1) review pass gets its own,
+  narrower seeded section instead: its own prior verdict message plus the
+  fix pass's dispositions file content, both verbatim, framed as claims to
+  verify against the diff — nothing else from the implementor (no pass
+  summary, no scout brief, no worker findings) reaches this prompt. Round 1's
+  review prompt is always unseeded. A missing dispositions file degrades to
+  seeding the prior verdict alone, never an error.
 - **Code-owned caps.** `--max-review-rounds` (default 3) caps additional
   passes a `BLOCK` verdict may trigger; `--max-slices` (default 9) caps the
   implement/fix/review invocation count regardless of verdict; either set to
