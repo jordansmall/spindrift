@@ -1035,6 +1035,78 @@ in
       "mkHarness.nix must not throw when orchestratorEnabled is not statically true, even with a missing VERDICT: marker";
     pkgs.runCommand "build-time-reject-orchestrator-verdict-not-triggered" { } "touch $out";
 
+  # Build-time reject arm (issue #2495): mkHarness.nix's
+  # maxParallelWorkersCoherenceOk assert rejects a Consumer who explicitly
+  # sets MAX_PARALLEL_WORKERS while ORCHESTRATOR is off -- the orchestrator's
+  # slice-manifest worker dispatch this knob caps never runs without
+  # ORCHESTRATOR on, so baking the knob in that config would be inert.
+  # orchestratorEnabled is explicit `false` here (not merely omitted) to
+  # prove the check fires on an explicit false too, not only "not statically
+  # true" the way build-time-reject-orchestrator-verdict-not-triggered above
+  # tolerates. reviewPrompt is left at its default (which does carry the
+  # required VERDICT: marker) so this fixture trips only the assert under
+  # test, not the unrelated reviewer-verdict reject above.
+  build-time-reject-max-parallel-workers-no-orchestrator =
+    let
+      inherit (pkgs.lib) assertMsg;
+      broken = builtins.tryEval (
+        (import ../../lib/mkHarness.nix {
+          inherit nixpkgs system;
+          packages = p: [ p.hello ];
+          defaults = {
+            maxParallelWorkers = 5;
+            orchestratorEnabled = false;
+          };
+        }).spindrift
+      );
+    in
+    assert assertMsg (!broken.success)
+      "mkHarness.nix must throw when MAX_PARALLEL_WORKERS is set but ORCHESTRATOR is explicitly disabled";
+    pkgs.runCommand "build-time-reject-max-parallel-workers-no-orchestrator" { } "touch $out";
+
+  # The gate-satisfied counterpart: the same explicit MAX_PARALLEL_WORKERS,
+  # but ORCHESTRATOR is also explicitly on -- a perfectly coherent config,
+  # so the build must succeed.
+  build-time-reject-max-parallel-workers-not-triggered =
+    let
+      inherit (pkgs.lib) assertMsg;
+      ok = builtins.tryEval (
+        (import ../../lib/mkHarness.nix {
+          inherit nixpkgs system;
+          packages = p: [ p.hello ];
+          defaults = {
+            maxParallelWorkers = 5;
+            orchestratorEnabled = true;
+          };
+        }).spindrift
+      );
+    in
+    assert assertMsg ok.success
+      "mkHarness.nix must not throw when MAX_PARALLEL_WORKERS is set and ORCHESTRATOR is also on";
+    pkgs.runCommand "build-time-reject-max-parallel-workers-not-triggered" { } "touch $out";
+
+  # The unset counterpart: MAX_PARALLEL_WORKERS is never set by the Consumer
+  # at all (only its schema default applies via mergedDefaults) -- that's not
+  # a Consumer request for anything, so the assert must not fire even with
+  # ORCHESTRATOR off. Only an explicit `defaults ? maxParallelWorkers` should
+  # trigger the reject.
+  build-time-reject-max-parallel-workers-unset-ok =
+    let
+      inherit (pkgs.lib) assertMsg;
+      ok = builtins.tryEval (
+        (import ../../lib/mkHarness.nix {
+          inherit nixpkgs system;
+          packages = p: [ p.hello ];
+          defaults = {
+            orchestratorEnabled = false;
+          };
+        }).spindrift
+      );
+    in
+    assert assertMsg ok.success
+      "mkHarness.nix must not throw when MAX_PARALLEL_WORKERS is never set, even with ORCHESTRATOR off";
+    pkgs.runCommand "build-time-reject-max-parallel-workers-unset-ok" { } "touch $out";
+
   # The `verdict-comment-relay` counterpart (issue #2250, parent #2244):
   # brokenResearchVerdictFragmentsDir (defined in the `let` above) swaps in
   # a research-verdict-github-readonly.md missing the required
