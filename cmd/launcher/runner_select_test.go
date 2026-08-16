@@ -7,59 +7,50 @@ import (
 	"spindrift.dev/launcher/internal/runner"
 )
 
-// TestRunnerForKind covers bootstrap's and cmdReconcile's shared runner
-// selection helper (issue #2538 review finding): it must key solely on
-// c.runnerKind ("bwrap" selects the bwrap adapter, anything else — including
-// "oci" and the empty-string default — selects the OCI adapter), never
-// c.runtime. Since the concrete adapter types (bwrapAdapter, ociAdapter) are
-// unexported, this asserts via reflect.TypeOf against a runner built by
-// calling the corresponding exported constructor directly.
-func TestRunnerForKind(t *testing.T) {
+// TestRunnerForKind_And_BuildRunnerForKind covers bootstrap's/cmdReconcile's
+// runnerForKind and build()'s buildRunnerForKind together (issue #2538
+// review finding): both must key solely on c.runnerKind ("bwrap" selects the
+// bwrap adapter, anything else — including "oci" and the empty-string
+// default — selects the OCI adapter), never c.runtime; they differ only in
+// which constructor the bwrap arm calls. Since the concrete adapter types
+// (bwrapAdapter, ociAdapter) are unexported, this asserts via
+// reflect.TypeOf against a runner built by calling the corresponding
+// exported constructor directly.
+func TestRunnerForKind_And_BuildRunnerForKind(t *testing.T) {
 	rc := runner.Config{}
 	pwd := "/pwd"
 
-	cases := []struct {
-		name       string
-		runnerKind string
-		want       runner.Runner
+	selectors := []struct {
+		name string
+		pick func(config, runner.Config, string) runner.Runner
 	}{
-		{name: "bwrap", runnerKind: "bwrap", want: runner.NewBwrap(rc)},
-		{name: "oci", runnerKind: "oci", want: runner.NewOCI(rc, pwd)},
-		{name: "empty defaults to oci", runnerKind: "", want: runner.NewOCI(rc, pwd)},
+		{name: "runnerForKind", pick: runnerForKind},
+		{name: "buildRunnerForKind", pick: buildRunnerForKind},
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			c := config{runnerKind: tc.runnerKind}
-			got := runnerForKind(c, rc, pwd)
-			if reflect.TypeOf(got) != reflect.TypeOf(tc.want) {
-				t.Errorf("runnerForKind(runnerKind=%q) = %T, want %T", tc.runnerKind, got, tc.want)
+
+	for _, sel := range selectors {
+		t.Run(sel.name, func(t *testing.T) {
+			bwrapWant := runner.NewBwrap(rc)
+			if sel.name == "buildRunnerForKind" {
+				bwrapWant = runner.NewBwrapBuild(rc)
 			}
-		})
-	}
-}
-
-// TestBuildRunnerForKind is runnerForKind's `launcher build` counterpart
-// (main.go's build()): the bwrap arm selects runner.NewBwrapBuild instead of
-// runner.NewBwrap, but keys off the same c.runnerKind == "bwrap" check.
-func TestBuildRunnerForKind(t *testing.T) {
-	rc := runner.Config{}
-	pwd := "/pwd"
-
-	cases := []struct {
-		name       string
-		runnerKind string
-		want       runner.Runner
-	}{
-		{name: "bwrap", runnerKind: "bwrap", want: runner.NewBwrapBuild(rc)},
-		{name: "oci", runnerKind: "oci", want: runner.NewOCI(rc, pwd)},
-		{name: "empty defaults to oci", runnerKind: "", want: runner.NewOCI(rc, pwd)},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			c := config{runnerKind: tc.runnerKind}
-			got := buildRunnerForKind(c, rc, pwd)
-			if reflect.TypeOf(got) != reflect.TypeOf(tc.want) {
-				t.Errorf("buildRunnerForKind(runnerKind=%q) = %T, want %T", tc.runnerKind, got, tc.want)
+			cases := []struct {
+				name       string
+				runnerKind string
+				want       runner.Runner
+			}{
+				{name: "bwrap", runnerKind: "bwrap", want: bwrapWant},
+				{name: "oci", runnerKind: "oci", want: runner.NewOCI(rc, pwd)},
+				{name: "empty defaults to oci", runnerKind: "", want: runner.NewOCI(rc, pwd)},
+			}
+			for _, tc := range cases {
+				t.Run(tc.name, func(t *testing.T) {
+					c := config{runnerKind: tc.runnerKind}
+					got := sel.pick(c, rc, pwd)
+					if reflect.TypeOf(got) != reflect.TypeOf(tc.want) {
+						t.Errorf("%s(runnerKind=%q) = %T, want %T", sel.name, tc.runnerKind, got, tc.want)
+					}
+				})
 			}
 		})
 	}
