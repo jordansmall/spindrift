@@ -124,11 +124,11 @@ func TestBackendRowsShape(t *testing.T) {
 			if row.HostMediatedRemote != tc.hostMediatedRemote {
 				t.Errorf("hostMediatedRemote = %v, want %v", row.HostMediatedRemote, tc.hostMediatedRemote)
 			}
-			if row.outboxRelayCapable != tc.outboxRelayCapable {
-				t.Errorf("outboxRelayCapable = %v, want %v", row.outboxRelayCapable, tc.outboxRelayCapable)
+			if row.OutboxRelayCapable != tc.outboxRelayCapable {
+				t.Errorf("outboxRelayCapable = %v, want %v", row.OutboxRelayCapable, tc.outboxRelayCapable)
 			}
-			if row.inBoxUnreachableTracker != tc.inBoxUnreachableTracker {
-				t.Errorf("inBoxUnreachableTracker = %v, want %v", row.inBoxUnreachableTracker, tc.inBoxUnreachableTracker)
+			if row.InBoxUnreachableTracker != tc.inBoxUnreachableTracker {
+				t.Errorf("inBoxUnreachableTracker = %v, want %v", row.InBoxUnreachableTracker, tc.inBoxUnreachableTracker)
 			}
 
 			if (row.validateTracker != nil) != tc.hasValidateTracker {

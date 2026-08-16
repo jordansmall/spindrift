@@ -274,8 +274,8 @@ func validate(c config) error {
 	// would trade a clear launcher error for a downstream Box crash.
 	codeForgeRow, codeForgeRowOK := backendByName(c.codeForge)
 	trackerRow, trackerRowOK := backendByName(c.issueTracker)
-	fullyLocal := codeForgeRow.HostMediatedRemote && trackerRow.inBoxUnreachableTracker
-	noRepoResearch := c.dispatchKind == dispatchKindResearch && c.selfContained && trackerRow.inBoxUnreachableTracker
+	fullyLocal := codeForgeRow.HostMediatedRemote && trackerRow.InBoxUnreachableTracker
+	noRepoResearch := c.dispatchKind == dispatchKindResearch && c.selfContained && trackerRow.InBoxUnreachableTracker
 	if !fullyLocal && !noRepoResearch && c.repoSlug == "" {
 		return fmt.Errorf("set REPO_SLUG=owner/repo (the target GitHub repository)")
 	}
@@ -523,11 +523,11 @@ func runnerConfig(c config) runner.Config {
 		PromptDir:                c.spindriftPromptDir,
 		SkillsDir:                c.spindriftSkillsDir,
 		DriverSessionCacheDir:    c.driverSessionCacheDir,
-		HostMediatedIssueTracker: trackerRow.inBoxUnreachableTracker,
+		HostMediatedIssueTracker: trackerRow.InBoxUnreachableTracker,
 		LocalIssuesDir:           absLocalIssuesDir(c.localIssuesDir),
 		HostMediatedRemote:       codeForgeRow.HostMediatedRemote,
 		AccumulationRepoDir:      c.codeForgeAccumulationRepoDir,
-		OutboxRelayCapable:       codeForgeRow.outboxRelayCapable,
+		OutboxRelayCapable:       codeForgeRow.OutboxRelayCapable,
 		BoxForgeAndIssueAccess:   c.boxForgeAndIssueAccess,
 	}
 }
@@ -651,7 +651,7 @@ func dispatchConfig(c config, it forge.IssueTracker, lw *localloop.Wired, cf for
 		Kind:                   c.dispatchKind,
 		SelfContained:          c.selfContained,
 		HostMediatedRemote:     codeForgeRow.HostMediatedRemote,
-		OutboxRelayCapable:     codeForgeRow.outboxRelayCapable,
+		OutboxRelayCapable:     codeForgeRow.OutboxRelayCapable,
 		BoxForgeAndIssueAccess: c.boxForgeAndIssueAccess,
 		TransientRetryMax:      c.transientRetryMax,
 		TransientBackoffSecs:   c.transientBackoffSecs,
