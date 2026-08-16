@@ -1,12 +1,63 @@
 package main
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"spindrift.dev/launcher/internal/driver"
 )
+
+// TestMainRunDefaultArgvFlagsReproduceClaudeShape verifies a bare mainRun
+// invocation with no explicit --argv-* flags reproduces claude's own argv
+// shape (lib/drivers/claude.nix: promptFlag="-p", agentsFlag="--agents") --
+// since -driver itself defaults to "claude" (issue #2534 follow-up), the
+// binary's own flag defaults must describe that same coherent shape instead
+// of emitting an empty-string token ahead of the prompt and silently
+// omitting --agents.
+func TestMainRunDefaultArgvFlagsReproduceClaudeShape(t *testing.T) {
+	dir := t.TempDir()
+	callLog := filepath.Join(dir, "calls.log")
+	driverBin := writeFakeDriver(t, dir, "fake-driver", "echo \"$@\" >> "+callLog+"\nexit 0\n")
+
+	promptFile := filepath.Join(dir, "prompt.txt")
+	if err := os.WriteFile(promptFile, []byte("implement the thing"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	agentsFile := filepath.Join(dir, "agents.json")
+	if err := os.WriteFile(agentsFile, []byte(`{"scout":{}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	argv := []string{
+		"-prompt-file", promptFile,
+		"-agents-file", agentsFile,
+		"-driver-bin", driverBin,
+		"-log-path", filepath.Join(dir, "stream.log"),
+		"-heartbeat-log", filepath.Join(dir, "heartbeat.log"),
+	}
+
+	var stdout, stderr bytes.Buffer
+	rc := mainRun(argv, &stdout, &stderr)
+	if rc != 0 {
+		t.Fatalf("mainRun exit code = %d, want 0 (stderr: %q)", rc, stderr.String())
+	}
+
+	calls, err := os.ReadFile(callLog)
+	if err != nil {
+		t.Fatalf("read callLog: %v", err)
+	}
+	got := strings.TrimSpace(string(calls))
+	fields := strings.Fields(got)
+	if len(fields) == 0 || fields[0] != "-p" {
+		t.Errorf("driver argv = %q, want it to start with \"-p\" (claude's promptFlag default)", got)
+	}
+	if !strings.Contains(got, "--agents") {
+		t.Errorf("driver argv = %q, want it to contain \"--agents\" (claude's agentsFlag default)", got)
+	}
+}
 
 // TestResolveExitUsesSynthesizedExitForOpencode verifies resolveExit
 // replaces the child process's own exit code with the opencode Driver's

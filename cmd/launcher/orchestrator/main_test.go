@@ -199,6 +199,42 @@ exit 0
 	}
 }
 
+// TestMainRunDefaultArgvFlagsReproduceClaudeShape verifies a bare mainRun
+// invocation with no explicit --argv-prompt-flag/--argv-agents-flag flags
+// forwards claude's own argv shape (lib/drivers/claude.nix:
+// promptFlag="-p", agentsFlag="--agents") into its driver-exec invocation --
+// since -driver itself defaults to "claude" (issue #2534 follow-up), the
+// orchestrator's own flag defaults must describe that same coherent shape
+// instead of forwarding an empty-string --argv-prompt-flag/--argv-agents-flag
+// value.
+func TestMainRunDefaultArgvFlagsReproduceClaudeShape(t *testing.T) {
+	dir := t.TempDir()
+	callLog := filepath.Join(dir, "calls.log")
+	writeFakeDriverExec(t, dir, callLog, `printf 'SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=done nonce=abc\n'
+exit 0
+`)
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	var stdout, stderr bytes.Buffer
+	rc := mainRun(singlePassFakeDriverArgv(dir), &stdout, &stderr)
+
+	if rc != 0 {
+		t.Fatalf("mainRun exit code = %d, want 0 (stderr: %q)", rc, stderr.String())
+	}
+
+	calls, err := os.ReadFile(callLog)
+	if err != nil {
+		t.Fatalf("read callLog: %v", err)
+	}
+	got := strings.TrimSpace(string(calls))
+	if !strings.Contains(got, "--argv-prompt-flag -p") {
+		t.Errorf("driver-exec argv = %q, want it to contain \"--argv-prompt-flag -p\" (claude's promptFlag default)", got)
+	}
+	if !strings.Contains(got, "--argv-agents-flag --agents") {
+		t.Errorf("driver-exec argv = %q, want it to contain \"--argv-agents-flag --agents\" (claude's agentsFlag default)", got)
+	}
+}
+
 // TestMainRunPositiveMaxParallelWorkersFlagBoundsWorkerConcurrency proves
 // the whole -max-parallel-workers pipeline end to end: the flag parsed by
 // mainRun (main.go), threaded into config.maxParallelWorkers (the
