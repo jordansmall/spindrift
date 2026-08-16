@@ -34,9 +34,9 @@ build:
   file-scoped lint/format/test command the project already defines for it
   (a package script, a linter already on PATH, a test runner scoped to the
   touched unit) — never a project-wide or store-triggering command. If the
-  project defines no such per-file gate for that file type, say so plainly
-  in your report rather than falling back to a store build or skipping the
-  gate silently.
+  project defines no such per-file gate for that file type, say so
+  plainly — routed the same way a gate failure is below — rather than
+  falling back to a store build or skipping the gate silently.
 
 Do not run `nix build` (any target, including `checks-inbox`), `nix flake
 check`, or anything else that triggers a Nix store round-trip. Whether
