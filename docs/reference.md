@@ -1411,6 +1411,23 @@ artifact, not a growing transcript:
   `--max-slices` shadowing `--max-review-rounds` exactly as it would have
   gone unwarned before.
 
+  A third cap, `--max-budget-tokens`/`--max-budget-usd` (issue #2694; both
+  default `0`, disabled), bounds the review-pass loop's own review-round
+  decision by cumulative spend instead of a pass or round count: once
+  cumulative token or USD usage across every pass so far (implement, fix,
+  and review passes alike, plus any dispatched worker's own spend) would
+  meet or exceed the configured cap, a further `BLOCK`-triggered review
+  round instead commits the run to one terminal land pass, the same
+  terminal-land mechanism `--max-review-rounds`/`--max-slices` already use.
+  Either dimension alone can trip it; negative values are rejected at
+  startup. Unlike `--max-review-rounds`/`--max-slices`, this cap is
+  consulted only by the code-owned review pass's own decision — the legacy
+  single-loop path (`--review-prompt-file` unset) ignores it entirely, since
+  it never asks the review-round question this cap answers. Forwarded from
+  the same `MAX_BUDGET_TOKENS`/`MAX_BUDGET_USD` knobs the [Advanced
+  tuning](#advanced-tuning) table's `selfHealing` group already documents —
+  see that table for the operator-facing env var/`settings` surface.
+
 **Code-owned review pass (issue #2037).** `--review-prompt-file` names a
 distinct prompt (`review-prompt.md`) the orchestrator invokes as its own
 fresh-session pass, in between implement/fix passes, instead of the
