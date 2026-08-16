@@ -62,6 +62,22 @@ func getenvArtifact(key, def string) string {
 	return def
 }
 
+// docArtifact reads key strictly from the loaded input document's Artifacts
+// section, returning "" when loadedDoc is nil or key is absent -- never
+// consulting os.Getenv. Unlike getenvArtifact's ambient-env-first escape
+// hatch (deliberate for genuine plumbing artifacts an operator may need to
+// override), the four capability-signal keys (HOST_MEDIATED_REMOTE,
+// OUTBOX_RELAY_CAPABLE, IN_BOX_UNREACHABLE_TRACKER, FULLY_LOCAL) are
+// nix-resolved policy, not operator knobs: a stray ambient env var must
+// never override what nix actually baked into the document (issue #2527
+// review). Used only by resolveCapabilitySignals's matching-document branch.
+func docArtifact(key string) string {
+	if loadedDoc == nil {
+		return ""
+	}
+	return loadedDoc.Artifacts[key]
+}
+
 // gitConfigLookup resolves a host git config key (e.g. "user.name"), the
 // fallback for GIT_USER_NAME/GIT_USER_EMAIL when neither the document, a
 // flag, nor env supplies one. Previously a bash line in the generated

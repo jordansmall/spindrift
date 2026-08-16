@@ -1250,6 +1250,72 @@ func TestResolveCapabilitySignals_OverrideAwayFromBakedDocumentFallsBack(t *test
 	}
 }
 
+// TestResolveCapabilitySignals_MatchingDocumentIgnoresAmbientEnvOverride
+// verifies that in the matching-document branch, the four capability-signal
+// keys are read strictly from the document's Artifacts section, never from
+// os.Getenv -- unlike getenvArtifact's other callers, these four are
+// nix-resolved policy, not operator knobs, so a stray ambient env var (e.g.
+// FULLY_LOCAL=true left over in a shell or CI environment) must not override
+// what nix actually baked into the document (issue #2527 review).
+func TestResolveCapabilitySignals_MatchingDocumentIgnoresAmbientEnvOverride(t *testing.T) {
+	t.Cleanup(func() { loadedDoc = nil })
+	loadedDoc = &inputDocument{
+		Settings: map[string]string{"CODE_FORGE": "github", "ISSUE_TRACKER": "github"},
+		Artifacts: map[string]string{
+			"HOST_MEDIATED_REMOTE":       "false",
+			"OUTBOX_RELAY_CAPABLE":       "false",
+			"IN_BOX_UNREACHABLE_TRACKER": "false",
+			"FULLY_LOCAL":                "false",
+		},
+	}
+	t.Setenv("HOST_MEDIATED_REMOTE", "true")
+	t.Setenv("OUTBOX_RELAY_CAPABLE", "true")
+	t.Setenv("IN_BOX_UNREACHABLE_TRACKER", "true")
+	t.Setenv("FULLY_LOCAL", "true")
+
+	sig := resolveCapabilitySignals("github", "github")
+	if sig.hostMediatedRemote {
+		t.Errorf("hostMediatedRemote = true, want false (ambient env must not override the document)")
+	}
+	if sig.outboxRelayCapable {
+		t.Errorf("outboxRelayCapable = true, want false (ambient env must not override the document)")
+	}
+	if sig.inBoxUnreachableTracker {
+		t.Errorf("inBoxUnreachableTracker = true, want false (ambient env must not override the document)")
+	}
+	if sig.fullyLocal {
+		t.Errorf("fullyLocal = true, want false (ambient env must not override the document)")
+	}
+}
+
+// TestResolveCapabilitySignals_MatchingDocumentMissingArtifactKeysFallsBack
+// verifies that when the matching document's Artifacts section carries none
+// of the four capability-signal keys at all (an old/malformed document that
+// predates this feature, or a nix rendering bug), resolveCapabilitySignals
+// does not trust an all-false answer -- it falls through to the
+// registry-derived fallback instead. A local/local document missing these
+// keys must still resolve fullyLocal=true (both registry rows are true for
+// local), never the wrong all-false reading validate() would otherwise use
+// to wrongly demand REPO_SLUG/GH_TOKEN (issue #2527 review).
+func TestResolveCapabilitySignals_MatchingDocumentMissingArtifactKeysFallsBack(t *testing.T) {
+	t.Cleanup(func() { loadedDoc = nil })
+	loadedDoc = &inputDocument{
+		Settings:  map[string]string{"CODE_FORGE": "local", "ISSUE_TRACKER": "local"},
+		Artifacts: map[string]string{"RUNTIME": "podman"},
+	}
+
+	sig := resolveCapabilitySignals("local", "local")
+	if !sig.fullyLocal {
+		t.Errorf("fullyLocal = false, want true (missing artifact keys must fall back to registry derivation)")
+	}
+	if !sig.hostMediatedRemote {
+		t.Errorf("hostMediatedRemote = false, want true (missing artifact keys must fall back to registry derivation)")
+	}
+	if !sig.inBoxUnreachableTracker {
+		t.Errorf("inBoxUnreachableTracker = false, want true (missing artifact keys must fall back to registry derivation)")
+	}
+}
+
 // TestValidate_FullyLocalExemptsRepoSlugAndGhToken verifies that validate()
 // does not require REPO_SLUG or GH_TOKEN when both CODE_FORGE and
 // ISSUE_TRACKER are local (issue #1895): the github gh-exec client that
