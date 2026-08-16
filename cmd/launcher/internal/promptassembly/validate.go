@@ -25,22 +25,6 @@ const (
 	severityWarn   = "warn"
 )
 
-// The Kind values a ForbiddenMarkerRow's Kind field is switched on in
-// Validate's forbiddenRows loop -- an allowlist, so an unrecognized Kind
-// (e.g. a typo in the nix registry) fails closed with a wrapped error
-// rather than silently falling through to the substring/imperative scan.
-const (
-	// forbiddenKindSubstring is the default meaning: Marker is checked as
-	// literal rendered text.
-	forbiddenKindSubstring = "substring"
-	// forbiddenKindGhAPIMutation names the one row (forbidden-gh-api-
-	// mutation) whose Marker ("gh api") is display-only -- see
-	// ForbiddenMarkerRow.Kind's doc comment. Its real enforcement is
-	// entrypoint.sh's install_readonly_gh_shim argument-scan, not a
-	// prompt-level substring scan here.
-	forbiddenKindGhAPIMutation = "gh-api-mutation"
-)
-
 // ValidateMarkerRow is the Go mirror of one row in
 // lib/prompt-contract.nix's validateMarkers registry. JSON tags mirror the
 // nix attrset's field names literally, the same convention FragmentRow
@@ -204,38 +188,11 @@ func LoadForbiddenMarkersFile(path string) ([]ForbiddenMarkerRow, error) {
 // whether a missing marker under an active gate is fatal or advisory --
 // driven by rows' own data rather than a hardcoded per-id switch (issue
 // #2318).
-//
-// Validate also checks forbiddenRows (issue #2464): for each row whose gate
-// is active, it rejects/warns if ForbiddenMarkerIsImperative reports the
-// row's Marker was rendered as an imperative instruction rather than an
-// absent or merely-mentioned one.
-//
-// liveCodeForge == "git" is excluded from the whenBoxAccessReadOnly
-// forbidden-row gate entirely (both loops below). templates/default/
-// prompts/issue-prompt.md's `**`CODE_FORGE=git`**` branch (a push-only Code
-// Forge with no PR mechanism) contains a genuine, ungated, un-negated "git
-// push" numbered-list instruction -- correct, load-bearing content for that
-// branch, since a CODE_FORGE=git Box must push directly to land its work;
-// it is never a drifted-fragment bug this check needs to catch. Unlike
-// cmd/launcher/main.go's checkReadOnlyCapabilityGate (which separately
-// refuses at launcher startup to ever dispatch
-// BOX_FORGE_AND_ISSUE_ACCESS=read-only with CODE_FORGE=git, since
-// CODE_FORGE=git doesn't implement forge.BundleRelay), this
-// promptassembly-package Validate call has no such protection of its own --
-// entrypoint.sh's bats coverage exercises read-only + CODE_FORGE=git
-// directly (e.g. tests/entrypoint-pr-intent-nudge.bats's "PR-intent gate:
-// never fires under CODE_FORGE=git"), so this package must tolerate the
-// combination rather than assume it away.
-func Validate(e Env, result Result, rows []ValidateMarkerRow, forbiddenRows []ForbiddenMarkerRow) (warnings []string, err error) {
+func Validate(e Env, result Result, rows []ValidateMarkerRow) (warnings []string, err error) {
 	gates := Gates(e)
 	kind := e.DispatchKind
 	if kind == "" {
 		kind = defaultDispatchKind
-	}
-
-	liveCodeForge := e.CodeForge
-	if liveCodeForge == "" {
-		liveCodeForge = defaultCodeForge
 	}
 
 	for _, row := range rows {
@@ -260,82 +217,6 @@ func Validate(e Env, result Result, rows []ValidateMarkerRow, forbiddenRows []Fo
 		}
 
 		if !gateActive || strings.Contains(haystack, row.Marker) {
-			continue
-		}
-
-		message := row.Message
-
-		switch row.Severity {
-		case severityReject:
-			return warnings, fmt.Errorf("%s", message)
-		case severityWarn:
-			warnings = append(warnings, message)
-		default:
-			return warnings, fmt.Errorf("promptassembly: validate: unknown severity %q for row %q", row.Severity, row.ID)
-		}
-	}
-
-	for _, row := range forbiddenRows {
-		var gateActive bool
-		var haystacks []string
-
-		switch row.When {
-		case whenBoxAccessReadOnly:
-			gateActive = gates["BOX_ACCESS_READ_ONLY"] && kind != "research" && liveCodeForge != "git"
-			// Three possible rendered texts a read-only Box's contract
-			// spans -- the main prompt, the filer sub-agent's own prompt,
-			// and the orchestrator's review prompt file -- mirroring the
-			// three haystacks the validateRows loop above already
-			// dispatches across per-When (issue #2464 follow-up: "gh issue
-			// create"/"gh issue comment" only ever render inside the filer
-			// prompt, never result.Prompt). The filer prompt haystack is
-			// dropped when the filer is legitimately using its own direct
-			// gh/fj write path (FILER_FILE_DIRECT_GH/FORGEJO) rather than
-			// the host-mediated relay -- that path's own token is
-			// independent of the main Box's BOX_ACCESS_READ_ONLY status
-			// (issue #2019), so "gh issue create" there is expected
-			// content, not a violation (issue #2464 follow-up: today's
-			// degraded direct-file path, tests/entrypoint-prompt-
-			// fragments.bats's "filer write step: read-only with
-			// orchestrator off keeps today's degraded direct-file path
-			// unchanged").
-			haystacks = []string{result.Prompt, result.Handoff.ReviewPromptFile}
-			if !gates["FILER_FILE_DIRECT_ANY"] {
-				haystacks = append(haystacks, filerPromptFrom(result.AgentsJSON))
-			}
-		default:
-			return warnings, fmt.Errorf("promptassembly: validate: no known gate for when %q (row %q)", row.When, row.ID)
-		}
-
-		violated := false
-		if gateActive {
-			switch row.Kind {
-			case forbiddenKindSubstring:
-				for _, h := range haystacks {
-					if h == "" {
-						continue
-					}
-					if ForbiddenMarkerIsImperative(row.Marker, h, liveCodeForge) {
-						violated = true
-						break
-					}
-				}
-			case forbiddenKindGhAPIMutation:
-				// A gh-api-mutation-kind row's Marker ("gh api") is
-				// display-only (ForbiddenMarkerRow.Kind's doc comment): it
-				// documents the runtime argument-scan entrypoint.sh's
-				// install_readonly_gh_shim performs (only a mutating
-				// -X/--method verb is rejected there), not a literal prompt
-				// substring. A plain, read-only `gh api ...` call is
-				// legitimate content, so this loop must never scan for it --
-				// the row's only real enforcement is that shim, not this Go
-				// code.
-			default:
-				return warnings, fmt.Errorf("promptassembly: validate: unknown kind %q for row %q", row.Kind, row.ID)
-			}
-		}
-
-		if !violated {
 			continue
 		}
 

@@ -115,7 +115,6 @@ assemble_go_agent_files() {
   run "$DRIVER_EXEC_BIN" assemble-prompt \
     --registry "$PROMPTASSEMBLY_REGISTRY_FILE" \
     --validate-markers-registry "$PROMPT_CONTRACT_REGISTRY_FILE" \
-    --forbidden-markers-registry "$FORBIDDEN_MARKERS_REGISTRY_FILE" \
     --prompt-output "$BATS_TEST_TMPDIR/go-prompt.txt" \
     --agents-json-output "$BATS_TEST_TMPDIR/go-agents.json" \
     --handoff-output "$BATS_TEST_TMPDIR/go-handoff.json" \

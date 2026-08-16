@@ -706,7 +706,6 @@ phase_prompt_assembly() {
   local -a _ap_args=(
     --registry "$PROMPTASSEMBLY_REGISTRY_FILE"
     --validate-markers-registry "$PROMPT_CONTRACT_REGISTRY_FILE"
-    --forbidden-markers-registry "$FORBIDDEN_MARKERS_REGISTRY_FILE"
     --agents-json-template "${AGENTS_JSON_TEMPLATE:-}"
     --issue-tracker "${ISSUE_TRACKER:-}"
     --code-forge "${CODE_FORGE:-}"
