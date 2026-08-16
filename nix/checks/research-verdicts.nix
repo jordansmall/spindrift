@@ -82,6 +82,8 @@ in
       "custom render must not leave the default status alternation";
     assert assertMsg (!(hasInfix "\${RESEARCH_STATUS_ENUM}" customRendered))
       "custom render must not leave the RESEARCH_STATUS_ENUM placeholder token unresolved (issue #2504)";
+    assert assertMsg (!(hasInfix "<RESEARCH_VERDICT_ENUM>" customRendered))
+      "custom render must not leave the <RESEARCH_VERDICT_ENUM> placeholder token unresolved";
     pkgs.runCommand "research-verdicts-render-custom" { } "touch $out";
 
   # Rendering a prompt that lacks the VERDICT markers (a Consumer research
