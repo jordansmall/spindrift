@@ -583,7 +583,7 @@ _is_self_contained() {
   [ "${SELF_CONTAINED:-}" = "1" ]
 }
 
-# _is_readonly_github reports (via exit status) whether this is a read-only
+# _is_readonly_outbox_relay reports (via exit status) whether this is a read-only
 # github Box: BOX_WRITE_ENABLED is unset (no push-capable token was ever
 # issued, so a force-push can only 403) and the Box is outbox-relay-capable
 # (today, true only for CODE_FORGE=github, per lib/backends/default.nix's
@@ -591,7 +591,7 @@ _is_self_contained() {
 # rather than compared against the raw CODE_FORGE name here). Such a Box
 # hands its branch off through the harness-owned outbox bundle seam rather
 # than a push (issue #2094).
-_is_readonly_github() {
+_is_readonly_outbox_relay() {
   [ -z "${BOX_WRITE_ENABLED:-}" ] && [ -n "${BOX_OUTBOX_RELAY_CAPABLE:-}" ]
 }
 
@@ -1278,7 +1278,7 @@ main() {
   # separately-gated outcomes rather than a strict three-way switch.
   if [ "$claude_rc" -eq 0 ]; then
     local _outcome_fields_before_note="${_last_outcome_line%% note=*}"
-    if _is_readonly_github \
+    if _is_readonly_outbox_relay \
       && [[ " $_outcome_fields_before_note " == *" status=ready "* ]] \
       && [ -z "$_last_pr_intent_line" ]; then
       local _original_ready_outcome_line="$_last_outcome_line"
@@ -1360,7 +1360,7 @@ main() {
   # nothing to bundle.
   if ! _is_research_kind \
     && { [ -n "${BOX_HOST_MEDIATED_REMOTE:-}" ] \
-      || _is_readonly_github; }; then
+      || _is_readonly_outbox_relay; }; then
     driver-exec bundle-out \
       --repo "$WORK_DIR" \
       --base "origin/${BASE_BRANCH:-}" \
