@@ -88,10 +88,6 @@ func validateRepoSlug(slug string) error {
 	return nil
 }
 
-// validRuntimeChoices are the operator-facing runtime values the wizard
-// accepts — the same four named in the "Runtime" prompt label.
-var validRuntimeChoices = []string{"podman", "docker", "rancher", "bwrap"}
-
 // validateRuntimeChoice rejects any value outside validRuntimeChoices.
 func validateRuntimeChoice(runtime string) error {
 	for _, v := range validRuntimeChoices {
@@ -386,7 +382,7 @@ func runQuickstart(dir string, env Environment, runner CommandRunner, forgeBuild
 	if err != nil {
 		return err
 	}
-	runtime, err := promptValidated("Runtime (podman/docker/rancher/bwrap)", detectedRuntime, validateRuntimeChoice)
+	runtime, err := promptValidated(fmt.Sprintf("Runtime (%s)", strings.Join(validRuntimeChoices, "/")), detectedRuntime, validateRuntimeChoice)
 	if err != nil {
 		return err
 	}

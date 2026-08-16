@@ -355,6 +355,28 @@ in
         touch $out
       '';
 
+  # cmd/launcher/quickstart/quickstart_runtime_gen.go must match the content
+  # generated from lib/runtime-values.nix. Fails when the runtime enum
+  # changes but the committed generated file isn't regenerated. Shares its
+  # renderer with `nix run .#regen` via lib/renderers.nix.
+  quickstart-runtime-gen =
+    let
+      runtimeValues = import ../../lib/runtime-values.nix;
+      generated = pkgs.writeText "quickstart_runtime_gen.go.generated" (
+        renderers.renderQuickstartRuntimeGo runtimeValues
+      );
+    in
+    pkgs.runCommand "quickstart-runtime-gen"
+      {
+        inherit generated;
+        committed = ../../cmd/launcher/quickstart/quickstart_runtime_gen.go;
+      }
+      ''
+        diff "$generated" "$committed" \
+          || { echo "cmd/launcher/quickstart/quickstart_runtime_gen.go is out of sync with lib/runtime-values.nix — regenerate it with \`nix run .#regen\`" >&2; exit 1; }
+        touch $out
+      '';
+
   # cmd/launcher/subcommands_gen.go must match the content generated from
   # lib/subcommands.nix. Fails when a subcommand is added/edited in the Nix
   # registry but the committed generated file is not regenerated. Shares its
