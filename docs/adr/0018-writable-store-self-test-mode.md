@@ -65,7 +65,14 @@ image bakes a `NIX_STORE_WRITABLE` env marker, and the entrypoint prints a
 (issue #469). This is an entrypoint/launcher concern, not a nix-layer one —
 the nix layer keeps `throw`/`assert` only, per the existing warning idiom.
 
-## bwrap limitation
+## bwrap limitation (superseded by ADR 0042)
+
+> **Superseded.** [ADR 0042](0042-the-bwrap-box-gets-in-box-nix-from-an-ephemeral-overlay-store.md)
+> lifts this limitation. bubblewrap 0.9+ can stack an overlay with a tmpfs
+> upper over the read-only host store, which is the ephemeral writable
+> layer this section says bwrap lacks. The reasoning below remains correct
+> about a *host-store bind mount*, which ADR 0042 also rejects; only the
+> conclusion that bwrap has no alternative is obsolete.
 
 This is OCI-runner behavior only. The bwrap runner (ADR 0006) binds the
 host's `/nix/store` read-only directly into the sandbox
