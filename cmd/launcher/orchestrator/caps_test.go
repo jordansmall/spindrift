@@ -106,22 +106,27 @@ func TestValidateMaxParallelWorkersAcceptsShippedDefault(t *testing.T) {
 // knob now that it's forwarded there unconditionally (boxEnv=true).
 func TestParseNonnegBudgetTokens(t *testing.T) {
 	tests := []struct {
-		name string
-		in   string
-		want int
+		name   string
+		in     string
+		want   int
+		wantOK bool
 	}{
-		{"zero", "0", 0},
-		{"positive", "100", 100},
-		{"negative collapses to 0", "-1", 0},
-		{"malformed collapses to 0", "not-a-number", 0},
-		{"empty collapses to 0", "", 0},
-		{"fractional collapses to 0 (Atoi rejects it, not a valid int)", "4.44", 0},
+		{"zero", "0", 0, true},
+		{"positive", "100", 100, true},
+		{"negative collapses to 0", "-1", 0, false},
+		{"malformed collapses to 0", "not-a-number", 0, false},
+		{"empty collapses to 0", "", 0, false},
+		{"fractional collapses to 0 (Atoi rejects it, not a valid int)", "4.44", 0, false},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := parseNonnegBudgetTokens(tt.in); got != tt.want {
+			got, ok := parseNonnegBudgetTokens(tt.in)
+			if got != tt.want {
 				t.Errorf("parseNonnegBudgetTokens(%q) = %d, want %d", tt.in, got, tt.want)
+			}
+			if ok != tt.wantOK {
+				t.Errorf("parseNonnegBudgetTokens(%q) ok = %v, want %v", tt.in, ok, tt.wantOK)
 			}
 		})
 	}
@@ -133,21 +138,26 @@ func TestParseNonnegBudgetTokens(t *testing.T) {
 // tokens case, parses normally here.
 func TestParseNonnegBudgetUSD(t *testing.T) {
 	tests := []struct {
-		name string
-		in   string
-		want float64
+		name   string
+		in     string
+		want   float64
+		wantOK bool
 	}{
-		{"zero", "0", 0},
-		{"positive", "4.44", 4.44},
-		{"negative collapses to 0", "-0.01", 0},
-		{"malformed collapses to 0", "not-a-number", 0},
-		{"empty collapses to 0", "", 0},
+		{"zero", "0", 0, true},
+		{"positive", "4.44", 4.44, true},
+		{"negative collapses to 0", "-0.01", 0, false},
+		{"malformed collapses to 0", "not-a-number", 0, false},
+		{"empty collapses to 0", "", 0, false},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := parseNonnegBudgetUSD(tt.in); got != tt.want {
+			got, ok := parseNonnegBudgetUSD(tt.in)
+			if got != tt.want {
 				t.Errorf("parseNonnegBudgetUSD(%q) = %v, want %v", tt.in, got, tt.want)
+			}
+			if ok != tt.wantOK {
+				t.Errorf("parseNonnegBudgetUSD(%q) ok = %v, want %v", tt.in, ok, tt.wantOK)
 			}
 		})
 	}

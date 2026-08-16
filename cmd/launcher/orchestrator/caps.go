@@ -217,29 +217,35 @@ func validateMaxParallelWorkers(maxParallelWorkers int) error {
 // parseNonnegBudgetTokens parses s (main.go's own -max-budget-tokens flag
 // value) as a non-negative integer budget cap, degrading a negative or
 // malformed value to 0 (disabled) rather than erroring (issue #2694 review
-// finding) -- deliberately mirroring the host launcher's own atoiNonneg
-// (cmd/launcher/main.go): MAX_BUDGET_TOKENS is boxEnv now, forwarded into
-// the Box unconditionally by entrypoint.sh, so a stale or mistyped value
-// the host has always tolerated silently (atoiNonneg falls back to its
-// schema default on the same bad input) must degrade the same way here, not
-// newly kill the Box over a value that was never fatal before this cap
-// existed. Unlike -max-parallel-workers, there is no meaningful "reject
-// outright" case for a budget cap: 0 is already its own legitimate
-// "disabled" sentinel, so a negative value simply collapses into that same
-// sentinel instead of a distinct error state.
-func parseNonnegBudgetTokens(s string) int {
-	if n, err := strconv.Atoi(s); err == nil && n >= 0 {
-		return n
+// finding) -- the same degrade outcome the host launcher's own atoiNonneg
+// (cmd/launcher/main.go) produces for the identical MAX_BUDGET_TOKENS env
+// var on the same bad input, though not the same mechanism: atoiNonneg
+// falls back to a caller-supplied schema default, where this always falls
+// back to the literal 0 (this flag's own default already is 0, so the two
+// coincide for this specific knob). MAX_BUDGET_TOKENS is boxEnv now,
+// forwarded into the Box unconditionally by entrypoint.sh, so a stale or
+// mistyped value the host has always tolerated silently must degrade the
+// same way here, not newly kill the Box over a value that was never fatal
+// before this cap existed. Unlike -max-parallel-workers, there is no
+// meaningful "reject outright" case for a budget cap: 0 is already its own
+// legitimate "disabled" sentinel, so a negative value simply collapses into
+// that same sentinel instead of a distinct error state. ok is false when s
+// needed degrading (negative or unparseable) -- callers that want to warn
+// an operator about a mistyped value check it; nothing about this parse
+// itself is fatal.
+func parseNonnegBudgetTokens(s string) (n int, ok bool) {
+	if v, err := strconv.Atoi(s); err == nil && v >= 0 {
+		return v, true
 	}
-	return 0
+	return 0, false
 }
 
 // parseNonnegBudgetUSD is parseNonnegBudgetTokens' -max-budget-usd
 // counterpart, mirroring the host launcher's own floatNonnegSchema/
 // floatNonneg the same way.
-func parseNonnegBudgetUSD(s string) float64 {
-	if n, err := strconv.ParseFloat(s, 64); err == nil && n >= 0 {
-		return n
+func parseNonnegBudgetUSD(s string) (n float64, ok bool) {
+	if v, err := strconv.ParseFloat(s, 64); err == nil && v >= 0 {
+		return v, true
 	}
-	return 0
+	return 0, false
 }
