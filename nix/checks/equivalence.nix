@@ -167,11 +167,15 @@ in
 
     # RUNNER_KIND is forwarded as a document artifact (issue #2538): "oci" for
     # any OCI runtime (podman here), "bwrap" for the bwrap harness below.
+    # Asserted on both the run and build documents — buildArtifacts carries
+    # its own RUNNER_KIND key, independent of runArtifacts.
     grep -q '"RUNNER_KIND":"oci"' ${harness.internals.runInputDocumentFile}
+    grep -q '"RUNNER_KIND":"oci"' ${harness.internals.buildInputDocumentFile}
 
     # bwrap harness bakes bwrap runtime and agent store paths; no OCI store paths.
     grep -q '"RUNTIME":"bwrap"' ${bwrapHarness.internals.runInputDocumentFile}
     grep -q '"RUNNER_KIND":"bwrap"' ${bwrapHarness.internals.runInputDocumentFile}
+    grep -q '"RUNNER_KIND":"bwrap"' ${bwrapHarness.internals.buildInputDocumentFile}
     grep -q '"AGENT_FILES":' ${bwrapHarness.internals.runInputDocumentFile}
     grep -q '"AGENT_ENV":' ${bwrapHarness.internals.runInputDocumentFile}
     # IMAGE_ARCHIVE is not baked as a store path (empty-default guard is fine).
