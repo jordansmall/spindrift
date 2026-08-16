@@ -19,10 +19,14 @@ import (
 // work it's delegated -- required, not omitempty like FileLeases/DependsOn
 // below, since a slice with no task description leaves the worker with
 // nothing to implement (issue #2059 code-review finding) -- the files it
-// declares it will touch (for a future scheduler to avoid overlapping
-// leases — not enforced by this slice), and the names of other slices in
-// the same manifest it depends on (also not enforced yet — declared,
-// carried through, and available for a later scheduling pass to use).
+// declares it will touch, and the names of other slices in the same
+// manifest it depends on. Both FileLeases and DependsOn are read and
+// enforced by scheduleSlices (schedule.go, issue #2060), which partitions a
+// manifest's slices into concurrency-safe batches from them: disjoint
+// FileLeases (and no DependsOn edge) let slices share a batch and run
+// concurrently, an empty FileLeases sequences a slice into its own solo
+// batch, and DependsOn puts a floor under a slice's earliest eligible batch
+// -- not just carried through inertly for a later pass to use.
 type ManifestSlice struct {
 	Name       string   `json:"name"`
 	Task       string   `json:"task"`
