@@ -357,6 +357,7 @@ func runWithReviewPass(cfg config, stdout io.Writer) (int, error) {
 
 	rc := 0
 	reviewRounds := 0
+	findingsLogRounds := 0
 	pass := 0
 	passKind := passmachine.KindImplement
 	prevSeededPromptFile := ""
@@ -474,8 +475,10 @@ func runWithReviewPass(cfg config, stdout io.Writer) (int, error) {
 			state.LastVerdict = reviewVerdict
 		}
 		state.ReviewFindings = findings
-		if err := appendFindingsLogRound(&state, reviewRounds+1, reviewVerdict, findings); err != nil {
+		findingsLogRounds++
+		if err := appendFindingsLogRound(&state, findingsLogRounds, reviewVerdict, findings); err != nil {
 			fmt.Fprintln(os.Stderr, "orchestrator: append findings log:", err)
+			fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "run_state_error", Phase: "findings_log", Error: err.Error()}))
 		}
 
 		// An APPROVE verdict deliberately falls through to "continue" here
@@ -530,7 +533,7 @@ func runWithReviewPass(cfg config, stdout io.Writer) (int, error) {
 // pass, nothing carried forward yet) this returns promptFile unchanged and
 // creates no temp file.
 func seedPromptFromState(promptFile string, state runstate.RunState) (string, error) {
-	if state.LastVerdict == "" && len(state.DoneSlices) == 0 && len(state.RemainingSlices) == 0 && state.ScoutBriefPath == "" && state.ReviewFindings == "" && state.WorkerFindings == "" && state.FindingsLogPath == "" && !state.TerminalLand {
+	if state.IsEmpty() {
 		return promptFile, nil
 	}
 
@@ -558,8 +561,14 @@ func seedPromptFromState(promptFile string, state runstate.RunState) (string, er
 	if state.ReviewFindings != "" {
 		fmt.Fprintf(&b, "- Reviewer findings:\n\n%s\n", state.ReviewFindings)
 	}
+	// A recorded FindingsLogPath whose file no longer exists degrades the
+	// same way an unset path does (AC4: "a missing log degrades to the
+	// current last-findings-only behavior, not an error") -- skip the
+	// bullet rather than point the land pass at a file that isn't there.
 	if state.FindingsLogPath != "" {
-		fmt.Fprintf(&b, "- Findings log: %s (every review round's own findings, one \"## Round N\" section per round -- when you reach FILE ISSUES, read this file and dedupe-and-file the union of every round's non-blocking findings, not just this round's Reviewer findings above)\n", state.FindingsLogPath)
+		if _, err := os.Stat(state.FindingsLogPath); err == nil {
+			fmt.Fprintf(&b, "- Findings log: %s (every review round's own findings, one \"## Round N\" section per round -- when you reach FILE ISSUES, read this file and run the same non-blocking triage from REVIEW over the union of every round's non-blocking findings, not just this round's Reviewer findings above; a finding already fixed inline in an earlier round's fix pass is resolved, not re-filed)\n", state.FindingsLogPath)
+		}
 	}
 	if state.WorkerFindings != "" {
 		fmt.Fprintf(&b, "- Worker dispatch results:\n\n%s\n", state.WorkerFindings)
