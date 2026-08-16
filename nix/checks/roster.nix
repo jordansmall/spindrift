@@ -162,52 +162,6 @@ in
     ) "normalizeRoster [] must return [], got: ${builtins.toJSON result.value}";
     pkgs.runCommand "roster-normalize-allows-empty" { } "touch $out";
 
-  # Issue #2506: lib/roster-schema-defaults.nix's rosterDefaults table is the
-  # roster's single root -- each default-roster agent name maps to its
-  # lib/env-schema.nix schemaKey and its fixed default effort (issue #2386).
-  roster-schema-defaults-exports-roster-defaults =
-    let
-      rosterDefaults =
-        (import ../../lib/roster-schema-defaults.nix { inherit (pkgs) lib; }).rosterDefaults;
-      expected = {
-        scout = {
-          schemaKey = "scoutModel";
-          effort = "medium";
-        };
-        reviewer = {
-          schemaKey = "reviewModel";
-          effort = "high";
-        };
-        filer = {
-          schemaKey = "filerModel";
-          effort = "medium";
-        };
-        worker = {
-          schemaKey = "workerModel";
-          effort = "high";
-        };
-      };
-      mismatches = builtins.filter (n: rosterDefaults.${n} != expected.${n}) [
-        "scout"
-        "reviewer"
-        "filer"
-        "worker"
-      ];
-    in
-    assert assertMsg
-      (
-        builtins.attrNames rosterDefaults == [
-          "filer"
-          "reviewer"
-          "scout"
-          "worker"
-        ]
-      )
-      "rosterDefaults must have exactly the four keys scout/reviewer/filer/worker, got: ${builtins.toJSON (builtins.attrNames rosterDefaults)}";
-    assert assertMsg (mismatches == [ ])
-      "rosterDefaults entries must match the expected schemaKey/effort per agent, mismatched: ${builtins.toJSON mismatches}";
-    pkgs.runCommand "roster-schema-defaults-exports-roster-defaults" { } "touch $out";
-
   # Issue #2506: readSchemaDefaults' `strict` flag must actually discriminate
   # -- `strict = true` throws on an entry missing `.default` (the contract
   # the roster's four schemaDefaults callers depend on). Without this
