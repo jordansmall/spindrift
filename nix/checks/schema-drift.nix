@@ -488,6 +488,48 @@ let
         got:  ${committed}
         want: ${generated}'';
     docSrc;
+
+  # Asserts docSrc's generated settings example `issueDiscovery`/
+  # `lifecycleLabels` sub-block (between its BEGIN/END GENERATED SETTINGS
+  # EXAMPLE LABELS markers) matches generated, else throws (issue #2537): the
+  # example's label/inProgressLabel/failedLabel/completeLabel literals
+  # restate lib/env-schema.nix's schema.label.default,
+  # schema.inProgressLabel.default, schema.failedLabel.default, and
+  # schema.completeLabel.default verbatim, so a schema-default bump for any
+  # of those four triage-label knobs must not be able to leave this
+  # illustrative example stale with no drift check. Factored out the same
+  # way assertSettingsExampleModelsDocOk is, so
+  # settings-example-labels-doc-guard can exercise this exact marker-split +
+  # equality assertion path against a synthetic doc, not only the real
+  # docs/reference.md content.
+  assertSettingsExampleLabelsDocOk =
+    { docSrc, generated }:
+    let
+      inherit (pkgs.lib) assertMsg;
+      beginMarker = "  # BEGIN GENERATED SETTINGS EXAMPLE LABELS -- nix run .#regen -- DO NOT EDIT\n";
+      endMarker = "  # END GENERATED SETTINGS EXAMPLE LABELS";
+      afterBegin =
+        let
+          parts = builtins.split beginMarker docSrc;
+        in
+        if builtins.length parts >= 3 then
+          builtins.elemAt parts 2
+        else
+          throw "docs/reference.md: BEGIN GENERATED SETTINGS EXAMPLE LABELS marker not found";
+      committed =
+        let
+          parts = builtins.split endMarker afterBegin;
+        in
+        if builtins.length parts >= 3 then
+          builtins.elemAt parts 0
+        else
+          throw "docs/reference.md: END GENERATED SETTINGS EXAMPLE LABELS marker not found";
+    in
+    assert assertMsg (committed == generated) ''
+      docs/reference.md generated settings example is out of sync with lib/env-schema.nix — regenerate it with `nix run .#regen`
+        got:  ${committed}
+        want: ${generated}'';
+    docSrc;
 in
 {
   # cmd/launcher/internal/driver/drivernames_gen.go must match the key list
@@ -1909,6 +1951,54 @@ in
     assert assertMsg (!result.success)
       "settings-example-models-doc-guard: expected assertSettingsExampleModelsDocOk to reject a synthetic doc whose models sub-block has drifted, but it evaluated successfully";
     pkgs.runCommand "settings-example-models-doc-guard" { } "touch $out";
+
+  # The generated `issueDiscovery`/`lifecycleLabels` sub-block of docs/
+  # reference.md's illustrative `settings = { ... }` example (between its
+  # BEGIN/END GENERATED SETTINGS EXAMPLE LABELS markers) must match the
+  # content rendered from lib/env-schema.nix (issue #2537): a schema-default
+  # bump to schema.label.default, schema.inProgressLabel.default,
+  # schema.failedLabel.default, or schema.completeLabel.default must not be
+  # able to leave this example's hand-typed label/inProgressLabel/
+  # failedLabel/completeLabel literals stale with no drift check, the exact
+  # failure mode this check closes. Shares its renderer with `nix run
+  # .#regen` via lib/renderers.nix, so guard and regenerator cannot drift
+  # from each other (issue #402). Mirrors settings-example-models-doc above.
+  settings-example-labels-doc =
+    let
+      generated = renderers.renderSettingsExampleLabelsDoc schema;
+      docSrc = builtins.readFile ../../docs/reference.md;
+    in
+    assert (assertSettingsExampleLabelsDocOk { inherit docSrc generated; }) == docSrc;
+    pkgs.runCommand "settings-example-labels-doc" { } "touch $out";
+
+  # Regression guard for settings-example-labels-doc above: proves its
+  # equality assertion actually rejects a drifted value instead of passing
+  # vacuously (mirrors marker-consistency-guard's tryEval pattern). Runs
+  # assertSettingsExampleLabelsDocOk — the exact function
+  # settings-example-labels-doc calls — against a synthetic doc whose labels
+  # sub-block carries a wrong label literal, via tryEval, so this fails if
+  # the equality assert is ever dropped from assertSettingsExampleLabelsDocOk.
+  settings-example-labels-doc-guard =
+    let
+      inherit (pkgs.lib) assertMsg;
+      generated = renderers.renderSettingsExampleLabelsDoc schema;
+      beginMarker = "  # BEGIN GENERATED SETTINGS EXAMPLE LABELS -- nix run .#regen -- DO NOT EDIT\n";
+      endMarker = "  # END GENERATED SETTINGS EXAMPLE LABELS";
+      driftedBlock = ''
+        issueDiscovery  = { label          = "wrong-label"; };
+        lifecycleLabels = { inProgressLabel = "wrong-in-progress-label";
+                            failedLabel     = "wrong-failed-label";
+                            completeLabel   = "wrong-complete-label"; };
+      '';
+      driftedDocSrc = beginMarker + driftedBlock + endMarker + "\n";
+      result = builtins.tryEval (assertSettingsExampleLabelsDocOk {
+        docSrc = driftedDocSrc;
+        inherit generated;
+      });
+    in
+    assert assertMsg (!result.success)
+      "settings-example-labels-doc-guard: expected assertSettingsExampleLabelsDocOk to reject a synthetic doc whose labels sub-block has drifted, but it evaluated successfully";
+    pkgs.runCommand "settings-example-labels-doc-guard" { } "touch $out";
 
   # docs/reference.md's Subagent roster section's dogfood paragraph restates
   # lib/default-model-fixture.nix's schemaDefaults scout/reviewer/worker

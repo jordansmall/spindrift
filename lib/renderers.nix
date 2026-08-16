@@ -367,6 +367,28 @@ rec {
     + "                      reviewModel = \"${schemaDefaults.reviewModel}\";\n"
     + "                      filerModel  = \"${schemaDefaults.filerModel}\"; };\n";
 
+  # docs/reference.md's generated `settings = { ... }` example's
+  # `issueDiscovery`/`lifecycleLabels` lines (issue #2537): the four
+  # lib/env-schema.nix leaves that drive an issue's dispatch label
+  # (label) and the three lifecycle labels the launcher swaps it through
+  # (inProgressLabel/failedLabel/completeLabel), formatted as the
+  # illustrative Nix literal shown in the doc's fenced ```nix example, so
+  # this hand-typed default-label literal site regenerates from the same
+  # schema docs/flake-options.md already draws from instead of drifting
+  # independently if one of those four defaults is ever changed.
+  # Indentation is fixed to match the surrounding `settings = { ... }`
+  # example exactly, so the generated text is a byte-for-byte drop-in
+  # replacement. Takes the whole schema attrset (unlike
+  # renderSettingsExampleModelsDoc, which takes the narrower default-model
+  # fixture) since label/inProgressLabel/failedLabel/completeLabel are
+  # plain env-schema.nix knobs with no dedicated fixture of their own.
+  renderSettingsExampleLabelsDoc =
+    schema:
+    "  issueDiscovery  = { label          = \"${schema.label.default}\"; };\n"
+    + "  lifecycleLabels = { inProgressLabel = \"${schema.inProgressLabel.default}\";\n"
+    + "                      failedLabel     = \"${schema.failedLabel.default}\";\n"
+    + "                      completeLabel   = \"${schema.completeLabel.default}\"; };\n";
+
   # cmd/launcher/internal/driver/drivernames_gen.go content. driverEntries is
   # the registry's `entries` attrset (name -> Driver entry), not the whole
   # registry -- the registry also exports its shape-assertion and rendering

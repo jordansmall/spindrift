@@ -123,10 +123,12 @@ flake module.
 
 ```nix
 settings = {
+  # BEGIN GENERATED SETTINGS EXAMPLE LABELS -- nix run .#regen -- DO NOT EDIT
   issueDiscovery  = { label          = "ready-for-agent"; };
   lifecycleLabels = { inProgressLabel = "agent-in-progress";
                       failedLabel     = "agent-failed";
                       completeLabel   = "agent-complete"; };
+  # END GENERATED SETTINGS EXAMPLE LABELS
   branches        = { baseBranch = "main"; branchPrefix = "agent/issue-";
                       mergeMode  = "manual";
                       mergeGuardPaths = ".github/**,.forgejo/**,**/CLAUDE.md,**/AGENTS.md,.claude/**,.opencode/**";
