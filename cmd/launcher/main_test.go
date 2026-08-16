@@ -1404,14 +1404,12 @@ func TestValidate_MixedLocalStillRequiresRepoSlugAndGhToken(t *testing.T) {
 	// CODE_FORGE=github (default), ISSUE_TRACKER=local.
 	c = minimalValidConfig()
 	c.issueTracker = "local"
-	c.inBoxUnreachableTracker = true
 	c.repoSlug = ""
 	if err := validate(c); err == nil {
 		t.Error("validate() must still require REPO_SLUG when only ISSUE_TRACKER is local")
 	}
 	c = minimalValidConfig()
 	c.issueTracker = "local"
-	c.inBoxUnreachableTracker = true
 	c.ghToken = ""
 	if err := validate(c); err == nil {
 		t.Error("validate() must still require GH_TOKEN when only ISSUE_TRACKER is local")
@@ -1428,7 +1426,6 @@ func TestValidate_ResearchSelfContainedExemptsRepoSlugAndGhToken(t *testing.T) {
 	c := applyDispatchKind(minimalValidConfig(), dispatchKindResearch)
 	c.selfContained = true
 	c.issueTracker = "local"
-	c.inBoxUnreachableTracker = true
 	c.repoSlug = ""
 	c.ghToken = ""
 	if err := validate(c); err != nil {

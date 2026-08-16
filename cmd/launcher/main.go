@@ -77,26 +77,6 @@ type config struct {
 	// the Go source never needs to enumerate them by hand.
 	boxEnvVars string
 
-	// hostMediatedRemote, outboxRelayCapable, inBoxUnreachableTracker, and
-	// fullyLocal are the four capability signals nix resolves once from the
-	// backend descriptor registry for the CODE_FORGE/ISSUE_TRACKER pairing
-	// baked at `nix build` time, and renders into the input document's
-	// artifacts section (lib/preambles.nix's runArtifacts, issue #2527
-	// slice 1) as the literal strings "true"/"false". loadConfig() reads
-	// them via getenvArtifact the same way it reads every other artifact
-	// field, purely so a manual inspection of a loaded config value can see
-	// what nix forwarded. CODE_FORGE/ISSUE_TRACKER are genuine per-run
-	// overrides (flag/env, resolved after this document was baked), so
-	// nothing reads these four fields directly: every consumer instead
-	// calls resolveCapabilitySignals(c.codeForge, c.issueTracker), which
-	// trusts the forwarded artifact only when the resolved pairing still
-	// matches what was baked, and otherwise re-derives fresh from the
-	// registry (issue #2527 review).
-	hostMediatedRemote      bool
-	outboxRelayCapable      bool
-	inBoxUnreachableTracker bool
-	fullyLocal              bool
-
 	// dispatchKind is "work" (the default, zero value) or "research" (ADR
 	// 0022). Set once by bootstrap via applyDispatchKind, never read from
 	// the environment directly — it is operator intent carried by which
@@ -275,11 +255,6 @@ func loadConfig() config {
 		driverSessionCacheDir: getenvArtifact("DRIVER_SESSION_CACHE_DIR", ""),
 
 		boxEnvVars: getenvArtifact("BOX_ENV_VARS", ""),
-
-		hostMediatedRemote:      getenvArtifact("HOST_MEDIATED_REMOTE", "") == "true",
-		outboxRelayCapable:      getenvArtifact("OUTBOX_RELAY_CAPABLE", "") == "true",
-		inBoxUnreachableTracker: getenvArtifact("IN_BOX_UNREACHABLE_TRACKER", "") == "true",
-		fullyLocal:              getenvArtifact("FULLY_LOCAL", "") == "true",
 	}
 }
 
