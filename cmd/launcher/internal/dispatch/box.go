@@ -85,12 +85,23 @@ func (d *Dispatch) Run() Result {
 	logPath := d.logPath()
 	return d.dispatchWithRetry(logPath, func(resumeAfterHold bool) error {
 		fmt.Fprintf(d.humanOut(), "    -> #%s: %s\n", d.number, d.title)
-		if !resumeAfterHold {
+		if !resumeAfterHold && !d.runner.IsRunning(BoxName(d.number)) {
 			// Only on this Run() call's very first attempt (never on a
-			// same-Run() hold/backoff re-dispatch) -- see
-			// quarantinePriorRunLogs.
+			// same-Run() hold/backoff re-dispatch), and only when no live
+			// container already owns this issue's log (mirrors
+			// quarantinePriorRunLogs' own IsRunning guard, checked again
+			// here so a live run's log dir stays completely untouched --
+			// no rename AND no lineage marker). Unconditional otherwise: a
+			// fresh Run() call always starts a new logical run, so
+			// anything already on disk -- including a lineage marker left
+			// by an earlier, now-closed logical run at this same issue
+			// number -- is stale relative to THIS run and must be
+			// quarantined regardless of the marker's presence.
 			if err := quarantinePriorRunLogs(d.pwd, d.number, d.runner); err != nil {
 				return quarantineErr{err: fmt.Errorf("quarantine prior-run logs: %w", err)}
+			}
+			if err := markRunLineage(d.pwd, d.number); err != nil {
+				return quarantineErr{err: fmt.Errorf("mark run lineage: %w", err)}
 			}
 		}
 		env := buildBoxEnv(d.cfg, d.number, d.title, 0, "", d.nonce)
@@ -298,19 +309,90 @@ func (e quarantineErr) Unwrap() error { return e.err }
 // out of the naming pattern AllAttemptLogPaths (and so CumulativeUsage and
 // UsageReport) scans.
 func quarantinePriorRunLogs(pwd, number string, r runner.Runner) error {
-	if r.IsRunning(BoxName(number)) {
+	// r == nil only ever happens in a test double that deliberately never
+	// wants the runner touched at all (e.g. a recover-path test scoped to
+	// exercise the no-open-PR exit, never a live container) -- treat that as
+	// "nothing is running," not a live run, so quarantine still proceeds
+	// rather than panicking on a nil interface call.
+	if r != nil && r.IsRunning(BoxName(number)) {
 		return nil
 	}
 	for _, pl := range AllAttemptLogPaths(pwd, number) {
 		for n := 1; ; n++ {
 			dest := fmt.Sprintf("%s.prior-run.%d", pl.Path, n)
-			if _, err := os.Stat(dest); os.IsNotExist(err) {
-				if err := os.Rename(pl.Path, dest); err != nil {
-					return err
-				}
-				break
+			_, err := os.Stat(dest)
+			if err == nil {
+				continue
 			}
+			// A stat failure other than "not found" (EACCES on the log
+			// dir, ENAMETOOLONG, ...) never turns into os.IsNotExist ==
+			// true, so treating anything but that specific case as "free
+			// slot, rename here" spans an unbounded n++ loop with no
+			// timeout or cap (issue #2575) -- surface it as a real error
+			// instead.
+			if !os.IsNotExist(err) {
+				return fmt.Errorf("stat %s: %w", dest, err)
+			}
+			if err := os.Rename(pl.Path, dest); err != nil {
+				return err
+			}
+			break
 		}
 	}
 	return nil
+}
+
+// runLineageMarkerPath returns the sentinel file Run() drops right after its
+// own quarantinePriorRunLogs call, so a later caller that never went through
+// Run() itself -- main.go's recoverByNumber, adopting an already-open PR via
+// settle.SettleAdopted -- can tell "the pass logs on disk right now were
+// quarantined at the true start of THIS logical run's history, safe to
+// trust" apart from "no Run() in this launcher's history ever quarantined
+// ahead of these -- don't trust them" (issue #2575). It intentionally
+// doesn't match AllAttemptLogPaths' own "<path>[.N]" pattern for any pass
+// label, so it is never itself walked as a pass log.
+func runLineageMarkerPath(pwd, number string) string {
+	return filepath.Join(HostLogDirFor(pwd), "issue-"+number+".run-lineage")
+}
+
+// markRunLineage (re)creates this issue's run-lineage marker, truncating any
+// stale marker a prior logical run's own Run() left behind -- see
+// runLineageMarkerPath and EnsureRunLineage.
+func markRunLineage(pwd, number string) error {
+	f, err := os.Create(runLineageMarkerPath(pwd, number))
+	if err != nil {
+		return err
+	}
+	return f.Close()
+}
+
+// EnsureRunLineage establishes, for a Dispatch that reaches Fix,
+// CumulativeUsage, or UsageReport without Run() ever having been called on
+// it first -- main.go's recoverByNumber adopting an already-open PR via
+// settle.SettleAdopted -- the same "these on-disk pass logs are safely this
+// run's own" guarantee Run's own quarantinePriorRunLogs call establishes on
+// the normal dispatch path (issue #2575).
+//
+// An open PR can only exist because some earlier Run(), in some earlier
+// launcher process, already reached box.go's quarantine-then-mark step for
+// this exact issue number -- so the ordinary case is the marker is already
+// there, and this is a no-op that trusts the on-disk logs exactly as before.
+// Only when the marker is missing entirely (an orphaned PR this launcher's
+// own Run() never produced, or a pre-#2575 log directory) can this issue's
+// on-disk pass logs not be told apart from an unrelated earlier run's
+// leftovers; in that case this quarantines everything AllAttemptLogPaths
+// finds -- exactly as Run's own first attempt would have -- before minting
+// the marker itself, so CumulativeUsage/UsageReport start this cycle's
+// count from zero rather than silently folding in someone else's spend. A
+// local filesystem failure part-way through (the same class
+// quarantinePriorRunLogs itself can hit) is returned rather than swallowed,
+// so callers can decide how to degrade instead of pretending it succeeded.
+func (d *Dispatch) EnsureRunLineage() error {
+	if fileExists(runLineageMarkerPath(d.pwd, d.number)) {
+		return nil
+	}
+	if err := quarantinePriorRunLogs(d.pwd, d.number, d.runner); err != nil {
+		return fmt.Errorf("quarantine prior-run logs: %w", err)
+	}
+	return markRunLineage(d.pwd, d.number)
 }

@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/runner"
@@ -151,6 +152,7 @@ func TestRun_QuarantinesPriorRunLogsBeforeFirstAttempt(t *testing.T) {
 	priorInitial := `{"type":"result","num_turns":1,"total_cost_usd":9.00,"usage":{"input_tokens":90000,"output_tokens":9000}}` + "\n"
 	priorRetry := `{"type":"result","num_turns":1,"total_cost_usd":5.00,"usage":{"input_tokens":50000,"output_tokens":5000}}` + "\n"
 	priorFix := `{"type":"result","num_turns":1,"total_cost_usd":3.00,"usage":{"input_tokens":30000,"output_tokens":3000}}` + "\n"
+	priorConflictResolve := `{"type":"result","num_turns":1,"total_cost_usd":1.00,"usage":{"input_tokens":10000,"output_tokens":1000}}` + "\n"
 	if err := writeFile(d.logPath(), priorInitial); err != nil {
 		t.Fatalf("seed prior initial log: %v", err)
 	}
@@ -159,6 +161,9 @@ func TestRun_QuarantinesPriorRunLogsBeforeFirstAttempt(t *testing.T) {
 	}
 	if err := writeFile(d.fixLogPath(1), priorFix); err != nil {
 		t.Fatalf("seed prior fix log: %v", err)
+	}
+	if err := writeFile(d.conflictLogPath(), priorConflictResolve); err != nil {
+		t.Fatalf("seed prior conflict-resolve log: %v", err)
 	}
 
 	drv, err := driver.New("claude")
@@ -188,7 +193,7 @@ func TestRun_QuarantinesPriorRunLogsBeforeFirstAttempt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read log dir: %v", err)
 	}
-	var foundInitial, foundRetry, foundFix bool
+	var foundInitial, foundRetry, foundFix, foundConflictResolve bool
 	for _, e := range entries {
 		b, err := os.ReadFile(filepath.Join(dir, e.Name()))
 		if err != nil {
@@ -201,10 +206,13 @@ func TestRun_QuarantinesPriorRunLogsBeforeFirstAttempt(t *testing.T) {
 			foundRetry = true
 		case priorFix:
 			foundFix = true
+		case priorConflictResolve:
+			foundConflictResolve = true
 		}
 	}
-	if !foundInitial || !foundRetry || !foundFix {
-		t.Errorf("prior run's logs were not preserved on disk: initial=%v retry=%v fix=%v", foundInitial, foundRetry, foundFix)
+	if !foundInitial || !foundRetry || !foundFix || !foundConflictResolve {
+		t.Errorf("prior run's logs were not preserved on disk: initial=%v retry=%v fix=%v conflict-resolve=%v",
+			foundInitial, foundRetry, foundFix, foundConflictResolve)
 	}
 }
 
@@ -214,8 +222,10 @@ func TestRun_QuarantinesPriorRunLogsBeforeFirstAttempt(t *testing.T) {
 // settledOutcome and parse whatever content is still sitting at logPath --
 // content this run never produced, left over from the exact prior run
 // quarantine was trying to move aside -- as if it were this run's own
-// verdict (issue #2575). It must instead report a definite failure with no
-// resolved outcome at all, and must never dispatch a box.
+// verdict (issue #2575). It must instead retry (this fixture's permission
+// problem never clears, so every retry fails the same way) up to
+// TransientRetryMax, then report a definite failure with no resolved
+// outcome at all, having never dispatched a box.
 func TestRun_QuarantineFailureDoesNotSettleOnStaleLog(t *testing.T) {
 	fr := runner.NewFake()
 
@@ -246,6 +256,77 @@ func TestRun_QuarantineFailureDoesNotSettleOnStaleLog(t *testing.T) {
 	}
 	if len(fr.RunCalls) != 0 {
 		t.Errorf("runner.Run: want 0 calls when quarantine fails before dispatch, got %d", len(fr.RunCalls))
+	}
+}
+
+// TestRun_QuarantineFailureRetriesWithBackoffBeforeGivingUp verifies the
+// degrade posture finding for issue #2575's quarantine step: a quarantine
+// failure is a local filesystem hiccup, not a terminal give-up, so it must
+// retry with the same linear backoff any other transient failure uses --
+// TransientRetryMax attempts, each sleeping through the injected Clock --
+// before finally giving up, rather than failing the whole dispatch outright
+// on the very first failure.
+func TestRun_QuarantineFailureRetriesWithBackoffBeforeGivingUp(t *testing.T) {
+	fr := runner.NewFake()
+	var sleeps []time.Duration
+	clock := fakeClock(time.Now(), &sleeps)
+
+	d := newTestDispatch(t, retryConfig(3, 5, 0), fr, fakeDriver{}, clock)
+
+	logDir := HostLogDirFor(d.pwd)
+	if err := os.Chmod(logDir, 0o555); err != nil {
+		t.Fatalf("chmod log dir read-only: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chmod(logDir, 0o755); err != nil {
+			t.Fatalf("chmod log dir writable: %v", err)
+		}
+	})
+
+	result := d.Run()
+
+	if result.Success {
+		t.Errorf("Run: want Success=false once the retry cap is exhausted, got %+v", result)
+	}
+	if len(sleeps) != 3 {
+		t.Errorf("Sleep calls = %d, want 3 (TransientRetryMax) -- a quarantine failure must retry with backoff, not give up on the first attempt", len(sleeps))
+	}
+	if len(fr.RunCalls) != 0 {
+		t.Errorf("runner.Run: want 0 calls when quarantine keeps failing, got %d", len(fr.RunCalls))
+	}
+}
+
+// TestQuarantinePriorRunLogs_BoundedOnNonNotExistStatError verifies
+// quarantinePriorRunLogs' free-suffix probe returns a real error instead of
+// looping forever when os.Stat(dest) fails with something other than "not
+// found" (issue #2575). A self-referential symlink at the very first
+// candidate destination (<path>.prior-run.1) makes os.Stat on it fail with
+// ELOOP, which os.IsNotExist never reports as true, so a probe that treated
+// anything but that specific case as "free slot, rename here" would spin
+// n++ forever with no timeout or cap.
+func TestQuarantinePriorRunLogs_BoundedOnNonNotExistStatError(t *testing.T) {
+	fr := runner.NewFake()
+	d := newTestDispatch(t, retryConfig(3, 0, 0), fr, fakeDriver{}, RealClock())
+
+	if err := writeFile(d.logPath(), "prior content\n"); err != nil {
+		t.Fatalf("seed log: %v", err)
+	}
+
+	dest := d.logPath() + ".prior-run.1"
+	if err := os.Symlink(filepath.Base(dest), dest); err != nil {
+		t.Fatalf("seed self-referential symlink: %v", err)
+	}
+
+	done := make(chan error, 1)
+	go func() { done <- quarantinePriorRunLogs(d.pwd, d.number, fr) }()
+
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Error("quarantinePriorRunLogs: want a non-nil error on a non-NotExist stat failure, got nil")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("quarantinePriorRunLogs: did not return -- free-suffix probe looped unbounded on a non-NotExist stat error")
 	}
 }
 
@@ -362,29 +443,28 @@ func TestQuarantinePriorRunLogs_HoldSleepBlindSpot(t *testing.T) {
 	}
 }
 
-// TestCumulativeUsage_RecoverPathNeverQuarantines pins a known, currently
-// unfixed limitation of the recover/adopt entry point rather than asserting
-// it is correct: quarantinePriorRunLogs only ever runs from Run's own very
-// first attempt (box.go), so a Dispatch built the way main.go's
-// recoverByNumber builds one -- via Factory.New, then straight into
-// CumulativeUsage/UsageReport/Fix through settle's SettleAdopted, with Run
-// never called at all -- never quarantines anything. This test stands in
-// for that path: it writes a rotated ".1" sibling directly to disk BEFORE
-// constructing the Dispatch at all (simulating a leftover from an earlier,
-// unrelated attempt sequence that no Run() call in this process ever
-// quarantined), then shows CumulativeUsage still walks it via
-// AllAttemptLogPaths, folding that unrelated spend into the total. That is
-// not correct, but it is current, documented behavior (see
-// AllAttemptLogPaths' and CumulativeUsage's own doc comments) -- closing it
-// needs cross-process lineage correlation, out of scope here. This test
-// exists so a future change to this behavior is a deliberate decision, not
-// an accidental regression nobody noticed.
-func TestCumulativeUsage_RecoverPathNeverQuarantines(t *testing.T) {
+// TestEnsureRunLineage_QuarantinesWhenMarkerAbsent verifies the fix for the
+// recover/adopt entry point's own quarantine gap (issue #2575):
+// quarantinePriorRunLogs only ever ran from Run's own very first attempt
+// (box.go), so a Dispatch built the way main.go's recoverByNumber builds one
+// -- via Factory.New, then straight into CumulativeUsage/UsageReport/Fix
+// through settle's SettleAdopted, with Run never called at all -- used to
+// never quarantine anything. This seeds a rotated ".1" sibling directly to
+// disk BEFORE constructing the Dispatch at all (simulating a leftover from
+// an earlier, unrelated attempt sequence that no Run() call in this process
+// ever quarantined) with no run-lineage marker present either, then shows
+// that calling EnsureRunLineage -- exactly as recoverByNumber now does
+// before touching CumulativeUsage/UsageReport/Fix -- quarantines that
+// leftover aside before it can be folded into this cycle's usage, leaving
+// CumulativeUsage at zero rather than silently inheriting someone else's
+// spend.
+func TestEnsureRunLineage_QuarantinesWhenMarkerAbsent(t *testing.T) {
 	dir := tempLogDir(t)
 
 	// A leftover from an earlier, unrelated attempt sequence -- written
 	// straight to disk, before any Dispatch for this issue exists in this
-	// process, so nothing has had a chance to quarantine it.
+	// process, so nothing has had a chance to quarantine it, and with no
+	// run-lineage marker either.
 	leftover := `{"type":"result","num_turns":1,"total_cost_usd":7.00,"usage":{"input_tokens":70000,"output_tokens":7000}}` + "\n"
 	if err := writeFile(logPathFor(dir, "20")+".1", leftover); err != nil {
 		t.Fatalf("seed leftover rotated log: %v", err)
@@ -395,16 +475,62 @@ func TestCumulativeUsage_RecoverPathNeverQuarantines(t *testing.T) {
 		t.Fatalf("NewFactory: %v", err)
 	}
 	defer f.Cleanup()
-	// Mirrors main.go's recoverByNumber: Factory.New, then straight to
-	// CumulativeUsage -- Run is never called.
+	// Mirrors main.go's recoverByNumber: Factory.New, then EnsureRunLineage,
+	// then straight to CumulativeUsage -- Run is never called.
 	d := f.New("20", "test issue")
 
-	got := d.CumulativeUsage()
-	if got.InputTokens != 70000 {
-		t.Errorf("CumulativeUsage.InputTokens = %d, want 70000 (recover path has no quarantine boundary, so the leftover rotated log is walked -- known limitation, see AllAttemptLogPaths' doc comment)", got.InputTokens)
+	if err := d.EnsureRunLineage(); err != nil {
+		t.Fatalf("EnsureRunLineage: %v", err)
 	}
-	if diff := got.TotalCostUSD - 7.00; diff > 0.0001 || diff < -0.0001 {
-		t.Errorf("CumulativeUsage.TotalCostUSD = %v, want ~7.00 (recover path has no quarantine boundary, so the leftover rotated log is walked -- known limitation)", got.TotalCostUSD)
+
+	got := d.CumulativeUsage()
+	if got.InputTokens != 0 {
+		t.Errorf("CumulativeUsage.InputTokens = %d, want 0 (EnsureRunLineage must quarantine the unmarked leftover before CumulativeUsage ever walks it)", got.InputTokens)
+	}
+	if got.TotalCostUSD != 0 {
+		t.Errorf("CumulativeUsage.TotalCostUSD = %v, want 0 (EnsureRunLineage must quarantine the unmarked leftover before CumulativeUsage ever walks it)", got.TotalCostUSD)
+	}
+
+	if _, err := os.Stat(runLineageMarkerPath(dir, "20")); err != nil {
+		t.Errorf("run-lineage marker: want created by EnsureRunLineage, stat error: %v", err)
+	}
+}
+
+// TestEnsureRunLineage_TrustsExistingLogsWhenMarkerPresent verifies the
+// common recover/adopt case: an open PR can only exist because some earlier
+// Run(), in some earlier launcher process, already quarantined-then-marked
+// this issue's log lineage (box.go's Run). When that marker is already on
+// disk, EnsureRunLineage must be a complete no-op -- it must not touch any
+// pass log -- so CumulativeUsage still sums this run's own genuine history
+// across the process restart recover exists to survive.
+func TestEnsureRunLineage_TrustsExistingLogsWhenMarkerPresent(t *testing.T) {
+	dir := tempLogDir(t)
+
+	initial := `{"type":"result","num_turns":1,"total_cost_usd":1.50,"usage":{"input_tokens":1000,"output_tokens":200}}` + "\n"
+	if err := writeFile(logPathFor(dir, "20"), initial); err != nil {
+		t.Fatalf("seed initial log: %v", err)
+	}
+	if err := markRunLineage(dir, "20"); err != nil {
+		t.Fatalf("markRunLineage: %v", err)
+	}
+
+	f, err := NewFactory(Config{}, dir, runner.NewFake(), fakeDriver{}, RealClock())
+	if err != nil {
+		t.Fatalf("NewFactory: %v", err)
+	}
+	defer f.Cleanup()
+	d := f.New("20", "test issue")
+
+	if err := d.EnsureRunLineage(); err != nil {
+		t.Fatalf("EnsureRunLineage: %v", err)
+	}
+
+	got := d.CumulativeUsage()
+	if got.InputTokens != 1000 {
+		t.Errorf("CumulativeUsage.InputTokens = %d, want 1000 (marker present must trust the existing log, not quarantine it)", got.InputTokens)
+	}
+	if diff := got.TotalCostUSD - 1.50; diff > 0.0001 || diff < -0.0001 {
+		t.Errorf("CumulativeUsage.TotalCostUSD = %v, want ~1.50 (marker present must trust the existing log, not quarantine it)", got.TotalCostUSD)
 	}
 }
 

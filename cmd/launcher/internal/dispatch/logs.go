@@ -55,21 +55,17 @@ func LogPaths(pwd, number string) []PassLog {
 // itself produced, never a leftover from an unrelated earlier run at the
 // same path (a re-dispatch of the same issue in a persistent pwd -- agent-
 // failed -> re-label, waves/continuous -- or issue #561's own "duplicate/
-// collided launch" case) -- PROVIDED this Dispatch reached this call via its
-// own Run(): Dispatch.Run quarantines any pre-existing log for this issue
-// out of this naming pattern before its very first attempt (box.go's
-// quarantinePriorRunLogs), so by the time a P.N sibling exists under this
-// scheme, only this run's own hold/backoff rotations could have put it
-// there.
-//
-// That guarantee does not hold for a Dispatch that never calls Run() at
-// all: main.go's recoverByNumber constructs one via Factory.New and, when
-// settle finds an already-open PR (SettleAdopted), calls
-// CumulativeUsage/UsageReport/Fix on it directly, so
-// quarantinePriorRunLogs never runs. On that recover/adopt path, in a
-// persistent working directory, a stray .N sibling left by an earlier,
-// unquarantined attempt sequence can still be walked here (issue #2575's
-// recover-path gap, pinned by TestCumulativeUsage_RecoverPathNeverQuarantines).
+// collided launch" case) -- PROVIDED this issue's log lineage was
+// established either by Dispatch.Run (which quarantines any pre-existing
+// log for this issue out of this naming pattern before its very first
+// attempt, box.go's quarantinePriorRunLogs) or, for a Dispatch that reaches
+// this call without ever calling Run() itself -- main.go's recoverByNumber
+// constructs one via Factory.New and, when settle finds an already-open PR
+// (SettleAdopted) or an adoptable relayed branch, calls
+// CumulativeUsage/UsageReport/Fix on it directly -- by an explicit
+// Dispatch.EnsureRunLineage call first (issue #2575). Either establishes
+// the same guarantee: by the time a P.N sibling exists under this scheme,
+// only this run's own hold/backoff rotations could have put it there.
 func AllAttemptLogPaths(pwd, number string) []PassLog {
 	var out []PassLog
 
