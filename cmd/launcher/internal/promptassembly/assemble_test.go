@@ -472,9 +472,12 @@ func TestAssembleAgentsJSON(t *testing.T) {
 	})
 }
 
-// TestAssembleUnsupportedCell covers every axis individually flipped away
-// from the covered cell: each must return an error satisfying
-// errors.Is(err, ErrUnsupportedCell).
+// TestAssembleUnsupportedCell covers the one axis checkCoveredCell still
+// validates (DispatchKind, issue #2540 -- IssueTracker and CodeForge are
+// covered upstream by lib/mkHarness.nix's choicesCheckOk assert and
+// cmd/launcher/main.go's validate(), so they no longer have cases here):
+// an unrecognized value must return an error satisfying errors.Is(err,
+// ErrUnsupportedCell).
 func TestAssembleUnsupportedCell(t *testing.T) {
 	reg := loadTestRegistry(t)
 
@@ -482,8 +485,6 @@ func TestAssembleUnsupportedCell(t *testing.T) {
 		name   string
 		mutate func(*Env)
 	}{
-		{name: "wrong issue tracker", mutate: func(e *Env) { e.IssueTracker = "bitbucket" }},
-		{name: "unrecognized code forge", mutate: func(e *Env) { e.CodeForge = "bogus" }},
 		{name: "unrecognized dispatch kind", mutate: func(e *Env) { e.DispatchKind = "bogus" }},
 	}
 	for _, tc := range cases {
@@ -504,14 +505,16 @@ func TestAssembleUnsupportedCell(t *testing.T) {
 }
 
 // TestAssembleAccessForgeCellsCovered covers the CodeForge x
-// BoxWriteEnabled cells this issue adds to checkCoveredCell's covered set
+// BoxWriteEnabled cells this issue adds to Assemble's covered set
 // (github+read-write was already covered): github+read-only,
 // forgejo+read-write, forgejo+read-only, plus (issue #2354) the "git" and
 // "local" CodeForge values -- both schema-documented (lib/env-schema.nix)
 // and already handled identically to "github" by Gates()
 // (gates_access_forge.go: "only forgejo diverges from the shared gh-flavored
-// path"), so checkCoveredCell's allowlist must accept them too. Each must
-// render without error.
+// path"). checkCoveredCell no longer re-validates CodeForge itself (issue
+// #2540 -- that's covered upstream, see its doc comment), but Assemble's
+// rendering logic must still accept all of these values. Each must render
+// without error.
 func TestAssembleAccessForgeCellsCovered(t *testing.T) {
 	reg := loadTestRegistry(t)
 
