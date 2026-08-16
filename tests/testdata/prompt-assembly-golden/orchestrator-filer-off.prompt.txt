@@ -336,6 +336,7 @@ unsure):
 gate): skip OPEN A PULL REQUEST below entirely.
 
 1. `git push --force-with-lease -u origin agent/issue-7` (if not already pushed).
+
 2. Print exactly one line as your final output and stop — raw plain text, not
    wrapped in backticks, a code fence, or any other markdown formatting:
 
@@ -343,13 +344,13 @@ gate): skip OPEN A PULL REQUEST below entirely.
 
    The launcher applies `MERGE_MODE` after this line (push straight to the
    target branch on `immediate`; leave the branch as pushed on `manual`).
-   Do NOT run `gh pr create` and do NOT attempt to merge.
+   Do not open a pull request and do not attempt to merge.
 
 **`CODE_FORGE=local`** (host-mediated Code Forge — no PR, no CI-watch, no
 network; the launcher lands your branch after this container exits): skip
-OPEN A PULL REQUEST below entirely. Do NOT `git push` — the repo you cloned
-from is mounted read-only — and do NOT run `git bundle create` yourself: the
-Harness bundles your commits out of the container after you exit.
+OPEN A PULL REQUEST below entirely. Do not push directly — the repo you
+cloned from is mounted read-only — and do not bundle your commits yourself:
+the Harness bundles them out of the container after you exit.
 
 1. Print exactly one line as your final output and stop — raw plain text, not
    wrapped in backticks, a code fence, or any other markdown formatting:
@@ -360,9 +361,9 @@ Harness bundles your commits out of the container after you exit.
    onto the Integration branch host-side. There is no PR to open, no CI to
    watch, and nothing further for you to do.
 
-**`CODE_FORGE=forgejo`** (Forgejo/Gitea Code Forge — the Box opens the PR via
-`fj pr create` and the launcher watches CI and merges it host-side, ADR 0038
-+ issue #1961): continue with OPEN A PULL REQUEST below.
+**`CODE_FORGE=forgejo`** (Forgejo/Gitea Code Forge — the Box opens the PR
+directly against the Forgejo API and the launcher watches CI and merges it
+host-side, ADR 0038 + issue #1961): continue with OPEN A PULL REQUEST below.
 
 **`CODE_FORGE=github`** (default): continue with OPEN A PULL REQUEST below.
 
