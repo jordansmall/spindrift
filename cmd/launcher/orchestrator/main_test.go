@@ -133,3 +133,31 @@ exit 0
 		t.Fatalf("driver-exec was never invoked -- the incoherent-cap warning aborted the run instead of proceeding")
 	}
 }
+
+// TestMainRunRejectsNonPositiveMaxParallelWorkers verifies the issue #2495
+// fix: unlike the cap-coherence warning above (which never aborts the run),
+// a non-positive -max-parallel-workers is fatal -- mainRun returns exit code
+// 1, writes an actionable message to stderr, and never invokes driver-exec
+// at all.
+func TestMainRunRejectsNonPositiveMaxParallelWorkers(t *testing.T) {
+	dir := t.TempDir()
+	callLog := filepath.Join(dir, "calls.log")
+	writeFakeDriverExec(t, dir, callLog, `printf 'SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=done nonce=abc\n'
+exit 0
+`)
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	var stdout, stderr bytes.Buffer
+	rc := mainRun(singlePassFakeDriverArgv(dir, "-max-parallel-workers=0"), &stdout, &stderr)
+
+	if rc != 1 {
+		t.Fatalf("mainRun exit code = %d, want 1 (stderr: %q)", rc, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "-max-parallel-workers=0") {
+		t.Errorf("stderr = %q, want it to name the offending -max-parallel-workers=0 value", stderr.String())
+	}
+
+	if _, err := os.ReadFile(callLog); err == nil {
+		t.Fatalf("driver-exec was invoked -- a non-positive -max-parallel-workers must abort the run before any pass runs")
+	}
+}

@@ -75,6 +75,15 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 	if err := validateCaps(*maxReviewRounds, *maxSlices, *reviewPromptFile != ""); err != nil {
 		fmt.Fprintln(stderr, err)
 	}
+	// Unlike the cap-coherence check above, a non-positive
+	// -max-parallel-workers is fatal (issue #2495): there is no meaningful
+	// "disabled" value for a concurrency semaphore's capacity, so a
+	// mistyped flag must abort the run rather than silently fall back to
+	// LaunchWorkers' own defaultMaxParallelWorkers substitution.
+	if err := validateMaxParallelWorkers(*maxParallelWorkers); err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
 
 	rc, err := run(config{
 		driver:             *driverName,
