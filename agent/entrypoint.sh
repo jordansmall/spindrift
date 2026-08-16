@@ -30,7 +30,6 @@ no_repo=false
 if [ "${SELF_CONTAINED:-}" = 1 ] && [ -n "${BOX_IN_BOX_UNREACHABLE_TRACKER:-}" ]; then
   no_repo=true
 fi
-[ "$fully_local" = true ] || [ "$no_repo" = true ] || : "${REPO_SLUG:?REPO_SLUG (owner/repo) is required}"
 : "${ISSUE_NUMBER:?ISSUE_NUMBER is required}"
 [ "$fully_local" = true ] || [ "$no_repo" = true ] || : "${GH_TOKEN:?GH_TOKEN is required}"
 : "${GIT_USER_NAME:?GIT_USER_NAME is required}"
