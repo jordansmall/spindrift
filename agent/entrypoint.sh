@@ -65,9 +65,11 @@ configure_env() {
   BRANCH="${BRANCH_PREFIX:-}${ISSUE_NUMBER}"
 
   # Baked-in locations; overridable only so the harness can be exercised on the
-  # host without a container.
+  # host without a container. PROMPTS_DIR moved to the nix-rendered agent-paths
+  # preamble (lib/preambles.nix's renderAgentPathsPreamble, issue #2531) --
+  # WORK_DIR/REPO_MOUNT_DIR/OUTBOX_DIR are true runtime mount points, not baked
+  # artifacts, so they keep their own literal defaults here.
   WORK_DIR="${WORK_DIR:-/work}"
-  PROMPTS_DIR="${PROMPTS_DIR:-/agent/prompts}"
   # REPO_MOUNT_DIR is the read-only Accumulation-repo mount CODE_FORGE=local
   # clones from instead of a network remote (ADR 0033, issue #1697's /repo
   # mount); unused otherwise.
@@ -106,42 +108,43 @@ configure_env() {
   # The canonical SPINDRIFT_OUTCOME contract (issue #419), baked at a sibling
   # path to /agent/prompts so a SPINDRIFT_PROMPT_DIR mount -- which shadows only
   # /agent/prompts -- never hides it (issue #420).
-  # Only the file-path default lives here; the driver-exec assemble-prompt
-  # verb (issue #2354) reads the marker straight off the contract file's own
-  # first line (injectSharedBlock, cmd/launcher/internal/promptassembly) so
-  # it cannot drift from the block's canonical source-file heading.
-  OUTCOME_CONTRACT_FILE="${OUTCOME_CONTRACT_FILE:-/agent/outcome-contract.md}"
+  # The driver-exec assemble-prompt verb (issue #2354) reads the marker
+  # straight off the contract file's own first line (injectSharedBlock,
+  # cmd/launcher/internal/promptassembly) so it cannot drift from the
+  # block's canonical source-file heading. The file-path default is rendered
+  # by lib/preambles.nix's renderAgentPathsPreamble from lib/agent-paths.nix,
+  # the single source of truth for this and the other baked /agent/* paths
+  # below (issue #2531).
 
   # The COMMS and CHECK/COMMIT blocks fix-prompt.md shares with issue-prompt.md
   # (issue #455 extends #419/#420's slice mechanism beyond the outcome contract):
   # baked and injected the same way, so a SPINDRIFT_PROMPT_DIR override of the
-  # fix prompt gets the identical treatment.
-  COMMS_CONTRACT_FILE="${COMMS_CONTRACT_FILE:-/agent/comms-contract.md}"
-  CHECK_CONTRACT_FILE="${CHECK_CONTRACT_FILE:-/agent/check-contract.md}"
+  # fix prompt gets the identical treatment. Defaults rendered by
+  # renderAgentPathsPreamble, same as OUTCOME_CONTRACT_FILE above.
 
   # The research dispatch kind's own harness-owned outcome contract (ADR 0022,
   # issue #640): posting the verdict comment and emitting the outcome line.
   # Baked and injected the same way as the work contract above, so a
-  # SPINDRIFT_PROMPT_DIR override of research-prompt.md gets it too.
-  RESEARCH_OUTCOME_CONTRACT_FILE="${RESEARCH_OUTCOME_CONTRACT_FILE:-/agent/research-outcome-contract.md}"
+  # SPINDRIFT_PROMPT_DIR override of research-prompt.md gets it too. Default
+  # rendered by renderAgentPathsPreamble, same as OUTCOME_CONTRACT_FILE above.
 
   # The Conditional fragment registry as JSON (issue #622, #2354), baked at
   # the same sibling-of-/agent/prompts path as the contract files above, for
-  # the `driver-exec assemble-prompt` verb's `--registry` flag.
-  PROMPTASSEMBLY_REGISTRY_FILE="${PROMPTASSEMBLY_REGISTRY_FILE:-/agent/fragments-registry.json}"
+  # the `driver-exec assemble-prompt` verb's `--registry` flag. Default
+  # rendered by renderAgentPathsPreamble, same as OUTCOME_CONTRACT_FILE above.
 
   # lib/prompt-contract.nix's validateMarkers list as JSON (issue #2356),
   # baked at the same sibling-of-/agent/prompts path as the contract files
   # above, for the `driver-exec assemble-prompt` verb's
-  # `--validate-markers-registry` flag.
-  PROMPT_CONTRACT_REGISTRY_FILE="${PROMPT_CONTRACT_REGISTRY_FILE:-/agent/prompt-contract-registry.json}"
+  # `--validate-markers-registry` flag. Default rendered by
+  # renderAgentPathsPreamble, same as OUTCOME_CONTRACT_FILE above.
 
   # lib/prompt-contract.nix's forbiddenMarkers list as JSON (issue #2464),
   # baked at the same sibling-of-/agent/prompts path as the contract files
   # above, for the `driver-exec readonly-guards` verb's
   # `--forbidden-markers-registry` flag (issue #2513: assemble-prompt no
-  # longer takes this flag).
-  FORBIDDEN_MARKERS_REGISTRY_FILE="${FORBIDDEN_MARKERS_REGISTRY_FILE:-/agent/forbidden-markers-registry.json}"
+  # longer takes this flag). Default rendered by renderAgentPathsPreamble,
+  # same as OUTCOME_CONTRACT_FILE above.
 
   # _driver_extract_outcome and _driver_session_flags are defined by the Driver
   # registry (lib/drivers/<name>.nix); a nix-built image prepends them via

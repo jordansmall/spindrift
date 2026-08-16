@@ -21,6 +21,7 @@ let
     opencodeHarness
     forgejoHarness
     ;
+  agentPaths = import ../../lib/agent-paths.nix;
   fragmentRows = import ../../lib/fragments.nix;
   fragmentBasenames = map (row: pkgs.lib.removeSuffix ".md" row.fragment) fragmentRows;
   # The shared prompt-block registry (issue #2245) lib/mkHarness.nix's
@@ -354,6 +355,45 @@ in
     done
     touch $out
   '';
+
+  # Issue #2531: the 8 baked /agent/* path literals (lib/agent-paths.nix) are
+  # rendered into the entrypoint preamble (lib/preambles.nix's
+  # renderAgentPathsPreamble) from the exact same nix binding agentFiles' cp
+  # destinations use (lib/image.nix) -- this check proves both sides actually
+  # agree in the real built image: the baked entrypoint.sh must carry each
+  # VAR=${VAR:-path} line, and something must actually exist at that path in
+  # the built agentFiles tree. A future rename that edits lib/agent-paths.nix
+  # without updating a hand-copied duplicate elsewhere is structurally
+  # impossible now (there is no duplicate left to edit), but this still guards
+  # against a regression that reintroduces one.
+  agent-paths-preamble-baked-into-image =
+    pkgs.runCommand "agent-paths-preamble-baked-into-image" { }
+      ''
+        ep=${batsHarness.agentFiles}/agent/entrypoint.sh
+        af=${batsHarness.agentFiles}
+        ${pkgs.lib.concatStrings (
+          pkgs.lib.mapAttrsToList (
+            var: path:
+            let
+              # Mirrors lib/preambles.nix's renderAgentPathsPreamble line shape
+              # byte-for-byte: VAR=${VAR:-path} (path is escapeShellArg-safe
+              # unquoted for every current agentPaths entry).
+              pattern = "${var}=\${${var}:-${path}}";
+            in
+            ''
+              grep -qF ${pkgs.lib.escapeShellArg pattern} "$ep" || {
+                echo ${pkgs.lib.escapeShellArg "entrypoint preamble is missing or diverges from ${pattern} -- rename not caught?"} >&2
+                exit 1
+              }
+              [ -e "$af${path}" ] || {
+                echo "${var} names ${path} but nothing is baked there" >&2
+                exit 1
+              }
+            ''
+          ) agentPaths
+        )}
+        touch $out
+      '';
 
   # The idempotency check (issue #420) hinges on the entrypoint sourcing its
   # marker from the same registry row lib/mkHarness.nix now looks up from

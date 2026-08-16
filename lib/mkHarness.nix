@@ -464,6 +464,14 @@ let
   # so neither can drift from the other.
   driverPreamble = driverRegistry.renderPreamble driverEntry;
 
+  # The 8 baked /agent/* path literals (contracts, registries, prompts dir)
+  # and their rendered fallback-preserving preamble (issue #2531): the same
+  # nix binding lib/image.nix's agentFiles cp destinations read, so a rename
+  # here updates both the image's copy destination and the entrypoint's
+  # baked default together.
+  agentPaths = import ./agent-paths.nix;
+  agentPathsPreamble = preambles.renderAgentPathsPreamble agentPaths;
+
   # The Conditional fragment registry (issue #622, CONTEXT.md), rendered into
   # agent/entrypoint.sh's single fragment loop input and `_subst`
   # substitution allowlist: a bash array of "gate|fragment|var" rows, plus a
@@ -787,6 +795,8 @@ let
   };
   imageContracts = {
     inherit
+      agentPaths
+      agentPathsPreamble
       fragmentsRegistryJson
       promptContractRegistryJson
       forbiddenMarkersRegistryJson

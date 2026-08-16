@@ -42,7 +42,13 @@
   # The contract files sliced from issue-prompt.md / research-prompt.md by
   # mkHarness (issues #419, #455, #640) and their injectors, plus the
   # fragment/prompt-contract/forbidden-markers registries baked as JSON for
-  # the Go `driver-exec` verbs (issues #2354, #2356, #2464).
+  # the Go `driver-exec` verbs (issues #2354, #2356, #2464). Also carries
+  # lib/agent-paths.nix's attrset (`agentPaths`, the single source of truth
+  # for the 8 baked /agent/* path literals driving agentFiles' cp
+  # destinations below) and its rendered fallback-defaults preamble
+  # (`agentPathsPreamble`, lib/preambles.nix's renderAgentPathsPreamble,
+  # issue #2531) — both are contract/registry-file-location data, the same
+  # family as the rest of this group.
   contracts,
   # The prompt tree: the Consumer's agent prompt template and the subagent
   # system prompts, the research prompts (ADR 0022, issues #640, #2202), the
@@ -148,6 +154,7 @@ let
       + lib.escapeShellArg agents.agentsPromptFilesJson
       + "\n"
       + driver.driverPreamble
+      + contracts.agentPathsPreamble
       + prompts.fragmentRegistryPreamble
       + knobs.entrypointDefaultsPreamble
       + stripShebang (builtins.readFile ../agent/entrypoint.sh);
@@ -280,7 +287,7 @@ let
   }) (builtins.filter (s: s.harnessOwned or false) bakedSkills);
 
   agentFiles = pkgs.runCommand "spindrift-agent-files" { } ''
-    mkdir -p $out/agent/prompts
+    mkdir -p $out${contracts.agentPaths.PROMPTS_DIR}
     ${lib.optionalString (driver.driverEntry ? sessionCacheDirRelative) ''
       # Pre-create the driver-cache mountpoint so podman reuses the agent-owned
       # directory instead of fabricating root-owned parents (issue #447).
@@ -303,30 +310,30 @@ let
     # A sibling of prompts/, not inside it, so a SPINDRIFT_PROMPT_DIR mount
     # (which shadows only /agent/prompts) never hides it from the entrypoint
     # (issue #420).
-    cp ${pkgs.writeText "outcome-contract.md" contracts.outcomeContract} $out/agent/outcome-contract.md
-    cp ${pkgs.writeText "comms-contract.md" contracts.commsBlock} $out/agent/comms-contract.md
-    cp ${pkgs.writeText "check-contract.md" contracts.checkBlock} $out/agent/check-contract.md
-    cp ${pkgs.writeText "research-outcome-contract.md" contracts.researchOutcomeContract} $out/agent/research-outcome-contract.md
-    cp ${pkgs.writeText "fragments-registry.json" contracts.fragmentsRegistryJson} $out/agent/fragments-registry.json
-    cp ${pkgs.writeText "prompt-contract-registry.json" contracts.promptContractRegistryJson} $out/agent/prompt-contract-registry.json
-    cp ${pkgs.writeText "forbidden-markers-registry.json" contracts.forbiddenMarkersRegistryJson} $out/agent/forbidden-markers-registry.json
-    cp ${pkgs.writeText "issue-prompt.md" (contracts.injectOutcomeContract prompts.prompt)} $out/agent/prompts/issue-prompt.md
-    cp ${pkgs.writeText "scout-prompt.md" prompts.scoutPrompt} $out/agent/prompts/scout-prompt.md
-    cp ${pkgs.writeText "review-prompt.md" prompts.reviewPrompt} $out/agent/prompts/review-prompt.md
-    cp ${pkgs.writeText "filer-prompt.md" prompts.filerPrompt} $out/agent/prompts/filer-prompt.md
-    cp ${pkgs.writeText "worker-prompt.md" prompts.workerPrompt} $out/agent/prompts/worker-prompt.md
+    cp ${pkgs.writeText "outcome-contract.md" contracts.outcomeContract} $out${contracts.agentPaths.OUTCOME_CONTRACT_FILE}
+    cp ${pkgs.writeText "comms-contract.md" contracts.commsBlock} $out${contracts.agentPaths.COMMS_CONTRACT_FILE}
+    cp ${pkgs.writeText "check-contract.md" contracts.checkBlock} $out${contracts.agentPaths.CHECK_CONTRACT_FILE}
+    cp ${pkgs.writeText "research-outcome-contract.md" contracts.researchOutcomeContract} $out${contracts.agentPaths.RESEARCH_OUTCOME_CONTRACT_FILE}
+    cp ${pkgs.writeText "fragments-registry.json" contracts.fragmentsRegistryJson} $out${contracts.agentPaths.PROMPTASSEMBLY_REGISTRY_FILE}
+    cp ${pkgs.writeText "prompt-contract-registry.json" contracts.promptContractRegistryJson} $out${contracts.agentPaths.PROMPT_CONTRACT_REGISTRY_FILE}
+    cp ${pkgs.writeText "forbidden-markers-registry.json" contracts.forbiddenMarkersRegistryJson} $out${contracts.agentPaths.FORBIDDEN_MARKERS_REGISTRY_FILE}
+    cp ${pkgs.writeText "issue-prompt.md" (contracts.injectOutcomeContract prompts.prompt)} $out${contracts.agentPaths.PROMPTS_DIR}/issue-prompt.md
+    cp ${pkgs.writeText "scout-prompt.md" prompts.scoutPrompt} $out${contracts.agentPaths.PROMPTS_DIR}/scout-prompt.md
+    cp ${pkgs.writeText "review-prompt.md" prompts.reviewPrompt} $out${contracts.agentPaths.PROMPTS_DIR}/review-prompt.md
+    cp ${pkgs.writeText "filer-prompt.md" prompts.filerPrompt} $out${contracts.agentPaths.PROMPTS_DIR}/filer-prompt.md
+    cp ${pkgs.writeText "worker-prompt.md" prompts.workerPrompt} $out${contracts.agentPaths.PROMPTS_DIR}/worker-prompt.md
     ${lib.concatMapStrings (
       e:
       let
         pf = e.promptFile;
       in
-      "cp ${pkgs.writeText pf e.prompt} $out/agent/prompts/${pf}\n"
+      "cp ${pkgs.writeText pf e.prompt} $out${contracts.agentPaths.PROMPTS_DIR}/${pf}\n"
     ) agents.customRosterPromptFiles}
-    cp ${pkgs.writeText "conflict-resolve-prompt.md" prompts.conflictResolvePrompt} $out/agent/prompts/conflict-resolve-prompt.md
-    cp ${pkgs.writeText "fix-prompt.md" (contracts.injectFixSharedBlocks prompts.fixPrompt)} $out/agent/prompts/fix-prompt.md
-    cp ${pkgs.writeText "research-prompt.md" (contracts.injectResearchOutcomeContract prompts.researchPrompt)} $out/agent/prompts/research-prompt.md
-    cp ${pkgs.writeText "research-self-contained-prompt.md" (contracts.injectResearchOutcomeContract prompts.researchSelfContainedPrompt)} $out/agent/prompts/research-self-contained-prompt.md
-    cp -r ${prompts.fragmentsSourceDir} $out/agent/prompts/fragments
+    cp ${pkgs.writeText "conflict-resolve-prompt.md" prompts.conflictResolvePrompt} $out${contracts.agentPaths.PROMPTS_DIR}/conflict-resolve-prompt.md
+    cp ${pkgs.writeText "fix-prompt.md" (contracts.injectFixSharedBlocks prompts.fixPrompt)} $out${contracts.agentPaths.PROMPTS_DIR}/fix-prompt.md
+    cp ${pkgs.writeText "research-prompt.md" (contracts.injectResearchOutcomeContract prompts.researchPrompt)} $out${contracts.agentPaths.PROMPTS_DIR}/research-prompt.md
+    cp ${pkgs.writeText "research-self-contained-prompt.md" (contracts.injectResearchOutcomeContract prompts.researchSelfContainedPrompt)} $out${contracts.agentPaths.PROMPTS_DIR}/research-self-contained-prompt.md
+    cp -r ${prompts.fragmentsSourceDir} $out${contracts.agentPaths.PROMPTS_DIR}/fragments
     ${lib.optionalString ((harnessSkills ++ agents.skills) != [ ]) ''
       mkdir -p $out/agent/skills
       ${lib.concatMapStrings (
