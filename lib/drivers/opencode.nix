@@ -160,4 +160,23 @@
         '';
       }) present
     );
+
+  # opencode's CLI argv shape (ADR 0009, issue #2534): the prompt is a bare
+  # positional argument (no flag), and opencode has no --agents equivalent --
+  # agentsFlag is deliberately omitted, the nullable slot's "absent" case.
+  # Reproduces the exact behavior of the args.go opencode branch this issue
+  # replaces.
+  argvShape = {
+    promptStyle = "positional";
+    modelFlag = "-m";
+    modelOmitEmpty = true;
+    effortFlag = "--variant";
+    order = [
+      "driverFlags"
+      "model"
+      "effort"
+      "session"
+      "prompt"
+    ];
+  };
 }

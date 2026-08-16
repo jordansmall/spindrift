@@ -31,6 +31,27 @@ let
     outcomeExtractFnBody = "echo stub-outcome\n";
     outcomeExtractNearMissFnBody = "echo stub-near-miss\n";
     sessionFlagsFnBody = "echo stub-session\n";
+    # Minimal well-formed argvShape (issue #2534): agentsFlag is deliberately
+    # omitted (like opencode.nix) and modelOmitEmpty is false, so
+    # drivers-render-preamble-omits-argv-shape-optional-vars below can assert
+    # both DRIVER_ARGV_AGENTS_FLAG and DRIVER_ARGV_MODEL_OMIT_EMPTY are
+    # omitted from renderPreamble's output for this fixture. order tracks
+    # agentsFlag's absence, dropping the "agents" slot (see
+    # assertArgvShape's expectedSlots).
+    argvShape = {
+      promptStyle = "flag";
+      promptFlag = "-p";
+      modelFlag = "--model";
+      modelOmitEmpty = false;
+      effortFlag = "--effort";
+      order = [
+        "prompt"
+        "model"
+        "session"
+        "driverFlags"
+        "effort"
+      ];
+    };
   };
   # Shared defaultRoster fixture (issue #2386): both
   # drivers-claude-agents-json-default-roster-effort and
@@ -1046,4 +1067,248 @@ in
     assert assertMsg (opencodeEntry.skillsDirRelative == claudeEntry.skillsDirRelative)
       "opencode Driver's skillsDirRelative must match claude's (ADR 0009), got opencode: ${opencodeEntry.skillsDirRelative}, claude: ${claudeEntry.skillsDirRelative}";
     pkgs.runCommand "drivers-opencode-skills-dir-matches-claude" { } "touch $out";
+
+  # Issue #2534: assertArgvShape validates argvShape's internal structure --
+  # assertShape (pinned above) only checks the attribute is present. Each of
+  # the following throws-cases perturbs exactly one field of an otherwise
+  # well-formed argvShape (stubDriverBase's own) off of stubDriverBase.
+  drivers-assert-argv-shape-bad-prompt-style-throws =
+    let
+      entry = stubDriverBase // {
+        argvShape = stubDriverBase.argvShape // {
+          promptStyle = "bogus";
+        };
+      };
+      result = builtins.tryEval (driverRegistry.assertArgvShape "stub" entry);
+    in
+    assert assertMsg (
+      !result.success
+    ) "assertArgvShape must throw when argvShape.promptStyle is neither \"flag\" nor \"positional\"";
+    pkgs.runCommand "drivers-assert-argv-shape-bad-prompt-style-throws" { } "touch $out";
+
+  drivers-assert-argv-shape-missing-prompt-flag-throws =
+    let
+      entry = stubDriverBase // {
+        argvShape = builtins.removeAttrs stubDriverBase.argvShape [ "promptFlag" ];
+      };
+      result = builtins.tryEval (driverRegistry.assertArgvShape "stub" entry);
+    in
+    assert assertMsg (
+      !result.success
+    ) "assertArgvShape must throw when promptStyle is \"flag\" but promptFlag is missing";
+    pkgs.runCommand "drivers-assert-argv-shape-missing-prompt-flag-throws" { } "touch $out";
+
+  drivers-assert-argv-shape-empty-model-flag-throws =
+    let
+      entry = stubDriverBase // {
+        argvShape = stubDriverBase.argvShape // {
+          modelFlag = "";
+        };
+      };
+      result = builtins.tryEval (driverRegistry.assertArgvShape "stub" entry);
+    in
+    assert assertMsg (
+      !result.success
+    ) "assertArgvShape must throw when argvShape.modelFlag is empty";
+    pkgs.runCommand "drivers-assert-argv-shape-empty-model-flag-throws" { } "touch $out";
+
+  drivers-assert-argv-shape-non-bool-model-omit-empty-throws =
+    let
+      entry = stubDriverBase // {
+        argvShape = stubDriverBase.argvShape // {
+          modelOmitEmpty = "false";
+        };
+      };
+      result = builtins.tryEval (driverRegistry.assertArgvShape "stub" entry);
+    in
+    assert assertMsg (
+      !result.success
+    ) "assertArgvShape must throw when argvShape.modelOmitEmpty is not a bool";
+    pkgs.runCommand "drivers-assert-argv-shape-non-bool-model-omit-empty-throws" { } "touch $out";
+
+  # The nullable slot (issue #2534): absent entirely is valid (opencode has
+  # no --agents equivalent), but present-and-empty is a violation.
+  drivers-assert-argv-shape-empty-agents-flag-throws =
+    let
+      entry = stubDriverBase // {
+        argvShape = stubDriverBase.argvShape // {
+          agentsFlag = "";
+        };
+      };
+      result = builtins.tryEval (driverRegistry.assertArgvShape "stub" entry);
+    in
+    assert assertMsg (
+      !result.success
+    ) "assertArgvShape must throw when argvShape.agentsFlag is present but empty";
+    pkgs.runCommand "drivers-assert-argv-shape-empty-agents-flag-throws" { } "touch $out";
+
+  drivers-assert-argv-shape-empty-effort-flag-throws =
+    let
+      entry = stubDriverBase // {
+        argvShape = stubDriverBase.argvShape // {
+          effortFlag = "";
+        };
+      };
+      result = builtins.tryEval (driverRegistry.assertArgvShape "stub" entry);
+    in
+    assert assertMsg (
+      !result.success
+    ) "assertArgvShape must throw when argvShape.effortFlag is empty";
+    pkgs.runCommand "drivers-assert-argv-shape-empty-effort-flag-throws" { } "touch $out";
+
+  drivers-assert-argv-shape-order-missing-slot-throws =
+    let
+      entry = stubDriverBase // {
+        argvShape = stubDriverBase.argvShape // {
+          order = [
+            "prompt"
+            "model"
+            "session"
+            "driverFlags"
+          ];
+        };
+      };
+      result = builtins.tryEval (driverRegistry.assertArgvShape "stub" entry);
+    in
+    assert assertMsg (
+      !result.success
+    ) "assertArgvShape must throw when argvShape.order is missing a slot (effort, here)";
+    pkgs.runCommand "drivers-assert-argv-shape-order-missing-slot-throws" { } "touch $out";
+
+  drivers-assert-argv-shape-order-duplicate-or-unknown-throws =
+    let
+      entry = stubDriverBase // {
+        argvShape = stubDriverBase.argvShape // {
+          order = [
+            "prompt"
+            "prompt"
+            "session"
+            "driverFlags"
+            "bogus"
+          ];
+        };
+      };
+      result = builtins.tryEval (driverRegistry.assertArgvShape "stub" entry);
+    in
+    assert assertMsg (
+      !result.success
+    ) "assertArgvShape must throw when argvShape.order has a duplicated slot name (prompt) and an unknown one (bogus)";
+    pkgs.runCommand "drivers-assert-argv-shape-order-duplicate-or-unknown-throws" { } "touch $out";
+
+  # The complementary positive case (mirrors drivers-assert-shape-succeeds
+  # above): a fully well-formed argvShape must not throw and must return the
+  # entry unchanged.
+  drivers-assert-argv-shape-succeeds =
+    let
+      entry = stubDriverBase // {
+        package = pkgs: pkgs.hello;
+        agentsJsonTemplate = "{}";
+        agentFilesTemplate = _: { };
+      };
+      result = builtins.tryEval (driverRegistry.assertArgvShape "stub" entry);
+    in
+    assert assertMsg (
+      result.success
+    ) "assertArgvShape must not throw when argvShape is fully well-formed";
+    assert assertMsg (
+      result.value == entry
+    ) "assertArgvShape must return the Driver entry unchanged when argvShape is fully well-formed";
+    pkgs.runCommand "drivers-assert-argv-shape-succeeds" { } "touch $out";
+
+  # Mirrors drivers-render-preamble-shape's hasInfix style: renderPreamble
+  # must bake every argvShape field stubDriverBase declares into its own
+  # DRIVER_ARGV_* var, space-joining order into a single shell-escaped var.
+  drivers-render-preamble-argv-shape =
+    let
+      out = driverRegistry.renderPreamble stubDriverBase;
+    in
+    assert assertMsg (hasInfix "DRIVER_ARGV_PROMPT_STYLE=flag" out)
+      "renderPreamble must bake DRIVER_ARGV_PROMPT_STYLE from the Driver entry's argvShape.promptStyle, got: ${out}";
+    assert assertMsg (hasInfix "DRIVER_ARGV_PROMPT_FLAG=-p" out)
+      "renderPreamble must bake DRIVER_ARGV_PROMPT_FLAG from the Driver entry's argvShape.promptFlag, got: ${out}";
+    assert assertMsg (hasInfix "DRIVER_ARGV_MODEL_FLAG=--model" out)
+      "renderPreamble must bake DRIVER_ARGV_MODEL_FLAG from the Driver entry's argvShape.modelFlag, got: ${out}";
+    assert assertMsg (hasInfix "DRIVER_ARGV_EFFORT_FLAG=--effort" out)
+      "renderPreamble must bake DRIVER_ARGV_EFFORT_FLAG from the Driver entry's argvShape.effortFlag, got: ${out}";
+    assert assertMsg (hasInfix "DRIVER_ARGV_ORDER='prompt model session driverFlags effort'" out)
+      "renderPreamble must bake DRIVER_ARGV_ORDER as a single space-separated, shell-escaped var from argvShape.order, got: ${out}";
+    pkgs.runCommand "drivers-render-preamble-argv-shape" { } "touch $out";
+
+  # Mirrors drivers-render-preamble-omits-agent-files-dir-when-absent's
+  # omission style: stubDriverBase's argvShape sets modelOmitEmpty=false and
+  # omits agentsFlag, so both bare/optional vars must be absent entirely --
+  # not rendered empty -- from renderPreamble's output.
+  drivers-render-preamble-omits-argv-shape-optional-vars =
+    let
+      out = driverRegistry.renderPreamble stubDriverBase;
+    in
+    assert assertMsg (!(hasInfix "DRIVER_ARGV_AGENTS_FLAG" out))
+      "renderPreamble must omit DRIVER_ARGV_AGENTS_FLAG entirely for a Driver entry whose argvShape has no agentsFlag, got: ${out}";
+    assert assertMsg (!(hasInfix "DRIVER_ARGV_MODEL_OMIT_EMPTY" out))
+      "renderPreamble must omit DRIVER_ARGV_MODEL_OMIT_EMPTY entirely when argvShape.modelOmitEmpty is false, got: ${out}";
+    pkgs.runCommand "drivers-render-preamble-omits-argv-shape-optional-vars" { } "touch $out";
+
+  # Pins the REAL claude entry's argvShape (not stubDriverBase) so the
+  # acceptance criterion "both entries carry argvShape" has eval-level
+  # coverage against lib/drivers/claude.nix's actual declared values, mirroring
+  # drivers-opencode-skills-dir-pinned's pin-the-exact-value style.
+  drivers-claude-argv-shape-pinned =
+    let
+      claudeEntry = driverRegistry.entries.claude;
+      shape = claudeEntry.argvShape;
+    in
+    assert assertMsg (shape.promptStyle == "flag")
+      "claude Driver's argvShape.promptStyle must stay \"flag\", got: ${shape.promptStyle}";
+    assert assertMsg (shape.promptFlag == "-p")
+      "claude Driver's argvShape.promptFlag must stay \"-p\", got: ${shape.promptFlag}";
+    assert assertMsg (shape.modelFlag == "--model")
+      "claude Driver's argvShape.modelFlag must stay \"--model\", got: ${shape.modelFlag}";
+    assert assertMsg (shape.modelOmitEmpty == false)
+      "claude Driver's argvShape.modelOmitEmpty must stay false, got: ${builtins.toJSON shape.modelOmitEmpty}";
+    assert assertMsg (shape.agentsFlag == "--agents")
+      "claude Driver's argvShape.agentsFlag must stay \"--agents\", got: ${shape.agentsFlag}";
+    assert assertMsg (shape.effortFlag == "--effort")
+      "claude Driver's argvShape.effortFlag must stay \"--effort\", got: ${shape.effortFlag}";
+    assert assertMsg (
+      shape.order == [
+        "prompt"
+        "model"
+        "agents"
+        "session"
+        "driverFlags"
+        "effort"
+      ]
+    ) "claude Driver's argvShape.order must stay pinned, got: ${builtins.toJSON shape.order}";
+    pkgs.runCommand "drivers-claude-argv-shape-pinned" { } "touch $out";
+
+  # Pins the REAL opencode entry's argvShape the same way -- agentsFlag stays
+  # absent (opencode has no --agents equivalent) and order stays the 5-slot
+  # permutation excluding "agents".
+  drivers-opencode-argv-shape-pinned =
+    let
+      opencodeEntry = driverRegistry.entries.opencode;
+      shape = opencodeEntry.argvShape;
+    in
+    assert assertMsg (shape.promptStyle == "positional")
+      "opencode Driver's argvShape.promptStyle must stay \"positional\", got: ${shape.promptStyle}";
+    assert assertMsg (!(shape ? promptFlag))
+      "opencode Driver's argvShape must not declare promptFlag for a positional prompt style, got: ${builtins.toJSON shape}";
+    assert assertMsg (shape.modelFlag == "-m")
+      "opencode Driver's argvShape.modelFlag must stay \"-m\", got: ${shape.modelFlag}";
+    assert assertMsg (shape.modelOmitEmpty == true)
+      "opencode Driver's argvShape.modelOmitEmpty must stay true, got: ${builtins.toJSON shape.modelOmitEmpty}";
+    assert assertMsg (!(shape ? agentsFlag))
+      "opencode Driver's argvShape must not declare agentsFlag (opencode has no --agents equivalent), got: ${builtins.toJSON shape}";
+    assert assertMsg (shape.effortFlag == "--variant")
+      "opencode Driver's argvShape.effortFlag must stay \"--variant\", got: ${shape.effortFlag}";
+    assert assertMsg (
+      shape.order == [
+        "driverFlags"
+        "model"
+        "effort"
+        "session"
+        "prompt"
+      ]
+    ) "opencode Driver's argvShape.order must stay pinned, got: ${builtins.toJSON shape.order}";
+    pkgs.runCommand "drivers-opencode-argv-shape-pinned" { } "touch $out";
 }
