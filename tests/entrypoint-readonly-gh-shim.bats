@@ -28,7 +28,7 @@ setup() {
   [ ! -e "$(dirname "$WORK_DIR")/readonly-gh-shim" ]
 }
 
-@test "read-only Box's gh shim rejects gh pr create, naming the PR-intent relay" {
+@test "read-only Box's gh shim rejects gh pr create" {
   unset BOX_WRITE_ENABLED # issue #2465: read-only Box
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
@@ -41,9 +41,14 @@ setup() {
   shim_dir="$HOME/.spindrift/readonly-gh-shim"
   [ -d "$shim_dir" ]
 
+  # The rejection's wording lives in lib/prompt-contract.nix's
+  # forbiddenMarkers registry (issue #2509), rendered verbatim into the
+  # installed shim by driver-exec readonly-guards -- assert the stable "gh
+  # pr create" substring the row's own message always names, not its full
+  # prose, which the registry is free to reword.
   PATH="$shim_dir:$PATH" run gh pr create --title "x" --body "y"
   [ "$status" -ne 0 ]
-  [[ "$output" == *"SPINDRIFT_PR_INTENT"* ]] || [[ "$output" == *"PR-intent"* ]]
+  [[ "$output" == *"gh pr create"* ]]
 }
 
 @test "read-only Box's gh shim rejects gh pr ready" {
@@ -57,7 +62,6 @@ setup() {
 
   PATH="$shim_dir:$PATH" run gh pr ready 1
   [ "$status" -ne 0 ]
-  [[ "$output" == *"launcher"* ]]
   [[ "$output" == *"gh pr ready"* ]]
 }
 
@@ -72,11 +76,10 @@ setup() {
 
   PATH="$shim_dir:$PATH" run gh pr merge 1
   [ "$status" -ne 0 ]
-  [[ "$output" == *"launcher"* ]]
   [[ "$output" == *"gh pr merge"* ]]
 }
 
-@test "read-only Box's gh shim rejects gh issue comment, naming the note= relay" {
+@test "read-only Box's gh shim rejects gh issue comment" {
   unset BOX_WRITE_ENABLED # issue #2465: read-only Box
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
@@ -87,10 +90,10 @@ setup() {
 
   PATH="$shim_dir:$PATH" run gh issue comment 1 --body "hi"
   [ "$status" -ne 0 ]
-  [[ "$output" == *"note="* ]]
+  [[ "$output" == *"gh issue comment"* ]]
 }
 
-@test "read-only Box's gh shim rejects gh issue create, naming the issue-intent relay" {
+@test "read-only Box's gh shim rejects gh issue create" {
   unset BOX_WRITE_ENABLED # issue #2465: read-only Box
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
@@ -101,7 +104,7 @@ setup() {
 
   PATH="$shim_dir:$PATH" run gh issue create --title "x" --body "y"
   [ "$status" -ne 0 ]
-  [[ "$output" == *"SPINDRIFT_ISSUE_INTENT"* ]] || [[ "$output" == *"issue-intent"* ]]
+  [[ "$output" == *"gh issue create"* ]]
 }
 
 @test "read-only Box's gh shim rejects gh api with a mutating method (-X POST)" {
