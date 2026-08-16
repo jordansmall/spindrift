@@ -242,11 +242,6 @@
     "var": "LAND_GIT_PUSH_READ_WRITE_STEP"
   },
   {
-    "gate": "BOX_ACCESS_READ_ONLY",
-    "fragment": "land-git-push-outbox.md",
-    "var": "LAND_GIT_PUSH_READ_ONLY_STEP"
-  },
-  {
     "gate": "BOX_ACCESS_READ_WRITE",
     "fragment": "open-pr-push-git.md",
     "var": "OPEN_PR_PUSH_READ_WRITE_STEP"

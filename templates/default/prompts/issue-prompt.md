@@ -146,7 +146,7 @@ unsure):
 **`CODE_FORGE=git`** (push-only Code Forge — no PR, no CI-watch, no merge
 gate): skip OPEN A PULL REQUEST below entirely.
 
-${LAND_GIT_PUSH_READ_WRITE_STEP}${LAND_GIT_PUSH_READ_ONLY_STEP}2. Print exactly one line as your final output and stop — raw plain text, not
+${LAND_GIT_PUSH_READ_WRITE_STEP}2. Print exactly one line as your final output and stop — raw plain text, not
    wrapped in backticks, a code fence, or any other markdown formatting:
 
    SPINDRIFT_OUTCOME issue=${ISSUE_NUMBER} landing=${BRANCH} status=ready note=<short reason>

@@ -7,11 +7,13 @@ import (
 )
 
 // TestLoadRegistryParsesAllRows loads testdata/registry.json — the hand
-// transcription of every row in lib/fragments.nix (68 rows as of issue
-// #2510, which added the LAND_GIT_PUSH_READ_WRITE_STEP/
-// LAND_GIT_PUSH_READ_ONLY_STEP pair) — and spot-checks a handful of known
-// rows rather than asserting the full payload verbatim, so this test
-// doesn't itself become the thing that silently drifts from fragments.nix.
+// transcription of every row in lib/fragments.nix (67 rows as of issue
+// #2526, which removed the LAND_GIT_PUSH_READ_ONLY_STEP row added by issue
+// #2510: an eval-time assert now makes BOX_FORGE_AND_ISSUE_ACCESS=read-only
+// paired with CODE_FORGE=git unbuildable, so no image needing that step can
+// exist) — and spot-checks a handful of known rows rather than asserting
+// the full payload verbatim, so this test doesn't itself become the thing
+// that silently drifts from fragments.nix.
 func TestLoadRegistryParsesAllRows(t *testing.T) {
 	f, err := os.Open("testdata/registry.json")
 	if err != nil {
@@ -24,7 +26,7 @@ func TestLoadRegistryParsesAllRows(t *testing.T) {
 		t.Fatalf("LoadRegistry: %v", err)
 	}
 
-	const wantRows = 68
+	const wantRows = 67
 	if len(reg.Rows) != wantRows {
 		t.Fatalf("len(reg.Rows) = %d, want %d", len(reg.Rows), wantRows)
 	}
