@@ -3,11 +3,14 @@ package promptassembly
 import "testing"
 
 // TestGatesSkillsBaking covers the CAVEMAN_BAKED/TDD_BAKED/COMMIT_BAKED/
-// CODE_REVIEW_BAKED gates (entrypoint.sh phase_prompt_assembly, lines
-// 727-747): each fires only when the corresponding skill was actually baked
-// at DRIVER_SKILLS_DIR/<name>/SKILL.md — a per-skill presence flag the CLI
-// boundary resolves via a filesystem stat before ever reaching this pure
-// Env, so Gates itself only branches on the already-resolved bool.
+// CODE_REVIEW_BAKED/AUTO_FORMAT_BAKED/AUTO_LINT_BAKED gates (entrypoint.sh
+// phase_prompt_assembly, lines 733-739): each fires only when the
+// corresponding skill was actually baked at DRIVER_SKILLS_DIR/<name>/
+// SKILL.md — a per-skill presence flag the CLI boundary resolves via a
+// filesystem stat before ever reaching this pure Env, so Gates itself only
+// branches on the already-resolved bool. AUTO_FORMAT_BAKED/AUTO_LINT_BAKED
+// exist for consistency/completeness of the generated skill-baked family,
+// not because any fragment row gates on them yet.
 func TestGatesSkillsBaking(t *testing.T) {
 	cases := []struct {
 		name string
@@ -22,6 +25,8 @@ func TestGatesSkillsBaking(t *testing.T) {
 				"TDD_BAKED":         false,
 				"COMMIT_BAKED":      false,
 				"CODE_REVIEW_BAKED": false,
+				"AUTO_FORMAT_BAKED": false,
+				"AUTO_LINT_BAKED":   false,
 			},
 		},
 		{
@@ -31,12 +36,16 @@ func TestGatesSkillsBaking(t *testing.T) {
 				TDDSkillBaked:        true,
 				CommitSkillBaked:     true,
 				CodeReviewSkillBaked: true,
+				AutoFormatSkillBaked: true,
+				AutoLintSkillBaked:   true,
 			},
 			want: map[string]bool{
 				"CAVEMAN_BAKED":     true,
 				"TDD_BAKED":         true,
 				"COMMIT_BAKED":      true,
 				"CODE_REVIEW_BAKED": true,
+				"AUTO_FORMAT_BAKED": true,
+				"AUTO_LINT_BAKED":   true,
 			},
 		},
 		{
@@ -49,51 +58,8 @@ func TestGatesSkillsBaking(t *testing.T) {
 				"TDD_BAKED":         false,
 				"COMMIT_BAKED":      false,
 				"CODE_REVIEW_BAKED": false,
-			},
-		},
-	}
-	for _, tc := range cases {
-		tc := tc
-		t.Run(tc.name, func(t *testing.T) {
-			got := Gates(tc.env)
-			for k, want := range tc.want {
-				if got[k] != want {
-					t.Errorf("Gates(%+v)[%q] = %v, want %v", tc.env, k, got[k], want)
-				}
-			}
-		})
-	}
-}
-
-// TestGatesAutoFormatAutoLintSkillBaked covers the AUTO_FORMAT_BAKED/
-// AUTO_LINT_BAKED gates: each fires exactly when the corresponding skill was
-// baked at DRIVER_SKILLS_DIR/<name>/SKILL.md, mirroring the other four
-// skill-baked gates above -- these two exist for consistency/completeness of
-// the generated skill-baked family, not because any fragment row gates on
-// them yet.
-func TestGatesAutoFormatAutoLintSkillBaked(t *testing.T) {
-	cases := []struct {
-		name string
-		env  Env
-		want map[string]bool
-	}{
-		{
-			name: "neither baked",
-			env:  Env{},
-			want: map[string]bool{
 				"AUTO_FORMAT_BAKED": false,
 				"AUTO_LINT_BAKED":   false,
-			},
-		},
-		{
-			name: "both baked",
-			env: Env{
-				AutoFormatSkillBaked: true,
-				AutoLintSkillBaked:   true,
-			},
-			want: map[string]bool{
-				"AUTO_FORMAT_BAKED": true,
-				"AUTO_LINT_BAKED":   true,
 			},
 		},
 		{
@@ -102,6 +68,10 @@ func TestGatesAutoFormatAutoLintSkillBaked(t *testing.T) {
 				AutoFormatSkillBaked: true,
 			},
 			want: map[string]bool{
+				"CAVEMAN_BAKED":     false,
+				"TDD_BAKED":         false,
+				"COMMIT_BAKED":      false,
+				"CODE_REVIEW_BAKED": false,
 				"AUTO_FORMAT_BAKED": true,
 				"AUTO_LINT_BAKED":   false,
 			},

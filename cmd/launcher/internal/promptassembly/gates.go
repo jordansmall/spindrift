@@ -12,7 +12,7 @@ import "encoding/json"
 func Gates(e Env) map[string]bool {
 	g := map[string]bool{}
 
-	// Skill-baking gates (entrypoint.sh: 736-747): each fires exactly when
+	// Skill-baking gates (entrypoint.sh: 733-739): each fires exactly when
 	// its corresponding skill was baked at DRIVER_SKILLS_DIR/<name>/SKILL.md.
 	// BEGIN GENERATED SKILL-BAKED GATES -- nix run .#regen -- DO NOT EDIT
 	g["CAVEMAN_BAKED"] = e.CavemanSkillBaked

@@ -32,7 +32,7 @@ const (
 // passthrough surface) round out the type for later slices (Assemble, the
 // CLI verb) that render the rest of the prompt, not just its gates.
 type Env struct {
-	// Skill-baking presence flags (entrypoint.sh: 736-747). Each is true
+	// Skill-baking presence flags (entrypoint.sh: 733-739). Each is true
 	// only when DRIVER_SKILLS_DIR/<name>/SKILL.md exists — bash resolves
 	// the stat itself; Env only ever sees the already-computed flag.
 	// BEGIN GENERATED SKILL-BAKED FIELDS -- nix run .#regen -- DO NOT EDIT
