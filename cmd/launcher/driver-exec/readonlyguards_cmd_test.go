@@ -122,6 +122,35 @@ func TestRunReadonlyGuards_ExtraRepoDirAlsoGetsHook(t *testing.T) {
 	}
 }
 
+// TestRunReadonlyGuards_SkipGitHookInstallsShimOnlyNoRepoDir verifies
+// -skip-git-hook is wired into readonlyguards.Config.SkipGitHook: with the
+// flag set and -repo-dir omitted entirely, the command-shim guard still
+// installs and runReadonlyGuards exits 0 -- no "RepoDir is empty" error,
+// mirroring entrypoint.sh's outbox-incapable Box branch (issue #2509).
+func TestRunReadonlyGuards_SkipGitHookInstallsShimOnlyNoRepoDir(t *testing.T) {
+	stubBinOnPath(t, "gh")
+	shimDir := t.TempDir()
+
+	var stdout bytes.Buffer
+	rc := runReadonlyGuards([]string{
+		"--forbidden-markers-registry", forbiddenMarkersRegistryPathForReadonlyGuardsTest,
+		"--skip-git-hook",
+		"--shim-dir", shimDir,
+	}, &stdout)
+	if rc != 0 {
+		t.Fatalf("runReadonlyGuards exit = %d, want 0 (stdout=%q)", rc, stdout.String())
+	}
+
+	if _, err := os.Stat(filepath.Join(shimDir, "gh")); err != nil {
+		t.Errorf("gh shim not installed: %v", err)
+	}
+
+	out := stdout.String()
+	if !bytes.Contains([]byte(out), []byte("hook installed=false")) {
+		t.Errorf("stdout = %q, want it to report hook installed=false", out)
+	}
+}
+
 // TestRunReadonlyGuards_MissingRegistryFlagReturnsNonZero verifies a missing
 // -forbidden-markers-registry flag fails loudly (exit 1) instead of running
 // Install against a zero-value rows slice.
@@ -197,5 +226,13 @@ func TestNewReadonlyGuardsFlagSet_DefaultsAreEmpty(t *testing.T) {
 		if got.DefValue != "" {
 			t.Errorf("%s default = %q, want empty", name, got.DefValue)
 		}
+	}
+
+	skipGitHook := fs.Lookup("skip-git-hook")
+	if skipGitHook == nil {
+		t.Fatal("skip-git-hook flag not registered")
+	}
+	if skipGitHook.DefValue != "false" {
+		t.Errorf("skip-git-hook default = %q, want \"false\"", skipGitHook.DefValue)
 	}
 }

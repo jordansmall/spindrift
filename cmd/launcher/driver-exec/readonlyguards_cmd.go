@@ -23,6 +23,7 @@ type readonlyGuardsFlags struct {
 	repoDir                      *string
 	extraRepoDir                 *string
 	shimDir                      *string
+	skipGitHook                  *bool
 }
 
 // newReadonlyGuardsFlagSet builds the readonly-guards subcommand's
@@ -37,6 +38,7 @@ func newReadonlyGuardsFlagSet() (*flag.FlagSet, *readonlyGuardsFlags) {
 		repoDir:                      fs.String("repo-dir", "", "the git repository (or bare/decoy repository) whose .git/hooks directory receives the rendered git-hook guard; required when the registry has at least one git-hook row"),
 		extraRepoDir:                 fs.String("extra-repo-dir", "", "an additional git repository whose .git/hooks directory also receives the rendered git-hook guard, identical to -repo-dir's (issue #2509 Finding 1: entrypoint.sh passes $WORK_DIR here alongside the decoy repo at -repo-dir); optional"),
 		shimDir:                      fs.String("shim-dir", "", "directory to install command-shim guards into; required when the registry has at least one command-shim row"),
+		skipGitHook:                  fs.Bool("skip-git-hook", false, "skip the git-hook guard entirely (no error even with -repo-dir empty); command-shim rows still install (issue #2509: a Box whose hand-off is a real git push, e.g. forgejo, must never get that push blocked locally)"),
 	}
 	return fs, flags
 }
@@ -75,6 +77,7 @@ func runReadonlyGuards(args []string, stdout io.Writer) int {
 		RepoDir:       *flags.repoDir,
 		ExtraRepoDirs: extraRepoDirs,
 		ShimDir:       *flags.shimDir,
+		SkipGitHook:   *flags.skipGitHook,
 	}, stdout)
 	if err != nil {
 		fmt.Fprintln(fs.Output(), "driver-exec readonly-guards:", err)

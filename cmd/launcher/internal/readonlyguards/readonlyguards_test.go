@@ -706,6 +706,56 @@ func TestInstall_GitHookRowMissingRepoDir(t *testing.T) {
 	}
 }
 
+// TestInstall_SkipGitHookIgnoresGitHookRows proves that cfg.SkipGitHook ==
+// true makes Install treat git-hook rows as absent entirely: no error even
+// though RepoDir is empty, no hook artifact rendered or installed, and
+// Result.HookInstalled stays false -- the command-shim guard this cfg's
+// forgejo (outbox-incapable) caller still wants must install regardless
+// (issue #2509).
+func TestInstall_SkipGitHookIgnoresGitHookRows(t *testing.T) {
+	realTrue := requireExecutable(t, "true")
+
+	rows := []promptassembly.ForbiddenMarkerRow{
+		{
+			ID:             "forbidden-git-push",
+			Marker:         "git push",
+			Kind:           "substring",
+			Enforce:        "git-hook",
+			Message:        "blocked: git push",
+			RuntimeMessage: "blocked: git push",
+		},
+		{
+			ID:             "forbidden-fj-pr-create",
+			Marker:         "fj pr create",
+			Kind:           "substring",
+			Enforce:        "command-shim",
+			Message:        "blocked: fj pr create",
+			RuntimeMessage: "blocked: fj pr create",
+		},
+	}
+
+	shimDir := t.TempDir()
+	cfg := Config{
+		SkipGitHook: true, // RepoDir deliberately left empty
+		ShimDir:     shimDir,
+		RealBinary: func(argv0 string) (string, error) {
+			return realTrue, nil
+		},
+	}
+
+	var out bytes.Buffer
+	result, err := Install(rows, cfg, &out)
+	if err != nil {
+		t.Fatalf("Install: %v, want nil error (SkipGitHook is true)", err)
+	}
+	if result.HookInstalled {
+		t.Errorf("result.HookInstalled = true, want false (SkipGitHook is true)")
+	}
+	if want := []string{"fj"}; len(result.Shims) != len(want) || result.Shims[0] != want[0] {
+		t.Fatalf("result.Shims = %v, want %v", result.Shims, want)
+	}
+}
+
 // TestInstall_CommandShimRowMissingShimDir proves Install returns a
 // non-nil error, rather than panicking or silently no-op'ing, when rows
 // contains a command-shim row but cfg.ShimDir is empty.
