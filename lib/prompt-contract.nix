@@ -18,7 +18,8 @@ let
   # lib/prompt-inject.nix's own splitOnce/injectSection idiom
   # (builtins.split on a regex-escaped literal, checking for more than the
   # one no-match part).
-  hasInfix = needle: text: builtins.length (builtins.split (builtinsCompat.escapeRegex needle) text) > 1;
+  hasInfix =
+    needle: text: builtins.length (builtins.split (builtinsCompat.escapeRegex needle) text) > 1;
 
   # sliceBetween's own doc comment (lib/prompt-inject.nix) notes "a sliced
   # shared block already ends with the blank line that separated it from the
@@ -93,7 +94,10 @@ rec {
       # outcome injection only targets fix-prompt.md. research-prompt.md has
       # its own separate outcome contract (see "research-verdict" below), so
       # this block is not injected there.
-      kinds = [ "issue" "fix" ];
+      kinds = [
+        "issue"
+        "fix"
+      ];
     }
     {
       id = "comms";
@@ -125,7 +129,10 @@ rec {
       # research-self-contained-prompt.md shares the same verdict-posting
       # contract and needs it injected the same way fix-prompt.md needs the
       # other three blocks above.
-      kinds = [ "research" "research-self-contained" ];
+      kinds = [
+        "research"
+        "research-self-contained"
+      ];
     }
   ];
 
@@ -730,10 +737,22 @@ rec {
             }
           )
           [
-            { gate = true; markerPresent = true; }
-            { gate = true; markerPresent = false; }
-            { gate = false; markerPresent = true; }
-            { gate = false; markerPresent = false; }
+            {
+              gate = true;
+              markerPresent = true;
+            }
+            {
+              gate = true;
+              markerPresent = false;
+            }
+            {
+              gate = false;
+              markerPresent = true;
+            }
+            {
+              gate = false;
+              markerPresent = false;
+            }
           ];
     in
     builtins.concatMap fixturesFor validateMarkers;
@@ -771,7 +790,11 @@ rec {
   outcomeStatusSets = [
     {
       kind = "work";
-      statuses = [ "ready" "blocked" "ambiguous" ];
+      statuses = [
+        "ready"
+        "blocked"
+        "ambiguous"
+      ];
     }
     {
       kind = "research";
