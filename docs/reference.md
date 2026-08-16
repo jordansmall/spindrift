@@ -77,11 +77,14 @@ flake-parts itself and passed through, so setting
 `perSystem.spindrift.system` errors the same way an `mkHarness`-only option
 would.
 
-The table below documents `mkHarness`'s named *parameters* — the versioned
-Consumer contract (ADR 0010). The function's *return value* is a separate
-surface: only `image`, `spindrift`, `packages`, and `apps` are in-contract,
-and everything else lives under the out-of-contract `internals` attrset (see
-[Calling `mkHarness` directly](#calling-mkharness-directly)).
+The table below documents `mkHarness`'s named *parameters*, plus `settings`
+— a **flake-module only** option with no `mkHarness` parameter counterpart
+(`mkHarness` takes the domain-tree knobs through its `defaults` argument
+instead) — together making up the versioned Consumer contract (ADR 0010).
+The function's *return value* is a separate surface: only `image`,
+`spindrift`, `packages`, and `apps` are in-contract, and everything else
+lives under the out-of-contract `internals` attrset (see [Calling
+`mkHarness` directly](#calling-mkharness-directly)).
 
 | option      | scope          | type                        | default            | meaning                                                              |
 | ----------- | -------------- | --------------------------- | ------------------ | -------------------------------------------------------------------- |
@@ -94,7 +97,7 @@ and everything else lives under the out-of-contract `internals` attrset (see
 | `prompt`    | shared         | string                      | bundled starter    | agent prompt template baked into the image; changing it requires a rebuild (`spindrift build`). The SPINDRIFT_OUTCOME contract is harness-owned: `spindrift build` appends it automatically if a custom `prompt` omits it (idempotent — a prompt that already has it is untouched) |
 | `scoutPrompt` / `reviewPrompt` / `filerPrompt` | **`mkHarness` only** | string | bundled starters | system prompts for the read-only scout and reviewer subagents and the opt-in filer subagent (see [Filer](#filer)); not settable on `perSystem.spindrift.*` — override at runtime via `SPINDRIFT_PROMPT_DIR` regardless of which caller baked the image |
 | `skills`    | shared         | list of path/derivation/`{ name; src; }` | `[]`  | skills baked into the image at the fixed `/agent/skills` path alongside the harness-owned skills (e.g. `auto-format`, `auto-lint`, baked regardless of this list), each as a `<name>/SKILL.md` directory (the only layout Claude Code discovers — a flat `<name>.md` is ignored) so the headless agent can `/invoke` them; a `{ name; src; }` content entry (name + SKILL.md body) is realized with the image's own Linux `pkgs` rather than copied from a pre-built host derivation, keeping the agent-image drvPath host-independent (issue #597); `agent/entrypoint.sh` copies both into the Driver's actual runtime skills dir at box startup, then copies `SPINDRIFT_SKILLS_DIR` (staged at `/operator-skills`) over the top so runtime overrides win without erasing the baked set (issue #2489) |
-| `settings`  | shared         | submodule, grouped by section (see below) | `{}` | **deprecated** compat shim (ADR 0037): every schema-generated knob is now a first-class option in the domain tree below; this submodule still works pre-1.0 (forwards with an eval warning) but new config should use the domain paths directly |
+| `settings`  | **flake-module only** | submodule, grouped by section (see below) | `{}` | **deprecated** compat shim (ADR 0037): every schema-generated knob is now a first-class option in the domain tree below; this submodule still works pre-1.0 (forwards with an eval warning) but new config should use the domain paths directly |
 | `runtime`   | shared         | `"podman"` \| `"docker"` \| `"rancher"` \| `"bwrap"` | `"podman"` | runner the `spindrift build`/`dispatch` commands drive: an OCI runtime (`"rancher"` is an alias for Rancher Desktop's containerd mode, driven via `nerdctl`), or the daemonless bubblewrap sandbox (`bwrap`, Linux-only, no image build/load) |
 | `driver`    | shared         | string                      | `"claude"`         | the agent CLI Driver baked into the image and threaded to the launcher (ADR 0009); `"claude"` (default) and `"opencode"` are the Drivers today. A non-`claude` Driver realises its own `spindrift-<driver>` image (e.g. `spindrift-opencode`) so per-Driver artifacts never collide |
 | `nixInBox`  | shared         | bool                        | `true`             | bake a usable nix (binary + registered store DB + sandbox-off config) into the box so `nix flake check` / `nix develop` work inside it; set `false` for a lean, nix-free image (ADR 0008) |
@@ -103,10 +106,13 @@ and everything else lives under the out-of-contract `internals` attrset (see
 | `nixBuilderImage` | **`mkHarness` only** | string        | `"docker.io/nixos/nix@sha256:bf1d938835ab96312f098fa6c2e9cab367728e0aad0646ee3e02a787c80d8fb8"` (pinned reference — the real default lives in `lib/build-constants.nix`) | Nix image `spindrift build` uses as a fallback Linux builder when the host can't realize the image; pinned by digest for supply-chain safety (see [Building on macOS](#building-on-macos)) |
 | `roster`    | shared         | list of subagent-entry attrs | `lib/roster.nix`'s `defaultRoster` | supersedes the four legacy model knobs; see [Subagent roster](#subagent-roster) |
 
-Every knob — schema-generated run default or hand-declared structural
-option alike — is a first-class option directly under
-`perSystem.spindrift.<domain>.*` (ADR 0037): `agents`, `git`, `issues`,
-`forge`, `dispatch`, `infra`. A schema-generated knob (e.g. `repoSlug`,
+Every knob settable on `perSystem.spindrift.*` — schema-generated run
+default or hand-declared structural option alike — is a first-class option
+directly under `perSystem.spindrift.<domain>.*` (ADR 0037): `agents`,
+`git`, `issues`, `forge`, `dispatch`, `infra`. The **`mkHarness` only**
+rows above (`scoutPrompt`/`reviewPrompt`/`filerPrompt`/`nixBuilderImage`)
+are the exception: they have no domain-tree path at all, since they aren't
+reachable from the flake module in the first place. A schema-generated knob (e.g. `repoSlug`,
 `gitUserName`) is placed by its `lib/env-schema.nix` entry's `group` and
 optional `nixSubPath` (`lib/nixpath.nix`); a structural knob (`roster`,
 `skills`, `packages`, `prefetch`, `driver`, `prompt`, `extraClosures`,
@@ -128,6 +134,9 @@ module. The old `settings.<section>.<knob>` spelling still works pre-1.0 as
 a deprecated alias (`lib/flakeModule.nix`'s `settingsOption`, forwarded with
 an eval warning) but is retired at the 1.0 boundary — new config should use
 the domain paths directly.
+
+Each binding below sets a domain-tree path under your Consumer flake's own
+`perSystem.spindrift`:
 
 ```nix
 # BEGIN GENERATED SETTINGS EXAMPLE LABELS -- nix run .#regen -- DO NOT EDIT
@@ -164,7 +173,7 @@ infra.devShell.probeTimeout = 300;
 infra.limits.memory  = "5g";
 infra.limits.pids    = "512";
 infra.network.podman = "";
-infra.network.bwrapUnshare = "";
+infra.network.bwrapUnshare = false;
 forge.repoSlug = "owner/repo";
 ```
 
@@ -235,9 +244,9 @@ description; tools; promptFile; prompt; effort }`. It supersedes the four fixed
 knob per hardcoded agent, a Consumer flake can pass any number of roster
 entries, including a custom Nth agent beyond the historical four. When
 `roster` is omitted, `mkHarness` falls back to `lib/roster.nix`'s
-`defaultRoster`, built from the four legacy model args (or their `settings`
-defaults) and reproducing today's scout/reviewer/filer/worker composition
-exactly.
+`defaultRoster`, built from the four legacy model args (or their
+`agents.models.*` defaults) and reproducing today's
+scout/reviewer/filer/worker composition exactly.
 
 `defaultRoster`'s own roster-native surface for setting models is its
 `models` argument (issue #2426): an attrset keyed by roster entry name
