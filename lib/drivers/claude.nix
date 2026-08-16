@@ -187,4 +187,25 @@
   # --agents JSON flag above instead. Always returns the empty attrset, so
   # lib/image.nix's agentFiles bakes no per-agent files for this Driver.
   agentFilesTemplate = _: { };
+
+  # claude's CLI argv shape (ADR 0009, issue #2534): the prompt rides a `-p`
+  # flag, --agents carries the roster JSON (agentsJsonTemplate above), and
+  # driver-exec assembles the invocation in this order. Reproduces the exact
+  # behavior of the args.go claude branch this issue replaces.
+  argvShape = {
+    promptStyle = "flag";
+    promptFlag = "-p";
+    modelFlag = "--model";
+    modelOmitEmpty = false;
+    agentsFlag = "--agents";
+    effortFlag = "--effort";
+    order = [
+      "prompt"
+      "model"
+      "agents"
+      "session"
+      "driverFlags"
+      "effort"
+    ];
+  };
 }
