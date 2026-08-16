@@ -108,20 +108,6 @@ func candidateSocketMount(source, target string) (MountSpec, bool) {
 	return MountSpec{Source: source, Target: target, ReadOnly: false}, true
 }
 
-// candidateFileMount reports whether source should be mounted at target:
-// both must be set and source must be a regular file that exists -- the
-// single-file counterpart to candidateMount, which requires a directory.
-func candidateFileMount(source, target string, readOnly bool) (MountSpec, bool) {
-	if source == "" || target == "" {
-		return MountSpec{}, false
-	}
-	info, err := os.Stat(source)
-	if err != nil || info.IsDir() {
-		return MountSpec{}, false
-	}
-	return MountSpec{Source: source, Target: target, ReadOnly: readOnly}, true
-}
-
 // buildMountSpecs computes the list of host-to-box mounts that apply for p
 // and box, independent of runtime backend. Every mount here is optional and
 // silent-when-absent except the issue-snapshot mount below: once
@@ -177,25 +163,25 @@ func buildMountSpecs(p MountParams, box Box) ([]MountSpec, error) {
 	// once at Run's box start (issue #2547), silent like the /issues mount
 	// (this is a normal read path, not an operator override). An empty
 	// path -- research dispatches, and every pre-#2547 Box construction --
-	// yields no mount, same as candidateFileMount's own contract. But once
-	// box.Run's writeIssueSnapshot step has set a non-empty path, that file
-	// is the box's sole source of issue text for implement/review/fix
-	// passes (the issue-read prompt fragments no longer do a live tracker
-	// read) -- candidateFileMount's fail-open behavior would otherwise leave
-	// the box silently starting with no issue text at all if the file were
-	// removed or made unreadable in the (tiny) window between the host
-	// write and this mount. So unlike every mount above, a non-empty
-	// IssueSnapshotPath that fails to stat is a hard error here, not a
-	// silently dropped mount.
+	// yields no mount. But once box.Run's writeIssueSnapshot step has set a
+	// non-empty path, that file is the box's sole source of issue text for
+	// implement/review/fix passes (the issue-read prompt fragments no
+	// longer do a live tracker read) -- a fail-open candidateMount-style
+	// check would otherwise leave the box silently starting with no issue
+	// text at all if the source were missing, unreadable, or (mis-)pointed
+	// at a directory. So unlike every mount above, a non-empty
+	// IssueSnapshotPath is resolved with a single os.Stat here: a stat
+	// failure, or a directory in place of a regular file, is a hard error,
+	// not a silently dropped mount.
 	if box.IssueSnapshotPath != "" {
-		if spec, ok := candidateFileMount(box.IssueSnapshotPath, issueSnapshotTarget, true); ok {
-			specs = append(specs, spec)
-		} else if _, err := os.Stat(box.IssueSnapshotPath); err != nil {
+		info, err := os.Stat(box.IssueSnapshotPath)
+		if err != nil {
 			return nil, fmt.Errorf("issue snapshot %q: %w", box.IssueSnapshotPath, err)
 		}
-		// else: the path stats fine but isn't a regular file (e.g. a
-		// directory) -- candidateFileMount's existing silent contract for
-		// that case is unchanged; only the stat-failure case above is a bug.
+		if info.IsDir() {
+			return nil, fmt.Errorf("issue snapshot %q: is a directory, want a regular file", box.IssueSnapshotPath)
+		}
+		specs = append(specs, MountSpec{Source: box.IssueSnapshotPath, Target: issueSnapshotTarget, ReadOnly: true})
 	}
 
 	return specs, nil
