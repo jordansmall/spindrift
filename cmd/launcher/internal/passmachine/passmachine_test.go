@@ -480,6 +480,101 @@ func TestTransition(t *testing.T) {
 			},
 			want: Decision{Continue: true, Reason: "", NextPass: KindFix},
 		},
+		{
+			name: "review: budget exceeded on tokens sets LandPhase and increments review rounds",
+			in: Input{
+				PassJustExecuted: KindReview,
+				Verdict:          VerdictBlock,
+				CumulativeTokens: 100,
+				Caps:             Caps{MaxBudgetTokens: 100},
+			},
+			want: Decision{
+				Continue:              true,
+				Reason:                "budget exceeded; running terminal land pass",
+				NextPass:              KindLand,
+				LandPhase:             LandPhaseTerminalCommitted,
+				Cap:                   StopBudgetExceeded,
+				CapFired:              "budget exceeded",
+				IncrementReviewRounds: true,
+			},
+		},
+		{
+			name: "review: budget exceeded on USD alone sets LandPhase and increments review rounds",
+			in: Input{
+				PassJustExecuted: KindReview,
+				Verdict:          VerdictBlock,
+				CumulativeUSD:    5,
+				Caps:             Caps{MaxBudgetUSD: 5},
+			},
+			want: Decision{
+				Continue:              true,
+				Reason:                "budget exceeded; running terminal land pass",
+				NextPass:              KindLand,
+				LandPhase:             LandPhaseTerminalCommitted,
+				Cap:                   StopBudgetExceeded,
+				CapFired:              "budget exceeded",
+				IncrementReviewRounds: true,
+			},
+		},
+		{
+			name: "review: unset budget caps never fire even with high cumulative usage, falls through to fix",
+			in: Input{
+				PassJustExecuted: KindReview,
+				Verdict:          VerdictBlock,
+				CumulativeTokens: 1_000_000,
+				CumulativeUSD:    1000,
+				Caps:             Caps{MaxBudgetTokens: 0, MaxBudgetUSD: 0},
+			},
+			want: Decision{Continue: true, Reason: "", NextPass: KindFix, IncrementReviewRounds: true},
+		},
+		{
+			name: "review: budget cap does not fire on APPROVE",
+			in: Input{
+				PassJustExecuted: KindReview,
+				Verdict:          VerdictApprove,
+				CumulativeTokens: 100,
+				Caps:             Caps{MaxBudgetTokens: 100},
+			},
+			want: Decision{Continue: true, Reason: "", NextPass: KindFix},
+		},
+		{
+			name: "review: max review rounds wins over budget cap (priority)",
+			in: Input{
+				PassJustExecuted: KindReview,
+				Verdict:          VerdictBlock,
+				ReviewRounds:     2,
+				CumulativeTokens: 100,
+				Caps:             Caps{MaxReviewRounds: 2, MaxBudgetTokens: 100},
+			},
+			want: Decision{
+				Continue:              true,
+				Reason:                "max review rounds reached; running terminal land pass",
+				NextPass:              KindLand,
+				LandPhase:             LandPhaseTerminalCommitted,
+				Cap:                   StopMaxReviewRoundsReached,
+				CapFired:              "max review rounds reached",
+				IncrementReviewRounds: true,
+			},
+		},
+		{
+			name: "review: max slices wins over budget cap (priority)",
+			in: Input{
+				PassJustExecuted: KindReview,
+				Verdict:          VerdictBlock,
+				Pass:             5,
+				CumulativeTokens: 100,
+				Caps:             Caps{MaxSlices: 5, MaxBudgetTokens: 100},
+			},
+			want: Decision{
+				Continue:              true,
+				Reason:                "max slices reached; running terminal land pass",
+				NextPass:              KindLand,
+				LandPhase:             LandPhaseTerminalCommitted,
+				Cap:                   StopMaxSlicesReached,
+				CapFired:              "max slices reached",
+				IncrementReviewRounds: true,
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -487,6 +582,60 @@ func TestTransition(t *testing.T) {
 			got := Transition(tt.in)
 			if got != tt.want {
 				t.Errorf("Transition(%+v) =\n  %+v\nwant\n  %+v", tt.in, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestBudgetExceeded exercises the budgetExceeded helper directly (issue
+// #2694): each of the two cap dimensions can trip it independently, a zero
+// cap on either dimension never fires regardless of usage, and the
+// comparison is >= (at-cap fires), not > (strictly over).
+func TestBudgetExceeded(t *testing.T) {
+	tests := []struct {
+		name   string
+		caps   Caps
+		tokens int
+		usd    float64
+		want   bool
+	}{
+		{
+			name:   "token cap at boundary fires",
+			caps:   Caps{MaxBudgetTokens: 100},
+			tokens: 100,
+			want:   true,
+		},
+		{
+			name:   "token cap under boundary does not fire",
+			caps:   Caps{MaxBudgetTokens: 100},
+			tokens: 99,
+			want:   false,
+		},
+		{
+			name: "USD cap at boundary fires",
+			caps: Caps{MaxBudgetUSD: 5},
+			usd:  5,
+			want: true,
+		},
+		{
+			name: "USD cap under boundary does not fire",
+			caps: Caps{MaxBudgetUSD: 5},
+			usd:  4.99,
+			want: false,
+		},
+		{
+			name:   "both caps unset never fires regardless of usage",
+			caps:   Caps{},
+			tokens: 1_000_000,
+			usd:    1000,
+			want:   false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := budgetExceeded(tt.caps, tt.tokens, tt.usd); got != tt.want {
+				t.Errorf("budgetExceeded(%+v, %d, %v) = %v, want %v", tt.caps, tt.tokens, tt.usd, got, tt.want)
 			}
 		})
 	}

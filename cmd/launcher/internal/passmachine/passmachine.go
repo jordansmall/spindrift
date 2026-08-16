@@ -118,6 +118,13 @@ const (
 	// legacy loop this is a hard stop; on the review loop's own review-pass
 	// decision it instead commits the run to one terminal land pass.
 	StopMaxReviewRoundsReached
+	// StopBudgetExceeded fires when Caps.MaxBudgetTokens or Caps.MaxBudgetUSD
+	// is a positive cap and the cumulative usage so far (Input.CumulativeTokens/
+	// CumulativeUSD) has reached or exceeded it -- on the review loop's own
+	// review-pass decision it, like StopMaxReviewRoundsReached, instead
+	// commits the run to one terminal land pass rather than stopping outright
+	// (issue #2694).
+	StopBudgetExceeded
 	// StopTerminalLandNoOutcome fires on the review loop's implement/fix/
 	// land decision when the pass that just ran was itself the committed
 	// terminal land pass (in.LandPhase was already LandPhaseTerminalCommitted
@@ -131,15 +138,27 @@ const (
 	StopApproveNoOutcome
 )
 
-// Caps carries the two orchestrator-configured budget caps a Transition
-// decision may consult -- a zero value (0) for either field means that cap
-// is disabled, mirroring cfg.maxSlices/cfg.maxReviewRounds's own "0 means
-// unlimited" convention.
+// Caps carries the orchestrator-configured budget caps a Transition decision
+// may consult -- a zero value (0) for any field means that cap is disabled,
+// mirroring cfg.maxSlices/cfg.maxReviewRounds's own "0 means unlimited"
+// convention. Static, per-run config only -- the dynamic usage-so-far values
+// these token/USD caps are compared against live on Input instead
+// (Input.CumulativeTokens/CumulativeUSD), mirroring the existing
+// Pass/ReviewRounds split against MaxSlices/MaxReviewRounds.
 type Caps struct {
 	// MaxSlices is the coarse backstop on total pass count (cfg.maxSlices).
 	MaxSlices int
 	// MaxReviewRounds is the cap on review rounds elapsed (cfg.maxReviewRounds).
 	MaxReviewRounds int
+	// MaxBudgetTokens is the cap on cumulative token usage (pre-summed across
+	// input/output/cache-read/cache-creation categories by the caller, not
+	// this package), compared against Input.CumulativeTokens. 0 disables this
+	// dimension independently of MaxBudgetUSD (issue #2694).
+	MaxBudgetTokens int
+	// MaxBudgetUSD is the cap on cumulative USD cost, compared against
+	// Input.CumulativeUSD. 0 disables this dimension independently of
+	// MaxBudgetTokens (issue #2694).
+	MaxBudgetUSD float64
 }
 
 // LandPhase names whether a prior decision has already committed this run
@@ -210,6 +229,16 @@ type Input struct {
 	// to parallel workers. Meaningful for KindImplement/KindFix/KindLand
 	// only.
 	ManifestDispatched bool
+	// CumulativeTokens is the caller's own sum of cumulative token usage so
+	// far (across all four usage.Usage token categories -- this package does
+	// no summing itself), compared against Caps.MaxBudgetTokens. Meaningful
+	// only for KindReview's own decision point, mirroring how ReviewRounds is
+	// compared against Caps.MaxReviewRounds there (issue #2694).
+	CumulativeTokens int
+	// CumulativeUSD is the cumulative USD cost so far, compared against
+	// Caps.MaxBudgetUSD. Meaningful only for KindReview's own decision point,
+	// mirroring CumulativeTokens (issue #2694).
+	CumulativeUSD float64
 }
 
 // Decision is Transition's result: whether to continue into another pass
@@ -365,6 +394,23 @@ func implementFixTransition(in Input) Decision {
 	return Decision{Continue: true, Reason: "", NextPass: KindReview}
 }
 
+// budgetExceeded reports whether tokens or usd has reached or exceeded
+// either of caps.MaxBudgetTokens/caps.MaxBudgetUSD -- deliberately duplicated
+// from settle's own budgetExceeded (cmd/launcher/internal/settle/budget.go)
+// rather than imported, to keep this package dependency-free of settle. Same
+// "0 disables this dimension, independently of the other" convention as
+// every other cap in this file: a zero cap never fires regardless of tokens
+// or usd, and either dimension alone can trip it.
+func budgetExceeded(caps Caps, tokens int, usd float64) bool {
+	if caps.MaxBudgetTokens > 0 && tokens >= caps.MaxBudgetTokens {
+		return true
+	}
+	if caps.MaxBudgetUSD > 0 && usd >= caps.MaxBudgetUSD {
+		return true
+	}
+	return false
+}
+
 // reviewTransition reproduces run.go:461-487, the review loop's own
 // decision after a review pass. Every branch of this decision continues --
 // there is no case that stops the loop; that is existing, deliberate
@@ -395,6 +441,19 @@ func reviewTransition(in Input) Decision {
 			LandPhase: LandPhaseTerminalCommitted,
 			Cap:       StopMaxReviewRoundsReached,
 			CapFired:  "max review rounds reached",
+		}
+	// This case must come last among the caps above: when a budget cap and
+	// an earlier cap (no-verdict, maxSlices, maxReviewRounds) both fire on
+	// the same pass, the earlier cap's Reason/CapFired/Cap keep reporting
+	// priority over this one -- the same ordering rule as the
+	// ManifestDispatched case in implementFixTransition above.
+	case in.Verdict == VerdictBlock && budgetExceeded(in.Caps, in.CumulativeTokens, in.CumulativeUSD):
+		d = Decision{
+			Continue:  true,
+			Reason:    "budget exceeded; running terminal land pass",
+			LandPhase: LandPhaseTerminalCommitted,
+			Cap:       StopBudgetExceeded,
+			CapFired:  "budget exceeded",
 		}
 	default:
 		d = Decision{Continue: true, Reason: ""}
