@@ -200,17 +200,25 @@ in
       '';
 
   # Proves the real production bindings (lib/agent-paths.nix) render
-  # correctly, ahead of slice 2 (issue #2531) actually consuming them in
-  # lib/image.nix / lib/mkHarness.nix. Builds the expected-lines list
-  # generically from the imported attrset instead of hand-typing all 8, so a
-  # 9th path added later doesn't silently escape this check's coverage.
+  # correctly -- lib/image.nix / lib/mkHarness.nix consume the rendered
+  # preamble directly (issue #2531, commit 895a1fdc). Builds the
+  # expected-lines list generically from the imported attrset instead of
+  # hand-typing all 8, so a 9th path added later doesn't silently escape
+  # this check's coverage.
   preambles-agent-paths-real-bindings-render =
     let
-      inherit (pkgs.lib) mapAttrsToList;
+      inherit (pkgs.lib) mapAttrsToList removeSuffix;
       agentPaths = import ../../lib/agent-paths.nix;
       out = preambles.renderAgentPathsPreamble agentPaths;
+      # Each expected line comes from the real renderer itself (called on a
+      # single-entry attrset), not a hand-re-derived `VAR=${VAR:-path}`
+      # shape -- a hand-typed shape drops renderAgentPathsPreamble's
+      # escapeShellArg treatment and can silently pass even when the real
+      # renderer's output diverges from it.
       missing = builtins.filter (line: !hasInfix line out) (
-        mapAttrsToList (var: path: "${var}=\${${var}:-${path}}") agentPaths
+        mapAttrsToList (
+          var: path: removeSuffix "\n" (preambles.renderAgentPathsPreamble { ${var} = path; })
+        ) agentPaths
       );
     in
     assert assertMsg (missing == [ ])
