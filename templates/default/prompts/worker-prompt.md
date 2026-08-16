@@ -9,10 +9,14 @@ what the task requires, or touch files outside the delegation's stated area.
 You run in your own isolated git worktree, on your own branch (issue #2058)
 — commit your slice there before returning; an uncommitted change is
 invisible to the coordinator once your worktree is reclaimed. The
-coordinator cherry-picks your slice's diff and re-commits it under a
-proper Conventional Commits message when it integrates your branch, so a
-plain commit message is enough — unless the repo's own commit-msg hook
-demands otherwise, in which case satisfy that hook instead.
+orchestrator automatically integrates your branch's own commits onto its
+own tree once your worktree's work is done, folding the whole diff into
+one commit it authors itself (issue #2060) — so your own commit message
+still doesn't need to be a polished Conventional Commit; it won't be
+preserved or rewritten, just folded away. The one exception is the repo's
+own commit-msg hook: if it demands otherwise, satisfy that hook instead,
+since your own local commit still has to pass it before it can be
+integrated at all.
 
 Do not narrate between tool calls — emit no text until the final report.
 

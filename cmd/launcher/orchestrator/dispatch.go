@@ -74,12 +74,17 @@ func truncateRunes(s string, max int) string {
 // the orchestrator's current HEAD, which is correct for retrying a
 // genuinely timed-out/crashed slice but would silently destroy a completed
 // worker's commits if the coordinator re-declares an already-done slice
-// name before cherry-picking its branch (issue #2059 review finding). Each
-// skipped slice gets its own "already done, skipped redispatch" line in
-// state.WorkerFindings instead, so the next coordinator pass's seeded
-// prompt tells it the slice's branch is still waiting to be cherry-picked.
-// If every slice in the manifest is filtered out this way, LaunchWorkers is
-// never called at all.
+// name before its branch was ever integrated (issue #2059 review finding).
+// Each skipped slice gets its own "already done, skipped redispatch" line in
+// state.WorkerFindings instead, pointing back at that slice's own earlier
+// integration result rather than claiming a manual cherry-pick is still
+// owed -- by the time a slice reaches state.DoneSlices, this function has
+// already run integrateSliceBranch against it (successfully or not, see
+// below), so the common case is that its branch is already on HEAD, not
+// still waiting to be cherry-picked (issue #2060 review finding: this line
+// previously claimed the branch "still needs cherry-picking" even after
+// automatic integration had already landed it). If every slice in the
+// manifest is filtered out this way, LaunchWorkers is never called at all.
 //
 // For whatever slices remain, it partitions them into ordered batches via
 // scheduleSlices (schedule.go, issue #2060) -- provably-disjoint-lease
@@ -146,7 +151,7 @@ func dispatchManifestIfPresent(cfg config, state *runstate.RunState, stdout io.W
 	dispatchSlices := make([]ManifestSlice, 0, len(manifest.Slices))
 	for _, s := range manifest.Slices {
 		if containsSlice(state.DoneSlices, s.Name) {
-			fmt.Fprintf(&findings, "- %s: already done, skipped redispatch (branch %s still needs cherry-picking)\n", s.Name, workerBranchName(s.Name))
+			fmt.Fprintf(&findings, "- %s: already done, skipped redispatch (see this slice's earlier integration result for branch %s)\n", s.Name, workerBranchName(s.Name))
 			continue
 		}
 		dispatchSlices = append(dispatchSlices, s)
