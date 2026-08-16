@@ -998,28 +998,23 @@ run_driver_in_env() {
     _worker_max_parallel_flags=(--max-parallel-workers "$worker_max_parallel")
   fi
 
-  # --max-budget-tokens, same orchestrator-only gate as --max-parallel-workers
-  # just above (issue #2694): the cumulative-token cap the orchestrator's own
-  # review loop consults before committing to a terminal land pass instead of
-  # a further BLOCK-triggered review round. Unlike every other orchestrator-
-  # only flag above, this one is NOT guarded on the value being non-empty --
-  # MAX_BUDGET_TOKENS is boxEnv (lib/env-schema.nix), so it is always set to
-  # a real value (its schema default "0", or an operator override), never
-  # unset; an `-n` guard here would always be true and the flag would always
-  # be forwarded anyway, so the ${VAR:-0} fallback below (belt-and-suspenders
-  # for a boxEnv default that somehow failed to render) is simpler and
-  # equally correct. The same host-facing knob selfHealGate already gates its
-  # fix-pass dispatch with.
+  # --max-budget-tokens/--max-budget-usd, same orchestrator-only gate as
+  # --max-parallel-workers above (issue #2694): the cumulative token/USD caps
+  # the orchestrator's own review loop consults before committing to a
+  # terminal land pass instead of a further BLOCK-triggered review round.
+  # Unlike every other orchestrator-only flag above, neither is guarded on
+  # its own value being non-empty -- MAX_BUDGET_TOKENS/MAX_BUDGET_USD are
+  # boxEnv (lib/env-schema.nix), so both are always set to a real value
+  # (their schema defaults "0"/"0.000000", or an operator override), never
+  # unset; an `-n` guard here would always be true and both flags would
+  # always be forwarded anyway, so the ${VAR:-0} fallbacks below (belt-and-
+  # suspenders for a boxEnv default that somehow failed to render) are
+  # simpler and equally correct. The same host-facing knobs selfHealGate
+  # already gates its fix-pass dispatch with.
   local -a _max_budget_tokens_flags=()
-  if [ "$_driver_invoker" = orchestrator ]; then
-    _max_budget_tokens_flags=(--max-budget-tokens "${MAX_BUDGET_TOKENS:-0}")
-  fi
-
-  # --max-budget-usd, same orchestrator-only shape as --max-budget-tokens just
-  # above (issue #2694): MAX_BUDGET_USD's USD-denominated counterpart, same
-  # always-set boxEnv reasoning.
   local -a _max_budget_usd_flags=()
   if [ "$_driver_invoker" = orchestrator ]; then
+    _max_budget_tokens_flags=(--max-budget-tokens "${MAX_BUDGET_TOKENS:-0}")
     _max_budget_usd_flags=(--max-budget-usd "${MAX_BUDGET_USD:-0}")
   fi
 
