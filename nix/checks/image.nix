@@ -36,6 +36,10 @@ let
   # Deliberate carve-out from readSchemaDefaults (issue #2506 AC5): this
   # pin needs the raw schema, not the helper under test elsewhere.
   reviewModelSchemaDefault = (import ../../lib/env-schema.nix).reviewModel.default;
+  # Single hand-typed anti-vacuity root (issue #2514) for the expected-default-
+  # model literals asserted below -- see lib/default-model-fixture.nix's own
+  # header comment for why it stays hand-typed rather than schema-derived.
+  defaultModelFixture = import ../../lib/default-model-fixture.nix;
   # Single source of truth for the per-agent effort literals asserted below
   # (issue #2506): read them from lib/roster-schema-defaults.nix instead of
   # restating them by hand. Deliberately does NOT extend to the model
@@ -160,22 +164,23 @@ in
     # these objects nest braces (tools is an array), so `[^}]*` can't overrun
     # into the next top-level key.
     dogfood_line=$(grep '^AGENTS_JSON_TEMPLATE=' ${harness.agentFiles}/agent/entrypoint.sh)
-    assert_agent_model "$dogfood_line" filer claude-haiku-4-5-20251001 \
+    assert_agent_model "$dogfood_line" filer ${defaultModelFixture.dogfoodPins.filer} \
       "dogfood harness" "missing the configured model"
 
-    assert_agent_model "$dogfood_line" scout claude-haiku-4-5-20251001 \
+    assert_agent_model "$dogfood_line" scout ${defaultModelFixture.schemaDefaults.scoutModel} \
       "dogfood harness" "missing the inherited model"
 
-    # Anchored to the literal "claude-opus-5", not reviewModelSchemaDefault --
-    # same rationale as nix/checks/equivalence.nix's
-    # dogfood-roster-and-review-effort reviewer assertion: the code-owned
-    # review pass binds to this exact model, so the guard must catch a
-    # schema-default regression away from it, not just confirm the bake
-    # mirrors whatever the schema currently says.
-    assert_agent_model "$dogfood_line" reviewer claude-opus-5 \
+    # Anchored to the fixture's literal "claude-opus-5"
+    # (defaultModelFixture.schemaDefaults.reviewModel), not
+    # reviewModelSchemaDefault -- same rationale as
+    # nix/checks/equivalence.nix's dogfood-roster-and-review-effort reviewer
+    # assertion: the code-owned review pass binds to this exact model, so the
+    # guard must catch a schema-default regression away from it, not just
+    # confirm the bake mirrors whatever the schema currently says.
+    assert_agent_model "$dogfood_line" reviewer ${defaultModelFixture.schemaDefaults.reviewModel} \
       "dogfood harness" "missing the anchored claude-opus-5 model"
 
-    assert_agent_model "$dogfood_line" worker claude-sonnet-5 \
+    assert_agent_model "$dogfood_line" worker ${defaultModelFixture.schemaDefaults.workerModel} \
       "dogfood harness" "missing the inherited model"
 
     # A Consumer that sets no model knobs and passes no roster (bats harness:
