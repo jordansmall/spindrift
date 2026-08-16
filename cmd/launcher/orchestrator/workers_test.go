@@ -11,6 +11,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"spindrift.dev/launcher/internal/outcome"
 )
 
 // chdirToFreshWorkerRepo creates a fresh temp git repo with one commit (so
@@ -223,7 +225,7 @@ case "$base" in
     sleep 30
     ;;
   emits-stray-outcome.log)
-    echo "SPINDRIFT_OUTCOME issue=9999 landing=bogus status=ready note=stray" >> "$DRIVER_LOG_PATH"
+    echo "` + outcome.Token + ` issue=9999 landing=bogus status=ready note=stray" >> "$DRIVER_LOG_PATH"
     sentinel="${DRIVER_LOG_PATH%.log}.done"
     : > "$sentinel"
     exit 0
