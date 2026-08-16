@@ -296,6 +296,48 @@ setup() {
   ! grep -q -- '--max-parallel-workers' "$DRIVER_LOG"
 }
 
+# Issue #2694: MAX_BUDGET_TOKENS/MAX_BUDGET_USD thread through to the
+# orchestrator's own --max-budget-tokens/--max-budget-usd flags, mirroring
+# WORKER_WORK_DIR/WORKER_TIMEOUT above -- neither has a Handoff descriptor
+# field, both come straight off the environment (now boxEnv, lib/env-schema.nix).
+@test "orchestrator path forwards MAX_BUDGET_TOKENS/MAX_BUDGET_USD to the orchestrator" {
+  export ORCHESTRATOR_ENABLED=1
+  export BOX_REVIEW_LOOP_ORCHESTRATOR=1
+  unset BOX_REVIEW_LOOP_INLINE
+  export MAX_BUDGET_TOKENS="500000"
+  export MAX_BUDGET_USD="4.44"
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -q -- '--max-budget-tokens 500000' "$ORCHESTRATOR_LOG"
+  grep -q -- '--max-budget-usd 4.44' "$ORCHESTRATOR_LOG"
+}
+
+# Without MAX_BUDGET_TOKENS/MAX_BUDGET_USD set, there's nothing to override the
+# orchestrator's own defaults (both disabled/0) with -- entrypoint.sh must omit
+# both flags entirely rather than pass them empty, mirroring the
+# --worker-work-dir/--worker-timeout omit test above.
+@test "orchestrator path omits --max-budget-tokens/--max-budget-usd when unset" {
+  export ORCHESTRATOR_ENABLED=1
+  export BOX_REVIEW_LOOP_ORCHESTRATOR=1
+  unset BOX_REVIEW_LOOP_INLINE
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  ! grep -q -- '--max-budget-tokens' "$ORCHESTRATOR_LOG"
+  ! grep -q -- '--max-budget-usd' "$ORCHESTRATOR_LOG"
+}
+
+# The --max-budget-tokens/--max-budget-usd gate is on _driver_invoker =
+# orchestrator -- the direct driver-exec path declares no such flags and would
+# hard-fail on them, mirroring the --max-parallel-workers omit test above.
+@test "direct driver-exec path omits --max-budget-tokens/--max-budget-usd even when set" {
+  export MAX_BUDGET_TOKENS="500000"
+  export MAX_BUDGET_USD="4.44"
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  ! grep -q -- '--max-budget-tokens' "$DRIVER_LOG"
+  ! grep -q -- '--max-budget-usd' "$DRIVER_LOG"
+}
+
 # The 7 --argv-* flags run_driver_in_env threads from the nix-rendered
 # DRIVER_ARGV_* preamble vars (issue #2534) unconditionally, on both the
 # direct driver-exec path and the orchestrator hand-off -- unlike every flag

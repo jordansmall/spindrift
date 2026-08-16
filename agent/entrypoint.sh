@@ -998,6 +998,24 @@ run_driver_in_env() {
     _worker_max_parallel_flags=(--max-parallel-workers "$worker_max_parallel")
   fi
 
+  # --max-budget-tokens, same orchestrator-only shape as --max-parallel-workers
+  # just above (issue #2694): the cumulative-token cap the orchestrator's own
+  # review loop consults before committing to a terminal land pass instead of
+  # a further BLOCK-triggered review round. MAX_BUDGET_TOKENS is now boxEnv
+  # (lib/env-schema.nix), the same host-facing knob selfHealGate already
+  # gates its fix-pass dispatch with.
+  local -a _max_budget_tokens_flags=()
+  if [ "$_driver_invoker" = orchestrator ] && [ -n "${MAX_BUDGET_TOKENS:-}" ]; then
+    _max_budget_tokens_flags=(--max-budget-tokens "$MAX_BUDGET_TOKENS")
+  fi
+
+  # --max-budget-usd, same orchestrator-only shape as --max-budget-tokens just
+  # above (issue #2694): MAX_BUDGET_USD's USD-denominated counterpart.
+  local -a _max_budget_usd_flags=()
+  if [ "$_driver_invoker" = orchestrator ] && [ -n "${MAX_BUDGET_USD:-}" ]; then
+    _max_budget_usd_flags=(--max-budget-usd "$MAX_BUDGET_USD")
+  fi
+
   local claude_rc=0
   set +e
   "$_driver_invoker" \
@@ -1026,7 +1044,9 @@ run_driver_in_env() {
     "${_worker_prompt_flags[@]}" \
     "${_worker_work_dir_flags[@]}" \
     "${_worker_timeout_flags[@]}" \
-    "${_worker_max_parallel_flags[@]}"
+    "${_worker_max_parallel_flags[@]}" \
+    "${_max_budget_tokens_flags[@]}" \
+    "${_max_budget_usd_flags[@]}"
   claude_rc=$?
   set -e
   rm -f "$_prompt_file" "$_agents_file" "$_session_file" "$_review_prompt_file" "$_worker_prompt_file"
