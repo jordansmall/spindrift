@@ -320,11 +320,15 @@ let
       let
         choices = entry.choices or null;
         value = mergedDefaults.${key} or null;
+        # toString null == "" would otherwise render as an empty-quoted
+        # value ("") indistinguishable from a legitimate empty string,
+        # hiding exactly which value was rejected.
+        displayValue = if value == null then "null" else "\"${toString value}\"";
       in
       if choices == null || lib.elem value choices then
         null
       else
-        "${entry.env or key}=\"${toString value}\" (valid: ${lib.concatStringsSep ", " choices})"
+        "${entry.env or key}=${displayValue} (valid: ${lib.concatStringsSep ", " choices})"
     ) flakeOptionEntries
   );
   choicesCheckOk =
