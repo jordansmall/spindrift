@@ -12,6 +12,8 @@
 let
   assertMsg = cond: msg: if cond then true else throw msg;
 
+  builtinsCompat = import ./builtins-compat.nix;
+
   # Splits `text` on the literal (non-regex) `marker`, asserting it appears
   # exactly once, and returns the text before and after it. `builtins.split`
   # represents a match of a pattern with no capture groups as an empty list,
@@ -20,7 +22,7 @@ let
   splitOnce =
     marker: text:
     let
-      parts = builtins.split (escapeRegex marker) text;
+      parts = builtins.split (builtinsCompat.escapeRegex marker) text;
     in
     assert assertMsg (builtins.length parts == 3)
       "prompt-inject: source must contain marker '${marker}' exactly once, found ${
@@ -30,67 +32,13 @@ let
       before = builtins.elemAt parts 0;
       after = builtins.elemAt parts 2;
     };
-
-  # Escapes a literal string's regex metacharacters so it can be used as a
-  # builtins.split/builtins.match pattern without them being read as regex.
-  escapeRegex =
-    builtins.replaceStrings
-      [
-        "\\"
-        "^"
-        "$"
-        "."
-        "|"
-        "?"
-        "*"
-        "+"
-        "("
-        ")"
-        "["
-        "]"
-        "{"
-        "}"
-      ]
-      [
-        "\\\\"
-        "\\^"
-        "\\$"
-        "\\."
-        "\\|"
-        "\\?"
-        "\\*"
-        "\\+"
-        "\\("
-        "\\)"
-        "\\["
-        "\\]"
-        "\\{"
-        "\\}"
-      ];
-
-  hasSuffix =
-    suffix: content:
-    let
-      lenContent = builtins.stringLength content;
-      lenSuffix = builtins.stringLength suffix;
-    in
-    lenContent >= lenSuffix && builtins.substring (lenContent - lenSuffix) lenSuffix content == suffix;
-
-  removeSuffix =
-    suffix: content:
-    if hasSuffix suffix content then
-      builtins.substring 0 (builtins.stringLength content - builtins.stringLength suffix) content
-    else
-      content;
 in
 rec {
-  # Escapes a literal string's regex metacharacters so it can be used as a
-  # builtins.split/builtins.match pattern without them being read as regex --
-  # exported so other marker-splitting call sites (e.g.
+  # Exported so other marker-splitting call sites (e.g.
   # nix/checks/baked-skills.nix's `between`) can split on a literal marker
   # without the same risk this file's own splitOnce/injectSection guard
   # against.
-  inherit escapeRegex;
+  escapeRegex = builtinsCompat.escapeRegex;
 
   # Slices `text` from `startMarker` (inclusive) up to `endMarker`
   # (exclusive), asserting each marker appears exactly once — the same
@@ -113,15 +61,16 @@ rec {
   # to back must not double that blank line up. Strips one, if present; a
   # no-op on text that ends with a single "\n" (e.g. a plain Consumer
   # `prompt` string).
-  trimTrailingBlankLine = s: if hasSuffix "\n\n" s then removeSuffix "\n" s else s;
+  trimTrailingBlankLine =
+    s: if builtinsCompat.hasSuffix "\n\n" s then builtinsCompat.removeSuffix "\n" s else s;
 
   # Appends `block` to `promptText` unless it already contains `marker` (the
   # default prompt's own copy, or a Consumer prompt that kept it) — so
   # injection is idempotent.
   injectSection =
     marker: block: promptText:
-    if builtins.length (builtins.split (escapeRegex marker) promptText) > 1 then
+    if builtins.length (builtins.split (builtinsCompat.escapeRegex marker) promptText) > 1 then
       promptText
     else
-      removeSuffix "\n" (trimTrailingBlankLine promptText) + "\n\n" + block;
+      builtinsCompat.removeSuffix "\n" (trimTrailingBlankLine promptText) + "\n\n" + block;
 }
