@@ -454,10 +454,10 @@ in
       "forbidden-gh-api-mutation row's enforce must be 'command-shim', got: ${row.enforce}";
     pkgs.runCommand "prompt-contract-forbidden-gh-api-mutation-row-shape" { } "touch $out";
 
-  # issue #2499: the five fj rows mirror the gh rows above one-for-one but are
-  # pinned enforce=="prompt-only" (no fj command-shim exists in
-  # agent/entrypoint.sh yet -- see the rationale comment on these rows in
-  # lib/prompt-contract.nix).
+  # issue #2509: the five fj rows mirror the gh rows above one-for-one and are
+  # pinned enforce=="command-shim" now that driver-exec's readonly-guards
+  # verb installs a real fj shim -- see the rationale comment on these rows
+  # in lib/prompt-contract.nix.
   prompt-contract-forbidden-fj-pr-create-row-shape =
     let
       row = forbiddenMarkerById "forbidden-fj-pr-create";
@@ -472,8 +472,8 @@ in
       "forbidden-fj-pr-create row's when must be 'boxAccessReadOnly', got: ${row.when}";
     assert assertMsg (row.kind == "substring")
       "forbidden-fj-pr-create row's kind must be 'substring', got: ${row.kind}";
-    assert assertMsg (row.enforce == "prompt-only")
-      "forbidden-fj-pr-create row's enforce must be 'prompt-only', got: ${row.enforce}";
+    assert assertMsg (row.enforce == "command-shim")
+      "forbidden-fj-pr-create row's enforce must be 'command-shim', got: ${row.enforce}";
     pkgs.runCommand "prompt-contract-forbidden-fj-pr-create-row-shape" { } "touch $out";
 
   prompt-contract-forbidden-fj-pr-ready-row-shape =
@@ -490,8 +490,8 @@ in
       "forbidden-fj-pr-ready row's when must be 'boxAccessReadOnly', got: ${row.when}";
     assert assertMsg (row.kind == "substring")
       "forbidden-fj-pr-ready row's kind must be 'substring', got: ${row.kind}";
-    assert assertMsg (row.enforce == "prompt-only")
-      "forbidden-fj-pr-ready row's enforce must be 'prompt-only', got: ${row.enforce}";
+    assert assertMsg (row.enforce == "command-shim")
+      "forbidden-fj-pr-ready row's enforce must be 'command-shim', got: ${row.enforce}";
     pkgs.runCommand "prompt-contract-forbidden-fj-pr-ready-row-shape" { } "touch $out";
 
   prompt-contract-forbidden-fj-pr-merge-row-shape =
@@ -508,8 +508,8 @@ in
       "forbidden-fj-pr-merge row's when must be 'boxAccessReadOnly', got: ${row.when}";
     assert assertMsg (row.kind == "substring")
       "forbidden-fj-pr-merge row's kind must be 'substring', got: ${row.kind}";
-    assert assertMsg (row.enforce == "prompt-only")
-      "forbidden-fj-pr-merge row's enforce must be 'prompt-only', got: ${row.enforce}";
+    assert assertMsg (row.enforce == "command-shim")
+      "forbidden-fj-pr-merge row's enforce must be 'command-shim', got: ${row.enforce}";
     pkgs.runCommand "prompt-contract-forbidden-fj-pr-merge-row-shape" { } "touch $out";
 
   prompt-contract-forbidden-fj-issue-comment-row-shape =
@@ -526,8 +526,8 @@ in
       "forbidden-fj-issue-comment row's when must be 'boxAccessReadOnly', got: ${row.when}";
     assert assertMsg (row.kind == "substring")
       "forbidden-fj-issue-comment row's kind must be 'substring', got: ${row.kind}";
-    assert assertMsg (row.enforce == "prompt-only")
-      "forbidden-fj-issue-comment row's enforce must be 'prompt-only', got: ${row.enforce}";
+    assert assertMsg (row.enforce == "command-shim")
+      "forbidden-fj-issue-comment row's enforce must be 'command-shim', got: ${row.enforce}";
     pkgs.runCommand "prompt-contract-forbidden-fj-issue-comment-row-shape" { } "touch $out";
 
   prompt-contract-forbidden-fj-issue-create-row-shape =
@@ -544,8 +544,8 @@ in
       "forbidden-fj-issue-create row's when must be 'boxAccessReadOnly', got: ${row.when}";
     assert assertMsg (row.kind == "substring")
       "forbidden-fj-issue-create row's kind must be 'substring', got: ${row.kind}";
-    assert assertMsg (row.enforce == "prompt-only")
-      "forbidden-fj-issue-create row's enforce must be 'prompt-only', got: ${row.enforce}";
+    assert assertMsg (row.enforce == "command-shim")
+      "forbidden-fj-issue-create row's enforce must be 'command-shim', got: ${row.enforce}";
     pkgs.runCommand "prompt-contract-forbidden-fj-issue-create-row-shape" { } "touch $out";
 
   # Pins buildTimeRejectVerdicts (issue #2250): the build-time reject arm that
