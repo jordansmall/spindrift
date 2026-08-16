@@ -81,6 +81,15 @@ type RunState struct {
 	// still carries only the last round's, unchanged, for that field's
 	// existing consumers). Empty until the first review round appends to it.
 	FindingsLogPath string `json:"findings_log_path,omitempty"`
+	// UnlandedSlices names every slice already present in DoneSlices whose
+	// own branch integration ended in conflict or failure -- its worker's
+	// job succeeded, but its commits never actually landed on the
+	// orchestrator's repo HEAD. Once a slice is in DoneSlices, a later
+	// manifest never redispatches it, so this is the only place a future
+	// pass's dispatch can learn that a new slice DependsOn (or file-lease
+	// overlaps) a name whose changes are still missing from HEAD (issue
+	// #2060 review finding).
+	UnlandedSlices []string `json:"unlanded_slices,omitempty"`
 }
 
 // IsEmpty reports whether s carries nothing worth seeding into a fresh
@@ -104,6 +113,7 @@ func (s RunState) IsEmpty() bool {
 		s.ReviewFindings == "" &&
 		s.WorkerFindings == "" &&
 		s.FindingsLogPath == "" &&
+		len(s.UnlandedSlices) == 0 &&
 		!s.TerminalLand
 }
 

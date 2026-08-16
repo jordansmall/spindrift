@@ -97,7 +97,20 @@ func truncateRunes(s string, max int) string {
 // batch's own workers are created via `git worktree add ... HEAD`
 // (workers.go), so a slice that DependsOn an earlier batch's slice must see
 // that dependency's integrated changes already on HEAD when its own
-// worktree is created.
+// worktree is created. The same not-landed gate also covers two extensions
+// (issue #2060 review findings): a later-batch slice is skipped not only
+// when its own DependsOn names a not-landed slice, but also when its own
+// FileLeases overlap (or are themselves undeclared) a not-landed slice's
+// leases, even with no DependsOn edge between them at all -- scheduleSlices
+// can sequence two lease-overlapping slices into different batches purely
+// by lease rules, and a not-landed earlier slice's overlap is exactly the
+// case a later worktree built from stale HEAD must not silently dispatch
+// against. And the gate is seeded, not just built fresh each call: any
+// slice name already recorded in state.UnlandedSlices from an EARLIER pass
+// is treated as not-landed from this pass's very first batch, so a brand
+// new manifest that DependsOn a slice whose integration failed in a prior
+// pass (and therefore was filtered out of dispatchSlices entirely, since it
+// already sits in state.DoneSlices) still gets gated correctly.
 //
 // Every WorkerResult across every batch is merged into state exactly as
 // before: WorkerDone slices move from RemainingSlices (if present) into
@@ -176,8 +189,10 @@ func dispatchManifestIfPresent(cfg config, state *runstate.RunState, stdout io.W
 
 		// notLanded records every slice name whose own commits did NOT end
 		// up on repoRoot's HEAD -- either because its own integration
-		// outcome was integrateConflict/integrateFailed, or because it was
-		// itself skipped here for depending on such a slice. batch N+1's
+		// outcome was integrateConflict/integrateFailed, because it was
+		// itself skipped here for depending on (or, below, file-lease
+		// overlapping) such a slice, or because a PRIOR pass already
+		// recorded it in state.UnlandedSlices (seeded below). batch N+1's
 		// own workers are created via `git worktree add ... HEAD`
 		// (workers.go), so a slice that DependsOn a name in this set must
 		// never be dispatched: its worktree would be created against a
@@ -188,7 +203,26 @@ func dispatchManifestIfPresent(cfg config, state *runstate.RunState, stdout io.W
 		// there was nothing to integrate, so HEAD already carries whatever
 		// the branch would have contributed (or the branch contributed
 		// nothing at all), not that anything failed to land.
-		notLanded := make(map[string]bool)
+		notLanded := make(map[string]bool, len(state.UnlandedSlices))
+		for _, name := range state.UnlandedSlices {
+			notLanded[name] = true
+		}
+
+		// sliceLeases records, per dispatchSlices name, its own normalized
+		// FileLeases (nil/empty for an undeclared slice) -- built once, up
+		// front, from every slice about to be dispatched this pass, so a
+		// slice skipped later (by DependsOn or by lease overlap) still has
+		// its own leases on hand for a THIRD slice's lease-overlap check
+		// against it (issue #2060 review finding: Bug A). A not-landed name
+		// seeded above from state.UnlandedSlices (a prior pass) has no
+		// entry here -- this pass never saw its FileLeases, so lease-overlap
+		// gating against it is out of scope; only the DependsOn-name check
+		// covers that cross-pass case, matching this function's pre-Bug-A
+		// behavior.
+		sliceLeases := make(map[string][]string, len(dispatchSlices))
+		for _, s := range dispatchSlices {
+			sliceLeases[s.Name] = claimLeases(s, nil)
+		}
 
 		for _, batch := range scheduleSlices(dispatchSlices) {
 			safe := make([]ManifestSlice, 0, len(batch))
@@ -212,6 +246,22 @@ func dispatchManifestIfPresent(cfg config, state *runstate.RunState, stdout io.W
 					fmt.Fprintf(&findings, "- %s: skipped -- depends on %s, whose own integration did not land on HEAD\n", s.Name, blockingDep)
 					continue
 				}
+
+				if blockingLease := notLandedLeaseOverlap(s, dispatchSlices, sliceLeases, notLanded); blockingLease != "" {
+					// scheduleSlices can sequence two slices with
+					// overlapping (or undeclared) FileLeases into
+					// different batches with no DependsOn edge between
+					// them at all -- lease overlap makes it very likely
+					// this slice edits the same files as blockingLease,
+					// so its own worktree (built from HEAD) must not be
+					// created until blockingLease's changes have actually
+					// landed there. Propagate the same fate exactly like
+					// the DependsOn case above.
+					notLanded[s.Name] = true
+					fmt.Fprintf(&findings, "- %s: skipped -- file lease overlaps %s, whose own integration did not land on HEAD\n", s.Name, blockingLease)
+					continue
+				}
+
 				safe = append(safe, s)
 			}
 			if len(safe) == 0 {
@@ -231,12 +281,14 @@ func dispatchManifestIfPresent(cfg config, state *runstate.RunState, stdout io.W
 					// own terms).
 					integrations[r.Slice] = integrationOutcome{status: integrateFailed, err: repoRootErr}
 					notLanded[r.Slice] = true
+					state.UnlandedSlices = appendUnique(state.UnlandedSlices, r.Slice)
 					continue
 				}
 				status, out, err := integrateSliceBranch(repoRoot, r.Slice, workerBranchName(r.Slice))
 				integrations[r.Slice] = integrationOutcome{status: status, output: out, err: err}
 				if status == integrateConflict || status == integrateFailed {
 					notLanded[r.Slice] = true
+					state.UnlandedSlices = appendUnique(state.UnlandedSlices, r.Slice)
 				}
 			}
 			results = append(results, batchResults...)
@@ -319,6 +371,41 @@ func dispatchManifestIfPresent(cfg config, state *runstate.RunState, stdout io.W
 	}
 	state.WorkerFindings = strings.TrimSpace(findings.String())
 	return true
+}
+
+// notLandedLeaseOverlap reports the name of the first not-landed slice
+// (per notLanded) in dispatchSlices, in manifest-processing order, whose own
+// normalized FileLeases (per sliceLeases) are not provably disjoint from
+// s's own -- or the empty string if none overlap. Matching canJoin's own
+// conservative rule (schedule.go), an undeclared-lease slice on either side
+// is treated as touching everything, so it always counts as overlapping.
+// Only names present in sliceLeases are considered: a not-landed name
+// seeded from a prior pass's state.UnlandedSlices has no known leases this
+// pass, so lease-overlap gating against it is deliberately out of scope
+// (issue #2060 review finding: Bug B) -- the DependsOn-name check above
+// already covers that cross-pass case.
+func notLandedLeaseOverlap(s ManifestSlice, dispatchSlices []ManifestSlice, sliceLeases map[string][]string, notLanded map[string]bool) string {
+	sLeases := sliceLeases[s.Name]
+	for _, other := range dispatchSlices {
+		if other.Name == s.Name || !notLanded[other.Name] {
+			continue
+		}
+		otherLeases, known := sliceLeases[other.Name]
+		if !known {
+			continue
+		}
+		if len(sLeases) == 0 || len(otherLeases) == 0 {
+			return other.Name
+		}
+		for _, lease := range sLeases {
+			for _, otherLease := range otherLeases {
+				if leasesOverlap(lease, otherLease) {
+					return other.Name
+				}
+			}
+		}
+	}
+	return ""
 }
 
 // containsSlice reports whether name is present anywhere in slices -- used
