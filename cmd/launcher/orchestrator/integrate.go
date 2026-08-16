@@ -48,14 +48,23 @@ const (
 //     a later batch's own `git worktree add ... HEAD` (workers.go) needs to
 //     see it: worktrees share the repository's objects/refs but not an
 //     uncommitted index.
-//   - A cherry-pick conflict is an expected outcome, not a Go error: the
-//     in-progress cherry-pick is aborted (leaving the working tree clean)
-//     and the conflict's own combined output is returned as the second
-//     value, for a caller to fold into a human/coordinator-facing finding
-//     -- exactly what today's manual-cherry-pick instructions already tell
-//     a human to do by hand.
-//   - Any other unexpected git failure (merge-base/rev-list/commit itself
-//     erroring) is a real Go error: returns (integrateFailed, "", err).
+//   - A cherry-pick conflict -- diagnosed by unmerged paths in `git status
+//     --porcelain` after the cherry-pick fails, not merely a non-zero exit
+//     -- is an expected outcome, not a Go error: the in-progress cherry-pick
+//     is aborted (leaving the working tree clean) and the conflict's own
+//     combined output is returned as the second value, for a caller to fold
+//     into a human/coordinator-facing finding -- exactly what today's
+//     manual-cherry-pick instructions already tell a human to do by hand.
+//     A cherry-pick can also fail for reasons that are NOT a content
+//     conflict -- e.g. revRange contains a merge commit, which git rejects
+//     without ever entering a real conflict state -- and those are treated
+//     as a real Go error instead (see below).
+//   - Any other unexpected git failure (merge-base/rev-list/a non-conflict
+//     cherry-pick failure/diff --cached/commit itself erroring) is a real Go
+//     error: returns (integrateFailed, "", err). Any of these that leaves
+//     the cherry-pick staged/mid-sequence in repoRoot is cleaned up (aborted)
+//     first, so the failure never cascades into a later slice's own
+//     dirty-tree guard below.
 //
 // Before doing anything else, integrateSliceBranch refuses to run at all if
 // repoRoot already has pre-existing uncommitted/staged changes: `git
@@ -96,17 +105,40 @@ func integrateSliceBranch(repoRoot, sliceName, branch string) (integrateStatus, 
 
 	cherryOut, err := runGitIn(repoRoot, "cherry-pick", "--no-commit", revRange)
 	if err != nil {
-		// Expected outcome, not a Go error -- abort the in-progress
-		// cherry-pick so the working tree is left exactly as it was
-		// before this call, then report the conflict's own output for a
-		// human/coordinator to resolve manually.
-		if abortOut, abortErr := runGitIn(repoRoot, "cherry-pick", "--abort"); abortErr != nil {
-			// The abort itself failing is genuinely unexpected -- the repo
-			// may now be left mid-cherry-pick, so this is a hard failure
-			// rather than a reportable-as-conflict outcome.
-			return integrateFailed, "", fmt.Errorf("integrate slice %s: cherry-pick --abort after conflict: %w: %s", sliceName, abortErr, strings.TrimSpace(abortOut))
+		// A non-zero exit here is not always a content conflict -- e.g. if
+		// revRange includes a merge commit, git errors with "is a merge
+		// but no -m option was given" without ever entering a real
+		// conflict/sequencer state. Only unmerged paths in `git status
+		// --porcelain` (any line starting with "U", or "AA"/"DD" for
+		// both-added/both-deleted) mean this is a genuine conflict; any
+		// other failure is misdiagnosed as one (issue #2060 review
+		// finding), which sends the coordinator "resolve manually" guidance
+		// that's literally the command that just failed.
+		conflictStatusOut, statusErr := runGitIn(repoRoot, "status", "--porcelain")
+		if statusErr == nil && hasUnmergedPaths(conflictStatusOut) {
+			// Expected outcome, not a Go error -- abort the in-progress
+			// cherry-pick so the working tree is left exactly as it was
+			// before this call, then report the conflict's own output for
+			// a human/coordinator to resolve manually.
+			if abortErr := abortCherryPick(repoRoot); abortErr != nil {
+				return integrateFailed, "", fmt.Errorf("integrate slice %s: cherry-pick --abort after conflict: %w", sliceName, abortErr)
+			}
+			return integrateConflict, strings.TrimSpace(cherryOut), nil
 		}
-		return integrateConflict, strings.TrimSpace(cherryOut), nil
+
+		// Not a genuine conflict -- a real Go error. Defensively clean up
+		// first: if the failure left anything dirty/mid-sequence behind
+		// (e.g. the merge-commit case, which leaves the merge's own
+		// changes staged), abort it the same way the conflict path does,
+		// folding any abort failure into the returned error rather than
+		// losing it silently.
+		cherryErr := fmt.Errorf("integrate slice %s: cherry-pick --no-commit: %w: %s", sliceName, err, strings.TrimSpace(cherryOut))
+		if leftoverOut, leftoverErr := runGitIn(repoRoot, "status", "--porcelain"); leftoverErr == nil && strings.TrimSpace(leftoverOut) != "" {
+			if abortErr := abortCherryPick(repoRoot); abortErr != nil {
+				return integrateFailed, "", fmt.Errorf("%w; cherry-pick --abort after non-conflict failure: %v", cherryErr, abortErr)
+			}
+		}
+		return integrateFailed, "", cherryErr
 	}
 
 	// The cherry-pick applied cleanly, but if branch's net diff was
@@ -117,7 +149,15 @@ func integrateSliceBranch(repoRoot, sliceName, branch string) (integrateStatus, 
 	// pattern-match its message.
 	stagedOut, err := runGitIn(repoRoot, "diff", "--cached", "--name-only")
 	if err != nil {
-		return integrateFailed, "", fmt.Errorf("integrate slice %s: diff --cached: %w: %s", sliceName, err, strings.TrimSpace(stagedOut))
+		diffErr := fmt.Errorf("integrate slice %s: diff --cached: %w: %s", sliceName, err, strings.TrimSpace(stagedOut))
+		// The cherry-pick itself applied cleanly, so it left the cherry-pick
+		// staged/mid-sequence in repoRoot; clean that up before returning,
+		// or a later slice's own integration trips the dirty-tree guard
+		// above (issue #2060 review finding).
+		if abortErr := abortCherryPick(repoRoot); abortErr != nil {
+			return integrateFailed, "", fmt.Errorf("%w; cherry-pick --abort after diff --cached failure: %v", diffErr, abortErr)
+		}
+		return integrateFailed, "", diffErr
 	}
 	if strings.TrimSpace(stagedOut) == "" {
 		// Nothing staged -- mirror the empty-rev-list guard above and
@@ -127,8 +167,8 @@ func integrateSliceBranch(repoRoot, sliceName, branch string) (integrateStatus, 
 		// against that changing underfoot by cleaning up defensively the
 		// same way the conflict path does.
 		if leftoverOut, leftoverErr := runGitIn(repoRoot, "status", "--porcelain"); leftoverErr == nil && strings.TrimSpace(leftoverOut) != "" {
-			if abortOut, abortErr := runGitIn(repoRoot, "cherry-pick", "--abort"); abortErr != nil {
-				return integrateFailed, "", fmt.Errorf("integrate slice %s: cherry-pick --abort after no-op apply: %w: %s", sliceName, abortErr, strings.TrimSpace(abortOut))
+			if abortErr := abortCherryPick(repoRoot); abortErr != nil {
+				return integrateFailed, "", fmt.Errorf("integrate slice %s: cherry-pick --abort after no-op apply: %w", sliceName, abortErr)
 			}
 		}
 		return integrateEmpty, "", nil
@@ -136,10 +176,67 @@ func integrateSliceBranch(repoRoot, sliceName, branch string) (integrateStatus, 
 
 	msg := fmt.Sprintf("chore(orchestrator): integrate slice %s\n\nCherry-picked from %s.", sliceName, branch)
 	if commitOut, err := runGitIn(repoRoot, "commit", "-m", msg); err != nil {
-		return integrateFailed, "", fmt.Errorf("integrate slice %s: commit: %w: %s", sliceName, err, strings.TrimSpace(commitOut))
+		commitErr := fmt.Errorf("integrate slice %s: commit: %w: %s", sliceName, err, strings.TrimSpace(commitOut))
+		// The cherry-pick's staged changes are still sitting in the index
+		// after a failed commit (e.g. a rejecting commit-msg hook) -- clean
+		// them up so they don't cascade into a later slice's own
+		// dirty-tree refusal (issue #2060 review finding).
+		if abortErr := abortCherryPick(repoRoot); abortErr != nil {
+			return integrateFailed, "", fmt.Errorf("%w; cherry-pick --abort after commit failure: %v", commitErr, abortErr)
+		}
+		return integrateFailed, "", commitErr
 	}
 
 	return integrateOK, "", nil
+}
+
+// hasUnmergedPaths reports whether porcelainOut -- the output of `git
+// status --porcelain` -- shows any path left unmerged by an in-progress
+// cherry-pick/merge: any line starting with "U", or "AA"/"DD" for
+// both-added/both-deleted, per porcelain conflict status codes. Used to
+// distinguish a genuine cherry-pick content conflict from any other
+// cherry-pick failure (e.g. a merge commit in the picked range), which
+// never enters this state at all.
+func hasUnmergedPaths(porcelainOut string) bool {
+	for _, line := range strings.Split(porcelainOut, "\n") {
+		if len(line) < 2 {
+			continue
+		}
+		code := line[:2]
+		if strings.HasPrefix(code, "U") || code == "AA" || code == "DD" {
+			return true
+		}
+	}
+	return false
+}
+
+// abortCherryPick cleans up an in-progress or already-applied
+// `cherry-pick --no-commit` in dir, returning an error that folds in
+// whatever failed if cleanup doesn't succeed -- the shared "abort and fold
+// failure into an error" pattern integrateSliceBranch uses at every point
+// it needs to clean up a cherry-pick before returning a failure, so a
+// cleanup failure is never silently lost.
+//
+// It tries `git cherry-pick --abort` first, which is enough whenever the
+// cherry-pick left sequencer state behind (e.g. a multi-commit revRange).
+// A cherry-pick of a *single*-commit revRange applies and stages directly
+// without ever touching the sequencer, though, so `--abort` on that case
+// fails with "no cherry-pick or revert in progress" despite there still
+// being a staged apply to undo; abortCherryPick falls back to `git reset
+// --hard HEAD` for that case. That fallback is safe precisely because of
+// integrateSliceBranch's own invariants: it never moves HEAD before a
+// successful commit, and it already refused to run at all on a dirty
+// repoRoot, so resetting to HEAD can only discard this call's own
+// cherry-pick apply -- never pre-existing, unrelated work.
+func abortCherryPick(dir string) error {
+	abortOut, abortErr := runGitIn(dir, "cherry-pick", "--abort")
+	if abortErr == nil {
+		return nil
+	}
+	if resetOut, resetErr := runGitIn(dir, "reset", "--hard", "HEAD"); resetErr != nil {
+		return fmt.Errorf("cherry-pick --abort: %w: %s (fallback git reset --hard HEAD also failed: %v: %s)", abortErr, strings.TrimSpace(abortOut), resetErr, strings.TrimSpace(resetOut))
+	}
+	return nil
 }
 
 // runGitIn runs `git <args...>` with its working directory set to dir,
