@@ -61,6 +61,66 @@ let
         chmod -R u+w $out
         cp "$brokenBodyPath" $out/research-verdict-github-readonly.md
       '';
+
+  # Broken fixture for the three forbidden-marker checks below (issue #2510,
+  # parent #2498 campaign R): the whole fragments directory, cp -r'd from the
+  # real templates tree (mirrors brokenResearchVerdictFragmentsDir above), but
+  # with auto-format.md (gated on the plain, non-exempt "AUTO_FORMAT" gate)
+  # swapped for a broken copy that carries the literal forbidden-marker
+  # substring "git push" as authored fragment-body text.
+  brokenForbiddenMarkerFragmentBody = ''
+    Run `git push` here. This fixture deliberately injects a forbidden marker
+    into a fragment gated on a plain, non-exempt gate.
+  '';
+  brokenForbiddenMarkerFragmentsDir =
+    pkgs.runCommand "broken-forbidden-marker-fragments"
+      {
+        passAsFile = [ "brokenBody" ];
+        brokenBody = brokenForbiddenMarkerFragmentBody;
+      }
+      ''
+        mkdir -p $out
+        cp -r ${../../templates/default/prompts/fragments}/. $out/
+        chmod -R u+w $out
+        cp "$brokenBodyPath" $out/auto-format.md
+      '';
+
+  # Exempt-gate counterpart fixture: same shape, but the broken content is
+  # injected into open-pr-create-outbox.md (gated on "BOX_ACCESS_READ_ONLY",
+  # which is exempt from the fragment-body forbidden-marker scan per lib/
+  # mkHarness.nix's readOnlyReachableFragmentRows filter) instead of a
+  # plain, non-exempt gate.
+  exemptGateForbiddenMarkerFragmentBody = ''
+    Do NOT run `git push` yourself here -- relay the branch instead. This
+    fixture deliberately injects the forbidden-marker substring into a
+    fragment gated on an exempt (read-only-labeled) gate, to prove the
+    exemption rule protects it from a false positive.
+  '';
+  exemptGateForbiddenMarkerFragmentsDir =
+    pkgs.runCommand "exempt-gate-forbidden-marker-fragments"
+      {
+        passAsFile = [ "exemptBody" ];
+        exemptBody = exemptGateForbiddenMarkerFragmentBody;
+      }
+      ''
+        mkdir -p $out
+        cp -r ${../../templates/default/prompts/fragments}/. $out/
+        chmod -R u+w $out
+        cp "$exemptBodyPath" $out/open-pr-create-outbox.md
+      '';
+
+  # Clean placeholder template text, carrying none of the forbiddenMarkers
+  # substrings (issue #2510): the real templates/default/prompts/{issue,
+  # filer}-prompt.md both carry a forbiddenMarkers substring today (issue-
+  # prompt.md a genuine imperative "git push"/"gh pr create"/etc, fixed in a
+  # later slice; filer-prompt.md a descriptive, non-imperative mention of
+  # "gh issue create" explaining what its own FILED output line means) --
+  # neither is touched by this slice. The three forbidden-marker checks below
+  # override `prompt`/`filerPrompt` with this placeholder wherever the check
+  # isn't specifically exercising that param, so a check asserting success/
+  # failure over the *fragment* scan (or over a deliberately broken `prompt`)
+  # isn't confounded by an unrelated, already-known template violation.
+  cleanForbiddenMarkerPlaceholder = "a clean placeholder prompt with no forbidden operations mentioned";
 in
 {
   # The configured `prompt` is rendered to a store-path directory and,
@@ -1022,4 +1082,83 @@ in
     assert assertMsg ok.success
       "mkHarness.nix must not throw when boxForgeAndIssueAccess is not statically read-only, even with a missing SPINDRIFT_COMMENT marker";
     pkgs.runCommand "build-time-reject-research-verdict-comment-relay-not-triggered" { } "touch $out";
+
+  # Structural forbidden-marker check (issue #2510, parent #2498 campaign R):
+  # a forbidden marker (lib/prompt-contract.nix forbiddenMarkers) authored as
+  # literal fragment-body text in a fragment gated on a plain, non-exempt gate
+  # must fail the build -- unconditionally, unlike buildTimeRejectVerdicts
+  # above, since a forbidden marker in the shipped corpus is a problem for
+  # any Consumer that might configure boxAccessReadOnly, not just this
+  # particular build's own static gates.
+  build-time-reject-forbidden-marker-fragment =
+    let
+      inherit (pkgs.lib) assertMsg;
+      broken = builtins.tryEval (
+        (import ../../lib/mkHarness.nix {
+          inherit nixpkgs system;
+          packages = p: [ p.hello ];
+          fragmentsDir = brokenForbiddenMarkerFragmentsDir;
+          # Isolates this check to the fragment scan: real filer-prompt.md
+          # (and real issue-prompt.md, if left default) already carry an
+          # unrelated, already-known template violation (see
+          # cleanForbiddenMarkerPlaceholder's doc comment above), which
+          # would make this assertion pass for the wrong reason.
+          prompt = cleanForbiddenMarkerPlaceholder;
+          filerPrompt = cleanForbiddenMarkerPlaceholder;
+        }).spindrift
+      );
+    in
+    assert assertMsg (!broken.success)
+      "mkHarness.nix must throw when a fragment gated on a plain, non-exempt gate (AUTO_FORMAT) carries a forbidden marker ('git push') as literal fragment-body text";
+    pkgs.runCommand "build-time-reject-forbidden-marker-fragment" { } "touch $out";
+
+  # The exempt-gate counterpart (regression guard): the same forbidden-marker
+  # substring, but injected into a fragment gated on an exempt gate
+  # (BOX_ACCESS_READ_ONLY) instead -- many shipped fragments legitimately
+  # carry forbidden-marker text as a negation ("do NOT git push") since
+  # they're the read-only half of an explicit access-mode pair, so the check
+  # must not false-positive on them. Proves the exemption rule actually
+  # protects legitimate read-only-labeled fragments.
+  build-time-forbidden-marker-fragment-exempt-gate-not-triggered =
+    let
+      inherit (pkgs.lib) assertMsg;
+      ok = builtins.tryEval (
+        (import ../../lib/mkHarness.nix {
+          inherit nixpkgs system;
+          packages = p: [ p.hello ];
+          fragmentsDir = exemptGateForbiddenMarkerFragmentsDir;
+          # Isolates this check to the fragment scan -- see the sibling
+          # build-time-reject-forbidden-marker-fragment check above for why.
+          prompt = cleanForbiddenMarkerPlaceholder;
+          filerPrompt = cleanForbiddenMarkerPlaceholder;
+        }).spindrift
+      );
+    in
+    assert assertMsg ok.success
+      "mkHarness.nix must not throw when a fragment gated on an exempt gate (BOX_ACCESS_READ_ONLY) carries a forbidden marker as literal fragment-body text";
+    pkgs.runCommand "build-time-forbidden-marker-fragment-exempt-gate-not-triggered" { } "touch $out";
+
+  # The shared top-level template counterpart (issue #2510): `prompt`
+  # (issue-prompt.md's default) gets no exemption at all -- its raw text is
+  # scanned unconditionally against every forbiddenMarkers substring row.
+  build-time-reject-forbidden-marker-template =
+    let
+      inherit (pkgs.lib) assertMsg;
+      broken = builtins.tryEval (
+        (import ../../lib/mkHarness.nix {
+          inherit nixpkgs system;
+          packages = p: [ p.hello ];
+          prompt = "some issue prompt text containing gh pr create somewhere";
+          # Isolates this check to the deliberately-broken `prompt` param:
+          # real filer-prompt.md carries an unrelated, already-known
+          # template violation (see cleanForbiddenMarkerPlaceholder's doc
+          # comment above), which would make this assertion pass for the
+          # wrong reason.
+          filerPrompt = cleanForbiddenMarkerPlaceholder;
+        }).spindrift
+      );
+    in
+    assert assertMsg (!broken.success)
+      "mkHarness.nix must throw when the shared `prompt` template carries a forbidden marker ('gh pr create') as literal text";
+    pkgs.runCommand "build-time-reject-forbidden-marker-template" { } "touch $out";
 }

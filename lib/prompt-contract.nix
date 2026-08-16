@@ -602,6 +602,67 @@ rec {
     in
     map verdictFor rejectRows;
 
+  # Build-time forbidden-marker check (issue #2510, parent #2498 campaign R):
+  # the INVERSE of buildTimeRejectVerdicts above -- that one asserts a
+  # required marker is *present* under a statically-known-true gate;
+  # this one asserts a forbidden marker (forbiddenMarkers above) is *absent*
+  # from the raw, unrendered content a caller hands it. Unlike
+  # buildTimeRejectVerdicts, this check is unconditional -- it does not take
+  # a `staticGates` argument and does not consult any Consumer's
+  # staticGates/mergedDefaults, because a forbidden marker shipped in the
+  # corpus is a problem for *any* Consumer that might configure
+  # `boxAccessReadOnly`, not just one particular build's own configuration.
+  # There is no "not triggered"/advise branch here the way there is for
+  # buildTimeRejectVerdicts: every violation is unconditionally reported.
+  #
+  #   fragmentContentByFile -- attrset from a fragment's basename (under
+  #                            templates/default/prompts/fragments/) to its
+  #                            raw file content. Callers are expected to
+  #                            have already filtered this down to whichever
+  #                            fragment rows should actually be scanned
+  #                            (e.g. lib/mkHarness.nix excludes fragments
+  #                            whose `gate` proves they're the access-mode-
+  #                            aware half of an explicit read-only/read-write
+  #                            pair, or the filer's independent-token direct-
+  #                            write path).
+  #   templateContentByFile -- attrset from a shared top-level template's
+  #                            basename (issue-prompt.md/review-prompt.md/
+  #                            filer-prompt.md) to its raw, unsubstituted
+  #                            text -- scanned unconditionally, no exemption.
+  #
+  # Only forbiddenMarkers rows with kind == "substring" are checked here: the
+  # "gh-api-mutation" row's marker is display-only (see forbiddenMarkers'
+  # own doc comment above), matched by agent/entrypoint.sh's bash argument
+  # scanner instead of a literal substring, so it can't be usefully scanned
+  # this way.
+  buildTimeForbiddenMarkerViolations =
+    {
+      fragmentContentByFile,
+      templateContentByFile,
+    }:
+    let
+      substringRows = builtins.filter (row: row.kind == "substring") forbiddenMarkers;
+      violationsIn =
+        contentByFile:
+        builtins.concatMap (
+          file:
+          builtins.concatMap (
+            row:
+            if hasInfix row.marker contentByFile.${file} then
+              [
+                {
+                  inherit file;
+                  marker = row.marker;
+                  id = row.id;
+                }
+              ]
+            else
+              [ ]
+          ) substringRows
+        ) (builtins.attrNames contentByFile);
+    in
+    (violationsIn fragmentContentByFile) ++ (violationsIn templateContentByFile);
+
   # Fold from a buildTimeRejectVerdicts verdict to "must the runtime bash
   # validator NOT block" (issue #2320, parent #2244): the runtime validator
   # (agent/entrypoint.sh's _validate_prompt_contract) only ever has a
