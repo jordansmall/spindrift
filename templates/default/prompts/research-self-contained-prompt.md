@@ -17,14 +17,13 @@ ${RESEARCH_ISSUE_READ_GITHUB_STEP}${RESEARCH_ISSUE_READ_LOCAL_STEP}${RESEARCH_IS
 # VERDICT
 
 Judge relevance from the issue content alone — there is no repo to explore.
-Render exactly one of these verdicts:
 
 # POST THE VERDICT
 
 ${RESEARCH_VERDICT_GITHUB_STEP}${RESEARCH_VERDICT_GITHUB_READONLY_STEP}${RESEARCH_VERDICT_LOCAL_STEP}${RESEARCH_VERDICT_FORGEJO_STEP}${RESEARCH_VERDICT_FORGEJO_READONLY_STEP}
 Structure the verdict in this order:
 
-1. **Verdict** — `recommend` / `reject` / `unclear`, plus a one-line rationale.
+1. **Verdict** — `<RESEARCH_VERDICT_ENUM>`, plus a one-line rationale.
 2. **Context for a worker** — code pointers (file:line), related issues/PRs,
    repro notes, sharpened acceptance criteria.
 3. **Open questions** — mandatory when the verdict is `unclear`: the concrete
