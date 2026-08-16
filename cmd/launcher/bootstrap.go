@@ -105,12 +105,7 @@ func bootstrap(ensureReady bool, kind string, selfContained bool) (lc *launchCon
 	}
 
 	rc := runnerConfig(c)
-	var r runner.Runner
-	if c.runnerKind == "bwrap" {
-		r = runner.NewBwrap(rc)
-	} else {
-		r = runner.NewOCI(rc, pwd)
-	}
+	r := runnerForKind(c, rc, pwd)
 	if ensureReady {
 		if err := r.EnsureReady(); err != nil {
 			return nil, err

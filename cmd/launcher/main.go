@@ -604,6 +604,29 @@ func runnerConfig(c config) runner.Config {
 	}
 }
 
+// runnerForKind selects the run-time runner adapter (bwrap or OCI) for
+// bootstrap and the reconcile local-tracker liveness probe. Keyed solely on
+// c.runnerKind (the RUNNER_KIND document artifact, issue #2538) — never
+// c.runtime, which also carries operator-facing runtime *names* (podman,
+// docker, rancher) that aren't "oci" literally.
+func runnerForKind(c config, rc runner.Config, pwd string) runner.Runner {
+	if c.runnerKind == "bwrap" {
+		return runner.NewBwrap(rc)
+	}
+	return runner.NewOCI(rc, pwd)
+}
+
+// buildRunnerForKind is runnerForKind's `launcher build` counterpart: it
+// selects NewBwrapBuild instead of NewBwrap for the bwrap arm (build realizes
+// store closures rather than running an agent), but keys off the same
+// c.runnerKind == "bwrap" check.
+func buildRunnerForKind(c config, rc runner.Config, pwd string) runner.Runner {
+	if c.runnerKind == "bwrap" {
+		return runner.NewBwrapBuild(rc)
+	}
+	return runner.NewOCI(rc, pwd)
+}
+
 // newDriver returns the Go Driver strategy selected by c.driver (ADR 0009).
 // validate() already rejects an unrecognised DRIVER before this is reached,
 // so the error here is treated as impossible in production and falls back to
@@ -885,12 +908,7 @@ func build() error {
 		return err
 	}
 	rc := runnerConfig(c)
-	var r runner.Runner
-	if c.runnerKind == "bwrap" {
-		r = runner.NewBwrapBuild(rc)
-	} else {
-		r = runner.NewOCI(rc, pwd)
-	}
+	r := buildRunnerForKind(c, rc, pwd)
 	return r.EnsureReady()
 }
 
