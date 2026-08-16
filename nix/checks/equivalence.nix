@@ -1243,7 +1243,7 @@ in
         aarch64-darwin: ${harnessDarwin.image.drvPath}'';
     pkgs.runCommand "extraclosures-function-form-drvpath-host-independent" { } "touch $out";
 
-  # The `skills` knob's path/derivation form (lib/image.nix:352-376) is copied
+  # The `skills` knob's path/derivation form (lib/image.nix:335-365) is copied
   # verbatim via `cp -r ${f}` rather than re-realized with the image's own
   # pkgs, unlike the `{ name; src; }` content form covered above. A plain
   # source path is content-addressed and host-independent, so pointing
