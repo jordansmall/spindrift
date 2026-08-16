@@ -248,6 +248,14 @@ in
         outboxRelayCapable = true;
         inBoxUnreachableTracker = false;
         fullyLocal = false;
+        trackerAxisRead = "GITHUB";
+        trackerAxisWrite = "GITHUB";
+        trackerAxisFiler = "GH";
+        forgeBackend = "GH";
+        filerEnabled = true;
+        workerProvisioned = true;
+        reviewLoopInline = true;
+        reviewLoopOrchestrator = false;
       };
     in
     assert assertMsg (
@@ -280,6 +288,26 @@ in
     assert assertMsg (out.FULLY_LOCAL == "false")
       "runArtifacts (bwrap) must render FULLY_LOCAL as the literal string \"false\", got: ${builtins.toJSON out}";
     assert assertMsg (
+      out.TRACKER_AXIS_READ == "GITHUB"
+    ) "runArtifacts (bwrap) must render TRACKER_AXIS_READ, got: ${builtins.toJSON out}";
+    assert assertMsg (
+      out.TRACKER_AXIS_WRITE == "GITHUB"
+    ) "runArtifacts (bwrap) must render TRACKER_AXIS_WRITE, got: ${builtins.toJSON out}";
+    assert assertMsg (
+      out.TRACKER_AXIS_FILER == "GH"
+    ) "runArtifacts (bwrap) must render TRACKER_AXIS_FILER, got: ${builtins.toJSON out}";
+    assert assertMsg (
+      out.FORGE_BACKEND == "GH"
+    ) "runArtifacts (bwrap) must render FORGE_BACKEND, got: ${builtins.toJSON out}";
+    assert assertMsg (out.FILER_ENABLED == "true")
+      "runArtifacts (bwrap) must render FILER_ENABLED as the literal string \"true\", got: ${builtins.toJSON out}";
+    assert assertMsg (out.WORKER_PROVISIONED == "true")
+      "runArtifacts (bwrap) must render WORKER_PROVISIONED as the literal string \"true\", got: ${builtins.toJSON out}";
+    assert assertMsg (out.REVIEW_LOOP_INLINE == "true")
+      "runArtifacts (bwrap) must render REVIEW_LOOP_INLINE as the literal string \"true\", got: ${builtins.toJSON out}";
+    assert assertMsg (out.REVIEW_LOOP_ORCHESTRATOR == "false")
+      "runArtifacts (bwrap) must render REVIEW_LOOP_ORCHESTRATOR as the literal string \"false\", got: ${builtins.toJSON out}";
+    assert assertMsg (
       !(out ? IMAGE_ARCHIVE)
     ) "runArtifacts (bwrap) must not set OCI-only keys, got: ${builtins.toJSON out}";
     pkgs.runCommand "preambles-run-artifacts-bwrap" { } "touch $out";
@@ -307,6 +335,14 @@ in
         outboxRelayCapable = false;
         inBoxUnreachableTracker = true;
         fullyLocal = true;
+        trackerAxisRead = "LOCAL";
+        trackerAxisWrite = "";
+        trackerAxisFiler = "GH";
+        forgeBackend = "GH";
+        filerEnabled = false;
+        workerProvisioned = false;
+        reviewLoopInline = false;
+        reviewLoopOrchestrator = true;
       };
     in
     assert assertMsg (
@@ -339,6 +375,26 @@ in
     assert assertMsg (out.FULLY_LOCAL == "true")
       "runArtifacts (oci) must render FULLY_LOCAL as the literal string \"true\", got: ${builtins.toJSON out}";
     assert assertMsg (
+      out.TRACKER_AXIS_READ == "LOCAL"
+    ) "runArtifacts (oci) must render TRACKER_AXIS_READ, got: ${builtins.toJSON out}";
+    assert assertMsg (
+      out.TRACKER_AXIS_WRITE == ""
+    ) "runArtifacts (oci) must render TRACKER_AXIS_WRITE, got: ${builtins.toJSON out}";
+    assert assertMsg (
+      out.TRACKER_AXIS_FILER == "GH"
+    ) "runArtifacts (oci) must render TRACKER_AXIS_FILER, got: ${builtins.toJSON out}";
+    assert assertMsg (
+      out.FORGE_BACKEND == "GH"
+    ) "runArtifacts (oci) must render FORGE_BACKEND, got: ${builtins.toJSON out}";
+    assert assertMsg (out.FILER_ENABLED == "false")
+      "runArtifacts (oci) must render FILER_ENABLED as the literal string \"false\", got: ${builtins.toJSON out}";
+    assert assertMsg (out.WORKER_PROVISIONED == "false")
+      "runArtifacts (oci) must render WORKER_PROVISIONED as the literal string \"false\", got: ${builtins.toJSON out}";
+    assert assertMsg (out.REVIEW_LOOP_INLINE == "false")
+      "runArtifacts (oci) must render REVIEW_LOOP_INLINE as the literal string \"false\", got: ${builtins.toJSON out}";
+    assert assertMsg (out.REVIEW_LOOP_ORCHESTRATOR == "true")
+      "runArtifacts (oci) must render REVIEW_LOOP_ORCHESTRATOR as the literal string \"true\", got: ${builtins.toJSON out}";
+    assert assertMsg (
       !(out ? AGENT_FILES)
     ) "runArtifacts (oci) must not set bwrap-only keys, got: ${builtins.toJSON out}";
     pkgs.runCommand "preambles-run-artifacts-oci" { } "touch $out";
@@ -369,6 +425,14 @@ in
         outboxRelayCapable = true;
         inBoxUnreachableTracker = false;
         fullyLocal = false;
+        trackerAxisRead = "FORGEJO";
+        trackerAxisWrite = "FORGEJO";
+        trackerAxisFiler = "FORGEJO";
+        forgeBackend = "FORGEJO";
+        filerEnabled = true;
+        workerProvisioned = false;
+        reviewLoopInline = true;
+        reviewLoopOrchestrator = false;
       };
     in
     assert assertMsg (
@@ -462,7 +526,9 @@ in
         "DRIVER"
         "DRIVER_SESSION_CACHE_DIR"
         "DRIVER_SKILLS_DIR"
+        "FILER_ENABLED"
         "FLAKE_IMAGE_ATTR"
+        "FORGE_BACKEND"
         "FULLY_LOCAL"
         "GITHUB_OUTPUT"
         "HOST_MEDIATED_REMOTE"
@@ -474,8 +540,14 @@ in
         "NIX_BUILDER_IMAGE"
         "NIX_VOLUME"
         "OUTBOX_RELAY_CAPABLE"
+        "REVIEW_LOOP_INLINE"
+        "REVIEW_LOOP_ORCHESTRATOR"
         "RUNNER_KIND"
         "RUNTIME"
+        "TRACKER_AXIS_FILER"
+        "TRACKER_AXIS_READ"
+        "TRACKER_AXIS_WRITE"
+        "WORKER_PROVISIONED"
       ];
     in
     assert assertMsg (out == expected)

@@ -353,6 +353,32 @@ let
   inBoxUnreachableTracker = issueTrackerRow.inBoxUnreachableTracker or false;
   fullyLocal = hostMediatedRemote && inBoxUnreachableTracker;
 
+  # Tracker/forge axis strings derived from mergedDefaults.issueTracker/
+  # codeForge, threaded into the Launcher input document's `run` artifacts
+  # (preambles.runArtifacts) as TRACKER_AXIS_READ / TRACKER_AXIS_WRITE /
+  # TRACKER_AXIS_FILER / FORGE_BACKEND (issue #2533). Mirrors the Go switch
+  # statement (issueTrackerAxis) that used to live in
+  # cmd/launcher/internal/promptassembly/gates_tracker.go and was deleted in
+  # a prior slice -- this nix computation supplies the real values a later
+  # slice will thread into the assemble-prompt CLI flags that now expect
+  # them instead of re-deriving the mapping in-box.
+  trackerAxisRead =
+    if mergedDefaults.issueTracker == "local" then
+      "LOCAL"
+    else if mergedDefaults.issueTracker == "forgejo" then
+      "FORGEJO"
+    else
+      "GITHUB";
+  trackerAxisWrite =
+    if mergedDefaults.issueTracker == "local" then
+      ""
+    else if mergedDefaults.issueTracker == "forgejo" then
+      "FORGEJO"
+    else
+      "GITHUB";
+  trackerAxisFiler = if mergedDefaults.issueTracker == "forgejo" then "FORGEJO" else "GH";
+  forgeBackend = if mergedDefaults.codeForge == "forgejo" then "FORGEJO" else "GH";
+
   # Eval-time choices guard (issue #2519 slice 2): lib/flakeModule.nix's
   # generated Consumer options use `types.enum` for every schema knob
   # declaring `choices`, but that only protects Consumers going through the
@@ -436,6 +462,17 @@ let
       resolvedRoster
     else
       map (e: if e.name == "reviewer" then e // { effort = reviewEffort; } else e) resolvedRoster;
+
+  # Roster/review-loop bools derived from finalRoster/mergedDefaults,
+  # threaded into the Launcher input document's `run` artifacts
+  # (preambles.runArtifacts) as FILER_ENABLED / WORKER_PROVISIONED /
+  # REVIEW_LOOP_INLINE / REVIEW_LOOP_ORCHESTRATOR (issue #2533) so a later
+  # Go-side slice can read them via getenvArtifact instead of re-deriving
+  # roster membership/orchestration mode itself.
+  filerEnabled = lib.any (e: e.name == "filer") finalRoster;
+  workerProvisioned = lib.any (e: e.name == "worker") finalRoster;
+  reviewLoopInline = !mergedDefaults.orchestratorEnabled;
+  reviewLoopOrchestrator = mergedDefaults.orchestratorEnabled;
 
   # --agents JSON, rendered by the selected Driver (ADR 0009) from the
   # resolved roster above, so a future Driver with a different agent-config
@@ -1022,6 +1059,14 @@ let
       outboxRelayCapable
       inBoxUnreachableTracker
       fullyLocal
+      trackerAxisRead
+      trackerAxisWrite
+      trackerAxisFiler
+      forgeBackend
+      filerEnabled
+      workerProvisioned
+      reviewLoopInline
+      reviewLoopOrchestrator
       ;
     driverEntry = imageDriver.driverEntry;
     prefetch = imageKnobs.prefetch;
