@@ -1593,7 +1593,11 @@ func TestValidateCodeForge_RejectsUnknown(t *testing.T) {
 
 // TestValidateCodeForge_RejectsUnknown_ExactMessage verifies validate()'s
 // exact CODE_FORGE-invalid error string, so a registry-driven rewrite of the
-// CODE_FORGE switch (issue #2267) can't silently drift the message text.
+// CODE_FORGE switch (issue #2267) can't silently drift the message text. The
+// "must be ..." list is rendered from validCodeForgeNames() (issue #2520
+// slice 4), so its word order tracks backendRows' declaration order
+// (github, forgejo, jira, local, git -- jira excluded, ValidAsCodeForge is
+// false) rather than a hand-typed literal.
 func TestValidateCodeForge_RejectsUnknown_ExactMessage(t *testing.T) {
 	c := minimalValidConfig()
 	c.codeForge = "gitlab"
@@ -1601,7 +1605,7 @@ func TestValidateCodeForge_RejectsUnknown_ExactMessage(t *testing.T) {
 	if err == nil {
 		t.Fatal("validate() should reject unrecognised CODE_FORGE")
 	}
-	want := `CODE_FORGE="gitlab" is not valid; must be github, git, local, or forgejo`
+	want := `CODE_FORGE="gitlab" is not valid; must be github, forgejo, local, or git`
 	if err.Error() != want {
 		t.Errorf("validate() error = %q, want %q", err.Error(), want)
 	}

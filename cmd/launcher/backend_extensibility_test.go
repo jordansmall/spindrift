@@ -138,3 +138,27 @@ func TestBackendRegistry_NewBackendNeedsOnlyRowAndNoOtherChanges(t *testing.T) {
 		t.Errorf("doctorSlugHint = %q, want %q", hintRow.DoctorSlugHint, "GITLAB_BASE_URL")
 	}
 }
+
+// TestValidateIssueTracker_InvalidMessageListsRuntimeRegisteredBackend pins
+// issue #2520 slice 4: the ISSUE_TRACKER-invalid error's "must be ..." list
+// must be computed dynamically from backendRows (filtered by
+// ValidAsTracker), not a hand-typed literal string in main.go. It appends a
+// fake "gitlab" backendRow (fakeGitlabRow, above) at runtime and asserts the
+// rejection message for a genuinely unknown ISSUE_TRACKER value now mentions
+// "gitlab" -- a literal string in main.go could never see this runtime
+// addition, so this only passes when the list is sourced from backendRows.
+func TestValidateIssueTracker_InvalidMessageListsRuntimeRegisteredBackend(t *testing.T) {
+	original := backendRows
+	backendRows = append(append([]backendRow{}, original...), fakeGitlabRow())
+	defer func() { backendRows = original }()
+
+	c := minimalValidConfig()
+	c.issueTracker = "not-a-real-tracker"
+	err := validate(c)
+	if err == nil {
+		t.Fatal("validate() should reject an unrecognised ISSUE_TRACKER")
+	}
+	if !strings.Contains(err.Error(), "gitlab") {
+		t.Errorf("validate() error = %q, want it to mention the runtime-registered %q backend", err.Error(), "gitlab")
+	}
+}
