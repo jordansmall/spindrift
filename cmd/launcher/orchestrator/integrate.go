@@ -192,9 +192,11 @@ func integrateSliceBranch(repoRoot, sliceName, branch string) (integrateStatus, 
 
 // hasUnmergedPaths reports whether porcelainOut -- the output of `git
 // status --porcelain` -- shows any path left unmerged by an in-progress
-// cherry-pick/merge: any line starting with "U", or "AA"/"DD" for
-// both-added/both-deleted, per porcelain conflict status codes. Used to
-// distinguish a genuine cherry-pick content conflict from any other
+// cherry-pick/merge: any line starting with "U", or "AA"/"DD"/"AU"/"DU" for
+// both-added/both-deleted/add-vs-unmerged/delete-vs-unmerged, per
+// git-status(1)'s "Unmerged" table -- the full set of porcelain conflict
+// codes, not just the two an add/delete-shaped conflict never produces.
+// Used to distinguish a genuine cherry-pick content conflict from any other
 // cherry-pick failure (e.g. a merge commit in the picked range), which
 // never enters this state at all.
 func hasUnmergedPaths(porcelainOut string) bool {
@@ -203,7 +205,7 @@ func hasUnmergedPaths(porcelainOut string) bool {
 			continue
 		}
 		code := line[:2]
-		if strings.HasPrefix(code, "U") || code == "AA" || code == "DD" {
+		if strings.HasPrefix(code, "U") || code == "AA" || code == "DD" || code == "AU" || code == "DU" {
 			return true
 		}
 	}
