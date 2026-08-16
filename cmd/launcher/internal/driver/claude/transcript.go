@@ -93,7 +93,7 @@ type SpindriftOp struct {
 	Verdict  string `json:"verdict,omitempty"`
 	Decision string `json:"decision,omitempty"` // "continue" or "stop"
 	Reason   string `json:"reason,omitempty"`
-	Phase    string `json:"phase,omitempty"` // "read", "write", or "findings_log", for run_state_error
+	Phase    string `json:"phase,omitempty"` // "read", "write", "findings_log", "dispositions_log", or "dispositions_budget", for run_state_error
 	Error    string `json:"error,omitempty"`
 	// Worker names the slice a worker_start/worker_finish op concerns
 	// (issue #2059) -- empty on every other op kind.
