@@ -3519,3 +3519,41 @@ func TestBuildArgs_ClosureGenerationAgentEnvOverridesSetenv(t *testing.T) {
 		}
 	}
 }
+
+// TestBwrapBuildArgs_MountsIssueSnapshot verifies that a Box with
+// IssueSnapshotPath set renders a --ro-bind <path> /issue-snapshot.md entry
+// — nothing previously asserted the frozen issue-read snapshot mount
+// actually reaches bwrap's own argv (issue #2547 review finding).
+func TestBwrapBuildArgs_MountsIssueSnapshot(t *testing.T) {
+	f, err := os.CreateTemp(t.TempDir(), "issue-snapshot-*.md")
+	if err != nil {
+		t.Fatalf("CreateTemp: %v", err)
+	}
+	f.Close()
+
+	a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok"}
+	box := Box{Env: map[string]string{}, IssueSnapshotPath: f.Name()}
+	args, err := a.buildArgs("/tmp/fake-etc", box)
+	if err != nil {
+		t.Fatalf("buildArgs: %v", err)
+	}
+
+	for i, arg := range args {
+		if arg == "--ro-bind" && i+2 < len(args) && args[i+1] == f.Name() && args[i+2] == "/issue-snapshot.md" {
+			return
+		}
+	}
+	t.Errorf("expected --ro-bind %s /issue-snapshot.md in args: %v", f.Name(), args)
+}
+
+// TestBwrapBuildArgs_PropagatesIssueSnapshotMountError verifies that a
+// missing IssueSnapshotPath surfaces buildMountSpecs's hard error through
+// buildArgs, rather than silently omitting the mount (issue #2547 review
+// finding).
+func TestBwrapBuildArgs_PropagatesIssueSnapshotMountError(t *testing.T) {
+	a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok"}
+	box := Box{Env: map[string]string{}, IssueSnapshotPath: filepath.Join(t.TempDir(), "missing.md")}
+	if _, err := a.buildArgs("/tmp/fake-etc", box); err == nil {
+		t.Error("buildArgs: want error on missing issue snapshot, got nil")
+	}
+}
