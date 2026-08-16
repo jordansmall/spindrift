@@ -22,9 +22,12 @@
 # dogfood-local pin or to the schema's own baked-in default (issue #2514
 # AC4).
 #
-# nix run .#regen will render this fixture into further consumer forms in a
-# later slice (a bats fixture, launcher testdata, and a docs block) -- not
-# implemented here.
+# `nix run .#regen` renders this fixture into further consumer forms: a bats
+# fixture (tests/default_models_gen.bash), launcher testdata
+# (cmd/launcher/defaultmodels_gen_test.go), and a docs block
+# (docs/reference.md's generated Default models table) -- see
+# lib/renderers.nix's renderDefaultModelFixture{Bash,Go} and
+# renderDefaultModelsDoc.
 {
   schemaDefaults = {
     model = "claude-sonnet-5";
