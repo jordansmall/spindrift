@@ -1,8 +1,10 @@
 package dispatch
 
 import (
+	"errors"
 	"os"
 	"testing"
+	"time"
 
 	"spindrift.dev/launcher/internal/runner"
 )
@@ -444,6 +446,40 @@ func TestRun_NilIssueSnapshot_NoOp(t *testing.T) {
 	}
 	if got := fr.RunCalls[0].IssueSnapshotPath; got != "" {
 		t.Errorf("Box.IssueSnapshotPath: got %q, want empty when IssueSnapshot is nil", got)
+	}
+}
+
+// TestRun_SnapshotResolveFailureRetriesWithBackoffBeforeGivingUp verifies
+// that a failing Config.IssueSnapshot -- e.g. a transient `gh` 403/429
+// resolving the issue snapshot -- gets the same degrade posture as a
+// quarantinePriorRunLogs or markRunLineage failure (both siblings in Run's
+// same pre-dispatch block): retry with linear backoff up to
+// TransientRetryMax before giving up, never hard-failing the whole dispatch
+// on the very first failure. Before the fix, writeIssueSnapshot's error
+// returned bare (not wrapped in quarantineErr), so dispatchWithRetry's
+// errors.As(err, &qErr) branch never matched and Run gave up after a single
+// attempt with no retry and no printed diagnostic.
+func TestRun_SnapshotResolveFailureRetriesWithBackoffBeforeGivingUp(t *testing.T) {
+	fr := runner.NewFake()
+	var sleeps []time.Duration
+	clock := fakeClock(time.Now(), &sleeps)
+
+	cfg := retryConfig(3, 5, 0)
+	cfg.IssueSnapshot = func(string) (string, error) {
+		return "", errors.New("gh: 403 forbidden")
+	}
+	d := newTestDispatch(t, cfg, fr, fakeDriver{}, clock)
+
+	result := d.Run()
+
+	if result.Success {
+		t.Errorf("Run: want Success=false once the retry cap is exhausted, got %+v", result)
+	}
+	if len(sleeps) != 3 {
+		t.Errorf("Sleep calls = %d, want 3 (TransientRetryMax) -- a snapshot-resolve failure must retry with backoff, not give up on the first attempt", len(sleeps))
+	}
+	if len(fr.RunCalls) != 0 {
+		t.Errorf("runner.Run: want 0 calls when the snapshot resolve keeps failing, got %d", len(fr.RunCalls))
 	}
 }
 

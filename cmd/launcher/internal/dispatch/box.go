@@ -117,7 +117,7 @@ func (d *Dispatch) Run() Result {
 			if d.cfg.Kind != "research" {
 				path, err := writeIssueSnapshot(d.cfg.IssueSnapshot, d.pwd, d.number)
 				if err != nil {
-					return fmt.Errorf("write issue snapshot: %w", err)
+					return quarantineErr{err: fmt.Errorf("write issue snapshot: %w", err)}
 				}
 				snapshotPath = path
 			}
@@ -283,10 +283,12 @@ func rotateStaleLog(logPath string) error {
 	}
 }
 
-// quarantineErr wraps a quarantinePriorRunLogs failure so dispatchWithRetry
-// (retry.go) can tell it apart from every other once() failure via
-// errors.As: nothing this run produced is necessarily at logPath yet when
-// quarantine runs, so on this specific failure the caller must not consult
+// quarantineErr wraps a failure from one of Run's pre-dispatch, once-per-run
+// steps -- quarantinePriorRunLogs, markRunLineage, or writeIssueSnapshot --
+// so dispatchWithRetry (retry.go) can tell it apart from every other once()
+// failure via errors.As: nothing this run produced is necessarily at logPath
+// yet when any of these run (all three execute before the box is ever
+// dispatched), so on this specific failure the caller must not consult
 // settledOutcome or ClassifyTransient against logPath at all -- either could
 // settle on, or reclassify, content left by the exact prior run quarantine
 // was trying to move aside (issue #2575), rather than failing outright.
