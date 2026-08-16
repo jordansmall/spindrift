@@ -18,6 +18,8 @@ setup() {
 
 @test "entrypoint hands the pass off to the orchestrator when ORCHESTRATOR_ENABLED is set" {
   export ORCHESTRATOR_ENABLED=1
+  export BOX_REVIEW_LOOP_ORCHESTRATOR=1
+  unset BOX_REVIEW_LOOP_INLINE
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   [ -s "$ORCHESTRATOR_LOG" ]
@@ -38,6 +40,8 @@ setup() {
 # any further.
 @test "entrypoint forwards EFFORT to the orchestrator as --effort" {
   export ORCHESTRATOR_ENABLED=1
+  export BOX_REVIEW_LOOP_ORCHESTRATOR=1
+  unset BOX_REVIEW_LOOP_INLINE
   export EFFORT="high"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
@@ -62,6 +66,8 @@ setup() {
 
 @test "orchestrator path exports CLAUDE_CODE_DISABLE_BACKGROUND_TASKS to the Driver identically" {
   export ORCHESTRATOR_ENABLED=1
+  export BOX_REVIEW_LOOP_ORCHESTRATOR=1
+  unset BOX_REVIEW_LOOP_INLINE
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   grep -q '^env: CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1$' "$DRIVER_LOG"
@@ -72,6 +78,8 @@ setup() {
 # --review-prompt-file, only on this fresh-issue work-dispatch path.
 @test "orchestrator path forwards --review-prompt-file carrying a real path" {
   export ORCHESTRATOR_ENABLED=1
+  export BOX_REVIEW_LOOP_ORCHESTRATOR=1
+  unset BOX_REVIEW_LOOP_INLINE
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   grep -q -- '--review-prompt-file' "$ORCHESTRATOR_LOG"
@@ -100,6 +108,8 @@ setup() {
 # resume must not.
 @test "orchestrator path omits --review-prompt-file on the corrective resume" {
   export ORCHESTRATOR_ENABLED=1
+  export BOX_REVIEW_LOOP_ORCHESTRATOR=1
+  unset BOX_REVIEW_LOOP_INLINE
   # First pass forgets its outcome; the SPINDRIFT_OUTCOME gate resumes once,
   # so the orchestrator is invoked exactly twice -- one line per invocation in
   # ORCHESTRATOR_LOG (the fake echoes its argv there, issue #1996).
@@ -119,6 +129,8 @@ setup() {
 # del(.reviewer) drops the reviewer entry from --agents entirely.
 @test "orchestrator path forwards --review-model from the reviewer's configured model" {
   export ORCHESTRATOR_ENABLED=1
+  export BOX_REVIEW_LOOP_ORCHESTRATOR=1
+  unset BOX_REVIEW_LOOP_INLINE
   export AGENTS_JSON_TEMPLATE='{"reviewer":{"description":"Review the branch diff for spec compliance and coding standards","model":"haiku","prompt":"","tools":["Read","Bash","WebFetch"]}}'
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
@@ -131,6 +143,8 @@ setup() {
 # must omit --review-model entirely rather than pass it empty.
 @test "orchestrator path omits --review-model when no reviewer model is configured" {
   export ORCHESTRATOR_ENABLED=1
+  export BOX_REVIEW_LOOP_ORCHESTRATOR=1
+  unset BOX_REVIEW_LOOP_INLINE
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   ! grep -q -- '--review-model' "$ORCHESTRATOR_LOG"
@@ -144,6 +158,8 @@ setup() {
 # --agents entirely.
 @test "orchestrator path forwards --review-effort from the reviewer's configured effort" {
   export ORCHESTRATOR_ENABLED=1
+  export BOX_REVIEW_LOOP_ORCHESTRATOR=1
+  unset BOX_REVIEW_LOOP_INLINE
   export AGENTS_JSON_TEMPLATE='{"reviewer":{"description":"Review the branch diff for spec compliance and coding standards","model":"haiku","effort":"high","prompt":"","tools":["Read","Bash","WebFetch"]}}'
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
@@ -157,6 +173,8 @@ setup() {
 # above.
 @test "orchestrator path omits --review-effort when no reviewer effort is configured" {
   export ORCHESTRATOR_ENABLED=1
+  export BOX_REVIEW_LOOP_ORCHESTRATOR=1
+  unset BOX_REVIEW_LOOP_INLINE
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   ! grep -q -- '--review-effort' "$ORCHESTRATOR_LOG"
@@ -186,6 +204,8 @@ setup() {
 # (fresh-issue work-dispatch path), same Handoff descriptor mechanism.
 @test "orchestrator path forwards --worker-prompt-file carrying a real path" {
   export ORCHESTRATOR_ENABLED=1
+  export BOX_REVIEW_LOOP_ORCHESTRATOR=1
+  unset BOX_REVIEW_LOOP_INLINE
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   grep -q -- '--worker-prompt-file' "$ORCHESTRATOR_LOG"
@@ -214,6 +234,8 @@ setup() {
 # descriptor field -- both come straight off the environment.
 @test "orchestrator path forwards WORKER_WORK_DIR/WORKER_TIMEOUT to the orchestrator" {
   export ORCHESTRATOR_ENABLED=1
+  export BOX_REVIEW_LOOP_ORCHESTRATOR=1
+  unset BOX_REVIEW_LOOP_INLINE
   export WORKER_WORK_DIR="/tmp/spindrift-workers-test"
   export WORKER_TIMEOUT="15m"
   run bash "$ENTRYPOINT"
@@ -228,6 +250,8 @@ setup() {
 # test above.
 @test "orchestrator path omits --worker-work-dir/--worker-timeout when unset" {
   export ORCHESTRATOR_ENABLED=1
+  export BOX_REVIEW_LOOP_ORCHESTRATOR=1
+  unset BOX_REVIEW_LOOP_INLINE
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   ! grep -q -- '--worker-work-dir' "$ORCHESTRATOR_LOG"
@@ -240,6 +264,8 @@ setup() {
 # field -- it comes straight off the environment.
 @test "orchestrator path forwards MAX_PARALLEL_WORKERS to the orchestrator as --max-parallel-workers" {
   export ORCHESTRATOR_ENABLED=1
+  export BOX_REVIEW_LOOP_ORCHESTRATOR=1
+  unset BOX_REVIEW_LOOP_INLINE
   export MAX_PARALLEL_WORKERS=4
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
@@ -252,6 +278,8 @@ setup() {
 # --review-effort omit test above.
 @test "orchestrator path omits --max-parallel-workers when unset" {
   export ORCHESTRATOR_ENABLED=1
+  export BOX_REVIEW_LOOP_ORCHESTRATOR=1
+  unset BOX_REVIEW_LOOP_INLINE
   unset MAX_PARALLEL_WORKERS
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
@@ -283,6 +311,8 @@ setup() {
 # fake orchestrator does not model) to forward it any further.
 @test "orchestrator path forwards claude's argv shape as --argv-* flags" {
   export ORCHESTRATOR_ENABLED=1
+  export BOX_REVIEW_LOOP_ORCHESTRATOR=1
+  unset BOX_REVIEW_LOOP_INLINE
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   grep -q -- '--argv-prompt-style flag' "$ORCHESTRATOR_LOG"
@@ -315,6 +345,8 @@ setup() {
 # that side of the gate has no bats coverage anywhere).
 @test "orchestrator path omits --argv-model-omit-empty for claude (modelOmitEmpty=false)" {
   export ORCHESTRATOR_ENABLED=1
+  export BOX_REVIEW_LOOP_ORCHESTRATOR=1
+  unset BOX_REVIEW_LOOP_INLINE
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   ! grep -q -- '--argv-model-omit-empty' "$ORCHESTRATOR_LOG"

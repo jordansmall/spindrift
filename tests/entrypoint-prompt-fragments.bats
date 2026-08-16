@@ -41,11 +41,21 @@ setup() {
 
     # shellcheck disable=SC2163 # $assign is itself a NAME=value pair
     export "$assign"
+    # BOX_FILER_ENABLED is not a schema knob (issue #2533): FILER_ENABLED is
+    # nix-computed roster-presence, forwarded verbatim rather than reparsed
+    # from AGENTS_JSON_TEMPLATE at runtime, so this loop's AGENTS_JSON_TEMPLATE
+    # case must also flip the matching BOX_* var to actually trip the gate.
+    if [[ "$assign" == AGENTS_JSON_TEMPLATE=* ]]; then
+      export BOX_FILER_ENABLED=1
+    fi
     export WORK_DIR="$BATS_TEST_TMPDIR/work-$i-on"
     run bash "$ENTRYPOINT"
     [ "$status" -eq 0 ]
     grep -qF "$marker" "$DRIVER_PROMPT_FILE"
     unset "${assign%%=*}"
+    if [[ "$assign" == AGENTS_JSON_TEMPLATE=* ]]; then
+      unset BOX_FILER_ENABLED
+    fi
   done
 }
 
@@ -67,6 +77,8 @@ setup() {
 
 @test "PR-body reference: local tracker defaults to no reference at all" {
   export ISSUE_TRACKER=local
+  export BOX_TRACKER_AXIS_READ=LOCAL
+  unset BOX_TRACKER_AXIS_WRITE
   export WORK_DIR="$BATS_TEST_TMPDIR/work-pr-body-local-off"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
@@ -76,6 +88,8 @@ setup() {
 
 @test "PR-body reference: local tracker opt-in emits a Local-issue breadcrumb, never Closes" {
   export ISSUE_TRACKER=local
+  export BOX_TRACKER_AXIS_READ=LOCAL
+  unset BOX_TRACKER_AXIS_WRITE
   export LOCAL_ISSUE_REFERENCE=1
   export WORK_DIR="$BATS_TEST_TMPDIR/work-pr-body-local-on"
   run bash "$ENTRYPOINT"
@@ -114,6 +128,8 @@ setup() {
 
 @test "issue-read step: local tracker reads the /issues mount, never gh issue view" {
   export ISSUE_TRACKER=local
+  export BOX_TRACKER_AXIS_READ=LOCAL
+  unset BOX_TRACKER_AXIS_WRITE
   export WORK_DIR="$BATS_TEST_TMPDIR/work-issue-read-local"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
@@ -125,6 +141,9 @@ setup() {
 # (ISSUE_TRACKER_FORGEJO) speaks fj instead of gh.
 @test "issue-read step: forgejo tracker reads the issue with fj, never gh issue view" {
   export ISSUE_TRACKER=forgejo
+  export BOX_TRACKER_AXIS_READ=FORGEJO
+  export BOX_TRACKER_AXIS_WRITE=FORGEJO
+  export BOX_TRACKER_AXIS_FILER=FORGEJO
   export WORK_DIR="$BATS_TEST_TMPDIR/work-issue-read-forgejo"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
@@ -164,6 +183,8 @@ setup() {
 @test "research verdict step: local tracker emits a nonce-guarded SPINDRIFT_COMMENT line, never gh issue comment" {
   export DISPATCH_KIND="research"
   export ISSUE_TRACKER=local
+  export BOX_TRACKER_AXIS_READ=LOCAL
+  unset BOX_TRACKER_AXIS_WRITE
   export RUN_NONCE="deadbeefcafe1234"
   export WORK_DIR="$BATS_TEST_TMPDIR/work-research-verdict-local"
   run bash "$ENTRYPOINT"
@@ -187,6 +208,8 @@ setup() {
 
 @test "issue blocked-comment step: local tracker never runs gh issue comment" {
   export ISSUE_TRACKER=local
+  export BOX_TRACKER_AXIS_READ=LOCAL
+  unset BOX_TRACKER_AXIS_WRITE
   export WORK_DIR="$BATS_TEST_TMPDIR/work-blocked-comment-local"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
@@ -265,6 +288,9 @@ setup() {
 @test "research verdict step: forgejo tracker under read-write keeps fj issue comment unchanged" {
   export DISPATCH_KIND="research"
   export ISSUE_TRACKER=forgejo
+  export BOX_TRACKER_AXIS_READ=FORGEJO
+  export BOX_TRACKER_AXIS_WRITE=FORGEJO
+  export BOX_TRACKER_AXIS_FILER=FORGEJO
   export WORK_DIR="$BATS_TEST_TMPDIR/work-research-verdict-forgejo-readwrite"
   # helper.bash's setup_entrypoint_env already exports BOX_WRITE_ENABLED=1
   # (mirroring the BOX_FORGE_AND_ISSUE_ACCESS=read-write schema default), so
@@ -277,6 +303,9 @@ setup() {
 @test "research verdict step: forgejo tracker under read-only relays via a nonce-guarded SPINDRIFT_COMMENT line, never fj issue comment" {
   export DISPATCH_KIND="research"
   export ISSUE_TRACKER=forgejo
+  export BOX_TRACKER_AXIS_READ=FORGEJO
+  export BOX_TRACKER_AXIS_WRITE=FORGEJO
+  export BOX_TRACKER_AXIS_FILER=FORGEJO
   unset BOX_WRITE_ENABLED
   export RUN_NONCE="deadbeefcafe1234"
   export WORK_DIR="$BATS_TEST_TMPDIR/work-research-verdict-forgejo-readonly"
@@ -288,6 +317,9 @@ setup() {
 
 @test "issue blocked-comment step: forgejo tracker under read-write keeps fj issue comment unchanged" {
   export ISSUE_TRACKER=forgejo
+  export BOX_TRACKER_AXIS_READ=FORGEJO
+  export BOX_TRACKER_AXIS_WRITE=FORGEJO
+  export BOX_TRACKER_AXIS_FILER=FORGEJO
   export WORK_DIR="$BATS_TEST_TMPDIR/work-blocked-comment-forgejo-readwrite"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
@@ -296,6 +328,9 @@ setup() {
 
 @test "issue blocked-comment step: forgejo tracker under read-only never runs fj issue comment" {
   export ISSUE_TRACKER=forgejo
+  export BOX_TRACKER_AXIS_READ=FORGEJO
+  export BOX_TRACKER_AXIS_WRITE=FORGEJO
+  export BOX_TRACKER_AXIS_FILER=FORGEJO
   unset BOX_WRITE_ENABLED
   export WORK_DIR="$BATS_TEST_TMPDIR/work-blocked-comment-forgejo-readonly"
   run bash "$ENTRYPOINT"
@@ -376,7 +411,11 @@ setup() {
 # `fj pr create`, never `gh pr create`.
 @test "OPEN A PULL REQUEST create step: forgejo read-write uses fj pr create, never gh pr create" {
   export ISSUE_TRACKER=forgejo
+  export BOX_TRACKER_AXIS_READ=FORGEJO
+  export BOX_TRACKER_AXIS_WRITE=FORGEJO
+  export BOX_TRACKER_AXIS_FILER=FORGEJO
   export CODE_FORGE=forgejo
+  export BOX_FORGE_BACKEND=FORGEJO
   export FORGEJO_BASE_URL="https://forge.test"
   export FORGEJO_TOKEN="fjtok"
   # clone_repo requires FORGEJO_TOKEN and builds the clone URL as
@@ -405,7 +444,11 @@ setup() {
 # a read-only forgejo Box must never render `fj pr create` either.
 @test "OPEN A PULL REQUEST create step: forgejo read-only stays forge-agnostic via SPINDRIFT_PR_INTENT, never fj pr create" {
   export ISSUE_TRACKER=forgejo
+  export BOX_TRACKER_AXIS_READ=FORGEJO
+  export BOX_TRACKER_AXIS_WRITE=FORGEJO
+  export BOX_TRACKER_AXIS_FILER=FORGEJO
   export CODE_FORGE=forgejo
+  export BOX_FORGE_BACKEND=FORGEJO
   export FORGEJO_BASE_URL="https://forge.test"
   export FORGEJO_TOKEN="fjtok"
   git config --global "url.file://$REMOTE_ROOT/.insteadOf" "https://fjtok@forge.test/"
@@ -737,6 +780,7 @@ setup() {
 
 @test "FILE ISSUES step stays separated from LAND THE CHANGE" {
   export AGENTS_JSON_TEMPLATE='{"filer":{"description":"filer","model":"haiku","prompt":"","tools":["Read","Bash","WebFetch"]}}'
+  export BOX_FILER_ENABLED=1
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   ! grep -q 'configured\.# LAND THE CHANGE' "$DRIVER_PROMPT_FILE"
@@ -997,7 +1041,10 @@ FILER_AGENTS_JSON_TEMPLATE='{"filer":{"description":"filer","model":"haiku","pro
 
 @test "filer write step: read-write keeps gh issue create unchanged regardless of ORCHESTRATOR_ENABLED" {
   export AGENTS_JSON_TEMPLATE="$FILER_AGENTS_JSON_TEMPLATE"
+  export BOX_FILER_ENABLED=1
   export ORCHESTRATOR_ENABLED=1
+  export BOX_REVIEW_LOOP_ORCHESTRATOR=1
+  unset BOX_REVIEW_LOOP_INLINE
   export WORK_DIR="$BATS_TEST_TMPDIR/work-filer-readwrite-orch-on"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
@@ -1014,6 +1061,7 @@ FILER_AGENTS_JSON_TEMPLATE='{"filer":{"description":"filer","model":"haiku","pro
 # flip the gate without read-only too.
 @test "filer write step: read-write with orchestrator off emits no SPINDRIFT_ISSUE_INTENT" {
   export AGENTS_JSON_TEMPLATE="$FILER_AGENTS_JSON_TEMPLATE"
+  export BOX_FILER_ENABLED=1
   export WORK_DIR="$BATS_TEST_TMPDIR/work-filer-readwrite-orch-off"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
@@ -1024,6 +1072,7 @@ FILER_AGENTS_JSON_TEMPLATE='{"filer":{"description":"filer","model":"haiku","pro
 
 @test "filer write step: read-only with orchestrator off keeps today's degraded direct-file path unchanged" {
   export AGENTS_JSON_TEMPLATE="$FILER_AGENTS_JSON_TEMPLATE"
+  export BOX_FILER_ENABLED=1
   unset BOX_WRITE_ENABLED
   export WORK_DIR="$BATS_TEST_TMPDIR/work-filer-readonly-orch-off"
   run bash "$ENTRYPOINT"
@@ -1035,8 +1084,11 @@ FILER_AGENTS_JSON_TEMPLATE='{"filer":{"description":"filer","model":"haiku","pro
 
 @test "filer write step: read-only with orchestrator on emits SPINDRIFT_ISSUE_INTENT, never gh issue create" {
   export AGENTS_JSON_TEMPLATE="$FILER_AGENTS_JSON_TEMPLATE"
+  export BOX_FILER_ENABLED=1
   unset BOX_WRITE_ENABLED
   export ORCHESTRATOR_ENABLED=1
+  export BOX_REVIEW_LOOP_ORCHESTRATOR=1
+  unset BOX_REVIEW_LOOP_INLINE
   export RUN_NONCE="deadbeefcafe1234"
   export WORK_DIR="$BATS_TEST_TMPDIR/work-filer-readonly-orch-on"
   run bash "$ENTRYPOINT"
@@ -1055,7 +1107,11 @@ FILER_AGENTS_JSON_TEMPLATE='{"filer":{"description":"filer","model":"haiku","pro
 # issue create.
 @test "filer write step: forgejo direct filer speaks fj issue create, never gh issue create" {
   export AGENTS_JSON_TEMPLATE="$FILER_AGENTS_JSON_TEMPLATE"
+  export BOX_FILER_ENABLED=1
   export ISSUE_TRACKER=forgejo
+  export BOX_TRACKER_AXIS_READ=FORGEJO
+  export BOX_TRACKER_AXIS_WRITE=FORGEJO
+  export BOX_TRACKER_AXIS_FILER=FORGEJO
   export WORK_DIR="$BATS_TEST_TMPDIR/work-filer-forgejo-direct"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
@@ -1066,6 +1122,7 @@ FILER_AGENTS_JSON_TEMPLATE='{"filer":{"description":"filer","model":"haiku","pro
 
 @test "filer write step: github direct filer still speaks gh issue create, never fj issue create" {
   export AGENTS_JSON_TEMPLATE="$FILER_AGENTS_JSON_TEMPLATE"
+  export BOX_FILER_ENABLED=1
   export WORK_DIR="$BATS_TEST_TMPDIR/work-filer-github-direct"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
@@ -1089,6 +1146,7 @@ WORKER_AGENTS_JSON_TEMPLATE='{"worker":{"description":"Implement a scoped slice 
 
 @test "IMPLEMENT section: a provisioned worker turns the section into a coordinator that delegates slices" {
   export AGENTS_JSON_TEMPLATE="$WORKER_AGENTS_JSON_TEMPLATE"
+  export BOX_WORKER_PROVISIONED=1
   export WORK_DIR="$BATS_TEST_TMPDIR/work-coordinator-on"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
@@ -1098,6 +1156,7 @@ WORKER_AGENTS_JSON_TEMPLATE='{"worker":{"description":"Implement a scoped slice 
 
 @test "IMPLEMENT section: coordinator's cherry-pick instruction uses a merge-base range, not a specific base ref" {
   export AGENTS_JSON_TEMPLATE="$WORKER_AGENTS_JSON_TEMPLATE"
+  export BOX_WORKER_PROVISIONED=1
   export BASE_BRANCH="release-42"
   export WORK_DIR="$BATS_TEST_TMPDIR/work-coordinator-base-branch"
   seed_release_branch "release-42" "seed-release-42"
@@ -1118,6 +1177,7 @@ WORKER_AGENTS_JSON_TEMPLATE='{"worker":{"description":"Implement a scoped slice 
 
 @test "IMPLEMENT section: coordinator does not touch the consumer repo's .gitignore" {
   export AGENTS_JSON_TEMPLATE="$WORKER_AGENTS_JSON_TEMPLATE"
+  export BOX_WORKER_PROVISIONED=1
   export WORK_DIR="$BATS_TEST_TMPDIR/work-coordinator-no-gitignore"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
@@ -1136,6 +1196,7 @@ WORKER_AGENTS_JSON_TEMPLATE='{"worker":{"description":"Implement a scoped slice 
 
 @test "IMPLEMENT section: coordinator grounds branch discovery in the worker's own report, not the Agent-tool result" {
   export AGENTS_JSON_TEMPLATE="$WORKER_AGENTS_JSON_TEMPLATE"
+  export BOX_WORKER_PROVISIONED=1
   export WORK_DIR="$BATS_TEST_TMPDIR/work-coordinator-report-branch"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
@@ -1149,6 +1210,7 @@ WORKER_AGENTS_JSON_TEMPLATE='{"worker":{"description":"Implement a scoped slice 
 
 @test "IMPLEMENT section: coordinator fails closed on a missing or unclear branch name" {
   export AGENTS_JSON_TEMPLATE="$WORKER_AGENTS_JSON_TEMPLATE"
+  export BOX_WORKER_PROVISIONED=1
   export WORK_DIR="$BATS_TEST_TMPDIR/work-coordinator-fail-closed"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
@@ -1162,6 +1224,7 @@ WORKER_AGENTS_JSON_TEMPLATE='{"worker":{"description":"Implement a scoped slice 
 
 @test "IMPLEMENT section: coordinator's base-ref prose does not interpolate BASE_BRANCH" {
   export AGENTS_JSON_TEMPLATE="$WORKER_AGENTS_JSON_TEMPLATE"
+  export BOX_WORKER_PROVISIONED=1
   export BASE_BRANCH="release-42"
   export WORK_DIR="$BATS_TEST_TMPDIR/work-coordinator-no-base-branch-interp"
   seed_release_branch "release-42" "seed-release-42-no-interp"
@@ -1191,6 +1254,7 @@ WORKER_AGENTS_JSON_TEMPLATE='{"worker":{"description":"Implement a scoped slice 
 
 @test "coordinator step stays separated from the test-first rule below it" {
   export AGENTS_JSON_TEMPLATE="$WORKER_AGENTS_JSON_TEMPLATE"
+  export BOX_WORKER_PROVISIONED=1
   export WORK_DIR="$BATS_TEST_TMPDIR/work-coordinator-sep"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
@@ -1211,6 +1275,8 @@ WORKER_AGENTS_JSON_TEMPLATE='{"worker":{"description":"Implement a scoped slice 
 
 @test "REVIEW section: orchestrator on defers to the code-owned review pass" {
   export ORCHESTRATOR_ENABLED=1
+  export BOX_REVIEW_LOOP_ORCHESTRATOR=1
+  unset BOX_REVIEW_LOOP_INLINE
   export WORK_DIR="$BATS_TEST_TMPDIR/work-review-loop-on"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]

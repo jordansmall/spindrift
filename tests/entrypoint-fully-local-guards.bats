@@ -14,6 +14,8 @@ setup() {
 @test "fully-local mode does not require REPO_SLUG or GH_TOKEN" {
   export CODE_FORGE="local"
   export ISSUE_TRACKER="local"
+  export BOX_TRACKER_AXIS_READ=LOCAL
+  unset BOX_TRACKER_AXIS_WRITE
   # entrypoint.sh no longer derives fully_local from CODE_FORGE/ISSUE_TRACKER
   # itself (issue #2527) -- it reads the launcher-forwarded BOX_FULLY_LOCAL
   # signal, so this fixture supplies it directly.
@@ -37,6 +39,8 @@ setup() {
 # standalone, can't exercise that path anymore.
 @test "non-fully-local mode (local tracker only) still requires GH_TOKEN" {
   export ISSUE_TRACKER="local"
+  export BOX_TRACKER_AXIS_READ=LOCAL
+  unset BOX_TRACKER_AXIS_WRITE
   unset GH_TOKEN REPO_SLUG
 
   run bash "$ENTRYPOINT"
@@ -69,6 +73,8 @@ setup() {
 @test "fully-local mode still requires ISSUE_NUMBER" {
   export CODE_FORGE="local"
   export ISSUE_TRACKER="local"
+  export BOX_TRACKER_AXIS_READ=LOCAL
+  unset BOX_TRACKER_AXIS_WRITE
   export BOX_FULLY_LOCAL=1
   unset GH_TOKEN REPO_SLUG ISSUE_NUMBER
 
@@ -80,6 +86,8 @@ setup() {
 @test "fully-local mode still requires GIT_USER_NAME" {
   export CODE_FORGE="local"
   export ISSUE_TRACKER="local"
+  export BOX_TRACKER_AXIS_READ=LOCAL
+  unset BOX_TRACKER_AXIS_WRITE
   export BOX_FULLY_LOCAL=1
   unset GH_TOKEN REPO_SLUG GIT_USER_NAME
 
@@ -91,6 +99,8 @@ setup() {
 @test "fully-local mode still requires GIT_USER_EMAIL" {
   export CODE_FORGE="local"
   export ISSUE_TRACKER="local"
+  export BOX_TRACKER_AXIS_READ=LOCAL
+  unset BOX_TRACKER_AXIS_WRITE
   export BOX_FULLY_LOCAL=1
   unset GH_TOKEN REPO_SLUG GIT_USER_EMAIL
 

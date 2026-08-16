@@ -306,6 +306,8 @@ EOF
 # whatever still gets through it -- a run must never exit silently.
 @test "orchestrator path: driver parks with no outcome line -> entrypoint still emits a synthetic ready outcome" {
   export ORCHESTRATOR_ENABLED=1
+  export BOX_REVIEW_LOOP_ORCHESTRATOR=1
+  unset BOX_REVIEW_LOOP_INLINE
   export FAKE_DRIVER_COMMIT=1
   export FAKE_DRIVER_NO_OUTCOME=1
   run bash "$ENTRYPOINT"
