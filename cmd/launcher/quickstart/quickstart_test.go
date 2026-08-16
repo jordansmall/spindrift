@@ -1673,25 +1673,55 @@ func TestRunQuickstart_SelfHostedForgejo_AsksBackendAndEmitsBaseURL(t *testing.T
 	}
 }
 
+// deprecatedPathSpellings are the old settings.<section>.<knob> shim
+// spellings TestRunQuickstart_FlakeNix_NoDeprecatedPathSpellings denylists.
+// The old flat structural-shim spelling for runtime ("runtime = " with no
+// leading "infra.") is checked separately by assertNoDeprecatedPathSpellings
+// since, unlike these, it can't be told apart from the canonical
+// infra.runtime spelling by substring alone.
+var deprecatedPathSpellings = []string{
+	"settings.repository.repoSlug",         // old settings.<section>.<knob> shim spelling
+	"settings.repository.gitUserName",      // old settings.<section>.<knob> shim spelling
+	"settings.repository.gitUserEmail",     // old settings.<section>.<knob> shim spelling
+	"settings.issueDiscovery.issueTracker", // old settings.<section>.<knob> shim spelling
+}
+
+// assertNoDeprecatedPathSpellings reads flake.nix from dir and fails t if it
+// contains any deprecatedPathSpellings substring, or a bare flat `runtime =`
+// assignment (the old structural-shim spelling; distinguished from the
+// canonical `infra.runtime =` line-by-line so it survives a template
+// reindent, unlike a hardcoded-whitespace substring check would).
+func assertNoDeprecatedPathSpellings(t *testing.T, dir string) {
+	t.Helper()
+
+	flakeNix, err := os.ReadFile(filepath.Join(dir, "flake.nix"))
+	if err != nil {
+		t.Fatalf("read flake.nix: %v", err)
+	}
+
+	for _, deprecated := range deprecatedPathSpellings {
+		if strings.Contains(string(flakeNix), deprecated) {
+			t.Errorf("expected flake.nix not to contain deprecated spelling %q, got:\n%s", deprecated, flakeNix)
+		}
+	}
+	for _, line := range strings.Split(string(flakeNix), "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), `runtime = "`) {
+			t.Errorf("expected flake.nix not to contain the flat structural-shim spelling %q, got:\n%s", strings.TrimSpace(line), flakeNix)
+		}
+	}
+}
+
 // TestRunQuickstart_FlakeNix_NoDeprecatedPathSpellings regression-guards
 // renderFlakeNix against a deprecated path spelling creeping back in. This is
 // exactly how the runtime bug shipped in a prior slice: renderFlakeNix
 // hand-typed a bare `runtime = "%s";` line (the old flat structural-shim
 // spelling lib/flakeModule.nix's oldFlatShims warns on) instead of using the
-// generated PathRuntime constant, and no test caught it because the existing
+// generated pathRuntime constant, and no test caught it because the existing
 // tests only asserted the presence of an expected string, never the absence
 // of a known-deprecated one. Exercises both the github and forgejo backend
 // branches of renderFlakeNix, since only the forgejo branch emits
 // forge.backend / issues.forgejo.baseURL at all.
 func TestRunQuickstart_FlakeNix_NoDeprecatedPathSpellings(t *testing.T) {
-	deprecatedSpellings := []string{
-		"\n            runtime = \"",           // old flat structural shim; must be infra.runtime = "
-		"settings.repository.repoSlug",         // old settings.<section>.<knob> shim spelling
-		"settings.repository.gitUserName",      // old settings.<section>.<knob> shim spelling
-		"settings.repository.gitUserEmail",     // old settings.<section>.<knob> shim spelling
-		"settings.issueDiscovery.issueTracker", // old settings.<section>.<knob> shim spelling
-	}
-
 	t.Run("github", func(t *testing.T) {
 		dir := t.TempDir()
 		var out bytes.Buffer
@@ -1708,15 +1738,7 @@ func TestRunQuickstart_FlakeNix_NoDeprecatedPathSpellings(t *testing.T) {
 			t.Fatalf("runQuickstart: %v", err)
 		}
 
-		flakeNix, err := os.ReadFile(filepath.Join(dir, "flake.nix"))
-		if err != nil {
-			t.Fatalf("read flake.nix: %v", err)
-		}
-		for _, deprecated := range deprecatedSpellings {
-			if strings.Contains(string(flakeNix), deprecated) {
-				t.Errorf("expected flake.nix not to contain deprecated spelling %q, got:\n%s", deprecated, flakeNix)
-			}
-		}
+		assertNoDeprecatedPathSpellings(t, dir)
 	})
 
 	t.Run("forgejo", func(t *testing.T) {
@@ -1740,15 +1762,7 @@ func TestRunQuickstart_FlakeNix_NoDeprecatedPathSpellings(t *testing.T) {
 			t.Fatalf("runQuickstart: %v", err)
 		}
 
-		flakeNix, err := os.ReadFile(filepath.Join(dir, "flake.nix"))
-		if err != nil {
-			t.Fatalf("read flake.nix: %v", err)
-		}
-		for _, deprecated := range deprecatedSpellings {
-			if strings.Contains(string(flakeNix), deprecated) {
-				t.Errorf("expected flake.nix not to contain deprecated spelling %q, got:\n%s", deprecated, flakeNix)
-			}
-		}
+		assertNoDeprecatedPathSpellings(t, dir)
 	})
 }
 
