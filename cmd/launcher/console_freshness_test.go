@@ -167,6 +167,45 @@ func TestNewConsoleFreshnessChecker_Rebuild_PropagatesPullNotice(t *testing.T) {
 	}
 }
 
+// TestNewConsoleFreshness_UsesRunnerKindNotRuntime proves newConsoleFreshness
+// wires config.runnerKind, not config.runtime, into freshness.Probe (issue
+// #2538 AC1/AC2): runtime is set to "podman" — a real OCI runtime name a
+// runtime-name comparison would read as "not bwrap" — while runnerKind is
+// "bwrap". A pwd that isn't a git repository at all would also come back
+// not-applicable via the OCI arm's own isNotAGitRepository check (see
+// freshness.Probe), so Applicable alone can't tell the two arms apart;
+// asserting the bwrap arm's distinct message text is what actually
+// discriminates a c.runtime regression from the correct c.runnerKind read. A
+// fake Evaluator that fails the test if ever called backs this up: the OCI
+// arm's fetch would fail closed before eval ever runs on this non-repo pwd,
+// so a called Eval would itself already prove a regression.
+func TestNewConsoleFreshness_UsesRunnerKindNotRuntime(t *testing.T) {
+	c := baseConfig()
+	c.runnerKind = "bwrap"
+	c.runtime = "podman"
+	c.baseBranch = "main"
+	eval := failEvaluator{t: t}
+
+	fresh, _ := newConsoleFreshness(c, t.TempDir(), eval, nil, nil)
+
+	const wantMsg = "not applicable (bwrap runtime keeps its store read-only; no loaded image to compare)"
+	applicable, isFresh, msg := fresh()
+	if applicable || isFresh || msg != wantMsg {
+		t.Fatalf("fresh() = applicable=%v fresh=%v msg=%q, want applicable=false fresh=false msg=%q (the bwrap arm, proving runnerKind was read)", applicable, isFresh, msg, wantMsg)
+	}
+}
+
+// failEvaluator is a freshness.Evaluator that fails the test if Eval is ever
+// called — used to prove a probe call short-circuited before reaching the
+// OCI eval path.
+type failEvaluator struct{ t *testing.T }
+
+func (f failEvaluator) Eval(pwd, rev, attr string) (string, error) {
+	f.t.Helper()
+	f.t.Fatal("Eval called, want the bwrap branch to short-circuit before evaluating")
+	return "", nil
+}
+
 // TestConsoleGitSync_DirtyOffBranch_RefusesCheckout verifies that when pwd is
 // on a branch other than baseBranch and has uncommitted changes,
 // consoleGitSync refuses the checkout instead of silently carrying those
