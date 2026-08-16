@@ -68,6 +68,8 @@ func (l *localCodeForge) RelayBundle(outboxDir, ref string) error {
 	return ensureIntegrationBranch(l.repoPath, l.baseBranch, IntegrationBranch(l.parent))
 }
 
+var _ forge.BundleRelay = (*localCodeForge)(nil)
+
 // Merge overrides the embedded git client's `git merge --no-ff` landing
 // (ADR 0033, issue #1889): the Integration branch must stay linear with zero
 // merge commits, unconditionally, unlike the remote git/github forges' own

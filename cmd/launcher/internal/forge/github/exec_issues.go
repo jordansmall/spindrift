@@ -409,3 +409,6 @@ func (e *execClient) PostIssue(title, body string, labels []string) (string, err
 	}
 	return strings.TrimSpace(string(out)), nil
 }
+
+var _ forge.HostPostedCommenter = (*execClient)(nil)
+var _ forge.HostPostedIssueFiler = (*execClient)(nil)

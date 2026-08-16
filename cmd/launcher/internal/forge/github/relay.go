@@ -68,6 +68,8 @@ func (c *readOnlyCodeForge) CommitSubjects(outboxDir, base, ref string) ([]strin
 }
 
 var _ forge.BundleCommitSubjects = (*readOnlyCodeForge)(nil)
+var _ forge.BundleRelay = (*readOnlyCodeForge)(nil)
+var _ forge.DraftPRCreator = (*readOnlyCodeForge)(nil)
 
 // CreateDraftPR opens a draft PR from head onto base via `gh pr create` --
 // the host-side counterpart to the Box's own in-box `gh pr create` under

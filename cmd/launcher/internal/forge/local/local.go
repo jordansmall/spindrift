@@ -103,6 +103,7 @@ type LocalTracker struct {
 }
 
 var _ forge.HostPostedIssueFiler = (*LocalTracker)(nil)
+var _ forge.HostPostedCommenter = (*LocalTracker)(nil)
 
 // NewLocalTracker returns a forge.IssueTracker backed by Markdown + YAML
 // frontmatter files in dir. verdictLabels configures CompleteVerdict (the
