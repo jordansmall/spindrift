@@ -150,6 +150,13 @@ in
         CHECK_CONTRACT_FILE = batsHarness.internals.checkContractFile;
         RESEARCH_OUTCOME_CONTRACT_FILE = batsHarness.internals.researchOutcomeContractFile;
         DRIVER_PREAMBLE_FILE = batsHarness.internals.driverPreambleFile;
+        # Rendered fallback-default preamble for the 8 baked /agent/* path
+        # literals (issue #2531); helper.bash prepends this between
+        # DRIVER_PREAMBLE_FILE and FRAGMENT_REGISTRY_FILE, matching
+        # lib/image.nix's real concatenation order, so this suite exercises
+        # the same rendered bytes the image bakes in, not the values these
+        # vars merely happen to already carry elsewhere in this env.
+        AGENT_PATHS_PREAMBLE_FILE = batsHarness.internals.agentPathsPreambleFile;
         FRAGMENT_REGISTRY_FILE = batsHarness.internals.fragmentRegistryFile;
         DRIVER_EXEC_BIN = "${batsHarness.internals.driverExecBin}/bin/driver-exec";
         # Reuses the same nix-rendered lib/fragments.nix JSON the drift
