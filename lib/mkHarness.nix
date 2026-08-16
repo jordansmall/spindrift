@@ -1372,6 +1372,17 @@ let
       throw "mkHarness: BOX_FORGE_AND_ISSUE_ACCESS=read-only: the selected ISSUE_TRACKER=${mergedDefaults.issueTracker} does not implement host-posted comments and issue-filing (forge.HostPostedCommenter / forge.HostPostedIssueFiler)"
     else
       true;
+
+  # Eval-time guard for the JIRA_STATUS_MAPPING knob (issue #2539):
+  # lib/jira-status-mapping.nix's `parse` mirrors the runtime validation
+  # cmd/launcher/internal/forge/jira/jira.go's ParseStatusMapping performs, so
+  # an unknown-key mapping fails the build here rather than only surfacing at
+  # Box runtime. `builtins.seq` forces `parse`'s result to WHNF so the
+  # `assert` below actually triggers any throw.
+  jiraStatusMapping = import ./jira-status-mapping.nix;
+  jiraStatusMappingOk = builtins.seq (jiraStatusMapping.parse (
+    mergedDefaults.jiraStatusMapping or ""
+  )) true;
 in
 if unknownDefaultKeys != [ ] then
   throw "mkHarness: unknown defaults key(s): ${lib.concatStringsSep ", " unknownDefaultKeys}; valid keys: ${lib.concatStringsSep ", " (lib.attrNames flakeOptionEntries)}"
@@ -1382,6 +1393,7 @@ else
   assert repoSlugCoherenceOk;
   assert choicesCheckOk;
   assert readOnlyCapabilityOk;
+  assert jiraStatusMappingOk;
   lib.warnIf (legacyKnobsSet != [ ]) deprecationMsg {
     inherit
       image

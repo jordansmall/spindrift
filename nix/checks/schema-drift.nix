@@ -1087,6 +1087,51 @@ in
       "mkharness-direct-choices-guard-null: expected mkHarness to reject a direct-caller `defaults.mergeMethod = null` (not a member of lib/env-schema.nix's mergeMethod.choices), but it evaluated successfully";
     pkgs.runCommand "mkharness-direct-choices-guard-null" { } "touch $out";
 
+  # Regression guard (issue #2539): proves lib/jira-status-mapping.nix's
+  # `parse` is actually wired into mkHarness's eval-time assert chain, not
+  # just exercised in isolation by nix/checks/jira-status-mapping.nix. A
+  # direct caller supplying a JIRA_STATUS_MAPPING knob with an unknown key
+  # must fail the build.
+  mkharness-jira-status-mapping-guard =
+    let
+      inherit (pkgs.lib) assertMsg;
+      result = builtins.tryEval (
+        import ../../lib/mkHarness.nix {
+          inherit nixpkgs system;
+          defaults = {
+            jiraStatusMapping = builtins.toJSON { bogusKey = "Done"; };
+          };
+          packages = p: [ p.hello ];
+        }
+      );
+    in
+    assert assertMsg (!result.success)
+      "mkharness-jira-status-mapping-guard: expected mkHarness to reject a direct-caller `defaults.jiraStatusMapping` with an unknown key (\"bogusKey\", not a member of lib/jira-status-mapping.nix's validKeys), but it evaluated successfully";
+    pkgs.runCommand "mkharness-jira-status-mapping-guard" { } "touch $out";
+
+  # The gate-not-triggered counterpart (mirrors
+  # mkharness-direct-choices-guard-not-triggered above): proves the same
+  # direct-call shape still evaluates cleanly for a valid JIRA_STATUS_MAPPING
+  # value, so mkharness-jira-status-mapping-guard's failure is known to come
+  # from the JIRA_STATUS_MAPPING guard specifically, not an incidental break
+  # elsewhere in the call shape.
+  mkharness-jira-status-mapping-guard-not-triggered =
+    let
+      inherit (pkgs.lib) assertMsg;
+      result = builtins.tryEval (
+        import ../../lib/mkHarness.nix {
+          inherit nixpkgs system;
+          defaults = {
+            jiraStatusMapping = builtins.toJSON { inProgress = "In Progress"; };
+          };
+          packages = p: [ p.hello ];
+        }
+      );
+    in
+    assert assertMsg result.success
+      "mkharness-jira-status-mapping-guard-not-triggered: expected mkHarness to accept a direct-caller `defaults.jiraStatusMapping` with only valid keys (\"inProgress\"), but it failed to evaluate";
+    pkgs.runCommand "mkharness-jira-status-mapping-guard-not-triggered" { } "touch $out";
+
   # tests/helper.bash's set_box_env fixture must export every boxEnv = true
   # schema knob, so the entrypoint-*.bats suites exercise the same defaults the nix
   # preamble bakes into the image at build time (issue #462). Fails when a new
