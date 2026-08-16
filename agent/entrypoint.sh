@@ -878,6 +878,12 @@ run_driver_in_env() {
   local worker_work_dir="${WORKER_WORK_DIR:-}"
   local worker_timeout="${WORKER_TIMEOUT:-}"
   local worker_max_parallel="${MAX_PARALLEL_WORKERS:-}"
+  # max_budget_tokens/max_budget_usd, same no-Handoff-field shape as
+  # worker_work_dir/worker_timeout above (issue #2694) -- boxEnv now
+  # (lib/env-schema.nix), so always present at a real value (their schema
+  # defaults "0"/"0.000000", or an operator override).
+  local max_budget_tokens="${MAX_BUDGET_TOKENS:-0}"
+  local max_budget_usd="${MAX_BUDGET_USD:-0}"
 
   local _review_prompt_file=""
   if [ -n "$review_prompt" ]; then
@@ -1003,19 +1009,16 @@ run_driver_in_env() {
   # the orchestrator's own review loop consults before committing to a
   # terminal land pass instead of a further BLOCK-triggered review round.
   # Unlike every other orchestrator-only flag above, neither is guarded on
-  # its own value being non-empty -- MAX_BUDGET_TOKENS/MAX_BUDGET_USD are
-  # boxEnv (lib/env-schema.nix), so both are always set to a real value
-  # (their schema defaults "0"/"0.000000", or an operator override), never
-  # unset; an `-n` guard here would always be true and both flags would
-  # always be forwarded anyway, so the ${VAR:-0} fallbacks below (belt-and-
-  # suspenders for a boxEnv default that somehow failed to render) are
-  # simpler and equally correct. The same host-facing knobs selfHealGate
-  # already gates its fix-pass dispatch with.
+  # its own value being non-empty -- max_budget_tokens/max_budget_usd are
+  # already real values by the time they reach here (bound above with their
+  # own ${VAR:-0} fallback, mirroring worker_timeout's shape), never empty,
+  # so an `-n` guard would be dead weight. The same host-facing knobs
+  # selfHealGate already gates its fix-pass dispatch with.
   local -a _max_budget_tokens_flags=()
   local -a _max_budget_usd_flags=()
   if [ "$_driver_invoker" = orchestrator ]; then
-    _max_budget_tokens_flags=(--max-budget-tokens "${MAX_BUDGET_TOKENS:-0}")
-    _max_budget_usd_flags=(--max-budget-usd "${MAX_BUDGET_USD:-0}")
+    _max_budget_tokens_flags=(--max-budget-tokens "$max_budget_tokens")
+    _max_budget_usd_flags=(--max-budget-usd "$max_budget_usd")
   fi
 
   local claude_rc=0
