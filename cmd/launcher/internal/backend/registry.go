@@ -59,6 +59,30 @@ type Descriptor struct {
 	// issue-filing host-mediated (host-posted comments + issue-filing).
 	// True for github, forgejo, local; false for jira.
 	HostPostingCapable bool
+
+	// TrackerAxisRead is this tracker's ISSUE_TRACKER_GITHUB/LOCAL/FORGEJO
+	// read-step axis value ("GITHUB", "LOCAL", or "FORGEJO"); empty means
+	// "GITHUB" (the default arm, shared by github and jira). An empty
+	// TrackerAxisRead is never a legitimate resolved value for a real
+	// tracker row -- unlike TrackerAxisWrite, which can legitimately be
+	// empty (for "local") -- so callers use TrackerAxisRead == "" as the
+	// "unregistered/no-row" sentinel, not TrackerAxisWrite.
+	TrackerAxisRead string
+
+	// TrackerAxisWrite is this tracker's write-step axis value ("GITHUB",
+	// "FORGEJO", or "" for a tracker with no direct write-step path);
+	// empty means "GITHUB" for an unregistered/no-row lookup, but "local"
+	// sets this to the literal empty string as its real, legitimate
+	// resolved value -- it has no write axis at all.
+	TrackerAxisWrite string
+
+	// TrackerAxisFiler is this tracker's filer write-mechanism axis value
+	// ("GH" or "FORGEJO"); empty means "GH".
+	TrackerAxisFiler string
+
+	// ForgeBackend is this code-forge's backend suffix ("GH" or
+	// "FORGEJO"); empty means "GH".
+	ForgeBackend string
 }
 
 // Registry (every registered backend descriptor) and its named GitHub/

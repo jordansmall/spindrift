@@ -82,6 +82,30 @@
 #                                     (host-posted comments + issue-filing)
 #                                     -- true for github, forgejo, local;
 #                                     omitted (false) for jira.
+#   trackerAxisRead          string  this tracker's ISSUE_TRACKER_GITHUB/
+#                                     LOCAL/FORGEJO read-step axis value
+#                                     ("GITHUB", "LOCAL", or "FORGEJO");
+#                                     omitted means "GITHUB" (the default
+#                                     arm, shared by github and jira).
+#   trackerAxisWrite         string  this tracker's write-step axis value
+#                                     ("GITHUB", "FORGEJO", or "" for a
+#                                     tracker with no direct write-step path);
+#                                     omitted means "GITHUB". "local" sets
+#                                     this to the literal empty string
+#                                     explicitly (not omitted) -- it
+#                                     legitimately has no write axis, exactly
+#                                     like local's write-step gates render
+#                                     neither pair today (see
+#                                     gates_tracker.go's
+#                                     ISSUE_TRACKER_*_READWRITE/READONLY
+#                                     gates, keyed off itWrite=="LOCAL" never
+#                                     matching either "GITHUB" or "FORGEJO"
+#                                     arm).
+#   trackerAxisFiler         string  this tracker's filer write-mechanism
+#                                     axis value ("GH" or "FORGEJO"); omitted
+#                                     means "GH".
+#   forgeBackend             string  this code-forge's backend suffix ("GH"
+#                                     or "FORGEJO"); omitted means "GH".
 [
   {
     name = "github";
@@ -107,6 +131,8 @@
     inBoxUnreachableTracker = true;
     relayCapable = true;
     hostPostingCapable = true;
+    trackerAxisRead = "LOCAL";
+    trackerAxisWrite = "";
   }
   {
     name = "jira";
@@ -126,5 +152,9 @@
     doctorSlugHint = "FORGEJO_BASE_URL";
     relayCapable = true;
     hostPostingCapable = true;
+    trackerAxisRead = "FORGEJO";
+    trackerAxisWrite = "FORGEJO";
+    trackerAxisFiler = "FORGEJO";
+    forgeBackend = "FORGEJO";
   }
 ]
