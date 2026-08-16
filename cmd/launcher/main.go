@@ -622,7 +622,7 @@ func runnerConfig(c config) runner.Config {
 // c.runtime, which also carries operator-facing runtime *names* (podman,
 // docker, rancher) that aren't "oci" literally.
 func runnerForKind(c config, rc runner.Config, pwd string) runner.Runner {
-	if c.runnerKind == "bwrap" {
+	if c.runnerKind == freshness.KindBwrap {
 		return runner.NewBwrap(rc)
 	}
 	return runner.NewOCI(rc, pwd)
@@ -631,9 +631,9 @@ func runnerForKind(c config, rc runner.Config, pwd string) runner.Runner {
 // buildRunnerForKind is runnerForKind's `launcher build` counterpart: it
 // selects NewBwrapBuild instead of NewBwrap for the bwrap arm (build realizes
 // store closures rather than running an agent), but keys off the same
-// c.runnerKind == "bwrap" check.
+// c.runnerKind == freshness.KindBwrap check.
 func buildRunnerForKind(c config, rc runner.Config, pwd string) runner.Runner {
-	if c.runnerKind == "bwrap" {
+	if c.runnerKind == freshness.KindBwrap {
 		return runner.NewBwrapBuild(rc)
 	}
 	return runner.NewOCI(rc, pwd)
