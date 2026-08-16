@@ -121,6 +121,73 @@ func TestWorkerPromptCarriesNoOutcomeGrammar(t *testing.T) {
 	})
 }
 
+// TestWorkerForbiddenMarkersRegistryMatchesGoPin is the parity guard between
+// lib/prompt-contract.nix's workerForbiddenMarkers registry and the
+// `forbidden` slice TestWorkerPromptCarriesNoOutcomeGrammar builds above
+// ([]string{outcome.Token, VerdictApprove, VerdictBlock}). The two are
+// separate, hand-maintained statements of the same three-marker contract --
+// nothing wires workerForbiddenMarkers into Go at runtime (see the "Data-
+// only" comment above that registry in lib/prompt-contract.nix explaining
+// why, issue #2059's quarantine), so nothing else catches the two drifting
+// apart. testWorkerForbiddenMarkerRows below hand-transcribes
+// workerForbiddenMarkers' rows' id/marker fields as of this test's writing;
+// this test asserts that transcription's marker set is exactly the
+// `forbidden` slice's set (same three strings, order-independent, no extras
+// either side) -- the same hand-transcribed-pin convention
+// promptassembly/forbidden_markers_test.go uses for the sibling
+// forbiddenMarkers registry, scoped down here to three rows and no JSON
+// testdata file since workerForbiddenMarkers was deliberately never wired
+// into promptassembly.Validate or lib/mkHarness.nix/lib/image.nix.
+func TestWorkerForbiddenMarkersRegistryMatchesGoPin(t *testing.T) {
+	forbidden := []string{outcome.Token, VerdictApprove, VerdictBlock}
+
+	nixRows := testWorkerForbiddenMarkerRows()
+
+	nixMarkers := make(map[string]bool, len(nixRows))
+	for _, row := range nixRows {
+		if nixMarkers[row.marker] {
+			t.Fatalf("testWorkerForbiddenMarkerRows(): duplicate marker %q (id %q)", row.marker, row.id)
+		}
+		nixMarkers[row.marker] = true
+	}
+
+	goMarkers := make(map[string]bool, len(forbidden))
+	for _, marker := range forbidden {
+		goMarkers[marker] = true
+	}
+
+	for marker := range nixMarkers {
+		if !goMarkers[marker] {
+			t.Errorf("lib/prompt-contract.nix workerForbiddenMarkers has marker %q, not present in TestWorkerPromptCarriesNoOutcomeGrammar's forbidden slice", marker)
+		}
+	}
+	for marker := range goMarkers {
+		if !nixMarkers[marker] {
+			t.Errorf("TestWorkerPromptCarriesNoOutcomeGrammar's forbidden slice has marker %q, not present in lib/prompt-contract.nix workerForbiddenMarkers", marker)
+		}
+	}
+}
+
+// workerForbiddenMarkerRow is the id/marker shape hand-transcribed from
+// lib/prompt-contract.nix's workerForbiddenMarkers registry -- deliberately
+// smaller than promptassembly.ForbiddenMarkerRow, since this pin only needs
+// enough fields to catch the two marker sets drifting apart.
+type workerForbiddenMarkerRow struct {
+	id     string
+	marker string
+}
+
+// testWorkerForbiddenMarkerRows returns the workerForbiddenMarkers rows in
+// lib/prompt-contract.nix's own order, hand-transcribed as a Go pin (see
+// TestWorkerForbiddenMarkersRegistryMatchesGoPin above).
+func testWorkerForbiddenMarkerRows() []workerForbiddenMarkerRow {
+	return []workerForbiddenMarkerRow{
+		{id: "worker-role-forbids-outcome", marker: "SPINDRIFT_OUTCOME"},
+		{id: "worker-role-forbids-verdict-approve", marker: "VERDICT: APPROVE"},
+		{id: "worker-role-forbids-verdict-block", marker: "VERDICT: BLOCK"},
+	}
+}
+
 // checkNoOutcomeGrammar returns an error describing the first marker in
 // forbidden that appears verbatim in content, or nil if none do.
 func checkNoOutcomeGrammar(content string, forbidden []string) error {
