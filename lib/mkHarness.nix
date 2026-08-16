@@ -1326,11 +1326,11 @@ else
         researchOutcomeContractFile
         driverPreambleFile
         fragmentRegistryFile
-        driverExecBin
-        driverEntry
         runInputDocumentFile
         buildInputDocumentFile
         ;
+      driverExecBin = imageDriver.driverExecBin;
+      driverEntry = imageDriver.driverEntry;
 
       # The fully resolved agent roster (issue #2512), after the reviewEffort
       # post-processing step -- exposed purely for eval-level introspection
