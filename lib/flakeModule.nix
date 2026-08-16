@@ -17,6 +17,7 @@ let
   mkHarness = import ./mkHarness.nix;
   schema = import ./env-schema.nix;
   resolveNixPath = import ./nixpath.nix;
+  runtimeValues = import ./runtime-values.nix;
   # flakeOption entries are the Consumer-tunable subset.
   flakeOptionEntries = lib.filterAttrs (_: e: e.flakeOption or false) schema;
 
@@ -195,14 +196,7 @@ let
     };
 
     runtime = mkOption {
-      type = types.nullOr (
-        types.enum [
-          "podman"
-          "docker"
-          "rancher"
-          "bwrap"
-        ]
-      );
+      type = types.nullOr (types.enum runtimeValues);
       default = null;
       description = "Runner the launcher commands drive: OCI runtimes (podman/docker/rancher, the last an alias for Rancher Desktop's nerdctl) or the daemonless bubblewrap runner (bwrap, Linux-only).";
     };
