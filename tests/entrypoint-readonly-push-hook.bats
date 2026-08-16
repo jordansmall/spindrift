@@ -14,7 +14,17 @@ setup() {
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   [ -d "$WORK_DIR/.git" ]
-  [ -x "$WORK_DIR/.git/hooks/pre-push" ]
+
+  # pushurl is repointed at a throwaway bare decoy repo, never $WORK_DIR
+  # itself (issue #2509 port regression: a pushurl pointed at $WORK_DIR
+  # makes a same-branch push resolve as "Everything up-to-date" and exit 0
+  # without ever invoking a hook) -- assert the decoy exists, is bare, and
+  # carries the installed pre-receive hook.
+  local pushurl
+  pushurl="$(git -C "$WORK_DIR" config remote.origin.pushurl)"
+  [ -n "$pushurl" ]
+  [ "$pushurl" != "$WORK_DIR" ]
+  [ -x "$pushurl/hooks/pre-receive" ]
 
   # The rejection's wording lives in lib/prompt-contract.nix's
   # forbiddenMarkers registry (issue #2509), rendered verbatim into the
@@ -36,12 +46,43 @@ setup() {
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   [ -d "$WORK_DIR/.git" ]
-  [ -x "$WORK_DIR/.git/hooks/pre-push" ]
 
   run git -C "$WORK_DIR" push origin HEAD:some-branch --no-verify
   [ "$status" -ne 0 ]
 
   run git -C "$REMOTE_ROOT/owner/repo.git" rev-parse --verify some-branch
+  [ "$status" -ne 0 ]
+}
+
+@test "read-only Box's guard still blocks git push --no-verify of the branch already checked out" {
+  # Regression coverage for the #2509 port itself: the test above pushes a
+  # brand-new ref name ("some-branch"), which still forces a genuine ref
+  # update -- and so still fires a pre-receive hook -- even under the buggy
+  # pushurl=$WORK_DIR wiring this test guards against. A real dispatch never
+  # does that: publish_rebased_branch/pushWithRetry always push the SAME
+  # branch name phase_branch_recovery already checked out in $WORK_DIR (e.g.
+  # `git push --no-verify -u origin $BRANCH`, or a bare `git push
+  # --no-verify`). If pushurl points back at $WORK_DIR itself, that
+  # destination ref already sits at this exact commit -- git calls it
+  # "Everything up-to-date" and exits 0 without ever invoking pre-receive,
+  # `--no-verify` or not: a silent fake success.
+  unset BOX_WRITE_ENABLED # issue #2463: read-only Box
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+
+  # BRANCH is computed inside entrypoint.sh's main
+  # (BRANCH="${BRANCH_PREFIX:-}${ISSUE_NUMBER}", entrypoint.sh:60), not
+  # exported -- reproduce the same computation here
+  # (tests/entrypoint-opencode-agent-files.bats's setup() pattern) so this
+  # test targets the exact branch phase_branch_recovery leaves checked out.
+  local branch="${BRANCH_PREFIX:-}${ISSUE_NUMBER}"
+  [ "$(git -C "$WORK_DIR" rev-parse --abbrev-ref HEAD)" = "$branch" ]
+
+  run git -C "$WORK_DIR" push --no-verify -u origin "$branch"
+  [ "$status" -ne 0 ]
+  [[ "$output" != *"Everything up-to-date"* ]]
+
+  run git -C "$REMOTE_ROOT/owner/repo.git" rev-parse --verify "$branch"
   [ "$status" -ne 0 ]
 }
 
@@ -102,7 +143,6 @@ setup() {
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   [ -d "$WORK_DIR/.git" ]
-  [ -x "$WORK_DIR/.git/hooks/pre-push" ]
 
   run git -C "$WORK_DIR" push origin HEAD:some-host-mediated-branch
   [ "$status" -ne 0 ]

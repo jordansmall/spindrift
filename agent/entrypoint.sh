@@ -263,48 +263,32 @@ clone_repo() {
 # lives in the registry, never hand-copied shell this file's own shellcheck
 # sweep couldn't reach.
 #
-# Repoints `origin`'s *push* URL (leaving fetch untouched) at $WORK_DIR
-# itself before installing the guards, so every push resolves over the
-# local-filesystem transport -- no network call, ever -- and git treats
-# $WORK_DIR as both the client (running its own pre-push hook) and the
-# receiving end (running its own pre-receive hook) of that local push. The
-# former hand-rolled version pointed at a separate throwaway `mktemp -d`
-# bare decoy repo instead of $WORK_DIR itself, because its two hook bodies
-# were independent heredocs it could place anywhere; readonlyguards.Install
-# always renders identical content to both hookNames in whatever single
-# RepoDir it's given (issue #2509), so pointing that one RepoDir at
-# $WORK_DIR itself -- rather than standing up a second bare repo purely to
-# hold a second copy of the same content -- gets the same "git push -c
-# no-verify still gets caught by the receiving side's pre-receive" property
-# (verified: a non-bare repo's own pre-receive hook fires on an incoming
-# push to a *different* ref than the one currently checked out, which is
-# all every push in this file's flow ever targets) with one directory and
-# one verb call instead of two.
+# Repoints `origin`'s *push* URL (leaving fetch untouched) at a throwaway
+# bare decoy repo -- never $WORK_DIR itself. Every real dispatch push
+# (publish_rebased_branch/pushWithRetry) pushes the exact branch name
+# phase_branch_recovery already checked out here, so a pushurl pointed at
+# $WORK_DIR would make that push resolve as "Everything up-to-date" (the
+# destination ref is already at this exact commit) and exit 0 without ever
+# invoking a hook -- `--no-verify` or not: a silent fake success, worse than
+# the 403 this issue exists to replace, since the agent would believe its
+# work landed when it went nowhere. A bare decoy's refs are never the same
+# as $WORK_DIR's, so every push to it is a genuine ref update and its
+# pre-receive hook -- installed under decoy/hooks by the verb call below,
+# see readonlyguards.Config.RepoDir -- always fires, `--no-verify` included.
 #
 # Gated on the former install_readonly_push_hook's own condition verbatim:
 # BOX_WRITE_ENABLED unset (no push-capable token was ever issued) AND
 # (BOX_HOST_MEDIATED_REMOTE or BOX_OUTBOX_RELAY_CAPABLE set -- the two
 # backend-capability facts dispatch.buildBoxEnv forwards host-side, issue
 # #2267). The former install_readonly_gh_shim used a narrower condition
-# (_is_readonly_github: BOX_WRITE_ENABLED unset AND CODE_FORGE=="github"),
-# but every real dispatch-generated env where that holds also satisfies this
-# one -- CODE_FORGE=="github" always forwards BOX_OUTBOX_RELAY_CAPABLE=1
-# (backend.go's outboxRelayCapable:true for github), so a github Box's old
-# gh-shim gate never fired without its old push-hook gate also firing. The
-# lone case that diverges is CODE_FORGE=local under
-# BOX_FORGE_AND_ISSUE_ACCESS=read-only (BOX_HOST_MEDIATED_REMOTE set,
-# CODE_FORGE != github): the former code installed only the push hook there;
-# this single call now installs the gh shim there too, since the verb
-# renders every row the registry names in one pass and there is no flag to
-# select a subset. That's inert -- CODE_FORGE=local never invokes gh -- and
-# reusing the push-hook's own original condition here (rather than an OR of
-# both former conditions) keeps install_readonly_push_hook's synthetic
-# "outbox-incapable future backend" regression-guard test
-# (tests/entrypoint-readonly-push-hook.bats) passing exactly as before: that
-# fixture leaves CODE_FORGE at its "github" default while deliberately
-# unsetting BOX_OUTBOX_RELAY_CAPABLE, a combination only the push-hook's own
-# CODE_FORGE-blind condition (not an OR pulling in the CODE_FORGE=="github"
-# check) correctly still treats as "install neither guard".
+# (BOX_WRITE_ENABLED unset AND CODE_FORGE=="github"), but every real
+# dispatch env satisfying that also satisfies this one -- CODE_FORGE=="github"
+# always forwards BOX_OUTBOX_RELAY_CAPABLE=1 -- except CODE_FORGE=local under
+# BOX_FORGE_AND_ISSUE_ACCESS=read-only, where this now also installs the
+# (inert -- CODE_FORGE=local never invokes gh) gh shim. Reusing the
+# push-hook's own condition, rather than an OR of both former conditions,
+# keeps the synthetic "outbox-incapable future backend" regression-guard
+# test (tests/entrypoint-readonly-push-hook.bats) passing exactly as before.
 install_readonly_guards() {
   if [ -n "${BOX_WRITE_ENABLED:-}" ]; then
     return 0
@@ -323,10 +307,18 @@ install_readonly_guards() {
   # to that same uid alongside /work.
   local shim_dir
   shim_dir="$HOME/.spindrift/readonly-gh-shim"
-  git -C "$WORK_DIR" config remote.origin.pushurl "$WORK_DIR"
+  # A path outside $WORK_DIR (never inside the clone, so it never shows up in
+  # `git status`/`git add -A`) that every push now targets instead of the
+  # real remote -- see the function comment above for why. Created as a real
+  # bare repo (not just a bare path) so the local-filesystem transport's
+  # cheap, non-network ref listing succeeds and the pre-receive hook fires.
+  local decoy
+  decoy="$(mktemp -d)/readonly-push-guard.git"
+  git init --bare -q "$decoy"
+  git -C "$WORK_DIR" config remote.origin.pushurl "$decoy"
   driver-exec readonly-guards \
     --forbidden-markers-registry "$FORBIDDEN_MARKERS_REGISTRY_FILE" \
-    --repo-dir "$WORK_DIR" \
+    --repo-dir "$decoy" \
     --shim-dir "$shim_dir"
   export PATH="$shim_dir:$PATH"
 }
