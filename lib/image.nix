@@ -14,11 +14,13 @@
 # package-set pair, the driver entry, the resolved agents, the contract
 # files, the prompt tree, and the knob subset the image consumes — instead
 # of one loose parameter per value; `pkgs` and `lib` stay top-level as
-# module plumbing, not Consumer/mkHarness state. This stays a pure
-# signature refactor: mkHarness threads the same already-computed values in
-# through the groups below, and the `let` block right after immediately
-# destructures each group back to the bare names the (unchanged) body
-# refers to throughout.
+# module plumbing, not Consumer/mkHarness state. mkHarness threads the same
+# already-computed values in through the groups below, and the body
+# references each value through its group (e.g. `driver.driverEntry`,
+# `agents.agentsJsonTemplate`) rather than destructuring the groups back to
+# bare names — the point of grouping is that the body actually treats a
+# group as a unit, not a one-line-later restatement of the loose-parameter
+# list it replaced.
 {
   pkgs,
   lib,
@@ -59,56 +61,12 @@ let
   # The baked-skill name list (issue #2532), single-sourced for harnessSkills
   # below so a skill's name is never hand-typed a second time here.
   bakedSkills = import ./baked-skills.nix;
-  inherit (packageSet) packages extraClosures;
-  inherit (driver)
-    driverEntry
-    driverExecBin
-    orchestratorBin
-    driverPreamble
-    driverAgentFiles
-    ;
-  inherit (agents)
-    agentsJsonTemplate
-    agentsPromptFilesJson
-    customRosterPromptFiles
-    skills
-    ;
-  inherit (contracts)
-    fragmentsRegistryJson
-    promptContractRegistryJson
-    forbiddenMarkersRegistryJson
-    outcomeContract
-    commsBlock
-    checkBlock
-    researchOutcomeContract
-    injectOutcomeContract
-    injectFixSharedBlocks
-    injectResearchOutcomeContract
-    ;
-  inherit (prompts)
-    prompt
-    scoutPrompt
-    reviewPrompt
-    filerPrompt
-    workerPrompt
-    conflictResolvePrompt
-    fixPrompt
-    researchPrompt
-    researchSelfContainedPrompt
-    fragmentsSourceDir
-    fragmentRegistryPreamble
-    ;
-  inherit (knobs)
-    nixInBox
-    nixStoreWritable
-    prefetch
-    imageName
-    entrypointDefaultsPreamble
-    ;
   # Whether ISSUE_TRACKER or CODE_FORGE selects the forgejo backend; bakes fj
   # (forgejo-cli) into the image when true, absent otherwise (issue #1963).
   # Kept as an `or false` default, as the pre-grouping parameter carried,
-  # even though mkHarness's call site always supplies it explicitly.
+  # even though mkHarness's call site always supplies it explicitly. A
+  # derived (default-applied) local binding, not a straight group passthrough,
+  # so it stays a bare name unlike every other value below.
   forgejoBackend = knobs.forgejoBackend or false;
 
   # Drop a leading `#!...` line so a complete, standalone-runnable script can be
@@ -137,21 +95,21 @@ let
       jq # extracts the outcome line from the agent's stream-json transcript
       git
       gh
-      (driverEntry.package pkgs)
+      (driver.driverEntry.package pkgs)
       cacert
-      driverExecBin # in-box Driver runner (#626)
-      orchestratorBin # in-box orchestrator (#1996)
+      driver.driverExecBin # in-box Driver runner (#626)
+      driver.orchestratorBin # in-box orchestrator (#1996)
     ])
     # The nix CLI is included by default so `nix flake check` / `nix develop`
     # work inside the box. Omitted only when the Consumer opts into the lean image.
-    ++ lib.optional nixInBox pkgs.nix
+    ++ lib.optional knobs.nixInBox pkgs.nix
     # fj (forgejo-cli): baked only for a forgejo-backend Consumer (issue
     # #1963), so a github-backend image never gains an unused CLI.
     ++ lib.optional forgejoBackend pkgs.forgejo-cli;
 
   agentEnv = pkgs.buildEnv {
     name = "agent-env";
-    paths = harnessPackages ++ packages pkgs;
+    paths = harnessPackages ++ packageSet.packages pkgs;
     pathsToLink = [
       "/bin"
       "/lib"
@@ -172,12 +130,12 @@ let
       (with pkgs; [
         git
         gh
-        (driverEntry.package pkgs)
+        (driver.driverEntry.package pkgs)
         gettext # envsubst
         coreutils
         jq # extracts the outcome from the stream-json transcript
-        driverExecBin # in-box Driver runner (#626)
-        orchestratorBin # in-box orchestrator (#1996)
+        driver.driverExecBin # in-box Driver runner (#626)
+        driver.orchestratorBin # in-box orchestrator (#1996)
       ])
       # fj (forgejo-cli): resolved on PATH for the entrypoint's fj credential
       # setup only when the Consumer's backend is forgejo (issue #1963).
@@ -188,14 +146,14 @@ let
     # is derived from the configured models, not a standalone knob.
     text =
       "AGENTS_JSON_TEMPLATE="
-      + lib.escapeShellArg agentsJsonTemplate
+      + lib.escapeShellArg agents.agentsJsonTemplate
       + "\n"
       + "AGENTS_PROMPT_FILES="
-      + lib.escapeShellArg agentsPromptFilesJson
+      + lib.escapeShellArg agents.agentsPromptFilesJson
       + "\n"
-      + driverPreamble
-      + fragmentRegistryPreamble
-      + entrypointDefaultsPreamble
+      + driver.driverPreamble
+      + prompts.fragmentRegistryPreamble
+      + knobs.entrypointDefaultsPreamble
       + stripShebang (builtins.readFile ../agent/entrypoint.sh);
   };
 
@@ -327,10 +285,10 @@ let
 
   agentFiles = pkgs.runCommand "spindrift-agent-files" { } ''
     mkdir -p $out/agent/prompts
-    ${lib.optionalString (driverEntry ? sessionCacheDirRelative) ''
+    ${lib.optionalString (driver.driverEntry ? sessionCacheDirRelative) ''
       # Pre-create the driver-cache mountpoint so podman reuses the agent-owned
       # directory instead of fabricating root-owned parents (issue #447).
-      mkdir -p $out/home/agent/${driverEntry.sessionCacheDirRelative}
+      mkdir -p $out/home/agent/${driver.driverEntry.sessionCacheDirRelative}
     ''}
     mkdir -p $out/home/agent/.claude/hooks
     cp ${../agent/reject-background-bash.sh} $out/home/agent/.claude/hooks/reject-background-bash.sh
@@ -349,31 +307,31 @@ let
     # A sibling of prompts/, not inside it, so a SPINDRIFT_PROMPT_DIR mount
     # (which shadows only /agent/prompts) never hides it from the entrypoint
     # (issue #420).
-    cp ${pkgs.writeText "outcome-contract.md" outcomeContract} $out/agent/outcome-contract.md
-    cp ${pkgs.writeText "comms-contract.md" commsBlock} $out/agent/comms-contract.md
-    cp ${pkgs.writeText "check-contract.md" checkBlock} $out/agent/check-contract.md
-    cp ${pkgs.writeText "research-outcome-contract.md" researchOutcomeContract} $out/agent/research-outcome-contract.md
-    cp ${pkgs.writeText "fragments-registry.json" fragmentsRegistryJson} $out/agent/fragments-registry.json
-    cp ${pkgs.writeText "prompt-contract-registry.json" promptContractRegistryJson} $out/agent/prompt-contract-registry.json
-    cp ${pkgs.writeText "forbidden-markers-registry.json" forbiddenMarkersRegistryJson} $out/agent/forbidden-markers-registry.json
-    cp ${pkgs.writeText "issue-prompt.md" (injectOutcomeContract prompt)} $out/agent/prompts/issue-prompt.md
-    cp ${pkgs.writeText "scout-prompt.md" scoutPrompt} $out/agent/prompts/scout-prompt.md
-    cp ${pkgs.writeText "review-prompt.md" reviewPrompt} $out/agent/prompts/review-prompt.md
-    cp ${pkgs.writeText "filer-prompt.md" filerPrompt} $out/agent/prompts/filer-prompt.md
-    cp ${pkgs.writeText "worker-prompt.md" workerPrompt} $out/agent/prompts/worker-prompt.md
+    cp ${pkgs.writeText "outcome-contract.md" contracts.outcomeContract} $out/agent/outcome-contract.md
+    cp ${pkgs.writeText "comms-contract.md" contracts.commsBlock} $out/agent/comms-contract.md
+    cp ${pkgs.writeText "check-contract.md" contracts.checkBlock} $out/agent/check-contract.md
+    cp ${pkgs.writeText "research-outcome-contract.md" contracts.researchOutcomeContract} $out/agent/research-outcome-contract.md
+    cp ${pkgs.writeText "fragments-registry.json" contracts.fragmentsRegistryJson} $out/agent/fragments-registry.json
+    cp ${pkgs.writeText "prompt-contract-registry.json" contracts.promptContractRegistryJson} $out/agent/prompt-contract-registry.json
+    cp ${pkgs.writeText "forbidden-markers-registry.json" contracts.forbiddenMarkersRegistryJson} $out/agent/forbidden-markers-registry.json
+    cp ${pkgs.writeText "issue-prompt.md" (contracts.injectOutcomeContract prompts.prompt)} $out/agent/prompts/issue-prompt.md
+    cp ${pkgs.writeText "scout-prompt.md" prompts.scoutPrompt} $out/agent/prompts/scout-prompt.md
+    cp ${pkgs.writeText "review-prompt.md" prompts.reviewPrompt} $out/agent/prompts/review-prompt.md
+    cp ${pkgs.writeText "filer-prompt.md" prompts.filerPrompt} $out/agent/prompts/filer-prompt.md
+    cp ${pkgs.writeText "worker-prompt.md" prompts.workerPrompt} $out/agent/prompts/worker-prompt.md
     ${lib.concatMapStrings (
       e:
       let
         pf = e.promptFile;
       in
       "cp ${pkgs.writeText pf e.prompt} $out/agent/prompts/${pf}\n"
-    ) customRosterPromptFiles}
-    cp ${pkgs.writeText "conflict-resolve-prompt.md" conflictResolvePrompt} $out/agent/prompts/conflict-resolve-prompt.md
-    cp ${pkgs.writeText "fix-prompt.md" (injectFixSharedBlocks fixPrompt)} $out/agent/prompts/fix-prompt.md
-    cp ${pkgs.writeText "research-prompt.md" (injectResearchOutcomeContract researchPrompt)} $out/agent/prompts/research-prompt.md
-    cp ${pkgs.writeText "research-self-contained-prompt.md" (injectResearchOutcomeContract researchSelfContainedPrompt)} $out/agent/prompts/research-self-contained-prompt.md
-    cp -r ${fragmentsSourceDir} $out/agent/prompts/fragments
-    ${lib.optionalString ((harnessSkills ++ skills) != [ ]) ''
+    ) agents.customRosterPromptFiles}
+    cp ${pkgs.writeText "conflict-resolve-prompt.md" prompts.conflictResolvePrompt} $out/agent/prompts/conflict-resolve-prompt.md
+    cp ${pkgs.writeText "fix-prompt.md" (contracts.injectFixSharedBlocks prompts.fixPrompt)} $out/agent/prompts/fix-prompt.md
+    cp ${pkgs.writeText "research-prompt.md" (contracts.injectResearchOutcomeContract prompts.researchPrompt)} $out/agent/prompts/research-prompt.md
+    cp ${pkgs.writeText "research-self-contained-prompt.md" (contracts.injectResearchOutcomeContract prompts.researchSelfContainedPrompt)} $out/agent/prompts/research-self-contained-prompt.md
+    cp -r ${prompts.fragmentsSourceDir} $out/agent/prompts/fragments
+    ${lib.optionalString ((harnessSkills ++ agents.skills) != [ ]) ''
       mkdir -p $out/agent/skills
       ${lib.concatMapStrings (
         f:
@@ -401,13 +359,13 @@ let
           ''
             cp -r ${f} $out/agent/skills/${if lib.isDerivation f then f.name else builtins.baseNameOf f}
           ''
-      ) (harnessSkills ++ skills)}
+      ) (harnessSkills ++ agents.skills)}
     ''}
     ${lib.concatStrings (
       lib.mapAttrsToList (relPath: content: ''
         mkdir -p "$(dirname $out/home/agent/${relPath})"
         cp ${pkgs.writeText (baseNameOf relPath) content} $out/home/agent/${relPath}
-      '') driverAgentFiles
+      '') driver.driverAgentFiles
     )}
   '';
 
@@ -426,10 +384,10 @@ let
 
   # Evaluated once so the image's contents, closure registration, and Env
   # marker below all see the identical set of extra derivations.
-  extraClosurePaths = extraClosures pkgs;
+  extraClosurePaths = packageSet.extraClosures pkgs;
 
   image = pkgs.dockerTools.buildLayeredImage {
-    name = imageName;
+    name = knobs.imageName;
     tag = "latest";
     contents = [
       agentEnv
@@ -445,7 +403,7 @@ let
     # Make nix operable in an unprivileged throwaway container: a single-user,
     # sandbox-off nix.conf and a store DB registered from the baked closure, so
     # `nix flake check` reuses the image's store instead of treating it as empty.
-    + lib.optionalString nixInBox ''
+    + lib.optionalString knobs.nixInBox ''
       mkdir -p etc/nix nix/var/nix/db nix/var/nix/gcroots nix/var/nix/profiles nix/var/nix/temproots nix/var/log/nix
       printf '%s\n' \
         'experimental-features = nix-command flakes' \
@@ -471,13 +429,13 @@ let
     fakeRootCommands = ''
       chown -R 1000:1000 home/agent work
     ''
-    + lib.optionalString nixInBox ''
+    + lib.optionalString knobs.nixInBox ''
       chown -R 1000:1000 nix/var
     ''
     # Non-recursive: only the store directory itself becomes agent-writable,
     # so existing baked paths stay root-owned and immutable (self-test mode,
     # ADR 0018).
-    + lib.optionalString nixStoreWritable ''
+    + lib.optionalString knobs.nixStoreWritable ''
       chown 1000:1000 nix/store
     '';
     config = {
@@ -490,8 +448,8 @@ let
         "SSL_CERT_FILE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt"
         "GIT_SSL_CAINFO=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt"
         "PKG_CONFIG_PATH=/lib/pkgconfig"
-        "PREFETCH=${prefetch}"
-        "NIX_STORE_WRITABLE=${lib.boolToString nixStoreWritable}"
+        "PREFETCH=${knobs.prefetch}"
+        "NIX_STORE_WRITABLE=${lib.boolToString knobs.nixStoreWritable}"
         # Lower Claude Code's own output-cap knobs so its built-in
         # file-spillover engages early -- see "Claude Code output caps" in
         # docs/reference.md for the values and rationale (issue #1987).
