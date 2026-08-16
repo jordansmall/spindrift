@@ -27,54 +27,35 @@ type Descriptor struct {
 	// HostMediatedRemote is true only for a backend with no writable
 	// remote to push to at all (ADR 0033: "local").
 	HostMediatedRemote bool
+
+	// OutboxRelayCapable is true for a backend whose CODE_FORGE selection
+	// gets the outbox mount/relay treatment under read-only today (issue
+	// #1918: "github" only). NOTE: forgejo also has its own read-only
+	// CodeForge constructor (NewReadOnlyForgejoCodeForge) but is NOT
+	// included in this today -- that's a pre-existing asymmetry in the
+	// current code (mount.go / dispatch/box.go's needsOutbox / the
+	// outcome-backstop switch all check CodeForge=="github" specifically,
+	// never "forgejo", for this one capability), and #2267 is explicitly
+	// behavior-preserving, so this field must reproduce that asymmetry
+	// (true for github, false for forgejo) rather than "fixing" it.
+	OutboxRelayCapable bool
+
+	// InBoxUnreachableTracker is true only for a tracker with no in-box
+	// reachability at all (ADR 0032: "local"), gating the read-only
+	// /issues mount.
+	InBoxUnreachableTracker bool
 }
 
-// GitHub is the descriptor for the "github" backend.
-var GitHub = Descriptor{
-	Name:             "github",
-	ValidAsTracker:   true,
-	ValidAsCodeForge: true,
-	TokenEnvVar:      "GH_TOKEN",
-}
-
-// Forgejo is the descriptor for the "forgejo" backend.
-var Forgejo = Descriptor{
-	Name:             "forgejo",
-	ValidAsTracker:   true,
-	ValidAsCodeForge: true,
-	TokenEnvVar:      "FORGEJO_TOKEN",
-	DoctorTokenHint:  "FORGEJO_TOKEN",
-	DoctorSlugHint:   "FORGEJO_BASE_URL",
-}
-
-// Jira is the descriptor for the "jira" backend.
-var Jira = Descriptor{
-	Name:             "jira",
-	ValidAsTracker:   true,
-	ValidAsCodeForge: false,
-	TokenEnvVar:      "JIRA_TOKEN",
-	DoctorTokenHint:  "JIRA_TOKEN",
-	DoctorSlugHint:   "JIRA_BASE_URL / JIRA_PROJECT_KEY",
-}
-
-// Local is the descriptor for the "local" backend.
-var Local = Descriptor{
-	Name:               "local",
-	ValidAsTracker:     true,
-	ValidAsCodeForge:   true,
-	HostMediatedRemote: true,
-}
-
-// Git is the descriptor for the "git" backend.
-var Git = Descriptor{
-	Name:             "git",
-	ValidAsTracker:   false,
-	ValidAsCodeForge: true,
-}
-
-// Registry is every registered backend descriptor, in the same order the
-// launcher's own backendRows registers them.
-var Registry = []Descriptor{GitHub, Forgejo, Jira, Local, Git}
+// Registry (every registered backend descriptor) and its named GitHub/
+// Forgejo/Jira/Local/Git vars are generated into registry_gen.go from
+// lib/backends/default.nix (issue #2521) -- not hand-declared here. Its
+// order is lib/backends/default.nix's declaration order (github, git,
+// local, jira, forgejo), not the order cmd/launcher's own backendRows
+// registers them: a follow-up slice derives env-schema.nix's
+// issueTracker.choices/codeForge.choices as an order-preserving filter over
+// that same Nix list, and this declaration order is chosen to reproduce
+// both axes' existing pinned choice orders via nothing but a single filter
+// each.
 
 // ByName looks up the descriptor for name (an ISSUE_TRACKER or CODE_FORGE
 // knob value). ok is false for an unregistered name.

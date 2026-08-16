@@ -260,6 +260,30 @@ in
         touch $out
       '';
 
+  # cmd/launcher/internal/backend/registry_gen.go must match the content
+  # generated from lib/backends/default.nix by lib/renderers.nix's
+  # renderBackendRegistryGo, gofmt-normalized the same way `nix run .#regen`
+  # normalizes it. Fails when a backend descriptor is added/edited in the Nix
+  # registry but the committed generated file is not regenerated. Shares its
+  # renderer with `nix run .#regen` via lib/renderers.nix (issue #2521).
+  backend-registry-gen =
+    let
+      backends = import ../../lib/backends/default.nix;
+      raw = pkgs.writeText "registry_gen.go.raw" (renderers.renderBackendRegistryGo backends);
+    in
+    pkgs.runCommand "backend-registry-gen"
+      {
+        nativeBuildInputs = [ pkgs.go ];
+        inherit raw;
+        committed = ../../cmd/launcher/internal/backend/registry_gen.go;
+      }
+      ''
+        gofmt "$raw" > generated.go
+        diff generated.go "$committed" \
+          || { echo "cmd/launcher/internal/backend/registry_gen.go is out of sync with lib/backends/default.nix — regenerate it with \`nix run .#regen\`" >&2; exit 1; }
+        touch $out
+      '';
+
   # cmd/launcher/subcommands_gen.go must match the content generated from
   # lib/subcommands.nix. Fails when a subcommand is added/edited in the Nix
   # registry but the committed generated file is not regenerated. Shares its
