@@ -373,17 +373,26 @@ body
 	t.Cleanup(func() { _ = reacquired.Release() })
 }
 
-// stubExecutableOnPath creates a no-op executable script named name in a
+// stubExecutableOnPath creates an executable script named name in a
 // throwaway dir and prepends that dir to PATH, so runner.ValidateRuntime's
-// exec.LookPath(name) succeeds without the real CLI being installed. The
-// script is never actually invoked by the tests that use this helper (the
-// bwrap branch's readiness checks are unconditional no-ops); it only needs
-// to exist and be executable to satisfy the upfront RUNTIME validity check.
+// exec.LookPath(name) succeeds without the real CLI being installed —
+// ValidateRuntime only probes presence via LookPath, it never runs the
+// binary, so any executable file satisfies it. The script itself exits
+// nonzero for every invocation, deliberately mimicking a real OCI CLI
+// failing `image inspect` against a nonexistent image: when the correct
+// runner branch is selected, the stub is never actually invoked (the bwrap
+// branch's readiness checks are unconditional no-ops), but if a regression
+// wrongly routes to the OCI branch instead, ociAdapter.IsReady() shells out
+// to this stub and its nonzero exit surfaces as a readiness failure rather
+// than silently reporting "ready" — the property that lets
+// TestBootstrap_RunnerKindBwrap_OverridesMismatchedRuntime actually
+// discriminate a reverted-to-RUNTIME selection instead of passing either way
+// (issue #2538 review finding).
 func stubExecutableOnPath(t *testing.T, name string) {
 	t.Helper()
 	bin := t.TempDir()
 	script := filepath.Join(bin, name)
-	if err := os.WriteFile(script, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+	if err := os.WriteFile(script, []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
