@@ -94,11 +94,9 @@ func (d *Dispatch) CumulativeUsage() usage.Usage {
 // DurationApiMs, and NumTurns all sum across every found report;
 // DurationMs (wall time) does not sum -- see spanDurationMs; SummedByModel
 // buckets merge by exact model id, summed, and kept in first-appearance
-// order across logs -- each found report's own SummedByModel already
-// arrives sorted by its own driver, so first-appearance order across an
-// already-sorted-per-log input is deterministic without replicating any
-// one driver's own family-rank sort here. found must contain only reports
-// with Found == true.
+// order across logs -- deterministic regardless of each report's own
+// per-log ordering, without replicating any one driver's own family-rank
+// sort here. found must contain only reports with Found == true.
 //
 // The single-report case (the common case -- one pass, no retries) returns
 // found[0] completely unchanged, bypassing every rule above: this is the
