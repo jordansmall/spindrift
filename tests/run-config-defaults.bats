@@ -3,6 +3,9 @@
 
 load helper
 
+# shellcheck source=tests/default_models_gen.bash disable=SC1091
+source "${BATS_TEST_DIRNAME}/default_models_gen.bash"
+
 setup() {
   setup_run_env
 }
@@ -55,17 +58,17 @@ EOF
   [ "$status" -eq 0 ]
   # Anchored on a non-word char before MODEL= so this can't false-match
   # WORKER_MODEL's own baked default, which is also claude-sonnet-5.
-  grep -qE '(^| )MODEL=claude-sonnet-5' "$PODMAN_LOG"
+  grep -qE "(^| )MODEL=$DEFAULT_MODEL" "$PODMAN_LOG"
 }
 
 @test "run passes the baked default SCOUT_MODEL and REVIEW_MODEL into the container" {
   export FAKE_PODMAN_IMAGE_PRESENT=1
   run "$RUN_CMD"
   [ "$status" -eq 0 ]
-  grep -q 'SCOUT_MODEL=claude-haiku-4-5-20251001' "$PODMAN_LOG"
+  grep -q "SCOUT_MODEL=$DEFAULT_SCOUT_MODEL" "$PODMAN_LOG"
   # Anchored on a trailing non-word char so a future claude-opus-5-N default
   # can't false-match this claude-opus-5 assertion.
-  grep -qE 'REVIEW_MODEL=claude-opus-5( |$)' "$PODMAN_LOG"
+  grep -qE "REVIEW_MODEL=$DEFAULT_REVIEW_MODEL( |\$)" "$PODMAN_LOG"
 }
 
 @test "MODEL env overrides the baked default into the container" {
@@ -76,7 +79,7 @@ EOF
   grep -q 'MODEL=claude-test-model' "$PODMAN_LOG"
   # Anchored (see above) so WORKER_MODEL's own claude-sonnet-5 default
   # doesn't make this negative assertion a false failure.
-  ! grep -qE '(^| )MODEL=claude-sonnet-5' "$PODMAN_LOG"
+  ! grep -qE "(^| )MODEL=$DEFAULT_MODEL" "$PODMAN_LOG"
 }
 
 @test "a non-default baked label changes which issues run queries" {

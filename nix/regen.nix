@@ -6,7 +6,8 @@
 # cmd/launcher/subcommands_gen.go,
 # cmd/launcher/internal/outcome/status_gen.go,
 # cmd/launcher/internal/backend/registry_gen.go,
-# tests/box_env_gen.bash, and the generated section of
+# tests/box_env_gen.bash, tests/default_models_gen.bash,
+# cmd/launcher/defaultmodels_gen.go, and the generated section of
 # templates/default/flake.nix's commented-out `settings` example, from their
 # respective Nix sources, and writes them into the working tree. Calls the
 # exact same renderers as the nix/checks.nix drift guards (lib/renderers.nix),
@@ -50,6 +51,9 @@ let
   );
   backendRegistry = import ../lib/backends/default.nix;
   backendRegistryFile = renderers.renderBackendRegistryGo backendRegistry;
+  defaultModelFixture = import ../lib/default-model-fixture.nix;
+  defaultModelFixtureBash = renderers.renderDefaultModelFixtureBash defaultModelFixture;
+  defaultModelFixtureGo = renderers.renderDefaultModelFixtureGo defaultModelFixture;
   inherit (pkgs.lib) escapeShellArg;
 in
 pkgs.writeShellApplication {
@@ -98,6 +102,9 @@ pkgs.writeShellApplication {
     write cmd/launcher/internal/backend/registry_gen.go ${escapeShellArg backendRegistryFile}
     gofmt -w "$root/cmd/launcher/internal/backend/registry_gen.go"
     write tests/box_env_gen.bash ${escapeShellArg boxEnvFixture}
+    write tests/default_models_gen.bash ${escapeShellArg defaultModelFixtureBash}
+    write cmd/launcher/defaultmodels_gen.go ${escapeShellArg defaultModelFixtureGo}
+    gofmt -w "$root/cmd/launcher/defaultmodels_gen.go"
     write_between templates/default/flake.nix \
       ${escapeShellArg "            # BEGIN GENERATED SETTINGS EXAMPLE -- nix run .#regen -- DO NOT EDIT"} \
       ${escapeShellArg "            # END GENERATED SETTINGS EXAMPLE"} \
