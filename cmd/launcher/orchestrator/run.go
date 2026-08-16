@@ -917,11 +917,16 @@ func seedAndInvokePass(cfg config, state runstate.RunState, prevSeededPromptFile
 	if prevSeededPromptFile != "" && prevSeededPromptFile != cfg.promptFile {
 		os.Remove(prevSeededPromptFile)
 	}
-	// A killed-mid-turn pass can leave cfg.passSummaryPath holding whatever a
-	// PRIOR pass wrote (or nothing at all); unlinking it before invoking this
-	// pass guarantees the post-pass os.Stat check in run/runWithReviewPass
-	// only ever sees a file this pass itself wrote, never a stale leftover.
-	if cfg.passSummaryPath != "" {
+	// Only clear a leftover file when nothing this round references it
+	// (state.PassSummaryPath == ""): a killed-mid-turn pass with nothing to
+	// report can otherwise leave cfg.passSummaryPath holding pure orphaned
+	// garbage from an even-earlier pass, which the post-pass os.Stat check
+	// in run/runWithReviewPass would then wrongly attribute as this pass's
+	// own fresh summary. When state.PassSummaryPath != "", this pass's own
+	// seeded prompt (via seedPromptFromState above) just told the agent to
+	// read this exact file -- removing it here would delete the file out
+	// from under that reference before the agent ever gets to read it.
+	if cfg.passSummaryPath != "" && state.PassSummaryPath == "" {
 		os.Remove(cfg.passSummaryPath)
 	}
 
