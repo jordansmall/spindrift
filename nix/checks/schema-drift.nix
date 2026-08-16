@@ -632,6 +632,30 @@ in
         touch $out
       '';
 
+  # cmd/launcher/internal/doctor/labelmeta_gen.go must match the content
+  # generated from lib/labels.nix by lib/renderers.nix's
+  # renderLabelRegistryGo, gofmt-normalized the same way `nix run .#regen`
+  # normalizes it. Fails when a label row is added/edited in the Nix
+  # registry but the committed generated file is not regenerated. Shares its
+  # renderer with `nix run .#regen` via lib/renderers.nix (issue #2528).
+  label-registry-gen =
+    let
+      labels = import ../../lib/labels.nix;
+      raw = pkgs.writeText "labelmeta_gen.go.raw" (renderers.renderLabelRegistryGo labels);
+    in
+    pkgs.runCommand "label-registry-gen"
+      {
+        nativeBuildInputs = [ pkgs.go ];
+        inherit raw;
+        committed = ../../cmd/launcher/internal/doctor/labelmeta_gen.go;
+      }
+      ''
+        gofmt "$raw" > generated.go
+        diff generated.go "$committed" \
+          || { echo "cmd/launcher/internal/doctor/labelmeta_gen.go is out of sync with lib/labels.nix — regenerate it with \`nix run .#regen\`" >&2; exit 1; }
+        touch $out
+      '';
+
   # cmd/launcher/quickstart/quickstart_runtime_gen.go must match the content
   # generated from lib/runtime-values.nix. Fails when the runtime enum
   # changes but the committed generated file isn't regenerated. Shares its
