@@ -472,7 +472,7 @@ in
       };
     in
     pkgs.runCommand "driver-preamble-baked-into-image" { } ''
-      ep=${batsHarness.agentFiles}/agent/entrypoint.sh
+      ep=${batsHarness.internals.agentFiles}/agent/entrypoint.sh
       ${pkgs.lib.concatStrings (
         pkgs.lib.mapAttrsToList (
           var: value:
