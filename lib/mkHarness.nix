@@ -733,10 +733,12 @@ let
   # stay byte-identical, so every value the module needs is threaded in
   # exactly as it was computed here.
   #
-  # lib/image.nix's parameters are grouped into six attrsets (issue #2530);
-  # each group below threads the same already-computed local values through
-  # unrenamed, so image.nix's own `let` block can destructure them straight
-  # back to the bare names its body already uses.
+  # lib/image.nix's parameters are grouped into six attrsets (issue #2530):
+  # a shared internal representation, not a bag invented solely for the
+  # image.nix call below. The host-native mirror derivations/documents
+  # further down this same file (promptDir, driverPreambleFile,
+  # runArtifacts, and others) read the same fields off these groups too,
+  # instead of re-deriving them from the bare local values.
   imagePackageSet = {
     inherit packages extraClosures;
   };
@@ -814,29 +816,29 @@ let
   # The canonical outcome contract as a host store path, so checks can diff
   # it against what a Consumer prompt lacking the contract gets injected with
   # — proof the two cannot drift apart (issue #419).
-  outcomeContractFile = hostPkgs.writeText "outcome-contract.md" outcomeContract;
+  outcomeContractFile = hostPkgs.writeText "outcome-contract.md" imageContracts.outcomeContract;
 
   # The COMMS and CHECK/COMMIT blocks as host store paths, for the same
   # drift-proof reason (issue #455).
-  commsContractFile = hostPkgs.writeText "comms-contract.md" commsBlock;
-  checkContractFile = hostPkgs.writeText "check-contract.md" checkBlock;
+  commsContractFile = hostPkgs.writeText "comms-contract.md" imageContracts.commsBlock;
+  checkContractFile = hostPkgs.writeText "check-contract.md" imageContracts.checkBlock;
 
   # The research dispatch kind's own outcome contract as a host store path,
   # for the same drift-proof reason (issue #640).
-  researchOutcomeContractFile = hostPkgs.writeText "research-outcome-contract.md" researchOutcomeContract;
+  researchOutcomeContractFile = hostPkgs.writeText "research-outcome-contract.md" imageContracts.researchOutcomeContract;
 
   # The Driver's registry-rendered preamble (DRIVER_* vars and function
   # definitions) as a host store-path file. The bats harness prepends this
   # before exec-ing the entrypoint (issue #433) so tests exercise the exact
   # same registry-rendered bytes that mkHarness bakes into the image (issue
   # #624) — not any hand-copied duplicates or entrypoint fallback literals.
-  driverPreambleFile = hostPkgs.writeText "driver-preamble.sh" driverPreamble;
+  driverPreambleFile = hostPkgs.writeText "driver-preamble.sh" imageDriver.driverPreamble;
 
   # The Conditional fragment registry as a host store-path file (issue #622,
   # mirrors driverPreambleFile above). The bats harness prepends this before
   # exec-ing the entrypoint so tests exercise the same registry-rendered loop
   # input and substitution allowlist that mkHarness bakes into the image.
-  fragmentRegistryFile = hostPkgs.writeText "fragment-registry.sh" fragmentRegistryPreamble;
+  fragmentRegistryFile = hostPkgs.writeText "fragment-registry.sh" imagePrompts.fragmentRegistryPreamble;
 
   # The rendered prompt directory as a host store path (native-buildable on
   # darwin, so it needs no Linux builder). The prompt is normally baked into
@@ -844,23 +846,23 @@ let
   # bind-mounted by default, and so SPINDRIFT_PROMPT_DIR can point to it.
   promptDir = hostPkgs.runCommand "prompt-dir" { } ''
     mkdir -p $out
-    cp ${hostPkgs.writeText "issue-prompt.md" (injectOutcomeContract prompt)} $out/issue-prompt.md
-    cp ${hostPkgs.writeText "scout-prompt.md" scoutPrompt} $out/scout-prompt.md
-    cp ${hostPkgs.writeText "review-prompt.md" reviewPrompt} $out/review-prompt.md
-    cp ${hostPkgs.writeText "filer-prompt.md" filerPrompt} $out/filer-prompt.md
-    cp ${hostPkgs.writeText "worker-prompt.md" workerPrompt} $out/worker-prompt.md
+    cp ${hostPkgs.writeText "issue-prompt.md" (imageContracts.injectOutcomeContract imagePrompts.prompt)} $out/issue-prompt.md
+    cp ${hostPkgs.writeText "scout-prompt.md" imagePrompts.scoutPrompt} $out/scout-prompt.md
+    cp ${hostPkgs.writeText "review-prompt.md" imagePrompts.reviewPrompt} $out/review-prompt.md
+    cp ${hostPkgs.writeText "filer-prompt.md" imagePrompts.filerPrompt} $out/filer-prompt.md
+    cp ${hostPkgs.writeText "worker-prompt.md" imagePrompts.workerPrompt} $out/worker-prompt.md
     ${lib.concatMapStrings (
       e:
       let
         pf = e.promptFile;
       in
       "cp ${hostPkgs.writeText pf e.prompt} $out/${pf}\n"
-    ) customRosterPromptFiles}
-    cp ${hostPkgs.writeText "conflict-resolve-prompt.md" conflictResolvePrompt} $out/conflict-resolve-prompt.md
-    cp ${hostPkgs.writeText "fix-prompt.md" (injectFixSharedBlocks fixPrompt)} $out/fix-prompt.md
-    cp ${hostPkgs.writeText "research-prompt.md" (injectResearchOutcomeContract researchPromptRendered)} $out/research-prompt.md
-    cp ${hostPkgs.writeText "research-self-contained-prompt.md" (injectResearchOutcomeContract researchSelfContainedPromptRendered)} $out/research-self-contained-prompt.md
-    cp -r ${fragmentsSourceDir} $out/fragments
+    ) imageAgents.customRosterPromptFiles}
+    cp ${hostPkgs.writeText "conflict-resolve-prompt.md" imagePrompts.conflictResolvePrompt} $out/conflict-resolve-prompt.md
+    cp ${hostPkgs.writeText "fix-prompt.md" (imageContracts.injectFixSharedBlocks imagePrompts.fixPrompt)} $out/fix-prompt.md
+    cp ${hostPkgs.writeText "research-prompt.md" (imageContracts.injectResearchOutcomeContract imagePrompts.researchPrompt)} $out/research-prompt.md
+    cp ${hostPkgs.writeText "research-self-contained-prompt.md" (imageContracts.injectResearchOutcomeContract imagePrompts.researchSelfContainedPrompt)} $out/research-self-contained-prompt.md
+    cp -r ${imagePrompts.fragmentsSourceDir} $out/fragments
   '';
 
   # The baked-skills directory as a host store path (native-buildable on
@@ -870,7 +872,7 @@ let
   # hostPkgs here — this directory is a host-only test artifact, never an input
   # to the (Linux) image itself, so it carries no host-independence requirement.
   skillsDir = hostPkgs.runCommand "skills-dir" { } (
-    if skills == [ ] then
+    if imageAgents.skills == [ ] then
       "mkdir -p $out"
     else
       ''
@@ -886,7 +888,7 @@ let
             ''
               cp -r ${f} $out/${if lib.isDerivation f then f.name else builtins.baseNameOf f}
             ''
-        ) skills}
+        ) imageAgents.skills}
       ''
   );
 
@@ -948,18 +950,18 @@ let
   runArtifacts = preambles.runArtifacts {
     inherit
       runnerKind
-      driverEntry
       agentFilesPath
       agentEnvPath
-      prefetch
       imagePath
       imageHash
-      imageName
       runtime
       imageDrv
       nixBuilderImage
       linuxSystem
       ;
+    driverEntry = imageDriver.driverEntry;
+    prefetch = imageKnobs.prefetch;
+    imageName = imageKnobs.imageName;
     boxEnvVars = preambles.renderBoxEnvVarsList schema;
   };
 
@@ -971,11 +973,11 @@ let
       runtime
       imagePath
       imageHash
-      imageName
       imageDrv
       nixBuilderImage
       linuxSystem
       ;
+    imageName = imageKnobs.imageName;
   };
 
   # The rendered documents as host store-path JSON files. The generated
