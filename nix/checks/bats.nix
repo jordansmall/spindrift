@@ -59,9 +59,11 @@ let
 
   # lib/prompt-contract.nix's forbiddenMarkers list, rendered the same way as
   # promptContractRegistryJsonFile above (issue #2464): entrypoint.sh's
-  # phase_prompt_assembly now unconditionally passes
-  # `--forbidden-markers-registry` too, so every suite exporting
-  # PROMPT_CONTRACT_REGISTRY_FILE below needs this sibling var as well.
+  # install_readonly_guards unconditionally passes
+  # `--forbidden-markers-registry` to `driver-exec readonly-guards` for any
+  # non-BOX_WRITE_ENABLED run (issue #2513: assemble-prompt no longer takes
+  # this flag), so every suite exporting PROMPT_CONTRACT_REGISTRY_FILE below
+  # needs this sibling var as well.
   forbiddenMarkersRegistryJsonFile = pkgs.writeText "forbidden-markers-registry.json" (
     builtins.toJSON (import ../../lib/prompt-contract.nix).forbiddenMarkers
   );

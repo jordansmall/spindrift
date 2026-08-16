@@ -133,8 +133,9 @@ configure_env() {
 
   # lib/prompt-contract.nix's forbiddenMarkers list as JSON (issue #2464),
   # baked at the same sibling-of-/agent/prompts path as the contract files
-  # above, for the `driver-exec assemble-prompt` verb's
-  # `--forbidden-markers-registry` flag.
+  # above, for the `driver-exec readonly-guards` verb's
+  # `--forbidden-markers-registry` flag (issue #2513: assemble-prompt no
+  # longer takes this flag).
   FORBIDDEN_MARKERS_REGISTRY_FILE="${FORBIDDEN_MARKERS_REGISTRY_FILE:-/agent/forbidden-markers-registry.json}"
 
   # _driver_extract_outcome and _driver_session_flags are defined by the Driver

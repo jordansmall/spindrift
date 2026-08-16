@@ -85,9 +85,10 @@
   promptContractRegistryJson,
   # lib/prompt-contract.nix's forbiddenMarkers list as JSON (issue #2464):
   # baked into the image at $out/agent/forbidden-markers-registry.json for
-  # the Go `driver-exec assemble-prompt` verb's
-  # `--forbidden-markers-registry` flag -- a sibling of
-  # promptContractRegistryJson above.
+  # the Go `driver-exec readonly-guards` verb's
+  # `--forbidden-markers-registry` flag (issue #2513: assemble-prompt no
+  # longer takes this flag) -- a sibling of promptContractRegistryJson
+  # above.
   forbiddenMarkersRegistryJson,
   # The schema-derived defaults block (mkHarness's `renderDefaultsPreamble { }`),
   # prepended to the entrypoint so it carries the baked values without

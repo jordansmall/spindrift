@@ -51,10 +51,13 @@ let
   );
 
   # lib/prompt-contract.nix's forbiddenMarkers list, rendered the same way as
-  # promptContractRegistryJsonFile above (issue #2464): entrypoint.sh's
-  # phase_prompt_assembly now unconditionally passes
-  # `--forbidden-markers-registry` too, so this lightweight check needs its
-  # own JSON file alongside promptContractRegistryJsonFile.
+  # promptContractRegistryJsonFile above: this suite's read-only cells
+  # (BOX_WRITE_ENABLED unset, e.g. github-read-only, forgejo-read-only)
+  # exercise agent/entrypoint.sh's install_readonly_guards, which calls
+  # `driver-exec readonly-guards --forbidden-markers-registry`, so this
+  # lightweight check needs its own JSON file alongside
+  # promptContractRegistryJsonFile even though assemble-prompt itself no
+  # longer reads a forbidden-markers registry.
   forbiddenMarkersRegistryJsonFile = pkgs.writeText "forbidden-markers-registry.json" (
     builtins.toJSON (import ../../lib/prompt-contract.nix).forbiddenMarkers
   );
