@@ -9,23 +9,23 @@ package main
 // single-sourced here so the wizard's rendered flake.nix literals can't
 // drift from the schema's own group/nixSubPath taxonomy (issue #2556).
 
-// PathCodeForge is the nix option path for the quickstart wizard's codeForge knob.
-const PathCodeForge = "forge.backend"
+// pathCodeForge is the nix option path for the quickstart wizard's codeForge knob.
+const pathCodeForge = "forge.backend"
 
-// PathForgejoBaseURL is the nix option path for the quickstart wizard's forgejoBaseURL knob.
-const PathForgejoBaseURL = "issues.forgejo.baseURL"
+// pathForgejoBaseURL is the nix option path for the quickstart wizard's forgejoBaseURL knob.
+const pathForgejoBaseURL = "issues.forgejo.baseURL"
 
-// PathGitUserEmail is the nix option path for the quickstart wizard's gitUserEmail knob.
-const PathGitUserEmail = "git.user.email"
+// pathGitUserEmail is the nix option path for the quickstart wizard's gitUserEmail knob.
+const pathGitUserEmail = "git.user.email"
 
-// PathGitUserName is the nix option path for the quickstart wizard's gitUserName knob.
-const PathGitUserName = "git.user.name"
+// pathGitUserName is the nix option path for the quickstart wizard's gitUserName knob.
+const pathGitUserName = "git.user.name"
 
-// PathIssueTracker is the nix option path for the quickstart wizard's issueTracker knob.
-const PathIssueTracker = "issues.tracker"
+// pathIssueTracker is the nix option path for the quickstart wizard's issueTracker knob.
+const pathIssueTracker = "issues.tracker"
 
-// PathRepoSlug is the nix option path for the quickstart wizard's repoSlug knob.
-const PathRepoSlug = "forge.repoSlug"
+// pathRepoSlug is the nix option path for the quickstart wizard's repoSlug knob.
+const pathRepoSlug = "forge.repoSlug"
 
-// PathRuntime is the nix option path for the quickstart wizard's runtime knob.
-const PathRuntime = "infra.runtime"
+// pathRuntime is the nix option path for the quickstart wizard's runtime knob.
+const pathRuntime = "infra.runtime"
