@@ -13,6 +13,7 @@ func TestGatesIssueTrackerReadAxis(t *testing.T) {
 	cases := []struct {
 		name            string
 		trackerAxisRead string
+		issueTracker    string
 		want            map[string]bool
 	}{
 		{
@@ -85,14 +86,42 @@ func TestGatesIssueTrackerReadAxis(t *testing.T) {
 				"ISSUE_TRACKER_FORGEJO": false,
 			},
 		},
+		{
+			// Same version-skew shape as above, but IssueTracker itself --
+			// still forwarded on Env for exactly this fallback (env.go:
+			// 93-101) -- says "local". The fallback must re-derive from
+			// IssueTracker, not hardcode the github/jira arm regardless of
+			// it (issue #2533 review): hardcoding GITHUB here would render
+			// the self-contradictory ISSUE_TRACKER_GITHUB alongside
+			// PR_BODY_LOCAL_NOREF (the PR-body gate below, which already
+			// reads IssueTracker directly and would correctly pick local).
+			name:            "empty TrackerAxisRead with IssueTracker=local falls open to LOCAL",
+			trackerAxisRead: "",
+			issueTracker:    "local",
+			want: map[string]bool{
+				"ISSUE_TRACKER_GITHUB":  false,
+				"ISSUE_TRACKER_LOCAL":   true,
+				"ISSUE_TRACKER_FORGEJO": false,
+			},
+		},
+		{
+			name:            "empty TrackerAxisRead with IssueTracker=forgejo falls open to FORGEJO",
+			trackerAxisRead: "",
+			issueTracker:    "forgejo",
+			want: map[string]bool{
+				"ISSUE_TRACKER_GITHUB":  false,
+				"ISSUE_TRACKER_LOCAL":   false,
+				"ISSUE_TRACKER_FORGEJO": true,
+			},
+		},
 	}
 	for _, tc := range cases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			got := Gates(Env{TrackerAxisRead: tc.trackerAxisRead})
+			got := Gates(Env{TrackerAxisRead: tc.trackerAxisRead, IssueTracker: tc.issueTracker})
 			for k, want := range tc.want {
 				if got[k] != want {
-					t.Errorf("Gates(TrackerAxisRead=%q)[%q] = %v, want %v", tc.trackerAxisRead, k, got[k], want)
+					t.Errorf("Gates(TrackerAxisRead=%q, IssueTracker=%q)[%q] = %v, want %v", tc.trackerAxisRead, tc.issueTracker, k, got[k], want)
 				}
 			}
 		})

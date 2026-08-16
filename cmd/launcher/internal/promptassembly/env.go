@@ -84,9 +84,11 @@ type Env struct {
 	// from (lib/mkHarness.nix: reviewLoopInline = !orchestratorEnabled;
 	// reviewLoopOrchestrator = orchestratorEnabled), rather than Gates
 	// negating/copying OrchestratorEnabled in-box (issue #2533). nix
-	// guarantees exactly one is ever true; this package trusts that
-	// invariant rather than re-validating it -- nothing here rejects an
-	// Env with both true or both false.
+	// guarantees exactly one is ever true, but the two fields cross a
+	// process boundary independently of each other, so Gates (gates.go:
+	// 46-51) repairs both agreeing cases -- both true or both false --
+	// from the live ORCHESTRATOR gate rather than trusting an Env value
+	// that disagrees with itself.
 	ReviewLoopInline       bool // nix-resolved: !OrchestratorEnabled
 	ReviewLoopOrchestrator bool // nix-resolved: OrchestratorEnabled
 
@@ -131,10 +133,12 @@ type Env struct {
 	LocalIssueReference bool // entrypoint.sh: $LOCAL_ISSUE_REFERENCE presence
 
 	// CodeForge selects the CODE_FORGE-backend gate family
-	// (entrypoint.sh: 959-989): OPEN_PR_CREATE_RW_*/FIX_CI_READ_*. Still
-	// carried on Env for non-gate purposes; the resolved backend suffix
-	// itself now arrives pre-resolved via ForgeBackend below (issue
-	// #2533) rather than being re-derived in-box.
+	// (entrypoint.sh: 959-989): OPEN_PR_CREATE_RW_*/FIX_CI_READ_*. The
+	// resolved backend suffix itself now arrives pre-resolved via
+	// ForgeBackend below (issue #2533) rather than being re-derived
+	// in-box on the happy path, but gates_access_forge.go's version-skew
+	// fallback still reads CodeForge directly when ForgeBackend arrives
+	// empty (an older host launcher that never forwarded it).
 	CodeForge string // entrypoint.sh: $CODE_FORGE
 
 	// ForgeBackend is nix's precomputed equivalent of

@@ -38,13 +38,19 @@ func Gates(e Env) map[string]bool {
 	// all -- dispatching against a newer box image leaves both false here.
 	// ORCHESTRATOR_ENABLED itself is a pre-existing boxEnv knob issue #2533
 	// left untouched, so `orchestrator` above still arrives correctly even
-	// under that version skew. When both forwarded fields are false, fall
-	// back to deriving the pairing from the live ORCHESTRATOR gate the same
-	// way entrypoint.sh's old bash negation did, rather than leaving both
-	// off and breaking the exactly-one-true invariant (env.go: 78-91) a
-	// missing forward would otherwise silently violate.
+	// under that version skew. The two forwarded fields cross a process
+	// boundary independently of $ORCHESTRATOR, so version skew can leave
+	// them agreeing with each other instead of only ever both-false: an
+	// older host launcher that never forwards either field leaves both
+	// false, while a forward that's stuck/duplicated could in principle
+	// leave both true. Either way the exactly-one-true invariant
+	// (env.go: 78-91) is broken, so repair both agreeing cases the same
+	// way, by deriving the pairing from the live ORCHESTRATOR gate the same
+	// way entrypoint.sh's old bash negation did, rather than repairing only
+	// the both-false arm and rendering both review-loop sections on a
+	// both-true forward.
 	reviewLoopInline, reviewLoopOrchestrator := e.ReviewLoopInline, e.ReviewLoopOrchestrator
-	if !reviewLoopInline && !reviewLoopOrchestrator {
+	if reviewLoopInline == reviewLoopOrchestrator {
 		reviewLoopInline, reviewLoopOrchestrator = !orchestrator, orchestrator
 	}
 	g["REVIEW_LOOP_INLINE"] = reviewLoopInline

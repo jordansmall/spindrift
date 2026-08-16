@@ -98,9 +98,10 @@
 #                                     neither pair today (see
 #                                     gates_tracker.go's
 #                                     ISSUE_TRACKER_*_READWRITE/READONLY
-#                                     gates, keyed off itWrite=="LOCAL" never
+#                                     gates, keyed off itWrite=="" never
 #                                     matching either "GITHUB" or "FORGEJO"
-#                                     arm).
+#                                     arm -- itWrite is never "LOCAL"; only
+#                                     trackerAxisRead ever takes that value).
 #   trackerAxisFiler         string  this tracker's filer write-mechanism
 #                                     axis value ("GH" or "FORGEJO"); omitted
 #                                     means "GH".
