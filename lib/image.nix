@@ -132,6 +132,10 @@
   skills,
 }:
 let
+  # The baked-skill name list (issue #2532), single-sourced for harnessSkills
+  # below so a skill's name is never hand-typed a second time here.
+  bakedSkills = import ./baked-skills.nix;
+
   # Drop a leading `#!...` line so a complete, standalone-runnable script can be
   # fed to writeShellApplication as its body (it supplies its own shebang).
   stripShebang =
@@ -338,17 +342,13 @@ let
   # Harness-owned skills (issues #2489, #2490): baked into every image
   # unconditionally, independent of the Consumer's own `skills` list, so
   # a Box always has something at /auto-format and /auto-lint to invoke
-  # regardless of consumer skills config.
-  harnessSkills = [
-    {
-      name = "auto-format";
-      src = builtins.readFile ../templates/default/skills/auto-format/SKILL.md;
-    }
-    {
-      name = "auto-lint";
-      src = builtins.readFile ../templates/default/skills/auto-lint/SKILL.md;
-    }
-  ];
+  # regardless of consumer skills config. Derived from lib/baked-skills.nix's
+  # `harnessOwned` rows (issue #2532) rather than hand-typed, so a skill's
+  # name is single-sourced there instead of duplicated here.
+  harnessSkills = builtins.map (s: {
+    inherit (s) name;
+    src = builtins.readFile (../templates/default/skills + "/${s.name}/SKILL.md");
+  }) (builtins.filter (s: s.harnessOwned or false) bakedSkills);
 
   agentFiles = pkgs.runCommand "spindrift-agent-files" { } ''
     mkdir -p $out/agent/prompts
