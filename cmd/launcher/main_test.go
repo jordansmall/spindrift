@@ -1813,24 +1813,22 @@ func TestNewCodeForge_GithubReadWrite_DoesNotImplementBundleRelay(t *testing.T) 
 }
 
 // TestNewCodeForge_GithubReadOnly_SatisfiesCapabilityGate verifies that
-// newCodeForge's production wiring for CODE_FORGE=github +
-// BOX_FORGE_AND_ISSUE_ACCESS=read-only passes checkReadOnlyCapabilityGate end
-// to end: the real adapter now implements both BundleRelay (issue #1918) and
-// DraftPRCreator (issue #1919), closing the gate #1916 declared open in
-// principle for "github + read-only". Supersedes
-// TestNewCodeForge_GithubReadOnly_StillFailsCapabilityGate, which pinned the
-// opposite (still-rejected) expectation while DraftPRCreator was
-// unimplemented.
+// CODE_FORGE=github + ISSUE_TRACKER=github (the default) +
+// BOX_FORGE_AND_ISSUE_ACCESS=read-only passes checkReadOnlyCapabilityGate:
+// github's backend registry row (issue #2526) carries RelayCapable and
+// HostPostingCapable, so the gate — now a registry lookup by name rather
+// than a live interface assertion against a constructed cf/it (issue #2526
+// slice 3) — accepts it. newCodeForge's production wiring is exercised here
+// too (proving it constructs without error for this config), even though
+// the gate itself no longer inspects the value it returns.
 func TestNewCodeForge_GithubReadOnly_SatisfiesCapabilityGate(t *testing.T) {
 	c := minimalValidConfig()
 	c.codeForge = "github"
 	c.boxForgeAndIssueAccess = "read-only"
-	cf := newCodeForge(c, local.SanitizedParent{}, nil)
-	fc := forge.NewFake() // HostPostedCommenter-shaped; stands in for the tracker
-	it := fc.AsIssueFiler()
+	_ = newCodeForge(c, local.SanitizedParent{}, nil)
 
-	if err := checkReadOnlyCapabilityGate(c, cf, it); err != nil {
-		t.Errorf("checkReadOnlyCapabilityGate() with newCodeForge's github read-only wiring = %v, want nil", err)
+	if err := checkReadOnlyCapabilityGate(c); err != nil {
+		t.Errorf("checkReadOnlyCapabilityGate() with CODE_FORGE=github/ISSUE_TRACKER=github, read-only = %v, want nil", err)
 	}
 }
 
