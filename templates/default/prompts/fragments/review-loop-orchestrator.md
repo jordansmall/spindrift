@@ -29,3 +29,8 @@ resolve them here:
    genuinely needs a human: a real design trade-off, work outside this issue's
    scope, or a change too large to fold in without derailing the slice. When
    unsure whether a finding clears that bar, fix it rather than file it.
+
+Before stopping this turn, either right after COMMIT or after OUTCOME per the
+two cases above, write a free-form summary of what you did this pass and what
+remains to `/tmp/pass-summary.md` (outside the repo, never commit) — the next
+pass, if any, is seeded with this path.
