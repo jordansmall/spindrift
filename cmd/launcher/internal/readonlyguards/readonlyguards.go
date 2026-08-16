@@ -83,6 +83,16 @@ type Config struct {
 	// Only required when rows contains at least one Enforce ==
 	// "command-shim" row.
 	ShimDir string
+	// SkipGitHook, when true, makes Install treat every git-hook row as
+	// though it weren't present at all: no error even when RepoDir is
+	// empty, no hook rendered or installed, Result.HookInstalled stays
+	// false. Command-shim rows are still processed normally regardless.
+	// entrypoint.sh's install_readonly_guards sets this for a read-only Box
+	// whose hand-off is a real `git push` (outbox-incapable, e.g. forgejo):
+	// blocking that push locally would break the only hand-off such a Box
+	// has, but the command-shim guard (gh/fj write-subcommand rejection)
+	// carries no such risk and should still install (issue #2509).
+	SkipGitHook bool
 	// RealBinary resolves argv0's real, absolute binary path -- called
 	// once per command-shim argv0 group, BEFORE ShimDir is ever prepended
 	// to PATH by a caller, mirroring entrypoint.sh's own
@@ -121,7 +131,7 @@ func Install(rows []promptassembly.ForbiddenMarkerRow, cfg Config, out io.Writer
 	}
 	var result Result
 
-	if hookRows := filterRows(rows, enforceGitHook); len(hookRows) > 0 {
+	if hookRows := filterRows(rows, enforceGitHook); len(hookRows) > 0 && !cfg.SkipGitHook {
 		if cfg.RepoDir == "" {
 			return result, fmt.Errorf("readonlyguards: install git-hook guard: RepoDir is empty")
 		}
