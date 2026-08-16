@@ -56,6 +56,20 @@ type RunState struct {
 	// has to parse narrative out of a summary file to find dispositions
 	// (the file-boundary firewall issue #2550 requires).
 	DispositionsPath string `json:"dispositions_path"`
+	// DispositionsLogPath is the path to the per-run, append-only
+	// dispositions log (issue #2550): every fix pass's own fresh
+	// DispositionsPath content, appended one "## Round N" section at a
+	// time, mirroring FindingsLogPath's own convention. A won't-fix entry
+	// is never dropped or collapsed by this append -- the log is expected
+	// to grow in entry count across rounds, which stays safe only because
+	// review-loop-orchestrator.md's own contract keeps every entry a
+	// terse reference (commit SHA, file path, issue number) rather than
+	// restated diff/file/transcript content. seedReviewPromptFromState
+	// reads this log, not the single latest DispositionsPath file, so a
+	// round-N review pass sees every won't-fix decided so far, not just
+	// the most recent round's. Empty until the first fix pass appends to
+	// it.
+	DispositionsLogPath string `json:"dispositions_log_path,omitempty"`
 	// ReviewFindings is the code-owned review pass's own final message --
 	// the "VERDICT: ..." line plus its Blocking/Non-blocking sections,
 	// verbatim -- recorded here (distinct from the bare LastVerdict word)
@@ -126,7 +140,8 @@ func (s RunState) IsEmpty() bool {
 	// field actually seeds. Including it here would make IsEmpty return
 	// false for a state whose only set field is DispositionsPath, and
 	// seedPromptFromState would then render a "Run-state handoff" section
-	// with no bullets in it at all.
+	// with no bullets in it at all. DispositionsLogPath joins it for the
+	// identical reason: only seedReviewPromptFromState reads it.
 	return s.LastVerdict == "" &&
 		s.ScoutBriefPath == "" &&
 		s.PassSummaryPath == "" &&
