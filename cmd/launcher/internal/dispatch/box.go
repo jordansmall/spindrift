@@ -85,9 +85,16 @@ func (d *Dispatch) Run() Result {
 	logPath := d.logPath()
 	// snapshotPath is set once, on this Run() call's true first attempt
 	// (the same guard as quarantinePriorRunLogs/markRunLineage below), and
-	// closed over by the retry callback so every re-dispatch this Run()
-	// makes -- a hold or backoff re-attempt -- reuses the same frozen file
-	// instead of re-resolving (and potentially re-writing) it.
+	// closed over by the retry callback so every hold/backoff re-attempt
+	// this Run() makes (resumeAfterHold == true) reuses the same frozen
+	// file instead of re-resolving (and potentially re-writing) it. A
+	// quarantineErr retry is the one exception: it re-enters with
+	// resumeAfterHold == false (retry.go), the same as this Run() call's
+	// true first attempt, because quarantineErr only ever fires from
+	// inside this still-pre-dispatch block -- so a transient failure in
+	// quarantinePriorRunLogs, markRunLineage, or writeIssueSnapshot itself
+	// causes all three to re-run, briefly reopening the freeze window this
+	// snapshot exists to close.
 	var snapshotPath string
 	return d.dispatchWithRetry(logPath, func(resumeAfterHold bool) error {
 		fmt.Fprintf(d.humanOut(), "    -> #%s: %s\n", d.number, d.title)
@@ -111,9 +118,11 @@ func (d *Dispatch) Run() Result {
 			}
 			// The issue-read snapshot is frozen once at the true start of
 			// this logical run (issue #2547), same lifetime as the
-			// lineage marker -- and, like it, skipped for a research
-			// dispatch (ADR 0022): research's own issue-read fragments
-			// stay live, ungated by this file.
+			// lineage marker above -- but unlike quarantinePriorRunLogs
+			// and markRunLineage, which run unconditionally, only the
+			// snapshot write itself is skipped for a research dispatch
+			// (ADR 0022): research's own issue-read fragments stay live,
+			// ungated by this file.
 			if d.cfg.Kind != "research" {
 				path, err := writeIssueSnapshot(d.cfg.IssueSnapshot, d.pwd, d.number)
 				if err != nil {
