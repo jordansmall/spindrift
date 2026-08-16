@@ -4,6 +4,7 @@
 # cmd/launcher/internal/driver/drivernames_gen.go,
 # cmd/launcher/subcommands_gen.go,
 # cmd/launcher/internal/outcome/status_gen.go,
+# cmd/launcher/internal/backend/registry_gen.go,
 # tests/box_env_gen.bash, and the generated section of
 # templates/default/flake.nix's commented-out `settings` example, from their
 # respective Nix sources, and writes them into the working tree. Calls the
@@ -44,6 +45,8 @@ let
   researchStatusPipe = renderers.renderOutcomeStatusPipe (
     builtins.filter (s: s != "blocked") (promptContract.outcomeStatusesFor "research")
   );
+  backendRegistry = import ../lib/backends/default.nix;
+  backendRegistryFile = renderers.renderBackendRegistryGo backendRegistry;
   inherit (pkgs.lib) escapeShellArg;
 in
 pkgs.writeShellApplication {
@@ -88,6 +91,8 @@ pkgs.writeShellApplication {
     write cmd/launcher/subcommands_gen.go ${escapeShellArg subcommandsFile}
     write cmd/launcher/internal/outcome/status_gen.go ${escapeShellArg outcomeStatusGoFile}
     gofmt -w "$root/cmd/launcher/internal/outcome/status_gen.go"
+    write cmd/launcher/internal/backend/registry_gen.go ${escapeShellArg backendRegistryFile}
+    gofmt -w "$root/cmd/launcher/internal/backend/registry_gen.go"
     write tests/box_env_gen.bash ${escapeShellArg boxEnvFixture}
     write_between templates/default/flake.nix \
       ${escapeShellArg "            # BEGIN GENERATED SETTINGS EXAMPLE -- nix run .#regen -- DO NOT EDIT"} \
