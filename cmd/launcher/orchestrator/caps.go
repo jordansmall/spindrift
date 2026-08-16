@@ -212,3 +212,23 @@ func validateMaxParallelWorkers(maxParallelWorkers int) error {
 	}
 	return nil
 }
+
+// validateBudgetCaps rejects a negative -max-budget-tokens/-max-budget-usd
+// value (issue #2694). Unlike -max-parallel-workers above, 0 IS a
+// legitimate value here -- budget's own "disabled" sentinel, matching
+// maxReviewRounds/maxSlices' convention (and MAX_BUDGET_TOKENS/
+// MAX_BUDGET_USD's existing selfHealGate one) -- but there is no meaningful
+// negative budget, and passmachine's own budgetExceeded compares with >=, so
+// a negative cap would silently behave exactly like a disabled one instead
+// of erroring: a fast, attributed startup failure here is better than that
+// silent, misleading no-op, mirroring validateMaxParallelWorkers' own
+// fatal-on-nonsense-value precedent just above.
+func validateBudgetCaps(maxBudgetTokens int, maxBudgetUSD float64) error {
+	if maxBudgetTokens < 0 {
+		return fmt.Errorf("orchestrator: -max-budget-tokens=%d must be >= 0 (0 disables the cap)", maxBudgetTokens)
+	}
+	if maxBudgetUSD < 0 {
+		return fmt.Errorf("orchestrator: -max-budget-usd=%v must be >= 0 (0 disables the cap)", maxBudgetUSD)
+	}
+	return nil
+}

@@ -97,3 +97,37 @@ func TestValidateMaxParallelWorkersAcceptsShippedDefault(t *testing.T) {
 		t.Errorf("validateMaxParallelWorkers(%d) = %v, want nil (shipped default must be valid)", defaultMaxParallelWorkers, err)
 	}
 }
+
+// TestValidateBudgetCaps guards the fail-fast check on -max-budget-tokens/
+// -max-budget-usd (issue #2694 review finding): unlike
+// -max-parallel-workers, 0 IS accepted here -- budget's own legitimate
+// "disabled" sentinel -- but a negative value is rejected, since
+// budgetExceeded's own >= comparison would otherwise silently never fire
+// against it, behaving exactly like (and so masking) a disabled cap.
+func TestValidateBudgetCaps(t *testing.T) {
+	tests := []struct {
+		name            string
+		maxBudgetTokens int
+		maxBudgetUSD    float64
+		wantErr         bool
+	}{
+		{"both zero (disabled) is accepted", 0, 0, false},
+		{"positive tokens, zero usd is accepted", 100, 0, false},
+		{"zero tokens, positive usd is accepted", 0, 4.44, false},
+		{"negative tokens is rejected", -1, 0, true},
+		{"negative usd is rejected", 0, -0.01, true},
+		{"both negative is rejected", -1, -0.01, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateBudgetCaps(tt.maxBudgetTokens, tt.maxBudgetUSD)
+			if tt.wantErr && err == nil {
+				t.Errorf("validateBudgetCaps(%d, %v) = nil, want error", tt.maxBudgetTokens, tt.maxBudgetUSD)
+			}
+			if !tt.wantErr && err != nil {
+				t.Errorf("validateBudgetCaps(%d, %v) = %v, want nil", tt.maxBudgetTokens, tt.maxBudgetUSD, err)
+			}
+		})
+	}
+}
