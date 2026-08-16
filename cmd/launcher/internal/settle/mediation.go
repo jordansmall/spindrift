@@ -86,25 +86,6 @@ func NewMediation(cf forge.CodeForge, it forge.IssueTracker, outboxDir func(num 
 	return m
 }
 
-// RequiredCapabilityError reports the missing capability, if any, that
-// BOX_FORGE_AND_ISSUE_ACCESS=read-only's startup capability gate requires of
-// codeForgeName's Code Forge: forge.BundleRelay unconditionally, and — only
-// when prShaped (the forge also implements forge.PRForge) —
-// forge.DraftPRCreator and forge.BundleCommitSubjects. Returns nil when every
-// required capability is present.
-func (m *Mediation) RequiredCapabilityError(codeForgeName string, prShaped bool) error {
-	if m.br == nil {
-		return fmt.Errorf("BOX_FORGE_AND_ISSUE_ACCESS=read-only: the selected CODE_FORGE=%q does not implement bundle-relay (forge.BundleRelay) for the Box's finished branch hand-off; only CODE_FORGE=local implements it today", codeForgeName)
-	}
-	if prShaped && m.dpc == nil {
-		return fmt.Errorf("BOX_FORGE_AND_ISSUE_ACCESS=read-only: the selected CODE_FORGE=%q does not implement host-side draft-PR-create (forge.DraftPRCreator); not yet available on CODE_FORGE=github", codeForgeName)
-	}
-	if prShaped && m.bcs == nil {
-		return fmt.Errorf("BOX_FORGE_AND_ISSUE_ACCESS=read-only: the selected CODE_FORGE=%q does not implement commit-subjects (forge.BundleCommitSubjects), the reconstructed-PR fallback the host-mediated hand-off needs when a Box leaves no usable PR-intent line", codeForgeName)
-	}
-	return nil
-}
-
 // Open relays num's finished branch out of the outbox and opens (or adopts)
 // a draft PR on it, resolving title/body from result's PR-intent line, or —
 // per fallback — a reconstructed-from-commits or issue-derived default when
