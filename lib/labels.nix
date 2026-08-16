@@ -1,9 +1,11 @@
 # The label registry (issue #2528): the one root every label family the
 # Harness writes hangs off of -- work-tier (operator-configurable via
 # lib/env-schema.nix), research-tier (ADR 0022, fixed names), the
-# researchVerdicts submitted by lib/research-verdicts.nix's defaultVerdicts,
+# researchVerdicts sourced from lib/research-verdicts.nix's defaultVerdicts,
 # priority-tier (ADR 0040), the ambiguous-spec label, the local-only
-# recoverable marker, and the trigger-only vocabulary. Rendered into
+# recoverable marker, the reviewFinding provenance label the Filer creates
+# directly (never through doctor), and the trigger-only vocabulary. Rendered
+# into
 # cmd/launcher/internal/doctor/labelmeta_gen.go by lib/renderers.nix's
 # renderLabelRegistryGo, guarded against drift by
 # nix/checks/schema-drift.nix's label-registry-gen check, written by
@@ -176,11 +178,35 @@ in
     }
   ];
 
+  # Review-finding provenance: the label the Filer applies to every issue it
+  # files from a non-blocking review finding (issue #393, ADR 0041). Written
+  # by cmd/launcher/internal/settle/issue_intent.go's issueIntentLabels (the
+  # Launcher's own fixed, non-agent-trusted label set for
+  # SPINDRIFT_ISSUE_INTENT filing) and created directly by the Filer prompt
+  # (templates/default/prompts/fragments/filer-label-direct.md /
+  # filer-label-direct-forgejo.md) via a bare `gh label create`/REST call --
+  # never through doctor.Run(), so (like `recoverable` above) it must NOT be
+  # rendered into TriageLabelMeta: doctor never probes or offers to create
+  # it, and folding it into that map would collide its color
+  # (d4c5f9, matching what the prompt fragments already hardcode) with
+  # agent-research-unclear's and trip
+  # TestTriageLabelMeta_ColorsAreDistinct. Carried here so the registry
+  # covers every label family the Harness writes (issue #2528 AC1), and so a
+  # rename of this literal in either fragment or in issue_intent.go without a
+  # matching registry update is something a future check can catch.
+  reviewFinding = [
+    {
+      role = "ReviewFinding";
+      name = "agent-review-finding";
+      color = "d4c5f9";
+      description = "Filed from a non-blocking review finding";
+    }
+  ];
+
   # Trigger-only vocabulary: fires a workflow dispatch/recover run; written
   # by the workflows (self-clearing on claim), never created or colored by
-  # doctor. A later slice (issue #2528, parity-check extension) sources
-  # nix/checks/dispatch-labels.nix's requiredLabels from this instead of a
-  # locally hardcoded duplicate.
+  # doctor. nix/checks/dispatch-labels.nix's requiredLabels sources this list
+  # directly instead of a locally hardcoded duplicate.
   triggerOnly = [
     "agent-trigger"
     "agent-recover"
