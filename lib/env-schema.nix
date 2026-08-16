@@ -596,7 +596,7 @@ in
     group = "forge";
     flag = "box-access";
     default = "read-write";
-    doc = "whether the Box writes to the Code Forge and Issue Tracker directly (read-write) or the launcher host-mediates every write instead (read-only), a third axis orthogonal to CODE_FORGE and ISSUE_TRACKER (issue #1914); read-only is gated at startup by capability — permitted only when the selected forge implements bundle-relay and host-side draft-PR-create and the selected tracker implements host-posted comments, otherwise the launcher exits with a startup error naming the missing seam; local and github backends both satisfy the gate today (ADR extending 0032/0033 to github, docs/adr/0034-host-mediated-github-forge-and-issue-access.md)";
+    doc = "whether the Box writes to the Code Forge and Issue Tracker directly (read-write) or the launcher host-mediates every write instead (read-only), a third axis orthogonal to CODE_FORGE and ISSUE_TRACKER (issue #1914); read-only is coherence-checked against the selected forge/tracker's registry capability bits at nix build (Consumer eval) time (issue #2526) — permitted only when the selected forge implements bundle-relay and host-side draft-PR-create and the selected tracker implements host-posted comments, otherwise the build throws naming the missing seam; local, github, and forgejo backends all satisfy the check today (ADR extending 0032/0033 to github, docs/adr/0034-host-mediated-github-forge-and-issue-access.md); the launcher's own startup gate now only backstops a runtime override of this value past what nix already validated";
     choices = [
       "read-write"
       "read-only"

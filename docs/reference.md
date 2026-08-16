@@ -865,7 +865,7 @@ exceptions.
 | `CODE_FORGE`              | `github` (baked)       | code-landing backend: `github` (open PR, watch CI, merge), `git` (push-only to `CODE_FORGE_REMOTE_URL`; no PR, CI-watch, or merge gate — see [ADR 0013](../docs/adr/0013-issue-tracker-and-code-forge-are-independent-seams.md)), `local` (host-mediated landing onto the Accumulation repo's Integration branch; no PR, CI-watch, or network — see [ADR 0033](../docs/adr/0033-host-mediated-local-code-forge.md)), or `forgejo` (open a PR via `fj pr create`, watch the CI rollup, and rebase-merge under `MERGE_MODE` on a Forgejo/Gitea instance authenticated by `FORGEJO_TOKEN` — the second full `PRForge` backend beside `github`; see [ADR 0038](../docs/adr/0038-the-forgejo-backend-decision-set.md)) |
 | `CODE_FORGE_REMOTE_URL`   | — (required when `CODE_FORGE=git`) | plain git remote URL to clone from and push to (self-hosted git, gitea, GitLab-without-MRs, a bare server repo) |
 | `CODE_FORGE_ACCUMULATION_REPO_DIR` | `.spindrift/accum.git` under the launcher's working directory when `CODE_FORGE=local` (auto-created and seeded); an explicit value overrides it | host path to the bare Accumulation repo, mounted read-only into the Box and landed into host-side |
-| `BOX_FORGE_AND_ISSUE_ACCESS` | `read-write` (baked)   | a third axis, orthogonal to `CODE_FORGE`/`ISSUE_TRACKER` (issue #1914): `read-write` (the Box writes directly, unchanged) or `read-only` (the Launcher host-mediates every write instead — see [Read-only Box](#read-only-box-box_forge_and_issue_accessread-only)), gated at startup by capability — `read-only` is permitted only when the selected forge implements bundle-relay and host-side draft-PR-create and the selected tracker implements host-posted comments; `local` and `github` both satisfy the gate today |
+| `BOX_FORGE_AND_ISSUE_ACCESS` | `read-write` (baked)   | a third axis, orthogonal to `CODE_FORGE`/`ISSUE_TRACKER` (issue #1914): `read-write` (the Box writes directly, unchanged) or `read-only` (the Launcher host-mediates every write instead — see [Read-only Box](#read-only-box-box_forge_and_issue_accessread-only)), coherence-checked against the selected forge/tracker's registry capability bits at `nix build` (Consumer eval) time (issue #2526) — `read-only` is permitted only when the selected forge implements bundle-relay and host-side draft-PR-create and the selected tracker implements host-posted comments; `local`, `github`, and `forgejo` all satisfy the check today; a Go startup gate remains only as a backstop for a runtime override past what nix already validated |
 | `LABEL`                   | `ready-for-agent` (baked) | issues to pick up                     |
 | `ISSUE_NUMBER`            | — (empty = discover)   | dispatch only this one issue, bypassing the `LABEL` query (per-run only; not bakeable) |
 | `ISSUE_TRACKER`           | `github` (baked)       | IssueTracker backend: `github`, `local` (private Markdown + YAML frontmatter files — see [Local issue tracker](#local-issue-tracker-issue_trackerlocal)), `jira`, or `forgejo` (see [Issue Tracker backends](#issue-tracker-backends)) |
@@ -2511,12 +2511,19 @@ create`, fails, and the main agent falls back to pasting the findings into
 the PR body) rather than switching to the relay — the relay only activates
 once `read-only` and `ORCHESTRATOR_ENABLED` are both true.
 
-This is gated at startup by capability, not by `CODE_FORGE`/`ISSUE_TRACKER`
-value alone: the selected forge must implement bundle-relay and host-side
+This is checked by capability, not by `CODE_FORGE`/`ISSUE_TRACKER` value
+alone: the selected forge must implement bundle-relay and host-side
 draft-PR-create, and the selected tracker must implement host-posted
-comments, or the launcher exits with a startup error naming the missing
-seam. `local` satisfies the gate by construction (there is no other way for
-it to work); `github` satisfies it as of issue #1919. `read-write` is
+comments. mkHarness's `readOnlyCapabilityOk` eval assert (issue #2526)
+enforces this at `nix build` (Consumer eval) time, before an image can ever
+exist, reading the same backend-registry capability bits the launcher's own
+`checkReadOnlyCapabilityGate` checks; a mismatched combination throws at
+build time naming the missing seam. The launcher's Go-level gate survives
+only as a backstop against a *runtime* override of
+`BOX_FORGE_AND_ISSUE_ACCESS`/`CODE_FORGE`/`ISSUE_TRACKER` past what nix
+already validated — it exits with a startup error naming the missing seam in
+that case. `local` satisfies the check by construction (there is no other
+way for it to work); `github` satisfies it as of issue #1919. `read-write` is
 unaffected either way — it never inspects these capabilities.
 
 Inside the Box, the write-enabled-vs-not decision is resolved once,
