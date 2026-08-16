@@ -1075,6 +1075,7 @@ in
         import ../../lib/mkHarness.nix {
           inherit nixpkgs system;
           defaults = {
+            issueTracker = "jira";
             jiraStatusMapping = builtins.toJSON { bogusKey = "Done"; };
           };
           packages = p: [ p.hello ];
@@ -1082,7 +1083,7 @@ in
       );
     in
     assert assertMsg (!result.success)
-      "mkharness-jira-status-mapping-guard: expected mkHarness to reject a direct-caller `defaults.jiraStatusMapping` with an unknown key (\"bogusKey\", not a member of lib/jira-status-mapping.nix's validKeys), but it evaluated successfully";
+      "mkharness-jira-status-mapping-guard: expected mkHarness to reject a direct-caller `defaults.jiraStatusMapping` with an unknown key (\"bogusKey\", not a member of lib/jira-status-mapping.nix's validKeys) under ISSUE_TRACKER=jira, but it evaluated successfully";
     pkgs.runCommand "mkharness-jira-status-mapping-guard" { } "touch $out";
 
   # The gate-not-triggered counterpart (mirrors
@@ -1098,6 +1099,7 @@ in
         import ../../lib/mkHarness.nix {
           inherit nixpkgs system;
           defaults = {
+            issueTracker = "jira";
             jiraStatusMapping = builtins.toJSON { inProgress = "In Progress"; };
           };
           packages = p: [ p.hello ];
@@ -1105,8 +1107,32 @@ in
       );
     in
     assert assertMsg result.success
-      "mkharness-jira-status-mapping-guard-not-triggered: expected mkHarness to accept a direct-caller `defaults.jiraStatusMapping` with only valid keys (\"inProgress\"), but it failed to evaluate";
+      "mkharness-jira-status-mapping-guard-not-triggered: expected mkHarness to accept a direct-caller `defaults.jiraStatusMapping` with only valid keys (\"inProgress\") under ISSUE_TRACKER=jira, but it failed to evaluate";
     pkgs.runCommand "mkharness-jira-status-mapping-guard-not-triggered" { } "touch $out";
+
+  # Proves the ISSUE_TRACKER gate itself (lib/mkHarness.nix's
+  # jiraStatusMappingOk): a non-jira tracker never reaches
+  # backend.go's jira.ParseStatusMapping call, so a stale/typoed
+  # JIRA_STATUS_MAPPING left over from a prior ISSUE_TRACKER=jira
+  # configuration must not fail a github-tracker build.
+  mkharness-jira-status-mapping-guard-non-jira-tracker-not-triggered =
+    let
+      inherit (pkgs.lib) assertMsg;
+      result = builtins.tryEval (
+        import ../../lib/mkHarness.nix {
+          inherit nixpkgs system;
+          defaults = {
+            issueTracker = "github";
+            jiraStatusMapping = builtins.toJSON { bogusKey = "Done"; };
+          };
+          packages = p: [ p.hello ];
+        }
+      );
+    in
+    assert assertMsg result.success
+      "mkharness-jira-status-mapping-guard-non-jira-tracker-not-triggered: expected mkHarness to accept a direct-caller `defaults.jiraStatusMapping` with an unknown key under ISSUE_TRACKER=github (the knob is dead config there), but it failed to evaluate";
+    pkgs.runCommand "mkharness-jira-status-mapping-guard-non-jira-tracker-not-triggered" { }
+      "touch $out";
 
   # tests/helper.bash's set_box_env fixture must export every boxEnv = true
   # schema knob, so the entrypoint-*.bats suites exercise the same defaults the nix
