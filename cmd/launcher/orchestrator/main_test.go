@@ -163,6 +163,42 @@ exit 0
 	}
 }
 
+// TestMainRunAcceptsArgvShapeFlags verifies mainRun's FlagSet declares all 7
+// argv-shape flags entrypoint.sh's orchestrator invocation always passes
+// (agent/entrypoint.sh's $_driver_invoker call, issue #2534 follow-up): a
+// FlagSet missing any of these fails fs.Parse with "flag provided but not
+// defined" and mainRun returns exit code 2 before any driver-exec pass runs.
+// This pins that an orchestrator-driven run works at all, not just that the
+// flags happen to be accepted.
+func TestMainRunAcceptsArgvShapeFlags(t *testing.T) {
+	dir := t.TempDir()
+	callLog := filepath.Join(dir, "calls.log")
+	writeFakeDriverExec(t, dir, callLog, `printf 'SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=done nonce=abc\n'
+exit 0
+`)
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	argv := append(singlePassFakeDriverArgv(dir),
+		"-argv-prompt-style", "flag",
+		"-argv-prompt-flag", "-p",
+		"-argv-model-flag", "--model",
+		"-argv-model-omit-empty",
+		"-argv-agents-flag", "--agents",
+		"-argv-effort-flag", "--effort",
+		"-argv-order", "prompt model",
+	)
+
+	var stdout, stderr bytes.Buffer
+	rc := mainRun(argv, &stdout, &stderr)
+
+	if rc == 2 {
+		t.Fatalf("mainRun exit code = 2 (flag parse failure), stderr: %q -- FlagSet must declare all 7 argv-shape flags", stderr.String())
+	}
+	if rc != 0 {
+		t.Fatalf("mainRun exit code = %d, want 0 (stderr: %q)", rc, stderr.String())
+	}
+}
+
 // TestMainRunPositiveMaxParallelWorkersFlagBoundsWorkerConcurrency proves
 // the whole -max-parallel-workers pipeline end to end: the flag parsed by
 // mainRun (main.go), threaded into config.maxParallelWorkers (the
