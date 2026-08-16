@@ -1037,6 +1037,13 @@ func recoverByNumber(c config, it forge.IssueTracker, cf forge.CodeForge, pwd st
 		}
 		d := f.New(iss.number, iss.title)
 		defer d.Close()
+		// SettleRelayedBranch's own gate can reach CumulativeUsage/
+		// UsageReport/Fix (selfHeal -> selfHealGate, adopt_relayed.go) on
+		// this same never-Run()'d Dispatch -- see the SettleAdopted arm's
+		// identical EnsureRunLineage call below for why (issue #2575).
+		if err := d.EnsureRunLineage(); err != nil {
+			fmt.Fprintf(os.Stderr, "    ?? #%s: ensure run lineage: %v\n", issueNum, err)
+		}
 		result := dispatch.Result{Resolved: resolved}
 		sit := s.SituationFor(iss.number, res.Found, result)
 		if s.SettleRelayedBranch(d, iss.number, 0, sit, result) {
@@ -1050,6 +1057,15 @@ func recoverByNumber(c config, it forge.IssueTracker, cf forge.CodeForge, pwd st
 	}
 	d := f.New(iss.number, iss.title)
 	defer d.Close()
+	// This Dispatch adopts an already-open PR and never calls Run() itself
+	// (SettleAdopted drives it straight into CumulativeUsage/UsageReport/Fix
+	// instead), so it never gets Run's own quarantine-prior-run-logs
+	// guarantee for free. EnsureRunLineage establishes the same guarantee
+	// explicitly, once, before any of those three ever reads a pass log
+	// (issue #2575).
+	if err := d.EnsureRunLineage(); err != nil {
+		fmt.Fprintf(os.Stderr, "    ?? #%s: ensure run lineage: %v\n", issueNum, err)
+	}
 	s.SettleAdopted(d, iss.number, 0, res.URL)
 	return nil
 }

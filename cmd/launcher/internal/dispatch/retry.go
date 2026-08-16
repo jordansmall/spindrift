@@ -75,12 +75,44 @@ func (d *Dispatch) dispatchWithRetry(logPath string, once func(resumeAfterHold b
 				// dispatched anything, so logPath may still hold the exact
 				// prior run's content it was trying to move aside. Neither
 				// settledOutcome nor ClassifyTransient may be trusted
-				// against it here (issue #2575): report a definite failure
-				// instead of risking a silent settle on someone else's
-				// verdict, and don't retry -- a quarantine failure is a
-				// local filesystem problem, not a transient box/API one.
+				// against it here (issue #2575): never fall through to
+				// either below -- `continue` retries with the same
+				// backoff any other transient uses instead.
+				//
+				// It still must not give up on the FIRST failure the way a
+				// hard Result{Success:false} would: a local filesystem
+				// hiccup (a lock held for a moment, a transient EACCES) is
+				// exactly the kind of thing a short retry clears, and
+				// failing the whole dispatch outright over it -- never
+				// running the agent at all -- is a strictly worse outcome
+				// than the mis-charge risk a stray uncounted pass log
+				// carries (the same "contributes nothing rather than
+				// aborting" posture #2575's own budget-gate degrade takes
+				// on a pass with no result event).
+				//
+				// prevRedispatched/prevWasHold are deliberately left
+				// untouched here: no box attempt happened yet, so the next
+				// retry must still see resumeAfterHold=false on its next
+				// call -- rerunning quarantine fresh (Run's own
+				// `!resumeAfterHold` guard) rather than skipping it, and
+				// never setting RESUME_AFTER_HOLD on a session that never
+				// started.
 				fmt.Fprintf(os.Stderr, "    ?? #%s: %v\n", d.number, qErr)
-				return Result{Success: false}
+				transientCount++
+				if transientCount > d.cfg.TransientRetryMax {
+					fmt.Fprintf(d.humanOut(), "    !! #%s: quarantine retry cap exhausted (%d)\n",
+						d.number, d.cfg.TransientRetryMax)
+					return Result{Success: false}
+				}
+				lb := retry.LinearBackoff{
+					Unit:  time.Duration(d.cfg.TransientBackoffSecs) * time.Second,
+					Clock: d.clock,
+				}
+				backoff := lb.Duration(transientCount)
+				fmt.Fprintf(d.humanOut(), "    .. #%s: quarantine failed; retry %d/%d in %s\n",
+					d.number, transientCount, d.cfg.TransientRetryMax, backoff)
+				d.clock.Sleep(backoff)
+				continue
 			}
 
 			if result, ok := d.settledOutcome(logPath); ok {
