@@ -1,1 +1,1 @@
-  cat /issues/${ISSUE_NUMBER}.md                  # acceptance criteria (follow Blocked-by/parent links)
+  cat /issue-snapshot.md                          # acceptance criteria, last 10 comments, captured at box start

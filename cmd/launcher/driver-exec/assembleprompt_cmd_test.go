@@ -340,13 +340,19 @@ func TestRunAssemblePrompt_ValidatorWarnStillWritesOutputs(t *testing.T) {
 // BOX_TRACKER_AXIS_READ/BOX_TRACKER_AXIS_WRITE/BOX_TRACKER_AXIS_FILER env
 // vars reach promptassembly.Env's
 // TrackerAxisRead/TrackerAxisWrite/TrackerAxisFiler fields (issue #2533
-// slice 2): setting BOX_TRACKER_AXIS_READ=FORGEJO fires the
-// ISSUE_TRACKER_FORGEJO gate (gates_tracker.go reads the axis fields
-// directly, no longer re-deriving them from ISSUE_TRACKER), rendering
-// issue-read-forgejo.md's distinctive "fj issue view" text instead of
-// issue-read-github.md's "gh issue view" -- even though ISSUE_TRACKER
-// itself is left at "github", since checkCoveredCell no longer re-validates
-// IssueTracker (issue #2540) and the axis fields are the sole gate input.
+// slice 2): setting BOX_TRACKER_AXIS_READ/WRITE/FILER=FORGEJO fires the
+// ISSUE_TRACKER_FORGEJO/ISSUE_TRACKER_FORGEJO_READWRITE gates
+// (gates_tracker.go reads the axis fields directly, no longer re-deriving
+// them from ISSUE_TRACKER) -- even though ISSUE_TRACKER itself is left at
+// "github", since checkCoveredCell no longer re-validates IssueTracker
+// (issue #2540) and the axis fields are the sole gate input.
+// Issue #2547 re-points issue-read-github.md/issue-read-forgejo.md at the
+// same frozen /issue-snapshot.md, so they no longer distinguish trackers;
+// this asserts that convergence directly, then proves the FORGEJO axis
+// still reaches a gate that does distinguish trackers --
+// ISSUE_TRACKER_FORGEJO_READWRITE's issue-blocked-comment-forgejo.md
+// ("fj issue comment"), unaffected by issue #2547, instead of
+// issue-blocked-comment-github.md's "gh issue comment".
 func TestRunAssemblePrompt_TrackerAxisEnvVarsReachGates(t *testing.T) {
 	dir := t.TempDir()
 	promptOutput := filepath.Join(dir, "prompt.txt")
@@ -369,11 +375,17 @@ func TestRunAssemblePrompt_TrackerAxisEnvVarsReachGates(t *testing.T) {
 		t.Fatalf("read prompt output: %v", err)
 	}
 	prompt := string(promptBytes)
-	if !strings.Contains(prompt, "fj issue view") {
-		t.Errorf("prompt does not contain %q (forgejo issue-read fragment), want it rendered when --tracker-axis-read=FORGEJO", "fj issue view")
+	if !strings.Contains(prompt, "cat /issue-snapshot.md") {
+		t.Errorf("prompt does not contain %q (issue-read-forgejo.md's frozen snapshot read), want it rendered when --tracker-axis-read=FORGEJO", "cat /issue-snapshot.md")
 	}
-	if strings.Contains(prompt, "gh issue view") {
-		t.Errorf("prompt contains %q (github issue-read fragment), want it absent when --tracker-axis-read=FORGEJO", "gh issue view")
+	if strings.Contains(prompt, "gh issue view") || strings.Contains(prompt, "fj issue view") {
+		t.Errorf("prompt contains a live gh/fj issue view call, want only the frozen snapshot read when --tracker-axis-read=FORGEJO")
+	}
+	if !strings.Contains(prompt, "fj issue comment") {
+		t.Errorf("prompt does not contain %q (forgejo blocked-comment fragment), want it rendered when --tracker-axis-write=FORGEJO", "fj issue comment")
+	}
+	if strings.Contains(prompt, "gh issue comment") {
+		t.Errorf("prompt contains %q (github blocked-comment fragment), want it absent when --tracker-axis-write=FORGEJO", "gh issue comment")
 	}
 }
 

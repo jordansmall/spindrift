@@ -471,11 +471,23 @@ let
       var = "PR_BODY_LOCAL_NOREF_STEP";
     }
     # The issue-read step (issue #1691, ADR 0032; forgejo third case added
-    # #1963): local issues are read from the read-only /issues mount instead
-    # of gh issue view, and forgejo issues are read via fj issue view instead.
-    # ISSUE_TRACKER_GITHUB / ISSUE_TRACKER_LOCAL / ISSUE_TRACKER_FORGEJO
-    # (agent/entrypoint.sh's phase_prompt_assembly precompute block, derived
-    # from ISSUE_TRACKER) are shared by all four per-prompt row triples below --
+    # #1963). The issue-read and review-issue-read row pairs now read one
+    # host-written snapshot file (issue #2547, /issue-snapshot.md, mounted
+    # read-only into the Box by Dispatch.Run at true-first-attempt)
+    # regardless of tracker, so all three of their fragments read that one
+    # file; the github and forgejo pair render identical text, while the
+    # local pair additionally keeps its /issues-mount pointer for the linked
+    # issues the snapshot does not cover (the two documented exceptions to
+    # identical content -- see nix/checks/prompts.nix's
+    # issue-read-and-review-fragments-use-snapshot-file check);
+    # the research-issue-read and scout-issue-read row pairs
+    # are unchanged and still do the live per-tracker read this comment
+    # originally described in full: local issues from the read-only /issues
+    # mount instead of gh issue view, forgejo issues via fj issue view
+    # instead. ISSUE_TRACKER_GITHUB / ISSUE_TRACKER_LOCAL /
+    # ISSUE_TRACKER_FORGEJO (agent/entrypoint.sh's phase_prompt_assembly
+    # precompute block, derived from ISSUE_TRACKER) are shared by all four
+    # per-prompt row triples below --
     # one gate computation, several render sites. Each triple's fragment folds
     # in the following unconditional line(s) too (the trailing `git
     # log`/prior-research-comment bullet, the Inputs: block's git diff/git log
