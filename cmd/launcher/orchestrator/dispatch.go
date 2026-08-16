@@ -318,7 +318,18 @@ func dispatchManifestIfPresent(cfg config, state *runstate.RunState, stdout io.W
 			case integrateEmpty:
 				fmt.Fprintf(&findings, "- %s: done, nothing to integrate (branch %s had no new commits)\n", r.Slice, branch)
 			case integrateConflict:
-				fmt.Fprintf(&findings, "- %s: done, but integration conflicted -- resolve manually: git cherry-pick --no-commit $(git merge-base HEAD %s)..%s (branch %s)\n", r.Slice, branch, branch, branch)
+				// The guidance itself is sourced from
+				// templates/default/prompts/conflict-resolve-cherry-pick-
+				// prompt.md (conflictResolveGuidance, issue #2060 review
+				// finding) rather than hand-written here, so a
+				// human/coordinator reading this finding sees the exact same
+				// conflict-resolution steps this repo's own rebase-conflict
+				// path already gives (conflict-resolve-prompt.md), adapted
+				// for cherry-pick.
+				revRange := fmt.Sprintf("$(git merge-base HEAD %s)..%s", branch, branch)
+				fmt.Fprintf(&findings, "- %s: done, but integration conflicted (branch %s)\n", r.Slice, branch)
+				guidance := conflictResolveGuidance(branch, revRange)
+				fmt.Fprintf(&findings, "  %s\n", strings.ReplaceAll(guidance, "\n", "\n  "))
 				if out := truncateRunes(strings.TrimSpace(outcome.output), maxWorkerResultInFindings); out != "" {
 					fmt.Fprintf(&findings, "  %s\n", strings.ReplaceAll(out, "\n", "\n  "))
 				}
