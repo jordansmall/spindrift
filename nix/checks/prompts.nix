@@ -515,6 +515,53 @@ in
         touch $out
       '';
 
+  # The two checks above only inspect the VERDICT..POST THE VERDICT span, so
+  # a rendering regression that fails to resolve enumMarker
+  # (`` `<RESEARCH_VERDICT_ENUM>` ``, which lives on the "Structure the
+  # verdict" line *after* the `# POST THE VERDICT` heading) would leave the
+  # literal placeholder in the baked prompt invisible to them. Scan the whole
+  # baked file for both markers -- neither may survive rendering -- and pin
+  # that the default set's resolved backtick enumeration is actually present.
+  mkharness-prompt-research-verdicts-markers-resolved =
+    pkgs.runCommand "mkharness-prompt-research-verdicts-markers-resolved" { }
+      ''
+        p=${batsHarness.internals.promptDir}/research-prompt.md
+        ! grep -qF -- '<RESEARCH_VERDICT_ENUM>' "$p" || {
+          echo "enumMarker survived rendering in $p" >&2
+          exit 1
+        }
+        ! grep -qF -- '<!-- RESEARCH_VERDICT_BULLETS -->' "$p" || {
+          echo "bulletsMarker survived rendering in $p" >&2
+          exit 1
+        }
+        grep -qF -- '`recommend` / `reject` / `unclear`' "$p" || {
+          echo "resolved default backtick enumeration missing from $p" >&2
+          exit 1
+        }
+        touch $out
+      '';
+
+  # Companion to mkharness-prompt-research-verdicts-markers-resolved above,
+  # for the self-contained sub-mode prompt.
+  mkharness-prompt-research-self-contained-verdicts-markers-resolved =
+    pkgs.runCommand "mkharness-prompt-research-self-contained-verdicts-markers-resolved" { }
+      ''
+        p=${batsHarness.internals.promptDir}/research-self-contained-prompt.md
+        ! grep -qF -- '<RESEARCH_VERDICT_ENUM>' "$p" || {
+          echo "enumMarker survived rendering in $p" >&2
+          exit 1
+        }
+        ! grep -qF -- '<!-- RESEARCH_VERDICT_BULLETS -->' "$p" || {
+          echo "bulletsMarker survived rendering in $p" >&2
+          exit 1
+        }
+        grep -qF -- '`recommend` / `reject` / `unclear`' "$p" || {
+          echo "resolved default backtick enumeration missing from $p" >&2
+          exit 1
+        }
+        touch $out
+      '';
+
   # A custom RESEARCH_VERDICTS set (issue #2201) flows into the baked research
   # prompt's verdict contract: the VERDICT bullets, the enumeration, and the
   # status alternation all render from the configured set, and no default

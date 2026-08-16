@@ -10,6 +10,7 @@ let
   inherit (pkgs.lib) assertMsg hasInfix;
 
   template = builtins.readFile ../../templates/default/prompts/research-prompt.md;
+  templateSelfContained = builtins.readFile ../../templates/default/prompts/research-self-contained-prompt.md;
   customJSON = builtins.toJSON [
     {
       verdict = "approve";
@@ -56,6 +57,23 @@ in
       (builtins.elemAt out 0).label == "agent-research-approve"
     ) "parse must carry the mapped label";
     pkgs.runCommand "research-verdicts-parse-custom" { } "touch $out";
+
+  # lib/research-verdicts.nix's own comment documents bulletsMarker/enumMarker
+  # as always both present or both absent in the checked-in templates -- this
+  # file otherwise only ever reads research-prompt.md raw (the `template`
+  # binding above), so a typo'd or removed marker in the self-contained
+  # sibling template would ship silently, uncaught at eval time. Pins both
+  # markers present in both template files directly, ahead of any rendering.
+  research-verdicts-templates-carry-both-markers =
+    assert assertMsg (hasInfix rv.bulletsMarker template)
+      "research-prompt.md must carry bulletsMarker";
+    assert assertMsg (hasInfix rv.enumMarker template)
+      "research-prompt.md must carry enumMarker";
+    assert assertMsg (hasInfix rv.bulletsMarker templateSelfContained)
+      "research-self-contained-prompt.md must carry bulletsMarker";
+    assert assertMsg (hasInfix rv.enumMarker templateSelfContained)
+      "research-self-contained-prompt.md must carry enumMarker";
+    pkgs.runCommand "research-verdicts-templates-carry-both-markers" { } "touch $out";
 
   # The empty (default) knob renders through the same machinery as a custom
   # set (issue #2525) -- no byte-identical-to-template no-op special case.
