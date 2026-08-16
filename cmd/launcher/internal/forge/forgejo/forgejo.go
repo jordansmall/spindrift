@@ -388,6 +388,9 @@ func (c *forgejoClient) PostIssue(title, body string, labels []string) (string, 
 	return payload.HTMLURL, nil
 }
 
+var _ forge.HostPostedCommenter = (*forgejoClient)(nil)
+var _ forge.HostPostedIssueFiler = (*forgejoClient)(nil)
+
 // StateLabels implements forge.LabeledTracker, returning the DispatchLabels
 // c resolves DispatchState values through.
 func (c *forgejoClient) StateLabels() forge.DispatchLabels {
