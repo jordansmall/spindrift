@@ -170,3 +170,72 @@ func TestBuildBoxEnvForwardsFullyLocalAndInBoxUnreachableTracker(t *testing.T) {
 		t.Error("BOX_IN_BOX_UNREACHABLE_TRACKER should be absent when Config.InBoxUnreachableTracker is false")
 	}
 }
+
+// TestBuildBoxEnvForwardsTrackerAxisAndForgeBackend verifies buildBoxEnv
+// forwards Config.TrackerAxisRead/TrackerAxisWrite/TrackerAxisFiler/
+// ForgeBackend into the Box as BOX_TRACKER_AXIS_READ/BOX_TRACKER_AXIS_WRITE/
+// BOX_TRACKER_AXIS_FILER/BOX_FORGE_BACKEND when non-empty, and leaves each
+// var absent when the field is empty -- TrackerAxisWrite's legitimate
+// empty-for-local-tracker case included (issue #2533).
+func TestBuildBoxEnvForwardsTrackerAxisAndForgeBackend(t *testing.T) {
+	env := buildBoxEnv(Config{
+		TrackerAxisRead:  "GITHUB",
+		TrackerAxisWrite: "GITHUB",
+		TrackerAxisFiler: "GH",
+		ForgeBackend:     "GH",
+	}, "3", "T", 0, "", "")
+	if got := env["BOX_TRACKER_AXIS_READ"]; got != "GITHUB" {
+		t.Errorf("BOX_TRACKER_AXIS_READ: got %q, want %q", got, "GITHUB")
+	}
+	if got := env["BOX_TRACKER_AXIS_WRITE"]; got != "GITHUB" {
+		t.Errorf("BOX_TRACKER_AXIS_WRITE: got %q, want %q", got, "GITHUB")
+	}
+	if got := env["BOX_TRACKER_AXIS_FILER"]; got != "GH" {
+		t.Errorf("BOX_TRACKER_AXIS_FILER: got %q, want %q", got, "GH")
+	}
+	if got := env["BOX_FORGE_BACKEND"]; got != "GH" {
+		t.Errorf("BOX_FORGE_BACKEND: got %q, want %q", got, "GH")
+	}
+
+	env = buildBoxEnv(Config{TrackerAxisRead: "LOCAL", TrackerAxisWrite: ""}, "3", "T", 0, "", "")
+	if got := env["BOX_TRACKER_AXIS_READ"]; got != "LOCAL" {
+		t.Errorf("BOX_TRACKER_AXIS_READ: got %q, want %q", got, "LOCAL")
+	}
+	if _, ok := env["BOX_TRACKER_AXIS_WRITE"]; ok {
+		t.Error("BOX_TRACKER_AXIS_WRITE should be absent when Config.TrackerAxisWrite is empty (local tracker)")
+	}
+
+	env = buildBoxEnv(Config{}, "3", "T", 0, "", "")
+	for _, name := range []string{"BOX_TRACKER_AXIS_READ", "BOX_TRACKER_AXIS_WRITE", "BOX_TRACKER_AXIS_FILER", "BOX_FORGE_BACKEND"} {
+		if _, ok := env[name]; ok {
+			t.Errorf("%s should be absent when the Config field is empty", name)
+		}
+	}
+}
+
+// TestBuildBoxEnvForwardsFilerEnabledWorkerProvisionedReviewLoop verifies
+// buildBoxEnv forwards Config.FilerEnabled/WorkerProvisioned/
+// ReviewLoopInline/ReviewLoopOrchestrator into the Box as BOX_FILER_ENABLED/
+// BOX_WORKER_PROVISIONED/BOX_REVIEW_LOOP_INLINE/BOX_REVIEW_LOOP_ORCHESTRATOR
+// -- present only as "1" when true, absent (not "0") when false, matching
+// BOX_FULLY_LOCAL's forwarding shape (issue #2533).
+func TestBuildBoxEnvForwardsFilerEnabledWorkerProvisionedReviewLoop(t *testing.T) {
+	env := buildBoxEnv(Config{
+		FilerEnabled:           true,
+		WorkerProvisioned:      true,
+		ReviewLoopInline:       true,
+		ReviewLoopOrchestrator: true,
+	}, "3", "T", 0, "", "")
+	for _, name := range []string{"BOX_FILER_ENABLED", "BOX_WORKER_PROVISIONED", "BOX_REVIEW_LOOP_INLINE", "BOX_REVIEW_LOOP_ORCHESTRATOR"} {
+		if got := env[name]; got != "1" {
+			t.Errorf("%s: got %q, want %q", name, got, "1")
+		}
+	}
+
+	env = buildBoxEnv(Config{}, "3", "T", 0, "", "")
+	for _, name := range []string{"BOX_FILER_ENABLED", "BOX_WORKER_PROVISIONED", "BOX_REVIEW_LOOP_INLINE", "BOX_REVIEW_LOOP_ORCHESTRATOR"} {
+		if _, ok := env[name]; ok {
+			t.Errorf("%s should be absent when the Config field is false", name)
+		}
+	}
+}

@@ -97,6 +97,31 @@ type Config struct {
 	// OutboxRelayCapable's doc comments above.
 	BoxForgeAndIssueAccess string
 
+	// TrackerAxisRead is the nix-resolved static prompt-gate value
+	// (issue #2533), forwarded into the Box unmodified.
+	TrackerAxisRead string
+	// TrackerAxisWrite is the nix-resolved static prompt-gate value
+	// (issue #2533), forwarded into the Box unmodified.
+	TrackerAxisWrite string
+	// TrackerAxisFiler is the nix-resolved static prompt-gate value
+	// (issue #2533), forwarded into the Box unmodified.
+	TrackerAxisFiler string
+	// ForgeBackend is the nix-resolved static prompt-gate value
+	// (issue #2533), forwarded into the Box unmodified.
+	ForgeBackend string
+	// FilerEnabled is the nix-resolved static prompt-gate value
+	// (issue #2533), forwarded into the Box unmodified.
+	FilerEnabled bool
+	// WorkerProvisioned is the nix-resolved static prompt-gate value
+	// (issue #2533), forwarded into the Box unmodified.
+	WorkerProvisioned bool
+	// ReviewLoopInline is the nix-resolved static prompt-gate value
+	// (issue #2533), forwarded into the Box unmodified.
+	ReviewLoopInline bool
+	// ReviewLoopOrchestrator is the nix-resolved static prompt-gate value
+	// (issue #2533), forwarded into the Box unmodified.
+	ReviewLoopOrchestrator bool
+
 	// OpenPRForIssue reports whether an open PR already exists for the
 	// issue's agent branch. Consulted before a zero-exit, no-outcome box is
 	// held-and-retried on a transient classification (issue #565), so a box
@@ -181,6 +206,40 @@ func buildBoxEnv(cfg Config, number, title string, fixPass int, ciFailureSummary
 	}
 	if cfg.InBoxUnreachableTracker {
 		env["BOX_IN_BOX_UNREACHABLE_TRACKER"] = "1"
+	}
+	// TrackerAxisRead/TrackerAxisWrite/TrackerAxisFiler/ForgeBackend are
+	// nix-resolved static prompt-gate values (issue #2533), forwarded
+	// unmodified whenever non-empty. TrackerAxisWrite is legitimately empty
+	// for a local (read-only) tracker, so this uniform empty-string guard
+	// leaves BOX_TRACKER_AXIS_WRITE correctly absent in that case, same
+	// effect as "absent" everywhere else.
+	if cfg.TrackerAxisRead != "" {
+		env["BOX_TRACKER_AXIS_READ"] = cfg.TrackerAxisRead
+	}
+	if cfg.TrackerAxisWrite != "" {
+		env["BOX_TRACKER_AXIS_WRITE"] = cfg.TrackerAxisWrite
+	}
+	if cfg.TrackerAxisFiler != "" {
+		env["BOX_TRACKER_AXIS_FILER"] = cfg.TrackerAxisFiler
+	}
+	if cfg.ForgeBackend != "" {
+		env["BOX_FORGE_BACKEND"] = cfg.ForgeBackend
+	}
+	// FilerEnabled/WorkerProvisioned/ReviewLoopInline/ReviewLoopOrchestrator
+	// are nix-resolved static prompt-gate values (issue #2533), forwarded as
+	// a single explicit positive signal matching BOX_FULLY_LOCAL's shape:
+	// present only as "1" when true, absent (not "0") when false.
+	if cfg.FilerEnabled {
+		env["BOX_FILER_ENABLED"] = "1"
+	}
+	if cfg.WorkerProvisioned {
+		env["BOX_WORKER_PROVISIONED"] = "1"
+	}
+	if cfg.ReviewLoopInline {
+		env["BOX_REVIEW_LOOP_INLINE"] = "1"
+	}
+	if cfg.ReviewLoopOrchestrator {
+		env["BOX_REVIEW_LOOP_ORCHESTRATOR"] = "1"
 	}
 	return env
 }
