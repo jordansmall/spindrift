@@ -24,15 +24,21 @@ func workerBranchName(sliceName string) string {
 	return "orchestrator-worker/" + sliceName
 }
 
-// workerLogPath returns one slice's own quarantined --log-path
-// (launchOneWorker's own logPath convention, line ~332 below). Shared with
-// dispatch.go's own budget-usage sum (issue #2694 review finding) so both
-// call sites derive the same path from the same workDir value, rather than
-// dispatch.go re-deriving it against cfg.workerWorkDir directly while
-// launchOneWorker's own caller (LaunchWorkers) first absolutizes it --
-// today those two resolve identically (nothing in this package ever calls
-// os.Chdir), but a shared helper keeps that true by construction instead of
-// by the absence of a future os.Chdir call elsewhere in the package.
+// workerLogPath returns one slice's own quarantined --log-path, given a
+// workDir value (launchOneWorker's own logPath convention, line ~332
+// below). Shared with dispatch.go's own budget-usage sum (issue #2694
+// review finding) so both call sites use the same join, rather than
+// dispatch.go re-deriving "workDir/name.log" inline a second time.
+//
+// This dedupes only the join, not the workDir value itself: LaunchWorkers
+// first absolutizes its own opts.WorkDir (filepath.Abs) before passing it
+// to launchOneWorker, while dispatch.go's own call passes cfg.workerWorkDir
+// unabsolutized. The two happen to resolve to the same file today because
+// nothing in this package ever calls os.Chdir -- a relative workerWorkDir
+// resolves identically against whichever cwd the process started with,
+// whether or not it was explicitly made absolute first -- but that
+// equivalence is an invariant of the process never changing its own cwd,
+// not something this helper enforces on its own.
 func workerLogPath(workDir, sliceName string) string {
 	return filepath.Join(workDir, sliceName+".log")
 }
