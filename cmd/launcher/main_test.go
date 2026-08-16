@@ -1176,19 +1176,146 @@ func TestValidate_RepoSlugRequired(t *testing.T) {
 	}
 }
 
+// TestResolveCapabilitySignals_NoDocumentFallsBackToRegistry verifies that
+// with no loaded document (direct binary invocation — tests, manual
+// debugging), resolveCapabilitySignals always derives the signals fresh
+// from the backend registry rather than trusting a forwarded artifact that
+// was never populated (issue #2527 review: getenvArtifact("FULLY_LOCAL", "")
+// is always "" with no document, never reflecting a true fully-local pairing).
+func TestResolveCapabilitySignals_NoDocumentFallsBackToRegistry(t *testing.T) {
+	t.Cleanup(func() { loadedDoc = nil })
+	loadedDoc = nil
+
+	sig := resolveCapabilitySignals("local", "local")
+	if !sig.fullyLocal {
+		t.Errorf("fullyLocal = false, want true for local/local with no document")
+	}
+	if !sig.hostMediatedRemote {
+		t.Errorf("hostMediatedRemote = false, want true for codeForge=local")
+	}
+	if !sig.inBoxUnreachableTracker {
+		t.Errorf("inBoxUnreachableTracker = false, want true for issueTracker=local")
+	}
+}
+
+// TestResolveCapabilitySignals_MatchingDocumentTrustsForwardedArtifact
+// verifies that when the resolved CODE_FORGE/ISSUE_TRACKER pairing matches
+// what was baked into the document's settings section (no override
+// happened), resolveCapabilitySignals trusts the nix-forwarded artifact
+// bools directly instead of re-deriving them.
+func TestResolveCapabilitySignals_MatchingDocumentTrustsForwardedArtifact(t *testing.T) {
+	t.Cleanup(func() { loadedDoc = nil })
+	loadedDoc = &inputDocument{
+		Settings: map[string]string{"CODE_FORGE": "github", "ISSUE_TRACKER": "github"},
+		Artifacts: map[string]string{
+			"HOST_MEDIATED_REMOTE":       "false",
+			"OUTBOX_RELAY_CAPABLE":       "true",
+			"IN_BOX_UNREACHABLE_TRACKER": "false",
+			"FULLY_LOCAL":                "false",
+		},
+	}
+
+	sig := resolveCapabilitySignals("github", "github")
+	if sig.hostMediatedRemote {
+		t.Errorf("hostMediatedRemote = true, want false (forwarded artifact)")
+	}
+	if !sig.outboxRelayCapable {
+		t.Errorf("outboxRelayCapable = false, want true (forwarded artifact)")
+	}
+	if sig.inBoxUnreachableTracker {
+		t.Errorf("inBoxUnreachableTracker = true, want false (forwarded artifact)")
+	}
+	if sig.fullyLocal {
+		t.Errorf("fullyLocal = true, want false (forwarded artifact)")
+	}
+}
+
+// TestResolveCapabilitySignals_OverrideAwayFromBakedDocumentFallsBack
+// verifies that when the pairing actually in effect this run diverges from
+// what was baked into the document (a CLI flag or env override), the
+// forwarded artifact is NOT trusted -- resolveCapabilitySignals falls back
+// to a fresh registry lookup on the resolved names instead (issue #2527
+// review: a github-baked document run with --forge-backend local
+// --tracker local must not keep reading the baked FULLY_LOCAL=false).
+func TestResolveCapabilitySignals_OverrideAwayFromBakedDocumentFallsBack(t *testing.T) {
+	t.Cleanup(func() { loadedDoc = nil })
+	loadedDoc = &inputDocument{
+		Settings:  map[string]string{"CODE_FORGE": "github", "ISSUE_TRACKER": "github"},
+		Artifacts: map[string]string{"FULLY_LOCAL": "false"},
+	}
+
+	sig := resolveCapabilitySignals("local", "local")
+	if !sig.fullyLocal {
+		t.Errorf("fullyLocal = false, want true (override to local/local ignores stale github-baked artifact)")
+	}
+}
+
 // TestValidate_FullyLocalExemptsRepoSlugAndGhToken verifies that validate()
 // does not require REPO_SLUG or GH_TOKEN when both CODE_FORGE and
 // ISSUE_TRACKER are local (issue #1895): the github gh-exec client that
-// reads them is never constructed under that combination.
+// reads them is never constructed under that combination. c.fullyLocal/
+// c.inBoxUnreachableTracker are deliberately left at their zero value and
+// loadedDoc left nil, so this exercises resolveCapabilitySignals's
+// registry-fallback derivation from c.codeForge/c.issueTracker rather than
+// a directly-set (and tautological) config field.
 func TestValidate_FullyLocalExemptsRepoSlugAndGhToken(t *testing.T) {
 	c := minimalValidLocalConfig()
 	c.issueTracker = "local"
-	c.inBoxUnreachableTracker = true
-	c.fullyLocal = true
 	c.repoSlug = ""
 	c.ghToken = ""
 	if err := validate(c); err != nil {
 		t.Errorf("validate() should exempt REPO_SLUG/GH_TOKEN when CODE_FORGE and ISSUE_TRACKER are both local: %v", err)
+	}
+}
+
+// TestValidate_OverrideAwayFromBakedGithubDocumentExemptsRepoSlugAndGhToken
+// reproduces the issue #2527 review finding: a github-baked input document
+// (nix built with default CODE_FORGE=github) run with an override to
+// --forge-backend local --tracker local must still exempt REPO_SLUG/
+// GH_TOKEN -- validate() must not keep trusting the stale
+// FULLY_LOCAL=false baked for the pre-override pairing.
+func TestValidate_OverrideAwayFromBakedGithubDocumentExemptsRepoSlugAndGhToken(t *testing.T) {
+	t.Cleanup(func() { loadedDoc = nil })
+	loadedDoc = &inputDocument{
+		Settings: map[string]string{"CODE_FORGE": "github", "ISSUE_TRACKER": "github"},
+		Artifacts: map[string]string{
+			"HOST_MEDIATED_REMOTE":       "true",
+			"IN_BOX_UNREACHABLE_TRACKER": "false",
+			"FULLY_LOCAL":                "false",
+		},
+	}
+
+	c := minimalValidLocalConfig()
+	c.issueTracker = "local"
+	c.repoSlug = ""
+	c.ghToken = ""
+	if err := validate(c); err != nil {
+		t.Errorf("validate() should exempt REPO_SLUG/GH_TOKEN on an override away from a github-baked document: %v", err)
+	}
+}
+
+// TestValidate_OverrideBackToGithubFromFullyLocalDocumentRequiresRepoSlugAndGhToken
+// reproduces the inverse of the issue #2527 review finding: a fully-local
+// baked document (Settings local/local, Artifacts FULLY_LOCAL=true)
+// overridden back to CODE_FORGE=github/ISSUE_TRACKER=github at runtime must
+// require REPO_SLUG/GH_TOKEN again -- validate() must not keep trusting the
+// stale FULLY_LOCAL=true baked for the pre-override pairing.
+func TestValidate_OverrideBackToGithubFromFullyLocalDocumentRequiresRepoSlugAndGhToken(t *testing.T) {
+	t.Cleanup(func() { loadedDoc = nil })
+	loadedDoc = &inputDocument{
+		Settings: map[string]string{"CODE_FORGE": "local", "ISSUE_TRACKER": "local"},
+		Artifacts: map[string]string{
+			"HOST_MEDIATED_REMOTE":       "true",
+			"IN_BOX_UNREACHABLE_TRACKER": "true",
+			"FULLY_LOCAL":                "true",
+		},
+	}
+
+	c := minimalValidConfig()
+	c.repoSlug = ""
+	c.ghToken = ""
+	if err := validate(c); err == nil {
+		t.Error("validate() must require REPO_SLUG/GH_TOKEN on an override back to github from a fully-local-baked document")
 	}
 }
 
@@ -2538,18 +2665,16 @@ func TestSettleConfig_Local_CodeForgeForIssueResolvesEachIssuesOwnParent(t *test
 // minimalValidLocalConfig returns a minimalValidConfig() wired for a valid
 // CODE_FORGE=local run (accumulation dir and the only merge mode local
 // accepts), so local-specific tests only need to override the one field
-// under test. hostMediatedRemote is set to mirror codeForge="local" (issue
-// #2527 slice 1's nix-forwarded capability signal, no longer derived from
-// codeForge inside validate()); callers that also want the ISSUE_TRACKER
-// side of the fully-local exemption must set c.inBoxUnreachableTracker
-// themselves alongside c.issueTracker = "local", the same way they already
-// set the raw backend name.
+// under test. validate() derives its capability signals fresh via
+// resolveCapabilitySignals(c.codeForge, c.issueTracker) (issue #2527
+// review), never reading c.hostMediatedRemote/c.inBoxUnreachableTracker/
+// c.fullyLocal directly, so callers don't need to set those fields
+// themselves — setting c.codeForge/c.issueTracker to "local" is enough.
 func minimalValidLocalConfig() config {
 	c := minimalValidConfig()
 	c.codeForge = "local"
 	c.codeForgeAccumulationRepoDir = ".spindrift/accum.git"
 	c.mergeMode = "immediate"
-	c.hostMediatedRemote = true
 	return c
 }
 

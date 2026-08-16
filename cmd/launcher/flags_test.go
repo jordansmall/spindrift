@@ -1393,9 +1393,18 @@ func TestApplySecretCmdFallback_UsesDocumentSettings(t *testing.T) {
 // TestApplySecretCmdFallback_SkipsGhTokenWhenDocumentIsFullyLocal: the
 // inverse of the above — CODE_FORGE=local/ISSUE_TRACKER=local set only via
 // the document must not force a GH_TOKEN vault lookup for an offline run.
+// Artifacts carries the FULLY_LOCAL bit nix would bake alongside that same
+// Settings pairing (mkHarness renders both from the same mergedDefaults, ADR
+// 0020), so this models a real document rather than an inconsistent one —
+// secretRequiredThisRun's resolveCapabilitySignals call trusts the
+// forwarded artifact only when Settings still matches the resolved pairing
+// (issue #2527 review).
 func TestApplySecretCmdFallback_SkipsGhTokenWhenDocumentIsFullyLocal(t *testing.T) {
 	t.Cleanup(func() { loadedDoc = nil })
-	loadedDoc = &inputDocument{Settings: map[string]string{"CODE_FORGE": "local", "ISSUE_TRACKER": "local"}}
+	loadedDoc = &inputDocument{
+		Settings:  map[string]string{"CODE_FORGE": "local", "ISSUE_TRACKER": "local"},
+		Artifacts: map[string]string{"FULLY_LOCAL": "true"},
+	}
 
 	orig := secretCmdRunner
 	t.Cleanup(func() { secretCmdRunner = orig })
