@@ -31,6 +31,7 @@ in
       ${../../lib/env-schema.nix} \
       ${../../lib/flakeModule.nix} \
       ${../../lib/mkHarness.nix} \
+      ${../../lib/nixpkgs-shared.nix} \
       ${../../lib/prompt-contract.nix} \
       ${../../lib/renderers.nix} \
       ${../fixtures.nix} \
