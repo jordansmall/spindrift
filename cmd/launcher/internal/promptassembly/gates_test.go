@@ -299,6 +299,28 @@ func TestGatesCodeForgeBackend(t *testing.T) {
 				"FIX_CI_READ_FORGEJO":       true,
 			},
 		},
+		{
+			// ForgeBackend's zero value: an Env built without populating it
+			// (e.g. a stray `Env{}` literal, or an upstream caller that
+			// forgot to thread nix's resolved backend through). Mirrors
+			// TestGatesIssueTrackerReadAxis's "empty TrackerAxisRead fails
+			// closed" case: nix is the sole source of truth for a non-empty
+			// backend value, so Gates fails closed (every gate off,
+			// including FIX_CI_READ's unconditional-on-backend fork) rather
+			// than silently guessing GH -- an empty ForgeBackend must never
+			// silently drop every PR-create/CI-read instruction without a
+			// loud signal that nix's resolution never reached here (issue
+			// #2533 review).
+			name:            "empty ForgeBackend fails closed: no gate fires",
+			forgeBackend:    "",
+			boxWriteEnabled: true,
+			want: map[string]bool{
+				"OPEN_PR_CREATE_RW_GH":      false,
+				"OPEN_PR_CREATE_RW_FORGEJO": false,
+				"FIX_CI_READ_GH":            false,
+				"FIX_CI_READ_FORGEJO":       false,
+			},
+		},
 	}
 	for _, tc := range cases {
 		tc := tc
