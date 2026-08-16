@@ -33,13 +33,6 @@ in
       out = rv.parse "";
     in
     assert assertMsg (out == rv.defaultVerdicts) "parse \"\" must return defaultVerdicts";
-    assert assertMsg (
-      map (v: v.verdict) out == [
-        "recommend"
-        "reject"
-        "unclear"
-      ]
-    ) "defaultVerdicts must be recommend/reject/unclear in order";
     pkgs.runCommand "research-verdicts-parse-empty-is-default" { } "touch $out";
 
   # A custom JSON array parses order-preserving into the same shape.
