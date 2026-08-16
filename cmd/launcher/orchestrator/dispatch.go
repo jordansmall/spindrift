@@ -180,6 +180,32 @@ func dispatchManifestIfPresent(cfg config, state *runstate.RunState, stdout io.W
 	if len(dispatchSlices) > 0 {
 		repoRoot, repoRootErr := os.Getwd()
 
+		// startHead records repoRoot's HEAD before this manifest's own batch
+		// loop below lands any per-slice integration commits, so the whole
+		// pass can be squashed into one commit once every batch has run (see
+		// the squash step after the loop, and squashIntegrationCommits'
+		// own doc comment, issue #2060 review finding: without this, an
+		// N-slice manifest lands N separate "chore(orchestrator): integrate
+		// slice <name>" commits instead of one coherent change). Left empty
+		// when repoRootErr != nil -- every WorkerDone slice in that case
+		// already degrades to integrateFailed below, so no commit ever
+		// lands and there is nothing to squash.
+		var startHead string
+		if repoRootErr == nil {
+			if headOut, headErr := runGitIn(repoRoot, "rev-parse", "HEAD"); headErr == nil {
+				startHead = strings.TrimSpace(headOut)
+			} else {
+				fmt.Fprintln(os.Stderr, "orchestrator: rev-parse HEAD before manifest dispatch:", headErr, strings.TrimSpace(headOut))
+			}
+		}
+		// integratedNames records, in manifest-processing order, every slice
+		// name whose own integrateSliceBranch call returned integrateOK this
+		// pass -- exactly the set squashIntegrationCommits below needs to
+		// name in the final squashed commit's message. integrateEmpty/
+		// integrateConflict/integrateFailed slices contributed no commit at
+		// all, so they are deliberately never added here.
+		var integratedNames []string
+
 		opts := WorkerOptions{
 			PromptFile:  cfg.workerPromptFile,
 			WorkDir:     cfg.workerWorkDir,
@@ -286,12 +312,28 @@ func dispatchManifestIfPresent(cfg config, state *runstate.RunState, stdout io.W
 				}
 				status, out, err := integrateSliceBranch(repoRoot, r.Slice, workerBranchName(r.Slice))
 				integrations[r.Slice] = integrationOutcome{status: status, output: out, err: err}
+				if status == integrateOK {
+					integratedNames = append(integratedNames, r.Slice)
+				}
 				if status == integrateConflict || status == integrateFailed {
 					notLanded[r.Slice] = true
 					state.UnlandedSlices = appendUnique(state.UnlandedSlices, r.Slice)
 				}
 			}
 			results = append(results, batchResults...)
+		}
+
+		// Every batch in this manifest has now been dispatched and
+		// integrated -- squash whatever per-slice integration commits
+		// landed on repoRoot's HEAD during the loop above into one final
+		// commit, so this pass lands as a single coherent change rather
+		// than one commit per slice (issue #2060). A squash failure is
+		// orchestrator-internal plumbing, not a per-slice outcome, so it is
+		// logged rather than folded into any one slice's own finding.
+		if repoRootErr == nil && startHead != "" {
+			if err := squashIntegrationCommits(repoRoot, startHead, integratedNames); err != nil {
+				fmt.Fprintln(os.Stderr, "orchestrator: squash manifest integration commits:", err)
+			}
 		}
 	}
 
@@ -430,6 +472,58 @@ func containsSlice(slices []string, name string) bool {
 		}
 	}
 	return false
+}
+
+// squashIntegrationCommits collapses every per-slice integration commit
+// dispatchManifestIfPresent landed on repoRoot's HEAD since startHead into
+// one final commit, naming every slice in integratedNames -- issue #2060
+// review finding: without this, an N-slice manifest lands N separate
+// "chore(orchestrator): integrate slice <name>" commits instead of the one
+// coherent change a human/coordinator-driven integration is documented to
+// produce (templates/default/prompts/fragments/coordinator.md).
+//
+// Those per-slice commits still MUST land as real commits during the batch
+// loop itself, though, not merely staged/uncommitted -- squashing can only
+// happen here, once, after every batch in the manifest has been dispatched
+// AND integrated. A later batch's own workers are created via `git worktree
+// add ... HEAD` (workers.go), and a new worktree only ever sees committed
+// history on its shared repository's refs, never another worktree's
+// uncommitted index -- so deferring ALL commits to the very end of the
+// manifest would leave batch N+1's worktree unable to see batch N's
+// changes at all. squashIntegrationCommits is safe to call only after the
+// last batch has already integrated, exactly where
+// dispatchManifestIfPresent calls it.
+//
+// If HEAD is still at startHead (nothing integrated this pass -- every
+// slice was integrateEmpty/integrateConflict/integrateFailed, or
+// dispatchSlices was empty), this is a deliberate no-op: no squash commit
+// is created, since `git reset --soft` followed immediately by `git
+// commit` with nothing to commit would either fail or, worse, silently
+// walk HEAD forward via an empty commit. Otherwise it runs `git reset
+// --soft startHead` (safe because integrateSliceBranch never leaves
+// repoRoot's working tree dirty, either mid-loop or once the last batch
+// has finished) followed by one `git commit` naming every slice in
+// integratedNames, in order, so the squashed commit is traceable back to
+// exactly which slices contributed to it.
+func squashIntegrationCommits(repoRoot, startHead string, integratedNames []string) error {
+	headOut, err := runGitIn(repoRoot, "rev-parse", "HEAD")
+	if err != nil {
+		return fmt.Errorf("squash integration commits: rev-parse HEAD: %w: %s", err, strings.TrimSpace(headOut))
+	}
+	if strings.TrimSpace(headOut) == startHead {
+		// Nothing landed on HEAD this pass -- no squash commit to make.
+		return nil
+	}
+
+	if resetOut, err := runGitIn(repoRoot, "reset", "--soft", startHead); err != nil {
+		return fmt.Errorf("squash integration commits: reset --soft %s: %w: %s", startHead, err, strings.TrimSpace(resetOut))
+	}
+
+	msg := fmt.Sprintf("chore(orchestrator): integrate manifest slices\n\nIntegrated: %s", strings.Join(integratedNames, ", "))
+	if commitOut, err := runGitIn(repoRoot, "commit", "-m", msg); err != nil {
+		return fmt.Errorf("squash integration commits: commit: %w: %s", err, strings.TrimSpace(commitOut))
+	}
+	return nil
 }
 
 // appendUnique appends name to slices only if it is not already present,
