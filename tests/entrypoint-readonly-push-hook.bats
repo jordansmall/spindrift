@@ -19,11 +19,13 @@ setup() {
   # The rejection's wording lives in lib/prompt-contract.nix's
   # forbiddenMarkers registry (issue #2509), rendered verbatim into the
   # installed hook by driver-exec readonly-guards -- assert the stable
-  # "git push" substring the row's own message always names, not its full
-  # prose, which the registry is free to reword.
+  # "git push" substring the row's own message always names, plus the
+  # relay-naming text ("outbox") that distinguishes this row from a bare
+  # boilerplate rejection.
   run git -C "$WORK_DIR" push origin HEAD:some-branch
   [ "$status" -ne 0 ]
   [[ "$output" == *"git push"* ]]
+  [[ "$output" == *"outbox"* ]]
 
   run git -C "$REMOTE_ROOT/owner/repo.git" rev-parse --verify some-branch
   [ "$status" -ne 0 ]
@@ -60,6 +62,7 @@ setup() {
   run git -C "$WORK_DIR" push origin HEAD:some-branch
   [ "$status" -ne 0 ]
   [[ "$output" == *"git push"* ]]
+  [[ "$output" == *"outbox"* ]]
   [[ "$output" != *"Could not resolve host"* ]]
   [[ "$output" != *"Failed to connect"* ]]
   [[ "$output" != *"unable to access"* ]]

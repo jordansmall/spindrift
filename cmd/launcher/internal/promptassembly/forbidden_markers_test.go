@@ -93,7 +93,7 @@ func testForbiddenMarkerRows() []ForbiddenMarkerRow {
 			When:     "boxAccessReadOnly",
 			Kind:     "substring",
 			Enforce:  "git-hook",
-			Message:  "_validate_prompt_contract: read-only dispatch's rendered prompt orders a read-only Box to run 'git push' -- gated under boxAccessReadOnly, a read-only Box holds no write-capable token for this operation. Refusing to invoke the Driver.",
+			Message:  "_validate_prompt_contract: read-only dispatch's rendered prompt orders a read-only Box to run 'git push' -- gated under boxAccessReadOnly, a read-only Box holds no write-capable token for this operation; the committed branch is relayed via the outbox instead, so a Box must never run 'git push' itself. Refusing to invoke the Driver.",
 		},
 		{
 			ID:       "forbidden-gh-pr-create",
@@ -103,7 +103,7 @@ func testForbiddenMarkerRows() []ForbiddenMarkerRow {
 			When:     "boxAccessReadOnly",
 			Kind:     "substring",
 			Enforce:  "command-shim",
-			Message:  "_validate_prompt_contract: read-only dispatch's rendered prompt orders a read-only Box to run 'gh pr create' -- gated under boxAccessReadOnly, a read-only Box holds no write-capable token for this operation. Refusing to invoke the Driver.",
+			Message:  "_validate_prompt_contract: read-only dispatch's rendered prompt orders a read-only Box to run 'gh pr create' -- gated under boxAccessReadOnly, a read-only Box holds no write-capable token for this operation; PRs are opened via the PR-intent relay (SPINDRIFT_PR_INTENT), so a Box must never run 'gh pr create' itself. Refusing to invoke the Driver.",
 		},
 		{
 			ID:       "forbidden-gh-pr-ready",
@@ -113,7 +113,7 @@ func testForbiddenMarkerRows() []ForbiddenMarkerRow {
 			When:     "boxAccessReadOnly",
 			Kind:     "substring",
 			Enforce:  "command-shim",
-			Message:  "_validate_prompt_contract: read-only dispatch's rendered prompt orders a read-only Box to run 'gh pr ready' -- gated under boxAccessReadOnly, a read-only Box holds no write-capable token for this operation. Refusing to invoke the Driver.",
+			Message:  "_validate_prompt_contract: read-only dispatch's rendered prompt orders a read-only Box to run 'gh pr ready' -- gated under boxAccessReadOnly, a read-only Box holds no write-capable token for this operation; the launcher flips the PR ready once CI is green, so a Box must never run 'gh pr ready' itself. Refusing to invoke the Driver.",
 		},
 		{
 			ID:       "forbidden-gh-pr-merge",
@@ -123,7 +123,7 @@ func testForbiddenMarkerRows() []ForbiddenMarkerRow {
 			When:     "boxAccessReadOnly",
 			Kind:     "substring",
 			Enforce:  "command-shim",
-			Message:  "_validate_prompt_contract: read-only dispatch's rendered prompt orders a read-only Box to run 'gh pr merge' -- gated under boxAccessReadOnly, a read-only Box holds no write-capable token for this operation. Refusing to invoke the Driver.",
+			Message:  "_validate_prompt_contract: read-only dispatch's rendered prompt orders a read-only Box to run 'gh pr merge' -- gated under boxAccessReadOnly, a read-only Box holds no write-capable token for this operation; the launcher merges the PR once CI is green, so a Box must never run 'gh pr merge' itself. Refusing to invoke the Driver.",
 		},
 		{
 			ID:       "forbidden-gh-issue-comment",
@@ -133,7 +133,7 @@ func testForbiddenMarkerRows() []ForbiddenMarkerRow {
 			When:     "boxAccessReadOnly",
 			Kind:     "substring",
 			Enforce:  "command-shim",
-			Message:  "_validate_prompt_contract: read-only dispatch's rendered prompt orders a read-only Box to run 'gh issue comment' -- gated under boxAccessReadOnly, a read-only Box holds no write-capable token for this operation. Refusing to invoke the Driver.",
+			Message:  "_validate_prompt_contract: read-only dispatch's rendered prompt orders a read-only Box to run 'gh issue comment' -- gated under boxAccessReadOnly, a read-only Box holds no write-capable token for this operation; issue comments are relayed via the outcome contract's `note=` field, so a Box must never run 'gh issue comment' itself. Refusing to invoke the Driver.",
 		},
 		{
 			ID:       "forbidden-gh-issue-create",
@@ -143,7 +143,7 @@ func testForbiddenMarkerRows() []ForbiddenMarkerRow {
 			When:     "boxAccessReadOnly",
 			Kind:     "substring",
 			Enforce:  "command-shim",
-			Message:  "_validate_prompt_contract: read-only dispatch's rendered prompt orders a read-only Box to run 'gh issue create' -- gated under boxAccessReadOnly, a read-only Box holds no write-capable token for this operation. Refusing to invoke the Driver.",
+			Message:  "_validate_prompt_contract: read-only dispatch's rendered prompt orders a read-only Box to run 'gh issue create' -- gated under boxAccessReadOnly, a read-only Box holds no write-capable token for this operation; issues are filed via the issue-intent relay (SPINDRIFT_ISSUE_INTENT), so a Box must never run 'gh issue create' itself. Refusing to invoke the Driver.",
 		},
 		{
 			ID:       "forbidden-git-bundle-create",
