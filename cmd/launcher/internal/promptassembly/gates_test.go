@@ -166,10 +166,13 @@ func TestGatesOrchestratorReviewLoop(t *testing.T) {
 			name: "roster present but neither filer nor worker provisioned",
 			env: Env{
 				AgentsJSONTemplate: `{"reviewer":{"model":"m"}}`,
+				ReviewLoopInline:   true,
 			},
 			want: map[string]bool{
-				"FILER_ENABLED":      false,
-				"WORKER_PROVISIONED": false,
+				"FILER_ENABLED":            false,
+				"WORKER_PROVISIONED":       false,
+				"REVIEW_LOOP_INLINE":       true,
+				"REVIEW_LOOP_ORCHESTRATOR": false,
 			},
 		},
 	}

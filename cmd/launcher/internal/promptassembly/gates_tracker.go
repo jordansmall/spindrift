@@ -2,11 +2,12 @@ package promptassembly
 
 // trackerGates computes the Issue-Tracker gate family: the tracker
 // read/write/filer descriptor gates and the PR-body ticket-reference
-// gates (entrypoint.sh: 801-814, 816-860, 862-938). filerEnabled and
-// orchestratorEnabled are Gates's own FILER_ENABLED/ORCHESTRATOR values,
-// passed in rather than re-derived here, so AgentsJSONTemplate parsing
-// stays in exactly one place (Gates itself).
-func trackerGates(e Env, filerEnabled, orchestratorEnabled bool) map[string]bool {
+// gates (entrypoint.sh: 801-814, 816-860, 862-938). orchestratorEnabled is
+// Gates's own ORCHESTRATOR value, passed in rather than re-derived here, so
+// Gates stays the one place that resolves it; e.FilerEnabled is read
+// directly since it's already a plain Env field (nix's precomputed roster
+// fact, issue #2533), not something Gates itself derives.
+func trackerGates(e Env, orchestratorEnabled bool) map[string]bool {
 	g := map[string]bool{}
 
 	// ISSUE_TRACKER -> per-axis descriptor (entrypoint.sh: 801-814): itRead
@@ -44,7 +45,7 @@ func trackerGates(e Env, filerEnabled, orchestratorEnabled bool) map[string]bool
 	filerFileRelay := false
 	filerFileDirectGH := false
 	filerFileDirectForgejo := false
-	if filerEnabled {
+	if e.FilerEnabled {
 		if !e.BoxWriteEnabled && orchestratorEnabled {
 			filerFileRelay = true
 		} else if itFiler == "FORGEJO" {
