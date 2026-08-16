@@ -2038,20 +2038,34 @@ exit 0
 // pass's seeded prompt end to end through runWithReviewPass -- not just at
 // the seedPromptFromState unit level (TestSeedPromptFromStateIncludesPassSummaryPath).
 // Otherwise identical to TestRunWithReviewPassSeedsFixPassWithReviewFindings.
+//
+// It also proves the fix pass's own reference is backed by a real file at
+// the moment that pass actually runs, not merely by text in its seeded
+// prompt: case 3 below (the fix pass invocation) probes for the file with
+// `test -f` and records "MISSING" into callLog if it's gone, guarding
+// against seedAndInvokePass unlinking cfg.passSummaryPath out from under
+// the very reference it just seeded into this pass's own prompt (issue
+// #2549 review finding).
 func TestRunWithReviewPassSeedsFixPassWithPassSummaryPath(t *testing.T) {
 	dir := t.TempDir()
 	callLog := filepath.Join(dir, "calls.log")
 	passSummaryPath := filepath.Join(dir, "pass-summary.md")
+	// missingMarker is a separate file, not callLog itself, so a "MISSING"
+	// hit doesn't perturb callLog's own per-invocation argv-line count and
+	// index-based lookups (lines[2] etc.) below.
+	missingMarker := filepath.Join(dir, "missing.marker")
 	body := fmt.Sprintf(`: > "$DRIVER_LOG_PATH"
 n=$(wc -l < "%s")
 case "$n" in
   1) printf 'summary' > %q ;;
   2) printf '%%s' '%s' >> "$DRIVER_LOG_PATH" ;;
-  3) printf '%%s' '%s' >> "$DRIVER_LOG_PATH" ;;
+  3) test -f %q || echo MISSING >> %q
+     printf '%%s' '%s' >> "$DRIVER_LOG_PATH" ;;
 esac
 exit 0
 `, callLog, passSummaryPath,
 		streamJSONOutcomeLine("VERDICT: BLOCK\\n\\n## Blocking\\n- run.go:1 -- bug"),
+		passSummaryPath, missingMarker,
 		streamJSONOutcomeLine("SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=done nonce=abc"))
 	writeFakeDriverExec(t, dir, callLog, body)
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
@@ -2081,6 +2095,12 @@ exit 0
 	var stdout bytes.Buffer
 	if _, err := run(cfg, &stdout); err != nil {
 		t.Fatalf("run: %v", err)
+	}
+
+	if _, err := os.Stat(missingMarker); err == nil {
+		t.Fatalf("fix pass ran with cfg.passSummaryPath (%s) missing -- seedAndInvokePass deleted the file its own seeded prompt just referenced", cfg.passSummaryPath)
+	} else if !os.IsNotExist(err) {
+		t.Fatalf("stat missingMarker: %v", err)
 	}
 
 	calls, err := os.ReadFile(callLog)
