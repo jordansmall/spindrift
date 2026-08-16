@@ -57,7 +57,7 @@ SKIPPED (duplicate of <url>) — <title>
 FAILED — <title>: <reason>
 ```
 
-`FILED <url>` is for a direct `gh issue create`; `QUEUED` is for a
+`FILED <url>` is for a direct issue-creation call; `QUEUED` is for a
 `SPINDRIFT_ISSUE_INTENT` line, whose issue isn't filed until the launcher
 relays it after this run exits, so no URL is known yet.
 

@@ -373,6 +373,29 @@
     fragment = "issue-blocked-comment-forgejo-readonly.md";
     var = "ISSUE_BLOCKED_COMMENT_FORGEJO_READONLY_STEP";
   }
+  # The LAND THE CHANGE CODE_FORGE=git push step (issue #2510, same
+  # BOX_ACCESS_READ_WRITE/BOX_ACCESS_READ_ONLY gates as commit-push-*/
+  # open-pr-push-* above): the structural forbidden-marker check
+  # (lib/prompt-contract.nix's forbiddenMarkers, lib/mkHarness.nix's
+  # forbiddenMarkerCheckOk) flags any raw, un-gated "git push" imperative in
+  # the shared templates, since it can't tell a genuinely unconditional
+  # imperative from one a nix-time gate already protects. The CODE_FORGE=git
+  # branch's push line in issue-prompt.md was exactly that: a real, ungated
+  # imperative that a read-only-configured Consumer's build baked in
+  # verbatim with zero read-only awareness. Moving it into this gate pair
+  # mirrors commit-push-git.md/commit-push-outbox.md and open-pr-push-git.md/
+  # open-pr-push-outbox.md, which already use this exact pairing for this
+  # exact "push" shape.
+  {
+    gate = "BOX_ACCESS_READ_WRITE";
+    fragment = "land-git-push-git.md";
+    var = "LAND_GIT_PUSH_READ_WRITE_STEP";
+  }
+  {
+    gate = "BOX_ACCESS_READ_ONLY";
+    fragment = "land-git-push-outbox.md";
+    var = "LAND_GIT_PUSH_READ_ONLY_STEP";
+  }
   # The OPEN A PULL REQUEST push step (issue #1918, BOX_FORGE_AND_ISSUE_ACCESS):
   # a read-only github Box holds no push-capable token, so it writes its
   # finished branch as a seam bundle to the outbox instead of git push --
