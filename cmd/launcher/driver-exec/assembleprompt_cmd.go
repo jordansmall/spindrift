@@ -27,10 +27,14 @@ func runAssemblePrompt(args []string, stdout io.Writer) int {
 	fs.SetOutput(stdout)
 
 	// Skill-baking presence flags.
+	// BEGIN GENERATED SKILL-BAKED FLAGS -- nix run .#regen -- DO NOT EDIT
 	cavemanSkillBaked := fs.Bool("caveman-skill-baked", false, "true when DRIVER_SKILLS_DIR/caveman/SKILL.md was baked")
 	tddSkillBaked := fs.Bool("tdd-skill-baked", false, "true when DRIVER_SKILLS_DIR/tdd/SKILL.md was baked")
 	commitSkillBaked := fs.Bool("commit-skill-baked", false, "true when DRIVER_SKILLS_DIR/commit/SKILL.md was baked")
 	codeReviewSkillBaked := fs.Bool("code-review-skill-baked", false, "true when DRIVER_SKILLS_DIR/code-review/SKILL.md was baked")
+	autoFormatSkillBaked := fs.Bool("auto-format-skill-baked", false, "true when DRIVER_SKILLS_DIR/auto-format/SKILL.md was baked")
+	autoLintSkillBaked := fs.Bool("auto-lint-skill-baked", false, "true when DRIVER_SKILLS_DIR/auto-lint/SKILL.md was baked")
+	// END GENERATED SKILL-BAKED FLAGS
 
 	orchestratorEnabled := fs.Bool("orchestrator-enabled", false, "true when ORCHESTRATOR_ENABLED is set")
 	agentsJSONTemplate := fs.String("agents-json-template", "", "the nix-baked --agents JSON template, empty when no subagent model is configured")
@@ -94,10 +98,14 @@ func runAssemblePrompt(args []string, stdout io.Writer) int {
 	}
 
 	env := promptassembly.Env{
+		// BEGIN GENERATED SKILL-BAKED ENV -- nix run .#regen -- DO NOT EDIT
 		CavemanSkillBaked:    *cavemanSkillBaked,
 		TDDSkillBaked:        *tddSkillBaked,
 		CommitSkillBaked:     *commitSkillBaked,
 		CodeReviewSkillBaked: *codeReviewSkillBaked,
+		AutoFormatSkillBaked: *autoFormatSkillBaked,
+		AutoLintSkillBaked:   *autoLintSkillBaked,
+		// END GENERATED SKILL-BAKED ENV
 
 		OrchestratorEnabled: *orchestratorEnabled,
 

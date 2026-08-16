@@ -40,7 +40,8 @@ let
     // (import ./changelog.nix common)
     // (import ./go.nix common)
     // (import ./roster.nix common)
-    // (import ./promptassembly.nix common);
+    // (import ./promptassembly.nix common)
+    // (import ./baked-skills.nix common);
 
   imageChecks = pkgs.lib.optionalAttrs pkgs.stdenv.isLinux (import ./image.nix common);
 
