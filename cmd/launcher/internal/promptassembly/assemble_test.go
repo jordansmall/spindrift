@@ -1143,6 +1143,48 @@ func TestAssembleOrchestratorWorkerPromptForbidsStoreBuild(t *testing.T) {
 	}
 }
 
+// TestAssembleOrchestratorWorkerPromptGateFailureSurfacesInResult pins
+// issue #2496 AC4: a worker slice whose per-file gate fails must surface
+// that failure in its result file, not just its final chat report, so the
+// coordinator can scope the fix without re-running anything. A byte-level
+// golden diff doesn't pin this -- it would keep "passing" even if a future
+// edit dropped the result-file destination and left only the final-report
+// path. Isolate the paragraph naming "result file" and assert it also ties
+// together the gate-failure content (failing command + output/exit status)
+// that must land there.
+func TestAssembleOrchestratorWorkerPromptGateFailureSurfacesInResult(t *testing.T) {
+	reg := loadTestRegistry(t)
+	env := coveredEnv()
+	env.OrchestratorEnabled = true
+
+	result, err := Assemble(env, reg)
+	if err != nil {
+		t.Fatalf("Assemble: %v", err)
+	}
+
+	prompt := result.Handoff.WorkerPromptFile
+	if prompt == "" {
+		t.Fatal("Handoff.WorkerPromptFile is empty, want non-empty")
+	}
+
+	var resultFileParagraph string
+	for _, paragraph := range strings.Split(prompt, "\n\n") {
+		if strings.Contains(paragraph, "result file") {
+			resultFileParagraph = paragraph
+			break
+		}
+	}
+	if resultFileParagraph == "" {
+		t.Fatalf("no paragraph in WorkerPromptFile mentions %q, want the gate-failure report tied to a result file destination:\n%s", "result file", prompt)
+	}
+
+	for _, phrase := range []string{"failing command", "exit status"} {
+		if !strings.Contains(resultFileParagraph, phrase) {
+			t.Errorf("paragraph naming \"result file\" doesn't also name %q, want the gate-failure content and its result-file destination tied together in one paragraph, got paragraph:\n%s", phrase, resultFileParagraph)
+		}
+	}
+}
+
 // TestAssembleOrchestratorCoordinatorChecksInboxOnce pins issue #2496 AC2:
 // fragments/coordinator.md must tell the coordinator that `checks-inbox`
 // runs exactly once, on the fully-integrated tree, in CHECK -- and that

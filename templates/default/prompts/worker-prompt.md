@@ -30,6 +30,13 @@ build:
 - Run `go vet` and `go test` scoped to only the Go package(s) your slice
   actually touched (e.g. `go test ./path/to/changed/package/...`) — never
   the whole module.
+- For any changed file type not covered above, use whatever fast,
+  file-scoped lint/format/test command the project already defines for it
+  (a package script, a linter already on PATH, a test runner scoped to the
+  touched unit) — never a project-wide or store-triggering command. If the
+  project defines no such per-file gate for that file type, say so plainly
+  in your report rather than falling back to a store build or skipping the
+  gate silently.
 
 Do not run `nix build` (any target, including `checks-inbox`), `nix flake
 check`, or anything else that triggers a Nix store round-trip. Whether
@@ -40,7 +47,8 @@ once, later, owned by the coordinator on the fully-integrated tree, never
 inside your own isolated worktree.
 
 If a per-file gate fails, do not escalate to a store build to investigate —
-report the specific failing command and its output/exit status plainly in
-your final report, so the coordinator can scope the fix from that report
-alone. If your delegation names a result file to write to, write it there
-instead of your final message.
+report the specific failing command and its output/exit status plainly. If
+your delegation names a result file to write to, write that gate-failure
+report there instead of your final message; otherwise put it in your final
+report. Either way it must state the failing command and its output/exit
+status so the coordinator can scope the fix from that alone.
