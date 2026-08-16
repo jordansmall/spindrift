@@ -32,8 +32,9 @@ func TestTruncateRunesNeverSplitsAMultiByteRune(t *testing.T) {
 
 // TestDispatchManifestIfPresentNoopWhenWorkerPromptFileUnset verifies
 // dispatchManifestIfPresent is a no-op -- returning false and leaving state
-// untouched -- when cfg.workerPromptFile is unset, matching every other
-// "empty disables this feature" field on config (issue #2059).
+// untouched -- when cfg.workerPromptFile is unset and its log carries no
+// manifest either, matching every other "empty disables this feature" field
+// on config (issue #2059).
 func TestDispatchManifestIfPresentNoopWhenWorkerPromptFileUnset(t *testing.T) {
 	cfg := config{workerPromptFile: "", logPath: filepath.Join(t.TempDir(), "nonexistent.log")}
 	state := runstate.RunState{}
@@ -45,6 +46,43 @@ func TestDispatchManifestIfPresentNoopWhenWorkerPromptFileUnset(t *testing.T) {
 	}
 	if !reflect.DeepEqual(state, want) {
 		t.Errorf("state = %+v, want untouched %+v", state, want)
+	}
+}
+
+// TestDispatchManifestIfPresentAttributesManifestDiscardedWhenWorkerPromptFileUnset
+// covers the runtime analog of mkHarness.nix's eval-time
+// maxParallelWorkersCoherenceOk assert (issue #2495 review finding, AC3): a
+// pass whose log genuinely carries a manifest, but whose cfg.workerPromptFile
+// is empty (e.g. a fix-pass or review-only invocation, which never renders
+// worker-prompt.md), has nowhere to dispatch that manifest -- it must still
+// return false and clear state.WorkerFindings, the same as the no-manifest
+// case, rather than silently pretending the pass reported nothing to
+// investigate.
+func TestDispatchManifestIfPresentAttributesManifestDiscardedWhenWorkerPromptFileUnset(t *testing.T) {
+	dir := t.TempDir()
+	manifest := SliceManifest{Slices: []ManifestSlice{{Name: "orphaned", Task: "implement seam a"}}}
+	line, err := manifest.Line()
+	if err != nil {
+		t.Fatalf("Line() error = %v", err)
+	}
+	logPath := filepath.Join(dir, "manifest-stream.log")
+	if err := os.WriteFile(logPath, []byte(streamJSONOutcomeLine(strings.TrimSpace(line))), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config{
+		driver:           "claude",
+		logPath:          logPath,
+		workerPromptFile: "",
+	}
+	state := runstate.RunState{WorkerFindings: "stale findings from an earlier dispatch"}
+
+	got := dispatchManifestIfPresent(cfg, &state, io.Discard)
+	if got {
+		t.Errorf("dispatchManifestIfPresent() = true, want false (no worker-prompt-file to dispatch against)")
+	}
+	if state.WorkerFindings != "" {
+		t.Errorf("state.WorkerFindings = %q, want empty (stale findings must not survive a pass that could not dispatch)", state.WorkerFindings)
 	}
 }
 
