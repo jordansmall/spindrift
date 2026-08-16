@@ -101,12 +101,20 @@ let
   ) { } (lib.attrNames flakeOptionEntries);
 
   # Generate one mkOption per knob; type is nullOr str/int so unset knobs fall
-  # through to mkHarness's schema defaults.
+  # through to mkHarness's schema defaults. A knob that declares `choices`
+  # (issue #2519) is generated as `types.nullOr (types.enum entry.choices)`
+  # instead — checked ahead of the int/bool/str inference below — so a
+  # Consumer setting an out-of-enum value fails `nix eval`/`nix build` at the
+  # option, naming the option path and the valid choices (the same behavior
+  # `structuralPlacements.runtime`'s hand-written enum already gets, just
+  # schema-driven here).
   mkKnobOption =
     _key: entry:
     mkOption {
       type =
-        if builtins.isInt (entry.default or "") then
+        if entry ? choices then
+          types.nullOr (types.enum entry.choices)
+        else if builtins.isInt (entry.default or "") then
           types.nullOr types.int
         else if builtins.isBool (entry.default or "") then
           types.nullOr types.bool
