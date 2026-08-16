@@ -774,8 +774,16 @@ in
         attrValues
         concatStringsSep
         filter
+        splitString
         subtractLists
         ;
+      # lib.hasInfix wraps builtins.match with a leading/trailing `.*`, whose
+      # C++ std::regex backtracking recurses per character of the haystack —
+      # main.go plus backend.go plus schemaconfig_gen.go is >100KB, deep
+      # enough to blow the evaluator's C stack (issue #2533 CI: "flake check"
+      # segfaulted, exit 139). splitString's regex has no `.*` wrapper (it
+      # only escapes the needle), so it doesn't recurse per haystack byte.
+      containsLiteral = needle: haystack: builtins.length (splitString needle haystack) > 1;
       launcherDir = ../../cmd/launcher;
       # schemaconfig_gen.go (issue #2364) lands here early — before config/
       # loadConfig embeds schemaConfig — so a later slice wiring it in
@@ -800,7 +808,7 @@ in
       boxEnvOnly = map (e: e.env) (filter (e: e.boxEnvOnly or false) (attrValues schema));
       # Forward: every schema name (that Go reads directly) must appear as a
       # string literal in main.go.
-      missingFromGo = filter (name: !pkgs.lib.hasInfix ''"${name}"'' mainGoSrc) (
+      missingFromGo = filter (name: !containsLiteral ''"${name}"'' mainGoSrc) (
         subtractLists boxEnvOnly schemaEnvNames
       );
       # Reverse: extract names from os.Getenv/getenv (1-arg),
