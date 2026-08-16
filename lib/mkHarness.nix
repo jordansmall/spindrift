@@ -206,8 +206,10 @@ let
   # #2245): the single source of truth for each block's id/marker/source/
   # slice-range/kinds, driving the marker constants and canonical text below
   # instead of each being a separate hand-wired literal (issue #2246 slice
-  # 1). nix/checks/prompt-contract.nix pins the registry's own shape and
-  # content. The outcome/comms/check blocks' canonical text is now read from
+  # 1). nix/checks/prompt-contract.nix pins the registry's cross-field
+  # invariants and its canonical text against the real prompt sources, not
+  # its row count/order/literal values (issue #2536). The outcome/comms/check
+  # blocks' canonical text is now read from
   # promptContract.canonicalText (which slices issue-prompt.md itself, see
   # lib/prompt-contract.nix) rather than a local issuePromptSource re-read
   # here; only the research block below still slices its own source

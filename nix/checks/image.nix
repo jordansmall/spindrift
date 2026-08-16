@@ -487,29 +487,28 @@ in
       touch $out
     '';
 
-  # The idempotency check (issue #420) hinges on the entrypoint sourcing its
-  # marker from the same registry row lib/mkHarness.nix now looks up from
-  # lib/prompt-contract.nix (issue #2246 slice 1). Since issue #2354's flip,
-  # shared-block injection no longer lives in agent/entrypoint.sh's
-  # `_inject_shared_block` (deleted, along with the rest of the inline gate/
-  # fragment/injection precompute) -- it lives in
+  # Originally an idempotency check (issue #420) pinned to the entrypoint
+  # sourcing its marker from the same registry row lib/mkHarness.nix looked
+  # up from lib/prompt-contract.nix (issue #2246 slice 1). Since issue
+  # #2354's flip, shared-block injection no longer lives in
+  # agent/entrypoint.sh's `_inject_shared_block` (deleted, along with the
+  # rest of the inline gate/fragment/injection precompute) -- it lives in
   # cmd/launcher/internal/promptassembly/assemble.go's `injectSharedBlock`,
-  # called with each contract file's Env field directly (no id lookup at all;
-  # Go derives the marker from the block's own first line rather than
-  # resolving an id against a registry). So the runtime-wiring half of this
-  # check now confirms the Go verb's shared-block-injection call site still
-  # references the right contract-file field, instead of grepping the
-  # (now-removed) bash call site.
-  outcome-contract-marker-parity = pkgs.runCommand "outcome-contract-marker-parity" { } ''
-    grep -qF 'e.CommsContractFile, e.CheckContractFile, e.OutcomeContractFile' ${../../cmd/launcher/internal/promptassembly/assemble.go}
-    touch $out
-  '';
-
-  # Same drift guard, for the COMMS and CHECK/COMMIT markers (issue #455).
-  comms-check-contract-marker-parity = pkgs.runCommand "comms-check-contract-marker-parity" { } ''
-    grep -qF 'e.CommsContractFile, e.CheckContractFile, e.OutcomeContractFile' ${../../cmd/launcher/internal/promptassembly/assemble.go}
-    touch $out
-  '';
+  # called with each contract file's Env field directly (no id lookup at
+  # all; Go derives the marker from the block's own first line rather than
+  # resolving an id against a registry). So this check now touches no
+  # registry data at all: it's a static grep pin confirming the Go verb's
+  # shared-block-injection call site still references the right
+  # contract-file field, instead of the (now-removed) bash call site.
+  # Covers the outcome, COMMS, and CHECK/COMMIT markers together (issue
+  # #455) -- the Go call site passes all three contract files in one call,
+  # so one grep covers all three.
+  outcome-comms-check-contract-marker-parity =
+    pkgs.runCommand "outcome-comms-check-contract-marker-parity" { }
+      ''
+        grep -qF 'e.CommsContractFile, e.CheckContractFile, e.OutcomeContractFile' ${../../cmd/launcher/internal/promptassembly/assemble.go}
+        touch $out
+      '';
 
   # Same drift guard, for the research-verdict marker (issue #640's
   # "research-verdict" row) -- previously uncovered by any parity check
