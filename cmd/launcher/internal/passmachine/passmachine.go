@@ -86,6 +86,13 @@ const (
 // to one terminal land pass (review loop).
 type StopReason int
 
+// CapReason is StopReason under a name that doesn't say "Stop" for a
+// decision that isn't stopping (Decision.Cap, below, can be non-StopNone on
+// a Continue: true Decision) -- a plain alias, not a distinct type, so
+// every StopMaxSlicesReached/StopMaxReviewRoundsReached/StopNoVerdict
+// constant is usable as either without conversion.
+type CapReason = StopReason
+
 const (
 	// StopNone means the loop is not stopping this pass -- Decision.Continue
 	// is true.
@@ -231,14 +238,14 @@ type Decision struct {
 	// -- set only when LandPhase is LandPhaseTerminalCommitted.
 	CapFired string
 	// Cap is the typed counterpart to CapFired: StopNone (the zero value)
-	// whenever LandPhase is LandPhaseActive, else the StopReason naming
+	// whenever LandPhase is LandPhaseActive, else the CapReason naming
 	// which cap fired (StopMaxSlicesReached, StopMaxReviewRoundsReached, or
 	// StopNoVerdict for the review pass's own "no verdict" case). Callers
 	// that need to detect a specific cap programmatically (e.g. caps.go's
 	// own simulateReviewRoundCapPass) compare against this instead of
 	// CapFired's prose string, which doubles as operator-facing prompt text
 	// (run.go's seedPromptFromState) and can be reworded independently.
-	Cap StopReason
+	Cap CapReason
 	// IncrementReviewRounds is true when this decision implies
 	// reviewRounds++ (unconditional on KindLegacy's own continue path;
 	// gated on reviewVerdict == BLOCK, regardless of which case matched,
@@ -313,8 +320,20 @@ func implementFixTransition(in Input) Decision {
 	switch {
 	case in.HasOutcome:
 		return Decision{Continue: false, Reason: "outcome reached", Stop: StopOutcomeReached}
+	// After an APPROVE verdict the land pass runs exactly once: a land pass
+	// cut off before its own terminal SPINDRIFT_OUTCOME is recovered by the
+	// within-pass required_marker_gate session-resume nudge (issue #2044,
+	// agent/entrypoint.sh) inside that single land driver-exec, not by
+	// re-entering this decision again -- a fresh land pass would re-invoke
+	// the Filer / FILE ISSUES step on every extra lap, bounded only by the
+	// coarse maxSlices cap below (issue #2069).
 	case in.LastVerdict == VerdictApprove:
 		return Decision{Continue: false, Reason: "land pass reached no terminal outcome after APPROVE", Stop: StopApproveNoOutcome}
+	// This case must come before ManifestDispatched below: maxSlices is a
+	// hard ceiling on total driver-exec invocations (issue #2457), and a
+	// coordinator that re-emits a slice manifest every single pass must not
+	// be able to keep matching ManifestDispatched first forever and defeat
+	// that ceiling (issue #2058 review).
 	case in.Caps.MaxSlices > 0 && in.Pass >= in.Caps.MaxSlices:
 		// manifestDispatched is checked regardless of which case fired the
 		// continue -- so even when this maxSlices case is what committed
@@ -335,6 +354,10 @@ func implementFixTransition(in Input) Decision {
 			Cap:       StopMaxSlicesReached,
 			CapFired:  "max slices reached",
 		}
+	// A manifest dispatch keeps the loop going when neither case above
+	// already fired this pass -- a pass that just dispatched workers isn't
+	// done yet regardless of what verdict state happens to be sitting
+	// around from a prior pass (issue #2059 AC1).
 	case in.ManifestDispatched:
 		return Decision{Continue: true, Reason: "slice manifest dispatched", NextPass: KindFix}
 	}

@@ -491,3 +491,27 @@ func TestTransition(t *testing.T) {
 		})
 	}
 }
+
+// TestPassKindString pins the pass_start op's own Role field value for
+// every PassKind (issue #2548 review) -- exercised only transitively by
+// TestTransition's op-stream assertions until now.
+func TestPassKindString(t *testing.T) {
+	tests := []struct {
+		kind PassKind
+		want string
+	}{
+		{KindLegacy, ""},
+		{KindImplement, "implement"},
+		{KindFix, "fix"},
+		{KindLand, "land"},
+		{KindReview, "review"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.want, func(t *testing.T) {
+			if got := tt.kind.String(); got != tt.want {
+				t.Errorf("PassKind(%d).String() = %q, want %q", tt.kind, got, tt.want)
+			}
+		})
+	}
+}
