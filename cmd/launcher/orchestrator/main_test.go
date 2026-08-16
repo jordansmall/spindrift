@@ -163,6 +163,94 @@ exit 0
 	}
 }
 
+// TestMainRunRejectsNegativeBudgetCaps is
+// TestMainRunRejectsNonPositiveMaxParallelWorkers's own twin for
+// validateBudgetCaps (issue #2694 review finding): proves mainRun's own
+// wiring -- flag parse, then the validateBudgetCaps call, then the fatal
+// abort -- actually runs, not just that validateBudgetCaps itself rejects a
+// negative value in isolation (caps_test.go already covers that).
+func TestMainRunRejectsNegativeBudgetCaps(t *testing.T) {
+	dir := t.TempDir()
+	callLog := filepath.Join(dir, "calls.log")
+	writeFakeDriverExec(t, dir, callLog, `printf 'SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=done nonce=abc\n'
+exit 0
+`)
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	var stdout, stderr bytes.Buffer
+	rc := mainRun(singlePassFakeDriverArgv(dir, "-max-budget-tokens=-1"), &stdout, &stderr)
+
+	if rc != 1 {
+		t.Fatalf("mainRun exit code = %d, want 1 (stderr: %q)", rc, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "-max-budget-tokens=-1") {
+		t.Errorf("stderr = %q, want it to name the offending -max-budget-tokens=-1 value", stderr.String())
+	}
+
+	if _, err := os.ReadFile(callLog); err == nil {
+		t.Fatalf("driver-exec was invoked -- a negative -max-budget-tokens must abort the run before any pass runs")
+	}
+}
+
+// TestMainRunAcceptsMaxBudgetFlagsAndThreadsThemIntoTheReviewLoop verifies
+// two things the flag declaration alone (main.go:45-46) doesn't prove
+// (issue #2694 review finding): that mainRun's FlagSet actually declares
+// -max-budget-tokens/-max-budget-usd (entrypoint.sh now forwards both on
+// every orchestrator run, unconditionally -- a FlagSet missing either one
+// fails fs.Parse and kills the Box, the same failure mode
+// TestMainRunAcceptsArgvShapeFlags guards for the 7 argv-shape flags), and
+// that a low -max-budget-tokens value threads all the way through config
+// into the review loop's own Caps.MaxBudgetTokens and actually caps the run
+// -- the same fake-driver body and assertions as
+// TestRunWithReviewPassTerminatesOnMaxBudgetTokensCap (run_test.go), but
+// driven through mainRun's own flag parsing instead of a hand-built config
+// literal, so this is the one test proving the full flag -> config -> Caps
+// -> behavior chain, not just the config -> Caps -> behavior half of it.
+func TestMainRunAcceptsMaxBudgetFlagsAndThreadsThemIntoTheReviewLoop(t *testing.T) {
+	dir := t.TempDir()
+	callLog := filepath.Join(dir, "calls.log")
+	body := `: > "$DRIVER_LOG_PATH"
+n=$(wc -l < "` + callLog + `")
+if [ $((n % 2)) -eq 0 ]; then
+  printf '%s' '` + streamJSONOutcomeLine("VERDICT: BLOCK") + `' >> "$DRIVER_LOG_PATH"
+fi
+printf '%s' '` + streamJSONResultLine(70, 30, 0.01) + `' >> "$DRIVER_LOG_PATH"
+exit 0
+`
+	writeFakeDriverExec(t, dir, callLog, body)
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	if err := os.WriteFile(filepath.Join(dir, "prompt.txt"), []byte("prompt"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	reviewPromptFile := filepath.Join(dir, "review-prompt.txt")
+	if err := os.WriteFile(reviewPromptFile, []byte("review prompt"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	argv := append(singlePassFakeDriverArgv(dir),
+		"-review-prompt-file", reviewPromptFile,
+		"-max-review-rounds=0",
+		"-max-slices=0",
+		"-max-budget-tokens=350",
+		"-max-budget-usd=0",
+	)
+
+	var stdout, stderr bytes.Buffer
+	rc := mainRun(argv, &stdout, &stderr)
+
+	if rc == 2 {
+		t.Fatalf("mainRun exit code = 2 (flag parse failure), stderr: %q -- FlagSet must declare -max-budget-tokens/-max-budget-usd", stderr.String())
+	}
+	if rc != 0 {
+		t.Fatalf("mainRun exit code = %d, want 0 (stderr: %q)", rc, stderr.String())
+	}
+
+	if !strings.Contains(stdout.String(), `"decision":"continue","reason":"budget exceeded; running terminal land pass"`) {
+		t.Errorf("stdout = %q, want the budget-cap-fired continue reason naming the cap, proving -max-budget-tokens threaded through config into Caps.MaxBudgetTokens", stdout.String())
+	}
+}
+
 // TestMainRunAcceptsArgvShapeFlags verifies mainRun's FlagSet declares all 7
 // argv-shape flags entrypoint.sh's orchestrator invocation always passes
 // (agent/entrypoint.sh's $_driver_invoker call, issue #2534 follow-up): a
