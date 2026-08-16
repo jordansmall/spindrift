@@ -162,6 +162,24 @@ setup() {
   ! grep -q -- '--review-effort' "$ORCHESTRATOR_LOG"
 }
 
+# Non-vacuous despite Handoff.ReviewEffort also staying empty on this path
+# for a second, independent reason (assemble.go only extracts .reviewer.effort
+# when ORCHESTRATOR_ENABLED is set, so a driver-exec run never even populates
+# the field) -- this test pins the separate bash-level gate at
+# run_driver_in_env's tail (entrypoint.sh, `[ "$_driver_invoker" = orchestrator
+# ]`) directly, on the live shell code, not just the Go-level extraction one
+# layer up. If that bash gate were ever deleted, or a future change fed
+# review_effort into this path from some other source entirely (bypassing
+# assemble.go's extraction), this is the test that would catch a
+# --review-effort leak on the driver-exec path specifically -- the Go-only
+# coverage above cannot.
+@test "direct driver-exec path omits --review-effort even with a reviewer effort configured" {
+  export AGENTS_JSON_TEMPLATE='{"reviewer":{"description":"Review the branch diff for spec compliance and coding standards","model":"haiku","effort":"high","prompt":"","tools":["Read","Bash","WebFetch"]}}'
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  ! grep -q -- '--review-effort' "$DRIVER_LOG"
+}
+
 # The parallel worker dispatch (issue #2059, #2058): entrypoint.sh renders
 # worker-prompt.md and threads it to the orchestrator's own
 # --worker-prompt-file, mirroring --review-prompt-file above -- same gate
