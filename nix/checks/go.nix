@@ -4,26 +4,11 @@
   pkgs,
   config,
   fixtures,
+  launcherGoModules,
   ...
 }:
 let
   inherit (fixtures) consumerFormatter;
-
-  buildConstants = import ../../lib/build-constants.nix;
-
-  # The vendored module tree for cmd/launcher's external deps
-  # (charmbracelet/bubbletea, issue #784) — GOPROXY=off below means these
-  # hand-rolled go build/vet/test checks need it on disk instead of
-  # reaching the network. vendorHash is lib/build-constants.nix's
-  # launcherVendorHash — the same root lib/mkHarness.nix's launcherBin and
-  # nix/quickstart.nix import, so all three can't drift apart.
-  launcherGoModules =
-    (pkgs.buildGoModule {
-      pname = "spindrift-launcher-modules";
-      version = "0";
-      src = ../../cmd/launcher;
-      vendorHash = buildConstants.launcherVendorHash;
-    }).goModules;
 in
 {
   # gofmt -l must exit cleanly — any output means unformatted files.
