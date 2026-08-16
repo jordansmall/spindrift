@@ -390,14 +390,17 @@ Also write a second, separate file, `/tmp/dispositions.md` (outside the
 repo, never commit) — do not fold this into the pass-summary file above, and
 do not put pass-summary prose into this one. It holds nothing but one terse
 line per Blocking or Non-blocking finding this pass addressed: `<finding> ->
-fixed in commit <short-sha-or-description>` for one you actually fixed, or
-`<finding> -> won't-fix: <reason>` for one you deliberately left alone (an
-escalated finding, per the non-blocking triage above, is a won't-fix here).
-No narrative, no headers, no reasoning beyond that one-line reason, and no
-pasted diff hunks, file contents, or transcript excerpts — reference the
-commit instead of quoting it. A later review round reads this file verbatim
-and treats every line as an unverified claim to check against the diff, not
-settled fact, so write it precisely enough to survive that check.
+fixed in commit <SHA>` for one you actually fixed, or `<finding> ->
+won't-fix: <reason>` for one you deliberately left alone (an escalated
+finding, per the non-blocking triage above, is a won't-fix here). Reference
+existing artifacts — the commit SHA, a `file:line`, an issue number — rather
+than restating their content: no narrative, no headers, no reasoning beyond
+that one-line reason, and no pasted diff hunks, file contents, or transcript
+excerpts. A later review round reads this file verbatim and treats every
+line as an unverified claim to check against the diff, not settled fact, so
+write it precisely enough to survive that check, and terse enough to stay a
+reference rather than a restatement — a compact, well-formed entry never
+needs more than a short clause after the arrow.
 
 # LAND THE CHANGE
 
