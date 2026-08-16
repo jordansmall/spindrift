@@ -39,6 +39,7 @@ func TestRunReadonlyGuards_FullRegistryInstallsShimAndHook(t *testing.T) {
 	stubBinOnPath(t, "gh")
 	stubBinOnPath(t, "fj")
 	repoDir := t.TempDir()
+	runGitCmd(t, repoDir, "init")
 	shimDir := t.TempDir()
 
 	var stdout bytes.Buffer

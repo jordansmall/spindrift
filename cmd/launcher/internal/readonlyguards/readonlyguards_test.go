@@ -11,6 +11,19 @@ import (
 	"spindrift.dev/launcher/internal/promptassembly"
 )
 
+// runGitCmd runs `git -C dir <args>`, failing the test on error. Mirrors the
+// runGitCmd helper in cmd/launcher/driver-exec/bundleout_cmd_test.go
+// (different package, so not importable directly).
+func runGitCmd(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v (dir=%s): %v: %s", args, dir, err, out)
+	}
+	return string(out)
+}
+
 // runShim execs the installed shim at shimDir/argv0 with args, returning its
 // stdout+stderr combined and exit code.
 func runShim(t *testing.T, shimDir, argv0 string, args ...string) (string, int) {
@@ -192,8 +205,8 @@ func TestInstall_GhAPIMutationRejectsMutatingMethod(t *testing.T) {
 
 // TestInstall_GitHookRow proves a git-hook row's Message ends up, verbatim,
 // in both the pre-push and pre-receive hooks installed under
-// RepoDir/.git/hooks, and that the installed hook actually rejects (exits
-// non-zero) when invoked.
+// RepoDir/.git/hooks for a normal (non-bare) working copy, and that the
+// installed hook actually rejects (exits non-zero) when invoked.
 func TestInstall_GitHookRow(t *testing.T) {
 	rows := []promptassembly.ForbiddenMarkerRow{
 		{
@@ -206,6 +219,7 @@ func TestInstall_GitHookRow(t *testing.T) {
 	}
 
 	repoDir := t.TempDir()
+	runGitCmd(t, repoDir, "init")
 	cfg := Config{RepoDir: repoDir}
 
 	var out bytes.Buffer
@@ -231,6 +245,63 @@ func TestInstall_GitHookRow(t *testing.T) {
 		out, err := cmd.CombinedOutput()
 		if err == nil {
 			t.Fatalf("%s exit code = 0, want non-zero; output=%q", name, out)
+		}
+	}
+}
+
+// TestInstall_GitHookRow_BareRepo proves a git-hook row targeting a bare
+// repository (no .git subdirectory -- repoDir itself is the bare git
+// directory, per `git init --bare`) installs its hooks directly under
+// repoDir/hooks, not repoDir/.git/hooks -- the path a bare repo never has,
+// and one git itself never consults, which would otherwise leave the guard
+// silently absent even though Result.HookInstalled reports true.
+func TestInstall_GitHookRow_BareRepo(t *testing.T) {
+	rows := []promptassembly.ForbiddenMarkerRow{
+		{
+			ID:      "forbidden-git-push",
+			Marker:  "git push",
+			Kind:    "substring",
+			Enforce: "git-hook",
+			Message: "read-only Box: do not run `git push` -- this push has been blocked locally.",
+		},
+	}
+
+	repoDir := t.TempDir()
+	runGitCmd(t, repoDir, "init", "--bare")
+	cfg := Config{RepoDir: repoDir}
+
+	var out bytes.Buffer
+	result, err := Install(rows, cfg, &out)
+	if err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+	if !result.HookInstalled {
+		t.Fatalf("result.HookInstalled = false, want true")
+	}
+
+	// A bare repo has no .git subdirectory -- the hook must not land there.
+	wrongPath := filepath.Join(repoDir, ".git", "hooks", "pre-receive")
+	if _, err := os.Stat(wrongPath); err == nil {
+		t.Fatalf("hook installed at %s, want it absent (bare repo has no .git dir)", wrongPath)
+	}
+
+	for _, name := range []string{"pre-push", "pre-receive"} {
+		hookPath := filepath.Join(repoDir, "hooks", name)
+		content, err := os.ReadFile(hookPath)
+		if err != nil {
+			t.Fatalf("read %s: %v", hookPath, err)
+		}
+		if !bytes.Contains(content, []byte(rows[0].Message)) {
+			t.Fatalf("%s content = %q, want it to contain %q", name, content, rows[0].Message)
+		}
+
+		cmd := exec.Command(hookPath)
+		out, err := cmd.CombinedOutput()
+		if err == nil {
+			t.Fatalf("%s exit code = 0, want non-zero; output=%q", name, out)
+		}
+		if !bytes.Contains(out, []byte(rows[0].Message)) {
+			t.Fatalf("%s output = %q, want it to contain %q", name, out, rows[0].Message)
 		}
 	}
 }
@@ -400,6 +471,7 @@ func TestInstall_CommandShimSkipsMissingBinary(t *testing.T) {
 
 	shimDir := t.TempDir()
 	repoDir := t.TempDir()
+	runGitCmd(t, repoDir, "init")
 	cfg := Config{
 		RepoDir: repoDir,
 		ShimDir: shimDir,
@@ -456,6 +528,7 @@ func TestInstall_FullRegistry(t *testing.T) {
 
 	shimDir := t.TempDir()
 	repoDir := t.TempDir()
+	runGitCmd(t, repoDir, "init")
 	cfg := Config{
 		RepoDir: repoDir,
 		ShimDir: shimDir,
@@ -540,5 +613,57 @@ func TestInstall_FullRegistry(t *testing.T) {
 	}
 	if !bytes.Contains(content, []byte("git push")) {
 		t.Fatalf("pre-push hook content = %q, want it to mention 'git push'", content)
+	}
+}
+
+// TestInstall_GitHookRowMissingRepoDir proves Install returns a non-nil
+// error, rather than panicking or silently no-op'ing, when rows contains a
+// git-hook row but cfg.RepoDir is empty.
+func TestInstall_GitHookRowMissingRepoDir(t *testing.T) {
+	rows := []promptassembly.ForbiddenMarkerRow{
+		{
+			ID:      "forbidden-git-push",
+			Marker:  "git push",
+			Kind:    "substring",
+			Enforce: "git-hook",
+			Message: "blocked: git push",
+		},
+	}
+
+	cfg := Config{ShimDir: t.TempDir()} // RepoDir deliberately left empty
+
+	var out bytes.Buffer
+	result, err := Install(rows, cfg, &out)
+	if err == nil {
+		t.Fatalf("Install: got nil error, want non-nil (RepoDir is empty)")
+	}
+	if result.HookInstalled {
+		t.Errorf("result.HookInstalled = true, want false on error")
+	}
+}
+
+// TestInstall_CommandShimRowMissingShimDir proves Install returns a
+// non-nil error, rather than panicking or silently no-op'ing, when rows
+// contains a command-shim row but cfg.ShimDir is empty.
+func TestInstall_CommandShimRowMissingShimDir(t *testing.T) {
+	rows := []promptassembly.ForbiddenMarkerRow{
+		{
+			ID:      "forbidden-gh-pr-create",
+			Marker:  "gh pr create",
+			Kind:    "substring",
+			Enforce: "command-shim",
+			Message: "blocked: gh pr create",
+		},
+	}
+
+	cfg := Config{RepoDir: t.TempDir()} // ShimDir deliberately left empty
+
+	var out bytes.Buffer
+	result, err := Install(rows, cfg, &out)
+	if err == nil {
+		t.Fatalf("Install: got nil error, want non-nil (ShimDir is empty)")
+	}
+	if len(result.Shims) != 0 {
+		t.Errorf("result.Shims = %v, want empty on error", result.Shims)
 	}
 }
