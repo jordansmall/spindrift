@@ -438,6 +438,26 @@ in
     assert assertMsg (
       out.IMAGE_TAG == "spindrift-opencode:deadbeef"
     ) "runArtifacts (oci) must scope IMAGE_TAG to the driver image name, got: ${builtins.toJSON out}";
+    assert assertMsg (
+      out.TRACKER_AXIS_READ == "FORGEJO"
+    ) "runArtifacts (oci-driver-scoped) must render TRACKER_AXIS_READ, got: ${builtins.toJSON out}";
+    assert assertMsg (
+      out.TRACKER_AXIS_WRITE == "FORGEJO"
+    ) "runArtifacts (oci-driver-scoped) must render TRACKER_AXIS_WRITE, got: ${builtins.toJSON out}";
+    assert assertMsg (
+      out.TRACKER_AXIS_FILER == "FORGEJO"
+    ) "runArtifacts (oci-driver-scoped) must render TRACKER_AXIS_FILER, got: ${builtins.toJSON out}";
+    assert assertMsg (
+      out.FORGE_BACKEND == "FORGEJO"
+    ) "runArtifacts (oci-driver-scoped) must render FORGE_BACKEND, got: ${builtins.toJSON out}";
+    assert assertMsg (out.FILER_ENABLED == "true")
+      "runArtifacts (oci-driver-scoped) must render FILER_ENABLED as the literal string \"true\", got: ${builtins.toJSON out}";
+    assert assertMsg (out.WORKER_PROVISIONED == "false")
+      "runArtifacts (oci-driver-scoped) must render WORKER_PROVISIONED as the literal string \"false\", got: ${builtins.toJSON out}";
+    assert assertMsg (out.REVIEW_LOOP_INLINE == "true")
+      "runArtifacts (oci-driver-scoped) must render REVIEW_LOOP_INLINE as the literal string \"true\", got: ${builtins.toJSON out}";
+    assert assertMsg (out.REVIEW_LOOP_ORCHESTRATOR == "false")
+      "runArtifacts (oci-driver-scoped) must render REVIEW_LOOP_ORCHESTRATOR as the literal string \"false\", got: ${builtins.toJSON out}";
     pkgs.runCommand "preambles-run-artifacts-oci-driver-scoped-image-name" { } "touch $out";
 
   preambles-build-artifacts-bwrap =
