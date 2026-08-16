@@ -1502,7 +1502,7 @@ func TestResolveAgentPresenceSignals_NoDocumentFallsBackToSchemaDefaults(t *test
 	t.Setenv("WORKER_MODEL", "")
 	t.Setenv("ORCHESTRATOR_ENABLED", "")
 
-	filerEnabled, workerProvisioned, reviewLoopInline, reviewLoopOrchestrator := resolveAgentPresenceSignals()
+	filerEnabled, workerProvisioned, reviewLoopInline, reviewLoopOrchestrator := resolveAgentPresenceSignals("")
 	if filerEnabled {
 		t.Errorf("filerEnabled = true, want false (FILER_MODEL schema default is empty)")
 	}
@@ -1545,7 +1545,7 @@ func TestResolveAgentPresenceSignals_MatchingDocumentTrustsForwardedArtifact(t *
 	t.Setenv("WORKER_MODEL", "claude-sonnet-5")
 	t.Setenv("ORCHESTRATOR_ENABLED", "")
 
-	filerEnabled, workerProvisioned, reviewLoopInline, reviewLoopOrchestrator := resolveAgentPresenceSignals()
+	filerEnabled, workerProvisioned, reviewLoopInline, reviewLoopOrchestrator := resolveAgentPresenceSignals("")
 	if !filerEnabled {
 		t.Errorf("filerEnabled = false, want true (forwarded artifact)")
 	}
@@ -1600,7 +1600,7 @@ func TestResolveAgentPresenceSignals_OverrideAwayFromBakedDocumentFallsBack(t *t
 	t.Setenv("WORKER_MODEL", "claude-sonnet-5")
 	t.Setenv("ORCHESTRATOR_ENABLED", "1")
 
-	filerEnabled, workerProvisioned, reviewLoopInline, reviewLoopOrchestrator := resolveAgentPresenceSignals()
+	filerEnabled, workerProvisioned, reviewLoopInline, reviewLoopOrchestrator := resolveAgentPresenceSignals("")
 	if filerEnabled {
 		t.Errorf("filerEnabled = true, want false (trusted straight from the document's FILER_ENABLED artifact -- the roster pair's trust gate is independent of the ORCHESTRATOR_ENABLED override this test exercises)")
 	}
@@ -1654,7 +1654,7 @@ func TestResolveAgentPresenceSignals_FilerModelOverride_DocumentArtifactStillTru
 	t.Setenv("WORKER_MODEL", "claude-sonnet-5")
 	t.Setenv("ORCHESTRATOR_ENABLED", "")
 
-	filerEnabled, workerProvisioned, reviewLoopInline, reviewLoopOrchestrator := resolveAgentPresenceSignals()
+	filerEnabled, workerProvisioned, reviewLoopInline, reviewLoopOrchestrator := resolveAgentPresenceSignals("")
 	if filerEnabled {
 		t.Errorf("filerEnabled = true, want false (document's baked FILER_ENABLED artifact must be trusted regardless of a live FILER_MODEL override -- AGENTS_JSON_TEMPLATE is a fixed, non-overridable bake)")
 	}
@@ -1699,7 +1699,7 @@ func TestResolveAgentPresenceSignals_WorkerModelOverride_DocumentArtifactStillTr
 	t.Setenv("WORKER_MODEL", "")
 	t.Setenv("ORCHESTRATOR_ENABLED", "")
 
-	filerEnabled, workerProvisioned, reviewLoopInline, reviewLoopOrchestrator := resolveAgentPresenceSignals()
+	filerEnabled, workerProvisioned, reviewLoopInline, reviewLoopOrchestrator := resolveAgentPresenceSignals("")
 	if filerEnabled {
 		t.Errorf("filerEnabled = true, want false (forwarded artifact)")
 	}
@@ -1747,7 +1747,7 @@ func TestResolveAgentPresenceSignals_OrchestratorOverride_ReviewLoopStaysLiveDer
 	t.Setenv("WORKER_MODEL", "claude-sonnet-5")
 	t.Setenv("ORCHESTRATOR_ENABLED", "1")
 
-	filerEnabled, workerProvisioned, reviewLoopInline, reviewLoopOrchestrator := resolveAgentPresenceSignals()
+	filerEnabled, workerProvisioned, reviewLoopInline, reviewLoopOrchestrator := resolveAgentPresenceSignals("")
 	if filerEnabled {
 		t.Errorf("filerEnabled = true, want false (document's FILER_ENABLED artifact is trusted independent of the review-loop axis)")
 	}
@@ -1759,6 +1759,33 @@ func TestResolveAgentPresenceSignals_OrchestratorOverride_ReviewLoopStaysLiveDer
 	}
 	if !reviewLoopOrchestrator {
 		t.Errorf("reviewLoopOrchestrator = false, want true (override to orchestrator-on ignores stale baked REVIEW_LOOP_ORCHESTRATOR=false, falls back to live-derived value)")
+	}
+}
+
+// TestResolveAgentPresenceSignals_NoDocumentOpencodeDriverFallsBackFalse
+// verifies that the version-skew fallback (no document at all, so neither
+// FILER_ENABLED nor WORKER_PROVISIONED keys exist) is driver-aware (issue
+// #2533 review): lib/drivers/opencode.nix's agentsJsonTemplate always
+// renders "" regardless of roster contents (it provisions subagents via
+// on-disk agents/*.md files instead), so nix always bakes
+// FILER_ENABLED=WORKER_PROVISIONED=false for the opencode Driver
+// (mkharness-filer-worker-false-for-opencode-driver pins this on the nix
+// side) even with a non-empty FILER_MODEL/WORKER_MODEL configured. A
+// driver-blind fallback of filerModel != ""/workerModel != "" would report
+// both true here, diverging from what nix would have baked.
+func TestResolveAgentPresenceSignals_NoDocumentOpencodeDriverFallsBackFalse(t *testing.T) {
+	t.Cleanup(func() { loadedDoc = nil })
+	loadedDoc = nil
+	t.Setenv("FILER_MODEL", "haiku")
+	t.Setenv("WORKER_MODEL", "claude-sonnet-5")
+	t.Setenv("ORCHESTRATOR_ENABLED", "")
+
+	filerEnabled, workerProvisioned, _, _ := resolveAgentPresenceSignals("opencode")
+	if filerEnabled {
+		t.Errorf("filerEnabled = true, want false (opencode Driver always bakes FILER_ENABLED=false regardless of FILER_MODEL)")
+	}
+	if workerProvisioned {
+		t.Errorf("workerProvisioned = true, want false (opencode Driver always bakes WORKER_PROVISIONED=false regardless of WORKER_MODEL)")
 	}
 }
 
@@ -1793,7 +1820,7 @@ func TestResolveAgentPresenceSignals_PartialArtifactKeysFallsBack(t *testing.T) 
 	t.Setenv("WORKER_MODEL", "claude-sonnet-5")
 	t.Setenv("ORCHESTRATOR_ENABLED", "")
 
-	filerEnabled, workerProvisioned, reviewLoopInline, reviewLoopOrchestrator := resolveAgentPresenceSignals()
+	filerEnabled, workerProvisioned, reviewLoopInline, reviewLoopOrchestrator := resolveAgentPresenceSignals("")
 	if !filerEnabled {
 		t.Errorf("filerEnabled = false, want true (both roster-pair keys present, trusted from document despite the review-loop pair's missing key)")
 	}

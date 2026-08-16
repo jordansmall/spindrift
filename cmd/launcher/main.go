@@ -333,11 +333,12 @@ func resolveCapabilitySignals(codeForge, issueTracker string) capabilitySignals 
 // (issue #2533 review): reads the tracker-axis facts straight off the
 // matching backendRows entry instead of re-deriving the mapping with its
 // own name switch, so nix and Go read the one place the mapping is
-// declared and can never drift on it. TrackerAxisRead is never
-// legitimately empty for a real tracker row (only TrackerAxisWrite can
-// be, for "local"), so an empty TrackerAxisRead is the "unregistered
-// name" sentinel -- same default arm the old switch's `default:` case
-// used.
+// declared and can never drift on it. An empty TrackerAxisRead covers two
+// cases at once, both resolving to the same GITHUB/GITHUB/GH defaults: an
+// unregistered name (no row at all), and github/jira's own rows, whose
+// real resolved value IS "GITHUB" but whose Go zero value leaves the field
+// unset rather than spelling out the literal -- the same default arm the
+// old switch's `default:` case used either way.
 func trackerAxisSignals(issueTracker string) (read, write, filer string) {
 	row, ok := backendByName(issueTracker)
 	if !ok || row.TrackerAxisRead == "" {
@@ -346,12 +347,14 @@ func trackerAxisSignals(issueTracker string) (read, write, filer string) {
 	// TrackerAxisWrite is read as-is: unlike TrackerAxisRead/TrackerAxisFiler,
 	// "" is a legitimate resolved value for a found row (local, which has
 	// no write-step axis at all), not an unset-field placeholder. Filer
-	// gets the same per-field "GH" default lib/mkHarness.nix's
-	// `issueTrackerRow.trackerAxisFiler or "GH"` applies unconditionally,
-	// since a found row that doesn't override it (e.g. local, whose
-	// registry row omits trackerAxisFiler) leaves it at the Go zero value
-	// "" -- distinct from write's Go zero value, which for local IS the
-	// real resolved value.
+	// gets the same "GH" default a found row's own Go zero value produces
+	// when it doesn't override trackerAxisFiler (e.g. local's registry row
+	// omits it) -- matching lib/mkHarness.nix's
+	// `issueTrackerRow.trackerAxisFiler or "GH"` in effect for every row
+	// registered today, though the two mechanisms differ (nix's `or` fires
+	// on attribute absence; this fires on the empty string the renderer
+	// produces for an absent attribute) -- distinct from write's Go zero
+	// value, which for local IS the real resolved value.
 	filer = row.TrackerAxisFiler
 	if filer == "" {
 		filer = "GH"
@@ -443,19 +446,31 @@ func resolveTrackerAndForgeSignals(codeForge, issueTracker string) (read, write,
 // the trust check and the fallback consistently.
 //
 // On any individual missing-artifact-key fallback within either pair, the
-// fallback computation is unchanged: filerModel != ""/workerModel != "" for
-// the first two, !orchestratorOn/orchestratorOn for the latter two.
+// fallback computation for REVIEW_LOOP_INLINE/REVIEW_LOOP_ORCHESTRATOR is
+// unchanged: !orchestratorOn/orchestratorOn. FILER_ENABLED/WORKER_PROVISIONED
+// fall back to driver-aware mirror of agentsJsonTemplate above (opencode:
+// always false, matching lib/drivers/opencode.nix, pinned by
+// mkharness-filer-worker-false-for-opencode-driver; every other driver:
+// filerModel != ""/workerModel != "", matching lib/drivers/claude.nix's
+// "#392 semantics" empty-model drop) rather than a driver-blind
+// filerModel != ""/workerModel != "" that would report filerEnabled=true
+// for an opencode box with a configured FILER_MODEL even though nix always
+// bakes FILER_ENABLED=false for that Driver (issue #2533 review).
 // WorkerProvisioned in particular defaults false under the old
 // all-four-or-nothing behavior even though workerModel's own schema default
 // is non-empty (the worker is provisioned by default), and defaulting both
 // review-loop bools false violates their exactly-one-true invariant (issue
 // #2533 review).
-func resolveAgentPresenceSignals() (filerEnabled, workerProvisioned, reviewLoopInline, reviewLoopOrchestrator bool) {
+func resolveAgentPresenceSignals(driver string) (filerEnabled, workerProvisioned, reviewLoopInline, reviewLoopOrchestrator bool) {
 	filerModel := getenvSchema("FILER_MODEL")
 	workerModel := getenvSchema("WORKER_MODEL")
 	orchestratorEnabled := getenvSchema("ORCHESTRATOR_ENABLED")
 
-	filerEnabled, workerProvisioned = filerModel != "", workerModel != ""
+	if driver == "opencode" {
+		filerEnabled, workerProvisioned = false, false
+	} else {
+		filerEnabled, workerProvisioned = filerModel != "", workerModel != ""
+	}
 	if loadedDoc != nil {
 		_, filerOK := loadedDoc.Artifacts["FILER_ENABLED"]
 		_, workerOK := loadedDoc.Artifacts["WORKER_PROVISIONED"]
@@ -912,7 +927,7 @@ func boxTokenResolver(next func(num, name string) string) func(num, name string)
 func dispatchConfig(c config, it forge.IssueTracker, lw *localloop.Wired, cf forge.CodeForge) dispatch.Config {
 	sig := resolveCapabilitySignals(c.codeForge, c.issueTracker)
 	trackerAxisRead, trackerAxisWrite, trackerAxisFiler, forgeBackend := resolveTrackerAndForgeSignals(c.codeForge, c.issueTracker)
-	filerEnabled, workerProvisioned, reviewLoopInline, reviewLoopOrchestrator := resolveAgentPresenceSignals()
+	filerEnabled, workerProvisioned, reviewLoopInline, reviewLoopOrchestrator := resolveAgentPresenceSignals(c.driver)
 	return dispatch.Config{
 		BoxEnvVars:              c.boxEnvVars,
 		ResolveEnv:              boxTokenResolver(localBaseBranchResolver(c, it, lw, cf)),
