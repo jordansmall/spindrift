@@ -329,27 +329,45 @@ func resolveCapabilitySignals(codeForge, issueTracker string) capabilitySignals 
 	}
 }
 
-// trackerAxisSignals mirrors lib/mkHarness.nix's trackerAxisRead/Write/
-// Filer let-bindings (issue #2533) as a launcher-side fallback for when the
-// nix-forwarded artifact can't be trusted (see resolveTrackerAndForgeSignals).
+// trackerAxisSignals mirrors lib/backends/default.nix's registry rows
+// (issue #2533 review): reads the tracker-axis facts straight off the
+// matching backendRows entry instead of re-deriving the mapping with its
+// own name switch, so nix and Go read the one place the mapping is
+// declared and can never drift on it. TrackerAxisRead is never
+// legitimately empty for a real tracker row (only TrackerAxisWrite can
+// be, for "local"), so an empty TrackerAxisRead is the "unregistered
+// name" sentinel -- same default arm the old switch's `default:` case
+// used.
 func trackerAxisSignals(issueTracker string) (read, write, filer string) {
-	switch issueTracker {
-	case "local":
-		return "LOCAL", "", "GH"
-	case "forgejo":
-		return "FORGEJO", "FORGEJO", "FORGEJO"
-	default:
+	row, ok := backendByName(issueTracker)
+	if !ok || row.TrackerAxisRead == "" {
 		return "GITHUB", "GITHUB", "GH"
 	}
+	// TrackerAxisWrite is read as-is: unlike TrackerAxisRead/TrackerAxisFiler,
+	// "" is a legitimate resolved value for a found row (local, which has
+	// no write-step axis at all), not an unset-field placeholder. Filer
+	// gets the same per-field "GH" default lib/mkHarness.nix's
+	// `issueTrackerRow.trackerAxisFiler or "GH"` applies unconditionally,
+	// since a found row that doesn't override it (e.g. local, whose
+	// registry row omits trackerAxisFiler) leaves it at the Go zero value
+	// "" -- distinct from write's Go zero value, which for local IS the
+	// real resolved value.
+	filer = row.TrackerAxisFiler
+	if filer == "" {
+		filer = "GH"
+	}
+	return row.TrackerAxisRead, row.TrackerAxisWrite, filer
 }
 
-// forgeBackendSignal mirrors lib/mkHarness.nix's forgeBackend let-binding
-// (issue #2533).
+// forgeBackendSignal mirrors lib/backends/default.nix's registry rows
+// (issue #2533 review), the same registry-driven shape as
+// trackerAxisSignals above.
 func forgeBackendSignal(codeForge string) string {
-	if codeForge == "forgejo" {
-		return "FORGEJO"
+	row, ok := backendByName(codeForge)
+	if !ok || row.ForgeBackend == "" {
+		return "GH"
 	}
-	return "GH"
+	return row.ForgeBackend
 }
 
 // resolveTrackerAndForgeSignals returns the tracker-axis/forge-backend

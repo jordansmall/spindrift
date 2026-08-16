@@ -354,31 +354,21 @@ let
   inBoxUnreachableTracker = issueTrackerRow.inBoxUnreachableTracker or false;
   fullyLocal = hostMediatedRemote && inBoxUnreachableTracker;
 
-  # Tracker/forge axis strings derived from mergedDefaults.issueTracker/
-  # codeForge, threaded into the Launcher input document's `run` artifacts
+  # Tracker/forge axis strings derived from the same codeForgeRow/
+  # issueTrackerRow registry rows the capability signals above already
+  # read, threaded into the Launcher input document's `run` artifacts
   # (preambles.runArtifacts) as TRACKER_AXIS_READ / TRACKER_AXIS_WRITE /
-  # TRACKER_AXIS_FILER / FORGE_BACKEND (issue #2533). Mirrors the Go switch
-  # statement (issueTrackerAxis) that used to live in
-  # cmd/launcher/internal/promptassembly/gates_tracker.go and was deleted in
-  # a prior slice -- this nix computation supplies the real values a later
-  # slice will thread into the assemble-prompt CLI flags that now expect
-  # them instead of re-deriving the mapping in-box.
-  trackerAxisRead =
-    if mergedDefaults.issueTracker == "local" then
-      "LOCAL"
-    else if mergedDefaults.issueTracker == "forgejo" then
-      "FORGEJO"
-    else
-      "GITHUB";
-  trackerAxisWrite =
-    if mergedDefaults.issueTracker == "local" then
-      ""
-    else if mergedDefaults.issueTracker == "forgejo" then
-      "FORGEJO"
-    else
-      "GITHUB";
-  trackerAxisFiler = if mergedDefaults.issueTracker == "forgejo" then "FORGEJO" else "GH";
-  forgeBackend = if mergedDefaults.codeForge == "forgejo" then "FORGEJO" else "GH";
+  # TRACKER_AXIS_FILER / FORGE_BACKEND (issue #2533; review finding: this
+  # used to be its own hand-rolled if/else chain sitting three lines below
+  # the registry-row reads for the other four capability signals, with no
+  # drift check tying it to cmd/launcher/main.go's matching Go switch --
+  # now both sides read the same lib/backends/default.nix row fields
+  # (trackerAxisRead/Write/Filer, forgeBackend), eliminating the last
+  # hand-rolled switch on this axis.
+  trackerAxisRead = issueTrackerRow.trackerAxisRead or "GITHUB";
+  trackerAxisWrite = issueTrackerRow.trackerAxisWrite or "GITHUB";
+  trackerAxisFiler = issueTrackerRow.trackerAxisFiler or "GH";
+  forgeBackend = codeForgeRow.forgeBackend or "GH";
 
   # Eval-time choices guard (issue #2519 slice 2): lib/flakeModule.nix's
   # generated Consumer options use `types.enum` for every schema knob

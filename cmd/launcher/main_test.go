@@ -1363,6 +1363,29 @@ func TestResolveCapabilitySignals_MatchingDocumentPartialArtifactKeysFallsBack(t
 	}
 }
 
+// TestTrackerAxisSignalsAndForgeBackendSignal_UnregisteredNameFallsBack
+// verifies that trackerAxisSignals/forgeBackendSignal fall back to the
+// default arm (GITHUB/GITHUB/GH, GH) for a name with no backendRows entry
+// at all, exercised directly rather than only through the registered
+// names (github/local/forgejo/jira) resolveTrackerAndForgeSignals's other
+// tests cover -- the registry-driven bodies (issue #2533 review) resolve
+// this case via `backendByName` returning ok=false / a zero-value
+// Descriptor (TrackerAxisRead=="" / ForgeBackend==""), the same sentinel
+// an unregistered CODE_FORGE/ISSUE_TRACKER name has always produced, but
+// unlike the deleted hand-written switch statements' `default:` case, this
+// is a genuinely distinct code path (the "not found" branch) worth its own
+// coverage rather than an assumed side effect of the known-name tests.
+func TestTrackerAxisSignalsAndForgeBackendSignal_UnregisteredNameFallsBack(t *testing.T) {
+	read, write, filer := trackerAxisSignals("not-a-real-backend")
+	if read != "GITHUB" || write != "GITHUB" || filer != "GH" {
+		t.Errorf("trackerAxisSignals(unregistered) = (%q,%q,%q), want (GITHUB,GITHUB,GH)", read, write, filer)
+	}
+
+	if got := forgeBackendSignal("not-a-real-backend"); got != "GH" {
+		t.Errorf("forgeBackendSignal(unregistered) = %q, want GH", got)
+	}
+}
+
 // TestResolveTrackerAndForgeSignals_NoDocumentFallsBackToComputation verifies
 // that with no loaded document, resolveTrackerAndForgeSignals always derives
 // the tracker-axis/forge-backend strings fresh from the pure mirror of

@@ -27,6 +27,7 @@ var Local = Descriptor{
 	InBoxUnreachableTracker: true,
 	RelayCapable:            true,
 	HostPostingCapable:      true,
+	TrackerAxisRead:         "LOCAL",
 }
 
 // Jira is the descriptor for the "jira" backend.
@@ -48,6 +49,10 @@ var Forgejo = Descriptor{
 	DoctorSlugHint:     "FORGEJO_BASE_URL",
 	RelayCapable:       true,
 	HostPostingCapable: true,
+	TrackerAxisRead:    "FORGEJO",
+	TrackerAxisWrite:   "FORGEJO",
+	TrackerAxisFiler:   "FORGEJO",
+	ForgeBackend:       "FORGEJO",
 }
 
 var Registry = []Descriptor{GitHub, Git, Local, Jira, Forgejo}

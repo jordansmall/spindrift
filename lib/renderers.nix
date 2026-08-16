@@ -528,6 +528,10 @@ rec {
         "outboxRelayCapable"
         "relayCapable"
         "hostPostingCapable"
+        "trackerAxisRead"
+        "trackerAxisWrite"
+        "trackerAxisFiler"
+        "forgeBackend"
       ];
       checkRow =
         row:
@@ -561,6 +565,10 @@ rec {
         + fieldLine "OutboxRelayCapable" (row.outboxRelayCapable or false)
         + fieldLine "RelayCapable" (row.relayCapable or false)
         + fieldLine "HostPostingCapable" (row.hostPostingCapable or false)
+        + fieldLine "TrackerAxisRead" (row.trackerAxisRead or "")
+        + fieldLine "TrackerAxisWrite" (row.trackerAxisWrite or "")
+        + fieldLine "TrackerAxisFiler" (row.trackerAxisFiler or "")
+        + fieldLine "ForgeBackend" (row.forgeBackend or "")
         + "}\n";
       checkedBackends = map checkRow backends;
       rows = concatStrings (map renderRow checkedBackends);
