@@ -32,15 +32,15 @@ build:
   the whole module.
 
 Do not run `nix build` (any target, including `checks-inbox`), `nix flake
-check`, or anything else that triggers a Nix store round-trip. You are one
-of several workers dispatched fully concurrently on isolated worktrees; a
-store build in one worker is a store build in K workers at once, and it is
+check`, or anything else that triggers a Nix store round-trip. Whether
+you're one of several workers running fully concurrently on isolated
+worktrees or the sole worker handling one slice at a time, a store build is
 never yours to run — the authoritative `checks-inbox` run happens exactly
 once, later, owned by the coordinator on the fully-integrated tree, never
 inside your own isolated worktree.
 
 If a per-file gate fails, do not escalate to a store build to investigate —
 report the specific failing command and its output/exit status plainly in
-your final report (the same result file this prompt already directs you to
-write to, via resultPath), so the coordinator can scope the fix from that
-report alone.
+your final report, so the coordinator can scope the fix from that report
+alone. If your delegation names a result file to write to, write it there
+instead of your final message.

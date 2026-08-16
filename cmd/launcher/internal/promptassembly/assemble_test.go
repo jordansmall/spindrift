@@ -1122,14 +1122,17 @@ func TestAssembleOrchestratorWorkerPromptForbidsStoreBuild(t *testing.T) {
 		t.Fatal("Handoff.WorkerPromptFile is empty, want non-empty")
 	}
 
+	// Presence alone isn't enough: a CHECK section that *prescribes*
+	// `nix build .#checks-inbox` still contains the phrases "nix build"
+	// and "checks-inbox", and the doc's own unrelated "Do not expand
+	// scope" line (line 6) already satisfies a bare "do not" search. Tie
+	// the forbidding word to the same sentence as the store-build phrase
+	// so a prescribing prompt actually fails this test.
 	forbidding := []string{"nix build", "checks-inbox"}
 	for _, phrase := range forbidding {
-		if !strings.Contains(prompt, phrase) {
-			t.Errorf("WorkerPromptFile missing forbidding reference to %q, want it to name and forbid store builds:\n%s", phrase, prompt)
+		if !sentenceForbids(prompt, phrase) {
+			t.Errorf("WorkerPromptFile doesn't forbid %q in the same sentence as a do-not/never/must-not phrase, want it named and forbidden together:\n%s", phrase, prompt)
 		}
-	}
-	if !strings.Contains(strings.ToLower(prompt), "do not") && !strings.Contains(strings.ToLower(prompt), "never") && !strings.Contains(strings.ToLower(prompt), "must not") {
-		t.Errorf("WorkerPromptFile missing an unambiguous forbidding phrase (do not / never / must not) around store builds:\n%s", prompt)
 	}
 
 	prescriptive := []string{"nil diagnostics", "shellcheck", "go vet", "go test"}
@@ -1137,6 +1140,57 @@ func TestAssembleOrchestratorWorkerPromptForbidsStoreBuild(t *testing.T) {
 		if !strings.Contains(prompt, phrase) {
 			t.Errorf("WorkerPromptFile missing sanctioned per-file gate %q, want it prescribed:\n%s", phrase, prompt)
 		}
+	}
+}
+
+// sentenceForbids reports whether prompt contains phrase inside a sentence
+// (a hard-wrapped line, further split on ". ") that also carries an
+// unambiguous forbidding word (do not / never / must not) -- catches a
+// prompt that merely *mentions* phrase elsewhere (prescriptively, or in an
+// unrelated sentence) without actually forbidding it. Splitting on line
+// breaks first, then ". ", keeps a markdown doc's own hard-wrapped
+// paragraphs (where a sentence's mid-point line break carries no trailing
+// space) from being silently merged with the next paragraph.
+func sentenceForbids(prompt, phrase string) bool {
+	for _, line := range strings.Split(prompt, "\n") {
+		for _, sentence := range strings.Split(line, ". ") {
+			if !strings.Contains(sentence, phrase) {
+				continue
+			}
+			lower := strings.ToLower(sentence)
+			if strings.Contains(lower, "do not") || strings.Contains(lower, "never") || strings.Contains(lower, "must not") {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// TestSentenceForbidsRejectsPrescriptiveMention pins the exact failure mode
+// TestAssembleOrchestratorWorkerPromptForbidsStoreBuild must not reproduce:
+// a CHECK section that *prescribes* running checks-inbox mentions both
+// "nix build" and "checks-inbox" (so a bare substring-presence check would
+// pass it) and an unrelated sentence elsewhere may say "do not" about
+// something else entirely (so a whole-document "do not" search would also
+// pass it). sentenceForbids must reject both.
+func TestSentenceForbidsRejectsPrescriptiveMention(t *testing.T) {
+	prescriptive := "Do not expand scope beyond your slice.\n\n" +
+		"## CHECK\n\n" +
+		"Run `nix build .#checks-inbox` to check your slice before committing."
+	if sentenceForbids(prescriptive, "nix build") {
+		t.Error("sentenceForbids(prescriptive, \"nix build\") = true, want false: the prompt prescribes nix build, it never forbids it")
+	}
+	if sentenceForbids(prescriptive, "checks-inbox") {
+		t.Error("sentenceForbids(prescriptive, \"checks-inbox\") = true, want false: the prompt prescribes checks-inbox, it never forbids it")
+	}
+
+	forbidding := "Do not run `nix build` (any target, including `checks-inbox`), " +
+		"or anything else that triggers a Nix store round-trip."
+	if !sentenceForbids(forbidding, "nix build") {
+		t.Error("sentenceForbids(forbidding, \"nix build\") = false, want true")
+	}
+	if !sentenceForbids(forbidding, "checks-inbox") {
+		t.Error("sentenceForbids(forbidding, \"checks-inbox\") = false, want true")
 	}
 }
 
