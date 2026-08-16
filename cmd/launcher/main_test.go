@@ -1183,6 +1183,8 @@ func TestValidate_RepoSlugRequired(t *testing.T) {
 func TestValidate_FullyLocalExemptsRepoSlugAndGhToken(t *testing.T) {
 	c := minimalValidLocalConfig()
 	c.issueTracker = "local"
+	c.inBoxUnreachableTracker = true
+	c.fullyLocal = true
 	c.repoSlug = ""
 	c.ghToken = ""
 	if err := validate(c); err != nil {
@@ -1209,12 +1211,14 @@ func TestValidate_MixedLocalStillRequiresRepoSlugAndGhToken(t *testing.T) {
 	// CODE_FORGE=github (default), ISSUE_TRACKER=local.
 	c = minimalValidConfig()
 	c.issueTracker = "local"
+	c.inBoxUnreachableTracker = true
 	c.repoSlug = ""
 	if err := validate(c); err == nil {
 		t.Error("validate() must still require REPO_SLUG when only ISSUE_TRACKER is local")
 	}
 	c = minimalValidConfig()
 	c.issueTracker = "local"
+	c.inBoxUnreachableTracker = true
 	c.ghToken = ""
 	if err := validate(c); err == nil {
 		t.Error("validate() must still require GH_TOKEN when only ISSUE_TRACKER is local")
@@ -1231,6 +1235,7 @@ func TestValidate_ResearchSelfContainedExemptsRepoSlugAndGhToken(t *testing.T) {
 	c := applyDispatchKind(minimalValidConfig(), dispatchKindResearch)
 	c.selfContained = true
 	c.issueTracker = "local"
+	c.inBoxUnreachableTracker = true
 	c.repoSlug = ""
 	c.ghToken = ""
 	if err := validate(c); err != nil {
@@ -2533,12 +2538,18 @@ func TestSettleConfig_Local_CodeForgeForIssueResolvesEachIssuesOwnParent(t *test
 // minimalValidLocalConfig returns a minimalValidConfig() wired for a valid
 // CODE_FORGE=local run (accumulation dir and the only merge mode local
 // accepts), so local-specific tests only need to override the one field
-// under test.
+// under test. hostMediatedRemote is set to mirror codeForge="local" (issue
+// #2527 slice 1's nix-forwarded capability signal, no longer derived from
+// codeForge inside validate()); callers that also want the ISSUE_TRACKER
+// side of the fully-local exemption must set c.inBoxUnreachableTracker
+// themselves alongside c.issueTracker = "local", the same way they already
+// set the raw backend name.
 func minimalValidLocalConfig() config {
 	c := minimalValidConfig()
 	c.codeForge = "local"
 	c.codeForgeAccumulationRepoDir = ".spindrift/accum.git"
 	c.mergeMode = "immediate"
+	c.hostMediatedRemote = true
 	return c
 }
 
