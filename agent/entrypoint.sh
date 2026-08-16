@@ -681,6 +681,14 @@ phase_prompt_assembly() {
     --agents-json-template "${AGENTS_JSON_TEMPLATE:-}"
     --issue-tracker "${ISSUE_TRACKER:-}"
     --code-forge "${CODE_FORGE:-}"
+    # Nix-precomputed static gate values (issue #2533) forwarded verbatim as
+    # BOX_* env vars -- assembleprompt_cmd.go re-derives nothing from them,
+    # it just receives the axis/backend strings the flake eval already
+    # settled per-tracker.
+    --tracker-axis-read "${BOX_TRACKER_AXIS_READ:-}"
+    --tracker-axis-write "${BOX_TRACKER_AXIS_WRITE:-}"
+    --tracker-axis-filer "${BOX_TRACKER_AXIS_FILER:-}"
+    --forge-backend "${BOX_FORGE_BACKEND:-}"
     --dispatch-kind "${DISPATCH_KIND:-}"
     --fix-pass "${FIX_PASS:-0}"
     --prompts-dir "$PROMPTS_DIR"
@@ -726,6 +734,12 @@ phase_prompt_assembly() {
   [ -n "$ORCHESTRATOR" ] && _ap_args+=(--orchestrator-enabled)
   [ -n "${BOX_WRITE_ENABLED:-}" ] && _ap_args+=(--box-write-enabled)
   [ -n "${LOCAL_ISSUE_REFERENCE:-}" ] && _ap_args+=(--local-issue-reference)
+  # More nix-precomputed static gates (issue #2533), presence-only like the
+  # flags just above -- forwarded verbatim, not derived here.
+  [ -n "${BOX_FILER_ENABLED:-}" ] && _ap_args+=(--filer-enabled)
+  [ -n "${BOX_WORKER_PROVISIONED:-}" ] && _ap_args+=(--worker-provisioned)
+  [ -n "${BOX_REVIEW_LOOP_INLINE:-}" ] && _ap_args+=(--review-loop-inline)
+  [ -n "${BOX_REVIEW_LOOP_ORCHESTRATOR:-}" ] && _ap_args+=(--review-loop-orchestrator)
   _is_self_contained && _ap_args+=(--self-contained)
   [ -n "${RESUME_AFTER_HOLD:-}" ] && _ap_args+=(--resume-after-hold)
   [ -n "${AUTO_FORMAT:-}" ] && _ap_args+=(--auto-format)
