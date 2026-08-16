@@ -117,8 +117,10 @@ func TestAssembleCoveredCellRendersPrompt(t *testing.T) {
 
 	// ISSUE_TRACKER_GITHUB's fragment text must appear, and its off-gate
 	// siblings' assigned vars must render empty (never a literal
-	// unsubstituted token).
-	if !strings.Contains(result.Prompt, "gh issue view") {
+	// unsubstituted token). Issue #2547: the fragment now points at the
+	// frozen host-written snapshot file instead of a live `gh issue view`
+	// call.
+	if !strings.Contains(result.Prompt, "cat /issue-snapshot.md") {
 		t.Errorf("Prompt missing ISSUE_TRACKER_GITHUB fragment text (issue-read-github.md)")
 	}
 }
@@ -696,6 +698,15 @@ func TestAssembleResearchKindRendersResearchPrompt(t *testing.T) {
 	if result.Handoff.SessionMode != "initial" {
 		t.Errorf("Handoff.SessionMode = %q, want %q even with ResumeAfterHold set", result.Handoff.SessionMode, "initial")
 	}
+	// Issue #2547 only re-points the issue-read/review-issue-read fragment
+	// pair at the frozen snapshot file -- research-issue-read-github.md is
+	// deliberately untouched and must still perform its own live `gh issue
+	// view` read (research needs the freshest possible issue state, and
+	// also re-checks for a prior research comment the frozen snapshot,
+	// captured once at box start, would never see).
+	if !strings.Contains(result.Prompt, "gh issue view") {
+		t.Errorf("Prompt missing research-issue-read-github.md's live gh issue view call, want it unaffected by issue #2547:\n%s", result.Prompt)
+	}
 }
 
 // TestAssembleResearchSelfContainedRendersSelfContainedPrompt covers the
@@ -978,7 +989,9 @@ func TestAssembleInjectedBlockSubstitutesTokens(t *testing.T) {
 
 // TestAssembleLocalTracker covers the local-tracker cell (issue #2352):
 // Assemble accepts IssueTracker == "local" and renders issue-read-local.md's
-// fragment text, never issue-read-github.md's "gh issue view".
+// fragment text. Issue #2547: issue-read-local.md now points at the frozen
+// host-written /issue-snapshot.md, same as every other tracker's issue-read
+// fragment, rather than a tracker-specific live-read caveat.
 func TestAssembleLocalTracker(t *testing.T) {
 	reg := loadTestRegistry(t)
 	env := localTrackerEnv()
@@ -988,11 +1001,11 @@ func TestAssembleLocalTracker(t *testing.T) {
 		t.Fatalf("Assemble: %v", err)
 	}
 
-	if !strings.Contains(result.Prompt, "This is a local issue with no GitHub-side counterpart") {
+	if !strings.Contains(result.Prompt, "cat /issue-snapshot.md") {
 		t.Errorf("Prompt missing ISSUE_TRACKER_LOCAL fragment text (issue-read-local.md):\n%s", result.Prompt)
 	}
 	if strings.Contains(result.Prompt, "gh issue view") {
-		t.Errorf("Prompt contains ISSUE_TRACKER_GITHUB fragment text (issue-read-github.md), want local tracker's fragment only")
+		t.Errorf("Prompt contains a live gh issue view call, want only the frozen snapshot read")
 	}
 }
 
@@ -1043,9 +1056,10 @@ func TestAssembleLocalTrackerWithoutLocalIssueReference(t *testing.T) {
 // TestAssembleForgejoTrackerReadWrite covers the forgejo-tracker cell,
 // read-write box (issue #2352, ADR 0022's read-write-only acceptance
 // criterion -- read-only tracker cells are out of scope): Assemble accepts
-// IssueTracker == "forgejo" and renders issue-read-forgejo.md's
-// distinguishing "fj issue view" text, never issue-read-github.md's "gh
-// issue view".
+// IssueTracker == "forgejo" and renders issue-read-forgejo.md's fragment
+// text. Issue #2547: issue-read-forgejo.md now points at the frozen
+// host-written /issue-snapshot.md, same as every other tracker's issue-read
+// fragment, rather than a live "fj issue view" call.
 func TestAssembleForgejoTrackerReadWrite(t *testing.T) {
 	reg := loadTestRegistry(t)
 	env := coveredEnv()
@@ -1059,11 +1073,131 @@ func TestAssembleForgejoTrackerReadWrite(t *testing.T) {
 		t.Fatalf("Assemble: %v", err)
 	}
 
-	if !strings.Contains(result.Prompt, "fj issue view") {
+	if !strings.Contains(result.Prompt, "cat /issue-snapshot.md") {
 		t.Errorf("Prompt missing ISSUE_TRACKER_FORGEJO fragment text (issue-read-forgejo.md):\n%s", result.Prompt)
+	}
+	if strings.Contains(result.Prompt, "fj issue view") {
+		t.Errorf("Prompt contains a live fj issue view call, want only the frozen snapshot read")
 	}
 	if strings.Contains(result.Prompt, "gh issue view") {
 		t.Errorf("Prompt contains ISSUE_TRACKER_GITHUB fragment text (issue-read-github.md), want forgejo tracker's fragment only")
+	}
+}
+
+// TestAssembleIssueReadUsesSnapshotFile covers issue #2547: the issue-read
+// step for a work (implement) dispatch no longer performs a live tracker
+// read -- lib/fragments.nix's ISSUE_TRACKER_GITHUB/LOCAL/FORGEJO-gated
+// issue-read-*.md fragments all point at the frozen /issue-snapshot.md file
+// the host writes once at the true first attempt of the initial box
+// dispatch (Dispatch.Run, cmd/launcher/internal/dispatch/box.go) and mounts
+// read-only into the Box, so every tracker's rendered fragment text
+// converges on the identical snapshot-file read -- no more per-tracker
+// live gh/fj/local-file read, and none of the old live-call mechanisms
+// survive in the rendered prompt.
+func TestAssembleIssueReadUsesSnapshotFile(t *testing.T) {
+	reg := loadTestRegistry(t)
+
+	cases := []struct {
+		name string
+		env  func() Env
+	}{
+		{name: "github", env: coveredEnv},
+		{name: "local", env: localTrackerEnv},
+		{name: "forgejo", env: func() Env {
+			env := coveredEnv()
+			env.IssueTracker = "forgejo"
+			env.TrackerAxisRead = "FORGEJO"
+			env.TrackerAxisWrite = "FORGEJO"
+			env.TrackerAxisFiler = "FORGEJO"
+			return env
+		}},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			env := tc.env()
+
+			result, err := Assemble(env, reg)
+			if err != nil {
+				t.Fatalf("Assemble: %v", err)
+			}
+
+			if !strings.Contains(result.Prompt, "cat /issue-snapshot.md") {
+				t.Errorf("Prompt missing the frozen issue-snapshot read for tracker %s:\n%s", tc.name, result.Prompt)
+			}
+			for _, oldMechanism := range []string{
+				"gh issue view",
+				"fj issue view",
+				"do not fetch it from the tracker",
+			} {
+				if strings.Contains(result.Prompt, oldMechanism) {
+					t.Errorf("Prompt still contains old live-read mechanism %q for tracker %s, want only the snapshot file read:\n%s", oldMechanism, tc.name, result.Prompt)
+				}
+			}
+		})
+	}
+}
+
+// TestAssembleReviewIssueReadUsesSnapshotFile covers the review-prompt.md
+// twin of TestAssembleIssueReadUsesSnapshotFile above: the
+// REVIEW_ISSUE_READ_GITHUB/LOCAL/FORGEJO-gated review-issue-read-*.md
+// fragments (rendered into Handoff.ReviewPromptFile, not Result.Prompt --
+// TestAssembleOrchestratorReviewerDrop covers the same field) also converge
+// on the frozen /issue-snapshot.md read for every tracker.
+func TestAssembleReviewIssueReadUsesSnapshotFile(t *testing.T) {
+	reg := loadTestRegistry(t)
+
+	cases := []struct {
+		name string
+		env  func() Env
+	}{
+		{name: "github", env: func() Env {
+			env := coveredEnv()
+			env.OrchestratorEnabled = true
+			return env
+		}},
+		{name: "local", env: func() Env {
+			env := localTrackerEnv()
+			env.OrchestratorEnabled = true
+			return env
+		}},
+		{name: "forgejo", env: func() Env {
+			env := coveredEnv()
+			env.OrchestratorEnabled = true
+			env.IssueTracker = "forgejo"
+			env.TrackerAxisRead = "FORGEJO"
+			env.TrackerAxisWrite = "FORGEJO"
+			env.TrackerAxisFiler = "FORGEJO"
+			return env
+		}},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			env := tc.env()
+
+			result, err := Assemble(env, reg)
+			if err != nil {
+				t.Fatalf("Assemble: %v", err)
+			}
+
+			prompt := result.Handoff.ReviewPromptFile
+			if prompt == "" {
+				t.Fatal("Handoff.ReviewPromptFile is empty, want non-empty")
+			}
+			if !strings.Contains(prompt, "cat /issue-snapshot.md") {
+				t.Errorf("ReviewPromptFile missing the frozen issue-snapshot read for tracker %s:\n%s", tc.name, prompt)
+			}
+			for _, oldMechanism := range []string{
+				"gh issue view",
+				"fj issue view",
+				"cat /issues/${ISSUE_NUMBER}.md",
+			} {
+				if strings.Contains(prompt, oldMechanism) {
+					t.Errorf("ReviewPromptFile still contains old live-read mechanism %q for tracker %s, want only the snapshot file read:\n%s", oldMechanism, tc.name, prompt)
+				}
+			}
+		})
 	}
 }
 
