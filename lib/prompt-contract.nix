@@ -12,42 +12,13 @@
 let
   promptInject = import ./prompt-inject.nix;
   researchVerdicts = import ./research-verdicts.nix;
+  builtinsCompat = import ./builtins-compat.nix;
 
   # Does `text` contain the literal (non-regex) `needle` -- mirrors
   # lib/prompt-inject.nix's own splitOnce/injectSection idiom
   # (builtins.split on a regex-escaped literal, checking for more than the
-  # one no-match part) without depending on that file's private, unexported
-  # escapeRegex: reimplemented locally, same as hasSuffix/removeSuffix below,
-  # because this file stays pure-builtins per the header comment above.
-  hasInfix =
-    needle: text:
-    builtins.length (
-      builtins.split (
-        builtins.replaceStrings
-          [ "\\" "^" "$" "." "|" "?" "*" "+" "(" ")" "[" "]" "{" "}" ]
-          [ "\\\\" "\\^" "\\$" "\\." "\\|" "\\?" "\\*" "\\+" "\\(" "\\)" "\\[" "\\]" "\\{" "\\}" ]
-          needle
-      ) text
-    ) > 1;
-
-  # Byte-for-byte copies of lib/prompt-inject.nix's own private hasSuffix/
-  # removeSuffix -- not exported there, so reimplemented locally rather than
-  # imported, same as hasInfix above -- needed only by ensureTrailingBlankLine
-  # below.
-  hasSuffix =
-    suffix: content:
-    let
-      lenContent = builtins.stringLength content;
-      lenSuffix = builtins.stringLength suffix;
-    in
-    lenContent >= lenSuffix && builtins.substring (lenContent - lenSuffix) lenSuffix content == suffix;
-
-  removeSuffix =
-    suffix: content:
-    if hasSuffix suffix content then
-      builtins.substring 0 (builtins.stringLength content - builtins.stringLength suffix) content
-    else
-      content;
+  # one no-match part).
+  hasInfix = needle: text: builtins.length (builtins.split (builtinsCompat.escapeRegex needle) text) > 1;
 
   # sliceBetween's own doc comment (lib/prompt-inject.nix) notes "a sliced
   # shared block already ends with the blank line that separated it from the
@@ -70,7 +41,8 @@ let
   # invariant naturally (the "check" block's comms sibling included), and a
   # single appended "\n\n" for a row -- like "check" now -- whose source text
   # doesn't.
-  ensureTrailingBlankLine = s: if hasSuffix "\n\n" s then s else removeSuffix "\n" s + "\n\n";
+  ensureTrailingBlankLine =
+    s: if builtinsCompat.hasSuffix "\n\n" s then s else builtinsCompat.removeSuffix "\n" s + "\n\n";
 
   # Slices one injectBlocks row's canonical text live from its declared
   # `source` prompt file -- never a standalone contract file, so this can
