@@ -28,26 +28,38 @@ setup() {
 # Regression guard: only the CODE_FORGE=local AND ISSUE_TRACKER=local
 # combination relaxes the guards above. Anything short of that (here,
 # CODE_FORGE left at its github default while ISSUE_TRACKER=local) must
-# still demand REPO_SLUG and GH_TOKEN, same as before this change.
-@test "non-fully-local mode (local tracker only) still requires REPO_SLUG and GH_TOKEN" {
+# still demand GH_TOKEN, same as before this change. REPO_SLUG's own
+# requirement moved solely to the launcher's validate()
+# (cmd/launcher/main.go, host-side, before the Box starts) plus a
+# build-time nix eval assert (lib/mkHarness.nix's repoSlugCoherenceOk,
+# for a Consumer-pinned empty repoSlug) -- entrypoint.sh itself no longer
+# re-checks it (issue #2527), so this test, which invokes entrypoint.sh
+# standalone, can't exercise that path anymore.
+@test "non-fully-local mode (local tracker only) still requires GH_TOKEN" {
   export ISSUE_TRACKER="local"
   unset GH_TOKEN REPO_SLUG
 
   run bash "$ENTRYPOINT"
   [ "$status" -ne 0 ]
-  [[ "$output" == *"REPO_SLUG (owner/repo) is required"* ]]
+  [[ "$output" == *"GH_TOKEN is required"* ]]
 }
 
 # Mirror of the guard above: the other half of the AND (CODE_FORGE=local while
 # ISSUE_TRACKER stays at its github default) is equally short of fully-local,
-# so it too must still demand REPO_SLUG and GH_TOKEN.
-@test "non-fully-local mode (local forge only) still requires REPO_SLUG and GH_TOKEN" {
+# so it too must still demand GH_TOKEN. REPO_SLUG's own requirement moved
+# solely to the launcher's validate() (cmd/launcher/main.go, host-side,
+# before the Box starts) plus a build-time nix eval assert
+# (lib/mkHarness.nix's repoSlugCoherenceOk, for a Consumer-pinned empty
+# repoSlug) -- entrypoint.sh itself no longer re-checks it (issue #2527),
+# so this test, which invokes entrypoint.sh standalone, can't exercise
+# that path anymore.
+@test "non-fully-local mode (local forge only) still requires GH_TOKEN" {
   export CODE_FORGE="local"
   unset GH_TOKEN REPO_SLUG
 
   run bash "$ENTRYPOINT"
   [ "$status" -ne 0 ]
-  [[ "$output" == *"REPO_SLUG (owner/repo) is required"* ]]
+  [[ "$output" == *"GH_TOKEN is required"* ]]
 }
 
 # GIT_USER_NAME, GIT_USER_EMAIL, and ISSUE_NUMBER stay unconditional even in
