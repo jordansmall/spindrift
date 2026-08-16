@@ -37,11 +37,19 @@ func runAssemblePrompt(args []string, stdout io.Writer) int {
 	// END GENERATED SKILL-BAKED FLAGS
 
 	orchestratorEnabled := fs.Bool("orchestrator-enabled", false, "true when ORCHESTRATOR_ENABLED is set")
+	reviewLoopInline := fs.Bool("review-loop-inline", false, "nix-resolved REVIEW_LOOP_INLINE gate: !ORCHESTRATOR_ENABLED")
+	reviewLoopOrchestrator := fs.Bool("review-loop-orchestrator", false, "nix-resolved REVIEW_LOOP_ORCHESTRATOR gate: ORCHESTRATOR_ENABLED verbatim")
 	agentsJSONTemplate := fs.String("agents-json-template", "", "the nix-baked --agents JSON template, empty when no subagent model is configured")
+	filerEnabled := fs.Bool("filer-enabled", false, "nix-resolved roster fact: roster carries a \"filer\" entry")
+	workerProvisioned := fs.Bool("worker-provisioned", false, "nix-resolved roster fact: roster carries a \"worker\" entry")
 	issueTracker := fs.String("issue-tracker", "", "ISSUE_TRACKER value, defaults to github when empty")
+	trackerAxisRead := fs.String("tracker-axis-read", "", "nix-precomputed tracker read-axis suffix (GITHUB/LOCAL/FORGEJO)")
+	trackerAxisWrite := fs.String("tracker-axis-write", "", "nix-precomputed tracker write-axis suffix (GITHUB/FORGEJO, empty when the tracker has no direct-write path)")
+	trackerAxisFiler := fs.String("tracker-axis-filer", "", "nix-precomputed tracker filer-axis suffix (GH/FORGEJO)")
 	boxWriteEnabled := fs.Bool("box-write-enabled", false, "true when BOX_WRITE_ENABLED is set")
 	localIssueReference := fs.Bool("local-issue-reference", false, "true when LOCAL_ISSUE_REFERENCE is set")
 	codeForge := fs.String("code-forge", "", "CODE_FORGE value, defaults to github when empty")
+	forgeBackend := fs.String("forge-backend", "", "nix-precomputed CODE_FORGE backend suffix (GH/FORGEJO)")
 	dispatchKind := fs.String("dispatch-kind", "", "DISPATCH_KIND value, defaults to work when empty")
 	selfContained := fs.Bool("self-contained", false, "true when SELF_CONTAINED == 1")
 	fixPass := fs.Int("fix-pass", 0, "FIX_PASS number; >0 selects fix-prompt.md")
@@ -109,15 +117,27 @@ func runAssemblePrompt(args []string, stdout io.Writer) int {
 
 		OrchestratorEnabled: *orchestratorEnabled,
 
+		ReviewLoopInline:       *reviewLoopInline,
+		ReviewLoopOrchestrator: *reviewLoopOrchestrator,
+
 		AgentsJSONTemplate: *agentsJSONTemplate,
 
+		FilerEnabled:      *filerEnabled,
+		WorkerProvisioned: *workerProvisioned,
+
 		IssueTracker: *issueTracker,
+
+		TrackerAxisRead:  *trackerAxisRead,
+		TrackerAxisWrite: *trackerAxisWrite,
+		TrackerAxisFiler: *trackerAxisFiler,
 
 		BoxWriteEnabled: *boxWriteEnabled,
 
 		LocalIssueReference: *localIssueReference,
 
 		CodeForge: *codeForge,
+
+		ForgeBackend: *forgeBackend,
 
 		DispatchKind:    *dispatchKind,
 		SelfContained:   *selfContained,

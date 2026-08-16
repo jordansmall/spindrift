@@ -315,6 +315,112 @@ func TestRunAssemblePrompt_ValidatorWarnStillWritesOutputs(t *testing.T) {
 	}
 }
 
+// TestRunAssemblePrompt_TrackerAxisFlagsReachGates verifies the
+// --tracker-axis-read/--tracker-axis-write/--tracker-axis-filer flags reach
+// promptassembly.Env's TrackerAxisRead/TrackerAxisWrite/TrackerAxisFiler
+// fields (issue #2533 slice 2): setting --tracker-axis-read=FORGEJO fires
+// the ISSUE_TRACKER_FORGEJO gate (gates_tracker.go reads the axis fields
+// directly, no longer re-deriving them from --issue-tracker), rendering
+// issue-read-forgejo.md's distinctive "fj issue view" text instead of
+// issue-read-github.md's "gh issue view" -- even though --issue-tracker
+// itself is left at "github", since checkCoveredCell no longer re-validates
+// IssueTracker (issue #2540) and the axis fields are the sole gate input.
+func TestRunAssemblePrompt_TrackerAxisFlagsReachGates(t *testing.T) {
+	dir := t.TempDir()
+	promptOutput := filepath.Join(dir, "prompt.txt")
+	agentsJSONOutput := filepath.Join(dir, "agents.json")
+	handoffOutput := filepath.Join(dir, "handoff.json")
+
+	args := coveredCellArgs(t, promptOutput, agentsJSONOutput, handoffOutput)
+	args = replaceArg(args, "--tracker-axis-read", "FORGEJO")
+	args = replaceArg(args, "--tracker-axis-write", "FORGEJO")
+	args = replaceArg(args, "--tracker-axis-filer", "FORGEJO")
+
+	var stdout bytes.Buffer
+	rc := runAssemblePrompt(args, &stdout)
+	if rc != 0 {
+		t.Fatalf("runAssemblePrompt exit = %d, want 0 (stdout=%q)", rc, stdout.String())
+	}
+
+	promptBytes, err := os.ReadFile(promptOutput)
+	if err != nil {
+		t.Fatalf("read prompt output: %v", err)
+	}
+	prompt := string(promptBytes)
+	if !strings.Contains(prompt, "fj issue view") {
+		t.Errorf("prompt does not contain %q (forgejo issue-read fragment), want it rendered when --tracker-axis-read=FORGEJO", "fj issue view")
+	}
+	if strings.Contains(prompt, "gh issue view") {
+		t.Errorf("prompt contains %q (github issue-read fragment), want it absent when --tracker-axis-read=FORGEJO", "gh issue view")
+	}
+}
+
+// TestRunAssemblePrompt_ForgeBackendFlagReachesGates verifies the
+// --forge-backend flag reaches promptassembly.Env.ForgeBackend
+// (gates_access_forge.go reads it directly, no longer re-deriving it from
+// --code-forge, issue #2533 slice 2): setting --forge-backend=FORGEJO fires
+// FIX_CI_READ_FORGEJO instead of FIX_CI_READ_GH, even with --code-forge
+// left at "github".
+func TestRunAssemblePrompt_ForgeBackendFlagReachesGates(t *testing.T) {
+	dir := t.TempDir()
+	promptOutput := filepath.Join(dir, "prompt.txt")
+	agentsJSONOutput := filepath.Join(dir, "agents.json")
+	handoffOutput := filepath.Join(dir, "handoff.json")
+
+	args := coveredCellArgs(t, promptOutput, agentsJSONOutput, handoffOutput)
+	args = replaceArg(args, "--fix-pass", "1")
+	args = replaceArg(args, "--forge-backend", "FORGEJO")
+
+	var stdout bytes.Buffer
+	rc := runAssemblePrompt(args, &stdout)
+	if rc != 0 {
+		t.Fatalf("runAssemblePrompt exit = %d, want 0 (stdout=%q)", rc, stdout.String())
+	}
+
+	promptBytes, err := os.ReadFile(promptOutput)
+	if err != nil {
+		t.Fatalf("read prompt output: %v", err)
+	}
+	prompt := string(promptBytes)
+	if !strings.Contains(prompt, "fj pr status") {
+		t.Errorf("prompt does not contain %q (forgejo fix-ci-read fragment), want it rendered when --forge-backend=FORGEJO", "fj pr status")
+	}
+	if strings.Contains(prompt, "gh pr view --json") {
+		t.Errorf("prompt contains %q (github fix-ci-read fragment), want it absent when --forge-backend=FORGEJO", "gh pr view --json")
+	}
+}
+
+// TestRunAssemblePrompt_RosterAndReviewLoopFlagsReachEnv verifies the
+// --filer-enabled/--worker-provisioned/--review-loop-inline/
+// --review-loop-orchestrator boolean flags parse and reach
+// promptassembly.Env without error (issue #2533 slice 2). Gates.go treats
+// them as plain passthrough fields (no in-box re-derivation left to
+// exercise, unlike the tracker-axis/forge-backend flags above), so this
+// case only pins that the flags exist and runAssemblePrompt still succeeds
+// with them set -- a construction/wiring smoke test, not a gate-rendering
+// one.
+func TestRunAssemblePrompt_RosterAndReviewLoopFlagsReachEnv(t *testing.T) {
+	dir := t.TempDir()
+	promptOutput := filepath.Join(dir, "prompt.txt")
+	agentsJSONOutput := filepath.Join(dir, "agents.json")
+	handoffOutput := filepath.Join(dir, "handoff.json")
+
+	args := coveredCellArgs(t, promptOutput, agentsJSONOutput, handoffOutput)
+	args = replaceArg(args, "--filer-enabled", "true")
+	args = replaceArg(args, "--worker-provisioned", "true")
+	args = replaceArg(args, "--review-loop-inline", "true")
+	args = replaceArg(args, "--review-loop-orchestrator", "false")
+
+	var stdout bytes.Buffer
+	rc := runAssemblePrompt(args, &stdout)
+	if rc != 0 {
+		t.Fatalf("runAssemblePrompt exit = %d, want 0 (stdout=%q)", rc, stdout.String())
+	}
+	if _, err := os.Stat(promptOutput); err != nil {
+		t.Fatalf("prompt output not written: %v", err)
+	}
+}
+
 // TestIsAssemblePromptInvocation verifies the assemble-prompt subcommand's
 // dispatch guard: a bare "assemble-prompt" first arg selects it, while every
 // other invocation shape falls through to the default Driver-invocation path
