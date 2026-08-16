@@ -425,8 +425,9 @@ let
 
   # lib/prompt-contract.nix's forbiddenMarkers list, as JSON rather than a
   # bash preamble (issue #2464): baked into the image for the Go
-  # `driver-exec assemble-prompt` verb's `--forbidden-markers-registry` flag
-  # (lib/image.nix), a sibling of promptContractRegistryJson above.
+  # `driver-exec readonly-guards` verb's `--forbidden-markers-registry` flag
+  # (lib/image.nix, issue #2513: assemble-prompt no longer takes this
+  # flag), a sibling of promptContractRegistryJson above.
   forbiddenMarkersRegistryJson = builtins.toJSON promptContract.forbiddenMarkers;
 
   # Build-time reject arm (issue #2250, parent #2244): resolves both
