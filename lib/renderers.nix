@@ -7,9 +7,12 @@
 # and the man-page renderer, for the same reason (issue #461).
 #
 # Pure builtins only (no `pkgs.lib`): keeps this file evaluable and unit-
-# testable with a bare `nix eval`, without needing a locked nixpkgs.
+# testable with a bare `nix eval`, without needing a locked nixpkgs (mirrors
+# lib/preambles.nix, issue #402; shares lib/builtins-compat.nix's
+# concatStrings/mapAttrsToList, issue #2535).
 let
-  mapAttrsToList = f: attrs: map (n: f n attrs.${n}) (builtins.attrNames attrs);
+  builtinsCompat = import ./builtins-compat.nix;
+  inherit (builtinsCompat) concatStrings mapAttrsToList;
   filterAttrs =
     pred: attrs:
     builtins.listToAttrs (
@@ -18,7 +21,6 @@ let
         value = attrs.${n};
       }) (builtins.filter (n: pred n attrs.${n}) (builtins.attrNames attrs))
     );
-  concatStrings = builtins.concatStringsSep "";
   # ASCII-only; every caller here feeds it a SCREAMING_SNAKE_CASE env var name.
   chars = s: builtins.genList (i: builtins.substring i 1 s) (builtins.stringLength s);
   toLower = builtins.replaceStrings (chars "ABCDEFGHIJKLMNOPQRSTUVWXYZ") (

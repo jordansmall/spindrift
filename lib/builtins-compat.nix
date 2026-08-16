@@ -1,9 +1,8 @@
-# Pure-builtins primitives shared across lib/prompt-inject.nix,
-# lib/prompt-contract.nix, and lib/preambles.nix (issue #2535): the
-# regex/suffix/shell-escaping helpers each of those files used to
-# reimplement independently. This is the bottom of that dependency
-# graph -- other pure-builtins lib files import from here instead of
-# duplicating these bodies.
+# Pure-builtins primitives shared across the "Pure builtins only" lib
+# files (issue #2535): the regex/suffix/shell-escaping/list helpers each
+# used to reimplement independently. This is the bottom of that
+# dependency graph -- other pure-builtins lib files import from here
+# instead of duplicating these bodies.
 #
 # Pure builtins only (no `pkgs.lib`, no imports of other lib/*.nix files):
 # keeps this file evaluable and unit-testable with a bare `nix eval`,
@@ -77,4 +76,8 @@ rec {
       "'" + builtins.replaceStrings [ "'" ] [ "'\\''" ] string + "'"
     else
       string;
+
+  concatStrings = builtins.concatStringsSep "";
+
+  mapAttrsToList = f: attrs: map (n: f n attrs.${n}) (builtins.attrNames attrs);
 }
