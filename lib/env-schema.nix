@@ -201,7 +201,6 @@ in
       "rebase"
     ];
     flakeOption = true;
-    legacySettingsExempt = true;
     nixSubPath = "merge.method";
     boxEnv = false;
   };
