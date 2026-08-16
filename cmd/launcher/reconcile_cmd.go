@@ -10,7 +10,6 @@ import (
 	"spindrift.dev/launcher/internal/forge/local"
 	"spindrift.dev/launcher/internal/localloop"
 	"spindrift.dev/launcher/internal/reconcile"
-	"spindrift.dev/launcher/internal/runner"
 )
 
 // runReconcile drives the reconcile.Run seam and reports the outcome to w,
@@ -113,12 +112,7 @@ func cmdReconcile() int {
 	var lp reconcile.LivenessProbe
 	if c.issueTracker == "local" {
 		rc := runnerConfig(c)
-		var r runner.Runner
-		if c.runnerKind == "bwrap" {
-			r = runner.NewBwrap(rc)
-		} else {
-			r = runner.NewOCI(rc, pwd)
-		}
+		r := runnerForKind(c, rc, pwd)
 		lp = reconcile.NewFSProbe(pwd, r)
 	}
 	if err := runReconcile(c, it, cf, lp, pwd, os.Stdout); err != nil {
