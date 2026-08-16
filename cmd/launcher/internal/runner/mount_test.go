@@ -5,19 +5,24 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"spindrift.dev/launcher/internal/agentpaths"
 )
 
 // TestBuildMountSpecs_PromptDirMounted verifies that a valid PromptDir
-// produces a MountSpec targeting /agent/prompts, read-only, with the
+// produces a MountSpec targeting agentpaths.PromptsDir, read-only, with the
 // SPINDRIFT_PROMPT_DIR operator message — computed once, independent of
-// backend.
+// backend. Asserts against the generated constant (not a hardcoded
+// "/agent/prompts" literal) so a rename in lib/agent-paths.nix that mount.go
+// picks up would break this test too, instead of the mount silently
+// targeting a dead in-box path (issue #2531).
 func TestBuildMountSpecs_PromptDirMounted(t *testing.T) {
 	dir := t.TempDir()
 	specs := buildMountSpecs(MountParams{PromptDir: dir}, Box{})
 
 	var found *MountSpec
 	for i := range specs {
-		if specs[i].Target == "/agent/prompts" {
+		if specs[i].Target == agentpaths.PromptsDir {
 			found = &specs[i]
 		}
 	}

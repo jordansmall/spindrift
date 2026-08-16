@@ -512,6 +512,31 @@ in
         touch $out
       '';
 
+  # cmd/launcher/internal/agentpaths/agentpaths_gen.go must match the
+  # content generated from lib/agent-paths.nix by lib/renderers.nix's
+  # renderAgentPathsGo. Fails when a baked /agent/* path is renamed in the
+  # Nix source but the committed generated Go constants aren't regenerated
+  # — the host-side gap issue #2531 closes: cmd/launcher/internal/runner/
+  # mount.go's SPINDRIFT_PROMPT_DIR mount target reads agentpaths.PromptsDir
+  # instead of an independent hardcoded literal, so a rename now fails here
+  # instead of silently mounting onto a dead in-box path. Shares its
+  # renderer with `nix run .#regen` via lib/renderers.nix.
+  agent-paths-gen =
+    let
+      agentPaths = import ../../lib/agent-paths.nix;
+      generated = pkgs.writeText "agentpaths_gen.go.generated" (renderers.renderAgentPathsGo agentPaths);
+    in
+    pkgs.runCommand "agent-paths-gen"
+      {
+        inherit generated;
+        committed = ../../cmd/launcher/internal/agentpaths/agentpaths_gen.go;
+      }
+      ''
+        diff "$generated" "$committed" \
+          || { echo "cmd/launcher/internal/agentpaths/agentpaths_gen.go is out of sync with lib/agent-paths.nix — regenerate it with \`nix run .#regen\`" >&2; exit 1; }
+        touch $out
+      '';
+
   # cmd/launcher/internal/backend/registry_gen.go must match the content
   # generated from lib/backends/default.nix by lib/renderers.nix's
   # renderBackendRegistryGo, gofmt-normalized the same way `nix run .#regen`

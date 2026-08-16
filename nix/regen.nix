@@ -2,6 +2,7 @@
 # `nix run .#regen` renders templates/default/harness.env.example,
 # cmd/launcher/flagtable_gen.go, docs/flake-options.md,
 # cmd/launcher/internal/driver/drivernames_gen.go,
+# cmd/launcher/internal/agentpaths/agentpaths_gen.go,
 # cmd/launcher/quickstart/quickstart_runtime_gen.go,
 # cmd/launcher/subcommands_gen.go,
 # cmd/launcher/internal/outcome/status_gen.go,
@@ -48,6 +49,8 @@ let
   templateSettingsBlock = renderers.renderTemplateSettingsBlock schema;
   driverRegistry = import ../lib/drivers/default.nix { inherit (pkgs) lib; };
   driverNamesFile = renderers.renderDriverNamesGo driverRegistry.entries;
+  agentPaths = import ../lib/agent-paths.nix;
+  agentPathsFile = renderers.renderAgentPathsGo agentPaths;
   runtimeValues = import ../lib/runtime-values.nix;
   quickstartRuntimeFile = renderers.renderQuickstartRuntimeGo runtimeValues;
   subcommands = import ../lib/subcommands.nix;
@@ -111,6 +114,7 @@ pkgs.writeShellApplication {
     gofmt -w "$root/cmd/launcher/schemaconfig_gen.go"
     write docs/flake-options.md ${escapeShellArg flakeOptionsDoc}
     write cmd/launcher/internal/driver/drivernames_gen.go ${escapeShellArg driverNamesFile}
+    write cmd/launcher/internal/agentpaths/agentpaths_gen.go ${escapeShellArg agentPathsFile}
     write cmd/launcher/quickstart/quickstart_runtime_gen.go ${escapeShellArg quickstartRuntimeFile}
     write cmd/launcher/subcommands_gen.go ${escapeShellArg subcommandsFile}
     write cmd/launcher/internal/outcome/status_gen.go ${escapeShellArg outcomeStatusGoFile}
