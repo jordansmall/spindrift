@@ -57,6 +57,11 @@ type config struct {
 	// /tmp/pass-summary.md), recorded into the run-state artifact rather than
 	// inlined there.
 	passSummaryPath string
+	// dispositionsPath is the fix pass's own per-finding dispositions file
+	// (conventionally /tmp/dispositions.md, issue #2550), recorded into
+	// state.DispositionsPath the same way passSummaryPath is recorded into
+	// state.PassSummaryPath.
+	dispositionsPath string
 	// maxReviewRounds caps how many additional fresh-session passes a BLOCK
 	// verdict may trigger (issue #1998): once this many extra passes have
 	// been started in response to a BLOCK, the loop stops even if the
@@ -282,8 +287,8 @@ func run(cfg config, stdout io.Writer) (int, error) {
 		// the box's own filesystem is destroyed with the container
 		// regardless.
 		var seededPromptFile string
-		var preStat *passSummarySnapshot
-		rc, seededPromptFile, preStat, err = seedAndInvokePass(cfg, state, prevSeededPromptFile, pass, stdout)
+		var preStat, dispositionsPreStat *artifactSnapshot
+		rc, seededPromptFile, preStat, dispositionsPreStat, err = seedAndInvokePass(cfg, state, prevSeededPromptFile, pass, stdout)
 		if err != nil {
 			return 0, err
 		}
@@ -296,6 +301,13 @@ func run(cfg config, stdout io.Writer) (int, error) {
 			state.ScoutBriefPath = cfg.scoutBriefPath
 		}
 		recordPassSummary(cfg.passSummaryPath, &state, preStat)
+		// This legacy single loop has no review pass, so nothing here ever
+		// consumes state.DispositionsPath the way this same loop's next
+		// iteration's seedPromptFromState call does consume PassSummaryPath
+		// above -- recorded anyway, for symmetry with PassSummaryPath and
+		// because a caller may still run this loop with -dispositions-path
+		// set for its own external inspection of the run-state artifact.
+		recordDispositions(cfg.dispositionsPath, &state, dispositionsPreStat)
 		// driver-exec (re-)creates cfg.logPath fresh for this one pass
 		// (issue #626's run.go: os.Create truncates), so by the time it
 		// returns the file holds exactly this pass's own raw stream -- the
@@ -395,8 +407,8 @@ func runWithReviewPass(cfg config, stdout io.Writer) (int, error) {
 		fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "pass_start", Pass: pass, Role: passKind.String()}))
 
 		var seededPromptFile string
-		var preStat *passSummarySnapshot
-		rc, seededPromptFile, preStat, err = seedAndInvokePass(cfg, state, prevSeededPromptFile, pass, stdout)
+		var preStat, dispositionsPreStat *artifactSnapshot
+		rc, seededPromptFile, preStat, dispositionsPreStat, err = seedAndInvokePass(cfg, state, prevSeededPromptFile, pass, stdout)
 		if err != nil {
 			return 0, err
 		}
@@ -406,6 +418,7 @@ func runWithReviewPass(cfg config, stdout io.Writer) (int, error) {
 			state.ScoutBriefPath = cfg.scoutBriefPath
 		}
 		recordPassSummary(cfg.passSummaryPath, &state, preStat)
+		recordDispositions(cfg.dispositionsPath, &state, dispositionsPreStat)
 		// Verdict authority belongs solely to the review pass below under
 		// this loop -- an implement/fix pass's own prompt has the
 		// self-review loop stripped, so its log is scanned only for
@@ -947,42 +960,84 @@ func invokeDriverExec(cfg config, stdout io.Writer) (int, error) {
 	return 0, nil
 }
 
-// passSummarySnapshot is the mtime+size seedAndInvokePass captures for
-// cfg.passSummaryPath immediately before invoking a pass it deliberately
-// left the file on disk for (state.PassSummaryPath != "" going in -- see
-// seedAndInvokePass's own doc comment); recordPassSummary compares this
+// artifactSnapshot is the mtime+size seedAndInvokePass captures for a
+// per-pass handoff artifact path (cfg.passSummaryPath, cfg.dispositionsPath)
+// immediately before invoking a pass it deliberately left the file on disk
+// for (the corresponding state field already non-empty going in -- see
+// seedAndInvokePass's own doc comment); recordArtifactPath compares this
 // against the same file's post-pass stat to tell "this pass wrote a fresh
-// summary" apart from "this pass never touched the file at all". nil when
-// seedAndInvokePass took the other branch (nothing to snapshot).
-type passSummarySnapshot struct {
+// file" apart from "this pass never touched the file at all". nil when
+// seedAndInvokePass took the other branch (nothing to snapshot). Shared by
+// PassSummaryPath and DispositionsPath tracking (issue #2550), which
+// otherwise duplicated this snapshot-and-compare shape verbatim.
+type artifactSnapshot struct {
 	modTime time.Time
 	size    int64
 }
 
-// recordPassSummary records passSummaryPath into state.PassSummaryPath only
-// when this pass's own invocation actually left a fresh file there --
-// "fresh" meaning both present (a stat-confirmed fs.ErrNotExist clears
-// state.PassSummaryPath instead; any other stat error, or an empty
-// passSummaryPath, leaves the carried-forward value alone -- see
-// passSummarySnapshot's doc comment for why) and, when preStat is non-nil,
-// changed since seedAndInvokePass's own pre-pass snapshot of the same path.
-// Shared by run and runWithReviewPass, which otherwise duplicated this block
-// verbatim.
-func recordPassSummary(passSummaryPath string, state *runstate.RunState, preStat *passSummarySnapshot) {
-	if passSummaryPath == "" {
+// snapshotArtifactIfPresent prepares path for this pass's own invocation,
+// keyed off target -- the corresponding run-state field's value going in.
+// An empty path is a no-op (the artifact is disabled for this run). When
+// target == "" (nothing this round references the artifact), any stale file
+// left over from a prior pass is removed outright and nil is returned --
+// there is nothing to compare a fresh write against once the loop no longer
+// expects the file to still be meaningful. Otherwise the file is
+// deliberately left alone (a seeded prompt may just have told the agent to
+// read it -- removing it here would delete it out from under that
+// reference before the agent gets to read it) and its pre-pass mtime+size
+// is snapshotted for the caller's later recordArtifactPath call to compare
+// against, or nil if the file isn't present to snapshot.
+func snapshotArtifactIfPresent(path, target string) *artifactSnapshot {
+	if path == "" {
+		return nil
+	}
+	if target == "" {
+		os.Remove(path)
+		return nil
+	}
+	if info, statErr := os.Stat(path); statErr == nil {
+		return &artifactSnapshot{modTime: info.ModTime(), size: info.Size()}
+	}
+	return nil
+}
+
+// recordArtifactPath records path into *target only when this pass's own
+// invocation actually left a fresh file there -- "fresh" meaning both
+// present (a stat-confirmed fs.ErrNotExist clears *target instead; any
+// other stat error, or an empty path, leaves the carried-forward value
+// alone -- see artifactSnapshot's doc comment for why) and, when preStat is
+// non-nil, changed since snapshotArtifactIfPresent's own pre-pass snapshot
+// of the same path.
+func recordArtifactPath(path string, target *string, preStat *artifactSnapshot) {
+	if path == "" {
 		return
 	}
-	info, statErr := os.Stat(passSummaryPath)
+	info, statErr := os.Stat(path)
 	switch {
 	case statErr == nil:
 		if preStat != nil && info.ModTime().Equal(preStat.modTime) && info.Size() == preStat.size {
-			state.PassSummaryPath = ""
+			*target = ""
 			return
 		}
-		state.PassSummaryPath = passSummaryPath
+		*target = path
 	case errors.Is(statErr, fs.ErrNotExist):
-		state.PassSummaryPath = ""
+		*target = ""
 	}
+}
+
+// recordPassSummary records passSummaryPath into state.PassSummaryPath, a
+// thin wrapper around recordArtifactPath (see its doc comment for the full
+// staleness-detection rules). Shared by run and runWithReviewPass, which
+// otherwise duplicated this block verbatim.
+func recordPassSummary(passSummaryPath string, state *runstate.RunState, preStat *artifactSnapshot) {
+	recordArtifactPath(passSummaryPath, &state.PassSummaryPath, preStat)
+}
+
+// recordDispositions records dispositionsPath into state.DispositionsPath
+// (issue #2550), a thin wrapper around recordArtifactPath mirroring
+// recordPassSummary. Shared by run and runWithReviewPass.
+func recordDispositions(dispositionsPath string, state *runstate.RunState, preStat *artifactSnapshot) {
+	recordArtifactPath(dispositionsPath, &state.DispositionsPath, preStat)
 }
 
 // seedAndInvokePass seeds cfg.promptFile from state (removing the previous
@@ -991,39 +1046,36 @@ func recordPassSummary(passSummaryPath string, state *runstate.RunState, preStat
 // seedPromptFromState's own no-op case when state carries nothing new to
 // seed), pins cfg.sessionFile verbatim only for pass 1 and runs every pass
 // after it sessionless, invokes driver-exec, and conditionally clears
-// cfg.passSummaryPath -- only when state.PassSummaryPath == "" going in
-// (nothing this round references it), matching recordPassSummary's own
-// guard for interpreting whatever file is left behind afterward. When
-// state.PassSummaryPath != "" instead, the file is deliberately left alone
-// (this pass's own seeded prompt just told the agent to read it -- removing
-// it here would delete the file out from under that reference before the
-// agent gets to read it) but its pre-pass mtime+size is snapshotted into the
-// returned preStat, so the caller's post-pass recordPassSummary call can
-// tell a pass that left the file completely untouched apart from a
-// crashed/no-op one (passSummarySnapshot's doc comment has the full
-// staleness-detection rationale, issue #2549). Returns the pass's exit
-// code, its own seeded prompt file for the caller to track as its next
-// prevSeededPromptFile, and preStat (nil when there was nothing to
-// snapshot). Shared by run's legacy single loop and runWithReviewPass's
-// implement/fix pass -- the one piece of per-pass bookkeeping identical
-// between them; each keeps its own scan-and-decide logic afterward, since a
-// legacy pass's own verdict drives its loop while an implement/fix pass's
-// does not.
-func seedAndInvokePass(cfg config, state runstate.RunState, prevSeededPromptFile string, pass int, stdout io.Writer) (rc int, seededPromptFile string, preStat *passSummarySnapshot, err error) {
+// cfg.passSummaryPath and cfg.dispositionsPath -- via snapshotArtifactIfPresent,
+// only when the corresponding state field is "" going in (nothing this
+// round references it), matching recordArtifactPath's own guard for
+// interpreting whatever file is left behind afterward. When the state field
+// is already set instead, the file is deliberately left alone (this pass's
+// own seeded prompt just told the agent to read it -- removing it here
+// would delete the file out from under that reference before the agent
+// gets to read it) but its pre-pass mtime+size is snapshotted into the
+// returned preStat/dispositionsPreStat, so the caller's post-pass
+// recordPassSummary/recordDispositions call can tell a pass that left the
+// file completely untouched apart from a crashed/no-op one
+// (artifactSnapshot's doc comment has the full staleness-detection
+// rationale, issue #2549 / #2550). Returns the pass's exit code, its own
+// seeded prompt file for the caller to track as its next
+// prevSeededPromptFile, and preStat/dispositionsPreStat (nil when there was
+// nothing to snapshot). Shared by run's legacy single loop and
+// runWithReviewPass's implement/fix pass -- the one piece of per-pass
+// bookkeeping identical between them; each keeps its own scan-and-decide
+// logic afterward, since a legacy pass's own verdict drives its loop while
+// an implement/fix pass's does not.
+func seedAndInvokePass(cfg config, state runstate.RunState, prevSeededPromptFile string, pass int, stdout io.Writer) (rc int, seededPromptFile string, preStat *artifactSnapshot, dispositionsPreStat *artifactSnapshot, err error) {
 	seededPromptFile, err = seedPromptFromState(cfg.promptFile, state)
 	if err != nil {
-		return 0, "", nil, err
+		return 0, "", nil, nil, err
 	}
 	if prevSeededPromptFile != "" && prevSeededPromptFile != cfg.promptFile {
 		os.Remove(prevSeededPromptFile)
 	}
-	if cfg.passSummaryPath != "" {
-		if state.PassSummaryPath == "" {
-			os.Remove(cfg.passSummaryPath)
-		} else if info, statErr := os.Stat(cfg.passSummaryPath); statErr == nil {
-			preStat = &passSummarySnapshot{modTime: info.ModTime(), size: info.Size()}
-		}
-	}
+	preStat = snapshotArtifactIfPresent(cfg.passSummaryPath, state.PassSummaryPath)
+	dispositionsPreStat = snapshotArtifactIfPresent(cfg.dispositionsPath, state.DispositionsPath)
 
 	passCfg := cfg
 	passCfg.promptFile = seededPromptFile
@@ -1032,7 +1084,7 @@ func seedAndInvokePass(cfg config, state runstate.RunState, prevSeededPromptFile
 	}
 
 	rc, err = invokeDriverExec(passCfg, stdout)
-	return rc, seededPromptFile, preStat, err
+	return rc, seededPromptFile, preStat, dispositionsPreStat, err
 }
 
 // buildDriverExecCmd resolves driver-exec on PATH and returns it invoked with
