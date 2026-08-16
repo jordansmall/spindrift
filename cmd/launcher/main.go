@@ -59,6 +59,13 @@ type config struct {
 	// Runtime: podman | docker | bwrap
 	runtime string
 
+	// runnerKind selects the launcher's runner implementation: "bwrap" or
+	// "oci" (issue #2538). Nix-rendered alongside runtime, but a distinct
+	// artifact — runner selection reads this, never runtime's raw value,
+	// since runtime also carries operator-facing runtime *names* (podman,
+	// docker, rancher) that aren't "oci" literally.
+	runnerKind string
+
 	// driver selects the Go Driver strategy (ADR 0009): transient
 	// classification and heartbeat parsing. Empty defaults to "claude",
 	// matching the nix side's default.
@@ -249,6 +256,7 @@ func loadConfig() config {
 		agentEnvDrv:     getenvArtifact("AGENT_ENV_DRV", ""),
 		bakedPrefetch:   getenvArtifact("BAKED_PREFETCH", ""),
 		runtime:         getenvArtifact("RUNTIME", ""),
+		runnerKind:      getenvArtifact("RUNNER_KIND", ""),
 		driver:          getenvArtifact("DRIVER", ""),
 		image:           image,
 
@@ -878,7 +886,7 @@ func build() error {
 	}
 	rc := runnerConfig(c)
 	var r runner.Runner
-	if c.runtime == "bwrap" {
+	if c.runnerKind == "bwrap" {
 		r = runner.NewBwrapBuild(rc)
 	} else {
 		r = runner.NewOCI(rc, pwd)

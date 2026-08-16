@@ -114,7 +114,7 @@ func cmdReconcile() int {
 	if c.issueTracker == "local" {
 		rc := runnerConfig(c)
 		var r runner.Runner
-		if c.runtime == "bwrap" {
+		if c.runnerKind == "bwrap" {
 			r = runner.NewBwrap(rc)
 		} else {
 			r = runner.NewOCI(rc, pwd)
