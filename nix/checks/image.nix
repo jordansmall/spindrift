@@ -395,6 +395,53 @@ in
         touch $out
       '';
 
+  # Issue #2531 (review fix-pass): the four Driver-identity vars (DRIVER_NAME,
+  # DRIVER_BIN, DRIVER_FLAGS_COMMON, DRIVER_SKILLS_DIR) are baked into the
+  # entrypoint preamble by lib/drivers/default.nix's renderPreamble, prepended
+  # to agent/entrypoint.sh (as driverPreamble) alongside agentPathsPreamble in
+  # the same lib/image.nix `text` concatenation. The agent-paths check above
+  # only proves the agent-paths half of that concatenation survived -- it
+  # greps a disjoint set of lines, so it says nothing about whether
+  # driverPreamble itself made it in (see agent/entrypoint.sh's comment on
+  # this pair). This check greps the same baked entrypoint.sh directly for
+  # the four Driver-identity lines, in the exact unconditional `VAR=value`
+  # shape renderPreamble emits (no `${VAR:-...}` fallback wrapper -- unlike
+  # the agent-paths vars, these are fixed per Box invocation, not overridable
+  # at runtime), asserted against the concrete "claude" Driver entry
+  # batsHarness actually selects (lib/mkHarness.nix's `driver ? "claude"`
+  # default). A build that ever drops driverPreamble from lib/image.nix's
+  # entrypoint `text` concatenation -- while leaving agentPathsPreamble intact
+  # -- now fails here instead of silently shipping a Box that dies on an
+  # unbound DRIVER_* variable at runtime.
+  driver-preamble-baked-into-image =
+    let
+      driverEntry = (import ../../lib/drivers/default.nix { inherit (pkgs) lib; }).entries.claude;
+      patterns = {
+        DRIVER_NAME = pkgs.lib.escapeShellArg driverEntry.name;
+        DRIVER_BIN = pkgs.lib.escapeShellArg driverEntry.bin;
+        DRIVER_FLAGS_COMMON = pkgs.lib.escapeShellArg driverEntry.flagsCommon;
+        DRIVER_SKILLS_DIR = pkgs.lib.escapeShellArg "/home/agent/${driverEntry.skillsDirRelative}";
+      };
+    in
+    pkgs.runCommand "driver-preamble-baked-into-image" { } ''
+      ep=${batsHarness.agentFiles}/agent/entrypoint.sh
+      ${pkgs.lib.concatStrings (
+        pkgs.lib.mapAttrsToList (
+          var: value:
+          let
+            pattern = "${var}=${value}";
+          in
+          ''
+            grep -qF ${pkgs.lib.escapeShellArg pattern} "$ep" || {
+              echo ${pkgs.lib.escapeShellArg "entrypoint is missing or diverges from ${pattern} -- Driver preamble not baked?"} >&2
+              exit 1
+            }
+          ''
+        ) patterns
+      )}
+      touch $out
+    '';
+
   # The idempotency check (issue #420) hinges on the entrypoint sourcing its
   # marker from the same registry row lib/mkHarness.nix now looks up from
   # lib/prompt-contract.nix (issue #2246 slice 1). Since issue #2354's flip,
