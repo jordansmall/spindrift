@@ -36,6 +36,13 @@ let
   # regression guard (issue #2514 AC2).
   wantDogfoodModels = "`${defaultModelFixture.schemaDefaults.scoutModel}`, `${defaultModelFixture.schemaDefaults.reviewModel}` (issue #2433), and `${defaultModelFixture.schemaDefaults.workerModel}` respectively";
 
+  # Shared by dogfood-doc-filer-pin-guard and
+  # dogfood-doc-filer-pin-guard-regression so the Subagent roster section's
+  # dogfood paragraph's hand-written Filer pin literal can't drift from
+  # lib/default-model-fixture.nix's dogfoodPins.filer between the check and
+  # its regression guard (issue #2514 AC2).
+  wantDogfoodFilerPin = "filer = \"${defaultModelFixture.dogfoodPins.filer}\"";
+
   # Shared by schema-choices and schema-secret-choices-guard (issue #872) so
   # the guard predicate is defined exactly once and can be exercised against
   # a synthetic/injected schema in a test, not only the real one.
@@ -320,9 +327,17 @@ let
   # else throws -- the anti-vacuity check for lib/default-model-fixture.nix
   # (issue #2514 AC3): a lib/env-schema.nix default bump with the fixture
   # left un-updated must fail here, not pass because the check happens to
-  # read the schema instead of the fixture. Factored out so
-  # default-model-fixture-schema-sync-guard can exercise this exact
-  # assertion path against a synthetic drifted schema, not only the real one.
+  # read the schema instead of the fixture. Also asserts, in the other
+  # direction, that every model-shaped schema key (attr name "model" or
+  # ending in "Model" -- lib/env-schema.nix's model/scoutModel/reviewModel/
+  # filerModel/workerModel naming convention) is present in the fixture, so a
+  # *new* model default added to the schema but never added to the fixture
+  # fails here too, instead of the fixture-side filterAttrs above silently
+  # never looking at it (issue #2514). Factored out so
+  # default-model-fixture-schema-sync-guard and
+  # default-model-fixture-schema-sync-completeness-guard can exercise these
+  # exact assertion paths against synthetic drifted schemas, not only the
+  # real one.
   assertFixtureMatchesSchemaOk =
     { schema, fixtureSchemaDefaults }:
     let
@@ -331,11 +346,19 @@ let
         filterAttrs
         concatStringsSep
         attrNames
+        hasSuffix
+        filter
         ;
       mismatches = filterAttrs (
         schemaKey: expected: (schema.${schemaKey}.default or null) != expected
       ) fixtureSchemaDefaults;
+      isModelShaped = name: name == "model" || hasSuffix "Model" name;
+      missingFromFixture = filter (name: isModelShaped name && !(fixtureSchemaDefaults ? ${name})) (
+        attrNames schema
+      );
     in
+    assert assertMsg (missingFromFixture == [ ])
+      "lib/default-model-fixture.nix: schemaDefaults is missing model-shaped lib/env-schema.nix keys -- a new *Model schema default was added but the fixture was never updated to mirror it -- missing keys: ${concatStringsSep ", " missingFromFixture} -- update the fixture (issue #2514)";
     assert assertMsg (mismatches == { })
       "lib/default-model-fixture.nix: schemaDefaults has drifted from lib/env-schema.nix's own .default values -- mismatched keys: ${concatStringsSep ", " (attrNames mismatches)} -- update the fixture (issue #2514)";
     fixtureSchemaDefaults;
@@ -356,6 +379,94 @@ let
     assert assertMsg (hasInfix wantModels (rosterDocSection doc))
       "docs/reference.md: Subagent roster section's dogfood paragraph must restate lib/default-model-fixture.nix's schemaDefaults scout/reviewer/worker model literals as `${wantModels}` — it has drifted from the fixture, update the doc (issue #2514)";
     doc;
+
+  # Asserts the isolated Subagent roster section's dogfood paragraph restates
+  # lib/default-model-fixture.nix's dogfoodPins.filer literal verbatim, else
+  # throws (issue #2514 AC2). The dogfood paragraph's opening sentence
+  # (`it sets roster = rosterLib.defaultRoster { models = { filer = "..."; };
+  # }`) hand-types this pin ahead of the scout/reviewer/worker restatement
+  # assertDogfoodDocModelsOk already guards. Factored out the same way
+  # assertDogfoodDocModelsOk is, so dogfood-doc-filer-pin-guard-regression can
+  # exercise this exact assertion path against a synthetic doc.
+  assertDogfoodDocFilerPinOk =
+    { doc, wantFilerPin }:
+    let
+      inherit (pkgs.lib) assertMsg hasInfix;
+    in
+    assert assertMsg (hasInfix wantFilerPin (rosterDocSection doc))
+      "docs/reference.md: Subagent roster section's dogfood paragraph must restate lib/default-model-fixture.nix's dogfoodPins.filer literal as `${wantFilerPin}` — it has drifted from the fixture, update the doc (issue #2514)";
+    doc;
+
+  # Asserts docSrc's generated Default models table (between its BEGIN/END
+  # GENERATED DEFAULT MODELS markers) matches generated, else throws (issue
+  # #2514 AC2). Factored out (like assertRosterDocFlakePathOk above) so
+  # default-models-doc-guard can exercise this exact marker-split + equality
+  # assertion path against a synthetic doc, not only the real
+  # docs/reference.md content — dropping the equality assert here would make
+  # that guard fail too, not stay silently green.
+  assertDefaultModelsDocOk =
+    { docSrc, generated }:
+    let
+      inherit (pkgs.lib) assertMsg;
+      beginMarker = "<!-- BEGIN GENERATED DEFAULT MODELS -- nix run .#regen -- DO NOT EDIT -->\n";
+      endMarker = "<!-- END GENERATED DEFAULT MODELS -->";
+      afterBegin =
+        let
+          parts = builtins.split beginMarker docSrc;
+        in
+        if builtins.length parts >= 3 then
+          builtins.elemAt parts 2
+        else
+          throw "docs/reference.md: BEGIN GENERATED DEFAULT MODELS marker not found";
+      committed =
+        let
+          parts = builtins.split endMarker afterBegin;
+        in
+        if builtins.length parts >= 3 then
+          builtins.elemAt parts 0
+        else
+          throw "docs/reference.md: END GENERATED DEFAULT MODELS marker not found";
+    in
+    assert assertMsg (committed == generated) ''
+      docs/reference.md generated Default models table is out of sync with lib/default-model-fixture.nix — regenerate it with `nix run .#regen`
+        got:  ${committed}
+        want: ${generated}'';
+    docSrc;
+
+  # Asserts docSrc's generated settings example `models` sub-block (between
+  # its BEGIN/END GENERATED SETTINGS EXAMPLE MODELS markers) matches
+  # generated, else throws (issue #2514 AC1). Factored out the same way
+  # assertDefaultModelsDocOk is, so settings-example-models-doc-guard can
+  # exercise this exact marker-split + equality assertion path against a
+  # synthetic doc, not only the real docs/reference.md content.
+  assertSettingsExampleModelsDocOk =
+    { docSrc, generated }:
+    let
+      inherit (pkgs.lib) assertMsg;
+      beginMarker = "  # BEGIN GENERATED SETTINGS EXAMPLE MODELS -- nix run .#regen -- DO NOT EDIT\n";
+      endMarker = "  # END GENERATED SETTINGS EXAMPLE MODELS";
+      afterBegin =
+        let
+          parts = builtins.split beginMarker docSrc;
+        in
+        if builtins.length parts >= 3 then
+          builtins.elemAt parts 2
+        else
+          throw "docs/reference.md: BEGIN GENERATED SETTINGS EXAMPLE MODELS marker not found";
+      committed =
+        let
+          parts = builtins.split endMarker afterBegin;
+        in
+        if builtins.length parts >= 3 then
+          builtins.elemAt parts 0
+        else
+          throw "docs/reference.md: END GENERATED SETTINGS EXAMPLE MODELS marker not found";
+    in
+    assert assertMsg (committed == generated) ''
+      docs/reference.md generated settings example is out of sync with lib/default-model-fixture.nix — regenerate it with `nix run .#regen`
+        got:  ${committed}
+        want: ${generated}'';
+    docSrc;
 in
 {
   # cmd/launcher/internal/driver/drivernames_gen.go must match the key list
@@ -1589,6 +1700,33 @@ in
       "default-model-fixture-schema-sync-guard: expected assertFixtureMatchesSchemaOk to reject a synthetic schema whose reviewModel default has drifted from the fixture, but it evaluated successfully";
     pkgs.runCommand "default-model-fixture-schema-sync-guard" { } "touch $out";
 
+  # Regression guard (issue #2514): the sync assertion above must also detect
+  # a *new* model-shaped schema key that was never added to the fixture, not
+  # just a mismatched value on a key the fixture already tracks --
+  # default-model-fixture-schema-sync-guard above only proves the
+  # value-mismatch direction is non-vacuous. Runs assertFixtureMatchesSchemaOk
+  # against a synthetic schema equal to the real one plus one extra
+  # model-shaped key (extraModel) absent from
+  # defaultModelFixture.schemaDefaults, via tryEval, so this fails if the
+  # missingFromFixture assert is ever dropped from assertFixtureMatchesSchemaOk.
+  default-model-fixture-schema-sync-completeness-guard =
+    let
+      inherit (pkgs.lib) assertMsg;
+      schema = import ../../lib/env-schema.nix;
+      driftedSchema = schema // {
+        extraModel = {
+          default = "claude-extra-1";
+        };
+      };
+      result = builtins.tryEval (assertFixtureMatchesSchemaOk {
+        schema = driftedSchema;
+        fixtureSchemaDefaults = defaultModelFixture.schemaDefaults;
+      });
+    in
+    assert assertMsg (!result.success)
+      "default-model-fixture-schema-sync-completeness-guard: expected assertFixtureMatchesSchemaOk to reject a synthetic schema with a model-shaped key missing from the fixture, but it evaluated successfully";
+    pkgs.runCommand "default-model-fixture-schema-sync-completeness-guard" { } "touch $out";
+
   # tests/default_models_gen.bash must match the content generated from
   # lib/default-model-fixture.nix by lib/renderers.nix
   # renderDefaultModelFixtureBash. Fails when the fixture is edited but the
@@ -1645,33 +1783,39 @@ in
   # drift from each other (issue #402).
   default-models-doc =
     let
-      inherit (pkgs.lib) assertMsg;
       generated = renderers.renderDefaultModelsDoc defaultModelFixture;
       docSrc = builtins.readFile ../../docs/reference.md;
+    in
+    assert (assertDefaultModelsDocOk { inherit docSrc generated; }) == docSrc;
+    pkgs.runCommand "default-models-doc" { } "touch $out";
+
+  # Regression guard (issue #2514 AC2): the doc-drift assertion above must
+  # actually detect a drifted generated Default models table, not just pass
+  # vacuously because docs/reference.md's table currently agrees with
+  # lib/default-model-fixture.nix. Runs assertDefaultModelsDocOk — the exact
+  # function default-models-doc calls — against a synthetic doc whose table
+  # row for `worker` states a wrong model literal (a plausible drift a
+  # fixture edit could leave behind), via tryEval, so this fails if the
+  # equality assert is ever dropped from assertDefaultModelsDocOk.
+  default-models-doc-guard =
+    let
+      inherit (pkgs.lib) assertMsg replaceStrings;
+      generated = renderers.renderDefaultModelsDoc defaultModelFixture;
       beginMarker = "<!-- BEGIN GENERATED DEFAULT MODELS -- nix run .#regen -- DO NOT EDIT -->\n";
       endMarker = "<!-- END GENERATED DEFAULT MODELS -->";
-      afterBegin =
-        let
-          parts = builtins.split beginMarker docSrc;
-        in
-        if builtins.length parts >= 3 then
-          builtins.elemAt parts 2
-        else
-          throw "docs/reference.md: BEGIN GENERATED DEFAULT MODELS marker not found";
-      committed =
-        let
-          parts = builtins.split endMarker afterBegin;
-        in
-        if builtins.length parts >= 3 then
-          builtins.elemAt parts 0
-        else
-          throw "docs/reference.md: END GENERATED DEFAULT MODELS marker not found";
+      workerModel = defaultModelFixture.schemaDefaults.workerModel;
+      driftedWorkerModel =
+        if workerModel == "claude-sonnet-5" then "claude-sonnet-6" else "claude-sonnet-5";
+      driftedGenerated = replaceStrings [ "`${workerModel}`" ] [ "`${driftedWorkerModel}`" ] generated;
+      driftedDocSrc = beginMarker + driftedGenerated + endMarker + "\n";
+      result = builtins.tryEval (assertDefaultModelsDocOk {
+        docSrc = driftedDocSrc;
+        inherit generated;
+      });
     in
-    assert assertMsg (committed == generated) ''
-      docs/reference.md generated Default models table is out of sync with lib/default-model-fixture.nix — regenerate it with `nix run .#regen`
-        got:  ${committed}
-        want: ${generated}'';
-    pkgs.runCommand "default-models-doc" { } "touch $out";
+    assert assertMsg (!result.success)
+      "default-models-doc-guard: expected assertDefaultModelsDocOk to reject a synthetic doc whose generated Default models table has drifted, but it evaluated successfully";
+    pkgs.runCommand "default-models-doc-guard" { } "touch $out";
 
   # The generated `models` sub-block of docs/reference.md's illustrative
   # `settings = { ... }` example (between its BEGIN/END GENERATED SETTINGS
@@ -1684,40 +1828,19 @@ in
   # from each other (issue #402). Mirrors default-models-doc above.
   settings-example-models-doc =
     let
-      inherit (pkgs.lib) assertMsg;
       generated = renderers.renderSettingsExampleModelsDoc defaultModelFixture;
       docSrc = builtins.readFile ../../docs/reference.md;
-      beginMarker = "  # BEGIN GENERATED SETTINGS EXAMPLE MODELS -- nix run .#regen -- DO NOT EDIT\n";
-      endMarker = "  # END GENERATED SETTINGS EXAMPLE MODELS";
-      afterBegin =
-        let
-          parts = builtins.split beginMarker docSrc;
-        in
-        if builtins.length parts >= 3 then
-          builtins.elemAt parts 2
-        else
-          throw "docs/reference.md: BEGIN GENERATED SETTINGS EXAMPLE MODELS marker not found";
-      committed =
-        let
-          parts = builtins.split endMarker afterBegin;
-        in
-        if builtins.length parts >= 3 then
-          builtins.elemAt parts 0
-        else
-          throw "docs/reference.md: END GENERATED SETTINGS EXAMPLE MODELS marker not found";
     in
-    assert assertMsg (committed == generated) ''
-      docs/reference.md generated settings example is out of sync with lib/default-model-fixture.nix — regenerate it with `nix run .#regen`
-        got:  ${committed}
-        want: ${generated}'';
+    assert (assertSettingsExampleModelsDocOk { inherit docSrc generated; }) == docSrc;
     pkgs.runCommand "settings-example-models-doc" { } "touch $out";
 
   # Regression guard for settings-example-models-doc above: proves its
   # equality assertion actually rejects a drifted value instead of passing
-  # vacuously (mirrors marker-consistency-guard's tryEval pattern). A
-  # synthetic doc whose models sub-block carries a wrong model literal must
-  # fail the same equality check settings-example-models-doc runs against
-  # the real docs/reference.md.
+  # vacuously (mirrors marker-consistency-guard's tryEval pattern). Runs
+  # assertSettingsExampleModelsDocOk — the exact function
+  # settings-example-models-doc calls — against a synthetic doc whose models
+  # sub-block carries wrong model literals, via tryEval, so this fails if the
+  # equality assert is ever dropped from assertSettingsExampleModelsDocOk.
   settings-example-models-doc-guard =
     let
       inherit (pkgs.lib) assertMsg;
@@ -1731,20 +1854,13 @@ in
                             filerModel  = "wrong-filer-model"; };
       '';
       driftedDocSrc = beginMarker + driftedBlock + endMarker + "\n";
-      driftedCommitted =
-        let
-          afterBegin =
-            let
-              parts = builtins.split beginMarker driftedDocSrc;
-            in
-            builtins.elemAt parts 2;
-          parts = builtins.split endMarker afterBegin;
-        in
-        builtins.elemAt parts 0;
-      driftedResult = builtins.tryEval (assertMsg (driftedCommitted == generated) "should not match");
+      result = builtins.tryEval (assertSettingsExampleModelsDocOk {
+        docSrc = driftedDocSrc;
+        inherit generated;
+      });
     in
-    assert assertMsg (!driftedResult.success || !driftedResult.value)
-      "settings-example-models-doc-guard: expected a drifted models sub-block to fail the equality check, but it matched";
+    assert assertMsg (!result.success)
+      "settings-example-models-doc-guard: expected assertSettingsExampleModelsDocOk to reject a synthetic doc whose models sub-block has drifted, but it evaluated successfully";
     pkgs.runCommand "settings-example-models-doc-guard" { } "touch $out";
 
   # docs/reference.md's Subagent roster section's dogfood paragraph restates
@@ -1799,6 +1915,61 @@ in
     assert assertMsg (!result.success)
       "dogfood-doc-models-guard-regression: expected assertDogfoodDocModelsOk to reject a synthetic doc whose dogfood paragraph states a wrong model restatement, but it evaluated successfully";
     pkgs.runCommand "dogfood-doc-models-guard-regression" { } "touch $out";
+
+  # docs/reference.md's Subagent roster section's dogfood paragraph's opening
+  # sentence hand-restates lib/default-model-fixture.nix's dogfoodPins.filer
+  # literal as prose (`it sets roster = rosterLib.defaultRoster { models = {
+  # filer = "..."; }; }`); this pins that string to the fixture's actual
+  # value instead of letting the two drift silently (issue #2514 AC2), the
+  # same way dogfood-doc-models-guard pins the section's scout/reviewer/
+  # worker restatement.
+  dogfood-doc-filer-pin-guard =
+    let
+      doc = builtins.readFile ../../docs/reference.md;
+    in
+    assert
+      (assertDogfoodDocFilerPinOk {
+        inherit doc;
+        wantFilerPin = wantDogfoodFilerPin;
+      }) == doc;
+    pkgs.runCommand "dogfood-doc-filer-pin-guard" { } "touch $out";
+
+  # Regression guard (issue #2514 AC2): the doc-drift assertion above must
+  # actually detect a wrong Filer pin restatement, not just pass vacuously
+  # because docs/reference.md's Subagent roster section currently agrees
+  # with the fixture. Runs assertDogfoodDocFilerPinOk — the exact function
+  # dogfood-doc-filer-pin-guard calls — against a synthetic doc whose dogfood
+  # paragraph states the real wantDogfoodFilerPin with the Filer model
+  # literal flipped (a plausible drift a fixture edit could leave behind),
+  # via tryEval, so this fails if the hasInfix assert is ever dropped from
+  # assertDogfoodDocFilerPinOk.
+  dogfood-doc-filer-pin-guard-regression =
+    let
+      inherit (pkgs.lib) assertMsg replaceStrings;
+      filerPin = defaultModelFixture.dogfoodPins.filer;
+      driftedFilerPin =
+        if filerPin == "claude-haiku-4-5-20251001" then
+          "claude-haiku-4-6-20251001"
+        else
+          "claude-haiku-4-5-20251001";
+      driftedFilerPinStatement = replaceStrings [ filerPin ] [ driftedFilerPin ] wantDogfoodFilerPin;
+      badDoc = ''
+        intro text
+
+        #### Subagent roster
+
+        it sets `roster = rosterLib.defaultRoster { models = { ${driftedFilerPinStatement} }; }`, naming only the Filer.
+
+        #### Next heading
+      '';
+      result = builtins.tryEval (assertDogfoodDocFilerPinOk {
+        doc = badDoc;
+        wantFilerPin = wantDogfoodFilerPin;
+      });
+    in
+    assert assertMsg (!result.success)
+      "dogfood-doc-filer-pin-guard-regression: expected assertDogfoodDocFilerPinOk to reject a synthetic doc whose dogfood paragraph states a wrong Filer pin restatement, but it evaluated successfully";
+    pkgs.runCommand "dogfood-doc-filer-pin-guard-regression" { } "touch $out";
 
   # Regression guard: rosterDocSection's own throw branch (missing "####
   # Subagent roster" heading) is otherwise never exercised -- every other
