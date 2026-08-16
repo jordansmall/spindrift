@@ -134,11 +134,28 @@ func (d *Dispatch) Run() Result {
 // is ignored: a fix pass already resumes its session via FIX_PASS>0, so a
 // transient-backoff re-dispatch mid-fix (a 429 hold or a 529 backoff) needs no
 // extra signal.
+//
+// A fix pass reuses -- never re-resolves or re-writes -- the same frozen
+// snapshot file Run wrote at this logical run's true start (issue #2547):
+// SnapshotPathFor(d.pwd, d.number) is the deterministic path Run's own
+// writeIssueSnapshot step already wrote it to. Its own reviewer/review-issue-
+// read fragments cat that same fixed in-box path, so a fix box needs the
+// mount too, not just the initial box Run dispatches. When no such file
+// exists -- a research dispatch (which never calls Fix, see settle/
+// research.go) or a Config with no IssueSnapshot resolver wired at all, e.g.
+// several dispatch-package tests that call Fix without a prior Run -- Fix
+// falls back to "", the pre-#2547 no-mount behavior, rather than handing
+// runOnce a path buildMountSpecs would now hard-error on (issue #2547 review
+// finding).
 func (d *Dispatch) Fix(pass int, ciFailureSummary string) Result {
 	logPath := d.fixLogPath(pass)
+	snapshotPath := ""
+	if _, err := os.Stat(SnapshotPathFor(d.pwd, d.number)); err == nil {
+		snapshotPath = SnapshotPathFor(d.pwd, d.number)
+	}
 	return d.dispatchWithRetry(logPath, func(_ bool) error {
 		fmt.Fprintf(d.humanOut(), "    -> #%s (fix-pass-%d): %s\n", d.number, pass, d.title)
-		return d.runOnce(logPath, buildBoxEnv(d.cfg, d.number, d.title, pass, ciFailureSummary, d.nonce), d.cacheDir, "")
+		return d.runOnce(logPath, buildBoxEnv(d.cfg, d.number, d.title, pass, ciFailureSummary, d.nonce), d.cacheDir, snapshotPath)
 	})
 }
 

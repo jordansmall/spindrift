@@ -383,6 +383,81 @@ func TestRun_WritesAndMountsIssueSnapshot(t *testing.T) {
 	}
 }
 
+// TestFix_MountsSameIssueSnapshotAsRun verifies a fix pass reuses -- never
+// re-resolves -- the same frozen snapshot file Run wrote: Fix's launched Box
+// carries the identical IssueSnapshotPath Run's Box did, and cfg.IssueSnapshot
+// is called exactly once across both dispatches (issue #2547 review finding:
+// a fix box previously got no snapshot mount at all, breaking review-prompt's
+// `cat /issue-snapshot.md` read for non-orchestrator, orchestrator-off
+// dispatches on a fix pass).
+func TestFix_MountsSameIssueSnapshotAsRun(t *testing.T) {
+	dir := tempLogDir(t)
+
+	fr := runner.NewFake()
+	calls := 0
+	cfg := Config{
+		IssueSnapshot: func(number string) (string, error) {
+			calls++
+			return "frozen text for #" + number, nil
+		},
+	}
+	f, err := NewFactory(cfg, dir, fr, fakeDriver{}, RealClock())
+	if err != nil {
+		t.Fatalf("NewFactory: %v", err)
+	}
+	defer f.Cleanup()
+
+	d := f.New("42", "T")
+	if result := d.Run(); !result.Success {
+		t.Fatalf("Run: want Success=true, got %+v", result)
+	}
+	if result := d.Fix(1, ""); !result.Success {
+		t.Fatalf("Fix: want Success=true, got %+v", result)
+	}
+
+	if len(fr.RunCalls) != 2 {
+		t.Fatalf("RunCalls: got %d, want 2", len(fr.RunCalls))
+	}
+	runPath := fr.RunCalls[0].IssueSnapshotPath
+	fixPath := fr.RunCalls[1].IssueSnapshotPath
+	if runPath == "" || fixPath != runPath {
+		t.Errorf("Box.IssueSnapshotPath: run=%q fix=%q, want equal and non-empty", runPath, fixPath)
+	}
+	if calls != 1 {
+		t.Errorf("cfg.IssueSnapshot called %d times, want 1 (Fix must reuse, not re-resolve)", calls)
+	}
+}
+
+// TestFix_NoIssueSnapshotWhenNoneWasWritten verifies Fix falls back to no
+// mount, rather than handing runOnce a path buildMountSpecs will hard-error
+// on, when Run never wrote a snapshot in the first place (e.g. cfg.
+// IssueSnapshot is nil, issue #2547 review finding).
+func TestFix_NoIssueSnapshotWhenNoneWasWritten(t *testing.T) {
+	dir := tempLogDir(t)
+
+	fr := runner.NewFake()
+	f, err := NewFactory(Config{}, dir, fr, fakeDriver{}, RealClock())
+	if err != nil {
+		t.Fatalf("NewFactory: %v", err)
+	}
+	defer f.Cleanup()
+
+	d := f.New("42", "T")
+	if result := d.Run(); !result.Success {
+		t.Fatalf("Run: want Success=true, got %+v", result)
+	}
+	if result := d.Fix(1, ""); !result.Success {
+		t.Fatalf("Fix: want Success=true, got %+v", result)
+	}
+
+	if len(fr.RunCalls) != 2 {
+		t.Fatalf("RunCalls: got %d, want 2", len(fr.RunCalls))
+	}
+	if got := fr.RunCalls[1].IssueSnapshotPath; got != "" {
+		t.Errorf("Box.IssueSnapshotPath: got %q, want empty when no snapshot was ever written", got)
+	}
+}
+
 // TestRun_ResearchKind_NoIssueSnapshot verifies a research-kind Dispatch
 // never gets a snapshot -- Scout and research flows are unchanged (issue
 // #2547's acceptance criteria).
