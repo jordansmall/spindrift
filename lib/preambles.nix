@@ -11,7 +11,7 @@
 let
   unique = builtins.foldl' (acc: x: if builtins.elem x acc then acc else acc ++ [ x ]) [ ];
   builtinsCompat = import ./builtins-compat.nix;
-  inherit (builtinsCompat) concatStrings mapAttrsToList;
+  inherit (builtinsCompat) concatStrings mapAttrsToList escapeShellArg;
 in
 rec {
   # One renderer used by both the shell and Go preamble families: iterates
@@ -34,7 +34,7 @@ rec {
           prefix = if export then "export " else "";
         in
         ''
-          ${prefix}${entry.env}=''${${entry.env}:-${builtinsCompat.escapeShellArg value}}
+          ${prefix}${entry.env}=''${${entry.env}:-${escapeShellArg value}}
         ''
       ) flakeOptionEntries
     );
@@ -58,10 +58,10 @@ rec {
   renderDriverMountPreamble =
     driverEntry:
     "export DRIVER_SKILLS_DIR="
-    + builtinsCompat.escapeShellArg "/home/agent/${driverEntry.skillsDirRelative}"
+    + escapeShellArg "/home/agent/${driverEntry.skillsDirRelative}"
     + "\n"
     + "export DRIVER_SESSION_CACHE_DIR="
-    + builtinsCompat.escapeShellArg (
+    + escapeShellArg (
       if driverEntry ? sessionCacheDirRelative then
         "/home/agent/${driverEntry.sessionCacheDirRelative}"
       else
@@ -80,7 +80,7 @@ rec {
   renderAgentPathsPreamble =
     agentPaths:
     concatStrings (
-      mapAttrsToList (var: path: "${var}=\${${var}:-${builtinsCompat.escapeShellArg path}}\n") agentPaths
+      mapAttrsToList (var: path: "${var}=\${${var}:-${escapeShellArg path}}\n") agentPaths
     );
 
   # The Launcher input document's `artifacts` section for the `run` wrapper
