@@ -8,7 +8,7 @@
 let
   renderers = import ../../lib/renderers.nix;
   bakedSkills = import ../../lib/baked-skills.nix;
-  inherit (import ../../lib/prompt-inject.nix) escapeRegex;
+  inherit (import ../../lib/builtins-compat.nix) escapeRegex;
 
   # Isolates the text strictly between a literal begin/end marker line pair,
   # mirroring nix/checks/schema-drift.nix's assertDefaultModelsDocOk (which

@@ -11,14 +11,6 @@
 # testable with a bare `nix eval`, without a locked nixpkgs (mirrors
 # lib/prompt-inject.nix and lib/renderers.nix).
 let
-  # Joins `list` with `sep` (builtins-only concatStringsSep).
-  concatSep =
-    sep: list:
-    if list == [ ] then
-      ""
-    else
-      builtins.foldl' (a: b: a + sep + b) (builtins.head list) (builtins.tail list);
-
   # True when `s` contains any of the six ASCII whitespace characters Go's
   # strings.ContainsAny(r.Verdict, " \t\n\r\v\f") checks (space, tab, LF, CR,
   # vertical tab, form feed) -- POSIX [:space:] covers the same set.
@@ -151,9 +143,9 @@ rec {
     promptText: verdicts:
     let
       bullet = v: "- `" + v.verdict + "` — " + (v.description or "");
-      bullets = concatSep "\n" (map bullet verdicts);
-      backtickEnum = concatSep " / " (map (v: "`" + v.verdict + "`") verdicts);
-      pipeJoined = concatSep "|" (map (v: v.verdict) verdicts);
+      bullets = builtins.concatStringsSep "\n" (map bullet verdicts);
+      backtickEnum = builtins.concatStringsSep " / " (map (v: "`" + v.verdict + "`") verdicts);
+      pipeJoined = builtins.concatStringsSep "|" (map (v: v.verdict) verdicts);
     in
     builtins.replaceStrings
       [

@@ -34,12 +34,6 @@ let
     };
 in
 rec {
-  # Exported so other marker-splitting call sites (e.g.
-  # nix/checks/baked-skills.nix's `between`) can split on a literal marker
-  # without the same risk this file's own splitOnce/injectSection guard
-  # against.
-  escapeRegex = builtinsCompat.escapeRegex;
-
   # Slices `text` from `startMarker` (inclusive) up to `endMarker`
   # (exclusive), asserting each marker appears exactly once — the same
   # single-occurrence guarantee sliceFromMarker below relies on, so a
