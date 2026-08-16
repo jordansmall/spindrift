@@ -1358,18 +1358,17 @@ verbatim — so continuity across passes comes from a compact run-state
 artifact, not a growing transcript:
 
 - **Run-state handoff.** A JSON file (`/tmp/run-state.json` by default,
-  outside the repo like `/tmp/brief.md`) records done slices, remaining
-  slices, the last reviewer verdict, the reviewer's own findings text, and
-  the scout-brief path. Each pass reads it before running and writes it back
-  after, through a temp-file-then-rename so a mid-write kill can never leave
-  a half-written file behind. A missing or corrupt file degrades to a cold
-  start, never an error.
+  outside the repo like `/tmp/brief.md`) records the last reviewer verdict,
+  the reviewer's own findings text, and the scout-brief path. Each pass reads
+  it before running and writes it back after, through a temp-file-then-rename
+  so a mid-write kill can never leave a half-written file behind. A missing
+  or corrupt file degrades to a cold start, never an error.
 - **Seeded prompts.** Before any pass whose run-state carries prior data (in
   practice every pass after the first, though a warm-started state file would
   seed pass 1 too), the orchestrator prepends a "Run-state handoff" section —
-  last verdict, done/remaining slices, reviewer findings, scout-brief path —
-  to the original prompt, so a fresh implementor pass knows where a prior
-  pass left off without reading its transcript.
+  last verdict, reviewer findings, scout-brief path — to the original prompt,
+  so a fresh implementor pass knows where a prior pass left off without
+  reading its transcript.
 - **Code-owned caps.** `--max-review-rounds` (default 3) caps additional
   passes a `BLOCK` verdict may trigger; `--max-slices` (default 9) caps the
   implement/fix/review invocation count regardless of verdict; either set to
