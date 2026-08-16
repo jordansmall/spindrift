@@ -415,6 +415,8 @@ rec {
         "hostMediatedRemote"
         "inBoxUnreachableTracker"
         "outboxRelayCapable"
+        "relayCapable"
+        "hostPostingCapable"
       ];
       checkRow =
         row:
@@ -446,6 +448,8 @@ rec {
         + fieldLine "HostMediatedRemote" (row.hostMediatedRemote or false)
         + fieldLine "InBoxUnreachableTracker" (row.inBoxUnreachableTracker or false)
         + fieldLine "OutboxRelayCapable" (row.outboxRelayCapable or false)
+        + fieldLine "RelayCapable" (row.relayCapable or false)
+        + fieldLine "HostPostingCapable" (row.hostPostingCapable or false)
         + "}\n";
       checkedBackends = map checkRow backends;
       rows = concatStrings (map renderRow checkedBackends);

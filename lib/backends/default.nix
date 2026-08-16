@@ -64,6 +64,24 @@
 #                                     treatment under read-only (issue
 #                                     #1918: "github" only); omitted (false)
 #                                     otherwise.
+#   relayCapable             bool    true for a CODE_FORGE backend that,
+#                                     under BOX_FORGE_AND_ISSUE_ACCESS=
+#                                     read-only, has every real
+#                                     host-mediation seam needed
+#                                     (bundle-relay always; draft-PR-create +
+#                                     commit-subjects too when the backend
+#                                     has a PR concept) -- true for github,
+#                                     forgejo, local; omitted (false) for
+#                                     git. Distinct from outboxRelayCapable
+#                                     (a narrower, github-only concern:
+#                                     outbox mount treatment, #1918/#2267).
+#   hostPostingCapable       bool    true for an ISSUE_TRACKER backend that,
+#                                     under BOX_FORGE_AND_ISSUE_ACCESS=
+#                                     read-only, can have its comments/
+#                                     issue-filing host-mediated
+#                                     (host-posted comments + issue-filing)
+#                                     -- true for github, forgejo, local;
+#                                     omitted (false) for jira.
 [
   {
     name = "github";
@@ -72,6 +90,8 @@
     validAsCodeForge = true;
     tokenEnvVar = "GH_TOKEN";
     outboxRelayCapable = true;
+    relayCapable = true;
+    hostPostingCapable = true;
   }
   {
     name = "git";
@@ -85,6 +105,8 @@
     validAsCodeForge = true;
     hostMediatedRemote = true;
     inBoxUnreachableTracker = true;
+    relayCapable = true;
+    hostPostingCapable = true;
   }
   {
     name = "jira";
@@ -102,5 +124,7 @@
     tokenEnvVar = "FORGEJO_TOKEN";
     doctorTokenHint = "FORGEJO_TOKEN";
     doctorSlugHint = "FORGEJO_BASE_URL";
+    relayCapable = true;
+    hostPostingCapable = true;
   }
 ]

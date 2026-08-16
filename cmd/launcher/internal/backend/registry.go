@@ -44,6 +44,21 @@ type Descriptor struct {
 	// reachability at all (ADR 0032: "local"), gating the read-only
 	// /issues mount.
 	InBoxUnreachableTracker bool
+
+	// RelayCapable is true for a CODE_FORGE backend that, under
+	// BOX_FORGE_AND_ISSUE_ACCESS=read-only, has every real host-mediation
+	// seam needed (bundle-relay always; draft-PR-create + commit-subjects
+	// too when the backend has a PR concept). True for github, forgejo,
+	// local (trivially, no PR concept); false for git. Distinct from
+	// OutboxRelayCapable, which is a narrower, github-only concern (outbox
+	// mount treatment, issue #1918/#2267).
+	RelayCapable bool
+
+	// HostPostingCapable is true for an ISSUE_TRACKER backend that, under
+	// BOX_FORGE_AND_ISSUE_ACCESS=read-only, can have its comments/
+	// issue-filing host-mediated (host-posted comments + issue-filing).
+	// True for github, forgejo, local; false for jira.
+	HostPostingCapable bool
 }
 
 // Registry (every registered backend descriptor) and its named GitHub/
