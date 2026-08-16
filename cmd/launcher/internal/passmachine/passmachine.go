@@ -470,7 +470,7 @@ func reviewTransition(in Input) Decision {
 			Reason:    "budget exceeded; running terminal land pass",
 			LandPhase: LandPhaseTerminalCommitted,
 			Cap:       StopBudgetExceeded,
-			CapFired:  "budget exceeded: " + budgetReason,
+			CapFired:  "budget exceeded (" + budgetReason + ")",
 		}
 	default:
 		d = Decision{Continue: true, Reason: ""}
