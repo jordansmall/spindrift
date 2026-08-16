@@ -15,9 +15,10 @@ import (
 // call), then compose the corresponding findings line later, once every
 // batch has run (issue #2060).
 type integrationOutcome struct {
-	status integrateStatus
-	output string
-	err    error
+	status   integrateStatus
+	output   string
+	err      error
+	revRange string
 }
 
 // maxWorkerResultInFindings caps how much of a single worker's own
@@ -310,8 +311,30 @@ func dispatchManifestIfPresent(cfg config, state *runstate.RunState, stdout io.W
 					state.UnlandedSlices = appendUnique(state.UnlandedSlices, r.Slice)
 					continue
 				}
-				status, out, err := integrateSliceBranch(repoRoot, r.Slice, workerBranchName(r.Slice))
-				integrations[r.Slice] = integrationOutcome{status: status, output: out, err: err}
+				branch := workerBranchName(r.Slice)
+				status, out, err := integrateSliceBranch(repoRoot, r.Slice, branch)
+				outcome := integrationOutcome{status: status, output: out, err: err}
+				if status == integrateConflict {
+					// Freeze the merge-base-vs-HEAD range for the
+					// human/coordinator-facing guidance NOW, while
+					// repoRoot's HEAD is still whatever this slice's own
+					// worktree was actually rooted on -- integrateSliceBranch
+					// aborts its own cherry-pick on conflict, so HEAD is
+					// untouched by this call, but squashIntegrationCommits
+					// (below, once every batch has run) rewrites HEAD via
+					// `git reset --soft`, orphaning any interim per-slice
+					// integration commit a LATER batch's worker branch was
+					// itself rooted on. Recomputing this merge-base after
+					// that rewrite would silently walk past the orphaned
+					// commit to an earlier, shared ancestor and hand the
+					// coordinator a range that replays an already-squashed
+					// slice's own diff a second time -- an empty cherry-pick
+					// git refuses outright (issue #2060 review finding).
+					if mergeBaseOut, mbErr := runGitIn(repoRoot, "merge-base", "HEAD", branch); mbErr == nil {
+						outcome.revRange = strings.TrimSpace(mergeBaseOut) + ".." + branch
+					}
+				}
+				integrations[r.Slice] = outcome
 				if status == integrateOK {
 					integratedNames = append(integratedNames, r.Slice)
 				}
@@ -367,8 +390,24 @@ func dispatchManifestIfPresent(cfg config, state *runstate.RunState, stdout io.W
 				// human/coordinator reading this finding sees the exact same
 				// conflict-resolution steps this repo's own rebase-conflict
 				// path already gives (conflict-resolve-prompt.md), adapted
-				// for cherry-pick.
-				revRange := fmt.Sprintf("$(git merge-base HEAD %s)..%s", branch, branch)
+				// for cherry-pick. revRange is the batch loop's own frozen
+				// outcome.revRange (a concrete merge-base SHA computed
+				// before squashIntegrationCommits rewrote HEAD), not a
+				// literal `$(git merge-base HEAD <branch>)..<branch>`
+				// shell expression re-evaluated here: re-evaluating it
+				// against THIS pass's post-squash HEAD would walk past the
+				// orphaned interim commit this slice's branch was rooted on
+				// to a shared ancestor further back, hand the coordinator a
+				// range that replays an already-squashed slice a second
+				// time, and halt on git's own empty-cherry-pick guard
+				// (issue #2060 review finding). Fall back to the live
+				// shell-expression form only in the unexpected case the
+				// batch loop's own merge-base call itself failed and left
+				// outcome.revRange empty.
+				revRange := outcome.revRange
+				if revRange == "" {
+					revRange = fmt.Sprintf("$(git merge-base HEAD %s)..%s", branch, branch)
+				}
 				fmt.Fprintf(&findings, "- %s: done, but integration conflicted (branch %s)\n", r.Slice, branch)
 				guidance := conflictResolveGuidance(branch, revRange)
 				fmt.Fprintf(&findings, "  %s\n", strings.ReplaceAll(guidance, "\n", "\n  "))
@@ -396,8 +435,10 @@ func dispatchManifestIfPresent(cfg config, state *runstate.RunState, stdout io.W
 					errMsg = truncateRunes(errMsg, maxWorkerResultInFindings)
 					fmt.Fprintf(&findings, "  %s\n", strings.ReplaceAll(errMsg, "\n", "\n  "))
 				}
-			default: // integrateOK
+			case integrateOK:
 				fmt.Fprintf(&findings, "- %s: done, integrated (branch %s)\n", r.Slice, branch)
+			default:
+				fmt.Fprintf(&findings, "- %s: done, integration outcome %q unrecognized\n", r.Slice, outcome.status)
 			}
 
 			if result := strings.TrimSpace(r.Result); result != "" {
