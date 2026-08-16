@@ -33,11 +33,12 @@ func stubBinOnPath(t *testing.T, name string) {
 // readonly-guards subcommand's flag parsing reaches
 // promptassembly.LoadForbiddenMarkersFile and readonlyguards.Install with the
 // right Config: the real 13-row forbiddenMarkers registry fixture installs
-// the one "gh" command shim (every "fj ..." row stays prompt-only per
-// lib/prompt-contract.nix's rationale comment on those rows) and the
-// pre-push/pre-receive git hook under -repo-dir, exit code 0 (issue #2509).
+// both the "gh" and "fj" command shims (every row of both is
+// enforce=="command-shim", issue #2509) and the pre-push/pre-receive git
+// hook under -repo-dir, exit code 0.
 func TestRunReadonlyGuards_FullRegistryInstallsShimAndHook(t *testing.T) {
 	stubBinOnPath(t, "gh")
+	stubBinOnPath(t, "fj")
 	repoDir := t.TempDir()
 	runGitCmd(t, repoDir, "init")
 	shimDir := t.TempDir()
@@ -52,14 +53,13 @@ func TestRunReadonlyGuards_FullRegistryInstallsShimAndHook(t *testing.T) {
 		t.Fatalf("runReadonlyGuards exit = %d, want 0 (stdout=%q)", rc, stdout.String())
 	}
 
-	if _, err := os.Stat(filepath.Join(shimDir, "gh")); err != nil {
-		t.Errorf("gh shim not installed: %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(shimDir, ".real-gh")); err != nil {
-		t.Errorf(".real-gh not installed: %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(shimDir, "fj")); err == nil {
-		t.Error("fj shim installed, want none (every fj row is prompt-only)")
+	for _, argv0 := range []string{"gh", "fj"} {
+		if _, err := os.Stat(filepath.Join(shimDir, argv0)); err != nil {
+			t.Errorf("%s shim not installed: %v", argv0, err)
+		}
+		if _, err := os.Stat(filepath.Join(shimDir, ".real-"+argv0)); err != nil {
+			t.Errorf(".real-%s not installed: %v", argv0, err)
+		}
 	}
 
 	for _, name := range []string{"pre-push", "pre-receive"} {
@@ -73,16 +73,21 @@ func TestRunReadonlyGuards_FullRegistryInstallsShimAndHook(t *testing.T) {
 	if !bytes.Contains([]byte(out), []byte("gh")) {
 		t.Errorf("stdout = %q, want it to mention the installed gh shim", out)
 	}
-
-	// Exercise the installed shim end-to-end: a guarded subcommand rejects,
-	// naming the relay it replaces.
-	cmd := exec.Command(filepath.Join(shimDir, "gh"), "pr", "create")
-	shimOut, err := cmd.CombinedOutput()
-	if err == nil {
-		t.Fatalf("gh pr create via installed shim exit = 0, want non-zero; output=%q", shimOut)
+	if !bytes.Contains([]byte(out), []byte("fj")) {
+		t.Errorf("stdout = %q, want it to mention the installed fj shim", out)
 	}
-	if !bytes.Contains(shimOut, []byte("gh pr create")) {
-		t.Errorf("installed shim output = %q, want it to mention 'gh pr create'", shimOut)
+
+	// Exercise both installed shims end-to-end: a guarded subcommand
+	// rejects, naming the relay it replaces.
+	for _, argv0 := range []string{"gh", "fj"} {
+		cmd := exec.Command(filepath.Join(shimDir, argv0), "pr", "create")
+		shimOut, err := cmd.CombinedOutput()
+		if err == nil {
+			t.Fatalf("%s pr create via installed shim exit = 0, want non-zero; output=%q", argv0, shimOut)
+		}
+		if !bytes.Contains(shimOut, []byte(argv0+" pr create")) {
+			t.Errorf("installed %s shim output = %q, want it to mention %q", argv0, shimOut, argv0+" pr create")
+		}
 	}
 }
 
