@@ -224,3 +224,35 @@ func backendByName(name string) (backendRow, bool) {
 	}
 	return backendRow{}, false
 }
+
+// validTrackerNames returns the Name of every backendRows entry valid as an
+// ISSUE_TRACKER, in backendRows' declaration order. Unlike validateChoice
+// (schema-static, generated at build time), this reads the package-level
+// backendRows slice directly, so a row appended to it at runtime -- the
+// issue #2267 AC5 extensibility guarantee
+// (TestBackendRegistry_NewBackendNeedsOnlyRowAndNoOtherChanges) -- is
+// reflected immediately, including in validate()'s ISSUE_TRACKER-invalid
+// error message.
+func validTrackerNames() []string {
+	var names []string
+	for _, r := range backendRows {
+		if r.ValidAsTracker {
+			names = append(names, r.Name)
+		}
+	}
+	return names
+}
+
+// validCodeForgeNames returns the Name of every backendRows entry valid as a
+// CODE_FORGE, in backendRows' declaration order. See validTrackerNames for
+// why this reads backendRows directly instead of routing through
+// validateChoice.
+func validCodeForgeNames() []string {
+	var names []string
+	for _, r := range backendRows {
+		if r.ValidAsCodeForge {
+			names = append(names, r.Name)
+		}
+	}
+	return names
+}

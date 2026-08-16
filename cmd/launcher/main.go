@@ -321,7 +321,7 @@ func validate(c config) error {
 		return err
 	}
 	if !trackerRowOK || !trackerRow.ValidAsTracker {
-		return fmt.Errorf("ISSUE_TRACKER=%q is not valid; must be github, local, jira, or forgejo", c.issueTracker)
+		return fmt.Errorf("ISSUE_TRACKER=%q is not valid; must be %s", c.issueTracker, joinOxford(validTrackerNames()))
 	}
 	if trackerRow.validateTracker != nil {
 		if err := trackerRow.validateTracker(c); err != nil {
@@ -329,7 +329,7 @@ func validate(c config) error {
 		}
 	}
 	if !codeForgeRowOK || !codeForgeRow.ValidAsCodeForge {
-		return fmt.Errorf("CODE_FORGE=%q is not valid; must be github, git, local, or forgejo", c.codeForge)
+		return fmt.Errorf("CODE_FORGE=%q is not valid; must be %s", c.codeForge, joinOxford(validCodeForgeNames()))
 	}
 	if codeForgeRow.validateCodeForge != nil {
 		if err := codeForgeRow.validateCodeForge(c); err != nil {
