@@ -254,9 +254,9 @@ the Harness bundles them out of the container after you exit.
    onto the Integration branch host-side. There is no PR to open, no CI to
    watch, and nothing further for you to do.
 
-**`CODE_FORGE=forgejo`** (Forgejo/Gitea Code Forge — the Box opens the PR
-directly against the Forgejo API and the launcher watches CI and merges it
-host-side, ADR 0038 + issue #1961): continue with OPEN A PULL REQUEST below.
+**`CODE_FORGE=forgejo`** (Forgejo/Gitea Code Forge — the Box opens the PR via
+the Forgejo CLI and the launcher watches CI and merges it host-side, ADR
+0038 + issue #1961): continue with OPEN A PULL REQUEST below.
 
 **`CODE_FORGE=github`** (default): continue with OPEN A PULL REQUEST below.
 
