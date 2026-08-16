@@ -522,16 +522,15 @@ func runWithReviewPass(cfg config, stdout io.Writer) (int, error) {
 }
 
 // seedPromptFromState composes a fresh prompt file carrying promptFile's own
-// content plus a summary of state -- last verdict, done/remaining slices,
-// scout-brief path -- so each pass is "seeded from the run-state artifact"
-// (issue #1998 AC1), not handed the same static prompt on every pass. This is
-// also the "precision between-iteration instruction injection" issue #1999
-// asks for: the explicit, inspectable "what is done, what the reviewer said"
-// brief, composed from the handoff artifact rather than an implicit resumed
-// session -- TestRunSeedsFixBriefWithDoneWorkAndVerdictAfterBlock asserts
-// AC2's exact shape. When state is the zero value (the common cold-start
-// pass, nothing carried forward yet) this returns promptFile unchanged and
-// creates no temp file.
+// content plus a summary of state -- last verdict, scout-brief path -- so
+// each pass is "seeded from the run-state artifact" (issue #1998 AC1), not
+// handed the same static prompt on every pass. This is also the "precision
+// between-iteration instruction injection" issue #1999 asks for: the
+// explicit, inspectable "what the reviewer said" brief, composed from the
+// handoff artifact rather than an implicit resumed session --
+// TestRunSeedsFixBriefWithVerdictAfterBlock asserts this shape. When state is
+// the zero value (the common cold-start pass, nothing carried forward yet)
+// this returns promptFile unchanged and creates no temp file.
 func seedPromptFromState(promptFile string, state runstate.RunState) (string, error) {
 	if state.IsEmpty() {
 		return promptFile, nil
@@ -548,12 +547,6 @@ func seedPromptFromState(promptFile string, state runstate.RunState) (string, er
 	b.WriteString("exactly this point -- don't redo already-done work.\n\n")
 	if state.LastVerdict != "" {
 		fmt.Fprintf(&b, "- Last reviewer verdict: %s\n", state.LastVerdict)
-	}
-	if len(state.DoneSlices) > 0 {
-		fmt.Fprintf(&b, "- Done slices: %s\n", strings.Join(state.DoneSlices, ", "))
-	}
-	if len(state.RemainingSlices) > 0 {
-		fmt.Fprintf(&b, "- Remaining slices: %s\n", strings.Join(state.RemainingSlices, ", "))
 	}
 	if state.ScoutBriefPath != "" {
 		fmt.Fprintf(&b, "- Scout brief: %s\n", state.ScoutBriefPath)
