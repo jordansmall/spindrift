@@ -60,8 +60,8 @@ let
   # the widest `path` (computed, not hand-typed -- issue #2557 review
   # finding), one line per { path, value } item. Shared by
   # renderSettingsExampleModelsDoc/LabelsDoc/ConfigDoc, whose flat
-  # domain-tree example blocks in docs/reference.md are hand-aligned per
-  # block.
+  # domain-tree example blocks in docs/reference.md have their alignment
+  # computed per block, not hand-typed.
   renderAlignedLines =
     items:
     let
