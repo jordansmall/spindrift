@@ -1277,6 +1277,20 @@ let
   # if narrow, foot-gun (e.g. a copy-pasted template placeholder) that would
   # otherwise bake an image that dies at launcher startup instead of at
   # eval time (spec #2517's Problem Statement).
+  #
+  # This is the intentional reading of issue #2527 AC3 ("a missing repo slug
+  # on a non-fully-local cell throws at eval"), not an unmet AC: "missing"
+  # here means a Consumer flake that never set `repoSlug` at all -- and that
+  # case is provably required to keep succeeding, by the pre-existing (main-
+  # branch) nix/checks/equivalence.nix `defaultRun`/`mkRun {}` pin, which
+  # asserts the resulting document bakes `"REPO_SLUG":""` rather than
+  # throwing. The only "missing" that's eval-decidable at all is the
+  # EXPLICIT `repoSlug = "";` case this assert actually catches; a Consumer
+  # that both omits `repoSlug` in Nix AND never supplies REPO_SLUG at
+  # dispatch runtime is genuinely runtime-missing, and is instead caught by
+  # cmd/launcher/main.go's validate() at run time (see its REPO_SLUG check
+  # around line 329) -- these two checks are deliberately complementary,
+  # covering eval-time and runtime respectively, not overlapping.
   repoSlugCoherenceOk =
     if (defaults ? repoSlug) && defaults.repoSlug == "" && !fullyLocal then
       throw "mkHarness: repoSlug is explicitly set to an empty string, but CODE_FORGE=${mergedDefaults.codeForge}/ISSUE_TRACKER=${mergedDefaults.issueTracker} is not fully-local (CODE_FORGE=local and ISSUE_TRACKER=local) -- either supply a real repoSlug or omit the key entirely so REPO_SLUG is supplied at dispatch runtime instead"
