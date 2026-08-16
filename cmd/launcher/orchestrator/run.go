@@ -218,14 +218,14 @@ func landPhase(terminalLand bool) passmachine.LandPhase {
 // this pass's write above deliberately happens BEFORE that mutation,
 // preserving the original blocks' own write-before-decide order), and emits
 // the decision op.
-func applyDecision(cfg config, state *runstate.RunState, stdout io.Writer, out passOutcome, in passmachine.Input) passmachine.Decision {
+func applyDecision(stateFile string, state *runstate.RunState, stdout io.Writer, out passOutcome, in passmachine.Input) passmachine.Decision {
 	if out.emitVerdictOp {
 		fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "verdict", Verdict: string(out.verdict)}))
 	}
 	if out.checkHasOutcome && !out.hasOutcome {
 		fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "pass_no_outcome", Pass: out.pass, Verdict: string(out.verdict), Reason: fmt.Sprintf("exit %d", out.exitCode)}))
 	}
-	if writeErr := runstate.WriteRunState(cfg.stateFile, *state); writeErr != nil {
+	if writeErr := runstate.WriteRunState(stateFile, *state); writeErr != nil {
 		fmt.Fprintln(os.Stderr, "orchestrator: write run state:", writeErr)
 		fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "run_state_error", Phase: "write", Error: writeErr.Error()}))
 	}
@@ -292,7 +292,7 @@ func run(cfg config, stdout io.Writer) (int, error) {
 		// or stop), so a mid-turn cutoff/park is visible for the exact pass
 		// it happened on, rather than only inferable from the run's own final
 		// decision reason once every pass is done.
-		d := applyDecision(cfg, &state, stdout, passOutcome{
+		d := applyDecision(cfg.stateFile, &state, stdout, passOutcome{
 			verdict:         passmachine.Verdict(verdict),
 			emitVerdictOp:   verdict != "",
 			hasOutcome:      hasOutcome,
@@ -402,7 +402,7 @@ func runWithReviewPass(cfg config, stdout io.Writer) (int, error) {
 		// or stop), so a mid-turn cutoff/park is visible for the exact pass
 		// it happened on, rather than only inferable from the run's own final
 		// decision reason once every pass is done.
-		d := applyDecision(cfg, &state, stdout, passOutcome{
+		d := applyDecision(cfg.stateFile, &state, stdout, passOutcome{
 			checkHasOutcome: true,
 			hasOutcome:      hasOutcome,
 			exitCode:        rc,
@@ -435,6 +435,17 @@ func runWithReviewPass(cfg config, stdout io.Writer) (int, error) {
 			// the run's last one regardless of what it finds.
 			passKind = passmachine.KindLand
 			continue
+		case passmachine.KindReview:
+			// implementFixTransition's own fallthrough case: neither
+			// manifest dispatch nor a cap fired, so this pass's own
+			// implement/fix/land work is done and a fresh review pass runs
+			// below.
+		default:
+			// d.Continue is true but NextPass is none of the three kinds
+			// implementFixTransition ever returns on a continue decision
+			// (issue #2548 review) -- report it loudly instead of silently
+			// falling into a review pass for an unmapped kind.
+			fmt.Fprintf(os.Stderr, "orchestrator: internal error: unexpected NextPass %q on continue decision; treating as review pass\n", d.NextPass)
 		}
 
 		// ---- review pass: cfg.reviewPromptFile, always a fresh session ----
@@ -481,7 +492,7 @@ func runWithReviewPass(cfg config, stdout io.Writer) (int, error) {
 		// state.TerminalLand case (already true by the time this land pass's
 		// own iteration reaches it) is what actually bounds this to exactly
 		// one extra pass.
-		d = applyDecision(cfg, &state, stdout, passOutcome{
+		d = applyDecision(cfg.stateFile, &state, stdout, passOutcome{
 			verdict:       passmachine.Verdict(reviewVerdict),
 			emitVerdictOp: reviewVerdict != "",
 		}, passmachine.Input{
