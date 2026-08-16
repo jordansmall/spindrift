@@ -1318,6 +1318,168 @@ esac
 	}
 }
 
+// TestDispatchManifestIfPresentSquashPreservesConflictGuidanceAcrossBatches
+// verifies dispatchManifestIfPresent (issue #2060 review finding): a
+// conflicted slice dispatched in a batch AFTER an earlier batch has already
+// landed its own per-slice integration commit must still get a usable
+// cherry-pick range in its finding's manual-resolution guidance, even
+// though squashIntegrationCommits (run once, after every batch) later
+// rewrites HEAD via `git reset --soft` and orphans that earlier batch's own
+// interim commit -- exactly the commit a later batch's worker branch (`git
+// worktree add ... HEAD`, workers.go) was rooted on. Three slices: "alpha"
+// (batch 0, unrelated FileLeases, integrates cleanly) landing an interim
+// commit; "beta" and "gamma" (batch 1, both DependsOn alpha, disjoint
+// declared FileLeases so they share a batch and both root their own
+// worktrees on alpha's interim commit) each independently create shared.txt
+// with different content -- beta integrates first and lands cleanly, then
+// gamma's own cherry-pick, replayed against beta's now-different shared.txt,
+// conflicts. Recomputing merge-base(HEAD, gamma's branch) AFTER the squash
+// below resolves to startHead (alpha's interim commit is unreachable from
+// the squashed HEAD), which would replay alpha's own already-squashed diff
+// a second time and halt with git's own empty-cherry-pick guard -- this
+// test proves the guidance's own frozen range instead applies cleanly.
+func TestDispatchManifestIfPresentSquashPreservesConflictGuidanceAcrossBatches(t *testing.T) {
+	repoRoot := chdirToFreshWorkerRepo(t)
+
+	dir := t.TempDir()
+	callLog := filepath.Join(dir, "calls.log")
+	if err := os.WriteFile(callLog, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	body := `case "$DRIVER_LOG_PATH" in
+  "$WORKER_WORK_DIR"*)
+    : > "$DRIVER_LOG_PATH"
+    base=$(basename "$DRIVER_LOG_PATH" .log)
+    case "$base" in
+      alpha)
+        echo "content for alpha" > alpha.txt
+        git add alpha.txt
+        ;;
+      beta)
+        echo "content B" > shared.txt
+        git add shared.txt
+        ;;
+      gamma)
+        echo "content C" > shared.txt
+        git add shared.txt
+        ;;
+    esac
+    git commit -m "worker commit for $base"
+    : > "${DRIVER_LOG_PATH%.log}.done"
+    exit 0
+    ;;
+esac
+: > "$DRIVER_LOG_PATH"
+`
+	writeFakeDriverExec(t, dir, callLog, body)
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	workerWorkDir := t.TempDir()
+	t.Setenv("WORKER_WORK_DIR", workerWorkDir)
+
+	manifest := SliceManifest{Slices: []ManifestSlice{
+		{Name: "alpha", Task: "implement seam alpha", FileLeases: []string{"alpha.txt"}},
+		{Name: "beta", Task: "implement seam beta", FileLeases: []string{"lease-beta"}, DependsOn: []string{"alpha"}},
+		{Name: "gamma", Task: "implement seam gamma", FileLeases: []string{"lease-gamma"}, DependsOn: []string{"alpha"}},
+	}}
+	line, err := manifest.Line()
+	if err != nil {
+		t.Fatalf("Line() error = %v", err)
+	}
+	logPath := filepath.Join(dir, "stream.log")
+	if err := os.WriteFile(logPath, []byte(streamJSONOutcomeLine(strings.TrimSpace(line))), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	workerPromptFile := filepath.Join(dir, "worker-prompt.txt")
+	if err := os.WriteFile(workerPromptFile, []byte("BASE WORKER PROMPT"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config{
+		driver:           "claude",
+		logPath:          logPath,
+		workerPromptFile: workerPromptFile,
+		workerWorkDir:    workerWorkDir,
+		workerTimeout:    5 * time.Second,
+	}
+	state := runstate.RunState{}
+
+	var stdout strings.Builder
+	got := dispatchManifestIfPresent(cfg, &state, &stdout)
+	if !got {
+		t.Fatalf("dispatchManifestIfPresent() = false, want true")
+	}
+
+	for _, want := range []string{"alpha", "beta", "gamma"} {
+		if !containsSlice(state.DoneSlices, want) {
+			t.Errorf("state.DoneSlices = %v, want it to contain %q", state.DoneSlices, want)
+		}
+	}
+
+	if !strings.Contains(state.WorkerFindings, "alpha: done, integrated") {
+		t.Errorf("state.WorkerFindings = %q, want alpha reported as cleanly integrated", state.WorkerFindings)
+	}
+	if !strings.Contains(state.WorkerFindings, "beta: done, integrated") {
+		t.Errorf("state.WorkerFindings = %q, want beta reported as cleanly integrated", state.WorkerFindings)
+	}
+	if !strings.Contains(state.WorkerFindings, "gamma: done, but integration conflicted") {
+		t.Errorf("state.WorkerFindings = %q, want gamma reported as conflicted", state.WorkerFindings)
+	}
+
+	// Squash landed alpha and beta's own interim commits as exactly one
+	// commit on HEAD; gamma's conflict never landed anything.
+	headMsg := gitOutputT(t, repoRoot, "log", "-1", "--format=%B", "HEAD")
+	if !strings.Contains(headMsg, "alpha") || !strings.Contains(headMsg, "beta") {
+		t.Errorf("squashed commit message = %q, want it to name both integrated slices alpha and beta", headMsg)
+	}
+	if strings.Contains(headMsg, "gamma") {
+		t.Errorf("squashed commit message = %q, want it to NOT name gamma (its own integration conflicted, nothing landed)", headMsg)
+	}
+
+	// Pull the exact `git cherry-pick <range>` command the rendered
+	// fallback guidance names for gamma. gamma's own change genuinely
+	// conflicts with beta's (both touch shared.txt), so replaying the
+	// range is still expected to conflict -- the regression this guards is
+	// a DIFFERENT failure: naming a range recomputed against post-squash
+	// HEAD would fold alpha's own already-squashed interim commit into the
+	// range too (rev-list count 2, not 1), and replaying THAT commit first
+	// halts on git's own empty-cherry-pick guard before gamma's own commit
+	// (the one that's actually supposed to conflict) is ever reached.
+	const marker = "git cherry-pick --no-commit "
+	idx := strings.Index(state.WorkerFindings, marker)
+	if idx == -1 {
+		t.Fatalf("state.WorkerFindings = %q, want it to carry a %q command for gamma's own conflict", state.WorkerFindings, marker)
+	}
+	rest := state.WorkerFindings[idx+len(marker):]
+	revRange := rest[:strings.IndexAny(rest, " \n")]
+	if !strings.Contains(revRange, "..") {
+		t.Fatalf("extracted revRange = %q, want a <sha>..<branch> range", revRange)
+	}
+
+	revListOut := gitOutputT(t, repoRoot, "rev-list", revRange)
+	revListCount := 0
+	if revListOut != "" {
+		revListCount = len(strings.Split(revListOut, "\n"))
+	}
+	if revListCount != 1 {
+		t.Fatalf("rev-list %s has %d commits, want exactly 1 (gamma's own commit only) -- a count of 2 means the range wrongly folded in alpha's own already-squashed interim commit", revRange, revListCount)
+	}
+
+	cherryCmd := exec.Command("git", "cherry-pick", "--no-commit", revRange)
+	cherryCmd.Dir = repoRoot
+	cherryOut, cherryErr := cherryCmd.CombinedOutput()
+	if cherryErr == nil {
+		t.Fatalf("git cherry-pick --no-commit %s (frozen guidance range) against post-squash HEAD unexpectedly succeeded, want gamma's genuine content conflict with beta's own change to shared.txt", revRange)
+	}
+	if strings.Contains(string(cherryOut), "previous cherry-pick is now empty") {
+		t.Fatalf("git cherry-pick --no-commit %s failed on git's own empty-cherry-pick guard (alpha's already-squashed commit got replayed a second time) instead of gamma's genuine conflict:\n%s", revRange, cherryOut)
+	}
+	if !strings.Contains(string(cherryOut), "CONFLICT") {
+		t.Fatalf("git cherry-pick --no-commit %s failed for an unexpected reason, want a CONFLICT on shared.txt:\n%s", revRange, cherryOut)
+	}
+}
+
 // TestDispatchManifestIfPresentDoesNotSquashWhenNothingIntegrated verifies
 // dispatchManifestIfPresent (issue #2060 review finding): when a dispatched
 // slice's own branch carries no new commits (integrateEmpty), HEAD is never
