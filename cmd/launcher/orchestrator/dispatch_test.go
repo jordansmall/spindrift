@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"spindrift.dev/launcher/internal/outcome"
 	"spindrift.dev/launcher/internal/runstate"
 )
 
@@ -207,8 +208,8 @@ func TestDispatchManifestIfPresentQuarantinesStrayWorkerOutcome(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadFile(workerLogPath): %v", err)
 	}
-	if !strings.Contains(string(workerLog), "SPINDRIFT_OUTCOME") {
-		t.Fatalf("worker's own log %q = %q, want it to contain the stray SPINDRIFT_OUTCOME line (otherwise this test proves nothing)", workerLogPath, workerLog)
+	if !strings.Contains(string(workerLog), outcome.Token) {
+		t.Fatalf("worker's own log %q = %q, want it to contain the stray %s line (otherwise this test proves nothing)", workerLogPath, workerLog, outcome.Token)
 	}
 
 	verdict, hasOutcome := scanPassLog(cfg.logPath, cfg.driver)
