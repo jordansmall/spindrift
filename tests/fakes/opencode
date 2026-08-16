@@ -29,16 +29,23 @@ prompt=""
 model=""
 while [ $# -gt 0 ]; do
   case "$1" in
-    -p)
-      prompt="${2:-}"
-      shift 2
-      ;;
-    --model)
+    -m)
       # shellcheck disable=SC2034 # model is read by the sourced _driver-common.bash below
       model="${2:-}"
       shift 2
       ;;
-    *) shift ;;
+    --variant)
+      # opencode's real effort flag (lib/drivers/opencode.nix); consumed so
+      # it isn't mistaken for the positional prompt below. Nothing
+      # downstream reads an effort value yet.
+      shift 2
+      ;;
+    *)
+      # opencode's real argv shape has no prompt flag -- the prompt rides a
+      # bare positional argument (lib/drivers/opencode.nix's argvShape).
+      prompt="$1"
+      shift
+      ;;
   esac
 done
 

@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
 # Fake driver-exec for bats tests (issue #626). Stands in for the real in-box
 # Go binary closely enough to prove agent/entrypoint.sh wires it correctly:
-# reads the prompt/agents/session file paths, builds the Driver's argv, runs
-# it directly or -- when --devshell is set -- wrapped in
+# reads the prompt/agents/session file paths, builds the Driver's argv from
+# the --argv-* shape flags (issue #2534, mirroring
+# cmd/launcher/driver-exec/args.go's slot-walk rather than hardcoding one
+# Driver's shape), runs it directly or -- when --devshell is set -- wrapped
+# in
 # `nix develop --command`, writes its raw output to -log-path (and echoes it
 # to stdout, the launcher's byte-exact capture channel), and appends a
 # synthetic heartbeat line to -heartbeat-log (absorbing the former standalone
@@ -156,6 +159,10 @@ fi
 prompt_file="" agents_file="" session_file=""
 driver_bin="" driver_flags="" model="" issue="${ISSUE_NUMBER:-0}"
 devshell=0 devshell_name="default" log_path="" heartbeat_log="/tmp/heartbeat.log"
+effort=""
+argv_prompt_style="flag" argv_prompt_flag="" argv_model_flag="--model"
+argv_model_omit_empty=0 argv_agents_flag="" argv_effort_flag="--effort"
+argv_order="prompt model agents session driverFlags effort"
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -165,30 +172,72 @@ while [ $# -gt 0 ]; do
     --driver-bin) driver_bin="$2"; shift 2 ;;
     --driver-flags) driver_flags="$2"; shift 2 ;;
     --model) model="$2"; shift 2 ;;
+    --effort) effort="$2"; shift 2 ;;
     --devshell) devshell=1; shift ;;
     --devshell-name) devshell_name="$2"; shift 2 ;;
     --issue) issue="$2"; shift 2 ;;
     --log-path) log_path="$2"; shift 2 ;;
     --heartbeat-log) heartbeat_log="$2"; shift 2 ;;
+    --argv-prompt-style) argv_prompt_style="$2"; shift 2 ;;
+    --argv-prompt-flag) argv_prompt_flag="$2"; shift 2 ;;
+    --argv-model-flag) argv_model_flag="$2"; shift 2 ;;
+    --argv-model-omit-empty) argv_model_omit_empty=1; shift ;;
+    --argv-agents-flag) argv_agents_flag="$2"; shift 2 ;;
+    --argv-effort-flag) argv_effort_flag="$2"; shift 2 ;;
+    --argv-order) argv_order="$2"; shift 2 ;;
     *) shift ;;
   esac
 done
 
-args=(-p "$(cat "$prompt_file")" --model "$model")
-if [ -s "$agents_file" ]; then
-  args+=(--agents "$(cat "$agents_file")")
-fi
-if [ -n "$session_file" ] && [ -s "$session_file" ]; then
-  # `read` returns non-zero on a file with no trailing newline (session_file
-  # is written with a bare printf '%s', never one) even though it still
-  # populates the array correctly -- swallow that under set -e.
-  read -ra _session_args < "$session_file" || true
-  args+=("${_session_args[@]}")
-fi
-if [ -n "$driver_flags" ]; then
-  read -ra _flag_args <<< "$driver_flags"
-  args+=("${_flag_args[@]}")
-fi
+# Generic re-implementation of buildDriverArgs's slot-walk
+# (cmd/launcher/driver-exec/args.go), driven entirely by the --argv-* shape
+# flags above instead of a hardcoded Driver-specific argv (issue #2534): a
+# bug in a real Driver's argvShape data row (lib/drivers/*.nix) or in
+# args.go's slot handling must be reachable through this fake, not masked by
+# it always emitting claude's shape.
+args=()
+for slot in $argv_order; do
+  case "$slot" in
+    prompt)
+      if [ "$argv_prompt_style" = "flag" ]; then
+        args+=("$argv_prompt_flag" "$(cat "$prompt_file")")
+      else
+        args+=("$(cat "$prompt_file")")
+      fi
+      ;;
+    model)
+      if [ -n "$model" ] || [ "$argv_model_omit_empty" != "1" ]; then
+        args+=("$argv_model_flag" "$model")
+      fi
+      ;;
+    agents)
+      if [ -n "$argv_agents_flag" ] && [ -s "$agents_file" ]; then
+        args+=("$argv_agents_flag" "$(cat "$agents_file")")
+      fi
+      ;;
+    session)
+      if [ -n "$session_file" ] && [ -s "$session_file" ]; then
+        # `read` returns non-zero on a file with no trailing newline
+        # (session_file is written with a bare printf '%s', never one) even
+        # though it still populates the array correctly -- swallow that
+        # under set -e.
+        read -ra _session_args < "$session_file" || true
+        args+=("${_session_args[@]}")
+      fi
+      ;;
+    driverFlags)
+      if [ -n "$driver_flags" ]; then
+        read -ra _flag_args <<< "$driver_flags"
+        args+=("${_flag_args[@]}")
+      fi
+      ;;
+    effort)
+      if [ -n "$effort" ]; then
+        args+=("$argv_effort_flag" "$effort")
+      fi
+      ;;
+  esac
+done
 
 rc=0
 if [ "$devshell" = "1" ]; then
