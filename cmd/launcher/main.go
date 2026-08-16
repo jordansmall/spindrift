@@ -308,20 +308,17 @@ func validate(c config) error {
 	if _, err := driver.New(c.driver); err != nil {
 		return err
 	}
-	if err := settle.ValidateMergeMode(c.mergeMode); err != nil {
+	if err := validateChoice("MERGE_MODE", c.mergeMode); err != nil {
 		return err
 	}
-	if err := settle.ValidateMergeMethod(c.mergeMethod); err != nil {
+	if err := validateChoice("MERGE_METHOD", c.mergeMethod); err != nil {
 		return err
 	}
-	if err := settle.ValidateSyncMethod(c.syncMethod); err != nil {
+	if err := validateChoice("SYNC_METHOD", c.syncMethod); err != nil {
 		return err
 	}
-	switch c.overlapGate {
-	case "defer", "off":
-		// valid
-	default:
-		return fmt.Errorf("OVERLAP_GATE=%q is not valid; must be defer or off", c.overlapGate)
+	if err := validateChoice("OVERLAP_GATE", c.overlapGate); err != nil {
+		return err
 	}
 	if !trackerRowOK || !trackerRow.ValidAsTracker {
 		return fmt.Errorf("ISSUE_TRACKER=%q is not valid; must be github, local, jira, or forgejo", c.issueTracker)
@@ -339,11 +336,8 @@ func validate(c config) error {
 			return err
 		}
 	}
-	switch c.boxForgeAndIssueAccess {
-	case "read-write", "read-only":
-		// valid
-	default:
-		return fmt.Errorf("BOX_FORGE_AND_ISSUE_ACCESS=%q is not valid; must be read-write or read-only", c.boxForgeAndIssueAccess)
+	if err := validateChoice("BOX_FORGE_AND_ISSUE_ACCESS", c.boxForgeAndIssueAccess); err != nil {
+		return err
 	}
 	if _, err := forge.ParseResearchVerdicts(c.researchVerdicts); err != nil {
 		return err
