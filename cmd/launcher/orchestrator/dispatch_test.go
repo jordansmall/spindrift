@@ -200,7 +200,7 @@ func TestDispatchManifestIfPresentQuarantinesStrayWorkerOutcome(t *testing.T) {
 		t.Fatalf("dispatchManifestIfPresent() = false, want true")
 	}
 	if state.WorkerFindings == "" {
-		t.Fatal("state.WorkerFindings is empty, want the stray-outcome worker's own summary (it must join as WorkerDone, not derail)")
+		t.Fatal("state.WorkerFindings is empty, want the no-result-reported summary dispatchManifestIfPresent records for a WorkerDone slice (it must join as WorkerDone, not derail)")
 	}
 
 	workerLogPath := filepath.Join(cfg.workerWorkDir, "emits-stray-outcome.log")
