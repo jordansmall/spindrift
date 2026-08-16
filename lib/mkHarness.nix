@@ -1262,6 +1262,40 @@ else
     # exposed. Not part of the settings/CLI surface itself.
     roster = finalRoster;
 
+    # Check-only outputs, additionally namespaced under one attrset (issue
+    # #2529 slice 1): the versioned Consumer contract (ADR 0010) scopes to
+    # `image`/`spindrift`/`packages`/`apps` only, and everything checks/
+    # fixtures reach for lives here too so a later slice can drop the
+    # top-level copies without disturbing this shape. Additive for now --
+    # the top-level `inherit` block above and `roster` still carry these
+    # same values.
+    internals = {
+      inherit
+        agentEnv
+        agentFiles
+        build
+        run
+        manpage
+        bashCompletion
+        fishCompletion
+        zshCompletion
+        imagePath
+        promptDir
+        skillsDir
+        outcomeContractFile
+        commsContractFile
+        checkContractFile
+        researchOutcomeContractFile
+        driverPreambleFile
+        fragmentRegistryFile
+        driverExecBin
+        driverEntry
+        runInputDocumentFile
+        buildInputDocumentFile
+        ;
+      roster = finalRoster;
+    };
+
     packages = {
       inherit spindrift;
       spindrift-manpage = manpage;
