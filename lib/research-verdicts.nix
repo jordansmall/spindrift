@@ -86,11 +86,11 @@ let
       builtins.seq (builtins.foldl' checkEntry [ ] indices) verdicts;
 in
 rec {
-  # The built-in three-verdict set (ADR 0022), with descriptions byte-matching
-  # templates/default/prompts/research-prompt.md's VERDICT bullets and labels
-  # matching forge.ResearchVerdictLabels(). Used when RESEARCH_VERDICTS is
-  # unset; rendering against it is short-circuited to a no-op below so the
-  # default prompt stays byte-identical to the template on disk.
+  # The built-in three-verdict set (ADR 0022), with labels matching
+  # forge.ResearchVerdictLabels(). Used when RESEARCH_VERDICTS is unset;
+  # render below always renders this set through the same machinery as a
+  # custom set, so these descriptions are what actually reaches the
+  # production prompt.
   defaultVerdicts = [
     {
       verdict = "recommend";
@@ -100,7 +100,7 @@ rec {
     {
       verdict = "reject";
       label = "agent-research-reject";
-      description = "false positive, not worth doing, or a duplicate.";
+      description = "false positive, not worth doing, or a duplicate. Name the duplicate issue by number in your rationale; duplicate is a reason under `reject`, not a separate verdict.";
     }
     {
       verdict = "unclear";
@@ -110,9 +110,9 @@ rec {
   ];
 
   # Parses the RESEARCH_VERDICTS knob string into the ordered verdict list.
-  # The empty string (the schema default) yields defaultVerdicts, so no custom
-  # set means no change; any other value is parsed as JSON (a malformed value
-  # fails the build loudly, mirroring the launcher's startup validation).
+  # The empty string (the schema default) yields defaultVerdicts; any other
+  # value is parsed as JSON (a malformed value fails the build loudly,
+  # mirroring the launcher's startup validation).
   parse = s: if s == "" then defaultVerdicts else validate (builtins.fromJSON s);
 
   # Renders the verdict contract of `promptText` from `verdicts`: the VERDICT
@@ -124,8 +124,8 @@ rec {
   # pass (agent/entrypoint.sh's RESEARCH_STATUS_ENUM span / driver-exec
   # assemble-prompt) to fill in with the built-in default. Each rewrite is
   # guarded on the text it targets being present, so rendering a Consumer
-  # prompt that lacks the default markers/tokens (or the default set itself —
-  # see renderIfCustom) is a safe no-op.
+  # prompt that lacks the default markers/tokens is a safe no-op. `render`
+  # below always calls this, for both the default and a custom set.
   renderPrompt =
     promptText: verdicts:
     let
@@ -151,11 +151,11 @@ rec {
       [ ("status=<" + pipeJoined + ">") backtickEnum ]
       withSection;
 
-  # renderPrompt gated on the raw knob: the empty (default) knob returns the
-  # prompt untouched, guaranteeing the default research prompt stays byte-
-  # identical to the template (nix/checks/prompts.nix pins this); only a
-  # configured custom set rewrites the contract.
-  renderIfCustom =
-    rawKnob: promptText:
-    if rawKnob == "" then promptText else renderPrompt promptText (parse rawKnob);
+  # Parses the raw RESEARCH_VERDICTS knob and renders `promptText` against
+  # the result -- one path for both the default (empty knob, defaultVerdicts)
+  # and a configured custom set. There is no byte-identical no-op special
+  # case: the checked-in template is always re-rendered, so its VERDICT
+  # bullets and status alternation need not (and no longer do) byte-match
+  # anything on disk.
+  render = rawKnob: promptText: renderPrompt promptText (parse rawKnob);
 }

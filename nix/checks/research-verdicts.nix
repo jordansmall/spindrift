@@ -1,7 +1,8 @@
 # Eval-level pins for lib/research-verdicts.nix (issue #2201): the build-time
 # half of the configurable research verdict set. One assertion per behavior —
-# default parsing, the byte-identical default-render no-op, custom-set contract
-# rendering, and the marker-absent safety guard — ahead of nix/checks/prompts.nix's
+# default parsing, the default-set render going through the same rendering
+# machinery as a custom set (issue #2525), custom-set contract rendering, and
+# the marker-absent safety guard — ahead of nix/checks/prompts.nix's
 # integration coverage of the same rendering through a built harness prompt dir.
 { pkgs, ... }:
 let
@@ -21,7 +22,8 @@ let
       description = "drop it.";
     }
   ];
-  customRendered = rv.renderIfCustom customJSON template;
+  customRendered = rv.render customJSON template;
+  defaultRendered = rv.render "" template;
 in
 {
   # The empty knob yields the built-in three, in order.
@@ -46,13 +48,26 @@ in
       "parse must carry the mapped label";
     pkgs.runCommand "research-verdicts-parse-custom" { } "touch $out";
 
-  # The default knob is a byte-identical no-op — the guarantee
-  # nix/checks/prompts.nix's mkharness-prompt-research-outcome-default-unchanged
-  # relies on at the built-prompt level.
-  research-verdicts-render-default-is-noop =
-    assert assertMsg (rv.renderIfCustom "" template == template)
-      "renderIfCustom \"\" must leave the prompt byte-identical";
-    pkgs.runCommand "research-verdicts-render-default-is-noop" { } "touch $out";
+  # The empty (default) knob renders through the same machinery as a custom
+  # set (issue #2525) -- no byte-identical-to-template no-op special case.
+  # The rendered output must carry the bullets synthesized from
+  # defaultVerdicts (not the raw hand-typed template text), the status
+  # alternation, and the backtick enumeration.
+  research-verdicts-render-default-renders-registry-content =
+    assert assertMsg
+      (hasInfix "- `recommend` — relevant, now enriched with real context; promote it." defaultRendered)
+      "default render must emit the recommend bullet synthesized from defaultVerdicts";
+    assert assertMsg
+      (hasInfix "- `reject` — false positive, not worth doing, or a duplicate. Name the duplicate issue by number in your rationale; duplicate is a reason under `reject`, not a separate verdict." defaultRendered)
+      "default render must emit the reject bullet synthesized from defaultVerdicts, full description included";
+    assert assertMsg
+      (hasInfix "- `unclear` — relevance can't be determined without a human's answer." defaultRendered)
+      "default render must emit the unclear bullet synthesized from defaultVerdicts";
+    assert assertMsg (hasInfix "status=<recommend|reject|unclear>" defaultRendered)
+      "default render must emit the status alternation from defaultVerdicts";
+    assert assertMsg (hasInfix "`recommend` / `reject` / `unclear`" defaultRendered)
+      "default render must emit the backtick enumeration from defaultVerdicts";
+    pkgs.runCommand "research-verdicts-render-default-renders-registry-content" { } "touch $out";
 
   # A custom set rewrites the VERDICT bullets, the enumeration, and the
   # status alternation, and drops every default token from the contract.
@@ -75,10 +90,10 @@ in
   research-verdicts-render-markerless-is-safe =
     let
       preamble = "CONFIGURED-RESEARCH-PROMPT-MARKER\nResearch issue.\n";
-      out = rv.renderIfCustom customJSON preamble;
+      out = rv.render customJSON preamble;
     in
     assert assertMsg (out == preamble)
-      "renderIfCustom on a markerless prompt with no default tokens must be a no-op";
+      "render on a markerless prompt with no default tokens must be a no-op";
     pkgs.runCommand "research-verdicts-render-markerless-is-safe" { } "touch $out";
 
   # A custom RESEARCH_VERDICTS array with zero entries must be rejected
