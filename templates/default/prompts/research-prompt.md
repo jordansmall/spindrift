@@ -27,16 +27,14 @@ mandated.
 
 Render exactly one of these verdicts:
 
-- `recommend` — relevant, now enriched with real context; promote it.
-- `reject` — false positive, not worth doing, or a duplicate. Name the duplicate issue by number in your rationale; duplicate is a reason under `reject`, not a separate verdict.
-- `unclear` — relevance can't be determined without a human's answer.
+<!-- RESEARCH_VERDICT_BULLETS -->
 
 # POST THE VERDICT
 
 ${RESEARCH_VERDICT_GITHUB_STEP}${RESEARCH_VERDICT_GITHUB_READONLY_STEP}${RESEARCH_VERDICT_LOCAL_STEP}${RESEARCH_VERDICT_FORGEJO_STEP}${RESEARCH_VERDICT_FORGEJO_READONLY_STEP}
 Structure the verdict in this order:
 
-1. **Verdict** — `recommend` / `reject` / `unclear`, plus a one-line rationale.
+1. **Verdict** — `<RESEARCH_VERDICT_ENUM>`, plus a one-line rationale.
 2. **Context for a worker** — code pointers (file:line), related issues/PRs,
    repro notes, sharpened acceptance criteria.
 3. **Open questions** — mandatory when the verdict is `unclear`: the concrete
