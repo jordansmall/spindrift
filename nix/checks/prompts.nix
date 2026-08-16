@@ -1037,16 +1037,16 @@ in
 
   # Build-time reject arm (issue #2495): mkHarness.nix's
   # maxParallelWorkersCoherenceOk assert rejects a Consumer who explicitly
-  # sets MAX_PARALLEL_WORKERS while ORCHESTRATOR is off -- the orchestrator's
-  # slice-manifest worker dispatch this knob caps never runs without
-  # ORCHESTRATOR on, so baking the knob in that config would be inert.
-  # orchestratorEnabled is explicit `false` here (not merely omitted) to
-  # prove the check fires on an explicit false too, not only "not statically
-  # true" the way build-time-reject-orchestrator-verdict-not-triggered above
-  # tolerates. reviewPrompt is left at its default (which does carry the
-  # required VERDICT: marker) so this fixture trips only the assert under
-  # test, not the unrelated reviewer-verdict reject above.
-  build-time-reject-max-parallel-workers-no-orchestrator =
+  # sets MAX_PARALLEL_WORKERS while no worker subagent is provisioned
+  # (workerModel/roster's worker model empty) -- the orchestrator's
+  # slice-manifest worker dispatch this knob caps has structurally nothing to
+  # ever run without a worker. workerModel is explicit `""` here (unset
+  # defaults to a provisioned claude-sonnet-5) to trip the assert;
+  # orchestratorEnabled is explicit `true` to prove the reject is NOT gated
+  # on ORCHESTRATOR (review finding, issue #2495) -- a prior revision of this
+  # assert checked orchestratorEnabled instead of worker provisioning and
+  # would have incorrectly kept a build like this one green.
+  build-time-reject-max-parallel-workers-no-worker =
     let
       inherit (pkgs.lib) assertMsg;
       broken = builtins.tryEval (
@@ -1055,19 +1055,25 @@ in
           packages = p: [ p.hello ];
           defaults = {
             maxParallelWorkers = 5;
-            orchestratorEnabled = false;
+            orchestratorEnabled = true;
+            workerModel = "";
           };
         }).spindrift
       );
     in
-    assert assertMsg (!broken.success)
-      "mkHarness.nix must throw when MAX_PARALLEL_WORKERS is set but ORCHESTRATOR is explicitly disabled";
-    pkgs.runCommand "build-time-reject-max-parallel-workers-no-orchestrator" { } "touch $out";
+    assert assertMsg (
+      !broken.success
+    ) "mkHarness.nix must throw when MAX_PARALLEL_WORKERS is set but no worker subagent is provisioned";
+    pkgs.runCommand "build-time-reject-max-parallel-workers-no-worker" { } "touch $out";
 
-  # The gate-satisfied counterpart: the same explicit MAX_PARALLEL_WORKERS,
-  # but ORCHESTRATOR is also explicitly on -- a perfectly coherent config,
-  # so the build must succeed.
-  build-time-reject-max-parallel-workers-not-triggered =
+  # The gate-satisfied counterpart, with ORCHESTRATOR left OFF (issue #2495
+  # review finding): a Consumer baking MAX_PARALLEL_WORKERS with a worker
+  # model configured (the schema default, left untouched here) but
+  # ORCHESTRATOR off by default -- e.g. to flip --orchestrator per dispatch
+  # for an A/B rollout -- is a coherent, intentionally supported config; the
+  # build must succeed. This is exactly the shape the ORCHESTRATOR-gated
+  # revision of this assert incorrectly rejected.
+  build-time-reject-max-parallel-workers-orchestrator-off-worker-provisioned =
     let
       inherit (pkgs.lib) assertMsg;
       ok = builtins.tryEval (
@@ -1076,20 +1082,21 @@ in
           packages = p: [ p.hello ];
           defaults = {
             maxParallelWorkers = 5;
-            orchestratorEnabled = true;
+            orchestratorEnabled = false;
           };
         }).spindrift
       );
     in
     assert assertMsg ok.success
-      "mkHarness.nix must not throw when MAX_PARALLEL_WORKERS is set and ORCHESTRATOR is also on";
-    pkgs.runCommand "build-time-reject-max-parallel-workers-not-triggered" { } "touch $out";
+      "mkHarness.nix must not throw when MAX_PARALLEL_WORKERS is set, a worker is provisioned, and ORCHESTRATOR is off";
+    pkgs.runCommand "build-time-reject-max-parallel-workers-orchestrator-off-worker-provisioned" { }
+      "touch $out";
 
   # The unset counterpart: MAX_PARALLEL_WORKERS is never set by the Consumer
   # at all (only its schema default applies via mergedDefaults) -- that's not
-  # a Consumer request for anything, so the assert must not fire even with
-  # ORCHESTRATOR off. Only an explicit `defaults ? maxParallelWorkers` should
-  # trigger the reject.
+  # a Consumer request for anything, so the assert must not fire even with no
+  # worker provisioned. Only an explicit `defaults ? maxParallelWorkers`
+  # should trigger the reject.
   build-time-reject-max-parallel-workers-unset-ok =
     let
       inherit (pkgs.lib) assertMsg;
@@ -1098,14 +1105,39 @@ in
           inherit nixpkgs system;
           packages = p: [ p.hello ];
           defaults = {
-            orchestratorEnabled = false;
+            workerModel = "";
           };
         }).spindrift
       );
     in
     assert assertMsg ok.success
-      "mkHarness.nix must not throw when MAX_PARALLEL_WORKERS is never set, even with ORCHESTRATOR off";
+      "mkHarness.nix must not throw when MAX_PARALLEL_WORKERS is never set, even with no worker provisioned";
     pkgs.runCommand "build-time-reject-max-parallel-workers-unset-ok" { } "touch $out";
+
+  # Build-time reject arm: a non-positive baked MAX_PARALLEL_WORKERS is
+  # eval-time-decidable on its own, independent of worker provisioning --
+  # there is no meaningful "disabled" value for a concurrency semaphore's
+  # capacity (mirrors validateMaxParallelWorkers' runtime-side rejection of
+  # the same condition, cmd/launcher/orchestrator/caps.go), so a Box must
+  # never be able to build green and then exit 1 at orchestrator startup on
+  # this (issue #2495 review finding).
+  build-time-reject-max-parallel-workers-non-positive =
+    let
+      inherit (pkgs.lib) assertMsg;
+      broken = builtins.tryEval (
+        (import ../../lib/mkHarness.nix {
+          inherit nixpkgs system;
+          packages = p: [ p.hello ];
+          defaults = {
+            maxParallelWorkers = 0;
+          };
+        }).spindrift
+      );
+    in
+    assert assertMsg (
+      !broken.success
+    ) "mkHarness.nix must throw when MAX_PARALLEL_WORKERS is baked non-positive";
+    pkgs.runCommand "build-time-reject-max-parallel-workers-non-positive" { } "touch $out";
 
   # The `verdict-comment-relay` counterpart (issue #2250, parent #2244):
   # brokenResearchVerdictFragmentsDir (defined in the `let` above) swaps in

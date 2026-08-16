@@ -1103,22 +1103,58 @@ let
       true
   ) buildTimeRejectVerdicts;
 
-  # Eval-time coherence assert (issue #2495): MAX_PARALLEL_WORKERS caps
+  # Eval-time coherence asserts (issue #2495): MAX_PARALLEL_WORKERS caps
   # concurrency for the orchestrator's own slice-manifest worker dispatch
   # (lib/fragments.nix's ORCHESTRATOR-gated coordinator-parallel-dispatch.md
-  # row) -- a mechanism that structurally does not exist at all when
-  # ORCHESTRATOR itself is off (that gate is unconditional: parallel dispatch
-  # needs no `worker` subagent provisioned, per fragments.nix's own comment on
-  # that row, only ORCHESTRATOR). A Consumer who explicitly sets this knob
-  # while leaving ORCHESTRATOR off is requesting parallelism with nothing to
-  # ever run it -- reject at build time instead of baking an inert knob, so
-  # the misconfiguration surfaces before a Box ever launches, not as a
-  # discovered-in-production surprise.
+  # row), but every dispatched slice runs through the roster's own "worker"
+  # entry (workers.go's launchOneWorker seeds each worker off the same
+  # worker-prompt.md the sequential WORKER_PROVISIONED coordinator path
+  # uses) -- a roster with no worker model configured has structurally
+  # nothing for a dispatched slice to ever run, regardless of ORCHESTRATOR.
+  # Checked against resolvedRoster (not the raw workerModel arg) so an
+  # explicit `roster` override is covered too, not just the legacy
+  # workerModel knob.
+  #
+  # Deliberately NOT gated on mergedDefaults.orchestratorEnabled (review
+  # finding, issue #2495): ORCHESTRATOR_ENABLED is a dispatch-time override
+  # (flagtable_gen.go's "orchestrator" flag, resolved ambient-env-first by
+  # the launcher's resolveBoxEnvVar), not an eval-time-fixed fact -- a
+  # Consumer baking MAX_PARALLEL_WORKERS with ORCHESTRATOR left off by
+  # default, then flipping --orchestrator per dispatch for an A/B rollout,
+  # is a legitimate, intentionally supported shape this assert must not
+  # reject.
+  workerProvisionedForParallelDispatch =
+    let
+      workerEntry = lib.findFirst (e: e.name == "worker") null resolvedRoster;
+    in
+    workerEntry != null && workerEntry.model != "";
+
   maxParallelWorkersCoherenceOk =
-    if (defaults ? maxParallelWorkers) && mergedDefaults.orchestratorEnabled != true then
-      throw "mkHarness: MAX_PARALLEL_WORKERS is set but ORCHESTRATOR is disabled; the orchestrator's slice-manifest worker dispatch this knob caps never runs without ORCHESTRATOR on"
+    if (defaults ? maxParallelWorkers) && !workerProvisionedForParallelDispatch then
+      throw "mkHarness: MAX_PARALLEL_WORKERS is set but no worker subagent is provisioned (workerModel/roster's worker model is empty); the orchestrator's slice-manifest worker dispatch this knob caps has nothing to ever run"
+    else if (defaults ? maxParallelWorkers) && defaults.maxParallelWorkers <= 0 then
+      throw "mkHarness: MAX_PARALLEL_WORKERS=${toString defaults.maxParallelWorkers} must be positive -- there is no meaningful \"disabled\" value for a concurrency semaphore's capacity (omit the knob, or set it >= 1, to use the schema default)"
     else
       true;
+
+  # The issue's own "What to build" prose also names a second eval-time-
+  # decidable example alongside the one above: "a per-worker timeout that
+  # cannot fit inside the pass timeout". Deliberately NOT implemented here
+  # (review finding, issue #2495): there is no pass-level timeout knob
+  # anywhere in this codebase to compare WORKER_TIMEOUT against (the
+  # orchestrator's own run loop has no per-pass timeout of its own --
+  # cmd/launcher/orchestrator/run_test.go says so directly), so the check
+  # has nothing eval-time-decidable to evaluate. Inventing a new pass-level
+  # timeout knob to make this checkable is out of scope for the
+  # MAX_PARALLEL_WORKERS knob this issue asks for.
+  #
+  # Bounding worker fan-out here does change LaunchWorkers' own worst-case
+  # join math, though: capped concurrency turns a single dispatch's
+  # worst-case wall-clock from 1 * workerTimeout (every slice joined in
+  # parallel) into ceil(slices/maxParallelWorkers) * workerTimeout (slices
+  # beyond the cap queue for a free semaphore slot) -- see
+  # cmd/launcher/orchestrator/workers.go's LaunchWorkers/runBounded doc
+  # comments for where that trade-off is recorded.
 in
 if unknownDefaultKeys != [ ] then
   throw "mkHarness: unknown defaults key(s): ${lib.concatStringsSep ", " unknownDefaultKeys}; valid keys: ${lib.concatStringsSep ", " (lib.attrNames flakeOptionEntries)}"
