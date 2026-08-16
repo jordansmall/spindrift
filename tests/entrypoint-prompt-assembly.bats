@@ -15,6 +15,27 @@ setup() {
   grep -q "cut from" "$DRIVER_PROMPT_FILE"
 }
 
+# entrypoint.sh's own hardcoded fallback default for PROMPTS_DIR (and the
+# other 7 baked /agent/* path vars) was removed in favor of the nix-rendered
+# agent-paths preamble (issue #2531): lib/preambles.nix's
+# renderAgentPathsPreamble emits `PROMPTS_DIR=${PROMPTS_DIR:-'/agent/prompts'}`
+# ahead of the entrypoint body, both in the real image (lib/image.nix) and in
+# this bats suite (tests/helper.bash prepends AGENT_PATHS_PREAMBLE_FILE the
+# same way it already does for DRIVER_PREAMBLE_FILE/FRAGMENT_REGISTRY_FILE,
+# issue #433/#622). Without that wiring, an unset PROMPTS_DIR would hit
+# entrypoint.sh's bare `"$PROMPTS_DIR"` reference under `set -u` and die with
+# "unbound variable" instead of resolving to the real baked default -- a
+# weaker entrypoint than production ever runs. Asserting the failure message
+# names the baked default path (rather than "unbound variable") pins that the
+# preamble actually supplied it.
+@test "PROMPTS_DIR unset still resolves to the real baked default, not unbound" {
+  unset PROMPTS_DIR
+  run bash "$ENTRYPOINT"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"/agent/prompts"* ]]
+  [[ "$output" != *"unbound variable"* ]]
+}
+
 # RUN_NONCE (issue #1937): the launcher mints a per-run nonce and forwards it
 # as RUN_NONCE so control-signal prompt fragments can reference it; nothing
 # gates on it yet, but it must reach the rendered prompt the Box sees.

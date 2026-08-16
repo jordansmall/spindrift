@@ -100,6 +100,7 @@ let
           CHECK_CONTRACT_FILE = batsHarness.internals.checkContractFile;
           RESEARCH_OUTCOME_CONTRACT_FILE = batsHarness.internals.researchOutcomeContractFile;
           DRIVER_PREAMBLE_FILE = driverOutcomeManifest.${name}.preamble;
+          AGENT_PATHS_PREAMBLE_FILE = batsHarness.internals.agentPathsPreambleFile;
           FRAGMENT_REGISTRY_FILE = batsHarness.internals.fragmentRegistryFile;
           DRIVER = name;
           DRIVER_SESSION_RESUMABLE = pkgs.lib.optionalString (entry ? sessionCacheDirRelative) "1";
@@ -242,6 +243,11 @@ in
         # prepends this before exec-ing the entrypoint so the bats suite
         # exercises the same bodies the image bakes in (issue #433).
         DRIVER_PREAMBLE_FILE = batsHarness.internals.driverPreambleFile;
+        # The 8 baked /agent/* path literals' rendered fallback preamble
+        # (issue #2531); helper.bash prepends this between DRIVER_PREAMBLE_FILE
+        # and FRAGMENT_REGISTRY_FILE for the same reason, matching lib/image.nix's
+        # own concatenation order.
+        AGENT_PATHS_PREAMBLE_FILE = batsHarness.internals.agentPathsPreambleFile;
         # The Conditional fragment registry's rendered loop input and
         # substitution allowlist (issue #622); helper.bash prepends this
         # alongside DRIVER_PREAMBLE_FILE for the same reason.
@@ -367,6 +373,7 @@ in
         CHECK_CONTRACT_FILE = batsHarness.internals.checkContractFile;
         RESEARCH_OUTCOME_CONTRACT_FILE = batsHarness.internals.researchOutcomeContractFile;
         DRIVER_PREAMBLE_FILE = batsHarness.internals.driverPreambleFile;
+        AGENT_PATHS_PREAMBLE_FILE = batsHarness.internals.agentPathsPreambleFile;
         FRAGMENT_REGISTRY_FILE = batsHarness.internals.fragmentRegistryFile;
         PROMPT_CONTRACT_PARITY_FIXTURE = promptContractParityFixtureFile;
         # Same reason as outcomeBatsChecks' own copy of these two vars above:

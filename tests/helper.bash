@@ -249,13 +249,16 @@ setup_fakes() {
 
   # DRIVER_PREAMBLE_FILE is the registry-rendered Driver preamble -- the
   # DRIVER_* variable block and function definitions alike (issue #624,
-  # #433) -- and FRAGMENT_REGISTRY_FILE is the registry-rendered Conditional
-  # fragment loop input and substitution allowlist (issue #622): prepend
-  # both to the entrypoint so the suite exercises the same bytes and data
-  # the image bakes in, not any hand-copied duplicates. The nix check
-  # derivation sets these; a bare bats run outside nix leaves ENTRYPOINT
-  # as-is (functions/registry undefined → tests fail, by design: use nix
-  # flake check).
+  # #433) -- AGENT_PATHS_PREAMBLE_FILE is the rendered fallback-default
+  # preamble for the 8 baked /agent/* path literals (issue #2531), and
+  # FRAGMENT_REGISTRY_FILE is the registry-rendered Conditional fragment
+  # loop input and substitution allowlist (issue #622): prepend all three to
+  # the entrypoint, in the same order lib/image.nix concatenates them into
+  # the real image, so the suite exercises the same bytes and data the image
+  # bakes in, not any hand-copied duplicates. The nix check derivation sets
+  # these; a bare bats run outside nix leaves ENTRYPOINT as-is
+  # (functions/registry undefined → tests fail, by design: use nix flake
+  # check).
   if [ -n "${DRIVER_PREAMBLE_FILE:-}" ]; then
     local _wrapped="$BATS_TEST_TMPDIR/entrypoint.sh"
     {
@@ -274,6 +277,9 @@ setup_fakes() {
       # assembled.
       # shellcheck disable=SC2016 # intentionally unexpanded -- written verbatim into $_wrapped
       echo 'DRIVER_SKILLS_DIR="$HOME/${DRIVER_SKILLS_DIR#/home/agent/}"'
+      if [ -n "${AGENT_PATHS_PREAMBLE_FILE:-}" ]; then
+        cat "$AGENT_PATHS_PREAMBLE_FILE"
+      fi
       if [ -n "${FRAGMENT_REGISTRY_FILE:-}" ]; then
         cat "$FRAGMENT_REGISTRY_FILE"
       fi
