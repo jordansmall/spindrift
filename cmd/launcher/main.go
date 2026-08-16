@@ -1337,7 +1337,7 @@ func runContinuousDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, 
 	var staleResult freshness.Result
 
 	fresh := func() (bool, bool, string) {
-		res := freshness.Probe(c.runtime, pwd, c.baseBranch, c.flakeImageAttr, c.imageTag, eval)
+		res := freshness.Probe(c.runnerKind, pwd, c.baseBranch, c.flakeImageAttr, c.imageTag, eval)
 		// fresh() is called under RunContinuous's mutex (see its doc
 		// comment), so this plain write is serialized — no separate
 		// locking needed, mirroring the firstQuery*/firstQueryEmpty comment
