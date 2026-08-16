@@ -346,9 +346,9 @@ resolve them here:
    unsure whether a finding clears that bar, fix it rather than file it.
 
 Before stopping this turn, either right after COMMIT or after OUTCOME per the
-two cases above, write a free-form summary of what you did this pass and what
-remains to `/tmp/pass-summary.md` (outside the repo, never commit) — the next
-pass, if any, is seeded with this path.
+two cases above, write to `/tmp/pass-summary.md` (outside the repo, never
+commit) a free-form summary of what you did this pass and what remains — the
+next pass, if any, is seeded with this path.
 
 # FILE ISSUES
 

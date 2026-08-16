@@ -1359,9 +1359,11 @@ artifact, not a growing transcript:
 
 - **Run-state handoff.** A JSON file (`/tmp/run-state.json` by default,
   outside the repo like `/tmp/brief.md`) records the last reviewer verdict,
-  the reviewer's own findings text, the scout-brief path, and the most recent
-  pass's own pass-summary path. It also carries dispatch-internal
-  bookkeeping unrelated to any seeded prompt: the done/remaining slice lists
+  the reviewer's own findings text, the scout-brief path (`--scout-brief-path`,
+  default `/tmp/brief.md`), and the most recent pass's own pass-summary path
+  (`--pass-summary-path`, default `/tmp/pass-summary.md`). It also carries
+  dispatch-internal bookkeeping unrelated to any seeded prompt: the
+  done/remaining slice lists
   (`DoneSlices`/`RemainingSlices`) issue #2059's parallel worker dedup
   mechanism reads and writes to avoid re-dispatching an already-completed
   slice. Each pass reads it before running and writes it back after, through
