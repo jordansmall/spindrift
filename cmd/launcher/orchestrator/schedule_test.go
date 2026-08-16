@@ -230,19 +230,23 @@ func TestScheduleSlices_ParentEscapeLeaseOverlapsEverything(t *testing.T) {
 // cycle-fallback branch (a full scan makes no progress) with a genuine
 // 2-slice cycle: a depends on b, b depends on a. It must terminate without
 // hanging or panicking and return both slices, though the exact tie-break
-// order beyond declaration order isn't pinned here.
+// order beyond declaration order isn't pinned here. Both slices must also be
+// reported via forceSolo, since both were placed by the fallback branch.
 func TestDependencyOrder_CycleFallbackTerminates(t *testing.T) {
 	slices := []ManifestSlice{
 		{Name: "a", DependsOn: []string{"b"}},
 		{Name: "b", DependsOn: []string{"a"}},
 	}
-	got := dependencyOrder(slices)
+	got, forceSolo := dependencyOrder(slices)
 	if len(got) != 2 {
 		t.Fatalf("dependencyOrder(cycle) returned %d slices, want 2; got=%v", len(got), batchNames(got))
 	}
 	names := map[string]bool{got[0].Name: true, got[1].Name: true}
 	if !names["a"] || !names["b"] {
 		t.Fatalf("dependencyOrder(cycle) = %v, want both a and b present", batchNames(got))
+	}
+	if !forceSolo["a"] || !forceSolo["b"] {
+		t.Fatalf("dependencyOrder(cycle) forceSolo = %v, want both a and b true", forceSolo)
 	}
 }
 
@@ -257,4 +261,53 @@ func TestScheduleSlices_DependencyCycleDoesNotHang(t *testing.T) {
 	}
 	got := scheduleNames(t, slices)
 	assertBatches(t, got, [][]string{{"a"}, {"b"}})
+}
+
+// TestScheduleSlices_GlobLeaseTreatedAsOverlapping covers a lease containing
+// glob metacharacters ("*", "?", "["). This package only ever compares
+// leases as plain strings (equality/prefix), so a glob lease can never be
+// proven disjoint from anything by that logic -- it must always be treated
+// as overlapping, forcing both slices in each pair into separate solo
+// batches.
+func TestScheduleSlices_GlobLeaseTreatedAsOverlapping(t *testing.T) {
+	slices := []ManifestSlice{
+		{Name: "a", FileLeases: []string{"cmd/**"}},
+		{Name: "b", FileLeases: []string{"cmd/launcher/x.go"}},
+		{Name: "c", FileLeases: []string{"*.go"}},
+		{Name: "d", FileLeases: []string{"main.go"}},
+	}
+	got := scheduleNames(t, slices)
+	assertBatches(t, got, [][]string{{"a"}, {"b"}, {"c"}, {"d"}})
+}
+
+// TestScheduleSlices_CycleFallbackSlicesForcedSolo covers a 3-slice
+// dependency cycle (a->b->c->a) with disjoint, non-empty FileLeases: since
+// dependencyOrder's cycle fallback can't establish a safe processing order
+// for any of them, every one of the three must land in its own solo batch
+// rather than being allowed to co-batch under lease rules alone (issue
+// #2060 review finding).
+func TestScheduleSlices_CycleFallbackSlicesForcedSolo(t *testing.T) {
+	slices := []ManifestSlice{
+		{Name: "a", FileLeases: []string{"a.go"}, DependsOn: []string{"b"}},
+		{Name: "b", FileLeases: []string{"b.go"}, DependsOn: []string{"c"}},
+		{Name: "c", FileLeases: []string{"c.go"}, DependsOn: []string{"a"}},
+	}
+	got := scheduleNames(t, slices)
+	assertBatches(t, got, [][]string{{"a"}, {"b"}, {"c"}})
+}
+
+// TestScheduleSlices_CycleContagionDoesNotSpreadUnsafely covers a case where
+// only two slices (a, b) form a genuine cycle, but a third (c) merely
+// depends on one of them -- dependencyOrder's fallback places all three via
+// the fallback branch (since a full scan makes no progress once a<->b are
+// stuck), so c must also be forced solo even though it isn't itself part of
+// the cycle.
+func TestScheduleSlices_CycleContagionDoesNotSpreadUnsafely(t *testing.T) {
+	slices := []ManifestSlice{
+		{Name: "c", FileLeases: []string{"c.go"}, DependsOn: []string{"a"}},
+		{Name: "a", FileLeases: []string{"a.go"}, DependsOn: []string{"b"}},
+		{Name: "b", FileLeases: []string{"b.go"}, DependsOn: []string{"a"}},
+	}
+	got := scheduleNames(t, slices)
+	assertBatches(t, got, [][]string{{"c"}, {"a"}, {"b"}})
 }
