@@ -321,7 +321,7 @@ let
         choices = entry.choices or null;
         value = mergedDefaults.${key} or null;
       in
-      if choices == null || value == null || lib.elem value choices then
+      if choices == null || lib.elem value choices then
         null
       else
         "${entry.env or key}=\"${toString value}\" (valid: ${lib.concatStringsSep ", " choices})"
