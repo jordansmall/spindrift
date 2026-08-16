@@ -31,6 +31,10 @@ let
   # effort out of it.
   reviewerEffortOf =
     roster: (builtins.head (builtins.filter (e: e.name == "reviewer") roster)).effort;
+  # Single hand-typed anti-vacuity root (issue #2514) for the expected-
+  # default-model literals used below -- see lib/default-model-fixture.nix's
+  # own header comment for why it stays hand-typed rather than schema-derived.
+  defaultModelFixture = import ../../lib/default-model-fixture.nix;
 in
 {
   # Pure-eval-style assertion: the image store path is substituted into the
@@ -419,7 +423,7 @@ in
                   mergeMode = "immediate";
                 };
                 models = {
-                  filerModel = "claude-haiku-4-5-20251001";
+                  filerModel = defaultModelFixture.dogfoodPins.filer;
                 };
                 repository = {
                   boxForgeAndIssueAccess = "read-only";
@@ -437,7 +441,7 @@ in
         inherit nixpkgs system;
         defaults = {
           mergeMode = "immediate";
-          filerModel = "claude-haiku-4-5-20251001";
+          filerModel = defaultModelFixture.dogfoodPins.filer;
           boxForgeAndIssueAccess = "read-only";
         };
         driver = "claude";
@@ -950,11 +954,13 @@ in
   # must resolve to their `lib/env-schema.nix` schema defaults as of this
   # writing -- claude-haiku-4-5-20251001, claude-opus-5, and claude-sonnet-5
   # respectively (issue #2434/#2433). Each assertion below is anchored to
-  # that literal rather than re-derived from the schema: comparing against
-  # e.g. `schema.reviewModel.default` would pass no matter what the schema
-  # default drifted to, defeating the point of a regression guard (issue
-  # #2435 AC2). Also pins the roster's fixed per-agent efforts (issue #2386),
-  # read from rosterDefaults below rather than restated here.
+  # defaultModelFixture's literal rather than re-derived from the schema:
+  # comparing against e.g. `schema.reviewModel.default` would pass no matter
+  # what the schema default drifted to, defeating the point of a regression
+  # guard (issue #2435 AC2) -- it is still hand-typed by design, just
+  # hand-typed once, in lib/default-model-fixture.nix (issue #2514), instead
+  # of restated here. Also pins the roster's fixed per-agent efforts (issue
+  # #2386), read from rosterDefaults below rather than restated here.
   dogfood-roster-and-review-effort =
     let
       inherit (pkgs.lib)
@@ -985,10 +991,10 @@ in
       # claude-haiku-4-5-20251001 (issue #2435 AC2); worker to
       # claude-sonnet-5 (issue #2435 AC2).
       expectedModels = {
-        filer = "claude-haiku-4-5-20251001";
-        reviewer = "claude-opus-5";
-        scout = "claude-haiku-4-5-20251001";
-        worker = "claude-sonnet-5";
+        filer = defaultModelFixture.dogfoodPins.filer;
+        reviewer = defaultModelFixture.schemaDefaults.reviewModel;
+        scout = defaultModelFixture.schemaDefaults.scoutModel;
+        worker = defaultModelFixture.schemaDefaults.workerModel;
       };
       modelMismatches = filterAttrs (
         name: model: rosterByName.${name}.model or null != model

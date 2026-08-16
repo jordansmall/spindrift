@@ -16,6 +16,7 @@ let
   schema = import ../../lib/env-schema.nix;
   rosterDefaults =
     (import ../../lib/roster-schema-defaults.nix { inherit (pkgs) lib; }).rosterDefaults;
+  defaultModelFixture = import ../../lib/default-model-fixture.nix;
   # Shared by roster-doc-efforts and roster-doc-efforts-guard so the doc's
   # expected effort string and its name list/format can't drift between the
   # check and its regression guard.
@@ -307,6 +308,30 @@ let
     assert assertMsg (hasInfix wantEfforts (rosterDocSection doc))
       "docs/reference.md: Subagent roster section must restate lib/roster-schema-defaults.nix's rosterDefaults effort literals as `${wantEfforts}` — it has drifted from the table, update the doc (issue #2506)";
     doc;
+
+  # Asserts fixture.schemaDefaults restates schema's own .default per key,
+  # else throws -- the anti-vacuity check for lib/default-model-fixture.nix
+  # (issue #2514 AC3): a lib/env-schema.nix default bump with the fixture
+  # left un-updated must fail here, not pass because the check happens to
+  # read the schema instead of the fixture. Factored out so
+  # default-model-fixture-schema-sync-guard can exercise this exact
+  # assertion path against a synthetic drifted schema, not only the real one.
+  assertFixtureMatchesSchemaOk =
+    { schema, fixtureSchemaDefaults }:
+    let
+      inherit (pkgs.lib)
+        assertMsg
+        filterAttrs
+        concatStringsSep
+        attrNames
+        ;
+      mismatches = filterAttrs (
+        schemaKey: expected: (schema.${schemaKey}.default or null) != expected
+      ) fixtureSchemaDefaults;
+    in
+    assert assertMsg (mismatches == { })
+      "lib/default-model-fixture.nix: schemaDefaults has drifted from lib/env-schema.nix's own .default values -- mismatched keys: ${concatStringsSep ", " (attrNames mismatches)} -- update the fixture (issue #2514)";
+    fixtureSchemaDefaults;
 in
 {
   # cmd/launcher/internal/driver/drivernames_gen.go must match the key list
@@ -1496,6 +1521,49 @@ in
     assert assertMsg (!result.success)
       "roster-doc-efforts-guard: expected assertRosterDocEffortsOk to reject a synthetic doc whose Subagent roster section states a wrong effort restatement, but it evaluated successfully";
     pkgs.runCommand "roster-doc-efforts-guard" { } "touch $out";
+
+  # lib/default-model-fixture.nix's schemaDefaults must restate
+  # lib/env-schema.nix's own .default values per key (issue #2514): a schema
+  # default bump with the fixture left un-updated fails here instead of
+  # silently validating against itself, since the fixture is the anti-vacuity
+  # root the two Nix check files (nix/checks/image.nix,
+  # nix/checks/equivalence.nix) import instead of re-typing the literals.
+  default-model-fixture-schema-sync =
+    let
+      schema = import ../../lib/env-schema.nix;
+    in
+    assert
+      (assertFixtureMatchesSchemaOk {
+        inherit schema;
+        fixtureSchemaDefaults = defaultModelFixture.schemaDefaults;
+      }) == defaultModelFixture.schemaDefaults;
+    pkgs.runCommand "default-model-fixture-schema-sync" { } "touch $out";
+
+  # Regression guard (issue #2514 AC3): the sync assertion above must actually
+  # detect a drifted schema default, not just pass vacuously because
+  # lib/env-schema.nix currently agrees with the fixture. Runs
+  # assertFixtureMatchesSchemaOk -- the exact function
+  # default-model-fixture-schema-sync calls -- against a synthetic schema
+  # whose reviewModel default has been bumped away from the fixture's
+  # claude-opus-5, via tryEval, so this fails if the equality assert is ever
+  # dropped from assertFixtureMatchesSchemaOk.
+  default-model-fixture-schema-sync-guard =
+    let
+      inherit (pkgs.lib) assertMsg;
+      schema = import ../../lib/env-schema.nix;
+      driftedSchema = schema // {
+        reviewModel = schema.reviewModel // {
+          default = "claude-opus-6";
+        };
+      };
+      result = builtins.tryEval (assertFixtureMatchesSchemaOk {
+        schema = driftedSchema;
+        fixtureSchemaDefaults = defaultModelFixture.schemaDefaults;
+      });
+    in
+    assert assertMsg (!result.success)
+      "default-model-fixture-schema-sync-guard: expected assertFixtureMatchesSchemaOk to reject a synthetic schema whose reviewModel default has drifted from the fixture, but it evaluated successfully";
+    pkgs.runCommand "default-model-fixture-schema-sync-guard" { } "touch $out";
 
   # Regression guard: rosterDocSection's own throw branch (missing "####
   # Subagent roster" heading) is otherwise never exercised -- every other
