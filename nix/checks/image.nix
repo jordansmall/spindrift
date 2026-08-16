@@ -484,14 +484,12 @@ in
     pkgs.runCommand "driver-preamble-baked-into-image" { } ''
       ep=${batsHarness.internals.agentFiles}/agent/entrypoint.sh
       ${pkgs.lib.concatStrings (
-        map (
-          line: ''
-            grep -qF ${pkgs.lib.escapeShellArg line} "$ep" || {
-              echo ${pkgs.lib.escapeShellArg "entrypoint is missing or diverges from ${line} -- Driver preamble not baked?"} >&2
-              exit 1
-            }
-          ''
-        ) driverPreambleLines
+        map (line: ''
+          grep -qF ${pkgs.lib.escapeShellArg line} "$ep" || {
+            echo ${pkgs.lib.escapeShellArg "entrypoint is missing or diverges from ${line} -- Driver preamble not baked?"} >&2
+            exit 1
+          }
+        '') driverPreambleLines
       )}
       touch $out
     '';
