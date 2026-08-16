@@ -498,7 +498,11 @@ let
     if forbiddenMarkerViolations == [ ] then
       true
     else
-      throw "mkHarness: structural forbidden-marker check failed -- a forbidden marker (lib/prompt-contract.nix forbiddenMarkers) must live only in a gate-paired fragment (issue #2510):\n${lib.concatMapStringsSep "\n" (v: "  ${v.file}: contains forbidden marker '${v.marker}' (${v.id})") forbiddenMarkerViolations}";
+      throw "mkHarness: structural forbidden-marker check failed -- a forbidden marker (lib/prompt-contract.nix forbiddenMarkers) must live only in a gate-paired fragment (issue #2510):\n${
+        lib.concatMapStringsSep "\n" (
+          v: "  ${v.file}: contains forbidden marker '${v.marker}' (${v.id})"
+        ) forbiddenMarkerViolations
+      }";
 
   # Version sourced from the release-please manifest so mkHarness always tracks
   # the bot-maintained source of truth (ADR-0010).

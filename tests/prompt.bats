@@ -236,7 +236,7 @@ setup() {
   grep -q 'CODE_FORGE=git' "$prompt"
   grep -q 'skip OPEN A PULL REQUEST below entirely' "$prompt"
   grep -qF 'landing=${BRANCH} status=ready' "$prompt"
-  grep -q 'Do NOT run `gh pr create`' "$prompt"
+  grep -q 'Do not open a pull request and do not attempt to merge' "$prompt"
 }
 
 @test "OPEN A PULL REQUEST opens the PR as a draft" {
