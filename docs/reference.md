@@ -190,24 +190,28 @@ Three paths to discover which options exist and what they do:
    and have no CLI flag counterpart; conversely some flags (e.g.
    `--skills-dir`) have no flake option at all.
 
-`inProgressLabel`/`failedLabel`/`completeLabel` drive the
-[label lifecycle](#how-a-run-works); `mergeMode` is the post-green
-[merge policy](#how-a-run-works) (`manual`/`immediate`/`auto`); `mergeGuardPaths`
-is the [merge guard](#merge-guard)'s glob list, downgrading a green PR to
-manual regardless of `mergeMode` when it touches a guarded path; `model` is the
-Claude model the in-container implementor agent runs, threaded into the container
-as `MODEL` so `MODEL=...` switches models at runtime with no image rebuild.
-`scoutModel`/`reviewModel` tier the read-only scout and reviewer subagents the
-same way; each is composed into `--agents` independently by its own knob, so
-emptying one drops only that subagent, never both. `filerModel` is the same
-shape but opt-in — empty by default, so the filer is not provisioned at all
-until a model is set; see [Filer](#filer). `scoutModel`/`filerModel`/
-`workerModel` are all **deprecated** in favor of the structural
-[`roster`](#subagent-roster) option. `reviewModel` is **deprecated for
-non-orchestrator use** only — superseded by `roster` there, but under
-`ORCHESTRATOR` the roster reviewer entry is itself superseded by the
-code-owned review pass, which binds its model from `reviewModel` instead
-(falling back to the coordinator model when unset).
+`issues.labels.inProgress`/`issues.labels.failed`/`issues.labels.complete`
+drive the [label lifecycle](#how-a-run-works); `git.merge.policy` is the
+post-green [merge policy](#how-a-run-works)
+(`manual`/`immediate`/`auto`); `git.merge.guardPaths` is the [merge
+guard](#merge-guard)'s glob list, downgrading a green PR to manual
+regardless of `git.merge.policy` when it touches a guarded path;
+`agents.models.default` is the Claude model the in-container implementor
+agent runs, threaded into the container as `MODEL` so `MODEL=...` switches
+models at runtime with no image rebuild. `agents.models.scout`/
+`agents.models.review` tier the read-only scout and reviewer subagents the
+same way; each is composed into `--agents` independently by its own knob,
+so emptying one drops only that subagent, never both.
+`agents.models.filer` is the same shape but opt-in — empty by default, so
+the filer is not provisioned at all until a model is set; see
+[Filer](#filer). `agents.models.scout`/`agents.models.filer`/
+`agents.models.worker` are all **deprecated** in favor of the structural
+[`roster`](#subagent-roster) option. `agents.models.review` is
+**deprecated for non-orchestrator use** only — superseded by `roster`
+there, but under `ORCHESTRATOR` the roster reviewer entry is itself
+superseded by the code-owned review pass, which binds its model from
+`agents.models.review` instead (falling back to the coordinator model when
+unset).
 
 #### Subagent roster
 
