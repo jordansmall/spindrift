@@ -1401,6 +1401,7 @@ in
         "checkContractFile"
         "researchOutcomeContractFile"
         "driverPreambleFile"
+        "agentPathsPreambleFile"
         "fragmentRegistryFile"
         "driverExecBin"
         "driverEntry"
