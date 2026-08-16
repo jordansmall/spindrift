@@ -25,6 +25,9 @@
 #   field - the promptassembly.Env struct field name.
 #   gate  - the Gates()-returned map key -- the same name the fragment
 #           registry's own `gate` column reads via "${!_fgate}" bash-side.
+#   harnessOwned - true only on the harness-owned rows lib/image.nix's
+#           harnessSkills bakes into every image unconditionally (issues
+#           #2489, #2490); absent (defaults false) on every other row.
 [
   {
     name = "caveman";
@@ -60,6 +63,7 @@
     goVar = "autoFormatSkillBaked";
     field = "AutoFormatSkillBaked";
     gate = "AUTO_FORMAT_BAKED";
+    harnessOwned = true;
   }
   {
     name = "auto-lint";
@@ -67,5 +71,6 @@
     goVar = "autoLintSkillBaked";
     field = "AutoLintSkillBaked";
     gate = "AUTO_LINT_BAKED";
+    harnessOwned = true;
   }
 ]
