@@ -353,6 +353,19 @@ func validate(c config) error {
 			return fmt.Errorf("set OPENCODE_AUTH_CONTENT for the github-copilot Provider (run 'opencode auth login -p github-copilot' on a host, then export the auth slice) under the opencode Driver")
 		}
 	default:
+		// Deviation from issue #2534 AC4 ("the launcher's dead validation
+		// arm is gone"): that AC assumed this arm was a pointless re-check
+		// of a name newDriver() already re-derives and nix eval-time
+		// generation already guarantees valid. Removing it (ba9472a5) was
+		// reverted by 21a260db: DRIVER is an operator-set *runtime* env
+		// var nix eval never sees, validate()'s switch had no default arm
+		// to catch a typo, and newDriver() silently falls back to the
+		// claude Driver on driver.New's error instead of failing the run —
+		// so an unrecognised DRIVER produced a confusing wrong-Driver run,
+		// not a clear error. This arm is a distinct, live guardrail, not
+		// the dead one AC4 describes; TestValidateDriver_RejectsUnknown
+		// pins it. Kept intentionally; flagged for human sign-off on the
+		// literal AC wording via the PR body.
 		if _, err := driver.New(c.driver); err != nil {
 			return err
 		}
