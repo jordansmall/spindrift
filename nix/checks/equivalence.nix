@@ -165,8 +165,13 @@ in
     grep -q '"RUNTIME":"docker"' ${dockerHarness.internals.runInputDocumentFile}
     grep -q '"RUNTIME":"rancher"' ${rancherHarness.internals.runInputDocumentFile}
 
+    # RUNNER_KIND is forwarded as a document artifact (issue #2538): "oci" for
+    # any OCI runtime (podman here), "bwrap" for the bwrap harness below.
+    grep -q '"RUNNER_KIND":"oci"' ${harness.internals.runInputDocumentFile}
+
     # bwrap harness bakes bwrap runtime and agent store paths; no OCI store paths.
     grep -q '"RUNTIME":"bwrap"' ${bwrapHarness.internals.runInputDocumentFile}
+    grep -q '"RUNNER_KIND":"bwrap"' ${bwrapHarness.internals.runInputDocumentFile}
     grep -q '"AGENT_FILES":' ${bwrapHarness.internals.runInputDocumentFile}
     grep -q '"AGENT_ENV":' ${bwrapHarness.internals.runInputDocumentFile}
     # IMAGE_ARCHIVE is not baked as a store path (empty-default guard is fine).

@@ -139,6 +139,7 @@ rec {
         }
     )
     // {
+      RUNNER_KIND = runnerKind;
       DRIVER_SKILLS_DIR = "/home/agent/${driverEntry.skillsDirRelative}";
       DRIVER_SESSION_CACHE_DIR =
         if driverEntry ? sessionCacheDirRelative then
@@ -168,22 +169,27 @@ rec {
       nixBuilderImage,
       linuxSystem,
     }:
-    if runnerKind == "bwrap" then
-      {
-        RUNTIME = "bwrap";
-        AGENT_FILES_DRV = agentFilesDrv;
-        AGENT_ENV_DRV = agentEnvDrv;
-      }
-    else
-      {
-        RUNTIME = runtime;
-        IMAGE_ARCHIVE = imagePath;
-        IMAGE_TAG = "${imageName}:${imageHash}";
-        IMAGE_DRV = imageDrv;
-        NIX_BUILDER_IMAGE = nixBuilderImage;
-        NIX_VOLUME = "spindrift-nix";
-        FLAKE_IMAGE_ATTR = ".#packages.${linuxSystem}.agent-image";
-      };
+    (
+      if runnerKind == "bwrap" then
+        {
+          RUNTIME = "bwrap";
+          AGENT_FILES_DRV = agentFilesDrv;
+          AGENT_ENV_DRV = agentEnvDrv;
+        }
+      else
+        {
+          RUNTIME = runtime;
+          IMAGE_ARCHIVE = imagePath;
+          IMAGE_TAG = "${imageName}:${imageHash}";
+          IMAGE_DRV = imageDrv;
+          NIX_BUILDER_IMAGE = nixBuilderImage;
+          NIX_VOLUME = "spindrift-nix";
+          FLAKE_IMAGE_ATTR = ".#packages.${linuxSystem}.agent-image";
+        }
+    )
+    // {
+      RUNNER_KIND = runnerKind;
+    };
 
   # Every artifact key runArtifacts/buildArtifacts can emit, across both
   # runnerKind branches, unioned and sorted — the allowed-artifact-keys set
