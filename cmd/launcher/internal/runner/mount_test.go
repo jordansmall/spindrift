@@ -12,10 +12,14 @@ import (
 // TestBuildMountSpecs_PromptDirMounted verifies that a valid PromptDir
 // produces a MountSpec targeting agentpaths.PromptsDir, read-only, with the
 // SPINDRIFT_PROMPT_DIR operator message — computed once, independent of
-// backend. Asserts against the generated constant (not a hardcoded
-// "/agent/prompts" literal) so a rename in lib/agent-paths.nix that mount.go
-// picks up would break this test too, instead of the mount silently
-// targeting a dead in-box path (issue #2531).
+// backend. Asserts against the generated constant, not a hardcoded
+// "/agent/prompts" literal — but both sides of that comparison read the
+// same agentpaths.PromptsDir, so a rename in lib/agent-paths.nix can't make
+// this assertion fail by itself; only `agent-paths-gen` (which regenerates
+// agentpaths.PromptsDir from lib/agent-paths.nix) catches that drift. What
+// this test does guard is mount.go's own wiring: that buildMountSpecs
+// actually targets the generated constant, not a stray literal that could
+// silently diverge from it (issue #2531).
 func TestBuildMountSpecs_PromptDirMounted(t *testing.T) {
 	dir := t.TempDir()
 	specs := buildMountSpecs(MountParams{PromptDir: dir}, Box{})
