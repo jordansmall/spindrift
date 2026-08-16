@@ -452,9 +452,10 @@ in
   # non-empty list of strings, and a knob's `default` (if any) must be a
   # member of its own `choices` — a knob completing values it can never
   # legally hold would silently mislead a user tab-completing it. Also pins
-  # the exact value set for the four knobs the issue names by name, so a
-  # typo or dropped value fails here instead of silently narrowing/widening
-  # what `spindrift --merge-mode <TAB>` etc. offer.
+  # the exact value set for all seven choice-knobs the issue names by name —
+  # mergeMode, codeForge, issueTracker, overlapGate, mergeMethod, syncMethod,
+  # boxForgeAndIssueAccess — so a typo or dropped value fails here instead of
+  # silently narrowing/widening what `spindrift --merge-mode <TAB>` etc. offer.
   schema-choices =
     let
       schema = assertSchemaChoicesOk (import ../../lib/env-schema.nix);
@@ -489,6 +490,25 @@ in
         "off"
       ]
     ) "lib/env-schema.nix: overlapGate.choices must be [ defer off ]";
+    assert assertMsg (
+      schema.mergeMethod.choices or [ ] == [
+        "merge"
+        "squash"
+        "rebase"
+      ]
+    ) "lib/env-schema.nix: mergeMethod.choices must be [ merge squash rebase ]";
+    assert assertMsg (
+      schema.syncMethod.choices or [ ] == [
+        "rebase"
+        "merge"
+      ]
+    ) "lib/env-schema.nix: syncMethod.choices must be [ rebase merge ]";
+    assert assertMsg (
+      schema.boxForgeAndIssueAccess.choices or [ ] == [
+        "read-write"
+        "read-only"
+      ]
+    ) "lib/env-schema.nix: boxForgeAndIssueAccess.choices must be [ read-write read-only ]";
     pkgs.runCommand "schema-choices" { } "touch $out";
 
   # Regression guard (issue #872): lib/renderers.nix's bash/fish/zsh
