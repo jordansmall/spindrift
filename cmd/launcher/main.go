@@ -232,6 +232,25 @@ func gitIdentityField(env, gitConfigKey string) string {
 	return gitConfigLookup(gitConfigKey)
 }
 
+// runtimeRunnerKind is loadConfig's compat-only fallback for deriving
+// runnerKind when the RUNNER_KIND artifact/env is genuinely absent (issue
+// #2538 review finding). It is NOT a general "kind" derivation for
+// selection logic — runnerForKind/buildRunnerForKind must keep reading
+// c.runnerKind only, never c.runtime, per issue #2538 AC1. This exists
+// solely because a direct binary invocation with no --input document
+// (inputdoc.go documents this as a supported path: tests, manual debugging)
+// falls through every artifact lookup to os.Getenv/schema default, and
+// before RUNNER_KIND existed, runner selection compared c.runtime == "bwrap"
+// directly — so RUNTIME=bwrap alone was sufficient. The real nix pipeline
+// always renders RUNNER_KIND alongside RUNTIME, so this fallback never fires
+// there.
+func runtimeRunnerKind(runtime string) string {
+	if runtime == "bwrap" {
+		return "bwrap"
+	}
+	return "oci"
+}
+
 func loadConfig() config {
 	imageTag := getenvArtifact("IMAGE_TAG", "spindrift:latest")
 	image := getenvArtifact("IMAGE", imageTag)
@@ -240,6 +259,12 @@ func loadConfig() config {
 	sc.gitUserName = gitIdentityField("GIT_USER_NAME", "user.name")
 	sc.gitUserEmail = gitIdentityField("GIT_USER_EMAIL", "user.email")
 	sc.codeForgeAccumulationRepoDir = absCodeForgeAccumulationRepoDir(sc.codeForge, getenvSchema("CODE_FORGE_ACCUMULATION_REPO_DIR"))
+
+	runtime := getenvArtifact("RUNTIME", "")
+	runnerKind := getenvArtifact("RUNNER_KIND", "")
+	if runnerKind == "" {
+		runnerKind = runtimeRunnerKind(runtime)
+	}
 
 	return config{
 		schemaConfig: sc,
@@ -255,8 +280,8 @@ func loadConfig() config {
 		agentFilesDrv:   getenvArtifact("AGENT_FILES_DRV", ""),
 		agentEnvDrv:     getenvArtifact("AGENT_ENV_DRV", ""),
 		bakedPrefetch:   getenvArtifact("BAKED_PREFETCH", ""),
-		runtime:         getenvArtifact("RUNTIME", ""),
-		runnerKind:      getenvArtifact("RUNNER_KIND", ""),
+		runtime:         runtime,
+		runnerKind:      runnerKind,
 		driver:          getenvArtifact("DRIVER", ""),
 		image:           image,
 
