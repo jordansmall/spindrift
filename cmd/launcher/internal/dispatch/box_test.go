@@ -362,6 +362,52 @@ func TestQuarantinePriorRunLogs_HoldSleepBlindSpot(t *testing.T) {
 	}
 }
 
+// TestCumulativeUsage_RecoverPathNeverQuarantines pins a known, currently
+// unfixed limitation of the recover/adopt entry point rather than asserting
+// it is correct: quarantinePriorRunLogs only ever runs from Run's own very
+// first attempt (box.go), so a Dispatch built the way main.go's
+// recoverByNumber builds one -- via Factory.New, then straight into
+// CumulativeUsage/UsageReport/Fix through settle's SettleAdopted, with Run
+// never called at all -- never quarantines anything. This test stands in
+// for that path: it writes a rotated ".1" sibling directly to disk BEFORE
+// constructing the Dispatch at all (simulating a leftover from an earlier,
+// unrelated attempt sequence that no Run() call in this process ever
+// quarantined), then shows CumulativeUsage still walks it via
+// AllAttemptLogPaths, folding that unrelated spend into the total. That is
+// not correct, but it is current, documented behavior (see
+// AllAttemptLogPaths' and CumulativeUsage's own doc comments) -- closing it
+// needs cross-process lineage correlation, out of scope here. This test
+// exists so a future change to this behavior is a deliberate decision, not
+// an accidental regression nobody noticed.
+func TestCumulativeUsage_RecoverPathNeverQuarantines(t *testing.T) {
+	dir := tempLogDir(t)
+
+	// A leftover from an earlier, unrelated attempt sequence -- written
+	// straight to disk, before any Dispatch for this issue exists in this
+	// process, so nothing has had a chance to quarantine it.
+	leftover := `{"type":"result","num_turns":1,"total_cost_usd":7.00,"usage":{"input_tokens":70000,"output_tokens":7000}}` + "\n"
+	if err := writeFile(logPathFor(dir, "20")+".1", leftover); err != nil {
+		t.Fatalf("seed leftover rotated log: %v", err)
+	}
+
+	f, err := NewFactory(Config{}, dir, runner.NewFake(), fakeDriver{}, RealClock())
+	if err != nil {
+		t.Fatalf("NewFactory: %v", err)
+	}
+	defer f.Cleanup()
+	// Mirrors main.go's recoverByNumber: Factory.New, then straight to
+	// CumulativeUsage -- Run is never called.
+	d := f.New("20", "test issue")
+
+	got := d.CumulativeUsage()
+	if got.InputTokens != 70000 {
+		t.Errorf("CumulativeUsage.InputTokens = %d, want 70000 (recover path has no quarantine boundary, so the leftover rotated log is walked -- known limitation, see AllAttemptLogPaths' doc comment)", got.InputTokens)
+	}
+	if diff := got.TotalCostUSD - 7.00; diff > 0.0001 || diff < -0.0001 {
+		t.Errorf("CumulativeUsage.TotalCostUSD = %v, want ~7.00 (recover path has no quarantine boundary, so the leftover rotated log is walked -- known limitation)", got.TotalCostUSD)
+	}
+}
+
 // TestRunOnce_SkipsAlreadyRunningContainerWithoutTouchingLog verifies that
 // when the runner reports the box's container/sandbox name is already
 // running, runOnce returns without ever rotating or creating the log file:

@@ -14,7 +14,9 @@ import (
 // within each pass, every rotated-aside retry attempt (issue #561) -- not
 // just the initial pass's own current log (issue #2575). If no attempt log
 // produced a result event, the body notes that usage is unavailable rather
-// than erroring.
+// than erroring. See AllAttemptLogPaths' doc comment for the guarantee this
+// relies on, and the case where it doesn't hold (a Dispatch reached via
+// main.go's recoverByNumber/SettleAdopted, which never calls Run()).
 func (d *Dispatch) UsageReport() string {
 	resolve := d.cfg.ResolveEnv
 	if resolve == nil {
@@ -60,10 +62,13 @@ func (d *Dispatch) UsageReport() string {
 // transient-backoff retry rotated aside (issue #561) — via
 // AllAttemptLogPaths, so selfHealGate's budget gate (issue #2001) reads the
 // run's true total spend, including a retried attempt's, not just the
-// spend of whichever attempt is current (issue #2575). An attempt log that
-// fails to parse, or has no result event, contributes nothing rather than
-// aborting the sum, matching ExtractUsage's own best-effort degrade —
-// acceptable for a best-effort spend governor.
+// spend of whichever attempt is current (issue #2575) — PROVIDED this
+// Dispatch's own Run() fired first in this process; see AllAttemptLogPaths'
+// doc comment for the recover-path (main.go's recoverByNumber/SettleAdopted)
+// case where that isn't true. An attempt log that fails to parse, or has no
+// result event, contributes nothing rather than aborting the sum, matching
+// ExtractUsage's own best-effort degrade — acceptable for a best-effort
+// spend governor.
 func (d *Dispatch) CumulativeUsage() usage.Usage {
 	var total usage.Usage
 	for _, pl := range AllAttemptLogPaths(d.pwd, d.number) {
