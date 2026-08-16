@@ -150,20 +150,22 @@ func buildMountSpecs(p MountParams, box Box) ([]MountSpec, error) {
 	// is the box's sole source of issue text for implement/review/fix
 	// passes (the issue-read prompt fragments no longer do a live tracker
 	// read) -- candidateFileMount's fail-open behavior would otherwise leave
-	// the box silently starting with no issue text at all if the file were
-	// removed or made unreadable in the (tiny) window between the host
-	// write and this mount. So unlike every mount above, a non-empty
-	// IssueSnapshotPath that fails to stat is a hard error here, not a
-	// silently dropped mount.
+	// the box silently starting with no issue text at all if the source
+	// were missing, unreadable, or (mis-)pointed at a directory. So unlike
+	// every mount above, a non-empty IssueSnapshotPath is resolved with a
+	// single os.Stat here rather than candidateFileMount's own
+	// stat-then-maybe-restat shape: a stat failure, or a directory in
+	// place of a regular file, is a hard error, not a silently dropped
+	// mount.
 	if box.IssueSnapshotPath != "" {
-		if spec, ok := candidateFileMount(box.IssueSnapshotPath, issueSnapshotTarget, true); ok {
-			specs = append(specs, spec)
-		} else if _, err := os.Stat(box.IssueSnapshotPath); err != nil {
+		info, err := os.Stat(box.IssueSnapshotPath)
+		if err != nil {
 			return nil, fmt.Errorf("issue snapshot %q: %w", box.IssueSnapshotPath, err)
 		}
-		// else: the path stats fine but isn't a regular file (e.g. a
-		// directory) -- candidateFileMount's existing silent contract for
-		// that case is unchanged; only the stat-failure case above is a bug.
+		if info.IsDir() {
+			return nil, fmt.Errorf("issue snapshot %q: is a directory, want a regular file", box.IssueSnapshotPath)
+		}
+		specs = append(specs, MountSpec{Source: box.IssueSnapshotPath, Target: issueSnapshotTarget, ReadOnly: true})
 	}
 
 	return specs, nil

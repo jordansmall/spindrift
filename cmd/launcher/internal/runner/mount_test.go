@@ -520,6 +520,25 @@ func TestBuildMountSpecs_IssueSnapshotStatFails_Error(t *testing.T) {
 	}
 }
 
+// TestBuildMountSpecs_IssueSnapshotPathIsDirectory_Error verifies
+// buildMountSpecs returns a descriptive error, rather than silently dropping
+// the mount, when box.IssueSnapshotPath stats fine but is a directory, not a
+// regular file. Before this fix candidateFileMount's fail-open contract (a
+// silently-omitted mount whenever the source isn't a plain file) applied
+// here too, the exact hole issue #2547's "sole source of issue text" design
+// depends on closing.
+func TestBuildMountSpecs_IssueSnapshotPathIsDirectory_Error(t *testing.T) {
+	dir := t.TempDir()
+
+	specs, err := buildMountSpecs(MountParams{}, Box{IssueSnapshotPath: dir})
+	if err == nil {
+		t.Fatalf("buildMountSpecs: got nil error and specs %+v, want a descriptive error", specs)
+	}
+	if !strings.Contains(err.Error(), dir) {
+		t.Errorf("buildMountSpecs error = %q, want it to mention the snapshot path %q", err.Error(), dir)
+	}
+}
+
 // TestAdaptersRenderOnly_NoDuplicatedMountDecisions is the issue's grep pin:
 // the prompt-dir/skills-dir mount gates and their operator messages must
 // live only in buildMountSpecs, not be duplicated in either adapter file.
