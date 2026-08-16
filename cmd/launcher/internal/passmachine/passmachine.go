@@ -13,6 +13,11 @@
 // Driver.
 package passmachine
 
+import (
+	"fmt"
+	"strings"
+)
+
 // PassKind names which of the orchestrator's five distinct pass shapes just
 // finished executing (the input to a Transition call), or which one should
 // run next (part of a Transition call's own Decision).
@@ -118,13 +123,6 @@ const (
 	// legacy loop this is a hard stop; on the review loop's own review-pass
 	// decision it instead commits the run to one terminal land pass.
 	StopMaxReviewRoundsReached
-	// StopBudgetExceeded fires when Caps.MaxBudgetTokens or Caps.MaxBudgetUSD
-	// is a positive cap and the cumulative usage so far (Input.CumulativeTokens/
-	// CumulativeUSD) has reached or exceeded it -- on the review loop's own
-	// review-pass decision it, like StopMaxReviewRoundsReached, instead
-	// commits the run to one terminal land pass rather than stopping outright
-	// (issue #2694).
-	StopBudgetExceeded
 	// StopTerminalLandNoOutcome fires on the review loop's implement/fix/
 	// land decision when the pass that just ran was itself the committed
 	// terminal land pass (in.LandPhase was already LandPhaseTerminalCommitted
@@ -136,6 +134,18 @@ const (
 	// still produced no outcome -- the bound on the land-after-APPROVE
 	// mechanism.
 	StopApproveNoOutcome
+	// StopBudgetExceeded fires when Caps.MaxBudgetTokens or Caps.MaxBudgetUSD
+	// is a positive cap and the cumulative usage so far (Input.CumulativeTokens/
+	// CumulativeUSD) has reached or exceeded it -- on the review loop's own
+	// review-pass decision it, like StopMaxReviewRoundsReached, instead
+	// commits the run to one terminal land pass rather than stopping outright
+	// (issue #2694). Appended last, after every pre-existing StopReason, so a
+	// future addition to this const block never again shifts an existing
+	// constant's ordinal value -- this package's Decision.Cap/StopReason
+	// values are compared programmatically (never serialized), so the shift
+	// itself is not a live bug here, but appending is the safer habit for a
+	// pinned-op-stream package (issue #2694 review finding).
+	StopBudgetExceeded
 )
 
 // Caps carries the orchestrator-configured budget caps a Transition decision
@@ -395,20 +405,26 @@ func implementFixTransition(in Input) Decision {
 }
 
 // budgetExceeded reports whether tokens or usd has reached or exceeded
-// either of caps.MaxBudgetTokens/caps.MaxBudgetUSD -- deliberately duplicated
-// from settle's own budgetExceeded (cmd/launcher/internal/settle/budget.go)
-// rather than imported, to keep this package dependency-free of settle. Same
-// "0 disables this dimension, independently of the other" convention as
-// every other cap in this file: a zero cap never fires regardless of tokens
-// or usd, and either dimension alone can trip it.
-func budgetExceeded(caps Caps, tokens int, usd float64) bool {
+// either of caps.MaxBudgetTokens/caps.MaxBudgetUSD, and if so, a human-
+// readable reason naming which dimension(s) tripped and by how much --
+// deliberately duplicated from settle's own budgetExceeded
+// (cmd/launcher/internal/settle/budget.go), same return shape and message
+// format, rather than imported, to keep this package dependency-free of
+// settle. Same "0 disables this dimension, independently of the other"
+// convention as every other cap in this file: a zero cap never fires
+// regardless of tokens or usd, and either dimension alone can trip it.
+func budgetExceeded(caps Caps, tokens int, usd float64) (bool, string) {
+	var reasons []string
 	if caps.MaxBudgetTokens > 0 && tokens >= caps.MaxBudgetTokens {
-		return true
+		reasons = append(reasons, fmt.Sprintf("%d tokens >= cap %d", tokens, caps.MaxBudgetTokens))
 	}
 	if caps.MaxBudgetUSD > 0 && usd >= caps.MaxBudgetUSD {
-		return true
+		reasons = append(reasons, fmt.Sprintf("$%.4f >= cap $%.4f", usd, caps.MaxBudgetUSD))
 	}
-	return false
+	if len(reasons) == 0 {
+		return false, ""
+	}
+	return true, strings.Join(reasons, "; ")
 }
 
 // reviewTransition reproduces run.go:461-487, the review loop's own
@@ -417,6 +433,7 @@ func budgetExceeded(caps Caps, tokens int, usd float64) bool {
 // behavior (a review pass alone never stops the run).
 func reviewTransition(in Input) Decision {
 	var d Decision
+	budgetHit, budgetReason := budgetExceeded(in.Caps, in.CumulativeTokens, in.CumulativeUSD)
 	switch {
 	case in.Verdict == VerdictNone:
 		d = Decision{
@@ -447,13 +464,13 @@ func reviewTransition(in Input) Decision {
 	// the same pass, the earlier cap's Reason/CapFired/Cap keep reporting
 	// priority over this one -- the same ordering rule as the
 	// ManifestDispatched case in implementFixTransition above.
-	case in.Verdict == VerdictBlock && budgetExceeded(in.Caps, in.CumulativeTokens, in.CumulativeUSD):
+	case in.Verdict == VerdictBlock && budgetHit:
 		d = Decision{
 			Continue:  true,
 			Reason:    "budget exceeded; running terminal land pass",
 			LandPhase: LandPhaseTerminalCommitted,
 			Cap:       StopBudgetExceeded,
-			CapFired:  "budget exceeded",
+			CapFired:  "budget exceeded: " + budgetReason,
 		}
 	default:
 		d = Decision{Continue: true, Reason: ""}

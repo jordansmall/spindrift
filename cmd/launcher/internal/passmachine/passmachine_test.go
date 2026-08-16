@@ -494,7 +494,7 @@ func TestTransition(t *testing.T) {
 				NextPass:              KindLand,
 				LandPhase:             LandPhaseTerminalCommitted,
 				Cap:                   StopBudgetExceeded,
-				CapFired:              "budget exceeded",
+				CapFired:              "budget exceeded: 100 tokens >= cap 100",
 				IncrementReviewRounds: true,
 			},
 		},
@@ -512,7 +512,7 @@ func TestTransition(t *testing.T) {
 				NextPass:              KindLand,
 				LandPhase:             LandPhaseTerminalCommitted,
 				Cap:                   StopBudgetExceeded,
-				CapFired:              "budget exceeded",
+				CapFired:              "budget exceeded: $5.0000 >= cap $5.0000",
 				IncrementReviewRounds: true,
 			},
 		},
@@ -634,8 +634,12 @@ func TestBudgetExceeded(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := budgetExceeded(tt.caps, tt.tokens, tt.usd); got != tt.want {
+			got, reason := budgetExceeded(tt.caps, tt.tokens, tt.usd)
+			if got != tt.want {
 				t.Errorf("budgetExceeded(%+v, %d, %v) = %v, want %v", tt.caps, tt.tokens, tt.usd, got, tt.want)
+			}
+			if (reason != "") != tt.want {
+				t.Errorf("budgetExceeded(%+v, %d, %v) reason = %q, want empty iff not exceeded (exceeded = %v)", tt.caps, tt.tokens, tt.usd, reason, tt.want)
 			}
 		})
 	}
