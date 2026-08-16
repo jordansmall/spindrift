@@ -94,16 +94,14 @@ configure_env() {
   # DRIVER_NAME, DRIVER_BIN, DRIVER_FLAGS_COMMON, and DRIVER_SKILLS_DIR are
   # baked by the selected Driver's lib/drivers/<name>.nix registry entry (ADR
   # 0009, issue #624) via the nix-rendered preamble prepended ahead of this
-  # file at image build time. No fallback literal lives here: a Box built
-  # without that preamble dies loudly instead of silently impersonating the
-  # claude Driver. Checked ahead of phase_prompt_assembly's driver-exec
-  # assemble-prompt call (issue #2354) so a Box missing every nix-rendered
-  # preamble dies naming the Driver preamble, not some unrelated failure deep
-  # inside the verb (issue #2246).
-  : "${DRIVER_BIN:?DRIVER_BIN not set -- the nix-rendered Driver preamble did not run}"
-  : "${DRIVER_FLAGS_COMMON:?DRIVER_FLAGS_COMMON not set -- the nix-rendered Driver preamble did not run}"
-  : "${DRIVER_SKILLS_DIR:?DRIVER_SKILLS_DIR not set -- the nix-rendered Driver preamble did not run}"
-  : "${DRIVER_NAME:?DRIVER_NAME not set -- the nix-rendered Driver preamble did not run}"
+  # file at image build time. No fallback literal lives here, and no runtime
+  # guard either (issue #2531): lib/image.nix's entrypoint derivation
+  # concatenates driverPreamble and agentPathsPreamble into the same `text`
+  # string in the same build, so nix/checks/image.nix's
+  # agent-paths-preamble-baked-into-image check -- which already proves the
+  # built image's entrypoint.sh carries the agent-paths preamble -- also
+  # transitively proves the Driver preamble rendered. A Box missing either
+  # preamble is now caught at build time, not runtime.
 
   # The canonical SPINDRIFT_OUTCOME contract (issue #419), baked at a sibling
   # path to /agent/prompts so a SPINDRIFT_PROMPT_DIR mount -- which shadows only
