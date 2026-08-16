@@ -29,14 +29,12 @@
 # from `rosterDefaults` (lib/roster-schema-defaults.nix; issue #2386/#2506)
 # -- a caller assembling a custom roster by hand still gets no injected
 # default, since that stays specific to `defaultRoster`'s own lookup, not a
-# `normalizeRoster`-level behavior. One exception (issue #2512): the
-# `reviewEffort` legacy knob, when supplied non-empty, overrides the
-# reviewer entry's own default `effort` the same way the `reviewModel`
-# legacy knob already overrides the reviewer's `model` above -- precedence
-# is `reviewEffort` (non-empty) over `rosterDefaults.reviewer.effort`.
-# Reviewer-only, deliberately: there is no `models`-attrset-style per-name
-# override for `effort` the way there is for `model`, since this issue's
-# scope is limited to the reviewer entry.
+# `normalizeRoster`-level behavior. The `reviewEffort` legacy knob (issue
+# #2512) does NOT live here: unlike the four legacy model knobs above, it
+# overrides the reviewer entry's `effort` regardless of whether the roster
+# came from `defaultRoster` or an explicit caller-supplied `roster`, so
+# lib/mkHarness.nix applies it as a post-processing step on the fully
+# resolved roster instead of threading it through this function.
 { lib }:
 {
   # Normalizes a roster list before any Driver consumes it (issue #2152 slice
@@ -82,7 +80,6 @@
       reviewModel ? null,
       filerModel ? null,
       workerModel ? null,
-      reviewEffort ? null,
       models ? { },
     }:
     let
@@ -103,12 +100,6 @@
           legacyModels.${name}
         else
           schemaDefaults.${name};
-      effortFor =
-        name:
-        if name == "reviewer" && reviewEffort != null && reviewEffort != "" then
-          reviewEffort
-        else
-          rosterDefaults.${name}.effort;
     in
     if unknownNames != [ ] then
       throw "defaultRoster: models names unknown agent(s) ${builtins.toJSON unknownNames} -- expected one of ${builtins.toJSON (builtins.attrNames legacyModels)}"
@@ -117,7 +108,7 @@
         {
           name = "scout";
           model = modelFor "scout";
-          effort = effortFor "scout";
+          effort = rosterDefaults.scout.effort;
           mode = "subagent";
           description = "Map relevant files, seams, and tests; return a structured brief";
           tools = [
@@ -134,7 +125,7 @@
         {
           name = "reviewer";
           model = modelFor "reviewer";
-          effort = effortFor "reviewer";
+          effort = rosterDefaults.reviewer.effort;
           mode = "subagent";
           description = "Review the branch diff for spec compliance and coding standards";
           tools = [
@@ -149,7 +140,7 @@
         {
           name = "filer";
           model = modelFor "filer";
-          effort = effortFor "filer";
+          effort = rosterDefaults.filer.effort;
           mode = "subagent";
           description = "File issues from a review's non-blocking findings, best-effort";
           tools = [
@@ -163,7 +154,7 @@
         {
           name = "worker";
           model = modelFor "worker";
-          effort = effortFor "worker";
+          effort = rosterDefaults.worker.effort;
           mode = "subagent";
           description = "Implement a scoped slice of work delegated to it, with full implement-capable tools";
           tools = [
