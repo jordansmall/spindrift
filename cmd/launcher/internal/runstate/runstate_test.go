@@ -102,6 +102,29 @@ func TestRunStateRoundTripIncludesPassSummaryPath(t *testing.T) {
 	}
 }
 
+// TestRunStateRoundTripIncludesUnlandedSlices verifies UnlandedSlices (issue
+// #2060 review finding: DoneSlices names whose branch integration ended in
+// conflict or failure) survives a WriteRunState/ReadRunState round trip like
+// every other field.
+func TestRunStateRoundTripIncludesUnlandedSlices(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "run-state.json")
+	want := RunState{
+		DoneSlices:     []string{"slice-a"},
+		UnlandedSlices: []string{"slice-a"},
+	}
+
+	if err := WriteRunState(path, want); err != nil {
+		t.Fatalf("WriteRunState: %v", err)
+	}
+	got, err := ReadRunState(path)
+	if err != nil {
+		t.Fatalf("ReadRunState: %v", err)
+	}
+	if !reflect.DeepEqual(got.UnlandedSlices, want.UnlandedSlices) {
+		t.Errorf("UnlandedSlices = %v, want %v", got.UnlandedSlices, want.UnlandedSlices)
+	}
+}
+
 // TestReadRunStateNoFileYetReturnsZeroValue verifies the actual pass-one
 // production path (issue #1997): --state-file defaults to a fixed tmp path
 // that has never been written, and ReadRunState must treat that as "no
@@ -279,6 +302,7 @@ func TestRunStateIsEmpty(t *testing.T) {
 		{WorkerFindings: "slice-a: done"},
 		{FindingsLogPath: "/tmp/findings.md"},
 		{TerminalLand: true},
+		{UnlandedSlices: []string{"slice-a"}},
 	}
 	for _, s := range nonEmpty {
 		if s.IsEmpty() {

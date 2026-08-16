@@ -1577,3 +1577,154 @@ func TestDispatchManifestIfPresentReportsIntegrationFailedWithoutLosingDoneSlice
 		t.Errorf("state.WorkerFindings = %q, want the indented block to contain the underlying error text %q", state.WorkerFindings, wantErrSnippet)
 	}
 }
+
+// TestDispatchManifestIfPresentSkipsLaterSliceWhoseLeaseOverlapsFailedSlice
+// verifies dispatchManifestIfPresent (issue #2060 review finding: Bug A) --
+// two slices declaring the SAME FileLeases, and NO DependsOn edge between
+// them at all, are sequenced into two separate batches purely by
+// scheduleSlices' own lease-disjointness rule (schedule.go). When the
+// first slice's own branch integration fails to land on HEAD, the second
+// slice -- which never named the first as a dependency -- must still be
+// skipped: its overlapping lease makes it very likely to edit the same
+// file(s), exactly the case a later worktree built from stale HEAD must not
+// silently dispatch against. repoRoot is dirtied up front so
+// integrateSliceBranch's own `git status --porcelain` guard deterministically
+// fails "done-fast"'s own integration attempt.
+func TestDispatchManifestIfPresentSkipsLaterSliceWhoseLeaseOverlapsFailedSlice(t *testing.T) {
+	repoRoot := chdirToFreshWorkerRepo(t)
+
+	// Dirty repoRoot so integrateSliceBranch's own `git status --porcelain`
+	// guard refuses to integrate at all -- deterministically forcing
+	// "done-fast"'s own integration outcome to integrateFailed.
+	if err := os.WriteFile(filepath.Join(repoRoot, "dirty.txt"), []byte("dirty"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	fakeDir := t.TempDir()
+	callLog := filepath.Join(fakeDir, "calls.log")
+	if err := os.WriteFile(callLog, nil, 0o644); err != nil {
+		t.Fatalf("WriteFile(callLog): %v", err)
+	}
+	writeFakeWorkerDriverExec(t, fakeDir, callLog)
+	t.Setenv("PATH", fakeDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	dir := t.TempDir()
+	// "done-fast" and "late" declare the SAME FileLeases (overlapping) and
+	// have no DependsOn edge between them -- scheduleSlices still sequences
+	// "late" into a LATER batch than "done-fast" purely because their leases
+	// overlap.
+	manifest := SliceManifest{Slices: []ManifestSlice{
+		{Name: "done-fast", Task: "implement seam a", FileLeases: []string{"shared.txt"}},
+		{Name: "late", Task: "implement seam b", FileLeases: []string{"shared.txt"}},
+	}}
+	line, err := manifest.Line()
+	if err != nil {
+		t.Fatalf("Line() error = %v", err)
+	}
+	logPath := filepath.Join(dir, "stream.log")
+	content := streamJSONOutcomeLine(strings.TrimSpace(line))
+	if err := os.WriteFile(logPath, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	workerPromptFile := filepath.Join(dir, "worker-prompt.txt")
+	if err := os.WriteFile(workerPromptFile, []byte("BASE WORKER PROMPT"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config{
+		driver:           "claude",
+		logPath:          logPath,
+		workerPromptFile: workerPromptFile,
+		workerWorkDir:    t.TempDir(),
+		workerTimeout:    2 * time.Second,
+	}
+	state := runstate.RunState{}
+
+	var stdout strings.Builder
+	got := dispatchManifestIfPresent(cfg, &state, &stdout)
+	if !got {
+		t.Fatalf("dispatchManifestIfPresent() = false, want true")
+	}
+
+	calls, err := os.ReadFile(callLog)
+	if err != nil {
+		t.Fatalf("read callLog: %v", err)
+	}
+	if strings.Contains(string(calls), "late") {
+		t.Errorf("callLog = %q, want no invocation for \"late\" -- its file lease overlaps \"done-fast\", whose own integration never landed on HEAD", calls)
+	}
+	if !strings.Contains(string(calls), "done-fast") {
+		t.Errorf("callLog = %q, want an invocation for \"done-fast\" (its own batch runs regardless of its later integration outcome)", calls)
+	}
+
+	if !containsSlice(state.DoneSlices, "done-fast") {
+		t.Errorf("state.DoneSlices = %v, want it to contain done-fast (the worker itself succeeded)", state.DoneSlices)
+	}
+	if containsSlice(state.DoneSlices, "late") {
+		t.Errorf("state.DoneSlices = %v, want it to NOT contain late (it was never dispatched)", state.DoneSlices)
+	}
+
+	if !strings.Contains(state.WorkerFindings, "late: skipped -- file lease overlaps done-fast, whose own integration did not land on HEAD") {
+		t.Errorf("state.WorkerFindings = %q, want a lease-overlap skip finding naming late and done-fast", state.WorkerFindings)
+	}
+}
+
+// TestDispatchManifestIfPresentSkipsSliceDependingOnPersistedUnlandedSlice
+// verifies dispatchManifestIfPresent (issue #2060 review finding: Bug B) --
+// a slice name recorded in state.UnlandedSlices by an EARLIER pass (its own
+// branch integration ended in conflict/failure, and it's already filtered
+// out of any future manifest by state.DoneSlices) still gates a brand-new
+// manifest's slice that DependsOn it, even though the local notLanded map
+// starts empty on every call: dispatchManifestIfPresent must seed it from
+// state.UnlandedSlices up front. LaunchWorkers must never run at all, since
+// the manifest's only slice is skipped before ever being batched.
+func TestDispatchManifestIfPresentSkipsSliceDependingOnPersistedUnlandedSlice(t *testing.T) {
+	dir := t.TempDir()
+	manifest := SliceManifest{Slices: []ManifestSlice{
+		{Name: "dependent", Task: "implement seam b", DependsOn: []string{"long-gone"}},
+	}}
+	line, err := manifest.Line()
+	if err != nil {
+		t.Fatalf("Line() error = %v", err)
+	}
+	logPath := filepath.Join(dir, "stream.log")
+	content := streamJSONOutcomeLine(strings.TrimSpace(line))
+	if err := os.WriteFile(logPath, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	workerWorkDir := filepath.Join(dir, "workdir-that-should-not-be-created")
+	cfg := config{
+		driver:           "claude",
+		logPath:          logPath,
+		workerPromptFile: filepath.Join(dir, "worker-prompt.txt"),
+		workerWorkDir:    workerWorkDir,
+		workerTimeout:    2 * time.Second,
+	}
+	// "long-gone" was WorkerDone in an earlier pass, so it's already in
+	// state.DoneSlices (and therefore filtered out of any future manifest's
+	// own dispatchSlices before ever reaching the batch loop) -- but its own
+	// branch integration ended in conflict/failure, recorded only in
+	// state.UnlandedSlices, since a filtered-out DoneSlice's ManifestSlice
+	// (and therefore its FileLeases) is never seen by this pass again.
+	state := runstate.RunState{
+		DoneSlices:     []string{"long-gone"},
+		UnlandedSlices: []string{"long-gone"},
+	}
+
+	got := dispatchManifestIfPresent(cfg, &state, io.Discard)
+	if !got {
+		t.Fatalf("dispatchManifestIfPresent() = false, want true")
+	}
+
+	if containsSlice(state.DoneSlices, "dependent") {
+		t.Errorf("state.DoneSlices = %v, want it to NOT contain dependent (it was never dispatched)", state.DoneSlices)
+	}
+	if !strings.Contains(state.WorkerFindings, "dependent: skipped -- depends on long-gone, whose own integration did not land on HEAD") {
+		t.Errorf("state.WorkerFindings = %q, want a skip finding naming dependent and long-gone", state.WorkerFindings)
+	}
+	if _, err := os.Stat(workerWorkDir); !os.IsNotExist(err) {
+		t.Errorf("workerWorkDir exists (stat err = %v), want it never created -- LaunchWorkers must never run when the only manifest slice is skipped for depending on a persisted not-landed slice", err)
+	}
+}
