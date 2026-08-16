@@ -439,6 +439,21 @@ in
       resolvedNixpkgs =
         if structuralResolved.nixpkgs != null then structuralResolved.nixpkgs else inputs.nixpkgs;
 
+      # Derive the structural-knob forwarding chain from the same canonical
+      # 13-key `structuralPlacements` map (lib/structural-paths.nix) that
+      # `structuralResolved` above is keyed by, instead of hand-writing one
+      # `lib.optionalAttrs` clause per knob (issue #2522 slice 2) — adding a
+      # 14th structural knob to structural-paths.nix + structuralOptions
+      # needs no edit here. `nixpkgs` is excluded: it's resolved separately
+      # above (resolvedNixpkgs) and forwarded unconditionally below.
+      structuralArgs = lib.foldl' (
+        acc: flatName:
+        acc
+        // lib.optionalAttrs (structuralResolved.${flatName} != null) {
+          ${flatName} = structuralResolved.${flatName};
+        }
+      ) { } (lib.filter (n: n != "nixpkgs") (lib.attrNames structuralPlacements));
+
       # Forward only the options the Consumer actually set; the rest fall
       # through to mkHarness's defaults.
       args = {
@@ -446,31 +461,8 @@ in
         nixpkgs = resolvedNixpkgs;
         revision = self.shortRev or self.dirtyShortRev or "unknown";
       }
-      // lib.optionalAttrs (structuralResolved.overlays != null) {
-        inherit (structuralResolved) overlays;
-      }
-      // lib.optionalAttrs (structuralResolved.config != null) { inherit (structuralResolved) config; }
-      // lib.optionalAttrs (structuralResolved.packages != null) {
-        inherit (structuralResolved) packages;
-      }
-      // lib.optionalAttrs (structuralResolved.prefetch != null) {
-        inherit (structuralResolved) prefetch;
-      }
-      // lib.optionalAttrs (structuralResolved.prompt != null) { inherit (structuralResolved) prompt; }
-      // lib.optionalAttrs (structuralResolved.skills != null) { inherit (structuralResolved) skills; }
-      // lib.optionalAttrs (structuralResolved.roster != null) { inherit (structuralResolved) roster; }
-      // lib.optionalAttrs (runDefaults != { }) { defaults = runDefaults; }
-      // lib.optionalAttrs (structuralResolved.runtime != null) { inherit (structuralResolved) runtime; }
-      // lib.optionalAttrs (structuralResolved.driver != null) { inherit (structuralResolved) driver; }
-      // lib.optionalAttrs (structuralResolved.nixInBox != null) {
-        inherit (structuralResolved) nixInBox;
-      }
-      // lib.optionalAttrs (structuralResolved.nixStoreWritable != null) {
-        inherit (structuralResolved) nixStoreWritable;
-      }
-      // lib.optionalAttrs (structuralResolved.extraClosures != null) {
-        inherit (structuralResolved) extraClosures;
-      };
+      // structuralArgs
+      // lib.optionalAttrs (runDefaults != { }) { defaults = runDefaults; };
       harness = mkHarness args;
       # nixfmt from the consumer's locked nixpkgs input — same pin the
       # nix-fmt gate uses — so `nix fmt` fixes what the check catches.
