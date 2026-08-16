@@ -11,15 +11,6 @@
 # testable with a bare `nix eval`, without a locked nixpkgs (mirrors
 # lib/prompt-inject.nix and lib/renderers.nix).
 let
-  # Escapes a literal string's regex metacharacters so builtins.split reads it
-  # as a literal (same table as lib/prompt-inject.nix's private escapeRegex).
-  escapeRegex = builtins.replaceStrings
-    [ "\\" "^" "$" "." "|" "?" "*" "+" "(" ")" "[" "]" "{" "}" ]
-    [ "\\\\" "\\^" "\\$" "\\." "\\|" "\\?" "\\*" "\\+" "\\(" "\\)" "\\[" "\\]" "\\{" "\\}" ];
-
-  # True when `marker` appears at least once in `text`.
-  present = marker: text: builtins.length (builtins.split (escapeRegex marker) text) > 1;
-
   # Joins `list` with `sep` (builtins-only concatStringsSep).
   concatSep =
     sep: list:
@@ -36,9 +27,6 @@ let
   # Mirrors verdict.go's blockedVerdict const: the reserved crash/no-verdict
   # escape-hatch status, never a configurable verdict token.
   blockedVerdict = "blocked";
-
-  verdictMarker = "# VERDICT";
-  postMarker = "# POST THE VERDICT";
 
   # Validates a parsed RESEARCH_VERDICTS array against the same rules the Go
   # launcher enforces at runtime (cmd/launcher/internal/forge/verdict.go's
@@ -114,47 +102,54 @@ rec {
   parse = s: if s == "" then defaultVerdicts else validate (builtins.fromJSON s);
 
   # Renders the verdict contract of `promptText` from `verdicts`: the VERDICT
-  # section's enumerated bullet list, the `<RESEARCH_VERDICT_ENUM>` nix-only
-  # placeholder, and the `status=<${RESEARCH_STATUS_ENUM}>` alternation of the
-  # outcome line -- the OUTCOME grammar line's registry-generated placeholder
-  # (issue #2504), not a hand-typed literal, so a custom verdict set fully
-  # replaces the token rather than leaving it for the runtime substitution
-  # pass (agent/entrypoint.sh's RESEARCH_STATUS_ENUM span / driver-exec
-  # assemble-prompt) to fill in with the built-in default. Each rewrite is
-  # guarded on the text it targets being present, so rendering a Consumer
-  # prompt that lacks the default markers/tokens is a safe no-op. `render`
-  # below always calls this, for both the default and a custom set.
+  # section's enumerated bullet list, the backtick-wrapped verdict
+  # enumeration on the "Structure the verdict" line, and the
+  # `status=<${RESEARCH_STATUS_ENUM}>` alternation of the outcome line (the
+  # OUTCOME grammar line's registry-generated runtime placeholder, issue
+  # #2504 -- unrelated to the two rewrites below).
+  #
+  # Each of the other two rewrites is a literal-text substitution: it
+  # replaces the exact bytes `defaultVerdicts` itself renders to (the
+  # checked-in template's own hand-typed content) with the exact bytes
+  # `verdicts` renders to. `builtins.replaceStrings` is a safe no-op
+  # wherever its target text isn't present, so this is safe against a
+  # Consumer prompt that never carried the default content, or one that's
+  # already been rewritten to a custom set (repeated calls are idempotent:
+  # once the default text is gone, the same pattern no longer matches). And
+  # because the match is exact bytes rather than a marker-bounded span, any
+  # other prose sharing the VERDICT section (e.g. the self-contained
+  # prompt's "Judge relevance..." sentence) is never touched. `render`
+  # below always calls this, for both the default and a custom set --
+  # rendering the default set against the checked-in template happens to be
+  # byte-identical to the template, because the template's own hand-typed
+  # content is exactly what `defaultVerdicts` renders to.
   renderPrompt =
     promptText: verdicts:
     let
-      tokens = map (v: v.verdict) verdicts;
-      pipeJoined = concatSep "|" tokens;
-      # The `# POST THE VERDICT` enumeration wraps each token in backticks
-      # (`recommend` / `reject` / `unclear`); match that form.
-      backtickEnum = concatSep " / " (map (t: "`" + t + "`") tokens);
       bullet = v: "- `" + v.verdict + "` — " + (v.description or "");
-      bullets = concatSep "\n" (map bullet verdicts);
-      # Inserted immediately before postMarker rather than replacing the
-      # whole verdictMarker..postMarker span, so any prose already in that
-      # span (e.g. the self-contained prompt's "Judge relevance..." sentence)
-      # is left completely untouched.
-      injectedBlock = "Render exactly one of these verdicts:\n\n" + bullets + "\n\n";
-      withSection =
-        if present verdictMarker promptText && present postMarker promptText then
-          builtins.replaceStrings [ postMarker ] [ (injectedBlock + postMarker) ] promptText
-        else
-          promptText;
+      bullets = vs: concatSep "\n" (map bullet vs);
+      backtickEnum = vs: concatSep " / " (map (v: "`" + v.verdict + "`") vs);
+      pipeJoined = concatSep "|" (map (v: v.verdict) verdicts);
     in
     builtins.replaceStrings
-      [ "status=<\${RESEARCH_STATUS_ENUM}>" "`<RESEARCH_VERDICT_ENUM>`" ]
-      [ ("status=<" + pipeJoined + ">") backtickEnum ]
-      withSection;
+      [
+        "status=<\${RESEARCH_STATUS_ENUM}>"
+        (backtickEnum defaultVerdicts)
+        (bullets defaultVerdicts)
+      ]
+      [
+        ("status=<" + pipeJoined + ">")
+        (backtickEnum verdicts)
+        (bullets verdicts)
+      ]
+      promptText;
 
   # Parses the raw RESEARCH_VERDICTS knob and renders `promptText` against
   # the result -- one path for both the default (empty knob, defaultVerdicts)
-  # and a configured custom set. There is no byte-identical no-op special
-  # case: the checked-in template is always re-rendered, so its VERDICT
-  # bullets and status alternation need not (and no longer do) byte-match
-  # anything on disk.
+  # and a configured custom set. There is no byte-identical-to-template
+  # no-op special case in the dispatch itself: render always calls
+  # renderPrompt. (Against the checked-in template, rendering the default
+  # set happens to produce byte-identical output, because the template's
+  # hand-typed content already equals what defaultVerdicts renders to.)
   render = rawKnob: promptText: renderPrompt promptText (parse rawKnob);
 }
