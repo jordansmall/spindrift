@@ -94,59 +94,18 @@ configure_env() {
   # DRIVER_NAME, DRIVER_BIN, DRIVER_FLAGS_COMMON, and DRIVER_SKILLS_DIR are
   # baked by the selected Driver's lib/drivers/<name>.nix registry entry (ADR
   # 0009, issue #624) via the nix-rendered preamble prepended ahead of this
-  # file at image build time. No fallback literal lives here, and no runtime
-  # guard either (issue #2531): nix/checks/image.nix's
-  # driver-preamble-baked-into-image check greps the real baked
-  # entrypoint.sh for these four Driver-identity lines directly, in the
-  # unconditional `VAR=value` shape lib/drivers/default.nix's renderPreamble
-  # emits (no `${VAR:-...}` fallback wrapper -- these are fixed per Box
-  # invocation, not overridable at runtime). That check is a sibling of, not
-  # subsumed by, agent-paths-preamble-baked-into-image just above it in that
-  # file: the two inspect disjoint lines, so proving the agent-paths half of
-  # lib/image.nix's entrypoint `text` concatenation survived says nothing
-  # about whether the driverPreamble half did too. A Box missing the Driver
-  # preamble is now caught at build time, not runtime.
+  # file at image build time -- no fallback literal and no runtime guard
+  # here; nix/checks/image.nix's driver-preamble-baked-into-image check
+  # catches an omitted Driver preamble at build time instead (issue #2531).
 
-  # The canonical SPINDRIFT_OUTCOME contract (issue #419), baked at a sibling
-  # path to /agent/prompts so a SPINDRIFT_PROMPT_DIR mount -- which shadows only
-  # /agent/prompts -- never hides it (issue #420).
-  # The driver-exec assemble-prompt verb (issue #2354) reads the marker
-  # straight off the contract file's own first line (injectSharedBlock,
-  # cmd/launcher/internal/promptassembly) so it cannot drift from the
-  # block's canonical source-file heading. The file-path default is rendered
-  # by lib/preambles.nix's renderAgentPathsPreamble from lib/agent-paths.nix,
-  # the single source of truth for this and the other baked /agent/* paths
-  # below (issue #2531).
-
-  # The COMMS and CHECK/COMMIT blocks fix-prompt.md shares with issue-prompt.md
-  # (issue #455 extends #419/#420's slice mechanism beyond the outcome contract):
-  # baked and injected the same way, so a SPINDRIFT_PROMPT_DIR override of the
-  # fix prompt gets the identical treatment. Defaults rendered by
-  # renderAgentPathsPreamble, same as OUTCOME_CONTRACT_FILE above.
-
-  # The research dispatch kind's own harness-owned outcome contract (ADR 0022,
-  # issue #640): posting the verdict comment and emitting the outcome line.
-  # Baked and injected the same way as the work contract above, so a
-  # SPINDRIFT_PROMPT_DIR override of research-prompt.md gets it too. Default
-  # rendered by renderAgentPathsPreamble, same as OUTCOME_CONTRACT_FILE above.
-
-  # The Conditional fragment registry as JSON (issue #622, #2354), baked at
-  # the same sibling-of-/agent/prompts path as the contract files above, for
-  # the `driver-exec assemble-prompt` verb's `--registry` flag. Default
-  # rendered by renderAgentPathsPreamble, same as OUTCOME_CONTRACT_FILE above.
-
-  # lib/prompt-contract.nix's validateMarkers list as JSON (issue #2356),
-  # baked at the same sibling-of-/agent/prompts path as the contract files
-  # above, for the `driver-exec assemble-prompt` verb's
-  # `--validate-markers-registry` flag. Default rendered by
-  # renderAgentPathsPreamble, same as OUTCOME_CONTRACT_FILE above.
-
-  # lib/prompt-contract.nix's forbiddenMarkers list as JSON (issue #2464),
-  # baked at the same sibling-of-/agent/prompts path as the contract files
-  # above, for the `driver-exec readonly-guards` verb's
-  # `--forbidden-markers-registry` flag (issue #2513: assemble-prompt no
-  # longer takes this flag). Default rendered by renderAgentPathsPreamble,
-  # same as OUTCOME_CONTRACT_FILE above.
+  # OUTCOME_CONTRACT_FILE, COMMS_CONTRACT_FILE, CHECK_CONTRACT_FILE,
+  # RESEARCH_OUTCOME_CONTRACT_FILE, PROMPTASSEMBLY_REGISTRY_FILE,
+  # PROMPT_CONTRACT_REGISTRY_FILE, and FORBIDDEN_MARKERS_REGISTRY_FILE --
+  # like PROMPTS_DIR above -- are baked by the nix-rendered agent-paths
+  # preamble (lib/preambles.nix's renderAgentPathsPreamble); no fallback
+  # literal or per-var commentary lives here anymore. See lib/agent-paths.nix
+  # for what each path is, why it lives outside PROMPTS_DIR, and which
+  # driver-exec verb/flag reads it (issue #2531).
 
   # _driver_extract_outcome and _driver_session_flags are defined by the Driver
   # registry (lib/drivers/<name>.nix); a nix-built image prepends them via
