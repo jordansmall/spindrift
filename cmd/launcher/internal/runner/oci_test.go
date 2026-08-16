@@ -293,7 +293,10 @@ func TestBuildRunArgsIncludesHardeningFlags(t *testing.T) {
 		memoryLimit: "4g",
 	}
 	box := Box{Name: "agent-issue-1", Env: map[string]string{"ISSUE_NUMBER": "1"}}
-	args := a.buildRunArgs(box)
+	args, err := a.buildRunArgs(box)
+	if err != nil {
+		t.Fatalf("buildRunArgs: %v", err)
+	}
 
 	for _, flag := range []string{
 		"--cap-drop=all",
@@ -315,7 +318,10 @@ func TestBuildRunArgsEmptyLimitsOmitted(t *testing.T) {
 		memoryLimit: "",
 	}
 	box := Box{Name: "agent-issue-1", Env: map[string]string{}}
-	args := a.buildRunArgs(box)
+	args, err := a.buildRunArgs(box)
+	if err != nil {
+		t.Fatalf("buildRunArgs: %v", err)
+	}
 
 	// cap-drop and no-new-privileges are unconditional
 	if !containsArg(args, "--cap-drop=all") {
@@ -343,7 +349,10 @@ func TestBuildRunArgsImageIsLast(t *testing.T) {
 		memoryLimit: "2g",
 	}
 	box := Box{Name: "agent-issue-99", Env: map[string]string{}}
-	args := a.buildRunArgs(box)
+	args, err := a.buildRunArgs(box)
+	if err != nil {
+		t.Fatalf("buildRunArgs: %v", err)
+	}
 
 	// image must appear before the entrypoint and after all flags
 	imageIdx := -1
@@ -379,7 +388,10 @@ func TestBuildRunArgs_SkillsDirMounted(t *testing.T) {
 		skillsDir: dir,
 	}
 	box := Box{Name: "agent-issue-1", Env: map[string]string{}}
-	args := a.buildRunArgs(box)
+	args, err := a.buildRunArgs(box)
+	if err != nil {
+		t.Fatalf("buildRunArgs: %v", err)
+	}
 
 	want := dir + ":/operator-skills:ro"
 	if !containsArg(args, want) {
@@ -405,7 +417,10 @@ func TestBuildRunArgs_IssuesDirMounted(t *testing.T) {
 		localIssuesDir:           dir,
 	}
 	box := Box{Name: "agent-issue-1", Env: map[string]string{}}
-	args := a.buildRunArgs(box)
+	args, err := a.buildRunArgs(box)
+	if err != nil {
+		t.Fatalf("buildRunArgs: %v", err)
+	}
 
 	want := dir + ":/issues:ro"
 	if !containsArg(args, want) {
@@ -424,7 +439,10 @@ func TestBuildRunArgs_IssuesDirNonLocalTracker_NoMount(t *testing.T) {
 		localIssuesDir:           dir,
 	}
 	box := Box{Name: "agent-issue-1", Env: map[string]string{}}
-	args := a.buildRunArgs(box)
+	args, err := a.buildRunArgs(box)
+	if err != nil {
+		t.Fatalf("buildRunArgs: %v", err)
+	}
 
 	for _, arg := range args {
 		if strings.Contains(arg, ":/issues") {
@@ -441,7 +459,10 @@ func TestBuildRunArgs_DriverCacheDirMountedWritable(t *testing.T) {
 		driverSessionCacheDir: "/home/agent/.claude/projects",
 	}
 	box := Box{Name: "agent-issue-1", Env: map[string]string{}, DriverCacheDir: dir}
-	args := a.buildRunArgs(box)
+	args, err := a.buildRunArgs(box)
+	if err != nil {
+		t.Fatalf("buildRunArgs: %v", err)
+	}
 
 	want := dir + ":/home/agent/.claude/projects"
 	if !containsArg(args, want) {
@@ -465,7 +486,10 @@ func TestBuildRunArgs_DriverCacheDirMounted_BakedSkillsSurvive(t *testing.T) {
 		driverSessionCacheDir: "/home/agent/.claude/projects",
 	}
 	box := Box{Name: "agent-issue-1", Env: map[string]string{}, DriverCacheDir: dir}
-	args := a.buildRunArgs(box)
+	args, err := a.buildRunArgs(box)
+	if err != nil {
+		t.Fatalf("buildRunArgs: %v", err)
+	}
 
 	for _, arg := range args {
 		if arg == "/home/agent/.claude" || strings.HasSuffix(arg, ":/home/agent/.claude") || strings.HasSuffix(arg, ":/home/agent/.claude:ro") {
@@ -482,7 +506,10 @@ func TestBuildRunArgs_DriverCacheDirMounted_HardeningPreserved(t *testing.T) {
 		driverSessionCacheDir: "/home/agent/.claude/projects",
 	}
 	box := Box{Name: "agent-issue-1", Env: map[string]string{}, DriverCacheDir: dir}
-	args := a.buildRunArgs(box)
+	args, err := a.buildRunArgs(box)
+	if err != nil {
+		t.Fatalf("buildRunArgs: %v", err)
+	}
 
 	for _, flag := range []string{"--cap-drop=all", "--security-opt=no-new-privileges"} {
 		if !containsArg(args, flag) {
@@ -497,7 +524,10 @@ func TestBuildRunArgs_DriverCacheDirUnset_NoMount(t *testing.T) {
 		image: "spindrift:test",
 	}
 	box := Box{Name: "agent-issue-1", Env: map[string]string{}}
-	args := a.buildRunArgs(box)
+	args, err := a.buildRunArgs(box)
+	if err != nil {
+		t.Fatalf("buildRunArgs: %v", err)
+	}
 
 	for _, arg := range args {
 		if strings.Contains(arg, "/home/agent/.claude/projects") {
@@ -518,7 +548,10 @@ func TestBuildRunArgs_DriverCacheMountTarget_FromDriverDeclaration(t *testing.T)
 		driverSessionCacheDir: "/home/agent/custom-driver/state",
 	}
 	box := Box{Name: "agent-issue-1", Env: map[string]string{}, DriverCacheDir: dir}
-	args := a.buildRunArgs(box)
+	args, err := a.buildRunArgs(box)
+	if err != nil {
+		t.Fatalf("buildRunArgs: %v", err)
+	}
 
 	want := dir + ":/home/agent/custom-driver/state"
 	if !containsArg(args, want) {
@@ -537,7 +570,10 @@ func TestBuildRunArgs_DriverSessionCacheDirUndeclared_NoMount(t *testing.T) {
 		image: "spindrift:test",
 	}
 	box := Box{Name: "agent-issue-1", Env: map[string]string{}, DriverCacheDir: dir}
-	args := a.buildRunArgs(box)
+	args, err := a.buildRunArgs(box)
+	if err != nil {
+		t.Fatalf("buildRunArgs: %v", err)
+	}
 
 	for _, arg := range args {
 		if strings.HasPrefix(arg, dir+":") {
@@ -553,7 +589,10 @@ func TestBuildRunArgs_SkillsDirUnset_NoMount(t *testing.T) {
 		skillsDir: "",
 	}
 	box := Box{Name: "agent-issue-1", Env: map[string]string{}}
-	args := a.buildRunArgs(box)
+	args, err := a.buildRunArgs(box)
+	if err != nil {
+		t.Fatalf("buildRunArgs: %v", err)
+	}
 
 	for _, arg := range args {
 		if strings.Contains(arg, ".claude/skills") {
@@ -669,7 +708,10 @@ func TestBuildRunArgs_NoRmFlag(t *testing.T) {
 		image: "spindrift:test",
 	}
 	box := Box{Name: "agent-issue-1", Env: map[string]string{}}
-	args := a.buildRunArgs(box)
+	args, err := a.buildRunArgs(box)
+	if err != nil {
+		t.Fatalf("buildRunArgs: %v", err)
+	}
 
 	if containsArg(args, "--rm") {
 		t.Errorf("--rm must not be in buildRunArgs (lifecycle is managed by Run); args: %v", args)

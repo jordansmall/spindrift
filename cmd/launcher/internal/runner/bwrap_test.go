@@ -266,7 +266,11 @@ func TestBwrapRun_OpencodeAuthContentOffArgvButInProcessEnv(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	for _, arg := range a.buildArgs("/tmp/fake-etc", box) {
+	args, err := a.buildArgs("/tmp/fake-etc", box)
+	if err != nil {
+		t.Fatalf("buildArgs: %v", err)
+	}
+	for _, arg := range args {
 		if strings.Contains(arg, sentinel) {
 			t.Errorf("OPENCODE_AUTH_CONTENT sentinel found in bwrap argv: %v", arg)
 		}
