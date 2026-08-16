@@ -125,17 +125,21 @@ already integrated so far this run.
 
 Do not run the repo's own `checks-inbox` (or any other store build)
 after integrating each slice — one store build per slice is exactly
-the redundant, heavy round-trip this design exists to avoid.
-`checks-inbox` runs exactly once, in CHECK below, on the
+the redundant, heavy round-trip this design exists to avoid. This is
+a firm rule, and it **overrides** CHECK's "before each commit, run
+the repo's own checks green" for every per-slice integration commit
+you author here: land each one with no check gate between it and the
+next. `checks-inbox` runs exactly once, in CHECK below, on the
 fully-integrated tree, after every slice you're dispatching this pass
-has landed.
+has landed — immediately before your own final COMMIT.
 
 You still own CHECK, COMMIT, REVIEW, and OUTCOME yourself: the worker only
 implements and commits each slice inside its own worktree; the coordinator
-integrates each worker's branch, keeps the checks green, reviews, and
-finalizes commits. The one-slice, test-first Hard rule below is what each
-delegated slice must satisfy — you enforce it; the worker performs each
-red-green-refactor cycle.
+integrates each worker's branch, then runs the checks green exactly once
+(CHECK below) before finalizing its own commits, and reviews. The
+one-slice, test-first Hard rule below is what each delegated slice must
+satisfy — you enforce it; the worker performs each red-green-refactor
+cycle.
 
 Skills available: caveman, code-review, commit, tdd. Prefer invoking with /skill-name; the inline guidance below is the fallback when a skill is absent.
 
