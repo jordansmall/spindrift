@@ -77,6 +77,21 @@ type Config struct {
 	// behavior-preserving).
 	OutboxRelayCapable bool
 
+	// FullyLocal reports whether both seams of this run are local (ADR
+	// 0033: CODE_FORGE=local and ISSUE_TRACKER=local together) -- the same
+	// "capability conclusion" main.go's validate() consults to exempt
+	// REPO_SLUG/GH_TOKEN, forwarded here so the Box can key its own
+	// behavior off the same explicit signal instead of re-deriving it from
+	// CODE_FORGE/ISSUE_TRACKER (issue #2527).
+	FullyLocal bool
+	// InBoxUnreachableTracker reports whether the active ISSUE_TRACKER
+	// backend has no in-box-reachable remote at all (true only for
+	// ISSUE_TRACKER=local today) -- the tracker half of FullyLocal, and
+	// also the bit main.go's validate() consults alone (independent of
+	// HostMediatedRemote) to exempt REPO_SLUG/GH_TOKEN for a self-contained
+	// research dispatch against a local tracker (issue #2202, #2527).
+	InBoxUnreachableTracker bool
+
 	// BoxForgeAndIssueAccess is the BOX_FORGE_AND_ISSUE_ACCESS knob value
 	// ("read-write" or "read-only"). See HostMediatedRemote/
 	// OutboxRelayCapable's doc comments above.
@@ -160,6 +175,12 @@ func buildBoxEnv(cfg Config, number, title string, fixPass int, ciFailureSummary
 	}
 	if cfg.OutboxRelayCapable {
 		env["BOX_OUTBOX_RELAY_CAPABLE"] = "1"
+	}
+	if cfg.FullyLocal {
+		env["BOX_FULLY_LOCAL"] = "1"
+	}
+	if cfg.InBoxUnreachableTracker {
+		env["BOX_IN_BOX_UNREACHABLE_TRACKER"] = "1"
 	}
 	return env
 }

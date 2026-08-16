@@ -77,6 +77,21 @@ type config struct {
 	// the Go source never needs to enumerate them by hand.
 	boxEnvVars string
 
+	// hostMediatedRemote, outboxRelayCapable, inBoxUnreachableTracker, and
+	// fullyLocal are the four capability signals nix resolves once from the
+	// backend descriptor registry for the active CODE_FORGE/ISSUE_TRACKER
+	// pairing and renders into the input document's artifacts section
+	// (lib/preambles.nix's runArtifacts, issue #2527 slice 1) as the literal
+	// strings "true"/"false". loadConfig() reads them via getenvArtifact the
+	// same way it reads every other artifact field, so validate() and
+	// dispatchConfig() consult these forwarded bools directly instead of
+	// re-deriving them from a backendByName lookup on c.codeForge/
+	// c.issueTracker.
+	hostMediatedRemote      bool
+	outboxRelayCapable      bool
+	inBoxUnreachableTracker bool
+	fullyLocal              bool
+
 	// dispatchKind is "work" (the default, zero value) or "research" (ADR
 	// 0022). Set once by bootstrap via applyDispatchKind, never read from
 	// the environment directly — it is operator intent carried by which
@@ -255,6 +270,11 @@ func loadConfig() config {
 		driverSessionCacheDir: getenvArtifact("DRIVER_SESSION_CACHE_DIR", ""),
 
 		boxEnvVars: getenvArtifact("BOX_ENV_VARS", ""),
+
+		hostMediatedRemote:      getenvArtifact("HOST_MEDIATED_REMOTE", "") == "true",
+		outboxRelayCapable:      getenvArtifact("OUTBOX_RELAY_CAPABLE", "") == "true",
+		inBoxUnreachableTracker: getenvArtifact("IN_BOX_UNREACHABLE_TRACKER", "") == "true",
+		fullyLocal:              getenvArtifact("FULLY_LOCAL", "") == "true",
 	}
 }
 
@@ -274,8 +294,8 @@ func validate(c config) error {
 	// would trade a clear launcher error for a downstream Box crash.
 	codeForgeRow, codeForgeRowOK := backendByName(c.codeForge)
 	trackerRow, trackerRowOK := backendByName(c.issueTracker)
-	fullyLocal := codeForgeRow.HostMediatedRemote && trackerRow.InBoxUnreachableTracker
-	noRepoResearch := c.dispatchKind == dispatchKindResearch && c.selfContained && trackerRow.InBoxUnreachableTracker
+	fullyLocal := c.fullyLocal
+	noRepoResearch := c.dispatchKind == dispatchKindResearch && c.selfContained && c.inBoxUnreachableTracker
 	if !fullyLocal && !noRepoResearch && c.repoSlug == "" {
 		return fmt.Errorf("set REPO_SLUG=owner/repo (the target GitHub repository)")
 	}
@@ -644,19 +664,20 @@ func boxTokenResolver(next func(num, name string) string) func(num, name string)
 // ResolveOpenPR itself resolves to Found: false, nil for a push-only Code
 // Forge, so the retry proceeds unguarded there without any guard here.
 func dispatchConfig(c config, it forge.IssueTracker, lw *localloop.Wired, cf forge.CodeForge) dispatch.Config {
-	codeForgeRow, _ := backendByName(c.codeForge)
 	return dispatch.Config{
-		BoxEnvVars:             c.boxEnvVars,
-		ResolveEnv:             boxTokenResolver(localBaseBranchResolver(c, it, lw, cf)),
-		Kind:                   c.dispatchKind,
-		SelfContained:          c.selfContained,
-		HostMediatedRemote:     codeForgeRow.HostMediatedRemote,
-		OutboxRelayCapable:     codeForgeRow.OutboxRelayCapable,
-		BoxForgeAndIssueAccess: c.boxForgeAndIssueAccess,
-		TransientRetryMax:      c.transientRetryMax,
-		TransientBackoffSecs:   c.transientBackoffSecs,
-		HoldJitterSecs:         c.holdJitterSecs,
-		DriverSessionCacheDir:  c.driverSessionCacheDir,
+		BoxEnvVars:              c.boxEnvVars,
+		ResolveEnv:              boxTokenResolver(localBaseBranchResolver(c, it, lw, cf)),
+		Kind:                    c.dispatchKind,
+		SelfContained:           c.selfContained,
+		HostMediatedRemote:      c.hostMediatedRemote,
+		OutboxRelayCapable:      c.outboxRelayCapable,
+		FullyLocal:              c.fullyLocal,
+		InBoxUnreachableTracker: c.inBoxUnreachableTracker,
+		BoxForgeAndIssueAccess:  c.boxForgeAndIssueAccess,
+		TransientRetryMax:       c.transientRetryMax,
+		TransientBackoffSecs:    c.transientBackoffSecs,
+		HoldJitterSecs:          c.holdJitterSecs,
+		DriverSessionCacheDir:   c.driverSessionCacheDir,
 		OpenPRForIssue: func(number string) (bool, error) {
 			res, err := forge.ResolveOpenPR(cf, number)
 			return res.Found, err

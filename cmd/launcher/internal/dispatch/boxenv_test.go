@@ -146,3 +146,27 @@ func TestBuildBoxEnvSetsWriteEnabledSignal(t *testing.T) {
 		t.Error("BOX_WRITE_ENABLED should be absent when BoxForgeAndIssueAccess is empty/malformed")
 	}
 }
+
+// TestBuildBoxEnvForwardsFullyLocalAndInBoxUnreachableTracker verifies
+// buildBoxEnv forwards Config.FullyLocal/Config.InBoxUnreachableTracker into
+// the Box as BOX_FULLY_LOCAL/BOX_IN_BOX_UNREACHABLE_TRACKER — present only
+// as "1" when true, absent (not "0") when false, matching
+// BOX_HOST_MEDIATED_REMOTE/BOX_OUTBOX_RELAY_CAPABLE's own forwarding shape
+// (issue #2527 slice 2).
+func TestBuildBoxEnvForwardsFullyLocalAndInBoxUnreachableTracker(t *testing.T) {
+	env := buildBoxEnv(Config{FullyLocal: true, InBoxUnreachableTracker: true}, "3", "T", 0, "", "")
+	if got := env["BOX_FULLY_LOCAL"]; got != "1" {
+		t.Errorf("BOX_FULLY_LOCAL with Config.FullyLocal=true: got %q, want %q", got, "1")
+	}
+	if got := env["BOX_IN_BOX_UNREACHABLE_TRACKER"]; got != "1" {
+		t.Errorf("BOX_IN_BOX_UNREACHABLE_TRACKER with Config.InBoxUnreachableTracker=true: got %q, want %q", got, "1")
+	}
+
+	env = buildBoxEnv(Config{}, "3", "T", 0, "", "")
+	if _, ok := env["BOX_FULLY_LOCAL"]; ok {
+		t.Error("BOX_FULLY_LOCAL should be absent when Config.FullyLocal is false")
+	}
+	if _, ok := env["BOX_IN_BOX_UNREACHABLE_TRACKER"]; ok {
+		t.Error("BOX_IN_BOX_UNREACHABLE_TRACKER should be absent when Config.InBoxUnreachableTracker is false")
+	}
+}
