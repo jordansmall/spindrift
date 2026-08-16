@@ -1057,8 +1057,8 @@ the authoritative list.
 | `CONTINUOUS_DISPATCH`  | `` (off) | `concurrency`     | opt-in slot-refill dispatch mode: refills each freed slot from a live re-discovery, gated by the image-freshness probe before every launch; exits with a new documented code when the probe finds the loaded image stale (see the [exit-code table](#dogfood-loop)) |
 | `MAX_FIX_ATTEMPTS`     | `3`     | `selfHealing`      | fix-box passes when CI is genuinely red before `agent-failed` (`0` disables self-healing) |
 | `MAX_REBASE_ATTEMPTS`  | `3`     | `selfHealing`      | rebase-and-retry passes when a green PR conflicts with the base after a sibling merge (`0` disables rebase retries); also caps the opt-in [Stale-base preflight](#stale-base-preflight)'s rebase budget |
-| `MAX_BUDGET_TOKENS`    | `0`     | `selfHealing`      | cumulative tokens (every pass and every retried attempt within it) before stopping self-heal short of `MAX_FIX_ATTEMPTS` (`0` disables the token budget cap); also forwarded into the Box, where the orchestrator's own review loop consults it to commit to a terminal land pass instead of a further BLOCK-triggered review round |
-| `MAX_BUDGET_USD`       | `0`     | `selfHealing`      | cumulative cost in USD (every pass and every retried attempt within it) before stopping self-heal short of `MAX_FIX_ATTEMPTS` (`0` disables the cost budget cap); quote fractional values in flake settings, e.g. `"4.44"`; also forwarded into the Box for the orchestrator's own review-loop budget cap, same as `MAX_BUDGET_TOKENS` |
+| `MAX_BUDGET_TOKENS`    | `0`     | `selfHealing`      | cumulative tokens (every pass and every retried attempt within it) before stopping self-heal short of `MAX_FIX_ATTEMPTS` (`0` disables the token budget cap); also forwarded into the Box, where the orchestrator's own review loop applies the same threshold to its own fresh, Box-local sum (implement/fix/review passes plus dispatched workers in *this* Box only, not the host's cross-Box figure) to commit to a terminal land pass instead of a further BLOCK-triggered review round |
+| `MAX_BUDGET_USD`       | `0`     | `selfHealing`      | cumulative cost in USD (every pass and every retried attempt within it) before stopping self-heal short of `MAX_FIX_ATTEMPTS` (`0` disables the cost budget cap); quote fractional values in flake settings, e.g. `"4.44"`; also forwarded into the Box for the orchestrator's own review-loop budget cap, same as `MAX_BUDGET_TOKENS` (same threshold, same fresh-per-Box sum, not the host's own cross-Box one) |
 | `PREFLIGHT_STALE_BASE` | `` (off) | `selfHealing`    | opt-in: proactively rebase a green-but-behind PR (no conflict) and re-green it before merging — see [Stale-base preflight](#stale-base-preflight); off by default merges a green-but-behind PR as-is |
 | `MERGE_POLL_INTERVAL`  | `30`    | `branches`         | seconds between CI-status polls in the merge gate      |
 | `MERGE_POLL_TIMEOUT`   | `1800`  | `branches`         | seconds to wait for CI green before abandoning the merge |
@@ -1414,17 +1414,23 @@ artifact, not a growing transcript:
   A third cap, `--max-budget-tokens`/`--max-budget-usd` (issue #2694; both
   default `0`, disabled), bounds the review-pass loop's own review-round
   decision by cumulative spend instead of a pass or round count: once
-  cumulative token or USD usage across every pass so far (implement, fix,
-  and review passes alike, plus any dispatched worker's own spend) would
-  meet or exceed the configured cap, a further `BLOCK`-triggered review
-  round instead commits the run to one terminal land pass, the same
-  terminal-land mechanism `--max-review-rounds`/`--max-slices` already use.
-  Either dimension alone can trip it; a negative or malformed value
-  silently degrades to `0` (disabled) rather than erroring, mirroring the
-  host launcher's own tolerance for the identical `MAX_BUDGET_TOKENS`/
-  `MAX_BUDGET_USD` env vars (`atoiNonneg`/`floatNonneg`) — there is no
-  coherent reason for the Box to be stricter than the host about the same
-  knob. Unlike `--max-review-rounds`/`--max-slices` — both consulted by the
+  cumulative token or USD usage across every pass *this Box has run so far*
+  (implement, fix, and review passes alike, plus any dispatched worker's
+  own spend) would meet or exceed the configured cap, a further
+  `BLOCK`-triggered review round instead commits the run to one terminal
+  land pass, the same terminal-land mechanism `--max-review-rounds`/
+  `--max-slices` already use. This sum is fresh per Box invocation, not the
+  host launcher's own cross-Box `selfHealGate` figure (`dispatch.
+  CumulativeUsage`, which sums every attempt's log across the whole issue,
+  including a prior fix-pass Box) — a run whose implementor loop spans
+  several fix-pass Boxes gets a fresh budget in each one, not one shared
+  total. Either dimension alone can trip it; a negative or malformed value
+  degrades to `0` (disabled) rather than erroring, mirroring the host
+  launcher's own tolerance for the identical `MAX_BUDGET_TOKENS`/
+  `MAX_BUDGET_USD` env vars (`atoiNonneg`/`floatNonneg`), with one
+  difference: the Box logs one stderr line naming the degraded value, since
+  it has no other channel back to an operator. Unlike
+  `--max-review-rounds`/`--max-slices` — both consulted by the
   legacy single-loop path too — `--max-budget-tokens`/`--max-budget-usd` is
   consulted only by the code-owned review pass's own decision: the legacy
   loop (`--review-prompt-file` unset) accepts both flags without error but
