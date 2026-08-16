@@ -25,9 +25,9 @@ func workerBranchName(sliceName string) string {
 }
 
 // workerLogPath returns one slice's own quarantined --log-path, given a
-// workDir value (launchOneWorker's own logPath convention, line ~332
-// below). Shared with dispatch.go's own budget-usage sum (issue #2694
-// review finding) so both call sites use the same join, rather than
+// workDir value (launchOneWorker's own logPath convention, below in this
+// same file). Shared with dispatch.go's own budget-usage sum so both call
+// sites use the same join, rather than
 // dispatch.go re-deriving "workDir/name.log" inline a second time.
 //
 // This dedupes only the join, not the workDir value itself: LaunchWorkers
