@@ -8,12 +8,8 @@ Fresh clone, new branch `agent/issue-7` cut from `main`. This issue only.
 
 Read first (run these yourself):
 
-- `fj issue view 7` — the issue title and body; add the
-  `comments` subcommand (`fj issue view 7 comments`) for the
-  discussion. fj has no last-N cap, so on a long thread read only the most
-  recent comments. For a bounded, machine-readable pull, curl the REST API
-  instead: `curl -fsS -H "Authorization: token ${FORGEJO_TOKEN}" "${FORGEJO_BASE_URL:-https://codeberg.org}/api/v1/repos/${REPO_SLUG}/issues/7/comments" | jq -r '.[-10:][] | "\(.user.login) (\(.created_at)): \(.body)"'`
-  — the last 10 comments, each attributed to its author. Pull any
+- `cat /issue-snapshot.md` — the issue body plus the last 10 comments,
+  each attributed to its author, captured once at box start. Pull any
   parent/linked issue or PRD it references too.
 - `git log -n 10 --oneline` — recent history.
 
