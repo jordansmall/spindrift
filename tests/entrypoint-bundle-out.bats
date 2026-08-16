@@ -12,6 +12,11 @@ setup() {
   export CODE_FORGE="local"
   export REPO_MOUNT_DIR="$REMOTE_ROOT/owner/repo.git"
   export OUTBOX_DIR="$BATS_TEST_TMPDIR/outbox"
+  # Mirrors what a real CODE_FORGE=local Box receives from the launcher
+  # (lib/backends/default.nix's "local" row has hostMediatedRemote=true) --
+  # the bundle-out gate at entrypoint.sh:1358 now keys on this forwarded
+  # signal instead of re-deriving it from CODE_FORGE by name.
+  export BOX_HOST_MEDIATED_REMOTE=1
 }
 
 @test "CODE_FORGE=local with real commits writes a seam bundle to the outbox" {

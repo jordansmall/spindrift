@@ -365,6 +365,13 @@ EOF
   export CODE_FORGE="git"
   export CODE_FORGE_REMOTE_URL="$REMOTE_ROOT/owner/repo.git"
   unset BOX_WRITE_ENABLED
+  # A real CODE_FORGE=git Box never gets this signal forwarded (neither the
+  # "git" nor "local" registry row in lib/backends/default.nix carries
+  # outboxRelayCapable=true) -- helper.bash's setup_entrypoint_env exports it
+  # by default to mirror a github Box, so it must be unset here to reproduce
+  # the git case the nudge gate (now keyed on _is_readonly_outbox_relay, not
+  # a raw CODE_FORGE name check) actually sees.
+  unset BOX_OUTBOX_RELAY_CAPABLE
   export FAKE_DRIVER_NO_PR_INTENT=1
   export OUTBOX_DIR="$BATS_TEST_TMPDIR/outbox"
   run bash "$ENTRYPOINT"
@@ -380,6 +387,11 @@ EOF
   export CODE_FORGE="local"
   export REPO_MOUNT_DIR="$REMOTE_ROOT/owner/repo.git"
   unset BOX_WRITE_ENABLED
+  # A real CODE_FORGE=local Box never gets this signal forwarded either (the
+  # "local" registry row has hostMediatedRemote=true, not
+  # outboxRelayCapable=true) -- unset the helper's github-mirroring default,
+  # same reasoning as the CODE_FORGE=git test above.
+  unset BOX_OUTBOX_RELAY_CAPABLE
   export FAKE_DRIVER_NO_PR_INTENT=1
   export OUTBOX_DIR="$BATS_TEST_TMPDIR/outbox"
   run bash "$ENTRYPOINT"
@@ -435,6 +447,10 @@ EOF
   export CODE_FORGE="git"
   export CODE_FORGE_REMOTE_URL="$REMOTE_ROOT/owner/repo.git"
   unset BOX_WRITE_ENABLED
+  # See the non-backstop CODE_FORGE=git test above: a real git Box never gets
+  # this signal forwarded, so the helper's github-mirroring default must be
+  # unset here too.
+  unset BOX_OUTBOX_RELAY_CAPABLE
   export OUTBOX_DIR="$BATS_TEST_TMPDIR/outbox"
   export FAKE_DRIVER_COMMIT=1
   export FAKE_DRIVER_NO_OUTCOME=1
@@ -450,6 +466,10 @@ EOF
   export CODE_FORGE="local"
   export REPO_MOUNT_DIR="$REMOTE_ROOT/owner/repo.git"
   unset BOX_WRITE_ENABLED
+  # See the non-backstop CODE_FORGE=local test above: a real local Box never
+  # gets this signal forwarded (hostMediatedRemote, not outboxRelayCapable),
+  # so the helper's github-mirroring default must be unset here too.
+  unset BOX_OUTBOX_RELAY_CAPABLE
   export OUTBOX_DIR="$BATS_TEST_TMPDIR/outbox"
   export FAKE_DRIVER_COMMIT=1
   export FAKE_DRIVER_NO_OUTCOME=1
