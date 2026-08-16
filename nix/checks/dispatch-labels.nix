@@ -20,7 +20,6 @@
 { pkgs, ... }:
 let
   inherit (pkgs.lib)
-    any
     assertMsg
     concatMap
     concatStringsSep
@@ -106,7 +105,13 @@ let
   # one of our labels (agent-<word>[-<word>...]) — otherwise every hyphenated
   # comment phrase in the same file (e.g. "the do-not-trust-the-agent-target
   # invariant") would tokenize into a false "missing label" offender. Used by
-  # both label-registry-covers-harness-writes below and triggerGuardLabel.
+  # triggerGuardLabel, which filters tokens on a workflow's own `if:
+  # github.event.label.name == '...'` guard line and has no false-positive
+  # risk from that (the guard line never carries unrelated prose). NOT used
+  # by label-registry-covers-harness-writes below any more — see
+  # harnessSurfaces for why a shape-only filter both fails open (on a
+  # de-prefixed rename) and, if broadened, false-positives (on prose like
+  # "non-blocking").
   isLabelShaped = s: builtins.match "agent-[a-z-]+" s != null;
   # Dedicated pin for the three dispatch-trigger guards (issue #2528 AC3):
   # each of agent-trigger/agent-recover/agent-research is the literal a
@@ -188,36 +193,135 @@ let
     ++ labels.triggerOnly;
   # The three known surfaces that write or create a label literal outside
   # doctor.Run()'s registry-derived TriageLabelMeta path (issue #2528 AC1).
-  # Each is paired with a marker substring so only the line(s) that actually
-  # carry the literal are tokenized — scanning a whole file's prose would
-  # reintroduce the same false-positive risk isLabelShaped alone doesn't
-  # fully close (e.g. issue_intent.go's unrelated "agent-target" comment).
+  # Each is paired with a dedicated `extract` function — not a generic
+  # markers-line-select + whole-line-tokenize + isLabelShaped-filter
+  # pipeline — that pulls the label literal from its own known syntactic
+  # position on the matched line:
+  #   - issue_intent.go: a quoted Go string literal on the
+  #     issueIntentLabels = []string{"..."} line.
+  #   - filer-label-direct.md: the shell bareword immediately following the
+  #     literal words `label create ` (unquoted, unlike the other two).
+  #   - filer-label-direct-forgejo.md: specifically the VALUE of the
+  #     "name":"..." JSON key on that line.
+  # A shape-only filter (isLabelShaped, which requires an agent- prefix)
+  # fails open on a de-prefixed rename: if issueIntentLabels'
+  # "agent-review-finding" were renamed to "review-finding", isLabelShaped
+  # would filter it out of the token stream entirely, so labelsWrittenBy
+  # would return [] for that surface and label-registry-covers-harness-writes
+  # would pass silently even though the harness now writes an unregistered
+  # label — label-registry-covers-harness-writes-regression below reproduces
+  # and closes that gap. Conversely, simply broadening isLabelShaped to
+  # accept any hyphenated lowercase word (instead of per-surface extraction)
+  # would reintroduce a false positive: the forgejo fragment's
+  # "name":"agent-review-finding" line also carries a "description" value
+  # containing the lowercase hyphenated phrase "non-blocking", which a
+  # whole-line tokenize + broadened-shape-filter would wrongly flag as a
+  # phantom missing-from-registry label on the CURRENT, correct source.
+  # Per-surface extraction avoids both failure modes by only ever looking
+  # where the literal is actually syntactically expected to be.
   harnessSurfaces = {
     "cmd/launcher/internal/settle/issue_intent.go" = {
       src = builtins.readFile ../../cmd/launcher/internal/settle/issue_intent.go;
-      markers = [ "issueIntentLabels" ];
+      extract = extractIssueIntentLabels;
     };
     "templates/default/prompts/fragments/filer-label-direct.md" = {
       src = builtins.readFile ../../templates/default/prompts/fragments/filer-label-direct.md;
-      markers = [ "label create" ];
+      extract = extractLabelCreateTokens;
     };
     "templates/default/prompts/fragments/filer-label-direct-forgejo.md" = {
       src = builtins.readFile ../../templates/default/prompts/fragments/filer-label-direct-forgejo.md;
-      markers = [ ''"name":'' ];
+      extract = extractNameFieldTokens;
     };
   };
-  labelsWrittenBy =
-    { src, markers }:
+  # The literal sits inside a double-quoted Go string literal on the
+  # issueIntentLabels = []string{"..."} line. Nix's builtins.match is
+  # whole-string-anchored, not a global/find-all primitive, and Go's slice
+  # literal syntax can in principle hold more than one entry
+  # (issueIntentLabels = []string{"a", "b"}), so rather than one anchored
+  # match we split the line on the quote character to isolate each quoted
+  # segment, then match-filter each segment to the label-literal shape
+  # (lowercase, digits, hyphens) — that filter discards the surrounding Go
+  # syntax (var ..., []string{, }, commas) on either side without requiring
+  # an agent- prefix, so a de-prefixed rename still extracts correctly.
+  extractIssueIntentLabels =
+    src:
     let
-      relevantLines = filter (line: any (m: hasInfix m line) markers) (splitString "\n" src);
+      relevantLines = filter (l: hasInfix "issueIntentLabels" l) (splitString "\n" src);
+      quotedTokens = line: filter (s: builtins.match "[a-z][a-z0-9-]*" s != null) (splitString "\"" line);
     in
-    unique (filter isLabelShaped (concatMap tokenize relevantLines));
-  missingFromRegistryBySurface = mapAttrs (
-    _: surface: filter (l: !(elem l allRegistryLabels)) (labelsWrittenBy surface)
-  ) harnessSurfaces;
-  registryOffenders = filter (name: missingFromRegistryBySurface.${name} != [ ]) (
-    builtins.attrNames missingFromRegistryBySurface
-  );
+    concatMap quotedTokens relevantLines;
+  # The literal is the shell bareword immediately following the literal
+  # words `label create ` (unquoted, unlike the Go and JSON surfaces below) —
+  # split the line on that marker and take the first whitespace-delimited
+  # token of what follows.
+  extractLabelCreateTokens =
+    src:
+    let
+      marker = "label create ";
+      relevantLines = filter (l: hasInfix marker l) (splitString "\n" src);
+      tokenAfterMarker =
+        line:
+        let
+          parts = splitString marker line;
+        in
+        if builtins.length parts < 2 then
+          [ ]
+        else
+          let
+            rest = builtins.elemAt parts 1;
+            firstTok = builtins.head (filter (s: s != "") (splitString " " rest));
+          in
+          if builtins.match "[a-z0-9-]+" firstTok != null then [ firstTok ] else [ ];
+    in
+    concatMap tokenAfterMarker relevantLines;
+  # The literal is specifically the VALUE of the "name":"..." JSON key on
+  # that line, not any quoted string on it — the same line's "description"
+  # value is free-form prose (e.g. "non-blocking") that would false-positive
+  # as a phantom missing label under a line-wide/shape-only filter. Split on
+  # the `"name":"` marker itself and take everything up to the next quote.
+  extractNameFieldTokens =
+    src:
+    let
+      marker = ''"name":"'';
+      relevantLines = filter (l: hasInfix marker l) (splitString "\n" src);
+      tokenAfterMarker =
+        line:
+        let
+          parts = splitString marker line;
+        in
+        if builtins.length parts < 2 then
+          [ ]
+        else
+          let
+            rest = builtins.elemAt parts 1;
+            value = builtins.head (splitString "\"" rest);
+          in
+          if builtins.match "[a-z0-9-]+" value != null then [ value ] else [ ];
+    in
+    concatMap tokenAfterMarker relevantLines;
+  labelsWrittenBy = { src, extract }: unique (extract src);
+  # Core assertion for the Registry ⊇ Harness direction, factored out
+  # (mirroring assertLabelsPinned's own factoring) so
+  # label-registry-covers-harness-writes-regression can exercise this exact
+  # assertion path against a doctored harnessSurfaces without touching real
+  # files beyond one doctored string.
+  assertHarnessWritesInRegistry =
+    { harnessSurfaces, registryLabels }:
+    let
+      missingFromRegistryBySurface = mapAttrs (
+        _: surface: filter (l: !(elem l registryLabels)) (labelsWrittenBy surface)
+      ) harnessSurfaces;
+      registryOffenders = filter (name: missingFromRegistryBySurface.${name} != [ ]) (
+        builtins.attrNames missingFromRegistryBySurface
+      );
+    in
+    assert assertMsg (registryOffenders == [ ])
+      "a Harness surface writes/creates a label lib/labels.nix doesn't know about — add a row for it to the registry: ${
+        concatStringsSep "; " (
+          map (n: "${n}: ${concatStringsSep ", " missingFromRegistryBySurface.${n}}") registryOffenders
+        )
+      }";
+    registryOffenders;
 in
 {
   dispatch-labels-pinned-in-workflows =
@@ -255,16 +359,116 @@ in
       "dispatch-labels-pinned-in-workflows-regression: expected assertTriggerGuardsPinned to reject a synthetic github agent-research.yml with the dispatch-trigger guard renamed from agent-research to agent-study, but it evaluated successfully";
     pkgs.runCommand "dispatch-labels-pinned-in-workflows-regression" { } "touch $out";
 
-  # Registry ⊇ Harness direction (issue #2528): asserts every label-shaped
-  # literal the three harnessSurfaces above write/create is a name somewhere
-  # in lib/labels.nix. This is the check that would have failed before
+  # Regression guard (issue #2528 AC3), distinct from the trigger-guard
+  # regression above: assertLabelsPinned itself — the file-wide "does this
+  # token appear ANYWHERE in the file" check, extended by issue #2528 to
+  # fold in research labels — needs its OWN doctored fixture to prove it
+  # still rejects a rename. The trigger-guard regression above only doctors
+  # a single `if: ...` guard line; assertLabelsPinned's whole-file token
+  # scan never even looks at that line specifically, so that regression
+  # alone leaves assertLabelsPinned completely unexercised. This instead
+  # doctors workflowSets.github with agent-research-recommend's literal
+  # swapped for a plausible drifted rename (as if someone renamed the label
+  # in the workflow YAML without updating lib/labels.nix), then runs
+  # assertLabelsPinned — the exact function
+  # dispatch-labels-pinned-in-workflows calls first — against that doctored
+  # set via tryEval, so this fails if the tokenize/exact-membership check is
+  # ever dropped from assertLabelsPinned. (This recreates the original
+  # regression issue #2528's f57ef25f commit added under the
+  # dispatch-labels-pinned-in-workflows-regression name, which a later
+  # commit's wholesale body replacement of that same-named check displaced.)
+  dispatch-labels-pinned-in-workflows-research-rename-regression =
+    let
+      driftedGithub = replaceStrings [ "agent-research-recommend" ] [ "agent-research-approved" ]
+        workflowSets.github;
+      doctoredWorkflowSets = workflowSets // {
+        github = driftedGithub;
+      };
+      result = builtins.tryEval (
+        assertLabelsPinned {
+          inherit requiredLabels;
+          workflowSets = doctoredWorkflowSets;
+        }
+      );
+    in
+    assert assertMsg (!result.success)
+      "dispatch-labels-pinned-in-workflows-research-rename-regression: expected assertLabelsPinned to reject a synthetic workflowSets.github with agent-research-recommend renamed to agent-research-approved, but it evaluated successfully";
+    pkgs.runCommand "dispatch-labels-pinned-in-workflows-research-rename-regression" { } "touch $out";
+
+  # Regression guard (issue #2528): proves the tokenize + exact `elem`
+  # membership fix in assertLabelsPinned actually rejects the
+  # substring-prefix drift class the comment on tokenize above describes,
+  # rather than merely documenting it. Builds a small synthetic
+  # workflowSets — a literal string, not a doctored real file, kept minimal
+  # and self-contained — that contains several compound research labels
+  # (agent-research-recommend, agent-research-in-progress,
+  # agent-research-failed) but never the standalone token agent-research
+  # anywhere. A plain hasInfix "agent-research" substring check would
+  # wrongly PASS this fixture, since "agent-research" is a literal substring
+  # of all three compound labels present; exact tokenization must REJECT it,
+  # since none of those compound labels tokenizes to the bare word
+  # "agent-research".
+  dispatch-labels-tokenize-exact-match-regression =
+    let
+      syntheticWorkflowSets = {
+        github = ''
+          agent-research-recommend
+          agent-research-in-progress
+          agent-research-failed
+        '';
+      };
+      result = builtins.tryEval (
+        assertLabelsPinned {
+          requiredLabels = [ "agent-research" ];
+          workflowSets = syntheticWorkflowSets;
+        }
+      );
+    in
+    assert assertMsg (!result.success)
+      "dispatch-labels-tokenize-exact-match-regression: expected assertLabelsPinned to reject a synthetic workflowSets containing only compound agent-research-* labels and never the standalone agent-research token, but it evaluated successfully";
+    pkgs.runCommand "dispatch-labels-tokenize-exact-match-regression" { } "touch $out";
+
+  # Registry ⊇ Harness direction (issue #2528): asserts every label literal
+  # the three harnessSurfaces above write/create is a name somewhere in
+  # lib/labels.nix. This is the check that would have failed before
   # lib/labels.nix grew a reviewFinding row for agent-review-finding.
   label-registry-covers-harness-writes =
-    assert assertMsg (registryOffenders == [ ])
-      "a Harness surface writes/creates a label lib/labels.nix doesn't know about — add a row for it to the registry: ${
-        concatStringsSep "; " (
-          map (n: "${n}: ${concatStringsSep ", " missingFromRegistryBySurface.${n}}") registryOffenders
-        )
-      }";
+    assert (assertHarnessWritesInRegistry { inherit harnessSurfaces; registryLabels = allRegistryLabels; }) == [ ];
     pkgs.runCommand "label-registry-covers-harness-writes" { } "touch $out";
+
+  # Regression guard (issue #2528): proves assertHarnessWritesInRegistry
+  # actually catches a de-prefixed rename of a harness-written label. Doctors
+  # the real issue_intent.go source (the file itself, via replaceStrings on
+  # its own builtins.readFile content, not a synthetic fixture) so
+  # issueIntentLabels' "agent-review-finding" loses its agent- prefix down to
+  # "review-finding", builds a doctored harnessSurfaces with only that one
+  # surface's src swapped in, and asserts via tryEval that
+  # assertHarnessWritesInRegistry now correctly REJECTS it — "review-finding"
+  # is not a name in lib/labels.nix's registry. Before the per-surface
+  # extraction fix, a shape-only filter (isLabelShaped, which requires an
+  # agent- prefix) would have discarded "review-finding" before it ever
+  # reached the registry-membership check, so labelsWrittenBy would have
+  # returned [] for that surface and this regression would have found
+  # nothing to reject — exactly the fail-open gap this check closes.
+  label-registry-covers-harness-writes-regression =
+    let
+      doctoredIssueIntentSrc = replaceStrings [ ''"agent-review-finding"'' ] [ ''"review-finding"'' ]
+        harnessSurfaces."cmd/launcher/internal/settle/issue_intent.go".src;
+      doctoredHarnessSurfaces = harnessSurfaces // {
+        "cmd/launcher/internal/settle/issue_intent.go" =
+          harnessSurfaces."cmd/launcher/internal/settle/issue_intent.go"
+          // {
+            src = doctoredIssueIntentSrc;
+          };
+      };
+      result = builtins.tryEval (
+        assertHarnessWritesInRegistry {
+          harnessSurfaces = doctoredHarnessSurfaces;
+          registryLabels = allRegistryLabels;
+        }
+      );
+    in
+    assert assertMsg (!result.success)
+      "label-registry-covers-harness-writes-regression: expected assertHarnessWritesInRegistry to reject a synthetic issue_intent.go with agent-review-finding de-prefixed to review-finding, but it evaluated successfully";
+    pkgs.runCommand "label-registry-covers-harness-writes-regression" { } "touch $out";
 }
