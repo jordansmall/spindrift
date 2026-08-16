@@ -456,11 +456,35 @@ in
   # mergeMode, codeForge, issueTracker, overlapGate, mergeMethod, syncMethod,
   # boxForgeAndIssueAccess — so a typo or dropped value fails here instead of
   # silently narrowing/widening what `spindrift --merge-mode <TAB>` etc. offer.
+  # Also asserts the *set* of choices-bearing knob names itself (issue #2519)
+  # — the seven per-knob asserts below only fire for a knob already listed
+  # here by name, so an added eighth knob declaring `choices` would otherwise
+  # go unpinned silently. Derives the actual set the same way
+  # flake-nixpath-exhaustive-disjoint derives flakeOptionNames above, from
+  # the schema itself rather than a second hand-typed list.
   schema-choices =
     let
       schema = assertSchemaChoicesOk (import ../../lib/env-schema.nix);
-      inherit (pkgs.lib) assertMsg;
+      inherit (pkgs.lib)
+        assertMsg
+        attrNames
+        filter
+        sort
+        concatStringsSep
+        ;
+      choiceKnobNames = sort builtins.lessThan (filter (n: schema.${n} ? choices) (attrNames schema));
+      expectedChoiceKnobNames = sort builtins.lessThan [
+        "mergeMode"
+        "codeForge"
+        "issueTracker"
+        "overlapGate"
+        "mergeMethod"
+        "syncMethod"
+        "boxForgeAndIssueAccess"
+      ];
     in
+    assert assertMsg (choiceKnobNames == expectedChoiceKnobNames)
+      "lib/env-schema.nix: choices-bearing knob set changed — expected exactly [ ${concatStringsSep " " expectedChoiceKnobNames} ], got [ ${concatStringsSep " " choiceKnobNames} ]; pin the new/removed knob's exact choices list in nix/checks/schema-drift.nix's schema-choices check (issue #2519)";
     assert assertMsg (
       schema.mergeMode.choices or [ ] == [
         "immediate"
@@ -510,6 +534,53 @@ in
       ]
     ) "lib/env-schema.nix: boxForgeAndIssueAccess.choices must be [ read-write read-only ]";
     pkgs.runCommand "schema-choices" { } "touch $out";
+
+  # Regression guard (issue #2519): the choices-bearing knob-set assertion
+  # above must actually detect an added/renamed choices-bearing knob, not
+  # just pass vacuously because the real schema currently has exactly the
+  # seven pinned names. Injects an eighth synthetic knob declaring `choices`
+  # into a copy of the real schema and asserts, via tryEval, that
+  # schema-choices' own set-equality check (reimplemented here against the
+  # injected schema, the same way schema-secret-choices-guard reruns
+  # assertSchemaChoicesOk rather than schema-choices itself) rejects it.
+  schema-choices-knobset-guard =
+    let
+      schema = import ../../lib/env-schema.nix;
+      inherit (pkgs.lib)
+        assertMsg
+        attrNames
+        filter
+        sort
+        ;
+      badSchema = schema // {
+        extraChoiceKnob = (schema.mergeMode) // {
+          choices = [
+            "a"
+            "b"
+          ];
+          default = "a";
+        };
+      };
+      choiceKnobNames = sort builtins.lessThan (
+        filter (n: badSchema.${n} ? choices) (attrNames badSchema)
+      );
+      expectedChoiceKnobNames = sort builtins.lessThan [
+        "mergeMode"
+        "codeForge"
+        "issueTracker"
+        "overlapGate"
+        "mergeMethod"
+        "syncMethod"
+        "boxForgeAndIssueAccess"
+      ];
+      result = builtins.tryEval (
+        assert choiceKnobNames == expectedChoiceKnobNames;
+        true
+      );
+    in
+    assert assertMsg (!result.success)
+      "schema-choices-knobset-guard: expected the choices-bearing knob-set assertion to reject a schema with an injected eighth choices knob (extraChoiceKnob), but it evaluated successfully";
+    pkgs.runCommand "schema-choices-knobset-guard" { } "touch $out";
 
   # Regression guard (issue #872): lib/renderers.nix's bash/fish/zsh
   # completion renderers always scope `choices` to nonSecret knobs (a secret
