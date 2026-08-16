@@ -141,7 +141,9 @@ guarantee.
   `perSystem.spindrift.settings.<section>.<knob>` (ADR 0015). This is a MINOR
   bump under the pre-1.0 policy; no external consumers existed at migration time.
 - **Note (issue #2529):** `mkHarness`'s return value carries a named
-  `internals` attrset holding every check-only output (build/run fixtures,
-  contract files, `driverExecBin`, `roster`, …). That attrset sits outside
-  this ADR's versioned Consumer surface, same as `cmd/launcher/internal/*` —
-  only `image`, `spindrift`, `packages`, and `apps` are the contract.
+  `internals` attrset holding the outputs checks/fixtures reach for but that
+  aren't themselves part of this ADR's versioned Consumer surface (build/run
+  fixtures, contract files, `driverExecBin`, `roster`, …), the same idea as
+  `cmd/launcher/internal/*` — only `image`, `spindrift`, `packages`, and
+  `apps` are the contract. A few `internals` keys (manpage, completions) are
+  also separately reachable as `packages.spindrift-*`.

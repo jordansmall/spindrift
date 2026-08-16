@@ -25,6 +25,19 @@ If you set one of these seven knobs, either through `perSystem.spindrift.*`
 or a direct `mkHarness` call, confirm the value is one of its documented
 choices (see `docs/reference.md` or `spindrift --help --all`).
 
+## `mkHarness`'s check-only return keys moved under `internals` (issue #2529)
+
+A direct `mkHarness { ... }` call's return attrset no longer carries its
+21 check-only keys (`build`, `run`, `manpage`, `bashCompletion`,
+`fishCompletion`, `zshCompletion`, `imagePath`, `promptDir`, `skillsDir`,
+`driverExecBin`, `roster`, …) at the top level. They now live under one
+named `internals` attrset instead, e.g. `result.driverExecBin` becomes
+`result.internals.driverExecBin`. This surface was never part of the
+versioned Consumer contract (ADR 0010 scopes that to `image`/`spindrift`/
+`packages`/`apps`; see `docs/reference.md`'s "Calling `mkHarness` directly"),
+so it carries no semver bump, but any fixture or fork reaching into these
+keys directly needs the `internals.` prefix added.
+
 ## Knob env overrides deprecated; use `--flag` or `settings.*` (ADR 0020)
 
 `spindrift` now hands every nix-computed value to the launcher through one
