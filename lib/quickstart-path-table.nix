@@ -7,9 +7,16 @@
 # renderFlakeNix), so the wizard's generated Nix literal paths
 # (cmd/launcher/quickstart/quickstart_paths_gen.go) can't drift from
 # lib/env-schema.nix's own group/nixSubPath taxonomy.
+#
+# One wizard knob, `runtime`, is structural rather than schema-rooted: it
+# isn't an lib/env-schema.nix entry, so resolveNixPath can't resolve it.
+# Instead it's resolved from lib/structural-paths.nix, the same flat-name ->
+# domain-tree-path map lib/flakeModule.nix's structuralPlacements draws on,
+# joined with "." the same way resolveNixPath joins schema-rooted paths.
 let
   schema = import ./env-schema.nix;
   resolveNixPath = import ./nixpath.nix;
+  structuralPaths = import ./structural-paths.nix;
   # The wizard's own knob set -- every schema key the quickstart flow prompts
   # for and writes into the generated flake.nix.
   knobNames = [
@@ -20,10 +27,14 @@ let
     "codeForge"
     "forgejoBaseURL"
   ];
+  schemaRootedPaths = builtins.listToAttrs (
+    map (name: {
+      inherit name;
+      value = resolveNixPath name schema.${name};
+    }) knobNames
+  );
+  structuralRootedPaths = {
+    runtime = builtins.concatStringsSep "." structuralPaths.runtime;
+  };
 in
-builtins.listToAttrs (
-  map (name: {
-    inherit name;
-    value = resolveNixPath name schema.${name};
-  }) knobNames
-)
+schemaRootedPaths // structuralRootedPaths
