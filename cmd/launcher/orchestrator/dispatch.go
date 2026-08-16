@@ -136,11 +136,11 @@ func truncateRunes(s string, max int) string {
 // (issue #2694), summed via passUsage over every dispatched slice's own log
 // (workDir/<slice>.log, workers.go's own logPath convention) regardless of
 // WorkerStatus -- a timed-out or crashed worker still spent tokens before
-// failing, and the budget cap this feeds must see that spend too. The
-// measured motivation behind the budget cap (issue #2694's own PR
-// description) is specifically that the worker/reviewer loop accounts for
-// the majority of a run's spend, so leaving worker dispatch out of the
-// accumulator the caller feeds into passmachine.Input.CumulativeTokens/
+// failing, and the budget cap this feeds must see that spend too. Issue
+// #2694's own motivating measurement is specifically that the worker/
+// reviewer loop accounts for the majority of a run's spend, so leaving
+// worker dispatch out of the accumulator the caller feeds into
+// passmachine.Input.CumulativeTokens/
 // CumulativeUSD would defeat the cap for exactly the spend it exists to
 // bound.
 func dispatchManifestIfPresent(cfg config, state *runstate.RunState, stdout io.Writer) (dispatched bool, workerTokens int, workerUSD float64) {

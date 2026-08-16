@@ -136,15 +136,17 @@ const (
 	StopApproveNoOutcome
 	// StopBudgetExceeded fires when Caps.MaxBudgetTokens or Caps.MaxBudgetUSD
 	// is a positive cap and the cumulative usage so far (Input.CumulativeTokens/
-	// CumulativeUSD) has reached or exceeded it -- on the review loop's own
-	// review-pass decision it, like StopMaxReviewRoundsReached, instead
-	// commits the run to one terminal land pass rather than stopping outright
-	// (issue #2694). Appended last, after every pre-existing StopReason, so a
-	// future addition to this const block never again shifts an existing
-	// constant's ordinal value -- this package's Decision.Cap/StopReason
-	// values are compared programmatically (never serialized), so the shift
-	// itself is not a live bug here, but appending is the safer habit for a
-	// pinned-op-stream package (issue #2694 review finding).
+	// CumulativeUSD) has reached or exceeded it, on a BLOCK verdict only --
+	// same gating as StopMaxReviewRoundsReached, since both cap "a further
+	// review round", which only a BLOCK verdict triggers; on the review
+	// loop's own review-pass decision it commits the run to one terminal
+	// land pass rather than stopping outright (issue #2694). Appended last,
+	// after every pre-existing StopReason, so a future addition to this
+	// const block never again shifts an existing constant's ordinal value --
+	// this package's Decision.Cap/StopReason values are compared
+	// programmatically (never serialized), so the shift itself is not a
+	// live bug here, but appending is the safer habit for a pinned-op-stream
+	// package.
 	StopBudgetExceeded
 )
 
