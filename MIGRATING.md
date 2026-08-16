@@ -1,5 +1,30 @@
 # Migration Guide
 
+## Choices-bearing knobs now enforce their valid values (issue #2519)
+
+The seven knobs that declare a `choices` list in `lib/env-schema.nix`
+(`mergeMode`, `codeForge`, `issueTracker`, `overlapGate`, `mergeMethod`,
+`syncMethod`, `boxForgeAndIssueAccess`) now reject an out-of-list value at
+build/eval time instead of accepting it silently, on both entry paths:
+
+- **Flake module.** Each knob's generated Consumer option
+  (`perSystem.spindrift.<path>`) now has type `types.enum choices` instead
+  of `types.str`. Setting one to a value outside its choices — e.g.
+  `git.merge.policy = "Auto"` (valid: `immediate`, `auto`, `manual`) — now
+  fails `nix eval`/`nix build` at the option, naming the option path and
+  the valid values, instead of evaluating.
+- **Direct `mkHarness` callers.** A Consumer or fixture calling `mkHarness
+  { defaults = { ... }; }` directly, bypassing the flake module, now gets
+  the same rejection: an out-of-choices value, or explicitly passing `null`
+  for one of these seven knobs, now throws naming the knob, the bad value,
+  and the valid choices, instead of silently rendering into the Launcher
+  input document (a `null` used to render as an empty string, e.g.
+  `MERGE_METHOD=""`).
+
+If you set one of these seven knobs, either through `perSystem.spindrift.*`
+or a direct `mkHarness` call, confirm the value is one of its documented
+choices (see `docs/reference.md` or `spindrift --help --all`).
+
 ## Knob env overrides deprecated; use `--flag` or `settings.*` (ADR 0020)
 
 `spindrift` now hands every nix-computed value to the launcher through one
