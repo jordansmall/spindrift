@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"spindrift.dev/launcher/internal/runstate"
@@ -478,7 +477,7 @@ func dispatchManifestIfPresent(cfg config, state *runstate.RunState, stdout io.W
 	}
 	state.WorkerFindings = strings.TrimSpace(findings.String())
 	for _, r := range results {
-		pu := passUsage(filepath.Join(cfg.workerWorkDir, r.Slice+".log"), cfg.driver)
+		pu := passUsage(workerLogPath(cfg.workerWorkDir, r.Slice), cfg.driver)
 		workerTokens += pu.TotalTokens()
 		workerUSD += pu.TotalCostUSD
 	}

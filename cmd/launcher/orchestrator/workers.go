@@ -24,6 +24,19 @@ func workerBranchName(sliceName string) string {
 	return "orchestrator-worker/" + sliceName
 }
 
+// workerLogPath returns one slice's own quarantined --log-path
+// (launchOneWorker's own logPath convention, line ~332 below). Shared with
+// dispatch.go's own budget-usage sum (issue #2694 review finding) so both
+// call sites derive the same path from the same workDir value, rather than
+// dispatch.go re-deriving it against cfg.workerWorkDir directly while
+// launchOneWorker's own caller (LaunchWorkers) first absolutizes it --
+// today those two resolve identically (nothing in this package ever calls
+// os.Chdir), but a shared helper keeps that true by construction instead of
+// by the absence of a future os.Chdir call elsewhere in the package.
+func workerLogPath(workDir, sliceName string) string {
+	return filepath.Join(workDir, sliceName+".log")
+}
+
 // WorkerStatus is the terminal state the orchestrator's own join code
 // assigns to one worker's dispatch (issue #2059) -- never inferred from
 // model memory: a worker is Done only once its own done-sentinel file is
@@ -329,7 +342,7 @@ func launchOneWorker(cfg config, slice ManifestSlice, promptFile, workDir string
 
 	resultPath := filepath.Join(workDir, slice.Name+".result")
 	sentinelPath := filepath.Join(workDir, slice.Name+".done")
-	logPath := filepath.Join(workDir, slice.Name+".log")
+	logPath := workerLogPath(workDir, slice.Name)
 	heartbeatLogPath := filepath.Join(workDir, slice.Name+".heartbeat.log")
 
 	// Remove any pre-existing result/sentinel files before the worker is
