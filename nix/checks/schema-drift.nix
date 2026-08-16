@@ -148,6 +148,48 @@ let
   structuralPaths = import ../../lib/structural-paths.nix;
   resolveNixPath = import ../../lib/nixpath.nix;
 
+  # Coverage predicate (issue #2522): every flakeOption knob must either have
+  # a row in lib/legacy-settings-section.nix or be explicitly
+  # `legacySettingsExempt = true;` in lib/env-schema.nix (a knob added after
+  # the ADR 0037 Pass 2 freeze, which never had an old
+  # `settings.<section>` alias to preserve) -- a knob added with neither
+  # would silently lose alias coverage. And every legacySettingsSection row
+  # must still name a real schema knob -- a knob removed from the schema
+  # leaving its row behind would be a dead entry. Factored like
+  # schemaChoiceIssues so the guard can exercise this exact predicate
+  # against a synthetic/injected legacySettingsSection/schema pair, not only
+  # the real data.
+  legacySettingsSectionIssues =
+    { legacySettingsSection, schema }:
+    let
+      inherit (pkgs.lib) filter attrNames;
+      flakeOptionNames = filter (n: schema.${n}.flakeOption or false) (attrNames schema);
+    in
+    {
+      missing = filter (
+        n: !(schema.${n}.legacySettingsExempt or false) && !(legacySettingsSection ? ${n})
+      ) flakeOptionNames;
+      stale = filter (n: !(schema ? ${n})) (attrNames legacySettingsSection);
+    };
+
+  # Throws via legacySettingsSectionIssues on a bad map/schema pair, else
+  # returns legacySettingsSection unchanged. Shared so
+  # legacy-settings-section-coverage-guard exercises this exact assertion
+  # path (not just legacySettingsSectionIssues in isolation) -- dropping
+  # either assert here would make that guard fail too, not stay silently
+  # green.
+  assertLegacySettingsSectionOk =
+    { legacySettingsSection, schema }:
+    let
+      inherit (pkgs.lib) assertMsg concatStringsSep;
+      issues = legacySettingsSectionIssues { inherit legacySettingsSection schema; };
+    in
+    assert assertMsg (issues.missing == [ ])
+      "lib/legacy-settings-section.nix: every flakeOption knob must have a row here or be lib/env-schema.nix legacySettingsExempt = true;: ${concatStringsSep ", " issues.missing}";
+    assert assertMsg (issues.stale == [ ])
+      "lib/legacy-settings-section.nix: entry has no matching lib/env-schema.nix knob (stale alias) -- remove it: ${concatStringsSep ", " issues.stale}";
+    legacySettingsSection;
+
   # Uniqueness + prefix-disjointness predicate over a flat list of dotted
   # nixPath strings, factored (like schemaChoiceIssues) so the guard can be
   # exercised against a synthetic/injected path set in a test, not only the
@@ -1549,4 +1591,55 @@ in
     assert assertMsg (!badIntKindValueResult.success)
       "marker-consistency-guard: expected assertMarkerConsistencyOk to reject maxParallel with intKind mistyped as \"positve\", but it evaluated successfully";
     pkgs.runCommand "marker-consistency-guard" { } "touch $out";
+
+  # lib/legacy-settings-section.nix must totally cover the schema's
+  # flakeOption knobs (issue #2522): every such knob either has a row here or
+  # is lib/env-schema.nix legacySettingsExempt = true;, and no row here
+  # outlives its schema knob. Runs assertLegacySettingsSectionOk against the
+  # real map/schema.
+  legacy-settings-section-coverage =
+    let
+      legacySettingsSection = import ../../lib/legacy-settings-section.nix;
+    in
+    assert
+      (assertLegacySettingsSectionOk { inherit legacySettingsSection schema; }) == legacySettingsSection;
+    pkgs.runCommand "legacy-settings-section-coverage" { } "touch $out";
+
+  # Regression guard (issue #2522): the coverage assert above must actually
+  # detect both failure shapes -- a flakeOption knob left with no alias and
+  # no exemption (missing), and a legacySettingsSection row whose knob no
+  # longer exists in the schema (stale) -- not just pass vacuously because
+  # the real data already satisfies both invariants. Runs
+  # assertLegacySettingsSectionOk -- the exact function
+  # legacy-settings-section-coverage calls -- against two independently
+  # mutated copies of the real map, each violating exactly one invariant,
+  # via tryEval, so this fails if either assert is ever dropped from
+  # assertLegacySettingsSectionOk (not just from legacySettingsSectionIssues).
+  legacy-settings-section-coverage-guard =
+    let
+      inherit (pkgs.lib) assertMsg;
+      legacySettingsSection = import ../../lib/legacy-settings-section.nix;
+      # filerModel is a real row for a real flakeOption knob that carries no
+      # legacySettingsExempt -- dropping its row must be caught by missing.
+      missingLegacySettingsSection = builtins.removeAttrs legacySettingsSection [ "filerModel" ];
+      # A synthetic row naming a schema key that does not exist at all --
+      # the shape a removed knob would leave behind -- must be caught by
+      # stale.
+      staleLegacySettingsSection = legacySettingsSection // {
+        removedKnobNeverInSchema = "someSection";
+      };
+      missingResult = builtins.tryEval (assertLegacySettingsSectionOk {
+        legacySettingsSection = missingLegacySettingsSection;
+        inherit schema;
+      });
+      staleResult = builtins.tryEval (assertLegacySettingsSectionOk {
+        legacySettingsSection = staleLegacySettingsSection;
+        inherit schema;
+      });
+    in
+    assert assertMsg (!missingResult.success)
+      "legacy-settings-section-coverage-guard: expected assertLegacySettingsSectionOk to reject a legacySettingsSection with filerModel's row dropped (a flakeOption knob left with no alias and no exemption), but it evaluated successfully";
+    assert assertMsg (!staleResult.success)
+      "legacy-settings-section-coverage-guard: expected assertLegacySettingsSectionOk to reject a legacySettingsSection with a stale row injected (no matching schema entry), but it evaluated successfully";
+    pkgs.runCommand "legacy-settings-section-coverage-guard" { } "touch $out";
 }
