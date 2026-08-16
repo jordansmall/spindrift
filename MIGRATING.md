@@ -1,5 +1,27 @@
 # Migration Guide
 
+## `MAX_BUDGET_TOKENS`/`MAX_BUDGET_USD` now also cap the orchestrator's review loop (issue #2694)
+
+These two knobs previously gated only `selfHealGate`'s host-side decision to
+dispatch another fix-pass Box (issue #2001) — the value never left the
+launcher process. They are now `boxEnv` (`lib/env-schema.nix`), so
+`entrypoint.sh` forwards them into the Box unconditionally as the
+orchestrator's own `--max-budget-tokens`/`--max-budget-usd` flags, and the
+orchestrator's review-pass loop (`--review-prompt-file` set, the default
+under `ORCHESTRATOR_ENABLED`) now consults the same cumulative-spend figure
+to commit to a terminal land pass instead of a further `BLOCK`-triggered
+review round.
+
+If you already set `MAX_BUDGET_TOKENS`/`MAX_BUDGET_USD` purely to bound
+host-side fix-pass retries, this is a behavior widening, not a breaking
+change: the cap now also applies to the in-Box review loop, which can land
+a run earlier than before at the same threshold. A malformed or negative
+value degrades to `0` (disabled) rather than erroring, matching this pair's
+existing host-side tolerance (`atoiNonneg`/`floatNonneg`) — under the
+legacy single-loop path (`ORCHESTRATOR_ENABLED` off, or a custom
+`SPINDRIFT_PROMPT_DIR` with no review-pass prompt) the value is accepted
+but never consulted.
+
 ## `agent-trigger` dropped from the versioned label lifecycle contract (issue #2557)
 
 [`VERSIONING.md`](VERSIONING.md)'s "Label lifecycle names" row no longer lists
