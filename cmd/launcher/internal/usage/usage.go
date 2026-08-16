@@ -34,6 +34,15 @@ type Usage struct {
 	NumTurns                 int     `json:"num_turns"`
 }
 
+// TotalTokens sums Usage's four billable token categories -- the single
+// source of this sum, shared by every budget-cap comparison that needs a
+// caller-summed token count (settle's own budgetExceeded, and the
+// orchestrator's pass-machine budget cap, issue #2694) instead of each
+// repeating the same four-field addition.
+func (u Usage) TotalTokens() int {
+	return u.InputTokens + u.OutputTokens + u.CacheReadInputTokens + u.CacheCreationInputTokens
+}
+
 // UnknownModel is the Model value used when a driver's log carried no model
 // field.
 const UnknownModel = "unknown"

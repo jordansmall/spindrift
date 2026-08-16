@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"spindrift.dev/launcher/internal/runstate"
@@ -131,7 +132,19 @@ func truncateRunes(s string, max int) string {
 // what its own verdict/outcome scan found, since the coordinator's only job
 // on a manifest-emitting pass is to declare the manifest and stop (issue
 // #2059 AC1).
-func dispatchManifestIfPresent(cfg config, state *runstate.RunState, stdout io.Writer) bool {
+//
+// It also returns this dispatch's own cumulative worker token/USD usage
+// (issue #2694), summed via passUsage over every dispatched slice's own log
+// (workDir/<slice>.log, workers.go's own logPath convention) regardless of
+// WorkerStatus -- a timed-out or crashed worker still spent tokens before
+// failing, and the budget cap this feeds must see that spend too. The
+// measured motivation behind the budget cap (issue #2694's own PR
+// description) is specifically that the worker/reviewer loop accounts for
+// the majority of a run's spend, so leaving worker dispatch out of the
+// accumulator the caller feeds into passmachine.Input.CumulativeTokens/
+// CumulativeUSD would defeat the cap for exactly the spend it exists to
+// bound.
+func dispatchManifestIfPresent(cfg config, state *runstate.RunState, stdout io.Writer) (dispatched bool, workerTokens int, workerUSD float64) {
 	if cfg.workerPromptFile == "" {
 		// This pass was never configured to dispatch anything of its own
 		// (a fix-pass or review-only invocation never renders
@@ -146,7 +159,7 @@ func dispatchManifestIfPresent(cfg config, state *runstate.RunState, stdout io.W
 		// (issue #2495 review finding). Runtime coherence checks for this
 		// knob belong at orchestrator startup (AC3), not as mid-run
 		// handling here.
-		return false
+		return false, 0, 0
 	}
 	manifest, ok := scanForManifest(cfg.logPath, cfg.driver)
 	if !ok {
@@ -157,7 +170,7 @@ func dispatchManifestIfPresent(cfg config, state *runstate.RunState, stdout io.W
 		// every later pass's prompt as though it were still fresh (issue
 		// #2059 review finding A).
 		state.WorkerFindings = ""
-		return false
+		return false, 0, 0
 	}
 
 	var findings strings.Builder
@@ -464,7 +477,12 @@ func dispatchManifestIfPresent(cfg config, state *runstate.RunState, stdout io.W
 		}
 	}
 	state.WorkerFindings = strings.TrimSpace(findings.String())
-	return true
+	for _, r := range results {
+		pu := passUsage(filepath.Join(cfg.workerWorkDir, r.Slice+".log"), cfg.driver)
+		workerTokens += pu.InputTokens + pu.OutputTokens + pu.CacheReadInputTokens + pu.CacheCreationInputTokens
+		workerUSD += pu.TotalCostUSD
+	}
+	return true, workerTokens, workerUSD
 }
 
 // notLandedLeaseOverlap reports the name of the first not-landed slice

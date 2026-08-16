@@ -57,7 +57,7 @@ func TestDispatchManifestIfPresentNoopWhenWorkerPromptFileUnset(t *testing.T) {
 	state := runstate.RunState{}
 	want := runstate.RunState{}
 
-	got := dispatchManifestIfPresent(cfg, &state, io.Discard)
+	got, _, _ := dispatchManifestIfPresent(cfg, &state, io.Discard)
 	if got {
 		t.Errorf("dispatchManifestIfPresent() = true, want false")
 	}
@@ -81,7 +81,7 @@ func TestDispatchManifestIfPresentPreservesPriorWorkerFindingsWhenWorkerPromptFi
 	state := runstate.RunState{WorkerFindings: "findings from an earlier dispatch, in this or a prior Box"}
 	want := state
 
-	got := dispatchManifestIfPresent(cfg, &state, io.Discard)
+	got, _, _ := dispatchManifestIfPresent(cfg, &state, io.Discard)
 	if got {
 		t.Errorf("dispatchManifestIfPresent() = true, want false")
 	}
@@ -125,7 +125,7 @@ func TestDispatchManifestIfPresentPreservesFindingsWhenManifestFoundButNoWorkerP
 	state := runstate.RunState{WorkerFindings: "findings from an earlier dispatch, in this or a prior Box"}
 	want := state
 
-	got := dispatchManifestIfPresent(cfg, &state, io.Discard)
+	got, _, _ := dispatchManifestIfPresent(cfg, &state, io.Discard)
 	if got {
 		t.Errorf("dispatchManifestIfPresent() = true, want false (no worker-prompt-file to dispatch against)")
 	}
@@ -154,7 +154,7 @@ func TestDispatchManifestIfPresentNoopWhenNoManifestInLog(t *testing.T) {
 	state := runstate.RunState{}
 	want := runstate.RunState{}
 
-	got := dispatchManifestIfPresent(cfg, &state, io.Discard)
+	got, _, _ := dispatchManifestIfPresent(cfg, &state, io.Discard)
 	if got {
 		t.Errorf("dispatchManifestIfPresent() = true, want false")
 	}
@@ -207,7 +207,7 @@ func TestDispatchManifestIfPresentClearsStaleWorkerFindingsWhenNoManifest(t *tes
 	state := runstate.RunState{}
 
 	var stdout strings.Builder
-	if got := dispatchManifestIfPresent(cfg, &state, &stdout); !got {
+	if got, _, _ := dispatchManifestIfPresent(cfg, &state, &stdout); !got {
 		t.Fatalf("dispatchManifestIfPresent() = false, want true")
 	}
 	if state.WorkerFindings == "" {
@@ -220,7 +220,7 @@ func TestDispatchManifestIfPresentClearsStaleWorkerFindingsWhenNoManifest(t *tes
 	}
 	cfg.logPath = noManifestLogPath
 
-	got := dispatchManifestIfPresent(cfg, &state, &stdout)
+	got, _, _ := dispatchManifestIfPresent(cfg, &state, &stdout)
 	if got {
 		t.Errorf("dispatchManifestIfPresent() = true, want false (no manifest in second pass's log)")
 	}
@@ -282,7 +282,7 @@ func TestDispatchManifestIfPresentQuarantinesStrayWorkerOutcome(t *testing.T) {
 	state := runstate.RunState{}
 
 	var stdout strings.Builder
-	if got := dispatchManifestIfPresent(cfg, &state, &stdout); !got {
+	if got, _, _ := dispatchManifestIfPresent(cfg, &state, &stdout); !got {
 		t.Fatalf("dispatchManifestIfPresent() = false, want true")
 	}
 	if state.WorkerFindings == "" {
@@ -350,7 +350,7 @@ func TestDispatchManifestIfPresentMovesRemainingSliceToDoneOnRetrySuccess(t *tes
 	state := runstate.RunState{RemainingSlices: []string{"done-fast"}}
 
 	var stdout strings.Builder
-	got := dispatchManifestIfPresent(cfg, &state, &stdout)
+	got, _, _ := dispatchManifestIfPresent(cfg, &state, &stdout)
 	if !got {
 		t.Fatalf("dispatchManifestIfPresent() = false, want true")
 	}
@@ -404,10 +404,10 @@ func TestDispatchManifestIfPresentDoesNotDuplicateDoneSliceAcrossDispatches(t *t
 	state := runstate.RunState{}
 
 	var stdout strings.Builder
-	if got := dispatchManifestIfPresent(cfg, &state, &stdout); !got {
+	if got, _, _ := dispatchManifestIfPresent(cfg, &state, &stdout); !got {
 		t.Fatalf("dispatchManifestIfPresent() (first call) = false, want true")
 	}
-	if got := dispatchManifestIfPresent(cfg, &state, &stdout); !got {
+	if got, _, _ := dispatchManifestIfPresent(cfg, &state, &stdout); !got {
 		t.Fatalf("dispatchManifestIfPresent() (second call) = false, want true")
 	}
 
@@ -701,7 +701,7 @@ func TestDispatchManifestIfPresentSkipsRedispatchOfAlreadyDoneSlice(t *testing.T
 	state := runstate.RunState{DoneSlices: []string{"already-done"}}
 
 	var stdout strings.Builder
-	got := dispatchManifestIfPresent(cfg, &state, &stdout)
+	got, _, _ := dispatchManifestIfPresent(cfg, &state, &stdout)
 	if !got {
 		t.Fatalf("dispatchManifestIfPresent() = false, want true")
 	}
@@ -758,7 +758,7 @@ func TestDispatchManifestIfPresentSkipsLaunchWorkersWhenAllSlicesAlreadyDone(t *
 	}
 	state := runstate.RunState{DoneSlices: []string{"already-done"}}
 
-	got := dispatchManifestIfPresent(cfg, &state, io.Discard)
+	got, _, _ := dispatchManifestIfPresent(cfg, &state, io.Discard)
 	if !got {
 		t.Fatalf("dispatchManifestIfPresent() = false, want true")
 	}
@@ -933,7 +933,7 @@ func TestDispatchManifestIfPresentDispatchesAndMergesResults(t *testing.T) {
 	state := runstate.RunState{}
 
 	var stdout strings.Builder
-	got := dispatchManifestIfPresent(cfg, &state, &stdout)
+	got, _, _ := dispatchManifestIfPresent(cfg, &state, &stdout)
 	if !got {
 		t.Fatalf("dispatchManifestIfPresent() = false, want true")
 	}
@@ -951,6 +951,81 @@ func TestDispatchManifestIfPresentDispatchesAndMergesResults(t *testing.T) {
 		if !strings.Contains(state.WorkerFindings, want) {
 			t.Errorf("state.WorkerFindings = %q, want it to contain %q", state.WorkerFindings, want)
 		}
+	}
+}
+
+// TestDispatchManifestIfPresentReturnsCumulativeWorkerUsage verifies
+// dispatchManifestIfPresent sums every dispatched slice's own token/USD
+// usage into its returned workerTokens/workerUSD (issue #2694 review
+// finding): the budget cap's own motivating measurement names the worker
+// loop as the majority of a run's spend, so this dispatch's own contribution
+// must be visible to the caller's cumulative accumulator, not just each
+// slice's pass/fail outcome.
+func TestDispatchManifestIfPresentReturnsCumulativeWorkerUsage(t *testing.T) {
+	chdirToFreshWorkerRepo(t)
+
+	fakeDir := t.TempDir()
+	callLog := filepath.Join(fakeDir, "calls.log")
+	if err := os.WriteFile(callLog, nil, 0o644); err != nil {
+		t.Fatalf("WriteFile(callLog): %v", err)
+	}
+	body := `echo "worker log" > "$DRIVER_LOG_PATH"
+base=$(basename "$DRIVER_LOG_PATH")
+case "$base" in
+  alpha.log)
+    printf '%s' '` + streamJSONResultLine(100, 50, 1.0) + `' >> "$DRIVER_LOG_PATH"
+    : > "${DRIVER_LOG_PATH%.log}.done"
+    exit 0
+    ;;
+  beta.log)
+    printf '%s' '` + streamJSONResultLine(200, 25, 2.5) + `' >> "$DRIVER_LOG_PATH"
+    : > "${DRIVER_LOG_PATH%.log}.done"
+    exit 0
+    ;;
+esac
+`
+	writeFakeDriverExec(t, fakeDir, callLog, body)
+	t.Setenv("PATH", fakeDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	dir := t.TempDir()
+	manifest := SliceManifest{Slices: []ManifestSlice{
+		{Name: "alpha", Task: "implement seam a"},
+		{Name: "beta", Task: "implement seam b"},
+	}}
+	line, err := manifest.Line()
+	if err != nil {
+		t.Fatalf("Line() error = %v", err)
+	}
+	logPath := filepath.Join(dir, "stream.log")
+	content := streamJSONOutcomeLine(strings.TrimSpace(line))
+	if err := os.WriteFile(logPath, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	workerPromptFile := filepath.Join(dir, "worker-prompt.txt")
+	if err := os.WriteFile(workerPromptFile, []byte("BASE WORKER PROMPT"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config{
+		driver:           "claude",
+		logPath:          logPath,
+		workerPromptFile: workerPromptFile,
+		workerWorkDir:    t.TempDir(),
+		workerTimeout:    200 * time.Millisecond,
+	}
+	state := runstate.RunState{}
+
+	var stdout strings.Builder
+	got, workerTokens, workerUSD := dispatchManifestIfPresent(cfg, &state, &stdout)
+	if !got {
+		t.Fatalf("dispatchManifestIfPresent() = false, want true")
+	}
+	if wantTokens := 100 + 50 + 200 + 25; workerTokens != wantTokens {
+		t.Errorf("workerTokens = %d, want %d", workerTokens, wantTokens)
+	}
+	if wantUSD := 1.0 + 2.5; workerUSD != wantUSD {
+		t.Errorf("workerUSD = %v, want %v", workerUSD, wantUSD)
 	}
 }
 
@@ -1004,7 +1079,7 @@ exit 0
 	state := runstate.RunState{}
 
 	var stdout strings.Builder
-	got := dispatchManifestIfPresent(cfg, &state, &stdout)
+	got, _, _ := dispatchManifestIfPresent(cfg, &state, &stdout)
 	if !got {
 		t.Fatalf("dispatchManifestIfPresent() = false, want true")
 	}
@@ -1053,7 +1128,7 @@ func TestDispatchManifestIfPresentReportsCrashErrNotMisleadingExitCode(t *testin
 	state := runstate.RunState{}
 
 	var stdout strings.Builder
-	got := dispatchManifestIfPresent(cfg, &state, &stdout)
+	got, _, _ := dispatchManifestIfPresent(cfg, &state, &stdout)
 	if !got {
 		t.Fatalf("dispatchManifestIfPresent() = false, want true")
 	}
@@ -1115,7 +1190,7 @@ exit 0
 	state := runstate.RunState{}
 
 	var stdout strings.Builder
-	got := dispatchManifestIfPresent(cfg, &state, &stdout)
+	got, _, _ := dispatchManifestIfPresent(cfg, &state, &stdout)
 	if !got {
 		t.Fatalf("dispatchManifestIfPresent() = false, want true")
 	}
@@ -1192,7 +1267,7 @@ esac
 	state := runstate.RunState{}
 
 	var stdout strings.Builder
-	got := dispatchManifestIfPresent(cfg, &state, &stdout)
+	got, _, _ := dispatchManifestIfPresent(cfg, &state, &stdout)
 	if !got {
 		t.Fatalf("dispatchManifestIfPresent() = false, want true")
 	}
@@ -1287,7 +1362,7 @@ esac
 	state := runstate.RunState{}
 
 	var stdout strings.Builder
-	got := dispatchManifestIfPresent(cfg, &state, &stdout)
+	got, _, _ := dispatchManifestIfPresent(cfg, &state, &stdout)
 	if !got {
 		t.Fatalf("dispatchManifestIfPresent() = false, want true")
 	}
@@ -1406,7 +1481,7 @@ esac
 	state := runstate.RunState{}
 
 	var stdout strings.Builder
-	got := dispatchManifestIfPresent(cfg, &state, &stdout)
+	got, _, _ := dispatchManifestIfPresent(cfg, &state, &stdout)
 	if !got {
 		t.Fatalf("dispatchManifestIfPresent() = false, want true")
 	}
@@ -1539,7 +1614,7 @@ esac
 	state := runstate.RunState{}
 
 	var stdout strings.Builder
-	got := dispatchManifestIfPresent(cfg, &state, &stdout)
+	got, _, _ := dispatchManifestIfPresent(cfg, &state, &stdout)
 	if !got {
 		t.Fatalf("dispatchManifestIfPresent() = false, want true")
 	}
@@ -1635,7 +1710,7 @@ esac
 	state := runstate.RunState{}
 
 	var stdout strings.Builder
-	got := dispatchManifestIfPresent(cfg, &state, &stdout)
+	got, _, _ := dispatchManifestIfPresent(cfg, &state, &stdout)
 	if !got {
 		t.Fatalf("dispatchManifestIfPresent() = false, want true")
 	}
@@ -1731,7 +1806,7 @@ esac
 	state := runstate.RunState{}
 
 	var stdout strings.Builder
-	got := dispatchManifestIfPresent(cfg, &state, &stdout)
+	got, _, _ := dispatchManifestIfPresent(cfg, &state, &stdout)
 	if !got {
 		t.Fatalf("dispatchManifestIfPresent() = false, want true")
 	}
@@ -1828,7 +1903,7 @@ func TestDispatchManifestIfPresentSkipsBatchWhoseDependencyFailedToIntegrate(t *
 	state := runstate.RunState{}
 
 	var stdout strings.Builder
-	got := dispatchManifestIfPresent(cfg, &state, &stdout)
+	got, _, _ := dispatchManifestIfPresent(cfg, &state, &stdout)
 	if !got {
 		t.Fatalf("dispatchManifestIfPresent() = false, want true")
 	}
@@ -1927,7 +2002,7 @@ func TestDispatchManifestIfPresentReportsIntegrationFailedWithoutLosingDoneSlice
 	state := runstate.RunState{}
 
 	var stdout strings.Builder
-	got := dispatchManifestIfPresent(cfg, &state, &stdout)
+	got, _, _ := dispatchManifestIfPresent(cfg, &state, &stdout)
 	if !got {
 		t.Fatalf("dispatchManifestIfPresent() = false, want true")
 	}
@@ -2016,7 +2091,7 @@ func TestDispatchManifestIfPresentSkipsLaterSliceWhoseLeaseOverlapsFailedSlice(t
 	state := runstate.RunState{}
 
 	var stdout strings.Builder
-	got := dispatchManifestIfPresent(cfg, &state, &stdout)
+	got, _, _ := dispatchManifestIfPresent(cfg, &state, &stdout)
 	if !got {
 		t.Fatalf("dispatchManifestIfPresent() = false, want true")
 	}
@@ -2087,7 +2162,7 @@ func TestDispatchManifestIfPresentSkipsSliceDependingOnPersistedUnlandedSlice(t 
 		UnlandedSlices: []string{"long-gone"},
 	}
 
-	got := dispatchManifestIfPresent(cfg, &state, io.Discard)
+	got, _, _ := dispatchManifestIfPresent(cfg, &state, io.Discard)
 	if !got {
 		t.Fatalf("dispatchManifestIfPresent() = false, want true")
 	}

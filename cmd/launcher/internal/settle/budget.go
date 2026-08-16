@@ -14,7 +14,7 @@ import (
 // matching MaxFixAttempts' own 0-disables convention rather than a second
 // sentinel; the two dimensions are independent, so either can trip first.
 func budgetExceeded(cfg Config, u usage.Usage) (bool, string) {
-	tokens := u.InputTokens + u.OutputTokens + u.CacheReadInputTokens + u.CacheCreationInputTokens
+	tokens := u.TotalTokens()
 	var reasons []string
 	if cfg.MaxBudgetTokens > 0 && tokens >= cfg.MaxBudgetTokens {
 		reasons = append(reasons, fmt.Sprintf("%d tokens >= cap %d", tokens, cfg.MaxBudgetTokens))
