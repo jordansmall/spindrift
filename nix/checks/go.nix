@@ -41,9 +41,11 @@ in
   nix-fmt = pkgs.runCommand "nix-fmt" { nativeBuildInputs = [ pkgs.nixfmt ]; } ''
     nixfmt --check \
       ${../../flake.nix} \
+      ${../../lib/default-model-fixture.nix} \
       ${../../lib/env-schema.nix} \
       ${../../lib/flakeModule.nix} \
       ${../../lib/mkHarness.nix} \
+      ${../../lib/renderers.nix} \
       ${../fixtures.nix} \
       ${../../templates/default/flake.nix} \
       ${./default.nix} \
