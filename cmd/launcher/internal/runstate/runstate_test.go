@@ -257,16 +257,24 @@ func TestReadRunStateCorruptFileReturnsError(t *testing.T) {
 
 // TestRunStateIsEmpty verifies IsEmpty (issue #2552) reports true only for
 // the zero value, and false the moment any single field -- including
-// FindingsLogPath, the newest one -- carries a handoff.
+// PassSummaryPath, the newest implementor-facing one -- carries a handoff.
+// DoneSlices/RemainingSlices are deliberately absent from the non-empty
+// cases: they are dispatch-internal bookkeeping only (issue #2059's dedup
+// mechanism in orchestrator/dispatch.go), never rendered by
+// seedPromptFromState, so on their own they must not gate IsEmpty's only
+// caller into seeding a "Run-state handoff" block with no handoff to show
+// (issue #2549).
 func TestRunStateIsEmpty(t *testing.T) {
 	if !(RunState{}).IsEmpty() {
 		t.Error("IsEmpty() of the zero value = false, want true")
 	}
+	if !(RunState{DoneSlices: []string{"scout"}, RemainingSlices: []string{"land"}}).IsEmpty() {
+		t.Error("IsEmpty() of a state with only DoneSlices/RemainingSlices set = false, want true")
+	}
 	nonEmpty := []RunState{
-		{DoneSlices: []string{"scout"}},
-		{RemainingSlices: []string{"land"}},
 		{LastVerdict: "BLOCK"},
 		{ScoutBriefPath: "/tmp/brief.md"},
+		{PassSummaryPath: "/tmp/pass-summary.md"},
 		{ReviewFindings: "some finding"},
 		{WorkerFindings: "slice-a: done"},
 		{FindingsLogPath: "/tmp/findings.md"},
