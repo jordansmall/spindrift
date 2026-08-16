@@ -224,3 +224,37 @@ setup() {
   ! grep -q -- '--worker-work-dir' "$ORCHESTRATOR_LOG"
   ! grep -q -- '--worker-timeout' "$ORCHESTRATOR_LOG"
 }
+
+# Issue #2059, #2495: MAX_PARALLEL_WORKERS threads through to the
+# orchestrator's own --max-parallel-workers flag, mirroring REVIEW_EFFORT ->
+# --review-effort above. Like REVIEW_EFFORT, it has no Handoff descriptor
+# field -- it comes straight off the environment.
+@test "orchestrator path forwards MAX_PARALLEL_WORKERS to the orchestrator as --max-parallel-workers" {
+  export ORCHESTRATOR_ENABLED=1
+  export MAX_PARALLEL_WORKERS=4
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -q -- '--max-parallel-workers 4' "$ORCHESTRATOR_LOG"
+}
+
+# Without MAX_PARALLEL_WORKERS set, there's nothing to override the
+# orchestrator's own default with -- entrypoint.sh must omit
+# --max-parallel-workers entirely rather than pass it empty, mirroring the
+# --review-effort omit test above.
+@test "orchestrator path omits --max-parallel-workers when unset" {
+  export ORCHESTRATOR_ENABLED=1
+  unset MAX_PARALLEL_WORKERS
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  ! grep -q -- '--max-parallel-workers' "$ORCHESTRATOR_LOG"
+}
+
+# The --max-parallel-workers gate is on _driver_invoker = orchestrator -- the
+# direct driver-exec path declares no such flag and would hard-fail on it,
+# mirroring the --review-effort omit test above.
+@test "direct driver-exec path omits --max-parallel-workers even with MAX_PARALLEL_WORKERS set" {
+  export MAX_PARALLEL_WORKERS=4
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  ! grep -q -- '--max-parallel-workers' "$DRIVER_LOG"
+}
