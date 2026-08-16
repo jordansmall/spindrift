@@ -1011,6 +1011,21 @@ func TestFormatSpindriftOpRunStateError(t *testing.T) {
 	}
 }
 
+// TestFormatSpindriftOpDispositionsBudget verifies FormatSpindriftOp renders
+// a run_state_error op with phase "dispositions_budget" (issue #2550 AC9)
+// with its own wording, not "run-state dispositions_budget failed: ..." --
+// the tripwire is a loud, non-fatal budget notice, not a run-state read,
+// write, or append failure.
+func TestFormatSpindriftOpDispositionsBudget(t *testing.T) {
+	got := claude.FormatSpindriftOp("7", claude.SpindriftOp{Op: "run_state_error", Phase: "dispositions_budget", Error: "round 1 mean 283.0/entry (ceiling 40), total 283 tokens (ceiling 400)"})
+	if !strings.Contains(got, "dispositions budget: round 1 mean 283.0/entry (ceiling 40), total 283 tokens (ceiling 400)") {
+		t.Errorf("FormatSpindriftOp = %q, want it to contain %q", got, "dispositions budget: round 1 mean 283.0/entry (ceiling 40), total 283 tokens (ceiling 400)")
+	}
+	if strings.Contains(got, "run-state dispositions_budget failed") {
+		t.Errorf("FormatSpindriftOp = %q, must not render the budget tripwire as a run-state failure", got)
+	}
+}
+
 // TestFormatSpindriftOpPassNoOutcome verifies FormatSpindriftOp renders a
 // pass_no_outcome op (issue #2036) as a single status row naming the pass
 // number, with the last verdict seen (if any) named inline so an operator

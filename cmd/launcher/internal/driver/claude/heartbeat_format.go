@@ -150,7 +150,15 @@ func FormatSpindriftOp(issue string, op SpindriftOp) string {
 			sb.WriteString(sanitizeRole(op.Decision))
 		}
 	case "run_state_error":
-		fmt.Fprintf(&sb, "run-state %s failed: %s", sanitizeRole(op.Phase), sanitizeRole(op.Error))
+		// dispositions_budget (issue #2550 AC9) is a loud, non-fatal
+		// tripwire, not a run-state read/write/append failure -- render it
+		// with its own wording so the operator heartbeat doesn't misreport
+		// a budget notice as a failed disk operation.
+		if op.Phase == "dispositions_budget" {
+			fmt.Fprintf(&sb, "dispositions budget: %s", sanitizeRole(op.Error))
+		} else {
+			fmt.Fprintf(&sb, "run-state %s failed: %s", sanitizeRole(op.Phase), sanitizeRole(op.Error))
+		}
 	case "worker_start":
 		fmt.Fprintf(&sb, "worker %s started", sanitizeRole(op.Worker))
 	case "worker_finish":
