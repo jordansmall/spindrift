@@ -646,11 +646,15 @@ in
     env = "MAX_BUDGET_TOKENS";
     group = "dispatch";
     default = 0;
-    doc = "cumulative tokens across every attempt dispatched so far -- the initial run, every fix pass, and any retried attempt within each (issue #2575) -- before selfHealGate stops dispatching further fix passes (issue #2001); 0 disables the token budget cap";
+    doc = "cumulative tokens across every attempt dispatched so far -- the initial run, every fix pass, and any retried attempt within each (issue #2575) -- before selfHealGate stops dispatching further fix passes (issue #2001) and, forwarded into the Box, before the orchestrator's own review loop commits to a terminal land pass instead of a further BLOCK-triggered review round (issue #2694); 0 disables the token budget cap";
     flakeOption = true;
     intKind = "nonneg";
     nixSubPath = "budget.tokens";
-    boxEnv = false;
+    # Forwarded into the Box (issue #2694): the in-Box orchestrator's own
+    # review loop now also caps its cumulative token spend against this
+    # bound (entrypoint.sh forwards it as --max-budget-tokens), the same
+    # dial selfHealGate already gates its host-side fix-pass dispatch with.
+    boxEnv = true;
   };
   maxBudgetUSD = {
     # default is a float, not the bare int 0 (unlike every other numeric knob
@@ -663,10 +667,14 @@ in
     env = "MAX_BUDGET_USD";
     group = "dispatch";
     default = 0.0;
-    doc = "cumulative cost in USD across every attempt dispatched so far -- the initial run, every fix pass, and any retried attempt within each (issue #2575) -- before selfHealGate stops dispatching further fix passes (issue #2001); 0 disables the cost budget cap; give it as a quoted string in flake settings since it may be fractional, e.g. 4.44";
+    doc = "cumulative cost in USD across every attempt dispatched so far -- the initial run, every fix pass, and any retried attempt within each (issue #2575) -- before selfHealGate stops dispatching further fix passes (issue #2001) and, forwarded into the Box, before the orchestrator's own review loop commits to a terminal land pass instead of a further BLOCK-triggered review round (issue #2694); 0 disables the cost budget cap; give it as a quoted string in flake settings since it may be fractional, e.g. 4.44";
     flakeOption = true;
     nixSubPath = "budget.usd";
-    boxEnv = false;
+    # Forwarded into the Box (issue #2694): the in-Box orchestrator's own
+    # review loop now also caps its cumulative USD spend against this bound
+    # (entrypoint.sh forwards it as --max-budget-usd), the same dial
+    # selfHealGate already gates its host-side fix-pass dispatch with.
+    boxEnv = true;
   };
   preflightStaleBase = {
     env = "PREFLIGHT_STALE_BASE";

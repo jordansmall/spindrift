@@ -31,6 +31,8 @@ set_box_env() {
   export IN_PROGRESS_LABEL="agent-in-progress"
   export ISSUE_TRACKER="github"
   export LOCAL_ISSUE_REFERENCE=""
+  export MAX_BUDGET_TOKENS=0
+  export MAX_BUDGET_USD="0.000000"
   export MAX_PARALLEL_WORKERS=2
   export MAX_REBASE_ATTEMPTS=3
   export MODEL="claude-sonnet-5"
