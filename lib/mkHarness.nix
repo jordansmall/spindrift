@@ -301,6 +301,38 @@ let
   schemaDefaults = rosterSchemaDefaults.readSchemaDefaults { strict = false; } flakeOptionEntries;
   mergedDefaults = schemaDefaults // defaults;
 
+  # Eval-time choices guard (issue #2519 slice 2): lib/flakeModule.nix's
+  # generated Consumer options use `types.enum` for every schema knob
+  # declaring `choices`, but that only protects Consumers going through the
+  # flake module. A Consumer calling `mkHarness { defaults = {...}; }`
+  # directly (bypassing the flake module) could otherwise set an invalid
+  # choice value with no eval-time protection at all. Distinct from
+  # nix/checks/schema-drift.nix's schemaChoiceIssues/assertSchemaChoicesOk,
+  # which validate the *schema's own* choices shape/default/secret rules --
+  # this instead validates a *runtime* value (mergedDefaults, the resolved
+  # schema-default-overridden-by-Consumer-defaults value documentSettings
+  # below renders into the Launcher input document's JSON) against the
+  # schema's choices, at the one point every entry path (flake module or
+  # direct call) funnels through.
+  choiceViolations = lib.filter (issue: issue != null) (
+    lib.mapAttrsToList (
+      key: entry:
+      let
+        choices = entry.choices or null;
+        value = mergedDefaults.${key} or null;
+      in
+      if choices == null || value == null || lib.elem value choices then
+        null
+      else
+        "${entry.env or key}=\"${toString value}\" (valid: ${lib.concatStringsSep ", " choices})"
+    ) flakeOptionEntries
+  );
+  choicesCheckOk =
+    if choiceViolations == [ ] then
+      true
+    else
+      throw "mkHarness: invalid choice value(s) for ${lib.concatStringsSep "; " choiceViolations}";
+
   # Whether either backend knob selects forgejo (issue #1963): drives
   # lib/image.nix's fj (forgejo-cli) bake, so a github-backend Consumer's
   # image never carries an unused CLI.
@@ -1185,6 +1217,7 @@ else
   assert buildTimeRejectOk;
   assert forbiddenMarkerCheckOk;
   assert maxParallelWorkersCoherenceOk;
+  assert choicesCheckOk;
   lib.warnIf (legacyKnobsSet != [ ]) deprecationMsg {
     inherit
       image

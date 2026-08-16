@@ -3,7 +3,13 @@
 # settings example, man page) must stay in sync with its schema source.
 # Shares its renderers with `nix run .#regen` via lib/renderers.nix so the
 # guard and the regenerator can never drift from each other (issue #402).
-{ pkgs, fixtures, ... }:
+{
+  pkgs,
+  fixtures,
+  nixpkgs,
+  system,
+  ...
+}:
 let
   inherit (fixtures) harness;
   renderers = import ../../lib/renderers.nix;
@@ -514,6 +520,34 @@ in
     assert assertMsg (!result.success)
       "schema-secret-choices-guard: expected assertSchemaChoicesOk to reject the injected secret+choices fixture (jiraToken), but it evaluated successfully";
     pkgs.runCommand "schema-secret-choices-guard" { } "touch $out";
+
+  # Regression guard (issue #2519 slice 2): lib/flakeModule.nix's generated
+  # Consumer options use `types.enum` for every choices-bearing knob, but that
+  # only protects Consumers going through the flake module. A Consumer calling
+  # `mkHarness { defaults = {...}; }` directly (bypassing the flake module,
+  # e.g. fixtures.nix's `minimalDirect`/`harness`/etc. wiring, or a downstream
+  # flake-parts-free consumer) had no eval-time protection against an invalid
+  # choice value at all. Proves lib/mkHarness.nix itself rejects a
+  # direct-caller-supplied invalid `mergeMethod` (one of the 7 choice-bearing
+  # knobs named in lib/env-schema.nix), via tryEval so this fails
+  # independently of any real Consumer ever getting this wrong, and would
+  # also fail if the assert were ever dropped from mkHarness.nix.
+  mkharness-direct-choices-guard =
+    let
+      inherit (pkgs.lib) assertMsg;
+      result = builtins.tryEval (
+        import ../../lib/mkHarness.nix {
+          inherit nixpkgs system;
+          defaults = {
+            mergeMethod = "bogus-merge-method";
+          };
+          packages = p: [ p.hello ];
+        }
+      );
+    in
+    assert assertMsg (!result.success)
+      "mkharness-direct-choices-guard: expected mkHarness to reject a direct-caller `defaults.mergeMethod = \"bogus-merge-method\"` (not a member of lib/env-schema.nix's mergeMethod.choices), but it evaluated successfully";
+    pkgs.runCommand "mkharness-direct-choices-guard" { } "touch $out";
 
   # tests/helper.bash's set_box_env fixture must export every boxEnv = true
   # schema knob, so the entrypoint-*.bats suites exercise the same defaults the nix
