@@ -21,10 +21,16 @@ import (
 // re-scoped into a new prompt instead.
 type RunState struct {
 	// DoneSlices names each implementor slice that has already landed, in
-	// completion order.
+	// completion order. Dispatch-internal bookkeeping only (issue #2059's
+	// parallel worker dedup safety mechanism in orchestrator/dispatch.go,
+	// which skips re-dispatching a slice already present here) -- not part
+	// of the implementor-facing seeded-prompt handoff (issue #2549 retired
+	// its narrative render in favor of WorkerFindings' richer prose).
 	DoneSlices []string `json:"done_slices"`
 	// RemainingSlices names each implementor slice still to run, in the
-	// order the loop intends to take them.
+	// order the loop intends to take them. Dispatch-internal bookkeeping
+	// only, same as DoneSlices above -- not part of the implementor-facing
+	// seeded-prompt handoff (issue #2549).
 	RemainingSlices []string `json:"remaining_slices"`
 	// LastVerdict is the most recent reviewer verdict word (e.g. "APPROVE"
 	// or "BLOCK"), empty when no review has run yet.
@@ -78,9 +84,11 @@ type RunState struct {
 // otherwise open-codes its own all-fields-empty check (seedPromptFromState's
 // own check, before this method existed, was one such site).
 func (s RunState) IsEmpty() bool {
+	// DoneSlices/RemainingSlices are deliberately excluded: they are
+	// dispatch-internal bookkeeping only (issue #2059's dedup mechanism),
+	// not part of the implementor-facing seeded-prompt handoff, and are
+	// never rendered by seedPromptFromState (issue #2549).
 	return s.LastVerdict == "" &&
-		len(s.DoneSlices) == 0 &&
-		len(s.RemainingSlices) == 0 &&
 		s.ScoutBriefPath == "" &&
 		s.ReviewFindings == "" &&
 		s.WorkerFindings == "" &&
@@ -114,9 +122,9 @@ func ReadRunState(path string) (RunState, error) {
 //
 // It writes to a temp file in the same directory as path and renames it into
 // place, rather than truncating path directly: once the multi-pass loop
-// lands (S3+ of #1627), DoneSlices/RemainingSlices/LastVerdict carry real
-// handoff data between passes, and a kill mid-write (OOM, SIGKILL, host
-// preemption) against an in-place truncate would leave invalid JSON at path,
+// lands (S3+ of #1627), LastVerdict and friends carry real handoff data
+// between passes, and a kill mid-write (OOM, SIGKILL, host preemption)
+// against an in-place truncate would leave invalid JSON at path,
 // silently discarding a prior pass's progress. The temp-file-then-rename
 // pattern keeps a kill mid-write from ever producing a half-written file at
 // path: it either leaves the old valid file untouched (killed before rename)

@@ -2556,14 +2556,14 @@ func TestSeedPromptFromStateTerminalLandOverridesStopAfterCommit(t *testing.T) {
 	}
 }
 
-// TestRunSeedsFixBriefWithDoneWorkAndVerdictAfterBlock verifies AC2 (issue
-// #1999): after a scripted BLOCK, the next pass's own seeded prompt carries
-// the scoped fix brief -- both what is already done (a DoneSlices list this
-// fixture seeds into the run-state artifact up front, standing in for
-// whatever an earlier pass in the same run would have left behind) and the
-// verdict that triggered the fix pass -- not just the bare verdict word alone
-// (that narrower claim is #1998's own TestRunSeedsSubsequentPassPromptFromRunState).
-func TestRunSeedsFixBriefWithDoneWorkAndVerdictAfterBlock(t *testing.T) {
+// TestRunSeedsFixBriefWithVerdictAfterBlock verifies AC2 (issue #1999): after
+// a scripted BLOCK, the next pass's own seeded prompt carries the scoped fix
+// brief -- the verdict that triggered the fix pass -- not just running the
+// same static prompt on every pass (that narrower claim is #1998's own
+// TestRunSeedsSubsequentPassPromptFromRunState). The done/remaining-slices
+// narrative render this test used to also assert was retired by issue #2549:
+// state.WorkerFindings now carries that richer prose instead.
+func TestRunSeedsFixBriefWithVerdictAfterBlock(t *testing.T) {
 	dir := t.TempDir()
 	callLog := filepath.Join(dir, "calls.log")
 	writeFakeDriverExec(t, dir, callLog, blockThenApproveFakeDriverBody(callLog))
@@ -2575,7 +2575,7 @@ func TestRunSeedsFixBriefWithDoneWorkAndVerdictAfterBlock(t *testing.T) {
 	}
 
 	stateFile := filepath.Join(dir, "run-state.json")
-	if err := runstate.WriteRunState(stateFile, runstate.RunState{DoneSlices: []string{"scout", "implement seam A"}}); err != nil {
+	if err := runstate.WriteRunState(stateFile, runstate.RunState{}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -2612,7 +2612,7 @@ func TestRunSeedsFixBriefWithDoneWorkAndVerdictAfterBlock(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read seeded pass 2 prompt file: %v", err)
 	}
-	for _, want := range []string{"Done slices: scout, implement seam A", "Last reviewer verdict: BLOCK"} {
+	for _, want := range []string{"Last reviewer verdict: BLOCK"} {
 		if !strings.Contains(string(seeded), want) {
 			t.Errorf("pass 2 prompt = %q, want the scoped fix brief to carry %q", seeded, want)
 		}
