@@ -45,22 +45,6 @@ type backendRow struct {
 	// readOnlyGateOkMessage renders the doctor success line for this gate;
 	// nil iff readOnlyTokenGate is nil.
 	readOnlyGateOkMessage func(verified bool) string
-
-	// outboxRelayCapable is true for a backend whose CODE_FORGE selection
-	// gets the outbox mount/relay treatment under read-only today (issue
-	// #1918: "github" only). NOTE: forgejo also has its own read-only
-	// CodeForge constructor (NewReadOnlyForgejoCodeForge) but is NOT
-	// included in this today -- that's a pre-existing asymmetry in the
-	// current code (mount.go / dispatch/box.go's needsOutbox / the
-	// outcome-backstop switch all check CodeForge=="github" specifically,
-	// never "forgejo", for this one capability), and #2267 is explicitly
-	// behavior-preserving, so this field must reproduce that asymmetry
-	// (true for github, false for forgejo) rather than "fixing" it.
-	outboxRelayCapable bool
-	// inBoxUnreachableTracker is true only for a tracker with no in-box
-	// reachability at all (ADR 0032: "local"), gating the read-only
-	// /issues mount.
-	inBoxUnreachableTracker bool
 }
 
 // forgejoCodeForgeConfig builds the forgejo.ForgejoCodeForgeConfig shared by
@@ -109,8 +93,6 @@ var backendRows = []backendRow{
 			}
 			return "ok: read-only token gate satisfied — BOX_GH_TOKEN is set and distinct (see warning above: its write capability could not be verified)"
 		},
-
-		outboxRelayCapable: true,
 	},
 	{
 		Descriptor: backend.Forgejo,
@@ -146,8 +128,6 @@ var backendRows = []backendRow{
 		readOnlyGateOkMessage: func(_ bool) string {
 			return "ok: read-only token gate satisfied — BOX_FORGEJO_TOKEN is set and distinct (see warning above: its write capability could not be verified — Forgejo exposes no introspection endpoint)"
 		},
-
-		outboxRelayCapable: false,
 	},
 	{
 		Descriptor: backend.Jira,
@@ -195,8 +175,6 @@ var backendRows = []backendRow{
 		newCodeForge: func(c config, parent local.SanitizedParent, _ forge.IssueTracker) forge.CodeForge {
 			return local.NewLocalCodeForge(c.codeForgeAccumulationRepoDir, c.baseBranch, parent, c.gitUserName, c.gitUserEmail, c.branchPrefix)
 		},
-
-		inBoxUnreachableTracker: true,
 	},
 	{
 		Descriptor: backend.Git,
