@@ -41,6 +41,26 @@ const (
 	KindReview
 )
 
+// String returns the pass_start op's own Role field value for k --
+// "implement"/"fix"/"land"/"review" for the review loop's four pass kinds,
+// matching run.go's own pre-#2548 implRole string literals and its review
+// pass's literal "review" Role value, and "" for KindLegacy, which never
+// sets Role at all (the legacy single loop has no role concept).
+func (k PassKind) String() string {
+	switch k {
+	case KindImplement:
+		return "implement"
+	case KindFix:
+		return "fix"
+	case KindLand:
+		return "land"
+	case KindReview:
+		return "review"
+	default:
+		return ""
+	}
+}
+
 // Verdict is the reviewer verdict word scanned from a pass's own log, or
 // the empty string when the pass never produced one.
 type Verdict string

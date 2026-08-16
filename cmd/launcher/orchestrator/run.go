@@ -14,6 +14,7 @@ import (
 	"spindrift.dev/launcher/internal/driver/claude"
 	"spindrift.dev/launcher/internal/driver/driverkit"
 	"spindrift.dev/launcher/internal/outcome"
+	"spindrift.dev/launcher/internal/passmachine"
 	"spindrift.dev/launcher/internal/runstate"
 )
 
@@ -182,6 +183,55 @@ func overrideIfSet(dst *string, src string) {
 	}
 }
 
+// passOutcome is what the caller has already derived from this pass's own
+// log, before persisting -- passed to applyDecision.
+type passOutcome struct {
+	verdict passmachine.Verdict
+	// emitVerdictOp is true when this pass kind's own verdict is
+	// authoritative and non-empty.
+	emitVerdictOp bool
+	hasOutcome    bool
+	// checkHasOutcome is false for a review pass -- it never emits
+	// pass_no_outcome.
+	checkHasOutcome bool
+	// exitCode is rc, for pass_no_outcome's Reason field.
+	exitCode int
+	// pass is the 1-indexed pass count, for pass_no_outcome's Pass field.
+	pass int
+}
+
+// applyDecision is the one shared persist/emit helper (issue #2548)
+// replacing the four duplicated blocks in run() and runWithReviewPass(): it
+// emits the verdict/pass_no_outcome ops (if applicable), writes state to
+// disk, computes the Decision via passmachine.Transition, applies any
+// TerminalLand/CapFired mutation to state (for the NEXT pass's own write --
+// this pass's write above deliberately happens BEFORE that mutation,
+// preserving the original blocks' own write-before-decide order), and emits
+// the decision op.
+func applyDecision(cfg config, state *runstate.RunState, stdout io.Writer, out passOutcome, in passmachine.Input) passmachine.Decision {
+	if out.emitVerdictOp {
+		fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "verdict", Verdict: string(out.verdict)}))
+	}
+	if out.checkHasOutcome && !out.hasOutcome {
+		fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "pass_no_outcome", Pass: out.pass, Verdict: string(out.verdict), Reason: fmt.Sprintf("exit %d", out.exitCode)}))
+	}
+	if writeErr := runstate.WriteRunState(cfg.stateFile, *state); writeErr != nil {
+		fmt.Fprintln(os.Stderr, "orchestrator: write run state:", writeErr)
+		fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "run_state_error", Phase: "write", Error: writeErr.Error()}))
+	}
+	d := passmachine.Transition(in)
+	if d.SetTerminalLand {
+		state.TerminalLand = true
+		state.CapFired = d.CapFired
+	}
+	decisionStr := "continue"
+	if !d.Continue {
+		decisionStr = "stop"
+	}
+	fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "decision", Decision: decisionStr, Reason: d.Reason}))
+	return d
+}
+
 func run(cfg config, stdout io.Writer) (int, error) {
 	if cfg.reviewPromptFile != "" {
 		return runWithReviewPass(cfg, stdout)
@@ -225,7 +275,6 @@ func run(cfg config, stdout io.Writer) (int, error) {
 		verdict, hasOutcome := scanPassLog(cfg.logPath, cfg.driver)
 		if verdict != "" {
 			state.LastVerdict = verdict
-			fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "verdict", Verdict: verdict}))
 		}
 		// A pass that never printed a terminal SPINDRIFT_OUTCOME line is
 		// recorded on its own, distinct marker (issue #2036) -- whatever the
@@ -233,34 +282,27 @@ func run(cfg config, stdout io.Writer) (int, error) {
 		// or stop), so a mid-turn cutoff/park is visible for the exact pass
 		// it happened on, rather than only inferable from the run's own final
 		// decision reason once every pass is done.
-		if !hasOutcome {
-			fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "pass_no_outcome", Pass: pass, Verdict: verdict, Reason: fmt.Sprintf("exit %d", rc)}))
-		}
-		if writeErr := runstate.WriteRunState(cfg.stateFile, state); writeErr != nil {
-			fmt.Fprintln(os.Stderr, "orchestrator: write run state:", writeErr)
-			fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "run_state_error", Phase: "write", Error: writeErr.Error()}))
-		}
-
-		decision, reason := "continue", ""
-		switch {
-		case hasOutcome:
-			decision, reason = "stop", "outcome reached"
-		case verdict == "":
-			decision, reason = "stop", "no verdict"
-		case verdict != "BLOCK":
-			decision, reason = "stop", "verdict not BLOCK"
-		case cfg.maxSlices > 0 && pass >= cfg.maxSlices:
-			// The coarser backstop on top of every other cap (issue #1998):
-			// reaching it always hard-stops.
-			decision, reason = "stop", "max slices reached"
-		case cfg.maxReviewRounds > 0 && reviewRounds >= cfg.maxReviewRounds:
-			decision, reason = "stop", "max review rounds reached"
-		}
-		fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "decision", Decision: decision, Reason: reason}))
-		if decision == "stop" {
+		d := applyDecision(cfg, &state, stdout, passOutcome{
+			verdict:         passmachine.Verdict(verdict),
+			emitVerdictOp:   verdict != "",
+			hasOutcome:      hasOutcome,
+			checkHasOutcome: true,
+			exitCode:        rc,
+			pass:            pass,
+		}, passmachine.Input{
+			PassJustExecuted: passmachine.KindLegacy,
+			Verdict:          passmachine.Verdict(verdict),
+			HasOutcome:       hasOutcome,
+			Pass:             pass,
+			ReviewRounds:     reviewRounds,
+			Caps:             passmachine.Caps{MaxSlices: cfg.maxSlices, MaxReviewRounds: cfg.maxReviewRounds},
+		})
+		if !d.Continue {
 			break
 		}
-		reviewRounds++
+		if d.IncrementReviewRounds {
+			reviewRounds++
+		}
 	}
 
 	return rc, nil
@@ -306,12 +348,12 @@ func runWithReviewPass(cfg config, stdout io.Writer) (int, error) {
 	rc := 0
 	reviewRounds := 0
 	pass := 0
-	implRole := "implement"
+	passKind := passmachine.KindImplement
 	prevSeededPromptFile := ""
 	for {
 		// ---- implement/fix pass: cfg.promptFile, seeded from state ----
 		pass++
-		fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "pass_start", Pass: pass, Role: implRole}))
+		fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "pass_start", Pass: pass, Role: passKind.String()}))
 
 		var seededPromptFile string
 		rc, seededPromptFile, err = seedAndInvokePass(cfg, state, prevSeededPromptFile, pass, stdout)
@@ -344,86 +386,50 @@ func runWithReviewPass(cfg config, stdout io.Writer) (int, error) {
 		if !hasOutcome && !state.TerminalLand {
 			manifestDispatched = dispatchManifestIfPresent(cfg, &state, stdout)
 		}
-		if !hasOutcome {
-			fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "pass_no_outcome", Pass: pass, Reason: fmt.Sprintf("exit %d", rc)}))
-		}
-		if writeErr := runstate.WriteRunState(cfg.stateFile, state); writeErr != nil {
-			fmt.Fprintln(os.Stderr, "orchestrator: write run state:", writeErr)
-			fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "run_state_error", Phase: "write", Error: writeErr.Error()}))
-		}
-
-		decision, reason := "continue", ""
-		switch {
-		case hasOutcome:
-			decision, reason = "stop", "outcome reached"
-		// state.TerminalLand is already true only when this very pass WAS the
-		// terminal land pass a prior iteration of this loop committed to (see
-		// the cap case below) and it still produced no outcome. That bounds
-		// the mechanism at exactly one extra pass -- without this case the
-		// loop would keep re-entering the maxSlices case below forever, since
-		// TerminalLand alone doesn't stop it. Checking this before
-		// manifestDispatched below matters too: a coordinator that re-emits a
-		// manifest on that same extra pass must not re-extend the run past
-		// its one committed land pass (issue #2058 review).
-		case state.TerminalLand:
-			decision, reason = "stop", "terminal land pass reached no outcome"
-		// After an APPROVE verdict the land pass above runs exactly once (see
-		// the review decision block below): a land pass cut off before its
-		// own terminal SPINDRIFT_OUTCOME is recovered by the within-pass
-		// required_marker_gate session-resume nudge (issue #2044,
-		// agent/entrypoint.sh) inside that single land driver-exec, not by
-		// re-entering the review->land cycle here -- a fresh land pass would
-		// re-invoke the Filer / FILE ISSUES step on every extra lap,
-		// bounded only by the coarse maxSlices (issue #2069). This stop is
-		// the bound; it emits the existing decision op so an operator sees
-		// why the run ended.
-		case state.LastVerdict == "APPROVE":
-			decision, reason = "stop", "land pass reached no terminal outcome after APPROVE"
-		// Issue #2457: rather than exiting outcome-less the first time the
-		// coarse maxSlices budget runs out mid-cycle, commit this run to one
-		// more terminal "land" pass instead of stopping outright -- the case
-		// above is what actually bounds it to exactly one. This case must
-		// come before manifestDispatched below: the cap is a hard ceiling on
-		// total driver-exec invocations (issue #2457), and a coordinator that
-		// re-emits a slice manifest every single pass must not be able to
-		// keep matching manifestDispatched first forever and defeat it
-		// (issue #2058 review).
-		case cfg.maxSlices > 0 && pass >= cfg.maxSlices:
-			state.TerminalLand = true
-			state.CapFired = "max slices reached"
-			decision, reason = "continue", "max slices reached; running terminal land pass"
-		// A manifest dispatch keeps the loop going when none of the stop/cap
-		// cases above already fired this pass -- a pass that just dispatched
-		// workers isn't done yet regardless of what verdict state happens to
-		// be sitting around from a prior pass (issue #2059 AC1).
-		case manifestDispatched:
-			decision, reason = "continue", "slice manifest dispatched"
-		}
-		fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "decision", Decision: decision, Reason: reason}))
-		if decision == "stop" {
+		// A pass that never printed a terminal SPINDRIFT_OUTCOME line is
+		// recorded on its own, distinct marker (issue #2036) -- whatever the
+		// loop's decision below turns out to be (continue into a fresh pass,
+		// or stop), so a mid-turn cutoff/park is visible for the exact pass
+		// it happened on, rather than only inferable from the run's own final
+		// decision reason once every pass is done.
+		d := applyDecision(cfg, &state, stdout, passOutcome{
+			checkHasOutcome: true,
+			hasOutcome:      hasOutcome,
+			exitCode:        rc,
+			pass:            pass,
+		}, passmachine.Input{
+			PassJustExecuted:   passKind,
+			HasOutcome:         hasOutcome,
+			Pass:               pass,
+			Caps:               passmachine.Caps{MaxSlices: cfg.maxSlices, MaxReviewRounds: cfg.maxReviewRounds},
+			TerminalLand:       state.TerminalLand,
+			LastVerdict:        passmachine.Verdict(state.LastVerdict),
+			ManifestDispatched: manifestDispatched,
+		})
+		if !d.Continue {
 			break
 		}
-		if manifestDispatched {
+		switch d.NextPass {
+		case passmachine.KindFix:
 			// A manifest-dispatch pass's only job was to declare the
 			// manifest and stop (issue #2059 AC1) -- there is nothing yet
 			// for a review pass to review, so the next pass is another
 			// implement/fix pass, seeded with state.WorkerFindings above.
-			implRole = "fix"
+			passKind = passmachine.KindFix
 			continue
-		}
-		if state.TerminalLand {
+		case passmachine.KindLand:
 			// The cap already used up this run's budget -- skip the review
 			// pass this iteration entirely rather than spending one more
 			// driver-exec invocation on it; the loop's own bound (the
 			// state.TerminalLand case above) guarantees this land pass is
 			// the run's last one regardless of what it finds.
-			implRole = "land"
+			passKind = passmachine.KindLand
 			continue
 		}
 
 		// ---- review pass: cfg.reviewPromptFile, always a fresh session ----
 		pass++
-		fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "pass_start", Pass: pass, Role: "review"}))
+		fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "pass_start", Pass: pass, Role: passmachine.KindReview.String()}))
 
 		reviewCfg := cfg
 		reviewCfg.promptFile = cfg.reviewPromptFile
@@ -445,21 +451,15 @@ func runWithReviewPass(cfg config, stdout io.Writer) (int, error) {
 		reviewVerdict, findings := scanReviewLog(cfg.logPath, cfg.driver)
 		if reviewVerdict != "" {
 			state.LastVerdict = reviewVerdict
-			fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "verdict", Verdict: reviewVerdict}))
 		}
 		state.ReviewFindings = findings
-		if writeErr := runstate.WriteRunState(cfg.stateFile, state); writeErr != nil {
-			fmt.Fprintln(os.Stderr, "orchestrator: write run state:", writeErr)
-			fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "run_state_error", Phase: "write", Error: writeErr.Error()}))
-		}
 
 		// An APPROVE verdict deliberately falls through to "continue" here
 		// (none of the cases below matches it), entering the land pass at
 		// the top of the loop exactly once -- see the land-block comment
 		// above for why that single land pass is terminal on APPROVE (issue
 		// #2069).
-		decision, reason = "continue", ""
-		switch {
+		//
 		// Issue #2457: a review pass that never resolved into a verdict at
 		// all (a malfunctioning/truncated review session), the coarse
 		// maxSlices backstop, and the maxReviewRounds cap all used to stop
@@ -471,31 +471,24 @@ func runWithReviewPass(cfg config, stdout io.Writer) (int, error) {
 		// state.TerminalLand case (already true by the time this land pass's
 		// own iteration reaches it) is what actually bounds this to exactly
 		// one extra pass.
-		case reviewVerdict == "":
-			state.TerminalLand = true
-			state.CapFired = "no verdict"
-			decision, reason = "continue", "no verdict; running terminal land pass"
-		case cfg.maxSlices > 0 && pass >= cfg.maxSlices:
-			state.TerminalLand = true
-			state.CapFired = "max slices reached"
-			decision, reason = "continue", "max slices reached; running terminal land pass"
-		case reviewVerdict == "BLOCK" && cfg.maxReviewRounds > 0 && reviewRounds >= cfg.maxReviewRounds:
-			state.TerminalLand = true
-			state.CapFired = "max review rounds reached"
-			decision, reason = "continue", "max review rounds reached; running terminal land pass"
-		}
-		fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "decision", Decision: decision, Reason: reason}))
-		if decision == "stop" {
+		d = applyDecision(cfg, &state, stdout, passOutcome{
+			verdict:       passmachine.Verdict(reviewVerdict),
+			emitVerdictOp: reviewVerdict != "",
+		}, passmachine.Input{
+			PassJustExecuted: passmachine.KindReview,
+			Verdict:          passmachine.Verdict(reviewVerdict),
+			Pass:             pass,
+			ReviewRounds:     reviewRounds,
+			Caps:             passmachine.Caps{MaxSlices: cfg.maxSlices, MaxReviewRounds: cfg.maxReviewRounds},
+			TerminalLand:     state.TerminalLand,
+		})
+		if !d.Continue {
 			break
 		}
-		if reviewVerdict == "BLOCK" {
+		if d.IncrementReviewRounds {
 			reviewRounds++
 		}
-		if state.TerminalLand {
-			implRole = "land"
-		} else {
-			implRole = "fix"
-		}
+		passKind = d.NextPass
 	}
 
 	return rc, nil
