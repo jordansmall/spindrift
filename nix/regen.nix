@@ -8,9 +8,11 @@
 # cmd/launcher/internal/backend/registry_gen.go,
 # tests/box_env_gen.bash, tests/default_models_gen.bash,
 # cmd/launcher/defaultmodels_gen_test.go, the generated section of
-# templates/default/flake.nix's commented-out `settings` example, and the
-# generated section of docs/reference.md's Default models table, from their
-# respective Nix sources, and writes them into the working tree. Calls the
+# templates/default/flake.nix's commented-out `settings` example, the
+# generated section of docs/reference.md's Default models table, and the
+# generated `models` sub-block of docs/reference.md's `settings = { ... }`
+# example, from their respective Nix sources, and writes them into the
+# working tree. Calls the
 # exact same renderers as the nix/checks.nix drift guards (lib/renderers.nix),
 # so resolving a source-edit conflict is: fix the Nix source, run this, commit.
 #
@@ -56,6 +58,7 @@ let
   defaultModelFixtureBash = renderers.renderDefaultModelFixtureBash defaultModelFixture;
   defaultModelFixtureGo = renderers.renderDefaultModelFixtureGo defaultModelFixture;
   defaultModelsDoc = renderers.renderDefaultModelsDoc defaultModelFixture;
+  settingsExampleModelsDoc = renderers.renderSettingsExampleModelsDoc defaultModelFixture;
   inherit (pkgs.lib) escapeShellArg;
 in
 pkgs.writeShellApplication {
@@ -124,5 +127,9 @@ pkgs.writeShellApplication {
       ${escapeShellArg "<!-- BEGIN GENERATED DEFAULT MODELS -- nix run .#regen -- DO NOT EDIT -->"} \
       ${escapeShellArg "<!-- END GENERATED DEFAULT MODELS -->"} \
       ${escapeShellArg defaultModelsDoc}
+    write_between docs/reference.md \
+      ${escapeShellArg "  # BEGIN GENERATED SETTINGS EXAMPLE MODELS -- nix run .#regen -- DO NOT EDIT"} \
+      ${escapeShellArg "  # END GENERATED SETTINGS EXAMPLE MODELS"} \
+      ${escapeShellArg settingsExampleModelsDoc}
   '';
 }

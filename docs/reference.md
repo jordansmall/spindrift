@@ -126,10 +126,12 @@ settings = {
                       mergeGuardPaths = ".github/**,.forgejo/**,**/CLAUDE.md,**/AGENTS.md,.claude/**,.opencode/**";
                       mergePollInterval = 30; mergePollTimeout = 1800; };
   concurrency     = { maxParallel = 3; maxJobs = 0; };
+  # BEGIN GENERATED SETTINGS EXAMPLE MODELS -- nix run .#regen -- DO NOT EDIT
   models          = { model = "claude-sonnet-5";
                       scoutModel  = "claude-haiku-4-5-20251001";
                       reviewModel = "claude-opus-5";
                       filerModel  = ""; };
+  # END GENERATED SETTINGS EXAMPLE MODELS
   sandbox         = { devShellName = "default"; devShellProbeTimeout = 300;
                       memoryLimit = "5g"; pidsLimit = "512";
                       podmanNetwork = ""; bwrapUnshareNet = ""; };
