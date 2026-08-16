@@ -495,14 +495,10 @@ rec {
   # registries have different scoping semantics (forbiddenMarkers is
   # exclusively boxAccessReadOnly-scoped -- every row's `when` is that one
   # literal -- while this registry is role-scoped, keyed on the "worker"
-  # roster entry, with no `when`/boxAccessReadOnly gating concept at all),
-  # and nix/checks/prompt-contract.nix pins forbiddenMarkers' exact row
-  # count, id order, and per-row `when`/`carrier`/`severity` values for that
-  # unrelated boxAccessReadOnly purpose -- appending rows here would corrupt
-  # that pin. This registry is intentionally a lighter shape than
-  # forbiddenMarkers: no carrier/kind/enforce fields, since the worker role
-  # has no "read-only Box" runtime shim mechanism for those fields to
-  # describe.
+  # roster entry, with no `when`/boxAccessReadOnly gating concept at all).
+  # This registry is intentionally a lighter shape than forbiddenMarkers: no
+  # carrier/kind/enforce fields, since the worker role has no "read-only
+  # Box" runtime shim mechanism for those fields to describe.
   #
   # Data-only, same as the other three registries, but for a different
   # reason: cmd/launcher/internal/promptassembly/validate.go's Validate
