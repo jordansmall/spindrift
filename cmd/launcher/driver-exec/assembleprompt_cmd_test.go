@@ -107,9 +107,11 @@ func TestRunAssemblePrompt_CoveredCellWritesOutputs(t *testing.T) {
 }
 
 // TestRunAssemblePrompt_UnsupportedCellReturnsNonZero verifies an Env
-// outside promptassembly.Assemble's covered cell (here, an issue tracker
-// value that is none of github/jira/local/forgejo, issue #2352) is reported
-// as a CLI failure, not a panic.
+// outside promptassembly.Assemble's covered cell (here, a dispatch kind
+// value that is neither "work" nor "research" -- the one axis
+// checkCoveredCell still validates as of issue #2540, since it has no
+// eval-time or launcher-side guard the way IssueTracker/CodeForge do) is
+// reported as a CLI failure, not a panic.
 func TestRunAssemblePrompt_UnsupportedCellReturnsNonZero(t *testing.T) {
 	dir := t.TempDir()
 	promptOutput := filepath.Join(dir, "prompt.txt")
@@ -118,8 +120,8 @@ func TestRunAssemblePrompt_UnsupportedCellReturnsNonZero(t *testing.T) {
 
 	args := coveredCellArgs(t, promptOutput, agentsJSONOutput, handoffOutput)
 	for i, a := range args {
-		if a == "github" && args[i-1] == "--issue-tracker" {
-			args[i] = "bogus-tracker"
+		if a == "work" && args[i-1] == "--dispatch-kind" {
+			args[i] = "bogus-kind"
 		}
 	}
 

@@ -12,11 +12,13 @@ import (
 )
 
 // ErrUnsupportedCell marks an Env combination Assemble does not know how to
-// render: an unrecognized IssueTracker, CodeForge, or DispatchKind value —
-// see checkCoveredCell for the exact set each is checked against. Every
-// other axis (orchestrator on/off, dispatch-kind/fix-pass, per-skill baked
-// flags, access/forge) is handled by Assemble's own logic regardless of how
-// the others are set, so no combination of them is rejected here.
+// render: an unrecognized DispatchKind value — see checkCoveredCell for the
+// exact set it is checked against. IssueTracker and CodeForge are covered
+// upstream (see checkCoveredCell's doc comment) and no longer re-validated
+// here. Every other axis (orchestrator on/off, dispatch-kind/fix-pass,
+// per-skill baked flags, access/forge) is handled by Assemble's own logic
+// regardless of how the others are set, so no combination of them is
+// rejected here.
 var ErrUnsupportedCell = errors.New("promptassembly: env combination not covered by Assemble")
 
 // Result is Assemble's rendered output: the final prompt text, the
@@ -76,20 +78,21 @@ type Handoff struct {
 }
 
 // checkCoveredCell validates that e sits in one of Assemble's covered Env
-// cells. Three axes are checked against a fixed allowlist, since each
-// value takes a genuinely different code path (or is simply invalid/
-// typo'd) and an unrecognized one is a real "Assemble doesn't know how to
-// render this" case:
+// cells. Only DispatchKind is checked here, against a fixed allowlist of
+// "work" (explicit or default) or "research" -- an unrecognized value is a
+// real "Assemble doesn't know how to render this" case, and DispatchKind
+// has no schema entry to guard it upstream: it is set programmatically at
+// runtime by applyDispatchKind (cmd/launcher/main.go), never eval-asserted.
 //
-//   - IssueTracker one of "github" (explicit or default), "jira", "local",
-//     or "forgejo" (issue #2352 -- see gates_tracker.go's issueTrackerAxis
-//     for how each maps onto its gate-family suffixes).
-//   - CodeForge (explicitly or by default) one of "github", "git", "local",
-//     or "forgejo" (issue #2354 -- gates_access_forge.go's Gates() already
-//     treats github/git/local identically, "only forgejo diverges from the
-//     shared gh-flavored path"; checkCoveredCell's allowlist mirrors that,
-//     not just github/forgejo).
-//   - DispatchKind (explicitly or by default) one of "work" or "research".
+// IssueTracker and CodeForge used to be re-validated here too, but that
+// duplicated two guarantees that already hold before Assemble ever runs, so
+// their arms were deleted (issue #2540):
+//
+//   - lib/mkHarness.nix's `assert choicesCheckOk;` eval-time assert
+//     (backed by the choices-guard block) validates both fields' schema
+//     `choices` (lib/env-schema.nix) at build time.
+//   - cmd/launcher/main.go's validate() re-checks both at launcher startup
+//     via trackerRow.ValidAsTracker and codeForgeRow.ValidAsCodeForge.
 //
 // Every other axis -- the orchestrator flag, FixPass, the four per-skill
 // baked flags, BoxWriteEnabled -- is handled by Assemble's own rendering
@@ -104,28 +107,6 @@ type Handoff struct {
 // fresh-work-dispatch path regardless of the orchestrator flag (see
 // Handoff's doc comment).
 func checkCoveredCell(e Env) error {
-	tracker := e.IssueTracker
-	if tracker == "" {
-		tracker = defaultIssueTracker
-	}
-	switch tracker {
-	case defaultIssueTracker, "jira", "local", "forgejo":
-		// covered
-	default:
-		return fmt.Errorf("issue tracker %q: %w", e.IssueTracker, ErrUnsupportedCell)
-	}
-
-	forge := e.CodeForge
-	if forge == "" {
-		forge = defaultCodeForge
-	}
-	switch forge {
-	case defaultCodeForge, "git", "local", "forgejo":
-		// covered
-	default:
-		return fmt.Errorf("code forge %q: %w", e.CodeForge, ErrUnsupportedCell)
-	}
-
 	kind := e.DispatchKind
 	if kind == "" {
 		kind = defaultDispatchKind
