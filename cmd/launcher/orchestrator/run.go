@@ -416,9 +416,7 @@ func runWithReviewPass(cfg config, stdout io.Writer) (int, error) {
 		// review pass below -- an implement/fix/land pass's own contribution
 		// must be folded in here, before the next pass's driver-exec
 		// invocation truncates cfg.logPath out from under it (issue #2694).
-		pu := passUsage(cfg.logPath, cfg.driver)
-		cumulativeTokens += pu.InputTokens + pu.OutputTokens + pu.CacheReadInputTokens + pu.CacheCreationInputTokens
-		cumulativeUSD += pu.TotalCostUSD
+		addPassUsage(&cumulativeTokens, &cumulativeUSD, passUsage(cfg.logPath, cfg.driver))
 		// dispatchManifestIfPresent (which calls LaunchWorkers and blocks for
 		// up to the full worker timeout) must never fire on a pass that has
 		// already reached a terminal outcome, nor on the already-committed
@@ -432,7 +430,16 @@ func runWithReviewPass(cfg config, stdout io.Writer) (int, error) {
 		// sets it for THIS pass later, after this call already ran.
 		manifestDispatched := false
 		if !hasOutcome && !state.TerminalLand {
-			manifestDispatched = dispatchManifestIfPresent(cfg, &state, stdout)
+			var workerTokens int
+			var workerUSD float64
+			manifestDispatched, workerTokens, workerUSD = dispatchManifestIfPresent(cfg, &state, stdout)
+			// Dispatched-worker spend counts toward the same budget cap as
+			// every other pass's own (issue #2694) -- the issue's own
+			// motivating measurement names the worker/reviewer loop as the
+			// majority of a run's spend, so leaving it out here would defeat
+			// the cap for exactly the spend it exists to bound.
+			cumulativeTokens += workerTokens
+			cumulativeUSD += workerUSD
 		}
 		// A pass that never printed a terminal SPINDRIFT_OUTCOME line is
 		// recorded on its own, distinct marker (issue #2036) -- whatever the
@@ -512,9 +519,7 @@ func runWithReviewPass(cfg config, stdout io.Writer) (int, error) {
 		// contribution in here, the same as the implement/fix/land block's
 		// own call above, before this pass's cfg.logPath is truncated by
 		// the next invocation (issue #2694).
-		pu = passUsage(cfg.logPath, cfg.driver)
-		cumulativeTokens += pu.InputTokens + pu.OutputTokens + pu.CacheReadInputTokens + pu.CacheCreationInputTokens
-		cumulativeUSD += pu.TotalCostUSD
+		addPassUsage(&cumulativeTokens, &cumulativeUSD, passUsage(cfg.logPath, cfg.driver))
 		if reviewVerdict != "" {
 			state.LastVerdict = reviewVerdict
 		}
@@ -836,13 +841,33 @@ func scanReviewLog(logPath, driverName string) (verdict, findings string) {
 func passUsage(logPath, driverName string) usage.Usage {
 	d, err := driver.New(driverName)
 	if err != nil {
+		fmt.Fprintln(os.Stderr, "orchestrator: budget usage: resolve driver:", err)
 		return usage.Usage{}
 	}
 	r, err := d.ExtractUsage(logPath)
-	if err != nil || !r.Found {
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "orchestrator: budget usage: extract usage:", err)
+		return usage.Usage{}
+	}
+	if !r.Found {
+		// No result event in this pass's own log -- an ordinary outcome (a
+		// pass cut short before completion), not an error, so this degrades
+		// silently like dispatch.UsageReport's own "usage data unavailable"
+		// case rather than logging.
 		return usage.Usage{}
 	}
 	return r.Totals
+}
+
+// addPassUsage folds one pass's own usage.Usage into the running
+// cumulativeTokens/cumulativeUSD totals (issue #2694) -- the single place
+// the four-token-category sum happens, shared by every call site in this
+// loop (implement/fix/land pass and review pass; dispatchManifestIfPresent's
+// own pre-summed worker totals are added directly by its caller instead,
+// since it already returns ints/floats rather than a usage.Usage).
+func addPassUsage(cumulativeTokens *int, cumulativeUSD *float64, u usage.Usage) {
+	*cumulativeTokens += u.TotalTokens()
+	*cumulativeUSD += u.TotalCostUSD
 }
 
 // appendFindingsLogRound appends round's own review findings to the per-run
