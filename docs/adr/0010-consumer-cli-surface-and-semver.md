@@ -140,3 +140,8 @@ guarantee.
 - The flake option surface `perSystem.spindrift.defaults.*` was replaced by
   `perSystem.spindrift.settings.<section>.<knob>` (ADR 0015). This is a MINOR
   bump under the pre-1.0 policy; no external consumers existed at migration time.
+- **Note (issue #2529):** `mkHarness`'s return value carries a named
+  `internals` attrset holding every check-only output (build/run fixtures,
+  contract files, `driverExecBin`, `roster`, …). That attrset sits outside
+  this ADR's versioned Consumer surface, same as `cmd/launcher/internal/*` —
+  only `image`, `spindrift`, `packages`, and `apps` are the contract.

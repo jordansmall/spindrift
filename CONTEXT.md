@@ -816,3 +816,12 @@ The launcher's detection that a PR was merged by an actor other than itself
 while the issue was `InProgress` — evidence the Agent (or someone else) merged
 around the gate. Detection only, no prevention; surfaces for human triage.
 _Avoid_: audit, alert, monitor.
+
+**internals**:
+`mkHarness`'s return-value attrset holding every check-only output (build/run
+fixtures, contract files, `driverExecBin`, `roster`, …) — the counterpart to
+the Consumer-facing `image`/`spindrift`/`packages`/`apps` keys. The versioned
+Consumer contract (ADR 0010) scopes to that small Consumer surface;
+`internals` sits outside it and is free to churn, the nix-attrset analogue of
+`cmd/launcher/internal/*` (issue #2529).
+_Avoid_: private outputs, test outputs.
