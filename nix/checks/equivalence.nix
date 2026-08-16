@@ -456,6 +456,39 @@ in
         touch $out
       '';
 
+  # ADR 0037 (issue #2522): the 13 flat legacy shim options (oldFlatShims) must
+  # be GENERATED from the same single hand-written structuralOptions
+  # declaration as the domain-tree entries, not hand-copied — the shim's
+  # description is a one-line auto-generated rename pointer (not the
+  # domain-tree option's own doc text, which was the pre-#2522 verbatim
+  # copy). Pins the generated shape via one representative knob (driver) so a
+  # future hand-copy regression is caught at eval time.
+  flakemodule-legacy-shim-description-generated =
+    let
+      eval =
+        flake-parts.lib.evalFlakeModule
+          {
+            inputs = {
+              inherit nixpkgs;
+              self = {
+                outPath = ../../.;
+              };
+            };
+          }
+          {
+            systems = [ system ];
+            imports = [ ../../lib/flakeModule.nix ];
+          };
+      actual = (eval.options.perSystem.type.getSubOptions [ "perSystem" ]).spindrift.driver.description;
+      expected = "perSystem.spindrift.driver is deprecated; use perSystem.spindrift.agents.driver.";
+    in
+    pkgs.runCommand "flakemodule-legacy-shim-description-generated" { } (
+      if actual == expected then
+        "touch $out"
+      else
+        throw "oldFlatShims.driver.description mismatch: got `${actual}`, want `${expected}`"
+    );
+
   # Promoted operator-tunable knobs (issue #353): the 13 newly consumer-tunable
   # knobs appear under their correct settings section and bake the expected
   # ${VAR:-<baked>} default into the generated run command.  Covers at least one

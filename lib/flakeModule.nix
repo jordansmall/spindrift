@@ -180,341 +180,195 @@ let
     opt = mkKnobOption key entry;
   }) flakeOptionEntries;
 
-  # Structural leaves: hand-placed at their new domain-tree path (slice 2's
-  # placement map), carrying the SAME real mkOption definition (type,
-  # default, description) the flat option had before this slice.
-  structuralTreeEntries = [
-    {
-      path = structuralPlacements.driver;
-      opt = mkOption {
-        # A plain string, not `types.enum`, so the lib/drivers/ registry (not
-        # this option) stays the single source of truth for valid names —
-        # mkHarness.nix throws at eval time on a name absent from the
-        # registry (ADR 0009).
-        type = types.nullOr types.str;
-        default = null;
-        description = "The agent CLI Driver (ADR 0009): a build-time choice selecting one entry from the lib/drivers/ registry, baked into the image and threaded to the launcher as DRIVER. \"claude\" is the only Driver today.";
-      };
-    }
-    {
-      path = structuralPlacements.prompt;
-      opt = mkOption {
-        type = types.nullOr types.lines;
-        default = null;
-        description = "Agent prompt template baked into the image; changing it requires an image rebuild. Set SPINDRIFT_PROMPT_DIR at runtime to override without a rebuild.";
-      };
-    }
-    {
-      path = structuralPlacements.skills;
-      opt = mkOption {
-        type = types.nullOr (
-          types.listOf (
-            types.either types.path (
-              types.submodule {
-                options = {
-                  name = mkOption {
-                    type = types.str;
-                    description = "Skill (directory) name; baked as <name>/SKILL.md.";
-                  };
-                  src = mkOption {
-                    type = types.str;
-                    description = "SKILL.md body, re-realized with the image's own Linux pkgs.";
-                  };
+  # Structural knobs: the ONE hand-written mkOption definition (type,
+  # default, description) per structural knob (issue #2522), keyed by its
+  # flat (legacy, == mkHarness arg) name — the same keys as
+  # structuralPlacements below. Both the domain-tree leaf
+  # (structuralTreeEntries) and the flat legacy shim (oldFlatShims) are
+  # generated from this single declaration, so there is no longer a
+  # hand-copy to keep in sync between the two surfaces.
+  structuralOptions = {
+    driver = mkOption {
+      # A plain string, not `types.enum`, so the lib/drivers/ registry (not
+      # this option) stays the single source of truth for valid names —
+      # mkHarness.nix throws at eval time on a name absent from the
+      # registry (ADR 0009).
+      type = types.nullOr types.str;
+      default = null;
+      description = "The agent CLI Driver (ADR 0009): a build-time choice selecting one entry from the lib/drivers/ registry, baked into the image and threaded to the launcher as DRIVER. \"claude\" is the only Driver today.";
+    };
+
+    prompt = mkOption {
+      type = types.nullOr types.lines;
+      default = null;
+      description = "Agent prompt template baked into the image; changing it requires an image rebuild. Set SPINDRIFT_PROMPT_DIR at runtime to override without a rebuild.";
+    };
+
+    skills = mkOption {
+      type = types.nullOr (
+        types.listOf (
+          types.either types.path (
+            types.submodule {
+              options = {
+                name = mkOption {
+                  type = types.str;
+                  description = "Skill (directory) name; baked as <name>/SKILL.md.";
                 };
-              }
-            )
+                src = mkOption {
+                  type = types.str;
+                  description = "SKILL.md body, re-realized with the image's own Linux pkgs.";
+                };
+              };
+            }
           )
-        );
-        default = null;
-        description = "Skills baked into the image at /home/agent/.claude/skills. Each is baked as a <name>/SKILL.md directory — the only layout Claude Code discovers (a flat <name>.md is ignored). An element is a path to a skill directory, or a { name; src; } content entry (name + SKILL.md body) realized with the image's Linux pkgs (issue #597). SPINDRIFT_SKILLS_DIR at runtime mounts over the same path and takes precedence.";
+        )
+      );
+      default = null;
+      description = "Skills baked into the image at /home/agent/.claude/skills. Each is baked as a <name>/SKILL.md directory — the only layout Claude Code discovers (a flat <name>.md is ignored). An element is a path to a skill directory, or a { name; src; } content entry (name + SKILL.md body) realized with the image's Linux pkgs (issue #597). SPINDRIFT_SKILLS_DIR at runtime mounts over the same path and takes precedence.";
+    };
+
+    roster = mkOption {
+      type = types.nullOr (types.listOf types.attrs);
+      default = null;
+      description = ''
+        The first-class N-agent roster (issue #264, lib/roster.nix): a list of
+        `{ name; model; effort; mode; description; tools; promptFile; prompt }`
+        attrsets that both Drivers render subagents from, replacing the four
+        hardcoded scout/reviewer/filer/worker model knobs. An explicit
+        `roster` always wins over the legacy per-agent model knobs
+        (scoutModel/reviewModel/filerModel/workerModel), the same precedence
+        `mkHarness.nix` applies to a raw call. Untyped (`types.attrs`
+        elements, not a submodule) so the forwarded list matches the
+        Consumer's input verbatim, byte-for-byte, with no default-injection.
+        `effort` (issue #2242) is an optional pass-through, driver-specific
+        effort/reasoning-level string: the claude Driver emits it as the
+        `effort` key in the agent's `--agents` JSON entry, the opencode
+        Driver as the `reasoningEffort` key in the agent-file frontmatter;
+        omitted entirely when not set.
+      '';
+    };
+
+    runtime = mkOption {
+      type = types.nullOr (
+        types.enum [
+          "podman"
+          "docker"
+          "rancher"
+          "bwrap"
+        ]
+      );
+      default = null;
+      description = "Runner the launcher commands drive: OCI runtimes (podman/docker/rancher, the last an alias for Rancher Desktop's nerdctl) or the daemonless bubblewrap runner (bwrap, Linux-only).";
+    };
+
+    packages = mkOption {
+      type = types.nullOr (types.functionTo (types.listOf types.package));
+      default = null;
+      description = "Project tools baked into the image, as a function of the (Linux) pkgs.";
+    };
+
+    prefetch = mkOption {
+      type = types.nullOr types.lines;
+      default = null;
+      description = "Shell snippet the entrypoint runs after cloning to warm caches.";
+    };
+
+    extraClosures = mkOption {
+      type = types.nullOr (types.functionTo (types.listOf types.package));
+      default = null;
+      description = ''
+        Extra derivations, as a function of the (Linux) pkgs, whose closures
+        are baked into the image contents and registered in the store DB
+        alongside the runtime closure — so in-box nix sees them as already
+        present instead of cold-substituting the world on every Box.
+      '';
+    };
+
+    nixInBox = mkOption {
+      type = types.nullOr types.bool;
+      default = null;
+      description = ''
+        Bake nix (binary + registered store DB + sandbox-off config) into the
+        box so `nix flake check` and `nix develop` work inside the container.
+        Defaults to true (the nix-centric baseline); set to false for a lean,
+        nix-free image.
+      '';
+    };
+
+    nixStoreWritable = mkOption {
+      type = types.nullOr types.bool;
+      default = null;
+      description = ''
+        Self-test mode (ADR 0018): make the /nix/store directory writable by
+        the agent uid in the built OCI image, so `nix flake check` can
+        substitute/build new store paths inside the Box instead of hitting
+        EACCES. New paths land only in the container's ephemeral
+        copy-on-write layer. Defaults to false; the entrypoint prints a loud
+        warning when enabled. OCI-runner only — the bwrap runner keeps its
+        read-only store bind.
+      '';
+    };
+
+    nixpkgs = mkOption {
+      type = types.nullOr types.raw;
+      default = null;
+      description = "Locked nixpkgs input the image and host commands build from.";
+    };
+
+    overlays = mkOption {
+      type = types.nullOr (types.listOf types.raw);
+      default = null;
+      description = "Overlays applied to the instantiated nixpkgs.";
+    };
+
+    config = mkOption {
+      type = types.nullOr types.attrs;
+      default = null;
+      example = {
+        allowUnfree = true;
       };
-    }
-    {
-      path = structuralPlacements.roster;
-      opt = mkOption {
-        type = types.nullOr (types.listOf types.attrs);
-        default = null;
-        description = ''
-          The first-class N-agent roster (issue #264, lib/roster.nix): a list of
-          `{ name; model; effort; mode; description; tools; promptFile; prompt }`
-          attrsets that both Drivers render subagents from, replacing the four
-          hardcoded scout/reviewer/filer/worker model knobs. An explicit
-          `roster` always wins over the legacy per-agent model knobs
-          (scoutModel/reviewModel/filerModel/workerModel), the same precedence
-          `mkHarness.nix` applies to a raw call. Untyped (`types.attrs`
-          elements, not a submodule) so the forwarded list matches the
-          Consumer's input verbatim, byte-for-byte, with no default-injection.
-          `effort` (issue #2242) is an optional pass-through, driver-specific
-          effort/reasoning-level string: the claude Driver emits it as the
-          `effort` key in the agent's `--agents` JSON entry, the opencode
-          Driver as the `reasoningEffort` key in the agent-file frontmatter;
-          omitted entirely when not set.
-        '';
-      };
-    }
-    {
-      path = structuralPlacements.runtime;
-      opt = mkOption {
-        type = types.nullOr (
-          types.enum [
-            "podman"
-            "docker"
-            "rancher"
-            "bwrap"
-          ]
-        );
-        default = null;
-        description = "Runner the launcher commands drive: OCI runtimes (podman/docker/rancher, the last an alias for Rancher Desktop's nerdctl) or the daemonless bubblewrap runner (bwrap, Linux-only).";
-      };
-    }
-    {
-      path = structuralPlacements.packages;
-      opt = mkOption {
-        type = types.nullOr (types.functionTo (types.listOf types.package));
-        default = null;
-        description = "Project tools baked into the image, as a function of the (Linux) pkgs.";
-      };
-    }
-    {
-      path = structuralPlacements.prefetch;
-      opt = mkOption {
-        type = types.nullOr types.lines;
-        default = null;
-        description = "Shell snippet the entrypoint runs after cloning to warm caches.";
-      };
-    }
-    {
-      path = structuralPlacements.extraClosures;
-      opt = mkOption {
-        type = types.nullOr (types.functionTo (types.listOf types.package));
-        default = null;
-        description = ''
-          Extra derivations, as a function of the (Linux) pkgs, whose closures
-          are baked into the image contents and registered in the store DB
-          alongside the runtime closure — so in-box nix sees them as already
-          present instead of cold-substituting the world on every Box.
-        '';
-      };
-    }
-    {
-      path = structuralPlacements.nixInBox;
-      opt = mkOption {
-        type = types.nullOr types.bool;
-        default = null;
-        description = ''
-          Bake nix (binary + registered store DB + sandbox-off config) into the
-          box so `nix flake check` and `nix develop` work inside the container.
-          Defaults to true (the nix-centric baseline); set to false for a lean,
-          nix-free image.
-        '';
-      };
-    }
-    {
-      path = structuralPlacements.nixStoreWritable;
-      opt = mkOption {
-        type = types.nullOr types.bool;
-        default = null;
-        description = ''
-          Self-test mode (ADR 0018): make the /nix/store directory writable by
-          the agent uid in the built OCI image, so `nix flake check` can
-          substitute/build new store paths inside the Box instead of hitting
-          EACCES. New paths land only in the container's ephemeral
-          copy-on-write layer. Defaults to false; the entrypoint prints a loud
-          warning when enabled. OCI-runner only — the bwrap runner keeps its
-          read-only store bind.
-        '';
-      };
-    }
-    {
-      path = structuralPlacements.nixpkgs;
-      opt = mkOption {
-        type = types.nullOr types.raw;
-        default = null;
-        description = "Locked nixpkgs input the image and host commands build from.";
-      };
-    }
-    {
-      path = structuralPlacements.overlays;
-      opt = mkOption {
-        type = types.nullOr (types.listOf types.raw);
-        default = null;
-        description = "Overlays applied to the instantiated nixpkgs.";
-      };
-    }
-    {
-      path = structuralPlacements.config;
-      opt = mkOption {
-        type = types.nullOr types.attrs;
-        default = null;
-        example = {
-          allowUnfree = true;
-        };
-        description = "nixpkgs config attrs.";
-      };
-    }
-  ];
+      description = "nixpkgs config attrs.";
+    };
+  };
+
+  # Structural leaves: each structuralOptions entry, hand-placed at its new
+  # domain-tree path (slice 2's placement map).
+  structuralTreeEntries = lib.mapAttrsToList (flatName: opt: {
+    path = structuralPlacements.${flatName};
+    inherit opt;
+  }) structuralOptions;
 
   # The old flat path -> new dotted domain-tree path each structural knob
   # moved to (slice 2's placement map), keyed by the flat option name — used
   # both to declare the deprecation-shim options and to resolve the
   # new-wins-old precedence in config.perSystem below.
   structuralPlacements = import ./structural-paths.nix;
+
+  # The 13 old flat structural options, now null-default deprecation shims
+  # (ADR 0037 Pass 1, generated per issue #2522): reuses each
+  # structuralOptions entry's type (precise errors on old paths for free),
+  # a null default so config.perSystem's forwarding below distinguishes
+  # unset from set, and a one-line auto-generated rename pointer as the
+  # description — the real type/default/description now lives on the new
+  # domain-tree option (structuralTreeEntries above). A consumer that still
+  # sets the old path is forwarded via `lib.warn` in config.perSystem below
+  # (matching wording). Kept DECLARED (not removed) so a typo on the old
+  # path still throws instead of silently doing nothing.
+  oldFlatShims = lib.mapAttrs (
+    flatName: opt:
+    mkOption {
+      type = opt.type;
+      default = null;
+      description = "perSystem.spindrift.${flatName} is deprecated; use perSystem.spindrift.${
+        lib.concatStringsSep "." structuralPlacements.${flatName}
+      }.";
+    }
+  ) structuralOptions;
 in
 {
   options.perSystem = flake-parts-lib.mkPerSystemOption {
     options.spindrift =
       let
-        # The 13 old flat structural options, now null-default deprecation
-        # shims (ADR 0037 Pass 1): the real type/default/description now
-        # lives on the new domain-tree option (structuralTreeEntries above);
-        # a consumer that still sets the old path is forwarded via
-        # `lib.warn` in config.perSystem below. Kept DECLARED (not removed)
-        # so a typo on the old path still throws instead of silently doing
-        # nothing.
-        oldFlatShims = {
-          nixpkgs = mkOption {
-            type = types.nullOr types.raw;
-            default = null;
-            description = "Locked nixpkgs input the image and host commands build from.";
-          };
-
-          overlays = mkOption {
-            type = types.nullOr (types.listOf types.raw);
-            default = null;
-            description = "Overlays applied to the instantiated nixpkgs.";
-          };
-
-          config = mkOption {
-            type = types.nullOr types.attrs;
-            default = null;
-            example = {
-              allowUnfree = true;
-            };
-            description = "nixpkgs config attrs.";
-          };
-
-          packages = mkOption {
-            type = types.nullOr (types.functionTo (types.listOf types.package));
-            default = null;
-            description = "Project tools baked into the image, as a function of the (Linux) pkgs.";
-          };
-
-          prefetch = mkOption {
-            type = types.nullOr types.lines;
-            default = null;
-            description = "Shell snippet the entrypoint runs after cloning to warm caches.";
-          };
-
-          prompt = mkOption {
-            type = types.nullOr types.lines;
-            default = null;
-            description = "Agent prompt template baked into the image; changing it requires an image rebuild. Set SPINDRIFT_PROMPT_DIR at runtime to override without a rebuild.";
-          };
-
-          skills = mkOption {
-            type = types.nullOr (
-              types.listOf (
-                types.either types.path (
-                  types.submodule {
-                    options = {
-                      name = mkOption {
-                        type = types.str;
-                        description = "Skill (directory) name; baked as <name>/SKILL.md.";
-                      };
-                      src = mkOption {
-                        type = types.str;
-                        description = "SKILL.md body, re-realized with the image's own Linux pkgs.";
-                      };
-                    };
-                  }
-                )
-              )
-            );
-            default = null;
-            description = "Skills baked into the image at /home/agent/.claude/skills. Each is baked as a <name>/SKILL.md directory — the only layout Claude Code discovers (a flat <name>.md is ignored). An element is a path to a skill directory, or a { name; src; } content entry (name + SKILL.md body) realized with the image's Linux pkgs (issue #597). SPINDRIFT_SKILLS_DIR at runtime mounts over the same path and takes precedence.";
-          };
-
-          runtime = mkOption {
-            type = types.nullOr (
-              types.enum [
-                "podman"
-                "docker"
-                "rancher"
-                "bwrap"
-              ]
-            );
-            default = null;
-            description = "Runner the launcher commands drive: OCI runtimes (podman/docker/rancher, the last an alias for Rancher Desktop's nerdctl) or the daemonless bubblewrap runner (bwrap, Linux-only).";
-          };
-
-          driver = mkOption {
-            # A plain string, not `types.enum`, so the lib/drivers/ registry (not
-            # this option) stays the single source of truth for valid names —
-            # mkHarness.nix throws at eval time on a name absent from the
-            # registry (ADR 0009).
-            type = types.nullOr types.str;
-            default = null;
-            description = "The agent CLI Driver (ADR 0009): a build-time choice selecting one entry from the lib/drivers/ registry, baked into the image and threaded to the launcher as DRIVER. \"claude\" is the only Driver today.";
-          };
-
-          nixInBox = mkOption {
-            type = types.nullOr types.bool;
-            default = null;
-            description = ''
-              Bake nix (binary + registered store DB + sandbox-off config) into the
-              box so `nix flake check` and `nix develop` work inside the container.
-              Defaults to true (the nix-centric baseline); set to false for a lean,
-              nix-free image.
-            '';
-          };
-
-          nixStoreWritable = mkOption {
-            type = types.nullOr types.bool;
-            default = null;
-            description = ''
-              Self-test mode (ADR 0018): make the /nix/store directory writable by
-              the agent uid in the built OCI image, so `nix flake check` can
-              substitute/build new store paths inside the Box instead of hitting
-              EACCES. New paths land only in the container's ephemeral
-              copy-on-write layer. Defaults to false; the entrypoint prints a loud
-              warning when enabled. OCI-runner only — the bwrap runner keeps its
-              read-only store bind.
-            '';
-          };
-
-          roster = mkOption {
-            type = types.nullOr (types.listOf types.attrs);
-            default = null;
-            description = ''
-              The first-class N-agent roster (issue #264, lib/roster.nix): a list of
-              `{ name; model; effort; mode; description; tools; promptFile; prompt }`
-              attrsets that both Drivers render subagents from, replacing the four
-              hardcoded scout/reviewer/filer/worker model knobs. An explicit
-              `roster` always wins over the legacy per-agent model knobs
-              (scoutModel/reviewModel/filerModel/workerModel), the same precedence
-              `mkHarness.nix` applies to a raw call. Untyped (`types.attrs`
-              elements, not a submodule) so the forwarded list matches the
-              Consumer's input verbatim, byte-for-byte, with no default-injection.
-              `effort` (issue #2242) is an optional pass-through, driver-specific
-              effort/reasoning-level string: the claude Driver emits it as the
-              `effort` key in the agent's `--agents` JSON entry, the opencode
-              Driver as the `reasoningEffort` key in the agent-file frontmatter;
-              omitted entirely when not set.
-            '';
-          };
-
-          extraClosures = mkOption {
-            type = types.nullOr (types.functionTo (types.listOf types.package));
-            default = null;
-            description = ''
-              Extra derivations, as a function of the (Linux) pkgs, whose closures
-              are baked into the image contents and registered in the store DB
-              alongside the runtime closure — so in-box nix sees them as already
-              present instead of cold-substituting the world on every Box.
-            '';
-          };
-        };
-
         # Legacy `settings.<section>.<knob>` deprecation shim (ADR 0037): the
         # primary surface is now the domain tree built by `buildTree`. Generated
         # from env-schema.nix — one sub-option per section (matching groupOrder
