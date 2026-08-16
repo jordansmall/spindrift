@@ -633,15 +633,33 @@ func scanPassLog(logPath, driverName string) (verdict string, hasOutcome bool) {
 // tool_result (RenderTranscript collapses that block's internal newlines
 // behind "[role]   -> "), a review pass's verdict is its own top-level final
 // assistant message: RenderTranscript's "text" case only TrimSpaces it, so
-// its internal newlines survive into the rendered transcript verbatim, and
-// findings can be sliced out from the verdict line onward.
+// its internal newlines survive into the rendered transcript verbatim.
 //
-// Returns ("", "") when no verdict line is found at all. Mirrors findVerdict's
-// last-wins, fail-unsafe-toward-BLOCK resolution when more than one verdict
-// line appears (review-prompt.md's own contract only ever emits one, but nothing
-// stops a rendering quirk from producing more). driverName selects the
-// RenderTranscript strategy (issue #262 slice 4), the same as scanPassLog's
-// own parameter.
+// Per review-prompt.md's own contract, the verdict is the reviewer's final
+// top-level message's FIRST LINE, and nothing else (issue #2546): unlike
+// scanPassLog's substring-anywhere findVerdict, a line only counts here when,
+// after stripping the "[role] " render prefix, it strictly STARTS WITH
+// VerdictBlock or VerdictApprove. That keeps a finding elsewhere in the same
+// message -- e.g. "the prior fix pass returned VERDICT: APPROVE but missed
+// X" -- from ever being mistaken for the real verdict, since it never leads
+// its own rendered block.
+//
+// scanReviewLog walks every top-level ([]driverkit.ReviewerRole-prefixed)
+// rendered block in order and keeps the LAST one whose first line strictly
+// matches, last-wins the same way findVerdict resolves multiple matches --
+// so a review pass that keeps talking after its real verdict message (a
+// misbehaving turn, or a rendering quirk) doesn't erase an already-found
+// verdict merely because its own trailing chatter carries no verdict marker
+// of its own; it only gets overridden by a LATER block that itself opens
+// with a strict verdict prefix. Findings are then sliced from that same
+// winning block's first line onward, stopping before the next
+// role-prefixed line, exactly as before.
+//
+// Returns ("", "") when no block's first line ever strictly matches --
+// review-prompt.md's own contract violated outright, not merely quoted
+// elsewhere -- regardless of what verdict literals appear anywhere else in
+// the transcript. driverName selects the RenderTranscript strategy (issue
+// #262 slice 4), the same as scanPassLog's own parameter.
 func scanReviewLog(logPath, driverName string) (verdict, findings string) {
 	d, err := driver.New(driverName)
 	if err != nil {
@@ -655,14 +673,30 @@ func scanReviewLog(logPath, driverName string) (verdict, findings string) {
 	}
 
 	lines := strings.Split(rendered, "\n")
-	verdictLine := -1
+	blockLine := -1
 	for i, line := range lines {
-		if v, ok := findVerdict(strings.TrimSpace(line)); ok {
-			verdict = v
-			verdictLine = i
+		// renderedRolePrefixRe (manifest.go) is the same "[role]" prefix
+		// matcher scanForManifest uses to attribute a rendered line to its
+		// role -- a bare physical-line continuation of a prior multi-line
+		// block carries no prefix at all and never starts a new block.
+		m := renderedRolePrefixRe.FindStringSubmatch(line)
+		if m == nil || m[1] != driverkit.ReviewerRole {
+			continue
+		}
+		text := line
+		if loc := renderedEventPrefix.FindStringIndex(text); loc != nil {
+			text = text[loc[1]:]
+		}
+		switch {
+		case strings.HasPrefix(text, VerdictBlock):
+			verdict = "BLOCK"
+			blockLine = i
+		case strings.HasPrefix(text, VerdictApprove):
+			verdict = "APPROVE"
+			blockLine = i
 		}
 	}
-	if verdictLine == -1 {
+	if blockLine == -1 {
 		return "", ""
 	}
 
@@ -670,7 +704,7 @@ func scanReviewLog(logPath, driverName string) (verdict, findings string) {
 	// assistant message with "[role] " (see scanPassLog's own comment) --
 	// strip it here so the seeded fix-pass brief carries the reviewer's
 	// findings text alone, not a rendering artifact.
-	first := lines[verdictLine]
+	first := lines[blockLine]
 	if loc := renderedEventPrefix.FindStringIndex(first); loc != nil {
 		first = first[loc[1]:]
 	}
@@ -685,7 +719,7 @@ func scanReviewLog(logPath, driverName string) (verdict, findings string) {
 	// render afterward (review-prompt.md's own contract says there should be
 	// none, but a rendering quirk or a misbehaving turn shouldn't corrupt the
 	// seeded fix-pass brief).
-	for _, l := range lines[verdictLine+1:] {
+	for _, l := range lines[blockLine+1:] {
 		if renderedEventPrefix.MatchString(l) {
 			break
 		}
