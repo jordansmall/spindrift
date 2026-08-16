@@ -17,12 +17,17 @@ package promptassembly
 
 // Default values entrypoint.sh's "${VAR:-default}" bash parameter expansion
 // applies when the corresponding Env field arrives empty. Named once here so
-// checkCoveredCell (assemble.go, DispatchKind only as of issue #2540),
-// Gates, and issueTrackerAxis (gates_tracker.go) resolve the same default
-// rather than each restating its own "github"/"work" literal.
+// checkCoveredCell (assemble.go, DispatchKind only as of issue #2540) and
+// Gates resolve the same default rather than each restating its own
+// "github"/"work" literal. gates_tracker.go's PR-body ticket-reference gates
+// are the only remaining in-box consumer of defaultIssueTracker -- issue
+// #2533 moved every other "${VAR:-default}" gate-family default (the
+// read/write/filer tracker axis, the CODE_FORGE backend suffix) upstream
+// into nix, carried pre-resolved via TrackerAxisRead/TrackerAxisWrite/
+// TrackerAxisFiler/ForgeBackend, so defaultCodeForge no longer has an
+// in-box consumer and was removed.
 const (
 	defaultIssueTracker = "github"
-	defaultCodeForge    = "github"
 	defaultDispatchKind = "work"
 )
 
@@ -49,17 +54,67 @@ type Env struct {
 	OrchestratorEnabled bool // entrypoint.sh: $ORCHESTRATOR_ENABLED presence
 
 	// AgentsJSONTemplate is the nix-baked --agents JSON template (empty
-	// when no subagent model is configured). FILER_ENABLED and
-	// WORKER_PROVISIONED (entrypoint.sh: 781-799) are derived from whether
-	// it carries a "filer"/"worker" key, respectively — a pure parse, not
-	// an I/O read, so Gates performs it itself rather than requiring the
-	// CLI boundary to pre-resolve two more presence flags.
+	// when no subagent model is configured), still read directly by
+	// Assemble for its actual JSON content (the reviewer-drop/model-
+	// extraction and generic per-agent injection loop). FILER_ENABLED and
+	// WORKER_PROVISIONED (entrypoint.sh: 781-799) used to be derived here
+	// by reparsing it for a "filer"/"worker" key; nix already builds the
+	// same roster it bakes into AgentsJSONTemplate, so it now resolves
+	// those two presence facts once, at eval time, and carries them
+	// pre-resolved via FilerEnabled/WorkerProvisioned below (issue #2533)
+	// rather than making every Box reparse the template a second time.
 	AgentsJSONTemplate string // entrypoint.sh: $AGENTS_JSON_TEMPLATE
+
+	// FilerEnabled and WorkerProvisioned are nix's precomputed equivalent
+	// of the FILER_ENABLED/WORKER_PROVISIONED gates (entrypoint.sh:
+	// 781-799): true iff the roster nix also bakes into AgentsJSONTemplate
+	// carries a "filer"/"worker" entry, respectively. nix already knows
+	// the roster's shape at eval time, so it resolves these two presence
+	// facts once there instead of Gates reparsing AgentsJSONTemplate's
+	// JSON for the same answer on every Box (issue #2533).
+	FilerEnabled      bool // nix-resolved roster fact: roster carries a "filer" entry
+	WorkerProvisioned bool // nix-resolved roster fact: roster carries a "worker" entry
+
+	// ReviewLoopInline and ReviewLoopOrchestrator are nix's precomputed
+	// equivalent of the REVIEW_LOOP_INLINE/REVIEW_LOOP_ORCHESTRATOR gates
+	// (entrypoint.sh: 771-779): exactly one is ever true, picked by
+	// OrchestratorEnabled alone -- ReviewLoopInline is
+	// !OrchestratorEnabled, ReviewLoopOrchestrator is OrchestratorEnabled
+	// verbatim. nix computes both directly from the same
+	// ORCHESTRATOR_ENABLED knob it already resolves OrchestratorEnabled
+	// from, rather than Gates negating/copying OrchestratorEnabled in-box
+	// (issue #2533).
+	ReviewLoopInline       bool // nix-resolved: !OrchestratorEnabled
+	ReviewLoopOrchestrator bool // nix-resolved: OrchestratorEnabled
 
 	// IssueTracker selects the per-axis issue-tracker gate family
 	// (entrypoint.sh: 810-814, 899-938). Defaults to "github" when empty,
-	// matching entrypoint.sh's "${ISSUE_TRACKER:-github}".
+	// matching entrypoint.sh's "${ISSUE_TRACKER:-github}". Still read
+	// directly by the PR-body ticket-reference gates (which switch on the
+	// raw "local" comparison, not an axis) and by Assemble/Validate for
+	// non-gate purposes; the per-axis suffixes themselves now arrive
+	// pre-resolved via TrackerAxisRead/TrackerAxisWrite/TrackerAxisFiler
+	// below (issue #2533) rather than being re-derived in-box.
 	IssueTracker string // entrypoint.sh: $ISSUE_TRACKER
+
+	// TrackerAxisRead, TrackerAxisWrite, and TrackerAxisFiler are nix's
+	// precomputed equivalent of entrypoint.sh's "${ISSUE_TRACKER:-github}"
+	// case statement (801-814): the same three gate-family suffixes
+	// gates_tracker.go's now-deleted issueTrackerAxis used to derive from
+	// IssueTracker in-box. nix already knows IssueTracker's value at eval
+	// time, so it resolves the axis once there and carries the resolved
+	// suffixes across the Env boundary, rather than making every Box
+	// re-derive the same case statement from the raw string (issue #2533).
+	//
+	// TrackerAxisRead is the issue-read step suffix, always one of
+	// "GITHUB"/"LOCAL"/"FORGEJO". TrackerAxisWrite is the direct
+	// write-step suffix, one of "GITHUB"/"FORGEJO", or "" when the tracker
+	// has no in-box direct-write path (local always relays instead).
+	// TrackerAxisFiler is the filer's direct-write suffix, one of
+	// "GH"/"FORGEJO".
+	TrackerAxisRead  string // nix-resolved ISSUE_TRACKER read-step suffix
+	TrackerAxisWrite string // nix-resolved ISSUE_TRACKER write-step suffix
+	TrackerAxisFiler string // nix-resolved ISSUE_TRACKER filer suffix
 
 	// BoxWriteEnabled is the single explicit write-enable signal the
 	// launcher resolves host-side from BOX_FORGE_AND_ISSUE_ACCESS and
@@ -73,8 +128,22 @@ type Env struct {
 	LocalIssueReference bool // entrypoint.sh: $LOCAL_ISSUE_REFERENCE presence
 
 	// CodeForge selects the CODE_FORGE-backend gate family
-	// (entrypoint.sh: 959-989): OPEN_PR_CREATE_RW_*/FIX_CI_READ_*.
+	// (entrypoint.sh: 959-989): OPEN_PR_CREATE_RW_*/FIX_CI_READ_*. Still
+	// carried on Env for non-gate purposes; the resolved backend suffix
+	// itself now arrives pre-resolved via ForgeBackend below (issue
+	// #2533) rather than being re-derived in-box.
 	CodeForge string // entrypoint.sh: $CODE_FORGE
+
+	// ForgeBackend is nix's precomputed equivalent of
+	// gates_access_forge.go's former CODE_FORGE -> backend switch
+	// (entrypoint.sh: 959-967, matching "${CODE_FORGE:-github}"): one of
+	// "GH" or "FORGEJO", with every value other than "forgejo"
+	// (github/git/local) riding the shared gh-flavored "GH" arm. nix
+	// already knows CodeForge's value at eval time, so it resolves the
+	// backend once there and carries the resolved suffix across the Env
+	// boundary, rather than making every Box re-derive the same switch
+	// from the raw string (issue #2533).
+	ForgeBackend string // nix-resolved CODE_FORGE backend suffix
 
 	// DispatchKind, SelfContained, FixPass, and ResumeAfterHold drive which
 	// prompt phase_prompt_assembly selects (research/fix/issue) and its

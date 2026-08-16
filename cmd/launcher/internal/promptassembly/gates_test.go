@@ -93,9 +93,12 @@ func TestGatesSkillsBaking(t *testing.T) {
 // TestGatesOrchestratorReviewLoop covers ORCHESTRATOR (entrypoint.sh:
 // 761-762), the REVIEW_LOOP_INLINE/REVIEW_LOOP_ORCHESTRATOR exactly-one-on
 // pairing it drives (entrypoint.sh: 771-779), and FILER_ENABLED/
-// WORKER_PROVISIONED (entrypoint.sh: 781-799), each derived from whether
-// AgentsJSONTemplate carries a "filer"/"worker" key — orthogonal to
-// ORCHESTRATOR, so every combination of the two axes is exercised.
+// WORKER_PROVISIONED (entrypoint.sh: 781-799) -- since issue #2533, all four
+// gates are plain passthroughs of nix-precomputed Env fields
+// (ReviewLoopInline/ReviewLoopOrchestrator/FilerEnabled/WorkerProvisioned)
+// rather than derived in-box from OrchestratorEnabled/AgentsJSONTemplate, so
+// each case sets its Env fields explicitly rather than relying on Gates to
+// re-derive them.
 func TestGatesOrchestratorReviewLoop(t *testing.T) {
 	cases := []struct {
 		name string
@@ -103,8 +106,10 @@ func TestGatesOrchestratorReviewLoop(t *testing.T) {
 		want map[string]bool
 	}{
 		{
-			name: "orchestrator off, no agents template",
-			env:  Env{},
+			name: "orchestrator off, no roster",
+			env: Env{
+				ReviewLoopInline: true,
+			},
 			want: map[string]bool{
 				"ORCHESTRATOR":             false,
 				"REVIEW_LOOP_INLINE":       true,
@@ -114,8 +119,11 @@ func TestGatesOrchestratorReviewLoop(t *testing.T) {
 			},
 		},
 		{
-			name: "orchestrator on, no agents template",
-			env:  Env{OrchestratorEnabled: true},
+			name: "orchestrator on, no roster",
+			env: Env{
+				OrchestratorEnabled:    true,
+				ReviewLoopOrchestrator: true,
+			},
 			want: map[string]bool{
 				"ORCHESTRATOR":             true,
 				"REVIEW_LOOP_INLINE":       false,
@@ -127,7 +135,9 @@ func TestGatesOrchestratorReviewLoop(t *testing.T) {
 		{
 			name: "orchestrator off, filer and worker both provisioned",
 			env: Env{
-				AgentsJSONTemplate: `{"filer":{"model":"m"},"worker":{"model":"m"}}`,
+				ReviewLoopInline:  true,
+				FilerEnabled:      true,
+				WorkerProvisioned: true,
 			},
 			want: map[string]bool{
 				"ORCHESTRATOR":             false,
@@ -140,8 +150,9 @@ func TestGatesOrchestratorReviewLoop(t *testing.T) {
 		{
 			name: "orchestrator on, only filer provisioned",
 			env: Env{
-				OrchestratorEnabled: true,
-				AgentsJSONTemplate:  `{"filer":{"model":"m"}}`,
+				OrchestratorEnabled:    true,
+				ReviewLoopOrchestrator: true,
+				FilerEnabled:           true,
 			},
 			want: map[string]bool{
 				"ORCHESTRATOR":             true,
@@ -152,7 +163,7 @@ func TestGatesOrchestratorReviewLoop(t *testing.T) {
 			},
 		},
 		{
-			name: "agents template present but neither filer nor worker keyed",
+			name: "roster present but neither filer nor worker provisioned",
 			env: Env{
 				AgentsJSONTemplate: `{"reviewer":{"model":"m"}}`,
 			},
@@ -216,22 +227,23 @@ func TestGatesBoxAccess(t *testing.T) {
 }
 
 // TestGatesCodeForgeBackend covers the CODE_FORGE-backend gate family
-// (entrypoint.sh: 958-989): CODE_FORGE (defaulting to "github" when empty)
-// resolves to a GH or FORGEJO backend suffix, only forgejo diverging from
-// the shared gh-flavored path. OPEN_PR_CREATE_RW_<suffix> forks further on
-// BOX_ACCESS_READ_WRITE (only the read-write create step splits on
-// CODE_FORGE); FIX_CI_READ_<suffix> fires unconditionally on the resolved
-// backend, regardless of box access.
+// (entrypoint.sh: 958-989): ForgeBackend -- nix's precomputed equivalent of
+// CODE_FORGE (defaulting to "github" when empty), resolved upstream rather
+// than re-derived by Gates itself (issue #2533) -- is a GH or FORGEJO
+// backend suffix, only forgejo diverging from the shared gh-flavored path.
+// OPEN_PR_CREATE_RW_<suffix> forks further on BOX_ACCESS_READ_WRITE (only
+// the read-write create step splits on the backend); FIX_CI_READ_<suffix>
+// fires unconditionally on the resolved backend, regardless of box access.
 func TestGatesCodeForgeBackend(t *testing.T) {
 	cases := []struct {
 		name            string
-		codeForge       string
+		forgeBackend    string
 		boxWriteEnabled bool
 		want            map[string]bool
 	}{
 		{
-			name:            "empty defaults to github, read-write",
-			codeForge:       "",
+			name:            "empty CODE_FORGE resolves upstream to GH, read-write",
+			forgeBackend:    "GH",
 			boxWriteEnabled: true,
 			want: map[string]bool{
 				"OPEN_PR_CREATE_RW_GH":      true,
@@ -242,7 +254,7 @@ func TestGatesCodeForgeBackend(t *testing.T) {
 		},
 		{
 			name:            "github explicit, read-write",
-			codeForge:       "github",
+			forgeBackend:    "GH",
 			boxWriteEnabled: true,
 			want: map[string]bool{
 				"OPEN_PR_CREATE_RW_GH":      true,
@@ -253,7 +265,7 @@ func TestGatesCodeForgeBackend(t *testing.T) {
 		},
 		{
 			name:            "github explicit, read-only: OPEN_PR_CREATE_RW off, FIX_CI_READ still on",
-			codeForge:       "github",
+			forgeBackend:    "GH",
 			boxWriteEnabled: false,
 			want: map[string]bool{
 				"OPEN_PR_CREATE_RW_GH":      false,
@@ -264,7 +276,7 @@ func TestGatesCodeForgeBackend(t *testing.T) {
 		},
 		{
 			name:            "forgejo, read-write",
-			codeForge:       "forgejo",
+			forgeBackend:    "FORGEJO",
 			boxWriteEnabled: true,
 			want: map[string]bool{
 				"OPEN_PR_CREATE_RW_GH":      false,
@@ -275,7 +287,7 @@ func TestGatesCodeForgeBackend(t *testing.T) {
 		},
 		{
 			name:            "forgejo, read-only: OPEN_PR_CREATE_RW off, FIX_CI_READ still on",
-			codeForge:       "forgejo",
+			forgeBackend:    "FORGEJO",
 			boxWriteEnabled: false,
 			want: map[string]bool{
 				"OPEN_PR_CREATE_RW_GH":      false,
@@ -288,10 +300,10 @@ func TestGatesCodeForgeBackend(t *testing.T) {
 	for _, tc := range cases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			got := Gates(Env{CodeForge: tc.codeForge, BoxWriteEnabled: tc.boxWriteEnabled})
+			got := Gates(Env{ForgeBackend: tc.forgeBackend, BoxWriteEnabled: tc.boxWriteEnabled})
 			for k, want := range tc.want {
 				if got[k] != want {
-					t.Errorf("Gates(CodeForge=%q, BoxWriteEnabled=%v)[%q] = %v, want %v", tc.codeForge, tc.boxWriteEnabled, k, got[k], want)
+					t.Errorf("Gates(ForgeBackend=%q, BoxWriteEnabled=%v)[%q] = %v, want %v", tc.forgeBackend, tc.boxWriteEnabled, k, got[k], want)
 				}
 			}
 		})

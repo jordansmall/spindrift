@@ -12,9 +12,11 @@ func trackerGates(e Env, filerEnabled, orchestratorEnabled bool) map[string]bool
 	// ISSUE_TRACKER -> per-axis descriptor (entrypoint.sh: 801-814): itRead
 	// is the issue-read step suffix (always one of GITHUB/LOCAL/FORGEJO).
 	// jira shares github's arm since it rides the same in-box reachability.
-	// One call binds all three axis names; each is read below by the gate
-	// family it feeds.
-	itRead, itWrite, itFiler := issueTrackerAxis(e.IssueTracker)
+	// nix already resolves entrypoint.sh's "${ISSUE_TRACKER:-github}" case
+	// statement once, at eval time, so the three axis names arrive
+	// pre-resolved on Env (TrackerAxisRead/TrackerAxisWrite/
+	// TrackerAxisFiler) rather than being re-derived here (issue #2533).
+	itRead, itWrite, itFiler := e.TrackerAxisRead, e.TrackerAxisWrite, e.TrackerAxisFiler
 
 	// The issue-read step gate (entrypoint.sh: 891-904): exactly one of
 	// ISSUE_TRACKER_GITHUB/ISSUE_TRACKER_LOCAL/ISSUE_TRACKER_FORGEJO fires,
@@ -83,26 +85,4 @@ func trackerGates(e Env, filerEnabled, orchestratorEnabled bool) map[string]bool
 	g["PR_BODY_LOCAL_NOREF"] = prBodyLocalNoref
 
 	return g
-}
-
-// issueTrackerAxis reproduces entrypoint.sh's "${ISSUE_TRACKER:-github}"
-// case statement (801-814), mapping the raw ISSUE_TRACKER value onto its
-// three gate-family suffixes: itRead (issue-read step, always one of
-// GITHUB/LOCAL/FORGEJO), itWrite (direct write-step suffix, empty when the
-// tracker has no in-box direct-write path -- local always relays), and
-// itFiler (filer direct-write suffix). jira shares github's in-box
-// reachability, so it rides the GITHUB/GH arms alongside it.
-func issueTrackerAxis(issueTracker string) (itRead, itWrite, itFiler string) {
-	tracker := issueTracker
-	if tracker == "" {
-		tracker = defaultIssueTracker
-	}
-	switch tracker {
-	case "local":
-		return "LOCAL", "", "GH"
-	case "forgejo":
-		return "FORGEJO", "FORGEJO", "FORGEJO"
-	default:
-		return "GITHUB", "GITHUB", "GH"
-	}
 }

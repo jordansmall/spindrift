@@ -5,17 +5,19 @@ import "testing"
 // TestGatesIssueTrackerReadAxis covers the issue-read step gate
 // (entrypoint.sh: 801-814, 891-904): exactly one of ISSUE_TRACKER_GITHUB/
 // ISSUE_TRACKER_LOCAL/ISSUE_TRACKER_FORGEJO is ever on, selected by
-// ISSUE_TRACKER (defaulting to "github" when empty); jira shares github's
-// arm since it rides the same in-box reachability.
+// TrackerAxisRead -- nix's precomputed equivalent of ISSUE_TRACKER
+// (defaulting to "github" when empty; jira sharing github's arm since it
+// rides the same in-box reachability), resolved upstream and carried
+// pre-resolved rather than re-derived by Gates itself (issue #2533).
 func TestGatesIssueTrackerReadAxis(t *testing.T) {
 	cases := []struct {
-		name         string
-		issueTracker string
-		want         map[string]bool
+		name            string
+		trackerAxisRead string
+		want            map[string]bool
 	}{
 		{
-			name:         "empty defaults to github",
-			issueTracker: "",
+			name:            "empty ISSUE_TRACKER resolves upstream to GITHUB",
+			trackerAxisRead: "GITHUB",
 			want: map[string]bool{
 				"ISSUE_TRACKER_GITHUB":  true,
 				"ISSUE_TRACKER_LOCAL":   false,
@@ -23,8 +25,8 @@ func TestGatesIssueTrackerReadAxis(t *testing.T) {
 			},
 		},
 		{
-			name:         "github explicit",
-			issueTracker: "github",
+			name:            "github explicit",
+			trackerAxisRead: "GITHUB",
 			want: map[string]bool{
 				"ISSUE_TRACKER_GITHUB":  true,
 				"ISSUE_TRACKER_LOCAL":   false,
@@ -32,8 +34,8 @@ func TestGatesIssueTrackerReadAxis(t *testing.T) {
 			},
 		},
 		{
-			name:         "jira rides the github arm",
-			issueTracker: "jira",
+			name:            "jira rides the github arm",
+			trackerAxisRead: "GITHUB",
 			want: map[string]bool{
 				"ISSUE_TRACKER_GITHUB":  true,
 				"ISSUE_TRACKER_LOCAL":   false,
@@ -41,8 +43,8 @@ func TestGatesIssueTrackerReadAxis(t *testing.T) {
 			},
 		},
 		{
-			name:         "local",
-			issueTracker: "local",
+			name:            "local",
+			trackerAxisRead: "LOCAL",
 			want: map[string]bool{
 				"ISSUE_TRACKER_GITHUB":  false,
 				"ISSUE_TRACKER_LOCAL":   true,
@@ -50,8 +52,8 @@ func TestGatesIssueTrackerReadAxis(t *testing.T) {
 			},
 		},
 		{
-			name:         "forgejo",
-			issueTracker: "forgejo",
+			name:            "forgejo",
+			trackerAxisRead: "FORGEJO",
 			want: map[string]bool{
 				"ISSUE_TRACKER_GITHUB":  false,
 				"ISSUE_TRACKER_LOCAL":   false,
@@ -62,10 +64,10 @@ func TestGatesIssueTrackerReadAxis(t *testing.T) {
 	for _, tc := range cases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			got := Gates(Env{IssueTracker: tc.issueTracker})
+			got := Gates(Env{TrackerAxisRead: tc.trackerAxisRead})
 			for k, want := range tc.want {
 				if got[k] != want {
-					t.Errorf("Gates(IssueTracker=%q)[%q] = %v, want %v", tc.issueTracker, k, got[k], want)
+					t.Errorf("Gates(TrackerAxisRead=%q)[%q] = %v, want %v", tc.trackerAxisRead, k, got[k], want)
 				}
 			}
 		})
@@ -76,20 +78,21 @@ func TestGatesIssueTrackerReadAxis(t *testing.T) {
 // research-verdict write-step gates (entrypoint.sh: 906-938): a tracker
 // with a direct write-step path (github/jira via GITHUB, forgejo via
 // FORGEJO) forks on BOX_WRITE_ENABLED between the _READWRITE and _READONLY
-// arm; local has no direct write-step path at all (_it_write is empty for
-// it, entrypoint.sh: 811), so it renders neither pair regardless of
-// BOX_WRITE_ENABLED.
+// arm; local has no direct write-step path at all (TrackerAxisWrite is ""
+// for it, entrypoint.sh: 811), so it renders neither pair regardless of
+// BOX_WRITE_ENABLED. TrackerAxisWrite arrives pre-resolved from nix (issue
+// #2533) rather than being re-derived here from ISSUE_TRACKER.
 func TestGatesIssueTrackerWriteAxis(t *testing.T) {
 	cases := []struct {
-		name            string
-		issueTracker    string
-		boxWriteEnabled bool
-		want            map[string]bool
+		name             string
+		trackerAxisWrite string
+		boxWriteEnabled  bool
+		want             map[string]bool
 	}{
 		{
-			name:            "github read-write",
-			issueTracker:    "github",
-			boxWriteEnabled: true,
+			name:             "github read-write",
+			trackerAxisWrite: "GITHUB",
+			boxWriteEnabled:  true,
 			want: map[string]bool{
 				"ISSUE_TRACKER_GITHUB_READWRITE":  true,
 				"ISSUE_TRACKER_GITHUB_READONLY":   false,
@@ -98,9 +101,9 @@ func TestGatesIssueTrackerWriteAxis(t *testing.T) {
 			},
 		},
 		{
-			name:            "github read-only",
-			issueTracker:    "github",
-			boxWriteEnabled: false,
+			name:             "github read-only",
+			trackerAxisWrite: "GITHUB",
+			boxWriteEnabled:  false,
 			want: map[string]bool{
 				"ISSUE_TRACKER_GITHUB_READWRITE":  false,
 				"ISSUE_TRACKER_GITHUB_READONLY":   true,
@@ -109,9 +112,9 @@ func TestGatesIssueTrackerWriteAxis(t *testing.T) {
 			},
 		},
 		{
-			name:            "forgejo read-write",
-			issueTracker:    "forgejo",
-			boxWriteEnabled: true,
+			name:             "forgejo read-write",
+			trackerAxisWrite: "FORGEJO",
+			boxWriteEnabled:  true,
 			want: map[string]bool{
 				"ISSUE_TRACKER_GITHUB_READWRITE":  false,
 				"ISSUE_TRACKER_GITHUB_READONLY":   false,
@@ -120,9 +123,9 @@ func TestGatesIssueTrackerWriteAxis(t *testing.T) {
 			},
 		},
 		{
-			name:            "forgejo read-only",
-			issueTracker:    "forgejo",
-			boxWriteEnabled: false,
+			name:             "forgejo read-only",
+			trackerAxisWrite: "FORGEJO",
+			boxWriteEnabled:  false,
 			want: map[string]bool{
 				"ISSUE_TRACKER_GITHUB_READWRITE":  false,
 				"ISSUE_TRACKER_GITHUB_READONLY":   false,
@@ -131,9 +134,9 @@ func TestGatesIssueTrackerWriteAxis(t *testing.T) {
 			},
 		},
 		{
-			name:            "local has no direct write-step path, write-enabled or not",
-			issueTracker:    "local",
-			boxWriteEnabled: true,
+			name:             "local has no direct write-step path, write-enabled or not",
+			trackerAxisWrite: "",
+			boxWriteEnabled:  true,
 			want: map[string]bool{
 				"ISSUE_TRACKER_GITHUB_READWRITE":  false,
 				"ISSUE_TRACKER_GITHUB_READONLY":   false,
@@ -145,10 +148,10 @@ func TestGatesIssueTrackerWriteAxis(t *testing.T) {
 	for _, tc := range cases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			got := Gates(Env{IssueTracker: tc.issueTracker, BoxWriteEnabled: tc.boxWriteEnabled})
+			got := Gates(Env{TrackerAxisWrite: tc.trackerAxisWrite, BoxWriteEnabled: tc.boxWriteEnabled})
 			for k, want := range tc.want {
 				if got[k] != want {
-					t.Errorf("Gates(IssueTracker=%q, BoxWriteEnabled=%v)[%q] = %v, want %v", tc.issueTracker, tc.boxWriteEnabled, k, got[k], want)
+					t.Errorf("Gates(TrackerAxisWrite=%q, BoxWriteEnabled=%v)[%q] = %v, want %v", tc.trackerAxisWrite, tc.boxWriteEnabled, k, got[k], want)
 				}
 			}
 		})
@@ -159,23 +162,24 @@ func TestGatesIssueTrackerWriteAxis(t *testing.T) {
 // (entrypoint.sh: 816-860): relay only activates on read-only
 // (BOX_WRITE_ENABLED absent) + the orchestrator gate; every other
 // combination keeps the direct gh/fj path, which itself forks on
-// ISSUE_TRACKER's filer suffix (_it_filer: GH for github/jira/local,
-// FORGEJO for forgejo). Both direct/relay stay off entirely when the filer
-// isn't configured. FILER_FILE_DIRECT_ANY fires whenever either direct
-// fork is on.
+// TrackerAxisFiler (GH for github/jira/local, FORGEJO for forgejo -- nix's
+// precomputed equivalent of ISSUE_TRACKER's filer suffix, issue #2533).
+// Both direct/relay stay off entirely when the filer isn't configured
+// (Env.FilerEnabled false, nix's precomputed roster fact rather than a
+// reparsed AgentsJSONTemplate). FILER_FILE_DIRECT_ANY fires whenever either
+// direct fork is on.
 func TestGatesFilerWriteMechanism(t *testing.T) {
-	filerTemplate := `{"filer":{"model":"m"}}`
 	cases := []struct {
 		name                string
-		agentsJSONTemplate  string
-		issueTracker        string
+		filerEnabled        bool
+		trackerAxisFiler    string
 		boxWriteEnabled     bool
 		orchestratorEnabled bool
 		want                map[string]bool
 	}{
 		{
-			name:               "filer not configured: everything off",
-			agentsJSONTemplate: "",
+			name:         "filer not configured: everything off",
+			filerEnabled: false,
 			want: map[string]bool{
 				"FILER_FILE_DIRECT_GH":      false,
 				"FILER_FILE_DIRECT_FORGEJO": false,
@@ -185,8 +189,8 @@ func TestGatesFilerWriteMechanism(t *testing.T) {
 		},
 		{
 			name:                "read-only + orchestrator on: relay",
-			agentsJSONTemplate:  filerTemplate,
-			issueTracker:        "github",
+			filerEnabled:        true,
+			trackerAxisFiler:    "GH",
 			boxWriteEnabled:     false,
 			orchestratorEnabled: true,
 			want: map[string]bool{
@@ -198,8 +202,8 @@ func TestGatesFilerWriteMechanism(t *testing.T) {
 		},
 		{
 			name:                "read-write + orchestrator on: direct gh (github tracker)",
-			agentsJSONTemplate:  filerTemplate,
-			issueTracker:        "github",
+			filerEnabled:        true,
+			trackerAxisFiler:    "GH",
 			boxWriteEnabled:     true,
 			orchestratorEnabled: true,
 			want: map[string]bool{
@@ -211,8 +215,8 @@ func TestGatesFilerWriteMechanism(t *testing.T) {
 		},
 		{
 			name:                "read-only + orchestrator off: direct gh (github tracker)",
-			agentsJSONTemplate:  filerTemplate,
-			issueTracker:        "github",
+			filerEnabled:        true,
+			trackerAxisFiler:    "GH",
 			boxWriteEnabled:     false,
 			orchestratorEnabled: false,
 			want: map[string]bool{
@@ -224,8 +228,8 @@ func TestGatesFilerWriteMechanism(t *testing.T) {
 		},
 		{
 			name:                "read-write + orchestrator on: direct forgejo (forgejo tracker)",
-			agentsJSONTemplate:  filerTemplate,
-			issueTracker:        "forgejo",
+			filerEnabled:        true,
+			trackerAxisFiler:    "FORGEJO",
 			boxWriteEnabled:     true,
 			orchestratorEnabled: true,
 			want: map[string]bool{
@@ -237,8 +241,8 @@ func TestGatesFilerWriteMechanism(t *testing.T) {
 		},
 		{
 			name:                "local tracker's filer suffix rides GH",
-			agentsJSONTemplate:  filerTemplate,
-			issueTracker:        "local",
+			filerEnabled:        true,
+			trackerAxisFiler:    "GH",
 			boxWriteEnabled:     true,
 			orchestratorEnabled: true,
 			want: map[string]bool{
@@ -253,8 +257,8 @@ func TestGatesFilerWriteMechanism(t *testing.T) {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			got := Gates(Env{
-				AgentsJSONTemplate:  tc.agentsJSONTemplate,
-				IssueTracker:        tc.issueTracker,
+				FilerEnabled:        tc.filerEnabled,
+				TrackerAxisFiler:    tc.trackerAxisFiler,
 				BoxWriteEnabled:     tc.boxWriteEnabled,
 				OrchestratorEnabled: tc.orchestratorEnabled,
 			})
