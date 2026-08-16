@@ -29,6 +29,30 @@ func TestModelDefault_IsSonnet5(t *testing.T) {
 	t.Fatal("MODEL entry not found in schemaFlags")
 }
 
+// TestSchemaFlags_DefaultModelsMatchFixture asserts every
+// expectedDefaultModels entry (cmd/launcher/defaultmodels_gen.go,
+// regen-rendered from lib/default-model-fixture.nix's schemaDefaults) matches
+// its corresponding schemaFlags entry's default, not just MODEL -- closing
+// the dead-fixture-key gap flagged in the issue #2514 review (SCOUT_MODEL,
+// REVIEW_MODEL, FILER_MODEL, and WORKER_MODEL were generated but asserted
+// nowhere).
+func TestSchemaFlags_DefaultModelsMatchFixture(t *testing.T) {
+	for env, want := range expectedDefaultModels {
+		env, want := env, want
+		t.Run(env, func(t *testing.T) {
+			for _, e := range schemaFlags {
+				if e.env == env {
+					if e.dflt != want {
+						t.Errorf("%s default = %q, want %q", env, e.dflt, want)
+					}
+					return
+				}
+			}
+			t.Fatalf("%s entry not found in schemaFlags", env)
+		})
+	}
+}
+
 // TestSchemaFlags_BwrapUnshareNetIsBool asserts the bwrap-unshare-net entry
 // is a presence-style bool flag, not a string (issue #2145 slice A).
 func TestSchemaFlags_BwrapUnshareNetIsBool(t *testing.T) {

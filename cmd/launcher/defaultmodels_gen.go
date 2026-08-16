@@ -6,7 +6,9 @@ package main
 
 // expectedDefaultModels mirrors lib/default-model-fixture.nix's
 // schemaDefaults -- the hand-typed anti-vacuity root for every
-// bump-sensitive default-model assertion (issue #2514).
+// bump-sensitive default-model assertion (issue #2514). dogfoodPins.filer
+// is deliberately NOT rendered here: it is a Nix-only concept (nix/
+// dogfood-defaults.nix's roster) with no Go-side consumer.
 var expectedDefaultModels = map[string]string{
 	"MODEL":        "claude-sonnet-5",
 	"SCOUT_MODEL":  "claude-haiku-4-5-20251001",
@@ -14,7 +16,3 @@ var expectedDefaultModels = map[string]string{
 	"FILER_MODEL":  "",
 	"WORKER_MODEL": "claude-sonnet-5",
 }
-
-// expectedDogfoodFilerModel mirrors lib/default-model-fixture.nix's
-// dogfoodPins.filer.
-const expectedDogfoodFilerModel = "claude-haiku-4-5-20251001"
