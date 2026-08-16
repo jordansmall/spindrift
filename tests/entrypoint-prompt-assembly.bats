@@ -24,16 +24,15 @@ setup() {
 # same way it already does for DRIVER_PREAMBLE_FILE/FRAGMENT_REGISTRY_FILE,
 # issue #433/#622). Without that wiring, an unset PROMPTS_DIR would hit
 # entrypoint.sh's bare `"$PROMPTS_DIR"` reference under `set -u` and die with
-# "unbound variable" instead of resolving to the real baked default -- a
-# weaker entrypoint than production ever runs. Asserting the failure message
-# names the baked default path (rather than "unbound variable") pins that the
-# preamble actually supplied it.
-@test "PROMPTS_DIR unset still resolves to the real baked default, not unbound" {
+# "unbound variable" partway through, instead of resolving to the real baked
+# default and completing the run like the sibling test above -- a weaker
+# entrypoint than production ever runs.
+@test "PROMPTS_DIR unset still resolves via the preamble default (not unbound)" {
   unset PROMPTS_DIR
   run bash "$ENTRYPOINT"
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"/agent/prompts"* ]]
+  [ "$status" -eq 0 ]
   [[ "$output" != *"unbound variable"* ]]
+  grep -q "Implement GitHub issue #7: Do the thing" "$DRIVER_PROMPT_FILE"
 }
 
 # RUN_NONCE (issue #1937): the launcher mints a per-run nonce and forwards it
