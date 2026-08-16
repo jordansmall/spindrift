@@ -65,21 +65,22 @@ let
 
   # A narrower axis than imageOnlyCheckNames: source checks whose *build*
   # closure embeds the aarch64-linux image — `bats` pulls it in through
-  # batsHarness.internals.run/build and skillsBwrapHarness.internals.agentFiles
-  # (nix/checks/bats.nix); `promptassembly-parity` pulls in the same
-  # batsHarness's internals.driverExecBin (nix/checks/promptassembly.nix) —
-  # mkHarness.nix always re-instantiates pkgs for the Linux twin of the host
-  # system, so either derivation is Linux-only regardless of which system
-  # evaluates it. `bats-outcome-opencode` and `bats-prompt-contract-parity`
+  # batsHarness.internals.run/build and
+  # skillsBwrapHarness.internals.agentFiles (nix/checks/bats.nix);
+  # `promptassembly-parity` pulls in the same batsHarness's
+  # internals.driverExecBin (nix/checks/promptassembly.nix) — mkHarness.nix
+  # always re-instantiates pkgs for the Linux twin of the host system, so
+  # either derivation is Linux-only regardless of which system evaluates it.
+  # `bats-outcome-opencode` and `bats-prompt-contract-parity`
   # (nix/checks/bats.nix) pull in the same batsHarness.internals.driverExecBin
   # now that $ENTRYPOINT unconditionally shells out to `driver-exec
   # assemble-prompt` (issue #2354), so they're Linux-only for the same
   # reason. `nix flake check` builds the whole checkset for the current
-  # system, so on darwin these fail with
-  # "Required system: aarch64-linux" (there is no Linux builder). Dropped from
-  # the darwin checkset below; still run on both Linux arches. Distinct from
-  # imageOnlyCheckNames: the `*-baked-in-dogfood` asserts there build natively
-  # on darwin (hostPkgs skillsDir / eval-only).
+  # system, so on darwin these fail with "Required system: aarch64-linux"
+  # (there is no Linux builder). Dropped from the darwin checkset below;
+  # still run on both Linux arches. Distinct from imageOnlyCheckNames: the
+  # `*-baked-in-dogfood` asserts there build natively on darwin (hostPkgs
+  # skillsDir / eval-only).
   linuxOnlyCheckNames = [
     "bats"
     "promptassembly-parity"
