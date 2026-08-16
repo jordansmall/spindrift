@@ -1299,27 +1299,27 @@ in
     assert assertMsg (!(harness.packages ? run)) "packages.run must not exist (removed, issue #613)";
     pkgs.runCommand "run-build-aliases-removed" { } "touch $out";
 
-  # Check-only outputs additionally live under a single `internals` attrset
-  # (issue #2529 slice 1), consumed by checks/fixtures instead of the
-  # top-level surface Consumers see. This slice is purely additive -- the
-  # legacy top-level keys stay put -- so assert both that the new path
-  # exists and that it's identical to the old one, for a few representative
-  # keys rather than the full set moving under `internals`.
-  mkharness-internals-attrset =
+  # The Consumer-facing attrset carries no check-only outputs (issue #2529
+  # AC1): every check-only key must live under `internals`, never reappear
+  # at the top level. Guards against silent reintroduction the same way
+  # run-build-aliases-removed above guards `apps`/`packages` -- a regression
+  # re-adding e.g. a top-level `imagePath` or `build` would otherwise pass
+  # every other check unnoticed.
+  mkharness-internals-attrset-scoped =
     let
       inherit (pkgs.lib) assertMsg;
+      expected = [
+        "apps"
+        "image"
+        "internals"
+        "packages"
+        "spindrift"
+      ];
+      actual = builtins.attrNames harness;
     in
-    assert assertMsg (harness ? internals) "harness.internals must exist (issue #2529)";
-    assert assertMsg (
-      harness.internals.imagePath == harness.imagePath
-    ) "harness.internals.imagePath must match harness.imagePath";
-    assert assertMsg (
-      harness.internals.roster == harness.roster
-    ) "harness.internals.roster must match harness.roster";
-    assert assertMsg (
-      harness.internals.build == harness.build
-    ) "harness.internals.build must match harness.build";
-    pkgs.runCommand "mkharness-internals-attrset" { } "touch $out";
+    assert assertMsg (actual == expected)
+      "mkHarness's Consumer-facing attrset must carry only ${builtins.toJSON expected}, got: ${builtins.toJSON actual}";
+    pkgs.runCommand "mkharness-internals-attrset-scoped" { } "touch $out";
 
   # A custom roster entry (the AC4 path) omitting both `promptFile` and
   # `prompt` must degrade gracefully -- not throw a cryptic missing-attribute

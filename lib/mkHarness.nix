@@ -1232,43 +1232,13 @@ else
   lib.warnIf (legacyKnobsSet != [ ]) deprecationMsg {
     inherit
       image
-      agentEnv
-      agentFiles
-      build
-      run
       spindrift
-      manpage
-      bashCompletion
-      fishCompletion
-      zshCompletion
-      imagePath
-      promptDir
-      skillsDir
-      outcomeContractFile
-      commsContractFile
-      checkContractFile
-      researchOutcomeContractFile
-      driverPreambleFile
-      fragmentRegistryFile
-      driverExecBin
-      driverEntry
-      runInputDocumentFile
-      buildInputDocumentFile
       ;
 
-    # The fully resolved agent roster (issue #2512), after the reviewEffort
-    # post-processing step -- exposed purely for eval-level introspection
-    # (nix/checks/equivalence.nix), the same reason driverEntry above is
-    # exposed. Not part of the settings/CLI surface itself.
-    roster = finalRoster;
-
-    # Check-only outputs, additionally namespaced under one attrset (issue
-    # #2529 slice 1): the versioned Consumer contract (ADR 0010) scopes to
+    # Check-only outputs live under this attrset only (issue #2529): the
+    # versioned Consumer contract (ADR 0010) scopes to
     # `image`/`spindrift`/`packages`/`apps` only, and everything checks/
-    # fixtures reach for lives here too so a later slice can drop the
-    # top-level copies without disturbing this shape. Additive for now --
-    # the top-level `inherit` block above and `roster` still carry these
-    # same values.
+    # fixtures reach for lives here instead, off the Consumer-facing surface.
     internals = {
       inherit
         agentEnv
@@ -1293,6 +1263,11 @@ else
         runInputDocumentFile
         buildInputDocumentFile
         ;
+
+      # The fully resolved agent roster (issue #2512), after the reviewEffort
+      # post-processing step -- exposed purely for eval-level introspection
+      # (nix/checks/equivalence.nix), the same reason driverEntry above is
+      # exposed. Not part of the settings/CLI surface itself.
       roster = finalRoster;
     };
 
@@ -1309,7 +1284,8 @@ else
     # apps.default (`nix run .`) is the sole app output: the spindrift CLI.
     # The `build`/`run` app-style aliases were removed (issue #613); the
     # `build`/`run` derivations themselves live on as bats/equivalence test
-    # fixtures (see `inherit build run` above), just off the flake surface.
+    # fixtures (see `internals.build`/`internals.run` above), just off the
+    # flake surface.
     apps.default = {
       type = "app";
       program = "${spindrift}/bin/spindrift";
