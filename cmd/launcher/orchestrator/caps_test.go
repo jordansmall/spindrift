@@ -98,68 +98,56 @@ func TestValidateMaxParallelWorkersAcceptsShippedDefault(t *testing.T) {
 	}
 }
 
-// TestValidateBudgetCaps guards the fail-fast check on -max-budget-tokens/
-// -max-budget-usd (issue #2694 review finding): unlike
-// -max-parallel-workers, 0 IS accepted here -- budget's own legitimate
-// "disabled" sentinel -- but a negative value is rejected, since
-// budgetExceeded's own >= comparison would otherwise silently never fire
-// against it, behaving exactly like (and so masking) a disabled cap.
-func TestValidateBudgetCaps(t *testing.T) {
+// TestParseNonnegBudgetTokens guards -max-budget-tokens' graceful-degrade
+// parsing (issue #2694 review finding): a negative or malformed value
+// collapses to 0 (disabled) instead of erroring, mirroring the host
+// launcher's own atoiNonneg tolerance for the identical MAX_BUDGET_TOKENS
+// env var -- the Box must not be stricter than the host about the same
+// knob now that it's forwarded there unconditionally (boxEnv=true).
+func TestParseNonnegBudgetTokens(t *testing.T) {
 	tests := []struct {
-		name            string
-		maxBudgetTokens int
-		maxBudgetUSD    float64
-		wantErr         bool
+		name string
+		in   string
+		want int
 	}{
-		{"both zero (disabled) is accepted", 0, 0, false},
-		{"positive tokens, zero usd is accepted", 100, 0, false},
-		{"zero tokens, positive usd is accepted", 0, 4.44, false},
-		{"negative tokens is rejected", -1, 0, true},
-		{"negative usd is rejected", 0, -0.01, true},
-		{"both negative is rejected", -1, -0.01, true},
+		{"zero", "0", 0},
+		{"positive", "100", 100},
+		{"negative collapses to 0", "-1", 0},
+		{"malformed collapses to 0", "not-a-number", 0},
+		{"empty collapses to 0", "", 0},
+		{"fractional collapses to 0 (Atoi rejects it, not a valid int)", "4.44", 0},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := validateBudgetCaps(tt.maxBudgetTokens, tt.maxBudgetUSD)
-			if tt.wantErr && err == nil {
-				t.Errorf("validateBudgetCaps(%d, %v) = nil, want error", tt.maxBudgetTokens, tt.maxBudgetUSD)
-			}
-			if !tt.wantErr && err != nil {
-				t.Errorf("validateBudgetCaps(%d, %v) = %v, want nil", tt.maxBudgetTokens, tt.maxBudgetUSD, err)
+			if got := parseNonnegBudgetTokens(tt.in); got != tt.want {
+				t.Errorf("parseNonnegBudgetTokens(%q) = %d, want %d", tt.in, got, tt.want)
 			}
 		})
 	}
 }
 
-// TestWarnBudgetCapsUnconsultedByLegacyLoop guards the advisory warning
-// (issue #2694 review finding) for a budget cap configured under the
-// legacy single-loop path, where legacyTransition has no budget case at
-// all and so never consults it -- a silent, symptomless no-op without this
-// warning.
-func TestWarnBudgetCapsUnconsultedByLegacyLoop(t *testing.T) {
+// TestParseNonnegBudgetUSD is TestParseNonnegBudgetTokens' -max-budget-usd
+// counterpart, mirroring the host launcher's own floatNonnegSchema
+// tolerance the same way -- including that a fractional value, unlike the
+// tokens case, parses normally here.
+func TestParseNonnegBudgetUSD(t *testing.T) {
 	tests := []struct {
-		name              string
-		maxBudgetTokens   int
-		maxBudgetUSD      float64
-		reviewPassEnabled bool
-		wantWarning       bool
+		name string
+		in   string
+		want float64
 	}{
-		{"both zero, legacy loop: no warning (nothing configured)", 0, 0, false, false},
-		{"tokens set, legacy loop: warns", 100, 0, false, true},
-		{"usd set, legacy loop: warns", 0, 4.44, false, true},
-		{"both set, legacy loop: warns", 100, 4.44, false, true},
-		{"tokens set, review loop enabled: no warning (actually consulted)", 100, 4.44, true, false},
+		{"zero", "0", 0},
+		{"positive", "4.44", 4.44},
+		{"negative collapses to 0", "-0.01", 0},
+		{"malformed collapses to 0", "not-a-number", 0},
+		{"empty collapses to 0", "", 0},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := warnBudgetCapsUnconsultedByLegacyLoop(tt.maxBudgetTokens, tt.maxBudgetUSD, tt.reviewPassEnabled)
-			if tt.wantWarning && got == "" {
-				t.Errorf("warnBudgetCapsUnconsultedByLegacyLoop(%d, %v, %v) = \"\", want a warning", tt.maxBudgetTokens, tt.maxBudgetUSD, tt.reviewPassEnabled)
-			}
-			if !tt.wantWarning && got != "" {
-				t.Errorf("warnBudgetCapsUnconsultedByLegacyLoop(%d, %v, %v) = %q, want \"\"", tt.maxBudgetTokens, tt.maxBudgetUSD, tt.reviewPassEnabled, got)
+			if got := parseNonnegBudgetUSD(tt.in); got != tt.want {
+				t.Errorf("parseNonnegBudgetUSD(%q) = %v, want %v", tt.in, got, tt.want)
 			}
 		})
 	}

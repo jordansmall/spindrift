@@ -42,8 +42,17 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 	passSummaryPath := fs.String("pass-summary-path", "/tmp/pass-summary.md", "path to the most recent pass's own summary, recorded into the run-state artifact")
 	maxReviewRounds := fs.Int("max-review-rounds", defaultMaxReviewRounds, "cap on additional fresh-session passes a BLOCK verdict may trigger; 0 disables the cap")
 	maxSlices := fs.Int("max-slices", defaultMaxSlices, "cap on total driver-exec invocations this run makes; 0 disables the cap")
-	maxBudgetTokens := fs.Int("max-budget-tokens", 0, "cap on this run's cumulative token usage across every pass, consulted by the review-pass loop's own review-round decision only (-review-prompt-file); 0 disables the cap")
-	maxBudgetUSD := fs.Float64("max-budget-usd", 0, "cap on this run's cumulative USD cost across every pass, consulted by the review-pass loop's own review-round decision only (-review-prompt-file); 0 disables the cap")
+	// Declared as strings, not fs.Int/fs.Float64, and parsed below with
+	// parseNonnegBudgetTokens/parseNonnegBudgetUSD instead of relying on
+	// flag.Parse's own strict numeric parsing (issue #2694 review finding):
+	// entrypoint.sh forwards MAX_BUDGET_TOKENS/MAX_BUDGET_USD unconditionally
+	// now (boxEnv=true), so a malformed or negative operator value must
+	// degrade gracefully the same way the host launcher's own
+	// atoiNonneg/floatNonneg already do for the identical env var, not kill
+	// the Box outright the way a bad fs.Int/fs.Float64 value would (fs.Parse
+	// itself fails with exit code 2 before this run ever starts).
+	maxBudgetTokensRaw := fs.String("max-budget-tokens", "0", "cap on this run's cumulative token usage across every pass, consulted by the review-pass loop's own review-round decision only (-review-prompt-file); 0 disables the cap; a negative or malformed value is treated as 0")
+	maxBudgetUSDRaw := fs.String("max-budget-usd", "0", "cap on this run's cumulative USD cost across every pass, consulted by the review-pass loop's own review-round decision only (-review-prompt-file); 0 disables the cap; a negative or malformed value is treated as 0")
 	reviewPromptFile := fs.String("review-prompt-file", "", "path to the code-owned review pass's own prompt text; empty disables the review pass")
 	reviewModel := fs.String("review-model", "", "value for the review pass's own --model flag, empty falls back to the coordinator's --model")
 	reviewEffort := fs.String("review-effort", "", "value for the review pass's own --effort flag, empty falls back to the coordinator's --effort")
@@ -94,21 +103,14 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
-	// Same fatal-on-nonsense-value shape as -max-parallel-workers above
-	// (issue #2694): 0 is budget's own legitimate "disabled" cap, but a
-	// negative value has no meaning and would silently behave like a
-	// disabled cap rather than erroring (budgetExceeded's own >= comparison
-	// never fires against a negative cap), so this aborts the run instead.
-	if err := validateBudgetCaps(*maxBudgetTokens, *maxBudgetUSD); err != nil {
-		fmt.Fprintln(stderr, err)
-		return 1
-	}
-	// Same warn-and-continue shape as the cap-coherence check above (issue
-	// #2694): a budget cap configured under the legacy loop is inert, not
-	// invalid, so this is advisory only.
-	if warning := warnBudgetCapsUnconsultedByLegacyLoop(*maxBudgetTokens, *maxBudgetUSD, *reviewPromptFile != ""); warning != "" {
-		fmt.Fprintln(stderr, warning)
-	}
+	// maxBudgetTokens/maxBudgetUSD parse with the same graceful-degrade
+	// semantics as the host launcher's own atoiNonneg/floatNonneg (issue
+	// #2694 review finding): a negative or malformed value silently becomes
+	// 0 (disabled) rather than a fatal error, matching how MAX_BUDGET_TOKENS/
+	// MAX_BUDGET_USD already behave host-side -- there is no coherent reason
+	// for the Box to be stricter than the host about the exact same knob.
+	maxBudgetTokens := parseNonnegBudgetTokens(*maxBudgetTokensRaw)
+	maxBudgetUSD := parseNonnegBudgetUSD(*maxBudgetUSDRaw)
 
 	rc, err := run(config{
 		driver:             *driverName,
@@ -129,8 +131,8 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 		passSummaryPath:    *passSummaryPath,
 		maxReviewRounds:    *maxReviewRounds,
 		maxSlices:          *maxSlices,
-		maxBudgetTokens:    *maxBudgetTokens,
-		maxBudgetUSD:       *maxBudgetUSD,
+		maxBudgetTokens:    maxBudgetTokens,
+		maxBudgetUSD:       maxBudgetUSD,
 		reviewPromptFile:   *reviewPromptFile,
 		reviewModel:        *reviewModel,
 		reviewEffort:       *reviewEffort,

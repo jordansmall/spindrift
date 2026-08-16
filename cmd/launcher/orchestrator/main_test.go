@@ -163,13 +163,17 @@ exit 0
 	}
 }
 
-// TestMainRunRejectsNegativeBudgetCaps is
-// TestMainRunRejectsNonPositiveMaxParallelWorkers's own twin for
-// validateBudgetCaps (issue #2694 review finding): proves mainRun's own
-// wiring -- flag parse, then the validateBudgetCaps call, then the fatal
-// abort -- actually runs, not just that validateBudgetCaps itself rejects a
-// negative value in isolation (caps_test.go already covers that).
-func TestMainRunRejectsNegativeBudgetCaps(t *testing.T) {
+// TestMainRunToleratesMalformedOrNegativeBudgetCaps proves mainRun's own
+// wiring -- flag parse (as a plain string, not fs.Int/fs.Float64), then
+// parseNonnegBudgetTokens/parseNonnegBudgetUSD -- actually runs a Box to
+// completion on a negative or malformed -max-budget-tokens/-max-budget-usd,
+// rather than the fs.Int/fs.Float64-typed flag.Parse failure (exit code 2,
+// before any pass runs at all) that shape would have produced (issue #2694
+// review finding): entrypoint.sh forwards MAX_BUDGET_TOKENS/MAX_BUDGET_USD
+// unconditionally now, so a stale or mistyped operator value -- one the
+// host launcher's own atoiNonneg/floatNonneg have always tolerated
+// silently -- must not newly kill the Box.
+func TestMainRunToleratesMalformedOrNegativeBudgetCaps(t *testing.T) {
 	dir := t.TempDir()
 	callLog := filepath.Join(dir, "calls.log")
 	writeFakeDriverExec(t, dir, callLog, `printf 'SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=done nonce=abc\n'
@@ -178,17 +182,13 @@ exit 0
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
 	var stdout, stderr bytes.Buffer
-	rc := mainRun(singlePassFakeDriverArgv(dir, "-max-budget-tokens=-1"), &stdout, &stderr)
+	rc := mainRun(singlePassFakeDriverArgv(dir, "-max-budget-tokens=-1", "-max-budget-usd=not-a-number"), &stdout, &stderr)
 
-	if rc != 1 {
-		t.Fatalf("mainRun exit code = %d, want 1 (stderr: %q)", rc, stderr.String())
+	if rc != 0 {
+		t.Fatalf("mainRun exit code = %d, want 0 (stderr: %q) -- a bad budget cap value must degrade to disabled, not abort the run", rc, stderr.String())
 	}
-	if !strings.Contains(stderr.String(), "-max-budget-tokens=-1") {
-		t.Errorf("stderr = %q, want it to name the offending -max-budget-tokens=-1 value", stderr.String())
-	}
-
-	if _, err := os.ReadFile(callLog); err == nil {
-		t.Fatalf("driver-exec was invoked -- a negative -max-budget-tokens must abort the run before any pass runs")
+	if _, err := os.ReadFile(callLog); err != nil {
+		t.Fatalf("driver-exec was never invoked (%v) -- a bad budget cap value must not abort the run before any pass runs", err)
 	}
 }
 
