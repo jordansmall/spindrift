@@ -1129,11 +1129,23 @@ let
     in
     workerEntry != null && workerEntry.model != "";
 
+  # Checked against mergedDefaults (schemaDefaults // defaults), not the raw
+  # Consumer-supplied `defaults`, and unconditionally -- not gated on
+  # `defaults ? maxParallelWorkers` (review finding, issue #2495). The
+  # schema bakes MAX_PARALLEL_WORKERS=2 whether or not a Consumer ever
+  # mentions the knob (env-schema.nix's own default), and
+  # fragments.nix's coordinator-parallel-dispatch.md row gates on
+  # ORCHESTRATOR alone -- so an unset knob still means "parallelism
+  # requested" at eval time, exactly as much as an explicit one does. A
+  # Consumer that gates ONLY on `defaults ? maxParallelWorkers` (the prior
+  # revision of this assert) builds green with `{ orchestratorEnabled =
+  # true; workerModel = ""; }`: parallel dispatch is on, by the baked
+  # default, with nothing for it to ever run.
   maxParallelWorkersCoherenceOk =
-    if (defaults ? maxParallelWorkers) && !workerProvisionedForParallelDispatch then
-      throw "mkHarness: MAX_PARALLEL_WORKERS is set but no worker subagent is provisioned (workerModel/roster's worker model is empty); the orchestrator's slice-manifest worker dispatch this knob caps has nothing to ever run"
-    else if (defaults ? maxParallelWorkers) && defaults.maxParallelWorkers <= 0 then
-      throw "mkHarness: MAX_PARALLEL_WORKERS=${toString defaults.maxParallelWorkers} must be positive -- there is no meaningful \"disabled\" value for a concurrency semaphore's capacity (omit the knob, or set it >= 1, to use the schema default)"
+    if !workerProvisionedForParallelDispatch then
+      throw "mkHarness: MAX_PARALLEL_WORKERS=${toString mergedDefaults.maxParallelWorkers} (default or explicit) requests worker-slice parallelism but no worker subagent is provisioned (workerModel/roster's worker model is empty); the orchestrator's slice-manifest worker dispatch this knob caps has nothing to ever run"
+    else if mergedDefaults.maxParallelWorkers <= 0 then
+      throw "mkHarness: MAX_PARALLEL_WORKERS=${toString mergedDefaults.maxParallelWorkers} must be positive -- there is no meaningful \"disabled\" value for a concurrency semaphore's capacity (set it >= 1)"
     else
       true;
 
