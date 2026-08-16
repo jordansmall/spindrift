@@ -281,22 +281,7 @@ func run(cfg config, stdout io.Writer) (int, error) {
 		if cfg.scoutBriefPath != "" {
 			state.ScoutBriefPath = cfg.scoutBriefPath
 		}
-		// An empty cfg.passSummaryPath means the caller didn't supply one
-		// this pass, not that the prior path is now unknown, so it leaves
-		// the carried-forward value alone rather than clobbering it with "".
-		// A configured path only gets recorded if this pass actually wrote
-		// it: seedAndInvokePass already unlinked any stale file left by a
-		// prior pass before invoking driver-exec, so a killed-mid-turn pass
-		// (or one that simply never wrote a summary) leaves the file
-		// missing here, and the state must not seed the next pass with a
-		// reference to a summary that no longer exists.
-		if cfg.passSummaryPath != "" {
-			if _, statErr := os.Stat(cfg.passSummaryPath); statErr == nil {
-				state.PassSummaryPath = cfg.passSummaryPath
-			} else {
-				state.PassSummaryPath = ""
-			}
-		}
+		recordPassSummary(cfg, &state)
 		// driver-exec (re-)creates cfg.logPath fresh for this one pass
 		// (issue #626's run.go: os.Create truncates), so by the time it
 		// returns the file holds exactly this pass's own raw stream -- the
@@ -396,22 +381,7 @@ func runWithReviewPass(cfg config, stdout io.Writer) (int, error) {
 		if cfg.scoutBriefPath != "" {
 			state.ScoutBriefPath = cfg.scoutBriefPath
 		}
-		// An empty cfg.passSummaryPath means the caller didn't supply one
-		// this pass, not that the prior path is now unknown, so it leaves
-		// the carried-forward value alone rather than clobbering it with "".
-		// A configured path only gets recorded if this pass actually wrote
-		// it: seedAndInvokePass already unlinked any stale file left by a
-		// prior pass before invoking driver-exec, so a killed-mid-turn pass
-		// (or one that simply never wrote a summary) leaves the file
-		// missing here, and the state must not seed the next pass with a
-		// reference to a summary that no longer exists.
-		if cfg.passSummaryPath != "" {
-			if _, statErr := os.Stat(cfg.passSummaryPath); statErr == nil {
-				state.PassSummaryPath = cfg.passSummaryPath
-			} else {
-				state.PassSummaryPath = ""
-			}
-		}
+		recordPassSummary(cfg, &state)
 		// Verdict authority belongs solely to the review pass below under
 		// this loop -- an implement/fix pass's own prompt has the
 		// self-review loop stripped, so its log is scanned only for
@@ -897,18 +867,44 @@ func invokeDriverExec(cfg config, stdout io.Writer) (int, error) {
 	return 0, nil
 }
 
+// recordPassSummary records cfg.passSummaryPath into state.PassSummaryPath
+// only when this pass's own invocation actually left a file there, verified
+// via os.Stat -- seedAndInvokePass's own guard only unlinks a leftover file
+// when state.PassSummaryPath was already "" going into this pass (nothing
+// this round referenced it), so a killed-mid-turn pass, or one that simply
+// never wrote a summary, can still leave the path missing here; the state
+// must not seed the next pass with a reference to a summary that doesn't
+// exist. An empty cfg.passSummaryPath means the caller didn't supply one
+// this pass, not that the prior path is now unknown, so it leaves the
+// carried-forward value alone rather than clobbering it with "". Shared by
+// run and runWithReviewPass, which otherwise duplicated this block
+// verbatim.
+func recordPassSummary(cfg config, state *runstate.RunState) {
+	if cfg.passSummaryPath == "" {
+		return
+	}
+	if _, statErr := os.Stat(cfg.passSummaryPath); statErr == nil {
+		state.PassSummaryPath = cfg.passSummaryPath
+	} else {
+		state.PassSummaryPath = ""
+	}
+}
+
 // seedAndInvokePass seeds cfg.promptFile from state (removing the previous
 // pass's own seeded file first, per seedPromptFromState's caller contract --
 // prevSeededPromptFile is "" on the first pass, and left alone by
 // seedPromptFromState's own no-op case when state carries nothing new to
 // seed), pins cfg.sessionFile verbatim only for pass 1 and runs every pass
-// after it sessionless, and invokes driver-exec. Returns the pass's exit
-// code and its own seeded prompt file, for the caller to track as its next
-// prevSeededPromptFile. Shared by run's legacy single loop and
-// runWithReviewPass's implement/fix pass -- the one piece of per-pass
-// bookkeeping identical between them; each keeps its own scan-and-decide
-// logic afterward, since a legacy pass's own verdict drives its loop while
-// an implement/fix pass's does not.
+// after it sessionless, invokes driver-exec, and conditionally clears
+// cfg.passSummaryPath -- only when state.PassSummaryPath == "" going in
+// (nothing this round references it), matching recordPassSummary's own
+// guard for interpreting whatever file is left behind afterward. Returns
+// the pass's exit code and its own seeded prompt file, for the caller to
+// track as its next prevSeededPromptFile. Shared by run's legacy single
+// loop and runWithReviewPass's implement/fix pass -- the one piece of
+// per-pass bookkeeping identical between them; each keeps its own
+// scan-and-decide logic afterward, since a legacy pass's own verdict
+// drives its loop while an implement/fix pass's does not.
 func seedAndInvokePass(cfg config, state runstate.RunState, prevSeededPromptFile string, pass int, stdout io.Writer) (rc int, seededPromptFile string, err error) {
 	seededPromptFile, err = seedPromptFromState(cfg.promptFile, state)
 	if err != nil {
