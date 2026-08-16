@@ -73,16 +73,22 @@ func TestDispatchManifestIfPresentPreservesPriorWorkerFindingsWhenWorkerPromptFi
 	}
 }
 
-// TestDispatchManifestIfPresentAttributesManifestDiscardedWhenWorkerPromptFileUnset
-// covers the runtime analog of mkHarness.nix's eval-time
-// maxParallelWorkersCoherenceOk assert (issue #2495 review finding, AC3): a
-// pass whose log genuinely carries a manifest, but whose cfg.workerPromptFile
-// is empty (e.g. a fix-pass or review-only invocation, which never renders
-// worker-prompt.md), has nowhere to dispatch that manifest -- it must still
-// return false and clear state.WorkerFindings, the same as the no-manifest
-// case, rather than silently pretending the pass reported nothing to
-// investigate.
-func TestDispatchManifestIfPresentAttributesManifestDiscardedWhenWorkerPromptFileUnset(t *testing.T) {
+// TestDispatchManifestIfPresentPreservesFindingsWhenManifestFoundButNoWorkerPromptFile
+// verifies that when cfg.workerPromptFile is empty (a fix-pass or
+// review-only invocation, which never renders worker-prompt.md), a manifest
+// appearing in this pass's own log anyway -- e.g. a custom
+// SPINDRIFT_PROMPT_DIR fix-prompt.md that still carries the manifest step,
+// a legitimate, supported shape, not just a rogue/hallucinated marker --
+// must NOT be scanned for or acted on at all: dispatchManifestIfPresent must
+// return false and leave a prior state.WorkerFindings (set by an earlier
+// pass's dispatch) untouched, exactly like the no-manifest case, rather than
+// discarding it with a stderr note. Runtime coherence checks for this knob
+// belong at orchestrator startup (issue #2495 AC3), not as mid-run handling
+// here; this function's own job is only to seed/preserve state for the next
+// pass's seedPromptFromState (issue #2495 review finding: this branch
+// previously cleared state.WorkerFindings unconditionally here, destroying
+// an earlier pass's dispatch results).
+func TestDispatchManifestIfPresentPreservesFindingsWhenManifestFoundButNoWorkerPromptFile(t *testing.T) {
 	dir := t.TempDir()
 	manifest := SliceManifest{Slices: []ManifestSlice{{Name: "orphaned", Task: "implement seam a"}}}
 	line, err := manifest.Line()
@@ -99,14 +105,15 @@ func TestDispatchManifestIfPresentAttributesManifestDiscardedWhenWorkerPromptFil
 		logPath:          logPath,
 		workerPromptFile: "",
 	}
-	state := runstate.RunState{WorkerFindings: "stale findings from an earlier dispatch"}
+	state := runstate.RunState{WorkerFindings: "findings from an earlier dispatch, in this or a prior Box"}
+	want := state
 
 	got := dispatchManifestIfPresent(cfg, &state, io.Discard)
 	if got {
 		t.Errorf("dispatchManifestIfPresent() = true, want false (no worker-prompt-file to dispatch against)")
 	}
-	if state.WorkerFindings != "" {
-		t.Errorf("state.WorkerFindings = %q, want empty (stale findings must not survive a pass that could not dispatch)", state.WorkerFindings)
+	if !reflect.DeepEqual(state, want) {
+		t.Errorf("state = %+v, want untouched %+v", state, want)
 	}
 }
 
