@@ -14,7 +14,7 @@ func TestValidateNoGatesActive(t *testing.T) {
 	e := Env{DispatchKind: "work", BoxWriteEnabled: true, OrchestratorEnabled: false}
 	result := Result{Prompt: "no markers anywhere", AgentsJSON: ""}
 
-	warnings, err := Validate(e, result, testValidateMarkerRows(), nil)
+	warnings, err := Validate(e, result, testValidateMarkerRows())
 	if err != nil {
 		t.Fatalf("Validate() error = %v, want nil", err)
 	}
@@ -30,7 +30,7 @@ func TestValidateReadOnlyResearchReject(t *testing.T) {
 	e := Env{DispatchKind: "research", BoxWriteEnabled: false}
 	result := Result{Prompt: "research stub, no verdict-comment marker here"}
 
-	warnings, err := Validate(e, result, testValidateMarkerRows(), nil)
+	warnings, err := Validate(e, result, testValidateMarkerRows())
 	if err == nil {
 		t.Fatal("Validate() error = nil, want non-nil")
 	}
@@ -46,7 +46,7 @@ func TestValidateReadOnlyResearchPass(t *testing.T) {
 	e := Env{DispatchKind: "research", BoxWriteEnabled: false}
 	result := Result{Prompt: "research stub\n\nPost your verdict with SPINDRIFT_COMMENT here"}
 
-	_, err := Validate(e, result, testValidateMarkerRows(), nil)
+	_, err := Validate(e, result, testValidateMarkerRows())
 	if err != nil {
 		t.Fatalf("Validate() error = %v, want nil", err)
 	}
@@ -61,7 +61,7 @@ func TestValidateOrchestratorEnabledReject(t *testing.T) {
 		Handoff: Handoff{ReviewPromptFile: "reviewer stub, no verdict line here"},
 	}
 
-	warnings, err := Validate(e, result, testValidateMarkerRows(), nil)
+	warnings, err := Validate(e, result, testValidateMarkerRows())
 	if err == nil {
 		t.Fatal("Validate() error = nil, want non-nil")
 	}
@@ -79,7 +79,7 @@ func TestValidateOrchestratorEnabledNoFalsePositive(t *testing.T) {
 	e := Env{OrchestratorEnabled: true, BoxWriteEnabled: true}
 	result := Result{Handoff: Handoff{ReviewPromptFile: ""}}
 
-	warnings, err := Validate(e, result, testValidateMarkerRows(), nil)
+	warnings, err := Validate(e, result, testValidateMarkerRows())
 	if err != nil {
 		t.Fatalf("Validate() error = %v, want nil", err)
 	}
@@ -94,7 +94,7 @@ func TestValidateBoxAccessReadOnlyWarn(t *testing.T) {
 	e := Env{DispatchKind: "work", BoxWriteEnabled: false}
 	result := Result{Prompt: "issue stub, no PR-intent marker here"}
 
-	warnings, err := Validate(e, result, testValidateMarkerRows(), nil)
+	warnings, err := Validate(e, result, testValidateMarkerRows())
 	if err != nil {
 		t.Fatalf("Validate() error = %v, want nil", err)
 	}
@@ -120,7 +120,7 @@ func TestValidateFilerFileRelayWarn(t *testing.T) {
 		AgentsJSON: `{"filer":{"prompt":"no marker here"}}`,
 	}
 
-	warnings, err := Validate(e, result, testValidateMarkerRows(), nil)
+	warnings, err := Validate(e, result, testValidateMarkerRows())
 	if err != nil {
 		t.Fatalf("Validate() error = %v, want nil", err)
 	}
@@ -143,7 +143,7 @@ func TestValidateDataDrivenSeverity(t *testing.T) {
 		}
 	}
 
-	warnings, err := Validate(e, result, rows, nil)
+	warnings, err := Validate(e, result, rows)
 	if err == nil {
 		t.Fatal("Validate() error = nil, want non-nil (severity patched to reject)")
 	}
@@ -232,7 +232,7 @@ func TestValidateMarkerMessageVerbatim(t *testing.T) {
 		e := Env{DispatchKind: "research", BoxWriteEnabled: false}
 		result := Result{Prompt: "research stub, no verdict-comment marker here"}
 
-		_, err := Validate(e, result, rows, nil)
+		_, err := Validate(e, result, rows)
 		if err == nil {
 			t.Fatal("Validate() error = nil, want non-nil")
 		}
@@ -248,7 +248,7 @@ func TestValidateMarkerMessageVerbatim(t *testing.T) {
 			Handoff: Handoff{ReviewPromptFile: "reviewer stub, no verdict line here"},
 		}
 
-		_, err := Validate(e, result, rows, nil)
+		_, err := Validate(e, result, rows)
 		if err == nil {
 			t.Fatal("Validate() error = nil, want non-nil")
 		}
@@ -262,7 +262,7 @@ func TestValidateMarkerMessageVerbatim(t *testing.T) {
 		e := Env{DispatchKind: "work", BoxWriteEnabled: false}
 		result := Result{Prompt: "issue stub, no PR-intent marker here"}
 
-		warnings, err := Validate(e, result, rows, nil)
+		warnings, err := Validate(e, result, rows)
 		if err != nil {
 			t.Fatalf("Validate() error = %v, want nil", err)
 		}
@@ -290,7 +290,7 @@ func TestValidateMarkerMessageVerbatim(t *testing.T) {
 			AgentsJSON: `{"filer":{"prompt":"no marker here"}}`,
 		}
 
-		warnings, err := Validate(e, result, rows, nil)
+		warnings, err := Validate(e, result, rows)
 		if err != nil {
 			t.Fatalf("Validate() error = %v, want nil", err)
 		}
@@ -302,226 +302,6 @@ func TestValidateMarkerMessageVerbatim(t *testing.T) {
 			t.Errorf("Validate() warnings[0] =\n%q\nwant\n%q", warnings[0], want)
 		}
 	})
-}
-
-// TestValidateForbiddenMarkerRejectsImperativeUnderActiveGate covers the
-// forbiddenMarkers row wiring (issue #2464): a read-only, non-research
-// dispatch whose rendered prompt orders `git push` as an un-negated
-// numbered-list instruction must reject, with the forbidden-git-push row's
-// own Message surfacing verbatim.
-func TestValidateForbiddenMarkerRejectsImperativeUnderActiveGate(t *testing.T) {
-	e := Env{BoxWriteEnabled: false, DispatchKind: "work"}
-	result := Result{Prompt: "1. Push your branch with `git push` before you finish.\n"}
-
-	_, err := Validate(e, result, nil, testForbiddenMarkerRows())
-	if err == nil {
-		t.Fatal("Validate() error = nil, want non-nil")
-	}
-	want := forbiddenMarkerMessage(t, "forbidden-git-push")
-	if err.Error() != want {
-		t.Errorf("Validate() error =\n%q\nwant\n%q", err.Error(), want)
-	}
-}
-
-// TestValidateForbiddenMarkerPassesOnNegation covers the false-positive
-// guard: the shipped if-blocked-push-outbox.md fragment's own negated
-// `git push` list item (a read-only Box is explicitly told NOT to push) must
-// never trip the forbidden-git-push row.
-func TestValidateForbiddenMarkerPassesOnNegation(t *testing.T) {
-	e := Env{BoxWriteEnabled: false, DispatchKind: "work"}
-	result := Result{Prompt: "1. Your token is read-only and you take no code-out action yourself — do NOT\n" +
-		"   `git push` and do NOT run `git bundle create` (or note if you have nothing\n" +
-		"   committed to hand off). Leave what you have committed on the branch: after\n" +
-		"   you exit the harness relays your committed branch out and the launcher\n" +
-		"   pushes it host-side with its own token.\n"}
-
-	_, err := Validate(e, result, nil, testForbiddenMarkerRows())
-	if err != nil {
-		t.Fatalf("Validate() error = %v, want nil", err)
-	}
-}
-
-// TestValidateForbiddenMarkerInactiveUnderReadWrite covers the read-write
-// path being unaffected: with BoxWriteEnabled true, the boxAccessReadOnly
-// gate is never active, so an un-negated imperative `git push` in the
-// rendered prompt is never even evaluated.
-func TestValidateForbiddenMarkerInactiveUnderReadWrite(t *testing.T) {
-	e := Env{BoxWriteEnabled: true}
-	result := Result{Prompt: "1. Push your branch with `git push` before you finish.\n"}
-
-	_, err := Validate(e, result, nil, testForbiddenMarkerRows())
-	if err != nil {
-		t.Fatalf("Validate() error = %v, want nil", err)
-	}
-}
-
-// TestValidateForbiddenMarkerAbsentPasses covers the gate-active-but-marker-
-// nowhere case: no forbidden marker text anywhere in the prompt is never a
-// reject regardless of gate state.
-func TestValidateForbiddenMarkerAbsentPasses(t *testing.T) {
-	e := Env{BoxWriteEnabled: false, DispatchKind: "work"}
-	result := Result{Prompt: "no forbidden markers anywhere in this prompt"}
-
-	_, err := Validate(e, result, nil, testForbiddenMarkerRows())
-	if err != nil {
-		t.Fatalf("Validate() error = %v, want nil", err)
-	}
-}
-
-// TestValidateForbiddenMarkerRejectsImperativeInFilerPrompt covers the
-// filer-prompt haystack gap (issue #2464 follow-up): "gh issue create" only
-// ever renders inside the filer's own rendered prompt (extracted from
-// AgentsJSON via filerPromptFrom), never result.Prompt. A read-only,
-// non-research dispatch whose filer prompt orders it as an un-negated
-// numbered-list instruction must reject, even though result.Prompt itself
-// carries nothing relevant.
-func TestValidateForbiddenMarkerRejectsImperativeInFilerPrompt(t *testing.T) {
-	e := Env{BoxWriteEnabled: false, DispatchKind: "work"}
-	result := Result{
-		Prompt:     "issue stub, nothing forbidden here",
-		AgentsJSON: `{"filer":{"prompt":"1. File the issue via ` + "`gh issue create --title ...`" + ` before you finish.\n"}}`,
-	}
-
-	_, err := Validate(e, result, nil, testForbiddenMarkerRows())
-	if err == nil {
-		t.Fatal("Validate() error = nil, want non-nil")
-	}
-	want := forbiddenMarkerMessage(t, "forbidden-gh-issue-create")
-	if err.Error() != want {
-		t.Errorf("Validate() error =\n%q\nwant\n%q", err.Error(), want)
-	}
-}
-
-// TestValidateForbiddenMarkerRejectsImperativeInReviewPromptFile covers the
-// review-prompt-file haystack gap (issue #2464 follow-up), symmetric with
-// the filer-prompt case above: a read-only, non-research dispatch whose
-// orchestrator review prompt file orders "gh pr merge" as an un-negated
-// numbered-list instruction must reject, even though result.Prompt itself
-// carries nothing relevant.
-func TestValidateForbiddenMarkerRejectsImperativeInReviewPromptFile(t *testing.T) {
-	e := Env{BoxWriteEnabled: false, DispatchKind: "work"}
-	result := Result{
-		Prompt: "issue stub, nothing forbidden here",
-		Handoff: Handoff{
-			ReviewPromptFile: "1. Merge the PR via `gh pr merge` before you finish.\n",
-		},
-	}
-
-	_, err := Validate(e, result, nil, testForbiddenMarkerRows())
-	if err == nil {
-		t.Fatal("Validate() error = nil, want non-nil")
-	}
-	want := forbiddenMarkerMessage(t, "forbidden-gh-pr-merge")
-	if err.Error() != want {
-		t.Errorf("Validate() error =\n%q\nwant\n%q", err.Error(), want)
-	}
-}
-
-// TestValidateForbiddenMarkerToleratesGitForgeBranchUnderReadOnly covers
-// liveCodeForge == "git" excluded from the whenBoxAccessReadOnly
-// forbidden-row gate entirely (Validate's doc comment, validate.go): the
-// shipped templates/default/prompts/issue-prompt.md's `**`CODE_FORGE=git`**`
-// branch carries a genuine, ungated, un-negated numbered-list "git push"
-// instruction -- correct, load-bearing content for that branch, never a
-// drifted-fragment bug to catch. cmd/launcher/main.go's
-// checkReadOnlyCapabilityGate separately refuses at launcher startup to
-// ever dispatch BOX_FORGE_AND_ISSUE_ACCESS=read-only with CODE_FORGE=git,
-// but this promptassembly-package Validate call has no such protection of
-// its own -- entrypoint.sh's bats coverage exercises this exact combination
-// directly (tests/entrypoint-pr-intent-nudge.bats's "PR-intent gate: never
-// fires under CODE_FORGE=git"), so Validate must tolerate it.
-func TestValidateForbiddenMarkerToleratesGitForgeBranchUnderReadOnly(t *testing.T) {
-	e := Env{BoxWriteEnabled: false, DispatchKind: "work", CodeForge: "git"}
-	result := Result{Prompt: "**`CODE_FORGE=git`** (push-only Code Forge — no PR, no CI-watch, no merge\n" +
-		"gate): skip OPEN A PULL REQUEST below entirely.\n" +
-		"\n" +
-		"1. `git push --force-with-lease -u origin ${BRANCH}` (if not already pushed).\n" +
-		"2. Print exactly one line as your final output and stop.\n"}
-
-	_, err := Validate(e, result, nil, testForbiddenMarkerRows())
-	if err != nil {
-		t.Fatalf("Validate() error = %v, want nil", err)
-	}
-}
-
-// TestValidateForbiddenMarkerGhAPIMutationKindNeverScannedAsSubstring covers
-// issue #2499: the forbidden-gh-api-mutation row's Kind is
-// "gh-api-mutation", meaning its Marker ("gh api") is display-only --
-// lib/prompt-contract.nix's own row doc comment says enforcement is
-// entrypoint.sh's install_readonly_gh_shim argument-scan (only a mutating
-// `-X`/`--method` verb is rejected), not a plain-substring scan here. A
-// read-only, non-research dispatch whose rendered prompt orders a plain,
-// un-negated, read-only `gh api rate_limit` call (no mutating method flag)
-// must never reject -- Validate must not treat "gh api" as a literal
-// forbidden substring for this row.
-func TestValidateForbiddenMarkerGhAPIMutationKindNeverScannedAsSubstring(t *testing.T) {
-	e := Env{BoxWriteEnabled: false, DispatchKind: "work"}
-	result := Result{Prompt: "1. Run `gh api rate_limit` to check your remaining quota before starting.\n"}
-
-	_, err := Validate(e, result, nil, testForbiddenMarkerRows())
-	if err != nil {
-		t.Fatalf("Validate() error = %v, want nil", err)
-	}
-}
-
-// TestValidateForbiddenMarkerFjRowStillRejectsImperative proves the
-// gh-api-mutation Kind fix above is narrowly scoped: a "substring"-kind row
-// (forbidden-fj-pr-create) must still reject an un-negated imperative
-// `fj pr create` exactly as before.
-func TestValidateForbiddenMarkerFjRowStillRejectsImperative(t *testing.T) {
-	e := Env{BoxWriteEnabled: false, DispatchKind: "work"}
-	result := Result{Prompt: "1. Open the PR with `fj pr create` before you finish.\n"}
-
-	_, err := Validate(e, result, nil, testForbiddenMarkerRows())
-	if err == nil {
-		t.Fatal("Validate() error = nil, want non-nil")
-	}
-	want := forbiddenMarkerMessage(t, "forbidden-fj-pr-create")
-	if err.Error() != want {
-		t.Errorf("Validate() error =\n%q\nwant\n%q", err.Error(), want)
-	}
-}
-
-// TestValidateForbiddenMarkerUnknownKindFailsClosed covers issue #2499's
-// fail-closed fix: the forbiddenRows loop's Kind dispatch is an allowlist
-// switch, not a `!= forbiddenKindGhAPIMutation` denylist, so a typo'd or
-// otherwise unrecognized Kind value must return a wrapped, non-nil error
-// naming the offending row's ID rather than silently falling through to the
-// substring/imperative scan.
-func TestValidateForbiddenMarkerUnknownKindFailsClosed(t *testing.T) {
-	e := Env{BoxWriteEnabled: false, DispatchKind: "work"}
-	result := Result{Prompt: "prompt text unrelated to the row's marker"}
-	rows := []ForbiddenMarkerRow{
-		{
-			ID:       "test-unknown-kind",
-			Marker:   "some marker",
-			Severity: "reject",
-			When:     "boxAccessReadOnly",
-			Kind:     "bogus-kind",
-			Message:  "unused",
-		},
-	}
-
-	_, err := Validate(e, result, nil, rows)
-	if err == nil {
-		t.Fatal("Validate() error = nil, want non-nil")
-	}
-	if !strings.Contains(err.Error(), "test-unknown-kind") {
-		t.Errorf("Validate() error = %q, want it to mention row ID %q", err.Error(), "test-unknown-kind")
-	}
-}
-
-// forbiddenMarkerMessage returns testForbiddenMarkerRows()'s Message field
-// for the row with the given id, failing the test if no such row exists.
-func forbiddenMarkerMessage(t *testing.T, id string) string {
-	t.Helper()
-	for _, r := range testForbiddenMarkerRows() {
-		if r.ID == id {
-			return r.Message
-		}
-	}
-	t.Fatalf("no forbidden marker row with id %q", id)
-	return ""
 }
 
 // testValidateMarkerRows returns the four validateMarkers rows in
