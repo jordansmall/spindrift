@@ -797,3 +797,92 @@ func TestForgejoClient_Snapshot_TruncatesToLast10(t *testing.T) {
 		t.Errorf("Snapshot() = %q, want chronological order (user3 before user12)", got)
 	}
 }
+
+// TestForgejoClient_Snapshot_PaginatesAcrossMultiplePages verifies Snapshot
+// walks every page of the comments endpoint (mirroring listIssues' own
+// c.rest.Paginate walk, issue #2265) before taking the last 10, rather than
+// truncating to the last 10 of page 1 alone. The comments endpoint is
+// paginated by Forgejo/Gitea (default ~30/page) same as the issue-listing
+// endpoint, so a long thread spanning multiple pages must be walked in full
+// or the "last 10" contract silently returns stale comments from partway
+// through the thread instead of the newest ones.
+func TestForgejoClient_Snapshot_PaginatesAcrossMultiplePages(t *testing.T) {
+	const pageSize = forge.ResultPageLimit
+	const total = pageSize + 5 // forces a second, short page
+
+	var gotPages []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/api/v1/repos/owner/repo/issues/10":
+			w.Write([]byte(`{"number":10,"title":"t","body":"the body","state":"open","labels":[]}`))
+		case r.URL.Path == "/api/v1/repos/owner/repo/issues/10/comments":
+			q := r.URL.Query()
+			if limit := q.Get("limit"); limit != strconv.Itoa(pageSize) {
+				t.Errorf("limit query param = %q, want %q", limit, strconv.Itoa(pageSize))
+			}
+			page, err := strconv.Atoi(q.Get("page"))
+			if err != nil {
+				t.Fatalf("invalid page query param: %v", err)
+			}
+			gotPages = append(gotPages, q.Get("page"))
+
+			var b strings.Builder
+			b.WriteByte('[')
+			switch page {
+			case 1:
+				// Oldest-first comments 1..pageSize, a full page.
+				for i := 1; i <= pageSize; i++ {
+					if i > 1 {
+						b.WriteByte(',')
+					}
+					fmt.Fprintf(&b, `{"user":{"login":"user%d"},"created_at":"2024-01-01T00:00:%02dZ","body":"comment %d"}`, i, i%60, i)
+				}
+			case 2:
+				// Comments pageSize+1..total, a short page (5 < pageSize),
+				// signals the walk is done.
+				for i := pageSize + 1; i <= total; i++ {
+					if i > pageSize+1 {
+						b.WriteByte(',')
+					}
+					fmt.Fprintf(&b, `{"user":{"login":"user%d"},"created_at":"2024-01-02T00:00:%02dZ","body":"comment %d"}`, i, i%60, i)
+				}
+			default:
+				t.Errorf("server received request for page %d, want no request beyond the short page 2", page)
+			}
+			b.WriteByte(']')
+			w.Write([]byte(b.String()))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	fc := forgejo.NewForgejoClient(forgejo.ForgejoConfig{BaseURL: srv.URL, Repo: "owner/repo", Token: "tok"}).(forge.SnapshotReader)
+	got, err := fc.Snapshot("10")
+	if err != nil {
+		t.Fatalf("Snapshot: %v", err)
+	}
+
+	if len(gotPages) != 2 || gotPages[0] != "1" || gotPages[1] != "2" {
+		t.Fatalf("server saw page requests %v, want exactly [1 2]", gotPages)
+	}
+
+	// The last 10 comments across both pages span the page boundary: the
+	// final 5 of page 1 (pageSize-4..pageSize) and all 5 of page 2
+	// (pageSize+1..total).
+	for i := total - 9; i <= total; i++ {
+		want := fmt.Sprintf("user%d ", i)
+		if !strings.Contains(got, want) {
+			t.Errorf("Snapshot() = %q, want it to contain comment %q (last 10 across pages)", got, want)
+		}
+	}
+	// Comments before the last 10 must be dropped, including ones that
+	// would wrongly survive if only page 1 were consulted (e.g. the
+	// last-10-of-page-1 comments pageSize-9..pageSize-5).
+	for i := 1; i <= total-10; i++ {
+		unwanted := fmt.Sprintf("user%d ", i)
+		if strings.Contains(got, unwanted) {
+			t.Errorf("Snapshot() = %q, want comment %q dropped (older than the last 10 across all pages)", got, unwanted)
+		}
+	}
+}
