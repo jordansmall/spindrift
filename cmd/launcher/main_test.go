@@ -2784,6 +2784,28 @@ func TestDispatchConfig_NonPRForge_OpenPRForIssueAlwaysReportsNotFound(t *testin
 	}
 }
 
+// TestDispatchConfig_WiresIssueSnapshot verifies dispatchConfig sets
+// IssueSnapshot to a closure that resolves forge.Snapshot(it, number) —
+// mirroring OpenPRForIssue's own wiring (issue #2547).
+func TestDispatchConfig_WiresIssueSnapshot(t *testing.T) {
+	cf := forge.NewFake()
+	it := forge.NewFake()
+	it.SetIssue(forge.Issue{Number: "42", Body: "the frozen body"})
+
+	cfg := dispatchConfig(minimalValidConfig(), it, testWired(it), cf)
+
+	if cfg.IssueSnapshot == nil {
+		t.Fatal("want IssueSnapshot set")
+	}
+	text, err := cfg.IssueSnapshot("42")
+	if err != nil {
+		t.Fatalf("IssueSnapshot: unexpected error: %v", err)
+	}
+	if text != "the frozen body" {
+		t.Errorf("IssueSnapshot(42) = %q, want %q", text, "the frozen body")
+	}
+}
+
 // TestDispatchConfig_Local_ResolveEnv_ForwardsIntegrationBranchAsBaseBranch
 // verifies that under CODE_FORGE=local, dispatchConfig's ResolveEnv resolves
 // BASE_BRANCH to the dispatched issue's own Integration branch

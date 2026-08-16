@@ -16,6 +16,11 @@ import (
 // rather than replaces.
 const operatorSkillsDir = "/operator-skills"
 
+// issueSnapshotTarget is the fixed in-box path Box.IssueSnapshotPath mounts
+// onto (issue #2547) -- the frozen issue-read snapshot every implement/
+// review issue-read fragment reads instead of a live tracker call.
+const issueSnapshotTarget = "/issue-snapshot.md"
+
 // MountSpec describes a single host-to-box mount: what to mount, where, and
 // under what read-only policy. The decision of whether a mount applies —
 // gate, existence guard, operator message — is computed once by
@@ -75,6 +80,20 @@ func candidateMount(source, target string, readOnly bool) (MountSpec, bool) {
 	return MountSpec{Source: source, Target: target, ReadOnly: readOnly}, true
 }
 
+// candidateFileMount reports whether source should be mounted at target:
+// both must be set and source must be a regular file that exists -- the
+// single-file counterpart to candidateMount, which requires a directory.
+func candidateFileMount(source, target string, readOnly bool) (MountSpec, bool) {
+	if source == "" || target == "" {
+		return MountSpec{}, false
+	}
+	info, err := os.Stat(source)
+	if err != nil || info.IsDir() {
+		return MountSpec{}, false
+	}
+	return MountSpec{Source: source, Target: target, ReadOnly: readOnly}, true
+}
+
 // buildMountSpecs computes the list of host-to-box mounts that apply for p
 // and box, independent of runtime backend.
 func buildMountSpecs(p MountParams, box Box) []MountSpec {
@@ -116,6 +135,15 @@ func buildMountSpecs(p MountParams, box Box) []MountSpec {
 		if spec, ok := candidateMount(p.LocalIssuesDir, "/issues", true); ok {
 			specs = append(specs, spec)
 		}
+	}
+
+	// box.IssueSnapshotPath is the frozen issue-read snapshot file written
+	// once at Run's box start (issue #2547), silent like the /issues mount
+	// (this is a normal read path, not an operator override). An empty
+	// path -- research dispatches, and every pre-#2547 Box construction --
+	// yields no mount.
+	if spec, ok := candidateFileMount(box.IssueSnapshotPath, issueSnapshotTarget, true); ok {
+		specs = append(specs, spec)
 	}
 
 	return specs

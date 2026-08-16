@@ -338,6 +338,115 @@ func TestFix_PopulatesBoxDriverCacheDirWithSameKeyAsRun(t *testing.T) {
 	}
 }
 
+// TestRun_WritesAndMountsIssueSnapshot verifies that a Config with
+// IssueSnapshot set and Kind empty/"work" writes a snapshot file to disk
+// before/as part of the box launch, and the launched runner.Box carries
+// IssueSnapshotPath pointing at it (issue #2547).
+func TestRun_WritesAndMountsIssueSnapshot(t *testing.T) {
+	dir := tempLogDir(t)
+
+	fr := runner.NewFake()
+	cfg := Config{
+		IssueSnapshot: func(number string) (string, error) {
+			return "frozen text for #" + number, nil
+		},
+	}
+	f, err := NewFactory(cfg, dir, fr, fakeDriver{}, RealClock())
+	if err != nil {
+		t.Fatalf("NewFactory: %v", err)
+	}
+	defer f.Cleanup()
+
+	d := f.New("42", "T")
+	if result := d.Run(); !result.Success {
+		t.Fatalf("Run: want Success=true, got %+v", result)
+	}
+
+	if len(fr.RunCalls) != 1 {
+		t.Fatalf("RunCalls: got %d, want 1", len(fr.RunCalls))
+	}
+	path := fr.RunCalls[0].IssueSnapshotPath
+	if path == "" {
+		t.Fatal("Box.IssueSnapshotPath: got empty, want the snapshot file path")
+	}
+	if path != SnapshotPathFor(dir, "42") {
+		t.Errorf("Box.IssueSnapshotPath: got %q, want %q", path, SnapshotPathFor(dir, "42"))
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile(%q): %v", path, err)
+	}
+	if string(got) != "frozen text for #42" {
+		t.Errorf("snapshot file content: got %q, want %q", string(got), "frozen text for #42")
+	}
+}
+
+// TestRun_ResearchKind_NoIssueSnapshot verifies a research-kind Dispatch
+// never gets a snapshot -- Scout and research flows are unchanged (issue
+// #2547's acceptance criteria).
+func TestRun_ResearchKind_NoIssueSnapshot(t *testing.T) {
+	dir := tempLogDir(t)
+
+	fr := runner.NewFake()
+	resolveCalled := false
+	cfg := Config{
+		Kind: "research",
+		IssueSnapshot: func(number string) (string, error) {
+			resolveCalled = true
+			return "should never be written", nil
+		},
+	}
+	f, err := NewFactory(cfg, dir, fr, fakeDriver{}, RealClock())
+	if err != nil {
+		t.Fatalf("NewFactory: %v", err)
+	}
+	defer f.Cleanup()
+
+	d := f.New("42", "T")
+	if result := d.Run(); !result.Success {
+		t.Fatalf("Run: want Success=true, got %+v", result)
+	}
+
+	if resolveCalled {
+		t.Error("cfg.IssueSnapshot was called for a research dispatch, want it never called")
+	}
+	if len(fr.RunCalls) != 1 {
+		t.Fatalf("RunCalls: got %d, want 1", len(fr.RunCalls))
+	}
+	if got := fr.RunCalls[0].IssueSnapshotPath; got != "" {
+		t.Errorf("Box.IssueSnapshotPath: got %q, want empty for a research dispatch", got)
+	}
+	if _, statErr := os.Stat(SnapshotPathFor(dir, "42")); statErr == nil {
+		t.Error("snapshot file was written for a research dispatch, want none")
+	}
+}
+
+// TestRun_NilIssueSnapshot_NoOp verifies IssueSnapshot: nil (the zero-value
+// Config every pre-#2547 test already constructs) is a no-op: no snapshot
+// file, no IssueSnapshotPath on the launched Box.
+func TestRun_NilIssueSnapshot_NoOp(t *testing.T) {
+	dir := tempLogDir(t)
+
+	fr := runner.NewFake()
+	f, err := NewFactory(Config{}, dir, fr, fakeDriver{}, RealClock())
+	if err != nil {
+		t.Fatalf("NewFactory: %v", err)
+	}
+	defer f.Cleanup()
+
+	d := f.New("42", "T")
+	if result := d.Run(); !result.Success {
+		t.Fatalf("Run: want Success=true, got %+v", result)
+	}
+
+	if len(fr.RunCalls) != 1 {
+		t.Fatalf("RunCalls: got %d, want 1", len(fr.RunCalls))
+	}
+	if got := fr.RunCalls[0].IssueSnapshotPath; got != "" {
+		t.Errorf("Box.IssueSnapshotPath: got %q, want empty when IssueSnapshot is nil", got)
+	}
+}
+
 // TestResolveConflict_DoesNotMountDriverCache verifies ResolveConflict's box
 // does not carry a DriverCacheDir -- it never runs the main agent prompt, so
 // there is no session to resume.

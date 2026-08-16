@@ -343,6 +343,105 @@ func TestBuildMountSpecs_IssuesDirMissing_NoMount(t *testing.T) {
 	}
 }
 
+// TestCandidateFileMount_RegularFile verifies candidateFileMount mounts a
+// source that stats as a regular file, unlike candidateMount which requires
+// a directory.
+func TestCandidateFileMount_RegularFile(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/snapshot.md"
+	if err := os.WriteFile(path, []byte("hello"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	spec, ok := candidateFileMount(path, "/issue-snapshot.md", true)
+	if !ok {
+		t.Fatalf("candidateFileMount(%q): got ok=false, want true", path)
+	}
+	if spec.Source != path || spec.Target != "/issue-snapshot.md" || !spec.ReadOnly {
+		t.Errorf("candidateFileMount: got %+v", spec)
+	}
+}
+
+// TestCandidateFileMount_RejectsDirectory verifies candidateFileMount
+// refuses a source that stats as a directory -- the inverse of
+// candidateMount's own directory-only requirement.
+func TestCandidateFileMount_RejectsDirectory(t *testing.T) {
+	dir := t.TempDir()
+
+	if _, ok := candidateFileMount(dir, "/issue-snapshot.md", true); ok {
+		t.Errorf("candidateFileMount(%q): got ok=true for a directory, want false", dir)
+	}
+}
+
+// TestCandidateFileMount_MissingSource verifies candidateFileMount yields no
+// mount for a source that does not exist.
+func TestCandidateFileMount_MissingSource(t *testing.T) {
+	if _, ok := candidateFileMount("/nonexistent/does-not-exist.md", "/issue-snapshot.md", true); ok {
+		t.Error("candidateFileMount: got ok=true for a missing source, want false")
+	}
+}
+
+// TestCandidateFileMount_EmptySourceOrTarget verifies candidateFileMount
+// requires both source and target set, mirroring candidateMount.
+func TestCandidateFileMount_EmptySourceOrTarget(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/snapshot.md"
+	if err := os.WriteFile(path, []byte("hello"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	if _, ok := candidateFileMount("", "/issue-snapshot.md", true); ok {
+		t.Error("candidateFileMount: got ok=true for an empty source, want false")
+	}
+	if _, ok := candidateFileMount(path, "", true); ok {
+		t.Error("candidateFileMount: got ok=true for an empty target, want false")
+	}
+}
+
+// TestBuildMountSpecs_IssueSnapshotMounted verifies buildMountSpecs mounts
+// box.IssueSnapshotPath read-only at /issue-snapshot.md when it points at a
+// real file, silently (no operator Message) like the /issues mount.
+func TestBuildMountSpecs_IssueSnapshotMounted(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/issue-42.md"
+	if err := os.WriteFile(path, []byte("frozen text"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	specs := buildMountSpecs(MountParams{}, Box{IssueSnapshotPath: path})
+
+	var found *MountSpec
+	for i := range specs {
+		if specs[i].Target == "/issue-snapshot.md" {
+			found = &specs[i]
+		}
+	}
+	if found == nil {
+		t.Fatalf("expected an /issue-snapshot.md spec in %+v", specs)
+	}
+	if found.Source != path {
+		t.Errorf("Source = %q, want %q", found.Source, path)
+	}
+	if !found.ReadOnly {
+		t.Error("issue-snapshot mount must be read-only")
+	}
+	if found.Message != "" {
+		t.Errorf("issue-snapshot mount must be silent; got Message = %q", found.Message)
+	}
+}
+
+// TestBuildMountSpecs_IssueSnapshotPathEmpty_NoMount verifies buildMountSpecs
+// produces no /issue-snapshot.md mount when box.IssueSnapshotPath is empty.
+func TestBuildMountSpecs_IssueSnapshotPathEmpty_NoMount(t *testing.T) {
+	specs := buildMountSpecs(MountParams{}, Box{})
+
+	for _, s := range specs {
+		if s.Target == "/issue-snapshot.md" {
+			t.Errorf("unexpected /issue-snapshot.md spec for an empty IssueSnapshotPath: %+v", specs)
+		}
+	}
+}
+
 // TestAdaptersRenderOnly_NoDuplicatedMountDecisions is the issue's grep pin:
 // the prompt-dir/skills-dir mount gates and their operator messages must
 // live only in buildMountSpecs, not be duplicated in either adapter file.
