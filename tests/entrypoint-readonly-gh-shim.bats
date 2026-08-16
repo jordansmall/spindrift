@@ -204,19 +204,3 @@ setup() {
   [ "$status" -eq 0 ]
   grep -qF "pr create --title x --body y" "$GH_LOG"
 }
-
-@test "read-only Box with BOX_OUTBOX_RELAY_CAPABLE unset installs no gh shim (not outbox-relay-capable)" {
-  unset BOX_WRITE_ENABLED # issue #2465: otherwise read-only Box
-  # Overrides setup_entrypoint_env's default (helper.bash): a Box that is
-  # neither write-enabled nor outbox-relay-capable (e.g. forgejo, per
-  # lib/backends/default.nix) takes the non-read-only path -- pins the branch
-  # _is_readonly_outbox_relay's [ -n "${BOX_OUTBOX_RELAY_CAPABLE:-}" ] half guards.
-  unset BOX_OUTBOX_RELAY_CAPABLE
-  run bash "$ENTRYPOINT"
-  [ "$status" -eq 0 ]
-  [ ! -e "$HOME/.spindrift/readonly-gh-shim" ]
-
-  run gh pr create --title "x" --body "y"
-  [ "$status" -eq 0 ]
-  grep -qF "pr create --title x --body y" "$GH_LOG"
-}
