@@ -3,9 +3,9 @@
 # read-only github Box that reaches status=ready but never printed a
 # SPINDRIFT_PR_INTENT line leaves the launcher's hostMediateDraftPR with
 # nothing to relay -- it posts "merge blocked" and strands the finished
-# branch. Registering a second row on required_marker_gate (issue #2044)
-# resumes the same pinned session once with a corrective nudge before that
-# happens.
+# branch. A second required-marker gate row (issue #2044, verb-owned
+# decision issue #2511) resumes the same pinned session once with a
+# corrective nudge before that happens.
 
 load helper
 
@@ -104,7 +104,7 @@ EOF
   [ "$status" -eq 0 ]
 
   # Exactly two Driver invocations: the initial pass and the one resume pass
-  # the gate's required_marker_gate row fires.
+  # the PR-intent required-marker gate fires.
   [ "$(grep -c '^driver invoked for issue' "$DRIVER_LOG")" -eq 2 ]
 
   # The resumed pass is the one whose prompt was actually rendered last
@@ -138,7 +138,7 @@ EOF
   # One resume attempt only -- never a second.
   [ "$(grep -c '^driver invoked for issue' "$DRIVER_LOG")" -eq 2 ]
 
-  # required_marker_gate never rewrites the outcome itself on a miss -- the
+  # The PR-intent gate never rewrites the outcome itself on a miss -- the
   # status=ready line the Driver already committed to survives, for the
   # launcher's own hostMediateDraftPR/blockHandoff to classify.
   grep -q '^SPINDRIFT_OUTCOME issue=7 landing=https://github.com/owner/repo/pull/1 status=ready note=fake$' <<<"$output"
@@ -259,7 +259,7 @@ EOF
 # always false on that path -- the nudge never got a chance to run at all.
 # Now that the fix makes the nudge reach a backstop-derived run (the whole
 # point of #2448), a new hazard opens up: if the nudge's own corrective
-# resume (required_marker_gate's one resume attempt) itself crashes or
+# resume (the PR-intent gate's one resume attempt) itself crashes or
 # otherwise exits non-zero, that failure lands in main()'s own $claude_rc,
 # and the unconditional `exit "$claude_rc"` at the bottom of main() would
 # send this already-backstopped, already-relayed run to the launcher's

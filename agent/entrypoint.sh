@@ -736,8 +736,8 @@ phase_conflict_resolve() {
 # called (issue #2354 slice 3), so its early exits skip the verb call
 # entirely rather than discarding its output. This function still sets
 # prompt, agents_json, and _handoff (the raw Handoff descriptor JSON) --
-# run_driver_in_env and required_marker_gate's corrective resume now read
-# session mode/invoker/review-prompt/review-model straight off $_handoff at
+# run_driver_in_env and the required-marker gates' corrective resumes now
+# read session mode/invoker/review-prompt/review-model straight off $_handoff at
 # their own call sites instead of from separately-extracted sentinels (issue
 # #2355 drained _driver_session_mode/review_prompt_rendered/
 # review_model_rendered onto the descriptor itself).
@@ -856,8 +856,8 @@ phase_prompt_assembly() {
   prompt="$(cat "$_prompt_out")"
   agents_json="$(cat "$_agents_out")"
   # _handoff is assigned here by plain (non-local) assignment, not `local`,
-  # so it escapes to run_driver_in_env and required_marker_gate via main's
-  # cross-phase sentinel -- the same dynamic-scoping shape _use_dev_shell
+  # so it escapes to run_driver_in_env and the required-marker gates via
+  # main's cross-phase sentinel -- the same dynamic-scoping shape _use_dev_shell
   # already uses (issue #515) -- since those callers run outside this
   # function's own call frame. Issue #2355 drains run_driver_in_env's
   # session-mode/invoker/review-prompt/review-model derivation onto this raw
@@ -888,7 +888,7 @@ phase_prompt_assembly() {
 # descriptor JSON phase_prompt_assembly's driver-exec assemble-prompt call
 # produced, or "" for the one pass that predates it -- phase_conflict_resolve's
 # conflict-resolve call, which runs before any Handoff exists; the corrective
-# resume required_marker_gate fires deliberately narrows $4 to
+# resume each required-marker gate fires deliberately narrows $4 to
 # `{"Invoker": ...}` only, carrying issue #2065's deliberate omission of the
 # review fields forward). Below derives the invoker fork and the code-owned
 # review pass's own rendered prompt text/model (issues #2037, #2277) straight
@@ -945,7 +945,7 @@ run_driver_in_env() {
   # review_prompt/review_model come straight from the Handoff descriptor's
   # own ReviewPromptFile/ReviewModel fields (issue #2355) -- empty whenever
   # handoff_json itself is empty (the pre-Handoff conflict-resolve pass) or
-  # the keys are simply absent (required_marker_gate's corrective resume
+  # the keys are simply absent (a required-marker gate's corrective resume
   # narrows handoff_json to {"Invoker": ...} only, issue #2065).
   local review_prompt="" review_model="" worker_prompt=""
   if [ -n "$handoff_json" ]; then
@@ -1179,9 +1179,9 @@ emit_outcome_backstop() {
 # mentions the token in passing essentially never also carries this run's
 # nonce verbatim, the same way an untrusted comment/issue-body author's echo
 # of the token can't. An empty RUN_NONCE (e.g. a research dispatch, which
-# never reaches this gate anyway -- required_marker_gate's own
-# _is_research_kind check short-circuits first) matches nothing, never
-# everything.
+# never reaches this gate anyway -- the SPINDRIFT_OUTCOME required-marker
+# gate's own _is_research_kind check short-circuits first) matches nothing,
+# never everything.
 _scan_pr_intent_in_log() {
   local log="$1" nonce="${RUN_NONCE:-}"
   [ -n "$nonce" ] || return 0
