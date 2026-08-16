@@ -81,6 +81,20 @@ rec {
     )
     + "\n";
 
+  # The 8 baked /agent/* path fallbacks (lib/agent-paths.nix), rendered the
+  # same `VAR=${VAR:-<baked>}` fallback-preserving way as
+  # renderDefaultsPreamble above -- not an unconditional overwrite like
+  # renderDriverMountPreamble/renderPreamble (lib/drivers/default.nix), whose
+  # Driver-identity vars are fixed per Box invocation. These 8 vars must stay
+  # overridable by an already-exported env var: existing bats fixtures rely
+  # on overriding a subset of them, and a future path relocation should still
+  # be able to override the baked default without editing nix.
+  renderAgentPathsPreamble =
+    agentPaths:
+    concatStrings (
+      mapAttrsToList (var: path: "${var}=\${${var}:-${escapeShellArg path}}\n") agentPaths
+    );
+
   # The Launcher input document's `artifacts` section for the `run` wrapper
   # (ADR 0020): everything `run` needs at sandbox dispatch time, as a plain
   # attrset instead of exported bash — mkHarness.nix renders it to JSON
