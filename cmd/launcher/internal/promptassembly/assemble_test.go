@@ -504,6 +504,37 @@ func TestAssembleUnsupportedCell(t *testing.T) {
 	}
 }
 
+// TestAssembleUnknownTrackerOrForgeNoLongerRejected pins the tolerance
+// deleting checkCoveredCell's IssueTracker/CodeForge arms left behind
+// (issue #2540): a bogus value for either field now renders through
+// issueTrackerAxis's/Gates's own default arm instead of erroring, since
+// upstream validation (lib/mkHarness.nix's choicesCheckOk assert,
+// cmd/launcher/main.go's validate()) is the only thing that rejects it now.
+// Exists so a future change re-adding allowlist validation here shows up as
+// a deliberate test change, not a silent behavior shift.
+func TestAssembleUnknownTrackerOrForgeNoLongerRejected(t *testing.T) {
+	reg := loadTestRegistry(t)
+
+	cases := []struct {
+		name   string
+		mutate func(*Env)
+	}{
+		{name: "bogus issue tracker", mutate: func(e *Env) { e.IssueTracker = "bogus-tracker" }},
+		{name: "bogus code forge", mutate: func(e *Env) { e.CodeForge = "bogus-forge" }},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			env := coveredEnv()
+			tc.mutate(&env)
+
+			if _, err := Assemble(env, reg); err != nil {
+				t.Fatalf("Assemble: %v, want no error (checkCoveredCell no longer validates this field)", err)
+			}
+		})
+	}
+}
+
 // TestAssembleAccessForgeCellsCovered covers the CodeForge x
 // BoxWriteEnabled cells this issue adds to Assemble's covered set
 // (github+read-write was already covered): github+read-only,

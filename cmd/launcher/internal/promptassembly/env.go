@@ -17,9 +17,9 @@ package promptassembly
 
 // Default values entrypoint.sh's "${VAR:-default}" bash parameter expansion
 // applies when the corresponding Env field arrives empty. Named once here so
-// checkCoveredCell (assemble.go), Gates, and issueTrackerAxis (gates.go)
-// resolve the same default rather than each restating its own "github"/
-// "work" literal.
+// checkCoveredCell (assemble.go, DispatchKind only as of issue #2540),
+// Gates, and issueTrackerAxis (gates_tracker.go) resolve the same default
+// rather than each restating its own "github"/"work" literal.
 const (
 	defaultIssueTracker = "github"
 	defaultCodeForge    = "github"

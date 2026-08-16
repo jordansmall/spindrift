@@ -15,10 +15,9 @@ import (
 // render: an unrecognized DispatchKind value — see checkCoveredCell for the
 // exact set it is checked against. IssueTracker and CodeForge are covered
 // upstream (see checkCoveredCell's doc comment) and no longer re-validated
-// here. Every other axis (orchestrator on/off, dispatch-kind/fix-pass,
-// per-skill baked flags, access/forge) is handled by Assemble's own logic
-// regardless of how the others are set, so no combination of them is
-// rejected here.
+// here. Every other axis (orchestrator on/off, FixPass, per-skill baked
+// flags, access/forge) is handled by Assemble's own logic regardless of how
+// the others are set, so no combination of them is rejected here.
 var ErrUnsupportedCell = errors.New("promptassembly: env combination not covered by Assemble")
 
 // Result is Assemble's rendered output: the final prompt text, the
@@ -89,10 +88,13 @@ type Handoff struct {
 // their arms were deleted (issue #2540):
 //
 //   - lib/mkHarness.nix's `assert choicesCheckOk;` eval-time assert
-//     (backed by the choices-guard block) validates both fields' schema
-//     `choices` (lib/env-schema.nix) at build time.
-//   - cmd/launcher/main.go's validate() re-checks both at launcher startup
-//     via trackerRow.ValidAsTracker and codeForgeRow.ValidAsCodeForge.
+//     (backed by choiceViolations, lib/mkHarness.nix) validates both
+//     fields' schema `choices` (lib/env-schema.nix) at build time.
+//   - cmd/launcher/main.go's validate() checks both at launcher startup,
+//     host-side and before the Box exists, via trackerRow.ValidAsTracker
+//     and codeForgeRow.ValidAsCodeForge -- a separate process from the Box
+//     that later runs Assemble (via driver-exec), not an in-process
+//     re-check.
 //
 // Every other axis -- the orchestrator flag, FixPass, the four per-skill
 // baked flags, BoxWriteEnabled -- is handled by Assemble's own rendering
