@@ -145,6 +145,78 @@ in
       "renderDriverMountPreamble must export an empty DRIVER_SESSION_CACHE_DIR when the Driver declares none, got: ${out}";
     pkgs.runCommand "preambles-driver-mount-without-cache" { } "touch $out";
 
+  # Pins renderAgentPathsPreamble's shape: one `VAR=${VAR:-<baked>}`
+  # fallback-preserving line per attrset entry (issue #2531), mirroring
+  # renderDefaultsPreamble's shape above rather than renderDriverMountPreamble's
+  # unconditional `export VAR=` lines -- these 8 vars must stay overridable by
+  # an already-exported env var.
+  preambles-agent-paths-shape =
+    let
+      out = preambles.renderAgentPathsPreamble {
+        PROMPTS_DIR = "/agent/prompts";
+        OUTCOME_CONTRACT_FILE = "/agent/outcome-contract.md";
+      };
+    in
+    assert assertMsg (hasInfix ''PROMPTS_DIR=''${PROMPTS_DIR:-/agent/prompts}'' out)
+      "renderAgentPathsPreamble must emit VAR=\${VAR:-<baked-path>} per entry, got: ${out}";
+    assert assertMsg (
+      hasInfix ''OUTCOME_CONTRACT_FILE=''${OUTCOME_CONTRACT_FILE:-/agent/outcome-contract.md}'' out
+    ) "renderAgentPathsPreamble must emit one line per attrset entry, got: ${out}";
+    pkgs.runCommand "preambles-agent-paths-shape" { } "touch $out";
+
+  # A path value containing a shell-special character (a space) must
+  # round-trip safely through escapeShellArg, the same guard
+  # preambles-defaults-quote-containing pins for renderDefaultsPreamble.
+  preambles-agent-paths-escapes-value =
+    let
+      out = preambles.renderAgentPathsPreamble {
+        PROMPTS_DIR = "/agent/weird path";
+      };
+    in
+    pkgs.runCommand "preambles-agent-paths-escapes-value"
+      {
+        preamble = out;
+        nativeBuildInputs = [ pkgs.shellcheck ];
+      }
+      ''
+        cat >script.sh <<'SCRIPT_HEADER'
+        #!/usr/bin/env bash
+        set -euo pipefail
+        SCRIPT_HEADER
+        printf '%s\n' "$preamble" >>script.sh
+        cat >>script.sh <<'SCRIPT_TAIL'
+        printf '%s' "$PROMPTS_DIR"
+        SCRIPT_TAIL
+
+        shellcheck script.sh
+
+        got=$(unset PROMPTS_DIR; source script.sh)
+        if [ "$got" != "/agent/weird path" ]; then
+          echo "round-trip mismatch: got [$got] want [/agent/weird path]" >&2
+          exit 1
+        fi
+
+        touch $out
+      '';
+
+  # Proves the real production bindings (lib/agent-paths.nix) render
+  # correctly, ahead of slice 2 (issue #2531) actually consuming them in
+  # lib/image.nix / lib/mkHarness.nix. Builds the expected-lines list
+  # generically from the imported attrset instead of hand-typing all 8, so a
+  # 9th path added later doesn't silently escape this check's coverage.
+  preambles-agent-paths-real-bindings-render =
+    let
+      inherit (pkgs.lib) mapAttrsToList;
+      agentPaths = import ../../lib/agent-paths.nix;
+      out = preambles.renderAgentPathsPreamble agentPaths;
+      missing = builtins.filter (line: !hasInfix line out) (
+        mapAttrsToList (var: path: "${var}=\${${var}:-${path}}") agentPaths
+      );
+    in
+    assert assertMsg (missing == [ ])
+      "renderAgentPathsPreamble (lib/agent-paths.nix) must render every real binding, missing: ${builtins.toJSON missing}, got: ${out}";
+    pkgs.runCommand "preambles-agent-paths-real-bindings-render" { } "touch $out";
+
   preambles-run-artifacts-bwrap =
     let
       out = preambles.runArtifacts {
