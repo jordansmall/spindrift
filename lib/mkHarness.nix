@@ -464,6 +464,7 @@ let
     row:
     !(
       lib.hasInfix "READ_ONLY" row.gate
+      || lib.hasInfix "READONLY" row.gate
       || lib.hasInfix "READWRITE" row.gate
       || lib.hasInfix "READ_WRITE" row.gate
       || lib.hasInfix "_RW_" row.gate
@@ -484,6 +485,12 @@ let
         value = builtins.readFile (fragmentsDir + "/${row.fragment}");
       }) readOnlyReachableFragmentRows
     );
+    # Deliberately just these three: issue #2510 scopes the shared-template
+    # half of this rule to "the shared top-level templates (issue, review,
+    # filer prompts)" by name. fix-prompt.md and research{,-self-contained}
+    # -prompt.md are shared templates too and do carry forbiddenMarkers
+    # substrings (a negation and a descriptive mention, respectively), but
+    # bringing them under this scan is out of scope here.
     templateContentByFile = {
       "issue-prompt.md" = prompt;
       "review-prompt.md" = reviewPrompt;
