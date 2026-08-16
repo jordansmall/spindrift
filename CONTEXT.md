@@ -818,10 +818,12 @@ around the gate. Detection only, no prevention; surfaces for human triage.
 _Avoid_: audit, alert, monitor.
 
 **internals**:
-`mkHarness`'s return-value attrset holding every check-only output (build/run
+`mkHarness`'s return-value attrset holding the outputs checks/fixtures reach
+for but that aren't themselves part of the Consumer contract (build/run
 fixtures, contract files, `driverExecBin`, `roster`, …) — the counterpart to
 the Consumer-facing `image`/`spindrift`/`packages`/`apps` keys. The versioned
 Consumer contract (ADR 0010) scopes to that small Consumer surface;
 `internals` sits outside it and is free to churn, the nix-attrset analogue of
-`cmd/launcher/internal/*` (issue #2529).
+`cmd/launcher/internal/*` (issue #2529). Some `internals` keys (manpage,
+completions) are also separately reachable via `packages.spindrift-*`.
 _Avoid_: private outputs, test outputs.

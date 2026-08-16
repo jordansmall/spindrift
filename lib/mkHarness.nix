@@ -1235,10 +1235,12 @@ else
       spindrift
       ;
 
-    # Check-only outputs live under this attrset only (issue #2529): the
-    # versioned Consumer contract (ADR 0010) scopes to
-    # `image`/`spindrift`/`packages`/`apps` only, and everything checks/
-    # fixtures reach for lives here instead, off the Consumer-facing surface.
+    # Outputs that checks/fixtures need but that aren't themselves part of
+    # the versioned Consumer contract (ADR 0010, scoped to
+    # `image`/`spindrift`/`packages`/`apps`) live here (issue #2529). Four of
+    # these -- manpage/bashCompletion/fishCompletion/zshCompletion -- are
+    # also separately Consumer-reachable below as `packages.spindrift-*`;
+    # this attrset is where checks reach them from, not their only surface.
     internals = {
       inherit
         agentEnv
