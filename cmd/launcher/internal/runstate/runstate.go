@@ -46,6 +46,16 @@ type RunState struct {
 	// convention -- so a later fix pass resumes from what was actually done
 	// instead of re-deriving it from a transcript.
 	PassSummaryPath string `json:"pass_summary_path"`
+	// DispositionsPath is the path to the fix pass's own per-finding
+	// dispositions file (issue #2550) -- terse per-finding lines (e.g.
+	// "finding -> fixed in commit X" or "finding -> won't-fix: reason") --
+	// referenced by path, not inlined, mirroring PassSummaryPath's own
+	// convention, so a later round-N review pass can read it fresh.
+	// Distinct from PassSummaryPath: this file is deliberately separate
+	// from the pass's free-form summary, so review-prompt seeding never
+	// has to parse narrative out of a summary file to find dispositions
+	// (the file-boundary firewall issue #2550 requires).
+	DispositionsPath string `json:"dispositions_path"`
 	// ReviewFindings is the code-owned review pass's own final message --
 	// the "VERDICT: ..." line plus its Blocking/Non-blocking sections,
 	// verbatim -- recorded here (distinct from the bare LastVerdict word)
@@ -107,6 +117,16 @@ func (s RunState) IsEmpty() bool {
 	// dispatch-internal bookkeeping only (issue #2059's dedup mechanism),
 	// not part of the implementor-facing seeded-prompt handoff, and are
 	// never rendered by seedPromptFromState (issue #2549).
+	//
+	// DispositionsPath is excluded for the same reason (issue #2550 review
+	// finding): seedPromptFromState -- IsEmpty's only caller -- never
+	// renders it either. Only seedReviewPromptFromState's own, narrower
+	// emptiness check (state.ReviewFindings plus a fresh read of
+	// DispositionsPath's own file) governs the round-N review prompt this
+	// field actually seeds. Including it here would make IsEmpty return
+	// false for a state whose only set field is DispositionsPath, and
+	// seedPromptFromState would then render a "Run-state handoff" section
+	// with no bullets in it at all.
 	return s.LastVerdict == "" &&
 		s.ScoutBriefPath == "" &&
 		s.PassSummaryPath == "" &&
