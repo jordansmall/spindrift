@@ -71,6 +71,23 @@ type RunState struct {
 	FindingsLogPath string `json:"findings_log_path,omitempty"`
 }
 
+// IsEmpty reports whether s carries nothing worth seeding into a fresh
+// pass's prompt -- the zero value, or the common cold-start case where no
+// prior pass has left any handoff behind. Kept on RunState itself so a new
+// field only needs to be added here once, rather than at every caller that
+// otherwise open-codes its own all-fields-empty check (seedPromptFromState's
+// own check, before this method existed, was one such site).
+func (s RunState) IsEmpty() bool {
+	return s.LastVerdict == "" &&
+		len(s.DoneSlices) == 0 &&
+		len(s.RemainingSlices) == 0 &&
+		s.ScoutBriefPath == "" &&
+		s.ReviewFindings == "" &&
+		s.WorkerFindings == "" &&
+		s.FindingsLogPath == "" &&
+		!s.TerminalLand
+}
+
 // ReadRunState reads and parses the run-state artifact at path. An empty
 // path or a path with no file yet (the first pass of a run) returns a zero
 // RunState with no error -- there is nothing to hand off yet, not a failure.

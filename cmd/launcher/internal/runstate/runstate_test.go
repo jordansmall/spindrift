@@ -229,3 +229,27 @@ func TestReadRunStateCorruptFileReturnsError(t *testing.T) {
 		t.Error("ReadRunState of a corrupt file: got nil error, want one")
 	}
 }
+
+// TestRunStateIsEmpty verifies IsEmpty (issue #2552) reports true only for
+// the zero value, and false the moment any single field -- including
+// FindingsLogPath, the newest one -- carries a handoff.
+func TestRunStateIsEmpty(t *testing.T) {
+	if !(RunState{}).IsEmpty() {
+		t.Error("IsEmpty() of the zero value = false, want true")
+	}
+	nonEmpty := []RunState{
+		{DoneSlices: []string{"scout"}},
+		{RemainingSlices: []string{"land"}},
+		{LastVerdict: "BLOCK"},
+		{ScoutBriefPath: "/tmp/brief.md"},
+		{ReviewFindings: "some finding"},
+		{WorkerFindings: "slice-a: done"},
+		{FindingsLogPath: "/tmp/findings.md"},
+		{TerminalLand: true},
+	}
+	for _, s := range nonEmpty {
+		if s.IsEmpty() {
+			t.Errorf("IsEmpty() of %+v = true, want false", s)
+		}
+	}
+}
