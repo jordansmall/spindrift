@@ -870,6 +870,13 @@ let
   # #624) — not any hand-copied duplicates or entrypoint fallback literals.
   driverPreambleFile = hostPkgs.writeText "driver-preamble.sh" imageDriver.driverPreamble;
 
+  # The 8 baked /agent/* path literals' rendered fallback preamble as a host
+  # store-path file (issue #2531, mirrors driverPreambleFile above). The bats
+  # harness prepends this before exec-ing the entrypoint so tests exercise
+  # the same rendered defaults that mkHarness bakes into the image, instead
+  # of an entrypoint with no default for these vars at all.
+  agentPathsPreambleFile = hostPkgs.writeText "agent-paths-preamble.sh" agentPathsPreamble;
+
   # The Conditional fragment registry as a host store-path file (issue #622,
   # mirrors driverPreambleFile above). The bats harness prepends this before
   # exec-ing the entrypoint so tests exercise the same registry-rendered loop
@@ -1403,6 +1410,7 @@ else
         checkContractFile
         researchOutcomeContractFile
         driverPreambleFile
+        agentPathsPreambleFile
         fragmentRegistryFile
         runInputDocumentFile
         buildInputDocumentFile
