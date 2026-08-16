@@ -336,7 +336,7 @@ let
   );
   # reviewEffort (issue #2512) is the one legacy knob that overrides an
   # already-resolved roster's reviewer entry regardless of roster source
-  # (contrast the four model knobs above, explicit-roster-only-wins per the
+  # (contrast the four model knobs above, explicit-roster-wins per the
   # doc comment above resolvedRoster) -- applied here, post-normalize, so it
   # reaches both the defaultRoster branch and a Consumer-supplied explicit
   # roster identically.
