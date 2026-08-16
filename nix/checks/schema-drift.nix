@@ -223,8 +223,10 @@ let
   # the ADR 0037 Pass 2 freeze, which never had an old
   # `settings.<section>` alias to preserve) -- a knob added with neither
   # would silently lose alias coverage. And every legacySettingsSection row
-  # must still name a real schema knob -- a knob removed from the schema
-  # leaving its row behind would be a dead entry. A third invariant
+  # must still name a live flakeOption schema knob -- a knob removed from
+  # the schema, or demoted to flakeOption = false;, leaving its row behind
+  # would be a dead entry (checking key existence alone would miss the
+  # demoted case). A third invariant
   # cross-checks legacySettingsExempt itself against
   # preFreezeFlakeOptionNames above, rather than trusting the hand-set flag
   # at face value: legacySettingsExempt and a knob's map row are both
@@ -243,7 +245,7 @@ let
       missing = filter (
         n: !(schema.${n}.legacySettingsExempt or false) && !(legacySettingsSection ? ${n})
       ) flakeOptionNames;
-      stale = filter (n: !(schema ? ${n})) (attrNames legacySettingsSection);
+      stale = filter (n: !(schema.${n}.flakeOption or false)) (attrNames legacySettingsSection);
       # A knob marked legacySettingsExempt = true; whose name nonetheless
       # appears in the frozen pre-freeze list unconditionally predates the
       # freeze, so it must have had a real old alias -- the exemption is
@@ -1692,8 +1694,10 @@ in
   # Regression guard (issue #2522): the coverage assert above must actually
   # detect all failure shapes -- a flakeOption knob left with no alias and
   # no exemption (missing), a legacySettingsSection row whose knob no longer
-  # exists in the schema (stale), and a knob marked legacySettingsExempt
-  # despite predating the freeze (wronglyExempt) -- not just pass vacuously
+  # exists in the schema or lost flakeOption = true; (stale, in two
+  # shapes -- key gone entirely, and key present but demoted), and a knob
+  # marked legacySettingsExempt despite predating the freeze
+  # (wronglyExempt) -- not just pass vacuously
   # because the real data already satisfies every invariant. Also proves the
   # exemption escape hatch itself still works for a knob that genuinely
   # postdates the freeze (exemptSkip). Runs assertLegacySettingsSectionOk --
@@ -1714,6 +1718,17 @@ in
       # stale.
       staleLegacySettingsSection = legacySettingsSection // {
         removedKnobNeverInSchema = "someSection";
+      };
+      # A schema entry whose flakeOption flag is turned off while its
+      # legacySettingsSection row survives -- the shape a knob demoted out
+      # of the flakeOption surface would leave behind. The schema key still
+      # exists, so a stale predicate that only checks key existence would
+      # miss this; it must also consult flakeOption. Must be caught by
+      # stale.
+      deadAliasSchema = schema // {
+        branchPrefix = schema.branchPrefix // {
+          flakeOption = false;
+        };
       };
       # A synthetic flakeOption knob whose name appears in neither the real
       # schema nor preFreezeFlakeOptionNames -- a knob that genuinely
@@ -1745,6 +1760,10 @@ in
         legacySettingsSection = staleLegacySettingsSection;
         inherit schema;
       });
+      deadAliasResult = builtins.tryEval (assertLegacySettingsSectionOk {
+        inherit legacySettingsSection;
+        schema = deadAliasSchema;
+      });
       exemptSkipResult = builtins.tryEval (assertLegacySettingsSectionOk {
         inherit legacySettingsSection;
         schema = exemptSkipSchema;
@@ -1758,6 +1777,8 @@ in
       "legacy-settings-section-coverage-guard: expected assertLegacySettingsSectionOk to reject a legacySettingsSection with filerModel's row dropped (a flakeOption knob left with no alias and no exemption), but it evaluated successfully";
     assert assertMsg (!staleResult.success)
       "legacy-settings-section-coverage-guard: expected assertLegacySettingsSectionOk to reject a legacySettingsSection with a stale row injected (no matching schema entry), but it evaluated successfully";
+    assert assertMsg (!deadAliasResult.success)
+      "legacy-settings-section-coverage-guard: expected assertLegacySettingsSectionOk to reject a legacySettingsSection row (branchPrefix) whose schema entry lost flakeOption = true; (a dead alias row), but it evaluated successfully";
     assert assertMsg exemptSkipResult.success
       "legacy-settings-section-coverage-guard: expected assertLegacySettingsSectionOk to accept a synthetic knob genuinely postdating the freeze (legacySettingsExempt = true;, not in preFreezeFlakeOptionNames, no map row), but it failed";
     assert assertMsg (!wronglyExemptResult.success)
