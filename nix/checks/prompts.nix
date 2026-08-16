@@ -109,6 +109,35 @@ let
         cp "$exemptBodyPath" $out/open-pr-create-outbox.md
       '';
 
+  # gh-api-mutation-kind counterpart (issue #2513): same plain, non-exempt
+  # gate as brokenForbiddenMarkerFragmentsDir above, but carrying the
+  # forbidden-gh-api-mutation row's marker text ("gh api") instead of a
+  # kind == "substring" row's marker. buildTimeForbiddenMarkerViolations
+  # (lib/prompt-contract.nix) only scans kind == "substring" rows -- a
+  # "gh-api-mutation" row's marker is display-only there, enforced instead
+  # by readonlyguards.go's command-shim argument scan (see
+  # TestInstall_GhAPIMutationRejectsMutatingMethod) -- so this must NOT
+  # throw, proving the kind filter still excludes it and hasn't regressed
+  # to scanning every row regardless of kind.
+  ghAPIMutationForbiddenMarkerFragmentBody = ''
+    Never run `gh api` yourself here with a mutating method. This fixture
+    deliberately injects the forbidden-gh-api-mutation row's marker text
+    into a fragment gated on a plain, non-exempt gate, to prove the
+    kind == "substring" filter still excludes it from the build-time scan.
+  '';
+  ghAPIMutationForbiddenMarkerFragmentsDir =
+    pkgs.runCommand "gh-api-mutation-forbidden-marker-fragments"
+      {
+        passAsFile = [ "ghAPIMutationBody" ];
+        ghAPIMutationBody = ghAPIMutationForbiddenMarkerFragmentBody;
+      }
+      ''
+        mkdir -p $out
+        cp -r ${../../templates/default/prompts/fragments}/. $out/
+        chmod -R u+w $out
+        cp "$ghAPIMutationBodyPath" $out/auto-format.md
+      '';
+
   # Clean placeholder template text, carrying none of the forbiddenMarkers
   # substrings (issue #2510). The real templates/default/prompts/{issue,
   # filer}-prompt.md are both clean of forbiddenMarkers substrings as of
@@ -928,7 +957,7 @@ in
     pkgs.runCommand "filer-relay-fragments-never-invoke-gh-write" { }
       ''
         for f in filer-label-relay.md filer-file-relay.md file-issues-relay.md; do
-          n=$(grep -c 'gh label create' ${../../templates/default/prompts/fragments}/"$f" || true)
+          n=$(grep -c -- 'gh label create' ${../../templates/default/prompts/fragments}/"$f" || true)
           [ "$n" -eq 0 ] || {
             echo "$f: expected no 'gh label create', found $n occurrence(s)" >&2
             exit 1
@@ -1212,6 +1241,32 @@ in
     assert assertMsg ok.success
       "mkHarness.nix must not throw when a fragment gated on an exempt gate (BOX_ACCESS_READ_ONLY) carries a forbidden marker as literal fragment-body text";
     pkgs.runCommand "build-time-forbidden-marker-fragment-exempt-gate-not-triggered" { } "touch $out";
+
+  # The gh-api-mutation-kind counterpart (issue #2513): a plain, non-exempt
+  # gate (same shape as build-time-reject-forbidden-marker-fragment above)
+  # carrying the forbidden-gh-api-mutation row's marker ("gh api") instead
+  # of a kind == "substring" row's marker. buildTimeForbiddenMarkerViolations
+  # filters to kind == "substring" rows only, so this must NOT throw --
+  # proves that filter still excludes the gh-api-mutation row rather than
+  # having silently regressed to scanning every row regardless of kind.
+  build-time-forbidden-marker-fragment-gh-api-mutation-kind-not-scanned =
+    let
+      inherit (pkgs.lib) assertMsg;
+      ok = builtins.tryEval (
+        (import ../../lib/mkHarness.nix {
+          inherit nixpkgs system;
+          packages = p: [ p.hello ];
+          fragmentsDir = ghAPIMutationForbiddenMarkerFragmentsDir;
+          # Isolates this check to the fragment scan -- see the sibling
+          # build-time-reject-forbidden-marker-fragment check above for why.
+          prompt = cleanForbiddenMarkerPlaceholder;
+          filerPrompt = cleanForbiddenMarkerPlaceholder;
+        }).spindrift
+      );
+    in
+    assert assertMsg ok.success
+      "mkHarness.nix must not throw when a fragment carries the forbidden-gh-api-mutation row's marker ('gh api') as literal text -- that row's kind is 'gh-api-mutation', not 'substring', so it must be excluded from the build-time scan";
+    pkgs.runCommand "build-time-forbidden-marker-fragment-gh-api-mutation-kind-not-scanned" { } "touch $out";
 
   # The shared top-level template counterpart (issue #2510): `prompt`
   # (issue-prompt.md's default) gets no exemption at all -- its raw text is
