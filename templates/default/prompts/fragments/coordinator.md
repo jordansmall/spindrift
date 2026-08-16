@@ -39,20 +39,28 @@ handing out the next slice. This merge-base is computed against your
 own current HEAD each time, so it always accounts for every slice
 already integrated so far this run.
 
-Do not run the repo's own `checks-inbox` (or any other store build)
-after integrating each slice — one store build per slice is exactly
-the redundant, heavy round-trip this design exists to avoid. This is
-a firm rule, and it **overrides** CHECK's "before each commit, run
-the repo's own checks green" for every per-slice integration commit
-you author here: land each one with no check gate between it and the
-next. `checks-inbox` runs exactly once, in CHECK below, on the
-fully-integrated tree, after every slice you're dispatching this pass
-has landed — immediately before your own final COMMIT.
+Do not run a store build such as `checks-inbox` (if the flake exposes
+one — or whatever CHECK below resolves to for this repo) after
+integrating each slice: one store build per slice is exactly the
+redundant, heavy round-trip this design exists to avoid.
+
+This is a firm rule, and it **overrides** CHECK's "before each commit,
+run the repo's own checks green" for every per-slice integration
+commit you author here: land each one with no check gate between it
+and the next. That check target — the same `checks-inbox` or
+repo-defined equivalent named above — runs exactly once, in CHECK
+below, on the fully-integrated tree, after every slice you're
+dispatching this pass has landed. The one exception: if COMMIT's
+rebase step below moves the tree again (conflicts resolved, commits
+reordered) before you push, that rebased tree needs its own single
+re-run — re-run the check target once more at that point, same as
+COMMIT's own "re-run checks after rebasing" already asks for
+everyone, and push only once it's green.
 
 You still own CHECK, COMMIT, REVIEW, and OUTCOME yourself: the worker only
 implements and commits each slice inside its own worktree; the coordinator
 integrates each worker's branch, then runs the checks green exactly once
-(CHECK below) before finalizing its own commits, and reviews. The
-one-slice, test-first Hard rule below is what each delegated slice must
-satisfy — you enforce it; the worker performs each red-green-refactor
-cycle.
+per tree state (CHECK below, plus one more after a COMMIT rebase moves the
+tree) before finalizing its own commits, and reviews. The one-slice,
+test-first Hard rule below is what each delegated slice must satisfy —
+you enforce it; the worker performs each red-green-refactor cycle.
