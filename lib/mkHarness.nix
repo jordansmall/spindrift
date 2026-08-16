@@ -1103,48 +1103,37 @@ let
       true
   ) buildTimeRejectVerdicts;
 
-  # Eval-time coherence asserts (issue #2495): MAX_PARALLEL_WORKERS caps
-  # concurrency for the orchestrator's own slice-manifest worker dispatch
-  # (lib/fragments.nix's ORCHESTRATOR-gated coordinator-parallel-dispatch.md
-  # row), but every dispatched slice runs through the roster's own "worker"
-  # entry (workers.go's launchOneWorker seeds each worker off the same
-  # worker-prompt.md the sequential WORKER_PROVISIONED coordinator path
-  # uses) -- a roster with no worker model configured has structurally
-  # nothing for a dispatched slice to ever run, regardless of ORCHESTRATOR.
-  # Checked against resolvedRoster (not the raw workerModel arg) so an
-  # explicit `roster` override is covered too, not just the legacy
-  # workerModel knob.
+  # Eval-time coherence assert (issue #2495; premise corrected by a later
+  # review pass -- see below): MAX_PARALLEL_WORKERS caps concurrency for the
+  # orchestrator's own slice-manifest worker dispatch (lib/fragments.nix's
+  # ORCHESTRATOR-gated coordinator-parallel-dispatch.md row).
   #
-  # Deliberately NOT gated on mergedDefaults.orchestratorEnabled (review
-  # finding, issue #2495): ORCHESTRATOR_ENABLED is a dispatch-time override
-  # (flagtable_gen.go's "orchestrator" flag, resolved ambient-env-first by
-  # the launcher's resolveBoxEnvVar), not an eval-time-fixed fact -- a
-  # Consumer baking MAX_PARALLEL_WORKERS with ORCHESTRATOR left off by
-  # default, then flipping --orchestrator per dispatch for an A/B rollout,
-  # is a legitimate, intentionally supported shape this assert must not
-  # reject.
-  workerProvisionedForParallelDispatch =
-    let
-      workerEntry = lib.findFirst (e: e.name == "worker") null resolvedRoster;
-    in
-    workerEntry != null && workerEntry.model != "";
-
-  # Checked against mergedDefaults (schemaDefaults // defaults), not the raw
+  # A prior revision of this assert also rejected any Consumer with no
+  # roster "worker" entry provisioned (workerModel/roster's worker model
+  # empty), on the premise that a dispatched slice runs through that
+  # roster's own "worker" entry. That premise is false in this codebase:
+  # fragments.nix gates coordinator-parallel-dispatch.md on ORCHESTRATOR
+  # alone, "regardless of whether a `worker` subagent happens to be
+  # provisioned too" (see the comment there);
+  # promptassembly/assemble.go renders worker-prompt.md -- the base prompt
+  # every dispatched slice worker gets -- whenever ORCHESTRATOR is on and
+  # it's a fresh-work pass, independent of any roster "worker" entry; and
+  # workers.go's launchOneWorker runs each dispatched worker process on the
+  # coordinator/implementor's OWN top-level `cfg.model`, never a roster
+  # "worker" entry's model (run.go: "Empty falls back to cfg.model"). No
+  # code path anywhere reads resolvedRoster's worker entry to pick a
+  # dispatched slice's model, so an absent/empty roster worker entry is not
+  # an eval-time-decidable incoherence for this knob and must not throw.
+  #
+  # What remains eval-time-decidable is only positivity: a concurrency
+  # semaphore's capacity has no meaningful "disabled" value. Checked against
+  # mergedDefaults (schemaDefaults // defaults), not the raw
   # Consumer-supplied `defaults`, and unconditionally -- not gated on
-  # `defaults ? maxParallelWorkers` (review finding, issue #2495). The
-  # schema bakes MAX_PARALLEL_WORKERS=2 whether or not a Consumer ever
-  # mentions the knob (env-schema.nix's own default), and
-  # fragments.nix's coordinator-parallel-dispatch.md row gates on
-  # ORCHESTRATOR alone -- so an unset knob still means "parallelism
-  # requested" at eval time, exactly as much as an explicit one does. A
-  # Consumer that gates ONLY on `defaults ? maxParallelWorkers` (the prior
-  # revision of this assert) builds green with `{ orchestratorEnabled =
-  # true; workerModel = ""; }`: parallel dispatch is on, by the baked
-  # default, with nothing for it to ever run.
+  # `defaults ? maxParallelWorkers` -- because the schema bakes
+  # MAX_PARALLEL_WORKERS=2 whether or not a Consumer ever mentions the knob
+  # (env-schema.nix's own default).
   maxParallelWorkersCoherenceOk =
-    if !workerProvisionedForParallelDispatch then
-      throw "mkHarness: MAX_PARALLEL_WORKERS=${toString mergedDefaults.maxParallelWorkers} (default or explicit) requests worker-slice parallelism but no worker subagent is provisioned (workerModel/roster's worker model is empty); the orchestrator's slice-manifest worker dispatch this knob caps has nothing to ever run"
-    else if mergedDefaults.maxParallelWorkers <= 0 then
+    if mergedDefaults.maxParallelWorkers <= 0 then
       throw "mkHarness: MAX_PARALLEL_WORKERS=${toString mergedDefaults.maxParallelWorkers} must be positive -- there is no meaningful \"disabled\" value for a concurrency semaphore's capacity (set it >= 1)"
     else
       true;
