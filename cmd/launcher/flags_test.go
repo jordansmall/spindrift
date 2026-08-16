@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -100,6 +101,23 @@ func TestSchemaFlags_ContinuousDispatchIsBoolAlias(t *testing.T) {
 		}
 	}
 	t.Fatalf("CONTINUOUS_DISPATCH entry not found in schemaFlags")
+}
+
+// TestSchemaFlags_MergeModeChoices asserts the MERGE_MODE entry carries the
+// schema's choices enum verbatim (issue #2520 slice 1): a later slice adds a
+// generic Go guard sourced from this field instead of a hand-typed value
+// list.
+func TestSchemaFlags_MergeModeChoices(t *testing.T) {
+	want := []string{"immediate", "auto", "manual"}
+	for _, e := range schemaFlags {
+		if e.env == "MERGE_MODE" {
+			if !slices.Equal(e.choices, want) {
+				t.Errorf("MERGE_MODE choices = %v, want %v", e.choices, want)
+			}
+			return
+		}
+	}
+	t.Fatal("MERGE_MODE entry not found in schemaFlags")
 }
 
 // TestExtractInputFlag_Present extracts the document path and strips both

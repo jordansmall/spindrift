@@ -363,6 +363,16 @@ rec {
       secretSchema = filterAttrs (_: e: (e.secret or false)) schema;
       flagAlias = e: if e ? alias then ", alias: \"${e.alias}\"" else "";
       flagDeprecatedAlias = e: if e ? flag then ", deprecatedAlias: \"${toKebab e.env}\"" else "";
+      # The knob's valid-value enum, when the schema declares one (e.g.
+      # mergeMode's choices = [ "immediate" "auto" "manual" ]) — carried onto
+      # the generated flag row so a later slice can source a generic Go guard
+      # from it instead of a hand-typed value list (issue #2520).
+      flagChoices =
+        e:
+        if e ? choices && e.choices != [ ] then
+          ", choices: []string{${builtins.concatStringsSep ", " (map (c: "\"${c}\"") e.choices)}}"
+        else
+          "";
       # The knob's derived domain-tree flake path (e.g. "git.merge.policy",
       # via resolveNixPath — lib/nixpath.nix) — the flake surface is now the
       # domain tree (ADR 0037 Pass 1), so the settings path IS the knob's
@@ -381,7 +391,7 @@ rec {
           concatStrings (
             mapAttrsToList (
               key: e:
-              "\t{env: \"${e.env}\", flag: \"${flagName e}\", group: \"${e.group}\"${flagAlias e}${flagDeprecatedAlias e}, kind: \"${flagKind e}\", doc: \"${e.doc}\", dflt: \"${flagDflt e}\", settingsPath: \"${flagSettingsPath key e}\"},\n"
+              "\t{env: \"${e.env}\", flag: \"${flagName e}\", group: \"${e.group}\"${flagAlias e}${flagDeprecatedAlias e}, kind: \"${flagKind e}\", doc: \"${e.doc}\", dflt: \"${flagDflt e}\", settingsPath: \"${flagSettingsPath key e}\"${flagChoices e}},\n"
             ) nonSecretSchema
           );
       secretRows = concatStrings (
