@@ -33,6 +33,8 @@ func coveredEnv() Env {
 		TDDSkillBaked:        true,
 		CommitSkillBaked:     true,
 		CodeReviewSkillBaked: true,
+		AutoFormatSkillBaked: true,
+		AutoLintSkillBaked:   true,
 		PromptsDir:           promptsDir,
 		IssueNumber:          "2349",
 		IssueTitle:           "Add promptassembly.Assemble",
