@@ -485,8 +485,8 @@ func applySecretCmdFallback() error {
 func secretRequiredThisRun(env string) bool {
 	switch env {
 	case "GH_TOKEN":
-		fullyLocal := getenvSchema("CODE_FORGE") == "local" && getenvSchema("ISSUE_TRACKER") == "local"
-		return !fullyLocal
+		sig := resolveCapabilitySignals(getenvSchema("CODE_FORGE"), getenvSchema("ISSUE_TRACKER"))
+		return !sig.fullyLocal
 	case "JIRA_TOKEN":
 		return getenvSchema("ISSUE_TRACKER") == "jira"
 	case "FORGEJO_TOKEN":

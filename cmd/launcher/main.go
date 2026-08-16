@@ -79,14 +79,19 @@ type config struct {
 
 	// hostMediatedRemote, outboxRelayCapable, inBoxUnreachableTracker, and
 	// fullyLocal are the four capability signals nix resolves once from the
-	// backend descriptor registry for the active CODE_FORGE/ISSUE_TRACKER
-	// pairing and renders into the input document's artifacts section
-	// (lib/preambles.nix's runArtifacts, issue #2527 slice 1) as the literal
-	// strings "true"/"false". loadConfig() reads them via getenvArtifact the
-	// same way it reads every other artifact field, so validate() and
-	// dispatchConfig() consult these forwarded bools directly instead of
-	// re-deriving them from a backendByName lookup on c.codeForge/
-	// c.issueTracker.
+	// backend descriptor registry for the CODE_FORGE/ISSUE_TRACKER pairing
+	// baked at `nix build` time, and renders into the input document's
+	// artifacts section (lib/preambles.nix's runArtifacts, issue #2527
+	// slice 1) as the literal strings "true"/"false". loadConfig() reads
+	// them via getenvArtifact the same way it reads every other artifact
+	// field, purely so a manual inspection of a loaded config value can see
+	// what nix forwarded. CODE_FORGE/ISSUE_TRACKER are genuine per-run
+	// overrides (flag/env, resolved after this document was baked), so
+	// nothing reads these four fields directly: every consumer instead
+	// calls resolveCapabilitySignals(c.codeForge, c.issueTracker), which
+	// trusts the forwarded artifact only when the resolved pairing still
+	// matches what was baked, and otherwise re-derives fresh from the
+	// registry (issue #2527 review).
 	hostMediatedRemote      bool
 	outboxRelayCapable      bool
 	inBoxUnreachableTracker bool
@@ -278,6 +283,45 @@ func loadConfig() config {
 	}
 }
 
+// capabilitySignals bundles the four capability bits nix resolves per
+// CODE_FORGE/ISSUE_TRACKER pairing (lib/backends/default.nix).
+type capabilitySignals struct {
+	hostMediatedRemote      bool
+	outboxRelayCapable      bool
+	inBoxUnreachableTracker bool
+	fullyLocal              bool
+}
+
+// resolveCapabilitySignals returns the capability signals for the
+// codeForge/issueTracker pairing actually in effect this run. The
+// nix-forwarded artifacts (getenvArtifact) describe whatever pairing was
+// baked into the --input document at build time; a later CLI flag or env
+// var overriding CODE_FORGE/ISSUE_TRACKER away from that baked pairing (or
+// no document at all — direct binary invocation, tests) moves the pairing
+// out from under the baked artifacts, so this falls back to a registry
+// lookup on the resolved names instead of trusting a forwarded bool that
+// would silently describe the wrong backend (issue #2527 review).
+func resolveCapabilitySignals(codeForge, issueTracker string) capabilitySignals {
+	if loadedDoc != nil && codeForge == loadedDoc.Settings["CODE_FORGE"] && issueTracker == loadedDoc.Settings["ISSUE_TRACKER"] {
+		return capabilitySignals{
+			hostMediatedRemote:      getenvArtifact("HOST_MEDIATED_REMOTE", "") == "true",
+			outboxRelayCapable:      getenvArtifact("OUTBOX_RELAY_CAPABLE", "") == "true",
+			inBoxUnreachableTracker: getenvArtifact("IN_BOX_UNREACHABLE_TRACKER", "") == "true",
+			fullyLocal:              getenvArtifact("FULLY_LOCAL", "") == "true",
+		}
+	}
+	codeForgeRow, _ := backendByName(codeForge)
+	trackerRow, _ := backendByName(issueTracker)
+	hostMediatedRemote := codeForgeRow.HostMediatedRemote
+	inBoxUnreachableTracker := trackerRow.InBoxUnreachableTracker
+	return capabilitySignals{
+		hostMediatedRemote:      hostMediatedRemote,
+		outboxRelayCapable:      codeForgeRow.OutboxRelayCapable,
+		inBoxUnreachableTracker: inBoxUnreachableTracker,
+		fullyLocal:              hostMediatedRemote && inBoxUnreachableTracker,
+	}
+}
+
 func validate(c config) error {
 	if c.selfContained && c.dispatchKind != dispatchKindResearch {
 		return fmt.Errorf("--self-contained is only valid for the research dispatch kind")
@@ -294,9 +338,9 @@ func validate(c config) error {
 	// would trade a clear launcher error for a downstream Box crash.
 	codeForgeRow, codeForgeRowOK := backendByName(c.codeForge)
 	trackerRow, trackerRowOK := backendByName(c.issueTracker)
-	fullyLocal := c.fullyLocal
-	noRepoResearch := c.dispatchKind == dispatchKindResearch && c.selfContained && c.inBoxUnreachableTracker
-	if !fullyLocal && !noRepoResearch && c.repoSlug == "" {
+	sig := resolveCapabilitySignals(c.codeForge, c.issueTracker)
+	noRepoResearch := c.dispatchKind == dispatchKindResearch && c.selfContained && sig.inBoxUnreachableTracker
+	if !sig.fullyLocal && !noRepoResearch && c.repoSlug == "" {
 		return fmt.Errorf("set REPO_SLUG=owner/repo (the target GitHub repository)")
 	}
 	if c.gitUserName == "" {
@@ -305,7 +349,7 @@ func validate(c config) error {
 	if c.gitUserEmail == "" {
 		return fmt.Errorf("set GIT_USER_EMAIL, or configure git user.email on the host")
 	}
-	if !fullyLocal && !noRepoResearch && c.ghToken == "" {
+	if !sig.fullyLocal && !noRepoResearch && c.ghToken == "" {
 		return fmt.Errorf("set GH_TOKEN (fine-grained PAT scoped to the single target repo: Issues RW, Contents RW, Pull requests RW, Metadata R)")
 	}
 	switch c.driver {
@@ -520,8 +564,7 @@ func absCodeForgeAccumulationRepoDir(codeForge, dir string) string {
 // build entry point never calls Run(), so leaving PromptDir/SkillsDir/
 // PodmanNetwork populated is harmless there.
 func runnerConfig(c config) runner.Config {
-	codeForgeRow, _ := backendByName(c.codeForge)
-	trackerRow, _ := backendByName(c.issueTracker)
+	sig := resolveCapabilitySignals(c.codeForge, c.issueTracker)
 	return runner.Config{
 		Runtime:                  c.runtime,
 		Image:                    c.image,
@@ -543,11 +586,11 @@ func runnerConfig(c config) runner.Config {
 		PromptDir:                c.spindriftPromptDir,
 		SkillsDir:                c.spindriftSkillsDir,
 		DriverSessionCacheDir:    c.driverSessionCacheDir,
-		HostMediatedIssueTracker: trackerRow.InBoxUnreachableTracker,
+		HostMediatedIssueTracker: sig.inBoxUnreachableTracker,
 		LocalIssuesDir:           absLocalIssuesDir(c.localIssuesDir),
-		HostMediatedRemote:       codeForgeRow.HostMediatedRemote,
+		HostMediatedRemote:       sig.hostMediatedRemote,
 		AccumulationRepoDir:      c.codeForgeAccumulationRepoDir,
-		OutboxRelayCapable:       codeForgeRow.OutboxRelayCapable,
+		OutboxRelayCapable:       sig.outboxRelayCapable,
 		BoxForgeAndIssueAccess:   c.boxForgeAndIssueAccess,
 	}
 }
@@ -664,15 +707,16 @@ func boxTokenResolver(next func(num, name string) string) func(num, name string)
 // ResolveOpenPR itself resolves to Found: false, nil for a push-only Code
 // Forge, so the retry proceeds unguarded there without any guard here.
 func dispatchConfig(c config, it forge.IssueTracker, lw *localloop.Wired, cf forge.CodeForge) dispatch.Config {
+	sig := resolveCapabilitySignals(c.codeForge, c.issueTracker)
 	return dispatch.Config{
 		BoxEnvVars:              c.boxEnvVars,
 		ResolveEnv:              boxTokenResolver(localBaseBranchResolver(c, it, lw, cf)),
 		Kind:                    c.dispatchKind,
 		SelfContained:           c.selfContained,
-		HostMediatedRemote:      c.hostMediatedRemote,
-		OutboxRelayCapable:      c.outboxRelayCapable,
-		FullyLocal:              c.fullyLocal,
-		InBoxUnreachableTracker: c.inBoxUnreachableTracker,
+		HostMediatedRemote:      sig.hostMediatedRemote,
+		OutboxRelayCapable:      sig.outboxRelayCapable,
+		FullyLocal:              sig.fullyLocal,
+		InBoxUnreachableTracker: sig.inBoxUnreachableTracker,
 		BoxForgeAndIssueAccess:  c.boxForgeAndIssueAccess,
 		TransientRetryMax:       c.transientRetryMax,
 		TransientBackoffSecs:    c.transientBackoffSecs,
