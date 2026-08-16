@@ -50,6 +50,10 @@ type config struct {
 	// /tmp/brief.md), recorded into the run-state artifact rather than
 	// inlined there.
 	scoutBriefPath string
+	// passSummaryPath is this pass's own pass-summary path (conventionally
+	// /tmp/pass-summary.md), recorded into the run-state artifact rather than
+	// inlined there.
+	passSummaryPath string
 	// maxReviewRounds caps how many additional fresh-session passes a BLOCK
 	// verdict may trigger (issue #1998): once this many extra passes have
 	// been started in response to a BLOCK, the loop stops even if the
@@ -277,6 +281,12 @@ func run(cfg config, stdout io.Writer) (int, error) {
 		if cfg.scoutBriefPath != "" {
 			state.ScoutBriefPath = cfg.scoutBriefPath
 		}
+		// An empty cfg.passSummaryPath means the caller didn't supply one
+		// this pass, not that the prior path is now unknown, so it leaves
+		// the carried-forward value alone rather than clobbering it with "".
+		if cfg.passSummaryPath != "" {
+			state.PassSummaryPath = cfg.passSummaryPath
+		}
 		// driver-exec (re-)creates cfg.logPath fresh for this one pass
 		// (issue #626's run.go: os.Create truncates), so by the time it
 		// returns the file holds exactly this pass's own raw stream -- the
@@ -375,6 +385,12 @@ func runWithReviewPass(cfg config, stdout io.Writer) (int, error) {
 
 		if cfg.scoutBriefPath != "" {
 			state.ScoutBriefPath = cfg.scoutBriefPath
+		}
+		// An empty cfg.passSummaryPath means the caller didn't supply one
+		// this pass, not that the prior path is now unknown, so it leaves
+		// the carried-forward value alone rather than clobbering it with "".
+		if cfg.passSummaryPath != "" {
+			state.PassSummaryPath = cfg.passSummaryPath
 		}
 		// Verdict authority belongs solely to the review pass below under
 		// this loop -- an implement/fix pass's own prompt has the
@@ -522,14 +538,14 @@ func runWithReviewPass(cfg config, stdout io.Writer) (int, error) {
 }
 
 // seedPromptFromState composes a fresh prompt file carrying promptFile's own
-// content plus a summary of state -- last verdict, scout-brief path -- so
-// each pass is "seeded from the run-state artifact" (issue #1998 AC1), not
-// handed the same static prompt on every pass. This is also the "precision
-// between-iteration instruction injection" issue #1999 asks for: the
-// explicit, inspectable "what the reviewer said" brief, composed from the
-// handoff artifact rather than an implicit resumed session --
-// TestRunSeedsFixBriefWithVerdictAfterBlock asserts this shape. When state is
-// the zero value (the common cold-start pass, nothing carried forward yet)
+// content plus a summary of state -- last verdict, scout-brief path,
+// pass-summary path -- so each pass is "seeded from the run-state artifact"
+// (issue #1998 AC1), not handed the same static prompt on every pass. This is
+// also the "precision between-iteration instruction injection" issue #1999
+// asks for: the explicit, inspectable "what the reviewer said" brief,
+// composed from the handoff artifact rather than an implicit resumed session
+// -- TestRunSeedsFixBriefWithVerdictAfterBlock asserts this shape. When state
+// is the zero value (the common cold-start pass, nothing carried forward yet)
 // this returns promptFile unchanged and creates no temp file.
 func seedPromptFromState(promptFile string, state runstate.RunState) (string, error) {
 	if state.IsEmpty() {
@@ -550,6 +566,9 @@ func seedPromptFromState(promptFile string, state runstate.RunState) (string, er
 	}
 	if state.ScoutBriefPath != "" {
 		fmt.Fprintf(&b, "- Scout brief: %s\n", state.ScoutBriefPath)
+	}
+	if state.PassSummaryPath != "" {
+		fmt.Fprintf(&b, "- Pass summary: %s\n", state.PassSummaryPath)
 	}
 	if state.ReviewFindings != "" {
 		fmt.Fprintf(&b, "- Reviewer findings:\n\n%s\n", state.ReviewFindings)

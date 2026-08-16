@@ -79,6 +79,29 @@ func TestRunStateRoundTripIncludesWorkerFindings(t *testing.T) {
 	}
 }
 
+// TestRunStateRoundTripIncludesPassSummaryPath verifies PassSummaryPath
+// (issue #2549: the most recent implement/fix pass's own free-form summary
+// of what it did and what remains, referenced by path like ScoutBriefPath)
+// survives a WriteRunState/ReadRunState round trip like every other field.
+func TestRunStateRoundTripIncludesPassSummaryPath(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "run-state.json")
+	want := RunState{
+		LastVerdict:     "BLOCK",
+		PassSummaryPath: "/tmp/pass-summary.md",
+	}
+
+	if err := WriteRunState(path, want); err != nil {
+		t.Fatalf("WriteRunState: %v", err)
+	}
+	got, err := ReadRunState(path)
+	if err != nil {
+		t.Fatalf("ReadRunState: %v", err)
+	}
+	if got.PassSummaryPath != want.PassSummaryPath {
+		t.Errorf("PassSummaryPath = %q, want %q", got.PassSummaryPath, want.PassSummaryPath)
+	}
+}
+
 // TestReadRunStateNoFileYetReturnsZeroValue verifies the actual pass-one
 // production path (issue #1997): --state-file defaults to a fixed tmp path
 // that has never been written, and ReadRunState must treat that as "no
@@ -190,6 +213,7 @@ func TestReadRunStateParsesPreExtractionFixture(t *testing.T) {
   "remaining_slices": ["implement seam B", "land"],
   "last_verdict": "BLOCK",
   "scout_brief_path": "/tmp/brief.md",
+  "pass_summary_path": "/tmp/pass-summary.md",
   "review_findings": "## Blocking\n- run.go:42 -- missing nil check",
   "terminal_land": true,
   "cap_fired": "max slices reached"
@@ -207,6 +231,7 @@ func TestReadRunStateParsesPreExtractionFixture(t *testing.T) {
 		RemainingSlices: []string{"implement seam B", "land"},
 		LastVerdict:     "BLOCK",
 		ScoutBriefPath:  "/tmp/brief.md",
+		PassSummaryPath: "/tmp/pass-summary.md",
 		ReviewFindings:  "## Blocking\n- run.go:42 -- missing nil check",
 		TerminalLand:    true,
 		CapFired:        "max slices reached",
