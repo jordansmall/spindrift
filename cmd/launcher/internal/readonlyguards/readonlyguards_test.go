@@ -259,6 +259,76 @@ func TestInstall_GitHookRow(t *testing.T) {
 	}
 }
 
+// TestInstall_GitHookRow_ExtraRepoDirs proves a git-hook row installs into
+// every dir named by cfg.ExtraRepoDirs, in addition to cfg.RepoDir --
+// issue #2509 Finding 1: agent/entrypoint.sh's install_readonly_guards must
+// install the guard at BOTH the decoy repo (RepoDir, blocking a plain `git
+// push`/origin push, whose pushurl is repointed there) AND $WORK_DIR itself
+// (an ExtraRepoDirs entry, blocking a push to any explicit URL or
+// non-origin remote, neither of which goes through origin's pushurl) --
+// losing the second install regresses to the pre-forge-403 behavior issue
+// #2463 exists to prevent.
+func TestInstall_GitHookRow_ExtraRepoDirs(t *testing.T) {
+	rows := []promptassembly.ForbiddenMarkerRow{
+		{
+			ID:             "forbidden-git-push",
+			Marker:         "git push",
+			Kind:           "substring",
+			Enforce:        "git-hook",
+			Message:        "blocked: git push (message)",
+			RuntimeMessage: "blocked: git push (runtime message)",
+		},
+	}
+
+	repoDir := t.TempDir()
+	runGitCmd(t, repoDir, "init", "--bare")
+
+	extraDir := t.TempDir()
+	runGitCmd(t, extraDir, "init")
+
+	cfg := Config{RepoDir: repoDir, ExtraRepoDirs: []string{extraDir}}
+
+	var out bytes.Buffer
+	result, err := Install(rows, cfg, &out)
+	if err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+	if !result.HookInstalled {
+		t.Fatalf("result.HookInstalled = false, want true")
+	}
+
+	// repoDir is bare -- hooks land directly under repoDir/hooks.
+	for _, name := range []string{"pre-push", "pre-receive"} {
+		hookPath := filepath.Join(repoDir, "hooks", name)
+		content, err := os.ReadFile(hookPath)
+		if err != nil {
+			t.Fatalf("read %s: %v", hookPath, err)
+		}
+		if !bytes.Contains(content, []byte(rows[0].RuntimeMessage)) {
+			t.Fatalf("%s content = %q, want it to contain %q", name, content, rows[0].RuntimeMessage)
+		}
+	}
+
+	// extraDir is a normal working copy -- hooks land under
+	// extraDir/.git/hooks.
+	for _, name := range []string{"pre-push", "pre-receive"} {
+		hookPath := filepath.Join(extraDir, ".git", "hooks", name)
+		content, err := os.ReadFile(hookPath)
+		if err != nil {
+			t.Fatalf("read %s: %v", hookPath, err)
+		}
+		if !bytes.Contains(content, []byte(rows[0].RuntimeMessage)) {
+			t.Fatalf("%s content = %q, want it to contain %q", name, content, rows[0].RuntimeMessage)
+		}
+
+		cmd := exec.Command(hookPath)
+		cmdOut, err := cmd.CombinedOutput()
+		if err == nil {
+			t.Fatalf("%s exit code = 0, want non-zero; output=%q", name, cmdOut)
+		}
+	}
+}
+
 // TestInstall_GitHookRow_BareRepo proves a git-hook row targeting a bare
 // repository (no .git subdirectory -- repoDir itself is the bare git
 // directory, per `git init --bare`) installs its hooks directly under
