@@ -16,10 +16,14 @@ setup() {
   [ -d "$WORK_DIR/.git" ]
   [ -x "$WORK_DIR/.git/hooks/pre-push" ]
 
+  # The rejection's wording lives in lib/prompt-contract.nix's
+  # forbiddenMarkers registry (issue #2509), rendered verbatim into the
+  # installed hook by driver-exec readonly-guards -- assert the stable
+  # "git push" substring the row's own message always names, not its full
+  # prose, which the registry is free to reword.
   run git -C "$WORK_DIR" push origin HEAD:some-branch
   [ "$status" -ne 0 ]
-  [[ "$output" == *"outbox"* ]]
-  [[ "$output" == *"relayed"* ]]
+  [[ "$output" == *"git push"* ]]
 
   run git -C "$REMOTE_ROOT/owner/repo.git" rev-parse --verify some-branch
   [ "$status" -ne 0 ]
@@ -55,8 +59,7 @@ setup() {
   git -C "$WORK_DIR" remote set-url origin https://readonly-push-hook-test.invalid/owner/repo.git
   run git -C "$WORK_DIR" push origin HEAD:some-branch
   [ "$status" -ne 0 ]
-  [[ "$output" == *"outbox"* ]]
-  [[ "$output" == *"relayed"* ]]
+  [[ "$output" == *"git push"* ]]
   [[ "$output" != *"Could not resolve host"* ]]
   [[ "$output" != *"Failed to connect"* ]]
   [[ "$output" != *"unable to access"* ]]
@@ -100,8 +103,7 @@ setup() {
 
   run git -C "$WORK_DIR" push origin HEAD:some-host-mediated-branch
   [ "$status" -ne 0 ]
-  [[ "$output" == *"outbox"* ]]
-  [[ "$output" == *"relayed"* ]]
+  [[ "$output" == *"git push"* ]]
 
   run git -C "$REMOTE_ROOT/owner/repo.git" rev-parse --verify some-host-mediated-branch
   [ "$status" -ne 0 ]
