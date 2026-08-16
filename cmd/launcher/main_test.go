@@ -3239,41 +3239,83 @@ func TestDoctor_TTY_Confirm_ResearchLabels(t *testing.T) {
 // color/description by role (MetaDispatchable etc.), not by a literal
 // TriageLabelMeta[name] lookup keyed on the default name — which would miss
 // and fall back to the gray "ededed" no-description default (#2528 AC2).
+// Table-driven across all four work-tier roles, not just Dispatchable: the
+// metaFor switch in doctor.go resolves each renamed field
+// (c.Label/c.InProgressLabel/c.FailedLabel/c.CompleteLabel) against its own
+// Meta<Role> var, and a copy-paste mistake swapping which field maps to
+// which role would only show up on the roles this test actually renames.
 func TestDoctor_TTY_Confirm_RenamedLifecycleLabel_UsesCorrectMeta(t *testing.T) {
-	f := forge.NewFake()
-	f.ProbeRepo = "owner/repo"
-
-	cfg := defaultLabelConfig()
-	cfg.label = "custom-ready-for-agent"
-
-	research := doctor.ResearchLabelNames()
-	priority := doctor.PriorityLabelNames()
-	ambiguous := doctor.AmbiguousLabelNames()
-	present := append(append(append([]string{"agent-in-progress", "agent-failed", "agent-complete"}, research...), priority...), ambiguous...)
-	f.Labels = present
-	f.LabelsSeq = [][]string{
-		present,
-		append(append([]string{}, present...), "custom-ready-for-agent"), // re-verify: renamed label now created too
+	tests := []struct {
+		role      string
+		renameCfg func(cfg *config, renamed string)
+		otherLive []string // the other three work-tier labels, already at default
+		wantMeta  doctor.LabelMeta
+	}{
+		{
+			role:      "Dispatchable",
+			renameCfg: func(cfg *config, renamed string) { cfg.label = renamed },
+			otherLive: []string{"agent-in-progress", "agent-failed", "agent-complete"},
+			wantMeta:  doctor.MetaDispatchable,
+		},
+		{
+			role:      "InProgress",
+			renameCfg: func(cfg *config, renamed string) { cfg.inProgressLabel = renamed },
+			otherLive: []string{"ready-for-agent", "agent-failed", "agent-complete"},
+			wantMeta:  doctor.MetaInProgress,
+		},
+		{
+			role:      "Failed",
+			renameCfg: func(cfg *config, renamed string) { cfg.failedLabel = renamed },
+			otherLive: []string{"ready-for-agent", "agent-in-progress", "agent-complete"},
+			wantMeta:  doctor.MetaFailed,
+		},
+		{
+			role:      "Complete",
+			renameCfg: func(cfg *config, renamed string) { cfg.completeLabel = renamed },
+			otherLive: []string{"ready-for-agent", "agent-in-progress", "agent-failed"},
+			wantMeta:  doctor.MetaComplete,
+		},
 	}
 
-	var buf bytes.Buffer
-	err := runDoctor(f, f, cfg, &buf, strings.NewReader("y\n"), true)
-	if err != nil {
-		t.Fatalf("unexpected error after confirm: %v", err)
-	}
+	for _, tt := range tests {
+		t.Run(tt.role, func(t *testing.T) {
+			f := forge.NewFake()
+			f.ProbeRepo = "owner/repo"
 
-	if len(f.CreateLabelCalls) != 1 {
-		t.Fatalf("want 1 CreateLabel call, got %d: %+v", len(f.CreateLabelCalls), f.CreateLabelCalls)
-	}
-	call := f.CreateLabelCalls[0]
-	if call.Name != "custom-ready-for-agent" {
-		t.Fatalf("want CreateLabel call for %q, got %q", "custom-ready-for-agent", call.Name)
-	}
-	if call.Color != doctor.MetaDispatchable.Color {
-		t.Errorf("want color %q (MetaDispatchable), got %q", doctor.MetaDispatchable.Color, call.Color)
-	}
-	if call.Description != doctor.MetaDispatchable.Description {
-		t.Errorf("want description %q (MetaDispatchable), got %q", doctor.MetaDispatchable.Description, call.Description)
+			cfg := defaultLabelConfig()
+			renamed := "custom-" + tt.role
+			tt.renameCfg(&cfg, renamed)
+
+			research := doctor.ResearchLabelNames()
+			priority := doctor.PriorityLabelNames()
+			ambiguous := doctor.AmbiguousLabelNames()
+			present := append(append(append(append([]string{}, tt.otherLive...), research...), priority...), ambiguous...)
+			f.Labels = present
+			f.LabelsSeq = [][]string{
+				present,
+				append(append([]string{}, present...), renamed), // re-verify: renamed label now created too
+			}
+
+			var buf bytes.Buffer
+			err := runDoctor(f, f, cfg, &buf, strings.NewReader("y\n"), true)
+			if err != nil {
+				t.Fatalf("unexpected error after confirm: %v", err)
+			}
+
+			if len(f.CreateLabelCalls) != 1 {
+				t.Fatalf("want 1 CreateLabel call, got %d: %+v", len(f.CreateLabelCalls), f.CreateLabelCalls)
+			}
+			call := f.CreateLabelCalls[0]
+			if call.Name != renamed {
+				t.Fatalf("want CreateLabel call for %q, got %q", renamed, call.Name)
+			}
+			if call.Color != tt.wantMeta.Color {
+				t.Errorf("want color %q (Meta%s), got %q", tt.wantMeta.Color, tt.role, call.Color)
+			}
+			if call.Description != tt.wantMeta.Description {
+				t.Errorf("want description %q (Meta%s), got %q", tt.wantMeta.Description, tt.role, call.Description)
+			}
+		})
 	}
 }
 
