@@ -87,14 +87,21 @@ func imageRepo(imageTag string) string {
 	return imageTag[:i]
 }
 
+// KindBwrap is the RUNNER_KIND value selecting the bwrap runner — the one
+// kind Probe treats as not-applicable (its store stays read-only, so there's
+// no loaded image to compare). Any other value, including an OCI runtime
+// name, is treated as an OCI kind.
+const KindBwrap = "bwrap"
+
 // Probe answers whether the loaded OCI image would be rebuilt if dispatch
 // ran against the current base-branch tip. runnerKind is the RUNNER_KIND
 // document artifact (issue #2538 AC1) — never a runtime-name comparison —
 // so a caller must pass config.runnerKind, not the raw RUNTIME/c.runtime
-// value, which can name a real OCI CLI (podman, docker, ...) that is still
-// bwrap-adjacent in intent.
+// value: a bwrap-kind harness can still carry an OCI runtime name (e.g. an
+// operator override), and comparing that name directly would misclassify
+// it as OCI.
 func Probe(runnerKind, pwd, baseBranch, flakeImageAttr, imageTag string, eval Evaluator) Result {
-	if runnerKind == "bwrap" {
+	if runnerKind == KindBwrap {
 		return Result{
 			Applicable: false,
 			Message:    "not applicable (bwrap runtime keeps its store read-only; no loaded image to compare)",
