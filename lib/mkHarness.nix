@@ -151,20 +151,45 @@ let
   }
   // config;
 
+  # `import nixpkgs { ... }` is not memoized by Nix — every call site pays for
+  # another fixed-point evaluation. spindrift's own checkset calls mkHarness
+  # ~100 times per `nix flake check`, which made those instantiations the bulk
+  # of evaluation (140s of a 2m25s warm check on a 32-core host).
+  #
+  # `import <path>` *is* memoized, keyed by the resolved path. So for the
+  # default toolset — no Consumer overlays, no Consumer config — route the
+  # instantiation through a generated file whose content is fully determined
+  # by (nixpkgs, system): every call in one evaluation derives the same store
+  # path and shares one instantiation. A Consumer passing `overlays` or
+  # `config` gets its own instantiation as before — functions have no stable
+  # identity, so those cannot be keyed on.
+  instantiate =
+    forSystem:
+    if overlays == [ ] && config == { } then
+      import (
+        builtins.toFile "nixpkgs-instance-${forSystem}.nix" ''
+          import ${nixpkgs} {
+            system = "${forSystem}";
+            overlays = [ ];
+            config = { allowUnfree = true; };
+          }
+        ''
+      )
+    else
+      import nixpkgs {
+        system = forSystem;
+        inherit overlays;
+        config = mergedConfig;
+      };
+
   # Image toolset: the Consumer's locked nixpkgs, re-instantiated for Linux.
-  pkgs = import nixpkgs {
-    system = linuxSystem;
-    inherit overlays;
-    config = mergedConfig;
-  };
+  pkgs = instantiate linuxSystem;
 
   # Host toolset: the launcher commands run on the Consumer's own system. Takes
   # the same overlays as the image so the tools pinned into the launchers
-  # (gh/git/coreutils via runtimeInputs) can be overridden consistently.
-  hostPkgs = import nixpkgs {
-    inherit system overlays;
-    config = mergedConfig;
-  };
+  # (gh/git/coreutils via runtimeInputs) can be overridden consistently. On a
+  # Linux Consumer the two systems coincide, so this is the same instantiation.
+  hostPkgs = if system == linuxSystem then pkgs else instantiate system;
 
   inherit (pkgs) lib;
 
