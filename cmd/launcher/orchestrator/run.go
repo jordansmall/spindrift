@@ -284,8 +284,18 @@ func run(cfg config, stdout io.Writer) (int, error) {
 		// An empty cfg.passSummaryPath means the caller didn't supply one
 		// this pass, not that the prior path is now unknown, so it leaves
 		// the carried-forward value alone rather than clobbering it with "".
+		// A configured path only gets recorded if this pass actually wrote
+		// it: seedAndInvokePass already unlinked any stale file left by a
+		// prior pass before invoking driver-exec, so a killed-mid-turn pass
+		// (or one that simply never wrote a summary) leaves the file
+		// missing here, and the state must not seed the next pass with a
+		// reference to a summary that no longer exists.
 		if cfg.passSummaryPath != "" {
-			state.PassSummaryPath = cfg.passSummaryPath
+			if _, statErr := os.Stat(cfg.passSummaryPath); statErr == nil {
+				state.PassSummaryPath = cfg.passSummaryPath
+			} else {
+				state.PassSummaryPath = ""
+			}
 		}
 		// driver-exec (re-)creates cfg.logPath fresh for this one pass
 		// (issue #626's run.go: os.Create truncates), so by the time it
@@ -389,8 +399,18 @@ func runWithReviewPass(cfg config, stdout io.Writer) (int, error) {
 		// An empty cfg.passSummaryPath means the caller didn't supply one
 		// this pass, not that the prior path is now unknown, so it leaves
 		// the carried-forward value alone rather than clobbering it with "".
+		// A configured path only gets recorded if this pass actually wrote
+		// it: seedAndInvokePass already unlinked any stale file left by a
+		// prior pass before invoking driver-exec, so a killed-mid-turn pass
+		// (or one that simply never wrote a summary) leaves the file
+		// missing here, and the state must not seed the next pass with a
+		// reference to a summary that no longer exists.
 		if cfg.passSummaryPath != "" {
-			state.PassSummaryPath = cfg.passSummaryPath
+			if _, statErr := os.Stat(cfg.passSummaryPath); statErr == nil {
+				state.PassSummaryPath = cfg.passSummaryPath
+			} else {
+				state.PassSummaryPath = ""
+			}
 		}
 		// Verdict authority belongs solely to the review pass below under
 		// this loop -- an implement/fix pass's own prompt has the
@@ -896,6 +916,13 @@ func seedAndInvokePass(cfg config, state runstate.RunState, prevSeededPromptFile
 	}
 	if prevSeededPromptFile != "" && prevSeededPromptFile != cfg.promptFile {
 		os.Remove(prevSeededPromptFile)
+	}
+	// A killed-mid-turn pass can leave cfg.passSummaryPath holding whatever a
+	// PRIOR pass wrote (or nothing at all); unlinking it before invoking this
+	// pass guarantees the post-pass os.Stat check in run/runWithReviewPass
+	// only ever sees a file this pass itself wrote, never a stale leftover.
+	if cfg.passSummaryPath != "" {
+		os.Remove(cfg.passSummaryPath)
 	}
 
 	passCfg := cfg
