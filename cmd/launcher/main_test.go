@@ -1539,18 +1539,20 @@ func TestResolveAgentPresenceSignals_MatchingDocumentTrustsForwardedArtifact(t *
 
 // TestResolveAgentPresenceSignals_OverrideAwayFromBakedDocumentFallsBack
 // verifies that a dispatch-time ORCHESTRATOR_ENABLED override away from what
-// the document baked into its Settings section is NOT trusted -- an
-// orchestrator-off-baked document overridden to orchestrator-on must not
-// keep reading the stale baked REVIEW_LOOP_INLINE=true/
-// REVIEW_LOOP_ORCHESTRATOR=false artifacts (issue #2533 review): unlike
-// FILER_MODEL/WORKER_MODEL, ORCHESTRATOR_ENABLED is boxEnv=true
-// (lib/env-schema.nix), so buildBoxEnv/resolveBoxEnvVar forward whatever it
-// resolves to in the ambient environment at dispatch time into the Box
-// regardless of what was baked into the document at image-build time --
-// trusting the stale artifact here would hand the Box off to the
+// the document baked into its Settings section is NOT trusted for the
+// review-loop pair -- an orchestrator-off-baked document overridden to
+// orchestrator-on must not keep reading the stale baked
+// REVIEW_LOOP_INLINE=true/REVIEW_LOOP_ORCHESTRATOR=false artifacts (issue
+// #2533 review): unlike FILER_MODEL/WORKER_MODEL, ORCHESTRATOR_ENABLED is
+// boxEnv=true (lib/env-schema.nix), so buildBoxEnv/resolveBoxEnvVar forward
+// whatever it resolves to in the ambient environment at dispatch time into
+// the Box regardless of what was baked into the document at image-build
+// time -- trusting the stale artifact here would hand the Box off to the
 // orchestrator ($ORCHESTRATOR, sourced from that same ambient
 // ORCHESTRATOR_ENABLED) while still rendering the inline review-loop
-// section.
+// section. FILER_MODEL/WORKER_MODEL stay matched to the document here, so
+// this also pins that the roster pair's trust gate is unaffected by the
+// review-loop pair's fallback -- the two gates are independent.
 func TestResolveAgentPresenceSignals_OverrideAwayFromBakedDocumentFallsBack(t *testing.T) {
 	t.Cleanup(func() { loadedDoc = nil })
 	loadedDoc = &inputDocument{
@@ -1577,10 +1579,10 @@ func TestResolveAgentPresenceSignals_OverrideAwayFromBakedDocumentFallsBack(t *t
 
 	filerEnabled, workerProvisioned, reviewLoopInline, reviewLoopOrchestrator := resolveAgentPresenceSignals()
 	if filerEnabled {
-		t.Errorf("filerEnabled = true, want false (recomputed from live FILER_MODEL, ignores stale baked artifact)")
+		t.Errorf("filerEnabled = true, want false (trusted straight from the document's FILER_ENABLED artifact -- the roster pair's trust gate is independent of the ORCHESTRATOR_ENABLED override this test exercises)")
 	}
 	if !workerProvisioned {
-		t.Errorf("workerProvisioned = false, want true (recomputed from live WORKER_MODEL, ignores stale baked artifact)")
+		t.Errorf("workerProvisioned = false, want true (trusted straight from the document's WORKER_PROVISIONED artifact -- the roster pair's trust gate is independent of the ORCHESTRATOR_ENABLED override this test exercises)")
 	}
 	if reviewLoopInline {
 		t.Errorf("reviewLoopInline = true, want false (override to orchestrator-on ignores stale baked REVIEW_LOOP_INLINE=true)")
@@ -1590,10 +1592,161 @@ func TestResolveAgentPresenceSignals_OverrideAwayFromBakedDocumentFallsBack(t *t
 	}
 }
 
+// TestResolveAgentPresenceSignals_FilerModelOverride_DocumentArtifactStillTrusted
+// verifies that a dispatch-time FILER_MODEL override away from what the
+// document baked into its Settings section does NOT defeat trust in the
+// document's FILER_ENABLED artifact (issue #2533 review): unlike
+// ORCHESTRATOR_ENABLED, FILER_MODEL/WORKER_MODEL never reach the box at
+// runtime -- lib/image.nix bakes AGENTS_JSON_TEMPLATE as a FIXED value at
+// build time from the *configured* models, and lib/mkHarness.nix computes
+// filerEnabled/workerProvisioned purely from that baked template's own
+// parsed keys -- so a live FILER_MODEL override has zero effect on the
+// box's real --agents roster. A box built with filerModel="" (no filer in
+// the roster) baking FILER_ENABLED=false into the document must still
+// report filerEnabled=false even when the live environment carries a
+// non-empty FILER_MODEL override, rather than recomputing
+// filerModel != "" = true from the live override the way the old
+// all-four-or-nothing trust gate did.
+func TestResolveAgentPresenceSignals_FilerModelOverride_DocumentArtifactStillTrusted(t *testing.T) {
+	t.Cleanup(func() { loadedDoc = nil })
+	loadedDoc = &inputDocument{
+		Settings: map[string]string{
+			"FILER_MODEL":          "",
+			"WORKER_MODEL":         "claude-sonnet-5",
+			"ORCHESTRATOR_ENABLED": "",
+		},
+		Artifacts: map[string]string{
+			"FILER_ENABLED":            "false",
+			"WORKER_PROVISIONED":       "true",
+			"REVIEW_LOOP_INLINE":       "true",
+			"REVIEW_LOOP_ORCHESTRATOR": "false",
+		},
+	}
+	// FILER_MODEL is overridden away from the document's baked "" to a
+	// non-empty model -- the scenario that trips the old code's
+	// all-three-must-match trust gate. WORKER_MODEL/ORCHESTRATOR_ENABLED
+	// stay matched to the baked document, isolating the divergence this
+	// test exercises to FILER_MODEL alone.
+	t.Setenv("FILER_MODEL", "haiku")
+	t.Setenv("WORKER_MODEL", "claude-sonnet-5")
+	t.Setenv("ORCHESTRATOR_ENABLED", "")
+
+	filerEnabled, workerProvisioned, reviewLoopInline, reviewLoopOrchestrator := resolveAgentPresenceSignals()
+	if filerEnabled {
+		t.Errorf("filerEnabled = true, want false (document's baked FILER_ENABLED artifact must be trusted regardless of a live FILER_MODEL override -- AGENTS_JSON_TEMPLATE is a fixed, non-overridable bake)")
+	}
+	if !workerProvisioned {
+		t.Errorf("workerProvisioned = false, want true (forwarded artifact)")
+	}
+	if !reviewLoopInline {
+		t.Errorf("reviewLoopInline = false, want true (forwarded artifact)")
+	}
+	if reviewLoopOrchestrator {
+		t.Errorf("reviewLoopOrchestrator = true, want false (forwarded artifact)")
+	}
+}
+
+// TestResolveAgentPresenceSignals_WorkerModelOverride_DocumentArtifactStillTrusted
+// is the WORKER_MODEL mirror of the FILER_MODEL case above: a document
+// baked with WORKER_MODEL="claude-sonnet-5" (worker provisioned,
+// WORKER_PROVISIONED=true) must still report workerProvisioned=true even
+// when the live WORKER_MODEL is overridden away to empty -- the fallback
+// computation (workerModel != "") would otherwise say false, diverging from
+// what lib/mkHarness.nix actually baked into the box's --agents roster.
+func TestResolveAgentPresenceSignals_WorkerModelOverride_DocumentArtifactStillTrusted(t *testing.T) {
+	t.Cleanup(func() { loadedDoc = nil })
+	loadedDoc = &inputDocument{
+		Settings: map[string]string{
+			"FILER_MODEL":          "",
+			"WORKER_MODEL":         "claude-sonnet-5",
+			"ORCHESTRATOR_ENABLED": "",
+		},
+		Artifacts: map[string]string{
+			"FILER_ENABLED":            "false",
+			"WORKER_PROVISIONED":       "true",
+			"REVIEW_LOOP_INLINE":       "true",
+			"REVIEW_LOOP_ORCHESTRATOR": "false",
+		},
+	}
+	// WORKER_MODEL is overridden away from the document's baked
+	// "claude-sonnet-5" to empty. FILER_MODEL/ORCHESTRATOR_ENABLED stay
+	// matched to the baked document, isolating the divergence to
+	// WORKER_MODEL alone.
+	t.Setenv("FILER_MODEL", "")
+	t.Setenv("WORKER_MODEL", "")
+	t.Setenv("ORCHESTRATOR_ENABLED", "")
+
+	filerEnabled, workerProvisioned, reviewLoopInline, reviewLoopOrchestrator := resolveAgentPresenceSignals()
+	if filerEnabled {
+		t.Errorf("filerEnabled = true, want false (forwarded artifact)")
+	}
+	if !workerProvisioned {
+		t.Errorf("workerProvisioned = false, want true (document's baked WORKER_PROVISIONED artifact must be trusted regardless of a live WORKER_MODEL override -- AGENTS_JSON_TEMPLATE is a fixed, non-overridable bake)")
+	}
+	if !reviewLoopInline {
+		t.Errorf("reviewLoopInline = false, want true (forwarded artifact)")
+	}
+	if reviewLoopOrchestrator {
+		t.Errorf("reviewLoopOrchestrator = true, want false (forwarded artifact)")
+	}
+}
+
+// TestResolveAgentPresenceSignals_OrchestratorOverride_ReviewLoopStaysLiveDerived
+// verifies that decoupling FILER_ENABLED/WORKER_PROVISIONED trust from the
+// live-vs-doc match requirement leaves REVIEW_LOOP_INLINE/
+// REVIEW_LOOP_ORCHESTRATOR's trust condition unchanged: ORCHESTRATOR_ENABLED
+// is boxEnv=true (lib/env-schema.nix) and entrypoint.sh reads it live at
+// runtime, so a dispatch-time override away from what the document baked in
+// must still fall through to the live-value-derived reviewLoopInline/
+// reviewLoopOrchestrator, not the document's now-independently-trusted (but
+// still stale for this axis) REVIEW_LOOP_* artifacts -- even though
+// FILER_ENABLED/WORKER_PROVISIONED are trusted straight from the document
+// in this same call, since FILER_MODEL/WORKER_MODEL stay matched here.
+func TestResolveAgentPresenceSignals_OrchestratorOverride_ReviewLoopStaysLiveDerived(t *testing.T) {
+	t.Cleanup(func() { loadedDoc = nil })
+	loadedDoc = &inputDocument{
+		Settings: map[string]string{
+			"FILER_MODEL":          "",
+			"WORKER_MODEL":         "claude-sonnet-5",
+			"ORCHESTRATOR_ENABLED": "",
+		},
+		Artifacts: map[string]string{
+			"FILER_ENABLED":            "false",
+			"WORKER_PROVISIONED":       "true",
+			"REVIEW_LOOP_INLINE":       "true",
+			"REVIEW_LOOP_ORCHESTRATOR": "false",
+		},
+	}
+	// FILER_MODEL/WORKER_MODEL stay matched to the baked document -- only
+	// ORCHESTRATOR_ENABLED is overridden, isolating the divergence this
+	// test exercises to the review-loop pair.
+	t.Setenv("FILER_MODEL", "")
+	t.Setenv("WORKER_MODEL", "claude-sonnet-5")
+	t.Setenv("ORCHESTRATOR_ENABLED", "1")
+
+	filerEnabled, workerProvisioned, reviewLoopInline, reviewLoopOrchestrator := resolveAgentPresenceSignals()
+	if filerEnabled {
+		t.Errorf("filerEnabled = true, want false (document's FILER_ENABLED artifact is trusted independent of the review-loop axis)")
+	}
+	if !workerProvisioned {
+		t.Errorf("workerProvisioned = false, want true (document's WORKER_PROVISIONED artifact is trusted independent of the review-loop axis)")
+	}
+	if reviewLoopInline {
+		t.Errorf("reviewLoopInline = true, want false (override to orchestrator-on ignores stale baked REVIEW_LOOP_INLINE=true, falls back to live-derived value)")
+	}
+	if !reviewLoopOrchestrator {
+		t.Errorf("reviewLoopOrchestrator = false, want true (override to orchestrator-on ignores stale baked REVIEW_LOOP_ORCHESTRATOR=false, falls back to live-derived value)")
+	}
+}
+
 // TestResolveAgentPresenceSignals_PartialArtifactKeysFallsBack verifies
-// that when the live values match the document's baked Settings but only
-// some of the four artifact keys are present (e.g. 3 of 4),
-// resolveAgentPresenceSignals falls back to schema defaults for all four,
+// that the FILER_ENABLED/WORKER_PROVISIONED and REVIEW_LOOP_INLINE/
+// REVIEW_LOOP_ORCHESTRATOR trust gates are independent (issue #2533
+// review): with REVIEW_LOOP_ORCHESTRATOR deliberately absent (3 of 4
+// artifact keys present) but both FILER_ENABLED/WORKER_PROVISIONED keys
+// present, the roster pair is still trusted straight from the document
+// while the review-loop pair -- missing one of its own two keys -- falls
+// back to the schema-default-derived live value for BOTH of its members,
 // not just the missing one.
 func TestResolveAgentPresenceSignals_PartialArtifactKeysFallsBack(t *testing.T) {
 	t.Cleanup(func() { loadedDoc = nil })
@@ -1618,17 +1771,17 @@ func TestResolveAgentPresenceSignals_PartialArtifactKeysFallsBack(t *testing.T) 
 	t.Setenv("ORCHESTRATOR_ENABLED", "")
 
 	filerEnabled, workerProvisioned, reviewLoopInline, reviewLoopOrchestrator := resolveAgentPresenceSignals()
-	if filerEnabled {
-		t.Errorf("filerEnabled = true, want false (partial keys fall back to schema default)")
+	if !filerEnabled {
+		t.Errorf("filerEnabled = false, want true (both roster-pair keys present, trusted from document despite the review-loop pair's missing key)")
 	}
-	if !workerProvisioned {
-		t.Errorf("workerProvisioned = false, want true (partial keys fall back to schema default)")
+	if workerProvisioned {
+		t.Errorf("workerProvisioned = true, want false (both roster-pair keys present, trusted from document despite the review-loop pair's missing key)")
 	}
 	if !reviewLoopInline {
-		t.Errorf("reviewLoopInline = false, want true (partial keys fall back to schema default)")
+		t.Errorf("reviewLoopInline = false, want true (review-loop pair missing REVIEW_LOOP_ORCHESTRATOR falls back to schema default for both members)")
 	}
 	if reviewLoopOrchestrator {
-		t.Errorf("reviewLoopOrchestrator = true, want false (partial keys fall back to schema default)")
+		t.Errorf("reviewLoopOrchestrator = true, want false (review-loop pair missing REVIEW_LOOP_ORCHESTRATOR falls back to schema default for both members)")
 	}
 }
 

@@ -383,46 +383,74 @@ func resolveTrackerAndForgeSignals(codeForge, issueTracker string) (read, write,
 // signals (FILER_ENABLED, WORKER_PROVISIONED, REVIEW_LOOP_INLINE,
 // REVIEW_LOOP_ORCHESTRATOR) for this run, mirroring
 // resolveTrackerAndForgeSignals's trust-then-fallback shape (issue #2527)
-// for the same reason: filerModel/workerModel/orchestratorEnabled are
-// boxEnvOnly (lib/env-schema.nix) -- the launcher's own config struct never
-// parses them -- but boxEnvOnly is not override-proof. orchestratorEnabled
-// is still boxEnv=true, so buildBoxEnv/resolveBoxEnvVar (dispatch.go)
-// forward whatever ORCHESTRATOR_ENABLED resolves to in the *ambient*
-// environment at dispatch time, independent of what was baked into the
-// document at image-build time; a dispatch-time override that disagrees
-// with the baked document would otherwise still read the document's stale
-// REVIEW_LOOP_INLINE/REVIEW_LOOP_ORCHESTRATOR, producing a Box whose real
-// $ORCHESTRATOR (entrypoint.sh, sourced from this same ambient
-// ORCHESTRATOR_ENABLED) disagrees with the rendered review-loop section --
-// exactly the divergence 4d36a298 fixed for the tracker axis (issue #2533
-// review). Compare each live value (getenvSchema, ambient-env-first) against
-// what the document baked in (loadedDoc.Settings) and trust the document's
-// artifacts only when every one matches; otherwise fall back to the live
-// values directly instead of schemaDefault's document-first read, so an
-// override is honored on both the trust check and the fallback consistently.
-// WorkerProvisioned in particular defaults false under the old behavior even
-// though workerModel's own schema default is non-empty (the worker is
-// provisioned by default), and defaulting both review-loop bools false
-// violates their exactly-one-true invariant (issue #2533 review).
+// but with two INDEPENDENT trust gates rather than one shared gate spanning
+// all four (issue #2533 review): the pairs have different override
+// semantics, so a single "everything must match live" gate over-fires on
+// the first pair and would under-fire on the second if loosened uniformly.
+//
+// FILER_ENABLED/WORKER_PROVISIONED are baked once, at image-build/eval
+// time, from agentsJsonTemplate's own parsed keys (lib/mkHarness.nix), and
+// agentsJsonTemplate is itself a FIXED value: either derived from the
+// *configured* filerModel/workerModel at eval time (lib/image.nix -- "not a
+// :-default... derived from the configured models, not a standalone knob"),
+// or unconditionally "" for the opencode driver regardless of roster
+// contents (lib/drivers/opencode.nix, which provisions subagents via
+// on-disk agents/*.md files instead). Either way, a dispatch-time
+// FILER_MODEL/WORKER_MODEL env override has ZERO effect on the real
+// --agents roster the box uses, so these two artifacts are trusted whenever
+// both keys are present in the document, regardless of whether the live
+// FILER_MODEL/WORKER_MODEL match what the document baked into its Settings
+// section -- trusting them conditionally on a live-model match would
+// produce a rendered-prompt divergence from what's actually baked into the
+// image (e.g. FILER_MODEL=haiku overridden at dispatch time against an
+// image built with filerModel="" must still report filerEnabled=false).
+//
+// REVIEW_LOOP_INLINE/REVIEW_LOOP_ORCHESTRATOR are different:
+// ORCHESTRATOR_ENABLED is boxEnv=true (lib/env-schema.nix), so
+// buildBoxEnv/resolveBoxEnvVar (dispatch.go) forward whatever it resolves to
+// in the *ambient* environment at dispatch time, independent of what was
+// baked into the document at image-build time, and entrypoint.sh reads it
+// live at runtime ("[ -n "${ORCHESTRATOR_ENABLED:-}" ] && ORCHESTRATOR=1").
+// A dispatch-time override therefore genuinely changes box behavior, so
+// these two artifacts stay gated on the live value matching what the
+// document baked in -- trusting a stale artifact here would hand the box
+// off to the orchestrator ($ORCHESTRATOR, sourced from that same ambient
+// ORCHESTRATOR_ENABLED) while still rendering the inline review-loop
+// section, or vice versa (exactly the divergence 4d36a298 fixed for the
+// tracker axis, issue #2533 review). Compare the live value (getenvSchema,
+// ambient-env-first) against what the document baked in
+// (loadedDoc.Settings) and trust the document's REVIEW_LOOP_* artifacts only
+// when it matches; otherwise fall back to the live value directly instead
+// of schemaDefault's document-first read, so an override is honored on both
+// the trust check and the fallback consistently.
+//
+// On any individual missing-artifact-key fallback within either pair, the
+// fallback computation is unchanged: filerModel != ""/workerModel != "" for
+// the first two, !orchestratorOn/orchestratorOn for the latter two.
+// WorkerProvisioned in particular defaults false under the old
+// all-four-or-nothing behavior even though workerModel's own schema default
+// is non-empty (the worker is provisioned by default), and defaulting both
+// review-loop bools false violates their exactly-one-true invariant (issue
+// #2533 review).
 func resolveAgentPresenceSignals() (filerEnabled, workerProvisioned, reviewLoopInline, reviewLoopOrchestrator bool) {
 	filerModel := getenvSchema("FILER_MODEL")
 	workerModel := getenvSchema("WORKER_MODEL")
 	orchestratorEnabled := getenvSchema("ORCHESTRATOR_ENABLED")
-	if loadedDoc != nil &&
-		filerModel == loadedDoc.Settings["FILER_MODEL"] &&
-		workerModel == loadedDoc.Settings["WORKER_MODEL"] &&
-		orchestratorEnabled == loadedDoc.Settings["ORCHESTRATOR_ENABLED"] {
+
+	filerEnabled, workerProvisioned = filerModel != "", workerModel != ""
+	if loadedDoc != nil {
 		_, filerOK := loadedDoc.Artifacts["FILER_ENABLED"]
 		_, workerOK := loadedDoc.Artifacts["WORKER_PROVISIONED"]
-		_, inlineOK := loadedDoc.Artifacts["REVIEW_LOOP_INLINE"]
-		_, orchOK := loadedDoc.Artifacts["REVIEW_LOOP_ORCHESTRATOR"]
-		if filerOK && workerOK && inlineOK && orchOK {
-			return docArtifact("FILER_ENABLED") == "true",
-				docArtifact("WORKER_PROVISIONED") == "true",
-				docArtifact("REVIEW_LOOP_INLINE") == "true",
-				docArtifact("REVIEW_LOOP_ORCHESTRATOR") == "true"
+		if filerOK && workerOK {
+			// AGENTS_JSON_TEMPLATE is a fixed, non-overridable bake (see
+			// doc comment above) -- trust it regardless of whether the
+			// live FILER_MODEL/WORKER_MODEL match the document's baked
+			// Settings.
+			filerEnabled = docArtifact("FILER_ENABLED") == "true"
+			workerProvisioned = docArtifact("WORKER_PROVISIONED") == "true"
 		}
 	}
+
 	// A bool-kind schema knob's live value is the ambient-env/flag convention
 	// ("1" or "", set by parseFlags's byBool handling and Nix's own
 	// toString-of-bool documentSettings rendering) -- never the literal
@@ -430,10 +458,16 @@ func resolveAgentPresenceSignals() (filerEnabled, workerProvisioned, reviewLoopI
 	// against (preambles.nix's runArtifacts renders those explicitly as
 	// "true"/"false", a distinct convention).
 	orchestratorOn := orchestratorEnabled != ""
-	return filerModel != "",
-		workerModel != "",
-		!orchestratorOn,
-		orchestratorOn
+	reviewLoopInline, reviewLoopOrchestrator = !orchestratorOn, orchestratorOn
+	if loadedDoc != nil && orchestratorEnabled == loadedDoc.Settings["ORCHESTRATOR_ENABLED"] {
+		_, inlineOK := loadedDoc.Artifacts["REVIEW_LOOP_INLINE"]
+		_, orchOK := loadedDoc.Artifacts["REVIEW_LOOP_ORCHESTRATOR"]
+		if inlineOK && orchOK {
+			reviewLoopInline = docArtifact("REVIEW_LOOP_INLINE") == "true"
+			reviewLoopOrchestrator = docArtifact("REVIEW_LOOP_ORCHESTRATOR") == "true"
+		}
+	}
+	return filerEnabled, workerProvisioned, reviewLoopInline, reviewLoopOrchestrator
 }
 
 func validate(c config) error {
