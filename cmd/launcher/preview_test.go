@@ -150,14 +150,23 @@ func TestPreviewIssues_EmptyQueue(t *testing.T) {
 }
 
 // TestPreviewIssues_PrintsImageFreshnessLine verifies that previewIssues
-// surfaces the image-freshness probe result as its own line — bwrap has no
-// loaded image, so it must report "not applicable" rather than attempting a
-// fetch or eval.
+// surfaces the image-freshness probe result as its own line — a "bwrap"
+// runnerKind has no loaded image, so it must report "not applicable" rather
+// than attempting a fetch or eval. c.runtime is deliberately set to a real
+// OCI CLI name ("podman") while c.runnerKind is "bwrap" to prove the
+// freshness line is driven by c.runnerKind (the RUNNER_KIND document
+// artifact, issue #2538 AC1), not a runtime-name comparison: the old
+// c.runtime == "bwrap" check would have taken the OCI branch here and tried
+// to git-fetch against pwd="/unused" instead, producing a different
+// not-applicable message (a missing-git-repo diagnostic, not the bwrap
+// one) — this asserts the bwrap-specific message text, not just any
+// "not applicable" substring, so that mismatch would be caught.
 func TestPreviewIssues_PrintsImageFreshnessLine(t *testing.T) {
 	c := baseConfig()
 	c.repoSlug = "owner/repo"
 	c.label = "ready-for-agent"
-	c.runtime = "bwrap"
+	c.runtime = "podman"
+	c.runnerKind = "bwrap"
 	fc := forge.NewFake()
 
 	var buf bytes.Buffer
@@ -169,8 +178,8 @@ func TestPreviewIssues_PrintsImageFreshnessLine(t *testing.T) {
 	if !strings.Contains(out, "image-freshness:") {
 		t.Errorf("output missing image-freshness line; got:\n%s", out)
 	}
-	if !strings.Contains(out, "not applicable") {
-		t.Errorf("output missing not-applicable freshness message for bwrap; got:\n%s", out)
+	if !strings.Contains(out, "bwrap runtime keeps its store read-only") {
+		t.Errorf("output missing the bwrap runnerKind not-applicable message (want the runnerKind early-return, not a git-repo-missing fallback); got:\n%s", out)
 	}
 }
 

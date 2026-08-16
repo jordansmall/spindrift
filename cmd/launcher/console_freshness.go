@@ -32,7 +32,7 @@ import (
 // directly to the Console's own stdout/stderr.
 func newConsoleFreshness(c config, pwd string, eval freshness.Evaluator, pull func() (string, string, error), build func() (string, error)) (waves.FreshnessChecker, func() (string, string, error)) {
 	probe := func() freshness.Result {
-		return freshness.Probe(c.runtime, pwd, c.baseBranch, c.flakeImageAttr, c.imageTag, eval)
+		return freshness.Probe(c.runnerKind, pwd, c.baseBranch, c.flakeImageAttr, c.imageTag, eval)
 	}
 	return newConsoleFreshnessChecker(c.baseBranch, probe, pull, build)
 }

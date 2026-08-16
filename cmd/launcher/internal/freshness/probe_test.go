@@ -19,17 +19,45 @@ const (
 	diffHash = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 )
 
-// TestProbe_BwrapNotApplicable verifies that the bwrap runtime — which keeps
-// its store read-only and has no loaded image to compare — reports the probe
-// as not applicable rather than attempting a fetch or eval.
+// TestProbe_BwrapNotApplicable verifies that a "bwrap" runnerKind — which
+// keeps its store read-only and has no loaded image to compare — reports the
+// probe as not applicable rather than attempting a fetch or eval. Probe's
+// first parameter is runnerKind (the RUNNER_KIND document artifact, issue
+// #2538 AC1), never a runtime-name comparison; it happens to equal the
+// literal runtime name "bwrap" only because that's bwrap's own runnerKind
+// value too.
 func TestProbe_BwrapNotApplicable(t *testing.T) {
 	res := Probe("bwrap", "/nonexistent", "main", ".#packages.x86_64-linux.agent-image", "spindrift:"+sameHash, nil)
 
 	if res.Applicable {
-		t.Errorf("Applicable = true, want false for bwrap")
+		t.Errorf("Applicable = true, want false for runnerKind bwrap")
 	}
 	if res.Message == "" {
 		t.Error("Message is empty, want a not-applicable explanation")
+	}
+}
+
+// TestProbe_RunnerKindNotApplicable_KeysOffValueNotRuntimeName is issue
+// #2538's regression test for probe.go:93 (a surviving runtime-name
+// comparison the original AC1 implementation missed): it feeds Probe a
+// runnerKind of "oci" — a value that is not itself any real runtime CLI
+// name (unlike "podman"/"docker" used elsewhere in this file) — and
+// confirms Probe proceeds past the early return exactly as it would for any
+// other non-"bwrap" runnerKind. This proves the comparison keys off the
+// parameter's runnerKind semantics (only the literal string "bwrap" is
+// special), not a coincidental match against a known runtime executable
+// name.
+func TestProbe_RunnerKindNotApplicable_KeysOffValueNotRuntimeName(t *testing.T) {
+	pwd := newCloneWithOrigin(t, "main")
+	eval := &Fake{OutPath: "/nix/store/" + sameHash + "-agent-image"}
+
+	res := Probe("oci", pwd, "main", ".#packages.x86_64-linux.agent-image", "spindrift:"+sameHash, eval)
+
+	if !res.Applicable {
+		t.Fatalf("Applicable = false, want true for runnerKind %q (not bwrap)", "oci")
+	}
+	if !res.Fresh {
+		t.Errorf("Fresh = false, want true when the image tag matches; message: %s", res.Message)
 	}
 }
 
@@ -82,7 +110,7 @@ func TestProbe_FreshWhenImageHashMatches(t *testing.T) {
 	res := Probe("podman", pwd, "main", ".#packages.x86_64-linux.agent-image", "spindrift:"+sameHash, eval)
 
 	if !res.Applicable {
-		t.Fatalf("Applicable = false, want true for podman runtime")
+		t.Fatalf("Applicable = false, want true for a non-bwrap runnerKind (podman)")
 	}
 	if !res.Fresh {
 		t.Errorf("Fresh = false, want true when the image tag matches; message: %s", res.Message)
@@ -131,7 +159,7 @@ func TestProbe_RebuildNeededWhenImageHashDiffers(t *testing.T) {
 	res := Probe("podman", pwd, "main", ".#packages.x86_64-linux.agent-image", "spindrift:"+sameHash, eval)
 
 	if !res.Applicable {
-		t.Fatalf("Applicable = false, want true for podman runtime")
+		t.Fatalf("Applicable = false, want true for a non-bwrap runnerKind (podman)")
 	}
 	if res.Fresh {
 		t.Errorf("Fresh = true, want false when the image tag differs; message: %s", res.Message)
@@ -169,7 +197,7 @@ func TestProbe_LivelockRegression_FreshWhenTagMatchesDespiteOutPathNameDrift(t *
 	res := Probe("podman", pwd, "main", ".#packages.x86_64-linux.agent-image", loadedTag, eval)
 
 	if !res.Applicable {
-		t.Fatalf("Applicable = false, want true for podman runtime")
+		t.Fatalf("Applicable = false, want true for a non-bwrap runnerKind (podman)")
 	}
 	if !res.Fresh {
 		t.Errorf("Fresh = false, want true when the tip's image tag matches the loaded tag; message: %s", res.Message)
@@ -188,7 +216,7 @@ func TestProbe_DriverScopedRepo_FreshWhenImageHashMatches(t *testing.T) {
 	res := Probe("podman", pwd, "main", ".#packages.x86_64-linux.agent-image", "spindrift-opencode:"+sameHash, eval)
 
 	if !res.Applicable {
-		t.Fatalf("Applicable = false, want true for podman runtime")
+		t.Fatalf("Applicable = false, want true for a non-bwrap runnerKind (podman)")
 	}
 	if !res.Fresh {
 		t.Errorf("Fresh = false, want true when the driver-scoped image tag matches; message: %s", res.Message)
@@ -207,7 +235,7 @@ func TestProbe_DriverScopedRepo_RebuildNeededWhenImageHashDiffers(t *testing.T) 
 	res := Probe("podman", pwd, "main", ".#packages.x86_64-linux.agent-image", "spindrift-opencode:"+sameHash, eval)
 
 	if !res.Applicable {
-		t.Fatalf("Applicable = false, want true for podman runtime")
+		t.Fatalf("Applicable = false, want true for a non-bwrap runnerKind (podman)")
 	}
 	if res.Fresh {
 		t.Errorf("Fresh = true, want false when the driver-scoped image tag's hash differs; message: %s", res.Message)
@@ -271,7 +299,7 @@ func TestProbe_EvalFailureFailsClosed(t *testing.T) {
 	res := Probe("podman", pwd, "main", ".#packages.x86_64-linux.agent-image", "spindrift:"+sameHash, eval)
 
 	if !res.Applicable {
-		t.Fatalf("Applicable = false, want true for podman runtime")
+		t.Fatalf("Applicable = false, want true for a non-bwrap runnerKind (podman)")
 	}
 	if res.Fresh {
 		t.Errorf("Fresh = true, want false (fail closed) on eval error")
@@ -296,7 +324,7 @@ func TestProbe_FetchFailureFailsClosed(t *testing.T) {
 	res := Probe("podman", pwd, "main", ".#packages.x86_64-linux.agent-image", "spindrift:"+sameHash, eval)
 
 	if !res.Applicable {
-		t.Fatalf("Applicable = false, want true for podman runtime")
+		t.Fatalf("Applicable = false, want true for a non-bwrap runnerKind (podman)")
 	}
 	if res.Fresh {
 		t.Errorf("Fresh = true, want false (fail closed) on fetch error")

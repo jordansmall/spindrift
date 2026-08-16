@@ -27,7 +27,7 @@ type Evaluator interface {
 
 // Result is the outcome of a Probe call.
 type Result struct {
-	// Applicable is false for the bwrap runtime, which keeps its store
+	// Applicable is false for a "bwrap" runnerKind, which keeps its store
 	// read-only and has no loaded image to compare.
 	Applicable bool
 	// Fresh is true when the evaluated image's content-hash tag matches the
@@ -88,9 +88,13 @@ func imageRepo(imageTag string) string {
 }
 
 // Probe answers whether the loaded OCI image would be rebuilt if dispatch
-// ran against the current base-branch tip.
-func Probe(runtime, pwd, baseBranch, flakeImageAttr, imageTag string, eval Evaluator) Result {
-	if runtime == "bwrap" {
+// ran against the current base-branch tip. runnerKind is the RUNNER_KIND
+// document artifact (issue #2538 AC1) — never a runtime-name comparison —
+// so a caller must pass config.runnerKind, not the raw RUNTIME/c.runtime
+// value, which can name a real OCI CLI (podman, docker, ...) that is still
+// bwrap-adjacent in intent.
+func Probe(runnerKind, pwd, baseBranch, flakeImageAttr, imageTag string, eval Evaluator) Result {
+	if runnerKind == "bwrap" {
 		return Result{
 			Applicable: false,
 			Message:    "not applicable (bwrap runtime keeps its store read-only; no loaded image to compare)",
