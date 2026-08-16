@@ -194,7 +194,7 @@ composes with both prior amendments rather than sitting outside them: like
 prompt directory ships both prompt files to override each independently —
 and its machine-checkable verdict contract renders from the same
 configured `RESEARCH_VERDICTS` set as the ordinary prompt (issue #2201,
-`researchVerdicts.renderIfCustom`, applied to both prompts), so a custom
+`researchVerdicts.render`, applied to both prompts), so a custom
 vocabulary reaches self-contained research too. Settle is unchanged:
 self-contained research still posts exactly one required verdict comment
 through the same configurable-verdict path this ADR and its #2201

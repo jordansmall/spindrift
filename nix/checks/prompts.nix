@@ -172,7 +172,6 @@ let
     # VERDICT
 
     Judge relevance from the issue content alone — there is no repo to explore.
-
     Render exactly one of these verdicts:
 
     - `recommend` — relevant, now enriched with real context; promote it.

@@ -101,46 +101,54 @@ rec {
   # mirroring the launcher's startup validation).
   parse = s: if s == "" then defaultVerdicts else validate (builtins.fromJSON s);
 
+  # Injection markers the checked-in templates carry in place of hand-typed
+  # verdict content (issue #2525): `bulletsMarker` sits alone where the
+  # VERDICT section's enumerated bullet list belongs, and `enumMarker` sits
+  # inside the "Structure the verdict" line's backtick enumeration. Each is
+  # single-use -- renderPrompt replaces it with content synthesized from
+  # `verdicts`, consuming the marker in the process, so re-rendering an
+  # already-rendered prompt finds no marker left and is a safe no-op via
+  # `builtins.replaceStrings`' no-match behavior. Neither rewrite depends on
+  # the template's on-disk bytes matching what `defaultVerdicts` itself
+  # renders to, so a reworded or reflowed default bullet can never leave the
+  # enumeration/status line rewritten while the bullet list itself stays
+  # stale (or vice versa): the markers are always either both present
+  # (nothing rendered yet) or both absent (already rendered), never one of
+  # each.
+  bulletsMarker = "<!-- RESEARCH_VERDICT_BULLETS -->";
+  enumMarker = "`<RESEARCH_VERDICT_ENUM>`";
+
   # Renders the verdict contract of `promptText` from `verdicts`: the VERDICT
-  # section's enumerated bullet list, the backtick-wrapped verdict
-  # enumeration on the "Structure the verdict" line, and the
-  # `status=<${RESEARCH_STATUS_ENUM}>` alternation of the outcome line (the
-  # OUTCOME grammar line's registry-generated runtime placeholder, issue
-  # #2504 -- unrelated to the two rewrites below).
-  #
-  # Each of the other two rewrites is a literal-text substitution: it
-  # replaces the exact bytes `defaultVerdicts` itself renders to (the
-  # checked-in template's own hand-typed content) with the exact bytes
-  # `verdicts` renders to. `builtins.replaceStrings` is a safe no-op
-  # wherever its target text isn't present, so this is safe against a
-  # Consumer prompt that never carried the default content, or one that's
-  # already been rewritten to a custom set (repeated calls are idempotent:
-  # once the default text is gone, the same pattern no longer matches). And
-  # because the match is exact bytes rather than a marker-bounded span, any
-  # other prose sharing the VERDICT section (e.g. the self-contained
-  # prompt's "Judge relevance..." sentence) is never touched. `render`
-  # below always calls this, for both the default and a custom set --
-  # rendering the default set against the checked-in template happens to be
-  # byte-identical to the template, because the template's own hand-typed
-  # content is exactly what `defaultVerdicts` renders to.
+  # section's enumerated bullet list (bulletsMarker), the backtick-wrapped
+  # verdict enumeration on the "Structure the verdict" line (enumMarker), and
+  # the `status=<${RESEARCH_STATUS_ENUM}>` alternation of the outcome line
+  # (the OUTCOME grammar line's registry-generated runtime placeholder, issue
+  # #2504 -- unrelated to the two marker rewrites). `builtins.replaceStrings`
+  # is a safe no-op wherever its target text isn't present, so this is safe
+  # against a Consumer prompt that never carried the markers at all. Because
+  # each rewrite targets a single-purpose marker rather than a span between
+  # section headings, any other prose sharing the VERDICT section (e.g. the
+  # self-contained prompt's "Judge relevance..." sentence) is never touched.
+  # `render` below always calls this, for both the default and a custom set
+  # -- there is no byte-identical-to-template no-op special case.
   renderPrompt =
     promptText: verdicts:
     let
       bullet = v: "- `" + v.verdict + "` — " + (v.description or "");
-      bullets = vs: concatSep "\n" (map bullet vs);
-      backtickEnum = vs: concatSep " / " (map (v: "`" + v.verdict + "`") vs);
+      bullets = concatSep "\n" (map bullet verdicts);
+      backtickEnum = concatSep " / " (map (v: "`" + v.verdict + "`") verdicts);
       pipeJoined = concatSep "|" (map (v: v.verdict) verdicts);
     in
     builtins.replaceStrings
       [
         "status=<\${RESEARCH_STATUS_ENUM}>"
-        (backtickEnum defaultVerdicts)
-        (bullets defaultVerdicts)
+        enumMarker
+        bulletsMarker
       ]
       [
         ("status=<" + pipeJoined + ">")
-        (backtickEnum verdicts)
-        (bullets verdicts)
+        backtickEnum
+        bullets
       ]
       promptText;
 
@@ -148,8 +156,6 @@ rec {
   # the result -- one path for both the default (empty knob, defaultVerdicts)
   # and a configured custom set. There is no byte-identical-to-template
   # no-op special case in the dispatch itself: render always calls
-  # renderPrompt. (Against the checked-in template, rendering the default
-  # set happens to produce byte-identical output, because the template's
-  # hand-typed content already equals what defaultVerdicts renders to.)
+  # renderPrompt.
   render = rawKnob: promptText: renderPrompt promptText (parse rawKnob);
 }
