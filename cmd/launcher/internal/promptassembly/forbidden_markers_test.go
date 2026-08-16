@@ -172,7 +172,7 @@ func testForbiddenMarkerRows() []ForbiddenMarkerRow {
 			Severity: "reject",
 			When:     "boxAccessReadOnly",
 			Kind:     "substring",
-			Enforce:  "prompt-only",
+			Enforce:  "command-shim",
 			Message:  "_validate_prompt_contract: read-only dispatch's rendered prompt orders a read-only Box to run 'fj pr create' -- gated under boxAccessReadOnly, a read-only Box holds no write-capable token for this operation; forgejo PRs are opened via the PR-intent relay (SPINDRIFT_PR_INTENT), the same host-mediated relay a read-only github Box uses for `gh pr create`, applied over the forgejo relay path. Refusing to invoke the Driver.",
 		},
 		{
@@ -182,7 +182,7 @@ func testForbiddenMarkerRows() []ForbiddenMarkerRow {
 			Severity: "reject",
 			When:     "boxAccessReadOnly",
 			Kind:     "substring",
-			Enforce:  "prompt-only",
+			Enforce:  "command-shim",
 			Message:  "_validate_prompt_contract: read-only dispatch's rendered prompt orders a read-only Box to run 'fj pr ready' -- gated under boxAccessReadOnly, a read-only Box holds no write-capable token for this operation; the launcher flips the PR ready once CI is green over the forgejo relay path, so a Box must never run 'fj pr ready' itself. Refusing to invoke the Driver.",
 		},
 		{
@@ -192,7 +192,7 @@ func testForbiddenMarkerRows() []ForbiddenMarkerRow {
 			Severity: "reject",
 			When:     "boxAccessReadOnly",
 			Kind:     "substring",
-			Enforce:  "prompt-only",
+			Enforce:  "command-shim",
 			Message:  "_validate_prompt_contract: read-only dispatch's rendered prompt orders a read-only Box to run 'fj pr merge' -- gated under boxAccessReadOnly, a read-only Box holds no write-capable token for this operation; the launcher merges the PR once CI is green over the forgejo relay path, so a Box must never run 'fj pr merge' itself. Refusing to invoke the Driver.",
 		},
 		{
@@ -202,7 +202,7 @@ func testForbiddenMarkerRows() []ForbiddenMarkerRow {
 			Severity: "reject",
 			When:     "boxAccessReadOnly",
 			Kind:     "substring",
-			Enforce:  "prompt-only",
+			Enforce:  "command-shim",
 			Message:  "_validate_prompt_contract: read-only dispatch's rendered prompt orders a read-only Box to run 'fj issue comment' -- gated under boxAccessReadOnly, a read-only Box holds no write-capable token for this operation; issue comments are relayed via the outcome contract's `note=` field, the same relay a read-only github Box uses for `gh issue comment`, applied over the forgejo path. Refusing to invoke the Driver.",
 		},
 		{
@@ -212,7 +212,7 @@ func testForbiddenMarkerRows() []ForbiddenMarkerRow {
 			Severity: "reject",
 			When:     "boxAccessReadOnly",
 			Kind:     "substring",
-			Enforce:  "prompt-only",
+			Enforce:  "command-shim",
 			Message:  "_validate_prompt_contract: read-only dispatch's rendered prompt orders a read-only Box to run 'fj issue create' -- gated under boxAccessReadOnly, a read-only Box holds no write-capable token for this operation; issues are filed via the issue-intent relay (SPINDRIFT_ISSUE_INTENT), the same relay a read-only github Box uses for `gh issue create`, applied over the forgejo path. Refusing to invoke the Driver.",
 		},
 	}

@@ -365,10 +365,10 @@ func TestInstall_GroupsByArgv0Generically(t *testing.T) {
 
 // TestInstall_FullRegistry loads the real thirteen-row forbiddenMarkers
 // fixture (promptassembly/testdata/forbidden-markers.json) and installs it
-// end to end: exactly one command-shim (argv0 "gh" -- every "fj ..." row is
-// still enforce=="prompt-only" as of issue #2509, per this slice's scope
-// note) and the one git-hook guard, with every "gh" subcommand row's
-// message reachable and no "fj" shim installed.
+// end to end: two command-shims (argv0 "gh" and argv0 "fj", both now
+// enforce=="command-shim" as of issue #2509) and the one git-hook guard,
+// with every "gh" and "fj" subcommand row's message reachable through its
+// own installed shim.
 func TestInstall_FullRegistry(t *testing.T) {
 	realTrue := requireExecutable(t, "true")
 
@@ -393,14 +393,17 @@ func TestInstall_FullRegistry(t *testing.T) {
 		t.Fatalf("Install: %v", err)
 	}
 
-	if want := []string{"gh"}; len(result.Shims) != len(want) || result.Shims[0] != want[0] {
-		t.Fatalf("result.Shims = %v, want %v (all fj rows are still prompt-only)", result.Shims, want)
+	wantShims := []string{"fj", "gh"}
+	if len(result.Shims) != len(wantShims) {
+		t.Fatalf("result.Shims = %v, want %v (both fj and gh rows are command-shim)", result.Shims, wantShims)
+	}
+	for i, name := range wantShims {
+		if result.Shims[i] != name {
+			t.Fatalf("result.Shims = %v, want %v (both fj and gh rows are command-shim)", result.Shims, wantShims)
+		}
 	}
 	if !result.HookInstalled {
 		t.Fatalf("result.HookInstalled = false, want true")
-	}
-	if _, err := os.Stat(filepath.Join(shimDir, "fj")); err == nil {
-		t.Fatalf("fj shim exists, want none installed (every fj row is prompt-only)")
 	}
 
 	for _, tc := range []struct {
@@ -428,6 +431,29 @@ func TestInstall_FullRegistry(t *testing.T) {
 	}
 	if _, code := runShim(t, shimDir, "gh", "api", "repos/foo/bar"); code != 0 {
 		t.Errorf("gh api (read): exit code != 0, want passthrough")
+	}
+
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"pr", "create"}, "fj pr create"},
+		{[]string{"pr", "ready"}, "fj pr ready"},
+		{[]string{"pr", "merge"}, "fj pr merge"},
+		{[]string{"issue", "comment"}, "fj issue comment"},
+		{[]string{"issue", "create"}, "fj issue create"},
+	} {
+		got, code := runShim(t, shimDir, "fj", tc.args...)
+		if code == 0 {
+			t.Errorf("fj %v: exit code = 0, want non-zero; output=%q", tc.args, got)
+		}
+		if !bytes.Contains([]byte(got), []byte(tc.want)) {
+			t.Errorf("fj %v: output = %q, want it to mention %q", tc.args, got, tc.want)
+		}
+	}
+
+	if _, code := runShim(t, shimDir, "fj", "pr", "list"); code != 0 {
+		t.Errorf("fj pr list: exit code != 0, want passthrough")
 	}
 
 	hookPath := filepath.Join(repoDir, ".git", "hooks", "pre-push")
