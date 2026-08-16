@@ -495,13 +495,15 @@ in
     ) "forbidden-gh-api-mutation row's runtimeMessage must match the runtime shim wording, got: ${row.runtimeMessage}";
     pkgs.runCommand "prompt-contract-forbidden-gh-api-mutation-row-shape" { } "touch $out";
 
-  # issue #2509: the five fj rows mirror the gh rows above one-for-one but
-  # stay pinned enforce=="prompt-only" -- driver-exec's readonly-guards verb
-  # CAN render a real fj shim, but agent/entrypoint.sh's
-  # install_readonly_guards never invokes the verb for a real forgejo
-  # dispatch (the forgejo backend's outboxRelayCapable/HostMediatedRemote are
-  # both false), so no fj shim reaches production -- see the rationale
-  # comment on these rows in lib/prompt-contract.nix.
+  # issue #2509: the five fj rows mirror the gh rows above one-for-one, and
+  # are pinned enforce=="command-shim" like them -- agent/entrypoint.sh's
+  # install_readonly_guards installs command-shim guards (gh and fj alike)
+  # for every read-only Box unconditionally, decoupled from the git-hook
+  # guard's outbox-capability gate via the readonly-guards verb's
+  # -skip-git-hook flag (readonlyguards.Config.SkipGitHook). A real fj shim
+  # reaches production on any read-only forgejo Box, where `fj` resolves on
+  # PATH -- see the rationale comment on these rows in
+  # lib/prompt-contract.nix.
   prompt-contract-forbidden-fj-pr-create-row-shape =
     let
       row = forbiddenMarkerById "forbidden-fj-pr-create";
@@ -516,8 +518,12 @@ in
       "forbidden-fj-pr-create row's when must be 'boxAccessReadOnly', got: ${row.when}";
     assert assertMsg (row.kind == "substring")
       "forbidden-fj-pr-create row's kind must be 'substring', got: ${row.kind}";
-    assert assertMsg (row.enforce == "prompt-only")
-      "forbidden-fj-pr-create row's enforce must be 'prompt-only', got: ${row.enforce}";
+    assert assertMsg (row.enforce == "command-shim")
+      "forbidden-fj-pr-create row's enforce must be 'command-shim', got: ${row.enforce}";
+    assert assertMsg (
+      row.runtimeMessage
+      == "read-only Box: PRs are opened via the PR-intent relay (SPINDRIFT_PR_INTENT); do not run `fj pr create` -- this call has been blocked locally."
+    ) "forbidden-fj-pr-create row's runtimeMessage must match the runtime shim wording, got: ${row.runtimeMessage}";
     pkgs.runCommand "prompt-contract-forbidden-fj-pr-create-row-shape" { } "touch $out";
 
   prompt-contract-forbidden-fj-pr-ready-row-shape =
@@ -534,8 +540,12 @@ in
       "forbidden-fj-pr-ready row's when must be 'boxAccessReadOnly', got: ${row.when}";
     assert assertMsg (row.kind == "substring")
       "forbidden-fj-pr-ready row's kind must be 'substring', got: ${row.kind}";
-    assert assertMsg (row.enforce == "prompt-only")
-      "forbidden-fj-pr-ready row's enforce must be 'prompt-only', got: ${row.enforce}";
+    assert assertMsg (row.enforce == "command-shim")
+      "forbidden-fj-pr-ready row's enforce must be 'command-shim', got: ${row.enforce}";
+    assert assertMsg (
+      row.runtimeMessage
+      == "read-only Box: the launcher flips the PR ready once CI is green; do not run `fj pr ready` -- this call has been blocked locally."
+    ) "forbidden-fj-pr-ready row's runtimeMessage must match the runtime shim wording, got: ${row.runtimeMessage}";
     pkgs.runCommand "prompt-contract-forbidden-fj-pr-ready-row-shape" { } "touch $out";
 
   prompt-contract-forbidden-fj-pr-merge-row-shape =
@@ -552,8 +562,12 @@ in
       "forbidden-fj-pr-merge row's when must be 'boxAccessReadOnly', got: ${row.when}";
     assert assertMsg (row.kind == "substring")
       "forbidden-fj-pr-merge row's kind must be 'substring', got: ${row.kind}";
-    assert assertMsg (row.enforce == "prompt-only")
-      "forbidden-fj-pr-merge row's enforce must be 'prompt-only', got: ${row.enforce}";
+    assert assertMsg (row.enforce == "command-shim")
+      "forbidden-fj-pr-merge row's enforce must be 'command-shim', got: ${row.enforce}";
+    assert assertMsg (
+      row.runtimeMessage
+      == "read-only Box: the launcher merges the PR once CI is green; do not run `fj pr merge` -- this call has been blocked locally."
+    ) "forbidden-fj-pr-merge row's runtimeMessage must match the runtime shim wording, got: ${row.runtimeMessage}";
     pkgs.runCommand "prompt-contract-forbidden-fj-pr-merge-row-shape" { } "touch $out";
 
   prompt-contract-forbidden-fj-issue-comment-row-shape =
@@ -570,8 +584,12 @@ in
       "forbidden-fj-issue-comment row's when must be 'boxAccessReadOnly', got: ${row.when}";
     assert assertMsg (row.kind == "substring")
       "forbidden-fj-issue-comment row's kind must be 'substring', got: ${row.kind}";
-    assert assertMsg (row.enforce == "prompt-only")
-      "forbidden-fj-issue-comment row's enforce must be 'prompt-only', got: ${row.enforce}";
+    assert assertMsg (row.enforce == "command-shim")
+      "forbidden-fj-issue-comment row's enforce must be 'command-shim', got: ${row.enforce}";
+    assert assertMsg (
+      row.runtimeMessage
+      == "read-only Box: issue comments are relayed via the outcome note= field; do not run `fj issue comment` -- this call has been blocked locally."
+    ) "forbidden-fj-issue-comment row's runtimeMessage must match the runtime shim wording, got: ${row.runtimeMessage}";
     pkgs.runCommand "prompt-contract-forbidden-fj-issue-comment-row-shape" { } "touch $out";
 
   prompt-contract-forbidden-fj-issue-create-row-shape =
@@ -588,8 +606,12 @@ in
       "forbidden-fj-issue-create row's when must be 'boxAccessReadOnly', got: ${row.when}";
     assert assertMsg (row.kind == "substring")
       "forbidden-fj-issue-create row's kind must be 'substring', got: ${row.kind}";
-    assert assertMsg (row.enforce == "prompt-only")
-      "forbidden-fj-issue-create row's enforce must be 'prompt-only', got: ${row.enforce}";
+    assert assertMsg (row.enforce == "command-shim")
+      "forbidden-fj-issue-create row's enforce must be 'command-shim', got: ${row.enforce}";
+    assert assertMsg (
+      row.runtimeMessage
+      == "read-only Box: issues are filed via the issue-intent relay (SPINDRIFT_ISSUE_INTENT); do not run `fj issue create` -- this call has been blocked locally."
+    ) "forbidden-fj-issue-create row's runtimeMessage must match the runtime shim wording, got: ${row.runtimeMessage}";
     pkgs.runCommand "prompt-contract-forbidden-fj-issue-create-row-shape" { } "touch $out";
 
   # Pins buildTimeRejectVerdicts (issue #2250): the build-time reject arm that
