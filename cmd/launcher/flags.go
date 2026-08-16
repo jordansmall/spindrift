@@ -505,20 +505,6 @@ func secretRequiredThisRun(env string) bool {
 	}
 }
 
-// groupOrder is the display order of flag-group headings in the full reference
-// (printHelpFull and the man page): the six domains (ADR 0037). Every group
-// used in env-schema.nix must appear here, or its flags would silently drop
-// out of the full listing (guarded by TestGroupOrder_CoversEverySchemaGroup
-// and launcher-flag-table).
-var groupOrder = []string{
-	"agents",
-	"git",
-	"issues",
-	"forge",
-	"dispatch",
-	"infra",
-}
-
 // printSubcommands writes the shared subcommand listing used by both help
 // modes, rendered from subcommandRegistry (lib/subcommands.nix) so the
 // listing can never hand-drift from the other renderings of the same
