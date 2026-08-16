@@ -266,7 +266,7 @@
   reviewEffort = {
     env = "REVIEW_EFFORT";
     group = "agents";
-    doc = "value for the orchestrator's code-owned review pass's own --effort flag (issue #2387); pass-through only, no normalization, same accepted values as EFFORT for the active Driver; empty falls back to the coordinator's EFFORT value, so default behavior is unchanged for anyone not setting it. Meaningful only under ORCHESTRATOR: entrypoint.sh threads this value to the orchestrator's --review-effort flag.";
+    doc = "value for the orchestrator's code-owned review pass's own --effort flag (issue #2387); pass-through only, no normalization, same accepted values as EFFORT for the active Driver. Overrides the roster reviewer entry's own effort (lib/roster.nix's defaultRoster, rosterDefaults.reviewer.effort by default) the same way REVIEW_MODEL overrides the reviewer's model -- empty means follow the roster, a non-empty value overrides it. Meaningful only under ORCHESTRATOR: the resolved value reaches the orchestrator via the prompt-assembly Handoff's ReviewEffort field (issue #2512), mirroring how ReviewModel reaches it.";
     flakeOption = true;
     nixSubPath = "models.reviewEffort";
     boxEnv = true;
