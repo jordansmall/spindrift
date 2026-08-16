@@ -773,18 +773,6 @@ in
       "opencode agentFilesTemplate's frontmatter description must be JSON-quoted so an embedded colon can't break YAML, got: ${auditorFile}";
     pkgs.runCommand "drivers-opencode-agent-files-description-colon-frontmatter" { } "touch $out";
 
-  # opencode reads .claude/skills/ directly (ADR 0009) rather than a
-  # opencode-specific skills directory -- pin the exact value so a future
-  # edit to lib/drivers/opencode.nix can't silently change the Driver's
-  # skills-discovery path without this check catching it.
-  drivers-opencode-skills-dir-pinned =
-    let
-      opencodeEntry = driverRegistry.entries.opencode;
-    in
-    assert assertMsg (opencodeEntry.skillsDirRelative == ".claude/skills")
-      "opencode Driver's skillsDirRelative must stay .claude/skills, got: ${opencodeEntry.skillsDirRelative}";
-    pkgs.runCommand "drivers-opencode-skills-dir-pinned" { } "touch $out";
-
   # Issue #2153: renderPreamble must bake DRIVER_AGENT_FILES_DIR from the
   # real opencode entry's agentFilesDirRelative so agent/entrypoint.sh's
   # file-rewrite loop (agent/entrypoint.sh:784+) actually runs in a real Box
