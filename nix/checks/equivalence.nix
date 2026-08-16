@@ -883,7 +883,7 @@ in
         ''mergeMode = "immediate"''
         "autoFormat = true"
         "autoLint = true"
-        ''filer = "claude-haiku-4-5-20251001"''
+        ''filer = "${defaultModelFixture.dogfoodPins.filer}"''
       ];
       # The legacy `filerModel` knob (superseded by the roster's `models.filer`
       # per issue #2388/#2435) is deliberately absent from
@@ -893,7 +893,7 @@ in
       # the roster) is exactly the kind of drift this check exists to catch,
       # so it stays tracked for `leaked` only.
       leakOnlyLiterals = [
-        ''filerModel = "claude-haiku-4-5-20251001"''
+        ''filerModel = "${defaultModelFixture.dogfoodPins.filer}"''
       ];
       leaked = filter (l: hasInfix l flakeSrc || hasInfix l fixturesSrc) (literals ++ leakOnlyLiterals);
       missing = filter (l: !hasInfix l defaultsSrc) literals;

@@ -162,7 +162,8 @@ in
           ${../../tests/fakes/nix} \
           ${../../tests/fakes/driver-exec} \
           ${../../tests/helper.bash} \
-          ${../../tests/box_env_gen.bash}
+          ${../../tests/box_env_gen.bash} \
+          ${../../tests/default_models_gen.bash}
         touch $out
       '';
 
