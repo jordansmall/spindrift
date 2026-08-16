@@ -149,6 +149,37 @@ let
   # stays isolated from the real templates regardless of their current
   # content -- future template edits can't silently confound these checks.
   cleanForbiddenMarkerPlaceholder = "a clean placeholder prompt with no forbidden operations mentioned";
+
+  # Expected content of the default-verdicts-rendered VERDICT..POST THE
+  # VERDICT span (exclusive of the second marker), for
+  # mkharness-prompt-research-verdicts-default-rendered below.
+  researchVerdictDefaultFixture = pkgs.writeText "research-verdict-default-rendered.txt" ''
+    # VERDICT
+
+    Render exactly one of these verdicts:
+
+    - `recommend` — relevant, now enriched with real context; promote it.
+    - `reject` — false positive, not worth doing, or a duplicate. Name the duplicate issue by number in your rationale; duplicate is a reason under `reject`, not a separate verdict.
+    - `unclear` — relevance can't be determined without a human's answer.
+
+  '';
+
+  # Same, for the self-contained sub-mode prompt (ADR 0022, issue #2202):
+  # keeps the template's own "Judge relevance..." sentence ahead of the
+  # registry-rendered bullets, for
+  # mkharness-prompt-research-self-contained-verdicts-default-rendered below.
+  researchVerdictSelfContainedFixture = pkgs.writeText "research-verdict-self-contained-rendered.txt" ''
+    # VERDICT
+
+    Judge relevance from the issue content alone — there is no repo to explore.
+
+    Render exactly one of these verdicts:
+
+    - `recommend` — relevant, now enriched with real context; promote it.
+    - `reject` — false positive, not worth doing, or a duplicate. Name the duplicate issue by number in your rationale; duplicate is a reason under `reject`, not a separate verdict.
+    - `unclear` — relevance can't be determined without a human's answer.
+
+  '';
 in
 {
   # The configured `prompt` is rendered to a store-path directory and,
@@ -448,26 +479,40 @@ in
 
   # Issue #2525: lib/research-verdicts.nix's `render` always rewrites the
   # VERDICT section (bullets, status alternation, backtick enumeration) from
-  # `defaultVerdicts`, for both the default and a custom set -- there is no
-  # more byte-identical-to-template no-op case, since the checked-in template
-  # no longer carries hand-typed bullets to be a no-op copy of. So this check
-  # no longer diffs the rendered prompt against the raw template; instead it
-  # pins the default verdict set's *rendered* contract content directly,
-  # mirroring mkharness-prompt-research-verdicts-custom-rendered below.
-  mkharness-prompt-research-outcome-default-unchanged =
-    pkgs.runCommand "mkharness-prompt-research-outcome-default-unchanged" { }
+  # the configured verdict set -- `defaultVerdicts` when the knob is empty,
+  # the parsed custom list otherwise -- for both the default and a custom
+  # set. There is no more byte-identical-to-template no-op case, since the
+  # checked-in template no longer carries hand-typed bullets to be a no-op
+  # copy of. A byte diff (not five separate grep presence checks) so any
+  # other prose in the VERDICT..POST THE VERDICT span -- deleted, duplicated,
+  # or reordered by a rendering regression -- fails loudly instead of being
+  # invisible to a presence-only assertion (the class of bug that silently
+  # dropped research-self-contained-prompt.md's "Judge relevance..." sentence
+  # before this fix).
+  mkharness-prompt-research-verdicts-default-rendered =
+    pkgs.runCommand "mkharness-prompt-research-verdicts-default-rendered" { }
       ''
-        p=${batsHarness.internals.promptDir}/research-prompt.md
-        grep -qF -- '- `recommend` — relevant, now enriched with real context; promote it.' "$p" \
-          || { echo "default recommend bullet missing from rendered research prompt" >&2; exit 1; }
-        grep -qF -- '- `reject` — false positive, not worth doing, or a duplicate. Name the duplicate issue by number in your rationale; duplicate is a reason under `reject`, not a separate verdict.' "$p" \
-          || { echo "default reject bullet missing from rendered research prompt" >&2; exit 1; }
-        grep -qF -- "- \`unclear\` — relevance can't be determined without a human's answer." "$p" \
-          || { echo "default unclear bullet missing from rendered research prompt" >&2; exit 1; }
-        grep -qF -- 'status=<recommend|reject|unclear>' "$p" \
-          || { echo "default status alternation missing from rendered research prompt" >&2; exit 1; }
-        grep -qF -- '`recommend` / `reject` / `unclear`' "$p" \
-          || { echo "default backtick enumeration missing from rendered research prompt" >&2; exit 1; }
+        awk '/^# VERDICT$/{f=1} /^# POST THE VERDICT$/{exit} f' \
+          ${batsHarness.internals.promptDir}/research-prompt.md > rendered.txt
+        diff -u ${researchVerdictDefaultFixture} rendered.txt \
+          || { echo "default research prompt's rendered VERDICT section drifted from the expected registry-rendered content" >&2; exit 1; }
+        touch $out
+      '';
+
+  # Companion to mkharness-prompt-research-verdicts-default-rendered above,
+  # for the self-contained sub-mode prompt (ADR 0022, issue #2202): no check
+  # anywhere previously read the *rendered* self-contained prompt's VERDICT
+  # section, so the render-time deletion of its "Judge relevance..." sentence
+  # (the one line distinguishing the sub-mode from the normal research
+  # prompt) went uncaught. Pins that the sentence survives rendering
+  # untouched, ahead of the registry-generated bullets.
+  mkharness-prompt-research-self-contained-verdicts-default-rendered =
+    pkgs.runCommand "mkharness-prompt-research-self-contained-verdicts-default-rendered" { }
+      ''
+        awk '/^# VERDICT$/{f=1} /^# POST THE VERDICT$/{exit} f' \
+          ${batsHarness.internals.promptDir}/research-self-contained-prompt.md > rendered.txt
+        diff -u ${researchVerdictSelfContainedFixture} rendered.txt \
+          || { echo "self-contained research prompt's rendered VERDICT section drifted from the expected registry-rendered content" >&2; exit 1; }
         touch $out
       '';
 
