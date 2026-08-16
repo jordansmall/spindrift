@@ -7,7 +7,8 @@
 # cmd/launcher/subcommands_gen.go,
 # cmd/launcher/internal/outcome/status_gen.go,
 # cmd/launcher/internal/backend/registry_gen.go,
-# tests/box_env_gen.bash, tests/default_models_gen.bash,
+# cmd/launcher/internal/doctor/labelmeta_gen.go (lib/labels.nix, issue
+# #2528), tests/box_env_gen.bash, tests/default_models_gen.bash,
 # cmd/launcher/defaultmodels_gen_test.go, the generated section of
 # templates/default/flake.nix's commented-out `settings` example, the
 # generated section of docs/reference.md's Default models table, the
@@ -64,6 +65,8 @@ let
   );
   backendRegistry = import ../lib/backends/default.nix;
   backendRegistryFile = renderers.renderBackendRegistryGo backendRegistry;
+  labelRegistry = import ../lib/labels.nix;
+  labelRegistryFile = renderers.renderLabelRegistryGo labelRegistry;
   defaultModelFixture = import ../lib/default-model-fixture.nix;
   defaultModelFixtureBash = renderers.renderDefaultModelFixtureBash defaultModelFixture;
   defaultModelFixtureGo = renderers.renderDefaultModelFixtureGo defaultModelFixture;
@@ -125,6 +128,8 @@ pkgs.writeShellApplication {
     gofmt -w "$root/cmd/launcher/internal/outcome/status_gen.go"
     write cmd/launcher/internal/backend/registry_gen.go ${escapeShellArg backendRegistryFile}
     gofmt -w "$root/cmd/launcher/internal/backend/registry_gen.go"
+    write cmd/launcher/internal/doctor/labelmeta_gen.go ${escapeShellArg labelRegistryFile}
+    gofmt -w "$root/cmd/launcher/internal/doctor/labelmeta_gen.go"
     write tests/box_env_gen.bash ${escapeShellArg boxEnvFixture}
     write tests/default_models_gen.bash ${escapeShellArg defaultModelFixtureBash}
     write cmd/launcher/defaultmodels_gen_test.go ${escapeShellArg defaultModelFixtureGo}

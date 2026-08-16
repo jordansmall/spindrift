@@ -22,37 +22,15 @@ type LabelMeta struct {
 	Color       string // hex without leading #
 }
 
-// TriageLabelMeta is the single source of truth for default triage/research/
-// priority label colors and descriptions, keyed by the canonical label name.
-// It covers the four operator-configurable work-tier labels, the six fixed
+// TriageLabelMeta is generated into labelmeta_gen.go (lib/labels.nix, issue
+// #2528) — the single source of truth for default triage/research/priority
+// label colors and descriptions, keyed by the canonical label name. It
+// covers the four operator-configurable work-tier labels, the six fixed
 // research-tier labels (ADR 0022, `forge.ResearchDispatchLabels()` /
 // `forge.ResearchVerdictLabels()`), and the three fixed priority-tier labels
 // (ADR 0040, `forge.PriorityLabelNames()`) so a doctor run creates any kind
-// with a real color/description instead of falling back to gray.
-var TriageLabelMeta = map[string]LabelMeta{
-	"ready-for-agent":   {Description: "Fully specified; ready for an AFK agent", Color: "0075ca"},
-	"agent-in-progress": {Description: "An AFK agent is actively working this issue", Color: "e4e669"},
-	"agent-failed":      {Description: "Box exited non-zero; needs human triage", Color: "d93f0b"},
-	"agent-complete":    {Description: "Agent work merged and green", Color: "0e8a16"},
-
-	"agent-research":             {Description: "Apply to fire a research dispatch", Color: "fbca04"},
-	"agent-research-in-progress": {Description: "A Box is reviewing this issue", Color: "bfd4f2"},
-	"agent-research-recommend":   {Description: "Relevant and enriched — promote it", Color: "2cbe4e"},
-	"agent-research-reject":      {Description: "False positive, not worth it, or a duplicate — close it", Color: "e11d21"},
-	"agent-research-unclear":     {Description: "Needs a human answer — answer, then re-apply agent-research", Color: "d4c5f9"},
-	"agent-research-failed":      {Description: "Box crashed or produced no verdict; needs human triage", Color: "b60205"},
-
-	"agent-priority-critical": {Description: "Drop everything — highest dispatch priority", Color: "d73a4a"},
-	"agent-priority-high":     {Description: "Dispatch ahead of normal-priority issues", Color: "ff8c00"},
-	"agent-priority-low":      {Description: "Dispatch behind normal-priority issues", Color: "8a9ba8"},
-
-	// Same "needs a human answer" semantic family as agent-research-unclear,
-	// but a distinct shade (e0cffc vs. d4c5f9) so the two never collide in
-	// the GitHub label UI (TestTriageLabelMeta_ColorsAreDistinct) — the
-	// choice of exact hex isn't load-bearing beyond staying visually
-	// adjacent and distinct.
-	"agent-ambiguous-spec": {Description: "An internally-contradictory issue; needs a human decision — not a crash", Color: "e0cffc"},
-}
+// with a real color/description instead of falling back to gray. Regenerate
+// with `nix run .#regen` after editing lib/labels.nix.
 
 // ResearchLabelNames returns the six fixed research-tier label names (ADR
 // 0022), sourced from forge.ResearchDispatchLabels()/ResearchVerdictLabels()
