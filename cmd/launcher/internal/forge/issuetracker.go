@@ -318,21 +318,17 @@ type LabeledTracker interface {
 // issue-read text a Box's own live issue-read fragment fetches today — the
 // issue body plus the last 10 comments, each attributed to its author —
 // captured once at box start so every pass (implement, review, ...) reads
-// the identical text instead of racing a comment posted mid-run. Only
-// github and forgejo implement it. local does NOT: its Comment appends
-// every new comment straight into the issue body under a trailing "##
-// Comments" section (see AppendComment), so Issue(num).Body already
-// contains the full comment history inline — there is no separate comments
-// endpoint for Snapshot to call, and nothing a Snapshot method would add
-// over the body alone. jira does NOT either — out of scope for #2547; it
-// has no dedicated issue-read fragment today, it rides a shared fallback.
-// That fallback still caps and attributes its comment intake (jira's own
-// Issue keeps its comment thread to the last 10, each attributed to its
-// author) — the degrade loses the snapshot's freeze-at-box-start guarantee,
-// not its bound. Callers discover it with a type assertion — `sr, ok :=
-// it.(SnapshotReader)` — the same optional-interface pattern LandingRecorder
-// and IssueCloser use; the package-level Snapshot function wraps that
-// assertion with the local/jira degrade to Issue(num).Body alone.
+// the identical text instead of racing a comment posted mid-run. github,
+// forgejo, and jira all implement it, each against their own comments API.
+// local does NOT: its Comment appends every new comment straight into the
+// issue body under a trailing "## Comments" section (see AppendComment), so
+// Issue(num).Body already contains the full comment history inline — there
+// is no separate comments endpoint for Snapshot to call, and nothing a
+// Snapshot method would add over the body alone. Callers discover it with a
+// type assertion — `sr, ok := it.(SnapshotReader)` — the same
+// optional-interface pattern LandingRecorder and IssueCloser use; the
+// package-level Snapshot function wraps that assertion with the local
+// degrade to Issue(num).Body alone.
 type SnapshotReader interface {
 	// Snapshot returns the frozen issue-read text for num: the issue body
 	// plus the last 10 comments, each attributed to its author — the same

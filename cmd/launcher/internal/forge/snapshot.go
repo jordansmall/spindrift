@@ -5,15 +5,15 @@ import "strings"
 // Snapshot returns the frozen issue-read text for num against tracker: if
 // tracker implements SnapshotReader, its Snapshot(num) result verbatim —
 // including any error, which is returned as-is rather than masked by a
-// fallback; otherwise tracker.Issue(num).Body (the local/jira degrade — no
-// separate comments to append, either because they're already inline in the
-// body (local) or unavailable (jira)), plus trailing "parent: <value>",
-// "state: <value>", and "labels: <comma-separated>" lines, each appended
-// only when the corresponding Issue field is non-empty/non-zero (skipped
-// entirely otherwise), in that order. Issue(num).Body is the local
-// adapter's Markdown body alone, stripped of its YAML frontmatter (ADR
-// 0013) — Parent, State, and Labels are all frontmatter-derived, so without
-// this they would vanish from the snapshot entirely: a local issue-read
+// fallback; otherwise tracker.Issue(num).Body (the local degrade — its
+// comments are already inline in the body, so there is nothing a separate
+// Snapshot call would add), plus trailing "parent: <value>", "state:
+// <value>", and "labels: <comma-separated>" lines, each appended only when
+// the corresponding Issue field is non-empty/non-zero (skipped entirely
+// otherwise), in that order. Issue(num).Body is the local adapter's
+// Markdown body alone, stripped of its YAML frontmatter (ADR 0013) —
+// Parent, State, and Labels are all frontmatter-derived, so without this
+// they would vanish from the snapshot entirely: a local issue-read
 // fragment's "follow its parent link" instruction would be unfollowable,
 // and the issue's state/labels would silently disappear from what a local
 // box's issue-read produces (issue #2547).
