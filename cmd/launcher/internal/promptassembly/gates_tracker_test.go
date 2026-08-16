@@ -60,6 +60,27 @@ func TestGatesIssueTrackerReadAxis(t *testing.T) {
 				"ISSUE_TRACKER_FORGEJO": true,
 			},
 		},
+		{
+			// TrackerAxisRead's zero value: an Env built without populating
+			// it (e.g. a stray `Env{}` literal, or an upstream caller that
+			// forgot to thread nix's resolved axis through). Before issue
+			// #2533, entrypoint.sh's "${ISSUE_TRACKER:-github}" bash default
+			// meant an empty/absent tracker always resolved to a real gate
+			// (github); that default arm lived upstream in nix now, and
+			// deliberately isn't reproduced here -- nix is the sole source
+			// of truth for a non-empty axis value, so Gates fails closed
+			// (every gate off) rather than silently guessing github when
+			// the axis arrives empty. This pins that fail-closed contract
+			// so a future change can't silently reintroduce a stale
+			// default or silently flip it back to fail-open.
+			name:            "empty TrackerAxisRead fails closed: no gate fires",
+			trackerAxisRead: "",
+			want: map[string]bool{
+				"ISSUE_TRACKER_GITHUB":  false,
+				"ISSUE_TRACKER_LOCAL":   false,
+				"ISSUE_TRACKER_FORGEJO": false,
+			},
+		},
 	}
 	for _, tc := range cases {
 		tc := tc
