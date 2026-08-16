@@ -1377,12 +1377,19 @@ let
   # lib/jira-status-mapping.nix's `parse` mirrors the runtime validation
   # cmd/launcher/internal/forge/jira/jira.go's ParseStatusMapping performs, so
   # an unknown-key mapping fails the build here rather than only surfacing at
-  # Box runtime. `builtins.seq` forces `parse`'s result to WHNF so the
-  # `assert` below actually triggers any throw.
+  # Box runtime. Gated on ISSUE_TRACKER=jira (mirrors readOnlyCapabilityOk's
+  # issueTracker-specific conditional above): backend.go only ever calls
+  # ParseStatusMapping on the Jira backend's row, so a non-jira consumer's
+  # stale/typoed JIRA_STATUS_MAPPING is dead config the launcher never reads,
+  # and must not fail a github/forgejo/local build. `builtins.seq` forces
+  # `parse`'s result to WHNF so the `assert` below actually triggers any
+  # throw.
   jiraStatusMapping = import ./jira-status-mapping.nix;
-  jiraStatusMappingOk = builtins.seq (jiraStatusMapping.parse (
-    mergedDefaults.jiraStatusMapping or ""
-  )) true;
+  jiraStatusMappingOk =
+    if mergedDefaults.issueTracker != "jira" then
+      true
+    else
+      builtins.seq (jiraStatusMapping.parse (mergedDefaults.jiraStatusMapping or "")) true;
 in
 if unknownDefaultKeys != [ ] then
   throw "mkHarness: unknown defaults key(s): ${lib.concatStringsSep ", " unknownDefaultKeys}; valid keys: ${lib.concatStringsSep ", " (lib.attrNames flakeOptionEntries)}"
