@@ -89,16 +89,12 @@ let
     { requiredLabels, workflowSets }:
     let
       workflowTokens = mapAttrs (_: tokenize) workflowSets;
-      missingBySet = mapAttrs (
-        _: toks: filter (l: !(elem l toks)) requiredLabels
-      ) workflowTokens;
+      missingBySet = mapAttrs (_: toks: filter (l: !(elem l toks)) requiredLabels) workflowTokens;
       offenders = filter (name: missingBySet.${name} != [ ]) (builtins.attrNames missingBySet);
     in
     assert assertMsg (offenders == [ ])
       "agent-dispatch.yml/agent-recover.yml/agent-research.yml missing label literal(s) — schema rename, trigger-vocab rename, or research-label rename not propagated to the workflows: ${
-        concatStringsSep "; " (
-          map (n: "${n}: ${concatStringsSep ", " missingBySet.${n}}") offenders
-        )
+        concatStringsSep "; " (map (n: "${n}: ${concatStringsSep ", " missingBySet.${n}}") offenders)
       }";
     offenders;
   # A token is worth checking against the registry only if it's shaped like
@@ -172,7 +168,9 @@ let
         concatStringsSep "; " (
           map (
             name:
-            "${name}: guard names ${builtins.toJSON (triggerGuardLabel triggerGuardSrcs.${name})}, want ${builtins.toJSON triggerGuardExpectations.${name}}"
+            "${name}: guard names ${builtins.toJSON (triggerGuardLabel triggerGuardSrcs.${name})}, want ${
+              builtins.toJSON triggerGuardExpectations.${name}
+            }"
           ) mismatches
         )
       }";
@@ -196,11 +194,23 @@ let
   # Each is paired with a dedicated `extract` function — not a generic
   # markers-line-select + whole-line-tokenize + isLabelShaped-filter
   # pipeline — that pulls the label literal from its own known syntactic
-  # position on the matched line:
-  #   - issue_intent.go: a quoted Go string literal on the
-  #     issueIntentLabels = []string{"..."} line.
+  # position, scanned across a marker-to-terminator SPAN rather than
+  # restricted to one line (a per-line restriction is exactly what let a
+  # gofmt-clean reformat or a shell line-continuation go unextracted before —
+  # see the two regression checks named below):
+  #   - issue_intent.go: every quoted Go string literal between the
+  #     issueIntentLabels = []string{ marker and that declaration's closing
+  #     }, wherever the source wraps it onto multiple lines — see
+  #     label-registry-covers-harness-writes-reformat-regression below, which
+  #     reproduces the gofmt-clean multi-line var block a second label makes
+  #     inevitable.
   #   - filer-label-direct.md: the shell bareword immediately following the
-  #     literal words `label create ` (unquoted, unlike the other two).
+  #     literal words `label create ` (unquoted, unlike the other two), after
+  #     joinBackslashNewline (defined by labelsWrittenBy below) has folded
+  #     every `\`-continued line into its continuation first, so a
+  #     line-wrapped `gh label create \` still yields the literal that
+  #     follows on the next line — see
+  #     label-registry-covers-harness-writes-continuation-regression below.
   #   - filer-label-direct-forgejo.md: specifically the VALUE of the
   #     "name":"..." JSON key on that line.
   # A shape-only filter (isLabelShaped, which requires an agent- prefix)
@@ -217,8 +227,9 @@ let
   # containing the lowercase hyphenated phrase "non-blocking", which a
   # whole-line tokenize + broadened-shape-filter would wrongly flag as a
   # phantom missing-from-registry label on the CURRENT, correct source.
-  # Per-surface extraction avoids both failure modes by only ever looking
-  # where the literal is actually syntactically expected to be.
+  # Per-surface, span-scanned extraction avoids all three failure modes by
+  # only ever looking where the literal is actually syntactically expected to
+  # be, regardless of how the surrounding source is line-wrapped.
   harnessSurfaces = {
     "cmd/launcher/internal/settle/issue_intent.go" = {
       src = builtins.readFile ../../cmd/launcher/internal/settle/issue_intent.go;
@@ -233,23 +244,42 @@ let
       extract = extractNameFieldTokens;
     };
   };
-  # The literal sits inside a double-quoted Go string literal on the
-  # issueIntentLabels = []string{"..."} line. Nix's builtins.match is
-  # whole-string-anchored, not a global/find-all primitive, and Go's slice
-  # literal syntax can in principle hold more than one entry
-  # (issueIntentLabels = []string{"a", "b"}), so rather than one anchored
-  # match we split the line on the quote character to isolate each quoted
-  # segment, then match-filter each segment to the label-literal shape
-  # (lowercase, digits, hyphens) — that filter discards the surrounding Go
-  # syntax (var ..., []string{, }, commas) on either side without requiring
-  # an agent- prefix, so a de-prefixed rename still extracts correctly.
+  # The literal(s) sit inside double-quoted Go string literals between the
+  # issueIntentLabels = []string{ marker and that declaration's closing }.
+  # Restricting extraction to a single line (as an earlier version of this
+  # check did, scanning only lines containing the bare substring
+  # "issueIntentLabels") fails open the moment a second label makes gofmt's
+  # multi-line slice-literal layout the natural shape:
+  #   var issueIntentLabels = []string{
+  #     "agent-review-finding",
+  #     "agent-something-else",
+  #   }
+  # None of those continuation lines contain "issueIntentLabels" themselves,
+  # so a per-line scan would silently extract nothing. Splitting the whole
+  # source on the marker instead, then again on the first "}" that follows,
+  # isolates exactly the declaration's body regardless of how it's
+  # line-wrapped — splitString has no notion of lines, so newlines inside
+  # that span are inert. Matching the anchor to "issueIntentLabels = []string{"
+  # rather than the bare identifier also skips the doc comment above the var
+  # (which mentions "issueIntentLabels" in prose but never followed by
+  # " = []string{"). Match-filtering the quote-split segments to the
+  # label-literal shape (lowercase, digits, hyphens) then discards the
+  # surrounding Go syntax (whitespace, commas, tabs) without requiring an
+  # agent- prefix, so a de-prefixed rename still extracts correctly.
   extractIssueIntentLabels =
     src:
     let
-      relevantLines = filter (l: hasInfix "issueIntentLabels" l) (splitString "\n" src);
-      quotedTokens = line: filter (s: builtins.match "[a-z][a-z0-9-]*" s != null) (splitString "\"" line);
+      marker = "issueIntentLabels = []string{";
+      parts = splitString marker src;
     in
-    concatMap quotedTokens relevantLines;
+    if builtins.length parts < 2 then
+      [ ]
+    else
+      let
+        rest = builtins.elemAt parts 1;
+        declBody = builtins.head (splitString "}" rest);
+      in
+      filter (s: builtins.match "[a-z][a-z0-9-]*" s != null) (splitString "\"" declBody);
   # The literal is the shell bareword immediately following the literal
   # words `label create ` (unquoted, unlike the Go and JSON surfaces below) —
   # split the line on that marker and take the first whitespace-delimited
@@ -299,7 +329,19 @@ let
           if builtins.match "[a-z0-9-]+" value != null then [ value ] else [ ];
     in
     concatMap tokenAfterMarker relevantLines;
-  labelsWrittenBy = { src, extract }: unique (extract src);
+  # extractLabelCreateTokens and extractNameFieldTokens both scan line by
+  # line, so a shell `\`-continued line (e.g. `gh label create \` with the
+  # actual label bareword on the following line) would otherwise put the
+  # marker on one line and the literal it's supposed to precede on the next,
+  # yielding no match on either — the same per-line fail-open class
+  # extractIssueIntentLabels closes above for Go's multi-line slice layout.
+  # Folding every backslash-newline into a single space before extraction
+  # runs re-joins each continued line into one, so the marker and the
+  # literal that follows it end up on the same line regardless of how the
+  # source wraps — see
+  # label-registry-covers-harness-writes-continuation-regression below.
+  joinBackslashNewline = src: replaceStrings [ "\\\n" ] [ " " ] src;
+  labelsWrittenBy = { src, extract }: unique (extract (joinBackslashNewline src));
   # Core assertion for the Registry ⊇ Harness direction, factored out
   # (mirroring assertLabelsPinned's own factoring) so
   # label-registry-covers-harness-writes-regression can exercise this exact
@@ -346,10 +388,11 @@ in
   # tryEval.
   dispatch-labels-pinned-in-workflows-regression =
     let
-      driftedResearchSrc = replaceStrings
-        [ "if: github.event.label.name == 'agent-research'" ]
-        [ "if: github.event.label.name == 'agent-study'" ]
-        realTriggerGuardSrcs."github:agent-research.yml";
+      driftedResearchSrc =
+        replaceStrings
+          [ "if: github.event.label.name == 'agent-research'" ]
+          [ "if: github.event.label.name == 'agent-study'" ]
+          realTriggerGuardSrcs."github:agent-research.yml";
       doctoredTriggerGuardSrcs = realTriggerGuardSrcs // {
         "github:agent-research.yml" = driftedResearchSrc;
       };
@@ -379,17 +422,16 @@ in
   # commit's wholesale body replacement of that same-named check displaced.)
   dispatch-labels-pinned-in-workflows-research-rename-regression =
     let
-      driftedGithub = replaceStrings [ "agent-research-recommend" ] [ "agent-research-approved" ]
-        workflowSets.github;
+      driftedGithub =
+        replaceStrings [ "agent-research-recommend" ] [ "agent-research-approved" ]
+          workflowSets.github;
       doctoredWorkflowSets = workflowSets // {
         github = driftedGithub;
       };
-      result = builtins.tryEval (
-        assertLabelsPinned {
-          inherit requiredLabels;
-          workflowSets = doctoredWorkflowSets;
-        }
-      );
+      result = builtins.tryEval (assertLabelsPinned {
+        inherit requiredLabels;
+        workflowSets = doctoredWorkflowSets;
+      });
     in
     assert assertMsg (!result.success)
       "dispatch-labels-pinned-in-workflows-research-rename-regression: expected assertLabelsPinned to reject a synthetic workflowSets.github with agent-research-recommend renamed to agent-research-approved, but it evaluated successfully";
@@ -417,12 +459,10 @@ in
           agent-research-failed
         '';
       };
-      result = builtins.tryEval (
-        assertLabelsPinned {
-          requiredLabels = [ "agent-research" ];
-          workflowSets = syntheticWorkflowSets;
-        }
-      );
+      result = builtins.tryEval (assertLabelsPinned {
+        requiredLabels = [ "agent-research" ];
+        workflowSets = syntheticWorkflowSets;
+      });
     in
     assert assertMsg (!result.success)
       "dispatch-labels-tokenize-exact-match-regression: expected assertLabelsPinned to reject a synthetic workflowSets containing only compound agent-research-* labels and never the standalone agent-research token, but it evaluated successfully";
@@ -433,7 +473,11 @@ in
   # lib/labels.nix. This is the check that would have failed before
   # lib/labels.nix grew a reviewFinding row for agent-review-finding.
   label-registry-covers-harness-writes =
-    assert (assertHarnessWritesInRegistry { inherit harnessSurfaces; registryLabels = allRegistryLabels; }) == [ ];
+    assert
+      (assertHarnessWritesInRegistry {
+        inherit harnessSurfaces;
+        registryLabels = allRegistryLabels;
+      }) == [ ];
     pkgs.runCommand "label-registry-covers-harness-writes" { } "touch $out";
 
   # Regression guard (issue #2528): proves assertHarnessWritesInRegistry
@@ -452,8 +496,9 @@ in
   # nothing to reject — exactly the fail-open gap this check closes.
   label-registry-covers-harness-writes-regression =
     let
-      doctoredIssueIntentSrc = replaceStrings [ ''"agent-review-finding"'' ] [ ''"review-finding"'' ]
-        harnessSurfaces."cmd/launcher/internal/settle/issue_intent.go".src;
+      doctoredIssueIntentSrc =
+        replaceStrings [ ''"agent-review-finding"'' ] [ ''"review-finding"'' ]
+          harnessSurfaces."cmd/launcher/internal/settle/issue_intent.go".src;
       doctoredHarnessSurfaces = harnessSurfaces // {
         "cmd/launcher/internal/settle/issue_intent.go" =
           harnessSurfaces."cmd/launcher/internal/settle/issue_intent.go"
@@ -461,14 +506,96 @@ in
             src = doctoredIssueIntentSrc;
           };
       };
-      result = builtins.tryEval (
-        assertHarnessWritesInRegistry {
-          harnessSurfaces = doctoredHarnessSurfaces;
-          registryLabels = allRegistryLabels;
-        }
-      );
+      result = builtins.tryEval (assertHarnessWritesInRegistry {
+        harnessSurfaces = doctoredHarnessSurfaces;
+        registryLabels = allRegistryLabels;
+      });
     in
     assert assertMsg (!result.success)
       "label-registry-covers-harness-writes-regression: expected assertHarnessWritesInRegistry to reject a synthetic issue_intent.go with agent-review-finding de-prefixed to review-finding, but it evaluated successfully";
     pkgs.runCommand "label-registry-covers-harness-writes-regression" { } "touch $out";
+
+  # Regression guard (issue #2528): proves extractIssueIntentLabels still
+  # catches an unregistered label once issueIntentLabels grows a second entry
+  # and gofmt reformats the var block onto multiple lines — the gofmt-clean,
+  # multi-line shape a second label makes inevitable, and the exact layout a
+  # per-line scan (an earlier version of this check) silently returned []
+  # for. Doctors the real issue_intent.go source by replacing its single-line
+  # declaration with that multi-line form, adding
+  # "agent-unregistered-label" (a name lib/labels.nix does not carry)
+  # alongside the real "agent-review-finding", and asserts via tryEval that
+  # assertHarnessWritesInRegistry rejects it. Before the marker-to-brace span
+  # fix, no line in the doctored source would contain the bare substring
+  # "issueIntentLabels" the old per-line filter looked for, so
+  # labelsWrittenBy would have returned [] and this regression would have
+  # found nothing to reject.
+  label-registry-covers-harness-writes-reformat-regression =
+    let
+      doctoredIssueIntentSrc =
+        replaceStrings
+          [ ''var issueIntentLabels = []string{"agent-review-finding"}'' ]
+          [
+            ''
+              var issueIntentLabels = []string{
+              	"agent-review-finding",
+              	"agent-unregistered-label",
+              }''
+          ]
+          harnessSurfaces."cmd/launcher/internal/settle/issue_intent.go".src;
+      doctoredHarnessSurfaces = harnessSurfaces // {
+        "cmd/launcher/internal/settle/issue_intent.go" =
+          harnessSurfaces."cmd/launcher/internal/settle/issue_intent.go"
+          // {
+            src = doctoredIssueIntentSrc;
+          };
+      };
+      result = builtins.tryEval (assertHarnessWritesInRegistry {
+        harnessSurfaces = doctoredHarnessSurfaces;
+        registryLabels = allRegistryLabels;
+      });
+    in
+    assert assertMsg (!result.success)
+      "label-registry-covers-harness-writes-reformat-regression: expected assertHarnessWritesInRegistry to reject a synthetic issue_intent.go with issueIntentLabels reformatted onto multiple lines and an unregistered second label added, but it evaluated successfully";
+    pkgs.runCommand "label-registry-covers-harness-writes-reformat-regression" { } "touch $out";
+
+  # Regression guard (issue #2528): proves extractLabelCreateTokens still
+  # catches an unregistered label once the `gh label create` invocation is
+  # line-wrapped with a shell `\` continuation — the same per-line fail-open
+  # class the reformat regression above closes for issue_intent.go, but for
+  # the shell-continuation shape instead of gofmt's multi-line braces.
+  # Doctors the real filer-label-direct.md source so the bareword right
+  # after `label create` moves onto its own continuation line AND is renamed
+  # to "agent-unregistered-label" (a name lib/labels.nix does not carry),
+  # then asserts via tryEval that assertHarnessWritesInRegistry rejects it.
+  # Before joinBackslashNewline, the marker `label create ` and the literal
+  # that follows it would land on two different lines, so
+  # extractLabelCreateTokens' per-line scan would find `\` immediately after
+  # the marker, fail its label-shape match, and return [] — this regression
+  # would have found nothing to reject.
+  label-registry-covers-harness-writes-continuation-regression =
+    let
+      doctoredFilerLabelDirectSrc =
+        replaceStrings
+          [ "label create agent-review-finding" ]
+          [
+            ''
+              label create \
+                     agent-unregistered-label''
+          ]
+          harnessSurfaces."templates/default/prompts/fragments/filer-label-direct.md".src;
+      doctoredHarnessSurfaces = harnessSurfaces // {
+        "templates/default/prompts/fragments/filer-label-direct.md" =
+          harnessSurfaces."templates/default/prompts/fragments/filer-label-direct.md"
+          // {
+            src = doctoredFilerLabelDirectSrc;
+          };
+      };
+      result = builtins.tryEval (assertHarnessWritesInRegistry {
+        harnessSurfaces = doctoredHarnessSurfaces;
+        registryLabels = allRegistryLabels;
+      });
+    in
+    assert assertMsg (!result.success)
+      "label-registry-covers-harness-writes-continuation-regression: expected assertHarnessWritesInRegistry to reject a synthetic filer-label-direct.md with the label-create bareword line-continued and renamed to agent-unregistered-label, but it evaluated successfully";
+    pkgs.runCommand "label-registry-covers-harness-writes-continuation-regression" { } "touch $out";
 }
