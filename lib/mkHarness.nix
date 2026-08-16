@@ -135,16 +135,13 @@ let
   # lib/build-constants.nix.
   buildConstants = import ./build-constants.nix;
 
+  # Shared default-toolset instantiation and the Linux-twin system map — see
+  # lib/nixpkgs-shared.nix for the memoization story.
+  nixpkgsShared = import ./nixpkgs-shared.nix;
+
   # OCI images are Linux-only. Map the Consumer's (possibly darwin) system to
   # its Linux twin for the image.
-  linuxSystem =
-    {
-      "aarch64-darwin" = "aarch64-linux";
-      "x86_64-darwin" = "x86_64-linux";
-      "aarch64-linux" = "aarch64-linux";
-      "x86_64-linux" = "x86_64-linux";
-    }
-    .${system};
+  linuxSystem = nixpkgsShared.linuxTwin.${system};
 
   mergedConfig = {
     allowUnfree = true;
@@ -152,29 +149,19 @@ let
   // config;
 
   # `import nixpkgs { ... }` is not memoized by Nix — every call site pays for
-  # another fixed-point evaluation. spindrift's own checkset calls mkHarness
-  # ~100 times per `nix flake check`, which made those instantiations the bulk
-  # of evaluation (140s of a 2m25s warm check on a 32-core host).
-  #
-  # `import <path>` *is* memoized, keyed by the resolved path. So for the
-  # default toolset — no Consumer overlays, no Consumer config — route the
-  # instantiation through a generated file whose content is fully determined
-  # by (nixpkgs, system): every call in one evaluation derives the same store
-  # path and shares one instantiation. A Consumer passing `overlays` or
+  # another fixed-point evaluation, and spindrift's own checkset calls
+  # mkHarness ~100 times per `nix flake check`. For the default toolset — no
+  # Consumer overlays, no Consumer config — consult the shared per-system
+  # cache a `withSharedInstances`-wrapped nixpkgs input carries (spindrift's
+  # flake.nix wraps its input; see lib/nixpkgs-shared.nix), falling back to a
+  # per-call instantiation for a bare input. A Consumer passing `overlays` or
   # `config` gets its own instantiation as before — functions have no stable
   # identity, so those cannot be keyed on.
   instantiate =
     forSystem:
     if overlays == [ ] && config == { } then
-      import (
-        builtins.toFile "nixpkgs-instance-${forSystem}.nix" ''
-          import ${nixpkgs} {
-            system = "${forSystem}";
-            overlays = [ ];
-            config = { allowUnfree = true; };
-          }
-        ''
-      )
+      (nixpkgsShared.sharedInstancesOf nixpkgs).${forSystem}
+        or (nixpkgsShared.instantiate nixpkgs forSystem)
     else
       import nixpkgs {
         system = forSystem;

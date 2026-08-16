@@ -34,139 +34,154 @@
       jordan-skills,
       ...
     }:
-    flake-parts.lib.mkFlake { inherit inputs; } {
-      systems = [
-        "aarch64-darwin"
-        "aarch64-linux"
-        "x86_64-linux"
-      ];
-
-      # Dogfood the declarative surface: our own packages/apps are produced by
-      # the flake-parts shim, not a direct mkHarness call.
-      imports = [ ./lib/flakeModule.nix ];
-
-      # The engine, exposed for Consumer flakes to import.
-      flake.lib.mkHarness = import ./lib/mkHarness.nix;
-
-      # The flake-parts shim, exposed for Consumer flakes that want the
-      # declarative option surface (ADR 0001).
-      flake.flakeModules.default = ./lib/flakeModule.nix;
-
-      # A ready-to-edit consumer starter (`nix flake init -t
-      # github:jordansmall/spindrift`). This is spindrift's own scaffold — the
-      # dogfood above consumes the very same templates/default toolchain and
-      # prompt.
-      flake.templates.default = {
-        path = ./templates/default;
-        description = "spindrift consumer starter: flake + prompts + toolchain + harness.env.example";
-      };
-
-      perSystem =
-        {
-          system,
-          pkgs,
-          config,
-          ...
-        }:
-        let
-          revision = inputs.self.shortRev or inputs.self.dirtyShortRev or "unknown";
-          dogfoodDefaults = import ./nix/dogfood-defaults.nix {
-            inherit system;
-            lib = pkgs.lib;
-          };
-          dogfoodSkills = import ./nix/dogfood-skills.nix {
-            inherit caveman matt-skills jordan-skills;
-          };
-          fixtures = import ./nix/fixtures.nix {
-            inherit
-              pkgs
-              nixpkgs
-              system
-              flake-parts
-              revision
-              caveman
-              matt-skills
-              jordan-skills
-              ;
-          };
-          checksResult = import ./nix/checks {
-            inherit
-              pkgs
-              config
-              fixtures
-              nixpkgs
-              system
-              flake-parts
-              ;
-          };
-        in
-        {
-          # The dogfood's real packages/apps flow through the flake-parts shim,
-          # fed from the same leaf values as fixtures.nix's direct mirror
-          # (nix/dogfood-defaults.nix, issue #459).
-          spindrift = {
-            # ADR 0037 Pass 1 (issue #2179): the dogfood configures every knob
-            # at its new domain-tree path, off the deprecated `settings.*` and
-            # flat structural paths, so spindrift's own flake never trips the
-            # eval-time deprecation warnings it now emits for consumers.
-            infra.image.prefetch = dogfoodDefaults.prefetch;
-            infra.image.packages = dogfoodDefaults.packages;
-            infra.image.extraClosures = dogfoodDefaults.extraClosures;
-            infra.nix.storeWritable = dogfoodDefaults.nixStoreWritable;
-            infra.limits.memory = dogfoodDefaults.defaults.memoryLimit;
-            agents.skills = dogfoodSkills;
-            git.merge.policy = dogfoodDefaults.defaults.mergeMode;
-            forge.boxAccess = dogfoodDefaults.defaults.boxForgeAndIssueAccess;
-            agents.format.enable = dogfoodDefaults.defaults.autoFormat;
-            agents.lint.enable = dogfoodDefaults.defaults.autoLint;
-            agents.models.roster = dogfoodDefaults.roster;
-          };
-
-          checks = checksResult.checks;
-
-          # Scoped in-box gate (issue #581): `nix build .#checks-inbox`
-          # builds the source-level checks only, skipping the OCI-image
-          # realization the full `checks` set above still covers for CI.
-          packages.checks-inbox = checksResult.checks-inbox;
-
-          # Repo-internal dev tooling, not consumer surface (issue #402):
-          # `nix run .#regen` regenerates every schema-generated artifact that
-          # nix/checks/schema-drift.nix drift-guards, sharing lib/renderers.nix
-          # with those checks so the two can never diverge.
-          apps.regen = {
-            type = "app";
-            program = "${import ./nix/regen.nix { inherit pkgs; }}/bin/regen";
-          };
-
-          # `nix run github:jordansmall/spindrift#quickstart` (ADR 0027):
-          # the pre-CLI interactive scaffolder. Standalone from the
-          # Consumer-facing lib/mkHarness.nix pipeline — see nix/quickstart.nix.
-          apps.quickstart = {
-            type = "app";
-            program = "${import ./nix/quickstart.nix { inherit pkgs; }}/bin/quickstart";
-          };
-
-          # For hacking ON the harness itself (host-side).
-          # spindrift CLI is included so `nix develop` → `spindrift dispatch` works.
-          devShells.default = pkgs.mkShell {
-            packages = [
-              pkgs.git
-              pkgs.gh
-              pkgs.jq
-              pkgs.go
-              config.packages.spindrift
-            ]
-            # bubblewrap only builds on Linux; the runner integration tests
-            # (go test -tags=integration ./cmd/launcher/internal/runner/...,
-            # issue #576) need it on PATH to exercise a real sandbox.
-            ++ pkgs.lib.optionals pkgs.stdenv.isLinux [ pkgs.bubblewrap ];
-            # `dogfood-stop`: ask a running ./dogfood.sh to exit after its current
-            # wave (see the USR1/TERM trap in dogfood.sh) instead of Ctrl-C, which
-            # would abort the wave mid-flight.
-            shellHook = ''
-              alias dogfood-stop='pid=$(cat "$(git rev-parse --show-toplevel 2>/dev/null)/.spindrift/dogfood.pid" 2>/dev/null) && kill -USR1 "$pid" && echo "dogfood: will stop after the current wave (pid $pid)" || echo "dogfood: no running loop (.spindrift/dogfood.pid not found)"'
-            '';
-          };
+    let
+      # Every mkHarness call handed this wrapped input shares one lazy nixpkgs
+      # instantiation per system instead of paying its own fixed-point
+      # evaluation (lib/nixpkgs-shared.nix) — the checkset alone makes ~100
+      # such calls per `nix flake check`. Overriding `inputs.nixpkgs` for
+      # mkFlake extends the sharing to the flake-parts shim's own mkHarness
+      # call (lib/flakeModule.nix falls back to `inputs.nixpkgs`).
+      nixpkgsShared = (import ./lib/nixpkgs-shared.nix).withSharedInstances nixpkgs;
+    in
+    flake-parts.lib.mkFlake
+      {
+        inputs = inputs // {
+          nixpkgs = nixpkgsShared;
         };
-    };
+      }
+      {
+        systems = [
+          "aarch64-darwin"
+          "aarch64-linux"
+          "x86_64-linux"
+        ];
+
+        # Dogfood the declarative surface: our own packages/apps are produced by
+        # the flake-parts shim, not a direct mkHarness call.
+        imports = [ ./lib/flakeModule.nix ];
+
+        # The engine, exposed for Consumer flakes to import.
+        flake.lib.mkHarness = import ./lib/mkHarness.nix;
+
+        # The flake-parts shim, exposed for Consumer flakes that want the
+        # declarative option surface (ADR 0001).
+        flake.flakeModules.default = ./lib/flakeModule.nix;
+
+        # A ready-to-edit consumer starter (`nix flake init -t
+        # github:jordansmall/spindrift`). This is spindrift's own scaffold — the
+        # dogfood above consumes the very same templates/default toolchain and
+        # prompt.
+        flake.templates.default = {
+          path = ./templates/default;
+          description = "spindrift consumer starter: flake + prompts + toolchain + harness.env.example";
+        };
+
+        perSystem =
+          {
+            system,
+            pkgs,
+            config,
+            ...
+          }:
+          let
+            revision = inputs.self.shortRev or inputs.self.dirtyShortRev or "unknown";
+            dogfoodDefaults = import ./nix/dogfood-defaults.nix {
+              inherit system;
+              lib = pkgs.lib;
+            };
+            dogfoodSkills = import ./nix/dogfood-skills.nix {
+              inherit caveman matt-skills jordan-skills;
+            };
+            fixtures = import ./nix/fixtures.nix {
+              inherit
+                pkgs
+                system
+                flake-parts
+                revision
+                caveman
+                matt-skills
+                jordan-skills
+                ;
+              nixpkgs = nixpkgsShared;
+            };
+            checksResult = import ./nix/checks {
+              inherit
+                pkgs
+                config
+                fixtures
+                system
+                flake-parts
+                ;
+              nixpkgs = nixpkgsShared;
+            };
+          in
+          {
+            # The dogfood's real packages/apps flow through the flake-parts shim,
+            # fed from the same leaf values as fixtures.nix's direct mirror
+            # (nix/dogfood-defaults.nix, issue #459).
+            spindrift = {
+              # ADR 0037 Pass 1 (issue #2179): the dogfood configures every knob
+              # at its new domain-tree path, off the deprecated `settings.*` and
+              # flat structural paths, so spindrift's own flake never trips the
+              # eval-time deprecation warnings it now emits for consumers.
+              infra.image.prefetch = dogfoodDefaults.prefetch;
+              infra.image.packages = dogfoodDefaults.packages;
+              infra.image.extraClosures = dogfoodDefaults.extraClosures;
+              infra.nix.storeWritable = dogfoodDefaults.nixStoreWritable;
+              infra.limits.memory = dogfoodDefaults.defaults.memoryLimit;
+              agents.skills = dogfoodSkills;
+              git.merge.policy = dogfoodDefaults.defaults.mergeMode;
+              forge.boxAccess = dogfoodDefaults.defaults.boxForgeAndIssueAccess;
+              agents.format.enable = dogfoodDefaults.defaults.autoFormat;
+              agents.lint.enable = dogfoodDefaults.defaults.autoLint;
+              agents.models.roster = dogfoodDefaults.roster;
+            };
+
+            checks = checksResult.checks;
+
+            # Scoped in-box gate (issue #581): `nix build .#checks-inbox`
+            # builds the source-level checks only, skipping the OCI-image
+            # realization the full `checks` set above still covers for CI.
+            packages.checks-inbox = checksResult.checks-inbox;
+
+            # Repo-internal dev tooling, not consumer surface (issue #402):
+            # `nix run .#regen` regenerates every schema-generated artifact that
+            # nix/checks/schema-drift.nix drift-guards, sharing lib/renderers.nix
+            # with those checks so the two can never diverge.
+            apps.regen = {
+              type = "app";
+              program = "${import ./nix/regen.nix { inherit pkgs; }}/bin/regen";
+            };
+
+            # `nix run github:jordansmall/spindrift#quickstart` (ADR 0027):
+            # the pre-CLI interactive scaffolder. Standalone from the
+            # Consumer-facing lib/mkHarness.nix pipeline — see nix/quickstart.nix.
+            apps.quickstart = {
+              type = "app";
+              program = "${import ./nix/quickstart.nix { inherit pkgs; }}/bin/quickstart";
+            };
+
+            # For hacking ON the harness itself (host-side).
+            # spindrift CLI is included so `nix develop` → `spindrift dispatch` works.
+            devShells.default = pkgs.mkShell {
+              packages = [
+                pkgs.git
+                pkgs.gh
+                pkgs.jq
+                pkgs.go
+                config.packages.spindrift
+              ]
+              # bubblewrap only builds on Linux; the runner integration tests
+              # (go test -tags=integration ./cmd/launcher/internal/runner/...,
+              # issue #576) need it on PATH to exercise a real sandbox.
+              ++ pkgs.lib.optionals pkgs.stdenv.isLinux [ pkgs.bubblewrap ];
+              # `dogfood-stop`: ask a running ./dogfood.sh to exit after its current
+              # wave (see the USR1/TERM trap in dogfood.sh) instead of Ctrl-C, which
+              # would abort the wave mid-flight.
+              shellHook = ''
+                alias dogfood-stop='pid=$(cat "$(git rev-parse --show-toplevel 2>/dev/null)/.spindrift/dogfood.pid" 2>/dev/null) && kill -USR1 "$pid" && echo "dogfood: will stop after the current wave (pid $pid)" || echo "dogfood: no running loop (.spindrift/dogfood.pid not found)"'
+              '';
+            };
+          };
+      };
 }

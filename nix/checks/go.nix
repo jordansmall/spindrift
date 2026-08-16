@@ -32,6 +32,7 @@ in
       ${../../lib/flakeModule.nix} \
       ${../../lib/jira-status-mapping.nix} \
       ${../../lib/mkHarness.nix} \
+      ${../../lib/nixpkgs-shared.nix} \
       ${../../lib/prompt-contract.nix} \
       ${../../lib/renderers.nix} \
       ${../fixtures.nix} \
