@@ -346,8 +346,9 @@ let
   # ISSUE_TRACKER backend rows above, threaded into the Launcher input
   # document's `run` artifacts (preambles.runArtifacts) as
   # HOST_MEDIATED_REMOTE / OUTBOX_RELAY_CAPABLE / IN_BOX_UNREACHABLE_TRACKER
-  # / FULLY_LOCAL (issue #2527 slice 1) so a later Go-side slice can read
-  # them via getenvArtifact instead of re-deriving backend facts itself.
+  # / FULLY_LOCAL (issue #2527 slice 1); the Go side reads them via
+  # docArtifact (cmd/launcher/main.go's dispatchConfig) instead of
+  # re-deriving backend facts itself.
   hostMediatedRemote = codeForgeRow.hostMediatedRemote or false;
   outboxRelayCapable = codeForgeRow.outboxRelayCapable or false;
   inBoxUnreachableTracker = issueTrackerRow.inBoxUnreachableTracker or false;
@@ -466,11 +467,17 @@ let
   # Roster/review-loop bools derived from finalRoster/mergedDefaults,
   # threaded into the Launcher input document's `run` artifacts
   # (preambles.runArtifacts) as FILER_ENABLED / WORKER_PROVISIONED /
-  # REVIEW_LOOP_INLINE / REVIEW_LOOP_ORCHESTRATOR (issue #2533) so a later
-  # Go-side slice can read them via getenvArtifact instead of re-deriving
-  # roster membership/orchestration mode itself.
-  filerEnabled = lib.any (e: e.name == "filer") finalRoster;
-  workerProvisioned = lib.any (e: e.name == "worker") finalRoster;
+  # REVIEW_LOOP_INLINE / REVIEW_LOOP_ORCHESTRATOR (issue #2533); the Go side
+  # reads them via docArtifact (cmd/launcher/main.go's dispatchConfig)
+  # instead of re-deriving roster membership/orchestration mode itself. The
+  # `&& (e.model or "") != ""` filter mirrors the drivers' own roster
+  # filter exactly (lib/drivers/claude.nix's agentsJsonTemplate,
+  # lib/drivers/opencode.nix's agentFilesTemplate, both "#392 semantics"):
+  # a roster entry with an empty model is dropped from the rendered
+  # --agents JSON / agent files entirely, so a name-only membership check
+  # here would disagree with what the driver actually provisions.
+  filerEnabled = lib.any (e: e.name == "filer" && (e.model or "") != "") finalRoster;
+  workerProvisioned = lib.any (e: e.name == "worker" && (e.model or "") != "") finalRoster;
   reviewLoopInline = !mergedDefaults.orchestratorEnabled;
   reviewLoopOrchestrator = mergedDefaults.orchestratorEnabled;
 
