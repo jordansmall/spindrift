@@ -248,177 +248,86 @@ clone_repo() {
   # so GIT_USER_NAME is available for its (cosmetic) key label -- mirrors gh
   # auth setup-git's placement earlier in this function for the github case.
   configure_forgejo_cli
-  install_readonly_push_hook
-  install_readonly_gh_shim
+  install_readonly_guards
 }
 
-# install_readonly_push_hook makes `git push` fail locally, cheaply, when
-# this is a read-only Box whose read-only hand-off is relay-based, not a
-# real push (issue #2463). A plain pre-push hook alone cannot do this for a
-# network remote: git's push machinery lists the remote's refs (an
-# authenticated network round trip) before it ever runs the pre-push hook,
-# so on the http(s) transport this Box actually clones over, a hook-only
-# guard still lets the agent's push attempt reach the forge and 403 there --
-# exactly the round trip this issue exists to avoid. Instead, this repoints
-# `origin`'s *push* URL (leaving fetch untouched) at a throwaway local bare
-# repo, so every push resolves over the local-filesystem transport -- no
-# network call, ever -- and the pre-push hook installed below (which does
-# fire before a local transport's cheap, non-network ref listing) is what
-# actually stops it and prints the message. The decoy also carries a
-# server-side pre-receive hook with the same message, so `git push
-# --no-verify` -- which skips only the client-side pre-push hook -- still
-# gets rejected by the decoy itself instead of silently landing the ref
-# there and exiting 0. A read-write Box, or a read-only Box whose actual
-# hand-off IS a real push (both BOX_HOST_MEDIATED_REMOTE and
-# BOX_OUTBOX_RELAY_CAPABLE unset -- e.g. forgejo, where pushWithRetry/
-# publish_rebased_branch's push path is the only way this Box's work ever
-# lands), installs neither and pushes exactly as before this change. This is
-# a cheap interim guard, not an adversary-proof one
-# (`-c remote.origin.pushurl=...` or `-c core.hooksPath=...` bypass it); it
-# exists to catch the agent guessing at the old read-write workflow, not a
-# hostile one.
-install_readonly_push_hook() {
+# install_readonly_guards installs both runtime read-only guards -- the git
+# push hook (issue #2463) and the gh command shim (issue #2465) -- via the
+# `driver-exec readonly-guards` verb (issue #2509), the Go successor to this
+# function's own former hand-rolled heredocs. The verb renders every guard
+# named by the forbiddenMarkers registry (lib/prompt-contract.nix) in one
+# pass: today that's exactly one git-hook row (pre-push/pre-receive, blocking
+# `git push`) and five command-shim rows sharing argv0 "gh" (`gh pr create`,
+# `gh pr ready`, `gh pr merge`, `gh issue comment`, `gh issue create`, and
+# `gh api` with a mutating method) -- so every rejection message's wording
+# lives in the registry, never hand-copied shell this file's own shellcheck
+# sweep couldn't reach.
+#
+# Repoints `origin`'s *push* URL (leaving fetch untouched) at $WORK_DIR
+# itself before installing the guards, so every push resolves over the
+# local-filesystem transport -- no network call, ever -- and git treats
+# $WORK_DIR as both the client (running its own pre-push hook) and the
+# receiving end (running its own pre-receive hook) of that local push. The
+# former hand-rolled version pointed at a separate throwaway `mktemp -d`
+# bare decoy repo instead of $WORK_DIR itself, because its two hook bodies
+# were independent heredocs it could place anywhere; readonlyguards.Install
+# always renders identical content to both hookNames in whatever single
+# RepoDir it's given (issue #2509), so pointing that one RepoDir at
+# $WORK_DIR itself -- rather than standing up a second bare repo purely to
+# hold a second copy of the same content -- gets the same "git push -c
+# no-verify still gets caught by the receiving side's pre-receive" property
+# (verified: a non-bare repo's own pre-receive hook fires on an incoming
+# push to a *different* ref than the one currently checked out, which is
+# all every push in this file's flow ever targets) with one directory and
+# one verb call instead of two.
+#
+# Gated on the former install_readonly_push_hook's own condition verbatim:
+# BOX_WRITE_ENABLED unset (no push-capable token was ever issued) AND
+# (BOX_HOST_MEDIATED_REMOTE or BOX_OUTBOX_RELAY_CAPABLE set -- the two
+# backend-capability facts dispatch.buildBoxEnv forwards host-side, issue
+# #2267). The former install_readonly_gh_shim used a narrower condition
+# (_is_readonly_github: BOX_WRITE_ENABLED unset AND CODE_FORGE=="github"),
+# but every real dispatch-generated env where that holds also satisfies this
+# one -- CODE_FORGE=="github" always forwards BOX_OUTBOX_RELAY_CAPABLE=1
+# (backend.go's outboxRelayCapable:true for github), so a github Box's old
+# gh-shim gate never fired without its old push-hook gate also firing. The
+# lone case that diverges is CODE_FORGE=local under
+# BOX_FORGE_AND_ISSUE_ACCESS=read-only (BOX_HOST_MEDIATED_REMOTE set,
+# CODE_FORGE != github): the former code installed only the push hook there;
+# this single call now installs the gh shim there too, since the verb
+# renders every row the registry names in one pass and there is no flag to
+# select a subset. That's inert -- CODE_FORGE=local never invokes gh -- and
+# reusing the push-hook's own original condition here (rather than an OR of
+# both former conditions) keeps install_readonly_push_hook's synthetic
+# "outbox-incapable future backend" regression-guard test
+# (tests/entrypoint-readonly-push-hook.bats) passing exactly as before: that
+# fixture leaves CODE_FORGE at its "github" default while deliberately
+# unsetting BOX_OUTBOX_RELAY_CAPABLE, a combination only the push-hook's own
+# CODE_FORGE-blind condition (not an OR pulling in the CODE_FORGE=="github"
+# check) correctly still treats as "install neither guard".
+install_readonly_guards() {
   if [ -n "${BOX_WRITE_ENABLED:-}" ]; then
     return 0
   fi
   if [ -z "${BOX_HOST_MEDIATED_REMOTE:-}" ] && [ -z "${BOX_OUTBOX_RELAY_CAPABLE:-}" ]; then
     return 0
   fi
-  # A path outside WORK_DIR (never inside the clone, so it never shows up in
-  # `git status`/`git add -A`) that every push now targets instead of the
-  # real remote -- see the function comment above for why. Created as a real
-  # bare repo (not just a bare path) so the local-filesystem transport's
-  # cheap, non-network ref listing succeeds and the client-side pre-push hook
-  # below actually fires and delivers its message on the normal push path.
-  local decoy
-  decoy="$(mktemp -d)/readonly-push-guard.git"
-  git init --bare -q "$decoy"
-  # `git push --no-verify` skips the client-side pre-push hook below, but it
-  # has no effect on the *receiving* repo's pre-receive hook -- git still
-  # runs that (locally, no network -- the decoy is a local filesystem path)
-  # before accepting any ref update. Without this, --no-verify would land
-  # the ref in the decoy and exit 0: a silent fake success, worse than the
-  # 403 this issue exists to replace, since the agent would believe its work
-  # was safely handed off when it went nowhere real. Message text matches
-  # the pre-push hook's below verbatim.
-  cat >"$decoy/hooks/pre-receive" <<'EOF'
-#!/bin/sh
-echo "read-only Box: your committed branch is relayed via the outbox; do not push -- this push has been blocked locally." >&2
-exit 1
-EOF
-  chmod +x "$decoy/hooks/pre-receive"
-  git -C "$WORK_DIR" config remote.origin.pushurl "$decoy"
-  # /bin/sh, not /usr/bin/env bash: git execs the hook's shebang directly,
-  # and /usr/bin/env is not guaranteed to resolve in every sandbox this
-  # entrypoint runs under (e.g. the nix-sandboxed bats check), while /bin/sh
-  # is.
-  local hook="$WORK_DIR/.git/hooks/pre-push"
-  mkdir -p "$(dirname "$hook")"
-  cat >"$hook" <<'EOF'
-#!/bin/sh
-echo "read-only Box: your committed branch is relayed via the outbox; do not push -- this push has been blocked locally." >&2
-exit 1
-EOF
-  chmod +x "$hook"
-}
-
-# install_readonly_gh_shim puts a `gh` shim ahead of the real `gh` binary on
-# PATH when this is a read-only github Box (issue #2465), rejecting write
-# subcommands so the agent gets a clear local error naming the relay that
-# replaces the write, instead of the real `gh` reaching the network and
-# 403ing there (the same "catch it locally, cheaply" shape as
-# install_readonly_push_hook above -- gated on _is_readonly_github, defined
-# later in this file (~line 537); bash resolves function bodies at call
-# time, so this forward reference is safe, same as every other phase
-# function's use of it). A read-write Box, or a Box whose Code Forge isn't
-# github (gh has nothing to guard there -- see clone_repo's own
-# CODE_FORGE-keyed skip of `gh auth setup-git`), installs no shim and the
-# real `gh` behaves exactly as before this change. This covers `gh pr
-# create`, `gh pr ready`, `gh pr merge`, `gh issue comment`, `gh issue
-# create`, and `gh api` with a mutating method (POST/PATCH/PUT/DELETE); every
-# other subcommand -- reads included -- falls through to the real `gh`
-# untouched.
-install_readonly_gh_shim() {
-  if ! _is_readonly_github; then
-    return 0
-  fi
-  # Resolve the real `gh`'s absolute path BEFORE prepending the shim dir to
-  # PATH below -- the shim itself must never re-resolve `gh` off its own
-  # runtime PATH (which, by then, has the shim dir in front of it too): a
-  # naive re-resolve would recurse into itself instead of reaching the real
-  # binary.
-  local real_gh
-  real_gh="$(command -v gh)"
-  # A deterministic location under $HOME, not a mktemp path: entrypoint.sh's
-  # PATH mutation below is local to this subprocess and never survives back to
-  # a caller inspecting the Box after it exits, so the install location has to
-  # be predictable from a value the caller already knows instead of discovered.
-  # $HOME, not $WORK_DIR's parent: production WORK_DIR is /work, whose parent
-  # is the root-owned `/`, while the Box runs as uid 1000 -- so a
-  # $WORK_DIR-derived path fails this mkdir with EACCES and `set -e` kills the
-  # Box mid-clone. $HOME is /home/agent, which lib/image.nix chowns to that
-  # same uid alongside /work.
+  # A deterministic location under $HOME, not a mktemp path: the PATH
+  # mutation below is local to this subprocess and never survives back to a
+  # caller inspecting the Box after it exits, so the install location has to
+  # be predictable from a value the caller already knows instead of
+  # discovered. $HOME, not $WORK_DIR's parent: production WORK_DIR is /work,
+  # whose parent is the root-owned `/`, while the Box runs as uid 1000 -- so
+  # a $WORK_DIR-derived path fails the verb's mkdir with EACCES and `set -e`
+  # kills the Box mid-clone. $HOME is /home/agent, which lib/image.nix chowns
+  # to that same uid alongside /work.
   local shim_dir
   shim_dir="$HOME/.spindrift/readonly-gh-shim"
-  mkdir -p "$shim_dir"
-  # The real gh's path is stored in a file, not inlined into the heredoc
-  # below, so the shim script never has to shell-quote an arbitrary
-  # filesystem path into a literal script body (the push-hook's heredocs
-  # above only ever emit a fixed, argument-free message, so they never faced
-  # this problem).
-  printf '%s' "$real_gh" >"$shim_dir/.real-gh"
-  cat >"$shim_dir/gh" <<'EOF'
-#!/bin/sh
-# Read-only Box gh shim (issue #2465): rejects gh write subcommands locally,
-# naming the relay that replaces each one, instead of letting the real gh
-# reach the network and 403 there. Everything else -- reads, and any write
-# subcommand this slice doesn't cover yet -- falls through to the real gh.
-real_gh="$(cat "$(dirname "$0")/.real-gh")"
-if [ "$1" = "pr" ] && [ "$2" = "create" ]; then
-  echo "read-only Box: PRs are opened via the PR-intent relay (SPINDRIFT_PR_INTENT); do not run \`gh pr create\` -- this call has been blocked locally." >&2
-  exit 1
-fi
-if [ "$1" = "pr" ] && [ "$2" = "ready" ]; then
-  echo "read-only Box: the launcher flips the PR ready once CI is green; do not run \`gh pr ready\` -- this call has been blocked locally." >&2
-  exit 1
-fi
-if [ "$1" = "pr" ] && [ "$2" = "merge" ]; then
-  echo "read-only Box: the launcher merges the PR once CI is green; do not run \`gh pr merge\` -- this call has been blocked locally." >&2
-  exit 1
-fi
-if [ "$1" = "issue" ] && [ "$2" = "comment" ]; then
-  echo "read-only Box: issue comments are relayed via the outcome note= field; do not run \`gh issue comment\` -- this call has been blocked locally." >&2
-  exit 1
-fi
-if [ "$1" = "issue" ] && [ "$2" = "create" ]; then
-  echo "read-only Box: issues are filed via the issue-intent relay (SPINDRIFT_ISSUE_INTENT); do not run \`gh issue create\` -- this call has been blocked locally." >&2
-  exit 1
-fi
-if [ "$1" = "api" ]; then
-  # `gh api` with no -X/--method flag defaults to GET (safe, must pass
-  # through). A `for` loop over "$@" -- rather than shift -- so this scan
-  # never consumes the positional params the final exec below still needs.
-  method="GET"
-  prev=""
-  for arg in "$@"; do
-    if [ "$prev" = "-X" ] || [ "$prev" = "--method" ]; then
-      method="$arg"
-    fi
-    case "$arg" in
-      --method=*) method="${arg#--method=}" ;;
-    esac
-    prev="$arg"
-  done
-  case "$method" in
-    [Pp][Oo][Ss][Tt] | [Pp][Aa][Tt][Cc][Hh] | [Pp][Uu][Tt] | [Dd][Ee][Ll][Ee][Tt][Ee])
-      echo "read-only Box: gh api does not accept a mutating method under read-only; make this change through the same relay a \`gh pr create\`/\`gh issue create\`/\`gh issue comment\` write would use -- this call has been blocked locally." >&2
-      exit 1
-      ;;
-  esac
-fi
-exec "$real_gh" "$@"
-EOF
-  chmod +x "$shim_dir/gh"
+  git -C "$WORK_DIR" config remote.origin.pushurl "$WORK_DIR"
+  driver-exec readonly-guards \
+    --forbidden-markers-registry "$FORBIDDEN_MARKERS_REGISTRY_FILE" \
+    --repo-dir "$WORK_DIR" \
+    --shim-dir "$shim_dir"
   export PATH="$shim_dir:$PATH"
 }
 

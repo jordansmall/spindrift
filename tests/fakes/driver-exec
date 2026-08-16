@@ -19,7 +19,10 @@
 # it delegates straight to the real Go binary (DRIVER_EXEC_BIN, exported by
 # the nix bats derivation, nix/checks/bats.nix) instead of reimplementing its
 # gate logic here -- promptassembly is the source of truth and this fake has
-# no bash re-derivation to keep in lockstep with it.
+# no bash re-derivation to keep in lockstep with it. The `marker-gate` verb
+# (issue #2511) is a fifth, delegated the same way. The `readonly-guards`
+# verb (issue #2509) is a sixth, delegated the same way as assemble-prompt --
+# readonlyguards is the source of truth for the guards' rendered content.
 set -euo pipefail
 
 if [ "${1:-}" = "assemble-prompt" ]; then
@@ -30,6 +33,11 @@ fi
 if [ "${1:-}" = "marker-gate" ]; then
   shift
   exec "$DRIVER_EXEC_BIN" marker-gate "$@"
+fi
+
+if [ "${1:-}" = "readonly-guards" ]; then
+  shift
+  exec "$DRIVER_EXEC_BIN" readonly-guards "$@"
 fi
 
 if [ "${1:-}" = "bundle-out" ]; then
