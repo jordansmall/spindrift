@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"spindrift.dev/launcher/internal/agentpaths"
 )
 
 // realPromptsDirT resolves this repo's own templates/default/prompts
@@ -72,12 +74,13 @@ func TestConflictResolveGuidanceFallsBackWhenTemplateMissing(t *testing.T) {
 }
 
 // TestPromptsDirDefaultsWhenUnset verifies promptsDir falls back to
-// defaultPromptsDir ("/agent/prompts", mirroring lib/agent-paths.nix's own
-// PROMPTS_DIR default) when the PROMPTS_DIR env var isn't set at all.
+// agentpaths.PromptsDir ("/agent/prompts", the single-sourced constant
+// generated from lib/agent-paths.nix, issue #2531) when the PROMPTS_DIR env
+// var isn't set at all.
 func TestPromptsDirDefaultsWhenUnset(t *testing.T) {
 	os.Unsetenv("PROMPTS_DIR")
 
-	if got := promptsDir(); got != defaultPromptsDir {
-		t.Errorf("promptsDir() = %q, want %q", got, defaultPromptsDir)
+	if got := promptsDir(); got != agentpaths.PromptsDir {
+		t.Errorf("promptsDir() = %q, want %q", got, agentpaths.PromptsDir)
 	}
 }

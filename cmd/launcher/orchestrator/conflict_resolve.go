@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"spindrift.dev/launcher/internal/agentpaths"
 	"spindrift.dev/launcher/internal/promptassembly"
 )
 
@@ -20,26 +21,20 @@ import (
 // both, closely mirroring each other's structure/steps.
 const conflictResolveCherryPickPromptFile = "conflict-resolve-cherry-pick-prompt.md"
 
-// defaultPromptsDir mirrors lib/agent-paths.nix's own PROMPTS_DIR default
-// ("/agent/prompts") -- the fixed, baked-into-every-Box-image location every
-// prompt template (including, once baked, conflict-resolve-cherry-pick-
-// prompt.md) lives at. entrypoint.sh exports PROMPTS_DIR into this
-// process's own environment before ever spawning the orchestrator binary
-// (agent/entrypoint.sh), so reading it directly here -- rather than
-// plumbing a new orchestrator CLI flag through entrypoint.sh -- mirrors
-// main.go's existing `os.Getenv("ISSUE_NUMBER")` default-flag convention
-// for a value this process already inherits.
-const defaultPromptsDir = "/agent/prompts"
-
 // promptsDir resolves the directory conflictResolveGuidance reads
-// conflictResolveCherryPickPromptFile from: the PROMPTS_DIR env var this
-// process inherits from entrypoint.sh (or a test's own t.Setenv override)
-// when set, else defaultPromptsDir.
+// conflictResolveCherryPickPromptFile from: the PROMPTS_DIR env var (a
+// test-only override via t.Setenv -- entrypoint.sh does not export
+// PROMPTS_DIR into the orchestrator process's own environment, unlike
+// driver-exec's separate --prompts-dir flag) when set, else
+// agentpaths.PromptsDir, the single-sourced baked-in-box constant
+// generated from lib/agent-paths.nix (issue #2531) -- so this never drifts
+// from the Nix image's own PROMPTS_DIR default the way a second hardcoded
+// literal here would.
 func promptsDir() string {
 	if dir := os.Getenv("PROMPTS_DIR"); dir != "" {
 		return dir
 	}
-	return defaultPromptsDir
+	return agentpaths.PromptsDir
 }
 
 // conflictResolveGuidance renders conflict-resolve-cherry-pick-prompt.md
