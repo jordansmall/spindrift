@@ -3,6 +3,7 @@ package main
 import (
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -12,6 +13,22 @@ import (
 	"spindrift.dev/launcher/internal/outcome"
 	"spindrift.dev/launcher/internal/runstate"
 )
+
+// gitOutputT runs `git <args...>` with its working directory set to dir,
+// failing the test on a non-zero exit, and returns its trimmed combined
+// output -- shared by the squash tests below to inspect repoRoot's HEAD/log
+// the same way chdirToFreshWorkerRepo's own unexported `run` closure sets it
+// up (workers_test.go).
+func gitOutputT(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, out)
+	}
+	return strings.TrimSpace(string(out))
+}
 
 // TestTruncateRunesNeverSplitsAMultiByteRune verifies truncateRunes cuts on
 // a rune boundary rather than a byte index: a naive s[:max] byte slice can
@@ -1201,6 +1218,177 @@ esac
 		if !strings.Contains(state.WorkerFindings, want) {
 			t.Errorf("state.WorkerFindings = %q, want it to contain %q", state.WorkerFindings, want)
 		}
+	}
+}
+
+// TestDispatchManifestIfPresentSquashesMultipleSliceIntegrationsIntoOneCommit
+// verifies dispatchManifestIfPresent (issue #2060 review finding): two
+// independent slices (disjoint declared FileLeases, so they batch and
+// integrate within the same LaunchWorkers call) each land their own
+// per-slice integration commit onto repoRoot's HEAD during the batch loop,
+// but once every batch in the manifest has been dispatched and integrated,
+// those per-slice commits must be squashed into exactly ONE final commit on
+// HEAD -- a single coherent change, not one "chore(orchestrator): integrate
+// slice <name>" commit per slice -- naming every integrated slice in its
+// own message.
+func TestDispatchManifestIfPresentSquashesMultipleSliceIntegrationsIntoOneCommit(t *testing.T) {
+	repoRoot := chdirToFreshWorkerRepo(t)
+	preCallHead := gitOutputT(t, repoRoot, "rev-parse", "HEAD")
+
+	dir := t.TempDir()
+	callLog := filepath.Join(dir, "calls.log")
+	if err := os.WriteFile(callLog, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	body := `case "$DRIVER_LOG_PATH" in
+  "$WORKER_WORK_DIR"*)
+    : > "$DRIVER_LOG_PATH"
+    base=$(basename "$DRIVER_LOG_PATH" .log)
+    echo "content for $base" > "$base.txt"
+    git add "$base.txt"
+    git commit -m "worker commit for $base"
+    : > "${DRIVER_LOG_PATH%.log}.done"
+    exit 0
+    ;;
+esac
+: > "$DRIVER_LOG_PATH"
+`
+	writeFakeDriverExec(t, dir, callLog, body)
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	workerWorkDir := t.TempDir()
+	t.Setenv("WORKER_WORK_DIR", workerWorkDir)
+
+	manifest := SliceManifest{Slices: []ManifestSlice{
+		{Name: "alpha", Task: "implement seam alpha", FileLeases: []string{"alpha.txt"}},
+		{Name: "beta", Task: "implement seam beta", FileLeases: []string{"beta.txt"}},
+	}}
+	line, err := manifest.Line()
+	if err != nil {
+		t.Fatalf("Line() error = %v", err)
+	}
+	logPath := filepath.Join(dir, "stream.log")
+	if err := os.WriteFile(logPath, []byte(streamJSONOutcomeLine(strings.TrimSpace(line))), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	workerPromptFile := filepath.Join(dir, "worker-prompt.txt")
+	if err := os.WriteFile(workerPromptFile, []byte("BASE WORKER PROMPT"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config{
+		driver:           "claude",
+		logPath:          logPath,
+		workerPromptFile: workerPromptFile,
+		workerWorkDir:    workerWorkDir,
+		workerTimeout:    5 * time.Second,
+	}
+	state := runstate.RunState{}
+
+	var stdout strings.Builder
+	got := dispatchManifestIfPresent(cfg, &state, &stdout)
+	if !got {
+		t.Fatalf("dispatchManifestIfPresent() = false, want true")
+	}
+
+	newCommits := gitOutputT(t, repoRoot, "rev-list", preCallHead+"..HEAD")
+	commitCount := 0
+	if newCommits != "" {
+		commitCount = len(strings.Split(newCommits, "\n"))
+	}
+	if commitCount != 1 {
+		t.Fatalf("rev-list %s..HEAD has %d commits, want exactly 1 (per-slice integration commits should be squashed into one)", preCallHead, commitCount)
+	}
+
+	headMsg := gitOutputT(t, repoRoot, "log", "-1", "--format=%B", "HEAD")
+	if !strings.Contains(headMsg, "alpha") || !strings.Contains(headMsg, "beta") {
+		t.Errorf("squashed commit message = %q, want it to name both integrated slices alpha and beta", headMsg)
+	}
+
+	for _, f := range []string{"alpha.txt", "beta.txt"} {
+		content, err := os.ReadFile(filepath.Join(repoRoot, f))
+		if err != nil {
+			t.Errorf("ReadFile(%s) after integration: %v", f, err)
+			continue
+		}
+		if !strings.Contains(string(content), "content for") {
+			t.Errorf("%s content = %q, want the worker's own committed content present on the squashed HEAD", f, content)
+		}
+	}
+}
+
+// TestDispatchManifestIfPresentDoesNotSquashWhenNothingIntegrated verifies
+// dispatchManifestIfPresent (issue #2060 review finding): when a dispatched
+// slice's own branch carries no new commits (integrateEmpty), HEAD is never
+// advanced, so squashIntegrationCommits must be a strict no-op -- it must
+// never create a spurious commit on top of an unchanged HEAD.
+func TestDispatchManifestIfPresentDoesNotSquashWhenNothingIntegrated(t *testing.T) {
+	repoRoot := chdirToFreshWorkerRepo(t)
+	preCallHead := gitOutputT(t, repoRoot, "rev-parse", "HEAD")
+
+	dir := t.TempDir()
+	callLog := filepath.Join(dir, "calls.log")
+	if err := os.WriteFile(callLog, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// The fake worker succeeds but never commits anything of its own, so
+	// its branch carries no commits past its merge-base with HEAD --
+	// integrateSliceBranch reports integrateEmpty, and HEAD stays put.
+	body := `case "$DRIVER_LOG_PATH" in
+  "$WORKER_WORK_DIR"*)
+    : > "$DRIVER_LOG_PATH"
+    : > "${DRIVER_LOG_PATH%.log}.done"
+    exit 0
+    ;;
+esac
+: > "$DRIVER_LOG_PATH"
+`
+	writeFakeDriverExec(t, dir, callLog, body)
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	workerWorkDir := t.TempDir()
+	t.Setenv("WORKER_WORK_DIR", workerWorkDir)
+
+	manifest := SliceManifest{Slices: []ManifestSlice{
+		{Name: "noop-slice", Task: "implement seam that makes no changes"},
+	}}
+	line, err := manifest.Line()
+	if err != nil {
+		t.Fatalf("Line() error = %v", err)
+	}
+	logPath := filepath.Join(dir, "stream.log")
+	if err := os.WriteFile(logPath, []byte(streamJSONOutcomeLine(strings.TrimSpace(line))), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	workerPromptFile := filepath.Join(dir, "worker-prompt.txt")
+	if err := os.WriteFile(workerPromptFile, []byte("BASE WORKER PROMPT"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config{
+		driver:           "claude",
+		logPath:          logPath,
+		workerPromptFile: workerPromptFile,
+		workerWorkDir:    workerWorkDir,
+		workerTimeout:    5 * time.Second,
+	}
+	state := runstate.RunState{}
+
+	var stdout strings.Builder
+	got := dispatchManifestIfPresent(cfg, &state, &stdout)
+	if !got {
+		t.Fatalf("dispatchManifestIfPresent() = false, want true")
+	}
+
+	if !strings.Contains(state.WorkerFindings, "noop-slice: done, nothing to integrate") {
+		t.Fatalf("state.WorkerFindings = %q, want noop-slice reported as integrateEmpty", state.WorkerFindings)
+	}
+
+	postCallHead := gitOutputT(t, repoRoot, "rev-parse", "HEAD")
+	if postCallHead != preCallHead {
+		t.Errorf("HEAD moved from %s to %s with nothing integrated, want it unchanged (no spurious squash commit)", preCallHead, postCallHead)
 	}
 }
 
