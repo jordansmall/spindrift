@@ -25,6 +25,12 @@ let
     templatePkgs
     harnessNoRevision
     ;
+  # Shared by the mkharness-review-effort-* checks below (issue #2512): each
+  # asserts against a differently-configured mkHarness call's own resolved
+  # `.roster` output, but all three only ever need the reviewer entry's
+  # effort out of it.
+  reviewerEffortOf =
+    roster: (builtins.head (builtins.filter (e: e.name == "reviewer") roster)).effort;
 in
 {
   # Pure-eval-style assertion: the image store path is substituted into the
@@ -790,8 +796,13 @@ in
   # effort flows straight to the orchestrator's code-owned review pass (issue
   # #2387) via the Handoff, so the `effortMismatches` assertion below --
   # comparing the *resolved* roster against `rosterHelper.rosterDefaults` per
-  # agent, including `reviewer` -- is the sole check that the review pass
-  # still runs at the roster's expected effort. scout, reviewer, and
+  # agent, including `reviewer` -- checks that the dogfood roster's per-agent
+  # efforts still match rosterDefaults. It does not independently check that
+  # the dogfood config carries no local `reviewEffort` pin at all -- that
+  # assertion was deleted along with the pin itself and nothing replaces it;
+  # inert today only because flake.nix no longer wires
+  # dogfood-defaults.nix's `reviewEffort` field into the flake options, so
+  # there is nothing left to pin. scout, reviewer, and
   # worker are all left unmentioned in the roster's `models` (issue #2435) and
   # must resolve to their `lib/env-schema.nix` schema defaults as of this
   # writing -- claude-haiku-4-5-20251001, claude-opus-5, and claude-sonnet-5
@@ -1207,7 +1218,7 @@ in
   # Issue #2512 (blocking review finding): reviewEffort is the one legacy
   # knob documented (lib/roster.nix) to override the reviewer entry's effort
   # regardless of roster source -- unlike the four legacy model knobs, which
-  # are explicit-roster-only-wins. mkHarness must apply it as a
+  # are explicit-roster-wins. mkHarness must apply it as a
   # post-normalize step on `finalRoster`, so it reaches an explicit
   # caller-supplied `roster` exactly the same way it reaches the
   # `defaultRoster` fallback path. Both branches below assert against
@@ -1221,10 +1232,9 @@ in
         packages = p: [ p.hello ];
         defaults.reviewEffort = "xhigh";
       };
-      byName = name: builtins.head (builtins.filter (e: e.name == name) direct.roster);
     in
-    assert pkgs.lib.assertMsg ((byName "reviewer").effort == "xhigh")
-      "mkHarness must apply a non-empty defaults.reviewEffort to the defaultRoster-resolved reviewer entry, got: ${builtins.toJSON (byName "reviewer").effort}";
+    assert pkgs.lib.assertMsg (reviewerEffortOf direct.roster == "xhigh")
+      "mkHarness must apply a non-empty defaults.reviewEffort to the defaultRoster-resolved reviewer entry, got: ${builtins.toJSON (reviewerEffortOf direct.roster)}";
     pkgs.runCommand "mkharness-review-effort-overrides-default-roster" { } "touch $out";
 
   mkharness-review-effort-overrides-explicit-roster =
@@ -1245,10 +1255,9 @@ in
         roster = explicitRoster;
         defaults.reviewEffort = "xhigh";
       };
-      byName = name: builtins.head (builtins.filter (e: e.name == name) direct.roster);
     in
-    assert pkgs.lib.assertMsg ((byName "reviewer").effort == "xhigh")
-      "mkHarness must apply a non-empty defaults.reviewEffort to an explicit caller-supplied roster's reviewer entry, overriding its own \"low\" effort, got: ${builtins.toJSON (byName "reviewer").effort}";
+    assert pkgs.lib.assertMsg (reviewerEffortOf direct.roster == "xhigh")
+      "mkHarness must apply a non-empty defaults.reviewEffort to an explicit caller-supplied roster's reviewer entry, overriding its own \"low\" effort, got: ${builtins.toJSON (reviewerEffortOf direct.roster)}";
     pkgs.runCommand "mkharness-review-effort-overrides-explicit-roster" { } "touch $out";
 
   # The other half of the contract: an unset/empty reviewEffort must leave
@@ -1261,10 +1270,9 @@ in
         packages = p: [ p.hello ];
       };
       rosterHelper = import ../../lib/roster-schema-defaults.nix { inherit (pkgs) lib; };
-      byName = name: builtins.head (builtins.filter (e: e.name == name) direct.roster);
     in
     assert pkgs.lib.assertMsg
-      ((byName "reviewer").effort == rosterHelper.rosterDefaults.reviewer.effort)
-      "mkHarness must leave the reviewer entry at its roster default effort (${rosterHelper.rosterDefaults.reviewer.effort}) when defaults.reviewEffort is unset, got: ${builtins.toJSON (byName "reviewer").effort}";
+      (reviewerEffortOf direct.roster == rosterHelper.rosterDefaults.reviewer.effort)
+      "mkHarness must leave the reviewer entry at its roster default effort (${rosterHelper.rosterDefaults.reviewer.effort}) when defaults.reviewEffort is unset, got: ${builtins.toJSON (reviewerEffortOf direct.roster)}";
     pkgs.runCommand "mkharness-review-effort-empty-leaves-reviewer-effort-untouched" { } "touch $out";
 }
