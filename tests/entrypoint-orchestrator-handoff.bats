@@ -312,18 +312,20 @@ setup() {
   grep -q -- '--max-budget-usd 4.44' "$ORCHESTRATOR_LOG"
 }
 
-# Without MAX_BUDGET_TOKENS/MAX_BUDGET_USD set, there's nothing to override the
-# orchestrator's own defaults (both disabled/0) with -- entrypoint.sh must omit
-# both flags entirely rather than pass them empty, mirroring the
-# --worker-work-dir/--worker-timeout omit test above.
-@test "orchestrator path omits --max-budget-tokens/--max-budget-usd when unset" {
+# Unlike every other orchestrator-only flag in this file, --max-budget-tokens/
+# --max-budget-usd are never omitted: MAX_BUDGET_TOKENS/MAX_BUDGET_USD are
+# boxEnv (lib/env-schema.nix), so set_box_env (helper.bash, mirroring the real
+# nix preamble) always exports them at their schema default ("0"/"0.000000")
+# even when the operator never overrides them -- there is no "unset" state to
+# omit on. entrypoint.sh forwards the schema default unchanged.
+@test "orchestrator path forwards schema-default --max-budget-tokens/--max-budget-usd when not overridden" {
   export ORCHESTRATOR_ENABLED=1
   export BOX_REVIEW_LOOP_ORCHESTRATOR=1
   unset BOX_REVIEW_LOOP_INLINE
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  ! grep -q -- '--max-budget-tokens' "$ORCHESTRATOR_LOG"
-  ! grep -q -- '--max-budget-usd' "$ORCHESTRATOR_LOG"
+  grep -q -- '--max-budget-tokens 0' "$ORCHESTRATOR_LOG"
+  grep -q -- '--max-budget-usd 0.000000' "$ORCHESTRATOR_LOG"
 }
 
 # The --max-budget-tokens/--max-budget-usd gate is on _driver_invoker =
