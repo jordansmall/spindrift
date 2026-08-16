@@ -121,7 +121,86 @@ func TestSnapshot_LocalTrackerIncludesParent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Snapshot: %v", err)
 	}
-	want := "the issue body\n\nparent: 42"
+	// local.toIssue appends the frontmatter's dispatch-state marker
+	// ("ready-for-agent") onto Labels (empty here otherwise), and the
+	// frontmatter's closed: axis (absent, so open) becomes State "OPEN" —
+	// both now carried into the degrade text alongside parent.
+	want := "the issue body\n\nparent: 42\n\nstate: OPEN\n\nlabels: ready-for-agent"
+	if got != want {
+		t.Errorf("Snapshot() = %q, want %q", got, want)
+	}
+}
+
+// TestSnapshot_LocalTrackerIncludesStateAndLabels verifies forge.Snapshot
+// against a real local.LocalTracker carries the issue's State and Labels
+// into the degrade text — before issue #2547, a local box's issue-read step
+// read the raw frontmatter file in full, so state:/labels: were visible;
+// Issue(num).Body alone strips that frontmatter (ADR 0013), so without this,
+// state and labels would silently vanish from the frozen issue-read
+// snapshot.
+func TestSnapshot_LocalTrackerIncludesStateAndLabels(t *testing.T) {
+	dir := t.TempDir()
+	issue := "---\n" +
+		"title: Do the thing\n" +
+		"state: ready-for-agent\n" +
+		"labels: [bug, enhancement]\n" +
+		"created: 2026-01-01T00:00:00Z\n" +
+		"---\n" +
+		"the issue body"
+	if err := os.WriteFile(filepath.Join(dir, "11.md"), []byte(issue), 0o644); err != nil {
+		t.Fatalf("write local issue: %v", err)
+	}
+	labels := forge.DispatchLabels{
+		Dispatchable: "ready-for-agent",
+		InProgress:   "agent-in-progress",
+		Complete:     "agent-complete",
+		Failed:       "agent-failed",
+	}
+	tracker := local.NewLocalTracker(dir, labels)
+
+	got, err := forge.Snapshot(tracker, "11")
+	if err != nil {
+		t.Fatalf("Snapshot: %v", err)
+	}
+	// No parent: set, so that line is skipped; state and labels both appear,
+	// with the dispatch-state marker "ready-for-agent" appended to the
+	// custom labels (local.toIssue's Labels merge).
+	want := "the issue body\n\nstate: OPEN\n\nlabels: bug, enhancement, ready-for-agent"
+	if got != want {
+		t.Errorf("Snapshot() = %q, want %q", got, want)
+	}
+}
+
+// TestSnapshot_LocalTrackerClosedStateAndNoLabels verifies forge.Snapshot's
+// degrade text reports "state: CLOSED" for a closed local issue, and omits
+// the labels: line entirely when Issue.Labels is empty (no custom labels
+// and no dispatch-state marker, e.g. a closed issue with its state marker
+// cleared).
+func TestSnapshot_LocalTrackerClosedStateAndNoLabels(t *testing.T) {
+	dir := t.TempDir()
+	issue := "---\n" +
+		"title: Do the thing\n" +
+		"labels: []\n" +
+		"created: 2026-01-01T00:00:00Z\n" +
+		"closed: true\n" +
+		"---\n" +
+		"the issue body"
+	if err := os.WriteFile(filepath.Join(dir, "12.md"), []byte(issue), 0o644); err != nil {
+		t.Fatalf("write local issue: %v", err)
+	}
+	labels := forge.DispatchLabels{
+		Dispatchable: "ready-for-agent",
+		InProgress:   "agent-in-progress",
+		Complete:     "agent-complete",
+		Failed:       "agent-failed",
+	}
+	tracker := local.NewLocalTracker(dir, labels)
+
+	got, err := forge.Snapshot(tracker, "12")
+	if err != nil {
+		t.Fatalf("Snapshot: %v", err)
+	}
+	want := "the issue body\n\nstate: CLOSED"
 	if got != want {
 		t.Errorf("Snapshot() = %q, want %q", got, want)
 	}
