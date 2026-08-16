@@ -30,11 +30,9 @@ let
     if unknown == [ ] then
       parsed
     else
-      throw ''JIRA_STATUS_MAPPING: unknown key "${builtins.head unknown}" (want one of dispatchable, inProgress, complete, failed)'';
+      throw ''JIRA_STATUS_MAPPING: unknown key "${builtins.head unknown}" (want one of ${builtins.concatStringsSep ", " validKeys})'';
 in
 {
-  inherit validKeys validate;
-
   # Parses the raw JIRA_STATUS_MAPPING knob string. The empty string (the
   # schema default) yields an empty mapping, mirroring ParseStatusMapping's
   # no-op on an empty string; any other value is parsed as JSON and its keys

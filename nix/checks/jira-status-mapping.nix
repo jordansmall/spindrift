@@ -49,7 +49,10 @@ in
     pkgs.runCommand "jira-status-mapping-parse-valid" { } "touch $out";
 
   # An unknown key must be rejected (mirrors ParseStatusMapping's "unknown
-  # key" config error).
+  # key" config error). tryEval exposes only success/failure, never the
+  # thrown message text (see nix/checks/drivers.nix's
+  # drivers-assert-shape-missing-attribute-throws for the same limitation),
+  # so this can't also pin that the message names the four valid states.
   jira-status-mapping-parse-rejects-unknown-key =
     let
       badJSON = builtins.toJSON { bogus = "x"; };
