@@ -1160,7 +1160,7 @@ in
     pkgs.runCommand "launcher-manpage"
       {
         nativeBuildInputs = [ pkgs.mandoc ];
-        man = "${harness.manpage}/share/man/man1/spindrift.1";
+        man = "${harness.internals.manpage}/share/man/man1/spindrift.1";
       }
       ''
         need() { grep -q "$@" "$man" || { echo "man page missing: $*" >&2; exit 1; }; }
@@ -1376,7 +1376,7 @@ in
           pkgs.bash
           pkgs.shellcheck
         ];
-        completion = "${harness.bashCompletion}/share/bash-completion/completions/spindrift";
+        completion = "${harness.internals.bashCompletion}/share/bash-completion/completions/spindrift";
       }
       ''
         need() {
@@ -1444,7 +1444,7 @@ in
     pkgs.runCommand "launcher-fish-completion"
       {
         nativeBuildInputs = [ pkgs.fish ];
-        completion = "${harness.fishCompletion}/share/fish/vendor_completions.d/spindrift.fish";
+        completion = "${harness.internals.fishCompletion}/share/fish/vendor_completions.d/spindrift.fish";
       }
       ''
         need() {
@@ -1514,7 +1514,7 @@ in
     pkgs.runCommand "launcher-zsh-completion"
       {
         nativeBuildInputs = [ pkgs.zsh ];
-        completion = "${harness.zshCompletion}/share/zsh/site-functions/_spindrift";
+        completion = "${harness.internals.zshCompletion}/share/zsh/site-functions/_spindrift";
       }
       ''
         need() {

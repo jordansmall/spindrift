@@ -124,7 +124,7 @@ in
   # Go `driver-exec assemble-prompt` verb, and asserts they produce
   # equivalent output for the one Env cell promptassembly.Assemble covers.
   # Same lightweight/non-image-dependent shape as bats.nix's
-  # "bats-prompt-contract-parity" (no batsHarness.run/build/spindrift/
+  # "bats-prompt-contract-parity" (no batsHarness.internals.run/build/
   # imagePath reference -- driverExecBin is a plain `buildGoModule` package,
   # not the OCI image, see equivalence.nix's driver-exec-src-excludes-tests
   # for the same driverExecBin-as-package precedent) -- reuses batsHarness
@@ -145,13 +145,13 @@ in
         ];
         ENTRYPOINT = ../../agent/entrypoint.sh;
         PROMPTS_DIR = ../../templates/default/prompts;
-        OUTCOME_CONTRACT_FILE = batsHarness.outcomeContractFile;
-        COMMS_CONTRACT_FILE = batsHarness.commsContractFile;
-        CHECK_CONTRACT_FILE = batsHarness.checkContractFile;
-        RESEARCH_OUTCOME_CONTRACT_FILE = batsHarness.researchOutcomeContractFile;
-        DRIVER_PREAMBLE_FILE = batsHarness.driverPreambleFile;
-        FRAGMENT_REGISTRY_FILE = batsHarness.fragmentRegistryFile;
-        DRIVER_EXEC_BIN = "${batsHarness.driverExecBin}/bin/driver-exec";
+        OUTCOME_CONTRACT_FILE = batsHarness.internals.outcomeContractFile;
+        COMMS_CONTRACT_FILE = batsHarness.internals.commsContractFile;
+        CHECK_CONTRACT_FILE = batsHarness.internals.checkContractFile;
+        RESEARCH_OUTCOME_CONTRACT_FILE = batsHarness.internals.researchOutcomeContractFile;
+        DRIVER_PREAMBLE_FILE = batsHarness.internals.driverPreambleFile;
+        FRAGMENT_REGISTRY_FILE = batsHarness.internals.fragmentRegistryFile;
+        DRIVER_EXEC_BIN = "${batsHarness.internals.driverExecBin}/bin/driver-exec";
         # Reuses the same nix-rendered lib/fragments.nix JSON the drift
         # check above already built -- no second render of the registry.
         PROMPTASSEMBLY_REGISTRY_FILE = fragmentsRegistryJsonFile;

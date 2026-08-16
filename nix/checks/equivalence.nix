@@ -42,21 +42,21 @@ in
   # no knob/artifact env or store paths beyond the document's own, passed via
   # a single --input flag) and the placeholder is gone.
   mkharness-substitution = pkgs.runCommand "mkharness-substitution" { } ''
-    buildCmd=${harness.build}/bin/build
-    runCmd=${harness.run}/bin/run
-    buildDoc=${harness.buildInputDocumentFile}
-    runDoc=${harness.runInputDocumentFile}
+    buildCmd=${harness.internals.build}/bin/build
+    runCmd=${harness.internals.run}/bin/run
+    buildDoc=${harness.internals.buildInputDocumentFile}
+    runDoc=${harness.internals.runInputDocumentFile}
 
     grep -q -- '--input' "$buildCmd"
     grep -q -- '--input' "$runCmd"
-    grep -q '${harness.imagePath}' "$buildDoc"
-    grep -q '${harness.imagePath}' "$runDoc"
+    grep -q '${harness.internals.imagePath}' "$buildDoc"
+    grep -q '${harness.internals.imagePath}' "$runDoc"
     ! grep -q '@imagePath@' "$buildCmd"
     ! grep -q '@imagePath@' "$runCmd"
 
-    case '${harness.imagePath}' in
+    case '${harness.internals.imagePath}' in
       /nix/store/*spindrift*) : ;;
-      *) echo "unexpected image path: ${harness.imagePath}" >&2; exit 1 ;;
+      *) echo "unexpected image path: ${harness.internals.imagePath}" >&2; exit 1 ;;
     esac
     touch $out
   '';
@@ -72,7 +72,7 @@ in
       {
         moduleSpindrift = config.packages.spindrift;
         directSpindrift = harness.spindrift;
-        imagePath = harness.imagePath;
+        imagePath = harness.internals.imagePath;
       }
       ''
         [ "$moduleSpindrift" = "$directSpindrift" ] \
@@ -81,7 +81,7 @@ in
         # wrapper store paths are byte-identical above) that document is the
         # direct call's own — which bakes the very same (Linux) image store path.
         grep -q -- '--input' "$moduleSpindrift/bin/spindrift"
-        grep -q "$imagePath" ${harness.runInputDocumentFile}
+        grep -q "$imagePath" ${harness.internals.runInputDocumentFile}
         touch $out
       '';
 
@@ -92,8 +92,8 @@ in
       {
         fixtureSpindrift = consumerPkgs.spindrift;
         directSpindrift = minimalDirect.spindrift;
-        imagePath = minimalDirect.imagePath;
-        runDoc = minimalDirect.runInputDocumentFile;
+        imagePath = minimalDirect.internals.imagePath;
+        runDoc = minimalDirect.internals.runInputDocumentFile;
       }
       ''
         [ "$fixtureSpindrift" = "$directSpindrift" ] \
@@ -115,8 +115,8 @@ in
       {
         templateSpindrift = templatePkgs.spindrift;
         directSpindrift = harnessNoRevision.spindrift;
-        imagePath = harnessNoRevision.imagePath;
-        runDoc = harnessNoRevision.runInputDocumentFile;
+        imagePath = harnessNoRevision.internals.imagePath;
+        runDoc = harnessNoRevision.internals.runInputDocumentFile;
       }
       ''
         spindriftCmd="$templateSpindrift/bin/spindrift"
@@ -143,7 +143,7 @@ in
   # (ADR 0020, cmd/launcher/inputdoc.go): these greps hand-pick specific
   # keys, so a new flakeOption knob is not automatically asserted here.
   mkharness-defaults = pkgs.runCommand "mkharness-defaults" { } ''
-    runDoc=${customHarness.runInputDocumentFile}
+    runDoc=${customHarness.internals.runInputDocumentFile}
     ! grep -q -- '@label@' "$runDoc"
     grep -q '"LABEL":"custom-label"' "$runDoc"
     grep -q '"BASE_BRANCH":"develop"' "$runDoc"
@@ -156,24 +156,24 @@ in
     grep -q '"COMPLETE_LABEL":"custom-done"' "$runDoc"
 
     # Default COMPLETE_LABEL baked into a default harness.
-    grep -q '"COMPLETE_LABEL":"agent-complete"' ${harness.runInputDocumentFile}
+    grep -q '"COMPLETE_LABEL":"agent-complete"' ${harness.internals.runInputDocumentFile}
 
     # Default runtime is podman; the docker/rancher harnesses bake their own
     # runtime value verbatim (rancher is a knob value, not a binary name —
     # the nerdctl alias lives in the Go runner package, not here).
-    grep -q '"RUNTIME":"podman"' ${harness.runInputDocumentFile}
-    grep -q '"RUNTIME":"docker"' ${dockerHarness.runInputDocumentFile}
-    grep -q '"RUNTIME":"rancher"' ${rancherHarness.runInputDocumentFile}
+    grep -q '"RUNTIME":"podman"' ${harness.internals.runInputDocumentFile}
+    grep -q '"RUNTIME":"docker"' ${dockerHarness.internals.runInputDocumentFile}
+    grep -q '"RUNTIME":"rancher"' ${rancherHarness.internals.runInputDocumentFile}
 
     # bwrap harness bakes bwrap runtime and agent store paths; no OCI store paths.
-    grep -q '"RUNTIME":"bwrap"' ${bwrapHarness.runInputDocumentFile}
-    grep -q '"AGENT_FILES":' ${bwrapHarness.runInputDocumentFile}
-    grep -q '"AGENT_ENV":' ${bwrapHarness.runInputDocumentFile}
+    grep -q '"RUNTIME":"bwrap"' ${bwrapHarness.internals.runInputDocumentFile}
+    grep -q '"AGENT_FILES":' ${bwrapHarness.internals.runInputDocumentFile}
+    grep -q '"AGENT_ENV":' ${bwrapHarness.internals.runInputDocumentFile}
     # IMAGE_ARCHIVE is not baked as a store path (empty-default guard is fine).
-    ! grep -q '"IMAGE_ARCHIVE":"/nix/store/' ${bwrapHarness.runInputDocumentFile}
-    grep -q '"AGENT_FILES_DRV":' ${bwrapHarness.buildInputDocumentFile}
-    grep -q '"AGENT_ENV_DRV":' ${bwrapHarness.buildInputDocumentFile}
-    ! grep -q '"IMAGE_DRV":' ${bwrapHarness.buildInputDocumentFile}
+    ! grep -q '"IMAGE_ARCHIVE":"/nix/store/' ${bwrapHarness.internals.runInputDocumentFile}
+    grep -q '"AGENT_FILES_DRV":' ${bwrapHarness.internals.buildInputDocumentFile}
+    grep -q '"AGENT_ENV_DRV":' ${bwrapHarness.internals.buildInputDocumentFile}
+    ! grep -q '"IMAGE_DRV":' ${bwrapHarness.internals.buildInputDocumentFile}
     touch $out
   '';
 
@@ -199,7 +199,7 @@ in
   # the image-layer check is below, Linux-gated).
   mkharness-skills = pkgs.runCommand "mkharness-skills" { } ''
     grep -q 'BAKED-SKILL-MARKER' \
-      ${skillsHarness.skillsDir}/baked-skill/SKILL.md
+      ${skillsHarness.internals.skillsDir}/baked-skill/SKILL.md
     touch $out
   '';
 
@@ -222,7 +222,7 @@ in
   packages-baked =
     let
       inherit (pkgs.lib) assertMsg any hasInfix;
-      names = map (p: p.name or "") nonRustHarness.agentEnv.paths;
+      names = map (p: p.name or "") nonRustHarness.internals.agentEnv.paths;
       baked = frag: any (n: hasInfix frag n) names;
     in
     assert assertMsg (baked "hello-") "expected the hello package baked into the env";
@@ -235,7 +235,7 @@ in
   nix-baked-by-default =
     let
       inherit (pkgs.lib) assertMsg any hasInfix;
-      names = map (p: p.name or "") nonRustHarness.agentEnv.paths;
+      names = map (p: p.name or "") nonRustHarness.internals.agentEnv.paths;
       hasNix = any (n: hasInfix "nix-" n || n == "nix") names;
     in
     assert assertMsg hasNix "expected the nix CLI to be baked into the default box";
@@ -247,7 +247,7 @@ in
   nil-baked-in-dogfood =
     let
       inherit (pkgs.lib) assertMsg any hasInfix;
-      names = map (p: p.name or "") harness.agentEnv.paths;
+      names = map (p: p.name or "") harness.internals.agentEnv.paths;
       hasNil = any (n: hasInfix "nil-" n || n == "nil") names;
     in
     assert assertMsg hasNil "expected nil to be baked into the dogfood toolchain";
@@ -259,7 +259,7 @@ in
   bats-baked-in-dogfood =
     let
       inherit (pkgs.lib) assertMsg any hasInfix;
-      names = map (p: p.name or "") harness.agentEnv.paths;
+      names = map (p: p.name or "") harness.internals.agentEnv.paths;
       hasBats = any (n: hasInfix "bats-" n) names;
     in
     assert assertMsg hasBats "expected bats to be baked into the dogfood toolchain";
@@ -268,7 +268,7 @@ in
   shellcheck-baked-in-dogfood =
     let
       inherit (pkgs.lib) assertMsg any hasInfix;
-      names = map (p: p.name or "") harness.agentEnv.paths;
+      names = map (p: p.name or "") harness.internals.agentEnv.paths;
       hasShellcheck = any (n: hasInfix "shellcheck-" n) names;
     in
     assert assertMsg hasShellcheck "expected shellcheck to be baked into the dogfood toolchain";
@@ -282,11 +282,11 @@ in
   # fails if the dogfood config stops baking any of them or reverts to the
   # flat layout.
   caveman-baked-in-dogfood = pkgs.runCommand "caveman-baked-in-dogfood" { } ''
-    test -s ${harness.skillsDir}/caveman/SKILL.md
-    test -s ${harness.skillsDir}/tdd/SKILL.md
-    test -s ${harness.skillsDir}/to-tickets/SKILL.md
-    test -s ${harness.skillsDir}/commit/SKILL.md
-    test -s ${harness.skillsDir}/code-review/SKILL.md
+    test -s ${harness.internals.skillsDir}/caveman/SKILL.md
+    test -s ${harness.internals.skillsDir}/tdd/SKILL.md
+    test -s ${harness.internals.skillsDir}/to-tickets/SKILL.md
+    test -s ${harness.internals.skillsDir}/commit/SKILL.md
+    test -s ${harness.internals.skillsDir}/code-review/SKILL.md
     touch $out
   '';
 
@@ -294,7 +294,7 @@ in
   lean-escape-hatch =
     let
       inherit (pkgs.lib) assertMsg any hasInfix;
-      names = map (p: p.name or "") leanHarness.agentEnv.paths;
+      names = map (p: p.name or "") leanHarness.internals.agentEnv.paths;
       hasNix = any (n: hasInfix "nix-" n || n == "nix") names;
     in
     assert assertMsg (!hasNix) "lean harness (nixInBox = false) must not bake in the nix CLI";
@@ -387,7 +387,7 @@ in
       {
         moduleSpindrift = consumerPkgs2200.spindrift;
         directSpindrift = direct2200.spindrift;
-        doc = direct2200.runInputDocumentFile;
+        doc = direct2200.internals.runInputDocumentFile;
       }
       ''
         [ "$moduleSpindrift" = "$directSpindrift" ] \
@@ -552,7 +552,8 @@ in
         in
         {
           inherit moduleSpindrift;
-          inherit (direct) spindrift runInputDocumentFile;
+          inherit (direct) spindrift;
+          runInputDocumentFile = direct.internals.runInputDocumentFile;
         };
 
       assertModuleMatchesDirect =
@@ -1076,7 +1077,7 @@ in
   # A tight fileset is the invariant; adding a new import outside it fails
   # the build loudly (missing package) rather than silently expanding the src.
   driver-exec-src-excludes-tests = pkgs.runCommand "driver-exec-src-excludes-tests" { } ''
-    test_files=$(find ${nonRustHarness.driverExecBin.src} -name '*_test.go')
+    test_files=$(find ${nonRustHarness.internals.driverExecBin.src} -name '*_test.go')
     if [ -n "$test_files" ]; then
       echo "driverExecBin.src contains *_test.go files:" >&2
       echo "$test_files" >&2
@@ -1404,8 +1405,8 @@ in
         defaults.reviewEffort = "xhigh";
       };
     in
-    assert pkgs.lib.assertMsg (reviewerEffortOf direct.roster == "xhigh")
-      "mkHarness must apply a non-empty defaults.reviewEffort to the defaultRoster-resolved reviewer entry, got: ${builtins.toJSON (reviewerEffortOf direct.roster)}";
+    assert pkgs.lib.assertMsg (reviewerEffortOf direct.internals.roster == "xhigh")
+      "mkHarness must apply a non-empty defaults.reviewEffort to the defaultRoster-resolved reviewer entry, got: ${builtins.toJSON (reviewerEffortOf direct.internals.roster)}";
     pkgs.runCommand "mkharness-review-effort-overrides-default-roster" { } "touch $out";
 
   mkharness-review-effort-overrides-explicit-roster =
@@ -1427,8 +1428,8 @@ in
         defaults.reviewEffort = "xhigh";
       };
     in
-    assert pkgs.lib.assertMsg (reviewerEffortOf direct.roster == "xhigh")
-      "mkHarness must apply a non-empty defaults.reviewEffort to an explicit caller-supplied roster's reviewer entry, overriding its own \"low\" effort, got: ${builtins.toJSON (reviewerEffortOf direct.roster)}";
+    assert pkgs.lib.assertMsg (reviewerEffortOf direct.internals.roster == "xhigh")
+      "mkHarness must apply a non-empty defaults.reviewEffort to an explicit caller-supplied roster's reviewer entry, overriding its own \"low\" effort, got: ${builtins.toJSON (reviewerEffortOf direct.internals.roster)}";
     pkgs.runCommand "mkharness-review-effort-overrides-explicit-roster" { } "touch $out";
 
   # The other half of the contract: an unset/empty reviewEffort must leave
@@ -1443,7 +1444,7 @@ in
       rosterHelper = import ../../lib/roster-schema-defaults.nix { inherit (pkgs) lib; };
     in
     assert pkgs.lib.assertMsg
-      (reviewerEffortOf direct.roster == rosterHelper.rosterDefaults.reviewer.effort)
-      "mkHarness must leave the reviewer entry at its roster default effort (${rosterHelper.rosterDefaults.reviewer.effort}) when defaults.reviewEffort is unset, got: ${builtins.toJSON (reviewerEffortOf direct.roster)}";
+      (reviewerEffortOf direct.internals.roster == rosterHelper.rosterDefaults.reviewer.effort)
+      "mkHarness must leave the reviewer entry at its roster default effort (${rosterHelper.rosterDefaults.reviewer.effort}) when defaults.reviewEffort is unset, got: ${builtins.toJSON (reviewerEffortOf direct.internals.roster)}";
     pkgs.runCommand "mkharness-review-effort-empty-leaves-reviewer-effort-untouched" { } "touch $out";
 }
