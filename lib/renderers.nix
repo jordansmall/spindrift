@@ -7,9 +7,9 @@
 # and the man-page renderer, for the same reason (issue #461).
 #
 # Pure builtins only (no `pkgs.lib`): keeps this file evaluable and unit-
-# testable with a bare `nix eval`, without needing a locked nixpkgs (mirrors
-# lib/preambles.nix, issue #402; shares lib/builtins-compat.nix's
-# concatStrings/mapAttrsToList, issue #2535).
+# testable with a bare `nix eval`, without needing a locked nixpkgs (issue
+# #402; shares lib/builtins-compat.nix's concatStrings/mapAttrsToList,
+# issue #2535).
 let
   builtinsCompat = import ./builtins-compat.nix;
   inherit (builtinsCompat) concatStrings mapAttrsToList;

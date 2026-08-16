@@ -1,8 +1,9 @@
 # Eval-level pins for lib/builtins-compat.nix (issue #2535): one assertion
 # per pure-builtins primitive shared across lib/prompt-inject.nix,
-# lib/prompt-contract.nix, and lib/preambles.nix, ahead of those files'
-# own checks (nix/checks/prompt-inject.nix, nix/checks/preambles.nix)
-# covering the higher-level renderers built on top of these primitives.
+# lib/prompt-contract.nix, lib/preambles.nix, and lib/renderers.nix, ahead
+# of those files' own checks (nix/checks/prompt-inject.nix,
+# nix/checks/prompt-contract.nix, nix/checks/preambles.nix) covering the
+# higher-level renderers built on top of these primitives.
 { pkgs, ... }:
 let
   builtinsCompat = import ../../lib/builtins-compat.nix;
@@ -68,6 +69,15 @@ in
     ) "removeSuffix must be a no-op when the suffix is absent, got: ${out}";
     pkgs.runCommand "builtins-compat-remove-suffix-noop-when-absent" { } "touch $out";
 
+  builtins-compat-remove-suffix-empty-suffix-is-noop =
+    let
+      out = builtinsCompat.removeSuffix "" "one\ntwo\n";
+    in
+    assert assertMsg (
+      out == "one\ntwo\n"
+    ) "removeSuffix must be a no-op for an empty suffix, got: ${out}";
+    pkgs.runCommand "builtins-compat-remove-suffix-empty-suffix-is-noop" { } "touch $out";
+
   builtins-compat-escape-shell-arg-safe-passes-through-unquoted =
     let
       out = builtinsCompat.escapeShellArg "safe-value_1.2:3@4%5/6,7";
@@ -88,6 +98,43 @@ in
     assert assertMsg (out == expected)
       "escapeShellArg must single-quote-wrap a string containing a single quote, escaping it as '\\'', got: ${out}";
     pkgs.runCommand "builtins-compat-escape-shell-arg-quotes-single-quote" { } "touch $out";
+
+  builtins-compat-escape-shell-arg-empty-string =
+    let
+      out = builtinsCompat.escapeShellArg "";
+    in
+    assert assertMsg (out == "''") "escapeShellArg must quote-wrap the empty string, got: ${out}";
+    pkgs.runCommand "builtins-compat-escape-shell-arg-empty-string" { } "touch $out";
+
+  builtins-compat-escape-shell-arg-converts-non-string =
+    let
+      out = builtinsCompat.escapeShellArg 42;
+    in
+    assert assertMsg (
+      out == "42"
+    ) "escapeShellArg must builtins.toString a non-string arg before escaping, got: ${out}";
+    pkgs.runCommand "builtins-compat-escape-shell-arg-converts-non-string" { } "touch $out";
+
+  # Pins escapeShellArg against the real pkgs.lib.escapeShellArg over a small
+  # fixture set, so nixpkgs drift in the reference implementation is caught
+  # here instead of only by the hand-written expectations above staying
+  # unpinned to it.
+  builtins-compat-escape-shell-arg-matches-pkgs-lib =
+    let
+      fixtures = [
+        "safe-value_1.2:3@4%5/6,7"
+        "it's good"
+        ""
+        "has space"
+        "semi;colon"
+      ];
+      mismatches = builtins.filter (
+        s: builtinsCompat.escapeShellArg s != pkgs.lib.escapeShellArg s
+      ) fixtures;
+    in
+    assert assertMsg (mismatches == [ ])
+      "escapeShellArg must match pkgs.lib.escapeShellArg byte for byte, mismatched on: ${builtins.toJSON mismatches}";
+    pkgs.runCommand "builtins-compat-escape-shell-arg-matches-pkgs-lib" { } "touch $out";
 
   builtins-compat-concat-strings-joins-with-no-separator =
     let
@@ -123,4 +170,13 @@ in
       ]
     ) "mapAttrsToList must apply f to each name/value pair, got: ${builtins.toJSON out}";
     pkgs.runCommand "builtins-compat-map-attrs-to-list-applies-name-and-value" { } "touch $out";
+
+  builtins-compat-map-attrs-to-list-empty-attrs =
+    let
+      out = builtinsCompat.mapAttrsToList (name: value: "${name}=${value}") { };
+    in
+    assert assertMsg (
+      out == [ ]
+    ) "mapAttrsToList must return the empty list for an empty attrset, got: ${builtins.toJSON out}";
+    pkgs.runCommand "builtins-compat-map-attrs-to-list-empty-attrs" { } "touch $out";
 }
