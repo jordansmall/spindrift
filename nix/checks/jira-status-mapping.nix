@@ -57,4 +57,61 @@ in
     in
     assert assertMsg (!result.success) "parse must throw on an unknown key";
     pkgs.runCommand "jira-status-mapping-parse-rejects-unknown-key" { } "touch $out";
+
+  # A JSON object using all four canonical keys parses into the same shape,
+  # values unchanged.
+  jira-status-mapping-parse-valid-all-keys =
+    let
+      mapping = {
+        dispatchable = "To Do";
+        inProgress = "In Progress";
+        complete = "Done";
+        failed = "Failed";
+      };
+      out = jsm.parse (builtins.toJSON mapping);
+    in
+    assert assertMsg (out == mapping) "parse must return all four keys unchanged";
+    pkgs.runCommand "jira-status-mapping-parse-valid-all-keys" { } "touch $out";
+
+  # JSON `null` mirrors json.Unmarshal of "null" into Go's map[string]string:
+  # the map stays nil with no error, so ParseStatusMapping("null") returns an
+  # empty mapping rather than erroring.
+  jira-status-mapping-parse-null-is-noop =
+    let
+      out = jsm.parse "null";
+    in
+    assert assertMsg (out == { }) "parse \"null\" must return an empty attrset";
+    pkgs.runCommand "jira-status-mapping-parse-null-is-noop" { } "touch $out";
+
+  # A non-object, non-null JSON payload (array or bare string) must be
+  # rejected rather than hitting builtins.attrNames's uncatchable type error.
+  jira-status-mapping-parse-rejects-non-object =
+    let
+      arrayResult = builtins.tryEval (
+        jsm.parse (
+          builtins.toJSON [
+            1
+            2
+          ]
+        )
+      );
+      stringResult = builtins.tryEval (jsm.parse (builtins.toJSON "hi"));
+    in
+    assert assertMsg (!arrayResult.success) "parse must throw on a JSON array";
+    assert assertMsg (!stringResult.success) "parse must throw on a bare JSON string";
+    pkgs.runCommand "jira-status-mapping-parse-rejects-non-object" { } "touch $out";
+
+  # Known divergence from the Go side (see lib/jira-status-mapping.nix's
+  # header): validate only checks keys, not value types, so a non-string
+  # value survives here even though Go's map[string]string unmarshal would
+  # reject it. Pinned so a future key-type check doesn't silently change
+  # this without updating the header's caveat too.
+  jira-status-mapping-parse-allows-non-string-value =
+    let
+      out = jsm.parse (builtins.toJSON { complete = 5; });
+    in
+    assert assertMsg (
+      out == { complete = 5; }
+    ) "parse must pass a non-string value through unchanged (known Go divergence)";
+    pkgs.runCommand "jira-status-mapping-parse-allows-non-string-value" { } "touch $out";
 }
