@@ -289,18 +289,6 @@ orchestrator's code-owned review pass (issue #2387) runs at directly, the
 same way it already does for the model (issue #2427) — one mechanism instead
 of two.
 
-##### Default models
-
-<!-- BEGIN GENERATED DEFAULT MODELS -- nix run .#regen -- DO NOT EDIT -->
-| Agent | Default model |
-| --- | --- |
-| `MODEL` (coordinator) | `claude-sonnet-5` |
-| `scout` | `claude-haiku-4-5-20251001` |
-| `reviewer` | `claude-opus-5` |
-| `filer` | *(empty; dogfood pins `claude-haiku-4-5-20251001`)* |
-| `worker` | `claude-sonnet-5` |
-<!-- END GENERATED DEFAULT MODELS -->
-
 The **prompt is baked into the image**: changing `prompts/issue-prompt.md`
 requires an image rebuild (`spindrift build`). Point `SPINDRIFT_PROMPT_DIR`
 at any directory to override it at runtime for zero-rebuild iteration.
@@ -396,6 +384,18 @@ under the mounted directory. When it is not — the cache was evicted, this is
 the first fix pass after a crash, or the branch was rebased out from under
 the session — the fix box falls back cleanly to the cold-context fix flow
 above, with no error.
+
+##### Default models
+
+<!-- BEGIN GENERATED DEFAULT MODELS -- nix run .#regen -- DO NOT EDIT -->
+| Agent | Default model |
+| --- | --- |
+| `MODEL` (coordinator) | `claude-sonnet-5` |
+| `scout` | `claude-haiku-4-5-20251001` |
+| `reviewer` | `claude-opus-5` |
+| `filer` | *(empty; dogfood pins `claude-haiku-4-5-20251001`)* |
+| `worker` | `claude-sonnet-5` |
+<!-- END GENERATED DEFAULT MODELS -->
 
 #### Authoring a new Driver
 
