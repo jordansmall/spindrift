@@ -1266,7 +1266,8 @@ in
     in
     assert assertMsg ok.success
       "mkHarness.nix must not throw when a fragment carries the forbidden-gh-api-mutation row's marker ('gh api') as literal text -- that row's kind is 'gh-api-mutation', not 'substring', so it must be excluded from the build-time scan";
-    pkgs.runCommand "build-time-forbidden-marker-fragment-gh-api-mutation-kind-not-scanned" { } "touch $out";
+    pkgs.runCommand "build-time-forbidden-marker-fragment-gh-api-mutation-kind-not-scanned" { }
+      "touch $out";
 
   # The shared top-level template counterpart (issue #2510): `prompt`
   # (issue-prompt.md's default) gets no exemption at all -- its raw text is
