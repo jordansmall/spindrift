@@ -18,21 +18,37 @@ setup() {
 # entrypoint.sh's own hardcoded fallback default for PROMPTS_DIR (and the
 # other 7 baked /agent/* path vars) was removed in favor of the nix-rendered
 # agent-paths preamble (issue #2531): lib/preambles.nix's
-# renderAgentPathsPreamble emits `PROMPTS_DIR=${PROMPTS_DIR:-'/agent/prompts'}`
-# ahead of the entrypoint body, both in the real image (lib/image.nix) and in
-# this bats suite (tests/helper.bash prepends AGENT_PATHS_PREAMBLE_FILE the
-# same way it already does for DRIVER_PREAMBLE_FILE/FRAGMENT_REGISTRY_FILE,
+# renderAgentPathsPreamble emits `PROMPTS_DIR=${PROMPTS_DIR:-/agent/prompts}`
+# -- unquoted, since its escapeShellArg only single-quote-wraps a value that
+# contains characters outside `[[:alnum:],._+:@%/-]`, and `/agent/prompts` has
+# none -- ahead of the entrypoint body, both in the real image (lib/image.nix)
+# and in this bats suite (tests/helper.bash prepends AGENT_PATHS_PREAMBLE_FILE
+# the same way it already does for DRIVER_PREAMBLE_FILE/FRAGMENT_REGISTRY_FILE,
 # issue #433/#622). Without that wiring, an unset PROMPTS_DIR would hit
 # entrypoint.sh's bare `"$PROMPTS_DIR"` reference under `set -u` and die with
 # "unbound variable" partway through, instead of resolving to the real baked
-# default and completing the run like the sibling test above -- a weaker
-# entrypoint than production ever runs.
+# default -- a weaker entrypoint than production ever runs.
+#
+# Whether the resulting run then *succeeds* depends on an environment this
+# test doesn't control: a real production image (or this dogfood Box, built
+# from one) genuinely has /agent/prompts baked in, so the run completes; a
+# real nix-sandboxed check build has no /agent directory at all (only nix
+# store paths and the build dir), so `driver-exec assemble-prompt` fails
+# trying to read /agent/prompts/issue-prompt.md. Assert only what must hold
+# in both: never "unbound variable", then branch on $status -- a successful
+# run must have actually rendered the prompt (same as the sibling test
+# above); a failing one must still show the resolved preamble default
+# (/agent/prompts) in its output, proving PROMPTS_DIR got there via the
+# preamble rather than by crashing unbound or resolving to something else.
 @test "PROMPTS_DIR unset still resolves via the preamble default (not unbound)" {
   unset PROMPTS_DIR
   run bash "$ENTRYPOINT"
-  [ "$status" -eq 0 ]
   [[ "$output" != *"unbound variable"* ]]
-  grep -q "Implement GitHub issue #7: Do the thing" "$DRIVER_PROMPT_FILE"
+  if [ "$status" -eq 0 ]; then
+    grep -q "Implement GitHub issue #7: Do the thing" "$DRIVER_PROMPT_FILE"
+  else
+    [[ "$output" == *"/agent/prompts"* ]]
+  fi
 }
 
 # RUN_NONCE (issue #1937): the launcher mints a per-run nonce and forwards it
