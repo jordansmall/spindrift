@@ -212,6 +212,119 @@ func TestIntegrateSliceBranchRefusesDirtyRepoRoot(t *testing.T) {
 	}
 }
 
+// TestIntegrateSliceBranchMergeCommitInRangeIsFailedNotConflict verifies
+// that a cherry-pick failure NOT caused by a content conflict -- here, the
+// cherry-picked range contains a merge commit, so `git cherry-pick
+// --no-commit` errors with "is a merge but no -m option was given" without
+// ever entering a real conflict/unmerged-paths state -- is reported as
+// integrateFailed with a non-nil error, not integrateConflict (issue #2060
+// review finding: misclassifying this as integrateConflict sends the
+// coordinator the literal command that just failed --
+// `git cherry-pick --no-commit <merge-base>..<branch>` -- as "resolve
+// manually" guidance, an unbreakable retry loop since there's no conflict
+// to resolve).
+func TestIntegrateSliceBranchMergeCommitInRangeIsFailedNotConflict(t *testing.T) {
+	repoRoot := chdirToFreshWorkerRepo(t)
+	base := currentBranchT(t, repoRoot)
+
+	// Build a branch whose own history -- within the range that will be
+	// cherry-picked -- contains a real merge commit: branch off, fork a
+	// side branch, commit on both, then merge the side branch back in with
+	// --no-ff so a genuine two-parent merge commit lands on the branch.
+	runGitT(t, repoRoot, "checkout", "-b", "orchestrator-worker/merge-slice")
+	runGitT(t, repoRoot, "checkout", "-b", "side-branch")
+	if err := os.WriteFile(filepath.Join(repoRoot, "side.txt"), []byte("side content\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	runGitT(t, repoRoot, "add", "side.txt")
+	runGitT(t, repoRoot, "commit", "-m", "side commit")
+
+	runGitT(t, repoRoot, "checkout", "orchestrator-worker/merge-slice")
+	if err := os.WriteFile(filepath.Join(repoRoot, "main.txt"), []byte("main content\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	runGitT(t, repoRoot, "add", "main.txt")
+	runGitT(t, repoRoot, "commit", "-m", "main commit")
+	runGitT(t, repoRoot, "merge", "--no-ff", "side-branch", "-m", "merge side into merge-slice")
+
+	runGitT(t, repoRoot, "checkout", base)
+
+	before := strings.TrimSpace(runGitT(t, repoRoot, "rev-parse", "HEAD"))
+
+	status, out, err := integrateSliceBranch(repoRoot, "merge-slice", "orchestrator-worker/merge-slice")
+	if err == nil {
+		t.Fatalf("integrateSliceBranch() error = nil, want a non-nil error (output: %q)", out)
+	}
+	if status != integrateFailed {
+		t.Errorf("integrateSliceBranch() status = %q, want %q (err: %v, output: %q)", status, integrateFailed, err, out)
+	}
+
+	after := strings.TrimSpace(runGitT(t, repoRoot, "rev-parse", "HEAD"))
+	if before != after {
+		t.Errorf("HEAD = %q after failed integration, want unchanged %q", after, before)
+	}
+
+	statusOut := runGitT(t, repoRoot, "status", "--short")
+	if strings.TrimSpace(statusOut) != "" {
+		t.Errorf("git status --short after failed integration = %q, want empty (no half-finished cherry-pick left behind)", statusOut)
+	}
+	if _, statErr := os.Stat(filepath.Join(repoRoot, ".git", "CHERRY_PICK_HEAD")); !os.IsNotExist(statErr) {
+		t.Errorf("CHERRY_PICK_HEAD exists (stat err = %v), want no in-progress cherry-pick left behind", statErr)
+	}
+}
+
+// TestIntegrateSliceBranchCommitHookFailureCleansUp verifies that when a
+// cherry-pick applies cleanly but the subsequent `git commit` fails (here,
+// because a rejecting commit-msg hook is installed), integrateSliceBranch
+// still cleans up the in-progress cherry-pick before returning
+// integrateFailed -- so the staged changes never survive to trip the
+// dirty-tree guard on a later slice's own integration call (issue #2060
+// review finding: without this cleanup, one bad commit-msg hook cascades
+// into every subsequent slice's integration failing too).
+func TestIntegrateSliceBranchCommitHookFailureCleansUp(t *testing.T) {
+	repoRoot := chdirToFreshWorkerRepo(t)
+	base := currentBranchT(t, repoRoot)
+
+	runGitT(t, repoRoot, "checkout", "-b", "orchestrator-worker/hook-slice")
+	if err := os.WriteFile(filepath.Join(repoRoot, "new.txt"), []byte("hello from the worker\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	runGitT(t, repoRoot, "add", "new.txt")
+	runGitT(t, repoRoot, "commit", "-m", "add new.txt")
+	runGitT(t, repoRoot, "checkout", base)
+
+	// Install a commit-msg hook that always rejects the commit, only now --
+	// after the worker's own setup commit above -- so it fires only on the
+	// integration commit integrateSliceBranch itself is about to attempt.
+	hookPath := filepath.Join(repoRoot, ".git", "hooks", "commit-msg")
+	if err := os.WriteFile(hookPath, []byte("#!/bin/sh\necho \"commit-msg hook rejects all commits\" >&2\nexit 1\n"), 0o755); err != nil {
+		t.Fatalf("WriteFile(commit-msg hook): %v", err)
+	}
+
+	before := strings.TrimSpace(runGitT(t, repoRoot, "rev-parse", "HEAD"))
+
+	status, out, err := integrateSliceBranch(repoRoot, "hook-slice", "orchestrator-worker/hook-slice")
+	if err == nil {
+		t.Fatalf("integrateSliceBranch() error = nil, want a non-nil error from the rejected commit (output: %q)", out)
+	}
+	if status != integrateFailed {
+		t.Errorf("integrateSliceBranch() status = %q, want %q (err: %v)", status, integrateFailed, err)
+	}
+
+	after := strings.TrimSpace(runGitT(t, repoRoot, "rev-parse", "HEAD"))
+	if before != after {
+		t.Errorf("HEAD = %q after failed integration, want unchanged %q", after, before)
+	}
+
+	statusOut := runGitT(t, repoRoot, "status", "--porcelain")
+	if strings.TrimSpace(statusOut) != "" {
+		t.Errorf("git status --porcelain after failed commit = %q, want empty (cherry-pick's staged changes must be cleaned up, not left to cascade into later slices' dirty-tree guard)", statusOut)
+	}
+	if _, statErr := os.Stat(filepath.Join(repoRoot, ".git", "CHERRY_PICK_HEAD")); !os.IsNotExist(statErr) {
+		t.Errorf("CHERRY_PICK_HEAD exists (stat err = %v), want no in-progress cherry-pick left behind", statErr)
+	}
+}
+
 // TestIntegrateSliceBranchAlreadyAppliedIsEmptyNotFailed verifies that when
 // two branches independently produce an identical net diff -- the first
 // integrated normally, the second's cherry-pick then applies cleanly but
