@@ -255,7 +255,7 @@ EOF
 
 # Issue #2448 finding 3: before the #2448 fix above, a backstop-derived
 # status=ready run's $_last_outcome_line was left empty, so the
-# _is_readonly_github + status=ready guard around the PR-intent nudge was
+# _is_readonly_outbox_relay + status=ready guard around the PR-intent nudge was
 # always false on that path -- the nudge never got a chance to run at all.
 # Now that the fix makes the nudge reach a backstop-derived run (the whole
 # point of #2448), a new hazard opens up: if the nudge's own corrective
