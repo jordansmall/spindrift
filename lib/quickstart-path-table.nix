@@ -28,10 +28,14 @@ let
     "forgejoBaseURL"
   ];
   schemaRootedPaths = builtins.listToAttrs (
-    map (name: {
-      inherit name;
-      value = resolveNixPath name schema.${name};
-    }) knobNames
+    map (
+      name:
+      assert schema.${name}.flakeOption or false; # else resolveNixPath resolves a path the flake module never declares
+      {
+        inherit name;
+        value = resolveNixPath name schema.${name};
+      }
+    ) knobNames
   );
   structuralRootedPaths = {
     runtime = builtins.concatStringsSep "." structuralPaths.runtime;
