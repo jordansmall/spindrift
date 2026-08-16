@@ -391,5 +391,45 @@ func (e *execClient) PostIssue(title, body string, labels []string) (string, err
 	return strings.TrimSpace(string(out)), nil
 }
 
+// Snapshot implements forge.SnapshotReader (issue #2547): it fetches the
+// issue body and its comments in a single `gh issue view --json
+// body,comments` call and formats the last 10 comments beneath the body via
+// forge.FormatSnapshot — the frozen issue-read text every pass (implement,
+// review, ...) sees identically, instead of each pass fetching live and
+// possibly racing a comment posted mid-run.
+func (e *execClient) Snapshot(num string) (string, error) {
+	cmd := exec.Command("gh", "issue", "view", num,
+		"--repo", e.repo,
+		"--json", "body,comments",
+	)
+	out, err := cmd.Output()
+	if err != nil {
+		return "", ghCommandErr(fmt.Sprintf("gh issue view %s", num), err)
+	}
+	var raw struct {
+		Body     string `json:"body"`
+		Comments []struct {
+			Author struct {
+				Login string `json:"login"`
+			} `json:"author"`
+			CreatedAt string `json:"createdAt"`
+			Body      string `json:"body"`
+		} `json:"comments"`
+	}
+	if err := json.Unmarshal(out, &raw); err != nil {
+		return "", fmt.Errorf("parse issue %s: %w", num, err)
+	}
+	comments := make([]forge.CommentAttribution, len(raw.Comments))
+	for i, c := range raw.Comments {
+		comments[i] = forge.CommentAttribution{
+			Author:    c.Author.Login,
+			CreatedAt: c.CreatedAt,
+			Body:      c.Body,
+		}
+	}
+	return forge.FormatSnapshot(raw.Body, comments), nil
+}
+
 var _ forge.HostPostedCommenter = (*execClient)(nil)
 var _ forge.HostPostedIssueFiler = (*execClient)(nil)
+var _ forge.SnapshotReader = (*execClient)(nil)

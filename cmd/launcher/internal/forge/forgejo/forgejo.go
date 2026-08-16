@@ -390,6 +390,43 @@ func (c *forgejoClient) PostIssue(title, body string, labels []string) (string, 
 
 var _ forge.HostPostedCommenter = (*forgejoClient)(nil)
 var _ forge.HostPostedIssueFiler = (*forgejoClient)(nil)
+var _ forge.SnapshotReader = (*forgejoClient)(nil)
+
+// forgejoCommentPayload is the comment shape Forgejo's issue-comments REST
+// endpoint emits.
+type forgejoCommentPayload struct {
+	User struct {
+		Login string `json:"login"`
+	} `json:"user"`
+	CreatedAt string `json:"created_at"`
+	Body      string `json:"body"`
+}
+
+// Snapshot implements forge.SnapshotReader (issue #2547): it fetches the
+// issue body (c.Issue) and its comments (the dedicated comments endpoint)
+// and formats the last 10 comments beneath the body via
+// forge.FormatSnapshot — the frozen issue-read text every pass (implement,
+// review, ...) sees identically, instead of each pass fetching live and
+// possibly racing a comment posted mid-run.
+func (c *forgejoClient) Snapshot(num string) (string, error) {
+	iss, err := c.Issue(num)
+	if err != nil {
+		return "", err
+	}
+	var payload []forgejoCommentPayload
+	if err := c.rest.Do(http.MethodGet, c.repoPath()+"/issues/"+num+"/comments", nil, &payload); err != nil {
+		return "", err
+	}
+	comments := make([]forge.CommentAttribution, len(payload))
+	for i, p := range payload {
+		comments[i] = forge.CommentAttribution{
+			Author:    p.User.Login,
+			CreatedAt: p.CreatedAt,
+			Body:      p.Body,
+		}
+	}
+	return forge.FormatSnapshot(iss.Body, comments), nil
+}
 
 // StateLabels implements forge.LabeledTracker, returning the DispatchLabels
 // c resolves DispatchState values through.

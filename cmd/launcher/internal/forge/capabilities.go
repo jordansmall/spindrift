@@ -37,6 +37,7 @@ type Capabilities struct {
 	PriorClaimStateReader PriorClaimStateReader
 	LabeledTracker        LabeledTracker
 	FullyPaginated        FullyPaginated
+	SnapshotReader        SnapshotReader
 
 	// ForgeDescriptor/TrackerDescriptor are the config-time half of the
 	// same value -- CODE_FORGE's and ISSUE_TRACKER's own backend.Descriptor
@@ -73,6 +74,7 @@ func ResolveCapabilities(cf CodeForge, it IssueTracker, forgeDesc, trackerDesc b
 	c.PriorClaimStateReader, _ = it.(PriorClaimStateReader)
 	c.LabeledTracker, _ = it.(LabeledTracker)
 	c.FullyPaginated, _ = it.(FullyPaginated)
+	c.SnapshotReader, _ = it.(SnapshotReader)
 
 	c.ForgeDescriptor = forgeDesc
 	c.TrackerDescriptor = trackerDesc
