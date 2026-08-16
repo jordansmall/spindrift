@@ -20,6 +20,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 
 	"spindrift.dev/launcher/internal/driver"
 )
@@ -55,6 +56,13 @@ func main() {
 	logPath := flag.String("log-path", "", "path to tee the raw Driver stream to, for outcome extraction (required)")
 	heartbeatLog := flag.String("heartbeat-log", "/tmp/heartbeat.log", "path to write coarse heartbeat status lines")
 	topLevelRole := flag.String("top-level-role", "", "role for this pass's own top-level (no parent_tool_use_id) messages; empty defaults to implementor (issue #2092)")
+	argvPromptStyle := flag.String("argv-prompt-style", "flag", "how the prompt is spliced into argv: \"flag\" (argv-prompt-flag then the prompt) or \"positional\" (the prompt alone)")
+	argvPromptFlag := flag.String("argv-prompt-flag", "", "flag preceding the prompt when argv-prompt-style is \"flag\"")
+	argvModelFlag := flag.String("argv-model-flag", "--model", "flag preceding the model value")
+	argvModelOmitEmpty := flag.Bool("argv-model-omit-empty", false, "omit the model slot entirely when -model is empty, instead of emitting argv-model-flag with an empty value")
+	argvAgentsFlag := flag.String("argv-agents-flag", "", "flag preceding --agents-file's content, empty if this Driver has no --agents equivalent")
+	argvEffortFlag := flag.String("argv-effort-flag", "--effort", "flag preceding the effort value")
+	argvOrder := flag.String("argv-order", "prompt model agents session driverFlags effort", "space-separated argv slot order (permutation of: prompt model agents session driverFlags effort)")
 	flag.Parse()
 
 	if *issue == "" {
@@ -80,7 +88,15 @@ func main() {
 	}
 
 	args, err := buildDriverArgs(driverInput{
-		driver:      *driverName,
+		shape: argvShape{
+			promptStyle:    *argvPromptStyle,
+			promptFlag:     *argvPromptFlag,
+			modelFlag:      *argvModelFlag,
+			modelOmitEmpty: *argvModelOmitEmpty,
+			agentsFlag:     *argvAgentsFlag,
+			effortFlag:     *argvEffortFlag,
+			order:          strings.Fields(*argvOrder),
+		},
 		promptFile:  *promptFile,
 		model:       *model,
 		effort:      *effort,
