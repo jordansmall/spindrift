@@ -18,7 +18,12 @@
 let
   promptContract = import ../../lib/prompt-contract.nix;
   promptInject = import ../../lib/prompt-inject.nix;
-  inherit (pkgs.lib) assertMsg concatStringsSep hasSuffix removeSuffix;
+  inherit (pkgs.lib)
+    assertMsg
+    concatStringsSep
+    hasSuffix
+    removeSuffix
+    ;
   issuePromptSource = builtins.readFile ../../templates/default/prompts/issue-prompt.md;
   researchPromptSource = builtins.readFile ../../templates/default/prompts/research-prompt.md;
 in
@@ -29,12 +34,13 @@ in
       out = promptContract.canonicalText.outcome;
       startMarker = "# LAND THE CHANGE";
     in
-    assert assertMsg (out == expected)
-      "canonicalText.outcome must equal a from-scratch sliceFromMarker of issue-prompt.md's own text";
-    assert assertMsg (builtins.stringLength out > 0)
-      "canonicalText.outcome must be non-empty";
-    assert assertMsg (builtins.substring 0 (builtins.stringLength startMarker) out == startMarker)
-      "canonicalText.outcome must start with its own startMarker '${startMarker}'";
+    assert assertMsg (
+      out == expected
+    ) "canonicalText.outcome must equal a from-scratch sliceFromMarker of issue-prompt.md's own text";
+    assert assertMsg (builtins.stringLength out > 0) "canonicalText.outcome must be non-empty";
+    assert assertMsg (
+      builtins.substring 0 (builtins.stringLength startMarker) out == startMarker
+    ) "canonicalText.outcome must start with its own startMarker '${startMarker}'";
     pkgs.runCommand "prompt-contract-canonical-text-outcome-matches-live-slice" { } "touch $out";
 
   prompt-contract-canonical-text-comms-matches-live-slice =
@@ -43,12 +49,13 @@ in
       out = promptContract.canonicalText.comms;
       startMarker = "# COMMS";
     in
-    assert assertMsg (out == expected)
-      "canonicalText.comms must equal a from-scratch sliceBetween of issue-prompt.md's own text";
-    assert assertMsg (builtins.stringLength out > 0)
-      "canonicalText.comms must be non-empty";
-    assert assertMsg (builtins.substring 0 (builtins.stringLength startMarker) out == startMarker)
-      "canonicalText.comms must start with its own startMarker '${startMarker}'";
+    assert assertMsg (
+      out == expected
+    ) "canonicalText.comms must equal a from-scratch sliceBetween of issue-prompt.md's own text";
+    assert assertMsg (builtins.stringLength out > 0) "canonicalText.comms must be non-empty";
+    assert assertMsg (
+      builtins.substring 0 (builtins.stringLength startMarker) out == startMarker
+    ) "canonicalText.comms must start with its own startMarker '${startMarker}'";
     pkgs.runCommand "prompt-contract-canonical-text-comms-matches-live-slice" { } "touch $out";
 
   prompt-contract-canonical-text-check-matches-live-slice =
@@ -73,10 +80,10 @@ in
     in
     assert assertMsg (out == expected)
       "canonicalText.check must equal a from-scratch sliceBetween of issue-prompt.md's own text, normalized to guarantee a trailing blank line (issue #2462's ensureTrailingBlankLine)";
-    assert assertMsg (builtins.stringLength out > 0)
-      "canonicalText.check must be non-empty";
-    assert assertMsg (builtins.substring 0 (builtins.stringLength startMarker) out == startMarker)
-      "canonicalText.check must start with its own startMarker '${startMarker}'";
+    assert assertMsg (builtins.stringLength out > 0) "canonicalText.check must be non-empty";
+    assert assertMsg (
+      builtins.substring 0 (builtins.stringLength startMarker) out == startMarker
+    ) "canonicalText.check must start with its own startMarker '${startMarker}'";
     pkgs.runCommand "prompt-contract-canonical-text-check-matches-live-slice" { } "touch $out";
 
   prompt-contract-canonical-text-research-verdict-matches-live-slice =
@@ -87,11 +94,26 @@ in
     in
     assert assertMsg (out == expected)
       "canonicalText.research-verdict must equal a from-scratch sliceFromMarker of research-prompt.md's own text";
-    assert assertMsg (builtins.stringLength out > 0)
-      "canonicalText.research-verdict must be non-empty";
-    assert assertMsg (builtins.substring 0 (builtins.stringLength startMarker) out == startMarker)
-      "canonicalText.research-verdict must start with its own startMarker '${startMarker}'";
-    pkgs.runCommand "prompt-contract-canonical-text-research-verdict-matches-live-slice" { } "touch $out";
+    assert assertMsg (builtins.stringLength out > 0) "canonicalText.research-verdict must be non-empty";
+    assert assertMsg (
+      builtins.substring 0 (builtins.stringLength startMarker) out == startMarker
+    ) "canonicalText.research-verdict must start with its own startMarker '${startMarker}'";
+    pkgs.runCommand "prompt-contract-canonical-text-research-verdict-matches-live-slice" { }
+      "touch $out";
+
+  # mkHarness.nix injects each block at `marker` (the byId lookup driving
+  # outcomeContractMarker/commsMarker/etc.) but canonicalText slices from
+  # `startMarker` -- a real behavioral cross-check, not a value restatement,
+  # since the two fields are free to diverge and nothing else pins them equal.
+  prompt-contract-inject-blocks-every-row-marker-equals-start-marker =
+    let
+      bad = builtins.filter (r: r.marker != r.startMarker) promptContract.injectBlocks;
+      badIds = map (r: r.id) bad;
+    in
+    assert assertMsg (bad == [ ])
+      "every injectBlocks row's marker must equal its own startMarker, offending ids: [${concatStringsSep ", " badIds}]";
+    pkgs.runCommand "prompt-contract-inject-blocks-every-row-marker-equals-start-marker" { }
+      "touch $out";
 
   # Pins forbiddenMarkers (issue #2464): the opposite-direction registry from
   # validateMarkers above -- every row here names a write-capable git/gh
@@ -104,7 +126,8 @@ in
     in
     assert assertMsg (bad == [ ])
       "every forbiddenMarkers row's carrier must be 'fragment-body', offending ids: [${concatStringsSep ", " badIds}]";
-    pkgs.runCommand "prompt-contract-forbidden-markers-every-row-carrier-fragment-body" { } "touch $out";
+    pkgs.runCommand "prompt-contract-forbidden-markers-every-row-carrier-fragment-body" { }
+      "touch $out";
 
   prompt-contract-forbidden-markers-every-row-severity-reject =
     let
@@ -122,7 +145,8 @@ in
     in
     assert assertMsg (bad == [ ])
       "every forbiddenMarkers row's when must be 'boxAccessReadOnly', offending ids: [${concatStringsSep ", " badIds}]";
-    pkgs.runCommand "prompt-contract-forbidden-markers-every-row-when-box-access-read-only" { } "touch $out";
+    pkgs.runCommand "prompt-contract-forbidden-markers-every-row-when-box-access-read-only" { }
+      "touch $out";
 
   prompt-contract-forbidden-markers-every-row-message-mentions-own-marker =
     let
@@ -131,7 +155,8 @@ in
     in
     assert assertMsg (bad == [ ])
       "every forbiddenMarkers row's message must contain its own marker substring, offending ids: [${concatStringsSep ", " badIds}]";
-    pkgs.runCommand "prompt-contract-forbidden-markers-every-row-message-mentions-own-marker" { } "touch $out";
+    pkgs.runCommand "prompt-contract-forbidden-markers-every-row-message-mentions-own-marker" { }
+      "touch $out";
 
   # issue #2499: every row's kind must be a known value -- structural
   # coverage only (does the field hold a value someone typo'd), not
@@ -194,8 +219,7 @@ in
     in
     assert assertMsg (bad == [ ])
       "every git-hook/command-shim forbiddenMarkers row must carry a non-empty runtimeMessage distinct from its message, offending ids: [${concatStringsSep ", " badIds}]";
-    pkgs.runCommand "prompt-contract-forbidden-markers-runtime-rendered-rows-have-runtime-message"
-      { }
+    pkgs.runCommand "prompt-contract-forbidden-markers-runtime-rendered-rows-have-runtime-message" { }
       "touch $out";
 
   prompt-contract-forbidden-markers-prompt-only-rows-have-no-runtime-message =
@@ -206,8 +230,7 @@ in
     in
     assert assertMsg (bad == [ ])
       "every prompt-only forbiddenMarkers row must carry no runtimeMessage, offending ids: [${concatStringsSep ", " badIds}]";
-    pkgs.runCommand "prompt-contract-forbidden-markers-prompt-only-rows-have-no-runtime-message"
-      { }
+    pkgs.runCommand "prompt-contract-forbidden-markers-prompt-only-rows-have-no-runtime-message" { }
       "touch $out";
 
   # Pins buildTimeRejectVerdicts (issue #2250): the build-time reject arm that
@@ -230,7 +253,10 @@ in
     in
     assert assertMsg (row.verdict == "reject")
       "buildTimeRejectVerdicts: reviewer-verdict must be 'reject' when orchestratorEnabled=true and its content lacks the marker, got: ${row.verdict}";
-    pkgs.runCommand "prompt-contract-build-time-reject-verdicts-reject-when-gate-true-and-marker-missing" { } "touch $out";
+    pkgs.runCommand
+      "prompt-contract-build-time-reject-verdicts-reject-when-gate-true-and-marker-missing"
+      { }
+      "touch $out";
 
   prompt-contract-build-time-reject-verdicts-advise-when-gate-false-and-marker-missing =
     let
@@ -246,7 +272,10 @@ in
     in
     assert assertMsg (row.verdict == "advise")
       "buildTimeRejectVerdicts: reviewer-verdict must be 'advise' when orchestratorEnabled=false and its content lacks the marker, got: ${row.verdict}";
-    pkgs.runCommand "prompt-contract-build-time-reject-verdicts-advise-when-gate-false-and-marker-missing" { } "touch $out";
+    pkgs.runCommand
+      "prompt-contract-build-time-reject-verdicts-advise-when-gate-false-and-marker-missing"
+      { }
+      "touch $out";
 
   prompt-contract-build-time-reject-verdicts-ok-when-marker-present =
     let
@@ -262,7 +291,8 @@ in
     in
     assert assertMsg (row.verdict == "ok")
       "buildTimeRejectVerdicts: reviewer-verdict must be 'ok' when its content contains the marker (regardless of the gate), got: ${row.verdict}";
-    pkgs.runCommand "prompt-contract-build-time-reject-verdicts-ok-when-marker-present" { } "touch $out";
+    pkgs.runCommand "prompt-contract-build-time-reject-verdicts-ok-when-marker-present" { }
+      "touch $out";
 
   prompt-contract-build-time-reject-verdicts-advise-when-fully-unresolved =
     let
@@ -274,7 +304,8 @@ in
     in
     assert assertMsg (builtins.all (v: v == "advise") verdicts)
       "buildTimeRejectVerdicts: every row must be 'advise' when both staticGates and contentByRowId are entirely unresolved, got: [${concatStringsSep ", " verdicts}]";
-    pkgs.runCommand "prompt-contract-build-time-reject-verdicts-advise-when-fully-unresolved" { } "touch $out";
+    pkgs.runCommand "prompt-contract-build-time-reject-verdicts-advise-when-fully-unresolved" { }
+      "touch $out";
 
   prompt-contract-build-time-reject-verdicts-covers-every-reject-row =
     let
@@ -291,7 +322,8 @@ in
       "buildTimeRejectVerdicts must return exactly one entry per severity==\"reject\" validateMarkers row (currently ${toString (builtins.length expectedIds)}), got: ${toString (builtins.length out)}";
     assert assertMsg (outIds == expectedIds)
       "buildTimeRejectVerdicts must iterate validateMarkers' own severity==\"reject\" rows in order rather than a hand-duplicated list, expected ids [${concatStringsSep ", " expectedIds}], got: [${concatStringsSep ", " outIds}]";
-    pkgs.runCommand "prompt-contract-build-time-reject-verdicts-covers-every-reject-row" { } "touch $out";
+    pkgs.runCommand "prompt-contract-build-time-reject-verdicts-covers-every-reject-row" { }
+      "touch $out";
 
   # Pins outcomeStatusSets' research row (issue #2524): the row must be
   # derived from lib/research-verdicts.nix's defaultVerdicts (the single
@@ -307,5 +339,6 @@ in
     in
     assert assertMsg (out == expected)
       "outcomeStatusSets' research row's statuses must equal lib/research-verdicts.nix's defaultVerdicts' verdict tokens (in order) plus \"blocked\", got: [${concatStringsSep ", " out}]";
-    pkgs.runCommand "prompt-contract-outcome-status-sets-research-row-derives-from-verdict-registry" { } "touch $out";
+    pkgs.runCommand "prompt-contract-outcome-status-sets-research-row-derives-from-verdict-registry" { }
+      "touch $out";
 }

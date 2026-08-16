@@ -605,12 +605,15 @@ in
     assert assertMsg (!(parsed ? reviewer))
       "claude agentsJsonTemplate must omit a roster entry with an empty model (reviewer), got keys: ${concatStringsSep ", " (builtins.attrNames parsed)}";
     assert assertMsg (parsed.auditor.model or "" == "audit-model")
-      "claude agentsJsonTemplate's auditor entry must carry the roster model verbatim, got: ${builtins.toJSON (parsed.auditor or { })}";
+      "claude agentsJsonTemplate's auditor entry must carry the roster model verbatim, got: ${
+        builtins.toJSON (parsed.auditor or { })
+      }";
     assert assertMsg (parsed.auditor.tools or [ ] == [ "Read" ])
-      "claude agentsJsonTemplate's auditor entry must carry the roster tools verbatim, got: ${builtins.toJSON (parsed.auditor or { })}";
-    assert assertMsg (
-      filter (name: (parsed.${name} or { }) ? mode) (builtins.attrNames parsed) == [ ]
-    ) "claude agentsJsonTemplate must never emit a `mode` key on any agent (claude's --agents schema has none), got: ${rendered}";
+      "claude agentsJsonTemplate's auditor entry must carry the roster tools verbatim, got: ${
+        builtins.toJSON (parsed.auditor or { })
+      }";
+    assert assertMsg (filter (name: (parsed.${name} or { }) ? mode) (builtins.attrNames parsed) == [ ])
+      "claude agentsJsonTemplate must never emit a `mode` key on any agent (claude's --agents schema has none), got: ${rendered}";
     pkgs.runCommand "drivers-claude-agents-json-roster" { } "touch $out";
 
   # Issue #2242 slice 1: a roster entry may set an optional `effort` field
@@ -640,7 +643,9 @@ in
     assert assertMsg (parsed ? scout)
       "claude agentsJsonTemplate must render a roster entry with a non-empty model, got keys: ${concatStringsSep ", " (builtins.attrNames parsed)}";
     assert assertMsg (parsed.scout.effort or "" == "high")
-      "claude agentsJsonTemplate must carry a roster entry's effort field verbatim into the rendered JSON, got: ${builtins.toJSON (parsed.scout or { })}";
+      "claude agentsJsonTemplate must carry a roster entry's effort field verbatim into the rendered JSON, got: ${
+        builtins.toJSON (parsed.scout or { })
+      }";
     pkgs.runCommand "drivers-claude-agents-json-effort-present" { } "touch $out";
 
   # Issue #2242 slice 1: an entry that omits `effort` (or sets it to "") must
@@ -736,7 +741,9 @@ in
     assert assertMsg (claudeRendered ? auditor)
       "claude agentsJsonTemplate must render a custom roster entry (auditor), got keys: ${concatStringsSep ", " (builtins.attrNames claudeRendered)}";
     assert assertMsg (claudeRendered.auditor.model or "" == "audit-model")
-      "claude agentsJsonTemplate's auditor entry must carry the roster model verbatim, got: ${builtins.toJSON (claudeRendered.auditor or { })}";
+      "claude agentsJsonTemplate's auditor entry must carry the roster model verbatim, got: ${
+        builtins.toJSON (claudeRendered.auditor or { })
+      }";
     assert assertMsg (opencodeRendered ? ".config/opencode/agents/auditor.md")
       "opencode agentFilesTemplate must render a custom roster entry (auditor.md), got keys: ${concatStringsSep ", " (builtins.attrNames opencodeRendered)}";
     assert assertMsg (hasInfix ''model: "audit-model"'' opencodeAuditorFile)
@@ -831,9 +838,13 @@ in
     assert assertMsg (parsed ? escapee)
       "claude agentsJsonTemplate must render the escapee roster entry, got keys: ${concatStringsSep ", " (builtins.attrNames parsed)}";
     assert assertMsg (parsed.escapee.description or "" == payload)
-      "claude agentsJsonTemplate must round-trip a JSON-breaking description exactly, got: ${builtins.toJSON (parsed.escapee.description or "")}";
+      "claude agentsJsonTemplate must round-trip a JSON-breaking description exactly, got: ${
+        builtins.toJSON (parsed.escapee.description or "")
+      }";
     assert assertMsg (parsed.escapee.model or "" == payload)
-      "claude agentsJsonTemplate must round-trip a JSON-breaking model exactly, got: ${builtins.toJSON (parsed.escapee.model or "")}";
+      "claude agentsJsonTemplate must round-trip a JSON-breaking model exactly, got: ${
+        builtins.toJSON (parsed.escapee.model or "")
+      }";
     pkgs.runCommand "drivers-claude-agents-json-escapes-every-scalar" { } "touch $out";
 
   # Issue #2152 slice C: opencode's agentFilesTemplate now JSON-encodes the
@@ -906,8 +917,9 @@ in
       claudeRendered = claudeEntry.agentsJsonTemplate { roster = [ ]; };
       opencodeRendered = opencodeEntry.agentFilesTemplate { roster = [ ]; };
     in
-    assert assertMsg (claudeRendered == "")
-      "claude agentsJsonTemplate must return \"\" for an empty roster, got: ${claudeRendered}";
+    assert assertMsg (
+      claudeRendered == ""
+    ) "claude agentsJsonTemplate must return \"\" for an empty roster, got: ${claudeRendered}";
     assert assertMsg (opencodeRendered == { })
       "opencode agentFilesTemplate must return {} for an empty roster, got: ${builtins.toJSON opencodeRendered}";
     pkgs.runCommand "drivers-render-empty-roster" { } "touch $out";
@@ -949,7 +961,9 @@ in
     assert assertMsg (claudeRendered ? auditor)
       "claude agentsJsonTemplate must render the custom roster entry (auditor), got keys: ${concatStringsSep ", " (builtins.attrNames claudeRendered)}";
     assert assertMsg (claudeRendered.auditor.model or "" == "audit-model")
-      "claude agentsJsonTemplate's auditor entry must carry the roster model, got: ${builtins.toJSON (claudeRendered.auditor or { })}";
+      "claude agentsJsonTemplate's auditor entry must carry the roster model, got: ${
+        builtins.toJSON (claudeRendered.auditor or { })
+      }";
     assert assertMsg (opencodeRendered ? ".config/opencode/agents/auditor.md")
       "opencode agentFilesTemplate must render the custom roster entry (auditor.md), got keys: ${concatStringsSep ", " (builtins.attrNames opencodeRendered)}";
     assert assertMsg (hasInfix ''model: "audit-model"'' auditorFile)
@@ -976,13 +990,21 @@ in
       parsed = builtins.fromJSON rendered;
     in
     assert assertMsg (parsed.scout.effort or "" == rosterHelper.rosterDefaults.scout.effort)
-      "claude agentsJsonTemplate must render defaultRoster's scout effort default (${rosterHelper.rosterDefaults.scout.effort}), got: ${builtins.toJSON (parsed.scout or { })}";
+      "claude agentsJsonTemplate must render defaultRoster's scout effort default (${rosterHelper.rosterDefaults.scout.effort}), got: ${
+        builtins.toJSON (parsed.scout or { })
+      }";
     assert assertMsg (parsed.reviewer.effort or "" == rosterHelper.rosterDefaults.reviewer.effort)
-      "claude agentsJsonTemplate must render defaultRoster's reviewer effort default (${rosterHelper.rosterDefaults.reviewer.effort}), got: ${builtins.toJSON (parsed.reviewer or { })}";
+      "claude agentsJsonTemplate must render defaultRoster's reviewer effort default (${rosterHelper.rosterDefaults.reviewer.effort}), got: ${
+        builtins.toJSON (parsed.reviewer or { })
+      }";
     assert assertMsg (parsed.filer.effort or "" == rosterHelper.rosterDefaults.filer.effort)
-      "claude agentsJsonTemplate must render defaultRoster's filer effort default (${rosterHelper.rosterDefaults.filer.effort}), got: ${builtins.toJSON (parsed.filer or { })}";
+      "claude agentsJsonTemplate must render defaultRoster's filer effort default (${rosterHelper.rosterDefaults.filer.effort}), got: ${
+        builtins.toJSON (parsed.filer or { })
+      }";
     assert assertMsg (parsed.worker.effort or "" == rosterHelper.rosterDefaults.worker.effort)
-      "claude agentsJsonTemplate must render defaultRoster's worker effort default (${rosterHelper.rosterDefaults.worker.effort}), got: ${builtins.toJSON (parsed.worker or { })}";
+      "claude agentsJsonTemplate must render defaultRoster's worker effort default (${rosterHelper.rosterDefaults.worker.effort}), got: ${
+        builtins.toJSON (parsed.worker or { })
+      }";
     pkgs.runCommand "drivers-claude-agents-json-default-roster-effort" { } "touch $out";
 
   # Same defaultRoster defaults as drivers-claude-agents-json-default-roster-effort
@@ -998,13 +1020,30 @@ in
       filerFile = rendered.".config/opencode/agents/filer.md" or "";
       workerFile = rendered.".config/opencode/agents/worker.md" or "";
     in
-    assert assertMsg (hasInfix ''reasoningEffort: "${rosterHelper.rosterDefaults.scout.effort}"'' scoutFile)
+    assert assertMsg
+      (hasInfix ''reasoningEffort: "${rosterHelper.rosterDefaults.scout.effort}"'' scoutFile)
       "opencode agentFilesTemplate must render defaultRoster's scout effort default (${rosterHelper.rosterDefaults.scout.effort}), got: ${scoutFile}";
-    assert assertMsg (hasInfix ''reasoningEffort: "${rosterHelper.rosterDefaults.reviewer.effort}"'' reviewerFile)
+    assert assertMsg
+      (hasInfix ''reasoningEffort: "${rosterHelper.rosterDefaults.reviewer.effort}"'' reviewerFile)
       "opencode agentFilesTemplate must render defaultRoster's reviewer effort default (${rosterHelper.rosterDefaults.reviewer.effort}), got: ${reviewerFile}";
-    assert assertMsg (hasInfix ''reasoningEffort: "${rosterHelper.rosterDefaults.filer.effort}"'' filerFile)
+    assert assertMsg
+      (hasInfix ''reasoningEffort: "${rosterHelper.rosterDefaults.filer.effort}"'' filerFile)
       "opencode agentFilesTemplate must render defaultRoster's filer effort default (${rosterHelper.rosterDefaults.filer.effort}), got: ${filerFile}";
-    assert assertMsg (hasInfix ''reasoningEffort: "${rosterHelper.rosterDefaults.worker.effort}"'' workerFile)
+    assert assertMsg
+      (hasInfix ''reasoningEffort: "${rosterHelper.rosterDefaults.worker.effort}"'' workerFile)
       "opencode agentFilesTemplate must render defaultRoster's worker effort default (${rosterHelper.rosterDefaults.worker.effort}), got: ${workerFile}";
     pkgs.runCommand "drivers-opencode-agent-files-default-roster-effort" { } "touch $out";
+
+  # ADR 0009: opencode reads .claude/skills/ directly rather than wiring its
+  # own skills directory. Cross-registry, not a hardcoded literal, so a
+  # future rename of claude's skillsDirRelative still catches opencode
+  # drifting off it instead of passing silently.
+  drivers-opencode-skills-dir-matches-claude =
+    let
+      claudeEntry = driverRegistry.entries.claude;
+      opencodeEntry = driverRegistry.entries.opencode;
+    in
+    assert assertMsg (opencodeEntry.skillsDirRelative == claudeEntry.skillsDirRelative)
+      "opencode Driver's skillsDirRelative must match claude's (ADR 0009), got opencode: ${opencodeEntry.skillsDirRelative}, claude: ${claudeEntry.skillsDirRelative}";
+    pkgs.runCommand "drivers-opencode-skills-dir-matches-claude" { } "touch $out";
 }
