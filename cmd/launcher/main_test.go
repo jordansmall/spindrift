@@ -3836,6 +3836,57 @@ func TestDoctor_ReadOnlyTokenGates_BothBackendsActiveOnDifferentAxes(t *testing.
 	}
 }
 
+// TestLoadConfig_RunnerKind_FallsBackToRuntime_Bwrap covers the direct
+// binary invocation path (no --input document; inputdoc.go documents this as
+// supported for tests and manual debugging) where RUNTIME is set but
+// RUNNER_KIND is not: before issue #2538, runner selection compared
+// c.runtime == "bwrap" directly, so RUNTIME=bwrap alone was sufficient.
+// getenvArtifact("RUNNER_KIND", "") now falls through to "" with no fallback,
+// which runnerForKind treats as "not bwrap" -- a regression this test pins
+// the fix for (loadConfig must derive runnerKind from runtime when the
+// RUNNER_KIND artifact/env is genuinely absent).
+func TestLoadConfig_RunnerKind_FallsBackToRuntime_Bwrap(t *testing.T) {
+	t.Setenv("RUNTIME", "bwrap")
+	os.Unsetenv("RUNNER_KIND")
+
+	c := loadConfig()
+
+	if c.runnerKind != "bwrap" {
+		t.Errorf("loadConfig().runnerKind = %q, want %q (derived from RUNTIME=bwrap)", c.runnerKind, "bwrap")
+	}
+}
+
+// TestLoadConfig_RunnerKind_FallsBackToRuntime_Oci is
+// TestLoadConfig_RunnerKind_FallsBackToRuntime_Bwrap's non-bwrap
+// counterpart: RUNTIME=podman with no RUNNER_KIND set must resolve to "oci",
+// matching the old runtime == "bwrap" comparison's else-arm.
+func TestLoadConfig_RunnerKind_FallsBackToRuntime_Oci(t *testing.T) {
+	t.Setenv("RUNTIME", "podman")
+	os.Unsetenv("RUNNER_KIND")
+
+	c := loadConfig()
+
+	if c.runnerKind != "oci" {
+		t.Errorf("loadConfig().runnerKind = %q, want %q (derived from RUNTIME=podman)", c.runnerKind, "oci")
+	}
+}
+
+// TestLoadConfig_RunnerKind_ExplicitEnvWinsOverRuntimeFallback proves the
+// RUNNER_KIND artifact/env, when actually set, always wins over the
+// runtime-derived fallback -- the fallback only fires when RUNNER_KIND is
+// genuinely absent, never overriding an explicit value even when it
+// disagrees with RUNTIME (e.g. a real nix-rendered pipeline run).
+func TestLoadConfig_RunnerKind_ExplicitEnvWinsOverRuntimeFallback(t *testing.T) {
+	t.Setenv("RUNTIME", "bwrap")
+	t.Setenv("RUNNER_KIND", "oci")
+
+	c := loadConfig()
+
+	if c.runnerKind != "oci" {
+		t.Errorf("loadConfig().runnerKind = %q, want %q (explicit RUNNER_KIND must win over RUNTIME-derived fallback)", c.runnerKind, "oci")
+	}
+}
+
 func contains(ss []string, s string) bool {
 	for _, v := range ss {
 		if v == s {
