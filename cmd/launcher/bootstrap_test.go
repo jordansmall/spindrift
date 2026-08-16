@@ -377,17 +377,14 @@ body
 // throwaway dir and prepends that dir to PATH, so runner.ValidateRuntime's
 // exec.LookPath(name) succeeds without the real CLI being installed —
 // ValidateRuntime only probes presence via LookPath, it never runs the
-// binary, so any executable file satisfies it. The script itself exits
-// nonzero for every invocation, deliberately mimicking a real OCI CLI
-// failing `image inspect` against a nonexistent image: when the correct
-// runner branch is selected, the stub is never actually invoked (the bwrap
-// branch's readiness checks are unconditional no-ops), but if a regression
-// wrongly routes to the OCI branch instead, ociAdapter.IsReady() shells out
-// to this stub and its nonzero exit surfaces as a readiness failure rather
-// than silently reporting "ready" — the property that lets
-// TestBootstrap_RunnerKindBwrap_OverridesMismatchedRuntime actually
-// discriminate a reverted-to-RUNTIME selection instead of passing either way
-// (issue #2538 review finding).
+// binary, so any executable file satisfies it. The script exits nonzero for
+// every invocation, mimicking a real OCI CLI failing `image inspect` against
+// a nonexistent image: the correct runner branch never invokes the stub (the
+// bwrap branch's readiness checks are unconditional no-ops), but a runner
+// selection wrongly routed to the OCI branch instead shells out to it,
+// surfacing as a readiness failure instead of silently reporting "ready" —
+// this is what lets a caller discriminate the correct branch from a wrong
+// one rather than passing either way.
 func stubExecutableOnPath(t *testing.T, name string) {
 	t.Helper()
 	bin := t.TempDir()
@@ -459,8 +456,17 @@ body
 // ociAdapter.IsReady() shells out to `$RUNTIME image inspect`; "bwrap" is
 // not an OCI CLI, so that invocation fails and bootstrap surfaces an error
 // instead of the trivial bwrap no-op success the old runtime-name
-// comparison would have produced.
+// comparison would have produced. stubExecutableOnPath puts a stub "bwrap"
+// on PATH so ValidateRuntime's upfront LookPath("bwrap") check (keyed off
+// RUNTIME, not RUNNER_KIND) succeeds on a host without the real bwrap CLI
+// installed — without the stub, that LookPath failure would short-circuit
+// before runner selection ever runs, and this test would pass vacuously
+// regardless of which branch selection took. Asserting the OCI adapter's
+// own "image absent" readiness message, rather than merely err != nil, is
+// what then proves the OCI branch — not ValidateRuntime — produced this
+// failure.
 func TestBootstrap_RunnerKindOCI_OverridesMatchingRuntime(t *testing.T) {
+	stubExecutableOnPath(t, "bwrap")
 	checkout := mustSeedableCheckout(t)
 	repoPath := filepath.Join(t.TempDir(), "accum.git")
 
@@ -493,8 +499,8 @@ body
 	t.Chdir(checkout)
 
 	lc, err := bootstrap(false, dispatchKindWork, false)
-	if err == nil {
-		t.Fatal("bootstrap() with RUNNER_KIND=oci and RUNTIME=bwrap = nil error, want the OCI adapter's IsReady() to fail against a non-OCI runtime name")
+	if err == nil || !strings.Contains(err.Error(), "image absent") {
+		t.Fatalf("bootstrap() with RUNNER_KIND=oci and RUNTIME=bwrap = %v, want the OCI adapter's \"image absent\" readiness error", err)
 	}
 	if lc != nil {
 		t.Fatalf("bootstrap() on readiness error = %+v, want nil launch context", lc)
