@@ -37,13 +37,26 @@ func truncateRunes(s string, max int) string {
 // assemble.go only renders worker-prompt.md on the fresh-work-dispatch
 // path), so scanning costs nothing on the routine case, but the rare case
 // where a manifest appears anyway (e.g. a rogue/hallucinated marker) gets an
-// attributed reason instead of a silent drop. If no manifest is present, or
-// a manifest is present but cfg.workerPromptFile is empty, it clears
-// state.WorkerFindings and returns false -- a pass that dispatched nothing
-// must not leave a stale findings report from an earlier dispatch sitting in
-// state for a later pass to seed as though still fresh (issue #2059 review
-// finding A). Otherwise, every slice already present in state.DoneSlices is
-// filtered out before
+// attributed reason instead of a silent drop.
+//
+// If no manifest is present, it clears state.WorkerFindings and returns
+// false -- a pass that dispatched nothing must not leave a stale findings
+// report from an earlier dispatch sitting in state for a later pass to seed
+// as though still fresh (issue #2059 review finding A). But when
+// cfg.workerPromptFile is empty AND no manifest is present -- the routine
+// case on a fix-pass/review-only run, which structurally never emits its own
+// manifest -- state is left untouched instead: a static run-wide "worker
+// dispatch disabled" pass must never wipe out state.WorkerFindings a PRIOR
+// pass (in this or an earlier Box invocation) already set, which a later
+// pass's own seedPromptFromState still needs to seed (issue #2495 review
+// finding: this branch previously cleared it unconditionally, silently
+// losing an earlier dispatch's results on every subsequent fix-pass write of
+// state to disk). Only a manifest that genuinely appears despite
+// cfg.workerPromptFile being empty clears state.WorkerFindings, via the
+// attributed-discard branch below.
+//
+// Otherwise, every slice already present in state.DoneSlices is filtered out
+// before
 // LaunchWorkers is ever called: launchOneWorker's own `git worktree add -B
 // <branch>` (workers.go) unconditionally force-resets that slice's branch to
 // the orchestrator's current HEAD, which is correct for retrying a
@@ -71,6 +84,14 @@ func truncateRunes(s string, max int) string {
 func dispatchManifestIfPresent(cfg config, state *runstate.RunState, stdout io.Writer) bool {
 	manifest, ok := scanForManifest(cfg.logPath, cfg.driver)
 	if !ok {
+		if cfg.workerPromptFile == "" {
+			// The routine fix-pass/review-only case: this run was never
+			// configured to dispatch anything of its own, so this pass
+			// finding no manifest says nothing about whether an earlier
+			// pass's WorkerFindings are stale -- leave state untouched
+			// (issue #2495 review finding).
+			return false
+		}
 		// A pass that dispatches nothing must clear any WorkerFindings left
 		// over from an earlier dispatch, mirroring run.go's own
 		// unconditional per-pass state.ReviewFindings reassignment --

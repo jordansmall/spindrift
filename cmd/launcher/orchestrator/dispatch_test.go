@@ -49,6 +49,30 @@ func TestDispatchManifestIfPresentNoopWhenWorkerPromptFileUnset(t *testing.T) {
 	}
 }
 
+// TestDispatchManifestIfPresentPreservesPriorWorkerFindingsWhenWorkerPromptFileUnset
+// verifies dispatchManifestIfPresent leaves a NON-empty state.WorkerFindings
+// (set by an earlier dispatch, possibly in a prior Box invocation reading
+// the same on-disk run-state) untouched when cfg.workerPromptFile is unset
+// and this pass's own log carries no manifest of its own -- the routine
+// fix-pass/review-only case (issue #2495 review finding). A zero-valued
+// state, as TestDispatchManifestIfPresentNoopWhenWorkerPromptFileUnset above
+// uses, can't distinguish "left untouched" from "cleared then happens to
+// still be empty"; this test seeds a non-empty value so a regression to
+// unconditional clearing is actually caught.
+func TestDispatchManifestIfPresentPreservesPriorWorkerFindingsWhenWorkerPromptFileUnset(t *testing.T) {
+	cfg := config{workerPromptFile: "", logPath: filepath.Join(t.TempDir(), "nonexistent.log")}
+	state := runstate.RunState{WorkerFindings: "findings from an earlier dispatch, in this or a prior Box"}
+	want := state
+
+	got := dispatchManifestIfPresent(cfg, &state, io.Discard)
+	if got {
+		t.Errorf("dispatchManifestIfPresent() = true, want false")
+	}
+	if !reflect.DeepEqual(state, want) {
+		t.Errorf("state = %+v, want untouched %+v", state, want)
+	}
+}
+
 // TestDispatchManifestIfPresentAttributesManifestDiscardedWhenWorkerPromptFileUnset
 // covers the runtime analog of mkHarness.nix's eval-time
 // maxParallelWorkersCoherenceOk assert (issue #2495 review finding, AC3): a
