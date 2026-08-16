@@ -129,11 +129,13 @@ settings = {
                       failedLabel     = "agent-failed";
                       completeLabel   = "agent-complete"; };
   # END GENERATED SETTINGS EXAMPLE LABELS
+  # BEGIN GENERATED SETTINGS EXAMPLE CONFIG -- nix run .#regen -- DO NOT EDIT
   branches        = { baseBranch = "main"; branchPrefix = "agent/issue-";
                       mergeMode  = "manual";
                       mergeGuardPaths = ".github/**,.forgejo/**,**/CLAUDE.md,**/AGENTS.md,.claude/**,.opencode/**";
                       mergePollInterval = 30; mergePollTimeout = 1800; };
   concurrency     = { maxParallel = 3; maxJobs = 0; };
+  # END GENERATED SETTINGS EXAMPLE CONFIG
   # BEGIN GENERATED SETTINGS EXAMPLE MODELS -- nix run .#regen -- DO NOT EDIT
   models          = { model = "claude-sonnet-5";
                       scoutModel  = "claude-haiku-4-5-20251001";

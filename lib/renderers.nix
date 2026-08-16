@@ -389,6 +389,33 @@ rec {
     + "                      failedLabel     = \"${schema.failedLabel.default}\";\n"
     + "                      completeLabel   = \"${schema.completeLabel.default}\"; };\n";
 
+  # docs/reference.md's generated `settings = { ... }` example's `branches`/
+  # `concurrency` lines (issue #2537): the eight lib/env-schema.nix leaves
+  # that drive branch naming and merge/dispatch behavior (baseBranch,
+  # branchPrefix, mergeMode, mergeGuardPaths, mergePollInterval,
+  # mergePollTimeout -- the BASE_BRANCH/BRANCH_PREFIX/MERGE_MODE/
+  # MERGE_GUARD_PATHS/MERGE_POLL_INTERVAL/MERGE_POLL_TIMEOUT env vars -- plus
+  # maxParallel/maxJobs, the MAX_PARALLEL/MAX_JOBS dispatch-concurrency env
+  # vars), formatted as the illustrative Nix literal shown in the doc's
+  # fenced ```nix example, so this hand-typed default-config literal site
+  # regenerates from the same schema docs/flake-options.md already draws
+  # from instead of drifting independently if one of those eight defaults is
+  # ever changed. Indentation is fixed to match the surrounding
+  # `settings = { ... }` example exactly, so the generated text is a
+  # byte-for-byte drop-in replacement. maxParallel/maxJobs/
+  # mergePollInterval/mergePollTimeout are Nix ints in the schema and render
+  # unquoted via toString, matching how they already appear in the doc.
+  # Takes the whole schema attrset (unlike renderSettingsExampleModelsDoc,
+  # which takes the narrower default-model fixture) since these are plain
+  # env-schema.nix knobs with no dedicated fixture of their own.
+  renderSettingsExampleConfigDoc =
+    schema:
+    "  branches        = { baseBranch = \"${schema.baseBranch.default}\"; branchPrefix = \"${schema.branchPrefix.default}\";\n"
+    + "                      mergeMode  = \"${schema.mergeMode.default}\";\n"
+    + "                      mergeGuardPaths = \"${schema.mergeGuardPaths.default}\";\n"
+    + "                      mergePollInterval = ${toString schema.mergePollInterval.default}; mergePollTimeout = ${toString schema.mergePollTimeout.default}; };\n"
+    + "  concurrency     = { maxParallel = ${toString schema.maxParallel.default}; maxJobs = ${toString schema.maxJobs.default}; };\n";
+
   # cmd/launcher/internal/driver/drivernames_gen.go content. driverEntries is
   # the registry's `entries` attrset (name -> Driver entry), not the whole
   # registry -- the registry also exports its shape-assertion and rendering
