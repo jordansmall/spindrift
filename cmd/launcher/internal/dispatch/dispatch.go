@@ -97,29 +97,17 @@ type Config struct {
 	// OutboxRelayCapable's doc comments above.
 	BoxForgeAndIssueAccess string
 
-	// TrackerAxisRead is the nix-resolved static prompt-gate value
-	// (issue #2533), forwarded into the Box unmodified.
-	TrackerAxisRead string
-	// TrackerAxisWrite is the nix-resolved static prompt-gate value
-	// (issue #2533), forwarded into the Box unmodified.
-	TrackerAxisWrite string
-	// TrackerAxisFiler is the nix-resolved static prompt-gate value
-	// (issue #2533), forwarded into the Box unmodified.
-	TrackerAxisFiler string
-	// ForgeBackend is the nix-resolved static prompt-gate value
-	// (issue #2533), forwarded into the Box unmodified.
-	ForgeBackend string
-	// FilerEnabled is the nix-resolved static prompt-gate value
-	// (issue #2533), forwarded into the Box unmodified.
-	FilerEnabled bool
-	// WorkerProvisioned is the nix-resolved static prompt-gate value
-	// (issue #2533), forwarded into the Box unmodified.
-	WorkerProvisioned bool
-	// ReviewLoopInline is the nix-resolved static prompt-gate value
-	// (issue #2533), forwarded into the Box unmodified.
-	ReviewLoopInline bool
-	// ReviewLoopOrchestrator is the nix-resolved static prompt-gate value
-	// (issue #2533), forwarded into the Box unmodified.
+	// TrackerAxisRead/TrackerAxisWrite/TrackerAxisFiler/ForgeBackend/
+	// FilerEnabled/WorkerProvisioned/ReviewLoopInline/ReviewLoopOrchestrator
+	// are each the nix-resolved static prompt-gate value (issue #2533),
+	// forwarded into the Box unmodified.
+	TrackerAxisRead        string
+	TrackerAxisWrite       string
+	TrackerAxisFiler       string
+	ForgeBackend           string
+	FilerEnabled           bool
+	WorkerProvisioned      bool
+	ReviewLoopInline       bool
 	ReviewLoopOrchestrator bool
 
 	// OpenPRForIssue reports whether an open PR already exists for the

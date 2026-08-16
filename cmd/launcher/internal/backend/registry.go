@@ -62,11 +62,14 @@ type Descriptor struct {
 
 	// TrackerAxisRead is this tracker's ISSUE_TRACKER_GITHUB/LOCAL/FORGEJO
 	// read-step axis value ("GITHUB", "LOCAL", or "FORGEJO"); empty means
-	// "GITHUB" (the default arm, shared by github and jira). An empty
-	// TrackerAxisRead is never a legitimate resolved value for a real
-	// tracker row -- unlike TrackerAxisWrite, which can legitimately be
-	// empty (for "local") -- so callers use TrackerAxisRead == "" as the
-	// "unregistered/no-row" sentinel, not TrackerAxisWrite.
+	// "GITHUB" (the default arm, shared by github and jira -- their
+	// registry rows below leave this field at its Go zero value rather
+	// than spelling out the literal "GITHUB"). Because an unregistered
+	// name's zero-value Descriptor also reads back as TrackerAxisRead ==
+	// "", trackerAxisSignals (main.go) uses that same check to cover both
+	// cases at once: either way, the caller falls back to the GITHUB/
+	// GITHUB/GH defaults, which is the correct resolved value for github
+	// and jira anyway.
 	TrackerAxisRead string
 
 	// TrackerAxisWrite is this tracker's write-step axis value ("GITHUB",
