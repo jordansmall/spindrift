@@ -1390,6 +1390,104 @@ esac
 	}
 }
 
+// TestDispatchManifestIfPresentSkipsBatchWhoseDependencyFailedToIntegrate
+// verifies dispatchManifestIfPresent (issue #2060 review finding): a slice
+// scheduled into a LATER batch, whose own DependsOn names a slice from an
+// EARLIER batch that finished WorkerDone but whose own branch integration
+// failed (never landed on HEAD), must never be dispatched at all -- its
+// batch's own workers are created via `git worktree add ... HEAD`
+// (workers.go), so dispatching it against a tree still missing its
+// dependency's changes would silently produce a worker whose starting point
+// doesn't match what its own DependsOn edge promised. repoRoot is dirtied
+// up front so integrateSliceBranch's own leading `git status --porcelain`
+// guard deterministically fails "done-fast"'s own integration attempt,
+// independent of any git internals of the cherry-pick itself.
+func TestDispatchManifestIfPresentSkipsBatchWhoseDependencyFailedToIntegrate(t *testing.T) {
+	repoRoot := chdirToFreshWorkerRepo(t)
+
+	// Dirty repoRoot so integrateSliceBranch's own `git status --porcelain`
+	// guard refuses to integrate at all -- deterministically forcing
+	// "done-fast"'s own integration outcome to integrateFailed.
+	if err := os.WriteFile(filepath.Join(repoRoot, "dirty.txt"), []byte("dirty"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	fakeDir := t.TempDir()
+	callLog := filepath.Join(fakeDir, "calls.log")
+	if err := os.WriteFile(callLog, nil, 0o644); err != nil {
+		t.Fatalf("WriteFile(callLog): %v", err)
+	}
+	writeFakeWorkerDriverExec(t, fakeDir, callLog)
+	t.Setenv("PATH", fakeDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	dir := t.TempDir()
+	// "done-fast" has no FileLeases, so scheduleSlices places it alone in
+	// batch 0. "dependent" DependsOn "done-fast", also has no FileLeases, so
+	// it lands alone in batch 1 -- exactly the cross-batch dependency shape
+	// this test targets.
+	manifest := SliceManifest{Slices: []ManifestSlice{
+		{Name: "done-fast", Task: "implement seam a"},
+		{Name: "dependent", Task: "implement seam b", DependsOn: []string{"done-fast"}},
+	}}
+	line, err := manifest.Line()
+	if err != nil {
+		t.Fatalf("Line() error = %v", err)
+	}
+	logPath := filepath.Join(dir, "stream.log")
+	content := streamJSONOutcomeLine(strings.TrimSpace(line))
+	if err := os.WriteFile(logPath, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	workerPromptFile := filepath.Join(dir, "worker-prompt.txt")
+	if err := os.WriteFile(workerPromptFile, []byte("BASE WORKER PROMPT"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config{
+		driver:           "claude",
+		logPath:          logPath,
+		workerPromptFile: workerPromptFile,
+		workerWorkDir:    t.TempDir(),
+		workerTimeout:    2 * time.Second,
+	}
+	state := runstate.RunState{}
+
+	var stdout strings.Builder
+	got := dispatchManifestIfPresent(cfg, &state, &stdout)
+	if !got {
+		t.Fatalf("dispatchManifestIfPresent() = false, want true")
+	}
+
+	calls, err := os.ReadFile(callLog)
+	if err != nil {
+		t.Fatalf("read callLog: %v", err)
+	}
+	if strings.Contains(string(calls), "dependent") {
+		t.Errorf("callLog = %q, want no invocation for \"dependent\" -- its own dependency's integration never landed on HEAD, so its batch must never be dispatched", calls)
+	}
+	if !strings.Contains(string(calls), "done-fast") {
+		t.Errorf("callLog = %q, want an invocation for \"done-fast\" (its own batch runs regardless of its later integration outcome)", calls)
+	}
+
+	if !containsSlice(state.DoneSlices, "done-fast") {
+		t.Errorf("state.DoneSlices = %v, want it to contain done-fast (the worker itself succeeded)", state.DoneSlices)
+	}
+	if containsSlice(state.DoneSlices, "dependent") {
+		t.Errorf("state.DoneSlices = %v, want it to NOT contain dependent (it was never dispatched)", state.DoneSlices)
+	}
+	if containsSlice(state.RemainingSlices, "dependent") {
+		t.Errorf("state.RemainingSlices = %v, want it to NOT contain dependent (a skipped-for-later-retry slice is left exactly as-is, not moved into RemainingSlices)", state.RemainingSlices)
+	}
+
+	if !strings.Contains(state.WorkerFindings, "dependent") {
+		t.Errorf("state.WorkerFindings = %q, want a skip finding naming dependent", state.WorkerFindings)
+	}
+	if !strings.Contains(state.WorkerFindings, "done-fast") {
+		t.Errorf("state.WorkerFindings = %q, want the skip finding to name done-fast as the dependency whose integration didn't land", state.WorkerFindings)
+	}
+}
+
 // TestDispatchManifestIfPresentReportsIntegrationFailedWithoutLosingDoneSlice
 // verifies dispatchManifestIfPresent's `case integrateFailed:` findings arm
 // (issue #2060 review finding: no test previously drove a WorkerDone result
@@ -1401,10 +1499,15 @@ esac
 // reliable, non-flaky way to force integrateFailed without depending on any
 // git internals of the cherry-pick itself. The worker still reports
 // WorkerDone (its own job succeeded), so state.DoneSlices must still list
-// it, but state.WorkerFindings must report the integration failure with a
-// real, non-empty error message -- proving the existing `errMsg := ""; if
-// outcome.err != nil { errMsg = outcome.err.Error() }` guard is exercised
-// end to end, not just theoretically safe.
+// it, but state.WorkerFindings must report the integration failure as a
+// short outcome line, matching the `integrateConflict` case's shape: the
+// underlying error text (which, per integrate.go's dirty-tree guard,
+// embeds a full `git status --porcelain` dump that can be arbitrarily
+// long) must land in a SEPARATE, indented, truncated block -- never
+// appended raw and un-indented onto the one-line outcome, where it could
+// blow past maxWorkerResultInFindings and read like additional top-level
+// findings lines in the block seeded into the next coordinator prompt
+// (issue #2060 review finding: a prompt-injection-shaped bug).
 func TestDispatchManifestIfPresentReportsIntegrationFailedWithoutLosingDoneSlice(t *testing.T) {
 	repoRoot := chdirToFreshWorkerRepo(t)
 
@@ -1459,16 +1562,18 @@ func TestDispatchManifestIfPresentReportsIntegrationFailedWithoutLosingDoneSlice
 		t.Errorf("state.DoneSlices = %v, want it to contain done-fast (the worker itself succeeded regardless of integration outcome)", state.DoneSlices)
 	}
 
-	const wantPrefix = "done-fast: done, but integration failed: "
-	idx := strings.Index(state.WorkerFindings, wantPrefix)
+	const wantLine = "- done-fast: done, but integration failed\n"
+	idx := strings.Index(state.WorkerFindings, wantLine)
 	if idx == -1 {
-		t.Fatalf("state.WorkerFindings = %q, want it to contain %q", state.WorkerFindings, wantPrefix)
+		t.Fatalf("state.WorkerFindings = %q, want it to contain the short outcome line %q, with no raw error appended inline", state.WorkerFindings, wantLine)
 	}
-	restOfLine := state.WorkerFindings[idx+len(wantPrefix):]
-	if nl := strings.IndexByte(restOfLine, '\n'); nl != -1 {
-		restOfLine = restOfLine[:nl]
+
+	rest := state.WorkerFindings[idx+len(wantLine):]
+	if !strings.HasPrefix(rest, "  ") {
+		t.Fatalf("state.WorkerFindings = %q, want a separate indented block immediately after the outcome line, got %q", state.WorkerFindings, rest)
 	}
-	if strings.TrimSpace(restOfLine) == "" {
-		t.Errorf("state.WorkerFindings = %q, want a non-empty error message after %q", state.WorkerFindings, wantPrefix)
+	const wantErrSnippet = "integrate slice done-fast"
+	if !strings.Contains(rest, wantErrSnippet) {
+		t.Errorf("state.WorkerFindings = %q, want the indented block to contain the underlying error text %q", state.WorkerFindings, wantErrSnippet)
 	}
 }
