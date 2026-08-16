@@ -106,7 +106,7 @@ func bootstrap(ensureReady bool, kind string, selfContained bool) (lc *launchCon
 
 	rc := runnerConfig(c)
 	var r runner.Runner
-	if c.runtime == "bwrap" {
+	if c.runnerKind == "bwrap" {
 		r = runner.NewBwrap(rc)
 	} else {
 		r = runner.NewOCI(rc, pwd)
