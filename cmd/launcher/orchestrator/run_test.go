@@ -1065,6 +1065,92 @@ func TestRunWithReviewPassSequenceOnBlockThenApprove(t *testing.T) {
 	}
 }
 
+// findingsLogFakeDriverBody returns a writeFakeDriverExec body scripting the
+// same #2037 implement -> review -> (BLOCK) fix -> review -> (APPROVE) land
+// sequence as reviewPassFakeDriverBody, but with a DISTINCT non-blocking
+// finding in each review round -- so a later assertion can tell "the
+// findings log accumulated both rounds' text" apart from "the log just has
+// the last round's text twice" (issue #2552).
+func findingsLogFakeDriverBody(callLog string) string {
+	return fmt.Sprintf(`: > "$DRIVER_LOG_PATH"
+n=$(wc -l < "%s")
+case "$n" in
+  2) printf '%%s' '%s' | tee -a "$DRIVER_LOG_PATH" ;;
+  4) printf '%%s' '%s' | tee -a "$DRIVER_LOG_PATH" ;;
+  5) printf '%%s' '%s' | tee -a "$DRIVER_LOG_PATH" ;;
+esac
+exit 0
+`, callLog,
+		streamJSONOutcomeLine("VERDICT: BLOCK\\n\\n## Blocking\\n- none\\n\\n## Non-blocking\\n- round-one-only-finding"),
+		streamJSONOutcomeLine("VERDICT: APPROVE\\n\\n## Blocking\\n- none\\n\\n## Non-blocking\\n- round-two-only-finding"),
+		streamJSONOutcomeLine("SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=done nonce=abc"))
+}
+
+// TestRunWithReviewPassAccumulatesFindingsAcrossRoundsInFindingsLog verifies
+// runWithReviewPass (issue #2552) appends every review round's own findings
+// to a per-run findings log, recording the log's path in
+// state.FindingsLogPath -- rather than only the last round's findings
+// surviving, as state.ReviewFindings alone does today.
+func TestRunWithReviewPassAccumulatesFindingsAcrossRoundsInFindingsLog(t *testing.T) {
+	dir := t.TempDir()
+	callLog := filepath.Join(dir, "calls.log")
+	writeFakeDriverExec(t, dir, callLog, findingsLogFakeDriverBody(callLog))
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	promptFile := filepath.Join(dir, "prompt.txt")
+	if err := os.WriteFile(promptFile, []byte("ORIGINAL PROMPT TEXT"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	reviewPromptFile := filepath.Join(dir, "review-prompt.txt")
+	if err := os.WriteFile(reviewPromptFile, []byte("REVIEW PROMPT TEXT"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sessionFile := filepath.Join(dir, "session.txt")
+	if err := os.WriteFile(sessionFile, []byte("--session-id fake-id"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stateFile := filepath.Join(dir, "run-state.json")
+
+	cfg := config{
+		promptFile:       promptFile,
+		reviewPromptFile: reviewPromptFile,
+		sessionFile:      sessionFile,
+		driverBin:        "claude",
+		issue:            "7",
+		logPath:          filepath.Join(dir, "stream.log"),
+		heartbeatLog:     filepath.Join(dir, "heartbeat.log"),
+		stateFile:        stateFile,
+		maxReviewRounds:  3,
+		maxSlices:        10,
+	}
+
+	var stdout bytes.Buffer
+	if _, err := run(cfg, &stdout); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	got, err := runstate.ReadRunState(stateFile)
+	if err != nil {
+		t.Fatalf("ReadRunState: %v", err)
+	}
+	if got.FindingsLogPath == "" {
+		t.Fatal("FindingsLogPath = \"\", want it set once a review round has run")
+	}
+
+	data, err := os.ReadFile(got.FindingsLogPath)
+	if err != nil {
+		t.Fatalf("read findings log: %v", err)
+	}
+	content := string(data)
+
+	if !strings.Contains(content, "round-one-only-finding") {
+		t.Errorf("findings log = %q, want round 1's own finding present", content)
+	}
+	if !strings.Contains(content, "round-two-only-finding") {
+		t.Errorf("findings log = %q, want round 2's own finding present", content)
+	}
+}
+
 // TestRunWithReviewPassSendsTopLevelRoleReviewerForReviewPassAndImplementorForImplementFixPasses
 // verifies runWithReviewPass forwards the correct --top-level-role to
 // driver-exec on every pass (issue #2092): "reviewer" for the code-owned
@@ -2755,6 +2841,69 @@ func TestScanReviewLogFindsNothingInPlainNarration(t *testing.T) {
 	}
 	if findings != "" {
 		t.Errorf("findings = %q, want empty", findings)
+	}
+}
+
+// TestAppendFindingsLogRoundAccumulatesAcrossRounds verifies
+// appendFindingsLogRound (issue #2552) creates the per-run findings log on
+// its first call, records the path in state.FindingsLogPath, reuses the same
+// path (rather than creating a fresh file) on a later round, and appends each
+// round's own findings as a distinct "## Round N" section rather than
+// overwriting the prior round's.
+func TestAppendFindingsLogRoundAccumulatesAcrossRounds(t *testing.T) {
+	var state runstate.RunState
+
+	if err := appendFindingsLogRound(&state, 1, "BLOCK", "round one findings text"); err != nil {
+		t.Fatalf("appendFindingsLogRound (round 1): %v", err)
+	}
+	firstPath := state.FindingsLogPath
+	if firstPath == "" {
+		t.Fatal("FindingsLogPath = \"\", want it set after the first call")
+	}
+
+	if err := appendFindingsLogRound(&state, 2, "APPROVE", "round two findings text"); err != nil {
+		t.Fatalf("appendFindingsLogRound (round 2): %v", err)
+	}
+	if state.FindingsLogPath != firstPath {
+		t.Errorf("FindingsLogPath = %q after round 2, want unchanged %q", state.FindingsLogPath, firstPath)
+	}
+
+	data, err := os.ReadFile(state.FindingsLogPath)
+	if err != nil {
+		t.Fatalf("read findings log: %v", err)
+	}
+	content := string(data)
+
+	round1Idx := strings.Index(content, "## Round 1 (verdict: BLOCK)")
+	round2Idx := strings.Index(content, "## Round 2 (verdict: APPROVE)")
+	if round1Idx == -1 {
+		t.Errorf("content = %q, want a \"## Round 1 (verdict: BLOCK)\" section", content)
+	}
+	if round2Idx == -1 {
+		t.Errorf("content = %q, want a \"## Round 2 (verdict: APPROVE)\" section", content)
+	}
+	if round1Idx != -1 && round2Idx != -1 && round1Idx >= round2Idx {
+		t.Errorf("round 1 section at %d, round 2 section at %d, want round 1 before round 2", round1Idx, round2Idx)
+	}
+	if !strings.Contains(content, "round one findings text") {
+		t.Errorf("content = %q, want round 1's findings text present", content)
+	}
+	if !strings.Contains(content, "round two findings text") {
+		t.Errorf("content = %q, want round 2's findings text present", content)
+	}
+}
+
+// TestAppendFindingsLogRoundSkipsEmptyFindings verifies a round with no
+// findings text (no verdict at all, or an unparseable review log) is a
+// no-op: no log file gets created and state.FindingsLogPath stays empty.
+func TestAppendFindingsLogRoundSkipsEmptyFindings(t *testing.T) {
+	var state runstate.RunState
+
+	if err := appendFindingsLogRound(&state, 1, "", ""); err != nil {
+		t.Fatalf("appendFindingsLogRound: %v", err)
+	}
+	if state.FindingsLogPath != "" {
+		t.Errorf("FindingsLogPath = %q, want empty (no findings, nothing to append)", state.FindingsLogPath)
 	}
 }
 

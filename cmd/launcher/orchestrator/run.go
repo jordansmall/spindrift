@@ -474,6 +474,9 @@ func runWithReviewPass(cfg config, stdout io.Writer) (int, error) {
 			state.LastVerdict = reviewVerdict
 		}
 		state.ReviewFindings = findings
+		if err := appendFindingsLogRound(&state, reviewRounds+1, reviewVerdict, findings); err != nil {
+			fmt.Fprintln(os.Stderr, "orchestrator: append findings log:", err)
+		}
 
 		// An APPROVE verdict deliberately falls through to "continue" here
 		// (none of the cases below matches it), entering the land pass at
@@ -764,6 +767,41 @@ func scanReviewLog(logPath, driverName string) (verdict, findings string) {
 	}
 	findings = strings.TrimSpace(strings.Join(findingsLines, "\n"))
 	return verdict, findings
+}
+
+// appendFindingsLogRound appends round's own review findings to the per-run
+// findings log (issue #2552), creating the log file on first use and
+// recording its path in state.FindingsLogPath. A round with no findings text
+// (no verdict at all, or an unparseable review log) is skipped -- there is
+// nothing to append, and an empty section would confuse the per-round
+// numbering. Best-effort: a failure here is logged to stderr and never
+// treated as fatal to the pass, matching every other handoff-artifact write
+// in this file (see applyDecision's own runstate.WriteRunState error
+// handling).
+func appendFindingsLogRound(state *runstate.RunState, round int, verdict, findings string) error {
+	if findings == "" {
+		return nil
+	}
+	if state.FindingsLogPath == "" {
+		f, err := os.CreateTemp("", "orchestrator-findings-log-*.md")
+		if err != nil {
+			return fmt.Errorf("create findings log: %w", err)
+		}
+		path := f.Name()
+		if err := f.Close(); err != nil {
+			return fmt.Errorf("create findings log: %w", err)
+		}
+		state.FindingsLogPath = path
+	}
+	f, err := os.OpenFile(state.FindingsLogPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		return fmt.Errorf("append findings log: %w", err)
+	}
+	defer f.Close()
+	if _, err := fmt.Fprintf(f, "## Round %d (verdict: %s)\n\n%s\n\n", round, verdict, findings); err != nil {
+		return fmt.Errorf("append findings log: %w", err)
+	}
+	return nil
 }
 
 // renderedEventPrefix matches RenderTranscript's own "[role] " event prefix
