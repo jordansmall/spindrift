@@ -290,9 +290,17 @@ setup() {
   grep -q -- '--argv-model-flag --model' "$ORCHESTRATOR_LOG"
   grep -q -- '--argv-agents-flag --agents' "$ORCHESTRATOR_LOG"
   grep -q -- '--argv-effort-flag --effort' "$ORCHESTRATOR_LOG"
+  # The fake orchestrator logs argv via `echo "$@"` (no field-boundary
+  # markers), and DRIVER_ARGV_ORDER is itself a space-joined multi-word
+  # string (lib/drivers/default.nix's renderArgvShape) -- so a `[^ ]+`
+  # capture would grab only its first word ("prompt") and silently pass on a
+  # truncated or wrong order. Every flag entrypoint.sh threads after
+  # --argv-order is a bare/valued "--"-prefixed flag (or absent), so the
+  # order value is exactly everything up to the next " --" (or end of
+  # line); pin the full 6-slot value claude.nix's argvShape.order declares.
   local argv_order
-  argv_order="$(grep -oE -- '--argv-order [^ ]+' "$ORCHESTRATOR_LOG" | awk '{print $2}')"
-  [ -n "$argv_order" ]
+  argv_order="$(grep -oE -- '--argv-order .*' "$ORCHESTRATOR_LOG" | sed -E 's/^--argv-order //; s/ --.*$//')"
+  [ "$argv_order" = "prompt model agents session driverFlags effort" ]
 }
 
 # DRIVER_ARGV_MODEL_OMIT_EMPTY is a bare-boolean gate (agent/entrypoint.sh
