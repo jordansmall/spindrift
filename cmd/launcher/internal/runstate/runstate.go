@@ -85,15 +85,11 @@ type RunState struct {
 
 // IsEmpty reports whether s carries nothing worth seeding into a fresh
 // pass's PROMPT specifically -- the zero value, or the common cold-start
-// case where no prior pass has left any handoff behind. This is
-// deliberately NOT an all-fields-empty check: DoneSlices/RemainingSlices
-// are excluded below on purpose (see the comment in the method body), so a
-// non-empty s can still report IsEmpty() == true. A future caller checking
-// something other than "does this need seeding into a prompt" -- e.g.
-// whether to bother persisting state at all -- must not assume this method
-// means "every field is zero" and reach for it unexamined; it would
-// silently ignore DoneSlices/RemainingSlices. Kept on RunState itself so a
-// new prompt-relevant field only needs to be added here once, rather than
+// case where no prior pass has left any handoff behind. Not an
+// all-fields-empty check: DoneSlices/RemainingSlices are excluded below on
+// purpose, since they're dispatch-internal bookkeeping never rendered into
+// a prompt (see the comment in the method body). Kept on RunState itself so
+// a new prompt-relevant field only needs to be added here once, rather than
 // at every caller that otherwise open-codes its own check
 // (seedPromptFromState's own check, before this method existed, was one
 // such site).
