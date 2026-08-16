@@ -30,6 +30,7 @@ in
       ${../../lib/default-model-fixture.nix} \
       ${../../lib/env-schema.nix} \
       ${../../lib/flakeModule.nix} \
+      ${../../lib/jira-status-mapping.nix} \
       ${../../lib/mkHarness.nix} \
       ${../../lib/prompt-contract.nix} \
       ${../../lib/renderers.nix} \
@@ -42,6 +43,7 @@ in
       ${./equivalence.nix} \
       ${./go.nix} \
       ${./image.nix} \
+      ${./jira-status-mapping.nix} \
       ${./prompts.nix} \
       ${./schema-drift.nix}
     touch $out

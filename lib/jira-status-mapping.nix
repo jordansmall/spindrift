@@ -30,8 +30,7 @@ let
     if unknown == [ ] then
       parsed
     else
-      throw ''
-        JIRA_STATUS_MAPPING: unknown key "${builtins.head unknown}" (want one of dispatchable, inProgress, complete, failed)'';
+      throw ''JIRA_STATUS_MAPPING: unknown key "${builtins.head unknown}" (want one of dispatchable, inProgress, complete, failed)'';
 in
 {
   inherit validKeys validate;
@@ -41,5 +40,22 @@ in
   # no-op on an empty string; any other value is parsed as JSON and its keys
   # validated, with a malformed value failing the build loudly (mirrors the
   # launcher's startup validation).
-  parse = s: if s == "" then { } else validate (builtins.fromJSON s);
+  parse =
+    s:
+    if s == "" then
+      { }
+    else
+      let
+        value = builtins.fromJSON s;
+      in
+      # json.Unmarshal of "null" into Go's map[string]string leaves it nil
+      # with no error, so ParseStatusMapping("null") returns an empty
+      # mapping; mirror that before validate's attrNames would otherwise
+      # abort on null.
+      if value == null then
+        { }
+      else if !(builtins.isAttrs value) then
+        throw "JIRA_STATUS_MAPPING: expected a JSON object, got ${builtins.typeOf value}"
+      else
+        validate value;
 }
