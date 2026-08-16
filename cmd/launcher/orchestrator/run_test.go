@@ -1149,6 +1149,26 @@ func TestRunWithReviewPassAccumulatesFindingsAcrossRoundsInFindingsLog(t *testin
 	if !strings.Contains(content, "round-two-only-finding") {
 		t.Errorf("findings log = %q, want round 2's own finding present", content)
 	}
+
+	calls, err := os.ReadFile(callLog)
+	if err != nil {
+		t.Fatalf("read callLog: %v", err)
+	}
+	lines := strings.Split(strings.TrimRight(string(calls), "\n"), "\n")
+	if len(lines) != 5 {
+		t.Fatalf("driver-exec invocation count = %d, want 5 (log: %q)", len(lines), calls)
+	}
+	landPromptFile := flagValue(lines[4], "--prompt-file")
+	if landPromptFile == "" {
+		t.Fatalf("pass 5 (land) --prompt-file = %q, want a fresh seeded file", landPromptFile)
+	}
+	landSeeded, err := os.ReadFile(landPromptFile)
+	if err != nil {
+		t.Fatalf("read seeded land prompt: %v", err)
+	}
+	if !strings.Contains(string(landSeeded), "Findings log: "+got.FindingsLogPath) {
+		t.Errorf("pass 5 (land) seeded prompt = %q, want it to reference the findings log path %q", landSeeded, got.FindingsLogPath)
+	}
 }
 
 // TestRunWithReviewPassSendsTopLevelRoleReviewerForReviewPassAndImplementorForImplementFixPasses
@@ -2271,6 +2291,76 @@ func TestSeedPromptFromStateIncludesReviewFindings(t *testing.T) {
 	}
 	if !strings.Contains(string(got), "## Blocking\n- run.go:42 -- missing nil check") {
 		t.Errorf("seeded prompt = %q, want it to carry the reviewer's findings verbatim", got)
+	}
+}
+
+// TestSeedPromptFromStateIncludesFindingsLog verifies seedPromptFromState
+// (issue #2552) carries state.FindingsLogPath into the seeded prompt with an
+// explicit dedupe-and-file-the-union instruction, and that FindingsLogPath
+// alone (with every other state field at its zero value) is enough to
+// trigger seeding rather than returning promptFile unchanged.
+func TestSeedPromptFromStateIncludesFindingsLog(t *testing.T) {
+	dir := t.TempDir()
+	promptFile := filepath.Join(dir, "prompt.txt")
+	if err := os.WriteFile(promptFile, []byte("ORIGINAL PROMPT TEXT"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	state := runstate.RunState{
+		FindingsLogPath: "/tmp/some-findings.md",
+	}
+
+	seeded, err := seedPromptFromState(promptFile, state)
+	if err != nil {
+		t.Fatalf("seedPromptFromState: %v", err)
+	}
+	if seeded == promptFile {
+		t.Fatalf("seedPromptFromState returned the original file unchanged, want a fresh seeded file")
+	}
+	got, err := os.ReadFile(seeded)
+	if err != nil {
+		t.Fatalf("read seeded prompt: %v", err)
+	}
+	gotStr := string(got)
+	if !strings.Contains(gotStr, "Findings log: /tmp/some-findings.md") {
+		t.Errorf("seeded prompt = %q, want it to name the findings log path", gotStr)
+	}
+	if !strings.Contains(gotStr, "dedupe-and-file the union of every round's non-blocking findings") {
+		t.Errorf("seeded prompt = %q, want an explicit dedupe-and-file-the-union instruction", gotStr)
+	}
+	if !strings.Contains(gotStr, "not just this round's Reviewer findings above") {
+		t.Errorf("seeded prompt = %q, want it to contrast the findings log with the last-round-only Reviewer findings bullet", gotStr)
+	}
+}
+
+// TestSeedPromptFromStateOmitsFindingsLogWhenUnset verifies seedPromptFromState
+// (issue #2552 AC4) degrades to the pre-#2552 behavior when
+// state.FindingsLogPath is unset -- the seeded prompt carries no "Findings
+// log" bullet at all, even when other findings-shaped fields (ReviewFindings)
+// are set, so a run with no captured log (no review pass ran, or slice 1's
+// log-file creation failed) never regresses to a stale or bogus reference.
+func TestSeedPromptFromStateOmitsFindingsLogWhenUnset(t *testing.T) {
+	dir := t.TempDir()
+	promptFile := filepath.Join(dir, "prompt.txt")
+	if err := os.WriteFile(promptFile, []byte("ORIGINAL PROMPT TEXT"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	state := runstate.RunState{
+		LastVerdict:    "BLOCK",
+		ReviewFindings: "VERDICT: BLOCK\n\n## Blocking\n- run.go:42 -- missing nil check",
+	}
+
+	seeded, err := seedPromptFromState(promptFile, state)
+	if err != nil {
+		t.Fatalf("seedPromptFromState: %v", err)
+	}
+	got, err := os.ReadFile(seeded)
+	if err != nil {
+		t.Fatalf("read seeded prompt: %v", err)
+	}
+	if strings.Contains(string(got), "Findings log:") {
+		t.Errorf("seeded prompt = %q, want no \"Findings log:\" bullet when FindingsLogPath is unset", got)
 	}
 }
 
