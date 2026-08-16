@@ -71,21 +71,13 @@ func TestPromptMarkersMatchScanner(t *testing.T) {
 	}
 }
 
-// TestWorkerPromptCarriesNoOutcomeGrammar is the marker-parity guard's
-// negative counterpart (issue #2491, the #2059 quarantine): every case in
-// TestPromptMarkersMatchScanner above pins that a writer-side prompt *does*
-// emit a marker the scanner greps for. worker-prompt.md must do the
-// opposite -- emit NEITHER outcome.Token NOR either verdict marker -- so a
-// worker's own prompt never teaches it the literal a misbehaving or
-// parroting worker could echo back into its transcript. An echoed line like
-// that could be mistaken, downstream, for the coordinator's own
-// SPINDRIFT_OUTCOME/VERDICT line, defeating the quarantine #2059 built
-// specifically to keep worker output out of the coordinator's outcome scan.
-//
-// checkNoOutcomeGrammar is exercised first against synthetic fixture strings
-// (a genuine red/green cycle on the check logic itself, since
-// worker-prompt.md already satisfies the invariant today and so can't supply
-// a naturally failing case), then against the real on-disk file.
+// TestWorkerPromptCarriesNoOutcomeGrammar is TestPromptMarkersMatchScanner's
+// negative counterpart: worker-prompt.md must emit NEITHER outcome.Token NOR
+// either verdict marker, so a parroting worker has no literal to echo back
+// that could be mistaken for the coordinator's own outcome/verdict line
+// (issue #2059 quarantine). checkNoOutcomeGrammar is exercised against
+// synthetic fixtures first since worker-prompt.md already satisfies the
+// invariant and so can't itself supply a naturally failing case.
 func TestWorkerPromptCarriesNoOutcomeGrammar(t *testing.T) {
 	forbidden := []string{outcome.Token, VerdictApprove, VerdictBlock}
 

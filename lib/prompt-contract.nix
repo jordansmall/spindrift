@@ -503,9 +503,12 @@ rec {
   # cmd/launcher/orchestrator/run.go), so there is no live enforcement point
   # analogous to Validate for the worker path. So this registry is not wired
   # into promptassembly.Validate or lib/mkHarness.nix/lib/image.nix; it is
-  # pinned by a Go test (a later slice) that checks these marker literals
+  # pinned by two Go tests in cmd/launcher/orchestrator/markers_test.go --
+  # TestWorkerPromptCarriesNoOutcomeGrammar checks these marker literals
   # directly against the rendered templates/default/prompts/worker-prompt.md
-  # file, not by any runtime validation pass.
+  # file, and TestWorkerForbiddenMarkersRegistryMatchesGoPin hand-transcribes
+  # this registry's own marker set and asserts it matches -- not by any
+  # runtime validation pass.
   #
   #   id      -- short, stable identifier for the forbidden marker.
   #   role    -- the roster entry name this row applies to; every row here is
