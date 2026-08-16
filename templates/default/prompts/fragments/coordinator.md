@@ -36,8 +36,8 @@ branch's diff into your own tree with
 resolving any conflict by hand, then author the commit yourself so
 it lands in proper Conventional Commits form — do this before
 handing out the next slice. This merge-base is computed against your
-own current HEAD each time, so it always accounts for every slice
-already integrated so far this run.
+own current HEAD each time, so it always
+accounts for every slice already integrated so far this run.
 
 Do not run a store build such as `checks-inbox` (if the flake exposes
 one — or whatever CHECK below resolves to for this repo) after
