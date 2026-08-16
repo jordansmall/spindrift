@@ -40,6 +40,12 @@ type RunState struct {
 	// small and the brief stays the single source of truth for scout
 	// findings.
 	ScoutBriefPath string `json:"scout_brief_path"`
+	// PassSummaryPath is the path to the most recent implement/fix pass's own
+	// free-form summary of what it did and what remains (issue #2549) --
+	// referenced by path, not inlined, mirroring ScoutBriefPath's own
+	// convention -- so a later fix pass resumes from what was actually done
+	// instead of re-deriving it from a transcript.
+	PassSummaryPath string `json:"pass_summary_path"`
 	// ReviewFindings is the code-owned review pass's own final message --
 	// the "VERDICT: ..." line plus its Blocking/Non-blocking sections,
 	// verbatim -- recorded here (distinct from the bare LastVerdict word)
@@ -90,6 +96,7 @@ func (s RunState) IsEmpty() bool {
 	// never rendered by seedPromptFromState (issue #2549).
 	return s.LastVerdict == "" &&
 		s.ScoutBriefPath == "" &&
+		s.PassSummaryPath == "" &&
 		s.ReviewFindings == "" &&
 		s.WorkerFindings == "" &&
 		s.FindingsLogPath == "" &&

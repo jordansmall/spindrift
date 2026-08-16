@@ -693,6 +693,86 @@ func TestRunKeepsPriorScoutBriefPathWhenConfigOmitsIt(t *testing.T) {
 	}
 }
 
+// TestRunRecordsPassSummaryPathIntoRunState verifies run records
+// cfg.passSummaryPath into the run-state artifact after a pass (issue #2549),
+// mirroring how it already records cfg.scoutBriefPath.
+func TestRunRecordsPassSummaryPathIntoRunState(t *testing.T) {
+	dir := t.TempDir()
+	callLog := filepath.Join(dir, "calls.log")
+	writeFakeDriverExec(t, dir, callLog, "exit 0\n")
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	promptFile := filepath.Join(dir, "prompt.txt")
+	if err := os.WriteFile(promptFile, []byte("prompt"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config{
+		promptFile:      promptFile,
+		driverBin:       "claude",
+		logPath:         filepath.Join(dir, "stream.log"),
+		heartbeatLog:    filepath.Join(dir, "heartbeat.log"),
+		stateFile:       filepath.Join(dir, "run-state.json"),
+		passSummaryPath: filepath.Join(dir, "pass-summary.md"),
+	}
+
+	if _, err := run(cfg, &bytes.Buffer{}); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	got, err := runstate.ReadRunState(cfg.stateFile)
+	if err != nil {
+		t.Fatalf("ReadRunState: %v", err)
+	}
+	if got.PassSummaryPath != cfg.passSummaryPath {
+		t.Errorf("PassSummaryPath = %q, want %q", got.PassSummaryPath, cfg.passSummaryPath)
+	}
+}
+
+// TestRunKeepsPriorPassSummaryPathWhenConfigOmitsIt verifies an empty
+// cfg.passSummaryPath never clobbers a prior pass's recorded pass-summary
+// path with an empty string (issue #2549, mirroring
+// TestRunKeepsPriorScoutBriefPathWhenConfigOmitsIt) -- only a caller that
+// actually supplies a new path updates the field.
+func TestRunKeepsPriorPassSummaryPathWhenConfigOmitsIt(t *testing.T) {
+	dir := t.TempDir()
+	callLog := filepath.Join(dir, "calls.log")
+	writeFakeDriverExec(t, dir, callLog, "exit 0\n")
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	stateFile := filepath.Join(dir, "run-state.json")
+	prior := runstate.RunState{PassSummaryPath: "/tmp/pass-summary.md"}
+	if err := runstate.WriteRunState(stateFile, prior); err != nil {
+		t.Fatal(err)
+	}
+
+	promptFile := filepath.Join(dir, "prompt.txt")
+	if err := os.WriteFile(promptFile, []byte("prompt"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config{
+		promptFile:   promptFile,
+		driverBin:    "claude",
+		logPath:      filepath.Join(dir, "stream.log"),
+		heartbeatLog: filepath.Join(dir, "heartbeat.log"),
+		stateFile:    stateFile,
+		// passSummaryPath intentionally left unset.
+	}
+
+	if _, err := run(cfg, &bytes.Buffer{}); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	got, err := runstate.ReadRunState(stateFile)
+	if err != nil {
+		t.Fatalf("ReadRunState: %v", err)
+	}
+	if got.PassSummaryPath != "/tmp/pass-summary.md" {
+		t.Errorf("PassSummaryPath = %q, want prior value %q preserved", got.PassSummaryPath, "/tmp/pass-summary.md")
+	}
+}
+
 // TestRunDevshellFlagsForwardedOnlyWhenSet verifies --devshell/--devshell-name
 // reach driver-exec's argv when cfg.devshell is set, and are omitted
 // entirely when it is not -- entrypoint.sh's own call only ever sets
@@ -2504,6 +2584,39 @@ func TestSeedPromptFromStateIncludesWorkerFindings(t *testing.T) {
 		if !strings.Contains(string(got), want) {
 			t.Errorf("seeded prompt = %q, want it to contain %q", got, want)
 		}
+	}
+}
+
+// TestSeedPromptFromStateIncludesPassSummaryPath verifies seedPromptFromState
+// (issue #2549) renders state.PassSummaryPath as a "Pass summary: <path>"
+// line the same way it already renders state.ScoutBriefPath as "Scout
+// brief: <path>", and that PassSummaryPath alone (with every other state
+// field at its zero value) is enough to trigger seeding rather than
+// returning promptFile unchanged.
+func TestSeedPromptFromStateIncludesPassSummaryPath(t *testing.T) {
+	dir := t.TempDir()
+	promptFile := filepath.Join(dir, "prompt.txt")
+	if err := os.WriteFile(promptFile, []byte("ORIGINAL PROMPT TEXT"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	state := runstate.RunState{
+		PassSummaryPath: "/tmp/pass-summary.md",
+	}
+
+	seeded, err := seedPromptFromState(promptFile, state)
+	if err != nil {
+		t.Fatalf("seedPromptFromState: %v", err)
+	}
+	if seeded == promptFile {
+		t.Fatalf("seedPromptFromState returned the original file unchanged, want a fresh seeded file")
+	}
+	got, err := os.ReadFile(seeded)
+	if err != nil {
+		t.Fatalf("read seeded prompt: %v", err)
+	}
+	if !strings.Contains(string(got), "- Pass summary: /tmp/pass-summary.md") {
+		t.Errorf("seeded prompt = %q, want it to contain %q", got, "- Pass summary: /tmp/pass-summary.md")
 	}
 }
 
