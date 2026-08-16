@@ -718,6 +718,17 @@ in
   # `mergeMode` (lib/env-schema.nix), whose domain-tree path is
   # `git.merge.policy` per its `nixSubPath`; a valid choice must still
   # evaluate cleanly so this pins acceptance, not just rejection.
+  #
+  # Forced only through `legacyPackages.mergePolicyProbe` — a plain read of
+  # `config.spindrift.git.merge.policy` — never through `.packages.${system}`,
+  # which would route through `mkHarness`'s own choices assert on
+  # `documentSettings` (issue #2519's other guard, lib/mkHarness.nix) and
+  # pass this check even with `mkKnobOption`'s enum branch deleted: mkHarness
+  # throws naming the env var (`MERGE_MODE="bogus"`), not the option path,
+  # so a failure sourced there wouldn't be pinning what this check claims to
+  # pin. Reading only the option's resolved config value forces nothing but
+  # the flakeModule option's own type check, so any throw here can only be
+  # the enum type's — never mkHarness's — by construction.
   flakemodule-rejects-invalid-choice =
     let
       inherit (pkgs.lib) assertMsg;
@@ -735,12 +746,14 @@ in
           {
             systems = [ system ];
             imports = [ ../../lib/flakeModule.nix ];
-            perSystem.spindrift = {
-              packages = p: [ p.hello ];
-              git.merge.policy = policy;
-            };
+            perSystem =
+              { config, ... }:
+              {
+                spindrift.git.merge.policy = policy;
+                legacyPackages.mergePolicyProbe = config.spindrift.git.merge.policy;
+              };
           }
-        ).packages.${system}.spindrift;
+        ).legacyPackages.${system}.mergePolicyProbe;
       badPolicy = builtins.tryEval (mkMergePolicyFlake "bogus");
       goodPolicy = builtins.tryEval (mkMergePolicyFlake "auto");
     in
