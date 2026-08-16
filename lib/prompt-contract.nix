@@ -11,6 +11,7 @@
 # lib/prompt-inject.nix, issue #512, and lib/renderers.nix, issue #402).
 let
   promptInject = import ./prompt-inject.nix;
+  researchVerdicts = import ./research-verdicts.nix;
 
   # Does `text` contain the literal (non-regex) `needle` -- mirrors
   # lib/prompt-inject.nix's own splitOnce/injectSection idiom
@@ -802,7 +803,12 @@ rec {
     }
     {
       kind = "research";
-      statuses = [ "recommend" "reject" "unclear" "blocked" ];
+      # Derived from lib/research-verdicts.nix's defaultVerdicts (the single
+      # source of truth for the built-in research verdict tokens) plus the
+      # "blocked" crash/no-verdict escape hatch, rather than a hand-typed
+      # restatement of that list -- keeps the research vocabulary rooted in
+      # exactly one place (issue #2524).
+      statuses = (map (v: v.verdict) researchVerdicts.defaultVerdicts) ++ [ "blocked" ];
     }
   ];
 
