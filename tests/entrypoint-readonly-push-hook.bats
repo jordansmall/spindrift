@@ -15,6 +15,12 @@ setup() {
   [ "$status" -eq 0 ]
   [ -d "$WORK_DIR/.git" ]
 
+  # The git-hook guard installs at BOTH $WORK_DIR (via --extra-repo-dir,
+  # covering a push to any explicit URL or non-origin remote) and the decoy
+  # (via --repo-dir, covering a plain `git push`/origin push) -- issue #2509
+  # Finding 1.
+  [ -x "$WORK_DIR/.git/hooks/pre-push" ]
+
   # pushurl is repointed at a throwaway bare decoy repo, never $WORK_DIR
   # itself (issue #2509 port regression: a pushurl pointed at $WORK_DIR
   # makes a same-branch push resolve as "Everything up-to-date" and exit 0
@@ -29,12 +35,12 @@ setup() {
   # The rejection's wording lives in lib/prompt-contract.nix's
   # forbiddenMarkers registry (issue #2509), rendered verbatim into the
   # installed hook by driver-exec readonly-guards -- assert the stable
-  # "git push" substring the row's own message always names, plus the
+  # "push" substring the row's own RuntimeMessage always names, plus the
   # relay-naming text ("outbox") that distinguishes this row from a bare
   # boilerplate rejection.
   run git -C "$WORK_DIR" push origin HEAD:some-branch
   [ "$status" -ne 0 ]
-  [[ "$output" == *"git push"* ]]
+  [[ "$output" == *"push"* ]]
   [[ "$output" == *"outbox"* ]]
 
   run git -C "$REMOTE_ROOT/owner/repo.git" rev-parse --verify some-branch
@@ -46,6 +52,7 @@ setup() {
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   [ -d "$WORK_DIR/.git" ]
+  [ -x "$WORK_DIR/.git/hooks/pre-push" ]
 
   run git -C "$WORK_DIR" push origin HEAD:some-branch --no-verify
   [ "$status" -ne 0 ]
@@ -69,6 +76,7 @@ setup() {
   unset BOX_WRITE_ENABLED # issue #2463: read-only Box
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
+  [ -x "$WORK_DIR/.git/hooks/pre-push" ]
 
   # BRANCH is computed inside entrypoint.sh's main
   # (BRANCH="${BRANCH_PREFIX:-}${ISSUE_NUMBER}", entrypoint.sh:60), not
@@ -98,11 +106,12 @@ setup() {
   unset BOX_WRITE_ENABLED
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
+  [ -x "$WORK_DIR/.git/hooks/pre-push" ]
 
   git -C "$WORK_DIR" remote set-url origin https://readonly-push-hook-test.invalid/owner/repo.git
   run git -C "$WORK_DIR" push origin HEAD:some-branch
   [ "$status" -ne 0 ]
-  [[ "$output" == *"git push"* ]]
+  [[ "$output" == *"push"* ]]
   [[ "$output" == *"outbox"* ]]
   [[ "$output" != *"Could not resolve host"* ]]
   [[ "$output" != *"Failed to connect"* ]]
@@ -143,10 +152,12 @@ setup() {
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   [ -d "$WORK_DIR/.git" ]
+  [ -x "$WORK_DIR/.git/hooks/pre-push" ]
 
   run git -C "$WORK_DIR" push origin HEAD:some-host-mediated-branch
   [ "$status" -ne 0 ]
-  [[ "$output" == *"git push"* ]]
+  [[ "$output" == *"push"* ]]
+  [[ "$output" == *"outbox"* ]]
 
   run git -C "$REMOTE_ROOT/owner/repo.git" rev-parse --verify some-host-mediated-branch
   [ "$status" -ne 0 ]
