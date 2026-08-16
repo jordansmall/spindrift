@@ -732,36 +732,36 @@ let
   # lib/image.nix (issue #514) as a pure code move; the image derivation must
   # stay byte-identical, so every value the module needs is threaded in
   # exactly as it was computed here.
-  imageModule = import ./image.nix {
+  #
+  # lib/image.nix's parameters are grouped into six attrsets (issue #2530);
+  # each group below threads the same already-computed local values through
+  # unrenamed, so image.nix's own `let` block can destructure them straight
+  # back to the bare names its body already uses.
+  imagePackageSet = {
+    inherit packages extraClosures;
+  };
+  imageDriver = {
     inherit
-      pkgs
-      lib
-      packages
-      prefetch
-      nixInBox
-      nixStoreWritable
-      forgejoBackend
-      extraClosures
       driverEntry
-      imageName
       driverExecBin
       orchestratorBin
+      driverPreamble
+      driverAgentFiles
+      ;
+  };
+  imageAgents = {
+    inherit
       agentsJsonTemplate
       agentsPromptFilesJson
       customRosterPromptFiles
-      driverAgentFiles
-      driverPreamble
-      fragmentRegistryPreamble
+      skills
+      ;
+  };
+  imageContracts = {
+    inherit
       fragmentsRegistryJson
       promptContractRegistryJson
       forbiddenMarkersRegistryJson
-      prompt
-      scoutPrompt
-      reviewPrompt
-      filerPrompt
-      workerPrompt
-      conflictResolvePrompt
-      fixPrompt
       outcomeContract
       commsBlock
       checkBlock
@@ -769,15 +769,45 @@ let
       injectOutcomeContract
       injectFixSharedBlocks
       injectResearchOutcomeContract
+      ;
+  };
+  imagePrompts = {
+    inherit
+      prompt
+      scoutPrompt
+      reviewPrompt
+      filerPrompt
+      workerPrompt
+      conflictResolvePrompt
+      fixPrompt
       fragmentsSourceDir
-      skills
+      fragmentRegistryPreamble
       ;
     # The research prompt baked into the image carries the verdict contract
     # rendered from the configured set (issue #2201); default knob is a no-op.
     researchPrompt = researchPromptRendered;
     # The self-contained sub-mode's own prompt (issue #2202), same rendering.
     researchSelfContainedPrompt = researchSelfContainedPromptRendered;
+  };
+  imageKnobs = {
+    inherit
+      nixInBox
+      nixStoreWritable
+      forgejoBackend
+      prefetch
+      imageName
+      ;
     entrypointDefaultsPreamble = renderDefaultsPreamble { };
+  };
+
+  imageModule = import ./image.nix {
+    inherit pkgs lib;
+    packageSet = imagePackageSet;
+    driver = imageDriver;
+    agents = imageAgents;
+    contracts = imageContracts;
+    prompts = imagePrompts;
+    knobs = imageKnobs;
   };
   inherit (imageModule) image agentEnv agentFiles;
 
