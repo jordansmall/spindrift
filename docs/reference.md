@@ -94,7 +94,7 @@ would.
 | `nixInBox`  | shared         | bool                        | `true`             | bake a usable nix (binary + registered store DB + sandbox-off config) into the box so `nix flake check` / `nix develop` work inside it; set `false` for a lean, nix-free image (ADR 0008) |
 | `nixStoreWritable` | shared  | bool                 | `false`            | self-test mode (ADR 0018): make `/nix/store` itself (not its existing contents) agent-writable so in-box `nix flake check` can substitute/build new paths instead of hitting EACCES; new paths live only in the container's ephemeral copy-on-write layer. Not hermetic — the entrypoint prints a loud `==> WARNING`; OCI runners only, the bwrap runner keeps its read-only store bind |
 | `extraClosures` | shared     | `pkgs -> [pkg]`         | `[]`               | extra derivations, as a function of the (Linux) `pkgs` (like `packages`), whose closures are baked into the image and registered in the store DB alongside the runtime closure, so in-box nix sees them as already present (ADR 0018) |
-| `nixBuilderImage` | **`mkHarness` only** | string        | `"docker.io/nixos/nix@sha256:bf1d938835ab96312f098fa6c2e9cab367728e0aad0646ee3e02a787c80d8fb8"` | Nix image `spindrift build` uses as a fallback Linux builder when the host can't realize the image; pinned by digest for supply-chain safety (see [Building on macOS](#building-on-macos)) |
+| `nixBuilderImage` | **`mkHarness` only** | string        | `"docker.io/nixos/nix@sha256:bf1d938835ab96312f098fa6c2e9cab367728e0aad0646ee3e02a787c80d8fb8"` (pinned reference — the real default lives in `lib/build-constants.nix`) | Nix image `spindrift build` uses as a fallback Linux builder when the host can't realize the image; pinned by digest for supply-chain safety (see [Building on macOS](#building-on-macos)) |
 | `roster`    | shared         | list of subagent-entry attrs | `lib/roster.nix`'s `defaultRoster` | supersedes the four legacy model knobs; see [Subagent roster](#subagent-roster) |
 
 The `settings` submodule bakes run knobs into the Launcher input document the
@@ -2780,7 +2780,8 @@ case for you:
     `nix.buildMachines` / `--builders`.
   - **Just build on Linux / CI** and load the result on the Mac.
 
-The Nix container image the fallback uses is pinned by digest (default:
+The Nix container image the fallback uses is pinned by digest (default — a
+pinned copy of the value rooted in `lib/build-constants.nix`:
 `docker.io/nixos/nix@sha256:bf1d938835ab96312f098fa6c2e9cab367728e0aad0646ee3e02a787c80d8fb8`).
 Digest pinning is a supply-chain safety measure: the container runs with the
 consumer's working tree bind-mounted read-write, so an unpinned `:latest` tag
@@ -2788,7 +2789,9 @@ would be a silent code-execution vector. Override with the `nixBuilderImage`
 parameter in your `mkHarness` call.
 
 **Bumping the pin:** pull the image you want, inspect its digest, and update
-both `mkHarness.nix` and `docs/reference.md`:
+`lib/build-constants.nix`, then both places the digest is copied into this
+file — the `nixBuilderImage` row in the [option surface](#option-surface)
+table and the pinned reference just above this section:
 
 ```bash
 podman pull docker.io/nixos/nix:latest

@@ -100,8 +100,8 @@
   # this container runs with the consumer tree bind-mounted read-write, so a
   # silently-updated :latest would be a code-execution vector.
   # To bump: pull the image, run `podman image inspect --format '{{.RepoDigests}}' nixos/nix`,
-  # and update the digest here and in README.md.
-  nixBuilderImage ? "docker.io/nixos/nix@sha256:bf1d938835ab96312f098fa6c2e9cab367728e0aad0646ee3e02a787c80d8fb8",
+  # and update the digest in lib/build-constants.nix and docs/reference.md.
+  nixBuilderImage ? (import ./build-constants.nix).nixBuilderImage,
   # Bake a usable nix into the box (binary + a registered store DB + a
   # single-user, sandbox-off nix.conf) so `nix flake check` and `nix develop`
   # run inside the unprivileged throwaway container. On by default — this is the
@@ -130,6 +130,11 @@
   revision ? "unknown",
 }:
 let
+  # Single source of truth for the vendorHash values and the nix-builder
+  # digest duplicated across nix build sites (issue #784 / #2523) — see
+  # lib/build-constants.nix.
+  buildConstants = import ./build-constants.nix;
+
   # OCI images are Linux-only. Map the Consumer's (possibly darwin) system to
   # its Linux twin for the image.
   linuxSystem =
@@ -661,7 +666,7 @@ let
     # present, and driver-exec's fileset (above) is narrower than
     # launcherBin's full cmd/launcher tree, so the two vendor differently even
     # off identical go.mod/go.sum (#784 fix pass).
-    vendorHash = "sha256-uaAaQReAf8PCq/TNWetYyYinj+BeUaiaL4zm/fpJPBA=";
+    vendorHash = buildConstants.driverExecVendorHash;
     subPackages = [ "driver-exec" ];
     meta.license = lib.licenses.mit;
   };
@@ -711,7 +716,7 @@ let
         ) ../cmd/launcher/internal/runstate)
       ];
     };
-    vendorHash = "sha256-uaAaQReAf8PCq/TNWetYyYinj+BeUaiaL4zm/fpJPBA=";
+    vendorHash = buildConstants.driverExecVendorHash;
     subPackages = [ "orchestrator" ];
     meta.license = lib.licenses.mit;
   };
@@ -977,14 +982,15 @@ let
   #                  in pkgs.buildGoModule { pname="x"; version="0"; \
   #                  src = ./cmd/launcher; \
   #                  vendorHash = pkgs.lib.fakeHash; }'
-  #             and replace the string below with the hash Nix reports in the
-  #             error output. Commit go.sum and the updated vendorHash together.
+  #             and set the recomputed hash in lib/build-constants.nix's
+  #             launcherVendorHash. Commit go.sum and the updated vendorHash
+  #             together.
   launcherBin = hostPkgs.buildGoModule {
     pname = "spindrift-launcher";
     version = spindriftVersion;
     src = launcherSrc;
     modRoot = "cmd/launcher";
-    vendorHash = "sha256-1rl00SlOdcXyd2kpgiX8C+sOsDbewLQedzDJZq98L3w=";
+    vendorHash = buildConstants.launcherVendorHash;
     subPackages = [ "." ]; # build only the launcher; driver-exec is in-box only
     # go test ./... already runs, vendored and offline, as the
     # launcher-go-test check (nix/checks/go.nix) against the same source —

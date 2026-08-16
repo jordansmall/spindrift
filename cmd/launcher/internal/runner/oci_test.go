@@ -157,6 +157,9 @@ func TestIsDigestPinned(t *testing.T) {
 		image string
 		want  bool
 	}{
+		// This checks the repo@sha256:... shape, not literal equality with the
+		// real pin, but the digest below matches lib/build-constants.nix's
+		// nixBuilderImage rather than being an independently made-up value.
 		{"docker.io/nixos/nix@sha256:bf1d938835ab96312f098fa6c2e9cab367728e0aad0646ee3e02a787c80d8fb8", true},
 		{"docker.io/nixos/nix:latest", false},
 		{"docker.io/nixos/nix:2.24.9", false},
