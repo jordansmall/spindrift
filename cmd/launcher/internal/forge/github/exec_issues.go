@@ -2,6 +2,7 @@ package github
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -402,9 +403,14 @@ func (e *execClient) Snapshot(num string) (string, error) {
 		"--repo", e.repo,
 		"--json", "body,comments",
 	)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
 	out, err := cmd.Output()
 	if err != nil {
-		return "", ghCommandErr(fmt.Sprintf("gh issue view %s", num), err)
+		// ghCommandErrText, not ghCommandErr: cmd.Stderr is wired to the
+		// buffer above, so cmd.Output() leaves *exec.ExitError's own Stderr
+		// empty and only the buffer carries gh's message (issue #2864).
+		return "", ghCommandErrText(fmt.Sprintf("gh issue view %s", num), err, stderr.String())
 	}
 	var raw struct {
 		Body     string `json:"body"`
