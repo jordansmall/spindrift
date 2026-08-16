@@ -545,6 +545,135 @@ exit 0
 	}
 }
 
+// TestRunWithReviewPassTerminatesOnMaxBudgetTokensCapFromWorkerSpend covers
+// the issue's own motivating end-to-end path (issue #2694 review finding):
+// every other budget-cap test drives cumulative usage entirely from
+// coordinator (implement/fix/review) pass logs, never a dispatched worker's
+// own spend -- despite the issue's motivation naming the worker/reviewer
+// loop as ~67% of a run's total cost. Here the coordinator's own passes
+// report zero usage; only the dispatched worker's log carries a
+// usage.Report (200 tokens), and -max-budget-tokens is set to 100 -- low
+// enough that only the worker's own contribution can trip it. If
+// dispatchManifestIfPresent's returned workerTokens/workerUSD were dropped
+// on the floor before reaching cumulativeTokens/cumulativeUSD (run.go's own
+// call site), this run would sail past the cap all the way to its plain
+// SPINDRIFT_OUTCOME instead of landing via the budget cap.
+func TestRunWithReviewPassTerminatesOnMaxBudgetTokensCapFromWorkerSpend(t *testing.T) {
+	chdirToFreshWorkerRepo(t)
+
+	dir := t.TempDir()
+	callLog := filepath.Join(dir, "calls.log")
+	coordCountFile := filepath.Join(dir, "coord-count")
+	workerWorkDir := filepath.Join(dir, "worker-work-dir")
+	if err := os.MkdirAll(workerWorkDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("WORKER_WORK_DIR", workerWorkDir)
+	t.Setenv("COORD_COUNT_FILE", coordCountFile)
+
+	manifest := SliceManifest{Slices: []ManifestSlice{{Name: "slice-a", Task: "implement seam a"}}}
+	manifestLine, err := manifest.Line()
+	if err != nil {
+		t.Fatalf("Line() error = %v", err)
+	}
+
+	// Coordinator pass sequence: 1 implement (dispatches the manifest), 2
+	// fix (no manifest this time, falls through to review), 3 review
+	// (BLOCK -- the budget cap fires here once the worker's own 200-token
+	// spend from pass 1's dispatch is folded in), 4 land (reaches its own
+	// outcome, stopping the loop). The worker branch reports 200 tokens via
+	// a stream-json result event before signaling done, same shape
+	// streamJSONResultLine produces.
+	body := `case "$DRIVER_LOG_PATH" in
+  "$WORKER_WORK_DIR"*)
+    : > "$DRIVER_LOG_PATH"
+    printf '%s' '` + streamJSONResultLine(200, 0, 0) + `' >> "$DRIVER_LOG_PATH"
+    sentinel="${DRIVER_LOG_PATH%.log}.done"
+    : > "$sentinel"
+    exit 0
+    ;;
+esac
+: > "$DRIVER_LOG_PATH"
+n=$(cat "$COORD_COUNT_FILE" 2>/dev/null || echo 0)
+n=$((n+1))
+echo "$n" > "$COORD_COUNT_FILE"
+case "$n" in
+  1)
+    printf '%s' '` + streamJSONOutcomeLine(strings.TrimSpace(manifestLine)) + `' >> "$DRIVER_LOG_PATH"
+    ;;
+  3)
+    printf '%s' '` + streamJSONOutcomeLine("VERDICT: BLOCK") + `' >> "$DRIVER_LOG_PATH"
+    ;;
+  4)
+    printf '%s' '` + streamJSONOutcomeLine("SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=done nonce=abc") + `' | tee -a "$DRIVER_LOG_PATH"
+    ;;
+esac
+exit 0
+`
+	writeFakeDriverExec(t, dir, callLog, body)
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	promptFile := filepath.Join(dir, "prompt.txt")
+	if err := os.WriteFile(promptFile, []byte("ORIGINAL PROMPT TEXT"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	reviewPromptFile := filepath.Join(dir, "review-prompt.txt")
+	if err := os.WriteFile(reviewPromptFile, []byte("REVIEW PROMPT TEXT"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	workerPromptFile := filepath.Join(dir, "worker-prompt.txt")
+	if err := os.WriteFile(workerPromptFile, []byte("BASE WORKER PROMPT"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config{
+		promptFile:       promptFile,
+		reviewPromptFile: reviewPromptFile,
+		driverBin:        "claude",
+		issue:            "7",
+		logPath:          filepath.Join(dir, "stream.log"),
+		heartbeatLog:     filepath.Join(dir, "heartbeat.log"),
+		stateFile:        filepath.Join(dir, "run-state.json"),
+		maxReviewRounds:  0,
+		maxSlices:        0,
+		maxBudgetTokens:  100,
+		workerPromptFile: workerPromptFile,
+		workerWorkDir:    workerWorkDir,
+		workerTimeout:    2 * time.Second,
+	}
+
+	var stdout strings.Builder
+	rc, err := run(cfg, &stdout)
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if rc != 0 {
+		t.Errorf("exit code = %d, want 0", rc)
+	}
+
+	calls, err := os.ReadFile(callLog)
+	if err != nil {
+		t.Fatalf("read callLog: %v", err)
+	}
+	// 4 coordinator invocations (implement, fix, review, land) + 1 worker
+	// invocation (slice-a) -- 5 lines total.
+	lines := strings.Split(strings.TrimRight(string(calls), "\n"), "\n")
+	if len(lines) != 5 {
+		t.Fatalf("driver-exec invocation count = %d, want 5 (log: %q)", len(lines), calls)
+	}
+
+	out := stdout.String()
+	if !strings.Contains(out, `"decision":"continue","reason":"budget exceeded; running terminal land pass"`) {
+		t.Errorf("stdout = %q, want the budget-cap-fired continue reason -- the worker's own 200-token spend, alone, must be enough to trip -max-budget-tokens=100", out)
+	}
+	if !strings.Contains(out, `"spindrift_op":{"op":"pass_start","pass":4,"role":"land"}`) {
+		t.Errorf("stdout = %q, want the terminal land pass's own pass_start with role \"land\"", out)
+	}
+	if !strings.Contains(out, "SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=done nonce=abc") {
+		t.Errorf("stdout = %q, want the land pass's own outcome line present unchanged", out)
+	}
+}
+
 // TestRunWithReviewPassMaxSlicesCapNotShadowedByRepeatedManifestDispatch
 // verifies the maxSlices cap (issue #2457) takes priority over a slice
 // manifest dispatch in the pass-decision switch (issue #2058 review
