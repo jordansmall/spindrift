@@ -1555,4 +1555,52 @@ in
       (reviewerEffortOf direct.internals.roster == rosterHelper.rosterDefaults.reviewer.effort)
       "mkHarness must leave the reviewer entry at its roster default effort (${rosterHelper.rosterDefaults.reviewer.effort}) when defaults.reviewEffort is unset, got: ${builtins.toJSON (reviewerEffortOf direct.internals.roster)}";
     pkgs.runCommand "mkharness-review-effort-empty-leaves-reviewer-effort-untouched" { } "touch $out";
+
+  # Issue #2533 (blocking review finding): FILER_ENABLED/WORKER_PROVISIONED
+  # must agree with what the selected Driver actually renders into the
+  # --agents JSON / agent files, not just with roster *name* membership.
+  # lib/drivers/claude.nix's agentsJsonTemplate and
+  # lib/drivers/opencode.nix's agentFilesTemplate both drop a roster entry
+  # entirely when its model is empty ("#392 semantics") -- the exact shape
+  # of the schema-default `filerModel = ""` roster (lib/env-schema.nix), so
+  # a name-only `lib.any (e: e.name == "filer") finalRoster` check
+  # (pre-fix lib/mkHarness.nix) would report FILER_ENABLED=true for a
+  # roster the driver renders with no "filer" key at all. This roster
+  # fixture reproduces that exact case directly (an explicit "filer" entry
+  # with an empty model, alongside a "worker" entry with a real model) and
+  # asserts the rendered run input document's FILER_ENABLED/
+  # WORKER_PROVISIONED artifacts against the model-presence outcome, not a
+  # re-derivation of the roster-filter logic.
+  mkharness-filer-worker-agree-with-roster-model-presence =
+    let
+      roster = [
+        {
+          name = "filer";
+          model = "";
+          mode = "subagent";
+          description = "";
+          tools = [ ];
+        }
+        {
+          name = "worker";
+          model = "m";
+          mode = "subagent";
+          description = "";
+          tools = [ ];
+        }
+      ];
+      direct = import ../../lib/mkHarness.nix {
+        inherit nixpkgs system;
+        packages = p: [ p.hello ];
+        inherit roster;
+      };
+    in
+    pkgs.runCommand "mkharness-filer-worker-agree-with-roster-model-presence" { } ''
+      runDoc=${direct.internals.runInputDocumentFile}
+
+      grep -q '"FILER_ENABLED":"false"' "$runDoc"
+      grep -q '"WORKER_PROVISIONED":"true"' "$runDoc"
+
+      touch $out
+    '';
 }
