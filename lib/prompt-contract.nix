@@ -263,16 +263,18 @@ rec {
   # write-capable token for it.
   #
   # Same row shape as validateMarkers (id/marker/carrier/severity/when/
-  # message), with one difference in how "present" is decided at validation
-  # time: unlike validateMarkers, where a bare substring scan is sufficient
-  # (any occurrence of the marker means it's present), whether a
-  # forbiddenMarkers row's marker counts as a forbidden *occurrence* is
-  # decided by the Go-side promptassembly.Validate function's shape-aware
-  # imperative-vs-negation check (a later slice) -- e.g. "never run git push"
-  # mentioning the marker in a negation is not itself a violation, while "run
-  # git push now" is. This Nix list stays pure data either way, same as
-  # validateMarkers -- it names the marker/carrier/severity/when/message per
-  # row; it does not itself decide presence.
+  # message). Presence is decided by a bare substring scan, same as
+  # validateMarkers -- any occurrence of a kind == "substring" row's marker
+  # in scanned content counts as a violation, whether it's an imperative
+  # ("run git push now") or a negation ("never run git push"); issue #2513
+  # deleted the prose-imperative heuristic that used to distinguish the two
+  # Go-side. The only exemption is structural, not text-shape-based: a
+  # fragment whose `gate` proves it's the read-only-labeled half of an
+  # explicit access-mode pair is excluded from the scan entirely (see
+  # buildTimeForbiddenMarkerViolations' own doc comment below, and
+  # lib/mkHarness.nix's readOnlyReachableFragmentRows filter). This Nix list
+  # stays pure data either way -- it names the marker/carrier/severity/when/
+  # message per row; it does not itself decide presence.
   #   id       -- short, stable identifier for the forbidden marker.
   #   marker   -- the literal marker text a Box's rendered prompt must not
   #               carry as an imperative.
@@ -291,33 +293,36 @@ rec {
   #   message  -- the row's fully pre-rendered diagnostic prose (marker
   #               already interpolated), same "no runtime templating needed"
   #               contract as validateMarkers' `message` field.
-  #   kind     -- how the marker is matched against the rendered prompt: a
-  #               plain "substring" scan for most rows here, or
-  #               "gh-api-mutation" for the row keyed off a `gh api` mutating
-  #               verb+endpoint pair (entrypoint.sh's argument-scan shim)
+  #   kind     -- how the marker is matched: a plain "substring" scan for
+  #               most rows here (buildTimeForbiddenMarkerViolations below,
+  #               build-time only as of issue #2513), or "gh-api-mutation"
+  #               for the row keyed off a `gh api` mutating verb+endpoint
+  #               pair (readonlyguards.go's command-shim argument scan)
   #               instead of a literal command string -- that row's marker
-  #               is display-only, never scanned as a prompt substring
-  #               (promptassembly.Validate skips it for this kind).
+  #               is display-only, excluded from the build-time substring
+  #               scan (buildTimeForbiddenMarkerViolations filters to
+  #               kind == "substring" only).
   #   enforce  -- which layer (if any) backstops this row at runtime, beyond
-  #               the prompt-level check every row gets: "git-hook" or
-  #               "command-shim" name a runtime guard that also blocks the
-  #               operation in-box, while "prompt-only" means no runtime
-  #               backstop exists -- Validate's prompt-level check is the
-  #               only enforcement, because a runtime guard would collide
-  #               with a legitimate in-box use of the same operation.
+  #               the build-time corpus scan every "substring" row gets:
+  #               "git-hook" or "command-shim" name a runtime guard
+  #               (readonlyguards.go) that also blocks the operation
+  #               in-box, while "prompt-only" means no runtime backstop
+  #               exists at all -- a runtime guard would collide with a
+  #               legitimate in-box use of the same operation, and (for a
+  #               row like forbidden-git-bundle-create) the build-time
+  #               corpus scan is this row's only enforcement, since it never
+  #               sees a Consumer's own `--prompts-dir` override.
   #   runtimeMessage -- present only on rows whose `enforce` is "git-hook" or
   #               "command-shim": the distinct, runtime-facing wording that
   #               readonlyguards.go renders into the installed shim/hook
   #               script itself. Deliberately not the same text as `message`
-  #               above -- `message` is written for promptassembly.Validate's
-  #               prompt-time check ("the rendered prompt orders...",
-  #               "Refusing to invoke the Driver"), which is nonsensical
-  #               printed by a runtime shim after the agent typed the
-  #               command itself mid-run and only that one command is being
-  #               rejected, not the whole run aborting. A row with no
-  #               runtime backstop (enforce = "prompt-only") carries no
-  #               runtimeMessage; it's never rendered anywhere but Validate's
-  #               diagnostic.
+  #               above, which stays written for a rendered-prompt-facing
+  #               diagnostic ("the rendered prompt orders...", "Refusing to
+  #               invoke the Driver") -- nonsensical printed by a runtime
+  #               shim after the agent typed the command itself mid-run and
+  #               only that one command is being rejected, not the whole run
+  #               aborting. A row with no runtime backstop
+  #               (enforce = "prompt-only") carries no runtimeMessage.
   forbiddenMarkers = [
     {
       id = "forbidden-git-push";
