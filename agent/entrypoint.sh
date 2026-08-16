@@ -942,26 +942,24 @@ run_driver_in_env() {
   _session_file="$(mktemp)"
   printf '%s' "$_driver_session_flags_rendered" > "$_session_file"
 
-  # review_prompt/review_model come straight from the Handoff descriptor's
-  # own ReviewPromptFile/ReviewModel fields (issue #2355) -- empty whenever
-  # handoff_json itself is empty (the pre-Handoff conflict-resolve pass) or
-  # the keys are simply absent (a required-marker gate's corrective resume
-  # narrows handoff_json to {"Invoker": ...} only, issue #2065).
-  local review_prompt="" review_model="" worker_prompt=""
+  # review_prompt/review_model/review_effort come straight from the Handoff
+  # descriptor's own ReviewPromptFile/ReviewModel/ReviewEffort fields (issue
+  # #2355; ReviewEffort added by issue #2512, mirroring ReviewModel exactly)
+  # -- empty whenever handoff_json itself is empty (the pre-Handoff
+  # conflict-resolve pass) or the keys are simply absent (a required-marker
+  # gate's corrective resume narrows handoff_json to {"Invoker": ...} only,
+  # issue #2065).
+  local review_prompt="" review_model="" review_effort="" worker_prompt=""
   if [ -n "$handoff_json" ]; then
     review_prompt="$(_handoff_field "$handoff_json" ReviewPromptFile)"
     review_model="$(_handoff_field "$handoff_json" ReviewModel)"
+    review_effort="$(_handoff_field "$handoff_json" ReviewEffort)"
     worker_prompt="$(_handoff_field "$handoff_json" WorkerPromptFile)"
   fi
 
-  # review_effort has no Handoff descriptor field (issue #2390) -- unlike
-  # review_prompt/review_model above, it comes straight off the environment,
-  # the same way --effort reads $EFFORT directly further down.
-  local review_effort="${REVIEW_EFFORT:-}"
-
-  # worker_work_dir/worker_timeout have no Handoff descriptor field either
-  # (issue #2059, #2058), same shape as review_effort above -- plain strings
-  # read straight off the environment, no Go-side rendering needed.
+  # worker_work_dir/worker_timeout have no Handoff descriptor field
+  # (issue #2059, #2058) -- plain strings read straight off the
+  # environment, no Go-side rendering needed.
   local worker_work_dir="${WORKER_WORK_DIR:-}"
   local worker_timeout="${WORKER_TIMEOUT:-}"
   local worker_max_parallel="${MAX_PARALLEL_WORKERS:-}"
@@ -1035,9 +1033,9 @@ run_driver_in_env() {
   fi
 
   # --review-effort, same orchestrator-only shape as --review-model just
-  # above (issue #2390): the reviewer's own configured effort, read straight
-  # off REVIEW_EFFORT (no Handoff field, unlike review_model) since it's not
-  # baked into the reviewer's own AGENTS_JSON_TEMPLATE entry.
+  # above (issue #2512): the reviewer's own configured effort now has its
+  # own Handoff descriptor field (ReviewEffort), mirroring ReviewModel's
+  # shape exactly.
   local -a _review_effort_flags=()
   if [ "$_driver_invoker" = orchestrator ] && [ -n "$review_effort" ]; then
     _review_effort_flags=(--review-effort "$review_effort")
