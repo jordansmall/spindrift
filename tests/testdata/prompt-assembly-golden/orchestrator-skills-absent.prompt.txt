@@ -193,15 +193,24 @@ done/timed-out/crashed status plus its own reported summary — you will see
 that on your next invocation, not this one.
 
 Each worker commits its slice on its own `orchestrator-worker/<name>`
-branch, left behind after its worktree is removed. Once you see a slice
-reported done, cherry-pick that branch into your own tree the same way you
-integrate a sequential `worker` delegation's branch — before re-declaring
-that same slice name in a later manifest. A slice name still present in
-`state.DoneSlices` when you re-declare it is skipped rather than
-re-dispatched, so re-declaring an already-done, not-yet-integrated slice
-wastes a batch slot rather than losing work — but the surest way to make
-forward progress is to cherry-pick each done slice's branch as soon as you
-see it and never re-declare that name again.
+branch, left behind after its worktree is removed. Unlike a sequential
+`worker` delegation's branch, you never cherry-pick this one yourself: the
+Go orchestrator already integrates each batch's own done slices onto its
+own tree's HEAD immediately after that batch finishes, before the next
+coordinator pass is ever invoked — so by the time you see a slice reported
+done, its branch has already been landed (or its integration outcome
+already decided) on your behalf. Your only job on the next pass is to read
+that per-slice integration outcome in the seeded report: "integrated" or
+"nothing to integrate" means it's already on HEAD and there is nothing
+further to do; "integration conflicted" or "integration failed" means it
+still needs your manual resolution, using the branch name and guidance the
+report gives you. Never re-cherry-pick a slice the report already says was
+integrated — that would double-apply a commit already on HEAD. A slice name
+still present in `state.DoneSlices` when you re-declare it is skipped
+rather than re-dispatched, so re-declaring an already-done slice wastes a
+batch slot rather than losing work, but there is no reason to re-declare
+one whose integration already succeeded — just never re-declare that name
+again.
 
 Work test-first, one slice at a time. Hard rule:
 
