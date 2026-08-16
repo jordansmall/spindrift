@@ -695,7 +695,8 @@ in
   # on-row and an off-row -- an explicit `else`, never a bare `if` whose off
   # case is left merely implicit -- so a segment added later with only one
   # side fails here instead of silently rendering the same fork for every
-  # input. Same grep-based, eval-only shape as the checks above.
+  # input. Same grep-based, eval-only shape as
+  # prompt-source-statusCheckRollup-query-absent above.
   orchestrator-fork-well-formed = pkgs.runCommand "orchestrator-fork-well-formed" { } ''
     entrypoint=${../../agent/entrypoint.sh}
 
@@ -858,8 +859,8 @@ in
   # footgun the read-only /issues mount exists to close -- and must reference
   # /issues instead. Fragment content itself is otherwise unchecked, so a
   # future edit reintroducing `gh issue view` into a local variant would
-  # otherwise go uncaught. Same
-  # static, eval-only grep shape as the pr-body-reference-* checks above.
+  # otherwise go uncaught. Same static, eval-only grep shape as the
+  # pr-body-reference-* checks above.
   issue-read-local-fragments-never-invoke-gh-issue-view =
     pkgs.runCommand "issue-read-local-fragments-never-invoke-gh-issue-view" { }
       ''

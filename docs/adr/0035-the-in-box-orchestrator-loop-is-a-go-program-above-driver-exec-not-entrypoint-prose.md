@@ -156,8 +156,7 @@ prose/`reviewer` subagent are untouched; only the predicate's plumbing
 changes. A fork-well-formedness parity check (`orchestrator-fork-well-formed`,
 `nix/checks/prompts.nix`, run in `checks-inbox`) now fails pre-merge if a
 future orchestrator-gated segment is added with only an on-row or only an
-off-row, or with more than one rendering for a given input — the same
-drift-guard shape `fragment-gate-parity` already gives the fragment registry.
+off-row, or with more than one rendering for a given input.
 
 **Migration stance.** `ORCHESTRATOR_ENABLED` is a migration flag, not a
 permanent configuration axis: orchestrator-on is the destination, and the

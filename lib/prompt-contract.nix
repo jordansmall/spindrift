@@ -221,15 +221,8 @@ rec {
     }) injectBlocks
   );
 
-  # The single list of every injectBlocks row's marker, in row order -- one
-  # place a future Nix bake / bash runtime injector / parity check can all
-  # read instead of independently re-declaring the same marker strings
-  # (issue #2244 user story 19).
-  markerList = map (row: row.marker) injectBlocks;
-
-  # Look up one injectBlocks row by id -- the single copy every consumer
-  # (nix/checks/prompt-contract.nix, nix/checks/image.nix, lib/mkHarness.nix)
-  # shares instead of each re-declaring the same filter-and-head one-liner
+  # Look up one injectBlocks row by id -- the single copy lib/mkHarness.nix
+  # shares instead of re-declaring the same filter-and-head one-liner
   # (issue #2246 review).
   byId = id: builtins.head (builtins.filter (r: r.id == id) injectBlocks);
 
