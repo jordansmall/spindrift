@@ -14,10 +14,14 @@ func Gates(e Env) map[string]bool {
 
 	// Skill-baking gates (entrypoint.sh: 736-747): each fires exactly when
 	// its corresponding skill was baked at DRIVER_SKILLS_DIR/<name>/SKILL.md.
+	// BEGIN GENERATED SKILL-BAKED GATES -- nix run .#regen -- DO NOT EDIT
 	g["CAVEMAN_BAKED"] = e.CavemanSkillBaked
 	g["TDD_BAKED"] = e.TDDSkillBaked
 	g["COMMIT_BAKED"] = e.CommitSkillBaked
 	g["CODE_REVIEW_BAKED"] = e.CodeReviewSkillBaked
+	g["AUTO_FORMAT_BAKED"] = e.AutoFormatSkillBaked
+	g["AUTO_LINT_BAKED"] = e.AutoLintSkillBaked
+	// END GENERATED SKILL-BAKED GATES
 
 	// ORCHESTRATOR (entrypoint.sh: 761-762): the single canonical
 	// master-switch gate every orchestrator-conditioned fork reads.

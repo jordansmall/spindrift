@@ -385,6 +385,47 @@ rec {
     + renderGoStringSlice names
     + "}\n";
 
+  # agent/entrypoint.sh's generated skill-baked probe block (issue #2532):
+  # one `[ -f ... ] && _ap_args+=(...)` line per lib/baked-skills.nix row.
+  renderBakedSkillProbesShell =
+    bakedSkills:
+    concatStrings (
+      map (
+        s: "  [ -f \"$DRIVER_SKILLS_DIR/${s.name}/SKILL.md\" ] && _ap_args+=(--${s.flag})\n"
+      ) bakedSkills
+    );
+
+  # cmd/launcher/driver-exec/assembleprompt_cmd.go's generated skill-baked
+  # flag declarations (issue #2532).
+  renderBakedSkillFlagsGo =
+    bakedSkills:
+    concatStrings (
+      map (
+        s:
+        "\t${s.goVar} := fs.Bool(\"${s.flag}\", false, \"true when DRIVER_SKILLS_DIR/${s.name}/SKILL.md was baked\")\n"
+      ) bakedSkills
+    );
+
+  # cmd/launcher/driver-exec/assembleprompt_cmd.go's generated skill-baked
+  # promptassembly.Env{} struct-literal assignments (issue #2532).
+  renderBakedSkillEnvAssignGo =
+    bakedSkills: concatStrings (map (s: "\t\t${s.field}: *${s.goVar},\n") bakedSkills);
+
+  # cmd/launcher/internal/promptassembly/env.go's generated skill-baked
+  # struct fields (issue #2532).
+  renderBakedSkillFieldsGo =
+    bakedSkills:
+    concatStrings (
+      map (
+        s: "\t${s.field} bool // entrypoint.sh: -f \"$DRIVER_SKILLS_DIR/${s.name}/SKILL.md\" (${s.gate})\n"
+      ) bakedSkills
+    );
+
+  # cmd/launcher/internal/promptassembly/gates.go's generated skill-baked
+  # Gates() map assignments (issue #2532).
+  renderBakedSkillGatesGo =
+    bakedSkills: concatStrings (map (s: "\tg[\"${s.gate}\"] = e.${s.field}\n") bakedSkills);
+
   # cmd/launcher/internal/backend/registry_gen.go content (issue #2521):
   # one Go `Descriptor` var per lib/backends/default.nix row (keyed by its
   # goVar field), plus a Registry slice listing those vars in the nix list's

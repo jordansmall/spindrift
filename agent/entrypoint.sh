@@ -730,10 +730,14 @@ phase_prompt_assembly() {
     --ci-failure-summary "${CI_FAILURE_SUMMARY:-}"
     --research-status-enum "${RESEARCH_STATUS_ENUM:-}"
   )
-  [ -f "${DRIVER_SKILLS_DIR}/caveman/SKILL.md" ] && _ap_args+=(--caveman-skill-baked)
-  [ -f "${DRIVER_SKILLS_DIR}/tdd/SKILL.md" ] && _ap_args+=(--tdd-skill-baked)
-  [ -f "${DRIVER_SKILLS_DIR}/commit/SKILL.md" ] && _ap_args+=(--commit-skill-baked)
-  [ -f "${DRIVER_SKILLS_DIR}/code-review/SKILL.md" ] && _ap_args+=(--code-review-skill-baked)
+  # BEGIN GENERATED SKILL-BAKED PROBES -- nix run .#regen -- DO NOT EDIT
+  [ -f "$DRIVER_SKILLS_DIR/caveman/SKILL.md" ] && _ap_args+=(--caveman-skill-baked)
+  [ -f "$DRIVER_SKILLS_DIR/tdd/SKILL.md" ] && _ap_args+=(--tdd-skill-baked)
+  [ -f "$DRIVER_SKILLS_DIR/commit/SKILL.md" ] && _ap_args+=(--commit-skill-baked)
+  [ -f "$DRIVER_SKILLS_DIR/code-review/SKILL.md" ] && _ap_args+=(--code-review-skill-baked)
+  [ -f "$DRIVER_SKILLS_DIR/auto-format/SKILL.md" ] && _ap_args+=(--auto-format-skill-baked)
+  [ -f "$DRIVER_SKILLS_DIR/auto-lint/SKILL.md" ] && _ap_args+=(--auto-lint-skill-baked)
+  # END GENERATED SKILL-BAKED PROBES
   # Reads $ORCHESTRATOR (main's early ORCHESTRATOR_ENABLED-derived cross-phase
   # sentinel, issue #2354 slice 3), not ORCHESTRATOR_ENABLED directly -- the
   # orchestrator-fork-well-formed check (nix/checks/prompts.nix) pins exactly

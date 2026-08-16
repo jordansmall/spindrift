@@ -9,9 +9,14 @@
 # tests/box_env_gen.bash, tests/default_models_gen.bash,
 # cmd/launcher/defaultmodels_gen_test.go, the generated section of
 # templates/default/flake.nix's commented-out `settings` example, the
-# generated section of docs/reference.md's Default models table, and the
+# generated section of docs/reference.md's Default models table, the
 # generated `models` sub-block of docs/reference.md's `settings = { ... }`
-# example, from their respective Nix sources, and writes them into the
+# example, agent/entrypoint.sh's generated skill-baked probe block, and the
+# generated skill-baked flags/Env-assignments/fields/gates spans of
+# cmd/launcher/driver-exec/assembleprompt_cmd.go,
+# cmd/launcher/internal/promptassembly/env.go, and
+# cmd/launcher/internal/promptassembly/gates.go (lib/baked-skills.nix, issue
+# #2532), from their respective Nix sources, and writes them into the
 # working tree. Calls the
 # exact same renderers as the nix/checks.nix drift guards (lib/renderers.nix),
 # so resolving a source-edit conflict is: fix the Nix source, run this, commit.
@@ -59,6 +64,12 @@ let
   defaultModelFixtureGo = renderers.renderDefaultModelFixtureGo defaultModelFixture;
   defaultModelsDoc = renderers.renderDefaultModelsDoc defaultModelFixture;
   settingsExampleModelsDoc = renderers.renderSettingsExampleModelsDoc defaultModelFixture;
+  bakedSkills = import ../lib/baked-skills.nix;
+  bakedSkillProbesShell = renderers.renderBakedSkillProbesShell bakedSkills;
+  bakedSkillFlagsGo = renderers.renderBakedSkillFlagsGo bakedSkills;
+  bakedSkillEnvAssignGo = renderers.renderBakedSkillEnvAssignGo bakedSkills;
+  bakedSkillFieldsGo = renderers.renderBakedSkillFieldsGo bakedSkills;
+  bakedSkillGatesGo = renderers.renderBakedSkillGatesGo bakedSkills;
   inherit (pkgs.lib) escapeShellArg;
 in
 pkgs.writeShellApplication {
@@ -131,5 +142,28 @@ pkgs.writeShellApplication {
       ${escapeShellArg "  # BEGIN GENERATED SETTINGS EXAMPLE MODELS -- nix run .#regen -- DO NOT EDIT"} \
       ${escapeShellArg "  # END GENERATED SETTINGS EXAMPLE MODELS"} \
       ${escapeShellArg settingsExampleModelsDoc}
+    write_between agent/entrypoint.sh \
+      ${escapeShellArg "  # BEGIN GENERATED SKILL-BAKED PROBES -- nix run .#regen -- DO NOT EDIT"} \
+      ${escapeShellArg "  # END GENERATED SKILL-BAKED PROBES"} \
+      ${escapeShellArg bakedSkillProbesShell}
+    write_between cmd/launcher/driver-exec/assembleprompt_cmd.go \
+      ${escapeShellArg "\t// BEGIN GENERATED SKILL-BAKED FLAGS -- nix run .#regen -- DO NOT EDIT"} \
+      ${escapeShellArg "\t// END GENERATED SKILL-BAKED FLAGS"} \
+      ${escapeShellArg bakedSkillFlagsGo}
+    write_between cmd/launcher/driver-exec/assembleprompt_cmd.go \
+      ${escapeShellArg "\t\t// BEGIN GENERATED SKILL-BAKED ENV -- nix run .#regen -- DO NOT EDIT"} \
+      ${escapeShellArg "\t\t// END GENERATED SKILL-BAKED ENV"} \
+      ${escapeShellArg bakedSkillEnvAssignGo}
+    gofmt -w "$root/cmd/launcher/driver-exec/assembleprompt_cmd.go"
+    write_between cmd/launcher/internal/promptassembly/env.go \
+      ${escapeShellArg "\t// BEGIN GENERATED SKILL-BAKED FIELDS -- nix run .#regen -- DO NOT EDIT"} \
+      ${escapeShellArg "\t// END GENERATED SKILL-BAKED FIELDS"} \
+      ${escapeShellArg bakedSkillFieldsGo}
+    gofmt -w "$root/cmd/launcher/internal/promptassembly/env.go"
+    write_between cmd/launcher/internal/promptassembly/gates.go \
+      ${escapeShellArg "\t// BEGIN GENERATED SKILL-BAKED GATES -- nix run .#regen -- DO NOT EDIT"} \
+      ${escapeShellArg "\t// END GENERATED SKILL-BAKED GATES"} \
+      ${escapeShellArg bakedSkillGatesGo}
+    gofmt -w "$root/cmd/launcher/internal/promptassembly/gates.go"
   '';
 }
