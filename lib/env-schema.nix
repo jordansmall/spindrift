@@ -65,6 +65,9 @@
 #   hostDerived  bool    marks a field that is generated but whose loader is
 #                        hand-written (not a plain getenvSchema/atoiSchema
 #                        call); implies host-config membership
+let
+  backends = import ./backends/default.nix;
+in
 {
   # ── Consumer-tunable (flakeOption = true) ──────────────────────────────────
   label = {
@@ -83,12 +86,7 @@
     flag = "tracker";
     default = "github";
     doc = "IssueTracker backend (ADR 0013): github (gh-exec, default), local (private Markdown + YAML frontmatter files; see LOCAL_ISSUES_DIR), jira (see JIRA_BASE_URL/JIRA_PROJECT_KEY/JIRA_TOKEN), or forgejo (Forgejo/Gitea REST API adapter; Codeberg default via FORGEJO_BASE_URL; see FORGEJO_BASE_URL/FORGEJO_TOKEN); the Code Forge (PR/CI/merge) stays github regardless";
-    choices = [
-      "github"
-      "local"
-      "jira"
-      "forgejo"
-    ];
+    choices = map (r: r.name) (builtins.filter (r: r.validAsTracker or false) backends);
     flakeOption = true;
     nixSubPath = "tracker";
     # Forwarded into the Box (issue #1429): the issue prompt's PR-body
@@ -553,12 +551,7 @@
     flag = "forge-backend";
     default = "github";
     doc = "code-landing backend: github (open PR, watch CI, merge), git (push-only to CODE_FORGE_REMOTE_URL; no PR, CI-watch, or merge gate), local (host-mediated landing onto the Accumulation repo's Integration branch by rebase and fast-forward, never a merge commit; no PR, CI-watch, or network; ADR 0033, issue #1889), or forgejo (push-only to a Forgejo/Gitea instance authenticated by FORGEJO_TOKEN; agent branch, rebase, and merge under MERGE_MODE, no PR surface yet; ADR 0038)";
-    choices = [
-      "github"
-      "git"
-      "local"
-      "forgejo"
-    ];
+    choices = map (r: r.name) (builtins.filter (r: r.validAsCodeForge or false) backends);
     flakeOption = true;
     nixSubPath = "backend";
     boxEnv = true;
