@@ -2,9 +2,9 @@
 # (./default.nix) validates this entry's shape and renders it into the data
 # lib/mkHarness.nix bakes into the image: the claude-code package, the
 # entrypoint's DRIVER_* preamble, and the --agents JSON. The bats harness
-# sources mkHarness.driverPreambleFile (the registry's rendered preamble,
-# byte-identical to what the image bakes in) before exec-ing the entrypoint,
-# so the suite exercises the exact same bytes (issue #433).
+# sources mkHarness.internals.driverPreambleFile (the registry's rendered
+# preamble, byte-identical to what the image bakes in) before exec-ing the
+# entrypoint, so the suite exercises the exact same bytes (issue #433).
 { lib }:
 {
   name = "claude";

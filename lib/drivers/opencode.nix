@@ -3,7 +3,7 @@
 # lib/mkHarness.nix bakes into the image: the opencode package, the
 # entrypoint's DRIVER_* preamble, and the --agents JSON (here always ""; see
 # agentsJsonTemplate below). The bats harness sources
-# mkHarness.driverPreambleFile (the registry's rendered preamble,
+# mkHarness.internals.driverPreambleFile (the registry's rendered preamble,
 # byte-identical to what the image bakes in) before exec-ing the entrypoint,
 # so the suite exercises the exact same bytes (issue #433).
 { lib }:
