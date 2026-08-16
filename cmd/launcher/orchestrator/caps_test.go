@@ -131,3 +131,36 @@ func TestValidateBudgetCaps(t *testing.T) {
 		})
 	}
 }
+
+// TestWarnBudgetCapsUnconsultedByLegacyLoop guards the advisory warning
+// (issue #2694 review finding) for a budget cap configured under the
+// legacy single-loop path, where legacyTransition has no budget case at
+// all and so never consults it -- a silent, symptomless no-op without this
+// warning.
+func TestWarnBudgetCapsUnconsultedByLegacyLoop(t *testing.T) {
+	tests := []struct {
+		name              string
+		maxBudgetTokens   int
+		maxBudgetUSD      float64
+		reviewPassEnabled bool
+		wantWarning       bool
+	}{
+		{"both zero, legacy loop: no warning (nothing configured)", 0, 0, false, false},
+		{"tokens set, legacy loop: warns", 100, 0, false, true},
+		{"usd set, legacy loop: warns", 0, 4.44, false, true},
+		{"both set, legacy loop: warns", 100, 4.44, false, true},
+		{"tokens set, review loop enabled: no warning (actually consulted)", 100, 4.44, true, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := warnBudgetCapsUnconsultedByLegacyLoop(tt.maxBudgetTokens, tt.maxBudgetUSD, tt.reviewPassEnabled)
+			if tt.wantWarning && got == "" {
+				t.Errorf("warnBudgetCapsUnconsultedByLegacyLoop(%d, %v, %v) = \"\", want a warning", tt.maxBudgetTokens, tt.maxBudgetUSD, tt.reviewPassEnabled)
+			}
+			if !tt.wantWarning && got != "" {
+				t.Errorf("warnBudgetCapsUnconsultedByLegacyLoop(%d, %v, %v) = %q, want \"\"", tt.maxBudgetTokens, tt.maxBudgetUSD, tt.reviewPassEnabled, got)
+			}
+		})
+	}
+}

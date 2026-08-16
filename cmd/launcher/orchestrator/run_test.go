@@ -2444,14 +2444,16 @@ exit 0
 // TestRunWithReviewPassTerminatesOnMaxBudgetUSDCap is
 // TestRunWithReviewPassTerminatesOnMaxBudgetTokensCap's own USD-dimension
 // twin (issue #2694 review finding): the token-cap test above is the only
-// orchestrator-loop-level coverage of the budget cap actually firing, so it
-// alone leaves the maxBudgetUSD wiring (main.go flag -> config ->
-// Caps.MaxBudgetUSD) exercised only by passmachine's own pure-function
-// table test, never through a real run() loop. Same fake driver body (each
-// call reports 70+30 tokens and $0.01), same 4-calls-in cadence, but capped
-// on maxBudgetUSD (0.035, crossed by the same 4th call 0.01*4=0.04 >= 0.035
-// that trips the token test's own 350-token cap at 100*4=400) -- so both
-// dimensions are proven to land the run identically.
+// coverage, at this config -> Caps -> behavior level, of the budget cap
+// actually firing through a real run() loop -- as opposed to
+// TestMainRunAcceptsMaxBudgetFlagsAndThreadsThemIntoTheReviewLoop
+// (main_test.go), which covers the flag -> config half of the chain instead
+// (mainRun's own FlagSet parsing -max-budget-tokens/-max-budget-usd, not
+// exercised here since this test builds config{} directly). Same fake
+// driver body (each call reports 70+30 tokens and $0.01), same 4-calls-in
+// cadence, but capped on maxBudgetUSD (0.035, crossed by the same 4th call
+// 0.01*4=0.04 >= 0.035 that trips the token test's own 350-token cap at
+// 100*4=400) -- so both dimensions are proven to land the run identically.
 func TestRunWithReviewPassTerminatesOnMaxBudgetUSDCap(t *testing.T) {
 	dir := t.TempDir()
 	callLog := filepath.Join(dir, "calls.log")

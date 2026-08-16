@@ -103,6 +103,12 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
+	// Same warn-and-continue shape as the cap-coherence check above (issue
+	// #2694): a budget cap configured under the legacy loop is inert, not
+	// invalid, so this is advisory only.
+	if warning := warnBudgetCapsUnconsultedByLegacyLoop(*maxBudgetTokens, *maxBudgetUSD, *reviewPromptFile != ""); warning != "" {
+		fmt.Fprintln(stderr, warning)
+	}
 
 	rc, err := run(config{
 		driver:             *driverName,

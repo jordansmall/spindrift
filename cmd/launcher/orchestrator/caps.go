@@ -232,3 +232,21 @@ func validateBudgetCaps(maxBudgetTokens int, maxBudgetUSD float64) error {
 	}
 	return nil
 }
+
+// warnBudgetCapsUnconsultedByLegacyLoop returns a non-fatal advisory (issue
+// #2694 review finding) when a positive -max-budget-tokens/-max-budget-usd
+// is configured but -review-prompt-file is unset (reviewPassEnabled false):
+// the legacy single-loop path's own decision (legacyTransition) has no
+// budget case at all -- only the review loop's own review-pass decision
+// (reviewTransition) ever consults Caps.MaxBudgetTokens/MaxBudgetUSD -- so a
+// budget cap configured under the legacy loop is silently inert, with no
+// other symptom. Mirrors validateCaps' own warn-and-continue shape (issue
+// #2460) rather than validateBudgetCaps' fatal one just above: this isn't
+// invalid input, just a cap that does nothing under the selected loop, so
+// the run still proceeds. Returns "" when there is nothing to warn about.
+func warnBudgetCapsUnconsultedByLegacyLoop(maxBudgetTokens int, maxBudgetUSD float64, reviewPassEnabled bool) string {
+	if reviewPassEnabled || (maxBudgetTokens <= 0 && maxBudgetUSD <= 0) {
+		return ""
+	}
+	return fmt.Sprintf("orchestrator: -max-budget-tokens=%d/-max-budget-usd=%v configured but -review-prompt-file is unset -- the legacy single-loop path never consults the budget cap, so it has no effect", maxBudgetTokens, maxBudgetUSD)
+}
