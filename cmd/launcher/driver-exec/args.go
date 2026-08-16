@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"strings"
 )
@@ -57,6 +58,10 @@ type driverInput struct {
 // driver-name conditional appears here, so a new Driver's argv shape is a
 // new argvShape data row, not a change to this function.
 func buildDriverArgs(in driverInput) ([]string, error) {
+	if in.shape.promptStyle != "flag" && in.shape.promptStyle != "positional" {
+		return nil, fmt.Errorf("buildDriverArgs: invalid promptStyle %q, want \"flag\" or \"positional\"", in.shape.promptStyle)
+	}
+
 	prompt, err := os.ReadFile(in.promptFile)
 	if err != nil {
 		return nil, err
@@ -102,6 +107,8 @@ func buildDriverArgs(in driverInput) ([]string, error) {
 				continue
 			}
 			args = append(args, in.shape.effortFlag, in.effort)
+		default:
+			return nil, fmt.Errorf("buildDriverArgs: unrecognised argv slot %q", slot)
 		}
 	}
 	return args, nil

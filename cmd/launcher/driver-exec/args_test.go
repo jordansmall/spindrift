@@ -352,6 +352,49 @@ func TestBuildDriverArgsSessionAndFlagsAreWordSplit(t *testing.T) {
 	}
 }
 
+// TestBuildDriverArgsUnknownSlotErrors verifies an unrecognised slot name in
+// shape.order (e.g. from a mis-set DRIVER_ARGV_ORDER) errors instead of being
+// silently dropped from argv (issue #2534 follow-up).
+func TestBuildDriverArgsUnknownSlotErrors(t *testing.T) {
+	dir := t.TempDir()
+	promptFile := filepath.Join(dir, "prompt.txt")
+	if err := os.WriteFile(promptFile, []byte("do it"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	shape := claudeShape
+	shape.order = []string{"prompt", "bogusSlot"}
+	in := driverInput{
+		shape:      shape,
+		promptFile: promptFile,
+		model:      "claude-opus-4-8",
+	}
+	if _, err := buildDriverArgs(in); err == nil {
+		t.Fatal("buildDriverArgs error = nil, want a non-nil error naming the unrecognised slot \"bogusSlot\"")
+	}
+}
+
+// TestBuildDriverArgsInvalidPromptStyleErrors verifies a promptStyle that is
+// neither "flag" nor "positional" (e.g. a typo) errors instead of silently
+// falling through to the positional branch and producing the wrong argv
+// shape (issue #2534 follow-up).
+func TestBuildDriverArgsInvalidPromptStyleErrors(t *testing.T) {
+	dir := t.TempDir()
+	promptFile := filepath.Join(dir, "prompt.txt")
+	if err := os.WriteFile(promptFile, []byte("do it"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	shape := claudeShape
+	shape.promptStyle = "flagg"
+	in := driverInput{
+		shape:      shape,
+		promptFile: promptFile,
+		model:      "claude-opus-4-8",
+	}
+	if _, err := buildDriverArgs(in); err == nil {
+		t.Fatal("buildDriverArgs error = nil, want a non-nil error naming the invalid promptStyle \"flagg\"")
+	}
+}
+
 // TestBuildDriverArgsSyntheticShapeIsDataDriven verifies buildDriverArgs
 // assembles argv purely from shape data by exercising a third, synthetic
 // shape that shares no order/flag values with claudeShape or opencodeShape:
