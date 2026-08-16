@@ -1747,6 +1747,16 @@ func TestValidateOverlapGate_AcceptsKnown(t *testing.T) {
 	}
 }
 
+// TestValidateDriver_RejectsUnknown verifies that validate() fails fast when
+// DRIVER is set to an unregistered Driver name.
+func TestValidateDriver_RejectsUnknown(t *testing.T) {
+	c := minimalValidConfig()
+	c.driver = "bogus"
+	if err := validate(c); err == nil {
+		t.Fatal("validate() should reject unrecognised DRIVER")
+	}
+}
+
 // TestValidateDriver_AcceptsKnownAndEmpty verifies that validate() accepts
 // the registered "claude" Driver as well as an empty DRIVER (which defaults
 // to "claude").

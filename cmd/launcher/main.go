@@ -356,6 +356,9 @@ func validate(c config) error {
 	if err := runner.ValidateRuntime(c.runtime); err != nil {
 		return err
 	}
+	if _, err := driver.New(c.driver); err != nil {
+		return err
+	}
 	if err := validateChoice("MERGE_MODE", c.mergeMode); err != nil {
 		return err
 	}
