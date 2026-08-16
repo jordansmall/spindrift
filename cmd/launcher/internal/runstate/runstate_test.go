@@ -102,6 +102,29 @@ func TestRunStateRoundTripIncludesPassSummaryPath(t *testing.T) {
 	}
 }
 
+// TestRunStateRoundTripIncludesDispositionsPath verifies DispositionsPath
+// (issue #2550: the fix pass's own per-finding dispositions file, referenced
+// by path like PassSummaryPath) survives a WriteRunState/ReadRunState round
+// trip like every other field.
+func TestRunStateRoundTripIncludesDispositionsPath(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "run-state.json")
+	want := RunState{
+		LastVerdict:      "BLOCK",
+		DispositionsPath: "/tmp/dispositions.md",
+	}
+
+	if err := WriteRunState(path, want); err != nil {
+		t.Fatalf("WriteRunState: %v", err)
+	}
+	got, err := ReadRunState(path)
+	if err != nil {
+		t.Fatalf("ReadRunState: %v", err)
+	}
+	if got.DispositionsPath != want.DispositionsPath {
+		t.Errorf("DispositionsPath = %q, want %q", got.DispositionsPath, want.DispositionsPath)
+	}
+}
+
 // TestRunStateRoundTripIncludesUnlandedSlices verifies UnlandedSlices (issue
 // #2060 review finding: DoneSlices names whose branch integration ended in
 // conflict or failure) survives a WriteRunState/ReadRunState round trip like
@@ -293,6 +316,16 @@ func TestRunStateIsEmpty(t *testing.T) {
 	}
 	if !(RunState{DoneSlices: []string{"scout"}, RemainingSlices: []string{"land"}}).IsEmpty() {
 		t.Error("IsEmpty() of a state with only DoneSlices/RemainingSlices set = false, want true")
+	}
+	// DispositionsPath joins DoneSlices/RemainingSlices in the "set but
+	// still IsEmpty" case (issue #2550 review finding): seedPromptFromState
+	// -- IsEmpty's only caller -- never renders it, so including it in the
+	// non-empty check would make IsEmpty return false for a state with
+	// nothing seedPromptFromState would actually put in the "Run-state
+	// handoff" section. seedReviewPromptFromState's own, narrower check
+	// governs the round-N review prompt DispositionsPath actually seeds.
+	if !(RunState{DispositionsPath: "/tmp/dispositions.md"}).IsEmpty() {
+		t.Error("IsEmpty() of a state with only DispositionsPath set = false, want true")
 	}
 	nonEmpty := []RunState{
 		{LastVerdict: "BLOCK"},
