@@ -1565,6 +1565,54 @@ in
       "default-model-fixture-schema-sync-guard: expected assertFixtureMatchesSchemaOk to reject a synthetic schema whose reviewModel default has drifted from the fixture, but it evaluated successfully";
     pkgs.runCommand "default-model-fixture-schema-sync-guard" { } "touch $out";
 
+  # tests/default_models_gen.bash must match the content generated from
+  # lib/default-model-fixture.nix by lib/renderers.nix
+  # renderDefaultModelFixtureBash. Fails when the fixture is edited but the
+  # committed generated file is not regenerated. Shares its renderer with
+  # `nix run .#regen` via lib/renderers.nix, so guard and regenerator cannot
+  # drift from each other (issue #2514, slice 2 of 3).
+  default-models-gen-bash =
+    let
+      generated = pkgs.writeText "default_models_gen.bash.generated" (
+        renderers.renderDefaultModelFixtureBash defaultModelFixture
+      );
+    in
+    pkgs.runCommand "default-models-gen-bash"
+      {
+        inherit generated;
+        committed = ../../tests/default_models_gen.bash;
+      }
+      ''
+        diff "$generated" "$committed" \
+          || { echo "tests/default_models_gen.bash is out of sync with lib/default-model-fixture.nix — regenerate it with \`nix run .#regen\`" >&2; exit 1; }
+        touch $out
+      '';
+
+  # cmd/launcher/defaultmodels_gen.go must match the content generated from
+  # lib/default-model-fixture.nix by lib/renderers.nix
+  # renderDefaultModelFixtureGo, gofmt-normalized the same way `nix run
+  # .#regen` normalizes it. Fails when the fixture is edited but the
+  # committed generated file is not regenerated. Shares its renderer with
+  # `nix run .#regen` via lib/renderers.nix (issue #2514, slice 2 of 3).
+  default-models-gen-go =
+    let
+      raw = pkgs.writeText "defaultmodels_gen.go.raw" (
+        renderers.renderDefaultModelFixtureGo defaultModelFixture
+      );
+    in
+    pkgs.runCommand "default-models-gen-go"
+      {
+        nativeBuildInputs = [ pkgs.go ];
+        inherit raw;
+        committed = ../../cmd/launcher/defaultmodels_gen.go;
+      }
+      ''
+        gofmt "$raw" > generated.go
+        diff generated.go "$committed" \
+          || { echo "cmd/launcher/defaultmodels_gen.go is out of sync with lib/default-model-fixture.nix — regenerate it with \`nix run .#regen\`" >&2; exit 1; }
+        touch $out
+      '';
+
   # Regression guard: rosterDocSection's own throw branch (missing "####
   # Subagent roster" heading) is otherwise never exercised -- every other
   # fixture in this file, real or synthetic, feeds a doc that contains the

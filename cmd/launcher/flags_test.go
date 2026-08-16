@@ -13,9 +13,11 @@ import (
 )
 
 // TestModelDefault_IsSonnet5 asserts that the main/coordinator session model
-// default is claude-sonnet-5, not opus-4-8 or an older release (issue #2240).
+// default matches expectedDefaultModels["MODEL"] (cmd/launcher/
+// defaultmodels_gen.go, regen-rendered from lib/default-model-fixture.nix),
+// not opus-4-8 or an older release (issue #2240).
 func TestModelDefault_IsSonnet5(t *testing.T) {
-	const want = "claude-sonnet-5"
+	want := expectedDefaultModels["MODEL"]
 	for _, e := range schemaFlags {
 		if e.env == "MODEL" {
 			if e.dflt != want {
