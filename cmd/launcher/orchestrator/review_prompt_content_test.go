@@ -60,6 +60,10 @@ func TestReviewPromptSeverityContract(t *testing.T) {
 			name:   "#2436 example: trailer placement",
 			clause: "where a trailer sits among the commits",
 		},
+		{
+			name:   "#2550 seeded section is not narrative to discard",
+			clause: `A "## Prior-round claims to verify" section above this prompt`,
+		},
 	}
 
 	for _, c := range cases {
