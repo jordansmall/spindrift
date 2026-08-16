@@ -5,11 +5,13 @@ import "testing"
 // TestTransition exercises Transition across every decision point the
 // orchestrator's two loops make today (issue #2548): the legacy loop's
 // single switch (run.go:244-259), the review loop's implement/fix/land
-// switch (run.go:355-401), and the review loop's own review-pass switch
-// (run.go:461-487). Each case names the exact decision-op Reason string and
-// (where applicable) state.CapFired text the source switches emit, since
-// both are part of a byte-for-byte-pinned op stream existing tests assert
-// on.
+// switch (run.go:355-401, now split into implementFixTransition and
+// terminalLandTransition per AC2), and the review loop's own review-pass
+// switch (run.go:461-487). Each case names the exact decision-op Reason
+// string and (where applicable) state.CapFired text the source switches
+// emit, since both are part of a byte-for-byte-pinned op stream existing
+// tests assert on. Cases that set CapFired also assert the typed Cap field
+// alongside it.
 func TestTransition(t *testing.T) {
 	tests := []struct {
 		name string
@@ -138,7 +140,7 @@ func TestTransition(t *testing.T) {
 			in: Input{
 				PassJustExecuted: KindFix,
 				HasOutcome:       false,
-				TerminalLand:     true,
+				LandPhase:        LandPhaseTerminalCommitted,
 			},
 			want: Decision{Continue: false, Reason: "terminal land pass reached no outcome", Stop: StopTerminalLandNoOutcome},
 		},
@@ -160,11 +162,12 @@ func TestTransition(t *testing.T) {
 				Caps:             Caps{MaxSlices: 4},
 			},
 			want: Decision{
-				Continue:        true,
-				Reason:          "max slices reached; running terminal land pass",
-				NextPass:        KindLand,
-				SetTerminalLand: true,
-				CapFired:        "max slices reached",
+				Continue:  true,
+				Reason:    "max slices reached; running terminal land pass",
+				NextPass:  KindLand,
+				LandPhase: LandPhaseTerminalCommitted,
+				Cap:       StopMaxSlicesReached,
+				CapFired:  "max slices reached",
 			},
 		},
 		{
@@ -185,16 +188,16 @@ func TestTransition(t *testing.T) {
 			want: Decision{Continue: true, Reason: "", NextPass: KindReview},
 		},
 		{
-			name: "fix falls through to review when TerminalLand false and nothing else matches",
+			name: "fix falls through to review when LandPhase active and nothing else matches",
 			in: Input{
 				PassJustExecuted: KindFix,
 				HasOutcome:       false,
-				TerminalLand:     false,
+				LandPhase:        LandPhaseActive,
 			},
 			want: Decision{Continue: true, Reason: "", NextPass: KindReview},
 		},
 		{
-			name: "manifestDispatched overrides TerminalLand's next-pass kind even when maxSlices ALSO fires this pass",
+			name: "manifestDispatched overrides LandPhase's next-pass kind even when maxSlices ALSO fires this pass",
 			in: Input{
 				PassJustExecuted:   KindImplement,
 				HasOutcome:         false,
@@ -203,11 +206,12 @@ func TestTransition(t *testing.T) {
 				ManifestDispatched: true,
 			},
 			want: Decision{
-				Continue:        true,
-				Reason:          "max slices reached; running terminal land pass",
-				NextPass:        KindFix,
-				SetTerminalLand: true,
-				CapFired:        "max slices reached",
+				Continue:  true,
+				Reason:    "max slices reached; running terminal land pass",
+				NextPass:  KindFix,
+				LandPhase: LandPhaseTerminalCommitted,
+				Cap:       StopMaxSlicesReached,
+				CapFired:  "max slices reached",
 			},
 		},
 		{
@@ -215,7 +219,7 @@ func TestTransition(t *testing.T) {
 			in: Input{
 				PassJustExecuted:   KindLand,
 				HasOutcome:         true,
-				TerminalLand:       true,
+				LandPhase:          LandPhaseTerminalCommitted,
 				LastVerdict:        VerdictApprove,
 				Pass:               10,
 				Caps:               Caps{MaxSlices: 3},
@@ -224,11 +228,11 @@ func TestTransition(t *testing.T) {
 			want: Decision{Continue: false, Reason: "outcome reached", Stop: StopOutcomeReached},
 		},
 		{
-			name: "implement/fix/land: TerminalLand wins over LastVerdict APPROVE and caps (priority)",
+			name: "implement/fix/land: LandPhaseTerminalCommitted wins over LastVerdict APPROVE and caps (priority)",
 			in: Input{
 				PassJustExecuted:   KindFix,
 				HasOutcome:         false,
-				TerminalLand:       true,
+				LandPhase:          LandPhaseTerminalCommitted,
 				LastVerdict:        VerdictApprove,
 				Pass:               10,
 				Caps:               Caps{MaxSlices: 3},
@@ -241,7 +245,7 @@ func TestTransition(t *testing.T) {
 			in: Input{
 				PassJustExecuted:   KindLand,
 				HasOutcome:         false,
-				TerminalLand:       false,
+				LandPhase:          LandPhaseActive,
 				LastVerdict:        VerdictApprove,
 				Pass:               10,
 				Caps:               Caps{MaxSlices: 3},
@@ -259,11 +263,12 @@ func TestTransition(t *testing.T) {
 				ManifestDispatched: true,
 			},
 			want: Decision{
-				Continue:        true,
-				Reason:          "max slices reached; running terminal land pass",
-				NextPass:        KindFix,
-				SetTerminalLand: true,
-				CapFired:        "max slices reached",
+				Continue:  true,
+				Reason:    "max slices reached; running terminal land pass",
+				NextPass:  KindFix,
+				LandPhase: LandPhaseTerminalCommitted,
+				Cap:       StopMaxSlicesReached,
+				CapFired:  "max slices reached",
 			},
 		},
 		{
@@ -275,11 +280,12 @@ func TestTransition(t *testing.T) {
 				Caps:             Caps{MaxSlices: 4},
 			},
 			want: Decision{
-				Continue:        true,
-				Reason:          "max slices reached; running terminal land pass",
-				NextPass:        KindLand,
-				SetTerminalLand: true,
-				CapFired:        "max slices reached",
+				Continue:  true,
+				Reason:    "max slices reached; running terminal land pass",
+				NextPass:  KindLand,
+				LandPhase: LandPhaseTerminalCommitted,
+				Cap:       StopMaxSlicesReached,
+				CapFired:  "max slices reached",
 			},
 		},
 		{
@@ -291,31 +297,66 @@ func TestTransition(t *testing.T) {
 				Caps:             Caps{MaxSlices: 4},
 			},
 			want: Decision{
-				Continue:        true,
-				Reason:          "max slices reached; running terminal land pass",
-				NextPass:        KindLand,
-				SetTerminalLand: true,
-				CapFired:        "max slices reached",
+				Continue:  true,
+				Reason:    "max slices reached; running terminal land pass",
+				NextPass:  KindLand,
+				LandPhase: LandPhaseTerminalCommitted,
+				Cap:       StopMaxSlicesReached,
+				CapFired:  "max slices reached",
 			},
+		},
+		{
+			name: "LandPhaseTerminalCommitted dispatches to terminalLandTransition on KindImplement regardless of LastVerdict/Caps/ManifestDispatched",
+			in: Input{
+				PassJustExecuted:   KindImplement,
+				HasOutcome:         false,
+				LandPhase:          LandPhaseTerminalCommitted,
+				LastVerdict:        VerdictApprove,
+				Pass:               1,
+				Caps:               Caps{MaxSlices: 100, MaxReviewRounds: 100},
+				ManifestDispatched: true,
+			},
+			want: Decision{Continue: false, Reason: "terminal land pass reached no outcome", Stop: StopTerminalLandNoOutcome},
+		},
+		{
+			name: "LandPhaseTerminalCommitted dispatches to terminalLandTransition on KindFix with HasOutcome true regardless of PassKind label",
+			in: Input{
+				PassJustExecuted: KindFix,
+				HasOutcome:       true,
+				LandPhase:        LandPhaseTerminalCommitted,
+			},
+			want: Decision{Continue: false, Reason: "outcome reached", Stop: StopOutcomeReached},
+		},
+		{
+			name: "LandPhaseTerminalCommitted dispatches to terminalLandTransition on KindLand regardless of Caps",
+			in: Input{
+				PassJustExecuted: KindLand,
+				HasOutcome:       false,
+				LandPhase:        LandPhaseTerminalCommitted,
+				Caps:             Caps{MaxSlices: 1, MaxReviewRounds: 1},
+				Pass:             1,
+			},
+			want: Decision{Continue: false, Reason: "terminal land pass reached no outcome", Stop: StopTerminalLandNoOutcome},
 		},
 
 		// ---- review loop's own review-pass switch (run.go:461-487) ----
 		{
-			name: "review: no verdict sets TerminalLand and always continues (never stops)",
+			name: "review: no verdict sets LandPhase and always continues (never stops)",
 			in: Input{
 				PassJustExecuted: KindReview,
 				Verdict:          VerdictNone,
 			},
 			want: Decision{
-				Continue:        true,
-				Reason:          "no verdict; running terminal land pass",
-				NextPass:        KindLand,
-				SetTerminalLand: true,
-				CapFired:        "no verdict",
+				Continue:  true,
+				Reason:    "no verdict; running terminal land pass",
+				NextPass:  KindLand,
+				LandPhase: LandPhaseTerminalCommitted,
+				Cap:       StopNoVerdict,
+				CapFired:  "no verdict",
 			},
 		},
 		{
-			name: "review: max slices reached sets TerminalLand and increments review rounds since verdict is BLOCK",
+			name: "review: max slices reached sets LandPhase and increments review rounds since verdict is BLOCK",
 			in: Input{
 				PassJustExecuted: KindReview,
 				Verdict:          VerdictBlock,
@@ -326,13 +367,14 @@ func TestTransition(t *testing.T) {
 				Continue:              true,
 				Reason:                "max slices reached; running terminal land pass",
 				NextPass:              KindLand,
-				SetTerminalLand:       true,
+				LandPhase:             LandPhaseTerminalCommitted,
+				Cap:                   StopMaxSlicesReached,
 				CapFired:              "max slices reached",
 				IncrementReviewRounds: true,
 			},
 		},
 		{
-			name: "review: max slices reached on APPROVE sets TerminalLand but does not increment review rounds",
+			name: "review: max slices reached on APPROVE sets LandPhase but does not increment review rounds",
 			in: Input{
 				PassJustExecuted: KindReview,
 				Verdict:          VerdictApprove,
@@ -340,15 +382,16 @@ func TestTransition(t *testing.T) {
 				Caps:             Caps{MaxSlices: 5},
 			},
 			want: Decision{
-				Continue:        true,
-				Reason:          "max slices reached; running terminal land pass",
-				NextPass:        KindLand,
-				SetTerminalLand: true,
-				CapFired:        "max slices reached",
+				Continue:  true,
+				Reason:    "max slices reached; running terminal land pass",
+				NextPass:  KindLand,
+				LandPhase: LandPhaseTerminalCommitted,
+				Cap:       StopMaxSlicesReached,
+				CapFired:  "max slices reached",
 			},
 		},
 		{
-			name: "review: max review rounds reached on BLOCK sets TerminalLand and increments review rounds",
+			name: "review: max review rounds reached on BLOCK sets LandPhase and increments review rounds",
 			in: Input{
 				PassJustExecuted: KindReview,
 				Verdict:          VerdictBlock,
@@ -359,13 +402,14 @@ func TestTransition(t *testing.T) {
 				Continue:              true,
 				Reason:                "max review rounds reached; running terminal land pass",
 				NextPass:              KindLand,
-				SetTerminalLand:       true,
+				LandPhase:             LandPhaseTerminalCommitted,
+				Cap:                   StopMaxReviewRoundsReached,
 				CapFired:              "max review rounds reached",
 				IncrementReviewRounds: true,
 			},
 		},
 		{
-			name: "review: APPROVE with no cap falls through to fix, no TerminalLand, no increment",
+			name: "review: APPROVE with no cap falls through to fix, no LandPhase commit, no increment",
 			in: Input{
 				PassJustExecuted: KindReview,
 				Verdict:          VerdictApprove,
@@ -381,11 +425,11 @@ func TestTransition(t *testing.T) {
 			want: Decision{Continue: true, Reason: "", NextPass: KindFix, IncrementReviewRounds: true},
 		},
 		{
-			name: "review: TerminalLand already true from before routes next pass to land even on plain APPROVE",
+			name: "review: LandPhase already TerminalCommitted from before routes next pass to land even on plain APPROVE",
 			in: Input{
 				PassJustExecuted: KindReview,
 				Verdict:          VerdictApprove,
-				TerminalLand:     true,
+				LandPhase:        LandPhaseTerminalCommitted,
 			},
 			want: Decision{Continue: true, Reason: "", NextPass: KindLand},
 		},
@@ -399,11 +443,12 @@ func TestTransition(t *testing.T) {
 				Caps:             Caps{MaxSlices: 5, MaxReviewRounds: 2},
 			},
 			want: Decision{
-				Continue:        true,
-				Reason:          "no verdict; running terminal land pass",
-				NextPass:        KindLand,
-				SetTerminalLand: true,
-				CapFired:        "no verdict",
+				Continue:  true,
+				Reason:    "no verdict; running terminal land pass",
+				NextPass:  KindLand,
+				LandPhase: LandPhaseTerminalCommitted,
+				Cap:       StopNoVerdict,
+				CapFired:  "no verdict",
 			},
 		},
 		{
@@ -419,7 +464,8 @@ func TestTransition(t *testing.T) {
 				Continue:              true,
 				Reason:                "max slices reached; running terminal land pass",
 				NextPass:              KindLand,
-				SetTerminalLand:       true,
+				LandPhase:             LandPhaseTerminalCommitted,
+				Cap:                   StopMaxSlicesReached,
 				CapFired:              "max slices reached",
 				IncrementReviewRounds: true,
 			},
