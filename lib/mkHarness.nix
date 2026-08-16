@@ -264,17 +264,17 @@ let
   researchOutcomeContractMarker = (byId "research-verdict").marker;
   # The configurable verdict vocabulary (issue #2201): render the verdict
   # contract from the RESEARCH_VERDICTS knob before slicing the outcome
-  # contract and baking the prompt, so a custom set flows into both the baked
-  # research prompt and the contract injected into a Consumer prompt lacking
-  # it. The empty (default) knob is a no-op, keeping the default research
-  # prompt byte-identical to the template on disk (nix/checks/prompts.nix).
+  # contract and baking the prompt, so both the default set and a custom set
+  # flow into the baked research prompt and the contract injected into a
+  # Consumer prompt lacking it, through the same rendering path (issue
+  # #2525) -- there is no byte-identical-to-template no-op case.
   researchVerdicts = import ./research-verdicts.nix;
   researchVerdictsKnob = mergedDefaults.researchVerdicts or "";
-  researchPromptRendered = researchVerdicts.renderIfCustom researchVerdictsKnob researchPrompt;
+  researchPromptRendered = researchVerdicts.render researchVerdictsKnob researchPrompt;
   # Same verdict-set rendering, applied to the self-contained sub-mode prompt
   # (issue #2202) so a custom RESEARCH_VERDICTS knob reaches both prompts.
-  researchSelfContainedPromptRendered = researchVerdicts.renderIfCustom researchVerdictsKnob researchSelfContainedPrompt;
-  researchPromptSourceRendered = researchVerdicts.renderIfCustom researchVerdictsKnob researchPromptSource;
+  researchSelfContainedPromptRendered = researchVerdicts.render researchVerdictsKnob researchSelfContainedPrompt;
+  researchPromptSourceRendered = researchVerdicts.render researchVerdictsKnob researchPromptSource;
   researchOutcomeContract = sliceFromMarker researchOutcomeContractMarker researchPromptSourceRendered;
   injectResearchOutcomeContract = injectSection researchOutcomeContractMarker researchOutcomeContract;
 
