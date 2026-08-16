@@ -216,11 +216,15 @@ AGENTS_ROSTER='{"scout":{"description":"Map relevant files, seams, and tests; re
 AGENTS_ROSTER_WITH_FILER='{"scout":{"description":"Map relevant files, seams, and tests; return a structured brief","model":"opus","prompt":"","tools":["Read","Bash","WebFetch","WebSearch","Glob","Grep"]},"reviewer":{"description":"Review the branch diff for spec compliance and coding standards","model":"haiku","prompt":"","tools":["Read","Bash","WebFetch"]},"worker":{"description":"Implement a scoped slice of work delegated to it","model":"sonnet","prompt":"","tools":["Read","Bash","Edit","Write","Glob","Grep","WebFetch"]},"filer":{"description":"File issues from a review'"'"'s non-blocking findings, best-effort","model":"haiku","prompt":"","tools":["Read","Bash","WebFetch"]}}'
 
 # issue #2512: AGENTS_ROSTER's reviewer entry, plus an explicit "effort" key
-# ("xhigh" -- deliberately not "high", rosterDefaults.reviewer.effort's own
-# default, so a fixture pinning it can only pass if the override actually
-# flowed through, not by coincidentally matching the fallback). Scout,
-# reviewer, worker -- no "filer" key, so this cell isolates the
-# reviewer-effort-override axis from the filer axis
+# ("xhigh", a value distinct from every other effort/model literal already
+# used across this file's fixtures, so a diff against the golden fixture
+# fails loudly on any accidental drop or truncation of the field rather than
+# on a value that could silently match some other cell's default). This
+# harness sets AGENTS_JSON_TEMPLATE literally, so rosterDefaults and any
+# roster-resolution fallback never participate in this path -- the
+# distinctive value is purely for diff visibility, not to distinguish an
+# override from a fallback. Scout, reviewer, worker -- no "filer" key, so
+# this cell isolates the reviewer-effort-override axis from the filer axis
 # AGENTS_ROSTER_WITH_FILER above already covers.
 AGENTS_ROSTER_WITH_REVIEW_EFFORT='{"scout":{"description":"Map relevant files, seams, and tests; return a structured brief","model":"opus","prompt":"","tools":["Read","Bash","WebFetch","WebSearch","Glob","Grep"]},"reviewer":{"description":"Review the branch diff for spec compliance and coding standards","model":"haiku","effort":"xhigh","prompt":"","tools":["Read","Bash","WebFetch"]},"worker":{"description":"Implement a scoped slice of work delegated to it","model":"sonnet","prompt":"","tools":["Read","Bash","Edit","Write","Glob","Grep","WebFetch"]}}'
 
