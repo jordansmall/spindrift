@@ -51,11 +51,10 @@ type Descriptor struct {
 // lib/backends/default.nix (issue #2521) -- not hand-declared here. Its
 // order is lib/backends/default.nix's declaration order (github, git,
 // local, jira, forgejo), not the order cmd/launcher's own backendRows
-// registers them: a follow-up slice derives env-schema.nix's
-// issueTracker.choices/codeForge.choices as an order-preserving filter over
-// that same Nix list, and this declaration order is chosen to reproduce
-// both axes' existing pinned choice orders via nothing but a single filter
-// each.
+// registers them: env-schema.nix's issueTracker.choices/codeForge.choices
+// derive from that same Nix list as an order-preserving filter, and this
+// declaration order is chosen to reproduce both axes' existing pinned
+// choice orders via nothing but a single filter each.
 
 // ByName looks up the descriptor for name (an ISSUE_TRACKER or CODE_FORGE
 // knob value). ok is false for an unregistered name.

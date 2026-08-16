@@ -9,17 +9,17 @@
 # `nix run .#regen`.
 #
 # A plain list (no `{ lib }:` wrapper), mirroring lib/subcommands.nix, so it
-# stays importable with zero arguments -- a follow-up slice imports it
-# directly (no `lib` in scope) from lib/env-schema.nix.
+# stays importable with zero arguments -- lib/env-schema.nix imports it
+# directly (no `lib` in scope).
 #
 # Declaration order here is deliberate and load-bearing: github, git, local,
-# jira, forgejo. A follow-up slice derives env-schema.nix's
-# issueTracker.choices and codeForge.choices as an order-preserving filter
-# over this one list; this declaration order reproduces both axes' existing
-# pinned choice orders -- [github, git, local, forgejo] for codeForge, and
-# [github, local, jira, forgejo] for issueTracker -- via nothing but a single
-# filter each (validAsCodeForge / validAsTracker), with no separate
-# per-axis ordering table.
+# jira, forgejo. lib/env-schema.nix derives issueTracker.choices and
+# codeForge.choices as an order-preserving filter over this one list; this
+# declaration order reproduces both axes' existing pinned choice orders --
+# [github, git, local, forgejo] for codeForge, and [github, local, jira,
+# forgejo] for issueTracker -- via nothing but a single filter each
+# (validAsCodeForge / validAsTracker), with no separate per-axis ordering
+# table.
 #
 # Fields:
 #   name                     string  the ISSUE_TRACKER/CODE_FORGE knob value
