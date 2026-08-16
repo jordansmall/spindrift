@@ -877,6 +877,101 @@ func TestRunUnlinksStalePassSummaryPathBeforePass(t *testing.T) {
 	}
 }
 
+// TestRecordPassSummaryLeavesPriorValueOnNonNotExistStatError verifies
+// recordPassSummary only clears state.PassSummaryPath to "" when
+// os.Stat(cfg.passSummaryPath) fails because the file does not exist -- not
+// on any other stat error (e.g. ENOTDIR from a non-directory path
+// component) -- carrying forward whatever state.PassSummaryPath already held
+// instead (non-blocking review finding on run.go:886: treating every stat
+// error as "the pass wrote nothing" silently drops a valid handoff on a
+// transient stat error).
+func TestRecordPassSummaryLeavesPriorValueOnNonNotExistStatError(t *testing.T) {
+	dir := t.TempDir()
+	// A regular file used as a path's directory component makes any stat
+	// under it fail with ENOTDIR, not ENOENT.
+	notADir := filepath.Join(dir, "not-a-dir")
+	if err := os.WriteFile(notADir, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	passSummaryPath := filepath.Join(notADir, "pass-summary.md")
+
+	cfg := config{passSummaryPath: passSummaryPath}
+	state := runstate.RunState{PassSummaryPath: "/tmp/prior-pass-summary.md"}
+
+	recordPassSummary(cfg, &state, nil)
+
+	if state.PassSummaryPath != "/tmp/prior-pass-summary.md" {
+		t.Errorf("PassSummaryPath = %q, want prior value %q preserved on non-ENOENT stat error", state.PassSummaryPath, "/tmp/prior-pass-summary.md")
+	}
+}
+
+// TestRunClearsPassSummaryPathWhenPassLeavesSeededFileUntouched verifies
+// run does not re-affirm state.PassSummaryPath when the file it already
+// pointed at going into this pass (seeded from a prior pass's real summary,
+// so seedAndInvokePass's own guard deliberately left it on disk rather than
+// unlinking it) comes out of this pass byte-for-byte identical -- i.e. this
+// pass's own driver-exec crashed, timed out, or otherwise never touched it.
+// Without staleness detection, the post-pass os.Stat in recordPassSummary
+// finds the leftover file and wrongly re-seeds state.PassSummaryPath as if
+// this pass had freshly written it, handing the next pass a summary that is
+// now two passes stale with no signal anything went wrong (non-blocking
+// review finding on seedAndInvokePass/recordPassSummary's interaction,
+// issue #2549). Mirrors TestRunUnlinksStalePassSummaryPathBeforePass's
+// shape, but seeds state.PassSummaryPath so seedAndInvokePass does NOT
+// unlink the file up front, matching the seeded-reference case this test
+// targets.
+func TestRunClearsPassSummaryPathWhenPassLeavesSeededFileUntouched(t *testing.T) {
+	dir := t.TempDir()
+	callLog := filepath.Join(dir, "calls.log")
+	// The fake driver-exec deliberately never touches cfg.passSummaryPath.
+	writeFakeDriverExec(t, dir, callLog, "exit 0\n")
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	passSummaryPath := filepath.Join(dir, "pass-summary.md")
+	if err := os.WriteFile(passSummaryPath, []byte("REAL SUMMARY FROM THE PRIOR PASS"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	stateFile := filepath.Join(dir, "run-state.json")
+	prior := runstate.RunState{PassSummaryPath: passSummaryPath}
+	if err := runstate.WriteRunState(stateFile, prior); err != nil {
+		t.Fatal(err)
+	}
+
+	promptFile := filepath.Join(dir, "prompt.txt")
+	if err := os.WriteFile(promptFile, []byte("prompt"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config{
+		promptFile:      promptFile,
+		driverBin:       "claude",
+		logPath:         filepath.Join(dir, "stream.log"),
+		heartbeatLog:    filepath.Join(dir, "heartbeat.log"),
+		stateFile:       stateFile,
+		passSummaryPath: passSummaryPath,
+	}
+
+	if _, err := run(cfg, &bytes.Buffer{}); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	// The file itself is left alone -- this test is about run's own
+	// bookkeeping around a file it never removes when seeded, not about the
+	// file's presence on disk.
+	if _, err := os.Stat(passSummaryPath); err != nil {
+		t.Fatalf("os.Stat(passSummaryPath): %v, want file still present (seeded reference, never unlinked)", err)
+	}
+
+	got, err := runstate.ReadRunState(stateFile)
+	if err != nil {
+		t.Fatalf("ReadRunState: %v", err)
+	}
+	if got.PassSummaryPath != "" {
+		t.Errorf("PassSummaryPath = %q, want \"\" (this pass left the seeded file byte-for-byte unchanged, so it must not be re-recorded as this pass's own fresh summary)", got.PassSummaryPath)
+	}
+}
+
 // TestRunWithReviewPassRecordsPassSummaryPathIntoRunState verifies
 // runWithReviewPass -- the loop production actually runs once entrypoint.sh
 // sets cfg.reviewPromptFile (ADR 0035) -- records cfg.passSummaryPath into
