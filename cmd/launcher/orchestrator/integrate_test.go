@@ -144,3 +144,137 @@ func TestIntegrateSliceBranchConflictAbortsCleanly(t *testing.T) {
 		t.Errorf("CHERRY_PICK_HEAD exists (stat err = %v), want no in-progress cherry-pick left behind", err)
 	}
 }
+
+// TestIntegrateSliceBranchRefusesDirtyRepoRoot verifies integrateSliceBranch
+// refuses to run at all -- never attempting merge-base/rev-list/cherry-pick
+// -- when repoRoot already has pre-existing uncommitted/staged changes
+// before the call, and that those changes survive untouched (issue #2060
+// review finding: `git cherry-pick --abort` on the conflict path can
+// destroy pre-existing staged work, since it resets the index/tree to
+// whatever they were when the cherry-pick started, not necessarily clean).
+func TestIntegrateSliceBranchRefusesDirtyRepoRoot(t *testing.T) {
+	repoRoot := chdirToFreshWorkerRepo(t)
+	base := currentBranchT(t, repoRoot)
+
+	// Branch off the initial commit, write conflict.txt with one content on
+	// the branch...
+	runGitT(t, repoRoot, "checkout", "-b", "orchestrator-worker/conflict-slice")
+	if err := os.WriteFile(filepath.Join(repoRoot, "conflict.txt"), []byte("worker's own content\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	runGitT(t, repoRoot, "add", "conflict.txt")
+	runGitT(t, repoRoot, "commit", "-m", "worker adds conflict.txt")
+
+	// ...then, back on the original branch, write conflict.txt with
+	// DIFFERENT content, so integrating conflict-slice would conflict.
+	runGitT(t, repoRoot, "checkout", base)
+	if err := os.WriteFile(filepath.Join(repoRoot, "conflict.txt"), []byte("HEAD's own different content\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	runGitT(t, repoRoot, "add", "conflict.txt")
+	runGitT(t, repoRoot, "commit", "-m", "HEAD adds conflict.txt independently")
+
+	// Now stage unrelated pre-existing work in repoRoot, simulating the
+	// coordinator's own in-flight edit sitting in the index before this
+	// call ever runs.
+	preexistingPath := filepath.Join(repoRoot, "preexisting.txt")
+	if err := os.WriteFile(preexistingPath, []byte("coordinator's own staged work\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	runGitT(t, repoRoot, "add", "preexisting.txt")
+
+	before := strings.TrimSpace(runGitT(t, repoRoot, "rev-parse", "HEAD"))
+
+	status, _, err := integrateSliceBranch(repoRoot, "conflict-slice", "orchestrator-worker/conflict-slice")
+	if err == nil {
+		t.Fatal("integrateSliceBranch() error = nil, want a non-nil error refusing to run on a dirty repoRoot")
+	}
+	if status != integrateFailed {
+		t.Errorf("integrateSliceBranch() status = %q, want %q", status, integrateFailed)
+	}
+
+	after := strings.TrimSpace(runGitT(t, repoRoot, "rev-parse", "HEAD"))
+	if before != after {
+		t.Errorf("HEAD = %q after refused integration, want unchanged %q", after, before)
+	}
+
+	got, readErr := os.ReadFile(preexistingPath)
+	if readErr != nil {
+		t.Fatalf("ReadFile(preexisting.txt) after refused integration: %v", readErr)
+	}
+	if string(got) != "coordinator's own staged work\n" {
+		t.Errorf("preexisting.txt content = %q, want the pre-existing staged content to survive untouched", got)
+	}
+
+	staged := runGitT(t, repoRoot, "diff", "--cached", "--name-only")
+	if strings.TrimSpace(staged) != "preexisting.txt" {
+		t.Errorf("git diff --cached --name-only after refused integration = %q, want preexisting.txt still staged", staged)
+	}
+}
+
+// TestIntegrateSliceBranchAlreadyAppliedIsEmptyNotFailed verifies that when
+// two branches independently produce an identical net diff -- the first
+// integrated normally, the second's cherry-pick then applies cleanly but
+// stages nothing because the tree already matches -- integrateSliceBranch
+// reports integrateEmpty rather than treating `git commit`'s "nothing to
+// commit" exit as a hard failure (issue #2060 review finding).
+func TestIntegrateSliceBranchAlreadyAppliedIsEmptyNotFailed(t *testing.T) {
+	repoRoot := chdirToFreshWorkerRepo(t)
+	base := currentBranchT(t, repoRoot)
+
+	// First branch: adds dup.txt with some content.
+	runGitT(t, repoRoot, "checkout", "-b", "orchestrator-worker/first-slice")
+	if err := os.WriteFile(filepath.Join(repoRoot, "dup.txt"), []byte("identical content\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	runGitT(t, repoRoot, "add", "dup.txt")
+	runGitT(t, repoRoot, "commit", "-m", "first slice adds dup.txt")
+	runGitT(t, repoRoot, "checkout", base)
+
+	// Second branch: also adds dup.txt with the exact same content, off the
+	// same original base -- an independent commit producing an identical
+	// net diff.
+	runGitT(t, repoRoot, "checkout", "-b", "orchestrator-worker/second-slice")
+	if err := os.WriteFile(filepath.Join(repoRoot, "dup.txt"), []byte("identical content\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	runGitT(t, repoRoot, "add", "dup.txt")
+	runGitT(t, repoRoot, "commit", "-m", "second slice adds dup.txt")
+	runGitT(t, repoRoot, "checkout", base)
+
+	// Integrate the first slice normally.
+	status, out, err := integrateSliceBranch(repoRoot, "first-slice", "orchestrator-worker/first-slice")
+	if err != nil {
+		t.Fatalf("integrateSliceBranch(first-slice) error = %v", err)
+	}
+	if status != integrateOK {
+		t.Fatalf("integrateSliceBranch(first-slice) status = %q, want %q (output: %q)", status, integrateOK, out)
+	}
+
+	before := strings.TrimSpace(runGitT(t, repoRoot, "rev-parse", "HEAD"))
+
+	// Integrating the second slice now cherry-picks a commit whose net
+	// diff is already present on HEAD via the first slice's integration --
+	// the cherry-pick applies cleanly but stages nothing.
+	status, out, err = integrateSliceBranch(repoRoot, "second-slice", "orchestrator-worker/second-slice")
+	if err != nil {
+		t.Fatalf("integrateSliceBranch(second-slice) error = %v", err)
+	}
+	if status != integrateEmpty {
+		t.Fatalf("integrateSliceBranch(second-slice) status = %q, want %q (output: %q)", status, integrateEmpty, out)
+	}
+
+	after := strings.TrimSpace(runGitT(t, repoRoot, "rev-parse", "HEAD"))
+	if before != after {
+		t.Errorf("HEAD = %q after already-applied integration, want unchanged %q", after, before)
+	}
+
+	statusOut := runGitT(t, repoRoot, "status", "--short")
+	if strings.TrimSpace(statusOut) != "" {
+		t.Errorf("git status --short after already-applied integration = %q, want empty (working tree must be left clean)", statusOut)
+	}
+
+	if _, statErr := os.Stat(filepath.Join(repoRoot, ".git", "CHERRY_PICK_HEAD")); !os.IsNotExist(statErr) {
+		t.Errorf("CHERRY_PICK_HEAD exists (stat err = %v), want no in-progress cherry-pick left behind", statErr)
+	}
+}
