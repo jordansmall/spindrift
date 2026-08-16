@@ -181,8 +181,10 @@ let
 
   # The backend descriptor registry (issue #2521): one row per ISSUE_TRACKER/
   # CODE_FORGE backend, carrying capability bits like relayCapable/
-  # hostPostingCapable consumed by readOnlyCapabilityOk below. Imported the
-  # same way lib/env-schema.nix does (no `lib` in scope needed).
+  # hostPostingCapable (consumed by readOnlyCapabilityOk below) and
+  # hostMediatedRemote/outboxRelayCapable/inBoxUnreachableTracker (consumed
+  # by codeForgeRow/issueTrackerRow below, issue #2527 slice 1). Imported
+  # the same way lib/env-schema.nix does (no `lib` in scope needed).
   backends = import ./backends/default.nix;
 
   # Section taxonomy and man-page renderer, shared with flakeModule.nix and the
@@ -311,6 +313,31 @@ let
   # keys, which are expected to carry one (strict mode there throws on a miss).
   schemaDefaults = rosterSchemaDefaults.readSchemaDefaults { strict = false; } flakeOptionEntries;
   mergedDefaults = schemaDefaults // defaults;
+
+  # lib/env-schema.nix imports the same `backends` registry (bound above)
+  # to derive its codeForge/issueTracker choices lists -- resolved here to
+  # the two rows the *selected* CODE_FORGE and ISSUE_TRACKER knob values
+  # pick out (issue #2527 slice 1), so the capability bits below don't
+  # hand-duplicate per-backend facts already declared once in the registry.
+  # Falls back to `{ }` on a bogus/unregistered name (every capability bit
+  # then reads `false`) rather than throwing: Go's own validate() already
+  # rejects an invalid CODE_FORGE/ISSUE_TRACKER at runtime, so nix doesn't
+  # need to duplicate that rejection here. readOnlyCapabilityOk below
+  # reuses these same two rows for its own relayCapable/hostPostingCapable
+  # checks instead of looking them up a second time.
+  codeForgeRow = lib.findFirst (r: r.name == mergedDefaults.codeForge) { } backends;
+  issueTrackerRow = lib.findFirst (r: r.name == mergedDefaults.issueTracker) { } backends;
+
+  # Four capability signals derived from the resolved CODE_FORGE/
+  # ISSUE_TRACKER backend rows above, threaded into the Launcher input
+  # document's `run` artifacts (preambles.runArtifacts) as
+  # HOST_MEDIATED_REMOTE / OUTBOX_RELAY_CAPABLE / IN_BOX_UNREACHABLE_TRACKER
+  # / FULLY_LOCAL (issue #2527 slice 1) so a later Go-side slice can read
+  # them via getenvArtifact instead of re-deriving backend facts itself.
+  hostMediatedRemote = codeForgeRow.hostMediatedRemote or false;
+  outboxRelayCapable = codeForgeRow.outboxRelayCapable or false;
+  inBoxUnreachableTracker = issueTrackerRow.inBoxUnreachableTracker or false;
+  fullyLocal = hostMediatedRemote && inBoxUnreachableTracker;
 
   # Eval-time choices guard (issue #2519 slice 2): lib/flakeModule.nix's
   # generated Consumer options use `types.enum` for every schema knob
@@ -929,6 +956,10 @@ let
       imageDrv
       nixBuilderImage
       linuxSystem
+      hostMediatedRemote
+      outboxRelayCapable
+      inBoxUnreachableTracker
+      fullyLocal
       ;
     boxEnvVars = preambles.renderBoxEnvVarsList schema;
   };
@@ -1228,6 +1259,30 @@ let
   # cmd/launcher/orchestrator/workers.go's LaunchWorkers/runBounded doc
   # comments for where that trade-off is recorded.
 
+  # Eval-time coherence assert (issue #2527 slice 1): REPO_SLUG is
+  # deliberately runtime-only (ADR 0001 -- "REPO_SLUG... stay runtime env,
+  # never Nix options"), so this must NOT throw just because
+  # mergedDefaults.repoSlug is "" -- that's the overwhelmingly common case
+  # (most Consumers, including this repo's own dogfood config, never set
+  # `defaults.repoSlug` at all, supplying it only via `--repo-slug`/
+  # REPO_SLUG at actual dispatch time) and nix/checks/equivalence.nix's
+  # flakemodule-widen-operator-knobs check pins `mkRun {}` baking
+  # `"REPO_SLUG":""` as a MUST-succeed case precisely so runtime
+  # required-validation isn't masked.
+  #
+  # What genuinely is eval-decidable: a Consumer flake that EXPLICITLY
+  # writes `repoSlug = "";` (detected via attribute-presence on the raw
+  # `defaults` argument, not the schema-defaulted mergedDefaults) while also
+  # selecting a non-fully-local CODE_FORGE/ISSUE_TRACKER pairing -- a real,
+  # if narrow, foot-gun (e.g. a copy-pasted template placeholder) that would
+  # otherwise bake an image that dies at launcher startup instead of at
+  # eval time (spec #2517's Problem Statement).
+  repoSlugCoherenceOk =
+    if (defaults ? repoSlug) && defaults.repoSlug == "" && !fullyLocal then
+      throw "mkHarness: repoSlug is explicitly set to an empty string, but CODE_FORGE=${mergedDefaults.codeForge}/ISSUE_TRACKER=${mergedDefaults.issueTracker} is not fully-local (CODE_FORGE=local and ISSUE_TRACKER=local) -- either supply a real repoSlug or omit the key entirely so REPO_SLUG is supplied at dispatch runtime instead"
+    else
+      true;
+
   # Eval-time capability-coherence assert (issue #2526, slice 2 of 3):
   # BOX_FORGE_AND_ISSUE_ACCESS=read-only denies the Box a write token on both
   # axes, so every write it would otherwise make must instead be host-
@@ -1243,14 +1298,12 @@ let
   # check subsumes its coherence half). read-write (the default) is a fast
   # no-op -- it never inspects the selected backends, mirroring how the Go
   # gate short-circuits on c.boxForgeAndIssueAccess != "read-only".
-  selectedCodeForgeRow = lib.findFirst (b: b.name == mergedDefaults.codeForge) null backends;
-  selectedIssueTrackerRow = lib.findFirst (b: b.name == mergedDefaults.issueTracker) null backends;
   readOnlyCapabilityOk =
     if mergedDefaults.boxForgeAndIssueAccess != "read-only" then
       true
-    else if !(selectedCodeForgeRow.relayCapable or false) then
+    else if !(codeForgeRow.relayCapable or false) then
       throw "mkHarness: BOX_FORGE_AND_ISSUE_ACCESS=read-only: the selected CODE_FORGE=${mergedDefaults.codeForge} does not implement bundle-relay (forge.BundleRelay) for the Box's finished branch hand-off"
-    else if !(selectedIssueTrackerRow.hostPostingCapable or false) then
+    else if !(issueTrackerRow.hostPostingCapable or false) then
       throw "mkHarness: BOX_FORGE_AND_ISSUE_ACCESS=read-only: the selected ISSUE_TRACKER=${mergedDefaults.issueTracker} does not implement host-posted comments and issue-filing (forge.HostPostedCommenter / forge.HostPostedIssueFiler)"
     else
       true;
@@ -1261,6 +1314,7 @@ else
   assert buildTimeRejectOk;
   assert forbiddenMarkerCheckOk;
   assert maxParallelWorkersCoherenceOk;
+  assert repoSlugCoherenceOk;
   assert choicesCheckOk;
   assert readOnlyCapabilityOk;
   lib.warnIf (legacyKnobsSet != [ ]) deprecationMsg {
