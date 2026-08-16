@@ -175,6 +175,47 @@ func TestGatesOrchestratorReviewLoop(t *testing.T) {
 				"REVIEW_LOOP_ORCHESTRATOR": false,
 			},
 		},
+		{
+			// ReviewLoopInline/ReviewLoopOrchestrator's zero value: the
+			// shape a version-skew dispatch leaves behind, not just a
+			// stray `Env{}` literal. BOX_REVIEW_LOOP_INLINE/ORCHESTRATOR
+			// are dispatch-time-only forwards (issue #2533) with no baked
+			// preamble default, so an older host launcher binary that
+			// predates issue #2533 (and therefore never sets either env
+			// var) dispatching against a newer box image leaves both false
+			// here even though ORCHESTRATOR_ENABLED itself -- a
+			// pre-existing knob issue #2533 left untouched -- still arrives
+			// correctly. Before issue #2533, entrypoint.sh's own bash
+			// negation of $ORCHESTRATOR guaranteed exactly one of the pair
+			// fired regardless; Gates now reproduces that same negation as
+			// a version-skew safety net (falling back to the live
+			// ORCHESTRATOR gate computed a few lines above) rather than
+			// leaving both off and breaking the exactly-one-true invariant
+			// (env.go: 78-91).
+			name: "both review-loop fields empty, orchestrator off: falls open to inline",
+			env: Env{
+				OrchestratorEnabled: false,
+			},
+			want: map[string]bool{
+				"ORCHESTRATOR":             false,
+				"REVIEW_LOOP_INLINE":       true,
+				"REVIEW_LOOP_ORCHESTRATOR": false,
+			},
+		},
+		{
+			// Same version-skew scenario as above, but with
+			// ORCHESTRATOR_ENABLED itself on: the fallback must track the
+			// live ORCHESTRATOR gate, not hardcode inline regardless of it.
+			name: "both review-loop fields empty, orchestrator on: falls open to orchestrator",
+			env: Env{
+				OrchestratorEnabled: true,
+			},
+			want: map[string]bool{
+				"ORCHESTRATOR":             true,
+				"REVIEW_LOOP_INLINE":       false,
+				"REVIEW_LOOP_ORCHESTRATOR": true,
+			},
+		},
 	}
 	for _, tc := range cases {
 		tc := tc
@@ -300,24 +341,29 @@ func TestGatesCodeForgeBackend(t *testing.T) {
 			},
 		},
 		{
-			// ForgeBackend's zero value: an Env built without populating it
-			// (e.g. a stray `Env{}` literal, or an upstream caller that
-			// forgot to thread nix's resolved backend through). Mirrors
-			// TestGatesIssueTrackerReadAxis's "empty TrackerAxisRead fails
-			// closed" case: nix is the sole source of truth for a non-empty
-			// backend value, so Gates fails closed (every gate off,
-			// including FIX_CI_READ's unconditional-on-backend fork) rather
-			// than silently guessing GH -- an empty ForgeBackend must never
-			// silently drop every PR-create/CI-read instruction without a
-			// loud signal that nix's resolution never reached here (issue
-			// #2533 review).
-			name:            "empty ForgeBackend fails closed: no gate fires",
+			// ForgeBackend's zero value: the shape a version-skew dispatch
+			// leaves behind, not just a stray `Env{}` literal. BOX_FORGE_
+			// BACKEND is a dispatch-time-only forward (issue #2533) with no
+			// baked preamble default, so an older host launcher binary that
+			// predates issue #2533 (and therefore never sets that env var
+			// at all) dispatching against a newer box image leaves
+			// ForgeBackend empty here even though the access-forge gate
+			// family is fully wired up. Before issue #2533, entrypoint.sh's
+			// own bash "${CODE_FORGE:-github}" defaulting guaranteed a real
+			// gate fired regardless (including FIX_CI_READ's unconditional-
+			// on-backend fork); Gates now reproduces that same default arm
+			// as a version-skew safety net so an old-launcher/new-box
+			// pairing renders the GH arm instead of silently dropping
+			// every PR-create/CI-read instruction for the run. This pins
+			// that fail-open contract so a future change can't silently
+			// reintroduce the fail-closed regression.
+			name:            "empty ForgeBackend falls open to GH default",
 			forgeBackend:    "",
 			boxWriteEnabled: true,
 			want: map[string]bool{
-				"OPEN_PR_CREATE_RW_GH":      false,
+				"OPEN_PR_CREATE_RW_GH":      true,
 				"OPEN_PR_CREATE_RW_FORGEJO": false,
-				"FIX_CI_READ_GH":            false,
+				"FIX_CI_READ_GH":            true,
 				"FIX_CI_READ_FORGEJO":       false,
 			},
 		},
