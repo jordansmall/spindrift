@@ -29,7 +29,14 @@
 # from `rosterDefaults` (lib/roster-schema-defaults.nix; issue #2386/#2506)
 # -- a caller assembling a custom roster by hand still gets no injected
 # default, since that stays specific to `defaultRoster`'s own lookup, not a
-# `normalizeRoster`-level behavior.
+# `normalizeRoster`-level behavior. One exception (issue #2512): the
+# `reviewEffort` legacy knob, when supplied non-empty, overrides the
+# reviewer entry's own default `effort` the same way the `reviewModel`
+# legacy knob already overrides the reviewer's `model` above -- precedence
+# is `reviewEffort` (non-empty) over `rosterDefaults.reviewer.effort`.
+# Reviewer-only, deliberately: there is no `models`-attrset-style per-name
+# override for `effort` the way there is for `model`, since this issue's
+# scope is limited to the reviewer entry.
 { lib }:
 {
   # Normalizes a roster list before any Driver consumes it (issue #2152 slice
@@ -75,6 +82,7 @@
       reviewModel ? null,
       filerModel ? null,
       workerModel ? null,
+      reviewEffort ? null,
       models ? { },
     }:
     let
@@ -95,6 +103,12 @@
           legacyModels.${name}
         else
           schemaDefaults.${name};
+      effortFor =
+        name:
+        if name == "reviewer" && reviewEffort != null && reviewEffort != "" then
+          reviewEffort
+        else
+          rosterDefaults.${name}.effort;
     in
     if unknownNames != [ ] then
       throw "defaultRoster: models names unknown agent(s) ${builtins.toJSON unknownNames} -- expected one of ${builtins.toJSON (builtins.attrNames legacyModels)}"
@@ -103,7 +117,7 @@
         {
           name = "scout";
           model = modelFor "scout";
-          effort = rosterDefaults.scout.effort;
+          effort = effortFor "scout";
           mode = "subagent";
           description = "Map relevant files, seams, and tests; return a structured brief";
           tools = [
@@ -120,7 +134,7 @@
         {
           name = "reviewer";
           model = modelFor "reviewer";
-          effort = rosterDefaults.reviewer.effort;
+          effort = effortFor "reviewer";
           mode = "subagent";
           description = "Review the branch diff for spec compliance and coding standards";
           tools = [
@@ -135,7 +149,7 @@
         {
           name = "filer";
           model = modelFor "filer";
-          effort = rosterDefaults.filer.effort;
+          effort = effortFor "filer";
           mode = "subagent";
           description = "File issues from a review's non-blocking findings, best-effort";
           tools = [
@@ -149,7 +163,7 @@
         {
           name = "worker";
           model = modelFor "worker";
-          effort = rosterDefaults.worker.effort;
+          effort = effortFor "worker";
           mode = "subagent";
           description = "Implement a scoped slice of work delegated to it, with full implement-capable tools";
           tools = [

@@ -332,6 +332,7 @@ let
         reviewModel = mergedDefaults.reviewModel or "";
         filerModel = mergedDefaults.filerModel or "";
         workerModel = mergedDefaults.workerModel or "";
+        reviewEffort = mergedDefaults.reviewEffort or "";
       }
   );
 
