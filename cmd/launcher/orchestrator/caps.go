@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"math"
+	"strconv"
 
 	"spindrift.dev/launcher/internal/passmachine"
 )
@@ -213,40 +214,32 @@ func validateMaxParallelWorkers(maxParallelWorkers int) error {
 	return nil
 }
 
-// validateBudgetCaps rejects a negative -max-budget-tokens/-max-budget-usd
-// value (issue #2694). Unlike -max-parallel-workers above, 0 IS a
-// legitimate value here -- budget's own "disabled" sentinel, matching
-// maxReviewRounds/maxSlices' convention (and MAX_BUDGET_TOKENS/
-// MAX_BUDGET_USD's existing selfHealGate one) -- but there is no meaningful
-// negative budget, and passmachine's own budgetExceeded compares with >=, so
-// a negative cap would silently behave exactly like a disabled one instead
-// of erroring: a fast, attributed startup failure here is better than that
-// silent, misleading no-op, mirroring validateMaxParallelWorkers' own
-// fatal-on-nonsense-value precedent just above.
-func validateBudgetCaps(maxBudgetTokens int, maxBudgetUSD float64) error {
-	if maxBudgetTokens < 0 {
-		return fmt.Errorf("orchestrator: -max-budget-tokens=%d must be >= 0 (0 disables the cap)", maxBudgetTokens)
+// parseNonnegBudgetTokens parses s (main.go's own -max-budget-tokens flag
+// value) as a non-negative integer budget cap, degrading a negative or
+// malformed value to 0 (disabled) rather than erroring (issue #2694 review
+// finding) -- deliberately mirroring the host launcher's own atoiNonneg
+// (cmd/launcher/main.go): MAX_BUDGET_TOKENS is boxEnv now, forwarded into
+// the Box unconditionally by entrypoint.sh, so a stale or mistyped value
+// the host has always tolerated silently (atoiNonneg falls back to its
+// schema default on the same bad input) must degrade the same way here, not
+// newly kill the Box over a value that was never fatal before this cap
+// existed. Unlike -max-parallel-workers, there is no meaningful "reject
+// outright" case for a budget cap: 0 is already its own legitimate
+// "disabled" sentinel, so a negative value simply collapses into that same
+// sentinel instead of a distinct error state.
+func parseNonnegBudgetTokens(s string) int {
+	if n, err := strconv.Atoi(s); err == nil && n >= 0 {
+		return n
 	}
-	if maxBudgetUSD < 0 {
-		return fmt.Errorf("orchestrator: -max-budget-usd=%v must be >= 0 (0 disables the cap)", maxBudgetUSD)
-	}
-	return nil
+	return 0
 }
 
-// warnBudgetCapsUnconsultedByLegacyLoop returns a non-fatal advisory (issue
-// #2694 review finding) when a positive -max-budget-tokens/-max-budget-usd
-// is configured but -review-prompt-file is unset (reviewPassEnabled false):
-// the legacy single-loop path's own decision (legacyTransition) has no
-// budget case at all -- only the review loop's own review-pass decision
-// (reviewTransition) ever consults Caps.MaxBudgetTokens/MaxBudgetUSD -- so a
-// budget cap configured under the legacy loop is silently inert, with no
-// other symptom. Mirrors validateCaps' own warn-and-continue shape (issue
-// #2460) rather than validateBudgetCaps' fatal one just above: this isn't
-// invalid input, just a cap that does nothing under the selected loop, so
-// the run still proceeds. Returns "" when there is nothing to warn about.
-func warnBudgetCapsUnconsultedByLegacyLoop(maxBudgetTokens int, maxBudgetUSD float64, reviewPassEnabled bool) string {
-	if reviewPassEnabled || (maxBudgetTokens <= 0 && maxBudgetUSD <= 0) {
-		return ""
+// parseNonnegBudgetUSD is parseNonnegBudgetTokens' -max-budget-usd
+// counterpart, mirroring the host launcher's own floatNonnegSchema/
+// floatNonneg the same way.
+func parseNonnegBudgetUSD(s string) float64 {
+	if n, err := strconv.ParseFloat(s, 64); err == nil && n >= 0 {
+		return n
 	}
-	return fmt.Sprintf("orchestrator: -max-budget-tokens=%d/-max-budget-usd=%v configured but -review-prompt-file is unset -- the legacy single-loop path never consults the budget cap, so it has no effect", maxBudgetTokens, maxBudgetUSD)
+	return 0
 }

@@ -1419,19 +1419,20 @@ artifact, not a growing transcript:
   meet or exceed the configured cap, a further `BLOCK`-triggered review
   round instead commits the run to one terminal land pass, the same
   terminal-land mechanism `--max-review-rounds`/`--max-slices` already use.
-  Either dimension alone can trip it; negative values are rejected at
-  startup. Unlike `--max-review-rounds`/`--max-slices` — both consulted by
-  the legacy single-loop path too — `--max-budget-tokens`/`--max-budget-usd`
-  is consulted only by the code-owned review pass's own decision: the
-  legacy loop (`--review-prompt-file` unset) accepts both flags without
-  error (mainRun warns to stderr instead of erroring, since a configured
-  cap that turns out to be inert isn't invalid input, just pointless under
-  the selected loop) but never reads them, so a run on that path spends
-  past a configured budget cap with no warning beyond that one startup
-  line. Forwarded from the same `MAX_BUDGET_TOKENS`/`MAX_BUDGET_USD` knobs
-  the [Advanced tuning](#advanced-tuning) table's `selfHealing` group
-  already documents — see that table for the operator-facing env
-  var/`settings` surface.
+  Either dimension alone can trip it; a negative or malformed value
+  silently degrades to `0` (disabled) rather than erroring, mirroring the
+  host launcher's own tolerance for the identical `MAX_BUDGET_TOKENS`/
+  `MAX_BUDGET_USD` env vars (`atoiNonneg`/`floatNonneg`) — there is no
+  coherent reason for the Box to be stricter than the host about the same
+  knob. Unlike `--max-review-rounds`/`--max-slices` — both consulted by the
+  legacy single-loop path too — `--max-budget-tokens`/`--max-budget-usd` is
+  consulted only by the code-owned review pass's own decision: the legacy
+  loop (`--review-prompt-file` unset) accepts both flags without error but
+  never reads them, so a run on that path spends past a configured budget
+  cap with no warning at all. Forwarded from the same `MAX_BUDGET_TOKENS`/
+  `MAX_BUDGET_USD` knobs the [Advanced tuning](#advanced-tuning) table's
+  `selfHealing` group already documents — see that table for the
+  operator-facing env var/`settings` surface.
 
 **Code-owned review pass (issue #2037).** `--review-prompt-file` names a
 distinct prompt (`review-prompt.md`) the orchestrator invokes as its own
