@@ -1,6 +1,10 @@
 package main
 
-import "fmt"
+import (
+	"fmt"
+
+	"spindrift.dev/launcher/internal/passmachine"
+)
 
 // defaultMaxReviewRounds and defaultMaxSlices are the orchestrator's shipped
 // --max-review-rounds / --max-slices flag defaults (issue #2460). They live
@@ -19,28 +23,20 @@ const (
 // review pass is configured (run.go's run(), around line 130, dispatches
 // between them on cfg.reviewPromptFile), and each has its own reachability
 // math for how many maxSlices invocations it takes to let reviewRounds
-// actually reach maxReviewRounds -- so the minSlices formula depends on
+// actually reach maxReviewRounds -- so the minSlices threshold depends on
 // reviewPassEnabled.
 //
-// reviewPassEnabled == true (runWithReviewPass, run.go): implement and
-// review are separate driver-exec invocations, and reaching a review pass
-// where reviewRounds == maxReviewRounds, then still running the one
-// terminal "land" pass after it (issue #2457), requires 2*maxReviewRounds+3
-// total invocations: 1 initial implement pass + (maxReviewRounds+1) review
-// passes + maxReviewRounds fix passes + 1 terminal land pass.
+// Rather than hand-deriving that threshold as a formula (issue #2548: that
+// formula silently drifted out of sync with the loop it was describing
+// once), minSlices is computed by simulateReviewRoundCapPass, which drives
+// passmachine.Transition -- the same pure decision function run.go's own
+// loops call -- forward pass by pass until the review-round cap itself
+// fires. That keeps this check anchored to the loop's real transition logic
+// instead of a derivation that can go stale.
 //
-// reviewPassEnabled == false (the legacy single-loop path, run.go lines
-// ~142-212): each pass does its own inline review instead of splitting
-// implement/review into separate invocations, so reviewRounds reaches
-// maxReviewRounds after just maxReviewRounds+1 invocations. That loop's own
-// switch also checks its maxSlices case ahead of its maxReviewRounds case,
-// so maxSlices must allow one more invocation than that (maxReviewRounds+2)
-// for the review-round cap to ever fire with correct attribution instead of
-// being shadowed by maxSlices stopping the loop first.
-//
-// In both cases, when maxSlices is too small to let reviewRounds ever reach
-// maxReviewRounds, maxSlices always fires first and silently shadows the
-// review-round cap -- the loop stops for the wrong reason and the
+// In both loop shapes, when maxSlices is too small to let reviewRounds ever
+// reach maxReviewRounds, maxSlices always fires first and silently shadows
+// the review-round cap -- the loop stops for the wrong reason and the
 // review-round cap never gets attributed as the stop reason.
 //
 // Zero means "disabled" for either cap (run.go's existing convention): a
@@ -50,16 +46,79 @@ func validateCaps(maxReviewRounds, maxSlices int, reviewPassEnabled bool) error 
 	if maxReviewRounds <= 0 || maxSlices <= 0 {
 		return nil
 	}
-	var minSlices int
-	if reviewPassEnabled {
-		minSlices = 2*maxReviewRounds + 3
-	} else {
-		minSlices = maxReviewRounds + 2
-	}
+	minSlices := simulateReviewRoundCapPass(maxReviewRounds, reviewPassEnabled) + 1
 	if maxSlices < minSlices {
 		return fmt.Errorf("orchestrator: -max-slices=%d cannot reach -max-review-rounds=%d (need -max-slices >= %d, or -max-slices=0/-max-review-rounds=0 to disable a cap)", maxSlices, maxReviewRounds, minSlices)
 	}
 	return nil
+}
+
+// simulateReviewRoundCapPass drives passmachine.Transition forward, pass by
+// pass, with maxSlices disabled and a reviewer that always BLOCKs, until the
+// review-round cap itself fires -- returning the 1-indexed pass count at
+// which that happens. validateCaps uses this instead of a hand-derived
+// formula (issue #2548), so a change to the loop's own transition logic can
+// never silently invalidate this arithmetic.
+func simulateReviewRoundCapPass(maxReviewRounds int, reviewPassEnabled bool) int {
+	caps := passmachine.Caps{MaxSlices: 0, MaxReviewRounds: maxReviewRounds}
+	pass := 0
+	reviewRounds := 0
+
+	if !reviewPassEnabled {
+		for {
+			pass++
+			d := passmachine.Transition(passmachine.Input{
+				PassJustExecuted: passmachine.KindLegacy,
+				Verdict:          passmachine.VerdictBlock,
+				Pass:             pass,
+				ReviewRounds:     reviewRounds,
+				Caps:             caps,
+			})
+			if d.Stop == passmachine.StopMaxReviewRoundsReached {
+				return pass
+			}
+			if d.IncrementReviewRounds {
+				reviewRounds++
+			}
+		}
+	}
+
+	passKind := passmachine.KindImplement
+	terminalLand := false
+	lastVerdict := passmachine.VerdictNone
+	for {
+		pass++
+		var d passmachine.Decision
+		if passKind == passmachine.KindReview {
+			d = passmachine.Transition(passmachine.Input{
+				PassJustExecuted: passmachine.KindReview,
+				Verdict:          passmachine.VerdictBlock,
+				Pass:             pass,
+				ReviewRounds:     reviewRounds,
+				Caps:             caps,
+				TerminalLand:     terminalLand,
+			})
+			if d.IncrementReviewRounds {
+				reviewRounds++
+			}
+		} else {
+			d = passmachine.Transition(passmachine.Input{
+				PassJustExecuted: passKind,
+				HasOutcome:       false,
+				Pass:             pass,
+				Caps:             caps,
+				TerminalLand:     terminalLand,
+				LastVerdict:      lastVerdict,
+			})
+		}
+		if d.CapFired == "max review rounds reached" {
+			return pass
+		}
+		if d.SetTerminalLand {
+			terminalLand = true
+		}
+		passKind = d.NextPass
+	}
 }
 
 // validateMaxParallelWorkers rejects a non-positive -max-parallel-workers
