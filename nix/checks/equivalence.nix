@@ -602,10 +602,25 @@ in
           (mkRun {
             issueDiscovery.issueNumber = "42";
           }).moduleSpindrift;
+
+      # Guard-check for lib/mkHarness.nix's repoSlugCoherenceOk assert
+      # (issue #2527 slice 1): a Consumer flake explicitly setting an empty
+      # repoSlug while the CODE_FORGE/ISSUE_TRACKER pairing is not
+      # fully-local (the "github"/"github" schema default here) must throw
+      # at eval time -- mirrors badIssueNumber's shape immediately above.
+      # defaultRun above (mkRun {}, repoSlug never mentioned at all) must
+      # keep succeeding and keep baking "REPO_SLUG":"" -- untouched here.
+      badRepoSlug =
+        builtins.tryEval
+          (mkRun {
+            repository.repoSlug = "";
+          }).moduleSpindrift;
     in
     assert assertMsg (
       !badIssueNumber.success
     ) "ISSUE_NUMBER must not be settable via settings.issueDiscovery (keep-off list)";
+    assert assertMsg (!badRepoSlug.success)
+      "an explicit empty repoSlug with a non-fully-local CODE_FORGE/ISSUE_TRACKER pairing must throw at eval time (mkHarness's repoSlugCoherenceOk assert)";
     pkgs.runCommand "flakemodule-widen-operator-knobs"
       {
         behaviorDoc = behaviorRun.runInputDocumentFile;

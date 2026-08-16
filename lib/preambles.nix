@@ -104,6 +104,16 @@ rec {
       nixBuilderImage,
       linuxSystem,
       boxEnvVars,
+      # Four capability signals resolved by lib/mkHarness.nix from the
+      # backend descriptor registry (lib/backends/default.nix) for the
+      # active CODE_FORGE/ISSUE_TRACKER pairing (issue #2527 slice 1), as
+      # plain bools. Rendered below as the literal strings "true"/"false" --
+      # Go's getenvArtifact returns map[string]string, and a later slice
+      # compares against the literal string "true".
+      hostMediatedRemote,
+      outboxRelayCapable,
+      inBoxUnreachableTracker,
+      fullyLocal,
     }:
     (
       if runnerKind == "bwrap" then
@@ -134,6 +144,10 @@ rec {
         else
           "";
       BOX_ENV_VARS = boxEnvVars;
+      HOST_MEDIATED_REMOTE = if hostMediatedRemote then "true" else "false";
+      OUTBOX_RELAY_CAPABLE = if outboxRelayCapable then "true" else "false";
+      IN_BOX_UNREACHABLE_TRACKER = if inBoxUnreachableTracker then "true" else "false";
+      FULLY_LOCAL = if fullyLocal then "true" else "false";
     };
 
   # The Launcher input document's `artifacts` section for the `build`
@@ -203,6 +217,10 @@ rec {
           nixBuilderImage = "dummy";
           linuxSystem = "dummy";
           boxEnvVars = "dummy";
+          hostMediatedRemote = false;
+          outboxRelayCapable = false;
+          inBoxUnreachableTracker = false;
+          fullyLocal = false;
         };
       dummyBuildArtifacts =
         runnerKind:

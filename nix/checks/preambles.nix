@@ -31,12 +31,12 @@ in
         };
       };
     in
-    assert assertMsg (hasInfix ''MAX_PARALLEL=''${MAX_PARALLEL:-5}'' out)
+    assert assertMsg (hasInfix "MAX_PARALLEL=\${MAX_PARALLEL:-5}" out)
       "renderDefaultsPreamble must emit VAR=\${VAR:-<baked>} per flakeOption entry";
     assert assertMsg (
       !hasInfix "export " out
     ) "renderDefaultsPreamble export=false must not emit `export`";
-    assert assertMsg (hasInfix ''export MAX_PARALLEL=''${MAX_PARALLEL:-5}'' outExported)
+    assert assertMsg (hasInfix "export MAX_PARALLEL=\${MAX_PARALLEL:-5}" outExported)
       "renderDefaultsPreamble export=true must prefix each line with `export `";
     pkgs.runCommand "preambles-defaults-shape" { } "touch $out";
 
@@ -164,6 +164,10 @@ in
         nixBuilderImage = "docker.io/nixos/nix@sha256:aaaa";
         linuxSystem = "x86_64-linux";
         boxEnvVars = "MODEL BASE_BRANCH";
+        hostMediatedRemote = false;
+        outboxRelayCapable = true;
+        inBoxUnreachableTracker = false;
+        fullyLocal = false;
       };
     in
     assert assertMsg (
@@ -187,6 +191,14 @@ in
     assert assertMsg (
       out.BOX_ENV_VARS == "MODEL BASE_BRANCH"
     ) "runArtifacts (bwrap) must set BOX_ENV_VARS, got: ${builtins.toJSON out}";
+    assert assertMsg (out.HOST_MEDIATED_REMOTE == "false")
+      "runArtifacts (bwrap) must render HOST_MEDIATED_REMOTE as the literal string \"false\", got: ${builtins.toJSON out}";
+    assert assertMsg (out.OUTBOX_RELAY_CAPABLE == "true")
+      "runArtifacts (bwrap) must render OUTBOX_RELAY_CAPABLE as the literal string \"true\", got: ${builtins.toJSON out}";
+    assert assertMsg (out.IN_BOX_UNREACHABLE_TRACKER == "false")
+      "runArtifacts (bwrap) must render IN_BOX_UNREACHABLE_TRACKER as the literal string \"false\", got: ${builtins.toJSON out}";
+    assert assertMsg (out.FULLY_LOCAL == "false")
+      "runArtifacts (bwrap) must render FULLY_LOCAL as the literal string \"false\", got: ${builtins.toJSON out}";
     assert assertMsg (
       !(out ? IMAGE_ARCHIVE)
     ) "runArtifacts (bwrap) must not set OCI-only keys, got: ${builtins.toJSON out}";
@@ -211,6 +223,10 @@ in
         nixBuilderImage = "docker.io/nixos/nix@sha256:aaaa";
         linuxSystem = "x86_64-linux";
         boxEnvVars = "MODEL";
+        hostMediatedRemote = true;
+        outboxRelayCapable = false;
+        inBoxUnreachableTracker = true;
+        fullyLocal = true;
       };
     in
     assert assertMsg (
@@ -234,6 +250,14 @@ in
     assert assertMsg (
       out.DRIVER_SKILLS_DIR == "/home/agent/.claude/skills"
     ) "runArtifacts (oci) must fold in the driver mount targets, got: ${builtins.toJSON out}";
+    assert assertMsg (out.HOST_MEDIATED_REMOTE == "true")
+      "runArtifacts (oci) must render HOST_MEDIATED_REMOTE as the literal string \"true\", got: ${builtins.toJSON out}";
+    assert assertMsg (out.OUTBOX_RELAY_CAPABLE == "false")
+      "runArtifacts (oci) must render OUTBOX_RELAY_CAPABLE as the literal string \"false\", got: ${builtins.toJSON out}";
+    assert assertMsg (out.IN_BOX_UNREACHABLE_TRACKER == "true")
+      "runArtifacts (oci) must render IN_BOX_UNREACHABLE_TRACKER as the literal string \"true\", got: ${builtins.toJSON out}";
+    assert assertMsg (out.FULLY_LOCAL == "true")
+      "runArtifacts (oci) must render FULLY_LOCAL as the literal string \"true\", got: ${builtins.toJSON out}";
     assert assertMsg (
       !(out ? AGENT_FILES)
     ) "runArtifacts (oci) must not set bwrap-only keys, got: ${builtins.toJSON out}";
@@ -261,6 +285,10 @@ in
         nixBuilderImage = "docker.io/nixos/nix@sha256:aaaa";
         linuxSystem = "x86_64-linux";
         boxEnvVars = "MODEL";
+        hostMediatedRemote = false;
+        outboxRelayCapable = true;
+        inBoxUnreachableTracker = false;
+        fullyLocal = false;
       };
     in
     assert assertMsg (
@@ -355,13 +383,17 @@ in
         "DRIVER_SESSION_CACHE_DIR"
         "DRIVER_SKILLS_DIR"
         "FLAKE_IMAGE_ATTR"
+        "FULLY_LOCAL"
         "GITHUB_OUTPUT"
+        "HOST_MEDIATED_REMOTE"
         "IMAGE"
         "IMAGE_ARCHIVE"
         "IMAGE_DRV"
         "IMAGE_TAG"
+        "IN_BOX_UNREACHABLE_TRACKER"
         "NIX_BUILDER_IMAGE"
         "NIX_VOLUME"
+        "OUTBOX_RELAY_CAPABLE"
         "RUNTIME"
       ];
     in
