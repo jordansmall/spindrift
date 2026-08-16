@@ -65,6 +65,61 @@ func TestGatesSkillsBaking(t *testing.T) {
 	}
 }
 
+// TestGatesAutoFormatAutoLintSkillBaked covers the AUTO_FORMAT_BAKED/
+// AUTO_LINT_BAKED gates: each fires exactly when the corresponding skill was
+// baked at DRIVER_SKILLS_DIR/<name>/SKILL.md, mirroring the other four
+// skill-baked gates above -- these two exist for consistency/completeness of
+// the generated skill-baked family, not because any fragment row gates on
+// them yet.
+func TestGatesAutoFormatAutoLintSkillBaked(t *testing.T) {
+	cases := []struct {
+		name string
+		env  Env
+		want map[string]bool
+	}{
+		{
+			name: "neither baked",
+			env:  Env{},
+			want: map[string]bool{
+				"AUTO_FORMAT_BAKED": false,
+				"AUTO_LINT_BAKED":   false,
+			},
+		},
+		{
+			name: "both baked",
+			env: Env{
+				AutoFormatSkillBaked: true,
+				AutoLintSkillBaked:   true,
+			},
+			want: map[string]bool{
+				"AUTO_FORMAT_BAKED": true,
+				"AUTO_LINT_BAKED":   true,
+			},
+		},
+		{
+			name: "only auto-format baked",
+			env: Env{
+				AutoFormatSkillBaked: true,
+			},
+			want: map[string]bool{
+				"AUTO_FORMAT_BAKED": true,
+				"AUTO_LINT_BAKED":   false,
+			},
+		},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			got := Gates(tc.env)
+			for k, want := range tc.want {
+				if got[k] != want {
+					t.Errorf("Gates(%+v)[%q] = %v, want %v", tc.env, k, got[k], want)
+				}
+			}
+		})
+	}
+}
+
 // TestGatesOrchestratorReviewLoop covers ORCHESTRATOR (entrypoint.sh:
 // 761-762), the REVIEW_LOOP_INLINE/REVIEW_LOOP_ORCHESTRATOR exactly-one-on
 // pairing it drives (entrypoint.sh: 771-779), and FILER_ENABLED/

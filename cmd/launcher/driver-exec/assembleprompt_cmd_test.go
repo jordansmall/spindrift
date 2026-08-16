@@ -36,6 +36,8 @@ func coveredCellArgs(t *testing.T, promptOutput, agentsJSONOutput, handoffOutput
 		"--tdd-skill-baked=true",
 		"--commit-skill-baked=true",
 		"--code-review-skill-baked=true",
+		"--auto-format-skill-baked=true",
+		"--auto-lint-skill-baked=true",
 		"--orchestrator-enabled=false",
 		"--issue-tracker", "github",
 		"--box-write-enabled=true",
