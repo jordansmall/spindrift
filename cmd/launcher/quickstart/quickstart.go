@@ -705,7 +705,7 @@ func render(a answers) []scaffoldFile {
 // reference (docs/flake-options.md) for everything else (ADR 0027). No
 // prompts/ directory is scaffolded — the harness defaults every prompt.
 func renderFlakeNix(repoSlug, runtime, gitUserName, gitUserEmail string, tracker trackerSettings) string {
-	trackerLine := fmt.Sprintf("            "+PathIssueTracker+" = \"%s\";\n", nixEscape(tracker.issueTracker))
+	trackerLine := fmt.Sprintf("            %s = \"%s\";\n", pathIssueTracker, nixEscape(tracker.issueTracker))
 
 	settingsLines := trackerLine
 	if tracker.issueTracker == "forgejo" {
@@ -714,9 +714,9 @@ func renderFlakeNix(repoSlug, runtime, gitUserName, gitUserEmail string, tracker
 		// the same instance doctor validated. Emitted in the current
 		// domain-tree spelling (forge.backend / issues.forgejo.baseURL), the
 		// same one templates/default/flake.nix documents.
-		settingsLines += "            " + PathCodeForge + " = \"forgejo\";\n"
+		settingsLines += fmt.Sprintf("            %s = \"forgejo\";\n", pathCodeForge)
 		if tracker.forgejoBaseURL != "" && tracker.forgejoBaseURL != codebergBaseURL {
-			settingsLines += fmt.Sprintf("            "+PathForgejoBaseURL+" = \"%s\";\n", nixEscape(tracker.forgejoBaseURL))
+			settingsLines += fmt.Sprintf("            %s = \"%s\";\n", pathForgejoBaseURL, nixEscape(tracker.forgejoBaseURL))
 		}
 	}
 
@@ -762,10 +762,10 @@ func renderFlakeNix(repoSlug, runtime, gitUserName, gitUserEmail string, tracker
         };
     };
 }
-`, PathRuntime, nixEscape(runtime),
-		PathRepoSlug, nixEscape(repoSlug),
-		PathGitUserName, nixEscape(gitUserName),
-		PathGitUserEmail, nixEscape(gitUserEmail),
+`, pathRuntime, nixEscape(runtime),
+		pathRepoSlug, nixEscape(repoSlug),
+		pathGitUserName, nixEscape(gitUserName),
+		pathGitUserEmail, nixEscape(gitUserEmail),
 		settingsLines)
 }
 
