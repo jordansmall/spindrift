@@ -30,8 +30,60 @@ let
     else
       builtins.foldl' (a: b: a + sep + b) (builtins.head list) (builtins.tail list);
 
+  # True when `s` contains any of the six ASCII whitespace characters Go's
+  # strings.ContainsAny(r.Verdict, " \t\n\r\v\f") checks (space, tab, LF, CR,
+  # vertical tab, form feed) -- POSIX [:space:] covers the same set.
+  hasWhitespace = s: builtins.match ".*[[:space:]].*" s != null;
+
+  # Mirrors verdict.go's blockedVerdict const: the reserved crash/no-verdict
+  # escape-hatch status, never a configurable verdict token.
+  blockedVerdict = "blocked";
+
   verdictMarker = "# VERDICT";
   postMarker = "# POST THE VERDICT";
+
+  # Validates a parsed RESEARCH_VERDICTS array against the same rules the Go
+  # launcher enforces at runtime (cmd/launcher/internal/forge/verdict.go's
+  # ParseResearchVerdicts): the array must be non-empty; every entry must
+  # carry a non-empty verdict and label; no verdict token may contain
+  # whitespace; no verdict token may be the reserved "blocked" escape-hatch
+  # status; and every verdict token must be unique. Throws on the first
+  # violated rule (nix has no multi-error accumulation idiom here); returns
+  # `verdicts` unchanged otherwise.
+  validate =
+    verdicts:
+    if verdicts == [ ] then
+      throw "parse RESEARCH_VERDICTS: must contain at least one entry"
+    else
+      let
+        indices = builtins.genList (i: i) (builtins.length verdicts);
+        # Checks entry `i`'s rules in Go's order, accumulating the verdict
+        # tokens seen so far into `seen` (for the uniqueness check below).
+        # builtins.foldl' forces each step's result to WHNF, which is enough
+        # to force every `if`-chain condition here (each guard forces just
+        # the field it inspects), so a violated rule throws even though
+        # nothing downstream ever reads `seen`'s contents besides membership.
+        checkEntry =
+          seen: i:
+          let
+            raw = builtins.elemAt verdicts i;
+            verdict = raw.verdict or "";
+            label = raw.label or "";
+          in
+          if verdict == "" then
+            throw "parse RESEARCH_VERDICTS: entry ${toString i}: verdict must not be empty"
+          else if label == "" then
+            throw "parse RESEARCH_VERDICTS: entry ${toString i} (verdict \"${verdict}\"): label must not be empty"
+          else if hasWhitespace verdict then
+            throw "parse RESEARCH_VERDICTS: entry ${toString i}: verdict \"${verdict}\" must not contain whitespace"
+          else if verdict == blockedVerdict then
+            throw "parse RESEARCH_VERDICTS: entry ${toString i}: verdict \"${verdict}\" is reserved for the crash/no-verdict escape hatch"
+          else if builtins.elem verdict seen then
+            throw "parse RESEARCH_VERDICTS: duplicate verdict token \"${verdict}\""
+          else
+            seen ++ [ verdict ];
+      in
+      builtins.seq (builtins.foldl' checkEntry [ ] indices) verdicts;
 in
 rec {
   # The built-in three-verdict set (ADR 0022), with descriptions byte-matching
@@ -61,7 +113,7 @@ rec {
   # The empty string (the schema default) yields defaultVerdicts, so no custom
   # set means no change; any other value is parsed as JSON (a malformed value
   # fails the build loudly, mirroring the launcher's startup validation).
-  parse = s: if s == "" then defaultVerdicts else builtins.fromJSON s;
+  parse = s: if s == "" then defaultVerdicts else validate (builtins.fromJSON s);
 
   # Renders the verdict contract of `promptText` from `verdicts`: the VERDICT
   # section's enumerated bullet list, the `recommend / reject / unclear`

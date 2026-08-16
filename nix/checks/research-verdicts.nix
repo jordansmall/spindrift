@@ -80,4 +80,101 @@ in
     assert assertMsg (out == preamble)
       "renderIfCustom on a markerless prompt with no default tokens must be a no-op";
     pkgs.runCommand "research-verdicts-render-markerless-is-safe" { } "touch $out";
+
+  # A custom RESEARCH_VERDICTS array with zero entries must be rejected
+  # (mirrors ParseResearchVerdicts's "must contain at least one entry").
+  research-verdicts-parse-rejects-empty-array =
+    let
+      badJSON = builtins.toJSON [ ];
+      result = builtins.tryEval (rv.parse badJSON);
+    in
+    assert assertMsg (!result.success)
+      "parse must throw on an empty verdict array";
+    pkgs.runCommand "research-verdicts-parse-rejects-empty-array" { } "touch $out";
+
+  # An entry with an empty verdict token must be rejected.
+  research-verdicts-parse-rejects-empty-verdict =
+    let
+      badJSON = builtins.toJSON [
+        {
+          verdict = "";
+          label = "agent-research-approve";
+          description = "ship it.";
+        }
+      ];
+      result = builtins.tryEval (rv.parse badJSON);
+    in
+    assert assertMsg (!result.success)
+      "parse must throw on an entry with an empty verdict";
+    pkgs.runCommand "research-verdicts-parse-rejects-empty-verdict" { } "touch $out";
+
+  # An entry with an empty label must be rejected.
+  research-verdicts-parse-rejects-empty-label =
+    let
+      badJSON = builtins.toJSON [
+        {
+          verdict = "approve";
+          label = "";
+          description = "ship it.";
+        }
+      ];
+      result = builtins.tryEval (rv.parse badJSON);
+    in
+    assert assertMsg (!result.success)
+      "parse must throw on an entry with an empty label";
+    pkgs.runCommand "research-verdicts-parse-rejects-empty-label" { } "touch $out";
+
+  # A verdict token containing whitespace must be rejected.
+  research-verdicts-parse-rejects-whitespace-token =
+    let
+      badJSON = builtins.toJSON [
+        {
+          verdict = "ship it";
+          label = "agent-research-approve";
+          description = "ship it.";
+        }
+      ];
+      result = builtins.tryEval (rv.parse badJSON);
+    in
+    assert assertMsg (!result.success)
+      "parse must throw on a verdict token containing whitespace";
+    pkgs.runCommand "research-verdicts-parse-rejects-whitespace-token" { } "touch $out";
+
+  # The reserved "blocked" crash/no-verdict escape-hatch token must never be
+  # a configurable verdict.
+  research-verdicts-parse-rejects-reserved-blocked-token =
+    let
+      badJSON = builtins.toJSON [
+        {
+          verdict = "blocked";
+          label = "agent-research-blocked";
+          description = "reserved.";
+        }
+      ];
+      result = builtins.tryEval (rv.parse badJSON);
+    in
+    assert assertMsg (!result.success)
+      "parse must throw on the reserved \"blocked\" verdict token";
+    pkgs.runCommand "research-verdicts-parse-rejects-reserved-blocked-token" { } "touch $out";
+
+  # Two entries sharing the same verdict token must be rejected.
+  research-verdicts-parse-rejects-duplicate-token =
+    let
+      badJSON = builtins.toJSON [
+        {
+          verdict = "approve";
+          label = "agent-research-approve";
+          description = "ship it.";
+        }
+        {
+          verdict = "approve";
+          label = "agent-research-approve-again";
+          description = "ship it again.";
+        }
+      ];
+      result = builtins.tryEval (rv.parse badJSON);
+    in
+    assert assertMsg (!result.success)
+      "parse must throw on a duplicate verdict token";
+    pkgs.runCommand "research-verdicts-parse-rejects-duplicate-token" { } "touch $out";
 }
