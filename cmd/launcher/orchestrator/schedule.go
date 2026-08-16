@@ -1,6 +1,9 @@
 package main
 
-import "path"
+import (
+	"path"
+	"strings"
+)
 
 // scheduleSlices partitions slices (already in manifest/declaration order)
 // into an ordered list of batches, where each batch is a set of slices safe
@@ -14,10 +17,10 @@ import "path"
 //
 //   - Lease disjointness: a slice with a non-empty FileLeases may join an
 //     existing batch only if none of its leases (normalized and compared
-//     for equality or path-prefix overlap, see leasesOverlap) overlap any
-//     lease already claimed by a slice already placed in that batch, and
-//     that batch doesn't already hold a slice with empty/undeclared
-//     FileLeases.
+//     for equality, path-prefix overlap, or one of a handful of
+//     provably-can't-tell shapes -- see leasesOverlap) overlap any lease
+//     already claimed by a slice already placed in that batch, and that
+//     batch doesn't already hold a slice with empty/undeclared FileLeases.
 //   - Undeclared leases are conservative: a slice with empty FileLeases is
 //     always sequenced into its own batch alone, both because it can't
 //     itself join a batch that has other members (its own touched-files
@@ -195,16 +198,41 @@ func claimLeases(s ManifestSlice, leases []string) []string {
 // equivalent spellings (e.g. "./a.go" and "a.go") compare equal. It
 // deliberately uses the path package, not path/filepath, to keep behavior
 // OS-independent and deterministic regardless of the host running tests or
-// the orchestrator.
+// the orchestrator. It does not resolve the lease against a repo root --
+// this package has no access to one -- so the result may still be absolute,
+// "." (whole tree), or escape the root via ".."; leasesOverlap is what
+// turns those shapes into a conservative "can't prove disjoint" verdict.
 func normalizeLease(lease string) string {
 	return path.Clean(lease)
 }
 
 // leasesOverlap reports whether two normalized lease paths are not provably
-// disjoint: they're equal, or one is a path-prefix of the other at a "/"
-// boundary (e.g. "cmd/x" overlaps "cmd/x/dispatch.go", since the latter
-// names a file inside the directory the former names).
+// disjoint. Beyond the straightforward cases -- equal, or one a path-prefix
+// of the other at a "/" boundary (e.g. "cmd/x" overlaps
+// "cmd/x/dispatch.go", since the latter names a file inside the directory
+// the former names) -- three shapes are treated as unprovable and therefore
+// overlapping, always erring toward sequencing rather than risking an
+// unsafe parallel batch:
+//
+//   - Either lease is "." or "/" (path.Clean("") is also "."), i.e. it
+//     names the whole repo root -- it can't be disjoint from anything.
+//   - Either lease still starts with ".." after cleaning (it's exactly
+//     ".." or starts with "../") -- it escapes the repo root, so there's
+//     no shared base to compare against.
+//   - One lease is absolute (starts with "/") and the other is relative --
+//     this package has no repoRoot to resolve the relative one against, so
+//     there's no reliable way to tell whether they name the same file.
 func leasesOverlap(a, b string) bool {
+	if isWholeTreeLease(a) || isWholeTreeLease(b) {
+		return true
+	}
+	if escapesRoot(a) || escapesRoot(b) {
+		return true
+	}
+	aAbs, bAbs := isAbsoluteLease(a), isAbsoluteLease(b)
+	if aAbs != bAbs {
+		return true
+	}
 	if a == b {
 		return true
 	}
@@ -215,4 +243,21 @@ func leasesOverlap(a, b string) bool {
 		return true
 	}
 	return false
+}
+
+// isWholeTreeLease reports whether a normalized lease names the whole repo
+// root ("." or "/").
+func isWholeTreeLease(lease string) bool {
+	return lease == "." || lease == "/"
+}
+
+// escapesRoot reports whether a normalized lease escapes the repo root,
+// i.e. it's exactly ".." or starts with "../".
+func escapesRoot(lease string) bool {
+	return lease == ".." || strings.HasPrefix(lease, "../")
+}
+
+// isAbsoluteLease reports whether a normalized lease is absolute.
+func isAbsoluteLease(lease string) bool {
+	return strings.HasPrefix(lease, "/")
 }
