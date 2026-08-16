@@ -65,6 +65,11 @@
 #   hostDerived  bool    marks a field that is generated but whose loader is
 #                        hand-written (not a plain getenvSchema/atoiSchema
 #                        call); implies host-config membership
+#   legacySettingsExempt bool  flakeOption knobs only: true when this knob
+#                        postdates the ADR 0037 Pass 2 freeze and therefore
+#                        never had an old `settings.<section>` alias; exempts
+#                        it from nix/checks/schema-drift.nix's
+#                        legacy-settings-section coverage assert (issue #2522)
 let
   backends = import ./backends/default.nix;
 in
@@ -196,6 +201,7 @@ in
       "rebase"
     ];
     flakeOption = true;
+    legacySettingsExempt = true;
     nixSubPath = "merge.method";
     boxEnv = false;
   };
@@ -209,6 +215,7 @@ in
       "merge"
     ];
     flakeOption = true;
+    legacySettingsExempt = true;
     nixSubPath = "merge.syncMethod";
     boxEnv = false;
   };
@@ -226,6 +233,7 @@ in
     group = "agents";
     doc = "main/coordinator reasoning-effort level for the agent (zero-rebuild runtime switch); pass-through only, no normalization -- the value must be valid for the active Driver: claude accepts low/medium/high/xhigh/max (appended as --effort <level>), opencode's cross-provider variant selector accepts a provider-specific set (appended as --variant <level>); unset emits no argument for either Driver, leaving the Driver's own default effort in place";
     flakeOption = true;
+    legacySettingsExempt = true;
     nixSubPath = "models.effort";
     boxEnv = true;
     boxEnvOnly = true;
@@ -266,6 +274,7 @@ in
     group = "agents";
     doc = "value for the orchestrator's code-owned review pass's own --effort flag (issue #2387); pass-through only, no normalization, same accepted values as EFFORT for the active Driver. Overrides the roster reviewer entry's own effort (rosterDefaults.reviewer.effort by default), regardless of whether the roster is the built-in default or a Consumer-supplied explicit one (lib/mkHarness.nix applies the override post-normalize, issue #2512) -- empty means follow the roster, a non-empty value overrides it. Unlike the four legacy per-agent model knobs (scoutModel/reviewModel/filerModel/workerModel), which an explicit roster arg always wins over, this override applies regardless of roster source (lib/roster.nix). Meaningful only under ORCHESTRATOR: the resolved value reaches the orchestrator via the prompt-assembly Handoff's ReviewEffort field (issue #2512), mirroring how ReviewModel reaches it. Like REVIEW_MODEL, this is a nix-build-time-only knob: setting it at dispatch time (REVIEW_EFFORT=... / --review-effort ...) has no runtime effect on an already-built image -- only this flake option, baked in and rebuilt, changes what the review pass runs at (issue #2512; see MIGRATING.md).";
     flakeOption = true;
+    legacySettingsExempt = true;
     nixSubPath = "models.reviewEffort";
     boxEnv = true;
     boxEnvOnly = true;
@@ -275,6 +284,7 @@ in
     group = "agents";
     doc = "directory the orchestrator uses for each parallel worker's log, heartbeat, result, and sentinel files (issue #2059); pass-through only, no normalization. Meaningful only under ORCHESTRATOR: entrypoint.sh threads this value to the orchestrator's --worker-work-dir flag.";
     flakeOption = true;
+    legacySettingsExempt = true;
     nixSubPath = "models.workerWorkDir";
     boxEnv = true;
     boxEnvOnly = true;
@@ -284,6 +294,7 @@ in
     group = "agents";
     doc = "timeout applied to each parallel worker subagent's run (issue #2059); must be a Go duration string (e.g. 20m, 1h) -- a bare number fails fs.Duration parsing and aborts the whole run with exit 2. Pass-through only, no normalization. Meaningful only under ORCHESTRATOR: entrypoint.sh threads this value to the orchestrator's --worker-timeout flag.";
     flakeOption = true;
+    legacySettingsExempt = true;
     nixSubPath = "models.workerTimeout";
     boxEnv = true;
     boxEnvOnly = true;
@@ -314,6 +325,7 @@ in
     default = 2;
     doc = "cap on how many of a coordinator pass's slice-manifest workers the Go orchestrator dispatches concurrently (issue #2059, #2495); 2 is the no-tuning-safe default -- enough to capture most of the wall-clock win on small-slice-count issues while staying clear of the Box's memory-kill regime. Meaningful only under ORCHESTRATOR: entrypoint.sh threads this value to the orchestrator's --max-parallel-workers flag.";
     flakeOption = true;
+    legacySettingsExempt = true;
     nixSubPath = "models.maxParallelWorkers";
     boxEnv = true;
     boxEnvOnly = true;
@@ -437,6 +449,7 @@ in
     default = "https://codeberg.org";
     doc = "Forgejo/Gitea instance base URL, defaulting to Codeberg; used when ISSUE_TRACKER=forgejo";
     flakeOption = true;
+    legacySettingsExempt = true;
     nixSubPath = "forgejo.baseURL";
     boxEnv = true;
   };
@@ -446,6 +459,7 @@ in
     default = "";
     doc = "JSON array of research verdict objects [{verdict,label,description}], order preserved, defining the research dispatch's verdict vocabulary and each verdict's terminal label (ADR 0022); empty (default) uses the built-in three, with no behavior change (see lib/research-verdicts.nix's defaultVerdicts for the built-in three and their labels). The launcher validates the posted verdict against this set and applies the mapped label on Settle; the research prompt's verdict contract is rendered from it";
     flakeOption = true;
+    legacySettingsExempt = true;
     nixSubPath = "research.verdicts";
     boxEnv = false;
   };
@@ -720,6 +734,7 @@ in
     flag = "prompt-dir";
     doc = "host directory mounted over /agent/prompts for zero-rebuild prompt iteration";
     flakeOption = true;
+    legacySettingsExempt = true;
     nixSubPath = "promptDir";
     boxEnv = false;
   };
