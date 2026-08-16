@@ -329,8 +329,10 @@ func (a *ociAdapter) ListRunning() ([]string, error) {
 }
 
 // mountSpecs computes the host-to-box mounts that apply for box, shared with
-// the bwrap adapter (buildMountSpecs); only the rendering below differs.
-func (a *ociAdapter) mountSpecs(box Box) []MountSpec {
+// the bwrap adapter (buildMountSpecs); only the rendering below differs. The
+// error return propagates buildMountSpecs's own required-mount failure (the
+// issue-snapshot mount, issue #2547 review finding).
+func (a *ociAdapter) mountSpecs(box Box) ([]MountSpec, error) {
 	return buildMountSpecs(MountParams{
 		PromptDir:                a.promptDir,
 		SkillsDir:                a.skillsDir,
@@ -345,8 +347,10 @@ func (a *ociAdapter) mountSpecs(box Box) []MountSpec {
 }
 
 // buildRunArgs assembles the argument slice for `podman/docker run`. Separated
-// from Run so the arg construction can be tested without exec.
-func (a *ociAdapter) buildRunArgs(box Box) []string {
+// from Run so the arg construction can be tested without exec. Returns an
+// error when mountSpecs does (the required issue-snapshot mount failing to
+// stat, issue #2547 review finding).
+func (a *ociAdapter) buildRunArgs(box Box) ([]string, error) {
 	args := []string{"run", "--name", box.Name}
 	if a.podmanNetwork != "" {
 		args = append(args, "--network", a.podmanNetwork)
@@ -361,7 +365,11 @@ func (a *ociAdapter) buildRunArgs(box Box) []string {
 	// bwrap's agentFiles fallback — so it is scoped to the Driver's declared
 	// session-cache dir, never the whole .claude, which would shadow the
 	// baked .claude/skills the image ships.
-	for _, m := range a.mountSpecs(box) {
+	specs, err := a.mountSpecs(box)
+	if err != nil {
+		return nil, err
+	}
+	for _, m := range specs {
 		if m.Message != "" {
 			fmt.Print(m.Message)
 		}
@@ -383,7 +391,7 @@ func (a *ociAdapter) buildRunArgs(box Box) []string {
 		args = append(args, "--memory="+a.memoryLimit)
 	}
 	args = append(args, a.image, "/agent/entrypoint.sh")
-	return args
+	return args, nil
 }
 
 // reapOrphanedRebaseDirs removes leftover spindrift-rebase-* directories in root.
@@ -425,10 +433,15 @@ func (a *ociAdapter) Run(box Box) error {
 		out = io.Discard
 	}
 
-	cmd := exec.Command(a.cli, a.buildRunArgs(box)...)
+	args, err := a.buildRunArgs(box)
+	if err != nil {
+		return err
+	}
+
+	cmd := exec.Command(a.cli, args...)
 	cmd.Stdout = out
 	cmd.Stderr = out
-	err := cmd.Run()
+	err = cmd.Run()
 	if reapAfterSuccess(err) {
 		_ = a.Reap(box.Name)
 	}

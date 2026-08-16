@@ -121,6 +121,15 @@ type Config struct {
 	// rely on it being non-nil.
 	OpenPRForIssue func(number string) (bool, error)
 
+	// IssueSnapshot resolves the frozen issue-read snapshot text for number,
+	// called once at Run's box start (issue #2547) so every implement/review
+	// issue-read fragment in that box reads one fixed file instead of a live
+	// tracker call. A closure, mirroring OpenPRForIssue, so dispatch stays
+	// decoupled from the forge package. nil is a valid, snapshot-disabled
+	// zero value (every pre-#2547 test construction of Config): Run treats a
+	// nil func identically to Kind == "research" -- no write, no mount.
+	IssueSnapshot func(number string) (string, error)
+
 	// HeartbeatOut is the human-facing sink every Box's heartbeat writer
 	// echoes to, alongside its unconditional pass-log file capture, and the
 	// sink each dispatch-start announce line ("-> #NN: title" and its

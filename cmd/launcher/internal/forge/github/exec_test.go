@@ -1391,3 +1391,123 @@ fi
 		t.Errorf("error should surface gh's stderr, got: %v", err)
 	}
 }
+
+// TestExecClient_ImplementsSnapshotReader verifies the github adapter
+// satisfies forge.SnapshotReader (issue #2547) — github has a genuine
+// separate comments API for Snapshot to call.
+func TestExecClient_ImplementsSnapshotReader(t *testing.T) {
+	var _ forge.SnapshotReader = NewExecClient("owner/repo", testLabels, "agent/issue-")
+}
+
+// TestExecClient_Snapshot_BodyPlusComments verifies Snapshot fetches the
+// issue body and comments in one `gh issue view --json body,comments` call
+// and formats each comment as "<login> (<createdAt>): <body>" beneath the
+// issue body, separated by a blank line.
+func TestExecClient_Snapshot_BodyPlusComments(t *testing.T) {
+	dir := prependFakeGH(t, `case "$*" in
+*"issue view"*)
+	printf '{"body":"the issue body","comments":[{"author":{"login":"alice"},"createdAt":"2024-01-01T00:00:00Z","body":"first comment"},{"author":{"login":"bob"},"createdAt":"2024-01-02T00:00:00Z","body":"second comment"}]}'
+	;;
+*)
+	exit 1
+	;;
+esac`)
+
+	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	got, err := c.Snapshot("10")
+	if err != nil {
+		t.Fatalf("Snapshot: %v", err)
+	}
+	want := "the issue body\n\nalice (2024-01-01T00:00:00Z): first comment\nbob (2024-01-02T00:00:00Z): second comment"
+	if got != want {
+		t.Errorf("Snapshot() = %q, want %q", got, want)
+	}
+
+	call, err := os.ReadFile(filepath.Join(dir, "call-00.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(call), "body,comments") {
+		t.Errorf("gh call = %q, want --json body,comments", call)
+	}
+}
+
+// TestExecClient_Snapshot_ZeroComments verifies Snapshot renders just the
+// body, with no dangling separator, when the issue has no comments.
+func TestExecClient_Snapshot_ZeroComments(t *testing.T) {
+	prependFakeGH(t, `case "$*" in
+*"issue view"*)
+	printf '{"body":"a lonely issue","comments":[]}'
+	;;
+esac`)
+
+	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	got, err := c.Snapshot("10")
+	if err != nil {
+		t.Fatalf("Snapshot: %v", err)
+	}
+	if got != "a lonely issue" {
+		t.Errorf("Snapshot() = %q, want %q", got, "a lonely issue")
+	}
+}
+
+// TestExecClient_Snapshot_TruncatesToLast10 verifies Snapshot keeps only the
+// last 10 comments (dropping from the front), preserving chronological
+// order among the kept ten — mirroring `gh issue view --json comments --jq
+// '.comments[-10:]'`.
+func TestExecClient_Snapshot_TruncatesToLast10(t *testing.T) {
+	var comments strings.Builder
+	comments.WriteString("[")
+	for i := 1; i <= 12; i++ {
+		if i > 1 {
+			comments.WriteString(",")
+		}
+		fmt.Fprintf(&comments, `{"author":{"login":"user%d"},"createdAt":"2024-01-%02dT00:00:00Z","body":"comment %d"}`, i, i, i)
+	}
+	comments.WriteString("]")
+
+	prependFakeGH(t, fmt.Sprintf(`case "$*" in
+*"issue view"*)
+	printf '{"body":"the body","comments":%s}'
+	;;
+esac`, comments.String()))
+
+	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	got, err := c.Snapshot("10")
+	if err != nil {
+		t.Fatalf("Snapshot: %v", err)
+	}
+	if strings.Contains(got, "user1 ") || strings.Contains(got, "user2 ") {
+		t.Errorf("Snapshot() = %q, want comments 1 and 2 dropped (only last 10 kept)", got)
+	}
+	if !strings.Contains(got, "user3 ") || !strings.Contains(got, "user12 ") {
+		t.Errorf("Snapshot() = %q, want comments 3 through 12 kept", got)
+	}
+	wantOrder := "user3 "
+	if idx3, idx12 := strings.Index(got, "user3 "), strings.Index(got, "user12 "); idx3 == -1 || idx12 == -1 || idx3 > idx12 {
+		t.Errorf("Snapshot() = %q, want chronological order (%s before user12)", got, wantOrder)
+	}
+}
+
+// TestExecClient_Snapshot_GenuineFailureSurfaced verifies that a real `gh
+// issue view` failure is returned as an error rather than swallowed — this
+// is the failure path dispatch's writeIssueSnapshot wraps as a quarantineErr
+// (issue #2547), so a masked failure here would silently change retry
+// behavior.
+func TestExecClient_Snapshot_GenuineFailureSurfaced(t *testing.T) {
+	prependFakeGH(t, `case "$*" in
+*"issue view"*)
+	printf 'HTTP 403: Resource not accessible by integration\n' >&2
+	exit 1
+	;;
+esac`)
+
+	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	_, err := c.Snapshot("10")
+	if err == nil {
+		t.Fatal("want error, got nil")
+	}
+	if !strings.Contains(err.Error(), "403") {
+		t.Errorf("error must surface gh's stderr, got: %v", err)
+	}
+}

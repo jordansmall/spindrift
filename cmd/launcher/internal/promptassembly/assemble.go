@@ -406,30 +406,43 @@ func Assemble(e Env, reg Registry) (Result, error) {
 	if e.AgentsJSONTemplate != "" {
 		agentsTemplate := e.AgentsJSONTemplate
 
-		if gates["ORCHESTRATOR"] {
-			// Issue #2277 (entrypoint.sh: 1086-1101): extract the
-			// reviewer's own configured model into Handoff.ReviewModel
-			// before dropping the reviewer key from the template entirely
-			// -- the code-owned review pass replaces the implementor's own
-			// inline reviewer subagent, so it's never provisioned into
-			// --agents at all, not merely muted.
+		// AgentsJSONTemplate is one fixed constant baked per Consumer image
+		// (lib/roster.nix has no per-dispatch-kind or per-FixPass axis), so
+		// without the kind=="research" drop below, a non-orchestrator
+		// research box would carry the same "reviewer" entry a work box
+		// gets -- but its prompt (review-prompt.md's issue-read fragment)
+		// cats the frozen /issue-snapshot.md, a file research dispatches
+		// deliberately never write or mount (ADR 0022; box.go's Run skips
+		// writeIssueSnapshot for cfg.Kind == "research"). Research prompts
+		// never invoke a "reviewer" subagent either, so dropping it here
+		// costs nothing a research box actually used (issue #2547 review
+		// finding).
+		if gates["ORCHESTRATOR"] || kind == "research" {
 			var agentsKeys map[string]json.RawMessage
 			if err := json.Unmarshal([]byte(agentsTemplate), &agentsKeys); err != nil {
 				return Result{}, fmt.Errorf("parse agents json template: %w", err)
 			}
-			if reviewerRaw, ok := agentsKeys["reviewer"]; ok {
-				var reviewer struct {
-					Model  string `json:"model"`
-					Effort string `json:"effort"`
+			if gates["ORCHESTRATOR"] {
+				// Issue #2277 (entrypoint.sh: 1086-1101): extract the
+				// reviewer's own configured model into Handoff.ReviewModel
+				// before dropping the reviewer key from the template entirely
+				// -- the code-owned review pass replaces the implementor's own
+				// inline reviewer subagent, so it's never provisioned into
+				// --agents at all, not merely muted.
+				if reviewerRaw, ok := agentsKeys["reviewer"]; ok {
+					var reviewer struct {
+						Model  string `json:"model"`
+						Effort string `json:"effort"`
+					}
+					// A malformed reviewer entry (not an object, or one with no
+					// model/effort field) mirrors jq's `.reviewer.model // empty`
+					// and `.reviewer.effort // empty`: Unmarshal error or a
+					// zero-value Model/Effort both leave ReviewModel/ReviewEffort
+					// at their empty default rather than failing.
+					_ = json.Unmarshal(reviewerRaw, &reviewer)
+					result.Handoff.ReviewModel = reviewer.Model
+					result.Handoff.ReviewEffort = reviewer.Effort
 				}
-				// A malformed reviewer entry (not an object, or one with no
-				// model/effort field) mirrors jq's `.reviewer.model // empty`
-				// and `.reviewer.effort // empty`: Unmarshal error or a
-				// zero-value Model/Effort both leave ReviewModel/ReviewEffort
-				// at their empty default rather than failing.
-				_ = json.Unmarshal(reviewerRaw, &reviewer)
-				result.Handoff.ReviewModel = reviewer.Model
-				result.Handoff.ReviewEffort = reviewer.Effort
 			}
 			delete(agentsKeys, "reviewer")
 			strippedJSON, err := json.Marshal(agentsKeys)

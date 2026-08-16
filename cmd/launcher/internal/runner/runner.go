@@ -37,6 +37,14 @@ type Box struct {
 	// the Launcher relays the bundle host-side after the run. Empty omits
 	// the mount, the same convention as DriverCacheDir.
 	OutboxDir string
+
+	// IssueSnapshotPath is a host path (a single file, not a directory)
+	// mounted read-only at the fixed in-box target /issue-snapshot.md
+	// (issue #2547) -- the frozen issue body + last-10-comments text every
+	// implement/review issue-read fragment reads instead of a live tracker
+	// call. Empty omits the mount, the same convention as OutboxDir/
+	// DriverCacheDir.
+	IssueSnapshotPath string
 }
 
 // Runner is the seam through which the launcher manages agent sandbox life-cycles.

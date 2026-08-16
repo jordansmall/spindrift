@@ -23,7 +23,10 @@ func TestBwrapArgs_NoSecretOnArgv(t *testing.T) {
 		},
 	}
 
-	args := a.buildArgs("/tmp/fake-etc", box)
+	args, err := a.buildArgs("/tmp/fake-etc", box)
+	if err != nil {
+		t.Fatalf("buildArgs: %v", err)
+	}
 
 	secrets := []string{"gh-secret-value", "claude-secret-value", "anthropic-secret-value"}
 	for _, arg := range args {
@@ -43,7 +46,10 @@ func TestBwrapArgs_NoClearEnv(t *testing.T) {
 		agentEnv:      "/fake/env",
 		bakedPrefetch: "echo ok",
 	}
-	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{"GH_TOKEN": "s"}})
+	args, err := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{"GH_TOKEN": "s"}})
+	if err != nil {
+		t.Fatalf("buildArgs: %v", err)
+	}
 	for _, arg := range args {
 		if arg == "--clearenv" {
 			t.Errorf("--clearenv found in bwrap argv; secrets would not reach sandbox")
@@ -64,7 +70,10 @@ func TestBwrapArgs_SkillsDirMounted(t *testing.T) {
 		bakedPrefetch: "echo ok",
 		skillsDir:     dir,
 	}
-	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}})
+	args, err := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}})
+	if err != nil {
+		t.Fatalf("buildArgs: %v", err)
+	}
 
 	argStr := strings.Join(args, " ")
 	want := "--ro-bind " + dir + " /operator-skills"
@@ -92,7 +101,10 @@ func TestBwrapArgs_IssuesDirMounted(t *testing.T) {
 		hostMediatedIssueTracker: true,
 		localIssuesDir:           dir,
 	}
-	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}})
+	args, err := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}})
+	if err != nil {
+		t.Fatalf("buildArgs: %v", err)
+	}
 
 	argStr := strings.Join(args, " ")
 	want := "--ro-bind " + dir + " /issues"
@@ -115,7 +127,10 @@ func TestBwrapArgs_IssuesDirUnset_NoMount(t *testing.T) {
 		hostMediatedIssueTracker: false,
 		localIssuesDir:           dir,
 	}
-	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}})
+	args, err := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}})
+	if err != nil {
+		t.Fatalf("buildArgs: %v", err)
+	}
 
 	argStr := strings.Join(args, " ")
 	if strings.Contains(argStr, "/issues") {
@@ -134,7 +149,10 @@ func TestBwrapArgs_DriverCacheDirMountedWritable(t *testing.T) {
 		bakedPrefetch:         "echo ok",
 		driverSessionCacheDir: "/home/agent/.claude/projects",
 	}
-	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}, DriverCacheDir: dir})
+	args, err := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}, DriverCacheDir: dir})
+	if err != nil {
+		t.Fatalf("buildArgs: %v", err)
+	}
 
 	argStr := strings.Join(args, " ")
 	want := "--bind " + dir + " /home/agent/.claude/projects"
@@ -157,7 +175,10 @@ func TestBwrapArgs_DriverCacheDirMounted_HardeningPreserved(t *testing.T) {
 		bakedPrefetch:         "echo ok",
 		driverSessionCacheDir: "/home/agent/.claude/projects",
 	}
-	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}, DriverCacheDir: dir})
+	args, err := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}, DriverCacheDir: dir})
+	if err != nil {
+		t.Fatalf("buildArgs: %v", err)
+	}
 
 	for _, flag := range []string{"--unshare-user", "--unshare-pid", "--unshare-ipc", "--unshare-uts"} {
 		if !containsArg(args, flag) {
@@ -178,7 +199,10 @@ func TestBwrapArgs_DriverCacheDir_DotClaudeParentCreated(t *testing.T) {
 		bakedPrefetch:         "echo ok",
 		driverSessionCacheDir: "/home/agent/.claude/projects",
 	}
-	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}, DriverCacheDir: dir})
+	args, err := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}, DriverCacheDir: dir})
+	if err != nil {
+		t.Fatalf("buildArgs: %v", err)
+	}
 
 	dirIdx := -1
 	bindIdx := -1
@@ -214,7 +238,10 @@ func TestBwrapArgs_DriverCacheMountTarget_FromDriverDeclaration(t *testing.T) {
 		bakedPrefetch:         "echo ok",
 		driverSessionCacheDir: "/home/agent/custom-driver/state",
 	}
-	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}, DriverCacheDir: dir})
+	args, err := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}, DriverCacheDir: dir})
+	if err != nil {
+		t.Fatalf("buildArgs: %v", err)
+	}
 
 	argStr := strings.Join(args, " ")
 	wantBind := "--bind " + dir + " /home/agent/custom-driver/state"
@@ -238,7 +265,10 @@ func TestBwrapArgs_DriverSessionCacheDirUndeclared_NoMount(t *testing.T) {
 		agentEnv:      "/fake/env",
 		bakedPrefetch: "echo ok",
 	}
-	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}, DriverCacheDir: dir})
+	args, err := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}, DriverCacheDir: dir})
+	if err != nil {
+		t.Fatalf("buildArgs: %v", err)
+	}
 	for _, arg := range args {
 		if arg == dir {
 			t.Errorf("unexpected driver cache bind in args when Driver declares no session-cache dir: %v", args)
@@ -255,7 +285,10 @@ func TestBwrapArgs_DriverCacheDirUnset_NoMount(t *testing.T) {
 		bakedPrefetch:         "echo ok",
 		driverSessionCacheDir: "/home/agent/.claude/projects",
 	}
-	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}})
+	args, err := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}})
+	if err != nil {
+		t.Fatalf("buildArgs: %v", err)
+	}
 	argStr := strings.Join(args, " ")
 	if strings.Contains(argStr, "/home/agent/.claude/projects") {
 		t.Errorf("unexpected driver cache bind in args when DriverCacheDir is empty: %v", args)
@@ -271,7 +304,10 @@ func TestBwrapArgs_SkillsDirUnset_NoMount(t *testing.T) {
 		bakedPrefetch: "echo ok",
 		skillsDir:     "",
 	}
-	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}})
+	args, err := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}})
+	if err != nil {
+		t.Fatalf("buildArgs: %v", err)
+	}
 	argStr := strings.Join(args, " ")
 	if strings.Contains(argStr, ".claude/skills") {
 		t.Errorf("unexpected skills bind in args when skillsDir is empty: %v", args)
@@ -304,7 +340,10 @@ func TestBwrapArgs_NonSecretOnArgv(t *testing.T) {
 		},
 	}
 
-	args := a.buildArgs("/tmp/fake-etc", box)
+	args, err := a.buildArgs("/tmp/fake-etc", box)
+	if err != nil {
+		t.Fatalf("buildArgs: %v", err)
+	}
 
 	argStr := strings.Join(args, " ")
 	for _, name := range []string{"REPO_SLUG", "ISSUE_NUMBER"} {

@@ -94,8 +94,10 @@ func (a *bwrapAdapter) EnsureReady() error { return nil }
 func (a *bwrapAdapter) IsReady() error { return nil }
 
 // mountSpecs computes the host-to-box mounts that apply for box, shared with
-// the OCI adapter (buildMountSpecs); only the rendering below differs.
-func (a *bwrapAdapter) mountSpecs(box Box) []MountSpec {
+// the OCI adapter (buildMountSpecs); only the rendering below differs. The
+// error return propagates buildMountSpecs's own required-mount failure (the
+// issue-snapshot mount, issue #2547 review finding).
+func (a *bwrapAdapter) mountSpecs(box Box) ([]MountSpec, error) {
 	return buildMountSpecs(MountParams{
 		PromptDir:                a.promptDir,
 		SkillsDir:                a.skillsDir,
@@ -113,7 +115,9 @@ func (a *bwrapAdapter) mountSpecs(box Box) []MountSpec {
 // etcDir is the temp directory holding the synthesised /etc/passwd and /etc/group.
 // Secret env vars (GH_TOKEN, auth tokens) are intentionally excluded from argv;
 // they reach the sandbox via inherited process environment (no --clearenv).
-func (a *bwrapAdapter) buildArgs(etcDir string, box Box) []string {
+// Returns an error when mountSpecs does (the required issue-snapshot mount
+// failing to stat, issue #2547 review finding).
+func (a *bwrapAdapter) buildArgs(etcDir string, box Box) ([]string, error) {
 	args := []string{
 		"--ro-bind", "/nix/store", "/nix/store",
 		"--tmpfs", "/tmp",
@@ -138,7 +142,11 @@ func (a *bwrapAdapter) buildArgs(etcDir string, box Box) []string {
 	// than its parent so it can never shadow a sibling skills bind regardless
 	// of order, and the CODE_FORGE=local outbox spec (ADR 0033, issue #1697)
 	// are the only writable mounts buildMountSpecs ever produces.
-	for _, m := range a.mountSpecs(box) {
+	specs, err := a.mountSpecs(box)
+	if err != nil {
+		return nil, err
+	}
+	for _, m := range specs {
 		if m.Message != "" {
 			fmt.Print(m.Message)
 		}
@@ -174,7 +182,7 @@ func (a *bwrapAdapter) buildArgs(etcDir string, box Box) []string {
 	}
 	args = append(args, unshareFlags...)
 	args = append(args, "--", "/agent/entrypoint.sh")
-	return args
+	return args, nil
 }
 
 // resolvedRunEnv returns the process environment the bwrap child should
@@ -232,11 +240,16 @@ func (a *bwrapAdapter) Run(box Box) error {
 		out = io.Discard
 	}
 
+	args, err := a.buildArgs(etcDir, box)
+	if err != nil {
+		return err
+	}
+
 	// The bwrap process inherits the launcher's full environment (with
 	// GH_TOKEN substituted per resolvedRunEnv). Without --clearenv, the
 	// sandbox also inherits it. Secrets (GH_TOKEN, auth tokens) are
 	// therefore available inside the sandbox without appearing on argv.
-	cmd := execCommand("bwrap", a.buildArgs(etcDir, box)...)
+	cmd := execCommand("bwrap", args...)
 	cmd.Env = resolvedRunEnv(os.Environ(), box.Env)
 	cmd.Stdout = out
 	cmd.Stderr = out

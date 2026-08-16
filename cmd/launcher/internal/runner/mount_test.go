@@ -22,7 +22,10 @@ import (
 // silently diverge from it (issue #2531).
 func TestBuildMountSpecs_PromptDirMounted(t *testing.T) {
 	dir := t.TempDir()
-	specs := buildMountSpecs(MountParams{PromptDir: dir}, Box{})
+	specs, err := buildMountSpecs(MountParams{PromptDir: dir}, Box{})
+	if err != nil {
+		t.Fatalf("buildMountSpecs: %v", err)
+	}
 
 	var found *MountSpec
 	for i := range specs {
@@ -50,7 +53,10 @@ func TestBuildMountSpecs_PromptDirMounted(t *testing.T) {
 // MountSpec with no operator message — computed once, independent of backend.
 func TestBuildMountSpecs_DriverCacheDirMountedWritable(t *testing.T) {
 	dir := t.TempDir()
-	specs := buildMountSpecs(MountParams{DriverSessionCacheDir: "/home/agent/.claude/projects"}, Box{DriverCacheDir: dir})
+	specs, err := buildMountSpecs(MountParams{DriverSessionCacheDir: "/home/agent/.claude/projects"}, Box{DriverCacheDir: dir})
+	if err != nil {
+		t.Fatalf("buildMountSpecs: %v", err)
+	}
 
 	var found *MountSpec
 	for i := range specs {
@@ -78,7 +84,10 @@ func TestBuildMountSpecs_DriverCacheDirMountedWritable(t *testing.T) {
 // (issue #448).
 func TestBuildMountSpecs_DriverSessionCacheDirUndeclared_NoMount(t *testing.T) {
 	dir := t.TempDir()
-	specs := buildMountSpecs(MountParams{}, Box{DriverCacheDir: dir})
+	specs, err := buildMountSpecs(MountParams{}, Box{DriverCacheDir: dir})
+	if err != nil {
+		t.Fatalf("buildMountSpecs: %v", err)
+	}
 
 	for _, s := range specs {
 		if s.Source == dir {
@@ -93,7 +102,10 @@ func TestBuildMountSpecs_DriverSessionCacheDirUndeclared_NoMount(t *testing.T) {
 // independent of backend.
 func TestBuildMountSpecs_SkillsDirMounted(t *testing.T) {
 	dir := t.TempDir()
-	specs := buildMountSpecs(MountParams{SkillsDir: dir}, Box{})
+	specs, err := buildMountSpecs(MountParams{SkillsDir: dir}, Box{})
+	if err != nil {
+		t.Fatalf("buildMountSpecs: %v", err)
+	}
 
 	var found *MountSpec
 	for i := range specs {
@@ -119,7 +131,10 @@ func TestBuildMountSpecs_SkillsDirMounted(t *testing.T) {
 // TestBuildMountSpecs_SkillsDirUnset_NoMount verifies that omitting SkillsDir
 // produces no skills spec.
 func TestBuildMountSpecs_SkillsDirUnset_NoMount(t *testing.T) {
-	specs := buildMountSpecs(MountParams{}, Box{})
+	specs, err := buildMountSpecs(MountParams{}, Box{})
+	if err != nil {
+		t.Fatalf("buildMountSpecs: %v", err)
+	}
 
 	for _, s := range specs {
 		if s.Target == "/operator-skills" {
@@ -134,7 +149,10 @@ func TestBuildMountSpecs_SkillsDirUnset_NoMount(t *testing.T) {
 // Accumulation repo single-writer).
 func TestBuildMountSpecs_LocalCodeForge_AccumulationRepoMountedReadOnly(t *testing.T) {
 	dir := t.TempDir()
-	specs := buildMountSpecs(MountParams{HostMediatedRemote: true, AccumulationRepoDir: dir}, Box{})
+	specs, err := buildMountSpecs(MountParams{HostMediatedRemote: true, AccumulationRepoDir: dir}, Box{})
+	if err != nil {
+		t.Fatalf("buildMountSpecs: %v", err)
+	}
 
 	var found *MountSpec
 	for i := range specs {
@@ -159,7 +177,10 @@ func TestBuildMountSpecs_LocalCodeForge_AccumulationRepoMountedReadOnly(t *testi
 // writable outbox since it cannot push to the read-only /repo mount).
 func TestBuildMountSpecs_LocalCodeForge_OutboxMountedWritable(t *testing.T) {
 	dir := t.TempDir()
-	specs := buildMountSpecs(MountParams{HostMediatedRemote: true}, Box{OutboxDir: dir})
+	specs, err := buildMountSpecs(MountParams{HostMediatedRemote: true}, Box{OutboxDir: dir})
+	if err != nil {
+		t.Fatalf("buildMountSpecs: %v", err)
+	}
 
 	var found *MountSpec
 	for i := range specs {
@@ -185,7 +206,10 @@ func TestBuildMountSpecs_LocalCodeForge_OutboxMountedWritable(t *testing.T) {
 func TestBuildMountSpecs_NonLocalCodeForge_NoAccumulationOrOutboxMount(t *testing.T) {
 	repoDir, outboxDir := t.TempDir(), t.TempDir()
 	for _, outboxRelayCapable := range []bool{true, false} {
-		specs := buildMountSpecs(MountParams{HostMediatedRemote: false, OutboxRelayCapable: outboxRelayCapable, AccumulationRepoDir: repoDir}, Box{OutboxDir: outboxDir})
+		specs, err := buildMountSpecs(MountParams{HostMediatedRemote: false, OutboxRelayCapable: outboxRelayCapable, AccumulationRepoDir: repoDir}, Box{OutboxDir: outboxDir})
+		if err != nil {
+			t.Fatalf("buildMountSpecs: %v", err)
+		}
 		for _, s := range specs {
 			if s.Target == "/repo" || s.Target == "/outbox" {
 				t.Errorf("OutboxRelayCapable=%v: unexpected spec %+v", outboxRelayCapable, s)
@@ -199,7 +223,10 @@ func TestBuildMountSpecs_NonLocalCodeForge_NoAccumulationOrOutboxMount(t *testin
 // spec even under HostMediatedRemote — both local mounts stay gated on
 // candidateMount, not just the HostMediatedRemote check.
 func TestBuildMountSpecs_LocalCodeForge_AbsentAccumulationRepoDir_NoMount(t *testing.T) {
-	specs := buildMountSpecs(MountParams{HostMediatedRemote: true}, Box{})
+	specs, err := buildMountSpecs(MountParams{HostMediatedRemote: true}, Box{})
+	if err != nil {
+		t.Fatalf("buildMountSpecs: %v", err)
+	}
 
 	for _, s := range specs {
 		if s.Target == "/repo" {
@@ -211,7 +238,10 @@ func TestBuildMountSpecs_LocalCodeForge_AbsentAccumulationRepoDir_NoMount(t *tes
 // TestBuildMountSpecs_LocalCodeForge_AbsentOutboxDir_NoMount verifies that an
 // unset Box.OutboxDir yields no /outbox spec even under HostMediatedRemote.
 func TestBuildMountSpecs_LocalCodeForge_AbsentOutboxDir_NoMount(t *testing.T) {
-	specs := buildMountSpecs(MountParams{HostMediatedRemote: true}, Box{})
+	specs, err := buildMountSpecs(MountParams{HostMediatedRemote: true}, Box{})
+	if err != nil {
+		t.Fatalf("buildMountSpecs: %v", err)
+	}
 
 	for _, s := range specs {
 		if s.Target == "/outbox" {
@@ -229,7 +259,10 @@ func TestBuildMountSpecs_LocalCodeForge_AbsentOutboxDir_NoMount(t *testing.T) {
 // from a locally mounted Accumulation repo.
 func TestBuildMountSpecs_GithubReadOnly_OutboxMountedWritable(t *testing.T) {
 	dir := t.TempDir()
-	specs := buildMountSpecs(MountParams{HostMediatedRemote: false, OutboxRelayCapable: true, BoxForgeAndIssueAccess: "read-only"}, Box{OutboxDir: dir})
+	specs, err := buildMountSpecs(MountParams{HostMediatedRemote: false, OutboxRelayCapable: true, BoxForgeAndIssueAccess: "read-only"}, Box{OutboxDir: dir})
+	if err != nil {
+		t.Fatalf("buildMountSpecs: %v", err)
+	}
 
 	var found *MountSpec
 	for i := range specs {
@@ -257,7 +290,10 @@ func TestBuildMountSpecs_GithubReadOnly_OutboxMountedWritable(t *testing.T) {
 // never consults an outbox.
 func TestBuildMountSpecs_GithubReadWrite_NoOutboxMount(t *testing.T) {
 	dir := t.TempDir()
-	specs := buildMountSpecs(MountParams{HostMediatedRemote: false, OutboxRelayCapable: true, BoxForgeAndIssueAccess: "read-write"}, Box{OutboxDir: dir})
+	specs, err := buildMountSpecs(MountParams{HostMediatedRemote: false, OutboxRelayCapable: true, BoxForgeAndIssueAccess: "read-write"}, Box{OutboxDir: dir})
+	if err != nil {
+		t.Fatalf("buildMountSpecs: %v", err)
+	}
 
 	for _, s := range specs {
 		if s.Target == "/outbox" {
@@ -278,7 +314,10 @@ func TestBuildMountSpecs_GithubReadWrite_NoOutboxMount(t *testing.T) {
 // behavior pin and not new behavior.
 func TestBuildMountSpecs_ForgejoReadOnly_NoOutboxMount(t *testing.T) {
 	dir := t.TempDir()
-	specs := buildMountSpecs(MountParams{HostMediatedRemote: false, OutboxRelayCapable: false, BoxForgeAndIssueAccess: "read-only"}, Box{OutboxDir: dir})
+	specs, err := buildMountSpecs(MountParams{HostMediatedRemote: false, OutboxRelayCapable: false, BoxForgeAndIssueAccess: "read-only"}, Box{OutboxDir: dir})
+	if err != nil {
+		t.Fatalf("buildMountSpecs: %v", err)
+	}
 
 	for _, s := range specs {
 		if s.Target == "/outbox" {
@@ -294,7 +333,10 @@ func TestBuildMountSpecs_ForgejoReadOnly_NoOutboxMount(t *testing.T) {
 // mount is the tracker's normal read path, not a diagnostic override.
 func TestBuildMountSpecs_IssuesDirMounted(t *testing.T) {
 	dir := t.TempDir()
-	specs := buildMountSpecs(MountParams{HostMediatedIssueTracker: true, LocalIssuesDir: dir}, Box{})
+	specs, err := buildMountSpecs(MountParams{HostMediatedIssueTracker: true, LocalIssuesDir: dir}, Box{})
+	if err != nil {
+		t.Fatalf("buildMountSpecs: %v", err)
+	}
 
 	var found *MountSpec
 	for i := range specs {
@@ -321,7 +363,10 @@ func TestBuildMountSpecs_IssuesDirMounted(t *testing.T) {
 // resolves to a real directory — the mount is local-only (ADR 0032).
 func TestBuildMountSpecs_IssuesDirNonLocalTracker_NoMount(t *testing.T) {
 	dir := t.TempDir()
-	specs := buildMountSpecs(MountParams{HostMediatedIssueTracker: false, LocalIssuesDir: dir}, Box{})
+	specs, err := buildMountSpecs(MountParams{HostMediatedIssueTracker: false, LocalIssuesDir: dir}, Box{})
+	if err != nil {
+		t.Fatalf("buildMountSpecs: %v", err)
+	}
 
 	for _, s := range specs {
 		if s.Target == "/issues" {
@@ -334,12 +379,163 @@ func TestBuildMountSpecs_IssuesDirNonLocalTracker_NoMount(t *testing.T) {
 // with an absent LocalIssuesDir yields no mount rather than an error — a
 // misconfigured or not-yet-created issues dir fails gracefully (ADR 0032).
 func TestBuildMountSpecs_IssuesDirMissing_NoMount(t *testing.T) {
-	specs := buildMountSpecs(MountParams{HostMediatedIssueTracker: true, LocalIssuesDir: "/nonexistent/does-not-exist"}, Box{})
+	specs, err := buildMountSpecs(MountParams{HostMediatedIssueTracker: true, LocalIssuesDir: "/nonexistent/does-not-exist"}, Box{})
+	if err != nil {
+		t.Fatalf("buildMountSpecs: %v", err)
+	}
 
 	for _, s := range specs {
 		if s.Target == "/issues" {
 			t.Errorf("unexpected /issues spec for a missing dir: %+v", specs)
 		}
+	}
+}
+
+// TestCandidateFileMount_RegularFile verifies candidateFileMount mounts a
+// source that stats as a regular file, unlike candidateMount which requires
+// a directory.
+func TestCandidateFileMount_RegularFile(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/snapshot.md"
+	if err := os.WriteFile(path, []byte("hello"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	spec, ok := candidateFileMount(path, "/issue-snapshot.md", true)
+	if !ok {
+		t.Fatalf("candidateFileMount(%q): got ok=false, want true", path)
+	}
+	if spec.Source != path || spec.Target != "/issue-snapshot.md" || !spec.ReadOnly {
+		t.Errorf("candidateFileMount: got %+v", spec)
+	}
+}
+
+// TestCandidateFileMount_RejectsDirectory verifies candidateFileMount
+// refuses a source that stats as a directory -- the inverse of
+// candidateMount's own directory-only requirement.
+func TestCandidateFileMount_RejectsDirectory(t *testing.T) {
+	dir := t.TempDir()
+
+	if _, ok := candidateFileMount(dir, "/issue-snapshot.md", true); ok {
+		t.Errorf("candidateFileMount(%q): got ok=true for a directory, want false", dir)
+	}
+}
+
+// TestCandidateFileMount_MissingSource verifies candidateFileMount yields no
+// mount for a source that does not exist.
+func TestCandidateFileMount_MissingSource(t *testing.T) {
+	if _, ok := candidateFileMount("/nonexistent/does-not-exist.md", "/issue-snapshot.md", true); ok {
+		t.Error("candidateFileMount: got ok=true for a missing source, want false")
+	}
+}
+
+// TestCandidateFileMount_EmptySourceOrTarget verifies candidateFileMount
+// requires both source and target set, mirroring candidateMount.
+func TestCandidateFileMount_EmptySourceOrTarget(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/snapshot.md"
+	if err := os.WriteFile(path, []byte("hello"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	if _, ok := candidateFileMount("", "/issue-snapshot.md", true); ok {
+		t.Error("candidateFileMount: got ok=true for an empty source, want false")
+	}
+	if _, ok := candidateFileMount(path, "", true); ok {
+		t.Error("candidateFileMount: got ok=true for an empty target, want false")
+	}
+}
+
+// TestBuildMountSpecs_IssueSnapshotMounted verifies buildMountSpecs mounts
+// box.IssueSnapshotPath read-only at /issue-snapshot.md when it points at a
+// real file, silently (no operator Message) like the /issues mount.
+func TestBuildMountSpecs_IssueSnapshotMounted(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/issue-42.md"
+	if err := os.WriteFile(path, []byte("frozen text"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	specs, err := buildMountSpecs(MountParams{}, Box{IssueSnapshotPath: path})
+	if err != nil {
+		t.Fatalf("buildMountSpecs: %v", err)
+	}
+
+	var found *MountSpec
+	for i := range specs {
+		if specs[i].Target == "/issue-snapshot.md" {
+			found = &specs[i]
+		}
+	}
+	if found == nil {
+		t.Fatalf("expected an /issue-snapshot.md spec in %+v", specs)
+	}
+	if found.Source != path {
+		t.Errorf("Source = %q, want %q", found.Source, path)
+	}
+	if !found.ReadOnly {
+		t.Error("issue-snapshot mount must be read-only")
+	}
+	if found.Message != "" {
+		t.Errorf("issue-snapshot mount must be silent; got Message = %q", found.Message)
+	}
+}
+
+// TestBuildMountSpecs_IssueSnapshotPathEmpty_NoMount verifies buildMountSpecs
+// produces no /issue-snapshot.md mount when box.IssueSnapshotPath is empty.
+func TestBuildMountSpecs_IssueSnapshotPathEmpty_NoMount(t *testing.T) {
+	specs, err := buildMountSpecs(MountParams{}, Box{})
+	if err != nil {
+		t.Fatalf("buildMountSpecs: %v", err)
+	}
+
+	for _, s := range specs {
+		if s.Target == "/issue-snapshot.md" {
+			t.Errorf("unexpected /issue-snapshot.md spec for an empty IssueSnapshotPath: %+v", specs)
+		}
+	}
+}
+
+// TestBuildMountSpecs_IssueSnapshotStatFails_Error verifies buildMountSpecs
+// returns a descriptive error, rather than silently dropping the mount, when
+// box.IssueSnapshotPath is non-empty but does not stat -- e.g. the frozen
+// issue-read snapshot Box.Run's writeIssueSnapshot step should have written
+// was removed or made unreadable in the window before this mount is
+// computed. Since #2547 the snapshot is the box's sole source of issue text
+// for implement/review/fix passes, so a silently-empty mount here would
+// otherwise leave the box starting with no issue text and only an opaque
+// "no such file" from `cat /issue-snapshot.md` inside the box, with no
+// diagnostic in the launcher's own output pointing at why. An empty
+// IssueSnapshotPath (research dispatches, pre-#2547 Box construction) must
+// stay silent -- see TestBuildMountSpecs_IssueSnapshotPathEmpty_NoMount.
+func TestBuildMountSpecs_IssueSnapshotStatFails_Error(t *testing.T) {
+	path := "/nonexistent/does-not-exist/issue-42.md"
+
+	specs, err := buildMountSpecs(MountParams{}, Box{IssueSnapshotPath: path})
+	if err == nil {
+		t.Fatalf("buildMountSpecs: got nil error and specs %+v, want a descriptive error", specs)
+	}
+	if !strings.Contains(err.Error(), path) {
+		t.Errorf("buildMountSpecs error = %q, want it to mention the snapshot path %q", err.Error(), path)
+	}
+}
+
+// TestBuildMountSpecs_IssueSnapshotPathIsDirectory_Error verifies
+// buildMountSpecs returns a descriptive error, rather than silently dropping
+// the mount, when box.IssueSnapshotPath stats fine but is a directory, not a
+// regular file. Before this fix candidateFileMount's fail-open contract (a
+// silently-omitted mount whenever the source isn't a plain file) applied
+// here too, the exact hole issue #2547's "sole source of issue text" design
+// depends on closing.
+func TestBuildMountSpecs_IssueSnapshotPathIsDirectory_Error(t *testing.T) {
+	dir := t.TempDir()
+
+	specs, err := buildMountSpecs(MountParams{}, Box{IssueSnapshotPath: dir})
+	if err == nil {
+		t.Fatalf("buildMountSpecs: got nil error and specs %+v, want a descriptive error", specs)
+	}
+	if !strings.Contains(err.Error(), dir) {
+		t.Errorf("buildMountSpecs error = %q, want it to mention the snapshot path %q", err.Error(), dir)
 	}
 }
 
@@ -393,8 +589,16 @@ func TestMountSpecs_RenderedIdenticallyAcrossBackends(t *testing.T) {
 	}
 	box := Box{Name: "agent-issue-1", Env: map[string]string{}, DriverCacheDir: cacheDir}
 
-	ociArgs := strings.Join(oci.buildRunArgs(box), " ")
-	bwrapArgs := strings.Join(bwrap.buildArgs("/tmp/fake-etc", box), " ")
+	ociArgSlice, err := oci.buildRunArgs(box)
+	if err != nil {
+		t.Fatalf("oci.buildRunArgs: %v", err)
+	}
+	ociArgs := strings.Join(ociArgSlice, " ")
+	bwrapArgSlice, err := bwrap.buildArgs("/tmp/fake-etc", box)
+	if err != nil {
+		t.Fatalf("bwrap.buildArgs: %v", err)
+	}
+	bwrapArgs := strings.Join(bwrapArgSlice, " ")
 
 	for _, mount := range []struct{ source, target string }{
 		{promptDir, "/agent/prompts"},
@@ -434,9 +638,16 @@ func TestLocalCodeForgeMounts_RenderedIdenticallyAcrossBackends(t *testing.T) {
 	}
 	box := Box{Name: "agent-issue-1", Env: map[string]string{}, OutboxDir: outboxDir}
 
-	ociArgSlice := oci.buildRunArgs(box)
+	ociArgSlice, err := oci.buildRunArgs(box)
+	if err != nil {
+		t.Fatalf("oci.buildRunArgs: %v", err)
+	}
 	ociArgs := strings.Join(ociArgSlice, " ")
-	bwrapArgs := strings.Join(bwrap.buildArgs("/tmp/fake-etc", box), " ")
+	bwrapArgSlice, err := bwrap.buildArgs("/tmp/fake-etc", box)
+	if err != nil {
+		t.Fatalf("bwrap.buildArgs: %v", err)
+	}
+	bwrapArgs := strings.Join(bwrapArgSlice, " ")
 
 	if !slices.Contains(ociArgSlice, repoDir+":/repo:ro") {
 		t.Errorf("OCI missing read-only /repo mount in args: %s", ociArgs)
@@ -476,9 +687,16 @@ func TestGithubReadOnlyOutboxMount_RenderedIdenticallyAcrossBackends(t *testing.
 	}
 	box := Box{Name: "agent-issue-1", Env: map[string]string{}, OutboxDir: outboxDir}
 
-	ociArgSlice := oci.buildRunArgs(box)
+	ociArgSlice, err := oci.buildRunArgs(box)
+	if err != nil {
+		t.Fatalf("oci.buildRunArgs: %v", err)
+	}
 	ociArgs := strings.Join(ociArgSlice, " ")
-	bwrapArgs := strings.Join(bwrap.buildArgs("/tmp/fake-etc", box), " ")
+	bwrapArgSlice, err := bwrap.buildArgs("/tmp/fake-etc", box)
+	if err != nil {
+		t.Fatalf("bwrap.buildArgs: %v", err)
+	}
+	bwrapArgs := strings.Join(bwrapArgSlice, " ")
 
 	if !slices.Contains(ociArgSlice, outboxDir+":/outbox") {
 		t.Errorf("OCI missing writable /outbox mount in args: %s", ociArgs)
@@ -512,8 +730,15 @@ func TestLocalCodeForgeMounts_AbsentOnNonLocalBackends(t *testing.T) {
 	}
 	box := Box{Name: "agent-issue-1", Env: map[string]string{}, OutboxDir: outboxDir}
 
-	ociArgSlice := oci.buildRunArgs(box)
-	bwrapArgs := strings.Join(bwrap.buildArgs("/tmp/fake-etc", box), " ")
+	ociArgSlice, err := oci.buildRunArgs(box)
+	if err != nil {
+		t.Fatalf("oci.buildRunArgs: %v", err)
+	}
+	bwrapArgSlice, err := bwrap.buildArgs("/tmp/fake-etc", box)
+	if err != nil {
+		t.Fatalf("bwrap.buildArgs: %v", err)
+	}
+	bwrapArgs := strings.Join(bwrapArgSlice, " ")
 
 	if slices.Contains(ociArgSlice, repoDir+":/repo:ro") || slices.Contains(ociArgSlice, outboxDir+":/outbox") {
 		t.Errorf("OCI must not mount /repo or /outbox with CodeForge unset: %s", strings.Join(ociArgSlice, " "))

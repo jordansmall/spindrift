@@ -83,6 +83,19 @@ func conflictLogPathFor(pwd, number string) string {
 // Run dispatches the initial box for this issue.
 func (d *Dispatch) Run() Result {
 	logPath := d.logPath()
+	// snapshotPath is set once, on this Run() call's true first attempt
+	// (the same guard as quarantinePriorRunLogs/markRunLineage below), and
+	// closed over by the retry callback so every hold/backoff re-attempt
+	// this Run() makes (resumeAfterHold == true) reuses the same frozen
+	// file instead of re-resolving (and potentially re-writing) it. A
+	// quarantineErr retry is the one exception: it re-enters with
+	// resumeAfterHold == false (retry.go), the same as this Run() call's
+	// true first attempt, because quarantineErr only ever fires from
+	// inside this still-pre-dispatch block -- so a transient failure in
+	// quarantinePriorRunLogs, markRunLineage, or writeIssueSnapshot itself
+	// causes all three to re-run, briefly reopening the freeze window this
+	// snapshot exists to close.
+	var snapshotPath string
 	return d.dispatchWithRetry(logPath, func(resumeAfterHold bool) error {
 		fmt.Fprintf(d.humanOut(), "    -> #%s: %s\n", d.number, d.title)
 		if !resumeAfterHold && !d.runner.IsRunning(BoxName(d.number)) {
@@ -103,12 +116,26 @@ func (d *Dispatch) Run() Result {
 			if err := markRunLineage(d.pwd, d.number); err != nil {
 				return quarantineErr{err: fmt.Errorf("mark run lineage: %w", err)}
 			}
+			// The issue-read snapshot is frozen once at the true start of
+			// this logical run (issue #2547), same lifetime as the
+			// lineage marker above -- but unlike quarantinePriorRunLogs
+			// and markRunLineage, which run unconditionally, only the
+			// snapshot write itself is skipped for a research dispatch
+			// (ADR 0022): research's own issue-read fragments stay live,
+			// ungated by this file.
+			if d.cfg.Kind != "research" {
+				path, err := writeIssueSnapshot(d.cfg.IssueSnapshot, d.pwd, d.number)
+				if err != nil {
+					return quarantineErr{err: fmt.Errorf("write issue snapshot: %w", err)}
+				}
+				snapshotPath = path
+			}
 		}
 		env := buildBoxEnv(d.cfg, d.number, d.title, 0, "", d.nonce)
 		if resumeAfterHold {
 			env["RESUME_AFTER_HOLD"] = "1"
 		}
-		return d.runOnce(logPath, env, d.cacheDir)
+		return d.runOnce(logPath, env, d.cacheDir, snapshotPath)
 	})
 }
 
@@ -116,11 +143,28 @@ func (d *Dispatch) Run() Result {
 // is ignored: a fix pass already resumes its session via FIX_PASS>0, so a
 // transient-backoff re-dispatch mid-fix (a 429 hold or a 529 backoff) needs no
 // extra signal.
+//
+// A fix pass reuses -- never re-resolves or re-writes -- the same frozen
+// snapshot file Run wrote at this logical run's true start (issue #2547):
+// SnapshotPathFor(d.pwd, d.number) is the deterministic path Run's own
+// writeIssueSnapshot step already wrote it to. Its own reviewer/review-issue-
+// read fragments cat that same fixed in-box path, so a fix box needs the
+// mount too, not just the initial box Run dispatches. When no such file
+// exists -- a research dispatch (which never calls Fix, see settle/
+// research.go) or a Config with no IssueSnapshot resolver wired at all, e.g.
+// several dispatch-package tests that call Fix without a prior Run -- Fix
+// falls back to "", the pre-#2547 no-mount behavior, rather than handing
+// runOnce a path buildMountSpecs would now hard-error on (issue #2547 review
+// finding).
 func (d *Dispatch) Fix(pass int, ciFailureSummary string) Result {
 	logPath := d.fixLogPath(pass)
+	snapshotPath := ""
+	if _, err := os.Stat(SnapshotPathFor(d.pwd, d.number)); err == nil {
+		snapshotPath = SnapshotPathFor(d.pwd, d.number)
+	}
 	return d.dispatchWithRetry(logPath, func(_ bool) error {
 		fmt.Fprintf(d.humanOut(), "    -> #%s (fix-pass-%d): %s\n", d.number, pass, d.title)
-		return d.runOnce(logPath, buildBoxEnv(d.cfg, d.number, d.title, pass, ciFailureSummary, d.nonce), d.cacheDir)
+		return d.runOnce(logPath, buildBoxEnv(d.cfg, d.number, d.title, pass, ciFailureSummary, d.nonce), d.cacheDir, snapshotPath)
 	})
 }
 
@@ -136,7 +180,7 @@ func (d *Dispatch) ResolveConflict(pr string) error {
 	fmt.Fprintf(d.humanOut(), "    -> #%s (conflict-resolve): %s\n", d.number, d.title)
 	env := buildBoxEnv(d.cfg, d.number, d.title, 0, "", d.nonce)
 	env["CONFLICT_RESOLVE_PR_URL"] = pr
-	return d.runOnce(d.conflictLogPath(), env, "")
+	return d.runOnce(d.conflictLogPath(), env, "", "")
 }
 
 // humanOut is the human-facing sink for this Dispatch: both the heartbeat
@@ -167,7 +211,12 @@ func (d *Dispatch) Close() {
 // orphaned by a killed launcher) still owns that log, so runOnce returns
 // runner.ErrAlreadyRunning without rotating, creating, or otherwise
 // disturbing it (issue #562).
-func (d *Dispatch) runOnce(logPath string, env map[string]string, driverCacheDir string) error {
+//
+// issueSnapshotPath is forwarded onto the launched Box unmodified (issue
+// #2547); only Run passes a non-empty value (and only for a non-research
+// dispatch) -- Fix and ResolveConflict always pass "", since fix-prompt.md
+// has no issue-read step to freeze against.
+func (d *Dispatch) runOnce(logPath string, env map[string]string, driverCacheDir string, issueSnapshotPath string) error {
 	name := BoxName(d.number)
 	if d.runner.IsRunning(name) {
 		return runner.ErrAlreadyRunning
@@ -198,12 +247,13 @@ func (d *Dispatch) runOnce(logPath string, env map[string]string, driverCacheDir
 	}
 
 	box := runner.Box{
-		Issue:          d.number,
-		Name:           name,
-		Env:            env,
-		Output:         d.driver.NewHeartbeatWriter(logFile, d.number, d.humanOut(), driverkit.RenderOptions{}),
-		DriverCacheDir: driverCacheDir,
-		OutboxDir:      outboxDir,
+		Issue:             d.number,
+		Name:              name,
+		Env:               env,
+		Output:            d.driver.NewHeartbeatWriter(logFile, d.number, d.humanOut(), driverkit.RenderOptions{}),
+		DriverCacheDir:    driverCacheDir,
+		OutboxDir:         outboxDir,
+		IssueSnapshotPath: issueSnapshotPath,
 	}
 	return d.runner.Run(box)
 }
@@ -259,10 +309,12 @@ func rotateStaleLog(logPath string) error {
 	}
 }
 
-// quarantineErr wraps a quarantinePriorRunLogs failure so dispatchWithRetry
-// (retry.go) can tell it apart from every other once() failure via
-// errors.As: nothing this run produced is necessarily at logPath yet when
-// quarantine runs, so on this specific failure the caller must not consult
+// quarantineErr wraps a failure from one of Run's pre-dispatch, once-per-run
+// steps -- quarantinePriorRunLogs, markRunLineage, or writeIssueSnapshot --
+// so dispatchWithRetry (retry.go) can tell it apart from every other once()
+// failure via errors.As: nothing this run produced is necessarily at logPath
+// yet when any of these run (all three execute before the box is ever
+// dispatched), so on this specific failure the caller must not consult
 // settledOutcome or ClassifyTransient against logPath at all -- either could
 // settle on, or reclassify, content left by the exact prior run quarantine
 // was trying to move aside (issue #2575), rather than failing outright.
