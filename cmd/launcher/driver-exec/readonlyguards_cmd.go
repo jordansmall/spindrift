@@ -21,6 +21,7 @@ func isReadonlyGuardsInvocation(args []string) bool {
 type readonlyGuardsFlags struct {
 	forbiddenMarkersRegistryPath *string
 	repoDir                      *string
+	extraRepoDir                 *string
 	shimDir                      *string
 }
 
@@ -34,6 +35,7 @@ func newReadonlyGuardsFlagSet() (*flag.FlagSet, *readonlyGuardsFlags) {
 	flags := &readonlyGuardsFlags{
 		forbiddenMarkersRegistryPath: fs.String("forbidden-markers-registry", "", "path to the prompt-contract forbiddenMarkers registry JSON file (required)"),
 		repoDir:                      fs.String("repo-dir", "", "the git repository (or bare/decoy repository) whose .git/hooks directory receives the rendered git-hook guard; required when the registry has at least one git-hook row"),
+		extraRepoDir:                 fs.String("extra-repo-dir", "", "an additional git repository whose .git/hooks directory also receives the rendered git-hook guard, identical to -repo-dir's (issue #2509 Finding 1: entrypoint.sh passes $WORK_DIR here alongside the decoy repo at -repo-dir); optional"),
 		shimDir:                      fs.String("shim-dir", "", "directory to install command-shim guards into; required when the registry has at least one command-shim row"),
 	}
 	return fs, flags
@@ -64,9 +66,15 @@ func runReadonlyGuards(args []string, stdout io.Writer) int {
 		return 1
 	}
 
+	var extraRepoDirs []string
+	if *flags.extraRepoDir != "" {
+		extraRepoDirs = []string{*flags.extraRepoDir}
+	}
+
 	result, err := readonlyguards.Install(rows, readonlyguards.Config{
-		RepoDir: *flags.repoDir,
-		ShimDir: *flags.shimDir,
+		RepoDir:       *flags.repoDir,
+		ExtraRepoDirs: extraRepoDirs,
+		ShimDir:       *flags.shimDir,
 	}, stdout)
 	if err != nil {
 		fmt.Fprintln(fs.Output(), "driver-exec readonly-guards:", err)
