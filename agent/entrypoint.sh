@@ -276,6 +276,21 @@ clone_repo() {
 # pre-receive hook -- installed under decoy/hooks by the verb call below,
 # see readonlyguards.Config.RepoDir -- always fires, `--no-verify` included.
 #
+# The git-hook guard is installed in BOTH places, not just the decoy:
+# decoy/hooks (via --repo-dir, above) AND $WORK_DIR/.git/hooks (via
+# --extra-repo-dir, see readonlyguards.Config.ExtraRepoDirs). The decoy's
+# pre-receive hook only ever fires for a push that actually goes through
+# origin's repointed pushurl -- a plain `git push`/`git push origin ...`.
+# A push to an explicit URL (`git push https://github.com/owner/repo
+# HEAD:b`) or a non-origin remote never touches origin's pushurl at all, so
+# the decoy alone never sees it and, without the second install, that push
+# would reach the real forge and 403 there -- exactly the round trip issue
+# #2463 exists to prevent. $WORK_DIR/.git/hooks/pre-push, installed by the
+# --extra-repo-dir call below, catches that case: it fires for every push
+# attempted directly against $WORK_DIR's own checkout, regardless of
+# destination URL or remote name, `--no-verify` included (pre-receive isn't
+# bypassable by a client-side flag either way).
+#
 # Gated on the former install_readonly_push_hook's own condition verbatim:
 # BOX_WRITE_ENABLED unset (no push-capable token was ever issued) AND
 # (BOX_HOST_MEDIATED_REMOTE or BOX_OUTBOX_RELAY_CAPABLE set -- the two
@@ -319,6 +334,7 @@ install_readonly_guards() {
   driver-exec readonly-guards \
     --forbidden-markers-registry "$FORBIDDEN_MARKERS_REGISTRY_FILE" \
     --repo-dir "$decoy" \
+    --extra-repo-dir "$WORK_DIR" \
     --shim-dir "$shim_dir"
   export PATH="$shim_dir:$PATH"
 }
