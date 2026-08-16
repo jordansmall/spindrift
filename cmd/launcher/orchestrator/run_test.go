@@ -921,14 +921,18 @@ exit 0
 	}
 }
 
-// reviewPassFakeDriverBody returns a writeFakeDriverExec body scripting a
-// fake driver-exec for the #2037 review-pass loop: implement/fix passes (odd
+// fakeReviewDriverBody returns a writeFakeDriverExec body scripting a fake
+// driver-exec for the #2037 review-pass loop: implement/fix passes (odd
 // calls) never emit a verdict or outcome of their own -- self-review is
 // stripped from their prompt under the orchestrator, so this fixture mirrors
 // that -- while review passes (even calls) BLOCK on the first review and
 // APPROVE on the second; the pass after that APPROVE (call 5, a "land" pass
 // seeded with the APPROVE verdict) emits the run's only terminal outcome.
-func reviewPassFakeDriverBody(callLog string) string {
+// blockFinding/round1NonBlocking/round2NonBlocking let callers vary the
+// findings text per round -- e.g. issue #2552's findings-log test needs a
+// DISTINCT non-blocking finding per round to tell "the log accumulated both
+// rounds' text" apart from "the log just has the last round's text twice".
+func fakeReviewDriverBody(callLog, blockFinding, round1NonBlocking, round2NonBlocking string) string {
 	return fmt.Sprintf(`: > "$DRIVER_LOG_PATH"
 n=$(wc -l < "%s")
 case "$n" in
@@ -938,9 +942,17 @@ case "$n" in
 esac
 exit 0
 `, callLog,
-		streamJSONOutcomeLine("VERDICT: BLOCK\\n\\n## Blocking\\n- run.go:1 -- bug\\n\\n## Non-blocking\\n- none"),
-		streamJSONOutcomeLine("VERDICT: APPROVE\\n\\n## Blocking\\n- none\\n\\n## Non-blocking\\n- none"),
+		streamJSONOutcomeLine("VERDICT: BLOCK\\n\\n## Blocking\\n- "+blockFinding+"\\n\\n## Non-blocking\\n- "+round1NonBlocking),
+		streamJSONOutcomeLine("VERDICT: APPROVE\\n\\n## Blocking\\n- none\\n\\n## Non-blocking\\n- "+round2NonBlocking),
 		streamJSONOutcomeLine("SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=done nonce=abc"))
+}
+
+// reviewPassFakeDriverBody is fakeReviewDriverBody with a blocking round-1
+// finding and no distinguishing non-blocking text -- the shape most #2037
+// loop-mechanics tests need; see fakeReviewDriverBody's own doc for what
+// each parameter controls.
+func reviewPassFakeDriverBody(callLog string) string {
+	return fakeReviewDriverBody(callLog, "run.go:1 -- bug", "none", "none")
 }
 
 // TestRunWithReviewPassSequenceOnBlockThenApprove verifies the #2037
@@ -1065,25 +1077,12 @@ func TestRunWithReviewPassSequenceOnBlockThenApprove(t *testing.T) {
 	}
 }
 
-// findingsLogFakeDriverBody returns a writeFakeDriverExec body scripting the
-// same #2037 implement -> review -> (BLOCK) fix -> review -> (APPROVE) land
-// sequence as reviewPassFakeDriverBody, but with a DISTINCT non-blocking
-// finding in each review round -- so a later assertion can tell "the
-// findings log accumulated both rounds' text" apart from "the log just has
-// the last round's text twice" (issue #2552).
+// findingsLogFakeDriverBody is fakeReviewDriverBody with a DISTINCT
+// non-blocking finding in each review round -- so a later assertion can
+// tell "the findings log accumulated both rounds' text" apart from "the log
+// just has the last round's text twice" (issue #2552).
 func findingsLogFakeDriverBody(callLog string) string {
-	return fmt.Sprintf(`: > "$DRIVER_LOG_PATH"
-n=$(wc -l < "%s")
-case "$n" in
-  2) printf '%%s' '%s' | tee -a "$DRIVER_LOG_PATH" ;;
-  4) printf '%%s' '%s' | tee -a "$DRIVER_LOG_PATH" ;;
-  5) printf '%%s' '%s' | tee -a "$DRIVER_LOG_PATH" ;;
-esac
-exit 0
-`, callLog,
-		streamJSONOutcomeLine("VERDICT: BLOCK\\n\\n## Blocking\\n- none\\n\\n## Non-blocking\\n- round-one-only-finding"),
-		streamJSONOutcomeLine("VERDICT: APPROVE\\n\\n## Blocking\\n- none\\n\\n## Non-blocking\\n- round-two-only-finding"),
-		streamJSONOutcomeLine("SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=done nonce=abc"))
+	return fakeReviewDriverBody(callLog, "none", "round-one-only-finding", "round-two-only-finding")
 }
 
 // TestRunWithReviewPassAccumulatesFindingsAcrossRoundsInFindingsLog verifies
@@ -1150,6 +1149,19 @@ func TestRunWithReviewPassAccumulatesFindingsAcrossRoundsInFindingsLog(t *testin
 		t.Errorf("findings log = %q, want round 2's own finding present", content)
 	}
 
+	round1Start := strings.Index(content, "## Round 1")
+	round2Start := strings.Index(content, "## Round 2")
+	if round1Start == -1 || round2Start == -1 || round1Start >= round2Start {
+		t.Fatalf("findings log = %q, want a \"## Round 1\" section followed by a \"## Round 2\" section", content)
+	}
+	round1Section, round2Section := content[round1Start:round2Start], content[round2Start:]
+	if !strings.Contains(round1Section, "round-one-only-finding") || strings.Contains(round1Section, "round-two-only-finding") {
+		t.Errorf("round 1 section = %q, want only round 1's own finding, not round 2's", round1Section)
+	}
+	if !strings.Contains(round2Section, "round-two-only-finding") || strings.Contains(round2Section, "round-one-only-finding") {
+		t.Errorf("round 2 section = %q, want only round 2's own finding, not round 1's", round2Section)
+	}
+
 	calls, err := os.ReadFile(callLog)
 	if err != nil {
 		t.Fatalf("read callLog: %v", err)
@@ -1168,6 +1180,63 @@ func TestRunWithReviewPassAccumulatesFindingsAcrossRoundsInFindingsLog(t *testin
 	}
 	if !strings.Contains(string(landSeeded), "Findings log: "+got.FindingsLogPath) {
 		t.Errorf("pass 5 (land) seeded prompt = %q, want it to reference the findings log path %q", landSeeded, got.FindingsLogPath)
+	}
+}
+
+// TestRunWithReviewPassEmitsRunStateErrorWhenFindingsLogAppendFails verifies
+// runWithReviewPass (issue #2552) surfaces a findings-log append failure as
+// a "run_state_error" spindrift op on stdout, the same way applyDecision
+// already does for a run-state write failure, rather than leaving it
+// stderr-only and invisible to the console/wave log. Pre-seeding
+// state.FindingsLogPath as a directory makes the first review round's
+// os.OpenFile fail.
+func TestRunWithReviewPassEmitsRunStateErrorWhenFindingsLogAppendFails(t *testing.T) {
+	dir := t.TempDir()
+	callLog := filepath.Join(dir, "calls.log")
+	writeFakeDriverExec(t, dir, callLog, reviewPassFakeDriverBody(callLog))
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	promptFile := filepath.Join(dir, "prompt.txt")
+	if err := os.WriteFile(promptFile, []byte("ORIGINAL PROMPT TEXT"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	reviewPromptFile := filepath.Join(dir, "review-prompt.txt")
+	if err := os.WriteFile(reviewPromptFile, []byte("REVIEW PROMPT TEXT"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sessionFile := filepath.Join(dir, "session.txt")
+	if err := os.WriteFile(sessionFile, []byte("--session-id fake-id"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stateFile := filepath.Join(dir, "run-state.json")
+	unwritablePath := filepath.Join(dir, "findings-log-dir")
+	if err := os.Mkdir(unwritablePath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := runstate.WriteRunState(stateFile, runstate.RunState{FindingsLogPath: unwritablePath}); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config{
+		promptFile:       promptFile,
+		reviewPromptFile: reviewPromptFile,
+		sessionFile:      sessionFile,
+		driverBin:        "claude",
+		issue:            "7",
+		logPath:          filepath.Join(dir, "stream.log"),
+		heartbeatLog:     filepath.Join(dir, "heartbeat.log"),
+		stateFile:        stateFile,
+		maxReviewRounds:  3,
+		maxSlices:        10,
+	}
+
+	var stdout bytes.Buffer
+	if _, err := run(cfg, &stdout); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	if !strings.Contains(stdout.String(), `"spindrift_op":{"op":"run_state_error","phase":"findings_log"`) {
+		t.Errorf("stdout = %q, want a run_state_error op with phase findings_log", stdout.String())
 	}
 }
 
@@ -2296,18 +2365,24 @@ func TestSeedPromptFromStateIncludesReviewFindings(t *testing.T) {
 
 // TestSeedPromptFromStateIncludesFindingsLog verifies seedPromptFromState
 // (issue #2552) carries state.FindingsLogPath into the seeded prompt with an
-// explicit dedupe-and-file-the-union instruction, and that FindingsLogPath
-// alone (with every other state field at its zero value) is enough to
-// trigger seeding rather than returning promptFile unchanged.
+// instruction to triage the union of every round's non-blocking findings
+// through REVIEW's own non-blocking triage (not file every one of them
+// unconditionally), and that FindingsLogPath alone (with every other state
+// field at its zero value) is enough to trigger seeding rather than
+// returning promptFile unchanged.
 func TestSeedPromptFromStateIncludesFindingsLog(t *testing.T) {
 	dir := t.TempDir()
 	promptFile := filepath.Join(dir, "prompt.txt")
 	if err := os.WriteFile(promptFile, []byte("ORIGINAL PROMPT TEXT"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	logPath := filepath.Join(dir, "findings.md")
+	if err := os.WriteFile(logPath, []byte("## Round 1 (verdict: BLOCK)\n\nsome finding\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	state := runstate.RunState{
-		FindingsLogPath: "/tmp/some-findings.md",
+		FindingsLogPath: logPath,
 	}
 
 	seeded, err := seedPromptFromState(promptFile, state)
@@ -2322,14 +2397,48 @@ func TestSeedPromptFromStateIncludesFindingsLog(t *testing.T) {
 		t.Fatalf("read seeded prompt: %v", err)
 	}
 	gotStr := string(got)
-	if !strings.Contains(gotStr, "Findings log: /tmp/some-findings.md") {
+	if !strings.Contains(gotStr, "Findings log: "+logPath) {
 		t.Errorf("seeded prompt = %q, want it to name the findings log path", gotStr)
 	}
-	if !strings.Contains(gotStr, "dedupe-and-file the union of every round's non-blocking findings") {
-		t.Errorf("seeded prompt = %q, want an explicit dedupe-and-file-the-union instruction", gotStr)
+	if !strings.Contains(gotStr, "run the same non-blocking triage from REVIEW over the union of every round's non-blocking findings") {
+		t.Errorf("seeded prompt = %q, want an explicit instruction to triage the union, not file it unconditionally", gotStr)
 	}
 	if !strings.Contains(gotStr, "not just this round's Reviewer findings above") {
 		t.Errorf("seeded prompt = %q, want it to contrast the findings log with the last-round-only Reviewer findings bullet", gotStr)
+	}
+	if !strings.Contains(gotStr, "already fixed inline in an earlier round's fix pass is resolved, not re-filed") {
+		t.Errorf("seeded prompt = %q, want it to reconcile the union path with file-issues-direct.md's \"do not re-file what you just fixed\"", gotStr)
+	}
+}
+
+// TestSeedPromptFromStateSkipsFindingsLogBulletWhenFileGone verifies
+// seedPromptFromState (issue #2552 AC4) degrades a FindingsLogPath that no
+// longer points at a real file the same way an unset path does -- the
+// bullet is omitted rather than pointing the land pass at a missing file --
+// while still seeding the prompt for any other state carried (LastVerdict
+// here).
+func TestSeedPromptFromStateSkipsFindingsLogBulletWhenFileGone(t *testing.T) {
+	dir := t.TempDir()
+	promptFile := filepath.Join(dir, "prompt.txt")
+	if err := os.WriteFile(promptFile, []byte("ORIGINAL PROMPT TEXT"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	state := runstate.RunState{
+		LastVerdict:     "BLOCK",
+		FindingsLogPath: filepath.Join(dir, "does-not-exist.md"),
+	}
+
+	seeded, err := seedPromptFromState(promptFile, state)
+	if err != nil {
+		t.Fatalf("seedPromptFromState: %v", err)
+	}
+	got, err := os.ReadFile(seeded)
+	if err != nil {
+		t.Fatalf("read seeded prompt: %v", err)
+	}
+	if strings.Contains(string(got), "Findings log:") {
+		t.Errorf("seeded prompt = %q, want no \"Findings log:\" bullet when the recorded path no longer exists", got)
 	}
 }
 
@@ -2994,6 +3103,36 @@ func TestAppendFindingsLogRoundSkipsEmptyFindings(t *testing.T) {
 	}
 	if state.FindingsLogPath != "" {
 		t.Errorf("FindingsLogPath = %q, want empty (no findings, nothing to append)", state.FindingsLogPath)
+	}
+}
+
+// TestAppendFindingsLogRoundErrorsOnUnwritablePath verifies appendFindingsLogRound
+// surfaces an error (rather than silently dropping the round) when
+// state.FindingsLogPath is already set to a path os.OpenFile cannot write --
+// here, a directory rather than a file.
+func TestAppendFindingsLogRoundErrorsOnUnwritablePath(t *testing.T) {
+	state := runstate.RunState{FindingsLogPath: t.TempDir()}
+
+	err := appendFindingsLogRound(&state, 1, "BLOCK", "some findings text")
+	if err == nil {
+		t.Fatal("appendFindingsLogRound with a directory as FindingsLogPath: got nil error, want one")
+	}
+}
+
+// TestAppendFindingsLogRoundErrorsWhenCreateTempFails verifies
+// appendFindingsLogRound surfaces an error when it cannot create the log
+// file on first use -- state.FindingsLogPath is still empty, so it falls to
+// os.CreateTemp, and TMPDIR here points at a path that does not exist.
+func TestAppendFindingsLogRoundErrorsWhenCreateTempFails(t *testing.T) {
+	t.Setenv("TMPDIR", filepath.Join(t.TempDir(), "does-not-exist"))
+	var state runstate.RunState
+
+	err := appendFindingsLogRound(&state, 1, "BLOCK", "some findings text")
+	if err == nil {
+		t.Fatal("appendFindingsLogRound with an uncreatable temp dir: got nil error, want one")
+	}
+	if state.FindingsLogPath != "" {
+		t.Errorf("FindingsLogPath = %q after a create failure, want it left empty", state.FindingsLogPath)
 	}
 }
 
