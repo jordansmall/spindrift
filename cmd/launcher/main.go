@@ -277,16 +277,18 @@ type capabilitySignals struct {
 // lookup on the resolved names instead of trusting a forwarded bool that
 // would silently describe the wrong backend (issue #2527 review). A document
 // whose Artifacts section carries none of the four keys at all (predates
-// this feature, or a rendering bug) falls back the same way, rather than
-// letting every docArtifact(key) == "true" comparison silently read as
-// false (issue #2527 review, absent-key finding).
+// this feature, or a rendering bug), or only some of them (a partial or
+// malformed render), falls back the same way, rather than letting a missing
+// key's docArtifact(key) == "true" comparison silently read as false (issue
+// #2527 review, absent-key and partial-key findings) -- the trust branch
+// below requires all four keys present, not merely any one of them.
 func resolveCapabilitySignals(codeForge, issueTracker string) capabilitySignals {
 	if loadedDoc != nil && codeForge == loadedDoc.Settings["CODE_FORGE"] && issueTracker == loadedDoc.Settings["ISSUE_TRACKER"] {
 		_, hostMediatedRemotePresent := loadedDoc.Artifacts["HOST_MEDIATED_REMOTE"]
 		_, outboxRelayCapablePresent := loadedDoc.Artifacts["OUTBOX_RELAY_CAPABLE"]
 		_, inBoxUnreachableTrackerPresent := loadedDoc.Artifacts["IN_BOX_UNREACHABLE_TRACKER"]
 		_, fullyLocalPresent := loadedDoc.Artifacts["FULLY_LOCAL"]
-		if hostMediatedRemotePresent || outboxRelayCapablePresent || inBoxUnreachableTrackerPresent || fullyLocalPresent {
+		if hostMediatedRemotePresent && outboxRelayCapablePresent && inBoxUnreachableTrackerPresent && fullyLocalPresent {
 			return capabilitySignals{
 				hostMediatedRemote:      docArtifact("HOST_MEDIATED_REMOTE") == "true",
 				outboxRelayCapable:      docArtifact("OUTBOX_RELAY_CAPABLE") == "true",

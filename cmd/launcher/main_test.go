@@ -1316,6 +1316,53 @@ func TestResolveCapabilitySignals_MatchingDocumentMissingArtifactKeysFallsBack(t
 	}
 }
 
+// TestResolveCapabilitySignals_MatchingDocumentPartialArtifactKeysFallsBack
+// verifies that when the matching document's Artifacts section carries only
+// SOME of the four capability-signal keys (a partial/malformed render, e.g.
+// 3 of 4), resolveCapabilitySignals does not trust the partial set -- it
+// falls through to the registry-derived fallback for ALL FOUR signals, the
+// same as the zero-keys-present case
+// (TestResolveCapabilitySignals_MatchingDocumentMissingArtifactKeysFallsBack
+// above). Presence must be checked with AND across all four keys, not OR:
+// an OR lets a document missing even one key into the trust branch, where
+// docArtifact(missingKey) == "true" silently reads the absent key as false
+// rather than falling back (issue #2527 review, partial-key finding).
+func TestResolveCapabilitySignals_MatchingDocumentPartialArtifactKeysFallsBack(t *testing.T) {
+	t.Cleanup(func() { loadedDoc = nil })
+	loadedDoc = &inputDocument{
+		Settings: map[string]string{"CODE_FORGE": "local", "ISSUE_TRACKER": "local"},
+		Artifacts: map[string]string{
+			"HOST_MEDIATED_REMOTE":       "false",
+			"IN_BOX_UNREACHABLE_TRACKER": "false",
+			"FULLY_LOCAL":                "false",
+			// OUTBOX_RELAY_CAPABLE deliberately absent -- 3 of 4 keys present.
+		},
+	}
+
+	sig := resolveCapabilitySignals("local", "local")
+	// hostMediatedRemote/inBoxUnreachableTracker/fullyLocal are all true in
+	// the local/local registry derivation -- deliberately the opposite of
+	// what the (present-but-wrong) document artifacts above say, so a wrong
+	// trust-branch read shows up as false here instead of silently matching
+	// by coincidence.
+	if !sig.fullyLocal {
+		t.Errorf("fullyLocal = false, want true (partial artifact keys must fall back to registry derivation)")
+	}
+	if !sig.hostMediatedRemote {
+		t.Errorf("hostMediatedRemote = false, want true (partial artifact keys must fall back to registry derivation)")
+	}
+	if !sig.inBoxUnreachableTracker {
+		t.Errorf("inBoxUnreachableTracker = false, want true (partial artifact keys must fall back to registry derivation)")
+	}
+	// outboxRelayCapable is false in the local/local registry derivation
+	// (local.OutboxRelayCapable is unset) -- asserted too, so all four
+	// signals are covered even though this one doesn't itself discriminate
+	// bug from fix (the missing key reads as false either way here).
+	if sig.outboxRelayCapable {
+		t.Errorf("outboxRelayCapable = true, want false (registry-derived value for local/local)")
+	}
+}
+
 // TestValidate_FullyLocalExemptsRepoSlugAndGhToken verifies that validate()
 // does not require REPO_SLUG or GH_TOKEN when both CODE_FORGE and
 // ISSUE_TRACKER are local (issue #1895): the github gh-exec client that
