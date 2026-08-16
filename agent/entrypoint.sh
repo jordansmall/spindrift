@@ -18,7 +18,9 @@ set -euo pipefail
 # forwards it as BOX_FULLY_LOCAL (issue #2527) -- read it rather than
 # re-deriving it from the raw CODE_FORGE/ISSUE_TRACKER names.
 fully_local=false
-[ -n "${BOX_FULLY_LOCAL:-}" ] && fully_local=true
+if [ -n "${BOX_FULLY_LOCAL:-}" ]; then
+  fully_local=true
+fi
 # Self-contained research (issue #2202) supplies its content from a local
 # issue tracker and clones no repo, so REPO_SLUG/GH_TOKEN have nothing to
 # resolve against either -- mirrors the launcher validate()'s noRepoResearch
@@ -30,8 +32,9 @@ no_repo=false
 if [ "${SELF_CONTAINED:-}" = 1 ] && [ -n "${BOX_IN_BOX_UNREACHABLE_TRACKER:-}" ]; then
   no_repo=true
 fi
-: "${ISSUE_NUMBER:?ISSUE_NUMBER is required}"
 [ "$fully_local" = true ] || [ "$no_repo" = true ] || : "${GH_TOKEN:?GH_TOKEN is required}"
+: "${ISSUE_NUMBER:?ISSUE_NUMBER is required}"
+[ "$fully_local" = true ] || [ "$no_repo" = true ] || : "${REPO_SLUG:?REPO_SLUG (owner/repo) is required}"
 : "${GIT_USER_NAME:?GIT_USER_NAME is required}"
 : "${GIT_USER_EMAIL:?GIT_USER_EMAIL is required}"
 

@@ -1260,9 +1260,10 @@ let
   # comments for where that trade-off is recorded.
 
   # Eval-time coherence assert (issue #2527 slice 1): REPO_SLUG is
-  # deliberately runtime-only (ADR 0001 -- "REPO_SLUG... stay runtime env,
-  # never Nix options"), so this must NOT throw just because
-  # mergedDefaults.repoSlug is "" -- that's the overwhelmingly common case
+  # deliberately runtime-optional at the Nix layer (even though
+  # `repository.repoSlug`/`forge.repoSlug` are live flake options today,
+  # nothing requires a Consumer to set either), so this must NOT throw just
+  # because mergedDefaults.repoSlug is "" -- that's the overwhelmingly common case
   # (most Consumers, including this repo's own dogfood config, never set
   # `defaults.repoSlug` at all, supplying it only via `--repo-slug`/
   # REPO_SLUG at actual dispatch time) and nix/checks/equivalence.nix's

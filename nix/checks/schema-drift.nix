@@ -683,9 +683,10 @@ in
       missingFromGo = filter (name: !pkgs.lib.hasInfix ''"${name}"'' mainGoSrc) (
         subtractLists boxEnvOnly schemaEnvNames
       );
-      # Reverse: extract names from os.Getenv/getenv (1-arg) and
-      # getenvArtifact (2-arg) calls in main.go.
-      parts = builtins.split ''(os\.Getenv|getenv|getenvArtifact)\("([A-Z_][A-Z0-9_]*)"[,)]'' mainGoSrc;
+      # Reverse: extract names from os.Getenv/getenv (1-arg),
+      # getenvArtifact (2-arg), and docArtifact (1-arg, issue #2527
+      # capability signals) calls in main.go.
+      parts = builtins.split ''(os\.Getenv|getenv|getenvArtifact|docArtifact)\("([A-Z_][A-Z0-9_]*)"[,)]'' mainGoSrc;
       goEnvNames = map (m: builtins.elemAt m 1) (filter builtins.isList parts);
       extraInGo = subtractLists (schemaEnvNames ++ documentArtifacts) goEnvNames;
     in
