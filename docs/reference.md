@@ -209,7 +209,7 @@ exactly.
 `defaultRoster`'s own roster-native surface for setting models is its
 `models` argument (issue #2426): an attrset keyed by roster entry name
 (`scout`/`reviewer`/`filer`/`worker`), e.g. `defaultRoster { models = {
-filer = "claude-haiku-4-5-20251001"; }; }`. A name absent from `models`
+filer = "your-model-id"; }; }`. A name absent from `models`
 inherits that agent's `lib/env-schema.nix` default (issue #2434) —
 the same default `mkHarness`'s no-roster fallback path resolves through
 `mergedDefaults` — so `defaultRoster { }` composes spindrift's own
@@ -875,7 +875,7 @@ exceptions.
 | `SCOUT_MODEL`             | (baked; see [Default models](#default-models)) | scout subagent model tier (empty drops the scout entry from `--agents`). **Deprecated** — superseded by the [`roster`](#subagent-roster) option |
 | `REVIEW_MODEL`            | (baked; see [Default models](#default-models)) | reviewer subagent model tier (empty drops the reviewer entry from `--agents`). **Deprecated for non-orchestrator use** — superseded by the [`roster`](#subagent-roster) option. Under `ORCHESTRATOR`, the roster reviewer entry is itself superseded by the code-owned review pass, which binds its model from this value instead (falling back to the coordinator model when unset) |
 | `REVIEW_EFFORT`           | — (empty, no baked default) | value for the orchestrator's code-owned review pass's own `--effort` flag; pass-through only, no normalization, same accepted values as `EFFORT` for the active Driver. Overrides the roster reviewer entry's own effort (`rosterDefaults.reviewer.effort` by default) the same way `REVIEW_MODEL` overrides the reviewer's model — empty means follow the roster, a non-empty value overrides it. Meaningful only under `ORCHESTRATOR`. Like `REVIEW_MODEL`, this is a nix-build-time-only knob (issue #2512): a dispatch-time `REVIEW_EFFORT=...`/`--review-effort ...` override on an already-built image is a no-op — set `perSystem.spindrift.agents.models.reviewEffort` and rebuild instead |
-| `FILER_MODEL`             | (baked; see [Default models](#default-models)) | filer subagent model tier; empty (default) means the filer is not provisioned — setting a model is the opt-in (recommended: `claude-haiku-4-5-20251001`); see [Filer](#filer). **Deprecated** — superseded by the [`roster`](#subagent-roster) option |
+| `FILER_MODEL`             | (baked; see [Default models](#default-models)) | filer subagent model tier; empty (default) means the filer is not provisioned — setting a model is the opt-in (recommended: the same model as the `scout` default, see [Default models](#default-models)); see [Filer](#filer). **Deprecated** — superseded by the [`roster`](#subagent-roster) option |
 | `WORKER_MODEL`            | (baked; see [Default models](#default-models)) | implement-capable worker subagent model tier (empty drops the worker entry from `--agents`); the implementor prompt does not delegate to it yet. **Deprecated** — superseded by the [`roster`](#subagent-roster) option |
 | `MAX_PARALLEL_WORKERS`    | `2` (baked)            | cap on how many of a coordinator pass's slice-manifest workers the orchestrator dispatches concurrently; 2 is the no-tuning-safe default that captures most of the wall-clock win on small-slice-count issues while staying clear of the Box's memory-kill regime. Meaningful only under `ORCHESTRATOR` |
 | `IMAGE`                   | `spindrift:latest`     | image tag to run                         |
@@ -1942,7 +1942,7 @@ Consumer flake:
 perSystem = { inputs, lib, ... }: {
   spindrift.agents.models.roster =
     (import "${inputs.spindrift}/lib/roster.nix" { inherit lib; }).defaultRoster {
-      models.filer = "claude-haiku-4-5-20251001";
+      models.filer = "your-model-id";
     };
 };
 ```
@@ -1952,10 +1952,11 @@ at their defaults. Setting `roster` itself to a hand-authored list instead of
 going through `defaultRoster` replaces the whole default roster, not just the
 filer entry, so a literal `roster = [ { name = "filer"; ... } ]` silently
 drops scout/reviewer/worker too; reach for that only when authoring a full
-custom roster. Setting `FILER_MODEL` (empty by default, recommended
-`claude-haiku-4-5-20251001`) is the older, **deprecated** opt-in — it still
-works but is superseded by `roster`. Either way, when neither is set, that's
-zero behavior change and zero prompt residue in the rendered issue prompt.
+custom roster. Setting `FILER_MODEL` (empty by default; recommended: the same
+model as the `scout` default, see [Default models](#default-models)) is the
+older, **deprecated** opt-in — it still works but is superseded by `roster`.
+Either way, when neither is set, that's zero behavior change and zero prompt
+residue in the rendered issue prompt.
 
 The work loop triages Non-blocking findings before the filer ever runs: it
 fixes inline, in the same effort, every finding whose fix is cheap and in
