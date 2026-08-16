@@ -19,7 +19,20 @@ func accessForgeGates(e Env) map[string]bool {
 	// this switch once, at eval time, so the backend suffix arrives
 	// pre-resolved on Env.ForgeBackend rather than being re-derived here
 	// from CodeForge (issue #2533).
+	//
+	// BOX_FORGE_BACKEND is a dispatch-time-only forward with no baked
+	// preamble default, so an older host launcher binary that predates
+	// issue #2533 -- and therefore never sets that env var at all --
+	// dispatching against a newer box image leaves ForgeBackend empty here
+	// even though this package is fully wired up to expect it. Falling
+	// open to the GH arm reproduces entrypoint.sh's old bash
+	// "${CODE_FORGE:-github}" default as a version-skew safety net, rather
+	// than silently dropping every PR-create/CI-read instruction for the
+	// run the way failing closed would.
 	backend := e.ForgeBackend
+	if backend == "" {
+		backend = "GH"
+	}
 
 	// The OPEN A PULL REQUEST create step's read-write fork (entrypoint.sh:
 	// 969-979): only fires on the resolved backend, and only when

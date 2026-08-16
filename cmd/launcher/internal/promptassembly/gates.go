@@ -31,8 +31,24 @@ func Gates(e Env) map[string]bool {
 	// resolves the pairing at eval time (issue #2533), so this is now a
 	// plain passthrough of Env.ReviewLoopInline/Env.ReviewLoopOrchestrator
 	// rather than Gates negating/copying ORCHESTRATOR itself.
-	g["REVIEW_LOOP_INLINE"] = e.ReviewLoopInline
-	g["REVIEW_LOOP_ORCHESTRATOR"] = e.ReviewLoopOrchestrator
+	//
+	// BOX_REVIEW_LOOP_INLINE/ORCHESTRATOR are dispatch-time-only forwards
+	// with no baked preamble default, so an older host launcher binary that
+	// predates issue #2533 -- and therefore never sets either env var at
+	// all -- dispatching against a newer box image leaves both false here.
+	// ORCHESTRATOR_ENABLED itself is a pre-existing boxEnv knob issue #2533
+	// left untouched, so `orchestrator` above still arrives correctly even
+	// under that version skew. When both forwarded fields are false, fall
+	// back to deriving the pairing from the live ORCHESTRATOR gate the same
+	// way entrypoint.sh's old bash negation did, rather than leaving both
+	// off and breaking the exactly-one-true invariant (env.go: 78-91) a
+	// missing forward would otherwise silently violate.
+	reviewLoopInline, reviewLoopOrchestrator := e.ReviewLoopInline, e.ReviewLoopOrchestrator
+	if !reviewLoopInline && !reviewLoopOrchestrator {
+		reviewLoopInline, reviewLoopOrchestrator = !orchestrator, orchestrator
+	}
+	g["REVIEW_LOOP_INLINE"] = reviewLoopInline
+	g["REVIEW_LOOP_ORCHESTRATOR"] = reviewLoopOrchestrator
 
 	// FILER_ENABLED/WORKER_PROVISIONED (entrypoint.sh: 781-799): each fires
 	// when the roster nix also bakes into AgentsJSONTemplate carries the

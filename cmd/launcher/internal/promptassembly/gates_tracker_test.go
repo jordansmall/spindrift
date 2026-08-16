@@ -61,22 +61,26 @@ func TestGatesIssueTrackerReadAxis(t *testing.T) {
 			},
 		},
 		{
-			// TrackerAxisRead's zero value: an Env built without populating
-			// it (e.g. a stray `Env{}` literal, or an upstream caller that
-			// forgot to thread nix's resolved axis through). Before issue
-			// #2533, entrypoint.sh's "${ISSUE_TRACKER:-github}" bash default
-			// meant an empty/absent tracker always resolved to a real gate
-			// (github); that default arm lived upstream in nix now, and
-			// deliberately isn't reproduced here -- nix is the sole source
-			// of truth for a non-empty axis value, so Gates fails closed
-			// (every gate off) rather than silently guessing github when
-			// the axis arrives empty. This pins that fail-closed contract
-			// so a future change can't silently reintroduce a stale
-			// default or silently flip it back to fail-open.
-			name:            "empty TrackerAxisRead fails closed: no gate fires",
+			// TrackerAxisRead's zero value: the shape a version-skew
+			// dispatch leaves behind, not just a stray `Env{}` literal.
+			// BOX_TRACKER_AXIS_READ/WRITE/FILER are dispatch-time-only
+			// forwards (issue #2533) with no baked preamble default, so an
+			// older host launcher binary that predates issue #2533 (and
+			// therefore never sets these env vars at all) dispatching
+			// against a newer box image leaves TrackerAxisRead empty here
+			// even though the tracker gate family is fully wired up.
+			// Before issue #2533, entrypoint.sh's own bash
+			// "${ISSUE_TRACKER:-github}" defaulting guaranteed a real gate
+			// fired regardless; Gates now reproduces that same default arm
+			// as a version-skew safety net so an old-launcher/new-box
+			// pairing renders the github/jira arm instead of silently
+			// dropping every tracker-gated prompt fragment for the run.
+			// This pins that fail-open contract so a future change can't
+			// silently reintroduce the fail-closed regression.
+			name:            "empty TrackerAxisRead falls open to GITHUB defaults",
 			trackerAxisRead: "",
 			want: map[string]bool{
-				"ISSUE_TRACKER_GITHUB":  false,
+				"ISSUE_TRACKER_GITHUB":  true,
 				"ISSUE_TRACKER_LOCAL":   false,
 				"ISSUE_TRACKER_FORGEJO": false,
 			},
@@ -102,16 +106,23 @@ func TestGatesIssueTrackerReadAxis(t *testing.T) {
 // arm; local has no direct write-step path at all (TrackerAxisWrite is ""
 // for it, entrypoint.sh: 811), so it renders neither pair regardless of
 // BOX_WRITE_ENABLED. TrackerAxisWrite arrives pre-resolved from nix (issue
-// #2533) rather than being re-derived here from ISSUE_TRACKER.
+// #2533) rather than being re-derived here from ISSUE_TRACKER. Each case
+// also sets a non-empty TrackerAxisRead matching the tracker under test --
+// the shape a real nix-resolved Env always carries -- so trackerGates'
+// itRead=="" version-skew fallback (which defaults itWrite along with
+// itRead) never fires here; that fallback gets its own dedicated coverage
+// in TestGatesIssueTrackerReadAxis.
 func TestGatesIssueTrackerWriteAxis(t *testing.T) {
 	cases := []struct {
 		name             string
+		trackerAxisRead  string
 		trackerAxisWrite string
 		boxWriteEnabled  bool
 		want             map[string]bool
 	}{
 		{
 			name:             "github read-write",
+			trackerAxisRead:  "GITHUB",
 			trackerAxisWrite: "GITHUB",
 			boxWriteEnabled:  true,
 			want: map[string]bool{
@@ -123,6 +134,7 @@ func TestGatesIssueTrackerWriteAxis(t *testing.T) {
 		},
 		{
 			name:             "github read-only",
+			trackerAxisRead:  "GITHUB",
 			trackerAxisWrite: "GITHUB",
 			boxWriteEnabled:  false,
 			want: map[string]bool{
@@ -134,6 +146,7 @@ func TestGatesIssueTrackerWriteAxis(t *testing.T) {
 		},
 		{
 			name:             "forgejo read-write",
+			trackerAxisRead:  "FORGEJO",
 			trackerAxisWrite: "FORGEJO",
 			boxWriteEnabled:  true,
 			want: map[string]bool{
@@ -145,6 +158,7 @@ func TestGatesIssueTrackerWriteAxis(t *testing.T) {
 		},
 		{
 			name:             "forgejo read-only",
+			trackerAxisRead:  "FORGEJO",
 			trackerAxisWrite: "FORGEJO",
 			boxWriteEnabled:  false,
 			want: map[string]bool{
@@ -156,6 +170,7 @@ func TestGatesIssueTrackerWriteAxis(t *testing.T) {
 		},
 		{
 			name:             "local has no direct write-step path, write-enabled or not",
+			trackerAxisRead:  "LOCAL",
 			trackerAxisWrite: "",
 			boxWriteEnabled:  true,
 			want: map[string]bool{
@@ -169,10 +184,10 @@ func TestGatesIssueTrackerWriteAxis(t *testing.T) {
 	for _, tc := range cases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			got := Gates(Env{TrackerAxisWrite: tc.trackerAxisWrite, BoxWriteEnabled: tc.boxWriteEnabled})
+			got := Gates(Env{TrackerAxisRead: tc.trackerAxisRead, TrackerAxisWrite: tc.trackerAxisWrite, BoxWriteEnabled: tc.boxWriteEnabled})
 			for k, want := range tc.want {
 				if got[k] != want {
-					t.Errorf("Gates(TrackerAxisWrite=%q, BoxWriteEnabled=%v)[%q] = %v, want %v", tc.trackerAxisWrite, tc.boxWriteEnabled, k, got[k], want)
+					t.Errorf("Gates(TrackerAxisRead=%q, TrackerAxisWrite=%q, BoxWriteEnabled=%v)[%q] = %v, want %v", tc.trackerAxisRead, tc.trackerAxisWrite, tc.boxWriteEnabled, k, got[k], want)
 				}
 			}
 		})
@@ -188,19 +203,25 @@ func TestGatesIssueTrackerWriteAxis(t *testing.T) {
 // Both direct/relay stay off entirely when the filer isn't configured
 // (Env.FilerEnabled false, nix's precomputed roster fact rather than a
 // reparsed AgentsJSONTemplate). FILER_FILE_DIRECT_ANY fires whenever either
-// direct fork is on.
+// direct fork is on. Each case also sets a non-empty TrackerAxisRead
+// matching the tracker under test -- the shape a real nix-resolved Env
+// always carries -- so trackerGates' itRead=="" version-skew fallback
+// (which defaults itFiler along with itRead) never fires here; that
+// fallback gets its own dedicated coverage in TestGatesIssueTrackerReadAxis.
 func TestGatesFilerWriteMechanism(t *testing.T) {
 	cases := []struct {
 		name                string
 		filerEnabled        bool
+		trackerAxisRead     string
 		trackerAxisFiler    string
 		boxWriteEnabled     bool
 		orchestratorEnabled bool
 		want                map[string]bool
 	}{
 		{
-			name:         "filer not configured: everything off",
-			filerEnabled: false,
+			name:            "filer not configured: everything off",
+			filerEnabled:    false,
+			trackerAxisRead: "GITHUB",
 			want: map[string]bool{
 				"FILER_FILE_DIRECT_GH":      false,
 				"FILER_FILE_DIRECT_FORGEJO": false,
@@ -211,6 +232,7 @@ func TestGatesFilerWriteMechanism(t *testing.T) {
 		{
 			name:                "read-only + orchestrator on: relay",
 			filerEnabled:        true,
+			trackerAxisRead:     "GITHUB",
 			trackerAxisFiler:    "GH",
 			boxWriteEnabled:     false,
 			orchestratorEnabled: true,
@@ -224,6 +246,7 @@ func TestGatesFilerWriteMechanism(t *testing.T) {
 		{
 			name:                "read-write + orchestrator on: direct gh (github tracker)",
 			filerEnabled:        true,
+			trackerAxisRead:     "GITHUB",
 			trackerAxisFiler:    "GH",
 			boxWriteEnabled:     true,
 			orchestratorEnabled: true,
@@ -237,6 +260,7 @@ func TestGatesFilerWriteMechanism(t *testing.T) {
 		{
 			name:                "read-only + orchestrator off: direct gh (github tracker)",
 			filerEnabled:        true,
+			trackerAxisRead:     "GITHUB",
 			trackerAxisFiler:    "GH",
 			boxWriteEnabled:     false,
 			orchestratorEnabled: false,
@@ -250,6 +274,7 @@ func TestGatesFilerWriteMechanism(t *testing.T) {
 		{
 			name:                "read-write + orchestrator on: direct forgejo (forgejo tracker)",
 			filerEnabled:        true,
+			trackerAxisRead:     "FORGEJO",
 			trackerAxisFiler:    "FORGEJO",
 			boxWriteEnabled:     true,
 			orchestratorEnabled: true,
@@ -263,6 +288,7 @@ func TestGatesFilerWriteMechanism(t *testing.T) {
 		{
 			name:                "local tracker's filer suffix rides GH",
 			filerEnabled:        true,
+			trackerAxisRead:     "LOCAL",
 			trackerAxisFiler:    "GH",
 			boxWriteEnabled:     true,
 			orchestratorEnabled: true,
@@ -279,6 +305,7 @@ func TestGatesFilerWriteMechanism(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			got := Gates(Env{
 				FilerEnabled:        tc.filerEnabled,
+				TrackerAxisRead:     tc.trackerAxisRead,
 				TrackerAxisFiler:    tc.trackerAxisFiler,
 				BoxWriteEnabled:     tc.boxWriteEnabled,
 				OrchestratorEnabled: tc.orchestratorEnabled,

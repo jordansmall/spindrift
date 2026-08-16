@@ -17,7 +17,24 @@ func trackerGates(e Env, orchestratorEnabled bool) map[string]bool {
 	// statement once, at eval time, so the three axis names arrive
 	// pre-resolved on Env (TrackerAxisRead/TrackerAxisWrite/
 	// TrackerAxisFiler) rather than being re-derived here (issue #2533).
+	//
+	// BOX_TRACKER_AXIS_READ/WRITE/FILER are dispatch-time-only forwards
+	// with no baked preamble default (unlike e.g. AGENTS_JSON_TEMPLATE), so
+	// an older host launcher binary that predates issue #2533 -- and
+	// therefore never sets these env vars at all -- dispatching against a
+	// newer box image leaves TrackerAxisRead empty here even though this
+	// package is fully wired up to expect it. TrackerAxisRead is never
+	// legitimately empty for a resolved axis (only TrackerAxisWrite can be,
+	// for the "local" tracker), so an empty itRead is unambiguously that
+	// version-skew case, not a legitimate axis value. Falling open to the
+	// github/jira arm here reproduces entrypoint.sh's old bash
+	// "${ISSUE_TRACKER:-github}" default as a version-skew safety net,
+	// rather than silently dropping every tracker-gated prompt fragment for
+	// the run the way failing closed would.
 	itRead, itWrite, itFiler := e.TrackerAxisRead, e.TrackerAxisWrite, e.TrackerAxisFiler
+	if itRead == "" {
+		itRead, itWrite, itFiler = "GITHUB", "GITHUB", "GH"
+	}
 
 	// The issue-read step gate (entrypoint.sh: 891-904): exactly one of
 	// ISSUE_TRACKER_GITHUB/ISSUE_TRACKER_LOCAL/ISSUE_TRACKER_FORGEJO fires,
