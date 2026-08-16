@@ -3233,6 +3233,50 @@ func TestDoctor_TTY_Confirm_ResearchLabels(t *testing.T) {
 	}
 }
 
+// TestDoctor_TTY_Confirm_RenamedLifecycleLabel_UsesCorrectMeta verifies that
+// when an operator renames a work-tier label away from its default (e.g.
+// LABEL=custom-ready-for-agent), doctor still resolves that label's real
+// color/description by role (MetaDispatchable etc.), not by a literal
+// TriageLabelMeta[name] lookup keyed on the default name — which would miss
+// and fall back to the gray "ededed" no-description default (#2528 AC2).
+func TestDoctor_TTY_Confirm_RenamedLifecycleLabel_UsesCorrectMeta(t *testing.T) {
+	f := forge.NewFake()
+	f.ProbeRepo = "owner/repo"
+
+	cfg := defaultLabelConfig()
+	cfg.label = "custom-ready-for-agent"
+
+	research := doctor.ResearchLabelNames()
+	priority := doctor.PriorityLabelNames()
+	ambiguous := doctor.AmbiguousLabelNames()
+	present := append(append(append([]string{"agent-in-progress", "agent-failed", "agent-complete"}, research...), priority...), ambiguous...)
+	f.Labels = present
+	f.LabelsSeq = [][]string{
+		present,
+		append(append([]string{}, present...), "custom-ready-for-agent"), // re-verify: renamed label now created too
+	}
+
+	var buf bytes.Buffer
+	err := runDoctor(f, f, cfg, &buf, strings.NewReader("y\n"), true)
+	if err != nil {
+		t.Fatalf("unexpected error after confirm: %v", err)
+	}
+
+	if len(f.CreateLabelCalls) != 1 {
+		t.Fatalf("want 1 CreateLabel call, got %d: %+v", len(f.CreateLabelCalls), f.CreateLabelCalls)
+	}
+	call := f.CreateLabelCalls[0]
+	if call.Name != "custom-ready-for-agent" {
+		t.Fatalf("want CreateLabel call for %q, got %q", "custom-ready-for-agent", call.Name)
+	}
+	if call.Color != doctor.MetaDispatchable.Color {
+		t.Errorf("want color %q (MetaDispatchable), got %q", doctor.MetaDispatchable.Color, call.Color)
+	}
+	if call.Description != doctor.MetaDispatchable.Description {
+		t.Errorf("want description %q (MetaDispatchable), got %q", doctor.MetaDispatchable.Description, call.Description)
+	}
+}
+
 // TestDoctor_TTY_Confirm_ResearchStillMissing_Advisory verifies that when a
 // create run's re-verify still finds research labels missing (e.g. eventual
 // consistency on the forge side), doctor prints a non-fatal advisory summary

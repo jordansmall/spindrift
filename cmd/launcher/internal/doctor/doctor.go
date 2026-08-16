@@ -199,11 +199,33 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, w io.Writer, stdin
 		return nil
 	}
 
-	for _, name := range missing {
-		meta, ok := TriageLabelMeta[name]
-		if !ok {
-			meta = LabelMeta{Color: "ededed"}
+	// metaFor resolves a missing label's color/description by role for the
+	// four operator-configurable work-tier labels — c.Label et al. may be
+	// renamed away from their defaults (LABEL/IN_PROGRESS_LABEL/FAILED_LABEL/
+	// COMPLETE_LABEL), so a literal TriageLabelMeta[name] lookup keyed on the
+	// default name would miss for a renamed label and fall back to gray
+	// (#2528 AC2). Research/priority/ambiguous-spec label names are fixed
+	// literals (never operator-configurable), so TriageLabelMeta's
+	// literal-name lookup stays correct for those tiers.
+	metaFor := func(name string) LabelMeta {
+		switch name {
+		case c.Label:
+			return MetaDispatchable
+		case c.InProgressLabel:
+			return MetaInProgress
+		case c.FailedLabel:
+			return MetaFailed
+		case c.CompleteLabel:
+			return MetaComplete
 		}
+		if meta, ok := TriageLabelMeta[name]; ok {
+			return meta
+		}
+		return LabelMeta{Color: "ededed"}
+	}
+
+	for _, name := range missing {
+		meta := metaFor(name)
 		if cerr := it.CreateLabel(name, meta.Description, meta.Color); cerr != nil {
 			return fmt.Errorf("create label %q: %w", name, cerr)
 		}
