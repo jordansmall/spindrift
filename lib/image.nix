@@ -287,6 +287,15 @@ let
   }) (builtins.filter (s: s.harnessOwned or false) bakedSkills);
 
   agentFiles = pkgs.runCommand "spindrift-agent-files" { } ''
+    # PROMPTS_DIR is currently /agent/prompts, so this is also the only line
+    # that creates $out/agent itself -- every OUTCOME_CONTRACT_FILE/
+    # COMMS_CONTRACT_FILE/CHECK_CONTRACT_FILE/RESEARCH_OUTCOME_CONTRACT_FILE/
+    # PROMPTASSEMBLY_REGISTRY_FILE/PROMPT_CONTRACT_REGISTRY_FILE/
+    # FORBIDDEN_MARKERS_REGISTRY_FILE `cp` destination below is a sibling of
+    # PROMPTS_DIR under that same $out/agent dir (issue #420) and relies on
+    # this mkdir having created it. A future lib/agent-paths.nix rename that
+    # moves PROMPTS_DIR out from under /agent would silently break those `cp`
+    # calls unless this mkdir (or an explicit one) moves with it.
     mkdir -p $out${contracts.agentPaths.PROMPTS_DIR}
     ${lib.optionalString (driver.driverEntry ? sessionCacheDirRelative) ''
       # Pre-create the driver-cache mountpoint so podman reuses the agent-owned
