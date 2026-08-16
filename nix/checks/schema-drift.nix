@@ -2281,11 +2281,13 @@ in
   # stays green (it only compares the renderer's own output against the
   # committed doc, so it can't catch the renderer itself drifting from
   # resolveNixPath). assertRendererPathsResolveOk (defined above, alongside
-  # the other assert*Ok helpers) re-derives each knob's expected
-  # "<path> = " line prefix independently via resolveNixPath (not by
-  # calling the renderer a second time, which would only prove the
-  # renderer agrees with itself) and asserts it is a literal substring of
-  # the renderer's generated output.
+  # the other assert*Ok helpers) re-derives each knob's expected path
+  # independently via resolveNixPath (not by calling the renderer a second
+  # time, which would only prove the renderer agrees with itself) and
+  # asserts it appears as an exact left-hand path among the renderer's
+  # generated lines -- a substring match was deliberately rejected (see
+  # assertRendererPathsResolveOk's own comment above) since it would also
+  # accept a wrong-but-prefix path like "git.merge" inside "git.merge.policy".
   settings-example-paths-resolve-nix-path =
     let
       modelsOk = assertRendererPathsResolveOk {
