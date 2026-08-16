@@ -1869,6 +1869,52 @@ func TestAssembleOrchestratorOffReviewerFlowsThroughGenericLoop(t *testing.T) {
 	}
 }
 
+// TestAssembleResearchKindOrchestratorOff_ReviewerDropped verifies that a
+// research dispatch drops the "reviewer" roster entry even with the
+// orchestrator off (issue #2547 review finding): AgentsJSONTemplate is one
+// fixed constant baked per Consumer image, shared across every dispatch
+// kind (lib/roster.nix has no per-kind axis), so without this drop a
+// non-orchestrator research box would carry the same "reviewer" entry a
+// work box gets -- but that entry's prompt cats the frozen
+// /issue-snapshot.md, a file research dispatches never write or mount (ADR
+// 0022). This is a genuinely new drop, not the pre-existing orchestrator-on
+// one TestAssembleOrchestratorOffReviewerFlowsThroughGenericLoop guards
+// against regressing.
+func TestAssembleResearchKindOrchestratorOff_ReviewerDropped(t *testing.T) {
+	reg := loadTestRegistry(t)
+	env := coveredEnv()
+	env.DispatchKind = "research"
+	env.ResearchStatusEnum = "recommend|reject|unclear"
+	env.AgentsJSONTemplate = `{"reviewer":{"model":"review-model-x"},"scout":{"model":"scout-model-y"}}`
+
+	result, err := Assemble(env, reg)
+	if err != nil {
+		t.Fatalf("Assemble: %v", err)
+	}
+
+	var parsed map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(result.AgentsJSON), &parsed); err != nil {
+		t.Fatalf("unmarshal AgentsJSON: %v\n%s", err, result.AgentsJSON)
+	}
+	if _, ok := parsed["reviewer"]; ok {
+		t.Errorf("AgentsJSON has reviewer key, want it dropped for a research dispatch: %s", result.AgentsJSON)
+	}
+	if _, ok := parsed["scout"]; !ok {
+		t.Errorf("AgentsJSON missing scout key, want every other roster entry to survive: %s", result.AgentsJSON)
+	}
+	// The orchestrator-on model/effort extraction is a separate, unrelated
+	// step (assemble.go's dropReviewer branch only runs it under
+	// gates["ORCHESTRATOR"]) -- dropping reviewer for a research dispatch
+	// with the orchestrator off must not spuriously populate Handoff's
+	// review fields.
+	if result.Handoff.ReviewModel != "" {
+		t.Errorf("Handoff.ReviewModel = %q, want empty (orchestrator off)", result.Handoff.ReviewModel)
+	}
+	if result.Handoff.ReviewEffort != "" {
+		t.Errorf("Handoff.ReviewEffort = %q, want empty (orchestrator off)", result.Handoff.ReviewEffort)
+	}
+}
+
 // writeAgentFile writes a baked opencode agent file fixture with real
 // frontmatter shape and a placeholder body distinguishable from any real
 // rendered prompt -- the Go-side twin of
