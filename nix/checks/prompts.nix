@@ -30,7 +30,7 @@ let
   checkSectionSlices = pkgs.runCommand "check-section-slices" { } ''
     mkdir -p $out
     awk '/^# CHECK$/{f=1} /^# REVIEW$/{exit} f' \
-      ${batsHarness.promptDir}/issue-prompt.md > $out/issue-check.txt
+      ${batsHarness.internals.promptDir}/issue-prompt.md > $out/issue-check.txt
   '';
 
   # Broken fixture shared by both build-time-reject-research-verdict-comment-
@@ -163,7 +163,7 @@ in
   mkharness-prompt = pkgs.runCommand "mkharness-prompt" { } ''
     # The Consumer's prompt text is what lands in the rendered file.
     grep -q 'CONFIGURED-PROMPT-MARKER' \
-      ${promptHarness.promptDir}/issue-prompt.md
+      ${promptHarness.internals.promptDir}/issue-prompt.md
     touch $out
   '';
 
@@ -171,7 +171,7 @@ in
   # ship an agent that emits the outcome line, so the launcher can learn the
   # PR (issue #419) — the harness appends the canonical contract exactly once.
   mkharness-prompt-outcome-injected = pkgs.runCommand "mkharness-prompt-outcome-injected" { } ''
-    count=$(grep -c '# LAND THE CHANGE' ${promptHarness.promptDir}/issue-prompt.md)
+    count=$(grep -c '# LAND THE CHANGE' ${promptHarness.internals.promptDir}/issue-prompt.md)
     [ "$count" -eq 1 ] || {
       echo "expected the outcome contract injected exactly once, got $count" >&2
       exit 1
@@ -184,7 +184,7 @@ in
   mkharness-prompt-outcome-not-duplicated =
     pkgs.runCommand "mkharness-prompt-outcome-not-duplicated" { }
       ''
-        count=$(grep -c '# LAND THE CHANGE' ${batsHarness.promptDir}/issue-prompt.md)
+        count=$(grep -c '# LAND THE CHANGE' ${batsHarness.internals.promptDir}/issue-prompt.md)
         [ "$count" -eq 1 ] || {
           echo "expected the default prompt's outcome contract to stay single, got $count" >&2
           exit 1
@@ -198,7 +198,7 @@ in
   mkharness-prompt-outcome-default-unchanged =
     pkgs.runCommand "mkharness-prompt-outcome-default-unchanged" { }
       ''
-        diff ${../../templates/default/prompts/issue-prompt.md} ${batsHarness.promptDir}/issue-prompt.md
+        diff ${../../templates/default/prompts/issue-prompt.md} ${batsHarness.internals.promptDir}/issue-prompt.md
         touch $out
       '';
 
@@ -207,8 +207,8 @@ in
   # sliced from the same marker in the same source file, so they cannot
   # drift apart (issue #419).
   mkharness-prompt-outcome-no-drift = pkgs.runCommand "mkharness-prompt-outcome-no-drift" { } ''
-    awk '/# LAND THE CHANGE/{f=1} f' ${promptHarness.promptDir}/issue-prompt.md > injected-contract.txt
-    diff ${batsHarness.outcomeContractFile} injected-contract.txt
+    awk '/# LAND THE CHANGE/{f=1} f' ${promptHarness.internals.promptDir}/issue-prompt.md > injected-contract.txt
+    diff ${batsHarness.internals.outcomeContractFile} injected-contract.txt
     touch $out
   '';
 
@@ -236,8 +236,8 @@ in
         # Floor guard: catches the degenerate case where every SPINDRIFT_OUTCOME
         # line -- and thus landing= itself -- vanishes from the contract, which
         # the per-line count below would otherwise wave through as 0 missing.
-        grep -qE 'SPINDRIFT_OUTCOME.*landing=' ${batsHarness.outcomeContractFile}
-        missing=$(grep 'SPINDRIFT_OUTCOME' ${batsHarness.outcomeContractFile} | grep -vc 'landing=' || true)
+        grep -qE 'SPINDRIFT_OUTCOME.*landing=' ${batsHarness.internals.outcomeContractFile}
+        missing=$(grep 'SPINDRIFT_OUTCOME' ${batsHarness.internals.outcomeContractFile} | grep -vc 'landing=' || true)
         [ "$missing" -eq 0 ] || {
           echo "expected every SPINDRIFT_OUTCOME line to carry landing=, $missing did not" >&2
           exit 1
@@ -259,7 +259,7 @@ in
   mkharness-prompt-outcome-contract-raw-text =
     pkgs.runCommand "mkharness-prompt-outcome-contract-raw-text" { }
       ''
-        grep -Pzoq '(?is)final output.{0,60}raw plain text' ${batsHarness.outcomeContractFile}
+        grep -Pzoq '(?is)final output.{0,60}raw plain text' ${batsHarness.internals.outcomeContractFile}
         touch $out
       '';
 
@@ -268,7 +268,7 @@ in
   # and outcome-contract blocks, each exactly once, mirroring the issue
   # prompt's own guard above.
   mkharness-prompt-fix-comms-injected = pkgs.runCommand "mkharness-prompt-fix-comms-injected" { } ''
-    count=$(grep -c '# COMMS' ${batsHarness.promptDir}/fix-prompt.md)
+    count=$(grep -c '# COMMS' ${batsHarness.internals.promptDir}/fix-prompt.md)
     [ "$count" -eq 1 ] || {
       echo "expected the fix prompt's COMMS block injected exactly once, got $count" >&2
       exit 1
@@ -277,7 +277,7 @@ in
   '';
 
   mkharness-prompt-fix-check-injected = pkgs.runCommand "mkharness-prompt-fix-check-injected" { } ''
-    count=$(grep -c '# CHECK' ${batsHarness.promptDir}/fix-prompt.md)
+    count=$(grep -c '# CHECK' ${batsHarness.internals.promptDir}/fix-prompt.md)
     [ "$count" -eq 1 ] || {
       echo "expected the fix prompt's CHECK/COMMIT block injected exactly once, got $count" >&2
       exit 1
@@ -288,7 +288,7 @@ in
   mkharness-prompt-fix-outcome-injected =
     pkgs.runCommand "mkharness-prompt-fix-outcome-injected" { }
       ''
-        count=$(grep -c '# LAND THE CHANGE' ${batsHarness.promptDir}/fix-prompt.md)
+        count=$(grep -c '# LAND THE CHANGE' ${batsHarness.internals.promptDir}/fix-prompt.md)
         [ "$count" -eq 1 ] || {
           echo "expected the fix prompt's outcome contract injected exactly once, got $count" >&2
           exit 1
@@ -304,14 +304,14 @@ in
   mkharness-prompt-fix-consumer-override-injected =
     pkgs.runCommand "mkharness-prompt-fix-consumer-override-injected" { }
       ''
-        grep -q 'CONFIGURED-FIX-PROMPT-MARKER' ${fixPromptHarness.promptDir}/fix-prompt.md
-        [ "$(grep -c '# COMMS' ${fixPromptHarness.promptDir}/fix-prompt.md)" -eq 1 ]
-        [ "$(grep -c '# CHECK' ${fixPromptHarness.promptDir}/fix-prompt.md)" -eq 1 ]
-        [ "$(grep -c '# LAND THE CHANGE' ${fixPromptHarness.promptDir}/fix-prompt.md)" -eq 1 ]
-        marker_line=$(grep -n 'CONFIGURED-FIX-PROMPT-MARKER' ${fixPromptHarness.promptDir}/fix-prompt.md | head -1 | cut -d: -f1)
-        comms_line=$(grep -n '# COMMS' ${fixPromptHarness.promptDir}/fix-prompt.md | head -1 | cut -d: -f1)
-        check_line=$(grep -n '# CHECK' ${fixPromptHarness.promptDir}/fix-prompt.md | head -1 | cut -d: -f1)
-        outcome_line=$(grep -n '# LAND THE CHANGE' ${fixPromptHarness.promptDir}/fix-prompt.md | head -1 | cut -d: -f1)
+        grep -q 'CONFIGURED-FIX-PROMPT-MARKER' ${fixPromptHarness.internals.promptDir}/fix-prompt.md
+        [ "$(grep -c '# COMMS' ${fixPromptHarness.internals.promptDir}/fix-prompt.md)" -eq 1 ]
+        [ "$(grep -c '# CHECK' ${fixPromptHarness.internals.promptDir}/fix-prompt.md)" -eq 1 ]
+        [ "$(grep -c '# LAND THE CHANGE' ${fixPromptHarness.internals.promptDir}/fix-prompt.md)" -eq 1 ]
+        marker_line=$(grep -n 'CONFIGURED-FIX-PROMPT-MARKER' ${fixPromptHarness.internals.promptDir}/fix-prompt.md | head -1 | cut -d: -f1)
+        comms_line=$(grep -n '# COMMS' ${fixPromptHarness.internals.promptDir}/fix-prompt.md | head -1 | cut -d: -f1)
+        check_line=$(grep -n '# CHECK' ${fixPromptHarness.internals.promptDir}/fix-prompt.md | head -1 | cut -d: -f1)
+        outcome_line=$(grep -n '# LAND THE CHANGE' ${fixPromptHarness.internals.promptDir}/fix-prompt.md | head -1 | cut -d: -f1)
         [ "$marker_line" -lt "$comms_line" ]
         [ "$comms_line" -lt "$check_line" ]
         [ "$check_line" -lt "$outcome_line" ]
@@ -323,14 +323,14 @@ in
   # so fix-prompt.md and issue-prompt.md cannot drift apart (issue #455,
   # mirrors mkharness-prompt-outcome-no-drift above).
   mkharness-prompt-fix-comms-no-drift = pkgs.runCommand "mkharness-prompt-fix-comms-no-drift" { } ''
-    awk '/^# COMMS$/{f=1} /^# CHECK$/{exit} f' ${fixPromptHarness.promptDir}/fix-prompt.md > injected-comms.txt
-    diff ${batsHarness.commsContractFile} injected-comms.txt
+    awk '/^# COMMS$/{f=1} /^# CHECK$/{exit} f' ${fixPromptHarness.internals.promptDir}/fix-prompt.md > injected-comms.txt
+    diff ${batsHarness.internals.commsContractFile} injected-comms.txt
     touch $out
   '';
 
   mkharness-prompt-fix-check-no-drift = pkgs.runCommand "mkharness-prompt-fix-check-no-drift" { } ''
-    awk '/^# CHECK$/{f=1} /^# LAND THE CHANGE$/{exit} f' ${fixPromptHarness.promptDir}/fix-prompt.md > injected-check.txt
-    diff ${batsHarness.checkContractFile} injected-check.txt
+    awk '/^# CHECK$/{f=1} /^# LAND THE CHANGE$/{exit} f' ${fixPromptHarness.internals.promptDir}/fix-prompt.md > injected-check.txt
+    diff ${batsHarness.internals.checkContractFile} injected-check.txt
     touch $out
   '';
 
@@ -413,8 +413,8 @@ in
   mkharness-prompt-fix-outcome-no-drift =
     pkgs.runCommand "mkharness-prompt-fix-outcome-no-drift" { }
       ''
-        awk '/# LAND THE CHANGE/{f=1} f' ${fixPromptHarness.promptDir}/fix-prompt.md > injected-contract.txt
-        diff ${batsHarness.outcomeContractFile} injected-contract.txt
+        awk '/# LAND THE CHANGE/{f=1} f' ${fixPromptHarness.internals.promptDir}/fix-prompt.md > injected-contract.txt
+        diff ${batsHarness.internals.outcomeContractFile} injected-contract.txt
         touch $out
       '';
 
@@ -425,7 +425,7 @@ in
   mkharness-prompt-research-outcome-injected =
     pkgs.runCommand "mkharness-prompt-research-outcome-injected" { }
       ''
-        count=$(grep -c '# POST THE VERDICT' ${batsHarness.promptDir}/research-prompt.md)
+        count=$(grep -c '# POST THE VERDICT' ${batsHarness.internals.promptDir}/research-prompt.md)
         [ "$count" -eq 1 ] || {
           echo "expected the research prompt's outcome contract injected exactly once, got $count" >&2
           exit 1
@@ -438,7 +438,7 @@ in
   mkharness-prompt-research-outcome-not-duplicated =
     pkgs.runCommand "mkharness-prompt-research-outcome-not-duplicated" { }
       ''
-        count=$(grep -c '# POST THE VERDICT' ${batsHarness.promptDir}/research-prompt.md)
+        count=$(grep -c '# POST THE VERDICT' ${batsHarness.internals.promptDir}/research-prompt.md)
         [ "$count" -eq 1 ] || {
           echo "expected the default research prompt's outcome contract to stay single, got $count" >&2
           exit 1
@@ -452,7 +452,7 @@ in
   mkharness-prompt-research-outcome-default-unchanged =
     pkgs.runCommand "mkharness-prompt-research-outcome-default-unchanged" { }
       ''
-        diff ${../../templates/default/prompts/research-prompt.md} ${batsHarness.promptDir}/research-prompt.md
+        diff ${../../templates/default/prompts/research-prompt.md} ${batsHarness.internals.promptDir}/research-prompt.md
         touch $out
       '';
 
@@ -464,7 +464,7 @@ in
   mkharness-prompt-research-verdicts-custom-rendered =
     pkgs.runCommand "mkharness-prompt-research-verdicts-custom-rendered" { }
       ''
-        p=${researchVerdictsHarness.promptDir}/research-prompt.md
+        p=${researchVerdictsHarness.internals.promptDir}/research-prompt.md
         grep -qF -- '- `approve` — relevant and worth doing; promote it.' "$p" \
           || { echo "custom verdict bullet missing from rendered research prompt" >&2; exit 1; }
         grep -qF -- '- `decline` — not worth doing.' "$p" \
@@ -490,8 +490,8 @@ in
   mkharness-prompt-research-outcome-no-drift =
     pkgs.runCommand "mkharness-prompt-research-outcome-no-drift" { }
       ''
-        awk '/# POST THE VERDICT/{f=1} f' ${researchPromptHarness.promptDir}/research-prompt.md > injected-contract.txt
-        diff ${batsHarness.researchOutcomeContractFile} injected-contract.txt
+        awk '/# POST THE VERDICT/{f=1} f' ${researchPromptHarness.internals.promptDir}/research-prompt.md > injected-contract.txt
+        diff ${batsHarness.internals.researchOutcomeContractFile} injected-contract.txt
         touch $out
       '';
 
@@ -524,8 +524,8 @@ in
     pkgs.runCommand "mkharness-prompt-research-outcome-contract-has-landing-token" { }
       ''
         # Floor guard, same reasoning as the issue-side check above.
-        grep -qE 'SPINDRIFT_OUTCOME.*landing=' ${batsHarness.researchOutcomeContractFile}
-        missing=$(grep 'SPINDRIFT_OUTCOME' ${batsHarness.researchOutcomeContractFile} | grep -vc 'landing=' || true)
+        grep -qE 'SPINDRIFT_OUTCOME.*landing=' ${batsHarness.internals.researchOutcomeContractFile}
+        missing=$(grep 'SPINDRIFT_OUTCOME' ${batsHarness.internals.researchOutcomeContractFile} | grep -vc 'landing=' || true)
         [ "$missing" -eq 0 ] || {
           echo "expected every SPINDRIFT_OUTCOME line to carry landing=, $missing did not" >&2
           exit 1
@@ -538,7 +538,7 @@ in
   mkharness-prompt-research-outcome-contract-raw-text =
     pkgs.runCommand "mkharness-prompt-research-outcome-contract-raw-text" { }
       ''
-        grep -Pzoq '(?is)final output.{0,60}raw plain text' ${batsHarness.researchOutcomeContractFile}
+        grep -Pzoq '(?is)final output.{0,60}raw plain text' ${batsHarness.internals.researchOutcomeContractFile}
         touch $out
       '';
 
@@ -551,10 +551,10 @@ in
   mkharness-prompt-research-consumer-override-injected =
     pkgs.runCommand "mkharness-prompt-research-consumer-override-injected" { }
       ''
-        grep -q 'CONFIGURED-RESEARCH-PROMPT-MARKER' ${researchPromptHarness.promptDir}/research-prompt.md
-        [ "$(grep -c '# POST THE VERDICT' ${researchPromptHarness.promptDir}/research-prompt.md)" -eq 1 ]
-        marker_line=$(grep -n 'CONFIGURED-RESEARCH-PROMPT-MARKER' ${researchPromptHarness.promptDir}/research-prompt.md | head -1 | cut -d: -f1)
-        contract_line=$(grep -n '# POST THE VERDICT' ${researchPromptHarness.promptDir}/research-prompt.md | head -1 | cut -d: -f1)
+        grep -q 'CONFIGURED-RESEARCH-PROMPT-MARKER' ${researchPromptHarness.internals.promptDir}/research-prompt.md
+        [ "$(grep -c '# POST THE VERDICT' ${researchPromptHarness.internals.promptDir}/research-prompt.md)" -eq 1 ]
+        marker_line=$(grep -n 'CONFIGURED-RESEARCH-PROMPT-MARKER' ${researchPromptHarness.internals.promptDir}/research-prompt.md | head -1 | cut -d: -f1)
+        contract_line=$(grep -n '# POST THE VERDICT' ${researchPromptHarness.internals.promptDir}/research-prompt.md | head -1 | cut -d: -f1)
         [ "$marker_line" -lt "$contract_line" ]
         touch $out
       '';

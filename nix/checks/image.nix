@@ -54,7 +54,7 @@ in
   # output. Realizes the agent-files layer, so it is gated to a Linux
   # builder and omitted from `nix flake check` on darwin.
   entrypoint-shebang = pkgs.runCommand "entrypoint-shebang" { } ''
-    shebang=$(head -1 ${nonRustHarness.agentFiles}/agent/entrypoint.sh)
+    shebang=$(head -1 ${nonRustHarness.internals.agentFiles}/agent/entrypoint.sh)
     case "$shebang" in
       '#!'/nix/store/*bash*) : ;;
       *) echo "entrypoint shebang is not a store bash: $shebang" >&2
@@ -85,7 +85,7 @@ in
         || { echo "$label $name entry $mismatch_msg" >&2; exit 1; }
     }
 
-    ep=${customHarness.agentFiles}/agent/entrypoint.sh
+    ep=${customHarness.internals.agentFiles}/agent/entrypoint.sh
 
     # The custom harness bakes both models — template must contain them.
     grep -q 'custom-scout' "$ep" \
@@ -96,11 +96,11 @@ in
       || { echo "AGENTS_JSON_TEMPLATE assignment missing from entrypoint" >&2; exit 1; }
 
     # Default harness bakes no models → template must not contain JSON content.
-    ! grep -q 'AGENTS_JSON_TEMPLATE=.*{' ${nonRustHarness.agentFiles}/agent/entrypoint.sh \
+    ! grep -q 'AGENTS_JSON_TEMPLATE=.*{' ${nonRustHarness.internals.agentFiles}/agent/entrypoint.sh \
       || { echo "AGENTS_JSON_TEMPLATE is non-empty for no-model harness" >&2; exit 1; }
 
     # A scout-only harness bakes the scout entry alone — no reviewer key at all.
-    scout_line=$(grep '^AGENTS_JSON_TEMPLATE=' ${scoutOnlyHarness.agentFiles}/agent/entrypoint.sh)
+    scout_line=$(grep '^AGENTS_JSON_TEMPLATE=' ${scoutOnlyHarness.internals.agentFiles}/agent/entrypoint.sh)
     grep -q 'solo-scout' <<<"$scout_line" \
       || { echo "scout-only harness missing scout model in baked template" >&2; exit 1; }
     ! grep -q '"reviewer"' <<<"$scout_line" \
@@ -116,7 +116,7 @@ in
       || { echo "scout-only harness missing default scout effort in baked template" >&2; exit 1; }
 
     # The reviewer-only mirror.
-    reviewer_line=$(grep '^AGENTS_JSON_TEMPLATE=' ${reviewerOnlyHarness.agentFiles}/agent/entrypoint.sh)
+    reviewer_line=$(grep '^AGENTS_JSON_TEMPLATE=' ${reviewerOnlyHarness.internals.agentFiles}/agent/entrypoint.sh)
     grep -q 'solo-reviewer' <<<"$reviewer_line" \
       || { echo "reviewer-only harness missing reviewer model in baked template" >&2; exit 1; }
     ! grep -q '"scout"' <<<"$reviewer_line" \
@@ -128,7 +128,7 @@ in
 
     # The filer-only mirror (opt-in, default empty — issue #393): composed
     # independently like scout/reviewer, no scout/reviewer keys alongside it.
-    filer_line=$(grep '^AGENTS_JSON_TEMPLATE=' ${filerOnlyHarness.agentFiles}/agent/entrypoint.sh)
+    filer_line=$(grep '^AGENTS_JSON_TEMPLATE=' ${filerOnlyHarness.internals.agentFiles}/agent/entrypoint.sh)
     grep -q 'solo-filer' <<<"$filer_line" \
       || { echo "filer-only harness missing filer model in baked template" >&2; exit 1; }
     ! grep -q '"scout"' <<<"$filer_line" \
@@ -142,7 +142,7 @@ in
 
     # The worker-only mirror (issue #2054): composed independently like
     # scout/reviewer/filer, no other agent keys alongside it.
-    worker_line=$(grep '^AGENTS_JSON_TEMPLATE=' ${workerOnlyHarness.agentFiles}/agent/entrypoint.sh)
+    worker_line=$(grep '^AGENTS_JSON_TEMPLATE=' ${workerOnlyHarness.internals.agentFiles}/agent/entrypoint.sh)
     grep -q 'solo-worker' <<<"$worker_line" \
       || { echo "worker-only harness missing worker model in baked template" >&2; exit 1; }
     ! grep -q '"scout"' <<<"$worker_line" \
@@ -163,7 +163,7 @@ in
     # against its own agent object, not the whole template line -- none of
     # these objects nest braces (tools is an array), so `[^}]*` can't overrun
     # into the next top-level key.
-    dogfood_line=$(grep '^AGENTS_JSON_TEMPLATE=' ${harness.agentFiles}/agent/entrypoint.sh)
+    dogfood_line=$(grep '^AGENTS_JSON_TEMPLATE=' ${harness.internals.agentFiles}/agent/entrypoint.sh)
     assert_agent_model "$dogfood_line" filer ${defaultModelFixture.dogfoodPins.filer} \
       "dogfood harness" "missing the configured model"
 
@@ -189,7 +189,7 @@ in
     # (lib/mkHarness.nix:317-327) -- reviewModel's default moved to
     # ${reviewModelSchemaDefault} so every Consumer's reviewer runs on the
     # strongest available model without configuring anything.
-    bats_line=$(grep '^AGENTS_JSON_TEMPLATE=' ${batsHarness.agentFiles}/agent/entrypoint.sh)
+    bats_line=$(grep '^AGENTS_JSON_TEMPLATE=' ${batsHarness.internals.agentFiles}/agent/entrypoint.sh)
     assert_agent_model "$bats_line" reviewer '${reviewModelSchemaDefault}' \
       "bats harness" "missing the default ${reviewModelSchemaDefault} model"
 
@@ -207,7 +207,7 @@ in
   # checks -- but only agentFiles, not the OCI image itself, so it stays
   # light (no dockerTools.buildLayeredImage).
   opencode-agent-files = pkgs.runCommand "opencode-agent-files" { } ''
-    scout=${opencodeHarness.agentFiles}/home/agent/.config/opencode/agents/scout.md
+    scout=${opencodeHarness.internals.agentFiles}/home/agent/.config/opencode/agents/scout.md
     [ -f "$scout" ] || {
       echo "opencode agentFiles missing scout.md" >&2
       exit 1
@@ -225,7 +225,7 @@ in
     grep -q 'reasoningEffort: "${rosterDefaults.scout.effort}"' "$scout" \
       || { echo "opencode scout.md missing default scout effort in baked frontmatter" >&2; exit 1; }
 
-    reviewer=${opencodeHarness.agentFiles}/home/agent/.config/opencode/agents/reviewer.md
+    reviewer=${opencodeHarness.internals.agentFiles}/home/agent/.config/opencode/agents/reviewer.md
     [ -f "$reviewer" ] || {
       echo "opencode agentFiles missing reviewer.md" >&2
       exit 1
@@ -237,7 +237,7 @@ in
     grep -q 'reasoningEffort: "${rosterDefaults.reviewer.effort}"' "$reviewer" \
       || { echo "opencode reviewer.md missing default reviewer effort in baked frontmatter" >&2; exit 1; }
 
-    worker=${opencodeHarness.agentFiles}/home/agent/.config/opencode/agents/worker.md
+    worker=${opencodeHarness.internals.agentFiles}/home/agent/.config/opencode/agents/worker.md
     [ -f "$worker" ] || {
       echo "opencode agentFiles missing worker.md" >&2
       exit 1
@@ -249,7 +249,7 @@ in
     grep -q 'reasoningEffort: "${rosterDefaults.worker.effort}"' "$worker" \
       || { echo "opencode worker.md missing default worker effort in baked frontmatter" >&2; exit 1; }
 
-    filer=${opencodeHarness.agentFiles}/home/agent/.config/opencode/agents/filer.md
+    filer=${opencodeHarness.internals.agentFiles}/home/agent/.config/opencode/agents/filer.md
     [ ! -e "$filer" ] || {
       echo "opencode agentFiles unexpectedly bakes filer.md (filerModel is empty)" >&2
       exit 1
@@ -293,11 +293,11 @@ in
   # the agent-files layer, so it is Linux-gated like the shebang check.
   prompt-baked-into-image = pkgs.runCommand "prompt-baked-into-image" { } ''
     grep -q 'CONFIGURED-PROMPT-MARKER' \
-      ${promptHarness.agentFiles}/agent/prompts/issue-prompt.md
+      ${promptHarness.internals.agentFiles}/agent/prompts/issue-prompt.md
     grep -q 'git rebase' \
-      ${promptHarness.agentFiles}/agent/prompts/conflict-resolve-prompt.md
+      ${promptHarness.internals.agentFiles}/agent/prompts/conflict-resolve-prompt.md
     grep -q 'Fix box for GitHub issue' \
-      ${promptHarness.agentFiles}/agent/prompts/fix-prompt.md
+      ${promptHarness.internals.agentFiles}/agent/prompts/fix-prompt.md
     # fix-prompt.md's fix-specific preamble is baked as-is, but the shared
     # outcome contract (LAND THE CHANGE onward) only ever reaches it via
     # injection (issue #455) — proof the baked image, not just the eval-only
@@ -308,7 +308,7 @@ in
     # literal command), distinct from fix-prompt.md's hand-written preamble
     # (which explicitly skips `gh pr create` on a fix pass).
     grep -q 'OPEN_PR_CREATE_READ_WRITE_STEP' \
-      ${promptHarness.agentFiles}/agent/prompts/fix-prompt.md
+      ${promptHarness.internals.agentFiles}/agent/prompts/fix-prompt.md
     touch $out
   '';
 
@@ -318,8 +318,8 @@ in
   # (issue #420) -- and it must be byte-identical to the single source #419
   # already exports, so the build-time and run-time injections cannot drift.
   outcome-contract-baked-into-image = pkgs.runCommand "outcome-contract-baked-into-image" { } ''
-    diff ${batsHarness.outcomeContractFile} \
-      ${batsHarness.agentFiles}/agent/outcome-contract.md
+    diff ${batsHarness.internals.outcomeContractFile} \
+      ${batsHarness.internals.agentFiles}/agent/outcome-contract.md
     touch $out
   '';
 
@@ -328,14 +328,14 @@ in
   # same reason: byte-identical to the single source, so build-time and
   # run-time injection cannot drift.
   comms-contract-baked-into-image = pkgs.runCommand "comms-contract-baked-into-image" { } ''
-    diff ${batsHarness.commsContractFile} \
-      ${batsHarness.agentFiles}/agent/comms-contract.md
+    diff ${batsHarness.internals.commsContractFile} \
+      ${batsHarness.internals.agentFiles}/agent/comms-contract.md
     touch $out
   '';
 
   check-contract-baked-into-image = pkgs.runCommand "check-contract-baked-into-image" { } ''
-    diff ${batsHarness.checkContractFile} \
-      ${batsHarness.agentFiles}/agent/check-contract.md
+    diff ${batsHarness.internals.checkContractFile} \
+      ${batsHarness.internals.agentFiles}/agent/check-contract.md
     touch $out
   '';
 
@@ -350,7 +350,7 @@ in
   fragments-baked-into-image = pkgs.runCommand "fragments-baked-into-image" { } ''
     for f in ${pkgs.lib.concatStringsSep " " fragmentBasenames}; do
       diff ${../../templates/default/prompts/fragments}/"$f".md \
-        ${batsHarness.agentFiles}/agent/prompts/fragments/"$f".md
+        ${batsHarness.internals.agentFiles}/agent/prompts/fragments/"$f".md
     done
     touch $out
   '';
@@ -418,7 +418,7 @@ in
   # Realizes the agent-files layer; Linux-gated like the other image checks.
   skills-baked-into-image = pkgs.runCommand "skills-baked-into-image" { } ''
     grep -q 'BAKED-SKILL-MARKER' \
-      ${skillsHarness.agentFiles}/agent/skills/baked-skill/SKILL.md
+      ${skillsHarness.internals.agentFiles}/agent/skills/baked-skill/SKILL.md
     touch $out
   '';
 
@@ -427,7 +427,7 @@ in
   # whatever the Consumer's own `skills` list contains. Built against
   # noSkillsHarness, which configures zero consumer skills, to prove this.
   auto-format-skill-baked-into-image = pkgs.runCommand "auto-format-skill-baked-into-image" { } ''
-    skill=${noSkillsHarness.agentFiles}/agent/skills/auto-format/SKILL.md
+    skill=${noSkillsHarness.internals.agentFiles}/agent/skills/auto-format/SKILL.md
     [ -s "$skill" ]
     grep -q 'Never .nix fmt.' "$skill"
     touch $out
@@ -438,7 +438,7 @@ in
   # whatever the Consumer's own `skills` list contains. Built against
   # noSkillsHarness, which configures zero consumer skills, to prove this.
   auto-lint-skill-baked-into-image = pkgs.runCommand "auto-lint-skill-baked-into-image" { } ''
-    skill=${noSkillsHarness.agentFiles}/agent/skills/auto-lint/SKILL.md
+    skill=${noSkillsHarness.internals.agentFiles}/agent/skills/auto-lint/SKILL.md
     [ -s "$skill" ]
     grep -q 'safe auto-fix mode where available' "$skill"
     touch $out
@@ -453,12 +453,12 @@ in
   reject-background-bash-hook-baked-into-image =
     pkgs.runCommand "reject-background-bash-hook-baked-into-image" { nativeBuildInputs = [ pkgs.jq ]; }
       ''
-        hook=${nonRustHarness.agentFiles}/home/agent/.claude/hooks/reject-background-bash.sh
+        hook=${nonRustHarness.internals.agentFiles}/home/agent/.claude/hooks/reject-background-bash.sh
         [ -x "$hook" ] || {
           echo "reject-background-bash.sh missing or not executable at $hook" >&2
           exit 1
         }
-        settings=${nonRustHarness.agentFiles}/home/agent/.claude/settings.json
+        settings=${nonRustHarness.internals.agentFiles}/home/agent/.claude/settings.json
         jq -e '.hooks.PreToolUse[0].matcher == "Bash"' "$settings" >/dev/null || {
           echo "settings.json does not register a PreToolUse hook matched to Bash" >&2
           exit 1
@@ -481,12 +481,12 @@ in
   credential-deny-hook-baked-into-image =
     pkgs.runCommand "credential-deny-hook-baked-into-image" { nativeBuildInputs = [ pkgs.jq ]; }
       ''
-        hook=${nonRustHarness.agentFiles}/home/agent/.claude/hooks/credential-deny.sh
+        hook=${nonRustHarness.internals.agentFiles}/home/agent/.claude/hooks/credential-deny.sh
         [ -x "$hook" ] || {
           echo "credential-deny.sh missing or not executable at $hook" >&2
           exit 1
         }
-        settings=${nonRustHarness.agentFiles}/home/agent/.claude/settings.json
+        settings=${nonRustHarness.internals.agentFiles}/home/agent/.claude/settings.json
         for matcher in Read Bash; do
           jq -e --arg matcher "$matcher" \
             'any(.hooks.PreToolUse[]; .matcher == $matcher and (.hooks[0].command | endswith("credential-deny.sh")))' \
@@ -508,12 +508,12 @@ in
   env-credential-scrub-hook-baked-into-image =
     pkgs.runCommand "env-credential-scrub-hook-baked-into-image" { nativeBuildInputs = [ pkgs.jq ]; }
       ''
-        hook=${nonRustHarness.agentFiles}/home/agent/.claude/hooks/env-credential-scrub.sh
+        hook=${nonRustHarness.internals.agentFiles}/home/agent/.claude/hooks/env-credential-scrub.sh
         [ -x "$hook" ] || {
           echo "env-credential-scrub.sh missing or not executable at $hook" >&2
           exit 1
         }
-        settings=${nonRustHarness.agentFiles}/home/agent/.claude/settings.json
+        settings=${nonRustHarness.internals.agentFiles}/home/agent/.claude/settings.json
         jq -e \
           'any(.hooks.PreToolUse[]; .matcher == "Bash" and (.hooks[0].command | endswith("env-credential-scrub.sh")))' \
           "$settings" >/dev/null || {
@@ -532,12 +532,12 @@ in
   bash-output-tee-hook-baked-into-image =
     pkgs.runCommand "bash-output-tee-hook-baked-into-image" { nativeBuildInputs = [ pkgs.jq ]; }
       ''
-        hook=${nonRustHarness.agentFiles}/home/agent/.claude/hooks/bash-output-tee.sh
+        hook=${nonRustHarness.internals.agentFiles}/home/agent/.claude/hooks/bash-output-tee.sh
         [ -x "$hook" ] || {
           echo "bash-output-tee.sh missing or not executable at $hook" >&2
           exit 1
         }
-        settings=${nonRustHarness.agentFiles}/home/agent/.claude/settings.json
+        settings=${nonRustHarness.internals.agentFiles}/home/agent/.claude/settings.json
         jq -e \
           'any(.hooks.PreToolUse[]; .matcher == "Bash" and (.hooks[0].command | endswith("bash-output-tee.sh")))' \
           "$settings" >/dev/null || {
@@ -550,12 +550,12 @@ in
   bash-output-summary-hook-baked-into-image =
     pkgs.runCommand "bash-output-summary-hook-baked-into-image" { nativeBuildInputs = [ pkgs.jq ]; }
       ''
-        hook=${nonRustHarness.agentFiles}/home/agent/.claude/hooks/bash-output-summary.sh
+        hook=${nonRustHarness.internals.agentFiles}/home/agent/.claude/hooks/bash-output-summary.sh
         [ -x "$hook" ] || {
           echo "bash-output-summary.sh missing or not executable at $hook" >&2
           exit 1
         }
-        settings=${nonRustHarness.agentFiles}/home/agent/.claude/settings.json
+        settings=${nonRustHarness.internals.agentFiles}/home/agent/.claude/settings.json
         jq -e \
           'any(.hooks.PostToolUse[]; .matcher == "Bash" and (.hooks[0].command | endswith("bash-output-summary.sh")))' \
           "$settings" >/dev/null || {
@@ -601,14 +601,14 @@ in
   # the image owned by uid 1000, so podman reuses the existing directory
   # instead of fabricating root-owned parent dirs when the volume is mounted
   # (issue #447). The expected path is derived from
-  # nonRustHarness.driverEntry rather than a literal, so this check tracks
+  # nonRustHarness.internals.driverEntry rather than a literal, so this check tracks
   # whichever Driver the image is built with (issue #448).
   # fakeRootCommands' chown -R 1000:1000 home/agent records the ownership in
   # the top customisation layer (Layers[-1]), the same layer that
   # nix-var-owned-by-agent and nix-conf-in-image inspect.
   projects-mountpoint-baked =
     let
-      relPath = nonRustHarness.driverEntry.sessionCacheDirRelative;
+      relPath = nonRustHarness.internals.driverEntry.sessionCacheDirRelative;
       bakedPath = "home/agent/${relPath}";
       awkPattern = pkgs.lib.replaceStrings [ "/" "." ] [ "\\/" "\\." ] bakedPath;
     in
@@ -728,11 +728,11 @@ in
   forgejo-cli-baked-only-for-forgejo-backend =
     pkgs.runCommand "forgejo-cli-baked-only-for-forgejo-backend" { }
       ''
-        test -x ${forgejoHarness.agentEnv}/bin/fj || {
+        test -x ${forgejoHarness.internals.agentEnv}/bin/fj || {
           echo "fj missing from forgejo-backend image" >&2
           exit 1
         }
-        ! test -e ${nonRustHarness.agentEnv}/bin/fj || {
+        ! test -e ${nonRustHarness.internals.agentEnv}/bin/fj || {
           echo "fj leaked into non-forgejo image" >&2
           exit 1
         }
