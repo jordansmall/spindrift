@@ -31,12 +31,12 @@ in
         };
       };
     in
-    assert assertMsg (hasInfix "MAX_PARALLEL=\${MAX_PARALLEL:-5}" out)
+    assert assertMsg (hasInfix ''MAX_PARALLEL=''${MAX_PARALLEL:-5}'' out)
       "renderDefaultsPreamble must emit VAR=\${VAR:-<baked>} per flakeOption entry";
     assert assertMsg (
       !hasInfix "export " out
     ) "renderDefaultsPreamble export=false must not emit `export`";
-    assert assertMsg (hasInfix "export MAX_PARALLEL=\${MAX_PARALLEL:-5}" outExported)
+    assert assertMsg (hasInfix ''export MAX_PARALLEL=''${MAX_PARALLEL:-5}'' outExported)
       "renderDefaultsPreamble export=true must prefix each line with `export `";
     pkgs.runCommand "preambles-defaults-shape" { } "touch $out";
 
