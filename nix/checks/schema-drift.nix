@@ -667,6 +667,37 @@ in
       "mkharness-direct-choices-guard-not-triggered: expected mkHarness to accept a direct-caller `defaults.mergeMethod = \"squash\"` (a member of lib/env-schema.nix's mergeMethod.choices), but it failed to evaluate";
     pkgs.runCommand "mkharness-direct-choices-guard-not-triggered" { } "touch $out";
 
+  # Regression guard (issue #2519): choiceViolations in lib/mkHarness.nix
+  # used to special-case `value == null -> null` (skip the guard entirely
+  # for a null choice value), so a direct caller passing
+  # `defaults.mergeMethod = null` silently passed and documentSettings went
+  # on to render `MERGE_METHOD=""` via `toString null`. The null-choice fix
+  # dropped that skip so a null choice value is rejected like any other
+  # non-member value.
+  # Distinct from mkharness-direct-choices-guard above, which only pins the
+  # non-null-bogus-value case ("bogus-merge-method") -- that check alone
+  # would keep passing even if a `value == null -> null` skip were
+  # reintroduced into choiceViolations, since null never reaches its
+  # `lib.elem value choices` check. This check closes that gap by asserting
+  # mkHarness still rejects `defaults.mergeMethod = null` from a direct
+  # caller.
+  mkharness-direct-choices-guard-null =
+    let
+      inherit (pkgs.lib) assertMsg;
+      result = builtins.tryEval (
+        import ../../lib/mkHarness.nix {
+          inherit nixpkgs system;
+          defaults = {
+            mergeMethod = null;
+          };
+          packages = p: [ p.hello ];
+        }
+      );
+    in
+    assert assertMsg (!result.success)
+      "mkharness-direct-choices-guard-null: expected mkHarness to reject a direct-caller `defaults.mergeMethod = null` (not a member of lib/env-schema.nix's mergeMethod.choices), but it evaluated successfully";
+    pkgs.runCommand "mkharness-direct-choices-guard-null" { } "touch $out";
+
   # tests/helper.bash's set_box_env fixture must export every boxEnv = true
   # schema knob, so the entrypoint-*.bats suites exercise the same defaults the nix
   # preamble bakes into the image at build time (issue #462). Fails when a new
