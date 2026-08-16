@@ -347,12 +347,38 @@ let
   # label-registry-covers-harness-writes-regression can exercise this exact
   # assertion path against a doctored harnessSurfaces without touching real
   # files beyond one doctored string.
+  #
+  # Guards two distinct failure modes, in order:
+  #   1. emptyOffenders — every harnessSurfaces entry writes at least one real
+  #      label today, so an extractor returning [] never means "this surface
+  #      stopped writing labels"; it means the extractor's marker/shape no
+  #      longer matches the source (a requote, a reformat, a var rename) and
+  #      the check below would otherwise pass vacuously instead of validating
+  #      anything for that surface — exactly the class of gap the three
+  #      *-regression checks below reproduce (a quoted bareword an unquoted
+  #      extractor can't see, `"name": "..."` spacing a no-space marker can't
+  #      see, and a renamed Go var an anchored marker can't see).
+  #   2. registryOffenders — the pre-existing Registry ⊇ Harness membership
+  #      check: every label an extractor DID find is a name in
+  #      lib/labels.nix.
+  # Checked in this order so a broken extractor fails loudly on its own
+  # (case 1) rather than silently masquerading as case 2's clean pass.
   assertHarnessWritesInRegistry =
     { harnessSurfaces, registryLabels }:
     let
+      extractedBySurface = mapAttrs (_: labelsWrittenBy) harnessSurfaces;
+      emptyOffenders = filter (name: extractedBySurface.${name} == [ ]) (
+        builtins.attrNames extractedBySurface
+      );
+    in
+    assert assertMsg (emptyOffenders == [ ])
+      "a harnessSurfaces extractor found zero label literal(s) for: ${
+        concatStringsSep ", " emptyOffenders
+      } — every known surface writes at least one label today, so an empty extraction means the extractor's marker/shape no longer matches the source (requoted, reformatted, or renamed), not that the surface stopped writing labels; fix the extractor in nix/checks/dispatch-labels.nix before trusting label-registry-covers-harness-writes again";
+    let
       missingFromRegistryBySurface = mapAttrs (
-        _: surface: filter (l: !(elem l registryLabels)) (labelsWrittenBy surface)
-      ) harnessSurfaces;
+        _: labels: filter (l: !(elem l registryLabels)) labels
+      ) extractedBySurface;
       registryOffenders = filter (name: missingFromRegistryBySurface.${name} != [ ]) (
         builtins.attrNames missingFromRegistryBySurface
       );
@@ -598,4 +624,99 @@ in
     assert assertMsg (!result.success)
       "label-registry-covers-harness-writes-continuation-regression: expected assertHarnessWritesInRegistry to reject a synthetic filer-label-direct.md with the label-create bareword line-continued and renamed to agent-unregistered-label, but it evaluated successfully";
     pkgs.runCommand "label-registry-covers-harness-writes-continuation-regression" { } "touch $out";
+
+  # Regression guard (issue #2528): proves the emptyOffenders half of
+  # assertHarnessWritesInRegistry actually fires when
+  # extractLabelCreateTokens' unquoted-bareword assumption breaks. Doctors
+  # filer-label-direct.md so the label-create argument is double-quoted
+  # (`gh label create "agent-unregistered-label"`) — extractLabelCreateTokens
+  # splits on whitespace and label-shape-matches the raw token, so a leading
+  # `"` fails builtins.match and the whole surface silently extracts [ ],
+  # which — before the emptyOffenders check existed — let
+  # label-registry-covers-harness-writes pass even though the harness now
+  # creates an unregistered label. Confirms via tryEval that
+  # assertHarnessWritesInRegistry now rejects this instead.
+  label-registry-covers-harness-writes-quoted-bareword-regression =
+    let
+      doctoredFilerLabelDirectSrc =
+        replaceStrings [ "label create agent-review-finding" ] [ ''label create "agent-unregistered-label"'' ]
+          harnessSurfaces."templates/default/prompts/fragments/filer-label-direct.md".src;
+      doctoredHarnessSurfaces = harnessSurfaces // {
+        "templates/default/prompts/fragments/filer-label-direct.md" =
+          harnessSurfaces."templates/default/prompts/fragments/filer-label-direct.md"
+          // {
+            src = doctoredFilerLabelDirectSrc;
+          };
+      };
+      result = builtins.tryEval (assertHarnessWritesInRegistry {
+        harnessSurfaces = doctoredHarnessSurfaces;
+        registryLabels = allRegistryLabels;
+      });
+    in
+    assert assertMsg (!result.success)
+      "label-registry-covers-harness-writes-quoted-bareword-regression: expected assertHarnessWritesInRegistry to reject a synthetic filer-label-direct.md with the label-create bareword double-quoted and renamed to agent-unregistered-label, but it evaluated successfully";
+    pkgs.runCommand "label-registry-covers-harness-writes-quoted-bareword-regression" { } "touch $out";
+
+  # Regression guard (issue #2528): proves the emptyOffenders half of
+  # assertHarnessWritesInRegistry actually fires when
+  # extractNameFieldTokens' no-space `"name":"` marker breaks on ordinary
+  # JSON formatting. Doctors filer-label-direct-forgejo.md so the `"name"`
+  # key gets a space after its colon (`"name": "agent-unregistered-label"`,
+  # gofmt/jq's normal style) — the marker never matches, so the surface
+  # silently extracts [ ], which — before the emptyOffenders check existed —
+  # let label-registry-covers-harness-writes pass even though the harness now
+  # creates an unregistered label. Confirms via tryEval that
+  # assertHarnessWritesInRegistry now rejects this instead.
+  label-registry-covers-harness-writes-json-spacing-regression =
+    let
+      doctoredForgejoSrc =
+        replaceStrings [ ''"name":"agent-review-finding"'' ] [ ''"name": "agent-unregistered-label"'' ]
+          harnessSurfaces."templates/default/prompts/fragments/filer-label-direct-forgejo.md".src;
+      doctoredHarnessSurfaces = harnessSurfaces // {
+        "templates/default/prompts/fragments/filer-label-direct-forgejo.md" =
+          harnessSurfaces."templates/default/prompts/fragments/filer-label-direct-forgejo.md"
+          // {
+            src = doctoredForgejoSrc;
+          };
+      };
+      result = builtins.tryEval (assertHarnessWritesInRegistry {
+        harnessSurfaces = doctoredHarnessSurfaces;
+        registryLabels = allRegistryLabels;
+      });
+    in
+    assert assertMsg (!result.success)
+      "label-registry-covers-harness-writes-json-spacing-regression: expected assertHarnessWritesInRegistry to reject a synthetic filer-label-direct-forgejo.md with a space after the \"name\" key's colon and the value renamed to agent-unregistered-label, but it evaluated successfully";
+    pkgs.runCommand "label-registry-covers-harness-writes-json-spacing-regression" { } "touch $out";
+
+  # Regression guard (issue #2528): proves the emptyOffenders half of
+  # assertHarnessWritesInRegistry actually fires when
+  # extractIssueIntentLabels' anchored `issueIntentLabels = []string{` marker
+  # breaks on a var rename. Doctors issue_intent.go so the declaration reads
+  # `issueIntentReviewLabels = []string{...}` instead — splitString never
+  # finds the old marker, so the surface silently extracts [ ], which —
+  # before the emptyOffenders check existed — let
+  # label-registry-covers-harness-writes pass even though the harness still
+  # writes agent-review-finding (now unobserved) and could just as easily
+  # have started writing something unregistered alongside it. Confirms via
+  # tryEval that assertHarnessWritesInRegistry now rejects this instead.
+  label-registry-covers-harness-writes-var-rename-regression =
+    let
+      doctoredIssueIntentSrc =
+        replaceStrings [ "issueIntentLabels = []string{" ] [ "issueIntentReviewLabels = []string{" ]
+          harnessSurfaces."cmd/launcher/internal/settle/issue_intent.go".src;
+      doctoredHarnessSurfaces = harnessSurfaces // {
+        "cmd/launcher/internal/settle/issue_intent.go" =
+          harnessSurfaces."cmd/launcher/internal/settle/issue_intent.go"
+          // {
+            src = doctoredIssueIntentSrc;
+          };
+      };
+      result = builtins.tryEval (assertHarnessWritesInRegistry {
+        harnessSurfaces = doctoredHarnessSurfaces;
+        registryLabels = allRegistryLabels;
+      });
+    in
+    assert assertMsg (!result.success)
+      "label-registry-covers-harness-writes-var-rename-regression: expected assertHarnessWritesInRegistry to reject a synthetic issue_intent.go with issueIntentLabels renamed to issueIntentReviewLabels, but it evaluated successfully";
+    pkgs.runCommand "label-registry-covers-harness-writes-var-rename-regression" { } "touch $out";
 }
