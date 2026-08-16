@@ -294,20 +294,30 @@ type capabilitySignals struct {
 
 // resolveCapabilitySignals returns the capability signals for the
 // codeForge/issueTracker pairing actually in effect this run. The
-// nix-forwarded artifacts (getenvArtifact) describe whatever pairing was
+// nix-forwarded artifacts (docArtifact) describe whatever pairing was
 // baked into the --input document at build time; a later CLI flag or env
 // var overriding CODE_FORGE/ISSUE_TRACKER away from that baked pairing (or
 // no document at all — direct binary invocation, tests) moves the pairing
 // out from under the baked artifacts, so this falls back to a registry
 // lookup on the resolved names instead of trusting a forwarded bool that
-// would silently describe the wrong backend (issue #2527 review).
+// would silently describe the wrong backend (issue #2527 review). A document
+// whose Artifacts section carries none of the four keys at all (predates
+// this feature, or a rendering bug) falls back the same way, rather than
+// letting every docArtifact(key) == "true" comparison silently read as
+// false (issue #2527 review, absent-key finding).
 func resolveCapabilitySignals(codeForge, issueTracker string) capabilitySignals {
 	if loadedDoc != nil && codeForge == loadedDoc.Settings["CODE_FORGE"] && issueTracker == loadedDoc.Settings["ISSUE_TRACKER"] {
-		return capabilitySignals{
-			hostMediatedRemote:      getenvArtifact("HOST_MEDIATED_REMOTE", "") == "true",
-			outboxRelayCapable:      getenvArtifact("OUTBOX_RELAY_CAPABLE", "") == "true",
-			inBoxUnreachableTracker: getenvArtifact("IN_BOX_UNREACHABLE_TRACKER", "") == "true",
-			fullyLocal:              getenvArtifact("FULLY_LOCAL", "") == "true",
+		_, hostMediatedRemotePresent := loadedDoc.Artifacts["HOST_MEDIATED_REMOTE"]
+		_, outboxRelayCapablePresent := loadedDoc.Artifacts["OUTBOX_RELAY_CAPABLE"]
+		_, inBoxUnreachableTrackerPresent := loadedDoc.Artifacts["IN_BOX_UNREACHABLE_TRACKER"]
+		_, fullyLocalPresent := loadedDoc.Artifacts["FULLY_LOCAL"]
+		if hostMediatedRemotePresent || outboxRelayCapablePresent || inBoxUnreachableTrackerPresent || fullyLocalPresent {
+			return capabilitySignals{
+				hostMediatedRemote:      docArtifact("HOST_MEDIATED_REMOTE") == "true",
+				outboxRelayCapable:      docArtifact("OUTBOX_RELAY_CAPABLE") == "true",
+				inBoxUnreachableTracker: docArtifact("IN_BOX_UNREACHABLE_TRACKER") == "true",
+				fullyLocal:              docArtifact("FULLY_LOCAL") == "true",
+			}
 		}
 	}
 	codeForgeRow, _ := backendByName(codeForge)
