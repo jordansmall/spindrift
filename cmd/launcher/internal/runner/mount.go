@@ -3,6 +3,8 @@ package runner
 import (
 	"fmt"
 	"os"
+
+	"spindrift.dev/launcher/internal/agentpaths"
 )
 
 // operatorSkillsDir is the fixed in-box path SPINDRIFT_SKILLS_DIR mounts
@@ -78,7 +80,7 @@ func candidateMount(source, target string, readOnly bool) (MountSpec, bool) {
 func buildMountSpecs(p MountParams, box Box) []MountSpec {
 	var specs []MountSpec
 
-	if spec, ok := candidateMount(p.PromptDir, "/agent/prompts", true); ok {
+	if spec, ok := candidateMount(p.PromptDir, agentpaths.PromptsDir, true); ok {
 		spec.Message = fmt.Sprintf("==> SPINDRIFT_PROMPT_DIR set; mounting %s over the baked prompt\n", spec.Source)
 		specs = append(specs, spec)
 	}
