@@ -120,7 +120,6 @@
             agents.format.enable = dogfoodDefaults.defaults.autoFormat;
             agents.lint.enable = dogfoodDefaults.defaults.autoLint;
             agents.models.roster = dogfoodDefaults.roster;
-            agents.models.reviewEffort = dogfoodDefaults.defaults.reviewEffort;
           };
 
           checks = checksResult.checks;

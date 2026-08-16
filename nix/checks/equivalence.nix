@@ -784,10 +784,14 @@ in
   # The dogfood Consumer config sources agent models/efforts from an explicit
   # roster (lib/roster.nix's defaultRoster) instead of the legacy `filerModel`
   # knob (issue #2388): `defaults` must no longer carry `filerModel` directly,
-  # `defaults.reviewEffort` must drive the orchestrator's code-owned review
-  # pass (issue #2387) at the same effort the roster's `reviewer` entry
-  # resolves to, and the roster's `filer` entry must still carry the Filer's
-  # (#393) tuned model as the roster's sole local pin. scout, reviewer, and
+  # and the roster's `filer` entry must still carry the Filer's (#393) tuned
+  # model as the roster's sole local pin. The dogfood config also carries no
+  # local `reviewEffort` pin (issue #2512): the roster's `reviewer` entry's
+  # effort flows straight to the orchestrator's code-owned review pass (issue
+  # #2387) via the Handoff, so the `effortMismatches` assertion below --
+  # comparing the *resolved* roster against `rosterHelper.rosterDefaults` per
+  # agent, including `reviewer` -- is the sole check that the review pass
+  # still runs at the roster's expected effort. scout, reviewer, and
   # worker are all left unmentioned in the roster's `models` (issue #2435) and
   # must resolve to their `lib/env-schema.nix` schema defaults as of this
   # writing -- claude-haiku-4-5-20251001, claude-opus-5, and claude-sonnet-5
@@ -842,10 +846,6 @@ in
     in
     assert assertMsg (!(defaults.defaults ? filerModel))
       "dogfood defaults must not carry the deprecated filerModel knob once a roster is set (issue #2388)";
-    assert assertMsg (defaults.defaults.reviewEffort or null == "high")
-      ''dogfood defaults.reviewEffort must be "high" (issue #2388/#2387): got "${
-        toString (defaults.defaults.reviewEffort or null)
-      }"'';
     assert assertMsg (
       modelMismatches == { }
     ) "dogfood roster per-agent model mismatch(es): ${builtins.toJSON modelMismatches}";
