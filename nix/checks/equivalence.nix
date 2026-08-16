@@ -709,6 +709,48 @@ in
     ) "flakeModule must throw on unknown knob 'typoKnob' in settings.branches";
     pkgs.runCommand "flakemodule-rejects-unknown-settings" { } "touch $out";
 
+  # A schema knob that declares `choices` (issue #2519) must be exposed on
+  # the flakeModule domain-tree surface as `types.nullOr (types.enum
+  # entry.choices)`, not the type/int/bool/str inference `mkKnobOption` falls
+  # back to for a choiceless knob — an out-of-enum value must throw at eval
+  # time the same way `structuralPlacements.runtime` (a hand-written enum)
+  # already does, naming the option path and the valid choices. Exercises
+  # `mergeMode` (lib/env-schema.nix), whose domain-tree path is
+  # `git.merge.policy` per its `nixSubPath`; a valid choice must still
+  # evaluate cleanly so this pins acceptance, not just rejection.
+  flakemodule-rejects-invalid-choice =
+    let
+      inherit (pkgs.lib) assertMsg;
+      mkMergePolicyFlake =
+        policy:
+        (flake-parts.lib.mkFlake
+          {
+            inputs = {
+              inherit nixpkgs;
+              self = {
+                outPath = ../../.;
+              };
+            };
+          }
+          {
+            systems = [ system ];
+            imports = [ ../../lib/flakeModule.nix ];
+            perSystem.spindrift = {
+              packages = p: [ p.hello ];
+              git.merge.policy = policy;
+            };
+          }
+        ).packages.${system}.spindrift;
+      badPolicy = builtins.tryEval (mkMergePolicyFlake "bogus");
+      goodPolicy = builtins.tryEval (mkMergePolicyFlake "auto");
+    in
+    assert assertMsg (
+      !badPolicy.success
+    ) "flakeModule must throw on out-of-enum value 'bogus' for git.merge.policy (mergeMode's choices)";
+    assert assertMsg (goodPolicy.success
+    ) "flakeModule must accept an in-enum value ('auto') for git.merge.policy (mergeMode's choices)";
+    pkgs.runCommand "flakemodule-rejects-invalid-choice" { } "touch $out";
+
   # The dogfood's tuned leaf values (mergeMode, autoFormat, autoLint, the
   # roster's `filer` model) must be defined exactly once, in
   # nix/dogfood-defaults.nix, and consumed by both flake.nix's `spindrift`
