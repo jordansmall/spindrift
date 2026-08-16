@@ -8,6 +8,8 @@ var GitHub = Descriptor{
 	ValidAsCodeForge:   true,
 	TokenEnvVar:        "GH_TOKEN",
 	OutboxRelayCapable: true,
+	RelayCapable:       true,
+	HostPostingCapable: true,
 }
 
 // Git is the descriptor for the "git" backend.
@@ -23,6 +25,8 @@ var Local = Descriptor{
 	ValidAsCodeForge:        true,
 	HostMediatedRemote:      true,
 	InBoxUnreachableTracker: true,
+	RelayCapable:            true,
+	HostPostingCapable:      true,
 }
 
 // Jira is the descriptor for the "jira" backend.
@@ -36,12 +40,14 @@ var Jira = Descriptor{
 
 // Forgejo is the descriptor for the "forgejo" backend.
 var Forgejo = Descriptor{
-	Name:             "forgejo",
-	ValidAsTracker:   true,
-	ValidAsCodeForge: true,
-	TokenEnvVar:      "FORGEJO_TOKEN",
-	DoctorTokenHint:  "FORGEJO_TOKEN",
-	DoctorSlugHint:   "FORGEJO_BASE_URL",
+	Name:               "forgejo",
+	ValidAsTracker:     true,
+	ValidAsCodeForge:   true,
+	TokenEnvVar:        "FORGEJO_TOKEN",
+	DoctorTokenHint:    "FORGEJO_TOKEN",
+	DoctorSlugHint:     "FORGEJO_BASE_URL",
+	RelayCapable:       true,
+	HostPostingCapable: true,
 }
 
 var Registry = []Descriptor{GitHub, Git, Local, Jira, Forgejo}
