@@ -1673,6 +1673,80 @@ in
         want: ${generated}'';
     pkgs.runCommand "default-models-doc" { } "touch $out";
 
+  # The generated `models` sub-block of docs/reference.md's illustrative
+  # `settings = { ... }` example (between its BEGIN/END GENERATED SETTINGS
+  # EXAMPLE MODELS markers) must match the content rendered from
+  # lib/default-model-fixture.nix (issue #2514 AC1): a schema-default bump
+  # must not be able to leave this example's hand-typed model/scoutModel/
+  # reviewModel/filerModel literals stale with no drift check, the exact
+  # failure mode this check closes. Shares its renderer with `nix run
+  # .#regen` via lib/renderers.nix, so guard and regenerator cannot drift
+  # from each other (issue #402). Mirrors default-models-doc above.
+  settings-example-models-doc =
+    let
+      inherit (pkgs.lib) assertMsg;
+      generated = renderers.renderSettingsExampleModelsDoc defaultModelFixture;
+      docSrc = builtins.readFile ../../docs/reference.md;
+      beginMarker = "  # BEGIN GENERATED SETTINGS EXAMPLE MODELS -- nix run .#regen -- DO NOT EDIT\n";
+      endMarker = "  # END GENERATED SETTINGS EXAMPLE MODELS";
+      afterBegin =
+        let
+          parts = builtins.split beginMarker docSrc;
+        in
+        if builtins.length parts >= 3 then
+          builtins.elemAt parts 2
+        else
+          throw "docs/reference.md: BEGIN GENERATED SETTINGS EXAMPLE MODELS marker not found";
+      committed =
+        let
+          parts = builtins.split endMarker afterBegin;
+        in
+        if builtins.length parts >= 3 then
+          builtins.elemAt parts 0
+        else
+          throw "docs/reference.md: END GENERATED SETTINGS EXAMPLE MODELS marker not found";
+    in
+    assert assertMsg (committed == generated) ''
+      docs/reference.md generated settings example is out of sync with lib/default-model-fixture.nix — regenerate it with `nix run .#regen`
+        got:  ${committed}
+        want: ${generated}'';
+    pkgs.runCommand "settings-example-models-doc" { } "touch $out";
+
+  # Regression guard for settings-example-models-doc above: proves its
+  # equality assertion actually rejects a drifted value instead of passing
+  # vacuously (mirrors marker-consistency-guard's tryEval pattern). A
+  # synthetic doc whose models sub-block carries a wrong model literal must
+  # fail the same equality check settings-example-models-doc runs against
+  # the real docs/reference.md.
+  settings-example-models-doc-guard =
+    let
+      inherit (pkgs.lib) assertMsg;
+      generated = renderers.renderSettingsExampleModelsDoc defaultModelFixture;
+      beginMarker = "  # BEGIN GENERATED SETTINGS EXAMPLE MODELS -- nix run .#regen -- DO NOT EDIT\n";
+      endMarker = "  # END GENERATED SETTINGS EXAMPLE MODELS";
+      driftedBlock = ''
+        models          = { model = "wrong-model";
+                            scoutModel  = "wrong-scout-model";
+                            reviewModel = "wrong-review-model";
+                            filerModel  = "wrong-filer-model"; };
+      '';
+      driftedDocSrc = beginMarker + driftedBlock + endMarker + "\n";
+      driftedCommitted =
+        let
+          afterBegin =
+            let
+              parts = builtins.split beginMarker driftedDocSrc;
+            in
+            builtins.elemAt parts 2;
+          parts = builtins.split endMarker afterBegin;
+        in
+        builtins.elemAt parts 0;
+      driftedResult = builtins.tryEval (assertMsg (driftedCommitted == generated) "should not match");
+    in
+    assert assertMsg (!driftedResult.success || !driftedResult.value)
+      "settings-example-models-doc-guard: expected a drifted models sub-block to fail the equality check, but it matched";
+    pkgs.runCommand "settings-example-models-doc-guard" { } "touch $out";
+
   # docs/reference.md's Subagent roster section's dogfood paragraph restates
   # lib/default-model-fixture.nix's schemaDefaults scout/reviewer/worker
   # model literals as prose (Filer is a separate, hand-stated local pin); this
