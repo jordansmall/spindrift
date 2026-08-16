@@ -190,6 +190,12 @@ exit 0
 	if _, err := os.ReadFile(callLog); err != nil {
 		t.Fatalf("driver-exec was never invoked (%v) -- a bad budget cap value must not abort the run before any pass runs", err)
 	}
+	if !strings.Contains(stderr.String(), `-max-budget-tokens="-1"`) {
+		t.Errorf("stderr = %q, want it to name the degraded -max-budget-tokens value", stderr.String())
+	}
+	if !strings.Contains(stderr.String(), `-max-budget-usd="not-a-number"`) {
+		t.Errorf("stderr = %q, want it to name the degraded -max-budget-usd value", stderr.String())
+	}
 }
 
 // TestMainRunAcceptsMaxBudgetFlagsAndThreadsThemIntoTheReviewLoop verifies

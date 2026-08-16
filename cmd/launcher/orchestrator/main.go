@@ -105,12 +105,20 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 	}
 	// maxBudgetTokens/maxBudgetUSD parse with the same graceful-degrade
 	// semantics as the host launcher's own atoiNonneg/floatNonneg (issue
-	// #2694 review finding): a negative or malformed value silently becomes
-	// 0 (disabled) rather than a fatal error, matching how MAX_BUDGET_TOKENS/
-	// MAX_BUDGET_USD already behave host-side -- there is no coherent reason
-	// for the Box to be stricter than the host about the exact same knob.
-	maxBudgetTokens := parseNonnegBudgetTokens(*maxBudgetTokensRaw)
-	maxBudgetUSD := parseNonnegBudgetUSD(*maxBudgetUSDRaw)
+	// #2694): a negative or malformed value becomes 0 (disabled) rather than
+	// a fatal error, matching how MAX_BUDGET_TOKENS/MAX_BUDGET_USD already
+	// behave host-side. Unlike the host's own silent fallback, a degrade
+	// here is worth one stderr line: the Box has no other channel back to
+	// an operator watching a run land earlier than a mistyped cap should
+	// have allowed.
+	maxBudgetTokens, tokensOK := parseNonnegBudgetTokens(*maxBudgetTokensRaw)
+	if !tokensOK {
+		fmt.Fprintf(stderr, "orchestrator: -max-budget-tokens=%q is negative or malformed, treating as 0 (disabled)\n", *maxBudgetTokensRaw)
+	}
+	maxBudgetUSD, usdOK := parseNonnegBudgetUSD(*maxBudgetUSDRaw)
+	if !usdOK {
+		fmt.Fprintf(stderr, "orchestrator: -max-budget-usd=%q is negative or malformed, treating as 0 (disabled)\n", *maxBudgetUSDRaw)
+	}
 
 	rc, err := run(config{
 		driver:             *driverName,
