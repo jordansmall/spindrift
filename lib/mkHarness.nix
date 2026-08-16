@@ -733,12 +733,11 @@ let
   # stay byte-identical, so every value the module needs is threaded in
   # exactly as it was computed here.
   #
-  # lib/image.nix's parameters are grouped into six attrsets (issue #2530):
-  # a shared internal representation, not a bag invented solely for the
-  # image.nix call below. The host-native mirror derivations/documents
-  # further down this same file (promptDir, driverPreambleFile,
-  # runArtifacts, and others) read the same fields off these groups too,
-  # instead of re-deriving them from the bare local values.
+  # lib/image.nix's parameters are grouped into six attrsets. The host-native
+  # mirror derivations/documents further down this same file (promptDir,
+  # driverPreambleFile, runArtifacts, and others) read the same fields off
+  # these groups too, instead of re-deriving them from the bare local
+  # values.
   imagePackageSet = {
     inherit packages extraClosures;
   };

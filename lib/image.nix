@@ -10,17 +10,15 @@
 # launchers without a Linux builder stays on the mkHarness side, applied to
 # this module's outputs.
 #
-# The parameters below (issue #2530) are grouped into six attrsets — the
-# package-set pair, the driver entry, the resolved agents, the contract
-# files, the prompt tree, and the knob subset the image consumes — instead
-# of one loose parameter per value; `pkgs` and `lib` stay top-level as
-# module plumbing, not Consumer/mkHarness state. mkHarness threads the same
+# The parameters below are grouped into six attrsets — the package-set
+# pair, the driver entry, the resolved agents, the contract files, the
+# prompt tree, and the knob subset the image consumes — instead of one
+# loose parameter per value; `pkgs` and `lib` stay top-level as module
+# plumbing, not Consumer/mkHarness state. mkHarness threads the same
 # already-computed values in through the groups below, and the body
 # references each value through its group (e.g. `driver.driverEntry`,
 # `agents.agentsJsonTemplate`) rather than destructuring the groups back to
-# bare names — the point of grouping is that the body actually treats a
-# group as a unit, not a one-line-later restatement of the loose-parameter
-# list it replaced.
+# bare names.
 {
   pkgs,
   lib,
@@ -63,10 +61,8 @@ let
   bakedSkills = import ./baked-skills.nix;
   # Whether ISSUE_TRACKER or CODE_FORGE selects the forgejo backend; bakes fj
   # (forgejo-cli) into the image when true, absent otherwise (issue #1963).
-  # Kept as an `or false` default, as the pre-grouping parameter carried,
-  # even though mkHarness's call site always supplies it explicitly. A
-  # derived (default-applied) local binding, not a straight group passthrough,
-  # so it stays a bare name unlike every other value below.
+  # Defaults to false since a caller may omit it; a derived value, not a
+  # plain group field, so it stays a bare local binding.
   forgejoBackend = knobs.forgejoBackend or false;
 
   # Drop a leading `#!...` line so a complete, standalone-runnable script can be
