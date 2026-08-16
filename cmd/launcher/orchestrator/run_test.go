@@ -773,6 +773,109 @@ func TestRunKeepsPriorPassSummaryPathWhenConfigOmitsIt(t *testing.T) {
 	}
 }
 
+// TestRunWithReviewPassRecordsPassSummaryPathIntoRunState verifies
+// runWithReviewPass -- the loop production actually runs once entrypoint.sh
+// sets cfg.reviewPromptFile (ADR 0035) -- records cfg.passSummaryPath into
+// the run-state artifact after a pass (issue #2549), the same way
+// TestRunRecordsPassSummaryPathIntoRunState already pins for the legacy
+// loop. Drives the full implement -> review(BLOCK) -> fix -> review(APPROVE)
+// -> land sequence via reviewPassFakeDriverBody, mirroring
+// TestRunWithReviewPassSequenceOnBlockThenApprove's cfg shape.
+func TestRunWithReviewPassRecordsPassSummaryPathIntoRunState(t *testing.T) {
+	dir := t.TempDir()
+	callLog := filepath.Join(dir, "calls.log")
+	writeFakeDriverExec(t, dir, callLog, reviewPassFakeDriverBody(callLog))
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	promptFile := filepath.Join(dir, "prompt.txt")
+	if err := os.WriteFile(promptFile, []byte("ORIGINAL PROMPT TEXT"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	reviewPromptFile := filepath.Join(dir, "review-prompt.txt")
+	if err := os.WriteFile(reviewPromptFile, []byte("REVIEW PROMPT TEXT"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stateFile := filepath.Join(dir, "run-state.json")
+
+	cfg := config{
+		promptFile:       promptFile,
+		reviewPromptFile: reviewPromptFile,
+		driverBin:        "claude",
+		issue:            "7",
+		logPath:          filepath.Join(dir, "stream.log"),
+		heartbeatLog:     filepath.Join(dir, "heartbeat.log"),
+		stateFile:        stateFile,
+		maxReviewRounds:  3,
+		maxSlices:        10,
+		passSummaryPath:  filepath.Join(dir, "pass-summary.md"),
+	}
+
+	if _, err := run(cfg, &bytes.Buffer{}); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	got, err := runstate.ReadRunState(stateFile)
+	if err != nil {
+		t.Fatalf("ReadRunState: %v", err)
+	}
+	if got.PassSummaryPath != cfg.passSummaryPath {
+		t.Errorf("PassSummaryPath = %q, want %q", got.PassSummaryPath, cfg.passSummaryPath)
+	}
+}
+
+// TestRunWithReviewPassKeepsPriorPassSummaryPathWhenConfigOmitsIt verifies
+// runWithReviewPass never clobbers a prior pass's recorded pass-summary path
+// with an empty string when cfg.passSummaryPath is left unset on a later
+// pass (issue #2549), mirroring
+// TestRunKeepsPriorPassSummaryPathWhenConfigOmitsIt for the legacy loop --
+// only a caller that actually supplies a new path updates the field.
+func TestRunWithReviewPassKeepsPriorPassSummaryPathWhenConfigOmitsIt(t *testing.T) {
+	dir := t.TempDir()
+	callLog := filepath.Join(dir, "calls.log")
+	writeFakeDriverExec(t, dir, callLog, reviewPassFakeDriverBody(callLog))
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	stateFile := filepath.Join(dir, "run-state.json")
+	prior := runstate.RunState{PassSummaryPath: "/tmp/pass-summary.md"}
+	if err := runstate.WriteRunState(stateFile, prior); err != nil {
+		t.Fatal(err)
+	}
+
+	promptFile := filepath.Join(dir, "prompt.txt")
+	if err := os.WriteFile(promptFile, []byte("ORIGINAL PROMPT TEXT"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	reviewPromptFile := filepath.Join(dir, "review-prompt.txt")
+	if err := os.WriteFile(reviewPromptFile, []byte("REVIEW PROMPT TEXT"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config{
+		promptFile:       promptFile,
+		reviewPromptFile: reviewPromptFile,
+		driverBin:        "claude",
+		issue:            "7",
+		logPath:          filepath.Join(dir, "stream.log"),
+		heartbeatLog:     filepath.Join(dir, "heartbeat.log"),
+		stateFile:        stateFile,
+		maxReviewRounds:  3,
+		maxSlices:        10,
+		// passSummaryPath intentionally left unset.
+	}
+
+	if _, err := run(cfg, &bytes.Buffer{}); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	got, err := runstate.ReadRunState(stateFile)
+	if err != nil {
+		t.Fatalf("ReadRunState: %v", err)
+	}
+	if got.PassSummaryPath != "/tmp/pass-summary.md" {
+		t.Errorf("PassSummaryPath = %q, want prior value %q preserved", got.PassSummaryPath, "/tmp/pass-summary.md")
+	}
+}
+
 // TestRunDevshellFlagsForwardedOnlyWhenSet verifies --devshell/--devshell-name
 // reach driver-exec's argv when cfg.devshell is set, and are omitted
 // entirely when it is not -- entrypoint.sh's own call only ever sets
@@ -1804,6 +1907,147 @@ exit 0
 		if !strings.Contains(string(seeded), want) {
 			t.Errorf("fix pass seeded prompt = %q, want it to contain %q", seeded, want)
 		}
+	}
+}
+
+// TestRunWithReviewPassSeedsFixPassWithPassSummaryPath verifies AC5 (issue
+// #2549): a fix pass seeded after a review pass's BLOCK carries a
+// "- Pass summary: <path>" line alongside the reviewer's own verdict/
+// findings, proving state.PassSummaryPath actually reaches a subsequent
+// pass's seeded prompt end to end through runWithReviewPass -- not just at
+// the seedPromptFromState unit level (TestSeedPromptFromStateIncludesPassSummaryPath).
+// Otherwise identical to TestRunWithReviewPassSeedsFixPassWithReviewFindings.
+func TestRunWithReviewPassSeedsFixPassWithPassSummaryPath(t *testing.T) {
+	dir := t.TempDir()
+	callLog := filepath.Join(dir, "calls.log")
+	body := fmt.Sprintf(`: > "$DRIVER_LOG_PATH"
+n=$(wc -l < "%s")
+case "$n" in
+  2) printf '%%s' '%s' >> "$DRIVER_LOG_PATH" ;;
+  3) printf '%%s' '%s' >> "$DRIVER_LOG_PATH" ;;
+esac
+exit 0
+`, callLog,
+		streamJSONOutcomeLine("VERDICT: BLOCK\\n\\n## Blocking\\n- run.go:1 -- bug"),
+		streamJSONOutcomeLine("SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=done nonce=abc"))
+	writeFakeDriverExec(t, dir, callLog, body)
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	promptFile := filepath.Join(dir, "prompt.txt")
+	if err := os.WriteFile(promptFile, []byte("ORIGINAL PROMPT TEXT"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	reviewPromptFile := filepath.Join(dir, "review-prompt.txt")
+	if err := os.WriteFile(reviewPromptFile, []byte("REVIEW PROMPT TEXT"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config{
+		promptFile:       promptFile,
+		reviewPromptFile: reviewPromptFile,
+		driverBin:        "claude",
+		issue:            "7",
+		logPath:          filepath.Join(dir, "stream.log"),
+		heartbeatLog:     filepath.Join(dir, "heartbeat.log"),
+		stateFile:        filepath.Join(dir, "run-state.json"),
+		maxReviewRounds:  3,
+		maxSlices:        10,
+		passSummaryPath:  filepath.Join(dir, "pass-summary.md"),
+	}
+
+	var stdout bytes.Buffer
+	if _, err := run(cfg, &stdout); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	calls, err := os.ReadFile(callLog)
+	if err != nil {
+		t.Fatalf("read callLog: %v", err)
+	}
+	lines := strings.Split(strings.TrimRight(string(calls), "\n"), "\n")
+	if len(lines) != 3 {
+		t.Fatalf("driver-exec invocation count = %d, want 3 (log: %q)", len(lines), calls)
+	}
+
+	fixPromptFile := flagValue(lines[2], "--prompt-file")
+	seeded, err := os.ReadFile(fixPromptFile)
+	if err != nil {
+		t.Fatalf("read seeded fix prompt: %v", err)
+	}
+	for _, want := range []string{"Last reviewer verdict: BLOCK", "- Pass summary: " + cfg.passSummaryPath} {
+		if !strings.Contains(string(seeded), want) {
+			t.Errorf("fix pass seeded prompt = %q, want it to contain %q", seeded, want)
+		}
+	}
+}
+
+// TestRunWithReviewPassPromptNeverSeededWithPassSummary verifies the review
+// pass's own driver-exec invocation never carries a pass-summary reference
+// (issue #2549 AC4, the "anti-anchoring firewall": the review pass must
+// re-derive its verdict fresh from the diff rather than anchoring on the
+// implementor's own self-report) even when state.PassSummaryPath is
+// actively set at the time the review pass runs. Pins two things about
+// each review pass in the full implement -> review(BLOCK) -> fix ->
+// review(APPROVE) -> land sequence: its --prompt-file argv is
+// cfg.reviewPromptFile exactly (proving it never went through
+// seedAndInvokePass at all), and cfg.reviewPromptFile's own on-disk content
+// is never mutated to carry "Pass summary:" either.
+func TestRunWithReviewPassPromptNeverSeededWithPassSummary(t *testing.T) {
+	dir := t.TempDir()
+	callLog := filepath.Join(dir, "calls.log")
+	writeFakeDriverExec(t, dir, callLog, reviewPassFakeDriverBody(callLog))
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	promptFile := filepath.Join(dir, "prompt.txt")
+	if err := os.WriteFile(promptFile, []byte("ORIGINAL PROMPT TEXT"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	reviewPromptFile := filepath.Join(dir, "review-prompt.txt")
+	if err := os.WriteFile(reviewPromptFile, []byte("REVIEW PROMPT TEXT"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config{
+		promptFile:       promptFile,
+		reviewPromptFile: reviewPromptFile,
+		driverBin:        "claude",
+		issue:            "7",
+		logPath:          filepath.Join(dir, "stream.log"),
+		heartbeatLog:     filepath.Join(dir, "heartbeat.log"),
+		stateFile:        filepath.Join(dir, "run-state.json"),
+		maxReviewRounds:  3,
+		maxSlices:        10,
+		passSummaryPath:  filepath.Join(dir, "pass-summary.md"),
+	}
+
+	var stdout bytes.Buffer
+	if _, err := run(cfg, &stdout); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	calls, err := os.ReadFile(callLog)
+	if err != nil {
+		t.Fatalf("read callLog: %v", err)
+	}
+	lines := strings.Split(strings.TrimRight(string(calls), "\n"), "\n")
+	if len(lines) != 5 {
+		t.Fatalf("driver-exec invocation count = %d, want 5 (log: %q)", len(lines), calls)
+	}
+
+	// Pass 2 and pass 4 are the two review passes in this sequence
+	// (reviewPassFakeDriverBody's BLOCK-then-APPROVE shape).
+	for _, i := range []int{1, 3} {
+		if got := flagValue(lines[i], "--prompt-file"); got != reviewPromptFile {
+			t.Errorf("review pass (line %d) --prompt-file = %q, want cfg.reviewPromptFile %q exactly, unseeded", i+1, got, reviewPromptFile)
+		}
+	}
+
+	onDisk, err := os.ReadFile(reviewPromptFile)
+	if err != nil {
+		t.Fatalf("read reviewPromptFile: %v", err)
+	}
+	if strings.Contains(string(onDisk), "Pass summary:") {
+		t.Errorf("cfg.reviewPromptFile on-disk content = %q, want no \"Pass summary:\" reference (anti-anchoring firewall)", onDisk)
 	}
 }
 
