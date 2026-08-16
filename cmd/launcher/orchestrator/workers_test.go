@@ -244,6 +244,30 @@ func TestRunBoundedWithFewerTasksThanCapRunsThemAll(t *testing.T) {
 	}
 }
 
+// TestRunBoundedZeroMaxParallelRunsSeriallyWithoutDeadlock verifies
+// runBounded(0, tasks) still runs every task exactly once rather than
+// deadlocking forever (issue #2495 review finding): a zero-capacity
+// semaphore channel's send blocks permanently, since the only goroutine that
+// would ever receive from it is spawned after the blocked send. This test
+// hangs the whole test binary on a regression, so it can't assert a timeout
+// itself -- `go test` (with its own default per-package timeout) is what
+// actually catches a reintroduced deadlock.
+func TestRunBoundedZeroMaxParallelRunsSeriallyWithoutDeadlock(t *testing.T) {
+	const numTasks = 3
+
+	var calls int32
+	tasks := make([]func(), numTasks)
+	for i := 0; i < numTasks; i++ {
+		tasks[i] = func() { atomic.AddInt32(&calls, 1) }
+	}
+
+	runBounded(0, tasks)
+
+	if got := atomic.LoadInt32(&calls); got != numTasks {
+		t.Errorf("calls = %d, want %d (every task invoked exactly once)", got, numTasks)
+	}
+}
+
 // TestLaunchWorkersZeroMaxParallelFallsBackToDefault verifies
 // WorkerOptions.MaxParallel <= 0 falls back to defaultMaxParallelWorkers
 // (issue #2495) rather than, say, treating zero as "no cap" or blocking
