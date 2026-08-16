@@ -172,8 +172,9 @@ forge.repoSlug = "owner/repo";
 Three paths to discover which options exist and what they do:
 
 1. **Generated reference** — [`docs/flake-options.md`](flake-options.md) lists
-   every flake option grouped by domain, with its env var, default, and
-   description. It is generated from `lib/env-schema.nix` and drift-guarded
+   every schema-generated flake option grouped by domain, with its env var,
+   default, and description; structural options are absent from it (see
+   above). It is generated from `lib/env-schema.nix` and drift-guarded
    by `nix flake check`; it is always in sync with the schema.
 
 2. **LSP autocomplete** — `nixd` and `nil` read the module option declarations
@@ -182,9 +183,12 @@ Three paths to discover which options exist and what they do:
    documentation for every flake option inline.
 
 3. **CLI reference** — `spindrift --help --all` (or `man spindrift`) prints the
-   full flag table grouped by domain.  Every flake option maps 1:1 to a
-   `--<flag>` in the same domain heading, so the CLI reference doubles as a
-   guide to what is settable in the flake.
+   full flag table grouped by domain.  Every schema-generated flake option
+   maps 1:1 to a `--<flag>` in the same domain heading, so the CLI reference
+   doubles as a guide to what is settable in the flake for schema-generated
+   knobs. Structural options (`roster`, `skills`, `driver`, ...) are flake-only
+   and have no CLI flag counterpart; conversely some flags (e.g.
+   `--skills-dir`) have no flake option at all.
 
 `inProgressLabel`/`failedLabel`/`completeLabel` drive the
 [label lifecycle](#how-a-run-works); `mergeMode` is the post-green
