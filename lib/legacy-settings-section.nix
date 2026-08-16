@@ -47,6 +47,7 @@
   maxRebaseAttempts = "selfHealing";
   memoryLimit = "sandbox";
   mergeGuardPaths = "branches";
+  mergeMethod = "branches";
   mergeMode = "branches";
   mergePollInterval = "branches";
   mergePollTimeout = "branches";
