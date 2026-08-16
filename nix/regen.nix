@@ -74,7 +74,7 @@ let
   defaultModelFixtureBash = renderers.renderDefaultModelFixtureBash defaultModelFixture;
   defaultModelFixtureGo = renderers.renderDefaultModelFixtureGo defaultModelFixture;
   defaultModelsDoc = renderers.renderDefaultModelsDoc defaultModelFixture;
-  settingsExampleModelsDoc = renderers.renderSettingsExampleModelsDoc defaultModelFixture;
+  settingsExampleModelsDoc = renderers.renderSettingsExampleModelsDoc defaultModelFixture schema;
   settingsExampleLabelsDoc = renderers.renderSettingsExampleLabelsDoc schema;
   settingsExampleConfigDoc = renderers.renderSettingsExampleConfigDoc schema;
   bakedSkills = import ../lib/baked-skills.nix;

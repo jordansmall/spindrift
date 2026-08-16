@@ -559,6 +559,68 @@ let
       endMarker = "# END GENERATED SETTINGS EXAMPLE CONFIG";
       inherit docSrc generated;
     };
+
+  # Asserts `generated` (one of renderSettingsExampleModelsDoc/LabelsDoc/
+  # ConfigDoc's output) contains, for every schema `key` in `keys`, a line
+  # whose left-hand path is exactly resolveNixPath's output for that key --
+  # else throws naming the offending key(s). Re-derives the expected path
+  # independently via resolveNixPath rather than re-invoking the renderer,
+  # so this actually catches a renderer that reverted to a hand-typed path
+  # literal (issue #2557 review finding), not just a renderer disagreeing
+  # with itself. Shared by settings-example-paths-resolve-nix-path and its
+  # -guard sibling below, so the check and its regression guard exercise
+  # this exact assertion.
+  assertRendererPathsResolveOk =
+    { generated, keys }:
+    let
+      inherit (pkgs.lib)
+        concatStringsSep
+        filter
+        splitString
+        trim
+        ;
+      # Each non-empty line's exact left-hand path, i.e. everything before
+      # its first "=" with the column-alignment padding trimmed off (the
+      # renderers right-pad the path to the block's widest path before
+      # " = ", so a naive substring/hasInfix check would also accept a
+      # wrong-but-prefix path, e.g. "git.merge" matching inside
+      # "git.merge.policy").
+      lines = filter (l: l != "") (splitString "\n" generated);
+      linePath = line: trim (builtins.head (splitString "=" line));
+      actualPaths = map linePath lines;
+      missing = filter (key: !(builtins.elem (resolveNixPath key schema.${key}) actualPaths)) keys;
+    in
+    if missing == [ ] then
+      true
+    else
+      throw "assertRendererPathsResolveOk: generated output is missing the resolveNixPath-derived path for env-schema key(s): ${concatStringsSep ", " missing}";
+
+  # The env-schema keys each of the three settings-example renderers emits
+  # (lib/renderers.nix renderSettingsExampleModelsDoc/LabelsDoc/ConfigDoc),
+  # shared between settings-example-paths-resolve-nix-path and its -guard
+  # sibling below.
+  settingsExampleModelsKeys = [
+    "model"
+    "scoutModel"
+    "reviewModel"
+    "filerModel"
+  ];
+  settingsExampleLabelsKeys = [
+    "label"
+    "inProgressLabel"
+    "failedLabel"
+    "completeLabel"
+  ];
+  settingsExampleConfigKeys = [
+    "baseBranch"
+    "branchPrefix"
+    "mergeMode"
+    "mergeGuardPaths"
+    "mergePollInterval"
+    "mergePollTimeout"
+    "maxParallel"
+    "maxJobs"
+  ];
 in
 {
   # cmd/launcher/internal/driver/drivernames_gen.go must match the key list
@@ -2073,7 +2135,7 @@ in
   # from each other (issue #402). Mirrors default-models-doc above.
   settings-example-models-doc =
     let
-      generated = renderers.renderSettingsExampleModelsDoc defaultModelFixture;
+      generated = renderers.renderSettingsExampleModelsDoc defaultModelFixture schema;
       docSrc = builtins.readFile ../../docs/reference.md;
     in
     assert (assertSettingsExampleModelsDocOk { inherit docSrc generated; }) == docSrc;
@@ -2089,7 +2151,7 @@ in
   settings-example-models-doc-guard =
     let
       inherit (pkgs.lib) assertMsg;
-      generated = renderers.renderSettingsExampleModelsDoc defaultModelFixture;
+      generated = renderers.renderSettingsExampleModelsDoc defaultModelFixture schema;
       beginMarker = "# BEGIN GENERATED SETTINGS EXAMPLE MODELS -- nix run .#regen -- DO NOT EDIT\n";
       endMarker = "# END GENERATED SETTINGS EXAMPLE MODELS";
       driftedBlock = ''
@@ -2209,6 +2271,63 @@ in
     assert assertMsg (!result.success)
       "settings-example-config-doc-guard: expected assertSettingsExampleConfigDocOk to reject a synthetic doc whose branches/concurrency sub-block has drifted, but it evaluated successfully";
     pkgs.runCommand "settings-example-config-doc-guard" { } "touch $out";
+
+  # Regression guard for issue #2557's review finding: renderSettingsExampleModelsDoc/
+  # LabelsDoc/ConfigDoc (lib/renderers.nix) must derive every emitted line's
+  # left-hand domain path via resolveNixPath (lib/nixpath.nix) from the
+  # knob's own lib/env-schema.nix entry, never a hand-typed path literal --
+  # otherwise a `group`/`nixSubPath` rename could leave these three
+  # renderers emitting a stale path while settings-example-*-doc above
+  # stays green (it only compares the renderer's own output against the
+  # committed doc, so it can't catch the renderer itself drifting from
+  # resolveNixPath). assertRendererPathsResolveOk (defined above, alongside
+  # the other assert*Ok helpers) re-derives each knob's expected
+  # "<path> = " line prefix independently via resolveNixPath (not by
+  # calling the renderer a second time, which would only prove the
+  # renderer agrees with itself) and asserts it is a literal substring of
+  # the renderer's generated output.
+  settings-example-paths-resolve-nix-path =
+    let
+      modelsOk = assertRendererPathsResolveOk {
+        generated = renderers.renderSettingsExampleModelsDoc defaultModelFixture schema;
+        keys = settingsExampleModelsKeys;
+      };
+      labelsOk = assertRendererPathsResolveOk {
+        generated = renderers.renderSettingsExampleLabelsDoc schema;
+        keys = settingsExampleLabelsKeys;
+      };
+      configOk = assertRendererPathsResolveOk {
+        generated = renderers.renderSettingsExampleConfigDoc schema;
+        keys = settingsExampleConfigKeys;
+      };
+    in
+    assert modelsOk && labelsOk && configOk;
+    pkgs.runCommand "settings-example-paths-resolve-nix-path" { } "touch $out";
+
+  # Regression guard for settings-example-paths-resolve-nix-path above:
+  # proves assertRendererPathsResolveOk actually rejects a renderer output
+  # whose path has reverted to a hand-typed (wrong/stale) literal, instead
+  # of passing vacuously (mirrors marker-consistency-guard's tryEval
+  # pattern). Runs it against a synthetic "generated" string that mimics
+  # renderSettingsExampleModelsDoc's shape but with the first line's path
+  # replaced by a literal that does not match resolveNixPath's output.
+  settings-example-paths-resolve-nix-path-guard =
+    let
+      inherit (pkgs.lib) assertMsg;
+      driftedGenerated = ''
+        agents.models.WRONG_HAND_TYPED_PATH = "x";
+        agents.models.scout = "x";
+        agents.models.review = "x";
+        agents.models.filer = "x";
+      '';
+      result = builtins.tryEval (assertRendererPathsResolveOk {
+        generated = driftedGenerated;
+        keys = settingsExampleModelsKeys;
+      });
+    in
+    assert assertMsg (!result.success)
+      "settings-example-paths-resolve-nix-path-guard: expected assertRendererPathsResolveOk to reject a synthetic generated string whose path has reverted to a hand-typed literal, but it evaluated successfully";
+    pkgs.runCommand "settings-example-paths-resolve-nix-path-guard" { } "touch $out";
 
   # docs/reference.md's Subagent roster section's dogfood paragraph restates
   # lib/default-model-fixture.nix's schemaDefaults scout/reviewer/worker
