@@ -853,19 +853,22 @@ in
         touch $out
       '';
 
-  # The issue-read step (issue #1691, ADR 0032): the four local-tracker
-  # fragments must never invoke `gh issue view` -- for a numeric slug it can
-  # silently fetch an unrelated real issue on the Target repo, the exact
-  # footgun the read-only /issues mount exists to close -- and must reference
-  # /issues instead. Fragment content itself is otherwise unchecked, so a
-  # future edit reintroducing `gh issue view` into a local variant would
-  # otherwise go uncaught. Same static, eval-only grep shape as the
-  # pr-body-reference-* checks above.
+  # The issue-read step (issue #1691, ADR 0032; narrowed to just the two
+  # still-live variants by issue #2547 -- see
+  # issue-read-and-review-fragments-use-snapshot-file below for the
+  # issue-read/review-issue-read pair this check used to also cover):
+  # research-issue-read-local.md and scout-issue-read-local.md must never
+  # invoke `gh issue view` -- for a numeric slug it can silently fetch an
+  # unrelated real issue on the Target repo, the exact footgun the read-only
+  # /issues mount exists to close -- and must reference /issues instead.
+  # Fragment content itself is otherwise unchecked, so a future edit
+  # reintroducing `gh issue view` into a local variant would otherwise go
+  # uncaught. Same static, eval-only grep shape as the pr-body-reference-*
+  # checks above.
   issue-read-local-fragments-never-invoke-gh-issue-view =
     pkgs.runCommand "issue-read-local-fragments-never-invoke-gh-issue-view" { }
       ''
-        for f in issue-read-local.md research-issue-read-local.md \
-          scout-issue-read-local.md review-issue-read-local.md; do
+        for f in research-issue-read-local.md scout-issue-read-local.md; do
           n=$(grep -c 'gh issue view' ${../../templates/default/prompts/fragments}/"$f" || true)
           [ "$n" -eq 0 ] || {
             echo "$f: expected no 'gh issue view', found $n occurrence(s)" >&2
@@ -876,26 +879,26 @@ in
         touch $out
       '';
 
-  # The github-side counterpart: each of the four github variants keeps
+  # The github-side counterpart (narrowed by issue #2547, see above):
+  # research-issue-read-github.md and scout-issue-read-github.md keep
   # `gh issue view ''${ISSUE_NUMBER}` unchanged, exactly as it read before
   # issue #1691's branch existed.
   issue-read-github-fragments-keep-gh-issue-view-unchanged =
     pkgs.runCommand "issue-read-github-fragments-keep-gh-issue-view-unchanged" { }
       ''
-        for f in issue-read-github.md research-issue-read-github.md \
-          scout-issue-read-github.md review-issue-read-github.md; do
+        for f in research-issue-read-github.md scout-issue-read-github.md; do
           grep -q 'gh issue view ''${ISSUE_NUMBER}' ${../../templates/default/prompts/fragments}/"$f"
         done
         touch $out
       '';
 
-  # The forgejo-side counterpart (issue #1963): each of the four forgejo
-  # variants speaks fj issue view, never gh issue view.
+  # The forgejo-side counterpart (issue #1963; narrowed by issue #2547, see
+  # above): research-issue-read-forgejo.md and scout-issue-read-forgejo.md
+  # speak fj issue view, never gh issue view.
   issue-read-forgejo-fragments-speak-fj-not-gh =
     pkgs.runCommand "issue-read-forgejo-fragments-speak-fj-not-gh" { }
       ''
-        for f in issue-read-forgejo.md research-issue-read-forgejo.md \
-          scout-issue-read-forgejo.md review-issue-read-forgejo.md; do
+        for f in research-issue-read-forgejo.md scout-issue-read-forgejo.md; do
           grep -q 'fj issue view ''${ISSUE_NUMBER}' ${../../templates/default/prompts/fragments}/"$f"
           n=$(grep -c 'gh issue view' ${../../templates/default/prompts/fragments}/"$f" || true)
           [ "$n" -eq 0 ] || {
@@ -906,21 +909,54 @@ in
         touch $out
       '';
 
-  # Issue #1990: unbounded `--comments` pulls a meta-issue's entire comment
-  # history into the agent's context on every turn. Each of the four github
-  # variants must cap intake to the last 10 comments (`comments[-10:]`)
-  # instead of the bare `--comments` flag.
+  # Issue #1990 (narrowed by issue #2547, see above): unbounded `--comments`
+  # pulls a meta-issue's entire comment history into the agent's context on
+  # every turn. research-issue-read-github.md and scout-issue-read-github.md
+  # must cap intake to the last 10 comments (`comments[-10:]`) instead of the
+  # bare `--comments` flag.
   issue-read-github-fragments-cap-comment-intake =
     pkgs.runCommand "issue-read-github-fragments-cap-comment-intake" { }
       ''
-        for f in issue-read-github.md research-issue-read-github.md \
-          scout-issue-read-github.md review-issue-read-github.md; do
+        for f in research-issue-read-github.md scout-issue-read-github.md; do
           grep -q 'comments\[-10:\]' ${../../templates/default/prompts/fragments}/"$f" || {
             echo "$f: expected a bounded comments[-10:] read" >&2
             exit 1
           }
           ! grep -qE -- '--comments\b' ${../../templates/default/prompts/fragments}/"$f" || {
             echo "$f: still uses the unbounded --comments flag" >&2
+            exit 1
+          }
+        done
+        touch $out
+      '';
+
+  # Issue #2547: issue-read.md and review-issue-read.md no longer do a live,
+  # per-tracker read at all -- the host writes one frozen issue-read
+  # snapshot at box start and mounts it read-only at /issue-snapshot.md, so
+  # all three tracker variants of each of these two fragment kinds converge
+  # on identical content. research-issue-read-*.md and scout-issue-read-*.md
+  # are untouched by #2547 and keep their own per-tracker live read, pinned
+  # by the four checks above (each narrowed to just those two remaining live
+  # variants).
+  issue-read-and-review-fragments-use-snapshot-file =
+    pkgs.runCommand "issue-read-and-review-fragments-use-snapshot-file" { }
+      ''
+        for f in issue-read-github.md issue-read-local.md issue-read-forgejo.md \
+          review-issue-read-github.md review-issue-read-local.md review-issue-read-forgejo.md; do
+          grep -qF '/issue-snapshot.md' ${../../templates/default/prompts/fragments}/"$f" || {
+            echo "$f: expected a /issue-snapshot.md read" >&2
+            exit 1
+          }
+          ! grep -q 'gh issue view' ${../../templates/default/prompts/fragments}/"$f" || {
+            echo "$f: still invokes gh issue view" >&2
+            exit 1
+          }
+          ! grep -q 'fj issue view' ${../../templates/default/prompts/fragments}/"$f" || {
+            echo "$f: still invokes fj issue view" >&2
+            exit 1
+          }
+          ! grep -q '/issues/''${ISSUE_NUMBER}' ${../../templates/default/prompts/fragments}/"$f" || {
+            echo "$f: still reads the local /issues mount directly" >&2
             exit 1
           }
         done
