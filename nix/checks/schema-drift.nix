@@ -1612,15 +1612,15 @@ in
         touch $out
       '';
 
-  # cmd/launcher/defaultmodels_gen.go must match the content generated from
-  # lib/default-model-fixture.nix by lib/renderers.nix
+  # cmd/launcher/defaultmodels_gen_test.go must match the content generated
+  # from lib/default-model-fixture.nix by lib/renderers.nix
   # renderDefaultModelFixtureGo, gofmt-normalized the same way `nix run
   # .#regen` normalizes it. Fails when the fixture is edited but the
   # committed generated file is not regenerated. Shares its renderer with
   # `nix run .#regen` via lib/renderers.nix (issue #2514, slice 2 of 3).
   default-models-gen-go =
     let
-      raw = pkgs.writeText "defaultmodels_gen.go.raw" (
+      raw = pkgs.writeText "defaultmodels_gen_test.go.raw" (
         renderers.renderDefaultModelFixtureGo defaultModelFixture
       );
     in
@@ -1628,12 +1628,12 @@ in
       {
         nativeBuildInputs = [ pkgs.go ];
         inherit raw;
-        committed = ../../cmd/launcher/defaultmodels_gen.go;
+        committed = ../../cmd/launcher/defaultmodels_gen_test.go;
       }
       ''
         gofmt "$raw" > generated.go
         diff generated.go "$committed" \
-          || { echo "cmd/launcher/defaultmodels_gen.go is out of sync with lib/default-model-fixture.nix — regenerate it with \`nix run .#regen\`" >&2; exit 1; }
+          || { echo "cmd/launcher/defaultmodels_gen_test.go is out of sync with lib/default-model-fixture.nix — regenerate it with \`nix run .#regen\`" >&2; exit 1; }
         touch $out
       '';
 

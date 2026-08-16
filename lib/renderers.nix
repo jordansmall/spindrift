@@ -288,7 +288,7 @@ rec {
     + "export DEFAULT_WORKER_MODEL=\"${schemaDefaults.workerModel}\"\n"
     + "export DOGFOOD_FILER_MODEL=\"${dogfoodPins.filer}\"\n";
 
-  # cmd/launcher/defaultmodels_gen.go content: the regen-rendered Go form of
+  # cmd/launcher/defaultmodels_gen_test.go content: the regen-rendered Go form of
   # lib/default-model-fixture.nix, keyed by the schema's own env-var names
   # (lib/env-schema.nix's model/scoutModel/reviewModel/filerModel/workerModel
   # entries' `env` fields) so a launcher test asserts against this fixture

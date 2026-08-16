@@ -14,7 +14,7 @@ import (
 
 // TestModelDefault_IsSonnet5 asserts that the main/coordinator session model
 // default matches expectedDefaultModels["MODEL"] (cmd/launcher/
-// defaultmodels_gen.go, regen-rendered from lib/default-model-fixture.nix),
+// defaultmodels_gen_test.go, regen-rendered from lib/default-model-fixture.nix),
 // not opus-4-8 or an older release (issue #2240).
 func TestModelDefault_IsSonnet5(t *testing.T) {
 	want := expectedDefaultModels["MODEL"]
@@ -30,7 +30,7 @@ func TestModelDefault_IsSonnet5(t *testing.T) {
 }
 
 // TestSchemaFlags_DefaultModelsMatchFixture asserts every
-// expectedDefaultModels entry (cmd/launcher/defaultmodels_gen.go,
+// expectedDefaultModels entry (cmd/launcher/defaultmodels_gen_test.go,
 // regen-rendered from lib/default-model-fixture.nix's schemaDefaults) matches
 // its corresponding schemaFlags entry's default, not just MODEL -- closing
 // the dead-fixture-key gap flagged in the issue #2514 review (SCOUT_MODEL,
