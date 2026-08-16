@@ -12,14 +12,18 @@ setup() {
   export CODE_FORGE="local"
   export REPO_MOUNT_DIR="$REMOTE_ROOT/owner/repo.git"
   export OUTBOX_DIR="$BATS_TEST_TMPDIR/outbox"
-  # Mirrors what a real CODE_FORGE=local Box receives from the launcher
-  # (lib/backends/default.nix's "local" row has hostMediatedRemote=true) --
-  # the bundle-out gate at entrypoint.sh:1358 now keys on this forwarded
-  # signal instead of re-deriving it from CODE_FORGE by name.
-  export BOX_HOST_MEDIATED_REMOTE=1
 }
 
 @test "CODE_FORGE=local with real commits writes a seam bundle to the outbox" {
+  # Mirrors what a real CODE_FORGE=local Box receives from the launcher
+  # (lib/backends/default.nix's "local" row has hostMediatedRemote=true) --
+  # the bundle-out gate at entrypoint.sh:1358 now keys on this forwarded
+  # signal instead of re-deriving it from CODE_FORGE by name. Exported per
+  # CODE_FORGE=local test, not in setup(), so it never leaks into the
+  # CODE_FORGE=github tests below (issue #2527 review): those unset
+  # CODE_FORGE and need BOX_HOST_MEDIATED_REMOTE genuinely unset to exercise
+  # the gate's other disjunct, _is_readonly_outbox_relay.
+  export BOX_HOST_MEDIATED_REMOTE=1
   export FAKE_DRIVER_COMMIT=1
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
@@ -32,6 +36,7 @@ setup() {
   # ADR 0039 (issue #2252): bundle-out must run before the box exits, even
   # when the driver itself crashed non-zero -- a committed branch is real
   # work worth relaying regardless of why the driver's own process died.
+  export BOX_HOST_MEDIATED_REMOTE=1
   export FAKE_DRIVER_COMMIT=1
   export FAKE_DRIVER_CRASH_EXIT=17
   run bash "$ENTRYPOINT"
@@ -44,6 +49,7 @@ setup() {
 @test "CODE_FORGE=local with no commits after a ready claim appends a corrective blocked outcome" {
   # Default fake claude claims status=ready but (with no
   # FAKE_DRIVER_COMMIT) never commits anything on the branch.
+  export BOX_HOST_MEDIATED_REMOTE=1
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   [ ! -f "$OUTBOX_DIR/seam.bundle" ]
