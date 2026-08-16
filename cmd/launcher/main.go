@@ -863,11 +863,17 @@ func checkReadOnlyCapabilityGate(c config) error {
 		return nil
 	}
 	forgeRow, ok := backendByName(c.codeForge)
-	if !ok || !forgeRow.RelayCapable {
+	if !ok {
+		return fmt.Errorf("BOX_FORGE_AND_ISSUE_ACCESS=read-only: CODE_FORGE=%q is not a registered backend", c.codeForge)
+	}
+	if !forgeRow.RelayCapable {
 		return fmt.Errorf("BOX_FORGE_AND_ISSUE_ACCESS=read-only: the selected CODE_FORGE=%q does not implement bundle-relay for the Box's finished branch hand-off", c.codeForge)
 	}
 	trackerRow, ok := backendByName(c.issueTracker)
-	if !ok || !trackerRow.HostPostingCapable {
+	if !ok {
+		return fmt.Errorf("BOX_FORGE_AND_ISSUE_ACCESS=read-only: ISSUE_TRACKER=%q is not a registered backend", c.issueTracker)
+	}
+	if !trackerRow.HostPostingCapable {
 		return fmt.Errorf("BOX_FORGE_AND_ISSUE_ACCESS=read-only: the selected ISSUE_TRACKER=%q does not implement host-posted comments and issue-filing", c.issueTracker)
 	}
 	return nil

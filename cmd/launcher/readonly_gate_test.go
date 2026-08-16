@@ -30,12 +30,13 @@ func TestReadOnlyCapabilityGate_ReadWriteIsNoOp(t *testing.T) {
 // at all.
 func TestReadOnlyCapabilityGate_Table(t *testing.T) {
 	cases := []struct {
-		name         string
-		access       string
-		codeForge    string
-		issueTracker string
-		wantErr      bool
-		wantSubstrs  []string
+		name           string
+		access         string
+		codeForge      string
+		issueTracker   string
+		wantErr        bool
+		wantSubstrs    []string
+		wantNotSubstrs []string
 	}{
 		{
 			name:         "read-only github/github passes",
@@ -104,6 +105,47 @@ func TestReadOnlyCapabilityGate_Table(t *testing.T) {
 				`the selected CODE_FORGE="git"`,
 			},
 		},
+		{
+			// An unregistered CODE_FORGE name is a lookup miss, not a
+			// capability-incapable registered backend -- Validate() should
+			// already reject this earlier, but this gate is a
+			// defense-in-depth backstop and must not misattribute the miss
+			// to "does not implement bundle-relay" (a claim that presumes a
+			// registered row to check a bit on).
+			name:         "read-only unregistered CODE_FORGE fails naming it unregistered, not capability-incapable",
+			access:       "read-only",
+			codeForge:    "bogus-forge",
+			issueTracker: "github",
+			wantErr:      true,
+			wantSubstrs: []string{
+				"BOX_FORGE_AND_ISSUE_ACCESS",
+				`CODE_FORGE="bogus-forge"`,
+				"not a registered",
+			},
+			wantNotSubstrs: []string{
+				"does not implement",
+				"bundle-relay",
+			},
+		},
+		{
+			// Same, on the tracker axis: an unregistered ISSUE_TRACKER name
+			// must not be misattributed as "does not implement host-posted
+			// comments and issue-filing" either.
+			name:         "read-only unregistered ISSUE_TRACKER fails naming it unregistered, not capability-incapable",
+			access:       "read-only",
+			codeForge:    "github",
+			issueTracker: "bogus-tracker",
+			wantErr:      true,
+			wantSubstrs: []string{
+				"BOX_FORGE_AND_ISSUE_ACCESS",
+				`ISSUE_TRACKER="bogus-tracker"`,
+				"not a registered",
+			},
+			wantNotSubstrs: []string{
+				"does not implement",
+				"issue-filing",
+			},
+		},
 	}
 
 	for _, tc := range cases {
@@ -121,6 +163,11 @@ func TestReadOnlyCapabilityGate_Table(t *testing.T) {
 				for _, s := range tc.wantSubstrs {
 					if !strings.Contains(err.Error(), s) {
 						t.Errorf("error %q should contain %q", err.Error(), s)
+					}
+				}
+				for _, s := range tc.wantNotSubstrs {
+					if strings.Contains(err.Error(), s) {
+						t.Errorf("error %q should not contain %q", err.Error(), s)
 					}
 				}
 				return
