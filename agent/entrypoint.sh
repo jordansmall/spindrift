@@ -1359,7 +1359,7 @@ main() {
   # $BRANCH worth relaying, and bundleout.Run is a safe no-op when there is
   # nothing to bundle.
   if ! _is_research_kind \
-    && { [ "${CODE_FORGE:-github}" = "local" ] \
+    && { [ -n "${BOX_HOST_MEDIATED_REMOTE:-}" ] \
       || _is_readonly_github; }; then
     driver-exec bundle-out \
       --repo "$WORK_DIR" \
