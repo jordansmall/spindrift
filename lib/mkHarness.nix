@@ -464,28 +464,36 @@ let
     else
       map (e: if e.name == "reviewer" then e // { effort = reviewEffort; } else e) resolvedRoster;
 
-  # Roster/review-loop bools derived from finalRoster/mergedDefaults,
-  # threaded into the Launcher input document's `run` artifacts
-  # (preambles.runArtifacts) as FILER_ENABLED / WORKER_PROVISIONED /
-  # REVIEW_LOOP_INLINE / REVIEW_LOOP_ORCHESTRATOR (issue #2533); the Go side
-  # reads them via docArtifact (cmd/launcher/main.go's dispatchConfig)
-  # instead of re-deriving roster membership/orchestration mode itself. The
-  # `&& (e.model or "") != ""` filter mirrors the drivers' own roster
-  # filter exactly (lib/drivers/claude.nix's agentsJsonTemplate,
-  # lib/drivers/opencode.nix's agentFilesTemplate, both "#392 semantics"):
-  # a roster entry with an empty model is dropped from the rendered
-  # --agents JSON / agent files entirely, so a name-only membership check
-  # here would disagree with what the driver actually provisions.
-  filerEnabled = lib.any (e: e.name == "filer" && (e.model or "") != "") finalRoster;
-  workerProvisioned = lib.any (e: e.name == "worker" && (e.model or "") != "") finalRoster;
-  reviewLoopInline = !mergedDefaults.orchestratorEnabled;
-  reviewLoopOrchestrator = mergedDefaults.orchestratorEnabled;
-
   # --agents JSON, rendered by the selected Driver (ADR 0009) from the
   # resolved roster above, so a future Driver with a different agent-config
   # shape (e.g. opencode's agents/*.md) can supply its own renderer without
   # touching mkHarness.
   agentsJsonTemplate = driverEntry.agentsJsonTemplate { roster = finalRoster; };
+
+  # Roster/review-loop bools derived from agentsJsonTemplate/mergedDefaults,
+  # threaded into the Launcher input document's `run` artifacts
+  # (preambles.runArtifacts) as FILER_ENABLED / WORKER_PROVISIONED /
+  # REVIEW_LOOP_INLINE / REVIEW_LOOP_ORCHESTRATOR (issue #2533); the Go side
+  # reads them via docArtifact (cmd/launcher/main.go's dispatchConfig)
+  # instead of re-deriving roster membership/orchestration mode itself.
+  # filerEnabled/workerProvisioned key off agentsJsonTemplate's own rendered
+  # output rather than finalRoster directly, reproducing exactly what the
+  # pre-#2533 in-box code computed (an in-box `jq -e 'has("filer"|"worker")'`
+  # reparse of the AGENTS_JSON_TEMPLATE env var, gates.go:42-47) instead of a
+  # roster-only presence check: lib/drivers/claude.nix's agentsJsonTemplate
+  # drops a roster entry with an empty model ("#392 semantics") and renders
+  # "" when nothing remains, while lib/drivers/opencode.nix's
+  # agentsJsonTemplate always returns "" regardless of roster contents (it
+  # provisions subagents via on-disk agents/*.md files instead, rendered
+  # separately below as driverAgentFiles) -- a finalRoster-only check would
+  # silently flip WORKER_PROVISIONED true for opencode even though opencode's
+  # own --agents-equivalent mechanism never carries that key (issue #2533
+  # review).
+  agentsJsonAttrs = if agentsJsonTemplate == "" then { } else builtins.fromJSON agentsJsonTemplate;
+  filerEnabled = agentsJsonAttrs ? filer;
+  workerProvisioned = agentsJsonAttrs ? worker;
+  reviewLoopInline = !mergedDefaults.orchestratorEnabled;
+  reviewLoopOrchestrator = mergedDefaults.orchestratorEnabled;
 
   # On-disk subagent files (AC4), rendered by the selected Driver the same
   # way agentsJsonTemplate is above: a Driver with no on-disk agent-config
