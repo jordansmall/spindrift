@@ -62,6 +62,13 @@ type RunState struct {
 	// fix pass, so the coordinator can see what happened without reading any
 	// worker's own transcript.
 	WorkerFindings string `json:"worker_findings,omitempty"`
+	// FindingsLogPath is the path to the per-run findings log (issue #2552):
+	// every review round's own findings text, appended one "## Round N"
+	// section at a time, so a later pass can dedupe and file the union across
+	// every round instead of only the last one (state.ReviewFindings above
+	// still carries only the last round's, unchanged, for that field's
+	// existing consumers). Empty until the first review round appends to it.
+	FindingsLogPath string `json:"findings_log_path,omitempty"`
 }
 
 // ReadRunState reads and parses the run-state artifact at path. An empty
