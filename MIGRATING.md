@@ -100,10 +100,21 @@ Under `DRIVER=opencode` specifically, the review pass's effort now always
 falls back to the coordinator's own `--effort`: opencode's `agentsJsonTemplate`
 never renders a `reviewer` key, so there is no roster value for the Handoff
 to extract — the same fallback `REVIEW_MODEL` already has on that Driver.
+`perSystem.spindrift.agents.models.reviewEffort` has no effect under
+`DRIVER=opencode` for this reason.
+
+This is also a default-behavior change, not just a removed override: with
+`REVIEW_EFFORT` unset, the review pass previously fell back to the
+coordinator's own `--effort`; under `DRIVER=claude` it now runs at the
+roster reviewer's effort (`rosterDefaults.reviewer.effort`, `"high"` by
+default) instead. Every default-roster orchestrator Consumer whose
+coordinator runs below `high` sees its review pass cost rise accordingly
+unless it pins `perSystem.spindrift.agents.models.reviewEffort` (or the
+roster's `reviewer` entry) explicitly.
 
 | Removed capability | Replacement |
 |---|---|
-| Dispatch-time `REVIEW_EFFORT=...` / `--review-effort ...` override | `perSystem.spindrift.agents.models.reviewEffort` in your Consumer flake (image rebuild required) |
+| Dispatch-time `REVIEW_EFFORT=...` / `--review-effort ...` override | `perSystem.spindrift.agents.models.reviewEffort` in your Consumer flake under `DRIVER=claude` (image rebuild required); no effect under `DRIVER=opencode` |
 
 ## `nix run .#run` / `nix run .#build` (removed in v0.5.0)
 
