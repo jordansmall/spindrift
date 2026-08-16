@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/runstate"
+	"spindrift.dev/launcher/internal/usage"
 )
 
 // writeFakeDriverExec writes an executable shell script standing in for the
@@ -63,6 +64,29 @@ func streamJSONOutcomeLine(text string) string {
 // only ExtractUsage ever reads it.
 func streamJSONResultLine(inputTokens, outputTokens int, costUSD float64) string {
 	return fmt.Sprintf(`{"type":"result","total_cost_usd":%g,"usage":{"input_tokens":%d,"output_tokens":%d}}`+"\n", costUSD, inputTokens, outputTokens)
+}
+
+// TestPassUsageDegradesOnUnresolvableDriver verifies passUsage's own
+// driver.New error path (issue #2694 review finding): an unregistered
+// driver name degrades to the zero usage.Usage rather than panicking or
+// propagating an error the caller has no way to handle mid-loop.
+func TestPassUsageDegradesOnUnresolvableDriver(t *testing.T) {
+	got := passUsage(filepath.Join(t.TempDir(), "stream.log"), "not-a-real-driver")
+	if got != (usage.Usage{}) {
+		t.Errorf("passUsage() = %+v, want the zero value for an unresolvable driver name", got)
+	}
+}
+
+// TestPassUsageDegradesOnMissingLog verifies passUsage's own ExtractUsage
+// error/not-found path (issue #2694 review finding): a log path that was
+// never written -- an ordinary outcome for a pass cut short before
+// completion, not a misconfiguration -- degrades to the zero usage.Usage
+// silently, the same as an unresolvable driver name.
+func TestPassUsageDegradesOnMissingLog(t *testing.T) {
+	got := passUsage(filepath.Join(t.TempDir(), "never-written.log"), "claude")
+	if got != (usage.Usage{}) {
+		t.Errorf("passUsage() = %+v, want the zero value for a log that was never written", got)
+	}
 }
 
 // blockThenApproveFakeDriverBody returns a writeFakeDriverExec body scripting
