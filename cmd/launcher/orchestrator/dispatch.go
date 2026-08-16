@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"io"
-	"os"
 	"strings"
 
 	"spindrift.dev/launcher/internal/runstate"
@@ -29,31 +28,32 @@ func truncateRunes(s string, max int) string {
 }
 
 // dispatchManifestIfPresent scans cfg.logPath (the pass that just ran) for a
-// slice manifest unconditionally, even when cfg.workerPromptFile is unset --
-// the runtime analog of mkHarness.nix's eval-time
-// maxParallelWorkersCoherenceOk assert (issue #2495): cfg.workerPromptFile
-// is only ever empty on a pass that structurally cannot have asked for a
-// manifest (a fix-pass or review-only invocation, promptassembly/
-// assemble.go only renders worker-prompt.md on the fresh-work-dispatch
-// path), so scanning costs nothing on the routine case, but the rare case
-// where a manifest appears anyway (e.g. a rogue/hallucinated marker) gets an
-// attributed reason instead of a silent drop.
+// slice manifest, but only once cfg.workerPromptFile is confirmed set.
+// cfg.workerPromptFile is empty exactly when this pass was never configured
+// to dispatch anything of its own (a fix-pass or review-only invocation --
+// promptassembly/assemble.go only renders worker-prompt.md on the
+// fresh-work-dispatch path), so that case is handled first, uniformly, and
+// unconditionally: return false and leave state entirely untouched, without
+// ever scanning the log for a manifest. That covers a manifest appearing in
+// this pass's own log anyway -- e.g. a custom SPINDRIFT_PROMPT_DIR
+// fix-prompt.md that still carries the manifest-emitting step, a
+// legitimate, supported shape, not just a rogue/hallucinated marker -- the
+// same as no manifest appearing at all: there is nowhere to dispatch it
+// either way, and a static run-wide "worker dispatch disabled" pass must
+// never wipe out state.WorkerFindings a PRIOR pass (in this or an earlier
+// Box invocation) already set, which a later pass's own
+// seedPromptFromState still needs to seed (issue #2495 review finding: this
+// function previously scanned for and discarded such a manifest here,
+// unconditionally clearing state.WorkerFindings and destroying an earlier
+// pass's dispatch results). Runtime coherence checks for this knob belong
+// at orchestrator startup (issue #2495 AC3), not as mid-run handling in
+// this per-pass function.
 //
-// If no manifest is present, it clears state.WorkerFindings and returns
-// false -- a pass that dispatched nothing must not leave a stale findings
-// report from an earlier dispatch sitting in state for a later pass to seed
-// as though still fresh (issue #2059 review finding A). But when
-// cfg.workerPromptFile is empty AND no manifest is present -- the routine
-// case on a fix-pass/review-only run, which structurally never emits its own
-// manifest -- state is left untouched instead: a static run-wide "worker
-// dispatch disabled" pass must never wipe out state.WorkerFindings a PRIOR
-// pass (in this or an earlier Box invocation) already set, which a later
-// pass's own seedPromptFromState still needs to seed (issue #2495 review
-// finding: this branch previously cleared it unconditionally, silently
-// losing an earlier dispatch's results on every subsequent fix-pass write of
-// state to disk). Only a manifest that genuinely appears despite
-// cfg.workerPromptFile being empty clears state.WorkerFindings, via the
-// attributed-discard branch below.
+// Once cfg.workerPromptFile is confirmed set, the routine case is scanning
+// the log and finding no manifest: it clears state.WorkerFindings and
+// returns false -- a pass that dispatched nothing must not leave a stale
+// findings report from an earlier dispatch sitting in state for a later
+// pass to seed as though still fresh (issue #2059 review finding A).
 //
 // Otherwise, every slice already present in state.DoneSlices is filtered out
 // before
@@ -82,34 +82,30 @@ func truncateRunes(s string, max int) string {
 // the coordinator's only job on a manifest-emitting pass is to declare the
 // manifest and stop (issue #2059 AC1).
 func dispatchManifestIfPresent(cfg config, state *runstate.RunState, stdout io.Writer) bool {
+	if cfg.workerPromptFile == "" {
+		// This pass was never configured to dispatch anything of its own
+		// (a fix-pass or review-only invocation never renders
+		// worker-prompt.md -- promptassembly/assemble.go only renders it on
+		// a fresh-work-dispatch pass with FixPass == 0). Leave
+		// state.WorkerFindings untouched regardless of whether this pass's
+		// own log happens to carry a manifest marker anyway (e.g. a custom
+		// SPINDRIFT_PROMPT_DIR fix-prompt.md that still carries the
+		// manifest step is a legitimate shape, not just a rogue/
+		// hallucinated marker) -- an earlier pass's dispatch results must
+		// survive for a later pass's seedPromptFromState to still seed
+		// (issue #2495 review finding). Runtime coherence checks for this
+		// knob belong at orchestrator startup (AC3), not as mid-run
+		// handling here.
+		return false
+	}
 	manifest, ok := scanForManifest(cfg.logPath, cfg.driver)
 	if !ok {
-		if cfg.workerPromptFile == "" {
-			// The routine fix-pass/review-only case: this run was never
-			// configured to dispatch anything of its own, so this pass
-			// finding no manifest says nothing about whether an earlier
-			// pass's WorkerFindings are stale -- leave state untouched
-			// (issue #2495 review finding).
-			return false
-		}
 		// A pass that dispatches nothing must clear any WorkerFindings left
 		// over from an earlier dispatch, mirroring run.go's own
 		// unconditional per-pass state.ReviewFindings reassignment --
 		// otherwise a stale worker report would keep being seeded into
 		// every later pass's prompt as though it were still fresh (issue
 		// #2059 review finding A).
-		state.WorkerFindings = ""
-		return false
-	}
-	if cfg.workerPromptFile == "" {
-		// Genuinely runtime-decidable (issue #2495 AC3, review finding): only
-		// knowable once this pass's own log is scanned, unlike the
-		// eval-time-decidable "no worker provisioned" case
-		// maxParallelWorkersCoherenceOk already rejects at build time. A
-		// manifest reaching here despite no configured worker prompt file
-		// means MAX_PARALLEL_WORKERS has nothing to act on this pass -- log
-		// why instead of silently discarding it.
-		fmt.Fprintln(os.Stderr, "orchestrator: this pass emitted a slice manifest, but no -worker-prompt-file is configured for this run (e.g. a fix-pass or review-only invocation); MAX_PARALLEL_WORKERS has nothing to dispatch and the manifest is discarded")
 		state.WorkerFindings = ""
 		return false
 	}
