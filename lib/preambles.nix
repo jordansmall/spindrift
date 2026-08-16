@@ -116,6 +116,20 @@ rec {
       outboxRelayCapable,
       inBoxUnreachableTracker,
       fullyLocal,
+      # Eight facts resolved by lib/mkHarness.nix from mergedDefaults/
+      # finalRoster (issue #2533): the tracker/forge axis strings and the
+      # roster/review-loop bools a prior slice deleted from in-box Go
+      # (cmd/launcher/internal/promptassembly/gates_tracker.go and friends)
+      # so promptassembly's Env can read them via CLI flags fed from
+      # getenvArtifact instead of re-deriving them itself.
+      trackerAxisRead,
+      trackerAxisWrite,
+      trackerAxisFiler,
+      forgeBackend,
+      filerEnabled,
+      workerProvisioned,
+      reviewLoopInline,
+      reviewLoopOrchestrator,
     }:
     (
       if runnerKind == "bwrap" then
@@ -151,6 +165,14 @@ rec {
       OUTBOX_RELAY_CAPABLE = if outboxRelayCapable then "true" else "false";
       IN_BOX_UNREACHABLE_TRACKER = if inBoxUnreachableTracker then "true" else "false";
       FULLY_LOCAL = if fullyLocal then "true" else "false";
+      TRACKER_AXIS_READ = trackerAxisRead;
+      TRACKER_AXIS_WRITE = trackerAxisWrite;
+      TRACKER_AXIS_FILER = trackerAxisFiler;
+      FORGE_BACKEND = forgeBackend;
+      FILER_ENABLED = if filerEnabled then "true" else "false";
+      WORKER_PROVISIONED = if workerProvisioned then "true" else "false";
+      REVIEW_LOOP_INLINE = if reviewLoopInline then "true" else "false";
+      REVIEW_LOOP_ORCHESTRATOR = if reviewLoopOrchestrator then "true" else "false";
     };
 
   # The Launcher input document's `artifacts` section for the `build`
@@ -229,6 +251,14 @@ rec {
           outboxRelayCapable = false;
           inBoxUnreachableTracker = false;
           fullyLocal = false;
+          trackerAxisRead = "dummy";
+          trackerAxisWrite = "dummy";
+          trackerAxisFiler = "dummy";
+          forgeBackend = "dummy";
+          filerEnabled = false;
+          workerProvisioned = false;
+          reviewLoopInline = false;
+          reviewLoopOrchestrator = false;
         };
       dummyBuildArtifacts =
         runnerKind:
