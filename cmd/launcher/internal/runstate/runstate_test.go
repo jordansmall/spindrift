@@ -125,6 +125,30 @@ func TestRunStateRoundTripIncludesDispositionsPath(t *testing.T) {
 	}
 }
 
+// TestRunStateRoundTripIncludesDispositionsLogPath verifies
+// DispositionsLogPath (issue #2550: the per-run, append-only dispositions
+// log seedReviewPromptFromState reads, mirroring FindingsLogPath's own
+// convention) survives a WriteRunState/ReadRunState round trip like every
+// other field.
+func TestRunStateRoundTripIncludesDispositionsLogPath(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "run-state.json")
+	want := RunState{
+		LastVerdict:         "BLOCK",
+		DispositionsLogPath: "/tmp/dispositions-log.md",
+	}
+
+	if err := WriteRunState(path, want); err != nil {
+		t.Fatalf("WriteRunState: %v", err)
+	}
+	got, err := ReadRunState(path)
+	if err != nil {
+		t.Fatalf("ReadRunState: %v", err)
+	}
+	if got.DispositionsLogPath != want.DispositionsLogPath {
+		t.Errorf("DispositionsLogPath = %q, want %q", got.DispositionsLogPath, want.DispositionsLogPath)
+	}
+}
+
 // TestRunStateRoundTripIncludesUnlandedSlices verifies UnlandedSlices (issue
 // #2060 review finding: DoneSlices names whose branch integration ended in
 // conflict or failure) survives a WriteRunState/ReadRunState round trip like
@@ -326,6 +350,11 @@ func TestRunStateIsEmpty(t *testing.T) {
 	// governs the round-N review prompt DispositionsPath actually seeds.
 	if !(RunState{DispositionsPath: "/tmp/dispositions.md"}).IsEmpty() {
 		t.Error("IsEmpty() of a state with only DispositionsPath set = false, want true")
+	}
+	// DispositionsLogPath, same reasoning: only seedReviewPromptFromState
+	// reads it.
+	if !(RunState{DispositionsLogPath: "/tmp/dispositions-log.md"}).IsEmpty() {
+		t.Error("IsEmpty() of a state with only DispositionsLogPath set = false, want true")
 	}
 	nonEmpty := []RunState{
 		{LastVerdict: "BLOCK"},
