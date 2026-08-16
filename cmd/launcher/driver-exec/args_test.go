@@ -7,6 +7,34 @@ import (
 	"testing"
 )
 
+// claudeShape is the claude Driver's argv shape (issue #262 slice 4): -p
+// <prompt>, --model <model> (always present, even empty), --agents <json>
+// only when non-empty, then session/driverFlags word-split, then --effort
+// <value> last, omitted entirely when empty.
+var claudeShape = argvShape{
+	promptStyle:    "flag",
+	promptFlag:     "-p",
+	modelFlag:      "--model",
+	modelOmitEmpty: false,
+	agentsFlag:     "--agents",
+	effortFlag:     "--effort",
+	order:          []string{"prompt", "model", "agents", "session", "driverFlags", "effort"},
+}
+
+// opencodeShape is the opencode Driver's argv shape (issue #262 slice 4):
+// driverFlags word-split first (its own `run` subcommand leads), then -m
+// <model> only when non-empty, then --variant <effort> only when non-empty,
+// then session word-split, and finally the prompt as one trailing
+// positional argument.
+var opencodeShape = argvShape{
+	promptStyle:    "positional",
+	modelFlag:      "-m",
+	modelOmitEmpty: true,
+	agentsFlag:     "",
+	effortFlag:     "--variant",
+	order:          []string{"driverFlags", "model", "effort", "session", "prompt"},
+}
+
 // TestBuildDriverArgsMinimal verifies the prompt file's content is spliced in
 // as -p's value and --model is always present, even with no agents/session
 // file, matching the Driver invocation's pre-driver-exec shape.
@@ -17,6 +45,7 @@ func TestBuildDriverArgsMinimal(t *testing.T) {
 		t.Fatal(err)
 	}
 	in := driverInput{
+		shape:      claudeShape,
 		promptFile: promptFile,
 		model:      "claude-opus-4-8",
 	}
@@ -43,6 +72,7 @@ func TestBuildDriverArgsWithAgents(t *testing.T) {
 		t.Fatal(err)
 	}
 	in := driverInput{
+		shape:      claudeShape,
 		promptFile: promptFile,
 		model:      "claude-opus-4-8",
 		agentsFile: agentsFile,
@@ -71,6 +101,7 @@ func TestBuildDriverArgsEmptyAgentsFileOmitsFlag(t *testing.T) {
 		t.Fatal(err)
 	}
 	in := driverInput{
+		shape:      claudeShape,
 		promptFile: promptFile,
 		model:      "claude-opus-4-8",
 		agentsFile: agentsFile,
@@ -86,11 +117,10 @@ func TestBuildDriverArgsEmptyAgentsFileOmitsFlag(t *testing.T) {
 }
 
 // TestBuildDriverArgsOpencodeShapeIsRunLeadingPromptTrailing verifies
-// driverInput{driver: "opencode"} builds opencode's own argv shape (issue
-// #262 slice 4): the `run` subcommand from driverFlags leads, followed by
-// -m <model> when model is non-empty, then any session-file content, with
-// the prompt spliced in as one positional argument last -- never -p, never
-// --agents.
+// opencodeShape builds opencode's own argv shape (issue #262 slice 4): the
+// `run` subcommand from driverFlags leads, followed by -m <model> when model
+// is non-empty, then any session-file content, with the prompt spliced in as
+// one positional argument last -- never -p, never --agents.
 func TestBuildDriverArgsOpencodeShapeIsRunLeadingPromptTrailing(t *testing.T) {
 	dir := t.TempDir()
 	promptFile := filepath.Join(dir, "prompt.txt")
@@ -98,7 +128,7 @@ func TestBuildDriverArgsOpencodeShapeIsRunLeadingPromptTrailing(t *testing.T) {
 		t.Fatal(err)
 	}
 	in := driverInput{
-		driver:      "opencode",
+		shape:       opencodeShape,
 		promptFile:  promptFile,
 		model:       "opencode/gpt-5",
 		driverFlags: "run --format json --auto",
@@ -123,7 +153,7 @@ func TestBuildDriverArgsOpencodeEmptyModelOmitsDashM(t *testing.T) {
 		t.Fatal(err)
 	}
 	in := driverInput{
-		driver:      "opencode",
+		shape:       opencodeShape,
 		promptFile:  promptFile,
 		model:       "",
 		driverFlags: "run --format json --auto",
@@ -148,6 +178,7 @@ func TestBuildDriverArgsClaudeEffort(t *testing.T) {
 		t.Fatal(err)
 	}
 	in := driverInput{
+		shape:      claudeShape,
 		promptFile: promptFile,
 		model:      "claude-opus-4-8",
 		effort:     "high",
@@ -172,6 +203,7 @@ func TestBuildDriverArgsClaudeEffortOmittedWhenEmpty(t *testing.T) {
 		t.Fatal(err)
 	}
 	in := driverInput{
+		shape:      claudeShape,
 		promptFile: promptFile,
 		model:      "claude-opus-4-8",
 		effort:     "",
@@ -201,7 +233,7 @@ func TestBuildDriverArgsOpencodeEffort(t *testing.T) {
 		t.Fatal(err)
 	}
 	in := driverInput{
-		driver:      "opencode",
+		shape:       opencodeShape,
 		promptFile:  promptFile,
 		model:       "opencode/gpt-5",
 		effort:      "high",
@@ -226,7 +258,7 @@ func TestBuildDriverArgsOpencodeEffortOmittedWhenEmpty(t *testing.T) {
 		t.Fatal(err)
 	}
 	in := driverInput{
-		driver:      "opencode",
+		shape:       opencodeShape,
 		promptFile:  promptFile,
 		model:       "opencode/gpt-5",
 		effort:      "",
@@ -263,6 +295,7 @@ func TestBuildDriverArgsClaudeEffortWithSessionAndFlags(t *testing.T) {
 		t.Fatal(err)
 	}
 	in := driverInput{
+		shape:       claudeShape,
 		promptFile:  promptFile,
 		model:       "claude-opus-4-8",
 		sessionFile: sessionFile,
@@ -299,6 +332,7 @@ func TestBuildDriverArgsSessionAndFlagsAreWordSplit(t *testing.T) {
 		t.Fatal(err)
 	}
 	in := driverInput{
+		shape:       claudeShape,
 		promptFile:  promptFile,
 		model:       "claude-opus-4-8",
 		sessionFile: sessionFile,
@@ -312,6 +346,61 @@ func TestBuildDriverArgsSessionAndFlagsAreWordSplit(t *testing.T) {
 		"-p", "do it", "--model", "claude-opus-4-8",
 		"--session-id", "abc-123",
 		"--verbose", "--dangerously-skip-permissions",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("buildDriverArgs = %q, want %q", got, want)
+	}
+}
+
+// TestBuildDriverArgsSyntheticShapeIsDataDriven verifies buildDriverArgs
+// assembles argv purely from shape data by exercising a third, synthetic
+// shape that shares no order/flag values with claudeShape or opencodeShape:
+// agents leads, then model, then driverFlags, then session, then effort,
+// then a flag-style prompt trails. A hypothetical new Driver with this shape
+// needs zero args.go changes to work.
+func TestBuildDriverArgsSyntheticShapeIsDataDriven(t *testing.T) {
+	dir := t.TempDir()
+	promptFile := filepath.Join(dir, "prompt.txt")
+	if err := os.WriteFile(promptFile, []byte("synthesize it"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	agentsFile := filepath.Join(dir, "agents.json")
+	if err := os.WriteFile(agentsFile, []byte(`{"a":1}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	sessionFile := filepath.Join(dir, "session.txt")
+	if err := os.WriteFile(sessionFile, []byte("--resume xyz"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	synthShape := argvShape{
+		promptStyle:    "flag",
+		promptFlag:     "--input",
+		modelFlag:      "--llm",
+		modelOmitEmpty: true,
+		agentsFlag:     "--personas",
+		effortFlag:     "--thinking",
+		order:          []string{"agents", "model", "driverFlags", "session", "effort", "prompt"},
+	}
+	in := driverInput{
+		shape:       synthShape,
+		promptFile:  promptFile,
+		model:       "synth-model",
+		effort:      "max",
+		agentsFile:  agentsFile,
+		sessionFile: sessionFile,
+		driverFlags: "--extra flag",
+	}
+	got, err := buildDriverArgs(in)
+	if err != nil {
+		t.Fatalf("buildDriverArgs: %v", err)
+	}
+	want := []string{
+		"--personas", `{"a":1}`,
+		"--llm", "synth-model",
+		"--extra", "flag",
+		"--resume", "xyz",
+		"--thinking", "max",
+		"--input", "synthesize it",
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("buildDriverArgs = %q, want %q", got, want)

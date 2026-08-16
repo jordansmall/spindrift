@@ -5,16 +5,28 @@ import (
 	"strings"
 )
 
+// argvShape describes how a Driver's argv is assembled from the pieces
+// driver-exec has on hand -- the prompt, model, effort, --agents JSON, and
+// session pin/resume flags (ADR 0009) -- as pure data, so adding a new
+// Driver is a data row, not an args.go edit.
+type argvShape struct {
+	promptStyle    string // "flag" or "positional"
+	promptFlag     string // meaningful only when promptStyle == "flag"
+	modelFlag      string
+	modelOmitEmpty bool     // when true, omit the model slot entirely if model == ""
+	agentsFlag     string   // "" means this Driver has no --agents equivalent
+	effortFlag     string   // the effort slot is always omitted when effort == ""
+	order          []string // permutation of {"prompt","model","agents","session","driverFlags","effort"}
+}
+
 // driverInput is the file-path/flag data driver-exec assembles into the
 // Driver's own argv (ADR 0009): the prompt, --agents JSON, and session
 // pin/resume flags all cross into this process as files (issue #626),
 // replacing the shell temp-file/eval marshalling that used to cross the
-// devShell boundary. driver names which of buildDriverArgs' two argv shapes
-// applies (issue #262 slice 4) -- empty (and any non-"opencode" value)
-// resolves to the claude shape, matching driver.New's own empty-defaults-to-
-// claude convention.
+// devShell boundary. shape carries the Driver's argv layout as data (issue
+// #2534), so buildDriverArgs itself carries no per-Driver knowledge.
 type driverInput struct {
-	driver      string
+	shape       argvShape
 	promptFile  string
 	model       string
 	effort      string
@@ -24,74 +36,73 @@ type driverInput struct {
 }
 
 // buildDriverArgs reads promptFile (and, if set, agentsFile/sessionFile) and
-// returns the Driver's argv, in one of two shapes selected by in.driver
-// (issue #262 slice 4):
+// assembles the Driver's argv by walking in.shape.order, applying each slot's
+// generic rule against the shape data (issue #2534):
 //
-// claude (the default, and every driver name other than "opencode"):
-// -p <prompt>, --model <model> (always present, even empty, to match the
-// pipeline's prior unconditional `--model "${MODEL:-}"`), --agents <json>
-// only when agentsFile holds non-empty content (matching the prior
-// agents_args, which stayed empty when agents_json was ""), then the
-// session file's content and driverFlags each word-split into separate argv
-// elements (matching the shell's prior `read -ra`/unquoted-splice
-// word-splitting of _driver_session_args and DRIVER_FLAGS_COMMON), and
-// finally --effort <effort> appended last, but only when effort is
-// non-empty -- unlike --model, --effort is omitted entirely rather than
-// emitted with an empty value (issue #2241).
+//   - "prompt": promptFlag then the prompt when promptStyle == "flag";
+//     otherwise just the prompt, positional.
+//   - "model": modelFlag then model, unless model is empty and
+//     modelOmitEmpty is set, in which case the slot is omitted entirely.
+//   - "agents": omitted when agentsFlag == "" or agentsFile == ""; otherwise
+//     agentsFlag then agentsFile's content, but only when that content is
+//     non-empty.
+//   - "session": omitted when sessionFile == ""; otherwise sessionFile's
+//     content, word-split into separate argv elements (matching the shell's
+//     prior `read -ra` word-splitting).
+//   - "driverFlags": driverFlags word-split into separate argv elements (may
+//     contribute nothing).
+//   - "effort": omitted when effort == ""; otherwise effortFlag then effort.
 //
-// opencode: driverFlags word-split first (its own `run --format json --auto`
-// -- the `run` subcommand must lead argv), then -m <model> only when model
-// is non-empty (never --model, and omitted entirely rather than -m ""),
-// then --variant <effort> (opencode's cross-provider reasoning-effort
-// selector) only when effort is non-empty, then the session file's content
-// word-split (a no-op today, kept for symmetry with the claude shape), and
-// finally the prompt spliced in as ONE trailing positional argument -- never
-// -p, and never --agents (opencode has no equivalent flag).
+// A Driver's shape is entirely a function of its argvShape value -- no
+// driver-name conditional appears here, so a new Driver's argv shape is a
+// new argvShape data row, not a change to this function.
 func buildDriverArgs(in driverInput) ([]string, error) {
 	prompt, err := os.ReadFile(in.promptFile)
 	if err != nil {
 		return nil, err
 	}
 
-	if in.driver == "opencode" {
-		args := strings.Fields(in.driverFlags)
-		if in.model != "" {
-			args = append(args, "-m", in.model)
-		}
-		if in.effort != "" {
-			args = append(args, "--variant", in.effort)
-		}
-		if in.sessionFile != "" {
+	var args []string
+	for _, slot := range in.shape.order {
+		switch slot {
+		case "prompt":
+			if in.shape.promptStyle == "flag" {
+				args = append(args, in.shape.promptFlag, string(prompt))
+			} else {
+				args = append(args, string(prompt))
+			}
+		case "model":
+			if in.model != "" || !in.shape.modelOmitEmpty {
+				args = append(args, in.shape.modelFlag, in.model)
+			}
+		case "agents":
+			if in.shape.agentsFlag == "" || in.agentsFile == "" {
+				continue
+			}
+			agents, err := os.ReadFile(in.agentsFile)
+			if err != nil {
+				return nil, err
+			}
+			if len(agents) > 0 {
+				args = append(args, in.shape.agentsFlag, string(agents))
+			}
+		case "session":
+			if in.sessionFile == "" {
+				continue
+			}
 			session, err := os.ReadFile(in.sessionFile)
 			if err != nil {
 				return nil, err
 			}
 			args = append(args, strings.Fields(string(session))...)
+		case "driverFlags":
+			args = append(args, strings.Fields(in.driverFlags)...)
+		case "effort":
+			if in.effort == "" {
+				continue
+			}
+			args = append(args, in.shape.effortFlag, in.effort)
 		}
-		args = append(args, string(prompt))
-		return args, nil
-	}
-
-	args := []string{"-p", string(prompt), "--model", in.model}
-	if in.agentsFile != "" {
-		agents, err := os.ReadFile(in.agentsFile)
-		if err != nil {
-			return nil, err
-		}
-		if len(agents) > 0 {
-			args = append(args, "--agents", string(agents))
-		}
-	}
-	if in.sessionFile != "" {
-		session, err := os.ReadFile(in.sessionFile)
-		if err != nil {
-			return nil, err
-		}
-		args = append(args, strings.Fields(string(session))...)
-	}
-	args = append(args, strings.Fields(in.driverFlags)...)
-	if in.effort != "" {
-		args = append(args, "--effort", in.effort)
 	}
 	return args, nil
 }
