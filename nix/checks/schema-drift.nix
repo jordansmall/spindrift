@@ -678,6 +678,30 @@ in
         touch $out
       '';
 
+  # cmd/launcher/quickstart/quickstart_paths_gen.go must match the content
+  # generated from lib/quickstart-path-table.nix. Fails when a quickstart
+  # knob's nix option path (lib/nixpath.nix over lib/env-schema.nix's
+  # group/nixSubPath) changes but the committed generated file isn't
+  # regenerated. Shares its renderer with `nix run .#regen` via
+  # lib/renderers.nix (issue #2556).
+  quickstart-paths-gen =
+    let
+      quickstartPathTable = import ../../lib/quickstart-path-table.nix;
+      generated = pkgs.writeText "quickstart_paths_gen.go.generated" (
+        renderers.renderQuickstartPathsGo quickstartPathTable
+      );
+    in
+    pkgs.runCommand "quickstart-paths-gen"
+      {
+        inherit generated;
+        committed = ../../cmd/launcher/quickstart/quickstart_paths_gen.go;
+      }
+      ''
+        diff "$generated" "$committed" \
+          || { echo "cmd/launcher/quickstart/quickstart_paths_gen.go is out of sync with lib/quickstart-path-table.nix — regenerate it with \`nix run .#regen\`" >&2; exit 1; }
+        touch $out
+      '';
+
   # cmd/launcher/subcommands_gen.go must match the content generated from
   # lib/subcommands.nix. Fails when a subcommand is added/edited in the Nix
   # registry but the committed generated file is not regenerated. Shares its

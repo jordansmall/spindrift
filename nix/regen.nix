@@ -4,6 +4,8 @@
 # cmd/launcher/internal/driver/drivernames_gen.go,
 # cmd/launcher/internal/agentpaths/agentpaths_gen.go,
 # cmd/launcher/quickstart/quickstart_runtime_gen.go,
+# cmd/launcher/quickstart/quickstart_paths_gen.go (lib/quickstart-path-table.nix,
+# issue #2556),
 # cmd/launcher/subcommands_gen.go,
 # cmd/launcher/internal/outcome/status_gen.go,
 # cmd/launcher/internal/backend/registry_gen.go,
@@ -56,6 +58,8 @@ let
   agentPathsFile = renderers.renderAgentPathsGo agentPaths;
   runtimeValues = import ../lib/runtime-values.nix;
   quickstartRuntimeFile = renderers.renderQuickstartRuntimeGo runtimeValues;
+  quickstartPathTable = import ../lib/quickstart-path-table.nix;
+  quickstartPathsFile = renderers.renderQuickstartPathsGo quickstartPathTable;
   subcommands = import ../lib/subcommands.nix;
   subcommandsFile = renderers.renderSubcommandsGo subcommands;
   promptContract = import ../lib/prompt-contract.nix;
@@ -123,6 +127,7 @@ pkgs.writeShellApplication {
     write cmd/launcher/internal/driver/drivernames_gen.go ${escapeShellArg driverNamesFile}
     write cmd/launcher/internal/agentpaths/agentpaths_gen.go ${escapeShellArg agentPathsFile}
     write cmd/launcher/quickstart/quickstart_runtime_gen.go ${escapeShellArg quickstartRuntimeFile}
+    write cmd/launcher/quickstart/quickstart_paths_gen.go ${escapeShellArg quickstartPathsFile}
     write cmd/launcher/subcommands_gen.go ${escapeShellArg subcommandsFile}
     write cmd/launcher/internal/outcome/status_gen.go ${escapeShellArg outcomeStatusGoFile}
     gofmt -w "$root/cmd/launcher/internal/outcome/status_gen.go"
