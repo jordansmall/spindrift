@@ -1389,3 +1389,86 @@ esac
 		t.Errorf("state.WorkerFindings = %q, want it to name conflict-b's own branch", state.WorkerFindings)
 	}
 }
+
+// TestDispatchManifestIfPresentReportsIntegrationFailedWithoutLosingDoneSlice
+// verifies dispatchManifestIfPresent's `case integrateFailed:` findings arm
+// (issue #2060 review finding: no test previously drove a WorkerDone result
+// whose integration outcome is integrateFailed through
+// dispatchManifestIfPresent). It dirties repoRoot with an untracked file
+// before dispatch, deterministically tripping integrateSliceBranch's own
+// leading `git status --porcelain` guard (integrate.go) for every
+// integration attempt regardless of what the worker itself did -- a
+// reliable, non-flaky way to force integrateFailed without depending on any
+// git internals of the cherry-pick itself. The worker still reports
+// WorkerDone (its own job succeeded), so state.DoneSlices must still list
+// it, but state.WorkerFindings must report the integration failure with a
+// real, non-empty error message -- proving the existing `errMsg := ""; if
+// outcome.err != nil { errMsg = outcome.err.Error() }` guard is exercised
+// end to end, not just theoretically safe.
+func TestDispatchManifestIfPresentReportsIntegrationFailedWithoutLosingDoneSlice(t *testing.T) {
+	repoRoot := chdirToFreshWorkerRepo(t)
+
+	// Dirty repoRoot with an untracked file so integrateSliceBranch's own
+	// `git status --porcelain` guard refuses to integrate at all --
+	// deterministic and independent of the worker's own branch content.
+	if err := os.WriteFile(filepath.Join(repoRoot, "dirty.txt"), []byte("dirty"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	fakeDir := t.TempDir()
+	callLog := filepath.Join(fakeDir, "calls.log")
+	if err := os.WriteFile(callLog, nil, 0o644); err != nil {
+		t.Fatalf("WriteFile(callLog): %v", err)
+	}
+	writeFakeWorkerDriverExec(t, fakeDir, callLog)
+	t.Setenv("PATH", fakeDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	dir := t.TempDir()
+	manifest := SliceManifest{Slices: []ManifestSlice{{Name: "done-fast", Task: "implement seam a"}}}
+	line, err := manifest.Line()
+	if err != nil {
+		t.Fatalf("Line() error = %v", err)
+	}
+	logPath := filepath.Join(dir, "stream.log")
+	content := streamJSONOutcomeLine(strings.TrimSpace(line))
+	if err := os.WriteFile(logPath, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	workerPromptFile := filepath.Join(dir, "worker-prompt.txt")
+	if err := os.WriteFile(workerPromptFile, []byte("BASE WORKER PROMPT"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config{
+		driver:           "claude",
+		logPath:          logPath,
+		workerPromptFile: workerPromptFile,
+		workerWorkDir:    t.TempDir(),
+		workerTimeout:    2 * time.Second,
+	}
+	state := runstate.RunState{}
+
+	var stdout strings.Builder
+	got := dispatchManifestIfPresent(cfg, &state, &stdout)
+	if !got {
+		t.Fatalf("dispatchManifestIfPresent() = false, want true")
+	}
+
+	if !containsSlice(state.DoneSlices, "done-fast") {
+		t.Errorf("state.DoneSlices = %v, want it to contain done-fast (the worker itself succeeded regardless of integration outcome)", state.DoneSlices)
+	}
+
+	const wantPrefix = "done-fast: done, but integration failed: "
+	idx := strings.Index(state.WorkerFindings, wantPrefix)
+	if idx == -1 {
+		t.Fatalf("state.WorkerFindings = %q, want it to contain %q", state.WorkerFindings, wantPrefix)
+	}
+	restOfLine := state.WorkerFindings[idx+len(wantPrefix):]
+	if nl := strings.IndexByte(restOfLine, '\n'); nl != -1 {
+		restOfLine = restOfLine[:nl]
+	}
+	if strings.TrimSpace(restOfLine) == "" {
+		t.Errorf("state.WorkerFindings = %q, want a non-empty error message after %q", state.WorkerFindings, wantPrefix)
+	}
+}
