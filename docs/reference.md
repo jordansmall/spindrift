@@ -110,8 +110,9 @@ option alike — is a first-class option directly under
 `gitUserName`) is placed by its `lib/env-schema.nix` entry's `group` and
 optional `nixSubPath` (`lib/nixpath.nix`); a structural knob (`roster`,
 `skills`, `packages`, `prefetch`, `driver`, `prompt`, `extraClosures`,
-`runtime`, and the rest of `lib/structural-paths.nix`) is placed by a small
-hand-written map in `lib/flakeModule.nix`. Either way the flake surface
+`runtime`, and the rest of `lib/structural-paths.nix`) is placed by the
+small hand-written map in `lib/structural-paths.nix` (imported by
+`lib/flakeModule.nix`). Either way the flake surface
 bakes run knobs into the Launcher input document the `spindrift` CLI passes
 to the launcher binary via `--input`; an explicit `--flag` at dispatch time
 re-points a value without a rebuild. Domain names are the same headings as
