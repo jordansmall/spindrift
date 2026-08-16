@@ -104,13 +104,17 @@ _Avoid_: triager (it does not triage), reporter (collides with outcome
 reporting).
 
 **Box**:
-The disposable per-issue podman container — the isolation boundary that makes
-`--dangerously-skip-permissions` safe. The `runtime` knob picks the OCI CLI
-that drives it: `podman`/`docker` name the binary directly; `rancher` is an
-operator-facing alias for Rancher Desktop's containerd mode and is the first
-value that differs from the binary it execs (`nerdctl`) — the one alias lives
-in the runner package, shared by adapter construction and validation.
-_Avoid_: sandbox, runner, worker.
+The disposable per-issue isolation boundary that makes
+`--dangerously-skip-permissions` safe. It comes in two flavors, chosen by the
+`runtime` knob. An **OCI container**: `podman`/`docker` name the binary
+directly; `rancher` is an operator-facing alias for Rancher Desktop's
+containerd mode and is the first value that differs from the binary it execs
+(`nerdctl`) — the one alias lives in the runner package, shared by adapter
+construction and validation. Or a **bwrap sandbox** (`bwrap`): daemonless and
+Linux-only, built from no image at all. The flavors are not interchangeable in
+their properties — uid mapping, resource limits, and lifecycle naming each
+differ — so a statement true of one is not automatically true of the other.
+_Avoid_: runner (that is the adapter that drives a Box, not the Box), worker.
 
 **Harness plumbing**:
 The language-agnostic tools every Agent needs regardless of the Target — shell,
