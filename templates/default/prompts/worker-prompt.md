@@ -41,10 +41,10 @@ build:
 Do not run `nix build` (any target, including `checks-inbox`), `nix flake
 check`, or anything else that triggers a Nix store round-trip. Whether
 you're one of several workers running fully concurrently on isolated
-worktrees or the sole worker handling one slice at a time, a store build is
-never yours to run — the authoritative `checks-inbox` run happens exactly
-once, later, owned by the coordinator on the fully-integrated tree, never
-inside your own isolated worktree.
+worktrees or the sole worker handling one slice at a time, a store build
+belongs to the coordinator alone: it owns the authoritative `checks-inbox`
+run, later, on the fully-integrated tree — not inside your own isolated
+worktree.
 
 If a per-file gate fails, do not escalate to a store build to investigate —
 report the specific failing command and its output/exit status plainly. If

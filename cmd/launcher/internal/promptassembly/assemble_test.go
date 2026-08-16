@@ -1127,7 +1127,12 @@ func TestAssembleOrchestratorWorkerPromptForbidsStoreBuild(t *testing.T) {
 	// and "checks-inbox", and the doc's own unrelated "Do not expand
 	// scope" line (line 6) already satisfies a bare "do not" search. Tie
 	// the forbidding word to the same sentence as the store-build phrase
-	// so a prescribing prompt actually fails this test.
+	// so a prescribing prompt actually fails this test. That alone isn't
+	// sufficient either: the doc also names checks-inbox a second time,
+	// descriptively, where the coordinator's own authoritative run
+	// happens -- see TestSentenceForbidsCatchesWorkerPromptRegression,
+	// which pins that this second, unrelated mention can't stand in for
+	// the real forbidding one if it's ever deleted.
 	forbidding := []string{"nix build", "checks-inbox"}
 	for _, phrase := range forbidding {
 		if !sentenceForbids(prompt, phrase) {
@@ -1285,6 +1290,45 @@ func TestSentenceForbidsRejectsPrescriptiveMention(t *testing.T) {
 	}
 	if !sentenceForbids(forbidding, "checks-inbox") {
 		t.Error("sentenceForbids(forbidding, \"checks-inbox\") = false, want true")
+	}
+}
+
+// TestSentenceForbidsCatchesWorkerPromptRegression pins the exact false-pass
+// the synthetic literals above can't reproduce: worker-prompt.md names
+// "checks-inbox" twice -- once forbidding it to the worker, once
+// descriptively, where it says the coordinator owns the authoritative run.
+// A synthetic "prescriptive" string never puts a forbidding word near that
+// second, unrelated mention, so it can't prove the real doc is safe if the
+// first, true forbidding mention is ever deleted. Mutate the real assembled
+// prompt -- not a hand-written literal -- to remove only that one true
+// forbidding mention, and confirm no other real mention of "checks-inbox"
+// left in the doc still trips sentenceForbids.
+func TestSentenceForbidsCatchesWorkerPromptRegression(t *testing.T) {
+	reg := loadTestRegistry(t)
+	env := coveredEnv()
+	env.OrchestratorEnabled = true
+
+	result, err := Assemble(env, reg)
+	if err != nil {
+		t.Fatalf("Assemble: %v", err)
+	}
+
+	prompt := result.Handoff.WorkerPromptFile
+	if !sentenceForbids(prompt, "checks-inbox") {
+		t.Fatal("WorkerPromptFile doesn't forbid \"checks-inbox\" today, want a starting point that passes before mutation")
+	}
+
+	const trueForbiddingMention = "(any target, including `checks-inbox`)"
+	if !strings.Contains(prompt, trueForbiddingMention) {
+		t.Fatalf("WorkerPromptFile doesn't contain %q, want the real forbidding mention this test deletes to still be there:\n%s", trueForbiddingMention, prompt)
+	}
+	mutated := strings.Replace(prompt, trueForbiddingMention, "(any target)", 1)
+	if !strings.Contains(mutated, "checks-inbox") {
+		t.Fatal("mutation removed every mention of checks-inbox, want at least one other real mention left over to prove this test isn't vacuous")
+	}
+
+	if sentenceForbids(mutated, "checks-inbox") {
+		t.Error("sentenceForbids(mutated, \"checks-inbox\") = true, want false: deleting the one true forbidding mention must not leave a different, unrelated real mention that still passes")
 	}
 }
 
