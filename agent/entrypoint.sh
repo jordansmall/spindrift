@@ -95,12 +95,16 @@ configure_env() {
   # baked by the selected Driver's lib/drivers/<name>.nix registry entry (ADR
   # 0009, issue #624) via the nix-rendered preamble prepended ahead of this
   # file at image build time. No fallback literal lives here, and no runtime
-  # guard either (issue #2531): lib/image.nix's entrypoint derivation
-  # concatenates driverPreamble and agentPathsPreamble into the same `text`
-  # string in the same build, so nix/checks/image.nix's
-  # agent-paths-preamble-baked-into-image check -- which already proves the
-  # built image's entrypoint.sh carries the agent-paths preamble -- also
-  # transitively proves the Driver preamble rendered. A Box missing either
+  # guard either (issue #2531): nix/checks/image.nix's
+  # driver-preamble-baked-into-image check greps the real baked
+  # entrypoint.sh for these four Driver-identity lines directly, in the
+  # unconditional `VAR=value` shape lib/drivers/default.nix's renderPreamble
+  # emits (no `${VAR:-...}` fallback wrapper -- these are fixed per Box
+  # invocation, not overridable at runtime). That check is a sibling of, not
+  # subsumed by, agent-paths-preamble-baked-into-image just above it in that
+  # file: the two inspect disjoint lines, so proving the agent-paths half of
+  # lib/image.nix's entrypoint `text` concatenation survived says nothing
+  # about whether the driverPreamble half did too. A Box missing the Driver
   # preamble is now caught at build time, not runtime.
 
   # The canonical SPINDRIFT_OUTCOME contract (issue #419), baked at a sibling
