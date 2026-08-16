@@ -13,18 +13,21 @@
 set -euo pipefail
 
 # Fully-local mode (CODE_FORGE=local AND ISSUE_TRACKER=local) talks to no real
-# forge, so REPO_SLUG and GH_TOKEN have nothing to resolve against — mirrors
-# the launcher's own validate() (cmd/launcher/main.go).
+# forge, so REPO_SLUG and GH_TOKEN have nothing to resolve against. The
+# launcher's own validate() (cmd/launcher/main.go) already made this call and
+# forwards it as BOX_FULLY_LOCAL (issue #2527) -- read it rather than
+# re-deriving it from the raw CODE_FORGE/ISSUE_TRACKER names.
 fully_local=false
-if [ "${CODE_FORGE:-}" = local ] && [ "${ISSUE_TRACKER:-}" = local ]; then
-  fully_local=true
-fi
+[ -n "${BOX_FULLY_LOCAL:-}" ] && fully_local=true
 # Self-contained research (issue #2202) supplies its content from a local
 # issue tracker and clones no repo, so REPO_SLUG/GH_TOKEN have nothing to
 # resolve against either -- mirrors the launcher validate()'s noRepoResearch
-# permit, which is likewise scoped to a local issue tracker.
+# permit. SELF_CONTAINED itself stays a raw runtime input (a genuinely
+# per-dispatch Dispatch-kind knob, not a nix-resolved capability signal), but
+# the local-issue-tracker half is now the forwarded BOX_IN_BOX_UNREACHABLE_TRACKER
+# signal (issue #2527) instead of a raw ISSUE_TRACKER=local comparison.
 no_repo=false
-if [ "${SELF_CONTAINED:-}" = 1 ] && [ "${ISSUE_TRACKER:-}" = local ]; then
+if [ "${SELF_CONTAINED:-}" = 1 ] && [ -n "${BOX_IN_BOX_UNREACHABLE_TRACKER:-}" ]; then
   no_repo=true
 fi
 [ "$fully_local" = true ] || [ "$no_repo" = true ] || : "${REPO_SLUG:?REPO_SLUG (owner/repo) is required}"
@@ -582,12 +585,14 @@ _is_self_contained() {
 
 # _is_readonly_github reports (via exit status) whether this is a read-only
 # github Box: BOX_WRITE_ENABLED is unset (no push-capable token was ever
-# issued, so a force-push can only 403) and the Code Forge is github. Such a
-# Box hands its branch off through the harness-owned outbox bundle seam rather
-# than a push (issue #2094). The github default mirrors every other
-# ${CODE_FORGE:-github} read in this file.
+# issued, so a force-push can only 403) and the Box is outbox-relay-capable
+# (today, true only for CODE_FORGE=github, per lib/backends/default.nix's
+# registry -- forwarded as BOX_OUTBOX_RELAY_CAPABLE, issue #2267/#2527,
+# rather than compared against the raw CODE_FORGE name here). Such a Box
+# hands its branch off through the harness-owned outbox bundle seam rather
+# than a push (issue #2094).
 _is_readonly_github() {
-  [ -z "${BOX_WRITE_ENABLED:-}" ] && [ "${CODE_FORGE:-github}" = "github" ]
+  [ -z "${BOX_WRITE_ENABLED:-}" ] && [ -n "${BOX_OUTBOX_RELAY_CAPABLE:-}" ]
 }
 
 # _handoff_field extracts field $2 from the raw Handoff descriptor JSON $1
