@@ -110,16 +110,15 @@ let
       '';
 
   # Clean placeholder template text, carrying none of the forbiddenMarkers
-  # substrings (issue #2510): the real templates/default/prompts/{issue,
-  # filer}-prompt.md both carry a forbiddenMarkers substring today (issue-
-  # prompt.md a genuine imperative "git push"/"gh pr create"/etc, fixed in a
-  # later slice; filer-prompt.md a descriptive, non-imperative mention of
-  # "gh issue create" explaining what its own FILED output line means) --
-  # neither is touched by this slice. The three forbidden-marker checks below
+  # substrings (issue #2510). The real templates/default/prompts/{issue,
+  # filer}-prompt.md are both clean of forbiddenMarkers substrings as of
+  # this branch's e9652e07 (the CODE_FORGE=git push text moved into a
+  # gate-paired fragment). The three forbidden-marker checks below still
   # override `prompt`/`filerPrompt` with this placeholder wherever the check
   # isn't specifically exercising that param, so a check asserting success/
   # failure over the *fragment* scan (or over a deliberately broken `prompt`)
-  # isn't confounded by an unrelated, already-known template violation.
+  # stays isolated from the real templates regardless of their current
+  # content -- future template edits can't silently confound these checks.
   cleanForbiddenMarkerPlaceholder = "a clean placeholder prompt with no forbidden operations mentioned";
 in
 {
@@ -1161,4 +1160,43 @@ in
     assert assertMsg (!broken.success)
       "mkHarness.nix must throw when the shared `prompt` template carries a forbidden marker ('gh pr create') as literal text";
     pkgs.runCommand "build-time-reject-forbidden-marker-template" { } "touch $out";
+
+  # Same as above, but exercising `reviewPrompt` instead of `prompt` --
+  # templateContentByFile's three entries are hand-written attrset keys
+  # (lib/mkHarness.nix), so a check that only ever overrides `prompt` would
+  # never notice if the `reviewPrompt` (or `filerPrompt`, below) entry were
+  # silently dropped or mis-keyed.
+  build-time-reject-forbidden-marker-review-template =
+    let
+      inherit (pkgs.lib) assertMsg;
+      broken = builtins.tryEval (
+        (import ../../lib/mkHarness.nix {
+          inherit nixpkgs system;
+          packages = p: [ p.hello ];
+          prompt = cleanForbiddenMarkerPlaceholder;
+          reviewPrompt = "some review prompt text containing gh pr merge somewhere";
+          filerPrompt = cleanForbiddenMarkerPlaceholder;
+        }).spindrift
+      );
+    in
+    assert assertMsg (!broken.success)
+      "mkHarness.nix must throw when the shared `reviewPrompt` template carries a forbidden marker ('gh pr merge') as literal text";
+    pkgs.runCommand "build-time-reject-forbidden-marker-review-template" { } "touch $out";
+
+  # Same again for `filerPrompt`.
+  build-time-reject-forbidden-marker-filer-template =
+    let
+      inherit (pkgs.lib) assertMsg;
+      broken = builtins.tryEval (
+        (import ../../lib/mkHarness.nix {
+          inherit nixpkgs system;
+          packages = p: [ p.hello ];
+          prompt = cleanForbiddenMarkerPlaceholder;
+          filerPrompt = "some filer prompt text containing gh issue create somewhere";
+        }).spindrift
+      );
+    in
+    assert assertMsg (!broken.success)
+      "mkHarness.nix must throw when the shared `filerPrompt` template carries a forbidden marker ('gh issue create') as literal text";
+    pkgs.runCommand "build-time-reject-forbidden-marker-filer-template" { } "touch $out";
 }
