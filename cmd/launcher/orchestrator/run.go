@@ -284,7 +284,7 @@ func run(cfg config, stdout io.Writer) (int, error) {
 		if cfg.scoutBriefPath != "" {
 			state.ScoutBriefPath = cfg.scoutBriefPath
 		}
-		recordPassSummary(cfg, &state, preStat)
+		recordPassSummary(cfg.passSummaryPath, &state, preStat)
 		// driver-exec (re-)creates cfg.logPath fresh for this one pass
 		// (issue #626's run.go: os.Create truncates), so by the time it
 		// returns the file holds exactly this pass's own raw stream -- the
@@ -385,7 +385,7 @@ func runWithReviewPass(cfg config, stdout io.Writer) (int, error) {
 		if cfg.scoutBriefPath != "" {
 			state.ScoutBriefPath = cfg.scoutBriefPath
 		}
-		recordPassSummary(cfg, &state, preStat)
+		recordPassSummary(cfg.passSummaryPath, &state, preStat)
 		// Verdict authority belongs solely to the review pass below under
 		// this loop -- an implement/fix pass's own prompt has the
 		// self-review loop stripped, so its log is scanned only for
@@ -883,37 +883,27 @@ type passSummarySnapshot struct {
 	size    int64
 }
 
-// recordPassSummary records cfg.passSummaryPath into state.PassSummaryPath
-// only when this pass's own invocation actually left a fresh file there.
-// preStat is seedAndInvokePass's pre-pass snapshot of the same path (nil
-// when there was nothing to snapshot, i.e. no seeded reference was on disk
-// going into this pass) -- see passSummarySnapshot's doc comment for the
-// staleness check this enables. An empty cfg.passSummaryPath means the
-// caller didn't supply one this pass, not that the prior path is now
-// unknown, so it leaves the carried-forward value alone rather than
-// clobbering it with "". Only a stat error confirming the file is actually
-// absent (fs.ErrNotExist) clears state.PassSummaryPath -- any other stat
-// error (EACCES, EIO, ELOOP, ...) is not evidence the pass wrote nothing, so
-// it leaves the carried-forward value alone the same as an empty
-// cfg.passSummaryPath does (non-blocking review finding on an earlier
-// version of this function, issue #2549). When the post-pass file exists
-// but its mtime and size exactly match preStat, this pass never touched
-// it -- treated the same as "pass wrote nothing" rather than re-affirming a
-// now-stale summary from an earlier pass (a second non-blocking review
-// finding, issue #2549). Shared by run and runWithReviewPass, which
-// otherwise duplicated this block verbatim.
-func recordPassSummary(cfg config, state *runstate.RunState, preStat *passSummarySnapshot) {
-	if cfg.passSummaryPath == "" {
+// recordPassSummary records passSummaryPath into state.PassSummaryPath only
+// when this pass's own invocation actually left a fresh file there --
+// "fresh" meaning both present (a stat-confirmed fs.ErrNotExist clears
+// state.PassSummaryPath instead; any other stat error, or an empty
+// passSummaryPath, leaves the carried-forward value alone -- see
+// passSummarySnapshot's doc comment for why) and, when preStat is non-nil,
+// changed since seedAndInvokePass's own pre-pass snapshot of the same path.
+// Shared by run and runWithReviewPass, which otherwise duplicated this block
+// verbatim.
+func recordPassSummary(passSummaryPath string, state *runstate.RunState, preStat *passSummarySnapshot) {
+	if passSummaryPath == "" {
 		return
 	}
-	info, statErr := os.Stat(cfg.passSummaryPath)
+	info, statErr := os.Stat(passSummaryPath)
 	switch {
 	case statErr == nil:
 		if preStat != nil && info.ModTime().Equal(preStat.modTime) && info.Size() == preStat.size {
 			state.PassSummaryPath = ""
 			return
 		}
-		state.PassSummaryPath = cfg.passSummaryPath
+		state.PassSummaryPath = passSummaryPath
 	case errors.Is(statErr, fs.ErrNotExist):
 		state.PassSummaryPath = ""
 	}

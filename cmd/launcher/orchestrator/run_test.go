@@ -895,10 +895,9 @@ func TestRecordPassSummaryLeavesPriorValueOnNonNotExistStatError(t *testing.T) {
 	}
 	passSummaryPath := filepath.Join(notADir, "pass-summary.md")
 
-	cfg := config{passSummaryPath: passSummaryPath}
 	state := runstate.RunState{PassSummaryPath: "/tmp/prior-pass-summary.md"}
 
-	recordPassSummary(cfg, &state, nil)
+	recordPassSummary(passSummaryPath, &state, nil)
 
 	if state.PassSummaryPath != "/tmp/prior-pass-summary.md" {
 		t.Errorf("PassSummaryPath = %q, want prior value %q preserved on non-ENOENT stat error", state.PassSummaryPath, "/tmp/prior-pass-summary.md")
