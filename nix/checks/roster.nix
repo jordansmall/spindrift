@@ -7,6 +7,7 @@
 }:
 let
   rosterLib = import ../../lib/roster.nix { inherit (pkgs) lib; };
+  defaultModelFixture = import ../../lib/default-model-fixture.nix;
   inherit (pkgs.lib) assertMsg mapAttrs;
 in
 {
@@ -281,7 +282,7 @@ in
     let
       roster = rosterLib.defaultRoster {
         models = {
-          filer = "claude-haiku-4-5-20251001";
+          filer = defaultModelFixture.dogfoodPins.filer;
         };
       };
       byName = name: builtins.head (builtins.filter (e: e.name == name) roster);
@@ -290,7 +291,7 @@ in
       # vacuous by comparing the helper under test against itself.
       schema = import ../../lib/env-schema.nix;
     in
-    assert assertMsg ((byName "filer").model == "claude-haiku-4-5-20251001")
+    assert assertMsg ((byName "filer").model == defaultModelFixture.dogfoodPins.filer)
       "defaultRoster models.filer must set the filer entry's model, got: ${builtins.toJSON (byName "filer").model}";
     assert assertMsg ((byName "scout").model == schema.scoutModel.default)
       "defaultRoster must inherit an unmentioned name's schema default, got: ${builtins.toJSON (byName "scout").model}";
