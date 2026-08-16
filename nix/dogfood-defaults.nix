@@ -43,9 +43,12 @@ in
   # unmentioned and inherit entirely from their `lib/env-schema.nix` schema
   # defaults (issue #2434) rather than being locally pinned (issue #2435):
   # reviewer's schema default is now `claude-opus-5` (issue #2433), so the
-  # orchestrator's code-owned review pass (issue #2387, run at `high` effort
-  # via `defaults.reviewEffort` below) still runs on the strongest available
-  # model without a local pin duplicating the schema's own value.
+  # orchestrator's code-owned review pass (issue #2387) still runs on the
+  # strongest available model without a local pin duplicating the schema's
+  # own value. The same is now true of the pass's effort: the roster's
+  # `reviewer` entry's effort (`rosterDefaults.reviewer.effort`, `"high"`)
+  # flows straight to the orchestrator via the Handoff (issue #2512), so no
+  # local `reviewEffort` knob is needed either.
   # `defaultRoster` also ships this roster's fixed per-agent efforts (issue
   # #2386).
   roster = rosterLib.defaultRoster {
@@ -61,10 +64,6 @@ in
     # Box makes no forge/tracker writes; the launcher relays branch, draft PR,
     # and comment writes host-side. github satisfies the capability gate.
     boxForgeAndIssueAccess = "read-only";
-    # Drive the orchestrator's code-owned review pass (issue #2387's
-    # REVIEW_EFFORT/--review-effort knob) at the same effort as the roster's
-    # `reviewer` entry above.
-    reviewEffort = "high";
     # Cap podman's container memory on darwin/windows, where podman runs in a
     # fixed-RAM VM (issue #712's original rationale); native Linux shares host
     # RAM with the container directly, so no cap is needed there (issue #2379).

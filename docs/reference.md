@@ -281,12 +281,11 @@ default is empty) and the dogfood genuinely depends on it for #393's
 unmentioned and so inherit their `lib/env-schema.nix` defaults (issue
 #2434) instead: `claude-haiku-4-5-20251001`, `claude-opus-5` (issue #2433),
 and `claude-sonnet-5` respectively. The dogfood still inherits `defaultRoster`'s built-in per-agent effort
-defaults unchanged (issue #2386), and separately sets
-`defaults.reviewEffort = "high"` so the orchestrator's own code-owned review
-pass (issue #2387) runs at the same effort as the roster's `reviewer` entry,
-on the same model (issue #2427): the orchestrator captures the reviewer
-entry's model into the handoff before deleting that entry in favour of the
-code-owned pass.
+defaults unchanged (issue #2386), and sets no separate `reviewEffort` knob
+(issue #2512): the roster's `reviewer` entry's own effort is what the
+orchestrator's code-owned review pass (issue #2387) runs at directly, the
+same way it already does for the model (issue #2427) — one mechanism instead
+of two.
 
 The **prompt is baked into the image**: changing `prompts/issue-prompt.md`
 requires an image rebuild (`spindrift build`). Point `SPINDRIFT_PROMPT_DIR`
@@ -861,7 +860,7 @@ exceptions.
 | `EFFORT`                  | — (empty, no baked default) | main/coordinator reasoning-effort level, passed straight through to the Driver with no normalization — the value must be valid for the active `DRIVER`: on `claude` it becomes `--effort <level>` (`low`/`medium`/`high`/`xhigh`/`max`), on `opencode` it becomes `--variant <level>` (opencode's cross-provider variant selector); unset emits no flag either way, so the Driver's own default effort applies |
 | `SCOUT_MODEL`             | `claude-haiku-4-5-20251001` (baked) | scout subagent model tier (empty drops the scout entry from `--agents`). **Deprecated** — superseded by the [`roster`](#subagent-roster) option |
 | `REVIEW_MODEL`            | `claude-opus-5` (baked) | reviewer subagent model tier (empty drops the reviewer entry from `--agents`). **Deprecated for non-orchestrator use** — superseded by the [`roster`](#subagent-roster) option. Under `ORCHESTRATOR`, the roster reviewer entry is itself superseded by the code-owned review pass, which binds its model from this value instead (falling back to the coordinator model when unset) |
-| `REVIEW_EFFORT`           | — (empty, no baked default) | value for the orchestrator's code-owned review pass's own `--effort` flag; pass-through only, no normalization, same accepted values as `EFFORT` for the active Driver. Falls back to the coordinator's `EFFORT` when unset, so default behavior is unchanged for anyone not setting it. Meaningful only under `ORCHESTRATOR` |
+| `REVIEW_EFFORT`           | — (empty, no baked default) | value for the orchestrator's code-owned review pass's own `--effort` flag; pass-through only, no normalization, same accepted values as `EFFORT` for the active Driver. Overrides the roster reviewer entry's own effort (`rosterDefaults.reviewer.effort` by default) the same way `REVIEW_MODEL` overrides the reviewer's model — empty means follow the roster, a non-empty value overrides it. Meaningful only under `ORCHESTRATOR` |
 | `FILER_MODEL`             | `` (baked)             | filer subagent model tier; empty (default) means the filer is not provisioned — setting a model is the opt-in (recommended: `claude-haiku-4-5-20251001`); see [Filer](#filer). **Deprecated** — superseded by the [`roster`](#subagent-roster) option |
 | `WORKER_MODEL`            | `claude-sonnet-5` (baked) | implement-capable worker subagent model tier (empty drops the worker entry from `--agents`); the implementor prompt does not delegate to it yet. **Deprecated** — superseded by the [`roster`](#subagent-roster) option |
 | `MAX_PARALLEL_WORKERS`    | `2` (baked)            | cap on how many of a coordinator pass's slice-manifest workers the orchestrator dispatches concurrently; 2 is the no-tuning-safe default that captures most of the wall-clock win on small-slice-count issues while staying clear of the Box's memory-kill regime. Meaningful only under `ORCHESTRATOR` |
@@ -1335,8 +1334,8 @@ coordinator model, matching the pre-#2277 behavior.
 `--review-effort` (from `REVIEW_EFFORT`) binds the review pass's own
 `--effort` flag the same way, so the review pass runs at its own reasoning
 effort instead of silently inheriting the coordinator/implementor's
-`--effort`; empty falls back to the coordinator's `EFFORT`, matching the
-pre-#2387 behavior.
+`--effort`; empty now means the review pass follows the roster reviewer
+entry's own effort, and a non-empty value overrides it (issue #2512).
 An implement/fix pass's own REVIEW section is stripped to a short deferral
 (`review-loop-orchestrator.md`) that stops the turn right after COMMIT unless
 the seeded run-state above it already shows an `APPROVE` verdict, and the
@@ -2987,9 +2986,9 @@ turns it off; both `spindrift dispatch` and `spindrift research` accept
 either form.
 
 **Subagent roster.** The dogfood Consumer config's subagent models and
-efforts, and its orchestrator review effort, are set via `roster` and
-`defaults.reviewEffort` in `nix/dogfood-defaults.nix` — see [Subagent
-roster](#subagent-roster) for the mechanism and dogfood's specific values.
+efforts, and its orchestrator review effort, are all set via `roster` in
+`nix/dogfood-defaults.nix` — see [Subagent roster](#subagent-roster) for the
+mechanism and dogfood's specific values.
 
 **Research.** `dogfood.sh` drives `spindrift dispatch` (the work kind) by
 default; set `DOGFOOD_KIND=research` to drive `spindrift research` instead —
