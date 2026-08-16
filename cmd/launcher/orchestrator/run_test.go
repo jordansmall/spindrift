@@ -694,12 +694,17 @@ func TestRunKeepsPriorScoutBriefPathWhenConfigOmitsIt(t *testing.T) {
 }
 
 // TestRunRecordsPassSummaryPathIntoRunState verifies run records
-// cfg.passSummaryPath into the run-state artifact after a pass (issue #2549),
-// mirroring how it already records cfg.scoutBriefPath.
+// cfg.passSummaryPath into the run-state artifact after a pass that actually
+// wrote the file there (issue #2549), mirroring how it already records
+// cfg.scoutBriefPath. The fake driver-exec writes cfg.passSummaryPath itself
+// (issue #2549 follow-up review finding: a configured path alone is not
+// evidence the pass wrote anything, so run only records it once the file is
+// confirmed present on disk after the pass).
 func TestRunRecordsPassSummaryPathIntoRunState(t *testing.T) {
 	dir := t.TempDir()
 	callLog := filepath.Join(dir, "calls.log")
-	writeFakeDriverExec(t, dir, callLog, "exit 0\n")
+	passSummaryPath := filepath.Join(dir, "pass-summary.md")
+	writeFakeDriverExec(t, dir, callLog, fmt.Sprintf("printf 'summary' > %q\nexit 0\n", passSummaryPath))
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
 	promptFile := filepath.Join(dir, "prompt.txt")
@@ -713,7 +718,7 @@ func TestRunRecordsPassSummaryPathIntoRunState(t *testing.T) {
 		logPath:         filepath.Join(dir, "stream.log"),
 		heartbeatLog:    filepath.Join(dir, "heartbeat.log"),
 		stateFile:       filepath.Join(dir, "run-state.json"),
-		passSummaryPath: filepath.Join(dir, "pass-summary.md"),
+		passSummaryPath: passSummaryPath,
 	}
 
 	if _, err := run(cfg, &bytes.Buffer{}); err != nil {
@@ -773,18 +778,134 @@ func TestRunKeepsPriorPassSummaryPathWhenConfigOmitsIt(t *testing.T) {
 	}
 }
 
+// TestRunClearsPassSummaryPathWhenPassDoesNotWriteFile verifies run clears
+// state.PassSummaryPath to "" -- rather than carrying forward whatever a
+// PRIOR pass recorded -- when this pass's cfg.passSummaryPath is configured
+// but the pass itself never wrote the file (issue #2549 follow-up review
+// finding: a killed-mid-turn pass, or one that simply never wrote a
+// summary, must not hand the next pass a stale/previous summary as if it
+// were current).
+func TestRunClearsPassSummaryPathWhenPassDoesNotWriteFile(t *testing.T) {
+	dir := t.TempDir()
+	callLog := filepath.Join(dir, "calls.log")
+	// The fake driver-exec deliberately never writes cfg.passSummaryPath.
+	writeFakeDriverExec(t, dir, callLog, "exit 0\n")
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	stateFile := filepath.Join(dir, "run-state.json")
+	prior := runstate.RunState{PassSummaryPath: "/tmp/pass-summary.md"}
+	if err := runstate.WriteRunState(stateFile, prior); err != nil {
+		t.Fatal(err)
+	}
+
+	promptFile := filepath.Join(dir, "prompt.txt")
+	if err := os.WriteFile(promptFile, []byte("prompt"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config{
+		promptFile:      promptFile,
+		driverBin:       "claude",
+		logPath:         filepath.Join(dir, "stream.log"),
+		heartbeatLog:    filepath.Join(dir, "heartbeat.log"),
+		stateFile:       stateFile,
+		passSummaryPath: filepath.Join(dir, "pass-summary.md"),
+	}
+
+	if _, err := run(cfg, &bytes.Buffer{}); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	got, err := runstate.ReadRunState(stateFile)
+	if err != nil {
+		t.Fatalf("ReadRunState: %v", err)
+	}
+	if got.PassSummaryPath != "" {
+		t.Errorf("PassSummaryPath = %q, want cleared to \"\" (pass never wrote the file)", got.PassSummaryPath)
+	}
+}
+
+// TestRunUnlinksStalePassSummaryPathBeforePass verifies seedAndInvokePass
+// unlinks any pre-existing file at cfg.passSummaryPath before invoking this
+// pass's driver-exec (issue #2549 follow-up review finding), so a stale
+// file left on disk by a prior turn (e.g. a pass killed mid-turn) can never
+// outlive it into a later pass's own post-pass os.Stat check. Seeds a stale
+// file on disk before calling run, then confirms both that it is gone
+// afterward (the only thing in this test that would ever remove it) and
+// that state.PassSummaryPath is not recorded, since the pass whose fake
+// driver-exec runs after the unlink never re-creates the file.
+func TestRunUnlinksStalePassSummaryPathBeforePass(t *testing.T) {
+	dir := t.TempDir()
+	callLog := filepath.Join(dir, "calls.log")
+	// The fake driver-exec deliberately never writes cfg.passSummaryPath.
+	writeFakeDriverExec(t, dir, callLog, "exit 0\n")
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	passSummaryPath := filepath.Join(dir, "pass-summary.md")
+	if err := os.WriteFile(passSummaryPath, []byte("STALE SUMMARY FROM A PRIOR PASS"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	promptFile := filepath.Join(dir, "prompt.txt")
+	if err := os.WriteFile(promptFile, []byte("prompt"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config{
+		promptFile:      promptFile,
+		driverBin:       "claude",
+		logPath:         filepath.Join(dir, "stream.log"),
+		heartbeatLog:    filepath.Join(dir, "heartbeat.log"),
+		stateFile:       filepath.Join(dir, "run-state.json"),
+		passSummaryPath: passSummaryPath,
+	}
+
+	if _, err := run(cfg, &bytes.Buffer{}); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	if _, err := os.Stat(passSummaryPath); !os.IsNotExist(err) {
+		t.Errorf("os.Stat(passSummaryPath) err = %v, want IsNotExist (stale file should have been unlinked before the pass ran)", err)
+	}
+
+	got, err := runstate.ReadRunState(cfg.stateFile)
+	if err != nil {
+		t.Fatalf("ReadRunState: %v", err)
+	}
+	if got.PassSummaryPath != "" {
+		t.Errorf("PassSummaryPath = %q, want \"\" (stale file was unlinked and never re-written)", got.PassSummaryPath)
+	}
+}
+
 // TestRunWithReviewPassRecordsPassSummaryPathIntoRunState verifies
 // runWithReviewPass -- the loop production actually runs once entrypoint.sh
 // sets cfg.reviewPromptFile (ADR 0035) -- records cfg.passSummaryPath into
-// the run-state artifact after a pass (issue #2549), the same way
-// TestRunRecordsPassSummaryPathIntoRunState already pins for the legacy
-// loop. Drives the full implement -> review(BLOCK) -> fix -> review(APPROVE)
-// -> land sequence via reviewPassFakeDriverBody, mirroring
-// TestRunWithReviewPassSequenceOnBlockThenApprove's cfg shape.
+// the run-state artifact after a pass that actually wrote the file there
+// (issue #2549), the same way TestRunRecordsPassSummaryPathIntoRunState
+// already pins for the legacy loop. Drives the full implement ->
+// review(BLOCK) -> fix -> review(APPROVE) -> land sequence, mirroring
+// reviewPassFakeDriverBody's shape but with the land pass (call 5) also
+// writing cfg.passSummaryPath -- a configured path alone is not evidence a
+// pass wrote anything (issue #2549 follow-up review finding), so this test's
+// fake driver-exec must write the file itself for run to record it.
 func TestRunWithReviewPassRecordsPassSummaryPathIntoRunState(t *testing.T) {
 	dir := t.TempDir()
 	callLog := filepath.Join(dir, "calls.log")
-	writeFakeDriverExec(t, dir, callLog, reviewPassFakeDriverBody(callLog))
+	passSummaryPath := filepath.Join(dir, "pass-summary.md")
+	body := fmt.Sprintf(`: > "$DRIVER_LOG_PATH"
+n=$(wc -l < "%s")
+case "$n" in
+  2) printf '%%s' '%s' | tee -a "$DRIVER_LOG_PATH" ;;
+  4) printf '%%s' '%s' | tee -a "$DRIVER_LOG_PATH" ;;
+  5) printf '%%s' '%s' | tee -a "$DRIVER_LOG_PATH"; printf 'summary' > %q ;;
+esac
+exit 0
+`, callLog,
+		streamJSONOutcomeLine("VERDICT: BLOCK\\n\\n## Blocking\\n- run.go:1 -- bug\\n\\n## Non-blocking\\n- none"),
+		streamJSONOutcomeLine("VERDICT: APPROVE\\n\\n## Blocking\\n- none\\n\\n## Non-blocking\\n- none"),
+		streamJSONOutcomeLine("SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=done nonce=abc"),
+		passSummaryPath)
+	writeFakeDriverExec(t, dir, callLog, body)
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
 	promptFile := filepath.Join(dir, "prompt.txt")
@@ -807,7 +928,7 @@ func TestRunWithReviewPassRecordsPassSummaryPathIntoRunState(t *testing.T) {
 		stateFile:        stateFile,
 		maxReviewRounds:  3,
 		maxSlices:        10,
-		passSummaryPath:  filepath.Join(dir, "pass-summary.md"),
+		passSummaryPath:  passSummaryPath,
 	}
 
 	if _, err := run(cfg, &bytes.Buffer{}); err != nil {
@@ -1920,14 +2041,16 @@ exit 0
 func TestRunWithReviewPassSeedsFixPassWithPassSummaryPath(t *testing.T) {
 	dir := t.TempDir()
 	callLog := filepath.Join(dir, "calls.log")
+	passSummaryPath := filepath.Join(dir, "pass-summary.md")
 	body := fmt.Sprintf(`: > "$DRIVER_LOG_PATH"
 n=$(wc -l < "%s")
 case "$n" in
+  1) printf 'summary' > %q ;;
   2) printf '%%s' '%s' >> "$DRIVER_LOG_PATH" ;;
   3) printf '%%s' '%s' >> "$DRIVER_LOG_PATH" ;;
 esac
 exit 0
-`, callLog,
+`, callLog, passSummaryPath,
 		streamJSONOutcomeLine("VERDICT: BLOCK\\n\\n## Blocking\\n- run.go:1 -- bug"),
 		streamJSONOutcomeLine("SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=done nonce=abc"))
 	writeFakeDriverExec(t, dir, callLog, body)
@@ -1952,7 +2075,7 @@ exit 0
 		stateFile:        filepath.Join(dir, "run-state.json"),
 		maxReviewRounds:  3,
 		maxSlices:        10,
-		passSummaryPath:  filepath.Join(dir, "pass-summary.md"),
+		passSummaryPath:  passSummaryPath,
 	}
 
 	var stdout bytes.Buffer
