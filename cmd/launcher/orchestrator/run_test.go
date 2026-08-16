@@ -2651,6 +2651,91 @@ func TestScanReviewLogFindsNothingInPlainNarration(t *testing.T) {
 	}
 }
 
+// TestScanReviewLogIgnoresQuotedVerdictInOwnFindings verifies scanReviewLog
+// (issue #2546) does not let a reviewer's own findings text -- which may
+// quote a *different* verdict literal while describing a prior pass's
+// mistake -- flip the verdict away from the one the final message actually
+// opens with. The old substring-based last-match-wins scan found the later-
+// occurring "VERDICT: APPROVE" quoted inside the findings and overwrote the
+// real "VERDICT: BLOCK" first line with it; anchoring to the final message's
+// own first line instead means only that line's own strict prefix can set
+// the verdict.
+func TestScanReviewLogIgnoresQuotedVerdictInOwnFindings(t *testing.T) {
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "stream.log")
+	content := streamJSONOutcomeLine("VERDICT: BLOCK\\n\\n## Blocking\\n- reviewer note: the prior fix pass returned VERDICT: APPROVE but missed the nil check")
+	if err := os.WriteFile(logPath, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	verdict, _ := scanReviewLog(logPath, "claude")
+	if verdict != "BLOCK" {
+		t.Errorf("verdict = %q, want %q", verdict, "BLOCK")
+	}
+}
+
+// TestScanReviewLogRequiresStrictPrefixNotSubstring verifies scanReviewLog
+// (issue #2546) treats a verdict word appearing anywhere in the final
+// message's first line -- but not as its strict leading prefix -- as no
+// verdict at all, matching review-prompt.md's contract ("the first line must
+// be exactly `VERDICT: APPROVE` or `VERDICT: BLOCK`"), not a substring
+// match.
+func TestScanReviewLogRequiresStrictPrefixNotSubstring(t *testing.T) {
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "stream.log")
+	content := streamJSONOutcomeLine("Looking at this, my VERDICT: APPROVE is warranted here")
+	if err := os.WriteFile(logPath, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	verdict, findings := scanReviewLog(logPath, "claude")
+	if verdict != "" {
+		t.Errorf("verdict = %q, want empty", verdict)
+	}
+	if findings != "" {
+		t.Errorf("findings = %q, want empty", findings)
+	}
+}
+
+// TestScanReviewLogIgnoresQuotedVerdictInToolOutput verifies scanReviewLog
+// (issue #2546) is unaffected by an earlier top-level message quoting a
+// verdict literal as part of narrated tool output (e.g. grepping an old log)
+// -- the real verdict is still whatever the LAST such message's first line
+// carries.
+func TestScanReviewLogIgnoresQuotedVerdictInToolOutput(t *testing.T) {
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "stream.log")
+	content := streamJSONOutcomeLine("Ran grep -r VERDICT . and saw: VERDICT: APPROVE in an old log line") +
+		streamJSONOutcomeLine("VERDICT: BLOCK\\n\\n## Blocking\\n- something")
+	if err := os.WriteFile(logPath, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	verdict, _ := scanReviewLog(logPath, "claude")
+	if verdict != "BLOCK" {
+		t.Errorf("verdict = %q, want %q", verdict, "BLOCK")
+	}
+}
+
+// TestScanReviewLogIgnoresQuotedVerdictInDiffHunk verifies scanReviewLog
+// (issue #2546) is unaffected by an earlier top-level message quoting a
+// verdict literal inside a diff-hunk-shaped fragment -- the real verdict is
+// still whatever the LAST such message's first line carries.
+func TestScanReviewLogIgnoresQuotedVerdictInDiffHunk(t *testing.T) {
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "stream.log")
+	content := streamJSONOutcomeLine("Reviewing the diff:\\n+ // old comment said VERDICT: APPROVE here\\n- removed line") +
+		streamJSONOutcomeLine("VERDICT: BLOCK\\n\\n## Blocking\\n- issue")
+	if err := os.WriteFile(logPath, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	verdict, _ := scanReviewLog(logPath, "claude")
+	if verdict != "BLOCK" {
+		t.Errorf("verdict = %q, want %q", verdict, "BLOCK")
+	}
+}
+
 // TestFindVerdictPrefersBLOCKOnTie verifies findVerdict resolves a line
 // carrying both marker words to BLOCK -- the fail-unsafe direction (another
 // fix pass, never a premature stop) -- rather than whichever happens to
