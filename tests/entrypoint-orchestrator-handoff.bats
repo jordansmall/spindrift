@@ -309,7 +309,7 @@ setup() {
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   grep -q -- '--max-budget-tokens 500000' "$ORCHESTRATOR_LOG"
-  grep -q -- '--max-budget-usd 4.44' "$ORCHESTRATOR_LOG"
+  grep -qF -- '--max-budget-usd 4.44' "$ORCHESTRATOR_LOG"
 }
 
 # Unlike every other orchestrator-only flag in this file, --max-budget-tokens/
@@ -325,7 +325,7 @@ setup() {
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   grep -q -- '--max-budget-tokens 0' "$ORCHESTRATOR_LOG"
-  grep -q -- '--max-budget-usd 0.000000' "$ORCHESTRATOR_LOG"
+  grep -qF -- '--max-budget-usd 0.000000' "$ORCHESTRATOR_LOG"
 }
 
 # The --max-budget-tokens/--max-budget-usd gate is on _driver_invoker =
