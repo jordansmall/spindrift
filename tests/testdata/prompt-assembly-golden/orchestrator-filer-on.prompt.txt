@@ -119,10 +119,16 @@ branch's diff into your own tree with
 `git cherry-pick --no-commit $(git merge-base HEAD <branch>)..<branch>`,
 resolving any conflict by hand, then author the commit yourself so
 it lands in proper Conventional Commits form — do this before
-running that slice's checks or handing out the next one. This
-merge-base is computed against your own current HEAD each time, so
-it always accounts for every slice already integrated so far this
-run.
+handing out the next slice. This merge-base is computed against your
+own current HEAD each time, so it always accounts for every slice
+already integrated so far this run.
+
+Do not run the repo's own `checks-inbox` (or any other store build)
+after integrating each slice — one store build per slice is exactly
+the redundant, heavy round-trip this design exists to avoid.
+`checks-inbox` runs exactly once, in CHECK below, on the
+fully-integrated tree, after every slice you're dispatching this pass
+has landed.
 
 You still own CHECK, COMMIT, REVIEW, and OUTCOME yourself: the worker only
 implements and commits each slice inside its own worktree; the coordinator
