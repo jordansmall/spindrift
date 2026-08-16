@@ -142,6 +142,75 @@ let
   structuralPaths = import ../../lib/structural-paths.nix;
   resolveNixPath = import ../../lib/nixpath.nix;
 
+  # Frozen ground truth (issue #2522 review finding): every flakeOption =
+  # true knob name that existed in lib/env-schema.nix at the ADR 0037 Pass 2
+  # freeze commit, i.e. `git show b2602019~1:lib/env-schema.nix` filtered for
+  # `flakeOption = true`. Sourced from git history exactly once and must
+  # never be edited again -- same "frozen snapshot" spirit as
+  # lib/legacy-settings-section.nix's own header comment. This is the
+  # independent cross-check for legacySettingsExempt below: a knob in this
+  # list unconditionally predates the freeze and therefore had a real old
+  # `settings.<section>` alias, so it can never legitimately be
+  # legacySettingsExempt -- a real bug (mergeMethod wrongly marked exempt
+  # despite predating the freeze) slipped past the coverage assert before
+  # this list existed, because the assert trusted legacySettingsExempt at
+  # face value with nothing to catch the flag itself being wrong.
+  preFreezeFlakeOptionNames = [
+    "autoFormat"
+    "autoLint"
+    "baseBranch"
+    "boxForgeAndIssueAccess"
+    "branchPrefix"
+    "bwrapUnshareNet"
+    "codeForge"
+    "codeForgeAccumulationRepoDir"
+    "codeForgeRemoteURL"
+    "completeLabel"
+    "continuousDispatch"
+    "devShellName"
+    "devShellProbeTimeout"
+    "failedLabel"
+    "filerModel"
+    "ghTokenRefreshFile"
+    "gitUserEmail"
+    "gitUserName"
+    "holdJitterSecs"
+    "inProgressLabel"
+    "issueTracker"
+    "jiraBaseURL"
+    "jiraEmail"
+    "jiraIncludeComments"
+    "jiraProjectKey"
+    "jiraStatusMapping"
+    "label"
+    "localIssueReference"
+    "localIssuesDir"
+    "maxBudgetTokens"
+    "maxBudgetUSD"
+    "maxFixAttempts"
+    "maxJobs"
+    "maxParallel"
+    "maxRebaseAttempts"
+    "memoryLimit"
+    "mergeGuardPaths"
+    "mergeMethod"
+    "mergeMode"
+    "mergePollInterval"
+    "mergePollTimeout"
+    "model"
+    "orchestratorEnabled"
+    "overlapGate"
+    "pidsLimit"
+    "podmanNetwork"
+    "preflightStaleBase"
+    "repoSlug"
+    "reviewModel"
+    "scoutModel"
+    "transientBackoffSecs"
+    "transientRetryMax"
+    "workerModel"
+  ];
+
   # Coverage predicate (issue #2522): every flakeOption knob must either have
   # a row in lib/legacy-settings-section.nix or be explicitly
   # `legacySettingsExempt = true;` in lib/env-schema.nix (a knob added after
@@ -149,14 +218,19 @@ let
   # `settings.<section>` alias to preserve) -- a knob added with neither
   # would silently lose alias coverage. And every legacySettingsSection row
   # must still name a real schema knob -- a knob removed from the schema
-  # leaving its row behind would be a dead entry. Factored like
-  # schemaChoiceIssues so the guard can exercise this exact predicate
-  # against a synthetic/injected legacySettingsSection/schema pair, not only
-  # the real data.
+  # leaving its row behind would be a dead entry. A third invariant
+  # cross-checks legacySettingsExempt itself against
+  # preFreezeFlakeOptionNames above, rather than trusting the hand-set flag
+  # at face value: legacySettingsExempt and a knob's map row are both
+  # hand-edited in the same PR, so they can be wrong together (the
+  # mergeMethod bug this closes -- wrongly marked exempt despite predating
+  # the freeze). Factored like schemaChoiceIssues so the guard can exercise
+  # this exact predicate against a synthetic/injected
+  # legacySettingsSection/schema pair, not only the real data.
   legacySettingsSectionIssues =
     { legacySettingsSection, schema }:
     let
-      inherit (pkgs.lib) filter attrNames;
+      inherit (pkgs.lib) filter attrNames elem;
       flakeOptionNames = filter (n: schema.${n}.flakeOption or false) (attrNames schema);
     in
     {
@@ -164,14 +238,22 @@ let
         n: !(schema.${n}.legacySettingsExempt or false) && !(legacySettingsSection ? ${n})
       ) flakeOptionNames;
       stale = filter (n: !(schema ? ${n})) (attrNames legacySettingsSection);
+      # A knob marked legacySettingsExempt = true; whose name nonetheless
+      # appears in the frozen pre-freeze list unconditionally predates the
+      # freeze, so it must have had a real old alias -- the exemption is
+      # wrong and it needs a real lib/legacy-settings-section.nix row
+      # instead.
+      wronglyExempt = filter (
+        n: (schema.${n}.legacySettingsExempt or false) && elem n preFreezeFlakeOptionNames
+      ) flakeOptionNames;
     };
 
   # Throws via legacySettingsSectionIssues on a bad map/schema pair, else
   # returns legacySettingsSection unchanged. Shared so
   # legacy-settings-section-coverage-guard exercises this exact assertion
   # path (not just legacySettingsSectionIssues in isolation) -- dropping
-  # either assert here would make that guard fail too, not stay silently
-  # green.
+  # any one of the three asserts here would make that guard fail too, not
+  # stay silently green.
   assertLegacySettingsSectionOk =
     { legacySettingsSection, schema }:
     let
@@ -182,6 +264,8 @@ let
       "lib/legacy-settings-section.nix: every flakeOption knob must have a row here or be lib/env-schema.nix legacySettingsExempt = true;: ${concatStringsSep ", " issues.missing}";
     assert assertMsg (issues.stale == [ ])
       "lib/legacy-settings-section.nix: entry has no matching lib/env-schema.nix knob (stale alias) -- remove it: ${concatStringsSep ", " issues.stale}";
+    assert assertMsg (issues.wronglyExempt == [ ])
+      "lib/env-schema.nix: legacySettingsExempt = true; but the knob appears in nix/checks/schema-drift.nix's frozen preFreezeFlakeOptionNames list, i.e. it predates the ADR 0037 Pass 2 freeze and had a real old settings.<section> alias -- give it a real lib/legacy-settings-section.nix row instead of an exemption: ${concatStringsSep ", " issues.wronglyExempt}";
     legacySettingsSection;
 
   # Uniqueness + prefix-disjointness predicate over a flat list of dotted
@@ -1423,15 +1507,18 @@ in
     pkgs.runCommand "legacy-settings-section-coverage" { } "touch $out";
 
   # Regression guard (issue #2522): the coverage assert above must actually
-  # detect both failure shapes -- a flakeOption knob left with no alias and
-  # no exemption (missing), and a legacySettingsSection row whose knob no
-  # longer exists in the schema (stale) -- not just pass vacuously because
-  # the real data already satisfies both invariants. Runs
-  # assertLegacySettingsSectionOk -- the exact function
-  # legacy-settings-section-coverage calls -- against two independently
-  # mutated copies of the real map, each violating exactly one invariant,
-  # via tryEval, so this fails if either assert is ever dropped from
-  # assertLegacySettingsSectionOk (not just from legacySettingsSectionIssues).
+  # detect all failure shapes -- a flakeOption knob left with no alias and
+  # no exemption (missing), a legacySettingsSection row whose knob no longer
+  # exists in the schema (stale), and a knob marked legacySettingsExempt
+  # despite predating the freeze (wronglyExempt) -- not just pass vacuously
+  # because the real data already satisfies every invariant. Also proves the
+  # exemption escape hatch itself still works for a knob that genuinely
+  # postdates the freeze (exemptSkip). Runs assertLegacySettingsSectionOk --
+  # the exact function legacy-settings-section-coverage calls -- against
+  # independently mutated copies of the real map/schema, each exercising
+  # exactly one invariant, via tryEval, so this fails if any assert is ever
+  # dropped from assertLegacySettingsSectionOk (not just from
+  # legacySettingsSectionIssues).
   legacy-settings-section-coverage-guard =
     let
       inherit (pkgs.lib) assertMsg;
@@ -1445,6 +1532,28 @@ in
       staleLegacySettingsSection = legacySettingsSection // {
         removedKnobNeverInSchema = "someSection";
       };
+      # A synthetic flakeOption knob whose name appears in neither the real
+      # schema nor preFreezeFlakeOptionNames -- a knob that genuinely
+      # postdates the freeze, the case legacySettingsExempt exists for. No
+      # map row, legacySettingsExempt = true; -- assertLegacySettingsSectionOk
+      # must accept it (no missing, no wronglyExempt).
+      exemptSkipSchema = schema // {
+        syntheticPostFreezeKnob = {
+          flakeOption = true;
+          legacySettingsExempt = true;
+        };
+      };
+      # mergeMode is a real pre-freeze knob (in preFreezeFlakeOptionNames)
+      # that already has a real row in legacySettingsSection -- decorating
+      # its schema entry with legacySettingsExempt = true; reproduces the
+      # exact mergeMethod bug shape this closes (a knob wrongly marked
+      # exempt despite predating the freeze) and must be caught by
+      # wronglyExempt.
+      wronglyExemptSchema = schema // {
+        mergeMode = schema.mergeMode // {
+          legacySettingsExempt = true;
+        };
+      };
       missingResult = builtins.tryEval (assertLegacySettingsSectionOk {
         legacySettingsSection = missingLegacySettingsSection;
         inherit schema;
@@ -1453,10 +1562,22 @@ in
         legacySettingsSection = staleLegacySettingsSection;
         inherit schema;
       });
+      exemptSkipResult = builtins.tryEval (assertLegacySettingsSectionOk {
+        inherit legacySettingsSection;
+        schema = exemptSkipSchema;
+      });
+      wronglyExemptResult = builtins.tryEval (assertLegacySettingsSectionOk {
+        inherit legacySettingsSection;
+        schema = wronglyExemptSchema;
+      });
     in
     assert assertMsg (!missingResult.success)
       "legacy-settings-section-coverage-guard: expected assertLegacySettingsSectionOk to reject a legacySettingsSection with filerModel's row dropped (a flakeOption knob left with no alias and no exemption), but it evaluated successfully";
     assert assertMsg (!staleResult.success)
       "legacy-settings-section-coverage-guard: expected assertLegacySettingsSectionOk to reject a legacySettingsSection with a stale row injected (no matching schema entry), but it evaluated successfully";
+    assert assertMsg exemptSkipResult.success
+      "legacy-settings-section-coverage-guard: expected assertLegacySettingsSectionOk to accept a synthetic knob genuinely postdating the freeze (legacySettingsExempt = true;, not in preFreezeFlakeOptionNames, no map row), but it failed";
+    assert assertMsg (!wronglyExemptResult.success)
+      "legacy-settings-section-coverage-guard: expected assertLegacySettingsSectionOk to reject mergeMode (a pre-freeze knob per preFreezeFlakeOptionNames, with a real map row) decorated with an injected legacySettingsExempt = true; -- the exact mergeMethod bug shape -- but it evaluated successfully";
     pkgs.runCommand "legacy-settings-section-coverage-guard" { } "touch $out";
 }
