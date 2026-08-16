@@ -1,5 +1,22 @@
 # Migration Guide
 
+## `agent-trigger` dropped from the versioned label lifecycle contract (issue #2557)
+
+[`VERSIONING.md`](VERSIONING.md)'s "Label lifecycle names" row no longer lists
+`agent-trigger` as part of the versioned contract. It's an internal
+CI-dispatch-workflow label `agent-dispatch.yml` swaps away the moment it
+claims an issue, not a durable state like the four triage names
+(`ready-for-agent`, `agent-in-progress`, `agent-complete`, `agent-failed`) —
+so it never should have carried a semver guarantee. The label itself is
+unaffected and still in active use by `.github/workflows/agent-dispatch.yml`;
+only the documented *contract* — the promise that its name won't change
+without a version bump — is withdrawn. If you depended on `agent-trigger`'s
+name as a stable integration point, it may still change in a future
+non-major release.
+
+The same table also now enumerates the previously-undocumented research
+(ADR 0022) and priority (ADR 0040) label families as part of the contract.
+
 ## Choices-bearing knobs now enforce their valid values (issue #2519)
 
 The seven knobs that declare a `choices` list in `lib/env-schema.nix`
