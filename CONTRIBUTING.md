@@ -70,7 +70,8 @@ dogfood-only — the generic harness keeps its empty `skills` default.
 
 After editing `lib/env-schema.nix`, regenerate the artifacts it drives —
 `templates/default/harness.env.example`, `cmd/launcher/flagtable_gen.go`,
-`docs/flake-options.md`, `tests/box_env_gen.bash`, and the generated section of
+`docs/flake-options.md`, `tests/box_env_gen.bash`,
+`cmd/launcher/internal/doctor/labelmeta_gen.go`, and the generated section of
 `templates/default/flake.nix`'s commented-out `settings` example — instead of
 hand-editing them until the drift-guard checks (`nix/checks.nix`) go quiet:
 
@@ -102,7 +103,11 @@ is the in-box entrypoint. Respect that split — it is the point of the project.
   backend; `env-schema.nix`'s tracker/forge choices derive from it),
   `baked-skills.nix` (the registry of skills `entrypoint.sh` probes at
   `DRIVER_SKILLS_DIR/<name>/SKILL.md` — one row per skill drives every
-  hand-mirrored consumer copy), and `renderers.nix` (the schema → artifact
+  hand-mirrored consumer copy), `labels.nix` (the label registry — one row
+  per label family/role, rendered into
+  `cmd/launcher/internal/doctor/labelmeta_gen.go` by `renderers.nix`'s
+  `renderLabelRegistryGo`, drift-guarded by `nix/checks/schema-drift.nix`'s
+  `label-registry-gen` check), and `renderers.nix` (the schema → artifact
   render functions shared by the `nix/checks.nix` drift guards and
   `nix run .#regen`). No language-specific tooling belongs here — the core
   is language-agnostic ([ADR 0003](docs/adr/0003-language-agnostic-core.md)).
