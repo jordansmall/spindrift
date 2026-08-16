@@ -280,8 +280,17 @@ func LaunchWorkers(cfg config, manifest SliceManifest, opts WorkerOptions, stdou
 // goroutine at once, uncapped). Blocks until every task has returned. Every
 // task is invoked exactly once, regardless of maxParallel -- callers (like
 // LaunchWorkers, whose own AC2 promises exactly one WorkerResult per slice)
-// rely on that.
+// rely on that. maxParallel <= 0 falls back to serial (1 at a time) rather
+// than an unbuffered semaphore: a zero-capacity channel's send blocks
+// forever, since the receiving goroutine is only spawned after the send
+// completes -- LaunchWorkers already normalizes its own opts.MaxParallel
+// before calling this, but that's a caller convention, not something this
+// function's own doc comment can rely on to keep its "invoked exactly once"
+// promise true.
 func runBounded(maxParallel int, tasks []func()) {
+	if maxParallel <= 0 {
+		maxParallel = 1
+	}
 	sem := make(chan struct{}, maxParallel)
 	var wg sync.WaitGroup
 	for _, task := range tasks {
