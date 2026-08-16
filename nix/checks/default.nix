@@ -13,6 +13,22 @@
   flake-parts,
 }:
 let
+  buildConstants = import ../../lib/build-constants.nix;
+
+  # The vendored module tree for cmd/launcher's external deps
+  # (charmbracelet/bubbletea, issue #784), built once here so every check
+  # module that needs to `go build`/`go vet`/`go test` a reconstructed
+  # launcher tree (nix/checks/go.nix, nix/checks/baked-skills.nix) shares the
+  # exact same vendor tree instead of each re-deriving its own buildGoModule
+  # call against the same inputs.
+  launcherGoModules =
+    (pkgs.buildGoModule {
+      pname = "spindrift-launcher-modules";
+      version = "0";
+      src = ../../cmd/launcher;
+      vendorHash = buildConstants.launcherVendorHash;
+    }).goModules;
+
   common = {
     inherit
       pkgs
@@ -21,6 +37,7 @@ let
       nixpkgs
       system
       flake-parts
+      launcherGoModules
       ;
   };
   sourceChecks =

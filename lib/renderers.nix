@@ -391,7 +391,7 @@ rec {
     bakedSkills:
     concatStrings (
       map (
-        s: "  [ -f \"$DRIVER_SKILLS_DIR/${s.name}/SKILL.md\" ] && _ap_args+=(--${s.flag})\n"
+        s: "  [ -f \"$DRIVER_SKILLS_DIR/${s.name}/SKILL.md\" ] && _ap_args+=(--${s.name}-skill-baked)\n"
       ) bakedSkills
     );
 
@@ -402,7 +402,7 @@ rec {
     concatStrings (
       map (
         s:
-        "\t${s.goVar} := fs.Bool(\"${s.flag}\", false, \"true when DRIVER_SKILLS_DIR/${s.name}/SKILL.md was baked\")\n"
+        "\t${s.goVar} := fs.Bool(\"${s.name}-skill-baked\", false, \"true when DRIVER_SKILLS_DIR/${s.name}/SKILL.md was baked\")\n"
       ) bakedSkills
     );
 

@@ -33,9 +33,40 @@ let
 
   # Escapes a literal string's regex metacharacters so it can be used as a
   # builtins.split/builtins.match pattern without them being read as regex.
-  escapeRegex = builtins.replaceStrings
-    [ "\\" "^" "$" "." "|" "?" "*" "+" "(" ")" "[" "]" "{" "}" ]
-    [ "\\\\" "\\^" "\\$" "\\." "\\|" "\\?" "\\*" "\\+" "\\(" "\\)" "\\[" "\\]" "\\{" "\\}" ];
+  escapeRegex =
+    builtins.replaceStrings
+      [
+        "\\"
+        "^"
+        "$"
+        "."
+        "|"
+        "?"
+        "*"
+        "+"
+        "("
+        ")"
+        "["
+        "]"
+        "{"
+        "}"
+      ]
+      [
+        "\\\\"
+        "\\^"
+        "\\$"
+        "\\."
+        "\\|"
+        "\\?"
+        "\\*"
+        "\\+"
+        "\\("
+        "\\)"
+        "\\["
+        "\\]"
+        "\\{"
+        "\\}"
+      ];
 
   hasSuffix =
     suffix: content:
@@ -53,6 +84,14 @@ let
       content;
 in
 rec {
+  # Escapes a literal string's regex metacharacters so it can be used as a
+  # builtins.split/builtins.match pattern without them being read as regex --
+  # exported so other marker-splitting call sites (e.g.
+  # nix/checks/baked-skills.nix's `between`) can split on a literal marker
+  # without the same risk this file's own splitOnce/injectSection guard
+  # against.
+  inherit escapeRegex;
+
   # Slices `text` from `startMarker` (inclusive) up to `endMarker`
   # (exclusive), asserting each marker appears exactly once — the same
   # single-occurrence guarantee sliceFromMarker below relies on, so a
@@ -67,9 +106,7 @@ rec {
 
   # Slices `text` from `marker` (inclusive) to the end of the string,
   # asserting it appears exactly once.
-  sliceFromMarker =
-    marker: text:
-    marker + (splitOnce marker text).after;
+  sliceFromMarker = marker: text: marker + (splitOnce marker text).after;
 
   # A sliced shared block already ends with the blank line that separated it
   # from the next heading in its source file, so chaining two of them back

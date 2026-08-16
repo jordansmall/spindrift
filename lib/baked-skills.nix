@@ -16,10 +16,11 @@
 # Each row:
 #   name  - the skill directory basename under DRIVER_SKILLS_DIR (the same
 #           `name` field dogfood-skills.nix/image.nix's harnessSkills rows
-#           use).
-#   flag  - the driver-exec `assemble-prompt` CLI flag name, forwarded by
-#           entrypoint.sh only when the probe finds
-#           DRIVER_SKILLS_DIR/<name>/SKILL.md.
+#           use). The driver-exec `assemble-prompt` CLI flag name --
+#           forwarded by entrypoint.sh only when the probe finds
+#           DRIVER_SKILLS_DIR/<name>/SKILL.md -- derives from it as
+#           "${name}-skill-baked"; it isn't a separate field since it never
+#           varies independently of name.
 #   goVar - the local Go variable name assembleprompt_cmd.go's flag parsing
 #           binds the flag to.
 #   field - the promptassembly.Env struct field name.
@@ -31,35 +32,30 @@
 [
   {
     name = "caveman";
-    flag = "caveman-skill-baked";
     goVar = "cavemanSkillBaked";
     field = "CavemanSkillBaked";
     gate = "CAVEMAN_BAKED";
   }
   {
     name = "tdd";
-    flag = "tdd-skill-baked";
     goVar = "tddSkillBaked";
     field = "TDDSkillBaked";
     gate = "TDD_BAKED";
   }
   {
     name = "commit";
-    flag = "commit-skill-baked";
     goVar = "commitSkillBaked";
     field = "CommitSkillBaked";
     gate = "COMMIT_BAKED";
   }
   {
     name = "code-review";
-    flag = "code-review-skill-baked";
     goVar = "codeReviewSkillBaked";
     field = "CodeReviewSkillBaked";
     gate = "CODE_REVIEW_BAKED";
   }
   {
     name = "auto-format";
-    flag = "auto-format-skill-baked";
     goVar = "autoFormatSkillBaked";
     field = "AutoFormatSkillBaked";
     gate = "AUTO_FORMAT_BAKED";
@@ -67,7 +63,6 @@
   }
   {
     name = "auto-lint";
-    flag = "auto-lint-skill-baked";
     goVar = "autoLintSkillBaked";
     field = "AutoLintSkillBaked";
     gate = "AUTO_LINT_BAKED";

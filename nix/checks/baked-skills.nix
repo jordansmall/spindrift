@@ -4,30 +4,20 @@
 # each committed generated span still matches lib/renderers.nix's
 # renderBakedSkill* output, and that adding a row to the list flows through
 # every renderer without touching any consumer file.
-{ pkgs, ... }:
+{ pkgs, launcherGoModules, ... }:
 let
   renderers = import ../../lib/renderers.nix;
   bakedSkills = import ../../lib/baked-skills.nix;
-  buildConstants = import ../../lib/build-constants.nix;
-
-  # The vendored module tree for cmd/launcher's external deps, needed so
-  # baked-skills-add-row-guard (below) can actually `go build`/`go test` the
-  # reconstructed tree it splices together -- mirrors nix/checks/go.nix's own
-  # launcherGoModules binding exactly (same buildGoModule inputs, same
-  # lib/build-constants.nix vendorHash), so this can't drift from what
-  # go.nix's own go vet/test/build checks already vendor against.
-  launcherGoModules =
-    (pkgs.buildGoModule {
-      pname = "spindrift-launcher-modules";
-      version = "0";
-      src = ../../cmd/launcher;
-      vendorHash = buildConstants.launcherVendorHash;
-    }).goModules;
+  inherit (import ../../lib/prompt-inject.nix) escapeRegex;
 
   # Isolates the text strictly between a literal begin/end marker line pair,
   # mirroring nix/checks/schema-drift.nix's assertDefaultModelsDocOk (which
   # itself mirrors nix/regen.nix's write_between) so this guard can never
-  # drift from what write_between actually replaces.
+  # drift from what write_between actually replaces. escapeRegex guards
+  # `builtins.split`, which reads its pattern arg as an ERE, not a literal --
+  # a future marker containing a regex metacharacter (`(`, `+`, `[`, ...)
+  # would otherwise silently split on the wrong text instead of the literal
+  # marker line.
   between =
     {
       src,
@@ -36,7 +26,7 @@ let
       end,
     }:
     let
-      beginMarker = begin + "\n";
+      beginMarker = escapeRegex (begin + "\n");
       afterBegin =
         let
           parts = builtins.split beginMarker src;
@@ -47,7 +37,7 @@ let
           throw "${file}: BEGIN marker not found: ${begin}";
       committed =
         let
-          parts = builtins.split end afterBegin;
+          parts = builtins.split (escapeRegex end) afterBegin;
         in
         if builtins.length parts >= 3 then
           builtins.elemAt parts 0
@@ -76,6 +66,26 @@ let
         got:  ${committed}
         want: ${generated}'';
     true;
+
+  # The awk technique that replaces the text strictly between (and
+  # preserving) a literal begin/end marker line pair with the contents of a
+  # raw file -- shared, as a single bash function definition interpolated
+  # into every runCommand script below that needs it, so
+  # assertGoSpanGofmtOk's single-span reconstruction and
+  # baked-skills-add-row-guard's multi-file, multi-span reconstruction can't
+  # drift into two different splice implementations.
+  spliceShellFn = ''
+    splice() {
+      local committed="$1" beginMarker="$2" endMarker="$3" rawfile="$4" outfile="$5"
+      awk -v begin="$beginMarker" -v end="$endMarker" -v rawfile="$rawfile" '
+        BEGIN { while ((getline line < rawfile) > 0) content = content line "\n" }
+        $0 == begin { print; printf "%s", content; skip=1; next }
+        $0 == end { skip=0 }
+        skip { next }
+        { print }
+      ' "$committed" > "$outfile"
+    }
+  '';
 
   # Two of the five generated spans (the assembleprompt_cmd.go Env{} literal
   # assignments and the env.go struct fields) sit inside a Go struct
@@ -123,13 +133,8 @@ let
           endMarker = end;
         }
         ''
-          awk -v begin="$beginMarker" -v end="$endMarker" -v rawfile="$raw" '
-            BEGIN { while ((getline line < rawfile) > 0) content = content line "\n" }
-            $0 == begin { print; printf "%s", content; skip=1; next }
-            $0 == end { skip=0 }
-            skip { next }
-            { print }
-          ' "$committed" > reconstructed.go
+          ${spliceShellFn}
+          splice "$committed" "$beginMarker" "$endMarker" "$raw" reconstructed.go
           gofmt -w reconstructed.go
           diff reconstructed.go "$committed" \
             || { echo "${toString file} generated skill-baked span (between \"${begin}\" / \"${end}\") is out of sync with lib/baked-skills.nix -- regenerate it with \`nix run .#regen\`" >&2; exit 1; }
@@ -200,7 +205,6 @@ in
     let
       extra = {
         name = "test-skill";
-        flag = "test-skill-skill-baked";
         goVar = "testSkillSkillBaked";
         field = "TestSkillSkillBaked";
         gate = "TEST_SKILL_BAKED";
@@ -372,22 +376,7 @@ in
           ;
       }
       ''
-        # splice replaces the text strictly between (and preserving) a
-        # literal begin/end marker line pair with the contents of a raw file
-        # -- the same awk technique assertGoSpanGofmtOk above uses to
-        # reconstruct a whole file, generalized here into a reusable
-        # function so it can run against agent/entrypoint.sh (a shell file,
-        # no gofmt needed) as well as the three Go files below.
-        splice() {
-          local committed="$1" beginMarker="$2" endMarker="$3" rawfile="$4" outfile="$5"
-          awk -v begin="$beginMarker" -v end="$endMarker" -v rawfile="$rawfile" '
-            BEGIN { while ((getline line < rawfile) > 0) content = content line "\n" }
-            $0 == begin { print; printf "%s", content; skip=1; next }
-            $0 == end { skip=0 }
-            skip { next }
-            { print }
-          ' "$committed" > "$outfile"
-        }
+        ${spliceShellFn}
 
         # Step 1+2: reconstruct the real committed files with the injected
         # row's generated spans spliced in, inside a real copy of the
