@@ -2,24 +2,24 @@ package forge
 
 import "strings"
 
-// Snapshot returns the frozen issue-read text for num against tracker: if
-// tracker implements SnapshotReader, its Snapshot(num) result verbatim —
+// Snapshot returns the frozen issue-read text for num: if caps.SnapshotReader
+// is resolved (see ResolveCapabilities), its Snapshot(num) result verbatim —
 // including any error, which is returned as-is rather than masked by a
-// fallback; otherwise tracker.Issue(num).Body (the local/jira degrade — no
-// separate comments to append, either because they're already inline in the
-// body (local) or unavailable (jira)), plus trailing "parent: <value>",
-// "state: <value>", and "labels: <comma-separated>" lines, each appended
-// only when the corresponding Issue field is non-empty/non-zero (skipped
-// entirely otherwise), in that order. Issue(num).Body is the local
-// adapter's Markdown body alone, stripped of its YAML frontmatter (ADR
-// 0013) — Parent, State, and Labels are all frontmatter-derived, so without
-// this they would vanish from the snapshot entirely: a local issue-read
+// fallback; otherwise tracker.Issue(num).Body (the local degrade — its
+// comments are already inline in the body, so there is nothing a separate
+// Snapshot call would add), plus trailing "parent: <value>", "state:
+// <value>", and "labels: <comma-separated>" lines, each appended only when
+// the corresponding Issue field is non-empty/non-zero (skipped entirely
+// otherwise), in that order. Issue(num).Body is the local adapter's
+// Markdown body alone, stripped of its YAML frontmatter (ADR 0013) —
+// Parent, State, and Labels are all frontmatter-derived, so without this
+// they would vanish from the snapshot entirely: a local issue-read
 // fragment's "follow its parent link" instruction would be unfollowable,
 // and the issue's state/labels would silently disappear from what a local
 // box's issue-read produces (issue #2547).
-func Snapshot(tracker IssueTracker, num string) (string, error) {
-	if sr, ok := tracker.(SnapshotReader); ok {
-		return sr.Snapshot(num)
+func Snapshot(caps Capabilities, tracker IssueTracker, num string) (string, error) {
+	if caps.SnapshotReader != nil {
+		return caps.SnapshotReader.Snapshot(num)
 	}
 	iss, err := tracker.Issue(num)
 	if err != nil {
@@ -47,17 +47,23 @@ type CommentAttribution struct {
 	Body      string
 }
 
-// FormatSnapshot renders body plus the last 10 of comments into the frozen
-// issue-read text every SnapshotReader implementation returns: the issue
-// body, a blank line, then one "<author> (<createdAt>): <body>" line per
-// kept comment, in original chronological order. Comments beyond the last
-// 10 are dropped from the front, mirroring `gh issue view --json comments
-// --jq '.comments[-10:]'`. Zero comments renders as just the body, with no
-// dangling trailing blank line — shared by the github and forgejo
-// SnapshotReader implementations so this formatting exists exactly once.
+// maxSnapshotComments is how many of the most recent comments FormatSnapshot
+// keeps — the single source of truth for the cap FormatSnapshot's own doc
+// and SnapshotReader's (issuetracker.go) restate in prose.
+const maxSnapshotComments = 10
+
+// FormatSnapshot renders body plus the last maxSnapshotComments of comments
+// into the frozen issue-read text every SnapshotReader implementation
+// returns: the issue body, a blank line, then one "<author> (<createdAt>):
+// <body>" line per kept comment, in original chronological order. Comments
+// beyond the cap are dropped from the front, mirroring `gh issue view --json
+// comments --jq '.comments[-10:]'`. Zero comments renders as just the body,
+// with no dangling trailing blank line — shared by every SnapshotReader
+// implementation (github, forgejo, and jira) so this formatting exists
+// exactly once.
 func FormatSnapshot(body string, comments []CommentAttribution) string {
-	if len(comments) > 10 {
-		comments = comments[len(comments)-10:]
+	if len(comments) > maxSnapshotComments {
+		comments = comments[len(comments)-maxSnapshotComments:]
 	}
 	if len(comments) == 0 {
 		return body

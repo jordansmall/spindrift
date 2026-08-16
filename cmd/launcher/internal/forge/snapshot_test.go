@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/local"
 )
@@ -30,8 +31,9 @@ func TestSnapshot_UsesSnapshotReaderWhenImplemented(t *testing.T) {
 	fake := forge.NewFake()
 	fake.SetIssue(forge.Issue{Number: "10", Body: "the plain body, not the snapshot"})
 	tracker := &snapshotReaderFake{Fake: fake, text: "body\n\nalice (t1): hi"}
+	caps := forge.ResolveCapabilities(forge.NewFake().AsPushOnly(), tracker, backend.Descriptor{}, backend.Descriptor{})
 
-	got, err := forge.Snapshot(tracker, "10")
+	got, err := forge.Snapshot(caps, tracker, "10")
 	if err != nil {
 		t.Fatalf("Snapshot: %v", err)
 	}
@@ -48,8 +50,9 @@ func TestSnapshot_UsesSnapshotReaderErrorWhenImplemented(t *testing.T) {
 	fake.SetIssue(forge.Issue{Number: "10", Body: "fallback body"})
 	wantErr := forge.ErrNotFound
 	tracker := &snapshotReaderFake{Fake: fake, err: wantErr}
+	caps := forge.ResolveCapabilities(forge.NewFake().AsPushOnly(), tracker, backend.Descriptor{}, backend.Descriptor{})
 
-	_, err := forge.Snapshot(tracker, "10")
+	_, err := forge.Snapshot(caps, tracker, "10")
 	if err != wantErr {
 		t.Fatalf("Snapshot() error = %v, want %v", err, wantErr)
 	}
@@ -57,16 +60,17 @@ func TestSnapshot_UsesSnapshotReaderErrorWhenImplemented(t *testing.T) {
 
 // TestSnapshot_FallsBackToIssueBodyWhenNotImplemented verifies forge.Snapshot
 // degrades to tracker.Issue(num).Body when tracker doesn't implement
-// SnapshotReader — the local/jira degrade documented on SnapshotReader.
+// SnapshotReader — the local degrade documented on SnapshotReader.
 func TestSnapshot_FallsBackToIssueBodyWhenNotImplemented(t *testing.T) {
 	tracker := forge.NewFake()
 	tracker.SetIssue(forge.Issue{Number: "10", Body: "the plain issue body"})
 
-	if _, ok := interface{}(tracker).(forge.SnapshotReader); ok {
+	caps := forge.ResolveCapabilities(forge.NewFake().AsPushOnly(), tracker, backend.Descriptor{}, backend.Descriptor{})
+	if caps.SnapshotReader != nil {
 		t.Fatal("forge.Fake unexpectedly implements forge.SnapshotReader; test assumes it does not")
 	}
 
-	got, err := forge.Snapshot(tracker, "10")
+	got, err := forge.Snapshot(caps, tracker, "10")
 	if err != nil {
 		t.Fatalf("Snapshot: %v", err)
 	}
@@ -80,8 +84,9 @@ func TestSnapshot_FallsBackToIssueBodyWhenNotImplemented(t *testing.T) {
 func TestSnapshot_FallsBackPropagatesIssueError(t *testing.T) {
 	tracker := forge.NewFake()
 	// No issue "99" was ever set, so tracker.Issue("99") errors.
+	caps := forge.ResolveCapabilities(forge.NewFake().AsPushOnly(), tracker, backend.Descriptor{}, backend.Descriptor{})
 
-	if _, err := forge.Snapshot(tracker, "99"); err == nil {
+	if _, err := forge.Snapshot(caps, tracker, "99"); err == nil {
 		t.Fatal("Snapshot: want error for unknown issue, got nil")
 	}
 }
@@ -113,11 +118,12 @@ func TestSnapshot_LocalTrackerIncludesParent(t *testing.T) {
 	}
 	tracker := local.NewLocalTracker(dir, labels)
 
-	if _, ok := interface{}(tracker).(forge.SnapshotReader); ok {
+	caps := forge.ResolveCapabilities(forge.NewFake().AsPushOnly(), tracker, backend.Descriptor{}, backend.Descriptor{})
+	if caps.SnapshotReader != nil {
 		t.Fatal("local.LocalTracker unexpectedly implements forge.SnapshotReader; test assumes it does not")
 	}
 
-	got, err := forge.Snapshot(tracker, "10")
+	got, err := forge.Snapshot(caps, tracker, "10")
 	if err != nil {
 		t.Fatalf("Snapshot: %v", err)
 	}
@@ -157,8 +163,9 @@ func TestSnapshot_LocalTrackerIncludesStateAndLabels(t *testing.T) {
 		Failed:       "agent-failed",
 	}
 	tracker := local.NewLocalTracker(dir, labels)
+	caps := forge.ResolveCapabilities(forge.NewFake().AsPushOnly(), tracker, backend.Descriptor{}, backend.Descriptor{})
 
-	got, err := forge.Snapshot(tracker, "11")
+	got, err := forge.Snapshot(caps, tracker, "11")
 	if err != nil {
 		t.Fatalf("Snapshot: %v", err)
 	}
@@ -195,8 +202,9 @@ func TestSnapshot_LocalTrackerClosedStateAndNoLabels(t *testing.T) {
 		Failed:       "agent-failed",
 	}
 	tracker := local.NewLocalTracker(dir, labels)
+	caps := forge.ResolveCapabilities(forge.NewFake().AsPushOnly(), tracker, backend.Descriptor{}, backend.Descriptor{})
 
-	got, err := forge.Snapshot(tracker, "12")
+	got, err := forge.Snapshot(caps, tracker, "12")
 	if err != nil {
 		t.Fatalf("Snapshot: %v", err)
 	}

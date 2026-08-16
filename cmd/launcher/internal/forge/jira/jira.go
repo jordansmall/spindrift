@@ -247,10 +247,12 @@ type jiraCommentsPayload struct {
 }
 
 // Issue returns the Jira issue's summary, description, status, and labels.
-// When IncludeComments is set, the last 10 comments (mirroring
-// forge.FormatSnapshot's truncation-from-the-front behavior, issue #2547)
-// are appended to Body, each attributed to its author and created
-// timestamp.
+// When IncludeComments is set, the comment thread is appended to Body,
+// unbounded — this is the general-purpose read every non-snapshot caller
+// (console/detail, waves/blocker, settle/adopt, settle/mediation,
+// localloop) shares, so it keeps its pre-#2547 shape; the box's frozen
+// issue-read snapshot has its own bounded, attributed path in Snapshot
+// below instead of reshaping this one underneath every other caller.
 func (j *jiraClient) Issue(num string) (forge.Issue, error) {
 	var payload jiraIssuePayload
 	if err := j.rest.Do(http.MethodGet, "/rest/api/2/issue/"+num, nil, &payload); err != nil {
@@ -263,12 +265,8 @@ func (j *jiraClient) Issue(num string) (forge.Issue, error) {
 		if err := j.rest.Do(http.MethodGet, "/rest/api/2/issue/"+num+"/comment", nil, &comments); err != nil {
 			return forge.Issue{}, err
 		}
-		kept := comments.Comments
-		if len(kept) > 10 {
-			kept = kept[len(kept)-10:]
-		}
-		for _, c := range kept {
-			body = forge.AppendComment(body, fmt.Sprintf("%s (%s): %s", c.Author.DisplayName, c.Created, c.Body))
+		for _, c := range comments.Comments {
+			body = forge.AppendComment(body, c.Body)
 		}
 	}
 
@@ -280,6 +278,38 @@ func (j *jiraClient) Issue(num string) (forge.Issue, error) {
 		Labels: payload.Fields.Labels,
 	}, nil
 }
+
+// Snapshot implements forge.SnapshotReader (issue #2547): it fetches the
+// issue description and comment thread as two REST calls and formats the
+// last 10 comments beneath the body via forge.FormatSnapshot, each
+// attributed to its author and created timestamp — the frozen issue-read
+// text every pass (implement, review, ...) sees identically, instead of
+// each pass fetching live. Unlike Issue, this always fetches and caps
+// comments regardless of IncludeComments: IncludeComments governs Issue's
+// own general-purpose (unbounded) comment append for every other caller;
+// Snapshot's bounded, attributed shape is the box's dedicated read path and
+// does not share that knob.
+func (j *jiraClient) Snapshot(num string) (string, error) {
+	var payload jiraIssuePayload
+	if err := j.rest.Do(http.MethodGet, "/rest/api/2/issue/"+num, nil, &payload); err != nil {
+		return "", err
+	}
+	var comments jiraCommentsPayload
+	if err := j.rest.Do(http.MethodGet, "/rest/api/2/issue/"+num+"/comment", nil, &comments); err != nil {
+		return "", err
+	}
+	attributed := make([]forge.CommentAttribution, len(comments.Comments))
+	for i, c := range comments.Comments {
+		attributed[i] = forge.CommentAttribution{
+			Author:    c.Author.DisplayName,
+			CreatedAt: c.Created,
+			Body:      c.Body,
+		}
+	}
+	return forge.FormatSnapshot(payload.Fields.Description, attributed), nil
+}
+
+var _ forge.SnapshotReader = (*jiraClient)(nil)
 
 // TouchesOf returns the declared touch-set parsed from issue num's
 // description — the shared body-grammar default (forge.ParseTouchPaths);

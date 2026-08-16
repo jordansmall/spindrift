@@ -1339,11 +1339,11 @@ in
   # bare `--comments` flag.
   #
   # jira's own #1990 cap has no fragment of its own to grep here -- jira
-  # shares the "GITHUB" TrackerAxisRead (registry.go) and rides
-  # forge.Snapshot's Issue(num).Body fallback (issuetracker.go's
-  # SnapshotReader doc comment) instead of a dedicated issue-read fragment.
-  # Its last-10 cap is enforced and tested at the Go level instead:
-  # cmd/launcher/internal/forge/jira/jira_test.go.
+  # shares the "GITHUB" TrackerAxisRead (registry.go) for in-box fragment
+  # selection, but the frozen issue-read snapshot itself comes from jira's
+  # own forge.SnapshotReader implementation (jira.go's Snapshot method), not
+  # a dedicated issue-read fragment. Its last-10 cap is enforced and tested
+  # at the Go level instead: cmd/launcher/internal/forge/jira/jira_test.go.
   issue-read-github-fragments-cap-comment-intake =
     pkgs.runCommand "issue-read-github-fragments-cap-comment-intake" { }
       ''

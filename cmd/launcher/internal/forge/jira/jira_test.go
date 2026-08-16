@@ -245,9 +245,12 @@ func TestJiraClient_Issue_DoneStatusCategoryIsClosed(t *testing.T) {
 }
 
 // TestJiraClient_Issue_IncludeComments verifies that when IncludeComments is
-// set, Issue() appends the comment thread to Body, each comment attributed
-// to its author and created timestamp; by default comments are left out to
-// keep the prompt-injection surface tight.
+// set, Issue() appends the comment thread to Body, unbounded and
+// unattributed; by default comments are left out to keep the
+// prompt-injection surface tight. This is Issue's pre-#2547 shape,
+// unchanged: the box's frozen issue-read snapshot has its own bounded,
+// attributed path in Snapshot instead (see the Snapshot tests below), so it
+// no longer reshapes this general-purpose read every other caller shares.
 func TestJiraClient_Issue_IncludeComments(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -259,7 +262,7 @@ func TestJiraClient_Issue_IncludeComments(t *testing.T) {
 			}`))
 		case "/rest/api/2/issue/PROJ-7/comment":
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(`{"comments": [{"body": "a comment from a user", "author": {"displayName": "Alice"}, "created": "2024-01-01T00:00:00.000+0000"}]}`))
+			w.Write([]byte(`{"comments": [{"body": "a comment from a user"}]}`))
 		default:
 			t.Errorf("unexpected path: %s", r.URL.Path)
 		}
@@ -276,70 +279,14 @@ func TestJiraClient_Issue_IncludeComments(t *testing.T) {
 		t.Errorf("Body must not include comments by default, got %q", iss.Body)
 	}
 
-	// Opt-in: comments appended, attributed to author and created timestamp.
+	// Opt-in: comments appended.
 	jcWithComments := jira.NewJiraClient(jira.JiraConfig{BaseURL: srv.URL, Token: "tok", IncludeComments: true})
 	iss2, err := jcWithComments.Issue("PROJ-7")
 	if err != nil {
 		t.Fatalf("Issue: %v", err)
 	}
-	if !strings.Contains(iss2.Body, "Alice (2024-01-01T00:00:00.000+0000): a comment from a user") {
-		t.Errorf("Body must include the attributed comment, got %q", iss2.Body)
-	}
-}
-
-// TestJiraClient_Issue_IncludeComments_CapsToLast10 verifies that Issue()
-// truncates the comment thread to the last 10 comments, mirroring
-// forge.FormatSnapshot's truncation-from-the-front behavior (issue #2547) —
-// the unbounded append this replaced regressed issue #1990's cap for jira
-// specifically, since jira has no dedicated issue-read fragment and rides
-// forge.Snapshot's Issue(num).Body fallback.
-func TestJiraClient_Issue_IncludeComments_CapsToLast10(t *testing.T) {
-	// %02d keeps every rendered number the same width (01..15) so no
-	// shorter number's text is a substring of a longer one's (e.g. "comment
-	// 01" is not a substring of "comment 10"), which would otherwise make
-	// the Contains assertions below pass/fail for the wrong reason.
-	var comments []string
-	for i := 1; i <= 15; i++ {
-		comments = append(comments, fmt.Sprintf(
-			`{"body": "comment %02d", "author": {"displayName": "user%02d"}, "created": "2024-01-%02dT00:00:00.000+0000"}`,
-			i, i, i))
-	}
-	payload := fmt.Sprintf(`{"comments": [%s]}`, strings.Join(comments, ","))
-
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/rest/api/2/issue/PROJ-9":
-			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(`{
-				"key": "PROJ-9",
-				"fields": {"summary": "s", "description": "desc", "status": {"name": "To Do"}, "labels": []}
-			}`))
-		case "/rest/api/2/issue/PROJ-9/comment":
-			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(payload))
-		default:
-			t.Errorf("unexpected path: %s", r.URL.Path)
-		}
-	}))
-	defer srv.Close()
-
-	jc := jira.NewJiraClient(jira.JiraConfig{BaseURL: srv.URL, Token: "tok", IncludeComments: true})
-	iss, err := jc.Issue("PROJ-9")
-	if err != nil {
-		t.Fatalf("Issue: %v", err)
-	}
-
-	for i := 1; i <= 5; i++ {
-		want := fmt.Sprintf("comment %02d", i)
-		if strings.Contains(iss.Body, want) {
-			t.Errorf("Body must not include comment %02d, the last 10 should drop the first 5, got %q", i, iss.Body)
-		}
-	}
-	for i := 6; i <= 15; i++ {
-		want := fmt.Sprintf("user%02d (2024-01-%02dT00:00:00.000+0000): comment %02d", i, i, i)
-		if !strings.Contains(iss.Body, want) {
-			t.Errorf("Body must include kept, attributed comment %02d, got %q", i, iss.Body)
-		}
+	if !strings.Contains(iss2.Body, "a comment from a user") {
+		t.Errorf("Body must include comments when opted in, got %q", iss2.Body)
 	}
 }
 
@@ -359,7 +306,7 @@ func TestJiraClient_Issue_IncludeComments_MultilineCommentIsVerbatimBlock(t *tes
 			}`))
 		case "/rest/api/2/issue/PROJ-8/comment":
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(`{"comments": [{"body": "line one\nline two", "author": {"displayName": "Bob"}, "created": "2024-01-02T00:00:00.000+0000"}]}`))
+			w.Write([]byte(`{"comments": [{"body": "line one\nline two"}]}`))
 		default:
 			t.Errorf("unexpected path: %s", r.URL.Path)
 		}
@@ -371,8 +318,177 @@ func TestJiraClient_Issue_IncludeComments_MultilineCommentIsVerbatimBlock(t *tes
 	if err != nil {
 		t.Fatalf("Issue: %v", err)
 	}
-	if !strings.Contains(iss.Body, "---\n\nBob (2024-01-02T00:00:00.000+0000): line one\nline two") {
+	if !strings.Contains(iss.Body, "---\n\nline one\nline two") {
 		t.Errorf("Body = %q, want a verbatim block with the newline preserved", iss.Body)
+	}
+}
+
+// TestJiraClient_ImplementsSnapshotReader verifies the jira adapter
+// satisfies forge.SnapshotReader (issue #2547) — jira has a genuine separate
+// comments API (the same endpoint Issue's own IncludeComments path calls),
+// so it earns a real Snapshot implementation rather than the local-only
+// Issue(num).Body degrade.
+func TestJiraClient_ImplementsSnapshotReader(t *testing.T) {
+	if _, ok := jira.NewJiraClient(jira.JiraConfig{}).(forge.SnapshotReader); !ok {
+		t.Error("jiraClient does not satisfy forge.SnapshotReader, want it implemented")
+	}
+}
+
+// TestJiraClient_Snapshot_BodyPlusComments verifies Snapshot fetches and
+// attributes comments unconditionally, regardless of IncludeComments — that
+// knob only governs Issue's own general-purpose, unbounded comment append;
+// Snapshot is the box's dedicated frozen issue-read path and always
+// includes comments.
+func TestJiraClient_Snapshot_BodyPlusComments(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/rest/api/2/issue/PROJ-10":
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{
+				"key": "PROJ-10",
+				"fields": {"summary": "s", "description": "desc", "status": {"name": "To Do"}, "labels": []}
+			}`))
+		case "/rest/api/2/issue/PROJ-10/comment":
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"comments": [{"body": "a comment from a user", "author": {"displayName": "Alice"}, "created": "2024-01-01T00:00:00.000+0000"}]}`))
+		default:
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	jc := jira.NewJiraClient(jira.JiraConfig{BaseURL: srv.URL, Token: "tok"}).(forge.SnapshotReader)
+	snap, err := jc.Snapshot("PROJ-10")
+	if err != nil {
+		t.Fatalf("Snapshot: %v", err)
+	}
+	want := "desc\n\nAlice (2024-01-01T00:00:00.000+0000): a comment from a user"
+	if snap != want {
+		t.Errorf("Snapshot = %q, want %q", snap, want)
+	}
+}
+
+// TestJiraClient_Snapshot_ZeroComments verifies Snapshot renders just the
+// body, with no dangling separator, when the issue has no comments.
+func TestJiraClient_Snapshot_ZeroComments(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/rest/api/2/issue/PROJ-11":
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{
+				"key": "PROJ-11",
+				"fields": {"summary": "s", "description": "desc", "status": {"name": "To Do"}, "labels": []}
+			}`))
+		case "/rest/api/2/issue/PROJ-11/comment":
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"comments": []}`))
+		default:
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	jc := jira.NewJiraClient(jira.JiraConfig{BaseURL: srv.URL, Token: "tok"}).(forge.SnapshotReader)
+	snap, err := jc.Snapshot("PROJ-11")
+	if err != nil {
+		t.Fatalf("Snapshot: %v", err)
+	}
+	if snap != "desc" {
+		t.Errorf("Snapshot = %q, want %q", snap, "desc")
+	}
+}
+
+// TestJiraClient_Snapshot_TruncatesToLast10 verifies Snapshot truncates the
+// comment thread to the last 10 comments, mirroring forge.FormatSnapshot's
+// truncation-from-the-front behavior (issue #2547) — the same cap issue
+// #1990 requires of every issue-read path.
+func TestJiraClient_Snapshot_TruncatesToLast10(t *testing.T) {
+	// %02d keeps every rendered number the same width (01..15) so no
+	// shorter number's text is a substring of a longer one's (e.g. "comment
+	// 01" is not a substring of "comment 10"), which would otherwise make
+	// the Contains assertions below pass/fail for the wrong reason.
+	var comments []string
+	for i := 1; i <= 15; i++ {
+		comments = append(comments, fmt.Sprintf(
+			`{"body": "comment %02d", "author": {"displayName": "user%02d"}, "created": "2024-01-%02dT00:00:00.000+0000"}`,
+			i, i, i))
+	}
+	payload := fmt.Sprintf(`{"comments": [%s]}`, strings.Join(comments, ","))
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/rest/api/2/issue/PROJ-12":
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{
+				"key": "PROJ-12",
+				"fields": {"summary": "s", "description": "desc", "status": {"name": "To Do"}, "labels": []}
+			}`))
+		case "/rest/api/2/issue/PROJ-12/comment":
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(payload))
+		default:
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	jc := jira.NewJiraClient(jira.JiraConfig{BaseURL: srv.URL, Token: "tok"}).(forge.SnapshotReader)
+	snap, err := jc.Snapshot("PROJ-12")
+	if err != nil {
+		t.Fatalf("Snapshot: %v", err)
+	}
+
+	for i := 1; i <= 5; i++ {
+		want := fmt.Sprintf("comment %02d", i)
+		if strings.Contains(snap, want) {
+			t.Errorf("Snapshot must not include comment %02d, the last 10 should drop the first 5, got %q", i, snap)
+		}
+	}
+	for i := 6; i <= 15; i++ {
+		want := fmt.Sprintf("user%02d (2024-01-%02dT00:00:00.000+0000): comment %02d", i, i, i)
+		if !strings.Contains(snap, want) {
+			t.Errorf("Snapshot must include kept, attributed comment %02d, got %q", i, snap)
+		}
+	}
+}
+
+// TestJiraClient_Snapshot_PropagatesIssueFailure verifies a genuine failure
+// fetching the issue itself (not just its comments) surfaces as a real
+// error rather than being swallowed.
+func TestJiraClient_Snapshot_PropagatesIssueFailure(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	jc := jira.NewJiraClient(jira.JiraConfig{BaseURL: srv.URL, Token: "tok"}).(forge.SnapshotReader)
+	if _, err := jc.Snapshot("PROJ-13"); err == nil {
+		t.Error("Snapshot: want error on issue-fetch failure, got nil")
+	}
+}
+
+// TestJiraClient_Snapshot_PropagatesCommentsFailure verifies a genuine
+// failure fetching the comment thread surfaces as a real error too.
+func TestJiraClient_Snapshot_PropagatesCommentsFailure(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/rest/api/2/issue/PROJ-14":
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{
+				"key": "PROJ-14",
+				"fields": {"summary": "s", "description": "desc", "status": {"name": "To Do"}, "labels": []}
+			}`))
+		case "/rest/api/2/issue/PROJ-14/comment":
+			w.WriteHeader(http.StatusInternalServerError)
+		default:
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	jc := jira.NewJiraClient(jira.JiraConfig{BaseURL: srv.URL, Token: "tok"}).(forge.SnapshotReader)
+	if _, err := jc.Snapshot("PROJ-14"); err == nil {
+		t.Error("Snapshot: want error on comments-fetch failure, got nil")
 	}
 }
 
