@@ -53,6 +53,18 @@ func streamJSONOutcomeLine(text string) string {
 	return `{"type":"assistant","message":{"content":[{"type":"text","text":"` + text + `"}]}}` + "\n"
 }
 
+// streamJSONResultLine appends a stream-json "result" event carrying
+// inputTokens/outputTokens/costUSD -- the shape ExtractUsage's sumInLog
+// (driver/claude/usage.go) scans for -- so a test fixture can control
+// passUsage's own contribution for the pass whose log carries this line
+// (issue #2694). Distinct from streamJSONVerdictLine/streamJSONOutcomeLine's
+// "assistant"/"user" event types: RenderTranscript's own type switch has no
+// "result" case, so this line is invisible to scanPassLog/scanReviewLog and
+// only ExtractUsage ever reads it.
+func streamJSONResultLine(inputTokens, outputTokens int, costUSD float64) string {
+	return fmt.Sprintf(`{"type":"result","total_cost_usd":%g,"usage":{"input_tokens":%d,"output_tokens":%d}}`+"\n", costUSD, inputTokens, outputTokens)
+}
+
 // blockThenApproveFakeDriverBody returns a writeFakeDriverExec body scripting
 // a fake driver-exec to BLOCK its first pass and APPROVE-with-outcome every
 // pass after, keyed off callLog's own line count (its own invocation tally)
@@ -2353,6 +2365,164 @@ exit 0
 	}
 	if !strings.Contains(stdout.String(), `"decision":"stop","reason":"terminal land pass reached no outcome"`) {
 		t.Errorf("stdout = %q, want the terminal-land-pass-no-outcome stop reason", stdout.String())
+	}
+}
+
+// TestRunWithReviewPassTerminatesOnMaxBudgetTokensCap verifies maxBudgetTokens
+// (issue #2694) bounds the review-pass loop the same way maxReviewRounds and
+// maxSlices already do: once cumulative usage across every pass -- implement/
+// fix passes as well as review passes, not review passes alone -- would meet
+// or exceed the cap, a further BLOCK-verdict review round instead commits the
+// run to one terminal land pass. This fake driver never emits
+// SPINDRIFT_OUTCOME on any call, so that land pass itself produces no outcome
+// either, and the run's own bound (exactly one land pass) stops it there.
+// Every call, implement/fix and review alike, carries its own 100-token
+// result event (70 input + 30 output): implement1 (cum=100), review1
+// (BLOCK, cum=200, below the 350 cap), fix2 (cum=300), review2 (BLOCK,
+// cum=400 >= 350 -- cap fires), land5 (no outcome -- stop). Reaching the cap
+// only on review2, after fix2's own contribution, is what proves the
+// implement/fix pass's usage is folded into the total too, not just the
+// review pass's.
+func TestRunWithReviewPassTerminatesOnMaxBudgetTokensCap(t *testing.T) {
+	dir := t.TempDir()
+	callLog := filepath.Join(dir, "calls.log")
+	body := `: > "$DRIVER_LOG_PATH"
+n=$(wc -l < "` + callLog + `")
+if [ $((n % 2)) -eq 0 ]; then
+  printf '%s' '` + streamJSONOutcomeLine("VERDICT: BLOCK") + `' >> "$DRIVER_LOG_PATH"
+fi
+printf '%s' '` + streamJSONResultLine(70, 30, 0.01) + `' >> "$DRIVER_LOG_PATH"
+exit 0
+`
+	writeFakeDriverExec(t, dir, callLog, body)
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	promptFile := filepath.Join(dir, "prompt.txt")
+	if err := os.WriteFile(promptFile, []byte("prompt"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	reviewPromptFile := filepath.Join(dir, "review-prompt.txt")
+	if err := os.WriteFile(reviewPromptFile, []byte("review prompt"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config{
+		promptFile:       promptFile,
+		reviewPromptFile: reviewPromptFile,
+		driverBin:        "claude",
+		logPath:          filepath.Join(dir, "stream.log"),
+		heartbeatLog:     filepath.Join(dir, "heartbeat.log"),
+		maxReviewRounds:  0,
+		maxSlices:        0,
+		maxBudgetTokens:  350,
+	}
+
+	var stdout bytes.Buffer
+	if _, err := run(cfg, &stdout); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	calls, err := os.ReadFile(callLog)
+	if err != nil {
+		t.Fatalf("read callLog: %v", err)
+	}
+	lines := strings.Split(strings.TrimRight(string(calls), "\n"), "\n")
+	if len(lines) != 5 {
+		t.Fatalf("driver-exec invocation count = %d, want 5 (log: %q)", len(lines), calls)
+	}
+	if !strings.Contains(stdout.String(), `"decision":"continue","reason":"budget exceeded; running terminal land pass"`) {
+		t.Errorf("stdout = %q, want the budget-cap-fired continue reason naming the cap and the land pass that follows", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), `"spindrift_op":{"op":"pass_start","pass":5,"role":"land"}`) {
+		t.Errorf("stdout = %q, want the terminal land pass's own pass_start with role \"land\"", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), `"decision":"stop","reason":"terminal land pass reached no outcome"`) {
+		t.Errorf("stdout = %q, want the terminal-land-pass-no-outcome stop reason", stdout.String())
+	}
+}
+
+// budgetCapUnsetFakeDriverBody is reviewPassFakeDriverBody's own BLOCK / BLOCK
+// / APPROVE / outcome sequence, with a heavy per-call usage.Report result
+// event layered on top of every call regardless of round (issue #2694 test)
+// -- proving accumulated usage this large never trips the loop early when
+// maxBudgetTokens/maxBudgetUSD are left at their zero-cap default, the same
+// "0 disables this cap" convention every other numeric cap in this file
+// already honors.
+func budgetCapUnsetFakeDriverBody(callLog string) string {
+	return fmt.Sprintf(`: > "$DRIVER_LOG_PATH"
+n=$(wc -l < "%s")
+case "$n" in
+  2) printf '%%s' '%s' | tee -a "$DRIVER_LOG_PATH" ;;
+  4) printf '%%s' '%s' | tee -a "$DRIVER_LOG_PATH" ;;
+  5) printf '%%s' '%s' | tee -a "$DRIVER_LOG_PATH" ;;
+esac
+printf '%%s' '%s' >> "$DRIVER_LOG_PATH"
+exit 0
+`, callLog,
+		streamJSONOutcomeLine("VERDICT: BLOCK\\n\\n## Blocking\\n- run.go:1 -- bug\\n\\n## Non-blocking\\n- none"),
+		streamJSONOutcomeLine("VERDICT: APPROVE\\n\\n## Blocking\\n- none\\n\\n## Non-blocking\\n- none"),
+		streamJSONOutcomeLine("SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=done nonce=abc"),
+		streamJSONResultLine(1_000_000, 1_000_000, 1000.0))
+}
+
+// TestRunWithReviewPassIgnoresBudgetCapsWhenUnset verifies maxBudgetTokens/
+// maxBudgetUSD left at their zero-value default (issue #2694) is a complete
+// no-op: the review-pass loop runs the exact same 5-invocation
+// implement/review/fix/review/land sequence as
+// TestRunWithReviewPassSequenceOnBlockThenApprove, even though every one of
+// those passes here reports a huge (1,000,000-token, $1,000) usage.Report --
+// proving the accumulator itself is wired up and doing real work (it isn't
+// simply skipped when unused), but the disabled caps never consult it.
+func TestRunWithReviewPassIgnoresBudgetCapsWhenUnset(t *testing.T) {
+	dir := t.TempDir()
+	callLog := filepath.Join(dir, "calls.log")
+	writeFakeDriverExec(t, dir, callLog, budgetCapUnsetFakeDriverBody(callLog))
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	promptFile := filepath.Join(dir, "prompt.txt")
+	if err := os.WriteFile(promptFile, []byte("prompt"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	reviewPromptFile := filepath.Join(dir, "review-prompt.txt")
+	if err := os.WriteFile(reviewPromptFile, []byte("review prompt"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config{
+		promptFile:       promptFile,
+		reviewPromptFile: reviewPromptFile,
+		driverBin:        "claude",
+		issue:            "7",
+		logPath:          filepath.Join(dir, "stream.log"),
+		heartbeatLog:     filepath.Join(dir, "heartbeat.log"),
+		maxReviewRounds:  3,
+		maxSlices:        10,
+		// maxBudgetTokens/maxBudgetUSD deliberately left unset (zero) --
+		// issue #2694's "0 disables this cap" default.
+	}
+
+	var stdout bytes.Buffer
+	rc, err := run(cfg, &stdout)
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if rc != 0 {
+		t.Errorf("exit code = %d, want 0", rc)
+	}
+
+	calls, err := os.ReadFile(callLog)
+	if err != nil {
+		t.Fatalf("read callLog: %v", err)
+	}
+	lines := strings.Split(strings.TrimRight(string(calls), "\n"), "\n")
+	if len(lines) != 5 {
+		t.Fatalf("driver-exec invocation count = %d, want 5 -- unchanged from the pre-#2694 sequence despite every pass carrying a huge usage.Report result event (log: %q)", len(lines), calls)
+	}
+	if strings.Contains(stdout.String(), "budget exceeded") {
+		t.Errorf("stdout = %q, must not contain a budget-exceeded decision -- the zero-value caps must never fire", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=done nonce=abc") {
+		t.Errorf("stdout = %q, want the final pass's own outcome line present unchanged", stdout.String())
 	}
 }
 

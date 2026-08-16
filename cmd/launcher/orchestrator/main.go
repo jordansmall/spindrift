@@ -42,6 +42,8 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 	passSummaryPath := fs.String("pass-summary-path", "/tmp/pass-summary.md", "path to the most recent pass's own summary, recorded into the run-state artifact")
 	maxReviewRounds := fs.Int("max-review-rounds", defaultMaxReviewRounds, "cap on additional fresh-session passes a BLOCK verdict may trigger; 0 disables the cap")
 	maxSlices := fs.Int("max-slices", defaultMaxSlices, "cap on total driver-exec invocations this run makes; 0 disables the cap")
+	maxBudgetTokens := fs.Int("max-budget-tokens", 0, "cap on this run's cumulative token usage across every pass; 0 disables the cap")
+	maxBudgetUSD := fs.Float64("max-budget-usd", 0, "cap on this run's cumulative USD cost across every pass; 0 disables the cap")
 	reviewPromptFile := fs.String("review-prompt-file", "", "path to the code-owned review pass's own prompt text; empty disables the review pass")
 	reviewModel := fs.String("review-model", "", "value for the review pass's own --model flag, empty falls back to the coordinator's --model")
 	reviewEffort := fs.String("review-effort", "", "value for the review pass's own --effort flag, empty falls back to the coordinator's --effort")
@@ -112,6 +114,8 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 		passSummaryPath:    *passSummaryPath,
 		maxReviewRounds:    *maxReviewRounds,
 		maxSlices:          *maxSlices,
+		maxBudgetTokens:    *maxBudgetTokens,
+		maxBudgetUSD:       *maxBudgetUSD,
 		reviewPromptFile:   *reviewPromptFile,
 		reviewModel:        *reviewModel,
 		reviewEffort:       *reviewEffort,

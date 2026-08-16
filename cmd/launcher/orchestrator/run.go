@@ -18,6 +18,7 @@ import (
 	"spindrift.dev/launcher/internal/outcome"
 	"spindrift.dev/launcher/internal/passmachine"
 	"spindrift.dev/launcher/internal/runstate"
+	"spindrift.dev/launcher/internal/usage"
 )
 
 // config is the data one implementor pass needs to hand off to driver-exec
@@ -67,6 +68,16 @@ type config struct {
 	// makes, across every pass regardless of verdict (issue #1998) -- the
 	// coarser backstop on top of maxReviewRounds. Zero means no cap.
 	maxSlices int
+	// maxBudgetTokens caps this run's cumulative token usage across every
+	// pass so far (issue #2694); once cumulative usage would meet or exceed
+	// this cap, a further BLOCK-verdict review round instead commits the run
+	// to one terminal land pass. Zero means no cap.
+	maxBudgetTokens int
+	// maxBudgetUSD is maxBudgetTokens's USD-denominated counterpart (issue
+	// #2694): once cumulative cost would meet or exceed this cap, the same
+	// terminal-land commitment fires, independently of maxBudgetTokens. Zero
+	// means no cap.
+	maxBudgetUSD float64
 	// reviewPromptFile is the code-owned review pass's own prompt file
 	// (issue #2037): a distinct driver-exec invocation against
 	// reviewPromptFile, scanned by scanReviewLog rather than scanPassLog,
@@ -313,7 +324,7 @@ func run(cfg config, stdout io.Writer) (int, error) {
 			HasOutcome:       hasOutcome,
 			Pass:             pass,
 			ReviewRounds:     reviewRounds,
-			Caps:             passmachine.Caps{MaxSlices: cfg.maxSlices, MaxReviewRounds: cfg.maxReviewRounds},
+			Caps:             passmachine.Caps{MaxSlices: cfg.maxSlices, MaxReviewRounds: cfg.maxReviewRounds, MaxBudgetTokens: cfg.maxBudgetTokens, MaxBudgetUSD: cfg.maxBudgetUSD},
 		})
 		if !d.Continue {
 			break
@@ -366,6 +377,15 @@ func runWithReviewPass(cfg config, stdout io.Writer) (int, error) {
 	rc := 0
 	reviewRounds := 0
 	findingsLogRounds := 0
+	// cumulativeTokens/cumulativeUSD accumulate every pass's own usage as it
+	// finishes (issue #2694) -- both the implement/fix/land block below and
+	// the review pass further down call passUsage right after their own log
+	// is scanned, since cfg.logPath is reused and truncated fresh by
+	// driver-exec on every single pass (see passUsage's own doc comment):
+	// there is no later point either pass's own usage could be read back
+	// from once the next pass has run.
+	var cumulativeTokens int
+	var cumulativeUSD float64
 	pass := 0
 	passKind := passmachine.KindImplement
 	prevSeededPromptFile := ""
@@ -392,6 +412,13 @@ func runWithReviewPass(cfg config, stdout io.Writer) (int, error) {
 		// hasOutcome; any VERDICT-shaped text it happens to contain is not
 		// state.LastVerdict's source of truth here.
 		_, hasOutcome := scanPassLog(cfg.logPath, cfg.driver)
+		// Every pass this loop invokes spends tokens/dollars, not just the
+		// review pass below -- an implement/fix/land pass's own contribution
+		// must be folded in here, before the next pass's driver-exec
+		// invocation truncates cfg.logPath out from under it (issue #2694).
+		pu := passUsage(cfg.logPath, cfg.driver)
+		cumulativeTokens += pu.InputTokens + pu.OutputTokens + pu.CacheReadInputTokens + pu.CacheCreationInputTokens
+		cumulativeUSD += pu.TotalCostUSD
 		// dispatchManifestIfPresent (which calls LaunchWorkers and blocks for
 		// up to the full worker timeout) must never fire on a pass that has
 		// already reached a terminal outcome, nor on the already-committed
@@ -422,7 +449,7 @@ func runWithReviewPass(cfg config, stdout io.Writer) (int, error) {
 			PassJustExecuted:   passKind,
 			HasOutcome:         hasOutcome,
 			Pass:               pass,
-			Caps:               passmachine.Caps{MaxSlices: cfg.maxSlices, MaxReviewRounds: cfg.maxReviewRounds},
+			Caps:               passmachine.Caps{MaxSlices: cfg.maxSlices, MaxReviewRounds: cfg.maxReviewRounds, MaxBudgetTokens: cfg.maxBudgetTokens, MaxBudgetUSD: cfg.maxBudgetUSD},
 			LandPhase:          landPhase(state.TerminalLand),
 			LastVerdict:        passmachine.Verdict(state.LastVerdict),
 			ManifestDispatched: manifestDispatched,
@@ -481,6 +508,13 @@ func runWithReviewPass(cfg config, stdout io.Writer) (int, error) {
 		}
 
 		reviewVerdict, findings := scanReviewLog(cfg.logPath, cfg.driver)
+		// The review pass spends tokens/dollars too -- fold its own
+		// contribution in here, the same as the implement/fix/land block's
+		// own call above, before this pass's cfg.logPath is truncated by
+		// the next invocation (issue #2694).
+		pu = passUsage(cfg.logPath, cfg.driver)
+		cumulativeTokens += pu.InputTokens + pu.OutputTokens + pu.CacheReadInputTokens + pu.CacheCreationInputTokens
+		cumulativeUSD += pu.TotalCostUSD
 		if reviewVerdict != "" {
 			state.LastVerdict = reviewVerdict
 		}
@@ -516,8 +550,10 @@ func runWithReviewPass(cfg config, stdout io.Writer) (int, error) {
 			Verdict:          passmachine.Verdict(reviewVerdict),
 			Pass:             pass,
 			ReviewRounds:     reviewRounds,
-			Caps:             passmachine.Caps{MaxSlices: cfg.maxSlices, MaxReviewRounds: cfg.maxReviewRounds},
+			Caps:             passmachine.Caps{MaxSlices: cfg.maxSlices, MaxReviewRounds: cfg.maxReviewRounds, MaxBudgetTokens: cfg.maxBudgetTokens, MaxBudgetUSD: cfg.maxBudgetUSD},
 			LandPhase:        landPhase(state.TerminalLand),
+			CumulativeTokens: cumulativeTokens,
+			CumulativeUSD:    cumulativeUSD,
 		})
 		if !d.Continue {
 			break
@@ -785,6 +821,28 @@ func scanReviewLog(logPath, driverName string) (verdict, findings string) {
 	}
 	findings = strings.TrimSpace(strings.Join(findingsLines, "\n"))
 	return verdict, findings
+}
+
+// passUsage extracts logPath's own usage.Report.Totals via driverName's
+// Driver (issue #2694), best-effort like dispatch.CumulativeUsage's own
+// degrade: an unresolvable driver name or a log with no result event
+// contributes the zero Usage rather than aborting the run. Called once per
+// pass, immediately after that pass's own log is scanned and before the
+// next pass truncates cfg.logPath (see the os.Create-truncates comment
+// above), since -- unlike dispatch.CumulativeUsage, which sums across many
+// distinct on-disk attempt logs -- the orchestrator's single loop reuses
+// one log path across every pass, so there is no later point this could be
+// read back from.
+func passUsage(logPath, driverName string) usage.Usage {
+	d, err := driver.New(driverName)
+	if err != nil {
+		return usage.Usage{}
+	}
+	r, err := d.ExtractUsage(logPath)
+	if err != nil || !r.Found {
+		return usage.Usage{}
+	}
+	return r.Totals
 }
 
 // appendFindingsLogRound appends round's own review findings to the per-run
