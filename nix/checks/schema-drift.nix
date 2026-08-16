@@ -640,6 +640,33 @@ in
       "mkharness-direct-choices-guard: expected mkHarness to reject a direct-caller `defaults.mergeMethod = \"bogus-merge-method\"` (not a member of lib/env-schema.nix's mergeMethod.choices), but it evaluated successfully";
     pkgs.runCommand "mkharness-direct-choices-guard" { } "touch $out";
 
+  # The gate-not-triggered counterpart (mirrors
+  # build-time-reject-orchestrator-verdict-not-triggered in
+  # nix/checks/prompts.nix and flakemodule-rejects-invalid-choice in
+  # nix/checks/equivalence.nix): without this, an unrelated eval failure in
+  # the `import ../../lib/mkHarness.nix { ... }` call above (a new required
+  # arg, an added unrelated assert) would make mkharness-direct-choices-guard
+  # pass vacuously even with the choices assert deleted from mkHarness.nix.
+  # Proves the same direct-call shape still evaluates cleanly for an in-choice
+  # `mergeMethod` value, so badResult.success == false is known to come from
+  # the choices assert specifically, not from an incidental break elsewhere.
+  mkharness-direct-choices-guard-not-triggered =
+    let
+      inherit (pkgs.lib) assertMsg;
+      result = builtins.tryEval (
+        import ../../lib/mkHarness.nix {
+          inherit nixpkgs system;
+          defaults = {
+            mergeMethod = "squash";
+          };
+          packages = p: [ p.hello ];
+        }
+      );
+    in
+    assert assertMsg result.success
+      "mkharness-direct-choices-guard-not-triggered: expected mkHarness to accept a direct-caller `defaults.mergeMethod = \"squash\"` (a member of lib/env-schema.nix's mergeMethod.choices), but it failed to evaluate";
+    pkgs.runCommand "mkharness-direct-choices-guard-not-triggered" { } "touch $out";
+
   # tests/helper.bash's set_box_env fixture must export every boxEnv = true
   # schema knob, so the entrypoint-*.bats suites exercise the same defaults the nix
   # preamble bakes into the image at build time (issue #462). Fails when a new
