@@ -1203,4 +1203,68 @@ in
     assert pkgs.lib.assertMsg result.success
       "mkHarness must not throw when a custom roster entry sets an inline prompt but omits promptFile (issue #264 review finding)";
     pkgs.runCommand "mkharness-roster-custom-entry-inline-prompt-no-file" { } "touch $out";
+
+  # Issue #2512 (blocking review finding): reviewEffort is the one legacy
+  # knob documented (lib/roster.nix) to override the reviewer entry's effort
+  # regardless of roster source -- unlike the four legacy model knobs, which
+  # are explicit-roster-only-wins. mkHarness must apply it as a
+  # post-normalize step on `finalRoster`, so it reaches an explicit
+  # caller-supplied `roster` exactly the same way it reaches the
+  # `defaultRoster` fallback path. Both branches below assert against
+  # mkHarness's own exposed `.roster` output (lib/mkHarness.nix, issue
+  # #2512), not a re-derivation of the override logic, so a regression that
+  # only fixed one of the two roster sources would still fail here.
+  mkharness-review-effort-overrides-default-roster =
+    let
+      direct = import ../../lib/mkHarness.nix {
+        inherit nixpkgs system;
+        packages = p: [ p.hello ];
+        defaults.reviewEffort = "xhigh";
+      };
+      byName = name: builtins.head (builtins.filter (e: e.name == name) direct.roster);
+    in
+    assert pkgs.lib.assertMsg ((byName "reviewer").effort == "xhigh")
+      "mkHarness must apply a non-empty defaults.reviewEffort to the defaultRoster-resolved reviewer entry, got: ${builtins.toJSON (byName "reviewer").effort}";
+    pkgs.runCommand "mkharness-review-effort-overrides-default-roster" { } "touch $out";
+
+  mkharness-review-effort-overrides-explicit-roster =
+    let
+      explicitRoster = [
+        {
+          name = "reviewer";
+          model = "claude-opus-5";
+          effort = "low";
+          mode = "subagent";
+          description = "";
+          tools = [ ];
+        }
+      ];
+      direct = import ../../lib/mkHarness.nix {
+        inherit nixpkgs system;
+        packages = p: [ p.hello ];
+        roster = explicitRoster;
+        defaults.reviewEffort = "xhigh";
+      };
+      byName = name: builtins.head (builtins.filter (e: e.name == name) direct.roster);
+    in
+    assert pkgs.lib.assertMsg ((byName "reviewer").effort == "xhigh")
+      "mkHarness must apply a non-empty defaults.reviewEffort to an explicit caller-supplied roster's reviewer entry, overriding its own \"low\" effort, got: ${builtins.toJSON (byName "reviewer").effort}";
+    pkgs.runCommand "mkharness-review-effort-overrides-explicit-roster" { } "touch $out";
+
+  # The other half of the contract: an unset/empty reviewEffort must leave
+  # the reviewer entry's effort untouched -- the override is opt-in, not a
+  # blanket rewrite.
+  mkharness-review-effort-empty-leaves-reviewer-effort-untouched =
+    let
+      direct = import ../../lib/mkHarness.nix {
+        inherit nixpkgs system;
+        packages = p: [ p.hello ];
+      };
+      rosterHelper = import ../../lib/roster-schema-defaults.nix { inherit (pkgs) lib; };
+      byName = name: builtins.head (builtins.filter (e: e.name == name) direct.roster);
+    in
+    assert pkgs.lib.assertMsg
+      ((byName "reviewer").effort == rosterHelper.rosterDefaults.reviewer.effort)
+      "mkHarness must leave the reviewer entry at its roster default effort (${rosterHelper.rosterDefaults.reviewer.effort}) when defaults.reviewEffort is unset, got: ${builtins.toJSON (byName "reviewer").effort}";
+    pkgs.runCommand "mkharness-review-effort-empty-leaves-reviewer-effort-untouched" { } "touch $out";
 }

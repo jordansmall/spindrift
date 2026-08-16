@@ -332,26 +332,39 @@ let
         reviewModel = mergedDefaults.reviewModel or "";
         filerModel = mergedDefaults.filerModel or "";
         workerModel = mergedDefaults.workerModel or "";
-        reviewEffort = mergedDefaults.reviewEffort or "";
       }
   );
+  # reviewEffort (issue #2512) is the one legacy knob that overrides an
+  # already-resolved roster's reviewer entry regardless of roster source
+  # (contrast the four model knobs above, explicit-roster-only-wins per the
+  # doc comment above resolvedRoster) -- applied here, post-normalize, so it
+  # reaches both the defaultRoster branch and a Consumer-supplied explicit
+  # roster identically.
+  finalRoster =
+    let
+      reviewEffort = mergedDefaults.reviewEffort or "";
+    in
+    if reviewEffort == "" then
+      resolvedRoster
+    else
+      map (e: if e.name == "reviewer" then e // { effort = reviewEffort; } else e) resolvedRoster;
 
   # --agents JSON, rendered by the selected Driver (ADR 0009) from the
   # resolved roster above, so a future Driver with a different agent-config
   # shape (e.g. opencode's agents/*.md) can supply its own renderer without
   # touching mkHarness.
-  agentsJsonTemplate = driverEntry.agentsJsonTemplate { roster = resolvedRoster; };
+  agentsJsonTemplate = driverEntry.agentsJsonTemplate { roster = finalRoster; };
 
   # On-disk subagent files (AC4), rendered by the selected Driver the same
   # way agentsJsonTemplate is above: a Driver with no on-disk agent-config
   # mechanism (claude.nix) returns { } here, since its subagents ride
   # agentsJsonTemplate's --agents JSON flag instead.
-  driverAgentFiles = driverEntry.agentFilesTemplate { roster = resolvedRoster; };
+  driverAgentFiles = driverEntry.agentFilesTemplate { roster = finalRoster; };
 
   # Nix-baked name -> prompt file map (issue #264), read at runtime by
   # entrypoint.sh's generic per-agent prompt injection loop so a custom Nth
   # agent's prompt resolves the same way as the four built-in names. Every
-  # `resolvedRoster` entry is guaranteed to carry a `promptFile` by
+  # `finalRoster` entry is guaranteed to carry a `promptFile` by
   # `rosterLib.normalizeRoster` above (issue #2152 slice B), which injects the
   # "<name>-prompt.md" default for any entry that omits one -- so there's no
   # fallback left to re-derive here.
@@ -360,7 +373,7 @@ let
       map (e: {
         name = e.name;
         value = e.promptFile;
-      }) resolvedRoster
+      }) finalRoster
     )
   );
 
@@ -369,7 +382,7 @@ let
   # baked into the image alongside the four fixed prompt files. A custom
   # roster entry omitting `prompt` entirely is treated the same as one
   # explicitly setting it to null (issue #264 review finding).
-  customRosterPromptFiles = lib.filter (e: (e.prompt or null) != null) resolvedRoster;
+  customRosterPromptFiles = lib.filter (e: (e.prompt or null) != null) finalRoster;
 
   # The Driver's in-box half, rendered by the registry (issue #624) into
   # agent/entrypoint.sh's DRIVER_* vars and function definitions (ADR 0009),
@@ -1190,6 +1203,12 @@ else
       runInputDocumentFile
       buildInputDocumentFile
       ;
+
+    # The fully resolved agent roster (issue #2512), after the reviewEffort
+    # post-processing step -- exposed purely for eval-level introspection
+    # (nix/checks/equivalence.nix), the same reason driverEntry above is
+    # exposed. Not part of the settings/CLI surface itself.
+    roster = finalRoster;
 
     packages = {
       inherit spindrift;
