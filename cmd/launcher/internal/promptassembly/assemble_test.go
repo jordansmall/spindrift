@@ -1143,6 +1143,58 @@ func TestAssembleOrchestratorWorkerPromptForbidsStoreBuild(t *testing.T) {
 	}
 }
 
+// TestAssembleOrchestratorCoordinatorChecksInboxOnce pins issue #2496 AC2:
+// fragments/coordinator.md must tell the coordinator that `checks-inbox`
+// runs exactly once, on the fully-integrated tree, in CHECK -- and that
+// this once-only rule **overrides** CHECK's own "before each commit, run
+// the repo's own checks green" instruction for the per-slice integration
+// commits the coordinator authors while cherry-picking each worker's
+// branch. A byte-level golden diff alone doesn't catch a regression here:
+// it's reflow-fragile (any unrelated wording tweak anywhere in the
+// document trips it, whether or not the tweak is semantically related) and
+// asserts nothing about intent -- a golden fixture updated to match a
+// broken doc goes on "passing" forever. Unlike
+// TestAssembleOrchestratorWorkerPromptForbidsStoreBuild's sentenceForbids
+// check, this rule isn't just a forbidding sentence around a single
+// phrase; it's an explicit override tying two rules together, so this
+// test isolates the paragraph carrying both "checks-inbox" and
+// "overrides" and asserts that same paragraph also names the CHECK rule
+// it overrides.
+func TestAssembleOrchestratorCoordinatorChecksInboxOnce(t *testing.T) {
+	reg := loadTestRegistry(t)
+	env := coveredEnv()
+	env.OrchestratorEnabled = true
+	env.AgentsJSONTemplate = `{"worker":{"model":"m"}}`
+
+	result, err := Assemble(env, reg)
+	if err != nil {
+		t.Fatalf("Assemble: %v", err)
+	}
+
+	// coordinator.md is spliced directly into the main assembled prompt via
+	// the WORKER_PROVISIONED gate -> COORDINATOR_STEP var (testdata/registry.json),
+	// not into a separate Handoff field.
+	prompt := result.Prompt
+
+	if !sentenceForbids(prompt, "checks-inbox") {
+		t.Errorf("Prompt doesn't forbid %q in the same sentence as a do-not/never/must-not phrase, want the per-slice checks-inbox run forbidden:\n%s", "checks-inbox", prompt)
+	}
+
+	var overrideParagraph string
+	for _, paragraph := range strings.Split(prompt, "\n\n") {
+		if strings.Contains(paragraph, "checks-inbox") && strings.Contains(paragraph, "overrides") {
+			overrideParagraph = paragraph
+			break
+		}
+	}
+	if overrideParagraph == "" {
+		t.Fatalf("no paragraph in Prompt contains both %q and %q, want the once-only checks-inbox rule to name its own override:\n%s", "checks-inbox", "overrides", prompt)
+	}
+	if !strings.Contains(overrideParagraph, "before each commit") {
+		t.Errorf("paragraph carrying checks-inbox/overrides doesn't name CHECK's \"before each commit\" rule, want it tied to that rule explicitly, got paragraph:\n%s", overrideParagraph)
+	}
+}
+
 // sentenceForbids reports whether prompt contains phrase inside a sentence
 // (a hard-wrapped line, further split on ". ") that also carries an
 // unambiguous forbidding word (do not / never / must not) -- catches a
