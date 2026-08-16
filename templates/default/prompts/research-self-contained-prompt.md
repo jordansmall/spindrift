@@ -17,13 +17,7 @@ ${RESEARCH_ISSUE_READ_GITHUB_STEP}${RESEARCH_ISSUE_READ_LOCAL_STEP}${RESEARCH_IS
 # VERDICT
 
 Judge relevance from the issue content alone — there is no repo to explore.
-Render exactly one of three verdicts:
-
-- `recommend` — relevant, now enriched with real context; promote it.
-- `reject` — false positive, not worth doing, or a duplicate. Name the
-  duplicate issue by number in your rationale; duplicate is a reason under
-  `reject`, not a separate verdict.
-- `unclear` — relevance can't be determined without a human's answer.
+Render exactly one of these verdicts:
 
 # POST THE VERDICT
 

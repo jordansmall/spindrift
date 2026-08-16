@@ -446,13 +446,28 @@ in
         touch $out
       '';
 
-  # The default box's rendered research prompt must be byte-identical to the
-  # template on disk -- injection must not touch a prompt that already has
-  # the contract (mirrors mkharness-prompt-outcome-default-unchanged).
+  # Issue #2525: lib/research-verdicts.nix's `render` always rewrites the
+  # VERDICT section (bullets, status alternation, backtick enumeration) from
+  # `defaultVerdicts`, for both the default and a custom set -- there is no
+  # more byte-identical-to-template no-op case, since the checked-in template
+  # no longer carries hand-typed bullets to be a no-op copy of. So this check
+  # no longer diffs the rendered prompt against the raw template; instead it
+  # pins the default verdict set's *rendered* contract content directly,
+  # mirroring mkharness-prompt-research-verdicts-custom-rendered below.
   mkharness-prompt-research-outcome-default-unchanged =
     pkgs.runCommand "mkharness-prompt-research-outcome-default-unchanged" { }
       ''
-        diff ${../../templates/default/prompts/research-prompt.md} ${batsHarness.internals.promptDir}/research-prompt.md
+        p=${batsHarness.internals.promptDir}/research-prompt.md
+        grep -qF -- '- `recommend` — relevant, now enriched with real context; promote it.' "$p" \
+          || { echo "default recommend bullet missing from rendered research prompt" >&2; exit 1; }
+        grep -qF -- '- `reject` — false positive, not worth doing, or a duplicate. Name the duplicate issue by number in your rationale; duplicate is a reason under `reject`, not a separate verdict.' "$p" \
+          || { echo "default reject bullet missing from rendered research prompt" >&2; exit 1; }
+        grep -qF -- "- \`unclear\` — relevance can't be determined without a human's answer." "$p" \
+          || { echo "default unclear bullet missing from rendered research prompt" >&2; exit 1; }
+        grep -qF -- 'status=<recommend|reject|unclear>' "$p" \
+          || { echo "default status alternation missing from rendered research prompt" >&2; exit 1; }
+        grep -qF -- '`recommend` / `reject` / `unclear`' "$p" \
+          || { echo "default backtick enumeration missing from rendered research prompt" >&2; exit 1; }
         touch $out
       '';
 
