@@ -9,10 +9,9 @@
 # testable with a bare `nix eval`, without needing a locked nixpkgs (mirrors
 # lib/renderers.nix, issue #402).
 let
-  concatStrings = builtins.concatStringsSep "";
-  mapAttrsToList = f: attrs: map (n: f n attrs.${n}) (builtins.attrNames attrs);
   unique = builtins.foldl' (acc: x: if builtins.elem x acc then acc else acc ++ [ x ]) [ ];
   builtinsCompat = import ./builtins-compat.nix;
+  inherit (builtinsCompat) concatStrings mapAttrsToList;
 in
 rec {
   # One renderer used by both the shell and Go preamble families: iterates
