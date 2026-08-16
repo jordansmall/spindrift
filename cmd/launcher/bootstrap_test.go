@@ -286,6 +286,7 @@ func TestBootstrap_EarlyErrorAfterAccumLockAcquired_ReleasesLock(t *testing.T) {
 	t.Setenv("BASE_BRANCH", "main")
 	t.Setenv("MERGE_MODE", "immediate")
 	t.Setenv("RUNTIME", "bwrap")
+	t.Setenv("RUNNER_KIND", "bwrap")
 	t.Setenv("BOX_FORGE_AND_ISSUE_ACCESS", "read-only")
 	t.Chdir(checkout)
 
@@ -342,6 +343,7 @@ body
 	t.Setenv("BASE_BRANCH", "main")
 	t.Setenv("MERGE_MODE", "immediate")
 	t.Setenv("RUNTIME", "bwrap")
+	t.Setenv("RUNNER_KIND", "bwrap")
 	t.Setenv("ISSUE_TRACKER", "local")
 	t.Setenv("LOCAL_ISSUES_DIR", issuesDir)
 	t.Chdir(checkout)
@@ -369,6 +371,125 @@ body
 		t.Fatalf("AcquireAccumulationLock after lc.cleanup(): %v, want the lock to have been released", err)
 	}
 	t.Cleanup(func() { _ = reacquired.Release() })
+}
+
+// stubExecutableOnPath creates a no-op executable script named name in a
+// throwaway dir and prepends that dir to PATH, so runner.ValidateRuntime's
+// exec.LookPath(name) succeeds without the real CLI being installed. The
+// script is never actually invoked by the tests that use this helper (the
+// bwrap branch's readiness checks are unconditional no-ops); it only needs
+// to exist and be executable to satisfy the upfront RUNTIME validity check.
+func stubExecutableOnPath(t *testing.T, name string) {
+	t.Helper()
+	bin := t.TempDir()
+	script := filepath.Join(bin, name)
+	if err := os.WriteFile(script, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
+// TestBootstrap_RunnerKindBwrap_OverridesMismatchedRuntime proves runner
+// selection keys off RUNNER_KIND, not a runtime-name comparison (issue
+// #2538): RUNTIME is set to "podman" — a real OCI runtime name, which the
+// old `c.runtime == "bwrap"` check would have read as "select OCI" — but
+// RUNNER_KIND=bwrap must still route to the bwrap adapter. bwrapAdapter's
+// IsReady() is an unconditional no-op (never shells out), so a full,
+// otherwise-successful bootstrap() proves the bwrap branch was taken; had
+// selection still keyed off RUNTIME, this would instead try to run `podman
+// image inspect` and fail. A stub "podman" is put on PATH purely to satisfy
+// runner.ValidateRuntime's upfront CLI-presence check (podman itself is
+// never invoked once the bwrap branch is correctly selected).
+func TestBootstrap_RunnerKindBwrap_OverridesMismatchedRuntime(t *testing.T) {
+	stubExecutableOnPath(t, "podman")
+	checkout := mustSeedableCheckout(t)
+	repoPath := filepath.Join(t.TempDir(), "accum.git")
+
+	issuesDir := t.TempDir()
+	issueFile := `---
+title: Some issue
+state: untriaged
+labels: []
+created: 2026-07-09T12:00:00Z
+---
+body
+`
+	if err := os.WriteFile(filepath.Join(issuesDir, "42.md"), []byte(issueFile), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("REPO_SLUG", "owner/repo")
+	t.Setenv("GH_TOKEN", "test-token")
+	t.Setenv("GIT_USER_NAME", "Test")
+	t.Setenv("GIT_USER_EMAIL", "test@example.com")
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "test-oauth-token")
+	t.Setenv("CODE_FORGE", "local")
+	t.Setenv("CODE_FORGE_ACCUMULATION_REPO_DIR", repoPath)
+	t.Setenv("BASE_BRANCH", "main")
+	t.Setenv("MERGE_MODE", "immediate")
+	t.Setenv("RUNTIME", "podman")
+	t.Setenv("RUNNER_KIND", "bwrap")
+	t.Setenv("ISSUE_TRACKER", "local")
+	t.Setenv("LOCAL_ISSUES_DIR", issuesDir)
+	t.Chdir(checkout)
+
+	lc, err := bootstrap(false, dispatchKindWork, false)
+	if err != nil {
+		t.Fatalf("bootstrap() with RUNNER_KIND=bwrap and RUNTIME=podman = %v, want success (bwrap selected)", err)
+	}
+	if lc == nil {
+		t.Fatal("bootstrap() launch context = nil, want a non-nil *launchContext on success")
+	}
+	t.Cleanup(lc.cleanup)
+}
+
+// TestBootstrap_RunnerKindOCI_OverridesMatchingRuntime is
+// TestBootstrap_RunnerKindBwrap_OverridesMismatchedRuntime's mirror: RUNTIME
+// is set to "bwrap" — the literal value the old comparison read as "select
+// bwrap" — but RUNNER_KIND=oci must still route to the OCI adapter.
+// ociAdapter.IsReady() shells out to `$RUNTIME image inspect`; "bwrap" is
+// not an OCI CLI, so that invocation fails and bootstrap surfaces an error
+// instead of the trivial bwrap no-op success the old runtime-name
+// comparison would have produced.
+func TestBootstrap_RunnerKindOCI_OverridesMatchingRuntime(t *testing.T) {
+	checkout := mustSeedableCheckout(t)
+	repoPath := filepath.Join(t.TempDir(), "accum.git")
+
+	issuesDir := t.TempDir()
+	issueFile := `---
+title: Some issue
+state: untriaged
+labels: []
+created: 2026-07-09T12:00:00Z
+---
+body
+`
+	if err := os.WriteFile(filepath.Join(issuesDir, "42.md"), []byte(issueFile), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("REPO_SLUG", "owner/repo")
+	t.Setenv("GH_TOKEN", "test-token")
+	t.Setenv("GIT_USER_NAME", "Test")
+	t.Setenv("GIT_USER_EMAIL", "test@example.com")
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "test-oauth-token")
+	t.Setenv("CODE_FORGE", "local")
+	t.Setenv("CODE_FORGE_ACCUMULATION_REPO_DIR", repoPath)
+	t.Setenv("BASE_BRANCH", "main")
+	t.Setenv("MERGE_MODE", "immediate")
+	t.Setenv("RUNTIME", "bwrap")
+	t.Setenv("RUNNER_KIND", "oci")
+	t.Setenv("ISSUE_TRACKER", "local")
+	t.Setenv("LOCAL_ISSUES_DIR", issuesDir)
+	t.Chdir(checkout)
+
+	lc, err := bootstrap(false, dispatchKindWork, false)
+	if err == nil {
+		t.Fatal("bootstrap() with RUNNER_KIND=oci and RUNTIME=bwrap = nil error, want the OCI adapter's IsReady() to fail against a non-OCI runtime name")
+	}
+	if lc != nil {
+		t.Fatalf("bootstrap() on readiness error = %+v, want nil launch context", lc)
+	}
 }
 
 // TestResearchLaunchStack_WiresResearchLabelsAndSettle verifies
