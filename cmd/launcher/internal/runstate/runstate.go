@@ -84,11 +84,19 @@ type RunState struct {
 }
 
 // IsEmpty reports whether s carries nothing worth seeding into a fresh
-// pass's prompt -- the zero value, or the common cold-start case where no
-// prior pass has left any handoff behind. Kept on RunState itself so a new
-// field only needs to be added here once, rather than at every caller that
-// otherwise open-codes its own all-fields-empty check (seedPromptFromState's
-// own check, before this method existed, was one such site).
+// pass's PROMPT specifically -- the zero value, or the common cold-start
+// case where no prior pass has left any handoff behind. This is
+// deliberately NOT an all-fields-empty check: DoneSlices/RemainingSlices
+// are excluded below on purpose (see the comment in the method body), so a
+// non-empty s can still report IsEmpty() == true. A future caller checking
+// something other than "does this need seeding into a prompt" -- e.g.
+// whether to bother persisting state at all -- must not assume this method
+// means "every field is zero" and reach for it unexamined; it would
+// silently ignore DoneSlices/RemainingSlices. Kept on RunState itself so a
+// new prompt-relevant field only needs to be added here once, rather than
+// at every caller that otherwise open-codes its own check
+// (seedPromptFromState's own check, before this method existed, was one
+// such site).
 func (s RunState) IsEmpty() bool {
 	// DoneSlices/RemainingSlices are deliberately excluded: they are
 	// dispatch-internal bookkeeping only (issue #2059's dedup mechanism),
