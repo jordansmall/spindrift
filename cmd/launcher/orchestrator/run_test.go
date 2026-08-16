@@ -1518,14 +1518,42 @@ func reviewPassFakeDriverBody(callLog string) string {
 	return fakeReviewDriverBody(callLog, "run.go:1 -- bug", "none", "none")
 }
 
+// reviewPassFakeDriverBodyWithDispositions is reviewPassFakeDriverBody's own
+// script plus one extra step (issue #2550): call 3, the fix pass that runs
+// between round 1's BLOCK and round 2's review, writes dispositionsContent
+// to dispositionsPath -- the way a real fix pass leaves its own per-finding
+// dispositions file behind for cfg.dispositionsPath -- so a caller asserting
+// on round 2's own seeded review prompt (call 4) can confirm it carries that
+// content forward. Kept as its own fixture rather than extending
+// fakeReviewDriverBody's shared signature, so the tests already calling
+// fakeReviewDriverBody/reviewPassFakeDriverBody verbatim are untouched.
+func reviewPassFakeDriverBodyWithDispositions(callLog, dispositionsPath, dispositionsContent string) string {
+	return fmt.Sprintf(`: > "$DRIVER_LOG_PATH"
+n=$(wc -l < "%s")
+case "$n" in
+  2) printf '%%s' '%s' | tee -a "$DRIVER_LOG_PATH" ;;
+  3) printf '%%s' '%s' > %s ;;
+  4) printf '%%s' '%s' | tee -a "$DRIVER_LOG_PATH" ;;
+  5) printf '%%s' '%s' | tee -a "$DRIVER_LOG_PATH" ;;
+esac
+exit 0
+`, callLog,
+		streamJSONOutcomeLine("VERDICT: BLOCK\\n\\n## Blocking\\n- run.go:1 -- bug\\n\\n## Non-blocking\\n- none"),
+		dispositionsContent, fmt.Sprintf("%q", dispositionsPath),
+		streamJSONOutcomeLine("VERDICT: APPROVE\\n\\n## Blocking\\n- none\\n\\n## Non-blocking\\n- none"),
+		streamJSONOutcomeLine("SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=done nonce=abc"))
+}
+
 // TestRunWithReviewPassSequenceOnBlockThenApprove verifies the #2037
 // implement -> review -> (BLOCK) fix -> review -> (APPROVE) land loop end to
 // end against a fake driver-exec: 5 invocations (implement, review-BLOCK,
 // fix, review-APPROVE, land), each review pass a distinct fresh-session
 // invocation against cfg.reviewPromptFile (never the implementor's own
-// promptFile), the fix pass seeded with the review's own findings, and the
-// run's own terminal SPINDRIFT_OUTCOME reached only once a review pass has
-// APPROVEd.
+// promptFile) -- the first (round 1, nothing yet to seed) unseeded, the
+// second (round 2, after round 1's own BLOCK) seeded with round 1's verdict
+// per issue #2550 -- the fix pass seeded with the review's own findings, and
+// the run's own terminal SPINDRIFT_OUTCOME reached only once a review pass
+// has APPROVEd.
 func TestRunWithReviewPassSequenceOnBlockThenApprove(t *testing.T) {
 	dir := t.TempDir()
 	callLog := filepath.Join(dir, "calls.log")
@@ -1599,8 +1627,21 @@ func TestRunWithReviewPassSequenceOnBlockThenApprove(t *testing.T) {
 		t.Errorf("pass 3 (fix) argv = %q, want an empty --session-file (fresh session)", lines[2])
 	}
 
-	if got := flagValue(lines[3], "--prompt-file"); got != reviewPromptFile {
-		t.Errorf("pass 4 (review) --prompt-file = %q, want cfg.reviewPromptFile %q unseeded", got, reviewPromptFile)
+	// Pass 4 is the round-2 review pass (reviewRounds == 1 by the time it
+	// runs, since round 1's own BLOCK already incremented it): issue #2550
+	// requires it seeded with round 1's own verdict, unlike pass 2 above.
+	round2ReviewPromptFile := flagValue(lines[3], "--prompt-file")
+	if round2ReviewPromptFile == "" || round2ReviewPromptFile == promptFile || round2ReviewPromptFile == reviewPromptFile {
+		t.Fatalf("pass 4 (review) --prompt-file = %q, want a fresh seeded file", round2ReviewPromptFile)
+	}
+	round2ReviewSeeded, err := os.ReadFile(round2ReviewPromptFile)
+	if err != nil {
+		t.Fatalf("read seeded round-2 review prompt: %v", err)
+	}
+	// "run.go:1 -- bug" is reviewPassFakeDriverBody's own blockFinding
+	// literal (fakeReviewDriverBody's blockFinding parameter).
+	if !strings.Contains(string(round2ReviewSeeded), "run.go:1 -- bug") {
+		t.Errorf("pass 4 (review) seeded prompt = %q, want it to carry round 1's own BLOCK verdict text %q", round2ReviewSeeded, "run.go:1 -- bug")
 	}
 
 	landPromptFile := flagValue(lines[4], "--prompt-file")
@@ -1637,6 +1678,150 @@ func TestRunWithReviewPassSequenceOnBlockThenApprove(t *testing.T) {
 	}
 	if got.LastVerdict != "APPROVE" {
 		t.Errorf("LastVerdict = %q, want %q", got.LastVerdict, "APPROVE")
+	}
+}
+
+// TestRunWithReviewPassRoundOneNeverSeededEvenWithPriorState verifies the
+// reviewRounds > 0 guard itself (issue #2550 review finding) is what keeps
+// round 1's review prompt unseeded -- not merely seedReviewPromptFromState's
+// own no-op case for an empty state. Every other loop test in this file
+// starts from a cold (zero-value) run-state, so state.ReviewFindings == ""
+// already makes seedReviewPromptFromState a no-op regardless of the guard;
+// mutating "reviewRounds > 0" to "reviewRounds >= 0" would still pass those
+// tests. Pre-seeding the run-state file with a non-empty ReviewFindings
+// before run() ever starts (as a crash-recovered or warm-started run might
+// carry) means seedReviewPromptFromState would NOT no-op if it were called
+// -- so round 1 staying byte-identical to cfg.reviewPromptFile here can only
+// be the reviewRounds > 0 guard itself, pinning it directly.
+func TestRunWithReviewPassRoundOneNeverSeededEvenWithPriorState(t *testing.T) {
+	dir := t.TempDir()
+	callLog := filepath.Join(dir, "calls.log")
+	writeFakeDriverExec(t, dir, callLog, reviewPassFakeDriverBody(callLog))
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	promptFile := filepath.Join(dir, "prompt.txt")
+	if err := os.WriteFile(promptFile, []byte("ORIGINAL PROMPT TEXT"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	reviewPromptFile := filepath.Join(dir, "review-prompt.txt")
+	if err := os.WriteFile(reviewPromptFile, []byte("REVIEW PROMPT TEXT"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sessionFile := filepath.Join(dir, "session.txt")
+	if err := os.WriteFile(sessionFile, []byte("--session-id fake-id"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stateFile := filepath.Join(dir, "run-state.json")
+	if err := runstate.WriteRunState(stateFile, runstate.RunState{
+		ReviewFindings: "VERDICT: BLOCK\n\n## Blocking\n- prior-run finding still on disk",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config{
+		promptFile:       promptFile,
+		reviewPromptFile: reviewPromptFile,
+		sessionFile:      sessionFile,
+		driverBin:        "claude",
+		issue:            "7",
+		logPath:          filepath.Join(dir, "stream.log"),
+		heartbeatLog:     filepath.Join(dir, "heartbeat.log"),
+		stateFile:        stateFile,
+		maxReviewRounds:  3,
+		maxSlices:        10,
+	}
+
+	var stdout bytes.Buffer
+	if _, err := run(cfg, &stdout); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	calls, err := os.ReadFile(callLog)
+	if err != nil {
+		t.Fatalf("read callLog: %v", err)
+	}
+	lines := strings.Split(strings.TrimRight(string(calls), "\n"), "\n")
+	if len(lines) < 2 {
+		t.Fatalf("driver-exec invocation count = %d, want at least 2 (log: %q)", len(lines), calls)
+	}
+	if got := flagValue(lines[1], "--prompt-file"); got != reviewPromptFile {
+		t.Errorf("pass 2 (round-1 review) --prompt-file = %q, want cfg.reviewPromptFile %q unseeded even though state.ReviewFindings was already non-empty going in", got, reviewPromptFile)
+	}
+}
+
+// TestRunWithReviewPassSeedsRoundTwoWithDispositions verifies runWithReviewPass
+// (issue #2550) seeds the round-2 review pass with BOTH round 1's own verdict
+// AND the fix pass's own dispositions file content, read at the
+// fake-driver-exec seam -- the fuller, positive end-to-end case
+// TestRunWithReviewPassSequenceOnBlockThenApprove's own pass-4 assertion only
+// covers, since that test never configures cfg.dispositionsPath and so only
+// exercises AC5's graceful-degradation path (verdict alone). Modeled on that
+// same test's 5-invocation implement/review-BLOCK/fix/review-APPROVE/land
+// shape, with the fix pass (call 3) additionally writing cfg.dispositionsPath
+// the way a real fix pass would.
+func TestRunWithReviewPassSeedsRoundTwoWithDispositions(t *testing.T) {
+	dir := t.TempDir()
+	callLog := filepath.Join(dir, "calls.log")
+	dispositionsPath := filepath.Join(dir, "dispositions.md")
+	const dispositionsContent = "- run.go:1 -- fixed by adding a nil check"
+	writeFakeDriverExec(t, dir, callLog, reviewPassFakeDriverBodyWithDispositions(callLog, dispositionsPath, dispositionsContent))
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	promptFile := filepath.Join(dir, "prompt.txt")
+	if err := os.WriteFile(promptFile, []byte("ORIGINAL PROMPT TEXT"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	reviewPromptFile := filepath.Join(dir, "review-prompt.txt")
+	if err := os.WriteFile(reviewPromptFile, []byte("REVIEW PROMPT TEXT"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sessionFile := filepath.Join(dir, "session.txt")
+	if err := os.WriteFile(sessionFile, []byte("--session-id fake-id"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stateFile := filepath.Join(dir, "run-state.json")
+
+	cfg := config{
+		promptFile:       promptFile,
+		reviewPromptFile: reviewPromptFile,
+		sessionFile:      sessionFile,
+		driverBin:        "claude",
+		issue:            "7",
+		logPath:          filepath.Join(dir, "stream.log"),
+		heartbeatLog:     filepath.Join(dir, "heartbeat.log"),
+		stateFile:        stateFile,
+		maxReviewRounds:  3,
+		maxSlices:        10,
+		dispositionsPath: dispositionsPath,
+	}
+
+	var stdout bytes.Buffer
+	if _, err := run(cfg, &stdout); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	calls, err := os.ReadFile(callLog)
+	if err != nil {
+		t.Fatalf("read callLog: %v", err)
+	}
+	lines := strings.Split(strings.TrimRight(string(calls), "\n"), "\n")
+	if len(lines) != 5 {
+		t.Fatalf("driver-exec invocation count = %d, want 5 (log: %q)", len(lines), calls)
+	}
+
+	round2ReviewPromptFile := flagValue(lines[3], "--prompt-file")
+	if round2ReviewPromptFile == "" || round2ReviewPromptFile == promptFile || round2ReviewPromptFile == reviewPromptFile {
+		t.Fatalf("pass 4 (review) --prompt-file = %q, want a fresh seeded file", round2ReviewPromptFile)
+	}
+	round2ReviewSeeded, err := os.ReadFile(round2ReviewPromptFile)
+	if err != nil {
+		t.Fatalf("read seeded round-2 review prompt: %v", err)
+	}
+	if !strings.Contains(string(round2ReviewSeeded), "run.go:1 -- bug") {
+		t.Errorf("pass 4 (review) seeded prompt = %q, want it to carry round 1's own BLOCK verdict text %q", round2ReviewSeeded, "run.go:1 -- bug")
+	}
+	if !strings.Contains(string(round2ReviewSeeded), dispositionsContent) {
+		t.Errorf("pass 4 (review) seeded prompt = %q, want it to carry the fix pass's own dispositions content %q", round2ReviewSeeded, dispositionsContent)
 	}
 }
 
@@ -2390,10 +2575,12 @@ exit 0
 // implementor's own self-report) even when state.PassSummaryPath is
 // actively set at the time the review pass runs. Pins two things about
 // each review pass in the full implement -> review(BLOCK) -> fix ->
-// review(APPROVE) -> land sequence: its --prompt-file argv is
-// cfg.reviewPromptFile exactly (proving it never went through
-// seedAndInvokePass at all), and cfg.reviewPromptFile's own on-disk content
-// is never mutated to carry "Pass summary:" either.
+// review(APPROVE) -> land sequence: pass 2 (round 1, nothing yet to seed)
+// --prompt-file argv is cfg.reviewPromptFile exactly, proving it never went
+// through seedAndInvokePass at all; pass 4 (round 2) is seeded per issue
+// #2550 with the round-1 verdict/dispositions, but its seeded content --
+// like cfg.reviewPromptFile's own on-disk content, never mutated in place
+// either way -- never carries a "Pass summary:" reference regardless.
 func TestRunWithReviewPassPromptNeverSeededWithPassSummary(t *testing.T) {
 	dir := t.TempDir()
 	callLog := filepath.Join(dir, "calls.log")
@@ -2436,12 +2623,25 @@ func TestRunWithReviewPassPromptNeverSeededWithPassSummary(t *testing.T) {
 		t.Fatalf("driver-exec invocation count = %d, want 5 (log: %q)", len(lines), calls)
 	}
 
-	// Pass 2 and pass 4 are the two review passes in this sequence
-	// (reviewPassFakeDriverBody's BLOCK-then-APPROVE shape).
-	for _, i := range []int{1, 3} {
-		if got := flagValue(lines[i], "--prompt-file"); got != reviewPromptFile {
-			t.Errorf("review pass (line %d) --prompt-file = %q, want cfg.reviewPromptFile %q exactly, unseeded", i+1, got, reviewPromptFile)
-		}
+	// Pass 2 (round 1, lines[1]) has nothing yet to seed and runs unseeded.
+	if got := flagValue(lines[1], "--prompt-file"); got != reviewPromptFile {
+		t.Errorf("pass 2 (review) --prompt-file = %q, want cfg.reviewPromptFile %q exactly, unseeded", got, reviewPromptFile)
+	}
+
+	// Pass 4 (round 2, lines[3]) is seeded per issue #2550 with round 1's own
+	// verdict/dispositions -- its --prompt-file argv is a fresh file, not
+	// cfg.reviewPromptFile itself -- but that seeded content must still never
+	// carry a "Pass summary:" reference.
+	round2ReviewPromptFile := flagValue(lines[3], "--prompt-file")
+	if round2ReviewPromptFile == "" || round2ReviewPromptFile == reviewPromptFile {
+		t.Fatalf("pass 4 (review) --prompt-file = %q, want a fresh seeded file distinct from cfg.reviewPromptFile", round2ReviewPromptFile)
+	}
+	round2Seeded, err := os.ReadFile(round2ReviewPromptFile)
+	if err != nil {
+		t.Fatalf("read seeded round-2 review prompt: %v", err)
+	}
+	if strings.Contains(string(round2Seeded), "Pass summary:") {
+		t.Errorf("pass 4 (review) seeded prompt = %q, want no \"Pass summary:\" reference (anti-anchoring firewall)", round2Seeded)
 	}
 
 	onDisk, err := os.ReadFile(reviewPromptFile)

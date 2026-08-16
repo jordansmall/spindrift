@@ -401,6 +401,7 @@ func runWithReviewPass(cfg config, stdout io.Writer) (int, error) {
 	pass := 0
 	passKind := passmachine.KindImplement
 	prevSeededPromptFile := ""
+	prevSeededReviewPromptFile := ""
 	for {
 		// ---- implement/fix pass: cfg.promptFile, seeded from state ----
 		pass++
@@ -514,6 +515,27 @@ func runWithReviewPass(cfg config, stdout io.Writer) (int, error) {
 
 		reviewCfg := cfg
 		reviewCfg.promptFile = cfg.reviewPromptFile
+		// A round-1 review pass (reviewRounds == 0, nothing yet decided
+		// against) runs unseeded, byte-identical to before issue #2550.
+		// Every review pass after the first BLOCK is seeded with the prior
+		// round's own verdict and the fix pass's dispositions file, mirroring
+		// seedAndInvokePass's own prevSeededPromptFile cleanup shape below --
+		// remove the previous round's now-stale seeded file only after this
+		// round's own seeding call succeeds, and only track a file this round
+		// actually created (seedReviewPromptFromState's own no-op case
+		// returns cfg.reviewPromptFile unchanged, leaving nothing new to
+		// clean up next round).
+		if reviewRounds > 0 {
+			seededReviewPromptFile, seedErr := seedReviewPromptFromState(reviewCfg.promptFile, state)
+			if seedErr != nil {
+				return 0, seedErr
+			}
+			if prevSeededReviewPromptFile != "" && prevSeededReviewPromptFile != cfg.reviewPromptFile {
+				os.Remove(prevSeededReviewPromptFile)
+			}
+			prevSeededReviewPromptFile = seededReviewPromptFile
+			reviewCfg.promptFile = seededReviewPromptFile
+		}
 		reviewCfg.sessionFile = ""
 		reviewCfg.topLevelRole = driverkit.ReviewerRole
 		// Issue #2277 / #2387: a configured reviewer model/effort overrides
