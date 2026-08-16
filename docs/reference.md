@@ -279,13 +279,25 @@ stays a local pin because it's opt-in by design (`filerModel`'s schema
 default is empty) and the dogfood genuinely depends on it for #393's
 `agent-review-finding` filing. Scout, reviewer, and worker are all
 unmentioned and so inherit their `lib/env-schema.nix` defaults (issue
-#2434) instead: `claude-haiku-4-5-20251001`, `claude-opus-5` (issue #2433),
-and `claude-sonnet-5` respectively. The dogfood still inherits `defaultRoster`'s built-in per-agent effort
+#2434) instead: `claude-haiku-4-5-20251001`, `claude-opus-5` (issue #2433), and `claude-sonnet-5` respectively.
+The dogfood still inherits `defaultRoster`'s built-in per-agent effort
 defaults unchanged (issue #2386), and sets no separate `reviewEffort` knob
 (issue #2512): the roster's `reviewer` entry's own effort is what the
 orchestrator's code-owned review pass (issue #2387) runs at directly, the
 same way it already does for the model (issue #2427) — one mechanism instead
 of two.
+
+##### Default models
+
+<!-- BEGIN GENERATED DEFAULT MODELS -- nix run .#regen -- DO NOT EDIT -->
+| Agent | Default model |
+| --- | --- |
+| `MODEL` (coordinator) | `claude-sonnet-5` |
+| `scout` | `claude-haiku-4-5-20251001` |
+| `reviewer` | `claude-opus-5` |
+| `filer` | *(empty; dogfood pins `claude-haiku-4-5-20251001`)* |
+| `worker` | `claude-sonnet-5` |
+<!-- END GENERATED DEFAULT MODELS -->
 
 The **prompt is baked into the image**: changing `prompts/issue-prompt.md`
 requires an image rebuild (`spindrift build`). Point `SPINDRIFT_PROMPT_DIR`

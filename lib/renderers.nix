@@ -200,7 +200,9 @@ rec {
           tree // { ${seg} = insertLeaf (tree.${seg} or { }) rest entry; };
       domainTree = builtins.foldl' (
         acc: key:
-        insertLeaf acc (splitNixPath (resolveNixPath key flakeOptionEntries.${key})) flakeOptionEntries.${key}
+        insertLeaf acc (splitNixPath (
+          resolveNixPath key flakeOptionEntries.${key}
+        )) flakeOptionEntries.${key}
       ) { } (builtins.attrNames flakeOptionEntries);
       # 2 spaces per depth level; children are ordered by attribute name
       # (mapAttrsToList walks builtins.attrNames, which sorts).
@@ -316,6 +318,30 @@ rec {
     + "// expectedDogfoodFilerModel mirrors lib/default-model-fixture.nix's\n"
     + "// dogfoodPins.filer.\n"
     + "const expectedDogfoodFilerModel = \"${dogfoodPins.filer}\"\n";
+
+  # docs/reference.md's generated "Default models" table body (issue #2514
+  # AC2): a Markdown table row per lib/default-model-fixture.nix
+  # schemaDefaults leaf (model/scoutModel/reviewModel/filerModel/
+  # workerModel), so the doc's default-model statements regenerate from the
+  # same fixture the bats/Go forms above do instead of drifting as
+  # hand-typed prose. filerModel renders specially since its schema default
+  # is the empty string -- the parenthetical instead states dogfoodPins.filer,
+  # the value spindrift's own dogfood Consumer config pins locally. No
+  # surrounding heading -- that stays hand-written in docs/reference.md; only
+  # the table itself is generated.
+  renderDefaultModelsDoc =
+    fixture:
+    let
+      inherit (fixture) schemaDefaults dogfoodPins;
+      filerCell = "*(empty; dogfood pins \`${dogfoodPins.filer}\`)*";
+    in
+    "| Agent | Default model |\n"
+    + "| --- | --- |\n"
+    + "| \`MODEL\` (coordinator) | \`${schemaDefaults.model}\` |\n"
+    + "| \`scout\` | \`${schemaDefaults.scoutModel}\` |\n"
+    + "| \`reviewer\` | \`${schemaDefaults.reviewModel}\` |\n"
+    + "| \`filer\` | ${filerCell} |\n"
+    + "| \`worker\` | \`${schemaDefaults.workerModel}\` |\n";
 
   # cmd/launcher/internal/driver/drivernames_gen.go content. driverEntries is
   # the registry's `entries` attrset (name -> Driver entry), not the whole
@@ -447,10 +473,13 @@ rec {
   renderOutcomeStatusGo =
     outcomeStatusSets:
     let
-      capitalize = s: toUpper (builtins.substring 0 1 s) + builtins.substring 1 (builtins.stringLength s - 1) s;
+      capitalize =
+        s: toUpper (builtins.substring 0 1 s) + builtins.substring 1 (builtins.stringLength s - 1) s;
       constName = word: "Status" + capitalize word;
       allWords = builtins.concatLists (map (row: row.statuses) outcomeStatusSets);
-      uniqueWords = builtins.foldl' (acc: w: if builtins.elem w acc then acc else acc ++ [ w ]) [ ] allWords;
+      uniqueWords = builtins.foldl' (
+        acc: w: if builtins.elem w acc then acc else acc ++ [ w ]
+      ) [ ] allWords;
       constLines = concatStrings (map (w: "\t${constName w} = \"${w}\"\n") uniqueWords);
       varFor =
         row:
@@ -583,7 +612,8 @@ rec {
   # hostConfig header doc. Feeds renderSchemaConfigGo below, which its
   # drift check (nix/checks/schema-drift.nix) calls too, so struct
   # membership can't drift from the check.
-  isHostConfigMember = e: ((!(e.secret or false)) && !(e.boxEnvOnly or false)) || (e.hostConfig or false);
+  isHostConfigMember =
+    e: ((!(e.secret or false)) && !(e.boxEnvOnly or false)) || (e.hostConfig or false);
 
   # cmd/launcher/schemaconfig_gen.go content: config's schema-derived
   # members (issue #2364), embedded by value in config (issue #2365) — an
@@ -631,7 +661,9 @@ rec {
         else if typeClass e == "bool" then
           "\t\t${key}: getenvSchema(\"${e.env}\") != \"\",\n"
         else if typeClass e == "int" then
-          "\t\t${key}: ${if e.intKind == "positive" then "atoiSchema" else "atoiNonnegSchema"}(\"${e.env}\"),\n"
+          "\t\t${key}: ${
+            if e.intKind == "positive" then "atoiSchema" else "atoiNonnegSchema"
+          }(\"${e.env}\"),\n"
         else if typeClass e == "float" then
           "\t\t${key}: floatNonnegSchema(\"${e.env}\"),\n"
         else

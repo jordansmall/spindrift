@@ -29,6 +29,13 @@ let
     ]
   );
 
+  # Shared by dogfood-doc-models-guard and dogfood-doc-models-guard-regression
+  # so the Subagent roster section's hand-written restatement of scout/
+  # reviewer/worker's schema-default models (the dogfood paragraph naming
+  # only Filer as a local pin) can't drift between the check and its
+  # regression guard (issue #2514 AC2).
+  wantDogfoodModels = "`${defaultModelFixture.schemaDefaults.scoutModel}`, `${defaultModelFixture.schemaDefaults.reviewModel}` (issue #2433), and `${defaultModelFixture.schemaDefaults.workerModel}` respectively";
+
   # Shared by schema-choices and schema-secret-choices-guard (issue #872) so
   # the guard predicate is defined exactly once and can be exercised against
   # a synthetic/injected schema in a test, not only the real one.
@@ -332,6 +339,23 @@ let
     assert assertMsg (mismatches == { })
       "lib/default-model-fixture.nix: schemaDefaults has drifted from lib/env-schema.nix's own .default values -- mismatched keys: ${concatStringsSep ", " (attrNames mismatches)} -- update the fixture (issue #2514)";
     fixtureSchemaDefaults;
+
+  # Asserts the isolated Subagent roster section restates
+  # lib/default-model-fixture.nix's schemaDefaults scout/reviewer/worker
+  # model literals verbatim, else throws (issue #2514 AC2). The dogfood
+  # paragraph inside that section hand-restates those three as prose (Filer
+  # is a local dogfoodPins pin, stated separately, and out of scope here).
+  # Factored out the same way assertRosterDocEffortsOk is, so
+  # dogfood-doc-models-guard-regression can exercise this exact assertion
+  # path against a synthetic doc.
+  assertDogfoodDocModelsOk =
+    { doc, wantModels }:
+    let
+      inherit (pkgs.lib) assertMsg hasInfix;
+    in
+    assert assertMsg (hasInfix wantModels (rosterDocSection doc))
+      "docs/reference.md: Subagent roster section's dogfood paragraph must restate lib/default-model-fixture.nix's schemaDefaults scout/reviewer/worker model literals as `${wantModels}` — it has drifted from the fixture, update the doc (issue #2514)";
+    doc;
 in
 {
   # cmd/launcher/internal/driver/drivernames_gen.go must match the key list
@@ -1612,6 +1636,95 @@ in
           || { echo "cmd/launcher/defaultmodels_gen.go is out of sync with lib/default-model-fixture.nix — regenerate it with \`nix run .#regen\`" >&2; exit 1; }
         touch $out
       '';
+
+  # The generated Default models table between docs/reference.md's BEGIN/END
+  # GENERATED DEFAULT MODELS markers must match the content rendered from
+  # lib/default-model-fixture.nix (issue #2514 AC2) — one row per
+  # schemaDefaults leaf, exhaustively. Shares its renderer with
+  # `nix run .#regen` via lib/renderers.nix, so guard and regenerator cannot
+  # drift from each other (issue #402).
+  default-models-doc =
+    let
+      inherit (pkgs.lib) assertMsg;
+      generated = renderers.renderDefaultModelsDoc defaultModelFixture;
+      docSrc = builtins.readFile ../../docs/reference.md;
+      beginMarker = "<!-- BEGIN GENERATED DEFAULT MODELS -- nix run .#regen -- DO NOT EDIT -->\n";
+      endMarker = "<!-- END GENERATED DEFAULT MODELS -->";
+      afterBegin =
+        let
+          parts = builtins.split beginMarker docSrc;
+        in
+        if builtins.length parts >= 3 then
+          builtins.elemAt parts 2
+        else
+          throw "docs/reference.md: BEGIN GENERATED DEFAULT MODELS marker not found";
+      committed =
+        let
+          parts = builtins.split endMarker afterBegin;
+        in
+        if builtins.length parts >= 3 then
+          builtins.elemAt parts 0
+        else
+          throw "docs/reference.md: END GENERATED DEFAULT MODELS marker not found";
+    in
+    assert assertMsg (committed == generated) ''
+      docs/reference.md generated Default models table is out of sync with lib/default-model-fixture.nix — regenerate it with `nix run .#regen`
+        got:  ${committed}
+        want: ${generated}'';
+    pkgs.runCommand "default-models-doc" { } "touch $out";
+
+  # docs/reference.md's Subagent roster section's dogfood paragraph restates
+  # lib/default-model-fixture.nix's schemaDefaults scout/reviewer/worker
+  # model literals as prose (Filer is a separate, hand-stated local pin); this
+  # pins that string to the fixture's actual values instead of letting the
+  # two drift silently (issue #2514 AC2), the same way roster-doc-efforts
+  # pins the section's effort prose to lib/roster-schema-defaults.nix.
+  dogfood-doc-models-guard =
+    let
+      doc = builtins.readFile ../../docs/reference.md;
+    in
+    assert
+      (assertDogfoodDocModelsOk {
+        inherit doc;
+        wantModels = wantDogfoodModels;
+      }) == doc;
+    pkgs.runCommand "dogfood-doc-models-guard" { } "touch $out";
+
+  # Regression guard (issue #2514 AC2): the doc-drift assertion above must
+  # actually detect a wrong model restatement, not just pass vacuously
+  # because docs/reference.md's Subagent roster section currently agrees
+  # with the fixture. Runs assertDogfoodDocModelsOk — the exact function
+  # dogfood-doc-models-guard calls — against a synthetic doc whose dogfood
+  # paragraph states the real wantDogfoodModels with the worker model
+  # literal flipped (a plausible drift a fixture edit could leave behind),
+  # via tryEval, so this fails if the hasInfix assert is ever dropped from
+  # assertDogfoodDocModelsOk.
+  dogfood-doc-models-guard-regression =
+    let
+      inherit (pkgs.lib) assertMsg replaceStrings;
+      workerModel = defaultModelFixture.schemaDefaults.workerModel;
+      driftedWorkerModel =
+        if workerModel == "claude-sonnet-5" then "claude-sonnet-6" else "claude-sonnet-5";
+      driftedModels =
+        replaceStrings [ "`${workerModel}`" ] [ "`${driftedWorkerModel}`" ]
+          wantDogfoodModels;
+      badDoc = ''
+        intro text
+
+        #### Subagent roster
+
+        Scout, reviewer, and worker inherit their defaults instead: ${driftedModels}.
+
+        #### Next heading
+      '';
+      result = builtins.tryEval (assertDogfoodDocModelsOk {
+        doc = badDoc;
+        wantModels = wantDogfoodModels;
+      });
+    in
+    assert assertMsg (!result.success)
+      "dogfood-doc-models-guard-regression: expected assertDogfoodDocModelsOk to reject a synthetic doc whose dogfood paragraph states a wrong model restatement, but it evaluated successfully";
+    pkgs.runCommand "dogfood-doc-models-guard-regression" { } "touch $out";
 
   # Regression guard: rosterDocSection's own throw branch (missing "####
   # Subagent roster" heading) is otherwise never exercised -- every other
