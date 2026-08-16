@@ -428,6 +428,42 @@ func TestBuildRunArgs_IssuesDirMounted(t *testing.T) {
 	}
 }
 
+// TestBuildRunArgs_IssueSnapshotMounted verifies that a Box with
+// IssueSnapshotPath set renders a read-only -v <path>:/issue-snapshot.md:ro
+// entry — nothing previously asserted the frozen issue-read snapshot mount
+// actually reaches podman/docker's own argv (issue #2547 review finding).
+func TestBuildRunArgs_IssueSnapshotMounted(t *testing.T) {
+	f, err := os.CreateTemp(t.TempDir(), "issue-snapshot-*.md")
+	if err != nil {
+		t.Fatalf("CreateTemp: %v", err)
+	}
+	f.Close()
+
+	a := &ociAdapter{cli: "podman", image: "spindrift:test"}
+	box := Box{Name: "agent-issue-1", Env: map[string]string{}, IssueSnapshotPath: f.Name()}
+	args, err := a.buildRunArgs(box)
+	if err != nil {
+		t.Fatalf("buildRunArgs: %v", err)
+	}
+
+	want := f.Name() + ":/issue-snapshot.md:ro"
+	if !containsArg(args, want) {
+		t.Errorf("issue snapshot mount %q not found in args: %v", want, args)
+	}
+}
+
+// TestBuildRunArgs_PropagatesIssueSnapshotMountError verifies that a missing
+// IssueSnapshotPath surfaces buildMountSpecs's hard error through
+// buildRunArgs, rather than silently omitting the mount (issue #2547 review
+// finding).
+func TestBuildRunArgs_PropagatesIssueSnapshotMountError(t *testing.T) {
+	a := &ociAdapter{cli: "podman", image: "spindrift:test"}
+	box := Box{Name: "agent-issue-1", Env: map[string]string{}, IssueSnapshotPath: filepath.Join(t.TempDir(), "missing.md")}
+	if _, err := a.buildRunArgs(box); err == nil {
+		t.Error("buildRunArgs: want error on missing issue snapshot, got nil")
+	}
+}
+
 // TestBuildRunArgs_IssuesDirNonLocalTracker_NoMount verifies that a
 // non-local tracker never renders an /issues mount.
 func TestBuildRunArgs_IssuesDirNonLocalTracker_NoMount(t *testing.T) {
