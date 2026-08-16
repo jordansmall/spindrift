@@ -123,3 +123,55 @@ func TestScheduleSlices_ManifestOrderPreservedWithinBatch(t *testing.T) {
 	got := scheduleNames(t, slices)
 	assertBatches(t, got, [][]string{{"a", "b", "c"}})
 }
+
+// TestScheduleSlices_ForwardDeclaredDependsOn covers a DependsOn edge naming
+// a slice declared LATER in the manifest than the dependent -- the
+// dependency must still be honored (b before a), not silently dropped just
+// because batchIndexOf wasn't populated yet in raw declaration order.
+func TestScheduleSlices_ForwardDeclaredDependsOn(t *testing.T) {
+	slices := []ManifestSlice{
+		{Name: "a", DependsOn: []string{"b"}},
+		{Name: "b"},
+	}
+	got := scheduleNames(t, slices)
+	assertBatches(t, got, [][]string{{"b"}, {"a"}})
+}
+
+// TestScheduleSlices_OverlappingDirectoryLeaseSequenced covers a lease that
+// names a directory containing another slice's file lease -- these are not
+// provably disjoint and must be sequenced into separate batches even though
+// the strings aren't identical.
+func TestScheduleSlices_OverlappingDirectoryLeaseSequenced(t *testing.T) {
+	slices := []ManifestSlice{
+		{Name: "a", FileLeases: []string{"cmd/x"}},
+		{Name: "b", FileLeases: []string{"cmd/x/dispatch.go"}},
+	}
+	got := scheduleNames(t, slices)
+	assertBatches(t, got, [][]string{{"a"}, {"b"}})
+}
+
+// TestScheduleSlices_NormalizedEquivalentLeasesSequenced covers two leases
+// that name the same path in different but equivalent forms ("./a.go" vs
+// "a.go") -- these must be treated as the same path and sequenced into
+// separate batches.
+func TestScheduleSlices_NormalizedEquivalentLeasesSequenced(t *testing.T) {
+	slices := []ManifestSlice{
+		{Name: "a", FileLeases: []string{"./a.go"}},
+		{Name: "b", FileLeases: []string{"a.go"}},
+	}
+	got := scheduleNames(t, slices)
+	assertBatches(t, got, [][]string{{"a"}, {"b"}})
+}
+
+// TestScheduleSlices_GenuinelyDisjointLeasesConcurrent guards against
+// over-correcting the lease-overlap fix into always-sequential: leases that
+// are neither equal nor prefix-related after normalization must still join
+// the same batch.
+func TestScheduleSlices_GenuinelyDisjointLeasesConcurrent(t *testing.T) {
+	slices := []ManifestSlice{
+		{Name: "a", FileLeases: []string{"cmd/x/a.go"}},
+		{Name: "b", FileLeases: []string{"cmd/y/b.go"}},
+	}
+	got := scheduleNames(t, slices)
+	assertBatches(t, got, [][]string{{"a", "b"}})
+}
