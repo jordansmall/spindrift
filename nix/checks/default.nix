@@ -50,6 +50,7 @@ let
     // (import ./prompt-contract.nix common)
     // (import ./prompt-contract-parity.nix common)
     // (import ./research-verdicts.nix common)
+    // (import ./jira-status-mapping.nix common)
     // (import ./read-only-capability.nix common)
     // (import ./prompts.nix common)
     // (import ./schema-drift.nix common)
