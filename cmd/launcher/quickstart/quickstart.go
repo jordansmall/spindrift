@@ -79,7 +79,7 @@ func runtimeAlias(binary string) string {
 }
 
 // validateRepoSlug rejects anything but a single-slash "owner/name" shape —
-// the form the generated flake.nix's settings.repository.repoSlug expects.
+// the form the generated flake.nix's forge.repoSlug expects.
 func validateRepoSlug(slug string) error {
 	parts := strings.Split(slug, "/")
 	if len(parts) != 2 || parts[0] == "" || parts[1] == "" || strings.ContainsAny(slug, " \t\n\r") {
@@ -705,7 +705,7 @@ func render(a answers) []scaffoldFile {
 // reference (docs/flake-options.md) for everything else (ADR 0027). No
 // prompts/ directory is scaffolded — the harness defaults every prompt.
 func renderFlakeNix(repoSlug, runtime, gitUserName, gitUserEmail string, tracker trackerSettings) string {
-	trackerLine := fmt.Sprintf("            settings.issueDiscovery.issueTracker = \"%s\";\n", nixEscape(tracker.issueTracker))
+	trackerLine := fmt.Sprintf("            "+PathIssueTracker+" = \"%s\";\n", nixEscape(tracker.issueTracker))
 
 	settingsLines := trackerLine
 	if tracker.issueTracker == "forgejo" {
@@ -714,9 +714,9 @@ func renderFlakeNix(repoSlug, runtime, gitUserName, gitUserEmail string, tracker
 		// the same instance doctor validated. Emitted in the current
 		// domain-tree spelling (forge.backend / issues.forgejo.baseURL), the
 		// same one templates/default/flake.nix documents.
-		settingsLines += "            forge.backend = \"forgejo\";\n"
+		settingsLines += "            " + PathCodeForge + " = \"forgejo\";\n"
 		if tracker.forgejoBaseURL != "" && tracker.forgejoBaseURL != codebergBaseURL {
-			settingsLines += fmt.Sprintf("            issues.forgejo.baseURL = \"%s\";\n", nixEscape(tracker.forgejoBaseURL))
+			settingsLines += fmt.Sprintf("            "+PathForgejoBaseURL+" = \"%s\";\n", nixEscape(tracker.forgejoBaseURL))
 		}
 	}
 
@@ -751,9 +751,9 @@ func renderFlakeNix(repoSlug, runtime, gitUserName, gitUserEmail string, tracker
           # reference: docs/flake-options.md
           spindrift = {
             runtime = "%s";
-            settings.repository.repoSlug = "%s";
-            settings.repository.gitUserName = "%s";
-            settings.repository.gitUserEmail = "%s";
+            %s = "%s";
+            %s = "%s";
+            %s = "%s";
 %s          };
 
           devShells.default = pkgs.mkShell {
@@ -762,7 +762,11 @@ func renderFlakeNix(repoSlug, runtime, gitUserName, gitUserEmail string, tracker
         };
     };
 }
-`, nixEscape(runtime), nixEscape(repoSlug), nixEscape(gitUserName), nixEscape(gitUserEmail), settingsLines)
+`, nixEscape(runtime),
+		PathRepoSlug, nixEscape(repoSlug),
+		PathGitUserName, nixEscape(gitUserName),
+		PathGitUserEmail, nixEscape(gitUserEmail),
+		settingsLines)
 }
 
 // nixEscape escapes a string for embedding in a Nix double-quoted string

@@ -101,10 +101,10 @@ func TestRunQuickstart_RepoSlugDetected_CanBeOverridden(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read flake.nix: %v", err)
 	}
-	if !strings.Contains(string(flakeNix), `settings.repository.repoSlug = "someoneelse/other-repo"`) {
+	if !strings.Contains(string(flakeNix), `forge.repoSlug = "someoneelse/other-repo"`) {
 		t.Errorf("expected flake.nix to carry the overridden repoSlug, got:\n%s", flakeNix)
 	}
-	if strings.Contains(string(flakeNix), `settings.repository.repoSlug = "jordansmall/spindrift"`) {
+	if strings.Contains(string(flakeNix), `forge.repoSlug = "jordansmall/spindrift"`) {
 		t.Errorf("expected the detected repoSlug default to be overridden, got:\n%s", flakeNix)
 	}
 }
@@ -134,7 +134,7 @@ func TestRunQuickstart_RepoSlugInvalid_RejectedAndReprompted(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read flake.nix: %v", err)
 	}
-	if !strings.Contains(string(flakeNix), `settings.repository.repoSlug = "owner/repo"`) {
+	if !strings.Contains(string(flakeNix), `forge.repoSlug = "owner/repo"`) {
 		t.Errorf("expected flake.nix to carry the re-prompted valid repoSlug, got:\n%s", flakeNix)
 	}
 }
@@ -597,8 +597,8 @@ func TestRunQuickstart_WritesGithubIssueTrackerWithoutPrompting(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read flake.nix: %v", err)
 	}
-	if !strings.Contains(string(flakeNix), `settings.issueDiscovery.issueTracker = "github"`) {
-		t.Errorf("expected flake.nix to set settings.issueDiscovery.issueTracker to github, got:\n%s", flakeNix)
+	if !strings.Contains(string(flakeNix), `issues.tracker = "github"`) {
+		t.Errorf("expected flake.nix to set issues.tracker to github, got:\n%s", flakeNix)
 	}
 }
 
@@ -1371,7 +1371,7 @@ func TestRender_ForgejoCodeberg_ConfiguresBothSeamsOmitsDefaultBaseURL(t *testin
 	}
 
 	flakeNix := byPath["flake.nix"]
-	if !strings.Contains(flakeNix.content, `settings.issueDiscovery.issueTracker = "forgejo"`) {
+	if !strings.Contains(flakeNix.content, `issues.tracker = "forgejo"`) {
 		t.Errorf("expected flake.nix to configure the forgejo issue tracker, got:\n%s", flakeNix.content)
 	}
 	if !strings.Contains(flakeNix.content, `forge.backend = "forgejo"`) {
@@ -1604,7 +1604,7 @@ func TestRunQuickstart_CodebergRemote_UsesForgejoBackend(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read flake.nix: %v", err)
 	}
-	if !strings.Contains(string(flakeNix), `settings.issueDiscovery.issueTracker = "forgejo"`) {
+	if !strings.Contains(string(flakeNix), `issues.tracker = "forgejo"`) {
 		t.Errorf("expected flake.nix to set issueTracker to forgejo, got:\n%s", flakeNix)
 	}
 	if !strings.Contains(string(flakeNix), `forge.backend = "forgejo"`) {
@@ -1656,7 +1656,7 @@ func TestRunQuickstart_SelfHostedForgejo_AsksBackendAndEmitsBaseURL(t *testing.T
 	if err != nil {
 		t.Fatalf("read flake.nix: %v", err)
 	}
-	if !strings.Contains(string(flakeNix), `settings.repository.repoSlug = "team/proj"`) {
+	if !strings.Contains(string(flakeNix), `forge.repoSlug = "team/proj"`) {
 		t.Errorf("expected flake.nix to carry the detected repoSlug team/proj, got:\n%s", flakeNix)
 	}
 	if !strings.Contains(string(flakeNix), `issues.forgejo.baseURL = "https://git.example.com"`) {
