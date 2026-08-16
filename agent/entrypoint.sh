@@ -34,7 +34,6 @@ fi
 : "${GIT_USER_EMAIL:?GIT_USER_EMAIL is required}"
 
 # BEGIN GENERATED OUTCOME STATUS WORDS -- nix run .#regen -- DO NOT EDIT
-WORK_STATUS_PROSE="ready, blocked, or ambiguous"
 # shellcheck disable=SC2034 # consumed by _subst's envsubst allowlist, wired in a later slice (issue #2504)
 RESEARCH_STATUS_ENUM="recommend|reject|unclear"
 # END GENERATED OUTCOME STATUS WORDS
@@ -1136,6 +1135,7 @@ run_driver_in_env() {
 # dispatch.buildBoxEnv already resolved host-side from the backend registry,
 # not re-derived in-box from CODE_FORGE's name.
 emit_outcome_backstop() {
+  local _recovery="${1:-}"
   # --run-state-file is a fixed path, not forwarded from any launcher-set
   # env var: it mirrors the orchestrator's own --state-file default
   # (issue #1997), the same fixed path the orchestrator process running
@@ -1152,71 +1152,12 @@ emit_outcome_backstop() {
     --host-mediated-remote "${BOX_HOST_MEDIATED_REMOTE:-}" \
     --outbox-relay-capable "${BOX_OUTBOX_RELAY_CAPABLE:-}" \
     --box-write-enabled "${BOX_WRITE_ENABLED:-}" \
-    --recovery-attempted "${_recovery_attempted:-}" \
+    --recovery-attempted "$_recovery" \
     --max-attempts "$MAX_REBASE_ATTEMPTS" \
     --backoff-secs "$TRANSIENT_BACKOFF_SECS" \
     --jitter-secs "$HOLD_JITTER_SECS" \
     --run-state-file "/tmp/run-state.json"
 }
-
-# required_marker_gate is the reusable shape issue #1607 hardwired to
-# SPINDRIFT_OUTCOME: a Driver pass that exits cleanly but leaves a required
-# marker missing most often just ended its turn early (issue #1542) rather
-# than actually failing, so before any caller-owned backstop runs, resume the
-# same pinned session exactly once with a corrective nudge and re-scan. Never
-# loops past that one resume -- a second miss falls through for the caller to
-# handle. A research dispatch pins no session worth resuming (ADR 0022), so
-# it always falls through untouched. Registering a second marker (e.g.
-# SPINDRIFT_PR_INTENT, issue #2036) means one more call at the call site
-# below, not a second copy of this function (issue #2044).
-#
-# Args:
-#   $1 - name of a scanner function: called with no arguments, echoes the
-#        marker's current value (or empty) by inspecting whatever state the
-#        just-completed pass left behind
-#   $2 - corrective prompt to resume the session with, sent only on a miss
-#   $3 - name of a required-predicate function: called with the scanned
-#        value as $1, returns success if the gate is already satisfied
-#
-# Reads/writes claude_rc, agents_json, _handoff, and _recovery_attempted by
-# dynamic scoping from main, the same idiom every other phase function here
-# uses (issue #515) -- there is no separate return value; a caller re-scans its
-# own marker after this returns to see whether the resume changed anything.
-required_marker_gate() {
-  local _scanner="$1" _corrective_prompt="$2" _predicate="$3"
-
-  if [ "$claude_rc" -ne 0 ] || _is_research_kind; then
-    return
-  fi
-  if "$_predicate" "$("$_scanner")"; then
-    return
-  fi
-
-  echo "==> required marker missing — resuming the session once with a nudge"
-  _recovery_attempted=1
-  # Narrows handoff_json to {"Invoker": ...} only (jq's `{Invoker}` object-
-  # construction shorthand) -- no ReviewPromptFile/ReviewModel key at all, so
-  # run_driver_in_env's own `// empty` jq defaults leave both empty,
-  # preserving issue #2065's deliberate single-pass-nudge omission (see the
-  # comment on the primary run_driver_in_env call in main for why).
-  run_driver_in_env "$_corrective_prompt" "$agents_json" "resume" "$(printf '%s' "$_handoff" | jq -c '{Invoker}')" || claude_rc=$?
-}
-
-# The SPINDRIFT_OUTCOME row on the required-marker gate above -- the scanner
-# reads back main's captured outcome line, and the predicate is bare
-# presence, the same condition the pre-#2044 inline check tested.
-#
-# Both are only ever invoked indirectly, via required_marker_gate's
-# "$_scanner"/"$_predicate" parameters (see its body above), never by their
-# literal names. shellcheck's own indirect-invocation credit for that
-# pattern stops working once main() ends with an unconditional
-# `exit "$claude_rc"` (ADR 0039 slice S1, issue #2252) -- a shellcheck
-# limitation, not a real dead-code finding; both are called from main() well
-# before that trailing exit.
-# shellcheck disable=SC2329
-_scan_outcome() { printf '%s' "$_last_outcome_line"; }
-# shellcheck disable=SC2329
-_require_nonempty() { [ -n "$1" ]; }
 
 # _scan_pr_intent_in_log reports (via stdout) the last line in $1 (a raw
 # stream_log a driver-exec pass just teed, still on disk at the point
@@ -1249,35 +1190,6 @@ _scan_pr_intent_in_log() {
     | tail -1
 }
 
-# The SPINDRIFT_PR_INTENT row on the required-marker gate above (issue
-# #2045, the #2036 fix): the scanner reads back main's captured PR-intent
-# line, reusing _require_nonempty as its predicate -- the same bare-presence
-# condition the SPINDRIFT_OUTCOME row above already uses.
-#
-# Same shellcheck note as _scan_outcome above: only ever invoked indirectly
-# via required_marker_gate's "$_scanner" parameter.
-# shellcheck disable=SC2329
-_scan_pr_intent() { printf '%s' "$_last_pr_intent_line"; }
-
-# _emit_pr_intent_giveup_op prints a single heartbeat "decision" op (issue
-# #2046) recording that the read-only PR-intent nudge gave up after $1
-# attempt(s) without ever yielding a usable SPINDRIFT_PR_INTENT line. It is an
-# ordinary stream-json line on the Box's own stdout -- the very stream
-# driver-exec and the orchestrator already write their own #2027 spindrift_op
-# events onto -- so the host heartbeat Writer (cmd/launcher/internal/driver/
-# claude) parses and renders it identically, giving an operator a visible
-# reason the run ended blocked rather than the unexplained state behind #2036.
-# The JSON mirrors that package's Event/SpindriftOp shape; a "decision" op
-# with decision=stop is exactly how the orchestrator's own give-up decisions
-# are encoded. The reason text deliberately omits the literal
-# SPINDRIFT_PR_INTENT token so no downstream scan mistakes it for a genuine
-# marker attempt (_scan_pr_intent_in_log and the launcher's
-# outcome.LastPRIntentInLog both key off the bare token).
-_emit_pr_intent_giveup_op() {
-  local attempts="$1"
-  printf '{"type":"spindrift_op","spindrift_op":{"op":"decision","decision":"stop","reason":"read-only PR-intent nudge exhausted after %s attempt; no marker line, handing off blocked"}}\n' "$attempts"
-}
-
 main() {
   # Cross-phase sentinels: declared local here so bash's dynamic scoping lets
   # each phase function assign them by plain (non-local) assignment while
@@ -1285,7 +1197,7 @@ main() {
   local _rebase_and_publish _had_rebase_conflict
   local _use_dev_shell _harness_path
   local prompt agents_json _handoff
-  local _last_outcome_line _last_near_miss_line _last_pr_intent_line _recovery_attempted
+  local _last_outcome_line _last_near_miss_line _last_pr_intent_line
   # Initialized empty here, unlike the sibling vars above (which are always
   # assigned unconditionally by run_driver_in_env before any read) -- this
   # one is only ever assigned inside the backstop `if` block below, and
@@ -1352,44 +1264,29 @@ main() {
     echo "==> claude implementing issue #$ISSUE_NUMBER on $BRANCH"
   fi
   local claude_rc=0
-  _recovery_attempted=""
   run_driver_in_env "$prompt" "$agents_json" "$(printf '%s' "$_handoff" | jq -r '.SessionMode')" "$_handoff" || claude_rc=$?
 
-  # Resume-once-then-fall-through via the required-marker gate (issue
-  # #2044). The same --agents JSON as the first pass rides along on any
-  # resume -- the run may still need to reach the scout/filer step it never
-  # got to, and the pinned session has no other way to learn about them.
-  # required_marker_gate's own corrective-resume call narrows its
-  # run_driver_in_env handoff_json argument to `{"Invoker": ...}` only (jq's
-  # `{Invoker}` object-construction shorthand) -- no ReviewPromptFile or
-  # ReviewModel key at all, so run_driver_in_env's own `// empty` jq defaults
-  # leave both empty: under the orchestrator, this one corrective nudge
-  # stays a narrow single-pass resume rather than re-entering the full
-  # implement/review/fix loop (issue #2037) a second time from whatever cap
-  # or park stopped the first attempt. Issue #2065
-  # reviewed this deliberate downgrade and kept the single-pass fallback:
-  # each run_driver_in_env call spawns a fresh orchestrator process whose
-  # --max-review-rounds/--max-slices budgets reset to their binary defaults
-  # (entrypoint.sh threads neither), so re-attaching --review-prompt-file
-  # here would hand the last-resort nudge a brand-new full review budget and
-  # re-trigger the exact bounded-but-large loop the original attempt just
-  # exhausted -- the deterministic checks/gates the recovery_prompt already
-  # asks for still run, only the code-owned review pass is skipped. A
-  # regression test pins this omission (tests/entrypoint-orchestrator-handoff.bats).
-  # When the just-completed pass left a near-miss outcome line -- the token
-  # present but the line unparseable (issue #1900) -- quote that offending
-  # text back and restate the canonical grammar and the allowed status
-  # values, mirroring the PR-intent nudge's grammar-rich shape below, rather
-  # than the bare "print the required line" wording. A bare absence (no
-  # near-miss line captured) still gets the generic nudge unchanged.
-  local recovery_prompt
-  if [ -n "$_last_near_miss_line" ]; then
-    recovery_prompt="Your last message printed a line that looks like a SPINDRIFT_OUTCOME marker but does not parse, so the run has no usable outcome: ${_last_near_miss_line}
-Print the required line exactly once as your final message, using this grammar -- one line, space-delimited fields: SPINDRIFT_OUTCOME issue=<issue> landing=<landing-ref> status=<status> note=<short reason>. For this run, that is: SPINDRIFT_OUTCOME issue=${ISSUE_NUMBER:-} landing=${BRANCH} status=<status> note=<short reason> -- only fill in status and note. The only valid status values are ${WORK_STATUS_PROSE}. Run any remaining checks/gates in the foreground first, then print that line."
-  else
-    recovery_prompt="The run ended without printing a SPINDRIFT_OUTCOME line. Finish the workflow: run any remaining checks/gates in the foreground, then print the required SPINDRIFT_OUTCOME line as your final message."
+  # SPINDRIFT_OUTCOME required-marker gate (issue #1607/#2044, verb-owned
+  # decision issue #2511): a Driver pass that exits cleanly but leaves the
+  # marker missing or unparseable most often just ended its turn early
+  # (issue #1542) rather than actually failing, so resume the same pinned
+  # session exactly once with a corrective nudge before any backstop runs.
+  # A research dispatch pins no session worth resuming (ADR 0022); a
+  # non-zero exit is the launcher's own ClassifyTransient/retry path to
+  # handle (issue #593) -- neither reaches this gate. The nudge prompt
+  # itself, including the near-miss-quoting variant (issue #1900), is
+  # rendered by the driver-exec marker-gate verb
+  # (cmd/launcher/internal/markergate), not hand-typed here.
+  local _outcome_gate_resumed=""
+  if [ "$claude_rc" -eq 0 ] && ! _is_research_kind && [ -z "$_last_outcome_line" ]; then
+    echo "==> required marker missing — resuming the session once with a nudge"
+    _outcome_gate_resumed=1
+    local _outcome_nudge_prompt
+    _outcome_nudge_prompt="$(driver-exec marker-gate --phase nudge --marker outcome \
+      --near-miss-line "$_last_near_miss_line" \
+      --issue "${ISSUE_NUMBER:-}" --landing "$BRANCH" | jq -r '.prompt')"
+    run_driver_in_env "$_outcome_nudge_prompt" "$agents_json" "resume" "$(printf '%s' "$_handoff" | jq -c '{Invoker}')" || claude_rc=$?
   fi
-  required_marker_gate _scan_outcome "$recovery_prompt" _require_nonempty
 
   # Only a driver that exited cleanly yet told us nothing gets the synthetic
   # backstop. A non-zero exit is left to propagate untouched -- the
@@ -1402,7 +1299,7 @@ Print the required line exactly once as your final message, using this grammar -
     # Capture into $_last_outcome_line (issue #2448): the PR-intent nudge gate
     # below reads it, and a bare `emit_outcome_backstop` left it empty,
     # silently skipping the nudge on every backstopped run.
-    _last_outcome_line="$(emit_outcome_backstop)"
+    _last_outcome_line="$(emit_outcome_backstop "$_outcome_gate_resumed")"
     printf '%s\n' "$_last_outcome_line"
     # Remembered for the PR-intent nudge gate below (issue #2448 finding 3):
     # this run's ready status was manufactured by the backstop, not reported
@@ -1423,126 +1320,77 @@ Print the required line exactly once as your final message, using this grammar -
     # claimed something other than ready), so nothing further is needed here.
   fi
 
-  # The SPINDRIFT_PR_INTENT row on the required-marker gate (issue #2045,
-  # the #2036 fix): a read-only github Box that reaches status=ready but
-  # never printed a PR-intent line leaves the launcher's hostMediateDraftPR
-  # with nothing to relay -- it posts "merge blocked" and strands the
-  # otherwise-finished branch. Scoped tighter than the SPINDRIFT_OUTCOME row
-  # above: only when read-only (BOX_WRITE_ENABLED absent, so a push-capable
-  # token was never issued and this marker is the Box's only way to hand off
-  # a PR), the github Code Forge (git/local never reach OPEN A PULL REQUEST
-  # at all, so they never emit this marker either -- ADR 0034), and the
-  # outcome itself parsed as status=ready (a blocked/failed run never opens
-  # a PR, so a missing PR-intent there is expected, not a bug to nudge).
-  # $_last_outcome_line may already be the SPINDRIFT_OUTCOME row's own
-  # resumed line, not the first pass's -- read after that gate above, same
-  # as every other post-gate use of it in this function. Matched against the
-  # line's own issue=/landing=/status= prefix only (everything up to the
-  # first " note="), not the whole line -- the free-text note field can
-  # itself contain the substring "status=ready" (e.g. an agent explaining
-  # why a status=blocked run couldn't reach status=ready), and a bare
-  # grep across the full line would false-positive on that.
-  #
-  # This whole block only makes sense on a genuine status=ready reached by a
-  # cleanly-exited driver. It used to rely on the now-deleted
-  # `[ "$claude_rc" -eq 0 ] || exit "$claude_rc"` line above for that
-  # guarantee; the explicit guard below (ADR 0039 slice S1, issue #2252)
-  # replaces it now that a non-zero claude_rc falls through instead of
-  # exiting immediately.
+  # SPINDRIFT_PR_INTENT required-marker gate (issue #2045/#2036, verb-owned
+  # decision issue #2511): a read-only github Box that reaches status=ready
+  # but never printed SPINDRIFT_PR_INTENT leaves the launcher's
+  # hostMediateDraftPR with nothing to relay. Scoped to read-only + github +
+  # a genuine status=ready (a blocked/failed run never opens a PR, ready or
+  # not via the synthetic backstop above -- issue #2448). Matched against
+  # the line's own issue=/landing=/status= prefix only (before " note="),
+  # since the free-text note field can itself contain the substring
+  # "status=ready". The corrective prompt, the give-up heartbeat op, and the
+  # restore-vs-leave-alone decision are all rendered/decided by the
+  # driver-exec marker-gate verb (cmd/launcher/internal/markergate) -- see
+  # its own doc comments for why give-up and restore are independent,
+  # separately-gated outcomes rather than a strict three-way switch.
   if [ "$claude_rc" -eq 0 ]; then
     local _outcome_fields_before_note="${_last_outcome_line%% note=*}"
     if _is_readonly_github \
-      && [[ " $_outcome_fields_before_note " == *" status=ready "* ]]; then
-      # Carries this run's nonce (so the resumed pass can emit a line
-      # _scan_pr_intent_in_log will actually match) and repeats the exact
-      # SPINDRIFT_OUTCOME line already captured above verbatim: run_driver_in_env
-      # recaptures $_last_outcome_line from whatever this resumed pass prints,
-      # so without an instruction to repeat it, a resume that prints only the
-      # PR-intent line would blank that var out and trip the no-outcome
-      # backstop above on a run that already genuinely finished ready.
-      #
-      # The grammar spelled out below is free-text LLM instruction, not a
-      # machine-parsed contract -- only the bare SPINDRIFT_PR_INTENT token
-      # (outcome.PRIntentToken) is load-bearing for _scan_pr_intent_in_log and
-      # the launcher's own outcome.LastPRIntentInLog, and that literal is what
-      # TestPromptMarkersMatchScanner pins against
-      # open-pr-create-outbox.md/if-blocked-pr-outbox.md. A reworded sentence
-      # here is harmless as long as it still leads the agent to print the
-      # token, the nonce, and a base64 payload in that order.
+      && [[ " $_outcome_fields_before_note " == *" status=ready "* ]] \
+      && [ -z "$_last_pr_intent_line" ]; then
       local _original_ready_outcome_line="$_last_outcome_line"
-      local pr_intent_recovery_prompt="Your last message ended with a status=ready SPINDRIFT_OUTCOME line but printed no SPINDRIFT_PR_INTENT line, so the launcher has no draft PR to open. Print exactly one SPINDRIFT_PR_INTENT line, grammar: SPINDRIFT_PR_INTENT ${RUN_NONCE:-} <base64-encoded title, a blank line, then the body>, built by joining the PR title, a blank line, and the PR body, then base64-encoding the result into one unbroken token with no embedded newlines or spaces. Then repeat this exact line as your final message: ${_last_outcome_line}"
-      required_marker_gate _scan_pr_intent "$pr_intent_recovery_prompt" _require_nonempty
-      # issue #2448 finding 3: this whole block only runs on a status=ready
-      # outcome, which may have been reached genuinely or, since the
-      # #2448 fix above made $_last_outcome_line carry the backstop's own
-      # line, via the synthetic backstop a few lines up. In the backstop
-      # case the "ready" verdict is already the terminal signal issue #593
-      # guarantees a cleanly-exited, no-outcome driver -- required_marker_gate's
-      # own corrective resume just above is a later, best-effort nudge for a
-      # missing PR-intent marker, not a re-run of the work itself. If that
-      # resume's own driver invocation crashes or otherwise exits non-zero,
-      # required_marker_gate has already folded that into $claude_rc, and
-      # letting it reach the unconditional `exit "$claude_rc"` at the bottom
-      # of this function would retroactively hand an already-backstopped,
-      # already-relayed run to the launcher's ClassifyTransient/retry path --
-      # exactly the outcome the backstop's own comment above says exit 0 must
-      # prevent. So: only when this run's ready status came from the
-      # backstop (not a genuine one, which keeps today's existing behavior of
-      # letting a crashed nudge propagate to retry, unchanged) and the nudge
-      # left $claude_rc non-zero, log why and restore the terminal exit 0.
-      if [ -n "$_outcome_via_backstop" ] && [ "$claude_rc" -ne 0 ]; then
+      local _pr_intent_nudge_prompt
+      _pr_intent_nudge_prompt="$(driver-exec marker-gate --phase nudge --marker pr-intent \
+        --nonce "${RUN_NONCE:-}" --original-outcome-line "$_original_ready_outcome_line" | jq -r '.prompt')"
+      echo "==> PR-intent marker missing — resuming the session once with a nudge"
+      run_driver_in_env "$_pr_intent_nudge_prompt" "$agents_json" "resume" "$(printf '%s' "$_handoff" | jq -c '{Invoker}')" || claude_rc=$?
+
+      local -a _resolve_args=(
+        --phase resolve --marker pr-intent
+        --attempts 1
+        --pr-intent-line "$_last_pr_intent_line"
+        --resumed-outcome-line "$_last_outcome_line"
+        --resumed-near-miss-line "$_last_near_miss_line"
+        --original-outcome-line "$_original_ready_outcome_line"
+        --resume-exit-code "$claude_rc"
+      )
+      [ -n "$_outcome_via_backstop" ] && _resolve_args+=(--outcome-via-backstop)
+      local _resolve_json
+      _resolve_json="$(driver-exec marker-gate "${_resolve_args[@]}")"
+
+      # issue #2448 finding 3: a crash in this best-effort nudge must never
+      # retroactively undo an already-terminal backstop-declared ready run
+      # (issue #593's exit-0 guarantee for a cleanly-exited, no-outcome
+      # driver). ForceExitZero fires only when this run's ready status came
+      # from the synthetic backstop and this resume itself exited non-zero.
+      if [ "$(printf '%s' "$_resolve_json" | jq -r '.force_exit_zero // false')" = "true" ]; then
         echo "==> PR-intent nudge resume failed (rc=$claude_rc) after a backstop-declared ready outcome — staying terminal (issue #593, #2448)"
         claude_rc=0
       fi
-      # The nudge is exhausted: required_marker_gate resumed the session once
-      # and the resumed pass still left no usable PR-intent line, so settle's
-      # host-mediated draft-PR step will find nothing to relay and report this
-      # run merge-blocked. Record that give-up as a heartbeat op (issue #2046)
-      # so the terminal state is visibly explained -- an operator sees the nudge
-      # ran and gave up, rather than an unexplained blocked hand-off (the #2036
-      # confusion). Fires only on the genuinely-exhausted path: a resume that
-      # supplied the marker leaves $_last_pr_intent_line non-empty and skips it,
-      # and this whole block is already gated on read-only + github +
-      # status=ready, so a run that landed a PR never reaches here. The single
-      # attempt is required_marker_gate's own one-resume contract.
-      if [ -z "$_last_pr_intent_line" ]; then
-        _emit_pr_intent_giveup_op 1
+
+      local _pr_intent_giveup_op
+      _pr_intent_giveup_op="$(printf '%s' "$_resolve_json" | jq -r '.op_line // empty')"
+      if [ -n "$_pr_intent_giveup_op" ]; then
+        printf '%s\n' "$_pr_intent_giveup_op"
       fi
-      # Belt-and-braces beyond the "repeat this exact line" instruction above:
-      # the resumed pass is still a fresh LLM turn that could garble or drop
-      # the outcome line despite being told not to, and unlike the
-      # SPINDRIFT_OUTCOME row's own resume (which only ever replaces "nothing"
-      # with something), this row's resume has a known-good line to fall back
-      # on. Restoring it here fixes both entrypoint.sh's own bookkeeping (so
-      # the no-outcome backstop below never fires on a run that already
-      # genuinely finished ready) and the container log the launcher's own
-      # last-line-wins outcome.LastInLog scans (so a garbled resumed line
-      # never shadows the good one there either).
-      #
-      # Restore only when the resume left NO valid outcome of its own
-      # ($_last_outcome_line empty, issue #2448 finding 2): a non-empty,
-      # differently-shaped $_last_outcome_line is the resumed pass's own
-      # genuine, valid verdict (e.g. it decided mid-nudge that the run is
-      # actually status=blocked) -- that is the pass's own final word and
-      # must be left completely alone, never clobbered back to the earlier
-      # ready line, or a genuinely blocked run would hand off as a
-      # manufactured status=ready.
-      #
-      # Within that empty case, only reprint into the container log when the
-      # resume actually shadowed the original line with a near-miss
-      # (garbled) SPINDRIFT_OUTCOME-shaped line of its own (issue #2448
-      # finding 1): $_last_near_miss_line non-empty. A resume whose result
-      # text carries no SPINDRIFT_OUTCOME token at all (e.g. plain prose)
-      # leaves both vars empty and shadows nothing in the log, so reprinting
-      # then would be pure duplication -- AC5 requires the line stay emitted
-      # exactly once.
-      if [ "$_last_outcome_line" != "$_original_ready_outcome_line" ] \
-        && [ -z "$_last_outcome_line" ]; then
-        if [ -n "$_last_near_miss_line" ]; then
-          echo "==> resumed pass did not repeat the original SPINDRIFT_OUTCOME line — restoring it"
-          printf '%s\n' "$_original_ready_outcome_line"
-        fi
+
+      # Restore bookkeeping (issue #2448 finding 2): the resume left no
+      # valid outcome of its own, so the earlier genuine/backstop line is
+      # still this run's final word for the bundle-out step below --
+      # reprinted into the container log only when the resume actually
+      # shadowed it with a near-miss line of its own (nothing to reprint
+      # otherwise -- AC5 requires the line stay emitted exactly once). A
+      # non-empty $_last_outcome_line here is the resumed pass's own
+      # genuine, differently-shaped verdict and must be left completely
+      # alone.
+      if [ -z "$_last_outcome_line" ]; then
         _last_outcome_line="$_original_ready_outcome_line"
+        local _pr_intent_restore_line
+        _pr_intent_restore_line="$(printf '%s' "$_resolve_json" | jq -r '.outcome_line // empty')"
+        if [ -n "$_pr_intent_restore_line" ]; then
+          echo "==> resumed pass did not repeat the original SPINDRIFT_OUTCOME line — restoring it"
+          printf '%s\n' "$_pr_intent_restore_line"
+        fi
       fi
     fi
   fi

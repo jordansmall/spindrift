@@ -27,6 +27,11 @@ if [ "${1:-}" = "assemble-prompt" ]; then
   exec "$DRIVER_EXEC_BIN" assemble-prompt "$@"
 fi
 
+if [ "${1:-}" = "marker-gate" ]; then
+  shift
+  exec "$DRIVER_EXEC_BIN" marker-gate "$@"
+fi
+
 if [ "${1:-}" = "bundle-out" ]; then
   shift
   repo="" base="" branch="" outbox="" bundle_issue="" prior=""
