@@ -1379,11 +1379,26 @@ artifact, not a growing transcript:
   left off without reading its transcript.
 - **Round-N review-prompt seeding.** A round-N (N>1) review pass gets its own,
   narrower seeded section instead: its own prior verdict message plus the
-  fix pass's dispositions file content, both verbatim, framed as claims to
+  append-only dispositions log's content, both verbatim, framed as claims to
   verify against the diff — nothing else from the implementor (no pass
   summary, no scout brief, no worker findings) reaches this prompt. Round 1's
-  review prompt is always unseeded. A missing dispositions file degrades to
+  review prompt is always unseeded. A missing dispositions log degrades to
   seeding the prior verdict alone, never an error.
+- **Dispositions log.** Each fix pass's own fresh `--dispositions-path` file
+  is appended, one "## Round N" section at a time, to a per-run,
+  append-only log (`DispositionsLogPath`) — an earlier round's won't-fix
+  entry is never dropped or collapsed just because a later
+  round wrote its own dispositions file, so a round-N reviewer sees every
+  disposition decided so far. This stays safe only because each entry is a
+  terse reference (a commit SHA, a `file:line`, an issue number) rather than
+  restated diff/file/transcript content: a round whose mean estimated
+  tokens-per-entry, or whose total estimated tokens across every entry,
+  exceeds a fixed ceiling is flagged loudly (a `run_state_error` op with
+  `phase: dispositions_budget`) as a tripwire for an entry restating
+  content instead of referencing it — the total check is what actually
+  catches a pasted diff hunk or file excerpt, many individually-short
+  lines that would keep the mean check alone from ever tripping — never a
+  budget the agent is meant to trim into.
 - **Code-owned caps.** `--max-review-rounds` (default 3) caps additional
   passes a `BLOCK` verdict may trigger; `--max-slices` (default 9) caps the
   implement/fix/review invocation count regardless of verdict; either set to
