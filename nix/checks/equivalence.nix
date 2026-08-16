@@ -27,8 +27,8 @@ let
     ;
   # Shared by the mkharness-review-effort-* checks below (issue #2512): each
   # asserts against a differently-configured mkHarness call's own resolved
-  # `.roster` output, but all three only ever need the reviewer entry's
-  # effort out of it.
+  # `internals.roster` output (issue #2529), but all three only ever need
+  # the reviewer entry's effort out of it.
   reviewerEffortOf =
     roster: (builtins.head (builtins.filter (e: e.name == "reviewer") roster)).effort;
   # Single hand-typed anti-vacuity root (issue #2514) for the expected-
@@ -1318,8 +1318,46 @@ in
       actual = builtins.attrNames harness;
     in
     assert assertMsg (actual == expected)
-      "mkHarness's Consumer-facing attrset must carry only ${builtins.toJSON expected}, got: ${builtins.toJSON actual}";
+      "mkHarness's top-level attrset must carry only ${builtins.toJSON expected}, got: ${builtins.toJSON actual}";
     pkgs.runCommand "mkharness-internals-attrset-scoped" { } "touch $out";
+
+  # Mirrors mkharness-internals-attrset-scoped above, one level down: pins
+  # `internals`' own key set (issue #2529 AC1) so a key silently dropped (or
+  # a stray one added) from lib/mkHarness.nix's `internals` binding fails
+  # here instead of only being caught by each key's own consumer going stale.
+  mkharness-internals-keys-scoped =
+    let
+      inherit (pkgs.lib) assertMsg sort;
+      expected = [
+        "agentEnv"
+        "agentFiles"
+        "build"
+        "run"
+        "manpage"
+        "bashCompletion"
+        "fishCompletion"
+        "zshCompletion"
+        "imagePath"
+        "promptDir"
+        "skillsDir"
+        "outcomeContractFile"
+        "commsContractFile"
+        "checkContractFile"
+        "researchOutcomeContractFile"
+        "driverPreambleFile"
+        "fragmentRegistryFile"
+        "driverExecBin"
+        "driverEntry"
+        "runInputDocumentFile"
+        "buildInputDocumentFile"
+        "roster"
+      ];
+      byName = a: b: a < b;
+      actual = builtins.attrNames harness.internals;
+    in
+    assert assertMsg (sort byName actual == sort byName expected)
+      "mkHarness's internals attrset must carry exactly ${builtins.toJSON expected}, got: ${builtins.toJSON actual}";
+    pkgs.runCommand "mkharness-internals-keys-scoped" { } "touch $out";
 
   # A custom roster entry (the AC4 path) omitting both `promptFile` and
   # `prompt` must degrade gracefully -- not throw a cryptic missing-attribute
@@ -1394,9 +1432,10 @@ in
   # post-normalize step on `finalRoster`, so it reaches an explicit
   # caller-supplied `roster` exactly the same way it reaches the
   # `defaultRoster` fallback path. Both branches below assert against
-  # mkHarness's own exposed `.roster` output (lib/mkHarness.nix, issue
-  # #2512), not a re-derivation of the override logic, so a regression that
-  # only fixed one of the two roster sources would still fail here.
+  # mkHarness's own exposed `internals.roster` output (lib/mkHarness.nix,
+  # issues #2512, #2529), not a re-derivation of the override logic, so a
+  # regression that only fixed one of the two roster sources would still
+  # fail here.
   mkharness-review-effort-overrides-default-roster =
     let
       direct = import ../../lib/mkHarness.nix {
