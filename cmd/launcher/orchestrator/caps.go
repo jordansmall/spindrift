@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"math"
 
 	"spindrift.dev/launcher/internal/passmachine"
 )
@@ -82,7 +83,19 @@ func simulateReviewRoundCapPass(maxReviewRounds int, reviewPassEnabled bool) (in
 		return 0, err
 	}
 	perRound := pass2 - pass1
-	return pass1 + (maxReviewRounds-1)*perRound, nil
+	if perRound <= 0 {
+		return 0, fmt.Errorf("orchestrator: internal error: cap probe found a non-positive per-round pass cost (%d) between review-round caps 1 and 2", perRound)
+	}
+	extraRounds := maxReviewRounds - 1
+	if extraRounds > (math.MaxInt-pass1)/perRound {
+		// The real minSlices threshold would overflow int here; return
+		// MaxInt-1 (validateCaps adds 1 to get minSlices, landing exactly on
+		// MaxInt) instead of a wrapped/negative value, so the maxSlices <
+		// minSlices comparison still fails closed (rejects the pair) rather
+		// than silently passing an incoherent one.
+		return math.MaxInt - 1, nil
+	}
+	return pass1 + extraRounds*perRound, nil
 }
 
 // capFiredPass drives passmachine.Transition forward, pass by pass, with
@@ -136,7 +149,9 @@ func capFiredPass(probeMaxReviewRounds int, reviewPassEnabled bool) (int, error)
 	}
 
 	passKind := passmachine.KindImplement
-	landPhase := passmachine.LandPhaseActive
+	// Named phase, not landPhase, so it doesn't shadow the package-level
+	// landPhase() helper in run.go (issue #2548 review).
+	phase := passmachine.LandPhaseActive
 	lastVerdict := passmachine.VerdictNone
 	for {
 		pass++
@@ -151,7 +166,7 @@ func capFiredPass(probeMaxReviewRounds int, reviewPassEnabled bool) (int, error)
 				Pass:             pass,
 				ReviewRounds:     reviewRounds,
 				Caps:             caps,
-				LandPhase:        landPhase,
+				LandPhase:        phase,
 			})
 			if d.IncrementReviewRounds {
 				reviewRounds++
@@ -162,7 +177,7 @@ func capFiredPass(probeMaxReviewRounds int, reviewPassEnabled bool) (int, error)
 				HasOutcome:       false,
 				Pass:             pass,
 				Caps:             caps,
-				LandPhase:        landPhase,
+				LandPhase:        phase,
 				LastVerdict:      lastVerdict,
 			})
 		}
@@ -173,7 +188,7 @@ func capFiredPass(probeMaxReviewRounds int, reviewPassEnabled bool) (int, error)
 			return 0, fmt.Errorf("orchestrator: internal error: review-pass-loop cap probe (max-review-rounds=%d) stopped unexpectedly at pass %d: %s", probeMaxReviewRounds, pass, d.Reason)
 		}
 		if d.LandPhase == passmachine.LandPhaseTerminalCommitted {
-			landPhase = passmachine.LandPhaseTerminalCommitted
+			phase = passmachine.LandPhaseTerminalCommitted
 		}
 		passKind = d.NextPass
 	}
