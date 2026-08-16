@@ -200,11 +200,21 @@ type passOutcome struct {
 	pass int
 }
 
+// landPhase converts state.TerminalLand's persisted bool into the machine's
+// own LandPhase state (issue #2548 AC2) at the two call sites that build a
+// passmachine.Input for an implement/fix/land or review decision.
+func landPhase(terminalLand bool) passmachine.LandPhase {
+	if terminalLand {
+		return passmachine.LandPhaseTerminalCommitted
+	}
+	return passmachine.LandPhaseActive
+}
+
 // applyDecision is the one shared persist/emit helper (issue #2548)
 // replacing the four duplicated blocks in run() and runWithReviewPass(): it
 // emits the verdict/pass_no_outcome ops (if applicable), writes state to
 // disk, computes the Decision via passmachine.Transition, applies any
-// TerminalLand/CapFired mutation to state (for the NEXT pass's own write --
+// LandPhase/CapFired mutation to state (for the NEXT pass's own write --
 // this pass's write above deliberately happens BEFORE that mutation,
 // preserving the original blocks' own write-before-decide order), and emits
 // the decision op.
@@ -220,7 +230,7 @@ func applyDecision(cfg config, state *runstate.RunState, stdout io.Writer, out p
 		fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "run_state_error", Phase: "write", Error: writeErr.Error()}))
 	}
 	d := passmachine.Transition(in)
-	if d.SetTerminalLand {
+	if d.LandPhase == passmachine.LandPhaseTerminalCommitted {
 		state.TerminalLand = true
 		state.CapFired = d.CapFired
 	}
@@ -402,7 +412,7 @@ func runWithReviewPass(cfg config, stdout io.Writer) (int, error) {
 			HasOutcome:         hasOutcome,
 			Pass:               pass,
 			Caps:               passmachine.Caps{MaxSlices: cfg.maxSlices, MaxReviewRounds: cfg.maxReviewRounds},
-			TerminalLand:       state.TerminalLand,
+			LandPhase:          landPhase(state.TerminalLand),
 			LastVerdict:        passmachine.Verdict(state.LastVerdict),
 			ManifestDispatched: manifestDispatched,
 		})
@@ -480,7 +490,7 @@ func runWithReviewPass(cfg config, stdout io.Writer) (int, error) {
 			Pass:             pass,
 			ReviewRounds:     reviewRounds,
 			Caps:             passmachine.Caps{MaxSlices: cfg.maxSlices, MaxReviewRounds: cfg.maxReviewRounds},
-			TerminalLand:     state.TerminalLand,
+			LandPhase:        landPhase(state.TerminalLand),
 		})
 		if !d.Continue {
 			break
