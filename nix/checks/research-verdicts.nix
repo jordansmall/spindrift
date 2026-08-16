@@ -70,7 +70,10 @@ in
     pkgs.runCommand "research-verdicts-render-default-renders-registry-content" { } "touch $out";
 
   # A custom set rewrites the VERDICT bullets, the enumeration, and the
-  # status alternation, and drops every default token from the contract.
+  # status alternation, and drops every default token from the contract --
+  # asserted against the real checked-in template, which (issue #2525)
+  # carries the literal default bullets/enumeration as hand-typed text, so
+  # these negative assertions are meaningful rather than vacuous.
   research-verdicts-render-custom =
     assert assertMsg (hasInfix "- `approve` — ship it." customRendered)
       "custom render must emit the configured verdict bullet";
@@ -82,9 +85,47 @@ in
       "custom render must not leave the default status alternation";
     assert assertMsg (!(hasInfix "\${RESEARCH_STATUS_ENUM}" customRendered))
       "custom render must not leave the RESEARCH_STATUS_ENUM placeholder token unresolved (issue #2504)";
-    assert assertMsg (!(hasInfix "<RESEARCH_VERDICT_ENUM>" customRendered))
-      "custom render must not leave the <RESEARCH_VERDICT_ENUM> placeholder token unresolved";
+    assert assertMsg (!(hasInfix "`recommend` / `reject` / `unclear`" customRendered))
+      "custom render must drop the default backtick enumeration from the contract";
+    assert assertMsg (!(hasInfix "- `recommend` — relevant, now enriched with real context; promote it." customRendered))
+      "custom render must drop the default recommend bullet from the contract";
     pkgs.runCommand "research-verdicts-render-custom" { } "touch $out";
+
+  # Regression pin for the non-idempotent insert-before-marker bug (issue
+  # #2525): renderPrompt used to insert the generated bullet block
+  # immediately before the `# POST THE VERDICT` marker rather than replacing
+  # a span, so re-rendering an already-rendered prompt duplicated the block.
+  # Rendering must be a fixpoint: a second render with the same knob must be
+  # byte-identical to the first, for both the default and a custom set.
+  research-verdicts-render-is-idempotent =
+    let
+      defaultTwice = rv.render "" defaultRendered;
+      customTwice = rv.render customJSON customRendered;
+    in
+    assert assertMsg (defaultTwice == defaultRendered)
+      "re-rendering the default-rendered prompt with the same (empty) knob must be a no-op";
+    assert assertMsg (customTwice == customRendered)
+      "re-rendering the custom-rendered prompt with the same custom knob must be a no-op";
+    pkgs.runCommand "research-verdicts-render-is-idempotent" { } "touch $out";
+
+  # Regression pin for the placeholder-vs-literal-match bug (issue #2525):
+  # renderPrompt used to match the enumeration target via a nix-only
+  # `<RESEARCH_VERDICT_ENUM>` placeholder, so a prompt that instead
+  # hand-typed the literal default enumeration (a Consumer's own
+  # researchPrompt override predating this refactor, or any prompt copied
+  # before the placeholder existed) was never rewritten by a custom set.
+  # Matching on the literal bytes fixes this: any prompt carrying the exact
+  # default enumeration text gets rewritten, regardless of a placeholder.
+  research-verdicts-render-rewrites-legacy-hand-typed-enum =
+    let
+      legacy = "1. **Verdict** — `recommend` / `reject` / `unclear`, plus a one-line rationale.\n";
+      out = rv.render customJSON legacy;
+    in
+    assert assertMsg (!(hasInfix "`recommend` / `reject` / `unclear`" out))
+      "a legacy prompt hand-typing the default enumeration must be rewritten by a custom set";
+    assert assertMsg (hasInfix "`approve` / `skip`" out)
+      "a legacy prompt hand-typing the default enumeration must pick up the custom set's tokens";
+    pkgs.runCommand "research-verdicts-render-rewrites-legacy-hand-typed-enum" { } "touch $out";
 
   # Rendering a prompt that lacks the VERDICT markers (a Consumer research
   # prompt carrying only its own preamble) must not throw — the section
