@@ -1337,6 +1337,13 @@ in
   # every turn. research-issue-read-github.md and scout-issue-read-github.md
   # must cap intake to the last 10 comments (`comments[-10:]`) instead of the
   # bare `--comments` flag.
+  #
+  # jira's own #1990 cap has no fragment of its own to grep here -- jira
+  # shares the "GITHUB" TrackerAxisRead (registry.go) and rides
+  # forge.Snapshot's Issue(num).Body fallback (issuetracker.go's
+  # SnapshotReader doc comment) instead of a dedicated issue-read fragment.
+  # Its last-10 cap is enforced and tested at the Go level instead:
+  # cmd/launcher/internal/forge/jira/jira_test.go.
   issue-read-github-fragments-cap-comment-intake =
     pkgs.runCommand "issue-read-github-fragments-cap-comment-intake" { }
       ''

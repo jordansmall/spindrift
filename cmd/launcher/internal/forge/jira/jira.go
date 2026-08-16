@@ -238,12 +238,19 @@ func issueState(p jiraIssuePayload) forge.IssueState {
 
 type jiraCommentsPayload struct {
 	Comments []struct {
-		Body string `json:"body"`
+		Body   string `json:"body"`
+		Author struct {
+			DisplayName string `json:"displayName"`
+		} `json:"author"`
+		Created string `json:"created"`
 	} `json:"comments"`
 }
 
 // Issue returns the Jira issue's summary, description, status, and labels.
-// When IncludeComments is set, the comment thread is appended to Body.
+// When IncludeComments is set, the last 10 comments (mirroring
+// forge.FormatSnapshot's truncation-from-the-front behavior, issue #2547)
+// are appended to Body, each attributed to its author and created
+// timestamp.
 func (j *jiraClient) Issue(num string) (forge.Issue, error) {
 	var payload jiraIssuePayload
 	if err := j.rest.Do(http.MethodGet, "/rest/api/2/issue/"+num, nil, &payload); err != nil {
@@ -256,8 +263,12 @@ func (j *jiraClient) Issue(num string) (forge.Issue, error) {
 		if err := j.rest.Do(http.MethodGet, "/rest/api/2/issue/"+num+"/comment", nil, &comments); err != nil {
 			return forge.Issue{}, err
 		}
-		for _, c := range comments.Comments {
-			body = forge.AppendComment(body, c.Body)
+		kept := comments.Comments
+		if len(kept) > 10 {
+			kept = kept[len(kept)-10:]
+		}
+		for _, c := range kept {
+			body = forge.AppendComment(body, fmt.Sprintf("%s (%s): %s", c.Author.DisplayName, c.Created, c.Body))
 		}
 	}
 

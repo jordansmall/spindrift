@@ -343,7 +343,10 @@ type LabeledTracker interface {
 // endpoint for Snapshot to call, and nothing a Snapshot method would add
 // over the body alone. jira does NOT either — out of scope for #2547; it
 // has no dedicated issue-read fragment today, it rides a shared fallback.
-// Callers discover it with a type assertion — `sr, ok :=
+// That fallback still caps and attributes its comment intake (jira's own
+// Issue keeps its comment thread to the last 10, each attributed to its
+// author) — the degrade loses the snapshot's freeze-at-box-start guarantee,
+// not its bound. Callers discover it with a type assertion — `sr, ok :=
 // it.(SnapshotReader)` — the same optional-interface pattern LandingRecorder
 // and IssueCloser use; the package-level Snapshot function wraps that
 // assertion with the local/jira degrade to Issue(num).Body alone.

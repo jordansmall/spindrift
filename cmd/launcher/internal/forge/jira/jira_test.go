@@ -245,8 +245,9 @@ func TestJiraClient_Issue_DoneStatusCategoryIsClosed(t *testing.T) {
 }
 
 // TestJiraClient_Issue_IncludeComments verifies that when IncludeComments is
-// set, Issue() appends the comment thread to Body; by default comments are
-// left out to keep the prompt-injection surface tight.
+// set, Issue() appends the comment thread to Body, each comment attributed
+// to its author and created timestamp; by default comments are left out to
+// keep the prompt-injection surface tight.
 func TestJiraClient_Issue_IncludeComments(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -258,7 +259,7 @@ func TestJiraClient_Issue_IncludeComments(t *testing.T) {
 			}`))
 		case "/rest/api/2/issue/PROJ-7/comment":
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(`{"comments": [{"body": "a comment from a user"}]}`))
+			w.Write([]byte(`{"comments": [{"body": "a comment from a user", "author": {"displayName": "Alice"}, "created": "2024-01-01T00:00:00.000+0000"}]}`))
 		default:
 			t.Errorf("unexpected path: %s", r.URL.Path)
 		}
@@ -275,14 +276,70 @@ func TestJiraClient_Issue_IncludeComments(t *testing.T) {
 		t.Errorf("Body must not include comments by default, got %q", iss.Body)
 	}
 
-	// Opt-in: comments appended.
+	// Opt-in: comments appended, attributed to author and created timestamp.
 	jcWithComments := jira.NewJiraClient(jira.JiraConfig{BaseURL: srv.URL, Token: "tok", IncludeComments: true})
 	iss2, err := jcWithComments.Issue("PROJ-7")
 	if err != nil {
 		t.Fatalf("Issue: %v", err)
 	}
-	if !strings.Contains(iss2.Body, "a comment from a user") {
-		t.Errorf("Body must include comments when opted in, got %q", iss2.Body)
+	if !strings.Contains(iss2.Body, "Alice (2024-01-01T00:00:00.000+0000): a comment from a user") {
+		t.Errorf("Body must include the attributed comment, got %q", iss2.Body)
+	}
+}
+
+// TestJiraClient_Issue_IncludeComments_CapsToLast10 verifies that Issue()
+// truncates the comment thread to the last 10 comments, mirroring
+// forge.FormatSnapshot's truncation-from-the-front behavior (issue #2547) —
+// the unbounded append this replaced regressed issue #1990's cap for jira
+// specifically, since jira has no dedicated issue-read fragment and rides
+// forge.Snapshot's Issue(num).Body fallback.
+func TestJiraClient_Issue_IncludeComments_CapsToLast10(t *testing.T) {
+	// %02d keeps every rendered number the same width (01..15) so no
+	// shorter number's text is a substring of a longer one's (e.g. "comment
+	// 01" is not a substring of "comment 10"), which would otherwise make
+	// the Contains assertions below pass/fail for the wrong reason.
+	var comments []string
+	for i := 1; i <= 15; i++ {
+		comments = append(comments, fmt.Sprintf(
+			`{"body": "comment %02d", "author": {"displayName": "user%02d"}, "created": "2024-01-%02dT00:00:00.000+0000"}`,
+			i, i, i))
+	}
+	payload := fmt.Sprintf(`{"comments": [%s]}`, strings.Join(comments, ","))
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/rest/api/2/issue/PROJ-9":
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{
+				"key": "PROJ-9",
+				"fields": {"summary": "s", "description": "desc", "status": {"name": "To Do"}, "labels": []}
+			}`))
+		case "/rest/api/2/issue/PROJ-9/comment":
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(payload))
+		default:
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	jc := jira.NewJiraClient(jira.JiraConfig{BaseURL: srv.URL, Token: "tok", IncludeComments: true})
+	iss, err := jc.Issue("PROJ-9")
+	if err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+
+	for i := 1; i <= 5; i++ {
+		want := fmt.Sprintf("comment %02d", i)
+		if strings.Contains(iss.Body, want) {
+			t.Errorf("Body must not include comment %02d, the last 10 should drop the first 5, got %q", i, iss.Body)
+		}
+	}
+	for i := 6; i <= 15; i++ {
+		want := fmt.Sprintf("user%02d (2024-01-%02dT00:00:00.000+0000): comment %02d", i, i, i)
+		if !strings.Contains(iss.Body, want) {
+			t.Errorf("Body must include kept, attributed comment %02d, got %q", i, iss.Body)
+		}
 	}
 }
 
@@ -302,7 +359,7 @@ func TestJiraClient_Issue_IncludeComments_MultilineCommentIsVerbatimBlock(t *tes
 			}`))
 		case "/rest/api/2/issue/PROJ-8/comment":
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(`{"comments": [{"body": "line one\nline two"}]}`))
+			w.Write([]byte(`{"comments": [{"body": "line one\nline two", "author": {"displayName": "Bob"}, "created": "2024-01-02T00:00:00.000+0000"}]}`))
 		default:
 			t.Errorf("unexpected path: %s", r.URL.Path)
 		}
@@ -314,7 +371,7 @@ func TestJiraClient_Issue_IncludeComments_MultilineCommentIsVerbatimBlock(t *tes
 	if err != nil {
 		t.Fatalf("Issue: %v", err)
 	}
-	if !strings.Contains(iss.Body, "---\n\nline one\nline two") {
+	if !strings.Contains(iss.Body, "---\n\nBob (2024-01-02T00:00:00.000+0000): line one\nline two") {
 		t.Errorf("Body = %q, want a verbatim block with the newline preserved", iss.Body)
 	}
 }
