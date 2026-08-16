@@ -901,6 +901,14 @@ run_driver_in_env() {
     _heartbeat_flags=(--heartbeat-log "$HEARTBEAT_LOG")
   fi
 
+  # DRIVER_ARGV_MODEL_OMIT_EMPTY is a bare-boolean gate baked by the
+  # selected Driver's registry entry (ADR 0009, issue #2534), same shape as
+  # $HEARTBEAT_LOG just above: "1" when set, unset (not "0") otherwise.
+  local -a _argv_model_omit_empty_flags=()
+  if [ -n "${DRIVER_ARGV_MODEL_OMIT_EMPTY:-}" ]; then
+    _argv_model_omit_empty_flags=(--argv-model-omit-empty)
+  fi
+
   # Invoker comes from handoff_json's own Invoker field when a Handoff
   # exists (issue #2355); the one pass with no Handoff yet
   # (phase_conflict_resolve's pre-Handoff call) falls back to $ORCHESTRATOR,
@@ -989,8 +997,15 @@ run_driver_in_env() {
     --effort "${EFFORT:-}" \
     --issue "$ISSUE_NUMBER" \
     --log-path "$stream_log" \
+    --argv-prompt-style "$DRIVER_ARGV_PROMPT_STYLE" \
+    --argv-prompt-flag "${DRIVER_ARGV_PROMPT_FLAG:-}" \
+    --argv-model-flag "$DRIVER_ARGV_MODEL_FLAG" \
+    --argv-agents-flag "${DRIVER_ARGV_AGENTS_FLAG:-}" \
+    --argv-effort-flag "$DRIVER_ARGV_EFFORT_FLAG" \
+    --argv-order "$DRIVER_ARGV_ORDER" \
     "${_devshell_flags[@]}" \
     "${_heartbeat_flags[@]}" \
+    "${_argv_model_omit_empty_flags[@]}" \
     "${_review_prompt_flags[@]}" \
     "${_review_model_flags[@]}" \
     "${_review_effort_flags[@]}" \
