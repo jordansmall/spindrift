@@ -861,6 +861,135 @@ func TestRunClearsPassSummaryPathWhenPassDoesNotWriteFile(t *testing.T) {
 	}
 }
 
+// TestRunRecordsDispositionsPathIntoRunState verifies run records
+// cfg.dispositionsPath into the run-state artifact after a pass that
+// actually wrote the file there (issue #2550), mirroring
+// TestRunRecordsPassSummaryPathIntoRunState. The fake driver-exec writes
+// cfg.dispositionsPath itself, since a configured path alone is not evidence
+// the pass wrote anything.
+func TestRunRecordsDispositionsPathIntoRunState(t *testing.T) {
+	dir := t.TempDir()
+	callLog := filepath.Join(dir, "calls.log")
+	dispositionsPath := filepath.Join(dir, "dispositions.md")
+	writeFakeDriverExec(t, dir, callLog, fmt.Sprintf("printf 'dispositions' > %q\nexit 0\n", dispositionsPath))
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	promptFile := filepath.Join(dir, "prompt.txt")
+	if err := os.WriteFile(promptFile, []byte("prompt"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config{
+		promptFile:       promptFile,
+		driverBin:        "claude",
+		logPath:          filepath.Join(dir, "stream.log"),
+		heartbeatLog:     filepath.Join(dir, "heartbeat.log"),
+		stateFile:        filepath.Join(dir, "run-state.json"),
+		dispositionsPath: dispositionsPath,
+	}
+
+	if _, err := run(cfg, &bytes.Buffer{}); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	got, err := runstate.ReadRunState(cfg.stateFile)
+	if err != nil {
+		t.Fatalf("ReadRunState: %v", err)
+	}
+	if got.DispositionsPath != cfg.dispositionsPath {
+		t.Errorf("DispositionsPath = %q, want %q", got.DispositionsPath, cfg.dispositionsPath)
+	}
+}
+
+// TestRunKeepsPriorDispositionsPathWhenConfigOmitsIt verifies an empty
+// cfg.dispositionsPath never clobbers a prior pass's recorded dispositions
+// path with an empty string (issue #2550, mirroring
+// TestRunKeepsPriorPassSummaryPathWhenConfigOmitsIt) -- only a caller that
+// actually supplies a new path updates the field.
+func TestRunKeepsPriorDispositionsPathWhenConfigOmitsIt(t *testing.T) {
+	dir := t.TempDir()
+	callLog := filepath.Join(dir, "calls.log")
+	writeFakeDriverExec(t, dir, callLog, "exit 0\n")
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	stateFile := filepath.Join(dir, "run-state.json")
+	prior := runstate.RunState{DispositionsPath: "/tmp/dispositions.md"}
+	if err := runstate.WriteRunState(stateFile, prior); err != nil {
+		t.Fatal(err)
+	}
+
+	promptFile := filepath.Join(dir, "prompt.txt")
+	if err := os.WriteFile(promptFile, []byte("prompt"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config{
+		promptFile:   promptFile,
+		driverBin:    "claude",
+		logPath:      filepath.Join(dir, "stream.log"),
+		heartbeatLog: filepath.Join(dir, "heartbeat.log"),
+		stateFile:    stateFile,
+		// dispositionsPath intentionally left unset.
+	}
+
+	if _, err := run(cfg, &bytes.Buffer{}); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	got, err := runstate.ReadRunState(stateFile)
+	if err != nil {
+		t.Fatalf("ReadRunState: %v", err)
+	}
+	if got.DispositionsPath != "/tmp/dispositions.md" {
+		t.Errorf("DispositionsPath = %q, want prior value %q preserved", got.DispositionsPath, "/tmp/dispositions.md")
+	}
+}
+
+// TestRunClearsDispositionsPathWhenPassDoesNotWriteFile verifies run clears
+// state.DispositionsPath to "" -- rather than carrying forward whatever a
+// PRIOR pass recorded -- when this pass's cfg.dispositionsPath is configured
+// but the pass itself never wrote the file (issue #2550, mirroring
+// TestRunClearsPassSummaryPathWhenPassDoesNotWriteFile).
+func TestRunClearsDispositionsPathWhenPassDoesNotWriteFile(t *testing.T) {
+	dir := t.TempDir()
+	callLog := filepath.Join(dir, "calls.log")
+	// The fake driver-exec deliberately never writes cfg.dispositionsPath.
+	writeFakeDriverExec(t, dir, callLog, "exit 0\n")
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	stateFile := filepath.Join(dir, "run-state.json")
+	prior := runstate.RunState{DispositionsPath: "/tmp/dispositions.md"}
+	if err := runstate.WriteRunState(stateFile, prior); err != nil {
+		t.Fatal(err)
+	}
+
+	promptFile := filepath.Join(dir, "prompt.txt")
+	if err := os.WriteFile(promptFile, []byte("prompt"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config{
+		promptFile:       promptFile,
+		driverBin:        "claude",
+		logPath:          filepath.Join(dir, "stream.log"),
+		heartbeatLog:     filepath.Join(dir, "heartbeat.log"),
+		stateFile:        stateFile,
+		dispositionsPath: filepath.Join(dir, "dispositions.md"),
+	}
+
+	if _, err := run(cfg, &bytes.Buffer{}); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	got, err := runstate.ReadRunState(stateFile)
+	if err != nil {
+		t.Fatalf("ReadRunState: %v", err)
+	}
+	if got.DispositionsPath != "" {
+		t.Errorf("DispositionsPath = %q, want cleared to \"\" (pass never wrote the file)", got.DispositionsPath)
+	}
+}
+
 // TestRunUnlinksStalePassSummaryPathBeforePass verifies seedAndInvokePass
 // unlinks any pre-existing file at cfg.passSummaryPath before invoking this
 // pass's driver-exec (issue #2549 follow-up review finding), so a stale

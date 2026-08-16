@@ -40,6 +40,7 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 	stateFile := fs.String("state-file", "/tmp/run-state.json", "path to the run-state handoff artifact (issue #1997); empty disables it")
 	scoutBriefPath := fs.String("scout-brief-path", "/tmp/brief.md", "path to the scout brief, recorded into the run-state artifact")
 	passSummaryPath := fs.String("pass-summary-path", "/tmp/pass-summary.md", "path to the most recent pass's own summary, recorded into the run-state artifact")
+	dispositionsPath := fs.String("dispositions-path", "/tmp/dispositions.md", "path to the most recent fix pass's own per-finding dispositions file, recorded into the run-state artifact")
 	maxReviewRounds := fs.Int("max-review-rounds", defaultMaxReviewRounds, "cap on additional fresh-session passes a BLOCK verdict may trigger; 0 disables the cap")
 	maxSlices := fs.Int("max-slices", defaultMaxSlices, "cap on total driver-exec invocations this run makes; 0 disables the cap")
 	// Declared as strings, not fs.Int/fs.Float64, and parsed below with
@@ -137,6 +138,7 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 		stateFile:          *stateFile,
 		scoutBriefPath:     *scoutBriefPath,
 		passSummaryPath:    *passSummaryPath,
+		dispositionsPath:   *dispositionsPath,
 		maxReviewRounds:    *maxReviewRounds,
 		maxSlices:          *maxSlices,
 		maxBudgetTokens:    maxBudgetTokens,
