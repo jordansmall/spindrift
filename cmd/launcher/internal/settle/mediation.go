@@ -105,23 +105,6 @@ func (m *Mediation) RequiredCapabilityError(codeForgeName string, prShaped bool)
 	return nil
 }
 
-// RequiredCapabilityError is Mediation.RequiredCapabilityError's
-// construction-free form: main.go's startup capability gate only needs to
-// ask whether cf implements the right capabilities, not build a full
-// Mediation (which also wants an IssueTracker, outbox resolver, and base
-// branch it would never use for this question). It delegates through
-// NewMediation so the gate is derived from the exact same capability
-// resolution Open uses, instead of re-running its own type assertions that
-// could silently drift out of sync with Mediation's fields.
-//
-// The Mediation it builds is scoped to this one capability check: it is
-// constructed with a nil IssueTracker, outbox resolver, and base branch, so
-// it must never be reused to call Open, defaultAdoptPRText, or any other
-// method that touches Mediation's it field — those would nil-panic.
-func RequiredCapabilityError(cf forge.CodeForge, codeForgeName string, prShaped bool) error {
-	return NewMediation(cf, nil, nil, "").RequiredCapabilityError(codeForgeName, prShaped)
-}
-
 // Open relays num's finished branch out of the outbox and opens (or adopts)
 // a draft PR on it, resolving title/body from result's PR-intent line, or —
 // per fallback — a reconstructed-from-commits or issue-derived default when
