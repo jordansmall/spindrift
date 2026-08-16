@@ -1102,12 +1102,30 @@ let
     else
       true
   ) buildTimeRejectVerdicts;
+
+  # Eval-time coherence assert (issue #2495): MAX_PARALLEL_WORKERS caps
+  # concurrency for the orchestrator's own slice-manifest worker dispatch
+  # (lib/fragments.nix's ORCHESTRATOR-gated coordinator-parallel-dispatch.md
+  # row) -- a mechanism that structurally does not exist at all when
+  # ORCHESTRATOR itself is off (that gate is unconditional: parallel dispatch
+  # needs no `worker` subagent provisioned, per fragments.nix's own comment on
+  # that row, only ORCHESTRATOR). A Consumer who explicitly sets this knob
+  # while leaving ORCHESTRATOR off is requesting parallelism with nothing to
+  # ever run it -- reject at build time instead of baking an inert knob, so
+  # the misconfiguration surfaces before a Box ever launches, not as a
+  # discovered-in-production surprise.
+  maxParallelWorkersCoherenceOk =
+    if (defaults ? maxParallelWorkers) && mergedDefaults.orchestratorEnabled != true then
+      throw "mkHarness: MAX_PARALLEL_WORKERS is set but ORCHESTRATOR is disabled; the orchestrator's slice-manifest worker dispatch this knob caps never runs without ORCHESTRATOR on"
+    else
+      true;
 in
 if unknownDefaultKeys != [ ] then
   throw "mkHarness: unknown defaults key(s): ${lib.concatStringsSep ", " unknownDefaultKeys}; valid keys: ${lib.concatStringsSep ", " (lib.attrNames flakeOptionEntries)}"
 else
   assert buildTimeRejectOk;
   assert forbiddenMarkerCheckOk;
+  assert maxParallelWorkersCoherenceOk;
   lib.warnIf (legacyKnobsSet != [ ]) deprecationMsg {
     inherit
       image

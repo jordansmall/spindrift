@@ -964,6 +964,7 @@ run_driver_in_env() {
   # read straight off the environment, no Go-side rendering needed.
   local worker_work_dir="${WORKER_WORK_DIR:-}"
   local worker_timeout="${WORKER_TIMEOUT:-}"
+  local worker_max_parallel="${MAX_PARALLEL_WORKERS:-}"
 
   local _review_prompt_file=""
   if [ -n "$review_prompt" ]; then
@@ -1068,6 +1069,14 @@ run_driver_in_env() {
     _worker_timeout_flags=(--worker-timeout "$worker_timeout")
   fi
 
+  # --max-parallel-workers, same orchestrator-only shape as --worker-timeout
+  # just above (issue #2059, #2495): the cap on how many manifest-dispatched
+  # workers LaunchWorkers runs concurrently.
+  local -a _worker_max_parallel_flags=()
+  if [ "$_driver_invoker" = orchestrator ] && [ -n "$worker_max_parallel" ]; then
+    _worker_max_parallel_flags=(--max-parallel-workers "$worker_max_parallel")
+  fi
+
   local claude_rc=0
   set +e
   "$_driver_invoker" \
@@ -1088,7 +1097,8 @@ run_driver_in_env() {
     "${_review_effort_flags[@]}" \
     "${_worker_prompt_flags[@]}" \
     "${_worker_work_dir_flags[@]}" \
-    "${_worker_timeout_flags[@]}"
+    "${_worker_timeout_flags[@]}" \
+    "${_worker_max_parallel_flags[@]}"
   claude_rc=$?
   set -e
   rm -f "$_prompt_file" "$_agents_file" "$_session_file" "$_review_prompt_file" "$_worker_prompt_file"
