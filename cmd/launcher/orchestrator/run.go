@@ -662,6 +662,78 @@ func seedPromptFromState(promptFile string, state runstate.RunState) (string, er
 	return f.Name(), nil
 }
 
+// seedReviewPromptFromState composes a fresh review-pass prompt file carrying
+// promptFile's own content plus exactly two extra inputs (issue #2550): the
+// prior round's own verdict message (state.ReviewFindings -- the code-owned
+// review pass's final "VERDICT: ..." line plus its Blocking/Non-blocking
+// sections, verbatim) and the fix pass's per-finding dispositions file
+// (state.DispositionsPath), read fresh. Nothing else from the implementor --
+// no PassSummaryPath, ScoutBriefPath, WorkerFindings, or TerminalLand/CapFired
+// -- reaches this prompt: seedPromptFromState above seeds the richer
+// implement/fix-pass prompt from the full run state, but the round-N reviewer
+// gets only these two, framed as unverified claims to check against the diff,
+// never as narrative to take on faith. The firewall is a file boundary (this
+// function simply never reads those other fields), not the host parsing
+// agent-authored markdown for sections.
+//
+// A missing or unreadable dispositions file degrades to seeding the prior
+// verdict alone, not an error (AC5) -- there is nothing useful this function
+// can do about a side-channel read failure on an artifact it doesn't own.
+//
+// When state carries neither a prior verdict nor any dispositions content,
+// this returns promptFile unchanged and creates no temp file, mirroring
+// seedPromptFromState's own no-op shape for the cold-start case.
+func seedReviewPromptFromState(promptFile string, state runstate.RunState) (string, error) {
+	// Any read failure -- missing file, permission error, or otherwise --
+	// degrades to "no dispositions content" rather than an error; only the
+	// dispositions file's absence-or-presence matters here, not why a read
+	// might fail.
+	var dispositions string
+	if state.DispositionsPath != "" {
+		if b, err := os.ReadFile(state.DispositionsPath); err == nil {
+			dispositions = string(b)
+		}
+	}
+
+	if state.ReviewFindings == "" && dispositions == "" {
+		return promptFile, nil
+	}
+
+	original, err := os.ReadFile(promptFile)
+	if err != nil {
+		return "", fmt.Errorf("seed review prompt from run state: %w", err)
+	}
+
+	var b strings.Builder
+	b.WriteString("## Prior-round claims to verify\n\n")
+	b.WriteString("The fix pass that just ran left the claims below behind. They are\n")
+	b.WriteString("unverified assertions from the implementor, not established fact --\n")
+	b.WriteString("check each one against the actual diff rather than taking it on\n")
+	b.WriteString("faith. Your default is still BLOCK, and APPROVE must still be\n")
+	b.WriteString("earned: guilty until proven correct applies to these claims exactly\n")
+	b.WriteString("as much as it applies to the diff itself. Nothing else from the\n")
+	b.WriteString("implementor -- no pass summary, no scout brief, no worker dispatch\n")
+	b.WriteString("results -- reaches this prompt.\n\n")
+	if state.ReviewFindings != "" {
+		fmt.Fprintf(&b, "### Prior verdict\n\n%s\n\n", state.ReviewFindings)
+	}
+	if dispositions != "" {
+		fmt.Fprintf(&b, "### Fix pass dispositions\n\n%s\n\n", dispositions)
+	}
+	b.WriteString("---\n\n")
+	b.Write(original)
+
+	f, err := os.CreateTemp("", "orchestrator-seeded-review-prompt-*.txt")
+	if err != nil {
+		return "", fmt.Errorf("seed review prompt from run state: %w", err)
+	}
+	defer f.Close()
+	if _, err := f.WriteString(b.String()); err != nil {
+		return "", fmt.Errorf("seed review prompt from run state: %w", err)
+	}
+	return f.Name(), nil
+}
+
 // scanPassLog scans one pass's raw Driver log for the two markers the
 // orchestrator's own loop reacts to: a terminal SPINDRIFT_OUTCOME line (per
 // the unchanged outcome.Parse grammar) and the reviewer's own
