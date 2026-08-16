@@ -294,11 +294,11 @@ in
   # the agent-files layer, so it is Linux-gated like the shebang check.
   prompt-baked-into-image = pkgs.runCommand "prompt-baked-into-image" { } ''
     grep -q 'CONFIGURED-PROMPT-MARKER' \
-      ${promptHarness.internals.agentFiles}/agent/prompts/issue-prompt.md
+      ${promptHarness.internals.agentFiles}${agentPaths.PROMPTS_DIR}/issue-prompt.md
     grep -q 'git rebase' \
-      ${promptHarness.internals.agentFiles}/agent/prompts/conflict-resolve-prompt.md
+      ${promptHarness.internals.agentFiles}${agentPaths.PROMPTS_DIR}/conflict-resolve-prompt.md
     grep -q 'Fix box for GitHub issue' \
-      ${promptHarness.internals.agentFiles}/agent/prompts/fix-prompt.md
+      ${promptHarness.internals.agentFiles}${agentPaths.PROMPTS_DIR}/fix-prompt.md
     # fix-prompt.md's fix-specific preamble is baked as-is, but the shared
     # outcome contract (LAND THE CHANGE onward) only ever reaches it via
     # injection (issue #455) — proof the baked image, not just the eval-only
@@ -309,7 +309,7 @@ in
     # literal command), distinct from fix-prompt.md's hand-written preamble
     # (which explicitly skips `gh pr create` on a fix pass).
     grep -q 'OPEN_PR_CREATE_READ_WRITE_STEP' \
-      ${promptHarness.internals.agentFiles}/agent/prompts/fix-prompt.md
+      ${promptHarness.internals.agentFiles}${agentPaths.PROMPTS_DIR}/fix-prompt.md
     touch $out
   '';
 
@@ -320,7 +320,7 @@ in
   # already exports, so the build-time and run-time injections cannot drift.
   outcome-contract-baked-into-image = pkgs.runCommand "outcome-contract-baked-into-image" { } ''
     diff ${batsHarness.internals.outcomeContractFile} \
-      ${batsHarness.internals.agentFiles}/agent/outcome-contract.md
+      ${batsHarness.internals.agentFiles}${agentPaths.OUTCOME_CONTRACT_FILE}
     touch $out
   '';
 
@@ -330,13 +330,13 @@ in
   # run-time injection cannot drift.
   comms-contract-baked-into-image = pkgs.runCommand "comms-contract-baked-into-image" { } ''
     diff ${batsHarness.internals.commsContractFile} \
-      ${batsHarness.internals.agentFiles}/agent/comms-contract.md
+      ${batsHarness.internals.agentFiles}${agentPaths.COMMS_CONTRACT_FILE}
     touch $out
   '';
 
   check-contract-baked-into-image = pkgs.runCommand "check-contract-baked-into-image" { } ''
     diff ${batsHarness.internals.checkContractFile} \
-      ${batsHarness.internals.agentFiles}/agent/check-contract.md
+      ${batsHarness.internals.agentFiles}${agentPaths.CHECK_CONTRACT_FILE}
     touch $out
   '';
 
@@ -351,7 +351,7 @@ in
   fragments-baked-into-image = pkgs.runCommand "fragments-baked-into-image" { } ''
     for f in ${pkgs.lib.concatStringsSep " " fragmentBasenames}; do
       diff ${../../templates/default/prompts/fragments}/"$f".md \
-        ${batsHarness.internals.agentFiles}/agent/prompts/fragments/"$f".md
+        ${batsHarness.internals.agentFiles}${agentPaths.PROMPTS_DIR}/fragments/"$f".md
     done
     touch $out
   '';
@@ -369,8 +369,8 @@ in
   agent-paths-preamble-baked-into-image =
     pkgs.runCommand "agent-paths-preamble-baked-into-image" { }
       ''
-        ep=${batsHarness.agentFiles}/agent/entrypoint.sh
-        af=${batsHarness.agentFiles}
+        ep=${batsHarness.internals.agentFiles}/agent/entrypoint.sh
+        af=${batsHarness.internals.agentFiles}
         ${pkgs.lib.concatStrings (
           pkgs.lib.mapAttrsToList (
             var: path:
