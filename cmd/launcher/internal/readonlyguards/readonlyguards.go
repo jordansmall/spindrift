@@ -41,19 +41,23 @@ const (
 const kindGhAPIMutation = "gh-api-mutation"
 
 // hookNames are the git hook filenames Install writes identical rendered
-// content to under RepoDir/.git/hooks -- pre-push covers the client-side
-// push path a working checkout takes, pre-receive covers a bare/decoy repo
-// used as a push target (agent/entrypoint.sh's install_readonly_push_hook
-// pattern); which one(s) actually fire is a matter of how a caller wires
-// RepoDir; this package renders and installs both, unconditionally.
+// content to under RepoDir's hooks directory (RepoDir/.git/hooks for a
+// normal working copy, RepoDir/hooks for a bare repo -- see gitHooksDir) --
+// pre-push covers the client-side push path a working checkout takes,
+// pre-receive covers a bare/decoy repo used as a push target
+// (agent/entrypoint.sh's install_readonly_push_hook pattern); which one(s)
+// actually fire is a matter of how a caller wires RepoDir; this package
+// renders and installs both, unconditionally.
 var hookNames = []string{"pre-push", "pre-receive"}
 
 // Config is everything Install needs to render and install every runtime
 // guard a set of forbiddenMarkers rows describes.
 type Config struct {
-	// RepoDir is the git repository (or bare/decoy repository) whose
-	// .git/hooks directory receives the rendered git-hook content. Only
-	// required when rows contains at least one Enforce == "git-hook" row.
+	// RepoDir is the git repository (or bare/decoy repository) whose hooks
+	// directory receives the rendered git-hook content -- RepoDir/.git/hooks
+	// for a normal working copy, RepoDir/hooks for a bare repo (see
+	// gitHooksDir). Only required when rows contains at least one
+	// Enforce == "git-hook" row.
 	RepoDir string
 	// ShimDir is the directory command-shim rows install into: one shim
 	// script per argv0 group, plus a sibling ".real-<argv0>" file recording
@@ -313,11 +317,27 @@ func renderMutationGuard(cond, message string) string {
 	return b.String()
 }
 
+// gitHooksDir returns the hooks directory git itself would consult for
+// repoDir: repoDir/.git/hooks when repoDir/.git exists and is a directory
+// (a normal, non-bare working copy), or repoDir/hooks otherwise -- a bare
+// repository (e.g. `git init --bare`, or the decoy repo
+// install_readonly_push_hook targets) has no .git subdirectory at all;
+// repoDir itself *is* the bare git directory, and git looks for hooks
+// directly under repoDir/hooks. Getting this wrong writes a hook file git
+// never reads, silently leaving the guard absent while Result.HookInstalled
+// still reports true.
+func gitHooksDir(repoDir string) string {
+	if info, err := os.Stat(filepath.Join(repoDir, ".git")); err == nil && info.IsDir() {
+		return filepath.Join(repoDir, ".git", "hooks")
+	}
+	return filepath.Join(repoDir, "hooks")
+}
+
 // installGitHook renders every hookRows row's Message into one hook body
 // and installs it, identically, as every name in hookNames under
-// repoDir/.git/hooks.
+// repoDir's hooks directory (see gitHooksDir).
 func installGitHook(hookRows []promptassembly.ForbiddenMarkerRow, repoDir string, out io.Writer) error {
-	hooksDir := filepath.Join(repoDir, ".git", "hooks")
+	hooksDir := gitHooksDir(repoDir)
 	if err := os.MkdirAll(hooksDir, 0o755); err != nil {
 		return fmt.Errorf("readonlyguards: mkdir hooks dir %s: %w", hooksDir, err)
 	}
