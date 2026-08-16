@@ -22,6 +22,8 @@ let
     forgejoHarness
     ;
   agentPaths = import ../../lib/agent-paths.nix;
+  preambles = import ../../lib/preambles.nix;
+  driverRegistry = import ../../lib/drivers/default.nix { inherit (pkgs) lib; };
   fragmentRows = import ../../lib/fragments.nix;
   fragmentBasenames = map (row: pkgs.lib.removeSuffix ".md" row.fragment) fragmentRows;
   # The shared prompt-block registry (issue #2245) lib/mkHarness.nix's
@@ -361,8 +363,8 @@ in
   # renderAgentPathsPreamble) from the exact same nix binding agentFiles' cp
   # destinations use (lib/image.nix) -- this check proves both sides actually
   # agree in the real built image: the baked entrypoint.sh must carry each
-  # VAR=${VAR:-path} line, and something must actually exist at that path in
-  # the built agentFiles tree.
+  # line the real renderer emits, and something must actually exist at that
+  # path in the built agentFiles tree.
   #
   # Honesty note (review fix-pass): this check's own "diverges" arm can never
   # actually fire against a real build. `agentPaths` above and the real baked
@@ -372,9 +374,9 @@ in
   # hand-copied duplicate anywhere for the two to drift apart from. That's
   # AC1's single-source win, not a gap in this check. It does NOT mean the
   # `grep -qF ... || exit 1` assertion shape below is untested: see the
-  # sibling check `agent-paths-preamble-detects-divergence` for a synthetic
-  # demonstration that this exact assertion mechanism genuinely rejects a
-  # real mismatch when the two sides actually disagree.
+  # sibling check `agent-paths-preamble-detects-divergence`, which builds its
+  # candidate text through the same renderer and demonstrates that this
+  # assertion shape genuinely rejects a real mismatch.
   agent-paths-preamble-baked-into-image =
     pkgs.runCommand "agent-paths-preamble-baked-into-image" { }
       ''
@@ -384,10 +386,12 @@ in
           pkgs.lib.mapAttrsToList (
             var: path:
             let
-              # Mirrors lib/preambles.nix's renderAgentPathsPreamble line shape
-              # byte-for-byte: VAR=${VAR:-path} (path is escapeShellArg-safe
-              # unquoted for every current agentPaths entry).
-              pattern = "${var}=\${${var}:-${path}}";
+              # The real renderer's own output for this one entry (not a
+              # hand-re-derived VAR=${VAR:-path} shape) -- called on a
+              # singleton attrset so the check exercises
+              # renderAgentPathsPreamble's actual escapeShellArg treatment
+              # instead of restating it by hand.
+              pattern = pkgs.lib.removeSuffix "\n" (preambles.renderAgentPathsPreamble { ${var} = path; });
             in
             ''
               grep -qF ${pkgs.lib.escapeShellArg pattern} "$ep" || {
@@ -404,23 +408,29 @@ in
         touch $out
       '';
 
-  # Issue #2531 (review fix-pass, AC2): demonstrates that the assertion
-  # mechanism used above (`grep -qF <expected pattern> <file> || exit 1`)
-  # genuinely rejects a real mismatch, since the check above can't exercise
-  # that itself -- see its comment. Builds a synthetic candidate entrypoint
-  # containing a deliberately WRONG PROMPTS_DIR default (a real path, but not
-  # the one lib/agent-paths.nix actually binds), then asserts that grepping
-  # for the real expected pattern in that synthetic candidate correctly does
-  # NOT match. If it did match, this would mean the assertion shape itself is
-  # unsound (e.g. wired backwards), not merely that a rename can't be caught.
+  # Issue #2531 (review fix-pass, AC2): demonstrates that the
+  # `grep -qF <expected line> <file> || exit 1` assertion shape used above
+  # genuinely distinguishes a real mismatch, since the check above can't
+  # exercise that itself -- see its comment. Renders two candidate lines
+  # through the real renderAgentPathsPreamble -- one for the real
+  # PROMPTS_DIR binding, one for a deliberately wrong path -- then asserts
+  # that the real-binding line does not appear in a synthetic entrypoint
+  # built from the wrong-path line. Both candidates go through the same
+  # renderer (not a hand-re-derived VAR=${VAR:-path} shape), so this also
+  # pins that grep -F treats the renderer's output as a literal, not a glob
+  # or regex. If the real-binding line matched anyway, that would mean the
+  # assertion shape itself is unsound (e.g. wired backwards), not merely
+  # that a rename can't be caught.
   agent-paths-preamble-detects-divergence =
     let
       var = "PROMPTS_DIR";
-      realPath = agentPaths.PROMPTS_DIR;
-      expectedPattern = "${var}=\${${var}:-${realPath}}";
+      expectedPattern = pkgs.lib.removeSuffix "\n" (
+        preambles.renderAgentPathsPreamble { ${var} = agentPaths.${var}; }
+      );
+      wrongLine = preambles.renderAgentPathsPreamble { ${var} = "/agent/WRONG_PATH"; };
       wrongCandidate = pkgs.writeText "fake-entrypoint-with-wrong-prompts-dir.sh" ''
         #!/usr/bin/env bash
-        ${var}=''${${var}:-/agent/WRONG_PATH}
+        ${wrongLine}
       '';
     in
     pkgs.runCommand "agent-paths-preamble-detects-divergence" { } ''
@@ -440,52 +450,48 @@ in
   # greps a disjoint set of lines, so it says nothing about whether
   # driverPreamble itself made it in (see agent/entrypoint.sh's comment on
   # this pair). This check greps the same baked entrypoint.sh directly for
-  # the four Driver-identity lines, in the exact unconditional `VAR=value`
-  # shape renderPreamble emits (no `${VAR:-...}` fallback wrapper -- unlike
-  # the agent-paths vars, these are fixed per Box invocation, not overridable
-  # at runtime), asserted against the concrete "claude" Driver entry
-  # batsHarness actually selects (lib/mkHarness.nix's `driver ? "claude"`
-  # default). A build that ever drops driverPreamble from lib/image.nix's
-  # entrypoint `text` concatenation -- while leaving agentPathsPreamble intact
-  # -- now fails here instead of silently shipping a Box that dies on an
-  # unbound DRIVER_* variable at runtime.
+  # renderPreamble's own DRIVER_* output lines (not hand-typed var names/
+  # values), asserted against the concrete "claude" Driver entry batsHarness
+  # actually selects (lib/mkHarness.nix's `driver ? "claude"` default). A
+  # build that ever drops driverPreamble from lib/image.nix's entrypoint
+  # `text` concatenation -- while leaving agentPathsPreamble intact -- now
+  # fails here instead of silently shipping a Box that dies on an unbound
+  # DRIVER_* variable at runtime.
   #
   # Honesty note (review fix-pass): like agent-paths-preamble-baked-into-image
   # above, this check's own value-mismatch ("diverges") arm can't be exercised
-  # by a rename either -- `patterns` here is built from the identical
-  # `driverEntry` binding renderPreamble itself reads, so both sides move
-  # together by construction. See agent-paths-preamble-detects-divergence
-  # above for a synthetic demonstration that the shared
-  # `grep -qF ... || exit 1` assertion shape genuinely catches a real
-  # mismatch -- the same mechanism this check reuses, so it isn't duplicated
-  # here. What this check newly exercises, and that sibling check does not,
-  # is the omission failure mode above: driverPreamble getting dropped whole
-  # from lib/image.nix's `text` concatenation.
+  # by a rename either -- `driverPreambleLines` here is built from the
+  # identical `driverEntry` binding renderPreamble itself reads, so both
+  # sides move together by construction. See
+  # agent-paths-preamble-detects-divergence above for a synthetic
+  # demonstration that the shared `grep -qF ... || exit 1` assertion shape
+  # genuinely catches a real mismatch -- the same mechanism this check
+  # reuses, so it isn't duplicated here. What this check newly exercises,
+  # and that sibling check does not, is the omission failure mode above:
+  # driverPreamble getting dropped whole from lib/image.nix's `text`
+  # concatenation.
   driver-preamble-baked-into-image =
     let
-      driverEntry = (import ../../lib/drivers/default.nix { inherit (pkgs) lib; }).entries.claude;
-      patterns = {
-        DRIVER_NAME = pkgs.lib.escapeShellArg driverEntry.name;
-        DRIVER_BIN = pkgs.lib.escapeShellArg driverEntry.bin;
-        DRIVER_FLAGS_COMMON = pkgs.lib.escapeShellArg driverEntry.flagsCommon;
-        DRIVER_SKILLS_DIR = pkgs.lib.escapeShellArg "/home/agent/${driverEntry.skillsDirRelative}";
-      };
+      driverEntry = driverRegistry.entries.claude;
+      # The real renderer's own DRIVER_* lines (not hand-typed var names or
+      # hand-applied escapeShellArg) -- filtered out of the full rendered
+      # text, which also carries envCommon exports and function bodies not
+      # covered by this check.
+      driverPreambleLines = builtins.filter (pkgs.lib.hasPrefix "DRIVER_") (
+        pkgs.lib.splitString "\n" (driverRegistry.renderPreamble driverEntry)
+      );
     in
     pkgs.runCommand "driver-preamble-baked-into-image" { } ''
       ep=${batsHarness.internals.agentFiles}/agent/entrypoint.sh
       ${pkgs.lib.concatStrings (
-        pkgs.lib.mapAttrsToList (
-          var: value:
-          let
-            pattern = "${var}=${value}";
-          in
-          ''
-            grep -qF ${pkgs.lib.escapeShellArg pattern} "$ep" || {
-              echo ${pkgs.lib.escapeShellArg "entrypoint is missing or diverges from ${pattern} -- Driver preamble not baked?"} >&2
+        map (
+          line: ''
+            grep -qF ${pkgs.lib.escapeShellArg line} "$ep" || {
+              echo ${pkgs.lib.escapeShellArg "entrypoint is missing or diverges from ${line} -- Driver preamble not baked?"} >&2
               exit 1
             }
           ''
-        ) patterns
+        ) driverPreambleLines
       )}
       touch $out
     '';
