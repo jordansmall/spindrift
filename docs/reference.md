@@ -94,7 +94,7 @@ and everything else lives under the out-of-contract `internals` attrset (see
 | `prompt`    | shared         | string                      | bundled starter    | agent prompt template baked into the image; changing it requires a rebuild (`spindrift build`). The SPINDRIFT_OUTCOME contract is harness-owned: `spindrift build` appends it automatically if a custom `prompt` omits it (idempotent — a prompt that already has it is untouched) |
 | `scoutPrompt` / `reviewPrompt` / `filerPrompt` | **`mkHarness` only** | string | bundled starters | system prompts for the read-only scout and reviewer subagents and the opt-in filer subagent (see [Filer](#filer)); not settable on `perSystem.spindrift.*` — override at runtime via `SPINDRIFT_PROMPT_DIR` regardless of which caller baked the image |
 | `skills`    | shared         | list of path/derivation/`{ name; src; }` | `[]`  | skills baked into the image at the fixed `/agent/skills` path alongside the harness-owned skills (e.g. `auto-format`, `auto-lint`, baked regardless of this list), each as a `<name>/SKILL.md` directory (the only layout Claude Code discovers — a flat `<name>.md` is ignored) so the headless agent can `/invoke` them; a `{ name; src; }` content entry (name + SKILL.md body) is realized with the image's own Linux `pkgs` rather than copied from a pre-built host derivation, keeping the agent-image drvPath host-independent (issue #597); `agent/entrypoint.sh` copies both into the Driver's actual runtime skills dir at box startup, then copies `SPINDRIFT_SKILLS_DIR` (staged at `/operator-skills`) over the top so runtime overrides win without erasing the baked set (issue #2489) |
-| `settings`  | shared         | submodule, grouped by section (see below) | `{}` | non-secret run defaults baked into the `spindrift` CLI |
+| `settings`  | shared         | submodule, grouped by section (see below) | `{}` | **deprecated** compat shim (ADR 0037): every schema-generated knob is now a first-class option in the domain tree below; this submodule still works pre-1.0 (forwards with an eval warning) but new config should use the domain paths directly |
 | `runtime`   | shared         | `"podman"` \| `"docker"` \| `"rancher"` \| `"bwrap"` | `"podman"` | runner the `spindrift build`/`dispatch` commands drive: an OCI runtime (`"rancher"` is an alias for Rancher Desktop's containerd mode, driven via `nerdctl`), or the daemonless bubblewrap sandbox (`bwrap`, Linux-only, no image build/load) |
 | `driver`    | shared         | string                      | `"claude"`         | the agent CLI Driver baked into the image and threaded to the launcher (ADR 0009); `"claude"` (default) and `"opencode"` are the Drivers today. A non-`claude` Driver realises its own `spindrift-<driver>` image (e.g. `spindrift-opencode`) so per-Driver artifacts never collide |
 | `nixInBox`  | shared         | bool                        | `true`             | bake a usable nix (binary + registered store DB + sandbox-off config) into the box so `nix flake check` / `nix develop` work inside it; set `false` for a lean, nix-free image (ADR 0008) |
@@ -103,54 +103,68 @@ and everything else lives under the out-of-contract `internals` attrset (see
 | `nixBuilderImage` | **`mkHarness` only** | string        | `"docker.io/nixos/nix@sha256:bf1d938835ab96312f098fa6c2e9cab367728e0aad0646ee3e02a787c80d8fb8"` (pinned reference — the real default lives in `lib/build-constants.nix`) | Nix image `spindrift build` uses as a fallback Linux builder when the host can't realize the image; pinned by digest for supply-chain safety (see [Building on macOS](#building-on-macos)) |
 | `roster`    | shared         | list of subagent-entry attrs | `lib/roster.nix`'s `defaultRoster` | supersedes the four legacy model knobs; see [Subagent roster](#subagent-roster) |
 
-The `settings` submodule bakes run knobs into the Launcher input document the
-`spindrift` CLI passes to the launcher binary via `--input`; an explicit
-`--flag` at dispatch time re-points a value without a rebuild. Knobs are
-grouped by section — the same headings as `spindrift --help --all` — so the
-flake surface is self-documenting and stays in lockstep with the CLI help.
-Sections and knobs derive from `lib/env-schema.nix`; unknown section or knob
-names are rejected at eval time by the NixOS module system.
+Every knob — schema-generated run default or hand-declared structural
+option alike — is a first-class option directly under
+`perSystem.spindrift.<domain>.*` (ADR 0037): `agents`, `git`, `issues`,
+`forge`, `dispatch`, `infra`. A schema-generated knob (e.g. `repoSlug`,
+`gitUserName`) is placed by its `lib/env-schema.nix` entry's `group` and
+optional `nixSubPath` (`lib/nixpath.nix`); a structural knob (`roster`,
+`skills`, `packages`, `prefetch`, `driver`, `prompt`, `extraClosures`,
+`runtime`, and the rest of `lib/structural-paths.nix`) is placed by a small
+hand-written map in `lib/flakeModule.nix`. Either way the flake surface
+bakes run knobs into the Launcher input document the `spindrift` CLI passes
+to the launcher binary via `--input`; an explicit `--flag` at dispatch time
+re-points a value without a rebuild. Domain names are the same headings as
+`spindrift --help --all`, so the flake surface stays in lockstep with the
+CLI help. Unknown domain or knob names are rejected at eval time by the
+NixOS module system.
 
-Every `settings.<section>.<knob>` is generated from that schema and appears
-in [`docs/flake-options.md`](flake-options.md). A *structural* option —
-`roster`, `skills`, `packages`, `prefetch`, `driver`, `prompt`,
-`extraClosures`, `runtime`, and the rest of `lib/structural-paths.nix` — is a
-different, disjoint surface: it's hand-declared directly on the domain tree
-(e.g. `perSystem.spindrift.agents.*`, `perSystem.spindrift.infra.*`) rather
-than generated from the env-schema registry, so it's absent from the
-generated reference for that reason, not because it's unreachable from the
-flake module.
+Every schema-generated knob's domain path is generated from that schema and
+appears in [`docs/flake-options.md`](flake-options.md); structural options
+are absent from that generated reference because they're hand-declared
+rather than schema-generated, not because they're unreachable from the flake
+module. The old `settings.<section>.<knob>` spelling still works pre-1.0 as
+a deprecated alias (`lib/flakeModule.nix`'s `settingsOption`, forwarded with
+an eval warning) but is retired at the 1.0 boundary — new config should use
+the domain paths directly.
 
 ```nix
-settings = {
-  # BEGIN GENERATED SETTINGS EXAMPLE LABELS -- nix run .#regen -- DO NOT EDIT
-  issueDiscovery  = { label          = "ready-for-agent"; };
-  lifecycleLabels = { inProgressLabel = "agent-in-progress";
-                      failedLabel     = "agent-failed";
-                      completeLabel   = "agent-complete"; };
-  # END GENERATED SETTINGS EXAMPLE LABELS
-  # BEGIN GENERATED SETTINGS EXAMPLE CONFIG -- nix run .#regen -- DO NOT EDIT
-  branches        = { baseBranch = "main"; branchPrefix = "agent/issue-";
-                      mergeMode  = "manual";
-                      mergeGuardPaths = ".github/**,.forgejo/**,**/CLAUDE.md,**/AGENTS.md,.claude/**,.opencode/**";
-                      mergePollInterval = 30; mergePollTimeout = 1800; };
-  concurrency     = { maxParallel = 3; maxJobs = 0; };
-  # END GENERATED SETTINGS EXAMPLE CONFIG
-  # BEGIN GENERATED SETTINGS EXAMPLE MODELS -- nix run .#regen -- DO NOT EDIT
-  models          = { model = "claude-sonnet-5";
-                      scoutModel  = "claude-haiku-4-5-20251001";
-                      reviewModel = "claude-opus-5";
-                      filerModel  = ""; };
-  # END GENERATED SETTINGS EXAMPLE MODELS
-  sandbox         = { devShellName = "default"; devShellProbeTimeout = 300;
-                      memoryLimit = "5g"; pidsLimit = "512";
-                      podmanNetwork = ""; bwrapUnshareNet = ""; };
-  selfHealing     = { maxFixAttempts = 3; maxRebaseAttempts = 3;
-                      holdJitterSecs = 5; transientBackoffSecs = 30;
-                      transientRetryMax = 3; };
-  repository      = { repoSlug = "owner/repo";
-                      gitUserName = "bot"; gitUserEmail = "bot@example.com"; };
-};
+# BEGIN GENERATED SETTINGS EXAMPLE LABELS -- nix run .#regen -- DO NOT EDIT
+issues.labels.dispatch   = "ready-for-agent";
+issues.labels.inProgress = "agent-in-progress";
+issues.labels.failed     = "agent-failed";
+issues.labels.complete   = "agent-complete";
+# END GENERATED SETTINGS EXAMPLE LABELS
+# BEGIN GENERATED SETTINGS EXAMPLE CONFIG -- nix run .#regen -- DO NOT EDIT
+git.baseBranch         = "main";
+git.branchPrefix       = "agent/issue-";
+git.merge.policy       = "manual";
+git.merge.guardPaths   = ".github/**,.forgejo/**,**/CLAUDE.md,**/AGENTS.md,.claude/**,.opencode/**";
+git.merge.pollInterval = 30;
+git.merge.pollTimeout  = 1800;
+dispatch.maxParallel   = 3;
+dispatch.maxJobs       = 0;
+# END GENERATED SETTINGS EXAMPLE CONFIG
+# BEGIN GENERATED SETTINGS EXAMPLE MODELS -- nix run .#regen -- DO NOT EDIT
+agents.models.default = "claude-sonnet-5";
+agents.models.scout   = "claude-haiku-4-5-20251001";
+agents.models.review  = "claude-opus-5";
+agents.models.filer   = "";
+# END GENERATED SETTINGS EXAMPLE MODELS
+git.user.name  = "bot";
+git.user.email = "bot@example.com";
+dispatch.retry.maxFix           = 3;
+dispatch.retry.maxRebase        = 3;
+dispatch.retry.holdJitter       = 5;
+dispatch.retry.transientBackoff = 30;
+dispatch.retry.transientMax     = 3;
+infra.devShell.name         = "default";
+infra.devShell.probeTimeout = 300;
+infra.limits.memory  = "5g";
+infra.limits.pids    = "512";
+infra.network.podman = "";
+infra.network.bwrapUnshare = "";
+forge.repoSlug = "owner/repo";
 ```
 
 #### Discovering flake options
@@ -158,18 +172,18 @@ settings = {
 Three paths to discover which options exist and what they do:
 
 1. **Generated reference** — [`docs/flake-options.md`](flake-options.md) lists
-   every `settings.<section>.<knob>` with its env var, default, and description.
-   It is generated from `lib/env-schema.nix` and drift-guarded by `nix flake
-   check`; it is always in sync with the schema.
+   every flake option grouped by domain, with its env var, default, and
+   description. It is generated from `lib/env-schema.nix` and drift-guarded
+   by `nix flake check`; it is always in sync with the schema.
 
 2. **LSP autocomplete** — `nixd` and `nil` read the module option declarations
    that `lib/flakeModule.nix` generates from the same schema.  Opening your
    Consumer flake in an editor with either LSP gives option completions and hover
-   documentation for every `settings.<section>.<knob>` inline.
+   documentation for every flake option inline.
 
 3. **CLI reference** — `spindrift --help --all` (or `man spindrift`) prints the
-   full flag table grouped by section.  Every `settings` knob maps 1:1 to a
-   `--<flag>` in the same section heading, so the CLI reference doubles as a
+   full flag table grouped by domain.  Every flake option maps 1:1 to a
+   `--<flag>` in the same domain heading, so the CLI reference doubles as a
    guide to what is settable in the flake.
 
 `inProgressLabel`/`failedLabel`/`completeLabel` drive the
@@ -279,7 +293,7 @@ The legacy knobs map onto the default roster's entry names:
 still work — the default roster derives from them unchanged, as a fallback
 under `models` — but a `nix eval` warning fires whenever any of them is set,
 whether via the `mkHarness` `defaults` argument or a Consumer's
-`settings.models.*`, pointing at this section. Unlike those knobs, which
+`agents.models.*`, pointing at this section. Unlike those knobs, which
 retier or add/drop a subagent with no image rebuild (`SCOUT_MODEL=...` at
 dispatch time, no `spindrift build`), adding an arbitrary Nth custom agent
 via `roster` is a `mkHarness`/image-time decision and requires a rebuild.

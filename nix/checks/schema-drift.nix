@@ -456,8 +456,8 @@ let
 
   # Shared by assertSettingsExampleModelsDocOk/assertSettingsExampleLabelsDocOk/
   # assertSettingsExampleConfigDocOk: each settings-example sub-block lives
-  # between its own BEGIN/END marker pair inside the doc's illustrative
-  # `settings = { ... }` example and is checked the same way -- split docSrc
+  # between its own BEGIN/END marker pair inside the doc's illustrative flat
+  # domain-tree example (ADR 0037) and is checked the same way -- split docSrc
   # on the markers, compare the committed slice against generated, else
   # throw a message naming which sub-block (blockName) and which schema file
   # (sourceDesc) it drifted from. Parameterized so the three callers below
@@ -497,9 +497,9 @@ let
         want: ${generated}'';
     docSrc;
 
-  # Asserts docSrc's generated settings example `models` sub-block (between
-  # its BEGIN/END GENERATED SETTINGS EXAMPLE MODELS markers) matches
-  # generated, else throws (issue #2514 AC1). Factored out the same way
+  # Asserts docSrc's generated flat domain-tree example's `agents.models.*`
+  # sub-block (between its BEGIN/END GENERATED SETTINGS EXAMPLE MODELS
+  # markers) matches generated, else throws (issue #2514 AC1). Factored out the same way
   # assertDefaultModelsDocOk is, so settings-example-models-doc-guard can
   # exercise this exact marker-split + equality assertion path against a
   # synthetic doc, not only the real docs/reference.md content.
@@ -508,14 +508,14 @@ let
     assertMarkedBlockOk {
       blockName = "SETTINGS EXAMPLE MODELS";
       sourceDesc = "lib/default-model-fixture.nix";
-      beginMarker = "  # BEGIN GENERATED SETTINGS EXAMPLE MODELS -- nix run .#regen -- DO NOT EDIT\n";
-      endMarker = "  # END GENERATED SETTINGS EXAMPLE MODELS";
+      beginMarker = "# BEGIN GENERATED SETTINGS EXAMPLE MODELS -- nix run .#regen -- DO NOT EDIT\n";
+      endMarker = "# END GENERATED SETTINGS EXAMPLE MODELS";
       inherit docSrc generated;
     };
 
-  # Asserts docSrc's generated settings example `issueDiscovery`/
-  # `lifecycleLabels` sub-block (between its BEGIN/END GENERATED SETTINGS
-  # EXAMPLE LABELS markers) matches generated, else throws (issue #2537): the
+  # Asserts docSrc's generated flat domain-tree example's `issues.labels.*`
+  # sub-block (between its BEGIN/END GENERATED SETTINGS EXAMPLE LABELS
+  # markers) matches generated, else throws (issue #2537): the
   # example's label/inProgressLabel/failedLabel/completeLabel literals
   # restate lib/env-schema.nix's schema.label.default,
   # schema.inProgressLabel.default, schema.failedLabel.default, and
@@ -530,14 +530,14 @@ let
     assertMarkedBlockOk {
       blockName = "SETTINGS EXAMPLE LABELS";
       sourceDesc = "lib/env-schema.nix";
-      beginMarker = "  # BEGIN GENERATED SETTINGS EXAMPLE LABELS -- nix run .#regen -- DO NOT EDIT\n";
-      endMarker = "  # END GENERATED SETTINGS EXAMPLE LABELS";
+      beginMarker = "# BEGIN GENERATED SETTINGS EXAMPLE LABELS -- nix run .#regen -- DO NOT EDIT\n";
+      endMarker = "# END GENERATED SETTINGS EXAMPLE LABELS";
       inherit docSrc generated;
     };
 
-  # Asserts docSrc's generated settings example `branches`/`concurrency`
-  # sub-block (between its BEGIN/END GENERATED SETTINGS EXAMPLE CONFIG
-  # markers) matches generated, else throws (issue #2537): the example's
+  # Asserts docSrc's generated flat domain-tree example's `git.*`/
+  # `dispatch.*` sub-block (between its BEGIN/END GENERATED SETTINGS EXAMPLE
+  # CONFIG markers) matches generated, else throws (issue #2537): the example's
   # baseBranch/branchPrefix/mergeMode/mergeGuardPaths/mergePollInterval/
   # mergePollTimeout/maxParallel/maxJobs literals restate lib/env-schema.nix's
   # schema.baseBranch.default, schema.branchPrefix.default,
@@ -555,8 +555,8 @@ let
     assertMarkedBlockOk {
       blockName = "SETTINGS EXAMPLE CONFIG";
       sourceDesc = "lib/env-schema.nix";
-      beginMarker = "  # BEGIN GENERATED SETTINGS EXAMPLE CONFIG -- nix run .#regen -- DO NOT EDIT\n";
-      endMarker = "  # END GENERATED SETTINGS EXAMPLE CONFIG";
+      beginMarker = "# BEGIN GENERATED SETTINGS EXAMPLE CONFIG -- nix run .#regen -- DO NOT EDIT\n";
+      endMarker = "# END GENERATED SETTINGS EXAMPLE CONFIG";
       inherit docSrc generated;
     };
 in
@@ -2062,9 +2062,9 @@ in
       "default-models-doc-guard: expected assertDefaultModelsDocOk to reject a synthetic doc whose generated Default models table has drifted, but it evaluated successfully";
     pkgs.runCommand "default-models-doc-guard" { } "touch $out";
 
-  # The generated `models` sub-block of docs/reference.md's illustrative
-  # `settings = { ... }` example (between its BEGIN/END GENERATED SETTINGS
-  # EXAMPLE MODELS markers) must match the content rendered from
+  # The generated `agents.models.*` sub-block of docs/reference.md's
+  # illustrative flat domain-tree example (between its BEGIN/END GENERATED
+  # SETTINGS EXAMPLE MODELS markers) must match the content rendered from
   # lib/default-model-fixture.nix (issue #2514 AC1): a schema-default bump
   # must not be able to leave this example's hand-typed model/scoutModel/
   # reviewModel/filerModel literals stale with no drift check, the exact
@@ -2090,13 +2090,13 @@ in
     let
       inherit (pkgs.lib) assertMsg;
       generated = renderers.renderSettingsExampleModelsDoc defaultModelFixture;
-      beginMarker = "  # BEGIN GENERATED SETTINGS EXAMPLE MODELS -- nix run .#regen -- DO NOT EDIT\n";
-      endMarker = "  # END GENERATED SETTINGS EXAMPLE MODELS";
+      beginMarker = "# BEGIN GENERATED SETTINGS EXAMPLE MODELS -- nix run .#regen -- DO NOT EDIT\n";
+      endMarker = "# END GENERATED SETTINGS EXAMPLE MODELS";
       driftedBlock = ''
-        models          = { model = "wrong-model";
-                            scoutModel  = "wrong-scout-model";
-                            reviewModel = "wrong-review-model";
-                            filerModel  = "wrong-filer-model"; };
+        agents.models.default = "wrong-model";
+        agents.models.scout   = "wrong-scout-model";
+        agents.models.review  = "wrong-review-model";
+        agents.models.filer   = "wrong-filer-model";
       '';
       driftedDocSrc = beginMarker + driftedBlock + endMarker + "\n";
       result = builtins.tryEval (assertSettingsExampleModelsDocOk {
@@ -2108,9 +2108,9 @@ in
       "settings-example-models-doc-guard: expected assertSettingsExampleModelsDocOk to reject a synthetic doc whose models sub-block has drifted, but it evaluated successfully";
     pkgs.runCommand "settings-example-models-doc-guard" { } "touch $out";
 
-  # The generated `issueDiscovery`/`lifecycleLabels` sub-block of docs/
-  # reference.md's illustrative `settings = { ... }` example (between its
-  # BEGIN/END GENERATED SETTINGS EXAMPLE LABELS markers) must match the
+  # The generated `issues.labels.*` sub-block of docs/reference.md's
+  # illustrative flat domain-tree example (between its BEGIN/END GENERATED
+  # SETTINGS EXAMPLE LABELS markers) must match the
   # content rendered from lib/env-schema.nix (issue #2537): a schema-default
   # bump to schema.label.default, schema.inProgressLabel.default,
   # schema.failedLabel.default, or schema.completeLabel.default must not be
@@ -2138,19 +2138,13 @@ in
     let
       inherit (pkgs.lib) assertMsg;
       generated = renderers.renderSettingsExampleLabelsDoc schema;
-      beginMarker = "  # BEGIN GENERATED SETTINGS EXAMPLE LABELS -- nix run .#regen -- DO NOT EDIT\n";
-      endMarker = "  # END GENERATED SETTINGS EXAMPLE LABELS";
-      # Built via string concatenation, not a ''-string: a ''-string strips
-      # the block's common leading indentation (down to 0 here), which would
-      # make committed's indentation itself mismatch generated's real
-      # 2-space-indented output regardless of the wrong-* literals below --
-      # proving only that the assert rejects a whitespace difference, not
-      # the drifted label value it's meant to catch.
+      beginMarker = "# BEGIN GENERATED SETTINGS EXAMPLE LABELS -- nix run .#regen -- DO NOT EDIT\n";
+      endMarker = "# END GENERATED SETTINGS EXAMPLE LABELS";
       driftedBlock =
-        "  issueDiscovery  = { label          = \"wrong-label\"; };\n"
-        + "  lifecycleLabels = { inProgressLabel = \"wrong-in-progress-label\";\n"
-        + "                      failedLabel     = \"wrong-failed-label\";\n"
-        + "                      completeLabel   = \"wrong-complete-label\"; };\n";
+        "issues.labels.dispatch   = \"wrong-label\";\n"
+        + "issues.labels.inProgress = \"wrong-in-progress-label\";\n"
+        + "issues.labels.failed     = \"wrong-failed-label\";\n"
+        + "issues.labels.complete   = \"wrong-complete-label\";\n";
       driftedDocSrc = beginMarker + driftedBlock + endMarker + "\n";
       result = builtins.tryEval (assertSettingsExampleLabelsDocOk {
         docSrc = driftedDocSrc;
@@ -2161,9 +2155,9 @@ in
       "settings-example-labels-doc-guard: expected assertSettingsExampleLabelsDocOk to reject a synthetic doc whose labels sub-block has drifted, but it evaluated successfully";
     pkgs.runCommand "settings-example-labels-doc-guard" { } "touch $out";
 
-  # The generated `branches`/`concurrency` sub-block of docs/reference.md's
-  # illustrative `settings = { ... }` example (between its BEGIN/END
-  # GENERATED SETTINGS EXAMPLE CONFIG markers) must match the content
+  # The generated `git.*`/`dispatch.*` sub-block of docs/reference.md's
+  # illustrative flat domain-tree example (between its BEGIN/END GENERATED
+  # SETTINGS EXAMPLE CONFIG markers) must match the content
   # rendered from lib/env-schema.nix (issue #2537): a schema-default bump to
   # schema.baseBranch.default, schema.branchPrefix.default,
   # schema.mergeMode.default, schema.mergeGuardPaths.default,
@@ -2195,20 +2189,17 @@ in
     let
       inherit (pkgs.lib) assertMsg;
       generated = renderers.renderSettingsExampleConfigDoc schema;
-      beginMarker = "  # BEGIN GENERATED SETTINGS EXAMPLE CONFIG -- nix run .#regen -- DO NOT EDIT\n";
-      endMarker = "  # END GENERATED SETTINGS EXAMPLE CONFIG";
-      # Built via string concatenation, not a ''-string: a ''-string strips
-      # the block's common leading indentation (down to 0 here), which would
-      # make committed's indentation itself mismatch generated's real
-      # 2-space-indented output regardless of the wrong-base-branch literal
-      # below -- proving only that the assert rejects a whitespace
-      # difference, not the drifted config value it's meant to catch.
+      beginMarker = "# BEGIN GENERATED SETTINGS EXAMPLE CONFIG -- nix run .#regen -- DO NOT EDIT\n";
+      endMarker = "# END GENERATED SETTINGS EXAMPLE CONFIG";
       driftedBlock =
-        "  branches        = { baseBranch = \"wrong-base-branch\"; branchPrefix = \"agent/issue-\";\n"
-        + "                      mergeMode  = \"manual\";\n"
-        + "                      mergeGuardPaths = \".github/**,.forgejo/**,**/CLAUDE.md,**/AGENTS.md,.claude/**,.opencode/**\";\n"
-        + "                      mergePollInterval = 30; mergePollTimeout = 1800; };\n"
-        + "  concurrency     = { maxParallel = 3; maxJobs = 0; };\n";
+        "git.baseBranch         = \"wrong-base-branch\";\n"
+        + "git.branchPrefix       = \"agent/issue-\";\n"
+        + "git.merge.policy       = \"manual\";\n"
+        + "git.merge.guardPaths   = \".github/**,.forgejo/**,**/CLAUDE.md,**/AGENTS.md,.claude/**,.opencode/**\";\n"
+        + "git.merge.pollInterval = 30;\n"
+        + "git.merge.pollTimeout  = 1800;\n"
+        + "dispatch.maxParallel   = 3;\n"
+        + "dispatch.maxJobs       = 0;\n";
       driftedDocSrc = beginMarker + driftedBlock + endMarker + "\n";
       result = builtins.tryEval (assertSettingsExampleConfigDocOk {
         docSrc = driftedDocSrc;

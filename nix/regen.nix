@@ -156,16 +156,16 @@ pkgs.writeShellApplication {
       ${escapeShellArg "<!-- END GENERATED DEFAULT MODELS -->"} \
       ${escapeShellArg defaultModelsDoc}
     write_between docs/reference.md \
-      ${escapeShellArg "  # BEGIN GENERATED SETTINGS EXAMPLE MODELS -- nix run .#regen -- DO NOT EDIT"} \
-      ${escapeShellArg "  # END GENERATED SETTINGS EXAMPLE MODELS"} \
+      ${escapeShellArg "# BEGIN GENERATED SETTINGS EXAMPLE MODELS -- nix run .#regen -- DO NOT EDIT"} \
+      ${escapeShellArg "# END GENERATED SETTINGS EXAMPLE MODELS"} \
       ${escapeShellArg settingsExampleModelsDoc}
     write_between docs/reference.md \
-      ${escapeShellArg "  # BEGIN GENERATED SETTINGS EXAMPLE LABELS -- nix run .#regen -- DO NOT EDIT"} \
-      ${escapeShellArg "  # END GENERATED SETTINGS EXAMPLE LABELS"} \
+      ${escapeShellArg "# BEGIN GENERATED SETTINGS EXAMPLE LABELS -- nix run .#regen -- DO NOT EDIT"} \
+      ${escapeShellArg "# END GENERATED SETTINGS EXAMPLE LABELS"} \
       ${escapeShellArg settingsExampleLabelsDoc}
     write_between docs/reference.md \
-      ${escapeShellArg "  # BEGIN GENERATED SETTINGS EXAMPLE CONFIG -- nix run .#regen -- DO NOT EDIT"} \
-      ${escapeShellArg "  # END GENERATED SETTINGS EXAMPLE CONFIG"} \
+      ${escapeShellArg "# BEGIN GENERATED SETTINGS EXAMPLE CONFIG -- nix run .#regen -- DO NOT EDIT"} \
+      ${escapeShellArg "# END GENERATED SETTINGS EXAMPLE CONFIG"} \
       ${escapeShellArg settingsExampleConfigDoc}
     write_between agent/entrypoint.sh \
       ${escapeShellArg "  # BEGIN GENERATED SKILL-BAKED PROBES -- nix run .#regen -- DO NOT EDIT"} \
