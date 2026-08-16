@@ -1834,3 +1834,65 @@ func TestPrintHelpFull_ShowsContinuousFlag(t *testing.T) {
 		t.Error("full help output's --continuous doc missing a pointer to --continuous-dispatch")
 	}
 }
+
+// TestJoinOxford exercises joinOxford's "a, b, or c" grammar (issue #2520
+// slice 2): empty, singleton, pair, and 3+ element inputs.
+func TestJoinOxford(t *testing.T) {
+	tests := []struct {
+		name string
+		in   []string
+		want string
+	}{
+		{"empty", nil, ""},
+		{"one", []string{"a"}, "a"},
+		{"two", []string{"a", "b"}, "a or b"},
+		{"three", []string{"a", "b", "c"}, "a, b, or c"},
+		{"four", []string{"immediate", "auto", "manual", "off"}, "immediate, auto, manual, or off"},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			if got := joinOxford(tt.in); got != tt.want {
+				t.Errorf("joinOxford(%v) = %q, want %q", tt.in, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestValidateChoice exercises the generic choice-knob guard (issue #2520
+// slice 2): a valid value on a known choice knob is a no-op, an invalid
+// value names the flag, the bad value, and every valid choice, and an
+// unknown/non-choice env is always a no-op.
+func TestValidateChoice(t *testing.T) {
+	t.Run("valid value is a no-op", func(t *testing.T) {
+		if err := validateChoice("MERGE_MODE", "auto"); err != nil {
+			t.Errorf("validateChoice(MERGE_MODE, auto) = %v, want nil", err)
+		}
+	})
+
+	t.Run("invalid value names flag, value, and choices", func(t *testing.T) {
+		err := validateChoice("MERGE_MODE", "bogus")
+		if err == nil {
+			t.Fatal("validateChoice(MERGE_MODE, bogus) = nil, want error")
+		}
+		msg := err.Error()
+		for _, want := range []string{"MERGE_MODE", "bogus", "immediate", "auto", "manual"} {
+			if !strings.Contains(msg, want) {
+				t.Errorf("error %q missing %q", msg, want)
+			}
+		}
+	})
+
+	t.Run("unknown env is a no-op", func(t *testing.T) {
+		if err := validateChoice("NOT_A_REAL_ENV", "whatever"); err != nil {
+			t.Errorf("validateChoice(NOT_A_REAL_ENV, whatever) = %v, want nil", err)
+		}
+	})
+
+	t.Run("non-choice env is a no-op", func(t *testing.T) {
+		// MODEL has no declared choices, so any value is accepted.
+		if err := validateChoice("MODEL", "whatever"); err != nil {
+			t.Errorf("validateChoice(MODEL, whatever) = %v, want nil", err)
+		}
+	})
+}
