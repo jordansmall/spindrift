@@ -381,23 +381,37 @@ func resolveTrackerAndForgeSignals(codeForge, issueTracker string) (read, write,
 
 // resolveAgentPresenceSignals returns the roster/orchestration-derived gate
 // signals (FILER_ENABLED, WORKER_PROVISIONED, REVIEW_LOOP_INLINE,
-// REVIEW_LOOP_ORCHESTRATOR) for this run. Unlike resolveTrackerAndForgeSignals,
-// there's no independently-tracked live value to compare against the
-// document: filerModel/workerModel/orchestratorEnabled are boxEnvOnly (see
-// lib/env-schema.nix) — the launcher's own config struct never parses them
-// at all, so there is no override-mismatch scenario to guard against, only
-// an absent/partial document. When all four artifact keys are present,
-// trust them; otherwise fall back to the resolved schema defaults
-// (schemaDefault, which still reads WORKER_MODEL/FILER_MODEL/
-// ORCHESTRATOR_ENABLED from loadedDoc.Settings when a document is loaded,
-// since lib/mkHarness.nix's documentSettings renders every flakeOption key
-// regardless of boxEnvOnly) instead of silently reading false for all
-// four -- WorkerProvisioned in particular defaults false under the old
-// behavior even though workerModel's own schema default is non-empty (the
-// worker is provisioned by default), and defaulting both review-loop bools
-// false violates their exactly-one-true invariant (issue #2533 review).
+// REVIEW_LOOP_ORCHESTRATOR) for this run, mirroring
+// resolveTrackerAndForgeSignals's trust-then-fallback shape (issue #2527)
+// for the same reason: filerModel/workerModel/orchestratorEnabled are
+// boxEnvOnly (lib/env-schema.nix) -- the launcher's own config struct never
+// parses them -- but boxEnvOnly is not override-proof. orchestratorEnabled
+// is still boxEnv=true, so buildBoxEnv/resolveBoxEnvVar (dispatch.go)
+// forward whatever ORCHESTRATOR_ENABLED resolves to in the *ambient*
+// environment at dispatch time, independent of what was baked into the
+// document at image-build time; a dispatch-time override that disagrees
+// with the baked document would otherwise still read the document's stale
+// REVIEW_LOOP_INLINE/REVIEW_LOOP_ORCHESTRATOR, producing a Box whose real
+// $ORCHESTRATOR (entrypoint.sh, sourced from this same ambient
+// ORCHESTRATOR_ENABLED) disagrees with the rendered review-loop section --
+// exactly the divergence 4d36a298 fixed for the tracker axis (issue #2533
+// review). Compare each live value (getenvSchema, ambient-env-first) against
+// what the document baked in (loadedDoc.Settings) and trust the document's
+// artifacts only when every one matches; otherwise fall back to the live
+// values directly instead of schemaDefault's document-first read, so an
+// override is honored on both the trust check and the fallback consistently.
+// WorkerProvisioned in particular defaults false under the old behavior even
+// though workerModel's own schema default is non-empty (the worker is
+// provisioned by default), and defaulting both review-loop bools false
+// violates their exactly-one-true invariant (issue #2533 review).
 func resolveAgentPresenceSignals() (filerEnabled, workerProvisioned, reviewLoopInline, reviewLoopOrchestrator bool) {
-	if loadedDoc != nil {
+	filerModel := getenvSchema("FILER_MODEL")
+	workerModel := getenvSchema("WORKER_MODEL")
+	orchestratorEnabled := getenvSchema("ORCHESTRATOR_ENABLED")
+	if loadedDoc != nil &&
+		filerModel == loadedDoc.Settings["FILER_MODEL"] &&
+		workerModel == loadedDoc.Settings["WORKER_MODEL"] &&
+		orchestratorEnabled == loadedDoc.Settings["ORCHESTRATOR_ENABLED"] {
 		_, filerOK := loadedDoc.Artifacts["FILER_ENABLED"]
 		_, workerOK := loadedDoc.Artifacts["WORKER_PROVISIONED"]
 		_, inlineOK := loadedDoc.Artifacts["REVIEW_LOOP_INLINE"]
@@ -409,9 +423,15 @@ func resolveAgentPresenceSignals() (filerEnabled, workerProvisioned, reviewLoopI
 				docArtifact("REVIEW_LOOP_ORCHESTRATOR") == "true"
 		}
 	}
-	orchestratorOn := schemaDefault("ORCHESTRATOR_ENABLED") == "true"
-	return schemaDefault("FILER_MODEL") != "",
-		schemaDefault("WORKER_MODEL") != "",
+	// A bool-kind schema knob's live value is the ambient-env/flag convention
+	// ("1" or "", set by parseFlags's byBool handling and Nix's own
+	// toString-of-bool documentSettings rendering) -- never the literal
+	// string "true" the Artifacts-section docArtifact reads above compare
+	// against (preambles.nix's runArtifacts renders those explicitly as
+	// "true"/"false", a distinct convention).
+	orchestratorOn := orchestratorEnabled != ""
+	return filerModel != "",
+		workerModel != "",
 		!orchestratorOn,
 		orchestratorOn
 }

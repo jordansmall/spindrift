@@ -1471,6 +1471,13 @@ func TestResolveTrackerAndForgeSignals_PartialArtifactKeysFallsBack(t *testing.T
 func TestResolveAgentPresenceSignals_NoDocumentFallsBackToSchemaDefaults(t *testing.T) {
 	t.Cleanup(func() { loadedDoc = nil })
 	loadedDoc = nil
+	// Isolate from whatever this test process's own ambient environment
+	// happens to carry (e.g. a dispatched Box's own ORCHESTRATOR_ENABLED),
+	// so the schema-default fallback this test pins is deterministic
+	// regardless of host.
+	t.Setenv("FILER_MODEL", "")
+	t.Setenv("WORKER_MODEL", "")
+	t.Setenv("ORCHESTRATOR_ENABLED", "")
 
 	filerEnabled, workerProvisioned, reviewLoopInline, reviewLoopOrchestrator := resolveAgentPresenceSignals()
 	if filerEnabled {
@@ -1488,13 +1495,19 @@ func TestResolveAgentPresenceSignals_NoDocumentFallsBackToSchemaDefaults(t *test
 }
 
 // TestResolveAgentPresenceSignals_MatchingDocumentTrustsForwardedArtifact
-// verifies that when all four artifact keys are present, the forwarded
-// values are trusted directly -- asserted against values the schema-default
+// verifies that when all four artifact keys are present and the live
+// FILER_MODEL/WORKER_MODEL/ORCHESTRATOR_ENABLED values match what the
+// document baked into its Settings section, the forwarded artifact values
+// are trusted directly -- asserted against values the schema-default
 // fallback would never produce, so the test can't pass by coincidence.
 func TestResolveAgentPresenceSignals_MatchingDocumentTrustsForwardedArtifact(t *testing.T) {
 	t.Cleanup(func() { loadedDoc = nil })
 	loadedDoc = &inputDocument{
-		Settings: map[string]string{},
+		Settings: map[string]string{
+			"FILER_MODEL":          "",
+			"WORKER_MODEL":         "claude-sonnet-5",
+			"ORCHESTRATOR_ENABLED": "",
+		},
 		Artifacts: map[string]string{
 			"FILER_ENABLED":            "true",
 			"WORKER_PROVISIONED":       "false",
@@ -1502,6 +1515,12 @@ func TestResolveAgentPresenceSignals_MatchingDocumentTrustsForwardedArtifact(t *
 			"REVIEW_LOOP_ORCHESTRATOR": "true",
 		},
 	}
+	// Live values must equal what the document baked in for the trust
+	// branch to activate -- pinned explicitly rather than left to whatever
+	// this test process's own ambient environment happens to carry.
+	t.Setenv("FILER_MODEL", "")
+	t.Setenv("WORKER_MODEL", "claude-sonnet-5")
+	t.Setenv("ORCHESTRATOR_ENABLED", "")
 
 	filerEnabled, workerProvisioned, reviewLoopInline, reviewLoopOrchestrator := resolveAgentPresenceSignals()
 	if !filerEnabled {
@@ -1518,14 +1537,72 @@ func TestResolveAgentPresenceSignals_MatchingDocumentTrustsForwardedArtifact(t *
 	}
 }
 
+// TestResolveAgentPresenceSignals_OverrideAwayFromBakedDocumentFallsBack
+// verifies that a dispatch-time ORCHESTRATOR_ENABLED override away from what
+// the document baked into its Settings section is NOT trusted -- an
+// orchestrator-off-baked document overridden to orchestrator-on must not
+// keep reading the stale baked REVIEW_LOOP_INLINE=true/
+// REVIEW_LOOP_ORCHESTRATOR=false artifacts (issue #2533 review): unlike
+// FILER_MODEL/WORKER_MODEL, ORCHESTRATOR_ENABLED is boxEnv=true
+// (lib/env-schema.nix), so buildBoxEnv/resolveBoxEnvVar forward whatever it
+// resolves to in the ambient environment at dispatch time into the Box
+// regardless of what was baked into the document at image-build time --
+// trusting the stale artifact here would hand the Box off to the
+// orchestrator ($ORCHESTRATOR, sourced from that same ambient
+// ORCHESTRATOR_ENABLED) while still rendering the inline review-loop
+// section.
+func TestResolveAgentPresenceSignals_OverrideAwayFromBakedDocumentFallsBack(t *testing.T) {
+	t.Cleanup(func() { loadedDoc = nil })
+	loadedDoc = &inputDocument{
+		Settings: map[string]string{
+			"FILER_MODEL":          "",
+			"WORKER_MODEL":         "claude-sonnet-5",
+			"ORCHESTRATOR_ENABLED": "",
+		},
+		Artifacts: map[string]string{
+			"FILER_ENABLED":            "false",
+			"WORKER_PROVISIONED":       "true",
+			"REVIEW_LOOP_INLINE":       "true",
+			"REVIEW_LOOP_ORCHESTRATOR": "false",
+		},
+	}
+	// FILER_MODEL/WORKER_MODEL stay matched to the baked document -- only
+	// ORCHESTRATOR_ENABLED is overridden, isolating the divergence this
+	// test exercises. "1" is the bool-kind schema knob's live-value
+	// convention (parseFlags's byBool handling / Nix's toString-of-bool),
+	// not the literal string "true".
+	t.Setenv("FILER_MODEL", "")
+	t.Setenv("WORKER_MODEL", "claude-sonnet-5")
+	t.Setenv("ORCHESTRATOR_ENABLED", "1")
+
+	filerEnabled, workerProvisioned, reviewLoopInline, reviewLoopOrchestrator := resolveAgentPresenceSignals()
+	if filerEnabled {
+		t.Errorf("filerEnabled = true, want false (recomputed from live FILER_MODEL, ignores stale baked artifact)")
+	}
+	if !workerProvisioned {
+		t.Errorf("workerProvisioned = false, want true (recomputed from live WORKER_MODEL, ignores stale baked artifact)")
+	}
+	if reviewLoopInline {
+		t.Errorf("reviewLoopInline = true, want false (override to orchestrator-on ignores stale baked REVIEW_LOOP_INLINE=true)")
+	}
+	if !reviewLoopOrchestrator {
+		t.Errorf("reviewLoopOrchestrator = false, want true (override to orchestrator-on ignores stale baked REVIEW_LOOP_ORCHESTRATOR=false)")
+	}
+}
+
 // TestResolveAgentPresenceSignals_PartialArtifactKeysFallsBack verifies
-// that when only some of the four artifact keys are present (e.g. 3 of 4),
+// that when the live values match the document's baked Settings but only
+// some of the four artifact keys are present (e.g. 3 of 4),
 // resolveAgentPresenceSignals falls back to schema defaults for all four,
 // not just the missing one.
 func TestResolveAgentPresenceSignals_PartialArtifactKeysFallsBack(t *testing.T) {
 	t.Cleanup(func() { loadedDoc = nil })
 	loadedDoc = &inputDocument{
-		Settings: map[string]string{},
+		Settings: map[string]string{
+			"FILER_MODEL":          "",
+			"WORKER_MODEL":         "claude-sonnet-5",
+			"ORCHESTRATOR_ENABLED": "",
+		},
 		Artifacts: map[string]string{
 			"FILER_ENABLED":      "true",
 			"WORKER_PROVISIONED": "false",
@@ -1533,6 +1610,12 @@ func TestResolveAgentPresenceSignals_PartialArtifactKeysFallsBack(t *testing.T) 
 			// REVIEW_LOOP_ORCHESTRATOR deliberately absent -- 3 of 4 keys present.
 		},
 	}
+	// Live values pinned to match the baked document, so only the partial
+	// artifact keys drive the fallback below, not an incidental live/baked
+	// mismatch this test isn't exercising.
+	t.Setenv("FILER_MODEL", "")
+	t.Setenv("WORKER_MODEL", "claude-sonnet-5")
+	t.Setenv("ORCHESTRATOR_ENABLED", "")
 
 	filerEnabled, workerProvisioned, reviewLoopInline, reviewLoopOrchestrator := resolveAgentPresenceSignals()
 	if filerEnabled {
@@ -2413,6 +2496,13 @@ func TestDispatchCompletionBanner_Local(t *testing.T) {
 func TestDispatchConfig_NoDocument_UsesGuardedResolvers(t *testing.T) {
 	t.Cleanup(func() { loadedDoc = nil })
 	loadedDoc = nil
+	// Isolate from whatever this test process's own ambient environment
+	// happens to carry (e.g. a dispatched Box's own ORCHESTRATOR_ENABLED),
+	// so the schema-default fallback this test pins is deterministic
+	// regardless of host.
+	t.Setenv("FILER_MODEL", "")
+	t.Setenv("WORKER_MODEL", "")
+	t.Setenv("ORCHESTRATOR_ENABLED", "")
 
 	cf := forge.NewFake()
 	it := forge.NewFake()
