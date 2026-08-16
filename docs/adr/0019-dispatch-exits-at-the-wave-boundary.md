@@ -1,5 +1,12 @@
 # Dispatch exits at the wave boundary; the launcher invocation is the image-freshness boundary
 
+> **Extended by [ADR 0043](0043-box-artifact-freshness-hot-swaps-the-launcher-restarts.md)
+> for the bwrap runtime.** Nothing below becomes false: the invocation stays
+> the freshness boundary for the OCI image and for the launcher itself under
+> every runtime. ADR 0043 adds a second artifact — the bwrap agent closure —
+> whose refresh does not require a process restart, and splits the verdict so
+> only launcher-affecting changes still drain and exit.
+
 The agent image reference is evaluated once, at flake-eval time: `nix run`
 bakes `IMAGE_TAG="spindrift:<store-hash>"` (and `IMAGE_DRV`) into the
 launcher's environment before the Go binary starts. The launcher never
