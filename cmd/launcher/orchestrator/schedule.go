@@ -50,12 +50,19 @@ import (
 // simple, deterministic behavior (it need not find every possible
 // parallelization opportunity, only ones that are safe and simple to
 // reason about).
+//
+// A slice named by dependencyOrder's forceSolo (placed via its
+// cycle-fallback branch, so its DependsOn floor can't be trusted) skips the
+// DependsOn-floor/canJoin logic entirely: it always opens a brand-new batch
+// containing only itself, and that batch is marked as holding an
+// undeclared-lease slice regardless of the slice's actual FileLeases, so
+// nothing else may ever join it either.
 func scheduleSlices(slices []ManifestSlice) [][]ManifestSlice {
 	if len(slices) == 0 {
 		return nil
 	}
 
-	ordered := dependencyOrder(slices)
+	ordered, forceSolo := dependencyOrder(slices)
 
 	var batches [][]ManifestSlice
 	batchIndexOf := make(map[string]int, len(ordered))
@@ -67,6 +74,15 @@ func scheduleSlices(slices []ManifestSlice) [][]ManifestSlice {
 	batchHasUndeclared := make([]bool, 0, len(ordered))
 
 	for _, s := range ordered {
+		if forceSolo[s.Name] {
+			idx := len(batches)
+			batches = append(batches, []ManifestSlice{s})
+			batchLeases = append(batchLeases, claimLeases(s, nil))
+			batchHasUndeclared = append(batchHasUndeclared, true)
+			batchIndexOf[s.Name] = idx
+			continue
+		}
+
 		earliest := 0
 		for _, dep := range s.DependsOn {
 			if depBatch, ok := batchIndexOf[dep]; ok && depBatch+1 > earliest {
@@ -114,14 +130,21 @@ func scheduleSlices(slices []ManifestSlice) [][]ManifestSlice {
 // validate against cycles either, so this defensively falls back to
 // appending whatever remains in original order rather than looping forever
 // (out of scope for #2060 beyond not hanging).
-func dependencyOrder(slices []ManifestSlice) []ManifestSlice {
+//
+// The second return value, forceSolo, names every slice appended by that
+// fallback branch -- its DependsOn floor can't be trusted (the dependency
+// it names may not have been placed, or even processed, yet), so
+// scheduleSlices must never let it join a batch by lease rules alone, and
+// must never let anything else join its batch either.
+func dependencyOrder(slices []ManifestSlice) (ordered []ManifestSlice, forceSolo map[string]bool) {
 	present := make(map[string]bool, len(slices))
 	for _, s := range slices {
 		present[s.Name] = true
 	}
 
 	placed := make(map[string]bool, len(slices))
-	ordered := make([]ManifestSlice, 0, len(slices))
+	ordered = make([]ManifestSlice, 0, len(slices))
+	forceSolo = make(map[string]bool)
 
 	for len(ordered) < len(slices) {
 		progressed := false
@@ -146,17 +169,20 @@ func dependencyOrder(slices []ManifestSlice) []ManifestSlice {
 		if !progressed {
 			// Dependency cycle among the remaining slices -- append what's
 			// left in original order and stop rather than looping forever.
+			// Every slice placed here is unsafe to co-batch by DependsOn
+			// floor alone, so mark it forceSolo.
 			for _, s := range slices {
 				if !placed[s.Name] {
 					ordered = append(ordered, s)
 					placed[s.Name] = true
+					forceSolo[s.Name] = true
 				}
 			}
 			break
 		}
 	}
 
-	return ordered
+	return ordered, forceSolo
 }
 
 // canJoin reports whether slice s may join a batch already holding
@@ -210,7 +236,7 @@ func normalizeLease(lease string) string {
 // disjoint. Beyond the straightforward cases -- equal, or one a path-prefix
 // of the other at a "/" boundary (e.g. "cmd/x" overlaps
 // "cmd/x/dispatch.go", since the latter names a file inside the directory
-// the former names) -- three shapes are treated as unprovable and therefore
+// the former names) -- four shapes are treated as unprovable and therefore
 // overlapping, always erring toward sequencing rather than risking an
 // unsafe parallel batch:
 //
@@ -222,11 +248,19 @@ func normalizeLease(lease string) string {
 //   - One lease is absolute (starts with "/") and the other is relative --
 //     this package has no repoRoot to resolve the relative one against, so
 //     there's no reliable way to tell whether they name the same file.
+//   - Either lease contains a glob metacharacter ("*", "?", "[") -- this
+//     function only ever compares leases as plain strings (equality or
+//     path-prefix), never as an actual glob match against candidate paths,
+//     so a glob lease can never be proven disjoint from anything by this
+//     logic.
 func leasesOverlap(a, b string) bool {
 	if isWholeTreeLease(a) || isWholeTreeLease(b) {
 		return true
 	}
 	if escapesRoot(a) || escapesRoot(b) {
+		return true
+	}
+	if containsGlobMeta(a) || containsGlobMeta(b) {
 		return true
 	}
 	aAbs, bAbs := isAbsoluteLease(a), isAbsoluteLease(b)
@@ -260,4 +294,12 @@ func escapesRoot(lease string) bool {
 // isAbsoluteLease reports whether a normalized lease is absolute.
 func isAbsoluteLease(lease string) bool {
 	return strings.HasPrefix(lease, "/")
+}
+
+// containsGlobMeta reports whether lease contains a glob metacharacter
+// ("*", "?", "["). leasesOverlap only ever compares leases as plain
+// strings, never as an actual glob match, so any lease containing one of
+// these can't be structurally compared and must be treated as unprovable.
+func containsGlobMeta(lease string) bool {
+	return strings.ContainsAny(lease, "*?[")
 }
