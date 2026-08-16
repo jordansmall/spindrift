@@ -28,7 +28,7 @@ setup() {
   [ ! -e "$(dirname "$WORK_DIR")/readonly-gh-shim" ]
 }
 
-@test "read-only Box's gh shim rejects gh pr create" {
+@test "read-only Box's gh shim rejects gh pr create, naming the PR-intent relay" {
   unset BOX_WRITE_ENABLED # issue #2465: read-only Box
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
@@ -44,11 +44,13 @@ setup() {
   # The rejection's wording lives in lib/prompt-contract.nix's
   # forbiddenMarkers registry (issue #2509), rendered verbatim into the
   # installed shim by driver-exec readonly-guards -- assert the stable "gh
-  # pr create" substring the row's own message always names, not its full
-  # prose, which the registry is free to reword.
+  # pr create" substring the row's own message always names, plus the
+  # relay-naming text (SPINDRIFT_PR_INTENT) that distinguishes this row from
+  # a bare boilerplate rejection.
   PATH="$shim_dir:$PATH" run gh pr create --title "x" --body "y"
   [ "$status" -ne 0 ]
   [[ "$output" == *"gh pr create"* ]]
+  [[ "$output" == *"SPINDRIFT_PR_INTENT"* ]]
 }
 
 @test "read-only Box's gh shim rejects gh pr ready" {
@@ -63,6 +65,7 @@ setup() {
   PATH="$shim_dir:$PATH" run gh pr ready 1
   [ "$status" -ne 0 ]
   [[ "$output" == *"gh pr ready"* ]]
+  [[ "$output" == *"launcher"* ]]
 }
 
 @test "read-only Box's gh shim rejects gh pr merge" {
@@ -77,9 +80,10 @@ setup() {
   PATH="$shim_dir:$PATH" run gh pr merge 1
   [ "$status" -ne 0 ]
   [[ "$output" == *"gh pr merge"* ]]
+  [[ "$output" == *"launcher"* ]]
 }
 
-@test "read-only Box's gh shim rejects gh issue comment" {
+@test "read-only Box's gh shim rejects gh issue comment, naming the note= relay" {
   unset BOX_WRITE_ENABLED # issue #2465: read-only Box
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
@@ -91,9 +95,10 @@ setup() {
   PATH="$shim_dir:$PATH" run gh issue comment 1 --body "hi"
   [ "$status" -ne 0 ]
   [[ "$output" == *"gh issue comment"* ]]
+  [[ "$output" == *"note="* ]]
 }
 
-@test "read-only Box's gh shim rejects gh issue create" {
+@test "read-only Box's gh shim rejects gh issue create, naming the issue-intent relay" {
   unset BOX_WRITE_ENABLED # issue #2465: read-only Box
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
@@ -105,6 +110,7 @@ setup() {
   PATH="$shim_dir:$PATH" run gh issue create --title "x" --body "y"
   [ "$status" -ne 0 ]
   [[ "$output" == *"gh issue create"* ]]
+  [[ "$output" == *"SPINDRIFT_ISSUE_INTENT"* ]]
 }
 
 @test "read-only Box's gh shim rejects gh api with a mutating method (-X POST)" {
