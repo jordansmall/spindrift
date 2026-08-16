@@ -179,6 +179,12 @@ let
   subcommandRegistry = import ./subcommands.nix;
   subcommands = subcommandRegistry;
 
+  # The backend descriptor registry (issue #2521): one row per ISSUE_TRACKER/
+  # CODE_FORGE backend, carrying capability bits like relayCapable/
+  # hostPostingCapable consumed by readOnlyCapabilityOk below. Imported the
+  # same way lib/env-schema.nix does (no `lib` in scope needed).
+  backends = import ./backends/default.nix;
+
   # Section taxonomy and man-page renderer, shared with flakeModule.nix and the
   # nix/checks/schema-drift.nix guards so none of them can drift from each
   # other (issue #461).
@@ -1221,6 +1227,33 @@ let
   # beyond the cap queue for a free semaphore slot) -- see
   # cmd/launcher/orchestrator/workers.go's LaunchWorkers/runBounded doc
   # comments for where that trade-off is recorded.
+
+  # Eval-time capability-coherence assert (issue #2526, slice 2 of 3):
+  # BOX_FORGE_AND_ISSUE_ACCESS=read-only denies the Box a write token on both
+  # axes, so every write it would otherwise make must instead be host-
+  # mediated. The selected CODE_FORGE row must be relayCapable (bundle-relay,
+  # and draft-PR-create/commit-subjects when PR-shaped) and the selected
+  # ISSUE_TRACKER row must be hostPostingCapable (host-posted comments and
+  # issue-filing) -- lib/backends/default.nix's `relayCapable` /
+  # `hostPostingCapable` bits, the static single source of truth for both
+  # facts (mirrors cmd/launcher/main.go's checkReadOnlyCapabilityGate, which
+  # today re-derives the same facts at runtime via live Go interface
+  # assertions on the constructed forge.CodeForge/forge.IssueTracker; that
+  # gate is slice 3's concern to shrink to an override-guard once this static
+  # check subsumes its coherence half). read-write (the default) is a fast
+  # no-op -- it never inspects the selected backends, mirroring how the Go
+  # gate short-circuits on c.boxForgeAndIssueAccess != "read-only".
+  selectedCodeForgeRow = lib.findFirst (b: b.name == mergedDefaults.codeForge) null backends;
+  selectedIssueTrackerRow = lib.findFirst (b: b.name == mergedDefaults.issueTracker) null backends;
+  readOnlyCapabilityOk =
+    if mergedDefaults.boxForgeAndIssueAccess != "read-only" then
+      true
+    else if !(selectedCodeForgeRow.relayCapable or false) then
+      throw "mkHarness: BOX_FORGE_AND_ISSUE_ACCESS=read-only: the selected CODE_FORGE=${mergedDefaults.codeForge} does not implement bundle-relay (forge.BundleRelay) for the Box's finished branch hand-off"
+    else if !(selectedIssueTrackerRow.hostPostingCapable or false) then
+      throw "mkHarness: BOX_FORGE_AND_ISSUE_ACCESS=read-only: the selected ISSUE_TRACKER=${mergedDefaults.issueTracker} does not implement host-posted comments and issue-filing (forge.HostPostedCommenter / forge.HostPostedIssueFiler)"
+    else
+      true;
 in
 if unknownDefaultKeys != [ ] then
   throw "mkHarness: unknown defaults key(s): ${lib.concatStringsSep ", " unknownDefaultKeys}; valid keys: ${lib.concatStringsSep ", " (lib.attrNames flakeOptionEntries)}"
@@ -1229,6 +1262,7 @@ else
   assert forbiddenMarkerCheckOk;
   assert maxParallelWorkersCoherenceOk;
   assert choicesCheckOk;
+  assert readOnlyCapabilityOk;
   lib.warnIf (legacyKnobsSet != [ ]) deprecationMsg {
     inherit
       image

@@ -32,6 +32,7 @@ let
     // (import ./prompt-contract.nix common)
     // (import ./prompt-contract-parity.nix common)
     // (import ./research-verdicts.nix common)
+    // (import ./read-only-capability.nix common)
     // (import ./prompts.nix common)
     // (import ./schema-drift.nix common)
     // (import ./dispatch-labels.nix common)
