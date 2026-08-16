@@ -351,13 +351,17 @@ in
 
   # issue #2499: every row's kind must be a known value -- structural
   # coverage only (does the field hold a value someone typo'd), not
-  # behavioral: this Nix check has no way to invoke promptassembly.Validate
-  # and confirm it actually branches on kind. That behavior -- a
-  # "gh-api-mutation" row's marker is display-only and never scanned as a
-  # forbidden substring, unlike a "substring" row -- is pinned Go-side by
-  # cmd/launcher/internal/promptassembly/validate_test.go's
-  # TestValidateForbiddenMarkerGhAPIMutationKindNeverScannedAsSubstring and
-  # TestValidateForbiddenMarkerFjRowStillRejectsImperative.
+  # behavioral. promptassembly.Validate no longer branches on kind at all
+  # (issue #2513 deleted its forbidden-marker loop); the two places that do
+  # still branch on kind are each pinned separately:
+  #   - lib/prompt-contract.nix's buildTimeForbiddenMarkerViolations filters
+  #     to kind == "substring" rows only -- pinned by this file's sibling
+  #     build-time-forbidden-marker-fragment-gh-api-mutation-kind-not-scanned
+  #     check (nix/checks/prompts.nix).
+  #   - readonlyguards.go's command-shim rendering switches on kindGhAPIMutation
+  #     for its runtime argument scan -- pinned Go-side by
+  #     cmd/launcher/internal/readonlyguards/readonlyguards_test.go's
+  #     TestInstall_GhAPIMutationRejectsMutatingMethod.
   prompt-contract-forbidden-markers-every-row-kind-known-value =
     let
       knownKinds = [
