@@ -76,8 +76,9 @@ type Config struct {
 // Result reports what Install actually installed, for a caller that wants
 // to log or act on it (e.g. prepending ShimDir to PATH).
 type Result struct {
-	// Shims lists the argv0 names Install installed a command shim for, in
-	// sorted order.
+	// Shims lists the argv0 names Install actually installed a command shim
+	// for, in sorted order -- a group whose argv0 has no resolvable real
+	// binary (RealBinary returned an error) is skipped, not included here.
 	Shims []string
 	// HookInstalled reports whether any git-hook row was rendered and
 	// installed under RepoDir/.git/hooks.
@@ -170,6 +171,17 @@ func groupByArgv0(rows []promptassembly.ForbiddenMarkerRow) map[string][]prompta
 // installCommandShims groups rows by argv0, renders one shim script per
 // group, and installs each under shimDir alongside its ".real-<argv0>"
 // file. Returns the installed argv0 names in sorted order.
+//
+// A group whose argv0 has no resolvable real binary (realBinary returns an
+// error -- e.g. exec.LookPath finding nothing on PATH) is skipped rather
+// than treated as fatal: not every Box's image bakes every registry-named
+// binary (fj/forgejo-cli, e.g., is baked only for a forgejo-backend
+// Consumer, lib/image.nix's forgejoBackend knob), and a command absent from
+// this Box's PATH entirely can never be invoked here in the first place, so
+// there is nothing to guard. Hard-failing the whole install over one absent
+// binary would otherwise take down every other row's guard -- including the
+// git-hook guard install_readonly_guards's caller relies on -- along with
+// it.
 func installCommandShims(rows []promptassembly.ForbiddenMarkerRow, shimDir string, realBinary func(string) (string, error), out io.Writer) ([]string, error) {
 	if err := os.MkdirAll(shimDir, 0o755); err != nil {
 		return nil, fmt.Errorf("readonlyguards: mkdir shim dir %s: %w", shimDir, err)
@@ -182,10 +194,12 @@ func installCommandShims(rows []promptassembly.ForbiddenMarkerRow, shimDir strin
 	}
 	sort.Strings(argv0s)
 
+	installed := make([]string, 0, len(argv0s))
 	for _, argv0 := range argv0s {
 		real, err := realBinary(argv0)
 		if err != nil {
-			return nil, fmt.Errorf("readonlyguards: resolve real binary for %q: %w", argv0, err)
+			fmt.Fprintf(out, "readonlyguards: skipping %q command-shim -- not found on PATH: %v\n", argv0, err)
+			continue
 		}
 
 		realFile := filepath.Join(shimDir, ".real-"+argv0)
@@ -200,9 +214,10 @@ func installCommandShims(rows []promptassembly.ForbiddenMarkerRow, shimDir strin
 		}
 
 		fmt.Fprintf(out, "readonlyguards: installed %q command-shim at %s (guarding %d subcommand(s))\n", argv0, shimPath, len(groups[argv0]))
+		installed = append(installed, argv0)
 	}
 
-	return argv0s, nil
+	return installed, nil
 }
 
 // renderShimScript renders one POSIX-sh shim for argv0 guarding every row

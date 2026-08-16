@@ -2,6 +2,7 @@ package readonlyguards
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -360,6 +361,82 @@ func TestInstall_GroupsByArgv0Generically(t *testing.T) {
 	}
 	if _, code := runShim(t, shimDir, "gh", "pr", "list"); code != 0 {
 		t.Errorf("gh pr list: exit code = %d, want 0 (passthrough)", code)
+	}
+}
+
+// TestInstall_CommandShimSkipsMissingBinary proves a group whose argv0 has
+// no resolvable real binary (RealBinary returns an error, e.g. exec.LookPath
+// finding nothing on PATH) is skipped rather than failing Install outright:
+// not every Box's image bakes every registry-named binary (fj/forgejo-cli is
+// baked only for a forgejo-backend Consumer), so a github-backend Box must
+// still install the "gh" shim and the git-hook guard even though "fj" is
+// nowhere on its PATH (issue #2509).
+func TestInstall_CommandShimSkipsMissingBinary(t *testing.T) {
+	realTrue := requireExecutable(t, "true")
+
+	rows := []promptassembly.ForbiddenMarkerRow{
+		{
+			ID:      "forbidden-gh-pr-create",
+			Marker:  "gh pr create",
+			Kind:    "substring",
+			Enforce: "command-shim",
+			Message: "blocked: gh pr create",
+		},
+		{
+			ID:      "forbidden-fj-pr-create",
+			Marker:  "fj pr create",
+			Kind:    "substring",
+			Enforce: "command-shim",
+			Message: "blocked: fj pr create",
+		},
+		{
+			ID:      "forbidden-git-push",
+			Marker:  "git push",
+			Kind:    "substring",
+			Enforce: "git-hook",
+			Message: "blocked: git push",
+		},
+	}
+
+	shimDir := t.TempDir()
+	repoDir := t.TempDir()
+	cfg := Config{
+		RepoDir: repoDir,
+		ShimDir: shimDir,
+		RealBinary: func(argv0 string) (string, error) {
+			if argv0 == "fj" {
+				return "", fmt.Errorf("exec: %q: executable file not found in $PATH", argv0)
+			}
+			return realTrue, nil
+		},
+	}
+
+	var out bytes.Buffer
+	result, err := Install(rows, cfg, &out)
+	if err != nil {
+		t.Fatalf("Install: %v, want nil (a missing binary must not be fatal)", err)
+	}
+
+	wantShims := []string{"gh"}
+	if len(result.Shims) != len(wantShims) || result.Shims[0] != wantShims[0] {
+		t.Fatalf("result.Shims = %v, want %v (fj skipped, gh still installed)", result.Shims, wantShims)
+	}
+	if !result.HookInstalled {
+		t.Error("result.HookInstalled = false, want true (the git-hook guard must still install)")
+	}
+
+	if _, err := os.Stat(filepath.Join(shimDir, "gh")); err != nil {
+		t.Errorf("gh shim not installed: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(shimDir, "fj")); err == nil {
+		t.Error("fj shim installed, want it skipped (no real fj binary)")
+	}
+	if _, err := os.Stat(filepath.Join(repoDir, ".git", "hooks", "pre-push")); err != nil {
+		t.Errorf("pre-push hook not installed: %v", err)
+	}
+
+	if !bytes.Contains(out.Bytes(), []byte(`skipping "fj"`)) {
+		t.Errorf("Install log = %q, want a note that the fj shim was skipped", out.String())
 	}
 }
 
