@@ -267,3 +267,47 @@ setup() {
   [ "$status" -eq 0 ]
   ! grep -q -- '--max-parallel-workers' "$DRIVER_LOG"
 }
+
+# The 7 --argv-* flags run_driver_in_env threads from the nix-rendered
+# DRIVER_ARGV_* preamble vars (issue #2534) unconditionally, on both the
+# direct driver-exec path and the orchestrator hand-off -- unlike every flag
+# above them, they aren't gated on $_driver_invoker or an unset/empty
+# override, since both binaries declare the same --argv-* flags and always
+# need a driver's argv shape to assemble its invocation. This suite's DRIVER
+# defaults to "claude" (setup_entrypoint_env), whose registry entry
+# (lib/drivers/claude.nix) bakes promptStyle=flag, promptFlag=-p,
+# modelFlag=--model, agentsFlag=--agents, effortFlag=--effort into
+# DRIVER_PREAMBLE_FILE -- asserted here via the orchestrator hand-off path so
+# each flag's real rendered value is pinned the same way --driver-bin claude
+# is pinned above, without needing driver-exec's own flag parsing (which the
+# fake orchestrator does not model) to forward it any further.
+@test "orchestrator path forwards claude's argv shape as --argv-* flags" {
+  export ORCHESTRATOR_ENABLED=1
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -q -- '--argv-prompt-style flag' "$ORCHESTRATOR_LOG"
+  grep -q -- '--argv-prompt-flag -p' "$ORCHESTRATOR_LOG"
+  grep -q -- '--argv-model-flag --model' "$ORCHESTRATOR_LOG"
+  grep -q -- '--argv-agents-flag --agents' "$ORCHESTRATOR_LOG"
+  grep -q -- '--argv-effort-flag --effort' "$ORCHESTRATOR_LOG"
+  local argv_order
+  argv_order="$(grep -oE -- '--argv-order [^ ]+' "$ORCHESTRATOR_LOG" | awk '{print $2}')"
+  [ -n "$argv_order" ]
+}
+
+# DRIVER_ARGV_MODEL_OMIT_EMPTY is a bare-boolean gate (agent/entrypoint.sh
+# ~lines 904-910): present only when the selected Driver's argvShape sets
+# modelOmitEmpty = true. claude's argvShape (lib/drivers/claude.nix) sets it
+# false, so this suite's DRIVER_PREAMBLE_FILE never defines
+# DRIVER_ARGV_MODEL_OMIT_EMPTY -- the bare --argv-model-omit-empty flag must
+# stay entirely absent from the invocation, proving the gate's unset side
+# (the true side -- opencode's argvShape.modelOmitEmpty -- is outside this
+# DRIVER=claude suite's scope; no other bats suite in this repo currently
+# threads DRIVER_ARGV_MODEL_OMIT_EMPTY through run_driver_in_env either, so
+# that side of the gate has no bats coverage anywhere).
+@test "orchestrator path omits --argv-model-omit-empty for claude (modelOmitEmpty=false)" {
+  export ORCHESTRATOR_ENABLED=1
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  ! grep -q -- '--argv-model-omit-empty' "$ORCHESTRATOR_LOG"
+}
