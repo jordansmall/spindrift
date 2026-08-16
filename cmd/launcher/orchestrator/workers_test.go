@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -167,6 +168,132 @@ func TestWaitForSentinelReturnsTrueImmediatelyWhenFileAlreadyExists(t *testing.T
 	}
 	if elapsed >= 200*time.Millisecond {
 		t.Errorf("waitForSentinel() took %v, want under the 200ms pollInterval", elapsed)
+	}
+}
+
+// TestRunBoundedNeverExceedsMaxParallel proves the semaphore-bounded fan-out
+// LaunchWorkers uses to cap concurrent worker dispatch (issue #2495) never
+// runs more than maxParallel tasks at the same instant: each task increments
+// a shared atomic counter, holds briefly (long enough for other goroutines
+// to have a chance to run too), records the running count into a shared
+// running-peak tracker, then decrements -- with more tasks than the cap, the
+// observed peak must never exceed it. Run with -race: the counter itself is
+// atomic, but the point of the test is proving runBounded's own admission
+// control, not just that access to the counter is safe.
+func TestRunBoundedNeverExceedsMaxParallel(t *testing.T) {
+	const maxParallel = 3
+	const numTasks = 12
+
+	var running int32
+	var peak int32
+	var mu sync.Mutex
+
+	tasks := make([]func(), numTasks)
+	for i := 0; i < numTasks; i++ {
+		tasks[i] = func() {
+			n := atomic.AddInt32(&running, 1)
+			mu.Lock()
+			if n > peak {
+				peak = n
+			}
+			mu.Unlock()
+			time.Sleep(20 * time.Millisecond)
+			atomic.AddInt32(&running, -1)
+		}
+	}
+
+	start := time.Now()
+	runBounded(maxParallel, tasks)
+	elapsed := time.Since(start)
+
+	if peak > maxParallel {
+		t.Errorf("peak concurrent tasks = %d, want <= %d (maxParallel)", peak, maxParallel)
+	}
+	if peak < maxParallel {
+		t.Errorf("peak concurrent tasks = %d, want exactly %d -- test never actually saturated the cap", peak, maxParallel)
+	}
+
+	// numTasks/maxParallel batches of 20ms each, minus one -- a loose lower
+	// bound proving the tasks really were serialized in batches rather than
+	// all launched at once (which would finish in ~20ms regardless of
+	// numTasks).
+	minExpected := time.Duration(numTasks/maxParallel-1) * 20 * time.Millisecond
+	if elapsed < minExpected {
+		t.Errorf("runBounded took %v, want at least %v (proof concurrency was actually capped, not just tracked)", elapsed, minExpected)
+	}
+}
+
+// TestRunBoundedWithFewerTasksThanCapRunsThemAll verifies runBounded still
+// runs every task exactly once (issue #2495 -- LaunchWorkers' own AC2
+// depends on this) when maxParallel exceeds the number of tasks, i.e. the
+// cap never blocks work that could run immediately.
+func TestRunBoundedWithFewerTasksThanCapRunsThemAll(t *testing.T) {
+	const maxParallel = 5
+	const numTasks = 2
+
+	var calls int32
+	tasks := make([]func(), numTasks)
+	for i := 0; i < numTasks; i++ {
+		tasks[i] = func() { atomic.AddInt32(&calls, 1) }
+	}
+
+	runBounded(maxParallel, tasks)
+
+	if got := atomic.LoadInt32(&calls); got != numTasks {
+		t.Errorf("calls = %d, want %d (every task invoked exactly once)", got, numTasks)
+	}
+}
+
+// TestLaunchWorkersZeroMaxParallelFallsBackToDefault verifies
+// WorkerOptions.MaxParallel <= 0 falls back to defaultMaxParallelWorkers
+// (issue #2495) rather than, say, treating zero as "no cap" or blocking
+// forever on an empty semaphore -- a manifest with more slices than the
+// default cap still completes and returns exactly one WorkerResult per
+// slice.
+func TestLaunchWorkersZeroMaxParallelFallsBackToDefault(t *testing.T) {
+	chdirToFreshWorkerRepo(t)
+
+	fakeDir := t.TempDir()
+	callLog := filepath.Join(fakeDir, "calls.log")
+	if err := os.WriteFile(callLog, nil, 0o644); err != nil {
+		t.Fatalf("WriteFile(callLog): %v", err)
+	}
+	body := `: > "$DRIVER_LOG_PATH"
+: > "${DRIVER_LOG_PATH%.log}.done"
+`
+	writeFakeDriverExec(t, fakeDir, callLog, body)
+	t.Setenv("PATH", fakeDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	promptDir := t.TempDir()
+	promptFile := filepath.Join(promptDir, "worker-prompt.txt")
+	if err := os.WriteFile(promptFile, []byte("BASE WORKER PROMPT"), 0o644); err != nil {
+		t.Fatalf("WriteFile(promptFile): %v", err)
+	}
+
+	workDir := t.TempDir()
+	var stdout bytes.Buffer
+	cfg := config{driver: "claude"}
+	manifest := SliceManifest{Slices: []ManifestSlice{
+		{Name: "slice-a", Task: "implement seam a"},
+		{Name: "slice-b", Task: "implement seam b"},
+		{Name: "slice-c", Task: "implement seam c"},
+	}}
+
+	results := LaunchWorkers(cfg, manifest, WorkerOptions{
+		PromptFile:   promptFile,
+		WorkDir:      workDir,
+		Timeout:      2 * time.Second,
+		PollInterval: 5 * time.Millisecond,
+		// MaxParallel deliberately left at its zero value.
+	}, &stdout)
+
+	if len(results) != 3 {
+		t.Fatalf("len(results) = %d, want 3", len(results))
+	}
+	for i, r := range results {
+		if r.Status != WorkerDone {
+			t.Errorf("results[%d] = %+v, want WorkerDone", i, r)
+		}
 	}
 }
 

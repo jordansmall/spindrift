@@ -58,6 +58,14 @@ type WorkerResult struct {
 // worker join is never allowed to wait forever.
 const defaultWorkerTimeout = 20 * time.Minute
 
+// defaultMaxParallelWorkers bounds how many manifest-dispatched workers
+// LaunchWorkers runs concurrently when no explicit cap is configured --
+// matches the maxParallelWorkers env-schema default (MAX_PARALLEL_WORKERS,
+// issue #2495): enough to capture most of the wall-clock win on
+// small-slice-count issues while staying clear of the Box's memory-kill
+// regime.
+const defaultMaxParallelWorkers = 2
+
 // seedWorkerPrompt composes a fresh prompt file for one worker: promptFile's
 // own content, with a "## Parallel worker dispatch" section prepended
 // naming slice.Name, stating slice.Task as the worker's own scoped
@@ -195,6 +203,9 @@ type WorkerOptions struct {
 	// PollInterval is how often LaunchWorkers checks each worker's
 	// sentinel; <= 0 falls back to defaultWorkerPollInterval.
 	PollInterval time.Duration
+	// MaxParallel bounds how many workers LaunchWorkers runs concurrently;
+	// <= 0 falls back to defaultMaxParallelWorkers.
+	MaxParallel int
 }
 
 // LaunchWorkers dispatches one driver-exec subprocess per manifest.Slices
@@ -226,6 +237,10 @@ func LaunchWorkers(cfg config, manifest SliceManifest, opts WorkerOptions, stdou
 	if pollInterval <= 0 {
 		pollInterval = defaultWorkerPollInterval
 	}
+	maxParallel := opts.MaxParallel
+	if maxParallel <= 0 {
+		maxParallel = defaultMaxParallelWorkers
+	}
 
 	var mu sync.Mutex
 
@@ -248,16 +263,37 @@ func LaunchWorkers(cfg config, manifest SliceManifest, opts WorkerOptions, stdou
 	}
 
 	results := make([]WorkerResult, len(manifest.Slices))
-	var wg sync.WaitGroup
+	tasks := make([]func(), len(manifest.Slices))
 	for i, slice := range manifest.Slices {
-		wg.Add(1)
-		go func(i int, slice ManifestSlice) {
-			defer wg.Done()
+		i, slice := i, slice
+		tasks[i] = func() {
 			results[i] = launchOneWorker(cfg, slice, opts.PromptFile, absWorkDir, timeout, pollInterval, stdout, &mu)
-		}(i, slice)
+		}
+	}
+	runBounded(maxParallel, tasks)
+	return results
+}
+
+// runBounded runs every fn in tasks, each on its own goroutine, but never
+// lets more than maxParallel of them run at the same instant (issue #2495:
+// LaunchWorkers previously fanned out every manifest slice's worker
+// goroutine at once, uncapped). Blocks until every task has returned. Every
+// task is invoked exactly once, regardless of maxParallel -- callers (like
+// LaunchWorkers, whose own AC2 promises exactly one WorkerResult per slice)
+// rely on that.
+func runBounded(maxParallel int, tasks []func()) {
+	sem := make(chan struct{}, maxParallel)
+	var wg sync.WaitGroup
+	for _, task := range tasks {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(task func()) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			task()
+		}(task)
 	}
 	wg.Wait()
-	return results
 }
 
 // crashAllSlices reports every slice in manifest as WorkerCrashed with err,

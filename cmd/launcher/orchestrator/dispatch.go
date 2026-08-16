@@ -90,9 +90,10 @@ func dispatchManifestIfPresent(cfg config, state *runstate.RunState, stdout io.W
 	var results []WorkerResult
 	if len(dispatchSlices) > 0 {
 		results = LaunchWorkers(cfg, SliceManifest{Slices: dispatchSlices}, WorkerOptions{
-			PromptFile: cfg.workerPromptFile,
-			WorkDir:    cfg.workerWorkDir,
-			Timeout:    cfg.workerTimeout,
+			PromptFile:  cfg.workerPromptFile,
+			WorkDir:     cfg.workerWorkDir,
+			Timeout:     cfg.workerTimeout,
+			MaxParallel: cfg.maxParallelWorkers,
 		}, stdout)
 	}
 
