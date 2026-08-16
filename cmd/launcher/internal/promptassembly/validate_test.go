@@ -114,6 +114,7 @@ func TestValidateFilerFileRelayWarn(t *testing.T) {
 		BoxWriteEnabled:     false,
 		OrchestratorEnabled: true,
 		AgentsJSONTemplate:  `{"filer":{"model":"m"}}`,
+		FilerEnabled:        true,
 	}
 	result := Result{
 		Prompt:     "issue stub",
@@ -281,6 +282,7 @@ func TestValidateMarkerMessageVerbatim(t *testing.T) {
 			BoxWriteEnabled:     false,
 			OrchestratorEnabled: true,
 			AgentsJSONTemplate:  `{"filer":{"model":"m"}}`,
+			FilerEnabled:        true,
 		}
 		result := Result{
 			// Already carries SPINDRIFT_PR_INTENT so the boxAccessReadOnly

@@ -1,7 +1,5 @@
 package promptassembly
 
-import "encoding/json"
-
 // Gates reproduces, as a pure function with no I/O, every computed gate
 // agent/entrypoint.sh's phase_prompt_assembly derives from e before
 // rendering the prompt fragment registry (lib/fragments.nix). The returned
@@ -29,27 +27,26 @@ func Gates(e Env) map[string]bool {
 	g["ORCHESTRATOR"] = orchestrator
 
 	// REVIEW_LOOP_INLINE/REVIEW_LOOP_ORCHESTRATOR (entrypoint.sh: 771-779):
-	// exactly one is ever on, picked by $ORCHESTRATOR alone.
-	g["REVIEW_LOOP_INLINE"] = !orchestrator
-	g["REVIEW_LOOP_ORCHESTRATOR"] = orchestrator
+	// exactly one is ever on, picked by $ORCHESTRATOR alone -- nix already
+	// resolves the pairing at eval time (issue #2533), so this is now a
+	// plain passthrough of Env.ReviewLoopInline/Env.ReviewLoopOrchestrator
+	// rather than Gates negating/copying ORCHESTRATOR itself.
+	g["REVIEW_LOOP_INLINE"] = e.ReviewLoopInline
+	g["REVIEW_LOOP_ORCHESTRATOR"] = e.ReviewLoopOrchestrator
 
 	// FILER_ENABLED/WORKER_PROVISIONED (entrypoint.sh: 781-799): each fires
-	// when AgentsJSONTemplate carries the corresponding top-level key. bash
-	// resolves this with `jq -e 'has("filer"|"worker")'`; unmarshalling into
-	// a map and checking key presence is the pure Go equivalent. An empty
-	// or malformed template behaves as "no such key" (jq -e likewise fails,
-	// leaving the gate off), never a panic.
-	agentsKeys := map[string]json.RawMessage{}
-	_ = json.Unmarshal([]byte(e.AgentsJSONTemplate), &agentsKeys)
-	_, hasFiler := agentsKeys["filer"]
-	_, hasWorker := agentsKeys["worker"]
-	g["FILER_ENABLED"] = hasFiler
-	g["WORKER_PROVISIONED"] = hasWorker
+	// when the roster nix also bakes into AgentsJSONTemplate carries the
+	// corresponding top-level key. nix already resolves this presence fact
+	// at eval time (issue #2533), so this is now a plain passthrough of
+	// Env.FilerEnabled/Env.WorkerProvisioned rather than Gates reparsing
+	// AgentsJSONTemplate's JSON for the same answer.
+	g["FILER_ENABLED"] = e.FilerEnabled
+	g["WORKER_PROVISIONED"] = e.WorkerProvisioned
 
 	// Issue-Tracker gate family (entrypoint.sh: 801-814, 816-860, 862-938):
 	// the tracker read/write/filer descriptor gates and the PR-body
 	// ticket-reference gates, computed in gates_tracker.go and merged in.
-	for k, v := range trackerGates(e, hasFiler, orchestrator) {
+	for k, v := range trackerGates(e, e.FilerEnabled, orchestrator) {
 		g[k] = v
 	}
 

@@ -15,15 +15,11 @@ func accessForgeGates(e Env) map[string]bool {
 
 	// CODE_FORGE -> backend suffix (entrypoint.sh: 959-967): only forgejo
 	// diverges from the shared gh-flavored path (github/git/local all ride
-	// the GH arm), matching "${CODE_FORGE:-github}".
-	codeForge := e.CodeForge
-	if codeForge == "" {
-		codeForge = defaultCodeForge
-	}
-	backend := "GH"
-	if codeForge == "forgejo" {
-		backend = "FORGEJO"
-	}
+	// the GH arm), matching "${CODE_FORGE:-github}". nix already resolves
+	// this switch once, at eval time, so the backend suffix arrives
+	// pre-resolved on Env.ForgeBackend rather than being re-derived here
+	// from CodeForge (issue #2533).
+	backend := e.ForgeBackend
 
 	// The OPEN A PULL REQUEST create step's read-write fork (entrypoint.sh:
 	// 969-979): only fires on the resolved backend, and only when

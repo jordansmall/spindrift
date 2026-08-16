@@ -18,16 +18,26 @@ const promptsDir = "../../../../templates/default/prompts"
 // coveredEnv returns a fixture Env sitting exactly in Assemble's covered
 // cell (see checkCoveredCell): github tracker, github forge, a read-write
 // box, dispatch kind "work", a fresh box (FixPass == 0), the orchestrator
-// off, and every skill baked. Tests mutate a copy to move a single axis off
-// the covered cell.
+// off, and every skill baked. TrackerAxisRead/TrackerAxisWrite/
+// TrackerAxisFiler and ForgeBackend are set to nix's own precomputed
+// resolution of the github tracker/forge (issue #2533) -- since Gates no
+// longer re-derives them in-box, a fixture claiming to sit in the github
+// tracker/forge cell must carry their already-resolved axis values
+// directly. ReviewLoopInline mirrors !OrchestratorEnabled for the same
+// reason. Tests mutate a copy to move a single axis off the covered cell.
 func coveredEnv() Env {
 	return Env{
 		IssueTracker:         "github",
+		TrackerAxisRead:      "GITHUB",
+		TrackerAxisWrite:     "GITHUB",
+		TrackerAxisFiler:     "GH",
 		CodeForge:            "github",
+		ForgeBackend:         "GH",
 		BoxWriteEnabled:      true,
 		DispatchKind:         "work",
 		FixPass:              0,
 		OrchestratorEnabled:  false,
+		ReviewLoopInline:     true,
 		SkillsFound:          "caveman, tdd, commit, code-review",
 		CavemanSkillBaked:    true,
 		TDDSkillBaked:        true,
@@ -46,12 +56,16 @@ func coveredEnv() Env {
 	}
 }
 
-// localTrackerEnv returns a copy of coveredEnv with IssueTracker set to
-// "local" -- otherwise identical, still a read-write box with every other
-// axis at its covered-cell value.
+// localTrackerEnv returns a copy of coveredEnv with IssueTracker (and its
+// nix-precomputed axis fields, issue #2533) set to "local" -- otherwise
+// identical, still a read-write box with every other axis at its
+// covered-cell value.
 func localTrackerEnv() Env {
 	env := coveredEnv()
 	env.IssueTracker = "local"
+	env.TrackerAxisRead = "LOCAL"
+	env.TrackerAxisWrite = ""
+	env.TrackerAxisFiler = "GH"
 	return env
 }
 
@@ -506,10 +520,14 @@ func TestAssembleUnsupportedCell(t *testing.T) {
 
 // TestAssembleUnknownTrackerOrForgeNoLongerRejected pins the tolerance
 // deleting checkCoveredCell's IssueTracker/CodeForge arms left behind
-// (issue #2540): a bogus value for either field now renders through
-// issueTrackerAxis's/Gates's own default arm instead of erroring, since
-// upstream validation (lib/mkHarness.nix's choicesCheckOk assert,
-// cmd/launcher/main.go's validate()) is the only thing that rejects it now.
+// (issue #2540): a bogus value for either field renders without error since
+// Assemble/Gates never branch on IssueTracker/CodeForge to reject an
+// unrecognized value -- their axis/backend resolution now lives entirely
+// upstream in nix (TrackerAxisRead/TrackerAxisWrite/TrackerAxisFiler/
+// ForgeBackend, issue #2533), so IssueTracker/CodeForge themselves are
+// inert here beyond the other purposes documented on Env. Upstream
+// validation (lib/mkHarness.nix's choicesCheckOk assert, cmd/launcher/
+// main.go's validate()) is the only thing that rejects a bogus value now.
 // Exists so a future change re-adding allowlist validation here shows up as
 // a deliberate test change, not a silent behavior shift.
 func TestAssembleUnknownTrackerOrForgeNoLongerRejected(t *testing.T) {
@@ -1032,6 +1050,9 @@ func TestAssembleForgejoTrackerReadWrite(t *testing.T) {
 	reg := loadTestRegistry(t)
 	env := coveredEnv()
 	env.IssueTracker = "forgejo"
+	env.TrackerAxisRead = "FORGEJO"
+	env.TrackerAxisWrite = "FORGEJO"
+	env.TrackerAxisFiler = "FORGEJO"
 
 	result, err := Assemble(env, reg)
 	if err != nil {
@@ -1047,8 +1068,11 @@ func TestAssembleForgejoTrackerReadWrite(t *testing.T) {
 }
 
 // TestAssembleJiraTracker covers the jira-tracker cell (issue #2352): jira
-// shares github's arm end to end (gates_tracker.go's issueTrackerAxis), so
-// Assemble accepts it and does not return ErrUnsupportedCell.
+// shares github's arm end to end (nix's precomputed TrackerAxisRead/
+// TrackerAxisWrite/TrackerAxisFiler resolution, issue #2533 -- coveredEnv's
+// axis fields stay at their github values here since only IssueTracker
+// itself is mutated), so Assemble accepts it and does not return
+// ErrUnsupportedCell.
 func TestAssembleJiraTracker(t *testing.T) {
 	reg := loadTestRegistry(t)
 	env := coveredEnv()
@@ -1329,7 +1353,10 @@ func TestAssembleOrchestratorCoordinatorChecksInboxOnce(t *testing.T) {
 	reg := loadTestRegistry(t)
 	env := coveredEnv()
 	env.OrchestratorEnabled = true
+	env.ReviewLoopOrchestrator = true
+	env.ReviewLoopInline = false
 	env.AgentsJSONTemplate = `{"worker":{"model":"m"}}`
+	env.WorkerProvisioned = true
 
 	result, err := Assemble(env, reg)
 	if err != nil {
