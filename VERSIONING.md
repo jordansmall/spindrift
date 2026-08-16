@@ -19,6 +19,11 @@ require a version bump per the policy below.
 | **`env-schema.nix` variable names** | Every `SPINDRIFT_*` environment variable name listed in `lib/env-schema.nix` |
 | **Label lifecycle names** | `ready-for-agent`, `agent-trigger`, `agent-in-progress`, `agent-complete`, `agent-failed` |
 
+"Flake options" covers `mkHarness`'s named *parameters* only, not the shape of
+its return value beyond `{ image, spindrift, packages, apps }`: the
+`internals` attrset (every check-only output) is excluded, mirroring the
+`cmd/launcher/internal/*` carve-out below.
+
 Everything else is internal and may change without a version bump:
 `cmd/launcher/internal/*`, prompt wording, log formatting, image layer layout,
 and any unexported Nix helpers.

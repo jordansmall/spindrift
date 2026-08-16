@@ -77,6 +77,12 @@ flake-parts itself and passed through, so setting
 `perSystem.spindrift.system` errors the same way an `mkHarness`-only option
 would.
 
+The table below documents `mkHarness`'s named *parameters* — the versioned
+Consumer contract (ADR 0010). The function's *return value* is a separate
+surface: only `image`, `spindrift`, `packages`, and `apps` are in-contract,
+and everything else lives under the out-of-contract `internals` attrset (see
+[Calling `mkHarness` directly](#calling-mkharness-directly)).
+
 | option      | scope          | type                        | default            | meaning                                                              |
 | ----------- | -------------- | --------------------------- | ------------------ | -------------------------------------------------------------------- |
 | `nixpkgs`   | shared         | flake input                 | your `nixpkgs`     | locked nixpkgs the image and host commands build from                |
@@ -703,9 +709,13 @@ spindrift.lib.mkHarness {
   system = "aarch64-darwin";
   packages = p: [ p.go ];
 }
-# => { image, spindrift, build, run, packages, apps, imagePath, promptDir, skillsDir, ... }
+# => { image, spindrift, packages, apps, internals }
 # packages.spindrift is the CLI; add it to a devShell so `spindrift` is on PATH.
 ```
+
+`internals` bundles every check-only output (build/run fixtures, contract
+files, `driverExecBin`, `roster`, …); only `image`, `spindrift`, `packages`,
+and `apps` are the versioned Consumer contract (ADR 0010).
 
 `mkHarness` takes the locked *nixpkgs input* (not a pre-built `pkgs`) so it can
 map a darwin `system` to its Linux twin and re-instantiate for the OCI image —
