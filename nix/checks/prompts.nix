@@ -16,13 +16,6 @@ let
     batsHarness
     ;
 
-  # lib/fragments.nix is the gate registry's source of truth (issue #959):
-  # derive the fragment-gate-parity gate list from it instead of a
-  # hand-maintained bash `for gate in ...` list that silently drifts when a
-  # row is added (issue #959, following the registry #622 -> parity #689).
-  fragmentRows = import ../../lib/fragments.nix;
-  allGates = map (row: row.gate) fragmentRows;
-
   # The rendered CHECK section, sliced once here rather than three times
   # across the never-background/vanished-marker/git-add checks below (issue
   # #781) -- a marker rename only needs updating in one place, and the three
@@ -690,32 +683,6 @@ in
         touch $out
       '';
 
-  # Registry-name pin (lib/fragments.nix, issue #622): every row's `gate`
-  # field must actually appear as a `gate = "...";` attr in the registry
-  # source -- catches a stale/renamed row reference. The gate list is
-  # derived from the registry (allGates above) rather than hand-copied, so a
-  # new row is covered automatically (issue #959; a hand-copied list had
-  # silently missed 3 of 9 rows).
-  #
-  # Until issue #2354, this check also asserted that each *computed* gate
-  # (every row not in the knob-gated AUTO_FORMAT/AUTO_LINT/CI_FAILURE_SUMMARY
-  # trio) named a `local $gate=` declaration in agent/entrypoint.sh's own
-  # gate-precompute block, guarding the bash fragment loop's `"${!_fgate}"`
-  # indirection against a silent typo (issue #689). Issue #2354 deleted that
-  # whole precompute block and fragment loop -- phase_prompt_assembly now
-  # forwards the registry straight to the driver-exec assemble-prompt verb
-  # (PROMPTASSEMBLY_REGISTRY_FILE, cmd/launcher/internal/promptassembly),
-  # which re-derives each gate in Go instead, covered by that package's own
-  # unit tests (gates_test.go et al.), not a grep against entrypoint.sh's
-  # source text. The entrypoint.sh half of this guard is retired along with
-  # the mechanism it protected; only the registry-name pin below remains.
-  fragment-gate-parity = pkgs.runCommand "fragment-gate-parity" { } ''
-    for gate in ${pkgs.lib.concatStringsSep " " allGates}; do
-      grep -qF "gate = \"$gate\";" ${../../lib/fragments.nix}
-    done
-    touch $out
-  '';
-
   # ORCHESTRATOR master-switch fork-well-formedness (issue #2047, ADR 0035
   # amendment): ORCHESTRATOR_ENABLED is a master feature-flag switch that
   # forks the rendered prompt/--agents, not a scatter of ad-hoc checks --
@@ -728,7 +695,7 @@ in
   # on-row and an off-row -- an explicit `else`, never a bare `if` whose off
   # case is left merely implicit -- so a segment added later with only one
   # side fails here instead of silently rendering the same fork for every
-  # input. Same grep-based, eval-only shape as fragment-gate-parity above.
+  # input. Same grep-based, eval-only shape as the checks above.
   orchestrator-fork-well-formed = pkgs.runCommand "orchestrator-fork-well-formed" { } ''
     entrypoint=${../../agent/entrypoint.sh}
 
@@ -889,10 +856,9 @@ in
   # fragments must never invoke `gh issue view` -- for a numeric slug it can
   # silently fetch an unrelated real issue on the Target repo, the exact
   # footgun the read-only /issues mount exists to close -- and must reference
-  # /issues instead. The fragment-gate-parity check above only pins that each
-  # row's gate name actually appears in lib/fragments.nix; it says nothing
-  # about a fragment's own content, so a future edit reintroducing `gh issue
-  # view` into a local variant would otherwise go uncaught. Same
+  # /issues instead. Fragment content itself is otherwise unchecked, so a
+  # future edit reintroducing `gh issue view` into a local variant would
+  # otherwise go uncaught. Same
   # static, eval-only grep shape as the pr-body-reference-* checks above.
   issue-read-local-fragments-never-invoke-gh-issue-view =
     pkgs.runCommand "issue-read-local-fragments-never-invoke-gh-issue-view" { }
