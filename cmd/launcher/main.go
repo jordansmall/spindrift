@@ -1082,6 +1082,7 @@ func dispatchConfig(c config, it forge.IssueTracker, lw *localloop.Wired, cf for
 			res, err := forge.ResolveOpenPR(cf, number)
 			return res.Found, err
 		},
+		IssueSnapshot: func(number string) (string, error) { return forge.Snapshot(it, number) },
 	}
 }
 

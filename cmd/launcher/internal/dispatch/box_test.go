@@ -911,7 +911,7 @@ func TestRunOnce_RegistryProxyTransportErrors_AbortsDispatch(t *testing.T) {
 
 	d := newTestDispatch(t, cfg, fr, fakeDriver{}, RealClock())
 
-	err := d.runOnce(d.logPath(), buildBoxEnv(d.cfg, d.number, d.title, 0, "", d.nonce), d.cacheDir)
+	err := d.runOnce(d.logPath(), buildBoxEnv(d.cfg, d.number, d.title, 0, "", d.nonce), d.cacheDir, "")
 
 	if err == nil {
 		t.Fatal("runOnce: want a non-nil error when the transport probe fails, got nil")
