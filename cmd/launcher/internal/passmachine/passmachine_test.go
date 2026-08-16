@@ -517,6 +517,25 @@ func TestTransition(t *testing.T) {
 			},
 		},
 		{
+			name: "review: budget exceeded on both tokens and USD reports both dimensions in CapFired",
+			in: Input{
+				PassJustExecuted: KindReview,
+				Verdict:          VerdictBlock,
+				CumulativeTokens: 100,
+				CumulativeUSD:    5,
+				Caps:             Caps{MaxBudgetTokens: 100, MaxBudgetUSD: 5},
+			},
+			want: Decision{
+				Continue:              true,
+				Reason:                "budget exceeded; running terminal land pass",
+				NextPass:              KindLand,
+				LandPhase:             LandPhaseTerminalCommitted,
+				Cap:                   StopBudgetExceeded,
+				CapFired:              "budget exceeded: 100 tokens >= cap 100; $5.0000 >= cap $5.0000",
+				IncrementReviewRounds: true,
+			},
+		},
+		{
 			name: "review: unset budget caps never fire even with high cumulative usage, falls through to fix",
 			in: Input{
 				PassJustExecuted: KindReview,
