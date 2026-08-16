@@ -600,6 +600,12 @@ func TestRunQuickstart_WritesGithubIssueTrackerWithoutPrompting(t *testing.T) {
 	if !strings.Contains(string(flakeNix), `issues.tracker = "github"`) {
 		t.Errorf("expected flake.nix to set issues.tracker to github, got:\n%s", flakeNix)
 	}
+	if !strings.Contains(string(flakeNix), `git.user.name = "Ada Lovelace"`) {
+		t.Errorf("expected flake.nix to set git.user.name to Ada Lovelace, got:\n%s", flakeNix)
+	}
+	if !strings.Contains(string(flakeNix), `git.user.email = "ada@example.com"`) {
+		t.Errorf("expected flake.nix to set git.user.email to ada@example.com, got:\n%s", flakeNix)
+	}
 }
 
 func TestRunQuickstart_AmbientGHToken_SkipsPrompt(t *testing.T) {
@@ -1665,6 +1671,85 @@ func TestRunQuickstart_SelfHostedForgejo_AsksBackendAndEmitsBaseURL(t *testing.T
 	if !strings.Contains(string(flakeNix), `forge.backend = "forgejo"`) {
 		t.Errorf("expected flake.nix to set codeForge to forgejo, got:\n%s", flakeNix)
 	}
+}
+
+// TestRunQuickstart_FlakeNix_NoDeprecatedPathSpellings regression-guards
+// renderFlakeNix against a deprecated path spelling creeping back in. This is
+// exactly how the runtime bug shipped in a prior slice: renderFlakeNix
+// hand-typed a bare `runtime = "%s";` line (the old flat structural-shim
+// spelling lib/flakeModule.nix's oldFlatShims warns on) instead of using the
+// generated PathRuntime constant, and no test caught it because the existing
+// tests only asserted the presence of an expected string, never the absence
+// of a known-deprecated one. Exercises both the github and forgejo backend
+// branches of renderFlakeNix, since only the forgejo branch emits
+// forge.backend / issues.forgejo.baseURL at all.
+func TestRunQuickstart_FlakeNix_NoDeprecatedPathSpellings(t *testing.T) {
+	deprecatedSpellings := []string{
+		"\n            runtime = \"",           // old flat structural shim; must be infra.runtime = "
+		"settings.repository.repoSlug",         // old settings.<section>.<knob> shim spelling
+		"settings.repository.gitUserName",      // old settings.<section>.<knob> shim spelling
+		"settings.repository.gitUserEmail",     // old settings.<section>.<knob> shim spelling
+		"settings.issueDiscovery.issueTracker", // old settings.<section>.<knob> shim spelling
+	}
+
+	t.Run("github", func(t *testing.T) {
+		dir := t.TempDir()
+		var out bytes.Buffer
+		stdin := strings.NewReader(strings.Join([]string{
+			"jordansmall/spindrift", // repoSlug
+			"podman",                // runtime
+			"Ada Lovelace",          // git user name
+			"ada@example.com",       // git user email
+			"ghp_faketoken",         // GH_TOKEN
+		}, "\n") + "\n")
+		env := fakeEnvironment{env: map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "claude-oauth-faketoken"}, runtimes: map[string]bool{"podman": true}}
+
+		if err := runQuickstart(dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false); err != nil {
+			t.Fatalf("runQuickstart: %v", err)
+		}
+
+		flakeNix, err := os.ReadFile(filepath.Join(dir, "flake.nix"))
+		if err != nil {
+			t.Fatalf("read flake.nix: %v", err)
+		}
+		for _, deprecated := range deprecatedSpellings {
+			if strings.Contains(string(flakeNix), deprecated) {
+				t.Errorf("expected flake.nix not to contain deprecated spelling %q, got:\n%s", deprecated, flakeNix)
+			}
+		}
+	})
+
+	t.Run("forgejo", func(t *testing.T) {
+		dir := t.TempDir()
+		var out bytes.Buffer
+		env := fakeEnvironment{
+			remoteURL: "https://git.example.com/team/proj.git",
+			env:       map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "claude-oauth-faketoken"},
+			runtimes:  map[string]bool{"podman": true},
+		}
+		stdin := strings.NewReader(strings.Join([]string{
+			"forgejo",           // backend
+			"",                  // repoSlug default team/proj
+			"",                  // runtime default podman
+			"Ada Lovelace",      // git user name
+			"ada@example.com",   // git user email
+			"forgejo-faketoken", // Forgejo token
+		}, "\n") + "\n")
+
+		if err := runQuickstart(dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false); err != nil {
+			t.Fatalf("runQuickstart: %v", err)
+		}
+
+		flakeNix, err := os.ReadFile(filepath.Join(dir, "flake.nix"))
+		if err != nil {
+			t.Fatalf("read flake.nix: %v", err)
+		}
+		for _, deprecated := range deprecatedSpellings {
+			if strings.Contains(string(flakeNix), deprecated) {
+				t.Errorf("expected flake.nix not to contain deprecated spelling %q, got:\n%s", deprecated, flakeNix)
+			}
+		}
+	})
 }
 
 // TestRunQuickstart_NewBackend_TokenAcquisitionNeedsNoRunQuickstartEdit pins
