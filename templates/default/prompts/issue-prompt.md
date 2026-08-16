@@ -146,9 +146,7 @@ unsure):
 **`CODE_FORGE=git`** (push-only Code Forge — no PR, no CI-watch, no merge
 gate): skip OPEN A PULL REQUEST below entirely.
 
-${LAND_GIT_PUSH_READ_WRITE_STEP}${LAND_GIT_STOP_READ_WRITE_STEP}${LAND_GIT_STOP_READ_ONLY_STEP}
-
-**`CODE_FORGE=local`** (host-mediated Code Forge — no PR, no CI-watch, no
+${LAND_GIT_PUSH_READ_WRITE_STEP}${LAND_GIT_STOP_READ_WRITE_STEP}${LAND_GIT_STOP_READ_ONLY_STEP}**`CODE_FORGE=local`** (host-mediated Code Forge — no PR, no CI-watch, no
 network; the launcher lands your branch after this container exits): skip
 OPEN A PULL REQUEST below entirely. Do not push directly — the repo you
 cloned from is mounted read-only — and do not bundle your commits yourself:
