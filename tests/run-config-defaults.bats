@@ -71,6 +71,20 @@ EOF
   grep -qE "REVIEW_MODEL=$DEFAULT_REVIEW_MODEL( |\$)" "$PODMAN_LOG"
 }
 
+@test "run passes the baked default WORKER_MODEL into the container" {
+  export FAKE_PODMAN_IMAGE_PRESENT=1
+  run "$RUN_CMD"
+  [ "$status" -eq 0 ]
+  grep -qE "WORKER_MODEL=$DEFAULT_WORKER_MODEL( |\$)" "$PODMAN_LOG"
+}
+
+@test "run passes the empty baked default FILER_MODEL (opt-in) into the container" {
+  export FAKE_PODMAN_IMAGE_PRESENT=1
+  run "$RUN_CMD"
+  [ "$status" -eq 0 ]
+  grep -qE "FILER_MODEL=$DEFAULT_FILER_MODEL( |\$)" "$PODMAN_LOG"
+}
+
 @test "MODEL env overrides the baked default into the container" {
   export FAKE_PODMAN_IMAGE_PRESENT=1
   export MODEL=claude-test-model

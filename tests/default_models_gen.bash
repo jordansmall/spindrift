@@ -3,12 +3,11 @@
 # Regenerate with `nix run .#regen` after editing lib/default-model-fixture.nix.
 
 # The regen-rendered bats fixture form of lib/default-model-fixture.nix's
-# schemaDefaults and dogfoodPins.filer, so a bats test asserts against this
-# fixture's variables instead of hand-typing the expected default model
-# literal at each assertion site (issue #2514).
+# schemaDefaults, so a bats test asserts against this fixture's variables
+# instead of hand-typing the expected default model literal at each
+# assertion site (issue #2514).
 export DEFAULT_MODEL="claude-sonnet-5"
 export DEFAULT_SCOUT_MODEL="claude-haiku-4-5-20251001"
 export DEFAULT_REVIEW_MODEL="claude-opus-5"
 export DEFAULT_FILER_MODEL=""
 export DEFAULT_WORKER_MODEL="claude-sonnet-5"
-export DOGFOOD_FILER_MODEL="claude-haiku-4-5-20251001"
