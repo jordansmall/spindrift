@@ -467,11 +467,12 @@ rec {
 
   # Fourth pure-data registry (issue #2491): records that the "worker" role
   # (lib/roster.nix's roster entry `name = "worker"`, `promptFile =
-  # "worker-prompt.md"`) is forbidden from carrying either the
-  # SPINDRIFT_OUTCOME or VERDICT marker in its rendered prompt -- the
-  # worker's prompt contract carries no outcome grammar by design, so a
-  # stray marker from a misbehaving worker must never be able to terminate
-  # the run or satisfy the launcher's outcome scanner.
+  # "worker-prompt.md"`) is forbidden from carrying the SPINDRIFT_OUTCOME
+  # marker or either verdict marker ("VERDICT: APPROVE"/"VERDICT: BLOCK") in
+  # its rendered prompt -- the worker's prompt contract carries no outcome
+  # grammar by design, so a stray marker from a misbehaving worker must
+  # never be able to terminate the run or satisfy the launcher's outcome
+  # scanner.
   #
   # Separate list from forbiddenMarkers above, not an addition to it: the two
   # registries have different scoping semantics (forbiddenMarkers is
@@ -522,10 +523,16 @@ rec {
       message = "prompt-contract: the worker role's rendered prompt (worker-prompt.md) must never carry the 'SPINDRIFT_OUTCOME' marker -- the worker's prompt contract carries no outcome grammar by design (issue #2491), so a stray marker from a misbehaving worker can never terminate the run or satisfy the launcher's outcome scanner.";
     }
     {
-      id = "worker-role-forbids-verdict";
+      id = "worker-role-forbids-verdict-approve";
       role = "worker";
-      marker = "VERDICT";
-      message = "prompt-contract: the worker role's rendered prompt (worker-prompt.md) must never carry the 'VERDICT' marker -- the worker's prompt contract carries no outcome grammar by design (issue #2491), so a stray marker from a misbehaving worker can never terminate the run or satisfy the launcher's outcome scanner.";
+      marker = "VERDICT: APPROVE";
+      message = "prompt-contract: the worker role's rendered prompt (worker-prompt.md) must never carry the 'VERDICT: APPROVE' marker -- the worker's prompt contract carries no outcome grammar by design (issue #2491), so a stray marker from a misbehaving worker can never terminate the run or satisfy the launcher's outcome scanner.";
+    }
+    {
+      id = "worker-role-forbids-verdict-block";
+      role = "worker";
+      marker = "VERDICT: BLOCK";
+      message = "prompt-contract: the worker role's rendered prompt (worker-prompt.md) must never carry the 'VERDICT: BLOCK' marker -- the worker's prompt contract carries no outcome grammar by design (issue #2491), so a stray marker from a misbehaving worker can never terminate the run or satisfy the launcher's outcome scanner.";
     }
   ];
 
