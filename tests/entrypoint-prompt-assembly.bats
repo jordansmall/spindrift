@@ -149,6 +149,7 @@ setup() {
 @test "fix pass on CODE_FORGE=forgejo reads CI via fj pr status, never gh pr view" {
   export FIX_PASS="2"
   export CODE_FORGE=forgejo
+  export BOX_FORGE_BACKEND=FORGEJO
   export FORGEJO_BASE_URL="https://forge.test"
   export FORGEJO_TOKEN="fjtok"
   # clone_repo requires FORGEJO_TOKEN and builds the clone URL as

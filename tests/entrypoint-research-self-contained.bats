@@ -41,6 +41,8 @@ setup() {
   export DISPATCH_KIND="research"
   export SELF_CONTAINED="1"
   export ISSUE_TRACKER="local"
+  export BOX_TRACKER_AXIS_READ=LOCAL
+  unset BOX_TRACKER_AXIS_WRITE
   # entrypoint.sh no longer derives no_repo's local-tracker half from
   # ISSUE_TRACKER itself (issue #2527) -- it reads the launcher-forwarded
   # BOX_IN_BOX_UNREACHABLE_TRACKER signal, so this fixture supplies it

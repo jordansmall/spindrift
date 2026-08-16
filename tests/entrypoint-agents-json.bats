@@ -62,6 +62,7 @@ setup() {
 # scout/reviewer (#392) — never bundled with either.
 @test "entrypoint passes --agents with only filer when the template carries filer alone" {
   export AGENTS_JSON_TEMPLATE='{"filer":{"description":"File issues from a review'"'"'s non-blocking findings, best-effort","model":"haiku","prompt":"","tools":["Read","Bash","WebFetch"]}}'
+  export BOX_FILER_ENABLED=1
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   [ -s "$DRIVER_AGENTS_FILE" ]
@@ -76,6 +77,8 @@ setup() {
   # composed --agents JSON forwarded to the Driver must not.
   export AGENTS_JSON_TEMPLATE='{"reviewer":{"description":"Review the branch diff for spec compliance and coding standards","model":"haiku","prompt":"","tools":["Read","Bash","WebFetch"]},"scout":{"description":"Map relevant files, seams, and tests; return a structured brief","model":"opus","prompt":"","tools":["Read","Bash","WebFetch","WebSearch","Glob","Grep"]}}'
   export ORCHESTRATOR_ENABLED=1
+  export BOX_REVIEW_LOOP_ORCHESTRATOR=1
+  unset BOX_REVIEW_LOOP_INLINE
   export WORK_DIR="$BATS_TEST_TMPDIR/work-agents-reviewer-orch-on"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
@@ -86,6 +89,7 @@ setup() {
 
 @test "entrypoint passes --agents with scout, reviewer, and filer all present" {
   export AGENTS_JSON_TEMPLATE='{"scout":{"description":"scout","model":"opus","prompt":"","tools":["Read"]},"reviewer":{"description":"reviewer","model":"opus","prompt":"","tools":["Read"]},"filer":{"description":"filer","model":"haiku","prompt":"","tools":["Read"]}}'
+  export BOX_FILER_ENABLED=1
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   jq -e 'has("scout") and has("reviewer") and has("filer")' "$DRIVER_AGENTS_FILE" >/dev/null
@@ -98,6 +102,7 @@ setup() {
 # claude-sonnet-5), composed independently exactly like scout/reviewer/filer.
 @test "entrypoint passes --agents with only worker when the template carries worker alone" {
   export AGENTS_JSON_TEMPLATE='{"worker":{"description":"Implement-capable worker subagent","model":"sonnet","prompt":"","tools":["Read","Bash","Edit","Write","Glob","Grep","WebFetch"]}}'
+  export BOX_WORKER_PROVISIONED=1
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   [ -s "$DRIVER_AGENTS_FILE" ]

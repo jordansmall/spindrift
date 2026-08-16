@@ -230,6 +230,8 @@ AGENTS_ROSTER_WITH_REVIEW_EFFORT='{"scout":{"description":"Map relevant files, s
 
 @test "production path matches the golden fixture for the covered cell, with a populated roster" {
   export AGENTS_JSON_TEMPLATE="$AGENTS_ROSTER"
+  # AGENTS_ROSTER carries a "worker" key but no "filer" key (issue #2533).
+  export BOX_WORKER_PROVISIONED=1
 
   assert_cell_golden "covered-cell-populated-roster" initial
 
@@ -285,6 +287,7 @@ AGENTS_ROSTER_WITH_REVIEW_EFFORT='{"scout":{"description":"Map relevant files, s
   # BOX_WRITE_ENABLED stays at setup_entrypoint_env's read-write default, so
   # no extra flag override is needed here.
   export CODE_FORGE="forgejo"
+  export BOX_FORGE_BACKEND=FORGEJO
   export FORGEJO_BASE_URL="https://forge.test"
   export FORGEJO_TOKEN="fjtok"
   # clone_repo requires FORGEJO_TOKEN and builds the clone URL as
@@ -299,6 +302,7 @@ AGENTS_ROSTER_WITH_REVIEW_EFFORT='{"scout":{"description":"Map relevant files, s
 @test "production path matches the golden fixture for the forgejo read-only cell" {
   # AGENTS_JSON_TEMPLATE deliberately left unset, same reasoning as above.
   export CODE_FORGE="forgejo"
+  export BOX_FORGE_BACKEND=FORGEJO
   export FORGEJO_BASE_URL="https://forge.test"
   export FORGEJO_TOKEN="fjtok"
   unset BOX_WRITE_ENABLED
@@ -317,6 +321,8 @@ AGENTS_ROSTER_WITH_REVIEW_EFFORT='{"scout":{"description":"Map relevant files, s
   # above already cover independently. SessionMode stays "initial" --
   # ISSUE_TRACKER is orthogonal to dispatch kind/fix-pass.
   export ISSUE_TRACKER="local"
+  export BOX_TRACKER_AXIS_READ=LOCAL
+  unset BOX_TRACKER_AXIS_WRITE
 
   assert_cell_golden "local-tracker-no-issue-ref" initial
 }
@@ -324,12 +330,17 @@ AGENTS_ROSTER_WITH_REVIEW_EFFORT='{"scout":{"description":"Map relevant files, s
 @test "production path matches the golden fixture for the local tracker cell, issue reference on" {
   export ISSUE_TRACKER="local"
   export LOCAL_ISSUE_REFERENCE="1"
+  export BOX_TRACKER_AXIS_READ=LOCAL
+  unset BOX_TRACKER_AXIS_WRITE
 
   assert_cell_golden "local-tracker-issue-ref-on" initial
 }
 
 @test "production path matches the golden fixture for the forgejo tracker cell" {
   export ISSUE_TRACKER="forgejo"
+  export BOX_TRACKER_AXIS_READ=FORGEJO
+  export BOX_TRACKER_AXIS_WRITE=FORGEJO
+  export BOX_TRACKER_AXIS_FILER=FORGEJO
 
   assert_cell_golden "forgejo-tracker" initial
 }
@@ -354,7 +365,12 @@ AGENTS_ROSTER_WITH_REVIEW_EFFORT='{"scout":{"description":"Map relevant files, s
 
 @test "production path matches the golden fixture for the orchestrator-on filer-on cell" {
   export ORCHESTRATOR_ENABLED=1
+  export BOX_REVIEW_LOOP_ORCHESTRATOR=1
+  unset BOX_REVIEW_LOOP_INLINE
   export AGENTS_JSON_TEMPLATE="$AGENTS_ROSTER_WITH_FILER"
+  # AGENTS_ROSTER_WITH_FILER carries both a "worker" key and a "filer" key.
+  export BOX_FILER_ENABLED=1
+  export BOX_WORKER_PROVISIONED=1
 
   assert_cell_golden "orchestrator-filer-on" initial
 
@@ -363,12 +379,16 @@ AGENTS_ROSTER_WITH_REVIEW_EFFORT='{"scout":{"description":"Map relevant files, s
 
 @test "production path matches the golden fixture for the orchestrator-on filer-off cell" {
   export ORCHESTRATOR_ENABLED=1
+  export BOX_REVIEW_LOOP_ORCHESTRATOR=1
+  unset BOX_REVIEW_LOOP_INLINE
   # AGENTS_ROSTER (not the _WITH_FILER variant above): scout+reviewer, no
   # "filer" key -- the FILER_ENABLED-off half of the roster axis. Reviewer is
   # present in both filer-on and filer-off (filer-on/off forks only on
   # whether "filer" itself is in the roster), so both cells assert
   # ReviewModel the same way via assert_review_handoff_golden.
   export AGENTS_JSON_TEMPLATE="$AGENTS_ROSTER"
+  # AGENTS_ROSTER carries a "worker" key but no "filer" key.
+  export BOX_WORKER_PROVISIONED=1
 
   assert_cell_golden "orchestrator-filer-off" initial
 
@@ -377,12 +397,16 @@ AGENTS_ROSTER_WITH_REVIEW_EFFORT='{"scout":{"description":"Map relevant files, s
 
 @test "production path matches the golden fixture for the orchestrator-on review-effort-set cell" {
   export ORCHESTRATOR_ENABLED=1
+  export BOX_REVIEW_LOOP_ORCHESTRATOR=1
+  unset BOX_REVIEW_LOOP_INLINE
   # AGENTS_ROSTER_WITH_REVIEW_EFFORT (not plain AGENTS_ROSTER): the reviewer
   # entry's "effort":"xhigh" is the whole point of this cell -- issue #2512's
   # AC2 non-empty-overrides case, contrasting the filer-on/filer-off cells
   # above whose reviewer carries no "effort" key at all (ReviewEffort ""
   # there, the empty-follows-roster case).
   export AGENTS_JSON_TEMPLATE="$AGENTS_ROSTER_WITH_REVIEW_EFFORT"
+  # AGENTS_ROSTER_WITH_REVIEW_EFFORT carries a "worker" key but no "filer" key.
+  export BOX_WORKER_PROVISIONED=1
 
   assert_cell_golden "orchestrator-review-effort-set" initial
 
@@ -391,7 +415,11 @@ AGENTS_ROSTER_WITH_REVIEW_EFFORT='{"scout":{"description":"Map relevant files, s
 
 @test "production path matches the golden fixture for the orchestrator-on skills-absent cell" {
   export ORCHESTRATOR_ENABLED=1
+  export BOX_REVIEW_LOOP_ORCHESTRATOR=1
+  unset BOX_REVIEW_LOOP_INLINE
   export AGENTS_JSON_TEMPLATE="$AGENTS_ROSTER"
+  # AGENTS_ROSTER carries a "worker" key but no "filer" key.
+  export BOX_WORKER_PROVISIONED=1
 
   # Contrast setup()'s unconditional 4-skill baking: this cell is the
   # "SkillsFound == "" and every *SkillBaked flag false" branch

@@ -120,8 +120,12 @@ _parity_stub_prompt_dir() {
         fi
         if [ "$gate" = true ]; then
           export ORCHESTRATOR_ENABLED=1
+          export BOX_REVIEW_LOOP_ORCHESTRATOR=1
+          unset BOX_REVIEW_LOOP_INLINE
         else
           unset ORCHESTRATOR_ENABLED
+          unset BOX_REVIEW_LOOP_ORCHESTRATOR
+          export BOX_REVIEW_LOOP_INLINE=1
         fi
         ;;
       pr-intent)
@@ -144,19 +148,27 @@ _parity_stub_prompt_dir() {
         fi
         if [ "$gate" = true ]; then
           export AGENTS_JSON_TEMPLATE='{"filer":{"description":"filer","model":"haiku","prompt":"","tools":["Read","Bash","WebFetch"]}}'
+          export BOX_FILER_ENABLED=1
           export ORCHESTRATOR_ENABLED=1
+          export BOX_REVIEW_LOOP_ORCHESTRATOR=1
+          unset BOX_REVIEW_LOOP_INLINE
           unset BOX_WRITE_ENABLED
         else
           # FILER_FILE_RELAY (cmd/launcher/internal/promptassembly/
-          # gates_tracker.go) requires filerEnabled (AGENTS_JSON_TEMPLATE has
-          # a "filer" key) AND !BOX_WRITE_ENABLED AND ORCHESTRATOR_ENABLED all
-          # at once -- toggle only BOX_WRITE_ENABLED off->on here (matching
-          # this suite's existing one-knob-per-row style) so the gate goes
-          # false while AGENTS_JSON_TEMPLATE/ORCHESTRATOR_ENABLED stay set,
-          # keeping .filer.prompt populated so markerPresent is still
-          # meaningfully exercised even though the gate itself is off.
+          # gates_tracker.go) now requires BOX_FILER_ENABLED (forwarded
+          # directly from the roster's "filer" key, issue #2533) AND
+          # !BOX_WRITE_ENABLED AND BOX_REVIEW_LOOP_ORCHESTRATOR all at once --
+          # toggle only BOX_WRITE_ENABLED off->on here (matching this suite's
+          # existing one-knob-per-row style) so the gate goes false while
+          # AGENTS_JSON_TEMPLATE/BOX_FILER_ENABLED/ORCHESTRATOR_ENABLED/
+          # BOX_REVIEW_LOOP_ORCHESTRATOR stay set, keeping .filer.prompt
+          # populated so markerPresent is still meaningfully exercised even
+          # though the gate itself is off.
           export AGENTS_JSON_TEMPLATE='{"filer":{"description":"filer","model":"haiku","prompt":"","tools":["Read","Bash","WebFetch"]}}'
+          export BOX_FILER_ENABLED=1
           export ORCHESTRATOR_ENABLED=1
+          export BOX_REVIEW_LOOP_ORCHESTRATOR=1
+          unset BOX_REVIEW_LOOP_INLINE
           export BOX_WRITE_ENABLED=1
         fi
         ;;

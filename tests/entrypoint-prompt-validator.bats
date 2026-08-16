@@ -99,6 +99,8 @@ _stub_prompt_dir() {
   printf 'reviewer stub, no verdict line here\n' >"$prompt_dir/review-prompt.md"
   export PROMPTS_DIR="$prompt_dir"
   export ORCHESTRATOR_ENABLED=1
+  export BOX_REVIEW_LOOP_ORCHESTRATOR=1
+  unset BOX_REVIEW_LOOP_INLINE
   run bash "$ENTRYPOINT"
   [ "$status" -ne 0 ]
   grep -q 'VERDICT:' <<<"$output"
@@ -150,7 +152,10 @@ _stub_prompt_dir() {
   printf 'filer stub, no issue-intent marker here\n' >"$prompt_dir/filer-prompt.md"
   export PROMPTS_DIR="$prompt_dir"
   export AGENTS_JSON_TEMPLATE='{"filer":{"description":"filer","model":"haiku","prompt":"","tools":["Read","Bash","WebFetch"]}}'
+  export BOX_FILER_ENABLED=1
   export ORCHESTRATOR_ENABLED=1
+  export BOX_REVIEW_LOOP_ORCHESTRATOR=1
+  unset BOX_REVIEW_LOOP_INLINE
   unset BOX_WRITE_ENABLED
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]

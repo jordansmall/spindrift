@@ -240,6 +240,8 @@ assemble_go_agent_files() {
   write_agent_file "$dir/reviewer.md" "reviewer"
   export DRIVER_AGENT_FILES_DIR="$dir"
   export ORCHESTRATOR_ENABLED=1
+  export BOX_REVIEW_LOOP_ORCHESTRATOR=1
+  unset BOX_REVIEW_LOOP_INLINE
   export WORK_DIR="$BATS_TEST_TMPDIR/work-agent-files-orch-on"
 
   run bash "$ENTRYPOINT"
@@ -268,6 +270,8 @@ assemble_go_agent_files() {
 
   export DRIVER_AGENT_FILES_DIR="$dir_bash"
   export ORCHESTRATOR_ENABLED=1
+  export BOX_REVIEW_LOOP_ORCHESTRATOR=1
+  unset BOX_REVIEW_LOOP_INLINE
   export WORK_DIR="$BATS_TEST_TMPDIR/work-agent-files-orch-on-parity"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
@@ -296,6 +300,8 @@ assemble_go_agent_files() {
   write_agent_file "$dir/reviewer.md" "reviewer"
   export DRIVER_AGENT_FILES_DIR="$dir"
   export ORCHESTRATOR_ENABLED=1
+  export BOX_REVIEW_LOOP_ORCHESTRATOR=1
+  unset BOX_REVIEW_LOOP_INLINE
   export WORK_DIR="$BATS_TEST_TMPDIR/work-agent-files-review-model"
 
   run bash "$ENTRYPOINT"
@@ -315,6 +321,8 @@ assemble_go_agent_files() {
   write_agent_file "$dir/scout.md" "scout"
   export DRIVER_AGENT_FILES_DIR="$dir"
   export ORCHESTRATOR_ENABLED=1
+  export BOX_REVIEW_LOOP_ORCHESTRATOR=1
+  unset BOX_REVIEW_LOOP_INLINE
   export WORK_DIR="$BATS_TEST_TMPDIR/work-agent-files-no-review-model"
 
   run bash "$ENTRYPOINT"

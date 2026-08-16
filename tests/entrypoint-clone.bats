@@ -66,6 +66,7 @@ setup() {
   git config --global "url.file://$forge_root/.insteadOf" "https://fjtok@forge.test/"
 
   export CODE_FORGE="forgejo"
+  export BOX_FORGE_BACKEND=FORGEJO
   export FORGEJO_BASE_URL="https://forge.test"
   export FORGEJO_TOKEN="fjtok"
   run bash "$ENTRYPOINT"
@@ -113,7 +114,11 @@ EOF
   chmod +x "$FAKE_BIN/fj"
 
   export CODE_FORGE="forgejo"
+  export BOX_FORGE_BACKEND=FORGEJO
   export ISSUE_TRACKER="forgejo"
+  export BOX_TRACKER_AXIS_READ=FORGEJO
+  export BOX_TRACKER_AXIS_WRITE=FORGEJO
+  export BOX_TRACKER_AXIS_FILER=FORGEJO
   export FORGEJO_BASE_URL="https://forge.test"
   export FORGEJO_TOKEN="fjtok"
   run bash "$ENTRYPOINT"
@@ -161,7 +166,11 @@ EOF
   chmod +x "$FAKE_BIN/fj"
 
   export CODE_FORGE="forgejo"
+  export BOX_FORGE_BACKEND=FORGEJO
   export ISSUE_TRACKER="forgejo"
+  export BOX_TRACKER_AXIS_READ=FORGEJO
+  export BOX_TRACKER_AXIS_WRITE=FORGEJO
+  export BOX_TRACKER_AXIS_FILER=FORGEJO
   export FORGEJO_BASE_URL="https://forge.test/"
   export FORGEJO_TOKEN="fjtok"
   run bash "$ENTRYPOINT"

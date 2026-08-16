@@ -115,6 +115,22 @@ setup_entrypoint_env() {
   # backstop's switch, so this value becomes irrelevant there, same as
   # BOX_WRITE_ENABLED already staying set-but-irrelevant in that test today).
   export BOX_OUTBOX_RELAY_CAPABLE=1
+  # BOX_TRACKER_AXIS_READ/WRITE/FILER, BOX_FORGE_BACKEND, and
+  # BOX_REVIEW_LOOP_INLINE are not schema knobs either (same reasoning as
+  # BOX_WRITE_ENABLED/BOX_OUTBOX_RELAY_CAPABLE above): nix derives them
+  # host-side from ISSUE_TRACKER/CODE_FORGE/ORCHESTRATOR_ENABLED and forwards
+  # them as a real launcher's own --tracker-axis-*/--forge-backend/
+  # --review-loop-* flags. Set them here to mirror what a real Box receives
+  # under this suite's default cell (ISSUE_TRACKER=github, CODE_FORGE=github,
+  # ORCHESTRATOR_ENABLED unset/off, issue #2533); individual tests that
+  # override one of those raw vars away from the default must also override
+  # the matching BOX_* var(s) alongside it to stay consistent, the same way a
+  # real dispatch always keeps them in sync.
+  export BOX_TRACKER_AXIS_READ=GITHUB
+  export BOX_TRACKER_AXIS_WRITE=GITHUB
+  export BOX_TRACKER_AXIS_FILER=GH
+  export BOX_FORGE_BACKEND=GH
+  export BOX_REVIEW_LOOP_INLINE=1
   # Pinned to a value distinct from the schema default (issue #2055; the
   # schema default has since moved on to claude-sonnet-5) so the MODEL-flag
   # assertions below stay stable regardless of what the schema defaults to.
