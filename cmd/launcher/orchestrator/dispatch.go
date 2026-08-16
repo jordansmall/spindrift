@@ -174,8 +174,51 @@ func dispatchManifestIfPresent(cfg config, state *runstate.RunState, stdout io.W
 			MaxParallel: cfg.maxParallelWorkers,
 		}
 
+		// notLanded records every slice name whose own commits did NOT end
+		// up on repoRoot's HEAD -- either because its own integration
+		// outcome was integrateConflict/integrateFailed, or because it was
+		// itself skipped here for depending on such a slice. batch N+1's
+		// own workers are created via `git worktree add ... HEAD`
+		// (workers.go), so a slice that DependsOn a name in this set must
+		// never be dispatched: its worktree would be created against a
+		// tree still missing that dependency's changes, defeating
+		// scheduleSlices' own batch-ordering guarantee in effect even
+		// though dispatch ORDER still honored it (issue #2060 review
+		// finding). integrateEmpty is deliberately excluded -- it means
+		// there was nothing to integrate, so HEAD already carries whatever
+		// the branch would have contributed (or the branch contributed
+		// nothing at all), not that anything failed to land.
+		notLanded := make(map[string]bool)
+
 		for _, batch := range scheduleSlices(dispatchSlices) {
-			batchResults := LaunchWorkers(cfg, SliceManifest{Slices: batch}, opts, stdout)
+			safe := make([]ManifestSlice, 0, len(batch))
+			for _, s := range batch {
+				blockingDep := ""
+				for _, dep := range s.DependsOn {
+					if notLanded[dep] {
+						blockingDep = dep
+						break
+					}
+				}
+				if blockingDep != "" {
+					// This slice's own dependency never landed on HEAD --
+					// skip it entirely (never dispatched), and propagate
+					// the same fate to it so anything depending on IT
+					// skips too. state.DoneSlices/RemainingSlices are left
+					// exactly as they were: this slice was never
+					// dispatched, so there is nothing to move, and a
+					// future manifest can still retry it.
+					notLanded[s.Name] = true
+					fmt.Fprintf(&findings, "- %s: skipped -- depends on %s, whose own integration did not land on HEAD\n", s.Name, blockingDep)
+					continue
+				}
+				safe = append(safe, s)
+			}
+			if len(safe) == 0 {
+				continue
+			}
+
+			batchResults := LaunchWorkers(cfg, SliceManifest{Slices: safe}, opts, stdout)
 			for _, r := range batchResults {
 				if r.Status != WorkerDone {
 					continue
@@ -187,10 +230,14 @@ func dispatchManifestIfPresent(cfg config, state *runstate.RunState, stdout io.W
 					// proceeds (workers already ran and succeeded on their
 					// own terms).
 					integrations[r.Slice] = integrationOutcome{status: integrateFailed, err: repoRootErr}
+					notLanded[r.Slice] = true
 					continue
 				}
 				status, out, err := integrateSliceBranch(repoRoot, r.Slice, workerBranchName(r.Slice))
 				integrations[r.Slice] = integrationOutcome{status: status, output: out, err: err}
+				if status == integrateConflict || status == integrateFailed {
+					notLanded[r.Slice] = true
+				}
 			}
 			results = append(results, batchResults...)
 		}
@@ -224,11 +271,26 @@ func dispatchManifestIfPresent(cfg config, state *runstate.RunState, stdout io.W
 					fmt.Fprintf(&findings, "  %s\n", strings.ReplaceAll(out, "\n", "\n  "))
 				}
 			case integrateFailed:
+				// Mirror the integrateConflict case's shape exactly: a
+				// short, one-line outcome, then -- separately -- an
+				// indented, truncated block for the actual error text.
+				// integrateSliceBranch's own dirty-tree error
+				// (integrate.go) embeds a full `git status --porcelain`
+				// dump, which can be arbitrarily long; appending it raw
+				// and un-indented onto this one line could blow past
+				// maxWorkerResultInFindings and inject content that reads
+				// like additional top-level findings lines into the block
+				// seeded into the next coordinator pass's own prompt
+				// (issue #2060 review finding).
+				fmt.Fprintf(&findings, "- %s: done, but integration failed\n", r.Slice)
 				errMsg := ""
 				if outcome.err != nil {
 					errMsg = outcome.err.Error()
 				}
-				fmt.Fprintf(&findings, "- %s: done, but integration failed: %s\n", r.Slice, errMsg)
+				if errMsg = strings.TrimSpace(errMsg); errMsg != "" {
+					errMsg = truncateRunes(errMsg, maxWorkerResultInFindings)
+					fmt.Fprintf(&findings, "  %s\n", strings.ReplaceAll(errMsg, "\n", "\n  "))
+				}
 			default: // integrateOK
 				fmt.Fprintf(&findings, "- %s: done, integrated (branch %s)\n", r.Slice, branch)
 			}
