@@ -69,14 +69,10 @@
 #                        postdates the ADR 0037 Pass 2 freeze and therefore
 #                        never had an old `settings.<section>` alias; exempts
 #                        it from nix/checks/schema-drift.nix's
-#                        legacy-settings-section coverage assert (issue #2522).
-#                        Cross-checked, not just trusted: that check's
-#                        preFreezeFlakeOptionNames is a frozen snapshot of
-#                        every flakeOption knob that existed at the freeze
-#                        commit, and a knob named there can never legitimately
-#                        carry this flag (it must have had a real old alias)
-#                        -- catches the flag and its map row being hand-edited
-#                        wrong together in the same PR
+#                        legacy-settings-section coverage assert (issue #2522
+#                        -- freeze details and the cross-check rationale live
+#                        on lib/legacy-settings-section.nix and
+#                        lib/pre-freeze-flake-options.nix, not repeated here)
 let
   backends = import ./backends/default.nix;
 in
