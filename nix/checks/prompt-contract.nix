@@ -389,6 +389,39 @@ in
       "every forbiddenMarkers row's enforce must be one of [${concatStringsSep ", " knownEnforce}], offending ids: [${concatStringsSep ", " badIds}]";
     pkgs.runCommand "prompt-contract-forbidden-markers-every-row-enforce-known-value" { } "touch $out";
 
+  # issue #2509 (Finding 2): every row whose enforce is "git-hook" or
+  # "command-shim" -- the rows readonlyguards.go actually renders into a
+  # runtime shim/hook script -- must carry a runtimeMessage distinct from its
+  # (prompt-validator-facing) message field. A "prompt-only" row is never
+  # runtime-rendered, so it carries no runtimeMessage at all.
+  prompt-contract-forbidden-markers-runtime-rendered-rows-have-runtime-message =
+    let
+      runtimeRendered = builtins.filter (
+        r: r.enforce == "git-hook" || r.enforce == "command-shim"
+      ) promptContract.forbiddenMarkers;
+      bad = builtins.filter (
+        r: !(r ? runtimeMessage) || r.runtimeMessage == "" || r.runtimeMessage == r.message
+      ) runtimeRendered;
+      badIds = map (r: r.id) bad;
+    in
+    assert assertMsg (bad == [ ])
+      "every git-hook/command-shim forbiddenMarkers row must carry a non-empty runtimeMessage distinct from its message, offending ids: [${concatStringsSep ", " badIds}]";
+    pkgs.runCommand "prompt-contract-forbidden-markers-runtime-rendered-rows-have-runtime-message"
+      { }
+      "touch $out";
+
+  prompt-contract-forbidden-markers-prompt-only-rows-have-no-runtime-message =
+    let
+      promptOnly = builtins.filter (r: r.enforce == "prompt-only") promptContract.forbiddenMarkers;
+      bad = builtins.filter (r: r ? runtimeMessage) promptOnly;
+      badIds = map (r: r.id) bad;
+    in
+    assert assertMsg (bad == [ ])
+      "every prompt-only forbiddenMarkers row must carry no runtimeMessage, offending ids: [${concatStringsSep ", " badIds}]";
+    pkgs.runCommand "prompt-contract-forbidden-markers-prompt-only-rows-have-no-runtime-message"
+      { }
+      "touch $out";
+
   prompt-contract-forbidden-git-push-row-shape =
     let
       row = forbiddenMarkerById "forbidden-git-push";
@@ -405,6 +438,10 @@ in
       "forbidden-git-push row's kind must be 'substring', got: ${row.kind}";
     assert assertMsg (row.enforce == "git-hook")
       "forbidden-git-push row's enforce must be 'git-hook', got: ${row.enforce}";
+    assert assertMsg (
+      row.runtimeMessage
+      == "read-only Box: your committed branch is relayed via the outbox; do not push -- this push has been blocked locally."
+    ) "forbidden-git-push row's runtimeMessage must match the runtime shim wording, got: ${row.runtimeMessage}";
     pkgs.runCommand "prompt-contract-forbidden-git-push-row-shape" { } "touch $out";
 
   # issue #2499: git bundle create's row is enforced only at the prompt level
@@ -452,12 +489,19 @@ in
       "forbidden-gh-api-mutation row's kind must be 'gh-api-mutation', got: ${row.kind}";
     assert assertMsg (row.enforce == "command-shim")
       "forbidden-gh-api-mutation row's enforce must be 'command-shim', got: ${row.enforce}";
+    assert assertMsg (
+      row.runtimeMessage
+      == "read-only Box: gh api does not accept a mutating method under read-only; make this change through the same relay a `gh pr create`/`gh issue create`/`gh issue comment` write would use -- this call has been blocked locally."
+    ) "forbidden-gh-api-mutation row's runtimeMessage must match the runtime shim wording, got: ${row.runtimeMessage}";
     pkgs.runCommand "prompt-contract-forbidden-gh-api-mutation-row-shape" { } "touch $out";
 
-  # issue #2509: the five fj rows mirror the gh rows above one-for-one and are
-  # pinned enforce=="command-shim" now that driver-exec's readonly-guards
-  # verb installs a real fj shim -- see the rationale comment on these rows
-  # in lib/prompt-contract.nix.
+  # issue #2509: the five fj rows mirror the gh rows above one-for-one but
+  # stay pinned enforce=="prompt-only" -- driver-exec's readonly-guards verb
+  # CAN render a real fj shim, but agent/entrypoint.sh's
+  # install_readonly_guards never invokes the verb for a real forgejo
+  # dispatch (the forgejo backend's outboxRelayCapable/HostMediatedRemote are
+  # both false), so no fj shim reaches production -- see the rationale
+  # comment on these rows in lib/prompt-contract.nix.
   prompt-contract-forbidden-fj-pr-create-row-shape =
     let
       row = forbiddenMarkerById "forbidden-fj-pr-create";
@@ -472,8 +516,8 @@ in
       "forbidden-fj-pr-create row's when must be 'boxAccessReadOnly', got: ${row.when}";
     assert assertMsg (row.kind == "substring")
       "forbidden-fj-pr-create row's kind must be 'substring', got: ${row.kind}";
-    assert assertMsg (row.enforce == "command-shim")
-      "forbidden-fj-pr-create row's enforce must be 'command-shim', got: ${row.enforce}";
+    assert assertMsg (row.enforce == "prompt-only")
+      "forbidden-fj-pr-create row's enforce must be 'prompt-only', got: ${row.enforce}";
     pkgs.runCommand "prompt-contract-forbidden-fj-pr-create-row-shape" { } "touch $out";
 
   prompt-contract-forbidden-fj-pr-ready-row-shape =
@@ -490,8 +534,8 @@ in
       "forbidden-fj-pr-ready row's when must be 'boxAccessReadOnly', got: ${row.when}";
     assert assertMsg (row.kind == "substring")
       "forbidden-fj-pr-ready row's kind must be 'substring', got: ${row.kind}";
-    assert assertMsg (row.enforce == "command-shim")
-      "forbidden-fj-pr-ready row's enforce must be 'command-shim', got: ${row.enforce}";
+    assert assertMsg (row.enforce == "prompt-only")
+      "forbidden-fj-pr-ready row's enforce must be 'prompt-only', got: ${row.enforce}";
     pkgs.runCommand "prompt-contract-forbidden-fj-pr-ready-row-shape" { } "touch $out";
 
   prompt-contract-forbidden-fj-pr-merge-row-shape =
@@ -508,8 +552,8 @@ in
       "forbidden-fj-pr-merge row's when must be 'boxAccessReadOnly', got: ${row.when}";
     assert assertMsg (row.kind == "substring")
       "forbidden-fj-pr-merge row's kind must be 'substring', got: ${row.kind}";
-    assert assertMsg (row.enforce == "command-shim")
-      "forbidden-fj-pr-merge row's enforce must be 'command-shim', got: ${row.enforce}";
+    assert assertMsg (row.enforce == "prompt-only")
+      "forbidden-fj-pr-merge row's enforce must be 'prompt-only', got: ${row.enforce}";
     pkgs.runCommand "prompt-contract-forbidden-fj-pr-merge-row-shape" { } "touch $out";
 
   prompt-contract-forbidden-fj-issue-comment-row-shape =
@@ -526,8 +570,8 @@ in
       "forbidden-fj-issue-comment row's when must be 'boxAccessReadOnly', got: ${row.when}";
     assert assertMsg (row.kind == "substring")
       "forbidden-fj-issue-comment row's kind must be 'substring', got: ${row.kind}";
-    assert assertMsg (row.enforce == "command-shim")
-      "forbidden-fj-issue-comment row's enforce must be 'command-shim', got: ${row.enforce}";
+    assert assertMsg (row.enforce == "prompt-only")
+      "forbidden-fj-issue-comment row's enforce must be 'prompt-only', got: ${row.enforce}";
     pkgs.runCommand "prompt-contract-forbidden-fj-issue-comment-row-shape" { } "touch $out";
 
   prompt-contract-forbidden-fj-issue-create-row-shape =
@@ -544,8 +588,8 @@ in
       "forbidden-fj-issue-create row's when must be 'boxAccessReadOnly', got: ${row.when}";
     assert assertMsg (row.kind == "substring")
       "forbidden-fj-issue-create row's kind must be 'substring', got: ${row.kind}";
-    assert assertMsg (row.enforce == "command-shim")
-      "forbidden-fj-issue-create row's enforce must be 'command-shim', got: ${row.enforce}";
+    assert assertMsg (row.enforce == "prompt-only")
+      "forbidden-fj-issue-create row's enforce must be 'prompt-only', got: ${row.enforce}";
     pkgs.runCommand "prompt-contract-forbidden-fj-issue-create-row-shape" { } "touch $out";
 
   # Pins buildTimeRejectVerdicts (issue #2250): the build-time reject arm that
