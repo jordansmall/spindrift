@@ -2106,7 +2106,9 @@ verdict tokens must be unique and contain no whitespace; and no verdict
 token may be the reserved `blocked` status, which stays the escape hatch for
 "the Box crashed or produced no verdict" regardless of configuration. A
 malformed value aborts startup rather than silently falling back to the
-default.
+default. The same five rules are also enforced at nix eval time
+(`lib/research-verdicts.nix`'s `parse`), so a malformed `RESEARCH_VERDICTS`
+fails the flake build itself rather than only surfacing at launcher startup.
 
 On Settle, the launcher parses the posted outcome line's verdict against
 this configured set and applies the mapped label. An unrecognized verdict —
