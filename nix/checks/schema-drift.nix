@@ -142,74 +142,11 @@ let
   structuralPaths = import ../../lib/structural-paths.nix;
   resolveNixPath = import ../../lib/nixpath.nix;
 
-  # Frozen ground truth (issue #2522 review finding): every flakeOption =
-  # true knob name that existed in lib/env-schema.nix at the ADR 0037 Pass 2
-  # freeze commit, i.e. `git show b2602019~1:lib/env-schema.nix` filtered for
-  # `flakeOption = true`. Sourced from git history exactly once and must
-  # never be edited again -- same "frozen snapshot" spirit as
-  # lib/legacy-settings-section.nix's own header comment. This is the
-  # independent cross-check for legacySettingsExempt below: a knob in this
-  # list unconditionally predates the freeze and therefore had a real old
-  # `settings.<section>` alias, so it can never legitimately be
-  # legacySettingsExempt -- a real bug (mergeMethod wrongly marked exempt
-  # despite predating the freeze) slipped past the coverage assert before
-  # this list existed, because the assert trusted legacySettingsExempt at
-  # face value with nothing to catch the flag itself being wrong.
-  preFreezeFlakeOptionNames = [
-    "autoFormat"
-    "autoLint"
-    "baseBranch"
-    "boxForgeAndIssueAccess"
-    "branchPrefix"
-    "bwrapUnshareNet"
-    "codeForge"
-    "codeForgeAccumulationRepoDir"
-    "codeForgeRemoteURL"
-    "completeLabel"
-    "continuousDispatch"
-    "devShellName"
-    "devShellProbeTimeout"
-    "failedLabel"
-    "filerModel"
-    "ghTokenRefreshFile"
-    "gitUserEmail"
-    "gitUserName"
-    "holdJitterSecs"
-    "inProgressLabel"
-    "issueTracker"
-    "jiraBaseURL"
-    "jiraEmail"
-    "jiraIncludeComments"
-    "jiraProjectKey"
-    "jiraStatusMapping"
-    "label"
-    "localIssueReference"
-    "localIssuesDir"
-    "maxBudgetTokens"
-    "maxBudgetUSD"
-    "maxFixAttempts"
-    "maxJobs"
-    "maxParallel"
-    "maxRebaseAttempts"
-    "memoryLimit"
-    "mergeGuardPaths"
-    "mergeMethod"
-    "mergeMode"
-    "mergePollInterval"
-    "mergePollTimeout"
-    "model"
-    "orchestratorEnabled"
-    "overlapGate"
-    "pidsLimit"
-    "podmanNetwork"
-    "preflightStaleBase"
-    "repoSlug"
-    "reviewModel"
-    "scoutModel"
-    "transientBackoffSecs"
-    "transientRetryMax"
-    "workerModel"
-  ];
+  # Frozen ground truth (issue #2522 review finding), factored into
+  # lib/pre-freeze-flake-options.nix (mirroring lib/legacy-settings-section.nix
+  # and lib/structural-paths.nix) so it isn't a fourth hand-copy of a knob
+  # list living only in this check.
+  preFreezeFlakeOptionNames = import ../../lib/pre-freeze-flake-options.nix;
 
   # Coverage predicate (issue #2522): every flakeOption knob must either have
   # a row in lib/legacy-settings-section.nix or be explicitly
@@ -1561,8 +1498,10 @@ in
       # mergeMode is a real pre-freeze knob (in preFreezeFlakeOptionNames)
       # that already has a real row in legacySettingsSection -- decorating
       # its schema entry with legacySettingsExempt = true; reproduces the
-      # exact mergeMethod bug shape this closes (a knob wrongly marked
-      # exempt despite predating the freeze) and must be caught by
+      # same wrongly-exempt-despite-predating-the-freeze mistake this closes
+      # (the actual mergeMethod bug lacked a map row entirely; wronglyExempt
+      # must fire regardless of whether a row exists, so this fixture keeps
+      # mergeMode's real row to prove that) and must be caught by
       # wronglyExempt.
       wronglyExemptSchema = schema // {
         mergeMode = schema.mergeMode // {
@@ -1599,6 +1538,6 @@ in
     assert assertMsg exemptSkipResult.success
       "legacy-settings-section-coverage-guard: expected assertLegacySettingsSectionOk to accept a synthetic knob genuinely postdating the freeze (legacySettingsExempt = true;, not in preFreezeFlakeOptionNames, no map row), but it failed";
     assert assertMsg (!wronglyExemptResult.success)
-      "legacy-settings-section-coverage-guard: expected assertLegacySettingsSectionOk to reject mergeMode (a pre-freeze knob per preFreezeFlakeOptionNames, with a real map row) decorated with an injected legacySettingsExempt = true; -- the exact mergeMethod bug shape -- but it evaluated successfully";
+      "legacy-settings-section-coverage-guard: expected assertLegacySettingsSectionOk to reject mergeMode (a pre-freeze knob per preFreezeFlakeOptionNames, with a real map row) decorated with an injected legacySettingsExempt = true; -- the same wrongly-exempt-despite-predating-the-freeze mistake as the mergeMethod bug -- but it evaluated successfully";
     pkgs.runCommand "legacy-settings-section-coverage-guard" { } "touch $out";
 }
