@@ -1420,13 +1420,18 @@ artifact, not a growing transcript:
   round instead commits the run to one terminal land pass, the same
   terminal-land mechanism `--max-review-rounds`/`--max-slices` already use.
   Either dimension alone can trip it; negative values are rejected at
-  startup. Unlike `--max-review-rounds`/`--max-slices`, this cap is
-  consulted only by the code-owned review pass's own decision — the legacy
-  single-loop path (`--review-prompt-file` unset) ignores it entirely, since
-  it never asks the review-round question this cap answers. Forwarded from
-  the same `MAX_BUDGET_TOKENS`/`MAX_BUDGET_USD` knobs the [Advanced
-  tuning](#advanced-tuning) table's `selfHealing` group already documents —
-  see that table for the operator-facing env var/`settings` surface.
+  startup. Unlike `--max-review-rounds`/`--max-slices` — both consulted by
+  the legacy single-loop path too — `--max-budget-tokens`/`--max-budget-usd`
+  is consulted only by the code-owned review pass's own decision: the
+  legacy loop (`--review-prompt-file` unset) accepts both flags without
+  error (mainRun warns to stderr instead of erroring, since a configured
+  cap that turns out to be inert isn't invalid input, just pointless under
+  the selected loop) but never reads them, so a run on that path spends
+  past a configured budget cap with no warning beyond that one startup
+  line. Forwarded from the same `MAX_BUDGET_TOKENS`/`MAX_BUDGET_USD` knobs
+  the [Advanced tuning](#advanced-tuning) table's `selfHealing` group
+  already documents — see that table for the operator-facing env
+  var/`settings` surface.
 
 **Code-owned review pass (issue #2037).** `--review-prompt-file` names a
 distinct prompt (`review-prompt.md`) the orchestrator invokes as its own
