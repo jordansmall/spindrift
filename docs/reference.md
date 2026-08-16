@@ -2158,6 +2158,20 @@ per-verdict semantic guidance itself is out of scope here and applies
 equally to the self-contained research mode's own baked prompt — see
 [Self-contained research mode](#self-contained-research-mode).
 
+**Caveat for a `SPINDRIFT_PROMPT_DIR` override of `research-prompt.md` /
+`research-self-contained-prompt.md` specifically:** both checked-in
+templates carry two injection markers (`<!-- RESEARCH_VERDICT_BULLETS -->`
+and `` `<RESEARCH_VERDICT_ENUM>` ``) that only `lib/research-verdicts.nix`'s
+`render` resolves, and that resolution happens at nix build/eval time (when
+the harness image is baked), never at container runtime. An unmodified copy
+of either template dropped into a `SPINDRIFT_PROMPT_DIR` override directory
+therefore ships those markers to the agent verbatim, unrendered — the agent
+would be told to "Render exactly one of these verdicts:" followed by
+nothing. An operator overriding either of these two files via
+`SPINDRIFT_PROMPT_DIR` must supply their own fully-written-out VERDICT
+section (no markers) in their override copy, the same as they always had to
+for any other prompt content.
+
 #### Caveat: a killed launcher can strand an issue
 
 The label swaps are best-effort. If the launcher is killed mid-run (Ctrl-C, a
@@ -2946,7 +2960,11 @@ it's overridable at runtime via the same `SPINDRIFT_PROMPT_DIR` /
 `--prompt-dir` prompt-directory override (issue #2200) for zero-rebuild
 iteration — a custom prompt directory ships
 `research-self-contained-prompt.md` alongside `research-prompt.md` to
-override both — and its machine-checkable verdict contract renders
+override both. As with the ordinary research prompt, an unmodified copy of
+the checked-in template ships its two verdict injection markers unresolved
+under this override — see the caveat under [Configuring the research
+verdict vocabulary](#configuring-the-research-verdict-vocabulary-research_verdicts).
+Its machine-checkable verdict contract otherwise renders
 from the same [`RESEARCH_VERDICTS`](#configuring-the-research-verdict-vocabulary-research_verdicts)
 configured set as the ordinary prompt (issue #2201), so a custom vocabulary
 reaches both. Settle is unchanged: self-contained research still posts
