@@ -450,6 +450,56 @@ let
     };
   };
 
+  # Structural forbidden-marker check (issue #2510, parent #2498 campaign R):
+  # the fragment rows the fragment-body scan actually reaches -- every
+  # fragments.nix row EXCEPT the ones whose `gate` name itself already
+  # proves the fragment is access-mode-aware (or independently authorized),
+  # so a legitimate negation ("do NOT `git push`") in the read-only half of
+  # an explicit access-mode pair is never mistaken for a leak. This is
+  # unconditional -- unlike buildTimeRejectVerdicts above, it does not
+  # depend on this build's own mergedDefaults/staticGates, because a
+  # forbidden marker shipped in the corpus is a problem for any Consumer
+  # that might configure boxAccessReadOnly, not just this particular build.
+  readOnlyReachableFragmentRows = builtins.filter (
+    row:
+    !(
+      lib.hasInfix "READ_ONLY" row.gate
+      || lib.hasInfix "READWRITE" row.gate
+      || lib.hasInfix "READ_WRITE" row.gate
+      || lib.hasInfix "_RW_" row.gate
+      || row.gate == "FILER_FILE_DIRECT_GH"
+      || row.gate == "FILER_FILE_DIRECT_FORGEJO"
+      || row.gate == "FILER_FILE_DIRECT_ANY"
+    )
+  ) fragments;
+
+  # Every non-exempt fragment's raw content, plus the three shared top-level
+  # templates' raw (unsubstituted) text, scanned for any forbiddenMarkers
+  # "substring" row -- see lib/prompt-contract.nix's
+  # buildTimeForbiddenMarkerViolations doc comment for the full design.
+  forbiddenMarkerViolations = promptContract.buildTimeForbiddenMarkerViolations {
+    fragmentContentByFile = builtins.listToAttrs (
+      map (row: {
+        name = row.fragment;
+        value = builtins.readFile (fragmentsDir + "/${row.fragment}");
+      }) readOnlyReachableFragmentRows
+    );
+    templateContentByFile = {
+      "issue-prompt.md" = prompt;
+      "review-prompt.md" = reviewPrompt;
+      "filer-prompt.md" = filerPrompt;
+    };
+  };
+
+  # Forces forbiddenMarkerViolations' evaluation the same way buildTimeRejectOk
+  # forces buildTimeRejectVerdicts below -- consumed by `assert
+  # forbiddenMarkerCheckOk;` ahead of the returned attrset.
+  forbiddenMarkerCheckOk =
+    if forbiddenMarkerViolations == [ ] then
+      true
+    else
+      throw "mkHarness: structural forbidden-marker check failed -- a forbidden marker (lib/prompt-contract.nix forbiddenMarkers) must live only in a gate-paired fragment (issue #2510):\n${lib.concatMapStringsSep "\n" (v: "  ${v.file}: contains forbidden marker '${v.marker}' (${v.id})") forbiddenMarkerViolations}";
+
   # Version sourced from the release-please manifest so mkHarness always tracks
   # the bot-maintained source of truth (ADR-0010).
   spindriftVersion = (builtins.fromJSON (builtins.readFile ../.release-please-manifest.json)).".";
@@ -1046,6 +1096,7 @@ if unknownDefaultKeys != [ ] then
   throw "mkHarness: unknown defaults key(s): ${lib.concatStringsSep ", " unknownDefaultKeys}; valid keys: ${lib.concatStringsSep ", " (lib.attrNames flakeOptionEntries)}"
 else
   assert buildTimeRejectOk;
+  assert forbiddenMarkerCheckOk;
   lib.warnIf (legacyKnobsSet != [ ]) deprecationMsg {
     inherit
       image
