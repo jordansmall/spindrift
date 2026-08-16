@@ -917,22 +917,22 @@ in
 
   # The read-only counterpart (issue #2019): a read-only Box under
   # ORCHESTRATOR_ENABLED holds no write token, so the filer's relay
-  # fragments must never invoke `gh label create`/`gh issue create` -- the
-  # exact footgun a read-only token can't satisfy -- and must carry the
-  # host-mediated SPINDRIFT_ISSUE_INTENT relay instead (mirroring
-  # open-pr-create-outbox.md's SPINDRIFT_PR_INTENT form). Same static,
-  # eval-only grep shape as github-readonly-comment-fragments-* above.
+  # fragments must never invoke `gh label create` -- the exact footgun a
+  # read-only token can't satisfy -- and must carry the host-mediated
+  # SPINDRIFT_ISSUE_INTENT relay instead (mirroring open-pr-create-outbox.md's
+  # SPINDRIFT_PR_INTENT form). `gh issue create`'s absence here is already
+  # covered by the mkHarness structural forbidden-marker eval assert (issue
+  # #2510/#2513). Same static, eval-only grep shape as
+  # github-readonly-comment-fragments-* above.
   filer-relay-fragments-never-invoke-gh-write =
     pkgs.runCommand "filer-relay-fragments-never-invoke-gh-write" { }
       ''
         for f in filer-label-relay.md filer-file-relay.md file-issues-relay.md; do
-          for cmd in 'gh label create' 'gh issue create'; do
-            n=$(grep -c -- "$cmd" ${../../templates/default/prompts/fragments}/"$f" || true)
-            [ "$n" -eq 0 ] || {
-              echo "$f: expected no '$cmd', found $n occurrence(s)" >&2
-              exit 1
-            }
-          done
+          n=$(grep -c 'gh label create' ${../../templates/default/prompts/fragments}/"$f" || true)
+          [ "$n" -eq 0 ] || {
+            echo "$f: expected no 'gh label create', found $n occurrence(s)" >&2
+            exit 1
+          }
         done
         grep -q 'SPINDRIFT_ISSUE_INTENT ''${RUN_NONCE}' ${../../templates/default/prompts/fragments/filer-file-relay.md}
         touch $out
