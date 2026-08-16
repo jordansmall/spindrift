@@ -166,7 +166,7 @@ func TestScheduleSlices_NormalizedEquivalentLeasesSequenced(t *testing.T) {
 // TestScheduleSlices_GenuinelyDisjointLeasesConcurrent guards against
 // over-correcting the lease-overlap fix into always-sequential: leases that
 // are neither equal nor prefix-related after normalization must still join
-// the same batch.
+// the same batch. This is a regression guard -- it already passes today.
 func TestScheduleSlices_GenuinelyDisjointLeasesConcurrent(t *testing.T) {
 	slices := []ManifestSlice{
 		{Name: "a", FileLeases: []string{"cmd/x/a.go"}},
@@ -174,4 +174,87 @@ func TestScheduleSlices_GenuinelyDisjointLeasesConcurrent(t *testing.T) {
 	}
 	got := scheduleNames(t, slices)
 	assertBatches(t, got, [][]string{{"a", "b"}})
+}
+
+// TestScheduleSlices_RootLeaseOverlapsEverything covers a lease of "."
+// (whole repo root) -- it must be treated as unprovably overlapping with
+// every other lease, never scheduled concurrently alongside anything else.
+func TestScheduleSlices_RootLeaseOverlapsEverything(t *testing.T) {
+	slices := []ManifestSlice{
+		{Name: "a", FileLeases: []string{"."}},
+		{Name: "b", FileLeases: []string{"cmd/x.go"}},
+	}
+	got := scheduleNames(t, slices)
+	assertBatches(t, got, [][]string{{"a"}, {"b"}})
+}
+
+// TestScheduleSlices_EmptyStringLeaseOverlapsEverything covers a lease of ""
+// -- path.Clean("") == "." so this must behave identically to an explicit
+// "." lease: unprovably overlapping with every other lease.
+func TestScheduleSlices_EmptyStringLeaseOverlapsEverything(t *testing.T) {
+	slices := []ManifestSlice{
+		{Name: "a", FileLeases: []string{""}},
+		{Name: "b", FileLeases: []string{"cmd/x.go"}},
+	}
+	got := scheduleNames(t, slices)
+	assertBatches(t, got, [][]string{{"a"}, {"b"}})
+}
+
+// TestScheduleSlices_AbsoluteVsRelativeLeaseOverlap covers an absolute lease
+// compared against a relative lease naming logically the same file -- with
+// no repoRoot available to this package, there's no reliable way to prove
+// they're disjoint, so the pair must be treated as overlapping.
+func TestScheduleSlices_AbsoluteVsRelativeLeaseOverlap(t *testing.T) {
+	slices := []ManifestSlice{
+		{Name: "a", FileLeases: []string{"/work/cmd/x.go"}},
+		{Name: "b", FileLeases: []string{"cmd/x.go"}},
+	}
+	got := scheduleNames(t, slices)
+	assertBatches(t, got, [][]string{{"a"}, {"b"}})
+}
+
+// TestScheduleSlices_ParentEscapeLeaseOverlapsEverything covers a lease
+// containing ".." that escapes the repo root -- it can't be reasoned about
+// against an ordinary relative lease, so it must be treated as unprovably
+// overlapping with every other lease.
+func TestScheduleSlices_ParentEscapeLeaseOverlapsEverything(t *testing.T) {
+	slices := []ManifestSlice{
+		{Name: "a", FileLeases: []string{"../etc/passwd"}},
+		{Name: "b", FileLeases: []string{"cmd/x.go"}},
+	}
+	got := scheduleNames(t, slices)
+	assertBatches(t, got, [][]string{{"a"}, {"b"}})
+}
+
+// TestDependencyOrder_CycleFallbackTerminates covers dependencyOrder's
+// cycle-fallback branch (a full scan makes no progress) with a genuine
+// 2-slice cycle: a depends on b, b depends on a. It must terminate without
+// hanging or panicking and return both slices, though the exact tie-break
+// order beyond declaration order isn't pinned here.
+func TestDependencyOrder_CycleFallbackTerminates(t *testing.T) {
+	slices := []ManifestSlice{
+		{Name: "a", DependsOn: []string{"b"}},
+		{Name: "b", DependsOn: []string{"a"}},
+	}
+	got := dependencyOrder(slices)
+	if len(got) != 2 {
+		t.Fatalf("dependencyOrder(cycle) returned %d slices, want 2; got=%v", len(got), batchNames(got))
+	}
+	names := map[string]bool{got[0].Name: true, got[1].Name: true}
+	if !names["a"] || !names["b"] {
+		t.Fatalf("dependencyOrder(cycle) = %v, want both a and b present", batchNames(got))
+	}
+}
+
+// TestScheduleSlices_DependencyCycleDoesNotHang covers scheduleSlices at the
+// end-to-end level with the same 2-slice cycle -- it must terminate and
+// produce some deterministic batch assignment holding both slices, whatever
+// that assignment actually is (one batch or two).
+func TestScheduleSlices_DependencyCycleDoesNotHang(t *testing.T) {
+	slices := []ManifestSlice{
+		{Name: "a", DependsOn: []string{"b"}},
+		{Name: "b", DependsOn: []string{"a"}},
+	}
+	got := scheduleNames(t, slices)
+	assertBatches(t, got, [][]string{{"a"}, {"b"}})
 }
