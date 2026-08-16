@@ -3,10 +3,22 @@ package main
 import (
 	"fmt"
 	"io"
+	"os"
 	"strings"
 
 	"spindrift.dev/launcher/internal/runstate"
 )
+
+// integrationOutcome bundles integrateSliceBranch's own three return values
+// so dispatchManifestIfPresent can record one WorkerDone slice's
+// integration result immediately (right after its batch's LaunchWorkers
+// call), then compose the corresponding findings line later, once every
+// batch has run (issue #2060).
+type integrationOutcome struct {
+	status integrateStatus
+	output string
+	err    error
+}
 
 // maxWorkerResultInFindings caps how much of a single worker's own
 // WorkerResult.Result text is folded into state.WorkerFindings -- one
@@ -69,18 +81,37 @@ func truncateRunes(s string, max int) string {
 // If every slice in the manifest is filtered out this way, LaunchWorkers is
 // never called at all.
 //
-// For whatever slices remain, it dispatches LaunchWorkers and merges every
-// WorkerResult into state: WorkerDone slices move from RemainingSlices (if
-// present) into DoneSlices, WorkerTimedOut/WorkerCrashed slices move the
-// other way, and each move is deduped so a slice name never appears twice in
-// the same list nor in both lists at once (issue #2059 review finding B). It
-// composes state.WorkerFindings as one line (plus, for a WorkerDone result,
-// its own indented result block, capped at maxWorkerResultInFindings) per
-// dispatched slice, plus one skip-notice line per already-done slice, and
-// returns true -- letting the caller's own loop treat this pass as "more
-// work to do" regardless of what its own verdict/outcome scan found, since
-// the coordinator's only job on a manifest-emitting pass is to declare the
-// manifest and stop (issue #2059 AC1).
+// For whatever slices remain, it partitions them into ordered batches via
+// scheduleSlices (schedule.go, issue #2060) -- provably-disjoint-lease
+// slices within one batch dispatch fully concurrently via one LaunchWorkers
+// call, while batches themselves run strictly in sequence, batch N+1 only
+// starting once every slice in batch N has both joined AND (for a
+// WorkerDone slice) had its branch integrated. That integration step
+// (integrateSliceBranch, integrate.go) runs immediately after each batch's
+// LaunchWorkers call, before the next batch is ever dispatched: a later
+// batch's own workers are created via `git worktree add ... HEAD`
+// (workers.go), so a slice that DependsOn an earlier batch's slice must see
+// that dependency's integrated changes already on HEAD when its own
+// worktree is created.
+//
+// Every WorkerResult across every batch is merged into state exactly as
+// before: WorkerDone slices move from RemainingSlices (if present) into
+// DoneSlices, WorkerTimedOut/WorkerCrashed slices move the other way, and
+// each move is deduped so a slice name never appears twice in the same list
+// nor in both lists at once (issue #2059 review finding B). A slice stays in
+// DoneSlices once WorkerDone regardless of whether its own branch
+// integration succeeded -- the worker's own job is done either way, and its
+// branch is never deleted, so a conflicted/failed integration can still be
+// resolved manually later from the same branch name. It composes
+// state.WorkerFindings as one line per dispatched slice (naming the
+// integration outcome for a WorkerDone slice -- integrated, nothing to
+// integrate, conflicted with manual-resolution guidance, or failed -- plus
+// its own indented result block, capped at maxWorkerResultInFindings), plus
+// one skip-notice line per already-done slice, and returns true -- letting
+// the caller's own loop treat this pass as "more work to do" regardless of
+// what its own verdict/outcome scan found, since the coordinator's only job
+// on a manifest-emitting pass is to declare the manifest and stop (issue
+// #2059 AC1).
 func dispatchManifestIfPresent(cfg config, state *runstate.RunState, stdout io.Writer) bool {
 	if cfg.workerPromptFile == "" {
 		// This pass was never configured to dispatch anything of its own
@@ -122,13 +153,42 @@ func dispatchManifestIfPresent(cfg config, state *runstate.RunState, stdout io.W
 	}
 
 	var results []WorkerResult
+	// integrations records, per slice name, the outcome of integrating that
+	// slice's own branch into repoRoot -- populated only for WorkerDone
+	// results, immediately after each batch's own LaunchWorkers call
+	// returns and before the next batch is dispatched (see the function's
+	// own doc comment above).
+	integrations := make(map[string]integrationOutcome)
 	if len(dispatchSlices) > 0 {
-		results = LaunchWorkers(cfg, SliceManifest{Slices: dispatchSlices}, WorkerOptions{
+		repoRoot, repoRootErr := os.Getwd()
+
+		opts := WorkerOptions{
 			PromptFile:  cfg.workerPromptFile,
 			WorkDir:     cfg.workerWorkDir,
 			Timeout:     cfg.workerTimeout,
 			MaxParallel: cfg.maxParallelWorkers,
-		}, stdout)
+		}
+
+		for _, batch := range scheduleSlices(dispatchSlices) {
+			batchResults := LaunchWorkers(cfg, SliceManifest{Slices: batch}, opts, stdout)
+			for _, r := range batchResults {
+				if r.Status != WorkerDone {
+					continue
+				}
+				if repoRootErr != nil {
+					// Determining repoRoot failed once, up front -- every
+					// WorkerDone slice across every batch degrades to a
+					// failed integration, but dispatch itself still
+					// proceeds (workers already ran and succeeded on their
+					// own terms).
+					integrations[r.Slice] = integrationOutcome{status: integrateFailed, err: repoRootErr}
+					continue
+				}
+				status, out, err := integrateSliceBranch(repoRoot, r.Slice, workerBranchName(r.Slice))
+				integrations[r.Slice] = integrationOutcome{status: status, output: out, err: err}
+			}
+			results = append(results, batchResults...)
+		}
 	}
 
 	for _, r := range results {
@@ -139,15 +199,38 @@ func dispatchManifestIfPresent(cfg config, state *runstate.RunState, stdout io.W
 			// before recording success, and dedup the append, so a
 			// retried-then-successful slice never ends up listed in both
 			// DoneSlices and RemainingSlices at once, nor duplicated within
-			// DoneSlices itself (issue #2059 review finding B).
+			// DoneSlices itself (issue #2059 review finding B). This move
+			// happens regardless of the slice's own integration outcome
+			// below -- the worker's own job is done either way, and its
+			// branch is never deleted, so a conflicted/failed integration
+			// can still be resolved manually later from the same branch
+			// name (issue #2060).
 			state.RemainingSlices = removeSlice(state.RemainingSlices, r.Slice)
 			state.DoneSlices = appendUnique(state.DoneSlices, r.Slice)
-			result := strings.TrimSpace(r.Result)
-			if result == "" {
-				fmt.Fprintf(&findings, "- %s: done (no result reported; branch %s ready to cherry-pick)\n", r.Slice, workerBranchName(r.Slice))
-			} else {
+
+			branch := workerBranchName(r.Slice)
+			outcome := integrations[r.Slice]
+			switch outcome.status {
+			case integrateEmpty:
+				fmt.Fprintf(&findings, "- %s: done, nothing to integrate (branch %s had no new commits)\n", r.Slice, branch)
+			case integrateConflict:
+				fmt.Fprintf(&findings, "- %s: done, but integration conflicted -- resolve manually: git cherry-pick --no-commit $(git merge-base HEAD %s)..%s (branch %s)\n", r.Slice, branch, branch, branch)
+				if out := truncateRunes(strings.TrimSpace(outcome.output), maxWorkerResultInFindings); out != "" {
+					fmt.Fprintf(&findings, "  %s\n", strings.ReplaceAll(out, "\n", "\n  "))
+				}
+			case integrateFailed:
+				errMsg := ""
+				if outcome.err != nil {
+					errMsg = outcome.err.Error()
+				}
+				fmt.Fprintf(&findings, "- %s: done, but integration failed: %s\n", r.Slice, errMsg)
+			default: // integrateOK
+				fmt.Fprintf(&findings, "- %s: done, integrated (branch %s)\n", r.Slice, branch)
+			}
+
+			if result := strings.TrimSpace(r.Result); result != "" {
 				result = truncateRunes(result, maxWorkerResultInFindings)
-				fmt.Fprintf(&findings, "- %s: done (branch %s ready to cherry-pick)\n  %s\n", r.Slice, workerBranchName(r.Slice), strings.ReplaceAll(result, "\n", "\n  "))
+				fmt.Fprintf(&findings, "  %s\n", strings.ReplaceAll(result, "\n", "\n  "))
 			}
 		case WorkerTimedOut, WorkerCrashed:
 			// Defensive mirror of the WorkerDone case above -- this

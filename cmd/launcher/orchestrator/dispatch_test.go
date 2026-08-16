@@ -1110,3 +1110,282 @@ exit 0
 		t.Errorf("state.WorkerFindings = %q, want a truncation marker", state.WorkerFindings)
 	}
 }
+
+// TestDispatchManifestIfPresentIntegratesDisjointLeaseSlicesOntoHead
+// verifies dispatchManifestIfPresent (issue #2060): a manifest of two
+// slices declaring disjoint FileLeases dispatch through scheduleSlices'
+// batching, and once dispatch finishes, both branches' own commits are
+// integrated automatically onto the orchestrator's own repo HEAD -- both
+// worker-committed files are present on disk, state.DoneSlices lists both
+// slice names, and state.WorkerFindings reports "integrated" for both,
+// rather than the old "ready to cherry-pick" wording a human/coordinator
+// pass previously had to act on by hand.
+func TestDispatchManifestIfPresentIntegratesDisjointLeaseSlicesOntoHead(t *testing.T) {
+	repoRoot := chdirToFreshWorkerRepo(t)
+
+	dir := t.TempDir()
+	callLog := filepath.Join(dir, "calls.log")
+	if err := os.WriteFile(callLog, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	body := `case "$DRIVER_LOG_PATH" in
+  "$WORKER_WORK_DIR"*)
+    : > "$DRIVER_LOG_PATH"
+    base=$(basename "$DRIVER_LOG_PATH" .log)
+    echo "content for $base" > "$base.txt"
+    git add "$base.txt"
+    git commit -m "worker commit for $base"
+    : > "${DRIVER_LOG_PATH%.log}.done"
+    exit 0
+    ;;
+esac
+: > "$DRIVER_LOG_PATH"
+`
+	writeFakeDriverExec(t, dir, callLog, body)
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	workerWorkDir := t.TempDir()
+	t.Setenv("WORKER_WORK_DIR", workerWorkDir)
+
+	manifest := SliceManifest{Slices: []ManifestSlice{
+		{Name: "alpha", Task: "implement seam alpha", FileLeases: []string{"alpha.txt"}},
+		{Name: "beta", Task: "implement seam beta", FileLeases: []string{"beta.txt"}},
+	}}
+	line, err := manifest.Line()
+	if err != nil {
+		t.Fatalf("Line() error = %v", err)
+	}
+	logPath := filepath.Join(dir, "stream.log")
+	if err := os.WriteFile(logPath, []byte(streamJSONOutcomeLine(strings.TrimSpace(line))), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	workerPromptFile := filepath.Join(dir, "worker-prompt.txt")
+	if err := os.WriteFile(workerPromptFile, []byte("BASE WORKER PROMPT"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config{
+		driver:           "claude",
+		logPath:          logPath,
+		workerPromptFile: workerPromptFile,
+		workerWorkDir:    workerWorkDir,
+		workerTimeout:    5 * time.Second,
+	}
+	state := runstate.RunState{}
+
+	var stdout strings.Builder
+	got := dispatchManifestIfPresent(cfg, &state, &stdout)
+	if !got {
+		t.Fatalf("dispatchManifestIfPresent() = false, want true")
+	}
+
+	for _, want := range []string{"alpha", "beta"} {
+		if !containsSlice(state.DoneSlices, want) {
+			t.Errorf("state.DoneSlices = %v, want it to contain %q", state.DoneSlices, want)
+		}
+	}
+
+	for _, f := range []string{"alpha.txt", "beta.txt"} {
+		content, err := os.ReadFile(filepath.Join(repoRoot, f))
+		if err != nil {
+			t.Errorf("ReadFile(%s) after integration: %v", f, err)
+			continue
+		}
+		if !strings.Contains(string(content), "content for") {
+			t.Errorf("%s content = %q, want the worker's own committed content present on HEAD", f, content)
+		}
+	}
+
+	for _, want := range []string{"alpha: done, integrated", "beta: done, integrated"} {
+		if !strings.Contains(state.WorkerFindings, want) {
+			t.Errorf("state.WorkerFindings = %q, want it to contain %q", state.WorkerFindings, want)
+		}
+	}
+}
+
+// TestDispatchManifestIfPresentDispatchesSeparateBatchesSequentially
+// verifies dispatchManifestIfPresent (issue #2060): two slices declaring no
+// FileLeases at all are each scheduled into their own separate, sequential
+// batch by scheduleSlices (an undeclared-lease slice is always solo,
+// schedule.go) -- and, crucially, the SECOND slice's own worktree (created
+// via `git worktree add ... HEAD`, workers.go) is created only after the
+// FIRST slice's own branch has already been integrated onto HEAD, so the
+// second worker's own worktree already carries the first worker's
+// committed file. The fake worker driver below deliberately crashes
+// (never writes its own sentinel) if it does not see that file, proving
+// the batches genuinely ran sequentially with integration in between --
+// not merely dispatched in manifest order with no ordering guarantee
+// between them.
+func TestDispatchManifestIfPresentDispatchesSeparateBatchesSequentially(t *testing.T) {
+	chdirToFreshWorkerRepo(t)
+
+	dir := t.TempDir()
+	callLog := filepath.Join(dir, "calls.log")
+	if err := os.WriteFile(callLog, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	body := `case "$DRIVER_LOG_PATH" in
+  "$WORKER_WORK_DIR"*)
+    : > "$DRIVER_LOG_PATH"
+    base=$(basename "$DRIVER_LOG_PATH" .log)
+    case "$base" in
+      first)
+        echo "marker from first" > first.marker
+        git add first.marker
+        git commit -m "first commit"
+        ;;
+      second)
+        if [ -f first.marker ]; then
+          echo "second saw first" > second.marker
+          git add second.marker
+          git commit -m "second commit"
+        else
+          exit 1
+        fi
+        ;;
+    esac
+    : > "${DRIVER_LOG_PATH%.log}.done"
+    exit 0
+    ;;
+esac
+: > "$DRIVER_LOG_PATH"
+`
+	writeFakeDriverExec(t, dir, callLog, body)
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	workerWorkDir := t.TempDir()
+	t.Setenv("WORKER_WORK_DIR", workerWorkDir)
+
+	manifest := SliceManifest{Slices: []ManifestSlice{
+		{Name: "first", Task: "implement seam first"},
+		{Name: "second", Task: "implement seam second"},
+	}}
+	line, err := manifest.Line()
+	if err != nil {
+		t.Fatalf("Line() error = %v", err)
+	}
+	logPath := filepath.Join(dir, "stream.log")
+	if err := os.WriteFile(logPath, []byte(streamJSONOutcomeLine(strings.TrimSpace(line))), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	workerPromptFile := filepath.Join(dir, "worker-prompt.txt")
+	if err := os.WriteFile(workerPromptFile, []byte("BASE WORKER PROMPT"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config{
+		driver:           "claude",
+		logPath:          logPath,
+		workerPromptFile: workerPromptFile,
+		workerWorkDir:    workerWorkDir,
+		workerTimeout:    5 * time.Second,
+	}
+	state := runstate.RunState{}
+
+	var stdout strings.Builder
+	got := dispatchManifestIfPresent(cfg, &state, &stdout)
+	if !got {
+		t.Fatalf("dispatchManifestIfPresent() = false, want true")
+	}
+
+	if !reflect.DeepEqual(state.DoneSlices, []string{"first", "second"}) {
+		t.Fatalf("state.DoneSlices = %v, want [first second] -- \"second\" missing/crashed means its worktree was created before \"first\"'s batch was integrated (batches did not run strictly sequentially)", state.DoneSlices)
+	}
+}
+
+// TestDispatchManifestIfPresentReportsIntegrationConflictWithoutLosingDoneSlice
+// verifies dispatchManifestIfPresent (issue #2060): two slices with
+// disjoint DECLARED FileLeases (so scheduleSlices dispatches them
+// concurrently in the same batch) both modify the same real file with
+// different content -- the first slice's branch integrates cleanly and
+// advances HEAD; the second slice's own branch, built from the ORIGINAL
+// pre-integration HEAD, then conflicts on integration. Both workers
+// themselves still succeeded (WorkerDone), so state.DoneSlices must list
+// both regardless -- but state.WorkerFindings must report the conflict
+// with manual-resolution guidance for the second slice, not silently
+// swallow it.
+func TestDispatchManifestIfPresentReportsIntegrationConflictWithoutLosingDoneSlice(t *testing.T) {
+	chdirToFreshWorkerRepo(t)
+
+	dir := t.TempDir()
+	callLog := filepath.Join(dir, "calls.log")
+	if err := os.WriteFile(callLog, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	body := `case "$DRIVER_LOG_PATH" in
+  "$WORKER_WORK_DIR"*)
+    : > "$DRIVER_LOG_PATH"
+    base=$(basename "$DRIVER_LOG_PATH" .log)
+    case "$base" in
+      conflict-a)
+        echo "content A" > shared.txt
+        ;;
+      conflict-b)
+        echo "content B" > shared.txt
+        ;;
+    esac
+    git add shared.txt
+    git commit -m "worker commit for $base"
+    : > "${DRIVER_LOG_PATH%.log}.done"
+    exit 0
+    ;;
+esac
+: > "$DRIVER_LOG_PATH"
+`
+	writeFakeDriverExec(t, dir, callLog, body)
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	workerWorkDir := t.TempDir()
+	t.Setenv("WORKER_WORK_DIR", workerWorkDir)
+
+	manifest := SliceManifest{Slices: []ManifestSlice{
+		{Name: "conflict-a", Task: "implement seam a", FileLeases: []string{"lease-a"}},
+		{Name: "conflict-b", Task: "implement seam b", FileLeases: []string{"lease-b"}},
+	}}
+	line, err := manifest.Line()
+	if err != nil {
+		t.Fatalf("Line() error = %v", err)
+	}
+	logPath := filepath.Join(dir, "stream.log")
+	if err := os.WriteFile(logPath, []byte(streamJSONOutcomeLine(strings.TrimSpace(line))), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	workerPromptFile := filepath.Join(dir, "worker-prompt.txt")
+	if err := os.WriteFile(workerPromptFile, []byte("BASE WORKER PROMPT"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config{
+		driver:           "claude",
+		logPath:          logPath,
+		workerPromptFile: workerPromptFile,
+		workerWorkDir:    workerWorkDir,
+		workerTimeout:    5 * time.Second,
+	}
+	state := runstate.RunState{}
+
+	var stdout strings.Builder
+	got := dispatchManifestIfPresent(cfg, &state, &stdout)
+	if !got {
+		t.Fatalf("dispatchManifestIfPresent() = false, want true")
+	}
+
+	for _, want := range []string{"conflict-a", "conflict-b"} {
+		if !containsSlice(state.DoneSlices, want) {
+			t.Errorf("state.DoneSlices = %v, want it to contain %q (the worker itself succeeded regardless of integration outcome)", state.DoneSlices, want)
+		}
+	}
+
+	if !strings.Contains(state.WorkerFindings, "conflict-a: done, integrated") {
+		t.Errorf("state.WorkerFindings = %q, want conflict-a reported as cleanly integrated", state.WorkerFindings)
+	}
+	if !strings.Contains(state.WorkerFindings, "conflict-b: done, but integration conflicted -- resolve manually") {
+		t.Errorf("state.WorkerFindings = %q, want conflict-b reported as conflicted with manual-resolution guidance, not silently swallowed", state.WorkerFindings)
+	}
+	if !strings.Contains(state.WorkerFindings, "orchestrator-worker/conflict-b") {
+		t.Errorf("state.WorkerFindings = %q, want it to name conflict-b's own branch", state.WorkerFindings)
+	}
+}

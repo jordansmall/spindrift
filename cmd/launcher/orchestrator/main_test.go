@@ -247,6 +247,13 @@ exit 0
 // even though every existing test (including the ones proving runBounded's
 // own admission control and LaunchWorkers' zero-value fallback) would stay
 // green (issue #2495 review finding).
+//
+// Every slice declares its own distinct FileLeases entry so scheduleSlices
+// (issue #2060) places all of them into the same batch -- an
+// undeclared-lease slice is scheduled conservatively solo (schedule.go),
+// which would otherwise flatten this test's observed peak to 1 regardless
+// of maxParallel, proving nothing about the concurrency cap this test
+// exists to pin.
 func TestMainRunPositiveMaxParallelWorkersFlagBoundsWorkerConcurrency(t *testing.T) {
 	chdirToFreshWorkerRepo(t)
 
@@ -271,7 +278,11 @@ func TestMainRunPositiveMaxParallelWorkersFlagBoundsWorkerConcurrency(t *testing
 
 	slices := make([]ManifestSlice, numSlices)
 	for i := range slices {
-		slices[i] = ManifestSlice{Name: fmt.Sprintf("slice-%d", i), Task: "implement seam"}
+		slices[i] = ManifestSlice{
+			Name:       fmt.Sprintf("slice-%d", i),
+			Task:       "implement seam",
+			FileLeases: []string{fmt.Sprintf("path/slice-%d.txt", i)},
+		}
 	}
 	manifestLine, err := SliceManifest{Slices: slices}.Line()
 	if err != nil {
