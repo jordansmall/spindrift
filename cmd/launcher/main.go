@@ -352,11 +352,12 @@ func validate(c config) error {
 		if strings.HasPrefix(c.model, "github-copilot/") && c.opencodeAuthContent == "" {
 			return fmt.Errorf("set OPENCODE_AUTH_CONTENT for the github-copilot Provider (run 'opencode auth login -p github-copilot' on a host, then export the auth slice) under the opencode Driver")
 		}
+	default:
+		if _, err := driver.New(c.driver); err != nil {
+			return err
+		}
 	}
 	if err := runner.ValidateRuntime(c.runtime); err != nil {
-		return err
-	}
-	if _, err := driver.New(c.driver); err != nil {
 		return err
 	}
 	if err := validateChoice("MERGE_MODE", c.mergeMode); err != nil {
