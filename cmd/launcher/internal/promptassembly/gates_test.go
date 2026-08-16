@@ -216,6 +216,38 @@ func TestGatesOrchestratorReviewLoop(t *testing.T) {
 				"REVIEW_LOOP_ORCHESTRATOR": true,
 			},
 		},
+		{
+			// Both fields forwarded true (issue #2533 review): the two
+			// fields cross a process boundary independently of each other,
+			// so a stuck/duplicated forward can in principle leave both
+			// true rather than only ever both-false. The same repair as
+			// the both-false case above must apply here too, or Gates
+			// renders both review-loop prompt sections at once.
+			name: "both review-loop fields true, orchestrator off: repairs to inline",
+			env: Env{
+				OrchestratorEnabled:    false,
+				ReviewLoopInline:       true,
+				ReviewLoopOrchestrator: true,
+			},
+			want: map[string]bool{
+				"ORCHESTRATOR":             false,
+				"REVIEW_LOOP_INLINE":       true,
+				"REVIEW_LOOP_ORCHESTRATOR": false,
+			},
+		},
+		{
+			name: "both review-loop fields true, orchestrator on: repairs to orchestrator",
+			env: Env{
+				OrchestratorEnabled:    true,
+				ReviewLoopInline:       true,
+				ReviewLoopOrchestrator: true,
+			},
+			want: map[string]bool{
+				"ORCHESTRATOR":             true,
+				"REVIEW_LOOP_INLINE":       false,
+				"REVIEW_LOOP_ORCHESTRATOR": true,
+			},
+		},
 	}
 	for _, tc := range cases {
 		tc := tc
@@ -282,6 +314,7 @@ func TestGatesCodeForgeBackend(t *testing.T) {
 	cases := []struct {
 		name            string
 		forgeBackend    string
+		codeForge       string
 		boxWriteEnabled bool
 		want            map[string]bool
 	}{
@@ -367,14 +400,32 @@ func TestGatesCodeForgeBackend(t *testing.T) {
 				"FIX_CI_READ_FORGEJO":       false,
 			},
 		},
+		{
+			// Same version-skew shape as above, but CodeForge itself --
+			// still forwarded on Env for exactly this fallback (env.go:
+			// 133-138) -- says "forgejo". The fallback must re-derive from
+			// CodeForge, not hardcode the GH arm regardless of it (issue
+			// #2533 review): hardcoding GH here would instruct the agent to
+			// drive `gh` against a Forgejo forge.
+			name:            "empty ForgeBackend with CodeForge=forgejo falls open to FORGEJO",
+			forgeBackend:    "",
+			codeForge:       "forgejo",
+			boxWriteEnabled: true,
+			want: map[string]bool{
+				"OPEN_PR_CREATE_RW_GH":      false,
+				"OPEN_PR_CREATE_RW_FORGEJO": true,
+				"FIX_CI_READ_GH":            false,
+				"FIX_CI_READ_FORGEJO":       true,
+			},
+		},
 	}
 	for _, tc := range cases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			got := Gates(Env{ForgeBackend: tc.forgeBackend, BoxWriteEnabled: tc.boxWriteEnabled})
+			got := Gates(Env{ForgeBackend: tc.forgeBackend, CodeForge: tc.codeForge, BoxWriteEnabled: tc.boxWriteEnabled})
 			for k, want := range tc.want {
 				if got[k] != want {
-					t.Errorf("Gates(ForgeBackend=%q, BoxWriteEnabled=%v)[%q] = %v, want %v", tc.forgeBackend, tc.boxWriteEnabled, k, got[k], want)
+					t.Errorf("Gates(ForgeBackend=%q, CodeForge=%q, BoxWriteEnabled=%v)[%q] = %v, want %v", tc.forgeBackend, tc.codeForge, tc.boxWriteEnabled, k, got[k], want)
 				}
 			}
 		})

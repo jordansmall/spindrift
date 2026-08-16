@@ -25,13 +25,19 @@ func accessForgeGates(e Env) map[string]bool {
 	// issue #2533 -- and therefore never sets that env var at all --
 	// dispatching against a newer box image leaves ForgeBackend empty here
 	// even though this package is fully wired up to expect it. Falling
-	// open to the GH arm reproduces entrypoint.sh's old bash
-	// "${CODE_FORGE:-github}" default as a version-skew safety net, rather
-	// than silently dropping every PR-create/CI-read instruction for the
-	// run the way failing closed would.
+	// open here reproduces entrypoint.sh's old bash "${CODE_FORGE:-github}"
+	// default, re-derived from e.CodeForge itself -- still forwarded on Env
+	// for exactly this fallback (env.go: 133-138) -- as a version-skew
+	// safety net, rather than hardcoding the GH arm regardless of what
+	// e.CodeForge actually says: a version-skewed forgejo Code Forge would
+	// otherwise instruct the agent to drive `gh` against a Forgejo forge
+	// instead of falling back to its own correct arm.
 	backend := e.ForgeBackend
 	if backend == "" {
 		backend = "GH"
+		if e.CodeForge == "forgejo" {
+			backend = "FORGEJO"
+		}
 	}
 
 	// The OPEN A PULL REQUEST create step's read-write fork (entrypoint.sh:

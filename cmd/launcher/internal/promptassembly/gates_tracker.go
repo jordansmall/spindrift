@@ -26,14 +26,18 @@ func trackerGates(e Env, orchestratorEnabled bool) map[string]bool {
 	// package is fully wired up to expect it. TrackerAxisRead is never
 	// legitimately empty for a resolved axis (only TrackerAxisWrite can be,
 	// for the "local" tracker), so an empty itRead is unambiguously that
-	// version-skew case, not a legitimate axis value. Falling open to the
-	// github/jira arm here reproduces entrypoint.sh's old bash
-	// "${ISSUE_TRACKER:-github}" default as a version-skew safety net,
-	// rather than silently dropping every tracker-gated prompt fragment for
-	// the run the way failing closed would.
+	// version-skew case, not a legitimate axis value. Falling open here
+	// reproduces entrypoint.sh's old bash "${ISSUE_TRACKER:-github}" case
+	// statement, re-derived from e.IssueTracker itself -- still forwarded
+	// on Env for exactly this fallback (env.go: 93-101) -- as a
+	// version-skew safety net, rather than hardcoding the github/jira arm
+	// regardless of what e.IssueTracker actually says: a version-skewed
+	// local or forgejo tracker would otherwise render a self-contradictory
+	// prompt (e.g. ISSUE_TRACKER_GITHUB alongside PR_BODY_LOCAL_NOREF)
+	// instead of falling back to its own correct arm.
 	itRead, itWrite, itFiler := e.TrackerAxisRead, e.TrackerAxisWrite, e.TrackerAxisFiler
 	if itRead == "" {
-		itRead, itWrite, itFiler = "GITHUB", "GITHUB", "GH"
+		itRead, itWrite, itFiler = issueTrackerAxisFallback(e.IssueTracker)
 	}
 
 	// The issue-read step gate (entrypoint.sh: 891-904): exactly one of
@@ -103,4 +107,26 @@ func trackerGates(e Env, orchestratorEnabled bool) map[string]bool {
 	g["PR_BODY_LOCAL_NOREF"] = prBodyLocalNoref
 
 	return g
+}
+
+// issueTrackerAxisFallback reproduces entrypoint.sh's old
+// "${ISSUE_TRACKER:-github}" case statement (801-814), mapping the raw
+// IssueTracker value onto its three gate-family suffixes -- the same
+// mapping nix now performs at eval time for TrackerAxisRead/Write/Filer.
+// Used only by trackerGates's version-skew fallback above, when an older
+// host launcher never forwarded the nix-resolved axis at all; jira shares
+// github's arm since it rides the same in-box reachability.
+func issueTrackerAxisFallback(issueTracker string) (itRead, itWrite, itFiler string) {
+	tracker := issueTracker
+	if tracker == "" {
+		tracker = defaultIssueTracker
+	}
+	switch tracker {
+	case "local":
+		return "LOCAL", "", "GH"
+	case "forgejo":
+		return "FORGEJO", "FORGEJO", "FORGEJO"
+	default:
+		return "GITHUB", "GITHUB", "GH"
+	}
 }
