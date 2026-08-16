@@ -86,7 +86,15 @@ rec {
     {
       verdict = "reject";
       label = "agent-research-reject";
-      description = "false positive, not worth doing, or a duplicate. Name the duplicate issue by number in your rationale; duplicate is a reason under `reject`, not a separate verdict.";
+      # Wrapped across concatenated string literals to stay near this
+      # repo's ~76-col prose wrap (see the templates this replaced) --
+      # the concatenation introduces no newline, so the rendered bullet
+      # (renderPrompt's `bullet` joins verdict + description onto one
+      # line) stays a single unbroken line, unaffected by the source wrap.
+      description =
+        "false positive, not worth doing, or a duplicate. Name the "
+        + "duplicate issue by number in your rationale; duplicate is a "
+        + "reason under `reject`, not a separate verdict.";
     }
     {
       verdict = "unclear";
@@ -112,9 +120,17 @@ rec {
   # the template's on-disk bytes matching what `defaultVerdicts` itself
   # renders to, so a reworded or reflowed default bullet can never leave the
   # enumeration/status line rewritten while the bullet list itself stays
-  # stale (or vice versa): the markers are always either both present
-  # (nothing rendered yet) or both absent (already rendered), never one of
-  # each.
+  # stale (or vice versa).
+  #
+  # The two markers being always both present (nothing rendered yet) or both
+  # absent (already rendered), never one of each, is an invariant the
+  # checked-in templates are expected to maintain -- `renderPrompt` and
+  # `builtins.replaceStrings` enforce nothing of the kind for arbitrary
+  # `promptText`; either marker missing while the other is present just
+  # silently no-ops that one rewrite. nix/checks/research-verdicts.nix's
+  # research-verdicts-templates-carry-both-markers check gives partial eval-
+  # time coverage of this invariant for research-prompt.md and
+  # research-self-contained-prompt.md specifically, not a general guarantee.
   bulletsMarker = "<!-- RESEARCH_VERDICT_BULLETS -->";
   enumMarker = "`<RESEARCH_VERDICT_ENUM>`";
 
