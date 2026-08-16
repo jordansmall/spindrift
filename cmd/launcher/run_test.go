@@ -219,7 +219,7 @@ func TestRunExitCode_ContinuousDispatch_AllBlocked_ReturnsExitCode3(t *testing.T
 
 // TestRunExitCode_ContinuousDispatch_Fresh_DispatchesAndReturns0 verifies
 // that with CONTINUOUS_DISPATCH enabled and the freshness probe reporting
-// not-applicable (RUNTIME=bwrap, which never blocks a refill), a
+// not-applicable (RUNNER_KIND=bwrap, which never blocks a refill), a
 // dispatchable issue launches and the run exits 0 — continuous mode wired
 // end-to-end through run/runExitCode.
 func TestRunExitCode_ContinuousDispatch_Fresh_DispatchesAndReturns0(t *testing.T) {
@@ -227,7 +227,7 @@ func TestRunExitCode_ContinuousDispatch_Fresh_DispatchesAndReturns0(t *testing.T
 	c.label = "ready-for-agent"
 	c.continuousDispatch = true
 	c.maxParallel = 1
-	c.runtime = "bwrap"
+	c.runnerKind = "bwrap"
 	dir := tempLogDir(t)
 
 	fc := forge.NewFake(testDispatchLabels)
@@ -262,7 +262,7 @@ func TestRunExitCode_ContinuousDispatch_QueriesTrackerOnceBeforeFirstDispatch(t 
 	c.label = "ready-for-agent"
 	c.continuousDispatch = true
 	c.maxParallel = 1
-	c.runtime = "bwrap"
+	c.runnerKind = "bwrap"
 	dir := tempLogDir(t)
 
 	fc := forge.NewFake(testDispatchLabels)
@@ -308,7 +308,7 @@ func TestRunExitCode_ContinuousDispatch_RefillAnnouncesOnlyNewIssue(t *testing.T
 	c.label = "ready-for-agent"
 	c.continuousDispatch = true
 	c.maxParallel = 1
-	c.runtime = "bwrap"
+	c.runnerKind = "bwrap"
 	dir := tempLogDir(t)
 
 	fc := forge.NewFake(testDispatchLabels)
@@ -489,7 +489,7 @@ func TestRunExitCode_ContinuousDispatch_DepsOfCheckFailure_HoldsIssueNotDispatch
 	c.label = "ready-for-agent"
 	c.continuousDispatch = true
 	c.maxParallel = 2
-	c.runtime = "bwrap"
+	c.runnerKind = "bwrap"
 	dir := tempLogDir(t)
 
 	fc := forge.NewFake(testDispatchLabels)
