@@ -3318,6 +3318,190 @@ func TestSeedPromptFromStateIncludesReviewFindings(t *testing.T) {
 	}
 }
 
+// TestSeedReviewPromptFromStateNoOpWhenStateEmpty verifies
+// seedReviewPromptFromState (issue #2550) returns promptFile unchanged and
+// creates no temp file when state carries neither a prior verdict nor any
+// dispositions content -- the same no-op shape as seedPromptFromState's own
+// cold-start case.
+func TestSeedReviewPromptFromStateNoOpWhenStateEmpty(t *testing.T) {
+	dir := t.TempDir()
+	promptFile := filepath.Join(dir, "prompt.txt")
+	if err := os.WriteFile(promptFile, []byte("ORIGINAL PROMPT TEXT"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	seeded, err := seedReviewPromptFromState(promptFile, runstate.RunState{})
+	if err != nil {
+		t.Fatalf("seedReviewPromptFromState: %v", err)
+	}
+	if seeded != promptFile {
+		t.Fatalf("seedReviewPromptFromState = %q, want the original %q unchanged", seeded, promptFile)
+	}
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("dir entries = %v, want only prompt.txt (no temp file created)", entries)
+	}
+}
+
+// TestSeedReviewPromptFromStateIncludesReviewFindingsVerbatim verifies
+// seedReviewPromptFromState (issue #2550) carries state.ReviewFindings --
+// the prior round's own verdict message -- into the seeded review prompt
+// verbatim, framed as a claim to verify against the diff rather than fact,
+// and that the original prompt content still survives.
+func TestSeedReviewPromptFromStateIncludesReviewFindingsVerbatim(t *testing.T) {
+	dir := t.TempDir()
+	promptFile := filepath.Join(dir, "prompt.txt")
+	if err := os.WriteFile(promptFile, []byte("ORIGINAL PROMPT TEXT"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	reviewFindings := "VERDICT: BLOCK\n\n## Blocking\n- run.go:42 -- missing nil check\n\n## Non-blocking\n- none"
+	state := runstate.RunState{ReviewFindings: reviewFindings}
+
+	seeded, err := seedReviewPromptFromState(promptFile, state)
+	if err != nil {
+		t.Fatalf("seedReviewPromptFromState: %v", err)
+	}
+	if seeded == promptFile {
+		t.Fatalf("seedReviewPromptFromState returned the original file unchanged, want a fresh seeded file")
+	}
+	got, err := os.ReadFile(seeded)
+	if err != nil {
+		t.Fatalf("read seeded review prompt: %v", err)
+	}
+	if !strings.Contains(string(got), reviewFindings) {
+		t.Errorf("seeded review prompt = %q, want it to carry the prior verdict verbatim", got)
+	}
+	for _, want := range []string{"unverified assertions", "guilty until proven correct", "Nothing else from the"} {
+		if !strings.Contains(string(got), want) {
+			t.Errorf("seeded review prompt = %q, want framing language %q", got, want)
+		}
+	}
+	if !strings.Contains(string(got), "ORIGINAL PROMPT TEXT") {
+		t.Errorf("seeded review prompt = %q, want it to still carry the original prompt content", got)
+	}
+}
+
+// TestSeedReviewPromptFromStateIncludesDispositionsVerbatim verifies
+// seedReviewPromptFromState (issue #2550) reads state.DispositionsPath fresh
+// and carries both the prior verdict and the dispositions file's own content
+// verbatim into the seeded review prompt.
+func TestSeedReviewPromptFromStateIncludesDispositionsVerbatim(t *testing.T) {
+	dir := t.TempDir()
+	promptFile := filepath.Join(dir, "prompt.txt")
+	if err := os.WriteFile(promptFile, []byte("ORIGINAL PROMPT TEXT"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dispositionsPath := filepath.Join(dir, "dispositions.txt")
+	dispositionsContent := "finding X -> fixed in commit abc123\nfinding Y -> won't-fix: out of scope"
+	if err := os.WriteFile(dispositionsPath, []byte(dispositionsContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	reviewFindings := "VERDICT: BLOCK\n\n## Blocking\n- run.go:42 -- missing nil check"
+	state := runstate.RunState{
+		ReviewFindings:   reviewFindings,
+		DispositionsPath: dispositionsPath,
+	}
+
+	seeded, err := seedReviewPromptFromState(promptFile, state)
+	if err != nil {
+		t.Fatalf("seedReviewPromptFromState: %v", err)
+	}
+	got, err := os.ReadFile(seeded)
+	if err != nil {
+		t.Fatalf("read seeded review prompt: %v", err)
+	}
+	if !strings.Contains(string(got), reviewFindings) {
+		t.Errorf("seeded review prompt = %q, want it to carry the prior verdict verbatim", got)
+	}
+	if !strings.Contains(string(got), dispositionsContent) {
+		t.Errorf("seeded review prompt = %q, want it to carry the dispositions file's content verbatim", got)
+	}
+}
+
+// TestSeedReviewPromptFromStateMissingDispositionsFileDegradesGracefully
+// verifies seedReviewPromptFromState (issue #2550 AC5) treats a
+// DispositionsPath that no longer exists on disk as "no dispositions
+// content" -- not an error -- and still seeds the prior verdict alone.
+func TestSeedReviewPromptFromStateMissingDispositionsFileDegradesGracefully(t *testing.T) {
+	dir := t.TempDir()
+	promptFile := filepath.Join(dir, "prompt.txt")
+	if err := os.WriteFile(promptFile, []byte("ORIGINAL PROMPT TEXT"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	reviewFindings := "VERDICT: BLOCK\n\n## Blocking\n- run.go:42 -- missing nil check"
+	state := runstate.RunState{
+		ReviewFindings:   reviewFindings,
+		DispositionsPath: filepath.Join(dir, "does-not-exist.txt"),
+	}
+
+	seeded, err := seedReviewPromptFromState(promptFile, state)
+	if err != nil {
+		t.Fatalf("seedReviewPromptFromState: %v, want no error on missing dispositions file", err)
+	}
+	got, err := os.ReadFile(seeded)
+	if err != nil {
+		t.Fatalf("read seeded review prompt: %v", err)
+	}
+	if !strings.Contains(string(got), reviewFindings) {
+		t.Errorf("seeded review prompt = %q, want it to still carry the prior verdict alone", got)
+	}
+}
+
+// TestSeedReviewPromptFromStateNeverIncludesPassSummaryOrWorkerFindings
+// verifies seedReviewPromptFromState (issue #2550 AC4) is a materially
+// narrower function than seedPromptFromState: even when state carries every
+// field a rich implement/fix-pass seeding would render, the seeded review
+// prompt carries only the prior verdict and dispositions, never
+// PassSummaryPath, ScoutBriefPath, WorkerFindings, or the TerminalLand
+// directive -- the "nothing else from the implementor" firewall.
+func TestSeedReviewPromptFromStateNeverIncludesPassSummaryOrWorkerFindings(t *testing.T) {
+	dir := t.TempDir()
+	promptFile := filepath.Join(dir, "prompt.txt")
+	if err := os.WriteFile(promptFile, []byte("ORIGINAL PROMPT TEXT"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	state := runstate.RunState{
+		ReviewFindings:  "VERDICT: BLOCK\n\n## Blocking\n- run.go:42 -- missing nil check",
+		PassSummaryPath: "/tmp/pass-summary.md",
+		ScoutBriefPath:  "/tmp/brief.md",
+		WorkerFindings:  "slice-a: done\nslice-b: timed out",
+		TerminalLand:    true,
+		CapFired:        "max slices reached",
+	}
+
+	seeded, err := seedReviewPromptFromState(promptFile, state)
+	if err != nil {
+		t.Fatalf("seedReviewPromptFromState: %v", err)
+	}
+	got, err := os.ReadFile(seeded)
+	if err != nil {
+		t.Fatalf("read seeded review prompt: %v", err)
+	}
+	for _, unwanted := range []string{
+		"Pass summary:",
+		"Scout brief:",
+		"Worker dispatch results:",
+		"terminal pass",
+		"/tmp/pass-summary.md",
+		"/tmp/brief.md",
+		"slice-a: done",
+		"slice-b: timed out",
+		"max slices reached",
+	} {
+		if strings.Contains(string(got), unwanted) {
+			t.Errorf("seeded review prompt = %q, must not contain %q (firewall against implementor narrative)", got, unwanted)
+		}
+	}
+}
+
 // TestSeedPromptFromStateIncludesFindingsLog verifies seedPromptFromState
 // (issue #2552) carries state.FindingsLogPath into the seeded prompt with an
 // instruction to triage the union of every round's non-blocking findings
