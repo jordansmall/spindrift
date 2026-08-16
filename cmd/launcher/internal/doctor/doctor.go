@@ -22,16 +22,6 @@ type LabelMeta struct {
 	Color       string // hex without leading #
 }
 
-// TriageLabelMeta is generated into labelmeta_gen.go (lib/labels.nix, issue
-// #2528) — the single source of truth for default triage/research/priority
-// label colors and descriptions, keyed by the canonical label name. It
-// covers the four operator-configurable work-tier labels, the six fixed
-// research-tier labels (ADR 0022, `forge.ResearchDispatchLabels()` /
-// `forge.ResearchVerdictLabels()`), and the three fixed priority-tier labels
-// (ADR 0040, `forge.PriorityLabelNames()`) so a doctor run creates any kind
-// with a real color/description instead of falling back to gray. Regenerate
-// with `nix run .#regen` after editing lib/labels.nix.
-
 // ResearchLabelNames returns the six fixed research-tier label names (ADR
 // 0022), sourced from forge.ResearchDispatchLabels()/ResearchVerdictLabels()
 // rather than duplicated as string literals.
