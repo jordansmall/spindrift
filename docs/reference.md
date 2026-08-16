@@ -2509,8 +2509,10 @@ only as a backstop against a *runtime* override of
 `BOX_FORGE_AND_ISSUE_ACCESS`/`CODE_FORGE`/`ISSUE_TRACKER` past what nix
 already validated — it exits with a startup error naming the missing seam in
 that case. `local` satisfies the check by construction (there is no other
-way for it to work); `github` satisfies it as of issue #1919. `read-write` is
-unaffected either way — it never inspects these capabilities.
+way for it to work); `github` satisfies it as of issue #1919; `forgejo`
+satisfies it via the `relayCapable`/`hostPostingCapable` registry bits this
+issue (#2526) itself added to its backend row. `read-write` is unaffected
+either way — it never inspects these capabilities.
 
 Inside the Box, the write-enabled-vs-not decision is resolved once,
 host-side, and forwarded as a single explicit positive signal
