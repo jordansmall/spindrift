@@ -25,10 +25,11 @@ const registryPathForTest = "../internal/promptassembly/testdata/registry.json"
 const validateMarkersRegistryPathForTest = "../internal/promptassembly/testdata/validate-markers.json"
 
 // coveredCellArgs returns the flag set that puts runAssemblePrompt's Env
-// squarely in promptassembly.Assemble's one covered cell (see
-// promptassembly's checkCoveredCell): github tracker, github forge, a
-// read-write box, dispatch kind "work", a fresh box (fix-pass 0), the
-// orchestrator off, and every skill baked.
+// squarely in promptassembly.Assemble's covered cell (see promptassembly's
+// checkCoveredCell, which as of issue #2540 checks only dispatch kind
+// "work"): github tracker, github forge, a read-write box, dispatch kind
+// "work", a fresh box (fix-pass 0), the orchestrator off, and every skill
+// baked.
 func coveredCellArgs(t *testing.T, promptOutput, agentsJSONOutput, handoffOutput string) []string {
 	t.Helper()
 	return []string{
@@ -129,6 +130,9 @@ func TestRunAssemblePrompt_UnsupportedCellReturnsNonZero(t *testing.T) {
 	rc := runAssemblePrompt(args, &stdout)
 	if rc == 0 {
 		t.Fatal("runAssemblePrompt exit = 0, want non-zero for an unsupported cell")
+	}
+	if !strings.Contains(stdout.String(), "bogus-kind") {
+		t.Errorf("stdout = %q, want it to mention the rejected dispatch kind bogus-kind", stdout.String())
 	}
 }
 
