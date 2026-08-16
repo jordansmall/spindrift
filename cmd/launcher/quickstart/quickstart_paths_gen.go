@@ -26,3 +26,6 @@ const PathIssueTracker = "issues.tracker"
 
 // PathRepoSlug is the nix option path for the quickstart wizard's repoSlug knob.
 const PathRepoSlug = "forge.repoSlug"
+
+// PathRuntime is the nix option path for the quickstart wizard's runtime knob.
+const PathRuntime = "infra.runtime"

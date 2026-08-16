@@ -182,7 +182,7 @@ func TestRunQuickstart_RuntimeInvalid_RejectedAndReprompted(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read flake.nix: %v", err)
 	}
-	if !strings.Contains(string(flakeNix), `runtime = "docker"`) {
+	if !strings.Contains(string(flakeNix), `infra.runtime = "docker"`) {
 		t.Errorf("expected flake.nix to carry the re-prompted valid runtime, got:\n%s", flakeNix)
 	}
 }
@@ -349,7 +349,7 @@ func TestRunQuickstart_RuntimeDefault_NerdctlDetected_OffersRancher(t *testing.T
 	if err != nil {
 		t.Fatalf("read flake.nix: %v", err)
 	}
-	if !strings.Contains(string(flakeNix), `runtime = "rancher"`) {
+	if !strings.Contains(string(flakeNix), `infra.runtime = "rancher"`) {
 		t.Errorf("expected flake.nix to default runtime to rancher, got:\n%s", flakeNix)
 	}
 }
@@ -445,7 +445,7 @@ func TestRunQuickstart_RuntimeDefault_PrefersPodmanOverDockerAndBwrap(t *testing
 	if err != nil {
 		t.Fatalf("read flake.nix: %v", err)
 	}
-	if !strings.Contains(string(flakeNix), `runtime = "podman"`) {
+	if !strings.Contains(string(flakeNix), `infra.runtime = "podman"`) {
 		t.Errorf("expected flake.nix to default runtime to podman, got:\n%s", flakeNix)
 	}
 }
