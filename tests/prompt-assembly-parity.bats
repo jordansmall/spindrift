@@ -57,16 +57,20 @@
 #     11. jira, which rides the github prompt-selection arms
 #         (ISSUE_TRACKER=jira)
 #
-# The orchestrator-on cells 12-14 (issue #2353) all share dispatch kind
-# "work" (default) with FIX_PASS unset -- the only path checkCoveredCell
-# covers combined with the orchestrator on -- and differ only on the
-# roster/skills axes:
+# The orchestrator-on cells 12-15 (issue #2353, cell 15 added by issue
+# #2512) all share dispatch kind "work" (default) with FIX_PASS unset -- the
+# only path checkCoveredCell covers combined with the orchestrator on -- and
+# differ only on the roster/skills axes:
 #   12. orchestrator on, filer-on -- roster carries a "filer" key alongside
 #       reviewer and scout (FILER_ENABLED on).
 #   13. orchestrator on, filer-off -- roster carries reviewer and scout but
 #       no "filer" key (FILER_ENABLED off).
 #   14. orchestrator on, skills-absent -- no skill baked at all, contrasting
 #       setup()'s unconditional 4-skill baking every other cell relies on.
+#   15. orchestrator on, review-effort-set -- roster's reviewer entry
+#       carries an explicit "effort" key, proving ReviewEffort's
+#       non-empty-overrides case (the filer-on/filer-off cells above only
+#       cover the empty-follows-roster case).
 #
 # Every cell test funnels through the shared assert_cell_golden helper below,
 # so the prompt/agents/session-mode comparison logic lives in exactly one
@@ -210,6 +214,15 @@ AGENTS_ROSTER='{"scout":{"description":"Map relevant files, seams, and tests; re
 # filer-on cell below actually flips the FILER_ENABLED gate on, unlike
 # AGENTS_ROSTER alone (the filer-off cell's roster).
 AGENTS_ROSTER_WITH_FILER='{"scout":{"description":"Map relevant files, seams, and tests; return a structured brief","model":"opus","prompt":"","tools":["Read","Bash","WebFetch","WebSearch","Glob","Grep"]},"reviewer":{"description":"Review the branch diff for spec compliance and coding standards","model":"haiku","prompt":"","tools":["Read","Bash","WebFetch"]},"worker":{"description":"Implement a scoped slice of work delegated to it","model":"sonnet","prompt":"","tools":["Read","Bash","Edit","Write","Glob","Grep","WebFetch"]},"filer":{"description":"File issues from a review'"'"'s non-blocking findings, best-effort","model":"haiku","prompt":"","tools":["Read","Bash","WebFetch"]}}'
+
+# issue #2512: AGENTS_ROSTER's reviewer entry, plus an explicit "effort" key
+# ("xhigh" -- deliberately not "high", rosterDefaults.reviewer.effort's own
+# default, so a fixture pinning it can only pass if the override actually
+# flowed through, not by coincidentally matching the fallback). Scout,
+# reviewer, worker -- no "filer" key, so this cell isolates the
+# reviewer-effort-override axis from the filer axis
+# AGENTS_ROSTER_WITH_FILER above already covers.
+AGENTS_ROSTER_WITH_REVIEW_EFFORT='{"scout":{"description":"Map relevant files, seams, and tests; return a structured brief","model":"opus","prompt":"","tools":["Read","Bash","WebFetch","WebSearch","Glob","Grep"]},"reviewer":{"description":"Review the branch diff for spec compliance and coding standards","model":"haiku","effort":"xhigh","prompt":"","tools":["Read","Bash","WebFetch"]},"worker":{"description":"Implement a scoped slice of work delegated to it","model":"sonnet","prompt":"","tools":["Read","Bash","Edit","Write","Glob","Grep","WebFetch"]}}'
 
 @test "production path matches the golden fixture for the covered cell, with a populated roster" {
   export AGENTS_JSON_TEMPLATE="$AGENTS_ROSTER"
@@ -356,6 +369,20 @@ AGENTS_ROSTER_WITH_FILER='{"scout":{"description":"Map relevant files, seams, an
   assert_cell_golden "orchestrator-filer-off" initial
 
   assert_review_handoff_golden "orchestrator-filer-off"
+}
+
+@test "production path matches the golden fixture for the orchestrator-on review-effort-set cell" {
+  export ORCHESTRATOR_ENABLED=1
+  # AGENTS_ROSTER_WITH_REVIEW_EFFORT (not plain AGENTS_ROSTER): the reviewer
+  # entry's "effort":"xhigh" is the whole point of this cell -- issue #2512's
+  # AC2 non-empty-overrides case, contrasting the filer-on/filer-off cells
+  # above whose reviewer carries no "effort" key at all (ReviewEffort ""
+  # there, the empty-follows-roster case).
+  export AGENTS_JSON_TEMPLATE="$AGENTS_ROSTER_WITH_REVIEW_EFFORT"
+
+  assert_cell_golden "orchestrator-review-effort-set" initial
+
+  assert_review_handoff_golden "orchestrator-review-effort-set"
 }
 
 @test "production path matches the golden fixture for the orchestrator-on skills-absent cell" {
