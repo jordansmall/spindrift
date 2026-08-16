@@ -62,6 +62,17 @@ type Config struct {
 	// gitHooksDir). Only required when rows contains at least one
 	// Enforce == "git-hook" row.
 	RepoDir string
+	// ExtraRepoDirs names additional git repositories (or bare/decoy
+	// repositories) that receive the identical rendered git-hook content
+	// installed at RepoDir -- additive and optional, never a substitute for
+	// RepoDir. entrypoint.sh's own production use installs into both a
+	// throwaway decoy repo (RepoDir, since origin's pushurl is repointed
+	// there) and $WORK_DIR itself (an ExtraRepoDirs entry): the decoy alone
+	// only ever sees a plain `git push`/origin push, since only that push
+	// resolves through origin's repointed pushurl -- a push to an explicit
+	// URL or a non-origin remote goes around it entirely and needs
+	// $WORK_DIR's own hook to catch it (issue #2509 Finding 1).
+	ExtraRepoDirs []string
 	// ShimDir is the directory command-shim rows install into: one shim
 	// script per argv0 group, plus a sibling ".real-<argv0>" file recording
 	// that argv0's real, resolved binary path. Deliberately a caller-chosen
@@ -114,7 +125,7 @@ func Install(rows []promptassembly.ForbiddenMarkerRow, cfg Config, out io.Writer
 		if cfg.RepoDir == "" {
 			return result, fmt.Errorf("readonlyguards: install git-hook guard: RepoDir is empty")
 		}
-		if err := installGitHook(hookRows, cfg.RepoDir, out); err != nil {
+		if err := installGitHook(hookRows, cfg.RepoDir, cfg.ExtraRepoDirs, out); err != nil {
 			return result, err
 		}
 		result.HookInstalled = true
@@ -336,24 +347,34 @@ func gitHooksDir(repoDir string) string {
 	return filepath.Join(repoDir, "hooks")
 }
 
-// installGitHook renders every hookRows row's Message into one hook body
-// and installs it, identically, as every name in hookNames under
-// repoDir's hooks directory (see gitHooksDir).
-func installGitHook(hookRows []promptassembly.ForbiddenMarkerRow, repoDir string, out io.Writer) error {
-	hooksDir := gitHooksDir(repoDir)
-	if err := os.MkdirAll(hooksDir, 0o755); err != nil {
-		return fmt.Errorf("readonlyguards: mkdir hooks dir %s: %w", hooksDir, err)
-	}
-
+// installGitHook renders every hookRows row's Message into one hook body,
+// once, and installs it, identically, as every name in hookNames under
+// repoDir's hooks directory (see gitHooksDir) AND every extraRepoDirs
+// entry's own hooks directory -- see Config.ExtraRepoDirs for why both
+// destinations matter.
+func installGitHook(hookRows []promptassembly.ForbiddenMarkerRow, repoDir string, extraRepoDirs []string, out io.Writer) error {
 	script := renderGitHookScript(hookRows)
-	for _, name := range hookNames {
-		hookPath := filepath.Join(hooksDir, name)
-		if err := os.WriteFile(hookPath, []byte(script), 0o755); err != nil {
-			return fmt.Errorf("readonlyguards: write hook %s: %w", hookPath, err)
+
+	dirs := make([]string, 0, 1+len(extraRepoDirs))
+	dirs = append(dirs, repoDir)
+	dirs = append(dirs, extraRepoDirs...)
+
+	for _, dir := range dirs {
+		hooksDir := gitHooksDir(dir)
+		if err := os.MkdirAll(hooksDir, 0o755); err != nil {
+			return fmt.Errorf("readonlyguards: mkdir hooks dir %s: %w", hooksDir, err)
 		}
+
+		for _, name := range hookNames {
+			hookPath := filepath.Join(hooksDir, name)
+			if err := os.WriteFile(hookPath, []byte(script), 0o755); err != nil {
+				return fmt.Errorf("readonlyguards: write hook %s: %w", hookPath, err)
+			}
+		}
+
+		fmt.Fprintf(out, "readonlyguards: installed git-hook guard at %s (guarding %d row(s))\n", hooksDir, len(hookRows))
 	}
 
-	fmt.Fprintf(out, "readonlyguards: installed git-hook guard at %s (guarding %d row(s))\n", hooksDir, len(hookRows))
 	return nil
 }
 
