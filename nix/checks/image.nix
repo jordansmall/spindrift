@@ -362,10 +362,19 @@ in
   # destinations use (lib/image.nix) -- this check proves both sides actually
   # agree in the real built image: the baked entrypoint.sh must carry each
   # VAR=${VAR:-path} line, and something must actually exist at that path in
-  # the built agentFiles tree. A future rename that edits lib/agent-paths.nix
-  # without updating a hand-copied duplicate elsewhere is structurally
-  # impossible now (there is no duplicate left to edit), but this still guards
-  # against a regression that reintroduces one.
+  # the built agentFiles tree.
+  #
+  # Honesty note (review fix-pass): this check's own "diverges" arm can never
+  # actually fire against a real build. `agentPaths` above and the real baked
+  # preamble both derive from the identical `import ../../lib/agent-paths.nix`
+  # binding, so a rename here updates both the expected `pattern` below and
+  # the real preamble text together, automatically -- there is no longer a
+  # hand-copied duplicate anywhere for the two to drift apart from. That's
+  # AC1's single-source win, not a gap in this check. It does NOT mean the
+  # `grep -qF ... || exit 1` assertion shape below is untested: see the
+  # sibling check `agent-paths-preamble-detects-divergence` for a synthetic
+  # demonstration that this exact assertion mechanism genuinely rejects a
+  # real mismatch when the two sides actually disagree.
   agent-paths-preamble-baked-into-image =
     pkgs.runCommand "agent-paths-preamble-baked-into-image" { }
       ''
@@ -395,6 +404,33 @@ in
         touch $out
       '';
 
+  # Issue #2531 (review fix-pass, AC2): demonstrates that the assertion
+  # mechanism used above (`grep -qF <expected pattern> <file> || exit 1`)
+  # genuinely rejects a real mismatch, since the check above can't exercise
+  # that itself -- see its comment. Builds a synthetic candidate entrypoint
+  # containing a deliberately WRONG PROMPTS_DIR default (a real path, but not
+  # the one lib/agent-paths.nix actually binds), then asserts that grepping
+  # for the real expected pattern in that synthetic candidate correctly does
+  # NOT match. If it did match, this would mean the assertion shape itself is
+  # unsound (e.g. wired backwards), not merely that a rename can't be caught.
+  agent-paths-preamble-detects-divergence =
+    let
+      var = "PROMPTS_DIR";
+      realPath = agentPaths.PROMPTS_DIR;
+      expectedPattern = "${var}=\${${var}:-${realPath}}";
+      wrongCandidate = pkgs.writeText "fake-entrypoint-with-wrong-prompts-dir.sh" ''
+        #!/usr/bin/env bash
+        ${var}=''${${var}:-/agent/WRONG_PATH}
+      '';
+    in
+    pkgs.runCommand "agent-paths-preamble-detects-divergence" { } ''
+      if grep -qF ${pkgs.lib.escapeShellArg expectedPattern} ${wrongCandidate}; then
+        echo "expected the assertion to catch this deliberate mismatch, but it didn't" >&2
+        exit 1
+      fi
+      touch $out
+    '';
+
   # Issue #2531 (review fix-pass): the four Driver-identity vars (DRIVER_NAME,
   # DRIVER_BIN, DRIVER_FLAGS_COMMON, DRIVER_SKILLS_DIR) are baked into the
   # entrypoint preamble by lib/drivers/default.nix's renderPreamble, prepended
@@ -413,6 +449,18 @@ in
   # entrypoint `text` concatenation -- while leaving agentPathsPreamble intact
   # -- now fails here instead of silently shipping a Box that dies on an
   # unbound DRIVER_* variable at runtime.
+  #
+  # Honesty note (review fix-pass): like agent-paths-preamble-baked-into-image
+  # above, this check's own value-mismatch ("diverges") arm can't be exercised
+  # by a rename either -- `patterns` here is built from the identical
+  # `driverEntry` binding renderPreamble itself reads, so both sides move
+  # together by construction. See agent-paths-preamble-detects-divergence
+  # above for a synthetic demonstration that the shared
+  # `grep -qF ... || exit 1` assertion shape genuinely catches a real
+  # mismatch -- the same mechanism this check reuses, so it isn't duplicated
+  # here. What this check newly exercises, and that sibling check does not,
+  # is the omission failure mode above: driverPreamble getting dropped whole
+  # from lib/image.nix's `text` concatenation.
   driver-preamble-baked-into-image =
     let
       driverEntry = (import ../../lib/drivers/default.nix { inherit (pkgs) lib; }).entries.claude;
