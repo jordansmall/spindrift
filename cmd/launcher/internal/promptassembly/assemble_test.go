@@ -536,6 +536,72 @@ func TestAssembleAccessForgeCellsCovered(t *testing.T) {
 	}
 }
 
+// TestAssembleLandGitStopStepNumbering covers the LAND THE CHANGE
+// CODE_FORGE=git block's own step numbering: the "Print exactly one
+// line..." step (LAND_GIT_STOP_READ_WRITE_STEP/LAND_GIT_STOP_READ_ONLY_STEP)
+// must carry a leading number consistent with whatever step, if any,
+// precedes it. Read-write follows the git-push step
+// (LAND_GIT_PUSH_READ_WRITE_STEP, "1. `git push` ..."), so it must be "2.";
+// read-only has no preceding step in this block at all (issue #2526's
+// eval-time assert makes BOX_FORGE_AND_ISSUE_ACCESS=read-only paired with
+// CODE_FORGE=git unbuildable, so LAND_GIT_PUSH_READ_ONLY_STEP no longer
+// exists to supply one), so it must be "1." -- never an orphaned "2." with
+// nothing numbered before it.
+func TestAssembleLandGitStopStepNumbering(t *testing.T) {
+	reg := loadTestRegistry(t)
+
+	cases := []struct {
+		name        string
+		boxWrite    bool
+		wantNumber  string
+		wantMissing string
+	}{
+		{name: "read-write", boxWrite: true, wantNumber: "2. Print exactly one line", wantMissing: "1. Print exactly one line"},
+		{name: "read-only", boxWrite: false, wantNumber: "1. Print exactly one line", wantMissing: "2. Print exactly one line"},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			env := coveredEnv()
+			env.BoxWriteEnabled = tc.boxWrite
+
+			result, err := Assemble(env, reg)
+			if err != nil {
+				t.Fatalf("Assemble: %v", err)
+			}
+
+			section := landGitForgeSection(t, result.Prompt)
+			if !strings.Contains(section, tc.wantNumber) {
+				t.Errorf("CODE_FORGE=git section missing %q:\n%s", tc.wantNumber, section)
+			}
+			if strings.Contains(section, tc.wantMissing) {
+				t.Errorf("CODE_FORGE=git section unexpectedly contains %q:\n%s", tc.wantMissing, section)
+			}
+		})
+	}
+}
+
+// landGitForgeSection extracts the LAND THE CHANGE section's
+// "**`CODE_FORGE=git`**" block -- from that header up to (not including) the
+// next "**`CODE_FORGE=" header -- the same slice-out-a-named-block pattern
+// TestAssembleInjectsSharedBlocks/TestAssembleSharedBlockAlreadyPresentIsNoOp
+// use for other named prompt regions, so a numbering assertion below can't
+// accidentally match a "Print exactly one line" step from a different
+// CODE_FORGE arm.
+func landGitForgeSection(t *testing.T, prompt string) string {
+	t.Helper()
+	start := strings.Index(prompt, "**`CODE_FORGE=git`**")
+	if start == -1 {
+		t.Fatalf("prompt missing CODE_FORGE=git header:\n%s", prompt)
+	}
+	rest := prompt[start+len("**`CODE_FORGE=git`**"):]
+	end := strings.Index(rest, "**`CODE_FORGE=")
+	if end == -1 {
+		t.Fatalf("prompt missing a CODE_FORGE header after CODE_FORGE=git:\n%s", prompt)
+	}
+	return rest[:end]
+}
+
 // TestAssembleResearchKindRendersResearchPrompt covers the research cell
 // (DispatchKind == "research", SelfContained == false): Assemble no longer
 // rejects it, renders research-prompt.md (not issue-prompt.md), and always

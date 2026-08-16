@@ -231,12 +231,20 @@ setup() {
 @test "prompt branches CODE_FORGE=git to a push-only outcome, no PR/CI" {
   # CODE_FORGE=git (#330) must skip PR creation and CI-watch entirely and
   # emit a branch ref where a PR URL would go.
+  # issue #2526: the block's own stop step now lives in a read-write/
+  # read-only fragment pair (land-git-stop-read-write.md /
+  # land-git-stop-read-only.md), not inline in the template -- the
+  # section itself only carries the LAND_GIT_STOP_*_STEP references.
   local prompts="${PROMPTS_DIR:-$BATS_TEST_DIRNAME/../templates/default/prompts}"
   local prompt="$prompts/issue-prompt.md"
   grep -q 'CODE_FORGE=git' "$prompt"
   grep -q 'skip OPEN A PULL REQUEST below entirely' "$prompt"
-  grep -qF 'landing=${BRANCH} status=ready' "$prompt"
-  grep -q 'Do not open a pull request and do not attempt to merge' "$prompt"
+  grep -q 'LAND_GIT_STOP_READ_WRITE_STEP' "$prompt"
+  grep -q 'LAND_GIT_STOP_READ_ONLY_STEP' "$prompt"
+  grep -qF 'landing=${BRANCH} status=ready' "$prompts/fragments/land-git-stop-read-write.md"
+  grep -qF 'landing=${BRANCH} status=ready' "$prompts/fragments/land-git-stop-read-only.md"
+  grep -q 'Do not open a pull request and do not attempt to merge' "$prompts/fragments/land-git-stop-read-write.md"
+  grep -q 'Do not open a pull request and do not attempt to merge' "$prompts/fragments/land-git-stop-read-only.md"
 }
 
 @test "OPEN A PULL REQUEST opens the PR as a draft" {
