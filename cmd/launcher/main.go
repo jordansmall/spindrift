@@ -1597,9 +1597,7 @@ func cmdDoctor() int {
 	c := loadConfig()
 	it := newIssueTracker(c)
 	cf := newCodeForge(c, local.SanitizedParent{}, it)
-	stat, serr := os.Stdin.Stat()
-	interactive := serr == nil && (stat.Mode()&os.ModeCharDevice) != 0
-	if err := runDoctor(it, cf, c, os.Stdout, os.Stdin, interactive); err != nil {
+	if err := runDoctor(it, cf, c, os.Stdout, os.Stdin, isStdinTTY()); err != nil {
 		fmt.Fprintf(os.Stderr, "%s\n", err)
 		return 1
 	}

@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/charmbracelet/x/term"
 )
 
 // TestSchemaFlags_DefaultModelsMatchFixture asserts every
@@ -1525,6 +1527,48 @@ func TestParseFlags_NoCmdOrFile_LeavesDirectEnv(t *testing.T) {
 	}
 	if got := os.Getenv("GH_TOKEN"); got != "direct-value" {
 		t.Errorf("GH_TOKEN = %q, want %q (direct env must be left untouched)", got, "direct-value")
+	}
+}
+
+// TestIsInteractiveTTY_Composition pins the isInteractiveTTY = isStdinTTY()
+// && isStderrTTY() composition (issue #2559): both seams are package vars,
+// so all four combinations are exercised here without a real TTY.
+func TestIsInteractiveTTY_Composition(t *testing.T) {
+	origStdin, origStderr := isStdinTTY, isStderrTTY
+	t.Cleanup(func() { isStdinTTY, isStderrTTY = origStdin, origStderr })
+
+	for _, tc := range []struct {
+		stdin, stderr, want bool
+	}{
+		{false, false, false},
+		{false, true, false},
+		{true, false, false},
+		{true, true, true},
+	} {
+		isStdinTTY = func() bool { return tc.stdin }
+		isStderrTTY = func() bool { return tc.stderr }
+		if got := isInteractiveTTY(); got != tc.want {
+			t.Errorf("isInteractiveTTY() with stdin=%v stderr=%v = %v, want %v", tc.stdin, tc.stderr, got, tc.want)
+		}
+	}
+}
+
+// TestTermIsTerminal_DevNull_NotATTY pins term.IsTerminal's behavior on
+// /dev/null (issue #2559): /dev/null is itself a character device, so the
+// old os.ModeCharDevice-based check wrongly treated it as an interactive
+// TTY. term.IsTerminal correctly reports it as not a terminal. This
+// exercises the real call isStdinTTY/isStderrTTY wrap directly against a
+// real non-tty file descriptor -- faking those package vars (as
+// TestIsInteractiveTTY_Composition above does) would prove nothing about
+// this regression.
+func TestTermIsTerminal_DevNull_NotATTY(t *testing.T) {
+	f, err := os.Open(os.DevNull)
+	if err != nil {
+		t.Fatalf("open %s: %v", os.DevNull, err)
+	}
+	defer f.Close()
+	if term.IsTerminal(f.Fd()) {
+		t.Error("want /dev/null to not be reported as a TTY (regression: os.ModeCharDevice used to wrongly treat it as one)")
 	}
 }
 
