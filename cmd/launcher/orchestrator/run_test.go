@@ -4349,6 +4349,44 @@ func TestSeedReviewPromptFromStateIncludesDeltaFocusForValidAnchor(t *testing.T)
 	if !strings.Contains(gotStr, "APPROVE") || !strings.Contains(gotStr, "FULL diff") {
 		t.Errorf("seeded review prompt = %q, want an unconditional re-skim-full-diff-before-APPROVE instruction", gotStr)
 	}
+	wantDiff := "git diff " + anchor + "..HEAD"
+	wantLog := "git log " + anchor + "..HEAD --oneline"
+	if !strings.Contains(gotStr, wantDiff) {
+		t.Errorf("seeded review prompt = %q, want it to name the focus range %q", gotStr, wantDiff)
+	}
+	if !strings.Contains(gotStr, wantLog) {
+		t.Errorf("seeded review prompt = %q, want it to name the focus range %q", gotStr, wantLog)
+	}
+}
+
+// TestSeedReviewPromptFromStateIncludesDeltaFocusForSixtyFourCharAnchor
+// pins reviewedCommitAnchorRe's own upper boundary (issue #2551 review): a
+// 64-character anchor -- a SHA-256 repo's own full, unabbreviated `git
+// rev-parse HEAD` output -- must still be accepted, not just rejected past
+// it (TestSeedReviewPromptFromStateOmitsDeltaFocusForInvalidAnchor already
+// covers 65 as a reject; nothing before this test pinned 64 as the actual
+// accepted edge).
+func TestSeedReviewPromptFromStateIncludesDeltaFocusForSixtyFourCharAnchor(t *testing.T) {
+	dir := t.TempDir()
+	promptFile := filepath.Join(dir, "prompt.txt")
+	if err := os.WriteFile(promptFile, []byte("ORIGINAL PROMPT TEXT"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	anchor := strings.Repeat("a", 64)
+	state := runstate.RunState{ReviewedCommitAnchor: anchor}
+
+	seeded, err := seedReviewPromptFromState(promptFile, state)
+	if err != nil {
+		t.Fatalf("seedReviewPromptFromState: %v", err)
+	}
+	got, err := os.ReadFile(seeded)
+	if err != nil {
+		t.Fatalf("read seeded review prompt: %v", err)
+	}
+	if !strings.Contains(string(got), "### Delta focus") {
+		t.Errorf("seeded review prompt = %q, want a delta-focus section for a 64-character anchor", got)
+	}
 }
 
 // TestSeedReviewPromptFromStateSeedsOnAnchorAlone verifies
