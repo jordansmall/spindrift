@@ -2143,9 +2143,13 @@ defaults to escalating instead, so the loop stops feeding itself an
 ever-growing "in scope" surface. This keeps the filer from turning every nit
 into churn: one issue closed should not spawn five more, but a rise in
 filing volume from round 2 on is the intended effect of the round-aware
-tiebreak, not a regression. Missing or inadequate tests are Blocking, not
-filer fodder — they are fixed in the current work, never deferred to an
-issue.
+tiebreak, not a regression. Missing or inadequate tests for new logic are
+Blocking, not filer fodder — they are fixed in the current work, never
+deferred to an issue. The one exemption is a pure relocation, refactor, or
+comment/doc change whose behaviour is already covered under test: that is
+Non-blocking (issue #2696), and it goes through the same triage as any
+other Non-blocking finding above — it needs neither an inline fix nor a
+human, so it is not escalated to the filer either.
 
 When enabled, after the final `APPROVE` verdict and before opening the PR,
 the main agent delegates only those escalated findings to the filer. The
@@ -3067,6 +3071,14 @@ See [`docs/adr/`](adr/) for the full architectural decision records (0001–0012
 including the Go launcher ([ADR 0007](adr/0007-runtime-logic-is-a-nix-built-go-binary.md)),
 the pluggable OCI/bwrap runner ([ADR 0006](adr/0006-box-isolation-is-a-pluggable-runner.md)),
 and nix-in-the-box ([ADR 0008](adr/0008-nix-is-a-first-class-default-in-the-box.md)).
+
+---
+
+## Review-prompt tuning measurements
+
+[`docs/measurements/`](measurements/) holds before/after writeups for
+changes that calibrate the reviewer's own rubric, e.g. [issue #2696's
+coverage-severity calibration](measurements/2696-coverage-severity.md).
 
 ---
 
