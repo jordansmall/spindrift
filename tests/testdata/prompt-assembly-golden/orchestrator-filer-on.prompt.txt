@@ -402,6 +402,22 @@ write it precisely enough to survive that check, and terse enough to stay a
 reference rather than a restatement — a compact, well-formed entry never
 needs more than a short clause after the arrow.
 
+Also write a third, separate file, `/tmp/decisions.md` (outside the repo,
+never commit) — never fold this into the pass-summary or dispositions file
+above. It holds nothing but one terse line per notable implementation
+decision this pass made: what you chose, what you rejected (if a real
+alternative existed), and the constraint that drove the choice, e.g.
+`<what/where> -> chose <X>, rejected <Y> -- <constraint, with a reference>`.
+Not every trivial choice belongs here — only one a later pass, re-deriving
+intent from the diff alone, could plausibly get wrong or relocate. Reference
+existing artifacts — the commit SHA, a `file:line`, an issue number —
+rather than restating their content: no narrative, no pasted diff hunks,
+file contents, or transcript excerpts. Write only this pass's own new
+decisions; a rejected alternative stays worth keeping even after a later
+pass's own choice looks different, and the run's own decisions record
+already accumulates every pass's entries across rounds without you doing
+anything extra.
+
 # FILE ISSUES
 
 REVIEW's triage already fixed inline every non-blocking finding that was cheap
