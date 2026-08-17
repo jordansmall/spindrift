@@ -143,11 +143,24 @@ func toKebab(env string) string {
 	return strings.ToLower(strings.ReplaceAll(env, "_", "-"))
 }
 
+// isStdinTTY reports whether the launcher's own stdin is a real terminal.
+// A package var so tests can override it without a real TTY (issue #1971).
+var isStdinTTY = func() bool {
+	return term.IsTerminal(os.Stdin.Fd())
+}
+
+// isStderrTTY reports whether the launcher's own stderr is a real terminal.
+// A package var, mirroring isStdinTTY, so tests can override it without a
+// real TTY (issue #1971).
+var isStderrTTY = func() bool {
+	return term.IsTerminal(os.Stderr.Fd())
+}
+
 // isInteractiveTTY reports whether the launcher's own stdin and stderr are
-// both real terminals. A package var so tests can force either branch
+// both real terminals. A package var so tests can override either branch
 // without a real TTY (issue #1971).
 var isInteractiveTTY = func() bool {
-	return term.IsTerminal(os.Stdin.Fd()) && term.IsTerminal(os.Stderr.Fd())
+	return isStdinTTY() && isStderrTTY()
 }
 
 // secretCmdRunner executes a secret-fetch command string (from a --<name>-cmd
