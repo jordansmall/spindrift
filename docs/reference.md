@@ -1381,9 +1381,9 @@ artifact, not a growing transcript:
 - **Seeded prompts.** Before any pass whose run-state carries prior data (in
   practice every pass after the first, though a warm-started state file would
   seed pass 1 too), the orchestrator prepends a "Run-state handoff" section —
-  last verdict, reviewer findings, scout-brief path, pass-summary path — to
-  the original prompt, so a fresh implementor pass knows where a prior pass
-  left off without reading its transcript.
+  last verdict, reviewer findings, scout-brief path, pass-summary path,
+  decisions log — to the original prompt, so a fresh implementor pass knows
+  where a prior pass left off without reading its transcript.
 - **Round-N review-prompt seeding.** A round-N (N>1) review pass gets its own,
   narrower seeded section instead: its own prior verdict message plus the
   append-only dispositions log's content, both verbatim, framed as claims to
@@ -1425,12 +1425,11 @@ artifact, not a growing transcript:
   file (default `/tmp/decisions.md`) is appended, one "## Round N" section at
   a time, to a per-run, append-only log (`DecisionsLogPath`) — the same
   append-only shape, reference-only contract, and token-budget tripwire
-  (`decisionsMeanTokenCeiling`/`decisionsTotalTokenCeiling`, flagged as a
-  `run_state_error` op with `phase: decisions_budget`) as the dispositions
-  log above. Unlike the dispositions log, which seeds only the round-N
-  *review* prompt, the decisions log seeds every *implement/fix* pass's
-  prompt (pass N>1). A missing or unreadable decisions log degrades to an
-  unseeded prompt, never an error.
+  (flagged as a `run_state_error` op with `phase: decisions_budget`) as the
+  dispositions log above. Unlike the dispositions log, which seeds only the
+  round-N *review* prompt, the decisions log seeds every *implement/fix*
+  pass's prompt (pass N>1). A missing or unreadable decisions log degrades to
+  an unseeded prompt, never an error.
 - **Code-owned caps.** `--max-review-rounds` (default 3) caps additional
   passes a `BLOCK` verdict may trigger; `--max-slices` (default 9) caps the
   implement/fix/review invocation count regardless of verdict; either set to

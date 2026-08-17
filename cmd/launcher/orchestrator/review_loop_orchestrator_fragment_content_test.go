@@ -44,6 +44,7 @@ func TestReviewLoopOrchestratorFragmentInstructsDecisionsFile(t *testing.T) {
 		"chose",
 		"rejected",
 		"constraint",
+		"pasted diff hunks",
 	} {
 		if !strings.Contains(content, want) {
 			t.Errorf("review-loop-orchestrator.md missing %q", want)

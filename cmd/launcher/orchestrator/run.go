@@ -315,8 +315,14 @@ func run(cfg config, stdout io.Writer) (int, error) {
 		// set for its own external inspection of the run-state artifact.
 		recordDispositions(cfg.dispositionsPath, &state, dispositionsPreStat)
 		// Same rationale as recordDispositions above: this legacy loop has
-		// no review pass to consume state.DecisionsPath, but a caller may
-		// still run it with -decisions-path set for its own external
+		// no review-round cadence for appendFreshDecisionsRound to
+		// accumulate a log across (that call is omitted here entirely,
+		// mirroring why appendFreshDispositionsRound is never called in
+		// this loop either), so state.DecisionsLogPath never gets
+		// populated and seedPromptFromState's own decisions bullet never
+		// fires on this path -- recordDecisions still runs, for symmetry
+		// with recordDispositions above and because a caller may still run
+		// this loop with -decisions-path set for its own external
 		// inspection of the run-state artifact.
 		recordDecisions(cfg.decisionsPath, &state, decisionsPreStat)
 		// driver-exec (re-)creates cfg.logPath fresh for this one pass
@@ -683,7 +689,12 @@ func seedPromptFromState(promptFile string, state runstate.RunState) (string, er
 	// designed to avoid.
 	var decisionsContent string
 	if state.DecisionsLogPath != "" {
-		if content, err := os.ReadFile(state.DecisionsLogPath); err == nil && len(content) > 0 {
+		// TrimSpace, not a bare len() check: a whitespace-only log (e.g. an
+		// appendDecisionsRound section header with no actual entries under
+		// it) must degrade the same way a genuinely empty file does, rather
+		// than clearing the IsEmpty()-and-no-content early return below and
+		// rendering a bullet whose fenced block is blank.
+		if content, err := os.ReadFile(state.DecisionsLogPath); err == nil && strings.TrimSpace(string(content)) != "" {
 			decisionsContent = string(content)
 		}
 	}
