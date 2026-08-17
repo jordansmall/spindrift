@@ -71,6 +71,17 @@
     fragment = "review-loop-orchestrator.md";
     var = "REVIEW_LOOP_ORCHESTRATOR_STEP";
   }
+  # The COMMIT-section fold-fix instruction (issue #2698): reuses the
+  # REVIEW_LOOP_ORCHESTRATOR gate above rather than a new one -- it's the
+  # same run/pass-scoped ORCHESTRATOR-on-ness, just needs to render earlier,
+  # in the COMMIT section, ahead of where the pass actually commits (the
+  # REVIEW_LOOP_ORCHESTRATOR fragment itself never acts on findings in the
+  # same turn, so the fold-fix instruction can't live there).
+  {
+    gate = "REVIEW_LOOP_ORCHESTRATOR";
+    fragment = "commit-rework-orchestrator.md";
+    var = "COMMIT_REWORK_ORCHESTRATOR_STEP";
+  }
   # The IMPLEMENT coordinator step (issue #2056): when a `worker` subagent is
   # provisioned (WORKER_MODEL set, issue #2054, detected by
   # agent/entrypoint.sh's phase_prompt_assembly WORKER_PROVISIONED precompute
