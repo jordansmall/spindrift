@@ -1714,14 +1714,17 @@ func TestRunWithReviewPassSequenceOnBlockThenApprove(t *testing.T) {
 // TestRunWithReviewPassRecordsReviewedCommitAnchor verifies runWithReviewPass
 // (issue #2551 slice 2) records the orchestrator's own repo workdir HEAD into
 // state.ReviewedCommitAnchor after every completed review pass, including
-// round 1 -- not just on a terminal BLOCK/APPROVE. The fake driver-exec here
-// never touches the real repo, so the anchor recorded must be the real
-// spindrift repo's own actual HEAD SHA at the time the test runs (computed
-// independently via `git rev-parse HEAD` in this test's own -- unchanged --
-// working directory, the same way dispatch_test.go's gitOutputT helper reads
-// HEAD elsewhere in this package).
+// round 1 -- not just on a terminal BLOCK/APPROVE. recordReviewedCommitAnchor
+// resolves the repo root via os.Getwd(), so this test chdirs into a fresh,
+// disposable temp git repo (chdirToFreshWorkerRepo, workers_test.go) rather
+// than relying on this package's own checkout -- the checked-out repo has no
+// `.git` directory once copied into the Nix build sandbox that
+// `checks-inbox` runs under, so a bare `git rev-parse HEAD` against "."
+// would fail there even though it happens to succeed in a plain `go test`
+// run from a real working tree.
 func TestRunWithReviewPassRecordsReviewedCommitAnchor(t *testing.T) {
-	wantHead := gitOutputT(t, ".", "rev-parse", "HEAD")
+	repoRoot := chdirToFreshWorkerRepo(t)
+	wantHead := gitOutputT(t, repoRoot, "rev-parse", "HEAD")
 
 	dir := t.TempDir()
 	callLog := filepath.Join(dir, "calls.log")
@@ -1781,11 +1784,14 @@ func TestRunWithReviewPassRecordsReviewedCommitAnchor(t *testing.T) {
 // (call 4) must then read that same anchor back out of run-state and seed
 // its own --prompt-file with a "### Delta focus" section naming it. The
 // fake driver-exec here never touches the real repo, so -- exactly as in
-// TestRunWithReviewPassRecordsReviewedCommitAnchor -- the anchor recorded
-// (and later seeded) must be the real spindrift repo's own actual HEAD SHA
-// at the time the test runs, computed independently via gitOutputT.
+// TestRunWithReviewPassRecordsReviewedCommitAnchor -- this test chdirs into
+// its own fresh, disposable temp git repo (chdirToFreshWorkerRepo) rather
+// than relying on this package's own checkout, which has no `.git`
+// directory once copied into the Nix build sandbox `checks-inbox` runs
+// under.
 func TestRunWithReviewPassSeedsRoundTwoWithDeltaFocusFromRecordedAnchor(t *testing.T) {
-	wantHead := gitOutputT(t, ".", "rev-parse", "HEAD")
+	repoRoot := chdirToFreshWorkerRepo(t)
+	wantHead := gitOutputT(t, repoRoot, "rev-parse", "HEAD")
 
 	dir := t.TempDir()
 	callLog := filepath.Join(dir, "calls.log")
