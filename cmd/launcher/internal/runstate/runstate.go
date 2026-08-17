@@ -81,6 +81,34 @@ type RunState struct {
 	// same fail-open convention as the run state artifact itself -- never an
 	// error. Empty until the first review pass records it.
 	ReviewedCommitAnchor string `json:"reviewed_commit_anchor,omitempty"`
+	// DecisionsPath is the path to the implement/fix pass's own per-decision
+	// file (issue #2695) -- terse per-decision lines (what was chosen, what
+	// was rejected, the constraint that drove it) -- referenced by path, not
+	// inlined, mirroring DispositionsPath's own convention, so a later
+	// implement/fix pass resumes from what was actually decided instead of
+	// re-deriving it from a transcript.
+	DecisionsPath string `json:"decisions_path"`
+	// DecisionsLogPath is the path to the per-run, append-only decisions log
+	// (issue #2695): every implement/fix pass's own fresh DecisionsPath
+	// content, appended one "## Round N" section at a time, mirroring
+	// DispositionsLogPath's own convention. A decision is never dropped or
+	// collapsed by this append -- the log is expected to grow in entry count
+	// across rounds, which stays safe only because review-loop-orchestrator.md's
+	// own contract (a later slice) keeps every entry a terse reference
+	// (commit SHA, file path, issue number) rather than restated
+	// diff/file/transcript content.
+	// Unlike DispositionsLogPath, this field is deliberately INCLUDED in
+	// IsEmpty()'s check below rather than excluded: a later slice makes
+	// seedPromptFromState itself (not a separate narrower-check function
+	// like seedReviewPromptFromState) the reader/renderer of
+	// DecisionsLogPath, seeding it directly into round-N implement/fix
+	// prompts. seedPromptFromState's own early-return is `if
+	// state.IsEmpty() { return promptFile, nil }` -- so excluding
+	// DecisionsLogPath the way DispositionsLogPath is excluded would make a
+	// state whose only content is a decisions log short-circuit before ever
+	// reaching the code that renders it. Empty until the first
+	// implement/fix pass appends to it.
+	DecisionsLogPath string `json:"decisions_log_path,omitempty"`
 	// ReviewFindings is the code-owned review pass's own final message --
 	// the "VERDICT: ..." line plus its Blocking/Non-blocking sections,
 	// verbatim -- recorded here (distinct from the bare LastVerdict word)
@@ -154,12 +182,24 @@ func (s RunState) IsEmpty() bool {
 	// with no bullets in it at all. DispositionsLogPath and
 	// ReviewedCommitAnchor join it for the identical reason: only
 	// seedReviewPromptFromState -- not seedPromptFromState -- reads either.
+	//
+	// DecisionsPath (issue #2695) joins DispositionsPath for the identical
+	// reason: nothing renders DecisionsPath directly, only DecisionsLogPath's
+	// log content is ever seeded. DecisionsLogPath itself, however, is
+	// deliberately NOT excluded below -- unlike DispositionsLogPath, a later
+	// slice makes seedPromptFromState itself (not a separate narrower-check
+	// function) the reader/renderer of DecisionsLogPath, so excluding it here
+	// would make IsEmpty return true for a state whose only content is a
+	// decisions log, and seedPromptFromState's own `if state.IsEmpty() {
+	// return promptFile, nil }` early-return would then skip rendering it
+	// entirely.
 	return s.LastVerdict == "" &&
 		s.ScoutBriefPath == "" &&
 		s.PassSummaryPath == "" &&
 		s.ReviewFindings == "" &&
 		s.WorkerFindings == "" &&
 		s.FindingsLogPath == "" &&
+		s.DecisionsLogPath == "" &&
 		len(s.UnlandedSlices) == 0 &&
 		!s.TerminalLand
 }
