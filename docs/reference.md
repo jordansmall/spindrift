@@ -1398,11 +1398,11 @@ artifact, not a growing transcript:
   <anchor>..HEAD` and `git log <anchor>..HEAD --oneline` — as where to
   concentrate the hunt (issue #2551). The full branch diff stays available
   throughout; this narrows where the reviewer spends its attention, never
-  what it's allowed to see, and territory outside that range (already
-  reviewed as of the anchor commit) is re-examined only where a new commit
-  actually touches it. The section also requires the
-  reviewer to re-skim the FULL diff's shape end to end before it may issue
-  APPROVE, regardless of the delta focus above — delta review must never
+  what it's allowed to see, and territory outside that range (assumed
+  already covered by the prior review pass) is re-examined only where a new
+  commit actually touches it. The section also requires the reviewer to
+  re-skim the FULL diff's shape end to end before it may issue APPROVE,
+  regardless of the delta focus above — delta review must never
   narrow final approval's own coverage. A missing or invalid-looking anchor
   omits the section entirely, degrading to the unchanged full-review prompt,
   never an error.
