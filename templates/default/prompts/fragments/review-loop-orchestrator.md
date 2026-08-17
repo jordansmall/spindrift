@@ -16,19 +16,37 @@ above, seeded from a prior pass in this run.
   LAND THE CHANGE, OPEN A PULL REQUEST, and OUTCOME.
 
 Non-blocking triage — do NOT reflexively file every finding. Filing every
-finding spawns more issues than the work ever closes; the default is to
-resolve them here:
+finding spawns more issues than the work ever closes, so resolving a cheap,
+in-scope finding here stays the default regardless of round (item 1 below,
+unchanged by round). Only the tiebreak for an ambiguous finding is
+round-aware (item 2 below): read the highest N among the top-level
+"## Round N (verdict: ...)" section headers in the Findings log file the
+handoff's own Findings log bullet points to — not the Decisions record's own
+"## Round N" headers shown separately above (those number by pass, not by
+review round), and not similar-looking text quoted inside a finding's own
+description. N == 1 means this is the first review round; N > 1 means the
+second review round or later. If the Findings log bullet is absent, or you
+otherwise cannot tell, treat it as the second round or later — deferring
+only costs an extra filed issue, not a silently widened diff, so it's the
+safer failure mode here. This round-awareness applies only to the
+non-blocking triage below, not the blocking-verdict handling above:
 
 1. Fix inline, on this branch, every finding whose fix is cheap and in scope
-   for this change — most nits, smells, dead code, misleading names, and doc
-   updates for a surface this diff already touches. Re-run checks, then commit
-   them the same way — amended into the commit each logically belongs to
-   unless it is a reasonably separate scope, which earns its own commit. They
-   never become issues.
-2. Escalate — to the filer if present, else the PR body — only a finding that
-   genuinely needs a human: a real design trade-off, work outside this issue's
-   scope, or a change too large to fold in without derailing the slice. When
-   unsure whether a finding clears that bar, fix it rather than file it.
+   for the slice as originally authored and the issue's own acceptance
+   criteria — most nits, smells, dead code, misleading names, and doc
+   updates for a surface the *original* slice touches, not whatever surface
+   the diff has since grown to touch across earlier rounds' own absorbed
+   non-blocking fixes. Re-run checks, then commit them the same way —
+   amended into the commit each logically belongs to unless it is a
+   reasonably separate scope, which earns its own commit. They never
+   become issues.
+2. Escalate — to the filer if present, else the PR body — only a finding
+   that genuinely needs a human: a real design trade-off, work outside
+   this issue's scope, or a change too large to fold in without derailing
+   the slice. When unsure whether a finding clears that bar: on the first
+   review round, fix it rather than file it; from the second review round on,
+   escalate it instead. Escalating more from round 2 on is the intended
+   effect of this round-awareness, not a regression.
 
 Before stopping this turn, either right after COMMIT or after OUTCOME per the
 two cases above, write to `/tmp/pass-summary.md` (outside the repo, never
