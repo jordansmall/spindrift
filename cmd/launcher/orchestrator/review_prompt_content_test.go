@@ -12,8 +12,9 @@ import (
 // literals a Go constant must match.
 
 // normalizeWhitespace collapses all runs of whitespace/newlines to a single
-// space, so these checks survive a harmless re-wrap of review-prompt.md's
-// prose across lines without asserting anything substantive changed.
+// space, so these checks survive a harmless re-wrap of a prompt or fragment
+// file's prose across lines without asserting anything substantive changed.
+// Shared with code_review_default_fragment_content_test.go.
 func normalizeWhitespace(s string) string {
 	return strings.Join(strings.Fields(s), " ")
 }
@@ -63,6 +64,18 @@ func TestReviewPromptSeverityContract(t *testing.T) {
 		{
 			name:   "#2550 seeded section is not narrative to discard",
 			clause: `A "## Prior-round claims to verify" section above this prompt`,
+		},
+		{
+			name:   "#2696 CORRECTNESS: already-covered non-behavioural change is non-blocking",
+			clause: "A pure relocation, refactor, or comment/doc change whose behaviour is already covered under test is not a coverage defect — note it under Non-blocking rather than Blocking",
+		},
+		{
+			name:   "#2696 Severity Blocking: new-logic coverage still blocks, points at the exemption",
+			clause: "**Blocking** — spec violations, correctness bugs, security issues, missing or inadequate tests for the new logic (untested new logic blocks on its own — the one exemption is in the Non-blocking bullet below), standards violations that break the build or documented rules",
+		},
+		{
+			name:   "#2696 Severity Non-blocking: already-covered exemption routed here explicitly",
+			clause: "missing or inadequate tests for a pure relocation, refactor, or comment/doc change whose behaviour is already covered under test",
 		},
 	}
 

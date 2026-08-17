@@ -37,8 +37,10 @@ behaviour changes as loudly as missing requirements.
 **CORRECTNESS** — Try to break it. Walk the edge cases the author skipped: empty
 / nil / zero / boundary inputs, error and early-return paths, partial failure,
 concurrency and ordering, off-by-one, resource leaks (unclosed files, goroutines,
-processes), and every branch the tests do NOT exercise. Untested new logic is a
-finding on its own.
+processes), and every branch the tests do NOT exercise. Untested new logic
+is a finding on its own. A pure relocation, refactor, or comment/doc change
+whose behaviour is already covered under test is not a coverage defect —
+note it under Non-blocking rather than Blocking.
 
 **SECURITY** — This system feeds untrusted issue and comment text to an agent as
 prompt input, handles live secrets, and runs shelled-out commands. Look hard for:
@@ -55,9 +57,12 @@ rot. Nits count — surface them, don't sit on them.
 
 Severity, so the fix loop converges:
 - **Blocking** — spec violations, correctness bugs, security issues, missing or
-  inadequate tests for the new logic (untested new logic blocks on its own),
-  standards violations that break the build or documented rules.
-- **Non-blocking** — smells, nits, style, and suggestions. BLOCK stays
+  inadequate tests for the new logic (untested new logic blocks on its own —
+  the one exemption is in the Non-blocking bullet below), standards
+  violations that break the build or documented rules.
+- **Non-blocking** — smells, nits, style, suggestions, and missing or
+  inadequate tests for a pure relocation, refactor, or comment/doc change
+  whose behaviour is already covered under test. BLOCK stays
   reserved for the categories above — a finding that fits one of those (a
   Conventional Commits format violation, say, is a standards violation)
   stays Blocking regardless of where it lands. Short of that: wording,
