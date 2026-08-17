@@ -1,10 +1,12 @@
 # FILE ISSUES
 
-REVIEW's triage already fixed inline every non-blocking finding that was cheap
-and in scope. Delegate to the filer subagent only the findings that survived
-that triage — the ones that genuinely need a human (a design trade-off,
-out-of-scope work, or a change too large to fold in). If none survived, skip
-this step; do not re-file what you just fixed.
+REVIEW's triage already fixed inline every non-blocking finding that was
+cheap and in scope. Delegate to the filer subagent only the findings that
+survived that triage — the ones that genuinely need a human (a design
+trade-off, out-of-scope work, or a change too large to fold in), plus, from
+the second review round on, an ambiguous finding REVIEW's own round-aware
+tiebreak deferred rather than fixed. If none survived, skip this step;
+do not re-file what you just fixed.
 
 It is pre-provisioned via --agents; pass it the surviving findings verbatim,
 the issue number, and the PR URL (or branch, if not yet opened) for provenance.
