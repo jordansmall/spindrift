@@ -1421,6 +1421,22 @@ artifact, not a growing transcript:
   catches a pasted diff hunk or file excerpt, many individually-short
   lines that would keep the mean check alone from ever tripping — never a
   budget the agent is meant to trim into.
+- **Decisions log.** Each implement/fix pass's own fresh `--decisions-path`
+  file (default `/tmp/decisions.md`) is appended, one "## Round N" section
+  at a time, to a per-run, append-only log (`DecisionsLogPath`) — same
+  append-only shape as the dispositions log, no entry ever dropped or
+  collapsed across rounds. The seeding target differs, though: the
+  dispositions log seeds only the round-N *review* prompt; the decisions
+  log instead seeds every *implement/fix* pass's prompt (pass N>1 — pass 1
+  has nothing yet to seed), so the reviewer and the implementor read
+  different accumulated logs, never each other's. Same reference-only
+  contract and token-budget tripwire shape as dispositions applies here too
+  — an entry restating diff/file/transcript content instead of referencing
+  a commit SHA/`file:line`/issue number risks tripping
+  `decisionsMeanTokenCeiling`/`decisionsTotalTokenCeiling`, flagged loudly
+  as a `run_state_error` op with `phase: decisions_budget`, never a budget
+  the agent is meant to trim into. A missing or unreadable decisions log
+  degrades to an unseeded prompt, never an error.
 - **Code-owned caps.** `--max-review-rounds` (default 3) caps additional
   passes a `BLOCK` verdict may trigger; `--max-slices` (default 9) caps the
   implement/fix/review invocation count regardless of verdict; either set to
