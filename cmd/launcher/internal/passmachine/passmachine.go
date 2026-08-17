@@ -348,8 +348,8 @@ func terminalLandTransition(in Input) Decision {
 
 // implementFixTransition reproduces the in.LandPhase == LandPhaseActive half
 // of what was previously a single switch at run.go:355-401 (issue #2548
-// AC2): the ordinary implement/fix/land decision rules (APPROVE, maxSlices,
-// manifest dispatch). It deliberately carries NO terminal-land case -- once
+// AC2): the ordinary implement/fix/land decision rules (APPROVE,
+// maxSlices). It deliberately carries NO terminal-land case -- once
 // a prior decision commits this run to landing, Transition dispatches to
 // terminalLandTransition instead, so that commitment's own rule lives
 // somewhere this switch's case order can never reprioritize against it.
