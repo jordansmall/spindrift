@@ -59,45 +59,6 @@ func TestValidateCapsAcceptsShippedDefaults(t *testing.T) {
 	}
 }
 
-// TestValidateMaxParallelWorkers guards the fail-fast check on
-// -max-parallel-workers (issue #2495): unlike validateCaps' 0-means-disabled
-// convention, a concurrency semaphore's capacity has no meaningful
-// "disabled" value, so any value <= 0 is rejected.
-func TestValidateMaxParallelWorkers(t *testing.T) {
-	tests := []struct {
-		name               string
-		maxParallelWorkers int
-		wantErr            bool
-	}{
-		{"zero is rejected", 0, true},
-		{"negative is rejected", -1, true},
-		{"one is accepted", 1, false},
-		{"two is accepted", 2, false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := validateMaxParallelWorkers(tt.maxParallelWorkers)
-			if tt.wantErr && err == nil {
-				t.Errorf("validateMaxParallelWorkers(%d) = nil, want error", tt.maxParallelWorkers)
-			}
-			if !tt.wantErr && err != nil {
-				t.Errorf("validateMaxParallelWorkers(%d) = %v, want nil", tt.maxParallelWorkers, err)
-			}
-		})
-	}
-}
-
-// TestValidateMaxParallelWorkersAcceptsShippedDefault pins the actual
-// -max-parallel-workers default main.go's flag.Int call ships
-// (defaultMaxParallelWorkers, workers.go): a fresh run with no flag override
-// must not fail validateMaxParallelWorkers at startup.
-func TestValidateMaxParallelWorkersAcceptsShippedDefault(t *testing.T) {
-	if err := validateMaxParallelWorkers(defaultMaxParallelWorkers); err != nil {
-		t.Errorf("validateMaxParallelWorkers(%d) = %v, want nil (shipped default must be valid)", defaultMaxParallelWorkers, err)
-	}
-}
-
 // TestParseNonnegBudgetTokens guards -max-budget-tokens' graceful-degrade
 // parsing (issue #2694 review finding): a negative or malformed value
 // collapses to 0 (disabled) instead of erroring, mirroring the host

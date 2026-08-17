@@ -445,9 +445,6 @@ func TestAssembleHandoff(t *testing.T) {
 			if result.Handoff.ReviewEffort != "" {
 				t.Errorf("Handoff.ReviewEffort = %q, want empty", result.Handoff.ReviewEffort)
 			}
-			if result.Handoff.WorkerPromptFile != "" {
-				t.Errorf("Handoff.WorkerPromptFile = %q, want empty (issue #2059)", result.Handoff.WorkerPromptFile)
-			}
 		})
 	}
 }
@@ -1175,9 +1172,6 @@ func TestAssembleOrchestratorReviewerDrop(t *testing.T) {
 	if !strings.Contains(result.Handoff.ReviewPromptFile, "#2349") {
 		t.Errorf("Handoff.ReviewPromptFile missing substituted ISSUE_NUMBER:\n%s", result.Handoff.ReviewPromptFile)
 	}
-	if result.Handoff.WorkerPromptFile == "" {
-		t.Fatal("Handoff.WorkerPromptFile is empty, want non-empty (issue #2059)")
-	}
 
 	var parsed map[string]json.RawMessage
 	if err := json.Unmarshal([]byte(result.AgentsJSON), &parsed); err != nil {
@@ -1258,9 +1252,6 @@ func TestAssembleOrchestratorNoReviewerKey(t *testing.T) {
 	if result.Handoff.ReviewPromptFile == "" {
 		t.Error("Handoff.ReviewPromptFile is empty, want non-empty even with no reviewer configured")
 	}
-	if result.Handoff.WorkerPromptFile == "" {
-		t.Error("Handoff.WorkerPromptFile is empty, want non-empty even with no reviewer configured (issue #2059)")
-	}
 }
 
 // TestAssembleOrchestratorEmptyAgentsTemplate covers the orchestrator-on
@@ -1289,243 +1280,6 @@ func TestAssembleOrchestratorEmptyAgentsTemplate(t *testing.T) {
 	}
 	if result.Handoff.ReviewPromptFile == "" {
 		t.Error("Handoff.ReviewPromptFile is empty, want non-empty")
-	}
-	if result.Handoff.WorkerPromptFile == "" {
-		t.Error("Handoff.WorkerPromptFile is empty, want non-empty (issue #2059)")
-	}
-}
-
-// TestAssembleOrchestratorWorkerPromptForbidsStoreBuild covers issue #2496:
-// worker-prompt.md must forbid a worker from invoking any Nix store build
-// (workers run fully concurrently -- issue #2059 -- so a store build in one
-// worker is a store build in K workers at once) and must instead prescribe
-// only fast per-file gates (nil diagnostics, shellcheck, scoped go vet/go
-// test) that stay on PATH without a store round-trip.
-func TestAssembleOrchestratorWorkerPromptForbidsStoreBuild(t *testing.T) {
-	reg := loadTestRegistry(t)
-	env := coveredEnv()
-	env.OrchestratorEnabled = true
-
-	result, err := Assemble(env, reg)
-	if err != nil {
-		t.Fatalf("Assemble: %v", err)
-	}
-
-	prompt := result.Handoff.WorkerPromptFile
-	if prompt == "" {
-		t.Fatal("Handoff.WorkerPromptFile is empty, want non-empty")
-	}
-
-	// Presence alone isn't enough: a CHECK section that *prescribes*
-	// `nix build .#checks-inbox` still contains the phrases "nix build"
-	// and "checks-inbox", and the doc's own unrelated "Do not expand
-	// scope" line (line 6) already satisfies a bare "do not" search. Tie
-	// the forbidding word to the same sentence as the store-build phrase
-	// so a prescribing prompt actually fails this test. That alone isn't
-	// sufficient either: the doc also names checks-inbox a second time,
-	// descriptively, where the coordinator's own authoritative run
-	// happens -- see TestSentenceForbidsCatchesWorkerPromptRegression,
-	// which pins that this second, unrelated mention can't stand in for
-	// the real forbidding one if it's ever deleted.
-	forbidding := []string{"nix build", "checks-inbox"}
-	for _, phrase := range forbidding {
-		if !sentenceForbids(prompt, phrase) {
-			t.Errorf("WorkerPromptFile doesn't forbid %q in the same sentence as a do-not/never/must-not phrase, want it named and forbidden together:\n%s", phrase, prompt)
-		}
-	}
-
-	prescriptive := []string{"nil diagnostics", "shellcheck", "go vet", "go test"}
-	for _, phrase := range prescriptive {
-		if !strings.Contains(prompt, phrase) {
-			t.Errorf("WorkerPromptFile missing sanctioned per-file gate %q, want it prescribed:\n%s", phrase, prompt)
-		}
-	}
-}
-
-// TestAssembleOrchestratorWorkerPromptGateFailureSurfacesInResult pins
-// issue #2496 AC4: a worker slice whose per-file gate fails must surface
-// that failure in its result file, not just its final chat report, so the
-// coordinator can scope the fix without re-running anything. A byte-level
-// golden diff doesn't pin this -- it would keep "passing" even if a future
-// edit dropped the result-file destination and left only the final-report
-// path. Isolate the paragraph naming "result file" and assert it also ties
-// together the gate-failure content (failing command + output/exit status)
-// that must land there.
-func TestAssembleOrchestratorWorkerPromptGateFailureSurfacesInResult(t *testing.T) {
-	reg := loadTestRegistry(t)
-	env := coveredEnv()
-	env.OrchestratorEnabled = true
-
-	result, err := Assemble(env, reg)
-	if err != nil {
-		t.Fatalf("Assemble: %v", err)
-	}
-
-	prompt := result.Handoff.WorkerPromptFile
-	if prompt == "" {
-		t.Fatal("Handoff.WorkerPromptFile is empty, want non-empty")
-	}
-
-	var resultFileParagraph string
-	for _, paragraph := range strings.Split(prompt, "\n\n") {
-		if strings.Contains(paragraph, "result file") {
-			resultFileParagraph = paragraph
-			break
-		}
-	}
-	if resultFileParagraph == "" {
-		t.Fatalf("no paragraph in WorkerPromptFile mentions %q, want the gate-failure report tied to a result file destination:\n%s", "result file", prompt)
-	}
-
-	for _, phrase := range []string{"failing command", "exit status"} {
-		if !strings.Contains(resultFileParagraph, phrase) {
-			t.Errorf("paragraph naming \"result file\" doesn't also name %q, want the gate-failure content and its result-file destination tied together in one paragraph, got paragraph:\n%s", phrase, resultFileParagraph)
-		}
-	}
-}
-
-// TestAssembleOrchestratorCoordinatorChecksInboxOnce pins issue #2496 AC2:
-// fragments/coordinator.md must tell the coordinator that `checks-inbox`
-// runs exactly once, on the fully-integrated tree, in CHECK -- and that
-// this once-only rule **overrides** CHECK's own "before each commit, run
-// the repo's own checks green" instruction for the per-slice integration
-// commits the coordinator authors while cherry-picking each worker's
-// branch. A byte-level golden diff alone doesn't catch a regression here:
-// it's reflow-fragile (any unrelated wording tweak anywhere in the
-// document trips it, whether or not the tweak is semantically related) and
-// asserts nothing about intent -- a golden fixture updated to match a
-// broken doc goes on "passing" forever. Unlike
-// TestAssembleOrchestratorWorkerPromptForbidsStoreBuild's sentenceForbids
-// check, this rule isn't just a forbidding sentence around a single
-// phrase; it's an explicit override tying two rules together, so this
-// test isolates the paragraph carrying both "checks-inbox" and
-// "overrides" and asserts that same paragraph also names the CHECK rule
-// it overrides.
-func TestAssembleOrchestratorCoordinatorChecksInboxOnce(t *testing.T) {
-	reg := loadTestRegistry(t)
-	env := coveredEnv()
-	env.OrchestratorEnabled = true
-	env.ReviewLoopOrchestrator = true
-	env.ReviewLoopInline = false
-	env.AgentsJSONTemplate = `{"worker":{"model":"m"}}`
-	env.WorkerProvisioned = true
-
-	result, err := Assemble(env, reg)
-	if err != nil {
-		t.Fatalf("Assemble: %v", err)
-	}
-
-	// coordinator.md is spliced directly into the main assembled prompt via
-	// the WORKER_PROVISIONED gate -> COORDINATOR_STEP var (testdata/registry.json),
-	// not into a separate Handoff field.
-	prompt := result.Prompt
-
-	if !sentenceForbids(prompt, "checks-inbox") {
-		t.Errorf("Prompt doesn't forbid %q in the same sentence as a do-not/never/must-not phrase, want the per-slice checks-inbox run forbidden:\n%s", "checks-inbox", prompt)
-	}
-
-	var overrideParagraph string
-	for _, paragraph := range strings.Split(prompt, "\n\n") {
-		if strings.Contains(paragraph, "checks-inbox") && strings.Contains(paragraph, "overrides") {
-			overrideParagraph = paragraph
-			break
-		}
-	}
-	if overrideParagraph == "" {
-		t.Fatalf("no paragraph in Prompt contains both %q and %q, want the once-only checks-inbox rule to name its own override:\n%s", "checks-inbox", "overrides", prompt)
-	}
-	if !strings.Contains(overrideParagraph, "before each commit") {
-		t.Errorf("paragraph carrying checks-inbox/overrides doesn't name CHECK's \"before each commit\" rule, want it tied to that rule explicitly, got paragraph:\n%s", overrideParagraph)
-	}
-}
-
-// sentenceForbids reports whether prompt contains phrase inside a sentence
-// (a hard-wrapped line, further split on ". ") that also carries an
-// unambiguous forbidding word (do not / never / must not) -- catches a
-// prompt that merely *mentions* phrase elsewhere (prescriptively, or in an
-// unrelated sentence) without actually forbidding it. Splitting on line
-// breaks first, then ". ", keeps a markdown doc's own hard-wrapped
-// paragraphs (where a sentence's mid-point line break carries no trailing
-// space) from being silently merged with the next paragraph.
-func sentenceForbids(prompt, phrase string) bool {
-	for _, line := range strings.Split(prompt, "\n") {
-		for _, sentence := range strings.Split(line, ". ") {
-			if !strings.Contains(sentence, phrase) {
-				continue
-			}
-			lower := strings.ToLower(sentence)
-			if strings.Contains(lower, "do not") || strings.Contains(lower, "never") || strings.Contains(lower, "must not") {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-// TestSentenceForbidsRejectsPrescriptiveMention pins the exact failure mode
-// TestAssembleOrchestratorWorkerPromptForbidsStoreBuild must not reproduce:
-// a CHECK section that *prescribes* running checks-inbox mentions both
-// "nix build" and "checks-inbox" (so a bare substring-presence check would
-// pass it) and an unrelated sentence elsewhere may say "do not" about
-// something else entirely (so a whole-document "do not" search would also
-// pass it). sentenceForbids must reject both.
-func TestSentenceForbidsRejectsPrescriptiveMention(t *testing.T) {
-	prescriptive := "Do not expand scope beyond your slice.\n\n" +
-		"## CHECK\n\n" +
-		"Run `nix build .#checks-inbox` to check your slice before committing."
-	if sentenceForbids(prescriptive, "nix build") {
-		t.Error("sentenceForbids(prescriptive, \"nix build\") = true, want false: the prompt prescribes nix build, it never forbids it")
-	}
-	if sentenceForbids(prescriptive, "checks-inbox") {
-		t.Error("sentenceForbids(prescriptive, \"checks-inbox\") = true, want false: the prompt prescribes checks-inbox, it never forbids it")
-	}
-
-	forbidding := "Do not run `nix build` (any target, including `checks-inbox`), " +
-		"or anything else that triggers a Nix store round-trip."
-	if !sentenceForbids(forbidding, "nix build") {
-		t.Error("sentenceForbids(forbidding, \"nix build\") = false, want true")
-	}
-	if !sentenceForbids(forbidding, "checks-inbox") {
-		t.Error("sentenceForbids(forbidding, \"checks-inbox\") = false, want true")
-	}
-}
-
-// TestSentenceForbidsCatchesWorkerPromptRegression pins the exact false-pass
-// the synthetic literals above can't reproduce: worker-prompt.md names
-// "checks-inbox" twice -- once forbidding it to the worker, once
-// descriptively, where it says the coordinator owns the authoritative run.
-// A synthetic "prescriptive" string never puts a forbidding word near that
-// second, unrelated mention, so it can't prove the real doc is safe if the
-// first, true forbidding mention is ever deleted. Mutate the real assembled
-// prompt -- not a hand-written literal -- to remove only that one true
-// forbidding mention, and confirm no other real mention of "checks-inbox"
-// left in the doc still trips sentenceForbids.
-func TestSentenceForbidsCatchesWorkerPromptRegression(t *testing.T) {
-	reg := loadTestRegistry(t)
-	env := coveredEnv()
-	env.OrchestratorEnabled = true
-
-	result, err := Assemble(env, reg)
-	if err != nil {
-		t.Fatalf("Assemble: %v", err)
-	}
-
-	prompt := result.Handoff.WorkerPromptFile
-	if !sentenceForbids(prompt, "checks-inbox") {
-		t.Fatal("WorkerPromptFile doesn't forbid \"checks-inbox\" today, want a starting point that passes before mutation")
-	}
-
-	const trueForbiddingMention = "(any target, including `checks-inbox`)"
-	if !strings.Contains(prompt, trueForbiddingMention) {
-		t.Fatalf("WorkerPromptFile doesn't contain %q, want the real forbidding mention this test deletes to still be there:\n%s", trueForbiddingMention, prompt)
-	}
-	mutated := strings.Replace(prompt, trueForbiddingMention, "(any target)", 1)
-	if !strings.Contains(mutated, "checks-inbox") {
-		t.Fatal("mutation removed every mention of checks-inbox, want at least one other real mention left over to prove this test isn't vacuous")
-	}
-
-	if sentenceForbids(mutated, "checks-inbox") {
-		t.Error("sentenceForbids(mutated, \"checks-inbox\") = true, want false: deleting the one true forbidding mention must not leave a different, unrelated real mention that still passes")
 	}
 }
 
@@ -1700,9 +1454,6 @@ func TestAssembleOrchestratorFixPassCovered(t *testing.T) {
 	if result.Handoff.ReviewModel != "review-model-x" {
 		t.Errorf("Handoff.ReviewModel = %q, want %q (extraction is unconditional whenever the orchestrator is on)", result.Handoff.ReviewModel, "review-model-x")
 	}
-	if result.Handoff.WorkerPromptFile != "" {
-		t.Errorf("Handoff.WorkerPromptFile = %q, want empty (fix pass, not the default fresh-work-dispatch path, issue #2059)", result.Handoff.WorkerPromptFile)
-	}
 }
 
 // TestAssembleOrchestratorResearchCovered covers that OrchestratorEnabled ==
@@ -1733,9 +1484,6 @@ func TestAssembleOrchestratorResearchCovered(t *testing.T) {
 	}
 	if result.Handoff.ReviewModel != "review-model-x" {
 		t.Errorf("Handoff.ReviewModel = %q, want %q (extraction is unconditional whenever the orchestrator is on)", result.Handoff.ReviewModel, "review-model-x")
-	}
-	if result.Handoff.WorkerPromptFile != "" {
-		t.Errorf("Handoff.WorkerPromptFile = %q, want empty (research dispatch, not the default fresh-work-dispatch path, issue #2059)", result.Handoff.WorkerPromptFile)
 	}
 }
 
@@ -1781,9 +1529,6 @@ func TestAssembleOrchestratorOffReviewerFlowsThroughGenericLoop(t *testing.T) {
 	}
 	if result.Handoff.ReviewPromptFile != "" {
 		t.Errorf("Handoff.ReviewPromptFile = %q, want empty (orchestrator off)", result.Handoff.ReviewPromptFile)
-	}
-	if result.Handoff.WorkerPromptFile != "" {
-		t.Errorf("Handoff.WorkerPromptFile = %q, want empty (orchestrator off, issue #2059)", result.Handoff.WorkerPromptFile)
 	}
 }
 

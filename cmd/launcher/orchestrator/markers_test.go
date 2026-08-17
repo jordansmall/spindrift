@@ -82,19 +82,6 @@ func TestPromptMarkersMatchScanner(t *testing.T) {
 			t.Errorf("fragments/caveman-default.md no longer names marker %q in its exemption list", marker)
 		}
 	}
-
-	// The slice-manifest hand-off (issue #2059): a coordinator pass emits
-	// this marker instead of blocking on parallel work itself, and
-	// scanForManifest/ParseManifestLine (manifest.go) grep this pass's own
-	// log for the exact literal. Nothing ties ManifestToken to the writer
-	// side except this check -- a reworded coordinator-parallel-dispatch.md
-	// would otherwise silently make dispatchManifestIfPresent permanently a
-	// no-op, the same failure mode this whole test guards against for the
-	// other markers above.
-	parallelDispatchFragment := readPromptFile(t, repoRoot, filepath.Join("fragments", "coordinator-parallel-dispatch.md"))
-	if !strings.Contains(parallelDispatchFragment, ManifestToken) {
-		t.Errorf("fragments/coordinator-parallel-dispatch.md no longer emits %q, the exact literal scanForManifest's ParseManifestLine greps for", ManifestToken)
-	}
 }
 
 // TestWorkerPromptCarriesNoOutcomeGrammar is TestPromptMarkersMatchScanner's

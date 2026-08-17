@@ -58,10 +58,6 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 	reviewPromptFile := fs.String("review-prompt-file", "", "path to the code-owned review pass's own prompt text; empty disables the review pass")
 	reviewModel := fs.String("review-model", "", "value for the review pass's own --model flag, empty falls back to the coordinator's --model")
 	reviewEffort := fs.String("review-effort", "", "value for the review pass's own --effort flag, empty falls back to the coordinator's --effort")
-	workerPromptFile := fs.String("worker-prompt-file", "", "path to the parallel worker's own base prompt text; empty disables parallel worker dispatch")
-	workerWorkDir := fs.String("worker-work-dir", "/tmp/spindrift-workers", "directory holding each dispatched worker's own quarantined log/heartbeat/result/sentinel files")
-	workerTimeout := fs.Duration("worker-timeout", defaultWorkerTimeout, "per-worker join timeout for a parallel dispatch")
-	maxParallelWorkers := fs.Int("max-parallel-workers", defaultMaxParallelWorkers, "cap on how many manifest-dispatched workers LaunchWorkers runs concurrently")
 	argvPromptStyle := fs.String("argv-prompt-style", "flag", "how the prompt is spliced into argv: \"flag\" (argv-prompt-flag then the prompt) or \"positional\" (the prompt alone)")
 	argvPromptFlag := fs.String("argv-prompt-flag", "-p", "flag preceding the prompt when argv-prompt-style is \"flag\"")
 	argvModelFlag := fs.String("argv-model-flag", "--model", "flag preceding the model value")
@@ -95,15 +91,6 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 	// instead of silently swallowed.
 	if err := validateCaps(*maxReviewRounds, *maxSlices, *reviewPromptFile != ""); err != nil {
 		fmt.Fprintln(stderr, err)
-	}
-	// Unlike the cap-coherence check above, a non-positive
-	// -max-parallel-workers is fatal (issue #2495): there is no meaningful
-	// "disabled" value for a concurrency semaphore's capacity, so a
-	// mistyped flag must abort the run rather than silently fall back to
-	// LaunchWorkers' own defaultMaxParallelWorkers substitution.
-	if err := validateMaxParallelWorkers(*maxParallelWorkers); err != nil {
-		fmt.Fprintln(stderr, err)
-		return 1
 	}
 	// maxBudgetTokens/maxBudgetUSD parse with the same graceful-degrade
 	// semantics as the host launcher's own atoiNonneg/floatNonneg (issue
@@ -148,10 +135,6 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 		reviewPromptFile:   *reviewPromptFile,
 		reviewModel:        *reviewModel,
 		reviewEffort:       *reviewEffort,
-		workerPromptFile:   *workerPromptFile,
-		workerWorkDir:      *workerWorkDir,
-		workerTimeout:      *workerTimeout,
-		maxParallelWorkers: *maxParallelWorkers,
 		argvPromptStyle:    *argvPromptStyle,
 		argvPromptFlag:     *argvPromptFlag,
 		argvModelFlag:      *argvModelFlag,

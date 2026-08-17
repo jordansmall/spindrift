@@ -56,29 +56,6 @@ func TestRunStateRoundTripIncludesReviewFindings(t *testing.T) {
 	}
 }
 
-// TestRunStateRoundTripIncludesWorkerFindings verifies WorkerFindings (issue
-// #2059: the last parallel worker dispatch's per-slice outcome summary,
-// distinct from ReviewFindings) survives a WriteRunState/ReadRunState round
-// trip like every other field.
-func TestRunStateRoundTripIncludesWorkerFindings(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "run-state.json")
-	want := RunState{
-		LastVerdict:    "BLOCK",
-		WorkerFindings: "- slice-a: done\n- slice-b: crashed (exit 1)",
-	}
-
-	if err := WriteRunState(path, want); err != nil {
-		t.Fatalf("WriteRunState: %v", err)
-	}
-	got, err := ReadRunState(path)
-	if err != nil {
-		t.Fatalf("ReadRunState: %v", err)
-	}
-	if got.WorkerFindings != want.WorkerFindings {
-		t.Errorf("WorkerFindings = %q, want %q", got.WorkerFindings, want.WorkerFindings)
-	}
-}
-
 // TestRunStateRoundTripIncludesPassSummaryPath verifies PassSummaryPath
 // (issue #2549: the most recent implement/fix pass's own free-form summary
 // of what it did and what remains, referenced by path like ScoutBriefPath)
@@ -215,29 +192,6 @@ func TestRunStateRoundTripIncludesDecisionsLogPath(t *testing.T) {
 	}
 	if got.DecisionsLogPath != want.DecisionsLogPath {
 		t.Errorf("DecisionsLogPath = %q, want %q", got.DecisionsLogPath, want.DecisionsLogPath)
-	}
-}
-
-// TestRunStateRoundTripIncludesUnlandedSlices verifies UnlandedSlices (issue
-// #2060 review finding: DoneSlices names whose branch integration ended in
-// conflict or failure) survives a WriteRunState/ReadRunState round trip like
-// every other field.
-func TestRunStateRoundTripIncludesUnlandedSlices(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "run-state.json")
-	want := RunState{
-		DoneSlices:     []string{"slice-a"},
-		UnlandedSlices: []string{"slice-a"},
-	}
-
-	if err := WriteRunState(path, want); err != nil {
-		t.Fatalf("WriteRunState: %v", err)
-	}
-	got, err := ReadRunState(path)
-	if err != nil {
-		t.Fatalf("ReadRunState: %v", err)
-	}
-	if !reflect.DeepEqual(got.UnlandedSlices, want.UnlandedSlices) {
-		t.Errorf("UnlandedSlices = %v, want %v", got.UnlandedSlices, want.UnlandedSlices)
 	}
 }
 
@@ -447,10 +401,8 @@ func TestRunStateIsEmpty(t *testing.T) {
 		{ScoutBriefPath: "/tmp/brief.md"},
 		{PassSummaryPath: "/tmp/pass-summary.md"},
 		{ReviewFindings: "some finding"},
-		{WorkerFindings: "slice-a: done"},
 		{FindingsLogPath: "/tmp/findings.md"},
 		{TerminalLand: true},
-		{UnlandedSlices: []string{"slice-a"}},
 	}
 	for _, s := range nonEmpty {
 		if s.IsEmpty() {

@@ -950,8 +950,7 @@ exceptions.
 | `REVIEW_MODEL`            | (baked; see [Default models](#default-models)) | reviewer subagent model tier (empty drops the reviewer entry from `--agents`). **Deprecated for non-orchestrator use** — superseded by the [`roster`](#subagent-roster) option. Under `ORCHESTRATOR`, the roster reviewer entry is itself superseded by the code-owned review pass, which binds its model from this value instead (falling back to the coordinator model when unset) |
 | `REVIEW_EFFORT`           | — (empty, no baked default) | value for the orchestrator's code-owned review pass's own `--effort` flag; pass-through only, no normalization, same accepted values as `EFFORT` for the active Driver. Overrides the roster reviewer entry's own effort (`rosterDefaults.reviewer.effort` by default) the same way `REVIEW_MODEL` overrides the reviewer's model — empty means follow the roster, a non-empty value overrides it. Meaningful only under `ORCHESTRATOR`. Like `REVIEW_MODEL`, this is a nix-build-time-only knob (issue #2512): a dispatch-time `REVIEW_EFFORT=...`/`--review-effort ...` override on an already-built image is a no-op — set `perSystem.spindrift.agents.models.reviewEffort` and rebuild instead |
 | `FILER_MODEL`             | (baked; see [Default models](#default-models)) | filer subagent model tier; empty (default) means the filer is not provisioned — setting a model is the opt-in (recommended: the same model as the `scout` default, see [Default models](#default-models)); see [Filer](#filer). **Deprecated** — superseded by the [`roster`](#subagent-roster) option |
-| `WORKER_MODEL`            | (baked; see [Default models](#default-models)) | implement-capable worker subagent model tier (empty drops the worker entry from `--agents`); the implementor prompt does not delegate to it yet. **Deprecated** — superseded by the [`roster`](#subagent-roster) option |
-| `MAX_PARALLEL_WORKERS`    | `2` (baked)            | cap on how many of a coordinator pass's slice-manifest workers the orchestrator dispatches concurrently; 2 is the no-tuning-safe default that captures most of the wall-clock win on small-slice-count issues while staying clear of the Box's memory-kill regime. Meaningful only under `ORCHESTRATOR` |
+| `WORKER_MODEL`            | (baked; see [Default models](#default-models)) | implement-capable worker subagent model tier (empty drops the worker entry from `--agents`); when set, the implementor runs IMPLEMENT as a coordinator and delegates one slice at a time to it. **Deprecated** — superseded by the [`roster`](#subagent-roster) option |
 | `IMAGE`                   | `spindrift:latest`     | image tag to run                         |
 | `SPINDRIFT_PROMPT_DIR`    | baked prompt store path | host directory mounted over `/agent/prompts` for zero-rebuild prompt iteration; declaratively configurable via the `perSystem.spindrift.agents.promptDir` flake option or `settings`, or hot-overridden at dispatch time via `--prompt-dir` / the env var |
 | `SPINDRIFT_SKILLS_DIR`    | baked skills store path | hot-override skills at dispatch time: mounted to `/operator-skills` and merged over the baked `/agent/skills` set at box startup (not bakeable) |
@@ -1376,9 +1375,7 @@ artifact, not a growing transcript:
   the anchor at whatever a prior review pass already recorded (or empty, on
   the first pass), never errors the run. It also carries dispatch-internal
   bookkeeping unrelated to any seeded prompt: the done/remaining slice lists
-  (`DoneSlices`/`RemainingSlices`) issue #2059's parallel worker dedup
-  mechanism reads and writes to avoid re-dispatching an already-completed
-  slice. Each pass reads it before running and writes it back after, through
+  (`DoneSlices`/`RemainingSlices`). Each pass reads it before running and writes it back after, through
   a temp-file-then-rename so a mid-write kill can never leave a half-written
   file behind. A missing or corrupt file degrades to a cold start, never an
   error.

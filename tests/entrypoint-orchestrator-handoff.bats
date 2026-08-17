@@ -198,108 +198,10 @@ setup() {
   ! grep -q -- '--review-effort' "$DRIVER_LOG"
 }
 
-# The parallel worker dispatch (issue #2059, #2058): entrypoint.sh renders
-# worker-prompt.md and threads it to the orchestrator's own
-# --worker-prompt-file, mirroring --review-prompt-file above -- same gate
-# (fresh-issue work-dispatch path), same Handoff descriptor mechanism.
-@test "orchestrator path forwards --worker-prompt-file carrying a real path" {
-  export ORCHESTRATOR_ENABLED=1
-  export BOX_REVIEW_LOOP_ORCHESTRATOR=1
-  unset BOX_REVIEW_LOOP_INLINE
-  run bash "$ENTRYPOINT"
-  [ "$status" -eq 0 ]
-  grep -q -- '--worker-prompt-file' "$ORCHESTRATOR_LOG"
-  local worker_prompt_file
-  worker_prompt_file="$(grep -oE -- '--worker-prompt-file [^ ]+' "$ORCHESTRATOR_LOG" | awk '{print $2}')"
-  # run_driver_in_env removes its own temp files once the pass returns, so the
-  # path itself no longer exists by the time bats inspects it here -- assert
-  # it was a real, non-empty flag value (not an omitted/empty flag), which is
-  # what proves entrypoint.sh actually rendered and threaded worker-prompt.md
-  # through, rather than skipping the flag or passing it empty.
-  [ -n "$worker_prompt_file" ]
-}
-
-# The --worker-prompt-file gate is on _driver_invoker = orchestrator -- the
-# direct driver-exec path declares no such flag and would hard-fail on it,
-# mirroring the --review-effort omit test above.
-@test "direct driver-exec path omits --worker-prompt-file" {
-  run bash "$ENTRYPOINT"
-  [ "$status" -eq 0 ]
-  ! grep -q -- '--worker-prompt-file' "$DRIVER_LOG"
-}
-
-# Issue #2059, #2058: WORKER_WORK_DIR/WORKER_TIMEOUT thread through to the
-# orchestrator's own --worker-work-dir/--worker-timeout flags. Unlike
-# review_effort (now Handoff-sourced, issue #2512), neither has a Handoff
-# descriptor field -- both come straight off the environment.
-@test "orchestrator path forwards WORKER_WORK_DIR/WORKER_TIMEOUT to the orchestrator" {
-  export ORCHESTRATOR_ENABLED=1
-  export BOX_REVIEW_LOOP_ORCHESTRATOR=1
-  unset BOX_REVIEW_LOOP_INLINE
-  export WORKER_WORK_DIR="/tmp/spindrift-workers-test"
-  export WORKER_TIMEOUT="15m"
-  run bash "$ENTRYPOINT"
-  [ "$status" -eq 0 ]
-  grep -q -- '--worker-work-dir /tmp/spindrift-workers-test' "$ORCHESTRATOR_LOG"
-  grep -q -- '--worker-timeout 15m' "$ORCHESTRATOR_LOG"
-}
-
-# Without WORKER_WORK_DIR/WORKER_TIMEOUT set, there's nothing to override the
-# orchestrator's own defaults with -- entrypoint.sh must omit both flags
-# entirely rather than pass them empty, mirroring the --review-effort omit
-# test above.
-@test "orchestrator path omits --worker-work-dir/--worker-timeout when unset" {
-  export ORCHESTRATOR_ENABLED=1
-  export BOX_REVIEW_LOOP_ORCHESTRATOR=1
-  unset BOX_REVIEW_LOOP_INLINE
-  run bash "$ENTRYPOINT"
-  [ "$status" -eq 0 ]
-  ! grep -q -- '--worker-work-dir' "$ORCHESTRATOR_LOG"
-  ! grep -q -- '--worker-timeout' "$ORCHESTRATOR_LOG"
-}
-
-# Issue #2059, #2495: MAX_PARALLEL_WORKERS threads through to the
-# orchestrator's own --max-parallel-workers flag, mirroring REVIEW_EFFORT ->
-# --review-effort above. Like REVIEW_EFFORT, it has no Handoff descriptor
-# field -- it comes straight off the environment.
-@test "orchestrator path forwards MAX_PARALLEL_WORKERS to the orchestrator as --max-parallel-workers" {
-  export ORCHESTRATOR_ENABLED=1
-  export BOX_REVIEW_LOOP_ORCHESTRATOR=1
-  unset BOX_REVIEW_LOOP_INLINE
-  export MAX_PARALLEL_WORKERS=4
-  run bash "$ENTRYPOINT"
-  [ "$status" -eq 0 ]
-  grep -q -- '--max-parallel-workers 4' "$ORCHESTRATOR_LOG"
-}
-
-# Without MAX_PARALLEL_WORKERS set, there's nothing to override the
-# orchestrator's own default with -- entrypoint.sh must omit
-# --max-parallel-workers entirely rather than pass it empty, mirroring the
-# --review-effort omit test above.
-@test "orchestrator path omits --max-parallel-workers when unset" {
-  export ORCHESTRATOR_ENABLED=1
-  export BOX_REVIEW_LOOP_ORCHESTRATOR=1
-  unset BOX_REVIEW_LOOP_INLINE
-  unset MAX_PARALLEL_WORKERS
-  run bash "$ENTRYPOINT"
-  [ "$status" -eq 0 ]
-  ! grep -q -- '--max-parallel-workers' "$ORCHESTRATOR_LOG"
-}
-
-# The --max-parallel-workers gate is on _driver_invoker = orchestrator -- the
-# direct driver-exec path declares no such flag and would hard-fail on it,
-# mirroring the --review-effort omit test above.
-@test "direct driver-exec path omits --max-parallel-workers even with MAX_PARALLEL_WORKERS set" {
-  export MAX_PARALLEL_WORKERS=4
-  run bash "$ENTRYPOINT"
-  [ "$status" -eq 0 ]
-  ! grep -q -- '--max-parallel-workers' "$DRIVER_LOG"
-}
-
 # Issue #2694: MAX_BUDGET_TOKENS/MAX_BUDGET_USD thread through to the
-# orchestrator's own --max-budget-tokens/--max-budget-usd flags, mirroring
-# WORKER_WORK_DIR/WORKER_TIMEOUT above -- neither has a Handoff descriptor
-# field, both come straight off the environment (now boxEnv, lib/env-schema.nix).
+# orchestrator's own --max-budget-tokens/--max-budget-usd flags -- neither
+# has a Handoff descriptor field, both come straight off the environment
+# (now boxEnv, lib/env-schema.nix).
 @test "orchestrator path forwards MAX_BUDGET_TOKENS/MAX_BUDGET_USD to the orchestrator" {
   export ORCHESTRATOR_ENABLED=1
   export BOX_REVIEW_LOOP_ORCHESTRATOR=1
@@ -330,7 +232,7 @@ setup() {
 
 # The --max-budget-tokens/--max-budget-usd gate is on _driver_invoker =
 # orchestrator -- the direct driver-exec path declares no such flags and would
-# hard-fail on them, mirroring the --max-parallel-workers omit test above.
+# hard-fail on them, mirroring the --review-effort omit test above.
 @test "direct driver-exec path omits --max-budget-tokens/--max-budget-usd even when set" {
   export MAX_BUDGET_TOKENS="500000"
   export MAX_BUDGET_USD="4.44"

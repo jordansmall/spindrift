@@ -281,26 +281,6 @@ in
     boxEnv = true;
     boxEnvOnly = true;
   };
-  workerWorkDir = {
-    env = "WORKER_WORK_DIR";
-    group = "agents";
-    doc = "directory the orchestrator uses for each parallel worker's log, heartbeat, result, and sentinel files (issue #2059); pass-through only, no normalization. Meaningful only under ORCHESTRATOR: entrypoint.sh threads this value to the orchestrator's --worker-work-dir flag.";
-    flakeOption = true;
-    legacySettingsExempt = true;
-    nixSubPath = "models.workerWorkDir";
-    boxEnv = true;
-    boxEnvOnly = true;
-  };
-  workerTimeout = {
-    env = "WORKER_TIMEOUT";
-    group = "agents";
-    doc = "timeout applied to each parallel worker subagent's run (issue #2059); must be a Go duration string (e.g. 20m, 1h) -- a bare number fails fs.Duration parsing and aborts the whole run with exit 2. Pass-through only, no normalization. Meaningful only under ORCHESTRATOR: entrypoint.sh threads this value to the orchestrator's --worker-timeout flag.";
-    flakeOption = true;
-    legacySettingsExempt = true;
-    nixSubPath = "models.workerTimeout";
-    boxEnv = true;
-    boxEnvOnly = true;
-  };
   filerModel = {
     env = "FILER_MODEL";
     group = "agents";
@@ -315,20 +295,9 @@ in
     env = "WORKER_MODEL";
     group = "agents";
     default = "claude-sonnet-5";
-    doc = "implement-capable worker subagent model tier; empty omits the worker entry from --agents; the implementor prompt does not delegate to it yet — this only provisions the subagent so it is invokable. DEPRECATED: superseded by the roster option (see docs/reference.md); these per-agent knobs still work but will be removed.";
+    doc = "implement-capable worker subagent model tier; empty omits the worker entry from --agents. When set, the implementor runs IMPLEMENT as a coordinator and delegates one slice at a time to this subagent (fragments/coordinator.md). DEPRECATED: superseded by the roster option (see docs/reference.md); these per-agent knobs still work but will be removed.";
     flakeOption = true;
     nixSubPath = "models.worker";
-    boxEnv = true;
-    boxEnvOnly = true;
-  };
-  maxParallelWorkers = {
-    env = "MAX_PARALLEL_WORKERS";
-    group = "agents";
-    default = 2;
-    doc = "cap on how many of a coordinator pass's slice-manifest workers the Go orchestrator dispatches concurrently (issue #2059, #2495); 2 is the no-tuning-safe default -- enough to capture most of the wall-clock win on small-slice-count issues while staying clear of the Box's memory-kill regime. Meaningful only under ORCHESTRATOR: entrypoint.sh threads this value to the orchestrator's --max-parallel-workers flag.";
-    flakeOption = true;
-    legacySettingsExempt = true;
-    nixSubPath = "models.maxParallelWorkers";
     boxEnv = true;
     boxEnvOnly = true;
   };

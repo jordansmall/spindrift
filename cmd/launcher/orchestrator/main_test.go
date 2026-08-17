@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -132,34 +131,6 @@ exit 0
 	}
 	if len(bytes.TrimSpace(calls)) == 0 {
 		t.Fatalf("driver-exec was never invoked -- the incoherent-cap warning aborted the run instead of proceeding")
-	}
-}
-
-// TestMainRunRejectsNonPositiveMaxParallelWorkers verifies the issue #2495
-// fix: unlike the cap-coherence warning above (which never aborts the run),
-// a non-positive -max-parallel-workers is fatal -- mainRun returns exit code
-// 1, writes an actionable message to stderr, and never invokes driver-exec
-// at all.
-func TestMainRunRejectsNonPositiveMaxParallelWorkers(t *testing.T) {
-	dir := t.TempDir()
-	callLog := filepath.Join(dir, "calls.log")
-	writeFakeDriverExec(t, dir, callLog, `printf 'SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=done nonce=abc\n'
-exit 0
-`)
-	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
-
-	var stdout, stderr bytes.Buffer
-	rc := mainRun(singlePassFakeDriverArgv(dir, "-max-parallel-workers=0"), &stdout, &stderr)
-
-	if rc != 1 {
-		t.Fatalf("mainRun exit code = %d, want 1 (stderr: %q)", rc, stderr.String())
-	}
-	if !strings.Contains(stderr.String(), "-max-parallel-workers=0") {
-		t.Errorf("stderr = %q, want it to name the offending -max-parallel-workers=0 value", stderr.String())
-	}
-
-	if _, err := os.ReadFile(callLog); err == nil {
-		t.Fatalf("driver-exec was invoked -- a non-positive -max-parallel-workers must abort the run before any pass runs")
 	}
 }
 
@@ -326,143 +297,5 @@ exit 0
 	}
 	if !strings.Contains(got, "--argv-agents-flag --agents") {
 		t.Errorf("driver-exec argv = %q, want it to contain \"--argv-agents-flag --agents\" (claude's agentsFlag default)", got)
-	}
-}
-
-// TestMainRunPositiveMaxParallelWorkersFlagBoundsWorkerConcurrency proves
-// the whole -max-parallel-workers pipeline end to end: the flag parsed by
-// mainRun (main.go), threaded into config.maxParallelWorkers (the
-// "maxParallelWorkers: *maxParallelWorkers" wiring at main.go), and from
-// there into WorkerOptions.MaxParallel at the LaunchWorkers call site
-// (dispatch.go's "MaxParallel: cfg.maxParallelWorkers"). A cap of 3 is
-// deliberately picked to differ from defaultMaxParallelWorkers (2): if
-// either wiring line were ever deleted, LaunchWorkers would silently fall
-// back to the default and this test's observed peak would read 2, not 3,
-// even though every existing test (including the ones proving runBounded's
-// own admission control and LaunchWorkers' zero-value fallback) would stay
-// green (issue #2495 review finding).
-//
-// Every slice declares its own distinct FileLeases entry so scheduleSlices
-// (issue #2060) places all of them into the same batch -- an
-// undeclared-lease slice is scheduled conservatively solo (schedule.go),
-// which would otherwise flatten this test's observed peak to 1 regardless
-// of maxParallel, proving nothing about the concurrency cap this test
-// exists to pin.
-func TestMainRunPositiveMaxParallelWorkersFlagBoundsWorkerConcurrency(t *testing.T) {
-	chdirToFreshWorkerRepo(t)
-
-	dir := t.TempDir()
-	callLog := filepath.Join(dir, "calls.log")
-	workerWorkDir := filepath.Join(dir, "worker-work-dir")
-	if err := os.MkdirAll(workerWorkDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	countFile := filepath.Join(dir, "running-count")
-	peakFile := filepath.Join(dir, "peak-count")
-	lockDir := filepath.Join(dir, "count.lockdir")
-	coordCountFile := filepath.Join(dir, "coord-count")
-	t.Setenv("WORKER_WORK_DIR", workerWorkDir)
-	t.Setenv("COUNT_FILE", countFile)
-	t.Setenv("PEAK_FILE", peakFile)
-	t.Setenv("LOCK_DIR", lockDir)
-	t.Setenv("COORD_COUNT_FILE", coordCountFile)
-
-	const numSlices = 6
-	const maxParallel = 3 // deliberately != defaultMaxParallelWorkers (2)
-
-	slices := make([]ManifestSlice, numSlices)
-	for i := range slices {
-		slices[i] = ManifestSlice{
-			Name:       fmt.Sprintf("slice-%d", i),
-			Task:       "implement seam",
-			FileLeases: []string{fmt.Sprintf("path/slice-%d.txt", i)},
-		}
-	}
-	manifestLine, err := SliceManifest{Slices: slices}.Line()
-	if err != nil {
-		t.Fatalf("Line() error = %v", err)
-	}
-
-	// A worker invocation's own $DRIVER_LOG_PATH lands under
-	// $WORKER_WORK_DIR (workers.go); the coordinator's own lands under
-	// $PWD/stream.log. Every worker bumps a shared, mkdir-locked counter
-	// (flock isn't guaranteed available in the box), records the running
-	// peak, holds briefly to force overlap with its siblings, then
-	// decrements before signaling done via its sentinel file -- the same
-	// technique TestRunBoundedNeverExceedsMaxParallel uses in-process,
-	// reproduced here across real subprocesses so it proves the config
-	// wiring too, not just runBounded's own admission control.
-	body := `case "$DRIVER_LOG_PATH" in
-  "$WORKER_WORK_DIR"*)
-    : > "$DRIVER_LOG_PATH"
-    while ! mkdir "$LOCK_DIR" 2>/dev/null; do sleep 0.01; done
-    n=$(( $(cat "$COUNT_FILE" 2>/dev/null || echo 0) + 1 ))
-    echo "$n" > "$COUNT_FILE"
-    peak=$(cat "$PEAK_FILE" 2>/dev/null || echo 0)
-    if [ "$n" -gt "$peak" ]; then echo "$n" > "$PEAK_FILE"; fi
-    rmdir "$LOCK_DIR"
-    sleep 0.2
-    while ! mkdir "$LOCK_DIR" 2>/dev/null; do sleep 0.01; done
-    n=$(( $(cat "$COUNT_FILE") - 1 ))
-    echo "$n" > "$COUNT_FILE"
-    rmdir "$LOCK_DIR"
-    : > "${DRIVER_LOG_PATH%.log}.done"
-    exit 0
-    ;;
-esac
-: > "$DRIVER_LOG_PATH"
-n=$(cat "$COORD_COUNT_FILE" 2>/dev/null || echo 0)
-n=$((n+1))
-echo "$n" > "$COORD_COUNT_FILE"
-case "$n" in
-  1)
-    printf '%s' '` + streamJSONOutcomeLine(strings.TrimSpace(manifestLine)) + `' >> "$DRIVER_LOG_PATH"
-    ;;
-  2)
-    printf '%s' '` + streamJSONOutcomeLine("SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=done nonce=abc") + `' >> "$DRIVER_LOG_PATH"
-    ;;
-esac
-exit 0
-`
-	writeFakeDriverExec(t, dir, callLog, body)
-	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
-
-	workerPromptFile := filepath.Join(dir, "worker-prompt.txt")
-	if err := os.WriteFile(workerPromptFile, []byte("BASE WORKER PROMPT"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	promptFile := filepath.Join(dir, "prompt.txt")
-	if err := os.WriteFile(promptFile, []byte("ORIGINAL PROMPT TEXT"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	// Manifest dispatch (dispatchManifestIfPresent) is only reachable
-	// through the review-pass loop (run.go), so -review-prompt-file must be
-	// set to route mainRun there -- the legacy loop never calls it at all.
-	reviewPromptFile := filepath.Join(dir, "review-prompt.txt")
-	if err := os.WriteFile(reviewPromptFile, []byte("REVIEW PROMPT TEXT"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	argv := append(reviewPassFakeDriverArgv(dir),
-		"-worker-prompt-file", workerPromptFile,
-		"-worker-work-dir", workerWorkDir,
-		"-worker-timeout", "10s",
-		fmt.Sprintf("-max-parallel-workers=%d", maxParallel),
-	)
-
-	var stdout, stderr bytes.Buffer
-	rc := mainRun(argv, &stdout, &stderr)
-	if rc != 0 {
-		t.Fatalf("mainRun exit code = %d, want 0 (stderr: %q)", rc, stderr.String())
-	}
-
-	peakBytes, err := os.ReadFile(peakFile)
-	if err != nil {
-		t.Fatalf("read peakFile: %v (workers may never have run)", err)
-	}
-	peak := strings.TrimSpace(string(peakBytes))
-	if peak != fmt.Sprintf("%d", maxParallel) {
-		t.Errorf("peak concurrent workers = %s, want exactly %d -- either the cap was not honored (peak > %d) or -max-parallel-workers never reached LaunchWorkers at all (peak = 2, the hardcoded default)", peak, maxParallel, maxParallel)
 	}
 }

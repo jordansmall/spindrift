@@ -80,13 +80,10 @@ elsewhere.
 A `worker` subagent is provisioned this run, so run IMPLEMENT as its
 **coordinator** rather than editing the source yourself. Use the scout brief
 to break the issue into an ordered set of small slices, then
-delegate each slice **sequentially** to the `worker` with `isolation:
-"worktree"` on the Agent call (issue #2058) — the worker commits on its own
-branch inside its own git worktree, never the coordinator's own tree:
+delegate each slice **sequentially** to the `worker`:
 
 > worker: implement <one slice, with the brief's relevant pointers>. Work
-> test-first, then commit your slice on your own branch. Return a concise
-> report — files touched, checks run, outcome, and your branch name —
+> test-first. Return a concise report — files touched, checks run, outcome —
 > not the diffs.
 
 Hand the worker one slice at a time and wait for its report before starting
@@ -95,149 +92,11 @@ file reads, and check logs live in the worker's context, not yours. If a
 slice's report shows it went wrong, refine the delegation and re-run that
 slice before moving on.
 
-The worker's own report names its worktree branch (its report contract
-requires this). If a report's branch name is missing or unclear,
-stop and get the worker to confirm it before integrating — never
-assume a garbled report means the slice produced no work worth
-merging, and silently skip it. The worker's worktree is cut from whatever base the
-harness's own worktree-isolation mechanism uses, not your own tree and
-not any fixed ref you can assume — which is exactly why the range
-below uses a merge-base, not a fixed-ref, form.
-
-Before integrating a confirmed branch, check
-`git rev-list $(git merge-base HEAD <branch>)..<branch>`: an empty
-result means the slice genuinely made no commits past the merge-base,
-and the cherry-pick below would abort on it
-(`fatal: empty commit set passed`) — skip the cherry-pick for that
-slice and move on to the next one instead. Otherwise, bring the
-branch's diff into your own tree with
-`git cherry-pick --no-commit $(git merge-base HEAD <branch>)..<branch>`,
-resolving any conflict by hand, then author the commit yourself so
-it lands in proper Conventional Commits form — do this before
-handing out the next slice. This merge-base is computed against your
-own current HEAD each time, so it always
-accounts for every slice already integrated so far this run.
-
-Do not run a store build such as `checks-inbox` (if the flake exposes
-one — or whatever CHECK below resolves to for this repo) after
-integrating each slice: one store build per slice is exactly the
-redundant, heavy round-trip this design exists to avoid.
-
-This is a firm rule, and it **overrides** CHECK's "before each commit,
-run the repo's own checks green" for every per-slice integration
-commit you author here: land each one with no check gate between it
-and the next. That check target — the same `checks-inbox` or
-repo-defined equivalent named above — runs once, in CHECK below, on
-the fully-integrated tree, after every slice you're dispatching this
-pass has landed. The one exception: if COMMIT's
-rebase step below moves the tree again (conflicts resolved, commits
-reordered) before you push, that rebased tree needs a re-run — re-run
-the check target again each time the rebase moves the tree, same as
-COMMIT's own "Re-run the repo's checks after rebasing" instruction
-already asks for everyone, and push only once it's green.
-
 You still own CHECK, COMMIT, REVIEW, and OUTCOME yourself: the worker only
-implements and commits each slice inside its own worktree; the coordinator
-integrates each worker's branch, then runs the checks green exactly once
-per tree state (CHECK below, plus once more each time a COMMIT rebase
-moves the tree) before finalizing its own commits, and reviews. The one-slice,
-test-first Hard rule below is what each delegated slice must satisfy —
-you enforce it; the worker performs each red-green-refactor cycle.
-
-In addition to the sequential `worker` delegation above, you may instead
-dispatch a batch of slices to run **in parallel**, below this model, as an
-alternative for the right kind of batch — never both for the same slices.
-
-Prefer this over sequential delegation only when every slice in the batch is
-genuinely independent: no shared files between any two slices, and no
-ordering or dependency between them. Prefer sequential delegation instead
-whenever a slice depends on another slice's outcome, or state needs to flow
-from one slice's report into the next slice's instructions — exactly the
-situation this run is in when a fix-pass's findings must inform how later
-findings get sliced up. When in doubt, delegate sequentially.
-
-To dispatch a parallel batch, compose a JSON object of this exact shape:
-
-```json
-{
-  "slices": [
-    {
-      "name": "<slice-name>",
-      "task": "<the scoped work this slice's worker must implement>",
-      "file_leases": ["<path>", "..."],
-      "depends_on": ["<other-slice-name>", "..."]
-    }
-  ]
-}
-```
-
-`name` is required and must match `^[a-zA-Z0-9_-]{1,64}$`. `task` is
-required and must be non-empty — it is the only description of the slice's
-work the dispatched worker ever receives, so write it the same way you'd
-write a `worker` delegation's own instructions. `file_leases` and
-`depends_on` are both optional, and both actually drive scheduling: slices
-whose `file_leases` are disjoint (no shared or overlapping paths) and that
-have no `depends_on` edge between them run concurrently in the same batch.
-A slice that declares no `file_leases` at all is always sequenced into its
-own solo batch — conservative, since its touched-files surface is unknown
-and it's treated as potentially touching everything. `depends_on` puts a
-floor under a slice's earliest eligible batch so it never starts before the
-batch containing each dependency it names has finished. Leaving both fields
-off every slice in a manifest means every slice sequences solo — no
-concurrency benefit — so declare `file_leases` on each slice if you want the
-parallelism this feature exists for. A manifest may declare **at most 8
-slices** — more than that is rejected outright and nothing is dispatched.
-Base64-standard-encode the JSON, then print exactly one line to stdout:
-
-```
-SPINDRIFT_SLICE_MANIFEST <base64>
-```
-
-Immediately after printing that line, end your turn. Do not also delegate
-an Agent-tool `worker` subagent for the same slices, and do not wait for
-results yourself. The Go orchestrator reads the manifest from this pass's
-own log and partitions it into ordered batches using the `file_leases` /
-`depends_on` rules above; it dispatches one batch at a time, launching one
-driver-exec worker process per slice in that batch concurrently (each in
-its own git worktree, issue #2058), and waits for that whole batch to
-finish — and, for every slice that completed, be integrated onto HEAD —
-before starting the next batch. Batches themselves always run strictly in
-sequence, never overlapping each other, even though the slices within one
-batch run in parallel. Once every batch has run, it seeds the next
-coordinator pass's prompt with each worker's done/timed-out/crashed status
-plus its own reported summary — you will see that on your next invocation,
-not this one.
-
-Note that automatic integration requires this coordinator pass's own
-working tree to be completely clean — no staged or uncommitted changes — at
-the moment the `SPINDRIFT_SLICE_MANIFEST` line is printed. The Go
-orchestrator's integration step runs `git status --porcelain` against that
-same tree before integrating any slice in any batch, and refuses to
-integrate anything at all if it's dirty: it can't safely resolve a
-cherry-pick conflict's `--abort` without risking discarding unrelated
-staged work. If this pass ran `git add -A` earlier (for example, per this
-repo's own CHECK guidance) and never committed it, commit or clean that up
-before declaring the manifest.
-
-Each worker commits its slice on its own `orchestrator-worker/<name>`
-branch, left behind after its worktree is removed. Unlike a sequential
-`worker` delegation's branch, you never cherry-pick this one yourself: the
-Go orchestrator already integrates each batch's own done slices onto its
-own tree's HEAD immediately after that batch finishes, before the next
-coordinator pass is ever invoked — so by the time you see a slice reported
-done, its branch has already been landed (or its integration outcome
-already decided) on your behalf. Your only job on the next pass is to read
-that per-slice integration outcome in the seeded report: "integrated" or
-"nothing to integrate" means it's already on HEAD and there is nothing
-further to do; "integration conflicted" or "integration failed" means it
-still needs your manual resolution, using the branch name and guidance the
-report gives you. Never re-cherry-pick a slice the report already says was
-integrated — that would double-apply a commit already on HEAD. A slice name
-still present in `state.DoneSlices` when you re-declare it is skipped
-rather than re-dispatched, so re-declaring an already-done slice wastes a
-batch slot rather than losing work, but there is no reason to re-declare
-one whose integration already succeeded — just never re-declare that name
-again.
+implements each slice; the coordinator keeps the checks green, reviews, and
+commits. The one-slice, test-first Hard rule below is what each delegated
+slice must satisfy — you enforce it; the worker performs each
+red-green-refactor cycle.
 
 Work test-first, one slice at a time. Hard rule:
 

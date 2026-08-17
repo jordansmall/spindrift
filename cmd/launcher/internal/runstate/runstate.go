@@ -126,13 +126,6 @@ type RunState struct {
 	// the terminal pass can name the reason it is running instead of the
 	// usual next step. Empty when TerminalLand is false (issue #2457).
 	CapFired string `json:"cap_fired"`
-	// WorkerFindings summarizes the last parallel worker dispatch's
-	// per-slice outcome (issue #2059) -- one line per slice, e.g.
-	// "slice-a: done", "slice-b: timed out", "slice-c: crashed (exit 1)" --
-	// seeded into the next pass's prompt the same way ReviewFindings seeds a
-	// fix pass, so the coordinator can see what happened without reading any
-	// worker's own transcript.
-	WorkerFindings string `json:"worker_findings,omitempty"`
 	// FindingsLogPath is the path to the per-run findings log (issue #2552):
 	// every review round's own findings text, appended one "## Round N"
 	// section at a time, so a later pass can dedupe and file the union across
@@ -140,15 +133,6 @@ type RunState struct {
 	// still carries only the last round's, unchanged, for that field's
 	// existing consumers). Empty until the first review round appends to it.
 	FindingsLogPath string `json:"findings_log_path,omitempty"`
-	// UnlandedSlices names every slice already present in DoneSlices whose
-	// own branch integration ended in conflict or failure -- its worker's
-	// job succeeded, but its commits never actually landed on the
-	// orchestrator's repo HEAD. Once a slice is in DoneSlices, a later
-	// manifest never redispatches it, so this is the only place a future
-	// pass's dispatch can learn that a new slice DependsOn (or file-lease
-	// overlaps) a name whose changes are still missing from HEAD (issue
-	// #2060 review finding).
-	UnlandedSlices []string `json:"unlanded_slices,omitempty"`
 }
 
 // IsEmpty reports whether s carries nothing worth seeding into a fresh
@@ -194,9 +178,7 @@ func (s RunState) IsEmpty() bool {
 		s.ScoutBriefPath == "" &&
 		s.PassSummaryPath == "" &&
 		s.ReviewFindings == "" &&
-		s.WorkerFindings == "" &&
 		s.FindingsLogPath == "" &&
-		len(s.UnlandedSlices) == 0 &&
 		!s.TerminalLand
 }
 

@@ -33,7 +33,6 @@ set_box_env() {
   export LOCAL_ISSUE_REFERENCE=""
   export MAX_BUDGET_TOKENS=0
   export MAX_BUDGET_USD="0.000000"
-  export MAX_PARALLEL_WORKERS=2
   export MAX_REBASE_ATTEMPTS=3
   export MODEL="claude-sonnet-5"
   export OPENCODE_AUTH_CONTENT=""
@@ -44,6 +43,4 @@ set_box_env() {
   export SCOUT_MODEL="claude-haiku-4-5-20251001"
   export TRANSIENT_BACKOFF_SECS=30
   export WORKER_MODEL="claude-sonnet-5"
-  export WORKER_TIMEOUT=""
-  export WORKER_WORK_DIR=""
 }

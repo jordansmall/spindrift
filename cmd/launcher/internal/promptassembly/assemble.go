@@ -63,17 +63,6 @@ type Handoff struct {
 	ReviewPromptFile string
 	ReviewModel      string
 	ReviewEffort     string
-
-	// WorkerPromptFile is the Go orchestrator's own driver-exec-spawned
-	// parallel worker prompt (issue #2059, #2058) -- the base prompt a
-	// coordinator's manifest-emission dispatches into one worktree per
-	// slice. It is populated under the exact same condition as
-	// ReviewPromptFile above (Invoker "orchestrator", kind "work",
-	// FixPass == 0): only the default fresh-work dispatch cell ever
-	// fans out slices this way -- research and fix-pass cells leave it
-	// empty even with the orchestrator on, for the same reasons
-	// ReviewPromptFile does.
-	WorkerPromptFile string
 }
 
 // checkCoveredCell validates that e sits in one of Assemble's covered Env
@@ -151,14 +140,7 @@ func substitute(text string, allowlist map[string]string) string {
 // file's contents. Exported so a caller outside this package that needs
 // this exact ${NAME}-substitution mechanism -- but not the rest of
 // Assemble's Env-driven cell-rendering pipeline -- can reuse it instead of
-// hand-rolling a bespoke strings.ReplaceAll pass. The orchestrator's own
-// cherry-pick conflict-resolve guidance is the first such caller (issue
-// #2060 review finding): it renders
-// templates/default/prompts/conflict-resolve-cherry-pick-prompt.md at
-// runtime with per-conflict values (the slice's own branch name and
-// revision range) that Assemble's own Env never carries, since they are
-// only known deep inside a dispatch pass long after any Env this package's
-// Assemble sees was built.
+// hand-rolling a bespoke strings.ReplaceAll pass.
 func RenderText(text string, vars map[string]string) string {
 	return strings.TrimRight(substitute(text, vars), "\n")
 }
@@ -408,16 +390,6 @@ func Assemble(e Env, reg Registry) (Result, error) {
 			return Result{}, fmt.Errorf("read review-prompt.md: %w", err)
 		}
 		result.Handoff.ReviewPromptFile = reviewPromptText
-
-		// worker_prompt_rendered (issue #2059, #2058): the Go
-		// orchestrator's own driver-exec worker prompt, gated and
-		// rendered identically to review-prompt.md above.
-		workerPromptPath := filepath.Join(e.PromptsDir, "worker-prompt.md")
-		workerPromptText, err := renderFile(workerPromptPath, allowlist)
-		if err != nil {
-			return Result{}, fmt.Errorf("read worker-prompt.md: %w", err)
-		}
-		result.Handoff.WorkerPromptFile = workerPromptText
 	}
 
 	// Agents JSON (entrypoint.sh: 1077-1116). Empty template means no

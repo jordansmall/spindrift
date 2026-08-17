@@ -1905,7 +1905,7 @@ func TestRecordReviewedCommitAnchorDegradesOnNonSHAOutput(t *testing.T) {
 // BLOCK-then-APPROVE script plus one extra step (issue #2551): call 3, the
 // fix pass that runs between round 1's BLOCK and round 2's review, commits
 // an empty commit in the current directory (the test's own chdir'd fake
-// repo, chdirToFreshWorkerRepo) -- the way a real fix pass would advance
+// repo, chdirToFreshGitRepo) -- the way a real fix pass would advance
 // the repo's own HEAD -- so a caller can distinguish round 1's own
 // recorded anchor (the repo's HEAD before this commit) from round 2's
 // (HEAD after it), rather than both rounds coincidentally recording the
@@ -1922,7 +1922,7 @@ func reviewPassFakeDriverBodyWithFixCommit(callLog string) string {
 // TestSeedReviewPromptFromStateIncludesDeltaFocus* unit tests already do on
 // their own. recordReviewedCommitAnchor resolves the repo root via
 // os.Getwd(), so this test chdirs into a fresh, disposable temp git repo
-// (chdirToFreshWorkerRepo, workers_test.go) rather than relying on this
+// (chdirToFreshGitRepo, gitrepo_test.go) rather than relying on this
 // package's own checkout -- the checked-out repo has no `.git` directory
 // once copied into the Nix build sandbox that `checks-inbox` runs under, so
 // a bare `git rev-parse HEAD` against "." would fail there even though it
@@ -1940,7 +1940,7 @@ func reviewPassFakeDriverBodyWithFixCommit(callLog string) string {
 // state.ReviewedCommitAnchor with round2Head, proving the recording is
 // fresh each round rather than write-once.
 func TestRunWithReviewPassSeedsRoundTwoWithDeltaFocusFromRecordedAnchor(t *testing.T) {
-	repoRoot := chdirToFreshWorkerRepo(t)
+	repoRoot := chdirToFreshGitRepo(t)
 	round1Head := gitOutputT(t, repoRoot, "rev-parse", "HEAD")
 
 	dir := t.TempDir()
@@ -4961,14 +4961,14 @@ func TestSeedReviewPromptFromStateMissingDispositionsFileDegradesGracefully(t *t
 	}
 }
 
-// TestSeedReviewPromptFromStateNeverIncludesPassSummaryOrWorkerFindings
+// TestSeedReviewPromptFromStateNeverIncludesPassSummary
 // verifies seedReviewPromptFromState (issue #2550 AC4) is a materially
 // narrower function than seedPromptFromState: even when state carries every
 // field a rich implement/fix-pass seeding would render, the seeded review
 // prompt carries only the prior verdict and dispositions, never
-// PassSummaryPath, ScoutBriefPath, WorkerFindings, or the TerminalLand
+// PassSummaryPath, ScoutBriefPath, or the TerminalLand
 // directive -- the "nothing else from the implementor" firewall.
-func TestSeedReviewPromptFromStateNeverIncludesPassSummaryOrWorkerFindings(t *testing.T) {
+func TestSeedReviewPromptFromStateNeverIncludesPassSummary(t *testing.T) {
 	dir := t.TempDir()
 	promptFile := filepath.Join(dir, "prompt.txt")
 	if err := os.WriteFile(promptFile, []byte("ORIGINAL PROMPT TEXT"), 0o644); err != nil {
@@ -4983,7 +4983,6 @@ func TestSeedReviewPromptFromStateNeverIncludesPassSummaryOrWorkerFindings(t *te
 		ReviewFindings:  "VERDICT: BLOCK\n\n## Blocking\n- run.go:42 -- missing nil check",
 		PassSummaryPath: "/tmp/pass-summary.md",
 		ScoutBriefPath:  "/tmp/brief.md",
-		WorkerFindings:  "slice-a: done\nslice-b: timed out",
 		TerminalLand:    true,
 		CapFired:        "max slices reached",
 		FindingsLogPath: findingsLogPath,
@@ -5000,12 +4999,9 @@ func TestSeedReviewPromptFromStateNeverIncludesPassSummaryOrWorkerFindings(t *te
 	for _, unwanted := range []string{
 		"Pass summary:",
 		"Scout brief:",
-		"Worker dispatch results:",
 		"terminal pass",
 		"/tmp/pass-summary.md",
 		"/tmp/brief.md",
-		"slice-a: done",
-		"slice-b: timed out",
 		"max slices reached",
 		"Findings log:",
 		findingsLogPath,
@@ -5293,40 +5289,6 @@ func TestSeedPromptFromStateOmitsFindingsLogWhenUnset(t *testing.T) {
 	}
 	if strings.Contains(string(got), "Findings log:") {
 		t.Errorf("seeded prompt = %q, want no \"Findings log:\" bullet when FindingsLogPath is unset", got)
-	}
-}
-
-// TestSeedPromptFromStateIncludesWorkerFindings verifies seedPromptFromState
-// (issue #2059) carries state.WorkerFindings into the seeded prompt the same
-// way it already carries state.ReviewFindings, and that WorkerFindings alone
-// (with every other state field at its zero value) is enough to trigger
-// seeding rather than returning promptFile unchanged.
-func TestSeedPromptFromStateIncludesWorkerFindings(t *testing.T) {
-	dir := t.TempDir()
-	promptFile := filepath.Join(dir, "prompt.txt")
-	if err := os.WriteFile(promptFile, []byte("ORIGINAL PROMPT TEXT"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	state := runstate.RunState{
-		WorkerFindings: "- slice-a: done\n- slice-b: timed out",
-	}
-
-	seeded, err := seedPromptFromState(promptFile, state)
-	if err != nil {
-		t.Fatalf("seedPromptFromState: %v", err)
-	}
-	if seeded == promptFile {
-		t.Fatalf("seedPromptFromState returned the original file unchanged, want a fresh seeded file")
-	}
-	got, err := os.ReadFile(seeded)
-	if err != nil {
-		t.Fatalf("read seeded prompt: %v", err)
-	}
-	for _, want := range []string{"Worker dispatch results", "slice-a: done", "slice-b: timed out"} {
-		if !strings.Contains(string(got), want) {
-			t.Errorf("seeded prompt = %q, want it to contain %q", got, want)
-		}
 	}
 }
 

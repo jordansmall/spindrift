@@ -123,25 +123,6 @@ type config struct {
 	// pre-#2387 behavior of the review pass silently reusing the
 	// coordinator's effort.
 	reviewEffort string
-	// workerPromptFile is the base prompt seedWorkerPrompt composes each
-	// dispatched worker's own addendum onto (issue #2059). Empty disables
-	// parallel worker dispatch entirely: a coordinator pass's slice manifest
-	// is never dispatched, matching every other "empty disables this
-	// feature" field in this struct (reviewPromptFile, above).
-	workerPromptFile string
-	// workerWorkDir holds every dispatched worker's own quarantined log,
-	// heartbeat log, result, and done-sentinel files (WorkerOptions.WorkDir).
-	// Only meaningful when workerPromptFile is set.
-	workerWorkDir string
-	// workerTimeout bounds each dispatched worker's own join
-	// (WorkerOptions.Timeout); <= 0 falls back to LaunchWorkers' own
-	// defaultWorkerTimeout.
-	workerTimeout time.Duration
-	// maxParallelWorkers caps how many dispatched workers LaunchWorkers runs
-	// concurrently (WorkerOptions.MaxParallel, issue #2495); <= 0 falls back
-	// to LaunchWorkers' own defaultMaxParallelWorkers. Only meaningful when
-	// workerPromptFile is set.
-	maxParallelWorkers int
 	// argvPromptStyle is forwarded verbatim as driver-exec's own
 	// --argv-prompt-style flag (issue #2534 follow-up): how the prompt is
 	// spliced into the Driver's argv ("flag" or "positional"). Empty falls
@@ -376,6 +357,24 @@ func run(cfg config, stdout io.Writer) (int, error) {
 // already recorded (or empty, on the first pass), never errors the run --
 // a later pass's seeding degrades to a full review on a missing anchor, so
 // a failed recording here is never fatal.
+// renderedRolePrefixRe extracts the bracketed role name
+// RenderTranscriptWithRole (transcript_render.go) leads a rendered line with
+// -- "[role] text" for an assistant-authored text/tool_use event, "[role]
+// -> summary" for a tool_result echo. Capture group 1 is the role name. A
+// line with no match at all is a bare physical-line continuation of a prior
+// multi-line rendered entry, whose embedded "\n" survives into the rendered
+// transcript verbatim.
+var renderedRolePrefixRe = regexp.MustCompile(`^\[([^\]]*)\]`)
+
+// runGitIn runs `git <args...>` with its working directory set to dir,
+// returning its combined stdout+stderr output.
+func runGitIn(dir string, args ...string) (string, error) {
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	return string(out), err
+}
+
 func recordReviewedCommitAnchor(state *runstate.RunState) {
 	repoRoot, err := os.Getwd()
 	if err != nil {
@@ -484,30 +483,6 @@ func runWithReviewPass(cfg config, stdout io.Writer) (int, error) {
 		passUsageTotals := passUsage(cfg.logPath, cfg.driver)
 		cumulativeTokens += passUsageTotals.TotalTokens()
 		cumulativeUSD += passUsageTotals.TotalCostUSD
-		// dispatchManifestIfPresent (which calls LaunchWorkers and blocks for
-		// up to the full worker timeout) must never fire on a pass that has
-		// already reached a terminal outcome, nor on the already-committed
-		// terminal land pass (state.TerminalLand, set by a PRIOR iteration's
-		// maxSlices cap case below) -- either way the switch below is about
-		// to stop the loop a few lines down, so dispatching workers here
-		// would be wasted work that also defeats the maxSlices/TerminalLand
-		// cap's intent to bound total dispatch, not just pass count (issue
-		// #2059 review finding). state.TerminalLand at this point reflects
-		// only a prior pass's decision -- this switch's own maxSlices case
-		// sets it for THIS pass later, after this call already ran.
-		manifestDispatched := false
-		if !hasOutcome && !state.TerminalLand {
-			var workerTokens int
-			var workerUSD float64
-			manifestDispatched, workerTokens, workerUSD = dispatchManifestIfPresent(cfg, &state, stdout)
-			// Dispatched-worker spend counts toward the same budget cap as
-			// every other pass's own (issue #2694) -- the issue's own
-			// motivating measurement names the worker/reviewer loop as the
-			// majority of a run's spend, so leaving it out here would defeat
-			// the cap for exactly the spend it exists to bound.
-			cumulativeTokens += workerTokens
-			cumulativeUSD += workerUSD
-		}
 		// A pass that never printed a terminal SPINDRIFT_OUTCOME line is
 		// recorded on its own, distinct marker (issue #2036) -- whatever the
 		// loop's decision below turns out to be (continue into a fresh pass,
@@ -520,13 +495,12 @@ func runWithReviewPass(cfg config, stdout io.Writer) (int, error) {
 			exitCode:        rc,
 			pass:            pass,
 		}, passmachine.Input{
-			PassJustExecuted:   passKind,
-			HasOutcome:         hasOutcome,
-			Pass:               pass,
-			Caps:               passmachine.Caps{MaxSlices: cfg.maxSlices, MaxReviewRounds: cfg.maxReviewRounds, MaxBudgetTokens: cfg.maxBudgetTokens, MaxBudgetUSD: cfg.maxBudgetUSD},
-			LandPhase:          landPhase(state.TerminalLand),
-			LastVerdict:        passmachine.Verdict(state.LastVerdict),
-			ManifestDispatched: manifestDispatched,
+			PassJustExecuted: passKind,
+			HasOutcome:       hasOutcome,
+			Pass:             pass,
+			Caps:             passmachine.Caps{MaxSlices: cfg.maxSlices, MaxReviewRounds: cfg.maxReviewRounds, MaxBudgetTokens: cfg.maxBudgetTokens, MaxBudgetUSD: cfg.maxBudgetUSD},
+			LandPhase:        landPhase(state.TerminalLand),
+			LastVerdict:      passmachine.Verdict(state.LastVerdict),
 		})
 		if !d.Continue {
 			break
@@ -732,19 +706,16 @@ func seedPromptFromState(promptFile string, state runstate.RunState) (string, er
 			fmt.Fprintf(&b, "- Findings log: %s (every review round's own findings, one \"## Round N\" section per round -- when you reach FILE ISSUES, read this file and run the same non-blocking triage from REVIEW over the union of every round's non-blocking findings, not just this round's Reviewer findings above; a finding already fixed inline in an earlier round's fix pass is resolved, not re-filed)\n", state.FindingsLogPath)
 		}
 	}
-	if state.WorkerFindings != "" {
-		fmt.Fprintf(&b, "- Worker dispatch results:\n\n%s\n", state.WorkerFindings)
-	}
 	// decisionsContent was already read fresh above (before the IsEmpty()
 	// check), so a missing or unreadable DecisionsLogPath has already
 	// degraded to "" here -- skipping the bullet, not an error, matching
 	// FindingsLogPath's own graceful-degrade convention. Content is inlined
 	// (not carried by reference the way FindingsLogPath is), mirroring
-	// ReviewFindings/WorkerFindings above, but fenced with fenceBlock --
-	// unlike those two -- since this log is agent-authored, downstream of
+	// ReviewFindings above, but fenced with fenceBlock -- unlike it --
+	// since this log is agent-authored, downstream of
 	// untrusted issue/comment text (CLAUDE.md's comment-injection trust
 	// boundary), and grows unboundedly larger across every pass in the run,
-	// unlike ReviewFindings/WorkerFindings which only ever carry one round's
+	// unlike ReviewFindings which only ever carries one round's
 	// text: a meaningfully higher chance of ever containing this function's
 	// own "\n---\n\n" section-boundary sequence, which fencing the content
 	// keeps contained inside the quoted block rather than readable as new
@@ -1080,10 +1051,8 @@ func scanReviewLog(logPath, driverName string) (verdict, findings string) {
 	lines := strings.Split(rendered, "\n")
 	blockLine := -1
 	for i, line := range lines {
-		// renderedRolePrefixRe (manifest.go) is the same "[role]" prefix
-		// matcher scanForManifest uses to attribute a rendered line to its
-		// role -- a bare physical-line continuation of a prior multi-line
-		// block carries no prefix at all and never starts a new block.
+		// A bare physical-line continuation of a prior multi-line block
+		// carries no "[role]" prefix at all and never starts a new block.
 		m := renderedRolePrefixRe.FindStringSubmatch(line)
 		if m == nil || m[1] != driverkit.ReviewerRole {
 			continue
