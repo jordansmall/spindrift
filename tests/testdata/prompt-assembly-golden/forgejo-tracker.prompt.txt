@@ -211,7 +211,26 @@ loop to single-pass on ORCHESTRATOR_ENABLED runs. On BLOCK:
 
 Never open the PR with a blocking finding open.
 
-Then triage the Non-blocking findings — do NOT reflexively file them. Filing
+When a check surfaces a failure you want to set aside as pre-existing
+rather than fix, prove it against a genuinely clean checkout of
+`origin/main` first — a cleaning step that reports nothing to
+clean is an unmet precondition, not proof, so do not go on to claim
+pre-existence from that run. `git stash` alone does not establish a
+clean base: once a slice's own edits are committed, the branch tip is
+the dirty state stash cannot touch, so it saves nothing, exits zero, and
+any check you then run is still against your own commits, not the base.
+Fetch first (`git fetch origin`, so the ref isn't stale), then check out
+`origin/main` itself somewhere outside this working tree — a
+sibling worktree (`git worktree add`) or a fresh clone — and re-run the
+same check there; that is what actually proves the failure predates this
+branch. Prove it wherever the check actually ran, not only on the host —
+a failure that reproduces solely in the Box is still real. Report which
+revision you verified against and how you reached the clean tree,
+directly in your own output this turn, so the claim is auditable from
+this log. A failure you cannot prove this way is a failure this branch
+caused: fix it, do not wave it off.
+
+Also triage the Non-blocking findings — do NOT reflexively file them. Filing
 every finding spawns more issues than the work ever closes, so resolving a
 cheap, in-scope finding here stays the default regardless of round (item
 1 below, unchanged by round). Only the tiebreak for an ambiguous finding
