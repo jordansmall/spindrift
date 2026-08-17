@@ -350,6 +350,24 @@ func TestLauncherChecks_IssueTracker_FailsAndPasses(t *testing.T) {
 	}
 }
 
+// TestDoctorExtraChecks_StripsRuntimeRowOnly verifies doctorExtraChecks
+// removes exactly the doctor.RuntimeCheckName-named row from
+// launcherChecks(c)'s output and passes every other row through unchanged.
+func TestDoctorExtraChecks_StripsRuntimeRowOnly(t *testing.T) {
+	c := minimalValidConfig()
+	all := launcherChecks(c)
+	extra := doctorExtraChecks(c)
+
+	if len(extra) != len(all)-1 {
+		t.Fatalf("doctorExtraChecks returned %d rows, want %d (launcherChecks rows minus the runtime row)", len(extra), len(all)-1)
+	}
+	for _, ch := range extra {
+		if ch.Name == doctor.RuntimeCheckName {
+			t.Errorf("doctorExtraChecks output still contains a row named %q", doctor.RuntimeCheckName)
+		}
+	}
+}
+
 // TestLauncherChecks_CodeForge_FailsAndPasses covers the code-forge row:
 // axis validity plus the cross-knob validateCodeForge call (forgejo here,
 // mirroring TestValidate_ForgejoCodeForge).

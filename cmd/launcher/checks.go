@@ -7,7 +7,6 @@ import (
 
 	"spindrift.dev/launcher/internal/doctor"
 	"spindrift.dev/launcher/internal/driver"
-	"spindrift.dev/launcher/internal/runner"
 )
 
 // launcherChecks builds the Required-tier doctor.Check rows that are the
@@ -42,7 +41,7 @@ func doctorExtraChecks(c config) []doctor.Check {
 	checks := launcherChecks(c)
 	out := make([]doctor.Check, 0, len(checks))
 	for _, ch := range checks {
-		if ch.Name == "runtime" {
+		if ch.Name == doctor.RuntimeCheckName {
 			continue
 		}
 		out = append(out, ch)
@@ -140,14 +139,7 @@ func launcherRequiredKnobChecks(c config) []doctor.Check {
 				return nil
 			},
 		},
-		{
-			Name:   "runtime",
-			Tier:   doctor.Required,
-			Remedy: "set RUNTIME to podman, docker, rancher, or bwrap, and ensure the matching CLI is on PATH",
-			Probe: func() error {
-				return runner.ValidateRuntime(c.runtime)
-			},
-		},
+		doctor.RuntimeCheck(c.runtime),
 	}
 }
 

@@ -1935,6 +1935,31 @@ func TestValidate_MixedLocalStillRequiresRepoSlugAndGhToken(t *testing.T) {
 	}
 }
 
+// TestValidate_ChoiceErrorsPrecedeCrossKnobErrors pins the origin/main
+// ordering restored by issue #2559: validate()'s validateChoice(MERGE_MODE)
+// call must run — and its enum-choice error must win — before the
+// CODE_FORGE=local cross-knob check that requires MERGE_MODE=immediate. A
+// prior refactor accidentally moved the cross-knob checks ahead of the
+// validateChoice calls, so an invalid MERGE_MODE under CODE_FORGE=local
+// surfaced the cross-knob error ("requires MERGE_MODE=immediate") instead of
+// the enum-choice error listing valid MERGE_MODE choices.
+func TestValidate_ChoiceErrorsPrecedeCrossKnobErrors(t *testing.T) {
+	c := minimalValidLocalConfig()
+	c.issueTracker = "local"
+	c.mergeMode = "bogus"
+
+	err := validate(c)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if strings.Contains(err.Error(), "requires MERGE_MODE") {
+		t.Fatalf("got cross-knob error (wrong precedence), want MERGE_MODE enum-choice error: %v", err)
+	}
+	if !strings.Contains(err.Error(), "MERGE_MODE") {
+		t.Fatalf("want error to mention MERGE_MODE, got: %v", err)
+	}
+}
+
 // TestValidate_ResearchSelfContainedExemptsRepoSlugAndGhToken verifies that
 // validate() does not require REPO_SLUG or GH_TOKEN for a research dispatch
 // with selfContained set and a local issue tracker (issue #2202,
@@ -3319,6 +3344,35 @@ func minimalValidConfig() config {
 
 // --- runDoctor tests ---
 
+// TestRunDoctor_WiresLauncherChecksIntoOutput verifies runDoctor passes
+// launcherChecks(c) — not nil — as doctor.Run's extraChecks argument (AC2):
+// a launcherChecks row failure must be visible in doctor's own output. c is
+// minimalValidConfig() (passes validate(), so every launcherChecks row but
+// the one under test succeeds) plus the four work-tier labels
+// defaultLabelConfig() sets (minimalValidConfig() leaves them unset, which
+// would otherwise make doctor.Run's own label check fail on the empty-string
+// label and mask the launcherChecks wiring this test targets), with
+// gitUserName cleared to fail exactly the "git-user-name" row and no other.
+func TestRunDoctor_WiresLauncherChecksIntoOutput(t *testing.T) {
+	f := forge.NewFake()
+	f.ProbeRepo = "owner/repo"
+	f.Labels = []string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}
+
+	c := minimalValidConfig()
+	c.label, c.inProgressLabel, c.failedLabel, c.completeLabel =
+		"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"
+	c.gitUserName = "" // fails exactly the launcherChecks "git-user-name" row
+
+	var buf bytes.Buffer
+	if err := runDoctor(f, f, c, &buf, strings.NewReader(""), false); err != nil {
+		t.Fatalf("unexpected error: %v", err) // extraChecks are informational-only, never fail Run
+	}
+	out := buf.String()
+	if !strings.Contains(out, "MISSING: git-user-name") {
+		t.Errorf("want runDoctor's output to report launcherChecks(c)'s failing git-user-name row (proves it wired launcherChecks(c), not nil), got:\n%s", out)
+	}
+}
+
 func TestDoctor_Success(t *testing.T) {
 	f := forge.NewFake()
 	f.ProbeRepo = "owner/repo"
@@ -3559,6 +3613,27 @@ func TestDoctor_RuntimeRow_Unset_PrintsAdvisorySkipped(t *testing.T) {
 	out := buf.String()
 	if !strings.Contains(out, "advisory: RUNTIME not set — skipping runtime check") {
 		t.Errorf("want output to contain the RUNTIME-unset advisory line, got:\n%s", out)
+	}
+}
+
+// TestDoctor_RuntimeRow_ReportedExactlyOnce guards against the runtime
+// check regressing back to two competing implementations (extraChecks row
+// + a separate hand-rolled doctor.Config.Runtime block) — issue #2559 AC2.
+func TestDoctor_RuntimeRow_ReportedExactlyOnce(t *testing.T) {
+	f := forge.NewFake()
+	f.ProbeRepo = "owner/repo"
+	f.Labels = []string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}
+
+	c := defaultLabelConfig()
+	c.runtime = ""
+
+	var buf bytes.Buffer
+	if err := runDoctor(f, f, c, &buf, strings.NewReader(""), false); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	out := buf.String()
+	if n := strings.Count(out, "runtime"); n != 1 {
+		t.Errorf("want exactly one runtime-related status line, got %d occurrences in:\n%s", n, out)
 	}
 }
 
