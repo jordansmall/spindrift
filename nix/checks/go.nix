@@ -93,7 +93,9 @@ in
   # same way so TestDispatchLabels_ClaimRemoveLabels_MatchesWorkflowFiles can resolve its
   # ../../../../.forgejo/workflows/{agent-dispatch,agent-recover}.yml paths
   # (#2507), alongside the .github/ copy above for the .github-side halves
-  # of that same test.
+  # of that same test. README.md is copied the same way so
+  # TestDocsHaveNoDeprecatedSpellings can resolve its ../../README.md path
+  # (#2566).
   launcher-go-test =
     pkgs.runCommand "launcher-go-test"
       {
@@ -109,6 +111,7 @@ in
         cp -r ${../../.github} src/.github
         cp -r ${../../.forgejo} src/.forgejo
         cp -r ${../../templates} src/templates
+        cp -r ${../../README.md} src/README.md
         chmod -R +w src
         cp -r ${launcherGoModules} src/cmd/launcher/vendor
         export GOPROXY=off

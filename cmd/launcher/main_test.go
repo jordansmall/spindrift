@@ -4173,6 +4173,143 @@ func TestReferenceDocHasLocalCodeForgeSection(t *testing.T) {
 	}
 }
 
+// deprecatedDocSpellings are the old settings.<section>.<knob> shim path
+// spellings findDeprecatedDocSpellings denylists in doc prose (README.md,
+// docs/reference.md). Mirrors quickstart_test.go's deprecatedPathSpellings,
+// but for docs prose rather than generated flake.nix output. The bare flat
+// structural-shim spelling for runtime ("runtime = " with no leading
+// "infra.") is checked separately by findDeprecatedDocSpellings since,
+// unlike these, it can't be told apart from the canonical infra.runtime
+// spelling by substring alone.
+var deprecatedDocSpellings = []string{
+	"settings.repository",
+	"settings.lifecycleLabels",
+	"settings.issueDiscovery",
+	"settings.branches.mergeGuardPaths",
+	"settings.issues.forgejo",
+	"settings.issues.research.verdicts",
+}
+
+// findDeprecatedDocSpellings scans content for any deprecatedDocSpellings
+// substring plus any occurrence anywhere in the content (not just at a line
+// start — the bare spelling can appear mid-sentence in doc prose, e.g.
+// README.md's "(or set `runtime = \"docker\"`; ...)") of the bare flat
+// structural-shim spelling `runtime = "`, distinguished from the canonical
+// `infra.runtime = "` spelling by checking the immediately preceding
+// characters aren't "infra.". Reports a single finding for the runtime
+// marker if any bare occurrence is found, consistent with how the other
+// deprecated markers report once per marker regardless of occurrence count.
+func findDeprecatedDocSpellings(content string) []string {
+	var found []string
+	for _, deprecated := range deprecatedDocSpellings {
+		if strings.Contains(content, deprecated) {
+			found = append(found, deprecated)
+		}
+	}
+
+	const runtimeMarker = `runtime = "`
+	const canonicalPrefix = "infra."
+	searchFrom := 0
+	for {
+		idx := strings.Index(content[searchFrom:], runtimeMarker)
+		if idx < 0 {
+			break
+		}
+		matchStart := searchFrom + idx
+		precedingStart := matchStart - len(canonicalPrefix)
+		if precedingStart < 0 || content[precedingStart:matchStart] != canonicalPrefix {
+			found = append(found, runtimeMarker)
+			break
+		}
+		searchFrom = matchStart + len(runtimeMarker)
+	}
+
+	return found
+}
+
+// TestFindDeprecatedDocSpellings_DetectsReintroducedSpelling is the
+// guard-demo acceptance criterion from issue #2566: it proves the lint
+// helper actually fails on a reintroduced deprecated spelling, covering a
+// deprecatedDocSpellings marker, the bare runtime = "..." structural shim,
+// and clean content (including the canonical infra.runtime spelling) that
+// reports nothing.
+func TestFindDeprecatedDocSpellings_DetectsReintroducedSpelling(t *testing.T) {
+	cases := []struct {
+		name    string
+		content string
+		want    []string
+	}{
+		{
+			name:    "deprecated marker present",
+			content: "Configure it via `settings.branches.mergeGuardPaths` (baked).",
+			want:    []string{"settings.branches.mergeGuardPaths"},
+		},
+		{
+			name:    "bare runtime structural shim",
+			content: "  runtime = \"docker\";\n",
+			want:    []string{`runtime = "`},
+		},
+		{
+			name:    "clean content with canonical spelling",
+			content: "  infra.runtime = \"docker\";\n",
+			want:    nil,
+		},
+		{
+			name: "mid-sentence bare runtime structural shim (README shape)",
+			content: "- **podman** (or set `runtime = \"docker\"`; `runtime = \"rancher\"` for Rancher\n" +
+				"  Desktop in containerd mode, driven via `nerdctl`; or `runtime = \"bwrap\"` for\n" +
+				"  the daemonless bubblewrap sandbox on Linux, which needs no container runtime).",
+			want: []string{`runtime = "`},
+		},
+		{
+			name:    "mid-sentence canonical spelling not reported",
+			content: "- **podman** (or set `infra.runtime = \"docker\"` for the shim).",
+			want:    nil,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := findDeprecatedDocSpellings(tc.content)
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("findDeprecatedDocSpellings(%q) = %v, want %v", tc.content, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestDocsHaveNoDeprecatedSpellings guards README.md and docs/reference.md
+// against the deprecatedDocSpellings old settings.<section>.<knob> shim
+// paths (and the bare runtime = "..." structural shim) creeping back in.
+// This is the integration counterpart to
+// TestFindDeprecatedDocSpellings_DetectsReintroducedSpelling, which only
+// exercises the checker against synthetic content — this test runs it
+// against the real docs (#2566).
+func TestDocsHaveNoDeprecatedSpellings(t *testing.T) {
+	readme, err := os.ReadFile(filepath.Join("..", "..", "README.md"))
+	if err != nil {
+		t.Fatalf("read README.md: %v", err)
+	}
+	reference, err := os.ReadFile(filepath.Join("..", "..", "docs", "reference.md"))
+	if err != nil {
+		t.Fatalf("read docs/reference.md: %v", err)
+	}
+
+	docs := []struct {
+		name    string
+		content string
+	}{
+		{"README.md", string(readme)},
+		{"docs/reference.md", string(reference)},
+	}
+
+	for _, doc := range docs {
+		if found := findDeprecatedDocSpellings(doc.content); len(found) > 0 {
+			t.Errorf("%s contains %d deprecated spelling(s): %v", doc.name, len(found), found)
+		}
+	}
+}
+
 // TestTriageLabelMeta_ColorsAreDistinct guards against two label tiers
 // visually colliding in the GitHub label UI by reusing the same hex color
 // (#801) — TestReferenceDocLabelSnippetMatchesTriageDefaults checks
