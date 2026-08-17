@@ -667,9 +667,27 @@ func runWithReviewPass(cfg config, stdout io.Writer) (int, error) {
 // implicit resumed session
 // -- TestRunSeedsFixBriefWithVerdictAfterBlock asserts this shape. When state
 // is the zero value (the common cold-start pass, nothing carried forward yet)
-// this returns promptFile unchanged and creates no temp file.
+// AND there is no fresh decisions content to seed either, this returns
+// promptFile unchanged and creates no temp file.
 func seedPromptFromState(promptFile string, state runstate.RunState) (string, error) {
-	if state.IsEmpty() {
+	// A missing or unreadable decisions record (state.DecisionsLogPath unset,
+	// or its file gone/unreadable) degrades to no decisions content, not an
+	// error (issue #2695 AC4: "A missing or unreadable decisions record
+	// degrades to an unseeded prompt, not an error"). Read fresh here, before
+	// the IsEmpty() check below: DecisionsLogPath is deliberately excluded
+	// from IsEmpty() (see runstate.go's own doc comment on that field) for
+	// exactly this reason -- a state whose only set field is a
+	// stale/unreadable DecisionsLogPath must not short-circuit into
+	// rendering a "Run-state handoff" header with no bullets in it, the
+	// degenerate stub excluding DispositionsPath from IsEmpty() was already
+	// designed to avoid.
+	var decisionsContent string
+	if state.DecisionsLogPath != "" {
+		if content, err := os.ReadFile(state.DecisionsLogPath); err == nil && len(content) > 0 {
+			decisionsContent = string(content)
+		}
+	}
+	if state.IsEmpty() && decisionsContent == "" {
 		return promptFile, nil
 	}
 
@@ -706,18 +724,22 @@ func seedPromptFromState(promptFile string, state runstate.RunState) (string, er
 	if state.WorkerFindings != "" {
 		fmt.Fprintf(&b, "- Worker dispatch results:\n\n%s\n", state.WorkerFindings)
 	}
-	// A missing or unreadable decisions record (state.DecisionsLogPath unset,
-	// or its file gone/unreadable) degrades to skipping the bullet, not an
-	// error -- matching FindingsLogPath's own graceful-degrade convention
-	// (AC4: "A missing or unreadable decisions record degrades to an
-	// unseeded prompt, not an error"). Content is read fresh here (not
-	// carried inline in state itself) and inlined verbatim, unfenced,
-	// mirroring ReviewFindings/WorkerFindings above rather than
-	// FindingsLogPath's path-reference convention.
-	if state.DecisionsLogPath != "" {
-		if content, err := os.ReadFile(state.DecisionsLogPath); err == nil && len(content) > 0 {
-			fmt.Fprintf(&b, "- Decisions record so far (what prior passes chose, rejected, and why):\n\n%s\n", content)
-		}
+	// decisionsContent was already read fresh above (before the IsEmpty()
+	// check), so a missing or unreadable DecisionsLogPath has already
+	// degraded to "" here -- skipping the bullet, not an error, matching
+	// FindingsLogPath's own graceful-degrade convention. Content is inlined
+	// (not carried by reference the way FindingsLogPath is), mirroring
+	// ReviewFindings/WorkerFindings above, but fenced with fenceBlock --
+	// unlike those two -- since this log is agent-authored, downstream of
+	// untrusted issue/comment text (CLAUDE.md's comment-injection trust
+	// boundary), and grows unboundedly larger across every pass in the run,
+	// unlike ReviewFindings/WorkerFindings which only ever carry one round's
+	// text: a meaningfully higher chance of ever containing this function's
+	// own "\n---\n\n" section-boundary sequence, which fencing the content
+	// keeps contained inside the quoted block rather than readable as new
+	// host-authored prompt structure.
+	if decisionsContent != "" {
+		fmt.Fprintf(&b, "- Decisions record so far (what prior passes chose, rejected, and why):\n\n%s\n", fenceBlock(decisionsContent))
 	}
 	if state.TerminalLand {
 		b.WriteString("\n")
@@ -895,6 +917,8 @@ func seedReviewPromptFromState(promptFile string, state runstate.RunState) (stri
 // fence and impersonate host-authored prompt structure in the very pass
 // that decides APPROVE. Sizing the fence past every run content actually
 // contains makes that escape structurally impossible, not just prose-framed.
+// seedPromptFromState uses it too, for its own decisions-log content, for
+// the identical reason.
 func fenceBlock(content string) string {
 	longest := 0
 	run := 0
@@ -1273,7 +1297,7 @@ const dispositionsTotalTokenCeiling = 400
 // excerpts -- still comfortably fits the same ceiling dispositions entries
 // use. A terse entry like "run.go:42 chose interface X over Y -- Y couldn't
 // satisfy the io.Writer constraint, see commit a1b2c3d" fits comfortably
-// inside it, so the ceiling is left unchanged from dispositions's own value.
+// inside it.
 const decisionsMeanTokenCeiling = 40
 
 // decisionsTotalTokenCeiling bounds one round's total estimated tokens
@@ -1399,11 +1423,14 @@ func appendFreshDispositionsRound(dispositionsPath string, state *runstate.RunSt
 // from a reused state file must never be re-read and re-appended). A
 // non-empty state.DecisionsPath here means recordArtifactPath just took its
 // "fresh" branch (see its own doc comment) -- this pass actually wrote a new
-// decisions file, not a stale one carried forward or a no-op pass. round is
-// incremented only when a fresh round's content is actually appended. Emits
-// a run_state_error op on stdout for a read failure exactly as it does for
-// an append failure -- both are decisions-log hiccups an operator should see
-// on the same channel, not just the ones surfacing after the read itself
+// decisions file, not a stale one carried forward or a no-op pass. *round is
+// incremented as soon as fresh, non-empty content is found -- before the
+// append call, not conditioned on the append actually succeeding -- so an
+// append failure still consumes a round number, mirroring
+// appendFreshDispositionsRound's own established behavior exactly. Emits a
+// run_state_error op on stdout for a read failure exactly as it does for an
+// append failure -- both are decisions-log hiccups an operator should see on
+// the same channel, not just the ones surfacing after the read itself
 // succeeds.
 func appendFreshDecisionsRound(decisionsPath string, state *runstate.RunState, round *int, stdout io.Writer) {
 	if decisionsPath == "" || state.DecisionsPath == "" {

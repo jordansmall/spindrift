@@ -990,6 +990,135 @@ func TestRunClearsDispositionsPathWhenPassDoesNotWriteFile(t *testing.T) {
 	}
 }
 
+// TestRunRecordsDecisionsPathIntoRunState verifies run records
+// cfg.decisionsPath into the run-state artifact after a pass that actually
+// wrote the file there (issue #2695), mirroring
+// TestRunRecordsDispositionsPathIntoRunState. The fake driver-exec writes
+// cfg.decisionsPath itself, since a configured path alone is not evidence
+// the pass wrote anything.
+func TestRunRecordsDecisionsPathIntoRunState(t *testing.T) {
+	dir := t.TempDir()
+	callLog := filepath.Join(dir, "calls.log")
+	decisionsPath := filepath.Join(dir, "decisions.md")
+	writeFakeDriverExec(t, dir, callLog, fmt.Sprintf("printf 'decisions' > %q\nexit 0\n", decisionsPath))
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	promptFile := filepath.Join(dir, "prompt.txt")
+	if err := os.WriteFile(promptFile, []byte("prompt"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config{
+		promptFile:    promptFile,
+		driverBin:     "claude",
+		logPath:       filepath.Join(dir, "stream.log"),
+		heartbeatLog:  filepath.Join(dir, "heartbeat.log"),
+		stateFile:     filepath.Join(dir, "run-state.json"),
+		decisionsPath: decisionsPath,
+	}
+
+	if _, err := run(cfg, &bytes.Buffer{}); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	got, err := runstate.ReadRunState(cfg.stateFile)
+	if err != nil {
+		t.Fatalf("ReadRunState: %v", err)
+	}
+	if got.DecisionsPath != cfg.decisionsPath {
+		t.Errorf("DecisionsPath = %q, want %q", got.DecisionsPath, cfg.decisionsPath)
+	}
+}
+
+// TestRunKeepsPriorDecisionsPathWhenConfigOmitsIt verifies an empty
+// cfg.decisionsPath never clobbers a prior pass's recorded decisions path
+// with an empty string (issue #2695, mirroring
+// TestRunKeepsPriorDispositionsPathWhenConfigOmitsIt) -- only a caller that
+// actually supplies a new path updates the field.
+func TestRunKeepsPriorDecisionsPathWhenConfigOmitsIt(t *testing.T) {
+	dir := t.TempDir()
+	callLog := filepath.Join(dir, "calls.log")
+	writeFakeDriverExec(t, dir, callLog, "exit 0\n")
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	stateFile := filepath.Join(dir, "run-state.json")
+	prior := runstate.RunState{DecisionsPath: "/tmp/decisions.md"}
+	if err := runstate.WriteRunState(stateFile, prior); err != nil {
+		t.Fatal(err)
+	}
+
+	promptFile := filepath.Join(dir, "prompt.txt")
+	if err := os.WriteFile(promptFile, []byte("prompt"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config{
+		promptFile:   promptFile,
+		driverBin:    "claude",
+		logPath:      filepath.Join(dir, "stream.log"),
+		heartbeatLog: filepath.Join(dir, "heartbeat.log"),
+		stateFile:    stateFile,
+		// decisionsPath intentionally left unset.
+	}
+
+	if _, err := run(cfg, &bytes.Buffer{}); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	got, err := runstate.ReadRunState(stateFile)
+	if err != nil {
+		t.Fatalf("ReadRunState: %v", err)
+	}
+	if got.DecisionsPath != "/tmp/decisions.md" {
+		t.Errorf("DecisionsPath = %q, want prior value %q preserved", got.DecisionsPath, "/tmp/decisions.md")
+	}
+}
+
+// TestRunClearsDecisionsPathWhenPassDoesNotWriteFile verifies run clears
+// state.DecisionsPath to "" -- rather than carrying forward whatever a PRIOR
+// pass recorded -- when this pass's cfg.decisionsPath is configured but the
+// pass itself never wrote the file (issue #2695, mirroring
+// TestRunClearsDispositionsPathWhenPassDoesNotWriteFile).
+func TestRunClearsDecisionsPathWhenPassDoesNotWriteFile(t *testing.T) {
+	dir := t.TempDir()
+	callLog := filepath.Join(dir, "calls.log")
+	// The fake driver-exec deliberately never writes cfg.decisionsPath.
+	writeFakeDriverExec(t, dir, callLog, "exit 0\n")
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	stateFile := filepath.Join(dir, "run-state.json")
+	prior := runstate.RunState{DecisionsPath: "/tmp/decisions.md"}
+	if err := runstate.WriteRunState(stateFile, prior); err != nil {
+		t.Fatal(err)
+	}
+
+	promptFile := filepath.Join(dir, "prompt.txt")
+	if err := os.WriteFile(promptFile, []byte("prompt"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config{
+		promptFile:    promptFile,
+		driverBin:     "claude",
+		logPath:       filepath.Join(dir, "stream.log"),
+		heartbeatLog:  filepath.Join(dir, "heartbeat.log"),
+		stateFile:     stateFile,
+		decisionsPath: filepath.Join(dir, "decisions.md"),
+	}
+
+	if _, err := run(cfg, &bytes.Buffer{}); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	got, err := runstate.ReadRunState(stateFile)
+	if err != nil {
+		t.Fatalf("ReadRunState: %v", err)
+	}
+	if got.DecisionsPath != "" {
+		t.Errorf("DecisionsPath = %q, want cleared to \"\" (pass never wrote the file)", got.DecisionsPath)
+	}
+}
+
 // TestRunUnlinksStalePassSummaryPathBeforePass verifies seedAndInvokePass
 // unlinks any pre-existing file at cfg.passSummaryPath before invoking this
 // pass's driver-exec (issue #2549 follow-up review finding), so a stale
@@ -2048,7 +2177,11 @@ func TestRunWithReviewPassSeedsRoundTwoWithDispositions(t *testing.T) {
 // back off disk once run() has returned; this fixture captures it at the
 // fake-driver-exec seam instead, while the run is still live. Decisions
 // originate on the implement pass, not the fix pass, unlike dispositions --
-// hence writing at call 1 rather than call 3.
+// hence writing at call 1 rather than call 3. decisionsContent is
+// interpolated into a single-quoted shell literal via fmt.Sprintf without
+// escaping -- every call site in this file passes content with no literal
+// "'" in it; a caller that needs one must escape it (or route the content
+// through a temp file instead) before passing it here.
 func decisionsFakeDriverBodyRoundOne(callLog, decisionsPath, decisionsContent, fixPromptCopyPath string) string {
 	return fmt.Sprintf(`: > "$DRIVER_LOG_PATH"
 n=$(wc -l < "%s")
@@ -2078,7 +2211,13 @@ exit 0
 // runstate/orchestrator slices) -- so seedPromptFromState (this issue's own
 // slice) must render it into pass 3's own seeded prompt. Modeled on
 // TestRunWithReviewPassSeedsRoundTwoWithDispositions's same 5-invocation
-// implement/review-BLOCK/fix/review-APPROVE/land shape.
+// implement/review-BLOCK/fix/review-APPROVE/land shape. Also covers AC5's
+// own requirement that the ON-DISK run-state artifact -- not just the
+// in-memory seeded prompt -- carries DecisionsPath and DecisionsLogPath once
+// run() returns, read back via runstate.ReadRunState against the actual JSON
+// file, mirroring
+// TestRunWithReviewPassAccumulatesDispositionsAcrossRoundsInDispositionsLog's
+// own on-disk assertion.
 func TestRunWithReviewPassSeedsPassThreeWithDecisionsRecord(t *testing.T) {
 	dir := t.TempDir()
 	callLog := filepath.Join(dir, "calls.log")
@@ -2145,6 +2284,241 @@ func TestRunWithReviewPassSeedsPassThreeWithDecisionsRecord(t *testing.T) {
 	}
 	if !strings.Contains(string(fixSeeded), decisionsContent) {
 		t.Errorf("pass 3 (fix) seeded prompt = %q, want it to carry the implement pass's own decisions content %q", fixSeeded, decisionsContent)
+	}
+
+	// The on-disk run-state artifact itself carries DecisionsLogPath once
+	// run() returns -- read back via runstate.ReadRunState against the
+	// actual JSON file, not just asserted in-memory, mirroring
+	// TestRunWithReviewPassAccumulatesDispositionsAcrossRoundsInDispositionsLog's
+	// own on-disk assertion. DecisionsPath itself is NOT asserted non-empty
+	// here: recordDecisions clears it once a LATER implement/fix/land pass
+	// runs without rewriting the file (recordArtifactPath's own
+	// unchanged-since-preStat rule), and this fixture's land pass (call 5)
+	// never rewrites it -- the identical, already-accepted behavior
+	// DispositionsPath has at the end of every dispositions loop test in
+	// this file, none of which assert it non-empty post-run either.
+	// TestRunWithReviewPassPersistsDecisionsPathWhenTheFinalPassWritesIt
+	// below covers the case where DecisionsPath does stay non-empty on disk.
+	got, err := runstate.ReadRunState(stateFile)
+	if err != nil {
+		t.Fatalf("ReadRunState: %v", err)
+	}
+	if got.DecisionsLogPath == "" {
+		t.Fatal("DecisionsLogPath = \"\", want it set and persisted once an implement/fix pass has written decisions")
+	}
+	logContent, err := os.ReadFile(got.DecisionsLogPath)
+	if err != nil {
+		t.Fatalf("read decisions log: %v", err)
+	}
+	if !strings.Contains(string(logContent), decisionsContent) {
+		t.Errorf("decisions log = %q, want the implement pass's own decisions content %q", logContent, decisionsContent)
+	}
+}
+
+// decisionsFakeDriverBodyRoundOneAndLand is decisionsFakeDriverBodyRoundOne's
+// own script plus one more write: the land pass (call 5, the run's final
+// driver-exec invocation) ALSO writes landDecisionsContent to decisionsPath,
+// so state.DecisionsPath stays non-empty in the run-state artifact once
+// run() returns -- rather than being cleared by recordArtifactPath's own
+// unchanged-since-preStat rule the way it is when nothing rewrites the file
+// after the implement pass (see
+// TestRunWithReviewPassSeedsPassThreeWithDecisionsRecord's own doc comment
+// for why that fixture's final DecisionsPath is empty by design). Used by
+// TestRunWithReviewPassPersistsDecisionsPathWhenTheFinalPassWritesIt (issue
+// #2695 AC5) to pin the on-disk case where DecisionsPath itself, not just
+// DecisionsLogPath, is non-empty.
+func decisionsFakeDriverBodyRoundOneAndLand(callLog, decisionsPath, decisionsContent, landDecisionsContent string) string {
+	return fmt.Sprintf(`: > "$DRIVER_LOG_PATH"
+n=$(wc -l < "%s")
+case "$n" in
+  1) printf '%%s' '%s' > %s ;;
+  2) printf '%%s' '%s' | tee -a "$DRIVER_LOG_PATH" ;;
+  4) printf '%%s' '%s' | tee -a "$DRIVER_LOG_PATH" ;;
+  5) printf '%%s' '%s' > %s; printf '%%s' '%s' | tee -a "$DRIVER_LOG_PATH" ;;
+esac
+exit 0
+`, callLog,
+		decisionsContent, fmt.Sprintf("%q", decisionsPath),
+		streamJSONOutcomeLine("VERDICT: BLOCK\\n\\n## Blocking\\n- run.go:1 -- bug\\n\\n## Non-blocking\\n- none"),
+		streamJSONOutcomeLine("VERDICT: APPROVE\\n\\n## Blocking\\n- none\\n\\n## Non-blocking\\n- none"),
+		landDecisionsContent, fmt.Sprintf("%q", decisionsPath),
+		streamJSONOutcomeLine("SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=done nonce=abc"))
+}
+
+// TestRunWithReviewPassPersistsDecisionsPathWhenTheFinalPassWritesIt verifies
+// runWithReviewPass's on-disk run-state artifact (issue #2695 AC5) carries
+// BOTH DecisionsPath and DecisionsLogPath non-empty once run() returns, read
+// back via runstate.ReadRunState against the actual JSON file on disk -- the
+// case where the run's own final pass (here, the land pass) is the one that
+// leaves a fresh decisions file behind, so recordDecisions's own
+// unchanged-since-preStat clearing rule never fires after it.
+func TestRunWithReviewPassPersistsDecisionsPathWhenTheFinalPassWritesIt(t *testing.T) {
+	dir := t.TempDir()
+	callLog := filepath.Join(dir, "calls.log")
+	decisionsPath := filepath.Join(dir, "decisions.md")
+	const implementDecisions = "- chose approach X over Y: simpler, no new dependency"
+	const landDecisions = "- chose to land despite minor debt: tracked in a follow-up issue"
+	writeFakeDriverExec(t, dir, callLog, decisionsFakeDriverBodyRoundOneAndLand(callLog, decisionsPath, implementDecisions, landDecisions))
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	promptFile := filepath.Join(dir, "prompt.txt")
+	if err := os.WriteFile(promptFile, []byte("ORIGINAL PROMPT TEXT"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	reviewPromptFile := filepath.Join(dir, "review-prompt.txt")
+	if err := os.WriteFile(reviewPromptFile, []byte("REVIEW PROMPT TEXT"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sessionFile := filepath.Join(dir, "session.txt")
+	if err := os.WriteFile(sessionFile, []byte("--session-id fake-id"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stateFile := filepath.Join(dir, "run-state.json")
+
+	cfg := config{
+		promptFile:       promptFile,
+		reviewPromptFile: reviewPromptFile,
+		sessionFile:      sessionFile,
+		driverBin:        "claude",
+		issue:            "7",
+		logPath:          filepath.Join(dir, "stream.log"),
+		heartbeatLog:     filepath.Join(dir, "heartbeat.log"),
+		stateFile:        stateFile,
+		maxReviewRounds:  3,
+		maxSlices:        10,
+		decisionsPath:    decisionsPath,
+	}
+
+	var stdout bytes.Buffer
+	if _, err := run(cfg, &stdout); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	got, err := runstate.ReadRunState(stateFile)
+	if err != nil {
+		t.Fatalf("ReadRunState: %v", err)
+	}
+	if got.DecisionsPath != decisionsPath {
+		t.Errorf("DecisionsPath = %q, want %q", got.DecisionsPath, decisionsPath)
+	}
+	if got.DecisionsLogPath == "" {
+		t.Fatal("DecisionsLogPath = \"\", want it set and persisted")
+	}
+	logContent, err := os.ReadFile(got.DecisionsLogPath)
+	if err != nil {
+		t.Fatalf("read decisions log: %v", err)
+	}
+	if !strings.Contains(string(logContent), implementDecisions) {
+		t.Errorf("decisions log = %q, want the implement pass's own decisions content %q", logContent, implementDecisions)
+	}
+	if !strings.Contains(string(logContent), landDecisions) {
+		t.Errorf("decisions log = %q, want the land pass's own decisions content %q", logContent, landDecisions)
+	}
+}
+
+// twoRoundDecisionsFakeDriverBody is twoRoundDispositionsFakeDriverBody's own
+// 7-invocation implement -> review-BLOCK -> fix -> review-BLOCK -> fix ->
+// review-APPROVE -> land shape (issue #2695 AC7), adapted for decisions: the
+// implement pass at call 1 writes round1Decisions to decisionsPath, and the
+// first fix pass at call 3 writes round2Decisions to the same path -- unlike
+// dispositions, which only ever originates on a fix pass, decisions
+// originates on the implement pass too (decisionsFakeDriverBodyRoundOne's
+// own doc comment), so this fixture's two writes span an implement call and
+// a fix call rather than two fix calls.
+func twoRoundDecisionsFakeDriverBody(callLog, decisionsPath, round1Decisions, round2Decisions string) string {
+	return fmt.Sprintf(`: > "$DRIVER_LOG_PATH"
+n=$(wc -l < "%s")
+case "$n" in
+  1) printf '%%s' '%s' > %s ;;
+  2) printf '%%s' '%s' | tee -a "$DRIVER_LOG_PATH" ;;
+  3) printf '%%s' '%s' > %s ;;
+  4) printf '%%s' '%s' | tee -a "$DRIVER_LOG_PATH" ;;
+  6) printf '%%s' '%s' | tee -a "$DRIVER_LOG_PATH" ;;
+  7) printf '%%s' '%s' | tee -a "$DRIVER_LOG_PATH" ;;
+esac
+exit 0
+`, callLog,
+		round1Decisions, fmt.Sprintf("%q", decisionsPath),
+		streamJSONOutcomeLine("VERDICT: BLOCK\\n\\n## Blocking\\n- run.go:1 -- bug\\n\\n## Non-blocking\\n- none"),
+		round2Decisions, fmt.Sprintf("%q", decisionsPath),
+		streamJSONOutcomeLine("VERDICT: BLOCK\\n\\n## Blocking\\n- run.go:2 -- another bug\\n\\n## Non-blocking\\n- none"),
+		streamJSONOutcomeLine("VERDICT: APPROVE\\n\\n## Blocking\\n- none\\n\\n## Non-blocking\\n- none"),
+		streamJSONOutcomeLine("SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=done nonce=abc"))
+}
+
+// TestRunWithReviewPassAccumulatesDecisionsAcrossRoundsInDecisionsLog
+// verifies runWithReviewPass (issue #2695 AC7) appends every
+// implement/fix pass's own fresh decisions to a per-run, append-only log --
+// state.DecisionsLogPath, persisted into the run-state JSON -- rather than a
+// later round's own fresh file replacing an earlier round's entries, the
+// decisions counterpart of
+// TestRunWithReviewPassAccumulatesDispositionsAcrossRoundsInDispositionsLog.
+// Drives a 7-invocation, 3-review-round sequence
+// (twoRoundDecisionsFakeDriverBody) where the implement pass (call 1) and
+// the first fix pass (call 3) each write a DISTINCT decisions line, and
+// asserts the on-disk log contains BOTH rounds' entries, not just the most
+// recent one.
+func TestRunWithReviewPassAccumulatesDecisionsAcrossRoundsInDecisionsLog(t *testing.T) {
+	dir := t.TempDir()
+	callLog := filepath.Join(dir, "calls.log")
+	decisionsPath := filepath.Join(dir, "decisions.md")
+	const round1Decisions = "- chose approach X over Y: simpler, no new dependency"
+	const round2Decisions = "- chose to keep the retry cap at 3: matches the existing backoff budget"
+	writeFakeDriverExec(t, dir, callLog, twoRoundDecisionsFakeDriverBody(callLog, decisionsPath, round1Decisions, round2Decisions))
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	promptFile := filepath.Join(dir, "prompt.txt")
+	if err := os.WriteFile(promptFile, []byte("ORIGINAL PROMPT TEXT"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	reviewPromptFile := filepath.Join(dir, "review-prompt.txt")
+	if err := os.WriteFile(reviewPromptFile, []byte("REVIEW PROMPT TEXT"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sessionFile := filepath.Join(dir, "session.txt")
+	if err := os.WriteFile(sessionFile, []byte("--session-id fake-id"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stateFile := filepath.Join(dir, "run-state.json")
+
+	cfg := config{
+		promptFile:       promptFile,
+		reviewPromptFile: reviewPromptFile,
+		sessionFile:      sessionFile,
+		driverBin:        "claude",
+		issue:            "7",
+		logPath:          filepath.Join(dir, "stream.log"),
+		heartbeatLog:     filepath.Join(dir, "heartbeat.log"),
+		stateFile:        stateFile,
+		maxReviewRounds:  5,
+		maxSlices:        10,
+		decisionsPath:    decisionsPath,
+	}
+
+	var stdout bytes.Buffer
+	if _, err := run(cfg, &stdout); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	got, err := runstate.ReadRunState(stateFile)
+	if err != nil {
+		t.Fatalf("ReadRunState: %v", err)
+	}
+	if got.DecisionsLogPath == "" {
+		t.Fatal("DecisionsLogPath = \"\", want it set and persisted once an implement/fix pass has written decisions")
+	}
+
+	logContent, err := os.ReadFile(got.DecisionsLogPath)
+	if err != nil {
+		t.Fatalf("read decisions log: %v", err)
+	}
+	round1Idx := strings.Index(string(logContent), "## Round 1")
+	round2Idx := strings.Index(string(logContent), "## Round 2")
+	if round1Idx == -1 || round2Idx == -1 || round1Idx >= round2Idx {
+		t.Fatalf("decisions log = %q, want a \"## Round 1\" section followed by a \"## Round 2\" section", logContent)
+	}
+	if !strings.Contains(string(logContent), round1Decisions) || !strings.Contains(string(logContent), round2Decisions) {
+		t.Errorf("decisions log = %q, want both rounds' own entries present", logContent)
 	}
 }
 
@@ -2498,6 +2872,128 @@ func TestRunWithReviewPassEmitsRunStateErrorWhenDispositionsTokenBudgetExceeded(
 
 	if !strings.Contains(stdout.String(), `"spindrift_op":{"op":"run_state_error","phase":"dispositions_budget"`) {
 		t.Errorf("stdout = %q, want a run_state_error op with phase dispositions_budget", stdout.String())
+	}
+}
+
+// TestRunWithReviewPassEmitsRunStateErrorWhenDecisionsLogAppendFails verifies
+// runWithReviewPass (issue #2695) surfaces a decisions-log append failure as
+// a "run_state_error" spindrift op on stdout (phase decisions_log), the same
+// way it already does for a dispositions-log append failure
+// (TestRunWithReviewPassEmitsRunStateErrorWhenDispositionsLogAppendFails).
+// Pre-seeding state.DecisionsLogPath as a directory makes appendDecisionsRound's
+// own os.OpenFile fail. Reuses reviewPassFakeDriverBodyWithDispositions
+// verbatim -- its fixture is content-agnostic about which run-state field
+// the path it writes at call 3 (the fix pass) belongs to, so pointing its
+// dispositionsPath parameter at cfg.decisionsPath instead exercises the
+// identical write-at-the-fix-pass-call shape without a near-duplicate
+// fixture.
+func TestRunWithReviewPassEmitsRunStateErrorWhenDecisionsLogAppendFails(t *testing.T) {
+	dir := t.TempDir()
+	callLog := filepath.Join(dir, "calls.log")
+	decisionsPath := filepath.Join(dir, "decisions.md")
+	writeFakeDriverExec(t, dir, callLog, reviewPassFakeDriverBodyWithDispositions(callLog, decisionsPath, "chose approach X over Y: simpler, no new dependency"))
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	promptFile := filepath.Join(dir, "prompt.txt")
+	if err := os.WriteFile(promptFile, []byte("ORIGINAL PROMPT TEXT"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	reviewPromptFile := filepath.Join(dir, "review-prompt.txt")
+	if err := os.WriteFile(reviewPromptFile, []byte("REVIEW PROMPT TEXT"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sessionFile := filepath.Join(dir, "session.txt")
+	if err := os.WriteFile(sessionFile, []byte("--session-id fake-id"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stateFile := filepath.Join(dir, "run-state.json")
+	unwritablePath := filepath.Join(dir, "decisions-log-dir")
+	if err := os.Mkdir(unwritablePath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := runstate.WriteRunState(stateFile, runstate.RunState{DecisionsLogPath: unwritablePath}); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config{
+		promptFile:       promptFile,
+		reviewPromptFile: reviewPromptFile,
+		sessionFile:      sessionFile,
+		driverBin:        "claude",
+		issue:            "7",
+		logPath:          filepath.Join(dir, "stream.log"),
+		heartbeatLog:     filepath.Join(dir, "heartbeat.log"),
+		stateFile:        stateFile,
+		maxReviewRounds:  3,
+		maxSlices:        10,
+		decisionsPath:    decisionsPath,
+	}
+
+	var stdout bytes.Buffer
+	if _, err := run(cfg, &stdout); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	if !strings.Contains(stdout.String(), `"spindrift_op":{"op":"run_state_error","phase":"decisions_log"`) {
+		t.Errorf("stdout = %q, want a run_state_error op with phase decisions_log", stdout.String())
+	}
+}
+
+// TestRunWithReviewPassEmitsRunStateErrorWhenDecisionsTokenBudgetExceeded
+// verifies runWithReviewPass (issue #2695) surfaces a "run_state_error"
+// spindrift op (phase decisions_budget) on stdout when a fix pass's own
+// fresh decisions content's mean tokens-per-entry exceeds
+// decisionsMeanTokenCeiling -- the runtime tripwire wired around
+// checkDecisionsTokenBudget, not just the pure function
+// TestCheckDecisionsTokenBudget already covers in isolation. Mirrors
+// TestRunWithReviewPassEmitsRunStateErrorWhenDispositionsTokenBudgetExceeded,
+// reusing reviewPassFakeDriverBodyWithDispositions the same way the
+// decisions_log test above does (see its own doc comment for why that
+// fixture fits decisions content too, unmodified).
+func TestRunWithReviewPassEmitsRunStateErrorWhenDecisionsTokenBudgetExceeded(t *testing.T) {
+	dir := t.TempDir()
+	callLog := filepath.Join(dir, "calls.log")
+	decisionsPath := filepath.Join(dir, "decisions.md")
+	oversized := "chose approach X over Y: rewriting the function as follows: " +
+		strings.Repeat("func example() { doSomething(); doSomethingElse(); } ", 20)
+	writeFakeDriverExec(t, dir, callLog, reviewPassFakeDriverBodyWithDispositions(callLog, decisionsPath, oversized))
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	promptFile := filepath.Join(dir, "prompt.txt")
+	if err := os.WriteFile(promptFile, []byte("ORIGINAL PROMPT TEXT"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	reviewPromptFile := filepath.Join(dir, "review-prompt.txt")
+	if err := os.WriteFile(reviewPromptFile, []byte("REVIEW PROMPT TEXT"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sessionFile := filepath.Join(dir, "session.txt")
+	if err := os.WriteFile(sessionFile, []byte("--session-id fake-id"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stateFile := filepath.Join(dir, "run-state.json")
+
+	cfg := config{
+		promptFile:       promptFile,
+		reviewPromptFile: reviewPromptFile,
+		sessionFile:      sessionFile,
+		driverBin:        "claude",
+		issue:            "7",
+		logPath:          filepath.Join(dir, "stream.log"),
+		heartbeatLog:     filepath.Join(dir, "heartbeat.log"),
+		stateFile:        stateFile,
+		maxReviewRounds:  3,
+		maxSlices:        10,
+		decisionsPath:    decisionsPath,
+	}
+
+	var stdout bytes.Buffer
+	if _, err := run(cfg, &stdout); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	if !strings.Contains(stdout.String(), `"spindrift_op":{"op":"run_state_error","phase":"decisions_budget"`) {
+		t.Errorf("stdout = %q, want a run_state_error op with phase decisions_budget", stdout.String())
 	}
 }
 
@@ -4902,6 +5398,46 @@ func TestSeedPromptFromStateDecisionsRecordMissingFileDegradesGracefully(t *test
 	}
 }
 
+// TestSeedPromptFromStateDegradesToUnseededWhenDecisionsLogPathIsOnlyFieldAndFileMissing
+// verifies seedPromptFromState (issue #2695 AC4, review finding) returns
+// promptFile completely unchanged -- byte-for-byte, no temp file created --
+// when state.DecisionsLogPath is the ONLY field set and its file is missing,
+// rather than rendering a "## Run-state handoff" header with zero bullets in
+// it. Unlike TestSeedPromptFromStateDecisionsRecordMissingFileDegradesGracefully
+// above (which also sets LastVerdict, so IsEmpty() is already false and the
+// header legitimately has other content to show), this pins the exact
+// degenerate case IsEmpty() including DecisionsLogPath used to produce: a
+// state whose only content is a decisions record pointing at a
+// missing/unreadable file must degrade all the way to "nothing to seed", not
+// stop at "nothing in the bullet but still render the header".
+func TestSeedPromptFromStateDegradesToUnseededWhenDecisionsLogPathIsOnlyFieldAndFileMissing(t *testing.T) {
+	dir := t.TempDir()
+	promptFile := filepath.Join(dir, "prompt.txt")
+	const original = "ORIGINAL PROMPT TEXT"
+	if err := os.WriteFile(promptFile, []byte(original), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	state := runstate.RunState{
+		DecisionsLogPath: filepath.Join(dir, "does-not-exist.md"),
+	}
+
+	seeded, err := seedPromptFromState(promptFile, state)
+	if err != nil {
+		t.Fatalf("seedPromptFromState: %v", err)
+	}
+	if seeded != promptFile {
+		t.Fatalf("seedPromptFromState returned %q, want promptFile %q unchanged (no fresh file created)", seeded, promptFile)
+	}
+	got, err := os.ReadFile(seeded)
+	if err != nil {
+		t.Fatalf("read seeded prompt: %v", err)
+	}
+	if string(got) != original {
+		t.Errorf("seeded prompt content = %q, want the original %q byte-for-byte unchanged", got, original)
+	}
+}
+
 // TestSeedPromptFromStateTerminalLandOverridesStopAfterCommit verifies
 // seedPromptFromState (issue #2457) renders an explicit terminal-land
 // directive when state.TerminalLand is set -- even with every other field at
@@ -5618,6 +6154,39 @@ func TestAppendDispositionsRoundErrorsWhenCreateTempFails(t *testing.T) {
 	}
 	if state.DispositionsLogPath != "" {
 		t.Errorf("DispositionsLogPath = %q after a create failure, want it left empty", state.DispositionsLogPath)
+	}
+}
+
+// TestAppendDecisionsRoundErrorsOnUnwritablePath verifies appendDecisionsRound
+// surfaces an error (rather than silently dropping the round) when
+// state.DecisionsLogPath is already set to a path os.OpenFile cannot write --
+// here, a directory rather than a file -- mirroring
+// TestAppendDispositionsRoundErrorsOnUnwritablePath (issue #2695).
+func TestAppendDecisionsRoundErrorsOnUnwritablePath(t *testing.T) {
+	state := runstate.RunState{DecisionsLogPath: t.TempDir()}
+
+	err := appendDecisionsRound(&state, 1, "chose approach X over Y: simpler, no new dependency")
+	if err == nil {
+		t.Fatal("appendDecisionsRound with a directory as DecisionsLogPath: got nil error, want one")
+	}
+}
+
+// TestAppendDecisionsRoundErrorsWhenCreateTempFails verifies
+// appendDecisionsRound surfaces an error when it cannot create the log file
+// on first use -- state.DecisionsLogPath is still empty, so it falls to
+// os.CreateTemp, and TMPDIR here points at a path that does not exist --
+// mirroring TestAppendDispositionsRoundErrorsWhenCreateTempFails (issue
+// #2695).
+func TestAppendDecisionsRoundErrorsWhenCreateTempFails(t *testing.T) {
+	t.Setenv("TMPDIR", filepath.Join(t.TempDir(), "does-not-exist"))
+	var state runstate.RunState
+
+	err := appendDecisionsRound(&state, 1, "chose approach X over Y: simpler, no new dependency")
+	if err == nil {
+		t.Fatal("appendDecisionsRound with an uncreatable temp dir: got nil error, want one")
+	}
+	if state.DecisionsLogPath != "" {
+		t.Errorf("DecisionsLogPath = %q after a create failure, want it left empty", state.DecisionsLogPath)
 	}
 }
 
