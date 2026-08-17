@@ -22,8 +22,8 @@ Run headless [Claude Code](https://claude.com/claude-code) agents in
 ## Prerequisites
 
 - **nix** with flakes enabled.
-- **podman** (or set `runtime = "docker"`; `runtime = "rancher"` for Rancher
-  Desktop in containerd mode, driven via `nerdctl`; or `runtime = "bwrap"` for
+- **podman** (or set `infra.runtime = "docker"`; `infra.runtime = "rancher"` for Rancher
+  Desktop in containerd mode, driven via `nerdctl`; or `infra.runtime = "bwrap"` for
   the daemonless bubblewrap sandbox on Linux, which needs no container runtime).
   On macOS/Windows, podman runs containers inside a VM with its own fixed RAM —
   size it to at least `MEMORY_LIMIT` × `MAX_PARALLEL` plus VM overhead. See
