@@ -57,6 +57,39 @@ func AmbiguousLabelNames() []string {
 	return []string{"agent-ambiguous-spec"}
 }
 
+// RuntimeCheckName is RuntimeCheck's Name field, exported so a caller
+// filtering the row out of a larger slice (checks.go's doctorExtraChecks)
+// matches on this constant instead of the bare string literal "runtime" —
+// a future rename here would otherwise silently reintroduce
+// double-reporting of the runtime row.
+const RuntimeCheckName = "runtime"
+
+// RuntimeCheck builds the Required-tier "runtime" Check row (Probe:
+// runner.ValidateRuntime(runtime), Remedy naming the four valid runtime
+// values). It backs launcherRequiredKnobChecks (cmd/launcher/checks.go),
+// the Required-tier row that feeds validate()'s fatal fail-fast startup
+// gate (main.go) — not the informational/advisory runtime line doctor and
+// Quickstart print for a human operator, which is a separate code path
+// (Config.Runtime below plus Run's own hand-rolled advisory block). The two
+// are deliberately kept apart so they never both report for one invocation
+// (issue #2559 AC2): doctorExtraChecks strips this row out of
+// launcherChecks(c) before handing it to Run as extraChecks, and
+// Quickstart's own doctor.Run call passes nil for extraChecks and relies on
+// Config.Runtime instead.
+func RuntimeCheck(runtime string) Check {
+	return Check{
+		Name:   RuntimeCheckName,
+		Tier:   Required,
+		Remedy: "set RUNTIME to podman, docker, rancher, or bwrap, and ensure the matching CLI is on PATH",
+		Probe: func() error {
+			return runner.ValidateRuntime(runtime)
+		},
+		SuccessMsg: func() string {
+			return fmt.Sprintf("runtime %q found on PATH", runtime)
+		},
+	}
+}
+
 // Config is the minimal slice of launcher config Run needs: the Issue
 // Tracker kind, the caller-resolved auth/repo hint strings for that tracker
 // (TokenHint/SlugHint — internal/doctor can't see package main's backend
@@ -77,13 +110,12 @@ type Config struct {
 	FailedLabel     string
 	CompleteLabel   string
 
-	// Runtime is the operator's configured container runtime (podman |
-	// docker | rancher | bwrap). Checked via runner.ValidateRuntime and
-	// reported as an advisory row — never fatal — since Quickstart's own
-	// prompt-time confirmation already lets an operator deliberately
-	// scaffold with an uninstalled runtime ("scaffold now, install later"),
-	// and doctor must not turn that already-accepted state into a hard
-	// failure.
+	// Runtime is the operator's configured container runtime (podman|docker|
+	// rancher|bwrap). Checked via runner.ValidateRuntime and reported as an
+	// advisory row — never fatal — since Quickstart's own prompt-time
+	// confirmation already lets an operator deliberately scaffold with an
+	// uninstalled runtime, and doctor must not turn that already-accepted
+	// state into a hard failure.
 	Runtime string
 }
 

@@ -25,7 +25,7 @@ func runDoctor(it forge.IssueTracker, cf forge.CodeForge, c config, w io.Writer,
 		FailedLabel:     c.failedLabel,
 		CompleteLabel:   c.completeLabel,
 		Runtime:         c.runtime,
-	}, w, bufio.NewScanner(stdin), interactive, nil); err != nil {
+	}, w, bufio.NewScanner(stdin), interactive, doctorExtraChecks(c)); err != nil {
 		return err
 	}
 	return reportReadOnlyTokenGate(c, w)
