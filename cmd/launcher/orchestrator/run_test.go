@@ -1711,6 +1711,64 @@ func TestRunWithReviewPassSequenceOnBlockThenApprove(t *testing.T) {
 	}
 }
 
+// TestRunWithReviewPassRecordsReviewedCommitAnchor verifies runWithReviewPass
+// (issue #2551 slice 2) records the orchestrator's own repo workdir HEAD into
+// state.ReviewedCommitAnchor after every completed review pass, including
+// round 1 -- not just on a terminal BLOCK/APPROVE. The fake driver-exec here
+// never touches the real repo, so the anchor recorded must be the real
+// spindrift repo's own actual HEAD SHA at the time the test runs (computed
+// independently via `git rev-parse HEAD` in this test's own -- unchanged --
+// working directory, the same way dispatch_test.go's gitOutputT helper reads
+// HEAD elsewhere in this package).
+func TestRunWithReviewPassRecordsReviewedCommitAnchor(t *testing.T) {
+	wantHead := gitOutputT(t, ".", "rev-parse", "HEAD")
+
+	dir := t.TempDir()
+	callLog := filepath.Join(dir, "calls.log")
+	writeFakeDriverExec(t, dir, callLog, reviewPassFakeDriverBody(callLog))
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	promptFile := filepath.Join(dir, "prompt.txt")
+	if err := os.WriteFile(promptFile, []byte("ORIGINAL PROMPT TEXT"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	reviewPromptFile := filepath.Join(dir, "review-prompt.txt")
+	if err := os.WriteFile(reviewPromptFile, []byte("REVIEW PROMPT TEXT"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sessionFile := filepath.Join(dir, "session.txt")
+	if err := os.WriteFile(sessionFile, []byte("--session-id fake-id"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stateFile := filepath.Join(dir, "run-state.json")
+
+	cfg := config{
+		promptFile:       promptFile,
+		reviewPromptFile: reviewPromptFile,
+		sessionFile:      sessionFile,
+		driverBin:        "claude",
+		issue:            "7",
+		logPath:          filepath.Join(dir, "stream.log"),
+		heartbeatLog:     filepath.Join(dir, "heartbeat.log"),
+		stateFile:        stateFile,
+		maxReviewRounds:  3,
+		maxSlices:        10,
+	}
+
+	var stdout bytes.Buffer
+	if _, err := run(cfg, &stdout); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	got, err := runstate.ReadRunState(stateFile)
+	if err != nil {
+		t.Fatalf("ReadRunState: %v", err)
+	}
+	if got.ReviewedCommitAnchor != wantHead {
+		t.Errorf("ReviewedCommitAnchor = %q, want the repo workdir's actual HEAD %q", got.ReviewedCommitAnchor, wantHead)
+	}
+}
+
 // TestRunWithReviewPassRoundOneNeverSeededEvenWithPriorState verifies the
 // reviewRounds > 0 guard itself (issue #2550 review finding) is what keeps
 // round 1's review prompt unseeded -- not merely seedReviewPromptFromState's

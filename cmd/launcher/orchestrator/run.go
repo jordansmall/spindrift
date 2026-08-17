@@ -350,6 +350,28 @@ func run(cfg config, stdout io.Writer) (int, error) {
 	return rc, nil
 }
 
+// recordReviewedCommitAnchor records the orchestrator's repo workdir HEAD
+// into state.ReviewedCommitAnchor (issue #2551) via one `git rev-parse
+// HEAD` invocation, right after a review pass completes. Best-effort like
+// dispatch.go's own rev-parse HEAD call: an os.Getwd or git failure logs to
+// stderr and leaves state.ReviewedCommitAnchor at whatever a prior review
+// pass already recorded (or empty, on the first pass), never errors the
+// run -- a later pass's seeding degrades to a full review on a missing or
+// stale anchor, so a failed recording here is never fatal.
+func recordReviewedCommitAnchor(state *runstate.RunState) {
+	repoRoot, err := os.Getwd()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "orchestrator: rev-parse HEAD for reviewed-commit anchor:", err)
+		return
+	}
+	headOut, err := runGitIn(repoRoot, "rev-parse", "HEAD")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "orchestrator: rev-parse HEAD for reviewed-commit anchor:", err, strings.TrimSpace(headOut))
+		return
+	}
+	state.ReviewedCommitAnchor = strings.TrimSpace(headOut)
+}
+
 // runWithReviewPass implements the #2037 code-owned review pass: instead of
 // one pass looping on its own inline "spawn a reviewer subagent, repeat until
 // no blocking findings" prose, the orchestrator alternates two structurally
@@ -553,6 +575,7 @@ func runWithReviewPass(cfg config, stdout io.Writer) (int, error) {
 		if err != nil {
 			return 0, err
 		}
+		recordReviewedCommitAnchor(&state)
 
 		reviewVerdict, findings := scanReviewLog(cfg.logPath, cfg.driver)
 		// The review pass spends tokens/dollars too -- fold its own
