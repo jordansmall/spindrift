@@ -1769,6 +1769,94 @@ func TestRunWithReviewPassRecordsReviewedCommitAnchor(t *testing.T) {
 	}
 }
 
+// TestRunWithReviewPassSeedsRoundTwoWithDeltaFocusFromRecordedAnchor verifies
+// issue #2551's anchor-recording (slice 2, recordReviewedCommitAnchor) and
+// delta-focus seeding (slice 3, seedReviewPromptFromState) actually connect
+// end to end through a real multi-round loop at the fake-driver-exec seam
+// (AC5), not merely in isolation the way
+// TestRunWithReviewPassRecordsReviewedCommitAnchor and the
+// TestSeedReviewPromptFromStateIncludesDeltaFocus* unit tests each already
+// do on their own. Round 1's review pass (call 2) records this repo's own
+// real HEAD SHA into state.ReviewedCommitAnchor; round 2's review pass
+// (call 4) must then read that same anchor back out of run-state and seed
+// its own --prompt-file with a "### Delta focus" section naming it. The
+// fake driver-exec here never touches the real repo, so -- exactly as in
+// TestRunWithReviewPassRecordsReviewedCommitAnchor -- the anchor recorded
+// (and later seeded) must be the real spindrift repo's own actual HEAD SHA
+// at the time the test runs, computed independently via gitOutputT.
+func TestRunWithReviewPassSeedsRoundTwoWithDeltaFocusFromRecordedAnchor(t *testing.T) {
+	wantHead := gitOutputT(t, ".", "rev-parse", "HEAD")
+
+	dir := t.TempDir()
+	callLog := filepath.Join(dir, "calls.log")
+	writeFakeDriverExec(t, dir, callLog, reviewPassFakeDriverBody(callLog))
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	promptFile := filepath.Join(dir, "prompt.txt")
+	if err := os.WriteFile(promptFile, []byte("ORIGINAL PROMPT TEXT"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	reviewPromptFile := filepath.Join(dir, "review-prompt.txt")
+	if err := os.WriteFile(reviewPromptFile, []byte("REVIEW PROMPT TEXT"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sessionFile := filepath.Join(dir, "session.txt")
+	if err := os.WriteFile(sessionFile, []byte("--session-id fake-id"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stateFile := filepath.Join(dir, "run-state.json")
+
+	cfg := config{
+		promptFile:       promptFile,
+		reviewPromptFile: reviewPromptFile,
+		sessionFile:      sessionFile,
+		driverBin:        "claude",
+		issue:            "7",
+		logPath:          filepath.Join(dir, "stream.log"),
+		heartbeatLog:     filepath.Join(dir, "heartbeat.log"),
+		stateFile:        stateFile,
+		maxReviewRounds:  3,
+		maxSlices:        10,
+	}
+
+	var stdout bytes.Buffer
+	if _, err := run(cfg, &stdout); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	got, err := runstate.ReadRunState(stateFile)
+	if err != nil {
+		t.Fatalf("ReadRunState: %v", err)
+	}
+	if got.ReviewedCommitAnchor != wantHead {
+		t.Fatalf("ReviewedCommitAnchor = %q, want the repo workdir's actual HEAD %q", got.ReviewedCommitAnchor, wantHead)
+	}
+
+	calls, err := os.ReadFile(callLog)
+	if err != nil {
+		t.Fatalf("read callLog: %v", err)
+	}
+	lines := strings.Split(strings.TrimRight(string(calls), "\n"), "\n")
+	if len(lines) != 5 {
+		t.Fatalf("driver-exec invocation count = %d, want 5 (log: %q)", len(lines), calls)
+	}
+
+	round2ReviewPromptFile := flagValue(lines[3], "--prompt-file")
+	if round2ReviewPromptFile == "" || round2ReviewPromptFile == promptFile || round2ReviewPromptFile == reviewPromptFile {
+		t.Fatalf("pass 4 (round-2 review) --prompt-file = %q, want a fresh seeded file", round2ReviewPromptFile)
+	}
+	round2ReviewSeeded, err := os.ReadFile(round2ReviewPromptFile)
+	if err != nil {
+		t.Fatalf("read seeded round-2 review prompt: %v", err)
+	}
+	if !strings.Contains(string(round2ReviewSeeded), "### Delta focus") {
+		t.Errorf("pass 4 (round-2 review) seeded prompt = %q, want it to contain a %q section", round2ReviewSeeded, "### Delta focus")
+	}
+	if !strings.Contains(string(round2ReviewSeeded), wantHead) {
+		t.Errorf("pass 4 (round-2 review) seeded prompt = %q, want it to reference round 1's own recorded anchor %q", round2ReviewSeeded, wantHead)
+	}
+}
+
 // TestRunWithReviewPassRoundOneNeverSeededEvenWithPriorState verifies the
 // reviewRounds > 0 guard itself (issue #2550 review finding) is what keeps
 // round 1's review prompt unseeded -- not merely seedReviewPromptFromState's
