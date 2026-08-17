@@ -173,6 +173,13 @@ var defaultDispatchLabels = forge.DispatchLabels{
 // can't drift out of sync between the call site and its assertions.
 var spindriftBuildArgs = []string{"nix", "develop", "--command", "spindrift", "build"}
 
+// spindriftDoctorArgs is the rerun command named in a post-write doctor
+// failure message — shared with tests so the command can't drift out of sync
+// between the call site and its assertions. Runnable via `nix develop`, unlike
+// a bare `spindrift doctor`, since the `spindrift` binary doesn't exist yet at
+// Quickstart's pre-CLI stage (see the ForgeBuilder doc comment below).
+var spindriftDoctorArgs = []string{"nix", "develop", "--command", "spindrift", "doctor"}
+
 // ForgeBuilder constructs the real IssueTracker/CodeForge from the wizard's
 // collected repoSlug, Issue Tracker settings, and the single backend token
 // the wizard collected (whichever one is relevant to the chosen backend —
@@ -474,11 +481,14 @@ func runQuickstart(dir string, env Environment, runner CommandRunner, forgeBuild
 		claudeOAuthToken: claudeOAuthToken,
 		anthropicAPIKey:  anthropicAPIKey,
 	}
-	for _, f := range render(a) {
+	scaffoldFiles := render(a)
+	written := make([]string, 0, len(scaffoldFiles))
+	for _, f := range scaffoldFiles {
 		if err := os.WriteFile(filepath.Join(dir, f.path), []byte(f.content), f.mode); err != nil {
 			return fmt.Errorf("write %s: %w", f.path, err)
 		}
 		fmt.Fprintf(w, "wrote: %s\n", f.path)
+		written = append(written, f.path)
 	}
 
 	// The gh CLI (used by the github Code Forge, and by the github Issue
@@ -503,22 +513,39 @@ func runQuickstart(dir string, env Environment, runner CommandRunner, forgeBuild
 		FailedLabel:     defaultDispatchLabels.Failed,
 		CompleteLabel:   defaultDispatchLabels.Complete,
 	}, w, scanner, interactive); err != nil {
-		return err
+		return postWriteFailure(written, "doctor check", err, spindriftDoctorArgs, spindriftBuildArgs)
 	}
 
 	fmt.Fprintln(w, "==> the first image build can take a while — building now")
 	if err := runner.Run(spindriftBuildArgs[0], spindriftBuildArgs[1:]...); err != nil {
-		return fmt.Errorf("spindrift build: %w", err)
+		return postWriteFailure(written, "spindrift build", err, spindriftBuildArgs)
 	}
 
 	fmt.Fprintln(w, "\nQuickstart complete. Wrote:")
-	fmt.Fprintln(w, "  flake.nix")
-	fmt.Fprintln(w, "  harness.env")
-	fmt.Fprintln(w, "  .gitignore")
-	fmt.Fprintln(w, "  .envrc")
+	for _, f := range written {
+		fmt.Fprintf(w, "  %s\n", f)
+	}
 	fmt.Fprintln(w, "\nNext: run `spindrift dispatch`.")
 
 	return nil
+}
+
+// postWriteFailure wraps a failure that happened after the scaffold files
+// were already written to disk (the doctor validation or the finish-line
+// build), naming those files and pointing the operator at rerunning the
+// failed step — and any steps still ahead of it — directly, in order, so
+// following the message to the letter still reaches the finish line (a built
+// first image, ADR 0027). The written files aren't necessarily at fault (a
+// doctor failure is often a bad token/slug already baked into harness.env,
+// which needs a hand edit, not a rewrite) — but either way there's no need
+// to regenerate them by rerunning the whole wizard with --force.
+func postWriteFailure(written []string, step string, err error, rerun ...[]string) error {
+	steps := make([]string, len(rerun))
+	for i, r := range rerun {
+		steps[i] = strings.Join(r, " ")
+	}
+	return fmt.Errorf("%s failed: %w\n\nalready written, no need to regenerate:\n  %s\n\nrerun `%s` directly to retry",
+		step, err, strings.Join(written, "\n  "), strings.Join(steps, "`, then `"))
 }
 
 // acquireGHToken reuses an ambient GH_TOKEN without prompting; otherwise it

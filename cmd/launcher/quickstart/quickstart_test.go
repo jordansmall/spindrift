@@ -458,11 +458,12 @@ func (f fakeEnvironment) LookupEnv(key string) (string, bool) {
 
 type fakeCommandRunner struct {
 	calls [][]string
+	err   error
 }
 
 func (f *fakeCommandRunner) Run(name string, args ...string) error {
 	f.calls = append(f.calls, append([]string{name}, args...))
-	return nil
+	return f.err
 }
 
 func TestRunQuickstart_NonTTY_ExitsWithError(t *testing.T) {
@@ -1378,6 +1379,84 @@ func TestRunQuickstart_FinishLine_ProbesForgeThenCreatesLabelsThenBuilds(t *test
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("expected closing summary to list %q, got:\n%s", want, out.String())
 		}
+	}
+}
+
+func TestRunQuickstart_DoctorFails_MentionsWrittenFilesAndDirectRerun(t *testing.T) {
+	dir := t.TempDir()
+	var out bytes.Buffer
+	stdin := strings.NewReader(strings.Join([]string{
+		"jordansmall/spindrift", // repoSlug
+		"podman",                // runtime
+		"Ada Lovelace",          // git user name
+		"ada@example.com",       // git user email
+		"ghp_faketoken",         // GH_TOKEN
+	}, "\n") + "\n")
+	env := fakeEnvironment{env: map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "claude-oauth-faketoken"}, runtimes: map[string]bool{"podman": true}}
+
+	f := passingForge()
+	f.ProbeErr = errors.New("boom")
+
+	err := runQuickstart(dir, env, &fakeCommandRunner{}, fakeForgeBuilder(f), &out, stdin, true, false)
+	if err == nil {
+		t.Fatal("expected an error when doctor's forge probe fails")
+	}
+	for _, want := range []string{"flake.nix", "harness.env", ".gitignore", ".envrc"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("expected error to mention written file %q, got: %q", want, err.Error())
+		}
+	}
+	if !strings.Contains(err.Error(), strings.Join(spindriftDoctorArgs, " ")) {
+		t.Errorf("expected error to point at rerunning %q directly, got: %q", strings.Join(spindriftDoctorArgs, " "), err.Error())
+	}
+	if !strings.Contains(err.Error(), strings.Join(spindriftBuildArgs, " ")) {
+		t.Errorf("expected error to also mention the follow-up build command %q, got: %q", strings.Join(spindriftBuildArgs, " "), err.Error())
+	}
+	doctorIdx := strings.Index(err.Error(), strings.Join(spindriftDoctorArgs, " "))
+	buildIdx := strings.Index(err.Error(), strings.Join(spindriftBuildArgs, " "))
+	if doctorIdx == -1 || buildIdx == -1 || doctorIdx > buildIdx {
+		t.Errorf("expected the doctor rerun command before the build rerun command, got: %q", err.Error())
+	}
+	if strings.Contains(err.Error(), "--force") {
+		t.Errorf("expected error not to suggest --force, got: %q", err.Error())
+	}
+
+	if _, statErr := os.Stat(filepath.Join(dir, "flake.nix")); statErr != nil {
+		t.Errorf("expected flake.nix to remain written on disk after the doctor failure, stat error: %v", statErr)
+	}
+}
+
+func TestRunQuickstart_BuildFails_MentionsWrittenFilesAndDirectRerun(t *testing.T) {
+	dir := t.TempDir()
+	var out bytes.Buffer
+	stdin := strings.NewReader(strings.Join([]string{
+		"jordansmall/spindrift", // repoSlug
+		"podman",                // runtime
+		"Ada Lovelace",          // git user name
+		"ada@example.com",       // git user email
+		"ghp_faketoken",         // GH_TOKEN
+	}, "\n") + "\n")
+	env := fakeEnvironment{env: map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "claude-oauth-faketoken"}, runtimes: map[string]bool{"podman": true}}
+	runner := &fakeCommandRunner{err: errors.New("build boom")}
+
+	err := runQuickstart(dir, env, runner, fakeForgeBuilder(passingForge()), &out, stdin, true, false)
+	if err == nil {
+		t.Fatal("expected an error when the build subprocess fails")
+	}
+	for _, want := range []string{"flake.nix", "harness.env", ".gitignore", ".envrc"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("expected error to mention written file %q, got: %q", want, err.Error())
+		}
+	}
+	if !strings.Contains(err.Error(), strings.Join(spindriftBuildArgs, " ")) {
+		t.Errorf("expected error to point at rerunning %q directly, got: %q", strings.Join(spindriftBuildArgs, " "), err.Error())
+	}
+	if strings.Contains(err.Error(), "--force") {
+		t.Errorf("expected error not to suggest --force, got: %q", err.Error())
+	}
+
+	if _, statErr := os.Stat(filepath.Join(dir, "flake.nix")); statErr != nil {
+		t.Errorf("expected flake.nix to remain written on disk after the build failure, stat error: %v", statErr)
 	}
 }
 
