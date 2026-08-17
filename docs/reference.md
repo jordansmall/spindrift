@@ -1363,15 +1363,16 @@ artifact, not a growing transcript:
   default `/tmp/brief.md`), the most recent pass's own pass-summary path
   (`--pass-summary-path`, default `/tmp/pass-summary.md`), the most recent
   fix pass's own dispositions path (`--dispositions-path`, default
-  `/tmp/dispositions.md`, issue #2550), and the reviewed-commit anchor
-  (`ReviewedCommitAnchor`, issue #2551) — the repo workdir's own `HEAD`
-  commit SHA, recorded via one `git rev-parse HEAD` invocation right after
-  each review pass completes. That recording is best-effort: an `os.Getwd`
-  or `git` failure, or `git` output that doesn't look like a real commit
-  SHA once trimmed, just logs to stderr and leaves the anchor at whatever a
-  prior review pass already recorded (or empty, on the first pass), never
-  errors the run. It also carries dispatch-internal bookkeeping unrelated to
-  any seeded prompt: the done/remaining slice lists
+  `/tmp/dispositions.md`, issue #2550), the append-only decisions log path
+  (`--decisions-path`, default `/tmp/decisions.md`, issue #2695), and the
+  reviewed-commit anchor (`ReviewedCommitAnchor`, issue #2551) — the repo
+  workdir's own `HEAD` commit SHA, recorded via one `git rev-parse HEAD`
+  invocation right after each review pass completes. That recording is
+  best-effort: an `os.Getwd` or `git` failure, or `git` output that doesn't
+  look like a real commit SHA once trimmed, just logs to stderr and leaves
+  the anchor at whatever a prior review pass already recorded (or empty, on
+  the first pass), never errors the run. It also carries dispatch-internal
+  bookkeeping unrelated to any seeded prompt: the done/remaining slice lists
   (`DoneSlices`/`RemainingSlices`) issue #2059's parallel worker dedup
   mechanism reads and writes to avoid re-dispatching an already-completed
   slice. Each pass reads it before running and writes it back after, through
