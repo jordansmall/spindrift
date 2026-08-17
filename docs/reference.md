@@ -1512,7 +1512,7 @@ coordinator model, matching the pre-#2277 behavior.
 effort instead of silently inheriting the coordinator/implementor's
 `--effort`; empty now means the review pass follows the roster reviewer
 entry's own effort, and a non-empty value overrides it (issue #2512).
-An implement/fix pass's own REVIEW section is stripped to a short deferral
+An implement/fix pass's own REVIEW section is stripped to a deferral
 (`review-loop-orchestrator.md`) that stops the turn right after COMMIT unless
 the seeded run-state above it already shows an `APPROVE` verdict, and the
 `reviewer` entry is dropped from `--agents` entirely (verdict authority moves
