@@ -1527,6 +1527,17 @@ lower than the inline loop — a review pass re-reads the diff cold instead of
 sharing the implementor's warm cache — the win this pass is scoped for is
 review quality and code-owned termination, measured via the A/B harness.
 
+Every implement/fix/land pass's own COMMIT section also carries one more
+fragment on the same `REVIEW_LOOP_ORCHESTRATOR` gate
+(`commit-rework-orchestrator.md`, issue #2698) — the review pass itself
+has no COMMIT section to carry it. It renders on every implement/fix/land
+pass alike, including the first, but branches in prose on the seeded
+handoff: once that handoff shows a `Last reviewer verdict:` line, this
+overrides the shared "several small focused commits" preference and
+tells the pass to fold each finding fix into the commit it belongs to
+instead; the implement pass authoring the first slice, seeded with no
+verdict yet, keeps the unmodified preference.
+
 The Driver stays pluggable ([ADR 0009](adr/0009-agent-cli-is-a-pluggable-driver.md)):
 the orchestrator only ever talks to `driver-exec` through the same
 `--prompt-file`/`--agents-file`/`--session-file`/`--log-path` surface (plus
