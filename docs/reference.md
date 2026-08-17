@@ -1361,16 +1361,17 @@ artifact, not a growing transcript:
   outside the repo like `/tmp/brief.md`) records the last reviewer verdict,
   the reviewer's own findings text, the scout-brief path (`--scout-brief-path`,
   default `/tmp/brief.md`), the most recent pass's own pass-summary path
-  (`--pass-summary-path`, default `/tmp/pass-summary.md`), and the most
-  recent fix pass's own dispositions path (`--dispositions-path`, default
+  (`--pass-summary-path`, default `/tmp/pass-summary.md`), the most recent
+  fix pass's own dispositions path (`--dispositions-path`, default
   `/tmp/dispositions.md`, issue #2550), and the reviewed-commit anchor
   (`ReviewedCommitAnchor`, issue #2551) — the repo workdir's own `HEAD`
   commit SHA, recorded via one `git rev-parse HEAD` invocation right after
-  each review pass completes. That recording is best-effort: a `git`
-  failure just logs to stderr and leaves the anchor at whatever a prior
-  review pass already recorded (or empty, on the first pass), never errors
-  the run. It also carries dispatch-internal bookkeeping unrelated to any
-  seeded prompt: the done/remaining slice lists
+  each review pass completes. That recording is best-effort: an `os.Getwd`
+  or `git` failure, or `git` output that doesn't look like a real commit
+  SHA once trimmed, just logs to stderr and leaves the anchor at whatever a
+  prior review pass already recorded (or empty, on the first pass), never
+  errors the run. It also carries dispatch-internal bookkeeping unrelated to
+  any seeded prompt: the done/remaining slice lists
   (`DoneSlices`/`RemainingSlices`) issue #2059's parallel worker dedup
   mechanism reads and writes to avoid re-dispatching an already-completed
   slice. Each pass reads it before running and writes it back after, through
@@ -1391,14 +1392,15 @@ artifact, not a growing transcript:
   review prompt is always unseeded. A missing dispositions log degrades to
   seeding the prior verdict alone, never an error.
 - **Delta focus.** When the run state's reviewed-commit anchor looks like a
-  real git commit SHA (7 to 40 lowercase hex characters), the same round-N
-  review prompt also gets a "### Delta focus" section naming the range since
-  that anchor — `git diff <anchor>..HEAD` and `git log <anchor>..HEAD
-  --oneline` — as where to concentrate the hunt (issue #2551). The full
-  branch diff stays available throughout; this narrows where the reviewer
-  spends its attention, never what it's allowed to see, and territory
-  outside that range (already cleared by a prior round) is re-examined only
-  where a new commit actually touches it. The section also requires the
+  real git commit SHA (7 to 64 lowercase hex characters, covering both a
+  SHA-1 and a SHA-256 repo), the same round-N review prompt also gets a
+  "### Delta focus" section naming the range since that anchor — `git diff
+  <anchor>..HEAD` and `git log <anchor>..HEAD --oneline` — as where to
+  concentrate the hunt (issue #2551). The full branch diff stays available
+  throughout; this narrows where the reviewer spends its attention, never
+  what it's allowed to see, and territory outside that range (already
+  reviewed as of the anchor commit) is re-examined only where a new commit
+  actually touches it. The section also requires the
   reviewer to re-skim the FULL diff's shape end to end before it may issue
   APPROVE, regardless of the delta focus above — delta review must never
   narrow final approval's own coverage. A missing or invalid-looking anchor
