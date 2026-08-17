@@ -215,17 +215,17 @@ below, not the BLOCK loop above, which always repeats until clear:
    criteria — most nits, smells, dead code, misleading names, and doc
    updates for a surface the *original* slice touches, not whatever surface
    the diff has since grown to touch across earlier rounds' own absorbed
-   fixes. Re-run checks, then commit them the same way — amended into the
-   commit each logically belongs to unless it is a reasonably separate scope,
-   which earns its own commit. They never become issues.
-2. Escalate — to the filer if present, else the PR body — a finding that
-   genuinely needs a human: a real design trade-off, work outside
+   non-blocking fixes. Re-run checks, then commit them the same way —
+   amended into the commit each logically belongs to unless it is a
+   reasonably separate scope, which earns its own commit. They never
+   become issues.
+2. Escalate — to the filer if present, else the PR body — only a finding
+   that genuinely needs a human: a real design trade-off, work outside
    this issue's scope, or a change too large to fold in without derailing
    the slice. When unsure whether a finding clears that bar: on the first
    review round, fix it rather than file it; from the second review round on,
-   escalate it instead. Escalating more from round 2 on, versus round 1's
-   near-total absorption, is the intended effect of this round-awareness,
-   not a regression.
+   escalate it instead. Escalating more from round 2 on is the intended
+   effect of this round-awareness, not a regression.
 
 # LAND THE CHANGE
 
