@@ -506,13 +506,6 @@ func runWithReviewPass(cfg config, stdout io.Writer) (int, error) {
 			break
 		}
 		switch d.NextPass {
-		case passmachine.KindFix:
-			// A manifest-dispatch pass's only job was to declare the
-			// manifest and stop (issue #2059 AC1) -- there is nothing yet
-			// for a review pass to review, so the next pass is another
-			// implement/fix pass, seeded with state.WorkerFindings above.
-			passKind = passmachine.KindFix
-			continue
 		case passmachine.KindLand:
 			// The cap already used up this run's budget -- skip the review
 			// pass this iteration entirely rather than spending one more
@@ -522,12 +515,11 @@ func runWithReviewPass(cfg config, stdout io.Writer) (int, error) {
 			passKind = passmachine.KindLand
 			continue
 		case passmachine.KindReview:
-			// implementFixTransition's own fallthrough case: neither
-			// manifest dispatch nor a cap fired, so this pass's own
-			// implement/fix/land work is done and a fresh review pass runs
-			// below.
+			// implementFixTransition's own fallthrough case: no cap fired,
+			// so this pass's own implement/fix/land work is done and a fresh
+			// review pass runs below.
 		default:
-			// d.Continue is true but NextPass is none of the three kinds
+			// d.Continue is true but NextPass is neither kind
 			// implementFixTransition ever returns on a continue decision
 			// (issue #2548 review) -- report it loudly instead of silently
 			// falling into a review pass for an unmapped kind.
@@ -776,7 +768,7 @@ func validReviewedCommitAnchor(anchor string) bool {
 // DispositionsPath file -- (both issue #2550), and a delta-focus section
 // derived from state.ReviewedCommitAnchor -- the commit the prior review
 // pass ran at (issue #2551). Nothing else from the implementor -- no
-// PassSummaryPath, ScoutBriefPath, WorkerFindings, or TerminalLand/CapFired
+// PassSummaryPath, ScoutBriefPath, or TerminalLand/CapFired
 // -- reaches this prompt: seedPromptFromState above seeds the richer
 // implement/fix-pass prompt from the full run state, but the round-N reviewer
 // gets only these three, framed as unverified claims to check against the

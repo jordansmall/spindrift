@@ -21,11 +21,11 @@ import (
 // re-scoped into a new prompt instead.
 type RunState struct {
 	// DoneSlices names each implementor slice that has already landed, in
-	// completion order. Dispatch-internal bookkeeping only (issue #2059's
-	// parallel worker dedup safety mechanism in orchestrator/dispatch.go,
-	// which skips re-dispatching a slice already present here) -- not part
-	// of the implementor-facing seeded-prompt handoff (issue #2549 retired
-	// its narrative render in favor of WorkerFindings' richer prose).
+	// completion order. Dispatch-internal bookkeeping only, and currently
+	// write-nothing/carry-forward: the parallel worker dedup mechanism that
+	// consumed it is gone, but the field stays on the wire because released
+	// handoff artifacts carry it. Not part of the implementor-facing
+	// seeded-prompt handoff (issue #2549 retired its narrative render).
 	DoneSlices []string `json:"done_slices"`
 	// RemainingSlices names each implementor slice still to run, in the
 	// order the loop intends to take them. Dispatch-internal bookkeeping

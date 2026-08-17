@@ -5328,7 +5328,7 @@ func TestSeedPromptFromStateIncludesPassSummaryPath(t *testing.T) {
 // TestSeedPromptFromStateIncludesDecisionsRecord verifies seedPromptFromState
 // (issue #2695) reads state.DecisionsLogPath fresh and inlines its content,
 // fenced via fenceBlock, into the seeded prompt -- the same inline-content
-// convention as ReviewFindings/WorkerFindings above, not FindingsLogPath's
+// convention as ReviewFindings above, not FindingsLogPath's
 // own path-reference convention -- so a pass N>1 sees what prior passes
 // decided, rejected, and why.
 func TestSeedPromptFromStateIncludesDecisionsRecord(t *testing.T) {
@@ -5546,8 +5546,7 @@ func TestSeedPromptFromStateTerminalLandOverridesStopAfterCommit(t *testing.T) {
 // brief -- the verdict that triggered the fix pass -- not just running the
 // same static prompt on every pass (that narrower claim is #1998's own
 // TestRunSeedsSubsequentPassPromptFromRunState). The done/remaining-slices
-// narrative render this test used to also assert was retired by issue #2549:
-// state.WorkerFindings now carries that richer prose instead.
+// narrative render this test used to also assert was retired by issue #2549.
 func TestRunSeedsFixBriefWithVerdictAfterBlock(t *testing.T) {
 	dir := t.TempDir()
 	callLog := filepath.Join(dir, "calls.log")
