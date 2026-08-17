@@ -710,29 +710,54 @@ func seedPromptFromState(promptFile string, state runstate.RunState) (string, er
 	return f.Name(), nil
 }
 
+// reviewedCommitAnchorRe matches a plausible git commit SHA: 7 to 40 lowercase
+// hex characters, the range git itself accepts for an abbreviated-to-full
+// object name.
+var reviewedCommitAnchorRe = regexp.MustCompile(`^[0-9a-f]{7,40}$`)
+
+// validReviewedCommitAnchor reports whether anchor looks like a real git
+// commit SHA (issue #2551) -- a cheap format check, not a live git lookup:
+// seedReviewPromptFromState is deliberately pure/file-based (see its own doc
+// comment), so validation here mirrors ReadRunState's own fail-open
+// convention for corrupt state -- malformed input degrades to "as if
+// absent," never an error or a live git round-trip.
+func validReviewedCommitAnchor(anchor string) bool {
+	return reviewedCommitAnchorRe.MatchString(anchor)
+}
+
 // seedReviewPromptFromState composes a fresh review-pass prompt file carrying
-// promptFile's own content plus exactly two extra inputs (issue #2550): the
-// prior round's own verdict message (state.ReviewFindings -- the code-owned
-// review pass's final "VERDICT: ..." line plus its Blocking/Non-blocking
-// sections, verbatim) and the append-only, per-run dispositions log
+// promptFile's own content plus exactly three extra inputs: the prior
+// round's own verdict message (state.ReviewFindings -- the code-owned review
+// pass's final "VERDICT: ..." line plus its Blocking/Non-blocking sections,
+// verbatim), the append-only, per-run dispositions log
 // (state.DispositionsLogPath), read fresh -- every fix pass's own fresh
 // dispositions joined so far (AC8), not just the most recent round's single
-// DispositionsPath file. Nothing else from the implementor -- no
+// DispositionsPath file -- (both issue #2550), and a delta-focus section
+// derived from state.ReviewedCommitAnchor -- the commit the prior review
+// pass ran at (issue #2551). Nothing else from the implementor -- no
 // PassSummaryPath, ScoutBriefPath, WorkerFindings, or TerminalLand/CapFired
 // -- reaches this prompt: seedPromptFromState above seeds the richer
 // implement/fix-pass prompt from the full run state, but the round-N reviewer
-// gets only these two, framed as unverified claims to check against the diff,
-// never as narrative to take on faith. The firewall is a file boundary (this
-// function simply never reads those other fields), not the host parsing
-// agent-authored markdown for sections.
+// gets only these three, framed as unverified claims to check against the
+// diff, never as narrative to take on faith. The firewall is a file boundary
+// (this function simply never reads those other fields), not the host
+// parsing agent-authored markdown for sections.
 //
 // A missing or unreadable dispositions log degrades to seeding the prior
 // verdict alone, not an error (AC5) -- there is nothing useful this function
 // can do about a side-channel read failure on an artifact it doesn't own.
+// Likewise, an empty or implausible-looking ReviewedCommitAnchor (see
+// validReviewedCommitAnchor) degrades to omitting the delta-focus section
+// entirely, not an error -- a missing or corrupt anchor must never narrow a
+// review pass's own coverage, only ever widen the diff it's asked to
+// consider. Since this function is deliberately pure/file-based, anchor
+// validation is a cheap format check, never a live git lookup.
 //
-// When state carries neither a prior verdict nor any dispositions content,
-// this returns promptFile unchanged and creates no temp file, mirroring
-// seedPromptFromState's own no-op shape for the cold-start case.
+// When state carries neither a prior verdict, nor any dispositions content,
+// nor a valid anchor, this returns promptFile unchanged and creates no temp
+// file, mirroring seedPromptFromState's own no-op shape for the cold-start
+// case. A valid anchor alone -- with ReviewFindings and dispositions both
+// empty -- is still enough to trigger seeding.
 func seedReviewPromptFromState(promptFile string, state runstate.RunState) (string, error) {
 	// Reads the append-only dispositions LOG (issue #2550 AC8), not the
 	// single latest DispositionsPath file: the log carries every round's
@@ -750,7 +775,13 @@ func seedReviewPromptFromState(promptFile string, state runstate.RunState) (stri
 		}
 	}
 
-	if state.ReviewFindings == "" && dispositions == "" {
+	// A valid anchor alone is worth seeding even when both ReviewFindings
+	// and dispositions are empty (e.g. round 1's own review pass just
+	// recorded the anchor and there is nothing yet to report): the
+	// delta-focus section it drives stands on its own.
+	hasAnchor := validReviewedCommitAnchor(state.ReviewedCommitAnchor)
+
+	if state.ReviewFindings == "" && dispositions == "" && !hasAnchor {
 		return promptFile, nil
 	}
 
@@ -783,6 +814,22 @@ func seedReviewPromptFromState(promptFile string, state runstate.RunState) (stri
 		b.WriteString("established fact -- check each one against the actual diff rather\n")
 		b.WriteString("than taking it on faith.\n\n")
 		fmt.Fprintf(&b, "%s\n\n", fenceBlock(dispositions))
+	}
+	if hasAnchor {
+		b.WriteString("### Delta focus\n\n")
+		b.WriteString("This branch's HEAD advanced since your last review pass, which ran at\n")
+		fmt.Fprintf(&b, "commit %s. Verify the prior verdict and dispositions above against\n", state.ReviewedCommitAnchor)
+		b.WriteString("the current diff, and concentrate your hunt on what changed since then:\n\n")
+		fmt.Fprintf(&b, "  git diff %s..HEAD           # what changed since your last pass\n", state.ReviewedCommitAnchor)
+		fmt.Fprintf(&b, "  git log %s..HEAD --oneline  # new commits since your last pass\n\n", state.ReviewedCommitAnchor)
+		b.WriteString("Territory outside that range was already cleared last round -- re-examine\n")
+		b.WriteString("it only where a new commit actually touches it. The full branch diff (the\n")
+		b.WriteString("Inputs section above) stays available throughout; this narrows where you\n")
+		b.WriteString("spend the hunt, never what you're allowed to see.\n\n")
+		b.WriteString("Before you may issue APPROVE, re-skim the FULL diff's shape end to end\n")
+		b.WriteString("(the origin/base...HEAD diff, not just the range above) regardless of the\n")
+		b.WriteString("delta focus above -- delta review must never narrow final approval's own\n")
+		b.WriteString("coverage.\n\n")
 	}
 	b.WriteString("---\n\n")
 	b.Write(original)

@@ -4187,6 +4187,138 @@ func TestSeedReviewPromptFromStateNeverIncludesPassSummaryOrWorkerFindings(t *te
 	}
 }
 
+// TestSeedReviewPromptFromStateIncludesDeltaFocusForValidAnchor verifies
+// seedReviewPromptFromState (issue #2551) renders a delta-focus section
+// naming state.ReviewedCommitAnchor's own value and an unconditional
+// requirement to re-skim the full diff's shape before issuing APPROVE
+// (AC4), whenever the anchor looks like a real git commit SHA.
+func TestSeedReviewPromptFromStateIncludesDeltaFocusForValidAnchor(t *testing.T) {
+	dir := t.TempDir()
+	promptFile := filepath.Join(dir, "prompt.txt")
+	if err := os.WriteFile(promptFile, []byte("ORIGINAL PROMPT TEXT"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	const anchor = "abc1234def5678901234567890123456789abcd"
+	state := runstate.RunState{
+		ReviewFindings:       "VERDICT: BLOCK\n\n## Blocking\n- run.go:42 -- missing nil check",
+		ReviewedCommitAnchor: anchor,
+	}
+
+	seeded, err := seedReviewPromptFromState(promptFile, state)
+	if err != nil {
+		t.Fatalf("seedReviewPromptFromState: %v", err)
+	}
+	if seeded == promptFile {
+		t.Fatalf("seedReviewPromptFromState returned the original file unchanged, want a fresh seeded file")
+	}
+	got, err := os.ReadFile(seeded)
+	if err != nil {
+		t.Fatalf("read seeded review prompt: %v", err)
+	}
+	gotStr := string(got)
+	if !strings.Contains(gotStr, anchor) {
+		t.Errorf("seeded review prompt = %q, want it to name the anchor %q", gotStr, anchor)
+	}
+	if !strings.Contains(gotStr, "Delta focus") {
+		t.Errorf("seeded review prompt = %q, want a delta-focus section", gotStr)
+	}
+	if !strings.Contains(gotStr, "APPROVE") || !strings.Contains(gotStr, "FULL diff") {
+		t.Errorf("seeded review prompt = %q, want an unconditional re-skim-full-diff-before-APPROVE instruction", gotStr)
+	}
+}
+
+// TestSeedReviewPromptFromStateSeedsOnAnchorAlone verifies
+// seedReviewPromptFromState (issue #2551) still seeds -- rather than
+// returning promptFile unchanged -- when ReviewFindings and the
+// dispositions log are both empty but a valid ReviewedCommitAnchor is
+// present: a delta-focus section alone is worth seeding.
+func TestSeedReviewPromptFromStateSeedsOnAnchorAlone(t *testing.T) {
+	dir := t.TempDir()
+	promptFile := filepath.Join(dir, "prompt.txt")
+	if err := os.WriteFile(promptFile, []byte("ORIGINAL PROMPT TEXT"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	state := runstate.RunState{ReviewedCommitAnchor: "abc1234"}
+
+	seeded, err := seedReviewPromptFromState(promptFile, state)
+	if err != nil {
+		t.Fatalf("seedReviewPromptFromState: %v", err)
+	}
+	if seeded == promptFile {
+		t.Fatalf("seedReviewPromptFromState returned the original file unchanged, want a fresh seeded file since a valid anchor alone is worth seeding")
+	}
+	got, err := os.ReadFile(seeded)
+	if err != nil {
+		t.Fatalf("read seeded review prompt: %v", err)
+	}
+	if !strings.Contains(string(got), "Delta focus") {
+		t.Errorf("seeded review prompt = %q, want a delta-focus section", got)
+	}
+}
+
+// TestSeedReviewPromptFromStateOmitsDeltaFocusForEmptyAnchor verifies
+// seedReviewPromptFromState (issue #2551) produces no delta-focus section
+// when state.ReviewedCommitAnchor is empty -- behavior identical to before
+// this anchor was introduced.
+func TestSeedReviewPromptFromStateOmitsDeltaFocusForEmptyAnchor(t *testing.T) {
+	dir := t.TempDir()
+	promptFile := filepath.Join(dir, "prompt.txt")
+	if err := os.WriteFile(promptFile, []byte("ORIGINAL PROMPT TEXT"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	state := runstate.RunState{
+		ReviewFindings: "VERDICT: BLOCK\n\n## Blocking\n- run.go:42 -- missing nil check",
+	}
+
+	seeded, err := seedReviewPromptFromState(promptFile, state)
+	if err != nil {
+		t.Fatalf("seedReviewPromptFromState: %v", err)
+	}
+	got, err := os.ReadFile(seeded)
+	if err != nil {
+		t.Fatalf("read seeded review prompt: %v", err)
+	}
+	if strings.Contains(string(got), "Delta focus") {
+		t.Errorf("seeded review prompt = %q, want no delta-focus section for an empty anchor", got)
+	}
+}
+
+// TestSeedReviewPromptFromStateOmitsDeltaFocusForInvalidAnchor verifies
+// seedReviewPromptFromState (issue #2551) degrades an implausible-looking
+// ReviewedCommitAnchor the same way as an empty one -- no delta-focus
+// section, no error -- rather than failing the seed.
+func TestSeedReviewPromptFromStateOmitsDeltaFocusForInvalidAnchor(t *testing.T) {
+	for _, anchor := range []string{"not-a-sha!", "abc", strings.Repeat("a", 41)} {
+		t.Run(anchor, func(t *testing.T) {
+			dir := t.TempDir()
+			promptFile := filepath.Join(dir, "prompt.txt")
+			if err := os.WriteFile(promptFile, []byte("ORIGINAL PROMPT TEXT"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+
+			state := runstate.RunState{
+				ReviewFindings:       "VERDICT: BLOCK\n\n## Blocking\n- run.go:42 -- missing nil check",
+				ReviewedCommitAnchor: anchor,
+			}
+
+			seeded, err := seedReviewPromptFromState(promptFile, state)
+			if err != nil {
+				t.Fatalf("seedReviewPromptFromState: %v, want no error for an invalid anchor", err)
+			}
+			got, err := os.ReadFile(seeded)
+			if err != nil {
+				t.Fatalf("read seeded review prompt: %v", err)
+			}
+			if strings.Contains(string(got), "Delta focus") {
+				t.Errorf("seeded review prompt = %q, want no delta-focus section for invalid anchor %q", got, anchor)
+			}
+		})
+	}
+}
+
 // TestSeedPromptFromStateIncludesFindingsLog verifies seedPromptFromState
 // (issue #2552) carries state.FindingsLogPath into the seeded prompt with an
 // instruction to triage the union of every round's non-blocking findings
