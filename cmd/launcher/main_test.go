@@ -3371,6 +3371,26 @@ func TestDoctor_AuthFailure(t *testing.T) {
 	}
 }
 
+// TestDoctor_AuthFailure_NotDoublyReported verifies a failing built-in
+// Required check is reported exactly once: via the returned error, not also
+// as a "MISSING: ..." row written to w. The caller (cmdDoctor in main.go)
+// already prints the returned error to stderr, so Run writing the same
+// failure to w too would double-report it — origin/main's pre-refactor Run
+// never wrote anything to w on this failure path.
+func TestDoctor_AuthFailure_NotDoublyReported(t *testing.T) {
+	f := forge.NewFake()
+	f.ProbeErr = forge.ErrAuthFailure
+
+	var buf bytes.Buffer
+	err := runDoctor(f, f, config{}, &buf, strings.NewReader(""), false)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if strings.Contains(buf.String(), "MISSING: issue-tracker") {
+		t.Errorf("want w to not contain the failing built-in row, got: %s", buf.String())
+	}
+}
+
 // TestDoctor_AuthFailure_Jira verifies the auth-failure remediation text
 // names JIRA_TOKEN, not GH_TOKEN, when the issue tracker is jira — the
 // generic message would misdirect an operator debugging a Jira probe.
