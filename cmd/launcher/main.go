@@ -21,6 +21,7 @@ import (
 
 	"spindrift.dev/launcher/internal/console"
 	"spindrift.dev/launcher/internal/dispatch"
+	"spindrift.dev/launcher/internal/doctor"
 	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/local"
@@ -507,64 +508,10 @@ func validate(c config) error {
 	if c.selfContained && c.dispatchKind != dispatchKindResearch {
 		return fmt.Errorf("--self-contained is only valid for the research dispatch kind")
 	}
-	// A fully-local run (both seams local) never constructs the github
-	// gh-exec client that reads REPO_SLUG/GH_TOKEN, so neither is required —
-	// any other combination (github, git, jira, or a mixed local pairing)
-	// keeps the unconditional requirement. A self-contained research run
-	// (issue #2202, --self-contained) is exempted for a different reason,
-	// but only when a local issue tracker supplies the content directly:
-	// the Box clones no repo and explores none. A github or forgejo issue
-	// tracker still needs REPO_SLUG/GH_TOKEN even in self-contained mode, to
-	// read the issue and post the verdict — relaxing the guardrail there
-	// would trade a clear launcher error for a downstream Box crash.
-	codeForgeRow, codeForgeRowOK := backendByName(c.codeForge)
-	trackerRow, trackerRowOK := backendByName(c.issueTracker)
-	sig := resolveCapabilitySignals(c.codeForge, c.issueTracker)
-	noRepoResearch := c.dispatchKind == dispatchKindResearch && c.selfContained && sig.inBoxUnreachableTracker
-	if !sig.fullyLocal && !noRepoResearch && c.repoSlug == "" {
-		return fmt.Errorf("set REPO_SLUG=owner/repo (the target GitHub repository)")
-	}
-	if c.gitUserName == "" {
-		return fmt.Errorf("set GIT_USER_NAME, or configure git user.name on the host")
-	}
-	if c.gitUserEmail == "" {
-		return fmt.Errorf("set GIT_USER_EMAIL, or configure git user.email on the host")
-	}
-	if !sig.fullyLocal && !noRepoResearch && c.ghToken == "" {
-		return fmt.Errorf("set GH_TOKEN (fine-grained PAT scoped to the single target repo: Issues RW, Contents RW, Pull requests RW, Metadata R)")
-	}
-	switch c.driver {
-	case "", "claude":
-		if c.claudeOAuthToken == "" && c.anthropicAPIKey == "" {
-			return fmt.Errorf("set CLAUDE_CODE_OAUTH_TOKEN (run 'claude setup-token') or ANTHROPIC_API_KEY")
-		}
-	case "opencode":
-		// The github-copilot Provider is OAuth-only (ADR 0009 amendment, #260):
-		// opencode reads the credential from OPENCODE_AUTH_CONTENT. Require it only
-		// when the Copilot Provider is actually selected (MODEL github-copilot/…);
-		// other opencode Providers carry their own apiKey via the {env:} config leg.
-		if strings.HasPrefix(c.model, "github-copilot/") && c.opencodeAuthContent == "" {
-			return fmt.Errorf("set OPENCODE_AUTH_CONTENT for the github-copilot Provider (run 'opencode auth login -p github-copilot' on a host, then export the auth slice) under the opencode Driver")
-		}
-	default:
-		// Deviation from issue #2534 AC4 ("the launcher's dead validation
-		// arm is gone"): that AC assumed this arm was a pointless re-check
-		// of a name newDriver() already re-derives and nix eval-time
-		// generation already guarantees valid. Removing it (ba9472a5) was
-		// reverted by 21a260db: DRIVER is an operator-set *runtime* env
-		// var nix eval never sees, validate()'s switch had no default arm
-		// to catch a typo, and newDriver() silently falls back to the
-		// claude Driver on driver.New's error instead of failing the run —
-		// so an unrecognised DRIVER produced a confusing wrong-Driver run,
-		// not a clear error. This arm is a distinct, live guardrail, not
-		// the dead one AC4 describes; TestValidateDriver_RejectsUnknown
-		// pins it. Kept intentionally; flagged for human sign-off on the
-		// literal AC wording via the PR body.
-		if _, err := driver.New(c.driver); err != nil {
-			return err
-		}
-	}
-	if err := runner.ValidateRuntime(c.runtime); err != nil {
+	// See checks.go's repoRequirementExemption for the REPO_SLUG/GH_TOKEN
+	// exemption logic (fully-local runs, self-contained research with an
+	// in-Box-unreachable tracker).
+	if err := doctor.FirstRequiredError(doctor.RunChecksFailFast(launcherRequiredKnobChecks(c))); err != nil {
 		return err
 	}
 	if err := validateChoice("MERGE_MODE", c.mergeMode); err != nil {
@@ -579,21 +526,8 @@ func validate(c config) error {
 	if err := validateChoice("OVERLAP_GATE", c.overlapGate); err != nil {
 		return err
 	}
-	if !trackerRowOK || !trackerRow.ValidAsTracker {
-		return fmt.Errorf("ISSUE_TRACKER=%q is not valid; must be %s", c.issueTracker, joinOxford(validTrackerNames()))
-	}
-	if trackerRow.validateTracker != nil {
-		if err := trackerRow.validateTracker(c); err != nil {
-			return err
-		}
-	}
-	if !codeForgeRowOK || !codeForgeRow.ValidAsCodeForge {
-		return fmt.Errorf("CODE_FORGE=%q is not valid; must be %s", c.codeForge, joinOxford(validCodeForgeNames()))
-	}
-	if codeForgeRow.validateCodeForge != nil {
-		if err := codeForgeRow.validateCodeForge(c); err != nil {
-			return err
-		}
+	if err := doctor.FirstRequiredError(doctor.RunChecksFailFast(launcherCrossKnobChecks(c))); err != nil {
+		return err
 	}
 	if err := validateChoice("BOX_FORGE_AND_ISSUE_ACCESS", c.boxForgeAndIssueAccess); err != nil {
 		return err
@@ -1572,9 +1506,7 @@ func cmdDoctor() int {
 	c := loadConfig()
 	it := newIssueTracker(c)
 	cf := newCodeForge(c, local.SanitizedParent{}, it)
-	stat, serr := os.Stdin.Stat()
-	interactive := serr == nil && (stat.Mode()&os.ModeCharDevice) != 0
-	if err := runDoctor(it, cf, c, os.Stdout, os.Stdin, interactive); err != nil {
+	if err := runDoctor(it, cf, c, os.Stdout, os.Stdin, isStdinTTY()); err != nil {
 		fmt.Fprintf(os.Stderr, "%s\n", err)
 		return 1
 	}

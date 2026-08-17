@@ -477,7 +477,7 @@ func runQuickstart(dir string, env Environment, runner CommandRunner, forgeBuild
 		InProgressLabel: defaultDispatchLabels.InProgress,
 		FailedLabel:     defaultDispatchLabels.Failed,
 		CompleteLabel:   defaultDispatchLabels.Complete,
-	}, w, scanner, interactive); err != nil {
+	}, w, scanner, interactive, nil); err != nil {
 		return err
 	}
 
