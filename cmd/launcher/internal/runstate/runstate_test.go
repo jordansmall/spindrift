@@ -196,10 +196,9 @@ func TestRunStateRoundTripIncludesDecisionsPath(t *testing.T) {
 }
 
 // TestRunStateRoundTripIncludesDecisionsLogPath verifies DecisionsLogPath
-// (issue #2695: the per-run, append-only decisions log a later slice makes
-// seedPromptFromState itself read, mirroring DispositionsLogPath's own
-// convention) survives a WriteRunState/ReadRunState round trip like every
-// other field.
+// (issue #2695: the per-run, append-only decisions log seedPromptFromState
+// itself reads, mirroring DispositionsLogPath's own convention) survives a
+// WriteRunState/ReadRunState round trip like every other field.
 func TestRunStateRoundTripIncludesDecisionsLogPath(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "run-state.json")
 	want := RunState{
@@ -431,11 +430,17 @@ func TestRunStateIsEmpty(t *testing.T) {
 	if !(RunState{ReviewedCommitAnchor: "0123456789abcdef0123456789abcdef01234567"}).IsEmpty() {
 		t.Error("IsEmpty() of a state with only ReviewedCommitAnchor set = false, want true")
 	}
-	// DecisionsPath joins DispositionsPath in the "set but still IsEmpty"
-	// case (issue #2695): nothing renders DecisionsPath directly, only
-	// DecisionsLogPath's log content is ever seeded.
+	// DecisionsPath and DecisionsLogPath join DispositionsPath/
+	// DispositionsLogPath in the "set but still IsEmpty" case (issue #2695):
+	// nothing renders either field directly off IsEmpty alone --
+	// seedPromptFromState does its own fresh read of DecisionsLogPath's file
+	// before its own early-return, exactly mirroring how
+	// seedReviewPromptFromState's own narrower check governs dispositions.
 	if !(RunState{DecisionsPath: "/tmp/decisions.md"}).IsEmpty() {
 		t.Error("IsEmpty() of a state with only DecisionsPath set = false, want true")
+	}
+	if !(RunState{DecisionsLogPath: "/tmp/decisions-log.md"}).IsEmpty() {
+		t.Error("IsEmpty() of a state with only DecisionsLogPath set = false, want true")
 	}
 	nonEmpty := []RunState{
 		{LastVerdict: "BLOCK"},
@@ -446,27 +451,10 @@ func TestRunStateIsEmpty(t *testing.T) {
 		{FindingsLogPath: "/tmp/findings.md"},
 		{TerminalLand: true},
 		{UnlandedSlices: []string{"slice-a"}},
-		{DecisionsLogPath: "/tmp/decisions-log.md"},
 	}
 	for _, s := range nonEmpty {
 		if s.IsEmpty() {
 			t.Errorf("IsEmpty() of %+v = true, want false", s)
 		}
-	}
-}
-
-// TestRunStateIsEmptyDecisionsLogPathIncluded verifies DecisionsLogPath
-// (issue #2695) has the opposite IsEmpty polarity from DispositionsLogPath:
-// a state whose only set field is DecisionsLogPath reports IsEmpty() ==
-// false, not true. A later slice makes seedPromptFromState itself (not a
-// separate narrower-check function like seedReviewPromptFromState) the
-// reader/renderer of DecisionsLogPath, and seedPromptFromState's own
-// early-return is `if state.IsEmpty() { return promptFile, nil }` -- so
-// excluding DecisionsLogPath here the way DispositionsLogPath is excluded
-// would make a state whose only content is a decisions log short-circuit
-// before ever reaching the code that renders it.
-func TestRunStateIsEmptyDecisionsLogPathIncluded(t *testing.T) {
-	if (RunState{DecisionsLogPath: "/tmp/decisions-log.md"}).IsEmpty() {
-		t.Error("IsEmpty() of a state with only DecisionsLogPath set = true, want false")
 	}
 }
