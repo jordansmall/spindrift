@@ -919,13 +919,13 @@ exceptions.
 
 | var                       | default                | meaning                                  |
 | ------------------------- | ---------------------- | ---------------------------------------- |
-| `REPO_SLUG`               | — (required unless `CODE_FORGE` and `ISSUE_TRACKER` are both `local`; baked via `settings.repository.repoSlug`) | target repo, `owner/repo` |
+| `REPO_SLUG`               | — (required unless `CODE_FORGE` and `ISSUE_TRACKER` are both `local`; baked via `forge.repoSlug`) | target repo, `owner/repo` |
 | `GH_TOKEN`                | — (required unless `CODE_FORGE` and `ISSUE_TRACKER` are both `local`) | GitHub token for `gh` inside containers (secret; env only) |
-| `GH_TOKEN_REFRESH_FILE`   | — (baked via `settings.repository.ghTokenRefreshFile`) | path the launcher polls to keep `GH_TOKEN` current past an installation token's ~1h lifetime — see [GitHub App installation token](#github-app-installation-token-recommended) |
+| `GH_TOKEN_REFRESH_FILE`   | — (baked via `forge.ghTokenRefreshFile`) | path the launcher polls to keep `GH_TOKEN` current past an installation token's ~1h lifetime — see [GitHub App installation token](#github-app-installation-token-recommended) |
 | `CLAUDE_CODE_OAUTH_TOKEN` | — (one auth required)  | from `claude setup-token` (secret; env only) |
 | `ANTHROPIC_API_KEY`       | —                      | alternative to the OAuth token (secret; env only) |
-| `GIT_USER_NAME`           | host `git config`; baked via `settings.repository.gitUserName` | commit author name (applied repo-locally inside the Box — see [Hermetic git config](#hermetic-git-config)) |
-| `GIT_USER_EMAIL`          | host `git config`; baked via `settings.repository.gitUserEmail` | commit author email (applied repo-locally inside the Box — see [Hermetic git config](#hermetic-git-config)) |
+| `GIT_USER_NAME`           | host `git config`; baked via `git.user.name` | commit author name (applied repo-locally inside the Box — see [Hermetic git config](#hermetic-git-config)) |
+| `GIT_USER_EMAIL`          | host `git config`; baked via `git.user.email` | commit author email (applied repo-locally inside the Box — see [Hermetic git config](#hermetic-git-config)) |
 | `CODE_FORGE`              | `github` (baked)       | code-landing backend: `github` (open PR, watch CI, merge), `git` (push-only to `CODE_FORGE_REMOTE_URL`; no PR, CI-watch, or merge gate — see [ADR 0013](../docs/adr/0013-issue-tracker-and-code-forge-are-independent-seams.md)), `local` (host-mediated landing onto the Accumulation repo's Integration branch; no PR, CI-watch, or network — see [ADR 0033](../docs/adr/0033-host-mediated-local-code-forge.md)), or `forgejo` (open a PR via `fj pr create`, watch the CI rollup, and rebase-merge under `MERGE_MODE` on a Forgejo/Gitea instance authenticated by `FORGEJO_TOKEN` — the second full `PRForge` backend beside `github`; see [ADR 0038](../docs/adr/0038-the-forgejo-backend-decision-set.md)) |
 | `CODE_FORGE_REMOTE_URL`   | — (required when `CODE_FORGE=git`) | plain git remote URL to clone from and push to (self-hosted git, gitea, GitLab-without-MRs, a bare server repo) |
 | `CODE_FORGE_ACCUMULATION_REPO_DIR` | `.spindrift/accum.git` under the launcher's working directory when `CODE_FORGE=local` (auto-created and seeded); an explicit value overrides it | host path to the bare Accumulation repo, mounted read-only into the Box and landed into host-side |
@@ -1659,7 +1659,7 @@ ready-for-agent ──dispatch──▶ agent-in-progress ───landing settl
   exactly as before.
 
 Rename any of these with the `inProgressLabel` / `failedLabel` / `completeLabel`
-knobs under `settings.lifecycleLabels` (baked) or the
+knobs under `issues.labels` (baked) or the
 `IN_PROGRESS_LABEL` / `FAILED_LABEL` / `COMPLETE_LABEL` env vars (runtime).
 
 #### Issue Tracker backends
@@ -1719,7 +1719,7 @@ generated `flake.nix`.
 
   Config: `JIRA_BASE_URL` (site base URL), `JIRA_PROJECT_KEY`, and
   `JIRA_STATUS_MAPPING` / `JIRA_INCLUDE_COMMENTS` are non-secret, set via
-  `settings.repository` / `settings.lifecycleLabels` / `settings.issueDiscovery`
+  `issues.jira`
   (baked) or their env vars (runtime) — see the [flake options
   reference](flake-options.md). `JIRA_TOKEN` is a secret env var alongside
   `GH_TOKEN`: a Jira API token used alone as a Bearer PAT (Server/Data
@@ -1753,7 +1753,7 @@ generated `flake.nix`.
   when the native lookup is empty or unavailable — the same precedence and
   `(native)` / `(body)` source tagging as the `github` tracker.
 
-  Config: `FORGEJO_BASE_URL` is non-secret, set via `settings.issues.forgejo`
+  Config: `FORGEJO_BASE_URL` is non-secret, set via `issues.forgejo.baseURL`
   (baked) or its env var (runtime) — see the [flake options
   reference](flake-options.md). `spindrift doctor`'s `Probe()` check
   validates the token and instance reachability independently of the GitHub
@@ -1875,7 +1875,7 @@ The guard exists on the `github` and `forgejo` Code Forge merge paths (both
 implement `PRForge`). The push-only `git` forge has no launcher in the merge
 path and therefore no guard at all.
 
-Configure it via `settings.branches.mergeGuardPaths` (baked) or the
+Configure it via `git.merge.guardPaths` (baked) or the
 `MERGE_GUARD_PATHS` env var (runtime) — see the [flake options
 reference](flake-options.md) for the full knob surface.
 
@@ -2280,7 +2280,7 @@ gh label create agent-ambiguous-spec --repo owner/repo --color e0cffc --descript
 By default the research kind's verdict terminals are the fixed three above:
 `recommend` → `agent-research-recommend`, `reject` → `agent-research-reject`,
 `unclear` → `agent-research-unclear`. `RESEARCH_VERDICTS` (flake option
-`settings.issues.research.verdicts`, schema key `researchVerdicts`) makes
+`issues.research.verdicts`, schema key `researchVerdicts`) makes
 that vocabulary — and each verdict's label — operator-configurable instead,
 per [ADR 0022's amendment for issue
 #2201](adr/0022-research-is-a-dispatch-kind.md#amendment-issue-2201-the-verdict-vocabulary-and-label-mapping-are-configurable-via-research_verdicts).
@@ -2496,7 +2496,7 @@ top of leaking a private ticket slug into a PR body on the shared remote. To
 avoid both, the PR-body reference is a three-way conditional fragment (see
 the Conditional fragment registry above) keyed on `ISSUE_TRACKER` and the
 `LOCAL_ISSUE_REFERENCE` global setting (grouped settings surface, ADR 0015;
-`settings.issueDiscovery.localIssueReference`):
+`issues.localReference`):
 
 - `ISSUE_TRACKER=github`: unchanged — the PR body still MUST contain
   `Closes #${ISSUE_NUMBER}`.
