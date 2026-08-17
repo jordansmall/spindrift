@@ -1495,27 +1495,38 @@ exit 0
 // findings text per round -- e.g. issue #2552's findings-log test needs a
 // DISTINCT non-blocking finding per round to tell "the log accumulated both
 // rounds' text" apart from "the log just has the last round's text twice".
-func fakeReviewDriverBody(callLog, blockFinding, round1NonBlocking, round2NonBlocking string) string {
+// call3Body is a raw shell command run for call 3 -- the fix pass between
+// round 1's BLOCK and round 2's review -- e.g. a `git commit` advancing the
+// fake repo's own HEAD (issue #2551's reviewPassFakeDriverBodyWithFixCommit
+// below), or "" for a plain no-op (every other caller). Kept as a shared
+// parameter here, rather than each caller hand-rolling its own near-verbatim
+// copy of this script, since call 3 is the only case that ever varies.
+func fakeReviewDriverBody(callLog, blockFinding, round1NonBlocking, round2NonBlocking, call3Body string) string {
+	if call3Body == "" {
+		call3Body = ":"
+	}
 	return fmt.Sprintf(`: > "$DRIVER_LOG_PATH"
 n=$(wc -l < "%s")
 case "$n" in
   2) printf '%%s' '%s' | tee -a "$DRIVER_LOG_PATH" ;;
+  3) %s ;;
   4) printf '%%s' '%s' | tee -a "$DRIVER_LOG_PATH" ;;
   5) printf '%%s' '%s' | tee -a "$DRIVER_LOG_PATH" ;;
 esac
 exit 0
 `, callLog,
 		streamJSONOutcomeLine("VERDICT: BLOCK\\n\\n## Blocking\\n- "+blockFinding+"\\n\\n## Non-blocking\\n- "+round1NonBlocking),
+		call3Body,
 		streamJSONOutcomeLine("VERDICT: APPROVE\\n\\n## Blocking\\n- none\\n\\n## Non-blocking\\n- "+round2NonBlocking),
 		streamJSONOutcomeLine("SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=done nonce=abc"))
 }
 
 // reviewPassFakeDriverBody is fakeReviewDriverBody with a blocking round-1
-// finding and no distinguishing non-blocking text -- the shape most #2037
-// loop-mechanics tests need; see fakeReviewDriverBody's own doc for what
-// each parameter controls.
+// finding, no distinguishing non-blocking text, and a no-op call 3 -- the
+// shape most #2037 loop-mechanics tests need; see fakeReviewDriverBody's own
+// doc for what each parameter controls.
 func reviewPassFakeDriverBody(callLog string) string {
-	return fakeReviewDriverBody(callLog, "run.go:1 -- bug", "none", "none")
+	return fakeReviewDriverBody(callLog, "run.go:1 -- bug", "none", "none", "")
 }
 
 // reviewPassFakeDriverBodyWithDispositions is reviewPassFakeDriverBody's own
@@ -1717,8 +1728,14 @@ func TestRunWithReviewPassSequenceOnBlockThenApprove(t *testing.T) {
 // git repo at all -- logs to stderr and leaves state.ReviewedCommitAnchor
 // exactly as it already stood, never panicking or propagating an error the
 // caller (runWithReviewPass, mid-loop) would have no way to handle.
+// GIT_CEILING_DIRECTORIES pins the "not a git repo" precondition explicitly
+// (git stops its own upward parent-directory search at each listed path)
+// rather than merely relying on t.TempDir() happening to land outside
+// whatever git repo the test process itself started in.
 func TestRecordReviewedCommitAnchorDegradesOnGitFailure(t *testing.T) {
-	t.Chdir(t.TempDir()) // a plain temp dir, deliberately not a git repo
+	dir := t.TempDir() // a plain temp dir, deliberately not a git repo
+	t.Setenv("GIT_CEILING_DIRECTORIES", dir)
+	t.Chdir(dir)
 
 	const priorAnchor = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	state := &runstate.RunState{ReviewedCommitAnchor: priorAnchor}
@@ -1727,6 +1744,31 @@ func TestRecordReviewedCommitAnchorDegradesOnGitFailure(t *testing.T) {
 
 	if state.ReviewedCommitAnchor != priorAnchor {
 		t.Errorf("ReviewedCommitAnchor = %q, want it left unchanged at %q on a git failure", state.ReviewedCommitAnchor, priorAnchor)
+	}
+}
+
+// TestRecordReviewedCommitAnchorDegradesOnNonSHAOutput verifies
+// recordReviewedCommitAnchor's own validReviewedCommitAnchor guard: `git
+// rev-parse HEAD` can exit 0 while still printing something that isn't a
+// commit SHA on the combined stdout+stderr runGitIn reads (a git warning,
+// say) -- that output must never be persisted into
+// state.ReviewedCommitAnchor as if it were a real anchor. A fake `git` on
+// PATH stands in for the real binary, always exiting 0 with deliberately
+// non-SHA-shaped output regardless of its own argv.
+func TestRecordReviewedCommitAnchorDegradesOnNonSHAOutput(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "git"), []byte("#!/bin/sh\necho 'warning: not a sha'\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	const priorAnchor = "cccccccccccccccccccccccccccccccccccccccc"
+	state := &runstate.RunState{ReviewedCommitAnchor: priorAnchor}
+
+	recordReviewedCommitAnchor(state)
+
+	if state.ReviewedCommitAnchor != priorAnchor {
+		t.Errorf("ReviewedCommitAnchor = %q, want it left unchanged at %q when git exits 0 with non-SHA output", state.ReviewedCommitAnchor, priorAnchor)
 	}
 }
 
@@ -1740,19 +1782,7 @@ func TestRecordReviewedCommitAnchorDegradesOnGitFailure(t *testing.T) {
 // (HEAD after it), rather than both rounds coincidentally recording the
 // same unmoving HEAD.
 func reviewPassFakeDriverBodyWithFixCommit(callLog string) string {
-	return fmt.Sprintf(`: > "$DRIVER_LOG_PATH"
-n=$(wc -l < "%s")
-case "$n" in
-  2) printf '%%s' '%s' | tee -a "$DRIVER_LOG_PATH" ;;
-  3) git commit --allow-empty -m "round 1 fix" >/dev/null ;;
-  4) printf '%%s' '%s' | tee -a "$DRIVER_LOG_PATH" ;;
-  5) printf '%%s' '%s' | tee -a "$DRIVER_LOG_PATH" ;;
-esac
-exit 0
-`, callLog,
-		streamJSONOutcomeLine("VERDICT: BLOCK\\n\\n## Blocking\\n- run.go:1 -- bug\\n\\n## Non-blocking\\n- none"),
-		streamJSONOutcomeLine("VERDICT: APPROVE\\n\\n## Blocking\\n- none\\n\\n## Non-blocking\\n- none"),
-		streamJSONOutcomeLine("SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=done nonce=abc"))
+	return fakeReviewDriverBody(callLog, "run.go:1 -- bug", "none", "none", `git commit --allow-empty -m "round 1 fix" >/dev/null`)
 }
 
 // TestRunWithReviewPassSeedsRoundTwoWithDeltaFocusFromRecordedAnchor verifies
@@ -2306,7 +2336,7 @@ func TestRunWithReviewPassEmitsRunStateErrorWhenDispositionsTokenBudgetExceeded(
 // tell "the findings log accumulated both rounds' text" apart from "the log
 // just has the last round's text twice" (issue #2552).
 func findingsLogFakeDriverBody(callLog string) string {
-	return fakeReviewDriverBody(callLog, "none", "round-one-only-finding", "round-two-only-finding")
+	return fakeReviewDriverBody(callLog, "none", "round-one-only-finding", "round-two-only-finding", "")
 }
 
 // TestRunWithReviewPassAccumulatesFindingsAcrossRoundsInFindingsLog verifies
@@ -4384,7 +4414,7 @@ func TestSeedReviewPromptFromStateOmitsDeltaFocusForEmptyAnchor(t *testing.T) {
 // ReviewedCommitAnchor the same way as an empty one -- no delta-focus
 // section, no error -- rather than failing the seed.
 func TestSeedReviewPromptFromStateOmitsDeltaFocusForInvalidAnchor(t *testing.T) {
-	for _, anchor := range []string{"not-a-sha!", "abc", strings.Repeat("a", 41)} {
+	for _, anchor := range []string{"not-a-sha!", "abc", strings.Repeat("a", 65)} {
 		t.Run(anchor, func(t *testing.T) {
 			dir := t.TempDir()
 			promptFile := filepath.Join(dir, "prompt.txt")
