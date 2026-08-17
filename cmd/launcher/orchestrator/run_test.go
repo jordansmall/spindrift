@@ -2425,7 +2425,14 @@ func TestRunWithReviewPassPersistsDecisionsPathWhenTheFinalPassWritesIt(t *testi
 // originates on the implement pass too (decisionsFakeDriverBodyRoundOne's
 // own doc comment), so this fixture's two writes span an implement call and
 // a fix call rather than two fix calls.
-func twoRoundDecisionsFakeDriverBody(callLog, decisionsPath, round1Decisions, round2Decisions string) string {
+// pass5PromptCopyPath: seedAndInvokePass removes a prior pass's own seeded
+// prompt file once a later pass seeds its own (only the run's very last
+// seeded file is deliberately left on disk), so a caller wanting to inspect
+// call 5's own --prompt-file content after run() returns can't just read
+// the path back off disk -- call 5's own branch below copies it out to a
+// side path first, mirroring decisionsFakeDriverBodyRoundOne's own
+// fixPromptCopyPath technique.
+func twoRoundDecisionsFakeDriverBody(callLog, decisionsPath, round1Decisions, round2Decisions, pass5PromptCopyPath string) string {
 	return fmt.Sprintf(`: > "$DRIVER_LOG_PATH"
 n=$(wc -l < "%s")
 case "$n" in
@@ -2433,6 +2440,7 @@ case "$n" in
   2) printf '%%s' '%s' | tee -a "$DRIVER_LOG_PATH" ;;
   3) printf '%%s' '%s' > %s ;;
   4) printf '%%s' '%s' | tee -a "$DRIVER_LOG_PATH" ;;
+  5) prev=""; for arg in "$@"; do if [ "$prev" = "--prompt-file" ]; then cp "$arg" %s; fi; prev="$arg"; done ;;
   6) printf '%%s' '%s' | tee -a "$DRIVER_LOG_PATH" ;;
   7) printf '%%s' '%s' | tee -a "$DRIVER_LOG_PATH" ;;
 esac
@@ -2442,6 +2450,7 @@ exit 0
 		streamJSONOutcomeLine("VERDICT: BLOCK\\n\\n## Blocking\\n- run.go:1 -- bug\\n\\n## Non-blocking\\n- none"),
 		round2Decisions, fmt.Sprintf("%q", decisionsPath),
 		streamJSONOutcomeLine("VERDICT: BLOCK\\n\\n## Blocking\\n- run.go:2 -- another bug\\n\\n## Non-blocking\\n- none"),
+		fmt.Sprintf("%q", pass5PromptCopyPath),
 		streamJSONOutcomeLine("VERDICT: APPROVE\\n\\n## Blocking\\n- none\\n\\n## Non-blocking\\n- none"),
 		streamJSONOutcomeLine("SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=done nonce=abc"))
 }
@@ -2462,9 +2471,10 @@ func TestRunWithReviewPassAccumulatesDecisionsAcrossRoundsInDecisionsLog(t *test
 	dir := t.TempDir()
 	callLog := filepath.Join(dir, "calls.log")
 	decisionsPath := filepath.Join(dir, "decisions.md")
+	pass5PromptCopyPath := filepath.Join(dir, "pass5-prompt-copy.txt")
 	const round1Decisions = "- chose approach X over Y: simpler, no new dependency"
 	const round2Decisions = "- chose to keep the retry cap at 3: matches the existing backoff budget"
-	writeFakeDriverExec(t, dir, callLog, twoRoundDecisionsFakeDriverBody(callLog, decisionsPath, round1Decisions, round2Decisions))
+	writeFakeDriverExec(t, dir, callLog, twoRoundDecisionsFakeDriverBody(callLog, decisionsPath, round1Decisions, round2Decisions, pass5PromptCopyPath))
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
 	promptFile := filepath.Join(dir, "prompt.txt")
@@ -2500,6 +2510,15 @@ func TestRunWithReviewPassAccumulatesDecisionsAcrossRoundsInDecisionsLog(t *test
 		t.Fatalf("run: %v", err)
 	}
 
+	calls, err := os.ReadFile(callLog)
+	if err != nil {
+		t.Fatalf("read callLog: %v", err)
+	}
+	lines := strings.Split(strings.TrimRight(string(calls), "\n"), "\n")
+	if len(lines) != 7 {
+		t.Fatalf("driver-exec invocation count = %d, want 7 (log: %q)", len(lines), calls)
+	}
+
 	got, err := runstate.ReadRunState(stateFile)
 	if err != nil {
 		t.Fatalf("ReadRunState: %v", err)
@@ -2519,6 +2538,27 @@ func TestRunWithReviewPassAccumulatesDecisionsAcrossRoundsInDecisionsLog(t *test
 	}
 	if !strings.Contains(string(logContent), round1Decisions) || !strings.Contains(string(logContent), round2Decisions) {
 		t.Errorf("decisions log = %q, want both rounds' own entries present", logContent)
+	}
+
+	// AC7's actually-observable effect: the accumulated log must reach a
+	// LATER implement/fix pass's own seeded prompt, not just sit unread on
+	// disk. Call 5 is the second fix pass (following call 4's review-BLOCK),
+	// seeded from state as it stood after both round 1 (call 1) and round 2
+	// (call 3) had already appended. seedAndInvokePass removes a prior
+	// pass's own seeded prompt file once a later pass seeds its own -- only
+	// the run's very last one survives on disk -- so call 5's own fake
+	// driver-exec branch copied its --prompt-file content out to
+	// pass5PromptCopyPath before returning; read that copy instead of
+	// call 5's own (long since deleted) --prompt-file path.
+	pass3Seeded, err := os.ReadFile(pass5PromptCopyPath)
+	if err != nil {
+		t.Fatalf("read pass-5 prompt copy: %v", err)
+	}
+	if !strings.Contains(string(pass3Seeded), round1Decisions) {
+		t.Errorf("pass 5 (fix) seeded prompt = %q, want round 1's own decision present -- an earlier round's entry must never be dropped", pass3Seeded)
+	}
+	if !strings.Contains(string(pass3Seeded), round2Decisions) {
+		t.Errorf("pass 5 (fix) seeded prompt = %q, want round 2's own decision present", pass3Seeded)
 	}
 }
 

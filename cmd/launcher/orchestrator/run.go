@@ -1300,25 +1300,29 @@ const dispositionsTotalTokenCeiling = 400
 
 // decisionsMeanTokenCeiling bounds the mean estimated tokens per decisions
 // entry (issue #2695), mirroring dispositionsMeanTokenCeiling's own tripwire
-// role: a decisions entry has three sub-parts (what was chosen, what was
-// rejected, and the constraint that drove the choice), so it can legitimately
-// run a little longer than a one-line dispositions entry, but the terse
-// reference shape a decisions entry is meant to keep -- point at commits,
-// files, or issue numbers rather than restating diff hunks or transcript
-// excerpts -- still comfortably fits the same ceiling dispositions entries
-// use. A terse entry like "run.go:42 chose interface X over Y -- Y couldn't
-// satisfy the io.Writer constraint, see commit a1b2c3d" fits comfortably
-// inside it.
-const decisionsMeanTokenCeiling = 40
+// role but set ten tokens higher: a decisions entry has three sub-parts
+// (what was chosen, what was rejected, and the constraint that drove the
+// choice) against a dispositions entry's one, so a realistic terse entry
+// following review-loop-orchestrator.md's own suggested shape --
+// "<what/where> -> chose <X>, rejected <Y> -- <constraint, with a
+// reference>" filled in, e.g. "run.go:42 -> chose interface X, rejected Y
+// -- Y couldn't satisfy the io.Writer constraint, see commit a1b2c3d" --
+// lands close enough to dispositions's own 40-token ceiling to risk noisy
+// false trips against entries that are still genuinely terse references,
+// not restated content. The higher ceiling leaves that shape real headroom
+// while still catching the restatement mode (diff hunks, file contents,
+// transcript excerpts) it exists to flag.
+const decisionsMeanTokenCeiling = 50
 
 // decisionsTotalTokenCeiling bounds one round's total estimated tokens
 // across every decisions entry, mirroring dispositionsTotalTokenCeiling's own
 // role: the tripwire decisionsMeanTokenCeiling alone cannot catch a pasted
 // diff hunk or file excerpt, since it is many individually-short lines each
 // comfortably under the mean ceiling on its own. Left at the same value as
-// dispositionsTotalTokenCeiling for the same reason the mean ceiling is:
-// ten compact, well-formed entries is already a large single-round decision
-// count, and this leaves the same headroom above that before tripping.
+// dispositionsTotalTokenCeiling: eight compact, well-formed three-part
+// entries at decisionsMeanTokenCeiling each is already a large single-round
+// decision count, and this leaves comparable headroom above that before
+// tripping.
 const decisionsTotalTokenCeiling = 400
 
 // estimateTokens is a cheap, tokenizer-agnostic token-count heuristic (~4
