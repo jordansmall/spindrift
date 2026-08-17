@@ -1711,91 +1711,82 @@ func TestRunWithReviewPassSequenceOnBlockThenApprove(t *testing.T) {
 	}
 }
 
-// TestRunWithReviewPassRecordsReviewedCommitAnchor verifies runWithReviewPass
-// (issue #2551 slice 2) records the orchestrator's own repo workdir HEAD into
-// state.ReviewedCommitAnchor after every completed review pass, including
-// round 1 -- not just on a terminal BLOCK/APPROVE. recordReviewedCommitAnchor
-// resolves the repo root via os.Getwd(), so this test chdirs into a fresh,
-// disposable temp git repo (chdirToFreshWorkerRepo, workers_test.go) rather
-// than relying on this package's own checkout -- the checked-out repo has no
-// `.git` directory once copied into the Nix build sandbox that
-// `checks-inbox` runs under, so a bare `git rev-parse HEAD` against "."
-// would fail there even though it happens to succeed in a plain `go test`
-// run from a real working tree.
-func TestRunWithReviewPassRecordsReviewedCommitAnchor(t *testing.T) {
-	repoRoot := chdirToFreshWorkerRepo(t)
-	wantHead := gitOutputT(t, repoRoot, "rev-parse", "HEAD")
+// TestRecordReviewedCommitAnchorDegradesOnGitFailure verifies
+// recordReviewedCommitAnchor's own fail-open contract (issue #2551, see its
+// doc comment): a `git rev-parse HEAD` failure -- here, running outside any
+// git repo at all -- logs to stderr and leaves state.ReviewedCommitAnchor
+// exactly as it already stood, never panicking or propagating an error the
+// caller (runWithReviewPass, mid-loop) would have no way to handle.
+func TestRecordReviewedCommitAnchorDegradesOnGitFailure(t *testing.T) {
+	t.Chdir(t.TempDir()) // a plain temp dir, deliberately not a git repo
 
-	dir := t.TempDir()
-	callLog := filepath.Join(dir, "calls.log")
-	writeFakeDriverExec(t, dir, callLog, reviewPassFakeDriverBody(callLog))
-	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	const priorAnchor = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	state := &runstate.RunState{ReviewedCommitAnchor: priorAnchor}
 
-	promptFile := filepath.Join(dir, "prompt.txt")
-	if err := os.WriteFile(promptFile, []byte("ORIGINAL PROMPT TEXT"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	reviewPromptFile := filepath.Join(dir, "review-prompt.txt")
-	if err := os.WriteFile(reviewPromptFile, []byte("REVIEW PROMPT TEXT"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	sessionFile := filepath.Join(dir, "session.txt")
-	if err := os.WriteFile(sessionFile, []byte("--session-id fake-id"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	stateFile := filepath.Join(dir, "run-state.json")
+	recordReviewedCommitAnchor(state)
 
-	cfg := config{
-		promptFile:       promptFile,
-		reviewPromptFile: reviewPromptFile,
-		sessionFile:      sessionFile,
-		driverBin:        "claude",
-		issue:            "7",
-		logPath:          filepath.Join(dir, "stream.log"),
-		heartbeatLog:     filepath.Join(dir, "heartbeat.log"),
-		stateFile:        stateFile,
-		maxReviewRounds:  3,
-		maxSlices:        10,
+	if state.ReviewedCommitAnchor != priorAnchor {
+		t.Errorf("ReviewedCommitAnchor = %q, want it left unchanged at %q on a git failure", state.ReviewedCommitAnchor, priorAnchor)
 	}
+}
 
-	var stdout bytes.Buffer
-	if _, err := run(cfg, &stdout); err != nil {
-		t.Fatalf("run: %v", err)
-	}
-
-	got, err := runstate.ReadRunState(stateFile)
-	if err != nil {
-		t.Fatalf("ReadRunState: %v", err)
-	}
-	if got.ReviewedCommitAnchor != wantHead {
-		t.Errorf("ReviewedCommitAnchor = %q, want the repo workdir's actual HEAD %q", got.ReviewedCommitAnchor, wantHead)
-	}
+// reviewPassFakeDriverBodyWithFixCommit is reviewPassFakeDriverBody's own
+// BLOCK-then-APPROVE script plus one extra step (issue #2551): call 3, the
+// fix pass that runs between round 1's BLOCK and round 2's review, commits
+// an empty commit in the current directory (the test's own chdir'd fake
+// repo, chdirToFreshWorkerRepo) -- the way a real fix pass would advance
+// the repo's own HEAD -- so a caller can distinguish round 1's own
+// recorded anchor (the repo's HEAD before this commit) from round 2's
+// (HEAD after it), rather than both rounds coincidentally recording the
+// same unmoving HEAD.
+func reviewPassFakeDriverBodyWithFixCommit(callLog string) string {
+	return fmt.Sprintf(`: > "$DRIVER_LOG_PATH"
+n=$(wc -l < "%s")
+case "$n" in
+  2) printf '%%s' '%s' | tee -a "$DRIVER_LOG_PATH" ;;
+  3) git commit --allow-empty -m "round 1 fix" >/dev/null ;;
+  4) printf '%%s' '%s' | tee -a "$DRIVER_LOG_PATH" ;;
+  5) printf '%%s' '%s' | tee -a "$DRIVER_LOG_PATH" ;;
+esac
+exit 0
+`, callLog,
+		streamJSONOutcomeLine("VERDICT: BLOCK\\n\\n## Blocking\\n- run.go:1 -- bug\\n\\n## Non-blocking\\n- none"),
+		streamJSONOutcomeLine("VERDICT: APPROVE\\n\\n## Blocking\\n- none\\n\\n## Non-blocking\\n- none"),
+		streamJSONOutcomeLine("SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=done nonce=abc"))
 }
 
 // TestRunWithReviewPassSeedsRoundTwoWithDeltaFocusFromRecordedAnchor verifies
 // issue #2551's anchor-recording (slice 2, recordReviewedCommitAnchor) and
 // delta-focus seeding (slice 3, seedReviewPromptFromState) actually connect
 // end to end through a real multi-round loop at the fake-driver-exec seam
-// (AC5), not merely in isolation the way
-// TestRunWithReviewPassRecordsReviewedCommitAnchor and the
-// TestSeedReviewPromptFromStateIncludesDeltaFocus* unit tests each already
-// do on their own. Round 1's review pass (call 2) records this repo's own
-// real HEAD SHA into state.ReviewedCommitAnchor; round 2's review pass
-// (call 4) must then read that same anchor back out of run-state and seed
-// its own --prompt-file with a "### Delta focus" section naming it. The
-// fake driver-exec here never touches the real repo, so -- exactly as in
-// TestRunWithReviewPassRecordsReviewedCommitAnchor -- this test chdirs into
-// its own fresh, disposable temp git repo (chdirToFreshWorkerRepo) rather
-// than relying on this package's own checkout, which has no `.git`
-// directory once copied into the Nix build sandbox `checks-inbox` runs
-// under.
+// (AC5), not merely in isolation the way the
+// TestSeedReviewPromptFromStateIncludesDeltaFocus* unit tests already do on
+// their own. recordReviewedCommitAnchor resolves the repo root via
+// os.Getwd(), so this test chdirs into a fresh, disposable temp git repo
+// (chdirToFreshWorkerRepo, workers_test.go) rather than relying on this
+// package's own checkout -- the checked-out repo has no `.git` directory
+// once copied into the Nix build sandbox that `checks-inbox` runs under, so
+// a bare `git rev-parse HEAD` against "." would fail there even though it
+// happens to succeed in a plain `go test` run from a real working tree.
+//
+// reviewPassFakeDriverBodyWithFixCommit advances that fake repo's own HEAD
+// between round 1 and round 2 (a real fix pass would too), so this test can
+// tell "round 1's own anchor" and "round 2's own anchor" apart instead of
+// both coincidentally recording the same unmoving HEAD: round 1's review
+// pass (call 2) records round1Head into state.ReviewedCommitAnchor; the fix
+// pass (call 3) advances HEAD to round2Head; round 2's review pass (call 4)
+// must seed its own --prompt-file with a "### Delta focus" section naming
+// round1Head -- the anchor as it stood when that prompt was composed, before
+// round 2 itself ran -- and, after round 2 completes, must have overwritten
+// state.ReviewedCommitAnchor with round2Head, proving the recording is
+// fresh each round rather than write-once.
 func TestRunWithReviewPassSeedsRoundTwoWithDeltaFocusFromRecordedAnchor(t *testing.T) {
 	repoRoot := chdirToFreshWorkerRepo(t)
-	wantHead := gitOutputT(t, repoRoot, "rev-parse", "HEAD")
+	round1Head := gitOutputT(t, repoRoot, "rev-parse", "HEAD")
 
 	dir := t.TempDir()
 	callLog := filepath.Join(dir, "calls.log")
-	writeFakeDriverExec(t, dir, callLog, reviewPassFakeDriverBody(callLog))
+	writeFakeDriverExec(t, dir, callLog, reviewPassFakeDriverBodyWithFixCommit(callLog))
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
 	promptFile := filepath.Join(dir, "prompt.txt")
@@ -1830,12 +1821,17 @@ func TestRunWithReviewPassSeedsRoundTwoWithDeltaFocusFromRecordedAnchor(t *testi
 		t.Fatalf("run: %v", err)
 	}
 
+	round2Head := gitOutputT(t, repoRoot, "rev-parse", "HEAD")
+	if round2Head == round1Head {
+		t.Fatalf("repo HEAD after run() = %q, want it to have advanced past round1Head %q (the fix pass's own commit)", round2Head, round1Head)
+	}
+
 	got, err := runstate.ReadRunState(stateFile)
 	if err != nil {
 		t.Fatalf("ReadRunState: %v", err)
 	}
-	if got.ReviewedCommitAnchor != wantHead {
-		t.Fatalf("ReviewedCommitAnchor = %q, want the repo workdir's actual HEAD %q", got.ReviewedCommitAnchor, wantHead)
+	if got.ReviewedCommitAnchor != round2Head {
+		t.Fatalf("ReviewedCommitAnchor = %q, want round 2's own freshly-recorded HEAD %q, not round 1's stale %q", got.ReviewedCommitAnchor, round2Head, round1Head)
 	}
 
 	calls, err := os.ReadFile(callLog)
@@ -1858,8 +1854,11 @@ func TestRunWithReviewPassSeedsRoundTwoWithDeltaFocusFromRecordedAnchor(t *testi
 	if !strings.Contains(string(round2ReviewSeeded), "### Delta focus") {
 		t.Errorf("pass 4 (round-2 review) seeded prompt = %q, want it to contain a %q section", round2ReviewSeeded, "### Delta focus")
 	}
-	if !strings.Contains(string(round2ReviewSeeded), wantHead) {
-		t.Errorf("pass 4 (round-2 review) seeded prompt = %q, want it to reference round 1's own recorded anchor %q", round2ReviewSeeded, wantHead)
+	if !strings.Contains(string(round2ReviewSeeded), round1Head) {
+		t.Errorf("pass 4 (round-2 review) seeded prompt = %q, want it to reference round 1's own recorded anchor %q (composed before round 2's fix-pass commit)", round2ReviewSeeded, round1Head)
+	}
+	if strings.Contains(string(round2ReviewSeeded), round2Head) {
+		t.Errorf("pass 4 (round-2 review) seeded prompt = %q, want it to reference only round 1's anchor %q, not round 2's own not-yet-recorded HEAD %q", round2ReviewSeeded, round1Head, round2Head)
 	}
 }
 

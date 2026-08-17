@@ -353,15 +353,17 @@ func run(cfg config, stdout io.Writer) (int, error) {
 // recordReviewedCommitAnchor records the orchestrator's repo workdir HEAD
 // into state.ReviewedCommitAnchor (issue #2551) via one `git rev-parse
 // HEAD` invocation, right after a review pass completes. Best-effort like
-// dispatch.go's own rev-parse HEAD call: an os.Getwd or git failure logs to
-// stderr and leaves state.ReviewedCommitAnchor at whatever a prior review
-// pass already recorded (or empty, on the first pass), never errors the
-// run -- a later pass's seeding degrades to a full review on a missing or
-// stale anchor, so a failed recording here is never fatal.
+// dispatch.go's own rev-parse HEAD call: an os.Getwd or git failure, or
+// output that doesn't look like a real commit SHA once trimmed (a git
+// warning sharing runGitIn's combined stdout+stderr, say), logs to stderr
+// and leaves state.ReviewedCommitAnchor at whatever a prior review pass
+// already recorded (or empty, on the first pass), never errors the run --
+// a later pass's seeding degrades to a full review on a missing anchor, so
+// a failed recording here is never fatal.
 func recordReviewedCommitAnchor(state *runstate.RunState) {
 	repoRoot, err := os.Getwd()
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "orchestrator: rev-parse HEAD for reviewed-commit anchor:", err)
+		fmt.Fprintln(os.Stderr, "orchestrator: get repo root for reviewed-commit anchor:", err)
 		return
 	}
 	headOut, err := runGitIn(repoRoot, "rev-parse", "HEAD")
@@ -369,7 +371,12 @@ func recordReviewedCommitAnchor(state *runstate.RunState) {
 		fmt.Fprintln(os.Stderr, "orchestrator: rev-parse HEAD for reviewed-commit anchor:", err, strings.TrimSpace(headOut))
 		return
 	}
-	state.ReviewedCommitAnchor = strings.TrimSpace(headOut)
+	head := strings.TrimSpace(headOut)
+	if !validReviewedCommitAnchor(head) {
+		fmt.Fprintln(os.Stderr, "orchestrator: rev-parse HEAD for reviewed-commit anchor: unexpected output:", head)
+		return
+	}
+	state.ReviewedCommitAnchor = head
 }
 
 // runWithReviewPass implements the #2037 code-owned review pass: instead of
@@ -817,19 +824,20 @@ func seedReviewPromptFromState(promptFile string, state runstate.RunState) (stri
 	}
 	if hasAnchor {
 		b.WriteString("### Delta focus\n\n")
-		b.WriteString("This branch's HEAD advanced since your last review pass, which ran at\n")
-		fmt.Fprintf(&b, "commit %s. Verify the prior verdict and dispositions above against\n", state.ReviewedCommitAnchor)
-		b.WriteString("the current diff, and concentrate your hunt on what changed since then:\n\n")
+		fmt.Fprintf(&b, "Your last review pass ran at commit %s. Verify the prior verdict\n", state.ReviewedCommitAnchor)
+		b.WriteString("and dispositions above against the current diff, and concentrate your\n")
+		b.WriteString("hunt on whatever changed since then (nothing, if the fix pass made no\n")
+		b.WriteString("new commits):\n\n")
 		fmt.Fprintf(&b, "  git diff %s..HEAD           # what changed since your last pass\n", state.ReviewedCommitAnchor)
 		fmt.Fprintf(&b, "  git log %s..HEAD --oneline  # new commits since your last pass\n\n", state.ReviewedCommitAnchor)
 		b.WriteString("Territory outside that range was already cleared last round -- re-examine\n")
 		b.WriteString("it only where a new commit actually touches it. The full branch diff (the\n")
-		b.WriteString("Inputs section above) stays available throughout; this narrows where you\n")
-		b.WriteString("spend the hunt, never what you're allowed to see.\n\n")
+		b.WriteString("Inputs section's own `git diff` above) stays available throughout; this\n")
+		b.WriteString("narrows where you spend the hunt, never what you're allowed to see.\n\n")
 		b.WriteString("Before you may issue APPROVE, re-skim the FULL diff's shape end to end\n")
-		b.WriteString("(the origin/base...HEAD diff, not just the range above) regardless of the\n")
-		b.WriteString("delta focus above -- delta review must never narrow final approval's own\n")
-		b.WriteString("coverage.\n\n")
+		b.WriteString("(the Inputs section's own `git diff` above, not just the range above)\n")
+		b.WriteString("regardless of the delta focus above -- delta review must never narrow\n")
+		b.WriteString("final approval's own coverage.\n\n")
 	}
 	b.WriteString("---\n\n")
 	b.Write(original)
