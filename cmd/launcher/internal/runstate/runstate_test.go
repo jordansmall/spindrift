@@ -149,6 +149,29 @@ func TestRunStateRoundTripIncludesDispositionsLogPath(t *testing.T) {
 	}
 }
 
+// TestRunStateRoundTripIncludesReviewedCommitAnchor verifies
+// ReviewedCommitAnchor (issue #2551: the git commit SHA the orchestrator's
+// repo workdir was at when the most recent review pass ran) survives a
+// WriteRunState/ReadRunState round trip like every other field.
+func TestRunStateRoundTripIncludesReviewedCommitAnchor(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "run-state.json")
+	want := RunState{
+		LastVerdict:          "BLOCK",
+		ReviewedCommitAnchor: "0123456789abcdef0123456789abcdef01234567",
+	}
+
+	if err := WriteRunState(path, want); err != nil {
+		t.Fatalf("WriteRunState: %v", err)
+	}
+	got, err := ReadRunState(path)
+	if err != nil {
+		t.Fatalf("ReadRunState: %v", err)
+	}
+	if got.ReviewedCommitAnchor != want.ReviewedCommitAnchor {
+		t.Errorf("ReviewedCommitAnchor = %q, want %q", got.ReviewedCommitAnchor, want.ReviewedCommitAnchor)
+	}
+}
+
 // TestRunStateRoundTripIncludesUnlandedSlices verifies UnlandedSlices (issue
 // #2060 review finding: DoneSlices names whose branch integration ended in
 // conflict or failure) survives a WriteRunState/ReadRunState round trip like
@@ -355,6 +378,11 @@ func TestRunStateIsEmpty(t *testing.T) {
 	// reads it.
 	if !(RunState{DispositionsLogPath: "/tmp/dispositions-log.md"}).IsEmpty() {
 		t.Error("IsEmpty() of a state with only DispositionsLogPath set = false, want true")
+	}
+	// ReviewedCommitAnchor, same reasoning: only seedReviewPromptFromState
+	// (issue #2551) reads it.
+	if !(RunState{ReviewedCommitAnchor: "0123456789abcdef0123456789abcdef01234567"}).IsEmpty() {
+		t.Error("IsEmpty() of a state with only ReviewedCommitAnchor set = false, want true")
 	}
 	nonEmpty := []RunState{
 		{LastVerdict: "BLOCK"},

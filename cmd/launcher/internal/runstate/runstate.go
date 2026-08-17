@@ -70,6 +70,17 @@ type RunState struct {
 	// the most recent round's. Empty until the first fix pass appends to
 	// it.
 	DispositionsLogPath string `json:"dispositions_log_path,omitempty"`
+	// ReviewedCommitAnchor is the git commit SHA the orchestrator's own repo
+	// workdir was at when the most recent review pass ran (issue #2551),
+	// recorded via one `git rev-parse HEAD` invocation right after that pass
+	// completes. seedReviewPromptFromState reads this on a round-N (N>1)
+	// review pass to focus the reviewer's hunt on the range since this
+	// commit, while the full branch diff stays available and
+	// previously-cleared territory is re-examined only where a new commit
+	// touches it. A missing or invalid value degrades to a full review, the
+	// same fail-open convention as the run state artifact itself -- never an
+	// error. Empty until the first review pass records it.
+	ReviewedCommitAnchor string `json:"reviewed_commit_anchor,omitempty"`
 	// ReviewFindings is the code-owned review pass's own final message --
 	// the "VERDICT: ..." line plus its Blocking/Non-blocking sections,
 	// verbatim -- recorded here (distinct from the bare LastVerdict word)
@@ -140,8 +151,9 @@ func (s RunState) IsEmpty() bool {
 	// field actually seeds. Including it here would make IsEmpty return
 	// false for a state whose only set field is DispositionsPath, and
 	// seedPromptFromState would then render a "Run-state handoff" section
-	// with no bullets in it at all. DispositionsLogPath joins it for the
-	// identical reason: only seedReviewPromptFromState reads it.
+	// with no bullets in it at all. DispositionsLogPath and
+	// ReviewedCommitAnchor join it for the identical reason: only
+	// seedReviewPromptFromState -- not seedPromptFromState -- reads either.
 	return s.LastVerdict == "" &&
 		s.ScoutBriefPath == "" &&
 		s.PassSummaryPath == "" &&
