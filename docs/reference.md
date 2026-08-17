@@ -1401,8 +1401,7 @@ artifact, not a growing transcript:
   where a new commit actually touches it. The section also requires the
   reviewer to re-skim the FULL diff's shape end to end before it may issue
   APPROVE, regardless of the delta focus above — delta review must never
-  narrow final approval's own coverage. Round 1's review prompt is
-  completely unaffected by any of this. A missing or invalid-looking anchor
+  narrow final approval's own coverage. A missing or invalid-looking anchor
   omits the section entirely, degrading to the unchanged full-review prompt,
   never an error.
 - **Dispositions log.** Each fix pass's own fresh `--dispositions-path` file
