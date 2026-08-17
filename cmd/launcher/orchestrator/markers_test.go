@@ -20,7 +20,10 @@ import (
 // to single-pass on ORCHESTRATOR_ENABLED runs (ADR 0035). Mirrors the
 // driver-registry parity test's shape (internal/driver/parity_test.go): read
 // the writer-side source of truth from disk and assert every reader-side
-// literal appears in it verbatim.
+// literal appears in it verbatim. The caveman-default.md subsection below
+// (issue #2710) extends the same disk-read-and-assert shape to a prompt
+// that never itself emits these markers, only names them in an exemption
+// list -- guarding that list against silently dropping a marker.
 func TestPromptMarkersMatchScanner(t *testing.T) {
 	repoRoot := filepath.Join("..", "..", "..")
 
@@ -54,6 +57,29 @@ func TestPromptMarkersMatchScanner(t *testing.T) {
 		rendered := readPromptFile(t, repoRoot, fragment)
 		if !strings.Contains(rendered, outcome.PRIntentToken) {
 			t.Errorf("%s no longer emits %q, the exact literal outcome.LastPRIntentInLog and entrypoint.sh's PR-intent gate both scan for", fragment, outcome.PRIntentToken)
+		}
+	}
+
+	// The caveman narration directive's marker exemption list (issue
+	// #2710): caveman-default.md tells the agent to route "all narration and
+	// prose output" through /caveman except what it names exempt. Before
+	// this fix, the exemption list named only code/commands/error
+	// messages/commit messages -- not the machine-parsed marker grammar
+	// below. That gap was live, not theoretical, for outcome.Token and its
+	// note= field: the directive is already wired into issue-prompt.md,
+	// the very prompt that emits the SPINDRIFT_OUTCOME line, so a
+	// caveman-compressed outcome line or note= field was a real risk today.
+	// VerdictApprove/VerdictBlock and outcome.PRIntentToken were safe only
+	// by accident so far -- the directive isn't wired into review-prompt.md
+	// or the outbox fragments that emit them -- but the issue that
+	// motivates this fix explicitly widens the directive's reach next, so
+	// the same gap would have opened for them too. Assert the fragment
+	// names each marker verbatim so a future rewording can't reopen either
+	// gap.
+	cavemanFragment := readPromptFile(t, repoRoot, filepath.Join("fragments", "caveman-default.md"))
+	for _, marker := range []string{outcome.Token, outcome.PRIntentToken, VerdictApprove, VerdictBlock} {
+		if !strings.Contains(cavemanFragment, marker) {
+			t.Errorf("fragments/caveman-default.md no longer names marker %q in its exemption list", marker)
 		}
 	}
 

@@ -366,7 +366,10 @@ The caveman-default step is keyed on the baked skill itself rather than a
 separate knob: whenever `DRIVER_SKILLS_DIR/caveman/SKILL.md` is present at
 runtime, both the issue pass and the fix pass (via the shared COMMS block,
 see below) direct the agent to use `/caveman` for narration and prose,
-exempting code, commands, error messages, and commit messages. A Consumer
+exempting code, commands, error messages, and commit messages, plus the
+machine-parsed marker grammar (the `SPINDRIFT_OUTCOME` line and its `note=`
+field, the `VERDICT:` line, and host-relay signal lines like
+`SPINDRIFT_PR_INTENT`) — see `fragments/caveman-default.md`. A Consumer
 that never bakes the skill gets a prompt with zero mention of it.
 
 A fix box (dispatched when CI comes back red — see [Runtime flow](#how-a-run-works))
@@ -3248,7 +3251,9 @@ them as slash commands:
 - [`caveman`](https://github.com/juliusbrussee/caveman) — `/caveman`. The
   rendered issue-pass and fix-pass prompts direct the agent to default to it
   for narration and prose, compressing narration ~65% in output tokens
-  without touching code, commands, error messages, or commit messages.
+  without touching code, commands, error messages, commit messages, or the
+  machine-parsed marker grammar (the outcome line and its `note=` field, the
+  verdict line, and host-relay signal lines).
 - [`tdd`](https://github.com/mattpocock/skills) and
   [`to-tickets`](https://github.com/mattpocock/skills) — `/tdd`,
   `/to-tickets` (pinned at tag `v1.1.0`). The IMPLEMENT section defers its

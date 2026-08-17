@@ -806,7 +806,7 @@ Respond terse like smart caveman.
 SKILL
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  ! grep -q 'verbatim\.Your text output' "$DRIVER_PROMPT_FILE"
+  ! grep -q 'message\.Your text output' "$DRIVER_PROMPT_FILE"
 }
 
 # issue #689: TDD_BAKED had zero test coverage of its gate mechanism before
