@@ -97,22 +97,6 @@
     fragment = "coordinator.md";
     var = "COORDINATOR_STEP";
   }
-  # The below-model parallel dispatch AC1 requires (issue #2059): a
-  # coordinator can, instead of (or in addition to) the sequential
-  # WORKER_PROVISIONED delegation above, emit a slice manifest and end its
-  # turn -- the Go orchestrator's own OS-level fan-out/join, one driver-exec
-  # worker process per slice, each in its own git worktree (issue #2058).
-  # Orthogonal to WORKER_PROVISIONED: that gate is about the Agent-tool
-  # `worker` subagent this session can delegate one slice at a time to;
-  # this one is about the orchestrator's own parallel dispatch, available
-  # whenever ORCHESTRATOR itself is on, regardless of whether a `worker`
-  # subagent happens to be provisioned too. Reuses the existing $ORCHESTRATOR
-  # bash variable directly as the gate -- no new precompute needed.
-  {
-    gate = "ORCHESTRATOR";
-    fragment = "coordinator-parallel-dispatch.md";
-    var = "COORDINATOR_PARALLEL_STEP";
-  }
   # The write-mechanism split (issue #2019): a filer configured under
   # read-only + ORCHESTRATOR_ENABLED holds no write token, so its FILE
   # ISSUES step (this pair) and its own in-agent label/file steps (the two

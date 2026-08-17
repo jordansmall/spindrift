@@ -43,15 +43,6 @@
   # composition entirely; the legacy knobs are then ignored.
   roster ? null,
   conflictResolvePrompt ? builtins.readFile ../templates/default/prompts/conflict-resolve-prompt.md,
-  # The cherry-pick-flavored counterpart to conflictResolvePrompt above
-  # (issue #2060 review finding): conflictResolvePrompt is written for a
-  # `git rebase` conflict (${BASE_BRANCH}/${BRANCH} placeholders, `git
-  # rebase --continue`), so the Go orchestrator's own `git cherry-pick
-  # --no-commit` slice-integration conflict path (cmd/launcher/orchestrator)
-  # renders this counterpart instead, at runtime, substituting the
-  # conflicting slice's own branch name and revision range into its
-  # ${BRANCH}/${REV_RANGE} placeholders.
-  conflictResolveCherryPickPrompt ? builtins.readFile ../templates/default/prompts/conflict-resolve-cherry-pick-prompt.md,
   # Driven instead of `prompt` on a fix box (FIX_PASS>0, ADR: selfHeal/runFix
   # in cmd/launcher): the branch is already checked out, so this warm-fix
   # prompt skips scout/implement-from-scratch and goes straight to
@@ -893,7 +884,6 @@ let
       filerPrompt
       workerPrompt
       conflictResolvePrompt
-      conflictResolveCherryPickPrompt
       fixPrompt
       fragmentsSourceDir
       fragmentRegistryPreamble
@@ -979,7 +969,6 @@ let
       "cp ${hostPkgs.writeText pf e.prompt} $out/${pf}\n"
     ) imageAgents.customRosterPromptFiles}
     cp ${hostPkgs.writeText "conflict-resolve-prompt.md" imagePrompts.conflictResolvePrompt} $out/conflict-resolve-prompt.md
-    cp ${hostPkgs.writeText "conflict-resolve-cherry-pick-prompt.md" imagePrompts.conflictResolveCherryPickPrompt} $out/conflict-resolve-cherry-pick-prompt.md
     cp ${hostPkgs.writeText "fix-prompt.md" (imageContracts.injectFixSharedBlocks imagePrompts.fixPrompt)} $out/fix-prompt.md
     cp ${hostPkgs.writeText "research-prompt.md" (imageContracts.injectResearchOutcomeContract imagePrompts.researchPrompt)} $out/research-prompt.md
     cp ${hostPkgs.writeText "research-self-contained-prompt.md" (imageContracts.injectResearchOutcomeContract imagePrompts.researchSelfContainedPrompt)} $out/research-self-contained-prompt.md
@@ -1339,60 +1328,6 @@ let
       true
   ) buildTimeRejectVerdicts;
 
-  # Eval-time coherence assert (issue #2495; premise corrected by a later
-  # review pass -- see below): MAX_PARALLEL_WORKERS caps concurrency for the
-  # orchestrator's own slice-manifest worker dispatch (lib/fragments.nix's
-  # ORCHESTRATOR-gated coordinator-parallel-dispatch.md row).
-  #
-  # A prior revision of this assert also rejected any Consumer with no
-  # roster "worker" entry provisioned (workerModel/roster's worker model
-  # empty), on the premise that a dispatched slice runs through that
-  # roster's own "worker" entry. That premise is false in this codebase:
-  # fragments.nix gates coordinator-parallel-dispatch.md on ORCHESTRATOR
-  # alone, "regardless of whether a `worker` subagent happens to be
-  # provisioned too" (see the comment there);
-  # promptassembly/assemble.go renders worker-prompt.md -- the base prompt
-  # every dispatched slice worker gets -- whenever ORCHESTRATOR is on and
-  # it's a fresh-work pass, independent of any roster "worker" entry; and
-  # workers.go's launchOneWorker runs each dispatched worker process on the
-  # coordinator/implementor's OWN top-level `cfg.model`, never a roster
-  # "worker" entry's model (run.go: "Empty falls back to cfg.model"). No
-  # code path anywhere reads resolvedRoster's worker entry to pick a
-  # dispatched slice's model, so an absent/empty roster worker entry is not
-  # an eval-time-decidable incoherence for this knob and must not throw.
-  #
-  # What remains eval-time-decidable is only positivity: a concurrency
-  # semaphore's capacity has no meaningful "disabled" value. Checked against
-  # mergedDefaults (schemaDefaults // defaults), not the raw
-  # Consumer-supplied `defaults`, and unconditionally -- not gated on
-  # `defaults ? maxParallelWorkers` -- because the schema bakes
-  # MAX_PARALLEL_WORKERS=2 whether or not a Consumer ever mentions the knob
-  # (env-schema.nix's own default).
-  maxParallelWorkersCoherenceOk =
-    if mergedDefaults.maxParallelWorkers <= 0 then
-      throw "mkHarness: MAX_PARALLEL_WORKERS=${toString mergedDefaults.maxParallelWorkers} must be positive -- there is no meaningful \"disabled\" value for a concurrency semaphore's capacity (set it >= 1)"
-    else
-      true;
-
-  # The issue's own "What to build" prose also names a second eval-time-
-  # decidable example alongside the one above: "a per-worker timeout that
-  # cannot fit inside the pass timeout". Deliberately NOT implemented here
-  # (review finding, issue #2495): there is no pass-level timeout knob
-  # anywhere in this codebase to compare WORKER_TIMEOUT against (the
-  # orchestrator's own run loop has no per-pass timeout of its own --
-  # cmd/launcher/orchestrator/run_test.go says so directly), so the check
-  # has nothing eval-time-decidable to evaluate. Inventing a new pass-level
-  # timeout knob to make this checkable is out of scope for the
-  # MAX_PARALLEL_WORKERS knob this issue asks for.
-  #
-  # Bounding worker fan-out here does change LaunchWorkers' own worst-case
-  # join math, though: capped concurrency turns a single dispatch's
-  # worst-case wall-clock from 1 * workerTimeout (every slice joined in
-  # parallel) into ceil(slices/maxParallelWorkers) * workerTimeout (slices
-  # beyond the cap queue for a free semaphore slot) -- see
-  # cmd/launcher/orchestrator/workers.go's LaunchWorkers/runBounded doc
-  # comments for where that trade-off is recorded.
-
   # Eval-time coherence assert (issue #2527 slice 1): REPO_SLUG is
   # deliberately runtime-optional at the Nix layer (even though
   # `repository.repoSlug`/`forge.repoSlug` are live flake options today,
@@ -1480,7 +1415,6 @@ if unknownDefaultKeys != [ ] then
 else
   assert buildTimeRejectOk;
   assert forbiddenMarkerCheckOk;
-  assert maxParallelWorkersCoherenceOk;
   assert repoSlugCoherenceOk;
   assert choicesCheckOk;
   assert readOnlyCapabilityOk;

@@ -237,10 +237,6 @@ type Input struct {
 	// for KindImplement/KindFix/KindLand only (the "land pass reached no
 	// terminal outcome after APPROVE" check).
 	LastVerdict Verdict
-	// ManifestDispatched is whether this pass dispatched a slice manifest
-	// to parallel workers. Meaningful for KindImplement/KindFix/KindLand
-	// only.
-	ManifestDispatched bool
 	// CumulativeTokens is the caller's own sum of cumulative token usage so
 	// far (across all four usage.Usage token categories -- this package does
 	// no summing itself), compared against Caps.MaxBudgetTokens. Meaningful
@@ -370,37 +366,17 @@ func implementFixTransition(in Input) Decision {
 	// coarse maxSlices cap below (issue #2069).
 	case in.LastVerdict == VerdictApprove:
 		return Decision{Continue: false, Reason: "land pass reached no terminal outcome after APPROVE", Stop: StopApproveNoOutcome}
-	// This case must come before ManifestDispatched below: maxSlices is a
-	// hard ceiling on total driver-exec invocations (issue #2457), and a
-	// coordinator that re-emits a slice manifest every single pass must not
-	// be able to keep matching ManifestDispatched first forever and defeat
-	// that ceiling (issue #2058 review).
+	// maxSlices is a hard ceiling on total driver-exec invocations (issue
+	// #2457).
 	case in.Caps.MaxSlices > 0 && in.Pass >= in.Caps.MaxSlices:
-		// manifestDispatched is checked regardless of which case fired the
-		// continue -- so even when this maxSlices case is what committed
-		// LandPhase to LandPhaseTerminalCommitted, if ManifestDispatched is
-		// ALSO true this same pass, the next pass is still Fix, not Land;
-		// LandPhase stays TerminalCommitted in the returned Decision (the
-		// caller persists it onto state) and is caught by
-		// terminalLandTransition the pass after next.
-		next := KindLand
-		if in.ManifestDispatched {
-			next = KindFix
-		}
 		return Decision{
 			Continue:  true,
 			Reason:    "max slices reached; running terminal land pass",
-			NextPass:  next,
+			NextPass:  KindLand,
 			LandPhase: LandPhaseTerminalCommitted,
 			Cap:       StopMaxSlicesReached,
 			CapFired:  "max slices reached",
 		}
-	// A manifest dispatch keeps the loop going when neither case above
-	// already fired this pass -- a pass that just dispatched workers isn't
-	// done yet regardless of what verdict state happens to be sitting
-	// around from a prior pass (issue #2059 AC1).
-	case in.ManifestDispatched:
-		return Decision{Continue: true, Reason: "slice manifest dispatched", NextPass: KindFix}
 	}
 	// No case matched: falls through to entering the review pass.
 	return Decision{Continue: true, Reason: "", NextPass: KindReview}
@@ -464,8 +440,8 @@ func reviewTransition(in Input) Decision {
 	// This case must come last among the caps above: when a budget cap and
 	// an earlier cap (no-verdict, maxSlices, maxReviewRounds) both fire on
 	// the same pass, the earlier cap's Reason/CapFired/Cap keep reporting
-	// priority over this one -- the same ordering rule as the
-	// ManifestDispatched case in implementFixTransition above.
+	// priority over this one -- the same ordering rule the caps in
+	// implementFixTransition above follow.
 	case in.Verdict == VerdictBlock && budgetHit:
 		d = Decision{
 			Continue:  true,

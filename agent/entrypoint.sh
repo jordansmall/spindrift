@@ -864,24 +864,18 @@ run_driver_in_env() {
   # conflict-resolve pass) or the keys are simply absent (a required-marker
   # gate's corrective resume narrows handoff_json to {"Invoker": ...} only,
   # issue #2065).
-  local review_prompt="" review_model="" review_effort="" worker_prompt=""
+  local review_prompt="" review_model="" review_effort=""
   if [ -n "$handoff_json" ]; then
     review_prompt="$(_handoff_field "$handoff_json" ReviewPromptFile)"
     review_model="$(_handoff_field "$handoff_json" ReviewModel)"
     review_effort="$(_handoff_field "$handoff_json" ReviewEffort)"
-    worker_prompt="$(_handoff_field "$handoff_json" WorkerPromptFile)"
   fi
 
-  # worker_work_dir/worker_timeout have no Handoff descriptor field
-  # (issue #2059, #2058) -- plain strings read straight off the
-  # environment, no Go-side rendering needed.
-  local worker_work_dir="${WORKER_WORK_DIR:-}"
-  local worker_timeout="${WORKER_TIMEOUT:-}"
-  local worker_max_parallel="${MAX_PARALLEL_WORKERS:-}"
-  # max_budget_tokens/max_budget_usd, same no-Handoff-field shape as
-  # worker_work_dir/worker_timeout above (issue #2694) -- boxEnv now
-  # (lib/env-schema.nix), so always present at a real value (their schema
-  # defaults "0"/"0.000000", or an operator override).
+  # max_budget_tokens/max_budget_usd have no Handoff descriptor field
+  # (issue #2694) -- plain strings read straight off the environment, no
+  # Go-side rendering needed; boxEnv now (lib/env-schema.nix), so always
+  # present at a real value (their schema defaults "0"/"0.000000", or an
+  # operator override).
   local max_budget_tokens="${MAX_BUDGET_TOKENS:-0}"
   local max_budget_usd="${MAX_BUDGET_USD:-0}"
 
@@ -889,12 +883,6 @@ run_driver_in_env() {
   if [ -n "$review_prompt" ]; then
     _review_prompt_file="$(mktemp)"
     printf '%s' "$review_prompt" > "$_review_prompt_file"
-  fi
-
-  local _worker_prompt_file=""
-  if [ -n "$worker_prompt" ]; then
-    _worker_prompt_file="$(mktemp)"
-    printf '%s' "$worker_prompt" > "$_worker_prompt_file"
   fi
 
   # stream_log is driver-exec's teed copy of the Driver's raw stdout, read
@@ -970,48 +958,14 @@ run_driver_in_env() {
     _review_effort_flags=(--review-effort "$review_effort")
   fi
 
-  # --worker-prompt-file, same orchestrator-only shape as --review-prompt-file
-  # above (issue #2059, #2058): the parallel worker's own base prompt text,
-  # threaded through so dispatchManifestIfPresent has a non-empty prompt to
-  # dispatch a manifest slice against -- without it, worker dispatch is a
-  # permanent no-op regardless of what the coordinator emits.
-  local -a _worker_prompt_flags=()
-  if [ "$_driver_invoker" = orchestrator ] && [ -n "$_worker_prompt_file" ]; then
-    _worker_prompt_flags=(--worker-prompt-file "$_worker_prompt_file")
-  fi
-
-  # --worker-work-dir, same orchestrator-only shape as --review-effort above
-  # (issue #2059, #2058): the directory holding each dispatched worker's own
-  # quarantined log/heartbeat/result/sentinel files.
-  local -a _worker_work_dir_flags=()
-  if [ "$_driver_invoker" = orchestrator ] && [ -n "$worker_work_dir" ]; then
-    _worker_work_dir_flags=(--worker-work-dir "$worker_work_dir")
-  fi
-
-  # --worker-timeout, same orchestrator-only shape as --review-effort above
-  # (issue #2059, #2058): the per-worker join timeout for a parallel
-  # dispatch.
-  local -a _worker_timeout_flags=()
-  if [ "$_driver_invoker" = orchestrator ] && [ -n "$worker_timeout" ]; then
-    _worker_timeout_flags=(--worker-timeout "$worker_timeout")
-  fi
-
-  # --max-parallel-workers, same orchestrator-only shape as --worker-timeout
-  # just above (issue #2059, #2495): the cap on how many manifest-dispatched
-  # workers LaunchWorkers runs concurrently.
-  local -a _worker_max_parallel_flags=()
-  if [ "$_driver_invoker" = orchestrator ] && [ -n "$worker_max_parallel" ]; then
-    _worker_max_parallel_flags=(--max-parallel-workers "$worker_max_parallel")
-  fi
-
   # --max-budget-tokens/--max-budget-usd, same orchestrator-only gate as
-  # --max-parallel-workers above (issue #2694): the cumulative token/USD caps
+  # --review-effort above (issue #2694): the cumulative token/USD caps
   # the orchestrator's own review loop consults before committing to a
   # terminal land pass instead of a further BLOCK-triggered review round.
   # Unlike every other orchestrator-only flag above, neither is guarded on
   # its own value being non-empty -- max_budget_tokens/max_budget_usd are
   # already real values by the time they reach here (bound above with their
-  # own ${VAR:-0} fallback, mirroring worker_timeout's shape), never empty,
+  # own ${VAR:-0} fallback), never empty,
   # so an `-n` guard would be dead weight. The same host-facing knobs
   # selfHealGate already gates its fix-pass dispatch with.
   local -a _max_budget_tokens_flags=()
@@ -1046,15 +1000,11 @@ run_driver_in_env() {
     "${_review_prompt_flags[@]}" \
     "${_review_model_flags[@]}" \
     "${_review_effort_flags[@]}" \
-    "${_worker_prompt_flags[@]}" \
-    "${_worker_work_dir_flags[@]}" \
-    "${_worker_timeout_flags[@]}" \
-    "${_worker_max_parallel_flags[@]}" \
     "${_max_budget_tokens_flags[@]}" \
     "${_max_budget_usd_flags[@]}"
   claude_rc=$?
   set -e
-  rm -f "$_prompt_file" "$_agents_file" "$_session_file" "$_review_prompt_file" "$_worker_prompt_file"
+  rm -f "$_prompt_file" "$_agents_file" "$_session_file" "$_review_prompt_file"
 
   # The launcher greps '^SPINDRIFT_OUTCOME ' from the container log, but the
   # Driver's raw transcript format buries it (claude wraps it in a stream-json

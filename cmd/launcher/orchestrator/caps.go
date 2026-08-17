@@ -195,25 +195,6 @@ func capFiredPass(probeMaxReviewRounds int, reviewPassEnabled bool) (int, error)
 	}
 }
 
-// validateMaxParallelWorkers rejects a non-positive -max-parallel-workers
-// value (issue #2495). Unlike maxReviewRounds/maxSlices, where zero is a
-// legitimate "no cap" sentinel handled by validateCaps above, there is no
-// meaningful "disabled" value for a concurrency semaphore's capacity --
-// LaunchWorkers' own runBounded (workers.go) already self-heals a <=0
-// MaxParallel by silently substituting defaultMaxParallelWorkers, so a
-// caller relying on that alone would see a mistyped flag silently
-// renormalized rather than reported. This check exists so that
-// misconfiguration is instead a fast, attributed failure at orchestrator
-// startup -- unlike validateCaps' own warn-and-continue precedent (issue
-// #2460), this error is fatal: mainRun aborts the run rather than
-// proceeding with a value the Consumer never actually asked for.
-func validateMaxParallelWorkers(maxParallelWorkers int) error {
-	if maxParallelWorkers <= 0 {
-		return fmt.Errorf("orchestrator: -max-parallel-workers=%d must be positive (omit the flag, or set it >= 1, to use the default %d)", maxParallelWorkers, defaultMaxParallelWorkers)
-	}
-	return nil
-}
-
 // parseNonnegBudgetTokens parses s (main.go's own -max-budget-tokens flag
 // value) as a non-negative integer budget cap, degrading a negative or
 // malformed value to 0 (disabled) rather than erroring (issue #2694 review
