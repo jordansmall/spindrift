@@ -279,6 +279,27 @@ func buildForge(repoSlug string, tracker trackerSettings, token string) (forge.I
 	}
 }
 
+// nextBackupPath picks a backup destination for path that doesn't already
+// exist on disk: path+".bak" if that's free, otherwise the first available
+// path+".bak.N" (N = 1, 2, 3, ...). This keeps a second consecutive forced
+// run from silently clobbering the backup a prior forced run made.
+func nextBackupPath(path string) (string, error) {
+	candidate := path + ".bak"
+	if _, err := os.Stat(candidate); os.IsNotExist(err) {
+		return candidate, nil
+	} else if err != nil {
+		return "", err
+	}
+	for n := 1; ; n++ {
+		candidate := fmt.Sprintf("%s.bak.%d", path, n)
+		if _, err := os.Stat(candidate); os.IsNotExist(err) {
+			return candidate, nil
+		} else if err != nil {
+			return "", err
+		}
+	}
+}
+
 // runQuickstart drives the wizard end-to-end: it takes injected I/O, a
 // target directory to write the scaffold into, and the Environment/
 // CommandRunner/ForgeBuilder seams (mirrors runDoctor's testability).
@@ -308,10 +329,14 @@ func runQuickstart(dir string, env Environment, runner CommandRunner, forgeBuild
 
 	for _, name := range clobbered {
 		path := filepath.Join(dir, name)
-		if err := os.Rename(path, path+".bak"); err != nil {
+		dest, err := nextBackupPath(path)
+		if err != nil {
 			return fmt.Errorf("back up %s: %w", name, err)
 		}
-		fmt.Fprintf(w, "backed up: %s -> %s.bak\n", name, name)
+		if err := os.Rename(path, dest); err != nil {
+			return fmt.Errorf("back up %s: %w", name, err)
+		}
+		fmt.Fprintf(w, "backed up: %s -> %s\n", name, filepath.Base(dest))
 	}
 
 	scanner := bufio.NewScanner(stdin)
@@ -621,8 +646,9 @@ result-*
 # spindrift artifacts (per-run logs, outbox, accumulation repo, issues)
 .spindrift/
 
-# local config + secrets — never commit this
+# local config + secrets — never commit this, or its backups
 harness.env
+harness.env.bak*
 
 # direnv
 .direnv/

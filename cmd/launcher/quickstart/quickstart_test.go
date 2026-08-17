@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -1036,6 +1037,78 @@ func TestRunQuickstart_Force_BacksUpExistingFiles(t *testing.T) {
 	}
 	if !strings.Contains(string(newFlake), "jordansmall/spindrift") {
 		t.Errorf("expected regenerated flake.nix to contain the new repoSlug, got:\n%s", newFlake)
+	}
+}
+
+func TestRunQuickstart_Force_SecondRunDoesNotClobberFirstBackup(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "flake.nix"), []byte("old flake"), 0o644); err != nil {
+		t.Fatalf("seed flake.nix: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "harness.env"), []byte("old harness"), 0o644); err != nil {
+		t.Fatalf("seed harness.env: %v", err)
+	}
+
+	makeStdin := func() io.Reader {
+		return strings.NewReader(strings.Join([]string{
+			"jordansmall/spindrift",
+			"podman",
+			"Ada Lovelace",
+			"ada@example.com",
+			"ghp_faketoken",
+		}, "\n") + "\n")
+	}
+	env := fakeEnvironment{env: map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "claude-oauth-faketoken"}, runtimes: map[string]bool{"podman": true}}
+
+	var out1 bytes.Buffer
+	if err := runQuickstart(dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out1, makeStdin(), true, true); err != nil {
+		t.Fatalf("runQuickstart (first run): %v", err)
+	}
+
+	firstRunFlake, err := os.ReadFile(filepath.Join(dir, "flake.nix"))
+	if err != nil {
+		t.Fatalf("read flake.nix after first run: %v", err)
+	}
+	firstRunHarness, err := os.ReadFile(filepath.Join(dir, "harness.env"))
+	if err != nil {
+		t.Fatalf("read harness.env after first run: %v", err)
+	}
+
+	var out2 bytes.Buffer
+	if err := runQuickstart(dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out2, makeStdin(), true, true); err != nil {
+		t.Fatalf("runQuickstart (second run): %v", err)
+	}
+
+	bakFlake, err := os.ReadFile(filepath.Join(dir, "flake.nix.bak"))
+	if err != nil {
+		t.Fatalf("read flake.nix.bak: %v", err)
+	}
+	if string(bakFlake) != "old flake" {
+		t.Errorf("expected flake.nix.bak to still hold the original seeded content, got: %q", bakFlake)
+	}
+
+	bakHarness, err := os.ReadFile(filepath.Join(dir, "harness.env.bak"))
+	if err != nil {
+		t.Fatalf("read harness.env.bak: %v", err)
+	}
+	if string(bakHarness) != "old harness" {
+		t.Errorf("expected harness.env.bak to still hold the original seeded content, got: %q", bakHarness)
+	}
+
+	bakFlake2, err := os.ReadFile(filepath.Join(dir, "flake.nix.bak.1"))
+	if err != nil {
+		t.Fatalf("read flake.nix.bak.1: %v", err)
+	}
+	if string(bakFlake2) != string(firstRunFlake) {
+		t.Errorf("expected flake.nix.bak.1 to hold the first run's regenerated content, got: %q, want: %q", bakFlake2, firstRunFlake)
+	}
+
+	bakHarness2, err := os.ReadFile(filepath.Join(dir, "harness.env.bak.1"))
+	if err != nil {
+		t.Fatalf("read harness.env.bak.1: %v", err)
+	}
+	if string(bakHarness2) != string(firstRunHarness) {
+		t.Errorf("expected harness.env.bak.1 to hold the first run's regenerated content, got: %q, want: %q", bakHarness2, firstRunHarness)
 	}
 }
 
