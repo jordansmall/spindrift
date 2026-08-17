@@ -1199,6 +1199,40 @@ func TestAssembleOrchestratorReviewerDrop(t *testing.T) {
 	}
 }
 
+// TestAssembleOrchestratorCommitReworkFragment covers issue #2698's
+// commit-rework-orchestrator.md wiring: it shares the REVIEW_LOOP_ORCHESTRATOR
+// gate (lib/fragments.nix), so it renders only when the orchestrator is
+// enabled and stays empty on the inline (orchestrator-off) path. This test
+// only asserts the marker's presence/absence; byte-identity of the inline
+// prompt itself is what the untouched inline golden fixtures in
+// tests/testdata/prompt-assembly-golden/ pin.
+func TestAssembleOrchestratorCommitReworkFragment(t *testing.T) {
+	reg := loadTestRegistry(t)
+	const marker = "fold each fix into the commit it logically belongs to"
+
+	env := coveredEnv()
+	env.OrchestratorEnabled = true
+	env.ReviewLoopInline = false
+	env.ReviewLoopOrchestrator = true
+
+	result, err := Assemble(env, reg)
+	if err != nil {
+		t.Fatalf("Assemble: %v", err)
+	}
+	if !strings.Contains(result.Prompt, marker) {
+		t.Errorf("Prompt missing commit-rework-orchestrator.md fragment text (orchestrator on):\n%s", result.Prompt)
+	}
+
+	offEnv := coveredEnv()
+	offResult, err := Assemble(offEnv, reg)
+	if err != nil {
+		t.Fatalf("Assemble: %v", err)
+	}
+	if strings.Contains(offResult.Prompt, marker) {
+		t.Errorf("Prompt contains commit-rework-orchestrator.md fragment text with orchestrator off, want absent:\n%s", offResult.Prompt)
+	}
+}
+
 // TestAssembleOrchestratorNoReviewerKey covers that ReviewModel and
 // ReviewEffort both stay empty (mirroring jq's `.reviewer.model // empty`
 // and `.reviewer.effort // empty`) when the template carries no reviewer

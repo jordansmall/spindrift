@@ -136,7 +136,7 @@ Prefer several small focused commits over one big one — commit each logical
 unit (domain change, then wiring, then tests) so each stands alone. Add a body
 only when the change isn't self-evident.
 
-${COMMIT_PUSH_READ_WRITE_STEP}${COMMIT_PUSH_READ_ONLY_STEP}# REVIEW
+${COMMIT_REWORK_ORCHESTRATOR_STEP}${COMMIT_PUSH_READ_WRITE_STEP}${COMMIT_PUSH_READ_ONLY_STEP}# REVIEW
 
 ${REVIEW_LOOP_INLINE_STEP}${REVIEW_LOOP_ORCHESTRATOR_STEP}${FILE_ISSUES_DIRECT_STEP}${FILE_ISSUES_RELAY_STEP}# LAND THE CHANGE
 

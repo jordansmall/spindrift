@@ -36,6 +36,11 @@
     "var": "REVIEW_LOOP_ORCHESTRATOR_STEP"
   },
   {
+    "gate": "REVIEW_LOOP_ORCHESTRATOR",
+    "fragment": "commit-rework-orchestrator.md",
+    "var": "COMMIT_REWORK_ORCHESTRATOR_STEP"
+  },
+  {
     "gate": "WORKER_PROVISIONED",
     "fragment": "coordinator.md",
     "var": "COORDINATOR_STEP"
