@@ -519,7 +519,7 @@ func TestDoctorRun_Forgejo_CreatesTriageAndResearchLabels(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := doctor.Run(fc, cf, cfg, &buf, bufio.NewScanner(strings.NewReader("y\n")), true)
+	err := doctor.Run(fc, cf, cfg, &buf, bufio.NewScanner(strings.NewReader("y\n")), true, nil)
 	if err != nil {
 		t.Fatalf("doctor.Run: %v", err)
 	}
@@ -564,7 +564,7 @@ func TestDoctorRun_Forgejo_MissingResearchLabelsAdvisoryOnly(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := doctor.Run(fc, cf, cfg, &buf, bufio.NewScanner(strings.NewReader("")), false)
+	err := doctor.Run(fc, cf, cfg, &buf, bufio.NewScanner(strings.NewReader("")), false, nil)
 	if err != nil {
 		t.Fatalf("doctor.Run: %v, want nil — missing research labels are advisory only (AC#3)", err)
 	}

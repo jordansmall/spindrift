@@ -575,7 +575,7 @@ func runQuickstart(dir string, env Environment, cmdRunner CommandRunner, forgeBu
 		FailedLabel:     defaultDispatchLabels.Failed,
 		CompleteLabel:   defaultDispatchLabels.Complete,
 		Runtime:         runtime,
-	}, w, scanner, interactive); err != nil {
+	}, w, scanner, interactive, nil); err != nil {
 		return postWriteFailure(doctorPostWriteStep, written, insideGitWorkTree, err)
 	}
 

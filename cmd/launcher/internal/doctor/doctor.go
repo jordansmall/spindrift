@@ -96,44 +96,111 @@ type Config struct {
 // the exit code. stdin is an already-constructed *bufio.Scanner
 // so a caller mid-way through its own scripted stdin flow (Quickstart's
 // finish line) can hand over the same scanner instead of double-wrapping the
-// underlying reader and losing already-buffered input.
-func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, w io.Writer, stdin *bufio.Scanner, interactive bool) error {
+// underlying reader and losing already-buffered input. extraChecks is a
+// caller-supplied slice of additional Check rows (Required or Advisory) —
+// run through RunChecks and reported via ReportResults after the three
+// probes below, but purely informational: unlike the three probes, a
+// failing extraChecks row (of either tier) never makes Run return an
+// error, the same treatment as the research/priority/ambiguous-spec label
+// tiers already get; pass nil when there are none.
+func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, w io.Writer, stdin *bufio.Scanner, interactive bool, extraChecks []Check) error {
 	tokenHint, slugHint := "GH_TOKEN", "--repo-slug / REPO_SLUG"
 	if c.TokenHint != "" {
 		tokenHint, slugHint = c.TokenHint, c.SlugHint
 	}
-	repo, err := it.Probe()
-	if err != nil {
-		if errors.Is(err, forge.ErrAuthFailure) {
-			return fmt.Errorf("forge auth check failed (check %s is set and valid): %w", tokenHint, err)
-		}
-		if errors.Is(err, forge.ErrRepoNotFound) {
-			return fmt.Errorf("forge repo not found (check %s is correct): %w", slugHint, err)
-		}
-		return fmt.Errorf("forge connectivity check failed: %w", err)
-	}
-	fmt.Fprintf(w, "ok: issue tracker confirmed — %s is reachable\n", repo)
-	cfRepo, err := cf.Probe()
-	if err != nil {
-		return fmt.Errorf("code forge connectivity check failed: %w", err)
-	}
-	fmt.Fprintf(w, "ok: code forge confirmed — %s is reachable\n", cfRepo)
 
+	var itRepo, cfRepo string
 	recoverableCount := 0
-	if lt, ok := it.(forge.LabeledTracker); !ok || lt.StateLabels().Label(forge.Recoverable) != "" {
-		// Only query when Recoverable resolves to a real label: an
-		// unconditional ListIssues(Recoverable) call would false-match every
-		// open issue on a tracker (GitHub, Forgejo) that leaves Recoverable
-		// unmapped, since both ignore an empty label filter instead of
-		// erroring (forge.LabeledTracker's doc comment) — mirroring
-		// console/adapter.go's countRecoverable guard for the same reason.
-		recoverable, err := it.ListIssues(forge.Recoverable)
-		if err != nil {
-			return fmt.Errorf("recoverable issue check failed: %w", err)
-		}
-		recoverableCount = len(recoverable)
+
+	// builtinChecks are the three always-run doctor rows: issue-tracker
+	// connectivity, code-forge connectivity, and the recoverable-issue
+	// count. Each Probe closure captures its fetched detail (repo slug or
+	// count) into the local vars above so its SuccessMsg closure can report
+	// the exact same dynamic success line the old hand-rolled fmt.Fprintf
+	// calls printed — registry-driven, so adding a fourth built-in doctor
+	// check means adding a row here, not editing Run's control flow.
+	builtinChecks := []Check{
+		{
+			Name: "issue-tracker",
+			Tier: Required,
+			Probe: func() error {
+				repo, err := it.Probe()
+				if err != nil {
+					if errors.Is(err, forge.ErrAuthFailure) {
+						return fmt.Errorf("forge auth check failed (check %s is set and valid): %w", tokenHint, err)
+					}
+					if errors.Is(err, forge.ErrRepoNotFound) {
+						return fmt.Errorf("forge repo not found (check %s is correct): %w", slugHint, err)
+					}
+					return fmt.Errorf("forge connectivity check failed: %w", err)
+				}
+				itRepo = repo
+				return nil
+			},
+			SuccessMsg: func() string {
+				return fmt.Sprintf("issue tracker confirmed — %s is reachable", itRepo)
+			},
+		},
+		{
+			Name: "code-forge",
+			Tier: Required,
+			Probe: func() error {
+				repo, err := cf.Probe()
+				if err != nil {
+					return fmt.Errorf("code forge connectivity check failed: %w", err)
+				}
+				cfRepo = repo
+				return nil
+			},
+			SuccessMsg: func() string {
+				return fmt.Sprintf("code forge confirmed — %s is reachable", cfRepo)
+			},
+		},
+		{
+			Name: "recoverable-issues",
+			Tier: Required,
+			Probe: func() error {
+				// Only query when Recoverable resolves to a real label: an
+				// unconditional ListIssues(Recoverable) call would
+				// false-match every open issue on a tracker (GitHub,
+				// Forgejo) that leaves Recoverable unmapped, since both
+				// ignore an empty label filter instead of erroring
+				// (forge.LabeledTracker's doc comment) — mirroring
+				// console/adapter.go's countRecoverable guard for the same
+				// reason.
+				if lt, ok := it.(forge.LabeledTracker); !ok || lt.StateLabels().Label(forge.Recoverable) != "" {
+					recoverable, err := it.ListIssues(forge.Recoverable)
+					if err != nil {
+						return fmt.Errorf("recoverable issue check failed: %w", err)
+					}
+					recoverableCount = len(recoverable)
+				}
+				return nil
+			},
+			SuccessMsg: func() string {
+				return fmt.Sprintf("%d recoverable issue(s) — run `spindrift recover <issue>` to land each", recoverableCount)
+			},
+		},
 	}
-	fmt.Fprintf(w, "ok: %d recoverable issue(s) — run `spindrift recover <issue>` to land each\n", recoverableCount)
+
+	results := RunChecksFailFast(builtinChecks)
+	if err := FirstRequiredError(results); err != nil {
+		// RunChecksFailFast stops at the first Required failure, so that
+		// failing result is always the last element here. Report only the
+		// results before it — the caller (cmdDoctor) already prints err to
+		// stderr, so writing the failing row to w too would double-report
+		// it (origin/main's pre-refactor Run never wrote anything to w on
+		// this path).
+		ReportResults(w, results[:len(results)-1])
+		return err
+	}
+	ReportResults(w, results)
+
+	// extraChecks are informational only: report each row's outcome via
+	// ReportResults, but never let a failure (Required or Advisory) make
+	// Run return an error — a caller's launcher-startup validation rows
+	// are surfaced for visibility, not treated as fatal here.
+	ReportResults(w, RunChecks(extraChecks))
 
 	// Runtime row (advisory, never fatal) — rationale on Config.Runtime.
 	if c.Runtime == "" {
