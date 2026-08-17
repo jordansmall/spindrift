@@ -5473,6 +5473,161 @@ func TestCheckDispositionsTokenBudget(t *testing.T) {
 	}
 }
 
+// TestAppendDecisionsRoundAccumulatesAcrossRounds verifies appendDecisionsRound
+// (issue #2695) never drops or collapses an earlier round's own decisions
+// when a later round appends its own -- both rounds' content, and both
+// "## Round N" section headers, survive in the log, earlier round first --
+// mirroring TestAppendDispositionsRoundAccumulatesAcrossRounds exactly.
+func TestAppendDecisionsRoundAccumulatesAcrossRounds(t *testing.T) {
+	var state runstate.RunState
+
+	if err := appendDecisionsRound(&state, 1, "run.go:1 chose interface X over Y -- Y couldn't satisfy the io.Writer constraint"); err != nil {
+		t.Fatalf("appendDecisionsRound (round 1): %v", err)
+	}
+	firstPath := state.DecisionsLogPath
+	if firstPath == "" {
+		t.Fatal("DecisionsLogPath = \"\", want it set after the first call")
+	}
+
+	if err := appendDecisionsRound(&state, 2, "run.go:88 chose retry-with-backoff over fail-fast -- flaky upstream, see #2696"); err != nil {
+		t.Fatalf("appendDecisionsRound (round 2): %v", err)
+	}
+	if state.DecisionsLogPath != firstPath {
+		t.Errorf("DecisionsLogPath = %q after round 2, want unchanged %q", state.DecisionsLogPath, firstPath)
+	}
+
+	data, err := os.ReadFile(state.DecisionsLogPath)
+	if err != nil {
+		t.Fatalf("read decisions log: %v", err)
+	}
+	content := string(data)
+
+	round1Idx := strings.Index(content, "## Round 1")
+	round2Idx := strings.Index(content, "## Round 2")
+	if round1Idx == -1 || round2Idx == -1 || round1Idx >= round2Idx {
+		t.Fatalf("content = %q, want a \"## Round 1\" section followed by a \"## Round 2\" section", content)
+	}
+	if !strings.Contains(content, "run.go:1 chose interface X over Y -- Y couldn't satisfy the io.Writer constraint") {
+		t.Errorf("content = %q, want round 1's decision present", content)
+	}
+	if !strings.Contains(content, "run.go:88 chose retry-with-backoff over fail-fast -- flaky upstream, see #2696") {
+		t.Errorf("content = %q, want round 2's decision present -- an earlier round's entry must never be dropped when a later one appends", content)
+	}
+}
+
+// TestAppendDecisionsRoundSkipsEmptyContent verifies a round with no fresh
+// decisions content is a no-op: no log file gets created and
+// state.DecisionsLogPath stays empty, mirroring
+// TestAppendDispositionsRoundSkipsEmptyContent.
+func TestAppendDecisionsRoundSkipsEmptyContent(t *testing.T) {
+	var state runstate.RunState
+
+	if err := appendDecisionsRound(&state, 1, ""); err != nil {
+		t.Fatalf("appendDecisionsRound: %v", err)
+	}
+	if state.DecisionsLogPath != "" {
+		t.Errorf("DecisionsLogPath = %q, want empty (no content, nothing to append)", state.DecisionsLogPath)
+	}
+}
+
+// TestAppendFreshDecisionsRoundEmitsRunStateErrorOnReadFailure verifies
+// appendFreshDecisionsRound (issue #2695) surfaces a decisions-log read
+// failure as a "run_state_error" spindrift op on stdout, the same way
+// appendFreshDispositionsRound already does for its own read failure --
+// pointing state.DecisionsPath at a directory makes os.ReadFile fail.
+func TestAppendFreshDecisionsRoundEmitsRunStateErrorOnReadFailure(t *testing.T) {
+	state := runstate.RunState{DecisionsPath: t.TempDir()}
+	round := 0
+	var stdout bytes.Buffer
+
+	appendFreshDecisionsRound("/tmp/decisions.md", &state, &round, &stdout)
+
+	if !strings.Contains(stdout.String(), `"spindrift_op":{"op":"run_state_error","phase":"decisions_log"`) {
+		t.Errorf("stdout = %q, want a run_state_error op with phase decisions_log", stdout.String())
+	}
+	if round != 0 {
+		t.Errorf("round = %d, want unchanged at 0 (a read failure appends nothing)", round)
+	}
+	if state.DecisionsLogPath != "" {
+		t.Errorf("DecisionsLogPath = %q, want empty (a read failure appends nothing)", state.DecisionsLogPath)
+	}
+}
+
+// TestAppendFreshDecisionsRoundNoOpWhenDecisionsPathDisabled verifies
+// appendFreshDecisionsRound is a no-op when decisionsPath == "" -- the run
+// has the decisions artifact disabled entirely -- even if state.DecisionsPath
+// somehow carries a non-empty value (a stale value from a reused state file,
+// which recordArtifactPath's own path == "" no-op deliberately leaves
+// untouched rather than clearing).
+func TestAppendFreshDecisionsRoundNoOpWhenDecisionsPathDisabled(t *testing.T) {
+	dir := t.TempDir()
+	stalePath := filepath.Join(dir, "decisions.md")
+	if err := os.WriteFile(stalePath, []byte("run.go:1 chose interface X over Y -- Y couldn't satisfy the io.Writer constraint"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	state := runstate.RunState{DecisionsPath: stalePath}
+	round := 0
+	var stdout bytes.Buffer
+
+	appendFreshDecisionsRound("", &state, &round, &stdout)
+
+	if round != 0 {
+		t.Errorf("round = %d, want unchanged at 0 (decisions artifact disabled)", round)
+	}
+	if state.DecisionsLogPath != "" {
+		t.Errorf("DecisionsLogPath = %q, want empty (decisions artifact disabled)", state.DecisionsLogPath)
+	}
+	if stdout.Len() != 0 {
+		t.Errorf("stdout = %q, want empty (no op emitted when disabled)", stdout.String())
+	}
+}
+
+// TestCheckDecisionsTokenBudget verifies checkDecisionsTokenBudget (issue
+// #2695) flags a round whose mean tokens-per-entry exceeds
+// decisionsMeanTokenCeiling -- the tripwire for an entry that restates
+// diff/file/transcript content instead of referencing it -- and leaves a
+// round of compact, reference-only entries under the ceiling, mirroring
+// TestCheckDispositionsTokenBudget's own cases.
+func TestCheckDecisionsTokenBudget(t *testing.T) {
+	compact := "run.go:1 chose interface X over Y -- Y couldn't satisfy the io.Writer constraint\n" +
+		"run.go:88 chose retry-with-backoff over fail-fast -- flaky upstream, see #2696"
+	if mean, total, exceeded := checkDecisionsTokenBudget(compact); exceeded {
+		t.Errorf("checkDecisionsTokenBudget(%q) = mean %.1f, total %d, exceeded %v, want under the ceiling", compact, mean, total, exceeded)
+	}
+
+	oversized := "run.go:1 chose to rewrite the function as follows instead of the simpler option: " +
+		strings.Repeat("func example() { doSomething(); doSomethingElse(); } ", 20)
+	if mean, total, exceeded := checkDecisionsTokenBudget(oversized); !exceeded {
+		t.Errorf("checkDecisionsTokenBudget(%q) = mean %.1f, total %d, exceeded %v, want over the ceiling", oversized, mean, total, exceeded)
+	}
+
+	if mean, total, exceeded := checkDecisionsTokenBudget(""); exceeded || mean != 0 || total != 0 {
+		t.Errorf("checkDecisionsTokenBudget(\"\") = mean %.1f, total %d, exceeded %v, want mean 0, total 0, not exceeded", mean, total, exceeded)
+	}
+
+	// A compact, well-formed entry using multi-byte UTF-8 (a non-ASCII file
+	// path/reason) must not trip the ceiling on byte count alone -- the
+	// same terse entry in ASCII stays comfortably under it.
+	nonASCII := "café.go:1 chose résumé strategy over überprüft strategy -- simpler constraint"
+	if mean, total, exceeded := checkDecisionsTokenBudget(nonASCII); exceeded {
+		t.Errorf("checkDecisionsTokenBudget(%q) = mean %.1f, total %d, exceeded %v, want under the ceiling (rune count, not byte count)", nonASCII, mean, total, exceeded)
+	}
+
+	// A pasted diff hunk: many individually short lines, each comfortably
+	// under the mean ceiling on its own, but the round's total balloons --
+	// exactly the restatement mode a mean-only check is blind to.
+	var pastedDiffHunk strings.Builder
+	pastedDiffHunk.WriteString("run.go:1 chose interface X over Y -- Y couldn't satisfy the io.Writer constraint\n")
+	for i := 0; i < 60; i++ {
+		fmt.Fprintf(&pastedDiffHunk, "+    line %d of the pasted diff\n", i)
+	}
+	if mean, total, exceeded := checkDecisionsTokenBudget(pastedDiffHunk.String()); !exceeded {
+		t.Errorf("checkDecisionsTokenBudget(pasted diff hunk) = mean %.1f, total %d, exceeded %v, want over the ceiling (total, even though mean stays low)", mean, total, exceeded)
+	} else if mean > decisionsMeanTokenCeiling {
+		t.Errorf("checkDecisionsTokenBudget(pasted diff hunk) = mean %.1f, want it to stay UNDER the mean ceiling %d -- this case is meant to prove the TOTAL check catches what the mean check alone misses", mean, decisionsMeanTokenCeiling)
+	}
+}
+
 // TestScanReviewLogIgnoresQuotedVerdictInOwnFindings verifies scanReviewLog
 // (issue #2546) does not let a reviewer's own findings text -- which may
 // quote a *different* verdict literal while describing a prior pass's
