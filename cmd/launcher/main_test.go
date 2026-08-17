@@ -4245,6 +4245,312 @@ func TestReferenceDocHasLocalCodeForgeSection(t *testing.T) {
 	}
 }
 
+// deprecatedDocSpellings are the old settings.<section>.<knob> shim path
+// spellings findDeprecatedDocSpellings denylists in doc prose (README.md,
+// docs/**/*.md). Mirrors quickstart/quickstart_test.go's
+// deprecatedPathSpellings, but for docs prose rather than generated
+// flake.nix output. Each entry is
+// either a section-level marker ("settings.<section>", covering every knob
+// under that section — lib/legacy-settings-section.nix has 9 unique section
+// names, all denylisted here: repository, lifecycleLabels, issueDiscovery,
+// branches, sandbox, models, concurrency, selfHealing,
+// promptSkillIteration) or one of two hybrid markers
+// ("settings.issues.forgejo", "settings.issues.research.verdicts") that
+// never had ANY valid settings.* form at all (lib/env-schema.nix marks their
+// knobs legacySettingsExempt = true) so they stay their own never-valid
+// paths — there's no legacy "settings.issues" section in
+// lib/legacy-settings-section.nix to generalize to in the first place. The
+// bare flat structural-shim spellings
+// (e.g. "runtime = " with no leading "infra.") are checked separately by
+// findDeprecatedDocSpellings via flatShimGeneralizedMarkers below, since,
+// unlike these, they can't be told apart from their canonical dotted form
+// by substring alone.
+var deprecatedDocSpellings = []string{
+	"settings.repository",
+	"settings.lifecycleLabels",
+	"settings.issueDiscovery",
+	"settings.branches",
+	"settings.sandbox",
+	"settings.models",
+	"settings.concurrency",
+	"settings.selfHealing",
+	"settings.promptSkillIteration",
+	"settings.issues.forgejo",
+	"settings.issues.research.verdicts",
+}
+
+// flatShimGeneralizedMarkers generalizes the bare-flat-shim detection to
+// every flake-module Consumer structural shim from lib/structural-paths.nix
+// that has zero collision with a legitimate, non-deprecated doc usage
+// today. canonicalPrefix is the domain-tree path (from
+// lib/structural-paths.nix, joined by "." with a trailing ".") that must
+// immediately precede a "<name> = " occurrence for it to be the canonical,
+// non-deprecated spelling; an empty canonicalPrefix means the flat name has
+// no such valid preceding form at all (nixInBox's and nixStoreWritable's
+// canonical forms are infra.nix.inBox and infra.nix.storeWritable — the
+// flat name isn't even a suffix of those, so any bare occurrence is
+// unconditionally deprecated).
+//
+// packages, roster, and nixpkgs are deliberately EXCLUDED from this list —
+// do not "fix" that by adding them. Each is also a legitimate, currently
+// non-deprecated Nix identifier elsewhere in the docs: docs/reference.md's
+// "Calling mkHarness directly" section uses `packages = p: [ p.go ];` and
+// `nixpkgs = inputs.nixpkgs;` as literal, still-canonical bare mkHarness
+// arguments; docs/reference.md also describes nix/dogfood-defaults.nix's own
+// internal `roster = rosterLib.defaultRoster {...}` field; and README.md's
+// `packages = [ config.packages.spindrift ];` is nixpkgs' own unrelated
+// `mkShell` argument. Generalizing those three would turn this check into a
+// false-positive generator against real, correct doc prose.
+var flatShimGeneralizedMarkers = []struct {
+	name            string
+	canonicalPrefix string
+}{
+	{"runtime", "infra."},
+	{"driver", "agents."},
+	{"prompt", "agents."},
+	{"skills", "agents."},
+	{"prefetch", "infra.image."},
+	{"extraClosures", "infra.image."},
+	{"overlays", "infra."},
+	{"config", "infra."},
+	{"nixInBox", ""},
+	{"nixStoreWritable", ""},
+}
+
+// findDeprecatedDocSpellings scans content for any deprecatedDocSpellings
+// substring, plus any occurrence anywhere in the content (not just at a
+// line start — a bare spelling can appear mid-sentence in doc prose, e.g.
+// README.md's "(or set `runtime = \"docker\"`; ...)") of a bare flat
+// structural-shim spelling from flatShimGeneralizedMarkers, distinguished
+// from its canonical dotted spelling by checking the immediately preceding
+// characters aren't that marker's canonicalPrefix. Reports a single finding
+// per marker if any bare occurrence is found, consistent with how the
+// deprecatedDocSpellings markers report once per marker regardless of
+// occurrence count.
+func findDeprecatedDocSpellings(content string) []string {
+	var found []string
+	for _, deprecated := range deprecatedDocSpellings {
+		if strings.Contains(content, deprecated) {
+			found = append(found, deprecated)
+		}
+	}
+
+	for _, shim := range flatShimGeneralizedMarkers {
+		marker := shim.name + " = "
+		searchFrom := 0
+		for {
+			idx := strings.Index(content[searchFrom:], marker)
+			if idx < 0 {
+				break
+			}
+			matchStart := searchFrom + idx
+			if shim.canonicalPrefix == "" {
+				found = append(found, marker)
+				break
+			}
+			precedingStart := matchStart - len(shim.canonicalPrefix)
+			if precedingStart < 0 || content[precedingStart:matchStart] != shim.canonicalPrefix {
+				found = append(found, marker)
+				break
+			}
+			searchFrom = matchStart + len(marker)
+		}
+	}
+
+	return found
+}
+
+// TestFindDeprecatedDocSpellings_DetectsReintroducedSpelling is the
+// guard-demo acceptance criterion from issue #2566: it proves the lint
+// helper actually fails on a reintroduced deprecated spelling, covering a
+// deprecatedDocSpellings marker, the bare runtime = "..." structural shim,
+// and clean content (including the canonical infra.runtime spelling) that
+// reports nothing. The bare form (runtime = ) reports without its trailing
+// quote, matching every other flatShimGeneralizedMarkers entry.
+func TestFindDeprecatedDocSpellings_DetectsReintroducedSpelling(t *testing.T) {
+	cases := []struct {
+		name    string
+		content string
+		want    []string
+	}{
+		{
+			name:    "deprecated marker present",
+			content: "Configure it via `settings.branches.mergeGuardPaths` (baked).",
+			want:    []string{"settings.branches"},
+		},
+		{
+			name:    "bare runtime structural shim",
+			content: "  runtime = \"docker\";\n",
+			want:    []string{"runtime = "},
+		},
+		{
+			name:    "clean content with canonical spelling",
+			content: "  infra.runtime = \"docker\";\n",
+			want:    nil,
+		},
+		{
+			name: "mid-sentence bare runtime structural shim (README shape)",
+			content: "- **podman** (or set `runtime = \"docker\"`; `runtime = \"rancher\"` for Rancher\n" +
+				"  Desktop in containerd mode, driven via `nerdctl`; or `runtime = \"bwrap\"` for\n" +
+				"  the daemonless bubblewrap sandbox on Linux, which needs no container runtime).",
+			want: []string{"runtime = "},
+		},
+		{
+			name:    "mid-sentence canonical spelling not reported",
+			content: "- **podman** (or set `infra.runtime = \"docker\"` for the shim).",
+			want:    nil,
+		},
+		{
+			name:    "widened settings.branches section marker (not just mergeGuardPaths)",
+			content: "Set it via `settings.branches.baseBranch` (deprecated).",
+			want:    []string{"settings.branches"},
+		},
+		{
+			name:    "newly added settings.sandbox section marker",
+			content: "Configure `settings.sandbox.devShellName` (deprecated).",
+			want:    []string{"settings.sandbox"},
+		},
+		{
+			name:    "newly added settings.models section marker",
+			content: "Configure `settings.models.filerModel` (deprecated).",
+			want:    []string{"settings.models"},
+		},
+		{
+			name:    "newly added settings.concurrency section marker",
+			content: "Configure `settings.concurrency.maxParallel` (deprecated).",
+			want:    []string{"settings.concurrency"},
+		},
+		{
+			name:    "newly added settings.selfHealing section marker",
+			content: "Configure `settings.selfHealing.maxFixAttempts` (deprecated).",
+			want:    []string{"settings.selfHealing"},
+		},
+		{
+			name:    "newly added settings.promptSkillIteration section marker",
+			content: "Configure `settings.promptSkillIteration.autoFormat` (deprecated).",
+			want:    []string{"settings.promptSkillIteration"},
+		},
+		{
+			name:    "bare nixInBox flat structural shim (always deprecated, no canonical bare form)",
+			content: "  nixInBox = false;\n",
+			want:    []string{"nixInBox = "},
+		},
+		{
+			name:    "bare nixStoreWritable flat structural shim (always deprecated, no canonical bare form)",
+			content: "  nixStoreWritable = true;\n",
+			want:    []string{"nixStoreWritable = "},
+		},
+		{
+			name:    "bare prefetch flat structural shim",
+			content: "  prefetch = [ ];\n",
+			want:    []string{"prefetch = "},
+		},
+		{
+			name:    "canonical agents.prompt spelling not reported",
+			content: "  agents.prompt = \"...\";\n",
+			want:    nil,
+		},
+		{
+			name:    "canonical infra.image.prefetch spelling not reported",
+			content: "  infra.image.prefetch = [ ];\n",
+			want:    nil,
+		},
+		{
+			// packages/roster/nixpkgs are deliberately NOT generalized: each
+			// collides with a legitimate, non-deprecated doc usage today —
+			// docs/reference.md ~line 824 `packages = p: [ p.go ];` and
+			// ~line 822 `nixpkgs = inputs.nixpkgs;` (mkHarness-direct
+			// arguments), ~line 370 `roster = rosterLib.defaultRoster
+			// {...}` (nix/dogfood-defaults.nix's own field), and
+			// README.md ~line 162 `packages = [ config.packages.spindrift
+			// ];` (nixpkgs' own unrelated mkShell argument). Do not add
+			// these three to flatShimGeneralizedMarkers — it would turn
+			// this check into a false-positive generator.
+			name:    "packages/roster/nixpkgs deliberately not generalized",
+			content: "  packages = p: [ p.go ];\n  roster = rosterLib.defaultRoster {};\n  nixpkgs = inputs.nixpkgs;\n",
+			want:    nil,
+		},
+		{
+			name: "multiple markers in one input accumulate in declaration order",
+			content: "Configure `settings.sandbox.devShellName` and `settings.models.filerModel`.\n" +
+				"  runtime = \"docker\";\n" +
+				"  nixInBox = false;\n",
+			want: []string{"settings.sandbox", "settings.models", "runtime = ", "nixInBox = "},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := findDeprecatedDocSpellings(tc.content)
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("findDeprecatedDocSpellings(%q) = %v, want %v", tc.content, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestDocsHaveNoDeprecatedSpellings guards README.md and every .md file
+// under docs/ (recursively — docs/adr/*.md, docs/console.md,
+// docs/flake-options.md, docs/measurements/*.md, docs/reference.md, ...)
+// against the deprecatedDocSpellings old settings.<section>.<knob> shim
+// paths (and the bare flat structural-shim spellings) creeping back in.
+// This is the integration counterpart to
+// TestFindDeprecatedDocSpellings_DetectsReintroducedSpelling, which only
+// exercises the checker against synthetic content — this test runs it
+// against the real docs (#2566). MIGRATING.md is the one place the
+// deprecated spellings are expected and documented on purpose, so the
+// docs/ walk below skips it by name (not just because it currently lives
+// at the repo root, outside docs/) — moving it under docs/ must not
+// silently start linting it.
+func TestDocsHaveNoDeprecatedSpellings(t *testing.T) {
+	readme, err := os.ReadFile(filepath.Join("..", "..", "README.md"))
+	if err != nil {
+		t.Fatalf("read README.md: %v", err)
+	}
+
+	docs := []struct {
+		name    string
+		content string
+	}{
+		{"README.md", string(readme)},
+	}
+
+	docsDir := filepath.Join("..", "..", "docs")
+	walkErr := filepath.Walk(docsDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() || filepath.Ext(path) != ".md" {
+			return nil
+		}
+		if info.Name() == "MIGRATING.md" {
+			return nil
+		}
+		content, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return readErr
+		}
+		relName, relErr := filepath.Rel(filepath.Join("..", ".."), path)
+		if relErr != nil {
+			relName = path
+		}
+		docs = append(docs, struct {
+			name    string
+			content string
+		}{relName, string(content)})
+		return nil
+	})
+	if walkErr != nil {
+		t.Fatalf("walk docs/: %v", walkErr)
+	}
+
+	for _, doc := range docs {
+		if found := findDeprecatedDocSpellings(doc.content); len(found) > 0 {
+			t.Errorf("%s contains %d deprecated spelling(s): %v", doc.name, len(found), found)
+		}
+	}
+}
+
 // TestTriageLabelMeta_ColorsAreDistinct guards against two label tiers
 // visually colliding in the GitHub label UI by reusing the same hex color
 // (#801) — TestReferenceDocLabelSnippetMatchesTriageDefaults checks
