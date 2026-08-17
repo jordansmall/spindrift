@@ -659,11 +659,12 @@ func runWithReviewPass(cfg config, stdout io.Writer) (int, error) {
 
 // seedPromptFromState composes a fresh prompt file carrying promptFile's own
 // content plus a summary of state -- last verdict, scout-brief path,
-// pass-summary path -- so each pass is "seeded from the run-state artifact"
-// (issue #1998 AC1), not handed the same static prompt on every pass. This is
-// also the "precision between-iteration instruction injection" issue #1999
-// asks for: the explicit, inspectable "what the reviewer said" brief,
-// composed from the handoff artifact rather than an implicit resumed session
+// pass-summary path, decisions record -- so each pass is "seeded from the
+// run-state artifact" (issue #1998 AC1), not handed the same static prompt
+// on every pass. This is also the "precision between-iteration instruction
+// injection" issue #1999 asks for: the explicit, inspectable "what the
+// reviewer said" brief, composed from the handoff artifact rather than an
+// implicit resumed session
 // -- TestRunSeedsFixBriefWithVerdictAfterBlock asserts this shape. When state
 // is the zero value (the common cold-start pass, nothing carried forward yet)
 // this returns promptFile unchanged and creates no temp file.
@@ -704,6 +705,19 @@ func seedPromptFromState(promptFile string, state runstate.RunState) (string, er
 	}
 	if state.WorkerFindings != "" {
 		fmt.Fprintf(&b, "- Worker dispatch results:\n\n%s\n", state.WorkerFindings)
+	}
+	// A missing or unreadable decisions record (state.DecisionsLogPath unset,
+	// or its file gone/unreadable) degrades to skipping the bullet, not an
+	// error -- matching FindingsLogPath's own graceful-degrade convention
+	// (AC4: "A missing or unreadable decisions record degrades to an
+	// unseeded prompt, not an error"). Content is read fresh here (not
+	// carried inline in state itself) and inlined verbatim, unfenced,
+	// mirroring ReviewFindings/WorkerFindings above rather than
+	// FindingsLogPath's path-reference convention.
+	if state.DecisionsLogPath != "" {
+		if content, err := os.ReadFile(state.DecisionsLogPath); err == nil && len(content) > 0 {
+			fmt.Fprintf(&b, "- Decisions record so far (what prior passes chose, rejected, and why):\n\n%s\n", content)
+		}
 	}
 	if state.TerminalLand {
 		b.WriteString("\n")

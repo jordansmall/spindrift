@@ -2036,6 +2036,176 @@ func TestRunWithReviewPassSeedsRoundTwoWithDispositions(t *testing.T) {
 	}
 }
 
+// decisionsFakeDriverBodyRoundOne is reviewPassFakeDriverBody's own script
+// plus two extra steps (issue #2695): call 1, the FIRST implement pass (not
+// the fix pass reviewPassFakeDriverBodyWithDispositions writes at call 3),
+// writes decisionsContent to decisionsPath -- the way a real implement pass
+// leaves its own per-decision file behind for cfg.decisionsPath -- and call
+// 3, the fix pass, copies its own --prompt-file argv to fixPromptCopyPath
+// before the run proceeds -- since seedAndInvokePass removes a prior pass's
+// own seeded prompt file once a LATER implement/fix-kind pass (here, pass
+// 5's land pass) seeds its own, a caller can't read pass 3's seeded file
+// back off disk once run() has returned; this fixture captures it at the
+// fake-driver-exec seam instead, while the run is still live. Decisions
+// originate on the implement pass, not the fix pass, unlike dispositions --
+// hence writing at call 1 rather than call 3.
+func decisionsFakeDriverBodyRoundOne(callLog, decisionsPath, decisionsContent, fixPromptCopyPath string) string {
+	return fmt.Sprintf(`: > "$DRIVER_LOG_PATH"
+n=$(wc -l < "%s")
+case "$n" in
+  1) printf '%%s' '%s' > %s ;;
+  2) printf '%%s' '%s' | tee -a "$DRIVER_LOG_PATH" ;;
+  3) prev=""; for arg in "$@"; do if [ "$prev" = "--prompt-file" ]; then cp "$arg" %s; fi; prev="$arg"; done ;;
+  4) printf '%%s' '%s' | tee -a "$DRIVER_LOG_PATH" ;;
+  5) printf '%%s' '%s' | tee -a "$DRIVER_LOG_PATH" ;;
+esac
+exit 0
+`, callLog,
+		decisionsContent, fmt.Sprintf("%q", decisionsPath),
+		streamJSONOutcomeLine("VERDICT: BLOCK\\n\\n## Blocking\\n- run.go:1 -- bug\\n\\n## Non-blocking\\n- none"),
+		fmt.Sprintf("%q", fixPromptCopyPath),
+		streamJSONOutcomeLine("VERDICT: APPROVE\\n\\n## Blocking\\n- none\\n\\n## Non-blocking\\n- none"),
+		streamJSONOutcomeLine("SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=done nonce=abc"))
+}
+
+// TestRunWithReviewPassSeedsPassThreeWithDecisionsRecord verifies runWithReviewPass
+// (issue #2695) carries the decisions record forward into a LATER
+// implement/fix pass's own seeded prompt, read fresh at the fake-driver-exec
+// seam: the first implement pass (call 1) writes cfg.decisionsPath, and by
+// the time the fix pass (call 3, after round 1's own BLOCK) runs, the
+// orchestrator has folded that file into state.DecisionsLogPath (via
+// recordDecisions/appendFreshDecisionsRound, already exercised by the #2695
+// runstate/orchestrator slices) -- so seedPromptFromState (this issue's own
+// slice) must render it into pass 3's own seeded prompt. Modeled on
+// TestRunWithReviewPassSeedsRoundTwoWithDispositions's same 5-invocation
+// implement/review-BLOCK/fix/review-APPROVE/land shape.
+func TestRunWithReviewPassSeedsPassThreeWithDecisionsRecord(t *testing.T) {
+	dir := t.TempDir()
+	callLog := filepath.Join(dir, "calls.log")
+	decisionsPath := filepath.Join(dir, "decisions.md")
+	fixPromptCopyPath := filepath.Join(dir, "fix-prompt-copy.txt")
+	const decisionsContent = "- chose approach X over Y: simpler, no new dependency"
+	writeFakeDriverExec(t, dir, callLog, decisionsFakeDriverBodyRoundOne(callLog, decisionsPath, decisionsContent, fixPromptCopyPath))
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	promptFile := filepath.Join(dir, "prompt.txt")
+	if err := os.WriteFile(promptFile, []byte("ORIGINAL PROMPT TEXT"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	reviewPromptFile := filepath.Join(dir, "review-prompt.txt")
+	if err := os.WriteFile(reviewPromptFile, []byte("REVIEW PROMPT TEXT"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sessionFile := filepath.Join(dir, "session.txt")
+	if err := os.WriteFile(sessionFile, []byte("--session-id fake-id"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stateFile := filepath.Join(dir, "run-state.json")
+
+	cfg := config{
+		promptFile:       promptFile,
+		reviewPromptFile: reviewPromptFile,
+		sessionFile:      sessionFile,
+		driverBin:        "claude",
+		issue:            "7",
+		logPath:          filepath.Join(dir, "stream.log"),
+		heartbeatLog:     filepath.Join(dir, "heartbeat.log"),
+		stateFile:        stateFile,
+		maxReviewRounds:  3,
+		maxSlices:        10,
+		decisionsPath:    decisionsPath,
+	}
+
+	var stdout bytes.Buffer
+	if _, err := run(cfg, &stdout); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	calls, err := os.ReadFile(callLog)
+	if err != nil {
+		t.Fatalf("read callLog: %v", err)
+	}
+	lines := strings.Split(strings.TrimRight(string(calls), "\n"), "\n")
+	if len(lines) != 5 {
+		t.Fatalf("driver-exec invocation count = %d, want 5 (log: %q)", len(lines), calls)
+	}
+
+	fixPromptFile := flagValue(lines[2], "--prompt-file")
+	if fixPromptFile == "" || fixPromptFile == promptFile || fixPromptFile == reviewPromptFile {
+		t.Fatalf("pass 3 (fix) --prompt-file = %q, want a fresh seeded file", fixPromptFile)
+	}
+	// Read the copy the fake driver-exec made of pass 3's own --prompt-file
+	// content at the fake-driver-exec seam (call 3), not fixPromptFile
+	// itself: by the time run() returns, pass 5's own seeded prompt has
+	// already replaced (and removed) pass 3's in prevSeededPromptFile's
+	// single-slot cleanup.
+	fixSeeded, err := os.ReadFile(fixPromptCopyPath)
+	if err != nil {
+		t.Fatalf("read pass 3's seeded fix prompt copy: %v", err)
+	}
+	if !strings.Contains(string(fixSeeded), decisionsContent) {
+		t.Errorf("pass 3 (fix) seeded prompt = %q, want it to carry the implement pass's own decisions content %q", fixSeeded, decisionsContent)
+	}
+}
+
+// TestRunWithReviewPassFirstPassPromptUnseededWhenStateStartsEmpty verifies
+// runWithReviewPass (issue #2695 AC3: "pass 1 prompts are unchanged") -- pass
+// 1's own --prompt-file argv equals cfg.promptFile verbatim, unseeded, when
+// state.DecisionsLogPath (and every other run-state field) starts empty,
+// since nothing has run yet to populate a decisions record for pass 1 to
+// see. Mirrors TestRunWithReviewPassSequenceOnBlockThenApprove's own pass-1
+// assertion, pinned as its own dedicated test for this issue's AC.
+func TestRunWithReviewPassFirstPassPromptUnseededWhenStateStartsEmpty(t *testing.T) {
+	dir := t.TempDir()
+	callLog := filepath.Join(dir, "calls.log")
+	writeFakeDriverExec(t, dir, callLog, reviewPassFakeDriverBody(callLog))
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	promptFile := filepath.Join(dir, "prompt.txt")
+	if err := os.WriteFile(promptFile, []byte("ORIGINAL PROMPT TEXT"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	reviewPromptFile := filepath.Join(dir, "review-prompt.txt")
+	if err := os.WriteFile(reviewPromptFile, []byte("REVIEW PROMPT TEXT"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sessionFile := filepath.Join(dir, "session.txt")
+	if err := os.WriteFile(sessionFile, []byte("--session-id fake-id"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stateFile := filepath.Join(dir, "run-state.json")
+
+	cfg := config{
+		promptFile:       promptFile,
+		reviewPromptFile: reviewPromptFile,
+		sessionFile:      sessionFile,
+		driverBin:        "claude",
+		issue:            "7",
+		logPath:          filepath.Join(dir, "stream.log"),
+		heartbeatLog:     filepath.Join(dir, "heartbeat.log"),
+		stateFile:        stateFile,
+		maxReviewRounds:  3,
+		maxSlices:        10,
+	}
+
+	var stdout bytes.Buffer
+	if _, err := run(cfg, &stdout); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	calls, err := os.ReadFile(callLog)
+	if err != nil {
+		t.Fatalf("read callLog: %v", err)
+	}
+	lines := strings.Split(strings.TrimRight(string(calls), "\n"), "\n")
+	if len(lines) < 1 {
+		t.Fatalf("driver-exec invocation count = %d, want at least 1 (log: %q)", len(lines), calls)
+	}
+	if got := flagValue(lines[0], "--prompt-file"); got != promptFile {
+		t.Errorf("pass 1 (implement) --prompt-file = %q, want the original %q unseeded (state starts empty)", got, promptFile)
+	}
+}
+
 // TestRunWithReviewPassRemovesPriorRoundSeededReviewPromptButKeepsTheLast
 // verifies runWithReviewPass's own prevSeededReviewPromptFile cleanup
 // (issue #2550 review finding) -- the review-side mirror of the
@@ -4654,6 +4824,81 @@ func TestSeedPromptFromStateIncludesPassSummaryPath(t *testing.T) {
 	}
 	if !strings.Contains(string(got), "- Pass summary: /tmp/pass-summary.md") {
 		t.Errorf("seeded prompt = %q, want it to contain %q", got, "- Pass summary: /tmp/pass-summary.md")
+	}
+}
+
+// TestSeedPromptFromStateIncludesDecisionsRecord verifies seedPromptFromState
+// (issue #2695) reads state.DecisionsLogPath fresh and inlines its content
+// verbatim, unfenced, into the seeded prompt -- the same inline-content
+// convention as ReviewFindings/WorkerFindings above, not FindingsLogPath's
+// own path-reference convention -- so a pass N>1 sees what prior passes
+// decided, rejected, and why.
+func TestSeedPromptFromStateIncludesDecisionsRecord(t *testing.T) {
+	dir := t.TempDir()
+	promptFile := filepath.Join(dir, "prompt.txt")
+	if err := os.WriteFile(promptFile, []byte("ORIGINAL PROMPT TEXT"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	decisionsLogPath := filepath.Join(dir, "decisions-log.md")
+	const decisionsContent = "## Round 1\n- chose approach X over Y: simpler, no new dependency"
+	if err := os.WriteFile(decisionsLogPath, []byte(decisionsContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	state := runstate.RunState{
+		DecisionsLogPath: decisionsLogPath,
+	}
+
+	seeded, err := seedPromptFromState(promptFile, state)
+	if err != nil {
+		t.Fatalf("seedPromptFromState: %v", err)
+	}
+	if seeded == promptFile {
+		t.Fatalf("seedPromptFromState returned the original file unchanged, want a fresh seeded file")
+	}
+	got, err := os.ReadFile(seeded)
+	if err != nil {
+		t.Fatalf("read seeded prompt: %v", err)
+	}
+	for _, want := range []string{"Decisions record so far", decisionsContent} {
+		if !strings.Contains(string(got), want) {
+			t.Errorf("seeded prompt = %q, want it to contain %q", got, want)
+		}
+	}
+}
+
+// TestSeedPromptFromStateDecisionsRecordMissingFileDegradesGracefully
+// verifies seedPromptFromState (issue #2695 AC4) degrades a
+// state.DecisionsLogPath whose file no longer exists the same way
+// TestSeedPromptFromStateSkipsFindingsLogBulletWhenFileGone degrades a
+// missing FindingsLogPath -- the bullet is omitted, with no error, rather
+// than pointing the pass at a file that isn't there, while still seeding the
+// prompt for any other state carried (LastVerdict here).
+func TestSeedPromptFromStateDecisionsRecordMissingFileDegradesGracefully(t *testing.T) {
+	dir := t.TempDir()
+	promptFile := filepath.Join(dir, "prompt.txt")
+	if err := os.WriteFile(promptFile, []byte("ORIGINAL PROMPT TEXT"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	state := runstate.RunState{
+		LastVerdict:      "BLOCK",
+		DecisionsLogPath: filepath.Join(dir, "does-not-exist.md"),
+	}
+
+	seeded, err := seedPromptFromState(promptFile, state)
+	if err != nil {
+		t.Fatalf("seedPromptFromState: %v", err)
+	}
+	got, err := os.ReadFile(seeded)
+	if err != nil {
+		t.Fatalf("read seeded prompt: %v", err)
+	}
+	if strings.Contains(string(got), "Decisions record so far") {
+		t.Errorf("seeded prompt = %q, want no \"Decisions record so far\" bullet when the recorded path no longer exists", got)
+	}
+	if !strings.Contains(string(got), "Last reviewer verdict: BLOCK") {
+		t.Errorf("seeded prompt = %q, want the LastVerdict bullet still seeded", got)
 	}
 }
 
