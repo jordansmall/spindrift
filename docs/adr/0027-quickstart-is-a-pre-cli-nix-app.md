@@ -25,7 +25,8 @@ linking `docs/flake-options.md` for the rest), a secrets-only `harness.env`, a
 `.gitignore` that protects it, and `.envrc`. No `prompts/` directory — the
 harness defaults every prompt (`lib/mkHarness.nix`), so a working Consumer needs
 none. It refuses to clobber an existing `flake.nix`/`harness.env` unless
-`--force` (backing each up to `*.bak`), and is interactive-only: a non-TTY exits
+`--force` (backing each up to a unique `*.bak`/`*.bak.N` file, never
+overwriting a previous backup), and is interactive-only: a non-TTY exits
 with a "write the files directly for scripted setup" message.
 
 The wizard is GitHub-only (issue #1559): it never prompts for the Issue

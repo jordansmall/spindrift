@@ -319,7 +319,7 @@ func runQuickstart(dir string, env Environment, runner CommandRunner, forgeBuild
 		}
 	}
 	if len(clobbered) > 0 && !force {
-		return fmt.Errorf("refusing to overwrite existing %s — rerun with --force to back each up to *.bak and regenerate", clobbered)
+		return fmt.Errorf("refusing to overwrite existing %s — rerun with --force to back each up to a unique *.bak file, never overwriting a previous backup, and regenerate", clobbered)
 	}
 
 	detectedRuntime, err := detectRuntime(env)

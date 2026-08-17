@@ -496,6 +496,12 @@ func TestRunQuickstart_ExistingFlakeNix_RefusesWithoutForce(t *testing.T) {
 	if !strings.Contains(err.Error(), "flake.nix") || !strings.Contains(err.Error(), "force") {
 		t.Errorf("expected error to name flake.nix and mention --force, got: %q", err.Error())
 	}
+	if strings.Contains(err.Error(), "back each up to *.bak") {
+		t.Errorf("expected error not to imply a single, overwritable *.bak backup slot, got: %q", err.Error())
+	}
+	if !strings.Contains(err.Error(), "never overwriting a previous backup") {
+		t.Errorf("expected error to convey that backups are preserved rather than overwritten, got: %q", err.Error())
+	}
 
 	got, readErr := os.ReadFile(filepath.Join(dir, "flake.nix"))
 	if readErr != nil {

@@ -210,7 +210,7 @@ func (hostCommandRunner) Run(name string, args ...string) error {
 }
 
 func main() {
-	force := flag.Bool("force", false, "overwrite an existing flake.nix/harness.env, backing each up to *.bak first")
+	force := flag.Bool("force", false, "overwrite an existing flake.nix/harness.env, backing each up to a unique *.bak file without overwriting a previous backup")
 	flag.Parse()
 
 	dir, err := os.Getwd()
