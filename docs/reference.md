@@ -1363,8 +1363,14 @@ artifact, not a growing transcript:
   default `/tmp/brief.md`), the most recent pass's own pass-summary path
   (`--pass-summary-path`, default `/tmp/pass-summary.md`), and the most
   recent fix pass's own dispositions path (`--dispositions-path`, default
-  `/tmp/dispositions.md`, issue #2550). It also carries dispatch-internal
-  bookkeeping unrelated to any seeded prompt: the done/remaining slice lists
+  `/tmp/dispositions.md`, issue #2550), and the reviewed-commit anchor
+  (`ReviewedCommitAnchor`, issue #2551) — the repo workdir's own `HEAD`
+  commit SHA, recorded via one `git rev-parse HEAD` invocation right after
+  each review pass completes. That recording is best-effort: a `git`
+  failure just logs to stderr and leaves the anchor at whatever a prior
+  review pass already recorded (or empty, on the first pass), never errors
+  the run. It also carries dispatch-internal bookkeeping unrelated to any
+  seeded prompt: the done/remaining slice lists
   (`DoneSlices`/`RemainingSlices`) issue #2059's parallel worker dedup
   mechanism reads and writes to avoid re-dispatching an already-completed
   slice. Each pass reads it before running and writes it back after, through
@@ -1384,6 +1390,21 @@ artifact, not a growing transcript:
   summary, no scout brief, no worker findings) reaches this prompt. Round 1's
   review prompt is always unseeded. A missing dispositions log degrades to
   seeding the prior verdict alone, never an error.
+- **Delta focus.** When the run state's reviewed-commit anchor looks like a
+  real git commit SHA (7 to 40 lowercase hex characters), the same round-N
+  review prompt also gets a "### Delta focus" section naming the range since
+  that anchor — `git diff <anchor>..HEAD` and `git log <anchor>..HEAD
+  --oneline` — as where to concentrate the hunt (issue #2551). The full
+  branch diff stays available throughout; this narrows where the reviewer
+  spends its attention, never what it's allowed to see, and territory
+  outside that range (already cleared by a prior round) is re-examined only
+  where a new commit actually touches it. The section also requires the
+  reviewer to re-skim the FULL diff's shape end to end before it may issue
+  APPROVE, regardless of the delta focus above — delta review must never
+  narrow final approval's own coverage. Round 1's review prompt is
+  completely unaffected by any of this. A missing or invalid-looking anchor
+  omits the section entirely, degrading to the unchanged full-review prompt,
+  never an error.
 - **Dispositions log.** Each fix pass's own fresh `--dispositions-path` file
   is appended, one "## Round N" section at a time, to a per-run,
   append-only log (`DispositionsLogPath`) — an earlier round's won't-fix
