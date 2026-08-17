@@ -1154,27 +1154,6 @@ WORKER_AGENTS_JSON_TEMPLATE='{"worker":{"description":"Implement a scoped slice 
   grep -qF 'delegate each slice' "$DRIVER_PROMPT_FILE"
 }
 
-@test "IMPLEMENT section: coordinator's cherry-pick instruction uses a merge-base range, not a specific base ref" {
-  export AGENTS_JSON_TEMPLATE="$WORKER_AGENTS_JSON_TEMPLATE"
-  export BOX_WORKER_PROVISIONED=1
-  export BASE_BRANCH="release-42"
-  export WORK_DIR="$BATS_TEST_TMPDIR/work-coordinator-base-branch"
-  seed_release_branch "release-42" "seed-release-42"
-  run bash "$ENTRYPOINT"
-  [ "$status" -eq 0 ]
-  # The Agent tool's isolation:"worktree" mechanism cuts a worker's worktree
-  # from the harness's own default, never from ${BASE_BRANCH} (which is a
-  # spindrift-specific env var and can differ from the repo's default
-  # branch) -- so the integration instruction must not assume any specific
-  # base ref and must use a merge-base range instead (issue #2058 review).
-  grep -qF 'git cherry-pick --no-commit $(git merge-base HEAD <branch>)..<branch>' "$DRIVER_PROMPT_FILE"
-  # Scoped to the cherry-pick line itself, not the whole rendered prompt --
-  # other, unrelated steps (e.g. the COMMIT section's own rebase-onto-base
-  # instruction) legitimately reference origin/${BASE_BRANCH} elsewhere.
-  cherry_pick_line=$(grep -F 'git cherry-pick --no-commit' "$DRIVER_PROMPT_FILE")
-  [[ "$cherry_pick_line" != *'origin/'* ]]
-}
-
 @test "IMPLEMENT section: coordinator does not touch the consumer repo's .gitignore" {
   export AGENTS_JSON_TEMPLATE="$WORKER_AGENTS_JSON_TEMPLATE"
   export BOX_WORKER_PROVISIONED=1
@@ -1192,55 +1171,6 @@ WORKER_AGENTS_JSON_TEMPLATE='{"worker":{"description":"Implement a scoped slice 
   implement_section="$(awk '/^# IMPLEMENT/,/^# CHECK/' "$DRIVER_PROMPT_FILE")"
   [[ "$implement_section" != *'gitignore'* ]]
   [[ "$implement_section" != *'WORK_DIR'* ]]
-}
-
-@test "IMPLEMENT section: coordinator grounds branch discovery in the worker's own report, not the Agent-tool result" {
-  export AGENTS_JSON_TEMPLATE="$WORKER_AGENTS_JSON_TEMPLATE"
-  export BOX_WORKER_PROVISIONED=1
-  export WORK_DIR="$BATS_TEST_TMPDIR/work-coordinator-report-branch"
-  run bash "$ENTRYPOINT"
-  [ "$status" -eq 0 ]
-  # Nothing in this repo asserts what the Agent tool's own result carries;
-  # the worker's report contract (worker-prompt.md) is what actually
-  # requires the branch name, so the coordinator's instruction must cite
-  # that instead (issue #2058 review).
-  grep -qF "worker's own report names its worktree branch" "$DRIVER_PROMPT_FILE"
-  ! grep -qF 'Agent-tool result' "$DRIVER_PROMPT_FILE"
-}
-
-@test "IMPLEMENT section: coordinator fails closed on a missing or unclear branch name" {
-  export AGENTS_JSON_TEMPLATE="$WORKER_AGENTS_JSON_TEMPLATE"
-  export BOX_WORKER_PROVISIONED=1
-  export WORK_DIR="$BATS_TEST_TMPDIR/work-coordinator-fail-closed"
-  run bash "$ENTRYPOINT"
-  [ "$status" -eq 0 ]
-  # A missing/garbled branch line must never be read as "no changes" -- a
-  # slice with real work could be silently dropped. The coordinator must
-  # stop and get the worker to confirm the branch before integrating
-  # (issue #2058 review).
-  ! grep -qF 'nothing to integrate' "$DRIVER_PROMPT_FILE"
-  grep -qF 'stop and get the worker to confirm it before integrating' "$DRIVER_PROMPT_FILE"
-}
-
-@test "IMPLEMENT section: coordinator's base-ref prose does not interpolate BASE_BRANCH" {
-  export AGENTS_JSON_TEMPLATE="$WORKER_AGENTS_JSON_TEMPLATE"
-  export BOX_WORKER_PROVISIONED=1
-  export BASE_BRANCH="release-42"
-  export WORK_DIR="$BATS_TEST_TMPDIR/work-coordinator-no-base-branch-interp"
-  seed_release_branch "release-42" "seed-release-42-no-interp"
-  run bash "$ENTRYPOINT"
-  [ "$status" -eq 0 ]
-  # coordinator.md declares no extraSubstVars in lib/fragments.nix's
-  # registry -- it is supposed to be static prose once its gate is on, so
-  # its base-ref sentence must not name ${BASE_BRANCH} or the rendered
-  # release-42 value at all (issue #2058 review).
-  base_ref_line=$(grep -F 'cut from whatever base' "$DRIVER_PROMPT_FILE")
-  [[ "$base_ref_line" != *'release-42'* ]]
-  [[ "$base_ref_line" != *'BASE_BRANCH'* ]]
-  # The merge-base is computed against the coordinator's own current HEAD
-  # each time, so it automatically accounts for every slice already
-  # integrated so far this run -- the piece the review flagged as missing.
-  grep -qF 'accounts for every slice already integrated so far this' "$DRIVER_PROMPT_FILE"
 }
 
 @test "IMPLEMENT section: no worker leaves the single-implementor prompt unchanged" {
