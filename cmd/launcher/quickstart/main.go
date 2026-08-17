@@ -6,6 +6,8 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+
+	"github.com/charmbracelet/x/term"
 )
 
 // hostEnvironment is the real Environment: host PATH lookups, ambient env
@@ -219,8 +221,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	stat, statErr := os.Stdin.Stat()
-	interactive := statErr == nil && (stat.Mode()&os.ModeCharDevice) != 0
+	interactive := term.IsTerminal(os.Stdin.Fd())
 
 	if err := runQuickstart(dir, hostEnvironment{}, hostCommandRunner{}, buildForge, os.Stdout, os.Stdin, interactive, *force); err != nil {
 		fmt.Fprintf(os.Stderr, "quickstart: %s\n", err)

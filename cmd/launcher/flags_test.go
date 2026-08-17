@@ -1528,6 +1528,29 @@ func TestParseFlags_NoCmdOrFile_LeavesDirectEnv(t *testing.T) {
 	}
 }
 
+// TestIsInteractiveTTY_Composition pins the isInteractiveTTY = isStdinTTY()
+// && isStderrTTY() composition (issue #2559): both seams are package vars,
+// so all four combinations are exercised here without a real TTY.
+func TestIsInteractiveTTY_Composition(t *testing.T) {
+	origStdin, origStderr := isStdinTTY, isStderrTTY
+	t.Cleanup(func() { isStdinTTY, isStderrTTY = origStdin, origStderr })
+
+	for _, tc := range []struct {
+		stdin, stderr, want bool
+	}{
+		{false, false, false},
+		{false, true, false},
+		{true, false, false},
+		{true, true, true},
+	} {
+		isStdinTTY = func() bool { return tc.stdin }
+		isStderrTTY = func() bool { return tc.stderr }
+		if got := isInteractiveTTY(); got != tc.want {
+			t.Errorf("isInteractiveTTY() with stdin=%v stderr=%v = %v, want %v", tc.stdin, tc.stderr, got, tc.want)
+		}
+	}
+}
+
 // TestSecretCmdRunner_Default_RunsRealCommand: the production secretCmdRunner
 // (unfaked) actually shells out and returns stdout, so the injected seam has
 // a real implementation wired up, not just fakes in tests.
