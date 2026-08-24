@@ -1,5 +1,14 @@
 package runner
 
+// NETWORK_MODE knob values (issue #2562), shared across the OCI and bwrap
+// adapters and the launcher's own runtime gate (cmd/launcher/main.go) so the
+// three literals aren't repeated as bare strings at each call site.
+const (
+	NetworkModeOpen           = "open"
+	NetworkModeNoHostLoopback = "no-host-loopback"
+	NetworkModeNone           = "none"
+)
+
 // Config carries the subset of launcher config the runner package's
 // constructors need to build an OCI or bwrap adapter. pwd is passed
 // separately to NewOCI (a genuine per-invocation runtime dependency, not a
@@ -19,8 +28,14 @@ type Config struct {
 	NixVolume       string
 	FlakeImageAttr  string
 
-	// OCI container network / resource caps.
+	// OCI container network / resource caps. NetworkMode is the NETWORK_MODE
+	// knob ("open"/"no-host-loopback"/"none"); PodmanNetwork is the raw
+	// --network escape hatch. nix eval-rejects setting both on a valid
+	// Consumer flake (lib/mkHarness.nix networkModeCoherenceOk); the OCI and
+	// bwrap adapters still resolve a deterministic precedence between them
+	// (raw wins) since Go has no way to observe that invariant.
 	PodmanNetwork string
+	NetworkMode   string
 	PidsLimit     string
 	MemoryLimit   string
 

@@ -40,7 +40,8 @@ type ociAdapter struct {
 	// mount (ADR 0032); see MountParams.
 	hostMediatedIssueTracker bool
 	localIssuesDir           string
-	podmanNetwork            string // optional --network value; empty omits the flag
+	podmanNetwork            string // optional raw --network value; empty omits the flag
+	networkMode              string // NETWORK_MODE knob ("open"/"no-host-loopback"/"none"/""); see networkArg
 	pidsLimit                string // --pids-limit value; empty disables the flag
 	memoryLimit              string // --memory value; empty disables the flag
 }
@@ -69,6 +70,7 @@ func NewOCI(cfg Config, pwd string) Runner {
 		hostMediatedIssueTracker: cfg.HostMediatedIssueTracker,
 		localIssuesDir:           cfg.LocalIssuesDir,
 		podmanNetwork:            cfg.PodmanNetwork,
+		networkMode:              cfg.NetworkMode,
 		pidsLimit:                cfg.PidsLimit,
 		memoryLimit:              cfg.MemoryLimit,
 	}
@@ -332,12 +334,48 @@ func (a *ociAdapter) mountSpecs(box Box) []MountSpec {
 	}, box)
 }
 
+// networkArg resolves the effective `--network` value from the raw
+// podmanNetwork escape hatch and the NETWORK_MODE knob (issue #2562). The
+// raw knob wins whenever set: mkHarness's networkModeCoherenceOk eval assert
+// (lib/mkHarness.nix) rejects setting both on a valid Consumer flake, and
+// cmd/launcher/main.go's checkNetworkModeRuntimeGate backstops the same
+// mutual exclusion against a runtime override (env var / CLI flag) of either
+// knob past what that eval assert could see — so by the time a Box reaches
+// this function, both being set is unreachable, not a live case this
+// raw-wins fallback is ever exercised against in practice. It still needs a
+// deterministic answer here as defense-in-depth, since Go has no way to
+// observe that invariant locally. "no-host-loopback" resolves per CLI: plain
+// `pasta` (no
+// `--map-gw`) genuinely denies host-loopback on podman, but docker/nerdctl's
+// "bridge" is just their own default network — byte-identical to what
+// "open" already renders there (no `--network` flag falls back to the same
+// default bridge) — and does not deny host-loopback by default, so on
+// docker/nerdctl this is currently an inert-but-correct render, not a
+// functional guarantee. "none" maps straight through. "open"/unset renders
+// no flag at all.
+func (a *ociAdapter) networkArg() string {
+	if a.podmanNetwork != "" {
+		return a.podmanNetwork
+	}
+	switch a.networkMode {
+	case NetworkModeNoHostLoopback:
+		if a.cli == "podman" {
+			return "pasta"
+		}
+		return "bridge"
+	case NetworkModeNone:
+		return NetworkModeNone
+	default:
+		return ""
+	}
+}
+
 // buildRunArgs assembles the argument slice for `podman/docker run`. Separated
 // from Run so the arg construction can be tested without exec.
 func (a *ociAdapter) buildRunArgs(box Box) []string {
 	args := []string{"run", "--name", box.Name}
-	if a.podmanNetwork != "" {
-		args = append(args, "--network", a.podmanNetwork)
+	if network := a.networkArg(); network != "" {
+		args = append(args, "--network", network)
 	}
 	for k, v := range box.Env {
 		args = append(args, "-e", k+"="+v)

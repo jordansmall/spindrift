@@ -579,6 +579,9 @@ func validate(c config) error {
 	if err := validateChoice("OVERLAP_GATE", c.overlapGate); err != nil {
 		return err
 	}
+	if err := validateChoice("NETWORK_MODE", c.networkMode); err != nil {
+		return err
+	}
 	if !trackerRowOK || !trackerRow.ValidAsTracker {
 		return fmt.Errorf("ISSUE_TRACKER=%q is not valid; must be %s", c.issueTracker, joinOxford(validTrackerNames()))
 	}
@@ -770,6 +773,7 @@ func runnerConfig(c config) runner.Config {
 		NixVolume:                c.nixVolume,
 		FlakeImageAttr:           c.flakeImageAttr,
 		PodmanNetwork:            c.podmanNetwork,
+		NetworkMode:              c.networkMode,
 		PidsLimit:                c.pidsLimit,
 		MemoryLimit:              c.memoryLimit,
 		AgentFiles:               c.agentFiles,
@@ -1163,6 +1167,69 @@ func checkReadOnlyCapabilityGate(c config) error {
 	}
 	if !trackerRow.HostPostingCapable {
 		return fmt.Errorf("BOX_FORGE_AND_ISSUE_ACCESS=read-only: the selected ISSUE_TRACKER=%q does not implement host-posted comments and issue-filing", c.issueTracker)
+	}
+	return nil
+}
+
+// checkNetworkModeRuntimeGate backstops two NETWORK_MODE combinations that
+// mkHarness's networkModeCoherenceOk eval assert (lib/mkHarness.nix) cannot
+// see, because that assert only ever runs against what a Consumer flake
+// bakes at `nix build` time — never a runtime override (env var or CLI
+// flag) — while NETWORK_MODE, PODMAN_NETWORK, and BWRAP_UNSHARE_NET are all
+// runtime-overridable:
+//
+//  1. NETWORK_MODE=no-host-loopback's runner requirement (issue #2562):
+//     bwrap can only unshare its network namespace all-or-nothing
+//     (--unshare-net), with no partial host-loopback-only isolation, so
+//     no-host-loopback has no bwrap rendering. An override can set
+//     NETWORK_MODE=no-host-loopback at runtime on an image nix validated
+//     for a different runner, a combination the eval assert never saw. The
+//     bwrap runner adapter itself only special-cases networkMode="none" and
+//     otherwise fails open (shares the full host network namespace) rather
+//     than reject no-host-loopback, so this gate is what actually prevents
+//     the combination from reaching it.
+//
+//  2. NETWORK_MODE / raw-knob coherence (review finding on issue #2562):
+//     mkHarness rejects baking a non-default networkMode alongside a raw
+//     knob (PODMAN_NETWORK / BWRAP_UNSHARE_NET) on the same Consumer flake —
+//     but a flake can bake only one of them (say, just PODMAN_NETWORK, mode
+//     left at the default "open") and then take a runtime override that
+//     sets NETWORK_MODE to a non-open value, a pairing the eval assert never
+//     saw either. Without this gate,
+//     cmd/launcher/internal/runner/oci.go's networkArg() picks the raw knob
+//     over the runtime-overridden mode ("raw wins whenever set"), silently
+//     rendering full egress instead of the isolation NETWORK_MODE asked
+//     for.
+//
+// Case 1 keys on c.runnerKind, never c.runtime (issue #2538 invariant, see
+// the runnerKind field doc and runnerForKind above): runnerKind is what
+// actually selects the bwrap adapter, and RUNNER_KIND=bwrap/RUNTIME=podman
+// is a supported combination (bootstrap_test.go) where the OCI adapter's
+// no-host-loopback rendering applies fine — keying on c.runtime would reject
+// that valid combination and, worse, let RUNNER_KIND=bwrap/RUNTIME=podman +
+// NETWORK_MODE=no-host-loopback pass straight through to bwrap.go's fail-open
+// isolateNet=false.
+//
+// Case 2 only covers the unambiguously-detectable subset: a resolved
+// c.networkMode that is not NetworkModeOpen alongside a set raw knob. Go has
+// no way to distinguish "networkMode defaulted to open" from "networkMode
+// was explicitly set to open" at this layer — only the resolved value is
+// visible — so, unlike the nix-side assert (which checks presence, not
+// value), an explicit NETWORK_MODE=open paired with a raw knob is out of
+// scope here and left to raw-wins in networkArg().
+func checkNetworkModeRuntimeGate(c config) error {
+	if c.networkMode == runner.NetworkModeNoHostLoopback && c.runnerKind == freshness.KindBwrap {
+		return fmt.Errorf("NETWORK_MODE=no-host-loopback is unsupported on RUNNER_KIND=bwrap -- bwrap can only unshare its network namespace all-or-nothing (--unshare-net), with no partial host-loopback isolation; use RUNNER_KIND=oci instead, or NETWORK_MODE=none/open on bwrap")
+	}
+	if c.networkMode != runner.NetworkModeOpen && c.networkMode != "" && (c.podmanNetwork != "" || c.bwrapUnshareNet) {
+		var rawKnobs []string
+		if c.podmanNetwork != "" {
+			rawKnobs = append(rawKnobs, "PODMAN_NETWORK")
+		}
+		if c.bwrapUnshareNet {
+			rawKnobs = append(rawKnobs, "BWRAP_UNSHARE_NET")
+		}
+		return fmt.Errorf("NETWORK_MODE=%s is set alongside raw network knob(s) %s -- there is no precedence rule between a runtime-overridden NETWORK_MODE and a raw knob; set only one", c.networkMode, strings.Join(rawKnobs, ", "))
 	}
 	return nil
 }

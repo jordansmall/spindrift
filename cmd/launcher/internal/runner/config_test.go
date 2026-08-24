@@ -22,6 +22,7 @@ func TestNewOCI_UsesConfigFields(t *testing.T) {
 		SkillsDir:             "/skills",
 		DriverSessionCacheDir: "/home/agent/.claude/projects",
 		PodmanNetwork:         "none",
+		NetworkMode:           "no-host-loopback",
 		PidsLimit:             "256",
 		MemoryLimit:           "2g",
 	}
@@ -44,6 +45,7 @@ func TestNewOCI_UsesConfigFields(t *testing.T) {
 		skillsDir:             a.skillsDir,
 		driverSessionCacheDir: a.driverSessionCacheDir,
 		podmanNetwork:         a.podmanNetwork,
+		networkMode:           a.networkMode,
 		pidsLimit:             a.pidsLimit,
 		memoryLimit:           a.memoryLimit,
 	}
@@ -61,6 +63,7 @@ func TestNewOCI_UsesConfigFields(t *testing.T) {
 		skillsDir:             cfg.SkillsDir,
 		driverSessionCacheDir: cfg.DriverSessionCacheDir,
 		podmanNetwork:         cfg.PodmanNetwork,
+		networkMode:           cfg.NetworkMode,
 		pidsLimit:             cfg.PidsLimit,
 		memoryLimit:           cfg.MemoryLimit,
 	}
@@ -94,6 +97,7 @@ func TestNewBwrap_UsesConfigFields(t *testing.T) {
 		SkillsDir:             "/skills",
 		DriverSessionCacheDir: "/home/agent/.claude/projects",
 		BwrapUnshareNet:       true,
+		NetworkMode:           "none",
 	}
 	r := NewBwrap(cfg)
 	a, ok := r.(*bwrapAdapter)
@@ -108,6 +112,7 @@ func TestNewBwrap_UsesConfigFields(t *testing.T) {
 		skillsDir:             cfg.SkillsDir,
 		driverSessionCacheDir: cfg.DriverSessionCacheDir,
 		unshareNet:            cfg.BwrapUnshareNet,
+		networkMode:           cfg.NetworkMode,
 	}
 	// reflect.DeepEqual over pointers, not !=: bwrapAdapter now also carries
 	// the mu/running process-tracking fields Kill (issue #649) uses, which a
