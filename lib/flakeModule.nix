@@ -271,6 +271,58 @@ let
     };
   };
 
+  # Name-keyed model/effort shorthand (issue #2560), a brand-new option with
+  # no pre-existing flat spelling -- deliberately declared OUTSIDE
+  # structuralOptions (whose keys drive the oldFlatShims/structuralPlacements
+  # dual-path legacy-migration machinery below) so it never grows a
+  # fabricated "old" flat alias and never emits a deprecation warning.
+  byNameOption = mkOption {
+    type = types.nullOr (
+      types.attrsOf (
+        types.submodule {
+          options = {
+            model = mkOption {
+              type = types.nullOr types.str;
+              default = null;
+              description = "Model override for this roster entry (lib/roster.nix's defaultRoster). An explicit empty string (\"\") opts this agent out, the same convention the roster-native `models` shorthand already uses.";
+            };
+            effort = mkOption {
+              type = types.nullOr types.str;
+              default = null;
+              description = "Effort/reasoning-level override for this roster entry. For the reviewer entry, the deprecated reviewEffort knob (agents.models.reviewEffort), when set, overrides this after the fact.";
+            };
+          };
+        }
+      )
+    );
+    default = null;
+    description = ''
+      Name-keyed shorthand (issue #2560) for per-agent model/effort overrides
+      on the default roster (lib/roster.nix's defaultRoster): each key must
+      name a roster entry (scout/reviewer/filer/worker) and each value is a
+      closed { model?; effort?; } attrset -- any other field fails eval. Mode,
+      tools, and prompt overrides stay roster-only, keeping this a shorthand.
+      Unlike the deprecated scoutModel/reviewModel/filerModel/workerModel
+      knobs, setting this emits no deprecation warning. Ignored when an
+      explicit `roster` is supplied, same precedence the legacy per-agent
+      knobs already have.
+    '';
+  };
+
+  # Standalone tree entry (not merged into flakeOptionTreeEntries or
+  # structuralTreeEntries) since byNameOption skips both of those surfaces'
+  # legacy-migration machinery.
+  byNameTreeEntries = [
+    {
+      path = [
+        "agents"
+        "models"
+        "byName"
+      ];
+      opt = byNameOption;
+    }
+  ];
+
   # Structural leaves: each structuralOptions entry, hand-placed at its new
   # domain-tree path (slice 2's placement map). Asserted against
   # structuralPlacements' own key set first — a row added to only one of the
@@ -339,7 +391,9 @@ in
           };
         };
       in
-      oldFlatShims // settingsOption // (buildTree (flakeOptionTreeEntries ++ structuralTreeEntries));
+      oldFlatShims
+      // settingsOption
+      // (buildTree (flakeOptionTreeEntries ++ structuralTreeEntries ++ byNameTreeEntries));
   };
 
   config.perSystem =
@@ -423,6 +477,7 @@ in
         revision = self.shortRev or self.dirtyShortRev or "unknown";
       }
       // structuralArgs
+      // lib.optionalAttrs (cfg.agents.models.byName != null) { byName = cfg.agents.models.byName; }
       // lib.optionalAttrs (runDefaults != { }) { defaults = runDefaults; };
       harness = mkHarness args;
       # nixfmt from the consumer's locked nixpkgs input — same pin the

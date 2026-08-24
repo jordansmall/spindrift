@@ -31,6 +31,9 @@ let
   # the reviewer entry's effort out of it.
   reviewerEffortOf =
     roster: (builtins.head (builtins.filter (e: e.name == "reviewer") roster)).effort;
+  # Shared by mkharness-byname-* below (issue #2560, blocking review
+  # finding): pulls a named entry's resolved model out of a roster.
+  modelOf = name: roster: (builtins.head (builtins.filter (e: e.name == name) roster)).model;
   # Single hand-typed anti-vacuity root (issue #2514) for the expected-
   # default-model literals used below -- see lib/default-model-fixture.nix's
   # own header comment for why it stays hand-typed rather than schema-derived.
@@ -828,6 +831,93 @@ in
       "flake.nix's flake.lib.rosterLib export (issue #2560 AC4) must resolve to the exact same lib/roster.nix, byte-identical output for the same byName input, got flake export=${builtins.toJSON fromFlakeRoster} vs direct import=${builtins.toJSON directRoster}";
     pkgs.runCommand "flake-lib-rosterlib-reachable" { } "touch $out";
 
+  # Issue #2560: the name-keyed `byName` shorthand reaches mkHarness via its
+  # new domain-tree path `agents.models.byName`, byte-identical to a direct
+  # mkHarness `byName` call -- the same parity pattern flakemodule-roster
+  # proves for `roster` and flakemodule-structural-domaintree-parity proves
+  # for a structural knob's new path. Unlike those 13 structural knobs,
+  # `byName` has no old flat path to fall back on (see
+  # flakemodule-byname-no-legacy-flat-alias below), so this check only
+  # exercises the new path.
+  flakemodule-byname =
+    let
+      testByName = {
+        filer = {
+          model = defaultModelFixture.dogfoodPins.filer;
+          effort = "high";
+        };
+      };
+      consumer108 =
+        flake-parts.lib.mkFlake
+          {
+            inputs = {
+              inherit nixpkgs;
+              self = {
+                outPath = ../../.;
+              };
+            };
+          }
+          {
+            systems = [ system ];
+            imports = [ ../../lib/flakeModule.nix ];
+            perSystem.spindrift = {
+              packages = p: [ p.hello ];
+              agents.models.byName = testByName;
+            };
+          };
+      direct108 = import ../../lib/mkHarness.nix {
+        inherit nixpkgs system;
+        packages = p: [ p.hello ];
+        byName = testByName;
+      };
+      consumerPkgs108 = consumer108.packages.${system};
+    in
+    pkgs.runCommand "flakemodule-byname"
+      {
+        moduleSpindrift = consumerPkgs108.spindrift;
+        directSpindrift = direct108.spindrift;
+      }
+      ''
+        [ "$moduleSpindrift" = "$directSpindrift" ] \
+          || { echo "spindrift mismatch: $moduleSpindrift != $directSpindrift" >&2; exit 1; }
+        touch $out
+      '';
+
+  # Issue #2560: `byName` is a brand-new option with no pre-existing flat
+  # spelling to migrate from, so it must NOT get a fabricated legacy flat
+  # alias the way the 13 structural knobs do (oldFlatShims) -- a flat
+  # `perSystem.spindrift.byName` must be rejected at eval by the module
+  # system, the same as any other undeclared option.
+  flakemodule-byname-no-legacy-flat-alias =
+    let
+      inherit (pkgs.lib) assertMsg;
+      badFlake =
+        (flake-parts.lib.mkFlake
+          {
+            inputs = {
+              inherit nixpkgs;
+              self = {
+                outPath = ../../.;
+              };
+            };
+          }
+          {
+            systems = [ system ];
+            imports = [ ../../lib/flakeModule.nix ];
+            perSystem.spindrift = {
+              packages = p: [ p.hello ];
+              byName = {
+                filer.model = defaultModelFixture.dogfoodPins.filer;
+              };
+            };
+          }
+        ).packages.${system}.spindrift;
+      result = builtins.tryEval (builtins.deepSeq badFlake badFlake);
+    in
+    assert assertMsg (!result.success)
+      "flakeModule must throw on undeclared flat option 'byName' (no legacy alias for issue #2560's byName)";
+    pkgs.runCommand "flakemodule-byname-no-legacy-flat-alias" { } "touch $out";
+
   # ADR 0037 (issue #2522 slice 2): the structural-knob forwarding chain in
   # config.perSystem (structuralArgs) must forward a knob reached via its NEW
   # domain-tree path, not just the deprecated flat path flakemodule-alias-parity
@@ -1602,6 +1692,60 @@ in
       (reviewerEffortOf direct.internals.roster == rosterHelper.rosterDefaults.reviewer.effort)
       "mkHarness must leave the reviewer entry at its roster default effort (${rosterHelper.rosterDefaults.reviewer.effort}) when defaults.reviewEffort is unset, got: ${builtins.toJSON (reviewerEffortOf direct.internals.roster)}";
     pkgs.runCommand "mkharness-review-effort-empty-leaves-reviewer-effort-untouched" { } "touch $out";
+
+  # Issue #2560 (blocking review finding): `inherit byName;` at
+  # lib/mkHarness.nix's resolvedRoster (the mkHarness -> defaultRoster
+  # forwarding seam) was untested end-to-end -- flakemodule-byname above only
+  # proves the flakeModule path and a direct mkHarness call agree with EACH
+  # OTHER when both are handed the same byName, which stays true even if that
+  # `inherit byName;` line is deleted (both sides would then be equally
+  # byName-blind). These two checks instead pin the seam itself, the same
+  # way mkharness-review-effort-* above pins reviewEffort's forwarding:
+  # against mkHarness's own exposed `internals.roster` (issue #2529), not a
+  # re-derivation of the override logic.
+  #
+  # First: a mkHarness call with byName set must actually change the
+  # resolved roster relative to the same call without it -- proves the value
+  # has an effect at all, not just that it round-trips unchanged.
+  mkharness-byname-overrides-default-roster =
+    let
+      testByName = {
+        filer.model = defaultModelFixture.dogfoodPins.filer;
+      };
+      direct = import ../../lib/mkHarness.nix {
+        inherit nixpkgs system;
+        packages = p: [ p.hello ];
+        byName = testByName;
+      };
+    in
+    assert pkgs.lib.assertMsg
+      (modelOf "filer" direct.internals.roster == defaultModelFixture.dogfoodPins.filer)
+      "mkHarness must apply its byName parameter's filer.model to the defaultRoster-resolved filer entry, got: ${builtins.toJSON (modelOf "filer" direct.internals.roster)}";
+    pkgs.runCommand "mkharness-byname-overrides-default-roster" { } "touch $out";
+
+  # Second: mkHarness's own resolved roster for a given byName must be
+  # byte-identical to calling rosterLib.defaultRoster directly with that same
+  # byName -- deleting the `inherit byName;` forwarding line would make the
+  # first check above fail differently (filer model would stay the schema
+  # default, "") but wouldn't by itself prove mkHarness is routing the value
+  # through defaultRoster rather than some other path; this comparison pins
+  # that specifically.
+  mkharness-byname-matches-direct-defaultroster-call =
+    let
+      testByName = {
+        filer.model = defaultModelFixture.dogfoodPins.filer;
+      };
+      direct = import ../../lib/mkHarness.nix {
+        inherit nixpkgs system;
+        packages = p: [ p.hello ];
+        byName = testByName;
+      };
+      rosterLib = import ../../lib/roster.nix { inherit (pkgs) lib; };
+      expected = rosterLib.normalizeRoster (rosterLib.defaultRoster { byName = testByName; });
+    in
+    assert pkgs.lib.assertMsg (direct.internals.roster == expected)
+      "mkHarness's resolvedRoster must forward `byName` into rosterLib.defaultRoster unchanged (lib/mkHarness.nix's `inherit byName;`), got: ${builtins.toJSON direct.internals.roster} vs expected ${builtins.toJSON expected}";
+    pkgs.runCommand "mkharness-byname-matches-direct-defaultroster-call" { } "touch $out";
 
   # Issue #2533 (blocking review finding): FILER_ENABLED/WORKER_PROVISIONED
   # must agree with what the selected Driver actually renders into the
