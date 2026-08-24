@@ -596,12 +596,13 @@ func (f fakeEnvironment) LookupEnv(key string) (string, bool) {
 }
 
 type fakeCommandRunner struct {
-	calls [][]string
+	calls  [][]string
+	runErr error
 }
 
 func (f *fakeCommandRunner) Run(name string, args ...string) error {
 	f.calls = append(f.calls, append([]string{name}, args...))
-	return nil
+	return f.runErr
 }
 
 func TestRunQuickstart_NonTTY_ExitsWithError(t *testing.T) {
@@ -1674,10 +1675,88 @@ func TestRunQuickstart_FinishLine_ProbesForgeThenCreatesLabelsThenBuilds(t *test
 	if !strings.Contains(out.String(), "spindrift dispatch") {
 		t.Errorf("expected closing summary to name `spindrift dispatch` as the next step, got:\n%s", out.String())
 	}
+	if !strings.Contains(out.String(), "Quickstart complete. Wrote:") {
+		t.Errorf("expected closing summary to include the `Quickstart complete. Wrote:` header, got:\n%s", out.String())
+	}
 	for _, want := range []string{"flake.nix", "harness.env", ".gitignore", ".envrc"} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("expected closing summary to list %q, got:\n%s", want, out.String())
 		}
+	}
+}
+
+// TestRunQuickstart_FailsAfterWrite_NamesWrittenFilesAndRerunCommand covers
+// the two post-write failure paths (issue #2563): the scaffold files are
+// already on disk by the time either doctor.Run or the finish-line build
+// subprocess fails, so the error must name them and point at rerunning the
+// failed step directly instead of sending the operator back through the
+// whole wizard (and never suggests --force, which only governs the
+// pre-write clobber guard). The two cases differ only in how the failure is
+// injected and which rerun command is expected.
+func TestRunQuickstart_FailsAfterWrite_NamesWrittenFilesAndRerunCommand(t *testing.T) {
+	cases := []struct {
+		name          string
+		forge         *forge.Fake
+		runErr        error
+		wantRerun     string
+		wantThenBuild bool // doctor failure should also point at the remaining build step
+	}{
+		{
+			name:          "doctor",
+			forge:         func() *forge.Fake { f := forge.NewFake(); f.ProbeErr = forge.ErrAuthFailure; return f }(),
+			runErr:        nil,
+			wantRerun:     spindriftDoctorArgs,
+			wantThenBuild: true,
+		},
+		{
+			name:      "build",
+			forge:     passingForge(),
+			runErr:    fmt.Errorf("exit status 1"),
+			wantRerun: strings.Join(spindriftBuildArgs, " "),
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			var out bytes.Buffer
+			stdin := defaultQuickstartStdin()
+			env := fakeEnvironment{env: map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "claude-oauth-faketoken"}, runtimes: map[string]bool{"podman": true}}
+			runner := &fakeCommandRunner{runErr: tc.runErr}
+
+			err := runQuickstart(dir, env, runner, fakeForgeBuilder(tc.forge), &out, stdin, true, false)
+			if err == nil {
+				t.Fatalf("expected runQuickstart to return an error when the %s step fails", tc.name)
+			}
+
+			for _, want := range []string{"flake.nix", "harness.env", ".gitignore", ".envrc"} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("expected error to name written file %q, got: %v", want, err)
+				}
+			}
+			if !strings.Contains(err.Error(), tc.wantRerun) {
+				t.Errorf("expected error to point at rerunning `%s` directly, got: %v", tc.wantRerun, err)
+			}
+			if strings.Contains(err.Error(), "--force") {
+				t.Errorf("expected error not to mention --force, got: %v", err)
+			}
+			if !strings.Contains(err.Error(), "fix the underlying issue") {
+				t.Errorf("expected error to say `fix the underlying issue` (no positional claim about terminal scrollback), got: %v", err)
+			}
+			if strings.Contains(err.Error(), "fix the issue above") {
+				t.Errorf("expected error not to say `fix the issue above`, got: %v", err)
+			}
+			if tc.wantThenBuild && !strings.Contains(err.Error(), strings.Join(spindriftBuildArgs, " ")) {
+				t.Errorf("expected doctor failure to also point at the remaining build step `%s`, got: %v", strings.Join(spindriftBuildArgs, " "), err)
+			}
+			if !tc.wantThenBuild && strings.Contains(err.Error(), "also run:") {
+				t.Errorf("expected build failure (no remaining step) not to mention an `also run:` clause, got: %v", err)
+			}
+
+			if _, statErr := os.Stat(filepath.Join(dir, "flake.nix")); statErr != nil {
+				t.Errorf("expected flake.nix to already be written when the %s step fails, got stat err: %v", tc.name, statErr)
+			}
+		})
 	}
 }
 

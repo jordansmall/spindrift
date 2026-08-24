@@ -150,6 +150,65 @@ var defaultDispatchLabels = forge.DispatchLabels{
 // can't drift out of sync between the call site and its assertions.
 var spindriftBuildArgs = []string{"nix", "develop", "--command", "spindrift", "build"}
 
+// spindriftDoctorArgs is the command text the doctor post-write rerun points
+// at — never shelled out to directly (doctor runs in-process), only ever
+// displayed — shared with tests so the command can't drift out of sync
+// between the call site and its assertions.
+var spindriftDoctorArgs = "nix develop --command spindrift doctor"
+
+// postWriteStep names one post-write validation/build step and the exact
+// command to rerun it directly (issue #2563) — bundling name+rerun together
+// so a call site can't accidentally pair one step's message with another
+// step's rerun command.
+type postWriteStep struct {
+	name  string
+	rerun string
+	next  *postWriteStep // optional: the step that remains after this one succeeds
+}
+
+// buildPostWriteStep is the direct rerun path a post-write build failure
+// points the operator at (issue #2563). Nothing remains after a successful
+// build, so `next` is left nil.
+var buildPostWriteStep = postWriteStep{
+	name:  "spindrift build",
+	rerun: strings.Join(spindriftBuildArgs, " "),
+}
+
+// doctorPostWriteStep is the direct rerun path a post-write doctor failure
+// points the operator at (issue #2563): flake.nix/harness.env are already on
+// disk at that point, but the `spindrift` binary only exists inside the
+// devShell the generated flake provides, so the rerun goes through `nix
+// develop` rather than a bare `spindrift doctor`. Doctor passing still
+// leaves the build step unrun, so `next` points at an independent copy of
+// buildPostWriteStep's fields rather than aliasing the mutable package-level
+// var itself.
+var doctorPostWriteStep = postWriteStep{
+	name:  "spindrift doctor",
+	rerun: spindriftDoctorArgs,
+	next: &postWriteStep{
+		name:  buildPostWriteStep.name,
+		rerun: buildPostWriteStep.rerun,
+	},
+}
+
+// postWriteFailure wraps a doctor or build failure that happens after the
+// scaffold files are already on disk (issue #2563): it names the files so
+// the operator knows nothing needs re-writing — hand-editing one directly
+// (e.g. a bad token already persisted to harness.env) is a valid fix — and
+// gives the exact command to rerun just the failed step, plus what remains
+// after it passes if anything does. Never --force (which only guards the
+// pre-write clobber check) and never the wizard itself. Owns 100% of the
+// user-facing prose itself — postWriteStep only carries data (name, rerun
+// command, and which step is next), never pre-rendered sentence fragments.
+func postWriteFailure(step postWriteStep, written []string, err error) error {
+	msg := fmt.Sprintf("%s failed after writing %s — fix the underlying issue (hand-edit the written files directly if that's the problem), then rerun directly (no need to redo quickstart): %s",
+		step.name, strings.Join(written, ", "), step.rerun)
+	if step.next != nil {
+		msg += fmt.Sprintf("; once that passes, also run: %s", step.next.rerun)
+	}
+	return fmt.Errorf("%s (cause: %w)", msg, err)
+}
+
 // ForgeBuilder constructs the real IssueTracker/CodeForge from the wizard's
 // collected repoSlug, Issue Tracker settings, and the single backend token
 // the wizard collected (whichever one is relevant to the chosen backend —
@@ -457,11 +516,13 @@ func runQuickstart(dir string, env Environment, cmdRunner CommandRunner, forgeBu
 		fmt.Fprintf(w, "backed up: %s -> %s\n", name, filepath.Base(bakPath))
 	}
 
+	var written []string
 	for _, f := range render(a) {
 		if err := os.WriteFile(filepath.Join(dir, f.path), []byte(f.content), f.mode); err != nil {
 			return fmt.Errorf("write %s: %w", f.path, err)
 		}
 		fmt.Fprintf(w, "wrote: %s\n", f.path)
+		written = append(written, f.path)
 	}
 
 	// The gh CLI (used by the github Code Forge, and by the github Issue
@@ -487,19 +548,18 @@ func runQuickstart(dir string, env Environment, cmdRunner CommandRunner, forgeBu
 		CompleteLabel:   defaultDispatchLabels.Complete,
 		Runtime:         runtime,
 	}, w, scanner, interactive); err != nil {
-		return err
+		return postWriteFailure(doctorPostWriteStep, written, err)
 	}
 
 	fmt.Fprintln(w, "==> the first image build can take a while — building now")
 	if err := cmdRunner.Run(spindriftBuildArgs[0], spindriftBuildArgs[1:]...); err != nil {
-		return fmt.Errorf("spindrift build: %w", err)
+		return postWriteFailure(buildPostWriteStep, written, err)
 	}
 
 	fmt.Fprintln(w, "\nQuickstart complete. Wrote:")
-	fmt.Fprintln(w, "  flake.nix")
-	fmt.Fprintln(w, "  harness.env")
-	fmt.Fprintln(w, "  .gitignore")
-	fmt.Fprintln(w, "  .envrc")
+	for _, f := range written {
+		fmt.Fprintf(w, "  %s\n", f)
+	}
 	fmt.Fprintln(w, "\nNext: run `spindrift dispatch`.")
 
 	return nil
