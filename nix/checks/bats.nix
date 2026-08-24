@@ -133,6 +133,155 @@ let
         ''
     )
   ) nonClaudeDrivers;
+
+  # The `bats` derivation's build environment: nativeBuildInputs plus the
+  # env vars its suites read (harness binaries, contract fixtures, hook
+  # scripts, driver registry data).
+  batsEnv = {
+    nativeBuildInputs = [
+      pkgs.bats
+      pkgs.bash
+      pkgs.git
+      pkgs.gettext
+      pkgs.coreutils
+      pkgs.gnugrep
+      pkgs.gnused
+      pkgs.jq
+    ];
+    # The launcher commands under test overlay `gh` with the fake
+    # (batsHarness/customHarness/dockerHarness), since the real `gh`
+    # is pinned into their runtimeInputs PATH and would otherwise
+    # shadow a PATH-injected fake.
+    RUN_CMD = "${batsHarness.internals.run}/bin/run";
+    SPINDRIFT_CMD = "${batsHarness.spindrift}/bin/spindrift";
+    BUILD_CMD = "${batsHarness.internals.build}/bin/build";
+    BUILD_NO_RUNTIME_CMD = "${noRuntimeHarness.internals.build}/bin/build";
+    CUSTOM_RUN_CMD = "${customHarness.internals.run}/bin/run";
+    DOCKER_RUN_CMD = "${dockerHarness.internals.run}/bin/run";
+    BWRAP_RUN_CMD = "${bwrapHarness.internals.run}/bin/run";
+    BWRAP_BUILD_CMD = "${bwrapHarness.internals.build}/bin/build";
+    IMAGE_PATH = batsHarness.internals.imagePath;
+    ENTRYPOINT = ../../agent/entrypoint.sh;
+    FORMAT_TRANSCRIPT_SCRIPT = ../../agent/format-transcript.sh;
+    # The PreToolUse hook script baked into the image at
+    # /home/agent/.claude/hooks/reject-background-bash.sh (issue #1609);
+    # exercised here directly against its own source, not the baked copy,
+    # since it takes no dependency on the Box environment.
+    REJECT_BACKGROUND_BASH_SCRIPT = ../../agent/reject-background-bash.sh;
+    # The PreToolUse hook script baked into the image at
+    # /home/agent/.claude/hooks/credential-deny.sh (issue #1909); same
+    # reasoning as REJECT_BACKGROUND_BASH_SCRIPT above.
+    CREDENTIAL_DENY_HOOK_SCRIPT = ../../agent/credential-deny.sh;
+    # The PreToolUse hook script baked into the image at
+    # /home/agent/.claude/hooks/env-credential-scrub.sh (issue #1927);
+    # same reasoning as CREDENTIAL_DENY_HOOK_SCRIPT above.
+    ENV_CREDENTIAL_SCRUB_HOOK_SCRIPT = ../../agent/env-credential-scrub.sh;
+    # The PreToolUse/PostToolUse hook pair baked into the image at
+    # /home/agent/.claude/hooks/bash-output-{tee,summary}.sh (issue
+    # #1988); same reasoning as ENV_CREDENTIAL_SCRUB_HOOK_SCRIPT above.
+    BASH_OUTPUT_TEE_SCRIPT = ../../agent/bash-output-tee.sh;
+    BASH_OUTPUT_SUMMARY_SCRIPT = ../../agent/bash-output-summary.sh;
+    DOGFOOD_SH = ../../dogfood.sh;
+    # The worker/coordinator A/B harness (issue #2057). tests/ is copied
+    # into the sandbox but its parent ab-orchestrator.sh is not, so
+    # tests/ab-orchestrator.bats resolves the script through this env var
+    # rather than $BATS_TEST_DIRNAME/../ab-orchestrator.sh.
+    AB_ORCHESTRATOR_SH = ../../ab-orchestrator.sh;
+    PROMPTS_DIR = ../../templates/default/prompts;
+    # The baked default prompt dir the `run` command mounts, and a
+    # Consumer-configured one whose rendered content flows through
+    # to the stubbed agent (#4).
+    PROMPT_PATH = batsHarness.internals.promptDir;
+    PROMPT_HARNESS_DIR = promptHarness.internals.promptDir;
+    # The default-image outcome contract, so the entrypoint-*.bats suites run standalone
+    # (no /agent/outcome-contract.md on the bats build host) still exercise
+    # the same canonical text an image would bake (issue #420).
+    OUTCOME_CONTRACT_FILE = batsHarness.internals.outcomeContractFile;
+    # Same reason, for the COMMS and CHECK/COMMIT blocks fix-prompt.md
+    # shares with issue-prompt.md (issue #455).
+    COMMS_CONTRACT_FILE = batsHarness.internals.commsContractFile;
+    CHECK_CONTRACT_FILE = batsHarness.internals.checkContractFile;
+    # Same reason, for the research dispatch kind's own outcome contract
+    # (issue #640, exported here to close the parity gap from #735).
+    RESEARCH_OUTCOME_CONTRACT_FILE = batsHarness.internals.researchOutcomeContractFile;
+    # The Driver's registry-rendered function definitions; helper.bash
+    # prepends this before exec-ing the entrypoint so the bats suite
+    # exercises the same bodies the image bakes in (issue #433).
+    DRIVER_PREAMBLE_FILE = batsHarness.internals.driverPreambleFile;
+    # The 8 baked /agent/* path literals' rendered fallback preamble
+    # (issue #2531); helper.bash prepends this between DRIVER_PREAMBLE_FILE
+    # and FRAGMENT_REGISTRY_FILE for the same reason, matching lib/image.nix's
+    # own concatenation order.
+    AGENT_PATHS_PREAMBLE_FILE = batsHarness.internals.agentPathsPreambleFile;
+    # The Conditional fragment registry's rendered loop input and
+    # substitution allowlist (issue #622); helper.bash prepends this
+    # alongside DRIVER_PREAMBLE_FILE for the same reason.
+    FRAGMENT_REGISTRY_FILE = batsHarness.internals.fragmentRegistryFile;
+    # tests/driver-registry-outcome-extraction.bats (issue #2261 slice 2)
+    # lives under tests/ like every other suite, so this catch-all `bats
+    # tests/` run picks it up too -- export the same registry-driven
+    # manifest the dedicated driver-registry-outcome-extraction check
+    # below exports, or that file's required-var guard fails here.
+    DRIVER_OUTCOME_MANIFEST = driverOutcomeManifestFile;
+    # claude's own resume-session test
+    # (entrypoint-outcome-recovery.bats's "the resume pass targets the
+    # pinned session via --resume") stays unconditionally green (issue
+    # #2261 slices 4-6): claude is resumable, so this mirrors the
+    # bats-outcome-<name> derivations' own per-driver
+    # DRIVER_SESSION_RESUMABLE computed from sessionCacheDirRelative.
+    DRIVER_SESSION_RESUMABLE = "1";
+    # Harnesses with baked skills for skills-precedence tests.
+    SKILLS_RUN_CMD = "${skillsHarness.internals.run}/bin/run";
+    SKILLS_BWRAP_RUN_CMD = "${skillsBwrapHarness.internals.run}/bin/run";
+    # Not read by bats directly, but forces Nix to realize
+    # skillsBwrapHarness.internals.agentFiles so its store path exists on disk when
+    # the bwrap adapter calls os.Stat on the baked-skills subdirectory.
+    # The run command embeds the path via unsafeDiscardStringContext, which
+    # drops the Nix dependency — without this attr the path is absent.
+    SKILLS_AGENT_FILES = skillsBwrapHarness.internals.agentFiles;
+    # The opencode Driver's registry-rendered preamble (issue #2262), so
+    # the cross-half integration test derives DRIVER_AGENT_FILES_DIR from
+    # the same rendered bytes an opencode image bakes in, instead of
+    # retyping the relative path -- keeping it in lockstep with whatever
+    # agentFilesTemplate below actually bakes into.
+    OPENCODE_DRIVER_PREAMBLE_FILE = opencodeHarness.internals.driverPreambleFile;
+    # The opencode Driver's REAL baked agent-files template output (issue
+    # #2262), so the same test renders through lib/drivers/opencode.nix's
+    # agentFilesTemplate instead of write_agent_file's hand-written
+    # fixture -- proof the entrypoint's rewrite loop works against actual
+    # baked bytes, not just a fixture shaped to look like them.
+    OPENCODE_AGENT_FILES = opencodeHarness.internals.agentFiles;
+    # tests/prompt-contract-parity.bats lives under tests/ like every
+    # other suite, so this catch-all `bats tests/` run picks it up too
+    # (mirrors the DRIVER_OUTCOME_MANIFEST comment above) -- export the
+    # same fixture file the dedicated bats-prompt-contract-parity check
+    # below exports, or that suite's required-var guard fails here.
+    PROMPT_CONTRACT_PARITY_FIXTURE = promptContractParityFixtureFile;
+    # tests/prompt-assembly-parity.bats's required env (see comment above
+    # promptassemblyRegistryJsonFile).
+    DRIVER_EXEC_BIN = "${batsHarness.internals.driverExecBin}/bin/driver-exec";
+    PROMPTASSEMBLY_REGISTRY_FILE = promptassemblyRegistryJsonFile;
+    PROMPT_CONTRACT_REGISTRY_FILE = promptContractRegistryJsonFile;
+    FORBIDDEN_MARKERS_REGISTRY_FILE = forbiddenMarkersRegistryJsonFile;
+  };
+
+  # The `bats` derivation's shared builder setup: stage a writable copy of
+  # tests/, rewrite the fakes' shebangs for the sandboxed build host (see
+  # inline comment below), and export FAKES_DIR.
+  batsBuilderSetup = ''
+    export HOME="$TMPDIR/home"
+    mkdir -p "$HOME"
+    cp -r ${../../tests} tests
+    chmod -R +w tests
+    # The fakes ship a `#!/usr/bin/env bash` shebang, which the
+    # host's launchers exec by path. A sandboxed Linux build has no
+    # /usr/bin/env, so rewrite them to the store bash before use.
+    for f in tests/fakes/*; do
+      substituteInPlace "$f" \
+        --replace '#!/usr/bin/env bash' "#!${pkgs.bash}/bin/bash"
+    done
+    export FAKES_DIR="$PWD/tests/fakes"
+  '';
 in
 {
   shellcheck =
@@ -170,151 +319,13 @@ in
 
   # The bash layers under bats, driven entirely through fakes — no real
   # container, network, or LLM.
-  bats =
-    pkgs.runCommand "bats"
-      {
-        nativeBuildInputs = [
-          pkgs.bats
-          pkgs.bash
-          pkgs.git
-          pkgs.gettext
-          pkgs.coreutils
-          pkgs.gnugrep
-          pkgs.gnused
-          pkgs.jq
-        ];
-        # The launcher commands under test overlay `gh` with the fake
-        # (batsHarness/customHarness/dockerHarness), since the real `gh`
-        # is pinned into their runtimeInputs PATH and would otherwise
-        # shadow a PATH-injected fake.
-        RUN_CMD = "${batsHarness.internals.run}/bin/run";
-        SPINDRIFT_CMD = "${batsHarness.spindrift}/bin/spindrift";
-        BUILD_CMD = "${batsHarness.internals.build}/bin/build";
-        BUILD_NO_RUNTIME_CMD = "${noRuntimeHarness.internals.build}/bin/build";
-        CUSTOM_RUN_CMD = "${customHarness.internals.run}/bin/run";
-        DOCKER_RUN_CMD = "${dockerHarness.internals.run}/bin/run";
-        BWRAP_RUN_CMD = "${bwrapHarness.internals.run}/bin/run";
-        BWRAP_BUILD_CMD = "${bwrapHarness.internals.build}/bin/build";
-        IMAGE_PATH = batsHarness.internals.imagePath;
-        ENTRYPOINT = ../../agent/entrypoint.sh;
-        FORMAT_TRANSCRIPT_SCRIPT = ../../agent/format-transcript.sh;
-        # The PreToolUse hook script baked into the image at
-        # /home/agent/.claude/hooks/reject-background-bash.sh (issue #1609);
-        # exercised here directly against its own source, not the baked copy,
-        # since it takes no dependency on the Box environment.
-        REJECT_BACKGROUND_BASH_SCRIPT = ../../agent/reject-background-bash.sh;
-        # The PreToolUse hook script baked into the image at
-        # /home/agent/.claude/hooks/credential-deny.sh (issue #1909); same
-        # reasoning as REJECT_BACKGROUND_BASH_SCRIPT above.
-        CREDENTIAL_DENY_HOOK_SCRIPT = ../../agent/credential-deny.sh;
-        # The PreToolUse hook script baked into the image at
-        # /home/agent/.claude/hooks/env-credential-scrub.sh (issue #1927);
-        # same reasoning as CREDENTIAL_DENY_HOOK_SCRIPT above.
-        ENV_CREDENTIAL_SCRUB_HOOK_SCRIPT = ../../agent/env-credential-scrub.sh;
-        # The PreToolUse/PostToolUse hook pair baked into the image at
-        # /home/agent/.claude/hooks/bash-output-{tee,summary}.sh (issue
-        # #1988); same reasoning as ENV_CREDENTIAL_SCRUB_HOOK_SCRIPT above.
-        BASH_OUTPUT_TEE_SCRIPT = ../../agent/bash-output-tee.sh;
-        BASH_OUTPUT_SUMMARY_SCRIPT = ../../agent/bash-output-summary.sh;
-        DOGFOOD_SH = ../../dogfood.sh;
-        # The worker/coordinator A/B harness (issue #2057). tests/ is copied
-        # into the sandbox but its parent ab-orchestrator.sh is not, so
-        # tests/ab-orchestrator.bats resolves the script through this env var
-        # rather than $BATS_TEST_DIRNAME/../ab-orchestrator.sh.
-        AB_ORCHESTRATOR_SH = ../../ab-orchestrator.sh;
-        PROMPTS_DIR = ../../templates/default/prompts;
-        # The baked default prompt dir the `run` command mounts, and a
-        # Consumer-configured one whose rendered content flows through
-        # to the stubbed agent (#4).
-        PROMPT_PATH = batsHarness.internals.promptDir;
-        PROMPT_HARNESS_DIR = promptHarness.internals.promptDir;
-        # The default-image outcome contract, so the entrypoint-*.bats suites run standalone
-        # (no /agent/outcome-contract.md on the bats build host) still exercise
-        # the same canonical text an image would bake (issue #420).
-        OUTCOME_CONTRACT_FILE = batsHarness.internals.outcomeContractFile;
-        # Same reason, for the COMMS and CHECK/COMMIT blocks fix-prompt.md
-        # shares with issue-prompt.md (issue #455).
-        COMMS_CONTRACT_FILE = batsHarness.internals.commsContractFile;
-        CHECK_CONTRACT_FILE = batsHarness.internals.checkContractFile;
-        # Same reason, for the research dispatch kind's own outcome contract
-        # (issue #640, exported here to close the parity gap from #735).
-        RESEARCH_OUTCOME_CONTRACT_FILE = batsHarness.internals.researchOutcomeContractFile;
-        # The Driver's registry-rendered function definitions; helper.bash
-        # prepends this before exec-ing the entrypoint so the bats suite
-        # exercises the same bodies the image bakes in (issue #433).
-        DRIVER_PREAMBLE_FILE = batsHarness.internals.driverPreambleFile;
-        # The 8 baked /agent/* path literals' rendered fallback preamble
-        # (issue #2531); helper.bash prepends this between DRIVER_PREAMBLE_FILE
-        # and FRAGMENT_REGISTRY_FILE for the same reason, matching lib/image.nix's
-        # own concatenation order.
-        AGENT_PATHS_PREAMBLE_FILE = batsHarness.internals.agentPathsPreambleFile;
-        # The Conditional fragment registry's rendered loop input and
-        # substitution allowlist (issue #622); helper.bash prepends this
-        # alongside DRIVER_PREAMBLE_FILE for the same reason.
-        FRAGMENT_REGISTRY_FILE = batsHarness.internals.fragmentRegistryFile;
-        # tests/driver-registry-outcome-extraction.bats (issue #2261 slice 2)
-        # lives under tests/ like every other suite, so this catch-all `bats
-        # tests/` run picks it up too -- export the same registry-driven
-        # manifest the dedicated driver-registry-outcome-extraction check
-        # below exports, or that file's required-var guard fails here.
-        DRIVER_OUTCOME_MANIFEST = driverOutcomeManifestFile;
-        # claude's own resume-session test
-        # (entrypoint-outcome-recovery.bats's "the resume pass targets the
-        # pinned session via --resume") stays unconditionally green (issue
-        # #2261 slices 4-6): claude is resumable, so this mirrors the
-        # bats-outcome-<name> derivations' own per-driver
-        # DRIVER_SESSION_RESUMABLE computed from sessionCacheDirRelative.
-        DRIVER_SESSION_RESUMABLE = "1";
-        # Harnesses with baked skills for skills-precedence tests.
-        SKILLS_RUN_CMD = "${skillsHarness.internals.run}/bin/run";
-        SKILLS_BWRAP_RUN_CMD = "${skillsBwrapHarness.internals.run}/bin/run";
-        # Not read by bats directly, but forces Nix to realize
-        # skillsBwrapHarness.internals.agentFiles so its store path exists on disk when
-        # the bwrap adapter calls os.Stat on the baked-skills subdirectory.
-        # The run command embeds the path via unsafeDiscardStringContext, which
-        # drops the Nix dependency — without this attr the path is absent.
-        SKILLS_AGENT_FILES = skillsBwrapHarness.internals.agentFiles;
-        # The opencode Driver's registry-rendered preamble (issue #2262), so
-        # the cross-half integration test derives DRIVER_AGENT_FILES_DIR from
-        # the same rendered bytes an opencode image bakes in, instead of
-        # retyping the relative path -- keeping it in lockstep with whatever
-        # agentFilesTemplate below actually bakes into.
-        OPENCODE_DRIVER_PREAMBLE_FILE = opencodeHarness.internals.driverPreambleFile;
-        # The opencode Driver's REAL baked agent-files template output (issue
-        # #2262), so the same test renders through lib/drivers/opencode.nix's
-        # agentFilesTemplate instead of write_agent_file's hand-written
-        # fixture -- proof the entrypoint's rewrite loop works against actual
-        # baked bytes, not just a fixture shaped to look like them.
-        OPENCODE_AGENT_FILES = opencodeHarness.internals.agentFiles;
-        # tests/prompt-contract-parity.bats lives under tests/ like every
-        # other suite, so this catch-all `bats tests/` run picks it up too
-        # (mirrors the DRIVER_OUTCOME_MANIFEST comment above) -- export the
-        # same fixture file the dedicated bats-prompt-contract-parity check
-        # below exports, or that suite's required-var guard fails here.
-        PROMPT_CONTRACT_PARITY_FIXTURE = promptContractParityFixtureFile;
-        # tests/prompt-assembly-parity.bats's required env (see comment above
-        # promptassemblyRegistryJsonFile).
-        DRIVER_EXEC_BIN = "${batsHarness.internals.driverExecBin}/bin/driver-exec";
-        PROMPTASSEMBLY_REGISTRY_FILE = promptassemblyRegistryJsonFile;
-        PROMPT_CONTRACT_REGISTRY_FILE = promptContractRegistryJsonFile;
-        FORBIDDEN_MARKERS_REGISTRY_FILE = forbiddenMarkersRegistryJsonFile;
-      }
-      ''
-        export HOME="$TMPDIR/home"
-        mkdir -p "$HOME"
-        cp -r ${../../tests} tests
-        chmod -R +w tests
-        # The fakes ship a `#!/usr/bin/env bash` shebang, which the
-        # host's launchers exec by path. A sandboxed Linux build has no
-        # /usr/bin/env, so rewrite them to the store bash before use.
-        for f in tests/fakes/*; do
-          substituteInPlace "$f" \
-            --replace '#!/usr/bin/env bash' "#!${pkgs.bash}/bin/bash"
-        done
-        export FAKES_DIR="$PWD/tests/fakes"
-        bats --print-output-on-failure tests/
-        touch $out
-      '';
+  bats = pkgs.runCommand "bats" batsEnv (
+    batsBuilderSetup
+    + ''
+      bats --print-output-on-failure tests/
+      touch $out
+    ''
+  );
 
   # Registry-driven (issue #2261 slice 2): executes every registered Driver's
   # outcome-extraction shell bodies (_driver_extract_outcome/
