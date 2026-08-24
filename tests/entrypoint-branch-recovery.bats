@@ -204,6 +204,53 @@ setup_rebase_conflict() {
   [[ "$output" == *"pre-work rebase"* ]]
 }
 
+# The unresolvable-conflict test above is the one place in this suite where
+# only a single driver invocation ever happens (the run exits before ever
+# reaching the main agent), so $DRIVER_PROMPT_FILE unambiguously holds
+# conflict-resolve-prompt.md's own rendered content -- every other test here
+# reaches phase_prompt_assembly too, whose own driver invocation overwrites
+# the same fixed-path capture file. Pins phase_conflict_resolve's own
+# CAVEMAN_STEP/SKILL_PREAMBLE precompute (issue #2706): unlike
+# phase_prompt_assembly, this prompt renders through the bash-only `_subst`
+# path, so nothing else populates these two vars for this call site.
+@test "pre-work rebase conflict: unresolvable conflict prompt carries caveman directive when baked" {
+  setup_rebase_conflict
+  export HARNESS_SKILLS_DIR="$BATS_TEST_TMPDIR/harness-skills"
+  mkdir -p "$HARNESS_SKILLS_DIR/caveman"
+  cat >"$HARNESS_SKILLS_DIR/caveman/SKILL.md" <<'SKILL'
+---
+name: caveman
+description: Ultra-compressed communication mode.
+---
+Respond terse like smart caveman.
+SKILL
+  # No FAKE_DRIVER_RESOLVE_CONFLICT — stub does not complete the rebase.
+
+  run bash "$ENTRYPOINT"
+  [ "$status" -ne 0 ]
+  grep -q "Default to the \`/caveman\` skill" "$DRIVER_PROMPT_FILE"
+  grep -q "Skills available:" "$DRIVER_PROMPT_FILE"
+  grep -q "Skills available: caveman" "$DRIVER_PROMPT_FILE"
+}
+
+@test "pre-work rebase conflict: unresolvable conflict prompt has no caveman directive or literal tokens by default" {
+  setup_rebase_conflict
+  export HARNESS_SKILLS_DIR="$BATS_TEST_TMPDIR/no-harness-skills"
+  # No FAKE_DRIVER_RESOLVE_CONFLICT — stub does not complete the rebase.
+
+  run bash "$ENTRYPOINT"
+  [ "$status" -ne 0 ]
+
+  run grep -q "Default to the \`/caveman\` skill" "$DRIVER_PROMPT_FILE"
+  [ "$status" -ne 0 ]
+
+  run grep -q '\${CAVEMAN_STEP}' "$DRIVER_PROMPT_FILE"
+  [ "$status" -ne 0 ]
+
+  run grep -q '\${SKILL_PREAMBLE}' "$DRIVER_PROMPT_FILE"
+  [ "$status" -ne 0 ]
+}
+
 @test "CONFLICT_RESOLVE_PR_URL: exits after resolving without running main agent" {
   setup_rebase_conflict
   export FAKE_DRIVER_RESOLVE_CONFLICT=1
@@ -213,6 +260,62 @@ setup_rebase_conflict() {
   [ "$status" -eq 0 ]
   # Main agent must NOT have been invoked — the issue prompt should be absent.
   ! grep -q "Implement GitHub issue #7" "$DRIVER_PROMPT_FILE"
+}
+
+# Complements the two "carries caveman directive"/"has no caveman directive"
+# tests above: those pin what CAVEMAN_STEP/SKILL_PREAMBLE render into the
+# conflict-resolve prompt text, but not whether the skill that text tells the
+# agent to invoke is actually resolvable when that agent runs. Claude Code
+# discovers a skill only from DRIVER_SKILLS_DIR ($HOME/.claude/skills in this
+# harness, mirrors tests/entrypoint-skills.bats), which phase_prompt_assembly
+# populates -- but phase_conflict_resolve now runs (and, on either of its two
+# early-exit paths, may finish the whole box) before phase_prompt_assembly
+# ever does (issue #2354 slice 3). The fake driver logs "skill discovered:
+# <name>" only when it actually finds the skill under DRIVER_SKILLS_DIR at
+# its own invocation time, so this proves the population happened in time
+# for the conflict-resolve agent specifically, not merely that the prompt
+# text mentions the skill (issue #2706).
+@test "pre-work rebase conflict: DRIVER_SKILLS_DIR is populated before the conflict-resolve agent runs" {
+  setup_rebase_conflict
+  export HARNESS_SKILLS_DIR="$BATS_TEST_TMPDIR/harness-skills"
+  mkdir -p "$HARNESS_SKILLS_DIR/caveman"
+  cat >"$HARNESS_SKILLS_DIR/caveman/SKILL.md" <<'SKILL'
+---
+name: caveman
+description: Ultra-compressed communication mode.
+---
+Respond terse like smart caveman.
+SKILL
+  # No FAKE_DRIVER_RESOLVE_CONFLICT — stub does not complete the rebase, so
+  # the conflict-resolve agent is the only driver invocation this run makes.
+
+  run bash "$ENTRYPOINT"
+  [ "$status" -ne 0 ]
+  grep -q "skill discovered: caveman" "$DRIVER_LOG"
+}
+
+# Same proof as the test above, for the CONFLICT_RESOLVE_PR_URL resolve-only
+# dispatch mode: phase_prompt_assembly never runs at all for this dispatch
+# (phase_conflict_resolve's own `exit 0` ends the box first), so this is the
+# one path where DRIVER_SKILLS_DIR population must not depend on
+# phase_prompt_assembly running afterward -- it never gets the chance to.
+@test "CONFLICT_RESOLVE_PR_URL: DRIVER_SKILLS_DIR is populated before the conflict-resolve agent runs" {
+  setup_rebase_conflict
+  export FAKE_DRIVER_RESOLVE_CONFLICT=1
+  export CONFLICT_RESOLVE_PR_URL="https://github.com/owner/repo/pull/7"
+  export HARNESS_SKILLS_DIR="$BATS_TEST_TMPDIR/harness-skills"
+  mkdir -p "$HARNESS_SKILLS_DIR/caveman"
+  cat >"$HARNESS_SKILLS_DIR/caveman/SKILL.md" <<'SKILL'
+---
+name: caveman
+description: Ultra-compressed communication mode.
+---
+Respond terse like smart caveman.
+SKILL
+
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -q "skill discovered: caveman" "$DRIVER_LOG"
 }
 
 # Pins the hoist (issue #2354 slice 3): phase_conflict_resolve's call site

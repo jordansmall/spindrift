@@ -570,6 +570,49 @@ _handoff_field() {
   printf '%s' "$1" | jq -r ".$2 // empty"
 }
 
+# _populate_driver_skills_dir copies HARNESS_SKILLS_DIR and OPERATOR_SKILLS_DIR
+# into DRIVER_SKILLS_DIR, by copying rather than mounting (issue #2489):
+# baked skills first, then any operator override layered on top by name, so
+# an operator-supplied skill wins on a name collision but a harness-owned
+# skill the operator didn't override survives. This is the one seam that
+# makes a skill actually invocable -- the driver discovers skills only at
+# DRIVER_SKILLS_DIR (e.g. Claude Code's $HOME/.claude/skills), never at
+# HARNESS_SKILLS_DIR/OPERATOR_SKILLS_DIR directly -- so every call site that
+# spawns a driver invocation whose prompt may reference a skill must run this
+# first. Called once in main() before phase_conflict_resolve (issue #2706:
+# that phase's own driver invocation and both its early-exit paths otherwise
+# ran ahead of phase_prompt_assembly, the only other call site, leaving
+# DRIVER_SKILLS_DIR unpopulated for a prompt that told the agent to invoke a
+# skill from it), and again at the top of phase_prompt_assembly so that
+# function stays self-contained if it's ever invoked in isolation -- cheap
+# and idempotent, just an mkdir -p and two conditional `cp -r`s.
+_populate_driver_skills_dir() {
+  mkdir -p "$DRIVER_SKILLS_DIR"
+  if [ -d "$HARNESS_SKILLS_DIR" ]; then
+    cp -r "$HARNESS_SKILLS_DIR"/. "$DRIVER_SKILLS_DIR"/
+  fi
+  if [ -d "$OPERATOR_SKILLS_DIR" ]; then
+    cp -r "$OPERATOR_SKILLS_DIR"/. "$DRIVER_SKILLS_DIR"/
+  fi
+}
+
+# _scan_skills_found echoes a comma-joined list of skill names discoverable
+# under "$1" -- a directory holding a SKILL.md (<dir>/<name>/SKILL.md), never
+# a flat <name>.md file, matches how Claude Code itself discovers a skill.
+# Shared by phase_prompt_assembly and phase_conflict_resolve's precompute
+# block below, which each build a SKILLS_FOUND directive off this same shape.
+_scan_skills_found() {
+  local _dir="$1" _sf _sn _found=""
+  if [ -d "$_dir" ]; then
+    for _sf in "${_dir}/"*/SKILL.md; do
+      [ -f "$_sf" ] || continue
+      _sn="$(basename "$(dirname "$_sf")")"
+      _found="${_found:+${_found}, }${_sn}"
+    done
+  fi
+  printf '%s' "$_found"
+}
+
 # phase_conflict_resolve spawns a conflict-resolve agent when
 # phase_prework_rebase hit a conflict, and handles the CONFLICT_RESOLVE_PR_URL
 # resolve-only dispatch mode. Reads _had_rebase_conflict and
@@ -585,6 +628,32 @@ phase_conflict_resolve() {
   # genuinely cannot resolve.
   if [ -n "${_had_rebase_conflict:-}" ]; then
     echo "==> pre-work rebase conflict detected — invoking conflict-resolve agent"
+    # Precompute the CAVEMAN_STEP/SKILL_PREAMBLE fragments conflict-resolve-
+    # prompt.md references (issue #2706): unlike phase_prompt_assembly, this
+    # prompt renders through the bash-only `_subst` path below, not the
+    # driver-exec assemble-prompt verb, so nothing else ever populates these
+    # two vars for this call site -- left unset, `_subst`'s `${!v:-}`
+    # indirect expansion would substitute them as permanently empty
+    # regardless of whether caveman is baked. Scans DRIVER_SKILLS_DIR (main()
+    # populates it via _populate_driver_skills_dir before this phase runs
+    # now), not HARNESS_SKILLS_DIR alone, so an operator-supplied skill
+    # override shows up here too, exactly like phase_prompt_assembly's own
+    # scan below. Shadows CAVEMAN_STEP/SKILL_PREAMBLE the same way
+    # _use_dev_shell is shadowed just below -- `local` vars in this
+    # function's own scope, visible to `_subst` via bash dynamic scoping
+    # (issue #515).
+    local SKILLS_FOUND
+    SKILLS_FOUND="$(_scan_skills_found "$DRIVER_SKILLS_DIR")"
+    local CAVEMAN_STEP=""
+    if [ -f "$DRIVER_SKILLS_DIR/caveman/SKILL.md" ]; then
+      # shellcheck disable=SC2034 # consumed by _subst's envsubst allowlist via ${!v:-} indirection
+      CAVEMAN_STEP="$(_subst "${PROMPTS_DIR}/fragments/caveman-default.md")"$'\n\n'
+    fi
+    local SKILL_PREAMBLE=""
+    if [ -n "$SKILLS_FOUND" ]; then
+      # shellcheck disable=SC2034 # consumed by _subst's envsubst allowlist via ${!v:-} indirection
+      SKILL_PREAMBLE="$(_subst "${PROMPTS_DIR}/fragments/skill-preamble.md")"$'\n\n'
+    fi
     local _cr_prompt
     _cr_prompt="$(_subst "${PROMPTS_DIR}/conflict-resolve-prompt.md")"
     # No agents config or session to pin/resume for this pass; its exit
@@ -646,27 +715,13 @@ phase_prompt_assembly() {
   # Claude Code discovers a skill as a directory holding a SKILL.md
   # (DRIVER_SKILLS_DIR/<name>/SKILL.md), never a flat <name>.md file, so the
   # skill name advertised in SKILLS_FOUND is the directory basename.
-  # Populate DRIVER_SKILLS_DIR by copying, not mounting (issue #2489):
-  # baked skills first, then any operator override layered on top by
-  # name, so an operator-supplied skill wins on a name collision but a
-  # harness-owned skill the operator didn't override survives.
-  mkdir -p "$DRIVER_SKILLS_DIR"
-  if [ -d "$HARNESS_SKILLS_DIR" ]; then
-    cp -r "$HARNESS_SKILLS_DIR"/. "$DRIVER_SKILLS_DIR"/
-  fi
-  if [ -d "$OPERATOR_SKILLS_DIR" ]; then
-    cp -r "$OPERATOR_SKILLS_DIR"/. "$DRIVER_SKILLS_DIR"/
-  fi
+  # main() already calls _populate_driver_skills_dir before phase_conflict_resolve
+  # (issue #2706); call it again here so this function stays self-contained
+  # if it's ever invoked in isolation (e.g. tests) -- cheap and idempotent.
+  _populate_driver_skills_dir
 
-  local SKILLS_FOUND=""
-  if [ -d "$DRIVER_SKILLS_DIR" ]; then
-    local _sf _sn
-    for _sf in "${DRIVER_SKILLS_DIR}/"*/SKILL.md; do
-      [ -f "$_sf" ] || continue
-      _sn="$(basename "$(dirname "$_sf")")"
-      SKILLS_FOUND="${SKILLS_FOUND:+${SKILLS_FOUND}, }${_sn}"
-    done
-  fi
+  local SKILLS_FOUND
+  SKILLS_FOUND="$(_scan_skills_found "$DRIVER_SKILLS_DIR")"
 
   # Build the assemble-prompt invocation. Every string flag maps 1:1 onto a
   # bash env var this Box already carries -- no gate computation here
@@ -1168,6 +1223,14 @@ main() {
   # (CONFLICT_RESOLVE_PR_URL's resolve-only dispatch, and an unresolvable
   # pre-work rebase conflict) now skip the driver-exec assemble-prompt verb
   # call entirely instead of running it and discarding the result.
+  #
+  # _populate_driver_skills_dir must run before phase_conflict_resolve, not
+  # just before phase_prompt_assembly (issue #2706): phase_conflict_resolve's
+  # own driver invocation, and both of its early-exit paths, otherwise ran
+  # ahead of the only other call site that populated DRIVER_SKILLS_DIR,
+  # leaving a conflict-resolve prompt that tells the agent to invoke a skill
+  # (e.g. `/caveman`) structurally unable to find it.
+  _populate_driver_skills_dir
   phase_conflict_resolve
   phase_prompt_assembly
 
