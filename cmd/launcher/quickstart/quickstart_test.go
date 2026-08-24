@@ -1851,34 +1851,87 @@ func TestRunQuickstart_NewBackend_TokenAcquisitionNeedsNoRunQuickstartEdit(t *te
 	}
 }
 
-func TestRunQuickstart_InvalidForgejoToken_AbortsNamingKnobs(t *testing.T) {
-	dir := t.TempDir()
-	var out bytes.Buffer
-	env := fakeEnvironment{
-		remoteURL: "https://codeberg.org/owner/repo.git",
-		env:       map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "claude-oauth-faketoken"},
-		runtimes:  map[string]bool{"podman": true},
+// TestRunQuickstart_ForgejoTokenAcquisitionFailures_AbortWithActionableGuidance
+// covers the three ways acquireForgejoToken's single, no-retry prompt can
+// fail: an invalid token the API rejects (ErrAuthFailure), a non-auth probe
+// failure covering both an unreachable host and a wrong repo slug on a
+// reachable host (Probe maps both to the same error, per bf2c4579), and an
+// empty token from a user who just hits enter.
+func TestRunQuickstart_ForgejoTokenAcquisitionFailures_AbortWithActionableGuidance(t *testing.T) {
+	cases := []struct {
+		name                 string
+		token                string // stdin line for the Forgejo token prompt
+		probeErr             error  // nil: Probe is never reached (empty token short-circuits)
+		wantSubstrings       []string
+		wantAbsentSubstrings []string
+	}{
+		{
+			name:                 "InvalidForgejoToken",
+			token:                "bad-token",
+			probeErr:             forge.ErrAuthFailure,
+			wantSubstrings:       []string{quickstartRerunCmd},
+			wantAbsentSubstrings: []string{"FORGEJO_TOKEN", "FORGEJO_BASE_URL"},
+		},
+		{
+			name:           "NonAuthProbeFailure",
+			token:          "some-token",
+			probeErr:       forge.ErrRepoNotFound,
+			wantSubstrings: []string{quickstartRerunCmd, "repo slug"},
+			wantAbsentSubstrings: []string{
+				"FORGEJO_TOKEN", "FORGEJO_BASE_URL",
+				// Probe maps a wrong repo slug on a reachable host to the
+				// same error as an unreachable host, so the message must not
+				// presume the instance is merely unreachable.
+				"once the instance is reachable",
+			},
+		},
+		{
+			name:                 "EmptyForgejoToken",
+			token:                "",
+			probeErr:             nil,
+			wantSubstrings:       []string{quickstartRerunCmd},
+			wantAbsentSubstrings: []string{"FORGEJO_TOKEN", "FORGEJO_BASE_URL"},
+		},
 	}
-	stdin := strings.NewReader(strings.Join([]string{
-		"",                // repoSlug default owner/repo
-		"",                // runtime default podman
-		"Ada Lovelace",    // git user name
-		"ada@example.com", // git user email
-		"bad-token",       // Forgejo token
-	}, "\n") + "\n")
 
-	f := forge.NewFake()
-	f.ProbeErr = forge.ErrAuthFailure
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			var out bytes.Buffer
+			env := fakeEnvironment{
+				remoteURL: "https://codeberg.org/owner/repo.git",
+				env:       map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "claude-oauth-faketoken"},
+				runtimes:  map[string]bool{"podman": true},
+			}
+			stdin := strings.NewReader(strings.Join([]string{
+				"",                // repoSlug default owner/repo
+				"",                // runtime default podman
+				"Ada Lovelace",    // git user name
+				"ada@example.com", // git user email
+				tc.token,          // Forgejo token
+			}, "\n") + "\n")
 
-	err := runQuickstart(dir, env, &fakeCommandRunner{}, fakeForgeBuilder(f), &out, stdin, true, false)
-	if err == nil {
-		t.Fatalf("expected runQuickstart to return an error for a rejected forgejo token")
-	}
-	if !strings.Contains(err.Error(), "FORGEJO_TOKEN") || !strings.Contains(err.Error(), "FORGEJO_BASE_URL") {
-		t.Errorf("expected error to name both FORGEJO_TOKEN and FORGEJO_BASE_URL, got: %v", err)
-	}
+			f := forge.NewFake()
+			f.ProbeErr = tc.probeErr
 
-	if _, statErr := os.Stat(filepath.Join(dir, "flake.nix")); !os.IsNotExist(statErr) {
-		t.Errorf("expected no flake.nix to be written when forgejo token validation fails, got stat err: %v", statErr)
+			err := runQuickstart(dir, env, &fakeCommandRunner{}, fakeForgeBuilder(f), &out, stdin, true, false)
+			if err == nil {
+				t.Fatalf("expected runQuickstart to return an error")
+			}
+			for _, want := range tc.wantSubstrings {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("expected error to contain %q, got: %v", want, err)
+				}
+			}
+			for _, absent := range tc.wantAbsentSubstrings {
+				if strings.Contains(err.Error(), absent) {
+					t.Errorf("expected error to not contain %q, got: %v", absent, err)
+				}
+			}
+
+			if _, statErr := os.Stat(filepath.Join(dir, "flake.nix")); !os.IsNotExist(statErr) {
+				t.Errorf("expected no flake.nix to be written when forgejo token acquisition fails, got stat err: %v", statErr)
+			}
+		})
 	}
 }

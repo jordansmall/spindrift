@@ -152,6 +152,12 @@ const defaultBranchPrefix = "agent/issue-"
 // flake.
 const codebergBaseURL = "https://codeberg.org"
 
+// quickstartRerunCmd is the command the wizard's own error hints point the
+// operator at rerunning to re-answer a prompt — quoted once here so a reword
+// of the command doesn't require hunting down every error message that
+// mentions it.
+const quickstartRerunCmd = "nix run github:jordansmall/spindrift#quickstart"
+
 // defaultDispatchLabels are the four operator-visible triage labels
 // Quickstart's generated flake relies on implicitly (the launcher's own
 // LABEL/IN_PROGRESS_LABEL/FAILED_LABEL/COMPLETE_LABEL defaults) — the wizard
@@ -223,7 +229,7 @@ var tokenAcquirers = map[string]TokenAcquirer{
 		return token, nil
 	},
 	"forgejo": func(ctx tokenAcquireContext) (string, error) {
-		return acquireForgejoToken(ctx.w, ctx.promptMasked, ctx.forgeBuilder, ctx.repoSlug, ctx.baseURL, ctx.desc.TokenEnvVar)
+		return acquireForgejoToken(ctx.w, ctx.promptMasked, ctx.forgeBuilder, ctx.repoSlug, ctx.baseURL)
 	},
 }
 
@@ -525,20 +531,21 @@ func acquireGHToken(env Environment, w io.Writer, promptMasked func(string) stri
 // acquireForgejoToken prompts for a Forgejo personal access token and
 // validates it with a live API ping (Probe) rather than a prefix audit —
 // Forgejo PATs have no sniffable prefix the way GitHub's do (ghp_/gho_/
-// github_pat_), so there is nothing to inspect locally. The error hints name
-// FORGEJO_TOKEN and FORGEJO_BASE_URL, the two env knobs an operator needs to
-// fix and rerun.
-func acquireForgejoToken(w io.Writer, promptMasked func(string) string, forgeBuilder ForgeBuilder, repoSlug, baseURL, tokenEnvVar string) (string, error) {
-	token := promptMasked(fmt.Sprintf("Forgejo token (paste a Forgejo personal access token — %s)", tokenEnvVar))
+// github_pat_), so there is nothing to inspect locally. The wizard prompts
+// exactly once and has no retry loop, so any failure here aborts the whole
+// run; remediation on every failure path is to rerun the wizard and
+// re-answer the prompt, not to set an env var (this path never reads one).
+func acquireForgejoToken(w io.Writer, promptMasked func(string) string, forgeBuilder ForgeBuilder, repoSlug, baseURL string) (string, error) {
+	token := promptMasked("Forgejo token (paste a Forgejo personal access token)")
 	if token == "" {
-		return "", fmt.Errorf("no Forgejo token provided — set %s and rerun", tokenEnvVar)
+		return "", fmt.Errorf("no Forgejo token provided — rerun `%s` and paste a token when prompted", quickstartRerunCmd)
 	}
 	it, _ := forgeBuilder(repoSlug, trackerSettings{issueTracker: "forgejo", forgejoBaseURL: baseURL}, token)
 	if _, err := it.Probe(); err != nil {
 		if errors.Is(err, forge.ErrAuthFailure) {
-			return "", fmt.Errorf("Forgejo token rejected by the API — check FORGEJO_TOKEN is valid and FORGEJO_BASE_URL (%s) points at the right instance: %w", baseURL, err)
+			return "", fmt.Errorf("Forgejo token rejected by the API at %s — the instance is derived from the git remote, so if this is the wrong instance, `git remote set-url` to point at the right one before you rerun `%s` and paste a valid token: %w", baseURL, quickstartRerunCmd, err)
 		}
-		return "", fmt.Errorf("Forgejo connectivity check failed — check FORGEJO_BASE_URL (%s) is reachable: %w", baseURL, err)
+		return "", fmt.Errorf("Forgejo connectivity check failed for %s (repo slug %q) — either the instance is unreachable or the repo slug is wrong; check both, then rerun `%s`: %w", baseURL, repoSlug, quickstartRerunCmd, err)
 	}
 	fmt.Fprintln(w, "ok: Forgejo token validated via live API ping")
 	return token, nil
