@@ -640,6 +640,91 @@ func TestAssembleWorkerPromptCavemanAndSkillPreamble(t *testing.T) {
 	})
 }
 
+// TestAssembleReviewPromptCaveman covers issue #2707:
+// review-prompt.md, rendered into Handoff.ReviewPromptFile (only when the
+// orchestrator is on, kind == "work", FixPass == 0 -- see
+// TestAssembleOrchestratorReviewerDrop), must carry the caveman-default
+// narration directive when the caveman skill is baked, plus explicit
+// exemption wording naming the VERDICT line and Non-blocking finding text
+// (the text the Filer turns into an issue body) as staying full prose, and
+// must carry no /caveman mention and no dangling ${...} token when skills
+// are absent. A third subtest flips only CavemanSkillBaked off, leaving
+// SkillsFound and the other three skill booleans at their coveredEnv
+// defaults, to prove the fragment is gated on CAVEMAN_BAKED specifically
+// rather than riding along on TDD_BAKED or the general SKILLS_FOUND signal.
+func TestAssembleReviewPromptCaveman(t *testing.T) {
+	reg := loadTestRegistry(t)
+
+	t.Run("skills present", func(t *testing.T) {
+		env := coveredEnv()
+		env.OrchestratorEnabled = true
+		env.ReviewLoopInline = false
+		env.ReviewLoopOrchestrator = true
+
+		result, err := Assemble(env, reg)
+		if err != nil {
+			t.Fatalf("Assemble: %v", err)
+		}
+
+		prompt := result.Handoff.ReviewPromptFile
+		if !strings.Contains(prompt, "Default to the `/caveman` skill") {
+			t.Errorf("ReviewPromptFile missing caveman-default-review.md fragment text: %q", prompt)
+		}
+		if !strings.Contains(prompt, "the `VERDICT: APPROVE` / `VERDICT: BLOCK` line") {
+			t.Errorf("ReviewPromptFile missing verdict-line exemption wording: %q", prompt)
+		}
+		if !strings.Contains(prompt, "Non-blocking finding") {
+			t.Errorf("ReviewPromptFile missing Non-blocking-finding exemption wording: %q", prompt)
+		}
+	})
+
+	t.Run("skills absent", func(t *testing.T) {
+		env := coveredEnv()
+		env.OrchestratorEnabled = true
+		env.ReviewLoopInline = false
+		env.ReviewLoopOrchestrator = true
+		env.SkillsFound = ""
+		env.CavemanSkillBaked = false
+		env.TDDSkillBaked = false
+		env.CommitSkillBaked = false
+		env.CodeReviewSkillBaked = false
+
+		result, err := Assemble(env, reg)
+		if err != nil {
+			t.Fatalf("Assemble: %v", err)
+		}
+
+		prompt := result.Handoff.ReviewPromptFile
+		if strings.Contains(prompt, "/caveman") {
+			t.Errorf("ReviewPromptFile contains /caveman text, want absent (CAVEMAN_BAKED gate off): %q", prompt)
+		}
+		if strings.Contains(prompt, "${") {
+			t.Errorf("ReviewPromptFile still contains an unsubstituted ${...} token: %q", prompt)
+		}
+	})
+
+	t.Run("only caveman skill absent", func(t *testing.T) {
+		env := coveredEnv()
+		env.OrchestratorEnabled = true
+		env.ReviewLoopInline = false
+		env.ReviewLoopOrchestrator = true
+		env.CavemanSkillBaked = false
+
+		result, err := Assemble(env, reg)
+		if err != nil {
+			t.Fatalf("Assemble: %v", err)
+		}
+
+		prompt := result.Handoff.ReviewPromptFile
+		if strings.Contains(prompt, "Default to the `/caveman` skill") {
+			t.Errorf("ReviewPromptFile contains caveman-default-review.md fragment text, want absent (CAVEMAN_BAKED gate off, other skills still baked): %q", prompt)
+		}
+		if strings.Contains(prompt, "${") {
+			t.Errorf("ReviewPromptFile still contains an unsubstituted ${...} token: %q", prompt)
+		}
+	})
+}
+
 // TestAssembleUnsupportedCell covers the one axis checkCoveredCell still
 // validates (DispatchKind, issue #2540 -- IssueTracker and CodeForge are
 // covered upstream by lib/mkHarness.nix's choicesCheckOk assert and
@@ -1668,6 +1753,47 @@ func TestAssembleOrchestratorOffReviewerFlowsThroughGenericLoop(t *testing.T) {
 	}
 	if result.Handoff.ReviewPromptFile != "" {
 		t.Errorf("Handoff.ReviewPromptFile = %q, want empty (orchestrator off)", result.Handoff.ReviewPromptFile)
+	}
+}
+
+// TestAssembleOrchestratorOffReviewerGetsCavemanFragment covers issue
+// #2707: with the orchestrator off, an inline reviewer entry's prompt still
+// flows through the same gated-fragment substitution as any other roster
+// entry (TestAssembleOrchestratorOffReviewerFlowsThroughGenericLoop's
+// tdd-default.md case), so mapping "reviewer" to
+// fragments/caveman-default-review.md with CAVEMAN_BAKED on (coveredEnv's
+// default) must substitute the caveman narration directive into the
+// reviewer's inline AgentsJSON prompt. Previously this was pinned only by
+// the golden fixture covered-cell-populated-roster.agents.json, not by any
+// Go unit test.
+func TestAssembleOrchestratorOffReviewerGetsCavemanFragment(t *testing.T) {
+	reg := loadTestRegistry(t)
+	env := coveredEnv()
+	env.AgentsJSONTemplate = `{"reviewer":{"model":"review-model-x"}}`
+	env.AgentsPromptFiles = `{"reviewer":"fragments/caveman-default-review.md"}`
+
+	result, err := Assemble(env, reg)
+	if err != nil {
+		t.Fatalf("Assemble: %v", err)
+	}
+
+	var parsed map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(result.AgentsJSON), &parsed); err != nil {
+		t.Fatalf("unmarshal AgentsJSON: %v\n%s", err, result.AgentsJSON)
+	}
+	reviewerRaw, ok := parsed["reviewer"]
+	if !ok {
+		t.Fatal("AgentsJSON missing reviewer key, want it present (orchestrator off, no reviewer-drop)")
+	}
+	var reviewer struct {
+		Model  string `json:"model"`
+		Prompt string `json:"prompt"`
+	}
+	if err := json.Unmarshal(reviewerRaw, &reviewer); err != nil {
+		t.Fatalf("unmarshal reviewer entry: %v", err)
+	}
+	if !strings.Contains(reviewer.Prompt, "Default to the `/caveman` skill") {
+		t.Errorf("reviewer.prompt missing substituted caveman-default-review.md content: %q", reviewer.Prompt)
 	}
 }
 

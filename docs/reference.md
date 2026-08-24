@@ -442,17 +442,22 @@ for the three cases.
 The caveman-default step is keyed on the baked skill itself rather than a
 separate knob: whenever `DRIVER_SKILLS_DIR/caveman/SKILL.md` is present at
 runtime, the issue pass and the fix pass (via the shared COMMS block, see
-below), the scout prompt, and both conflict-resolve prompts direct the agent
-to use `/caveman` for narration and prose, exempting code, commands, error
-messages, and commit messages, plus the machine-parsed marker grammar (the
-`SPINDRIFT_OUTCOME` line and its `note=` field, the `VERDICT:` line, and
-host-relay signal lines like `SPINDRIFT_PR_INTENT`) — see
-`fragments/caveman-default.md`. The worker prompt carries the same directive
-minus that marker-grammar paragraph (`fragments/caveman-default-worker.md`):
-the worker role is structurally forbidden from ever emitting that grammar
-(issue #2059/#2491 quarantine), so naming those markers in its own
-rendered prompt would trip that contract. A Consumer that never bakes the
-skill gets a prompt with zero mention of it.
+below), the scout prompt, both conflict-resolve prompts, and the
+orchestrator's review pass direct the agent to use `/caveman` for narration
+and prose, exempting code, commands, error messages, and commit messages,
+plus the machine-parsed marker grammar (the `SPINDRIFT_OUTCOME` line and its
+`note=` field, the `VERDICT:` line, and host-relay signal lines like
+`SPINDRIFT_PR_INTENT`) — see `fragments/caveman-default.md`. The worker
+prompt carries the same directive minus that marker-grammar paragraph
+(`fragments/caveman-default-worker.md`): the worker role is structurally
+forbidden from ever emitting that grammar (issue #2059/#2491 quarantine), so
+naming those markers in its own rendered prompt would trip that contract.
+The review prompt carries the full marker-grammar paragraph plus one
+addition of its own (`fragments/caveman-default-review.md`): the `VERDICT:`
+line and every `## Blocking`/`## Non-blocking` finding stay full prose too,
+since the orchestrator hands finding text to a Filer subagent that turns it
+into a GitHub issue body verbatim. A Consumer that never bakes the skill
+gets a prompt with zero mention of it.
 
 A fix box (dispatched when CI comes back red — see [Runtime flow](#how-a-run-works))
 receives `FIX_PASS` and runs `prompts/fix-prompt.md` instead: the branch is
