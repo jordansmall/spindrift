@@ -468,6 +468,14 @@ let
         inherit byName;
       }
   );
+  # The #392 opt-out (rosterLib.dropOptedOut, issue #2571 review fix): drops
+  # any entry whose model is the explicit "" sentinel, right after
+  # normalizeRoster (which deliberately never filters) and before any
+  # Driver or downstream consumer of finalRoster below ever sees the
+  # roster. `keptRoster` holds the survivors -- the entries that were NOT
+  # opted out.
+  keptRoster = rosterLib.dropOptedOut resolvedRoster;
+
   # reviewEffort (issue #2512) is the one legacy knob that overrides an
   # already-resolved roster's reviewer entry regardless of roster source
   # (contrast the four model knobs above, explicit-roster-wins per the
@@ -479,9 +487,9 @@ let
       reviewEffort = mergedDefaults.reviewEffort or "";
     in
     if reviewEffort == "" then
-      resolvedRoster
+      keptRoster
     else
-      map (e: if e.name == "reviewer" then e // { effort = reviewEffort; } else e) resolvedRoster;
+      map (e: if e.name == "reviewer" then e // { effort = reviewEffort; } else e) keptRoster;
 
   # --agents JSON, rendered by the selected Driver (ADR 0009) from the
   # resolved roster above, so a future Driver with a different agent-config
@@ -499,9 +507,11 @@ let
   # output rather than finalRoster directly, reproducing exactly what the
   # pre-#2533 in-box code computed (an in-box `jq -e 'has("filer"|"worker")'`
   # reparse of the AGENTS_JSON_TEMPLATE env var, gates.go:42-47) instead of a
-  # roster-only presence check: lib/drivers/claude.nix's agentsJsonTemplate
-  # drops a roster entry with an empty model ("#392 semantics") and renders
-  # "" when nothing remains, while lib/drivers/opencode.nix's
+  # roster-only presence check: finalRoster above already had #392-opted-out
+  # entries (model = "") dropped by rosterLib.dropOptedOut before
+  # agentsJsonTemplate ever rendered it, so an opted-out entry never reaches
+  # lib/drivers/claude.nix's agentsJsonTemplate at all, which renders "" when
+  # nothing remains, while lib/drivers/opencode.nix's
   # agentsJsonTemplate always returns "" regardless of roster contents (it
   # provisions subagents via on-disk agents/*.md files instead, rendered
   # separately below as driverAgentFiles) -- a finalRoster-only check would
@@ -1487,8 +1497,9 @@ else
       driverExecBin = imageDriver.driverExecBin;
       driverEntry = imageDriver.driverEntry;
 
-      # The fully resolved agent roster (issue #2512), after the reviewEffort
-      # post-processing step -- exposed purely for eval-level introspection
+      # The fully resolved agent roster (issue #2512), after the #392
+      # dropOptedOut step and then the reviewEffort post-processing step --
+      # exposed purely for eval-level introspection
       # (nix/checks/equivalence.nix), the same reason driverEntry above is
       # exposed. Not part of the settings/CLI surface itself.
       roster = finalRoster;

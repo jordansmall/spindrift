@@ -8,7 +8,7 @@
 let
   rosterLib = import ../../lib/roster.nix { inherit (pkgs) lib; };
   defaultModelFixture = import ../../lib/default-model-fixture.nix;
-  inherit (pkgs.lib) assertMsg mapAttrs;
+  inherit (pkgs.lib) assertMsg mapAttrs hasInfix;
   # Shared by the roster-default-roster-by-name-* checks below (issue #2560,
   # non-blocking review finding): pulls a named entry out of a roster, same
   # shape as equivalence.nix's modelOf but returning the whole entry since
@@ -16,7 +16,46 @@ let
   entryFor = name: roster: builtins.head (builtins.filter (e: e.name == name) roster);
 in
 {
+  # Issue #2571 review fix (Finding B): normalizeRosterResult never throws --
+  # it returns a structured { ok; value; violation; entryName; message; }
+  # result, so this asserts directly on .ok/.violation/.entryName (which
+  # entry, which problem) rather than only "did eval abort" via tryEval
+  # (builtins.tryEval can't recover the thrown message text).
   roster-normalize-rejects-invalid-name =
+    let
+      result = rosterLib.normalizeRosterResult [
+        {
+          name = "Bad_Name";
+          model = "m";
+          mode = "subagent";
+          description = "d";
+          tools = [ ];
+        }
+      ];
+    in
+    assert assertMsg (
+      result.ok == false
+    ) "normalizeRosterResult must not accept a name that isn't lowercase-alnum-dash";
+    assert assertMsg (result.violation == "invalid-name")
+      "normalizeRosterResult must report violation == \"invalid-name\", got: ${builtins.toJSON result.violation}";
+    assert assertMsg (result.entryName == "Bad_Name")
+      "normalizeRosterResult must name the offending entry, got: ${builtins.toJSON result.entryName}";
+    # Issue #2571 blocking review finding: pin message content, not just
+    # .ok/.violation/.entryName -- normalizeRoster (the throwing wrapper)
+    # throws this exact .message unmodified, so this is the only way to pin
+    # that the production throw path actually names the entry and the
+    # problem (AC1), since builtins.tryEval can't recover a thrown message.
+    assert assertMsg (hasInfix "Bad_Name" result.message)
+      "normalizeRosterResult's message must name the offending entry \"Bad_Name\", got: ${builtins.toJSON result.message}";
+    assert assertMsg (hasInfix "invalid name" result.message)
+      "normalizeRosterResult's message must describe the problem (\"invalid name\"), got: ${builtins.toJSON result.message}";
+    pkgs.runCommand "roster-normalize-rejects-invalid-name" { } "touch $out";
+
+  # Issue #2571 non-blocking review finding (AC1 gap): the checks above only
+  # prove normalizeRosterResult's structured output, never that the throwing
+  # wrapper production code (lib/mkHarness.nix) actually calls --
+  # normalizeRoster -- really throws for this violation class.
+  roster-normalize-throws-on-invalid-name =
     let
       result = builtins.tryEval (
         let
@@ -33,12 +72,119 @@ in
         builtins.deepSeq r r
       );
     in
+    assert assertMsg (!result.success)
+      "normalizeRoster must throw on a name that isn't lowercase-alnum-dash";
+    pkgs.runCommand "roster-normalize-throws-on-invalid-name" { } "touch $out";
+
+  # Issue #2571 round-3 review finding: builtins.match throws its own opaque
+  # type error if e.name isn't a string at all (e.g. a bare number) -- must
+  # fail with a clean, named "invalid-name" violation (same tag as the
+  # format check, just a different reason) instead of aborting eval
+  # mid-match with a message that names neither the entry nor the problem.
+  roster-normalize-rejects-non-string-name =
+    let
+      result = rosterLib.normalizeRosterResult [
+        {
+          name = 5;
+          model = "m";
+          mode = "subagent";
+          description = "d";
+          tools = [ ];
+        }
+      ];
+    in
     assert assertMsg (
-      !result.success
-    ) "normalizeRoster must throw on a name that isn't lowercase-alnum-dash";
-    pkgs.runCommand "roster-normalize-rejects-invalid-name" { } "touch $out";
+      result.ok == false
+    ) "normalizeRosterResult must not accept a name that isn't a string";
+    assert assertMsg (result.violation == "invalid-name")
+      "normalizeRosterResult must report violation == \"invalid-name\", got: ${builtins.toJSON result.violation}";
+    # Issue #2571 blocking review finding: see
+    # roster-normalize-rejects-invalid-name above for rationale.
+    assert assertMsg (hasInfix "invalid name" result.message)
+      "normalizeRosterResult's message must describe the problem (\"invalid name\"), got: ${builtins.toJSON result.message}";
+    pkgs.runCommand "roster-normalize-rejects-non-string-name" { } "touch $out";
+
+  # Issue #2571 non-blocking review finding (AC1 gap): see
+  # roster-normalize-throws-on-invalid-name above for rationale.
+  roster-normalize-throws-on-non-string-name =
+    let
+      result = builtins.tryEval (
+        let
+          r = rosterLib.normalizeRoster [
+            {
+              name = 5;
+              model = "m";
+              mode = "subagent";
+              description = "d";
+              tools = [ ];
+            }
+          ];
+        in
+        builtins.deepSeq r r
+      );
+    in
+    assert assertMsg (!result.success) "normalizeRoster must throw on a name that isn't a string";
+    pkgs.runCommand "roster-normalize-throws-on-non-string-name" { } "touch $out";
 
   roster-normalize-rejects-missing-name =
+    let
+      result = rosterLib.normalizeRosterResult [
+        {
+          model = "m";
+          mode = "subagent";
+          description = "d";
+          tools = [ ];
+        }
+      ];
+    in
+    assert assertMsg (
+      result.ok == false
+    ) "normalizeRosterResult must not accept an entry that omits name";
+    assert assertMsg (result.violation == "missing-name")
+      "normalizeRosterResult must report violation == \"missing-name\", got: ${builtins.toJSON result.violation}";
+    assert assertMsg (result.entryName == null)
+      "normalizeRosterResult must report entryName == null when the name itself is missing, got: ${builtins.toJSON result.entryName}";
+    # Issue #2571 blocking review finding: see
+    # roster-normalize-rejects-invalid-name above for rationale.
+    assert assertMsg (hasInfix "entry 0" result.message)
+      "normalizeRosterResult's message must identify the offending entry by index (\"entry 0\"), got: ${builtins.toJSON result.message}";
+    assert assertMsg (hasInfix "missing a name" result.message)
+      "normalizeRosterResult's message must describe the problem (\"missing a name\"), got: ${builtins.toJSON result.message}";
+    pkgs.runCommand "roster-normalize-rejects-missing-name" { } "touch $out";
+
+  # Issue #2571 non-blocking review finding: normalizeRosterResult's
+  # documented failure shape is exactly { ok; value; violation; entryName;
+  # message; } (its doc comment above the function) -- the failure branch
+  # must construct this explicitly, not return the internal fold
+  # accumulator (which also carries seen/out) verbatim.
+  roster-normalize-result-failure-shape-has-no-internal-keys =
+    let
+      result = rosterLib.normalizeRosterResult [
+        {
+          model = "m";
+          mode = "subagent";
+          description = "d";
+          tools = [ ];
+        }
+      ];
+    in
+    assert assertMsg (
+      result.ok == false
+    ) "normalizeRosterResult must not accept an entry that omits name";
+    assert assertMsg (
+      builtins.attrNames result == [
+        "entryName"
+        "message"
+        "ok"
+        "value"
+        "violation"
+      ]
+    ) "normalizeRosterResult's failure branch must return exactly the documented { ok; value; violation; entryName; message; } shape, got attrNames: ${builtins.toJSON (builtins.attrNames result)}";
+    pkgs.runCommand "roster-normalize-result-failure-shape-has-no-internal-keys" { } "touch $out";
+
+  # Issue #2571 non-blocking review finding (AC1 gap): see
+  # roster-normalize-throws-on-invalid-name above for rationale.
+  roster-normalize-throws-on-missing-name =
     let
       result = builtins.tryEval (
         let
@@ -55,30 +201,63 @@ in
       );
     in
     assert assertMsg (!result.success) "normalizeRoster must throw on an entry that omits name";
-    pkgs.runCommand "roster-normalize-rejects-missing-name" { } "touch $out";
+    pkgs.runCommand "roster-normalize-throws-on-missing-name" { } "touch $out";
 
   roster-normalize-accepts-valid-name =
     let
-      result = builtins.tryEval (
-        let
-          r = rosterLib.normalizeRoster [
-            {
-              name = "scout-2";
-              model = "m";
-              mode = "subagent";
-              description = "d";
-              tools = [ ];
-            }
-          ];
-        in
-        builtins.deepSeq r r
-      );
+      result = rosterLib.normalizeRosterResult [
+        {
+          name = "scout-2";
+          model = "m";
+          mode = "subagent";
+          description = "d";
+          tools = [ ];
+          prompt = "some prompt text";
+        }
+      ];
     in
-    assert assertMsg (result.success
-    ) "normalizeRoster must not throw on a valid lowercase-alnum-dash name";
+    assert assertMsg (
+      result.ok == true
+    ) "normalizeRosterResult must accept a valid lowercase-alnum-dash name";
     pkgs.runCommand "roster-normalize-accepts-valid-name" { } "touch $out";
 
   roster-normalize-rejects-duplicate-name =
+    let
+      result = rosterLib.normalizeRosterResult [
+        {
+          name = "scout";
+          model = "m1";
+          mode = "subagent";
+          description = "d1";
+          tools = [ ];
+        }
+        {
+          name = "scout";
+          model = "m2";
+          mode = "subagent";
+          description = "d2";
+          tools = [ ];
+        }
+      ];
+    in
+    assert assertMsg (
+      result.ok == false
+    ) "normalizeRosterResult must not accept two entries that share a name";
+    assert assertMsg (result.violation == "duplicate-name")
+      "normalizeRosterResult must report violation == \"duplicate-name\", got: ${builtins.toJSON result.violation}";
+    assert assertMsg (result.entryName == "scout")
+      "normalizeRosterResult must name the offending entry, got: ${builtins.toJSON result.entryName}";
+    # Issue #2571 blocking review finding: see
+    # roster-normalize-rejects-invalid-name above for rationale.
+    assert assertMsg (hasInfix "scout" result.message)
+      "normalizeRosterResult's message must name the offending entry \"scout\", got: ${builtins.toJSON result.message}";
+    assert assertMsg (hasInfix "duplicate name" result.message)
+      "normalizeRosterResult's message must describe the problem (\"duplicate name\"), got: ${builtins.toJSON result.message}";
+    pkgs.runCommand "roster-normalize-rejects-duplicate-name" { } "touch $out";
+
+  # Issue #2571 non-blocking review finding (AC1 gap): see
+  # roster-normalize-throws-on-invalid-name above for rationale.
+  roster-normalize-throws-on-duplicate-name =
     let
       result = builtins.tryEval (
         let
@@ -102,8 +281,528 @@ in
         builtins.deepSeq r r
       );
     in
-    assert assertMsg (!result.success) "normalizeRoster must throw when two entries share a name";
-    pkgs.runCommand "roster-normalize-rejects-duplicate-name" { } "touch $out";
+    assert assertMsg (!result.success)
+      "normalizeRoster must throw when two entries share a name";
+    pkgs.runCommand "roster-normalize-throws-on-duplicate-name" { } "touch $out";
+
+  # Issue #2571 slice 1: an entry's keys must be a subset of the documented
+  # roster entry shape (docs/reference.md's "Subagent roster" section) --
+  # any stray/unknown key (e.g. a typo) must throw rather than silently
+  # passing through to the Drivers.
+  roster-normalize-rejects-unknown-key =
+    let
+      result = rosterLib.normalizeRosterResult [
+        {
+          name = "scout";
+          model = "m";
+          mode = "subagent";
+          description = "d";
+          tools = [ ];
+          nonesuch = "x";
+        }
+      ];
+    in
+    assert assertMsg (
+      result.ok == false
+    ) "normalizeRosterResult must not accept an entry with an unknown key";
+    assert assertMsg (result.violation == "unknown-key")
+      "normalizeRosterResult must report violation == \"unknown-key\", got: ${builtins.toJSON result.violation}";
+    assert assertMsg (result.entryName == "scout")
+      "normalizeRosterResult must name the offending entry, got: ${builtins.toJSON result.entryName}";
+    # Issue #2571 blocking review finding: see
+    # roster-normalize-rejects-invalid-name above for rationale.
+    assert assertMsg (hasInfix "scout" result.message)
+      "normalizeRosterResult's message must name the offending entry \"scout\", got: ${builtins.toJSON result.message}";
+    assert assertMsg (hasInfix "nonesuch" result.message)
+      "normalizeRosterResult's message must name the unknown key \"nonesuch\", got: ${builtins.toJSON result.message}";
+    pkgs.runCommand "roster-normalize-rejects-unknown-key" { } "touch $out";
+
+  # Issue #2571 non-blocking review finding (AC1 gap): see
+  # roster-normalize-throws-on-invalid-name above for rationale.
+  roster-normalize-throws-on-unknown-key =
+    let
+      result = builtins.tryEval (
+        let
+          r = rosterLib.normalizeRoster [
+            {
+              name = "scout";
+              model = "m";
+              mode = "subagent";
+              description = "d";
+              tools = [ ];
+              nonesuch = "x";
+            }
+          ];
+        in
+        builtins.deepSeq r r
+      );
+    in
+    assert assertMsg (!result.success)
+      "normalizeRoster must throw on an entry with an unknown key";
+    pkgs.runCommand "roster-normalize-throws-on-unknown-key" { } "touch $out";
+
+  # Issue #2571 slice 1: every entry must literally carry a `model` key, even
+  # when its value is the empty-string opt-out sentinel (#392) -- omitting
+  # the key entirely (typo/oversight) must throw.
+  roster-normalize-rejects-missing-model =
+    let
+      result = rosterLib.normalizeRosterResult [
+        {
+          name = "scout";
+          mode = "subagent";
+          description = "d";
+          tools = [ ];
+        }
+      ];
+    in
+    assert assertMsg (
+      result.ok == false
+    ) "normalizeRosterResult must not accept an entry that omits model";
+    assert assertMsg (result.violation == "missing-model")
+      "normalizeRosterResult must report violation == \"missing-model\", got: ${builtins.toJSON result.violation}";
+    assert assertMsg (result.entryName == "scout")
+      "normalizeRosterResult must name the offending entry, got: ${builtins.toJSON result.entryName}";
+    # Issue #2571 blocking review finding: see
+    # roster-normalize-rejects-invalid-name above for rationale.
+    assert assertMsg (hasInfix "scout" result.message)
+      "normalizeRosterResult's message must name the offending entry \"scout\", got: ${builtins.toJSON result.message}";
+    assert assertMsg (hasInfix "missing model" result.message)
+      "normalizeRosterResult's message must describe the problem (\"missing model\"), got: ${builtins.toJSON result.message}";
+    pkgs.runCommand "roster-normalize-rejects-missing-model" { } "touch $out";
+
+  # Issue #2571 non-blocking review finding (AC1 gap): see
+  # roster-normalize-throws-on-invalid-name above for rationale.
+  roster-normalize-throws-on-missing-model =
+    let
+      result = builtins.tryEval (
+        let
+          r = rosterLib.normalizeRoster [
+            {
+              name = "scout";
+              mode = "subagent";
+              description = "d";
+              tools = [ ];
+            }
+          ];
+        in
+        builtins.deepSeq r r
+      );
+    in
+    assert assertMsg (!result.success) "normalizeRoster must throw on an entry that omits model";
+    pkgs.runCommand "roster-normalize-throws-on-missing-model" { } "touch $out";
+
+  # Issue #2571 round-3 review finding: model = null (or any other non-string
+  # value) currently passes normalizeRosterResult straight through and gets
+  # baked into the --agents JSON as "model": null. Reuses the "missing-model"
+  # tag (both mean "there's no usable model value") rather than adding a
+  # distinct tag.
+  roster-normalize-rejects-non-string-model =
+    let
+      result = rosterLib.normalizeRosterResult [
+        {
+          name = "scout";
+          model = null;
+          mode = "subagent";
+          description = "d";
+          tools = [ ];
+        }
+      ];
+    in
+    assert assertMsg (
+      result.ok == false
+    ) "normalizeRosterResult must not accept an entry whose model isn't a string";
+    assert assertMsg (result.violation == "missing-model")
+      "normalizeRosterResult must report violation == \"missing-model\", got: ${builtins.toJSON result.violation}";
+    assert assertMsg (result.entryName == "scout")
+      "normalizeRosterResult must name the offending entry, got: ${builtins.toJSON result.entryName}";
+    assert assertMsg (hasInfix "scout" result.message)
+      "normalizeRosterResult's message must name the offending entry \"scout\", got: ${builtins.toJSON result.message}";
+    assert assertMsg (hasInfix "missing model" result.message)
+      "normalizeRosterResult's message must describe the problem (\"missing model\"), got: ${builtins.toJSON result.message}";
+    pkgs.runCommand "roster-normalize-rejects-non-string-model" { } "touch $out";
+
+  # Issue #2571 non-blocking review finding (AC1 gap): see
+  # roster-normalize-throws-on-invalid-name above for rationale.
+  roster-normalize-throws-on-non-string-model =
+    let
+      result = builtins.tryEval (
+        let
+          r = rosterLib.normalizeRoster [
+            {
+              name = "scout";
+              model = null;
+              mode = "subagent";
+              description = "d";
+              tools = [ ];
+            }
+          ];
+        in
+        builtins.deepSeq r r
+      );
+    in
+    assert assertMsg (!result.success) "normalizeRoster must throw on an entry whose model isn't a string";
+    pkgs.runCommand "roster-normalize-throws-on-non-string-model" { } "touch $out";
+
+  # Issue #2571 slice 1: model = "" is a well-established, permanent explicit
+  # opt-out sentinel (#392) -- normalizeRoster must accept it (not throw).
+  # Issue #2571 review fix (Finding A): normalizeRoster no longer drops such
+  # an entry from the returned list -- model = "" is an ordinary, valid
+  # value that passes through completely unfiltered (the #392
+  # opt-out-from-the-built-image behavior moves to an explicit step in
+  # lib/mkHarness.nix in a later slice, not silently inside this funnel).
+  roster-normalize-accepts-explicit-empty-model =
+    let
+      result = builtins.tryEval (
+        let
+          r = rosterLib.normalizeRoster [
+            {
+              name = "scout";
+              model = "";
+              mode = "subagent";
+              description = "d";
+              tools = [ ];
+            }
+          ];
+        in
+        builtins.deepSeq r r
+      );
+    in
+    assert assertMsg (
+      result.success
+    ) "normalizeRoster must not throw on an entry with an explicit empty model";
+    assert assertMsg (builtins.length result.value == 1)
+      "normalizeRoster must retain an entry with an explicit empty model in the returned list, got: ${builtins.toJSON result.value}";
+    assert assertMsg ((builtins.elemAt result.value 0).model == "")
+      "normalizeRoster must preserve model == \"\" on the retained entry, got: ${builtins.toJSON (builtins.elemAt result.value 0).model}";
+    pkgs.runCommand "roster-normalize-accepts-explicit-empty-model" { } "touch $out";
+
+  # Issue #2571 review fix (Finding A): a duplicate name must still be
+  # rejected even when the first occurrence has model == "" -- duplicate
+  # detection runs before model is even inspected, so this is unaffected by
+  # the removal of the empty-model drop (there's no drop left to reference).
+  roster-normalize-duplicate-name-detected-with-empty-model =
+    let
+      result = rosterLib.normalizeRosterResult [
+        {
+          name = "scout";
+          model = "";
+          mode = "subagent";
+          description = "d1";
+          tools = [ ];
+        }
+        {
+          name = "scout";
+          model = "m";
+          mode = "subagent";
+          description = "d2";
+          tools = [ ];
+        }
+      ];
+    in
+    assert assertMsg (result.ok == false)
+      "normalizeRosterResult must still detect a duplicate name when the first occurrence has an empty model";
+    assert assertMsg (result.violation == "duplicate-name")
+      "normalizeRosterResult must report violation == \"duplicate-name\", got: ${builtins.toJSON result.violation}";
+    pkgs.runCommand "roster-normalize-duplicate-name-detected-with-empty-model" { } "touch $out";
+
+  # Issue #2571 slice 2: an entry whose effective promptFile (explicit or
+  # injected default) doesn't exist on disk under templates/default/prompts
+  # and carries no inline prompt must throw.
+  roster-normalize-rejects-nonexistent-promptfile =
+    let
+      result = rosterLib.normalizeRosterResult [
+        {
+          name = "nonesuch";
+          model = "m";
+          mode = "subagent";
+          description = "d";
+          tools = [ ];
+        }
+      ];
+    in
+    assert assertMsg (result.ok == false)
+      "normalizeRosterResult must not accept an entry whose effective promptFile doesn't exist on disk and carries no inline prompt";
+    assert assertMsg (result.violation == "missing-promptfile")
+      "normalizeRosterResult must report violation == \"missing-promptfile\", got: ${builtins.toJSON result.violation}";
+    assert assertMsg (result.entryName == "nonesuch")
+      "normalizeRosterResult must name the offending entry, got: ${builtins.toJSON result.entryName}";
+    # Issue #2571 blocking review finding: pin message content for the
+    # "missing-promptfile" violation class too -- see
+    # roster-normalize-rejects-invalid-name above for rationale.
+    assert assertMsg (hasInfix "nonesuch" result.message)
+      "normalizeRosterResult's message must name the offending entry \"nonesuch\", got: ${builtins.toJSON result.message}";
+    assert assertMsg (hasInfix "does not exist" result.message)
+      "normalizeRosterResult's message must describe the problem (\"does not exist\"), got: ${builtins.toJSON result.message}";
+    pkgs.runCommand "roster-normalize-rejects-nonexistent-promptfile" { } "touch $out";
+
+  # Issue #2571 round-3 review finding (flagged non-blocking in review rounds
+  # 1, 2, and 3, never fixed until now): builtins.pathExists alone blesses
+  # non-files -- promptFile = ".", "..", "fragments" (a real subdirectory
+  # under templates/default/prompts), and a path-traversal escape all
+  # resolve to something that pathExists reports as existing even though
+  # none of them is a usable prompt file. All four must be rejected under
+  # the same "missing-promptfile" tag as a genuinely nonexistent file --
+  # "the effective promptFile doesn't resolve to a usable prompt file"
+  # covers path-traversal, directory, and missing uniformly.
+  roster-normalize-rejects-unusable-promptfile =
+    let
+      rejects =
+        promptFile:
+        let
+          result = rosterLib.normalizeRosterResult [
+            {
+              name = "nonesuch";
+              model = "m";
+              mode = "subagent";
+              description = "d";
+              tools = [ ];
+              inherit promptFile;
+            }
+          ];
+        in
+        result.ok == false
+        && result.violation == "missing-promptfile"
+        # Issue #2571 blocking review finding: pin message content for the
+        # "missing-promptfile" violation class too -- see
+        # roster-normalize-rejects-invalid-name above for rationale.
+        && hasInfix "nonesuch" result.message
+        && hasInfix "does not exist" result.message;
+      cases = [
+        "."
+        ".."
+        "fragments"
+        "../../../../../../etc/passwd"
+      ];
+      failures = builtins.filter (pf: !(rejects pf)) cases;
+    in
+    assert assertMsg (failures == [ ])
+      "normalizeRosterResult must reject every unusable promptFile (directory, '.', '..', or a path-traversal escape) with violation == \"missing-promptfile\" and a message naming the entry and problem, but accepted or under-reported: ${builtins.toJSON failures}";
+    pkgs.runCommand "roster-normalize-rejects-unusable-promptfile" { } "touch $out";
+
+  # Issue #2571 blocking review finding: a promptFile that isn't a string at
+  # all (e.g. null -- the same sentinel defaultRoster uses for `prompt`,
+  # so a plausible Consumer spelling mistake confusing promptFile with
+  # prompt) must fail with a clean, named violation rather than aborting
+  # eval mid-interpolation with an opaque "cannot coerce null to a string".
+  roster-normalize-rejects-non-string-promptfile =
+    let
+      result = rosterLib.normalizeRosterResult [
+        {
+          name = "scout";
+          model = "m";
+          mode = "subagent";
+          description = "d";
+          tools = [ ];
+          promptFile = null;
+        }
+      ];
+    in
+    assert assertMsg (result.ok == false)
+      "normalizeRosterResult must not accept an entry whose promptFile isn't a string";
+    assert assertMsg (result.violation == "invalid-promptfile-type")
+      "normalizeRosterResult must report violation == \"invalid-promptfile-type\", got: ${builtins.toJSON result.violation}";
+    assert assertMsg (result.entryName == "scout")
+      "normalizeRosterResult must name the offending entry, got: ${builtins.toJSON result.entryName}";
+    # Issue #2571 blocking review finding: see
+    # roster-normalize-rejects-invalid-name above for rationale.
+    assert assertMsg (hasInfix "scout" result.message)
+      "normalizeRosterResult's message must name the offending entry \"scout\", got: ${builtins.toJSON result.message}";
+    assert assertMsg (hasInfix "promptFile" result.message)
+      "normalizeRosterResult's message must describe the problem (\"promptFile\"), got: ${builtins.toJSON result.message}";
+    pkgs.runCommand "roster-normalize-rejects-non-string-promptfile" { } "touch $out";
+
+  # Issue #2571 non-blocking review finding (AC1 gap): see
+  # roster-normalize-throws-on-invalid-name above for rationale.
+  roster-normalize-throws-on-invalid-promptfile-type =
+    let
+      result = builtins.tryEval (
+        let
+          r = rosterLib.normalizeRoster [
+            {
+              name = "scout";
+              model = "m";
+              mode = "subagent";
+              description = "d";
+              tools = [ ];
+              promptFile = null;
+            }
+          ];
+        in
+        builtins.deepSeq r r
+      );
+    in
+    assert assertMsg (!result.success)
+      "normalizeRoster must throw when promptFile isn't a non-empty string";
+    pkgs.runCommand "roster-normalize-throws-on-invalid-promptfile-type" { } "touch $out";
+
+  # Issue #2571 tied non-blocking finding (issue #2555 user story 23):
+  # promptFile = "" resolves to templates/default/prompts/ itself (the
+  # directory exists), so builtins.pathExists alone would wrongly bless it as
+  # "found". Must be rejected the same as any other non-usable promptFile
+  # value, closing the sibling hole to prompt = "" (see hasInlinePrompt
+  # below, which already requires non-empty).
+  roster-normalize-rejects-empty-string-promptfile =
+    let
+      result = rosterLib.normalizeRosterResult [
+        {
+          name = "scout";
+          model = "m";
+          mode = "subagent";
+          description = "d";
+          tools = [ ];
+          promptFile = "";
+        }
+      ];
+    in
+    assert assertMsg (result.ok == false)
+      "normalizeRosterResult must not accept an entry with promptFile == \"\"";
+    assert assertMsg (result.violation == "invalid-promptfile-type")
+      "normalizeRosterResult must report violation == \"invalid-promptfile-type\", got: ${builtins.toJSON result.violation}";
+    assert assertMsg (result.entryName == "scout")
+      "normalizeRosterResult must name the offending entry, got: ${builtins.toJSON result.entryName}";
+    pkgs.runCommand "roster-normalize-rejects-empty-string-promptfile" { } "touch $out";
+
+  # Issue #2571 round-3 review finding: prompt = 5 (or any non-null,
+  # non-string value) currently passes normalizeRosterResult silently and
+  # only fails later inside writeText deep in the Driver pipeline, far from
+  # the entry that caused it -- must fail with a clean, named
+  # "invalid-prompt-type" violation instead.
+  roster-normalize-rejects-non-string-prompt =
+    let
+      result = rosterLib.normalizeRosterResult [
+        {
+          name = "scout";
+          model = "m";
+          mode = "subagent";
+          description = "d";
+          tools = [ ];
+          prompt = 5;
+        }
+      ];
+    in
+    assert assertMsg (result.ok == false)
+      "normalizeRosterResult must not accept an entry whose prompt isn't a string or null";
+    assert assertMsg (result.violation == "invalid-prompt-type")
+      "normalizeRosterResult must report violation == \"invalid-prompt-type\", got: ${builtins.toJSON result.violation}";
+    assert assertMsg (result.entryName == "scout")
+      "normalizeRosterResult must name the offending entry, got: ${builtins.toJSON result.entryName}";
+    assert assertMsg (hasInfix "scout" result.message)
+      "normalizeRosterResult's message must name the offending entry \"scout\", got: ${builtins.toJSON result.message}";
+    assert assertMsg (hasInfix "prompt" result.message)
+      "normalizeRosterResult's message must describe the problem (\"prompt\"), got: ${builtins.toJSON result.message}";
+    pkgs.runCommand "roster-normalize-rejects-non-string-prompt" { } "touch $out";
+
+  # Issue #2571 non-blocking review finding (AC1 gap): see
+  # roster-normalize-throws-on-invalid-name above for rationale.
+  roster-normalize-throws-on-non-string-prompt =
+    let
+      result = builtins.tryEval (
+        let
+          r = rosterLib.normalizeRoster [
+            {
+              name = "scout";
+              model = "m";
+              mode = "subagent";
+              description = "d";
+              tools = [ ];
+              prompt = 5;
+            }
+          ];
+        in
+        builtins.deepSeq r r
+      );
+    in
+    assert assertMsg (!result.success)
+      "normalizeRoster must throw on an entry whose prompt isn't a string or null";
+    pkgs.runCommand "roster-normalize-throws-on-non-string-prompt" { } "touch $out";
+
+  # Issue #2571 review fix (cheap non-blocking finding): an empty inline
+  # `prompt = ""` must not satisfy the promptFile-existence escape hatch --
+  # it's not a usable prompt, the same "agent runs with no usable prompt"
+  # failure mode issue #2555 user story 23 is about. Must fall through to
+  # requiring a real promptFile the same as omitting `prompt` entirely.
+  roster-normalize-rejects-empty-inline-prompt =
+    let
+      result = rosterLib.normalizeRosterResult [
+        {
+          name = "nonesuch";
+          model = "m";
+          mode = "subagent";
+          description = "d";
+          tools = [ ];
+          prompt = "";
+        }
+      ];
+    in
+    assert assertMsg (result.ok == false)
+      "normalizeRosterResult must not accept an entry with an empty inline prompt and no resolvable promptFile";
+    assert assertMsg (result.violation == "missing-promptfile")
+      "normalizeRosterResult must report violation == \"missing-promptfile\" for an empty inline prompt, got: ${builtins.toJSON result.violation}";
+    assert assertMsg (result.entryName == "nonesuch")
+      "normalizeRosterResult must name the offending entry, got: ${builtins.toJSON result.entryName}";
+    # Issue #2571 blocking review finding: pin message content for the
+    # "missing-promptfile" violation class too -- see
+    # roster-normalize-rejects-invalid-name above for rationale.
+    assert assertMsg (hasInfix "nonesuch" result.message)
+      "normalizeRosterResult's message must name the offending entry \"nonesuch\", got: ${builtins.toJSON result.message}";
+    assert assertMsg (hasInfix "does not exist" result.message)
+      "normalizeRosterResult's message must describe the problem (\"does not exist\"), got: ${builtins.toJSON result.message}";
+    pkgs.runCommand "roster-normalize-rejects-empty-inline-prompt" { } "touch $out";
+
+  # Issue #2571 review fix (Finding C): "reviewer" is the one canonical
+  # agent name whose injected promptFile default deliberately doesn't
+  # follow the "<name>-prompt.md" convention -- its on-disk template is
+  # templates/default/prompts/review-prompt.md. An entry named "reviewer"
+  # omitting both promptFile and prompt must not throw, and must resolve to
+  # review-prompt.md specifically (not the naive reviewer-prompt.md, which
+  # doesn't exist on disk).
+  roster-normalize-injects-reviewer-promptfile-override =
+    let
+      result = builtins.tryEval (
+        let
+          r = rosterLib.normalizeRoster [
+            {
+              name = "reviewer";
+              model = "m";
+              mode = "subagent";
+              description = "d";
+              tools = [ ];
+            }
+          ];
+        in
+        builtins.deepSeq r r
+      );
+    in
+    assert assertMsg (result.success)
+      "normalizeRoster must not throw on a reviewer entry omitting promptFile, got failure evaluating: ${builtins.toJSON result}";
+    assert assertMsg ((builtins.elemAt result.value 0).promptFile == "review-prompt.md")
+      "normalizeRoster must inject promptFile == \"review-prompt.md\" for the reviewer name (not reviewer-prompt.md), got: ${builtins.toJSON (builtins.elemAt result.value 0).promptFile}";
+    pkgs.runCommand "roster-normalize-injects-reviewer-promptfile-override" { } "touch $out";
+
+  # Issue #2571 slice 2: the other half of the same contract -- an entry
+  # with a nonexistent promptFile but a non-null inline `prompt` must not
+  # throw.
+  roster-normalize-accepts-inline-prompt-without-promptfile-file =
+    let
+      result = builtins.tryEval (
+        let
+          r = rosterLib.normalizeRoster [
+            {
+              name = "nonesuch";
+              model = "m";
+              mode = "subagent";
+              description = "d";
+              tools = [ ];
+              prompt = "some inline prompt text";
+            }
+          ];
+        in
+        builtins.deepSeq r r
+      );
+    in
+    assert assertMsg (result.success)
+      "normalizeRoster must not throw on an entry with a nonexistent promptFile when an inline prompt is supplied";
+    pkgs.runCommand "roster-normalize-accepts-inline-prompt-without-promptfile-file" { } "touch $out";
 
   roster-normalize-injects-promptfile-default =
     let
@@ -139,6 +838,7 @@ in
               description = "d";
               tools = [ ];
               promptFile = "custom-scout.md";
+              prompt = "some prompt text";
             }
           ];
         in
@@ -547,6 +1247,88 @@ in
     assert assertMsg (!result.success)
       "defaultRoster must throw when byName.<name> is not an attribute set (e.g. byName.filer = \"oops\")";
     pkgs.runCommand "roster-default-roster-by-name-non-attrset-value-throws" { } "touch $out";
+
+  # Issue #2571 review fix: rosterLib.dropOptedOut drops only the entry
+  # whose model is the explicit "" opt-out sentinel (#392), leaving any
+  # other entry (regardless of model value) untouched.
+  roster-drop-opted-out-drops-only-empty-model =
+    let
+      normalized = rosterLib.normalizeRoster [
+        {
+          name = "a";
+          model = "";
+          mode = "subagent";
+          description = "d";
+          tools = [ ];
+          prompt = "some prompt text";
+        }
+        {
+          name = "b";
+          model = "m";
+          mode = "subagent";
+          description = "d";
+          tools = [ ];
+          prompt = "some prompt text";
+        }
+      ];
+      result = rosterLib.dropOptedOut normalized;
+    in
+    assert assertMsg (builtins.length result == 1)
+      "dropOptedOut must drop only the entry with an explicit empty model, got: ${builtins.toJSON result}";
+    assert assertMsg ((builtins.elemAt result 0).name == "b")
+      "dropOptedOut must retain the entry with a non-empty model, got: ${builtins.toJSON result}";
+    pkgs.runCommand "roster-drop-opted-out-drops-only-empty-model" { } "touch $out";
+
+  # Issue #2571 review fix: the identity case -- dropOptedOut on a roster
+  # with no opted-out entries returns it unchanged.
+  roster-drop-opted-out-identity-when-none-opted-out =
+    let
+      normalized = rosterLib.normalizeRoster [
+        {
+          name = "a";
+          model = "m1";
+          mode = "subagent";
+          description = "d";
+          tools = [ ];
+          prompt = "some prompt text";
+        }
+        {
+          name = "b";
+          model = "m2";
+          mode = "subagent";
+          description = "d";
+          tools = [ ];
+          prompt = "some prompt text";
+        }
+      ];
+      result = rosterLib.dropOptedOut normalized;
+    in
+    assert assertMsg (result == normalized)
+      "dropOptedOut must return the roster unchanged when no entry is opted out, got: ${builtins.toJSON result}";
+    pkgs.runCommand "roster-drop-opted-out-identity-when-none-opted-out" { } "touch $out";
+
+  # Issue #2571 review fix: dropOptedOut is exported directly on the
+  # versioned rosterLib surface (flake.nix), so a Consumer can call it
+  # standalone on a hand-built roster that skipped normalizeRoster. An
+  # entry missing `model` must fail with a guard naming the entry (rather
+  # than Nix's bare, unhelpful "attribute 'model' missing") -- but
+  # builtins.tryEval can only prove *that* eval aborted, never recover the
+  # thrown message text (same caveat as the normalizeRoster throw checks
+  # above), so this only pins the throw itself.
+  roster-drop-opted-out-rejects-missing-model =
+    let
+      result = builtins.tryEval (
+        let
+          r = rosterLib.dropOptedOut [
+            { name = "x"; }
+          ];
+        in
+        builtins.deepSeq r r
+      );
+    in
+    assert assertMsg (!result.success)
+      "dropOptedOut must throw a guard error on an entry missing model, not silently succeed";
+    pkgs.runCommand "roster-drop-opted-out-rejects-missing-model" { } "touch $out";
 
   # Issue #2437: lib/roster-schema-defaults.nix is the single source of
   # truth for defaultRoster's roster-name -> schema-key model defaults.
