@@ -65,8 +65,17 @@
 
         # The roster helpers (issue #2560), exposed the same way -- a Consumer
         # calls `spindrift.lib.rosterLib { inherit lib; }` to get
-        # `{ normalizeRoster; defaultRoster; }`.
-        flake.lib.rosterLib = import ./lib/roster.nix;
+        # `{ normalizeRoster; dropOptedOut; defaultRoster; }`
+        # (normalizeRosterResult stays internal test-support machinery, not
+        # exported here).
+        flake.lib.rosterLib =
+          args:
+          let
+            roster = import ./lib/roster.nix args;
+          in
+          {
+            inherit (roster) normalizeRoster dropOptedOut defaultRoster;
+          };
 
         # The flake-parts shim, exposed for Consumer flakes that want the
         # declarative option surface (ADR 0001).
