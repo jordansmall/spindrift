@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/runner"
 )
 
 // LabelMeta holds the default color and description for a triage label.
@@ -69,6 +70,15 @@ type Config struct {
 	InProgressLabel string
 	FailedLabel     string
 	CompleteLabel   string
+
+	// Runtime is the operator's configured container runtime (podman |
+	// docker | rancher | bwrap). Checked via runner.ValidateRuntime and
+	// reported as an advisory row — never fatal — since Quickstart's own
+	// prompt-time confirmation already lets an operator deliberately
+	// scaffold with an uninstalled runtime ("scaffold now, install later"),
+	// and doctor must not turn that already-accepted state into a hard
+	// failure.
+	Runtime string
 }
 
 // Run probes both seams (IssueTracker + CodeForge), then checks that all
@@ -118,6 +128,15 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, w io.Writer, stdin
 		recoverableCount = len(recoverable)
 	}
 	fmt.Fprintf(w, "ok: %d recoverable issue(s) — run `spindrift recover <issue>` to land each\n", recoverableCount)
+
+	// Runtime row (advisory, never fatal) — rationale on Config.Runtime.
+	if c.Runtime == "" {
+		fmt.Fprintln(w, "advisory: RUNTIME not set — skipping runtime check")
+	} else if rerr := runner.ValidateRuntime(c.Runtime); rerr != nil {
+		fmt.Fprintf(w, "advisory: runtime %q not ready: %v — does not fail this check\n", c.Runtime, rerr)
+	} else {
+		fmt.Fprintf(w, "ok: runtime %q found on PATH\n", c.Runtime)
+	}
 
 	checkLabelSet := func(names []string, present map[string]bool) []string {
 		var missing []string
