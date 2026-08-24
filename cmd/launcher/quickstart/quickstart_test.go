@@ -505,6 +505,28 @@ func TestRunQuickstart_ExistingFlakeNix_RefusesWithoutForce(t *testing.T) {
 	}
 }
 
+func TestRunQuickstart_ExistingFlakeNixAndHarnessEnv_RefusesWithProseList(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "flake.nix"), []byte("existing"), 0o644); err != nil {
+		t.Fatalf("seed flake.nix: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "harness.env"), []byte("existing"), 0o644); err != nil {
+		t.Fatalf("seed harness.env: %v", err)
+	}
+	var out bytes.Buffer
+
+	err := runQuickstart(dir, fakeEnvironment{}, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, strings.NewReader(""), true, false)
+	if err == nil {
+		t.Fatal("expected an error refusing to clobber existing flake.nix and harness.env, got nil")
+	}
+	if strings.Contains(err.Error(), "[flake.nix") {
+		t.Errorf("expected prose file list, not Go slice bracket syntax, got: %q", err.Error())
+	}
+	if !strings.Contains(err.Error(), "flake.nix, harness.env") {
+		t.Errorf("expected error to list both files in prose (comma-separated), got: %q", err.Error())
+	}
+}
+
 func TestRunQuickstart_HappyPath_WritesFiles(t *testing.T) {
 	dir := t.TempDir()
 	var out bytes.Buffer
