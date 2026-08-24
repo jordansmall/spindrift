@@ -183,6 +183,7 @@ let
       labels.work
       ++ labels.research
       ++ labels.researchVerdicts
+      ++ labels.researchFinding
       ++ labels.priority
       ++ labels.ambiguous
       ++ labels.recoverable

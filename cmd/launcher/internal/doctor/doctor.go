@@ -23,9 +23,14 @@ type LabelMeta struct {
 	Color       string // hex without leading #
 }
 
-// ResearchLabelNames returns the six fixed research-tier label names (ADR
+// ResearchLabelNames returns the seven fixed research-tier label names (ADR
 // 0022), sourced from forge.ResearchDispatchLabels()/ResearchVerdictLabels()
-// rather than duplicated as string literals.
+// rather than duplicated as string literals, plus the fixed literal
+// "agent-research-finding" (ADR 0041). There's no
+// forge.ResearchFindingLabel() helper for that last name — unlike
+// AmbiguousLabelNames() below, whose fixed literal mirrors a real
+// forge.DispatchLabels.Ambiguous declaration, this one has no Go
+// counterpart to mirror at all.
 func ResearchLabelNames() []string {
 	dl := forge.ResearchDispatchLabels()
 	vl := forge.ResearchVerdictLabels()
@@ -33,6 +38,7 @@ func ResearchLabelNames() []string {
 	for _, e := range vl.Entries() {
 		names = append(names, e.Label)
 	}
+	names = append(names, "agent-research-finding")
 	return names
 }
 
@@ -178,7 +184,7 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, w io.Writer, stdin
 		return err
 	}
 	if len(researchMissing) > 0 {
-		fmt.Fprintf(w, "advisory: %d research label(s) missing (ADR 0022) — does not fail this check\n", len(researchMissing))
+		fmt.Fprintf(w, "advisory: %d research label(s) missing (ADR 0022 / ADR 0041) — does not fail this check\n", len(researchMissing))
 	}
 	if len(priorityMissing) > 0 {
 		fmt.Fprintf(w, "advisory: %d priority label(s) missing (ADR 0040) — does not fail this check\n", len(priorityMissing))
@@ -250,13 +256,13 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, w io.Writer, stdin
 		return fmt.Errorf("one or more triage labels are still missing after creation")
 	}
 	// Work labels are fatal (handled above) and research/priority/
-	// ambiguous-spec labels are advisory (ADR 0022 / ADR 0040 / #2275), so
-	// each advisory tier gets its own wrap-up line here: an advisory note if
-	// that tier is still short after creation, or a single success line
-	// naming all four tiers once none is.
+	// ambiguous-spec labels are advisory (ADR 0022 / ADR 0040 / ADR 0041 /
+	// #2275), so each advisory tier gets its own wrap-up line here: an
+	// advisory note if that tier is still short after creation, or a single
+	// success line naming all four tiers once none is.
 	stillMissing := false
 	if len(researchMissing) > 0 {
-		fmt.Fprintf(w, "advisory: %d research label(s) still missing after creation (ADR 0022) — does not fail this check: %s\n", len(researchMissing), strings.Join(researchMissing, ", "))
+		fmt.Fprintf(w, "advisory: %d research label(s) still missing after creation (ADR 0022 / ADR 0041) — does not fail this check: %s\n", len(researchMissing), strings.Join(researchMissing, ", "))
 		stillMissing = true
 	}
 	if len(priorityMissing) > 0 {

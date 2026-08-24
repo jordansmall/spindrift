@@ -4,8 +4,9 @@
 # researchVerdicts sourced from lib/research-verdicts.nix's defaultVerdicts,
 # priority-tier (ADR 0040), the ambiguous-spec label, the local-only
 # recoverable marker, the reviewFinding provenance label the Filer creates
-# directly (never through doctor), and the trigger-only vocabulary. Rendered
-# into
+# directly (never through doctor), the researchFinding provenance label
+# (ADR 0041, doctor DOES probe/offer to create this one), and the
+# trigger-only vocabulary. Rendered into
 # cmd/launcher/internal/doctor/labelmeta_gen.go by lib/renderers.nix's
 # renderLabelRegistryGo, guarded against drift by
 # nix/checks/schema-drift.nix's label-registry-gen check, written by
@@ -158,6 +159,29 @@ in
       name = "agent-ambiguous-spec";
       color = "e0cffc";
       description = "An internally-contradictory issue; needs a human decision — not a crash";
+    }
+  ];
+
+  # Research-finding provenance: the research-dispatch counterpart to
+  # reviewFinding below (issue #2591, ADR 0041) -- the label a research Box's
+  # Filer will apply to every issue it files from a research finding, once
+  # that Filer fragment exists (ADR 0041 is itself still future-tense here;
+  # only doctor's advisory probe/create side ships in this diff). Unlike
+  # reviewFinding, this one IS rendered into TriageLabelMeta: doctor probes
+  # and, in interactive mode, offers to create it alongside the rest of the
+  # research family (ADR 0041's "doctor's advisory research label set gains
+  # agent-research-finding"), staying advisory (never fails the check) same
+  # as the rest of that family. Needs its own fresh color, distinct from
+  # reviewFinding's d4c5f9 (which collides with agent-research-unclear --
+  # harmless there only because reviewFinding is excluded from the map), to
+  # avoid tripping TestTriageLabelMeta_ColorsAreDistinct now that this row
+  # does land in the map.
+  researchFinding = [
+    {
+      role = "ResearchFinding";
+      name = "agent-research-finding";
+      color = "c5def5";
+      description = "Filed from a research finding";
     }
   ];
 
