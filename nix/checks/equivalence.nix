@@ -517,6 +517,49 @@ in
       "oldFlatShims description mismatch (hand-copy regression) for: ${concatStringsSep ", " mismatches}";
     pkgs.runCommand "flakemodule-legacy-shim-description-generated" { } "touch $out";
 
+  # Slice of issue #2572 ("structural options join the generated surfaces"):
+  # every one of the 13 structural knobs (lib/structural-paths.nix's keys)
+  # plus "byName" must have a plain-data doc entry in
+  # lib/structural-options-doc.nix with a non-empty string
+  # `doc`/`docType`/`docDefault` — the source lib/renderers.nix's
+  # renderStructuralOptionsDoc renders into a docs/flake-options.md table
+  # row. This is a cheap plain-attrset assertion rather than an
+  # eval-flake-module-and-drill check, since lib/structural-options-doc.nix
+  # holds this data as plain data rather than embedded in
+  # lib/flakeModule.nix's mkOption `description`/docType/docDefault
+  # (lib/renderers.nix must stay pure-builtins, no flake-parts eval).
+  structural-options-doc-metadata =
+    let
+      inherit (pkgs.lib)
+        assertMsg
+        attrNames
+        concatStringsSep
+        filter
+        ;
+      structuralPlacements = import ../../lib/structural-paths.nix;
+      structuralOptionsDoc = import ../../lib/structural-options-doc.nix;
+      allNames = attrNames structuralPlacements ++ [ "byName" ];
+      hasDocMeta =
+        key: name:
+        structuralOptionsDoc ? ${name}
+        && structuralOptionsDoc.${name} ? ${key}
+        && builtins.isString structuralOptionsDoc.${name}.${key}
+        && structuralOptionsDoc.${name}.${key} != "";
+      missingDoc = filter (name: !hasDocMeta "doc" name) allNames;
+      missingDocType = filter (name: !hasDocMeta "docType" name) allNames;
+      missingDocDefault = filter (name: !hasDocMeta "docDefault" name) allNames;
+      extraNames = filter (name: !(builtins.elem name allNames)) (attrNames structuralOptionsDoc);
+    in
+    assert assertMsg (missingDoc == [ ])
+      "lib/structural-options-doc.nix: every structural option (13 knobs + byName) must declare a non-empty string doc: missing on ${concatStringsSep ", " missingDoc}";
+    assert assertMsg (missingDocType == [ ])
+      "lib/structural-options-doc.nix: every structural option (13 knobs + byName) must declare a non-empty string docType: missing on ${concatStringsSep ", " missingDocType}";
+    assert assertMsg (missingDocDefault == [ ])
+      "lib/structural-options-doc.nix: every structural option (13 knobs + byName) must declare a non-empty string docDefault: missing on ${concatStringsSep ", " missingDocDefault}";
+    assert assertMsg (extraNames == [ ])
+      "lib/structural-options-doc.nix: has doc entries for unknown/stale structural option(s) not in lib/structural-paths.nix (+ byName): ${concatStringsSep ", " extraNames}";
+    pkgs.runCommand "structural-options-doc-metadata" { } "touch $out";
+
   # Promoted operator-tunable knobs (issue #353): the 13 newly consumer-tunable
   # knobs appear under their correct settings section and bake the expected
   # ${VAR:-<baked>} default into the generated run command.  Covers at least one
