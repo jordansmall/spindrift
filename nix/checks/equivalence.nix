@@ -781,6 +781,53 @@ in
         touch $out
       '';
 
+  # Issue #2560 AC4 (blocking review finding): AC4 requires rosterLib to be
+  # "reachable from the versioned flake lib export" -- every other roster
+  # check imports lib/roster.nix directly, so a typo'd or dropped
+  # `flake.lib.rosterLib = ...` line in flake.nix (blocking finding round 1)
+  # would leave every check green while AC4 silently regressed. This
+  # evaluates flake.nix's own `outputs` function -- the actual attribute a
+  # Consumer flake would reach via `spindrift.lib.rosterLib` -- rather than
+  # re-importing lib/roster.nix under a different name, and asserts its
+  # `defaultRoster`+`normalizeRoster` output for a `byName` override is
+  # byte-identical to the direct import. `caveman`/`matt-skills`/
+  # `jordan-skills` are dummy attrsets: `flake.lib` is a top-level output,
+  # never forced through `perSystem.spindrift.agents.skills` (the only
+  # consumer of those three inputs), so real values are unnecessary here.
+  flake-lib-rosterlib-reachable =
+    let
+      inherit (pkgs.lib) assertMsg;
+      flakeOutputs = (import ../../flake.nix).outputs {
+        self = {
+          outPath = ../../.;
+        };
+        inherit flake-parts nixpkgs;
+        caveman = {
+          outPath = ../../.;
+        };
+        matt-skills = {
+          outPath = ../../.;
+        };
+        jordan-skills = {
+          outPath = ../../.;
+        };
+      };
+      rosterLibFromFlake = flakeOutputs.lib.rosterLib { inherit (pkgs) lib; };
+      rosterLibDirect = import ../../lib/roster.nix { inherit (pkgs) lib; };
+      testByName = {
+        filer.model = defaultModelFixture.dogfoodPins.filer;
+      };
+      fromFlakeRoster = rosterLibFromFlake.normalizeRoster (
+        rosterLibFromFlake.defaultRoster { byName = testByName; }
+      );
+      directRoster = rosterLibDirect.normalizeRoster (
+        rosterLibDirect.defaultRoster { byName = testByName; }
+      );
+    in
+    assert assertMsg (fromFlakeRoster == directRoster)
+      "flake.nix's flake.lib.rosterLib export (issue #2560 AC4) must resolve to the exact same lib/roster.nix, byte-identical output for the same byName input, got flake export=${builtins.toJSON fromFlakeRoster} vs direct import=${builtins.toJSON directRoster}";
+    pkgs.runCommand "flake-lib-rosterlib-reachable" { } "touch $out";
+
   # ADR 0037 (issue #2522 slice 2): the structural-knob forwarding chain in
   # config.perSystem (structuralArgs) must forward a knob reached via its NEW
   # domain-tree path, not just the deprecated flat path flakemodule-alias-parity
