@@ -105,7 +105,7 @@ lives under the out-of-contract `internals` attrset (see [Calling
 | `extraClosures` | shared     | `pkgs -> [pkg]`         | `[]`               | extra derivations, as a function of the (Linux) `pkgs` (like `packages`), whose closures are baked into the image and registered in the store DB alongside the runtime closure, so in-box nix sees them as already present (ADR 0018) |
 | `nixBuilderImage` | **`mkHarness` only** | string        | `"docker.io/nixos/nix@sha256:bf1d938835ab96312f098fa6c2e9cab367728e0aad0646ee3e02a787c80d8fb8"` (pinned reference — the real default lives in `lib/build-constants.nix`) | Nix image `spindrift build` uses as a fallback Linux builder when the host can't realize the image; pinned by digest for supply-chain safety (see [Building on macOS](#building-on-macos)) |
 | `roster`    | shared         | list of subagent-entry attrs | `lib/roster.nix`'s `defaultRoster` | supersedes the four legacy model knobs; see [Subagent roster](#subagent-roster) |
-| `byName`    | shared         | attrset of `{ model?; effort?; }` keyed by roster entry name | `{}` (this row is the `mkHarness` parameter; the flake option, `agents.models.byName`, defaults to `null`) | name-keyed model/effort shorthand (issue #2560), forwarded into `defaultRoster`; only takes effect when `roster` is unset; no flat `perSystem.spindrift.byName` alias — see the standalone-domain-tree-leaf note below and [Subagent roster](#subagent-roster) |
+| `byName`    | shared         | attrset of `{ model?; effort?; }` keyed by roster entry name | `{}` (this row is the `mkHarness` parameter; the flake option, `agents.models.byName`, defaults to `null`) | name-keyed model/effort shorthand (issue #2560), forwarded into `defaultRoster`; only takes effect when `roster` is unset; no flat `perSystem.spindrift.byName` alias — see [Subagent roster](#subagent-roster) |
 
 Every knob settable on `perSystem.spindrift.*` — schema-generated run
 default or hand-declared structural option alike — is a first-class option
@@ -113,17 +113,7 @@ directly under `perSystem.spindrift.<domain>.*` (ADR 0037): `agents`,
 `git`, `issues`, `forge`, `dispatch`, `infra`. The **`mkHarness` only**
 rows above (`scoutPrompt`/`reviewPrompt`/`filerPrompt`/`nixBuilderImage`)
 are the exception: they have no domain-tree path at all, since they aren't
-reachable from the flake module in the first place. A schema-generated knob (e.g. `repoSlug`,
-`gitUserName`) is placed by its `lib/env-schema.nix` entry's `group` and
-optional `nixSubPath` (`lib/nixpath.nix`); a structural knob (`roster`,
-`skills`, `packages`, `prefetch`, `driver`, `prompt`, `extraClosures`,
-`runtime`, and the rest of `lib/structural-paths.nix`) is placed by the
-small hand-written map in `lib/structural-paths.nix` (imported by
-`lib/flakeModule.nix`); `byName` (`agents.models.byName`, issue #2560) is a
-third case, its own standalone domain-tree leaf declared directly in
-`lib/flakeModule.nix` rather than through either the schema `group`
-mechanism or `lib/structural-paths.nix` (it has no legacy flat spelling to
-migrate from, so it needs neither). Whichever way it's placed, the flake surface
+reachable from the flake module in the first place. The flake surface
 bakes run knobs into the Launcher input document the `spindrift` CLI passes
 to the launcher binary via `--input`; an explicit `--flag` at dispatch time
 re-points a value without a rebuild. Domain names are the same headings as
@@ -131,14 +121,12 @@ re-points a value without a rebuild. Domain names are the same headings as
 CLI help. Unknown domain or knob names are rejected at eval time by the
 NixOS module system.
 
-Every schema-generated knob's domain path is generated from that schema and
-appears in [`docs/flake-options.md`](flake-options.md); structural options
-are absent from that generated reference because they're hand-declared
-rather than schema-generated, not because they're unreachable from the flake
-module. The old `settings.<section>.<knob>` spelling still works pre-1.0 as
-a deprecated alias (`lib/flakeModule.nix`'s `settingsOption`, forwarded with
-an eval warning) but is retired at the 1.0 boundary — new config should use
-the domain paths directly.
+Every option on the domain tree — schema-generated or structural alike —
+has its own entry in [`docs/flake-options.md`](flake-options.md), with its
+type, default, and description. The old `settings.<section>.<knob>`
+spelling still works pre-1.0 as a deprecated alias (`lib/flakeModule.nix`'s
+`settingsOption`, forwarded with an eval warning) but is retired at the 1.0
+boundary — new config should use the domain paths directly.
 
 Each binding below sets a domain-tree path under your Consumer flake's own
 `perSystem.spindrift`:
@@ -187,10 +175,11 @@ forge.repoSlug = "owner/repo";
 Three paths to discover which options exist and what they do:
 
 1. **Generated reference** — [`docs/flake-options.md`](flake-options.md) lists
-   every schema-generated flake option grouped by domain, with its env var,
-   default, and description; structural options are absent from it (see
-   above). It is generated from `lib/env-schema.nix` and drift-guarded
-   by `nix flake check`; it is always in sync with the schema.
+   every flake option: schema-generated knobs grouped by domain, with their
+   env var, default, and description, followed by a structural-options
+   section covering the rest, with their type, default, and doc but no env
+   var, since they have none. Both classes are generated and drift-guarded
+   by `nix flake check`, so the reference is always in sync.
 
 2. **LSP autocomplete** — `nixd` and `nil` read the module option declarations
    that `lib/flakeModule.nix` generates from the same schema.  Opening your
@@ -232,17 +221,14 @@ unset).
 
 `roster` (issue #264) is a *structural* option: a flakeModule Consumer sets
 it directly at `perSystem.spindrift.agents.models.roster`, declared as a real
-`mkOption` in `lib/flakeModule.nix` at the domain-tree path registered for
-`roster` in `lib/structural-paths.nix` (pinned against that registry by the
-`roster-doc-flake-path` check in `nix/checks/schema-drift.nix`). `mkHarness`
-also takes a `roster` argument, forwarded from the Consumer's value only
+`mkOption` in `lib/flakeModule.nix`. `mkHarness` also takes a `roster`
+argument, forwarded from the Consumer's value only
 when the Consumer sets it (`lib/flakeModule.nix`) — unlike
 `scoutPrompt`/`reviewPrompt`/`filerPrompt`/`nixBuilderImage`, which are
 declared only as `mkHarness` arguments with no flake-module path at all,
-`roster` is reachable from the flake module itself. It never appears in
-[`docs/flake-options.md`](flake-options.md) for the same settings-vs-structural
-reason given under [Option surface](#option-surface) above, not because it's
-unreachable from the flake module.
+`roster` is reachable from the flake module itself, and appears in
+[`docs/flake-options.md`](flake-options.md) with its own entry, the same as
+every other domain-tree option.
 `roster` takes a list of subagent entries, each shaped `{ name; model; mode;
 description; tools; promptFile; prompt; effort }`. It supersedes the four fixed
 `scoutModel`/`reviewModel`/`filerModel`/`workerModel` args: instead of one
