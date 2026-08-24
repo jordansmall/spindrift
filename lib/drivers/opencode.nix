@@ -120,11 +120,14 @@
   # YAML frontmatter block (description/mode/model) plus a body that seeds
   # the subagent's system prompt. Takes the same first-class roster (issue
   # #264, lib/roster.nix) as claude.nix's agentsJsonTemplate: each roster
-  # entry with a non-empty model becomes one file, so an arbitrary N-agent
-  # roster -- including a custom agent beyond the historical
-  # scout/reviewer/filer/worker set -- renders the same way; an entry with an
-  # empty model is dropped entirely (#392 semantics) rather than baking a
-  # modelless stub. The model is passed VERBATIM (never string-processed) --
+  # entry becomes one file, so an arbitrary N-agent roster -- including a
+  # custom agent beyond the historical scout/reviewer/filer/worker set --
+  # renders the same way. An entry with an empty model is dropped upstream,
+  # before this template ever runs, by rosterLib.dropOptedOut -- applied by
+  # lib/mkHarness.nix right after normalizeRoster succeeds (normalizeRoster
+  # itself never filters) -- rather than baking a modelless stub here -- so
+  # every entry this template sees is guaranteed to carry a non-empty model. The
+  # model is passed VERBATIM (never string-processed) --
   # the operator supplies the full provider-prefixed model id, matching
   # driver-exec's unprefixed `-m <model>` invocation -- but every frontmatter
   # scalar, including mode/model, is JSON-encoded (issue #2152 slice C): JSON
@@ -142,9 +145,6 @@
   # stays byte-stable for a roster that doesn't use it.
   agentFilesTemplate =
     { roster }:
-    let
-      present = lib.filter (e: (e.model or "") != "") roster;
-    in
     lib.listToAttrs (
       map (e: {
         name = ".config/opencode/agents/${e.name}.md";
@@ -158,7 +158,7 @@
           ) "reasoningEffort: ${builtins.toJSON e.effort}\n"}---
           ${e.description or ""}
         '';
-      }) present
+      }) roster
     );
 
   # opencode's CLI argv shape (ADR 0009, issue #2534): the prompt is a bare
