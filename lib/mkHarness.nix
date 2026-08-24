@@ -412,6 +412,28 @@ let
     else
       throw "mkHarness: invalid choice value(s) for ${lib.concatStringsSep "; " choiceViolations}";
 
+  # Eval-time coherence assert for the NETWORK_MODE knob (issue #2562, slice
+  # 2): network.mode and the raw per-runtime network knobs (network.podman /
+  # network.bwrapUnshare) are alternative ways to say the same thing, and
+  # there is no precedence rule between them -- a Consumer that sets both
+  # must pick one rather than have mkHarness silently choose a winner.
+  # Separately, network.mode = no-host-loopback has no bwrap rendering:
+  # bwrap can only unshare its network namespace all-or-nothing
+  # (--unshare-net), so there is no partial host-loopback-only isolation for
+  # it to express -- unlike the podman/docker/rancher OCI adapters, which
+  # render it as a network mode that keeps the container off the host
+  # network but still reachable via slirp4netns/pasta port-forwarding.
+  networkModeCoherenceOk =
+    if
+      (defaults ? networkMode)
+      && ((mergedDefaults.podmanNetwork or "" != "") || (mergedDefaults.bwrapUnshareNet or false))
+    then
+      throw "mkHarness: network.mode=${mergedDefaults.networkMode} is set together with a raw network knob (network.podman/network.bwrapUnshare) -- there is no precedence rule between them, so the Consumer must pick one"
+    else if mergedDefaults.networkMode or "open" == "no-host-loopback" && runnerKind == "bwrap" then
+      throw "mkHarness: network.mode=no-host-loopback is unsupported on runtime=bwrap -- bwrap can only unshare its network namespace all-or-nothing (--unshare-net), with no partial host-loopback isolation; use runtime=podman/docker/rancher instead, or network.mode=none/open on bwrap"
+    else
+      true;
+
   # Whether either backend knob selects forgejo (issue #1963): drives
   # lib/image.nix's fj (forgejo-cli) bake, so a github-backend Consumer's
   # image never carries an unused CLI.
@@ -1424,6 +1446,7 @@ else
   assert forbiddenMarkerCheckOk;
   assert repoSlugCoherenceOk;
   assert choicesCheckOk;
+  assert networkModeCoherenceOk;
   assert readOnlyCapabilityOk;
   assert jiraStatusMappingOk;
   lib.warnIf (legacyKnobsSet != [ ]) deprecationMsg {
