@@ -788,7 +788,7 @@ in
             "WebFetch"
           ];
           promptFile = "auditor-prompt.md";
-          prompt = null;
+          prompt = "You are the auditor. Review the diff.";
         }
       ];
       consumer106 =
@@ -873,6 +873,44 @@ in
     assert assertMsg (fromFlakeRoster == directRoster)
       "flake.nix's flake.lib.rosterLib export (issue #2560 AC4) must resolve to the exact same lib/roster.nix, byte-identical output for the same byName input, got flake export=${builtins.toJSON fromFlakeRoster} vs direct import=${builtins.toJSON directRoster}";
     pkgs.runCommand "flake-lib-rosterlib-reachable" { } "touch $out";
+
+  # Non-blocking review finding on flake.nix's flake.lib.rosterLib export
+  # (issue #2560): lib/roster.nix's `normalizeRosterResult` is internal
+  # test-support machinery for nix/checks/roster.nix's own assertions, not a
+  # documented Consumer-facing function like `normalizeRoster`/
+  # `dropOptedOut`/`defaultRoster` (see docs/reference.md). It must not leak
+  # onto the versioned `flake.lib.rosterLib` output surface where a Consumer
+  # could start depending on it.
+  flake-lib-rosterlib-excludes-normalize-roster-result =
+    let
+      inherit (pkgs.lib) assertMsg;
+      flakeOutputs = (import ../../flake.nix).outputs {
+        self = {
+          outPath = ../../.;
+        };
+        inherit flake-parts nixpkgs;
+        caveman = {
+          outPath = ../../.;
+        };
+        matt-skills = {
+          outPath = ../../.;
+        };
+        jordan-skills = {
+          outPath = ../../.;
+        };
+      };
+      rosterLibFromFlake = flakeOutputs.lib.rosterLib { inherit (pkgs) lib; };
+    in
+    assert assertMsg (!(rosterLibFromFlake ? normalizeRosterResult))
+      "flake.nix's flake.lib.rosterLib export must NOT expose lib/roster.nix's internal normalizeRosterResult test-support helper, got attrs=${builtins.toJSON (builtins.attrNames rosterLibFromFlake)}";
+    assert assertMsg
+      (
+        rosterLibFromFlake ? normalizeRoster
+        && rosterLibFromFlake ? dropOptedOut
+        && rosterLibFromFlake ? defaultRoster
+      )
+      "flake.nix's flake.lib.rosterLib export must still expose normalizeRoster, dropOptedOut, and defaultRoster, got attrs=${builtins.toJSON (builtins.attrNames rosterLibFromFlake)}";
+    pkgs.runCommand "flake-lib-rosterlib-excludes-normalize-roster-result" { } "touch $out";
 
   # Issue #2560: the name-keyed `byName` shorthand reaches mkHarness via its
   # new domain-tree path `agents.models.byName`, byte-identical to a direct
@@ -1608,19 +1646,41 @@ in
       "mkHarness's internals attrset must carry exactly ${builtins.toJSON expected}, got: ${builtins.toJSON actual}";
     pkgs.runCommand "mkharness-internals-keys-scoped" { } "touch $out";
 
-  # A custom roster entry (the AC4 path) omitting both `promptFile` and
-  # `prompt` must degrade gracefully -- not throw a cryptic missing-attribute
-  # eval error. mkHarness routes every roster (explicit or default) through
-  # `rosterLib.normalizeRoster` (issue #2152 slice B) before anything reads
-  # `promptFile`, so by the time agentsPromptFilesJson/customRosterPromptFiles
-  # run their now-unconditional `e.promptFile` reads, every entry already
-  # carries one -- normalizeRoster's own default-injection is pinned
-  # separately in nix/checks/roster.nix. Forcing `.spindrift` to a string
-  # realizes the whole image-input graph, including the roster-derived JSON
-  # map, so a regression reintroducing a bare unnormalized `e.promptFile`/
-  # `e.prompt` read would throw here.
-  mkharness-roster-custom-entry-missing-prompt-fields =
+  # A plain default mkHarness call (no `byName` overrides, `minimalDirect`
+  # fixture) resolves `defaultRoster`'s built-in `filer` entry with
+  # `model = ""` (`rosterDefaults.filer`, lib/roster-schema-defaults.nix) --
+  # the #392 opt-out sentinel -- and `dropOptedOut` (lib/roster.nix), which
+  # now runs unconditionally in lib/mkHarness.nix ahead of every downstream
+  # consumer of `internals.roster`, drops it before that output is ever
+  # exposed. A default roster therefore bakes 3 agents (scout/reviewer/
+  # worker), not 4, and `filer` never appears in it -- pinned here so a
+  # future change to either dropOptedOut's placement or filerModel's default
+  # can't silently regress this further without failing a check (issue
+  # #2571 review; see MIGRATING.md).
+  mkharness-default-roster-drops-filer =
     let
+      inherit (pkgs.lib) assertMsg;
+      names = map (e: e.name) minimalDirect.internals.roster;
+    in
+    assert assertMsg (builtins.length names == 3)
+      "a plain default mkHarness call's internals.roster must have exactly 3 entries (filer opted out by default), got ${builtins.toJSON names}";
+    assert assertMsg (!(builtins.elem "filer" names))
+      "a plain default mkHarness call's internals.roster must not include filer (model = \"\" opt-out, issue #392)";
+    pkgs.runCommand "mkharness-default-roster-drops-filer" { } "touch $out";
+
+  # A custom roster entry (the AC4 path) omitting both `promptFile` and
+  # `prompt` must now THROW at eval time -- issue #2571 made
+  # `rosterLib.normalizeRoster` (lib/roster.nix) strict: a `promptFile` must
+  # resolve to a real on-disk file under templates/default/prompts/, or the
+  # entry must carry a non-null inline `prompt`. Neither holds here, so a
+  # Consumer who supplies a custom agent with no resolvable prompt gets a
+  # clear eval-time error instead of an agent silently running with no
+  # prompt -- issue #2555 user story 23 ("a misspelled or missing roster
+  # prompt file [should] fail at eval"). This supersedes the old #264
+  # "degrade gracefully" behavior this check used to pin.
+  mkharness-roster-custom-entry-missing-prompt-fields-throws =
+    let
+      inherit (pkgs.lib) assertMsg;
       minimalRoster = [
         {
           name = "auditor";
@@ -1637,15 +1697,17 @@ in
       };
       result = builtins.tryEval (builtins.toString direct.spindrift);
     in
-    assert pkgs.lib.assertMsg result.success
-      "mkHarness must not throw when a custom roster entry omits promptFile/prompt (issue #264 review finding)";
-    pkgs.runCommand "mkharness-roster-custom-entry-missing-prompt-fields" { } "touch $out";
+    assert assertMsg (!result.success)
+      "mkHarness must throw when a custom roster entry omits both promptFile and prompt (issue #2571, #2555 user story 23)";
+    pkgs.runCommand "mkharness-roster-custom-entry-missing-prompt-fields-throws" { } "touch $out";
 
   # The other AC4 shape: a custom roster entry carrying an inline `prompt` but
-  # NO `promptFile`. Unlike the missing-both case above (dropped by
-  # customRosterPromptFiles' `prompt != null` filter, so its bake line never
-  # runs), this entry survives the filter and IS baked -- exercising the one
-  # code path customRosterPromptFiles exists to serve. `resolvedRoster` is
+  # NO `promptFile`. Unlike the missing-both case above (which now throws in
+  # `normalizeRoster` itself, at eval time, before `finalRoster` -- and so
+  # `customRosterPromptFiles`, which is derived from it -- is ever computed),
+  # this entry passes validation and survives customRosterPromptFiles'
+  # `prompt != null` filter, so it IS baked -- exercising the one code path
+  # customRosterPromptFiles exists to serve. `resolvedRoster` is
   # normalized before customRosterPromptFiles is derived from it (issue #2152
   # slice B), so the entry's `promptFile` is already "auditor-prompt.md" by
   # the time the bake `cp` reads it unconditionally; a regression that read
@@ -1784,7 +1846,9 @@ in
         byName = testByName;
       };
       rosterLib = import ../../lib/roster.nix { inherit (pkgs) lib; };
-      expected = rosterLib.normalizeRoster (rosterLib.defaultRoster { byName = testByName; });
+      expected = rosterLib.dropOptedOut (
+        rosterLib.normalizeRoster (rosterLib.defaultRoster { byName = testByName; })
+      );
     in
     assert pkgs.lib.assertMsg (direct.internals.roster == expected)
       "mkHarness's resolvedRoster must forward `byName` into rosterLib.defaultRoster unchanged (lib/mkHarness.nix's `inherit byName;`), got: ${builtins.toJSON direct.internals.roster} vs expected ${builtins.toJSON expected}";
