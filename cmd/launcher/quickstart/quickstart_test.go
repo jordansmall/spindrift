@@ -1854,6 +1854,19 @@ func TestRender_ForgejoCodeberg_ConfiguresBothSeamsOmitsDefaultBaseURL(t *testin
 	}
 }
 
+// flakeNixFor extracts the flake.nix scaffoldFile's content from a rendered
+// scaffold, failing the test if render() didn't emit one.
+func flakeNixFor(t *testing.T, files []scaffoldFile) string {
+	t.Helper()
+	for _, f := range files {
+		if f.path == "flake.nix" {
+			return f.content
+		}
+	}
+	t.Fatalf("expected flake.nix among rendered files, got: %v", files)
+	return ""
+}
+
 func TestRender_ForgejoSelfHosted_EmitsBaseURL(t *testing.T) {
 	a := answers{
 		repoSlug:         "owner/repo",
@@ -1866,16 +1879,67 @@ func TestRender_ForgejoSelfHosted_EmitsBaseURL(t *testing.T) {
 	}
 
 	files := render(a)
-
-	var flakeNix string
-	for _, f := range files {
-		if f.path == "flake.nix" {
-			flakeNix = f.content
-		}
-	}
+	flakeNix := flakeNixFor(t, files)
 
 	if !strings.Contains(flakeNix, `issues.forgejo.baseURL = "https://git.example.com"`) {
 		t.Errorf("expected flake.nix to contain the self-hosted forgejo baseURL, got:\n%s", flakeNix)
+	}
+}
+
+// TestRender_Github_Golden byte-compares renderFlakeNix's output for a fixed
+// github-tracker answers fixture against a committed golden file. This same
+// golden is also nix-evaluated against the real spindrift flake module by
+// nix/checks/quickstart-golden.nix, which imports this identical file
+// directly (no separate copy), so the fixture values here must stay in sync
+// with what that check expects to evaluate cleanly.
+func TestRender_Github_Golden(t *testing.T) {
+	a := answers{
+		repoSlug:         "jordansmall/spindrift-consumer-example",
+		runtime:          "podman",
+		gitUserName:      "Ada Lovelace",
+		gitUserEmail:     "ada@example.com",
+		tracker:          trackerSettings{issueTracker: "github"},
+		token:            "ghp_faketoken",
+		claudeOAuthToken: "claude-oauth-faketoken",
+	}
+
+	files := render(a)
+	flakeNix := flakeNixFor(t, files)
+
+	want, err := os.ReadFile("testdata/golden/github/flake.nix")
+	if err != nil {
+		t.Fatalf("reading golden file: %v", err)
+	}
+
+	if flakeNix != string(want) {
+		t.Errorf("flake.nix does not match testdata/golden/github/flake.nix\n--- got ---\n%s\n--- want ---\n%s", flakeNix, want)
+	}
+}
+
+// TestRender_Forgejo_Golden is TestRender_Github_Golden's forgejo twin: a
+// self-hosted forgejoBaseURL (not the codeberg default) so the golden
+// exercises the issues.forgejo.baseURL line too.
+func TestRender_Forgejo_Golden(t *testing.T) {
+	a := answers{
+		repoSlug:         "jordansmall/spindrift-consumer-example",
+		runtime:          "podman",
+		gitUserName:      "Ada Lovelace",
+		gitUserEmail:     "ada@example.com",
+		tracker:          trackerSettings{issueTracker: "forgejo", forgejoBaseURL: "https://git.example.com"},
+		token:            "forgejo-faketoken",
+		claudeOAuthToken: "claude-oauth-faketoken",
+	}
+
+	files := render(a)
+	flakeNix := flakeNixFor(t, files)
+
+	want, err := os.ReadFile("testdata/golden/forgejo/flake.nix")
+	if err != nil {
+		t.Fatalf("reading golden file: %v", err)
+	}
+
+	if flakeNix != string(want) {
+		t.Errorf("flake.nix does not match testdata/golden/forgejo/flake.nix\n--- got ---\n%s\n--- want ---\n%s", flakeNix, want)
 	}
 }
 
@@ -1943,12 +2007,7 @@ func TestRender_NixSpecialChars_AreEscaped(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			files := render(tc.mutate(base))
-			var flakeNix string
-			for _, f := range files {
-				if f.path == "flake.nix" {
-					flakeNix = f.content
-				}
-			}
+			flakeNix := flakeNixFor(t, files)
 			if strings.Contains(flakeNix, tc.wantRaw) {
 				t.Errorf("expected flake.nix not to contain unescaped %q, got:\n%s", tc.wantRaw, flakeNix)
 			}
