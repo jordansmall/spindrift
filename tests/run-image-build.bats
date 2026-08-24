@@ -67,7 +67,7 @@ setup() {
   export FAKE_PODMAN_IMAGE_PRESENT=1
   run "$RUN_CMD"
   [ "$status" -eq 0 ]
-  [ "$(grep -c '^run ' "$PODMAN_LOG")" -eq 2 ]
+  wait_for_log_lines "$PODMAN_LOG" '^run ' 2
   grep -q 'ISSUE_NUMBER=1' "$PODMAN_LOG"
   grep -q 'ISSUE_NUMBER=2' "$PODMAN_LOG"
 }
