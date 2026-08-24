@@ -37,6 +37,22 @@
     fragment = "caveman-default.md";
     var = "CAVEMAN_STEP";
   }
+  # The worker-role variant of the row above (issue #2706): worker-prompt.md
+  # is structurally quarantined from the outcome/verdict marker grammar
+  # (lib/prompt-contract.nix's workerForbiddenMarkers) -- a worker never
+  # emits SPINDRIFT_OUTCOME/VERDICT: APPROVE/VERDICT: BLOCK/SPINDRIFT_PR_INTENT
+  # by design, so caveman-default.md's marker-grammar-is-exempt-too prose
+  # (which names those markers verbatim) would leak literal forbidden-marker
+  # strings into the rendered worker prompt if reused as-is. This fragment
+  # keeps only the `/caveman` default directive and the code/commands/
+  # error-messages/commit-messages exemption paragraph; same CAVEMAN_BAKED
+  # gate, since a worker dispatch only exists when the same caveman skill is
+  # baked.
+  {
+    gate = "CAVEMAN_BAKED";
+    fragment = "caveman-default-worker.md";
+    var = "CAVEMAN_STEP_WORKER";
+  }
   {
     gate = "TDD_BAKED";
     fragment = "tdd-default.md";

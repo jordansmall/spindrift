@@ -400,13 +400,18 @@ for the three cases.
 
 The caveman-default step is keyed on the baked skill itself rather than a
 separate knob: whenever `DRIVER_SKILLS_DIR/caveman/SKILL.md` is present at
-runtime, both the issue pass and the fix pass (via the shared COMMS block,
-see below) direct the agent to use `/caveman` for narration and prose,
-exempting code, commands, error messages, and commit messages, plus the
-machine-parsed marker grammar (the `SPINDRIFT_OUTCOME` line and its `note=`
-field, the `VERDICT:` line, and host-relay signal lines like
-`SPINDRIFT_PR_INTENT`) — see `fragments/caveman-default.md`. A Consumer
-that never bakes the skill gets a prompt with zero mention of it.
+runtime, the issue pass and the fix pass (via the shared COMMS block, see
+below), the scout prompt, and both conflict-resolve prompts direct the agent
+to use `/caveman` for narration and prose, exempting code, commands, error
+messages, and commit messages, plus the machine-parsed marker grammar (the
+`SPINDRIFT_OUTCOME` line and its `note=` field, the `VERDICT:` line, and
+host-relay signal lines like `SPINDRIFT_PR_INTENT`) — see
+`fragments/caveman-default.md`. The worker prompt carries the same directive
+minus that marker-grammar paragraph (`fragments/caveman-default-worker.md`):
+the worker role is structurally forbidden from ever emitting that grammar
+(issue #2059/#2491 quarantine), so naming those markers in its own
+rendered prompt would trip that contract. A Consumer that never bakes the
+skill gets a prompt with zero mention of it.
 
 A fix box (dispatched when CI comes back red — see [Runtime flow](#how-a-run-works))
 receives `FIX_PASS` and runs `prompts/fix-prompt.md` instead: the branch is
