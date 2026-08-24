@@ -28,4 +28,6 @@ var TriageLabelMeta = map[string]LabelMeta{
 	"agent-priority-low":      LabelMeta{Description: "Dispatch behind normal-priority issues", Color: "8a9ba8"},
 
 	"agent-ambiguous-spec": LabelMeta{Description: "An internally-contradictory issue; needs a human decision — not a crash", Color: "e0cffc"},
+
+	"agent-research-finding": LabelMeta{Description: "Filed from a research finding", Color: "c5def5"},
 }
