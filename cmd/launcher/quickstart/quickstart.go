@@ -256,6 +256,12 @@ func buildForge(repoSlug string, tracker trackerSettings, token string) (forge.I
 	}
 }
 
+// backupSuffixDigits is the zero-padded width of the numbered .bak.NNNNNN
+// suffix quickstart uses when a backup name is already taken (issue #2563) —
+// wide enough that lexical sort order (`ls`) still matches numeric order
+// past any realistic number of forced reruns.
+const backupSuffixDigits = 6
+
 // runQuickstart drives the wizard end-to-end: it takes injected I/O, a
 // target directory to write the scaffold into, and the Environment/
 // CommandRunner/ForgeBuilder seams (mirrors runDoctor's testability).
@@ -432,10 +438,23 @@ func runQuickstart(dir string, env Environment, cmdRunner CommandRunner, forgeBu
 	// existing file renamed away with nothing written to replace it.
 	for _, name := range clobbered {
 		path := filepath.Join(dir, name)
-		if err := os.Rename(path, path+".bak"); err != nil {
+		bakPath := path + ".bak"
+		for n := 1; ; n++ {
+			f, err := os.OpenFile(bakPath, os.O_CREATE|os.O_EXCL, 0o644)
+			if err == nil {
+				f.Close()
+				break
+			}
+			if !os.IsExist(err) {
+				return fmt.Errorf("back up %s: %w", name, err)
+			}
+			bakPath = fmt.Sprintf("%s.bak.%0*d", path, backupSuffixDigits, n)
+		}
+		if err := os.Rename(path, bakPath); err != nil {
+			_ = os.Remove(bakPath)
 			return fmt.Errorf("back up %s: %w", name, err)
 		}
-		fmt.Fprintf(w, "backed up: %s -> %s.bak\n", name, name)
+		fmt.Fprintf(w, "backed up: %s -> %s\n", name, filepath.Base(bakPath))
 	}
 
 	for _, f := range render(a) {
@@ -614,6 +633,11 @@ result-*
 
 # local config + secrets — never commit this
 harness.env
+harness.env.bak*
+
+# throwaway backups from --force reruns — flake.nix itself is meant to be
+# committed, but its numbered .bak copies are not
+flake.nix.bak*
 
 # direnv
 .direnv/

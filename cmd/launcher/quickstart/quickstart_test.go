@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -1197,6 +1198,220 @@ func TestRunQuickstart_Force_BacksUpExistingFiles(t *testing.T) {
 	}
 	if !strings.Contains(string(newFlake), "jordansmall/spindrift") {
 		t.Errorf("expected regenerated flake.nix to contain the new repoSlug, got:\n%s", newFlake)
+	}
+}
+
+func TestQuickstartGitignore_IgnoresHarnessEnvBackups(t *testing.T) {
+	found := false
+	for _, line := range strings.Split(quickstartGitignore, "\n") {
+		if line == "harness.env.bak*" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected quickstartGitignore to contain the exact line %q to cover harness.env.bak and harness.env.bak.NNN backups, got:\n%s", "harness.env.bak*", quickstartGitignore)
+	}
+}
+
+func TestQuickstartGitignore_IgnoresFlakeNixBackups(t *testing.T) {
+	found := false
+	for _, line := range strings.Split(quickstartGitignore, "\n") {
+		if line == "flake.nix.bak*" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected quickstartGitignore to contain the exact line %q to cover flake.nix.bak and flake.nix.bak.NNN backups, got:\n%s", "flake.nix.bak*", quickstartGitignore)
+	}
+}
+
+// defaultQuickstartStdin returns the canned interactive-prompt answers
+// (repoSlug, runtime, git name/email, token) shared by the three post-write
+// failure/backup tests (issue #2563).
+func defaultQuickstartStdin() *strings.Reader {
+	return strings.NewReader(strings.Join([]string{
+		"jordansmall/spindrift",
+		"podman",
+		"Ada Lovelace",
+		"ada@example.com",
+		"ghp_faketoken",
+	}, "\n") + "\n")
+}
+
+func TestRunQuickstart_Force_BackupReserveNonIsExistErr_ReturnsErrorInsteadOfHanging(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("running as root bypasses permission checks")
+	}
+
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "flake.nix"), []byte("old flake"), 0o644); err != nil {
+		t.Fatalf("seed flake.nix: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "harness.env"), []byte("old harness"), 0o644); err != nil {
+		t.Fatalf("seed harness.env: %v", err)
+	}
+
+	// Remove write permission on dir so the backup-name reservation
+	// (os.OpenFile with O_CREATE|O_EXCL) fails with EACCES rather than
+	// "already exists" — the loop must surface that error instead of
+	// spinning forever treating every non-ENOENT stat as "name taken".
+	if err := os.Chmod(dir, 0o500); err != nil {
+		t.Fatalf("chmod dir: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chmod(dir, 0o755); err != nil {
+			t.Fatalf("restore dir perms: %v", err)
+		}
+	})
+
+	var out bytes.Buffer
+	stdin := defaultQuickstartStdin()
+	env := fakeEnvironment{env: map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "claude-oauth-faketoken"}, runtimes: map[string]bool{"podman": true}}
+
+	err := runQuickstart(dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, true)
+	if err == nil {
+		t.Fatalf("expected runQuickstart to return an error, got nil")
+	}
+	if !strings.Contains(err.Error(), "back up") {
+		t.Errorf("expected error to mention backing up the file, got: %v", err)
+	}
+}
+
+func TestRunQuickstart_Force_BackupRenameErr_CleansUpReservedBakFile(t *testing.T) {
+	dir := t.TempDir()
+
+	// Seed flake.nix as a directory rather than a regular file. The clobber
+	// check only stats the path, so this directory still counts as
+	// "existing" and gets queued for backup. The backup-name reservation
+	// (os.OpenFile with O_CREATE|O_EXCL against flake.nix.bak) then
+	// succeeds, since that name doesn't exist yet — but the follow-up
+	// os.Rename from a directory onto that freshly reserved, non-directory
+	// bak file fails with ENOTDIR. That reproduces the "reservation
+	// succeeded, rename failed" path without needing any filesystem
+	// abstraction seam: the reserved, empty flake.nix.bak must not be left
+	// behind afterward.
+	if err := os.Mkdir(filepath.Join(dir, "flake.nix"), 0o755); err != nil {
+		t.Fatalf("seed flake.nix as a directory: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "harness.env"), []byte("old harness"), 0o644); err != nil {
+		t.Fatalf("seed harness.env: %v", err)
+	}
+
+	var out bytes.Buffer
+	stdin := defaultQuickstartStdin()
+	env := fakeEnvironment{env: map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "claude-oauth-faketoken"}, runtimes: map[string]bool{"podman": true}}
+
+	err := runQuickstart(dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, true)
+	if err == nil {
+		t.Fatalf("expected runQuickstart to return an error, got nil")
+	}
+	if !strings.Contains(err.Error(), "back up flake.nix") {
+		t.Errorf("expected error to mention failing to back up flake.nix, got: %v", err)
+	}
+
+	if _, statErr := os.Stat(filepath.Join(dir, "flake.nix.bak")); !os.IsNotExist(statErr) {
+		t.Errorf("expected the reserved flake.nix.bak to be removed after the failed rename instead of leaking a zero-byte file, stat error: %v", statErr)
+	}
+}
+
+func TestRunQuickstart_Force_SecondRun_PreservesBothBackups(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "flake.nix"), []byte("v1 flake"), 0o644); err != nil {
+		t.Fatalf("seed flake.nix: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "harness.env"), []byte("v1 harness"), 0o644); err != nil {
+		t.Fatalf("seed harness.env: %v", err)
+	}
+
+	runOnce := func() *bytes.Buffer {
+		var out bytes.Buffer
+		stdin := defaultQuickstartStdin()
+		env := fakeEnvironment{env: map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "claude-oauth-faketoken"}, runtimes: map[string]bool{"podman": true}}
+		if err := runQuickstart(dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, true); err != nil {
+			t.Fatalf("runQuickstart: %v", err)
+		}
+		return &out
+	}
+
+	// First forced run: flake.nix/harness.env exist with "v1" content, so
+	// they get backed up before regeneration.
+	runOnce()
+
+	// Simulate a second run's worth of pre-existing files by writing "v2"
+	// content back into place.
+	if err := os.WriteFile(filepath.Join(dir, "flake.nix"), []byte("v2 flake"), 0o644); err != nil {
+		t.Fatalf("reseed flake.nix: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "harness.env"), []byte("v2 harness"), 0o644); err != nil {
+		t.Fatalf("reseed harness.env: %v", err)
+	}
+
+	// Second forced run: must not clobber the first run's backups.
+	secondOut := runOnce()
+
+	if !strings.Contains(secondOut.String(), "backed up: flake.nix -> flake.nix.bak.000001\n") {
+		t.Errorf("expected second run's transcript to contain the flake.nix.bak.000001 backup line, got:\n%s", secondOut.String())
+	}
+	if !strings.Contains(secondOut.String(), "backed up: harness.env -> harness.env.bak.000001\n") {
+		t.Errorf("expected second run's transcript to contain the harness.env.bak.000001 backup line, got:\n%s", secondOut.String())
+	}
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("read dir: %v", err)
+	}
+	var flakeBackups, harnessBackups []string
+	for _, e := range entries {
+		name := e.Name()
+		switch {
+		case strings.HasPrefix(name, "flake.nix.bak"):
+			flakeBackups = append(flakeBackups, name)
+		case strings.HasPrefix(name, "harness.env.bak"):
+			harnessBackups = append(harnessBackups, name)
+		}
+	}
+
+	if len(flakeBackups) != 2 {
+		t.Fatalf("expected 2 flake.nix backups after two forced runs, got %v", flakeBackups)
+	}
+	if len(harnessBackups) != 2 {
+		t.Fatalf("expected 2 harness.env backups after two forced runs, got %v", harnessBackups)
+	}
+	if !slices.Contains(flakeBackups, "flake.nix.bak") || !slices.Contains(flakeBackups, "flake.nix.bak.000001") {
+		t.Errorf("expected flake.nix backups named exactly flake.nix.bak and flake.nix.bak.000001, got %v", flakeBackups)
+	}
+	if !slices.Contains(harnessBackups, "harness.env.bak") || !slices.Contains(harnessBackups, "harness.env.bak.000001") {
+		t.Errorf("expected harness.env backups named exactly harness.env.bak and harness.env.bak.000001, got %v", harnessBackups)
+	}
+
+	readContents := func(names []string) []string {
+		var contents []string
+		for _, name := range names {
+			b, err := os.ReadFile(filepath.Join(dir, name))
+			if err != nil {
+				t.Fatalf("read %s: %v", name, err)
+			}
+			contents = append(contents, string(b))
+		}
+		return contents
+	}
+
+	flakeContents := readContents(flakeBackups)
+	if !slices.Contains(flakeContents, "v1 flake") {
+		t.Errorf("expected one flake.nix backup to hold the first run's content %q, got backups %v with contents %v", "v1 flake", flakeBackups, flakeContents)
+	}
+	if !slices.Contains(flakeContents, "v2 flake") {
+		t.Errorf("expected one flake.nix backup to hold the second run's content %q, got backups %v with contents %v", "v2 flake", flakeBackups, flakeContents)
+	}
+
+	harnessContents := readContents(harnessBackups)
+	if !slices.Contains(harnessContents, "v1 harness") {
+		t.Errorf("expected one harness.env backup to hold the first run's content %q, got backups %v with contents %v", "v1 harness", harnessBackups, harnessContents)
+	}
+	if !slices.Contains(harnessContents, "v2 harness") {
+		t.Errorf("expected one harness.env backup to hold the second run's content %q, got backups %v with contents %v", "v2 harness", harnessBackups, harnessContents)
 	}
 }
 
