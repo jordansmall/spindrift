@@ -935,13 +935,14 @@ in
   # non-empty list of strings, and a knob's `default` (if any) must be a
   # member of its own `choices` — a knob completing values it can never
   # legally hold would silently mislead a user tab-completing it. Also pins
-  # the exact value set for all seven choice-knobs the issue names by name —
+  # the exact value set for all eight choice-knobs the issue names by name —
   # mergeMode, codeForge, issueTracker, overlapGate, mergeMethod, syncMethod,
-  # boxForgeAndIssueAccess — so a typo or dropped value fails here instead of
-  # silently narrowing/widening what `spindrift --merge-mode <TAB>` etc. offer.
+  # boxForgeAndIssueAccess, networkMode — so a typo or dropped value fails
+  # here instead of silently narrowing/widening what `spindrift --merge-mode
+  # <TAB>` etc. offer.
   # Also asserts the *set* of choices-bearing knob names itself (issue #2519)
-  # — the seven per-knob asserts below only fire for a knob already listed
-  # here by name, so an added eighth knob declaring `choices` would otherwise
+  # — the eight per-knob asserts below only fire for a knob already listed
+  # here by name, so an added ninth knob declaring `choices` would otherwise
   # go unpinned silently. Derives the actual set the same way
   # flake-nixpath-exhaustive-disjoint derives flakeOptionNames above, from
   # the schema itself rather than a second hand-typed list.
@@ -964,6 +965,7 @@ in
         "mergeMethod"
         "syncMethod"
         "boxForgeAndIssueAccess"
+        "networkMode"
       ];
     in
     assert assertMsg (choiceKnobNames == expectedChoiceKnobNames)
@@ -1016,12 +1018,19 @@ in
         "read-only"
       ]
     ) "lib/env-schema.nix: boxForgeAndIssueAccess.choices must be [ read-write read-only ]";
+    assert assertMsg (
+      schema.networkMode.choices or [ ] == [
+        "open"
+        "no-host-loopback"
+        "none"
+      ]
+    ) "lib/env-schema.nix: networkMode.choices must be [ open no-host-loopback none ]";
     pkgs.runCommand "schema-choices" { } "touch $out";
 
   # Regression guard (issue #2519): the choices-bearing knob-set assertion
   # above must actually detect an added/renamed choices-bearing knob, not
   # just pass vacuously because the real schema currently has exactly the
-  # seven pinned names. Injects an eighth synthetic knob declaring `choices`
+  # eight pinned names. Injects a ninth synthetic knob declaring `choices`
   # into a copy of the real schema and asserts, via tryEval, that
   # schema-choices' own set-equality check (reimplemented here against the
   # injected schema, the same way schema-secret-choices-guard reruns
@@ -1055,6 +1064,7 @@ in
         "mergeMethod"
         "syncMethod"
         "boxForgeAndIssueAccess"
+        "networkMode"
       ];
       result = builtins.tryEval (
         assert choiceKnobNames == expectedChoiceKnobNames;
@@ -1062,7 +1072,7 @@ in
       );
     in
     assert assertMsg (!result.success)
-      "schema-choices-knobset-guard: expected the choices-bearing knob-set assertion to reject a schema with an injected eighth choices knob (extraChoiceKnob), but it evaluated successfully";
+      "schema-choices-knobset-guard: expected the choices-bearing knob-set assertion to reject a schema with an injected ninth choices knob (extraChoiceKnob), but it evaluated successfully";
     pkgs.runCommand "schema-choices-knobset-guard" { } "touch $out";
 
   # Regression guard (issue #872): lib/renderers.nix's bash/fish/zsh

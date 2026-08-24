@@ -53,6 +53,7 @@ type schemaConfig struct {
 	mergePollInterval            int
 	mergePollTimeout             int
 	model                        string
+	networkMode                  string
 	opencodeAuthContent          string
 	overlapGate                  string
 	pidsLimit                    string
@@ -116,6 +117,7 @@ func loadSchemaConfig() schemaConfig {
 		mergePollInterval:      atoiNonnegSchema("MERGE_POLL_INTERVAL"),
 		mergePollTimeout:       atoiNonnegSchema("MERGE_POLL_TIMEOUT"),
 		model:                  getenvSchema("MODEL"),
+		networkMode:            getenvSchema("NETWORK_MODE"),
 		opencodeAuthContent:    os.Getenv("OPENCODE_AUTH_CONTENT"),
 		overlapGate:            getenvSchema("OVERLAP_GATE"),
 		pidsLimit:              getenvSchema("PIDS_LIMIT"),
