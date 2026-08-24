@@ -105,6 +105,7 @@ lives under the out-of-contract `internals` attrset (see [Calling
 | `extraClosures` | shared     | `pkgs -> [pkg]`         | `[]`               | extra derivations, as a function of the (Linux) `pkgs` (like `packages`), whose closures are baked into the image and registered in the store DB alongside the runtime closure, so in-box nix sees them as already present (ADR 0018) |
 | `nixBuilderImage` | **`mkHarness` only** | string        | `"docker.io/nixos/nix@sha256:bf1d938835ab96312f098fa6c2e9cab367728e0aad0646ee3e02a787c80d8fb8"` (pinned reference — the real default lives in `lib/build-constants.nix`) | Nix image `spindrift build` uses as a fallback Linux builder when the host can't realize the image; pinned by digest for supply-chain safety (see [Building on macOS](#building-on-macos)) |
 | `roster`    | shared         | list of subagent-entry attrs | `lib/roster.nix`'s `defaultRoster` | supersedes the four legacy model knobs; see [Subagent roster](#subagent-roster) |
+| `byName`    | shared         | attrset of `{ model?; effort?; }` keyed by roster entry name | `{}` (this row is the `mkHarness` parameter; the flake option, `agents.models.byName`, defaults to `null`) | name-keyed model/effort shorthand (issue #2560), forwarded into `defaultRoster`; only takes effect when `roster` is unset; no flat `perSystem.spindrift.byName` alias — see the standalone-domain-tree-leaf note below and [Subagent roster](#subagent-roster) |
 
 Every knob settable on `perSystem.spindrift.*` — schema-generated run
 default or hand-declared structural option alike — is a first-class option
@@ -118,7 +119,11 @@ optional `nixSubPath` (`lib/nixpath.nix`); a structural knob (`roster`,
 `skills`, `packages`, `prefetch`, `driver`, `prompt`, `extraClosures`,
 `runtime`, and the rest of `lib/structural-paths.nix`) is placed by the
 small hand-written map in `lib/structural-paths.nix` (imported by
-`lib/flakeModule.nix`). Either way the flake surface
+`lib/flakeModule.nix`); `byName` (`agents.models.byName`, issue #2560) is a
+third case, its own standalone domain-tree leaf declared directly in
+`lib/flakeModule.nix` rather than through either the schema `group`
+mechanism or `lib/structural-paths.nix` (it has no legacy flat spelling to
+migrate from, so it needs neither). Whichever way it's placed, the flake surface
 bakes run knobs into the Launcher input document the `spindrift` CLI passes
 to the launcher binary via `--input`; an explicit `--flag` at dispatch time
 re-points a value without a rebuild. Domain names are the same headings as
@@ -271,6 +276,45 @@ schema default, when more than one is set for the same name — since
 behavior for an unmentioned name must switch to explicit
 `models.<name> = ""`.
 
+`agents.models.byName` (issue #2560) is the versioned, Consumer-facing flake
+option for the same name-keyed override `models` gives `defaultRoster`
+callers directly:
+
+```nix
+perSystem.spindrift.agents.models.byName = {
+  filer = {
+    model = "claude-haiku-4-5-20251001";
+    effort = "high";
+  };
+};
+```
+
+a three-line flake edit, no deprecation warning (unlike the legacy
+`scoutModel`/`reviewModel`/`filerModel`/`workerModel` knobs documented later
+in this same section). Each key must name a roster entry
+(scout/reviewer/filer/worker); each value is a *closed* `{ model?; effort?;
+}` attrset — any other field (and any unknown key) fails eval.
+`mode`/`tools`/`prompt` stay roster-only (only reachable by hand-authoring a
+full `roster` list), keeping this a shorthand, not a parallel roster
+surface. It also carries `effort`, unlike the older `models` argument, which
+is model-only. An explicit `roster` drops `byName` before its unknown-name/
+unknown-field validation runs, the same way it drops `models` and the four
+legacy knobs — a typo'd key or field in `byName` alongside an explicit
+`roster` evaluates clean rather than throwing, since the whole shorthand is
+moot once `roster` wins. It's declared as a real domain-tree option in
+`lib/flakeModule.nix` (`byNameOption`/`byNameTreeEntries`), forwarded into
+`mkHarness`'s `byName` arg, which threads into `lib/roster.nix`'s
+`defaultRoster` the same way `agents.models.roster` threads its own
+`roster` argument in — ignored when an explicit `roster` is supplied (same
+precedence the legacy per-agent knobs already have, stated earlier in this
+section). Per name, `models.<name>` still outranks `byName.<name>.model`
+when both are set — the same precedence order `models` already has over the
+legacy per-agent knobs above. `byName.reviewer.effort` is likewise
+overridden, after the fact, by the `reviewEffort` legacy knob when that
+knob is set (`lib/mkHarness.nix` applies `reviewEffort` as a post-processing
+step on the fully resolved roster, downstream of `defaultRoster` and
+everything it produces, `byName` included).
+
 An entry with an empty (or absent) `model` is dropped from both Drivers'
 rendered config, the same per-agent omission the four legacy knobs give today
 (#392). `lib/drivers/claude.nix` renders the roster into the `--agents` JSON
@@ -285,7 +329,13 @@ Driver emits it as an `"effort"` key beside `model` in the agent's `--agents`
 JSON object; the opencode Driver emits it as a `reasoningEffort:` key beside
 `model:` in the agent's YAML frontmatter. Omitting `effort` omits the
 key/line entirely on both Drivers — the same inherit-session-effort behavior
-as today.
+as today. `byName.<name>.effort = ""` is accepted, not rejected, but is not
+an opt-out the way `models.<name> = ""`/`byName.<name>.model = ""` is: it
+still overrides `defaultRoster`'s own per-agent default effort with an
+empty string, which both Drivers then treat as "omit the key/line" the same
+as never setting `effort` at all — net effect, an explicit empty string
+silently drops that agent's differentiated default effort down to the
+target driver's inherited session effort.
 
 `defaultRoster` itself now ships a fixed default `effort` per agent (issue
 #2386), from `lib/roster-schema-defaults.nix`'s `rosterDefaults` table:
