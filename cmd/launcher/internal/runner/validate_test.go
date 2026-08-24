@@ -1,6 +1,7 @@
 package runner
 
 import (
+	"fmt"
 	"os/exec"
 	"strings"
 	"testing"
@@ -45,6 +46,31 @@ func TestValidateRuntime_RancherLooksUpNerdctl(t *testing.T) {
 	}
 	if err == nil {
 		t.Fatal("ValidateRuntime(\"rancher\") should error when nerdctl is absent from PATH")
+	}
+	if !strings.Contains(err.Error(), "nerdctl") {
+		t.Errorf("error = %q, want it to mention nerdctl", err.Error())
+	}
+	if !strings.Contains(err.Error(), "Rancher Desktop") {
+		t.Errorf("error = %q, want it to mention Rancher Desktop", err.Error())
+	}
+}
+
+// TestValidateRuntimeWithLookup_RancherLooksUpNerdctl verifies
+// ValidateRuntimeWithLookup("rancher", ...) drives the same nerdctl lookup
+// and Rancher-Desktop-flavored error message as ValidateRuntime, but through
+// an injectable lookPath func instead of the real PATH — so callers with
+// their own PATH-lookup abstraction (e.g. quickstart's Environment.LookPath)
+// can reuse this exact validation logic and message text (issue #2561).
+func TestValidateRuntimeWithLookup_RancherLooksUpNerdctl(t *testing.T) {
+	fakeLookPath := func(file string) (string, error) {
+		if file == "nerdctl" {
+			return "", fmt.Errorf("not found")
+		}
+		return "/usr/bin/" + file, nil
+	}
+	err := ValidateRuntimeWithLookup("rancher", fakeLookPath)
+	if err == nil {
+		t.Fatal("ValidateRuntimeWithLookup(\"rancher\", ...) should error when nerdctl is absent from PATH")
 	}
 	if !strings.Contains(err.Error(), "nerdctl") {
 		t.Errorf("error = %q, want it to mention nerdctl", err.Error())

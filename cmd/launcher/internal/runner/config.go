@@ -5,8 +5,9 @@ package runner
 // separately to NewOCI (a genuine per-invocation runtime dependency, not a
 // config knob).
 type Config struct {
-	// Runtime selects the sandbox mechanism: "podman", "docker", or "bwrap".
-	// For OCI adapters it also names the CLI binary.
+	// Runtime selects the sandbox mechanism — one of ValidValues ("podman",
+	// "docker", "rancher", or "bwrap"). For OCI adapters it also names the
+	// CLI binary (via BinaryFor).
 	Runtime string
 
 	// OCI image config (baked by nix wrapper; empty for bwrap).

@@ -56,7 +56,7 @@ type config struct {
 	agentEnvDrv   string // .drv path; used by `launcher build` to realize the closure
 	bakedPrefetch string
 
-	// Runtime: podman | docker | bwrap
+	// Runtime: podman | docker | rancher | bwrap (runner.ValidValues)
 	runtime string
 
 	// runnerKind selects the launcher's runner implementation: "bwrap" or
