@@ -15,6 +15,15 @@
 let
   buildConstants = import ../../lib/build-constants.nix;
 
+  # Same shard module bats.nix generates its bats-shard-N checks from
+  # (nix/checks/bats-shards.nix, issue #2648) — imported once here and
+  # threaded through `common` so bats.nix reuses this evaluation instead of
+  # each re-running the directory scan/@test count over every tests/*.bats
+  # file, and so the image-only/linux-only name lists below are generated
+  # from that one source instead of hand-duplicating the shard name list.
+  batsShards = import ./bats-shards.nix { inherit pkgs; };
+  batsShardNames = batsShards.shardNames;
+
   # The vendored module tree for cmd/launcher's external deps
   # (charmbracelet/bubbletea, issue #784), built once here so every check
   # module that needs to `go build`/`go vet`/`go test` a reconstructed
@@ -38,6 +47,7 @@ let
       system
       flake-parts
       launcherGoModules
+      batsShards
       ;
   };
   sourceChecks =
@@ -71,9 +81,9 @@ let
   # about the very box's own baked toolchain — redundant/heavy to re-run
   # *inside* the box built from that image (issue #581). Named once here;
   # `checks-inbox` below excludes them, `checks` below still carries them for
-  # CI's pre-dispatch gate.
-  imageOnlyCheckNames = [
-    "bats"
+  # CI's pre-dispatch gate. Each bats-shard-N (issue #2648) carries the same
+  # image dependency the old single `bats` derivation had.
+  imageOnlyCheckNames = batsShardNames ++ [
     "nil-baked-in-dogfood"
     "bats-baked-in-dogfood"
     "shellcheck-baked-in-dogfood"
@@ -87,9 +97,10 @@ let
   checksInboxSet = removeAttrs sourceChecks imageOnlyCheckNames;
 
   # A narrower axis than imageOnlyCheckNames: source checks whose *build*
-  # closure embeds the aarch64-linux image — `bats` pulls it in through
-  # batsHarness.internals.run/build and
-  # skillsBwrapHarness.internals.agentFiles (nix/checks/bats.nix);
+  # closure embeds the aarch64-linux image — each bats-shard-N pulls it in
+  # through batsHarness.internals.run/build and
+  # skillsBwrapHarness.internals.agentFiles (nix/checks/bats.nix, issue
+  # #2648, same dependency the old single `bats` derivation had);
   # `promptassembly-parity` pulls in the same batsHarness's
   # internals.driverExecBin (nix/checks/promptassembly.nix) — mkHarness.nix
   # always re-instantiates pkgs for the Linux twin of the host system, so
@@ -104,8 +115,7 @@ let
   # still run on both Linux arches. Distinct from imageOnlyCheckNames: the
   # `*-baked-in-dogfood` asserts there build natively on darwin (hostPkgs
   # skillsDir / eval-only).
-  linuxOnlyCheckNames = [
-    "bats"
+  linuxOnlyCheckNames = batsShardNames ++ [
     "promptassembly-parity"
     "bats-outcome-opencode"
     "bats-prompt-contract-parity"
