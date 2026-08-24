@@ -12,11 +12,16 @@
 # workflows, but neither stops a Go source file or a Filer prompt fragment
 # from writing/creating a brand-new label literal that lib/labels.nix never
 # heard of — exactly how agent-review-finding (written by
-# cmd/launcher/internal/settle/issue_intent.go, created directly by
+# cmd/launcher/internal/settle/gate.go's fileIssueIntents(...) call,
+# created directly by
 # templates/default/prompts/fragments/filer-label-direct{,-forgejo}.md,
 # neither going through doctor.Run()) escaped the registry until this check
 # was added. label-registry-covers-harness-writes below closes that gap for
-# those three known label-writing surfaces.
+# those three known label-writing surfaces. (Issue #2590 moved the Go literal
+# out of issue_intent.go's own issueIntentLabels var — since removed — and
+# into this call site's own fourth argument, and turned the call itself from
+# a method (s.fileIssueIntents(...)) into the package-level function
+# fileIssueIntents(s.it, ...); see harnessSurfaces below.)
 { pkgs, ... }:
 let
   inherit (pkgs.lib)
@@ -197,13 +202,19 @@ let
   # position, scanned across a marker-to-terminator SPAN rather than
   # restricted to one line (a per-line restriction is exactly what let a
   # gofmt-clean reformat or a shell line-continuation go unextracted before —
-  # see the two regression checks named below):
-  #   - issue_intent.go: every quoted Go string literal between the
-  #     issueIntentLabels = []string{ marker and that declaration's closing
-  #     }, wherever the source wraps it onto multiple lines — see
-  #     label-registry-covers-harness-writes-reformat-regression below, which
-  #     reproduces the gofmt-clean multi-line var block a second label makes
-  #     inevitable.
+  # see label-registry-covers-harness-writes-fileissueintents-multiline-regression
+  # (gofmt reformat) and label-registry-covers-harness-writes-continuation-regression
+  # (shell line-continuation) below):
+  #   - gate.go: the string literal inside the fourth argument of the
+  #     fileIssueIntents(s.it, num, result, "agent-review-finding") call
+  #     gate.go's work-path settle makes (issue #2590 moved this literal out
+  #     of issue_intent.go's own issueIntentLabels var — since removed — and
+  #     into this call site's own literal argument, and turned the call from
+  #     a method (s.fileIssueIntents(...)) into the package-level function
+  #     fileIssueIntents(s.it, ...)). Anchored to the call itself
+  #     ("fileIssueIntents(") and scanned span-wise, so a gofmt multi-line
+  #     reformat of the call's arguments is inert to extraction — see
+  #     extractFileIssueIntentsProvenanceLabel below.
   #   - filer-label-direct.md: the shell bareword immediately following the
   #     literal words `label create ` (unquoted, unlike the other two), after
   #     joinBackslashNewline (defined by labelsWrittenBy below) has folded
@@ -214,15 +225,16 @@ let
   #   - filer-label-direct-forgejo.md: specifically the VALUE of the
   #     "name":"..." JSON key on that line.
   # A shape-only filter (isLabelShaped, which requires an agent- prefix)
-  # fails open on a de-prefixed rename: if issueIntentLabels'
-  # "agent-review-finding" were renamed to "review-finding", isLabelShaped
-  # would filter it out of the token stream entirely, so labelsWrittenBy
-  # would return [] for that surface and label-registry-covers-harness-writes
-  # would pass silently even though the harness now writes an unregistered
-  # label — label-registry-covers-harness-writes-regression below reproduces
-  # and closes that gap. Conversely, simply broadening isLabelShaped to
-  # accept any hyphenated lowercase word (instead of per-surface extraction)
-  # would reintroduce a false positive: the forgejo fragment's
+  # fails open on a de-prefixed rename: if the fileIssueIntents call's
+  # "agent-review-finding" argument were renamed to "review-finding",
+  # isLabelShaped would filter it out of the token stream entirely, so
+  # labelsWrittenBy would return [] for that surface and
+  # label-registry-covers-harness-writes would pass silently even though the
+  # harness now writes an unregistered label —
+  # label-registry-covers-harness-writes-regression below reproduces and
+  # closes that gap. Conversely, simply broadening isLabelShaped to accept
+  # any hyphenated lowercase word (instead of per-surface extraction) would
+  # reintroduce a false positive: the forgejo fragment's
   # "name":"agent-review-finding" line also carries a "description" value
   # containing the lowercase hyphenated phrase "non-blocking", which a
   # whole-line tokenize + broadened-shape-filter would wrongly flag as a
@@ -231,9 +243,9 @@ let
   # only ever looking where the literal is actually syntactically expected to
   # be, regardless of how the surrounding source is line-wrapped.
   harnessSurfaces = {
-    "cmd/launcher/internal/settle/issue_intent.go" = {
-      src = builtins.readFile ../../cmd/launcher/internal/settle/issue_intent.go;
-      extract = extractIssueIntentLabels;
+    "cmd/launcher/internal/settle/gate.go" = {
+      src = builtins.readFile ../../cmd/launcher/internal/settle/gate.go;
+      extract = extractFileIssueIntentsProvenanceLabel;
     };
     "templates/default/prompts/fragments/filer-label-direct.md" = {
       src = builtins.readFile ../../templates/default/prompts/fragments/filer-label-direct.md;
@@ -244,42 +256,53 @@ let
       extract = extractNameFieldTokens;
     };
   };
-  # The literal(s) sit inside double-quoted Go string literals between the
-  # issueIntentLabels = []string{ marker and that declaration's closing }.
-  # Restricting extraction to a single line (as an earlier version of this
-  # check did, scanning only lines containing the bare substring
-  # "issueIntentLabels") fails open the moment a second label makes gofmt's
-  # multi-line slice-literal layout the natural shape:
-  #   var issueIntentLabels = []string{
-  #     "agent-review-finding",
-  #     "agent-something-else",
-  #   }
-  # None of those continuation lines contain "issueIntentLabels" themselves,
-  # so a per-line scan would silently extract nothing. Splitting the whole
-  # source on the marker instead, then again on the first "}" that follows,
-  # isolates exactly the declaration's body regardless of how it's
-  # line-wrapped — splitString has no notion of lines, so newlines inside
-  # that span are inert. Matching the anchor to "issueIntentLabels = []string{"
-  # rather than the bare identifier also skips the doc comment above the var
-  # (which mentions "issueIntentLabels" in prose but never followed by
-  # " = []string{"). Match-filtering the quote-split segments to the
-  # label-literal shape (lowercase, digits, hyphens) then discards the
-  # surrounding Go syntax (whitespace, commas, tabs) without requiring an
-  # agent- prefix, so a de-prefixed rename still extracts correctly.
-  extractIssueIntentLabels =
+  # The literal sits inside the fourth argument of the
+  # fileIssueIntents(s.it, num, result, "agent-review-finding") call gate.go's
+  # work-path settle makes (issue #2590 parameterized fileIssueIntents by
+  # provenance label, moving the literal out of issue_intent.go's own
+  # now-removed issueIntentLabels var and into this call site's own literal
+  # argument instead, and turned the call from a method
+  # (s.fileIssueIntents(...)) into the package-level function
+  # fileIssueIntents(s.it, ...)). Anchored to the call itself
+  # ("fileIssueIntents(") rather than to the call's first three argument
+  # names, so a future rename of gate.go's own local num/result variables (or
+  # the s.it receiver expression) doesn't false-negative this extractor --
+  # only a rename of the fileIssueIntents call itself (or the label argument
+  # ceasing to be a literal) can break the marker. Splits on "," to reach the
+  # fourth (0-indexed 3rd) positional argument, then on the first pair of
+  # quotes within it -- splitString has no notion of lines, so a gofmt
+  # multi-line reformat of the call's arguments is inert to this span-scanned
+  # extraction: the whole call segment between one "fileIssueIntents(" marker
+  # and the next ")" is collected first, then split on "," across that whole
+  # span regardless of embedded newlines, rather than scanned one source line
+  # at a time -- see
+  # label-registry-covers-harness-writes-fileissueintents-multiline-regression
+  # below, which proves this claim rather than merely asserting it.
+  extractFileIssueIntentsProvenanceLabel =
     src:
     let
-      marker = "issueIntentLabels = []string{";
-      parts = splitString marker src;
+      marker = "fileIssueIntents(";
+      labelFromCall =
+        segment:
+        let
+          call = builtins.head (splitString ")" segment);
+          args = splitString "," call;
+        in
+        if builtins.length args < 4 then
+          [ ]
+        else
+          let
+            quoteParts = splitString "\"" (builtins.elemAt args 3);
+          in
+          if builtins.length quoteParts < 2 then
+            [ ]
+          else
+            let
+              value = builtins.elemAt quoteParts 1;
+            in
+            if builtins.match "[a-z][a-z0-9-]*" value != null then [ value ] else [ ];
     in
-    if builtins.length parts < 2 then
-      [ ]
-    else
-      let
-        rest = builtins.elemAt parts 1;
-        declBody = builtins.head (splitString "}" rest);
-      in
-      filter (s: builtins.match "[a-z][a-z0-9-]*" s != null) (splitString "\"" declBody);
+    concatMap labelFromCall (builtins.tail (splitString marker src));
   # The literal is the shell bareword immediately following the literal
   # words `label create ` (unquoted, unlike the Go and JSON surfaces below) —
   # split the line on that marker and take the first whitespace-delimited
@@ -334,7 +357,8 @@ let
   # actual label bareword on the following line) would otherwise put the
   # marker on one line and the literal it's supposed to precede on the next,
   # yielding no match on either — the same per-line fail-open class
-  # extractIssueIntentLabels closes above for Go's multi-line slice layout.
+  # extractFileIssueIntentsProvenanceLabel closes above for Go's multi-line
+  # call-argument layout.
   # Folding every backslash-newline into a single space before extraction
   # runs re-joins each continued line into one, so the marker and the
   # literal that follows it end up on the same line regardless of how the
@@ -352,12 +376,13 @@ let
   #   1. emptyOffenders — every harnessSurfaces entry writes at least one real
   #      label today, so an extractor returning [] never means "this surface
   #      stopped writing labels"; it means the extractor's marker/shape no
-  #      longer matches the source (a requote, a reformat, a var rename) and
+  #      longer matches the source (a requote, a reformat, a call rename) and
   #      the check below would otherwise pass vacuously instead of validating
-  #      anything for that surface — exactly the class of gap the three
+  #      anything for that surface — exactly the class of gap the four
   #      *-regression checks below reproduce (a quoted bareword an unquoted
   #      extractor can't see, `"name": "..."` spacing a no-space marker can't
-  #      see, and a renamed Go var an anchored marker can't see).
+  #      see, a renamed Go call an anchored marker can't see, and a
+  #      gofmt-reformatted multi-line call a per-line scan can't see).
   #   2. registryOffenders — the pre-existing Registry ⊇ Harness membership
   #      check: every label an extractor DID find is a name in
   #      lib/labels.nix.
@@ -508,11 +533,11 @@ in
 
   # Regression guard (issue #2528): proves assertHarnessWritesInRegistry
   # actually catches a de-prefixed rename of a harness-written label. Doctors
-  # the real issue_intent.go source (the file itself, via replaceStrings on
-  # its own builtins.readFile content, not a synthetic fixture) so
-  # issueIntentLabels' "agent-review-finding" loses its agent- prefix down to
-  # "review-finding", builds a doctored harnessSurfaces with only that one
-  # surface's src swapped in, and asserts via tryEval that
+  # the real gate.go source (the file itself, via replaceStrings on its own
+  # builtins.readFile content, not a synthetic fixture) so the
+  # fileIssueIntents(...) call's "agent-review-finding" argument loses its
+  # agent- prefix down to "review-finding", builds a doctored harnessSurfaces
+  # with only that one surface's src swapped in, and asserts via tryEval that
   # assertHarnessWritesInRegistry now correctly REJECTS it — "review-finding"
   # is not a name in lib/labels.nix's registry. Before the per-surface
   # extraction fix, a shape-only filter (isLabelShaped, which requires an
@@ -522,15 +547,13 @@ in
   # nothing to reject — exactly the fail-open gap this check closes.
   label-registry-covers-harness-writes-regression =
     let
-      doctoredIssueIntentSrc =
+      doctoredGateSrc =
         replaceStrings [ ''"agent-review-finding"'' ] [ ''"review-finding"'' ]
-          harnessSurfaces."cmd/launcher/internal/settle/issue_intent.go".src;
+          harnessSurfaces."cmd/launcher/internal/settle/gate.go".src;
       doctoredHarnessSurfaces = harnessSurfaces // {
-        "cmd/launcher/internal/settle/issue_intent.go" =
-          harnessSurfaces."cmd/launcher/internal/settle/issue_intent.go"
-          // {
-            src = doctoredIssueIntentSrc;
-          };
+        "cmd/launcher/internal/settle/gate.go" = harnessSurfaces."cmd/launcher/internal/settle/gate.go" // {
+          src = doctoredGateSrc;
+        };
       };
       result = builtins.tryEval (assertHarnessWritesInRegistry {
         harnessSurfaces = doctoredHarnessSurfaces;
@@ -538,57 +561,15 @@ in
       });
     in
     assert assertMsg (!result.success)
-      "label-registry-covers-harness-writes-regression: expected assertHarnessWritesInRegistry to reject a synthetic issue_intent.go with agent-review-finding de-prefixed to review-finding, but it evaluated successfully";
+      "label-registry-covers-harness-writes-regression: expected assertHarnessWritesInRegistry to reject a synthetic gate.go with agent-review-finding de-prefixed to review-finding, but it evaluated successfully";
     pkgs.runCommand "label-registry-covers-harness-writes-regression" { } "touch $out";
-
-  # Regression guard (issue #2528): proves extractIssueIntentLabels still
-  # catches an unregistered label once issueIntentLabels grows a second entry
-  # and gofmt reformats the var block onto multiple lines — the gofmt-clean,
-  # multi-line shape a second label makes inevitable, and the exact layout a
-  # per-line scan (an earlier version of this check) silently returned []
-  # for. Doctors the real issue_intent.go source by replacing its single-line
-  # declaration with that multi-line form, adding
-  # "agent-unregistered-label" (a name lib/labels.nix does not carry)
-  # alongside the real "agent-review-finding", and asserts via tryEval that
-  # assertHarnessWritesInRegistry rejects it. Before the marker-to-brace span
-  # fix, no line in the doctored source would contain the bare substring
-  # "issueIntentLabels" the old per-line filter looked for, so
-  # labelsWrittenBy would have returned [] and this regression would have
-  # found nothing to reject.
-  label-registry-covers-harness-writes-reformat-regression =
-    let
-      doctoredIssueIntentSrc =
-        replaceStrings
-          [ ''var issueIntentLabels = []string{"agent-review-finding"}'' ]
-          [
-            ''
-              var issueIntentLabels = []string{
-              	"agent-review-finding",
-              	"agent-unregistered-label",
-              }''
-          ]
-          harnessSurfaces."cmd/launcher/internal/settle/issue_intent.go".src;
-      doctoredHarnessSurfaces = harnessSurfaces // {
-        "cmd/launcher/internal/settle/issue_intent.go" =
-          harnessSurfaces."cmd/launcher/internal/settle/issue_intent.go"
-          // {
-            src = doctoredIssueIntentSrc;
-          };
-      };
-      result = builtins.tryEval (assertHarnessWritesInRegistry {
-        harnessSurfaces = doctoredHarnessSurfaces;
-        registryLabels = allRegistryLabels;
-      });
-    in
-    assert assertMsg (!result.success)
-      "label-registry-covers-harness-writes-reformat-regression: expected assertHarnessWritesInRegistry to reject a synthetic issue_intent.go with issueIntentLabels reformatted onto multiple lines and an unregistered second label added, but it evaluated successfully";
-    pkgs.runCommand "label-registry-covers-harness-writes-reformat-regression" { } "touch $out";
 
   # Regression guard (issue #2528): proves extractLabelCreateTokens still
   # catches an unregistered label once the `gh label create` invocation is
   # line-wrapped with a shell `\` continuation — the same per-line fail-open
-  # class the reformat regression above closes for issue_intent.go, but for
-  # the shell-continuation shape instead of gofmt's multi-line braces.
+  # class extractFileIssueIntentsProvenanceLabel's span-scanned (not per-line)
+  # extraction avoids above for gate.go's call-argument layout, but for the
+  # shell-continuation shape instead of gofmt's multi-line call arguments.
   # Doctors the real filer-label-direct.md source so the bareword right
   # after `label create` moves onto its own continuation line AND is renamed
   # to "agent-unregistered-label" (a name lib/labels.nix does not carry),
@@ -690,26 +671,24 @@ in
 
   # Regression guard (issue #2528): proves the emptyOffenders half of
   # assertHarnessWritesInRegistry actually fires when
-  # extractIssueIntentLabels' anchored `issueIntentLabels = []string{` marker
-  # breaks on a var rename. Doctors issue_intent.go so the declaration reads
-  # `issueIntentReviewLabels = []string{...}` instead — splitString never
-  # finds the old marker, so the surface silently extracts [ ], which —
-  # before the emptyOffenders check existed — let
-  # label-registry-covers-harness-writes pass even though the harness still
-  # writes agent-review-finding (now unobserved) and could just as easily
-  # have started writing something unregistered alongside it. Confirms via
-  # tryEval that assertHarnessWritesInRegistry now rejects this instead.
-  label-registry-covers-harness-writes-var-rename-regression =
+  # extractFileIssueIntentsProvenanceLabel's anchored `fileIssueIntents(`
+  # marker breaks on a rename of the call itself. Doctors gate.go so the call
+  # reads `fileReviewFindingIntents(...)` instead — splitString never finds
+  # the old marker, so the surface silently extracts [ ], which — before the
+  # emptyOffenders check existed — let label-registry-covers-harness-writes
+  # pass even though the harness still writes agent-review-finding (now
+  # unobserved) and could just as easily have started writing something
+  # unregistered alongside it. Confirms via tryEval that
+  # assertHarnessWritesInRegistry now rejects this instead.
+  label-registry-covers-harness-writes-call-rename-regression =
     let
-      doctoredIssueIntentSrc =
-        replaceStrings [ "issueIntentLabels = []string{" ] [ "issueIntentReviewLabels = []string{" ]
-          harnessSurfaces."cmd/launcher/internal/settle/issue_intent.go".src;
+      doctoredGateSrc =
+        replaceStrings [ "fileIssueIntents(" ] [ "fileReviewFindingIntents(" ]
+          harnessSurfaces."cmd/launcher/internal/settle/gate.go".src;
       doctoredHarnessSurfaces = harnessSurfaces // {
-        "cmd/launcher/internal/settle/issue_intent.go" =
-          harnessSurfaces."cmd/launcher/internal/settle/issue_intent.go"
-          // {
-            src = doctoredIssueIntentSrc;
-          };
+        "cmd/launcher/internal/settle/gate.go" = harnessSurfaces."cmd/launcher/internal/settle/gate.go" // {
+          src = doctoredGateSrc;
+        };
       };
       result = builtins.tryEval (assertHarnessWritesInRegistry {
         harnessSurfaces = doctoredHarnessSurfaces;
@@ -717,6 +696,51 @@ in
       });
     in
     assert assertMsg (!result.success)
-      "label-registry-covers-harness-writes-var-rename-regression: expected assertHarnessWritesInRegistry to reject a synthetic issue_intent.go with issueIntentLabels renamed to issueIntentReviewLabels, but it evaluated successfully";
-    pkgs.runCommand "label-registry-covers-harness-writes-var-rename-regression" { } "touch $out";
+      "label-registry-covers-harness-writes-call-rename-regression: expected assertHarnessWritesInRegistry to reject a synthetic gate.go with fileIssueIntents renamed to fileReviewFindingIntents, but it evaluated successfully";
+    pkgs.runCommand "label-registry-covers-harness-writes-call-rename-regression" { } "touch $out";
+
+  # Regression guard (issue #2528 AC1, issue #2590): proves the new
+  # extractor's span-scanned (marker-to-")", split on multi-line source)
+  # extraction survives a gofmt multi-line reformat of the fileIssueIntents(
+  # ...) call's arguments — a property nothing previously exercised, since
+  # this same commit deletes label-registry-covers-harness-writes-reformat-
+  # regression (proved the *old* extractor survived a reformatted
+  # `[]string{...}` var block, a different risk: argument count, not
+  # multi-line span-splitting). A naive per-line scan would silently return
+  # [ ] the moment the label literal lands on a different line than the
+  # `fileIssueIntents(` marker, the dangerous fails-open direction. Doctors
+  # gate.go's single-line call into a gofmt-plausible five-line reformat with
+  # the label argument swapped to "agent-unregistered-label" (unregistered),
+  # then asserts two things: the extractor itself still finds exactly
+  # [ "agent-unregistered-label" ] (not [ ], which would hide "found but
+  # rejected" behind "found nothing"), and assertHarnessWritesInRegistry as a
+  # whole still rejects the doctored input end to end.
+  label-registry-covers-harness-writes-fileissueintents-multiline-regression =
+    let
+      doctoredGateSrc =
+        replaceStrings
+          [ ''fileIssueIntents(s.it, num, result, "agent-review-finding")'' ]
+          [
+            "fileIssueIntents(\n\t\ts.it,\n\t\tnum,\n\t\tresult,\n\t\t\"agent-unregistered-label\",\n\t)"
+          ]
+          harnessSurfaces."cmd/launcher/internal/settle/gate.go".src;
+      doctoredHarnessSurfaces = harnessSurfaces // {
+        "cmd/launcher/internal/settle/gate.go" = harnessSurfaces."cmd/launcher/internal/settle/gate.go" // {
+          src = doctoredGateSrc;
+        };
+      };
+      extractedLabels = labelsWrittenBy {
+        src = doctoredGateSrc;
+        extract = extractFileIssueIntentsProvenanceLabel;
+      };
+      result = builtins.tryEval (assertHarnessWritesInRegistry {
+        harnessSurfaces = doctoredHarnessSurfaces;
+        registryLabels = allRegistryLabels;
+      });
+    in
+    assert assertMsg (extractedLabels == [ "agent-unregistered-label" ])
+      "label-registry-covers-harness-writes-fileissueintents-multiline-regression: expected extractFileIssueIntentsProvenanceLabel to find [ \"agent-unregistered-label\" ] on the multi-line-reformatted call (not [ ]), but got: ${concatStringsSep ", " extractedLabels}";
+    assert assertMsg (!result.success)
+      "label-registry-covers-harness-writes-fileissueintents-multiline-regression: expected assertHarnessWritesInRegistry to reject a synthetic gate.go with the fileIssueIntents(...) call gofmt-reformatted across multiple lines and its label argument swapped to agent-unregistered-label, but it evaluated successfully";
+    pkgs.runCommand "label-registry-covers-harness-writes-fileissueintents-multiline-regression" { } "touch $out";
 }
