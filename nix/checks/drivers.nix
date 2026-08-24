@@ -334,113 +334,10 @@ in
       "opencode agentFilesTemplate's scout.md must carry the scout description, got: ${scoutFile}";
     pkgs.runCommand "drivers-opencode-agent-files-scout-frontmatter" { } "touch $out";
 
-  # An empty model for an agent must omit that agent's file entirely (not
-  # bake a modelless stub), mirroring agentsJsonTemplate's per-agent
-  # lib.optionalAttrs omission (drivers-render-preamble-shape's neighbors
-  # above, and nix/checks/image.nix's agents-json-baked, pin the JSON side of
-  # this same contract).
-  drivers-opencode-agent-files-omits-empty-model =
-    let
-      opencodeEntry = driverRegistry.entries.opencode;
-      rendered = opencodeEntry.agentFilesTemplate {
-        roster = [
-          {
-            name = "scout";
-            model = "solo-scout-model";
-            mode = "subagent";
-            description = "Map relevant files, seams, and tests; return a structured brief";
-            tools = [ "Read" ];
-            promptFile = "scout-prompt.md";
-            prompt = null;
-          }
-          {
-            name = "reviewer";
-            model = "";
-            mode = "subagent";
-            description = "Review the branch diff for spec compliance and coding standards";
-            tools = [ "Read" ];
-            promptFile = "review-prompt.md";
-            prompt = null;
-          }
-          {
-            name = "filer";
-            model = "";
-            mode = "subagent";
-            description = "File issues from a review's non-blocking findings, best-effort";
-            tools = [ "Read" ];
-            promptFile = "filer-prompt.md";
-            prompt = null;
-          }
-          {
-            name = "worker";
-            model = "";
-            mode = "subagent";
-            description = "Implement a scoped slice of work delegated to it, with full implement-capable tools";
-            tools = [ "Read" ];
-            promptFile = "worker-prompt.md";
-            prompt = null;
-          }
-        ];
-      };
-    in
-    assert assertMsg (!(rendered ? ".config/opencode/agents/reviewer.md"))
-      "opencode agentFilesTemplate must omit reviewer.md when reviewModel is empty, got keys: ${concatStringsSep ", " (builtins.attrNames rendered)}";
-    assert assertMsg (!(rendered ? ".config/opencode/agents/filer.md"))
-      "opencode agentFilesTemplate must omit filer.md when filerModel is empty, got keys: ${concatStringsSep ", " (builtins.attrNames rendered)}";
-    assert assertMsg (!(rendered ? ".config/opencode/agents/worker.md"))
-      "opencode agentFilesTemplate must omit worker.md when workerModel is empty, got keys: ${concatStringsSep ", " (builtins.attrNames rendered)}";
-    pkgs.runCommand "drivers-opencode-agent-files-omits-empty-model" { } "touch $out";
-
-  # All-empty-models call must return the empty attrset -- no stray keys, no
-  # empty-string values -- mirroring agentsJsonTemplate's own all-empty ""
-  # return (nonRustHarness / agents-json-baked in nix/checks/image.nix).
-  drivers-opencode-agent-files-all-empty-returns-empty-set =
-    let
-      opencodeEntry = driverRegistry.entries.opencode;
-      rendered = opencodeEntry.agentFilesTemplate {
-        roster = [
-          {
-            name = "scout";
-            model = "";
-            mode = "subagent";
-            description = "Map relevant files, seams, and tests; return a structured brief";
-            tools = [ "Read" ];
-            promptFile = "scout-prompt.md";
-            prompt = null;
-          }
-          {
-            name = "reviewer";
-            model = "";
-            mode = "subagent";
-            description = "Review the branch diff for spec compliance and coding standards";
-            tools = [ "Read" ];
-            promptFile = "review-prompt.md";
-            prompt = null;
-          }
-          {
-            name = "filer";
-            model = "";
-            mode = "subagent";
-            description = "File issues from a review's non-blocking findings, best-effort";
-            tools = [ "Read" ];
-            promptFile = "filer-prompt.md";
-            prompt = null;
-          }
-          {
-            name = "worker";
-            model = "";
-            mode = "subagent";
-            description = "Implement a scoped slice of work delegated to it, with full implement-capable tools";
-            tools = [ "Read" ];
-            promptFile = "worker-prompt.md";
-            prompt = null;
-          }
-        ];
-      };
-    in
-    assert assertMsg (rendered == { })
-      "opencode agentFilesTemplate must return {} when every model is empty, got: ${builtins.toJSON rendered}";
-    pkgs.runCommand "drivers-opencode-agent-files-all-empty-returns-empty-set" { } "touch $out";
+  # The empty-model-entry-dropped invariant (#392 semantics) now lives at the
+  # dropOptedOut layer, not here -- see nix/checks/roster.nix's
+  # roster-drop-opted-out-drops-only-empty-model and
+  # roster-drop-opted-out-identity-when-none-opted-out.
 
   # Issue #2242 slice 2: a roster entry may set an optional `effort` field
   # (a per-agent reasoning-effort knob, e.g. "high"/"low") alongside `model`.
@@ -538,37 +435,10 @@ in
       "opencode agentFilesTemplate must not let an effort value's embedded newline inject a raw YAML key, got: ${file}";
     pkgs.runCommand "drivers-opencode-agent-files-escapes-effort" { } "touch $out";
 
-  # Issue #2242 slice 2: `effort` must not affect the existing filter-by-
-  # model-presence gate (#392 semantics) -- an entry with effort set but no
-  # (or empty) model still gets no agent file generated at all, same as today
-  # (mirrors claude.nix's drivers-claude-agents-json-effort-does-not-bypass-model-filter).
-  drivers-opencode-agent-files-effort-does-not-bypass-model-filter =
-    let
-      opencodeEntry = driverRegistry.entries.opencode;
-      rendered = opencodeEntry.agentFilesTemplate {
-        roster = [
-          {
-            name = "reviewer";
-            model = "";
-            effort = "high";
-            mode = "subagent";
-            description = "Review the branch diff for spec compliance and coding standards";
-            tools = [ "Read" ];
-            promptFile = "review-prompt.md";
-            prompt = null;
-          }
-        ];
-      };
-    in
-    assert assertMsg (!(rendered ? ".config/opencode/agents/reviewer.md"))
-      "opencode agentFilesTemplate must omit a roster entry's agent file with an empty model even when effort is set (filter-by-model-presence gate must stay unaffected by effort), got keys: ${concatStringsSep ", " (builtins.attrNames rendered)}";
-    pkgs.runCommand "drivers-opencode-agent-files-effort-does-not-bypass-model-filter" { } "touch $out";
-
   # Issue #264: claude's agentsJsonTemplate now takes a roster list rather
   # than four fixed model-knob args -- a custom 5th agent ("auditor", not one
   # of scout/reviewer/filer/worker) must render into the --agents JSON the
-  # same as any built-in entry, an empty-model entry (reviewer here) must be
-  # dropped (#392 semantics), and the rendered JSON must never gain a `mode`
+  # same as any built-in entry, and the rendered JSON must never gain a `mode`
   # key (claude's --agents schema has none; opencode.nix's agentFilesTemplate
   # is the only Driver that emits mode).
   drivers-claude-agents-json-roster =
@@ -593,20 +463,6 @@ in
             prompt = null;
           }
           {
-            name = "reviewer";
-            model = "";
-            mode = "subagent";
-            description = "Review the branch diff for spec compliance and coding standards";
-            tools = [
-              "Read"
-              "Bash"
-              "WebFetch"
-              "Agent"
-            ];
-            promptFile = "review-prompt.md";
-            prompt = null;
-          }
-          {
             name = "auditor";
             model = "audit-model";
             mode = "subagent";
@@ -623,8 +479,6 @@ in
       "claude agentsJsonTemplate must render a roster entry with a non-empty model, got keys: ${concatStringsSep ", " (builtins.attrNames parsed)}";
     assert assertMsg (parsed ? auditor)
       "claude agentsJsonTemplate must render a custom roster entry (auditor), got keys: ${concatStringsSep ", " (builtins.attrNames parsed)}";
-    assert assertMsg (!(parsed ? reviewer))
-      "claude agentsJsonTemplate must omit a roster entry with an empty model (reviewer), got keys: ${concatStringsSep ", " (builtins.attrNames parsed)}";
     assert assertMsg (parsed.auditor.model or "" == "audit-model")
       "claude agentsJsonTemplate's auditor entry must carry the roster model verbatim, got: ${
         builtins.toJSON (parsed.auditor or { })
@@ -710,32 +564,6 @@ in
     assert assertMsg (!(parsed.filer ? effort))
       "claude agentsJsonTemplate must omit the effort key entirely when a roster entry sets effort to the empty string, got: ${builtins.toJSON parsed.filer}";
     pkgs.runCommand "drivers-claude-agents-json-effort-absent" { } "touch $out";
-
-  # Issue #2242 slice 1: `effort` must not affect the existing filter-by-
-  # model-presence gate (#392 semantics) -- an entry with effort set but no
-  # (or empty) model is still dropped entirely, same as today.
-  drivers-claude-agents-json-effort-does-not-bypass-model-filter =
-    let
-      claudeEntry = driverRegistry.entries.claude;
-      rendered = claudeEntry.agentsJsonTemplate {
-        roster = [
-          {
-            name = "reviewer";
-            model = "";
-            effort = "high";
-            mode = "subagent";
-            description = "Review the branch diff for spec compliance and coding standards";
-            tools = [ "Read" ];
-            promptFile = "review-prompt.md";
-            prompt = null;
-          }
-        ];
-      };
-      parsed = if rendered == "" then { } else builtins.fromJSON rendered;
-    in
-    assert assertMsg (!(parsed ? reviewer))
-      "claude agentsJsonTemplate must omit a roster entry with an empty model even when effort is set (filter-by-model-presence gate must stay unaffected by effort), got keys: ${concatStringsSep ", " (builtins.attrNames parsed)}";
-    pkgs.runCommand "drivers-claude-agents-json-effort-does-not-bypass-model-filter" { } "touch $out";
 
   # AC#4: a single roster containing a custom agent not in the historical
   # scout/reviewer/filer/worker set must render into BOTH Drivers' output --
@@ -927,10 +755,10 @@ in
     pkgs.runCommand "drivers-opencode-agent-files-escapes-mode" { } "touch $out";
 
   # Issue #2152 slice C (documents the deliberate agent-less image, mirroring
-  # normalizeRoster's own empty-roster comment in lib/roster.nix): an empty
-  # roster must render into the same empty shape both Drivers already return
-  # for an all-empty-model roster -- claude's agentsJsonTemplate returns "",
-  # opencode's agentFilesTemplate returns {}.
+  # normalizeRoster's own empty-roster comment in lib/roster.nix): a
+  # literally empty roster (`roster = []`) must render into an empty shape
+  # from both Drivers -- claude's agentsJsonTemplate returns "", opencode's
+  # agentFilesTemplate returns {}.
   drivers-render-empty-roster =
     let
       claudeEntry = driverRegistry.entries.claude;
