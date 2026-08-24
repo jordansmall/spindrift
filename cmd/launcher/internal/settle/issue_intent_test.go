@@ -13,8 +13,8 @@ import (
 // TestFileIssueIntents_FilesEachIntentWithHostDerivedLabels verifies the
 // 1-to-many host-mediated issue-filing relay channel (issue #2018): every
 // decoded SPINDRIFT_ISSUE_INTENT payload in Result.IssueIntents is filed via
-// the tracker's HostPostedIssueFiler with the launcher's own fixed label
-// set — never the payload's own "labels" field (issue #1949's
+// the tracker's HostPostedIssueFiler with the caller-supplied provenance
+// label — never the payload's own "labels" field (issue #1949's
 // do-not-trust-the-agent-target invariant, extended from destination repo to
 // labels).
 func TestFileIssueIntents_FilesEachIntentWithHostDerivedLabels(t *testing.T) {
@@ -29,25 +29,29 @@ func TestFileIssueIntents_FilesEachIntentWithHostDerivedLabels(t *testing.T) {
 		},
 	}
 
-	c := baseConfig()
-	s := New(c, fc.AsIssueFiler(), fc.AsPushOnly())
-	urls := s.fileIssueIntents("1", result)
+	urls := fileIssueIntents(fc.AsIssueFiler(), "1", result, "agent-review-finding")
 
 	if len(fc.PostIssueCalls) != 2 {
 		t.Fatalf("PostIssueCalls = %+v, want 2", fc.PostIssueCalls)
 	}
-	want0 := forge.PostIssueCall{Title: "first bug", Body: "first body", Labels: issueIntentLabels}
+	want0 := forge.PostIssueCall{Title: "first bug", Body: "first body", Labels: []string{"agent-review-finding"}}
 	if fc.PostIssueCalls[0].Title != want0.Title || fc.PostIssueCalls[0].Body != want0.Body {
 		t.Errorf("PostIssueCalls[0] = %+v, want title/body %+v", fc.PostIssueCalls[0], want0)
+	}
+	if len(fc.PostIssueCalls[0].Labels) != 1 || fc.PostIssueCalls[0].Labels[0] != want0.Labels[0] {
+		t.Errorf("PostIssueCalls[0].Labels = %v, want %v", fc.PostIssueCalls[0].Labels, want0.Labels)
 	}
 	for _, l := range fc.PostIssueCalls[0].Labels {
 		if l == "evil-label" {
 			t.Errorf("PostIssueCalls[0].Labels leaked the payload's own label: %v", fc.PostIssueCalls[0].Labels)
 		}
 	}
-	want1 := forge.PostIssueCall{Title: "second bug", Body: "second body", Labels: issueIntentLabels}
+	want1 := forge.PostIssueCall{Title: "second bug", Body: "second body", Labels: []string{"agent-review-finding"}}
 	if fc.PostIssueCalls[1].Title != want1.Title || fc.PostIssueCalls[1].Body != want1.Body {
 		t.Errorf("PostIssueCalls[1] = %+v, want title/body %+v", fc.PostIssueCalls[1], want1)
+	}
+	if len(fc.PostIssueCalls[1].Labels) != 1 || fc.PostIssueCalls[1].Labels[0] != want1.Labels[0] {
+		t.Errorf("PostIssueCalls[1].Labels = %v, want %v", fc.PostIssueCalls[1].Labels, want1.Labels)
 	}
 	if len(urls) != 2 || urls[0] != fc.PostIssueURL || urls[1] != fc.PostIssueURL {
 		t.Errorf("returned urls = %v, want [%s %s]", urls, fc.PostIssueURL, fc.PostIssueURL)
@@ -70,9 +74,7 @@ func TestFileIssueIntents_MalformedPayloadSkipped(t *testing.T) {
 		},
 	}
 
-	c := baseConfig()
-	s := New(c, fc.AsIssueFiler(), fc.AsPushOnly())
-	urls := s.fileIssueIntents("1", result)
+	urls := fileIssueIntents(fc.AsIssueFiler(), "1", result, "agent-review-finding")
 
 	if len(fc.PostIssueCalls) != 1 || fc.PostIssueCalls[0].Title != "good one" {
 		t.Fatalf("PostIssueCalls = %+v, want exactly the well-formed intent", fc.PostIssueCalls)
@@ -95,9 +97,7 @@ func TestFileIssueIntents_TrackerWithoutHostPostedIssueFilerNoOps(t *testing.T) 
 		IssueIntents:      []string{`{"title":"first","body":"body"}`},
 	}
 
-	c := baseConfig()
-	s := New(c, fc, fc.AsPushOnly())
-	urls := s.fileIssueIntents("1", result)
+	urls := fileIssueIntents(fc, "1", result, "agent-review-finding")
 
 	if len(fc.PostIssueCalls) != 0 {
 		t.Errorf("PostIssueCalls = %+v, want none", fc.PostIssueCalls)
@@ -110,7 +110,8 @@ func TestFileIssueIntents_TrackerWithoutHostPostedIssueFilerNoOps(t *testing.T) 
 // TestFileIssueIntents_RealLocalTracker_FilesIssueOnDisk exercises the relay
 // path (issue #2018) end-to-end against a real *local.LocalTracker as the
 // HostPostedIssueFiler, not just the interface-satisfaction assertion the
-// fake-backed tests above cover: fileIssueIntents type-asserts s.it, and a
+// fake-backed tests above cover: fileIssueIntents type-asserts the it
+// parameter, and a
 // real adapter is the only way to prove that assertion actually reaches a
 // tracker that writes to disk.
 func TestFileIssueIntents_RealLocalTracker_FilesIssueOnDisk(t *testing.T) {
@@ -125,9 +126,7 @@ func TestFileIssueIntents_RealLocalTracker_FilesIssueOnDisk(t *testing.T) {
 		},
 	}
 
-	c := baseConfig()
-	s := New(c, lt, forge.NewFake(testDispatchLabels).AsPushOnly())
-	urls := s.fileIssueIntents("1", result)
+	urls := fileIssueIntents(lt, "1", result, "agent-review-finding")
 
 	if len(urls) != 2 {
 		t.Fatalf("urls = %v, want 2", urls)
@@ -175,6 +174,40 @@ func TestFileIssueIntents_RealLocalTracker_FilesIssueOnDisk(t *testing.T) {
 	}
 }
 
+// TestFileIssueIntents_ArbitraryProvenanceLabel verifies fileIssueIntents
+// files under whatever provenanceLabel the caller supplies, not a label
+// baked into the routine itself — "some-other-caller-label" here is a
+// deliberately arbitrary placeholder, not ADR 0041's real
+// "agent-research-finding" label (that label isn't registered in
+// lib/labels.nix and isn't what this test is exercising). This is the seam
+// a future research-settle caller (issue #2590, ResearchSettle in
+// research.go) needs: fileIssueIntents is a package-level function, not a
+// *Settle method, so ResearchSettle can call it directly without
+// fabricating a *Settle it has no Config/push-only forge.CodeForge for.
+func TestFileIssueIntents_ArbitraryProvenanceLabel(t *testing.T) {
+	fc := forge.NewFake(testDispatchLabels)
+	fc.PostIssueURL = "https://github.com/owner/repo/issues/55"
+
+	result := dispatch.Result{
+		IssueIntentsFound: true,
+		IssueIntents: []string{
+			`{"title":"research finding","body":"body"}`,
+		},
+	}
+
+	urls := fileIssueIntents(fc.AsIssueFiler(), "1", result, "some-other-caller-label")
+
+	if len(fc.PostIssueCalls) != 1 {
+		t.Fatalf("PostIssueCalls = %+v, want 1", fc.PostIssueCalls)
+	}
+	if len(fc.PostIssueCalls[0].Labels) != 1 || fc.PostIssueCalls[0].Labels[0] != "some-other-caller-label" {
+		t.Errorf("PostIssueCalls[0].Labels = %v, want [some-other-caller-label]", fc.PostIssueCalls[0].Labels)
+	}
+	if len(urls) != 1 || urls[0] != fc.PostIssueURL {
+		t.Errorf("urls = %v, want [%s]", urls, fc.PostIssueURL)
+	}
+}
+
 // TestSettle_FilesIssueIntents_OnReadyOutcome verifies the full Settle entry
 // point -- not just the standalone fileIssueIntents helper above -- actually
 // drives the host-mediated issue-filing relay (issue #2019, wiring #2018's
@@ -206,6 +239,13 @@ func TestSettle_FilesIssueIntents_OnReadyOutcome(t *testing.T) {
 	if len(fc.PostIssueCalls) != 1 || fc.PostIssueCalls[0].Title != "fix(auth): validate token expiry" {
 		t.Errorf("PostIssueCalls = %+v, want exactly the one intent filed", fc.PostIssueCalls)
 	}
+	// Pins gate.go's own call site to the "agent-review-finding" provenance
+	// label -- unlike the direct fileIssueIntents calls above, this test
+	// drives the real Settle.Settle -> gate.go work path, so this is the
+	// assertion that actually guards gate.go's literal argument.
+	if len(fc.PostIssueCalls) == 1 && (len(fc.PostIssueCalls[0].Labels) != 1 || fc.PostIssueCalls[0].Labels[0] != "agent-review-finding") {
+		t.Errorf("PostIssueCalls[0].Labels = %v, want [agent-review-finding]", fc.PostIssueCalls[0].Labels)
+	}
 }
 
 // TestSettle_FilesIssueIntents_OnBlockedOutcome verifies filing fires on the
@@ -236,6 +276,12 @@ func TestSettle_FilesIssueIntents_OnBlockedOutcome(t *testing.T) {
 
 	if len(fc.PostIssueCalls) != 1 {
 		t.Errorf("PostIssueCalls = %+v, want exactly 1", fc.PostIssueCalls)
+	}
+	// Pins gate.go's own call site to the "agent-review-finding" provenance
+	// label on the blocked path too -- see the matching assertion in
+	// TestSettle_FilesIssueIntents_OnReadyOutcome above.
+	if len(fc.PostIssueCalls) == 1 && (len(fc.PostIssueCalls[0].Labels) != 1 || fc.PostIssueCalls[0].Labels[0] != "agent-review-finding") {
+		t.Errorf("PostIssueCalls[0].Labels = %v, want [agent-review-finding]", fc.PostIssueCalls[0].Labels)
 	}
 }
 
