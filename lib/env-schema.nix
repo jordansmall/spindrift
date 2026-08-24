@@ -321,6 +321,21 @@ in
     boxEnv = true;
     boxEnvOnly = true;
   };
+  networkMode = {
+    env = "NETWORK_MODE";
+    group = "infra";
+    default = "open";
+    doc = "Box network posture, rendered per runtime/OCI backend into the right flag/syntax: 'open' (default) shares the host netns as-is (bwrap) or applies no flag, the runtime's own default network (OCI); 'no-host-loopback' keeps internet egress while denying host-loopback on podman (renders pasta, no --map-gw); on docker/nerdctl it renders their own default bridge network, an inert-but-correct render that does not yet deny host-loopback there -- unsupported on runtime=bwrap (bwrap can only unshare its network namespace all-or-nothing, no partial isolation -- throws at eval); 'none' is fully offline, documented test-only since a Driver can't reach its Provider under it. Mutually exclusive at eval time with the raw PODMAN_NETWORK/BWRAP_UNSHARE_NET escape-hatch knobs (network.podman/network.bwrapUnshare) -- setting both throws, there is no precedence rule";
+    choices = [
+      "open"
+      "no-host-loopback"
+      "none"
+    ];
+    flakeOption = true;
+    legacySettingsExempt = true;
+    nixSubPath = "network.mode";
+    boxEnv = false;
+  };
   podmanNetwork = {
     env = "PODMAN_NETWORK";
     group = "infra";
