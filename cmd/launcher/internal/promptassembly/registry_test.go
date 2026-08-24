@@ -7,7 +7,7 @@ import (
 )
 
 // TestLoadRegistryParsesAllRows loads testdata/registry.json — the hand
-// transcription of every row in lib/fragments.nix (70 rows: 67 as of issue
+// transcription of every row in lib/fragments.nix (71 rows: 67 as of issue
 // #2526's removal of the LAND_GIT_PUSH_READ_ONLY_STEP row issue #2510 had
 // added -- an eval-time assert now makes BOX_FORGE_AND_ISSUE_ACCESS=
 // read-only paired with CODE_FORGE=git unbuildable, so no image needing
@@ -17,10 +17,11 @@ import (
 // removal left behind in the CODE_FORGE=git block's own final step, plus
 // the COMMIT_REWORK_ORCHESTRATOR_STEP row issue #2698 added on the
 // existing REVIEW_LOOP_ORCHESTRATOR gate, plus the CAVEMAN_STEP_WORKER row
-// issue #2706 added on the existing CAVEMAN_BAKED gate) — and spot-checks a
-// handful of known rows rather than asserting the full payload verbatim, so
-// this test doesn't itself become the thing that silently drifts from
-// fragments.nix.
+// issue #2706 added on the existing CAVEMAN_BAKED gate, plus the
+// CAVEMAN_STEP_REVIEW row issue #2707 added on the same CAVEMAN_BAKED
+// gate) — and spot-checks a handful of known rows rather than asserting the
+// full payload verbatim, so this test doesn't itself become the thing that
+// silently drifts from fragments.nix.
 func TestLoadRegistryParsesAllRows(t *testing.T) {
 	f, err := os.Open("testdata/registry.json")
 	if err != nil {
@@ -33,7 +34,7 @@ func TestLoadRegistryParsesAllRows(t *testing.T) {
 		t.Fatalf("LoadRegistry: %v", err)
 	}
 
-	const wantRows = 70
+	const wantRows = 71
 	if len(reg.Rows) != wantRows {
 		t.Fatalf("len(reg.Rows) = %d, want %d", len(reg.Rows), wantRows)
 	}

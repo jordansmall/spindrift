@@ -53,6 +53,25 @@
     fragment = "caveman-default-worker.md";
     var = "CAVEMAN_STEP_WORKER";
   }
+  # The review-role variant of the same row (issue #2707): review-prompt.md
+  # keeps the full marker-grammar-is-exempt-too paragraph the worker variant
+  # above drops (a review pass still emits a VERDICT line, unlike a worker
+  # dispatch, though it never emits SPINDRIFT_OUTCOME/SPINDRIFT_PR_INTENT --
+  # those are the coordinator's own markers, not the reviewer's), plus one
+  # addition: the VERDICT line and every `## Non-blocking` finding -- the
+  # text the orchestrator hands a Filer subagent to become a GitHub issue
+  # body -- are called out as exempt from caveman compression too, same
+  # tier as the existing commit-message/SPINDRIFT_OUTCOME note= exemptions,
+  # since that finding text reaches a human reader cold. Same CAVEMAN_BAKED
+  # gate as the two rows above: this row only renders caveman narration
+  # into the review prompt when the caveman skill is baked, independent of
+  # whether a review pass itself runs (that depends on the orchestrator
+  # being on, not on this gate).
+  {
+    gate = "CAVEMAN_BAKED";
+    fragment = "caveman-default-review.md";
+    var = "CAVEMAN_STEP_REVIEW";
+  }
   {
     gate = "TDD_BAKED";
     fragment = "tdd-default.md";
