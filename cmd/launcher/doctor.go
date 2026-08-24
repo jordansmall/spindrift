@@ -24,6 +24,7 @@ func runDoctor(it forge.IssueTracker, cf forge.CodeForge, c config, w io.Writer,
 		InProgressLabel: c.inProgressLabel,
 		FailedLabel:     c.failedLabel,
 		CompleteLabel:   c.completeLabel,
+		Runtime:         c.runtime,
 	}, w, bufio.NewScanner(stdin), interactive); err != nil {
 		return err
 	}

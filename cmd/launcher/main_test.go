@@ -3460,14 +3460,85 @@ func TestDoctor_AuthFailure_Local(t *testing.T) {
 }
 
 func defaultLabelConfig() config {
-	return config{schemaConfig: schemaConfig{
-		label:           "ready-for-agent",
-		inProgressLabel: "agent-in-progress",
-		failedLabel:     "agent-failed",
-		completeLabel:   "agent-complete",
-		codeForge:       "github",
-		issueTracker:    "github",
-	}}
+	return config{
+		schemaConfig: schemaConfig{
+			label:           "ready-for-agent",
+			inProgressLabel: "agent-in-progress",
+			failedLabel:     "agent-failed",
+			completeLabel:   "agent-complete",
+			codeForge:       "github",
+			issueTracker:    "github",
+		},
+		// "echo" is always on PATH, so it's a safe non-empty default that
+		// makes the new doctor runtime row print "ok" without dragging in a
+		// real container runtime — unrelated tests shouldn't trip the check.
+		runtime: "echo",
+	}
+}
+
+// TestDoctor_RuntimeRow_OnPath_PrintsOk verifies doctor prints an "ok" line
+// naming the configured runtime when it resolves to a binary on PATH — using
+// defaultLabelConfig()'s "echo" runtime, which the runner package can
+// genuinely LookPath since it's always available.
+func TestDoctor_RuntimeRow_OnPath_PrintsOk(t *testing.T) {
+	f := forge.NewFake()
+	f.ProbeRepo = "owner/repo"
+	f.Labels = []string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}
+
+	var buf bytes.Buffer
+	if err := runDoctor(f, f, defaultLabelConfig(), &buf, strings.NewReader(""), false); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, `ok: runtime "echo" found on PATH`) {
+		t.Errorf("want output to contain an ok line naming the echo runtime, got:\n%s", out)
+	}
+}
+
+// TestDoctor_RuntimeRow_AbsentFromPATH_PrintsAdvisoryNotFatal verifies a
+// runtime that resolves to no binary on PATH is reported as an advisory —
+// never a fatal error — mirroring the research/priority/ambiguous-spec label
+// rows; rationale on doctor.Config.Runtime.
+func TestDoctor_RuntimeRow_AbsentFromPATH_PrintsAdvisoryNotFatal(t *testing.T) {
+	f := forge.NewFake()
+	f.ProbeRepo = "owner/repo"
+	f.Labels = []string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}
+
+	c := defaultLabelConfig()
+	c.runtime = "definitely-not-a-real-binary-xyz"
+
+	var buf bytes.Buffer
+	if err := runDoctor(f, f, c, &buf, strings.NewReader(""), false); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, `advisory: runtime "definitely-not-a-real-binary-xyz" not ready`) {
+		t.Errorf("want output to contain an advisory line naming the missing runtime, got:\n%s", out)
+	}
+	if !strings.Contains(out, "does not fail this check") {
+		t.Errorf("want output to note the runtime row does not fail this check, got:\n%s", out)
+	}
+}
+
+// TestDoctor_RuntimeRow_Unset_PrintsAdvisorySkipped verifies an empty
+// RUNTIME is reported as a skipped-check advisory — never a fatal error —
+// mirroring the on-PATH and absent-from-PATH runtime row tests above.
+func TestDoctor_RuntimeRow_Unset_PrintsAdvisorySkipped(t *testing.T) {
+	f := forge.NewFake()
+	f.ProbeRepo = "owner/repo"
+	f.Labels = []string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}
+
+	c := defaultLabelConfig()
+	c.runtime = ""
+
+	var buf bytes.Buffer
+	if err := runDoctor(f, f, c, &buf, strings.NewReader(""), false); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "advisory: RUNTIME not set — skipping runtime check") {
+		t.Errorf("want output to contain the RUNTIME-unset advisory line, got:\n%s", out)
+	}
 }
 
 func TestDoctor_LabelsAllPresent(t *testing.T) {
