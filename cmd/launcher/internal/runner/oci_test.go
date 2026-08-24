@@ -335,6 +335,68 @@ func TestBuildRunArgsEmptyLimitsOmitted(t *testing.T) {
 	}
 }
 
+// TestNetworkArg covers networkArg's resolution of the effective --network
+// value across cli x networkMode, plus the raw podmanNetwork escape hatch
+// (issue #2562). Raw podmanNetwork wins whenever set, even alongside a set
+// networkMode — nix eval-rejects that combination for a real Consumer flake
+// (lib/mkHarness.nix networkModeCoherenceOk), but networkArg still needs a
+// deterministic answer since it has no way to observe "this can't happen".
+func TestNetworkArg(t *testing.T) {
+	cases := []struct {
+		name          string
+		cli           string
+		networkMode   string
+		podmanNetwork string
+		want          string
+	}{
+		{name: "podman no-host-loopback", cli: "podman", networkMode: "no-host-loopback", want: "pasta"},
+		{name: "docker no-host-loopback", cli: "docker", networkMode: "no-host-loopback", want: "bridge"},
+		{name: "nerdctl no-host-loopback", cli: "nerdctl", networkMode: "no-host-loopback", want: "bridge"},
+		{name: "none any cli", cli: "podman", networkMode: "none", want: "none"},
+		{name: "none docker", cli: "docker", networkMode: "none", want: "none"},
+		{name: "open no flag", cli: "podman", networkMode: "open", want: ""},
+		{name: "unset no flag", cli: "podman", networkMode: "", want: ""},
+		{name: "raw wins over mode", cli: "podman", networkMode: "no-host-loopback", podmanNetwork: "slirp4netns:allow_host_loopback=true", want: "slirp4netns:allow_host_loopback=true"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			a := &ociAdapter{cli: tc.cli, networkMode: tc.networkMode, podmanNetwork: tc.podmanNetwork}
+			if got := a.networkArg(); got != tc.want {
+				t.Errorf("networkArg() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestBuildRunArgs_NetworkModeRendersNetworkFlag verifies buildRunArgs itself
+// wires networkMode through to --network, not just the networkArg helper.
+func TestBuildRunArgs_NetworkModeRendersNetworkFlag(t *testing.T) {
+	a := &ociAdapter{cli: "podman", image: "spindrift:test", networkMode: "no-host-loopback"}
+	box := Box{Name: "agent-issue-1", Env: map[string]string{}}
+	args := a.buildRunArgs(box)
+	if !containsArg(args, "--network") {
+		t.Fatalf("--network missing from args: %v", args)
+	}
+	for i, arg := range args {
+		if arg == "--network" {
+			if i+1 >= len(args) || args[i+1] != "pasta" {
+				t.Errorf("--network value = %v, want pasta; args: %v", args, args)
+			}
+		}
+	}
+}
+
+// TestBuildRunArgs_NetworkModeOpenOmitsFlag verifies the default/unset mode
+// renders no --network flag at all when no raw knob is set either.
+func TestBuildRunArgs_NetworkModeOpenOmitsFlag(t *testing.T) {
+	a := &ociAdapter{cli: "podman", image: "spindrift:test", networkMode: "open"}
+	box := Box{Name: "agent-issue-1", Env: map[string]string{}}
+	args := a.buildRunArgs(box)
+	if containsArg(args, "--network") {
+		t.Errorf("--network must be absent for networkMode=open; args: %v", args)
+	}
+}
+
 func TestBuildRunArgsImageIsLast(t *testing.T) {
 	a := &ociAdapter{
 		cli:         "podman",

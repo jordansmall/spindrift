@@ -73,6 +73,95 @@ func TestBwrapArgs_SkillsDirMounted(t *testing.T) {
 	}
 }
 
+// stubResolvConfPresent forces statResolvConf to report /etc/resolv.conf as
+// present, independent of whether the test host actually has one (some nix
+// build sandboxes don't). Returns a restore func to defer.
+func stubResolvConfPresent() func() {
+	prev := statResolvConf
+	statResolvConf = func() error { return nil }
+	return func() { statResolvConf = prev }
+}
+
+// TestBwrapArgs_NetworkModeNoneUnsharesNet verifies that networkMode="none"
+// alone (unshareNet=false) has the same effect as the raw unshareNet=true
+// knob: --unshare-net is appended and the /etc/resolv.conf bind is skipped
+// (issue #2562). "no-host-loopback" isn't expected to reach bwrap in
+// practice — nix eval-rejects that combination for a valid Consumer flake
+// (lib/mkHarness.nix networkModeCoherenceOk), and main.go's
+// checkNetworkModeRuntimeGate backstops a runtime override past that — so
+// bwrap only ever needs to special-case "none" here; see
+// TestBwrapArgs_NetworkModeNoHostLoopbackFailsOpen for what this adapter
+// does on its own if that upstream guarding is ever bypassed.
+func TestBwrapArgs_NetworkModeNoneUnsharesNet(t *testing.T) {
+	a := &bwrapAdapter{
+		agentFiles:    "/fake/agent",
+		agentEnv:      "/fake/env",
+		bakedPrefetch: "echo ok",
+		networkMode:   "none",
+	}
+	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}})
+
+	if !containsArg(args, "--unshare-net") {
+		t.Errorf("--unshare-net missing for networkMode=none; args: %v", args)
+	}
+	if containsArg(args, "/etc/resolv.conf") {
+		t.Errorf("resolv.conf must not be bound for networkMode=none; args: %v", args)
+	}
+}
+
+// TestBwrapArgs_NetworkModeOpenNoUnshareNet verifies the default/unset mode
+// leaves --unshare-net absent and the resolv.conf bind present, same as
+// today's behavior with the raw knob unset.
+func TestBwrapArgs_NetworkModeOpenNoUnshareNet(t *testing.T) {
+	restore := stubResolvConfPresent()
+	defer restore()
+
+	a := &bwrapAdapter{
+		agentFiles:    "/fake/agent",
+		agentEnv:      "/fake/env",
+		bakedPrefetch: "echo ok",
+		networkMode:   "open",
+	}
+	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}})
+
+	if containsArg(args, "--unshare-net") {
+		t.Errorf("--unshare-net must be absent for networkMode=open; args: %v", args)
+	}
+	if !containsArg(args, "/etc/resolv.conf") {
+		t.Errorf("resolv.conf bind must be present for networkMode=open; args: %v", args)
+	}
+}
+
+// TestBwrapArgs_NetworkModeNoHostLoopbackFailsOpen is a characterization
+// test (issue #2562 review finding), not a bug fix at this layer: it proves
+// that if networkMode="no-host-loopback" were ever constructed directly
+// against a bwrapAdapter -- bypassing main.go's checkNetworkModeRuntimeGate,
+// which is what actually prevents this combination from reaching the
+// adapter in practice -- isolateNet evaluates to false, since the adapter
+// only special-cases unshareNet and networkMode="none". The sandbox would
+// silently share the full host network namespace and bind
+// /etc/resolv.conf, i.e. the isolation request fails open with no error.
+// The fix lives upstream in main.go's gate, not here.
+func TestBwrapArgs_NetworkModeNoHostLoopbackFailsOpen(t *testing.T) {
+	restore := stubResolvConfPresent()
+	defer restore()
+
+	a := &bwrapAdapter{
+		agentFiles:    "/fake/agent",
+		agentEnv:      "/fake/env",
+		bakedPrefetch: "echo ok",
+		networkMode:   "no-host-loopback",
+	}
+	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}})
+
+	if containsArg(args, "--unshare-net") {
+		t.Errorf("fail-open characterization broke: --unshare-net present for networkMode=no-host-loopback; args: %v", args)
+	}
+	if !containsArg(args, "/etc/resolv.conf") {
+		t.Errorf("fail-open characterization broke: resolv.conf bind absent for networkMode=no-host-loopback; args: %v", args)
+	}
+}
+
 // TestBwrapArgs_SkillsMountTarget_FromDriverDeclaration is gone (issue
 // #2489): the operator-override skills mount now always lands at the fixed
 // /operator-skills staging path (see operatorSkillsDir in mount.go),

@@ -17,6 +17,15 @@ import (
 // standard library's exec.Command unmodified.
 var execCommand = exec.Command
 
+// statResolvConf backs the "does the host have /etc/resolv.conf to bind"
+// check in buildArgs. Tests swap this seam so the resolv.conf-bind
+// assertions don't depend on whether the CI runner's own filesystem happens
+// to have /etc/resolv.conf (it doesn't inside some nix build sandboxes).
+var statResolvConf = func() error {
+	_, err := os.Stat("/etc/resolv.conf")
+	return err
+}
+
 // bwrapSecrets is the set of box.Env keys whose values must not appear on the
 // bwrap command line. They are delivered via the process environment instead
 // so that ps/proc cannot expose them to other local users.
@@ -51,7 +60,8 @@ type bwrapAdapter struct {
 	// mount (ADR 0032); see MountParams.
 	hostMediatedIssueTracker bool
 	localIssuesDir           string
-	unshareNet               bool // when true, adds --unshare-net (isolates from host netns)
+	unshareNet               bool   // raw BWRAP_UNSHARE_NET knob; when true, adds --unshare-net (isolates from host netns)
+	networkMode              string // NETWORK_MODE knob; "none" also isolates from the host netns. "no-host-loopback" never reaches bwrap — nix eval-rejects it for a valid Consumer flake (lib/mkHarness.nix networkModeCoherenceOk).
 
 	// mu guards running, the box-name -> live process map Kill (issue #649)
 	// consults — bwrap sandboxes are unnamed child processes with no
@@ -82,6 +92,7 @@ func NewBwrap(cfg Config) Runner {
 		hostMediatedIssueTracker: cfg.HostMediatedIssueTracker,
 		localIssuesDir:           cfg.LocalIssuesDir,
 		unshareNet:               cfg.BwrapUnshareNet,
+		networkMode:              cfg.NetworkMode,
 	}
 }
 
@@ -114,6 +125,30 @@ func (a *bwrapAdapter) mountSpecs(box Box) []MountSpec {
 // Secret env vars (GH_TOKEN, auth tokens) are intentionally excluded from argv;
 // they reach the sandbox via inherited process environment (no --clearenv).
 func (a *bwrapAdapter) buildArgs(etcDir string, box Box) []string {
+	// isolateNet is the effective "cut off the host netns" decision: the raw
+	// BWRAP_UNSHARE_NET escape hatch, or NETWORK_MODE=none (issue #2562).
+	// Same shared invariant as oci.go's networkArg/config.go's Config doc
+	// (raw wins whenever set) even though this is an OR rather than an
+	// explicit "prefer raw" branch: BWRAP_UNSHARE_NET is bool-typed and only
+	// ever forces isolation *on* (true) -- there's no raw value here that
+	// forces it *off* against an isolating mode, unlike podman's
+	// string-typed raw knob, which can render any --network value including
+	// one that reopens what a mode would have closed. So OR-ing the two
+	// reaches the same answer "raw wins" would for every combination Go can
+	// observe. nix eval-rejects setting both on a valid Consumer flake
+	// (lib/mkHarness.nix networkModeCoherenceOk), so this is defense in
+	// depth for a case that can't actually occur there; it still needs a
+	// deterministic answer here since Go has no way to observe that
+	// invariant. NETWORK_MODE=no-host-loopback is not handled here on
+	// purpose: bwrap's --unshare-net is all-or-nothing and can't express a
+	// partial isolation, so this adapter has no rendering for it and falls
+	// open (treats it like "open") if it ever arrives. RUNTIME is baked at
+	// eval time while NETWORK_MODE is runtime-overridable -- main.go's
+	// checkNetworkModeRuntimeGate is the actual backstop that keeps a
+	// runtime override of NETWORK_MODE from reaching this adapter; see
+	// TestBwrapArgs_NetworkModeNoHostLoopbackFailsOpen for the
+	// characterization of what happens here if that gate is bypassed.
+	isolateNet := a.unshareNet || a.networkMode == NetworkModeNone
 	args := []string{
 		"--ro-bind", "/nix/store", "/nix/store",
 		"--tmpfs", "/tmp",
@@ -125,8 +160,8 @@ func (a *bwrapAdapter) buildArgs(etcDir string, box Box) []string {
 		"--ro-bind", filepath.Join(etcDir, "passwd"), "/etc/passwd",
 		"--ro-bind", filepath.Join(etcDir, "group"), "/etc/group",
 	}
-	if !a.unshareNet {
-		if _, err := os.Stat("/etc/resolv.conf"); err == nil {
+	if !isolateNet {
+		if err := statResolvConf(); err == nil {
 			args = append(args, "--ro-bind", "/etc/resolv.conf", "/etc/resolv.conf")
 		}
 	}
@@ -169,7 +204,7 @@ func (a *bwrapAdapter) buildArgs(etcDir string, box Box) []string {
 	}
 	unshareFlags := []string{"--unshare-user", "--uid", "1000", "--gid", "1000",
 		"--unshare-pid", "--unshare-ipc", "--unshare-uts"}
-	if a.unshareNet {
+	if isolateNet {
 		unshareFlags = append(unshareFlags, "--unshare-net")
 	}
 	args = append(args, unshareFlags...)
