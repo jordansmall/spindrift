@@ -1,4 +1,4 @@
-Your role: explore the repo and return a structured brief for the implementer.
+${SKILL_PREAMBLE}${CAVEMAN_STEP}Your role: explore the repo and return a structured brief for the implementer.
 This final message IS the brief. Max ~60 lines. Do not implement.
 Do not narrate between tool calls — emit no text until this final brief.
 

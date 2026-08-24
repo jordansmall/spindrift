@@ -11,6 +11,11 @@
     "var": "CAVEMAN_STEP"
   },
   {
+    "gate": "CAVEMAN_BAKED",
+    "fragment": "caveman-default-worker.md",
+    "var": "CAVEMAN_STEP_WORKER"
+  },
+  {
     "gate": "TDD_BAKED",
     "fragment": "tdd-default.md",
     "var": "TDD_STEP"

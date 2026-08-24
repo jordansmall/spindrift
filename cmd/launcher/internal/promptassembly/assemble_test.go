@@ -78,6 +78,26 @@ func loadTestRegistry(t *testing.T) Registry {
 	return reg
 }
 
+// agentPromptFromJSON decodes agentsJSON (an Assemble result's AgentsJSON)
+// and returns the rendered prompt for the named agent, failing the test if
+// the JSON doesn't parse or the agent is missing -- the decode-and-lookup
+// shape TestAssembleScoutPromptCavemanAndSkillPreamble and
+// TestAssembleWorkerPromptCavemanAndSkillPreamble's subtests all repeat.
+func agentPromptFromJSON(t *testing.T, agentsJSON, agent string) string {
+	t.Helper()
+	var parsed map[string]struct {
+		Prompt string `json:"prompt"`
+	}
+	if err := json.Unmarshal([]byte(agentsJSON), &parsed); err != nil {
+		t.Fatalf("unmarshal AgentsJSON: %v\n%s", err, agentsJSON)
+	}
+	entry, ok := parsed[agent]
+	if !ok {
+		t.Fatalf("AgentsJSON missing %s entry", agent)
+	}
+	return entry.Prompt
+}
+
 // TestAssembleCoveredCellRendersPrompt covers the covered cell's happy
 // path: a non-empty prompt with the fixed allowlist names substituted, a
 // gate-on fragment's text present, and a gate-off fragment's text absent.
@@ -497,6 +517,125 @@ func TestAssembleAgentsJSON(t *testing.T) {
 		}
 		if result.AgentsJSON != "" {
 			t.Errorf("AgentsJSON = %q, want empty", result.AgentsJSON)
+		}
+	})
+}
+
+// TestAssembleScoutPromptCavemanAndSkillPreamble covers issue #2706:
+// scout-prompt.md, rendered through renderAgentsJSON's per-agent prompt
+// lookup (Env.AgentsPromptFiles["scout"] -> "scout-prompt.md"), must carry
+// the caveman-default narration directive and the skill-advertisement
+// preamble when the caveman skill is baked and skills are present, and must
+// carry neither -- no empty placeholder residue, no dangling literal
+// ${CAVEMAN_STEP}/${SKILL_PREAMBLE} token -- when skills are absent.
+func TestAssembleScoutPromptCavemanAndSkillPreamble(t *testing.T) {
+	reg := loadTestRegistry(t)
+
+	t.Run("skills present", func(t *testing.T) {
+		env := coveredEnv()
+		env.AgentsJSONTemplate = `{"scout":{"model":"x"}}`
+		env.AgentsPromptFiles = `{"scout":"scout-prompt.md"}`
+
+		result, err := Assemble(env, reg)
+		if err != nil {
+			t.Fatalf("Assemble: %v", err)
+		}
+
+		prompt := agentPromptFromJSON(t, result.AgentsJSON, "scout")
+		if !strings.Contains(prompt, "Default to the `/caveman` skill") {
+			t.Errorf("scout.prompt missing caveman-default.md fragment text: %q", prompt)
+		}
+		if !strings.Contains(prompt, "Skills available:") {
+			t.Errorf("scout.prompt missing skill-preamble.md fragment text: %q", prompt)
+		}
+	})
+
+	t.Run("skills absent", func(t *testing.T) {
+		env := coveredEnv()
+		env.SkillsFound = ""
+		env.CavemanSkillBaked = false
+		env.TDDSkillBaked = false
+		env.CommitSkillBaked = false
+		env.CodeReviewSkillBaked = false
+		env.AgentsJSONTemplate = `{"scout":{"model":"x"}}`
+		env.AgentsPromptFiles = `{"scout":"scout-prompt.md"}`
+
+		result, err := Assemble(env, reg)
+		if err != nil {
+			t.Fatalf("Assemble: %v", err)
+		}
+
+		prompt := agentPromptFromJSON(t, result.AgentsJSON, "scout")
+		if strings.Contains(prompt, "/caveman") {
+			t.Errorf("scout.prompt contains /caveman text, want absent (CAVEMAN_BAKED gate off): %q", prompt)
+		}
+		if strings.Contains(prompt, "Skills available:") {
+			t.Errorf("scout.prompt contains skill-preamble.md fragment text, want absent (SKILLS_FOUND gate off): %q", prompt)
+		}
+		if strings.Contains(prompt, "${") {
+			t.Errorf("scout.prompt still contains an unsubstituted ${...} token: %q", prompt)
+		}
+	})
+}
+
+// TestAssembleWorkerPromptCavemanAndSkillPreamble covers issue #2706:
+// worker-prompt.md, rendered through renderAgentsJSON's per-agent prompt
+// lookup (Env.AgentsPromptFiles["worker"] -> "worker-prompt.md"), must carry
+// the caveman-default narration directive and the skill-advertisement
+// preamble when the caveman skill is baked and skills are present, and must
+// carry neither -- no empty placeholder residue, no dangling literal
+// ${CAVEMAN_STEP}/${SKILL_PREAMBLE} token -- when skills are absent.
+func TestAssembleWorkerPromptCavemanAndSkillPreamble(t *testing.T) {
+	reg := loadTestRegistry(t)
+
+	t.Run("skills present", func(t *testing.T) {
+		env := coveredEnv()
+		env.AgentsJSONTemplate = `{"worker":{"model":"x"}}`
+		env.AgentsPromptFiles = `{"worker":"worker-prompt.md"}`
+
+		result, err := Assemble(env, reg)
+		if err != nil {
+			t.Fatalf("Assemble: %v", err)
+		}
+
+		prompt := agentPromptFromJSON(t, result.AgentsJSON, "worker")
+		if !strings.Contains(prompt, "Default to the `/caveman` skill") {
+			t.Errorf("worker.prompt missing caveman-default.md fragment text: %q", prompt)
+		}
+		if !strings.Contains(prompt, "Skills available:") {
+			t.Errorf("worker.prompt missing skill-preamble.md fragment text: %q", prompt)
+		}
+		for _, marker := range []string{"SPINDRIFT_OUTCOME", "VERDICT: APPROVE", "VERDICT: BLOCK"} {
+			if strings.Contains(prompt, marker) {
+				t.Errorf("worker.prompt contains forbidden marker %q (issue #2059/#2491 quarantine), want absent: %q", marker, prompt)
+			}
+		}
+	})
+
+	t.Run("skills absent", func(t *testing.T) {
+		env := coveredEnv()
+		env.SkillsFound = ""
+		env.CavemanSkillBaked = false
+		env.TDDSkillBaked = false
+		env.CommitSkillBaked = false
+		env.CodeReviewSkillBaked = false
+		env.AgentsJSONTemplate = `{"worker":{"model":"x"}}`
+		env.AgentsPromptFiles = `{"worker":"worker-prompt.md"}`
+
+		result, err := Assemble(env, reg)
+		if err != nil {
+			t.Fatalf("Assemble: %v", err)
+		}
+
+		prompt := agentPromptFromJSON(t, result.AgentsJSON, "worker")
+		if strings.Contains(prompt, "/caveman") {
+			t.Errorf("worker.prompt contains /caveman text, want absent (CAVEMAN_BAKED gate off): %q", prompt)
+		}
+		if strings.Contains(prompt, "Skills available:") {
+			t.Errorf("worker.prompt contains skill-preamble.md fragment text, want absent (SKILLS_FOUND gate off): %q", prompt)
+		}
+		if strings.Contains(prompt, "${") {
+			t.Errorf("worker.prompt still contains an unsubstituted ${...} token: %q", prompt)
 		}
 	})
 }
@@ -1619,6 +1758,73 @@ func TestAssembleDriverAgentFilesRewrite(t *testing.T) {
 	if agentFileFrontmatter(t, filepath.Join(dir, "scout.md")) != frontmatterBefore {
 		t.Errorf("scout.md frontmatter changed, want unchanged")
 	}
+}
+
+// TestAssembleDriverAgentFilesWorkerCavemanAndSkillPreamble covers issue
+// #2706's second, independent render path: rewriteAgentFiles' on-disk
+// worker.md rewrite (entrypoint.sh: 1128-1187) must also carry the
+// caveman-default narration directive and the skill-advertisement preamble
+// when the caveman skill is baked and skills are present, and must carry
+// neither -- no dangling literal ${CAVEMAN_STEP}/${SKILL_PREAMBLE} token --
+// when skills are absent, mirroring TestAssembleWorkerPromptCavemanAndSkillPreamble's
+// renderAgentsJSON-path coverage of the same worker-prompt.md template.
+func TestAssembleDriverAgentFilesWorkerCavemanAndSkillPreamble(t *testing.T) {
+	reg := loadTestRegistry(t)
+
+	t.Run("skills present", func(t *testing.T) {
+		dir := t.TempDir()
+		writeAgentFile(t, filepath.Join(dir, "worker.md"), "worker")
+
+		env := coveredEnv()
+		env.DriverAgentFilesDir = dir
+		env.AgentsPromptFiles = `{"worker":"worker-prompt.md"}`
+
+		if _, err := Assemble(env, reg); err != nil {
+			t.Fatalf("Assemble: %v", err)
+		}
+
+		body := agentFileBody(t, filepath.Join(dir, "worker.md"))
+		if !strings.Contains(body, "Default to the `/caveman` skill") {
+			t.Errorf("worker.md body missing caveman-default.md fragment text: %q", body)
+		}
+		if !strings.Contains(body, "Skills available:") {
+			t.Errorf("worker.md body missing skill-preamble.md fragment text: %q", body)
+		}
+		for _, marker := range []string{"SPINDRIFT_OUTCOME", "VERDICT: APPROVE", "VERDICT: BLOCK"} {
+			if strings.Contains(body, marker) {
+				t.Errorf("worker.md body contains forbidden marker %q (issue #2059/#2491 quarantine), want absent: %q", marker, body)
+			}
+		}
+	})
+
+	t.Run("skills absent", func(t *testing.T) {
+		dir := t.TempDir()
+		writeAgentFile(t, filepath.Join(dir, "worker.md"), "worker")
+
+		env := coveredEnv()
+		env.SkillsFound = ""
+		env.CavemanSkillBaked = false
+		env.TDDSkillBaked = false
+		env.CommitSkillBaked = false
+		env.CodeReviewSkillBaked = false
+		env.DriverAgentFilesDir = dir
+		env.AgentsPromptFiles = `{"worker":"worker-prompt.md"}`
+
+		if _, err := Assemble(env, reg); err != nil {
+			t.Fatalf("Assemble: %v", err)
+		}
+
+		body := agentFileBody(t, filepath.Join(dir, "worker.md"))
+		if strings.Contains(body, "/caveman") {
+			t.Errorf("worker.md body contains /caveman text, want absent (CAVEMAN_BAKED gate off): %q", body)
+		}
+		if strings.Contains(body, "Skills available:") {
+			t.Errorf("worker.md body contains skill-preamble.md fragment text, want absent (SKILLS_FOUND gate off): %q", body)
+		}
+		if strings.Contains(body, "${") {
+			t.Errorf("worker.md body still contains an unsubstituted ${...} token: %q", body)
+		}
+	})
 }
 
 // TestAssembleDriverAgentFilesReviewerDropOrchestratorOn covers

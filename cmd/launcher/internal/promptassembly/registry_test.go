@@ -16,9 +16,11 @@ import (
 // right after, to fix the orphaned "2." the LAND_GIT_PUSH_READ_ONLY_STEP
 // removal left behind in the CODE_FORGE=git block's own final step, plus
 // the COMMIT_REWORK_ORCHESTRATOR_STEP row issue #2698 added on the
-// existing REVIEW_LOOP_ORCHESTRATOR gate) — and spot-checks a handful of
-// known rows rather than asserting the full payload verbatim, so this test
-// doesn't itself become the thing that silently drifts from fragments.nix.
+// existing REVIEW_LOOP_ORCHESTRATOR gate, plus the CAVEMAN_STEP_WORKER row
+// issue #2706 added on the existing CAVEMAN_BAKED gate) — and spot-checks a
+// handful of known rows rather than asserting the full payload verbatim, so
+// this test doesn't itself become the thing that silently drifts from
+// fragments.nix.
 func TestLoadRegistryParsesAllRows(t *testing.T) {
 	f, err := os.Open("testdata/registry.json")
 	if err != nil {
@@ -31,7 +33,7 @@ func TestLoadRegistryParsesAllRows(t *testing.T) {
 		t.Fatalf("LoadRegistry: %v", err)
 	}
 
-	const wantRows = 69
+	const wantRows = 70
 	if len(reg.Rows) != wantRows {
 		t.Fatalf("len(reg.Rows) = %d, want %d", len(reg.Rows), wantRows)
 	}
