@@ -46,6 +46,7 @@ in
       ${./image.nix} \
       ${./jira-status-mapping.nix} \
       ${./prompts.nix} \
+      ${./quickstart-golden.nix} \
       ${./schema-drift.nix}
     touch $out
   '';
