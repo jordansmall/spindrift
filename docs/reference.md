@@ -1144,8 +1144,48 @@ the authoritative list.
 | `DEV_SHELL_PROBE_TIMEOUT` | `300` | `sandbox`        | seconds before the in-box devShell probe is abandoned for the baked toolchain |
 | `MEMORY_LIMIT`         | `5g`    | `sandbox`          | per-container `--memory` cap (OCI only; empty disables) |
 | `PIDS_LIMIT`           | `512`   | `sandbox`          | per-container `--pids-limit` cap (OCI only; empty disables) |
-| `PODMAN_NETWORK`       | —       | `sandbox`          | `--network` value for podman run; set `pasta` to restrict egress |
-| `BWRAP_UNSHARE_NET`    | —       | `sandbox`          | non-empty adds `--unshare-net` to the bwrap runner      |
+| `NETWORK_MODE`         | `open`  | — (post-freeze; no legacy alias — set `infra.network.mode`) | Box network posture: `open` (runtime default, no isolation), `no-host-loopback` (keep egress, deny host-loopback on podman; inert-but-correct on docker/nerdctl, same as `open` there — unsupported on `runtime=bwrap`, eval error), `none` (fully offline — documented test-only, a Driver can't reach its Provider) — see [Network mode](#network-mode-network_mode) |
+| `PODMAN_NETWORK`       | —       | `sandbox`          | raw `--network` escape hatch for podman run; mutually exclusive with `NETWORK_MODE` at eval time |
+| `BWRAP_UNSHARE_NET`    | —       | `sandbox`          | raw `--unshare-net` escape hatch for bwrap; mutually exclusive with `NETWORK_MODE` at eval time |
+
+#### Network mode (`NETWORK_MODE`)
+
+`NETWORK_MODE` (`perSystem.spindrift.infra.network.mode`) is the primary
+network-posture knob — one of `open`, `no-host-loopback`, or `none`,
+rendered into the right per-runtime flag by the launcher:
+
+- **`open`** (default) — no isolation. bwrap shares the host netns as-is;
+  OCI runtimes apply no `--network` flag, so the runtime's own default
+  network (podman/docker/nerdctl bridge, general egress) applies.
+- **`no-host-loopback`** — keeps internet egress while denying
+  host-loopback, **on podman**: renders `--network=pasta` (no `--map-gw`),
+  which genuinely denies host-loopback by default. **On docker/nerdctl**
+  this mode currently renders `--network=bridge` — but `bridge` is
+  docker's/nerdctl's own *default* network, byte-identical to what `open`
+  already renders there (no `--network` flag at all falls back to the same
+  default bridge). Docker's/nerdctl's default bridge does **not** deny
+  host-loopback: a host service bound to `0.0.0.0` stays reachable from
+  inside the container via the bridge gateway IP (e.g. `172.17.0.1`, or
+  `host.docker.internal` where wired), regardless of this mode. So on
+  docker/nerdctl, `no-host-loopback` is currently an inert-but-correct
+  render — right backend syntax, no stronger isolation than `open` — not
+  yet a functional guarantee; podman is the runtime this mode's guarantee
+  actually holds on today.
+  **Unsupported on `runtime=bwrap`**: bwrap's `--unshare-net` is
+  all-or-nothing — no partial host-loopback carve-out — so a Consumer flake
+  combining `NETWORK_MODE=no-host-loopback` with `runtime=bwrap` fails at
+  `nix eval`, not at dispatch time.
+- **`none`** — fully offline. Renders `--network=none` on OCI runtimes and
+  `--unshare-net` on bwrap. This is **documented test-only**: a Driver
+  cannot reach its own Provider (the Anthropic API, GitHub Copilot, etc.)
+  under `none`, so it's only useful for tests that don't need a live model
+  call or a network-dependent assertion — not a real dispatch
+  configuration.
+
+Setting both `NETWORK_MODE` and a raw knob (`PODMAN_NETWORK` /
+`BWRAP_UNSHARE_NET`, i.e. `infra.network.podman` / `infra.network.bwrapUnshare`)
+on the same Consumer flake is an eval error — there is no precedence rule
+between them, pick one.
 
 #### Reaching a local/self-hosted model server under egress restriction
 
@@ -1153,25 +1193,37 @@ A local/self-hosted opencode Provider — Ollama, LM Studio, or a llama.cpp
 server (Tier 5; [ADR 0009](adr/0009-agent-cli-is-a-pluggable-driver.md)'s
 issue-#269 amendment) — is an OpenAI-compatible endpoint on the host loopback
 or LAN (`http://localhost:11434/v1`, `http://127.0.0.1:1234/v1`,
-`http://127.0.0.1:8080/v1`). Whether the Box can reach it turns entirely on the
-two knobs above, and the two runners differ:
+`http://127.0.0.1:8080/v1`). Whether the Box can reach it turns on
+[`NETWORK_MODE`](#network-mode-network_mode) (or, on a Consumer that still
+sets a raw knob instead, `PODMAN_NETWORK`/`BWRAP_UNSHARE_NET`), and the two
+runners differ:
 
-- **Defaults, either runner — already reachable.** bwrap with
-  `BWRAP_UNSHARE_NET` unset shares the host network namespace, and podman's
-  default bridge permits general egress, so a host-loopback/LAN model server is
-  reachable with no extra wiring. Selecting a local Provider opens nothing new;
-  the reachability is already latent.
-- **Restricted egress, podman — use a compound `--network` value.**
-  `PODMAN_NETWORK` is passed verbatim to `--network`, so a backend that both
-  restricts egress *and* reopens host-loopback works through the existing knob:
-  `PODMAN_NETWORK=pasta:--map-gw` or
-  `PODMAN_NETWORK=slirp4netns:allow_host_loopback=true`. Plain-default host-loopback
-  reach is rootless-podman-version/`containers.conf`-dependent — verify it against
-  your podman rather than assume it.
-- **Restricted egress, bwrap — unsupported today.** `BWRAP_UNSHARE_NET=1` is
-  all-or-nothing: it drops *all* egress (including GitHub), and no
-  slirp4netns/pasta companion is wired to punch a scoped host-loopback hole. A
-  local Provider under `BWRAP_UNSHARE_NET=1` is not reachable until such a
+- **`open` (default), either runner — already reachable.** bwrap shares the
+  host network namespace, and the OCI runtime's own default bridge permits
+  general egress, so a host-loopback/LAN model server is reachable with no
+  extra wiring. Selecting a local Provider opens nothing new; the
+  reachability is already latent.
+- **`no-host-loopback`, podman — reopen it with the raw escape hatch.**
+  `NETWORK_MODE=no-host-loopback` renders plain `--network=pasta`, which
+  denies host-loopback. For a backend that needs both restricted egress
+  *and* a reopened host-loopback hole, drop down to the raw `PODMAN_NETWORK`
+  knob instead — it's passed verbatim to `--network` and accepts a compound
+  value `network.mode` can't express: `PODMAN_NETWORK=pasta:--map-gw` or
+  `PODMAN_NETWORK=slirp4netns:allow_host_loopback=true`. (Remember
+  `NETWORK_MODE` and `PODMAN_NETWORK` are mutually exclusive at eval time —
+  using the raw knob for this means leaving `NETWORK_MODE` unset; an
+  explicit `NETWORK_MODE=open` still throws when paired with the raw
+  knob.)
+  Plain-default host-loopback reach is rootless-podman-version/
+  `containers.conf`-dependent — verify it against your podman rather than
+  assume it.
+- **`no-host-loopback`, bwrap — unsupported, rejected at eval.** This is the
+  exact cell `NETWORK_MODE=no-host-loopback` formally rejects at `nix eval`
+  when `runtime=bwrap` (see [Network mode](#network-mode-network_mode)):
+  bwrap's `--unshare-net` is all-or-nothing, dropping *all* egress
+  (including GitHub) with no slirp4netns/pasta companion wired to punch a
+  scoped host-loopback hole. The raw `BWRAP_UNSHARE_NET=1` knob hits the
+  same wall — a local Provider is not reachable under it until such a
   companion lands.
 
 Reopening host loopback under a restricted-egress config is a deliberate
