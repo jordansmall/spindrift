@@ -72,6 +72,27 @@
     fragment = "caveman-default-review.md";
     var = "CAVEMAN_STEP_REVIEW";
   }
+  # The research-role variant of the CAVEMAN_STEP row above (issue #2708,
+  # reusing the existing CAVEMAN_BAKED gate): unlike worker, a research pass
+  # DOES produce human-facing output -- the posted verdict comment is the
+  # product a human reads to decide whether to promote the issue, and a
+  # later worker picks up its context-for-a-worker section cold.
+  # caveman-default.md's marker-only exemption (naming just the
+  # SPINDRIFT_OUTCOME/VERDICT/PR-intent lines) isn't wide enough here, so
+  # this fragment instead exempts the entire posted verdict comment in full
+  # -- the verdict line and rationale, the context-for-a-worker section, the
+  # open-questions section, and the `<!-- spindrift-research -->` machine
+  # marker -- on top of the usual SPINDRIFT_OUTCOME/note=/SPINDRIFT_COMMENT
+  # exemption. Same CAVEMAN_BAKED gate as the rows above: the gate controls
+  # whether this step renders into the prompt, not whether a research
+  # dispatch exists at all -- a research dispatch runs with an empty step
+  # when the caveman skill isn't baked, same as the CAVEMAN_STEP/
+  # CAVEMAN_STEP_WORKER/CAVEMAN_STEP_REVIEW rows.
+  {
+    gate = "CAVEMAN_BAKED";
+    fragment = "caveman-default-research.md";
+    var = "CAVEMAN_STEP_RESEARCH";
+  }
   {
     gate = "TDD_BAKED";
     fragment = "tdd-default.md";
