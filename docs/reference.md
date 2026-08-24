@@ -239,6 +239,38 @@ entries, including a custom Nth agent beyond the historical four. When
 `agents.models.*` defaults) and reproducing today's
 scout/reviewer/filer/worker composition exactly.
 
+Every roster — explicit or default — passes through `lib/roster.nix`'s
+`normalizeRoster` before either Driver renders it, and `normalizeRoster` is
+strict (issue #2571): the entry key set is closed, so an unrecognized key
+throws at eval time the same way an unknown `defaults` key does. `model`
+must be present as a *key* on every entry — an explicit `model = ""` is
+still the supported opt-out for dropping that entry (#392, below), but
+omitting the `model` key entirely throws. `normalizeRoster` itself only
+validates: it never drops the `model = ""` entry, which passes through as
+an ordinary, valid entry. The drop is a separate step —
+`rosterLib.dropOptedOut` — that `lib/mkHarness.nix` applies once, right
+after `normalizeRoster` succeeds and before either Driver ever sees the
+roster (see below). `promptFile` must resolve to a
+real file on disk under `templates/default/prompts/`, or the entry must
+carry a non-null, non-empty inline `prompt`; an entry with neither — a
+typo'd `promptFile` and no inline `prompt` — throws instead of silently baking an
+agent with no resolvable prompt (issue #2555 user story 23). This applies
+to hand-authored `roster` entries as much as to `defaultRoster`'s own
+built-in four, though in practice the built-in four always ship a real
+`promptFile` under `templates/default/prompts/`.
+
+This promptFile check runs at eval time against the checked-in
+`templates/default/prompts/` directory only, so it cannot see a file that's
+only ever supplied via a *runtime* prompt-dir override
+(`SPINDRIFT_PROMPT_DIR` env var / `--prompt-dir` flag /
+`perSystem.spindrift.agents.promptDir` flake option — see the
+`SPINDRIFT_PROMPT_DIR` row further down and the
+`scoutPrompt`/`reviewPrompt`/`filerPrompt` row above): that directory
+doesn't exist yet at build time. A custom roster entry whose real prompt
+file lives only in a runtime prompt-dir override must instead supply an
+inline `prompt` (or ship a real file under the checked-in
+`templates/default/prompts/`) to pass eval.
+
 `defaultRoster`'s own roster-native surface for setting models is its
 `models` argument (issue #2426): an attrset keyed by roster entry name
 (`scout`/`reviewer`/`filer`/`worker`), e.g. `defaultRoster { models = {
@@ -301,12 +333,15 @@ knob is set (`lib/mkHarness.nix` applies `reviewEffort` as a post-processing
 step on the fully resolved roster, downstream of `defaultRoster` and
 everything it produces, `byName` included).
 
-An entry with an empty (or absent) `model` is dropped from both Drivers'
-rendered config, the same per-agent omission the four legacy knobs give today
-(#392). `lib/drivers/claude.nix` renders the roster into the `--agents` JSON
-flag (one key per non-empty-model entry); `lib/drivers/opencode.nix` renders
-it into `.config/opencode/agents/<name>.md` files instead, one per
-non-empty-model entry, each with `description`/`mode`/`model` frontmatter.
+An entry with an empty `model` is dropped upstream of both Drivers, by
+`rosterLib.dropOptedOut` (`lib/roster.nix`), which `lib/mkHarness.nix` applies
+once right after `normalizeRoster` succeeds — the same per-agent omission the
+four legacy knobs give today (#392), just resolved once before either Driver
+sees the roster rather than inside each Driver's own render function.
+`lib/drivers/claude.nix` renders the roster it's handed into the `--agents`
+JSON flag; `lib/drivers/opencode.nix` renders it into
+`.config/opencode/agents/<name>.md` files instead, one per entry, each with
+`description`/`mode`/`model` frontmatter.
 
 An entry may also set `effort` (issue #2242), a pass-through, driver-specific
 effort/reasoning-level string — spindrift does not normalize it, so the value
@@ -511,8 +546,8 @@ Driver entry declares:
   roster](#subagent-roster)) returning an attrset of HOME-relative path →
   file content, for a Driver whose subagents land as on-disk files rather
   than a `--agents` flag (opencode renders
-  `.config/opencode/agents/<name>.md`, one per roster entry with a non-empty
-  model). Required; `claude` returns `{ }` and composes subagents via
+  `.config/opencode/agents/<name>.md`, one per roster entry). Required;
+  `claude` returns `{ }` and composes subagents via
   `agentsJsonTemplate` instead, which also takes `{ roster }`.
 - `sessionCacheDirRelative` — where the agent CLI's session transcripts
   live, relative to `$HOME`. Optional; a Driver that omits it has no
@@ -836,7 +871,7 @@ keeping the agent's toolchain and your dev shell from one pin (ADR 0002).
 
 `spindrift.lib.rosterLib` (issue #2560) is part of that same versioned
 Consumer contract. It's a curried function: call it with your own `lib` to
-get `{ normalizeRoster; defaultRoster; }`. `defaultRoster` is what
+get `{ normalizeRoster; dropOptedOut; defaultRoster; }`. `defaultRoster` is what
 `mkHarness`'s no-explicit-roster fallback path uses internally to build the
 four-agent scout/reviewer/filer/worker roster — a Consumer can call it
 directly to build a custom roster without hand-authoring all four entries.
@@ -850,11 +885,14 @@ perSystem = { inputs, lib, ... }: {
 };
 ```
 
-`normalizeRoster` is the other function in the returned attrset: the same
-validation/`promptFile`-default pass `mkHarness` runs on every roster before
-handing it to a Driver (issue #2152 slice A), useful to a Consumer building
-an entirely hand-authored `roster` list who wants it caught at eval time
-rather than downstream.
+The other two functions in the returned attrset are `dropOptedOut` and
+`normalizeRoster`. `normalizeRoster` is the same validation/`promptFile`-default
+pass `mkHarness` runs on every roster before handing it to a Driver (issue
+#2152 slice A), useful to a Consumer building an entirely hand-authored
+`roster` list who wants it caught at eval time rather than downstream.
+`dropOptedOut` is the #392 opt-out step: it drops any entry whose `model` is
+the explicit `""` sentinel, the step `mkHarness` runs after `normalizeRoster`
+and right before handing the roster to a Driver.
 
 ### Targeting repos that define their own devShell toolchain
 
