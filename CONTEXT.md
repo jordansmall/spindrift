@@ -592,8 +592,9 @@ operator from zero to a validated, buildable Consumer flake in one command. It
 runs *before* the `spindrift` binary exists (which is why it cannot be a
 subcommand: `runtime`/`driver` are baked into the wrapper the binary is built
 from, and the fields it sets live in `flake.nix`, not env). A TTY-only wizard
-that detects what it can (container runtime by `podman → docker → bwrap`, host
-git identity, repoSlug from `git remote`, an ambient token) and asks only the
+that detects what it can (container runtime by `podman → docker →
+nerdctl(⇒ rancher) → bwrap`, host git identity, repoSlug from `git remote`,
+an ambient token) and asks only the
 irreducible rest, then writes a minimal generated `flake.nix` + secrets-only
 `harness.env` + `.gitignore` + `.envrc` (no `prompts/` — the Harness defaults
 every prompt), and finishes through `spindrift doctor` and `spindrift build`
