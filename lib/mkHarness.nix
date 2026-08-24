@@ -42,6 +42,12 @@
   # always has. A Consumer that sets `roster` explicitly takes over agent
   # composition entirely; the legacy knobs are then ignored.
   roster ? null,
+  # Name-keyed model/effort shorthand (issue #2560) forwarded straight into
+  # `rosterLib.defaultRoster`'s own `byName` param below. Like the legacy
+  # per-agent model knobs, it only takes effect when `roster` is null -- an
+  # explicit `roster` always wins over every shorthand (see the doc comment
+  # above `roster ? null,`).
+  byName ? { },
   conflictResolvePrompt ? builtins.readFile ../templates/default/prompts/conflict-resolve-prompt.md,
   # Driven instead of `prompt` on a fix box (FIX_PASS>0, ADR: selfHeal/runFix
   # in cmd/launcher): the branch is already checked out, so this warm-fix
@@ -437,6 +443,7 @@ let
         reviewModel = mergedDefaults.reviewModel or "";
         filerModel = mergedDefaults.filerModel or "";
         workerModel = mergedDefaults.workerModel or "";
+        inherit byName;
       }
   );
   # reviewEffort (issue #2512) is the one legacy knob that overrides an
