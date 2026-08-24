@@ -134,6 +134,19 @@ func (hostEnvironment) GitRemoteURL() string {
 	return strings.TrimSpace(string(out))
 }
 
+// InsideGitWorkTree reports whether dir sits inside a git work tree, so the
+// finish line can warn the operator to `git add` the newly written scaffold
+// files before an untracked flake.nix silently breaks `nix develop`/direnv
+// (issue #2567).
+func (hostEnvironment) InsideGitWorkTree(dir string) bool {
+	cmd := exec.Command("git", "-C", dir, "rev-parse", "--is-inside-work-tree")
+	out, err := cmd.Output()
+	if err != nil {
+		return false
+	}
+	return strings.TrimSpace(string(out)) == "true"
+}
+
 // parseRemoteHostSlug extracts the host and "owner/repo" slug from a git
 // remote URL in any common form — scp-like ssh (git@host:owner/repo.git),
 // ssh:// (ssh://git@host/owner/repo.git), or https

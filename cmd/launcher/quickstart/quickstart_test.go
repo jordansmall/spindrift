@@ -16,15 +16,20 @@ import (
 )
 
 type fakeEnvironment struct {
-	env            map[string]string
-	tokenScopes    []string
-	tokenScopesErr error
-	ghAuthToken    string
-	ghAuthTokenErr error
-	runtimes       map[string]bool
-	gitConfig      map[string]string
-	repoSlug       string
-	remoteURL      string
+	env               map[string]string
+	tokenScopes       []string
+	tokenScopesErr    error
+	ghAuthToken       string
+	ghAuthTokenErr    error
+	runtimes          map[string]bool
+	gitConfig         map[string]string
+	repoSlug          string
+	remoteURL         string
+	insideGitWorkTree bool
+	// insideGitWorkTreeDir, if non-nil, records the dir InsideGitWorkTree was
+	// last called with, so tests can pin that runQuickstart probes the
+	// SCAFFOLD directory rather than some other path (issue #2567).
+	insideGitWorkTreeDir *string
 }
 
 func (f fakeEnvironment) LookPath(file string) (string, error) {
@@ -47,6 +52,13 @@ func (f fakeEnvironment) GitConfig(key string) string { return f.gitConfig[key] 
 func (f fakeEnvironment) GitRemoteRepoSlug() string { return f.repoSlug }
 
 func (f fakeEnvironment) GitRemoteURL() string { return f.remoteURL }
+
+func (f fakeEnvironment) InsideGitWorkTree(dir string) bool {
+	if f.insideGitWorkTreeDir != nil {
+		*f.insideGitWorkTreeDir = dir
+	}
+	return f.insideGitWorkTree
+}
 
 func withPodman() fakeEnvironment {
 	return fakeEnvironment{runtimes: map[string]bool{"podman": true}}
@@ -735,6 +747,84 @@ func TestRunQuickstart_HappyPath_WritesFiles(t *testing.T) {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("expected transcript to mention %q, got:\n%s", want, out.String())
 		}
+	}
+}
+
+// TestRunQuickstart_InsideGitWorkTree_FinishLineRemindsGitAdd covers issue
+// #2567: an untracked flake.nix is invisible to `nix develop`/direnv, so when
+// the wizard runs inside a git work tree the finish line must remind the
+// operator to `git add` the newly written scaffold files.
+func TestRunQuickstart_InsideGitWorkTree_FinishLineRemindsGitAdd(t *testing.T) {
+	dir := t.TempDir()
+	var out bytes.Buffer
+	stdin := defaultQuickstartStdin()
+	var probedDir string
+	env := fakeEnvironment{
+		env:                  map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "claude-oauth-faketoken"},
+		runtimes:             map[string]bool{"podman": true},
+		insideGitWorkTree:    true,
+		insideGitWorkTreeDir: &probedDir,
+	}
+
+	if err := runQuickstart(dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false); err != nil {
+		t.Fatalf("runQuickstart: %v", err)
+	}
+
+	if probedDir != dir {
+		t.Errorf("InsideGitWorkTree called with dir %q, want the SCAFFOLD dir %q", probedDir, dir)
+	}
+
+	const finishLineMarker = "Quickstart complete. Wrote:"
+	idx := strings.Index(out.String(), finishLineMarker)
+	if idx == -1 {
+		t.Fatalf("expected transcript to contain finish line marker %q, got:\n%s", finishLineMarker, out.String())
+	}
+	finishBlock := out.String()[idx:]
+
+	var reminderLine string
+	for _, line := range strings.Split(finishBlock, "\n") {
+		if strings.Contains(line, "git add") {
+			reminderLine = line
+			break
+		}
+	}
+	if reminderLine == "" {
+		t.Fatalf("expected closing summary (at or after %q) to remind the operator to `git add` the written files, got:\n%s", finishLineMarker, finishBlock)
+	}
+	// The reminder must name the trackable files explicitly rather than
+	// pointing at "the files above" — that phrase also covers harness.env,
+	// which is gitignored and holds a live GH/Forgejo token plus a Claude
+	// credential (issue #2567).
+	for _, name := range []string{"flake.nix", ".gitignore", ".envrc"} {
+		if !strings.Contains(reminderLine, name) {
+			t.Errorf("expected git add reminder line to name %q explicitly, got:\n%s", name, reminderLine)
+		}
+	}
+	if strings.Contains(reminderLine, "harness.env") {
+		t.Errorf("expected git add reminder line never to mention harness.env (secret, always gitignored), got:\n%s", reminderLine)
+	}
+}
+
+// TestRunQuickstart_NotInsideGitWorkTree_FinishLineOmitsGitAddReminder is the
+// negative counterpart of TestRunQuickstart_InsideGitWorkTree_FinishLineRemindsGitAdd:
+// outside a git work tree there is nothing to `git add`, so the reminder must
+// not appear.
+func TestRunQuickstart_NotInsideGitWorkTree_FinishLineOmitsGitAddReminder(t *testing.T) {
+	dir := t.TempDir()
+	var out bytes.Buffer
+	stdin := defaultQuickstartStdin()
+	env := fakeEnvironment{
+		env:               map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "claude-oauth-faketoken"},
+		runtimes:          map[string]bool{"podman": true},
+		insideGitWorkTree: false,
+	}
+
+	if err := runQuickstart(dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false); err != nil {
+		t.Fatalf("runQuickstart: %v", err)
+	}
+
+	if strings.Contains(out.String(), "git add") {
+		t.Errorf("expected closing summary not to mention `git add` outside a git work tree, got:\n%s", out.String())
 	}
 }
 
@@ -1714,11 +1804,13 @@ func TestRunQuickstart_FinishLine_ProbesForgeThenCreatesLabelsThenBuilds(t *test
 // injected and which rerun command is expected.
 func TestRunQuickstart_FailsAfterWrite_NamesWrittenFilesAndRerunCommand(t *testing.T) {
 	cases := []struct {
-		name          string
-		forge         *forge.Fake
-		runErr        error
-		wantRerun     string
-		wantThenBuild bool // doctor failure should also point at the remaining build step
+		name               string
+		forge              *forge.Fake
+		runErr             error
+		wantRerun          string
+		wantThenBuild      bool // doctor failure should also point at the remaining build step
+		insideGitWorkTree  bool
+		wantGitAddReminder bool
 	}{
 		{
 			name:          "doctor",
@@ -1728,10 +1820,41 @@ func TestRunQuickstart_FailsAfterWrite_NamesWrittenFilesAndRerunCommand(t *testi
 			wantThenBuild: true,
 		},
 		{
+			// Covers the doctor-failure-inside-a-work-tree path, which the
+			// "doctor" case above (run outside a git work tree) leaves
+			// unpinned: doctor.Run can fail for reasons unrelated to the
+			// untracked scaffold files, but the reminder and the
+			// postWriteFailure git-add clause must still fire regardless of
+			// which post-write step failed.
+			name:               "doctor_insideGitWorkTree",
+			forge:              func() *forge.Fake { f := forge.NewFake(); f.ProbeErr = forge.ErrAuthFailure; return f }(),
+			runErr:             nil,
+			wantRerun:          spindriftDoctorArgs,
+			wantThenBuild:      true,
+			insideGitWorkTree:  true,
+			wantGitAddReminder: true,
+		},
+		{
 			name:      "build",
 			forge:     passingForge(),
 			runErr:    fmt.Errorf("exit status 1"),
 			wantRerun: strings.Join(spindriftBuildArgs, " "),
+		},
+		{
+			// Covers issue #2567 bug A/B: inside a git work tree, an
+			// untracked flake.nix is invisible to the `nix develop`
+			// subprocess the build step shells out to, so the build step
+			// fails for exactly the reason the git-add reminder exists to
+			// prevent. The reminder must still land on the transcript
+			// before the failing step runs, and the returned error itself
+			// must mention `git add` so the rerun command it hands the
+			// operator doesn't just fail the same way again.
+			name:               "build_insideGitWorkTree",
+			forge:              passingForge(),
+			runErr:             fmt.Errorf("exit status 1"),
+			wantRerun:          strings.Join(spindriftBuildArgs, " "),
+			insideGitWorkTree:  true,
+			wantGitAddReminder: true,
 		},
 	}
 
@@ -1740,7 +1863,11 @@ func TestRunQuickstart_FailsAfterWrite_NamesWrittenFilesAndRerunCommand(t *testi
 			dir := t.TempDir()
 			var out bytes.Buffer
 			stdin := defaultQuickstartStdin()
-			env := fakeEnvironment{env: map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "claude-oauth-faketoken"}, runtimes: map[string]bool{"podman": true}}
+			env := fakeEnvironment{
+				env:               map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "claude-oauth-faketoken"},
+				runtimes:          map[string]bool{"podman": true},
+				insideGitWorkTree: tc.insideGitWorkTree,
+			}
 			runner := &fakeCommandRunner{runErr: tc.runErr}
 
 			err := runQuickstart(dir, env, runner, fakeForgeBuilder(tc.forge), &out, stdin, true, false)
@@ -1770,6 +1897,33 @@ func TestRunQuickstart_FailsAfterWrite_NamesWrittenFilesAndRerunCommand(t *testi
 			}
 			if !tc.wantThenBuild && strings.Contains(err.Error(), "also run:") {
 				t.Errorf("expected build failure (no remaining step) not to mention an `also run:` clause, got: %v", err)
+			}
+
+			if tc.wantGitAddReminder {
+				var reminderLine string
+				for _, line := range strings.Split(out.String(), "\n") {
+					if strings.Contains(line, "git add") {
+						reminderLine = line
+						break
+					}
+				}
+				if reminderLine == "" {
+					t.Fatalf("expected transcript to contain a `git add` reminder even though the %s step failed, got:\n%s", tc.name, out.String())
+				}
+				for _, name := range []string{"flake.nix", ".gitignore", ".envrc"} {
+					if !strings.Contains(reminderLine, name) {
+						t.Errorf("expected git add reminder line to name %q explicitly, got:\n%s", name, reminderLine)
+					}
+				}
+			}
+
+			// postWriteFailure embeds the git-add clause directly into the
+			// returned error's message whenever the run was inside a git
+			// work tree, independent of which post-write step failed — so
+			// the rerun command it hands the operator doesn't just fail the
+			// same way again.
+			if tc.insideGitWorkTree && !strings.Contains(err.Error(), "git add") {
+				t.Errorf("expected the returned error itself to mention `git add` (so the rerun command it hands the operator doesn't just fail the same way again), got: %v", err)
 			}
 
 			if _, statErr := os.Stat(filepath.Join(dir, "flake.nix")); statErr != nil {
