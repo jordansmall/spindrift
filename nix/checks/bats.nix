@@ -263,6 +263,19 @@ let
     PROMPTASSEMBLY_REGISTRY_FILE = promptassemblyRegistryJsonFile;
     PROMPT_CONTRACT_REGISTRY_FILE = promptContractRegistryJsonFile;
     FORBIDDEN_MARKERS_REGISTRY_FILE = forbiddenMarkersRegistryJsonFile;
+    # Widens wait_for_log_lines' (tests/helper.bash, issue #2649) default
+    # poll patience from 2s for this gate specifically: a serially-run
+    # bats suite on a loaded host can outrun the tight local-dev
+    # default, and Nix's scrubbed build sandbox is the only place a
+    # human can move that number without editing every default-timeout
+    # call site -- a shell-level `WAIT_FOR_LOG_LINES_TIMEOUT=N nix
+    # flake check` never reaches this sandboxed bash process. A bare
+    # `bats tests/` run outside this derivation doesn't fall back to the
+    # tighter 2s default either -- it never gets that far, dying in every
+    # test's setup() on FAKES_DIR's `: "${FAKES_DIR:?...}"` guard (and the
+    # suite's other required env vars this derivation exports), since
+    # nothing else supplies them.
+    WAIT_FOR_LOG_LINES_TIMEOUT = "10";
   };
 
   # The `bats` derivation's shared builder setup: stage a writable copy of
