@@ -65,8 +65,9 @@ for the unknowing, ignorable by everyone else.
   the Driver at all*, the entrypoint relaunches once in the baked env, but once
   the agent has started doing work there is no mid-run fallback.
 
-`nixInBox = true` is a prerequisite for this whole path — the devShell can only
-be entered inside the box if `nix` is present there (ADR 0008).
+`infra.nix.inBox = true` is a prerequisite for this whole path — the
+devShell can only be entered inside the box if `nix` is present there
+(ADR 0008).
 
 ## Harness tools stay reachable inside the devShell
 

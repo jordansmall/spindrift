@@ -39,10 +39,10 @@ never offers them. Detected values
 (runtime by `podman → docker → nerdctl(⇒ rancher) → bwrap` precedence, git
 identity from host `git config`, repoSlug from `git remote`) appear as inline
 pre-filled defaults. nerdctl is probed after docker since Rancher Desktop's
-dockerd mode already satisfies the `docker` branch. Git
-identity is baked into `settings.repository` rather than left to the runtime
-host-config fallback, so the committed flake reproduces in CI where no host git
-config exists. It finishes by running `spindrift doctor` (probe the forge,
+dockerd mode already satisfies the `docker` branch. Git identity is baked
+into `git.user.name`/`git.user.email` rather than left to the runtime
+host-config fallback, so the committed flake reproduces in CI where no host
+git config exists. It finishes by running `spindrift doctor` (probe the forge,
 create the four triage labels) and then `spindrift build` — warning that the
 first image realization is slow — leaving `spindrift dispatch` as the only
 remaining step.
@@ -80,7 +80,7 @@ remaining step.
   Quick start, alongside (not replacing) `nix flake init -t` for users who
   prefer to hand-edit.
 - Glossary term **Quickstart** lands in CONTEXT.md with this decision.
-- `runtime = "rancher"` (issue #1274) is in the detection chain above (issue
-  #1275): nerdctl is probed after docker, since Rancher Desktop's dockerd mode
-  already satisfies the `docker` branch and only containerd mode needs the
-  nerdctl/rancher branch.
+- `infra.runtime = "rancher"` (issue #1274) is in the detection chain above
+  (issue #1275): nerdctl is probed after docker, since Rancher Desktop's
+  dockerd mode already satisfies the `docker` branch and only containerd
+  mode needs the nerdctl/rancher branch.

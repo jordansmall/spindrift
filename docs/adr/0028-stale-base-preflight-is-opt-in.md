@@ -43,10 +43,10 @@ therefore a *default*, not a removal.
 ## Decision
 
 Gate the stale-base preflight behind a dedicated knob, `PREFLIGHT_STALE_BASE`
-(flake option `preflightStaleBase`, `settings.selfHealing.preflightStaleBase`),
-**off by default**. When off, `preflightStaleBase` returns immediately without
-even querying `NeedsUpdate` — no wasted compare-API round-trip — and a
-green-but-behind PR merges as-is, relying on its green CI as the landing gate.
+(flake option `git.merge.preflightStaleBase`), **off by default**. When off,
+`preflightStaleBase` returns immediately without even querying
+`NeedsUpdate` — no wasted compare-API round-trip — and a green-but-behind PR
+merges as-is, relying on its green CI as the landing gate.
 When on, ADR 0026's behavior is restored verbatim: a `NeedsUpdate`-true PR is
 rebased and re-greened before the merge, drawing on `MAX_REBASE_ATTEMPTS` for
 its budget.

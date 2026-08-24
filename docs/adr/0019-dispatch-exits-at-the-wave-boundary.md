@@ -82,8 +82,8 @@ an explicit override into hidden machine state.
   dependency graph in one invocation; a driving loop (dogfood.sh, CI, or a
   human re-running) drains it wave by fresh wave, terminating on exit 2
   (queue empty) or 3 (none dispatchable).
-- `DEPS_POLL_SECS`/`DEPS_WAIT_SECS` leave the settings surface
-  (`settings.concurrency.depsPollSecs`/`depsWaitSecs` included). Under the
+- `DEPS_POLL_SECS`/`DEPS_WAIT_SECS` leave the settings surface entirely,
+  their old deprecated `settings.<section>` aliases removed too. Under the
   pre-1.0 policy (ADR 0010) this ships as a breaking MINOR; a consumer who
   set them gets the loud unknown-key eval error naming the valid keys.
 - The dependency-deadlock failure mode moves from "error after

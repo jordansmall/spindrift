@@ -109,7 +109,7 @@ The original decision above fixed the verdict set at three tokens
 universal — a deployment may want different verdict names, more or fewer
 terminals, or different label text — so the vocabulary and its label
 mapping move behind a new operator knob, `RESEARCH_VERDICTS` (flake option
-`settings.issues.research.verdicts`, schema key `researchVerdicts`; see
+`issues.research.verdicts`, schema key `researchVerdicts`; see
 [Configuring the research verdict vocabulary
 (`RESEARCH_VERDICTS`)](../reference.md#configuring-the-research-verdict-vocabulary-research_verdicts)
 for the operator-facing format and validation rules). The default remains

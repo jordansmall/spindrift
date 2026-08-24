@@ -29,9 +29,10 @@ shrinking the runtime to a thin, daemonless exec, not deleting it.
   usually root; heavier and less portable than bubblewrap for an unprivileged
   per-issue exec; rejected in favour of bwrap (revisit for hosts already on
   nspawn).
-- **Make bubblewrap a drop-in `runtime = "bwrap"`** — the existing `runtime`
-  knob assumes OCI verbs (`run`/`load`/`image exists`); bwrap has no image to
-  load, so it is a distinct runner code path, not another OCI CLI name.
+- **Make bubblewrap a drop-in `infra.runtime = "bwrap"`** — the existing
+  `runtime` knob assumes OCI verbs (`run`/`load`/`image exists`); bwrap has
+  no image to load, so it is a distinct runner code path, not another OCI
+  CLI name.
 
 ## Consequences
 
@@ -44,7 +45,7 @@ closure but skips the image/`load` step, and the entrypoint must not assume an
 OCI filesystem layout — it already clones into a work dir and reads a mounted
 prompt, both of which bwrap supplies as bind mounts.
 
-`runtime = "rancher"` (issue #1274) adds a third OCI CLI name — Rancher
+`infra.runtime = "rancher"` (issue #1274) adds a third OCI CLI name — Rancher
 Desktop's containerd mode, driven via `nerdctl` — and is the first runtime
 value where the knob value differs from the binary it execs (podman and
 docker were value == binary). The `rancher → nerdctl` alias lives in exactly
