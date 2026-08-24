@@ -21,6 +21,11 @@
     "var": "CAVEMAN_STEP_REVIEW"
   },
   {
+    "gate": "CAVEMAN_BAKED",
+    "fragment": "caveman-default-research.md",
+    "var": "CAVEMAN_STEP_RESEARCH"
+  },
+  {
     "gate": "TDD_BAKED",
     "fragment": "tdd-default.md",
     "var": "TDD_STEP"

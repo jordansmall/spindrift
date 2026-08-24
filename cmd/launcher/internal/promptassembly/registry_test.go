@@ -7,21 +7,28 @@ import (
 )
 
 // TestLoadRegistryParsesAllRows loads testdata/registry.json — the hand
-// transcription of every row in lib/fragments.nix (71 rows: 67 as of issue
-// #2526's removal of the LAND_GIT_PUSH_READ_ONLY_STEP row issue #2510 had
-// added -- an eval-time assert now makes BOX_FORGE_AND_ISSUE_ACCESS=
-// read-only paired with CODE_FORGE=git unbuildable, so no image needing
-// that step can exist -- plus the LAND_GIT_STOP_READ_WRITE_STEP/
-// LAND_GIT_STOP_READ_ONLY_STEP pair this same issue's review pass added
-// right after, to fix the orphaned "2." the LAND_GIT_PUSH_READ_ONLY_STEP
-// removal left behind in the CODE_FORGE=git block's own final step, plus
-// the COMMIT_REWORK_ORCHESTRATOR_STEP row issue #2698 added on the
-// existing REVIEW_LOOP_ORCHESTRATOR gate, plus the CAVEMAN_STEP_WORKER row
-// issue #2706 added on the existing CAVEMAN_BAKED gate, plus the
-// CAVEMAN_STEP_REVIEW row issue #2707 added on the same CAVEMAN_BAKED
-// gate) — and spot-checks a handful of known rows rather than asserting the
-// full payload verbatim, so this test doesn't itself become the thing that
-// silently drifts from fragments.nix.
+// transcription of every row in lib/fragments.nix (72 rows, reconciled via
+// `git log --oneline -- lib/fragments.nix` as: 67 as of issue #2526's
+// removal (commit 44d101bd) of the LAND_GIT_PUSH_READ_ONLY_STEP row issue
+// #2510 had added -- an eval-time assert now makes
+// BOX_FORGE_AND_ISSUE_ACCESS=read-only paired with CODE_FORGE=git
+// unbuildable, so no image needing that step can exist -- plus 2 for the
+// LAND_GIT_STOP_READ_WRITE_STEP/LAND_GIT_STOP_READ_ONLY_STEP pair this same
+// issue's review pass (commit 6b275e1b) added right after, to fix the
+// orphaned "2." the LAND_GIT_PUSH_READ_ONLY_STEP removal left behind in the
+// CODE_FORGE=git block's own final step (69), plus 1 for the
+// COMMIT_REWORK_ORCHESTRATOR_STEP row issue #2698 added (commit 48bef325)
+// on the existing REVIEW_LOOP_ORCHESTRATOR gate (70), minus 1 for the
+// COORDINATOR_PARALLEL_STEP row issue #2061/#2497's parallel-dispatch
+// removal (commit 45679577) dropped (69), plus 1 for the CAVEMAN_STEP_WORKER
+// row issue #2706 added (commit e3cfc7cd) on the existing CAVEMAN_BAKED gate
+// (70), plus 1 for the CAVEMAN_STEP_REVIEW row issue #2707 added (commit
+// b27ed6eb) on the same CAVEMAN_BAKED gate (71), plus 1 for the
+// CAVEMAN_STEP_RESEARCH row issue #2708 added (commit 48ba64a2, this
+// branch) on the same CAVEMAN_BAKED gate (72)) — and spot-checks a handful
+// of known rows rather than asserting the full payload verbatim, so this
+// test doesn't itself become the thing that silently drifts from
+// fragments.nix.
 func TestLoadRegistryParsesAllRows(t *testing.T) {
 	f, err := os.Open("testdata/registry.json")
 	if err != nil {
@@ -34,7 +41,7 @@ func TestLoadRegistryParsesAllRows(t *testing.T) {
 		t.Fatalf("LoadRegistry: %v", err)
 	}
 
-	const wantRows = 71
+	const wantRows = 72
 	if len(reg.Rows) != wantRows {
 		t.Fatalf("len(reg.Rows) = %d, want %d", len(reg.Rows), wantRows)
 	}
