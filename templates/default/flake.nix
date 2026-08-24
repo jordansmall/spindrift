@@ -60,19 +60,47 @@
             #     enable = false;
             #   };
             #   models = {
+            #     # Name-keyed model/effort shorthand (issue #2560): a lighter alternative to the roster list below when you only want to override one agent's model or effort.
+            #     byName = {
+            #       filer = {
+            #         model = "claude-haiku-4-5-20251001";
+            #         effort = "high";
+            #       };
+            #     };
             #     # main/coordinator Claude model for the agent (zero-rebuild runtime switch); worker-tier defaults are unaffected
             #     default = "claude-sonnet-5";
             #     # main/coordinator reasoning-effort level for the agent (zero-rebuild runtime switch); pass-through only, no normalization -- the value must be valid for the active Driver: claude accepts low/medium/high/xhigh/max (appended as --effort <level>), opencode's cross-provider variant selector accepts a provider-specific set (appended as --variant <level>); unset emits no argument for either Driver, leaving the Driver's own default effort in place
             #     effort = "";
-            #     # filer subagent model tier; empty (default) omits the filer entry from --agents and means the filer is not provisioned at all — setting a model is the opt-in (recommended: claude-haiku-4-5-20251001). DEPRECATED: superseded by the roster option (see docs/reference.md); these per-agent knobs still work but will be removed.
+            #     # filer subagent model tier; empty (default) omits the filer entry from --agents and means the filer is not provisioned at all — setting a model is the opt-in (recommended: claude-haiku-4-5-20251001). DEPRECATED: superseded by the byName/roster options (agents.models.byName for a one-agent override, agents.models.roster for the full list; see docs/reference.md); these per-agent knobs still work but will be removed.
             #     filer = "";
-            #     # reviewer subagent model tier; empty omits the reviewer entry from --agents; the flag itself is omitted only when no subagent model is set. DEPRECATED for non-orchestrator use: superseded by the roster option (see docs/reference.md). Under ORCHESTRATOR, the roster reviewer entry is itself superseded by the code-owned review pass, which instead binds its model from this value (captured before the roster entry is deleted, falling back to the coordinator model when unset).
+            #     # reviewer subagent model tier; empty omits the reviewer entry from --agents; the flag itself is omitted only when no subagent model is set. DEPRECATED for non-orchestrator use: superseded by the byName/roster options (agents.models.byName for a one-agent override, agents.models.roster for the full list; see docs/reference.md). Under ORCHESTRATOR, the roster reviewer entry is itself superseded by the code-owned review pass, which instead binds its model from this value (captured before the roster entry is deleted, falling back to the coordinator model when unset).
             #     review = "claude-opus-5";
             #     # value for the orchestrator's code-owned review pass's own --effort flag (issue #2387); pass-through only, no normalization, same accepted values as EFFORT for the active Driver. Overrides the roster reviewer entry's own effort (rosterDefaults.reviewer.effort by default), regardless of whether the roster is the built-in default or a Consumer-supplied explicit one (lib/mkHarness.nix applies the override post-normalize, issue #2512) -- empty means follow the roster, a non-empty value overrides it. Unlike the four legacy per-agent model knobs (scoutModel/reviewModel/filerModel/workerModel), which an explicit roster arg always wins over, this override applies regardless of roster source (lib/roster.nix). Meaningful only under ORCHESTRATOR: the resolved value reaches the orchestrator via the prompt-assembly Handoff's ReviewEffort field (issue #2512), mirroring how ReviewModel reaches it. Like REVIEW_MODEL, this is a nix-build-time-only knob: setting it at dispatch time (REVIEW_EFFORT=... / --review-effort ...) has no runtime effect on an already-built image -- only this flake option, baked in and rebuilt, changes what the review pass runs at (issue #2512; see MIGRATING.md).
             #     reviewEffort = "";
-            #     # scout subagent model tier; empty omits the scout entry from --agents; the flag itself is omitted only when no subagent model is set. DEPRECATED: superseded by the roster option (see docs/reference.md); these per-agent knobs still work but will be removed.
+            #     # Subagent roster (issue #264): the first-class N-agent list. Supersedes the four deprecated per-agent model knobs (filer/review above, scout/worker below) and the byName shorthand above, when set. An explicit roster like this one replaces defaultRoster wholesale -- this two-entry example customizes only scout/reviewer, so a Consumer copying it verbatim drops filer/worker; add entries for them too to keep all four.
+            #     roster = [
+            #       {
+            #         name = "scout";
+            #         model = "claude-haiku-4-5-20251001";
+            #         mode = "subagent";
+            #         description = "Map relevant files, seams, and tests; return a structured brief";
+            #         tools = [ "Read" "Bash" "WebFetch" "WebSearch" "Glob" "Grep" ];
+            #         promptFile = "scout-prompt.md";
+            #         effort = "medium";
+            #       }
+            #       {
+            #         name = "reviewer";
+            #         model = "claude-opus-5";
+            #         mode = "subagent";
+            #         description = "Review the branch diff for spec compliance and coding standards";
+            #         tools = [ "Read" "Bash" "WebFetch" "Agent" ];
+            #         promptFile = "review-prompt.md";
+            #         effort = "high";
+            #       }
+            #     ];
+            #     # scout subagent model tier; empty omits the scout entry from --agents; the flag itself is omitted only when no subagent model is set. DEPRECATED: superseded by the byName/roster options (agents.models.byName for a one-agent override, agents.models.roster for the full list; see docs/reference.md); these per-agent knobs still work but will be removed.
             #     scout = "claude-haiku-4-5-20251001";
-            #     # implement-capable worker subagent model tier; empty omits the worker entry from --agents. When set, the implementor runs IMPLEMENT as a coordinator and delegates one slice at a time to this subagent (fragments/coordinator.md). DEPRECATED: superseded by the roster option (see docs/reference.md); these per-agent knobs still work but will be removed.
+            #     # implement-capable worker subagent model tier; empty omits the worker entry from --agents. When set, the implementor runs IMPLEMENT as a coordinator and delegates one slice at a time to this subagent (fragments/coordinator.md). DEPRECATED: superseded by the byName/roster options (agents.models.byName for a one-agent override, agents.models.roster for the full list; see docs/reference.md); these per-agent knobs still work but will be removed.
             #     worker = "claude-sonnet-5";
             #   };
             #   # host directory mounted over /agent/prompts for zero-rebuild prompt iteration
