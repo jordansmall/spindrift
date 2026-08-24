@@ -85,7 +85,9 @@ dev tooling, not part of the flake-option/env-schema consumer surface. The man
 page rebuilds fresh from the schema on every `nix flake check` (nothing to
 regenerate). `lib/env-schema.nix` is the only hand-edit a new knob requires;
 the launcher's Go wiring (when the binary reads the knob directly) is the only
-other hand-edit.
+other hand-edit. A structural knob's doc/type/default metadata lives instead
+in `lib/structural-options-doc.nix`, paired with its `mkOption` declaration in
+`lib/flakeModule.nix`'s `structuralOptions`.
 
 To exercise the whole loop end to end against a live repo, use `./dogfood.sh`
 (never hand-run `spindrift dispatch`) — see [`docs/reference.md`](docs/reference.md).
