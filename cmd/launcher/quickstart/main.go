@@ -8,6 +8,12 @@ import (
 	"strings"
 )
 
+// forceFlagUsage is the help text for the -force flag. It intentionally
+// doesn't promise a fixed "*.bak" backup name — the actual scheme uses
+// numbered suffixes like .bak.000001 so each backup gets a unique name
+// (ADR 0027).
+const forceFlagUsage = "overwrite an existing flake.nix/harness.env, backing each up first"
+
 // hostEnvironment is the real Environment: host PATH lookups, ambient env
 // var reads, host git config, and the git remote repoSlug guess (ADR 0027).
 type hostEnvironment struct{}
@@ -210,7 +216,7 @@ func (hostCommandRunner) Run(name string, args ...string) error {
 }
 
 func main() {
-	force := flag.Bool("force", false, "overwrite an existing flake.nix/harness.env, backing each up to *.bak first")
+	force := flag.Bool("force", false, forceFlagUsage)
 	flag.Parse()
 
 	dir, err := os.Getwd()

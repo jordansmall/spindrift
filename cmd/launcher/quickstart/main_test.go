@@ -1,6 +1,18 @@
 package main
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
+
+func TestForceFlagUsage_NoBakPromise(t *testing.T) {
+	if !strings.Contains(forceFlagUsage, "backing each up") {
+		t.Errorf("forceFlagUsage = %q, want it to mention backing each up", forceFlagUsage)
+	}
+	if strings.Contains(forceFlagUsage, "*.bak") {
+		t.Errorf("forceFlagUsage = %q, must not promise a fixed *.bak backup name", forceFlagUsage)
+	}
+}
 
 func TestParseRemoteHostSlug(t *testing.T) {
 	tests := []struct {
