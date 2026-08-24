@@ -93,6 +93,28 @@ setup() {
   [[ "$output" == *"status=verified-merged"* ]]
 }
 
+# Sequence exhaustion (issue #2650): a SEQ shorter than the number of polls
+# the loop will make must stick on its last entry rather than running off
+# the end of the array. FAKE_GH_GRAPHQL_ROLLUP_SEQ_1 has only 1 entry;
+# MERGE_POLL_TIMEOUT=4 needs 5 real calls (elapsed increments by 1 per call
+# when MERGE_POLL_INTERVAL=0 — cmd/launcher/internal/settle/watch.go) before
+# its own deadline fires, so calls 2-5 all read past the sequence's single
+# entry.
+@test "rollup PENDING sequence exhausted before timeout → sticks on last entry, times out cleanly" {
+  export FAKE_PODMAN_IMAGE_PRESENT=1
+  export FAKE_GH_ISSUES=$'1\tFirst issue'
+  export FAKE_PODMAN_OUTCOME_1="SPINDRIFT_OUTCOME issue=1 landing=https://github.com/owner/repo/pull/1 status=ready note=ci-pending"
+  export FAKE_GH_GRAPHQL_ROLLUP_SEQ_1="PENDING"
+  export MERGE_POLL_INTERVAL=0
+  export MERGE_POLL_TIMEOUT=4
+  run "$RUN_CMD"
+  [ "$status" -eq 0 ]
+  ! grep -q 'pr merge' "$GH_LOG"
+  grep -q -- 'issue edit 1 --repo owner/repo --add-label agent-failed --remove-label agent-in-progress' "$GH_LOG"
+  [[ "$output" == *"status=failed"* ]]
+  [[ "$output" == *"ci-timeout:"* ]]
+}
+
 # AC #1 (issue #130): a late-registered check appears PENDING on the
 # confirmation re-poll; gate keeps waiting and merges once the full set
 # is green.  The initial SUCCESS snapshot alone is not sufficient.
