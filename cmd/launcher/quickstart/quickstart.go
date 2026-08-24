@@ -681,9 +681,10 @@ func excessGHScopes(scopes []string) []string {
 }
 
 // quickstartGitignore protects the secrets-only harness.env file quickstart
-// writes, plus the usual nix build/log noise (templates/default/.gitignore
-// is the fuller reference; this is the minimal subset the github/happy path
-// needs).
+// writes, plus the usual nix build/log noise. It is a strict superset of
+// templates/default/.gitignore: it carries every non-comment line the template does,
+// plus flake.nix.bak*/harness.env.bak* entries for the backup-file churn a
+// `--force` rerun leaves behind — churn a hand-authored template never sees.
 const quickstartGitignore = `# nix build output
 result
 result-*
@@ -701,6 +702,10 @@ flake.nix.bak*
 
 # direnv
 .direnv/
+
+# container-fallback build artifacts (staged under tmpdir; listed here as safety net)
+.spindrift-image.tar
+.spindrift-image-path
 
 # OS
 .DS_Store

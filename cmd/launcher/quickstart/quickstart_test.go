@@ -1231,6 +1231,25 @@ func TestQuickstartGitignore_IgnoresFlakeNixBackups(t *testing.T) {
 	}
 }
 
+func TestQuickstartGitignore_MatchesTemplateDefaultGitignore(t *testing.T) {
+	templatePath := filepath.Join("..", "..", "..", "templates", "default", ".gitignore")
+	raw, err := os.ReadFile(templatePath)
+	if err != nil {
+		t.Fatalf("read %s: %v", templatePath, err)
+	}
+
+	quickstartLines := strings.Split(quickstartGitignore, "\n")
+	for _, line := range strings.Split(string(raw), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		if !slices.Contains(quickstartLines, trimmed) {
+			t.Errorf("expected quickstartGitignore to contain the line %q from %s (parity with the template), got:\n%s", trimmed, templatePath, quickstartGitignore)
+		}
+	}
+}
+
 // defaultQuickstartStdin returns the canned interactive-prompt answers
 // (repoSlug, runtime, git name/email, token) shared by the three post-write
 // failure/backup tests (issue #2563).
