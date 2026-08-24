@@ -45,12 +45,15 @@
 let
   renderers = import ../lib/renderers.nix;
   schema = import ../lib/env-schema.nix;
+  structuralOptionsDoc = import ../lib/structural-options-doc.nix;
+  structuralPaths = import ../lib/structural-paths.nix;
+  structuralTemplateExamples = import ../lib/structural-template-examples.nix { inherit (pkgs) lib; };
   envExample = renderers.renderHarnessEnvExample schema;
   flagTable = renderers.renderFlagTableGo schema;
   schemaConfigFile = renderers.renderSchemaConfigGo schema;
-  flakeOptionsDoc = renderers.renderFlakeOptionsDoc schema;
+  flakeOptionsDoc = renderers.renderFlakeOptionsDocFull schema structuralOptionsDoc structuralPaths;
   boxEnvFixture = renderers.renderSetBoxEnvFixture schema;
-  templateSettingsBlock = renderers.renderTemplateSettingsBlock schema;
+  templateSettingsBlock = renderers.renderTemplateSettingsBlock schema structuralTemplateExamples;
   driverRegistry = import ../lib/drivers/default.nix { inherit (pkgs) lib; };
   driverNamesFile = renderers.renderDriverNamesGo driverRegistry.entries;
   agentPaths = import ../lib/agent-paths.nix;

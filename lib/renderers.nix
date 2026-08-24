@@ -40,6 +40,21 @@ let
   # Shared by every renderer emitting a flat string-slice var (groupOrder,
   # nixDriverNames, runner's ValidValues) so the quote/join shape lives once.
   renderGoStringSlice = items: builtins.concatStringsSep ", " (map (s: "\"${s}\"") items);
+  # Collapses any run of whitespace (including embedded newlines, e.g. a
+  # trailing "\n" before a multi-line doc string's closing `''`) down to a
+  # single space, trimming the ends -- a naive "\n" -> " " replaceStrings
+  # leaves doubled spaces at a line-wrap or a trailing-newline boundary.
+  # Shared by renderFlakeOptionsDoc and renderStructuralOptionsDoc's markdown
+  # table rows, both of which need a `doc` string collapsed to a single line.
+  oneLine =
+    s:
+    builtins.concatStringsSep " " (
+      builtins.filter (p: p != "") (builtins.filter builtins.isString (builtins.split "[ \t\n]+" s))
+    );
+  # A markdown table cell can't carry a literal, unescaped "|" (it reads as a
+  # column separator). Shared by renderFlakeOptionsDoc and
+  # renderStructuralOptionsDoc's markdown table rows.
+  escapeCell = builtins.replaceStrings [ "|" ] [ "\\|" ];
   # Uppercase a string's first character, leaving the rest untouched. Shared
   # by renderQuickstartPathsGo's capitalize (camelCase keys, rest already
   # cased) and renderAgentPathsGo's capitalizeWord (SCREAMING_SNAKE_CASE
@@ -187,8 +202,17 @@ rec {
   # (ADR 0037; issue #2179 — supersedes the flat groupToAttr/groupOrder
   # `settings = { ... }` shape), with its doc string, so a new knob is
   # discoverable in the template without a hand-edit (issue #520).
+  # structuralExamples (issue #2572) is a list of { path; doc; lines; } —
+  # lib/structural-template-examples.nix's byName/roster worked examples —
+  # spliced into the same tree at the same nesting/sorting step, since
+  # roster/byName have no representable schema-default literal to derive a
+  # `nixLiteral` line from (their real default is a Nix function call,
+  # lib/roster.nix's defaultRoster). Every caller passes this explicitly
+  # (nix/regen.nix, nix/checks/schema-drift.nix) rather than the parameter
+  # defaulting to `[ ]`, since a bare curried `schema: extra:` has no Nix
+  # syntax for a default on a non-attrset argument.
   renderTemplateSettingsBlock =
-    schema:
+    schema: structuralExamples:
     let
       ind = "            # ";
       flakeOptionEntries = filterAttrs (_: e: e.flakeOption or false) schema;
@@ -221,21 +245,35 @@ rec {
           rest = builtins.tail segs;
         in
         if rest == [ ] then
-          tree
-          // {
-            ${seg} = {
-              __leaf = true;
-              inherit entry;
-            };
-          }
+          if tree ? ${seg} && (tree.${seg}.__leaf or false) then
+            throw "renderTemplateSettingsBlock: path collides with an existing leaf at \"${seg}\""
+          else
+            tree
+            // {
+              ${seg} = {
+                __leaf = true;
+                inherit entry;
+              };
+            }
         else
           tree // { ${seg} = insertLeaf (tree.${seg} or { }) rest entry; };
-      domainTree = builtins.foldl' (
+      schemaDomainTree = builtins.foldl' (
         acc: key:
         insertLeaf acc (splitNixPath (
           resolveNixPath key flakeOptionEntries.${key}
         )) flakeOptionEntries.${key}
       ) { } (builtins.attrNames flakeOptionEntries);
+      # Splice each structural example (lib/structural-template-examples.nix)
+      # into the same tree, at its own hand-given path — there is no schema
+      # entry/resolveNixPath call for these, since they aren't env-schema.nix
+      # knobs.
+      domainTree = builtins.foldl' (
+        acc: ex:
+        insertLeaf acc ex.path {
+          doc = ex.doc;
+          lines = ex.lines;
+        }
+      ) schemaDomainTree structuralExamples;
       # 2 spaces per depth level; children are ordered by attribute name
       # (mapAttrsToList walks builtins.attrNames, which sorts).
       indentAt = depth: builtins.concatStringsSep "" (builtins.genList (_: "  ") depth);
@@ -248,7 +286,19 @@ rec {
           mapAttrsToList (
             name: child:
             if child.__leaf or false then
-              "${ind}${pad}# ${child.entry.doc}\n" + "${ind}${pad}${name} = ${nixLiteral child.entry};\n"
+              let
+                entry = child.entry;
+              in
+              # A structural example entry carries `lines` (a multi-line
+              # commented Nix assignment) instead of a schema-default-
+              # derived single-line `nixLiteral` value.
+              "${ind}${pad}# ${entry.doc}\n"
+              + (
+                if entry ? lines then
+                  concatStrings (map (l: "${ind}${pad}${l}\n") entry.lines)
+                else
+                  "${ind}${pad}${name} = ${nixLiteral entry};\n"
+              )
             else
               "${ind}${pad}${name} = {\n" + renderNode (depth + 1) child + "${ind}${pad}};\n"
           ) node
@@ -1075,7 +1125,7 @@ rec {
         let
           entry = flakeOptionEntries.${name};
         in
-        "| `perSystem.spindrift.${resolveNixPath name entry}` | `${entry.env}` | ${renderDefault entry} | ${entry.doc} |\n";
+        "| `perSystem.spindrift.${resolveNixPath name entry}` | `${entry.env}` | ${renderDefault entry} | ${escapeCell (oneLine entry.doc)} |\n";
       renderSection =
         domain:
         let
@@ -1092,8 +1142,7 @@ rec {
           + concatStrings (map renderRow knobs)
           + "\n";
     in
-    "<!-- Code generated by nix/checks.nix from lib/env-schema.nix. DO NOT EDIT. -->\n"
-    + "<!-- Regenerate: nix flake check -->\n"
+    "<!-- Regenerate: nix flake check -->\n"
     + "\n"
     + "# Flake options reference\n"
     + "\n"
@@ -1107,6 +1156,72 @@ rec {
     + "See [`docs/reference.md`](reference.md) for the full option surface and runtime vars.\n"
     + "\n"
     + concatStrings (map renderSection domainOrder);
+
+  # docs/flake-options.md's structural-options section (issue #2572): the 13
+  # hand-declared structural knobs (lib/flakeModule.nix's structuralOptions)
+  # plus byNameOption, documented from lib/structural-options-doc.nix (plain
+  # data, not env-schema.nix) at their lib/structural-paths.nix domain-tree
+  # paths. Same table style as renderFlakeOptionsDoc's renderSection above,
+  # but a "type" column instead of "env var" — structural options have no
+  # env var, only a docType string. renderFlakeOptionsDocFull below composes
+  # this onto renderFlakeOptionsDoc's own output rather than this being
+  # folded into that renderer, so renderFlakeOptionsDoc's own schema-only
+  # signature/behavior stays unchanged. `doc` strings may be multi-line
+  # prose (mirroring the mkOption `description` they were extracted from) —
+  # collapsed to a single line here since a raw embedded newline would break
+  # the markdown table's one-row-per-line shape.
+  renderStructuralOptionsDoc =
+    structuralOptionsDoc: structuralPaths:
+    let
+      # byName has no lib/structural-paths.nix entry of its own (it's nested
+      # under agents.models, not a top-level structuralOptions knob), so its
+      # doc-table path is hand-given here rather than resolved from
+      # structuralPaths.
+      byNameStructuralPath = "agents.models.byName";
+      pathFor =
+        name:
+        if name == "byName" then
+          byNameStructuralPath
+        else
+          builtins.concatStringsSep "." structuralPaths.${name};
+      # oneLine and escapeCell are shared, top-level helpers (also used by
+      # renderFlakeOptionsDoc's renderRow) -- docType (e.g. runtime's
+      # `"podman"` | `"docker"` | ...) is the one field here where the "|"
+      # escaping matters most, since it's the one field that reliably
+      # contains a literal "|".
+      names = builtins.attrNames structuralPaths ++ [ "byName" ];
+      sortedNames = builtins.sort (a: b: pathFor a < pathFor b) names;
+      renderRow =
+        name:
+        let
+          entry = structuralOptionsDoc.${name};
+        in
+        "| `perSystem.spindrift.${pathFor name}` | ${escapeCell entry.docType} | ${escapeCell entry.docDefault} | ${escapeCell (oneLine entry.doc)} |\n";
+    in
+    "## Structural options (`perSystem.spindrift`)\n\n"
+    + "Hand-declared structural knobs (ADR 0037; issue #2572) — build-time\n"
+    + "or otherwise non-schema-derived surfaces such as the Driver, roster,\n"
+    + "and image contents. Same table shape as the sections above, but a\n"
+    + "type column in place of env var: attr path, type, default, and\n"
+    + "description.\n"
+    + "\n"
+    + "| attr path | type | default | description |\n"
+    + "|---|---|---|---|\n"
+    + concatStrings (map renderRow sortedNames)
+    + "\n";
+
+  # docs/flake-options.md's full content: the banner, then the
+  # schema-generated sections (renderFlakeOptionsDoc), then the
+  # structural-options section (renderStructuralOptionsDoc, issue #2572).
+  # This is the single renderer both nix/regen.nix and
+  # nix/checks/schema-drift.nix's flake-options-doc check call, so the
+  # composition itself — concatenation order and arg wiring — can't drift
+  # between them (CONTRIBUTING.md's one-renderer-per-artifact contract).
+  renderFlakeOptionsDocFull =
+    schema: structuralOptionsDoc: structuralPaths:
+    "<!-- Code generated by nix/checks.nix from lib/env-schema.nix and lib/structural-options-doc.nix. DO NOT EDIT. -->\n"
+    + renderFlakeOptionsDoc schema
+    + renderStructuralOptionsDoc structuralOptionsDoc structuralPaths;
 
   # share/bash-completion/completions/spindrift content: subcommand
   # completion for the first word, flag completion (incl. the --issue alias

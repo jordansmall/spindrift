@@ -14,6 +14,38 @@ let
   inherit (fixtures) harness;
   renderers = import ../../lib/renderers.nix;
   schema = import ../../lib/env-schema.nix;
+  # Shared by template-settings-block and the
+  # structural-template-examples-*-valid checks below (issue #2572 round 2)
+  # so all three consumers of lib/structural-template-examples.nix's byName/
+  # roster worked examples share one import instead of three copies.
+  structuralTemplateExamples = import ../../lib/structural-template-examples.nix {
+    inherit (pkgs) lib;
+  };
+  rosterLib = import ../../lib/roster.nix { inherit (pkgs) lib; };
+  # Parses an example's rendered `lines` (the exact Nix source text
+  # templates/default/flake.nix ships, and a Consumer would paste) back as
+  # real Nix, wrapped as `{ <key> = <value>; }` -- the
+  # structural-template-examples-*-valid checks below need the *rendered
+  # text* validated, not just lib/structural-template-examples.nix's backing
+  # `.example` value, since a bug in its renderer (e.g. emitting a
+  # JSON-style comma-separated list) can desync the two even though
+  # `.example` itself stays valid. builtins.toFile writes content-addressed
+  # text at eval time with no derivation build, so this isn't
+  # import-from-derivation. Note: a genuine Nix *syntax* error in the
+  # rendered lines (like that comma-separated-list example) crashes eval
+  # during `import` before `builtins.tryEval` below can catch it -- it
+  # surfaces as a raw parse-error build failure, not the friendly
+  # `parsedFromLines.success` assertMsg text. The build still fails either
+  # way (bad renderer output still fails `nix build .#checks-inbox`); only
+  # *other* catchable failures inside this function (e.g. an out-of-bounds
+  # `builtins.elemAt`) actually reach that assertMsg.
+  evalExampleLines =
+    entry:
+    let
+      key = builtins.elemAt entry.path (builtins.length entry.path - 1);
+      src = "{ ${builtins.concatStringsSep "\n" entry.lines} }";
+    in
+    (import (builtins.toFile "structural-example-${key}.nix" src)).${key};
   rosterDefaults =
     (import ../../lib/roster-schema-defaults.nix { inherit (pkgs) lib; }).rosterDefaults;
   defaultModelFixture = import ../../lib/default-model-fixture.nix;
@@ -1330,14 +1362,21 @@ in
         touch $out
       '';
 
-  # docs/flake-options.md must match the reference generated from env-schema.nix.
-  # Fails when a flakeOption knob is added or removed but the committed file is
-  # not regenerated (same treatment as harness.env.example and flagtable_gen.go).
-  # Shares its renderer with `nix run .#regen` via lib/renderers.nix.
+  # docs/flake-options.md must match the reference generated from
+  # env-schema.nix plus the hand-declared structural knobs
+  # (lib/structural-options-doc.nix, issue #2572). Fails when a flakeOption
+  # knob is added/removed or a structural knob's doc metadata changes but
+  # the committed file is not regenerated (same treatment as
+  # harness.env.example and flagtable_gen.go). Shares its renderers with
+  # `nix run .#regen` via lib/renderers.nix.
   flake-options-doc =
     let
       schema = import ../../lib/env-schema.nix;
-      generated = pkgs.writeText "flake-options.md.generated" (renderers.renderFlakeOptionsDoc schema);
+      structuralOptionsDoc = import ../../lib/structural-options-doc.nix;
+      structuralPaths = import ../../lib/structural-paths.nix;
+      generated = pkgs.writeText "flake-options.md.generated" (
+        renderers.renderFlakeOptionsDocFull schema structuralOptionsDoc structuralPaths
+      );
     in
     pkgs.runCommand "flake-options-doc"
       {
@@ -1358,9 +1397,8 @@ in
   # drift from each other (issue #402).
   template-settings-block =
     let
-      schema = import ../../lib/env-schema.nix;
       inherit (pkgs.lib) assertMsg;
-      generated = renderers.renderTemplateSettingsBlock schema;
+      generated = renderers.renderTemplateSettingsBlock schema structuralTemplateExamples;
       templateSrc = builtins.readFile ../../templates/default/flake.nix;
       beginMarker = "BEGIN GENERATED SETTINGS EXAMPLE -- nix run .#regen -- DO NOT EDIT\n";
       endMarker = "            # END GENERATED SETTINGS EXAMPLE";
@@ -1386,6 +1424,153 @@ in
         got:  ${committed}
         want: ${generated}'';
     pkgs.runCommand "template-settings-block" { } "touch $out";
+
+  # Issue #2572 round 2 (blocking finding 2): checkEntry inside
+  # lib/structural-template-examples.nix only regex-matches the *rendered
+  # text* of each worked example -- it never runs the example *values*
+  # through real validation, so an unusable example (e.g. finding 1's
+  # roster entries missing description/tools) could ship silently. This
+  # check finds the roster example's `.example` field (the real Nix list
+  # lib/structural-template-examples.nix now also exports alongside its
+  # rendered `lines`) and actually evaluates it: it must survive
+  # normalizeRoster unchanged, and -- the regression guard for finding 1
+  # specifically -- every entry must carry a non-empty description and a
+  # non-empty tools list, since a Driver renders `description: ""` /
+  # `tools: [ ]` for either omission (lib/drivers/claude.nix:173,175;
+  # lib/drivers/opencode.nix:153,159), producing a capability-less agent.
+  #
+  # Issue #2572 round 3 (blocking findings 1 and 2): round 2's guard only
+  # covered description/tools by name -- the same class of bug recurred
+  # through promptFile (round 2's fix didn't inherit it, so normalizeRoster
+  # silently injected a wrong default for reviewer specifically). Two more
+  # checks close the class instead of the one field: every example entry's
+  # mode/description/tools/promptFile/effort must equal its defaultRoster
+  # counterpart's -- only `model` is exempted from this check, since it's the
+  # one field a Consumer copying this example is expected to freely
+  # customize (today's shipped values happen to equal defaultRoster's own,
+  # but nothing requires that) -- and every entry's normalizeRoster-resolved
+  # promptFile must resolve to a file that actually exists under
+  # templates/default/prompts/.
+  structural-template-examples-roster-valid =
+    let
+      inherit (pkgs.lib) assertMsg;
+      rosterEntry = builtins.head (
+        builtins.filter (
+          e:
+          e.path == [
+            "agents"
+            "models"
+            "roster"
+          ]
+        ) structuralTemplateExamples
+      );
+      parsedFromLines = builtins.tryEval (
+        let
+          r = evalExampleLines rosterEntry;
+        in
+        builtins.deepSeq r r
+      );
+      roster = if parsedFromLines.success then parsedFromLines.value else rosterEntry.example;
+      normalizeResult = builtins.tryEval (
+        let
+          r = rosterLib.normalizeRoster roster;
+        in
+        builtins.deepSeq r r
+      );
+      missingDescription = builtins.filter (e: (e.description or "") == "") roster;
+      missingTools = builtins.filter (e: (e.tools or [ ]) == [ ]) roster;
+      defaultRosterEntries = rosterLib.defaultRoster { };
+      knownNames = map (d: d.name) defaultRosterEntries;
+      entryFor = name: builtins.head (builtins.filter (d: d.name == name) defaultRosterEntries);
+      fieldsMustMatchDefault = [
+        "mode"
+        "description"
+        "tools"
+        "promptFile"
+        "effort"
+      ];
+      fieldMismatches = builtins.concatMap (
+        e:
+        if !(builtins.elem e.name knownNames) then
+          [ ]
+        else
+          let
+            defaults = entryFor e.name;
+          in
+          builtins.concatMap (
+            f: if (e.${f} or null) != (defaults.${f} or null) then [ "${e.name}.${f}" ] else [ ]
+          ) fieldsMustMatchDefault
+      ) roster;
+      normalized = if normalizeResult.success then normalizeResult.value else roster;
+      promptsDir = ../../templates/default/prompts;
+      missingPromptFiles = builtins.filter (
+        e: !(builtins.pathExists (promptsDir + "/${e.promptFile}"))
+      ) normalized;
+    in
+    assert assertMsg (parsedFromLines.success)
+      "structural-template-examples-roster-valid (issue #2572): lib/structural-template-examples.nix's roster example's rendered `lines` threw a catchable error when parsed back as Nix (a renderer bug can desync `lines` from the backing `.example` value even though the value itself stays valid) -- note a genuine Nix syntax error in `lines` instead crashes eval with a raw parse error before this assert is reached, so it fails the build with different text but still fails it";
+    assert assertMsg (parsedFromLines.value == rosterEntry.example)
+      "structural-template-examples-roster-valid (issue #2572): the roster example's rendered `lines`, parsed back as Nix, must equal its backing `.example` value -- they have desynced";
+    assert assertMsg (normalizeResult.success)
+      "structural-template-examples-roster-valid (issue #2572): lib/structural-template-examples.nix's roster example must survive rosterLib.normalizeRoster without throwing";
+    assert assertMsg (missingDescription == [ ])
+      "structural-template-examples-roster-valid (issue #2572): every roster example entry must carry a non-empty description (a Driver renders description: \"\" otherwise, producing a broken agent) -- offending entries: ${
+        builtins.toJSON (map (e: e.name) missingDescription)
+      }";
+    assert assertMsg (missingTools == [ ])
+      "structural-template-examples-roster-valid (issue #2572): every roster example entry must carry a non-empty tools list (a Driver renders tools: [ ] otherwise, producing a capability-less agent) -- offending entries: ${
+        builtins.toJSON (map (e: e.name) missingTools)
+      }";
+    assert assertMsg (fieldMismatches == [ ])
+      "structural-template-examples-roster-valid (issue #2572 round 3): every roster example entry's mode/description/tools/promptFile/effort must match rosterLib.defaultRoster { }'s entry of the same name (model is exempt -- it's the field a Consumer is expected to customize) -- mismatched fields: ${builtins.toJSON fieldMismatches}";
+    assert assertMsg (missingPromptFiles == [ ])
+      "structural-template-examples-roster-valid (issue #2572 round 3): every roster example entry's promptFile (after rosterLib.normalizeRoster's default injection) must resolve to a file under templates/default/prompts/ -- offending entries: ${
+        builtins.toJSON (map (e: { inherit (e) name promptFile; }) missingPromptFiles)
+      }";
+    pkgs.runCommand "structural-template-examples-roster-valid" { } "touch $out";
+
+  # Issue #2572 round 2 (blocking finding 2), byName half: the byName
+  # example has no dedicated normalize function the way roster does, so this
+  # runs it through rosterLib.defaultRoster's own byName argument instead --
+  # a deliberate proxy for flakeModule.nix's byNameOption submodule shape,
+  # since types.attrsOf doesn't itself constrain key names the way
+  # defaultRoster's runtime checks do (it throws on an unknown byName agent
+  # name or an unknown byName field, the same two invariants byNameOption's
+  # real Driver-facing consumers depend on).
+  structural-template-examples-byname-valid =
+    let
+      inherit (pkgs.lib) assertMsg;
+      byNameEntry = builtins.head (
+        builtins.filter (
+          e:
+          e.path == [
+            "agents"
+            "models"
+            "byName"
+          ]
+        ) structuralTemplateExamples
+      );
+      parsedFromLines = builtins.tryEval (
+        let
+          r = evalExampleLines byNameEntry;
+        in
+        builtins.deepSeq r r
+      );
+      byName = if parsedFromLines.success then parsedFromLines.value else byNameEntry.example;
+      result = builtins.tryEval (
+        let
+          r = rosterLib.defaultRoster { inherit byName; };
+        in
+        builtins.deepSeq r r
+      );
+    in
+    assert assertMsg (parsedFromLines.success)
+      "structural-template-examples-byname-valid (issue #2572): lib/structural-template-examples.nix's byName example's rendered `lines` threw a catchable error when parsed back as Nix (a renderer bug can desync `lines` from the backing `.example` value even though the value itself stays valid) -- note a genuine Nix syntax error in `lines` instead crashes eval with a raw parse error before this assert is reached, so it fails the build with different text but still fails it";
+    assert assertMsg (parsedFromLines.value == byNameEntry.example)
+      "structural-template-examples-byname-valid (issue #2572): the byName example's rendered `lines`, parsed back as Nix, must equal its backing `.example` value -- they have desynced";
+    assert assertMsg (result.success)
+      "structural-template-examples-byname-valid (issue #2572): lib/structural-template-examples.nix's byName example must survive rosterLib.defaultRoster { byName = ...; } without throwing";
+    pkgs.runCommand "structural-template-examples-byname-valid" { } "touch $out";
 
   # The generated status-word span between agent/entrypoint.sh's BEGIN/END
   # GENERATED OUTCOME STATUS WORDS markers must match the content rendered
