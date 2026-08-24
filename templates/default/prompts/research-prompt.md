@@ -1,6 +1,6 @@
 # TASK
 
-Research GitHub issue #${ISSUE_NUMBER}: ${ISSUE_TITLE}
+${CAVEMAN_STEP_RESEARCH}Research GitHub issue #${ISSUE_NUMBER}: ${ISSUE_TITLE}
 
 Fresh clone of the Target repo, no branch cut, no commits. This is a research
 dispatch (ADR 0022): explore the repo, judge the issue's relevance, and post
