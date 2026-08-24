@@ -71,7 +71,7 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, gen uint64, result di
 	// branches above both return first) -- a crashed or outcome-less run
 	// never reaches FILE ISSUES in its own prompt either, so there is
 	// nothing for this call to find in that case.
-	s.fileIssueIntents(num, result)
+	fileIssueIntents(s.it, num, result, "agent-review-finding")
 	switch o.Status {
 	case outcome.StatusBlocked:
 		// A read-only run's status=blocked here may just be the ADR 0036

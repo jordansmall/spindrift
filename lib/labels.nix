@@ -180,9 +180,11 @@ in
 
   # Review-finding provenance: the label the Filer applies to every issue it
   # files from a non-blocking review finding (issue #393, ADR 0041). Written
-  # by cmd/launcher/internal/settle/issue_intent.go's issueIntentLabels (the
-  # Launcher's own fixed, non-agent-trusted label set for
-  # SPINDRIFT_ISSUE_INTENT filing) and created directly by the Filer prompt
+  # by the provenanceLabel argument cmd/launcher/internal/settle/gate.go's
+  # work-path settle passes to fileIssueIntents (issue #2590 parameterized
+  # that call; the Launcher's own non-agent-trusted literal for
+  # SPINDRIFT_ISSUE_INTENT filing, never the payload's own labels) and
+  # created directly by the Filer prompt
   # (templates/default/prompts/fragments/filer-label-direct.md /
   # filer-label-direct-forgejo.md) via a bare `gh label create`/REST call --
   # never through doctor.Run(), so (like `recoverable` above) it must NOT be
@@ -192,7 +194,7 @@ in
   # agent-research-unclear's and trip
   # TestTriageLabelMeta_ColorsAreDistinct. Carried here so the registry
   # covers every label family the Harness writes (issue #2528 AC1), and so a
-  # rename of this literal in either fragment or in issue_intent.go without a
+  # rename of this literal in either fragment or in gate.go without a
   # matching registry update is something a future check can catch.
   reviewFinding = [
     {
