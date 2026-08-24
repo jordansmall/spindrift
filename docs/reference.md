@@ -22,7 +22,7 @@ the [README](../README.md); for vocabulary see [`CONTEXT.md`](../CONTEXT.md).
 | `spindrift preview [issue...]`   | dry run: show what `dispatch` would pick up, and the wave ordering               |
 | `spindrift build`                | realize/load the agent image (or store closures) without running any agent      |
 | `spindrift recover <issue>`      | re-run the merge gate for one issue (adopt a stranded `agent-in-progress`)       |
-| `spindrift doctor`               | check forge credentials, repository connectivity, container runtime readiness (advisory only — issue #2561), and label presence — the four triage labels (fatal if missing) and the six `agent-research*` labels (ADR 0022, advisory only); when run interactively (TTY attached) and labels are missing it offers to create them with default colors and descriptions; in CI (no TTY) it reports missing labels and exits non-zero only if a triage label is missing |
+| `spindrift doctor`               | check forge credentials, repository connectivity, container runtime readiness (advisory only — issue #2561), and label presence — the four triage labels (fatal if missing) and the seven `agent-research*` labels (ADR 0022 and ADR 0041, advisory only); when run interactively (TTY attached) and labels are missing it offers to create them with default colors and descriptions; in CI (no TTY) it reports missing labels and exits non-zero only if a triage label is missing |
 | `spindrift reconcile`            | local-tracker bookkeeping sweep: close issues whose recorded `landing` PR merged (ADR 0029) — a clear no-op on `github`/`jira`; also auto-invoked at the end of a `dispatch` run when `ISSUE_TRACKER=local` — see [`reconcile`: closing a local issue](#reconcile-closing-a-local-issue) |
 | `spindrift --help`               | concise usage: subcommands, common flags, and pointers to the full reference    |
 | `spindrift --help --all`         | the full flag reference, grouped by category (same content as `man spindrift`)  |
@@ -2431,10 +2431,19 @@ gh label create agent-research-recommend   --repo owner/repo --color 2cbe4e --de
 gh label create agent-research-reject      --repo owner/repo --color e11d21 --description "False positive, not worth it, or a duplicate — close it"
 gh label create agent-research-unclear     --repo owner/repo --color d4c5f9 --description "Needs a human answer — answer, then re-apply agent-research"
 gh label create agent-research-failed      --repo owner/repo --color b60205 --description "Box crashed or produced no verdict; needs human triage"
+gh label create agent-research-finding     --repo owner/repo --color c5def5 --description "Filed from a research finding"
 ```
 
 If a custom `RESEARCH_VERDICTS` set is configured, create its labels
 instead of (or alongside, if some overlap) the three above.
+
+`agent-research-finding` is a provenance label, not a dispatch label: a
+research Box's Filer will apply it directly to every issue it files from a
+research finding (ADR 0041, same contract as `agent-review-finding` on the
+work path — a human promotes the filed issue to `ready-for-agent` like any
+other), once that Filer fragment exists. `spindrift doctor` already checks
+and, in interactive mode, offers to create it alongside the rest of the
+research family above.
 
 #### Create the priority labels on the Target repo
 
@@ -3294,6 +3303,7 @@ issue can legitimately wear both a work label and a research label at once:
 | `agent-research-reject` | false positive, not worth doing, or a duplicate (named in the comment) — close it |
 | `agent-research-unclear` | relevance needs an answer only a human has — answer, then re-apply `agent-research` |
 | `agent-research-failed` | the Box crashed or produced no verdict — a human triage queue, distinct from `agent-research-reject` (a *successful* "this is a false positive" conclusion is `Complete`, never `Failed`) |
+| `agent-research-finding` | filed by the Filer from a research finding (ADR 0041) — never carries a dispatch label; a human promotes it to `ready-for-agent` like any other issue |
 
 Settle is strictly one-shot: parse the Outcome line, apply exactly one
 terminal label, done — no CI watch, no self-heal fix passes, no merge, since

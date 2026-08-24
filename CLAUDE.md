@@ -43,10 +43,11 @@ setup, required App permissions, and how the refresh mechanism works.
 
 A second, disjoint label family (ADR 0022; see `.github/workflows/agent-research.yml`)
 drives the advise-only research Dispatch kind — never the work path above.
-Claiming a research issue strips only these labels, so a work lifecycle label
-(`ready-for-agent`, `agent-in-progress`, ...) survives a research claim
-untouched, and an issue may legitimately wear one label from each family at
-once:
+Claiming a research issue strips only the dispatch/verdict labels below
+(`agent-research-finding` is a provenance label the claim step never
+touches), so a work lifecycle label (`ready-for-agent`, `agent-in-progress`,
+...) survives a research claim untouched, and an issue may legitimately wear
+one label from each family at once:
 
 - `agent-research` — dual-role: standing state and trigger. Apply it to fire
   one research dispatch; re-apply it to retry (crash) or re-research (after
@@ -65,6 +66,10 @@ once:
 - `agent-research-failed` — the Box crashed or produced no verdict; a human
   triage queue distinct from `agent-research-reject`, so crash-retry and
   verdict-review never mix.
+- `agent-research-finding` — filed by the Filer from a research finding
+  (ADR 0041). Never carries a dispatch label
+  (`agent-trigger`/`ready-for-agent`) — a human promotes it to
+  `ready-for-agent` like any other issue before an agent picks it up.
 
 Research never opens a PR, watches CI, or merges — it posts one comment and
 stops. `spindrift doctor` checks and, in interactive mode, offers to create

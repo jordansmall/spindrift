@@ -206,11 +206,11 @@ Three non-negotiables before pointing the harness at a live repo:
    the blast radius is what the token allows and nothing more.
 
 Run `spindrift doctor` as a preflight: it checks forge connectivity, token
-validity, and label presence across all fourteen labels — the four triage
-labels (fatal if missing) plus ten advisory labels (the six `agent-research*`
-labels, the three `agent-priority-*` labels, and `agent-ambiguous-spec`). Run
-interactively, it offers to create missing labels; in CI it exits non-zero
-only when a triage label is missing.
+validity, and label presence across all fifteen labels — the four triage
+labels (fatal if missing) plus eleven advisory labels (the seven
+`agent-research*` labels, the three `agent-priority-*` labels, and
+`agent-ambiguous-spec`). Run interactively, it offers to create missing
+labels; in CI it exits non-zero only when a triage label is missing.
 
 ## Basic flow
 
