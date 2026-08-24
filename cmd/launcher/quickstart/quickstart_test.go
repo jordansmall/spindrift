@@ -2111,6 +2111,60 @@ func TestRenderHarnessEnv_RegistryDriven(t *testing.T) {
 	}
 }
 
+// TestRenderHarnessEnv_DocumentsCommandFormIndirection pins that every secret
+// line renderHarnessEnv emits is preceded by a comment documenting the
+// <NAME>_CMD vault-indirection convention from
+// templates/default/harness.env.example, not just the bare plaintext line.
+func TestRenderHarnessEnv_DocumentsCommandFormIndirection(t *testing.T) {
+	out := renderHarnessEnv("github", "ghp_faketoken", "claude-oauth-faketoken", "")
+
+	if !strings.Contains(out, `GH_TOKEN_CMD="rbw get spindrift-gh-token"`) {
+		t.Errorf("expected harness.env to document GH_TOKEN_CMD indirection, got:\n%s", out)
+	}
+	if !strings.Contains(out, "the command's stdout wins over GH_TOKEN") {
+		t.Errorf("expected harness.env to document that GH_TOKEN_CMD's stdout wins over GH_TOKEN, got:\n%s", out)
+	}
+	if !strings.Contains(out, `CLAUDE_CODE_OAUTH_TOKEN_CMD="rbw get spindrift-claude-code-oauth-token"`) {
+		t.Errorf("expected harness.env to document CLAUDE_CODE_OAUTH_TOKEN_CMD indirection, got:\n%s", out)
+	}
+	if !strings.Contains(out, "the command's stdout wins over CLAUDE_CODE_OAUTH_TOKEN") {
+		t.Errorf("expected harness.env to document that CLAUDE_CODE_OAUTH_TOKEN_CMD's stdout wins over CLAUDE_CODE_OAUTH_TOKEN, got:\n%s", out)
+	}
+}
+
+// TestRenderHarnessEnv_FileLevelPreamble pins that renderHarnessEnv's output
+// opens with a file-level preamble — matching
+// templates/default/harness.env.example's framing — documenting that vault
+// indirection via <NAME>_CMD is preferred over a plaintext value ("fetch
+// recipes, not live credentials") and that SECRET_CMD sets a single
+// templated fallback command. The fallback line must not claim that a
+// secret's own <NAME>_CMD is the only thing that outranks SECRET_CMD: per
+// the resolution precedence in docs/reference.md, the plaintext value the
+// wizard always writes below also wins over SECRET_CMD, so it's a no-op
+// in every wizard-generated harness.env unless the operator removes that
+// value (or adds <NAME>_CMD). Without this, the guided (quickstart) path
+// teaches less than the hand-authored template it's meant to match, or
+// worse, misleads the operator about which value actually takes effect.
+func TestRenderHarnessEnv_FileLevelPreamble(t *testing.T) {
+	out := renderHarnessEnv("github", "ghp_faketoken", "claude-oauth-faketoken", "")
+
+	if !strings.Contains(out, "SECRET_CMD") {
+		t.Errorf("expected harness.env to mention the SECRET_CMD fallback, got:\n%s", out)
+	}
+	if !strings.Contains(out, "fetch recipes, not live credentials") {
+		t.Errorf("expected harness.env to document that harness.env then holds fetch recipes, not live credentials, got:\n%s", out)
+	}
+	if strings.Contains(out, "lacking its\n# own <NAME>_CMD, which still wins over this fallback when set.") {
+		t.Errorf("expected harness.env to NOT claim SECRET_CMD applies merely for lacking a <NAME>_CMD (the plaintext value below also wins over it), got:\n%s", out)
+	}
+	if !strings.Contains(out, "plaintext value below still wins over it") {
+		t.Errorf("expected harness.env to document that the plaintext value below also wins over SECRET_CMD, got:\n%s", out)
+	}
+	if !strings.Contains(out, "remove that value (or add <NAME>_CMD) for SECRET_CMD to apply") {
+		t.Errorf("expected harness.env to document how to make SECRET_CMD actually take effect, got:\n%s", out)
+	}
+}
+
 func TestRunQuickstart_CodebergRemote_UsesForgejoBackend(t *testing.T) {
 	dir := t.TempDir()
 	var out bytes.Buffer
