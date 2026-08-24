@@ -81,6 +81,7 @@
       filerModel ? null,
       workerModel ? null,
       models ? { },
+      byName ? { },
     }:
     let
       rosterHelper = import ./roster-schema-defaults.nix { inherit lib; };
@@ -91,24 +92,61 @@
         filer = filerModel;
         worker = workerModel;
       };
-      unknownNames = builtins.filter (n: !(legacyModels ? ${n})) (builtins.attrNames models);
+      isUnknownName = n: !(legacyModels ? ${n});
+      unknownNames = builtins.filter isUnknownName (builtins.attrNames models);
+      unknownByNameNames = builtins.filter isUnknownName (builtins.attrNames byName);
+      unknownByNameFields = lib.concatMap (
+        name:
+        if !(builtins.isAttrs byName.${name}) then
+          throw "defaultRoster: byName.${name} must be an attribute set, got ${builtins.typeOf byName.${name}}"
+        else
+          let
+            unknownFields = builtins.filter (f: f != "model" && f != "effort") (
+              builtins.attrNames byName.${name}
+            );
+          in
+          if unknownFields != [ ] then
+            [
+              {
+                inherit name unknownFields;
+              }
+            ]
+          else
+            [ ]
+      ) (builtins.attrNames byName);
       modelFor =
         name:
         if models ? ${name} then
           models.${name}
+        else if (byName.${name}.model or null) != null then
+          byName.${name}.model
         else if legacyModels.${name} != null then
           legacyModels.${name}
         else
           schemaDefaults.${name};
+      effortFor =
+        name:
+        if (byName.${name}.effort or null) != null then
+          byName.${name}.effort
+        else
+          rosterDefaults.${name}.effort;
     in
     if unknownNames != [ ] then
       throw "defaultRoster: models names unknown agent(s) ${builtins.toJSON unknownNames} -- expected one of ${builtins.toJSON (builtins.attrNames legacyModels)}"
+    else if unknownByNameNames != [ ] then
+      throw "defaultRoster: byName names unknown agent(s) ${builtins.toJSON unknownByNameNames} -- expected one of ${builtins.toJSON (builtins.attrNames legacyModels)}"
+    else if unknownByNameFields != [ ] then
+      throw "defaultRoster: byName has unknown field(s) -- expected only model and/or effort -- ${
+        lib.concatMapStringsSep "; " (
+          e: "${e.name}: ${builtins.toJSON e.unknownFields}"
+        ) unknownByNameFields
+      }"
     else
       [
         {
           name = "scout";
           model = modelFor "scout";
-          effort = rosterDefaults.scout.effort;
+          effort = effortFor "scout";
           mode = "subagent";
           description = "Map relevant files, seams, and tests; return a structured brief";
           tools = [
@@ -125,7 +163,7 @@
         {
           name = "reviewer";
           model = modelFor "reviewer";
-          effort = rosterDefaults.reviewer.effort;
+          effort = effortFor "reviewer";
           mode = "subagent";
           description = "Review the branch diff for spec compliance and coding standards";
           tools = [
@@ -140,7 +178,7 @@
         {
           name = "filer";
           model = modelFor "filer";
-          effort = rosterDefaults.filer.effort;
+          effort = effortFor "filer";
           mode = "subagent";
           description = "File issues from a review's non-blocking findings, best-effort";
           tools = [
@@ -154,7 +192,7 @@
         {
           name = "worker";
           model = modelFor "worker";
-          effort = rosterDefaults.worker.effort;
+          effort = effortFor "worker";
           mode = "subagent";
           description = "Implement a scoped slice of work delegated to it, with full implement-capable tools";
           tools = [
