@@ -29,8 +29,17 @@ issue_prompt_outcome_section() {
 # belt-and-suspenders wait, not a proven fix for a root cause that remains
 # unidentified. Bounded by a timeout so a genuine under-count -- the log
 # will never reach expected_count -- still fails, rather than hanging:
-# default 2s, or an explicit 4th arg (kept short in tests that intentionally
-# exercise the timeout path).
+# default 2s (widen via WAIT_FOR_LOG_LINES_TIMEOUT), or a non-empty explicit
+# 4th arg, which wins over both the env var and the 2s default (kept short in
+# tests that intentionally exercise the timeout path). An unset OR
+# empty-string 4th arg falls through to the env var/default instead, per
+# bash's own "${4:-...}" fallback rule. Whichever source it comes from, the
+# timeout value must be a non-negative integer no more than 6 digits (up to
+# 999999) -- it flows into a `timeout * 20` arithmetic context, so anything
+# else is rejected outright rather than risking a bash syntax error, an
+# arithmetic overflow (an 18+ digit value can wrap the poll-count negative
+# and silently skip the loop instead of erroring), or, worse, code
+# execution.
 #
 # Reaching expected_count mid-poll is not itself proof the count has
 # settled: it may just be passing through on its way to a higher, wrong
@@ -52,9 +61,16 @@ _count_matches() {
   echo "$count"
 }
 
-# Usage: wait_for_log_lines <file> <pattern> <expected_count> [timeout_seconds=2]
+# Usage: wait_for_log_lines <file> <pattern> <expected_count> [timeout_seconds]
+# timeout must be a non-negative integer of at most 6 digits (up to 999999)
+# (rejects fractional/negative/oversized/injection values before they reach
+# an arithmetic context).
 wait_for_log_lines() {
-  local file="$1" pattern="$2" expected="$3" timeout="${4:-2}"
+  local file="$1" pattern="$2" expected="$3" timeout="${4:-${WAIT_FOR_LOG_LINES_TIMEOUT:-2}}"
+  if ! [[ "$timeout" =~ ^(0|[1-9][0-9]{0,5})$ ]]; then
+    echo "wait_for_log_lines: timeout must be a non-negative integer of at most 6 digits, got '$timeout'" >&2
+    return 1
+  fi
   local interval="0.05"
   local confirm_tries=3
   local tries=$((timeout * 20)) # 20 == 1/interval (0.05s); keep in sync if interval changes

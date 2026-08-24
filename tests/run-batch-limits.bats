@@ -90,6 +90,85 @@ setup() {
   [ "$status" -ne 0 ]
 }
 
+@test "wait_for_log_lines picks up WAIT_FOR_LOG_LINES_TIMEOUT as the default" {
+  local log="$BATS_TEST_TMPDIR/probe.log"
+  printf 'unrelated\n' >"$log"
+  export WAIT_FOR_LOG_LINES_TIMEOUT=1
+  run wait_for_log_lines "$log" '^run ' 1
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"timed out after 1s"* ]]
+}
+
+@test "wait_for_log_lines lets an explicit 4th arg win over WAIT_FOR_LOG_LINES_TIMEOUT" {
+  local log="$BATS_TEST_TMPDIR/probe.log"
+  printf 'unrelated\n' >"$log"
+  export WAIT_FOR_LOG_LINES_TIMEOUT=5
+  run wait_for_log_lines "$log" '^run ' 1 1
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"timed out after 1s"* ]]
+}
+
+@test "wait_for_log_lines lets WAIT_FOR_LOG_LINES_TIMEOUT widen past the 2s default" {
+  local log="$BATS_TEST_TMPDIR/probe.log"
+  : >"$log"
+  (
+    sleep 2.2
+    printf 'run x\n' >>"$log"
+  ) &
+  local writer=$!
+  export WAIT_FOR_LOG_LINES_TIMEOUT=3
+  run wait_for_log_lines "$log" '^run ' 1
+  wait "$writer"
+  [ "$status" -eq 0 ]
+}
+
+@test "wait_for_log_lines rejects a non-integer timeout cleanly instead of a bash arithmetic error" {
+  local log="$BATS_TEST_TMPDIR/probe.log"
+  printf 'unrelated\n' >"$log"
+  run wait_for_log_lines "$log" '^run ' 1 0.5
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"timeout must be a non-negative integer"* ]]
+  [[ "$output" != *"syntax error"* ]]
+  [[ "$output" != *"integer expression expected"* ]]
+}
+
+@test "wait_for_log_lines rejects a negative timeout cleanly instead of an unbound-variable crash" {
+  local log="$BATS_TEST_TMPDIR/probe.log"
+  printf 'unrelated\n' >"$log"
+  run wait_for_log_lines "$log" '^run ' 1 -1
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"timeout must be a non-negative integer"* ]]
+  [[ "$output" != *"unbound variable"* ]]
+}
+
+@test "wait_for_log_lines rejects a leading-zero timeout cleanly instead of a bash arithmetic error" {
+  local log="$BATS_TEST_TMPDIR/probe.log"
+  printf 'unrelated\n' >"$log"
+  run wait_for_log_lines "$log" '^run ' 1 08
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"timeout must be a non-negative integer"* ]]
+  [[ "$output" != *"value too great for base"* ]]
+}
+
+@test "wait_for_log_lines rejects an injection payload timeout without executing it" {
+  local log="$BATS_TEST_TMPDIR/probe.log"
+  local marker="$BATS_TEST_TMPDIR/PWNED_MARKER"
+  printf 'unrelated\n' >"$log"
+  run wait_for_log_lines "$log" '^run ' 1 'x[$(touch "'"$marker"'")]'
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"timeout must be a non-negative integer"* ]]
+  [ ! -e "$marker" ]
+}
+
+@test "wait_for_log_lines rejects an oversized timeout cleanly instead of a bash arithmetic overflow" {
+  local log="$BATS_TEST_TMPDIR/probe.log"
+  printf 'unrelated\n' >"$log"
+  run wait_for_log_lines "$log" '^run ' 1 500000000000000000
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"timeout must be a non-negative integer"* ]]
+  [[ "$output" != *"unbound variable"* ]]
+}
+
 # --- MAX_JOBS batch cap (dogfood serial loop) ------------------------------
 
 @test "MAX_JOBS=1 dispatches only the oldest ready issue" {
