@@ -23,6 +23,7 @@ import (
 	"spindrift.dev/launcher/internal/forge/github"
 	"spindrift.dev/launcher/internal/forge/jira"
 	"spindrift.dev/launcher/internal/forge/local"
+	"spindrift.dev/launcher/internal/runner"
 )
 
 // Environment abstracts host detection (available container runtimes, git
@@ -60,24 +61,6 @@ type Environment interface {
 	GitRemoteURL() string
 }
 
-// runtimePrecedence is the order Quickstart probes for an available
-// container runtime (ADR 0027): podman first, then docker, then nerdctl
-// (Rancher Desktop's containerd mode) after docker — since Rancher Desktop
-// in dockerd mode already surfaces as "docker" and only containerd mode
-// exposes nerdctl — then the daemonless bwrap fallback.
-var runtimePrecedence = []string{"podman", "docker", "nerdctl", "bwrap"}
-
-// runtimeAlias maps a probed binary name to the operator-facing runtime
-// value Quickstart offers/writes. Every binary is its own value except
-// nerdctl, which reports as "rancher" — the same alias runtimeCLI (runner
-// package) maps back to nerdctl when actually invoking the runtime.
-func runtimeAlias(binary string) string {
-	if binary == "nerdctl" {
-		return "rancher"
-	}
-	return binary
-}
-
 // validateRepoSlug rejects anything but a single-slash "owner/name" shape —
 // the form the generated flake.nix's forge.repoSlug expects.
 func validateRepoSlug(slug string) error {
@@ -88,14 +71,14 @@ func validateRepoSlug(slug string) error {
 	return nil
 }
 
-// validateRuntimeChoice rejects any value outside validRuntimeChoices.
+// validateRuntimeChoice rejects any value outside runner.ValidValues.
 func validateRuntimeChoice(runtime string) error {
-	for _, v := range validRuntimeChoices {
+	for _, v := range runner.ValidValues {
 		if runtime == v {
 			return nil
 		}
 	}
-	return fmt.Errorf("expected one of %s, got %q", strings.Join(validRuntimeChoices, ", "), runtime)
+	return fmt.Errorf("expected one of %s, got %q", strings.Join(runner.ValidValues, ", "), runtime)
 }
 
 // quickstartBackendNames returns the operator-facing code-forge backend
@@ -121,18 +104,6 @@ func validateBackendChoice(b string) error {
 		}
 	}
 	return fmt.Errorf("expected one of %s, got %q", strings.Join(names, ", "), b)
-}
-
-// detectRuntime returns the first runtime in runtimePrecedence found on
-// PATH (aliased via runtimeAlias), or an actionable error naming all four
-// when none is available — Quickstart cannot proceed without one (ADR 0027).
-func detectRuntime(env Environment) (string, error) {
-	for _, rt := range runtimePrecedence {
-		if _, err := env.LookPath(rt); err == nil {
-			return runtimeAlias(rt), nil
-		}
-	}
-	return "", fmt.Errorf("no supported container runtime found on PATH — install one of: podman, docker, bwrap, or nerdctl (Rancher Desktop containerd mode, offered as runtime = \"rancher\")")
 }
 
 // CommandRunner abstracts the two subprocesses Quickstart shells out to
@@ -291,7 +262,7 @@ func buildForge(repoSlug string, tracker trackerSettings, token string) (forge.I
 // Interactive-only for v1: a non-TTY stdin (interactive == false) is a fatal
 // error directing scripted setups to write flake.nix/harness.env directly
 // instead.
-func runQuickstart(dir string, env Environment, runner CommandRunner, forgeBuilder ForgeBuilder, w io.Writer, stdin io.Reader, interactive, force bool) error {
+func runQuickstart(dir string, env Environment, cmdRunner CommandRunner, forgeBuilder ForgeBuilder, w io.Writer, stdin io.Reader, interactive, force bool) error {
 	if !interactive {
 		return fmt.Errorf("quickstart requires an interactive terminal — for scripted setups, write flake.nix and harness.env directly (see docs/flake-options.md)")
 	}
@@ -307,17 +278,9 @@ func runQuickstart(dir string, env Environment, runner CommandRunner, forgeBuild
 		return fmt.Errorf("refusing to overwrite existing %s — rerun with --force to back each up to *.bak and regenerate", strings.Join(clobbered, ", "))
 	}
 
-	detectedRuntime, err := detectRuntime(env)
+	detectedRuntime, err := runner.Probe(env.LookPath)
 	if err != nil {
 		return err
-	}
-
-	for _, name := range clobbered {
-		path := filepath.Join(dir, name)
-		if err := os.Rename(path, path+".bak"); err != nil {
-			return fmt.Errorf("back up %s: %w", name, err)
-		}
-		fmt.Fprintf(w, "backed up: %s -> %s.bak\n", name, name)
 	}
 
 	scanner := bufio.NewScanner(stdin)
@@ -388,9 +351,15 @@ func runQuickstart(dir string, env Environment, runner CommandRunner, forgeBuild
 	if err != nil {
 		return err
 	}
-	runtime, err := promptValidated(fmt.Sprintf("Runtime (%s)", strings.Join(validRuntimeChoices, "/")), detectedRuntime, validateRuntimeChoice)
+	runtime, err := promptValidated(fmt.Sprintf("Runtime (%s)", strings.Join(runner.ValidValues, "/")), detectedRuntime, validateRuntimeChoice)
 	if err != nil {
 		return err
+	}
+	if rerr := runner.ValidateRuntimeWithLookup(runtime, env.LookPath); rerr != nil {
+		fmt.Fprintf(w, "WARNING: %v — without it installed, `spindrift build` will fail later.\n", rerr)
+		if strings.ToLower(strings.TrimSpace(prompt("Proceed anyway and install it before the first build? [y/N]"))) != "y" {
+			return fmt.Errorf("%w — install it, or rerun quickstart and choose a different runtime", rerr)
+		}
 	}
 	gitUserName := promptDefault("Git user name", env.GitConfig("user.name"))
 	gitUserEmail := promptDefault("Git user email", env.GitConfig("user.email"))
@@ -434,7 +403,7 @@ func runQuickstart(dir string, env Environment, runner CommandRunner, forgeBuild
 		anthropicAPIKey = v
 		fmt.Fprintln(w, "reusing ambient ANTHROPIC_API_KEY")
 	} else if strings.ToLower(strings.TrimSpace(prompt("No ambient Claude credential found. Run `claude setup-token` now (browser OAuth)? [y/N]"))) == "y" {
-		if err := runner.Run("claude", "setup-token"); err != nil {
+		if err := cmdRunner.Run("claude", "setup-token"); err != nil {
 			return fmt.Errorf("run claude setup-token: %w", err)
 		}
 		claudeOAuthToken = promptMasked("Paste the CLAUDE_CODE_OAUTH_TOKEN printed by claude setup-token")
@@ -455,6 +424,20 @@ func runQuickstart(dir string, env Environment, runner CommandRunner, forgeBuild
 		claudeOAuthToken: claudeOAuthToken,
 		anthropicAPIKey:  anthropicAPIKey,
 	}
+
+	// Backup happens only now, right before the scaffold is actually
+	// (re)written — every prompt/validation/abort point above (repo slug,
+	// runtime choice + PATH confirmation, token acquisition, ...) has already
+	// succeeded, so an operator who aborts an earlier prompt never sees an
+	// existing file renamed away with nothing written to replace it.
+	for _, name := range clobbered {
+		path := filepath.Join(dir, name)
+		if err := os.Rename(path, path+".bak"); err != nil {
+			return fmt.Errorf("back up %s: %w", name, err)
+		}
+		fmt.Fprintf(w, "backed up: %s -> %s.bak\n", name, name)
+	}
+
 	for _, f := range render(a) {
 		if err := os.WriteFile(filepath.Join(dir, f.path), []byte(f.content), f.mode); err != nil {
 			return fmt.Errorf("write %s: %w", f.path, err)
@@ -483,12 +466,13 @@ func runQuickstart(dir string, env Environment, runner CommandRunner, forgeBuild
 		InProgressLabel: defaultDispatchLabels.InProgress,
 		FailedLabel:     defaultDispatchLabels.Failed,
 		CompleteLabel:   defaultDispatchLabels.Complete,
+		Runtime:         runtime,
 	}, w, scanner, interactive); err != nil {
 		return err
 	}
 
 	fmt.Fprintln(w, "==> the first image build can take a while — building now")
-	if err := runner.Run(spindriftBuildArgs[0], spindriftBuildArgs[1:]...); err != nil {
+	if err := cmdRunner.Run(spindriftBuildArgs[0], spindriftBuildArgs[1:]...); err != nil {
 		return fmt.Errorf("spindrift build: %w", err)
 	}
 
