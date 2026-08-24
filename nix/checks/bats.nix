@@ -1,6 +1,11 @@
 # Bats/shell orchestration: shellcheck over the launcher scripts and fakes,
 # and the bash layer driven end-to-end through bats against those fakes.
-{ pkgs, fixtures, ... }:
+{
+  pkgs,
+  fixtures,
+  batsShards,
+  ...
+}:
 let
   inherit (fixtures)
     batsHarness
@@ -22,6 +27,15 @@ let
   # with its own fixture is picked up automatically -- no edits needed here
   # or in tests/driver-registry-outcome-extraction.bats.
   driverRegistry = import ../../lib/drivers/default.nix { inherit (pkgs) lib; };
+
+  # Shard partition for tests/*.bats (issue #2648 slice 1,
+  # nix/checks/bats-shards.nix): shardFiles/shardNames drive the per-shard
+  # `bats-shard-N` derivations below, replacing the single catch-all `bats`
+  # derivation that ran the whole suite serially. `batsShards` itself is
+  # threaded in via `common` (nix/checks/default.nix) rather than imported
+  # here, so the directory scan/@test count it runs happens once per eval,
+  # not once per consumer.
+  inherit (batsShards) shardFiles shardNames;
   driverOutcomeManifest = pkgs.lib.mapAttrs (name: entry: {
     preamble = "${pkgs.writeText "driver-preamble-${name}.sh" (driverRegistry.renderPreamble entry)}";
     fixture = "${(../../cmd/launcher/internal/driver + "/${name}/testdata/outcome-fixture.jsonl")}";
@@ -43,12 +57,12 @@ let
   );
 
   # tests/prompt-assembly-parity.bats (issue #2349) lives under tests/ like
-  # every other suite, so this catch-all `bats tests/` run picks it up too
-  # (mirrors the DRIVER_OUTCOME_MANIFEST/PROMPT_CONTRACT_PARITY_FIXTURE
-  # comments above) -- export the same driver-exec binary and nix-rendered
-  # lib/fragments.nix JSON the dedicated promptassembly-parity check
-  # (nix/checks/promptassembly.nix) exports, or that suite's required-var
-  # guard fails here.
+  # every other suite, so whichever bats-shard-N it lands in (issue #2648)
+  # picks it up too (mirrors the DRIVER_OUTCOME_MANIFEST/
+  # PROMPT_CONTRACT_PARITY_FIXTURE comments above) -- export the same
+  # driver-exec binary and nix-rendered lib/fragments.nix JSON the dedicated
+  # promptassembly-parity check (nix/checks/promptassembly.nix) exports, or
+  # that suite's required-var guard fails here.
   promptassemblyRegistryJsonFile = pkgs.writeText "fragments-registry.json" (
     builtins.toJSON (import ../../lib/fragments.nix)
   );
@@ -134,9 +148,9 @@ let
     )
   ) nonClaudeDrivers;
 
-  # The `bats` derivation's build environment: nativeBuildInputs plus the
-  # env vars its suites read (harness binaries, contract fixtures, hook
-  # scripts, driver registry data).
+  # Shared build environment for the bats-shard-N derivations (batsShardChecks
+  # below): nativeBuildInputs plus the env vars their suites read (harness
+  # binaries, contract fixtures, hook scripts, driver registry data).
   batsEnv = {
     nativeBuildInputs = [
       pkgs.bats
@@ -218,10 +232,10 @@ let
     # alongside DRIVER_PREAMBLE_FILE for the same reason.
     FRAGMENT_REGISTRY_FILE = batsHarness.internals.fragmentRegistryFile;
     # tests/driver-registry-outcome-extraction.bats (issue #2261 slice 2)
-    # lives under tests/ like every other suite, so this catch-all `bats
-    # tests/` run picks it up too -- export the same registry-driven
-    # manifest the dedicated driver-registry-outcome-extraction check
-    # below exports, or that file's required-var guard fails here.
+    # lives under tests/ like every other suite, so whichever bats-shard-N it
+    # lands in (issue #2648) picks it up too -- export the same
+    # registry-driven manifest the dedicated driver-registry-outcome-extraction
+    # check below exports, or that file's required-var guard fails here.
     DRIVER_OUTCOME_MANIFEST = driverOutcomeManifestFile;
     # claude's own resume-session test
     # (entrypoint-outcome-recovery.bats's "the resume pass targets the
@@ -252,9 +266,9 @@ let
     # baked bytes, not just a fixture shaped to look like them.
     OPENCODE_AGENT_FILES = opencodeHarness.internals.agentFiles;
     # tests/prompt-contract-parity.bats lives under tests/ like every
-    # other suite, so this catch-all `bats tests/` run picks it up too
-    # (mirrors the DRIVER_OUTCOME_MANIFEST comment above) -- export the
-    # same fixture file the dedicated bats-prompt-contract-parity check
+    # other suite, so whichever bats-shard-N it lands in (issue #2648) picks
+    # it up too (mirrors the DRIVER_OUTCOME_MANIFEST comment above) -- export
+    # the same fixture file the dedicated bats-prompt-contract-parity check
     # below exports, or that suite's required-var guard fails here.
     PROMPT_CONTRACT_PARITY_FIXTURE = promptContractParityFixtureFile;
     # tests/prompt-assembly-parity.bats's required env (see comment above
@@ -278,7 +292,7 @@ let
     WAIT_FOR_LOG_LINES_TIMEOUT = "10";
   };
 
-  # The `bats` derivation's shared builder setup: stage a writable copy of
+  # Shared builder setup for the bats-shard-N derivations: stage a writable copy of
   # tests/, rewrite the fakes' shebangs for the sandboxed build host (see
   # inline comment below), and export FAKES_DIR.
   batsBuilderSetup = ''
@@ -295,6 +309,43 @@ let
     done
     export FAKES_DIR="$PWD/tests/fakes"
   '';
+
+  # The bash layers under bats, driven entirely through fakes — no real
+  # container, network, or LLM. Sharded (issue #2648) across shardNames'
+  # parallel derivations instead of one catch-all `bats tests/` run, each
+  # given its own explicit file-list slice of tests/*.bats (batsShards.
+  # shardFiles) so Nix can build the shards concurrently; batsEnv/
+  # batsBuilderSetup stay shared and unduplicated across shards.
+  batsShardChecks = pkgs.lib.listToAttrs (
+    pkgs.lib.imap0 (
+      idx: name:
+      let
+        files = shardFiles idx;
+      in
+      {
+        inherit name;
+        value = pkgs.runCommand name batsEnv (
+          batsBuilderSetup
+          # A shard can legitimately be empty when there are fewer tests/*.bats
+          # files than shards (fills-every-shard only requires every shard
+          # non-empty once file count >= shardCount); `bats` with no file
+          # arguments is a usage error, so skip invoking it rather than pass
+          # an empty argument list.
+          + (
+            if files == [ ] then
+              "touch $out"
+            else
+              ''
+                bats --print-output-on-failure ${
+                  pkgs.lib.concatMapStringsSep " " (f: pkgs.lib.escapeShellArg "tests/${f}") files
+                }
+                touch $out
+              ''
+          )
+        );
+      }
+    ) shardNames
+  );
 in
 {
   shellcheck =
@@ -329,16 +380,6 @@ in
           ${../../tests/default_models_gen.bash}
         touch $out
       '';
-
-  # The bash layers under bats, driven entirely through fakes — no real
-  # container, network, or LLM.
-  bats = pkgs.runCommand "bats" batsEnv (
-    batsBuilderSetup
-    + ''
-      bats --print-output-on-failure tests/
-      touch $out
-    ''
-  );
 
   # Registry-driven (issue #2261 slice 2): executes every registered Driver's
   # outcome-extraction shell bodies (_driver_extract_outcome/
@@ -421,5 +462,19 @@ in
         bats --print-output-on-failure tests/prompt-contract-parity.bats
         touch $out
       '';
+
+  # Eval-time guard derivations from bats-shards.nix (coverage, balance, and
+  # no-empty-shard), carried through into sourceChecks (nix/checks/
+  # default.nix) rather than left as dangling let-bindings only reachable by
+  # hand-importing the module. Each is a `touch $out` placeholder -- its
+  # actual content is the `assert` guarding it (bats-shards.nix, scoped to
+  # this one attribute's own definition so forcing it doesn't drag in the
+  # sibling guards' asserts too); merging them here means every `nix build
+  # .#checks`/`.#checks-inbox` run forces this attribute and so forces that
+  # assert, not that anything is meaningfully "built".
+  "bats-shard-partition-covers-all-suites" = batsShards."bats-shard-partition-covers-all-suites";
+  "bats-shard-partition-is-balanced" = batsShards."bats-shard-partition-is-balanced";
+  "bats-shard-partition-fills-every-shard" = batsShards."bats-shard-partition-fills-every-shard";
 }
 // outcomeBatsChecks
+// batsShardChecks
