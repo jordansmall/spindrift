@@ -15,6 +15,18 @@ import (
 // package-relative testdata path.
 const promptsDir = "../../../../templates/default/prompts"
 
+// markerGrammarSpindriftCommentExcerpt is a contiguous, verbatim excerpt of
+// caveman-default-research.md's marker-grammar exemption paragraph, copied
+// from the fragment itself, spanning from "machine-parsed marker grammar"
+// through its SPINDRIFT_COMMENT mention. Asserting this single literal
+// (rather than locating the first "machine-parsed marker grammar" substring
+// anywhere in the whole rendered prompt and slicing out the paragraph that
+// follows it) ties the phrase directly to SPINDRIFT_COMMENT in one string,
+// so the assertion can't silently mis-scope itself if that phrase ever
+// starts appearing in more than one fragment within the same rendered
+// prompt.
+const markerGrammarSpindriftCommentExcerpt = "The machine-parsed marker grammar is exempt too: the `SPINDRIFT_OUTCOME`\nline and its `note=` field, and any host-relay signal line such as\n`SPINDRIFT_COMMENT`"
+
 // coveredEnv returns a fixture Env sitting exactly in Assemble's covered
 // cell (see checkCoveredCell): github tracker, github forge, a read-write
 // box, dispatch kind "work", a fresh box (FixPass == 0), the orchestrator
@@ -966,6 +978,206 @@ func TestAssembleResearchSelfContainedRendersSelfContainedPrompt(t *testing.T) {
 	}
 	if result.Handoff.SessionMode != "initial" {
 		t.Errorf("Handoff.SessionMode = %q, want %q", result.Handoff.SessionMode, "initial")
+	}
+}
+
+// TestAssembleResearchPromptCaveman covers issue #2708: research-prompt.md
+// (DispatchKind == "research", SelfContained == false), rendered as
+// result.Prompt (a single-document render, not AgentsJSON -- research
+// prompts are not agent-roster prompts like scout/worker), must carry the
+// caveman-default-research narration directive -- including its
+// research-specific exemption for the posted verdict comment -- when the
+// caveman skill is baked, and must carry neither it nor a dangling literal
+// ${CAVEMAN_STEP_RESEARCH} token when it isn't. research-prompt.md wires
+// only ${CAVEMAN_STEP_RESEARCH}, not ${SKILL_PREAMBLE} (unlike
+// scout-prompt.md/worker-prompt.md): skill-preamble.md's own "fallback when
+// a skill is absent" prose only makes sense next to the TDD/commit/
+// code-review guidance those two roster prompts also wire, none of which
+// research renders.
+func TestAssembleResearchPromptCaveman(t *testing.T) {
+	reg := loadTestRegistry(t)
+
+	t.Run("caveman baked", func(t *testing.T) {
+		env := coveredEnv()
+		env.DispatchKind = "research"
+		env.SelfContained = false
+		env.ResearchStatusEnum = "recommend|reject|unclear"
+
+		result, err := Assemble(env, reg)
+		if err != nil {
+			t.Fatalf("Assemble: %v", err)
+		}
+
+		if !strings.Contains(result.Prompt, "Default to the `/caveman` skill") {
+			t.Errorf("Prompt missing caveman-default-research.md fragment text: %q", result.Prompt)
+		}
+		if !strings.Contains(result.Prompt, "context-for-a-worker section") {
+			t.Errorf("Prompt missing caveman-default-research.md's research-specific exemption text: %q", result.Prompt)
+		}
+		if strings.Contains(result.Prompt, "${") {
+			t.Errorf("Prompt still contains an unsubstituted ${...} token: %q", result.Prompt)
+		}
+	})
+
+	t.Run("caveman not baked", func(t *testing.T) {
+		env := coveredEnv()
+		env.DispatchKind = "research"
+		env.SelfContained = false
+		env.ResearchStatusEnum = "recommend|reject|unclear"
+		env.CavemanSkillBaked = false
+
+		result, err := Assemble(env, reg)
+		if err != nil {
+			t.Fatalf("Assemble: %v", err)
+		}
+
+		if strings.Contains(result.Prompt, "/caveman") {
+			t.Errorf("Prompt contains /caveman text, want absent (CAVEMAN_BAKED gate off): %q", result.Prompt)
+		}
+		if strings.Contains(result.Prompt, "${") {
+			t.Errorf("Prompt still contains an unsubstituted ${...} token: %q", result.Prompt)
+		}
+	})
+}
+
+// TestAssembleResearchPromptCavemanReadOnly covers issue #2708: on a
+// read-only research dispatch (BoxWriteEnabled == false), the box never
+// posts the verdict comment itself -- it emits a single stdout
+// `SPINDRIFT_COMMENT ${RUN_NONCE} <base64>` line
+// (research-verdict-github-readonly.md) that outcome.LastCommentLineInLog
+// parses host-side. caveman-default-research.md's marker-grammar exemption
+// must name SPINDRIFT_COMMENT explicitly, not just SPINDRIFT_OUTCOME, or a
+// caveman-narrating box could reflow/reword the sole carrier of the
+// verdict and silently drop it.
+func TestAssembleResearchPromptCavemanReadOnly(t *testing.T) {
+	reg := loadTestRegistry(t)
+
+	env := coveredEnv()
+	env.DispatchKind = "research"
+	env.SelfContained = false
+	env.ResearchStatusEnum = "recommend|reject|unclear"
+	env.BoxWriteEnabled = false
+
+	result, err := Assemble(env, reg)
+	if err != nil {
+		t.Fatalf("Assemble: %v", err)
+	}
+
+	if !strings.Contains(result.Prompt, "SPINDRIFT_COMMENT run-nonce-abc123") {
+		t.Errorf("Prompt missing research-verdict-github-readonly.md's substituted SPINDRIFT_COMMENT relay line: %q", result.Prompt)
+	}
+	if !strings.Contains(result.Prompt, markerGrammarSpindriftCommentExcerpt) {
+		t.Errorf("Prompt's marker-grammar exemption paragraph doesn't name SPINDRIFT_COMMENT: %q", result.Prompt)
+	}
+}
+
+// TestAssembleResearchSelfContainedPromptCavemanReadOnly is the same
+// coverage as TestAssembleResearchPromptCavemanReadOnly, but for
+// research-self-contained-prompt.md (SelfContained == true): the
+// ISSUE_TRACKER_GITHUB_READONLY gate (lib/fragments.nix) forks on itWrite
+// and BoxWriteEnabled alone, independent of SelfContained, so the
+// self-contained cell relays the verdict through the identical
+// research-verdict-github-readonly.md fragment the repo-backed cell does.
+func TestAssembleResearchSelfContainedPromptCavemanReadOnly(t *testing.T) {
+	reg := loadTestRegistry(t)
+
+	env := coveredEnv()
+	env.DispatchKind = "research"
+	env.SelfContained = true
+	env.ResearchStatusEnum = "recommend|reject|unclear"
+	env.BoxWriteEnabled = false
+
+	result, err := Assemble(env, reg)
+	if err != nil {
+		t.Fatalf("Assemble: %v", err)
+	}
+
+	if !strings.Contains(result.Prompt, "SPINDRIFT_COMMENT run-nonce-abc123") {
+		t.Errorf("Prompt missing research-verdict-github-readonly.md's substituted SPINDRIFT_COMMENT relay line: %q", result.Prompt)
+	}
+	if !strings.Contains(result.Prompt, markerGrammarSpindriftCommentExcerpt) {
+		t.Errorf("Prompt's marker-grammar exemption paragraph doesn't name SPINDRIFT_COMMENT: %q", result.Prompt)
+	}
+}
+
+// TestAssembleResearchSelfContainedPromptCaveman is the same coverage as
+// TestAssembleResearchPromptCaveman, but for
+// research-self-contained-prompt.md (SelfContained == true).
+func TestAssembleResearchSelfContainedPromptCaveman(t *testing.T) {
+	reg := loadTestRegistry(t)
+
+	t.Run("caveman baked", func(t *testing.T) {
+		env := coveredEnv()
+		env.DispatchKind = "research"
+		env.SelfContained = true
+		env.ResearchStatusEnum = "recommend|reject|unclear"
+
+		result, err := Assemble(env, reg)
+		if err != nil {
+			t.Fatalf("Assemble: %v", err)
+		}
+
+		if !strings.Contains(result.Prompt, "Default to the `/caveman` skill") {
+			t.Errorf("Prompt missing caveman-default-research.md fragment text: %q", result.Prompt)
+		}
+		if !strings.Contains(result.Prompt, "context-for-a-worker section") {
+			t.Errorf("Prompt missing caveman-default-research.md's research-specific exemption text: %q", result.Prompt)
+		}
+		if strings.Contains(result.Prompt, "${") {
+			t.Errorf("Prompt still contains an unsubstituted ${...} token: %q", result.Prompt)
+		}
+	})
+
+	t.Run("caveman not baked", func(t *testing.T) {
+		env := coveredEnv()
+		env.DispatchKind = "research"
+		env.SelfContained = true
+		env.ResearchStatusEnum = "recommend|reject|unclear"
+		env.CavemanSkillBaked = false
+
+		result, err := Assemble(env, reg)
+		if err != nil {
+			t.Fatalf("Assemble: %v", err)
+		}
+
+		if strings.Contains(result.Prompt, "/caveman") {
+			t.Errorf("Prompt contains /caveman text, want absent (CAVEMAN_BAKED gate off): %q", result.Prompt)
+		}
+		if strings.Contains(result.Prompt, "${") {
+			t.Errorf("Prompt still contains an unsubstituted ${...} token: %q", result.Prompt)
+		}
+	})
+}
+
+// TestAssembleResearchPromptCavemanLocalTracker covers issue #2708's third
+// research-verdict relay cell: a local issue tracker (env.IssueTracker ==
+// "local") fires ISSUE_TRACKER_LOCAL, wiring research-verdict-local.md
+// (lib/fragments.nix, cmd/launcher/internal/promptassembly/gates_tracker.go)
+// -- unlike the github split, this fragment's SPINDRIFT_COMMENT relay line
+// renders regardless of BoxWriteEnabled, since a local tracker has no
+// in-box tracker client to post a comment with either way. BoxWriteEnabled
+// is set false here anyway, to mirror TestAssembleResearchPromptCavemanReadOnly's
+// fixture and keep the read-only-box story consistent across both relay
+// cells' tests.
+func TestAssembleResearchPromptCavemanLocalTracker(t *testing.T) {
+	reg := loadTestRegistry(t)
+
+	env := localTrackerEnv()
+	env.DispatchKind = "research"
+	env.SelfContained = false
+	env.ResearchStatusEnum = "recommend|reject|unclear"
+	env.BoxWriteEnabled = false
+
+	result, err := Assemble(env, reg)
+	if err != nil {
+		t.Fatalf("Assemble: %v", err)
+	}
+
+	if !strings.Contains(result.Prompt, "SPINDRIFT_COMMENT run-nonce-abc123") {
+		t.Errorf("Prompt missing research-verdict-local.md's substituted SPINDRIFT_COMMENT relay line: %q", result.Prompt)
+	}
+	if !strings.Contains(result.Prompt, markerGrammarSpindriftCommentExcerpt) {
+		t.Errorf("Prompt's marker-grammar exemption paragraph doesn't name SPINDRIFT_COMMENT: %q", result.Prompt)
 	}
 }
 

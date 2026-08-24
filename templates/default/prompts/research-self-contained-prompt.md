@@ -1,6 +1,6 @@
 # TASK
 
-Research GitHub issue #${ISSUE_NUMBER}: ${ISSUE_TITLE}
+${CAVEMAN_STEP_RESEARCH}Research GitHub issue #${ISSUE_NUMBER}: ${ISSUE_TITLE}
 
 This is a self-contained research dispatch (ADR 0022, issue #2202): NO repo —
 all content to analyze lives in the issue itself. No branch cut, no commits.
