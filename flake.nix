@@ -63,6 +63,11 @@
         # The engine, exposed for Consumer flakes to import.
         flake.lib.mkHarness = import ./lib/mkHarness.nix;
 
+        # The roster helpers (issue #2560), exposed the same way -- a Consumer
+        # calls `spindrift.lib.rosterLib { inherit lib; }` to get
+        # `{ normalizeRoster; defaultRoster; }`.
+        flake.lib.rosterLib = import ./lib/roster.nix;
+
         # The flake-parts shim, exposed for Consumer flakes that want the
         # declarative option surface (ADR 0001).
         flake.flakeModules.default = ./lib/flakeModule.nix;

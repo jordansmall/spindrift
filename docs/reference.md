@@ -785,6 +785,28 @@ and `apps` are the versioned Consumer contract (ADR 0010).
 map a darwin `system` to its Linux twin and re-instantiate for the OCI image —
 keeping the agent's toolchain and your dev shell from one pin (ADR 0002).
 
+### Calling the roster helpers directly
+
+`spindrift.lib.rosterLib` (issue #2560) is part of that same versioned
+Consumer contract. It's a curried function: call it with your own `lib` to
+get `{ normalizeRoster; defaultRoster; }`. `defaultRoster` is what
+`mkHarness`'s no-explicit-roster fallback path uses internally to build the
+four-agent scout/reviewer/filer/worker roster — a Consumer can call it
+directly to build a custom roster without hand-authoring all four entries.
+
+```nix
+rosterLib = spindrift.lib.rosterLib { inherit lib; };
+roster = rosterLib.defaultRoster {
+  byName.reviewer.model = "claude-opus-5";
+};
+```
+
+`normalizeRoster` is the other function in the returned attrset: the same
+validation/`promptFile`-default pass `mkHarness` runs on every roster before
+handing it to a Driver (issue #2152 slice A), useful to a Consumer building
+an entirely hand-authored `roster` list who wants it caught at eval time
+rather than downstream.
+
 ### Targeting repos that define their own devShell toolchain
 
 If the Target repos define their own build toolchain in a `flake.nix` devShell,
