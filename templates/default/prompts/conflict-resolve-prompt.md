@@ -1,6 +1,6 @@
 # TASK
 
-A `git rebase` onto `${BASE_BRANCH}` left conflicts in the working tree of
+${SKILL_PREAMBLE}${CAVEMAN_STEP}A `git rebase` onto `${BASE_BRANCH}` left conflicts in the working tree of
 branch `${BRANCH}`. Resolve them and complete the rebase.
 
 # WHAT TO DO

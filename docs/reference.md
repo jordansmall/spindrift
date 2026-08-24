@@ -379,8 +379,14 @@ directive, `FILE ISSUES`, `AUTO-FORMAT`, `AUTO-LINT`, `CI FAILURE`, and the
 `prompts/fragments/`, and a substitution variable — rendered into the
 entrypoint's single fragment loop and its substitution allowlist together,
 so a fragment can never reference a variable the substitution step doesn't
-know about. Adding an opt-in prompt step is a nix-only change: one registry
-row plus one fragment file, no entrypoint edit. All instruction prose —
+know about. Adding an opt-in prompt step that renders through the driver-exec
+`assemble-prompt` verb (every prompt phase_prompt_assembly assembles) is a
+nix-only change: one registry row plus one fragment file, no entrypoint edit.
+`conflict-resolve-prompt.md` is the one exception — it renders earlier, via
+`phase_conflict_resolve`'s own bash-only `_subst` call, before
+`phase_prompt_assembly` ever runs, so its `CAVEMAN_STEP`/`SKILL_PREAMBLE`
+gates are precomputed by a small hand-written block in `entrypoint.sh` rather
+than the shared fragment loop. All instruction prose —
 conditional or not — lives with the rest of the prompt surface rather than
 as heredocs in the entrypoint script. `SPINDRIFT_PROMPT_DIR` therefore
 overrides fragments the same way it overrides `prompts/issue-prompt.md`
