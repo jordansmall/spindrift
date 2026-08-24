@@ -59,6 +59,12 @@ type Environment interface {
 	// parseRemoteHostSlug to detect a Forgejo/Codeberg host; the github-only
 	// GitRemoteRepoSlug still seeds the repo-slug default.
 	GitRemoteURL() string
+
+	// InsideGitWorkTree reports whether dir sits inside a git work tree, so
+	// the finish line can warn the operator to `git add` the newly written
+	// scaffold files — an untracked flake.nix is invisible to `nix
+	// develop`/direnv, silently breaking the dev shell (issue #2567).
+	InsideGitWorkTree(dir string) bool
 }
 
 // validateRepoSlug rejects anything but a single-slash "owner/name" shape —
@@ -128,6 +134,15 @@ const codebergBaseURL = "https://codeberg.org"
 // of the command doesn't require hunting down every error message that
 // mentions it.
 const quickstartRerunCmd = "nix run github:jordansmall/spindrift#quickstart"
+
+// gitAddReminder is printed both immediately after the scaffold files are
+// written and again at the finish line of a successful run (issue #2567):
+// inside a git work tree, `nix develop`/`nix build` resolve `.` via
+// `git+file://` and silently exclude untracked files, so an operator who
+// only saw the early print — which can scroll off-screen during the
+// multi-minute doctor/build steps in between — still sees the reminder one
+// more time right before the wizard hands off to `spindrift dispatch`.
+const gitAddReminder = "\nRun `git add flake.nix .gitignore .envrc` — an untracked flake.nix is invisible to `nix develop`/direnv."
 
 // defaultDispatchLabels are the four operator-visible triage labels
 // Quickstart's generated flake relies on implicitly (the launcher's own
@@ -200,9 +215,13 @@ var doctorPostWriteStep = postWriteStep{
 // pre-write clobber check) and never the wizard itself. Owns 100% of the
 // user-facing prose itself — postWriteStep only carries data (name, rerun
 // command, and which step is next), never pre-rendered sentence fragments.
-func postWriteFailure(step postWriteStep, written []string, err error) error {
-	msg := fmt.Sprintf("%s failed after writing %s — fix the underlying issue (hand-edit the written files directly if that's the problem), then rerun directly (no need to redo quickstart): %s",
-		step.name, strings.Join(written, ", "), step.rerun)
+func postWriteFailure(step postWriteStep, written []string, insideGitWorkTree bool, err error) error {
+	msg := fmt.Sprintf("%s failed after writing %s — fix the underlying issue (hand-edit the written files directly if that's the problem)",
+		step.name, strings.Join(written, ", "))
+	if insideGitWorkTree {
+		msg += ", run `git add flake.nix .gitignore .envrc` (an untracked flake.nix is invisible to `nix develop`/direnv)"
+	}
+	msg += fmt.Sprintf(", then rerun directly (no need to redo quickstart): %s", step.rerun)
 	if step.next != nil {
 		msg += fmt.Sprintf("; once that passes, also run: %s", step.next.rerun)
 	}
@@ -536,6 +555,15 @@ func runQuickstart(dir string, env Environment, cmdRunner CommandRunner, forgeBu
 			return fmt.Errorf("set GH_TOKEN: %w", err)
 		}
 	}
+	// Computed once, right after the scaffold files are on disk, and reused
+	// by the early transcript print immediately below, the finish-line
+	// print, and postWriteFailure's message. See gitAddReminder's own doc
+	// comment above for why.
+	insideGitWorkTree := env.InsideGitWorkTree(dir)
+	if insideGitWorkTree {
+		fmt.Fprintln(w, gitAddReminder)
+	}
+
 	it, cf := forgeBuilder(repoSlug, tracker, a.token)
 	tokenHint, slugHint := doctorHints(tracker.issueTracker)
 	if err := doctor.Run(it, cf, doctor.Config{
@@ -548,17 +576,20 @@ func runQuickstart(dir string, env Environment, cmdRunner CommandRunner, forgeBu
 		CompleteLabel:   defaultDispatchLabels.Complete,
 		Runtime:         runtime,
 	}, w, scanner, interactive); err != nil {
-		return postWriteFailure(doctorPostWriteStep, written, err)
+		return postWriteFailure(doctorPostWriteStep, written, insideGitWorkTree, err)
 	}
 
 	fmt.Fprintln(w, "==> the first image build can take a while — building now")
 	if err := cmdRunner.Run(spindriftBuildArgs[0], spindriftBuildArgs[1:]...); err != nil {
-		return postWriteFailure(buildPostWriteStep, written, err)
+		return postWriteFailure(buildPostWriteStep, written, insideGitWorkTree, err)
 	}
 
 	fmt.Fprintln(w, "\nQuickstart complete. Wrote:")
 	for _, f := range written {
 		fmt.Fprintf(w, "  %s\n", f)
+	}
+	if insideGitWorkTree {
+		fmt.Fprintln(w, gitAddReminder)
 	}
 	fmt.Fprintln(w, "\nNext: run `spindrift dispatch`.")
 
