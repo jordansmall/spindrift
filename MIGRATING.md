@@ -1,5 +1,54 @@
 # Migration Guide
 
+## Roster entries fail eval on an unknown key, a missing model, or an unresolvable prompt file (issue #2571)
+
+`roster` entries — both `defaultRoster`'s own built-in four and
+hand-authored `perSystem.spindrift.roster` / direct `mkHarness roster`
+entries — now go through strict validation in `normalizeRoster`
+(`lib/roster.nix`) instead of being accepted as-is. Three previously-silent
+mistakes now fail eval:
+
+- An entry carrying a key outside the documented shape (`name`, `model`,
+  `effort`, `mode`, `description`, `tools`, `promptFile`, `prompt`) — a
+  typo like `dexcription` — now throws instead of silently passing the
+  stray key through unused.
+- An entry that omits `model` entirely now throws. An explicit `model =
+  ""` is unaffected — it's still the supported #392 opt-out, dropped by a
+  separate `rosterLib.dropOptedOut` step `lib/mkHarness.nix` applies after
+  validation succeeds.
+- A `promptFile` that isn't a non-empty string (e.g. a number, `null`, or
+  `""`) now throws.
+- An entry whose `promptFile` (explicit, or the auto-derived
+  `<name>-prompt.md` default) doesn't resolve to a real file under
+  `templates/default/prompts/`, and which carries no inline `prompt`, now
+  throws instead of silently baking an agent with no usable prompt. The
+  auto-derived default is `<name>-prompt.md` for every roster entry except
+  `reviewer`, which defaults to `review-prompt.md` (matching that agent's
+  on-disk template name, `lib/roster.nix`'s `defaultPromptFileOverrides`).
+
+This promptFile check runs at eval time against the checked-in
+`templates/default/prompts/` tree only. A Consumer relying on a *runtime*
+prompt-dir override (`SPINDRIFT_PROMPT_DIR` / `--prompt-dir` /
+`perSystem.spindrift.agents.promptDir`) to supply a custom agent's prompt
+file must add an inline `prompt` to that roster entry (or ship the file in
+the checked-in tree) to keep evaluating — the override directory doesn't
+exist yet at build time, so the eval-time check can't see into it.
+
+This is a breaking change to the versioned `roster` flake option surface
+(see [`VERSIONING.md`](VERSIONING.md)). Most existing rosters are
+unaffected: only entries of the exact invalid shapes above — the kind that
+used to silently misbehave rather than do anything useful — now fail eval.
+
+A plain default `mkHarness` call (no explicit `byName` overrides) now bakes
+3 agents instead of 4: `defaultRoster`'s built-in `filer` entry resolves to
+the `filerModel` schema default, `""`, which is the existing #392 opt-out
+sentinel, and `rosterLib.dropOptedOut` — which `lib/mkHarness.nix` now runs
+unconditionally ahead of every downstream consumer of the resolved roster —
+drops it before the image is built. This is not new behavior: `filer` was
+always opted out by default, only previously masked by Driver-level
+empty-model filters (removed as redundant by this same issue) rather than
+by roster-entry count.
+
 ## `MAX_BUDGET_TOKENS`/`MAX_BUDGET_USD` now also cap the orchestrator's review loop (issue #2694)
 
 These two knobs previously gated only `selfHealGate`'s host-side decision to
