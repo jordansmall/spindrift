@@ -13,7 +13,7 @@ three ways:
   `packages`, `prompt`, `skills`, `runtime`, `nixInBox`, `extraClosures`, and
   the rest — stayed flat at the top of `spindrift.*`. Two conceptual peers at
   two different depths: `roster` sat at the top while the per-agent model knobs
-  it supersedes were buried in `settings.models`.
+  it supersedes were buried in the old `settings` section named `models`.
 - **A borrowed taxonomy.** The sections were the CLI `--help` groups verbatim.
   That grouping exists to lay out flag help text; it is not how a consumer
   editing a flake reaches for a knob. Its seams show: `Repository & identity`

@@ -1,4 +1,4 @@
-# Nix is a first-class default in the box; lean escape hatch via nixInBox = false
+# Nix is a first-class default in the box; lean escape hatch via infra.nix.inBox = false
 
 Every box ships the nix CLI, a registered store DB, and a single-user
 sandbox-off nix.conf by default. A Consumer whose checks are `nix flake check`
@@ -27,11 +27,12 @@ The nix-centric baseline is now:
 
 ## Lean escape hatch
 
-Consumers who want the smallest possible image pass `nixInBox = false`; this
-omits the nix CLI from `harnessPackages`, skips the store-DB registration step,
-and skips writing `nix.conf`. The `packages-baked` check continues to cover the
-nix-present default. New checks `nix-baked-by-default` and `lean-escape-hatch`
-assert both sides of the boundary at eval time (no Linux builder needed).
+Consumers who want the smallest possible image pass
+`infra.nix.inBox = false`; this omits the nix CLI from `harnessPackages`,
+skips the store-DB registration step, and skips writing `nix.conf`. The
+`packages-baked` check continues to cover the nix-present default. New
+checks `nix-baked-by-default` and `lean-escape-hatch` assert both sides of
+the boundary at eval time (no Linux builder needed).
 
 ## Considered Options
 
@@ -39,11 +40,11 @@ assert both sides of the boundary at eval time (no Linux builder needed).
   on Consumers that never run nix inside the box; rejected.
 - **Always off, opt-in as before** — keeps the image lean by default, but makes
   the common case (nix Consumer, nix checks) a configuration tax; rejected for
-  the default, kept as the escape hatch via `nixInBox = false`.
+  the default, kept as the escape hatch via `infra.nix.inBox = false`.
 - **Separate `build-nix` / `run-nix` commands** — the prototype exposed a
   parallel pair of launchers for the nix-enabled variant; this adds surface
   without simplifying the common case and splits the audience unnecessarily;
-  superseded by promoting `nixInBox = true` as the default.
+  superseded by promoting `infra.nix.inBox = true` as the default.
 
 ## Consequences
 
@@ -53,6 +54,6 @@ are visible in the nix build log and documented here rather than in ephemeral
 PR descriptions. On the other side, `nix flake check` and `nix develop` run
 inside the container out of the box, and the prefetch hook can warm flake
 inputs (`nix flake archive || true`) so subsequent nix commands in the box
-are fast. Consumers who do not need nix use `nixInBox = false` to recover the
-lean image; the escape hatch is a one-line opt-out, not a rebuild of anything
-else.
+are fast. Consumers who do not need nix use
+`infra.nix.inBox = false` to recover the lean image; the escape hatch is a
+one-line opt-out, not a rebuild of anything else.
