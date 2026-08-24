@@ -165,6 +165,7 @@ func TestRunQuickstart_RuntimeInvalid_RejectedAndReprompted(t *testing.T) {
 		"jordansmall/spindrift",
 		"nonsense",
 		"docker",
+		"y",
 		"Ada Lovelace",
 		"ada@example.com",
 		"ghp_faketoken",
@@ -184,6 +185,111 @@ func TestRunQuickstart_RuntimeInvalid_RejectedAndReprompted(t *testing.T) {
 	}
 	if !strings.Contains(string(flakeNix), `infra.runtime = "docker"`) {
 		t.Errorf("expected flake.nix to carry the re-prompted valid runtime, got:\n%s", flakeNix)
+	}
+}
+
+// TestRunQuickstart_RuntimeChosen_AbsentFromPATH_WarnsAndAsksConfirmation
+// covers the issue #2561 UX fix: choosing a valid runtime whose binary isn't
+// on PATH must warn and ask for confirmation right away, rather than
+// silently writing the flake and letting the failure surface later at
+// `spindrift build`. Declining the confirmation must abort before any file
+// is written.
+func TestRunQuickstart_RuntimeChosen_AbsentFromPATH_WarnsAndAsksConfirmation(t *testing.T) {
+	dir := t.TempDir()
+	var out bytes.Buffer
+	env := withPodman()
+	stdin := strings.NewReader(strings.Join([]string{
+		"jordansmall/spindrift",
+		"docker",
+		"n",
+	}, "\n") + "\n")
+
+	err := runQuickstart(dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false)
+	if err == nil {
+		t.Fatal("expected an error when the operator declines to proceed with an uninstalled runtime, got nil")
+	}
+	if !strings.Contains(err.Error(), "docker") {
+		t.Errorf("expected error to name the chosen runtime, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "PATH") {
+		t.Errorf("expected error to mention PATH, got: %v", err)
+	}
+	if !strings.Contains(out.String(), "docker") || !strings.Contains(out.String(), "PATH") {
+		t.Errorf("expected transcript to warn about docker not being on PATH, got:\n%s", out.String())
+	}
+	if !strings.Contains(out.String(), "spindrift build") {
+		t.Errorf("expected transcript to mention spindrift build as where the failure would otherwise surface, got:\n%s", out.String())
+	}
+	if _, statErr := os.Stat(filepath.Join(dir, "flake.nix")); !os.IsNotExist(statErr) {
+		t.Errorf("expected no flake.nix to be written when the operator declines, stat error: %v", statErr)
+	}
+}
+
+// TestRunQuickstart_RuntimeChosen_AbsentFromPATH_ConfirmedProceeds covers the
+// "scaffold now, install the runtime later" flow the issue explicitly calls
+// out as something the new confirmation must preserve: confirming "y" must
+// still write flake.nix with the chosen (uninstalled) runtime.
+func TestRunQuickstart_RuntimeChosen_AbsentFromPATH_ConfirmedProceeds(t *testing.T) {
+	dir := t.TempDir()
+	var out bytes.Buffer
+	env := withPodman()
+	stdin := strings.NewReader(strings.Join([]string{
+		"jordansmall/spindrift",
+		"docker",
+		"y",
+		"Ada Lovelace",
+		"ada@example.com",
+		"ghp_faketoken",
+		"claude-oauth-faketoken",
+	}, "\n") + "\n")
+
+	if err := runQuickstart(dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false); err != nil {
+		t.Fatalf("runQuickstart: %v", err)
+	}
+
+	flakeNix, err := os.ReadFile(filepath.Join(dir, "flake.nix"))
+	if err != nil {
+		t.Fatalf("read flake.nix: %v", err)
+	}
+	if !strings.Contains(string(flakeNix), `infra.runtime = "docker"`) {
+		t.Errorf("expected flake.nix to carry the confirmed uninstalled runtime, got:\n%s", flakeNix)
+	}
+}
+
+// TestRunQuickstart_RancherSelected_WarningNamesNerdctl covers issue #2561:
+// choosing "rancher" when the underlying binary (nerdctl) isn't on PATH must
+// warn using runner.ValidateRuntimeWithLookup's own nerdctl/Rancher-Desktop
+// message, not a hand-rolled string that tells the operator to install a
+// nonexistent "rancher" binary.
+func TestRunQuickstart_RancherSelected_WarningNamesNerdctl(t *testing.T) {
+	dir := t.TempDir()
+	var out bytes.Buffer
+	// bwrap is on PATH so runner.Probe succeeds and offers a default, but
+	// the operator picks rancher instead, which has no nerdctl on PATH —
+	// triggering the WARNING + confirmation.
+	env := fakeEnvironment{runtimes: map[string]bool{"bwrap": true}}
+	stdin := strings.NewReader(strings.Join([]string{
+		"jordansmall/spindrift",
+		"rancher",
+		"n",
+	}, "\n") + "\n")
+
+	err := runQuickstart(dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false)
+	if err == nil {
+		t.Fatal("expected an error when the operator declines to proceed with an uninstalled runtime, got nil")
+	}
+	if !strings.Contains(err.Error(), "nerdctl") {
+		t.Errorf("expected returned error to name nerdctl, got: %v", err)
+	}
+
+	if !strings.Contains(out.String(), "nerdctl") {
+		t.Errorf("expected transcript WARNING to name nerdctl, got:\n%s", out.String())
+	}
+	if strings.Contains(out.String(), `"rancher" was not found on PATH`) {
+		t.Errorf("expected transcript to not falsely claim \"rancher\" was not found on PATH, got:\n%s", out.String())
+	}
+	if strings.Contains(strings.ToLower(out.String()), "install rancher") {
+		t.Errorf("expected transcript to not tell the operator to install a nonexistent \"rancher\" binary, got:\n%s", out.String())
 	}
 }
 
@@ -411,6 +517,39 @@ func TestRunQuickstart_NoRuntimeDetected_ForceDoesNotBackUpExistingFiles(t *test
 
 	if _, statErr := os.Stat(filepath.Join(dir, "flake.nix.bak")); !os.IsNotExist(statErr) {
 		t.Errorf("expected no flake.nix.bak to be written before the runtime check fails, stat error: %v", statErr)
+	}
+	got, readErr := os.ReadFile(filepath.Join(dir, "flake.nix"))
+	if readErr != nil {
+		t.Fatalf("read flake.nix: %v", readErr)
+	}
+	if string(got) != "existing" {
+		t.Errorf("expected existing flake.nix to be left untouched, got: %q", got)
+	}
+}
+
+func TestRunQuickstart_DeclineRuntimeConfirmation_ForceDoesNotBackUpExistingFiles(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "flake.nix"), []byte("existing"), 0o644); err != nil {
+		t.Fatalf("seed flake.nix: %v", err)
+	}
+	var out bytes.Buffer
+	// bwrap is on PATH (so runner.Probe succeeds and offers a default), but
+	// the operator picks podman instead, which is NOT on PATH — triggering
+	// the WARNING + "Proceed anyway...?" confirmation. Answering "n" declines.
+	env := fakeEnvironment{runtimes: map[string]bool{"bwrap": true}}
+	stdin := strings.NewReader(strings.Join([]string{
+		"jordansmall/spindrift",
+		"podman",
+		"n",
+	}, "\n") + "\n")
+
+	err := runQuickstart(dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, true)
+	if err == nil {
+		t.Fatal("expected an error when the operator declines the runtime-not-on-PATH confirmation, got nil")
+	}
+
+	if _, statErr := os.Stat(filepath.Join(dir, "flake.nix.bak")); !os.IsNotExist(statErr) {
+		t.Errorf("expected no flake.nix.bak to be written before the confirmation is answered, stat error: %v", statErr)
 	}
 	got, readErr := os.ReadFile(filepath.Join(dir, "flake.nix"))
 	if readErr != nil {

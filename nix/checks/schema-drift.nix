@@ -718,25 +718,25 @@ in
         touch $out
       '';
 
-  # cmd/launcher/quickstart/quickstart_runtime_gen.go must match the content
+  # cmd/launcher/internal/runner/runtimevalues_gen.go must match the content
   # generated from lib/runtime-values.nix. Fails when the runtime enum
   # changes but the committed generated file isn't regenerated. Shares its
-  # renderer with `nix run .#regen` via lib/renderers.nix.
-  quickstart-runtime-gen =
+  # renderer with `nix run .#regen` via lib/renderers.nix (issue #2561).
+  runtime-values-gen =
     let
       runtimeValues = import ../../lib/runtime-values.nix;
-      generated = pkgs.writeText "quickstart_runtime_gen.go.generated" (
-        renderers.renderQuickstartRuntimeGo runtimeValues
+      generated = pkgs.writeText "runtimevalues_gen.go.generated" (
+        renderers.renderRuntimeValuesGo runtimeValues
       );
     in
-    pkgs.runCommand "quickstart-runtime-gen"
+    pkgs.runCommand "runtime-values-gen"
       {
         inherit generated;
-        committed = ../../cmd/launcher/quickstart/quickstart_runtime_gen.go;
+        committed = ../../cmd/launcher/internal/runner/runtimevalues_gen.go;
       }
       ''
         diff "$generated" "$committed" \
-          || { echo "cmd/launcher/quickstart/quickstart_runtime_gen.go is out of sync with lib/runtime-values.nix — regenerate it with \`nix run .#regen\`" >&2; exit 1; }
+          || { echo "cmd/launcher/internal/runner/runtimevalues_gen.go is out of sync with lib/runtime-values.nix — regenerate it with \`nix run .#regen\`" >&2; exit 1; }
         touch $out
       '';
 

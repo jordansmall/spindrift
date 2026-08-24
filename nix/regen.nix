@@ -3,7 +3,7 @@
 # cmd/launcher/flagtable_gen.go, docs/flake-options.md,
 # cmd/launcher/internal/driver/drivernames_gen.go,
 # cmd/launcher/internal/agentpaths/agentpaths_gen.go,
-# cmd/launcher/quickstart/quickstart_runtime_gen.go,
+# cmd/launcher/internal/runner/runtimevalues_gen.go,
 # cmd/launcher/quickstart/quickstart_paths_gen.go,
 # cmd/launcher/subcommands_gen.go,
 # cmd/launcher/internal/outcome/status_gen.go,
@@ -56,7 +56,7 @@ let
   agentPaths = import ../lib/agent-paths.nix;
   agentPathsFile = renderers.renderAgentPathsGo agentPaths;
   runtimeValues = import ../lib/runtime-values.nix;
-  quickstartRuntimeFile = renderers.renderQuickstartRuntimeGo runtimeValues;
+  runtimeValuesFile = renderers.renderRuntimeValuesGo runtimeValues;
   quickstartPathTable = import ../lib/quickstart-path-table.nix;
   quickstartPathsFile = renderers.renderQuickstartPathsGo quickstartPathTable;
   subcommands = import ../lib/subcommands.nix;
@@ -125,7 +125,7 @@ pkgs.writeShellApplication {
     write docs/flake-options.md ${escapeShellArg flakeOptionsDoc}
     write cmd/launcher/internal/driver/drivernames_gen.go ${escapeShellArg driverNamesFile}
     write cmd/launcher/internal/agentpaths/agentpaths_gen.go ${escapeShellArg agentPathsFile}
-    write cmd/launcher/quickstart/quickstart_runtime_gen.go ${escapeShellArg quickstartRuntimeFile}
+    write cmd/launcher/internal/runner/runtimevalues_gen.go ${escapeShellArg runtimeValuesFile}
     write cmd/launcher/quickstart/quickstart_paths_gen.go ${escapeShellArg quickstartPathsFile}
     write cmd/launcher/subcommands_gen.go ${escapeShellArg subcommandsFile}
     write cmd/launcher/internal/outcome/status_gen.go ${escapeShellArg outcomeStatusGoFile}
