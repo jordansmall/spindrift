@@ -868,16 +868,72 @@ func nixEscape(s string) string {
 // (e.g. FORGEJO_TOKEN for forgejo, GH_TOKEN for github), falling back to
 // GH_TOKEN for an unregistered/tokenless issueTracker — and whichever Claude
 // credential the operator chose (OAuth token or API key, never both).
+//
+// The output opens with a short file-level preamble, then each secret line
+// is preceded by a comment documenting the <NAME>_CMD vault-indirection
+// convention — see lib/renderers.nix's renderHarnessEnvExample, the source
+// of truth this wording mirrors (templates/default/harness.env.example is
+// itself rendered from it). The wizard still writes the plaintext value the
+// operator typed for simplicity; the comments merely document that a
+// <NAME>_CMD entry (or the SECRET_CMD fallback), if the operator adds one
+// later, wins over it.
 func renderHarnessEnv(issueTracker, token, claudeOAuthToken, anthropicAPIKey string) string {
 	tokenEnvVar := "GH_TOKEN"
 	if desc, ok := backend.ByName(issueTracker); ok && desc.TokenEnvVar != "" {
 		tokenEnvVar = desc.TokenEnvVar
 	}
-	out := fmt.Sprintf("%s=%s\n", tokenEnvVar, token)
+	out := harnessEnvPreamble
+	out += harnessEnvSecretLine(tokenEnvVar, token)
 	if claudeOAuthToken != "" {
-		out += fmt.Sprintf("CLAUDE_CODE_OAUTH_TOKEN=%s\n", claudeOAuthToken)
+		out += harnessEnvSecretLine("CLAUDE_CODE_OAUTH_TOKEN", claudeOAuthToken)
 	} else {
-		out += fmt.Sprintf("ANTHROPIC_API_KEY=%s\n", anthropicAPIKey)
+		out += harnessEnvSecretLine("ANTHROPIC_API_KEY", anthropicAPIKey)
 	}
 	return out
+}
+
+// harnessEnvPreamble is renderHarnessEnv's file-level framing, prepended
+// ahead of the per-secret lines. It condenses
+// templates/default/harness.env.example's preamble (itself rendered from
+// lib/renderers.nix's renderHarnessEnvExample) for a generated,
+// single-run harness.env rather than the general-purpose template: vault
+// indirection via <NAME>_CMD is preferred over a plaintext value, so
+// harness.env then holds fetch recipes, not live credentials, and
+// SECRET_CMD sets a single templated fetch command — {name} substituting
+// the secret's kebab-case env name — but per the resolution precedence
+// (docs/reference.md), both a secret's own <NAME>_CMD and the plaintext
+// value the wizard already wrote below outrank this fallback, so it only
+// takes effect once the operator removes that value (or adds <NAME>_CMD).
+const harnessEnvPreamble = "" +
+	"# Preferred: source each secret below from a vault via its <NAME>_CMD\n" +
+	"# form rather than the plaintext value — harness.env then holds\n" +
+	"# fetch recipes, not live credentials.\n" +
+	"# One vault, uniform naming? SECRET_CMD sets a single templated fetch\n" +
+	"# command (e.g. \"rbw get spindrift-{name}\") for any secret without a\n" +
+	"# <NAME>_CMD, but note the plaintext value below still wins over it\n" +
+	"# too, so remove that value (or add <NAME>_CMD) for SECRET_CMD to apply.\n\n"
+
+// harnessEnvSecretLine renders one secret's harness.env stanza: a comment
+// block documenting the <NAME>_CMD command-form indirection (matching
+// templates/default/harness.env.example), followed by the bare NAME=value
+// line the wizard collected.
+func harnessEnvSecretLine(name, value string) string {
+	return fmt.Sprintf(
+		"# Preferred: fetch this from a vault instead of the plaintext value below —\n"+
+			"# %s_CMD=\"rbw get spindrift-%s\" (or an op/pass/vault\n"+
+			"# read); the command's stdout wins over %s and is never baked,\n"+
+			"# logged, or written to disk.\n"+
+			"%s=%s\n\n",
+		name, toKebab(name), name, name, value,
+	)
+}
+
+// toKebab derives the "spindrift-<kebab-name>" vault key convention's
+// kebab-case suffix from an env var name: lowercased with underscores
+// replaced by hyphens (e.g. GH_TOKEN -> gh-token, CLAUDE_CODE_OAUTH_TOKEN ->
+// claude-code-oauth-token). Named to match its sibling copies of this exact
+// transform: cmd/launcher's flags.go toKebab (Go) and lib/renderers.nix's
+// toKebab (Nix) — a deliberate cross-language naming lineage.
+func toKebab(name string) string {
+	return strings.ReplaceAll(strings.ToLower(name), "_", "-")
 }
