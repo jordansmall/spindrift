@@ -3691,6 +3691,7 @@ func TestDoctor_NoTTY_ResearchLabelsMissing_ExitZero(t *testing.T) {
 	for _, label := range []string{
 		"agent-research", "agent-research-in-progress", "agent-research-failed",
 		"agent-research-recommend", "agent-research-reject", "agent-research-unclear",
+		"agent-research-finding",
 	} {
 		if !strings.Contains(out, "MISSING: label \""+label+"\"") {
 			t.Errorf("want MISSING line for research label %q, got:\n%s", label, out)
@@ -3776,9 +3777,9 @@ func TestDoctor_TTY_Confirm(t *testing.T) {
 }
 
 // TestDoctor_TTY_Confirm_ResearchLabels verifies interactive doctor also
-// offers to create missing research labels (advisory tier, ADR 0022)
-// alongside work labels, and creates them with real colors/descriptions —
-// never the "ededed" gray fallback (#796).
+// offers to create missing research labels (advisory tier, ADR 0022 / ADR
+// 0041) alongside work labels, and creates them with real
+// colors/descriptions — never the "ededed" gray fallback (#796).
 func TestDoctor_TTY_Confirm_ResearchLabels(t *testing.T) {
 	f := forge.NewFake()
 	f.ProbeRepo = "owner/repo"
@@ -3786,7 +3787,7 @@ func TestDoctor_TTY_Confirm_ResearchLabels(t *testing.T) {
 	research := doctor.ResearchLabelNames()
 	priority := doctor.PriorityLabelNames()
 	ambiguous := doctor.AmbiguousLabelNames()
-	// All work, priority, and ambiguous-spec labels present; all six
+	// All work, priority, and ambiguous-spec labels present; all seven
 	// research labels missing, so this test stays scoped to research label
 	// creation.
 	f.Labels = append(append(append([]string{}, work...), priority...), ambiguous...)
@@ -3908,7 +3909,7 @@ func TestDoctor_TTY_Confirm_ResearchStillMissing_Advisory(t *testing.T) {
 	f := forge.NewFake()
 	f.ProbeRepo = "owner/repo"
 	work := []string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}
-	f.Labels = work // all work labels present, all six research labels missing
+	f.Labels = work // all work labels present, all seven research labels missing
 	f.LabelsSeq = [][]string{
 		work,
 		work, // re-verify: research labels still missing despite CreateLabel "succeeding"
@@ -3922,7 +3923,7 @@ func TestDoctor_TTY_Confirm_ResearchStillMissing_Advisory(t *testing.T) {
 	out := buf.String()
 	var advisoryLine string
 	for _, line := range strings.Split(out, "\n") {
-		if strings.HasPrefix(line, "advisory: 6 research label(s) still missing after creation") {
+		if strings.HasPrefix(line, "advisory: 7 research label(s) still missing after creation") {
 			advisoryLine = line
 			break
 		}
