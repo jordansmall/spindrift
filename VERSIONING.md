@@ -14,7 +14,7 @@ require a version bump per the policy below.
 
 | Surface | What is versioned |
 |---|---|
-| **CLI verbs** | `spindrift dispatch`, `spindrift build`, `spindrift preview` — verb names, flag names, exit codes |
+| **CLI verbs** | `spindrift dispatch`, `spindrift build`, `spindrift preview`, `spindrift doctor` — verb names, flag names, exit codes |
 | **Flake options** | `perSystem.spindrift.*` and all named parameters of `mkHarness` |
 | **Lib exports** | `spindrift.lib.mkHarness` (the function itself, not its `internals`-scoped return-value fields — see the `mkHarness` return-value carve-out below) and `spindrift.lib.rosterLib` (issue #2560), whose `{ normalizeRoster; dropOptedOut; defaultRoster; }` return value carries no `internals` field and is versioned in full |
 | **`env-schema.nix` variable names** | Every `SPINDRIFT_*` environment variable name listed in `lib/env-schema.nix` |
