@@ -14,7 +14,8 @@ import (
 // credential/construction, runtime validity, and the ISSUE_TRACKER/CODE_FORGE
 // row validity plus cross-knob checks. Each Probe returns the exact error
 // validate() (main.go) surfaces for that condition by running these same
-// rows through doctor.RunChecksFailFast (issue #2559).
+// rows through doctor.RunChecksFailFast (issue #2559). See doctor.go for
+// runDoctor and main.go for validateConfig.
 //
 // The eight rows are split into two ordered groups —
 // launcherRequiredKnobChecks (6 rows) and launcherCrossKnobChecks (2 rows) —
@@ -22,13 +23,16 @@ import (
 // before validate()'s validateChoice calls (MERGE_MODE, MERGE_METHOD,
 // SYNC_METHOD, OVERLAP_GATE), and the two cross-knob rows run after those
 // calls (and before BOX_FORGE_AND_ISSUE_ACCESS), fail-fast and gating
-// dispatch. launcherChecks concatenates both groups and feeds doctor's
-// runDoctor (see doctor.go), where every row runs informational-only rather
-// than fail-fast. validateChoice calls themselves, the --self-contained
-// dispatch-kind check, and forge.ParseResearchVerdicts stay out of scope —
-// not part of "required-knob presence, runtime validity, driver
-// construction, credential presence, cross-knob conditional requirements"
-// per the issue.
+// dispatch. launcherChecks concatenates both groups; doctorExtraChecks below
+// (runtime filtered out) feeds two different `spindrift doctor` consumers:
+// runDoctor, where every row runs informational-only rather than
+// fail-fast, and validateConfig, which runs the same rows to classify exit 2
+// "configuration invalid" (issue #2569) — the two never disagree about which
+// rows count as "configuration" because both read the identical row set.
+// validateChoice calls themselves, the --self-contained dispatch-kind check,
+// and forge.ParseResearchVerdicts stay out of scope — not part of
+// "required-knob presence, runtime validity, driver construction, credential
+// presence, cross-knob conditional requirements" per the issue.
 func launcherChecks(c config) []doctor.Check {
 	return append(launcherRequiredKnobChecks(c), launcherCrossKnobChecks(c)...)
 }

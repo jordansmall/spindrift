@@ -1,5 +1,31 @@
 # Migration Guide
 
+## `spindrift doctor` exit codes are no longer a flat 0/1 (issue #2569)
+
+`spindrift doctor` used to exit `0` on success and `1` on any failure — the
+only two codes it ever produced. It now exits a distinct code per failure
+class: `0` healthy (advisory findings — missing research/priority/
+ambiguous-spec labels, container runtime not ready, etc. — are allowed and
+reported informationally), `1` reserved for internal/unclassified errors,
+`2` configuration invalid, `3` auth or connectivity, `4` required checks
+failed or declined. See [`spindrift doctor` exit
+codes](docs/reference.md#spindrift-doctor-exit-codes-issue-2569) for the full
+table.
+
+A script that only distinguishes `$? -eq 0` (success) from anything else is
+unaffected. A script that specifically checked `$? -eq 1` to mean "any
+failure" must switch to `$? -ne 0` — a real failure can now also exit `2`,
+`3`, or `4`.
+
+Two more doctor behaviors changed alongside the exit codes: every
+issue-tracker/code-forge connectivity error doctor reports now carries an
+`issue tracker or code forge connectivity failure: ` prefix (it names the
+failure class being classified as exit `3`), and an advisory-tier label
+(research/priority/ambiguous-spec) that fails to create at the interactive
+prompt is reported but no longer fails the check — it exits `0`, where it
+previously exited `1`. Only a work-tier (triage) label create failure is
+still fatal.
+
 ## Roster entries fail eval on an unknown key, a missing model, or an unresolvable prompt file (issue #2571)
 
 `roster` entries — both `defaultRoster`'s own built-in four and
