@@ -33,18 +33,28 @@ issue_prompt_outcome_section() {
 # 4th arg, which wins over both the env var and the 2s default (kept short in
 # tests that intentionally exercise the timeout path). An unset OR
 # empty-string 4th arg falls through to the env var/default instead, per
-# bash's own "${4:-...}" fallback rule. Whichever source it comes from, the
-# timeout value must be a positive integer no more than 6 digits (up to
-# 999999) -- it flows into a `timeout * 20` arithmetic context, so anything
-# else is rejected outright rather than risking a bash syntax error, an
-# arithmetic overflow (an 18+ digit value can wrap the poll-count negative
-# and silently skip the loop instead of erroring), or, worse, code
-# execution. Zero is rejected too: timeout=0 collapses the main retry
-# loop to zero retries, so only the first check ever runs, falling
-# straight to either the confirm window (if it already matches) or the
-# timeout error (if it doesn't) -- defeating the point of a wait/poll
-# helper (issue #2450), so issue #2759 rejects 0 outright rather than
-# treating it as a valid bound.
+# bash's own "${4:-...}" fallback rule. That env var only reaches this
+# process when the caller's shell is the one running bats directly -- Nix's
+# build sandbox scrubs the environment before a derivation's builder runs,
+# so a shell-level `WAIT_FOR_LOG_LINES_TIMEOUT=N nix flake check` never
+# propagates down into this sourced bash process. That's why the Nix `bats`
+# check (nix/checks/bats.nix, issue #2649) bakes its own wider 10s default
+# directly into the derivation's environment instead of relying on a
+# caller-supplied env var: a serially-run bats suite on a loaded host can
+# outrun the tight 2s local-dev default, and the derivation's own env is the
+# only place a human can move that number without editing every
+# default-timeout call site -- the only place it's reachable from inside the
+# sandbox. Whichever source it comes from, the timeout value must be a
+# positive integer no more than 6 digits (up to 999999) -- it flows into a
+# `timeout * 20` arithmetic context, so anything else is rejected outright
+# rather than risking a bash syntax error, an arithmetic overflow (an 18+
+# digit value can wrap the poll-count negative and silently skip the loop
+# instead of erroring), or, worse, code execution. Zero is rejected too:
+# timeout=0 collapses the main retry loop to zero retries, so only the
+# first check ever runs, falling straight to either the confirm window
+# (if it already matches) or the timeout error (if it doesn't) --
+# defeating the point of a wait/poll helper (issue #2450), so issue #2759
+# rejects 0 outright rather than treating it as a valid bound.
 #
 # Reaching expected_count mid-poll is not itself proof the count has
 # settled: it may just be passing through on its way to a higher, wrong
