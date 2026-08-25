@@ -345,6 +345,129 @@ in
     pkgs.runCommand "prompt-contract-build-time-reject-verdicts-covers-every-reject-row" { }
       "touch $out";
 
+  # Pins buildTimeResearchDirectFileViolations (issue #2595, ADR 0041): the
+  # build-time backstop proving a research prompt (research-prompt.md /
+  # research-self-contained-prompt.md) never references one of
+  # lib/fragments.nix's FILER_FILE_DIRECT*-gated rows' envsubst placeholder --
+  # research filing is host-mediated/relay-only by design, so wiring a direct-
+  # file var into a research prompt must fail the build, not silently
+  # regress. Exercises the pure function in isolation with minimal inline
+  # fixtures first, then against the real registry/prompt content below.
+  prompt-contract-build-time-research-direct-file-violations-detects-direct-var-in-content =
+    let
+      out = promptContract.buildTimeResearchDirectFileViolations {
+        directFileFragmentRows = [
+          {
+            fragment = "filer-file-direct.md";
+            var = "SOME_VAR";
+          }
+        ];
+        researchPromptContentByName = {
+          "research-prompt.md" = "before \${SOME_VAR} after";
+        };
+      };
+    in
+    assert assertMsg (builtins.length out == 1)
+      "buildTimeResearchDirectFileViolations must report one violation when a research prompt's content contains a direct-file row's \${VAR} placeholder, got: ${toString (builtins.length out)}";
+    pkgs.runCommand
+      "prompt-contract-build-time-research-direct-file-violations-detects-direct-var-in-content"
+      { }
+      "touch $out";
+
+  prompt-contract-build-time-research-direct-file-violations-none-when-var-absent =
+    let
+      out = promptContract.buildTimeResearchDirectFileViolations {
+        directFileFragmentRows = [
+          {
+            fragment = "filer-file-direct.md";
+            var = "SOME_VAR";
+          }
+        ];
+        researchPromptContentByName = {
+          "research-prompt.md" = "no direct-file placeholders here";
+        };
+      };
+    in
+    assert assertMsg (out == [ ])
+      "buildTimeResearchDirectFileViolations must report no violations when the content contains none of the direct-file rows' \${VAR} placeholders, got: ${toString (builtins.length out)}";
+    pkgs.runCommand "prompt-contract-build-time-research-direct-file-violations-none-when-var-absent"
+      { }
+      "touch $out";
+
+  prompt-contract-build-time-research-direct-file-violations-none-when-no-direct-rows =
+    let
+      out = promptContract.buildTimeResearchDirectFileViolations {
+        directFileFragmentRows = [ ];
+        researchPromptContentByName = {
+          "research-prompt.md" = "\${SOME_VAR} and \${ANYTHING_ELSE}";
+        };
+      };
+    in
+    assert assertMsg (out == [ ])
+      "buildTimeResearchDirectFileViolations must report no violations when directFileFragmentRows is empty, regardless of content, got: ${toString (builtins.length out)}";
+    pkgs.runCommand
+      "prompt-contract-build-time-research-direct-file-violations-none-when-no-direct-rows"
+      { }
+      "touch $out";
+
+  prompt-contract-build-time-research-direct-file-violations-violation-names-fragment-and-var =
+    let
+      out = promptContract.buildTimeResearchDirectFileViolations {
+        directFileFragmentRows = [
+          {
+            fragment = "filer-file-direct.md";
+            var = "FILER_FILE_DIRECT_STEP";
+          }
+        ];
+        researchPromptContentByName = {
+          "research-self-contained-prompt.md" = "\${FILER_FILE_DIRECT_STEP}";
+        };
+      };
+      violation = builtins.head out;
+    in
+    assert assertMsg (builtins.length out == 1)
+      "buildTimeResearchDirectFileViolations must report exactly one violation for this fixture, got: ${toString (builtins.length out)}";
+    assert assertMsg (violation.fragment == "filer-file-direct.md")
+      "buildTimeResearchDirectFileViolations violation record must name the offending row's fragment, got: ${violation.fragment}";
+    assert assertMsg (violation.var == "FILER_FILE_DIRECT_STEP")
+      "buildTimeResearchDirectFileViolations violation record must name the offending row's var, got: ${violation.var}";
+    assert assertMsg (violation.promptName == "research-self-contained-prompt.md")
+      "buildTimeResearchDirectFileViolations violation record must name the offending research prompt, got: ${violation.promptName}";
+    pkgs.runCommand
+      "prompt-contract-build-time-research-direct-file-violations-violation-names-fragment-and-var"
+      { }
+      "touch $out";
+
+  # The real registry check (issue #2595, ADR 0041): filters lib/fragments.nix's
+  # real fragment rows down to the FILER_FILE_DIRECT*-gated ones and feeds the
+  # real, on-disk content of both research prompts -- proving today's "holds
+  # by construction" claim documented at lib/fragments.nix's
+  # research-file-issues-relay.md row (the one row wiring FILER_FILE_RELAY into
+  # a research-only fragment) actually holds, and will keep failing the build
+  # the moment it stops holding.
+  prompt-contract-build-time-research-direct-file-violations-real-registry-passes =
+    let
+      fragments = import ../../lib/fragments.nix;
+      directFileFragmentRows = builtins.filter (
+        row: pkgs.lib.hasInfix "FILER_FILE_DIRECT" row.gate
+      ) fragments;
+      out = promptContract.buildTimeResearchDirectFileViolations {
+        inherit directFileFragmentRows;
+        researchPromptContentByName = {
+          "research-prompt.md" = builtins.readFile ../../templates/default/prompts/research-prompt.md;
+          "research-self-contained-prompt.md" =
+            builtins.readFile ../../templates/default/prompts/research-self-contained-prompt.md;
+        };
+      };
+    in
+    assert assertMsg (directFileFragmentRows != [ ])
+      "prompt-contract-build-time-research-direct-file-violations-real-registry-passes: expected at least one FILER_FILE_DIRECT*-gated row in lib/fragments.nix, got none -- fixture is vacuous";
+    assert assertMsg (out == [ ])
+      "buildTimeResearchDirectFileViolations must return no violations against the real fragments.nix registry and real research prompt content (ADR 0041: research filing is host-mediated/relay-only), got: ${builtins.toJSON out}";
+    pkgs.runCommand "prompt-contract-build-time-research-direct-file-violations-real-registry-passes"
+      { }
+      "touch $out";
+
   # Pins outcomeStatusSets' research row (issue #2524): the row must be
   # derived from lib/research-verdicts.nix's defaultVerdicts (the single
   # source of truth for the built-in research verdict tokens) plus the
