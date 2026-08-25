@@ -22,12 +22,37 @@ the [README](../README.md); for vocabulary see [`CONTEXT.md`](../CONTEXT.md).
 | `spindrift preview [issue...]`   | dry run: show what `dispatch` would pick up, and the wave ordering               |
 | `spindrift build`                | realize/load the agent image (or store closures) without running any agent      |
 | `spindrift recover <issue>`      | re-run the merge gate for one issue (adopt a stranded `agent-in-progress`)       |
-| `spindrift doctor`               | check forge credentials, repository connectivity, container runtime readiness (advisory only — issue #2561), base-branch protection (fatal if `MERGE_MODE` isn't `manual` and the base branch isn't protected, advisory otherwise — issue #2570), and label presence — the four triage labels (fatal if missing) and the seven `agent-research*` labels (ADR 0022 and ADR 0041, advisory only); when run interactively (TTY attached) and labels are missing it offers to create them with default colors and descriptions; in CI (no TTY) it reports missing labels and exits non-zero only if a triage label is missing; it also reports the same required-knob/driver/cross-knob checks `dispatch` gates on (issue #2559), one status line per check (plus a remedy line for a failing one, unless its remedy just repeats the error), informationally — this doesn't affect doctor's exit code |
+| `spindrift doctor`               | check configuration validity, forge credentials, repository connectivity, container runtime readiness (advisory only — issue #2561), base-branch protection (fatal if `MERGE_MODE` isn't `manual` and the base branch isn't protected, advisory otherwise — issue #2570), and label presence — the four triage labels (required) and the seven `agent-research*`/priority/ambiguous-spec labels (ADR 0022, ADR 0040, ADR 0041, advisory only); when run interactively (TTY attached) and labels are missing it offers to create them, with the prompt itself stating the required/advisory tier counts and what declining each means; in CI (no TTY) missing required labels are fatal; it also reports the same required-knob/driver/cross-knob checks `dispatch` gates on (issue #2559), one status line per check (plus a remedy line for a failing one, unless its remedy just repeats the error); a distinct exit code per failure class (below) and, on any failure, a stderr summary that stands alone even with stdout redirected (issue #2569) |
 | `spindrift reconcile`            | local-tracker bookkeeping sweep: close issues whose recorded `landing` PR merged (ADR 0029) — a clear no-op on `github`/`jira`; also auto-invoked at the end of a `dispatch` run when `ISSUE_TRACKER=local` — see [`reconcile`: closing a local issue](#reconcile-closing-a-local-issue) |
 | `spindrift --help`               | concise usage: subcommands, common flags, and pointers to the full reference    |
 | `spindrift --help --all`         | the full flag reference, grouped by category (same content as `man spindrift`)  |
 | `man spindrift`                  | the manual page (installed alongside the binary on your PATH)                    |
 | `spindrift --version`            | installed version and revision                                                  |
+
+**`spindrift doctor` exit codes** (issue #2569). A scriptable, distinct code
+per failure class — never a flat 0/1 — so automation can branch without
+parsing stderr strings; on any non-zero exit, stderr alone (independent of
+stdout, which carries the ok/MISSING/advisory status lines) explains the
+failure, and, for missing labels, names every missing label. A configuration
+problem (exit 2) enumerates every simultaneously-broken required knob, not
+just the first — none of those checks are network probes, so doctor runs
+every one instead of stopping at the first failure the way `dispatch`'s own
+fail-fast gate does; the connectivity probes (exit 3) stay fail-fast, since
+each is a live network call and a later one is moot once an earlier one has
+already failed:
+
+These codes are scoped to `doctor` alone and deliberately disagree with the
+numbers `dispatch`'s own loop uses for its unrelated exit 2/3/4 (queue empty,
+none dispatchable, image stale) — the two vocabularies are never compared to
+each other, so the collision is not a conflict to resolve.
+
+| exit | meaning |
+|------|---------|
+| 0    | healthy — required checks passed; advisory findings (missing research/priority/ambiguous-spec labels, runtime not ready, etc.) are allowed and reported informationally |
+| 1    | reserved for internal/unclassified errors |
+| 2    | configuration invalid — the same required-knob/driver/cross-knob validation `dispatch` gates on, minus runtime readiness (advisory here, per exit 0 above, even though `dispatch` itself still requires it before launching a Box) |
+| 3    | auth or connectivity — the issue tracker or code forge could not be reached, or a work-tier label create call failed (an advisory-tier label create failure is reported but does not fail the check, and still exits 0) |
+| 4    | required checks failed or declined — one or more of the four triage labels are missing and were not created, whether declined at the interactive prompt, missing in non-interactive (CI) mode, or still missing after a create attempt |
 
 Every runtime knob is also a `--flag`. Precedence is **flag > flake `settings`
 > baked default** (ADR 0020): nix renders the resolved `settings` values (plus

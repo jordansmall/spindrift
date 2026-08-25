@@ -72,7 +72,7 @@
   {
     name = "doctor";
     usage = "";
-    doc = "check forge credentials, repository connectivity, and label presence (triage fatal, research advisory)";
+    doc = "check configuration validity, forge credentials, repository connectivity, and label presence; distinct exit code per failure class (see docs/reference.md)";
   }
   {
     name = "reconcile";
