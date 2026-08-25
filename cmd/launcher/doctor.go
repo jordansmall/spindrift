@@ -25,6 +25,8 @@ func runDoctor(it forge.IssueTracker, cf forge.CodeForge, c config, w io.Writer,
 		FailedLabel:     c.failedLabel,
 		CompleteLabel:   c.completeLabel,
 		Runtime:         c.runtime,
+		MergePolicy:     c.mergeMode,
+		BaseBranch:      c.baseBranch,
 	}, w, bufio.NewScanner(stdin), interactive, doctorExtraChecks(c)); err != nil {
 		return err
 	}

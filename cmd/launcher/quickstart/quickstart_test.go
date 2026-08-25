@@ -1786,11 +1786,17 @@ func TestRunQuickstart_AmbientAnthropicAPIKey_ReusedWithoutPrompt(t *testing.T) 
 
 // passingForge returns a forge.Fake with a resolved repo and all four work
 // labels already present, so doctor validation succeeds without prompting —
-// the default most finish-line-agnostic tests want.
+// the default most finish-line-agnostic tests want. Quickstart's own
+// doctor.Run call (issue #2570) always probes branch protection for
+// defaultBaseBranch, the same "main" value the generated flake.nix runs
+// under since quickstart doesn't prompt for BASE_BRANCH; scripting that
+// branch as protected here keeps the branch-protection row from failing
+// every happy-path finish-line test as an unrelated side effect.
 func passingForge() *forge.Fake {
 	f := forge.NewFake()
 	f.ProbeRepo = "owner/repo"
 	f.Labels = []string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}
+	f.SetBranchProtected(defaultBaseBranch, true)
 	return f
 }
 
@@ -1821,6 +1827,7 @@ func TestRunQuickstart_FinishLine_ProbesForgeThenCreatesLabelsThenBuilds(t *test
 	ambiguous := doctor.AmbiguousLabelNames()
 	f := forge.NewFake()
 	f.ProbeRepo = "jordansmall/spindrift"
+	f.SetBranchProtected(defaultBaseBranch, true)
 	// three work labels missing; research, priority, and ambiguous-spec
 	// labels all present
 	f.Labels = append(append(append([]string{"ready-for-agent"}, research...), priority...), ambiguous...)
