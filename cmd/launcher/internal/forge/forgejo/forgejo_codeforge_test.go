@@ -178,3 +178,185 @@ func TestForgejoCodeForge_Probe_AuthFailure(t *testing.T) {
 		t.Fatalf("Probe() error = %v, want ErrAuthFailure", err)
 	}
 }
+
+// TestForgejoCodeForge_BranchProtected_Protected verifies BranchProtected
+// reports (true, nil) when Forgejo's branch_protections list endpoint
+// returns a rule whose rule_name matches branch exactly.
+func TestForgejoCodeForge_BranchProtected_Protected(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/repos/owner/repo/branch_protections" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`[{"rule_name":"main"}]`))
+	}))
+	defer srv.Close()
+
+	cf := forgejo.NewForgejoCodeForge(forgejo.ForgejoCodeForgeConfig{
+		BaseURL: srv.URL,
+		Repo:    "owner/repo",
+		Token:   "tok",
+	}, nil)
+	bp, ok := cf.(forge.BranchProtectionForge)
+	if !ok {
+		t.Fatal("forgejoCodeForge does not implement forge.BranchProtectionForge")
+	}
+	protected, err := bp.BranchProtected("main")
+	if err != nil {
+		t.Fatalf("BranchProtected() error = %v, want nil", err)
+	}
+	if !protected {
+		t.Fatal("BranchProtected() = false, want true")
+	}
+}
+
+// TestForgejoCodeForge_BranchProtected_GlobRuleName verifies BranchProtected
+// matches a rule_name glob (e.g. "release/*") against branch, not just a
+// literal branch name -- Forgejo's rule_name is a glob, so a branch can be
+// protected without ever appearing verbatim as a rule_name.
+func TestForgejoCodeForge_BranchProtected_GlobRuleName(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`[{"rule_name":"release/*"}]`))
+	}))
+	defer srv.Close()
+
+	cf := forgejo.NewForgejoCodeForge(forgejo.ForgejoCodeForgeConfig{
+		BaseURL: srv.URL,
+		Repo:    "owner/repo",
+		Token:   "tok",
+	}, nil)
+	bp, ok := cf.(forge.BranchProtectionForge)
+	if !ok {
+		t.Fatal("forgejoCodeForge does not implement forge.BranchProtectionForge")
+	}
+	protected, err := bp.BranchProtected("release/1.0")
+	if err != nil {
+		t.Fatalf("BranchProtected() error = %v, want nil", err)
+	}
+	if !protected {
+		t.Fatal("BranchProtected() = false, want true for a branch matching a glob rule_name")
+	}
+}
+
+// TestForgejoCodeForge_BranchProtected_NotProtected verifies BranchProtected
+// reports the definitive, successful (false, nil) result -- not an error --
+// when no listed rule_name matches branch.
+func TestForgejoCodeForge_BranchProtected_NotProtected(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`[{"rule_name":"release/*"}]`))
+	}))
+	defer srv.Close()
+
+	cf := forgejo.NewForgejoCodeForge(forgejo.ForgejoCodeForgeConfig{
+		BaseURL: srv.URL,
+		Repo:    "owner/repo",
+		Token:   "tok",
+	}, nil)
+	bp, ok := cf.(forge.BranchProtectionForge)
+	if !ok {
+		t.Fatal("forgejoCodeForge does not implement forge.BranchProtectionForge")
+	}
+	protected, err := bp.BranchProtected("main")
+	if err != nil {
+		t.Fatalf("BranchProtected() error = %v, want nil", err)
+	}
+	if protected {
+		t.Fatal("BranchProtected() = true, want false")
+	}
+}
+
+// TestForgejoCodeForge_BranchProtected_NoRules verifies BranchProtected
+// reports the definitive, successful (false, nil) result -- not an error --
+// when Forgejo's branch_protections list endpoint returns 200 with an empty
+// array, meaning the repo has no protection rules at all. This is the
+// genuine "no rules" signal on Gitea/Forgejo's list endpoint, distinct from
+// a 404 (see TestForgejoCodeForge_BranchProtected_GenericNotFound).
+func TestForgejoCodeForge_BranchProtected_NoRules(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`[]`))
+	}))
+	defer srv.Close()
+
+	cf := forgejo.NewForgejoCodeForge(forgejo.ForgejoCodeForgeConfig{
+		BaseURL: srv.URL,
+		Repo:    "owner/repo",
+		Token:   "tok",
+	}, nil)
+	bp, ok := cf.(forge.BranchProtectionForge)
+	if !ok {
+		t.Fatal("forgejoCodeForge does not implement forge.BranchProtectionForge")
+	}
+	protected, err := bp.BranchProtected("main")
+	if err != nil {
+		t.Fatalf("BranchProtected() error = %v, want nil", err)
+	}
+	if protected {
+		t.Fatal("BranchProtected() = true, want false")
+	}
+}
+
+// TestForgejoCodeForge_BranchProtected_GenericNotFound verifies
+// BranchProtected surfaces a non-nil error -- never a false "not
+// protected" -- when the branch_protections list endpoint 404s. Unlike
+// GitHub's per-branch endpoint, Forgejo's list endpoint always returns 200
+// with an empty array for a repo with no rules (see
+// TestForgejoCodeForge_BranchProtected_NoRules), so a 404 here means the
+// repo or endpoint couldn't be resolved at all (old server, wrong mount,
+// invisible repo) -- a genuine probe failure, not a definitive answer.
+func TestForgejoCodeForge_BranchProtected_GenericNotFound(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	cf := forgejo.NewForgejoCodeForge(forgejo.ForgejoCodeForgeConfig{
+		BaseURL: srv.URL,
+		Repo:    "owner/repo",
+		Token:   "tok",
+	}, nil)
+	bp, ok := cf.(forge.BranchProtectionForge)
+	if !ok {
+		t.Fatal("forgejoCodeForge does not implement forge.BranchProtectionForge")
+	}
+	protected, err := bp.BranchProtected("main")
+	if err == nil {
+		t.Fatal("BranchProtected() error = nil, want non-nil")
+	}
+	if protected {
+		t.Fatal("BranchProtected() = true, want false alongside a non-nil error")
+	}
+}
+
+// TestForgejoCodeForge_BranchProtected_ProbeFailure verifies BranchProtected
+// surfaces a non-nil error -- never a false "not protected" -- when the
+// probe itself fails to determine the answer, e.g. a 403 auth failure.
+func TestForgejoCodeForge_BranchProtected_ProbeFailure(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	defer srv.Close()
+
+	cf := forgejo.NewForgejoCodeForge(forgejo.ForgejoCodeForgeConfig{
+		BaseURL: srv.URL,
+		Repo:    "owner/repo",
+		Token:   "tok",
+	}, nil)
+	bp, ok := cf.(forge.BranchProtectionForge)
+	if !ok {
+		t.Fatal("forgejoCodeForge does not implement forge.BranchProtectionForge")
+	}
+	protected, err := bp.BranchProtected("main")
+	if err == nil {
+		t.Fatal("BranchProtected() error = nil, want non-nil")
+	}
+	if protected {
+		t.Fatal("BranchProtected() = true, want false alongside a non-nil error")
+	}
+}
