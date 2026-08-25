@@ -26,6 +26,25 @@ let
     ;
   issuePromptSource = builtins.readFile ../../templates/default/prompts/issue-prompt.md;
   researchPromptSource = builtins.readFile ../../templates/default/prompts/research-prompt.md;
+  # Shared fixture for the prompt-contract-shared-obligation-violations-for-*
+  # tests below (issue #2699): identical `obligations` list reused by each,
+  # only `contentBySource` differs per test.
+  fixtureObligations = [
+    {
+      id = "fold-commits";
+      branches = [
+        {
+          id = "inline";
+          source = "fixture-inline.md";
+        }
+        {
+          id = "orchestrator";
+          source = "fixture-orchestrator.md";
+        }
+      ];
+      requiredSubstrings = [ "fold your commits" ];
+    }
+  ];
 in
 {
   prompt-contract-canonical-text-outcome-matches-live-slice =
@@ -341,4 +360,68 @@ in
       "outcomeStatusSets' research row's statuses must equal lib/research-verdicts.nix's defaultVerdicts' verdict tokens (in order) plus \"blocked\", got: [${concatStringsSep ", " out}]";
     pkgs.runCommand "prompt-contract-outcome-status-sets-research-row-derives-from-verdict-registry" { }
       "touch $out";
+
+  # Pins sharedObligationViolationsFor (issue #2699): sharedObligations'
+  # consumer function, which checks that BOTH branches of a paired prompt
+  # fork carry every literal substring a shared obligation declares.
+  # Exercised here with fixtureObligations (a hand-built obligations list)
+  # and synthetic contentBySource -- the point of taking contentBySource as
+  # an explicit argument is that this stays testable with fixture content
+  # proving the check can actually fail, independent of whether any real row
+  # exists yet.
+  prompt-contract-shared-obligation-violations-for-detects-missing-substring =
+    let
+      contentBySource = {
+        "fixture-inline.md" = "Before you finish, fold your commits into one.";
+        "fixture-orchestrator.md" = "Before you finish, tidy up your work.";
+      };
+      out = promptContract.sharedObligationViolationsFor fixtureObligations contentBySource;
+    in
+    assert assertMsg (builtins.length out == 1)
+      "sharedObligationViolationsFor must report exactly one violation when exactly one branch's content is missing the declared substring, got ${toString (builtins.length out)}";
+    assert assertMsg ((builtins.head out).branchId == "orchestrator")
+      "sharedObligationViolationsFor must name the offending branch's id ('orchestrator'), got '${(builtins.head out).branchId}'";
+    pkgs.runCommand "prompt-contract-shared-obligation-violations-for-detects-missing-substring" { }
+      "touch $out";
+
+  prompt-contract-shared-obligation-violations-for-empty-when-all-branches-satisfy =
+    let
+      contentBySource = {
+        "fixture-inline.md" = "Before you finish, fold your commits into one.";
+        "fixture-orchestrator.md" = "Before you finish, fold your commits into one too.";
+      };
+      out = promptContract.sharedObligationViolationsFor fixtureObligations contentBySource;
+    in
+    assert assertMsg (out == [ ])
+      "sharedObligationViolationsFor must return no violations when every branch's content satisfies every declared substring, got: [${
+        concatStringsSep ", " (map (v: v.branchId) out)
+      }]";
+    pkgs.runCommand "prompt-contract-shared-obligation-violations-for-empty-when-all-branches-satisfy"
+      { }
+      "touch $out";
+
+  # Acceptance criterion (issue #2699): a violation's pre-rendered `message`
+  # must name BOTH the offending fork branch and the obligation it's missing
+  # -- not just carry those ids in separate structured fields no caller reads
+  # before rendering. The other tests in this group only assert on
+  # `.branchId`/list length, so a future edit that silently drops
+  # `${obligation.id}` (or `${branch.id}`) from the message template would
+  # stay green everywhere else.
+  prompt-contract-shared-obligation-violations-for-message-names-branch-and-obligation =
+    let
+      contentBySource = {
+        "fixture-inline.md" = "Before you finish, fold your commits into one.";
+        "fixture-orchestrator.md" = "Before you finish, tidy up your work.";
+      };
+      out = promptContract.sharedObligationViolationsFor fixtureObligations contentBySource;
+      message = (builtins.head out).message;
+    in
+    assert assertMsg
+      (pkgs.lib.hasInfix "orchestrator" message && pkgs.lib.hasInfix "fold-commits" message)
+      "sharedObligationViolationsFor's message must name both the at-fault branch ('orchestrator') and the missing obligation ('fold-commits'), got: '${message}'";
+    pkgs.runCommand
+      "prompt-contract-shared-obligation-violations-for-message-names-branch-and-obligation"
+      { }
+      "touch $out";
+
 }
