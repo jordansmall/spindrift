@@ -452,7 +452,7 @@ func testValidateMarkerRows() []ValidateMarkerRow {
 			Carrier:  "fragment-body",
 			Severity: "warn",
 			When:     "researchFileRelay",
-			Message:  "_validate_prompt_contract: warning -- research dispatch's rendered prompt is missing the 'SPINDRIFT_ISSUE_INTENT' marker under an active Filer-relay gate (belongs in research-prompt.md's, or research-self-contained-prompt.md's, POST THE VERDICT section, research-file-issues-relay.md-injected). Proceeding: any finding the filer can't relay still surfaces inline via its own best-effort fallback, and the researcher's posted verdict comment is unaffected either way.",
+			Message:  "_validate_prompt_contract: warning -- research dispatch's rendered prompt is missing the 'SPINDRIFT_ISSUE_INTENT' marker under an active Filer-relay gate (belongs in research-prompt.md's, or research-self-contained-prompt.md's, POST THE VERDICT section, research-file-issues-relay.md-substituted). Proceeding: any finding the filer can't relay still surfaces inline via its own best-effort fallback (describe it directly in the verdict body), and the researcher's posted verdict comment is unaffected either way.",
 		},
 	}
 }

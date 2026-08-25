@@ -39,8 +39,7 @@ never edit a predecessor research comment, even on a re-run.
 
 ${RESEARCH_FILE_ISSUES_RELAY_STEP}Never edit the issue body, never add or remove a label, never close the
 issue, never promote it to dispatchable, and never file an issue yourself.
-Comments only — plus, when the Filer is provisioned, the delegated filing
-above.
+Comments only.
 
 # OUTCOME
 
