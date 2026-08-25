@@ -412,10 +412,10 @@ func recordReviewedCommitAnchor(state *runstate.RunState) {
 // an APPROVE verdict, in which case it proceeds straight to landing the
 // change and its own terminal SPINDRIFT_OUTCOME. So the sequence this loop
 // drives is implement -> review -> (BLOCK) fix -> review -> ... -> (APPROVE)
-// land, where "land" is just another fix-role pass that happens to find
-// nothing left to fix. The loop's own hasOutcome check (unchanged from run's
-// legacy loop) is what actually stops it, once that land pass reaches its
-// own outcome -- there is no separate "land" pass kind in the Go code.
+// land, where "land" is its own distinct terminal role (KindLand in
+// passmachine.go), not a fix-role pass. The loop's own hasOutcome check
+// (unchanged from run's legacy loop) is what actually stops it, once that
+// land pass reaches its own outcome.
 func runWithReviewPass(cfg config, stdout io.Writer) (int, error) {
 	// Every implement/fix/land pass this loop invokes below (seedAndInvokePass
 	// copies cfg by value, so this local mutation flows into each of its own
