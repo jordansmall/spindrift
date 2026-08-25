@@ -78,6 +78,32 @@ func TestRealizeTip_NonEmptyRevEmptyTipTagNoOp(t *testing.T) {
 	}
 }
 
+// TestRealizeTip_LauncherOnlyStaleNoOp is an end-to-end regression test for
+// the launcher-only-stale bug (issue #1364's research comment): the exact
+// Result shape Probe now produces when the image matches but the launcher
+// doesn't (Applicable, !Fresh, ImageFresh true, LauncherFresh false, Rev
+// set, TipTag == "") must never kick off a background `nix build` of a tip
+// image that's already loaded and fresh — RealizeTip only ever wants to
+// realize a genuine image-tag mismatch. Named separately from the generic
+// empty-TipTag cases above so the launcher scenario has its own regression
+// test rather than relying on inference from TestRealizeTip_EmptyRevNoOp /
+// TestRealizeTip_NonEmptyRevEmptyTipTagNoOp.
+func TestRealizeTip_LauncherOnlyStaleNoOp(t *testing.T) {
+	rf := NewRealizerFake()
+	res := Result{Applicable: true, Fresh: false, ImageFresh: true, LauncherFresh: false, Rev: "revA", TipTag: ""}
+
+	RealizeTip(rf, "/pwd", res, ".#packages.x86_64-linux.agent-image")
+
+	select {
+	case <-rf.Done:
+		t.Fatal("Start was called, want no-op for a launcher-only-stale Result (image already fresh, nothing to realize)")
+	case <-time.After(100 * time.Millisecond):
+	}
+	if calls := rf.CallsCopy(); len(calls) != 0 {
+		t.Fatalf("len(calls) = %d, want 0 for a launcher-only-stale Result", len(calls))
+	}
+}
+
 // TestRealizeTip_CallsRealizeOnce verifies RealizeTip calls Start exactly
 // once with (pwd, res.Rev, trimmed-attr) when the verdict is a genuine
 // rebuild-needed at a known rev. It synchronizes on the fake's Done channel

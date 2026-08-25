@@ -45,8 +45,13 @@ func NewGuard(pwd string) Guard {
 // updating the persisted prior-stale-rev memory as a side effect: it
 // records the rev on Rebuild and clears the memory on HostTainted. The
 // empty-tip-tag guard lives here beside the post-condition it depends on —
-// a stuck eval/derive failure (Applicable, !Fresh, Rev set, TipTag=="")
-// repeats at the same rev but is NOT host taint, so it stays Rebuild.
+// TipTag is empty for every stale Result that is NOT a genuine "the
+// evaluated image tag differs from the loaded image tag" divergence: a
+// stuck image eval/tag-derive failure, a stuck launcher eval/hash-derive
+// failure (the image itself may have succeeded and matched), or a
+// launcher-only-stale verdict (image matched; only the launcher dimension
+// is stale). All of these repeat at the same rev but are NOT host taint, so
+// they stay Rebuild.
 func (g Guard) Classify(res Result) Disposition {
 	if NonConverging(res.Rev, g.prior()) && res.TipTag != "" {
 		_ = g.clear()

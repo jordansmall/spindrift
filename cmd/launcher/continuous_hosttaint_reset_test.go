@@ -51,7 +51,7 @@ import (
 // cannot even partially contribute ("both contribute" is excluded). The
 // freshness probe's signature is
 //
-//	freshness.Probe(runtime, pwd, baseBranch, flakeImageAttr, imageTag string, eval Evaluator)
+//	freshness.Probe(runtime, pwd, baseBranch, flakeImageAttr, imageTag, flakeLauncherAttr, loadedLauncherHash string, eval Evaluator)
 //
 // at cmd/launcher/internal/freshness/probe.go:91 — it takes NO codeForge
 // argument, so it behaves identically under CODE_FORGE=local and

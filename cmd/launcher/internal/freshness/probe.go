@@ -43,10 +43,42 @@ type Result struct {
 	Rev string
 	// TipTag is the "<repo>:<hash>" image tag freshly evaluated at the base
 	// tip — the tag a rebuild would load. Empty when the probe never got far
-	// enough to derive it. The non-convergence diagnostic (issue #2113) names
-	// it alongside the loaded tag so an operator sees the two tags that will
-	// never converge.
+	// enough to derive it, when the image dimension itself is fresh (only the
+	// launcher dimension is stale — there is no genuine image-tag divergence
+	// to name), or on a launcher eval/hash-derive failure. The
+	// non-convergence diagnostic (issue #2113) names it alongside the loaded
+	// tag so an operator sees the two tags that will never converge.
 	TipTag string
+	// LauncherFresh is true when the host-launcher-only dimension is
+	// considered fresh — no launcher rebuild would be needed. Meaningless
+	// when Applicable is false. False (fail-closed) on every branch reached
+	// before the launcher comparison itself is known — the bwrap
+	// not-applicable branch, every not-applicable/error branch that returns
+	// before the launcher dimension is even reached (fetch failure, image
+	// eval error, image tag-derive error), and a launcher eval/hash-derive
+	// failure once flakeLauncherAttr is configured. Only reached and set true
+	// when flakeLauncherAttr is empty (the launcher dimension isn't
+	// configured — "not configured" is not "stale"), or when the freshly
+	// evaluated launcher store hash matches loadedLauncherHash. Fresh is true
+	// only when both LauncherFresh and the image comparison are true.
+	LauncherFresh bool
+	// ImageFresh is true only when the image dimension itself matched —
+	// independent of the launcher dimension, and independent of the overall
+	// Fresh verdict (which is also false when only the launcher is stale).
+	// False (fail-closed) on every branch reached before the image
+	// comparison itself is known — the not-applicable branches and every
+	// image-side error (fetch failure, image eval error, image tag-derive
+	// error). Once the image comparison is known, it carries that same
+	// value through the rest of Probe, including a launcher eval/hash-derive
+	// failure (the image succeeded; only the launcher dimension errored) and
+	// the final success return.
+	ImageFresh bool
+	// TipLauncherHash is the bare 32-char store hash of flakeLauncherAttr
+	// freshly evaluated at the base tip — the hash a launcher rebuild would
+	// produce. Empty when flakeLauncherAttr is empty or the probe never got
+	// far enough to derive it. Mirrors TipTag for the launcher dimension, for
+	// a future caller (issue #2682) to compare without re-parsing Message.
+	TipLauncherHash string
 }
 
 // storeHashPrefixLen and storeHashLen locate the 32-char base32 content
@@ -67,11 +99,24 @@ const (
 // its tip tag against the same repo it was loaded under, rather than a
 // hardcoded "spindrift" repo.
 func imageTagFromOutPath(outPath, repo string) (string, error) {
+	hash, err := storeHash(outPath)
+	if err != nil {
+		return "", err
+	}
+	return repo + ":" + hash, nil
+}
+
+// storeHash extracts the bare 32-char base32 content hash from a nix store
+// output path (see storeHashPrefixLen/storeHashLen), without the
+// "<repo>:" tag prefixing imageTagFromOutPath adds on top. The launcher
+// freshness dimension (issue #1364) compares this bare hash directly —
+// there is no "repo" concept for a host-launcher binary the way there is
+// for an OCI image.
+func storeHash(outPath string) (string, error) {
 	if !strings.HasPrefix(outPath, "/nix/store/") || len(outPath) < storeHashPrefixLen+storeHashLen {
 		return "", fmt.Errorf("not a nix store path: %q", outPath)
 	}
-	hash := outPath[storeHashPrefixLen : storeHashPrefixLen+storeHashLen]
-	return repo + ":" + hash, nil
+	return outPath[storeHashPrefixLen : storeHashPrefixLen+storeHashLen], nil
 }
 
 // imageRepo derives the repo portion of an "<repo>:<tag>" image reference —
@@ -107,8 +152,14 @@ const KindBwrap = "bwrap"
 // so a caller must pass config.runnerKind, not the raw RUNTIME/c.runtime
 // value: a bwrap-kind harness can still carry an OCI runtime name (e.g. an
 // operator override), and comparing that name directly would misclassify
-// it as OCI.
-func Probe(runnerKind, pwd, baseBranch, flakeImageAttr, imageTag string, eval Evaluator) Result {
+// it as OCI. flakeLauncherAttr and loadedLauncherHash drive the
+// host-launcher-only freshness dimension (issue #1364): when
+// flakeLauncherAttr is non-empty, Probe also evaluates it at the exact same
+// fetched rev used for the image and compares its store hash against
+// loadedLauncherHash. Overall Fresh is true only when both dimensions are
+// fresh (or the launcher dimension isn't configured at all, i.e.
+// flakeLauncherAttr == "").
+func Probe(runnerKind, pwd, baseBranch, flakeImageAttr, imageTag, flakeLauncherAttr, loadedLauncherHash string, eval Evaluator) Result {
 	if runnerKind == KindBwrap {
 		return Result{
 			Applicable: false,
@@ -169,22 +220,81 @@ func Probe(runnerKind, pwd, baseBranch, flakeImageAttr, imageTag string, eval Ev
 			Rev:        rev,
 		}
 	}
+	imageFresh := tipTag == imageTag
 
-	if tipTag == imageTag {
-		return Result{
-			Applicable: true,
-			Fresh:      true,
-			Message:    fmt.Sprintf("fresh (%s tip %s matches the loaded image %s)", baseBranch, rev, imageTag),
-			Rev:        rev,
-			TipTag:     tipTag,
+	launcherConfigured := flakeLauncherAttr != ""
+	launcherFresh := true
+	var tipLauncherHash string
+	if launcherConfigured {
+		launcherAttr := trimFlakeAttrPrefix(flakeLauncherAttr)
+		launcherOutPath, err := eval.Eval(pwd, rev, launcherAttr)
+		if err != nil {
+			return Result{
+				Applicable: true,
+				Fresh:      false,
+				ImageFresh: imageFresh,
+				Message:    fmt.Sprintf("could not evaluate launcher at %s tip %s: %v — assuming rebuild needed", baseBranch, rev, err),
+				Rev:        rev,
+			}
 		}
+		tipLauncherHash, err = storeHash(launcherOutPath)
+		if err != nil {
+			return Result{
+				Applicable: true,
+				Fresh:      false,
+				ImageFresh: imageFresh,
+				Message:    fmt.Sprintf("could not derive launcher hash at %s tip %s: %v — assuming rebuild needed", baseBranch, rev, err),
+				Rev:        rev,
+			}
+		}
+		launcherFresh = tipLauncherHash == loadedLauncherHash
 	}
+
+	resultTipTag := tipTag
+	if imageFresh {
+		resultTipTag = ""
+	}
+
 	return Result{
-		Applicable: true,
-		Fresh:      false,
-		Message:    fmt.Sprintf("rebuild needed (%s tip %s produces %s, loaded image is %s)", baseBranch, rev, tipTag, imageTag),
-		Rev:        rev,
-		TipTag:     tipTag,
+		Applicable:      true,
+		Fresh:           imageFresh && launcherFresh,
+		LauncherFresh:   launcherFresh,
+		ImageFresh:      imageFresh,
+		Message:         freshnessMessage(baseBranch, rev, launcherConfigured, imageFresh, launcherFresh, tipTag, imageTag, tipLauncherHash, loadedLauncherHash),
+		Rev:             rev,
+		TipTag:          resultTipTag,
+		TipLauncherHash: tipLauncherHash,
+	}
+}
+
+// freshnessMessage builds the human-readable summary for a probe that
+// successfully evaluated the image dimension (and, if configured, the
+// launcher dimension) — naming whichever dimension(s) drove a
+// rebuild-needed verdict, or confirming both match when fresh. When the
+// launcher dimension isn't configured at all (launcherConfigured is false),
+// it preserves the original image-only wording unchanged.
+func freshnessMessage(baseBranch, rev string, launcherConfigured, imageFresh, launcherFresh bool, tipTag, imageTag, tipLauncherHash, loadedLauncherHash string) string {
+	if !launcherConfigured {
+		if imageFresh {
+			return fmt.Sprintf("fresh (%s tip %s matches the loaded image %s)", baseBranch, rev, imageTag)
+		}
+		return fmt.Sprintf("rebuild needed (%s tip %s produces %s, loaded image is %s)", baseBranch, rev, tipTag, imageTag)
+	}
+
+	if imageFresh && launcherFresh {
+		return fmt.Sprintf("fresh (image and launcher both match %s tip %s, loaded image is %s)", baseBranch, rev, imageTag)
+	}
+
+	imageClause := fmt.Sprintf("image: %s tip %s produces %s, loaded image is %s", baseBranch, rev, tipTag, imageTag)
+	launcherClause := fmt.Sprintf("launcher: %s tip %s produces %s, loaded launcher is %s", baseBranch, rev, tipLauncherHash, loadedLauncherHash)
+
+	switch {
+	case !imageFresh && launcherFresh:
+		return fmt.Sprintf("rebuild needed (%s)", imageClause)
+	case imageFresh && !launcherFresh:
+		return fmt.Sprintf("rebuild needed (%s)", launcherClause)
+	default:
+		return fmt.Sprintf("rebuild needed (%s; %s)", imageClause, launcherClause)
 	}
 }
 

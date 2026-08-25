@@ -46,14 +46,20 @@ type Realizer interface {
 // failed realize never blocks or changes the caller's own behavior. It is a
 // no-op — Start is never called — unless res is Probe's one genuine
 // "rebuild needed, tag differs" verdict: the only Result variant with a
-// non-empty TipTag, since Probe only derives a tag once it has successfully
-// fetched, evaluated, and tagged the base tip. !res.Applicable, res.Fresh,
-// or res.TipTag == "" all skip the realize entirely — the last of which
-// also catches every one of Probe's error branches that report
-// Applicable=true/Fresh=false without ever reaching tag derivation,
-// including the two that carry a real, non-empty res.Rev (the eval-error
-// and tag-derive-error branches) as well as the one that doesn't (the
-// fetch-failure branch): none of them have anything meaningful to realize.
+// non-empty TipTag, since Probe only sets TipTag once it has successfully
+// fetched, evaluated, and tagged the base tip AND that tag genuinely differs
+// from the loaded one. !res.Applicable, res.Fresh, or res.TipTag == "" all
+// skip the realize entirely — the last of which also catches every one of
+// Probe's error/no-divergence branches that report Applicable=true without a
+// genuine image-tag mismatch to realize: the two image-side branches that
+// carry a real, non-empty res.Rev but never reach tag derivation
+// (eval-error and tag-derive-error), the one that doesn't (fetch-failure),
+// the two launcher-side error branches (launcher eval-error and
+// hash-derive-error — the image itself succeeded, but there's still no
+// genuine image-tag divergence to realize), and a launcher-only-stale
+// verdict (the image matched; only the launcher dimension is stale, so
+// TipTag is left empty even though Fresh is false). None of them have
+// anything meaningful to realize.
 // flakeImageAttr is trimmed of its ".#" prefix via the same
 // trimFlakeAttrPrefix helper Probe uses immediately before its own
 // eval.Eval call, so the two paths always address the same flake attribute.

@@ -263,7 +263,7 @@ func TestHeadRevAndProbeRev_SameCommit_IdenticalFormat(t *testing.T) {
 	}
 
 	eval := &freshness.Fake{OutPath: "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-agent-image"}
-	res := freshness.Probe("podman", pwd, "main", ".#packages.x86_64-linux.agent-image", "spindrift:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", eval)
+	res := freshness.Probe("podman", pwd, "main", ".#packages.x86_64-linux.agent-image", "spindrift:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "", "", eval)
 
 	if res.Rev != head {
 		t.Errorf("Probe Rev = %q, headRev = %q, want identical for the same commit", res.Rev, head)
