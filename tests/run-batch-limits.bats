@@ -125,48 +125,53 @@ setup() {
 @test "wait_for_log_lines rejects a non-integer timeout cleanly instead of a bash arithmetic error" {
   local log="$BATS_TEST_TMPDIR/probe.log"
   printf 'unrelated\n' >"$log"
-  run wait_for_log_lines "$log" '^run ' 1 0.5
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"timeout must be a non-negative integer"* ]]
-  [[ "$output" != *"syntax error"* ]]
+  assert_timeout_rejected "$log" 0.5 "syntax error"
   [[ "$output" != *"integer expression expected"* ]]
 }
 
 @test "wait_for_log_lines rejects a negative timeout cleanly instead of an unbound-variable crash" {
   local log="$BATS_TEST_TMPDIR/probe.log"
   printf 'unrelated\n' >"$log"
-  run wait_for_log_lines "$log" '^run ' 1 -1
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"timeout must be a non-negative integer"* ]]
-  [[ "$output" != *"unbound variable"* ]]
+  assert_timeout_rejected "$log" -1 "unbound variable"
 }
 
 @test "wait_for_log_lines rejects a leading-zero timeout cleanly instead of a bash arithmetic error" {
   local log="$BATS_TEST_TMPDIR/probe.log"
   printf 'unrelated\n' >"$log"
-  run wait_for_log_lines "$log" '^run ' 1 08
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"timeout must be a non-negative integer"* ]]
-  [[ "$output" != *"value too great for base"* ]]
+  assert_timeout_rejected "$log" 08 "value too great for base"
 }
 
 @test "wait_for_log_lines rejects an injection payload timeout without executing it" {
   local log="$BATS_TEST_TMPDIR/probe.log"
   local marker="$BATS_TEST_TMPDIR/PWNED_MARKER"
   printf 'unrelated\n' >"$log"
-  run wait_for_log_lines "$log" '^run ' 1 'x[$(touch "'"$marker"'")]'
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"timeout must be a non-negative integer"* ]]
+  assert_timeout_rejected "$log" 'x[$(touch "'"$marker"'")]'
   [ ! -e "$marker" ]
 }
 
 @test "wait_for_log_lines rejects an oversized timeout cleanly instead of a bash arithmetic overflow" {
   local log="$BATS_TEST_TMPDIR/probe.log"
   printf 'unrelated\n' >"$log"
-  run wait_for_log_lines "$log" '^run ' 1 500000000000000000
+  assert_timeout_rejected "$log" 500000000000000000 "unbound variable"
+}
+
+@test "wait_for_log_lines rejects a zero timeout cleanly instead of silently running a single check" {
+  local log="$BATS_TEST_TMPDIR/probe.log"
+  # A pattern that already matches (not 'unrelated' like the siblings
+  # above) is what makes this fail on status pre-fix: the old code
+  # accepted timeout=0 and returned success once the confirm window
+  # found the match already present.
+  printf 'run x\n' >"$log"
+  assert_timeout_rejected "$log" 0 "timed out after 0s"
+}
+
+@test "wait_for_log_lines rejects WAIT_FOR_LOG_LINES_TIMEOUT=0 the same as an explicit zero" {
+  local log="$BATS_TEST_TMPDIR/probe.log"
+  printf 'unrelated\n' >"$log"
+  export WAIT_FOR_LOG_LINES_TIMEOUT=0
+  run wait_for_log_lines "$log" '^run ' 1
   [ "$status" -eq 1 ]
-  [[ "$output" == *"timeout must be a non-negative integer"* ]]
-  [[ "$output" != *"unbound variable"* ]]
+  [[ "$output" == *"timeout must be a positive integer"* ]]
 }
 
 # --- MAX_JOBS batch cap (dogfood serial loop) ------------------------------
