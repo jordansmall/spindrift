@@ -40,6 +40,23 @@ func trackerGates(e Env, orchestratorEnabled bool) map[string]bool {
 		itRead, itWrite, itFiler = issueTrackerAxisFallback(e.IssueTracker)
 	}
 
+	// researchForceRelay is the ADR 0041 / issue #2593 research special-case:
+	// a research dispatch with the Filer provisioned always uses the relay
+	// form for both the verdict-comment write step and the filer's own
+	// write-mechanism -- unconditionally, with no ORCHESTRATOR_ENABLED
+	// condition, and regardless of BOX_WRITE_ENABLED (read-write or
+	// read-only). DispatchKind is fixed for the whole Assemble() call, so
+	// this can only ever be true while rendering research-path fragments;
+	// it never touches the work-path issue-blocked-comment or
+	// file-issues-direct fragments below. kind defaults to "work" the same
+	// way assemble.go/validate.go do, since DispatchKind is forwarded
+	// empty-string on Env for the default case rather than "work" itself.
+	kind := e.DispatchKind
+	if kind == "" {
+		kind = defaultDispatchKind
+	}
+	researchForceRelay := kind == "research" && e.FilerEnabled
+
 	// The issue-read step gate (entrypoint.sh: 891-904): exactly one of
 	// ISSUE_TRACKER_GITHUB/ISSUE_TRACKER_LOCAL/ISSUE_TRACKER_FORGEJO fires,
 	// selected by itRead above.
@@ -52,22 +69,36 @@ func trackerGates(e Env, orchestratorEnabled bool) map[string]bool {
 	// (itWrite non-empty) forks on BOX_WRITE_ENABLED between the
 	// _READWRITE and _READONLY arm; local (itWrite empty) renders neither
 	// pair regardless of BOX_WRITE_ENABLED -- its write step always goes
-	// through the relay form instead.
-	g["ISSUE_TRACKER_GITHUB_READWRITE"] = itWrite == "GITHUB" && e.BoxWriteEnabled
-	g["ISSUE_TRACKER_GITHUB_READONLY"] = itWrite == "GITHUB" && !e.BoxWriteEnabled
-	g["ISSUE_TRACKER_FORGEJO_READWRITE"] = itWrite == "FORGEJO" && e.BoxWriteEnabled
-	g["ISSUE_TRACKER_FORGEJO_READONLY"] = itWrite == "FORGEJO" && !e.BoxWriteEnabled
+	// through the relay form instead. This same pair of gates also drives
+	// the research-path research-verdict-github(-readonly).md fragments, so
+	// researchForceRelay (ADR 0041 / issue #2593) flips a would-be
+	// _READWRITE case to its _READONLY sibling whenever the current
+	// dispatch is research with the Filer provisioned; it's always false
+	// for a work dispatch (or a Filer-less research dispatch), leaving
+	// these expressions byte-for-byte their pre-#2593 shape in every case
+	// this function's other callers ever actually observe.
+	g["ISSUE_TRACKER_GITHUB_READWRITE"] = itWrite == "GITHUB" && e.BoxWriteEnabled && !researchForceRelay
+	g["ISSUE_TRACKER_GITHUB_READONLY"] = itWrite == "GITHUB" && (!e.BoxWriteEnabled || researchForceRelay)
+	g["ISSUE_TRACKER_FORGEJO_READWRITE"] = itWrite == "FORGEJO" && e.BoxWriteEnabled && !researchForceRelay
+	g["ISSUE_TRACKER_FORGEJO_READONLY"] = itWrite == "FORGEJO" && (!e.BoxWriteEnabled || researchForceRelay)
 
-	// The filer's write-mechanism gates (entrypoint.sh: 816-860): relay
-	// only activates on read-only (BOX_WRITE_ENABLED absent) + the
-	// orchestrator gate; every other combination keeps the direct gh/fj
-	// path, forked further on itFiler. Both stay off when the filer isn't
-	// configured at all.
+	// The filer's write-mechanism gates (entrypoint.sh: 816-860): on a work
+	// dispatch, relay only activates on read-only (BOX_WRITE_ENABLED
+	// absent) + the orchestrator gate; every other combination keeps the
+	// direct gh/fj path, forked further on itFiler. On a research dispatch
+	// (researchForceRelay, ADR 0041 / issue #2593), relay activates
+	// unconditionally instead -- no orchestrator condition, and regardless
+	// of BOX_WRITE_ENABLED (applies in read-write mode too) -- so the
+	// research special-case is checked first, ahead of the work-path
+	// !e.BoxWriteEnabled && orchestratorEnabled check below. Both stay off
+	// when the filer isn't configured at all.
 	filerFileRelay := false
 	filerFileDirectGH := false
 	filerFileDirectForgejo := false
 	if e.FilerEnabled {
-		if !e.BoxWriteEnabled && orchestratorEnabled {
+		if researchForceRelay {
+			filerFileRelay = true
+		} else if !e.BoxWriteEnabled && orchestratorEnabled {
 			filerFileRelay = true
 		} else if itFiler == "FORGEJO" {
 			filerFileDirectForgejo = true
@@ -76,6 +107,23 @@ func trackerGates(e Env, orchestratorEnabled bool) map[string]bool {
 		}
 	}
 	g["FILER_FILE_RELAY"] = filerFileRelay
+	// FILER_FILE_RELAY_RESEARCH/FILER_FILE_RELAY_WORK (issue #2593 review
+	// finding): the write-mechanism itself (host-mediated
+	// SPINDRIFT_ISSUE_INTENT relay vs. direct gh/fj) is identical between
+	// work and research relay, which is why FILER_FILE_RELAY above stays
+	// kind-agnostic and keeps driving every other relay-gated row
+	// (file-issues-relay.md, filer-file-relay.md) unchanged. But the label
+	// the launcher applies host-side once it files each relayed issue
+	// differs by kind -- agent-review-finding for work (settle/gate.go),
+	// agent-research-finding for research (settle/research.go:97) -- and
+	// filer-label-relay.md's prose names that label explicitly. These two
+	// gates are the kind-split view of that same filerFileRelay boolean,
+	// mutually exclusive and together exactly equal to it (researchForceRelay
+	// implies filerFileRelay), so filer-label-relay.md can be split into a
+	// work-worded and a research-worded fragment without touching the
+	// combined gate any other row still relies on.
+	g["FILER_FILE_RELAY_RESEARCH"] = researchForceRelay
+	g["FILER_FILE_RELAY_WORK"] = filerFileRelay && !researchForceRelay
 	g["FILER_FILE_DIRECT_GH"] = filerFileDirectGH
 	g["FILER_FILE_DIRECT_FORGEJO"] = filerFileDirectForgejo
 
