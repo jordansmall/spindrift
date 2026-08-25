@@ -42,12 +42,13 @@ type config struct {
 	schemaConfig
 
 	// OCI image config (baked by nix wrapper; empty for bwrap)
-	imageArchive    string
-	imageTag        string
-	imageDrv        string
-	nixBuilderImage string
-	nixVolume       string
-	flakeImageAttr  string
+	imageArchive      string
+	imageTag          string
+	imageDrv          string
+	nixBuilderImage   string
+	nixVolume         string
+	flakeImageAttr    string
+	flakeLauncherAttr string
 
 	// bwrap agent closure paths (bwrap only)
 	agentFiles    string
@@ -256,21 +257,22 @@ func loadConfig() config {
 	return config{
 		schemaConfig: sc,
 
-		imageArchive:    getenvArtifact("IMAGE_ARCHIVE", ""),
-		imageTag:        imageTag,
-		imageDrv:        getenvArtifact("IMAGE_DRV", ""),
-		nixBuilderImage: getenvArtifact("NIX_BUILDER_IMAGE", ""),
-		nixVolume:       getenvArtifact("NIX_VOLUME", "spindrift-nix"),
-		flakeImageAttr:  getenvArtifact("FLAKE_IMAGE_ATTR", ""),
-		agentFiles:      getenvArtifact("AGENT_FILES", ""),
-		agentEnv:        getenvArtifact("AGENT_ENV", ""),
-		agentFilesDrv:   getenvArtifact("AGENT_FILES_DRV", ""),
-		agentEnvDrv:     getenvArtifact("AGENT_ENV_DRV", ""),
-		bakedPrefetch:   getenvArtifact("BAKED_PREFETCH", ""),
-		runtime:         runtime,
-		runnerKind:      runnerKind,
-		driver:          getenvArtifact("DRIVER", ""),
-		image:           image,
+		imageArchive:      getenvArtifact("IMAGE_ARCHIVE", ""),
+		imageTag:          imageTag,
+		imageDrv:          getenvArtifact("IMAGE_DRV", ""),
+		nixBuilderImage:   getenvArtifact("NIX_BUILDER_IMAGE", ""),
+		nixVolume:         getenvArtifact("NIX_VOLUME", "spindrift-nix"),
+		flakeImageAttr:    getenvArtifact("FLAKE_IMAGE_ATTR", ""),
+		flakeLauncherAttr: getenvArtifact("FLAKE_LAUNCHER_ATTR", ""),
+		agentFiles:        getenvArtifact("AGENT_FILES", ""),
+		agentEnv:          getenvArtifact("AGENT_ENV", ""),
+		agentFilesDrv:     getenvArtifact("AGENT_FILES_DRV", ""),
+		agentEnvDrv:       getenvArtifact("AGENT_ENV_DRV", ""),
+		bakedPrefetch:     getenvArtifact("BAKED_PREFETCH", ""),
+		runtime:           runtime,
+		runnerKind:        runnerKind,
+		driver:            getenvArtifact("DRIVER", ""),
+		image:             image,
 
 		driverSessionCacheDir: getenvArtifact("DRIVER_SESSION_CACHE_DIR", ""),
 
