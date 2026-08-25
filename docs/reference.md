@@ -2402,6 +2402,19 @@ combination (`read-write` regardless of `ORCHESTRATOR_ENABLED`, or
 `read-only` with the orchestrator off) keeps the direct `gh issue create`
 path above, unchanged.
 
+The relayed payload's JSON may also carry an optional `type` key, one of the
+closed set `bug` | `enhancement` | `chore` (issue #2594, ADR 0041) — the
+Filer names a *type*, never a label; the Launcher owns the type→label
+mapping and ensure-creates the mapped label best-effort before applying it
+alongside whichever provenance label the caller supplies
+(`agent-review-finding` on the work path, `agent-research-finding` on the
+research path).
+Omitting `type`, or naming anything outside the closed set, still files the
+issue — just untyped, never rejected — and a label ensure-creation failure
+is itself non-fatal, the same best-effort guarantee as the rest of this
+channel. Extending the enum is a host-side-only change; the Box can never
+smuggle an arbitrary label through this field.
+
 Override the filer's system prompt the same way as `scoutPrompt`/
 `reviewPrompt`: the `filerPrompt` `mkHarness` argument (image rebuild), or
 `SPINDRIFT_PROMPT_DIR` at runtime (zero-rebuild, works regardless of which
