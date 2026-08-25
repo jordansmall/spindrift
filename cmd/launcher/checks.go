@@ -78,11 +78,11 @@ func requiredValue(name, msg string, missing func() bool) doctor.Check {
 		Name:   name,
 		Tier:   doctor.Required,
 		Remedy: msg,
-		Probe: func() error {
+		Probe: func() (any, error) {
 			if missing() {
-				return errors.New(msg)
+				return nil, errors.New(msg)
 			}
-			return nil
+			return nil, nil
 		},
 	}
 }
@@ -109,11 +109,11 @@ func launcherRequiredKnobChecks(c config) []doctor.Check {
 			Name:   "driver-credentials",
 			Tier:   doctor.Required,
 			Remedy: "set the credential required by DRIVER (CLAUDE_CODE_OAUTH_TOKEN/ANTHROPIC_API_KEY for claude, OPENCODE_AUTH_CONTENT for the opencode github-copilot Provider), or fix a typo'd DRIVER value",
-			Probe: func() error {
+			Probe: func() (any, error) {
 				switch c.driver {
 				case "", "claude":
 					if c.claudeOAuthToken == "" && c.anthropicAPIKey == "" {
-						return fmt.Errorf("set CLAUDE_CODE_OAUTH_TOKEN (run 'claude setup-token') or ANTHROPIC_API_KEY")
+						return nil, fmt.Errorf("set CLAUDE_CODE_OAUTH_TOKEN (run 'claude setup-token') or ANTHROPIC_API_KEY")
 					}
 				case "opencode":
 					// The github-copilot Provider is OAuth-only (ADR 0009 amendment, #260):
@@ -121,7 +121,7 @@ func launcherRequiredKnobChecks(c config) []doctor.Check {
 					// when the Copilot Provider is actually selected (MODEL github-copilot/…);
 					// other opencode Providers carry their own apiKey via the {env:} config leg.
 					if strings.HasPrefix(c.model, "github-copilot/") && c.opencodeAuthContent == "" {
-						return fmt.Errorf("set OPENCODE_AUTH_CONTENT for the github-copilot Provider (run 'opencode auth login -p github-copilot' on a host, then export the auth slice) under the opencode Driver")
+						return nil, fmt.Errorf("set OPENCODE_AUTH_CONTENT for the github-copilot Provider (run 'opencode auth login -p github-copilot' on a host, then export the auth slice) under the opencode Driver")
 					}
 				default:
 					// Deviation from issue #2534 AC4 ("the launcher's dead validation
@@ -137,10 +137,10 @@ func launcherRequiredKnobChecks(c config) []doctor.Check {
 					// the dead one AC4 describes; TestValidateDriver_RejectsUnknown
 					// pins it.
 					if _, err := driver.New(c.driver); err != nil {
-						return err
+						return nil, err
 					}
 				}
-				return nil
+				return nil, nil
 			},
 		},
 		doctor.RuntimeCheck(c.runtime),
@@ -164,15 +164,15 @@ func crossKnobCheck(rowName, knobName, value, remedy string, validAs func(backen
 		Name:   rowName,
 		Tier:   doctor.Required,
 		Remedy: remedy,
-		Probe: func() error {
+		Probe: func() (any, error) {
 			row, ok := backendByName(value)
 			if !ok || !validAs(row) {
-				return fmt.Errorf("%s=%q is not valid; must be %s", knobName, value, joinOxford(validNames()))
+				return nil, fmt.Errorf("%s=%q is not valid; must be %s", knobName, value, joinOxford(validNames()))
 			}
 			if fn := validateFn(row); fn != nil {
-				return fn(c)
+				return nil, fn(c)
 			}
-			return nil
+			return nil, nil
 		},
 	}
 }
