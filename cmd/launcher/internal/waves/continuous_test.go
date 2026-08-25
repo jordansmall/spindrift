@@ -2417,3 +2417,37 @@ func TestEmitDrainReport_OpenFailureLogsToStderr(t *testing.T) {
 		t.Errorf("Stat(%s): got err=%v, want a not-exist error (no file should have been created)", logPath, err)
 	}
 }
+
+// TestEmitDrainReportReleasingMu_ReleasesMuAroundIO verifies the contract
+// emitDrainReportReleasingMu's call sites (#2775, continuous.go:376,439) rely
+// on: it releases the caller-held mu before doing emitDrainReport's blocking
+// I/O (stdout print, OnDrainReport callback, drain.log write), then
+// re-acquires mu before returning -- held on entry, held on exit, released
+// only in between.
+func TestEmitDrainReportReleasingMu_ReleasesMuAroundIO(t *testing.T) {
+	var mu sync.Mutex
+	mu.Lock()
+
+	releasedDuringCallback := false
+	cfg := baseConfig()
+	cfg.OnDrainReport = func(DrainReport) {
+		if mu.TryLock() {
+			releasedDuringCallback = true
+			mu.Unlock()
+		}
+	}
+
+	dir := tempLogDir(t)
+	testutil.CaptureStdout(t, func() {
+		emitDrainReportReleasingMu(&mu, cfg, dir, DrainReport{})
+	})
+
+	if !releasedDuringCallback {
+		t.Error("OnDrainReport callback: got mu held, want mu released during emitDrainReportReleasingMu's I/O")
+	}
+
+	if mu.TryLock() {
+		mu.Unlock()
+		t.Error("mu after emitDrainReportReleasingMu returns: got released, want held (re-acquired before return)")
+	}
+}

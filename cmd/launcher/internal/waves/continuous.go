@@ -199,6 +199,38 @@ func emitDrainReport(cfg Config, pwd string, report DrainReport) {
 	}
 }
 
+// emitDrainReportReleasingMu runs emitDrainReport's blocking I/O (stdout
+// print, OnDrainReport callback, drain.log write) with mu released, then
+// re-acquires mu before returning -- held on entry, held on exit, released
+// only in between. This narrows the window mu is held around
+// emitDrainReport's call sites to just the mutations that need it, letting
+// other goroutines make progress while the I/O runs (#2775).
+//
+// Design decision (#2775): the report is staged under mu, then emitted
+// unlocked, rather than emitted under mu throughout. Both call sites build
+// report by calling drain.finish(...) before invoking this function --
+// still holding mu at that point -- and finish is what sets drainEnd on
+// the shared drainTracker, the write that makes drain.inProgress() false
+// from then on (drain_tracker.go). That's the only state mutation the
+// single-emit invariant actually depends on, and it's already complete by
+// the time this function unlocks mu; the report value itself, once built,
+// is a private copy no other goroutine can reach. So no second drain
+// report can race in behind this one, and no extra lock is needed here --
+// mu's existing coverage of drain.finish already establishes the
+// invariant before this function does anything with it. What runs
+// unlocked is purely the "genuinely expensive/blocking" tail: the stdout
+// print, cfg.OnDrainReport (a caller-supplied hook -- the one production
+// wiring takes its own, different lock, but that's a property of that
+// wiring, not one this function can guarantee of an arbitrary callback),
+// and the log file write -- kept off mu's critical section so the resize
+// listener, poll ticker, and other refill triggers waiting on mu are not
+// blocked behind file I/O.
+func emitDrainReportReleasingMu(mu *sync.Mutex, cfg Config, pwd string, report DrainReport) {
+	mu.Unlock()
+	emitDrainReport(cfg, pwd, report)
+	mu.Lock()
+}
+
 // RunContinuous runs the opt-in slot-refill dispatch mode (#527): it fills
 // up to cfg.MaxParallel slots from discover's result, then, as each Box
 // finishes, consults fresh before refilling the slot it freed. A fresh
@@ -341,7 +373,7 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 				// drainEnd is set to drainStart itself, not a fresh
 				// time.Now(), so Duration() is exactly zero rather than a
 				// near-zero timing artifact.
-				emitDrainReport(cfg, pwd, drain.finish(drain.drainStart))
+				emitDrainReportReleasingMu(&mu, cfg, pwd, drain.finish(drain.drainStart))
 			}
 			return false
 		}
@@ -404,7 +436,7 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 			outstanding--
 			drainRefill()
 			if drain.inProgress() && outstanding == 0 {
-				emitDrainReport(cfg, pwd, drain.finish(drain.drainSlotAt))
+				emitDrainReportReleasingMu(&mu, cfg, pwd, drain.finish(drain.drainSlotAt))
 			}
 			if outstanding == 0 {
 				idle.Broadcast()
