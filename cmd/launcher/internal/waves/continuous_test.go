@@ -551,7 +551,7 @@ func TestRunContinuous_StaleDrainWithInFlightBoxReportsHeldBack(t *testing.T) {
 	// whole waves suite green, since the two assertions below only checked
 	// >=0). The mu.Lock()/idle.Wait() pairing in RunContinuous's bootstrap
 	// section guarantees this scenario reads the clock exactly twice, in
-	// order: once to set drainStart when the stale verdict fires (still
+	// order: once to set staleDrainStart when the stale verdict fires (still
 	// holding mu inside drainRefill), once more to checkpoint when box #1
 	// -- the only Box ever in flight -- completes and its handler acquires
 	// mu (which it cannot do until the bootstrap's idle.Wait() releases
@@ -635,38 +635,29 @@ func TestRunContinuous_StaleDrainWithInFlightBoxReportsHeldBack(t *testing.T) {
 	if !strings.Contains(stdout, "1 issue(s) held back") {
 		t.Fatalf("stdout: got %q, want a drain report line mentioning 1 issue(s) held back", stdout)
 	}
-	if !strings.Contains(stdout, "==> drain: ") {
+	if !strings.Contains(stdout, "==> stale-drain: ") {
 		t.Fatalf("stdout: got %q, want a drain report line", stdout)
 	}
 
-	logPath := filepath.Join(dispatch.HostLogDirFor(dir), drainMarker)
-	logBytes, err := os.ReadFile(logPath)
-	if err != nil {
-		t.Fatalf("ReadFile(%s): %v", logPath, err)
-	}
-	log := string(logBytes)
-	drainLines := strings.Count(log, "DRAIN ")
-	if drainLines != 1 {
-		t.Fatalf("drain.log: got %d DRAIN line(s), want exactly 1: %q", drainLines, log)
-	}
+	log := readSingleStaleDrainLog(t, dir)
 	if !strings.Contains(log, "heldBack=1") {
-		t.Fatalf("drain.log: got %q, want heldBack=1", log)
+		t.Fatalf("stale-drain.log: got %q, want heldBack=1", log)
 	}
 
-	dur := parseDrainField(t, log, "durationSeconds=")
+	dur := parseStaleDrainField(t, log, "durationSeconds=")
 	// The clock advances by exactly one tick between the two reads
-	// (drainStart, then the completion checkpoint that becomes drainEnd),
-	// so Duration() == tick exactly.
+	// (staleDrainStart, then the completion checkpoint that becomes
+	// staleDrainEnd), so Duration() == tick exactly.
 	wantDur := tick.Seconds()
 	if dur != wantDur {
 		t.Fatalf("durationSeconds: got %v, want exactly %v (base+%v clock, two reads)", dur, wantDur, tick)
 	}
 
-	free := parseDrainField(t, log, "freeSlotSeconds=")
+	free := parseStaleDrainField(t, log, "freeSlotSeconds=")
 	// freeSlotSecs accumulates (limiter.Cap()-outstanding)*elapsed across
 	// the single interval between the two clock reads: Cap()=2,
 	// outstanding=1 (box #1 still counted before its own decrement) over
-	// the one tick between drainStart and the completion checkpoint, so
+	// the one tick between staleDrainStart and the completion checkpoint, so
 	// the exact expected value is 1*tick, not merely >=0 -- reverting the
 	// real accumulation to a literal 0 (or any other wrong formula) must
 	// fail this assertion.
@@ -676,14 +667,14 @@ func TestRunContinuous_StaleDrainWithInFlightBoxReportsHeldBack(t *testing.T) {
 	}
 
 	if clockCalls != 2 {
-		t.Fatalf("clock reads: got %d, want exactly 2 (drainStart + completion checkpoint) -- test assumptions about the deterministic sequence no longer hold", clockCalls)
+		t.Fatalf("clock reads: got %d, want exactly 2 (staleDrainStart + completion checkpoint) -- test assumptions about the deterministic sequence no longer hold", clockCalls)
 	}
 }
 
 // TestRunContinuous_StaleDrainDiscoverErrorReportsHeldBackUnknown verifies a
 // review finding on #2678: when the stale-transition branch's
 // reporting-only discover() call fails (a transient tracker hiccup), the
-// emitted DrainReport must say the held-back count is unknown, not silently
+// emitted StaleDrainReport must say the held-back count is unknown, not silently
 // fabricate a confirmed-looking zero. The discover fake distinguishes the
 // normal bootstrap discover call (which launches #1 and must succeed, or
 // nothing would ever get in flight to exercise the stale path) from the
@@ -775,69 +766,61 @@ func TestRunContinuous_StaleDrainDiscoverErrorReportsHeldBackUnknown(t *testing.
 		t.Fatalf("stdout: got %q, must not fabricate a confirmed-looking 0 issue(s) held back after a discover error", stdout)
 	}
 
-	logPath := filepath.Join(dispatch.HostLogDirFor(dir), drainMarker)
-	logBytes, err := os.ReadFile(logPath)
-	if err != nil {
-		t.Fatalf("ReadFile(%s): %v", logPath, err)
-	}
-	log := string(logBytes)
-	drainLines := strings.Count(log, "DRAIN ")
-	if drainLines != 1 {
-		t.Fatalf("drain.log: got %d DRAIN line(s), want exactly 1: %q", drainLines, log)
-	}
+	log := readSingleStaleDrainLog(t, dir)
 	if !strings.Contains(log, "heldBack=unknown") {
-		t.Fatalf("drain.log: got %q, want heldBack=unknown", log)
+		t.Fatalf("stale-drain.log: got %q, want heldBack=unknown", log)
 	}
 	if strings.Contains(log, "heldBack=0") {
-		t.Fatalf("drain.log: got %q, must not fabricate heldBack=0 after a discover error", log)
+		t.Fatalf("stale-drain.log: got %q, must not fabricate heldBack=0 after a discover error", log)
 	}
 }
 
 // TestRunContinuous_StaleDrainResizeBelowOutstandingClampsFreeSlotSecs
 // verifies a review finding on #2678: the completion goroutine's
 // freeSlotSecs accumulation multiplies the elapsed interval by
-// drainCap-outstanding, with no floor. ResizeDelta (limiter.go) never
+// staleDrainCap-outstanding, with no floor. ResizeDelta (limiter.go) never
 // revokes a slot already claimed/outstanding, so an operator lowering the
 // live cap mid-drain below the outstanding count makes that term negative,
 // corrupting the running total with a negative contribution instead of
 // crediting zero free slots for an interval that had none.
 //
-// A second review finding on #2678 fixed drainCap itself: it now tracks the
-// cap actually in effect since the last checkpoint (frozen at drainStart,
+// A second review finding on #2678 fixed staleDrainCap itself: it now tracks the
+// cap actually in effect since the last checkpoint (frozen at staleDrainStart,
 // refreshed only after each checkpoint closes out the interval that just
 // ended) rather than reading limiter.Cap() live at checkpoint time -- see
 // TestRunContinuous_StaleDrainResizeUpCheckpointsBeforeCapChange for that
 // half of the fix. A THIRD review finding fixed the resize listener itself:
 // it now wakes on Limiter.Resized() (fires on either direction), not just
 // Grown() (raise-only) -- ResizeDelta's lower here checkpoints immediately,
-// exactly like a raise does, instead of leaving drainCap frozen until
+// exactly like a raise does, instead of leaving staleDrainCap frozen until
 // whichever Box happens to complete next. This scenario now proves all
 // three fixes compose: with 3 Boxes launched against an initial cap of 4,
 // then resized straight down to the Limiter's floor of 1 while all 3 are
 // still outstanding, the resize listener's own checkpoint is the FIRST of
-// the four checkpoints this drain sees (drainStart, then one checkpoint
+// the four checkpoints this drain sees (staleDrainStart, then one checkpoint
 // each for the resize and the three completions -- five now() calls total,
 // not four) -- and one of the three completion checkpoints after it must
-// still be clamped, because drainCap can fall below outstanding even after
+// still be clamped, because staleDrainCap can fall below outstanding even after
 // the refresh.
 //
 // The initial cap is 4, not 3, because the staleness probe that trips a
 // drain can only succeed while a slot is still free (Limiter.TryAcquire
 // requires cap > live) -- tripping it with all 3 Boxes already outstanding
-// forces the frozen drainCap at drainStart to be at least outstanding+1,
+// forces the frozen staleDrainCap at staleDrainStart to be at least outstanding+1,
 // never outstanding itself. That's an inherent floor of the "extra
 // TryAcquire probe" mechanism RunContinuous uses to detect staleness, not a
 // choice made for this test.
 //
 // The deterministic clock's `now` closure is the synchronization point,
-// exactly as in TestRunContinuous_StaleDrainResizeDownAboveOutstandingCheckpointsBeforeCapChange
+// exactly as in
+// TestRunContinuous_StaleDrainResizeDownAboveOutstandingCheckpointsBeforeCapChange
 // below: it signals sawResizeCheckpoint the moment its SECOND call happens,
 // which by construction can only be the resize listener's own
-// checkpointDrain (nothing else calls now() between drainStart and the
+// checkpointStaleDrain (nothing else calls now() between staleDrainStart and the
 // test's own ResizeDelta) -- and because that call happens while the
 // resize listener still holds the shared mutex the completion goroutines
 // also need, waiting for the signal before releasing any of the three
-// Boxes guarantees the resize listener's checkpoint (and its drainCap
+// Boxes guarantees the resize listener's checkpoint (and its staleDrainCap
 // refresh) has already run to completion before any completion goroutine's
 // own checkpoint can start. Without that barrier, the resize listener's
 // checkpoint is only taken at all if inProgress() is still true when
@@ -848,10 +831,10 @@ func TestRunContinuous_StaleDrainDiscoverErrorReportsHeldBackUnknown(t *testing.
 //
 // With that ordering pinned, the math comes out as follows: only the FIRST
 // of the four checkpoints -- now guaranteed to be the resize listener's,
-// not a completion's -- ever sees the still-frozen drainCap=4 and
+// not a completion's -- ever sees the still-frozen staleDrainCap=4 and
 // outstanding=3 (the count before any completion has decremented it) --
 // (4-3)*tick = one tick, correctly positive, no clamp needed -- because
-// that first checkpoint is also what refreshes drainCap to the
+// that first checkpoint is also what refreshes staleDrainCap to the
 // already-applied live cap of 1, so every checkpoint after it credits
 // (1-outstanding)*tick for whatever outstanding remains, and outstanding
 // never drops below 1 until the very last of the three completions, so
@@ -871,14 +854,14 @@ func TestRunContinuous_StaleDrainResizeBelowOutstandingClampsFreeSlotSecs(t *tes
 
 	// Deterministic clock (same pattern as
 	// TestRunContinuous_StaleDrainWithInFlightBoxReportsHeldBack): this
-	// scenario reads the clock exactly five times -- once to set drainStart
+	// scenario reads the clock exactly five times -- once to set staleDrainStart
 	// when the stale verdict fires (bootstrap, still holding mu), once for
 	// the resize listener's own checkpoint (triggered by the ResizeDelta
 	// below), then once per completion checkpoint as box #1, #2, and #3
 	// each settle. sawResizeCheckpoint closes the moment the SECOND now()
-	// call happens. Between drainStart (the first call) and the test's own
+	// call happens. Between staleDrainStart (the first call) and the test's own
 	// limiter.ResizeDelta below, nothing else calls now() -- so the second
-	// call can only be the resize listener's checkpointDrain, and it fires
+	// call can only be the resize listener's checkpointStaleDrain, and it fires
 	// while that listener still holds mu, guaranteeing (see the function
 	// doc comment) that closing any of the three releases right after
 	// receiving this signal can never race ahead of the resize listener's
@@ -1003,22 +986,13 @@ func TestRunContinuous_StaleDrainResizeBelowOutstandingClampsFreeSlotSecs(t *tes
 	if !errors.Is(err, ErrImageStale) {
 		t.Fatalf("RunContinuous: got %v, want ErrImageStale", err)
 	}
-	if !strings.Contains(stdout, "==> drain: ") {
+	if !strings.Contains(stdout, "==> stale-drain: ") {
 		t.Fatalf("stdout: got %q, want a drain report line", stdout)
 	}
 
-	logPath := filepath.Join(dispatch.HostLogDirFor(dir), drainMarker)
-	logBytes, err := os.ReadFile(logPath)
-	if err != nil {
-		t.Fatalf("ReadFile(%s): %v", logPath, err)
-	}
-	log := string(logBytes)
-	drainLines := strings.Count(log, "DRAIN ")
-	if drainLines != 1 {
-		t.Fatalf("drain.log: got %d DRAIN line(s), want exactly 1: %q", drainLines, log)
-	}
+	log := readSingleStaleDrainLog(t, dir)
 
-	free := parseDrainField(t, log, "freeSlotSeconds=")
+	free := parseStaleDrainField(t, log, "freeSlotSeconds=")
 	// See the function doc comment above for the full derivation: the
 	// resize listener's checkpoint, guaranteed first of the four by the
 	// sawResizeCheckpoint barrier above, contributes (4-3)*tick == one
@@ -1033,7 +1007,7 @@ func TestRunContinuous_StaleDrainResizeBelowOutstandingClampsFreeSlotSecs(t *tes
 	}
 
 	if clockCalls != 5 {
-		t.Fatalf("clock reads: got %d, want exactly 5 (drainStart + the resize listener's own checkpoint + three completion checkpoints) -- test assumptions about the deterministic sequence no longer hold", clockCalls)
+		t.Fatalf("clock reads: got %d, want exactly 5 (staleDrainStart + the resize listener's own checkpoint + three completion checkpoints) -- test assumptions about the deterministic sequence no longer hold", clockCalls)
 	}
 }
 
@@ -1044,7 +1018,7 @@ func TestRunContinuous_StaleDrainResizeBelowOutstandingClampsFreeSlotSecs(t *tes
 // can raise the live cap mid-drain via ResizeDelta (ADR 0023) at any
 // moment; RunContinuous's grow listener (the `case <-limiter.Grown():`
 // branch) must checkpoint the interval that just ended -- at the OLD cap --
-// before it ever lets drainCap see the raised value, so the raise is only
+// before it ever lets staleDrainCap see the raised value, so the raise is only
 // ever credited to the interval that starts after it, never retroactively
 // to the interval before it.
 //
@@ -1055,23 +1029,23 @@ func TestRunContinuous_StaleDrainResizeBelowOutstandingClampsFreeSlotSecs(t *tes
 // that Box is still running. The deterministic clock's `now` closure
 // itself is the synchronization point: it signals sawGrowCheckpoint the
 // moment its SECOND call happens, which by construction can only be the
-// grow listener's checkpointDrain (nothing else calls now() between
-// drainStart and the resize) -- and because that call happens while the
+// grow listener's checkpointStaleDrain (nothing else calls now() between
+// staleDrainStart and the resize) -- and because that call happens while the
 // grow listener still holds the shared mutex the completion goroutine also
 // needs, waiting for the signal before releasing the Box guarantees the
-// grow listener's checkpoint (and its drainCap refresh) has already run to
+// grow listener's checkpoint (and its staleDrainCap refresh) has already run to
 // completion before the Box's own completion checkpoint can start, with no
 // sleep or poll required.
 //
-// Interval 1 (drainStart -> the grow listener's checkpoint, triggered by
-// ResizeDelta itself, not a Box completion): drainCap is still the OLD cap,
-// 2 (frozen since drainStart), outstanding=1 -- (2-1)*tick = one tick.
-// Interval 2 (that checkpoint -> the Box's own completion): drainCap has
+// Interval 1 (staleDrainStart -> the grow listener's checkpoint, triggered by
+// ResizeDelta itself, not a Box completion): staleDrainCap is still the OLD cap,
+// 2 (frozen since staleDrainStart), outstanding=1 -- (2-1)*tick = one tick.
+// Interval 2 (that checkpoint -> the Box's own completion): staleDrainCap has
 // refreshed to the NEW cap, 10, outstanding=1 -- (10-1)*tick = nine ticks.
 // Total: ten ticks (50s) -- neither the ~90s crediting the whole two-tick
 // drain at the raised cap 10 (the pre-fix bug this pins: reading
 // limiter.Cap() live at the single completion checkpoint would apply 10 to
-// the entire interval since drainStart) nor the ~10s crediting it all at
+// the entire interval since staleDrainStart) nor the ~10s crediting it all at
 // the original cap 2.
 func TestRunContinuous_StaleDrainResizeUpCheckpointsBeforeCapChange(t *testing.T) {
 	c := baseConfig()
@@ -1085,9 +1059,9 @@ func TestRunContinuous_StaleDrainResizeUpCheckpointsBeforeCapChange(t *testing.T
 	var clockMu sync.Mutex
 	clockCalls := 0
 	// sawGrowCheckpoint closes the moment the SECOND now() call happens.
-	// Between drainStart (the first call) and the test's own
+	// Between staleDrainStart (the first call) and the test's own
 	// limiter.ResizeDelta below, nothing else calls now() -- so the second
-	// call can only be the grow listener's checkpointDrain, and it fires
+	// call can only be the grow listener's checkpointStaleDrain, and it fires
 	// while that listener still holds mu, guaranteeing (see the function
 	// doc comment) that closing release1 right after receiving this signal
 	// can never race ahead of the grow listener's checkpoint.
@@ -1183,28 +1157,19 @@ func TestRunContinuous_StaleDrainResizeUpCheckpointsBeforeCapChange(t *testing.T
 	if !errors.Is(err, ErrImageStale) {
 		t.Fatalf("RunContinuous: got %v, want ErrImageStale", err)
 	}
-	if !strings.Contains(stdout, "==> drain: ") {
+	if !strings.Contains(stdout, "==> stale-drain: ") {
 		t.Fatalf("stdout: got %q, want a drain report line", stdout)
 	}
 
-	logPath := filepath.Join(dispatch.HostLogDirFor(dir), drainMarker)
-	logBytes, err := os.ReadFile(logPath)
-	if err != nil {
-		t.Fatalf("ReadFile(%s): %v", logPath, err)
-	}
-	log := string(logBytes)
-	drainLines := strings.Count(log, "DRAIN ")
-	if drainLines != 1 {
-		t.Fatalf("drain.log: got %d DRAIN line(s), want exactly 1: %q", drainLines, log)
-	}
+	log := readSingleStaleDrainLog(t, dir)
 
-	dur := parseDrainField(t, log, "durationSeconds=")
+	dur := parseStaleDrainField(t, log, "durationSeconds=")
 	wantDur := 2 * tick.Seconds()
 	if dur != wantDur {
-		t.Fatalf("durationSeconds: got %v, want exactly %v (drainStart + two checkpoints, one tick apart each)", dur, wantDur)
+		t.Fatalf("durationSeconds: got %v, want exactly %v (staleDrainStart + two checkpoints, one tick apart each)", dur, wantDur)
 	}
 
-	free := parseDrainField(t, log, "freeSlotSeconds=")
+	free := parseStaleDrainField(t, log, "freeSlotSeconds=")
 	// See the function doc comment above for the interval-by-interval
 	// derivation: (2-1)*tick + (10-1)*tick == one tick + nine ticks == ten
 	// ticks (50s).
@@ -1214,28 +1179,29 @@ func TestRunContinuous_StaleDrainResizeUpCheckpointsBeforeCapChange(t *testing.T
 	}
 
 	if clockCalls != 3 {
-		t.Fatalf("clock reads: got %d, want exactly 3 (drainStart + grow checkpoint + completion checkpoint) -- test assumptions about the deterministic sequence no longer hold", clockCalls)
+		t.Fatalf("clock reads: got %d, want exactly 3 (staleDrainStart + grow checkpoint + completion checkpoint) -- test assumptions about the deterministic sequence no longer hold", clockCalls)
 	}
 }
 
 // TestRunContinuous_StaleDrainResizeDownAboveOutstandingCheckpointsBeforeCapChange
 // verifies a review finding on #2678: the fix that made the resize listener
-// checkpoint on a raise (TestRunContinuous_StaleDrainResizeUpCheckpointsBeforeCapChange
-// above) left the mirror-image case unfixed. RunContinuous's resize listener
+// checkpoint on a raise
+// (TestRunContinuous_StaleDrainResizeUpCheckpointsBeforeCapChange above) left
+// the mirror-image case unfixed. RunContinuous's resize listener
 // used to wake only on Limiter.Grown(), which never signals for a lower
 // (limiter.go's signalGrow returns early when the resize didn't grow the
 // cap) -- so a mid-drain lower sat unnoticed until whichever Box happened to
 // complete next, and that completion's checkpoint credited the ENTIRE
-// interval since the last checkpoint at the stale, pre-lower drainCap,
+// interval since the last checkpoint at the stale, pre-lower staleDrainCap,
 // over-crediting every second between the lower and that completion as if
-// the higher cap had still been in effect. TestRunContinuous_
-// StaleDrainResizeBelowOutstandingClampsFreeSlotSecs above never caught this
-// because it lowers the cap to the Limiter's floor of 1, below the 3
-// outstanding Boxes -- the clamp erases the over-credit along with
-// everything else. This scenario instead lowers a cap of 6 to 3 with only 2
-// Boxes outstanding (the review finding's own repro numbers), so the
-// lowered cap stays ABOVE outstanding, the clamp never engages, and an
-// over-credit would show up directly in the asserted total.
+// the higher cap had still been in effect.
+// TestRunContinuous_StaleDrainResizeBelowOutstandingClampsFreeSlotSecs
+// above never caught this because it lowers the cap to the Limiter's floor
+// of 1, below the 3 outstanding Boxes -- the clamp erases the over-credit
+// along with everything else. This scenario instead lowers a cap of 6 to 3
+// with only 2 Boxes outstanding (the review finding's own repro numbers),
+// so the lowered cap stays ABOVE outstanding, the clamp never engages, and
+// an over-credit would show up directly in the asserted total.
 //
 // Both Boxes are held outstanding at cap 6 (the review finding's own
 // numbers), then a Console-style ResizeDelta(-3) lowers the cap to 3 while
@@ -1243,25 +1209,25 @@ func TestRunContinuous_StaleDrainResizeUpCheckpointsBeforeCapChange(t *testing.T
 // nothing here is clamped. The deterministic clock's `now` closure is the
 // synchronization point, exactly as in the Up-checkpoints test above: it
 // signals sawResizeCheckpoint the moment its SECOND call happens, which by
-// construction can only be the resize listener's checkpointDrain (nothing
-// else calls now() between drainStart and the test's own ResizeDelta) --
+// construction can only be the resize listener's checkpointStaleDrain (nothing
+// else calls now() between staleDrainStart and the test's own ResizeDelta) --
 // and because that call happens while the resize listener still holds the
 // shared mutex the completion goroutines also need, waiting for the signal
 // before releasing either Box guarantees the resize listener's checkpoint
-// (and its drainCap refresh) has already run to completion before either
+// (and its staleDrainCap refresh) has already run to completion before either
 // Box's own completion checkpoint can start.
 //
-// Interval 1 (drainStart -> the resize listener's checkpoint, triggered by
-// ResizeDelta itself, not a Box completion): drainCap is still the OLD cap,
-// 6 (frozen since drainStart), outstanding=2 (both Boxes still running) --
+// Interval 1 (staleDrainStart -> the resize listener's checkpoint, triggered by
+// ResizeDelta itself, not a Box completion): staleDrainCap is still the OLD cap,
+// 6 (frozen since staleDrainStart), outstanding=2 (both Boxes still running) --
 // (6-2)*tick = four ticks. Interval 2 (that checkpoint -> the first Box to
-// complete): drainCap has refreshed to the NEW cap, 3, outstanding=2
+// complete): staleDrainCap has refreshed to the NEW cap, 3, outstanding=2
 // (pre-decrement, neither Box has completed yet) -- (3-2)*tick = one tick.
-// Interval 3 (-> the second Box's completion): drainCap=3, outstanding=1
+// Interval 3 (-> the second Box's completion): staleDrainCap=3, outstanding=1
 // (pre-decrement, the one remaining Box) -- (3-1)*tick = two ticks. Total:
 // seven ticks (35s) -- not the ~45s (nine ticks: (6-2)+(6-1)... crediting
 // the whole pre-completion span at the stale cap 6) the pre-fix bug this
-// pins would produce by leaving drainCap frozen at 6 until a Box completion
+// pins would produce by leaving staleDrainCap frozen at 6 until a Box completion
 // happened to refresh it.
 //
 // Which of the two Boxes completes first is never pinned down -- both are
@@ -1281,9 +1247,9 @@ func TestRunContinuous_StaleDrainResizeDownAboveOutstandingCheckpointsBeforeCapC
 	var clockMu sync.Mutex
 	clockCalls := 0
 	// sawResizeCheckpoint closes the moment the SECOND now() call happens.
-	// Between drainStart (the first call) and the test's own
+	// Between staleDrainStart (the first call) and the test's own
 	// limiter.ResizeDelta below, nothing else calls now() -- so the second
-	// call can only be the resize listener's checkpointDrain, and it fires
+	// call can only be the resize listener's checkpointStaleDrain, and it fires
 	// while that listener still holds mu, guaranteeing (see the function
 	// doc comment) that closing either release right after receiving this
 	// signal can never race ahead of the resize listener's checkpoint.
@@ -1391,28 +1357,19 @@ func TestRunContinuous_StaleDrainResizeDownAboveOutstandingCheckpointsBeforeCapC
 	if !errors.Is(err, ErrImageStale) {
 		t.Fatalf("RunContinuous: got %v, want ErrImageStale", err)
 	}
-	if !strings.Contains(stdout, "==> drain: ") {
+	if !strings.Contains(stdout, "==> stale-drain: ") {
 		t.Fatalf("stdout: got %q, want a drain report line", stdout)
 	}
 
-	logPath := filepath.Join(dispatch.HostLogDirFor(dir), drainMarker)
-	logBytes, err := os.ReadFile(logPath)
-	if err != nil {
-		t.Fatalf("ReadFile(%s): %v", logPath, err)
-	}
-	log := string(logBytes)
-	drainLines := strings.Count(log, "DRAIN ")
-	if drainLines != 1 {
-		t.Fatalf("drain.log: got %d DRAIN line(s), want exactly 1: %q", drainLines, log)
-	}
+	log := readSingleStaleDrainLog(t, dir)
 
-	dur := parseDrainField(t, log, "durationSeconds=")
+	dur := parseStaleDrainField(t, log, "durationSeconds=")
 	wantDur := 3 * tick.Seconds()
 	if dur != wantDur {
-		t.Fatalf("durationSeconds: got %v, want exactly %v (drainStart + three checkpoints, one tick apart each)", dur, wantDur)
+		t.Fatalf("durationSeconds: got %v, want exactly %v (staleDrainStart + three checkpoints, one tick apart each)", dur, wantDur)
 	}
 
-	free := parseDrainField(t, log, "freeSlotSeconds=")
+	free := parseStaleDrainField(t, log, "freeSlotSeconds=")
 	// See the function doc comment above for the interval-by-interval
 	// derivation: (6-2)*tick + (3-2)*tick + (3-1)*tick == four ticks + one
 	// tick + two ticks == seven ticks (35s).
@@ -1422,7 +1379,7 @@ func TestRunContinuous_StaleDrainResizeDownAboveOutstandingCheckpointsBeforeCapC
 	}
 
 	if clockCalls != 4 {
-		t.Fatalf("clock reads: got %d, want exactly 4 (drainStart + resize checkpoint + two completion checkpoints) -- test assumptions about the deterministic sequence no longer hold", clockCalls)
+		t.Fatalf("clock reads: got %d, want exactly 4 (staleDrainStart + resize checkpoint + two completion checkpoints) -- test assumptions about the deterministic sequence no longer hold", clockCalls)
 	}
 }
 
@@ -2126,18 +2083,18 @@ func TestRunContinuous_StaleWithNothingInFlightReportsZeroLengthDrain(t *testing
 	if len(fr.RunCalls) != 0 {
 		t.Fatalf("RunCalls: got %v, want none (stale fired before any launch)", fr.RunCalls)
 	}
-	if !strings.Contains(stdout, "==> drain: 0s idle, 0.0 free-slot-s, 1 issue(s) held back\n") {
+	if !strings.Contains(stdout, "==> stale-drain: 0s idle, 0.0 free-slot-s, 1 issue(s) held back\n") {
 		t.Fatalf("stdout: got %q, want a zero-duration drain report line", stdout)
 	}
 
-	logPath := filepath.Join(dispatch.HostLogDirFor(dir), drainMarker)
+	logPath := filepath.Join(dispatch.HostLogDirFor(dir), staleDrainMarker)
 	logBytes, err := os.ReadFile(logPath)
 	if err != nil {
 		t.Fatalf("ReadFile(%s): %v", logPath, err)
 	}
 	log := string(logBytes)
-	if !strings.Contains(log, "DRAIN ") || !strings.Contains(log, "durationSeconds=0.000") || !strings.Contains(log, "freeSlotSeconds=0.000") || !strings.Contains(log, "heldBack=1") {
-		t.Fatalf("drain.log: got %q, want a DRAIN line with durationSeconds=0.000, freeSlotSeconds=0.000, heldBack=1", log)
+	if !strings.Contains(log, "STALE_DRAIN ") || !strings.Contains(log, "durationSeconds=0.000") || !strings.Contains(log, "freeSlotSeconds=0.000") || !strings.Contains(log, "heldBack=1") {
+		t.Fatalf("stale-drain.log: got %q, want a STALE_DRAIN line with durationSeconds=0.000, freeSlotSeconds=0.000, heldBack=1", log)
 	}
 }
 
@@ -2196,14 +2153,14 @@ func TestRunContinuous_StaleDrainPendingCountOverridesPreResolvedFallback(t *tes
 		t.Fatalf("stdout: got %q, want a drain report line mentioning 3 issue(s) held back (from cfg.PendingCount, not discover() or the PreResolved zero-value fallback)", stdout)
 	}
 
-	logPath := filepath.Join(dispatch.HostLogDirFor(dir), drainMarker)
+	logPath := filepath.Join(dispatch.HostLogDirFor(dir), staleDrainMarker)
 	logBytes, err := os.ReadFile(logPath)
 	if err != nil {
 		t.Fatalf("ReadFile(%s): %v", logPath, err)
 	}
 	log := string(logBytes)
 	if !strings.Contains(log, "heldBack=3") {
-		t.Fatalf("drain.log: got %q, want heldBack=3", log)
+		t.Fatalf("stale-drain.log: got %q, want heldBack=3", log)
 	}
 }
 
@@ -2253,14 +2210,14 @@ func TestRunContinuous_StaleDrainPreResolvedWithoutPendingCountReportsUnknown(t 
 		t.Fatalf("stdout: got %q, want a drain report line mentioning held back: unknown", stdout)
 	}
 
-	logPath := filepath.Join(dispatch.HostLogDirFor(dir), drainMarker)
+	logPath := filepath.Join(dispatch.HostLogDirFor(dir), staleDrainMarker)
 	logBytes, err := os.ReadFile(logPath)
 	if err != nil {
 		t.Fatalf("ReadFile(%s): %v", logPath, err)
 	}
 	log := string(logBytes)
 	if !strings.Contains(log, "heldBack=unknown") {
-		t.Fatalf("drain.log: got %q, want heldBack=unknown", log)
+		t.Fatalf("stale-drain.log: got %q, want heldBack=unknown", log)
 	}
 }
 
@@ -2325,14 +2282,14 @@ func TestRunContinuous_StaleDrainHeldBackExcludesBlockedIssues(t *testing.T) {
 		t.Fatalf("stdout: got %q, want a drain report line mentioning 1 issue(s) held back (only #1 is ready; #2 is blocked by #9)", stdout)
 	}
 
-	logPath := filepath.Join(dispatch.HostLogDirFor(dir), drainMarker)
+	logPath := filepath.Join(dispatch.HostLogDirFor(dir), staleDrainMarker)
 	logBytes, err := os.ReadFile(logPath)
 	if err != nil {
 		t.Fatalf("ReadFile(%s): %v", logPath, err)
 	}
 	log := string(logBytes)
 	if !strings.Contains(log, "heldBack=1") {
-		t.Fatalf("drain.log: got %q, want heldBack=1 (only #1 is ready; #2 is blocked by #9, so it must not inflate the count)", log)
+		t.Fatalf("stale-drain.log: got %q, want heldBack=1 (only #1 is ready; #2 is blocked by #9, so it must not inflate the count)", log)
 	}
 }
 
@@ -2340,7 +2297,7 @@ func TestRunContinuous_StaleDrainHeldBackExcludesBlockedIssues(t *testing.T) {
 // cfg.DiscoverReporting to a pure closure returning one ready, unblocked
 // issue, and gives RunContinuous a discover param that fails the test if
 // ever invoked. It asserts the stale-drain heldBack report (both the stdout
-// line and drain.log) reflects DiscoverReporting's count, proving the
+// line and stale-drain.log) reflects DiscoverReporting's count, proving the
 // stale-transition branch prefers it over discover.
 func TestRunContinuous_StaleDrainDiscoverReportingSkipsLoggingDiscoverer(t *testing.T) {
 	c := baseConfig()
@@ -2382,55 +2339,57 @@ func TestRunContinuous_StaleDrainDiscoverReportingSkipsLoggingDiscoverer(t *test
 		t.Fatalf("stdout: got %q, want a drain report line mentioning 1 issue(s) held back (from cfg.DiscoverReporting, not the discover param)", stdout)
 	}
 
-	logPath := filepath.Join(dispatch.HostLogDirFor(dir), drainMarker)
+	logPath := filepath.Join(dispatch.HostLogDirFor(dir), staleDrainMarker)
 	logBytes, err := os.ReadFile(logPath)
 	if err != nil {
 		t.Fatalf("ReadFile(%s): %v", logPath, err)
 	}
 	log := string(logBytes)
 	if !strings.Contains(log, "heldBack=1") {
-		t.Fatalf("drain.log: got %q, want heldBack=1", log)
+		t.Fatalf("stale-drain.log: got %q, want heldBack=1", log)
 	}
 }
 
-// TestEmitDrainReport_OpenFailureLogsToStderr verifies a review finding on
-// #2678: emitDrainReport's drain.log open failure is swallowed to stderr
-// rather than failing the run, and does not crash or panic. pwd is a
-// directory whose .spindrift/logs subdirectory was never created (unlike
-// every real RunContinuous call, which always os.MkdirAll's it first), so
-// dispatch.HostLogDirFor(pwd) names a path with no such directory and
-// os.OpenFile's O_CREATE cannot create the file inside a missing parent.
-func TestEmitDrainReport_OpenFailureLogsToStderr(t *testing.T) {
+// TestEmitStaleDrainReport_OpenFailureLogsToStderr verifies a review finding
+// on #2678: emitStaleDrainReport's stale-drain.log open failure is
+// swallowed to stderr rather than failing the run, and does not crash or
+// panic. pwd is a directory whose .spindrift/logs subdirectory was never
+// created (unlike every real RunContinuous call, which always
+// os.MkdirAll's it first), so dispatch.HostLogDirFor(pwd) names a path with
+// no such directory and os.OpenFile's O_CREATE cannot create the file
+// inside a missing parent.
+func TestEmitStaleDrainReport_OpenFailureLogsToStderr(t *testing.T) {
 	dir := t.TempDir()
-	report := DrainReport{StaleAt: time.Now(), DrainedAt: time.Now(), HeldBack: 1}
+	report := StaleDrainReport{StaleAt: time.Now(), DrainedAt: time.Now(), HeldBack: 1}
 
 	stderr := testutil.CaptureStderr(t, func() {
-		emitDrainReport(Config{}, dir, report)
+		emitStaleDrainReport(Config{}, dir, report)
 	})
 
 	if !strings.Contains(stderr, "continuous: open") {
 		t.Errorf("stderr: got %q, want an \"continuous: open ...\" line reporting the failure", stderr)
 	}
 
-	logPath := filepath.Join(dispatch.HostLogDirFor(dir), drainMarker)
+	logPath := filepath.Join(dispatch.HostLogDirFor(dir), staleDrainMarker)
 	if _, err := os.Stat(logPath); !os.IsNotExist(err) {
 		t.Errorf("Stat(%s): got err=%v, want a not-exist error (no file should have been created)", logPath, err)
 	}
 }
 
-// TestEmitDrainReportReleasingMu_ReleasesMuAroundIO verifies the contract
-// emitDrainReportReleasingMu's call sites (#2775, continuous.go:376,439) rely
-// on: it releases the caller-held mu before doing emitDrainReport's blocking
-// I/O (stdout print, OnDrainReport callback, drain.log write), then
-// re-acquires mu before returning -- held on entry, held on exit, released
-// only in between.
-func TestEmitDrainReportReleasingMu_ReleasesMuAroundIO(t *testing.T) {
+// TestEmitStaleDrainReportReleasingMu_ReleasesMuAroundIO verifies the
+// contract emitStaleDrainReportReleasingMu's call sites (#2775,
+// continuous.go:376,439) rely on: it releases the caller-held mu before
+// doing emitStaleDrainReport's blocking I/O (stdout print,
+// OnStaleDrainReport callback, stale-drain.log write), then re-acquires mu
+// before returning -- held on entry, held on exit, released only in
+// between.
+func TestEmitStaleDrainReportReleasingMu_ReleasesMuAroundIO(t *testing.T) {
 	var mu sync.Mutex
 	mu.Lock()
 
 	releasedDuringCallback := false
 	cfg := baseConfig()
-	cfg.OnDrainReport = func(DrainReport) {
+	cfg.OnStaleDrainReport = func(StaleDrainReport) {
 		if mu.TryLock() {
 			releasedDuringCallback = true
 			mu.Unlock()
@@ -2439,15 +2398,15 @@ func TestEmitDrainReportReleasingMu_ReleasesMuAroundIO(t *testing.T) {
 
 	dir := tempLogDir(t)
 	testutil.CaptureStdout(t, func() {
-		emitDrainReportReleasingMu(&mu, cfg, dir, DrainReport{})
+		emitStaleDrainReportReleasingMu(&mu, cfg, dir, StaleDrainReport{})
 	})
 
 	if !releasedDuringCallback {
-		t.Error("OnDrainReport callback: got mu held, want mu released during emitDrainReportReleasingMu's I/O")
+		t.Error("OnStaleDrainReport callback: got mu held, want mu released during emitStaleDrainReportReleasingMu's I/O")
 	}
 
 	if mu.TryLock() {
 		mu.Unlock()
-		t.Error("mu after emitDrainReportReleasingMu returns: got released, want held (re-acquired before return)")
+		t.Error("mu after emitStaleDrainReportReleasingMu returns: got released, want held (re-acquired before return)")
 	}
 }

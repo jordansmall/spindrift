@@ -3,6 +3,7 @@ package waves
 import (
 	"errors"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -56,15 +57,16 @@ func tempLogDir(tb testing.TB) string {
 // boxErr is a non-nil error that stands in for a non-zero box exit.
 var boxErr = errors.New("exit 1")
 
-// parseDrainField extracts key's numeric value from a drain.log DRAIN line
-// (e.g. "durationSeconds=" or "freeSlotSeconds="), failing the test if key
-// is absent or its value isn't a parseable float -- the shared extraction
-// continuous_test.go's stale-drain tests otherwise copy-pasted per field.
-func parseDrainField(t *testing.T, log, key string) float64 {
+// parseStaleDrainField extracts key's numeric value from a stale-drain.log
+// STALE_DRAIN line (e.g. "durationSeconds=" or "freeSlotSeconds="), failing
+// the test if key is absent or its value isn't a parseable float -- the
+// shared extraction continuous_test.go's stale-drain tests otherwise
+// copy-pasted per field.
+func parseStaleDrainField(t *testing.T, log, key string) float64 {
 	t.Helper()
 	idx := strings.Index(log, key)
 	if idx == -1 {
-		t.Fatalf("drain.log: got %q, want %s", log, key)
+		t.Fatalf("stale-drain.log: got %q, want %s", log, key)
 	}
 	field := strings.Fields(log[idx:])[0]
 	val, err := strconv.ParseFloat(strings.TrimPrefix(field, key), 64)
@@ -72,6 +74,24 @@ func parseDrainField(t *testing.T, log, key string) float64 {
 		t.Fatalf("%s: got %q, not parseable as float: %v", key, strings.TrimPrefix(field, key), err)
 	}
 	return val
+}
+
+// readSingleStaleDrainLog reads dir's stale-drain.log and fails the test
+// unless it holds exactly one STALE_DRAIN line, returning its contents --
+// the ReadFile-then-count preamble continuous_test.go's stale-drain tests
+// otherwise copy-paste per call site.
+func readSingleStaleDrainLog(t *testing.T, dir string) string {
+	t.Helper()
+	logPath := filepath.Join(dispatch.HostLogDirFor(dir), staleDrainMarker)
+	logBytes, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("ReadFile(%s): %v", logPath, err)
+	}
+	log := string(logBytes)
+	if n := strings.Count(log, "STALE_DRAIN "); n != 1 {
+		t.Fatalf("stale-drain.log: got %d STALE_DRAIN line(s), want exactly 1: %q", n, log)
+	}
+	return log
 }
 
 // testFactory builds a dispatch.Factory wired to dir and r, matching
