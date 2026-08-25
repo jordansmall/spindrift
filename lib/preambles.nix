@@ -109,8 +109,11 @@ rec {
       runtime,
       imageDrv,
       nixBuilderImage,
-      linuxSystem,
-      system,
+      # The host system and its Linux twin, bundled (issue #2770 slice 1) so
+      # this function takes one systems-shaped param instead of two loose
+      # system strings. See the FLAKE_LAUNCHER_ATTR comment below for why the
+      # two fields diverge in what they render.
+      systems,
       boxEnvVars,
       # Four capability signals resolved by lib/mkHarness.nix from the
       # backend descriptor registry (lib/backends/default.nix) for the
@@ -155,7 +158,7 @@ rec {
           IMAGE_DRV = imageDrv;
           NIX_BUILDER_IMAGE = nixBuilderImage;
           NIX_VOLUME = "spindrift-nix";
-          FLAKE_IMAGE_ATTR = ".#packages.${linuxSystem}.agent-image";
+          FLAKE_IMAGE_ATTR = ".#packages.${systems.linux}.agent-image";
         }
     )
     // {
@@ -167,12 +170,12 @@ rec {
         else
           "";
       BOX_ENV_VARS = boxEnvVars;
-      # Unlike FLAKE_IMAGE_ATTR above (rendered against linuxSystem, the
+      # Unlike FLAKE_IMAGE_ATTR above (rendered against systems.linux, the
       # Linux twin used only for Linux-bound OCI artifacts), the launcher is
       # a plain per-host-system Go binary (built via hostPkgs.buildGoModule,
       # runs on every platform including bwrap/darwin), so this correctly
-      # renders against system -- the host's own system.
-      FLAKE_LAUNCHER_ATTR = launcherCurrencyAttr system;
+      # renders against systems.host -- the host's own system.
+      FLAKE_LAUNCHER_ATTR = launcherCurrencyAttr systems.host;
       LAUNCHER_CURRENCY_HASH = launcherCurrencyHash;
       HOST_MEDIATED_REMOTE = if hostMediatedRemote then "true" else "false";
       OUTBOX_RELAY_CAPABLE = if outboxRelayCapable then "true" else "false";
@@ -203,8 +206,11 @@ rec {
       imageName,
       imageDrv,
       nixBuilderImage,
-      linuxSystem,
-      system,
+      # The host system and its Linux twin, bundled into one systems-shaped
+      # param the same way as runArtifacts above (issue #2770 slice 2) — see
+      # its comment for the bundling rationale and the FLAKE_IMAGE_ATTR/
+      # FLAKE_LAUNCHER_ATTR divergence.
+      systems,
     }:
     (
       if runnerKind == "bwrap" then
@@ -221,12 +227,12 @@ rec {
           IMAGE_DRV = imageDrv;
           NIX_BUILDER_IMAGE = nixBuilderImage;
           NIX_VOLUME = "spindrift-nix";
-          FLAKE_IMAGE_ATTR = ".#packages.${linuxSystem}.agent-image";
+          FLAKE_IMAGE_ATTR = ".#packages.${systems.linux}.agent-image";
         }
     )
     // {
       RUNNER_KIND = runnerKind;
-      FLAKE_LAUNCHER_ATTR = launcherCurrencyAttr system;
+      FLAKE_LAUNCHER_ATTR = launcherCurrencyAttr systems.host;
       LAUNCHER_CURRENCY_HASH = launcherCurrencyHash;
     };
 
@@ -263,8 +269,10 @@ rec {
           runtime = "dummy";
           imageDrv = "dummy";
           nixBuilderImage = "dummy";
-          linuxSystem = "dummy";
-          system = "dummy";
+          systems = {
+            host = "dummy";
+            linux = "dummy";
+          };
           boxEnvVars = "dummy";
           hostMediatedRemote = false;
           outboxRelayCapable = false;
@@ -292,8 +300,10 @@ rec {
           imageName = "dummy";
           imageDrv = "dummy";
           nixBuilderImage = "dummy";
-          linuxSystem = "dummy";
-          system = "dummy";
+          systems = {
+            host = "dummy";
+            linux = "dummy";
+          };
         };
       allKeys =
         builtins.concatMap (runnerKind: builtins.attrNames (dummyRunArtifacts runnerKind)) [

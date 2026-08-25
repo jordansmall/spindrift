@@ -149,6 +149,16 @@ let
   # its Linux twin for the image.
   linuxSystem = nixpkgsShared.linuxTwin.${system};
 
+  # Bundled into the single param preambles.runArtifacts and
+  # preambles.buildArtifacts take (issue #2770 slices 1/2) — see
+  # lib/preambles.nix's runArtifacts comment for the bundling rationale.
+  # linuxSystem/system stay in scope too — they're used directly elsewhere in
+  # this file (pkgs, hostPkgs, isLinux).
+  systems = {
+    host = system;
+    linux = linuxSystem;
+  };
+
   mergedConfig = {
     allowUnfree = true;
   }
@@ -1160,8 +1170,7 @@ let
       runtime
       imageDrv
       nixBuilderImage
-      linuxSystem
-      system
+      systems
       hostMediatedRemote
       outboxRelayCapable
       inBoxUnreachableTracker
@@ -1192,8 +1201,7 @@ let
       launcherCurrencyHash
       imageDrv
       nixBuilderImage
-      linuxSystem
-      system
+      systems
       ;
     imageName = imageKnobs.imageName;
   };
