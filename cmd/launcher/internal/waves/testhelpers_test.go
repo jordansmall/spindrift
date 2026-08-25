@@ -44,11 +44,11 @@ func dispatchLabels(cfg Config) forge.DispatchLabels {
 }
 
 // tempLogDir creates a temp dir with a .spindrift/logs subdirectory.
-func tempLogDir(t *testing.T) string {
-	t.Helper()
-	dir := t.TempDir()
+func tempLogDir(tb testing.TB) string {
+	tb.Helper()
+	dir := tb.TempDir()
 	if err := os.MkdirAll(dispatch.HostLogDirFor(dir), 0o755); err != nil {
-		t.Fatal(err)
+		tb.Fatal(err)
 	}
 	return dir
 }
