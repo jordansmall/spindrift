@@ -3,14 +3,19 @@
 // three switch statements in cmd/launcher/orchestrator/run.go: the legacy
 // single loop's own decision (run.go:244-259), the review loop's
 // implement/fix/land decision (run.go:355-401), and the review loop's own
-// review-pass decision (run.go:461-487). Transition reproduces every case,
-// string, and priority order of those three switches exactly -- zero
-// behavior change -- because the decision op's Reason field and
-// state.CapFired are part of a byte-for-byte-pinned op stream existing
-// tests assert on. This package is deliberately I/O-free: it takes an
-// Input struct and returns a Decision, with no access to cfg, state, or
-// stdout, so its every transition can be table-tested without executing a
-// Driver.
+// review-pass decision (run.go:461-487). Transition reproduces every case
+// and priority order of those three switches exactly, and state.CapFired
+// is part of a byte-for-byte-pinned op stream existing tests assert on --
+// but the Reason strings are not pinned verbatim to the original switches:
+// issue #2655 rewrote three previously-empty Reason fallthroughs
+// (legacyTransition's BLOCK-with-rounds-remaining case,
+// implementFixTransition's no-cap-fired case, and reviewTransition's
+// default case, split into its own APPROVE and BLOCK reasons) so every
+// decision carries a non-empty, human-readable reason -- a deliberate,
+// in-scope change to the Reason text. This package is deliberately I/O-free:
+// it takes an Input struct and returns a Decision, with no access to cfg,
+// state, or stdout, so its every transition can be table-tested without
+// executing a Driver.
 package passmachine
 
 import (
@@ -343,7 +348,7 @@ func legacyTransition(in Input) Decision {
 	// Only reachable when Verdict == BLOCK, HasOutcome is false, and
 	// neither cap fired: reviewRounds++ unconditionally, loop continues
 	// with the same single pass kind.
-	return Decision{Continue: true, Reason: "", NextPass: KindLegacy, IncrementReviewRounds: true}
+	return Decision{Continue: true, Reason: "blocked, running another pass", NextPass: KindLegacy, IncrementReviewRounds: true}
 }
 
 // terminalLandTransition reproduces the in.LandPhase ==
@@ -394,7 +399,7 @@ func implementFixTransition(in Input) Decision {
 		}
 	}
 	// No case matched: falls through to entering the review pass.
-	return Decision{Continue: true, Reason: "", NextPass: KindReview}
+	return Decision{Continue: true, Reason: "no cap fired, entering review pass", NextPass: KindReview}
 }
 
 // budgetExceeded reports whether tokens or usd has reached or exceeded
@@ -465,8 +470,16 @@ func reviewTransition(in Input) Decision {
 			Cap:       StopBudgetExceeded,
 			CapFired:  "budget exceeded (" + budgetReason + ")",
 		}
+	case in.Verdict == VerdictApprove:
+		// A plain APPROVE deliberately does not stop the run: the
+		// implement/fix pass it followed was told to stop right after
+		// COMMIT, so at the moment of approval the work is committed but
+		// not pushed, has no PR, and has produced no outcome -- one more
+		// (terminal) pass is required to land it (issue #2069).
+		d = Decision{Continue: true, Reason: "approved, running the land pass"}
 	default:
-		d = Decision{Continue: true, Reason: ""}
+		// A plain BLOCK with no cap hit: another fix pass is needed.
+		d = Decision{Continue: true, Reason: "blocked, running another fix pass"}
 	}
 
 	// Unconditional, regardless of which case fired: a BLOCK verdict
