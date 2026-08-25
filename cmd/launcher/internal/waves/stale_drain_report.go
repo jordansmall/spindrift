@@ -8,47 +8,27 @@ import (
 
 // StaleDrainReport summarizes what a stale drain cost (issue #2678): the
 // wall-clock window between refilling stopping and every in-flight Box
-// landing, the slot-seconds that sat idle across that window, and (see
-// HeldBack's own doc comment below for the exact, narrower semantics, and
-// its caveat under cfg.IgnoreBlockers) how many issues were genuinely
-// ready to dispatch but didn't launch solely because the run had already
-// gone stale.
+// landing, the slot-seconds that sat idle across that window, and how many
+// issues HeldBack's own doc comment below counts as held back by the drain
+// itself.
 type StaleDrainReport struct {
 	StaleAt      time.Time
 	DrainedAt    time.Time
 	FreeSlotSecs float64
-	// HeldBack counts issues that passed the narrow check this field
-	// measures -- every blocker/touch-overlap/DepsOf check, evaluated the
-	// same way issueReadiness evaluates it -- but didn't launch solely
-	// because the run had already gone stale by the time they were
-	// reached. It is a scope decision, not a claim that every excluded
-	// issue would definitely never have launched fresh: it deliberately
-	// excludes three categories that issueReadiness also marks not-ready,
-	// and two of the three are frequently transient rather than durable
-	// blocks. Dependency-blocked issues (an unresolved blocker edge) are
-	// the one genuinely durable, pre-existing exclusion, independent of
-	// this run. Touch-overlap-deferred issues (waiting on a still
-	// in-flight Box's file overlap) are frequently self-induced by this
-	// run's own concurrency -- ListIssues(InProgress) during a drain is
-	// dominated by this run's own in-flight Boxes, so once the colliding
-	// Box lands, a fresh run's next refill would very plausibly launch
-	// it. And (only when !cfg.IgnoreBlockers, continuous.go's own guard)
-	// issues whose own DepsOf check failed are held only because that one
-	// check call failed transiently -- continuous.go's own comment on
-	// that case says "the next refill retries" -- so a fresh run's next
-	// refill would very plausibly succeed and launch it too. Counting
-	// either of those two into HeldBack would conflate the drain's own
-	// cost with issues that were, at most, incidentally delayed by this
-	// run's own state (#2778). Under cfg.IgnoreBlockers (research-kind
-	// continuous dispatch, main.go's dispatchKindResearch wiring), only
-	// that DepsOf-failed switch case's own guard is bypassed, so such an
-	// issue IS counted into HeldBack; the unresolved-blocker-edge
-	// exclusion above is untouched by cfg.IgnoreBlockers (it is gated
-	// solely on !cfg.PreResolved) and so a blocker-edge-blocked issue
-	// stays excluded from HeldBack even under cfg.IgnoreBlockers --
-	// unlike engine.go's drainMaxJobs, which additionally gates the
-	// blocker-edge computation itself on !cfg.IgnoreBlockers and so skips
-	// it entirely in that mode (#2778 review finding).
+	// HeldBack counts issues that didn't launch solely because the run had
+	// already gone stale by the time they were reached. When populated by
+	// countReady (continuous.go) -- the !cfg.PreResolved branch, the only
+	// producer that runs a readiness check at all -- that count applies
+	// issueReadiness's own blocker/touch-overlap/DepsOf filtering, and
+	// deliberately excludes three categories issueReadiness also marks
+	// not-ready; see countReady's doc comment (continuous.go) for exactly
+	// which categories and why. When populated by cfg.PendingCount
+	// instead (Console's Queue.PendingCount, checked first) it is a raw
+	// PickQueued tally with no readiness filtering at all -- Console
+	// leaves OverlapGate empty, so no touch-overlap or DepsOf check runs
+	// on that path either. It is a scope decision either way, not a claim
+	// that every excluded issue would definitely never have launched
+	// fresh (#2778).
 	HeldBack int
 	// HeldBackUnknown is true when the stale-drain report's held-back count
 	// could not be determined (a transient discover error at the moment of

@@ -303,6 +303,40 @@ func TestNextReady_Local_LandingVerifiedUnblocksDependentInSameRun(t *testing.T)
 	}
 }
 
+// TestNextReady_IgnoreBlockers_DispatchesDespiteUnmetBlocker verifies that
+// nextReady's own live-dispatch selection -- not just countReady's tally --
+// honors Config.IgnoreBlockers (research-kind continuous dispatch,
+// continuous.go:120): an issue with a real unresolved blocker edge is
+// selected for dispatch rather than held. TestDrainMaxJobs_IgnoreBlockers_
+// DispatchesDespiteUnmetBlocker (ignoreblockers_test.go) already pins this
+// for drainMaxJobs' whole-batch path; this pins the same guarantee for the
+// separate nextReady refill path RunContinuous actually calls, which every
+// prior IgnoreBlockers test in this package (continuous_test.go) only
+// exercised through countReady's ready/not-ready tally, never through
+// nextReady's own returned (Issue, bool) dispatch decision.
+func TestNextReady_IgnoreBlockers_DispatchesDespiteUnmetBlocker(t *testing.T) {
+	c := baseConfig()
+	c.Label = "agent-research"
+	c.IgnoreBlockers = true
+
+	fc := forge.NewFake(dispatchLabels(c))
+	// Issue #1 is blocked by #3 (open, no complete label) -- would normally
+	// hold #1 for a later invocation.
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.Label}})
+	fc.SetIssue(forge.Issue{Number: "3", State: "OPEN"})
+
+	edges := map[string][]string{"1": {"3"}}
+	checkOverlap := func(string) (string, bool) { return "", false }
+
+	iss, ok := nextReady(c, fc, fc, checkOverlap, []Issue{
+		{Number: "1", Title: "blocked issue"},
+	}, edges, nil, nil, nil)
+
+	if !ok || iss.Number != "1" {
+		t.Fatalf("nextReady: got (%v, %v), want (\"1\", true) -- blocker edges must not gate research dispatch", iss, ok)
+	}
+}
+
 // TestNextReady_HappyPath verifies that with no cascade or overlap in play,
 // nextReady still selects the first dispatch-ready issue in scan order —
 // guarding against the cascade and overlap tests masking the happy path.

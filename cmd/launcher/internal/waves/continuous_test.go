@@ -2241,12 +2241,6 @@ func TestRunContinuous_StaleDrainHeldBackExcludesBlockedIssues(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{c.Label}})
 	fc.SetIssue(forge.Issue{Number: "9", State: "OPEN"}) // #2's blocker, unmet
 
-	fr := runner.NewFake()
-
-	dir := tempLogDir(t)
-	f := testFactory(t, dir, fr)
-	s := newSettle(fc, fc)
-
 	edges := map[string][]string{"2": {"9"}}
 	discover := func() ([]Issue, map[string][]string, Sources, map[string]bool, error) {
 		raw, err := fc.ListIssues(forge.Dispatchable)
@@ -2259,35 +2253,12 @@ func TestRunContinuous_StaleDrainHeldBackExcludesBlockedIssues(t *testing.T) {
 		}
 		return out, edges, nil, nil, nil
 	}
-	// Stale on the very first refill, before anything ever launches --
-	// MaxParallel=1 means the sole slot is acquired then immediately
-	// released by the stale branch's defer, so outstanding never leaves
-	// zero and heldBack is computed from the full discovered batch.
-	fresh := func() (bool, bool, string) {
-		return true, false, "rebuild needed (base tip changed image inputs)"
-	}
 
-	var err error
-	stdout := testutil.CaptureStdout(t, func() {
-		err = RunContinuous(c, nil, fc, fc, dir, f, s, discover, fresh)
-	})
+	stdout, log := runStaleDrain(t, c, fc, discover)
 
-	if !errors.Is(err, ErrImageStale) {
-		t.Fatalf("RunContinuous: got %v, want ErrImageStale", err)
-	}
-	if len(fr.RunCalls) != 0 {
-		t.Fatalf("RunCalls: got %v, want none (stale fired before any launch)", fr.RunCalls)
-	}
 	if !strings.Contains(stdout, "1 issue(s) held back") {
 		t.Fatalf("stdout: got %q, want a drain report line mentioning 1 issue(s) held back (only #1 is ready; #2 is blocked by #9)", stdout)
 	}
-
-	logPath := filepath.Join(dispatch.HostLogDirFor(dir), staleDrainMarker)
-	logBytes, err := os.ReadFile(logPath)
-	if err != nil {
-		t.Fatalf("ReadFile(%s): %v", logPath, err)
-	}
-	log := string(logBytes)
 	if !strings.Contains(log, "heldBack=1") {
 		t.Fatalf("stale-drain.log: got %q, want heldBack=1 (only #1 is ready; #2 is blocked by #9, so it must not inflate the count)", log)
 	}
@@ -2367,12 +2338,6 @@ func TestRunContinuous_StaleDrainHeldBackExcludesTouchOverlapDeferredIssues(t *t
 	fc.SetIssue(forge.Issue{Number: "2", Body: "## Touches\n- lib/foo.nix", Labels: []string{c.Label}})
 	fc.SetIssue(forge.Issue{Number: "9", Body: "## Touches\n- lib/foo.nix", Labels: []string{c.InProgressLabel}, State: "OPEN"}) // #2's overlap collider
 
-	fr := runner.NewFake()
-
-	dir := tempLogDir(t)
-	f := testFactory(t, dir, fr)
-	s := newSettle(fc, fc)
-
 	discover := func() ([]Issue, map[string][]string, Sources, map[string]bool, error) {
 		raw, err := fc.ListIssues(forge.Dispatchable)
 		if err != nil {
@@ -2384,35 +2349,12 @@ func TestRunContinuous_StaleDrainHeldBackExcludesTouchOverlapDeferredIssues(t *t
 		}
 		return out, nil, nil, nil, nil
 	}
-	// Stale on the very first refill, before anything ever launches --
-	// MaxParallel=1 means the sole slot is acquired then immediately
-	// released by the stale branch's defer, so outstanding never leaves
-	// zero and heldBack is computed from the full discovered batch.
-	fresh := func() (bool, bool, string) {
-		return true, false, "rebuild needed (base tip changed image inputs)"
-	}
 
-	var err error
-	stdout := testutil.CaptureStdout(t, func() {
-		err = RunContinuous(c, nil, fc, fc, dir, f, s, discover, fresh)
-	})
+	stdout, log := runStaleDrain(t, c, fc, discover)
 
-	if !errors.Is(err, ErrImageStale) {
-		t.Fatalf("RunContinuous: got %v, want ErrImageStale", err)
-	}
-	if len(fr.RunCalls) != 0 {
-		t.Fatalf("RunCalls: got %v, want none (stale fired before any launch)", fr.RunCalls)
-	}
 	if !strings.Contains(stdout, "1 issue(s) held back") {
 		t.Fatalf("stdout: got %q, want a drain report line mentioning 1 issue(s) held back (only #1 is ready; #2 is deferred by the touch-overlap gate)", stdout)
 	}
-
-	logPath := filepath.Join(dispatch.HostLogDirFor(dir), staleDrainMarker)
-	logBytes, err := os.ReadFile(logPath)
-	if err != nil {
-		t.Fatalf("ReadFile(%s): %v", logPath, err)
-	}
-	log := string(logBytes)
 	if !strings.Contains(log, "heldBack=1") {
 		t.Fatalf("stale-drain.log: got %q, want heldBack=1 (only #1 is ready; #2 is deferred by the touch-overlap gate, so it must not inflate the count)", log)
 	}
@@ -2433,12 +2375,6 @@ func TestRunContinuous_StaleDrainHeldBackExcludesDepsOfFailedIssues(t *testing.T
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.Label}})
 	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{c.Label}}) // its own DepsOf check fails
 
-	fr := runner.NewFake()
-
-	dir := tempLogDir(t)
-	f := testFactory(t, dir, fr)
-	s := newSettle(fc, fc)
-
 	failed := map[string]bool{"2": true}
 	discover := func() ([]Issue, map[string][]string, Sources, map[string]bool, error) {
 		raw, err := fc.ListIssues(forge.Dispatchable)
@@ -2451,63 +2387,34 @@ func TestRunContinuous_StaleDrainHeldBackExcludesDepsOfFailedIssues(t *testing.T
 		}
 		return out, nil, nil, failed, nil
 	}
-	// Stale on the very first refill, before anything ever launches --
-	// MaxParallel=1 means the sole slot is acquired then immediately
-	// released by the stale branch's defer, so outstanding never leaves
-	// zero and heldBack is computed from the full discovered batch.
-	fresh := func() (bool, bool, string) {
-		return true, false, "rebuild needed (base tip changed image inputs)"
-	}
 
-	var err error
-	stdout := testutil.CaptureStdout(t, func() {
-		err = RunContinuous(c, nil, fc, fc, dir, f, s, discover, fresh)
-	})
+	stdout, log := runStaleDrain(t, c, fc, discover)
 
-	if !errors.Is(err, ErrImageStale) {
-		t.Fatalf("RunContinuous: got %v, want ErrImageStale", err)
-	}
-	if len(fr.RunCalls) != 0 {
-		t.Fatalf("RunCalls: got %v, want none (stale fired before any launch)", fr.RunCalls)
-	}
 	if !strings.Contains(stdout, "1 issue(s) held back") {
 		t.Fatalf("stdout: got %q, want a drain report line mentioning 1 issue(s) held back (only #1 is ready; #2's own DepsOf check failed)", stdout)
 	}
-
-	logPath := filepath.Join(dispatch.HostLogDirFor(dir), staleDrainMarker)
-	logBytes, err := os.ReadFile(logPath)
-	if err != nil {
-		t.Fatalf("ReadFile(%s): %v", logPath, err)
-	}
-	log := string(logBytes)
 	if !strings.Contains(log, "heldBack=1") {
 		t.Fatalf("stale-drain.log: got %q, want heldBack=1 (only #1 is ready; #2's own DepsOf check failed, so it must not inflate the count)", log)
 	}
 }
 
-// TestRunContinuous_StaleDrainHeldBackCountsDepsOfFailedWhenIgnoreBlockers
-// pins the counterexample to the sibling test's exclusion claim (#2778
-// review finding): the DepsOf-failed exclusion in countReady/issueReadiness
-// only fires when !cfg.IgnoreBlockers (continuous.go:124's own guard).
-// Under cfg.IgnoreBlockers (research-kind continuous dispatch, set from
-// main.go:1069), that guard short-circuits and a DepsOf-failed issue is
-// no longer excluded -- it falls through to the touch-overlap check and,
-// finding none, is counted ready. It also pins the contrasting case a
-// second review finding on #2778 called out: cfg.IgnoreBlockers only
-// bypasses that one DepsOf-failed guard, not the unresolved-blocker-edge
-// exclusion, which is gated solely on !cfg.PreResolved
-// (issueReadiness/continuous.go:120) and so still fires even under
-// IgnoreBlockers -- unlike engine.go's drainMaxJobs, which additionally
-// gates the blocker-edge computation itself on !cfg.IgnoreBlockers. #1 is
-// genuinely ready; #2's own DepsOf check is marked failed via the discover
-// closure's failed map, same setup as
-// TestRunContinuous_StaleDrainHeldBackExcludesDepsOfFailedIssues; #3 is
-// blocked by an unresolved edge to #9, same setup as
-// TestRunContinuous_StaleDrainHeldBackExcludesBlockedIssues. With
-// IgnoreBlockers=true the correct heldBack is 2 (#1 and #2, but not #3):
-// the DepsOf-failed exclusion is skipped so #2 is counted ready, but the
-// blocker-edge exclusion is untouched so #3 stays excluded.
-func TestRunContinuous_StaleDrainHeldBackCountsDepsOfFailedWhenIgnoreBlockers(t *testing.T) {
+// TestRunContinuous_StaleDrainHeldBackCountsAllExclusionsWhenIgnoreBlockers
+// pins the counterexample to the two sibling exclusion tests above (#2778
+// review finding): under cfg.IgnoreBlockers (research-kind continuous
+// dispatch, set from main.go's dispatchKindResearch wiring), issueReadiness
+// (continuous.go) skips both the DepsOf-failed switch case's own guard and
+// the unresolved-blocker-edge computation itself, so neither exclusion
+// applies -- only the touch-overlap exclusion, unexercised here, still can.
+// #1 is genuinely ready; #2's own DepsOf check is marked failed via the
+// discover closure's failed map, same setup as
+// TestRunContinuous_StaleDrainHeldBackExcludesDepsOfFailedIssues; #3 has an
+// edge to unresolved #9 in the edges map, same setup as
+// TestRunContinuous_StaleDrainHeldBackExcludesBlockedIssues, but under
+// IgnoreBlockers that edge is never even consulted. With
+// IgnoreBlockers=true the correct heldBack is 3 (#1, #2, and #3): the
+// DepsOf-failed exclusion is skipped so #2 is counted ready, and the
+// blocker-edge check is skipped entirely so #3 is counted ready too.
+func TestRunContinuous_StaleDrainHeldBackCountsAllExclusionsWhenIgnoreBlockers(t *testing.T) {
 	c := baseConfig()
 	c.Label = "agent-trigger"
 	c.MaxParallel = 1
@@ -2518,12 +2425,6 @@ func TestRunContinuous_StaleDrainHeldBackCountsDepsOfFailedWhenIgnoreBlockers(t 
 	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{c.Label}}) // its own DepsOf check fails
 	fc.SetIssue(forge.Issue{Number: "3", Labels: []string{c.Label}}) // blocked by unresolved edge to #9
 	fc.SetIssue(forge.Issue{Number: "9", State: "OPEN"})             // #3's blocker, unmet
-
-	fr := runner.NewFake()
-
-	dir := tempLogDir(t)
-	f := testFactory(t, dir, fr)
-	s := newSettle(fc, fc)
 
 	edges := map[string][]string{"3": {"9"}}
 	failed := map[string]bool{"2": true}
@@ -2538,37 +2439,14 @@ func TestRunContinuous_StaleDrainHeldBackCountsDepsOfFailedWhenIgnoreBlockers(t 
 		}
 		return out, edges, nil, failed, nil
 	}
-	// Stale on the very first refill, before anything ever launches --
-	// MaxParallel=1 means the sole slot is acquired then immediately
-	// released by the stale branch's defer, so outstanding never leaves
-	// zero and heldBack is computed from the full discovered batch.
-	fresh := func() (bool, bool, string) {
-		return true, false, "rebuild needed (base tip changed image inputs)"
-	}
 
-	var err error
-	stdout := testutil.CaptureStdout(t, func() {
-		err = RunContinuous(c, nil, fc, fc, dir, f, s, discover, fresh)
-	})
+	stdout, log := runStaleDrain(t, c, fc, discover)
 
-	if !errors.Is(err, ErrImageStale) {
-		t.Fatalf("RunContinuous: got %v, want ErrImageStale", err)
+	if !strings.Contains(stdout, "3 issue(s) held back") {
+		t.Fatalf("stdout: got %q, want a drain report line mentioning 3 issue(s) held back (IgnoreBlockers skips both the DepsOf-failed exclusion and the blocker-edge check, so #1, #2, and #3 are all counted ready)", stdout)
 	}
-	if len(fr.RunCalls) != 0 {
-		t.Fatalf("RunCalls: got %v, want none (stale fired before any launch)", fr.RunCalls)
-	}
-	if !strings.Contains(stdout, "2 issue(s) held back") {
-		t.Fatalf("stdout: got %q, want a drain report line mentioning 2 issue(s) held back (IgnoreBlockers skips the DepsOf-failed exclusion, so #2 is counted ready alongside #1; #3 stays excluded because IgnoreBlockers does not touch the blocker-edge exclusion)", stdout)
-	}
-
-	logPath := filepath.Join(dispatch.HostLogDirFor(dir), staleDrainMarker)
-	logBytes, err := os.ReadFile(logPath)
-	if err != nil {
-		t.Fatalf("ReadFile(%s): %v", logPath, err)
-	}
-	log := string(logBytes)
-	if !strings.Contains(log, "heldBack=2") {
-		t.Fatalf("stale-drain.log: got %q, want heldBack=2 (IgnoreBlockers means #2's DepsOf failure no longer excludes it from the count, but #3 remains blocked by #9 since IgnoreBlockers doesn't skip the blocker-edge exclusion)", log)
+	if !strings.Contains(log, "heldBack=3") {
+		t.Fatalf("stale-drain.log: got %q, want heldBack=3 (IgnoreBlockers means #2's DepsOf failure no longer excludes it from the count, and #3's edge to unresolved #9 is never consulted since IgnoreBlockers skips the blocker-edge check entirely)", log)
 	}
 }
 

@@ -13,6 +13,7 @@ import (
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/runner"
 	"spindrift.dev/launcher/internal/settle"
+	"spindrift.dev/launcher/internal/testutil"
 )
 
 // testDispatchLabels mirrors the conventional lifecycle-label set used
@@ -123,4 +124,43 @@ func newSettle(it forge.IssueTracker, cf forge.CodeForge) *settle.Settle {
 		MergePollInterval: 0,
 		MergePollTimeout:  100,
 	}, it, cf)
+}
+
+// runStaleDrain drives RunContinuous with discover against an
+// always-immediately-stale freshness check, and returns the captured stdout
+// alongside the appended stale-drain.log contents -- the boilerplate every
+// heldBack stale-drain test in continuous_test.go otherwise repeats
+// (#2778 review finding). Requires c.MaxParallel == 1: the sole slot is
+// acquired then immediately released by the stale branch's defer, so
+// outstanding never leaves zero and heldBack is computed from the full
+// discovered batch. Asserts the two outcomes every caller shares --
+// ErrImageStale and zero RunCalls -- so each caller only needs to assert
+// its own heldBack count.
+func runStaleDrain(t *testing.T, c Config, fc *forge.Fake, discover Discoverer) (stdout, log string) {
+	t.Helper()
+	fr := runner.NewFake()
+	dir := tempLogDir(t)
+	f := testFactory(t, dir, fr)
+	s := newSettle(fc, fc)
+	fresh := func() (bool, bool, string) {
+		return true, false, "rebuild needed (base tip changed image inputs)"
+	}
+
+	var err error
+	stdout = testutil.CaptureStdout(t, func() {
+		err = RunContinuous(c, nil, fc, fc, dir, f, s, discover, fresh)
+	})
+	if !errors.Is(err, ErrImageStale) {
+		t.Fatalf("RunContinuous: got %v, want ErrImageStale", err)
+	}
+	if len(fr.RunCalls) != 0 {
+		t.Fatalf("RunCalls: got %v, want none (stale fired before any launch)", fr.RunCalls)
+	}
+
+	logPath := filepath.Join(dispatch.HostLogDirFor(dir), staleDrainMarker)
+	logBytes, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("ReadFile(%s): %v", logPath, err)
+	}
+	return stdout, string(logBytes)
 }
