@@ -341,9 +341,14 @@ func (a *ociAdapter) mountSpecs(box Box) []MountSpec {
 // cmd/launcher/main.go's checkNetworkModeRuntimeGate backstops the same
 // mutual exclusion against a runtime override (env var / CLI flag) of either
 // knob past what that eval assert could see — so by the time a Box reaches
-// this function, both being set is unreachable, not a live case this
-// raw-wins fallback is ever exercised against in practice. It still needs a
-// deterministic answer here as defense-in-depth, since Go has no way to
+// this function, both being set is unreachable for a non-open NETWORK_MODE.
+// An explicit NETWORK_MODE=open paired with a raw knob is a real, reachable
+// case, though: checkNetworkModeRuntimeGate deliberately leaves it out of
+// scope (Go can't distinguish "networkMode defaulted to open" from
+// "networkMode was explicitly set to open" at that layer) and lets it reach
+// here, where raw-wins resolves it. It still needs a deterministic answer
+// here as defense-in-depth against the otherwise-unreachable non-open case,
+// since Go has no way to
 // observe that invariant locally. "no-host-loopback" resolves per CLI: plain
 // `pasta` (no
 // `--map-gw`) genuinely denies host-loopback on podman, but docker/nerdctl's

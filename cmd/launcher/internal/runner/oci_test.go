@@ -338,9 +338,12 @@ func TestBuildRunArgsEmptyLimitsOmitted(t *testing.T) {
 // TestNetworkArg covers networkArg's resolution of the effective --network
 // value across cli x networkMode, plus the raw podmanNetwork escape hatch
 // (issue #2562). Raw podmanNetwork wins whenever set, even alongside a set
-// networkMode — nix eval-rejects that combination for a real Consumer flake
-// (lib/mkHarness.nix networkModeCoherenceOk), but networkArg still needs a
-// deterministic answer since it has no way to observe "this can't happen".
+// networkMode: for a non-open networkMode, nix eval-rejects that combination
+// for a real Consumer flake (lib/mkHarness.nix networkModeCoherenceOk), and
+// networkArg still needs a deterministic answer since it has no way to
+// observe "this can't happen"; for networkMode "open" specifically, raw-wins
+// is a real, reachable case (checkNetworkModeRuntimeGate in main.go leaves
+// it out of scope on purpose), not just defense-in-depth.
 func TestNetworkArg(t *testing.T) {
 	cases := []struct {
 		name          string
@@ -357,6 +360,7 @@ func TestNetworkArg(t *testing.T) {
 		{name: "open no flag", cli: "podman", networkMode: "open", want: ""},
 		{name: "unset no flag", cli: "podman", networkMode: "", want: ""},
 		{name: "raw wins over mode", cli: "podman", networkMode: "no-host-loopback", podmanNetwork: "slirp4netns:allow_host_loopback=true", want: "slirp4netns:allow_host_loopback=true"},
+		{name: "raw wins over open mode", cli: "podman", networkMode: "open", podmanNetwork: "slirp4netns:allow_host_loopback=true", want: "slirp4netns:allow_host_loopback=true"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
