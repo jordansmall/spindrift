@@ -1835,7 +1835,7 @@ func TestRunWithReviewPassSequenceOnBlockThenApprove(t *testing.T) {
 		`"spindrift_op":{"op":"pass_start","pass":2,"role":"review"}`,
 		`"spindrift_op":{"op":"pass_start","pass":3,"role":"fix"}`,
 		`"spindrift_op":{"op":"pass_start","pass":4,"role":"review"}`,
-		`"spindrift_op":{"op":"pass_start","pass":5,"role":"fix"}`,
+		`"spindrift_op":{"op":"pass_start","pass":5,"role":"land"}`,
 	} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Errorf("stdout = %q, want it to contain %q", stdout.String(), want)
@@ -3600,7 +3600,7 @@ func TestRunWithReviewPassStopsWhenLandPassProducesNoOutcomeAfterApprove(t *test
 		t.Errorf("stdout = %q, want the land-pass-no-outcome stop reason", stdout.String())
 	}
 
-	if !strings.Contains(stdout.String(), `"spindrift_op":{"op":"pass_start","pass":3,"role":"fix"}`) {
+	if !strings.Contains(stdout.String(), `"spindrift_op":{"op":"pass_start","pass":3,"role":"land"}`) {
 		t.Errorf("stdout = %q, want the land pass's own pass_start", stdout.String())
 	}
 	if strings.Contains(stdout.String(), `"spindrift_op":{"op":"pass_start","pass":4`) {
