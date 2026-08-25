@@ -9,6 +9,7 @@
 }:
 let
   inherit (fixtures)
+    harness
     promptHarness
     fixPromptHarness
     researchPromptHarness
@@ -1378,6 +1379,72 @@ in
       "mkHarness.nix must throw when the shared `filerPrompt` template carries a forbidden marker ('gh issue create') as literal text";
     pkgs.runCommand "build-time-reject-forbidden-marker-filer-template" { } "touch $out";
 
+  # Build-time research-direct-file check (issue #2595, ADR 0041: "Research
+  # filing is host-mediated and relay-only"): a research prompt must never
+  # statically carry a FILER_FILE_DIRECT*-gated fragment's envsubst
+  # placeholder -- research issues are always filed through the host-mediated
+  # SPINDRIFT_ISSUE_INTENT relay, never `gh`/`fj` straight from the agent.
+  # FILER_FILE_DIRECT_STEP is filer-file-direct.md's var (gate
+  # FILER_FILE_DIRECT_GH, lib/fragments.nix), so wiring it into `researchPrompt`
+  # here is standing in for the regression this check exists to catch.
+  build-time-reject-research-direct-file-prompt =
+    let
+      inherit (pkgs.lib) assertMsg;
+      broken = builtins.tryEval (
+        (import ../../lib/mkHarness.nix {
+          inherit nixpkgs system;
+          packages = p: [ p.hello ];
+          researchPrompt = "some research prompt text with \${FILER_FILE_DIRECT_STEP} embedded";
+        }).spindrift
+      );
+    in
+    assert assertMsg (!broken.success)
+      "mkHarness.nix must throw when researchPrompt statically carries a direct-file fragment's \${VAR} placeholder (ADR 0041)";
+    pkgs.runCommand "build-time-reject-research-direct-file-prompt" { } "touch $out";
+
+  # Same as above, but exercising researchSelfContainedPrompt (the
+  # self-contained research sub-mode's own prompt template, issue #2202) --
+  # the acceptance criteria for #2595 names both research prompt kinds
+  # explicitly, and researchPrompt/researchSelfContainedPrompt are two
+  # separately hand-keyed entries in lib/mkHarness.nix's
+  # researchPromptContentByName, so a check that only ever overrides
+  # researchPrompt would never notice if the self-contained entry were
+  # silently dropped or mis-keyed.
+  build-time-reject-research-direct-file-self-contained-prompt =
+    let
+      inherit (pkgs.lib) assertMsg;
+      broken = builtins.tryEval (
+        (import ../../lib/mkHarness.nix {
+          inherit nixpkgs system;
+          packages = p: [ p.hello ];
+          researchSelfContainedPrompt = "some self-contained research prompt text with \${FILER_FILE_DIRECT_STEP} embedded";
+        }).spindrift
+      );
+    in
+    assert assertMsg (!broken.success)
+      "mkHarness.nix must throw when researchSelfContainedPrompt statically carries a direct-file fragment's \${VAR} placeholder (ADR 0041)";
+    pkgs.runCommand "build-time-reject-research-direct-file-self-contained-prompt" { } "touch $out";
+
+  # The "not triggered" counterpart: the real, unmodified default templates
+  # must build clean today -- lib/fragments.nix's real DIRECT-gated rows
+  # never wire their var into either research prompt template (see that
+  # file's own doc comment on research-file-issues-relay.md), so this proves
+  # the current configuration passes rather than only ever exercising the
+  # deliberately-broken fixtures above.
+  build-time-research-direct-file-not-triggered =
+    let
+      inherit (pkgs.lib) assertMsg;
+      ok = builtins.tryEval (
+        (import ../../lib/mkHarness.nix {
+          inherit nixpkgs system;
+          packages = p: [ p.hello ];
+        }).spindrift
+      );
+    in
+    assert assertMsg ok.success
+      "mkHarness.nix must not throw for the real, unmodified research prompt templates -- neither carries a direct-file fragment's \${VAR} placeholder today (ADR 0041)";
+    pkgs.runCommand "build-time-research-direct-file-not-triggered" { } "touch $out";
+
   # Anti-drift registry check (issue #2709, slice 1): lib/prompt-coverage.nix
   # declares one row per prompt template under templates/default/prompts/,
   # classifying it "covered" (its assembled text must carry a caveman
@@ -1637,4 +1704,89 @@ in
       done < ${requiredMarkerNamesFile}
       touch $out
     '';
+
+  # Regression test for lib/mkHarness.nix's isDirectFileGate predicate (issue
+  # #2595 review finding A): directFileFragmentRows and
+  # readOnlyReachableFragmentRows' exclusion list used to spell "is this a
+  # FILER_FILE_DIRECT*-gated row" two different ways -- a hasInfix substring
+  # check there, three hand-typed gate-name equality checks here -- so a
+  # future FILER_FILE_DIRECT_GITLAB (or similar) gate added only to
+  # lib/fragments.nix would be picked up by the former but silently miss the
+  # latter. Builds a real harness with a synthetic FILER_FILE_DIRECT_GITLAB
+  # row appended to the real fragment registry and reads back
+  # `internals.directFileFragmentRows`/`internals.readOnlyReachableFragmentRows`
+  # (the harness' own computed values, not a reimplementation of the
+  # predicate) so a future re-drift in lib/mkHarness.nix itself is caught
+  # here, not just in a parallel copy of the logic. The synthetic row points
+  # at skill-preamble.md (inert content, no forbiddenMarkers substring)
+  # rather than a real filer-file-direct*.md fragment, so a leak is caught
+  # by this check's own assertion instead of surfacing indirectly as an
+  # unrelated-looking forbiddenMarkerCheckOk build failure. Against the
+  # pre-fix two-spellings code this went red: the equality-list spelling in
+  # readOnlyReachableFragmentRows did not know the string
+  # "FILER_FILE_DIRECT_GITLAB", so the synthetic row stayed in
+  # readOnlyReachableFragmentRows instead of being excluded.
+  mkharness-read-only-reachable-fragment-rows-excludes-hypothetical-direct-file-gate =
+    let
+      inherit (pkgs.lib) assertMsg;
+      syntheticGate = "FILER_FILE_DIRECT_GITLAB";
+      syntheticRow = {
+        gate = syntheticGate;
+        fragment = "skill-preamble.md";
+        var = "FILER_FILE_DIRECT_GITLAB_STEP";
+      };
+      testHarness = import ../../lib/mkHarness.nix {
+        inherit nixpkgs system;
+        packages = p: [ p.hello ];
+        fragments = (import ../../lib/fragments.nix) ++ [ syntheticRow ];
+      };
+      directRows = testHarness.internals.directFileFragmentRows;
+      readOnlyReachableRows = testHarness.internals.readOnlyReachableFragmentRows;
+      leakedIntoReadOnlyReachable = builtins.filter (
+        row: row.gate == syntheticGate
+      ) readOnlyReachableRows;
+    in
+    assert assertMsg (builtins.any (row: row.gate == syntheticGate) directRows)
+      "directFileFragmentRows must pick up a synthetic ${syntheticGate}-gated row via the shared hasInfix \"FILER_FILE_DIRECT\" predicate -- fixture is broken";
+    assert assertMsg (leakedIntoReadOnlyReachable == [ ])
+      "readOnlyReachableFragmentRows must exclude a synthetic ${syntheticGate}-gated row the same way it excludes FILER_FILE_DIRECT_GH/_FORGEJO/_ANY (lib/mkHarness.nix's isDirectFileGate predicate), but it leaked through";
+    pkgs.runCommand "mkharness-read-only-reachable-fragment-rows-excludes-hypothetical-direct-file-gate"
+      { }
+      "touch $out";
+
+  # Anti-drift check for lib/mkHarness.nix's researchPromptContentByName
+  # (issue #2595 review finding B): that map hand-keys exactly the research
+  # prompt names its build-time direct-file scan (researchDirectFileViolations)
+  # covers -- a future third templates/default/prompts/research*-prompt.md
+  # template would silently miss the scan unless someone also adds a row to
+  # researchPromptContentByName. Reads the real, on-disk prompt directory
+  # (not a hand-typed second copy of the file list) and compares it against
+  # `internals.researchPromptContentByName`'s own keys (the harness' real
+  # computed value, not a reimplementation), so this fails loudly the moment
+  # the two disagree in either direction.
+  mkharness-research-prompt-content-by-name-covers-every-research-prompt-file =
+    let
+      inherit (pkgs.lib)
+        assertMsg
+        concatStringsSep
+        filterAttrs
+        hasPrefix
+        hasSuffix
+        ;
+      promptsDir = ../../templates/default/prompts;
+      dirEntries = builtins.readDir promptsDir;
+      onDiskResearchPromptFiles = builtins.attrNames (
+        filterAttrs (
+          name: type: type == "regular" && hasPrefix "research" name && hasSuffix "-prompt.md" name
+        ) dirEntries
+      );
+      coveredNames = builtins.attrNames harness.internals.researchPromptContentByName;
+      sort = builtins.sort (a: b: a < b);
+    in
+    assert assertMsg (onDiskResearchPromptFiles != [ ])
+      "mkharness-research-prompt-content-by-name-covers-every-research-prompt-file: expected at least one research*-prompt.md file under templates/default/prompts/, got none -- fixture is vacuous";
+    assert assertMsg (sort coveredNames == sort onDiskResearchPromptFiles)
+      "lib/mkHarness.nix's researchPromptContentByName must cover exactly every research*-prompt.md file under templates/default/prompts/ (issue #2595 review finding B); on disk: [${concatStringsSep ", " (sort onDiskResearchPromptFiles)}], covered: [${concatStringsSep ", " (sort coveredNames)}]";
+    pkgs.runCommand "mkharness-research-prompt-content-by-name-covers-every-research-prompt-file" { }
+      "touch $out";
 }

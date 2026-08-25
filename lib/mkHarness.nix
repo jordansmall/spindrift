@@ -642,6 +642,17 @@ let
     };
   };
 
+  # Single spelling of "is this a FILER_FILE_DIRECT*-gated row" (issue #2595
+  # review finding A): shared by readOnlyReachableFragmentRows' exclusion
+  # list below and directFileFragmentRows further down, which used to spell
+  # this two different ways -- three gate-name equality checks here, one
+  # hasInfix substring check there -- so a future FILER_FILE_DIRECT_GITLAB
+  # (or similar) gate added only to lib/fragments.nix would be picked up by
+  # the hasInfix spelling but silently miss the hand-typed equality list,
+  # wrongly staying inside the forbidden-marker scan it's meant to be
+  # exempted from.
+  isDirectFileGate = row: lib.hasInfix "FILER_FILE_DIRECT" row.gate;
+
   # Structural forbidden-marker check (issue #2510, parent #2498 campaign R):
   # the fragment rows the fragment-body scan actually reaches -- every
   # fragments.nix row EXCEPT the ones whose `gate` name itself already
@@ -660,9 +671,7 @@ let
       || lib.hasInfix "READWRITE" row.gate
       || lib.hasInfix "READ_WRITE" row.gate
       || lib.hasInfix "_RW_" row.gate
-      || row.gate == "FILER_FILE_DIRECT_GH"
-      || row.gate == "FILER_FILE_DIRECT_FORGEJO"
-      || row.gate == "FILER_FILE_DIRECT_ANY"
+      || isDirectFileGate row
     )
   ) fragments;
 
@@ -701,6 +710,44 @@ let
         lib.concatMapStringsSep "\n" (
           v: "  ${v.file}: contains forbidden marker '${v.marker}' (${v.id})"
         ) forbiddenMarkerViolations
+      }";
+
+  # The FILER_FILE_DIRECT*-gated fragment rows (issue #2595, ADR 0041: "Research
+  # filing is host-mediated and relay-only"): the ones whose fragment tells
+  # the agent to run `gh issue create`/`fj issue create`/`gh label create`
+  # directly, never rendered into a research prompt by design (see
+  # lib/fragments.nix's own doc comment on its research-file-issues-relay.md
+  # row for why).
+  directFileFragmentRows = builtins.filter isDirectFileGate fragments;
+
+  # The research prompts actually scanned for a direct-file placeholder
+  # (issue #2595 review finding B): a hand-typed name -> rendered-content map,
+  # not derived from a directory listing, so a future third
+  # templates/default/prompts/research*-prompt.md template would silently
+  # miss this scan unless someone also adds a row here. Named so
+  # nix/checks/prompts.nix can read it back through `internals` below and
+  # assert its keys still cover every research*-prompt.md file actually on
+  # disk, instead of re-typing this same two-name list a second time.
+  researchPromptContentByName = {
+    "research-prompt.md" = researchPromptRendered;
+    "research-self-contained-prompt.md" = researchSelfContainedPromptRendered;
+  };
+
+  researchDirectFileViolations = promptContract.buildTimeResearchDirectFileViolations {
+    inherit directFileFragmentRows researchPromptContentByName;
+  };
+
+  # Forces researchDirectFileViolations' evaluation the same way
+  # forbiddenMarkerCheckOk forces forbiddenMarkerViolations above -- consumed
+  # by `assert researchDirectFileCheckOk;` ahead of the returned attrset.
+  researchDirectFileCheckOk =
+    if researchDirectFileViolations == [ ] then
+      true
+    else
+      throw "mkHarness: a research prompt must never render a direct-file filing fragment (ADR 0041, docs/adr/0041-research-filing-is-host-mediated-and-relay-only.md: research filing is host-mediated and relay-only) -- issues are filed via the SPINDRIFT_ISSUE_INTENT relay, never gh/fj directly, in a research dispatch:\n${
+        lib.concatMapStringsSep "\n" (
+          v: "  ${v.promptName}: references direct-file fragment '${v.fragment}' via \${${v.var}}"
+        ) researchDirectFileViolations
       }";
 
   # Version sourced from the release-please manifest so mkHarness always tracks
@@ -1563,6 +1610,7 @@ if unknownDefaultKeys != [ ] then
 else
   assert buildTimeRejectOk;
   assert forbiddenMarkerCheckOk;
+  assert researchDirectFileCheckOk;
   assert repoSlugCoherenceOk;
   assert choicesCheckOk;
   assert networkModeCoherenceOk;
@@ -1618,6 +1666,20 @@ else
       # (issue #2677 review fix) -- a comparison derivation there needs
       # this exact fileset value, not just the realized store path.
       inherit launcherCurrencyFileset;
+
+      # Exposed for nix/checks/prompts.nix's eval-level introspection (issue
+      # #2595 review findings A and B): directFileFragmentRows/
+      # readOnlyReachableFragmentRows let a check prove the two lists agree
+      # on every FILER_FILE_DIRECT*-gated row (finding A) against a real
+      # mkHarness build's own computed values, rather than a reimplementation
+      # of the predicate that could itself drift from this file;
+      # researchPromptContentByName lets a check prove its keys still cover
+      # every research*-prompt.md file on disk (finding B).
+      inherit
+        directFileFragmentRows
+        readOnlyReachableFragmentRows
+        researchPromptContentByName
+        ;
     };
 
     packages = {

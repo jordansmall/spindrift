@@ -1639,6 +1639,9 @@ in
         "buildInputDocumentFile"
         "roster"
         "launcherCurrencyFileset"
+        "directFileFragmentRows"
+        "readOnlyReachableFragmentRows"
+        "researchPromptContentByName"
       ];
       byName = a: b: a < b;
       actual = builtins.attrNames harness.internals;
