@@ -14,6 +14,18 @@ import (
 	"spindrift.dev/launcher/internal/retry"
 )
 
+// TestDecodeErrorZeroValueDoesNotPanic covers constructing a DecodeError
+// directly (its own doc comment recommends errors.As(err, &DecodeError{}),
+// which zero-initializes the struct before As populates it) -- Error must
+// not dereference a nil Err and panic, even transiently during that
+// construction.
+func TestDecodeErrorZeroValueDoesNotPanic(t *testing.T) {
+	var de DecodeError
+	if got := de.Error(); got == "" {
+		t.Fatalf("DecodeError{}.Error() = %q, want a non-empty message", got)
+	}
+}
+
 // TestDoDecodesJSONResponse covers the success path where the server returns
 // a 2xx with a JSON body that Do decodes into the caller's out.
 func TestDoDecodesJSONResponse(t *testing.T) {
@@ -34,6 +46,32 @@ func TestDoDecodesJSONResponse(t *testing.T) {
 	}
 	if out.Name != "widget" {
 		t.Fatalf("out.Name = %q, want %q", out.Name, "widget")
+	}
+}
+
+// TestDoChainsDecodeErrorOnMalformedJSON covers a 2xx response whose body is
+// not valid JSON: Do must return a non-nil error chaining a DecodeError,
+// recoverable via errors.As, distinct from a network-level or non-2xx-status
+// failure.
+func TestDoChainsDecodeErrorOnMalformedJSON(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("not json"))
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, nil, "testbackend", nil, nil)
+
+	var out struct {
+		Name string `json:"name"`
+	}
+	err := c.Do(http.MethodGet, "/widgets/1", nil, &out)
+	if err == nil {
+		t.Fatal("Do returned nil error, want a decode error for a malformed JSON body")
+	}
+	var decodeErr DecodeError
+	if !errors.As(err, &decodeErr) {
+		t.Fatalf("Do error = %v, want errors.As match against DecodeError", err)
 	}
 }
 
