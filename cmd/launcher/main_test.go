@@ -4463,9 +4463,21 @@ func parseLegacySettingsSectionNames(t *testing.T) []string {
 		t.Fatalf("read lib/legacy-settings-section.nix: %v", err)
 	}
 
+	return parseLegacySettingsSectionNamesContent(t, string(content))
+}
+
+// parseLegacySettingsSectionNamesContent is parseLegacySettingsSectionNames'
+// content-parsing core, split out so tests can exercise it directly against
+// synthetic content (e.g. to prove it ignores Nix line comments) without
+// round-tripping through the real lib/legacy-settings-section.nix file.
+func parseLegacySettingsSectionNamesContent(t fataler, content string) []string {
+	t.Helper()
+
+	content = stripNixLineComments(content)
+
 	rowRe := regexp.MustCompile(`\w+\s*=\s*"([^"]+)";`)
 	seen := map[string]bool{}
-	for _, match := range rowRe.FindAllStringSubmatch(string(content), -1) {
+	for _, match := range rowRe.FindAllStringSubmatch(content, -1) {
 		seen[match[1]] = true
 	}
 	if len(seen) == 0 {
@@ -4503,6 +4515,26 @@ func TestParseLegacySettingsSectionNames_MatchesKnownSet(t *testing.T) {
 
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("parseLegacySettingsSectionNames() = %v, want %v", got, want)
+	}
+}
+
+// TestParseLegacySettingsSectionNamesContent_IgnoresNixComments guards
+// against the regex matching inside Nix line comments: a `#`-prefixed
+// comment line that merely looks like a real `knob = "section";` row (e.g.
+// "# historical note: phantomKnob = \"phantomSection\";") must never
+// contribute a phantom section name to the parsed set.
+func TestParseLegacySettingsSectionNamesContent_IgnoresNixComments(t *testing.T) {
+	const synthetic = `{
+  # historical note: phantomKnob = "phantomSection";
+  repoSlug = "repository";
+}
+`
+
+	got := parseLegacySettingsSectionNamesContent(t, synthetic)
+	want := []string{"repository"}
+
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("parseLegacySettingsSectionNamesContent(t, synthetic) = %v, want %v (a '#'-comment row must not be picked up as a real section name)", got, want)
 	}
 }
 
@@ -4900,6 +4932,265 @@ func TestFlatShimGeneralizedMarkers_ExcludesDeliberateCollisions(t *testing.T) {
 		if !found {
 			t.Errorf("deliberate collision %q no longer appears bare in README.md or docs/ — the carve-out may no longer be justified; if so, move it into flatShimGeneralizedMarkers and update wantCollisions in this test to match", collision)
 		}
+	}
+}
+
+// parseStructuralPaths reads lib/structural-paths.nix and returns the full
+// map of flat structural knob name to its ordered domain-tree path segments
+// (e.g. "driver" -> ["agents", "driver"]). Test-only: production code never
+// parses this file directly (lib/flakeModule.nix and
+// nix/checks/schema-drift.nix consume it as Nix data), so this helper has no
+// non-test counterpart. Mirrors parseLegacySettingsSectionNames above in
+// shape and style.
+func parseStructuralPaths(t *testing.T) map[string][]string {
+	t.Helper()
+
+	content, err := os.ReadFile(filepath.Join("..", "..", "lib", "structural-paths.nix"))
+	if err != nil {
+		t.Fatalf("read lib/structural-paths.nix: %v", err)
+	}
+
+	return parseStructuralPathsContent(t, string(content))
+}
+
+// fataler is the minimal slice of *testing.T's failure-reporting surface
+// parseLegacySettingsSectionNamesContent and parseStructuralPathsContent
+// need. Accepting this interface instead of the concrete *testing.T lets a
+// test substitute a fake that records a Fatalf call instead of tearing down
+// the calling goroutine via runtime.Goexit -- necessary to assert "did it
+// fail cleanly" from the very test goroutine making that assertion.
+type fataler interface {
+	Helper()
+	Fatalf(format string, args ...any)
+}
+
+// stripNixLineComments strips Nix line comments (an unescaped '#' to end of
+// line) from content before regex-matching, so a commented-out row that
+// merely looks like a real data row (e.g. `# historical note: repoSlug =
+// "sandbox";`) is never picked up as one. Sufficient for the flat, plain
+// attrset fixture files this package parses (lib/legacy-settings-section.nix,
+// lib/structural-paths.nix), which contain no string literals with '#' in
+// them; deliberately not a general Nix tokenizer.
+func stripNixLineComments(content string) string {
+	lines := strings.Split(content, "\n")
+	for i, line := range lines {
+		if idx := strings.Index(line, "#"); idx != -1 {
+			lines[i] = line[:idx]
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+// parseStructuralPathsContent is parseStructuralPaths' content-parsing core,
+// split out so tests can exercise it directly against synthetic content
+// (e.g. to prove it handles comment lines and empty segment lists correctly)
+// without round-tripping through the real lib/structural-paths.nix file.
+func parseStructuralPathsContent(t fataler, content string) map[string][]string {
+	t.Helper()
+
+	content = stripNixLineComments(content)
+
+	entryRe := regexp.MustCompile(`(\w+)\s*=\s*\[([^\]]*)\]`)
+	segmentRe := regexp.MustCompile(`"([^"]+)"`)
+
+	paths := map[string][]string{}
+	for _, entry := range entryRe.FindAllStringSubmatch(content, -1) {
+		name := entry[1]
+		var segments []string
+		for _, segment := range segmentRe.FindAllStringSubmatch(entry[2], -1) {
+			segments = append(segments, segment[1])
+		}
+		if len(segments) == 0 {
+			t.Fatalf("lib/structural-paths.nix entry %q has no segments; regex out of sync with file format?", name)
+		}
+		paths[name] = segments
+	}
+	if len(paths) == 0 {
+		t.Fatalf("parsed zero entries from lib/structural-paths.nix; regex out of sync with file format?")
+	}
+
+	return paths
+}
+
+// fatalRecorder is a fake fataler that records whether Fatalf was called
+// instead of tearing down the calling goroutine, so a test can observe "did
+// the code under test fail cleanly" from its own goroutine.
+type fatalRecorder struct {
+	called  bool
+	message string
+}
+
+func (r *fatalRecorder) Helper() {}
+
+func (r *fatalRecorder) Fatalf(format string, args ...any) {
+	r.called = true
+	r.message = fmt.Sprintf(format, args...)
+}
+
+// TestParseStructuralPathsContent_EmptySegmentListFailsCleanly guards against
+// a silent slice-bounds panic: if lib/structural-paths.nix ever contains an
+// entry whose list has no string segments (e.g. "emptyThing = [ ];"),
+// parseStructuralPathsContent must fail cleanly via Fatalf, naming the
+// offending entry, rather than silently storing an empty segments slice for
+// TestFlatShimGeneralizedMarkers_MatchesStructuralPaths's
+// `segments[len(segments)-1]` lookup to panic on later.
+func TestParseStructuralPathsContent_EmptySegmentListFailsCleanly(t *testing.T) {
+	const synthetic = `{
+  emptyThing = [ ];
+  driver = [
+    "agents"
+    "driver"
+  ];
+}
+`
+
+	rec := &fatalRecorder{}
+	var panicked any
+	var paths map[string][]string
+	func() {
+		defer func() { panicked = recover() }()
+		paths = parseStructuralPathsContent(rec, synthetic)
+	}()
+
+	if panicked != nil {
+		t.Fatalf("parseStructuralPathsContent panicked instead of failing cleanly via Fatalf: %v", panicked)
+	}
+	if rec.called {
+		if !strings.Contains(rec.message, "emptyThing") {
+			t.Errorf("parseStructuralPathsContent's Fatalf message = %q, want it to name the offending entry %q", rec.message, "emptyThing")
+		}
+		return
+	}
+
+	// Pre-fix, parseStructuralPathsContent never calls Fatalf and silently
+	// stores an empty segments slice for "emptyThing"; replicate the exact
+	// downstream indexing TestFlatShimGeneralizedMarkers_MatchesStructuralPaths
+	// performs on the result, which is what actually panics, so this failure
+	// reproduces the real bug precisely rather than merely asserting "Fatalf
+	// was never called".
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				t.Fatalf("parseStructuralPathsContent silently stored an empty segments slice for an entry, which panics downstream consumers (e.g. TestFlatShimGeneralizedMarkers_MatchesStructuralPaths) instead of failing cleanly: %v", r)
+			}
+		}()
+		for name, segments := range paths {
+			_ = segments[len(segments)-1] != name
+		}
+	}()
+	t.Fatalf("parseStructuralPathsContent(rec, synthetic) with an empty-segment entry neither called Fatalf nor panicked; want a clean failure naming the offending entry")
+}
+
+// TestParseStructuralPathsContent_IgnoresNixComments guards against the
+// regex matching inside Nix line comments: a `#`-prefixed comment line that
+// merely looks like a real `name = [ ... ];` row (e.g. "# historical note:
+// phantomThing = [ \"phantom\" ];") must never contribute a phantom entry to
+// the parsed map.
+func TestParseStructuralPathsContent_IgnoresNixComments(t *testing.T) {
+	const synthetic = `{
+  # historical note: phantomThing = [ "phantom" ];
+  driver = [
+    "agents"
+    "driver"
+  ];
+}
+`
+
+	got := parseStructuralPathsContent(t, synthetic)
+	want := map[string][]string{
+		"driver": {"agents", "driver"},
+	}
+
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("parseStructuralPathsContent(t, synthetic) = %v, want %v (a '#'-comment row must not be picked up as a real entry)", got, want)
+	}
+}
+
+// TestParseStructuralPaths_MatchesKnownSet pins the exact name -> segment-list
+// map lib/structural-paths.nix currently declares. This is a canary for
+// parseStructuralPaths itself (proves the regex parses the real file
+// correctly); TestFlatShimGeneralizedMarkers_MatchesStructuralPaths below is
+// the actual drift guard for flatShimGeneralizedMarkers.
+func TestParseStructuralPaths_MatchesKnownSet(t *testing.T) {
+	got := parseStructuralPaths(t)
+
+	want := map[string][]string{
+		"driver":           {"agents", "driver"},
+		"prompt":           {"agents", "prompt"},
+		"skills":           {"agents", "skills"},
+		"roster":           {"agents", "models", "roster"},
+		"runtime":          {"infra", "runtime"},
+		"packages":         {"infra", "image", "packages"},
+		"prefetch":         {"infra", "image", "prefetch"},
+		"extraClosures":    {"infra", "image", "extraClosures"},
+		"nixInBox":         {"infra", "nix", "inBox"},
+		"nixStoreWritable": {"infra", "nix", "storeWritable"},
+		"nixpkgs":          {"infra", "nixpkgs"},
+		"overlays":         {"infra", "overlays"},
+		"config":           {"infra", "config"},
+	}
+
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("parseStructuralPaths() = %v, want %v", got, want)
+	}
+}
+
+// TestFlatShimGeneralizedMarkers_MatchesStructuralPaths is the drift guard
+// for flatShimGeneralizedMarkers' canonicalPrefix values: for every entry in
+// lib/structural-paths.nix that isn't in flatShimDeliberateCollisions (see
+// the doc comment on flatShimGeneralizedMarkers for why those three are
+// excluded — that carve-out is enforced separately by
+// TestFlatShimGeneralizedMarkers_ExcludesDeliberateCollisions, not here), it
+// derives the expected canonicalPrefix as the entry's segments minus their
+// final (leaf) element, joined by "." with a trailing "." — the flat name
+// itself stands in for that final segment when findDeprecatedDocSpellings
+// checks for the canonical "<canonicalPrefix><name> = " form — and asserts
+// flatShimGeneralizedMarkers contains exactly that (name, canonicalPrefix)
+// pair — no more, no fewer. Maintenance strategy going forward: if
+// lib/structural-paths.nix ever gains, loses, or renames an entry, this test
+// fails until flatShimGeneralizedMarkers is hand-updated to match, so the
+// two can't silently drift apart.
+//
+// The general rule this derivation applies: canonicalPrefix can only be
+// derived as "segments-minus-leaf, dotted" when the entry's flat name is
+// itself the leaf (final) segment — that's what lets the flat name stand in
+// for the leaf when reconstructing the canonical dotted form. Whenever
+// lib/structural-paths.nix renames the leaf segment away from the flat name,
+// the flat name is never even a suffix of its canonical dotted form in the
+// first place, so no derived prefix could ever be correct, and the expected
+// canonicalPrefix must be "" instead. nixInBox and nixStoreWritable are the
+// two current instances of this (leaf segments inBox, storeWritable — not
+// nixInBox, nixStoreWritable), but the check below is keyed on the general
+// leaf-segment-equals-flat-name condition, not on those two literal names,
+// so it stays correct if lib/structural-paths.nix ever gains another
+// renamed-leaf entry.
+func TestFlatShimGeneralizedMarkers_MatchesStructuralPaths(t *testing.T) {
+	structuralPaths := parseStructuralPaths(t)
+
+	collisions := map[string]bool{}
+	for _, name := range flatShimDeliberateCollisions {
+		collisions[name] = true
+	}
+
+	want := map[string]string{}
+	for name, segments := range structuralPaths {
+		if collisions[name] {
+			continue
+		}
+		if segments[len(segments)-1] != name {
+			want[name] = ""
+			continue
+		}
+		want[name] = strings.Join(segments[:len(segments)-1], ".") + "."
+	}
+
+	got := map[string]string{}
+	for _, shim := range flatShimGeneralizedMarkers {
+		got[shim.name] = shim.canonicalPrefix
+	}
+
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("flatShimGeneralizedMarkers (name -> canonicalPrefix) = %v, want %v (derived from lib/structural-paths.nix, excluding flatShimDeliberateCollisions)", got, want)
 	}
 }
 
