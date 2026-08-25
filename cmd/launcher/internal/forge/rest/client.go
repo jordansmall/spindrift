@@ -76,6 +76,34 @@ func (e StatusError) Error() string {
 	return fmt.Sprintf("status %d", e.Status)
 }
 
+// DecodeError marks a failure to decode a 2xx response body as the expected
+// JSON shape, distinct from a network-level failure (the request never got a
+// response) or a non-2xx-status failure (StatusError). Do chains one into
+// the decode-failure error it returns via %w, letting a caller recover it
+// with errors.As(err, &DecodeError{}) instead of matching the error message.
+type DecodeError struct {
+	Err error
+}
+
+// Error delegates to the wrapped decode error, so DecodeError is transparent
+// in an error message: adding it around an existing error does not change
+// what Error() renders. A zero-value DecodeError (e.g. the target of
+// errors.As(err, &DecodeError{}) before As populates it) has a nil Err;
+// Error reports a static placeholder instead of dereferencing it.
+func (e DecodeError) Error() string {
+	if e.Err == nil {
+		return "decode error"
+	}
+	return e.Err.Error()
+}
+
+// Unwrap exposes the wrapped decode error, so errors.Is/errors.As continue
+// to see through DecodeError to the original error (e.g. a
+// *json.SyntaxError).
+func (e DecodeError) Unwrap() error {
+	return e.Err
+}
+
 // Client is a generic REST client for a single forge backend. Construct one
 // with New; issue requests with Do.
 type Client struct {
@@ -165,7 +193,7 @@ func (c *Client) Do(method, path string, body, out any) error {
 			if out != nil {
 				if err := json.NewDecoder(resp.Body).Decode(out); err != nil && err != io.EOF {
 					resp.Body.Close()
-					return fmt.Errorf("%s: decode response from %s %s: %w", c.backend, method, path, err)
+					return fmt.Errorf("%s: decode response from %s %s: %w", c.backend, method, path, DecodeError{Err: err})
 				}
 			}
 			resp.Body.Close()
