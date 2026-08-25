@@ -29,16 +29,21 @@
 #   exit 0 — dispatched work; loop continues after rebuilding from updated tree.
 #   exit 2 — queue empty (no open issues with the dispatch label); loop exits.
 #   exit 3 — open issues exist but none are dispatchable. The freshness probe
-#             only tracks the box image, so a host-side-only launcher fix
-#             (e.g. to the blocker parser) never trips exit 4 and this loop
-#             would otherwise stay blind to it for the life of the run. So
-#             exit 3 pulls too: if the pull advances HEAD, rebuild and retry
-#             once, the same as exit 4; if HEAD doesn't move, the block is
-#             genuine and the loop stops for human triage (typically a failed
-#             blocker needing re-label).
-#   exit 4 — CONTINUOUS_DISPATCH mode: the image-freshness probe found the
-#             loaded image stale; in-flight Boxes finished, no new ones
-#             launched. Loop pulls, rebuilds, and re-invokes, like exit 0.
+#             now tracks the loaded host launcher too (its store hash against
+#             the flake's launcher-currency attr), alongside the image, so
+#             most host-side-only launcher fixes (e.g. to the blocker parser)
+#             already trip exit 4 on their own. Exit 3 still pulls anyway as a
+#             backstop for whatever isn't covered by either freshness
+#             dimension (e.g. a dispatchability change that's just a label
+#             flip on the tracker, not a code change at all): if the pull
+#             advances HEAD, rebuild and retry once, the same as exit 4; if
+#             HEAD doesn't move, the block is genuine and the loop stops for
+#             human triage (typically a failed blocker needing re-label).
+#   exit 4 — CONTINUOUS_DISPATCH mode: the freshness probe found the loaded
+#             image stale, the loaded host launcher stale relative to the
+#             flake's launcher-currency attr, or both; in-flight Boxes
+#             finished, no new ones launched. Loop pulls, rebuilds, and
+#             re-invokes, like exit 0.
 set -euo pipefail
 
 cd "$(dirname "$0")"
