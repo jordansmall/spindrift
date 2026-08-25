@@ -210,7 +210,10 @@ under the pre-1.0 policy this Pass-1 change is a **MINOR** bump.
   `defaults` map to `mkHarness`.
 - `nix/checks/schema-drift.nix` gains a check that every `flakeOption` knob has
   a `nixPath` and that the paths are exhaustive and disjoint, so a knob can
-  never silently fall off the surface or land in two places.
+  never silently fall off the surface or land in two places. Coverage later
+  grew to fold in the structural domain-tree paths (issue #2184) and the
+  byName domain-tree path (issue #2731) into the same `allNixPaths` binding;
+  any future path source must splice into that binding too to stay covered.
 - The Nix surface and `--help` intentionally disagree between Pass 1 and Pass 2.
   Documentation for the window notes the mapping; the disagreement is designed,
   not drift, and the drift checks are scoped so they do not flag it.

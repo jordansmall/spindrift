@@ -193,7 +193,30 @@ let
     schema;
 
   structuralPaths = import ../../lib/structural-paths.nix;
+  byNamePaths = import ../../lib/byname-paths.nix;
   resolveNixPath = import ../../lib/nixpath.nix;
+  # Renders every segment-list value of a structural/byName paths attrset
+  # (e.g. lib/structural-paths.nix, lib/byname-paths.nix) as its dotted
+  # string form. Shared so allNixPaths below doesn't eta-expand the same
+  # `map (segs: concatStringsSep "." segs)` twice, once per source.
+  dotted = attrs: map (pkgs.lib.concatStringsSep ".") (pkgs.lib.attrValues attrs);
+
+  # Single real combined nixPath set (issue #2731 review finding): computed
+  # once here instead of separately inside flake-nixpath-exhaustive-disjoint
+  # and each collision guard below, so a regression in this fold-in (e.g.
+  # dropping the byNamePaths splice) is visible to every consumer instead of
+  # staying invisible to a guard that silently recomputes its own copy.
+  allNixPaths =
+    let
+      inherit (pkgs.lib)
+        attrNames
+        filter
+        ;
+      flakeOptionNames = filter (n: schema.${n}.flakeOption or false) (attrNames schema);
+    in
+    (map (n: resolveNixPath n schema.${n}) flakeOptionNames)
+    ++ (dotted structuralPaths)
+    ++ (dotted byNamePaths);
 
   # Frozen ground truth (issue #2522 review finding), factored into
   # lib/pre-freeze-flake-options.nix (mirroring lib/legacy-settings-section.nix
@@ -310,6 +333,23 @@ let
         concatStringsSep ", " (map (p: "${p.a} vs ${p.b}") issues.collidingPairs)
       }";
     nixPaths;
+
+  # Shared by the two nixPath collision guards below: injects a synthetic
+  # path nesting under `leaf` into the real combined allNixPaths set, runs
+  # it through assertNixPathsOk (the exact function the real
+  # flake-nixpath-exhaustive-disjoint check calls) via tryEval, and asserts
+  # that eval failed — i.e. the synthetic collision was actually rejected,
+  # not silently accepted.
+  mkNixPathCollisionGuard =
+    { name, leaf }:
+    let
+      inherit (pkgs.lib) assertMsg;
+      badPaths = allNixPaths ++ [ "${leaf}.injected" ];
+      result = builtins.tryEval (assertNixPathsOk badPaths);
+    in
+    assert assertMsg (!result.success)
+      "${name}: expected assertNixPathsOk to reject a synthetic path nesting under the leaf ${leaf}, but it evaluated successfully";
+    pkgs.runCommand name { } "touch $out";
 
   # Isolates the "#### Subagent roster" section of a docs/reference.md-shaped
   # doc string, else throws. Shared by assertRosterDocFlakePathOk and
@@ -2029,15 +2069,13 @@ in
       inherit (pkgs.lib)
         assertMsg
         attrNames
-        attrValues
         filter
         concatStringsSep
         ;
-      # Fold the structural domain-tree paths into the same disjointness set:
-      # both flakeOption leaves and structural leaves are merged into one tree
-      # by buildTree at flake eval (lib/flakeModule.nix), so a cross-set prefix
-      # collision is just as fatal — catch it here as a clear error instead of
-      # an opaque buildTree throw (issue #2184).
+      # Every flakeOption knob, used below to check each one declares a
+      # usable `group` (missingGroup). The cross-set disjointness fold
+      # (flakeOption leaves + structural leaves, checked via assertNixPathsOk
+      # below) now lives in the shared allNixPaths binding above, not here.
       flakeOptionNames = filter (n: schema.${n}.flakeOption or false) (attrNames schema);
       missingGroup = filter (
         n:
@@ -2046,9 +2084,6 @@ in
         in
         !(e ? group) || !builtins.isString e.group || e.group == ""
       ) flakeOptionNames;
-      allNixPaths =
-        (map (n: resolveNixPath n schema.${n}) flakeOptionNames)
-        ++ (map (segs: concatStringsSep "." segs) (attrValues structuralPaths));
     in
     assert assertMsg (missingGroup == [ ])
       "lib/env-schema.nix: every flakeOption knob must declare a non-empty group (ADR 0037 Pass 2): ${concatStringsSep ", " missingGroup}";
@@ -2693,32 +2728,27 @@ in
   # cover the structural domain-tree paths too, not just the flakeOption
   # nixPaths — a future structural-vs-flakeOption prefix collision otherwise
   # slips past this check and surfaces as an opaque buildTree throw at flake
+  # eval. "agents.driver" is a real structural leaf; a knob landing under it
+  # would collide — exactly the latent cross-set failure this guards.
+  flake-nixpath-disjointness-collision-guard = mkNixPathCollisionGuard {
+    name = "flake-nixpath-disjointness-collision-guard";
+    leaf = "agents.driver";
+  };
+
+  # Regression guard (issue #2731): the disjointness assertion must cover the
+  # byNameTreeEntries domain path too, not just the flakeOption nixPaths and
+  # structural paths — a future collision under the byName leaf otherwise
+  # slips past this check and surfaces as an opaque buildTree throw at flake
   # eval. Runs assertNixPathsOk — the exact function the real check calls —
-  # against the real combined path set with one synthetic path injected that
-  # nests under the structural leaf `agents.driver`, via tryEval, so it fails
-  # if assertNixPathsOk ever stops folding in / rejecting a structural
-  # collision.
-  flake-nixpath-disjointness-collision-guard =
-    let
-      inherit (pkgs.lib)
-        assertMsg
-        attrNames
-        attrValues
-        filter
-        concatStringsSep
-        ;
-      flakeOptionNames = filter (n: schema.${n}.flakeOption or false) (attrNames schema);
-      realNixPaths =
-        (map (n: resolveNixPath n schema.${n}) flakeOptionNames)
-        ++ (map (segs: concatStringsSep "." segs) (attrValues structuralPaths));
-      # "agents.driver" is a real structural leaf; a knob landing under it
-      # would collide — exactly the latent cross-set failure this guards.
-      badPaths = realNixPaths ++ [ "agents.driver.injected" ];
-      result = builtins.tryEval (assertNixPathsOk badPaths);
-    in
-    assert assertMsg (!result.success)
-      "flake-nixpath-disjointness-collision-guard: expected assertNixPathsOk to reject a synthetic path nesting under the structural leaf agents.driver, but it evaluated successfully";
-    pkgs.runCommand "flake-nixpath-disjointness-collision-guard" { } "touch $out";
+  # against the real combined path set (flakeOptionNames ++ structuralPaths
+  # ++ byNamePaths) with one synthetic path injected that nests under the
+  # byName leaf `agents.models.byName`, via tryEval, so it fails if either
+  # allNixPaths ever stops folding in the byName paths, or assertNixPathsOk
+  # ever stops rejecting a byName collision.
+  flake-nixpath-byname-collision-guard = mkNixPathCollisionGuard {
+    name = "flake-nixpath-byname-collision-guard";
+    leaf = "agents.models.byName";
+  };
 
   # lib/env-schema.nix's intKind/hostConfig/hostDerived markers (issue #2363)
   # must stay internally consistent: every int-typed, non-secret,

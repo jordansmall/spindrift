@@ -32,6 +32,11 @@ let
   # legacy-settings-section-coverage check (issue #2522) can import it
   # standalone, the same reason structural-paths.nix was factored out.
   legacySettingsSection = import ./legacy-settings-section.nix;
+  # byName domain-tree path (single source of truth, mirroring
+  # structuralPlacements below) so nix/checks/schema-drift.nix's
+  # flake-nixpath-exhaustive-disjoint check (issue #2731) can import the
+  # same literal standalone instead of it being duplicated inline here.
+  byNamePaths = import ./byname-paths.nix;
 
   # Group flakeOptionEntries by their section attr name; the result is
   # { sectionAttr = { knobName = entry; ... }; ... }.
@@ -273,17 +278,22 @@ let
 
   # Standalone tree entry (not merged into flakeOptionTreeEntries or
   # structuralTreeEntries) since byNameOption skips both of those surfaces'
-  # legacy-migration machinery.
-  byNameTreeEntries = [
-    {
-      path = [
-        "agents"
-        "models"
-        "byName"
-      ];
-      opt = byNameOption;
-    }
-  ];
+  # legacy-migration machinery. The path segments live in lib/byname-paths.nix
+  # (byNamePaths above) rather than being hardcoded here, so
+  # nix/checks/schema-drift.nix's flake-nixpath-exhaustive-disjoint check can
+  # see them the same way structuralPlacements' paths already are (issue
+  # #2731). Asserted against byNamePaths' own key set first — a stray/unwired
+  # key would otherwise silently inflate that check's disjointness set with a
+  # path no option actually occupies.
+  byNameTreeEntries =
+    assert lib.assertMsg (lib.attrNames byNamePaths == [ "byName" ])
+      "lib/flakeModule.nix: lib/byname-paths.nix (byNamePaths) must have exactly the key set wired into byNameTreeEntries below";
+    [
+      {
+        path = byNamePaths.byName;
+        opt = byNameOption;
+      }
+    ];
 
   # Structural leaves: each structuralOptions entry, hand-placed at its new
   # domain-tree path (slice 2's placement map). Asserted against
