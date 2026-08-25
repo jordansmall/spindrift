@@ -453,18 +453,20 @@ in
         touch $out
       '';
 
-  # Eval-time guard derivations from bats-shards.nix (coverage, balance, and
-  # no-empty-shard), carried through into sourceChecks (nix/checks/
-  # default.nix) rather than left as dangling let-bindings only reachable by
-  # hand-importing the module. Each is a `touch $out` placeholder -- its
-  # actual content is the `assert` guarding it (bats-shards.nix, scoped to
-  # this one attribute's own definition so forcing it doesn't drag in the
-  # sibling guards' asserts too); merging them here means every `nix build
-  # .#checks`/`.#checks-inbox` run forces this attribute and so forces that
-  # assert, not that anything is meaningfully "built".
+  # Eval-time guard derivations from bats-shards.nix (coverage, balance,
+  # ceiling-formula safety, and no-empty-shard), carried through into
+  # sourceChecks (nix/checks/default.nix) rather than left as dangling
+  # let-bindings only reachable by hand-importing the module. Each is a
+  # `touch $out` placeholder -- its actual content is the `assert` guarding
+  # it (bats-shards.nix, scoped to this one attribute's own definition so
+  # forcing it doesn't drag in the sibling guards' asserts too); merging
+  # them here means every `nix build .#checks`/`.#checks-inbox` run forces
+  # this attribute and so forces that assert, not that anything is
+  # meaningfully "built".
   "bats-shard-partition-covers-all-suites" = batsShards."bats-shard-partition-covers-all-suites";
   "bats-shard-partition-is-balanced" = batsShards."bats-shard-partition-is-balanced";
   "bats-shard-partition-fills-every-shard" = batsShards."bats-shard-partition-fills-every-shard";
+  "bats-shard-ceiling-formula-is-safe" = batsShards."bats-shard-ceiling-formula-is-safe";
 }
 // outcomeBatsChecks
 // batsShardChecks
