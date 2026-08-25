@@ -450,6 +450,12 @@ func TestRunExitCode_ContinuousDispatch_ImageStale_ReturnsExitCode4(t *testing.T
 // run must still exit 4 (waves.ErrImageStale), not flatten into the raw
 // transient error the way a genuine startup-query failure does elsewhere.
 // No Box may ever launch.
+//
+// This is the ONLY reachable scenario where ErrImageStale masks a real
+// firstQueryErr: a genuine (non-reporting-only) first discover error can
+// never coexist with independently-detected later staleness in the same
+// run (see TestRunContinuousDispatch_GenuineFirstDiscoverErrorNeverReachesLaterStaleness
+// and the updated priority-check comment in main.go for why).
 func TestRunExitCode_ContinuousDispatch_ImageStaleOnFirstRefillWithTransientDiscoverError_ReturnsExitCode4(t *testing.T) {
 	c := baseConfig()
 	c.label = "ready-for-agent"
