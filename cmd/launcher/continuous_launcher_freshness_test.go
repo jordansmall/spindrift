@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"testing"
 
 	"spindrift.dev/launcher/internal/forge"
@@ -145,5 +146,86 @@ func TestRunContinuousDispatch_LauncherHashMatchAllowsDispatch(t *testing.T) {
 	}
 	if len(fr.RunCalls) != 1 || fr.RunCalls[0].Issue != "1" {
 		t.Fatalf("fr.RunCalls = %v, want exactly one Run call for issue #1 -- an overall-fresh verdict must not suppress dispatch", fr.RunCalls)
+	}
+}
+
+// TestRunContinuousDispatch_GenuineFirstDiscoverErrorNeverReachesLaterStaleness
+// is the regression test for the "scenario 2" masking worry raised in a
+// research comment on issue #2780: could a genuine (non-reporting-only)
+// first-ever discover() error ever coexist with staleness that's detected
+// independently later in the same run, so that runContinuousDispatch's
+// `errors.Is(err, waves.ErrImageStale)` check masks that real error behind
+// exit 4 instead of surfacing it as exit 1? This test proves that scenario
+// is structurally unreachable, not just untested -- see the priority
+// comment above that check in main.go for the full unreachability proof;
+// this doc only summarizes the setup, to avoid keeping two prose copies of
+// that proof in sync.
+//
+// The fixture makes fresh() report NOT stale (the fake outpath hash matches
+// c.imageTag's hash) and makes every discover() call fail. refill calls
+// fresh() first; since it's not stale, refill falls through to the genuine
+// discover() call, which fails here, so refill logs to stderr and returns
+// false without ever reaching the dispatch/launch code -- zero Boxes
+// launch, and RunContinuous's bootstrap never releases its mutex to a
+// second refill (see the main.go comment for why). So a genuine
+// first-discover error always ends the run (via ErrOpenNoneDispatchable,
+// since stale and dispatchedAny both stay false) before fresh() is ever
+// evaluated a second time, and the raw discover error must surface as exit
+// 1, never flattened into ErrImageStale/exit 4 or
+// ErrOpenNoneDispatchable/exit 3.
+func TestRunContinuousDispatch_GenuineFirstDiscoverErrorNeverReachesLaterStaleness(t *testing.T) {
+	const loadedImageHash = "11111111111111111111111111111111" // 32 chars
+
+	c := baseConfig()
+	c.continuousDispatch = true
+	c.maxParallel = 2 // >1, to also rule out a multi-slot bootstrap burst reaching a second refill
+	c.runtime = "podman"
+	c.baseBranch = "main"
+	c.label = "ready-for-agent"
+	c.issueTracker = "local"
+	c.codeForge = "local"
+	c.flakeImageAttr = ".#image"
+	c.imageTag = "spindrift:" + loadedImageHash
+
+	dir, _ := newStaleProbeRepo(t)
+
+	it := forge.NewFake(testDispatchLabels)
+	// Every discover() call fails -- no issue is ever reached, so SetIssue is
+	// never called.
+	it.ListIssuesErr = boxErr
+	cf := it
+
+	fr := runner.NewFake()
+	f := testFactory(t, dir, fr)
+	s := settle.NewFake()
+	lp := fakeLiveness{}
+
+	freshEval := &freshness.Fake{
+		OutPathForAttr: map[string]string{
+			// image attr trims to "image" -- outpath hash matches
+			// c.imageTag's hash exactly, so fresh() reports NOT stale on
+			// every call it's given (there should only ever be one call).
+			"image": "/nix/store/" + loadedImageHash + "-img",
+		},
+	}
+
+	realizeFake := freshness.NewRealizerFake()
+
+	err := runContinuousDispatch(c, it, cf, dir, f, s, freshEval, realizeFake, lp)
+	if !errors.Is(err, boxErr) {
+		t.Fatalf("runContinuousDispatch = %v, want the raw ListIssuesErr surfaced (errors.Is boxErr), never flattened into ErrImageStale or ErrOpenNoneDispatchable", err)
+	}
+	if got := exitCodeFor(err); got != 1 {
+		t.Fatalf("exitCodeFor(err) = %d, want 1 -- a genuine first-discover error must surface as a raw error, not exit 3 or exit 4", got)
+	}
+	// freshEval.Calls counts Eval() calls, not fresh() calls; the two match
+	// 1:1 here only because baseConfig leaves flakeLauncherAttr and
+	// loadedLauncherHash empty, so Probe's single fresh() call makes only
+	// the one image-attr Eval and skips its second, launcher-attr Eval.
+	if len(freshEval.Calls) != 1 {
+		t.Fatalf("freshEval.Calls = %d, want exactly 1 Eval call -- the bootstrap's single refill calls fresh() exactly once; a failed genuine discover aborts the run before any later refill has a chance to call fresh() again", len(freshEval.Calls))
+	}
+	if len(fr.RunCalls) != 0 {
+		t.Fatalf("fr.RunCalls = %v, want no Box launches -- a failing genuine first discover must abort before any dispatch", fr.RunCalls)
 	}
 }
