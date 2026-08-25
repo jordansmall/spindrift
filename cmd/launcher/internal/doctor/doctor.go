@@ -104,10 +104,10 @@ func RuntimeCheck(runtime string) Check {
 		Name:   RuntimeCheckName,
 		Tier:   Required,
 		Remedy: "set RUNTIME to podman, docker, rancher, or bwrap, and ensure the matching CLI is on PATH",
-		Probe: func() error {
-			return runner.ValidateRuntime(runtime)
+		Probe: func() (any, error) {
+			return nil, runner.ValidateRuntime(runtime)
 		},
-		SuccessMsg: func() string {
+		SuccessMsg: func(output any) string {
 			return fmt.Sprintf("runtime %q found on PATH", runtime)
 		},
 	}
@@ -174,59 +174,53 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, w io.Writer, stdin
 		tokenHint, slugHint = c.TokenHint, c.SlugHint
 	}
 
-	var itRepo, cfRepo string
-	recoverableCount := 0
-
 	// builtinChecks are the always-run doctor rows: issue-tracker
 	// connectivity, code-forge connectivity, branch protection, and the
-	// recoverable-issue count. Each Probe closure captures its fetched
-	// detail (repo slug or count) into the local vars above so its
-	// SuccessMsg closure can report the exact same dynamic success line the
-	// old hand-rolled fmt.Fprintf calls printed — registry-driven, so
-	// adding another built-in doctor check means adding a row here, not
-	// editing Run's control flow.
+	// recoverable-issue count. Each Probe returns its fetched detail (repo
+	// slug or count) as its Output so its SuccessMsg can report the exact
+	// same dynamic success line the old hand-rolled fmt.Fprintf calls
+	// printed — registry-driven, so adding another built-in doctor check
+	// means adding a row here, not editing Run's control flow.
 	builtinChecks := []Check{
 		{
 			Name: "issue-tracker",
 			Tier: Required,
-			Probe: func() error {
+			Probe: func() (any, error) {
 				repo, err := it.Probe()
 				if err != nil {
 					if errors.Is(err, forge.ErrAuthFailure) {
-						return fmt.Errorf("%w: forge auth check failed (check %s is set and valid): %w", ErrConnectivity, tokenHint, err)
+						return nil, fmt.Errorf("%w: forge auth check failed (check %s is set and valid): %w", ErrConnectivity, tokenHint, err)
 					}
 					if errors.Is(err, forge.ErrRepoNotFound) {
-						return fmt.Errorf("%w: forge repo not found (check %s is correct): %w", ErrConnectivity, slugHint, err)
+						return nil, fmt.Errorf("%w: forge repo not found (check %s is correct): %w", ErrConnectivity, slugHint, err)
 					}
-					return fmt.Errorf("%w: forge connectivity check failed: %w", ErrConnectivity, err)
+					return nil, fmt.Errorf("%w: forge connectivity check failed: %w", ErrConnectivity, err)
 				}
-				itRepo = repo
-				return nil
+				return repo, nil
 			},
-			SuccessMsg: func() string {
-				return fmt.Sprintf("issue tracker confirmed — %s is reachable", itRepo)
+			SuccessMsg: func(output any) string {
+				return fmt.Sprintf("issue tracker confirmed — %s is reachable", output.(string))
 			},
 		},
 		{
 			Name: "code-forge",
 			Tier: Required,
-			Probe: func() error {
+			Probe: func() (any, error) {
 				repo, err := cf.Probe()
 				if err != nil {
-					return fmt.Errorf("%w: code forge connectivity check failed: %w", ErrConnectivity, err)
+					return nil, fmt.Errorf("%w: code forge connectivity check failed: %w", ErrConnectivity, err)
 				}
-				cfRepo = repo
-				return nil
+				return repo, nil
 			},
-			SuccessMsg: func() string {
-				return fmt.Sprintf("code forge confirmed — %s is reachable", cfRepo)
+			SuccessMsg: func(output any) string {
+				return fmt.Sprintf("code forge confirmed — %s is reachable", output.(string))
 			},
 		},
 		BranchProtectionCheck(cf, c.MergePolicy, c.BaseBranch),
 		{
 			Name: "recoverable-issues",
 			Tier: Required,
-			Probe: func() error {
+			Probe: func() (any, error) {
 				// Only query when Recoverable resolves to a real label: an
 				// unconditional ListIssues(Recoverable) call would
 				// false-match every open issue on a tracker (GitHub,
@@ -235,17 +229,18 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, w io.Writer, stdin
 				// (forge.LabeledTracker's doc comment) — mirroring
 				// console/adapter.go's countRecoverable guard for the same
 				// reason.
+				recoverableCount := 0
 				if lt, ok := it.(forge.LabeledTracker); !ok || lt.StateLabels().Label(forge.Recoverable) != "" {
 					recoverable, err := it.ListIssues(forge.Recoverable)
 					if err != nil {
-						return fmt.Errorf("%w: recoverable issue check failed: %w", ErrConnectivity, err)
+						return nil, fmt.Errorf("%w: recoverable issue check failed: %w", ErrConnectivity, err)
 					}
 					recoverableCount = len(recoverable)
 				}
-				return nil
+				return recoverableCount, nil
 			},
-			SuccessMsg: func() string {
-				return fmt.Sprintf("%d recoverable issue(s) — run `spindrift recover <issue>` to land each", recoverableCount)
+			SuccessMsg: func(output any) string {
+				return fmt.Sprintf("%d recoverable issue(s) — run `spindrift recover <issue>` to land each", output.(int))
 			},
 		},
 	}

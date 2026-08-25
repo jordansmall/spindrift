@@ -14,17 +14,17 @@ func TestRunChecks_RunsEveryCheckEvenAfterAFailure(t *testing.T) {
 		{
 			Name: "first-fails",
 			Tier: Required,
-			Probe: func() error {
+			Probe: func() (any, error) {
 				ran = append(ran, "first-fails")
-				return errors.New("boom")
+				return nil, errors.New("boom")
 			},
 		},
 		{
 			Name: "second-still-runs",
 			Tier: Required,
-			Probe: func() error {
+			Probe: func() (any, error) {
 				ran = append(ran, "second-still-runs")
-				return nil
+				return nil, nil
 			},
 		},
 	}
@@ -48,17 +48,17 @@ func TestRunChecksFailFast_StopsAfterFirstRequiredFailure(t *testing.T) {
 		{
 			Name: "first-fails",
 			Tier: Required,
-			Probe: func() error {
+			Probe: func() (any, error) {
 				ran = append(ran, "first-fails")
-				return errors.New("boom")
+				return nil, errors.New("boom")
 			},
 		},
 		{
 			Name: "second-never-runs",
 			Tier: Required,
-			Probe: func() error {
+			Probe: func() (any, error) {
 				ran = append(ran, "second-never-runs")
-				return nil
+				return nil, nil
 			},
 		},
 	}
@@ -79,17 +79,17 @@ func TestRunChecksFailFast_AdvisoryFailureDoesNotStopIteration(t *testing.T) {
 		{
 			Name: "advisory-fails",
 			Tier: Advisory,
-			Probe: func() error {
+			Probe: func() (any, error) {
 				ran = append(ran, "advisory-fails")
-				return errors.New("advisory boom")
+				return nil, errors.New("advisory boom")
 			},
 		},
 		{
 			Name: "still-runs",
 			Tier: Required,
-			Probe: func() error {
+			Probe: func() (any, error) {
 				ran = append(ran, "still-runs")
-				return nil
+				return nil, nil
 			},
 		},
 	}
@@ -106,9 +106,9 @@ func TestRunChecksFailFast_AdvisoryFailureDoesNotStopIteration(t *testing.T) {
 
 func TestRunChecksFailFast_ReturnsOnlyResultsForChecksThatRan(t *testing.T) {
 	checks := []Check{
-		{Name: "ok1", Tier: Required, Probe: func() error { return nil }},
-		{Name: "req-fails", Tier: Required, Probe: func() error { return errors.New("boom") }},
-		{Name: "never-runs", Tier: Required, Probe: func() error { return nil }},
+		{Name: "ok1", Tier: Required, Probe: func() (any, error) { return nil, nil }},
+		{Name: "req-fails", Tier: Required, Probe: func() (any, error) { return nil, errors.New("boom") }},
+		{Name: "never-runs", Tier: Required, Probe: func() (any, error) { return nil, nil }},
 	}
 
 	results := RunChecksFailFast(checks)
@@ -228,7 +228,7 @@ func TestReportResults_UsesSuccessMsgWhenSet(t *testing.T) {
 		{
 			Check: Check{
 				Name:       "github-repo",
-				SuccessMsg: func() string { return "github-repo: jordansmall/spindrift" },
+				SuccessMsg: func(output any) string { return "github-repo: jordansmall/spindrift" },
 			},
 			Err: nil,
 		},
@@ -238,6 +238,32 @@ func TestReportResults_UsesSuccessMsgWhenSet(t *testing.T) {
 	ReportResults(&buf, results)
 
 	want := "ok: github-repo: jordansmall/spindrift\n"
+	if buf.String() != want {
+		t.Fatalf("ReportResults() wrote %q, want %q", buf.String(), want)
+	}
+}
+
+// TestReportResults_SuccessMsgReceivesProbeOutput verifies SuccessMsg is
+// handed the Result's Output (the value Probe returned alongside a nil
+// error) as its own parameter, rather than reading a value some outer
+// closure captured on the side.
+func TestReportResults_SuccessMsgReceivesProbeOutput(t *testing.T) {
+	check := Check{
+		Name: "github-repo",
+		Probe: func() (any, error) {
+			return "some-value", nil
+		},
+		SuccessMsg: func(output any) string {
+			return fmt.Sprintf("ok: %v", output)
+		},
+	}
+
+	results := RunChecks([]Check{check})
+
+	var buf bytes.Buffer
+	ReportResults(&buf, results)
+
+	want := "ok: ok: some-value\n"
 	if buf.String() != want {
 		t.Fatalf("ReportResults() wrote %q, want %q", buf.String(), want)
 	}
@@ -298,17 +324,17 @@ func TestRunChecksFailFast_DegradedRequiredFailureDoesNotStopIteration(t *testin
 		{
 			Name: "branch-protection",
 			Tier: Required,
-			Probe: func() error {
+			Probe: func() (any, error) {
 				ran = append(ran, "branch-protection")
-				return fmt.Errorf("permission denied: %w", ErrDegraded)
+				return nil, fmt.Errorf("permission denied: %w", ErrDegraded)
 			},
 		},
 		{
 			Name: "still-runs",
 			Tier: Required,
-			Probe: func() error {
+			Probe: func() (any, error) {
 				ran = append(ran, "still-runs")
-				return nil
+				return nil, nil
 			},
 		},
 	}
@@ -329,17 +355,17 @@ func TestRunChecksFailFast_NonDegradedRequiredFailureStillStopsIteration(t *test
 		{
 			Name: "genuine-required-fails",
 			Tier: Required,
-			Probe: func() error {
+			Probe: func() (any, error) {
 				ran = append(ran, "genuine-required-fails")
-				return errors.New("boom")
+				return nil, errors.New("boom")
 			},
 		},
 		{
 			Name: "never-runs",
 			Tier: Required,
-			Probe: func() error {
+			Probe: func() (any, error) {
 				ran = append(ran, "never-runs")
-				return nil
+				return nil, nil
 			},
 		},
 	}
