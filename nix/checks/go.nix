@@ -90,8 +90,11 @@ in
   # resolve its ../../../../../.github/workflows/agent-dispatch.yml path
   # (#1985). templates/ is copied the same way so
   # TestPromptMarkersMatchScanner can resolve its own
-  # ../../../templates/default/prompts path (#2038). .forgejo/ is copied the
-  # same way so TestDispatchLabels_ClaimRemoveLabels_MatchesWorkflowFiles can resolve its
+  # ../../../templates/default/prompts path (#2038), alongside
+  # TestHarnessEnvSecretLine_MatchesTemplateHarnessEnvExample and
+  # TestHarnessEnvPreamble_TokensMatchTemplate, which resolve their own
+  # ../../../templates/default/harness.env.example path (#2743). .forgejo/
+  # is copied the same way so TestDispatchLabels_ClaimRemoveLabels_MatchesWorkflowFiles can resolve its
   # ../../../../.forgejo/workflows/{agent-dispatch,agent-recover}.yml paths
   # (#2507), alongside the .github/ copy above for the .github-side halves
   # of that same test. README.md is copied the same way so

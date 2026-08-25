@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -2390,6 +2391,152 @@ func TestRenderHarnessEnv_FileLevelPreamble(t *testing.T) {
 	}
 	if !strings.Contains(out, "remove that value (or add <NAME>_CMD) for SECRET_CMD to apply") {
 		t.Errorf("expected harness.env to document how to make SECRET_CMD actually take effect, got:\n%s", out)
+	}
+}
+
+// harnessEnvExampleNameRe extracts the secret's env-var NAME from
+// the second line of one of templates/default/harness.env.example's
+// per-secret comment blocks (scanned out to its `<NAME>=` sentinel line, not
+// a fixed length), e.g. `# GH_TOKEN_CMD="rbw get spindrift-gh-token"`
+// yields "GH_TOKEN".
+var harnessEnvExampleNameRe = regexp.MustCompile(`^# (\w+)_CMD="rbw get spindrift-`)
+
+// harnessEnvExampleSentinel matches a stanza's bare `<NAME>=` line (no
+// value) — the line that terminates one secret's comment block in
+// templates/default/harness.env.example.
+var harnessEnvExampleSentinel = regexp.MustCompile(`^\w+=$`)
+
+// harnessEnvExampleStartLine is the first line of the comment block
+// harnessEnvSecretLine (quickstart.go) renders for every secret, derived
+// from its actual output rather than hand-copied, so the two tests below
+// that scan templates/default/harness.env.example for this line can never
+// drift from the string they exist to catch drift in.
+var harnessEnvExampleStartLine = strings.SplitN(harnessEnvSecretLine("X", ""), "\n", 2)[0]
+
+// readHarnessEnvExampleLines reads and splits
+// templates/default/harness.env.example, the shared fixture read by both
+// TestHarnessEnvSecretLine_MatchesTemplateHarnessEnvExample and
+// TestHarnessEnvPreamble_TokensMatchTemplate.
+func readHarnessEnvExampleLines(t *testing.T) []string {
+	t.Helper()
+	templatePath := filepath.Join("..", "..", "..", "templates", "default", "harness.env.example")
+	raw, err := os.ReadFile(templatePath)
+	if err != nil {
+		t.Fatalf("read %s: %v", templatePath, err)
+	}
+	return strings.Split(string(raw), "\n")
+}
+
+// TestHarnessEnvSecretLine_MatchesTemplateHarnessEnvExample pins that the
+// <NAME>_CMD comment block plus its trailing blank-value `NAME=` line and
+// blank separator line — as harnessEnvSecretLine renders it for every
+// secret — is byte-identical (mod name substitution) to the corresponding
+// stanza in the git-committed, Nix-generated fixture
+// templates/default/harness.env.example (pinned Nix-side by
+// nix/checks/schema-drift.nix's harness-env-example check). The block is
+// scanned dynamically out to its `NAME=` sentinel line rather than assuming
+// a fixed length, so appending or removing a comment line on either side
+// still surfaces as drift. Without this, the Go and Nix sides of the same
+// documentation could drift apart silently — this test does not cover the
+// file-level preamble, which is a deliberate condensation on the Go side
+// (see harnessEnvPreamble's doc comment and
+// TestHarnessEnvPreamble_TokensMatchTemplate below).
+func TestHarnessEnvSecretLine_MatchesTemplateHarnessEnvExample(t *testing.T) {
+	templatePath := filepath.Join("..", "..", "..", "templates", "default", "harness.env.example")
+	lines := readHarnessEnvExampleLines(t)
+
+	found := 0
+	for i := 0; i < len(lines); i++ {
+		if lines[i] != harnessEnvExampleStartLine {
+			continue
+		}
+
+		if i < 2 {
+			t.Errorf("expected template comment block's %q line at line %d in %s to be preceded by a blank separator line and a description line, but the block starts too early in the file for both to exist", harnessEnvExampleStartLine, i+1, templatePath)
+		} else {
+			if lines[i-2] != "" {
+				t.Errorf("expected line %d in %s (two lines above the %q line at line %d) to be a blank separator line, got %q", i-1, templatePath, harnessEnvExampleStartLine, i+1, lines[i-2])
+			}
+			if lines[i-1] == "" || !strings.HasPrefix(lines[i-1], "#") {
+				t.Errorf("expected line %d in %s (the line above the %q line at line %d) to be a single non-blank #-prefixed description line, got %q", i, templatePath, harnessEnvExampleStartLine, i+1, lines[i-1])
+			}
+		}
+
+		end := -1
+		for j := i; j < len(lines); j++ {
+			if harnessEnvExampleSentinel.MatchString(lines[j]) {
+				end = j
+				break
+			}
+		}
+		if end == -1 {
+			t.Fatalf("expected to find a <NAME>= sentinel line after template comment block starting at line %d in %s, found none", i+1, templatePath)
+		}
+		commentBlock := lines[i:end]
+
+		if len(commentBlock) < 2 {
+			t.Errorf("expected template comment block starting at line %d in %s to contain at least 2 lines (the %q line plus a <NAME>_CMD example), got %d: %q", i+1, templatePath, harnessEnvExampleStartLine, len(commentBlock), commentBlock)
+			i = end
+			continue
+		}
+
+		m := harnessEnvExampleNameRe.FindStringSubmatch(commentBlock[1])
+		if m == nil {
+			t.Errorf("expected to extract a <NAME>_CMD secret name from template comment block line %q, got no match", commentBlock[1])
+			i = end
+			continue
+		}
+		name := m[1]
+		found++
+
+		expectedStanza := strings.Join(commentBlock, "\n") + "\n" + lines[end] + "\n\n"
+		out := harnessEnvSecretLine(name, "")
+		if out != expectedStanza {
+			t.Errorf("expected harnessEnvSecretLine(%q, ...) to equal the stanza from %s:\n%q\n\ngot:\n%q", name, templatePath, expectedStanza, out)
+		}
+
+		i = end
+	}
+
+	if found == 0 {
+		t.Fatalf("expected to find at least one <NAME>_CMD comment block in %s, found none — either the parsing logic or the template's block wording drifted", templatePath)
+	}
+}
+
+// TestHarnessEnvPreamble_TokensMatchTemplate pins that
+// harnessEnvPreamble (quickstart.go), though a deliberate condensation of
+// templates/default/harness.env.example's file-level preamble rather than a
+// verbatim copy (see harnessEnvPreamble's doc comment), still names the same
+// three load-bearing tokens the template's preamble documents: the
+// SECRET_CMD fallback knob, its {name} substitution placeholder, and the
+// <NAME>_CMD per-secret override form. "Not equal" is not the same as
+// "unchecked" — this closes that gap without forcing full-text equality.
+func TestHarnessEnvPreamble_TokensMatchTemplate(t *testing.T) {
+	templatePath := filepath.Join("..", "..", "..", "templates", "default", "harness.env.example")
+	lines := readHarnessEnvExampleLines(t)
+
+	firstStanzaStart := -1
+	for i, line := range lines {
+		if line == harnessEnvExampleStartLine {
+			firstStanzaStart = i
+			break
+		}
+	}
+	if firstStanzaStart < 1 {
+		t.Fatalf("expected to find a secret comment block starting with %q in %s, found none", harnessEnvExampleStartLine, templatePath)
+	}
+	// The line immediately before the first stanza's comment block is that
+	// secret's own doc-comment line (e.g. "# Anthropic API key; ..."); the
+	// template's file-level preamble is everything before it.
+	templatePreamble := strings.Join(lines[:firstStanzaStart-1], "\n")
+
+	for _, token := range []string{"SECRET_CMD", "{name}", "<NAME>_CMD"} {
+		if !strings.Contains(templatePreamble, token) {
+			t.Errorf("expected template preamble in %s to mention %q, got:\n%s", templatePath, token, templatePreamble)
+		}
+		if !strings.Contains(harnessEnvPreamble, token) {
+			t.Errorf("expected harnessEnvPreamble to mention %q, got:\n%s", token, harnessEnvPreamble)
+		}
 	}
 }
 
