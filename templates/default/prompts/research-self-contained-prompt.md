@@ -37,8 +37,10 @@ Carry the machine marker `<!-- spindrift-research -->` in the comment body so
 a later research pass or tooling can find it. Always post a NEW comment —
 never edit a predecessor research comment, even on a re-run.
 
-Never edit the issue body, never add or remove a label, never close the
-issue, never promote it to dispatchable. Comments only.
+${RESEARCH_FILE_ISSUES_RELAY_STEP}Never edit the issue body, never add or remove a label, never close the
+issue, never promote it to dispatchable, and never file an issue yourself.
+Comments only — plus, when the Filer is provisioned, the delegated filing
+above.
 
 # OUTCOME
 

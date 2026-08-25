@@ -7,13 +7,14 @@ fail or find nothing to do, say so; the caller proceeds either way.
 
 Do not narrate between tool calls — emit no text until the final report.
 
-Inputs (from the delegation message): the escalated findings block, the
-implementing issue number, and the PR URL (or branch, if the PR is not yet
-open).
+Inputs (from the delegation message): the escalated findings block and the
+originating issue number, always. A work-path delegation also includes the
+PR URL (or branch, if the PR is not yet open); a research delegation passes
+the issue number alone — research never opens a PR.
 
 Steps:
 
-${FILER_LABEL_DIRECT_STEP}${FILER_LABEL_DIRECT_FORGEJO_STEP}${FILER_LABEL_RELAY_STEP}2. Dedup — a finding must not already be tracked, or already dismissed:
+${FILER_LABEL_DIRECT_STEP}${FILER_LABEL_DIRECT_FORGEJO_STEP}${FILER_LABEL_RELAY_STEP}${FILER_LABEL_RELAY_RESEARCH_STEP}2. Dedup — a finding must not already be tracked, or already dismissed:
    - Search ALL open issues, regardless of label — an open issue describing
      the same problem means it's already tracked, whether human-filed,
      `ready-for-agent`, filed via `/to-tickets`, or from a prior Filer run:
@@ -21,16 +22,19 @@ ${FILER_LABEL_DIRECT_STEP}${FILER_LABEL_DIRECT_FORGEJO_STEP}${FILER_LABEL_RELAY_
      This was deliberately broadened from a labeled-only search for
      better recall (fewer false re-files); the accepted cost is a loose
      subject-line match suppressing a genuinely distinct finding.
-   - Search closed issues carrying `agent-review-finding` OR
-     `agent-research-reject` — both are deliberate triage decisions (a
-     human's won't-fix/already-fixed/duplicate verdict, or a research pass's
-     false-positive/not-worth-doing/duplicate rejection) and neither is ever
-     refiled:
+   - Search closed issues carrying `agent-review-finding`,
+     `agent-research-reject`, OR `agent-research-finding` — all three are
+     deliberate triage decisions (a human's won't-fix/already-fixed/
+     duplicate verdict, a research pass's false-positive/not-worth-doing/
+     duplicate rejection, or a research finding already filed and since
+     closed) and none of them is ever refiled:
        gh issue list --label agent-review-finding --state closed --search "<terms>"
        gh issue list --label agent-research-reject --state closed --search "<terms>"
-   - A plain closed issue carrying neither label does NOT suppress filing —
-     a problem that was fixed and later regressed can still be refiled.
-   Skip any finding that matches an existing issue in either search by
+       gh issue list --label agent-research-finding --state closed --search "<terms>"
+   - A plain closed issue carrying none of these labels does NOT suppress
+     filing — a problem that was fixed and later regressed can still be
+     refiled.
+   Skip any finding that matches an existing issue in any search by
    subject.
 
 ${FILER_FILE_DIRECT_STEP}${FILER_FILE_DIRECT_FORGEJO_STEP}${FILER_FILE_RELAY_STEP}4. Each filed issue:
@@ -38,11 +42,15 @@ ${FILER_FILE_DIRECT_STEP}${FILER_FILE_DIRECT_FORGEJO_STEP}${FILER_FILE_RELAY_STE
      `fix(auth): validate token expiry before use`) — never a meta-title like
      "review finding".
    - Body: the finding verbatim with file:line references, the reviewer's
-     reasoning for why it matters, a provenance line
-     `Found by review during #<issue> (PR <url>)`, and an acceptance-criteria
-     checklist. Add a README/docs-update criterion whenever the finding
-     touches a user-facing surface (a flag, an env var, a documented
-     behaviour).
+     reasoning for why it matters, and an acceptance-criteria checklist. Add
+     a README/docs-update criterion whenever the finding touches a
+     user-facing surface (a flag, an env var, a documented behaviour). For a
+     work-path delegation, also add a provenance line
+     `Found by review during #<issue> (PR <url>)` — you were given the PR
+     URL for exactly this. For a research delegation, add no provenance
+     line of your own: the launcher appends its own `Filed from research on
+     #<N>` backlink to the body automatically after you exit, and your own
+     line would duplicate or contradict it.
    - Labels: `agent-review-finding` only. NEVER the dispatch label (the label
      that makes an issue eligible for agent pickup, e.g. `ready-for-agent`) —
      a human promotes these; that promotion is the launch button.
