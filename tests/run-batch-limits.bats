@@ -166,47 +166,53 @@ setup() {
   [[ "$output" == *"timed out after 2s"* ]]
 }
 
-@test "wait_for_log_lines rejects a non-integer timeout cleanly instead of a bash arithmetic error" {
+@test "wait_for_log_lines rejects malformed, unsafe, or zero timeout values" {
   local log="$BATS_TEST_TMPDIR/probe.log"
-  printf 'unrelated\n' >"$log"
-  assert_timeout_rejected "$log" 0.5 "syntax error"
-  [[ "$output" != *"integer expression expected"* ]]
-}
-
-@test "wait_for_log_lines rejects a negative timeout cleanly instead of an unbound-variable crash" {
-  local log="$BATS_TEST_TMPDIR/probe.log"
-  printf 'unrelated\n' >"$log"
-  assert_timeout_rejected "$log" -1 "unbound variable"
-}
-
-@test "wait_for_log_lines rejects a leading-zero timeout cleanly instead of a bash arithmetic error" {
-  local log="$BATS_TEST_TMPDIR/probe.log"
-  printf 'unrelated\n' >"$log"
-  assert_timeout_rejected "$log" 08 "value too great for base"
-}
-
-@test "wait_for_log_lines rejects an injection payload timeout without executing it" {
-  local log="$BATS_TEST_TMPDIR/probe.log"
+  # Per-case data used only by the "injection" row's payload substitution
+  # below -- the other 5 rows' payloads don't contain the MARKER
+  # placeholder, so this is a no-op for them.
   local marker="$BATS_TEST_TMPDIR/PWNED_MARKER"
-  printf 'unrelated\n' >"$log"
-  assert_timeout_rejected "$log" 'x[$(touch "'"$marker"'")]'
-  [ ! -e "$marker" ]
-}
-
-@test "wait_for_log_lines rejects an oversized timeout cleanly instead of a bash arithmetic overflow" {
-  local log="$BATS_TEST_TMPDIR/probe.log"
-  printf 'unrelated\n' >"$log"
-  assert_timeout_rejected "$log" 500000000000000000 "unbound variable"
-}
-
-@test "wait_for_log_lines rejects a zero timeout cleanly instead of silently running a single check" {
-  local log="$BATS_TEST_TMPDIR/probe.log"
-  # A pattern that already matches (not 'unrelated' like the siblings
-  # above) is what makes this fail on status pre-fix: the old code
-  # accepted timeout=0 and returned success once the confirm window
-  # found the match already present.
-  printf 'run x\n' >"$log"
-  assert_timeout_rejected "$log" 0 "timed out after 0s"
+  # Every case shares 'unrelated' log content except "zero": that one needs
+  # a pattern that already matches (not 'unrelated' like the siblings) to
+  # prove timeout=0 doesn't silently succeed by finding the match already
+  # present during the confirm window.
+  # Payload uses a MARKER placeholder rather than interpolating $marker
+  # directly: $marker derives from $BATS_TEST_TMPDIR, and a real path
+  # containing '|' would otherwise mis-split this pipe-delimited row.
+  local -a cases=(
+    "non-integer|0.5|unrelated|syntax error"
+    "negative|-1|unrelated|unbound variable"
+    "leading-zero|08|unrelated|value too great for base"
+    "injection|x[\$(touch \"MARKER\")]|unrelated|"
+    "oversized|500000000000000000|unrelated|unbound variable"
+    "zero|0|run x|timed out after 0s"
+  )
+  local tc id payload log_content absent_substring
+  local -i fail=0
+  for tc in "${cases[@]}"; do
+    IFS='|' read -r id payload log_content absent_substring <<<"$tc"
+    payload="${payload/MARKER/$marker}"
+    printf '%s\n' "$log_content" >"$log"
+    if ! assert_timeout_rejected "$log" "$payload" "$absent_substring"; then
+      echo "$id: assert_timeout_rejected failed for payload [$payload]" >&2
+      fail=1
+    fi
+    case "$id" in
+    non-integer)
+      if [[ "$output" == *"integer expression expected"* ]]; then
+        echo "$id: output [$output] unexpectedly contains [integer expression expected]" >&2
+        fail=1
+      fi
+      ;;
+    injection)
+      if [ -e "$marker" ]; then
+        echo "$id: marker file [$marker] unexpectedly created" >&2
+        fail=1
+      fi
+      ;;
+    esac
+  done
+  [ "$fail" -eq 0 ]
 }
 
 @test "wait_for_log_lines rejects WAIT_FOR_LOG_LINES_TIMEOUT=0 the same as an explicit zero" {
