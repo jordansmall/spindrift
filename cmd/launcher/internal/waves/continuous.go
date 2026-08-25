@@ -157,12 +157,36 @@ func dropClaimed(issues []Issue, claimed map[string]bool) []Issue {
 	return unclaimed
 }
 
-// countReady counts how many issues in the batch are actually ready to
-// dispatch -- applying nextReady's own blocked/touch-overlap/failed-check
-// filtering without its print/dedup side effects -- so the stale-drain
-// report's heldBack number (#2678) reflects issues that would genuinely
-// have launched, not every unclaimed issue sitting in the discovered batch
-// regardless of readiness.
+// countReady counts how many issues in the batch pass the narrow check the
+// stale-drain report's heldBack number (#2678) measures -- applying
+// nextReady's own blocked/touch-overlap/failed-check filtering without its
+// print/dedup side effects. This is a scope decision, not a claim that
+// every excluded issue would definitely never have launched fresh: heldBack
+// deliberately excludes three categories issueReadiness also marks
+// not-ready, and two of the three are frequently transient rather than
+// durable blocks. Issues blocked on an unresolved blocker edge are the one
+// genuinely durable, pre-existing exclusion, independent of this run.
+// Issues deferred for touch-overlap with a still in-flight Box are
+// frequently self-induced by this run's own concurrency -- the collider
+// comes from ListIssues(InProgress), which during a drain is dominated by
+// this run's own in-flight Boxes, so a fresh run's next refill would very
+// plausibly launch it once that Box lands. And (only when
+// !cfg.IgnoreBlockers, per issueReadiness's own guard above) issues whose
+// own DepsOf check failed are held only because that one check call failed
+// transiently -- issueReadiness's own comment on that case says "the next
+// refill retries" -- so a fresh run's next refill would very plausibly
+// succeed and launch it too. Counting either of those two into heldBack
+// would conflate the drain's own cost with issues that were, at most,
+// incidentally delayed by this run's own state; heldBack measures the
+// drain's own cost only, not the total number of issues sitting unclaimed
+// (#2778). Under cfg.IgnoreBlockers (research-kind continuous dispatch),
+// only the DepsOf-failed switch case's own guard is bypassed, so such an
+// issue IS counted into heldBack; the unresolved-blocker-edge exclusion is
+// untouched by cfg.IgnoreBlockers (gated solely on !cfg.PreResolved), so a
+// blocker-edge-blocked issue stays excluded from heldBack even under
+// cfg.IgnoreBlockers -- unlike engine.go's drainMaxJobs, which additionally
+// gates the blocker-edge computation itself on !cfg.IgnoreBlockers and so
+// skips it entirely in that mode (#2778 review finding).
 func countReady(cfg Config, it forge.IssueTracker, cf forge.CodeForge, checkOverlap func(string) (string, bool), issues []Issue, edges map[string][]string, depsOfFailed map[string]bool) int {
 	n := 0
 	for _, iss := range issues {
@@ -347,6 +371,20 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 			// that a reporting-only heldBack call must not trigger, so a
 			// caller with such a side effect supplies a pure
 			// DiscoverReporting closure instead.
+			//
+			// The !cfg.PreResolved branch's extra discover()+countReady()
+			// call is a real cost, and every headless CONTINUOUS_DISPATCH
+			// caller pays it -- only Console sets cfg.PendingCount. That
+			// cost is accepted, not a gap to close (#2778): it fires at
+			// most once per drain transition, never per-tick; it's bounded
+			// by the size of whatever unclaimed batch remains, not the
+			// full issue history; and it runs at the moment the run is
+			// already exiting/draining, so it can't delay or block any
+			// further dispatch decision. Giving headless a PendingCount
+			// equivalent would mean inventing a new unclaimed-count
+			// facility from nothing -- headless keeps no live pick
+			// collection between refills the way Console's Queue does --
+			// which is out of scope here.
 			switch {
 			case cfg.PendingCount != nil:
 				staleDrain.heldBack = cfg.PendingCount()
