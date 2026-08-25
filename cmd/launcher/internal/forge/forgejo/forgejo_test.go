@@ -564,6 +564,12 @@ func TestDoctorRun_Forgejo_CreatesTriageAndResearchLabels(t *testing.T) {
 		InProgressLabel: "agent-in-progress",
 		FailedLabel:     "agent-failed",
 		CompleteLabel:   "agent-complete",
+		// MergePolicy "manual" keeps the branch-protection row (issue #2570)
+		// Advisory rather than Required — cf here doesn't script
+		// SetBranchProtected, so an unset base branch would otherwise report
+		// a spurious Required failure unrelated to what this test verifies
+		// (label creation).
+		MergePolicy: "manual",
 	}
 
 	var buf bytes.Buffer
@@ -609,6 +615,9 @@ func TestDoctorRun_Forgejo_MissingResearchLabelsAdvisoryOnly(t *testing.T) {
 		InProgressLabel: workLabels[1],
 		FailedLabel:     workLabels[2],
 		CompleteLabel:   workLabels[3],
+		// MergePolicy "manual" keeps the branch-protection row (issue #2570)
+		// Advisory rather than Required — see the identical rationale above.
+		MergePolicy: "manual",
 	}
 
 	var buf bytes.Buffer

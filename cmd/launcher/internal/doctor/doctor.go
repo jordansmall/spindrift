@@ -117,6 +117,16 @@ type Config struct {
 	// uninstalled runtime, and doctor must not turn that already-accepted
 	// state into a hard failure.
 	Runtime string
+
+	// MergePolicy is the operator's configured post-green merge policy
+	// (immediate|auto|manual, MERGE_MODE) -- the branch-protection row's Tier
+	// is Required under immediate/auto (no human merge gate) and Advisory
+	// under manual (a human already reviews before merge).
+	MergePolicy string
+
+	// BaseBranch is the repository's base/target branch (BASE_BRANCH,
+	// default "main") -- the branch the branch-protection row queries.
+	BaseBranch string
 }
 
 // Run probes both seams (IssueTracker + CodeForge), then checks that all
@@ -144,13 +154,14 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, w io.Writer, stdin
 	var itRepo, cfRepo string
 	recoverableCount := 0
 
-	// builtinChecks are the three always-run doctor rows: issue-tracker
-	// connectivity, code-forge connectivity, and the recoverable-issue
-	// count. Each Probe closure captures its fetched detail (repo slug or
-	// count) into the local vars above so its SuccessMsg closure can report
-	// the exact same dynamic success line the old hand-rolled fmt.Fprintf
-	// calls printed — registry-driven, so adding a fourth built-in doctor
-	// check means adding a row here, not editing Run's control flow.
+	// builtinChecks are the always-run doctor rows: issue-tracker
+	// connectivity, code-forge connectivity, branch protection, and the
+	// recoverable-issue count. Each Probe closure captures its fetched
+	// detail (repo slug or count) into the local vars above so its
+	// SuccessMsg closure can report the exact same dynamic success line the
+	// old hand-rolled fmt.Fprintf calls printed — registry-driven, so
+	// adding another built-in doctor check means adding a row here, not
+	// editing Run's control flow.
 	builtinChecks := []Check{
 		{
 			Name: "issue-tracker",
@@ -188,6 +199,7 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, w io.Writer, stdin
 				return fmt.Sprintf("code forge confirmed — %s is reachable", cfRepo)
 			},
 		},
+		BranchProtectionCheck(cf, c.MergePolicy, c.BaseBranch),
 		{
 			Name: "recoverable-issues",
 			Tier: Required,
@@ -220,10 +232,17 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, w io.Writer, stdin
 		// RunChecksFailFast stops at the first Required failure, so that
 		// failing result is always the last element here. Report only the
 		// results before it — the caller (cmdDoctor) already prints err to
-		// stderr, so writing the failing row to w too would double-report
-		// it (origin/main's pre-refactor Run never wrote anything to w on
-		// this path).
+		// stderr, so writing the failing row's MISSING line to w too would
+		// double-report it (origin/main's pre-refactor Run never wrote
+		// anything to w on this path). Its Remedy line is not part of that
+		// duplication (cmdDoctor never prints it), so still write that one
+		// line — otherwise the failing row's remedy is silently dropped and
+		// never reaches the operator anywhere.
 		ReportResults(w, results[:len(results)-1])
+		failing := results[len(results)-1]
+		if failing.Check.Remedy != "" && failing.Check.Remedy != err.Error() {
+			fmt.Fprintf(w, "  remedy: %s\n", failing.Check.Remedy)
+		}
 		return err
 	}
 	ReportResults(w, results)

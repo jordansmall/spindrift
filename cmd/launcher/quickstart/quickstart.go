@@ -124,6 +124,16 @@ type CommandRunner interface {
 // (flagtable_gen.go) — Quickstart doesn't prompt for it.
 const defaultBranchPrefix = "agent/issue-"
 
+// defaultBaseBranch and defaultMergePolicy match the launcher's own
+// BASE_BRANCH/MERGE_MODE schema defaults (flagtable_gen.go) — Quickstart's
+// generated flake.nix doesn't set either, so the scaffolded repo runs under
+// exactly these defaults, and the post-write doctor.Run call below must
+// probe against the same values rather than the Config zero value.
+const (
+	defaultBaseBranch  = "main"
+	defaultMergePolicy = "manual"
+)
+
 // codebergBaseURL is the Forgejo adapter's default base URL — a
 // forgejoBaseURL of exactly this value is the adapter default and must not
 // be emitted as an explicit issues.forgejo.baseURL line in the generated
@@ -618,6 +628,8 @@ func runQuickstart(dir string, env Environment, cmdRunner CommandRunner, forgeBu
 		FailedLabel:     defaultDispatchLabels.Failed,
 		CompleteLabel:   defaultDispatchLabels.Complete,
 		Runtime:         runtime,
+		MergePolicy:     defaultMergePolicy,
+		BaseBranch:      defaultBaseBranch,
 	}, w, scanner, interactive, nil); err != nil {
 		return postWriteFailure(doctorPostWriteStep, written, insideGitWorkTree, err)
 	}

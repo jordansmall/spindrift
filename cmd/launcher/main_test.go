@@ -3574,6 +3574,15 @@ func defaultLabelConfig() config {
 			completeLabel:   "agent-complete",
 			codeForge:       "github",
 			issueTracker:    "github",
+			baseBranch:      "main",
+			// mergeMode "manual" keeps the branch-protection row (issue
+			// #2570) Advisory rather than Required here — these tests exist
+			// to exercise label/runtime/token-gate behavior, not branch
+			// protection, and the forge.Fake instances they build generally
+			// don't script SetBranchProtected, so an unset "main" would
+			// otherwise report a spurious Required failure unrelated to what
+			// each test actually verifies.
+			mergeMode: "manual",
 		},
 		// "echo" is always on PATH, so it's a safe non-empty default that
 		// makes the new doctor runtime row print "ok" without dragging in a

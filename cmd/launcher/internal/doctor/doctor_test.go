@@ -17,6 +17,17 @@ func defaultDoctorConfig() Config {
 		InProgressLabel: "agent-in-progress",
 		FailedLabel:     "agent-failed",
 		CompleteLabel:   "agent-complete",
+		// MergePolicy "manual" keeps the branch-protection row (issue #2570)
+		// Advisory rather than Required for tests that don't care about it —
+		// the forge.Fake instances these existing tests build generally
+		// don't script SetBranchProtected, so an unset BaseBranch would
+		// otherwise report a spurious Required failure unrelated to what
+		// each test actually verifies. Tests that DO exercise
+		// branch-protection still call defaultDoctorConfig() and override
+		// MergePolicy/BaseBranch on the returned Config, rather than
+		// building a separate Config{} literal.
+		MergePolicy: "manual",
+		BaseBranch:  "main",
 	}
 }
 
@@ -182,5 +193,153 @@ func TestRun_ExtraChecks_FailingAdvisoryRowDoesNotFailRun(t *testing.T) {
 	out := buf.String()
 	if !strings.Contains(out, "fake advisory launcher check") {
 		t.Errorf("want output to report the failing advisory extraChecks row, got:\n%s", out)
+	}
+}
+
+// TestRun_BranchProtection_RequiredTierUnprotectedFailsRun verifies that
+// under a Required merge policy (immediate/auto/empty), an unprotected base
+// branch makes Run return a non-nil error naming the branch (AC1 "fails as
+// required").
+func TestRun_BranchProtection_RequiredTierUnprotectedFailsRun(t *testing.T) {
+	for _, mergePolicy := range []string{"immediate", "auto", ""} {
+		t.Run(mergePolicy, func(t *testing.T) {
+			f := forge.NewFake()
+			f.ProbeRepo = "owner/repo"
+			f.Labels = []string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}
+			f.SetBranchProtected("main", false)
+
+			cfg := defaultDoctorConfig()
+			cfg.MergePolicy = mergePolicy
+			cfg.BaseBranch = "main"
+
+			var buf bytes.Buffer
+			err := Run(f, f, cfg, &buf, bufio.NewScanner(strings.NewReader("")), false, nil)
+			if err == nil {
+				t.Fatal("expected error, got nil")
+			}
+			if !strings.Contains(err.Error(), "main") || !strings.Contains(err.Error(), "not protected") {
+				t.Errorf("want error to mention base branch and not-protected, got: %v", err)
+			}
+		})
+	}
+}
+
+// TestRun_BranchProtection_AdvisoryTierUnprotectedReportsButDoesNotFailRun
+// verifies that under mergePolicy "manual" (Advisory tier), an unprotected
+// base branch does NOT fail Run, but the row's failure is still visible in
+// the output as a MISSING line.
+func TestRun_BranchProtection_AdvisoryTierUnprotectedReportsButDoesNotFailRun(t *testing.T) {
+	f := forge.NewFake()
+	f.ProbeRepo = "owner/repo"
+	f.Labels = []string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}
+	f.SetBranchProtected("main", false)
+
+	cfg := defaultDoctorConfig()
+	cfg.MergePolicy = "manual"
+	cfg.BaseBranch = "main"
+
+	var buf bytes.Buffer
+	err := Run(f, f, cfg, &buf, bufio.NewScanner(strings.NewReader("")), false, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "MISSING: branch-protection") {
+		t.Errorf("want MISSING line for branch-protection row, got:\n%s", out)
+	}
+}
+
+// TestRun_BranchProtection_NotApplicableForForgeWithoutProtectionAPI verifies
+// that a forge shape with no branch-protection API (push-only, local)
+// reports "not applicable" and never fails Run, regardless of merge policy.
+func TestRun_BranchProtection_NotApplicableForForgeWithoutProtectionAPI(t *testing.T) {
+	for _, mergePolicy := range []string{"immediate", "manual"} {
+		t.Run(mergePolicy, func(t *testing.T) {
+			it := forge.NewFake()
+			it.ProbeRepo = "owner/repo"
+			it.Labels = []string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}
+			cf := it.AsPushOnly()
+
+			cfg := defaultDoctorConfig()
+			cfg.MergePolicy = mergePolicy
+			cfg.BaseBranch = "main"
+
+			var buf bytes.Buffer
+			err := Run(it, cf, cfg, &buf, bufio.NewScanner(strings.NewReader("")), false, nil)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			out := buf.String()
+			const want = "ok: not applicable (code forge has no branch-protection API)\n"
+			if !strings.Contains(out, want) {
+				t.Errorf("want output to contain %q, got:\n%s", want, out)
+			}
+		})
+	}
+}
+
+// TestRun_BranchProtection_ProbeFailureDegradesAndDoesNotFailRun verifies
+// AC3: even under a Required merge policy, a probe failure (e.g. missing
+// token permission) degrades to non-blocking — Run returns nil — while the
+// failure and its Remedy line are still visible in the output.
+func TestRun_BranchProtection_ProbeFailureDegradesAndDoesNotFailRun(t *testing.T) {
+	f := forge.NewFake()
+	f.ProbeRepo = "owner/repo"
+	f.Labels = []string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}
+	probeErr := errors.New("missing token permission")
+	f.SetBranchProtectedErr("main", probeErr)
+
+	cfg := defaultDoctorConfig()
+	cfg.MergePolicy = "auto"
+	cfg.BaseBranch = "main"
+
+	var buf bytes.Buffer
+	err := Run(f, f, cfg, &buf, bufio.NewScanner(strings.NewReader("")), false, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "advisory: branch-protection") {
+		t.Errorf("want advisory line for the degraded branch-protection row, got:\n%s", out)
+	}
+	if strings.Contains(out, "MISSING: branch-protection") {
+		t.Errorf("want no MISSING line for the degraded branch-protection row, got:\n%s", out)
+	}
+	if strings.Contains(out, "check degraded") {
+		t.Errorf("want ErrDegraded's internal sentinel text trimmed from output, got:\n%s", out)
+	}
+	if !strings.Contains(out, "remedy:") {
+		t.Errorf("want remedy line printed for the degraded branch-protection row, got:\n%s", out)
+	}
+	if !strings.Contains(out, probeErr.Error()) {
+		t.Errorf("want output to include the underlying probe error text, got:\n%s", out)
+	}
+}
+
+// TestRun_BranchProtection_ProtectedAndRequiredSucceeds verifies that a
+// protected base branch under a Required merge policy reports success and
+// does not fail Run.
+func TestRun_BranchProtection_ProtectedAndRequiredSucceeds(t *testing.T) {
+	f := forge.NewFake()
+	f.ProbeRepo = "owner/repo"
+	f.Labels = []string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}
+	f.SetBranchProtected("main", true)
+
+	cfg := defaultDoctorConfig()
+	cfg.MergePolicy = "immediate"
+	cfg.BaseBranch = "main"
+
+	var buf bytes.Buffer
+	err := Run(f, f, cfg, &buf, bufio.NewScanner(strings.NewReader("")), false, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, `ok: base branch "main" is protected`) {
+		t.Errorf("want ok line for branch-protection row, got:\n%s", out)
 	}
 }
