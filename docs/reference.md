@@ -2435,13 +2435,15 @@ This changes observable read-write behavior too: once the Filer is
 provisioned, the research verdict comment itself now always relays through
 the Launcher (`SPINDRIFT_COMMENT`) as well, even under `read-write`, where an
 unmodified research Box used to post its own `gh issue comment` directly.
-The Launcher posts the verdict comment host-side, then appends a "Filed
-issues" section listing the real URLs — or, for a filing that failed, an
-inline title-and-summary bullet — right after the comment body, so the
-researcher never fabricates an issue URL itself. Without the Filer
-provisioned, both research prompts render exactly as before, and the verdict
-comment posts directly from the Box as always — the filing step and the
-relay-comment change are both gated purely on Filer presence.
+The Launcher files each intent first, appends a "Filed issues" section
+listing the real URLs — or, for a filing that failed, an inline
+title-and-summary bullet — right after the comment body, then posts the
+combined comment host-side in one call, so the researcher never fabricates
+an issue URL itself. Without the Filer provisioned, the filing step and its
+"plus, when the Filer is provisioned" closing reference both vanish from
+both research prompts, and the verdict comment posts directly from the Box
+as always — the filing step and the relay-comment change are both gated
+purely on Filer presence.
 
 Override the filer's system prompt the same way as `scoutPrompt`/
 `reviewPrompt`: the `filerPrompt` `mkHarness` argument (image rebuild), or
