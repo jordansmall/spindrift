@@ -861,10 +861,47 @@ rec {
   #               differently from its sibling; only these substrings are
   #               compared, not the obligation's overall wording.
   #
-  # Empty for this slice (issue #2699 is scaffolding only): the real
-  # commit-folding row -- naming REVIEW's inline/orchestrator split and its
-  # amend/fixup obligation -- lands wired to the real fragment files in a
-  # follow-up commit, once sharedObligationViolationsFor above has proven
-  # itself against synthetic fixtures.
-  sharedObligations = [ ];
+  # The real commit-folding row (issue #2699): REVIEW's inline
+  # (fragments/review-loop-inline.md) and orchestrator
+  # (fragments/commit-rework-orchestrator.md) branches each instruct folding
+  # a fix into an existing commit via amend/fixup rather than stacking a new
+  # one, and both call out that the branch force-pushes so rewriting history
+  # is expected -- worded differently in each file, but every substring below
+  # is verbatim in both.
+  sharedObligations = [
+    {
+      id = "commit-folding";
+      branches = [
+        {
+          id = "review-loop-inline";
+          source = "fragments/review-loop-inline.md";
+        }
+        {
+          id = "commit-rework-orchestrator";
+          source = "fragments/commit-rework-orchestrator.md";
+        }
+      ];
+      requiredSubstrings = [
+        "git commit --amend"
+        "fold"
+        "fixup"
+        "force-pushes"
+      ];
+    }
+  ];
+
+  # Every sharedObligations row checked against the real, on-disk content of
+  # each branch's own declared `source` file (issue #2699) -- the live
+  # counterpart to sharedObligationViolationsFor above, which a test instead
+  # feeds synthetic contentBySource to prove the check can actually fail.
+  # Mirrors sliceRow's own `builtins.readFile (../templates/default/prompts/
+  # ${row.source})` idiom for reading a registry row's declared source file.
+  sharedObligationViolations = sharedObligationViolationsFor sharedObligations (
+    builtins.listToAttrs (
+      map (b: {
+        name = b.source;
+        value = builtins.readFile (../templates/default/prompts/${b.source});
+      }) (builtins.concatMap (o: o.branches) sharedObligations)
+    )
+  );
 }

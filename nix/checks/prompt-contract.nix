@@ -8,12 +8,13 @@
 # This file diffs each injectBlocks row's canonicalText against a
 # from-scratch slice of the actual source .md files on disk, and asserts
 # cross-row invariants across injectBlocks, validateMarkers,
-# forbiddenMarkers, and outcomeStatusSets (e.g. every forbiddenMarkers
-# row's severity/carrier/message shape, every buildTimeRejectVerdicts
-# branch) so a future consumer can't silently break real behavior -- it no
-# longer pins any of these registries' row count, row order, or per-row
-# literal field values, since those can only ever fail on a deliberate
-# data edit, not a real behavioral bug.
+# forbiddenMarkers, outcomeStatusSets, and sharedObligations (e.g. every
+# forbiddenMarkers row's severity/carrier/message shape, every
+# buildTimeRejectVerdicts branch, every sharedObligations row's real
+# fragment content) so a future consumer can't silently break real behavior
+# -- it no longer pins any of these registries' row count, row order, or
+# per-row literal field values, since those can only ever fail on a
+# deliberate data edit, not a real behavioral bug.
 { pkgs, ... }:
 let
   promptContract = import ../../lib/prompt-contract.nix;
@@ -367,8 +368,9 @@ in
   # Exercised here with fixtureObligations (a hand-built obligations list)
   # and synthetic contentBySource -- the point of taking contentBySource as
   # an explicit argument is that this stays testable with fixture content
-  # proving the check can actually fail, independent of whether any real row
-  # exists yet.
+  # proving the check can actually fail, independent of the real
+  # sharedObligations registry (exercised separately below, against the
+  # real on-disk fragments).
   prompt-contract-shared-obligation-violations-for-detects-missing-substring =
     let
       contentBySource = {
@@ -424,4 +426,47 @@ in
       { }
       "touch $out";
 
+  # Proves the real sharedObligations registry's own "commit-folding" row
+  # (issue #2699) can actually go red: exercises sharedObligationViolationsFor
+  # directly against that real row, but with the inline branch's content
+  # swapped for a synthetic string carrying none of the row's declared
+  # substrings while the orchestrator branch keeps its real, on-disk content.
+  # If a future edit ever drops the row (or the row's own `requiredSubstrings`
+  # list), this degrades to an empty result and fails loudly instead of
+  # silently passing. Filters `out` down to the commit-folding obligation's
+  # own violations before asserting count/branchId, so adding a second,
+  # unrelated obligation to the registry later can't fail this test on an
+  # incidental extra violation it was never about.
+  prompt-contract-shared-obligations-detects-drift-if-inline-branch-drops-folding =
+    let
+      brokenInlineContent = "no folding instruction of any kind in this fragment";
+      realOrchestratorContent = builtins.readFile ../../templates/default/prompts/fragments/commit-rework-orchestrator.md;
+      out = promptContract.sharedObligationViolationsFor promptContract.sharedObligations {
+        "fragments/review-loop-inline.md" = brokenInlineContent;
+        "fragments/commit-rework-orchestrator.md" = realOrchestratorContent;
+      };
+      commitFoldingViolations = builtins.filter (v: v.obligationId == "commit-folding") out;
+    in
+    assert assertMsg (builtins.length commitFoldingViolations == 1)
+      "sharedObligationViolationsFor must report exactly one commit-folding violation when the real sharedObligations registry's inline branch content is swapped for content missing the declared obligation, got ${toString (builtins.length commitFoldingViolations)}";
+    assert assertMsg ((builtins.head commitFoldingViolations).branchId == "review-loop-inline")
+      "sharedObligationViolationsFor must name the offending branch's id ('review-loop-inline'), got '${(builtins.head commitFoldingViolations).branchId}'";
+    pkgs.runCommand "prompt-contract-shared-obligations-detects-drift-if-inline-branch-drops-folding"
+      { }
+      "touch $out";
+
+  # Enforcing check (issue #2699): the real sharedObligations registry's rows
+  # must hold against the real, on-disk fragment content every branch
+  # declares -- fails loudly, naming the offending branch and missing
+  # substring(s), the moment a future edit to either fragment file silently
+  # drops a shared obligation the other branch still carries.
+  prompt-contract-shared-obligations-satisfied =
+    let
+      violations = promptContract.sharedObligationViolations;
+      messages = map (v: v.message) violations;
+    in
+    assert assertMsg (
+      violations == [ ]
+    ) "shared prompt-fork obligations violated:\n${concatStringsSep "\n" messages}";
+    pkgs.runCommand "prompt-contract-shared-obligations-satisfied" { } "touch $out";
 }
