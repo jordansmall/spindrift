@@ -12,7 +12,7 @@ the [README](../README.md); for vocabulary see [`CONTEXT.md`](../CONTEXT.md).
 
 | command                          | what it does                                                                    |
 | -------------------------------- | ------------------------------------------------------------------------------- |
-| `spindrift dispatch`             | launch one container per `ready-for-agent` issue, in dependency waves          |
+| `spindrift dispatch`             | launch one container per `ready-for-agent` issue, in dependency waves; exits with a distinct exit code (6) before claiming any issue if the required config-check tier fails, rather than silently marking issues agent-failed (issue #2568) |
 | `spindrift dispatch 42 57`       | dispatch exactly these issues, bypassing the label/barrier gates                |
 | `spindrift dispatch --no-build`  | fail fast if the image is absent instead of building it first (split build/run) |
 | `spindrift dispatch --yes`       | skip the confirmation prompt when dispatching unlabeled issues (alias `--force`)|
