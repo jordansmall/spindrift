@@ -6,6 +6,12 @@
 // effects. Dispatch validates a Plan and runs it: the claim/dispatch/settle
 // loop, MAX_PARALLEL/MAX_JOBS concurrency, and the Touches overlap check,
 // all in a single selection-pass-then-exit wave (ADR 0019).
+//
+// This package also tracks a second, unrelated "drain" (#2678): a
+// CONTINUOUS_DISPATCH stale-image pause, reported as a StaleDrainReport
+// (stale_drain_report.go, stale_drain_tracker.go) and named staleDrain*/StaleDrain*
+// throughout to keep it distinct from the MAX_JOBS refill drain above,
+// which every identifier here keeps naming plain "drain".
 package waves
 
 import (
@@ -168,16 +174,16 @@ type Config struct {
 	// unchanged behavior.
 	DiscoverReporting Discoverer
 
-	// OnDrainReport, when set, is called with every DrainReport RunContinuous
-	// emits (both the zero-outstanding-at-stale-time case and the
-	// drain-finished case, #2678) -- additive to emitDrainReport's own
-	// stdout print and drain.log append, which stay unchanged for every
-	// headless caller. Console's runStack wires this to
-	// Launcher.recordDrainReport so a stale-drain summary reaches a live TUI
-	// session, which never sees emitDrainReport's raw stdout write (it runs
-	// under tea.WithAltScreen()). nil (every non-Console construction site)
-	// means no-op; RunContinuous guards every call with a nil check.
-	OnDrainReport func(DrainReport)
+	// OnStaleDrainReport, when set, is called with every StaleDrainReport
+	// RunContinuous emits (both the zero-outstanding-at-stale-time case and
+	// the drain-finished case, #2678) -- additive to emitStaleDrainReport's
+	// own stdout print and stale-drain.log append, which stay unchanged for
+	// every headless caller. Console's runStack wires this to
+	// Launcher.recordStaleDrainReport so a stale-drain summary reaches a live TUI
+	// session, which never sees emitStaleDrainReport's raw stdout write (it
+	// runs under tea.WithAltScreen()). nil (every non-Console construction
+	// site) means no-op; RunContinuous guards every call with a nil check.
+	OnStaleDrainReport func(StaleDrainReport)
 
 	// pollInterval overrides RunContinuous's background refill-poll cadence
 	// (issue #1637) — zero (every production construction site) means "use

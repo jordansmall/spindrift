@@ -26,10 +26,10 @@ import (
 // overrides it for tests that can't wait out a real interval.
 const defaultPollInterval = 30 * time.Second
 
-// drainMarker is the file emitDrainReport appends each stale-drain report's
-// HostLog line to, under .spindrift/logs/ (#2678) -- named like engine.go's
-// blockedMarker rather than left as a scattered string literal.
-const drainMarker = "drain.log"
+// staleDrainMarker is the file emitStaleDrainReport appends each stale-drain
+// report's HostLog line to, under .spindrift/logs/ (#2678) -- named like
+// engine.go's blockedMarker rather than left as a scattered string literal.
+const staleDrainMarker = "stale-drain.log"
 
 // ErrImageStale is returned by RunContinuous when the freshness checker
 // reports the loaded image would be rebuilt against the current
@@ -173,21 +173,21 @@ func countReady(cfg Config, it forge.IssueTracker, cf forge.CodeForge, checkOver
 	return n
 }
 
-// emitDrainReport prints report to stdout and appends its HostLog line to
-// pwd's drain.log, swallowing any file error to stderr (#2678). Shared by
-// both emission sites -- the stale-transition branch's zero-outstanding
-// case (refill, below) and the in-flight completion goroutine's
-// drain-finished case -- so the open/write/close pattern is written once.
-// Also forwards report to cfg.OnDrainReport when set, so a Console session
-// -- which never sees this function's raw stdout write, since it runs under
-// tea.WithAltScreen() -- learns the same report through that callback
-// instead (#2678).
-func emitDrainReport(cfg Config, pwd string, report DrainReport) {
+// emitStaleDrainReport prints report to stdout and appends its HostLog line
+// to pwd's stale-drain.log, swallowing any file error to stderr (#2678).
+// Shared by both emission sites -- the stale-transition branch's
+// zero-outstanding case (refill, below) and the in-flight completion
+// goroutine's drain-finished case -- so the open/write/close pattern is
+// written once. Also forwards report to cfg.OnStaleDrainReport when set, so
+// a Console session -- which never sees this function's raw stdout write,
+// since it runs under tea.WithAltScreen() -- learns the same report through
+// that callback instead (#2678).
+func emitStaleDrainReport(cfg Config, pwd string, report StaleDrainReport) {
 	fmt.Print(report.Console())
-	if cfg.OnDrainReport != nil {
-		cfg.OnDrainReport(report)
+	if cfg.OnStaleDrainReport != nil {
+		cfg.OnStaleDrainReport(report)
 	}
-	logPath := filepath.Join(dispatch.HostLogDirFor(pwd), drainMarker)
+	logPath := filepath.Join(dispatch.HostLogDirFor(pwd), staleDrainMarker)
 	logFile, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "continuous: open %s: %v\n", logPath, err)
@@ -199,35 +199,35 @@ func emitDrainReport(cfg Config, pwd string, report DrainReport) {
 	}
 }
 
-// emitDrainReportReleasingMu runs emitDrainReport's blocking I/O (stdout
-// print, OnDrainReport callback, drain.log write) with mu released, then
-// re-acquires mu before returning -- held on entry, held on exit, released
-// only in between. This narrows the window mu is held around
-// emitDrainReport's call sites to just the mutations that need it, letting
-// other goroutines make progress while the I/O runs (#2775).
+// emitStaleDrainReportReleasingMu runs emitStaleDrainReport's blocking I/O
+// (stdout print, OnStaleDrainReport callback, stale-drain.log write) with mu
+// released, then re-acquires mu before returning -- held on entry, held on
+// exit, released only in between. This narrows the window mu is held around
+// emitStaleDrainReport's call sites to just the mutations that need it,
+// letting other goroutines make progress while the I/O runs (#2775).
 //
 // Design decision (#2775): the report is staged under mu, then emitted
 // unlocked, rather than emitted under mu throughout. Both call sites build
-// report by calling drain.finish(...) before invoking this function --
-// still holding mu at that point -- and finish is what sets drainEnd on
-// the shared drainTracker, the write that makes drain.inProgress() false
-// from then on (drain_tracker.go). That's the only state mutation the
-// single-emit invariant actually depends on, and it's already complete by
-// the time this function unlocks mu; the report value itself, once built,
-// is a private copy no other goroutine can reach. So no second drain
-// report can race in behind this one, and no extra lock is needed here --
-// mu's existing coverage of drain.finish already establishes the
-// invariant before this function does anything with it. What runs
+// report by calling staleDrain.finish(...) before invoking this function --
+// still holding mu at that point -- and finish is what sets staleDrainEnd on
+// the shared staleDrainTracker, the write that makes staleDrain.inProgress()
+// false from then on (stale_drain_tracker.go). That's the only state
+// mutation the single-emit invariant actually depends on, and it's already
+// complete by the time this function unlocks mu; the report value itself,
+// once built, is a private copy no other goroutine can reach. So no second
+// drain report can race in behind this one, and no extra lock is needed
+// here -- mu's existing coverage of staleDrain.finish already establishes
+// the invariant before this function does anything with it. What runs
 // unlocked is purely the "genuinely expensive/blocking" tail: the stdout
-// print, cfg.OnDrainReport (a caller-supplied hook -- the one production
-// wiring takes its own, different lock, but that's a property of that
-// wiring, not one this function can guarantee of an arbitrary callback),
-// and the log file write -- kept off mu's critical section so the resize
-// listener, poll ticker, and other refill triggers waiting on mu are not
-// blocked behind file I/O.
-func emitDrainReportReleasingMu(mu *sync.Mutex, cfg Config, pwd string, report DrainReport) {
+// print, cfg.OnStaleDrainReport (a caller-supplied hook -- the one
+// production wiring takes its own, different lock, but that's a property of
+// that wiring, not one this function can guarantee of an arbitrary
+// callback), and the log file write -- kept off mu's critical section so
+// the resize listener, poll ticker, and other refill triggers waiting on mu
+// are not blocked behind file I/O.
+func emitStaleDrainReportReleasingMu(mu *sync.Mutex, cfg Config, pwd string, report StaleDrainReport) {
 	mu.Unlock()
-	emitDrainReport(cfg, pwd, report)
+	emitStaleDrainReport(cfg, pwd, report)
 	mu.Lock()
 }
 
@@ -289,9 +289,9 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 	// race.
 	outstanding := 0
 	closed := false
-	// drain consolidates the stale-drain report state (#2678, #2774): see
-	// drainTracker in drain_tracker.go for the per-field rationale.
-	var drain drainTracker
+	// staleDrain consolidates the stale-drain report state (#2678, #2774):
+	// see staleDrainTracker in stale_drain_tracker.go for the per-field rationale.
+	var staleDrain staleDrainTracker
 	// now is cfg's test override (issue #2678, so the stale-drain report's
 	// freeSlotSecs accumulation is exactly assertable from a deterministic
 	// clock sequence rather than only >=0-checkable against real wall
@@ -326,7 +326,7 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 		if applicable && !isFresh {
 			stale = true
 			fmt.Printf("==> %s\n", msg)
-			drain.begin(now(), limiter.Cap())
+			staleDrain.begin(now(), limiter.Cap())
 			// heldBack only calls discover() for callers whose Discoverer is
 			// a pure query. Console's Queue.Discover (cfg.PreResolved, the
 			// only PreResolved caller today) claims the ready pick it
@@ -349,31 +349,31 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 			// DiscoverReporting closure instead.
 			switch {
 			case cfg.PendingCount != nil:
-				drain.heldBack = cfg.PendingCount()
+				staleDrain.heldBack = cfg.PendingCount()
 			case !cfg.PreResolved:
 				reportDiscover := discover
 				if cfg.DiscoverReporting != nil {
 					reportDiscover = cfg.DiscoverReporting
 				}
 				if issues, edges, _, failed, err := reportDiscover(); err != nil {
-					fmt.Fprintf(os.Stderr, "continuous: re-discover for drain report: %v\n", err)
-					drain.heldBackUnknown = true
+					fmt.Fprintf(os.Stderr, "continuous: re-discover for stale-drain report: %v\n", err)
+					staleDrain.heldBackUnknown = true
 				} else {
 					unclaimed := dropClaimed(issues, claimed)
 					checkOverlap := waveOverlapCheck(cfg, it, cf)
-					drain.heldBack = countReady(cfg, it, cf, checkOverlap, unclaimed, edges, failed)
+					staleDrain.heldBack = countReady(cfg, it, cf, checkOverlap, unclaimed, edges, failed)
 				}
 			default:
-				drain.heldBackUnknown = true
+				staleDrain.heldBackUnknown = true
 			}
 			if outstanding == 0 {
 				// Nothing in flight -- the drain is already over. Report it
 				// now rather than leaving it to the completion goroutine
 				// (slice 3), which never runs when nothing is outstanding.
-				// drainEnd is set to drainStart itself, not a fresh
-				// time.Now(), so Duration() is exactly zero rather than a
-				// near-zero timing artifact.
-				emitDrainReportReleasingMu(&mu, cfg, pwd, drain.finish(drain.drainStart))
+				// staleDrainEnd is set to staleDrainStart itself, not a
+				// fresh time.Now(), so Duration() is exactly zero rather
+				// than a near-zero timing artifact.
+				emitStaleDrainReportReleasingMu(&mu, cfg, pwd, staleDrain.finish(staleDrain.staleDrainStart))
 			}
 			return false
 		}
@@ -428,15 +428,15 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 			// the idle slot-time that elapsed since the last checkpoint here,
 			// using the pre-decrement outstanding count -- the busy-slot
 			// count over the interval that just ended -- to derive how many
-			// slots sat free across it. checkpointDrain uses drainCap, the
-			// cap actually in effect over that interval, not a live
-			// limiter.Cap() read (#2678 review finding); checkpointIfDraining
-			// is a no-op outside a drain.
-			drain.checkpointIfDraining(now(), limiter.Cap(), outstanding)
+			// slots sat free across it. checkpointStaleDrain uses
+			// staleDrainCap, the cap actually in effect over that interval,
+			// not a live limiter.Cap() read (#2678 review finding);
+			// checkpointIfStaleDraining is a no-op outside a drain.
+			staleDrain.checkpointIfStaleDraining(now(), limiter.Cap(), outstanding)
 			outstanding--
 			drainRefill()
-			if drain.inProgress() && outstanding == 0 {
-				emitDrainReportReleasingMu(&mu, cfg, pwd, drain.finish(drain.drainSlotAt))
+			if staleDrain.inProgress() && outstanding == 0 {
+				emitStaleDrainReportReleasingMu(&mu, cfg, pwd, staleDrain.finish(staleDrain.staleDrainSlotAt))
 			}
 			if outstanding == 0 {
 				idle.Broadcast()
@@ -480,8 +480,8 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 				// listen on Resized, not Grown, because a checkpoint is
 				// needed on EITHER direction, not just a raise -- a lower
 				// mid-drain is exactly as mis-attributing as a raise if the
-				// stale drainCap is left to bridge across it (#2678 review
-				// finding: the raise-only fix left the mirror-image
+				// stale staleDrainCap is left to bridge across it (#2678
+				// review finding: the raise-only fix left the mirror-image
 				// over-crediting bug on a lower). Loop drainRefill rather
 				// than a single refill() call: per Resized's signal-loss
 				// contract, one signal only means "at least one resize
@@ -493,14 +493,14 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 				mu.Lock()
 				// The resize that just woke this listener, if a drain is in
 				// progress, is exactly the moment the live cap changed:
-				// close out the interval that just ended at drainCap, the
-				// cap that held during it, before refreshing drainCap to
-				// the new value for the interval that starts now (#2678
-				// review finding -- this is what stops the new cap from
-				// being retroactively credited to the whole preceding
-				// interval at the next checkpoint). checkpointIfDraining is
-				// a no-op outside a drain.
-				drain.checkpointIfDraining(now(), limiter.Cap(), outstanding)
+				// close out the interval that just ended at staleDrainCap,
+				// the cap that held during it, before refreshing
+				// staleDrainCap to the new value for the interval that
+				// starts now (#2678 review finding -- this is what stops
+				// the new cap from being retroactively credited to the
+				// whole preceding interval at the next checkpoint).
+				// checkpointIfStaleDraining is a no-op outside a drain.
+				staleDrain.checkpointIfStaleDraining(now(), limiter.Cap(), outstanding)
 				drainRefill()
 				mu.Unlock()
 			case <-growDone:
