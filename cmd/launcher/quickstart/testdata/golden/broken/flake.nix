@@ -30,8 +30,8 @@
           # Deliberately broken guard fixture (issue #2565): infra.runtime is
           # set to a value outside the runtime enum, so a later nix check can
           # assert this scaffold throws at eval time against the real
-          # spindrift flake module. Not meant to render cleanly — no Go test
-          # reads this file.
+          # spindrift flake module. This comment block itself is
+          # byte-pinned by TestGoldenBroken_MatchesGithubExceptKnownDiffs (issue #2735).
           spindrift = {
             infra.runtime = "not-a-real-runtime";
             forge.repoSlug = "jordansmall/spindrift-consumer-example";

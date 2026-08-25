@@ -40,6 +40,12 @@
 let
   inherit (pkgs.lib) assertMsg;
 
+  # Single root for the runtime enum's valid values (ADR 0027) — shared with
+  # nix/checks/schema-drift.nix's runtime-values-gen check and the runner
+  # module's generated value set. "podman" (the first entry) is used below as
+  # a valid, in-enum replacement for the broken golden's out-of-enum value.
+  runtimeValues = import ../../lib/runtime-values.nix;
+
   # Evaluates a golden flake.nix's own `outputs` function against stubbed
   # inputs: the repo's locked nixpkgs/flake-parts (threaded through from
   # nix/checks/default.nix's `common`, the same locked inputs every other
@@ -128,4 +134,39 @@ in
     assert assertMsg (!result.success)
       "cmd/launcher/quickstart/testdata/golden/broken/flake.nix must fail to evaluate against the real spindrift flake module (infra.runtime is set to an out-of-enum value) — it evaluated successfully instead";
     pkgs.runCommand "quickstart-golden-broken-fails" { } "touch $out";
+
+  # AC2 of issue #2735: quickstart-golden-broken-fails above proves the
+  # broken golden fails, but builtins.tryEval only sees success/failure,
+  # never the thrown message text (same limitation documented at
+  # jira-status-mapping.nix's *-rejects-unknown-key check and drivers.nix's
+  # drivers-assert-shape-missing-attribute-throws), so that check alone
+  # can't rule out the failure being sourced in the `infra.runtime` key
+  # itself rather than its out-of-enum value. This sibling check pins
+  # acceptance, not just rejection, mirroring flakemodule-rejects-invalid-choice
+  # (nix/checks/equivalence.nix:1099, "a valid choice must still evaluate
+  # cleanly"): it takes the broken golden's own source text, swaps only
+  # its out-of-enum runtime value for a valid one (lib/runtime-values.nix),
+  # leaving the `infra.runtime` key itself untouched, and asserts the
+  # result evaluates successfully. That success, together with
+  # quickstart-golden-broken-fails' failure on the unmodified text, proves
+  # the earlier failure is sourced in the value, not the key. builtins.toFile
+  # writes content-addressed text at eval time with no derivation build
+  # (nix/checks/schema-drift.nix documents the same pattern), so this isn't
+  # import-from-derivation.
+  quickstart-golden-broken-with-valid-runtime-evaluates =
+    let
+      brokenText = builtins.readFile brokenGolden;
+      runtimeNeedle = ''infra.runtime = "not-a-real-runtime";'';
+      goldenValidRuntime = builtins.toFile "golden-broken-valid-runtime.nix" (
+        assert assertMsg (pkgs.lib.hasInfix runtimeNeedle brokenText)
+          "cmd/launcher/quickstart/testdata/golden/broken/flake.nix no longer contains the expected out-of-enum infra.runtime line ${runtimeNeedle} — quickstart-golden-broken-with-valid-runtime-evaluates' replaceStrings needle is stale";
+        builtins.replaceStrings
+          [ runtimeNeedle ]
+          [
+            ''infra.runtime = "${builtins.head runtimeValues}";''
+          ]
+          brokenText
+      );
+    in
+    mkEvaluatesCheck "quickstart-golden-broken-with-valid-runtime-evaluates" goldenValidRuntime;
 }
