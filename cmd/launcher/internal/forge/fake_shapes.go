@@ -70,6 +70,47 @@ func (f *Fake) AsLocalShaped() IssueTracker {
 	return localShapedIssueTracker{IssueTracker: f, f: f}
 }
 
+// localIssueFilerTracker adapts a Fake to expose IssueTracker plus both
+// LandingRecorder and IssueCloser (localShapedIssueTracker's local-only
+// write surfaces) together with HostPostedIssueFiler (issueFilerTracker's
+// host-mediated filing surface) — the real local adapter's actual combined
+// shape (local.go: RecordLanding and PostIssue are both implemented on the
+// same *localTracker). Neither AsLocalShaped nor AsIssueFiler alone can
+// stand in for it: AsLocalShaped promotes RecordLanding/CloseIssue but never
+// gained PostIssue, and AsIssueFiler embeds the IssueTracker interface value
+// rather than *Fake, so it doesn't promote RecordLanding/CloseIssue at all.
+// That left no Fake shape able to exercise ResearchSettle's local branch
+// (r.landing != nil) together with issue filing via
+// fileIssueIntentsDetailed (issue #2592) — this double closes that gap.
+type localIssueFilerTracker struct {
+	IssueTracker
+	f *Fake
+}
+
+func (l localIssueFilerTracker) RecordLanding(num, landing string) error {
+	return l.f.RecordLanding(num, landing)
+}
+
+func (l localIssueFilerTracker) CloseIssue(num string) error {
+	return l.f.CloseIssue(num)
+}
+
+func (l localIssueFilerTracker) PostIssue(title, body string, labels []string) (string, error) {
+	return l.f.postIssue(title, body, labels)
+}
+
+// AsLocalIssueFiler returns f wrapped so it satisfies IssueTracker,
+// LandingRecorder, IssueCloser, and HostPostedIssueFiler — the real local
+// adapter's combined shape (issue #2592) — but not MergeCloser, which only
+// github and forgejo implement.
+func (f *Fake) AsLocalIssueFiler() IssueTracker {
+	return localIssueFilerTracker{IssueTracker: f, f: f}
+}
+
+var _ HostPostedIssueFiler = localIssueFilerTracker{}
+var _ LandingRecorder = localIssueFilerTracker{}
+var _ IssueCloser = localIssueFilerTracker{}
+
 // forgejoShapedIssueTracker adapts a Fake to expose IssueTracker plus
 // MergeCloser — one surface the real forgejo adapter implements (see
 // forgejo.go) — but hides LandingRecorder and IssueCloser (embedding the

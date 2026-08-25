@@ -3,6 +3,7 @@ package settle
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/forge"
@@ -92,21 +93,96 @@ func (r *ResearchSettle) Settle(d dispatch.Dispatcher, num string, gen uint64, r
 		r.fail(num, o.Note)
 		return
 	}
-	if r.landing != nil || r.readOnly {
-		if !result.CommentFound || result.Comment == "" {
-			r.fail(num, "no verdict comment block")
-			return
+	backlink := fmt.Sprintf("Filed from research on #%s", num)
+	filed := fileIssueIntentsDetailed(r.it, num, result, "agent-research-finding", backlink)
+	if result.CommentFound && result.Comment != "" {
+		body := result.Comment
+		if section := buildFiledIssuesSection(filed); section != "" {
+			body = strings.TrimRight(body, "\n") + "\n\n" + section
 		}
-		if err := r.it.Comment(num, result.Comment); err != nil {
+		// If filing above already succeeded (filed is non-empty with
+		// successes) but this post then fails, we return here without
+		// applying a verdict label and without transitioning to Failed —
+		// num is left in agent-research-in-progress with issues already
+		// filed. A retry (re-applying agent-research) re-files them,
+		// producing duplicates, since nothing here consults the intents'
+		// own dedupTerms. Known, accepted non-idempotency (the
+		// file->comment->label order is what the spec requires), not an
+		// oversight.
+		if err := r.it.Comment(num, body); err != nil {
 			fmt.Printf("    #%s  status=comment-post-failed  !! %v\n", num, err)
 			return
 		}
+	} else if r.landing != nil || r.readOnly {
+		r.fail(num, "no verdict comment block")
+		return
 	}
 	if err := r.it.CompleteVerdict(num, verdict); err != nil {
 		fmt.Printf("    #%s  landing=%s  status=verdict-apply-failed  !! %v\n", num, o.Landing, err)
 		return
 	}
 	fmt.Printf("    #%s  landing=%s  status=%s  note=%s\n", num, o.Landing, o.Status, o.Note)
+}
+
+// buildFiledIssuesSection renders filed's successful entries as a "## Filed
+// issues" Markdown list linking each real URL, and degrades a failed entry
+// to an inline "title — summary" bullet in the same section (no URL to
+// link) rather than silently dropping it — a filing failure is non-fatal
+// and must still surface for a human to notice and retry. Returns "" for an
+// empty filed, so a comment carrying no intents is appended byte-for-byte
+// unchanged.
+//
+// Every title (success or failed) is Markdown-link-escaped before
+// rendering — f.Title is agent-chosen text that could otherwise contain `[`
+// or `]` and break the surrounding syntax. A successful entry only renders
+// as a clickable `[title](url)` link when f.URL looks like a real http(s)
+// URL; the local tracker's PostIssue returns a "local:<slug>" identifier
+// rather than a URL, which would otherwise render as a dead link, so that
+// (and any other non-http(s) URL) instead renders as a plain "title — url"
+// bullet, the same shape a failed filing uses.
+func buildFiledIssuesSection(filed []filedIntent) string {
+	if len(filed) == 0 {
+		return ""
+	}
+	lines := make([]string, 0, len(filed))
+	for _, f := range filed {
+		title := escapeMarkdownLinkText(f.Title)
+		if f.Failed {
+			lines = append(lines, fmt.Sprintf("- **%s** (filing failed) — %s", title, firstLine(f.Body)))
+			continue
+		}
+		if strings.HasPrefix(f.URL, "http://") || strings.HasPrefix(f.URL, "https://") {
+			lines = append(lines, fmt.Sprintf("- [%s](%s)", title, f.URL))
+			continue
+		}
+		lines = append(lines, fmt.Sprintf("- **%s** — %s", title, f.URL))
+	}
+	return "## Filed issues\n\n" + strings.Join(lines, "\n")
+}
+
+// firstLine returns s truncated to the text up to (not including) its first
+// newline, with any trailing \r trimmed — a filing-failure bullet renders a
+// finding's full original Body (which may be multi-line, with headings or
+// fenced code) inline in a single Markdown list item, and an unescaped
+// multi-line body would break out of the bullet and inject arbitrary
+// Markdown into the posted verdict comment. No ellipsis marker: the bullet
+// already reads as a summary, and the full body is either what got filed to
+// the issue itself (filing succeeded elsewhere in the same run) or is
+// otherwise recoverable from the Box's own output.
+func firstLine(s string) string {
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		s = s[:i]
+	}
+	return strings.TrimSuffix(s, "\r")
+}
+
+// escapeMarkdownLinkText escapes s for safe use inside a Markdown link's
+// text portion (or any bullet standing in for one): f.Title is agent-chosen
+// text, and an unescaped `[` or `]` would break the surrounding
+// `[title](url)` or bullet syntax.
+func escapeMarkdownLinkText(s string) string {
+	s = strings.ReplaceAll(s, "[", "\\[")
+	return strings.ReplaceAll(s, "]", "\\]")
 }
 
 // fail transitions num from InProgress to Failed (agent-research-failed),
