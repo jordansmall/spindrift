@@ -1010,8 +1010,8 @@ func renderHeader(m Model) string {
 		b.WriteString(roleStyle(RoleDim).Render(fmt.Sprintf("%s notice: %s", glyphNotice, m.RebuildStatus.BranchSwitchNotice)))
 		b.WriteString("\n")
 	}
-	if m.RebuildStatus.DrainSummary != "" {
-		b.WriteString(roleStyle(RoleDim).Render(fmt.Sprintf("%s notice: %s", glyphNotice, strings.TrimPrefix(m.RebuildStatus.DrainSummary, "==> "))))
+	if m.RebuildStatus.StaleDrainSummary != "" {
+		b.WriteString(roleStyle(RoleDim).Render(fmt.Sprintf("%s notice: %s", glyphNotice, strings.TrimPrefix(m.RebuildStatus.StaleDrainSummary, "==> "))))
 		b.WriteString("\n")
 	}
 	if m.DogfoodLive {
