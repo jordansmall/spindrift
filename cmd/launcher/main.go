@@ -1049,10 +1049,11 @@ func localloopConfig(c config) localloop.Config {
 func newSettle(c config, it forge.IssueTracker, lw *localloop.Wired, cf forge.CodeForge) settle.Settler {
 	if c.dispatchKind == dispatchKindResearch {
 		vl := researchVerdictLabels(c)
+		filerEnabled, _, _, _ := resolveAgentPresenceSignals(c.driver)
 		if c.boxForgeAndIssueAccess == "read-only" {
-			return settle.NewResearchSettleReadOnly(it, vl)
+			return settle.NewResearchSettleReadOnly(it, vl, filerEnabled)
 		}
-		return settle.NewResearchSettle(it, vl)
+		return settle.NewResearchSettle(it, vl, filerEnabled)
 	}
 	return settle.New(settleConfig(c, lw, cf), it, cf)
 }

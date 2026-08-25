@@ -38,7 +38,7 @@ func TestResearchSettle_Recommend(t *testing.T) {
 		},
 	}
 
-	s := NewResearchSettle(fc.AsNoLandingRecorder(), researchVerdictLabels)
+	s := NewResearchSettle(fc.AsNoLandingRecorder(), researchVerdictLabels, false)
 	s.Settle(dispatch.NewFake(), "42", 0, result)
 
 	if len(fc.CompleteVerdictCalls) != 1 {
@@ -66,7 +66,7 @@ func TestResearchSettle_Reject(t *testing.T) {
 		},
 	}
 
-	s := NewResearchSettle(fc.AsNoLandingRecorder(), researchVerdictLabels)
+	s := NewResearchSettle(fc.AsNoLandingRecorder(), researchVerdictLabels, false)
 	s.Settle(dispatch.NewFake(), "7", 0, result)
 
 	if len(fc.CompleteVerdictCalls) != 1 || fc.CompleteVerdictCalls[0].Verdict != forge.Reject {
@@ -86,7 +86,7 @@ func TestResearchSettle_Unclear(t *testing.T) {
 		},
 	}
 
-	s := NewResearchSettle(fc.AsNoLandingRecorder(), researchVerdictLabels)
+	s := NewResearchSettle(fc.AsNoLandingRecorder(), researchVerdictLabels, false)
 	s.Settle(dispatch.NewFake(), "8", 0, result)
 
 	if len(fc.CompleteVerdictCalls) != 1 || fc.CompleteVerdictCalls[0].Verdict != forge.Unclear {
@@ -108,7 +108,7 @@ func TestResearchSettle_CompleteVerdictError(t *testing.T) {
 		},
 	}
 
-	s := NewResearchSettle(fc.AsNoLandingRecorder(), researchVerdictLabels)
+	s := NewResearchSettle(fc.AsNoLandingRecorder(), researchVerdictLabels, false)
 	out := testutil.CaptureStdout(t, func() {
 		s.Settle(dispatch.NewFake(), "42", 0, result)
 	})
@@ -140,7 +140,7 @@ func TestResearchSettle_CompleteVerdictError_MissingInProgress(t *testing.T) {
 		},
 	}
 
-	s := NewResearchSettle(fc.AsNoLandingRecorder(), researchVerdictLabels)
+	s := NewResearchSettle(fc.AsNoLandingRecorder(), researchVerdictLabels, false)
 	out := testutil.CaptureStdout(t, func() {
 		s.Settle(dispatch.NewFake(), "42", 0, result)
 	})
@@ -170,7 +170,7 @@ func TestResearchSettle_Local_PostsCommentBlockThenVerdict(t *testing.T) {
 		CommentFound: true,
 	}
 
-	s := NewResearchSettle(fc, researchVerdictLabels)
+	s := NewResearchSettle(fc, researchVerdictLabels, false)
 	s.Settle(dispatch.NewFake(), "42", 0, result)
 
 	if len(fc.CommentCalls) != 1 {
@@ -199,7 +199,7 @@ func TestResearchSettle_Local_MissingCommentBlockTreatedAsBlocked(t *testing.T) 
 		CommentFound: false,
 	}
 
-	s := NewResearchSettle(fc, researchVerdictLabels)
+	s := NewResearchSettle(fc, researchVerdictLabels, false)
 	s.Settle(dispatch.NewFake(), "42", 0, result)
 
 	if len(fc.CommentCalls) != 0 {
@@ -234,7 +234,7 @@ func TestResearchSettle_Local_EmptyCommentBlockTreatedAsBlocked(t *testing.T) {
 		CommentFound: true,
 	}
 
-	s := NewResearchSettle(fc, researchVerdictLabels)
+	s := NewResearchSettle(fc, researchVerdictLabels, false)
 	s.Settle(dispatch.NewFake(), "42", 0, result)
 
 	if len(fc.CommentCalls) != 0 {
@@ -263,7 +263,7 @@ func TestResearchSettle_Github_NeverPostsComment(t *testing.T) {
 		},
 	}
 
-	s := NewResearchSettle(ghLike, researchVerdictLabels)
+	s := NewResearchSettle(ghLike, researchVerdictLabels, false)
 	s.Settle(dispatch.NewFake(), "42", 0, result)
 
 	if len(fc.CommentCalls) != 0 {
@@ -271,6 +271,53 @@ func TestResearchSettle_Github_NeverPostsComment(t *testing.T) {
 	}
 	if len(fc.CompleteVerdictCalls) != 1 || fc.CompleteVerdictCalls[0].Verdict != forge.Recommend {
 		t.Fatalf("want 1 CompleteVerdict(Recommend) call, got %+v", fc.CompleteVerdictCalls)
+	}
+}
+
+// TestResearchSettle_GithubReadWriteFilerEnabled_MissingCommentBlockTreatedAsBlocked
+// covers the unrecoverable-verdict-loss gap fixed by issue #2593: a github
+// (non-LandingRecorder) tracker, read-write (readOnly=false), with the Filer
+// provisioned (filerEnabled=true) forces gates_tracker.go's
+// researchForceRelay unconditionally, so the Box's rendered prompt is the
+// SPINDRIFT_COMMENT-relay-only research-verdict-github-readonly.md fragment
+// even though this is the read-write path -- the same "no other channel ever
+// posts the verdict" shape TestResearchSettle_GithubReadOnly_
+// MissingCommentBlockTreatedAsBlocked and TestResearchSettle_Local_
+// MissingCommentBlockTreatedAsBlocked already guard. Before this fix, this
+// exact combination (landing == nil, readOnly == false) fell through the
+// "else if r.landing != nil || r.readOnly" check silently and applied
+// CompleteVerdict with no comment ever posted -- the loss the
+// verdict-comment-relay validate.go reject row exists to prevent, reachable
+// here because Part A's box-side reject can still be bypassed (e.g. a
+// SPINDRIFT_PROMPT_DIR override dropping SPINDRIFT_COMMENT). No comment
+// posted, no verdict applied, transitioned to Failed instead.
+func TestResearchSettle_GithubReadWriteFilerEnabled_MissingCommentBlockTreatedAsBlocked(t *testing.T) {
+	fc := newResearchFake("42")
+	ghLike := fc.AsNoLandingRecorder()
+	result := dispatch.Result{
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: "42", Landing: "https://github.com/owner/repo/issues/42#issuecomment-1", Status: "recommend", Note: "grounded in code"},
+		},
+		CommentFound: false,
+	}
+
+	s := NewResearchSettle(ghLike, researchVerdictLabels, true)
+	s.Settle(dispatch.NewFake(), "42", 0, result)
+
+	if len(fc.CommentCalls) != 0 {
+		t.Errorf("want no comment posted, got %+v", fc.CommentCalls)
+	}
+	if len(fc.CompleteVerdictCalls) != 0 {
+		t.Errorf("want no verdict applied, got %+v", fc.CompleteVerdictCalls)
+	}
+	if len(fc.TransitionStateCalls) != 1 {
+		t.Fatalf("want 1 TransitionState call, got %d", len(fc.TransitionStateCalls))
+	}
+	call := fc.TransitionStateCalls[0]
+	if call.Num != "42" || call.From != forge.InProgress || call.To != forge.Failed {
+		t.Errorf("unexpected transition: %+v", call)
 	}
 }
 
@@ -287,7 +334,7 @@ func TestResearchSettle_Blocked(t *testing.T) {
 		},
 	}
 
-	s := NewResearchSettle(fc, researchVerdictLabels)
+	s := NewResearchSettle(fc, researchVerdictLabels, false)
 	s.Settle(dispatch.NewFake(), "9", 0, result)
 
 	if len(fc.CompleteVerdictCalls) != 0 {
@@ -309,7 +356,7 @@ func TestResearchSettle_MissingOutcome(t *testing.T) {
 	fc := newResearchFake("11")
 	result := dispatch.Result{Success: true}
 
-	s := NewResearchSettle(fc, researchVerdictLabels)
+	s := NewResearchSettle(fc, researchVerdictLabels, false)
 	s.Settle(dispatch.NewFake(), "11", 0, result)
 
 	if len(fc.TransitionStateCalls) != 1 {
@@ -341,7 +388,7 @@ func TestResearchSettle_GithubReadOnly_PostsCommentBlockThenVerdict(t *testing.T
 		CommentFound: true,
 	}
 
-	s := NewResearchSettleReadOnly(ghLike, researchVerdictLabels)
+	s := NewResearchSettleReadOnly(ghLike, researchVerdictLabels, false)
 	s.Settle(dispatch.NewFake(), "42", 0, result)
 
 	if len(fc.CommentCalls) != 1 {
@@ -371,7 +418,7 @@ func TestResearchSettle_GithubReadOnly_MissingCommentBlockTreatedAsBlocked(t *te
 		CommentFound: false,
 	}
 
-	s := NewResearchSettleReadOnly(ghLike, researchVerdictLabels)
+	s := NewResearchSettleReadOnly(ghLike, researchVerdictLabels, false)
 	s.Settle(dispatch.NewFake(), "42", 0, result)
 
 	if len(fc.CommentCalls) != 0 {
@@ -412,7 +459,7 @@ func TestResearchSettle_GithubReadWrite_FilesIntentsAndLinksVerdictComment(t *te
 		},
 	}
 
-	s := NewResearchSettle(ghLike, researchVerdictLabels)
+	s := NewResearchSettle(ghLike, researchVerdictLabels, false)
 	s.Settle(dispatch.NewFake(), "42", 0, result)
 
 	if len(fc.PostIssueCalls) != 1 {
@@ -470,7 +517,7 @@ func TestResearchSettle_Local_FilesIntentsAndLinksVerdictComment(t *testing.T) {
 		},
 	}
 
-	s := NewResearchSettle(localLike, researchVerdictLabels)
+	s := NewResearchSettle(localLike, researchVerdictLabels, false)
 	s.Settle(dispatch.NewFake(), "42", 0, result)
 
 	if len(fc.PostIssueCalls) != 1 {
@@ -520,7 +567,7 @@ func TestResearchSettle_FilingFailureDegradesInlineInComment(t *testing.T) {
 		},
 	}
 
-	s := NewResearchSettle(fc.AsIssueFiler(), researchVerdictLabels)
+	s := NewResearchSettle(fc.AsIssueFiler(), researchVerdictLabels, false)
 	s.Settle(dispatch.NewFake(), "42", 0, result)
 
 	if len(fc.CommentCalls) != 1 {
@@ -560,7 +607,7 @@ func TestResearchSettle_Local_CommentPostFailure_NeverAppliesVerdictLabel(t *tes
 		CommentFound: true,
 	}
 
-	s := NewResearchSettle(fc, researchVerdictLabels)
+	s := NewResearchSettle(fc, researchVerdictLabels, false)
 	s.Settle(dispatch.NewFake(), "42", 0, result)
 
 	if len(fc.CommentCalls) != 1 {
@@ -586,7 +633,7 @@ func TestResearchSettle_Local_NoIntentsNoCommentSection(t *testing.T) {
 		CommentFound: true,
 	}
 
-	s := NewResearchSettle(fc, researchVerdictLabels)
+	s := NewResearchSettle(fc, researchVerdictLabels, false)
 	s.Settle(dispatch.NewFake(), "42", 0, result)
 
 	if len(fc.CommentCalls) != 1 {
@@ -622,7 +669,7 @@ func TestResearchSettle_GithubReadWrite_EmptyRelayedCommentIgnored(t *testing.T)
 		CommentFound: true,
 	}
 
-	s := NewResearchSettle(ghLike, researchVerdictLabels)
+	s := NewResearchSettle(ghLike, researchVerdictLabels, false)
 	s.Settle(dispatch.NewFake(), "42", 0, result)
 
 	if len(fc.CommentCalls) != 0 {
@@ -657,7 +704,7 @@ func TestResearchSettle_CustomVerdictSet(t *testing.T) {
 		},
 	}
 
-	s := NewResearchSettle(fc.AsNoLandingRecorder(), custom)
+	s := NewResearchSettle(fc.AsNoLandingRecorder(), custom, false)
 	s.Settle(dispatch.NewFake(), "42", 0, result)
 
 	if len(fc.CompleteVerdictCalls) != 1 {
@@ -690,7 +737,7 @@ func TestResearchSettle_CustomVerdictSet_DefaultTokenNotRecognized(t *testing.T)
 		},
 	}
 
-	s := NewResearchSettle(fc.AsNoLandingRecorder(), custom)
+	s := NewResearchSettle(fc.AsNoLandingRecorder(), custom, false)
 	s.Settle(dispatch.NewFake(), "42", 0, result)
 
 	if len(fc.CompleteVerdictCalls) != 0 {
