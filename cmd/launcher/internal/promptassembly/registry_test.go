@@ -7,7 +7,7 @@ import (
 )
 
 // TestLoadRegistryParsesAllRows loads testdata/registry.json — the hand
-// transcription of every row in lib/fragments.nix (72 rows, reconciled via
+// transcription of every row in lib/fragments.nix (73 rows, reconciled via
 // `git log --oneline -- lib/fragments.nix` as: 67 as of issue #2526's
 // removal (commit 44d101bd) of the LAND_GIT_PUSH_READ_ONLY_STEP row issue
 // #2510 had added -- an eval-time assert now makes
@@ -25,10 +25,17 @@ import (
 // (70), plus 1 for the CAVEMAN_STEP_REVIEW row issue #2707 added (commit
 // b27ed6eb) on the same CAVEMAN_BAKED gate (71), plus 1 for the
 // CAVEMAN_STEP_RESEARCH row issue #2708 added (commit 48ba64a2, this
-// branch) on the same CAVEMAN_BAKED gate (72)) — and spot-checks a handful
-// of known rows rather than asserting the full payload verbatim, so this
-// test doesn't itself become the thing that silently drifts from
-// fragments.nix.
+// branch) on the same CAVEMAN_BAKED gate (72), plus 1 for the
+// RESEARCH_FILE_ISSUES_RELAY_STEP row issue #2593/ADR 0041 added on the
+// existing FILER_FILE_RELAY gate (73), plus 1 for the
+// FILER_LABEL_RELAY_RESEARCH_STEP row a review finding on issue #2593
+// added (this branch): filer-label-relay.md's write-mechanism gate split
+// from the combined FILER_FILE_RELAY into FILER_FILE_RELAY_WORK (kept on
+// the existing filer-label-relay.md row) and FILER_FILE_RELAY_RESEARCH (this
+// new row, on the new filer-label-relay-research.md fragment) (74)) — and
+// spot-checks a handful of known rows rather than asserting the full
+// payload verbatim, so this test doesn't itself become the thing that
+// silently drifts from fragments.nix.
 func TestLoadRegistryParsesAllRows(t *testing.T) {
 	f, err := os.Open("testdata/registry.json")
 	if err != nil {
@@ -41,7 +48,7 @@ func TestLoadRegistryParsesAllRows(t *testing.T) {
 		t.Fatalf("LoadRegistry: %v", err)
 	}
 
-	const wantRows = 72
+	const wantRows = 74
 	if len(reg.Rows) != wantRows {
 		t.Fatalf("len(reg.Rows) = %d, want %d", len(reg.Rows), wantRows)
 	}

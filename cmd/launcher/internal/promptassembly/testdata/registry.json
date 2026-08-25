@@ -81,9 +81,14 @@
     "var": "FILER_LABEL_DIRECT_FORGEJO_STEP"
   },
   {
-    "gate": "FILER_FILE_RELAY",
+    "gate": "FILER_FILE_RELAY_WORK",
     "fragment": "filer-label-relay.md",
     "var": "FILER_LABEL_RELAY_STEP"
+  },
+  {
+    "gate": "FILER_FILE_RELAY_RESEARCH",
+    "fragment": "filer-label-relay-research.md",
+    "var": "FILER_LABEL_RELAY_RESEARCH_STEP"
   },
   {
     "gate": "FILER_FILE_DIRECT_GH",
@@ -99,6 +104,11 @@
     "gate": "FILER_FILE_RELAY",
     "fragment": "filer-file-relay.md",
     "var": "FILER_FILE_RELAY_STEP"
+  },
+  {
+    "gate": "FILER_FILE_RELAY",
+    "fragment": "research-file-issues-relay.md",
+    "var": "RESEARCH_FILE_ISSUES_RELAY_STEP"
   },
   {
     "gate": "AUTO_FORMAT",

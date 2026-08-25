@@ -3,6 +3,7 @@ package promptassembly
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -979,6 +980,168 @@ func TestAssembleResearchSelfContainedRendersSelfContainedPrompt(t *testing.T) {
 	if result.Handoff.SessionMode != "initial" {
 		t.Errorf("Handoff.SessionMode = %q, want %q", result.Handoff.SessionMode, "initial")
 	}
+}
+
+// TestAssembleResearchFileFindingsRelay covers issue #2593 (ADR 0041): the
+// FILE FINDINGS delegate-to-filer section, gated on FILER_FILE_RELAY,
+// renders in both research-prompt.md (SelfContained == false) and
+// research-self-contained-prompt.md (SelfContained == true) whenever a
+// research dispatch has the Filer provisioned -- unconditionally, with no
+// orchestrator or BoxWriteEnabled condition (gates_tracker.go's
+// researchForceRelay) -- and never renders (the "renders exactly as today"
+// pin) when the Filer isn't provisioned at all.
+func TestAssembleResearchFileFindingsRelay(t *testing.T) {
+	reg := loadTestRegistry(t)
+
+	for _, selfContained := range []bool{false, true} {
+		selfContained := selfContained
+		name := "research-prompt"
+		if selfContained {
+			name = "research-self-contained-prompt"
+		}
+
+		t.Run(name+"/filer enabled read-write", func(t *testing.T) {
+			env := coveredEnv()
+			env.DispatchKind = "research"
+			env.SelfContained = selfContained
+			env.ResearchStatusEnum = "recommend|reject|unclear"
+			env.FilerEnabled = true
+			env.BoxWriteEnabled = true
+			env.OrchestratorEnabled = false
+
+			result, err := Assemble(env, reg)
+			if err != nil {
+				t.Fatalf("Assemble: %v", err)
+			}
+
+			if !strings.Contains(result.Prompt, "**File findings.**") {
+				t.Errorf("Prompt missing the FILE FINDINGS section: %q", result.Prompt)
+			}
+			if !strings.Contains(result.Prompt, "SPINDRIFT_ISSUE_INTENT") {
+				t.Errorf("Prompt missing SPINDRIFT_ISSUE_INTENT from research-file-issues-relay.md: %q", result.Prompt)
+			}
+			if !strings.Contains(result.Prompt, "agent-research-finding") {
+				t.Errorf("Prompt missing the agent-research-finding label mention: %q", result.Prompt)
+			}
+			if strings.Contains(result.Prompt, "${RESEARCH_FILE_ISSUES_RELAY_STEP}") {
+				t.Errorf("Prompt contains an unsubstituted RESEARCH_FILE_ISSUES_RELAY_STEP token: %q", result.Prompt)
+			}
+		})
+
+		t.Run(name+"/filer not enabled", func(t *testing.T) {
+			env := coveredEnv()
+			env.DispatchKind = "research"
+			env.SelfContained = selfContained
+			env.ResearchStatusEnum = "recommend|reject|unclear"
+			env.FilerEnabled = false
+
+			result, err := Assemble(env, reg)
+			if err != nil {
+				t.Fatalf("Assemble: %v", err)
+			}
+
+			if strings.Contains(result.Prompt, "**File findings.**") {
+				t.Errorf("Prompt contains the FILE FINDINGS section, want absent (Filer not provisioned): %q", result.Prompt)
+			}
+			if strings.Contains(result.Prompt, "SPINDRIFT_ISSUE_INTENT") {
+				t.Errorf("Prompt contains SPINDRIFT_ISSUE_INTENT, want absent (Filer not provisioned): %q", result.Prompt)
+			}
+		})
+
+		for _, boxWriteEnabled := range []bool{true, false} {
+			for _, orchestratorEnabled := range []bool{true, false} {
+				boxWriteEnabled, orchestratorEnabled := boxWriteEnabled, orchestratorEnabled
+				t.Run(fmt.Sprintf("%s/never direct-file boxWrite=%v orchestrator=%v", name, boxWriteEnabled, orchestratorEnabled), func(t *testing.T) {
+					env := coveredEnv()
+					env.DispatchKind = "research"
+					env.SelfContained = selfContained
+					env.ResearchStatusEnum = "recommend|reject|unclear"
+					env.FilerEnabled = true
+					env.BoxWriteEnabled = boxWriteEnabled
+					env.OrchestratorEnabled = orchestratorEnabled
+
+					result, err := Assemble(env, reg)
+					if err != nil {
+						t.Fatalf("Assemble: %v", err)
+					}
+
+					if strings.Contains(result.Prompt, "gh issue create --title") {
+						t.Errorf("Prompt contains filer-file-direct.md's direct-file literal, want never in a research prompt: %q", result.Prompt)
+					}
+				})
+			}
+		}
+	}
+}
+
+// TestAssembleFilerLabelRelayStepByKind covers a review finding on issue
+// #2593: filer-label-relay.md's write-mechanism gate used to be the
+// kind-agnostic FILER_FILE_RELAY, so a research dispatch with the Filer
+// provisioned rendered the work-worded sentence naming
+// `agent-review-finding` -- the label the launcher's work path
+// (settle/gate.go) applies -- even though the launcher's research path
+// (settle/research.go:97, fileIssueIntentsDetailed) actually applies
+// `agent-research-finding`. gates_tracker.go now splits FILER_FILE_RELAY
+// into FILER_FILE_RELAY_RESEARCH/FILER_FILE_RELAY_WORK so
+// filer-label-relay-research.md (naming the correct label) renders instead
+// for research, while filer-label-relay.md keeps rendering unchanged for
+// work. Checked on the filer's own rendered prompt, extracted from
+// AgentsJSON via agentPromptFromJSON -- not result.Prompt, which is the
+// delegating orchestrator/research prompt, not the filer's.
+func TestAssembleFilerLabelRelayStepByKind(t *testing.T) {
+	reg := loadTestRegistry(t)
+
+	t.Run("research + Filer: research label, never the work label", func(t *testing.T) {
+		env := coveredEnv()
+		env.DispatchKind = "research"
+		env.ResearchStatusEnum = "recommend|reject|unclear"
+		env.FilerEnabled = true
+		env.BoxWriteEnabled = true
+		env.OrchestratorEnabled = false
+		env.AgentsJSONTemplate = `{"filer":{"model":"m"}}`
+		env.AgentsPromptFiles = `{"filer":"filer-prompt.md"}`
+
+		result, err := Assemble(env, reg)
+		if err != nil {
+			t.Fatalf("Assemble: %v", err)
+		}
+
+		filerPrompt := agentPromptFromJSON(t, result.AgentsJSON, "filer")
+		if !strings.Contains(filerPrompt, "applies the `agent-research-finding` label itself") {
+			t.Errorf("filer prompt missing the agent-research-finding label-relay sentence: %q", filerPrompt)
+		}
+		if strings.Contains(filerPrompt, "applies the `agent-review-finding` label itself") {
+			t.Errorf("filer prompt contains the work-worded agent-review-finding label-relay sentence, want absent for research: %q", filerPrompt)
+		}
+		if strings.Contains(filerPrompt, "${FILER_LABEL_RELAY_RESEARCH_STEP}") {
+			t.Errorf("filer prompt contains an unsubstituted FILER_LABEL_RELAY_RESEARCH_STEP token: %q", filerPrompt)
+		}
+	})
+
+	t.Run("work relay (read-only + orchestrator): work label, never the research label", func(t *testing.T) {
+		env := coveredEnv()
+		env.FilerEnabled = true
+		env.BoxWriteEnabled = false
+		env.OrchestratorEnabled = true
+		env.AgentsJSONTemplate = `{"filer":{"model":"m"}}`
+		env.AgentsPromptFiles = `{"filer":"filer-prompt.md"}`
+
+		result, err := Assemble(env, reg)
+		if err != nil {
+			t.Fatalf("Assemble: %v", err)
+		}
+
+		filerPrompt := agentPromptFromJSON(t, result.AgentsJSON, "filer")
+		if !strings.Contains(filerPrompt, "applies the `agent-review-finding` label itself") {
+			t.Errorf("filer prompt missing the agent-review-finding label-relay sentence: %q", filerPrompt)
+		}
+		if strings.Contains(filerPrompt, "applies the `agent-research-finding` label itself") {
+			t.Errorf("filer prompt contains the research-worded agent-research-finding label-relay sentence, want absent for work: %q", filerPrompt)
+		}
+		if strings.Contains(filerPrompt, "${FILER_LABEL_RELAY_STEP}") {
+			t.Errorf("filer prompt contains an unsubstituted FILER_LABEL_RELAY_STEP token: %q", filerPrompt)
+		}
+	})
 }
 
 // TestAssembleResearchPromptCaveman covers issue #2708: research-prompt.md

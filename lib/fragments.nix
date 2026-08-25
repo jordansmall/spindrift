@@ -195,10 +195,28 @@
     fragment = "filer-label-direct-forgejo.md";
     var = "FILER_LABEL_DIRECT_FORGEJO_STEP";
   }
+  # filer-label-relay.md's write-mechanism gate was split by dispatch kind
+  # (issue #2593 review finding): the relay write-mechanism itself is
+  # identical for work and research (both go through the host-mediated
+  # SPINDRIFT_ISSUE_INTENT path, so FILER_FILE_RELAY above stays combined
+  # and keeps driving file-issues-relay.md/filer-file-relay.md unchanged
+  # for both kinds), but the label the launcher applies host-side once it
+  # files each relayed issue differs by kind -- agent-review-finding for
+  # work (settle/gate.go), agent-research-finding for research
+  # (settle/research.go:97) -- and this fragment's prose names that label
+  # explicitly. FILER_FILE_RELAY_WORK/FILER_FILE_RELAY_RESEARCH
+  # (gates_tracker.go) are the kind-split view of the same
+  # FILER_FILE_RELAY boolean, mutually exclusive and never both true, so
+  # exactly one of this row and the one below ever renders.
   {
-    gate = "FILER_FILE_RELAY";
+    gate = "FILER_FILE_RELAY_WORK";
     fragment = "filer-label-relay.md";
     var = "FILER_LABEL_RELAY_STEP";
+  }
+  {
+    gate = "FILER_FILE_RELAY_RESEARCH";
+    fragment = "filer-label-relay-research.md";
+    var = "FILER_LABEL_RELAY_RESEARCH_STEP";
   }
   {
     gate = "FILER_FILE_DIRECT_GH";
@@ -214,6 +232,24 @@
     gate = "FILER_FILE_RELAY";
     fragment = "filer-file-relay.md";
     var = "FILER_FILE_RELAY_STEP";
+  }
+  # The research-only filing step (issue #2593, ADR 0041): reuses the same
+  # FILER_FILE_RELAY gate the filer's own write-mechanism steps above use --
+  # a prior slice (gates_tracker.go) made that gate unconditionally true
+  # whenever DispatchKind == "research" and the Filer is provisioned,
+  # regardless of BOX_WRITE_ENABLED or the orchestrator flag, so reusing it
+  # here for real gives research prompts their own always-relay filing step
+  # for free, with no separate gate needed. Deliberately has no
+  # FILER_FILE_DIRECT_* counterpart: a research prompt must never render a
+  # direct-file fragment in any mode (this is the only row wiring this
+  # fragment in, and neither research-prompt.md nor
+  # research-self-contained-prompt.md ever reference a DIRECT-gated
+  # variable), so "never renders direct-file instructions" holds by
+  # construction, not by a runtime check.
+  {
+    gate = "FILER_FILE_RELAY";
+    fragment = "research-file-issues-relay.md";
+    var = "RESEARCH_FILE_ISSUES_RELAY_STEP";
   }
   {
     gate = "AUTO_FORMAT";
