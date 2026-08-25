@@ -1,8 +1,6 @@
 package main
 
 import (
-	"os"
-	"path/filepath"
 	"testing"
 
 	"spindrift.dev/launcher/internal/forge"
@@ -132,31 +130,10 @@ func TestRunContinuousDispatch_CleanSuccessPreservesHostTaintGuard_Halts(t *test
 	c.flakeImageAttr = ".#image"
 	c.imageTag = "spindrift:" + freshHash // the loaded image
 
-	dir := tempLogDir(t) // pwd: the checkout runContinuousDispatch's probe fetches from
-
-	// origin: a second repo dir's worth of history for pwd's "origin" remote
-	// to fetch — fetchBaseTip needs a real, stable git round-trip, and the
-	// rev it resolves must not move between the three calls below, so R stays
-	// the same guard key across steps 1 and 3.
-	origin := t.TempDir()
-	mustRunGit(t, origin, "init", "-b", "main")
-	mustRunGit(t, origin, "config", "user.email", "origin@example.com")
-	mustRunGit(t, origin, "config", "user.name", "Origin")
-	if err := os.WriteFile(filepath.Join(origin, "base.txt"), []byte("base"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	mustRunGit(t, origin, "add", "base.txt")
-	mustRunGit(t, origin, "commit", "-m", "base")
-
-	mustRunGit(t, dir, "init", "-b", "main")
-	mustRunGit(t, dir, "config", "user.email", "pwd@example.com")
-	mustRunGit(t, dir, "config", "user.name", "Pwd")
-	if err := os.WriteFile(filepath.Join(dir, "base.txt"), []byte("base"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	mustRunGit(t, dir, "add", "base.txt")
-	mustRunGit(t, dir, "commit", "-m", "base")
-	mustRunGit(t, dir, "remote", "add", "origin", origin)
+	// newStaleProbeRepo's dir/origin round-trip gives a real, stable git rev
+	// that must not move between the three calls below, so R stays the same
+	// guard key across steps 1 and 3.
+	dir, _ := newStaleProbeRepo(t)
 
 	it := forge.NewFake(testDispatchLabels)
 	it.SetIssue(forge.Issue{Number: "1", Labels: []string{c.label}})
@@ -169,9 +146,14 @@ func TestRunContinuousDispatch_CleanSuccessPreservesHostTaintGuard_Halts(t *test
 
 	staleEval := &freshness.Fake{OutPath: "/nix/store/" + staleHash + "-img"}
 	freshEval := &freshness.Fake{OutPath: "/nix/store/" + freshHash + "-img"}
+	// realizeFake is shared across all three calls below: this test's own
+	// purpose (host-taint guard behavior) is unrelated to realize, so a
+	// single fake standing in for `nix build` across every call is enough --
+	// no per-call assertions on it are needed here.
+	realizeFake := freshness.NewRealizerFake()
 
 	// --- call 1: stale, no prior guard -- content staleness, arm the guard at R ---
-	err1 := runContinuousDispatch(c, it, cf, dir, f, s, staleEval, lp)
+	err1 := runContinuousDispatch(c, it, cf, dir, f, s, staleEval, realizeFake, lp)
 	if got := exitCodeFor(err1); got != 4 {
 		t.Fatalf("call 1: exitCodeFor(err1) = %d, want 4 (waves.ErrImageStale)", got)
 	}
@@ -186,7 +168,7 @@ func TestRunContinuousDispatch_CleanSuccessPreservesHostTaintGuard_Halts(t *test
 	// unconditionally, so the guard armed by call 1 survives this unrelated
 	// clean success -- ANY clean success now leaves it intact, the
 	// originally reported issue-close being just one such success. ---
-	err2 := runContinuousDispatch(c, it, cf, dir, f, s, freshEval, lp)
+	err2 := runContinuousDispatch(c, it, cf, dir, f, s, freshEval, realizeFake, lp)
 	if err2 != nil {
 		t.Fatalf("call 2: runContinuousDispatch = %v, want nil (fresh probe + one dispatchable issue settles cleanly)", err2)
 	}
@@ -200,7 +182,7 @@ func TestRunContinuousDispatch_CleanSuccessPreservesHostTaintGuard_Halts(t *test
 	// --- call 3: stale again, at the SAME rev R -- a real host-taint
 	// signature. The guard survived (call 2 preserved it), so this correctly
 	// halts (exit 5) instead of misclassifying as content staleness. ---
-	err3 := runContinuousDispatch(c, it, cf, dir, f, s, staleEval, lp)
+	err3 := runContinuousDispatch(c, it, cf, dir, f, s, staleEval, realizeFake, lp)
 	// THIS IS THE REGRESSION #2128 GUARDS AGAINST: a same-rev repeat after a
 	// rebuild attempt (call 1's exit 4 is exactly the dogfood loop's rebuild
 	// trigger) must be reported as errImageHostTainted (exit 5) — see

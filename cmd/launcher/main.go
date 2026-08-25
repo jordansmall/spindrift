@@ -1487,7 +1487,7 @@ func run(lc *launchContext) error {
 	// operator-driven `spindrift recover <n>`, fired by the agent-recover
 	// label — see recoverByNumber and .github/workflows/agent-recover.yml.
 	if resolveOrigin(c) == waves.OriginDiscovered && c.continuousDispatch {
-		return runContinuousDispatch(c, it, cf, pwd, f, s, runner.NixEvaluator{}, lp)
+		return runContinuousDispatch(c, it, cf, pwd, f, s, runner.NixEvaluator{}, runner.NixRealizer{}, lp)
 	}
 
 	issues, origin, err := discoverIssues(c, it)
@@ -1535,8 +1535,11 @@ func run(lc *launchContext) error {
 // console package's own Discoverer, which pre-filters claimed/dissolved
 // picks — a zero-issue result there doesn't mean the tracker itself is
 // empty (#1645). eval is injected so tests can substitute a Fake instead of
-// shelling out to nix — mirrors previewIssues's own eval parameter.
-func runContinuousDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, pwd string, f *dispatch.Factory, s settle.Settler, eval freshness.Evaluator, lp reconcile.LivenessProbe) error {
+// shelling out to nix — mirrors previewIssues's own eval parameter. realize
+// is injected for the same reason: tests substitute a RealizerFake instead
+// of shelling out to `nix build` for the background base-tip realize
+// (#2679).
+func runContinuousDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, pwd string, f *dispatch.Factory, s settle.Settler, eval freshness.Evaluator, realize freshness.Realizer, lp reconcile.LivenessProbe) error {
 	firstQuery := true
 	firstQueryEmpty := false
 	var firstQueryErr error
@@ -1585,6 +1588,7 @@ func runContinuousDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, 
 		if res.Applicable && !res.Fresh {
 			staleResult = res
 		}
+		freshness.RealizeTip(realize, pwd, res, c.flakeImageAttr)
 		return res.Applicable, res.Fresh, res.Message
 	}
 
