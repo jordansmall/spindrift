@@ -148,33 +148,45 @@ let
     )
   ) nonClaudeDrivers;
 
-  # Shared build environment for the bats-shard-N derivations (batsShardChecks
-  # below): nativeBuildInputs plus the env vars their suites read (harness
-  # binaries, contract fixtures, hook scripts, driver registry data).
-  batsEnv = {
-    nativeBuildInputs = [
-      pkgs.bats
-      pkgs.bash
-      pkgs.git
-      pkgs.gettext
-      pkgs.coreutils
-      pkgs.gnugrep
-      pkgs.gnused
-      pkgs.jq
-    ];
-    # The launcher commands under test overlay `gh` with the fake
-    # (batsHarness/customHarness/dockerHarness), since the real `gh`
-    # is pinned into their runtimeInputs PATH and would otherwise
-    # shadow a PATH-injected fake.
-    RUN_CMD = "${batsHarness.internals.run}/bin/run";
-    SPINDRIFT_CMD = "${batsHarness.spindrift}/bin/spindrift";
-    BUILD_CMD = "${batsHarness.internals.build}/bin/build";
-    BUILD_NO_RUNTIME_CMD = "${noRuntimeHarness.internals.build}/bin/build";
-    CUSTOM_RUN_CMD = "${customHarness.internals.run}/bin/run";
-    DOCKER_RUN_CMD = "${dockerHarness.internals.run}/bin/run";
-    BWRAP_RUN_CMD = "${bwrapHarness.internals.run}/bin/run";
-    BWRAP_BUILD_CMD = "${bwrapHarness.internals.build}/bin/build";
-    IMAGE_PATH = batsHarness.internals.imagePath;
+  # nativeBuildInputs shared by every bats-shaped derivation in this file
+  # (batsLightweightEnv/batsImageEnv below, plus outcomeBatsChecks and
+  # bats-prompt-contract-parity, which still hand-duplicate this list inline
+  # pending a later migration slice -- issue #2751).
+  batsNativeBuildInputs = [
+    pkgs.bats
+    pkgs.bash
+    pkgs.git
+    pkgs.gettext
+    pkgs.coreutils
+    pkgs.gnugrep
+    pkgs.gnused
+    pkgs.jq
+  ];
+
+  # The default DRIVER_SESSION_RESUMABLE value batsLightweightEnv exports:
+  # claude (the only Driver run through the `bats` derivations built on
+  # batsLightweightEnv/batsEnv) is resumable, mirroring the bats-outcome-<name>
+  # derivations' own per-driver value computed from sessionCacheDirRelative
+  # (see the DRIVER_SESSION_RESUMABLE comment further down). Pulled out as its
+  # own binding so a future per-Driver consumer of batsLightweightEnv can
+  # override it via `batsLightweightEnv // { DRIVER_SESSION_RESUMABLE = ...; }`
+  # instead of forking the whole attrset.
+  batsDriverSessionResumableDefault = "1";
+
+  # Split (issue #2751) so a future lightweight bats-shaped consumer -- one
+  # that never touches $RUN_CMD/$BUILD_CMD/friends or $IMAGE_PATH -- can reuse
+  # batsLightweightEnv without paying for the OCI image realization those
+  # image-build-forcing vars trigger (same "deliberately excluded from image
+  # realization" reasoning as driver-registry-outcome-extraction and
+  # bats-prompt-contract-parity above). batsEnv below recombines the two for
+  # the existing bats-shard-N consumers, unchanged.
+  #
+  # batsLightweightEnv: nativeBuildInputs plus every env var that doesn't
+  # force the image build -- contract fixtures, driver preambles, skills
+  # harness vars, prompt/fragment registries, and the wait_for_log_lines
+  # timeout override.
+  batsLightweightEnv = {
+    nativeBuildInputs = batsNativeBuildInputs;
     ENTRYPOINT = ../../agent/entrypoint.sh;
     FORMAT_TRANSCRIPT_SCRIPT = ../../agent/format-transcript.sh;
     # The PreToolUse hook script baked into the image at
@@ -243,7 +255,7 @@ let
     # #2261 slices 4-6): claude is resumable, so this mirrors the
     # bats-outcome-<name> derivations' own per-driver
     # DRIVER_SESSION_RESUMABLE computed from sessionCacheDirRelative.
-    DRIVER_SESSION_RESUMABLE = "1";
+    DRIVER_SESSION_RESUMABLE = batsDriverSessionResumableDefault;
     # Harnesses with baked skills for skills-precedence tests.
     SKILLS_RUN_CMD = "${skillsHarness.internals.run}/bin/run";
     SKILLS_BWRAP_RUN_CMD = "${skillsBwrapHarness.internals.run}/bin/run";
@@ -291,6 +303,32 @@ let
     # nothing else supplies them.
     WAIT_FOR_LOG_LINES_TIMEOUT = "10";
   };
+
+  # batsImageEnv: just the vars that force the OCI image build --
+  # batsShardChecks' suites overlay `gh` with the fake and exercise `run`/
+  # `build` end-to-end against the launcher, so they need the image realized;
+  # a future lightweight consumer that skips these vars entirely never
+  # triggers that realization.
+  batsImageEnv = {
+    # The launcher commands under test overlay `gh` with the fake
+    # (batsHarness/customHarness/dockerHarness), since the real `gh`
+    # is pinned into their runtimeInputs PATH and would otherwise
+    # shadow a PATH-injected fake.
+    RUN_CMD = "${batsHarness.internals.run}/bin/run";
+    SPINDRIFT_CMD = "${batsHarness.spindrift}/bin/spindrift";
+    BUILD_CMD = "${batsHarness.internals.build}/bin/build";
+    BUILD_NO_RUNTIME_CMD = "${noRuntimeHarness.internals.build}/bin/build";
+    CUSTOM_RUN_CMD = "${customHarness.internals.run}/bin/run";
+    DOCKER_RUN_CMD = "${dockerHarness.internals.run}/bin/run";
+    BWRAP_RUN_CMD = "${bwrapHarness.internals.run}/bin/run";
+    BWRAP_BUILD_CMD = "${bwrapHarness.internals.build}/bin/build";
+    IMAGE_PATH = batsHarness.internals.imagePath;
+  };
+
+  # batsEnv: the lightweight and heavyweight pieces recombined, kept under the
+  # original name so batsShardChecks (the only current consumer) below needs
+  # zero changes and keeps building the exact same derivations it always has.
+  batsEnv = batsLightweightEnv // batsImageEnv;
 
   # Shared builder setup for the bats-shard-N derivations: stage a writable copy of
   # tests/, rewrite the fakes' shebangs for the sandboxed build host (see
