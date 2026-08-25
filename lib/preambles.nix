@@ -104,6 +104,7 @@ rec {
       prefetch,
       imagePath,
       imageHash,
+      launcherCurrencyHash,
       imageName,
       runtime,
       imageDrv,
@@ -172,6 +173,7 @@ rec {
       # runs on every platform including bwrap/darwin), so this correctly
       # renders against system -- the host's own system.
       FLAKE_LAUNCHER_ATTR = launcherCurrencyAttr system;
+      LAUNCHER_CURRENCY_HASH = launcherCurrencyHash;
       HOST_MEDIATED_REMOTE = if hostMediatedRemote then "true" else "false";
       OUTBOX_RELAY_CAPABLE = if outboxRelayCapable then "true" else "false";
       IN_BOX_UNREACHABLE_TRACKER = if inBoxUnreachableTracker then "true" else "false";
@@ -197,6 +199,7 @@ rec {
       runtime,
       imagePath,
       imageHash,
+      launcherCurrencyHash,
       imageName,
       imageDrv,
       nixBuilderImage,
@@ -224,6 +227,7 @@ rec {
     // {
       RUNNER_KIND = runnerKind;
       FLAKE_LAUNCHER_ATTR = launcherCurrencyAttr system;
+      LAUNCHER_CURRENCY_HASH = launcherCurrencyHash;
     };
 
   # Every artifact key runArtifacts/buildArtifacts can emit, across both
@@ -254,6 +258,7 @@ rec {
           prefetch = "dummy";
           imagePath = "dummy";
           imageHash = "dummy";
+          launcherCurrencyHash = "dummy";
           imageName = "dummy";
           runtime = "dummy";
           imageDrv = "dummy";
@@ -283,6 +288,7 @@ rec {
           runtime = "dummy";
           imagePath = "dummy";
           imageHash = "dummy";
+          launcherCurrencyHash = "dummy";
           imageName = "dummy";
           imageDrv = "dummy";
           nixBuilderImage = "dummy";

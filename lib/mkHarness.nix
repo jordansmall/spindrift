@@ -1041,6 +1041,13 @@ let
       ''
   );
 
+  # Extracts the 32-char nix store hash from a store path as PLAIN TEXT. Nix
+  # store paths are always `/nix/store/<32-char-base32-hash>-<name>`, so
+  # characters 11–42 (0-indexed) are the hash. Shared by imageHash and
+  # launcherCurrencyHash below so the prefix-length/hash-width magic numbers
+  # live in exactly one place.
+  storeHashOf = path: builtins.substring 11 32 path;
+
   # The image's store path as PLAIN TEXT (context discarded), so the launcher
   # commands embed the exact Linux image path WITHOUT taking a build-time
   # dependency on it. That lets `build`/`run` — and `nix flake check` — build
@@ -1048,11 +1055,10 @@ let
   # `nix build .#agent-image`.
   imagePath = builtins.unsafeDiscardStringContext (toString image);
 
-  # The 32-char nix store hash extracted from imagePath. Nix store paths are
-  # always `/nix/store/<32-char-base32-hash>-<name>`, so characters 11–42
-  # (0-indexed) are the hash. Used as the content-hash image tag so that a
-  # changed flake produces a new hash → the old tag is absent → run rebuilds.
-  imageHash = builtins.substring 11 32 imagePath;
+  # The nix store hash extracted from imagePath. Used as the content-hash
+  # image tag so that a changed flake produces a new hash → the old tag is
+  # absent → run rebuilds.
+  imageHash = storeHashOf imagePath;
 
   # The image's `.drv` path, also context-discarded. `build` realizes this with
   # `nix build "<drv>^*"` before loading, so a fresh machine builds the image
@@ -1103,6 +1109,7 @@ let
       agentEnvPath
       imagePath
       imageHash
+      launcherCurrencyHash
       runtime
       imageDrv
       nixBuilderImage
@@ -1135,6 +1142,7 @@ let
       runtime
       imagePath
       imageHash
+      launcherCurrencyHash
       imageDrv
       nixBuilderImage
       linuxSystem
@@ -1291,6 +1299,18 @@ let
     ];
     meta.license = lib.licenses.mit;
   };
+
+  # launcherCurrencyBin's store path as PLAIN TEXT (context discarded), same
+  # trick as imagePath above -- nix derivation output paths are computed from
+  # the derivation's hash at eval time, so reading this does NOT force a
+  # build.
+  launcherCurrencyPath = builtins.unsafeDiscardStringContext (toString launcherCurrencyBin);
+
+  # The nix store hash extracted from launcherCurrencyPath, via the same
+  # storeHashOf helper imageHash above uses. Used by the freshness probe to
+  # compare the loaded launcher's store hash against the one the current
+  # flake would produce.
+  launcherCurrencyHash = storeHashOf launcherCurrencyPath;
 
   # Single-verb wrapper execing `launcher build`. The `apps.build`/
   # `packages.build` flake outputs that once forwarded to this were removed
