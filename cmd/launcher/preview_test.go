@@ -183,6 +183,59 @@ func TestPreviewIssues_PrintsImageFreshnessLine(t *testing.T) {
 	}
 }
 
+// TestPreviewIssues_PrintsLauncherCurrencyLine verifies that previewIssues
+// always prints the launcher-currency line, naming the launcher's own
+// FLAKE_LAUNCHER_ATTR alongside the image-freshness line (issue #2677) — a
+// plain, unconditional print of the attribute name already carried on
+// config, not a freshness verdict.
+func TestPreviewIssues_PrintsLauncherCurrencyLine(t *testing.T) {
+	c := baseConfig()
+	c.repoSlug = "owner/repo"
+	c.label = "ready-for-agent"
+	c.flakeLauncherAttr = ".#packages.x86_64-linux.launcher-currency"
+	fc := forge.NewFake()
+
+	var buf bytes.Buffer
+	if err := previewIssues(c, fc, fc, &buf, nil, t.TempDir(), nil); err != nil {
+		t.Fatalf("previewIssues: %v", err)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "launcher-currency-attr:") {
+		t.Errorf("output missing launcher-currency-attr line; got:\n%s", out)
+	}
+	if !strings.Contains(out, ".#packages.x86_64-linux.launcher-currency") {
+		t.Errorf("output missing launcher-currency attribute value; got:\n%s", out)
+	}
+}
+
+// TestPreviewIssues_PrintsLauncherCurrencyPlaceholderWhenUnset verifies that
+// when FLAKE_LAUNCHER_ATTR is unset (c.flakeLauncherAttr == "", the unwrapped
+// `go run` case), previewIssues prints an explicit "(unset)" placeholder on
+// the launcher-currency line instead of a bare, valueless trailing colon —
+// matching the adjacent image-freshness line, which always carries a
+// non-empty res.Message (issue #2677 review finding).
+func TestPreviewIssues_PrintsLauncherCurrencyPlaceholderWhenUnset(t *testing.T) {
+	c := baseConfig()
+	c.repoSlug = "owner/repo"
+	c.label = "ready-for-agent"
+	c.flakeLauncherAttr = ""
+	fc := forge.NewFake()
+
+	var buf bytes.Buffer
+	if err := previewIssues(c, fc, fc, &buf, nil, t.TempDir(), nil); err != nil {
+		t.Fatalf("previewIssues: %v", err)
+	}
+
+	out := buf.String()
+	if strings.Contains(out, "launcher-currency-attr: \n") {
+		t.Errorf("launcher-currency-attr line printed bare with no value; got:\n%s", out)
+	}
+	if !strings.Contains(out, "launcher-currency-attr: (unset)\n") {
+		t.Errorf("output missing launcher-currency-attr placeholder for unset attr; got:\n%s", out)
+	}
+}
+
 // TestPreviewIssues_BareAnnotatesBlockers verifies that bare preview (no
 // positionals) annotates each issue with its inline blocker references.
 func TestPreviewIssues_BareAnnotatesBlockers(t *testing.T) {
