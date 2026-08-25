@@ -416,6 +416,92 @@ let
       "docs/reference.md: Subagent roster section must restate lib/roster-schema-defaults.nix's rosterDefaults effort literals as `${wantEfforts}` — it has drifted from the table, update the doc (issue #2506)";
     doc;
 
+  # Isolates the "### Option surface" table section of a docs/reference.md-
+  # shaped doc string, else throws. Mirrors rosterDocSection's split-on-
+  # heading-marker approach rather than a whole-doc regex, for the same
+  # evaluator-stack reason (issue #2436's comment above rosterDocSection).
+  # Stops at the next line matching "\n#+ " (mirroring rosterDocSection's own
+  # split marker), which today isn't a "### "/"## " sibling heading at all —
+  # it's the "# BEGIN GENERATED SETTINGS EXAMPLE LABELS" comment line inside
+  # the section's ```nix fenced code block, whose leading "#" the same regex
+  # matches.
+  optionSurfaceDocSection =
+    doc:
+    let
+      afterHeading = builtins.split "\n### Option surface\n" doc;
+    in
+    if builtins.length afterHeading < 3 then
+      throw "docs/reference.md: missing the \"### Option surface\" heading"
+    else
+      builtins.elemAt (builtins.split "\n#+ " (builtins.elemAt afterHeading 2)) 0;
+
+  # Every mkHarness parameter with a real domain-tree path (issue #2739): the
+  # union of lib/structural-paths.nix's 13 entries and lib/byname-paths.nix's
+  # single byName entry, each resolved to its canonical
+  # perSystem.spindrift.<domain-path> spelling. The Option surface table's
+  # other four rows (system, the combined scoutPrompt/reviewPrompt/
+  # filerPrompt row, settings, nixBuilderImage) are mkHarness-only/
+  # auto-supplied/flake-module-only and have no domain path, so they're
+  # deliberately excluded here.
+  optionSurfaceWantEntries =
+    let
+      inherit (pkgs.lib) concatStringsSep attrNames;
+      combined = structuralPaths // byNamePaths;
+    in
+    map (name: {
+      inherit name;
+      path = "perSystem.spindrift.${concatStringsSep "." combined.${name}}";
+      source = if structuralPaths ? ${name} then "lib/structural-paths.nix" else "lib/byname-paths.nix";
+    }) (attrNames combined);
+
+  # Isolates a single option's own table row out of the wider Option surface
+  # section, else "" (no match). optionSurfaceDocSection's section is too
+  # wide a scope for assertOptionSurfaceDocPathsOk's per-option check below:
+  # a `hasInfix e.path section` against the whole section would pass
+  # vacuously if e.path merely appears somewhere in the section's prose (the
+  # intro paragraphs above the table) or in a *different* option's row, even
+  # though that option's own row has drifted — the same section-wide
+  # vacuity issue #2514's review narrowed dogfoodParagraph to avoid (see its
+  # comment above). Table rows are markdown table rows starting with
+  # `` | `<option-name>` `` (one per line), so splitting on that literal
+  # prefix and taking the segment up to the next newline isolates the row.
+  optionSurfaceRowFor =
+    section: name:
+    let
+      inherit (pkgs.lib) escapeRegex;
+      afterName = builtins.split "\n\\| `${escapeRegex name}`" section;
+    in
+    if builtins.length afterName < 3 then
+      ""
+    else
+      builtins.elemAt (builtins.split "\n" (builtins.elemAt afterName 2)) 0;
+
+  # Asserts the isolated Option surface section states every
+  # optionSurfaceWantEntries path verbatim in that option's own table row,
+  # else throws naming the missing option(s), their expected path, and the
+  # source-of-truth registry file (issue #2739). Factored out (like
+  # assertRosterDocFlakePathOk above) so option-surface-doc-paths-guard can
+  # exercise this exact assertion path against a synthetic doc, not only the
+  # real docs/reference.md content — dropping the hasInfix assert here would
+  # make that guard fail too, not stay silently green.
+  assertOptionSurfaceDocPathsOk =
+    { doc, wantEntries }:
+    let
+      inherit (pkgs.lib)
+        assertMsg
+        hasInfix
+        concatStringsSep
+        filter
+        ;
+      section = optionSurfaceDocSection doc;
+      missing = filter (e: !(hasInfix e.path (optionSurfaceRowFor section e.name))) wantEntries;
+    in
+    assert assertMsg (missing == [ ])
+      "docs/reference.md: Option surface table must show each option's canonical perSystem.spindrift.<domain-path> spelling — missing/drifted for: ${
+        concatStringsSep ", " (map (e: "${e.name} (want `${e.path}`, derived from ${e.source})") missing)
+      } — add/update the domain-path column (issue #2739)";
+    doc;
+
   # Asserts fixture.schemaDefaults restates schema's own .default per key,
   # else throws -- the anti-vacuity check for lib/default-model-fixture.nix
   # (issue #2514 AC3): a lib/env-schema.nix default bump with the fixture
@@ -2193,6 +2279,133 @@ in
     assert assertMsg (!result.success)
       "roster-doc-efforts-guard: expected assertRosterDocEffortsOk to reject a synthetic doc whose Subagent roster section states a wrong effort restatement, but it evaluated successfully";
     pkgs.runCommand "roster-doc-efforts-guard" { } "touch $out";
+
+  # docs/reference.md's Option surface table must show every mkHarness
+  # parameter with a real domain-tree path (lib/structural-paths.nix's 13
+  # entries plus lib/byname-paths.nix's byName) as its canonical
+  # perSystem.spindrift.<domain-path> spelling; this pins that column to the
+  # registries instead of letting the two drift silently (issue #2739).
+  # Isolates the "### Option surface" section the same way roster-doc-
+  # flake-path isolates "#### Subagent roster", for the same evaluator-stack
+  # reason (issue #2436).
+  option-surface-doc-paths =
+    let
+      doc = builtins.readFile ../../docs/reference.md;
+    in
+    assert
+      (assertOptionSurfaceDocPathsOk {
+        inherit doc;
+        wantEntries = optionSurfaceWantEntries;
+      }) == doc;
+    pkgs.runCommand "option-surface-doc-paths" { } "touch $out";
+
+  # Regression guard (issue #2739): the doc-drift assertion above must
+  # actually detect a missing/drifted domain path, not just pass vacuously.
+  # Runs assertOptionSurfaceDocPathsOk — the exact function
+  # option-surface-doc-paths calls — against a synthetic doc whose Option
+  # surface section states every wanted path except one, via tryEval, so
+  # this fails if the hasInfix assert is ever dropped from
+  # assertOptionSurfaceDocPathsOk.
+  option-surface-doc-paths-guard =
+    let
+      inherit (pkgs.lib) assertMsg concatStringsSep filter;
+      wantEntries = optionSurfaceWantEntries;
+      # Drops the "byName" entry specifically (lib/byname-paths.nix's single
+      # entry, added for issue #2731) rather than an implicit
+      # builtins.tail — which entry `tail` drops depends on attrNames'
+      # (alphabetical) ordering of lib/structural-paths.nix's ++
+      # lib/byname-paths.nix's combined keys, an incidental detail unrelated
+      # to what this guard means to exercise. Naming the entry ties the
+      # guard's intent to the registry it's protecting, mirroring
+      # roster-doc-flake-path-guard's hand-crafted driftedPath above.
+      incompleteEntries = filter (e: e.name != "byName") wantEntries;
+      # Table-row shaped (`` | `<name>` | `<path>` | ``), like
+      # docs/reference.md's real rows, not free prose — so it round-trips
+      # through optionSurfaceRowFor's `` "\n| `<name>`" `` row isolator the
+      # same way the real doc does, exercising the same per-row code path
+      # instead of the isolator finding no row at all for every entry.
+      badDoc = ''
+        intro text
+
+        ### Option surface
+
+        | option | domain path |
+        | ------ | ----------- |
+        ${concatStringsSep "\n" (map (e: "| `${e.name}` | `${e.path}` |") incompleteEntries)}
+
+        #### Next heading
+      '';
+      result = builtins.tryEval (assertOptionSurfaceDocPathsOk {
+        doc = badDoc;
+        inherit wantEntries;
+      });
+    in
+    assert assertMsg (!result.success)
+      "option-surface-doc-paths-guard: expected assertOptionSurfaceDocPathsOk to reject a synthetic doc whose Option surface section is missing one wanted domain path, but it evaluated successfully";
+    pkgs.runCommand "option-surface-doc-paths-guard" { } "touch $out";
+
+  # Regression guard (issue #2739, review counterexample): a duplicate of a
+  # wanted domain path elsewhere in the Option surface section (e.g. an
+  # unrelated example sentence in the section's prose, above the table) must
+  # never let a wrong per-row restatement pass -- optionSurfaceRowFor's own
+  # row isolation, not just hasInfix's substring match against the whole
+  # section, is what has to catch this. Before optionSurfaceRowFor existed, a
+  # doc shaped exactly like this synthetic one (correct path once, outside
+  # the option's own row; wrong path once, inside it) evaluated successfully
+  # against assertOptionSurfaceDocPathsOk's optionSurfaceDocSection-scoped
+  # hasInfix -- this fails if that vacuity is ever reintroduced.
+  option-surface-doc-paths-guard-nonvacuity-regression =
+    let
+      inherit (pkgs.lib) assertMsg concatStringsSep;
+      wantEntries = optionSurfaceWantEntries;
+      nixpkgsEntry = builtins.head (builtins.filter (e: e.name == "nixpkgs") wantEntries);
+      driftedNixpkgsPath = "perSystem.spindrift.infra.wrongNixpkgs";
+      rowFor =
+        e:
+        if e.name == "nixpkgs" then
+          "| `${e.name}` | `${driftedNixpkgsPath}` |"
+        else
+          "| `${e.name}` | `${e.path}` |";
+      badDoc = ''
+        intro text
+
+        ### Option surface
+
+        unrelated example: nixpkgs's canonical path is `${nixpkgsEntry.path}`.
+
+        | option | domain path |
+        | ------ | ----------- |
+        ${concatStringsSep "\n" (map rowFor wantEntries)}
+
+        #### Next heading
+      '';
+      result = builtins.tryEval (assertOptionSurfaceDocPathsOk {
+        doc = badDoc;
+        inherit wantEntries;
+      });
+    in
+    assert assertMsg (!result.success)
+      "option-surface-doc-paths-guard-nonvacuity-regression: expected assertOptionSurfaceDocPathsOk to reject a synthetic doc whose nixpkgs table row states a wrong domain path even though the correct path appears elsewhere in the Option surface section, but it evaluated successfully";
+    pkgs.runCommand "option-surface-doc-paths-guard-nonvacuity-regression" { } "touch $out";
+
+  # Regression guard (issue #2739): optionSurfaceDocSection's throw branch
+  # for a doc missing the "### Option surface" heading must actually fire —
+  # every fixture doc (real or synthetic) used elsewhere in this file
+  # contains the heading, so nothing else exercises that branch. Mirrors
+  # roster-doc-section-throws-on-missing-heading below, but for
+  # optionSurfaceDocSection: calls it directly (not through either
+  # assertOptionSurfaceDocPathsOk wrapper) against a doc with no "### Option
+  # surface" heading at all, via tryEval.
+  option-surface-doc-section-throws-on-missing-heading =
+    let
+      inherit (pkgs.lib) assertMsg;
+      result = builtins.tryEval (
+        optionSurfaceDocSection "intro text with no option surface heading at all"
+      );
+    in
+    assert assertMsg (!result.success)
+      "option-surface-doc-section-throws-on-missing-heading: expected optionSurfaceDocSection to throw on a doc missing the \"### Option surface\" heading, but it evaluated successfully";
+    pkgs.runCommand "option-surface-doc-section-throws-on-missing-heading" { } "touch $out";
 
   # lib/default-model-fixture.nix's schemaDefaults must restate
   # lib/env-schema.nix's own .default values per key (issue #2514): a schema
