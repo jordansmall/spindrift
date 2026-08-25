@@ -16,6 +16,7 @@ import (
 	"spindrift.dev/launcher/internal/doctor"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/forgejo"
+	"spindrift.dev/launcher/internal/forge/rest"
 )
 
 // TestForgejoClient_ImplementsIssueTracker asserts that NewForgejoClient
@@ -92,6 +93,53 @@ func TestForgejoClient_Probe_NotFound(t *testing.T) {
 	fc := forgejo.NewForgejoClient(forgejo.ForgejoConfig{BaseURL: srv.URL, Repo: "owner/repo", Token: "tok"})
 	if _, err := fc.Probe(); !errors.Is(err, forge.ErrRepoNotFound) {
 		t.Fatalf("Probe() error = %v, want ErrRepoNotFound", err)
+	}
+}
+
+// TestForgejoClient_Probe_ServerError verifies Probe() preserves both the
+// ErrRepoNotFound sentinel and the underlying rest.StatusError (with its
+// wire status code) on an unmapped non-2xx response, so a caller can tell an
+// unmapped status apart from a genuine 404. Uses 400 rather than a 5xx: every
+// 5xx is transient per rest's isTransientStatus, so a 5xx here would sleep
+// through a real LinearBackoff before Do gives up and returns.
+func TestForgejoClient_Probe_ServerError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+	}))
+	defer srv.Close()
+
+	fc := forgejo.NewForgejoClient(forgejo.ForgejoConfig{BaseURL: srv.URL, Repo: "owner/repo", Token: "tok"})
+	_, err := fc.Probe()
+	if !errors.Is(err, forge.ErrRepoNotFound) {
+		t.Fatalf("Probe() error = %v, want ErrRepoNotFound", err)
+	}
+	var statusErr rest.StatusError
+	if !errors.As(err, &statusErr) {
+		t.Fatalf("Probe() error = %v, want rest.StatusError in chain", err)
+	}
+	if statusErr.Status != http.StatusBadRequest {
+		t.Errorf("StatusError.Status = %d, want %d", statusErr.Status, http.StatusBadRequest)
+	}
+}
+
+// TestForgejoClient_Probe_DecodeFailure verifies Probe() preserves both the
+// ErrRepoNotFound sentinel and the underlying rest.DecodeError when the
+// server responds 2xx with a malformed body.
+func TestForgejoClient_Probe_DecodeFailure(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("not json"))
+	}))
+	defer srv.Close()
+
+	fc := forgejo.NewForgejoClient(forgejo.ForgejoConfig{BaseURL: srv.URL, Repo: "owner/repo", Token: "tok"})
+	_, err := fc.Probe()
+	if !errors.Is(err, forge.ErrRepoNotFound) {
+		t.Fatalf("Probe() error = %v, want ErrRepoNotFound", err)
+	}
+	var decodeErr rest.DecodeError
+	if !errors.As(err, &decodeErr) {
+		t.Fatalf("Probe() error = %v, want rest.DecodeError in chain", err)
 	}
 }
 
