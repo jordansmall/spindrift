@@ -418,15 +418,15 @@ rec {
     fixture:
     let
       inherit (fixture) schemaDefaults dogfoodPins;
-      filerCell = "*(empty; dogfood pins \`${dogfoodPins.filer}\`)*";
+      filerCell = "*(empty; dogfood pins `${dogfoodPins.filer}`)*";
     in
     "| Agent | Default model |\n"
     + "| --- | --- |\n"
-    + "| \`MODEL\` (coordinator) | \`${schemaDefaults.model}\` |\n"
-    + "| \`scout\` | \`${schemaDefaults.scoutModel}\` |\n"
-    + "| \`reviewer\` | \`${schemaDefaults.reviewModel}\` |\n"
-    + "| \`filer\` | ${filerCell} |\n"
-    + "| \`worker\` | \`${schemaDefaults.workerModel}\` |\n";
+    + "| `MODEL` (coordinator) | `${schemaDefaults.model}` |\n"
+    + "| `scout` | `${schemaDefaults.scoutModel}` |\n"
+    + "| `reviewer` | `${schemaDefaults.reviewModel}` |\n"
+    + "| `filer` | ${filerCell} |\n"
+    + "| `worker` | `${schemaDefaults.workerModel}` |\n";
 
   # docs/reference.md's generated flat domain-tree example's `agents.models.*`
   # lines (issue #2514; ADR 0037 re-spelling, issue #2557): the same four
