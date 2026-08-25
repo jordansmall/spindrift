@@ -51,9 +51,11 @@ ${FILER_FILE_DIRECT_STEP}${FILER_FILE_DIRECT_FORGEJO_STEP}${FILER_FILE_RELAY_STE
      line of your own: the launcher appends its own `Filed from research on
      #<N>` backlink to the body automatically after you exit, and your own
      line would duplicate or contradict it.
-   - Labels: `agent-review-finding` only. NEVER the dispatch label (the label
-     that makes an issue eligible for agent pickup, e.g. `ready-for-agent`) —
-     a human promotes these; that promotion is the launch button.
+   - Labels: whichever provenance label step 1 above established
+     (`agent-review-finding` on the work path, `agent-research-finding` on
+     the research path) only. NEVER the dispatch label (the label that makes
+     an issue eligible for agent pickup, e.g. `ready-for-agent`) — a human
+     promotes these; that promotion is the launch button.
 
 Output — final message exactly this shape, one line per finding you were
 given:
