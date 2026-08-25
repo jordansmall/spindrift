@@ -31,3 +31,13 @@ var TriageLabelMeta = map[string]LabelMeta{
 
 	"agent-research-finding": LabelMeta{Description: "Filed from a research finding", Color: "c5def5"},
 }
+
+// FindingTypeLabels is the closed bug/enhancement/chore issue-intent
+// type->label vocabulary (lib/labels.nix's findingType family, issue
+// #2594 / ADR 0041), kept separate from TriageLabelMeta on purpose -- see
+// lib/labels.nix's findingType doc comment.
+var FindingTypeLabels = map[string]LabelMeta{
+	"bug":         LabelMeta{Description: "Filed as a bug finding", Color: "ee0701"},
+	"enhancement": LabelMeta{Description: "Filed as an enhancement finding", Color: "a2eeef"},
+	"chore":       LabelMeta{Description: "Filed as a chore finding", Color: "fef2c0"},
+}

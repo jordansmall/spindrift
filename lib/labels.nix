@@ -5,7 +5,9 @@
 # priority-tier (ADR 0040), the ambiguous-spec label, the local-only
 # recoverable marker, the reviewFinding provenance label the Filer creates
 # directly (never through doctor), the researchFinding provenance label
-# (ADR 0041, doctor DOES probe/offer to create this one), and the
+# (ADR 0041, doctor DOES probe/offer to create this one), the findingType
+# closed bug/enhancement/chore vocabulary (issue #2594 / ADR 0041, rendered
+# into its own dedicated Go map, never folded into TriageLabelMeta), and the
 # trigger-only vocabulary. Rendered into
 # cmd/launcher/internal/doctor/labelmeta_gen.go by lib/renderers.nix's
 # renderLabelRegistryGo, guarded against drift by
@@ -226,6 +228,47 @@ in
       name = "agent-review-finding";
       color = "d4c5f9";
       description = "Filed from a non-blocking review finding";
+    }
+  ];
+
+  # Finding-type vocabulary: the closed bug/enhancement/chore type-token
+  # vocabulary issue #2594 / ADR 0041 introduces on a filed issue-intent's
+  # optional `type` field. cmd/launcher/internal/settle/issue_intent.go's
+  # ensureTypeLabel looks up a filed intent's `type` against the generated Go
+  # map this family renders to (`FindingTypeLabels`, NOT TriageLabelMeta —
+  # see below), and best-effort `CreateLabel`s the mapped label at
+  # issue-filing time: never through doctor.Run(), and never through a
+  # Filer-prompt bash `gh label create` like reviewFinding above. Unlike
+  # reviewFinding, this one DOES need a Go-visible map, because
+  # ensureTypeLabel resolves it at runtime rather than a human running a
+  # documented snippet — but it must render into its OWN dedicated map, never
+  # folded into TriageLabelMeta, whose keys are real dispatch/provenance
+  # label names like "ready-for-agent": folding this closed 3-entry enum in
+  # would let `TriageLabelMeta["ready-for-agent"]` resolve as though
+  # "ready-for-agent" were a valid finding type, defeating the whole point of
+  # keeping the vocabularies separate (issue #1949's
+  # do-not-trust-the-agent-target invariant — the Box names a *type*, never a
+  # label). Colors are fresh and distinct from every other family here
+  # (TestTriageLabelMeta_ColorsAreDistinct only guards TriageLabelMeta today,
+  # but staying distinct keeps this family safe if it's ever folded in).
+  findingType = [
+    {
+      role = "FindingTypeBug";
+      name = "bug";
+      color = "ee0701";
+      description = "Filed as a bug finding";
+    }
+    {
+      role = "FindingTypeEnhancement";
+      name = "enhancement";
+      color = "a2eeef";
+      description = "Filed as an enhancement finding";
+    }
+    {
+      role = "FindingTypeChore";
+      name = "chore";
+      color = "fef2c0";
+      description = "Filed as a chore finding";
     }
   ];
 

@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/dispatch"
+	"spindrift.dev/launcher/internal/doctor"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/local"
 	"spindrift.dev/launcher/internal/outcome"
@@ -445,6 +446,337 @@ func TestFileIssueIntentsDetailed_MalformedPayloadSkipped(t *testing.T) {
 
 	if len(detailed) != 1 || detailed[0].Title != "good one" {
 		t.Fatalf("detailed = %+v, want exactly the well-formed intent", detailed)
+	}
+}
+
+// TestFileIssueIntentsDetailed_RecognizedTypeAppliesMappedLabel verifies a
+// payload's optional "type" field, when it names one of the closed set of
+// recognized finding types (issue #2594 / ADR 0041), gets ensure-created and
+// applied as an additional label alongside the caller's provenanceLabel --
+// provenance first, type second.
+func TestFileIssueIntentsDetailed_RecognizedTypeAppliesMappedLabel(t *testing.T) {
+	for _, typ := range []string{"bug", "enhancement", "chore"} {
+		t.Run(typ, func(t *testing.T) {
+			fc := forge.NewFake(testDispatchLabels)
+			fc.PostIssueURL = "https://github.com/owner/repo/issues/99"
+
+			result := dispatch.Result{
+				IssueIntentsFound: true,
+				IssueIntents: []string{
+					`{"title":"t","body":"b","type":"` + typ + `"}`,
+				},
+			}
+
+			fileIssueIntentsDetailed(fc.AsIssueFiler(), "1", result, "agent-review-finding", "")
+
+			if len(fc.PostIssueCalls) != 1 {
+				t.Fatalf("PostIssueCalls = %+v, want 1", fc.PostIssueCalls)
+			}
+			want := []string{"agent-review-finding", typ}
+			got := fc.PostIssueCalls[0].Labels
+			if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+				t.Errorf("PostIssueCalls[0].Labels = %v, want %v", got, want)
+			}
+
+			if len(fc.CreateLabelCalls) != 1 {
+				t.Fatalf("CreateLabelCalls = %+v, want 1", fc.CreateLabelCalls)
+			}
+			wantMeta := doctor.FindingTypeLabels[typ]
+			gotCall := fc.CreateLabelCalls[0]
+			if gotCall.Name != typ || gotCall.Description != wantMeta.Description || gotCall.Color != wantMeta.Color {
+				t.Errorf("CreateLabelCalls[0] = %+v, want {%q %q %q}", gotCall, typ, wantMeta.Description, wantMeta.Color)
+			}
+		})
+	}
+}
+
+// TestFileIssueIntentsDetailed_ResearchProvenanceWithTypeLabel verifies AC1
+// of issue #2594 with the research-path provenance label rather than the
+// work-path one every other type-label test in this file uses: an intent
+// with type "bug" files with the mapped "bug" label alongside
+// "agent-research-finding", not just "agent-review-finding".
+func TestFileIssueIntentsDetailed_ResearchProvenanceWithTypeLabel(t *testing.T) {
+	fc := forge.NewFake(testDispatchLabels)
+	fc.PostIssueURL = "https://github.com/owner/repo/issues/99"
+
+	result := dispatch.Result{
+		IssueIntentsFound: true,
+		IssueIntents: []string{
+			`{"title":"t","body":"b","type":"bug"}`,
+		},
+	}
+
+	fileIssueIntentsDetailed(fc.AsIssueFiler(), "1", result, "agent-research-finding", "")
+
+	if len(fc.PostIssueCalls) != 1 {
+		t.Fatalf("PostIssueCalls = %+v, want 1", fc.PostIssueCalls)
+	}
+	want := []string{"agent-research-finding", "bug"}
+	got := fc.PostIssueCalls[0].Labels
+	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Errorf("PostIssueCalls[0].Labels = %v, want %v", got, want)
+	}
+}
+
+// TestFileIssueIntentsDetailed_AbsentTypeFilesUntyped verifies a payload
+// that omits the "type" key entirely files with only the provenance label
+// -- no CreateLabel call, no type label appended.
+func TestFileIssueIntentsDetailed_AbsentTypeFilesUntyped(t *testing.T) {
+	fc := forge.NewFake(testDispatchLabels)
+	fc.PostIssueURL = "https://github.com/owner/repo/issues/99"
+
+	result := dispatch.Result{
+		IssueIntentsFound: true,
+		IssueIntents: []string{
+			`{"title":"t","body":"b"}`,
+		},
+	}
+
+	fileIssueIntentsDetailed(fc.AsIssueFiler(), "1", result, "agent-review-finding", "")
+
+	if len(fc.PostIssueCalls) != 1 {
+		t.Fatalf("PostIssueCalls = %+v, want 1", fc.PostIssueCalls)
+	}
+	want := []string{"agent-review-finding"}
+	got := fc.PostIssueCalls[0].Labels
+	if len(got) != len(want) || got[0] != want[0] {
+		t.Errorf("PostIssueCalls[0].Labels = %v, want %v", got, want)
+	}
+	if len(fc.CreateLabelCalls) != 0 {
+		t.Errorf("CreateLabelCalls = %+v, want none", fc.CreateLabelCalls)
+	}
+}
+
+// TestFileIssueIntentsDetailed_UnknownTypeFilesUntyped verifies a "type"
+// value outside the closed set never rejects/skips the payload -- it still
+// files, just without a type label.
+func TestFileIssueIntentsDetailed_UnknownTypeFilesUntyped(t *testing.T) {
+	fc := forge.NewFake(testDispatchLabels)
+	fc.PostIssueURL = "https://github.com/owner/repo/issues/99"
+
+	result := dispatch.Result{
+		IssueIntentsFound: true,
+		IssueIntents: []string{
+			`{"title":"t","body":"b","type":"feature"}`,
+		},
+	}
+
+	fileIssueIntentsDetailed(fc.AsIssueFiler(), "1", result, "agent-review-finding", "")
+
+	if len(fc.PostIssueCalls) != 1 {
+		t.Fatalf("PostIssueCalls = %+v, want 1", fc.PostIssueCalls)
+	}
+	want := []string{"agent-review-finding"}
+	got := fc.PostIssueCalls[0].Labels
+	if len(got) != len(want) || got[0] != want[0] {
+		t.Errorf("PostIssueCalls[0].Labels = %v, want %v", got, want)
+	}
+	if len(fc.CreateLabelCalls) != 0 {
+		t.Errorf("CreateLabelCalls = %+v, want none", fc.CreateLabelCalls)
+	}
+}
+
+// TestFileIssueIntentsDetailed_UnrecognizedTypeCannotSmuggleADispatchLabel
+// verifies a Box attempting to smuggle a real dispatch label (e.g.
+// "ready-for-agent") through the "type" field never gets that label applied
+// -- the closed map (issue #2594's host-side type→label mapping) never
+// echoes an arbitrary caller-supplied token back as a label, only its own
+// three mapped tokens.
+func TestFileIssueIntentsDetailed_UnrecognizedTypeCannotSmuggleADispatchLabel(t *testing.T) {
+	fc := forge.NewFake(testDispatchLabels)
+	fc.PostIssueURL = "https://github.com/owner/repo/issues/99"
+
+	result := dispatch.Result{
+		IssueIntentsFound: true,
+		IssueIntents: []string{
+			`{"title":"t","body":"b","type":"ready-for-agent"}`,
+		},
+	}
+
+	fileIssueIntentsDetailed(fc.AsIssueFiler(), "1", result, "agent-review-finding", "")
+
+	if len(fc.PostIssueCalls) != 1 {
+		t.Fatalf("PostIssueCalls = %+v, want 1", fc.PostIssueCalls)
+	}
+	for _, l := range fc.PostIssueCalls[0].Labels {
+		if l == "ready-for-agent" {
+			t.Fatalf("PostIssueCalls[0].Labels = %v, leaked a smuggled dispatch label", fc.PostIssueCalls[0].Labels)
+		}
+	}
+	want := []string{"agent-review-finding"}
+	got := fc.PostIssueCalls[0].Labels
+	if len(got) != len(want) || got[0] != want[0] {
+		t.Errorf("PostIssueCalls[0].Labels = %v, want %v", got, want)
+	}
+}
+
+// TestFileIssueIntentsDetailed_LabelAlreadyExistsSkipsCreate verifies
+// ensureTypeLabel skips CreateLabel when ListLabels already reports the
+// mapped label present -- it still gets applied to the filed issue, just
+// without a redundant create call.
+func TestFileIssueIntentsDetailed_LabelAlreadyExistsSkipsCreate(t *testing.T) {
+	fc := forge.NewFake(testDispatchLabels)
+	fc.PostIssueURL = "https://github.com/owner/repo/issues/99"
+	fc.Labels = []string{"bug"}
+
+	result := dispatch.Result{
+		IssueIntentsFound: true,
+		IssueIntents: []string{
+			`{"title":"t","body":"b","type":"bug"}`,
+		},
+	}
+
+	fileIssueIntentsDetailed(fc.AsIssueFiler(), "1", result, "agent-review-finding", "")
+
+	if len(fc.CreateLabelCalls) != 0 {
+		t.Errorf("CreateLabelCalls = %+v, want none", fc.CreateLabelCalls)
+	}
+	if len(fc.PostIssueCalls) != 1 {
+		t.Fatalf("PostIssueCalls = %+v, want 1", fc.PostIssueCalls)
+	}
+	found := false
+	for _, l := range fc.PostIssueCalls[0].Labels {
+		if l == "bug" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("PostIssueCalls[0].Labels = %v, want to include %q", fc.PostIssueCalls[0].Labels, "bug")
+	}
+}
+
+// TestFileIssueIntentsDetailed_LabelCreateFailureFilesUntypedNonFatally
+// verifies a CreateLabel failure only drops the type label, not the whole
+// filing -- the issue still files successfully with just the provenance
+// label.
+func TestFileIssueIntentsDetailed_LabelCreateFailureFilesUntypedNonFatally(t *testing.T) {
+	fc := forge.NewFake(testDispatchLabels)
+	fc.PostIssueURL = "https://github.com/owner/repo/issues/99"
+	fc.CreateLabelErr = errFake
+
+	result := dispatch.Result{
+		IssueIntentsFound: true,
+		IssueIntents: []string{
+			`{"title":"t","body":"b","type":"bug"}`,
+		},
+	}
+
+	detailed := fileIssueIntentsDetailed(fc.AsIssueFiler(), "1", result, "agent-review-finding", "")
+
+	if len(detailed) != 1 || detailed[0].Failed || detailed[0].URL == "" {
+		t.Fatalf("detailed = %+v, want a single successful entry", detailed)
+	}
+	if len(fc.PostIssueCalls) != 1 {
+		t.Fatalf("PostIssueCalls = %+v, want 1", fc.PostIssueCalls)
+	}
+	want := []string{"agent-review-finding"}
+	got := fc.PostIssueCalls[0].Labels
+	if len(got) != len(want) || got[0] != want[0] {
+		t.Errorf("PostIssueCalls[0].Labels = %v, want %v", got, want)
+	}
+}
+
+// TestFileIssueIntentsDetailed_ListLabelsErrSkipsPreCheckButCreateSucceeds
+// verifies the hoisted ListLabels error branch (a previously untested path)
+// is non-fatal: with existingLabels unusable, ensureTypeLabel falls through
+// to CreateLabel, which still succeeds and gets the type label applied.
+func TestFileIssueIntentsDetailed_ListLabelsErrSkipsPreCheckButCreateSucceeds(t *testing.T) {
+	fc := forge.NewFake(testDispatchLabels)
+	fc.PostIssueURL = "https://github.com/owner/repo/issues/99"
+	fc.ListLabelsErr = errFake
+
+	result := dispatch.Result{
+		IssueIntentsFound: true,
+		IssueIntents: []string{
+			`{"title":"t","body":"b","type":"bug"}`,
+		},
+	}
+
+	detailed := fileIssueIntentsDetailed(fc.AsIssueFiler(), "1", result, "agent-review-finding", "")
+
+	if len(detailed) != 1 || detailed[0].Failed || detailed[0].URL == "" {
+		t.Fatalf("detailed = %+v, want a single successful entry", detailed)
+	}
+	if len(fc.CreateLabelCalls) != 1 {
+		t.Fatalf("CreateLabelCalls = %+v, want 1", fc.CreateLabelCalls)
+	}
+	if len(fc.PostIssueCalls) != 1 {
+		t.Fatalf("PostIssueCalls = %+v, want 1", fc.PostIssueCalls)
+	}
+	found := false
+	for _, l := range fc.PostIssueCalls[0].Labels {
+		if l == "bug" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("PostIssueCalls[0].Labels = %v, want to include %q", fc.PostIssueCalls[0].Labels, "bug")
+	}
+}
+
+// TestFileIssueIntentsDetailed_CreateLabelFailsButLabelAlreadyExists_StillApplied
+// verifies the finding-B bug: the hoisted ListLabels call misses the label
+// (empty/stale), CreateLabel then fails because it already exists, and
+// ensureTypeLabel's retry ListLabels call reveals it was there all along --
+// the label must still be applied, not dropped.
+func TestFileIssueIntentsDetailed_CreateLabelFailsButLabelAlreadyExists_StillApplied(t *testing.T) {
+	fc := forge.NewFake(testDispatchLabels)
+	fc.PostIssueURL = "https://github.com/owner/repo/issues/99"
+	fc.LabelsSeq = [][]string{{}, {"bug"}}
+	fc.CreateLabelErr = errFake
+
+	result := dispatch.Result{
+		IssueIntentsFound: true,
+		IssueIntents: []string{
+			`{"title":"t","body":"b","type":"bug"}`,
+		},
+	}
+
+	fileIssueIntentsDetailed(fc.AsIssueFiler(), "1", result, "agent-review-finding", "")
+
+	if len(fc.PostIssueCalls) != 1 {
+		t.Fatalf("PostIssueCalls = %+v, want 1", fc.PostIssueCalls)
+	}
+	found := false
+	for _, l := range fc.PostIssueCalls[0].Labels {
+		if l == "bug" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("PostIssueCalls[0].Labels = %v, want to include %q despite the CreateLabel error", fc.PostIssueCalls[0].Labels, "bug")
+	}
+}
+
+// TestFileIssueIntentsDetailed_ListLabelsErrAndCreateLabelErr_DropsLabelNonFatally
+// verifies the worst case -- both the hoisted ListLabels call and the
+// CreateLabel call fail -- still degrades to an untyped-but-successful
+// filing rather than failing the issue.
+func TestFileIssueIntentsDetailed_ListLabelsErrAndCreateLabelErr_DropsLabelNonFatally(t *testing.T) {
+	fc := forge.NewFake(testDispatchLabels)
+	fc.PostIssueURL = "https://github.com/owner/repo/issues/99"
+	fc.ListLabelsErr = errFake
+	fc.CreateLabelErr = errFake
+
+	result := dispatch.Result{
+		IssueIntentsFound: true,
+		IssueIntents: []string{
+			`{"title":"t","body":"b","type":"bug"}`,
+		},
+	}
+
+	detailed := fileIssueIntentsDetailed(fc.AsIssueFiler(), "1", result, "agent-review-finding", "")
+
+	if len(detailed) != 1 || detailed[0].Failed || detailed[0].URL == "" {
+		t.Fatalf("detailed = %+v, want a single successful entry", detailed)
+	}
+	if len(fc.PostIssueCalls) != 1 {
+		t.Fatalf("PostIssueCalls = %+v, want 1", fc.PostIssueCalls)
+	}
+	want := []string{"agent-review-finding"}
+	got := fc.PostIssueCalls[0].Labels
+	if len(got) != len(want) || got[0] != want[0] {
+		t.Errorf("PostIssueCalls[0].Labels = %v, want %v", got, want)
 	}
 }
 
