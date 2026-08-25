@@ -8,9 +8,9 @@
 # skill was wired in -- a new prompt kind added later had no forcing
 # function and would silently default to uncovered. nix/checks/prompts.nix's
 # caveman-coverage-registry-matches-templates-dir check (issue #2709, slice
-# 1) keeps this list in sync with the templates directory; later slices
-# (2 and 3) drive the actual per-row coverage/exemption assertions off this
-# same list.
+# 1) keeps this list in sync with the templates directory; that same file's
+# slice 2 and slice 3 checks drive the actual per-row coverage/exemption
+# assertions off this same list.
 #
 # Pure builtins only (no `pkgs.lib`): keeps this file evaluable and unit-
 # testable with a bare `nix eval`, without needing a locked nixpkgs (mirrors

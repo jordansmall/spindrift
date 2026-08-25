@@ -16,6 +16,55 @@ let
     batsHarness
     ;
 
+  # Anti-drift caveman-coverage registry (issue #2709): one row per
+  # top-level prompt template, declaring "covered" (with the envsubst
+  # variable it must carry) or "exempt" (with a reason). Hoisted here, once,
+  # so every caveman-coverage-* check below shares the same import instead
+  # of each re-importing it.
+  cavemanCoverageRegistry = import ../../lib/prompt-coverage.nix;
+
+  # lib/prompt-contract.nix's own pure-data marker registries (validateMarkers,
+  # workerForbiddenMarkers), imported once here so
+  # caveman-coverage-exemption-list-covers-marker-registry below can derive
+  # requiredMarkerNames from them instead of hand-retyping their marker
+  # literals a second time.
+  promptContract = import ../../lib/prompt-contract.nix;
+
+  # lib/fragments.nix's own pure-data Conditional fragment registry, imported
+  # once here so caveman-coverage-exemption-list-covers-marker-registry below
+  # can derive the caveman fragment file list from its `gate == "CAVEMAN_BAKED"`
+  # rows instead of hand-retyping the 4 caveman-default*.md paths a second
+  # time.
+  fragmentsRegistry = import ../../lib/fragments.nix;
+
+  # Derived (not hand-typed) marker-name list for
+  # caveman-coverage-exemption-list-covers-marker-registry below: every
+  # marker from promptContract.validateMarkers plus every marker from
+  # promptContract.workerForbiddenMarkers. So a FUTURE row added to either
+  # of those two registries is picked up here automatically -- if nobody
+  # then also names that new marker in at least one caveman fragment, the
+  # check below fails. That's the literal acceptance criterion: adding a
+  # machine-parsed marker without naming it in the exemption list fails the
+  # check.
+  #
+  # The "issue-intent" row (SPINDRIFT_ISSUE_INTENT) is IN this union, not
+  # excluded -- an earlier version of this comment argued it could be
+  # dropped because its sole carrier, filer-prompt.md, is wholly
+  # caveman-exempt per lib/prompt-coverage.nix. That's true of
+  # filer-prompt.md, but false as a justification for the exclusion:
+  # templates/default/prompts/issue-prompt.md -- a caveman-*covered* row
+  # (cavemanVar = "CAVEMAN_STEP", rendered via caveman-default.md) --
+  # itself interpolates FILE_ISSUES_RELAY_STEP (lib/fragments.nix), which
+  # injects fragments/file-issues-relay.md, and that fragment's own text
+  # names SPINDRIFT_ISSUE_INTENT. So a caveman-narrated issue-prompt.md can
+  # carry a live SPINDRIFT_ISSUE_INTENT-emitting section, and
+  # caveman-default.md's own "the machine-parsed marker grammar is exempt
+  # too" paragraph must name it -- which it now does (issue #2709 review
+  # finding).
+  requiredMarkerNames =
+    (map (r: r.marker) promptContract.validateMarkers)
+    ++ (map (r: r.marker) promptContract.workerForbiddenMarkers);
+
   # The rendered CHECK section, sliced once here rather than three times
   # across the never-background/vanished-marker/git-add checks below (issue
   # #781) -- a marker rename only needs updating in one place, and the three
@@ -1328,4 +1377,264 @@ in
     assert assertMsg (!broken.success)
       "mkHarness.nix must throw when the shared `filerPrompt` template carries a forbidden marker ('gh issue create') as literal text";
     pkgs.runCommand "build-time-reject-forbidden-marker-filer-template" { } "touch $out";
+
+  # Anti-drift registry check (issue #2709, slice 1): lib/prompt-coverage.nix
+  # declares one row per prompt template under templates/default/prompts/,
+  # classifying it "covered" (its assembled text must carry a caveman
+  # envsubst variable) or "exempt" (with a reason) -- before this registry
+  # existed, caveman coverage was decided once by hand per template, so a
+  # new prompt kind added later would silently default to uncovered. This
+  # check only guards the registry's own completeness against the templates
+  # directory, both directions: a template on disk missing a registry row,
+  # and a stale registry row naming a template that no longer exists. It
+  # deliberately does NOT check that a "covered" row's assembled text
+  # actually carries its declared variable, nor does it tie into the
+  # validateMarkers/forbiddenMarkers registries above -- those assertions
+  # are the caveman-coverage-covered-templates-carry-directive and
+  # caveman-coverage-exemption-list-covers-marker-registry checks below
+  # (issue #2709, slices 2 and 3).
+  caveman-coverage-registry-matches-templates-dir =
+    let
+      inherit (pkgs.lib) concatMapStringsSep;
+      # Trailing "\n": matches the sibling list files below (coveredRowsFile,
+      # exemptFiles, requiredMarkerNamesFile), which all carry one for the
+      # same reason (a `while read` loop would otherwise drop the final
+      # line). Harmless here under `sort`/`comm`/`uniq` today, but keeps this
+      # file consistent with its siblings for any future `while read` reuse.
+      registryFiles = pkgs.writeText "caveman-coverage-registry-files.txt" (
+        concatMapStringsSep "\n" (r: r.promptFile) cavemanCoverageRegistry + "\n"
+      );
+    in
+    pkgs.runCommand "caveman-coverage-registry-matches-templates-dir" { } ''
+      registry_files=$(sort ${registryFiles})
+      disk_files=$(find ${../../templates/default/prompts} -maxdepth 1 -name '*.md' -printf '%f\n' | sort)
+
+      # A duplicate row (two entries naming the same promptFile) would
+      # otherwise surface through `comm -13` below as the misleading
+      # "names a promptFile that does not exist" -- comm's multiset
+      # semantics report the second occurrence of a duplicate registry line
+      # as "unique to registry" once the single disk copy is consumed.
+      # Catch the real fault directly, with its own message, first.
+      duplicates=$(echo "$registry_files" | uniq -d)
+      [ -z "$duplicates" ] || {
+        echo "lib/prompt-coverage.nix has more than one row for the following promptFile(s):" >&2
+        echo "$duplicates" >&2
+        exit 1
+      }
+
+      missing=$(comm -23 <(echo "$disk_files") <(echo "$registry_files"))
+      [ -z "$missing" ] || {
+        echo "lib/prompt-coverage.nix is missing a row for the following template(s) under templates/default/prompts/:" >&2
+        echo "$missing" >&2
+        echo "every *.md file directly under templates/default/prompts/ must have a covered/exempt row" >&2
+        exit 1
+      }
+
+      stale=$(comm -13 <(echo "$disk_files") <(echo "$registry_files"))
+      [ -z "$stale" ] || {
+        echo "lib/prompt-coverage.nix names a promptFile that does not exist under templates/default/prompts/:" >&2
+        echo "$stale" >&2
+        exit 1
+      }
+
+      touch $out
+    '';
+
+  # Row-shape guards (blocking code-review finding on issue #2709): the
+  # registry's header comment documents three invariants -- coverage is
+  # "covered" or "exempt"; cavemanVar is required iff covered; reason is
+  # required iff exempt -- but nothing previously enforced them. A typo'd
+  # `coverage = "Covered";` would silently drop that row from every
+  # `filter (r: r.coverage == "covered")` / `filter (r: r.coverage ==
+  # "exempt")` call above, so the two content checks above would pass
+  # vacuously and reinstate the exact "silently defaults to uncovered" drift
+  # this registry exists to kill. Pure eval-time asserts, mirroring
+  # nix/checks/prompt-contract.nix's `bad = filter …; assert assertMsg (bad
+  # == [ ])` idiom (added there for this same typo class, #2499) -- the
+  # assertion fires during `nix eval`/`nix build`, before any derivation
+  # builds; the check derivation itself is a no-op `touch $out` that exists
+  # only so `nix build`/`nix flake check` forces the assertion.
+  caveman-coverage-registry-coverage-is-known-value =
+    let
+      inherit (pkgs.lib) assertMsg concatMapStringsSep filter;
+      bad = filter (r: r.coverage != "covered" && r.coverage != "exempt") cavemanCoverageRegistry;
+    in
+    assert assertMsg (bad == [ ])
+      "every row's coverage must be 'covered' or 'exempt', offending promptFile(s): [ ${
+        concatMapStringsSep ", " (r: r.promptFile) bad
+      } ]";
+    pkgs.runCommand "caveman-coverage-registry-coverage-is-known-value" { } "touch $out";
+
+  caveman-coverage-registry-caveman-var-required-iff-covered =
+    let
+      inherit (pkgs.lib) assertMsg concatMapStringsSep filter;
+      bad = filter (r: (r.coverage == "covered") != (r.cavemanVar != null)) cavemanCoverageRegistry;
+    in
+    assert assertMsg (bad == [ ])
+      "every row's cavemanVar must be non-null iff coverage == \"covered\" (and null iff \"exempt\"), offending promptFile(s): [ ${
+        concatMapStringsSep ", " (r: r.promptFile) bad
+      } ]";
+    pkgs.runCommand "caveman-coverage-registry-caveman-var-required-iff-covered" { } "touch $out";
+
+  caveman-coverage-registry-reason-required-iff-exempt =
+    let
+      inherit (pkgs.lib) assertMsg concatMapStringsSep filter;
+      bad = filter (r: (r.coverage == "exempt") != (r.reason != null)) cavemanCoverageRegistry;
+    in
+    assert assertMsg (bad == [ ])
+      "every row's reason must be non-null iff coverage == \"exempt\" (and null iff \"covered\"), offending promptFile(s): [ ${
+        concatMapStringsSep ", " (r: r.promptFile) bad
+      } ]";
+    pkgs.runCommand "caveman-coverage-registry-reason-required-iff-exempt" { } "touch $out";
+
+  # Structural tie from cavemanVar to lib/fragments.nix (blocking code-review
+  # finding on issue #2709): the sibling check below,
+  # caveman-coverage-covered-templates-carry-directive, only greps the
+  # assembled prompt for the literal, unsubstituted "${cavemanVar}"
+  # placeholder text -- it never checks that cavemanVar names a real
+  # CAVEMAN_BAKED fragment var at all. A typo'd cavemanVar (or one that
+  # simply doesn't correspond to any fragment) would still pass that grep by
+  # coincidence if the placeholder text happens to appear in the assembled
+  # prompt for any reason, and would render with no caveman skill actually
+  # baked in. This check cross-references cavemanVar against
+  # fragmentsRegistry's own CAVEMAN_BAKED-gated rows -- a pure Nix data
+  # comparison, not another string-content grep -- so the tie is structural
+  # rather than coincidental. It complements, not replaces, the
+  # carries-directive check below.
+  caveman-coverage-covered-templates-caveman-var-known-to-fragments-registry =
+    let
+      inherit (pkgs.lib) assertMsg concatMapStringsSep filter;
+      knownCavemanVars = map (r: r.var) (filter (r: r.gate == "CAVEMAN_BAKED") fragmentsRegistry);
+      bad = filter (
+        r: r.coverage == "covered" && !(builtins.elem r.cavemanVar knownCavemanVars)
+      ) cavemanCoverageRegistry;
+    in
+    assert assertMsg (bad == [ ])
+      "every covered row's cavemanVar must be a var defined by one of lib/fragments.nix's CAVEMAN_BAKED-gated rows, offending: [ ${
+        concatMapStringsSep ", " (r: r.promptFile + ": " + toString r.cavemanVar) bad
+      } ]";
+    pkgs.runCommand "caveman-coverage-covered-templates-caveman-var-known-to-fragments-registry" { }
+      "touch $out";
+
+  # Per-row directive check (issue #2709, slice 2): for every "covered" row
+  # in lib/prompt-coverage.nix, assert the *assembled* prompt (via
+  # batsHarness -- the same harness the mkharness-prompt-* checks above read
+  # from) contains the literal, unsubstituted envsubst placeholder for its
+  # declared cavemanVar (e.g. "${CAVEMAN_STEP_WORKER}"). envsubst
+  # substitution happens at container runtime, not at nix build time, so the
+  # literal ${VAR} text is what's on disk in the assembled prompt dir. Reads
+  # uniformly from the assembled dir for every covered row, not the raw
+  # on-disk template -- fix-prompt.md's directive only exists post-injection
+  # (see lib/prompt-coverage.nix's comment on that row), and reading every
+  # row the same way keeps this check from needing to special-case it.
+  #
+  # The search string per row is built in real Nix string concatenation
+  # (not inside the runCommand shell), so the shell script never has to
+  # reconstruct a literal "${...}" from a dynamic variable name -- each
+  # line of coveredRowsFile already carries the exact target directive.
+  caveman-coverage-covered-templates-carry-directive =
+    let
+      inherit (pkgs.lib) concatMapStringsSep filter;
+      coveredRows = filter (r: r.coverage == "covered") cavemanCoverageRegistry;
+      # Trailing "\n" matters: bash's `while read` skips a final line with
+      # no trailing newline (its exit status goes nonzero right when the
+      # loop body would otherwise run), so a bare concatMapStringsSep here
+      # would silently drop the last covered row from the scan.
+      coveredRowsFile = pkgs.writeText "caveman-coverage-covered-rows.txt" (
+        concatMapStringsSep "\n" (r: r.promptFile + " \${" + r.cavemanVar + "}") coveredRows + "\n"
+      );
+    in
+    pkgs.runCommand "caveman-coverage-covered-templates-carry-directive" { } ''
+      promptDir=${batsHarness.internals.promptDir}
+      while read -r promptFile directive; do
+        [ -n "$promptFile" ] || continue
+        [ -f "$promptDir/$promptFile" ] || {
+          echo "$promptFile: expected the assembled prompt directory to contain this file (registry row in lib/prompt-coverage.nix) -- not found" >&2
+          exit 1
+        }
+        grep -qF -- "$directive" "$promptDir/$promptFile" || {
+          echo "$promptFile: expected the assembled prompt to carry the literal directive $directive (declared covered in lib/prompt-coverage.nix), not found" >&2
+          exit 1
+        }
+      done < ${coveredRowsFile}
+      touch $out
+    '';
+
+  # Exempt-row check, the filer-prompt half of the same registry (issue
+  # #2709, slice 2 acceptance criteria): every "exempt" row's assembled
+  # prompt must carry NO case-insensitive occurrence of "caveman" at all --
+  # currently just filer-prompt.md, which authors GitHub issue titles/bodies
+  # directly and so must stay human prose end to end (see its `reason` row).
+  # Derives the file list from the registry's exempt rows instead of
+  # hardcoding "filer-prompt.md" here, so this generalizes if a future
+  # exempt row is added without a second hand-maintained list (the same
+  # single-sourcing principle issue #2709 asks for).
+  caveman-coverage-exempt-templates-carry-no-caveman-mention =
+    let
+      inherit (pkgs.lib) concatMapStringsSep filter;
+      exemptRows = filter (r: r.coverage == "exempt") cavemanCoverageRegistry;
+      # Same trailing-newline guard as coveredRowsFile above.
+      exemptFiles = pkgs.writeText "caveman-coverage-exempt-files.txt" (
+        concatMapStringsSep "\n" (r: r.promptFile) exemptRows + "\n"
+      );
+    in
+    pkgs.runCommand "caveman-coverage-exempt-templates-carry-no-caveman-mention" { } ''
+      promptDir=${batsHarness.internals.promptDir}
+      while read -r promptFile; do
+        [ -n "$promptFile" ] || continue
+        [ -f "$promptDir/$promptFile" ] || {
+          echo "$promptFile: expected the assembled prompt directory to contain this file (registry row in lib/prompt-coverage.nix) -- not found" >&2
+          exit 1
+        }
+        # `|| true`: under stdenv's pipefail, a no-match exit (grep's status
+        # 1) would otherwise abort the script right here, before the
+        # assertion below ever runs.
+        n=$(grep -ic 'caveman' "$promptDir/$promptFile" || true)
+        [ "$n" -eq 0 ] || {
+          echo "$promptFile: expected no case-insensitive 'caveman' mention in the assembled prompt (declared exempt in lib/prompt-coverage.nix), found $n" >&2
+          exit 1
+        }
+      done < ${exemptFiles}
+      touch $out
+    '';
+
+  # Ties the caveman narration directive to the machine-parsed marker
+  # registries (issue #2709, slice 3; fixed to derive rather than hardcode
+  # the fragment list per the #2709 review finding): every fragment row in
+  # lib/fragments.nix gated `CAVEMAN_BAKED` carries a "the machine-parsed
+  # marker grammar is exempt too" paragraph naming a subset of
+  # requiredMarkerNames (defined above in the shared let), so a marker
+  # that's parsed by code but never named in any caveman fragment risks a
+  # Box caveman-compressing it into an unparseable line. The fragment file
+  # list itself is derived from fragmentsRegistry's CAVEMAN_BAKED rows
+  # (currently 4: caveman-default.md/-worker.md/-review.md/-research.md)
+  # rather than hand-typed here a second time, so a future 5th CAVEMAN_BAKED
+  # fragment is picked up automatically instead of silently unscanned --
+  # the same single-sourcing principle the sibling checks above already
+  # apply to their own file lists.
+  caveman-coverage-exemption-list-covers-marker-registry =
+    let
+      inherit (pkgs.lib) concatMapStringsSep filter;
+      cavemanFragmentsDir = ../../templates/default/prompts/fragments;
+      cavemanFragmentRows = filter (r: r.gate == "CAVEMAN_BAKED") fragmentsRegistry;
+      cavemanFragmentPaths = map (r: cavemanFragmentsDir + "/${r.fragment}") cavemanFragmentRows;
+      # Same trailing-newline guard as coveredRowsFile/exemptFiles above --
+      # a pkgs.writeText list without a trailing "\n" silently drops the
+      # last line from a `while read` loop.
+      requiredMarkerNamesFile = pkgs.writeText "caveman-coverage-required-marker-names.txt" (
+        concatMapStringsSep "\n" (m: m) requiredMarkerNames + "\n"
+      );
+    in
+    pkgs.runCommand "caveman-coverage-exemption-list-covers-marker-registry" { } ''
+      cat ${concatMapStringsSep " " (p: "${p}") cavemanFragmentPaths} > fragments-union.txt
+
+      while read -r marker; do
+        [ -n "$marker" ] || continue
+        grep -qF -- "$marker" fragments-union.txt || {
+          echo "marker '$marker' (from lib/prompt-contract.nix's validateMarkers/workerForbiddenMarkers) is not named in any CAVEMAN_BAKED-gated fragment (lib/fragments.nix) under templates/default/prompts/fragments/ -- name it in the 'machine-parsed marker grammar is exempt too' paragraph of at least one" >&2
+          exit 1
+        }
+      done < ${requiredMarkerNamesFile}
+      touch $out
+    '';
 }
