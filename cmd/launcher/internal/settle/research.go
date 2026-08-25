@@ -37,6 +37,19 @@ type ResearchSettle struct {
 	// clearer at each of its two call sites than a single-field Config
 	// would.
 	readOnly bool
+	// filerEnabled mirrors the same roster-derived signal
+	// dispatchConfig/resolveAgentPresenceSignals resolves for the Filer
+	// (issue #2593, ADR 0041): a research dispatch with the Filer
+	// provisioned forces gates_tracker.go's researchForceRelay
+	// unconditionally, even in read-write mode, so the Box's Filer-relay
+	// research-verdict-github-readonly.md fragment (and its
+	// SPINDRIFT_COMMENT-only posting instruction) renders regardless of
+	// readOnly. A missing/empty relayed comment under that combo is exactly
+	// as unrecoverable as the read-only/local case already guards below --
+	// nothing else ever posts the verdict -- so filerEnabled joins landing
+	// != nil and readOnly as a third reason a missing comment must fail
+	// instead of silently falling through to CompleteVerdict.
+	filerEnabled bool
 	// verdicts is the configured research verdict vocabulary (ADR 0022,
 	// issue #2201): the ordered verdict->label set Settle validates the
 	// posted outcome's Status against, sourced from RESEARCH_VERDICTS (or
@@ -54,9 +67,15 @@ var _ Settler = (*ResearchSettle)(nil)
 // (default) path. verdicts is the configured research verdict set (ADR 0022,
 // issue #2201) Settle validates the posted verdict against — the compiled
 // default (forge.ResearchVerdictLabels) unless RESEARCH_VERDICTS overrides it.
-func NewResearchSettle(it forge.IssueTracker, verdicts forge.VerdictLabels) *ResearchSettle {
+// filerEnabled mirrors the same roster-derived signal dispatchConfig passes
+// as FilerEnabled (issue #2593, ADR 0041): research + Filer forces the
+// SPINDRIFT_COMMENT relay unconditionally, even here in the read-write path,
+// so a missing verdict comment must fail exactly like the read-only/local
+// case does today rather than silently applying the verdict label with no
+// comment ever posted.
+func NewResearchSettle(it forge.IssueTracker, verdicts forge.VerdictLabels, filerEnabled bool) *ResearchSettle {
 	landing, _ := it.(forge.LandingRecorder)
-	return &ResearchSettle{it: it, landing: landing, verdicts: verdicts}
+	return &ResearchSettle{it: it, landing: landing, verdicts: verdicts, filerEnabled: filerEnabled}
 }
 
 // NewResearchSettleReadOnly constructs a ResearchSettle for a Dispatch
@@ -68,9 +87,14 @@ func NewResearchSettle(it forge.IssueTracker, verdicts forge.VerdictLabels) *Res
 // the configured research verdict set (ADR 0022, issue #2201) Settle
 // validates the posted verdict against — the compiled default
 // (forge.ResearchVerdictLabels) unless RESEARCH_VERDICTS overrides it.
-func NewResearchSettleReadOnly(it forge.IssueTracker, verdicts forge.VerdictLabels) *ResearchSettle {
+// filerEnabled mirrors the same roster-derived signal dispatchConfig passes
+// as FilerEnabled (issue #2593, ADR 0041): research + Filer forces the
+// SPINDRIFT_COMMENT relay unconditionally regardless of read-only/read-write,
+// so a missing verdict comment must fail here too, same reasoning as
+// NewResearchSettle's own filerEnabled doc.
+func NewResearchSettleReadOnly(it forge.IssueTracker, verdicts forge.VerdictLabels, filerEnabled bool) *ResearchSettle {
 	landing, _ := it.(forge.LandingRecorder)
-	return &ResearchSettle{it: it, landing: landing, readOnly: true, verdicts: verdicts}
+	return &ResearchSettle{it: it, landing: landing, readOnly: true, verdicts: verdicts, filerEnabled: filerEnabled}
 }
 
 // Settle interprets result and drives num to its terminal research label:
@@ -113,7 +137,7 @@ func (r *ResearchSettle) Settle(d dispatch.Dispatcher, num string, gen uint64, r
 			fmt.Printf("    #%s  status=comment-post-failed  !! %v\n", num, err)
 			return
 		}
-	} else if r.landing != nil || r.readOnly {
+	} else if r.landing != nil || r.readOnly || r.filerEnabled {
 		r.fail(num, "no verdict comment block")
 		return
 	}
