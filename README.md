@@ -214,7 +214,9 @@ validity, and label presence across all fifteen labels — the four triage
 labels (fatal if missing) plus eleven advisory labels (the seven
 `agent-research*` labels, the three `agent-priority-*` labels, and
 `agent-ambiguous-spec`). Run interactively, it offers to create missing
-labels; in CI it exits non-zero only when a triage label is missing.
+labels; in CI it exits non-zero when a triage label is missing or the
+configuration is invalid — see [exit codes](docs/reference.md#spindrift-doctor-exit-codes-issue-2569)
+for the full vocabulary.
 
 ## Basic flow
 
