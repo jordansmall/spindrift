@@ -1,6 +1,8 @@
 package main
 
 import (
+	"errors"
+	"fmt"
 	"os"
 	"time"
 
@@ -12,6 +14,14 @@ import (
 	"spindrift.dev/launcher/internal/settle"
 	"spindrift.dev/launcher/internal/tokenrefresh"
 )
+
+// errConfigInvalid is the sentinel bootstrap() wraps its own validate(c)
+// error return with (issue #2568 slice 1), letting a caller distinguish "the
+// loaded config failed validation" from any other bootstrap failure (a
+// readiness check, the accumulation-repo seed, etc.) via errors.Is, without
+// changing what validate(c) itself returns -- existing tests assert
+// validate(c)'s raw error text directly and must keep passing unchanged.
+var errConfigInvalid = errors.New("config invalid")
 
 // ghTokenRefreshInterval is how often bootstrap polls GH_TOKEN_REFRESH_FILE
 // (when set) for a freshly minted token. An installation token's ~1h
@@ -67,7 +77,7 @@ func bootstrap(ensureReady bool, kind string, selfContained bool) (lc *launchCon
 	c := applyDispatchKind(loadConfig(), kind)
 	c.selfContained = selfContained
 	if err := validate(c); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: %w", errConfigInvalid, err)
 	}
 	// One-time relocation (issue #2138): fold any legacy top-level logs/
 	// left by an earlier spindrift into the new .spindrift/logs before any

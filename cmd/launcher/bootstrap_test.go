@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -25,6 +26,23 @@ func TestBootstrap_PropagatesValidateError(t *testing.T) {
 	}
 	if err == nil || !strings.Contains(err.Error(), "REPO_SLUG") {
 		t.Fatalf("bootstrap() error = %v, want a REPO_SLUG validation error", err)
+	}
+}
+
+// TestBootstrap_ValidateError_WrapsErrConfigInvalid verifies bootstrap()'s
+// own return of a validate(c) failure now satisfies errors.Is(err,
+// errConfigInvalid) (issue #2568 slice 1), so a caller can distinguish a
+// config-validation failure from any other bootstrap failure -- without
+// changing what validate(c) itself returns (see
+// TestBootstrap_PropagatesValidateError, which still asserts the raw
+// REPO_SLUG error text unchanged).
+func TestBootstrap_ValidateError_WrapsErrConfigInvalid(t *testing.T) {
+	t.Setenv("REPO_SLUG", "")
+
+	_, err := bootstrap(true, dispatchKindWork, false)
+
+	if !errors.Is(err, errConfigInvalid) {
+		t.Fatalf("bootstrap() error = %v, want errors.Is(err, errConfigInvalid) = true", err)
 	}
 }
 
