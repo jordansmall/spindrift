@@ -438,7 +438,7 @@ func (c *forgejoClient) Probe() (string, error) {
 		if errors.Is(err, forge.ErrAuthFailure) {
 			return "", err
 		}
-		return "", fmt.Errorf("%w: %s", forge.ErrRepoNotFound, err)
+		return "", fmt.Errorf("%w: %w", forge.ErrRepoNotFound, err)
 	}
 	return payload.FullName, nil
 }
