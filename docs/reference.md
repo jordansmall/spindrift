@@ -3502,12 +3502,15 @@ guaranteed correct for your config.
 | 3    | open issues exist but none are dispatchable | stop and print a triage message — typically a failed blocker needs re-labeling before the queue can drain |
 | 4    | `CONTINUOUS_DISPATCH` mode: the freshness probe found either the loaded image would be rebuilt against the current base-branch tip, or the loaded host launcher is stale relative to the flake's launcher-currency attr; in-flight Boxes finished, no new ones launched | pull + rebuild, then re-invoke — the same boundary exit 0 runs; on an image-stale verdict the rebuild is often already pre-warmed by a background `nix build` the launcher kicked off during the drain, so the driving loop's rebuild is frequently a cache hit — a launcher-only-stale verdict does not trigger that background prebuild, so the rebuild there always runs cold |
 
-An exit-4 stale drain also appends a summary line to
-`.spindrift/logs/drain.log` — drain duration, free-slot-seconds accumulated
-while refilling was stopped, and how many discovered issues were held back
-— so a driving loop can total those numbers across iterations to judge
-whether the drain is a rounding error or the dominant stall (#2678). Each
-line is space-delimited `key=value` pairs prefixed `DRAIN `:
+This exit-4 "stale drain" is a distinct concept from the `MAX_JOBS` refill
+drain: the stale drain is `CONTINUOUS_DISPATCH` pausing new dispatch while
+the image or launcher is rebuilt, not the wave engine finishing its
+`MAX_JOBS`-bounded batch. It also appends a summary line to
+`.spindrift/logs/stale-drain.log` — drain duration, free-slot-seconds
+accumulated while refilling was stopped, and how many discovered issues were
+held back — so a driving loop can total those numbers across iterations to
+judge whether the drain is a rounding error or the dominant stall (#2678).
+Each line is space-delimited `key=value` pairs prefixed `STALE_DRAIN `:
 `durationSeconds`, `freeSlotSeconds`, and `heldBack` are the three fields
 worth grepping and summing. `heldBack` can be the literal string `unknown`
 instead of a number — a transient tracker error at the moment the drain
