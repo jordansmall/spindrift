@@ -3870,6 +3870,75 @@ func TestDoctor_TTY_Decline(t *testing.T) {
 	}
 }
 
+// TestDoctor_TTY_Decline_PromptShowsTierBreakdown verifies issue #2569's
+// tiered-label-prompt AC: when both the required (work) tier and an advisory
+// tier (research, here) have missing labels, the single interactive prompt
+// names the required-tier count and that declining it fails the check, and
+// the advisory-tier count and that declining it is safe — all in the same
+// [y/N] prompt/scan, with no extra round-trip.
+func TestDoctor_TTY_Decline_PromptShowsTierBreakdown(t *testing.T) {
+	f := forge.NewFake()
+	f.ProbeRepo = "owner/repo"
+	priority := doctor.PriorityLabelNames()
+	ambiguous := doctor.AmbiguousLabelNames()
+	// Two work labels missing (agent-failed, agent-complete) and all seven
+	// research labels missing; priority and ambiguous-spec present so the
+	// advisory count is scoped to research alone.
+	f.Labels = append(append([]string{"ready-for-agent", "agent-in-progress"}, priority...), ambiguous...)
+
+	var buf bytes.Buffer
+	err := runDoctor(f, f, defaultLabelConfig(), &buf, strings.NewReader("n\n"), true)
+	if err == nil {
+		t.Fatal("expected non-zero exit on decline, got nil")
+	}
+	out := buf.String()
+	if !strings.Contains(out, "[y/N]") {
+		t.Errorf("prompt must still end in [y/N], got:\n%s", out)
+	}
+	if !strings.Contains(out, "2 required") {
+		t.Errorf("prompt must name the required-tier count (2), got:\n%s", out)
+	}
+	if !strings.Contains(out, "7 advisory") {
+		t.Errorf("prompt must name the advisory-tier count (7), got:\n%s", out)
+	}
+	if !strings.Contains(out, "declining leaves this check failing") {
+		t.Errorf("prompt must state declining the required tier fails the check, got:\n%s", out)
+	}
+	if !strings.Contains(out, "declining is safe") {
+		t.Errorf("prompt must state declining the advisory tier is safe, got:\n%s", out)
+	}
+	if len(f.CreateLabelCalls) != 0 {
+		t.Errorf("decline must not create labels, got %d calls", len(f.CreateLabelCalls))
+	}
+}
+
+// TestDoctor_TTY_Decline_PromptOmitsConsequenceWhenNoRequiredMissing verifies
+// that when every work-tier label is present and only an advisory tier
+// (research, here) is missing, the prompt names "0 required" without the
+// "(declining leaves this check failing)" consequence clause — that clause
+// describes a tier that, with zero missing labels in it, has no consequence
+// to state.
+func TestDoctor_TTY_Decline_PromptOmitsConsequenceWhenNoRequiredMissing(t *testing.T) {
+	f := forge.NewFake()
+	f.ProbeRepo = "owner/repo"
+	priority := doctor.PriorityLabelNames()
+	ambiguous := doctor.AmbiguousLabelNames()
+	f.Labels = append(append([]string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}, priority...), ambiguous...)
+
+	var buf bytes.Buffer
+	err := runDoctor(f, f, defaultLabelConfig(), &buf, strings.NewReader("n\n"), true)
+	if err != nil {
+		t.Fatalf("missing advisory labels alone must not fail doctor, got: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "0 required") {
+		t.Errorf("prompt must name the required-tier count (0), got:\n%s", out)
+	}
+	if strings.Contains(out, "0 required (declining leaves this check failing)") {
+		t.Errorf("prompt must not attach a consequence clause to an empty required tier, got:\n%s", out)
+	}
+}
+
 func TestDoctor_TTY_Confirm(t *testing.T) {
 	f := forge.NewFake()
 	f.ProbeRepo = "owner/repo"
@@ -4966,5 +5035,62 @@ func TestBootstrapExitCode(t *testing.T) {
 				t.Errorf("bootstrapExitCode(%v) = %d, want %d", tc.err, got, tc.want)
 			}
 		})
+	}
+}
+
+// TestBootstrapExitCode_ReadOnlyTokenGateMisconfigured_ExitsOne is the
+// regression test for the review-flagged bug (issue #2569 follow-up):
+// checkReadOnlyTokenGate/checkReadOnlyForgejoTokenGate are called directly
+// by bootstrap() (bootstrap.go) and preview() (preview.go), not just from
+// doctor.go's reportReadOnlyTokenGate. Wrapping their misconfiguration
+// errors with bootstrap.go's errConfigInvalid (the sentinel meant only for
+// bootstrap()'s own validate(c) failure) would make bootstrapExitCode award
+// exitConfigInvalid (6) to a read-only-token misconfiguration hit by
+// `spindrift dispatch`/`recover`/console, an undocumented change to that
+// versioned exit code. It must instead fall through to the default exit 1,
+// origin/main's historical behavior for this failure on those subcommands.
+func TestBootstrapExitCode_ReadOnlyTokenGateMisconfigured_ExitsOne(t *testing.T) {
+	c := minimalValidConfig()
+	c.boxForgeAndIssueAccess = "read-only"
+	c.repoSlug = "owner/repo"
+	t.Setenv("BOX_GH_TOKEN", "")
+
+	introspect := func(token, repoSlug string) (tokenIntrospectionResult, error) {
+		t.Fatal("introspect should not be called when BOX_GH_TOKEN is unset")
+		return tokenIntrospectionResult{}, nil
+	}
+	var buf bytes.Buffer
+	_, err := checkReadOnlyTokenGate(c, introspect, &buf)
+	if err == nil {
+		t.Fatal("checkReadOnlyTokenGate() error = nil, want a misconfiguration error")
+	}
+
+	if got := bootstrapExitCode(err); got != 1 {
+		t.Errorf("bootstrapExitCode(%v) = %d, want 1", err, got)
+	}
+}
+
+// TestBootstrapExitCode_ReadOnlyForgejoTokenGateMisconfigured_ExitsOne is the
+// Forgejo-side sibling of TestBootstrapExitCode_ReadOnlyTokenGateMisconfigured_ExitsOne
+// above: checkReadOnlyForgejoTokenGate wraps the same errReadOnlyGateMisconfigured
+// sentinel, but only the GitHub gate had a dispatch-path exit-code regression
+// test pinning that bootstrapExitCode falls through to the default exit 1
+// rather than errConfigInvalid's exitConfigInvalid (6).
+func TestBootstrapExitCode_ReadOnlyForgejoTokenGateMisconfigured_ExitsOne(t *testing.T) {
+	c := minimalValidConfig()
+	c.boxForgeAndIssueAccess = "read-only"
+	c.codeForge = "forgejo"
+	c.issueTracker = "forgejo"
+	c.repoSlug = "owner/repo"
+	t.Setenv("BOX_FORGEJO_TOKEN", "")
+
+	var buf bytes.Buffer
+	_, err := checkReadOnlyForgejoTokenGate(c, &buf)
+	if err == nil {
+		t.Fatal("checkReadOnlyForgejoTokenGate() error = nil, want a misconfiguration error")
+	}
+
+	if got := bootstrapExitCode(err); got != 1 {
+		t.Errorf("bootstrapExitCode(%v) = %d, want 1", err, got)
 	}
 }

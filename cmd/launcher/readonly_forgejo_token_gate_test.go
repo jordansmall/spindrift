@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"strings"
 	"testing"
 )
@@ -21,6 +22,7 @@ func TestCheckReadOnlyForgejoTokenGate(t *testing.T) {
 		launcherToken string
 		boxToken      string // BOX_FORGEJO_TOKEN; empty means unset
 		wantErrSubstr string
+		wantErrIs     error // nil means skip the errors.Is check
 		wantWarning   bool
 	}{
 		{
@@ -39,6 +41,7 @@ func TestCheckReadOnlyForgejoTokenGate(t *testing.T) {
 			codeForge:     "forgejo",
 			boxToken:      "",
 			wantErrSubstr: "BOX_FORGEJO_TOKEN",
+			wantErrIs:     errReadOnlyGateMisconfigured,
 		},
 		{
 			name:          "Box token equal to Launcher token fails",
@@ -47,6 +50,7 @@ func TestCheckReadOnlyForgejoTokenGate(t *testing.T) {
 			launcherToken: "shared-token",
 			boxToken:      "shared-token",
 			wantErrSubstr: "BOX_FORGEJO_TOKEN",
+			wantErrIs:     errReadOnlyGateMisconfigured,
 		},
 		{
 			name:          "distinct token warns and succeeds unverified",
@@ -82,6 +86,9 @@ func TestCheckReadOnlyForgejoTokenGate(t *testing.T) {
 				if err == nil || !strings.Contains(err.Error(), tc.wantErrSubstr) {
 					t.Errorf("checkReadOnlyForgejoTokenGate() error = %v, want it to contain %q", err, tc.wantErrSubstr)
 				}
+			}
+			if tc.wantErrIs != nil && !errors.Is(err, tc.wantErrIs) {
+				t.Errorf("checkReadOnlyForgejoTokenGate() error = %v, want errors.Is(err, %v)", err, tc.wantErrIs)
 			}
 			if verified {
 				t.Errorf("checkReadOnlyForgejoTokenGate() verified = true, want always false (Forgejo has no introspection endpoint)")

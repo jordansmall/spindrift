@@ -2,12 +2,85 @@ package main
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"io"
+	"os"
 
 	"spindrift.dev/launcher/internal/doctor"
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/forge/local"
 )
+
+// cmdDoctor is the `doctor` subcommand: probe each forge seam through its
+// own adapter (not the combined Client) so a CODE_FORGE=git deployment
+// checks the actual remote it will push to, not the IssueTracker's repo a
+// second time. No runner/dispatch/settle wiring needed, so it does not go
+// through bootstrap.
+func cmdDoctor() int {
+	c := loadConfig()
+	it := newIssueTracker(c)
+	cf := newCodeForge(c, local.SanitizedParent{}, it)
+	return doctorReport(it, cf, c, os.Stdout, os.Stderr, os.Stdin, isStdinTTY())
+}
+
+// doctorReport runs cmdDoctor's full exit-vocabulary classification (issue
+// #2569). It always runs both validateConfig(c) (main.go) and runDoctor — an
+// invalid configuration never skips runDoctor, so a config-invalid run still
+// prints every ok/MISSING/advisory status line runDoctor would otherwise
+// produce, the same full report origin/main's doctor always gave regardless
+// of config validity. Either failure's explanation goes to stderr as it's
+// found, so a caller that redirects stdout never loses the reason for a
+// non-zero exit (AC2) even when both configErr and runErr are non-nil at
+// once. doctorExitCodeFor still gives configErr precedence for the exit
+// code itself — an invalid configuration makes runDoctor's own result
+// unreliable — but both explanations are already on stderr by the time it
+// runs.
+func doctorReport(it forge.IssueTracker, cf forge.CodeForge, c config, stdout, stderr io.Writer, stdin io.Reader, interactive bool) int {
+	configErr := validateConfig(c)
+	if configErr != nil {
+		fmt.Fprintf(stderr, "%s\n", configErr)
+	}
+	runErr := runDoctor(it, cf, c, stdout, stdin, interactive)
+	if runErr != nil {
+		fmt.Fprintf(stderr, "%s\n", runErr)
+	}
+	return doctorExitCodeFor(configErr, runErr)
+}
+
+// doctorExitCodeFor maps cmdDoctor's two failure sources to the doctor
+// exit-code vocabulary (issue #2569): 0 healthy (advisory findings
+// allowed), 2 configuration invalid — either configErr itself, or a runErr
+// wrapping errReadOnlyGateMisconfigured (the read-only token gate's
+// misconfiguration errors: BOX_GH_TOKEN/BOX_FORGEJO_TOKEN unset, identical
+// to the Launcher's own token, or write-capable), 3 auth or connectivity
+// (doctor.ErrConnectivity, which also covers the read-only token gate's own
+// introspection failures), 4 required checks failed or declined
+// (doctor.ErrRequiredLabelsMissing), 1 reserved for internal/unclassified
+// errors. configErr, from validateConfig(c) (main.go), always wins the exit
+// code — doctorReport runs runDoctor regardless of configErr (issue #2559's
+// full-report behavior), so both can be genuinely non-nil at once; an
+// invalid configuration just makes whatever runDoctor found unreliable, so
+// it doesn't get to pick the exit code. runErr is never a bare
+// errConfigInvalid: that sentinel is bootstrap.go's own validate(c) wrap,
+// which doctorReport surfaces separately as configErr, not through
+// runDoctor.
+func doctorExitCodeFor(configErr, runErr error) int {
+	switch {
+	case configErr != nil:
+		return 2
+	case runErr == nil:
+		return 0
+	case errors.Is(runErr, errReadOnlyGateMisconfigured):
+		return 2
+	case errors.Is(runErr, doctor.ErrConnectivity):
+		return 3
+	case errors.Is(runErr, doctor.ErrRequiredLabelsMissing):
+		return 4
+	default:
+		return 1
+	}
+}
 
 // runDoctor adapts the launcher's full config to doctor.Config and delegates
 // to the shared internal/doctor package (also used in-process by

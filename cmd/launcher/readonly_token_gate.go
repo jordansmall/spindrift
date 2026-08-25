@@ -1,13 +1,30 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"strings"
 
+	"spindrift.dev/launcher/internal/doctor"
 	"spindrift.dev/launcher/internal/forge/github"
 )
+
+// errReadOnlyGateMisconfigured is the sentinel checkReadOnlyTokenGate and
+// checkReadOnlyForgejoTokenGate wrap their own misconfiguration errors with
+// (BOX_GH_TOKEN/BOX_FORGEJO_TOKEN unset, identical to the Launcher's own
+// token, or write-capable). It is deliberately distinct from bootstrap.go's
+// errConfigInvalid: these gates are called not just from doctor.go's
+// reportReadOnlyTokenGate, but directly by bootstrap() and preview() too
+// (bootstrap.go, preview.go). Reusing errConfigInvalid would make
+// bootstrapExitCode -- which checks errors.Is(err, errConfigInvalid) to
+// award exit 6 for validate(c) failures only -- also award exit 6 to
+// dispatch/recover/preview for a read-only-token misconfiguration, an
+// undocumented change to a versioned exit code those subcommands never
+// signed up for. doctorExitCodeFor (doctor.go) checks for this sentinel
+// instead, so `spindrift doctor` keeps classifying it as exit 2.
+var errReadOnlyGateMisconfigured = errors.New("read-only token gate misconfigured")
 
 // tokenIntrospectionResult reports what checkReadOnlyTokenGate's GitHub-side
 // probe learned about a Box token. Introspectable is false only for a
@@ -48,21 +65,21 @@ func checkReadOnlyTokenGate(c config, introspect tokenIntrospector, w io.Writer)
 	}
 	boxToken := os.Getenv("BOX_GH_TOKEN")
 	if boxToken == "" {
-		return false, fmt.Errorf("BOX_FORGE_AND_ISSUE_ACCESS=read-only requires BOX_GH_TOKEN to be set to a credential distinct from GH_TOKEN — the Box must never receive the Launcher's own write-capable token")
+		return false, fmt.Errorf("%w: BOX_FORGE_AND_ISSUE_ACCESS=read-only requires BOX_GH_TOKEN to be set to a credential distinct from GH_TOKEN — the Box must never receive the Launcher's own write-capable token", errReadOnlyGateMisconfigured)
 	}
 	if boxToken == c.ghToken {
-		return false, fmt.Errorf("BOX_FORGE_AND_ISSUE_ACCESS=read-only requires BOX_GH_TOKEN to differ from GH_TOKEN — it is byte-for-byte identical to the Launcher's own token, which defeats read-only")
+		return false, fmt.Errorf("%w: BOX_FORGE_AND_ISSUE_ACCESS=read-only requires BOX_GH_TOKEN to differ from GH_TOKEN — it is byte-for-byte identical to the Launcher's own token, which defeats read-only", errReadOnlyGateMisconfigured)
 	}
 	result, err := introspect(boxToken, c.repoSlug)
 	if err != nil {
-		return false, fmt.Errorf("BOX_FORGE_AND_ISSUE_ACCESS=read-only: introspecting BOX_GH_TOKEN failed: %w", err)
+		return false, fmt.Errorf("%w: BOX_FORGE_AND_ISSUE_ACCESS=read-only: introspecting BOX_GH_TOKEN failed: %w", doctor.ErrConnectivity, err)
 	}
 	if !result.Introspectable {
 		fmt.Fprintln(w, "WARNING: BOX_GH_TOKEN's write capability could not be determined (e.g. a fine-grained PAT, whose granted permissions GitHub exposes no endpoint to introspect). read-only trusts that it was provisioned with read-only scope; verify this yourself before relying on it.")
 		return false, nil
 	}
 	if result.WriteCapable {
-		return false, fmt.Errorf("BOX_FORGE_AND_ISSUE_ACCESS=read-only requires BOX_GH_TOKEN to carry no write scopes; the provided token is write-capable")
+		return false, fmt.Errorf("%w: BOX_FORGE_AND_ISSUE_ACCESS=read-only requires BOX_GH_TOKEN to carry no write scopes; the provided token is write-capable", errReadOnlyGateMisconfigured)
 	}
 	return true, nil
 }

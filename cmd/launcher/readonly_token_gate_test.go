@@ -5,6 +5,8 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"spindrift.dev/launcher/internal/doctor"
 )
 
 // TestCheckReadOnlyTokenGate table-drives checkReadOnlyTokenGate's cases
@@ -24,6 +26,7 @@ func TestCheckReadOnlyTokenGate(t *testing.T) {
 		introspectErr        error
 		expectIntrospectCall bool
 		wantErrSubstr        string
+		wantErrIs            error // nil means skip the errors.Is check
 		wantVerified         bool
 		wantWarning          bool
 	}{
@@ -38,6 +41,7 @@ func TestCheckReadOnlyTokenGate(t *testing.T) {
 			boxToken:             "",
 			expectIntrospectCall: false,
 			wantErrSubstr:        "BOX_GH_TOKEN",
+			wantErrIs:            errReadOnlyGateMisconfigured,
 		},
 		{
 			name:                 "Box token equal to Launcher token fails",
@@ -46,6 +50,7 @@ func TestCheckReadOnlyTokenGate(t *testing.T) {
 			boxToken:             "shared-token",
 			expectIntrospectCall: false,
 			wantErrSubstr:        "BOX_GH_TOKEN",
+			wantErrIs:            errReadOnlyGateMisconfigured,
 		},
 		{
 			name:                 "distinct non-write-capable token succeeds",
@@ -64,6 +69,7 @@ func TestCheckReadOnlyTokenGate(t *testing.T) {
 			result:               tokenIntrospectionResult{Introspectable: true, WriteCapable: true},
 			expectIntrospectCall: true,
 			wantErrSubstr:        "write",
+			wantErrIs:            errReadOnlyGateMisconfigured,
 		},
 		{
 			name:                 "non-introspectable token warns and succeeds",
@@ -82,6 +88,7 @@ func TestCheckReadOnlyTokenGate(t *testing.T) {
 			introspectErr:        errors.New("gh api -i user: exit status 1"),
 			expectIntrospectCall: true,
 			wantErrSubstr:        "introspecting BOX_GH_TOKEN failed",
+			wantErrIs:            doctor.ErrConnectivity,
 		},
 		{
 			name:                 "read-only pure-forgejo deployment is a no-op",
@@ -128,6 +135,9 @@ func TestCheckReadOnlyTokenGate(t *testing.T) {
 				if err == nil || !strings.Contains(err.Error(), tc.wantErrSubstr) {
 					t.Errorf("checkReadOnlyTokenGate() error = %v, want it to contain %q", err, tc.wantErrSubstr)
 				}
+			}
+			if tc.wantErrIs != nil && !errors.Is(err, tc.wantErrIs) {
+				t.Errorf("checkReadOnlyTokenGate() error = %v, want errors.Is(err, %v)", err, tc.wantErrIs)
 			}
 			if verified != tc.wantVerified {
 				t.Errorf("checkReadOnlyTokenGate() verified = %v, want %v", verified, tc.wantVerified)

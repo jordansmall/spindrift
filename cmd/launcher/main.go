@@ -552,6 +552,55 @@ func validate(c config) error {
 	return nil
 }
 
+// validateConfig runs the same configuration-correctness checks validate(c)
+// gates dispatch on — required-knob presence, driver credentials,
+// cross-knob pairs, and the enum-choice knobs, plus RESEARCH_VERDICTS — with
+// two deliberate omissions: doctor.RuntimeCheck and the --self-contained
+// check. Runtime readiness is an environment/installation concern doctor has
+// always treated as advisory (issue #2561), never fatal, so it must not
+// fold into cmdDoctor's exit-2 "configuration invalid" classification
+// (issue #2569) even though validate(c) itself still requires it before
+// dispatch can launch a Box. --self-contained is a dispatch-kind check
+// (checks.go), and cmdDoctor's only config source, loadConfig(), never sets
+// c.selfContained — only bootstrap() does, from the dispatch flag — so the
+// check can never fire here; validateConfig omits it rather than carry dead
+// code. It reuses doctorExtraChecks(c) — the same runtime-filtered row set
+// runDoctor already reports informationally — so the two never disagree
+// about which rows count as "configuration".
+//
+// Unlike validate(), which runs its checks fail-fast because dispatch only
+// needs to know about the first blocking problem, validateConfig runs every
+// row via doctor.RunChecks and joins every failure with errors.Join: none
+// of these checks are network probes, so running every row costs nothing,
+// and cmdDoctor's stderr summary can then name each simultaneously-broken
+// check (issue #2569 AC2) instead of only the first. validate() itself is
+// untouched by this function and keeps its own fail-fast precedence
+// (TestValidate_ChoiceErrorsPrecedeCrossKnobErrors and friends).
+func validateConfig(c config) error {
+	var errs []error
+	for _, r := range doctor.RunChecks(doctorExtraChecks(c)) {
+		if r.Check.Tier == doctor.Required && r.Err != nil {
+			errs = append(errs, r.Err)
+		}
+	}
+	for _, choice := range []struct{ env, value string }{
+		{"MERGE_MODE", c.mergeMode},
+		{"MERGE_METHOD", c.mergeMethod},
+		{"SYNC_METHOD", c.syncMethod},
+		{"OVERLAP_GATE", c.overlapGate},
+		{"NETWORK_MODE", c.networkMode},
+		{"BOX_FORGE_AND_ISSUE_ACCESS", c.boxForgeAndIssueAccess},
+	} {
+		if err := validateChoice(choice.env, choice.value); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if _, err := forge.ParseResearchVerdicts(c.researchVerdicts); err != nil {
+		errs = append(errs, err)
+	}
+	return errors.Join(errs...)
+}
+
 // repoBanner formats the "repo: ... merge-mode: ..." line preview and run
 // print at the top of a dispatch, omitting the repo segment when repoSlug is
 // empty — the fully-local case (CODE_FORGE=local && ISSUE_TRACKER=local)
@@ -1592,22 +1641,6 @@ func runContinuousDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, 
 // closures without running any agent.
 func cmdBuild() int {
 	if err := build(); err != nil {
-		fmt.Fprintf(os.Stderr, "%s\n", err)
-		return 1
-	}
-	return 0
-}
-
-// cmdDoctor is the `doctor` subcommand: probe each forge seam through its
-// own adapter (not the combined Client) so a CODE_FORGE=git deployment
-// checks the actual remote it will push to, not the IssueTracker's repo a
-// second time. No runner/dispatch/settle wiring needed, so it does not go
-// through bootstrap.
-func cmdDoctor() int {
-	c := loadConfig()
-	it := newIssueTracker(c)
-	cf := newCodeForge(c, local.SanitizedParent{}, it)
-	if err := runDoctor(it, cf, c, os.Stdout, os.Stdin, isStdinTTY()); err != nil {
 		fmt.Fprintf(os.Stderr, "%s\n", err)
 		return 1
 	}
