@@ -1599,13 +1599,64 @@ func runContinuousDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, 
 	cfg := wavesConfig(c)
 	cfg.SeedScopeOf = localloop.SeedScopeResolver(it, cf)
 	if err := waves.RunContinuous(cfg, nil, it, cf, pwd, f, s, discover, fresh); err != nil {
-		// ErrImageStale takes priority over firstQueryErr below: refill's
-		// stale-drain report (see continuous.go) can itself trigger an
-		// extra, reporting-only discover() call the very first time
-		// staleness fires, and if that call is also the run's first-ever
-		// discover() call, a transient error from it would otherwise get
-		// caught by firstQueryErr and flatten this more specific,
-		// higher-priority ErrImageStale/exit-4 outcome into a raw error.
+		// ErrImageStale deliberately takes priority over firstQueryErr
+		// below when both are non-nil (issue #2780's Option 1: leave this
+		// order as-is). The only way both can be non-nil at once: refill's
+		// stale-drain report (see continuous.go) makes refill's very first
+		// staleness detection issue an extra, reporting-only discover()
+		// call (continuous.go's refill, around the `case !cfg.PreResolved`
+		// branch), and if that call is also the run's first-ever
+		// discover() call, a transient error from it sets firstQueryErr as
+		// well as staleResult -- without this priority, that error would
+		// flatten the more specific, higher-priority ErrImageStale/exit-4
+		// outcome into a raw error.
+		//
+		// A genuine (non-reporting-only) first-ever discover() error can
+		// never coexist with staleness detected independently *later* in
+		// the same run, so this check can only ever mask the
+		// reporting-only case above, never a real, separate error.
+		// Reasoning: refill (continuous.go's refill closure) calls fresh()
+		// first; when fresh() says not-stale, refill's only discover()
+		// call is the genuine one, and if that's the run's first-ever
+		// discover() call and it errors, refill logs to stderr and returns
+		// false before ever reaching the dispatch/launch code -- no Box
+		// ever launches. RunContinuous's bootstrap is
+		// `mu.Lock(); drainRefill(); for outstanding > 0 { idle.Wait() };
+		// closed = true; mu.Unlock()`, and drainRefill is
+		// `for refill() { n++ }`: since that one refill() call already
+		// returned false, drainRefill's loop body never runs again, so
+		// outstanding stays 0 and the `for outstanding > 0` loop's body --
+		// the only place idle.Wait() releases mu -- never runs either. mu
+		// is therefore held continuously from Lock() to Unlock() with no
+		// gap for the poll-ticker or grow-resize listener goroutines to
+		// acquire it and run another refill()/fresh() call. Both of those
+		// goroutines are started before this Lock(), but neither ever
+		// reaches mu.Lock() at all during this call, gap or no gap: the
+		// headless path (nil Session) always builds its own fixed,
+		// never-resized Limiter (continuous.go's RunContinuous, around
+		// `limiter = NewLimiter(cfg.MaxParallel)`), so the grow listener's
+		// Resized() case can never fire; the poll ticker's first tick is
+		// at least pollInterval away (a waves-package-private field,
+		// defaulting to 30s, that main.go has no way to override), and
+		// RunContinuous closes both goroutines down (growDone/pollDone)
+		// immediately after this Unlock(), long before a real 30s could
+		// elapse. RunContinuous returns almost immediately
+		// (ErrOpenNoneDispatchable, since stale and dispatchedAny both
+		// stay false) before fresh() is ever called a second time. So
+		// there is no "later" in this run for staleness to be
+		// independently detected in. And even in the one reachable
+		// masking case, the error isn't silently lost: refill's
+		// reporting-only discover() already prints it to stderr the moment
+		// it happens, before RunContinuous returns -- masking here only
+		// changes the process exit code, not the diagnostic.
+		//
+		// See TestRunExitCode_ContinuousDispatch_ImageStaleOnFirstRefillWithTransientDiscoverError_ReturnsExitCode4
+		// (the masked-but-stderr-logged case),
+		// TestRunContinuousDispatch_GenuineFirstDiscoverErrorNeverReachesLaterStaleness
+		// (pins that a genuine first-discover error can't reach a later
+		// staleness detection), and
+		// TestRun_ContinuousDispatch_StartupQueryError_Propagates (the
+		// never-stale, real-error-surfaces case).
 		if errors.Is(err, waves.ErrImageStale) {
 			if guard.Classify(staleResult) == freshness.HostTainted {
 				fmt.Fprintln(os.Stdout, freshness.HostTaintDiagnostic(c.baseBranch, staleResult.Rev, c.flakeImageAttr, staleResult.TipTag, c.imageTag))
