@@ -4,7 +4,7 @@
 # #2356): drives the ACTUAL runtime validator (agent/entrypoint.sh's
 # phase_prompt_assembly, which since issue #2356 forwards to the real Go
 # `driver-exec assemble-prompt` verb's promptassembly.Validate, the
-# successor to the old bash _validate_prompt_contract) against the same 16
+# successor to the old bash _validate_prompt_contract) against the same 20
 # fixtures lib/prompt-contract.nix's `parityFixtures` already resolved --
 # for severity=="reject" rows, via the real `buildTimeRejectVerdicts`
 # function; for severity=="warn" rows, by construction, since a warn row's
@@ -14,14 +14,14 @@
 # just that Nix's own pinning of the fold (nix/checks/prompt-contract-
 # parity.nix, slice 1) is self-consistent.
 #
-# A single @test loops over all 16 fixture rows read from
+# A single @test loops over all 20 fixture rows read from
 # PROMPT_CONTRACT_PARITY_FIXTURE (a JSON file nix/checks/bats.nix renders
 # from lib/prompt-contract.nix's parityFixtures) rather than one @test per
 # row: bats has no built-in data-driven-@test-generation this repo already
 # uses elsewhere (tests/entrypoint-prompt-validator.bats's own "data-driven"
 # case patches a single field and asserts a single outcome, it doesn't loop
 # over a fixture list), so a hand-rolled per-@test-per-row split would mean
-# hardcoding the 16 (id, gate, markerPresent) combinations a second time in
+# hardcoding the 20 (id, gate, markerPresent) combinations a second time in
 # bash -- exactly the duplication this slice exists to avoid. The loop
 # accumulates every failing fixture's id/gate/markerPresent/verdict before
 # failing once at the end, so a broken row is still individually legible in
@@ -74,7 +74,7 @@ _parity_stub_prompt_dir() {
 
   local failures=0
   local i=0
-  local fixture id gate markerPresent verdict expect_block prompt_dir status_out
+  local fixture id gate markerPresent verdict expect_block prompt_dir status_out comment_marker
 
   while IFS= read -r fixture; do
     i=$((i + 1))
@@ -170,6 +170,37 @@ _parity_stub_prompt_dir() {
           export BOX_REVIEW_LOOP_ORCHESTRATOR=1
           unset BOX_REVIEW_LOOP_INLINE
           export BOX_WRITE_ENABLED=1
+        fi
+        ;;
+      research-issue-intent)
+        # FILER_FILE_RELAY's research special case (ADR 0041 / issue #2593)
+        # fires whenever DISPATCH_KIND=research and BOX_FILER_ENABLED, with
+        # no orchestrator condition and regardless of BOX_WRITE_ENABLED --
+        # and, per issue #2593's validate.go fix, that same
+        # kind=="research" && FILER_FILE_RELAY condition now also activates
+        # the verdict-comment-relay reject row (When=readOnlyResearch),
+        # which scans this same research-prompt.md for SPINDRIFT_COMMENT.
+        # Append it here whenever gate=true so that unrelated row never
+        # spuriously fires against this row's own markerPresent scenario;
+        # when gate=false, DISPATCH_KIND is unset below so kind reverts to
+        # "work" and verdict-comment-relay's own kind=="research" condition
+        # is never active regardless, so no marker is needed there.
+        comment_marker=""
+        if [ "$gate" = true ]; then
+          comment_marker=$'\n\nPost your verdict with SPINDRIFT_COMMENT here'
+        fi
+        if [ "$markerPresent" = true ]; then
+          printf 'research stub with SPINDRIFT_ISSUE_INTENT here%s\n' "$comment_marker" >"$prompt_dir/research-prompt.md"
+        else
+          printf 'research stub, no issue-intent marker here%s\n' "$comment_marker" >"$prompt_dir/research-prompt.md"
+        fi
+        export BOX_WRITE_ENABLED=1
+        if [ "$gate" = true ]; then
+          export DISPATCH_KIND="research"
+          export BOX_FILER_ENABLED=1
+        else
+          unset DISPATCH_KIND
+          unset BOX_FILER_ENABLED
         fi
         ;;
       *)

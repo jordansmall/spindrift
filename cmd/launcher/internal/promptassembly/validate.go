@@ -16,6 +16,7 @@ const (
 	whenOrchestratorEnabled = "orchestratorEnabled"
 	whenBoxAccessReadOnly   = "boxAccessReadOnly"
 	whenFilerFileRelay      = "filerFileRelay"
+	whenResearchFileRelay   = "researchFileRelay"
 )
 
 // The Severity values a ValidateMarkerRow's Severity field is compared
@@ -45,9 +46,9 @@ type ValidateMarkerRow struct {
 	// active and Marker is missing.
 	Severity string `json:"severity"`
 	// When names which gate condition activates this row -- one of
-	// "readOnlyResearch", "orchestratorEnabled", "boxAccessReadOnly", or
-	// "filerFileRelay". See Validate's switch for exactly what each resolves
-	// to.
+	// "readOnlyResearch", "orchestratorEnabled", "boxAccessReadOnly",
+	// "filerFileRelay", or "researchFileRelay". See Validate's switch for
+	// exactly what each resolves to.
 	When string `json:"when"`
 	// Message is the row's fully pre-rendered diagnostic prose, marker
 	// already interpolated by the nix registry.
@@ -121,7 +122,7 @@ func Validate(e Env, result Result, rows []ValidateMarkerRow) (warnings []string
 
 		switch row.When {
 		case whenReadOnlyResearch:
-			gateActive = kind == "research" && gates["BOX_ACCESS_READ_ONLY"]
+			gateActive = kind == "research" && (gates["BOX_ACCESS_READ_ONLY"] || gates["FILER_FILE_RELAY"])
 			haystack = result.Prompt
 		case whenOrchestratorEnabled:
 			gateActive = gates["ORCHESTRATOR"] && result.Handoff.ReviewPromptFile != ""
@@ -132,6 +133,9 @@ func Validate(e Env, result Result, rows []ValidateMarkerRow) (warnings []string
 		case whenFilerFileRelay:
 			gateActive = gates["FILER_FILE_RELAY"]
 			haystack = filerPromptFrom(result.AgentsJSON)
+		case whenResearchFileRelay:
+			gateActive = kind == "research" && gates["FILER_FILE_RELAY"]
+			haystack = result.Prompt
 		default:
 			return warnings, fmt.Errorf("promptassembly: validate: no known gate for when %q (row %q)", row.When, row.ID)
 		}
