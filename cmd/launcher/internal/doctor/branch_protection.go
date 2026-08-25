@@ -52,23 +52,23 @@ func BranchProtectionCheck(cf forge.CodeForge, mergePolicy, baseBranch string) C
 			"protect %s: block direct pushes and require CI status checks (see README.md/SECURITY.md — running without branch protection is not safe to deploy)",
 			baseBranch,
 		),
-		Probe: func() error {
+		Probe: func() (any, error) {
 			bp, ok := cf.(forge.BranchProtectionForge)
 			if !ok {
 				successMsg = "not applicable (code forge has no branch-protection API)"
-				return nil
+				return nil, nil
 			}
 			protected, err := bp.BranchProtected(baseBranch)
 			if err != nil {
-				return fmt.Errorf("branch protection probe for %q failed: %w: %w", baseBranch, err, ErrDegraded)
+				return nil, fmt.Errorf("branch protection probe for %q failed: %w: %w", baseBranch, err, ErrDegraded)
 			}
 			if !protected {
-				return fmt.Errorf("base branch %q is not protected", baseBranch)
+				return nil, fmt.Errorf("base branch %q is not protected", baseBranch)
 			}
 			successMsg = fmt.Sprintf("base branch %q is protected", baseBranch)
-			return nil
+			return nil, nil
 		},
-		SuccessMsg: func() string {
+		SuccessMsg: func(output any) string {
 			return successMsg
 		},
 	}

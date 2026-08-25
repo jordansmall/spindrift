@@ -153,7 +153,7 @@ func TestRun_ExtraChecks_FailingRequiredRowIsReportedButDoesNotFailRun(t *testin
 		{
 			Name:  "fake required launcher check",
 			Tier:  Required,
-			Probe: func() error { return wantErr },
+			Probe: func() (any, error) { return nil, wantErr },
 		},
 	}
 
@@ -186,7 +186,7 @@ func TestRun_ExtraChecks_FailingAdvisoryRowDoesNotFailRun(t *testing.T) {
 		{
 			Name:  "fake advisory launcher check",
 			Tier:  Advisory,
-			Probe: func() error { return errors.New("advisory check failed") },
+			Probe: func() (any, error) { return nil, errors.New("advisory check failed") },
 		},
 	}
 

@@ -43,22 +43,31 @@ type Check struct {
 	// Tier determines whether a failure is blocking (Required) or
 	// informational (Advisory).
 	Tier Tier
-	// Probe runs the check, returning a non-nil error on failure.
-	Probe func() error
+	// Probe runs the check, returning a non-nil error on failure. On
+	// success, its first return value is passed to SuccessMsg as that
+	// call's own output parameter, rather than a Probe closure having to
+	// stash the value in a variable captured by a sibling SuccessMsg
+	// closure.
+	Probe func() (any, error)
 	// Remedy is a short human-readable hint printed alongside a failure,
 	// e.g. "set GIT_USER_NAME, or configure git user.name on the host".
 	Remedy string
 	// SuccessMsg, if set, overrides the "ok: <Name>" line ReportResults
 	// prints on success, letting a Check report a dynamic, probe-derived
 	// detail in its own success line -- e.g. a live-fetched repo slug or a
-	// count -- the same way Remedy lets it report a fatal detail. When nil,
-	// ReportResults falls back to printing "ok: <Name>" as before.
-	SuccessMsg func() string
+	// count -- the same way Remedy lets it report a fatal detail. output is
+	// the value Probe returned alongside its nil error (Result.Output).
+	// When SuccessMsg is nil, ReportResults falls back to printing "ok:
+	// <Name>" as before.
+	SuccessMsg func(output any) string
 }
 
 // Result is the outcome of running one Check's Probe.
 type Result struct {
 	Check Check
+	// Output is the value Probe returned alongside a nil Err -- passed to
+	// Check.SuccessMsg by ReportResults. Meaningless when Err is non-nil.
+	Output any
 	// Err is nil on success.
 	Err error
 }
@@ -68,7 +77,8 @@ func runOne(c Check) Result {
 	if c.Probe == nil {
 		return Result{Check: c, Err: fmt.Errorf("check %q has no Probe", c.Name)}
 	}
-	return Result{Check: c, Err: c.Probe()}
+	output, err := c.Probe()
+	return Result{Check: c, Output: output, Err: err}
 }
 
 // blocking reports whether r should stop a fail-fast chain (RunChecksFailFast)
@@ -155,7 +165,7 @@ func ReportResults(w io.Writer, results []Result) {
 	for _, r := range results {
 		if r.Err == nil {
 			if r.Check.SuccessMsg != nil {
-				fmt.Fprintf(w, "ok: %s\n", r.Check.SuccessMsg())
+				fmt.Fprintf(w, "ok: %s\n", r.Check.SuccessMsg(r.Output))
 				continue
 			}
 			fmt.Fprintf(w, "ok: %s\n", r.Check.Name)
