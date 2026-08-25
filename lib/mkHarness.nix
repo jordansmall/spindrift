@@ -1183,7 +1183,15 @@ let
   #                  vendorHash = pkgs.lib.fakeHash; }'
   #             and set the recomputed hash in lib/build-constants.nix's
   #             launcherVendorHash. Commit go.sum and the updated vendorHash
-  #             together.
+  #             together. launcherCurrencyBin below vendors the same
+  #             go.mod/go.sum against a narrower fileset (src =
+  #             launcherCurrencyFileset, not ./cmd/launcher), so a go.mod/
+  #             go.sum change also needs a second recompute of that recipe's
+  #             `src` against launcherCurrencyFileset, set into
+  #             launcherCurrencyVendorHash -- the two hashes are not
+  #             interchangeable (#784, issue #2677). driverExecVendorHash
+  #             (below) needs the same treatment, off driverExecBin's own
+  #             src.
   launcherBin = hostPkgs.buildGoModule {
     pname = "spindrift-launcher";
     version = spindriftVersion;
@@ -1199,6 +1207,85 @@ let
     ldflags = [
       "-X main.version=${spindriftVersion}"
       "-X main.revision=${revision}"
+    ];
+    meta.license = lib.licenses.mit;
+  };
+
+  # A revision-independent sibling of launcherBin (issue #2677 slice 1):
+  # launcherBin's ldflags bake `-X main.revision=${revision}`, which moves
+  # its store path on every commit -- even docs-only ones, since `revision`
+  # (flake.nix) tracks `self.shortRev`. Callers that only need to detect
+  # launcher *staleness* (issue #1364) want a hash that is stable across
+  # revision-only changes -- a sibling derivation over the same source with
+  # the revision normalized out (ADR 0043). This binary is never invoked,
+  # only its store hash is read, so its ldflags intentionally drop
+  # `-X main.revision=...` entirely; `main.version` is kept for symmetry
+  # with launcherBin. `spindriftVersion` (above) reads
+  # .release-please-manifest.json, a file outside cmd/launcher, so this
+  # hash still moves on a release-only commit -- but only once per
+  # release, not once per commit like `revision` did, so it doesn't
+  # reintroduce the per-commit churn this derivation exists to avoid.
+  #
+  # src is scoped with lib.fileset, NOT launcherSrc (unlike launcherBin)
+  # -- launcherSrc's runCommand copies ../docs alongside cmd/launcher so
+  # launcherBin's checkPhase can resolve a docs-relative test path (#611),
+  # but doCheck is false here and pulling docs in would make a docs-only
+  # commit move this derivation's hash too, defeating the point.
+  #
+  # The fileset below is a directory-level approximation of the launcher's
+  # import graph, not the graph itself: it takes go.mod, go.sum, and every
+  # non-test .go file under cmd/launcher, then subtracts the driver-exec,
+  # orchestrator, and quickstart subtrees (each of those is an independent
+  # `package main`, unreachable from the launcher's imports). That keeps
+  # this derivation's hash from moving on a commit to those three sibling
+  # trees or a _test.go file, neither of which subPackages = [ "." ] ever
+  # compiles into the launcher binary -- but it is only an approximation:
+  # a reviewer diffing `go list -deps .` against this fileset found 13
+  # directories included here that are outside the launcher's real import
+  # graph (e.g. internal/passmachine is orchestrator-only, internal/testutil
+  # is test-support-only), so perturbing those still moves this
+  # derivation's outPath too (issue #2677 review fix).
+  launcherCurrencyFileset =
+    lib.fileset.difference
+      (lib.fileset.unions [
+        ../cmd/launcher/go.mod
+        ../cmd/launcher/go.sum
+        (lib.fileset.fileFilter (f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name) ../cmd/launcher)
+      ])
+      (
+        lib.fileset.unions [
+          ../cmd/launcher/driver-exec
+          ../cmd/launcher/orchestrator
+          ../cmd/launcher/quickstart
+        ]
+      );
+
+  launcherCurrencySrc = lib.fileset.toSource {
+    root = ../cmd/launcher;
+    fileset = launcherCurrencyFileset;
+  };
+
+  launcherCurrencyBin = hostPkgs.buildGoModule {
+    pname = "spindrift-launcher-currency";
+    version = spindriftVersion;
+    src = launcherCurrencySrc;
+    # No modRoot here (unlike launcherBin): the fileset's `root` above is
+    # already ../cmd/launcher, so the resulting src's top level IS
+    # cmd/launcher's contents -- mirroring driverExecBin, which also omits
+    # modRoot for the same reason. launcherBin sets modRoot = "cmd/launcher"
+    # because its launcherSrc nests a copy under $out/cmd/launcher instead.
+    # Same go.mod/go.sum as launcherBin, but a narrower fileset (see above)
+    # -- like driverExecBin (#784), `go mod vendor` prunes to packages
+    # actually present in the source tree, so the narrower fileset vendors
+    # differently even off identical go.mod/go.sum, hence its own
+    # buildConstants.launcherCurrencyVendorHash rather than reusing
+    # launcherVendorHash.
+    vendorHash = buildConstants.launcherCurrencyVendorHash;
+    subPackages = [ "." ];
+    doCheck = false;
+    ldflags = [
+      "-X main.version=${spindriftVersion}"
+      # main.revision intentionally omitted -- see comment above.
     ];
     meta.license = lib.licenses.mit;
   };
@@ -1503,10 +1590,17 @@ else
       # (nix/checks/equivalence.nix), the same reason driverEntry above is
       # exposed. Not part of the settings/CLI surface itself.
       roster = finalRoster;
+
+      # The pre-toSource lib.fileset value backing launcherCurrencySrc,
+      # exposed for nix/checks/equivalence.nix's eval-level introspection
+      # (issue #2677 review fix) -- a comparison derivation there needs
+      # this exact fileset value, not just the realized store path.
+      inherit launcherCurrencyFileset;
     };
 
     packages = {
       inherit spindrift;
+      launcher-currency = launcherCurrencyBin;
       spindrift-manpage = manpage;
       spindrift-bash-completion = bashCompletion;
       spindrift-fish-completion = fishCompletion;
