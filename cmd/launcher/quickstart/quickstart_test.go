@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"slices"
 	"strings"
@@ -2757,17 +2758,168 @@ func TestRunQuickstart_SelfHostedForgejo_AsksBackendAndEmitsBaseURL(t *testing.T
 	}
 }
 
-// deprecatedPathSpellings are the old settings.<section>.<knob> shim
+// parseLegacySettingsSections reads lib/legacy-settings-section.nix (the
+// frozen ADR-0037-Pass-2 knob -> section map, shared with
+// cmd/launcher/main_test.go's parseLegacySettingsSectionNames, which parses
+// the same file but only keeps the distinct section names) and returns the
+// full knob -> section map. Test-only: production code never parses this
+// file directly (lib/flakeModule.nix consumes it as Nix data), so this
+// helper has no non-test counterpart. Deliberately a local, package-private
+// duplicate of cmd/launcher's parseLegacySettingsSectionNames parsing logic
+// rather than a shared helper: the two callers keep different shapes (this
+// one keeps the full knob -> section map, that one keeps only the distinct
+// section names), and the duplication is small enough that a shared helper
+// package would cost more than it saves.
+func parseLegacySettingsSections(t *testing.T) map[string]string {
+	t.Helper()
+
+	content, err := os.ReadFile(filepath.Join("..", "..", "..", "lib", "legacy-settings-section.nix"))
+	if err != nil {
+		t.Fatalf("read lib/legacy-settings-section.nix: %v", err)
+	}
+
+	return parseLegacySettingsSectionsContent(t, string(content))
+}
+
+// parseLegacySettingsSectionsContent is parseLegacySettingsSections'
+// content-parsing core, split out so tests can exercise it directly against
+// synthetic content (e.g. to prove it ignores Nix line comments) without
+// round-tripping through the real lib/legacy-settings-section.nix file.
+func parseLegacySettingsSectionsContent(t *testing.T, content string) map[string]string {
+	t.Helper()
+
+	content = stripNixLineComments(content)
+
+	rowRe := regexp.MustCompile(`(\w+)\s*=\s*"([^"]+)";`)
+	sections := map[string]string{}
+	for _, match := range rowRe.FindAllStringSubmatch(content, -1) {
+		sections[match[1]] = match[2]
+	}
+	if len(sections) == 0 {
+		t.Fatalf("parsed zero knob rows from lib/legacy-settings-section.nix; regex out of sync with file format?")
+	}
+	return sections
+}
+
+// stripNixLineComments strips Nix line comments (an unescaped '#' to end of
+// line) from content before regex-matching, so a commented-out row that
+// merely looks like a real data row (e.g. `# historical note: repoSlug =
+// "sandbox";`) is never picked up as one. Sufficient for the flat, plain
+// attrset lib/legacy-settings-section.nix fixture this package parses, which
+// contains no string literals with '#' in them; deliberately not a general
+// Nix tokenizer. Package-private duplicate of
+// cmd/launcher/main_test.go's helper of the same name and shape — see the
+// doc comment on parseLegacySettingsSections above for why these test-only
+// parse helpers are duplicated across the package boundary rather than
+// shared.
+func stripNixLineComments(content string) string {
+	lines := strings.Split(content, "\n")
+	for i, line := range lines {
+		if idx := strings.Index(line, "#"); idx != -1 {
+			lines[i] = line[:idx]
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+// TestParseLegacySettingsSections_MatchesKnownEntries pins the size of
+// lib/legacy-settings-section.nix's knob -> section map and spot-checks four
+// representative knobs. This is a canary for parseLegacySettingsSections
+// itself (proves the regex parses the real file correctly); deprecatedPathSpellings
+// below builds its denylist directly off this same map, so there is no
+// separate consistency test to drift out of sync.
+func TestParseLegacySettingsSections_MatchesKnownEntries(t *testing.T) {
+	got := parseLegacySettingsSections(t)
+
+	const wantCount = 53
+	if len(got) != wantCount {
+		t.Errorf("parseLegacySettingsSections() returned %d entries, want %d", len(got), wantCount)
+	}
+
+	wantEntries := map[string]string{
+		"repoSlug":     "repository",
+		"gitUserName":  "repository",
+		"gitUserEmail": "repository",
+		"issueTracker": "issueDiscovery",
+	}
+	for knob, wantSection := range wantEntries {
+		if gotSection, ok := got[knob]; !ok {
+			t.Errorf("parseLegacySettingsSections() missing knob %q", knob)
+		} else if gotSection != wantSection {
+			t.Errorf("parseLegacySettingsSections()[%q] = %q, want %q", knob, gotSection, wantSection)
+		}
+	}
+}
+
+// TestParseLegacySettingsSectionsContent_IgnoresNixComments guards against
+// the regex matching inside Nix line comments: a `#`-prefixed comment line
+// that merely looks like a real `knob = "section";` row (e.g. "# historical
+// note: repoSlug = \"sandbox\";") must never overwrite or add to the parsed
+// knob -> section map.
+func TestParseLegacySettingsSectionsContent_IgnoresNixComments(t *testing.T) {
+	const synthetic = `{
+  repoSlug = "repository";
+  # historical note: repoSlug = "sandbox";
+}
+`
+
+	got := parseLegacySettingsSectionsContent(t, synthetic)
+	want := map[string]string{"repoSlug": "repository"}
+
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("parseLegacySettingsSectionsContent(t, synthetic) = %v, want %v (a '#'-comment row must not be picked up as a real knob -> section row)", got, want)
+	}
+}
+
+// deprecatedPathSpellings returns the old settings.<section>.<knob> shim
 // spellings TestRunQuickstart_FlakeNix_NoDeprecatedPathSpellings denylists.
 // The old flat structural-shim spelling for runtime ("runtime = " with no
 // leading "infra.") is checked separately by assertNoDeprecatedPathSpellings
 // since, unlike these, it can't be told apart from the canonical
 // infra.runtime spelling by substring alone.
-var deprecatedPathSpellings = []string{
-	"settings.repository.repoSlug",         // old settings.<section>.<knob> shim spelling
-	"settings.repository.gitUserName",      // old settings.<section>.<knob> shim spelling
-	"settings.repository.gitUserEmail",     // old settings.<section>.<knob> shim spelling
-	"settings.issueDiscovery.issueTracker", // old settings.<section>.<knob> shim spelling
+//
+// The list is fully derived from parseLegacySettingsSections: every
+// knob -> section row in lib/legacy-settings-section.nix (all ~53 of them)
+// becomes one "settings.<section>.<knob>" entry here, not just the subset
+// quickstart's generated flake.nix is known to render today.
+// Over-inclusion is intentional and free: assertNoDeprecatedPathSpellings
+// only ever does an absence check against generated flake.nix, so an entry
+// quickstart never emits simply never matches — there's no false-positive
+// risk to trade for completeness. That also means a knob added to
+// lib/legacy-settings-section.nix is automatically covered here with no
+// human hand-add step, and the denylist is provably derived from Nix
+// source rather than hand-picked.
+//
+// This list is intentionally kept separate from
+// cmd/launcher/main_test.go's deprecatedDocSpellings, which checks doc
+// prose (README.md, docs/**/*.md) rather than generated flake.nix output —
+// different granularity (knob-level here vs. section-level there) for a
+// different artifact — even though both now cross-check against the same
+// canonical lib/legacy-settings-section.nix.
+//
+// Subsumes issue #2685 ("derive deprecated-path spellings denylist from
+// flakeModule"): that issue's suggested source, lib/flakeModule.nix's
+// oldFlatShims, is still live (built from structuralOptions) — it was never
+// extracted or moved anywhere. It generates a different, unrelated
+// deprecated-spelling family: the flat structural shims (e.g. "nixInBox",
+// "runtime"), not the settings.<section>.<knob> spellings this list
+// targets. The actual canonical source for settings.<section>.<knob>
+// spellings is lib/legacy-settings-section.nix (legacySettingsSection),
+// which feeds lib/flakeModule.nix's sectionKnobs and mkSectionOption — the
+// code that actually builds the settings.<section>.<knob> shim options this
+// denylist targets. So lib/legacy-settings-section.nix, parsed here via
+// parseLegacySettingsSections, is the correct "equivalent structure" issue
+// #2685's AC1 allows for this family — not a claim that oldFlatShims moved
+// there.
+func deprecatedPathSpellings(t *testing.T) []string {
+	t.Helper()
+
+	knobToSection := parseLegacySettingsSections(t)
+	spellings := make([]string, 0, len(knobToSection))
+	for knob, section := range knobToSection {
+		spellings = append(spellings, "settings."+section+"."+knob)
+	}
+	return spellings
 }
 
 // assertNoDeprecatedPathSpellings reads flake.nix from dir and fails t if it
@@ -2783,7 +2935,7 @@ func assertNoDeprecatedPathSpellings(t *testing.T, dir string) {
 		t.Fatalf("read flake.nix: %v", err)
 	}
 
-	for _, deprecated := range deprecatedPathSpellings {
+	for _, deprecated := range deprecatedPathSpellings(t) {
 		if strings.Contains(string(flakeNix), deprecated) {
 			t.Errorf("expected flake.nix not to contain deprecated spelling %q, got:\n%s", deprecated, flakeNix)
 		}
