@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"path"
 	"strings"
 	"time"
 
@@ -299,3 +300,39 @@ func (f *forgejoCodeForge) Probe() (string, error) {
 	}
 	return payload.FullName, nil
 }
+
+// forgejoBranchProtection is the subset of Forgejo's branch-protection
+// payload BranchProtected needs: rule_name is a glob (e.g. "release/*"), not
+// a literal branch name, so a single rule can cover many branches.
+type forgejoBranchProtection struct {
+	RuleName string `json:"rule_name"`
+}
+
+// BranchProtected reports whether branch is covered by any Forgejo
+// branch-protection rule, via GET repos/{repo}/branch_protections -- the
+// list endpoint, not the per-name lookup, because each rule's rule_name is
+// matched against branch as a glob (path.Match), not a literal branch name:
+// a rule named "release/*" or "*" protects "release/1.0" or "main" without
+// either ever appearing verbatim as a rule_name. Gitea/Forgejo's list
+// endpoint returns 200 with an empty array for a repo with no protection
+// rules at all -- that is the definitive, successful (false, nil) "no
+// rules" result, and the empty-slice loop below handles it without ever
+// seeing an error. A 404 here therefore never means "no rules"; like any
+// other rest.Do failure (forge.ErrAuthFailure or otherwise), it means the
+// probe itself couldn't determine the answer, per BranchProtectionForge's
+// contract -- returned as a non-nil error, never as a false "not
+// protected".
+func (f *forgejoCodeForge) BranchProtected(branch string) (bool, error) {
+	var rules []forgejoBranchProtection
+	if err := f.rest.Do(http.MethodGet, f.repoPath()+"/branch_protections", nil, &rules); err != nil {
+		return false, err
+	}
+	for _, r := range rules {
+		if ok, err := path.Match(r.RuleName, branch); err == nil && ok {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+var _ forge.BranchProtectionForge = (*forgejoCodeForge)(nil)
