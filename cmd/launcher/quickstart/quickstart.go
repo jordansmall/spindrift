@@ -23,6 +23,7 @@ import (
 	"spindrift.dev/launcher/internal/forge/github"
 	"spindrift.dev/launcher/internal/forge/jira"
 	"spindrift.dev/launcher/internal/forge/local"
+	"spindrift.dev/launcher/internal/forge/rest"
 	"spindrift.dev/launcher/internal/runner"
 )
 
@@ -639,10 +640,31 @@ func acquireForgejoToken(w io.Writer, promptMasked func(string) string, forgeBui
 		if errors.Is(err, forge.ErrAuthFailure) {
 			return "", fmt.Errorf("Forgejo token rejected by the API at %s — the instance is derived from the git remote, so if this is the wrong instance, `git remote set-url` to point at the right one before you rerun `%s` and paste a valid token: %w", baseURL, quickstartRerunCmd, err)
 		}
-		return "", fmt.Errorf("Forgejo connectivity check failed for %s (repo slug %q) — either the instance is unreachable or the repo slug is wrong; check both, then rerun `%s`: %w", baseURL, repoSlug, quickstartRerunCmd, err)
+		if !errors.Is(err, forge.ErrNotFound) {
+			var statusErr rest.StatusError
+			if errors.As(err, &statusErr) {
+				cause := fmt.Sprintf("the instance responded with HTTP status %d", statusErr.Status)
+				return "", forgejoConnectivityError(baseURL, repoSlug, cause, "check the Forgejo instance's health/logs", err)
+			}
+			var decodeErr rest.DecodeError
+			if errors.As(err, &decodeErr) {
+				return "", forgejoConnectivityError(baseURL, repoSlug, "the instance's response could not be parsed", "check the Forgejo instance's version/API compatibility", err)
+			}
+		}
+		return "", forgejoConnectivityError(baseURL, repoSlug, "either the instance is unreachable or the repo slug is wrong", "check both", err)
 	}
 	fmt.Fprintln(w, "ok: Forgejo token validated via live API ping")
 	return token, nil
+}
+
+// forgejoConnectivityError builds the shared-skeleton error acquireForgejoToken
+// returns for each of its three post-Probe failure branches (an unmapped
+// StatusError, a DecodeError, and the generic unreachable-or-wrong-slug
+// fallback) -- cause names what went wrong and remedy names the operator
+// action, so the three branches differ only in those two clauses instead of
+// each restating the ~200-character skeleton around them.
+func forgejoConnectivityError(baseURL, repoSlug, cause, remedy string, err error) error {
+	return fmt.Errorf("Forgejo connectivity check to %s (repo slug %q) failed — %s; %s, then rerun `%s`: %w", baseURL, repoSlug, cause, remedy, quickstartRerunCmd, err)
 }
 
 // requiredGHPermissions are the four permissions a token must carry on the
