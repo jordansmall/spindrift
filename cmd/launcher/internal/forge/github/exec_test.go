@@ -538,6 +538,256 @@ func TestExecClient_BranchExists_RejectsEmptyBranch(t *testing.T) {
 	}
 }
 
+// TestExecClient_BranchProtected_Protected verifies BranchProtected returns
+// true when the branch-protection endpoint returns 200 with a JSON body.
+func TestExecClient_BranchProtected_Protected(t *testing.T) {
+	prependFakeGH(t, `case "$*" in
+*branches/main/protection*)
+	printf '{"required_status_checks":null}\n'
+	;;
+*)
+	exit 1
+	;;
+esac`)
+
+	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	protected, err := c.BranchProtected("main")
+	if err != nil {
+		t.Fatalf("BranchProtected: %v", err)
+	}
+	if !protected {
+		t.Error("BranchProtected(main) = false, want true")
+	}
+}
+
+// TestExecClient_BranchProtected_NotProtected verifies BranchProtected
+// returns (false, nil) — a definitive, successful result, not an error —
+// when both the classic endpoint 404s with GitHub's "Branch not protected"
+// message and the ruleset endpoint reports no applicable rules.
+func TestExecClient_BranchProtected_NotProtected(t *testing.T) {
+	prependFakeGH(t, `case "$*" in
+*branches/main/protection*)
+	echo 'gh: Branch not protected (HTTP 404)' >&2
+	exit 1
+	;;
+*rules/branches/main*)
+	printf '0\n'
+	;;
+*)
+	exit 1
+	;;
+esac`)
+
+	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	protected, err := c.BranchProtected("main")
+	if err != nil {
+		t.Fatalf("BranchProtected: want nil error for the 'not protected' 404, got %v", err)
+	}
+	if protected {
+		t.Error("BranchProtected(main) = true, want false")
+	}
+}
+
+// TestExecClient_BranchProtected_RulesetOnly verifies BranchProtected
+// returns (true, nil) when the classic endpoint 404s "Branch not
+// protected" but the branch is covered by a repository ruleset -- the
+// mechanism README.md and SECURITY.md instruct operators to configure,
+// which the classic branches/{branch}/protection endpoint never reports.
+func TestExecClient_BranchProtected_RulesetOnly(t *testing.T) {
+	prependFakeGH(t, `case "$*" in
+*branches/main/protection*)
+	echo 'gh: Branch not protected (HTTP 404)' >&2
+	exit 1
+	;;
+*rules/branches/main*)
+	printf '1\n'
+	;;
+*)
+	exit 1
+	;;
+esac`)
+
+	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	protected, err := c.BranchProtected("main")
+	if err != nil {
+		t.Fatalf("BranchProtected: %v", err)
+	}
+	if !protected {
+		t.Error("BranchProtected(main) = false, want true (ruleset-protected)")
+	}
+}
+
+// TestExecClient_BranchProtected_DocumentedTokenFallsThroughOn403 verifies
+// BranchProtected falls through to branchProtectedByRuleset when the
+// classic endpoint fails with HTTP 403 rather than the "Branch not
+// protected" 404 -- this project's own documented fine-grained PAT scope
+// (Contents/Pull requests/Issues RW + Metadata R, no Administration: read)
+// makes 403 the response the classic endpoint actually returns, so this is
+// the single most common real configuration: a ruleset-protected branch
+// under the documented token must be reported protected, not error out.
+func TestExecClient_BranchProtected_DocumentedTokenFallsThroughOn403(t *testing.T) {
+	prependFakeGH(t, `case "$*" in
+*branches/main/protection*)
+	echo 'gh: Resource not accessible by personal access token (HTTP 403)' >&2
+	exit 1
+	;;
+*rules/branches/main*)
+	printf '1\n'
+	;;
+*)
+	exit 1
+	;;
+esac`)
+
+	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	protected, err := c.BranchProtected("main")
+	if err != nil {
+		t.Fatalf("BranchProtected: want nil error for the documented-token 403 fallthrough, got %v", err)
+	}
+	if !protected {
+		t.Error("BranchProtected(main) = false, want true (ruleset-protected)")
+	}
+}
+
+// TestExecClient_BranchProtected_DocumentedTokenZeroRulesetDegrades verifies
+// BranchProtected returns a non-nil error -- never a definitive false --
+// when the classic endpoint 403s (the documented fine-grained PAT scope,
+// no Administration: read) and the ruleset probe reports zero applicable
+// rules. Unlike the 404 "Branch not protected" case, a 403 means the
+// classic mechanism was never actually read, so a zero ruleset count does
+// not rule out a classic-only protection rule this token simply can't see
+// -- exactly the configuration docs/reference.md instructs operators to
+// set up (a classic rule on main, no ruleset). Reporting (false, nil) here
+// would be a false required failure under MERGE_MODE=immediate/auto.
+func TestExecClient_BranchProtected_DocumentedTokenZeroRulesetDegrades(t *testing.T) {
+	prependFakeGH(t, `case "$*" in
+*branches/main/protection*)
+	echo 'gh: Resource not accessible by personal access token (HTTP 403)' >&2
+	exit 1
+	;;
+*rules/branches/main*)
+	printf '0\n'
+	;;
+*)
+	exit 1
+	;;
+esac`)
+
+	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	protected, err := c.BranchProtected("main")
+	if err == nil {
+		t.Fatal("BranchProtected: want error for a 403 with zero applicable rulesets, got nil")
+	}
+	if protected {
+		t.Error("BranchProtected(main) = true, want false alongside the error")
+	}
+}
+
+// TestExecClient_BranchProtected_RulesetProbeFailure verifies BranchProtected
+// surfaces a non-nil error when the classic endpoint's "Branch not
+// protected" 404 falls through to the ruleset probe and that probe itself
+// fails (network, insufficient token scope, etc.) -- never a false "not
+// protected".
+func TestExecClient_BranchProtected_RulesetProbeFailure(t *testing.T) {
+	prependFakeGH(t, `case "$*" in
+*branches/main/protection*)
+	echo 'gh: Branch not protected (HTTP 404)' >&2
+	exit 1
+	;;
+*rules/branches/main*)
+	echo 'gh: Resource not accessible by personal access token (HTTP 403)' >&2
+	exit 1
+	;;
+*)
+	exit 1
+	;;
+esac`)
+
+	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	protected, err := c.BranchProtected("main")
+	if err == nil {
+		t.Fatal("BranchProtected: want error for a ruleset probe failure, got nil")
+	}
+	if protected {
+		t.Error("BranchProtected(main) = true, want false alongside the error")
+	}
+}
+
+// TestExecClient_BranchProtected_ProbeFailure verifies BranchProtected
+// surfaces a non-nil error — never a false "not protected" — when the
+// classic endpoint's 403 falls through to the ruleset probe (as the
+// documented token's scope makes it) and that ruleset probe itself is
+// unstubbed here and fails: a genuine probe failure, not resolved to a
+// false "not protected".
+func TestExecClient_BranchProtected_ProbeFailure(t *testing.T) {
+	prependFakeGH(t, `case "$*" in
+*branches/main/protection*)
+	echo 'gh: Resource not accessible by personal access token (HTTP 403)' >&2
+	exit 1
+	;;
+*)
+	exit 1
+	;;
+esac`)
+
+	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	protected, err := c.BranchProtected("main")
+	if err == nil {
+		t.Fatal("BranchProtected: want error for a non-404 probe failure, got nil")
+	}
+	if protected {
+		t.Error("BranchProtected(main) = true, want false alongside the error")
+	}
+}
+
+// TestExecClient_BranchProtected_GenericNotFound verifies BranchProtected
+// surfaces a non-nil error -- not a false "not protected" -- for a 404 that
+// isn't GitHub's "Branch not protected" body, e.g. a base branch that hasn't
+// been pushed yet, a typo'd branch name, or a repo the token can't see: all
+// return a bare 404 that must not be conflated with a definitive "no
+// protection rule" answer.
+func TestExecClient_BranchProtected_GenericNotFound(t *testing.T) {
+	prependFakeGH(t, `case "$*" in
+*branches/main/protection*)
+	echo 'gh: Not Found (HTTP 404)' >&2
+	exit 1
+	;;
+*)
+	exit 1
+	;;
+esac`)
+
+	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	protected, err := c.BranchProtected("main")
+	if err == nil {
+		t.Fatal("BranchProtected: want error for a generic 404, got nil")
+	}
+	if protected {
+		t.Error("BranchProtected(main) = true, want false alongside the error")
+	}
+}
+
+// TestExecClient_BranchProtected_RejectsEmptyBranch verifies BranchProtected
+// refuses an empty branch without shelling out, mirroring
+// TestExecClient_BranchExists_RejectsEmptyBranch.
+func TestExecClient_BranchProtected_RejectsEmptyBranch(t *testing.T) {
+	dir := prependFakeGH(t, `exit 1`)
+
+	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	if _, err := c.BranchProtected(""); err == nil {
+		t.Error("BranchProtected(\"\"): want error, got nil")
+	}
+	if matches, _ := filepath.Glob(filepath.Join(dir, "call-*.txt")); len(matches) != 0 {
+		t.Errorf("want no gh invocation for an empty branch, got %d", len(matches))
+	}
+}
+
+// TestExecClient_ImplementsBranchProtectionForge verifies the github adapter
+// satisfies forge.BranchProtectionForge.
+func TestExecClient_ImplementsBranchProtectionForge(t *testing.T) {
+	var _ forge.BranchProtectionForge = NewExecClient("owner/repo", testLabels, "agent/issue-")
+}
+
 // TestExecClient_TouchesOf_FetchesFullIssueBody verifies that TouchesOf
 // fetches the issue's full body via `gh issue view` (unlike ListIssues,
 // whose --json number,title summary never includes body) and parses its

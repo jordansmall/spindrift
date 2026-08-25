@@ -77,6 +77,88 @@ func (e *execClient) BranchExists(branch string) (bool, error) {
 	return false, nil
 }
 
+// BranchProtected reports whether branch has protection configured, via
+// GET repos/{repo}/branches/{branch}/protection. GitHub returns 404 "Branch
+// not protected" when the branch carries no *classic* protection rule --
+// but that endpoint never sees a branch protected solely by a repository
+// ruleset (the mechanism README.md and SECURITY.md instruct operators to
+// configure), so a "Branch not protected" 404 falls through to
+// branchProtectedByRuleset, and the classic mechanism is known false: the
+// ruleset count alone decides the definitive answer.
+//
+// The classic endpoint also requires the token's Administration: read
+// permission, which this project's own documented fine-grained PAT scope
+// (Contents/Pull requests/Issues RW + Metadata R -- see docs/reference.md)
+// does not grant, so on the documented deployment the classic endpoint
+// returns HTTP 403 rather than the 404 body above. A 403 falls through to
+// branchProtectedByRuleset too, since Metadata: read is sufficient for that
+// endpoint -- but unlike the 404 case, a 403 means the classic mechanism
+// was never actually read, so a ruleset count of zero here does NOT license
+// a definitive false: the branch could still carry a classic-only rule this
+// token simply can't see. Only ruleset count > 0 is definitive on the 403
+// path (a ruleset alone is sufficient to protect); count == 0 degrades to
+// an error, per BranchProtectionForge's contract that a non-nil error means
+// the probe couldn't determine the answer, never "determined unprotected".
+//
+// Any other gh api failure (network, a scope insufficient for both
+// endpoints, etc.) means the probe itself couldn't determine the answer --
+// returned as a non-nil error, never as a false "not protected".
+func (e *execClient) BranchProtected(branch string) (bool, error) {
+	if branch == "" {
+		return false, fmt.Errorf("branch must not be empty")
+	}
+	var stderr bytes.Buffer
+	cmd := exec.Command("gh", "api",
+		fmt.Sprintf("repos/%s/branches/%s/protection", e.repo, branch),
+	)
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		classicKnownUnprotected := strings.Contains(stderr.String(), "Branch not protected")
+		classicUnreadable := strings.Contains(stderr.String(), "HTTP 403")
+		if classicKnownUnprotected || classicUnreadable {
+			protected, rerr := e.branchProtectedByRuleset(branch)
+			if rerr != nil {
+				return false, rerr
+			}
+			if protected || classicKnownUnprotected {
+				return protected, nil
+			}
+			return false, fmt.Errorf("gh api branches/%s/protection: HTTP 403 (classic protection unreadable) and no ruleset applies -- cannot determine whether %s carries a classic-only protection rule", branch, branch)
+		}
+		suffix := ""
+		if s := strings.TrimSpace(stderr.String()); s != "" {
+			suffix = ": " + s
+		}
+		return false, fmt.Errorf("gh api branches/%s/protection: %w%s", branch, err, suffix)
+	}
+	return true, nil
+}
+
+// branchProtectedByRuleset covers the GitHub branch-protection mechanism
+// the classic branches/{branch}/protection endpoint can't see: repository
+// rulesets. GET repos/{repo}/rules/branches/{branch} returns every ruleset
+// rule that currently applies to branch, evaluated server-side (so a
+// wildcard target like "release/*" is matched without the caller having to
+// replicate GitHub's own targeting logic) -- 200 with an empty array when
+// none apply, never a 404, so a bare gh api failure here is always a
+// genuine probe failure. --jq length collapses the array to a count so the
+// answer is a single line of stdout, mirroring BranchExists' --jq usage.
+func (e *execClient) branchProtectedByRuleset(branch string) (bool, error) {
+	cmd := exec.Command("gh", "api",
+		fmt.Sprintf("repos/%s/rules/branches/%s", e.repo, branch),
+		"--jq", "length",
+	)
+	out, err := cmd.Output()
+	if err != nil {
+		return false, fmt.Errorf("gh api rules/branches/%s: %w", branch, err)
+	}
+	n, parseErr := strconv.Atoi(strings.TrimSpace(string(out)))
+	if parseErr != nil {
+		return false, fmt.Errorf("gh api rules/branches/%s: parse response: %w", branch, parseErr)
+	}
+	return n > 0, nil
+}
+
 func (e *execClient) PRForBranch(branch string) (string, bool, error) {
 	cmd := exec.Command("gh", "pr", "list",
 		"--repo", e.repo,
@@ -475,3 +557,5 @@ func (e *execClient) Rebase(prURL string) error {
 	defer cancel()
 	return gitplumbing.GitForcePush(ctx, dir)
 }
+
+var _ forge.BranchProtectionForge = (*execClient)(nil)
