@@ -52,6 +52,41 @@ func TestValidateReadOnlyResearchPass(t *testing.T) {
 	}
 }
 
+// TestValidateReadWriteResearchFilerRelayReject covers the same
+// verdict-comment-relay row's other trigger (issue #2593): a research
+// dispatch with the Filer provisioned forces FILER_FILE_RELAY (and the
+// read-only-shaped research-verdict-github-readonly.md fragment) even when
+// BoxWriteEnabled is true, per gates_tracker.go's researchForceRelay. A
+// rendered prompt missing SPINDRIFT_COMMENT under that gate is exactly the
+// unrecoverable verdict-loss case the reject row exists to prevent, so this
+// must reject even though BOX_ACCESS_READ_ONLY is false.
+func TestValidateReadWriteResearchFilerRelayReject(t *testing.T) {
+	e := Env{DispatchKind: "research", BoxWriteEnabled: true, FilerEnabled: true}
+	result := Result{Prompt: "research stub, no verdict-comment marker here"}
+
+	warnings, err := Validate(e, result, testValidateMarkerRows())
+	if err == nil {
+		t.Fatal("Validate() error = nil, want non-nil")
+	}
+	mustContain(t, err.Error(), "SPINDRIFT_COMMENT")
+	if warnings != nil {
+		t.Fatalf("Validate() warnings = %v, want nil", warnings)
+	}
+}
+
+// TestValidateReadWriteResearchFilerRelayPass covers the same gate as
+// TestValidateReadWriteResearchFilerRelayReject, but with SPINDRIFT_COMMENT
+// present -- no reject, no false positive.
+func TestValidateReadWriteResearchFilerRelayPass(t *testing.T) {
+	e := Env{DispatchKind: "research", BoxWriteEnabled: true, FilerEnabled: true}
+	result := Result{Prompt: "research stub\n\nPost your verdict with SPINDRIFT_COMMENT here"}
+
+	_, err := Validate(e, result, testValidateMarkerRows())
+	if err != nil {
+		t.Fatalf("Validate() error = %v, want nil", err)
+	}
+}
+
 // TestValidateOrchestratorEnabledReject covers the reviewer-verdict row: the
 // orchestrator on with a rendered review prompt missing VERDICT: must
 // reject.
@@ -126,6 +161,74 @@ func TestValidateFilerFileRelayWarn(t *testing.T) {
 		t.Fatalf("Validate() error = %v, want nil", err)
 	}
 	mustContain(t, strings.Join(warnings, "\n"), "SPINDRIFT_ISSUE_INTENT")
+}
+
+// TestValidateResearchFileRelayWarn covers the research-issue-intent row: a
+// research dispatch with the Filer provisioned (so FILER_FILE_RELAY resolves
+// true, issue #2593) whose own rendered prompt (result.Prompt, not the
+// filer's) is missing SPINDRIFT_ISSUE_INTENT -- advisory only. AgentsJSON's
+// filer.prompt already carries the marker, so the pre-existing issue-intent
+// row (which scans AgentsJSON, not Prompt) doesn't also warn here -- isolates
+// this case to the new row alone. Prompt already carries SPINDRIFT_COMMENT so
+// the verdict-comment-relay row (also gate-active here per issue #2593's
+// FILER_FILE_RELAY OR condition) doesn't reject first.
+func TestValidateResearchFileRelayWarn(t *testing.T) {
+	e := Env{DispatchKind: "research", FilerEnabled: true, BoxWriteEnabled: true}
+	result := Result{
+		Prompt:     "research stub with SPINDRIFT_COMMENT present, no issue-intent marker here",
+		AgentsJSON: `{"filer":{"prompt":"already has SPINDRIFT_ISSUE_INTENT"}}`,
+	}
+
+	warnings, err := Validate(e, result, testValidateMarkerRows())
+	if err != nil {
+		t.Fatalf("Validate() error = %v, want nil", err)
+	}
+	if len(warnings) != 1 {
+		t.Fatalf("Validate() warnings = %v, want exactly one entry", warnings)
+	}
+	mustContain(t, warnings[0], "SPINDRIFT_ISSUE_INTENT")
+}
+
+// TestValidateResearchFileRelayNoFalsePositiveMarkerPresent covers the
+// research-issue-intent row's no-false-positive case: same gate-active Env,
+// but result.Prompt already carries SPINDRIFT_ISSUE_INTENT -- no warning from
+// this row. AgentsJSON's filer.prompt also carries the marker, so the
+// pre-existing issue-intent row (which scans AgentsJSON, not Prompt) doesn't
+// independently warn either -- isolates this case to the new row alone.
+// Prompt also carries SPINDRIFT_COMMENT so the verdict-comment-relay row
+// (also gate-active here per issue #2593's FILER_FILE_RELAY OR condition)
+// doesn't reject first.
+func TestValidateResearchFileRelayNoFalsePositiveMarkerPresent(t *testing.T) {
+	e := Env{DispatchKind: "research", FilerEnabled: true, BoxWriteEnabled: true}
+	result := Result{
+		Prompt:     "research stub ... SPINDRIFT_ISSUE_INTENT ... SPINDRIFT_COMMENT ... present",
+		AgentsJSON: `{"filer":{"prompt":"already has SPINDRIFT_ISSUE_INTENT"}}`,
+	}
+
+	warnings, err := Validate(e, result, testValidateMarkerRows())
+	if err != nil {
+		t.Fatalf("Validate() error = %v, want nil", err)
+	}
+	if warnings != nil {
+		t.Fatalf("Validate() warnings = %v, want nil", warnings)
+	}
+}
+
+// TestValidateResearchFileRelayNoFalsePositiveGateOff covers the
+// research-issue-intent row's other no-false-positive case: a work-kind
+// dispatch (gate never active regardless of FilerEnabled) with no marker in
+// Prompt -- no warning from this row.
+func TestValidateResearchFileRelayNoFalsePositiveGateOff(t *testing.T) {
+	e := Env{DispatchKind: "work", FilerEnabled: true, BoxWriteEnabled: true}
+	result := Result{Prompt: "issue stub, no issue-intent marker here"}
+
+	warnings, err := Validate(e, result, testValidateMarkerRows())
+	if err != nil {
+		t.Fatalf("Validate() error = %v, want nil", err)
+	}
+	if warnings != nil {
+		t.Fatalf("Validate() warnings = %v, want nil", warnings)
+	}
 }
 
 // TestValidateDataDrivenSeverity is the data-driven proof (issue #2318):
@@ -306,7 +409,7 @@ func TestValidateMarkerMessageVerbatim(t *testing.T) {
 	})
 }
 
-// testValidateMarkerRows returns the four validateMarkers rows in
+// testValidateMarkerRows returns the five validateMarkers rows in
 // lib/prompt-contract.nix's own order, for tests that don't need to load
 // them from testdata/validate-markers.json.
 func testValidateMarkerRows() []ValidateMarkerRow {
@@ -342,6 +445,14 @@ func testValidateMarkerRows() []ValidateMarkerRow {
 			Severity: "warn",
 			When:     "filerFileRelay",
 			Message:  "_validate_prompt_contract: warning -- filer-relay dispatch's rendered filer prompt is missing the 'SPINDRIFT_ISSUE_INTENT' marker (belongs in filer-prompt.md's, or a SPINDRIFT_PROMPT_DIR override's, filer-file-relay-injected section). Proceeding: the filer's own best-effort PR-body fallback still records the issue reference even without the relay.",
+		},
+		{
+			ID:       "research-issue-intent",
+			Marker:   "SPINDRIFT_ISSUE_INTENT",
+			Carrier:  "fragment-body",
+			Severity: "warn",
+			When:     "researchFileRelay",
+			Message:  "_validate_prompt_contract: warning -- research dispatch's rendered prompt is missing the 'SPINDRIFT_ISSUE_INTENT' marker under an active Filer-relay gate (belongs in research-prompt.md's, or research-self-contained-prompt.md's, POST THE VERDICT section, research-file-issues-relay.md-injected). Proceeding: any finding the filer can't relay still surfaces inline via its own best-effort fallback, and the researcher's posted verdict comment is unaffected either way.",
 		},
 	}
 }

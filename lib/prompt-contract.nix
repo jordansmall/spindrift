@@ -208,6 +208,14 @@ rec {
       when = "filerFileRelay";
       message = "_validate_prompt_contract: warning -- filer-relay dispatch's rendered filer prompt is missing the 'SPINDRIFT_ISSUE_INTENT' marker (belongs in filer-prompt.md's, or a SPINDRIFT_PROMPT_DIR override's, filer-file-relay-injected section). Proceeding: the filer's own best-effort PR-body fallback still records the issue reference even without the relay.";
     }
+    {
+      id = "research-issue-intent";
+      marker = "SPINDRIFT_ISSUE_INTENT";
+      carrier = "fragment-body";
+      severity = "warn";
+      when = "researchFileRelay";
+      message = "_validate_prompt_contract: warning -- research dispatch's rendered prompt is missing the 'SPINDRIFT_ISSUE_INTENT' marker under an active Filer-relay gate (belongs in research-prompt.md's, or research-self-contained-prompt.md's, POST THE VERDICT section, research-file-issues-relay.md-injected). Proceeding: any finding the filer can't relay still surfaces inline via its own best-effort fallback, and the researcher's posted verdict comment is unaffected either way.";
+    }
   ];
 
   # Each injectBlocks row's canonical text, keyed by `id`, sliced live from
