@@ -13,6 +13,7 @@ import (
 	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/doctor"
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/forge/rest"
 )
 
 type fakeEnvironment struct {
@@ -2640,11 +2641,16 @@ func TestRunQuickstart_NewBackend_TokenAcquisitionNeedsNoRunQuickstartEdit(t *te
 }
 
 // TestRunQuickstart_ForgejoTokenAcquisitionFailures_AbortWithActionableGuidance
-// covers the three ways acquireForgejoToken's single, no-retry prompt can
-// fail: an invalid token the API rejects (ErrAuthFailure), a non-auth probe
-// failure covering both an unreachable host and a wrong repo slug on a
-// reachable host (Probe maps both to the same error, per bf2c4579), and an
-// empty token from a user who just hits enter.
+// covers the six ways acquireForgejoToken's single, no-retry prompt can
+// fail, each asserting its own actionable-guidance wording: an invalid
+// token the API rejects (ErrAuthFailure); a non-auth probe failure covering
+// both an unreachable host and a wrong repo slug on a reachable host (Probe
+// cannot disambiguate the two, so both fall into the same generic
+// unreachable-or-wrong-slug guidance); a genuine 404 (ErrNotFound), which
+// must not fall into the unmapped-status guidance; an unmapped non-2xx
+// status Probe's rest.Client surfaces as a rest.StatusError; a malformed
+// response body surfaced as a rest.DecodeError; and an empty token from a
+// user who just hits enter.
 func TestRunQuickstart_ForgejoTokenAcquisitionFailures_AbortWithActionableGuidance(t *testing.T) {
 	cases := []struct {
 		name                 string
@@ -2661,9 +2667,13 @@ func TestRunQuickstart_ForgejoTokenAcquisitionFailures_AbortWithActionableGuidan
 			wantAbsentSubstrings: []string{"FORGEJO_TOKEN", "FORGEJO_BASE_URL"},
 		},
 		{
+			// An unreachable host: Do never gets an HTTP response, so the
+			// error chain carries neither StatusError nor DecodeError --
+			// this is the one case acquireForgejoToken genuinely cannot
+			// disambiguate from a wrong repo slug.
 			name:           "NonAuthProbeFailure",
 			token:          "some-token",
-			probeErr:       forge.ErrRepoNotFound,
+			probeErr:       fmt.Errorf("%w: %w", forge.ErrRepoNotFound, errors.New("dial tcp: connection refused")),
 			wantSubstrings: []string{quickstartRerunCmd, "repo slug"},
 			wantAbsentSubstrings: []string{
 				"FORGEJO_TOKEN", "FORGEJO_BASE_URL",
@@ -2671,6 +2681,48 @@ func TestRunQuickstart_ForgejoTokenAcquisitionFailures_AbortWithActionableGuidan
 				// same error as an unreachable host, so the message must not
 				// presume the instance is merely unreachable.
 				"once the instance is reachable",
+			},
+		},
+		{
+			// A genuine wrong repo slug on a reachable host: the API answers
+			// 404, which forgejoStatusMap maps to forge.ErrNotFound and Do
+			// chains alongside rest.StatusError{404}. This must NOT fall
+			// into the generic "instance responded with HTTP status" branch
+			// -- a 404 is the single most likely quickstart failure, and
+			// that branch sends the operator to the instance's logs instead
+			// of at the actual wrong-slug hypothesis.
+			name:  "NotFoundProbeFailure",
+			token: "some-token",
+			probeErr: fmt.Errorf("%w: %w", forge.ErrRepoNotFound,
+				fmt.Errorf("%w: %w", forge.ErrNotFound, rest.StatusError{Status: 404})),
+			wantSubstrings: []string{quickstartRerunCmd, "repo slug"},
+			wantAbsentSubstrings: []string{
+				"FORGEJO_TOKEN", "FORGEJO_BASE_URL",
+				"HTTP status", "health/logs",
+			},
+		},
+		{
+			name:           "ServerErrorProbeFailure",
+			token:          "some-token",
+			probeErr:       fmt.Errorf("%w: %w", forge.ErrRepoNotFound, rest.StatusError{Status: 503}),
+			wantSubstrings: []string{quickstartRerunCmd, "503"},
+			wantAbsentSubstrings: []string{
+				"FORGEJO_TOKEN", "FORGEJO_BASE_URL",
+				// A real (non-2xx) status response is not the "unreachable
+				// or wrong repo slug" ambiguity — the instance answered.
+				"repo slug is wrong", "instance is unreachable",
+			},
+		},
+		{
+			name:           "DecodeFailureProbeFailure",
+			token:          "some-token",
+			probeErr:       fmt.Errorf("%w: %w", forge.ErrRepoNotFound, rest.DecodeError{Err: errors.New("invalid character 'x' looking for beginning of value")}),
+			wantSubstrings: []string{quickstartRerunCmd, "parsed"},
+			wantAbsentSubstrings: []string{
+				"FORGEJO_TOKEN", "FORGEJO_BASE_URL",
+				// A parse/decode failure means the instance responded — not
+				// the "unreachable or wrong repo slug" ambiguity.
+				"repo slug is wrong", "instance is unreachable",
 			},
 		},
 		{
