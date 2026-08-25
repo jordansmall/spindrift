@@ -159,7 +159,20 @@ type Config struct {
 	// Queue.Discover) cannot safely do purely for a report a second time
 	// without claiming a pick that then never dispatches. nil (every
 	// non-Console construction site) falls back to RunContinuous's own
-	// discover()+readiness-filter computation.
+	// discover()+countReady() computation (continuous.go's refill,
+	// !cfg.PreResolved branch) — a real cost every headless
+	// CONTINUOUS_DISPATCH caller pays, accepted rather than closed
+	// (#2778): it fires at most once per drain transition, never
+	// per-tick, at the moment the run is already exiting/draining, so it
+	// can't delay or block any further dispatch decision. It is bounded
+	// by the size of whatever unclaimed batch remains plus, when
+	// touch-overlap gating is on, waveOverlapCheck's own upfront
+	// ListIssues(InProgress) and a TouchesOf/prTouchesOf round-trip per
+	// in-flight issue (touches.go) — not the full issue history. Giving
+	// headless a PendingCount equivalent would mean inventing a new
+	// unclaimed-count facility from nothing, since headless keeps no live
+	// pick collection between refills the way Console's Queue does, which
+	// is out of scope here.
 	PendingCount func() int
 
 	// DiscoverReporting, when set, is a pure alternative to the discover

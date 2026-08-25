@@ -3507,10 +3507,13 @@ drain: the stale drain is `CONTINUOUS_DISPATCH` pausing new dispatch while
 the image or launcher is rebuilt, not the wave engine finishing its
 `MAX_JOBS`-bounded batch. It also appends a summary line to
 `.spindrift/logs/stale-drain.log` — drain duration, free-slot-seconds
-accumulated while refilling was stopped, and how many discovered issues were
-held back — so a driving loop can total those numbers across iterations to
-judge whether the drain is a rounding error or the dominant stall (#2678).
-Each line is space-delimited `key=value` pairs prefixed `STALE_DRAIN `:
+accumulated while refilling was stopped, and how many otherwise-ready issues
+the drain itself held back from launching (not the full unclaimed backlog —
+see `heldBack`'s own doc comment in `stale_drain_report.go` for exactly
+which categories count) — so a driving loop can total those numbers across
+iterations to judge whether the drain is a rounding error or the dominant
+stall (#2678). Each line is space-delimited `key=value` pairs prefixed
+`STALE_DRAIN `:
 `durationSeconds`, `freeSlotSeconds`, and `heldBack` are the three fields
 worth grepping and summing. `heldBack` can be the literal string `unknown`
 instead of a number — a transient tracker error at the moment the drain

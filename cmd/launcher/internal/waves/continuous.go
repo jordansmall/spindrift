@@ -121,7 +121,7 @@ func nextReady(cfg Config, it forge.IssueTracker, cf forge.CodeForge, checkOverl
 // not-ready result; it is meaningless when ready is true.
 func issueReadiness(cfg Config, it forge.IssueTracker, cf forge.CodeForge, checkOverlap func(string) (string, bool), iss Issue, edges map[string][]string, depsOfFailed map[string]bool) (ready bool, line string) {
 	var unready []string
-	if !cfg.PreResolved {
+	if !cfg.PreResolved && !cfg.IgnoreBlockers {
 		unready = unreadyBlockers(it, cf, iss.Number, edges, cfg.SeedScopeOf)
 	}
 	switch {
@@ -180,13 +180,13 @@ func dropClaimed(issues []Issue, claimed map[string]bool) []Issue {
 // incidentally delayed by this run's own state; heldBack measures the
 // drain's own cost only, not the total number of issues sitting unclaimed
 // (#2778). Under cfg.IgnoreBlockers (research-kind continuous dispatch),
-// only the DepsOf-failed switch case's own guard is bypassed, so such an
-// issue IS counted into heldBack; the unresolved-blocker-edge exclusion is
-// untouched by cfg.IgnoreBlockers (gated solely on !cfg.PreResolved), so a
-// blocker-edge-blocked issue stays excluded from heldBack even under
-// cfg.IgnoreBlockers -- unlike engine.go's drainMaxJobs, which additionally
-// gates the blocker-edge computation itself on !cfg.IgnoreBlockers and so
-// skips it entirely in that mode (#2778 review finding).
+// both the DepsOf-failed switch case's own guard and the blocker-edge
+// computation itself are bypassed: issueReadiness gates the blocker-edge
+// computation on !cfg.PreResolved && !cfg.IgnoreBlockers, the same
+// condition engine.go's drainMaxJobs uses, so the two functions now agree
+// on this point. That means neither exclusion category applies under
+// cfg.IgnoreBlockers -- only the touch-overlap exclusion can still exclude
+// an issue from heldBack in that mode.
 func countReady(cfg Config, it forge.IssueTracker, cf forge.CodeForge, checkOverlap func(string) (string, bool), issues []Issue, edges map[string][]string, depsOfFailed map[string]bool) int {
 	n := 0
 	for _, iss := range issues {
@@ -372,19 +372,10 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 			// caller with such a side effect supplies a pure
 			// DiscoverReporting closure instead.
 			//
-			// The !cfg.PreResolved branch's extra discover()+countReady()
-			// call is a real cost, and every headless CONTINUOUS_DISPATCH
-			// caller pays it -- only Console sets cfg.PendingCount. That
-			// cost is accepted, not a gap to close (#2778): it fires at
-			// most once per drain transition, never per-tick; it's bounded
-			// by the size of whatever unclaimed batch remains, not the
-			// full issue history; and it runs at the moment the run is
-			// already exiting/draining, so it can't delay or block any
-			// further dispatch decision. Giving headless a PendingCount
-			// equivalent would mean inventing a new unclaimed-count
-			// facility from nothing -- headless keeps no live pick
-			// collection between refills the way Console's Queue does --
-			// which is out of scope here.
+			// The !cfg.PreResolved branch below pays a real discover()+
+			// countReady() cost every headless CONTINUOUS_DISPATCH caller
+			// incurs; see Config.PendingCount's own doc comment (plan.go)
+			// for the accepted-cost rationale (#2778).
 			switch {
 			case cfg.PendingCount != nil:
 				staleDrain.heldBack = cfg.PendingCount()
