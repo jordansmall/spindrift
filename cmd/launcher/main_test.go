@@ -4450,6 +4450,62 @@ func TestReferenceDocHasLocalCodeForgeSection(t *testing.T) {
 	}
 }
 
+// parseLegacySettingsSectionNames reads lib/legacy-settings-section.nix and
+// returns the distinct set of section names (the string values in each
+// `knob = "section";` row), sorted. Test-only: production code never parses
+// this file directly (lib/flakeModule.nix consumes it as Nix data), so this
+// helper has no non-test counterpart.
+func parseLegacySettingsSectionNames(t *testing.T) []string {
+	t.Helper()
+
+	content, err := os.ReadFile(filepath.Join("..", "..", "lib", "legacy-settings-section.nix"))
+	if err != nil {
+		t.Fatalf("read lib/legacy-settings-section.nix: %v", err)
+	}
+
+	rowRe := regexp.MustCompile(`\w+\s*=\s*"([^"]+)";`)
+	seen := map[string]bool{}
+	for _, match := range rowRe.FindAllStringSubmatch(string(content), -1) {
+		seen[match[1]] = true
+	}
+	if len(seen) == 0 {
+		t.Fatalf("parsed zero section names from lib/legacy-settings-section.nix; regex out of sync with file format?")
+	}
+
+	names := make([]string, 0, len(seen))
+	for name := range seen {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+// TestParseLegacySettingsSectionNames_MatchesKnownSet pins the distinct
+// section names lib/legacy-settings-section.nix currently declares. This is
+// a canary for parseLegacySettingsSectionNames itself (proves the regex
+// parses the real file correctly); TestDeprecatedDocSpellings_SectionMarkersMatchLegacySettingsSection
+// below is the actual drift guard for deprecatedDocSpellings.
+func TestParseLegacySettingsSectionNames_MatchesKnownSet(t *testing.T) {
+	got := parseLegacySettingsSectionNames(t)
+
+	want := []string{
+		"branches",
+		"concurrency",
+		"issueDiscovery",
+		"lifecycleLabels",
+		"models",
+		"promptSkillIteration",
+		"repository",
+		"sandbox",
+		"selfHealing",
+	}
+	sort.Strings(want)
+
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("parseLegacySettingsSectionNames() = %v, want %v", got, want)
+	}
+}
+
 // deprecatedDocSpellings are the old settings.<section>.<knob> shim path
 // spellings findDeprecatedDocSpellings denylists in doc prose (README.md,
 // docs/**/*.md). Mirrors quickstart/quickstart_test.go's
@@ -4482,6 +4538,58 @@ var deprecatedDocSpellings = []string{
 	"settings.promptSkillIteration",
 	"settings.issues.forgejo",
 	"settings.issues.research.verdicts",
+}
+
+// TestDeprecatedDocSpellings_SectionMarkersMatchLegacySettingsSection is the
+// drift guard for deprecatedDocSpellings' 9 section-level markers: it
+// derives "settings.<section>" for every distinct section name
+// parseLegacySettingsSectionNames finds in lib/legacy-settings-section.nix
+// and asserts deprecatedDocSpellings contains exactly those, order
+// independent. Maintenance strategy going forward: if
+// lib/legacy-settings-section.nix ever gains or loses a distinct section
+// name (e.g. a new legacy section is frozen in, or ADR 0037's removal at
+// 1.0 deletes the file), this test fails until deprecatedDocSpellings is
+// hand-updated to match — so the two lists can't silently drift apart. The
+// two hybrid markers ("settings.issues.forgejo",
+// "settings.issues.research.verdicts") are a deliberate, permanent
+// carve-out from that derivation: their knobs are legacySettingsExempt in
+// lib/env-schema.nix, meaning they never had a row in
+// lib/legacy-settings-section.nix to begin with, so there is nothing to
+// derive them from — this test asserts they're still present rather than
+// trying to generate them.
+func TestDeprecatedDocSpellings_SectionMarkersMatchLegacySettingsSection(t *testing.T) {
+	sectionNames := parseLegacySettingsSectionNames(t)
+
+	wantSectionMarkers := make([]string, 0, len(sectionNames))
+	for _, name := range sectionNames {
+		wantSectionMarkers = append(wantSectionMarkers, "settings."+name)
+	}
+	sort.Strings(wantSectionMarkers)
+
+	const hybridForgejo = "settings.issues.forgejo"
+	const hybridResearchVerdicts = "settings.issues.research.verdicts"
+
+	var gotSectionMarkers []string
+	hybridSeen := map[string]bool{}
+	for _, spelling := range deprecatedDocSpellings {
+		switch spelling {
+		case hybridForgejo, hybridResearchVerdicts:
+			hybridSeen[spelling] = true
+		default:
+			gotSectionMarkers = append(gotSectionMarkers, spelling)
+		}
+	}
+	sort.Strings(gotSectionMarkers)
+
+	if !reflect.DeepEqual(gotSectionMarkers, wantSectionMarkers) {
+		t.Errorf("deprecatedDocSpellings section-level markers = %v, want %v (derived from lib/legacy-settings-section.nix)", gotSectionMarkers, wantSectionMarkers)
+	}
+
+	for _, hybrid := range []string{hybridForgejo, hybridResearchVerdicts} {
+		if !hybridSeen[hybrid] {
+			t.Errorf("deprecatedDocSpellings missing hand-maintained hybrid marker %q (legacySettingsExempt in lib/env-schema.nix, no legacy section to derive it from)", hybrid)
+		}
+	}
 }
 
 // flatShimGeneralizedMarkers generalizes the bare-flat-shim detection to
