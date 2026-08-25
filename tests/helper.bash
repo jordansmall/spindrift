@@ -73,7 +73,7 @@ wait_for_log_lines() {
   fi
   local interval="0.05"
   local confirm_tries=3
-  local tries=$((timeout * 20)) # 20 == 1/interval (0.05s); keep in sync if interval changes
+  local tries=$((timeout * 20)) # 20 == 1/interval (0.05s); keep in sync if interval changes -- also mirrored in tests/run-batch-limits.bats' "widen past the 2s default" test
   local actual i confirm
 
   for ((i = 0; i <= tries; i++)); do
