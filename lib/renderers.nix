@@ -32,8 +32,8 @@ let
   # A resolved flake path (e.g. "git.merge.policy", derived by resolveNixPath
   # from a knob's group + optional nixSubPath — lib/nixpath.nix) -> its
   # dot-separated segments. Shared by renderTemplateSettingsBlock (builds the
-  # nested domain-tree example) and renderFlakeOptionsDoc (groups by the first
-  # segment, the domain) — ADR 0037.
+  # nested domain-tree example) and renderFlakeOptionsDocFull (groups by the
+  # first segment, the domain) — ADR 0037.
   splitNixPath = path: builtins.filter builtins.isString (builtins.split "\\." path);
   resolveNixPath = import ./nixpath.nix;
   # A Go `[]string{"a", "b"}` literal's inner comma-joined, quoted contents.
@@ -44,15 +44,16 @@ let
   # trailing "\n" before a multi-line doc string's closing `''`) down to a
   # single space, trimming the ends -- a naive "\n" -> " " replaceStrings
   # leaves doubled spaces at a line-wrap or a trailing-newline boundary.
-  # Shared by renderFlakeOptionsDoc and renderStructuralOptionsDoc's markdown
-  # table rows, both of which need a `doc` string collapsed to a single line.
+  # Shared by renderFlakeOptionsDocFull and renderStructuralOptionsDoc's
+  # markdown table rows, both of which need a `doc` string collapsed to a
+  # single line.
   oneLine =
     s:
     builtins.concatStringsSep " " (
       builtins.filter (p: p != "") (builtins.filter builtins.isString (builtins.split "[ \t\n]+" s))
     );
   # A markdown table cell can't carry a literal, unescaped "|" (it reads as a
-  # column separator). Shared by renderFlakeOptionsDoc and
+  # column separator). Shared by renderFlakeOptionsDocFull and
   # renderStructuralOptionsDoc's markdown table rows.
   escapeCell = builtins.replaceStrings [ "|" ] [ "\\|" ];
   # Uppercase a string's first character, leaving the rest untouched. Shared
@@ -1127,63 +1128,13 @@ rec {
     "infra"
   ];
 
-  # docs/flake-options.md content.
-  renderFlakeOptionsDoc =
-    schema:
-    let
-      flakeOptionEntries = filterAttrs (_: e: e.flakeOption or false) schema;
-      flakeOptionNames = builtins.attrNames flakeOptionEntries;
-      domainKnobs = domain: builtins.filter (n: flakeOptionEntries.${n}.group == domain) flakeOptionNames;
-      renderDefault = entry: if entry ? default then "`${toString entry.default}`" else "—";
-      capitalize =
-        s: toUpper (builtins.substring 0 1 s) + builtins.substring 1 (builtins.stringLength s) s;
-      renderRow =
-        name:
-        let
-          entry = flakeOptionEntries.${name};
-        in
-        "| `perSystem.spindrift.${resolveNixPath name entry}` | `${entry.env}` | ${renderDefault entry} | ${escapeCell (oneLine entry.doc)} |\n";
-      renderSection =
-        domain:
-        let
-          knobs = builtins.sort (
-            a: b: resolveNixPath a flakeOptionEntries.${a} < resolveNixPath b flakeOptionEntries.${b}
-          ) (domainKnobs domain);
-        in
-        if knobs == [ ] then
-          ""
-        else
-          "## ${capitalize domain} (`perSystem.spindrift.${domain}`)\n\n"
-          + "| attr path | env var | default | description |\n"
-          + "|---|---|---|---|\n"
-          + concatStrings (map renderRow knobs)
-          + "\n";
-    in
-    "<!-- Regenerate: nix flake check -->\n"
-    + "\n"
-    + "# Flake options reference\n"
-    + "\n"
-    + "Consumer-tunable knobs live under `perSystem.spindrift.*`, grouped by\n"
-    + "domain (ADR 0037); domains with no consumer-tunable knobs are omitted.\n"
-    + "\n"
-    + "Precedence at runtime: CLI flag > flake setting (via the Launcher input\n"
-    + "document, ADR 0020) > baked default. A knob env var still wins over the\n"
-    + "flake setting this release, but is deprecated and warns; env configures\n"
-    + "only secrets and internal plumbing going forward.\n"
-    + "See [`docs/reference.md`](reference.md) for the full option surface and runtime vars.\n"
-    + "\n"
-    + concatStrings (map renderSection domainOrder);
-
   # docs/flake-options.md's structural-options section (issue #2572): the 13
   # hand-declared structural knobs (lib/flakeModule.nix's structuralOptions)
   # plus byNameOption, documented from lib/structural-options-doc.nix (plain
   # data, not env-schema.nix) at their lib/structural-paths.nix domain-tree
-  # paths. Same table style as renderFlakeOptionsDoc's renderSection above,
-  # but a "type" column instead of "env var" — structural options have no
-  # env var, only a docType string. renderFlakeOptionsDocFull below composes
-  # this onto renderFlakeOptionsDoc's own output rather than this being
-  # folded into that renderer, so renderFlakeOptionsDoc's own schema-only
-  # signature/behavior stays unchanged. `doc` strings may be multi-line
+  # paths. Same table style as renderFlakeOptionsDocFull's schema-generated
+  # sections, but a "type" column instead of "env var" — structural options
+  # have no env var, only a docType string. `doc` strings may be multi-line
   # prose (mirroring the mkOption `description` they were extracted from) —
   # collapsed to a single line here since a raw embedded newline would break
   # the markdown table's one-row-per-line shape.
@@ -1202,10 +1153,10 @@ rec {
         else
           builtins.concatStringsSep "." structuralPaths.${name};
       # oneLine and escapeCell are shared, top-level helpers (also used by
-      # renderFlakeOptionsDoc's renderRow) -- docType (e.g. runtime's
-      # `"podman"` | `"docker"` | ...) is the one field here where the "|"
-      # escaping matters most, since it's the one field that reliably
-      # contains a literal "|".
+      # renderFlakeOptionsDocFull's own renderRow below) -- docType (e.g.
+      # runtime's `"podman"` | `"docker"` | ...) is the one field here where
+      # the "|" escaping matters most, since it's the one field that
+      # reliably contains a literal "|".
       names = builtins.attrNames structuralPaths ++ [ "byName" ];
       sortedNames = builtins.sort (a: b: pathFor a < pathFor b) names;
       renderRow =
@@ -1228,16 +1179,55 @@ rec {
     + "\n";
 
   # docs/flake-options.md's full content: the banner, then the
-  # schema-generated sections (renderFlakeOptionsDoc), then the
+  # schema-generated sections (grouped by domain, ADR 0037), then the
   # structural-options section (renderStructuralOptionsDoc, issue #2572).
-  # This is the single renderer both nix/regen.nix and
-  # nix/checks/schema-drift.nix's flake-options-doc check call, so the
-  # composition itself — concatenation order and arg wiring — can't drift
-  # between them (CONTRIBUTING.md's one-renderer-per-artifact contract).
+  # The single renderer both nix/regen.nix and nix/checks/schema-drift.nix's
+  # flake-options-doc check call (CONTRIBUTING.md's one-renderer-per-artifact
+  # contract).
   renderFlakeOptionsDocFull =
     schema: structuralOptionsDoc: structuralPaths:
+    let
+      flakeOptionEntries = filterAttrs (_: e: e.flakeOption or false) schema;
+      flakeOptionNames = builtins.attrNames flakeOptionEntries;
+      domainKnobs = domain: builtins.filter (n: flakeOptionEntries.${n}.group == domain) flakeOptionNames;
+      renderDefault = entry: if entry ? default then "`${toString entry.default}`" else "—";
+      renderRow =
+        name:
+        let
+          entry = flakeOptionEntries.${name};
+        in
+        "| `perSystem.spindrift.${resolveNixPath name entry}` | `${entry.env}` | ${renderDefault entry} | ${escapeCell (oneLine entry.doc)} |\n";
+      renderSection =
+        domain:
+        let
+          knobs = builtins.sort (
+            a: b: resolveNixPath a flakeOptionEntries.${a} < resolveNixPath b flakeOptionEntries.${b}
+          ) (domainKnobs domain);
+        in
+        if knobs == [ ] then
+          ""
+        else
+          "## ${upperFirst domain} (`perSystem.spindrift.${domain}`)\n\n"
+          + "| attr path | env var | default | description |\n"
+          + "|---|---|---|---|\n"
+          + concatStrings (map renderRow knobs)
+          + "\n";
+    in
     "<!-- Code generated by nix/checks.nix from lib/env-schema.nix and lib/structural-options-doc.nix. DO NOT EDIT. -->\n"
-    + renderFlakeOptionsDoc schema
+    + "<!-- Regenerate: nix flake check -->\n"
+    + "\n"
+    + "# Flake options reference\n"
+    + "\n"
+    + "Consumer-tunable knobs live under `perSystem.spindrift.*`, grouped by\n"
+    + "domain (ADR 0037); domains with no consumer-tunable knobs are omitted.\n"
+    + "\n"
+    + "Precedence at runtime: CLI flag > flake setting (via the Launcher input\n"
+    + "document, ADR 0020) > baked default. A knob env var still wins over the\n"
+    + "flake setting this release, but is deprecated and warns; env configures\n"
+    + "only secrets and internal plumbing going forward.\n"
+    + "See [`docs/reference.md`](reference.md) for the full option surface and runtime vars.\n"
+    + "\n"
+    + concatStrings (map renderSection domainOrder)
     + renderStructuralOptionsDoc structuralOptionsDoc structuralPaths;
 
   # share/bash-completion/completions/spindrift content: subcommand
