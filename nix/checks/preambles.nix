@@ -243,8 +243,10 @@ in
         runtime = "bwrap";
         imageDrv = "/nix/store/ddd-image.drv";
         nixBuilderImage = "docker.io/nixos/nix@sha256:aaaa";
-        linuxSystem = "x86_64-linux";
-        system = "aarch64-darwin";
+        systems = {
+          host = "aarch64-darwin";
+          linux = "x86_64-linux";
+        };
         boxEnvVars = "MODEL BASE_BRANCH";
         hostMediatedRemote = false;
         outboxRelayCapable = true;
@@ -338,8 +340,10 @@ in
         runtime = "podman";
         imageDrv = "/nix/store/ddd-image.drv";
         nixBuilderImage = "docker.io/nixos/nix@sha256:aaaa";
-        linuxSystem = "x86_64-linux";
-        system = "aarch64-darwin";
+        systems = {
+          host = "aarch64-darwin";
+          linux = "x86_64-linux";
+        };
         boxEnvVars = "MODEL";
         hostMediatedRemote = true;
         outboxRelayCapable = false;
@@ -436,8 +440,10 @@ in
         runtime = "podman";
         imageDrv = "/nix/store/ddd-image.drv";
         nixBuilderImage = "docker.io/nixos/nix@sha256:aaaa";
-        linuxSystem = "x86_64-linux";
-        system = "aarch64-darwin";
+        systems = {
+          host = "aarch64-darwin";
+          linux = "x86_64-linux";
+        };
         boxEnvVars = "MODEL";
         hostMediatedRemote = false;
         outboxRelayCapable = true;
@@ -497,8 +503,10 @@ in
         imageName = "spindrift";
         imageDrv = "/nix/store/ddd-image.drv";
         nixBuilderImage = "docker.io/nixos/nix@sha256:aaaa";
-        linuxSystem = "x86_64-linux";
-        system = "aarch64-darwin";
+        systems = {
+          host = "aarch64-darwin";
+          linux = "x86_64-linux";
+        };
       };
     in
     assert assertMsg (
@@ -534,8 +542,10 @@ in
         imageName = "spindrift";
         imageDrv = "/nix/store/ddd-image.drv";
         nixBuilderImage = "docker.io/nixos/nix@sha256:aaaa";
-        linuxSystem = "x86_64-linux";
-        system = "aarch64-darwin";
+        systems = {
+          host = "aarch64-darwin";
+          linux = "x86_64-linux";
+        };
       };
     in
     assert assertMsg (
