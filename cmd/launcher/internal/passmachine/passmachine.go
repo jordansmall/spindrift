@@ -54,17 +54,21 @@ const (
 	KindReview
 )
 
-// The pass_start op's own Role field values -- the string form of each
-// PassKind that actually sets Role (KindLegacy never does).
+// Role is the string form of a pass's role, as sent in the pass_start op's
+// own Role field (a plain string -- see driver/claude's transcript.go,
+// which this package does not import).
+type Role string
+
+// KindLegacy never sets Role.
 const (
 	// RoleImplement is the review loop's first pass's Role value.
-	RoleImplement = "implement"
+	RoleImplement Role = "implement"
 	// RoleReview is the review loop's review pass's Role value.
-	RoleReview = "review"
+	RoleReview Role = "review"
 	// RoleFix is the review loop's post-review pass's Role value.
-	RoleFix = "fix"
+	RoleFix Role = "fix"
 	// RoleLand is the review loop's terminal pass's Role value.
-	RoleLand = "land"
+	RoleLand Role = "land"
 )
 
 // String returns the pass_start op's own Role field value for k --
@@ -75,13 +79,13 @@ const (
 func (k PassKind) String() string {
 	switch k {
 	case KindImplement:
-		return RoleImplement
+		return string(RoleImplement)
 	case KindFix:
-		return RoleFix
+		return string(RoleFix)
 	case KindLand:
-		return RoleLand
+		return string(RoleLand)
 	case KindReview:
-		return RoleReview
+		return string(RoleReview)
 	default:
 		return ""
 	}

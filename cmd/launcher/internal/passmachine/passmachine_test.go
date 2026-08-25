@@ -1,6 +1,9 @@
 package passmachine
 
-import "testing"
+import (
+	"reflect"
+	"testing"
+)
 
 // TestTransition exercises Transition across every decision point the
 // orchestrator's two loops make today (issue #2548): the legacy loop's
@@ -737,6 +740,33 @@ func TestPassKindString(t *testing.T) {
 		t.Run(tt.want, func(t *testing.T) {
 			if got := tt.kind.String(); got != tt.want {
 				t.Errorf("PassKind(%d).String() = %q, want %q", tt.kind, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestRoleConstantsAreNamedType pins the Role constants to the named Role
+// type (issue #2766), mirroring Verdict's own type convention. A []Role
+// literal alone can't tell an untyped string constant from a Role one --
+// Go implicitly converts an untyped constant to any type whose underlying
+// type is string, so that check passes either way. Assigning into an
+// any-valued field instead forces Go to use the constant's default type
+// (string) when it's untyped, and its declared type (Role) when it isn't,
+// so reflect.TypeOf distinguishes the two.
+func TestRoleConstantsAreNamedType(t *testing.T) {
+	tests := []struct {
+		name string
+		role any
+	}{
+		{"RoleImplement", RoleImplement},
+		{"RoleReview", RoleReview},
+		{"RoleFix", RoleFix},
+		{"RoleLand", RoleLand},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got, want := reflect.TypeOf(tt.role), reflect.TypeOf(Role("")); got != want {
+				t.Errorf("reflect.TypeOf(%s) = %v, want %v", tt.name, got, want)
 			}
 		})
 	}
