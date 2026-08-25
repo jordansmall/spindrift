@@ -114,20 +114,21 @@ type Launcher struct {
 	// #1141). Set on every RebuildFn completion regardless of outcome, same
 	// as rebuildOutput, and read by StaleStatus for the console's banner.
 	branchSwitchNotice string
-	// lastDrainSummary is the last stale-drain report's rendered one-line
-	// summary (waves.DrainReport.Console(), trimmed of its trailing
-	// newline), or "" when no drain has been reported yet this session, or
-	// once the next successful Rebuild clears it (#2678) — set by
-	// recordDrainReport, cleared alongside stale/staleMessage in Rebuild's
-	// success branch, read by StaleStatus. Distinct from staleMessage:
-	// staleMessage describes the *ongoing* stale gate (why new launches are
-	// held right now), while lastDrainSummary is a *retrospective* report of
-	// what a completed (or in-flight-being-measured) drain actually cost in
-	// idle slot-time and held-back work — retrospective information that
-	// itself goes stale once a later successful rebuild resolves the
-	// staleness the drain was about, unlike rebuildOutput (see above),
-	// which an operator may still want to inspect after success.
-	lastDrainSummary string
+	// lastStaleDrainSummary is the last stale-drain report's rendered
+	// one-line summary (waves.StaleDrainReport.Console(), trimmed of its
+	// trailing newline), or "" when no drain has been reported yet this
+	// session, or once the next successful Rebuild clears it (#2678) — set by
+	// recordStaleDrainReport, cleared alongside stale/staleMessage in
+	// Rebuild's success branch, read by StaleStatus. Distinct from
+	// staleMessage: staleMessage describes the *ongoing* stale gate (why new
+	// launches are held right now), while lastStaleDrainSummary is a
+	// *retrospective* report of what a completed (or in-flight-being-measured)
+	// drain actually cost in idle slot-time and held-back work —
+	// retrospective information that itself goes stale once a later
+	// successful rebuild resolves the staleness the drain was about, unlike
+	// rebuildOutput (see above), which an operator may still want to inspect
+	// after success.
+	lastStaleDrainSummary string
 	// pollInterval overrides Run's default background poll cadence — unset
 	// (zero) in every production construction site, so only same-package
 	// tests reach in to shrink it below defaultPollInterval.
@@ -708,11 +709,11 @@ func (l *Launcher) runStack(st launchStack, pwd string) bool {
 		// Queue.Discover's claim side effect (queue.go) makes calling it a
 		// second time purely for a count unsafe here.
 		PendingCount: func() int { return l.queueRef().PendingCount(st.kind) },
-		// OnDrainReport surfaces the stale-drain report on the console's own
-		// banner (#2678) -- RunContinuous's emitDrainReport writes straight
-		// to stdout, which a Console session running under
+		// OnStaleDrainReport surfaces the stale-drain report on the console's
+		// own banner (#2678) -- RunContinuous's emitStaleDrainReport writes
+		// straight to stdout, which a Console session running under
 		// tea.WithAltScreen() never renders.
-		OnDrainReport: l.recordDrainReport,
+		OnStaleDrainReport: l.recordStaleDrainReport,
 	}, &waves.Session{Limiter: l.limiter(), Terminated: l.registry()}, st.tracker, l.CodeForge, pwd, st.factory, queueSettler{st.settle, l.queueRef(), l.signalRefresh, l.registry()}, discover, l.freshnessChecker())
 
 	if errors.Is(err, waves.ErrImageStale) {
@@ -765,17 +766,18 @@ func (l *Launcher) freshnessChecker() waves.FreshnessChecker {
 	}
 }
 
-// recordDrainReport records r's rendered summary for StaleStatus to
+// recordStaleDrainReport records r's rendered summary for StaleStatus to
 // surface, and signals a refresh so a live Console session's render/refresh
-// cycle (syncStale) picks it up (#2678) — wired as waves.Config.OnDrainReport
-// on runStack's RunContinuous call, the only path that ever calls it, since
-// RunContinuous itself has no notion of Launcher and can't push here on its
-// own. r.Console() is reused verbatim (trimmed of its trailing newline)
-// rather than re-derived, so the console banner and the stdout/drain.log
-// lines a headless caller sees always agree.
-func (l *Launcher) recordDrainReport(r waves.DrainReport) {
+// cycle (syncStale) picks it up (#2678) — wired as
+// waves.Config.OnStaleDrainReport on runStack's RunContinuous call, the only
+// path that ever calls it, since RunContinuous itself has no notion of
+// Launcher and can't push here on its own. r.Console() is reused verbatim
+// (trimmed of its trailing newline) rather than re-derived, so the console
+// banner and the stdout/stale-drain.log lines a headless caller sees always
+// agree.
+func (l *Launcher) recordStaleDrainReport(r waves.StaleDrainReport) {
 	l.mu.Lock()
-	l.lastDrainSummary = strings.TrimRight(r.Console(), "\n")
+	l.lastStaleDrainSummary = strings.TrimRight(r.Console(), "\n")
 	l.mu.Unlock()
 	l.signalRefresh()
 }
@@ -816,7 +818,7 @@ func (l *Launcher) Rebuild(tracker forge.IssueTracker, pwd string) {
 		if err == nil {
 			l.stale = false
 			l.staleMessage = ""
-			l.lastDrainSummary = ""
+			l.lastStaleDrainSummary = ""
 		}
 		l.mu.Unlock()
 		l.signalRefresh()
@@ -841,12 +843,12 @@ type RebuildStatus struct {
 	// — "" when pwd's checkout didn't move off the branch it was on (issue
 	// #1141).
 	BranchSwitchNotice string
-	// DrainSummary is the last stale-drain report's rendered one-line
+	// StaleDrainSummary is the last stale-drain report's rendered one-line
 	// summary, or "" when no drain has been reported yet this session
 	// (#2678). Unlike Stale/Message, which describe the *ongoing* stale
-	// gate, DrainSummary is a *retrospective* report of what a completed (or
-	// in-flight-being-measured) drain cost.
-	DrainSummary string
+	// gate, StaleDrainSummary is a *retrospective* report of what a
+	// completed (or in-flight-being-measured) drain cost.
+	StaleDrainSummary string
 }
 
 // StaleStatus returns the launcher's live image-freshness/rebuild state —
@@ -864,7 +866,7 @@ func (l *Launcher) StaleStatus() RebuildStatus {
 		Rebuilding:         l.rebuilding,
 		Output:             l.rebuildOutput,
 		BranchSwitchNotice: l.branchSwitchNotice,
-		DrainSummary:       l.lastDrainSummary,
+		StaleDrainSummary:  l.lastStaleDrainSummary,
 	}
 	if l.rebuildErr != nil {
 		status.Err = l.rebuildErr.Error()

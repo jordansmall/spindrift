@@ -700,36 +700,37 @@ func TestView_BranchSwitchNotice_Surfaced(t *testing.T) {
 	}
 }
 
-// TestView_DrainSummary_Surfaced verifies a stale-drain report's summary
-// (#2678) appears in the rendered header — the TUI-reachable counterpart to
-// RunContinuous's stdout/drain.log emission, which a Console session running
-// under tea.WithAltScreen() never renders. A zero-value RebuildStatus (every
-// pre-#2678 Model) must render byte-identical to before this change: no new
-// blank line, no stray banner.
-func TestView_DrainSummary_Surfaced(t *testing.T) {
+// TestView_StaleDrainSummary_Surfaced verifies a stale-drain report's
+// summary (#2678) appears in the rendered header — the TUI-reachable
+// counterpart to RunContinuous's stdout/stale-drain.log emission, which a
+// Console session running under tea.WithAltScreen() never renders. A
+// zero-value RebuildStatus (every pre-#2678 Model) must render
+// byte-identical to before this change: no new blank line, no stray banner.
+func TestView_StaleDrainSummary_Surfaced(t *testing.T) {
 	before := View(NewModel())
 	fresh := View(NewModel())
 	if fresh != before {
 		t.Fatalf("View(NewModel()) is non-deterministic across calls; can't use it as a regression baseline")
 	}
-	if strings.Contains(fresh, "drain:") {
+	if strings.Contains(fresh, "stale-drain:") {
 		t.Errorf("View() with no drain summary = %q, want no mention of a drain report", fresh)
 	}
 
-	m := Update(NewModel(), StaleStatusMsg{RebuildStatus: RebuildStatus{DrainSummary: "==> drain: 1.2s idle, 3.4 free-slot-s, 2 issue(s) held back"}})
+	m := Update(NewModel(), StaleStatusMsg{RebuildStatus: RebuildStatus{StaleDrainSummary: "==> stale-drain: 1.2s idle, 3.4 free-slot-s, 2 issue(s) held back"}})
 	out := View(m)
 	if strings.Contains(out, "==>") {
 		t.Errorf("View() = %q, want the stdout-style \"==>\" arrow stripped from the TUI banner", out)
 	}
-	if !strings.Contains(out, "notice: drain: 1.2s idle, 3.4 free-slot-s, 2 issue(s) held back") {
+	if !strings.Contains(out, "notice: stale-drain: 1.2s idle, 3.4 free-slot-s, 2 issue(s) held back") {
 		t.Errorf("View() = %q, want the drain summary surfaced with the sibling lines' \"notice: \" prefix", out)
 	}
 
-	// Empty DrainSummary (the zero value) must render byte-identical to the
-	// pre-#2678 baseline captured above — no new blank line, no stray banner.
+	// Empty StaleDrainSummary (the zero value) must render byte-identical to
+	// the pre-#2678 baseline captured above — no new blank line, no stray
+	// banner.
 	unchanged := View(Update(NewModel(), StaleStatusMsg{RebuildStatus: RebuildStatus{}}))
 	if unchanged != before {
-		t.Errorf("View() with empty DrainSummary regressed the pre-#2678 rendering:\ngot:  %q\nwant: %q", unchanged, before)
+		t.Errorf("View() with empty StaleDrainSummary regressed the pre-#2678 rendering:\ngot:  %q\nwant: %q", unchanged, before)
 	}
 }
 

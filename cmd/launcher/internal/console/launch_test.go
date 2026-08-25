@@ -450,8 +450,8 @@ func TestQueue_Discover_AlreadyCompletePick_NeverLaunches(t *testing.T) {
 // first claims and starts running (blocked on a release channel) before the
 // freshness check reports stale on the very next refill attempt, leaving
 // the second pick still PickQueued. The drain report -- observable via both
-// the stdout Console() line and the drain.log HostLog() line -- must show
-// heldBack=1 (the still-queued pick), not 0.
+// the stdout Console() line and the stale-drain.log HostLog() line -- must
+// show heldBack=1 (the still-queued pick), not 0.
 func TestLauncher_StaleDrainReportsPendingCountAsHeldBack(t *testing.T) {
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress"})
 	f.SetIssue(forge.Issue{Number: "42", Title: "first", Labels: []string{"ready-for-agent"}})
@@ -511,14 +511,14 @@ func TestLauncher_StaleDrainReportsPendingCountAsHeldBack(t *testing.T) {
 		t.Fatalf("stdout: got %q, want a drain report line mentioning 1 issue(s) held back (pick #43, still queued)", stdout)
 	}
 
-	logPath := filepath.Join(dispatch.HostLogDirFor(dir), "drain.log")
+	logPath := filepath.Join(dispatch.HostLogDirFor(dir), "stale-drain.log")
 	logBytes, err := os.ReadFile(logPath)
 	if err != nil {
 		t.Fatalf("ReadFile(%s): %v", logPath, err)
 	}
 	log := string(logBytes)
 	if !strings.Contains(log, "heldBack=1") {
-		t.Fatalf("drain.log: got %q, want heldBack=1", log)
+		t.Fatalf("stale-drain.log: got %q, want heldBack=1", log)
 	}
 
 	snap := q.Snapshot()
@@ -533,12 +533,12 @@ func TestLauncher_StaleDrainReportsPendingCountAsHeldBack(t *testing.T) {
 
 // TestLauncher_StaleDrainReportSurfacesOnStaleStatus verifies the other half
 // of #2678's AC 5: a code review blocked the original PR because a stale
-// drain's report only ever reached stdout/drain.log (waves.RunContinuous's
-// emitDrainReport), a path a Console session running under
+// drain's report only ever reached stdout/stale-drain.log (waves.RunContinuous's
+// emitStaleDrainReport), a path a Console session running under
 // tea.WithAltScreen() never renders. runStack now wires
-// waves.Config.OnDrainReport to Launcher.recordDrainReport, so the exact
-// same report reaches StaleStatus().DrainSummary — the field the console's
-// renderer reads. Same scripted two-pick/one-release setup as
+// waves.Config.OnStaleDrainReport to Launcher.recordStaleDrainReport, so the
+// exact same report reaches StaleStatus().StaleDrainSummary — the field the
+// console's renderer reads. Same scripted two-pick/one-release setup as
 // TestLauncher_StaleDrainReportsPendingCountAsHeldBack above, but this test
 // asserts on the TUI-reachable StaleStatus() field instead of stdout, and
 // checks the same substring that test's stdout assertion checks, proving
@@ -595,27 +595,28 @@ func TestLauncher_StaleDrainReportSurfacesOnStaleStatus(t *testing.T) {
 		launch.Wait()
 	})
 
-	summary := launch.StaleStatus().DrainSummary
+	summary := launch.StaleStatus().StaleDrainSummary
 	if summary == "" {
-		t.Fatalf("StaleStatus().DrainSummary is empty, want the stale-drain report's rendered summary")
+		t.Fatalf("StaleStatus().StaleDrainSummary is empty, want the stale-drain report's rendered summary")
 	}
 	if !strings.Contains(summary, "1 issue(s) held back") {
-		t.Errorf("DrainSummary = %q, want it to mention 1 issue(s) held back (pick #43, still queued)", summary)
+		t.Errorf("StaleDrainSummary = %q, want it to mention 1 issue(s) held back (pick #43, still queued)", summary)
 	}
-	if !strings.Contains(summary, "drain:") {
-		t.Errorf("DrainSummary = %q, want it to contain the drain: prefix", summary)
+	if !strings.Contains(summary, "stale-drain:") {
+		t.Errorf("StaleDrainSummary = %q, want it to contain the stale-drain: prefix", summary)
 	}
 }
 
-// TestLauncher_Rebuild_Success_ClearsLastDrainSummary verifies a successful
-// Rebuild clears lastDrainSummary alongside the stale gate (#2678 review
-// finding): a stale-drain report is a retrospective one-off event that
-// becomes stale itself once a later rebuild resolves the staleness it was
-// about, unlike rebuildOutput (kept on success so an operator can still
-// inspect it). Without the fix, StaleStatus().DrainSummary stays pinned to
-// the recorded report for the rest of the Console session even long after
-// the rebuild it was about has succeeded.
-func TestLauncher_Rebuild_Success_ClearsLastDrainSummary(t *testing.T) {
+// TestLauncher_Rebuild_Success_ClearsLastStaleDrainSummary verifies a
+// successful Rebuild clears lastStaleDrainSummary alongside the stale gate
+// (#2678 review finding): a stale-drain report is a retrospective one-off
+// event that becomes stale itself once a later rebuild resolves the
+// staleness it was about, unlike rebuildOutput (kept on success so an
+// operator can still inspect it). Without the fix,
+// StaleStatus().StaleDrainSummary stays pinned to the recorded report for
+// the rest of the Console session even long after the rebuild it was about
+// has succeeded.
+func TestLauncher_Rebuild_Success_ClearsLastStaleDrainSummary(t *testing.T) {
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress"})
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", Labels: []string{"ready-for-agent"}})
 
@@ -644,16 +645,16 @@ func TestLauncher_Rebuild_Success_ClearsLastDrainSummary(t *testing.T) {
 	}
 
 	now := time.Now()
-	launch.recordDrainReport(waves.DrainReport{StaleAt: now, DrainedAt: now.Add(time.Second), FreeSlotSecs: 1.5, HeldBack: 2})
-	if launch.StaleStatus().DrainSummary == "" {
-		t.Fatalf("StaleStatus().DrainSummary is empty after recordDrainReport, want the recorded summary")
+	launch.recordStaleDrainReport(waves.StaleDrainReport{StaleAt: now, DrainedAt: now.Add(time.Second), FreeSlotSecs: 1.5, HeldBack: 2})
+	if launch.StaleStatus().StaleDrainSummary == "" {
+		t.Fatalf("StaleStatus().StaleDrainSummary is empty after recordStaleDrainReport, want the recorded summary")
 	}
 
 	launch.Rebuild(f, dir)
 	launch.Wait()
 
-	if summary := launch.StaleStatus().DrainSummary; summary != "" {
-		t.Errorf("StaleStatus().DrainSummary after successful Rebuild = %q, want cleared", summary)
+	if summary := launch.StaleStatus().StaleDrainSummary; summary != "" {
+		t.Errorf("StaleStatus().StaleDrainSummary after successful Rebuild = %q, want cleared", summary)
 	}
 }
 
