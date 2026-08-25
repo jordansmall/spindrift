@@ -253,41 +253,9 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 	// race.
 	outstanding := 0
 	closed := false
-	// heldBack, drainStart, drainEnd track the stale-drain report (#2678).
-	// drainStart/drainEnd stay zero-valued until the stale verdict fires and
-	// this invocation's report is emitted; that zero value doubles as a
-	// single-emit guard against ever computing a second report for the same
-	// RunContinuous call, since the stale-transition branch below runs at
-	// most once per call.
-	heldBack := 0
-	// heldBackUnknown is set true only when the stale-transition branch's
-	// reporting-only discover() call (below) errors -- a transient tracker
-	// hiccup, not a confirmed zero-blocker result -- so both DrainReport
-	// emission sites can render "unknown" instead of silently asserting a
-	// fabricated 0 (#2678 review finding). It is never set in the
-	// cfg.PendingCount branch: that path has no discover() call to fail.
-	heldBackUnknown := false
-	var drainStart, drainEnd, drainSlotAt time.Time
-	freeSlotSecs := 0.0
-	// drainCap tracks the cap that was actually in effect since the last
-	// checkpoint -- not limiter.Cap() read live at checkpoint time. A
-	// Console operator can raise or lower the live cap mid-interval via
-	// ResizeDelta (ADR 0023); reading limiter.Cap() fresh at the next
-	// checkpoint would retroactively credit the new cap to the whole
-	// preceding interval, when only the cap that actually held during
-	// that interval is correct. checkpointDrain (below) is the only
-	// place drainCap is refreshed, and always after closing out the
-	// interval that just ended -- driven by both the completion goroutine
-	// and the resize listener (below), so a fresh read only ever applies
-	// to the interval starting now, whichever direction the resize went.
-	drainCap := 0
-	// drainInProgress reports whether a stale drain has started and not yet
-	// been reported -- drainStart is only ever set inside the stale=true
-	// branch below, so a bare stale check would be redundant with
-	// !drainStart.IsZero() here; this closure is the single definition both
-	// completion-goroutine guards below share, rather than duplicating the
-	// condition verbatim at each site.
-	drainInProgress := func() bool { return !drainStart.IsZero() && drainEnd.IsZero() }
+	// drain consolidates the stale-drain report state (#2678, #2774): see
+	// drainTracker in drain_tracker.go for the per-field rationale.
+	var drain drainTracker
 	// now is cfg's test override (issue #2678, so the stale-drain report's
 	// freeSlotSecs accumulation is exactly assertable from a deterministic
 	// clock sequence rather than only >=0-checkable against real wall
@@ -305,30 +273,6 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 	// drainRefill is predeclared here, like refill above, so refill's
 	// completion-handler goroutine can call it before its body is assigned.
 	var drainRefill func() int
-	// checkpointDrain closes out the drain interval since the last
-	// checkpoint (or drainStart) using drainCap -- the cap that was
-	// actually in effect over that interval, not a live limiter.Cap()
-	// read -- then refreshes drainCap from the limiter for the interval
-	// that starts now. Callers must hold mu and have already confirmed
-	// drainInProgress(). Shared by the completion goroutine (below, at
-	// every Box completion) and the resize listener (below, the moment a
-	// Console "+" or "-" changes the live cap mid-drain): the resize
-	// listener's call is what actually fixes the live-sampling bug in
-	// both directions, since it closes out the pre-change interval at the
-	// pre-change cap before drainCap ever sees the new value.
-	checkpointDrain := func() {
-		checkpoint := now()
-		// A Console operator can lower the live cap mid-drain via
-		// ResizeDelta while more Boxes are outstanding than the new cap
-		// allows -- ResizeDelta never revokes an already-claimed slot
-		// (limiter.go), so drainCap-outstanding can go negative here.
-		// Clamp to zero: a lowered-below-outstanding interval has no
-		// free slots to credit, not a negative contribution that would
-		// corrupt the running total.
-		freeSlotSecs += float64(max(drainCap-outstanding, 0)) * checkpoint.Sub(drainSlotAt).Seconds()
-		drainSlotAt = checkpoint
-		drainCap = limiter.Cap()
-	}
 	refill = func() bool {
 		if stale || closed {
 			return false
@@ -346,9 +290,7 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 		if applicable && !isFresh {
 			stale = true
 			fmt.Printf("==> %s\n", msg)
-			drainStart = now()
-			drainSlotAt = drainStart
-			drainCap = limiter.Cap()
+			drain.begin(now(), limiter.Cap())
 			// heldBack only calls discover() for callers whose Discoverer is
 			// a pure query. Console's Queue.Discover (cfg.PreResolved, the
 			// only PreResolved caller today) claims the ready pick it
@@ -365,18 +307,18 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 			// confirmed-looking 0 (#2678 review finding).
 			switch {
 			case cfg.PendingCount != nil:
-				heldBack = cfg.PendingCount()
+				drain.heldBack = cfg.PendingCount()
 			case !cfg.PreResolved:
 				if issues, edges, _, failed, err := discover(); err != nil {
 					fmt.Fprintf(os.Stderr, "continuous: re-discover for drain report: %v\n", err)
-					heldBackUnknown = true
+					drain.heldBackUnknown = true
 				} else {
 					unclaimed := dropClaimed(issues, claimed)
 					checkOverlap := waveOverlapCheck(cfg, it, cf)
-					heldBack = countReady(cfg, it, cf, checkOverlap, unclaimed, edges, failed)
+					drain.heldBack = countReady(cfg, it, cf, checkOverlap, unclaimed, edges, failed)
 				}
 			default:
-				heldBackUnknown = true
+				drain.heldBackUnknown = true
 			}
 			if outstanding == 0 {
 				// Nothing in flight -- the drain is already over. Report it
@@ -385,9 +327,7 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 				// drainEnd is set to drainStart itself, not a fresh
 				// time.Now(), so Duration() is exactly zero rather than a
 				// near-zero timing artifact.
-				drainEnd = drainStart
-				report := DrainReport{StaleAt: drainStart, DrainedAt: drainEnd, FreeSlotSecs: 0, HeldBack: heldBack, HeldBackUnknown: heldBackUnknown}
-				emitDrainReport(cfg, pwd, report)
+				emitDrainReport(cfg, pwd, drain.finish(drain.drainStart))
 			}
 			return false
 		}
@@ -438,22 +378,19 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 			}
 			limiter.Release()
 			mu.Lock()
-			if drainInProgress() {
-				// A real drain is in progress and not yet finished: integrate
-				// the idle slot-time that elapsed since the last checkpoint,
-				// using the pre-decrement outstanding count -- the busy-slot
-				// count over the interval that just ended -- to derive how
-				// many slots sat free across it. checkpointDrain uses
-				// drainCap, the cap actually in effect over that interval,
-				// not a live limiter.Cap() read (#2678 review finding).
-				checkpointDrain()
-			}
+			// A real drain, if in progress and not yet finished, integrates
+			// the idle slot-time that elapsed since the last checkpoint here,
+			// using the pre-decrement outstanding count -- the busy-slot
+			// count over the interval that just ended -- to derive how many
+			// slots sat free across it. checkpointDrain uses drainCap, the
+			// cap actually in effect over that interval, not a live
+			// limiter.Cap() read (#2678 review finding); checkpointIfDraining
+			// is a no-op outside a drain.
+			drain.checkpointIfDraining(now(), limiter.Cap(), outstanding)
 			outstanding--
 			drainRefill()
-			if drainInProgress() && outstanding == 0 {
-				drainEnd = drainSlotAt
-				report := DrainReport{StaleAt: drainStart, DrainedAt: drainEnd, FreeSlotSecs: freeSlotSecs, HeldBack: heldBack, HeldBackUnknown: heldBackUnknown}
-				emitDrainReport(cfg, pwd, report)
+			if drain.inProgress() && outstanding == 0 {
+				emitDrainReport(cfg, pwd, drain.finish(drain.drainSlotAt))
 			}
 			if outstanding == 0 {
 				idle.Broadcast()
@@ -508,17 +445,16 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 				// short-circuits on stale, which always holds during a
 				// drain).
 				mu.Lock()
-				if drainInProgress() {
-					// The resize that just woke this listener is exactly
-					// the moment the live cap changed: close out the
-					// interval that just ended at drainCap, the cap that
-					// held during it, before refreshing drainCap to the
-					// new value for the interval that starts now (#2678
-					// review finding -- this is what stops the new cap
-					// from being retroactively credited to the whole
-					// preceding interval at the next checkpoint).
-					checkpointDrain()
-				}
+				// The resize that just woke this listener, if a drain is in
+				// progress, is exactly the moment the live cap changed:
+				// close out the interval that just ended at drainCap, the
+				// cap that held during it, before refreshing drainCap to
+				// the new value for the interval that starts now (#2678
+				// review finding -- this is what stops the new cap from
+				// being retroactively credited to the whole preceding
+				// interval at the next checkpoint). checkpointIfDraining is
+				// a no-op outside a drain.
+				drain.checkpointIfDraining(now(), limiter.Cap(), outstanding)
 				drainRefill()
 				mu.Unlock()
 			case <-growDone:
