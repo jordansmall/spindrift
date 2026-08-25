@@ -2207,6 +2207,63 @@ func TestRunContinuous_StaleDrainPendingCountOverridesPreResolvedFallback(t *tes
 	}
 }
 
+// TestRunContinuous_StaleDrainPreResolvedWithoutPendingCountReportsUnknown
+// verifies a review finding on #2678: a PreResolved caller that leaves
+// cfg.PendingCount nil (no caller does this today, but the switch in
+// continuous.go still guards against it) must not fall through to a
+// fabricated heldBack of 0 -- that would look like a confirmed "nothing
+// held back" reading when it is really "we have no way to know". The
+// default branch of the switch must set heldBackUnknown instead, which
+// Console()/HostLog() render as "unknown" rather than a bare 0.
+func TestRunContinuous_StaleDrainPreResolvedWithoutPendingCountReportsUnknown(t *testing.T) {
+	c := baseConfig()
+	c.Label = "agent-trigger"
+	c.MaxParallel = 1
+	c.PreResolved = true
+	// c.PendingCount intentionally left nil.
+
+	fc := forge.NewFake(dispatchLabels(c))
+
+	fr := runner.NewFake()
+
+	dir := tempLogDir(t)
+	f := testFactory(t, dir, fr)
+	s := newSettle(fc, fc)
+
+	discover := func() ([]Issue, map[string][]string, Sources, map[string]bool, error) {
+		// Never consulted on this path: PreResolved with no PendingCount
+		// must not fall back to calling discover() again (that would risk
+		// the claim-as-side-effect problem PendingCount exists to avoid);
+		// it must report heldBackUnknown instead.
+		return nil, nil, nil, nil, nil
+	}
+	fresh := func() (bool, bool, string) {
+		return true, false, "rebuild needed (base tip changed image inputs)"
+	}
+
+	var err error
+	stdout := testutil.CaptureStdout(t, func() {
+		err = RunContinuous(c, nil, fc, fc, dir, f, s, discover, fresh)
+	})
+
+	if !errors.Is(err, ErrImageStale) {
+		t.Fatalf("RunContinuous: got %v, want ErrImageStale", err)
+	}
+	if !strings.Contains(stdout, "held back: unknown") {
+		t.Fatalf("stdout: got %q, want a drain report line mentioning held back: unknown", stdout)
+	}
+
+	logPath := filepath.Join(dispatch.HostLogDirFor(dir), drainMarker)
+	logBytes, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("ReadFile(%s): %v", logPath, err)
+	}
+	log := string(logBytes)
+	if !strings.Contains(log, "heldBack=unknown") {
+		t.Fatalf("drain.log: got %q, want heldBack=unknown", log)
+	}
+}
+
 // TestRunContinuous_StaleDrainHeldBackExcludesBlockedIssues verifies a review
 // finding on #2678: the stale-transition branch's heldBack count must apply
 // nextReady's own blocked/touch-overlap/failed-check filtering, not just

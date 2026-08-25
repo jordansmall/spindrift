@@ -77,6 +77,24 @@ func (q *Queue) hasQueuedForKinds(kinds []Kind) bool {
 	return false
 }
 
+// PendingCount reports how many picks of kind are still queued and not yet
+// claimed (PickQueued) -- genuinely ready to launch, just waiting for a
+// slot. PickHeld is excluded: its declared blockers are not all satisfied
+// yet, so it is not ready to dispatch. This is a pure read, unlike Discover,
+// so a stale-drain report (waves.Config.PendingCount, #2678) can read it
+// without Discover's claim side effect.
+func (q *Queue) PendingCount(kind Kind) int {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	n := 0
+	for _, p := range q.picks {
+		if p.State == PickQueued && p.effectiveKind() == kind {
+			n++
+		}
+	}
+	return n
+}
+
 // Snapshot returns a copy of the queue's current picks, in pick order.
 func (q *Queue) Snapshot() []Pick {
 	q.mu.Lock()
