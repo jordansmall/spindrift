@@ -1429,6 +1429,72 @@ func TestRunQuickstart_Force_BackupRenameErr_CleansUpReservedBakFile(t *testing.
 	}
 }
 
+func TestRunQuickstart_Force_BackupRenameErr_RollsBackEarlierBackups(t *testing.T) {
+	dir := t.TempDir()
+
+	// Seed flake.nix as a regular file so its backup rename succeeds first,
+	// then seed harness.env as a directory so its backup rename fails with
+	// ENOTDIR (directory-to-file rename) — the exact repro from issue
+	// #2733's research comment. The loop must undo flake.nix's already-
+	// succeeded rename before returning harness.env's error, leaving the
+	// directory exactly as it was before the backup loop started.
+	if err := os.WriteFile(filepath.Join(dir, "flake.nix"), []byte("old flake"), 0o644); err != nil {
+		t.Fatalf("seed flake.nix: %v", err)
+	}
+	if err := os.Mkdir(filepath.Join(dir, "harness.env"), 0o755); err != nil {
+		t.Fatalf("seed harness.env as a directory: %v", err)
+	}
+
+	var out bytes.Buffer
+	stdin := defaultQuickstartStdin()
+	env := fakeEnvironment{env: map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "claude-oauth-faketoken"}, runtimes: map[string]bool{"podman": true}}
+
+	err := runQuickstart(dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, true)
+	if err == nil {
+		t.Fatalf("expected runQuickstart to return an error, got nil")
+	}
+	if !strings.Contains(err.Error(), "back up harness.env") {
+		t.Errorf("expected error to mention failing to back up harness.env, got: %v", err)
+	}
+
+	if strings.Contains(out.String(), "backed up: flake.nix") {
+		t.Errorf("expected no stale \"backed up: flake.nix\" transcript line once its rename was rolled back, got output: %q", out.String())
+	}
+
+	flakeContent, readErr := os.ReadFile(filepath.Join(dir, "flake.nix"))
+	if readErr != nil {
+		t.Fatalf("expected flake.nix to be restored to its original path after rollback, read error: %v", readErr)
+	}
+	if string(flakeContent) != "old flake" {
+		t.Errorf("expected restored flake.nix to hold the original content, got: %q", flakeContent)
+	}
+
+	if _, statErr := os.Stat(filepath.Join(dir, "flake.nix.bak")); !os.IsNotExist(statErr) {
+		t.Errorf("expected flake.nix.bak to be rolled back (removed), stat error: %v", statErr)
+	}
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("read dir: %v", err)
+	}
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), "flake.nix.bak") {
+			t.Errorf("expected no leftover flake.nix.bak* variants after rollback, found: %s", e.Name())
+		}
+		if strings.HasPrefix(e.Name(), "harness.env.bak") {
+			t.Errorf("expected no leftover harness.env.bak* reservation after the failed rename, found: %s", e.Name())
+		}
+	}
+
+	info, statErr := os.Stat(filepath.Join(dir, "harness.env"))
+	if statErr != nil {
+		t.Fatalf("expected harness.env to remain in place, stat error: %v", statErr)
+	}
+	if !info.IsDir() {
+		t.Errorf("expected harness.env to remain untouched as a directory, got a regular file")
+	}
+}
+
 func TestRunQuickstart_Force_SecondRun_PreservesBothBackups(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "flake.nix"), []byte("v1 flake"), 0o644); err != nil {
