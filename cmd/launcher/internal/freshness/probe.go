@@ -87,6 +87,14 @@ func imageRepo(imageTag string) string {
 	return imageTag[:i]
 }
 
+// trimFlakeAttrPrefix strips the ".#" flake-CLI shorthand prefix from attr,
+// if present, so Probe's eval.Eval call and RealizeTip's Start call always
+// address the exact same flake attribute string regardless of which form
+// flakeImageAttr was configured with.
+func trimFlakeAttrPrefix(attr string) string {
+	return strings.TrimPrefix(attr, ".#")
+}
+
 // KindBwrap is the RUNNER_KIND value selecting the bwrap runner — the one
 // kind Probe treats as not-applicable (its store stays read-only, so there's
 // no loaded image to compare). Any other value, including an OCI runtime
@@ -135,7 +143,7 @@ func Probe(runnerKind, pwd, baseBranch, flakeImageAttr, imageTag string, eval Ev
 		}
 	}
 
-	attr := strings.TrimPrefix(flakeImageAttr, ".#")
+	attr := trimFlakeAttrPrefix(flakeImageAttr)
 	outPath, err := eval.Eval(pwd, rev, attr)
 	if err != nil {
 		if isImageAttrMissing(err) {
