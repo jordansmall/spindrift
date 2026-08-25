@@ -5,14 +5,26 @@ import (
 	"testing"
 )
 
-// TestNixEvalRef_BuildsHermeticGitFileRef verifies that the flake reference
-// passed to `nix eval` points at the fetched rev via a hermetic git+file URL
-// — never the working tree — with .outPath appended to the attr.
-func TestNixEvalRef_BuildsHermeticGitFileRef(t *testing.T) {
-	got := nixEvalRef("/repo", "deadbeef", "packages.x86_64-linux.agent-image")
+// TestNixEvaluatorEval_BuildsHermeticGitFileRef verifies that the flake
+// reference Eval passes to `nix eval` (via the execCommand seam) points at
+// the fetched rev via a hermetic git+file URL — never the working tree —
+// with .outPath appended to the attr.
+func TestNixEvaluatorEval_BuildsHermeticGitFileRef(t *testing.T) {
+	script, dir := newFakeCLI(t, fakeCall{exit: 0, stdout: "/nix/store/abc-drv"})
+	orig := execCommand
+	t.Cleanup(func() { execCommand = orig })
+	execCommand = func(name string, args ...string) *exec.Cmd {
+		return exec.Command(script, args...)
+	}
+
+	if _, err := (NixEvaluator{}).Eval("/repo", "deadbeef", "packages.x86_64-linux.agent-image"); err != nil {
+		t.Fatalf("Eval() error = %v", err)
+	}
+
+	call := readCall(t, dir, 0)
 	want := "git+file:///repo?rev=deadbeef#packages.x86_64-linux.agent-image.outPath"
-	if got != want {
-		t.Errorf("nixEvalRef = %q, want %q", got, want)
+	if got := call[len(call)-1]; got != want {
+		t.Errorf("nix eval ref = %q, want %q", got, want)
 	}
 }
 

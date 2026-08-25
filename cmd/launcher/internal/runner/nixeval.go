@@ -6,11 +6,11 @@ import (
 	"strings"
 )
 
-// nixEvalRef builds the hermetic git+file flake reference `nix eval` reads:
-// the flake rooted at pwd, evaluated at rev — a fetched commit-ish, never the
-// working tree — with ".outPath" appended to attr.
-func nixEvalRef(pwd, rev, attr string) string {
-	return fmt.Sprintf("git+file://%s?rev=%s#%s.outPath", pwd, rev, attr)
+// hermeticFlakeRef builds the git+file flake reference both nix eval and
+// nix build read: the flake rooted at pwd, at rev -- a fetched commit-ish,
+// never the working tree.
+func hermeticFlakeRef(pwd, rev, attr string) string {
+	return fmt.Sprintf("git+file://%s?rev=%s#%s", pwd, rev, attr)
 }
 
 // NixEvaluator hermetically evaluates a flake attribute's output path at a
@@ -23,7 +23,10 @@ type NixEvaluator struct{}
 // Eval hermetically evaluates attr's outPath at rev via `nix eval --raw`
 // against a git+file flake reference — no checkout, no pull.
 func (NixEvaluator) Eval(pwd, rev, attr string) (string, error) {
-	ref := nixEvalRef(pwd, rev, attr)
+	// ".outPath" is the suffix nix eval needs to resolve a derivation's
+	// output path (nix build, by contrast, wants the derivation attr
+	// itself -- see NixRealizer.Start).
+	ref := hermeticFlakeRef(pwd, rev, attr) + ".outPath"
 	cmd := execCommand("nix", "eval", "--raw", ref)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
