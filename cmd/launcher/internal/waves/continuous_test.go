@@ -840,7 +840,7 @@ func TestRunContinuous_StaleDrainDiscoverErrorReportsHeldBackUnknown(t *testing.
 // Boxes guarantees the resize listener's checkpoint (and its drainCap
 // refresh) has already run to completion before any completion goroutine's
 // own checkpoint can start. Without that barrier, the resize listener's
-// checkpoint is only taken at all if drainInProgress() is still true when
+// checkpoint is only taken at all if inProgress() is still true when
 // it acquires mu (continuous.go's `case <-limiter.Resized():` branch) --
 // if all three completions raced ahead and drained outstanding to 0
 // first, the checkpoint would be skipped outright, so the barrier is load
