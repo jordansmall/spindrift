@@ -383,6 +383,20 @@ var transitionTestCases = []struct {
 		want: Decision{Continue: true, Reason: "blocked, running another fix pass", NextPass: KindFix, IncrementReviewRounds: true},
 	},
 	{
+		name: "review: BLOCK with no cap but LandPhase already TerminalCommitted from before still routes to land, with a Reason that reflects it",
+		in: Input{
+			PassJustExecuted: KindReview,
+			Verdict:          VerdictBlock,
+			LandPhase:        LandPhaseTerminalCommitted,
+		},
+		want: Decision{
+			Continue:              true,
+			Reason:                "blocked, but the run is already committed to the terminal land pass; running it anyway",
+			NextPass:              KindLand,
+			IncrementReviewRounds: true,
+		},
+	},
+	{
 		name: "review: LandPhase already TerminalCommitted from before routes next pass to land even on plain APPROVE",
 		in: Input{
 			PassJustExecuted: KindReview,

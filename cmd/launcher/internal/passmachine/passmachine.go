@@ -435,6 +435,7 @@ func budgetExceeded(caps Caps, tokens int, usd float64) (bool, string) {
 // behavior (a review pass alone never stops the run).
 func reviewTransition(in Input) Decision {
 	var d Decision
+	alreadyCommitted := in.LandPhase == LandPhaseTerminalCommitted
 	budgetHit, budgetReason := budgetExceeded(in.Caps, in.CumulativeTokens, in.CumulativeUSD)
 	switch {
 	case in.Verdict == VerdictNone:
@@ -482,8 +483,15 @@ func reviewTransition(in Input) Decision {
 		// (terminal) pass is required to land it (issue #2069).
 		d = Decision{Continue: true, Reason: "approved, running the land pass"}
 	default:
-		// A plain BLOCK with no cap hit: another fix pass is needed.
-		d = Decision{Continue: true, Reason: "blocked, running another fix pass"}
+		// A plain BLOCK with no cap hit. Normally another fix pass is
+		// needed -- but if in.LandPhase is already LandPhaseTerminalCommitted
+		// on entry, the dispatch below still routes NextPass to KindLand
+		// in that case, so the Reason must say so too (issue #2782).
+		reason := "blocked, running another fix pass"
+		if alreadyCommitted {
+			reason = "blocked, but the run is already committed to the terminal land pass; running it anyway"
+		}
+		d = Decision{Continue: true, Reason: reason}
 	}
 
 	// Unconditional, regardless of which case fired: a BLOCK verdict
@@ -497,7 +505,7 @@ func reviewTransition(in Input) Decision {
 	// always means "nothing left to fix, land it" even with no cap in
 	// play): next pass kind is Land; else (a BLOCK, or no verdict yet
 	// outside this function's other branches) Fix.
-	if in.LandPhase == LandPhaseTerminalCommitted || d.LandPhase == LandPhaseTerminalCommitted || in.Verdict == VerdictApprove {
+	if alreadyCommitted || d.LandPhase == LandPhaseTerminalCommitted || in.Verdict == VerdictApprove {
 		d.NextPass = KindLand
 	} else {
 		d.NextPass = KindFix
