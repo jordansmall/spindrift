@@ -17,7 +17,7 @@
 # templates/default/prompts/fragments/filer-label-direct{,-forgejo}.md,
 # neither going through doctor.Run()) escaped the registry until this check
 # was added. label-registry-covers-harness-writes below closes that gap for
-# those three known label-writing surfaces. (Issue #2590 moved the Go literal
+# those four known label-writing surfaces. (Issue #2590 moved the Go literal
 # out of issue_intent.go's own issueIntentLabels var — since removed — and
 # into this call site's own fourth argument, and turned the call itself from
 # a method (s.fileIssueIntents(...)) into the package-level function
@@ -195,8 +195,14 @@ let
       ++ labels.reviewFinding
     )
     ++ labels.triggerOnly;
-  # The three known surfaces that write or create a label literal outside
-  # doctor.Run()'s registry-derived TriageLabelMeta path (issue #2528 AC1).
+  # The four known surfaces that write or create a label literal outside
+  # the registry-derived TriageLabelMeta path (issue #2528 AC1, extended to a
+  # fourth surface by issue #2749). ResearchLabelNames() is called from
+  # inside doctor.Run() (doctor.go:317) — it's the literal itself, not the
+  # call site, that sits outside the registry-derived codegen path. A fifth
+  # surface, cmd/launcher/internal/settle/research.go:121's hard-coded
+  # "agent-research-finding" argument to fileIssueIntentsDetailed(...), is
+  # known and currently uncovered — out of scope for issue #2749.
   # Each is paired with a dedicated `extract` function — not a generic
   # markers-line-select + whole-line-tokenize + isLabelShaped-filter
   # pipeline — that pulls the label literal from its own known syntactic
@@ -225,6 +231,17 @@ let
   #     label-registry-covers-harness-writes-continuation-regression below.
   #   - filer-label-direct-forgejo.md: specifically the VALUE of the
   #     "name":"..." JSON key on that line.
+  #   - doctor.go: the string literal inside ResearchLabelNames()'s `names =
+  #     append(names, "agent-research-finding")` call (ADR 0041) — the one
+  #     hand-written label literal in doctor.go that has no
+  #     forge.ResearchFindingLabel() counterpart to source from instead (see
+  #     the doc comment on ResearchLabelNames() itself). Anchored to the
+  #     marker "append(names, \"" — confirmed unique in the file: the file's
+  #     other `append(names, ...)` call, `append(names, e.Label)`, has no
+  #     quote immediately after the comma, so it never matches — and scanned
+  #     span-wise to the literal's closing quote, mirroring
+  #     extractNameFieldTokens' simple quote-split shape — see
+  #     extractResearchLabelNamesLiteral below.
   # A shape-only filter (isLabelShaped, which requires an agent- prefix)
   # fails open on a de-prefixed rename: if the fileIssueIntents call's
   # "agent-review-finding" argument were renamed to "review-finding",
@@ -255,6 +272,10 @@ let
     "templates/default/prompts/fragments/filer-label-direct-forgejo.md" = {
       src = builtins.readFile ../../templates/default/prompts/fragments/filer-label-direct-forgejo.md;
       extract = extractNameFieldTokens;
+    };
+    "cmd/launcher/internal/doctor/doctor.go" = {
+      src = builtins.readFile ../../cmd/launcher/internal/doctor/doctor.go;
+      extract = extractResearchLabelNamesLiteral;
     };
   };
   # The literal sits inside the fourth argument of the
@@ -353,6 +374,32 @@ let
           if builtins.match "[a-z0-9-]+" value != null then [ value ] else [ ];
     in
     concatMap tokenAfterMarker relevantLines;
+  # The literal sits inside ResearchLabelNames()'s `names = append(names,
+  # "agent-research-finding")` call (doctor.go, ADR 0041). Anchored to the
+  # marker "append(names, \"" — marker uniqueness in doctor.go is argued in
+  # the harnessSurfaces bullet above. Splits the whole source on the marker
+  # (span-scanned, not per-line, though this literal is realistically always
+  # on one line) and, for each segment after the first, takes everything up
+  # to the next quote as the literal — the same shape as extractNameFieldTokens
+  # above.
+  extractResearchLabelNamesLiteral =
+    src:
+    let
+      marker = ''append(names, "'';
+      labelFromSegment =
+        segment:
+        let
+          quoteParts = splitString "\"" segment;
+        in
+        if builtins.length quoteParts < 2 then
+          [ ]
+        else
+          let
+            value = builtins.head quoteParts;
+          in
+          if builtins.match "[a-z0-9-]+" value != null then [ value ] else [ ];
+    in
+    concatMap labelFromSegment (builtins.tail (splitString marker src));
   # extractLabelCreateTokens and extractNameFieldTokens both scan line by
   # line, so a shell `\`-continued line (e.g. `gh label create \` with the
   # actual label bareword on the following line) would otherwise put the
@@ -520,10 +567,11 @@ in
       "dispatch-labels-tokenize-exact-match-regression: expected assertLabelsPinned to reject a synthetic workflowSets containing only compound agent-research-* labels and never the standalone agent-research token, but it evaluated successfully";
     pkgs.runCommand "dispatch-labels-tokenize-exact-match-regression" { } "touch $out";
 
-  # Registry ⊇ Harness direction (issue #2528): asserts every label literal
-  # the three harnessSurfaces above write/create is a name somewhere in
-  # lib/labels.nix. This is the check that would have failed before
-  # lib/labels.nix grew a reviewFinding row for agent-review-finding.
+  # Registry ⊇ Harness direction (issue #2528, extended to a fourth surface by
+  # issue #2749): asserts every label literal the four harnessSurfaces above
+  # write/create is a name somewhere in lib/labels.nix. This is the check that
+  # would have failed before lib/labels.nix grew a reviewFinding row for
+  # agent-review-finding.
   label-registry-covers-harness-writes =
     assert
       (assertHarnessWritesInRegistry {
@@ -699,6 +747,85 @@ in
     assert assertMsg (!result.success)
       "label-registry-covers-harness-writes-call-rename-regression: expected assertHarnessWritesInRegistry to reject a synthetic gate.go with fileIssueIntents renamed to fileReviewFindingIntents, but it evaluated successfully";
     pkgs.runCommand "label-registry-covers-harness-writes-call-rename-regression" { } "touch $out";
+
+  # Regression guard (issue #2749): proves assertHarnessWritesInRegistry
+  # actually catches a drift between doctor.go's hand-written
+  # ResearchLabelNames() literal ("agent-research-finding", ADR 0041, at
+  # `names = append(names, "agent-research-finding")`) and lib/labels.nix's
+  # researchFinding row — the fourth harnessSurfaces entry added by this
+  # commit. Doctors the real doctor.go source (via replaceStrings on its own
+  # builtins.readFile content, not a synthetic fixture) so that literal
+  # becomes "agent-unregistered-label", builds a doctored harnessSurfaces with
+  # only that one surface's src swapped in, and asserts via tryEval that
+  # assertHarnessWritesInRegistry now correctly REJECTS it —
+  # "agent-unregistered-label" is not a name in lib/labels.nix's registry.
+  # Before this commit, doctor.go wasn't a harnessSurfaces entry at all, so a
+  # future rename of lib/labels.nix's researchFinding.name without updating
+  # doctor.go's literal (or vice versa) would have gone completely undetected
+  # by this file — metaFor() would silently fall through to the gray
+  # "ededed" no-description default instead of erroring. Named for the
+  # failure mode it guards (doctor.go's literal drifting from the registry),
+  # not the file it doctors, matching the naming convention of its siblings
+  # (-continuation-regression, -quoted-bareword-regression,
+  # -json-spacing-regression, -call-rename-regression, -multiline-regression
+  # below). See label-registry-covers-harness-writes-research-finding-registry-rename-regression
+  # below for the converse direction: a rename on lib/labels.nix's side
+  # instead of doctor.go's.
+  label-registry-covers-harness-writes-research-finding-drift-regression =
+    let
+      doctoredDoctorSrc =
+        replaceStrings [ ''"agent-research-finding"'' ] [ ''"agent-unregistered-label"'' ]
+          harnessSurfaces."cmd/launcher/internal/doctor/doctor.go".src;
+      doctoredHarnessSurfaces = harnessSurfaces // {
+        "cmd/launcher/internal/doctor/doctor.go" = harnessSurfaces."cmd/launcher/internal/doctor/doctor.go" // {
+          src = doctoredDoctorSrc;
+        };
+      };
+      extractedLabels = labelsWrittenBy {
+        src = doctoredDoctorSrc;
+        extract = extractResearchLabelNamesLiteral;
+      };
+      result = builtins.tryEval (assertHarnessWritesInRegistry {
+        harnessSurfaces = doctoredHarnessSurfaces;
+        registryLabels = allRegistryLabels;
+      });
+    in
+    assert assertMsg (extractedLabels == [ "agent-unregistered-label" ])
+      "label-registry-covers-harness-writes-research-finding-drift-regression: expected extractResearchLabelNamesLiteral to find [ \"agent-unregistered-label\" ] on the doctored ResearchLabelNames() literal (not [ ]), but got: ${concatStringsSep ", " extractedLabels}";
+    assert assertMsg (!result.success)
+      "label-registry-covers-harness-writes-research-finding-drift-regression: expected assertHarnessWritesInRegistry to reject a synthetic doctor.go with ResearchLabelNames()'s agent-research-finding literal renamed to agent-unregistered-label, but it evaluated successfully";
+    pkgs.runCommand "label-registry-covers-harness-writes-research-finding-drift-regression" { } "touch $out";
+
+  # Regression guard (issue #2749 AC3), converse direction from the check
+  # above: that check doctors doctor.go's literal and proves
+  # assertHarnessWritesInRegistry catches the harness side drifting away from
+  # the registry. This instead doctors the REGISTRY side — simulating a
+  # rename of lib/labels.nix's researchFinding row from "agent-research-finding"
+  # to a plausible new name, "agent-research-note" — and proves
+  # assertHarnessWritesInRegistry catches that direction too: doctor.go's
+  # ResearchLabelNames() literal still says "agent-research-finding", which
+  # after the doctored rename is no longer a name anywhere in
+  # allRegistryLabels. Builds doctoredRegistryLabels by mapping the
+  # replacement over allRegistryLabels (not over lib/labels.nix's raw rows —
+  # allRegistryLabels is the exact list assertHarnessWritesInRegistry checks
+  # membership against), then calls assertHarnessWritesInRegistry with the
+  # real (undoctored) harnessSurfaces against that doctored registry via
+  # tryEval, asserting it now correctly REJECTS it. This is the check issue
+  # #2749's third acceptance criterion asked to be confirmed manually; pinning
+  # it here as a permanent check keeps it from silently regressing later.
+  label-registry-covers-harness-writes-research-finding-registry-rename-regression =
+    let
+      doctoredRegistryLabels = map (
+        l: if l == "agent-research-finding" then "agent-research-note" else l
+      ) allRegistryLabels;
+      result = builtins.tryEval (assertHarnessWritesInRegistry {
+        inherit harnessSurfaces;
+        registryLabels = doctoredRegistryLabels;
+      });
+    in
+    assert assertMsg (!result.success)
+      "label-registry-covers-harness-writes-research-finding-registry-rename-regression: expected assertHarnessWritesInRegistry to reject a synthetic registry with agent-research-finding renamed to agent-research-note, but it evaluated successfully";
+    pkgs.runCommand "label-registry-covers-harness-writes-research-finding-registry-rename-regression" { } "touch $out";
 
   # Regression guard (issue #2528 AC1, issue #2590): proves the new
   # extractor's span-scanned (marker-to-")", split on multi-line source)
