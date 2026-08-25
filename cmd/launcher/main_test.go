@@ -4755,6 +4755,21 @@ func TestLoadConfig_RunnerKind_ReadsArtifactRegardlessOfRuntime(t *testing.T) {
 	}
 }
 
+// TestLoadConfig_FlakeLauncherAttr_ReadsArtifact proves loadConfig() reads
+// FLAKE_LAUNCHER_ATTR into config.flakeLauncherAttr, mirroring how
+// flakeImageAttr/FLAKE_IMAGE_ATTR is nix-rendered into the artifacts section
+// (issue #2677 slice 3): the launcher-currency check needs the launcher's own
+// flake attr, distinct from the OCI image's.
+func TestLoadConfig_FlakeLauncherAttr_ReadsArtifact(t *testing.T) {
+	t.Setenv("FLAKE_LAUNCHER_ATTR", ".#launcher-currency")
+
+	c := loadConfig()
+
+	if c.flakeLauncherAttr != ".#launcher-currency" {
+		t.Errorf("loadConfig().flakeLauncherAttr = %q, want %q", c.flakeLauncherAttr, ".#launcher-currency")
+	}
+}
+
 func contains(ss []string, s string) bool {
 	for _, v := range ss {
 		if v == s {
