@@ -245,7 +245,9 @@
   # fragment in, and neither research-prompt.md nor
   # research-self-contained-prompt.md ever reference a DIRECT-gated
   # variable), so "never renders direct-file instructions" holds by
-  # construction, not by a runtime check.
+  # construction. lib/mkHarness.nix's `researchDirectFileCheckOk` (issue
+  # #2595, ADR 0041) now also backstops this claim with a build-time check,
+  # rather than relying on construction alone.
   {
     gate = "FILER_FILE_RELAY";
     fragment = "research-file-issues-relay.md";
