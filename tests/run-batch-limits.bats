@@ -113,7 +113,7 @@ setup() {
   local call_count="$BATS_TEST_TMPDIR/count_matches_calls"
   echo 0 >"$call_count"
 
-  local polls_per_second=20 # tests/helper.bash:76 -- 1/interval (0.05s); keep in sync
+  local polls_per_second=20 # tests/helper.bash's wait_for_log_lines "tries" calc -- 1/interval (0.05s); keep in sync
   local old_calls=$((2 * polls_per_second + 1)) # calls made under the un-widened 2s default
   local new_calls=$((3 * polls_per_second + 1)) # calls made under the widened 3s timeout
   local hit_call=$((old_calls + 5))             # margin above old_calls, still <= new_calls
@@ -132,9 +132,10 @@ setup() {
   # old_calls = 2*20+1 = 41 (< hit_call, so the un-widened default times
   # out first) and new_calls = 3*20+1 = 61 (>= hit_call, so the widened
   # timeout reaches it comfortably). The "2s default" below is only
-  # helper.bash's shell-level fallback -- CI's bats derivation
-  # (nix/checks/bats.nix) bakes WAIT_FOR_LOG_LINES_TIMEOUT=10 instead, so
-  # this test explicitly exports 3 rather than relying on either default.
+  # helper.bash's shell-level fallback (see that file's doc comment above
+  # wait_for_log_lines for the full rationale, including why CI's bats
+  # derivation bakes a different default) -- this test explicitly exports 3
+  # rather than relying on either default.
   # The call count is threaded through a tmpfile because `_count_matches`
   # runs via command substitution, forking a fresh subshell per call that
   # a plain-variable increment wouldn't survive.
