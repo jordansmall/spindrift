@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -9,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"spindrift.dev/launcher/internal/driver/claude"
 	"spindrift.dev/launcher/internal/runstate"
 	"spindrift.dev/launcher/internal/usage"
 )
@@ -1504,12 +1506,137 @@ func TestRunEmitsDecisionMarkerOnStdout(t *testing.T) {
 	}
 
 	out := stdout.String()
-	if !strings.Contains(out, `"spindrift_op":{"op":"decision","decision":"continue"}`) {
-		t.Errorf("stdout = %q, want a continue decision marker after pass 1's BLOCK", out)
+	if !strings.Contains(out, `"spindrift_op":{"op":"decision","decision":"continue","reason":"blocked, running another pass"`) {
+		t.Errorf("stdout = %q, want a continue decision marker with reason after pass 1's BLOCK", out)
 	}
 	if !strings.Contains(out, `"decision":"stop","reason":"outcome reached"`) {
 		t.Errorf("stdout = %q, want a stop decision marker with reason after pass 2's terminal outcome", out)
 	}
+}
+
+// TestRunDecisionOpsAlwaysHaveNonEmptyReason is the orchestrator-level
+// companion to passmachine's own TestTransitionNeverReturnsEmptyReason
+// (issue #2655 AC3): it scans every "spindrift_op" line a full run actually
+// prints to stdout -- not just Transition's return value in isolation --
+// and asserts every "decision" op carries a non-empty Reason, across both
+// pass machines that call passmachine.Transition: the legacy single loop
+// (blockThenApproveFakeDriverBody exercises legacyTransition's BLOCK-continue
+// and outcome-stop cases) and the review loop (twoRoundDecisionsFakeDriverBody
+// exercises implementFixTransition's no-cap-fired continue case and its own
+// HasOutcome stop case on the terminal land pass, plus reviewTransition's
+// BLOCK-continue case and its APPROVE case -- the APPROVE case only routes
+// into the land pass and never itself stops the run, so this fixture never
+// reaches terminalLandTransition).
+// runReviewLoopFixture builds the common review-pass-loop fixture shared by
+// TestRunDecisionOpsAlwaysHaveNonEmptyReason's "review pass loop" subtest and
+// TestRunWithReviewPassAccumulatesDecisionsAcrossRoundsInDecisionsLog: a temp
+// dir, a fake driver-exec wired with twoRoundDecisionsFakeDriverBody, the
+// prompt/review-prompt/session files, a config wired for a two-round review
+// pass, and the run() call itself. round1Decisions and round2Decisions are
+// the only inputs that vary between the two call sites; it returns whatever
+// each call site reads afterward.
+func runReviewLoopFixture(t *testing.T, round1Decisions, round2Decisions string) (stdout *bytes.Buffer, callLog, stateFile, pass5PromptCopyPath string) {
+	t.Helper()
+	dir := t.TempDir()
+	callLog = filepath.Join(dir, "calls.log")
+	decisionsPath := filepath.Join(dir, "decisions.md")
+	pass5PromptCopyPath = filepath.Join(dir, "pass5-prompt-copy.txt")
+	writeFakeDriverExec(t, dir, callLog, twoRoundDecisionsFakeDriverBody(callLog, decisionsPath, round1Decisions, round2Decisions, pass5PromptCopyPath))
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	promptFile := filepath.Join(dir, "prompt.txt")
+	if err := os.WriteFile(promptFile, []byte("ORIGINAL PROMPT TEXT"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	reviewPromptFile := filepath.Join(dir, "review-prompt.txt")
+	if err := os.WriteFile(reviewPromptFile, []byte("REVIEW PROMPT TEXT"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sessionFile := filepath.Join(dir, "session.txt")
+	if err := os.WriteFile(sessionFile, []byte("--session-id fake-id"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stateFile = filepath.Join(dir, "run-state.json")
+
+	cfg := config{
+		promptFile:       promptFile,
+		reviewPromptFile: reviewPromptFile,
+		sessionFile:      sessionFile,
+		driverBin:        "claude",
+		issue:            "7",
+		logPath:          filepath.Join(dir, "stream.log"),
+		heartbeatLog:     filepath.Join(dir, "heartbeat.log"),
+		stateFile:        stateFile,
+		maxReviewRounds:  5,
+		maxSlices:        10,
+		decisionsPath:    decisionsPath,
+	}
+
+	stdout = &bytes.Buffer{}
+	if _, err := run(cfg, stdout); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	return stdout, callLog, stateFile, pass5PromptCopyPath
+}
+
+func TestRunDecisionOpsAlwaysHaveNonEmptyReason(t *testing.T) {
+	assertAllDecisionOpsHaveReason := func(t *testing.T, stdout string) {
+		t.Helper()
+		saw := false
+		for _, line := range strings.Split(strings.TrimRight(stdout, "\n"), "\n") {
+			if line == "" {
+				continue
+			}
+			var ev claude.Event
+			if err := json.Unmarshal([]byte(line), &ev); err != nil {
+				t.Fatalf("unmarshal stdout line %q: %v", line, err)
+			}
+			if ev.SpindriftOp == nil || ev.SpindriftOp.Op != "decision" {
+				continue
+			}
+			saw = true
+			if ev.SpindriftOp.Reason == "" {
+				t.Errorf("decision op line %q has an empty reason", line)
+			}
+		}
+		if !saw {
+			t.Fatal("stdout contained no decision ops -- fixture didn't exercise the path under test")
+		}
+	}
+
+	t.Run("legacy loop", func(t *testing.T) {
+		dir := t.TempDir()
+		callLog := filepath.Join(dir, "calls.log")
+		writeFakeDriverExec(t, dir, callLog, blockThenApproveFakeDriverBody(callLog))
+		t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+		promptFile := filepath.Join(dir, "prompt.txt")
+		if err := os.WriteFile(promptFile, []byte("prompt"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+
+		cfg := config{
+			promptFile:      promptFile,
+			driverBin:       "claude",
+			issue:           "7",
+			logPath:         filepath.Join(dir, "stream.log"),
+			heartbeatLog:    filepath.Join(dir, "heartbeat.log"),
+			stateFile:       filepath.Join(dir, "run-state.json"),
+			maxReviewRounds: 3,
+			maxSlices:       5,
+		}
+
+		var stdout bytes.Buffer
+		if _, err := run(cfg, &stdout); err != nil {
+			t.Fatalf("run: %v", err)
+		}
+		assertAllDecisionOpsHaveReason(t, stdout.String())
+	})
+
+	t.Run("review pass loop", func(t *testing.T) {
+		stdout, _, _, _ := runReviewLoopFixture(t, "- decision one", "- decision two")
+		assertAllDecisionOpsHaveReason(t, stdout.String())
+	})
 }
 
 // TestRunEmitsNoVerdictStopReason verifies the decision marker's reason
@@ -2468,47 +2595,9 @@ exit 0
 // asserts the on-disk log contains BOTH rounds' entries, not just the most
 // recent one.
 func TestRunWithReviewPassAccumulatesDecisionsAcrossRoundsInDecisionsLog(t *testing.T) {
-	dir := t.TempDir()
-	callLog := filepath.Join(dir, "calls.log")
-	decisionsPath := filepath.Join(dir, "decisions.md")
-	pass5PromptCopyPath := filepath.Join(dir, "pass5-prompt-copy.txt")
 	const round1Decisions = "- chose approach X over Y: simpler, no new dependency"
 	const round2Decisions = "- chose to keep the retry cap at 3: matches the existing backoff budget"
-	writeFakeDriverExec(t, dir, callLog, twoRoundDecisionsFakeDriverBody(callLog, decisionsPath, round1Decisions, round2Decisions, pass5PromptCopyPath))
-	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
-
-	promptFile := filepath.Join(dir, "prompt.txt")
-	if err := os.WriteFile(promptFile, []byte("ORIGINAL PROMPT TEXT"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	reviewPromptFile := filepath.Join(dir, "review-prompt.txt")
-	if err := os.WriteFile(reviewPromptFile, []byte("REVIEW PROMPT TEXT"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	sessionFile := filepath.Join(dir, "session.txt")
-	if err := os.WriteFile(sessionFile, []byte("--session-id fake-id"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	stateFile := filepath.Join(dir, "run-state.json")
-
-	cfg := config{
-		promptFile:       promptFile,
-		reviewPromptFile: reviewPromptFile,
-		sessionFile:      sessionFile,
-		driverBin:        "claude",
-		issue:            "7",
-		logPath:          filepath.Join(dir, "stream.log"),
-		heartbeatLog:     filepath.Join(dir, "heartbeat.log"),
-		stateFile:        stateFile,
-		maxReviewRounds:  5,
-		maxSlices:        10,
-		decisionsPath:    decisionsPath,
-	}
-
-	var stdout bytes.Buffer
-	if _, err := run(cfg, &stdout); err != nil {
-		t.Fatalf("run: %v", err)
-	}
+	_, callLog, stateFile, pass5PromptCopyPath := runReviewLoopFixture(t, round1Decisions, round2Decisions)
 
 	calls, err := os.ReadFile(callLog)
 	if err != nil {
