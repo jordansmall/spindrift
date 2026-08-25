@@ -36,9 +36,12 @@ const (
 	// findings.
 	KindFix
 	// KindLand is the review loop's terminal pass: another lap through the
-	// same implement/fix code path that finds nothing left to fix, either
-	// because the prior review APPROVEd or because a cap committed the run
-	// to a terminal land pass.
+	// same implement/fix code path, reached either because the prior
+	// review APPROVEd or because a cap committed the run to a terminal
+	// land pass. It can still make edits -- it's seeded with the
+	// reviewer's non-blocking findings and told to fix cheap ones inline
+	// -- but the role names what makes it terminal (it lands), not those
+	// incidental edits.
 	KindLand
 	// KindReview is the review loop's review pass: a fresh session against
 	// cfg.reviewPromptFile, whose own verdict (not the implement/fix/land
@@ -46,21 +49,34 @@ const (
 	KindReview
 )
 
+// The pass_start op's own Role field values -- the string form of each
+// PassKind that actually sets Role (KindLegacy never does).
+const (
+	// RoleImplement is the review loop's first pass's Role value.
+	RoleImplement = "implement"
+	// RoleReview is the review loop's review pass's Role value.
+	RoleReview = "review"
+	// RoleFix is the review loop's post-review pass's Role value.
+	RoleFix = "fix"
+	// RoleLand is the review loop's terminal pass's Role value.
+	RoleLand = "land"
+)
+
 // String returns the pass_start op's own Role field value for k --
-// "implement"/"fix"/"land"/"review" for the review loop's four pass kinds,
-// matching run.go's own pre-#2548 implRole string literals and its review
-// pass's literal "review" Role value, and "" for KindLegacy, which never
-// sets Role at all (the legacy single loop has no role concept).
+// RoleImplement/RoleFix/RoleLand/RoleReview for the review loop's four pass
+// kinds, matching run.go's own pre-#2548 implRole string literals and its
+// review pass's literal "review" Role value, and "" for KindLegacy, which
+// never sets Role at all (the legacy single loop has no role concept).
 func (k PassKind) String() string {
 	switch k {
 	case KindImplement:
-		return "implement"
+		return RoleImplement
 	case KindFix:
-		return "fix"
+		return RoleFix
 	case KindLand:
-		return "land"
+		return RoleLand
 	case KindReview:
-		return "review"
+		return RoleReview
 	default:
 		return ""
 	}
@@ -191,12 +207,11 @@ const (
 	// firing on the implement/fix/land decision point, or a no-verdict/
 	// maxSlices/maxReviewRounds cap firing on the review-pass decision
 	// point -- already committed this run to landing, regardless of the
-	// PassKind label the pass that just ran happens to carry. In
-	// particular, when a maxSlices cap and a manifest dispatch both fire on
-	// the same pass, the NextPass label stays KindFix (for pass_start's own
-	// Role display) even though LandPhase is already TerminalCommitted; the
-	// caller threads this field, not PassKind, back into the next call's
-	// Input.LandPhase.
+	// PassKind label the pass that just ran happens to carry. The caller
+	// threads this field, not PassKind, back into the next call's
+	// Input.LandPhase; reviewTransition maps a LandPhase already (or
+	// newly) TerminalCommitted -- or a plain APPROVE verdict -- to
+	// NextPass == KindLand.
 	LandPhaseTerminalCommitted
 )
 
@@ -461,8 +476,11 @@ func reviewTransition(in Input) Decision {
 	}
 
 	// LandPhase already TerminalCommitted from before, or just committed
-	// above by this decision: next pass kind is Land; else Fix.
-	if in.LandPhase == LandPhaseTerminalCommitted || d.LandPhase == LandPhaseTerminalCommitted {
+	// above by this decision, or the verdict is a plain APPROVE (which
+	// always means "nothing left to fix, land it" even with no cap in
+	// play): next pass kind is Land; else (a BLOCK, or no verdict yet
+	// outside this function's other branches) Fix.
+	if in.LandPhase == LandPhaseTerminalCommitted || d.LandPhase == LandPhaseTerminalCommitted || in.Verdict == VerdictApprove {
 		d.NextPass = KindLand
 	} else {
 		d.NextPass = KindFix

@@ -360,12 +360,12 @@ func TestTransition(t *testing.T) {
 			},
 		},
 		{
-			name: "review: APPROVE with no cap falls through to fix, no LandPhase commit, no increment",
+			name: "review: APPROVE with no cap routes straight to land, no LandPhase commit, no increment",
 			in: Input{
 				PassJustExecuted: KindReview,
 				Verdict:          VerdictApprove,
 			},
-			want: Decision{Continue: true, Reason: "", NextPass: KindFix},
+			want: Decision{Continue: true, Reason: "", NextPass: KindLand},
 		},
 		{
 			name: "review: BLOCK with no cap falls through to fix but still increments review rounds",
@@ -429,7 +429,7 @@ func TestTransition(t *testing.T) {
 				ReviewRounds:     5,
 				Caps:             Caps{MaxReviewRounds: 2},
 			},
-			want: Decision{Continue: true, Reason: "", NextPass: KindFix},
+			want: Decision{Continue: true, Reason: "", NextPass: KindLand},
 		},
 		{
 			name: "review: budget exceeded on tokens sets LandPhase and increments review rounds",
@@ -505,7 +505,7 @@ func TestTransition(t *testing.T) {
 				CumulativeTokens: 100,
 				Caps:             Caps{MaxBudgetTokens: 100},
 			},
-			want: Decision{Continue: true, Reason: "", NextPass: KindFix},
+			want: Decision{Continue: true, Reason: "", NextPass: KindLand},
 		},
 		{
 			name: "review: max review rounds wins over budget cap (priority)",
