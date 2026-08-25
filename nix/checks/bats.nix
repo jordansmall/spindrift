@@ -92,18 +92,16 @@ let
   # with its own tests/fakes/<name> fake is covered automatically, no edits
   # needed here.
   nonClaudeDrivers = pkgs.lib.filterAttrs (name: _: name != "claude") driverRegistry.entries;
+
   # nativeBuildInputs migrated to the shared batsNativeBuildInputs (issue
   # #2751); the env vars below stay hand-listed rather than building on
-  # `batsLightweightEnv // { ... }` -- unlike batsShardChecks (batsEnv) this
-  # derivation never runs the suites that need
-  # batsLightweightEnv's other vars (SKILLS_*/OPENCODE_*/PROMPT_PATH/
-  # PROMPT_HARNESS_DIR/DRIVER_OUTCOME_MANIFEST/PROMPT_CONTRACT_PARITY_FIXTURE/
-  # WAIT_FOR_LOG_LINES_TIMEOUT/etc.), so merging batsLightweightEnv wholesale
-  # would silently pull those harnesses (skillsHarness, skillsBwrapHarness,
-  # opencodeHarness, promptHarness, ...) into this derivation's build closure
-  # and change its output path for no behavioral benefit -- exactly the
-  # "forces realization" cost batsLightweightEnv/batsImageEnv were split to
-  # avoid in the first place.
+  # `batsEnv // { ... }` -- this derivation hand-lists only the env vars it
+  # actually needs. Merging all of batsEnv wholesale would pull unrelated
+  # harnesses (skillsHarness, skillsBwrapHarness, opencodeHarness,
+  # promptHarness, DOGFOOD_SH, AB_ORCHESTRATOR_SH, etc.) into this
+  # derivation's build inputs/closure for vars its own suites never read --
+  # that's the actual cost, independent of any OCI image realization
+  # concern.
   outcomeBatsChecks = pkgs.lib.mapAttrs' (
     name: entry:
     pkgs.lib.nameValuePair "bats-outcome-${name}" (
@@ -143,11 +141,12 @@ let
     )
   ) nonClaudeDrivers;
 
-  # nativeBuildInputs shared by every bats-shaped derivation in this file
-  # (batsLightweightEnv/batsImageEnv below, plus outcomeBatsChecks above,
-  # which now consumes this binding, and bats-prompt-contract-parity, which
-  # still hand-duplicates this list inline pending a later migration slice
-  # -- issue #2751).
+  # nativeBuildInputs shared by three consumers (issue #2751): batsEnv below
+  # (via batsShardChecks), outcomeBatsChecks above, and
+  # bats-prompt-contract-parity further down. `driver-registry-outcome-
+  # extraction` (further down) is a deliberate exception -- it hand-lists
+  # its own narrower 6-package nativeBuildInputs (bats bash jq gnugrep
+  # gnused coreutils), since that check needs neither git nor gettext.
   batsNativeBuildInputs = [
     pkgs.bats
     pkgs.bash
@@ -159,29 +158,12 @@ let
     pkgs.jq
   ];
 
-  # The default DRIVER_SESSION_RESUMABLE value batsLightweightEnv exports:
-  # claude (the only Driver run through the `bats` derivations built on
-  # batsLightweightEnv/batsEnv) is resumable, mirroring the bats-outcome-<name>
-  # derivations' own per-driver value computed from sessionCacheDirRelative
-  # (see the DRIVER_SESSION_RESUMABLE comment further down). Pulled out as its
-  # own binding so a future per-Driver consumer of batsLightweightEnv can
-  # override it via `batsLightweightEnv // { DRIVER_SESSION_RESUMABLE = ...; }`
-  # instead of forking the whole attrset.
-  batsDriverSessionResumableDefault = "1";
-
-  # Split (issue #2751) so a future lightweight bats-shaped consumer -- one
-  # that never touches $RUN_CMD/$BUILD_CMD/friends or $IMAGE_PATH -- can reuse
-  # batsLightweightEnv without paying for the OCI image realization those
-  # image-build-forcing vars trigger (same "deliberately excluded from image
-  # realization" reasoning as driver-registry-outcome-extraction and
-  # bats-prompt-contract-parity above). batsEnv below recombines the two for
-  # the existing bats-shard-N consumers, unchanged.
-  #
-  # batsLightweightEnv: nativeBuildInputs plus every env var that doesn't
-  # force the image build -- contract fixtures, driver preambles, skills
-  # harness vars, prompt/fragment registries, and the wait_for_log_lines
-  # timeout override.
-  batsLightweightEnv = {
+  # The full env for the bats-shard-N derivations (batsShardChecks below):
+  # nativeBuildInputs, contract fixtures, driver preambles, skills harness
+  # vars, prompt/fragment registries, the wait_for_log_lines timeout
+  # override, and the launcher command paths batsShardChecks' suites drive
+  # end-to-end.
+  batsEnv = {
     nativeBuildInputs = batsNativeBuildInputs;
     ENTRYPOINT = ../../agent/entrypoint.sh;
     FORMAT_TRANSCRIPT_SCRIPT = ../../agent/format-transcript.sh;
@@ -250,8 +232,9 @@ let
     # pinned session via --resume") stays unconditionally green (issue
     # #2261 slices 4-6): claude is resumable, so this mirrors the
     # bats-outcome-<name> derivations' own per-driver
-    # DRIVER_SESSION_RESUMABLE computed from sessionCacheDirRelative.
-    DRIVER_SESSION_RESUMABLE = batsDriverSessionResumableDefault;
+    # DRIVER_SESSION_RESUMABLE computed from sessionCacheDirRelative
+    # (see outcomeBatsChecks above).
+    DRIVER_SESSION_RESUMABLE = "1";
     # Harnesses with baked skills for skills-precedence tests.
     SKILLS_RUN_CMD = "${skillsHarness.internals.run}/bin/run";
     SKILLS_BWRAP_RUN_CMD = "${skillsBwrapHarness.internals.run}/bin/run";
@@ -298,14 +281,6 @@ let
     # suite's other required env vars this derivation exports), since
     # nothing else supplies them.
     WAIT_FOR_LOG_LINES_TIMEOUT = "10";
-  };
-
-  # batsImageEnv: just the vars that force the OCI image build --
-  # batsShardChecks' suites overlay `gh` with the fake and exercise `run`/
-  # `build` end-to-end against the launcher, so they need the image realized;
-  # a future lightweight consumer that skips these vars entirely never
-  # triggers that realization.
-  batsImageEnv = {
     # The launcher commands under test overlay `gh` with the fake
     # (batsHarness/customHarness/dockerHarness), since the real `gh`
     # is pinned into their runtimeInputs PATH and would otherwise
@@ -321,14 +296,15 @@ let
     IMAGE_PATH = batsHarness.internals.imagePath;
   };
 
-  # batsEnv: the lightweight and heavyweight pieces recombined, kept under the
-  # original name so batsShardChecks (the only current consumer) below needs
-  # zero changes and keeps building the exact same derivations it always has.
-  batsEnv = batsLightweightEnv // batsImageEnv;
-
-  # Shared builder setup for the bats-shard-N derivations: stage a writable copy of
+  # Shared builder setup for the bats-shard-N derivations (batsShardChecks
+  # below), bats-outcome-<name> (outcomeBatsChecks above), and
+  # bats-prompt-contract-parity further down: stage a writable copy of
   # tests/, rewrite the fakes' shebangs for the sandboxed build host (see
-  # inline comment below), and export FAKES_DIR.
+  # inline comment below), and export FAKES_DIR. `driver-registry-outcome-
+  # extraction` (further down) deliberately does NOT build on this: it never
+  # invokes any tests/fakes/* binary, so it needs neither the shebang
+  # rewrite loop nor FAKES_DIR, and copies tests/ itself with a shorter
+  # builder body.
   batsBuilderSetup = ''
     export HOME="$TMPDIR/home"
     mkdir -p "$HOME"
@@ -448,23 +424,15 @@ in
   # exit code matches parityFold(fixture.verdict) -- the real cross-language
   # proof that nix/checks/prompt-contract-parity.nix's pure-Nix pinning of
   # the fold (slice 1) actually matches what the runtime bash validator
-  # does. Lightweight/non-image-dependent, same shape as
-  # driver-registry-outcome-extraction above: no batsHarness.internals.run/build/
-  # imagePath reference (batsHarness.spindrift is a separate, Consumer-surface
-  # key), so this never forces the OCI image build.
+  # does.
+  # nativeBuildInputs migrated to the shared batsNativeBuildInputs (issue
+  # #2751); the env vars below stay hand-listed rather than building on
+  # `batsEnv // { ... }` -- same reasoning as outcomeBatsChecks' comment
+  # above, see nix/checks/bats.nix:96.
   "bats-prompt-contract-parity" =
     pkgs.runCommand "bats-prompt-contract-parity"
       {
-        nativeBuildInputs = [
-          pkgs.bats
-          pkgs.bash
-          pkgs.git
-          pkgs.gettext
-          pkgs.coreutils
-          pkgs.gnugrep
-          pkgs.gnused
-          pkgs.jq
-        ];
+        nativeBuildInputs = batsNativeBuildInputs;
         ENTRYPOINT = ../../agent/entrypoint.sh;
         PROMPTS_DIR = ../../templates/default/prompts;
         OUTCOME_CONTRACT_FILE = batsHarness.internals.outcomeContractFile;
@@ -484,15 +452,7 @@ in
         FORBIDDEN_MARKERS_REGISTRY_FILE = forbiddenMarkersRegistryJsonFile;
       }
       ''
-        export HOME="$TMPDIR/home"
-        mkdir -p "$HOME"
-        cp -r ${../../tests} tests
-        chmod -R +w tests
-        for f in tests/fakes/*; do
-          substituteInPlace "$f" \
-            --replace '#!/usr/bin/env bash' "#!${pkgs.bash}/bin/bash"
-        done
-        export FAKES_DIR="$PWD/tests/fakes"
+        ${batsBuilderSetup}
         bats --print-output-on-failure tests/prompt-contract-parity.bats
         touch $out
       '';
