@@ -38,12 +38,51 @@ func parseIssueIntent(raw string) (issueIntent, bool) {
 	return in, true
 }
 
+// filedIntent is the per-payload outcome of filing one issue-intent: either
+// a successful filing (URL set) or a failure (Failed=true, Body set to
+// the intent's own body) a caller can degrade into inline comment text
+// rather than silently dropping.
+type filedIntent struct {
+	Title  string
+	URL    string
+	Failed bool
+	Body   string
+}
+
 // fileIssueIntents files every issue-intent payload in result.IssueIntents
 // via its forge.HostPostedIssueFiler (issue #2018) — the host-mediated
 // issue-filing relay channel, the fourth alongside branch→bundle, PR→intent
 // line, and comment→comment line (ADR 0034). Unlike those three, this is
 // 1-to-many: every verified payload files its own issue with the Launcher's
 // own write-credentialed tracker, never the read-only Box's.
+//
+// A thin wrapper over fileIssueIntentsDetailed (issue #2592) that keeps its
+// original URL-only return shape for its existing tests and as a
+// narrower-surface convenience: it extracts the successes' URLs and drops
+// any failures, exactly as before this routine grew a detailed sibling.
+// gate.go's own call site (gate.go) ignores the return value entirely — it's
+// a bare statement, not assigned to anything — so only the tests actually
+// consume the []string shape.
+//
+// Returns the URLs of every issue successfully filed, in payload order.
+func fileIssueIntents(it forge.IssueTracker, num string, result dispatch.Result, provenanceLabel string) []string {
+	detailed := fileIssueIntentsDetailed(it, num, result, provenanceLabel, "")
+	var urls []string
+	for _, d := range detailed {
+		if !d.Failed {
+			urls = append(urls, d.URL)
+		}
+	}
+	return urls
+}
+
+// fileIssueIntentsDetailed mirrors fileIssueIntents but returns one
+// filedIntent per well-formed payload in payload order — success or
+// failure — instead of only the successes' URLs, and optionally appends
+// bodyBacklink to each filed issue's body (e.g. "Filed from research on
+// #123") before calling PostIssue, when bodyBacklink is non-empty. A
+// malformed or blank-title payload is skipped exactly as fileIssueIntents
+// skips it — it never had a title to file or degrade with.
 //
 // A package-level function rather than a *Settle method (issue #2590):
 // ResearchSettle (research.go) is a distinct struct in this same package,
@@ -68,9 +107,7 @@ func parseIssueIntent(raw string) (issueIntent, bool) {
 // HostPostedIssueFiler, is skipped/no-op rather than failing the caller —
 // this is a best-effort side channel, not part of the run's own landing
 // decision.
-//
-// Returns the URLs of every issue successfully filed, in payload order.
-func fileIssueIntents(it forge.IssueTracker, num string, result dispatch.Result, provenanceLabel string) []string {
+func fileIssueIntentsDetailed(it forge.IssueTracker, num string, result dispatch.Result, provenanceLabel, bodyBacklink string) []filedIntent {
 	if !result.IssueIntentsFound {
 		return nil
 	}
@@ -78,19 +115,24 @@ func fileIssueIntents(it forge.IssueTracker, num string, result dispatch.Result,
 	if !ok {
 		return nil
 	}
-	var urls []string
+	var out []filedIntent
 	for _, raw := range result.IssueIntents {
 		in, ok := parseIssueIntent(raw)
 		if !ok {
 			fmt.Fprintf(os.Stderr, "    ?? #%s: skipping malformed issue-intent payload\n", num)
 			continue
 		}
-		url, err := filer.PostIssue(in.Title, in.Body, []string{provenanceLabel})
+		body := in.Body
+		if bodyBacklink != "" {
+			body = in.Body + "\n\n" + bodyBacklink
+		}
+		url, err := filer.PostIssue(in.Title, body, []string{provenanceLabel})
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "    ?? #%s: issue-intent file failed: %v\n", num, err)
+			out = append(out, filedIntent{Title: in.Title, Failed: true, Body: in.Body})
 			continue
 		}
-		urls = append(urls, url)
+		out = append(out, filedIntent{Title: in.Title, URL: url})
 	}
-	return urls
+	return out
 }

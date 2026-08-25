@@ -313,6 +313,141 @@ func TestSettle_NoIssueIntentsFound_NoFilingAttempted(t *testing.T) {
 	}
 }
 
+// TestFileIssueIntentsDetailed_ReturnsSuccessAndFailureEntries verifies
+// fileIssueIntentsDetailed reports both branches -- success and failure --
+// as filedIntent entries rather than silently dropping failures the way
+// fileIssueIntents' URL-only return does. fc.PostIssueErr scripts every
+// PostIssue call on a given fake uniformly, so the all-success and
+// all-failure cases each need their own fake to exercise independently.
+func TestFileIssueIntentsDetailed_ReturnsSuccessAndFailureEntries(t *testing.T) {
+	result := dispatch.Result{
+		IssueIntentsFound: true,
+		IssueIntents: []string{
+			`{"title":"first bug","body":"first body"}`,
+			`{"title":"second bug","body":"second body"}`,
+		},
+	}
+
+	t.Run("all success", func(t *testing.T) {
+		fc := forge.NewFake(testDispatchLabels)
+		fc.PostIssueURL = "https://github.com/owner/repo/issues/99"
+
+		detailed := fileIssueIntentsDetailed(fc.AsIssueFiler(), "1", result, "agent-review-finding", "")
+
+		if len(detailed) != 2 {
+			t.Fatalf("detailed = %+v, want 2 entries", detailed)
+		}
+		for i, d := range detailed {
+			if d.Failed {
+				t.Errorf("detailed[%d].Failed = true, want false", i)
+			}
+			if d.URL != fc.PostIssueURL {
+				t.Errorf("detailed[%d].URL = %q, want %q", i, d.URL, fc.PostIssueURL)
+			}
+		}
+	})
+
+	t.Run("all failure", func(t *testing.T) {
+		fc := forge.NewFake(testDispatchLabels)
+		fc.PostIssueErr = errFake
+
+		detailed := fileIssueIntentsDetailed(fc.AsIssueFiler(), "1", result, "agent-review-finding", "")
+
+		if len(detailed) != 2 {
+			t.Fatalf("detailed = %+v, want 2 entries", detailed)
+		}
+		wantBodies := []string{"first body", "second body"}
+		for i, d := range detailed {
+			if !d.Failed {
+				t.Errorf("detailed[%d].Failed = false, want true", i)
+			}
+			if d.URL != "" {
+				t.Errorf("detailed[%d].URL = %q, want empty", i, d.URL)
+			}
+			if d.Body != wantBodies[i] {
+				t.Errorf("detailed[%d].Body = %q, want %q", i, d.Body, wantBodies[i])
+			}
+		}
+	})
+}
+
+// TestFileIssueIntentsDetailed_AppendsBacklinkToPostedBody verifies a
+// non-empty bodyBacklink is appended to the posted issue's body -- e.g. a
+// research-settle caller (issue #2590) attributing a filed issue back to
+// the research run that found it -- without touching the Body reported
+// on failure, which stays the intent's own original body.
+func TestFileIssueIntentsDetailed_AppendsBacklinkToPostedBody(t *testing.T) {
+	fc := forge.NewFake(testDispatchLabels)
+	fc.PostIssueURL = "https://github.com/owner/repo/issues/99"
+
+	result := dispatch.Result{
+		IssueIntentsFound: true,
+		IssueIntents: []string{
+			`{"title":"first bug","body":"first body"}`,
+		},
+	}
+
+	fileIssueIntentsDetailed(fc.AsIssueFiler(), "1", result, "agent-review-finding", "Filed from research on #99")
+
+	if len(fc.PostIssueCalls) != 1 {
+		t.Fatalf("PostIssueCalls = %+v, want 1", fc.PostIssueCalls)
+	}
+	want := "first body" + "\n\n" + "Filed from research on #99"
+	if fc.PostIssueCalls[0].Body != want {
+		t.Errorf("PostIssueCalls[0].Body = %q, want %q", fc.PostIssueCalls[0].Body, want)
+	}
+}
+
+// TestFileIssueIntentsDetailed_EmptyBacklinkLeavesBodyUnchanged verifies an
+// empty bodyBacklink posts the intent's body byte-for-byte, with no trailing
+// separator or text -- proving fileIssueIntents' existing wrapper behavior
+// (which always passes "") is preserved unchanged by this refactor.
+func TestFileIssueIntentsDetailed_EmptyBacklinkLeavesBodyUnchanged(t *testing.T) {
+	fc := forge.NewFake(testDispatchLabels)
+	fc.PostIssueURL = "https://github.com/owner/repo/issues/99"
+
+	result := dispatch.Result{
+		IssueIntentsFound: true,
+		IssueIntents: []string{
+			`{"title":"first bug","body":"first body"}`,
+		},
+	}
+
+	fileIssueIntentsDetailed(fc.AsIssueFiler(), "1", result, "agent-review-finding", "")
+
+	if len(fc.PostIssueCalls) != 1 {
+		t.Fatalf("PostIssueCalls = %+v, want 1", fc.PostIssueCalls)
+	}
+	if fc.PostIssueCalls[0].Body != "first body" {
+		t.Errorf("PostIssueCalls[0].Body = %q, want %q", fc.PostIssueCalls[0].Body, "first body")
+	}
+}
+
+// TestFileIssueIntentsDetailed_MalformedPayloadSkipped mirrors
+// TestFileIssueIntents_MalformedPayloadSkipped but asserts on the detailed
+// return value: a malformed or blank-title payload never had a title to
+// file or degrade with, so it produces no filedIntent entry at all -- not
+// even a Failed one.
+func TestFileIssueIntentsDetailed_MalformedPayloadSkipped(t *testing.T) {
+	fc := forge.NewFake(testDispatchLabels)
+	fc.PostIssueURL = "https://github.com/owner/repo/issues/99"
+
+	result := dispatch.Result{
+		IssueIntentsFound: true,
+		IssueIntents: []string{
+			`not valid json`,
+			`{"title":"","body":"blank title"}`,
+			`{"title":"good one","body":"body"}`,
+		},
+	}
+
+	detailed := fileIssueIntentsDetailed(fc.AsIssueFiler(), "1", result, "agent-review-finding", "")
+
+	if len(detailed) != 1 || detailed[0].Title != "good one" {
+		t.Fatalf("detailed = %+v, want exactly the well-formed intent", detailed)
+	}
+}
+
 // TestSettle_IssueIntentFilingFailure_DoesNotBlockOutcome verifies a filing
 // failure (PostIssue error) never changes the run's own landing decision --
 // AC5's best-effort guarantee: the "ready" outcome still merges through
