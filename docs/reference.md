@@ -2415,6 +2415,34 @@ is itself non-fatal, the same best-effort guarantee as the rest of this
 channel. Extending the enum is a host-side-only change; the Box can never
 smuggle an arbitrary label through this field.
 
+##### Research filing
+
+The Filer also backs the research Dispatch kind (see [Research
+dispatch](#research-dispatch)): whenever a research run — ordinary or
+`--self-contained`, read-only or read-write, orchestrator on or off — has
+the Filer provisioned (same `models.filer` roster switch as above, no
+separate research knob), both research prompts render a filing step letting
+the researcher hand any finding worth tracking, beyond the issue's own
+verdict, to the filer subagent. Unlike the work path's read-only/orchestrator
+fork above, research filing is relay-only **unconditionally** — there is no
+direct-file mode for research at all. The filer emits one
+`SPINDRIFT_ISSUE_INTENT` line per finding; the Launcher files each host-side
+after the Box exits, applying `agent-research-finding` (not
+`agent-review-finding`) and a `Filed from research on #<N>` backlink to the
+filed issue's body.
+
+This changes observable read-write behavior too: once the Filer is
+provisioned, the research verdict comment itself now always relays through
+the Launcher (`SPINDRIFT_COMMENT`) as well, even under `read-write`, where an
+unmodified research Box used to post its own `gh issue comment` directly.
+The Launcher posts the verdict comment host-side, then appends a "Filed
+issues" section listing the real URLs — or, for a filing that failed, an
+inline title-and-summary bullet — right after the comment body, so the
+researcher never fabricates an issue URL itself. Without the Filer
+provisioned, both research prompts render exactly as before, and the verdict
+comment posts directly from the Box as always — the filing step and the
+relay-comment change are both gated purely on Filer presence.
+
 Override the filer's system prompt the same way as `scoutPrompt`/
 `reviewPrompt`: the `filerPrompt` `mkHarness` argument (image rebuild), or
 `SPINDRIFT_PROMPT_DIR` at runtime (zero-rebuild, works regardless of which
@@ -2460,13 +2488,14 @@ gh label create agent-research-finding     --repo owner/repo --color c5def5 --de
 If a custom `RESEARCH_VERDICTS` set is configured, create its labels
 instead of (or alongside, if some overlap) the three above.
 
-`agent-research-finding` is a provenance label, not a dispatch label: a
-research Box's Filer will apply it directly to every issue it files from a
-research finding (ADR 0041, same contract as `agent-review-finding` on the
-work path — a human promotes the filed issue to `ready-for-agent` like any
-other), once that Filer fragment exists. `spindrift doctor` already checks
-and, in interactive mode, offers to create it alongside the rest of the
-research family above.
+`agent-research-finding` is a provenance label, not a dispatch label: when a
+research dispatch's Filer is provisioned, the Launcher applies it, host-side,
+to every issue it relays on the Filer's behalf (ADR 0041; see
+[Filer](#filer) for the relay mechanics) — same contract as
+`agent-review-finding` on the work path, a human promotes the filed issue to
+`ready-for-agent` like any other. `spindrift doctor` already checks and, in
+interactive mode, offers to create it alongside the rest of the research
+family above.
 
 #### Create the priority labels on the Target repo
 
@@ -3311,7 +3340,10 @@ coverage-severity calibration](measurements/2696-coverage-severity.md).
 container reviews one posted issue from inside a fresh clone of the Target
 repo, then posts a single structured comment carrying a verdict — it never
 edits the issue body, never closes it, and never promotes it to
-`ready-for-agent`. A human always acts on the verdict.
+`ready-for-agent`, with one narrow exception: filing a finding worth tracking
+through the Filer, which stays relay-only and host-mediated in every mode
+(see [Filer](#filer)), so the Box itself never writes to the tracker even for
+this. A human always acts on the verdict.
 
 Research shares the launcher's four canonical Dispatch states with `dispatch`,
 but maps them to its own disjoint `github` label family — claiming an issue
