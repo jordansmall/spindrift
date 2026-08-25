@@ -6,11 +6,11 @@ import (
 	"time"
 )
 
-// DrainReport summarizes what a stale drain cost (issue #2678): the
+// StaleDrainReport summarizes what a stale drain cost (issue #2678): the
 // wall-clock window between refilling stopping and every in-flight Box
 // landing, the slot-seconds that sat idle across that window, and how many
 // discovered issues were still unclaimed when the stale verdict fired.
-type DrainReport struct {
+type StaleDrainReport struct {
 	StaleAt      time.Time
 	DrainedAt    time.Time
 	FreeSlotSecs float64
@@ -26,7 +26,7 @@ type DrainReport struct {
 // Duration returns the wall-clock gap between StaleAt and DrainedAt. It is
 // not rounded here: a zero-length drain (StaleAt == DrainedAt) must return
 // exactly zero, not a near-zero rounding artifact.
-func (r DrainReport) Duration() time.Duration {
+func (r StaleDrainReport) Duration() time.Duration {
 	return r.DrainedAt.Sub(r.StaleAt)
 }
 
@@ -34,7 +34,7 @@ func (r DrainReport) Duration() time.Duration {
 // tail both Console and HostLog embed -- the only part their formats differ
 // on, so rendering it once here keeps the two Sprintf calls from drifting
 // out of sync with each other.
-func (r DrainReport) heldBackText() string {
+func (r StaleDrainReport) heldBackText() string {
 	if r.HeldBackUnknown {
 		return "unknown"
 	}
@@ -45,7 +45,7 @@ func (r DrainReport) heldBackText() string {
 // only part its two shapes (HeldBackUnknown or not) differ on, so extracting
 // it here keeps Console down to a single Sprintf call instead of duplicating
 // the whole format string across both branches.
-func (r DrainReport) heldBackTail() string {
+func (r StaleDrainReport) heldBackTail() string {
 	if r.HeldBackUnknown {
 		return fmt.Sprintf("held back: %s (query failed)", r.heldBackText())
 	}
@@ -53,19 +53,19 @@ func (r DrainReport) heldBackTail() string {
 }
 
 // Console renders a human-readable summary line for stdout, ending in "\n".
-func (r DrainReport) Console() string {
+func (r StaleDrainReport) Console() string {
 	return fmt.Sprintf(
-		"==> drain: %s idle, %.1f free-slot-s, %s\n",
+		"==> stale-drain: %s idle, %.1f free-slot-s, %s\n",
 		r.Duration().Round(time.Millisecond), r.FreeSlotSecs, r.heldBackTail(),
 	)
 }
 
 // HostLog renders a single space-delimited key=value line, prefixed
-// "DRAIN ", ending in "\n", machine-parseable and summable by an external
+// "STALE_DRAIN ", ending in "\n", machine-parseable and summable by an external
 // loop script across repeated appends.
-func (r DrainReport) HostLog() string {
+func (r StaleDrainReport) HostLog() string {
 	return fmt.Sprintf(
-		"DRAIN staleAt=%s drainedAt=%s durationSeconds=%.3f freeSlotSeconds=%.3f heldBack=%s\n",
+		"STALE_DRAIN staleAt=%s drainedAt=%s durationSeconds=%.3f freeSlotSeconds=%.3f heldBack=%s\n",
 		r.StaleAt.UTC().Format(time.RFC3339Nano),
 		r.DrainedAt.UTC().Format(time.RFC3339Nano),
 		r.Duration().Seconds(),

@@ -6,31 +6,31 @@ import (
 	"time"
 )
 
-// TestDrainReport_Duration verifies Duration() returns the wall-clock gap
+// TestStaleDrainReport_Duration verifies Duration() returns the wall-clock gap
 // between StaleAt and DrainedAt, and returns exactly zero (not near-zero)
 // when the two are the same time.Time value (the zero-length-drain case).
-func TestDrainReport_Duration(t *testing.T) {
+func TestStaleDrainReport_Duration(t *testing.T) {
 	stale := time.Date(2026, 8, 25, 12, 0, 0, 0, time.UTC)
 	drained := stale.Add(5 * time.Second)
 
-	r := DrainReport{StaleAt: stale, DrainedAt: drained}
+	r := StaleDrainReport{StaleAt: stale, DrainedAt: drained}
 	if got, want := r.Duration(), 5*time.Second; got != want {
 		t.Errorf("Duration() = %v, want %v", got, want)
 	}
 
-	zero := DrainReport{StaleAt: stale, DrainedAt: stale}
+	zero := StaleDrainReport{StaleAt: stale, DrainedAt: stale}
 	if got := zero.Duration(); got != 0 {
 		t.Errorf("Duration() on zero-length drain = %v, want exactly 0", got)
 	}
 }
 
-// TestDrainReport_Console verifies Console()'s exact rendered line -- a
+// TestStaleDrainReport_Console verifies Console()'s exact rendered line -- a
 // substring-only check (e.g. "1" alone) would pass for several wrong
 // renderings (a swapped field, a missing separator), so this pins the whole
 // format the docs and loop scripts depend on, not just its presence.
-func TestDrainReport_Console(t *testing.T) {
+func TestStaleDrainReport_Console(t *testing.T) {
 	stale := time.Date(2026, 8, 25, 12, 0, 0, 0, time.UTC)
-	r := DrainReport{
+	r := StaleDrainReport{
 		StaleAt:      stale,
 		DrainedAt:    stale.Add(5 * time.Second),
 		FreeSlotSecs: 8.4,
@@ -38,18 +38,18 @@ func TestDrainReport_Console(t *testing.T) {
 	}
 
 	got := r.Console()
-	want := "==> drain: 5s idle, 8.4 free-slot-s, 1 issue(s) held back\n"
+	want := "==> stale-drain: 5s idle, 8.4 free-slot-s, 1 issue(s) held back\n"
 	if got != want {
 		t.Errorf("Console() = %q, want %q", got, want)
 	}
 }
 
-// TestDrainReport_HostLog verifies HostLog() starts with "DRAIN " and
+// TestStaleDrainReport_HostLog verifies HostLog() starts with "STALE_DRAIN " and
 // contains correctly formatted key=value pairs, parseable by a simple
 // strings.Split/regex a loop script would use.
-func TestDrainReport_HostLog(t *testing.T) {
+func TestStaleDrainReport_HostLog(t *testing.T) {
 	stale := time.Date(2026, 8, 25, 12, 0, 0, 0, time.UTC)
-	r := DrainReport{
+	r := StaleDrainReport{
 		StaleAt:      stale,
 		DrainedAt:    stale.Add(5 * time.Second),
 		FreeSlotSecs: 8.4,
@@ -57,8 +57,8 @@ func TestDrainReport_HostLog(t *testing.T) {
 	}
 
 	got := r.HostLog()
-	if !strings.HasPrefix(got, "DRAIN ") {
-		t.Errorf("HostLog() = %q, want prefix %q", got, "DRAIN ")
+	if !strings.HasPrefix(got, "STALE_DRAIN ") {
+		t.Errorf("HostLog() = %q, want prefix %q", got, "STALE_DRAIN ")
 	}
 	for _, want := range []string{"durationSeconds=5.000", "freeSlotSeconds=8.400", "heldBack=1"} {
 		if !strings.Contains(got, want) {
@@ -70,14 +70,14 @@ func TestDrainReport_HostLog(t *testing.T) {
 	}
 }
 
-// TestDrainReport_Console_HeldBackUnknown verifies Console() renders an
+// TestStaleDrainReport_Console_HeldBackUnknown verifies Console() renders an
 // explicit "unknown" clause -- not a fabricated "0 issue(s) held back" --
 // when HeldBackUnknown is true, since a transient discover error during the
 // stale-drain report (#2678) means the held-back count was never actually
 // confirmed.
-func TestDrainReport_Console_HeldBackUnknown(t *testing.T) {
+func TestStaleDrainReport_Console_HeldBackUnknown(t *testing.T) {
 	stale := time.Date(2026, 8, 25, 12, 0, 0, 0, time.UTC)
-	r := DrainReport{
+	r := StaleDrainReport{
 		StaleAt:         stale,
 		DrainedAt:       stale.Add(5 * time.Second),
 		FreeSlotSecs:    8.4,
@@ -99,13 +99,13 @@ func TestDrainReport_Console_HeldBackUnknown(t *testing.T) {
 	}
 }
 
-// TestDrainReport_HostLog_HeldBackUnknown verifies HostLog() renders
+// TestStaleDrainReport_HostLog_HeldBackUnknown verifies HostLog() renders
 // "heldBack=unknown" -- not "heldBack=0" -- when HeldBackUnknown is true, so
-// an external loop script totaling drain.log across iterations never sums a
-// fabricated zero into its total.
-func TestDrainReport_HostLog_HeldBackUnknown(t *testing.T) {
+// an external loop script totaling stale-drain.log across iterations never
+// sums a fabricated zero into its total.
+func TestStaleDrainReport_HostLog_HeldBackUnknown(t *testing.T) {
 	stale := time.Date(2026, 8, 25, 12, 0, 0, 0, time.UTC)
-	r := DrainReport{
+	r := StaleDrainReport{
 		StaleAt:         stale,
 		DrainedAt:       stale.Add(5 * time.Second),
 		FreeSlotSecs:    8.4,
@@ -114,8 +114,8 @@ func TestDrainReport_HostLog_HeldBackUnknown(t *testing.T) {
 	}
 
 	got := r.HostLog()
-	if !strings.HasPrefix(got, "DRAIN ") {
-		t.Errorf("HostLog() = %q, want prefix %q", got, "DRAIN ")
+	if !strings.HasPrefix(got, "STALE_DRAIN ") {
+		t.Errorf("HostLog() = %q, want prefix %q", got, "STALE_DRAIN ")
 	}
 	if !strings.Contains(got, "heldBack=unknown") {
 		t.Errorf("HostLog() = %q, want substring %q", got, "heldBack=unknown")
@@ -128,11 +128,11 @@ func TestDrainReport_HostLog_HeldBackUnknown(t *testing.T) {
 	}
 }
 
-// TestDrainReport_ZeroLengthDrain verifies Console() and HostLog() render a
+// TestStaleDrainReport_ZeroLengthDrain verifies Console() and HostLog() render a
 // zero duration cleanly (not blank/garbage) when StaleAt == DrainedAt.
-func TestDrainReport_ZeroLengthDrain(t *testing.T) {
+func TestStaleDrainReport_ZeroLengthDrain(t *testing.T) {
 	stale := time.Date(2026, 8, 25, 12, 0, 0, 0, time.UTC)
-	r := DrainReport{StaleAt: stale, DrainedAt: stale, FreeSlotSecs: 0, HeldBack: 0}
+	r := StaleDrainReport{StaleAt: stale, DrainedAt: stale, FreeSlotSecs: 0, HeldBack: 0}
 
 	console := r.Console()
 	if !strings.Contains(console, "0s") {
