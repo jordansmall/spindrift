@@ -7,17 +7,11 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"spindrift.dev/launcher/internal/testutil"
 )
 
 var errEvalBoom = errors.New("nix eval boom")
-
-// sameHash and diffHash are 32-char store-hash-shaped fixtures for tests
-// below; sameHash is the "matches the loaded image" case, diffHash the
-// "changed image inputs" case.
-const (
-	sameHash = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-	diffHash = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-)
 
 // TestProbe_BwrapNotApplicable verifies that a "bwrap" runnerKind — which
 // keeps its store read-only and has no loaded image to compare — reports the
@@ -27,7 +21,7 @@ const (
 // literal runtime name "bwrap" only because that's bwrap's own runnerKind
 // value too.
 func TestProbe_BwrapNotApplicable(t *testing.T) {
-	res := Probe("bwrap", "/nonexistent", "main", ".#packages.x86_64-linux.agent-image", "spindrift:"+sameHash, nil)
+	res := Probe("bwrap", "/nonexistent", "main", ".#packages.x86_64-linux.agent-image", "spindrift:"+testutil.SameHash, "", "", nil)
 
 	if res.Applicable {
 		t.Errorf("Applicable = true, want false for runnerKind bwrap")
@@ -48,10 +42,10 @@ func TestProbe_BwrapNotApplicable(t *testing.T) {
 // special), not a coincidental match against a known runtime executable
 // name.
 func TestProbe_RunnerKindNotApplicable_KeysOffValueNotRuntimeName(t *testing.T) {
-	pwd := newCloneWithOrigin(t, "main")
-	eval := &Fake{OutPath: "/nix/store/" + sameHash + "-agent-image"}
+	pwd := testutil.NewCloneWithOrigin(t, "main")
+	eval := &Fake{OutPath: "/nix/store/" + testutil.SameHash + "-agent-image"}
 
-	res := Probe("oci", pwd, "main", ".#packages.x86_64-linux.agent-image", "spindrift:"+sameHash, eval)
+	res := Probe("oci", pwd, "main", ".#packages.x86_64-linux.agent-image", "spindrift:"+testutil.SameHash, "", "", eval)
 
 	if !res.Applicable {
 		t.Fatalf("Applicable = false, want true for runnerKind %q (not bwrap)", "oci")
@@ -59,38 +53,6 @@ func TestProbe_RunnerKindNotApplicable_KeysOffValueNotRuntimeName(t *testing.T) 
 	if !res.Fresh {
 		t.Errorf("Fresh = false, want true when the image tag matches; message: %s", res.Message)
 	}
-}
-
-// gitRun runs git in dir, failing the test on error.
-func gitRun(t *testing.T, dir string, args ...string) {
-	t.Helper()
-	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("git %v: %v: %s", args, err, out)
-	}
-}
-
-// newCloneWithOrigin sets up a bare "origin" repo with a single commit on
-// baseBranch and a local clone of it, matching the shape the launcher's own
-// pwd has in production: a checkout with an "origin" remote. Returns the
-// clone directory.
-func newCloneWithOrigin(t *testing.T, baseBranch string) string {
-	t.Helper()
-	dir := t.TempDir()
-	bare := filepath.Join(dir, "origin.git")
-	clone := filepath.Join(dir, "clone")
-
-	gitRun(t, "", "init", "--bare", bare)
-	gitRun(t, "", "clone", bare, clone)
-	gitRun(t, clone, "checkout", "-B", baseBranch)
-	gitRun(t, clone, "config", "user.email", "test@example.com")
-	gitRun(t, clone, "config", "user.name", "Test")
-	gitWriteFile(t, filepath.Join(clone, "flake.nix"), "{ }\n")
-	gitRun(t, clone, "add", "flake.nix")
-	gitRun(t, clone, "commit", "-m", "base")
-	gitRun(t, clone, "push", "-u", "origin", baseBranch)
-
-	return clone
 }
 
 func gitWriteFile(t *testing.T, path, contents string) {
@@ -104,10 +66,10 @@ func gitWriteFile(t *testing.T, path, contents string) {
 // the fetched base tip whose content-hash tag equals the loaded image's tag
 // reports fresh.
 func TestProbe_FreshWhenImageHashMatches(t *testing.T) {
-	pwd := newCloneWithOrigin(t, "main")
-	eval := &Fake{OutPath: "/nix/store/" + sameHash + "-agent-image"}
+	pwd := testutil.NewCloneWithOrigin(t, "main")
+	eval := &Fake{OutPath: "/nix/store/" + testutil.SameHash + "-agent-image"}
 
-	res := Probe("podman", pwd, "main", ".#packages.x86_64-linux.agent-image", "spindrift:"+sameHash, eval)
+	res := Probe("podman", pwd, "main", ".#packages.x86_64-linux.agent-image", "spindrift:"+testutil.SameHash, "", "", eval)
 
 	if !res.Applicable {
 		t.Fatalf("Applicable = false, want true for a non-bwrap runnerKind (podman)")
@@ -128,15 +90,15 @@ func TestProbe_FreshWhenImageHashMatches(t *testing.T) {
 // wiring that makes the eval hermetic against the fetched tip rather than
 // whatever pwd happens to have checked out.
 func TestProbe_EvalReceivesFetchedRev(t *testing.T) {
-	pwd := newCloneWithOrigin(t, "main")
+	pwd := testutil.NewCloneWithOrigin(t, "main")
 	localHead := gitOutput(t, pwd, "rev-parse", "HEAD")
 	advancedSha, err := gitAdvanceOrigin(t, pwd, "main")
 	if err != nil {
 		t.Fatalf("gitAdvanceOrigin: %v", err)
 	}
-	eval := &Fake{OutPath: "/nix/store/" + sameHash + "-agent-image"}
+	eval := &Fake{OutPath: "/nix/store/" + testutil.SameHash + "-agent-image"}
 
-	Probe("podman", pwd, "main", ".#packages.x86_64-linux.agent-image", "spindrift:"+sameHash, eval)
+	Probe("podman", pwd, "main", ".#packages.x86_64-linux.agent-image", "spindrift:"+testutil.SameHash, "", "", eval)
 
 	if len(eval.Calls) != 1 {
 		t.Fatalf("Eval called %d times, want 1", len(eval.Calls))
@@ -153,10 +115,10 @@ func TestProbe_EvalReceivesFetchedRev(t *testing.T) {
 // commit which changed image inputs — a different evaluated content-hash
 // tag — reports rebuild-needed, not fresh.
 func TestProbe_RebuildNeededWhenImageHashDiffers(t *testing.T) {
-	pwd := newCloneWithOrigin(t, "main")
-	eval := &Fake{OutPath: "/nix/store/" + diffHash + "-agent-image"}
+	pwd := testutil.NewCloneWithOrigin(t, "main")
+	eval := &Fake{OutPath: "/nix/store/" + testutil.DiffHash + "-agent-image"}
 
-	res := Probe("podman", pwd, "main", ".#packages.x86_64-linux.agent-image", "spindrift:"+sameHash, eval)
+	res := Probe("podman", pwd, "main", ".#packages.x86_64-linux.agent-image", "spindrift:"+testutil.SameHash, "", "", eval)
 
 	if !res.Applicable {
 		t.Fatalf("Applicable = false, want true for a non-bwrap runnerKind (podman)")
@@ -171,12 +133,12 @@ func TestProbe_RebuildNeededWhenImageHashDiffers(t *testing.T) {
 // tag a rebuild would load — so the non-convergence diagnostic (issue #2113)
 // can name it alongside the loaded tag.
 func TestProbe_RebuildNeededSetsTipTag(t *testing.T) {
-	pwd := newCloneWithOrigin(t, "main")
-	eval := &Fake{OutPath: "/nix/store/" + diffHash + "-agent-image"}
+	pwd := testutil.NewCloneWithOrigin(t, "main")
+	eval := &Fake{OutPath: "/nix/store/" + testutil.DiffHash + "-agent-image"}
 
-	res := Probe("podman", pwd, "main", ".#packages.x86_64-linux.agent-image", "spindrift:"+sameHash, eval)
+	res := Probe("podman", pwd, "main", ".#packages.x86_64-linux.agent-image", "spindrift:"+testutil.SameHash, "", "", eval)
 
-	want := "spindrift:" + diffHash
+	want := "spindrift:" + testutil.DiffHash
 	if res.TipTag != want {
 		t.Errorf("TipTag = %q, want %q", res.TipTag, want)
 	}
@@ -189,12 +151,12 @@ func TestProbe_RebuildNeededSetsTipTag(t *testing.T) {
 // the same currency `build`/EnsureReady gates on (the tag), not the raw
 // drvPath a stale baked IMAGE_DRV could desync from with no way to re-sync.
 func TestProbe_LivelockRegression_FreshWhenTagMatchesDespiteOutPathNameDrift(t *testing.T) {
-	pwd := newCloneWithOrigin(t, "main")
+	pwd := testutil.NewCloneWithOrigin(t, "main")
 	hash := "abcdefghijklmnopqrstuvwxyz012345"
 	eval := &Fake{OutPath: "/nix/store/" + hash + "-agent-image-generation-7"}
 	loadedTag := "spindrift:" + hash
 
-	res := Probe("podman", pwd, "main", ".#packages.x86_64-linux.agent-image", loadedTag, eval)
+	res := Probe("podman", pwd, "main", ".#packages.x86_64-linux.agent-image", loadedTag, "", "", eval)
 
 	if !res.Applicable {
 		t.Fatalf("Applicable = false, want true for a non-bwrap runnerKind (podman)")
@@ -210,10 +172,10 @@ func TestProbe_LivelockRegression_FreshWhenTagMatchesDespiteOutPathNameDrift(t *
 // SAME repo, so a matching content hash reports fresh — an opencode image
 // must never compare against a hardcoded "spindrift:" tip tag (#262).
 func TestProbe_DriverScopedRepo_FreshWhenImageHashMatches(t *testing.T) {
-	pwd := newCloneWithOrigin(t, "main")
-	eval := &Fake{OutPath: "/nix/store/" + sameHash + "-agent-image"}
+	pwd := testutil.NewCloneWithOrigin(t, "main")
+	eval := &Fake{OutPath: "/nix/store/" + testutil.SameHash + "-agent-image"}
 
-	res := Probe("podman", pwd, "main", ".#packages.x86_64-linux.agent-image", "spindrift-opencode:"+sameHash, eval)
+	res := Probe("podman", pwd, "main", ".#packages.x86_64-linux.agent-image", "spindrift-opencode:"+testutil.SameHash, "", "", eval)
 
 	if !res.Applicable {
 		t.Fatalf("Applicable = false, want true for a non-bwrap runnerKind (podman)")
@@ -229,10 +191,10 @@ func TestProbe_DriverScopedRepo_FreshWhenImageHashMatches(t *testing.T) {
 // message names the repo-matching tip tag (not a hardcoded "spindrift:"
 // tag) so the diagnostic is accurate for the driver in play.
 func TestProbe_DriverScopedRepo_RebuildNeededWhenImageHashDiffers(t *testing.T) {
-	pwd := newCloneWithOrigin(t, "main")
-	eval := &Fake{OutPath: "/nix/store/" + diffHash + "-agent-image"}
+	pwd := testutil.NewCloneWithOrigin(t, "main")
+	eval := &Fake{OutPath: "/nix/store/" + testutil.DiffHash + "-agent-image"}
 
-	res := Probe("podman", pwd, "main", ".#packages.x86_64-linux.agent-image", "spindrift-opencode:"+sameHash, eval)
+	res := Probe("podman", pwd, "main", ".#packages.x86_64-linux.agent-image", "spindrift-opencode:"+testutil.SameHash, "", "", eval)
 
 	if !res.Applicable {
 		t.Fatalf("Applicable = false, want true for a non-bwrap runnerKind (podman)")
@@ -240,8 +202,226 @@ func TestProbe_DriverScopedRepo_RebuildNeededWhenImageHashDiffers(t *testing.T) 
 	if res.Fresh {
 		t.Errorf("Fresh = true, want false when the driver-scoped image tag's hash differs; message: %s", res.Message)
 	}
-	if !strings.Contains(res.Message, "spindrift-opencode:"+diffHash) {
-		t.Errorf("Message %q does not name the repo-matching tip tag spindrift-opencode:%s", res.Message, diffHash)
+	if !strings.Contains(res.Message, "spindrift-opencode:"+testutil.DiffHash) {
+		t.Errorf("Message %q does not name the repo-matching tip tag spindrift-opencode:%s", res.Message, testutil.DiffHash)
+	}
+}
+
+// TestProbe_LauncherStale_ImageFresh_RebuildNeeded verifies that a stale
+// launcher hash (the tip's evaluated launcher store hash differs from the
+// loaded one) drives Fresh to false and LauncherFresh to false even when the
+// image dimension matches — and that Message names the launcher, not the
+// image, as the cause, since the image itself is fresh.
+func TestProbe_LauncherStale_ImageFresh_RebuildNeeded(t *testing.T) {
+	pwd := testutil.NewCloneWithOrigin(t, "main")
+	eval := &Fake{
+		OutPathForAttr: map[string]string{
+			"packages.x86_64-linux.agent-image": "/nix/store/" + testutil.SameHash + "-agent-image",
+			"packages.x86_64-linux.launcher":    "/nix/store/" + testutil.DiffHash + "-launcher",
+		},
+	}
+
+	res := Probe("podman", pwd, "main", ".#packages.x86_64-linux.agent-image", "spindrift:"+testutil.SameHash, ".#packages.x86_64-linux.launcher", testutil.SameHash, eval)
+
+	if res.Fresh {
+		t.Errorf("Fresh = true, want false when the launcher hash differs; message: %s", res.Message)
+	}
+	if res.LauncherFresh {
+		t.Errorf("LauncherFresh = true, want false when the launcher hash differs")
+	}
+	if !strings.Contains(res.Message, "launcher") {
+		t.Errorf("Message %q does not name the launcher as the stale dimension", res.Message)
+	}
+	if strings.Contains(res.Message, "image:") {
+		t.Errorf("Message %q names the image as a cause, but only the launcher is stale", res.Message)
+	}
+	if res.TipTag != "" {
+		t.Errorf("TipTag = %q, want empty when the image itself is fresh and only the launcher is stale (no genuine image-tag divergence to name)", res.TipTag)
+	}
+	if !res.ImageFresh {
+		t.Errorf("ImageFresh = false, want true when the image dimension matched, even though overall Fresh is false due to the launcher")
+	}
+}
+
+// TestProbe_ImageStale_LauncherFresh_RebuildNeeded verifies that a stale
+// image hash drives Fresh to false even when the launcher dimension matches
+// (LauncherFresh true) — and that Message names the image, not the
+// launcher, as the cause.
+func TestProbe_ImageStale_LauncherFresh_RebuildNeeded(t *testing.T) {
+	pwd := testutil.NewCloneWithOrigin(t, "main")
+	eval := &Fake{
+		OutPathForAttr: map[string]string{
+			"packages.x86_64-linux.agent-image": "/nix/store/" + testutil.DiffHash + "-agent-image",
+			"packages.x86_64-linux.launcher":    "/nix/store/" + testutil.SameHash + "-launcher",
+		},
+	}
+
+	res := Probe("podman", pwd, "main", ".#packages.x86_64-linux.agent-image", "spindrift:"+testutil.SameHash, ".#packages.x86_64-linux.launcher", testutil.SameHash, eval)
+
+	if res.Fresh {
+		t.Errorf("Fresh = true, want false when the image hash differs; message: %s", res.Message)
+	}
+	if !res.LauncherFresh {
+		t.Errorf("LauncherFresh = false, want true when the launcher hash matches")
+	}
+	if !strings.Contains(res.Message, "image:") {
+		t.Errorf("Message %q does not name the image as the stale dimension", res.Message)
+	}
+	if strings.Contains(res.Message, "launcher:") {
+		t.Errorf("Message %q names the launcher as a cause, but only the image is stale", res.Message)
+	}
+}
+
+// TestProbe_ImageAndLauncherBothStale_RebuildNeeded verifies that a stale
+// hash on BOTH dimensions drives Fresh and LauncherFresh both to false, and
+// that Message names both the image and the launcher as causes.
+func TestProbe_ImageAndLauncherBothStale_RebuildNeeded(t *testing.T) {
+	pwd := testutil.NewCloneWithOrigin(t, "main")
+	eval := &Fake{
+		OutPathForAttr: map[string]string{
+			"packages.x86_64-linux.agent-image": "/nix/store/" + testutil.DiffHash + "-agent-image",
+			"packages.x86_64-linux.launcher":    "/nix/store/" + testutil.DiffHash + "-launcher",
+		},
+	}
+
+	res := Probe("podman", pwd, "main", ".#packages.x86_64-linux.agent-image", "spindrift:"+testutil.SameHash, ".#packages.x86_64-linux.launcher", testutil.SameHash, eval)
+
+	if res.Fresh {
+		t.Errorf("Fresh = true, want false when both the image and launcher hashes differ; message: %s", res.Message)
+	}
+	if res.LauncherFresh {
+		t.Errorf("LauncherFresh = true, want false when the launcher hash differs")
+	}
+	if !strings.Contains(res.Message, "image:") {
+		t.Errorf("Message %q does not name the image as a stale dimension", res.Message)
+	}
+	if !strings.Contains(res.Message, "launcher:") {
+		t.Errorf("Message %q does not name the launcher as a stale dimension", res.Message)
+	}
+}
+
+// TestProbe_ImageAndLauncherBothFresh verifies that a matching hash on BOTH
+// dimensions reports Fresh and LauncherFresh both true, Message confirms
+// both match, and TipLauncherHash carries the freshly evaluated launcher
+// hash.
+func TestProbe_ImageAndLauncherBothFresh(t *testing.T) {
+	pwd := testutil.NewCloneWithOrigin(t, "main")
+	eval := &Fake{
+		OutPathForAttr: map[string]string{
+			"packages.x86_64-linux.agent-image": "/nix/store/" + testutil.SameHash + "-agent-image",
+			"packages.x86_64-linux.launcher":    "/nix/store/" + testutil.SameHash + "-launcher",
+		},
+	}
+
+	res := Probe("podman", pwd, "main", ".#packages.x86_64-linux.agent-image", "spindrift:"+testutil.SameHash, ".#packages.x86_64-linux.launcher", testutil.SameHash, eval)
+
+	if !res.Fresh {
+		t.Errorf("Fresh = false, want true when both the image and launcher hashes match; message: %s", res.Message)
+	}
+	if !res.LauncherFresh {
+		t.Errorf("LauncherFresh = false, want true when the launcher hash matches")
+	}
+	if !strings.Contains(res.Message, "fresh") {
+		t.Errorf("Message %q does not confirm fresh", res.Message)
+	}
+	if res.TipLauncherHash != testutil.SameHash {
+		t.Errorf("TipLauncherHash = %q, want %q", res.TipLauncherHash, testutil.SameHash)
+	}
+}
+
+// TestProbe_LauncherNotConfigured_ImageFresh_Fresh is a regression check for
+// an existing image-only caller (flakeLauncherAttr == ""): the launcher
+// dimension is not configured/not checked at all, so it must never veto an
+// otherwise-fresh image verdict, and Probe must not call Eval a second time
+// for a launcher attr that was never supplied.
+func TestProbe_LauncherNotConfigured_ImageFresh_Fresh(t *testing.T) {
+	pwd := testutil.NewCloneWithOrigin(t, "main")
+	eval := &Fake{OutPath: "/nix/store/" + testutil.SameHash + "-agent-image"}
+
+	res := Probe("podman", pwd, "main", ".#packages.x86_64-linux.agent-image", "spindrift:"+testutil.SameHash, "", "", eval)
+
+	if !res.Fresh {
+		t.Errorf("Fresh = false, want true when the image tag matches and the launcher dimension isn't configured; message: %s", res.Message)
+	}
+	if !res.LauncherFresh {
+		t.Errorf("LauncherFresh = false, want true when the launcher dimension isn't configured (\"not configured\" is not \"stale\")")
+	}
+	if res.TipLauncherHash != "" {
+		t.Errorf("TipLauncherHash = %q, want empty when the launcher dimension isn't configured", res.TipLauncherHash)
+	}
+	if len(eval.Calls) != 1 {
+		t.Errorf("Eval called %d times, want 1 (image only) when flakeLauncherAttr is empty", len(eval.Calls))
+	}
+}
+
+// TestProbe_LauncherEvalFailure_TipTagEmptyImageFresh verifies that a
+// launcher eval failure (the image attr evaluates fine, but the launcher
+// attr's Eval call errors) reports rebuild-needed with Rev set but TipTag
+// left empty — a stuck launcher eval failure repeating at the same rev must
+// stay Rebuild under Guard.Classify, not spuriously look like a genuine
+// image-tag divergence (HostTainted). ImageFresh is true since the image
+// dimension itself succeeded and matched.
+func TestProbe_LauncherEvalFailure_TipTagEmptyImageFresh(t *testing.T) {
+	pwd := testutil.NewCloneWithOrigin(t, "main")
+	eval := &Fake{
+		OutPathForAttr: map[string]string{
+			"packages.x86_64-linux.agent-image": "/nix/store/" + testutil.SameHash + "-agent-image",
+		},
+		ErrForAttr: map[string]error{
+			"packages.x86_64-linux.launcher": errEvalBoom,
+		},
+	}
+
+	res := Probe("podman", pwd, "main", ".#packages.x86_64-linux.agent-image", "spindrift:"+testutil.SameHash, ".#packages.x86_64-linux.launcher", testutil.SameHash, eval)
+
+	if res.Fresh {
+		t.Errorf("Fresh = true, want false when the launcher eval fails")
+	}
+	if res.TipTag != "" {
+		t.Errorf("TipTag = %q, want empty on a launcher eval failure (a stuck failure, not a genuine image-tag divergence)", res.TipTag)
+	}
+	if !res.ImageFresh {
+		t.Errorf("ImageFresh = false, want true when the image dimension itself succeeded and matched")
+	}
+	if res.Rev == "" {
+		t.Errorf("Rev = %q, want the fetched base tip set even on a launcher eval failure", res.Rev)
+	}
+	if !strings.Contains(res.Message, errEvalBoom.Error()) {
+		t.Errorf("Message %q does not name the launcher eval failure", res.Message)
+	}
+}
+
+// TestProbe_LauncherHashDeriveFailure_TipTagEmptyImageFresh verifies that a
+// launcher hash-derive failure (the launcher attr evaluates to an outPath
+// that isn't a valid nix store path, so storeHash errors) reports
+// rebuild-needed with Rev set but TipTag left empty — same "stuck failure,
+// not a genuine divergence" shape as the eval-failure case, so it also stays
+// Rebuild under Guard.Classify on a repeat at the same rev.
+func TestProbe_LauncherHashDeriveFailure_TipTagEmptyImageFresh(t *testing.T) {
+	pwd := testutil.NewCloneWithOrigin(t, "main")
+	eval := &Fake{
+		OutPathForAttr: map[string]string{
+			"packages.x86_64-linux.agent-image": "/nix/store/" + testutil.SameHash + "-agent-image",
+			"packages.x86_64-linux.launcher":    "not-a-store-path",
+		},
+	}
+
+	res := Probe("podman", pwd, "main", ".#packages.x86_64-linux.agent-image", "spindrift:"+testutil.SameHash, ".#packages.x86_64-linux.launcher", testutil.SameHash, eval)
+
+	if res.Fresh {
+		t.Errorf("Fresh = true, want false when the launcher hash cannot be derived")
+	}
+	if res.TipTag != "" {
+		t.Errorf("TipTag = %q, want empty on a launcher hash-derive failure (a stuck failure, not a genuine image-tag divergence)", res.TipTag)
+	}
+	if !res.ImageFresh {
+		t.Errorf("ImageFresh = false, want true when the image dimension itself succeeded and matched")
+	}
+	if res.Rev == "" {
+		t.Errorf("Rev = %q, want the fetched base tip set even on a launcher hash-derive failure", res.Rev)
+	}
+	if !strings.Contains(res.Message, "not a nix store path") {
+		t.Errorf("Message %q does not name the launcher hash-derive failure", res.Message)
 	}
 }
 
@@ -256,8 +436,8 @@ func TestImageRepo_DerivesRepoFromLastColon(t *testing.T) {
 		imageTag string
 		want     string
 	}{
-		{"default claude repo", "spindrift:" + sameHash, "spindrift"},
-		{"driver-scoped repo", "spindrift-opencode:" + sameHash, "spindrift-opencode"},
+		{"default claude repo", "spindrift:" + testutil.SameHash, "spindrift"},
+		{"driver-scoped repo", "spindrift-opencode:" + testutil.SameHash, "spindrift-opencode"},
 		{"no colon falls back to default", "spindrift", "spindrift"},
 		{"empty tag falls back to default", "", "spindrift"},
 	}
@@ -276,14 +456,14 @@ func TestImageRepo_DerivesRepoFromLastColon(t *testing.T) {
 // the tag comparison, to recognize "I already rebuilt this exact tip"
 // without re-parsing Message.
 func TestProbe_Rev_MatchesFetchedTip(t *testing.T) {
-	pwd := newCloneWithOrigin(t, "main")
+	pwd := testutil.NewCloneWithOrigin(t, "main")
 	advancedSha, err := gitAdvanceOrigin(t, pwd, "main")
 	if err != nil {
 		t.Fatalf("gitAdvanceOrigin: %v", err)
 	}
-	eval := &Fake{OutPath: "/nix/store/" + diffHash + "-agent-image"}
+	eval := &Fake{OutPath: "/nix/store/" + testutil.DiffHash + "-agent-image"}
 
-	res := Probe("podman", pwd, "main", ".#packages.x86_64-linux.agent-image", "spindrift:"+sameHash, eval)
+	res := Probe("podman", pwd, "main", ".#packages.x86_64-linux.agent-image", "spindrift:"+testutil.SameHash, "", "", eval)
 
 	if res.Rev != advancedSha {
 		t.Errorf("Rev = %q, want the fetched base tip %q", res.Rev, advancedSha)
@@ -293,10 +473,10 @@ func TestProbe_Rev_MatchesFetchedTip(t *testing.T) {
 // TestProbe_EvalFailureFailsClosed verifies that an eval error reports
 // rebuild-needed with a loud message rather than guessing fresh.
 func TestProbe_EvalFailureFailsClosed(t *testing.T) {
-	pwd := newCloneWithOrigin(t, "main")
+	pwd := testutil.NewCloneWithOrigin(t, "main")
 	eval := &Fake{Err: errEvalBoom}
 
-	res := Probe("podman", pwd, "main", ".#packages.x86_64-linux.agent-image", "spindrift:"+sameHash, eval)
+	res := Probe("podman", pwd, "main", ".#packages.x86_64-linux.agent-image", "spindrift:"+testutil.SameHash, "", "", eval)
 
 	if !res.Applicable {
 		t.Fatalf("Applicable = false, want true for a non-bwrap runnerKind (podman)")
@@ -317,11 +497,11 @@ func TestProbe_EvalFailureFailsClosed(t *testing.T) {
 // TestProbe_NoOriginRemoteNotApplicable) where proceeding is safe.
 func TestProbe_FetchFailureFailsClosed(t *testing.T) {
 	pwd := t.TempDir()
-	gitRun(t, pwd, "init")
-	gitRun(t, pwd, "remote", "add", "origin", "https://example.invalid/nope.git")
-	eval := &Fake{OutPath: "/nix/store/" + sameHash + "-agent-image"}
+	testutil.GitRun(t, pwd, "init")
+	testutil.GitRun(t, pwd, "remote", "add", "origin", "https://example.invalid/nope.git")
+	eval := &Fake{OutPath: "/nix/store/" + testutil.SameHash + "-agent-image"}
 
-	res := Probe("podman", pwd, "main", ".#packages.x86_64-linux.agent-image", "spindrift:"+sameHash, eval)
+	res := Probe("podman", pwd, "main", ".#packages.x86_64-linux.agent-image", "spindrift:"+testutil.SameHash, "", "", eval)
 
 	if !res.Applicable {
 		t.Fatalf("Applicable = false, want true for a non-bwrap runnerKind (podman)")
@@ -341,9 +521,9 @@ func TestProbe_FetchFailureFailsClosed(t *testing.T) {
 // same way.
 func TestProbe_NotAGitRepo(t *testing.T) {
 	pwd := t.TempDir()
-	eval := &Fake{OutPath: "/nix/store/" + sameHash + "-agent-image"}
+	eval := &Fake{OutPath: "/nix/store/" + testutil.SameHash + "-agent-image"}
 
-	res := Probe("podman", pwd, "main", ".#packages.x86_64-linux.agent-image", "spindrift:"+sameHash, eval)
+	res := Probe("podman", pwd, "main", ".#packages.x86_64-linux.agent-image", "spindrift:"+testutil.SameHash, "", "", eval)
 
 	if res.Applicable {
 		t.Errorf("Applicable = true, want false when pwd is not a git repository")
@@ -365,10 +545,10 @@ func TestProbe_NotAGitRepo(t *testing.T) {
 // origin has no such branch, so freshness cannot be checked here, and
 // continuous dispatch must not treat it as rebuild-needed (#1753).
 func TestProbe_MissingRemoteRefNotApplicable(t *testing.T) {
-	pwd := newCloneWithOrigin(t, "main")
-	eval := &Fake{OutPath: "/nix/store/" + sameHash + "-agent-image"}
+	pwd := testutil.NewCloneWithOrigin(t, "main")
+	eval := &Fake{OutPath: "/nix/store/" + testutil.SameHash + "-agent-image"}
 
-	res := Probe("podman", pwd, "release", ".#packages.x86_64-linux.agent-image", "spindrift:"+sameHash, eval)
+	res := Probe("podman", pwd, "release", ".#packages.x86_64-linux.agent-image", "spindrift:"+testutil.SameHash, "", "", eval)
 
 	if res.Applicable {
 		t.Errorf("Applicable = true, want false when the base branch isn't on origin")
@@ -392,10 +572,10 @@ func TestProbe_MissingRemoteRefNotApplicable(t *testing.T) {
 // dispatch must not treat it as rebuild-needed (#2034).
 func TestProbe_NoOriginRemoteNotApplicable(t *testing.T) {
 	pwd := t.TempDir()
-	gitRun(t, pwd, "init")
-	eval := &Fake{OutPath: "/nix/store/" + sameHash + "-agent-image"}
+	testutil.GitRun(t, pwd, "init")
+	eval := &Fake{OutPath: "/nix/store/" + testutil.SameHash + "-agent-image"}
 
-	res := Probe("podman", pwd, "main", ".#packages.x86_64-linux.agent-image", "spindrift:"+sameHash, eval)
+	res := Probe("podman", pwd, "main", ".#packages.x86_64-linux.agent-image", "spindrift:"+testutil.SameHash, "", "", eval)
 
 	if res.Applicable {
 		t.Errorf("Applicable = true, want false when the repo has no origin remote")
@@ -418,11 +598,11 @@ func TestProbe_NoOriginRemoteNotApplicable(t *testing.T) {
 // cannot be checked here, and continuous dispatch must not treat it as
 // rebuild-needed (#1754).
 func TestProbe_ImageAttrMissingNotApplicable(t *testing.T) {
-	pwd := newCloneWithOrigin(t, "main")
+	pwd := testutil.NewCloneWithOrigin(t, "main")
 	attrErr := errors.New(`nix eval git+file:///tmp/target#packages.x86_64-linux.agent-image.outPath: exit status 1: error: flake 'git+file:///tmp/target' does not provide attribute 'packages.x86_64-linux.agent-image', 'legacyPackages.x86_64-linux.agent-image' or 'packages.x86_64-linux.default'`)
 	eval := &Fake{Err: attrErr}
 
-	res := Probe("podman", pwd, "main", ".#packages.x86_64-linux.agent-image", "spindrift:"+sameHash, eval)
+	res := Probe("podman", pwd, "main", ".#packages.x86_64-linux.agent-image", "spindrift:"+testutil.SameHash, "", "", eval)
 
 	if res.Applicable {
 		t.Errorf("Applicable = true, want false when the flake does not provide the image attr")
@@ -440,11 +620,11 @@ func TestProbe_ImageAttrMissingNotApplicable(t *testing.T) {
 // the bare exit status, so an operator reading `preview` output can see why.
 func TestProbe_FetchFailure_MessageIncludesGitStderr(t *testing.T) {
 	pwd := t.TempDir()
-	gitRun(t, pwd, "init")
-	gitRun(t, pwd, "remote", "add", "origin", "https://example.invalid/nope.git")
-	eval := &Fake{OutPath: "/nix/store/" + sameHash + "-agent-image"}
+	testutil.GitRun(t, pwd, "init")
+	testutil.GitRun(t, pwd, "remote", "add", "origin", "https://example.invalid/nope.git")
+	eval := &Fake{OutPath: "/nix/store/" + testutil.SameHash + "-agent-image"}
 
-	res := Probe("podman", pwd, "main", ".#packages.x86_64-linux.agent-image", "spindrift:"+sameHash, eval)
+	res := Probe("podman", pwd, "main", ".#packages.x86_64-linux.agent-image", "spindrift:"+testutil.SameHash, "", "", eval)
 
 	if !strings.Contains(res.Message, "example.invalid") {
 		t.Errorf("Message %q does not surface git's stderr detail", res.Message)
@@ -455,15 +635,15 @@ func TestProbe_FetchFailure_MessageIncludesGitStderr(t *testing.T) {
 // without checking it out — the local clone's checked-out commit and dirty
 // files are unchanged after the call.
 func TestProbe_NeverMutatesWorkingCopy(t *testing.T) {
-	pwd := newCloneWithOrigin(t, "main")
+	pwd := testutil.NewCloneWithOrigin(t, "main")
 	before := gitOutput(t, pwd, "rev-parse", "HEAD")
-	eval := &Fake{OutPath: "/nix/store/" + sameHash + "-agent-image"}
+	eval := &Fake{OutPath: "/nix/store/" + testutil.SameHash + "-agent-image"}
 
 	if _, err := gitAdvanceOrigin(t, pwd, "main"); err != nil {
 		t.Fatalf("gitAdvanceOrigin: %v", err)
 	}
 
-	res := Probe("podman", pwd, "main", ".#packages.x86_64-linux.agent-image", "spindrift:"+sameHash, eval)
+	res := Probe("podman", pwd, "main", ".#packages.x86_64-linux.agent-image", "spindrift:"+testutil.SameHash, "", "", eval)
 	if !res.Applicable {
 		t.Fatalf("Applicable = false, want true")
 	}
@@ -496,13 +676,13 @@ func gitAdvanceOrigin(t *testing.T, pwd, baseBranch string) (string, error) {
 	t.Helper()
 	origin := gitOutput(t, pwd, "remote", "get-url", "origin")
 	second := t.TempDir()
-	gitRun(t, "", "clone", origin, second)
-	gitRun(t, second, "checkout", baseBranch)
-	gitRun(t, second, "config", "user.email", "test@example.com")
-	gitRun(t, second, "config", "user.name", "Test")
+	testutil.GitRun(t, "", "clone", origin, second)
+	testutil.GitRun(t, second, "checkout", baseBranch)
+	testutil.GitRun(t, second, "config", "user.email", "test@example.com")
+	testutil.GitRun(t, second, "config", "user.name", "Test")
 	gitWriteFile(t, filepath.Join(second, "new.txt"), "new\n")
-	gitRun(t, second, "add", "new.txt")
-	gitRun(t, second, "commit", "-m", "advance")
-	gitRun(t, second, "push", "origin", baseBranch)
+	testutil.GitRun(t, second, "add", "new.txt")
+	testutil.GitRun(t, second, "commit", "-m", "advance")
+	testutil.GitRun(t, second, "push", "origin", baseBranch)
 	return gitOutput(t, second, "rev-parse", "HEAD"), nil
 }

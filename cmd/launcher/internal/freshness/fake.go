@@ -14,13 +14,31 @@ type Fake struct {
 	OutPath string
 	// Err, if non-nil, is returned by Eval instead of OutPath.
 	Err error
+	// OutPathForAttr, if it has an entry for the requested attr, overrides
+	// OutPath for that attr — used by a test that needs Eval to return
+	// different outpaths for different attrs in the same call (e.g. an image
+	// attr and a launcher attr probed within one Probe call). An attr not
+	// present here falls back to the plain OutPath/Err fields, so every
+	// existing test that only sets OutPath/Err keeps working unchanged.
+	OutPathForAttr map[string]string
+	// ErrForAttr, if it has an entry for the requested attr, overrides Err
+	// for that attr, mirroring OutPathForAttr.
+	ErrForAttr map[string]error
 	// Calls records the (pwd, rev, attr) tuples passed to Eval, in order.
 	Calls []FakeCall
 }
 
-// Eval records the call and returns OutPath, or Err if set.
+// Eval records the call and returns the per-attr override from
+// OutPathForAttr/ErrForAttr if attr has one, else falls back to the plain
+// OutPath/Err fields.
 func (f *Fake) Eval(pwd, rev, attr string) (string, error) {
 	f.Calls = append(f.Calls, FakeCall{pwd, rev, attr})
+	if err, ok := f.ErrForAttr[attr]; ok {
+		return "", err
+	}
+	if outPath, ok := f.OutPathForAttr[attr]; ok {
+		return outPath, nil
+	}
 	if f.Err != nil {
 		return "", f.Err
 	}

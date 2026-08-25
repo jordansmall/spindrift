@@ -81,6 +81,30 @@ func TestGuard_Classify_SameRevEmptyTipTag_RebuildsNotHostTaint(t *testing.T) {
 	}
 }
 
+// TestGuard_Classify_LauncherOnlyStale_RebuildsNotHostTaint is an end-to-end
+// regression test for the launcher-only-stale bug (issue #1364's research
+// comment): a launcher-only-stale verdict — Applicable, !Fresh, ImageFresh
+// true, LauncherFresh false, Rev set, TipTag == "" — is the exact Result
+// shape Probe now produces when the image matches but the launcher doesn't.
+// Classifying it twice at the SAME rev (two runs stuck at the same
+// launcher-stale tip) must return Rebuild both times, never HostTainted —
+// otherwise the launcher-only case would spuriously masquerade as a
+// non-converging image-tag divergence (exit 5 instead of exit 4).
+func TestGuard_Classify_LauncherOnlyStale_RebuildsNotHostTaint(t *testing.T) {
+	g := NewGuard(t.TempDir())
+	res := Result{Applicable: true, Fresh: false, ImageFresh: true, LauncherFresh: false, Rev: "revA", TipTag: ""}
+
+	first := g.Classify(res)
+	if first != Rebuild {
+		t.Fatalf("first Classify() = %v, want Rebuild", first)
+	}
+
+	second := g.Classify(res)
+	if second != Rebuild {
+		t.Errorf("second Classify() (same rev) = %v, want Rebuild, not HostTainted", second)
+	}
+}
+
 // TestGuard_Classify_EmptyStaleRev_NeverHostTainted verifies that an empty
 // Rev (a transient fetch failure, not a resolved base-tip rev) is never
 // classified HostTainted, even with an empty prior — NonConverging treats ""
