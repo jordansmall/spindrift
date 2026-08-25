@@ -99,7 +99,12 @@ in
   # (#2507), alongside the .github/ copy above for the .github-side halves
   # of that same test. README.md is copied the same way so
   # TestDocsHaveNoDeprecatedSpellings can resolve its ../../README.md path
-  # (#2566).
+  # (#2566). lib/ is copied the same way so
+  # TestDeprecatedDocSpellings_SectionMarkersMatchLegacySettingsSection,
+  # TestFlatShimGeneralizedMarkers_MatchesStructuralPaths, and
+  # quickstart's deprecatedPathSpellings can resolve their
+  # ../../lib/legacy-settings-section.nix and ../../lib/structural-paths.nix
+  # paths (#2741).
   launcher-go-test =
     pkgs.runCommand "launcher-go-test"
       {
@@ -116,6 +121,7 @@ in
         cp -r ${../../.forgejo} src/.forgejo
         cp -r ${../../templates} src/templates
         cp ${../../README.md} src/README.md
+        cp -r ${../../lib} src/lib
         chmod -R +w src
         cp -r ${launcherGoModules} src/cmd/launcher/vendor
         export GOPROXY=off
