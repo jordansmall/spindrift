@@ -4,9 +4,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 
 	"spindrift.dev/launcher/internal/dispatch"
+	"spindrift.dev/launcher/internal/doctor"
 	"spindrift.dev/launcher/internal/forge"
 )
 
@@ -20,6 +22,45 @@ type issueIntent struct {
 	Body       string   `json:"body"`
 	Labels     []string `json:"labels"`
 	DedupTerms []string `json:"dedupTerms"`
+	// Type is an optional finding-type token (issue #2594 / ADR 0041) --
+	// zero value "" when the payload omits it. Never used directly as a
+	// label; see doctor.FindingTypeLabels and ensureTypeLabel below.
+	Type string `json:"type"`
+}
+
+// ensureTypeLabel best-effort ensure-creates typ's mapped label (skipping
+// creation when it's already present in existing, the caller's hoisted
+// ListLabels result -- see fileIssueIntentsDetailed) and returns the label
+// name to append to the filed issue's labels -- or "" when typ is empty,
+// unrecognized, or label ensure-creation itself failed. If CreateLabel fails,
+// existing may simply be stale (the caller's ListLabels errored, or the
+// label exists past ListLabels' own pagination window), so this re-checks
+// ground truth with one more ListLabels call before giving up -- gh label
+// create has no --force and rejects an existing name outright, so treating
+// every CreateLabel error as "doesn't exist" would wrongly drop a label that
+// was there all along. An unknown type or a genuinely failed create never
+// blocks filing: fileIssueIntentsDetailed's caller still files the issue,
+// just untyped/unlabeled. The type→label mapping itself is
+// doctor.FindingTypeLabels (lib/labels.nix's findingType family, issue
+// #2594 / ADR 0041) -- a closed, host-side enum an intent's optional Type
+// field is looked up against, never a label the Box names directly (issue
+// #1949's do-not-trust-the-agent-target invariant).
+func ensureTypeLabel(it forge.IssueTracker, typ string, existing []string) string {
+	meta, ok := doctor.FindingTypeLabels[typ]
+	if !ok {
+		return ""
+	}
+	if slices.Contains(existing, typ) {
+		return typ
+	}
+	if err := it.CreateLabel(typ, meta.Description, meta.Color); err != nil {
+		if reListed, rerr := it.ListLabels(); rerr == nil && slices.Contains(reListed, typ) {
+			return typ
+		}
+		fmt.Fprintf(os.Stderr, "    ?? create label %q failed: %v\n", typ, err)
+		return ""
+	}
+	return typ
 }
 
 // parseIssueIntent decodes a single raw SPINDRIFT_ISSUE_INTENT payload (the
@@ -95,8 +136,10 @@ func fileIssueIntents(it forge.IssueTracker, num string, result dispatch.Result,
 // Both the destination repo and the applied labels are derived host-side:
 // the repo is implicit in which tracker instance it already is (PostIssue
 // takes no repo argument for a payload to redirect), and the labels are
-// always the caller-supplied provenanceLabel, never the payload's own Labels
-// field (issue #1949's do-not-trust-the-agent-target invariant, extended
+// the caller-supplied provenanceLabel plus, when the payload names a
+// recognized type, the host-mapped label ensureTypeLabel ensure-creates for
+// it -- never the payload's own Labels field (issue #1949's
+// do-not-trust-the-agent-target invariant, extended
 // from destination repo to labels: a read-only Box holds no write token and
 // cannot be trusted to pick which labels a filed issue carries any more than
 // which repo it targets). provenanceLabel lets each caller record its own
@@ -115,6 +158,15 @@ func fileIssueIntentsDetailed(it forge.IssueTracker, num string, result dispatch
 	if !ok {
 		return nil
 	}
+	// Hoisted once per call rather than once per payload inside the loop
+	// below -- N filed findings would otherwise cost N ListLabels (gh label
+	// list) round trips. A listErr here is non-fatal: ensureTypeLabel just
+	// treats existingLabels as empty and falls through to its own
+	// CreateLabel-then-recheck path per label.
+	existingLabels, listErr := it.ListLabels()
+	if listErr != nil {
+		fmt.Fprintf(os.Stderr, "    ?? #%s: list labels failed: %v\n", num, listErr)
+	}
 	var out []filedIntent
 	for _, raw := range result.IssueIntents {
 		in, ok := parseIssueIntent(raw)
@@ -126,7 +178,11 @@ func fileIssueIntentsDetailed(it forge.IssueTracker, num string, result dispatch
 		if bodyBacklink != "" {
 			body = in.Body + "\n\n" + bodyBacklink
 		}
-		url, err := filer.PostIssue(in.Title, body, []string{provenanceLabel})
+		labels := []string{provenanceLabel}
+		if l := ensureTypeLabel(it, in.Type, existingLabels); l != "" {
+			labels = append(labels, l)
+		}
+		url, err := filer.PostIssue(in.Title, body, labels)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "    ?? #%s: issue-intent file failed: %v\n", num, err)
 			out = append(out, filedIntent{Title: in.Title, Failed: true, Body: in.Body})
