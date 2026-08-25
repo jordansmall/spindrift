@@ -389,6 +389,253 @@ func TestResearchSettle_GithubReadOnly_MissingCommentBlockTreatedAsBlocked(t *te
 	}
 }
 
+// TestResearchSettle_GithubReadWrite_FilesIntentsAndLinksVerdictComment
+// verifies the core new behavior (issue #2592): a relayed comment is honored
+// in read-write mode too, not only local/read-only, and any relayed issue
+// intents are filed before the comment is posted, so the posted comment can
+// link the freshly filed issue's own URL.
+func TestResearchSettle_GithubReadWrite_FilesIntentsAndLinksVerdictComment(t *testing.T) {
+	fc := newResearchFake("42")
+	ghLike := fc.AsIssueFiler()
+	fc.PostIssueURL = "https://github.com/owner/repo/issues/501"
+	result := dispatch.Result{
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: "42", Landing: "https://github.com/owner/repo/issues/42#issuecomment-1", Status: "recommend", Note: "grounded in code"},
+		},
+		Comment:           "**Verdict** — recommend\n\n<!-- spindrift-research -->",
+		CommentFound:      true,
+		IssueIntentsFound: true,
+		IssueIntents: []string{
+			`{"title":"fix(x): bug found during research","body":"repro steps"}`,
+		},
+	}
+
+	s := NewResearchSettle(ghLike, researchVerdictLabels)
+	s.Settle(dispatch.NewFake(), "42", 0, result)
+
+	if len(fc.PostIssueCalls) != 1 {
+		t.Fatalf("want 1 PostIssue call, got %d: %+v", len(fc.PostIssueCalls), fc.PostIssueCalls)
+	}
+	if len(fc.PostIssueCalls[0].Labels) != 1 || fc.PostIssueCalls[0].Labels[0] != "agent-research-finding" {
+		t.Errorf("PostIssueCalls[0].Labels = %v, want [agent-research-finding]", fc.PostIssueCalls[0].Labels)
+	}
+	if !strings.Contains(fc.PostIssueCalls[0].Body, "Filed from research on #42") {
+		t.Errorf("PostIssueCalls[0].Body = %q, want it to contain the backlink", fc.PostIssueCalls[0].Body)
+	}
+
+	if len(fc.CommentCalls) != 1 {
+		t.Fatalf("want 1 comment posted, got %d", len(fc.CommentCalls))
+	}
+	body := fc.CommentCalls[0].Body
+	if !strings.Contains(body, result.Comment) {
+		t.Errorf("comment body = %q, want it to contain the original verdict comment", body)
+	}
+	if !strings.Contains(body, "## Filed issues") {
+		t.Errorf("comment body = %q, want a Filed issues section", body)
+	}
+	if !strings.Contains(body, fc.PostIssueURL) {
+		t.Errorf("comment body = %q, want it to link the filed issue's URL", body)
+	}
+
+	if len(fc.CompleteVerdictCalls) != 1 {
+		t.Fatalf("want 1 CompleteVerdict call, got %d", len(fc.CompleteVerdictCalls))
+	}
+}
+
+// TestResearchSettle_Local_FilesIntentsAndLinksVerdictComment verifies the
+// same file-then-comment-then-label behavior as
+// TestResearchSettle_GithubReadWrite_FilesIntentsAndLinksVerdictComment
+// holds on the local branch too (r.landing != nil, issue #2592): a relayed
+// SPINDRIFT_COMMENT is posted host-side with any relayed issue intents filed
+// first, so the posted comment can link the freshly filed issue's own URL,
+// even though local's own PostIssue/RecordLanding live on the same
+// tracker.
+func TestResearchSettle_Local_FilesIntentsAndLinksVerdictComment(t *testing.T) {
+	fc := newResearchFake("42")
+	localLike := fc.AsLocalIssueFiler()
+	fc.PostIssueURL = "https://github.com/owner/repo/issues/501"
+	result := dispatch.Result{
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: "42", Landing: "https://github.com/owner/repo/issues/42#issuecomment-1", Status: "recommend", Note: "grounded in code"},
+		},
+		Comment:           "**Verdict** — recommend\n\n<!-- spindrift-research -->",
+		CommentFound:      true,
+		IssueIntentsFound: true,
+		IssueIntents: []string{
+			`{"title":"fix(x): bug found during research","body":"repro steps"}`,
+		},
+	}
+
+	s := NewResearchSettle(localLike, researchVerdictLabels)
+	s.Settle(dispatch.NewFake(), "42", 0, result)
+
+	if len(fc.PostIssueCalls) != 1 {
+		t.Fatalf("want 1 PostIssue call, got %d: %+v", len(fc.PostIssueCalls), fc.PostIssueCalls)
+	}
+	if !strings.Contains(fc.PostIssueCalls[0].Body, "Filed from research on #42") {
+		t.Errorf("PostIssueCalls[0].Body = %q, want it to contain the backlink", fc.PostIssueCalls[0].Body)
+	}
+
+	if len(fc.CommentCalls) != 1 {
+		t.Fatalf("want 1 comment posted, got %d", len(fc.CommentCalls))
+	}
+	body := fc.CommentCalls[0].Body
+	if !strings.Contains(body, result.Comment) {
+		t.Errorf("comment body = %q, want it to contain the original verdict comment", body)
+	}
+	if !strings.Contains(body, "## Filed issues") {
+		t.Errorf("comment body = %q, want a Filed issues section", body)
+	}
+	if !strings.Contains(body, fc.PostIssueURL) {
+		t.Errorf("comment body = %q, want it to link the filed issue's URL", body)
+	}
+
+	if len(fc.CompleteVerdictCalls) != 1 {
+		t.Fatalf("want 1 CompleteVerdict call, got %d", len(fc.CompleteVerdictCalls))
+	}
+}
+
+// TestResearchSettle_FilingFailureDegradesInlineInComment verifies a filing
+// failure never blocks the run: the failed intent degrades to an inline
+// bullet in the posted comment (no link, since there is no URL) and the
+// verdict label is still applied.
+func TestResearchSettle_FilingFailureDegradesInlineInComment(t *testing.T) {
+	fc := newResearchFake("42")
+	fc.PostIssueErr = errors.New("create failed")
+	result := dispatch.Result{
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: "42", Landing: "https://github.com/owner/repo/issues/42#issuecomment-1", Status: "recommend", Note: "grounded in code"},
+		},
+		Comment:           "**Verdict** — recommend\n\n<!-- spindrift-research -->",
+		CommentFound:      true,
+		IssueIntentsFound: true,
+		IssueIntents: []string{
+			`{"title":"fix(x): bug found during research","body":"detailed repro steps"}`,
+		},
+	}
+
+	s := NewResearchSettle(fc.AsIssueFiler(), researchVerdictLabels)
+	s.Settle(dispatch.NewFake(), "42", 0, result)
+
+	if len(fc.CommentCalls) != 1 {
+		t.Fatalf("want 1 comment posted, got %d", len(fc.CommentCalls))
+	}
+	body := fc.CommentCalls[0].Body
+	if !strings.Contains(body, "fix(x): bug found during research") {
+		t.Errorf("comment body = %q, want the failed intent's title", body)
+	}
+	if !strings.Contains(body, "filing failed") {
+		t.Errorf("comment body = %q, want a filing-failed marker", body)
+	}
+	if !strings.Contains(body, "detailed repro steps") {
+		t.Errorf("comment body = %q, want the failed intent's own summary", body)
+	}
+	if strings.Contains(body, "](https://") {
+		t.Errorf("comment body = %q, want no linked URL for the failed intent", body)
+	}
+	if len(fc.CompleteVerdictCalls) != 1 {
+		t.Fatalf("want 1 CompleteVerdict call despite the filing failure, got %d", len(fc.CompleteVerdictCalls))
+	}
+}
+
+// TestResearchSettle_Local_CommentPostFailure_NeverAppliesVerdictLabel pins
+// the file->comment->label ordering's comment-fails-blocks-label leg: a
+// failed comment post must never be followed by CompleteVerdict.
+func TestResearchSettle_Local_CommentPostFailure_NeverAppliesVerdictLabel(t *testing.T) {
+	fc := newResearchFake("42")
+	fc.CommentErr = errors.New("comment API down")
+	result := dispatch.Result{
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: "42", Landing: "none", Status: "recommend", Note: "grounded in code"},
+		},
+		Comment:      "**Verdict** — recommend\n\n<!-- spindrift-research -->",
+		CommentFound: true,
+	}
+
+	s := NewResearchSettle(fc, researchVerdictLabels)
+	s.Settle(dispatch.NewFake(), "42", 0, result)
+
+	if len(fc.CommentCalls) != 1 {
+		t.Fatalf("want 1 comment attempted, got %d", len(fc.CommentCalls))
+	}
+	if len(fc.CompleteVerdictCalls) != 0 {
+		t.Errorf("want no verdict applied after a failed comment post, got %+v", fc.CompleteVerdictCalls)
+	}
+}
+
+// TestResearchSettle_Local_NoIntentsNoCommentSection is a regression/no-op
+// guard: when nothing was filed, the posted comment body is byte-for-byte
+// the relayed verdict comment — no "## Filed issues" section appended.
+func TestResearchSettle_Local_NoIntentsNoCommentSection(t *testing.T) {
+	fc := newResearchFake("42")
+	result := dispatch.Result{
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: "42", Landing: "none", Status: "recommend", Note: "grounded in code"},
+		},
+		Comment:      "**Verdict** — recommend\n\n<!-- spindrift-research -->",
+		CommentFound: true,
+	}
+
+	s := NewResearchSettle(fc, researchVerdictLabels)
+	s.Settle(dispatch.NewFake(), "42", 0, result)
+
+	if len(fc.CommentCalls) != 1 {
+		t.Fatalf("want 1 comment posted, got %d", len(fc.CommentCalls))
+	}
+	if fc.CommentCalls[0].Body != result.Comment {
+		t.Errorf("comment body = %q, want it unchanged when nothing was filed", fc.CommentCalls[0].Body)
+	}
+	if len(fc.CompleteVerdictCalls) != 1 {
+		t.Fatalf("want 1 CompleteVerdict call, got %d", len(fc.CompleteVerdictCalls))
+	}
+}
+
+// TestResearchSettle_GithubReadWrite_EmptyRelayedCommentIgnored verifies
+// that a decodable-but-empty relayed comment (CommentFound=true,
+// Comment=="") in read-write github mode does not fail the run: a verdict
+// was already parsed above, so this must apply CompleteVerdict, not
+// TransitionState-to-Failed — read-write mode never reached the
+// found-but-empty check before ADR 0041 wired relayed filing/comment
+// through this same branch, and empty must not regress into a newly
+// reachable agent-research-failed (ADR 0041: agent-research-failed keeps
+// meaning "no verdict was produced").
+func TestResearchSettle_GithubReadWrite_EmptyRelayedCommentIgnored(t *testing.T) {
+	fc := newResearchFake("42")
+	ghLike := fc.AsNoLandingRecorder()
+	result := dispatch.Result{
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: "42", Landing: "https://github.com/owner/repo/issues/42#issuecomment-1", Status: "recommend", Note: "grounded in code"},
+		},
+		Comment:      "",
+		CommentFound: true,
+	}
+
+	s := NewResearchSettle(ghLike, researchVerdictLabels)
+	s.Settle(dispatch.NewFake(), "42", 0, result)
+
+	if len(fc.CommentCalls) != 0 {
+		t.Errorf("want no comment posted for an empty relayed comment, got %+v", fc.CommentCalls)
+	}
+	if len(fc.CompleteVerdictCalls) != 1 || fc.CompleteVerdictCalls[0].Verdict != forge.Recommend {
+		t.Fatalf("want 1 CompleteVerdict(Recommend) call despite the empty relayed comment, got %+v", fc.CompleteVerdictCalls)
+	}
+	if len(fc.TransitionStateCalls) != 0 {
+		t.Errorf("want no TransitionState call, got %+v", fc.TransitionStateCalls)
+	}
+}
+
 // TestResearchSettle_CustomVerdictSet verifies that Settle validates the
 // posted outcome's Status against the verdict set threaded into the
 // constructor (ADR 0022, issue #2201's RESEARCH_VERDICTS override) rather
@@ -455,5 +702,64 @@ func TestResearchSettle_CustomVerdictSet_DefaultTokenNotRecognized(t *testing.T)
 	transitionCall := fc.TransitionStateCalls[0]
 	if transitionCall.Num != "42" || transitionCall.From != forge.InProgress || transitionCall.To != forge.Failed {
 		t.Errorf("unexpected transition: %+v", transitionCall)
+	}
+}
+
+// TestBuildFiledIssuesSection_FailedBodyTruncatedToFirstLine verifies that a
+// failed intent's inline bullet renders only the first line of its
+// (potentially multi-line) body — an unescaped multi-line body would break
+// out of the Markdown list item and inject arbitrary Markdown into the
+// posted verdict comment.
+func TestBuildFiledIssuesSection_FailedBodyTruncatedToFirstLine(t *testing.T) {
+	filed := []filedIntent{
+		{Title: "fix(x): bug", Failed: true, Body: "first line of repro\n\n## Heading\n```code fence```"},
+	}
+
+	got := buildFiledIssuesSection(filed)
+
+	if !strings.Contains(got, "first line of repro") {
+		t.Errorf("section = %q, want it to contain the body's first line", got)
+	}
+	if strings.Contains(got, "## Heading") || strings.Contains(got, "```code fence```") {
+		t.Errorf("section = %q, want later body lines truncated away", got)
+	}
+}
+
+// TestBuildFiledIssuesSection_TitleWithBracketEscaped verifies that a title
+// containing `]` (agent-chosen, untrusted text) renders escaped rather than
+// breaking the surrounding Markdown link/bullet syntax, for both a
+// successful (linked) and a failed (inline) entry.
+func TestBuildFiledIssuesSection_TitleWithBracketEscaped(t *testing.T) {
+	filed := []filedIntent{
+		{Title: "fix(x): [bad] title", URL: "https://github.com/owner/repo/issues/501"},
+		{Title: "fix(y): [bad] title", Failed: true, Body: "repro"},
+	}
+
+	got := buildFiledIssuesSection(filed)
+
+	if !strings.Contains(got, `\[bad\]`) {
+		t.Errorf("section = %q, want the bracketed title escaped", got)
+	}
+	if strings.Contains(got, "[bad]") {
+		t.Errorf("section = %q, want no unescaped bracketed title", got)
+	}
+}
+
+// TestBuildFiledIssuesSection_NonHTTPURLDegradesToPlainBullet verifies that
+// a non-http(s) URL (the local tracker's PostIssue returns "local:<slug>",
+// not a URL) renders as a plain "title — url" bullet rather than a broken
+// [title](local:slug) Markdown link.
+func TestBuildFiledIssuesSection_NonHTTPURLDegradesToPlainBullet(t *testing.T) {
+	filed := []filedIntent{
+		{Title: "fix(x): bug", URL: "local:some-slug"},
+	}
+
+	got := buildFiledIssuesSection(filed)
+
+	if strings.Contains(got, "](local:some-slug)") {
+		t.Errorf("section = %q, want no Markdown link around the non-http URL", got)
+	}
+	if !strings.Contains(got, "local:some-slug") {
+		t.Errorf("section = %q, want the local identifier still surfaced", got)
 	}
 }
