@@ -4,9 +4,54 @@ package testutil
 
 import (
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 )
+
+// SameHash and DiffHash are 32-char store-hash-shaped fixtures for tests
+// that compare a freshly evaluated nix store hash against a loaded one —
+// SameHash is the "matches the loaded value" case, DiffHash the "differs"
+// case.
+const (
+	SameHash = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	DiffHash = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+)
+
+// GitRun runs git in dir, failing the test on error.
+func GitRun(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %v: %v: %s", args, err, out)
+	}
+}
+
+// NewCloneWithOrigin sets up a bare "origin" repo with a single commit on
+// baseBranch and a local clone of it, matching the shape a real launcher
+// pwd has in production: a checkout with a fetchable "origin" remote.
+// Returns the clone directory.
+func NewCloneWithOrigin(t *testing.T, baseBranch string) string {
+	t.Helper()
+	dir := t.TempDir()
+	bare := filepath.Join(dir, "origin.git")
+	clone := filepath.Join(dir, "clone")
+
+	GitRun(t, "", "init", "--bare", bare)
+	GitRun(t, "", "clone", bare, clone)
+	GitRun(t, clone, "checkout", "-B", baseBranch)
+	GitRun(t, clone, "config", "user.email", "test@example.com")
+	GitRun(t, clone, "config", "user.name", "Test")
+	if err := os.WriteFile(filepath.Join(clone, "flake.nix"), []byte("{ }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	GitRun(t, clone, "add", "flake.nix")
+	GitRun(t, clone, "commit", "-m", "base")
+	GitRun(t, clone, "push", "-u", "origin", baseBranch)
+
+	return clone
+}
 
 // CaptureStderr runs fn with os.Stderr redirected to a pipe and returns
 // everything written to it.
