@@ -3,8 +3,8 @@
 # the other nix/checks/*.nix modules take. Returns both the shard-assignment
 # data (`shardNames`/`shardFiles`) that bats.nix wires into the per-shard
 # `bats-shard-N` derivations, and a handful of eval-only guard check
-# derivations (coverage/balance/no-empty-shard) that default.nix merges into
-# `sourceChecks`.
+# derivations (coverage, balance, ceiling-formula safety, and no-empty-shard)
+# that default.nix merges into `sourceChecks`.
 { pkgs, ... }:
 let
   inherit (pkgs) lib;
@@ -58,17 +58,9 @@ let
     count = countTests file;
   }) allFiles;
 
-  sortedByCountDesc = builtins.sort (
-    a: b: if a.count != b.count then a.count > b.count else a.file < b.file
-  ) fileCounts;
-
-  emptyShards = map (_: {
-    total = 0;
-    files = [ ];
-  }) shardIndices;
-
   # Index of the shard with the smallest running total in `shards` (first
-  # such index wins ties, matching the emptyShards seed order).
+  # such index wins ties, matching the seed order of lptFold's own
+  # `emptyShards` binding below).
   minTotalIndex =
     shards:
     let
@@ -82,18 +74,157 @@ let
     in
     lowest.i;
 
-  finalShards = lib.foldl' (
-    shards: entry:
+  # The LPT bin-packing fold itself, generalized over an `n` shard count and
+  # a `counts` list of `{ file, count }` attrsets instead of closing over the
+  # module-level `shardCount`/`fileCounts` -- so both the real tests/*.bats
+  # partition below and the synthetic scenarios in
+  # `"bats-shard-ceiling-formula-is-safe"` run the exact same fold instead of
+  # a hand-copied stand-in that could silently drift from real behavior.
+  # Parameter named `n`, not `shardCount`, so it can't shadow the
+  # module-level `shardCount`/`shardIndices` bindings above.
+  lptFold =
+    n: counts:
     let
-      idx = minTotalIndex shards;
-      target = builtins.elemAt shards idx;
-      updated = {
-        total = target.total + entry.count;
-        files = target.files ++ [ entry.file ];
-      };
+      foldShardIndices = lib.range 0 (n - 1);
+      sortedByCountDesc = builtins.sort (
+        a: b: if a.count != b.count then a.count > b.count else a.file < b.file
+      ) counts;
+      emptyShards = map (_: {
+        total = 0;
+        files = [ ];
+      }) foldShardIndices;
     in
-    lib.imap0 (i: s: if i == idx then updated else s) shards
-  ) emptyShards sortedByCountDesc;
+    lib.foldl' (
+      shards: entry:
+      let
+        idx = minTotalIndex shards;
+        target = builtins.elemAt shards idx;
+        updated = {
+          total = target.total + entry.count;
+          files = target.files ++ [ entry.file ];
+        };
+      in
+      lib.imap0 (i: s: if i == idx then updated else s) shards
+    ) emptyShards sortedByCountDesc;
+
+  finalShards = lptFold shardCount fileCounts;
+
+  # Stats over an `lptFold n counts` partition, generalized the same
+  # way as `lptFold` itself so both the real tests/*.bats partition and the
+  # synthetic scenarios in `"bats-shard-ceiling-formula-is-safe"` share one
+  # implementation of "what does balanced even mean" instead of two that
+  # could drift apart.
+  partitionStats =
+    n: counts:
+    let
+      shards = lptFold n counts;
+      totalTests = builtins.foldl' (acc: fc: acc + fc.count) 0 counts;
+      maxFileCount = builtins.foldl' (best: fc: if fc.count > best then fc.count else best) 0 counts;
+      # Perfectly even split of the total, rounded up so integer division
+      # doesn't undercount. One of the two lower-bound terms `ceiling`
+      # combines below with `maxFileCount` (no partition can beat either:
+      # not the even split, and not the heaviest single file, which can't
+      # be split across shards).
+      perfectSplit = (totalTests + n - 1) / n; # ceil(totalTests / n)
+      # Classical list-scheduling bound, safe for any greedy
+      # min-loaded-shard assignment order (not just LPT specifically) and
+      # not dependent on knowing the true optimal makespan (issue #2764):
+      # take the shard `i` that ends up with the max total, and the last
+      # file `j` the fold placed into it. Because the fold always assigns
+      # the next file to whichever shard currently has the smallest running
+      # total, every other shard's running total at the moment `j` was
+      # placed was >= shard i's total *before* `j` was added. Totals only
+      # grow from there, so summing that inequality across all `n` shards
+      # gives `totalTests >= n * (finalMaxTotal - countOf(j))`.
+      # `countOf(j) <= maxFileCount` (the largest file's own count), so
+      # `finalMaxTotal <= totalTests/n + maxFileCount`. `perfectSplit =
+      # ceil(totalTests/n) >= totalTests/n` keeps the ceiling
+      # integer-safe: `ceiling = perfectSplit + maxFileCount`. Unlike
+      # Graham's-bound (the previous formula here), this derivation never
+      # assumes it is fed the true optimal makespan -- `perfectSplit`/
+      # `maxFileCount` are only lower bounds on true OPT, and Graham's bound
+      # is unsound when applied to a lower-bound proxy instead of true OPT
+      # (see issue #2764 for a concrete repro: 11 equal-size files into 10
+      # shards force an unavoidable makespan of 20, but Graham's bound over
+      # the lower-bound proxy produced a ceiling of 15).
+      ceiling = perfectSplit + maxFileCount;
+      shardTotals = lib.imap0 (i: s: {
+        idx = i;
+        inherit (s) total files;
+      }) shards;
+      maxShardTotal = builtins.foldl' (best: s: if s.total > best then s.total else best) 0 shardTotals;
+      overCeiling = builtins.filter (s: s.total > ceiling) shardTotals;
+      overCeilingDesc = lib.concatMapStringsSep ", " (
+        s:
+        "shard ${toString s.idx} (total ${toString s.total}, files: ${lib.concatStringsSep ", " s.files})"
+      ) overCeiling;
+    in
+    {
+      inherit
+        totalTests
+        maxFileCount
+        ceiling
+        maxShardTotal
+        overCeiling
+        overCeilingDesc
+        ;
+    };
+
+  # Synthetic scenarios for `"bats-shard-ceiling-formula-is-safe"` -- do not
+  # read testsDir at all, so this check exercises the ceiling formula against
+  # shapes the *current* tests/*.bats directory doesn't happen to hit today,
+  # rather than only ever being as strong as whatever partition risk
+  # tests/*.bats currently poses.
+  syntheticScenarios = [
+    {
+      # issue #2764 repro: 11 equal-size files (10 tests each) into 10
+      # shards. Pigeonhole forces one shard to hold 2 files (total 20); true
+      # OPT is exactly 20, but perfectSplit/maxFileCount (both lower bounds,
+      # not true OPT) fed into Graham's-bound math produced a ceiling of 15
+      # -- tighter than the unavoidable optimum.
+      name = "equal-size-files-repro";
+      shardCount = 10;
+      expectedCeiling = 21;
+      counts = map (i: {
+        file = "synthetic-${toString i}.bats";
+        count = 10;
+      }) (lib.range 1 11);
+    }
+    {
+      # One large outlier file plus many tiny ones -- the shape that
+      # motivated LPT weighting in the first place (see the module-level
+      # comment on `fileCounts` above).
+      name = "one-large-file-many-tiny";
+      shardCount = 4;
+      expectedCeiling = 68;
+      counts = [
+        {
+          file = "big.bats";
+          count = 50;
+        }
+      ]
+      ++ map (i: {
+        file = "tiny-${toString i}.bats";
+        count = 1;
+      }) (lib.range 1 20);
+    }
+    {
+      # A shape that already divides evenly (9 equal files into 3 shards, 3
+      # files each): baseline sanity check pinning the formula's ceiling
+      # value (perfectSplit + maxFileCount = 15 + 5 = 20) on a case neither
+      # formula ever struggled with. It does not discriminate between the
+      # old and new formula (both give 20 here) and asserts nothing about
+      # looseness -- equal-size-files-repro and one-large-file-many-tiny
+      # above are what actually discriminate.
+      name = "evenly-divisible";
+      shardCount = 3;
+      expectedCeiling = 20;
+      counts = map (i: {
+        file = "even-${toString i}.bats";
+        count = 5;
+      }) (lib.range 1 9);
+    }
+  ];
 
   # Shard *membership* is LPT-assigned (above) for test-count balance, but the
   # run *order* within a shard is sorted back to alphabetical here, matching
@@ -136,63 +267,81 @@ in
       "bats shard partition does not cover tests/*.bats exactly: union of shardFiles across all ${toString shardCount} shards (${toString (builtins.length unionSorted)} entries) != tests/*.bats (${toString (builtins.length allFiles)} entries)";
     pkgs.runCommand "bats-shard-partition-covers-all-suites" { } "touch $out";
 
-  # Regression guard (slice 4): every shard's total @test count must sit
-  # under a ceiling derived from the *current* tests/ directory every eval,
-  # not a hardcoded constant -- a fixed constant goes unsatisfiable by any
-  # partition once the suite grows past it (e.g. entrypoint-prompt-
-  # fragments.bats alone already carries 80 @test cases; 11 more in that one
-  # file, or ~40% overall growth, would brick a fixed ceiling of 90 no matter
-  # how well-balanced the partition is), bricking flake eval for a module
-  # whose whole point is that adding a tests/*.bats file needs no edit here.
+  # Fold-implementation guard (issue #2764): `ceiling = perfectSplit +
+  # maxFileCount` (see `partitionStats` above) is a proven upper bound on
+  # *any* correct min-loaded-shard greedy fold, derived fresh from the
+  # *current* tests/ directory every eval rather than a hardcoded constant.
+  # Unlike the old Graham's-bound formula, it can no longer trip from suite
+  # growth or composition alone -- the only way `overCeiling` comes out
+  # non-empty is a bug in `lptFold`/`minTotalIndex` itself.
   #
   # See the comment on `"bats-shard-partition-covers-all-suites"` above for
   # why the assert lives inside this attribute's own `let ... in assert`
   # rather than a module-top-level assert chain.
   "bats-shard-partition-is-balanced" =
     let
-      totalTests = builtins.foldl' (acc: fc: acc + fc.count) 0 fileCounts;
-      maxFileCount = builtins.foldl' (best: fc: if fc.count > best then fc.count else best) 0 fileCounts;
-      # Lower bound no partition can beat: a perfectly even split of the
-      # total (rounded up), or the single largest file's own count -- one
-      # file can't be split across shards, so no shard can ever do better
-      # than whichever file is heaviest.
-      perfectSplit = (totalTests + shardCount - 1) / shardCount; # ceil(totalTests / shardCount)
-      optimal = if maxFileCount > perfectSplit then maxFileCount else perfectSplit;
-      # Greedy LPT's textbook worst-case bound: makespan <= (4/3 - 1/(3 *
-      # shardCount)) * optimal. Rounding that up to ceil(4 * optimal / 3)
-      # drops the (always-positive) "- 1/(3*shardCount)" term, which only
-      # tightens the true bound further, so this ceiling is always >= the
-      # guaranteed LPT worst case -- any correct LPT partition of whatever
-      # tests/ looks like *today* is guaranteed to pass, and the ceiling
-      # scales with the suite automatically instead of needing a hand-tuned
-      # constant revisited on every growth spurt.
-      ceiling = (4 * optimal + 2) / 3; # ceil(4 * optimal / 3)
-      shardTotals = lib.imap0 (i: s: {
-        idx = i;
-        inherit (s) total;
-      }) finalShards;
-      overCeiling = builtins.filter (s: s.total > ceiling) shardTotals;
-      # A file whose own count already exceeds the ceiling can never be fixed
-      # by rebalancing -- it alone blows the ceiling regardless of which
-      # shard it lands in -- so name it explicitly and point at the only two
-      # real fixes (grow shardCount, or split the file).
-      oversizedFiles = builtins.filter (fc: fc.count > ceiling) fileCounts;
-      overCeilingDesc = lib.concatMapStringsSep ", " (
-        s: "shard ${toString s.idx} (total ${toString s.total})"
-      ) overCeiling;
-      oversizedFilesDesc =
-        if oversizedFiles == [ ] then
-          ""
-        else
-          "; tests/"
-          + lib.concatMapStringsSep ", tests/" (
-            fc: "${fc.file} alone has ${toString fc.count} tests"
-          ) oversizedFiles
-          + " -- over the ceiling on its own, so no rebalancing can fix this, only raising shardCount or splitting that file will";
+      stats = partitionStats shardCount fileCounts;
     in
-    assert lib.assertMsg (overCeiling == [ ])
-      "bats shard partition is unbalanced: ${overCeilingDesc} exceed the ${toString ceiling}-test ceiling (derived from ${toString totalTests} total tests across ${toString shardCount} shards, largest single file ${toString maxFileCount} tests)${oversizedFilesDesc}";
+    assert lib.assertMsg (stats.overCeiling == [ ])
+      "bats shard partition is unbalanced: ${stats.overCeilingDesc} exceed the ${toString stats.ceiling}-test ceiling (derived from ${toString stats.totalTests} total tests across ${toString shardCount} shards, largest single file ${toString stats.maxFileCount} tests) -- this ceiling is a proven upper bound for any correct min-loaded-shard fold, so this means a bug in lptFold/minTotalIndex itself, not a suite-balance problem fixable by moving files or raising shardCount";
     pkgs.runCommand "bats-shard-partition-is-balanced" { } "touch $out";
+
+  # Companion guard (issue #2764): the ceiling formula in `partitionStats`
+  # above must be safe for *any* shape the LPT fold can face, not just
+  # whatever tests/*.bats happens to look like today -- exercise it against
+  # hardcoded synthetic scenarios (`syntheticScenarios` above) that don't
+  # read testsDir at all, so this check's coverage of the formula's edge
+  # cases never depends on the live suite's current file sizes.
+  #
+  # See the comment on `"bats-shard-partition-covers-all-suites"` above for
+  # why the assert lives inside this attribute's own `let ... in assert`
+  # rather than a module-top-level assert chain.
+  "bats-shard-ceiling-formula-is-safe" =
+    let
+      results = map (
+        scenario:
+        let
+          stats = partitionStats scenario.shardCount scenario.counts;
+          ceilingOk = stats.ceiling == scenario.expectedCeiling;
+          # Restates the same proven-upper-bound theorem as
+          # bats-shard-partition-is-balanced's guard, so this only has teeth
+          # against a broken fold -- it can't catch a loose or wrong
+          # ceiling, which is `ceilingOk`'s job.
+          safeOk = stats.maxShardTotal <= stats.ceiling;
+        in
+        {
+          inherit (scenario) name expectedCeiling;
+          inherit (stats) ceiling maxShardTotal;
+          inherit ceilingOk safeOk;
+          ok = ceilingOk && safeOk;
+        }
+      ) syntheticScenarios;
+      failing = builtins.filter (r: !r.ok) results;
+      failingDesc = lib.concatMapStringsSep "; " (
+        r:
+        "${r.name}: "
+        + lib.concatStringsSep ", " (
+          builtins.filter (s: s != null) [
+            (
+              if r.ceilingOk then
+                null
+              else
+                "ceiling formula gave ${toString r.ceiling}, expected ${toString r.expectedCeiling}"
+            )
+            (
+              if r.safeOk then
+                null
+              else
+                "achieved max shard total ${toString r.maxShardTotal} > ceiling ${toString r.ceiling}"
+            )
+          ]
+        )
+      ) failing;
+    in
+    assert lib.assertMsg (
+      failing == [ ]
+    ) "bats shard ceiling formula is unsafe for synthetic scenario(s): ${failingDesc}";
+    pkgs.runCommand "bats-shard-ceiling-formula-is-safe" { } "touch $out";
 
   # Second, independent balance guard: the LPT weighting above (fileCounts /
   # countTests) could itself be broken (e.g. every file's `@test` count
