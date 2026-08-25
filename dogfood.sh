@@ -149,7 +149,9 @@ check_podman_machine_memory
 # alias does this) to exit after the current wave instead of aborting it. Bash
 # defers a trapped signal until the in-flight `nix run` returns, so the wave
 # always finishes cleanly; the loop then breaks at the next boundary. Ctrl-C
-# (SIGINT to the whole process group) stays the hard-abort escape hatch.
+# (SIGINT to the whole process group) stays the hard-abort escape hatch — a
+# backgrounded `nix build` started via NixRealizer deliberately survives it,
+# orphaned, instead of aborting (see NixRealizer's doc comment for why).
 # Written after the dirty-tree check above: .spindrift/dogfood.pid is
 # untracked, and writing it first would trip that very check.
 stop_requested=0
