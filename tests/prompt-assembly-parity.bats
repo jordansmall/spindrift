@@ -27,10 +27,10 @@
 # rendered prompt or roster, not just the specific facts someone thought to
 # check.
 #
-# The orchestrator-off cells 1-11 share the orchestrator off and every skill
+# The orchestrator-off cells 1-13 share the orchestrator off and every skill
 # baked -- exactly tests/box_env_gen.bash's set_box_env schema-default cell,
 # plus setup_entrypoint_env's own BOX_WRITE_ENABLED=1 default -- and differ
-# only on three orthogonal axes:
+# on four axes:
 #
 #   DISPATCH_KIND/SELF_CONTAINED/FIX_PASS/RESUME_AFTER_HOLD, with
 #   ISSUE_TRACKER/CODE_FORGE/BOX_WRITE_ENABLED held at their defaults:
@@ -39,35 +39,53 @@
 #        roster. Also the github read-write cell on the access/forge axis
 #        (the schema default).
 #     2. research (DISPATCH_KIND=research)
-#     3. self-contained research (DISPATCH_KIND=research, SELF_CONTAINED=1)
-#     4. fix-pass (FIX_PASS>0)
+#     3. research, filer-on (DISPATCH_KIND=research, roster/filer axis on
+#        below -- issue #2786)
+#     4. self-contained research (DISPATCH_KIND=research, SELF_CONTAINED=1)
+#     5. self-contained research, filer-on (DISPATCH_KIND=research,
+#        SELF_CONTAINED=1, roster/filer axis on below -- issue #2786)
+#     6. fix-pass (FIX_PASS>0)
 #
 #   CODE_FORGE/BOX_WRITE_ENABLED access/forge axis, with dispatch
 #   kind/fix-pass/ISSUE_TRACKER untouched:
-#     5. github read-only (CODE_FORGE=github, BOX_WRITE_ENABLED unset)
-#     6. forgejo read-write (CODE_FORGE=forgejo, BOX_WRITE_ENABLED=1)
-#     7. forgejo read-only (CODE_FORGE=forgejo, BOX_WRITE_ENABLED unset)
+#     7. github read-only (CODE_FORGE=github, BOX_WRITE_ENABLED unset)
+#     8. forgejo read-write (CODE_FORGE=forgejo, BOX_WRITE_ENABLED=1)
+#     9. forgejo read-only (CODE_FORGE=forgejo, BOX_WRITE_ENABLED unset)
 #
 #   ISSUE_TRACKER, with SessionMode held at "initial" (dispatch kind/fix-pass
 #   untouched):
-#     8. local, no issue reference (ISSUE_TRACKER=local)
-#     9. local, issue-reference knob on (ISSUE_TRACKER=local,
-#        LOCAL_ISSUE_REFERENCE=1)
-#     10. forgejo, read-write (ISSUE_TRACKER=forgejo)
-#     11. jira, which rides the github prompt-selection arms
+#     10. local, no issue reference (ISSUE_TRACKER=local)
+#     11. local, issue-reference knob on (ISSUE_TRACKER=local,
+#         LOCAL_ISSUE_REFERENCE=1)
+#     12. forgejo, read-write (ISSUE_TRACKER=forgejo)
+#     13. jira, which rides the github prompt-selection arms
 #         (ISSUE_TRACKER=jira)
 #
-# The orchestrator-on cells 12-15 (issue #2353, cell 15 added by issue
+#   Roster/filer axis, added by cells 3 and 5 above -- unlike the axes
+#   above, not isolated to a single knob: cells 2 and 4 leave
+#   AGENTS_JSON_TEMPLATE unset entirely, so cell 3 against cell 2 flips four
+#   knobs at once (roster present at all, the filer key, BOX_FILER_ENABLED,
+#   BOX_WORKER_PROVISIONED):
+#     - filer present in the roster and BOX_FILER_ENABLED=1 pins
+#       gates_tracker.go's researchForceRelay, which forces the
+#       verdict-comment step onto the SPINDRIFT_COMMENT relay arm even
+#       though this suite's default box is read-write -- otherwise only
+#       covered at the Go unit level (issue #2786).
+#     - filer absent, BOX_FILER_ENABLED unset (every other cell in this
+#       orchestrator-off group; the orchestrator-on filer-on cell, 14, below
+#       carries both)
+#
+# The orchestrator-on cells 14-17 (issue #2353, cell 17 added by issue
 # #2512) all share dispatch kind "work" (default) with FIX_PASS unset -- the
 # only path checkCoveredCell covers combined with the orchestrator on -- and
 # differ only on the roster/skills axes:
-#   12. orchestrator on, filer-on -- roster carries a "filer" key alongside
+#   14. orchestrator on, filer-on -- roster carries a "filer" key alongside
 #       reviewer and scout (FILER_ENABLED on).
-#   13. orchestrator on, filer-off -- roster carries reviewer and scout but
+#   15. orchestrator on, filer-off -- roster carries reviewer and scout but
 #       no "filer" key (FILER_ENABLED off).
-#   14. orchestrator on, skills-absent -- no skill baked at all, contrasting
+#   16. orchestrator on, skills-absent -- no skill baked at all, contrasting
 #       setup()'s unconditional 4-skill baking every other cell relies on.
-#   15. orchestrator on, review-effort-set -- roster's reviewer entry
+#   17. orchestrator on, review-effort-set -- roster's reviewer entry
 #       carries an explicit "effort" key, proving ReviewEffort's
 #       non-empty-overrides case (the filer-on/filer-off cells above only
 #       cover the empty-follows-roster case).
@@ -211,8 +229,9 @@ AGENTS_ROSTER='{"scout":{"description":"Map relevant files, seams, and tests; re
 # issue #2353: AGENTS_ROSTER plus a "filer" entry (the shape
 # tests/entrypoint-agents-json.bats:64 already exercises -- "File issues from
 # a review's non-blocking findings, best-effort"), so the orchestrator-on
-# filer-on cell below actually flips the FILER_ENABLED gate on, unlike
-# AGENTS_ROSTER alone (the filer-off cell's roster).
+# filer-on cell and the two research filer-on cells (issue #2786) below
+# actually flip the FILER_ENABLED gate on, unlike AGENTS_ROSTER alone (the
+# filer-off cells' roster).
 AGENTS_ROSTER_WITH_FILER='{"scout":{"description":"Map relevant files, seams, and tests; return a structured brief","model":"opus","prompt":"","tools":["Read","Bash","WebFetch","WebSearch","Glob","Grep"]},"reviewer":{"description":"Review the branch diff for spec compliance and coding standards","model":"haiku","prompt":"","tools":["Read","Bash","WebFetch"]},"worker":{"description":"Implement a scoped slice of work delegated to it","model":"sonnet","prompt":"","tools":["Read","Bash","Edit","Write","Glob","Grep","WebFetch"]},"filer":{"description":"File issues from a review'"'"'s non-blocking findings, best-effort","model":"haiku","prompt":"","tools":["Read","Bash","WebFetch"]}}'
 
 # issue #2512: AGENTS_ROSTER's reviewer entry, plus an explicit "effort" key
@@ -260,11 +279,40 @@ AGENTS_ROSTER_WITH_REVIEW_EFFORT='{"scout":{"description":"Map relevant files, s
   assert_cell_golden "research" initial
 }
 
+@test "production path matches the golden fixture for the research filer-on cell" {
+  export DISPATCH_KIND="research"
+  # AGENTS_ROSTER_WITH_FILER (not plain AGENTS_ROSTER, unlike the research
+  # cell above): the roster/filer axis this cell isolates (issue #2786) --
+  # see the "Roster/filer axis" header bullet above for what
+  # BOX_FILER_ENABLED=1 actually pins. No handoff fixture: research never
+  # turns the orchestrator on, so assert_review_handoff_golden doesn't apply
+  # here.
+  export AGENTS_JSON_TEMPLATE="$AGENTS_ROSTER_WITH_FILER"
+  export BOX_FILER_ENABLED=1
+  # AGENTS_ROSTER_WITH_FILER carries a "worker" key too, same as every other
+  # roster-exporting cell in this file.
+  export BOX_WORKER_PROVISIONED=1
+
+  assert_cell_golden "research-filer-on" initial
+}
+
 @test "production path matches the golden fixture for the self-contained research cell" {
   export DISPATCH_KIND="research"
   export SELF_CONTAINED="1"
 
   assert_cell_golden "self-contained-research" initial
+}
+
+@test "production path matches the golden fixture for the self-contained research filer-on cell" {
+  export DISPATCH_KIND="research"
+  export SELF_CONTAINED="1"
+  # Same roster/filer axis as the research filer-on cell above, isolated
+  # against the self-contained knob instead (issue #2786).
+  export AGENTS_JSON_TEMPLATE="$AGENTS_ROSTER_WITH_FILER"
+  export BOX_FILER_ENABLED=1
+  export BOX_WORKER_PROVISIONED=1
+
+  assert_cell_golden "self-contained-research-filer-on" initial
 }
 
 @test "production path matches the golden fixture for the fix-pass cell" {
@@ -357,11 +405,11 @@ AGENTS_ROSTER_WITH_REVIEW_EFFORT='{"scout":{"description":"Map relevant files, s
   assert_cell_golden "jira-tracker" initial
 }
 
-# issue #2353: three orchestrator-on cells (dispatch kind "work", FIX_PASS
+# issue #2353: four orchestrator-on cells (dispatch kind "work", FIX_PASS
 # unset -- the only orchestrator-on path checkCoveredCell covers). Unlike
-# cells 1-4 above, ORCHESTRATOR_ENABLED must be exported so the bash side
-# takes run_driver_in_env's orchestrator invocation path (entrypoint.sh:
-# 1282-1286, tests/entrypoint-orchestrator-handoff.bats).
+# the orchestrator-off cells above, ORCHESTRATOR_ENABLED must be exported so
+# the bash side takes run_driver_in_env's orchestrator invocation path
+# (entrypoint.sh:1282-1286, tests/entrypoint-orchestrator-handoff.bats).
 
 @test "production path matches the golden fixture for the orchestrator-on filer-on cell" {
   export ORCHESTRATOR_ENABLED=1

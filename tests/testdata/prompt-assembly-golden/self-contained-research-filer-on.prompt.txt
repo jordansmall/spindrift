@@ -1,0 +1,125 @@
+# TASK
+
+Default to the `/caveman` skill for all narration and prose output this run.
+Code, commands, and error messages are exempt and stay verbatim.
+
+The posted verdict comment is exempt in full and stays human-quality prose:
+the verdict line and its rationale, the context-for-a-worker section, and
+the open-questions section, together with the machine marker
+`<!-- spindrift-research -->` carried in the comment body. Never route
+any part of the posted comment through `/caveman` or otherwise compress it —
+a human reads it to decide whether to promote the issue or close it, and a
+later worker picks up the context-for-a-worker section cold.
+
+The machine-parsed marker grammar is exempt too: the `SPINDRIFT_OUTCOME`
+line and its `note=` field, and any host-relay signal line such as
+`SPINDRIFT_COMMENT` — on a read-only dispatch, or when the issue tracker
+is a local tracker, it is the sole carrier of the posted verdict comment
+above. Never route these through `/caveman`.
+
+Every exempted marker line above must keep its required shape exactly
+intact — never reworded, reflowed, or line-wrapped: the leading token,
+the outcome line's key=value pairs, and the SPINDRIFT_COMMENT line's
+nonce and base64 payload as one unbroken token.
+
+Research GitHub issue #7: Do the thing
+
+This is a self-contained research dispatch (ADR 0022, issue #2202): NO repo —
+all content to analyze lives in the issue itself. No branch cut, no commits.
+Judge the issue's relevance from the issue content alone, and post one
+verdict comment. Advise-only — never edit the issue body, never touch a
+label, never close the issue, never promote it to dispatchable. A human acts
+on your verdict; the launcher owns every lifecycle transition.
+
+# CONTEXT
+
+Read first (run these yourself):
+
+- `gh issue view 7 --json body,comments --jq '.body, (.comments[-10:][] | "\(.author.login) (\(.createdAt)): \(.body)")'`
+  — the issue body plus only the last 10 comments, each attributed to its
+  author; pull any parent/linked issue or PRD it references too.
+- Any prior research comment already on the issue (look for the
+  `<!-- spindrift-research -->` marker used below) — read it before
+  researching again so a re-run doesn't repeat prior findings. If it isn't
+  among the last 10 comments above, fetch it directly: `gh issue view 7 --json comments --jq '.comments[] | select(.body | contains("spindrift-research")) | .body'`.
+
+
+# VERDICT
+
+Judge relevance from the issue content alone — there is no repo to explore.
+Render exactly one of these verdicts:
+
+<!-- RESEARCH_VERDICT_BULLETS -->
+
+# POST THE VERDICT
+
+Your GitHub token is read-only here — you cannot comment on the issue
+yourself. Print the verdict as a single line on stdout instead — the
+launcher finds it by this run's nonce, decodes it, and posts it to the
+issue, host-side, once you exit:
+
+SPINDRIFT_COMMENT test-run-nonce-0001 <base64-encoded verdict comment body,
+structured per below>
+
+Base64-encode the entire verdict body (e.g. `base64 -w0`) into one unbroken
+token with no embedded newlines or spaces. Print exactly ONE such line,
+before the SPINDRIFT_OUTCOME line below.
+
+
+Structure the verdict in this order:
+
+1. **Verdict** — `<RESEARCH_VERDICT_ENUM>`, plus a one-line rationale.
+2. **Context for a worker** — code pointers (file:line), related issues/PRs,
+   repro notes, sharpened acceptance criteria.
+3. **Open questions** — mandatory when the verdict is `unclear`: the concrete
+   questions only a human can answer. Omit this section for
+   `recommend`/`reject`.
+
+Carry the machine marker `<!-- spindrift-research -->` in the comment body so
+a later research pass or tooling can find it. Always post a NEW comment —
+never edit a predecessor research comment, even on a re-run.
+
+**File findings.** Hand any finding worth tracking as follow-up work —
+beyond the issue's own verdict — to the filer subagent: a bug, a missing
+feature, a perf chore your exploration surfaced. It is pre-provisioned via
+--agents; pass it each finding verbatim, plus this issue's number for
+provenance.
+
+Research never writes to the Issue Tracker itself, in any mode, read-only or
+read-write — the filer is relay-only here, with no orchestrator condition.
+It emits `SPINDRIFT_ISSUE_INTENT` lines instead of filing directly, and the
+launcher files each one host-side once you exit, applying the
+`agent-research-finding` label and a "Filed from research on #<N>" backlink
+itself — no issue URL is known yet.
+
+Best-effort: filing must never block the verdict.
+
+- On success (the filer reports `QUEUED`), just note in the verdict that the
+  finding was queued for filing — never fabricate an issue URL; the launcher
+  appends a "Filed issues" section with the real links right after your
+  comment posts.
+- On failure (the filer errors, times out, or returns nothing usable),
+  describe the finding directly in the verdict body instead.
+
+Never edit the issue body, never add or remove a label, never close the
+issue, never promote it to dispatchable, and never file an issue yourself.
+Comments only.
+
+# OUTCOME
+
+Once the comment is posted, print exactly one line as your final output —
+raw plain text, not wrapped in backticks, a code fence, or any other
+markdown formatting:
+
+SPINDRIFT_OUTCOME issue=7 landing=<verdict-comment-url> status=<recommend|reject|unclear> note=<one-line rationale>
+
+This must be the literal final message — nothing after it, no prose summary.
+For github, `landing` is the URL of the comment you just posted
+(`gh issue comment` prints it). For local, nothing was posted from in-box —
+use `landing=none`. `status` carries the verdict, not a work-style
+ready/blocked.
+
+If you cannot reach a verdict, or the comment cannot be posted, use `blocked`
+as the escape hatch instead — same raw plain text requirement:
+
+SPINDRIFT_OUTCOME issue=7 landing=none status=blocked note=<short reason>
