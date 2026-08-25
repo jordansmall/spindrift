@@ -238,6 +238,7 @@ in
         prefetch = "";
         imagePath = "/nix/store/ccc-image";
         imageHash = "deadbeef";
+        launcherCurrencyHash = "deadbeefdeadbeefdeadbeefdeadbeef";
         imageName = "spindrift";
         runtime = "bwrap";
         imageDrv = "/nix/store/ddd-image.drv";
@@ -314,6 +315,9 @@ in
     assert assertMsg (
       out.FLAKE_LAUNCHER_ATTR == ".#packages.aarch64-darwin.launcher-currency"
     ) "runArtifacts (bwrap) must set FLAKE_LAUNCHER_ATTR, got: ${builtins.toJSON out}";
+    assert assertMsg (
+      out.LAUNCHER_CURRENCY_HASH == "deadbeefdeadbeefdeadbeefdeadbeef"
+    ) "runArtifacts (bwrap) must set LAUNCHER_CURRENCY_HASH, got: ${builtins.toJSON out}";
     pkgs.runCommand "preambles-run-artifacts-bwrap" { } "touch $out";
 
   preambles-run-artifacts-oci =
@@ -329,6 +333,7 @@ in
         prefetch = "";
         imagePath = "/nix/store/ccc-image";
         imageHash = "deadbeef";
+        launcherCurrencyHash = "deadbeefdeadbeefdeadbeefdeadbeef";
         imageName = "spindrift";
         runtime = "podman";
         imageDrv = "/nix/store/ddd-image.drv";
@@ -371,6 +376,9 @@ in
     assert assertMsg (
       out.FLAKE_LAUNCHER_ATTR == ".#packages.aarch64-darwin.launcher-currency"
     ) "runArtifacts (oci) must set FLAKE_LAUNCHER_ATTR, got: ${builtins.toJSON out}";
+    assert assertMsg (
+      out.LAUNCHER_CURRENCY_HASH == "deadbeefdeadbeefdeadbeefdeadbeef"
+    ) "runArtifacts (oci) must set LAUNCHER_CURRENCY_HASH, got: ${builtins.toJSON out}";
     assert assertMsg (
       out.DRIVER_SKILLS_DIR == "/home/agent/.claude/skills"
     ) "runArtifacts (oci) must fold in the driver mount targets, got: ${builtins.toJSON out}";
@@ -423,6 +431,7 @@ in
         prefetch = "";
         imagePath = "/nix/store/ccc-image";
         imageHash = "deadbeef";
+        launcherCurrencyHash = "deadbeefdeadbeefdeadbeefdeadbeef";
         imageName = "spindrift-opencode";
         runtime = "podman";
         imageDrv = "/nix/store/ddd-image.drv";
@@ -450,6 +459,9 @@ in
     assert assertMsg (
       out.FLAKE_LAUNCHER_ATTR == ".#packages.aarch64-darwin.launcher-currency"
     ) "runArtifacts (oci-driver-scoped) must set FLAKE_LAUNCHER_ATTR, got: ${builtins.toJSON out}";
+    assert assertMsg (
+      out.LAUNCHER_CURRENCY_HASH == "deadbeefdeadbeefdeadbeefdeadbeef"
+    ) "runArtifacts (oci-driver-scoped) must set LAUNCHER_CURRENCY_HASH, got: ${builtins.toJSON out}";
     assert assertMsg (
       out.TRACKER_AXIS_READ == "FORGEJO"
     ) "runArtifacts (oci-driver-scoped) must render TRACKER_AXIS_READ, got: ${builtins.toJSON out}";
@@ -481,6 +493,7 @@ in
         runtime = "bwrap";
         imagePath = "/nix/store/ccc-image";
         imageHash = "deadbeef";
+        launcherCurrencyHash = "deadbeefdeadbeefdeadbeefdeadbeef";
         imageName = "spindrift";
         imageDrv = "/nix/store/ddd-image.drv";
         nixBuilderImage = "docker.io/nixos/nix@sha256:aaaa";
@@ -503,6 +516,9 @@ in
     assert assertMsg (
       out.FLAKE_LAUNCHER_ATTR == ".#packages.aarch64-darwin.launcher-currency"
     ) "buildArtifacts (bwrap) must set FLAKE_LAUNCHER_ATTR, got: ${builtins.toJSON out}";
+    assert assertMsg (
+      out.LAUNCHER_CURRENCY_HASH == "deadbeefdeadbeefdeadbeefdeadbeef"
+    ) "buildArtifacts (bwrap) must set LAUNCHER_CURRENCY_HASH, got: ${builtins.toJSON out}";
     pkgs.runCommand "preambles-build-artifacts-bwrap" { } "touch $out";
 
   preambles-build-artifacts-oci =
@@ -514,6 +530,7 @@ in
         runtime = "podman";
         imagePath = "/nix/store/ccc-image";
         imageHash = "deadbeef";
+        launcherCurrencyHash = "deadbeefdeadbeefdeadbeefdeadbeef";
         imageName = "spindrift";
         imageDrv = "/nix/store/ddd-image.drv";
         nixBuilderImage = "docker.io/nixos/nix@sha256:aaaa";
@@ -539,6 +556,9 @@ in
     assert assertMsg (
       out.FLAKE_LAUNCHER_ATTR == ".#packages.aarch64-darwin.launcher-currency"
     ) "buildArtifacts (oci) must set FLAKE_LAUNCHER_ATTR, got: ${builtins.toJSON out}";
+    assert assertMsg (
+      out.LAUNCHER_CURRENCY_HASH == "deadbeefdeadbeefdeadbeefdeadbeef"
+    ) "buildArtifacts (oci) must set LAUNCHER_CURRENCY_HASH, got: ${builtins.toJSON out}";
     assert assertMsg (
       !(out ? AGENT_FILES_DRV)
     ) "buildArtifacts (oci) must not set bwrap-only keys, got: ${builtins.toJSON out}";
@@ -578,6 +598,7 @@ in
         "IMAGE_DRV"
         "IMAGE_TAG"
         "IN_BOX_UNREACHABLE_TRACKER"
+        "LAUNCHER_CURRENCY_HASH"
         "NIX_BUILDER_IMAGE"
         "NIX_VOLUME"
         "OUTBOX_RELAY_CAPABLE"
