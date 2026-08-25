@@ -1857,7 +1857,7 @@ var verbHandlers = map[string]verbHandler{
 		lc, err := bootstrap(!noBuild, dispatchKindWork, false)
 		if err != nil {
 			fmt.Fprintf(stderr, "%s\n", err)
-			return 1
+			return bootstrapExitCode(err)
 		}
 		if len(nums) > 0 {
 			return cmdDispatchSelective(lc, nums, forceYes)
