@@ -93,18 +93,48 @@ func TestMainRun_Research_RoutesThroughBootstrap(t *testing.T) {
 // TestMainRun_Dispatch_ContinuousSetsEnv verifies the bare `--continuous`
 // flag (issue #2033) sets CONTINUOUS_DISPATCH the same way
 // `--continuous-dispatch 1` does, reaching loadConfig via bootstrap before
-// validate fails fast on the missing REPO_SLUG.
+// validate fails fast on the missing REPO_SLUG. The `dispatch` verb now
+// routes a config-invalid bootstrap error through bootstrapExitCode (issue
+// #2568 slice 2), so the expected code is exitConfigInvalid rather than the
+// generic 1.
 func TestMainRun_Dispatch_ContinuousSetsEnv(t *testing.T) {
 	t.Setenv("REPO_SLUG", "")
 	t.Setenv("CONTINUOUS_DISPATCH", "")
 
 	var stdout, stderr bytes.Buffer
 	code := mainRun([]string{"dispatch", "--continuous"}, &stdout, &stderr)
-	if code != 1 {
-		t.Errorf("mainRun(dispatch --continuous) code = %d, want 1", code)
+	if code != exitConfigInvalid {
+		t.Errorf("mainRun(dispatch --continuous) code = %d, want %d", code, exitConfigInvalid)
 	}
 	if got := os.Getenv("CONTINUOUS_DISPATCH"); got != "1" {
 		t.Errorf("CONTINUOUS_DISPATCH = %q, want %q", got, "1")
+	}
+}
+
+// TestMainRun_Dispatch_MissingRepoSlugUnderLocalForge_ExitsConfigInvalid
+// verifies the #2032 repro: CODE_FORGE=local with ISSUE_TRACKER left at its
+// github default is not the fully-local exemption (repoRequirementExemptionFor,
+// checks.go) -- that only exempts REPO_SLUG when both CODE_FORGE and
+// ISSUE_TRACKER are local (or a self-contained research run). So REPO_SLUG
+// stays required, validate() fails on it, and the `dispatch` verb (issue
+// #2568 slice 2) now surfaces that as exitConfigInvalid instead of a bare 1
+// -- a typo'd/missing REPO_SLUG under a local Code Forge is a config error,
+// not the generic failure every other bootstrap problem produces.
+func TestMainRun_Dispatch_MissingRepoSlugUnderLocalForge_ExitsConfigInvalid(t *testing.T) {
+	t.Setenv("CODE_FORGE", "local")
+	t.Setenv("ISSUE_TRACKER", "github")
+	t.Setenv("REPO_SLUG", "")
+
+	var stdout, stderr bytes.Buffer
+	code := mainRun([]string{"dispatch"}, &stdout, &stderr)
+	if code != exitConfigInvalid {
+		t.Errorf("mainRun(dispatch) code = %d, want %d; stderr=%s", code, exitConfigInvalid, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "REPO_SLUG") {
+		t.Errorf("mainRun(dispatch) stderr = %q, want a REPO_SLUG validation error", stderr.String())
+	}
+	if stdout.String() != "" {
+		t.Errorf("stdout = %q, want empty (bootstrap fails before any dispatch work runs)", stdout.String())
 	}
 }
 
