@@ -50,6 +50,14 @@ type config struct {
 	flakeImageAttr    string
 	flakeLauncherAttr string
 
+	// loadedLauncherHash is the bare 32-char nix store hash of the
+	// launcher-currency flake package this launcher binary was built from
+	// (LAUNCHER_CURRENCY_HASH, rendered by lib/preambles.nix/lib/mkHarness.nix
+	// alongside flakeLauncherAttr — issue #2677, issue #1364 slice 4).
+	// freshness.Probe compares it against a freshly-evaluated hash at the
+	// base-branch tip to answer the launcher-staleness dimension.
+	loadedLauncherHash string
+
 	// bwrap agent closure paths (bwrap only)
 	agentFiles    string
 	agentEnv      string
@@ -257,22 +265,23 @@ func loadConfig() config {
 	return config{
 		schemaConfig: sc,
 
-		imageArchive:      getenvArtifact("IMAGE_ARCHIVE", ""),
-		imageTag:          imageTag,
-		imageDrv:          getenvArtifact("IMAGE_DRV", ""),
-		nixBuilderImage:   getenvArtifact("NIX_BUILDER_IMAGE", ""),
-		nixVolume:         getenvArtifact("NIX_VOLUME", "spindrift-nix"),
-		flakeImageAttr:    getenvArtifact("FLAKE_IMAGE_ATTR", ""),
-		flakeLauncherAttr: getenvArtifact("FLAKE_LAUNCHER_ATTR", ""),
-		agentFiles:        getenvArtifact("AGENT_FILES", ""),
-		agentEnv:          getenvArtifact("AGENT_ENV", ""),
-		agentFilesDrv:     getenvArtifact("AGENT_FILES_DRV", ""),
-		agentEnvDrv:       getenvArtifact("AGENT_ENV_DRV", ""),
-		bakedPrefetch:     getenvArtifact("BAKED_PREFETCH", ""),
-		runtime:           runtime,
-		runnerKind:        runnerKind,
-		driver:            getenvArtifact("DRIVER", ""),
-		image:             image,
+		imageArchive:       getenvArtifact("IMAGE_ARCHIVE", ""),
+		imageTag:           imageTag,
+		imageDrv:           getenvArtifact("IMAGE_DRV", ""),
+		nixBuilderImage:    getenvArtifact("NIX_BUILDER_IMAGE", ""),
+		nixVolume:          getenvArtifact("NIX_VOLUME", "spindrift-nix"),
+		flakeImageAttr:     getenvArtifact("FLAKE_IMAGE_ATTR", ""),
+		flakeLauncherAttr:  getenvArtifact("FLAKE_LAUNCHER_ATTR", ""),
+		loadedLauncherHash: getenvArtifact("LAUNCHER_CURRENCY_HASH", ""),
+		agentFiles:         getenvArtifact("AGENT_FILES", ""),
+		agentEnv:           getenvArtifact("AGENT_ENV", ""),
+		agentFilesDrv:      getenvArtifact("AGENT_FILES_DRV", ""),
+		agentEnvDrv:        getenvArtifact("AGENT_ENV_DRV", ""),
+		bakedPrefetch:      getenvArtifact("BAKED_PREFETCH", ""),
+		runtime:            runtime,
+		runnerKind:         runnerKind,
+		driver:             getenvArtifact("DRIVER", ""),
+		image:              image,
 
 		driverSessionCacheDir: getenvArtifact("DRIVER_SESSION_CACHE_DIR", ""),
 
@@ -1246,9 +1255,10 @@ func checkNetworkModeRuntimeGate(c config) error {
 //	  drain selected zero (all blocked/deferred); the driving loop should
 //	  stop with a triage message rather than hot-looping.
 //	exit 4 (waves.ErrImageStale): CONTINUOUS_DISPATCH mode only — the
-//	  image-freshness probe found the loaded image would be rebuilt against
-//	  the current base-branch tip; in-flight Boxes finished, no new ones
-//	  launched, and the driving loop should rebuild and re-invoke.
+//	  freshness probe found the loaded image, the loaded host-launcher
+//	  binary, or both would be rebuilt (or, for the launcher, restarted)
+//	  against the current base-branch tip; in-flight Boxes finished, no new
+//	  ones launched, and the driving loop should rebuild and re-invoke.
 //	exit 5 (errImageHostTainted): CONTINUOUS_DISPATCH mode only — a stale
 //	  divergence persisted after a rebuild to the base tip (a host-system
 //	  derivation reached the image graph through a consumer flake); the
@@ -1581,7 +1591,7 @@ func runContinuousDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, 
 	var staleResult freshness.Result
 
 	fresh := func() (bool, bool, string) {
-		res := freshness.Probe(c.runnerKind, pwd, c.baseBranch, c.flakeImageAttr, c.imageTag, eval)
+		res := freshness.Probe(c.runnerKind, pwd, c.baseBranch, c.flakeImageAttr, c.imageTag, c.flakeLauncherAttr, c.loadedLauncherHash, eval)
 		// fresh() is called under RunContinuous's mutex (see its doc
 		// comment), so this plain write is serialized — no separate
 		// locking needed, mirroring the firstQuery*/firstQueryEmpty comment

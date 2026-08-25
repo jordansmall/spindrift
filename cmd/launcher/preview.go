@@ -14,16 +14,20 @@ import (
 )
 
 // previewIssues is the testable core of the preview verb. It always prints
-// an image-freshness line first (freshness.Probe against pwd/eval), then an
-// unconditional launcher-currency line naming the launcher's own
-// FLAKE_LAUNCHER_ATTR (no freshness verdict yet — see issue #2677), then:
-// when issueNums is non-empty it performs a selective dry-run — fetches
-// exactly those issues, prints label-bypass warnings, blocker annotations,
-// and cascade-eviction notices without launching any Box or prompting; when
-// issueNums is empty it falls back to queue-drain discovery.
+// a freshness line first (freshness.Probe against pwd/eval) — when
+// c.flakeLauncherAttr is configured, res.Message already folds the launcher
+// dimension into this same line as a real combined verdict (issue #1364
+// slice 4) — then an unconditional launcher-currency-attr line naming the
+// launcher's own FLAKE_LAUNCHER_ATTR value verbatim (a plain config echo,
+// not a second verdict — the verdict lives entirely in the line above),
+// then: when issueNums is non-empty it
+// performs a selective dry-run — fetches exactly those issues, prints
+// label-bypass warnings, blocker annotations, and cascade-eviction notices
+// without launching any Box or prompting; when issueNums is empty it falls
+// back to queue-drain discovery.
 func previewIssues(c config, it forge.IssueTracker, cf forge.CodeForge, w io.Writer, issueNums []string, pwd string, eval freshness.Evaluator) error {
-	res := freshness.Probe(c.runnerKind, pwd, c.baseBranch, c.flakeImageAttr, c.imageTag, eval)
-	fmt.Fprintf(w, "image-freshness: %s\n", res.Message)
+	res := freshness.Probe(c.runnerKind, pwd, c.baseBranch, c.flakeImageAttr, c.imageTag, c.flakeLauncherAttr, c.loadedLauncherHash, eval)
+	fmt.Fprintf(w, "freshness: %s\n", res.Message)
 	launcherAttr := c.flakeLauncherAttr
 	if launcherAttr == "" {
 		launcherAttr = "(unset)"

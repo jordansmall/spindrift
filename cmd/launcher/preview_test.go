@@ -149,8 +149,8 @@ func TestPreviewIssues_EmptyQueue(t *testing.T) {
 	}
 }
 
-// TestPreviewIssues_PrintsImageFreshnessLine verifies that previewIssues
-// surfaces the image-freshness probe result as its own line — a "bwrap"
+// TestPreviewIssues_PrintsFreshnessLine verifies that previewIssues
+// surfaces the freshness probe result as its own line — a "bwrap"
 // runnerKind has no loaded image, so it must report "not applicable" rather
 // than attempting a fetch or eval. c.runtime is deliberately set to a real
 // OCI CLI name ("podman") while c.runnerKind is "bwrap" to prove the
@@ -161,7 +161,7 @@ func TestPreviewIssues_EmptyQueue(t *testing.T) {
 // not-applicable message (a missing-git-repo diagnostic, not the bwrap
 // one) — this asserts the bwrap-specific message text, not just any
 // "not applicable" substring, so that mismatch would be caught.
-func TestPreviewIssues_PrintsImageFreshnessLine(t *testing.T) {
+func TestPreviewIssues_PrintsFreshnessLine(t *testing.T) {
 	c := baseConfig()
 	c.repoSlug = "owner/repo"
 	c.label = "ready-for-agent"
@@ -175,8 +175,8 @@ func TestPreviewIssues_PrintsImageFreshnessLine(t *testing.T) {
 	}
 
 	out := buf.String()
-	if !strings.Contains(out, "image-freshness:") {
-		t.Errorf("output missing image-freshness line; got:\n%s", out)
+	if !strings.Contains(out, "freshness:") {
+		t.Errorf("output missing freshness line; got:\n%s", out)
 	}
 	if !strings.Contains(out, "bwrap runtime keeps its store read-only") {
 		t.Errorf("output missing the bwrap runnerKind not-applicable message (want the runnerKind early-return, not a git-repo-missing fallback); got:\n%s", out)
@@ -185,7 +185,7 @@ func TestPreviewIssues_PrintsImageFreshnessLine(t *testing.T) {
 
 // TestPreviewIssues_PrintsLauncherCurrencyLine verifies that previewIssues
 // always prints the launcher-currency line, naming the launcher's own
-// FLAKE_LAUNCHER_ATTR alongside the image-freshness line (issue #2677) — a
+// FLAKE_LAUNCHER_ATTR alongside the freshness line (issue #2677) — a
 // plain, unconditional print of the attribute name already carried on
 // config, not a freshness verdict.
 func TestPreviewIssues_PrintsLauncherCurrencyLine(t *testing.T) {
@@ -213,7 +213,7 @@ func TestPreviewIssues_PrintsLauncherCurrencyLine(t *testing.T) {
 // when FLAKE_LAUNCHER_ATTR is unset (c.flakeLauncherAttr == "", the unwrapped
 // `go run` case), previewIssues prints an explicit "(unset)" placeholder on
 // the launcher-currency line instead of a bare, valueless trailing colon —
-// matching the adjacent image-freshness line, which always carries a
+// matching the adjacent freshness line, which always carries a
 // non-empty res.Message (issue #2677 review finding).
 func TestPreviewIssues_PrintsLauncherCurrencyPlaceholderWhenUnset(t *testing.T) {
 	c := baseConfig()
