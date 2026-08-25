@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -4901,5 +4902,30 @@ func TestEngageAliasRemoved(t *testing.T) {
 	}
 	if strings.Contains(string(data), `args[0] == "engage"`) {
 		t.Error(`main.go still dispatches the deprecated "engage" subcommand; remove the handler`)
+	}
+}
+
+// TestBootstrapExitCode verifies bootstrapExitCode's full error-to-exit-code
+// mapping (issue #2568 slice 1): nil maps to 0, an error wrapping
+// errConfigInvalid (as bootstrap() now produces on a validate() failure)
+// maps to the dedicated exitConfigInvalid (6), and any other error falls
+// back to the generic 1 — mirroring TestExitCodeFor's table-driven shape for
+// exitCodeFor.
+func TestBootstrapExitCode(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want int
+	}{
+		{"nil", nil, 0},
+		{"wrapped errConfigInvalid", fmt.Errorf("%w: %w", errConfigInvalid, errors.New("REPO_SLUG is required")), exitConfigInvalid},
+		{"other error", errors.New("boom"), 1},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := bootstrapExitCode(tc.err); got != tc.want {
+				t.Errorf("bootstrapExitCode(%v) = %d, want %d", tc.err, got, tc.want)
+			}
+		})
 	}
 }

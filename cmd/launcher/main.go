@@ -1197,7 +1197,17 @@ func checkNetworkModeRuntimeGate(c config) error {
 //	  divergence persisted after a rebuild to the base tip (a host-system
 //	  derivation reached the image graph through a consumer flake); the
 //	  driving loop must halt, not rebuild-and-retry (issue #2113).
+//	exit 6 (errConfigInvalid, exitConfigInvalid): bootstrap()'s validate(c)
+//	  step rejected the loaded config — lets a caller (the dispatch verb,
+//	  wired in issue #2568 slice 2) distinguish a config-validation failure
+//	  from any other bootstrap failure (a readiness check, the
+//	  accumulation-repo seed, etc.), which still falls back to exit 1.
 var errQueueEmpty = errors.New("queue empty")
+
+// exitConfigInvalid is the process exit code for a bootstrap() failure whose
+// error wraps errConfigInvalid (bootstrap.go) -- see the exit-code doc
+// comment above for the full mapping.
+const exitConfigInvalid = 6
 
 func containsLabel(labels []string, target string) bool {
 	for _, l := range labels {
@@ -1746,6 +1756,22 @@ func exitCodeFor(err error) int {
 		return 4
 	case errors.Is(err, errImageHostTainted):
 		return 5
+	default:
+		return 1
+	}
+}
+
+// bootstrapExitCode translates a bootstrap() error into the launcher's
+// process exit code: exitConfigInvalid (6) when the error wraps
+// errConfigInvalid (bootstrap()'s own validate(c) failure), 1 for any other
+// error, 0 on success (nil). Pure and side-effect-free, mirroring
+// exitCodeFor's shape for run/runContinuousDispatch errors.
+func bootstrapExitCode(err error) int {
+	switch {
+	case err == nil:
+		return 0
+	case errors.Is(err, errConfigInvalid):
+		return exitConfigInvalid
 	default:
 		return 1
 	}
