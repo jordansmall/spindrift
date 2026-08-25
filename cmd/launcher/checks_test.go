@@ -96,7 +96,7 @@ func TestLauncherChecks_RepoSlug_Fails(t *testing.T) {
 	c := minimalValidConfig()
 	c.repoSlug = ""
 	ch := checkByName(t, launcherChecks(c), "repo-slug")
-	err := ch.Probe()
+	_, err := ch.Probe()
 	if err == nil {
 		t.Fatal("repo-slug Probe() must fail when REPO_SLUG is empty")
 	}
@@ -110,7 +110,7 @@ func TestLauncherChecks_RepoSlug_Fails(t *testing.T) {
 func TestLauncherChecks_RepoSlug_Passes(t *testing.T) {
 	c := minimalValidConfig()
 	ch := checkByName(t, launcherChecks(c), "repo-slug")
-	if err := ch.Probe(); err != nil {
+	if _, err := ch.Probe(); err != nil {
 		t.Errorf("repo-slug Probe() unexpected error: %v", err)
 	}
 }
@@ -124,7 +124,7 @@ func TestLauncherChecks_RepoSlug_FullyLocalExempt(t *testing.T) {
 	c.repoSlug = ""
 	c.ghToken = ""
 	ch := checkByName(t, launcherChecks(c), "repo-slug")
-	if err := ch.Probe(); err != nil {
+	if _, err := ch.Probe(); err != nil {
 		t.Errorf("repo-slug Probe() should exempt REPO_SLUG for fully-local pairing: %v", err)
 	}
 }
@@ -140,7 +140,7 @@ func TestLauncherChecks_RepoSlug_SelfContainedResearchExempt(t *testing.T) {
 	c.repoSlug = ""
 	c.ghToken = ""
 	ch := checkByName(t, launcherChecks(c), "repo-slug")
-	if err := ch.Probe(); err != nil {
+	if _, err := ch.Probe(); err != nil {
 		t.Errorf("repo-slug Probe() should exempt REPO_SLUG for self-contained research with a local issue tracker: %v", err)
 	}
 }
@@ -154,7 +154,7 @@ func TestLauncherChecks_RepoSlug_SelfContainedResearchGithubTrackerStillFails(t 
 	c.selfContained = true
 	c.repoSlug = ""
 	ch := checkByName(t, launcherChecks(c), "repo-slug")
-	if err := ch.Probe(); err == nil {
+	if _, err := ch.Probe(); err == nil {
 		t.Fatal("repo-slug Probe() must still require REPO_SLUG for self-contained research with a github issue tracker")
 	}
 }
@@ -164,14 +164,14 @@ func TestLauncherChecks_GitUserName_FailsAndPasses(t *testing.T) {
 	c := minimalValidConfig()
 	c.gitUserName = ""
 	ch := checkByName(t, launcherChecks(c), "git-user-name")
-	err := ch.Probe()
+	_, err := ch.Probe()
 	if err == nil || err.Error() != "set GIT_USER_NAME, or configure git user.name on the host" {
 		t.Errorf("git-user-name Probe() = %v, want exact validate() text", err)
 	}
 
 	c = minimalValidConfig()
 	ch = checkByName(t, launcherChecks(c), "git-user-name")
-	if err := ch.Probe(); err != nil {
+	if _, err := ch.Probe(); err != nil {
 		t.Errorf("git-user-name Probe() unexpected error: %v", err)
 	}
 }
@@ -182,14 +182,14 @@ func TestLauncherChecks_GitUserEmail_FailsAndPasses(t *testing.T) {
 	c := minimalValidConfig()
 	c.gitUserEmail = ""
 	ch := checkByName(t, launcherChecks(c), "git-user-email")
-	err := ch.Probe()
+	_, err := ch.Probe()
 	if err == nil || err.Error() != "set GIT_USER_EMAIL, or configure git user.email on the host" {
 		t.Errorf("git-user-email Probe() = %v, want exact validate() text", err)
 	}
 
 	c = minimalValidConfig()
 	ch = checkByName(t, launcherChecks(c), "git-user-email")
-	if err := ch.Probe(); err != nil {
+	if _, err := ch.Probe(); err != nil {
 		t.Errorf("git-user-email Probe() unexpected error: %v", err)
 	}
 }
@@ -200,7 +200,7 @@ func TestLauncherChecks_GhToken_Fails(t *testing.T) {
 	c := minimalValidConfig()
 	c.ghToken = ""
 	ch := checkByName(t, launcherChecks(c), "gh-token")
-	err := ch.Probe()
+	_, err := ch.Probe()
 	want := "set GH_TOKEN (fine-grained PAT scoped to the single target repo: Issues RW, Contents RW, Pull requests RW, Metadata R)"
 	if err == nil || err.Error() != want {
 		t.Errorf("gh-token Probe() = %v, want %q", err, want)
@@ -212,7 +212,7 @@ func TestLauncherChecks_GhToken_Fails(t *testing.T) {
 func TestLauncherChecks_GhToken_Passes(t *testing.T) {
 	c := minimalValidConfig()
 	ch := checkByName(t, launcherChecks(c), "gh-token")
-	if err := ch.Probe(); err != nil {
+	if _, err := ch.Probe(); err != nil {
 		t.Errorf("gh-token Probe() unexpected error: %v", err)
 	}
 }
@@ -225,7 +225,7 @@ func TestLauncherChecks_GhToken_FullyLocalExempt(t *testing.T) {
 	c.repoSlug = ""
 	c.ghToken = ""
 	ch := checkByName(t, launcherChecks(c), "gh-token")
-	if err := ch.Probe(); err != nil {
+	if _, err := ch.Probe(); err != nil {
 		t.Errorf("gh-token Probe() should exempt GH_TOKEN for fully-local pairing: %v", err)
 	}
 }
@@ -237,14 +237,14 @@ func TestLauncherChecks_DriverCredentials_ClaudeArm(t *testing.T) {
 	c.claudeOAuthToken = ""
 	c.anthropicAPIKey = ""
 	ch := checkByName(t, launcherChecks(c), "driver-credentials")
-	err := ch.Probe()
+	_, err := ch.Probe()
 	if err == nil || err.Error() != "set CLAUDE_CODE_OAUTH_TOKEN (run 'claude setup-token') or ANTHROPIC_API_KEY" {
 		t.Errorf("driver-credentials Probe() = %v, want exact validate() text", err)
 	}
 
 	c = minimalValidConfig()
 	ch = checkByName(t, launcherChecks(c), "driver-credentials")
-	if err := ch.Probe(); err != nil {
+	if _, err := ch.Probe(); err != nil {
 		t.Errorf("driver-credentials Probe() unexpected error for valid claude config: %v", err)
 	}
 }
@@ -258,7 +258,7 @@ func TestLauncherChecks_DriverCredentials_OpencodeArm(t *testing.T) {
 	c.model = "github-copilot/claude-opus-4-8"
 	c.opencodeAuthContent = ""
 	ch := checkByName(t, launcherChecks(c), "driver-credentials")
-	err := ch.Probe()
+	_, err := ch.Probe()
 	want := "set OPENCODE_AUTH_CONTENT for the github-copilot Provider (run 'opencode auth login -p github-copilot' on a host, then export the auth slice) under the opencode Driver"
 	if err == nil || err.Error() != want {
 		t.Errorf("driver-credentials Probe() = %v, want %q", err, want)
@@ -269,7 +269,7 @@ func TestLauncherChecks_DriverCredentials_OpencodeArm(t *testing.T) {
 	c.model = "github-copilot/claude-opus-4-8"
 	c.opencodeAuthContent = "gho_test"
 	ch = checkByName(t, launcherChecks(c), "driver-credentials")
-	if err := ch.Probe(); err != nil {
+	if _, err := ch.Probe(); err != nil {
 		t.Errorf("driver-credentials Probe() unexpected error with OPENCODE_AUTH_CONTENT set: %v", err)
 	}
 
@@ -280,7 +280,7 @@ func TestLauncherChecks_DriverCredentials_OpencodeArm(t *testing.T) {
 	c.claudeOAuthToken = ""
 	c.anthropicAPIKey = ""
 	ch = checkByName(t, launcherChecks(c), "driver-credentials")
-	if err := ch.Probe(); err != nil {
+	if _, err := ch.Probe(); err != nil {
 		t.Errorf("driver-credentials Probe() should only require OPENCODE_AUTH_CONTENT for the github-copilot Provider: %v", err)
 	}
 }
@@ -291,7 +291,7 @@ func TestLauncherChecks_DriverCredentials_UnknownArm(t *testing.T) {
 	c := minimalValidConfig()
 	c.driver = "bogus"
 	ch := checkByName(t, launcherChecks(c), "driver-credentials")
-	err := ch.Probe()
+	_, err := ch.Probe()
 	if err == nil {
 		t.Fatal("driver-credentials Probe() must fail for an unregistered DRIVER")
 	}
@@ -305,13 +305,13 @@ func TestLauncherChecks_Runtime_FailsAndPasses(t *testing.T) {
 	c := minimalValidConfig()
 	c.runtime = ""
 	ch := checkByName(t, launcherChecks(c), "runtime")
-	if err := ch.Probe(); err == nil {
+	if _, err := ch.Probe(); err == nil {
 		t.Fatal("runtime Probe() must fail when RUNTIME is empty")
 	}
 
 	c = minimalValidConfig() // runtime: "echo", always on PATH
 	ch = checkByName(t, launcherChecks(c), "runtime")
-	if err := ch.Probe(); err != nil {
+	if _, err := ch.Probe(); err != nil {
 		t.Errorf("runtime Probe() unexpected error: %v", err)
 	}
 }
@@ -323,7 +323,7 @@ func TestLauncherChecks_IssueTracker_FailsAndPasses(t *testing.T) {
 	c := minimalValidConfig()
 	c.issueTracker = "not-a-real-tracker"
 	ch := checkByName(t, launcherChecks(c), "issue-tracker-config")
-	err := ch.Probe()
+	_, err := ch.Probe()
 	if err == nil || !strings.Contains(err.Error(), "ISSUE_TRACKER") {
 		t.Errorf("issue-tracker Probe() = %v, want it to mention ISSUE_TRACKER", err)
 	}
@@ -332,20 +332,20 @@ func TestLauncherChecks_IssueTracker_FailsAndPasses(t *testing.T) {
 	c.issueTracker = "jira"
 	c.jiraBaseURL = "https://example.atlassian.net"
 	ch = checkByName(t, launcherChecks(c), "issue-tracker-config")
-	if err := ch.Probe(); err == nil {
+	if _, err := ch.Probe(); err == nil {
 		t.Fatal("issue-tracker Probe() must fail when jira cross-knob fields are incomplete")
 	}
 
 	c.jiraProjectKey = "PROJ"
 	c.jiraToken = "tok"
 	ch = checkByName(t, launcherChecks(c), "issue-tracker-config")
-	if err := ch.Probe(); err != nil {
+	if _, err := ch.Probe(); err != nil {
 		t.Errorf("issue-tracker Probe() unexpected error for fully configured jira: %v", err)
 	}
 
 	c = minimalValidConfig()
 	ch = checkByName(t, launcherChecks(c), "issue-tracker-config")
-	if err := ch.Probe(); err != nil {
+	if _, err := ch.Probe(); err != nil {
 		t.Errorf("issue-tracker Probe() unexpected error for default github config: %v", err)
 	}
 }
@@ -375,7 +375,7 @@ func TestLauncherChecks_CodeForge_FailsAndPasses(t *testing.T) {
 	c := minimalValidConfig()
 	c.codeForge = "not-a-real-forge"
 	ch := checkByName(t, launcherChecks(c), "code-forge-config")
-	err := ch.Probe()
+	_, err := ch.Probe()
 	if err == nil || !strings.Contains(err.Error(), "CODE_FORGE") {
 		t.Errorf("code-forge Probe() = %v, want it to mention CODE_FORGE", err)
 	}
@@ -384,19 +384,19 @@ func TestLauncherChecks_CodeForge_FailsAndPasses(t *testing.T) {
 	c.codeForge = "forgejo"
 	c.forgejoBaseURL = "https://codeberg.org"
 	ch = checkByName(t, launcherChecks(c), "code-forge-config")
-	if err := ch.Probe(); err == nil {
+	if _, err := ch.Probe(); err == nil {
 		t.Fatal("code-forge Probe() must fail when forgejo cross-knob fields are incomplete")
 	}
 
 	c.forgejoToken = "tok"
 	ch = checkByName(t, launcherChecks(c), "code-forge-config")
-	if err := ch.Probe(); err != nil {
+	if _, err := ch.Probe(); err != nil {
 		t.Errorf("code-forge Probe() unexpected error for fully configured forgejo: %v", err)
 	}
 
 	c = minimalValidConfig()
 	ch = checkByName(t, launcherChecks(c), "code-forge-config")
-	if err := ch.Probe(); err != nil {
+	if _, err := ch.Probe(); err != nil {
 		t.Errorf("code-forge Probe() unexpected error for default github config: %v", err)
 	}
 }
