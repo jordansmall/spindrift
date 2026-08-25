@@ -3425,7 +3425,7 @@ guaranteed correct for your config.
 | 0    | dispatched work | pull + rebuild, then continue |
 | 2    | queue empty (no open issues with the dispatch label) | exit cleanly |
 | 3    | open issues exist but none are dispatchable | stop and print a triage message — typically a failed blocker needs re-labeling before the queue can drain |
-| 4    | `CONTINUOUS_DISPATCH` mode: the image-freshness probe found the loaded image would be rebuilt against the current base-branch tip; in-flight Boxes finished, no new ones launched | pull + rebuild, then re-invoke — the same boundary exit 0 runs |
+| 4    | `CONTINUOUS_DISPATCH` mode: the image-freshness probe found the loaded image would be rebuilt against the current base-branch tip; in-flight Boxes finished, no new ones launched | pull + rebuild (often already pre-warmed by a background `nix build` the launcher kicked off during the drain, so the driving loop's rebuild is frequently a cache hit), then re-invoke — the same boundary exit 0 runs |
 
 Set `CONTINUOUS_DISPATCH=1` to opt into the slot-refill dispatch mode in a
 driving loop other than `dogfood.sh`; see `lib/env-schema.nix`'s
