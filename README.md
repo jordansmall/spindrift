@@ -168,11 +168,15 @@ your inputs and import the flake-parts module:
 ```
 
 This yields the **`spindrift` CLI** as `packages.<system>.spindrift` and as
-`apps.<system>.default`, plus the Linux-only `agent-image`. The bare form
-(`nix run .`) prints help and exits; drain the queue with
-`nix run . -- dispatch`. See [`docs/reference.md`](docs/reference.md) for the
-`mkHarness`-direct variant and the devShell-targeting pattern (one image,
-many differently-toolchained Target repos).
+`apps.<system>.default`, plus the Linux-only `agent-image`. It also exposes
+`packages.<system>.launcher-currency` — a sibling build of the launcher
+binary, never invoked, whose store hash tracks the launcher's own source
+independent of the commit revision (issue #2677); nothing consumes it for
+a freshness verdict yet. The bare form (`nix run .`) prints help and exits;
+drain the queue with `nix run . -- dispatch`. See
+[`docs/reference.md`](docs/reference.md) for the `mkHarness`-direct variant
+and the devShell-targeting pattern (one image, many differently-toolchained
+Target repos).
 
 **Lean CI shell.** If the Target repo exposes a `devShells.ci` with only the
 tools the agent needs (no LSP, no GUI tooling), set `DEV_SHELL_NAME=ci` — or

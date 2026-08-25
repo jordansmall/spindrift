@@ -1638,6 +1638,7 @@ in
         "runInputDocumentFile"
         "buildInputDocumentFile"
         "roster"
+        "launcherCurrencyFileset"
       ];
       byName = a: b: a < b;
       actual = builtins.attrNames harness.internals;
@@ -1944,6 +1945,87 @@ in
       grep -q '"FILER_ENABLED":"false"' "$runDoc"
       grep -q '"WORKER_PROVISIONED":"false"' "$runDoc"
 
+      touch $out
+    '';
+
+  # Issue #2677 slice 1: launcherBin's store path moves on every commit
+  # because its ldflags bake `-X main.revision=${revision}`, even for
+  # docs-only commits. `packages.launcher-currency` is a sibling derivation
+  # over the same cmd/launcher source with revision normalized out of its
+  # ldflags entirely (ADR 0043's "sibling derivation over the same source
+  # with the revision normalized" framing), so its hash should be stable
+  # across a revision-only change. Two direct mkHarness calls differing only
+  # in `revision` must agree on launcher-currency's outPath. The `spindrift`
+  # outPath contrast (which still wraps launcherBin, so it SHOULD differ)
+  # rules out a vacuously-passing check.
+  mkharness-launcher-currency-revision-independent =
+    let
+      inherit (pkgs.lib) assertMsg;
+      direct1 = import ../../lib/mkHarness.nix {
+        inherit nixpkgs system;
+        revision = "aaaaaaa";
+      };
+      direct2 = import ../../lib/mkHarness.nix {
+        inherit nixpkgs system;
+        revision = "bbbbbbb";
+      };
+    in
+    assert assertMsg
+      (direct1.packages.launcher-currency.outPath == direct2.packages.launcher-currency.outPath)
+      "launcher-currency outPath must not move when only revision changes: ${direct1.packages.launcher-currency.outPath} != ${direct2.packages.launcher-currency.outPath}";
+    assert assertMsg (direct1.packages.spindrift.outPath != direct2.packages.spindrift.outPath)
+      "spindrift outPath should differ when revision changes (it still wraps launcherBin) -- if it doesn't, this check is vacuous";
+    pkgs.runCommand "mkharness-launcher-currency-revision-independent" { } "touch $out";
+
+  # Flip side of the revision-independence check above: launcher-currency's
+  # outPath must move when launcher SOURCE changes. Without this, a future
+  # narrowing of launcherCurrencyFileset (e.g. down to just go.mod/go.sum)
+  # would silently defeat launcher-currency's whole purpose -- it would keep
+  # reporting the same hash forever, blind to real launcher changes -- while
+  # the check above stayed green throughout. Drop one real top-level
+  # launcher source file (flags.go) from direct1's fileset and confirm the
+  # resulting derivation's outPath differs from the unperturbed one.
+  # `overrideAttrs` only swaps the outer derivation's `src` -- the vendored
+  # `-go-modules` derivation underneath still vendors off the unperturbed
+  # source, so launcherCurrencyPerturbed is a valid outPath-difference
+  # probe but not something you could actually build as a stand-in for
+  # "flags.go removed" (issue #2677 review finding).
+  mkharness-launcher-currency-source-sensitive =
+    let
+      inherit (pkgs.lib) assertMsg;
+      direct1 = import ../../lib/mkHarness.nix {
+        inherit nixpkgs system;
+        revision = "aaaaaaa";
+      };
+      launcherCurrencyPerturbedSrc = pkgs.lib.fileset.toSource {
+        root = ../../cmd/launcher;
+        fileset = pkgs.lib.fileset.difference direct1.internals.launcherCurrencyFileset ../../cmd/launcher/flags.go;
+      };
+      launcherCurrencyPerturbed = direct1.packages.launcher-currency.overrideAttrs (_: {
+        src = launcherCurrencyPerturbedSrc;
+      });
+    in
+    assert assertMsg (direct1.packages.launcher-currency.outPath != launcherCurrencyPerturbed.outPath)
+      "launcher-currency outPath must change when launcher source changes: dropping cmd/launcher/flags.go from launcherCurrencyFileset produced the same outPath (${direct1.packages.launcher-currency.outPath})";
+    pkgs.runCommand "mkharness-launcher-currency-source-sensitive" { } "touch $out";
+
+  # The two checks above only ever compare `.outPath` strings -- an eval-level
+  # comparison that never forces Nix to actually build launcher-currency's
+  # contents. Nothing else in the checkset realizes this derivation either:
+  # it's a sibling of launcherBin that exists solely so its store hash can be
+  # read (never invoked), so unlike launcherBin (built as part of `spindrift`)
+  # there's no other consumer forcing a real build. Without this check, a
+  # future cmd/launcher/go.mod dependency bump could leave
+  # launcherCurrencyVendorHash stale (wrong sha256) or otherwise break
+  # launcher-currency's build, and checks-inbox would stay green throughout.
+  # `test -x` is enough to force realization without ever invoking the
+  # binary, matching launcherCurrencyBin's own "never invoked" contract.
+  mkharness-launcher-currency-builds =
+    let
+      direct1 = import ../../lib/mkHarness.nix { inherit nixpkgs system; };
+    in
+    pkgs.runCommand "mkharness-launcher-currency-builds" { } ''
+      test -x ${direct1.packages.launcher-currency}/bin/launcher
       touch $out
     '';
 }
