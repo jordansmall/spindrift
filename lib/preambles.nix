@@ -12,6 +12,10 @@ let
   unique = builtins.foldl' (acc: x: if builtins.elem x acc then acc else acc ++ [ x ]) [ ];
   builtinsCompat = import ./builtins-compat.nix;
   inherit (builtinsCompat) concatStrings mapAttrsToList escapeShellArg;
+  # Shared by runArtifacts and buildArtifacts below (issue #2677 review fix)
+  # so the FLAKE_LAUNCHER_ATTR string is defined once instead of duplicated
+  # verbatim at both call sites.
+  launcherCurrencyAttr = system: ".#packages.${system}.launcher-currency";
 in
 rec {
   # One renderer used by both the shell and Go preamble families: iterates
@@ -105,6 +109,7 @@ rec {
       imageDrv,
       nixBuilderImage,
       linuxSystem,
+      system,
       boxEnvVars,
       # Four capability signals resolved by lib/mkHarness.nix from the
       # backend descriptor registry (lib/backends/default.nix) for the
@@ -161,6 +166,12 @@ rec {
         else
           "";
       BOX_ENV_VARS = boxEnvVars;
+      # Unlike FLAKE_IMAGE_ATTR above (rendered against linuxSystem, the
+      # Linux twin used only for Linux-bound OCI artifacts), the launcher is
+      # a plain per-host-system Go binary (built via hostPkgs.buildGoModule,
+      # runs on every platform including bwrap/darwin), so this correctly
+      # renders against system -- the host's own system.
+      FLAKE_LAUNCHER_ATTR = launcherCurrencyAttr system;
       HOST_MEDIATED_REMOTE = if hostMediatedRemote then "true" else "false";
       OUTBOX_RELAY_CAPABLE = if outboxRelayCapable then "true" else "false";
       IN_BOX_UNREACHABLE_TRACKER = if inBoxUnreachableTracker then "true" else "false";
@@ -190,6 +201,7 @@ rec {
       imageDrv,
       nixBuilderImage,
       linuxSystem,
+      system,
     }:
     (
       if runnerKind == "bwrap" then
@@ -211,6 +223,7 @@ rec {
     )
     // {
       RUNNER_KIND = runnerKind;
+      FLAKE_LAUNCHER_ATTR = launcherCurrencyAttr system;
     };
 
   # Every artifact key runArtifacts/buildArtifacts can emit, across both
@@ -246,6 +259,7 @@ rec {
           imageDrv = "dummy";
           nixBuilderImage = "dummy";
           linuxSystem = "dummy";
+          system = "dummy";
           boxEnvVars = "dummy";
           hostMediatedRemote = false;
           outboxRelayCapable = false;
@@ -273,6 +287,7 @@ rec {
           imageDrv = "dummy";
           nixBuilderImage = "dummy";
           linuxSystem = "dummy";
+          system = "dummy";
         };
       allKeys =
         builtins.concatMap (runnerKind: builtins.attrNames (dummyRunArtifacts runnerKind)) [

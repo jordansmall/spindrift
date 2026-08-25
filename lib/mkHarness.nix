@@ -1107,6 +1107,7 @@ let
       imageDrv
       nixBuilderImage
       linuxSystem
+      system
       hostMediatedRemote
       outboxRelayCapable
       inBoxUnreachableTracker
@@ -1137,6 +1138,7 @@ let
       imageDrv
       nixBuilderImage
       linuxSystem
+      system
       ;
     imageName = imageKnobs.imageName;
   };
