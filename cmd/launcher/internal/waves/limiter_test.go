@@ -106,8 +106,8 @@ func TestLimiter_ResizeDownNeverRevokesLiveSlots(t *testing.T) {
 
 // TestLimiter_ResizeDeltaAppliesRelativeToCurrentCap verifies that
 // ResizeDelta computes the new cap from the current cap plus delta under a
-// single lock acquisition, clamps to a floor of 1, and still signals Grown
-// on a raise like Resize does.
+// single lock acquisition, clamps to a floor of 1, and still signals
+// Resized on a raise.
 func TestLimiter_ResizeDeltaAppliesRelativeToCurrentCap(t *testing.T) {
 	l := NewLimiter(2)
 
@@ -122,19 +122,20 @@ func TestLimiter_ResizeDeltaAppliesRelativeToCurrentCap(t *testing.T) {
 	}
 
 	select {
-	case <-l.Grown():
+	case <-l.Resized():
 	default:
-		t.Fatal("Grown: want a signal from the earlier raise, got none")
+		t.Fatal("Resized: want a signal from the earlier raise, got none")
 	}
 }
 
-// TestLimiter_ResizeCoalescesGrowSignalUnderRapidRaises verifies that two
+// TestLimiter_ResizeCoalescesResizedSignalUnderRapidRaises verifies that two
 // back-to-back ResizeDelta raises, called through the real public API with
-// no listener parked on Grown, coalesce into a single buffered signal — the
-// second raise's non-blocking send hits signalGrow's default branch and is
-// dropped (issue #766's coalescing fix; issue #1134 exercises it through
-// ResizeDelta itself instead of mutating Limiter's internal fields).
-func TestLimiter_ResizeCoalescesGrowSignalUnderRapidRaises(t *testing.T) {
+// no listener parked on Resized, coalesce into a single buffered signal —
+// the second raise's non-blocking send hits signalResized's default branch
+// and is dropped (issue #766's coalescing fix; issue #1134 exercises it
+// through ResizeDelta itself instead of mutating Limiter's internal
+// fields).
+func TestLimiter_ResizeCoalescesResizedSignalUnderRapidRaises(t *testing.T) {
 	l := NewLimiter(1)
 
 	l.ResizeDelta(1)
@@ -145,14 +146,47 @@ func TestLimiter_ResizeCoalescesGrowSignalUnderRapidRaises(t *testing.T) {
 	}
 
 	select {
-	case <-l.Grown():
+	case <-l.Resized():
 	default:
-		t.Fatal("Grown: want one signal from the two raises, got none")
+		t.Fatal("Resized: want one signal from the two raises, got none")
 	}
 
 	select {
-	case <-l.Grown():
-		t.Fatal("Grown: want no second signal (coalesced), got one")
+	case <-l.Resized():
+		t.Fatal("Resized: want no second signal (coalesced), got one")
+	default:
+	}
+}
+
+// TestLimiter_ResizeDeltaNoopDoesNotSignalResized verifies that ResizeDelta
+// only signals Resized when the clamped cap actually changes: calling it
+// with a delta that keeps the cap pinned at the floor of 1 (e.g. two
+// consecutive lowers past the floor) must not emit a Resized signal for the
+// second, no-op call. This pins the `if newCap != oldCap` guard in
+// ResizeDelta — without it, the second call's unconditional signal would
+// make this test fail.
+func TestLimiter_ResizeDeltaNoopDoesNotSignalResized(t *testing.T) {
+	l := NewLimiter(2)
+
+	l.ResizeDelta(-5)
+	if got := l.Cap(); got != 1 {
+		t.Fatalf("Cap after ResizeDelta(-5) from 2: got %d, want 1 (clamped floor)", got)
+	}
+
+	select {
+	case <-l.Resized():
+	default:
+		t.Fatal("Resized: want a signal from the first (actual) lower to the floor, got none")
+	}
+
+	l.ResizeDelta(-5)
+	if got := l.Cap(); got != 1 {
+		t.Fatalf("Cap after second ResizeDelta(-5) at floor: got %d, want 1 (still clamped)", got)
+	}
+
+	select {
+	case <-l.Resized():
+		t.Fatal("Resized: want no signal from a no-op resize (cap already at floor), got one")
 	default:
 	}
 }

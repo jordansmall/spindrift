@@ -3427,6 +3427,18 @@ guaranteed correct for your config.
 | 3    | open issues exist but none are dispatchable | stop and print a triage message — typically a failed blocker needs re-labeling before the queue can drain |
 | 4    | `CONTINUOUS_DISPATCH` mode: the image-freshness probe found the loaded image would be rebuilt against the current base-branch tip; in-flight Boxes finished, no new ones launched | pull + rebuild (often already pre-warmed by a background `nix build` the launcher kicked off during the drain, so the driving loop's rebuild is frequently a cache hit), then re-invoke — the same boundary exit 0 runs |
 
+An exit-4 stale drain also appends a summary line to
+`.spindrift/logs/drain.log` — drain duration, free-slot-seconds accumulated
+while refilling was stopped, and how many discovered issues were held back
+— so a driving loop can total those numbers across iterations to judge
+whether the drain is a rounding error or the dominant stall (#2678). Each
+line is space-delimited `key=value` pairs prefixed `DRAIN `:
+`durationSeconds`, `freeSlotSeconds`, and `heldBack` are the three fields
+worth grepping and summing. `heldBack` can be the literal string `unknown`
+instead of a number — a transient tracker error at the moment the drain
+started, not a confirmed zero — so a naive summing script must skip or
+special-case that value rather than parse it as an integer.
+
 Set `CONTINUOUS_DISPATCH=1` to opt into the slot-refill dispatch mode in a
 driving loop other than `dogfood.sh`; see `lib/env-schema.nix`'s
 `continuousDispatch` entry for the full behavior. On the command line

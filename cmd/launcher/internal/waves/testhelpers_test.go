@@ -3,6 +3,8 @@ package waves
 import (
 	"errors"
 	"os"
+	"strconv"
+	"strings"
 	"testing"
 
 	"spindrift.dev/launcher/internal/dispatch"
@@ -53,6 +55,24 @@ func tempLogDir(t *testing.T) string {
 
 // boxErr is a non-nil error that stands in for a non-zero box exit.
 var boxErr = errors.New("exit 1")
+
+// parseDrainField extracts key's numeric value from a drain.log DRAIN line
+// (e.g. "durationSeconds=" or "freeSlotSeconds="), failing the test if key
+// is absent or its value isn't a parseable float -- the shared extraction
+// continuous_test.go's stale-drain tests otherwise copy-pasted per field.
+func parseDrainField(t *testing.T, log, key string) float64 {
+	t.Helper()
+	idx := strings.Index(log, key)
+	if idx == -1 {
+		t.Fatalf("drain.log: got %q, want %s", log, key)
+	}
+	field := strings.Fields(log[idx:])[0]
+	val, err := strconv.ParseFloat(strings.TrimPrefix(field, key), 64)
+	if err != nil {
+		t.Fatalf("%s: got %q, not parseable as float: %v", key, strings.TrimPrefix(field, key), err)
+	}
+	return val
+}
 
 // testFactory builds a dispatch.Factory wired to dir and r, matching
 // cmd/launcher's own test helper.
