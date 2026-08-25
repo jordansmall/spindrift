@@ -203,6 +203,7 @@ var _ PRForge = githubReadOnlyForge{}
 var _ BundleRelay = githubReadOnlyForge{}
 var _ DraftPRCreator = githubReadOnlyForge{}
 var _ BundleCommitSubjects = githubReadOnlyForge{}
+var _ BranchProtectionForge = githubReadOnlyForge{}
 var _ LandingRef = localForge{}
 var _ LandingRepair = localForge{}
 var _ LandingContainmentQuery = localForge{}

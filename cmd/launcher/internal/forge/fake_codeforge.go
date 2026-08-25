@@ -2,6 +2,8 @@ package forge
 
 var _ CodeForge = (*CodeForgeFake)(nil)
 
+var _ BranchProtectionForge = (*CodeForgeFake)(nil)
+
 // CodeForgeFake is the code-forge-capability slice of Fake, holding every
 // field the CodeForge surface reads or writes. It embeds *core — see core's
 // doc comment for the admission rule — so its methods can reach mu/prStates/
@@ -19,6 +21,9 @@ type CodeForgeFake struct {
 	branchExists map[string]bool // branch → scripted BranchExists result
 	// BranchExistsErr, if non-nil, is returned by every BranchExists call.
 	BranchExistsErr error
+
+	branchProtected    map[string]bool  // branch → scripted BranchProtected result
+	branchProtectedErr map[string]error // branch → scripted BranchProtected error
 
 	// MergeErr, if non-nil, is returned by every Merge call (after MergeErrs is drained).
 	MergeErr error
@@ -61,6 +66,37 @@ func (cf *CodeForgeFake) SetBranchExists(branch string, exists bool) {
 	cf.mu.Lock()
 	defer cf.mu.Unlock()
 	cf.branchExists[branch] = exists
+}
+
+// BranchProtected returns the scripted result set by SetBranchProtected
+// (false for an unscripted branch, mirroring BranchExists's own
+// unset-means-false default), or the per-branch error set by
+// SetBranchProtectedErr, if any.
+func (cf *CodeForgeFake) BranchProtected(branch string) (bool, error) {
+	cf.mu.Lock()
+	defer cf.mu.Unlock()
+	if err := cf.branchProtectedErr[branch]; err != nil {
+		return false, err
+	}
+	return cf.branchProtected[branch], nil
+}
+
+// SetBranchProtected scripts BranchProtected's result for branch. Unset
+// branches default to false (not protected), the same zero-value
+// convention SetBranchExists uses.
+func (cf *CodeForgeFake) SetBranchProtected(branch string, protected bool) {
+	cf.mu.Lock()
+	defer cf.mu.Unlock()
+	cf.branchProtected[branch] = protected
+}
+
+// SetBranchProtectedErr scripts BranchProtected to return err for branch,
+// taking precedence over any SetBranchProtected result for that branch —
+// the probe-failed outcome, distinct from a definitive "not protected".
+func (cf *CodeForgeFake) SetBranchProtectedErr(branch string, err error) {
+	cf.mu.Lock()
+	defer cf.mu.Unlock()
+	cf.branchProtectedErr[branch] = err
 }
 
 func (cf *CodeForgeFake) Merge(url string) error {
