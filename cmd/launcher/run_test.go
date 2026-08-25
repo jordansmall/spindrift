@@ -438,6 +438,55 @@ func TestRunExitCode_ContinuousDispatch_ImageStale_ReturnsExitCode4(t *testing.T
 	}
 }
 
+// TestRunExitCode_ContinuousDispatch_ImageStaleOnFirstRefillWithTransientDiscoverError_ReturnsExitCode4
+// is the regression test for the interaction bug between the stale-drain
+// report (which makes refill's first-ever staleness detection issue one
+// extra, reporting-only discover() call) and runContinuousDispatch's
+// firstQueryErr early-return: when staleness fires on the very first refill
+// of the whole run (fresh() is stale from the start, as in
+// TestRunExitCode_ContinuousDispatch_ImageStale_ReturnsExitCode4 above) and
+// that same first-ever discover() call — made only to compute the
+// stale-drain report's heldBack count — hits a transient tracker error, the
+// run must still exit 4 (waves.ErrImageStale), not flatten into the raw
+// transient error the way a genuine startup-query failure does elsewhere.
+// No Box may ever launch.
+func TestRunExitCode_ContinuousDispatch_ImageStaleOnFirstRefillWithTransientDiscoverError_ReturnsExitCode4(t *testing.T) {
+	c := baseConfig()
+	c.label = "ready-for-agent"
+	c.continuousDispatch = true
+	c.maxParallel = 1
+	c.runtime = "podman"
+	c.baseBranch = "main"
+	dir := tempLogDir(t)
+	if err := runGit(dir, "init"); err != nil {
+		t.Fatalf("git init: %v", err)
+	}
+	if err := runGit(dir, "remote", "add", "origin", "https://example.invalid/nope.git"); err != nil {
+		t.Fatalf("git remote add: %v", err)
+	}
+
+	fc := forge.NewFake(testDispatchLabels)
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.label}})
+	fc.ListIssuesErr = boxErr
+
+	fr := runner.NewFake()
+	lc := &launchContext{
+		config:       c,
+		pwd:          dir,
+		issueTracker: fc,
+		codeForge:    fc,
+		factory:      testFactory(t, dir, fr),
+		settle:       settle.NewFake(),
+	}
+
+	if got := runExitCode(lc); got != 4 {
+		t.Errorf("runExitCode(lc) = %d, want 4 (waves.ErrImageStale)", got)
+	}
+	if len(fr.RunCalls) != 0 {
+		t.Errorf("RunCalls: got %d, want 0 (no Box launches once the probe is stale)", len(fr.RunCalls))
+	}
+}
+
 // TestRun_DepsOfCheckFailure_HoldsIssueNotDispatched verifies that the batch
 // dispatch path (`run`) threads NewReadiness's failed set (#1103) through to the
 // wave engine: an issue whose own DepsOf call errored is held for retry, not

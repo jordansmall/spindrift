@@ -1595,6 +1595,20 @@ func runContinuousDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, 
 	cfg := wavesConfig(c)
 	cfg.SeedScopeOf = localloop.SeedScopeResolver(it, cf)
 	if err := waves.RunContinuous(cfg, nil, it, cf, pwd, f, s, discover, fresh); err != nil {
+		// ErrImageStale takes priority over firstQueryErr below: refill's
+		// stale-drain report (see continuous.go) can itself trigger an
+		// extra, reporting-only discover() call the very first time
+		// staleness fires, and if that call is also the run's first-ever
+		// discover() call, a transient error from it would otherwise get
+		// caught by firstQueryErr and flatten this more specific,
+		// higher-priority ErrImageStale/exit-4 outcome into a raw error.
+		if errors.Is(err, waves.ErrImageStale) {
+			if guard.Classify(staleResult) == freshness.HostTainted {
+				fmt.Fprintln(os.Stdout, freshness.HostTaintDiagnostic(c.baseBranch, staleResult.Rev, c.flakeImageAttr, staleResult.TipTag, c.imageTag))
+				return errImageHostTainted
+			}
+			return waves.ErrImageStale
+		}
 		// refill swallows every discover error to stderr and retries on the
 		// next trigger (a transient-tracker-hiccup tolerance that's fine for
 		// refill 2+, but the first call has no next trigger to retry on once
@@ -1612,13 +1626,6 @@ func runContinuousDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, 
 			}
 			_ = guard.Reset()
 			return errQueueEmpty
-		}
-		if errors.Is(err, waves.ErrImageStale) {
-			if guard.Classify(staleResult) == freshness.HostTainted {
-				fmt.Fprintln(os.Stdout, freshness.HostTaintDiagnostic(c.baseBranch, staleResult.Rev, c.flakeImageAttr, staleResult.TipTag, c.imageTag))
-				return errImageHostTainted
-			}
-			return waves.ErrImageStale
 		}
 		return err
 	}
