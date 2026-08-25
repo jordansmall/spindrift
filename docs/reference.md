@@ -1716,14 +1716,15 @@ An implement/fix pass's own REVIEW section is stripped to a deferral
 the seeded run-state above it already shows an `APPROVE` verdict, and the
 `reviewer` entry is dropped from `--agents` entirely (verdict authority moves
 fully to the review pass). The loop this drives is implement → review →
-(`BLOCK`) fix → review → … → (`APPROVE`) land, where "land" is just another
-fix-role pass that finds nothing left to do — `scanReviewLog` (not
-`scanPassLog`) reads the review pass's own verdict and Blocking/Non-blocking
-findings text, both carried into the next fix pass's seeded prompt via
-run-state. Each pass's `pass_start` marker carries its role (`implement`,
-`review`, or `fix`) so telemetry can tell them apart. Cost is not assumed
-lower than the inline loop — a review pass re-reads the diff cold instead of
-sharing the implementor's warm cache — the win this pass is scoped for is
+(`BLOCK`) fix → review → … → (`APPROVE`) land, where "land" is its own
+distinct terminal role reached via an `APPROVE` verdict (or a cap), not
+another fix-role pass — `scanReviewLog` (not `scanPassLog`) reads the review
+pass's own verdict and Blocking/Non-blocking findings text, both carried
+into the next fix or land pass's seeded prompt via run-state. Each pass's
+`pass_start` marker carries its role (`implement`, `review`, `fix`, or `land`)
+so telemetry can tell them apart. Cost is not assumed lower than the inline
+loop — a review pass re-reads the diff cold instead of sharing the
+implementor's warm cache — the win this pass is scoped for is
 review quality and code-owned termination, measured via the A/B harness.
 
 Every implement/fix/land pass's own COMMIT section also carries one more
