@@ -1232,6 +1232,41 @@ func TestWriterPassStartSwitchesBackToImplementorOnFix(t *testing.T) {
 	}
 }
 
+// TestWriterPassStartSwitchesBackToImplementorOnLand verifies a Writer
+// switches its active top-level role back to implementor when a "land"
+// pass_start follows a "review" pass_start — pinning the heartbeat
+// rendering of the land role at the Writer surface directly, per issue
+// #2654's acceptance criterion 1 that the heartbeat renders
+// "pass N (land) started" and switches the active role back to implementor.
+func TestWriterPassStartSwitchesBackToImplementorOnLand(t *testing.T) {
+	const rule = "\xe2\x94\x80\xe2\x94\x80" // ──
+	var status bytes.Buffer
+	w := claude.New(&bytes.Buffer{}, "2654", &status)
+
+	reviewStart := `{"type":"spindrift_op","spindrift_op":{"op":"pass_start","pass":2,"role":"review"}}` + "\n"
+	reviewNar := `{"type":"assistant","message":{"content":[{"type":"text","text":"Reviewing the change."}]}}` + "\n"
+	landStart := `{"type":"spindrift_op","spindrift_op":{"op":"pass_start","pass":3,"role":"land"}}` + "\n"
+	landNar := `{"type":"assistant","message":{"content":[{"type":"text","text":"Landing the change."}]}}` + "\n"
+	fmt.Fprint(w, reviewStart)
+	fmt.Fprint(w, reviewNar)
+	fmt.Fprint(w, landStart)
+	fmt.Fprint(w, landNar)
+
+	out := status.String()
+	if !strings.Contains(out, rule+" reviewer ") {
+		t.Errorf("missing reviewer switch header after review pass_start: %q", out)
+	}
+	if !strings.Contains(out, rule+" implementor ") {
+		t.Errorf("missing implementor switch header after land pass_start: %q", out)
+	}
+	if !strings.Contains(out, "Reviewing the change.") {
+		t.Errorf("missing review narration: %q", out)
+	}
+	if !strings.Contains(out, "Landing the change.") {
+		t.Errorf("missing land narration: %q", out)
+	}
+}
+
 // TestWriterPassStartEmptyRoleDoesNotChangeActiveRole verifies a pass_start
 // spindrift_op with no Role (the legacy single-loop dispatch shape, matching
 // TestFormatSpindriftOpPassStart) leaves the active top-level role
