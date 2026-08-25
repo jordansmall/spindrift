@@ -677,6 +677,98 @@ rec {
     in
     (violationsIn fragmentContentByFile) ++ (violationsIn templateContentByFile);
 
+  # Build-time research-direct-file check (issue #2595, ADR 0041: "Research
+  # filing is host-mediated and relay-only"): asserts a research prompt
+  # (research-prompt.md / research-self-contained-prompt.md) never carries
+  # the envsubst placeholder for one of lib/fragments.nix's FILER_FILE_DIRECT*-
+  # gated rows -- the fragment rows that render `gh issue create`/
+  # `fj issue create`/`gh label create` instructions straight into the
+  # rendered prompt, instead of going through the host-mediated
+  # SPINDRIFT_ISSUE_INTENT relay. Today this holds only "by construction"
+  # (see lib/fragments.nix's own doc comment on its research-file-issues-
+  # relay.md row): no row currently wires a DIRECT var into either research
+  # prompt, but nothing stops a future edit from doing so. This function is
+  # the build-time backstop that turns that regression into a build failure
+  # instead of a silent one.
+  #
+  # Unconditional, like buildTimeForbiddenMarkerViolations above, not gated
+  # like buildTimeRejectVerdicts: a research prompt structurally must never
+  # carry a direct-file var, for any Consumer's build, not just one build's
+  # own static gate configuration -- there is no "not triggered"/advise
+  # branch here, every violation is unconditionally reported.
+  #
+  # Scans for the literal envsubst placeholder `${VAR}` (row.var), not the
+  # fragment's own rendered body text: fragment substitution happens at
+  # runtime, in agent/entrypoint.sh's envsubst step, never at Nix eval time --
+  # build time only ever sees the raw, unsubstituted prompt template. This
+  # deliberately checks only the braced `${VAR}` spelling, by convention --
+  # agent/entrypoint.sh's `_subst` expands bare `$VAR` identically via
+  # envsubst's shell-format allowlist, so a future prompt template wiring a
+  # fragment's var in with the bare spelling would slip past this scan. Not
+  # live today: every research prompt renders through
+  # promptassembly.substTokenRe, which only ever emits the braced form.
+  #
+  # Deliberately does not reuse this file's own `hasInfix` (which routes a
+  # needle through builtinsCompat.escapeRegex verbatim): escapeRegex
+  # backslash-escapes `{`/`}` (`\{`/`\}`), which Nix's POSIX-extended
+  # builtins.split/builtins.match regex engine rejects outright ("invalid
+  # regular expression") rather than treating as a literal brace -- braces
+  # are ERE interval-expression metacharacters with no backslash-escape
+  # literal form, unlike every other character escapeRegex handles. Wrapping
+  # the braces in a single-character class (`[{]`/`[}]`) instead sidesteps
+  # that ERE quirk and matches literally, so the placeholder's `${`/`}`
+  # wrapper is hand-built here rather than folded into escapeRegex's own
+  # blanket escaping; `row.var` itself still goes through escapeRegex, since
+  # a var name is never expected to contain a brace.
+  #
+  #   directFileFragmentRows    -- the FILER_FILE_DIRECT*-gated fragment rows
+  #                                 to check for (each needs at least
+  #                                 `fragment` and `var`). Callers are
+  #                                 expected to have already filtered
+  #                                 lib/fragments.nix's full row list down to
+  #                                 the DIRECT-gated ones (e.g. by `gate`) --
+  #                                 this function stays decoupled from
+  #                                 fragments.nix's gate-naming convention
+  #                                 and doesn't look at `gate` at all.
+  #   researchPromptContentByName -- attrset from a research prompt's name
+  #                                 (e.g. "research-prompt.md") to its raw,
+  #                                 unsubstituted text.
+  #
+  # Returns a flat list of violation records, one per (promptName, row) pair
+  # whose content contains that row's `${var}` placeholder: { promptName;
+  # fragment; var; }.
+  buildTimeResearchDirectFileViolations =
+    { directFileFragmentRows, researchPromptContentByName }:
+    let
+      hasDirectPlaceholder =
+        var: content:
+        let
+          pattern = "\\$[{]" + builtinsCompat.escapeRegex var + "[}]";
+        in
+        # Braced-only by convention (see the doc comment above) -- a bare
+        # `$VAR` placeholder would not match this pattern.
+        builtins.length (builtins.split pattern content) > 1;
+    in
+    builtins.concatMap (
+      promptName:
+      let
+        content = researchPromptContentByName.${promptName};
+      in
+      builtins.concatMap (
+        row:
+        if hasDirectPlaceholder row.var content then
+          [
+            {
+              inherit promptName;
+              fragment = row.fragment;
+              var = row.var;
+            }
+          ]
+        else
+          [ ]
+      ) directFileFragmentRows
+    ) (builtins.attrNames researchPromptContentByName);
+
   # Fold from a buildTimeRejectVerdicts verdict to "must the runtime bash
   # validator NOT block" (issue #2320, parent #2244): the runtime validator
   # (agent/entrypoint.sh's _validate_prompt_contract) only ever has a
