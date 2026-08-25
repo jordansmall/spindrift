@@ -47,7 +47,10 @@
   # keeps only the `/caveman` default directive and the code/commands/
   # error-messages/commit-messages exemption paragraph; same CAVEMAN_BAKED
   # gate, since a worker dispatch only exists when the same caveman skill is
-  # baked.
+  # baked. This row duplicates that paragraph from base's prose verbatim
+  # rather than composing it from a shared source (issue #2753): drift is
+  # caught by
+  # cmd/launcher/orchestrator/caveman_default_fragment_parity_test.go.
   {
     gate = "CAVEMAN_BAKED";
     fragment = "caveman-default-worker.md";
@@ -67,6 +70,19 @@
   # into the review prompt when the caveman skill is baked, independent of
   # whether a review pass itself runs (that depends on the orchestrator
   # being on, not on this gate).
+  #
+  # Unlike the worker row above, this row is not a verbatim duplicate of
+  # base: it re-wraps base's marker-grammar-exemption prose (minus the
+  # SPINDRIFT_ISSUE_INTENT clause review legitimately omits) and appends its
+  # own `## Blocking`/`## Non-blocking` paragraph base has no counterpart
+  # for. Issue #2753 weighed three options for this row and the worker row
+  # above -- (a) a lightweight parity check, (b) accept the duplication as
+  # precedent (the pattern #2706 already established for the worker row),
+  # (c) a real composition mechanism -- and chose (a) over (c) as the
+  # lower-cost option, rejecting (b) because a third duplicate of the same
+  # prose raises the silent-drift risk past what human discipline alone
+  # covers. Drift in the spans this row does share with base is caught by
+  # cmd/launcher/orchestrator/caveman_default_fragment_parity_test.go.
   {
     gate = "CAVEMAN_BAKED";
     fragment = "caveman-default-review.md";
