@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -439,23 +440,32 @@ func TestRunExitCode_ContinuousDispatch_ImageStale_ReturnsExitCode4(t *testing.T
 }
 
 // TestRunExitCode_ContinuousDispatch_ImageStaleOnFirstRefillWithTransientDiscoverError_ReturnsExitCode4
-// is the regression test for the interaction bug between the stale-drain
-// report (which makes refill's first-ever staleness detection issue one
-// extra, reporting-only discover() call) and runContinuousDispatch's
-// firstQueryErr early-return: when staleness fires on the very first refill
-// of the whole run (fresh() is stale from the start, as in
-// TestRunExitCode_ContinuousDispatch_ImageStale_ReturnsExitCode4 above) and
-// that same first-ever discover() call — made only to compute the
-// stale-drain report's heldBack count — hits a transient tracker error, the
-// run must still exit 4 (waves.ErrImageStale), not flatten into the raw
-// transient error the way a genuine startup-query failure does elsewhere.
-// No Box may ever launch.
+// is the regression test for #2777: the stale-drain report's heldBack count
+// is computed by a separate, reporting-only discoverReporting()/
+// cfg.DiscoverReporting() call, never by the CLI's own discover() closure.
+// This test forces the run's fetched-tracker-query (fc.ListIssuesErr) to
+// fail so that the heldBack call — fired the first time staleness is
+// detected (fresh() is stale from the start, as in
+// TestRunExitCode_ContinuousDispatch_ImageStale_ReturnsExitCode4 above) —
+// itself errors, and proves that error is fully inert: it must never print
+// the "==> querying open" line (that line belongs to a real poll, not a
+// reporting-only query), and it must never change the run's exit code — the
+// run still exits 4 (waves.ErrImageStale) and no Box ever launches.
 //
-// This is the ONLY reachable scenario where ErrImageStale masks a real
-// firstQueryErr: a genuine (non-reporting-only) first discover error can
-// never coexist with independently-detected later staleness in the same
-// run (see TestRunContinuousDispatch_GenuineFirstDiscoverErrorNeverReachesLaterStaleness
-// and the updated priority-check comment in main.go for why).
+// Before #2777, this same scenario was also the ONLY reachable case where
+// ErrImageStale masks a real firstQueryErr (see
+// TestRunContinuousDispatch_GenuineFirstDiscoverErrorNeverReachesLaterStaleness
+// and the priority-check comment in main.go: a genuine, non-reporting-only
+// first discover error can never coexist with independently-detected later
+// staleness in the same run, so that was never a second reachable case).
+// #2777 closes this one too — the heldBack call no longer runs through
+// discover() at all, so it can no longer set firstQueryErr — leaving no
+// reachable production path where both are non-nil simultaneously. The
+// ErrImageStale-over-firstQueryErr precedence itself is kept as documented
+// intent (see continuousDispatchErr's own doc comment in main.go) and
+// pinned directly, in isolation from any specific call path, by
+// TestContinuousDispatchErr_ImageStaleWinsOverFirstQueryErr and its sibling
+// tests below.
 func TestRunExitCode_ContinuousDispatch_ImageStaleOnFirstRefillWithTransientDiscoverError_ReturnsExitCode4(t *testing.T) {
 	c := baseConfig()
 	c.label = "ready-for-agent"
@@ -485,11 +495,62 @@ func TestRunExitCode_ContinuousDispatch_ImageStaleOnFirstRefillWithTransientDisc
 		settle:       settle.NewFake(),
 	}
 
-	if got := runExitCode(lc); got != 4 {
-		t.Errorf("runExitCode(lc) = %d, want 4 (waves.ErrImageStale)", got)
-	}
+	out := testutil.CaptureStdout(t, func() {
+		if got := runExitCode(lc); got != 4 {
+			t.Errorf("runExitCode(lc) = %d, want 4 (waves.ErrImageStale)", got)
+		}
+	})
 	if len(fr.RunCalls) != 0 {
 		t.Errorf("RunCalls: got %d, want 0 (no Box launches once the probe is stale)", len(fr.RunCalls))
+	}
+	if strings.Contains(out, "==> querying open") {
+		t.Errorf("stdout must not contain \"==> querying open\" (heldBack discover() call is reporting-only, not a real poll):\n%s", out)
+	}
+}
+
+// TestContinuousDispatchErr_ImageStaleWinsOverFirstQueryErr proves
+// continuousDispatchErr's top priority directly: a wrapped ErrImageStale
+// wins even when firstQueryErr is a distinct, non-nil error. This is the
+// precedence runContinuousDispatch's own doc comment relies on, and which
+// TestRunExitCode_ContinuousDispatch_ImageStaleOnFirstRefillWithTransientDiscoverError_ReturnsExitCode4
+// can no longer exercise end-to-end now that the stale-drain report's
+// heldBack query never touches firstQueryErr (issue #2777).
+func TestContinuousDispatchErr_ImageStaleWinsOverFirstQueryErr(t *testing.T) {
+	err := fmt.Errorf("refill: %w", waves.ErrImageStale)
+	firstQueryErr := errors.New("transient: tracker hiccup")
+
+	got := continuousDispatchErr(err, firstQueryErr)
+
+	if !errors.Is(got, waves.ErrImageStale) {
+		t.Errorf("continuousDispatchErr(err, firstQueryErr) = %v, want errors.Is(got, waves.ErrImageStale)", got)
+	}
+}
+
+// TestContinuousDispatchErr_FirstQueryErrWinsWhenNotStale proves
+// continuousDispatchErr's second priority: when err is not ErrImageStale, a
+// non-nil firstQueryErr wins over err itself — the startup-query-failure
+// surfacing runContinuousDispatch's own doc comment describes.
+func TestContinuousDispatchErr_FirstQueryErrWinsWhenNotStale(t *testing.T) {
+	firstQueryErr := errors.New("first query: distinct sentinel")
+	err := errors.New("some other refill error")
+
+	got := continuousDispatchErr(err, firstQueryErr)
+
+	if got != firstQueryErr {
+		t.Errorf("continuousDispatchErr(err, firstQueryErr) = %v, want firstQueryErr (%v)", got, firstQueryErr)
+	}
+}
+
+// TestContinuousDispatchErr_FallsBackToRawErr proves continuousDispatchErr's
+// fallback: with neither ErrImageStale nor a firstQueryErr in play, the raw
+// err passes through unchanged.
+func TestContinuousDispatchErr_FallsBackToRawErr(t *testing.T) {
+	err := errors.New("raw refill error")
+
+	got := continuousDispatchErr(err, nil)
+
+	if got != err {
+		t.Errorf("continuousDispatchErr(err, nil) = %v, want err (%v)", got, err)
 	}
 }
 

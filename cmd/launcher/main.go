@@ -1315,6 +1315,22 @@ func queryOpenIssues(c config, it forge.IssueTracker) ([]issue, error) {
 	return issues, nil
 }
 
+// readinessFor resolves waveIssues/edges/sources/failed from a raw issues
+// batch via toWaveIssues + waves.NewReadiness — shared by discover, which
+// must call logDiscoveryPoll on the raw issues between its own
+// queryOpenIssues and this call (see discover's own comment on why that
+// announcement has to run before readinessFor's DepsOf fan-out), and
+// discoverReporting, which has no announce-timing constraint of its own and
+// so chains queryOpenIssues straight into this call.
+func readinessFor(it forge.IssueTracker, issues []issue) ([]waves.Issue, map[string][]string, waves.Sources, map[string]bool, error) {
+	waveIssues := toWaveIssues(issues)
+	result, err := waves.NewReadiness(it, waveIssues)
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
+	return waveIssues, result.Edges, result.Sources, result.Failed, nil
+}
+
 // logDiscoveryPoll decides whether a continuous-dispatch refill poll should
 // print the "==> querying open" announcement, then records this poll's issue
 // numbers into seen. The first poll of a run always announces — the #1645
@@ -1522,6 +1538,30 @@ func run(lc *launchContext) error {
 	return reconcileAfterDispatch(c, it, cf, lp, pwd, os.Stdout)
 }
 
+// continuousDispatchErr picks runContinuousDispatch's terminal error from
+// RunContinuous's own return, in priority order: err's ErrImageStale wins
+// over a stashed firstQueryErr. As of #2777 (on top of #2780's own
+// unreachability proof for a genuine first-discover error masked by later,
+// independently-detected staleness — see the call site's own comment), no
+// currently-reachable production path sets both simultaneously: the
+// stale-transition heldBack query that used to be the one live masking case
+// now runs through cfg.DiscoverReporting, which never touches
+// firstQueryErr. This priority is kept as documented, tested intent rather
+// than a live guard, in case a future caller reintroduces a path that can
+// set both. See the TestContinuousDispatchErr_* tests in run_test.go,
+// which pin this precedence directly against this helper in isolation from
+// any specific call path — the only way to test it at all now that no
+// reachable scenario exercises it end-to-end.
+func continuousDispatchErr(err, firstQueryErr error) error {
+	if errors.Is(err, waves.ErrImageStale) {
+		return waves.ErrImageStale
+	}
+	if firstQueryErr != nil {
+		return firstQueryErr
+	}
+	return err
+}
+
 // runContinuousDispatch is the entry point for CONTINUOUS_DISPATCH: the
 // opt-in slot-refill dispatch mode (#527). It hands off straight to
 // waves.RunContinuous with a Discoverer that re-runs the label query and
@@ -1568,16 +1608,47 @@ func runContinuousDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, 
 		// so logDiscoveryPoll finds nothing new and stays silent -- this
 		// poll simply never gets announced, unlike the pre-#1666 code that
 		// printed the query line on every poll regardless of outcome.
+		//
+		// logDiscoveryPoll runs before readinessFor's DepsOf fan-out below
+		// on purpose: this announcement is about the poll itself, not about
+		// how long readiness resolution takes, so a slow per-issue DepsOf
+		// round-trip must never delay "==> querying open" behind it.
 		logDiscoveryPoll(c, issues, wasFirst, seenIssues)
 		if err != nil {
 			return nil, nil, nil, nil, err
 		}
-		waveIssues := toWaveIssues(issues)
-		result, err := waves.NewReadiness(it, waveIssues)
+		waveIssues, edges, sources, failed, err := readinessFor(it, issues)
 		if err != nil {
 			return nil, nil, nil, nil, err
 		}
-		return waveIssues, result.Edges, result.Sources, result.Failed, nil
+		return waveIssues, edges, sources, failed, nil
+	}
+	// discoverReporting is a pure, side-effect-free alternative to discover,
+	// wired into cfg.DiscoverReporting below and used only for the
+	// stale-transition drain report's heldBack computation
+	// (waves.Config.DiscoverReporting's own doc comment). That computation
+	// must never call logDiscoveryPoll: the CLI's discover closure above
+	// prints "==> querying open" as a side effect on every call, which is
+	// right for a real poll but misleading here, since a reporting-only
+	// heldBack query never represents an actual dispatch attempt (issue
+	// #2777). It also must not touch discover's own
+	// firstQuery/firstQueryEmpty/firstQueryErr/seenIssues state, since it
+	// isn't a real poll either. See queryOpenIssues's own doc comment,
+	// which already anticipates exactly this: "so a caller that polls
+	// repeatedly ... can decide for itself whether this poll is worth
+	// announcing." Unlike discover, it has no announce-timing constraint of
+	// its own, so it goes straight from queryOpenIssues to readinessFor with
+	// no raw issues slice to thread through in between.
+	discoverReporting := func() ([]waves.Issue, map[string][]string, waves.Sources, map[string]bool, error) {
+		issues, err := queryOpenIssues(c, it)
+		if err != nil {
+			return nil, nil, nil, nil, err
+		}
+		waveIssues, edges, sources, failed, err := readinessFor(it, issues)
+		if err != nil {
+			return nil, nil, nil, nil, err
+		}
+		return waveIssues, edges, sources, failed, nil
 	}
 
 	guard := freshness.NewGuard(pwd)
@@ -1598,80 +1669,60 @@ func runContinuousDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, 
 
 	cfg := wavesConfig(c)
 	cfg.SeedScopeOf = localloop.SeedScopeResolver(it, cf)
+	cfg.DiscoverReporting = discoverReporting
 	if err := waves.RunContinuous(cfg, nil, it, cf, pwd, f, s, discover, fresh); err != nil {
-		// ErrImageStale deliberately takes priority over firstQueryErr
-		// below when both are non-nil (issue #2780's Option 1: leave this
-		// order as-is). The only way both can be non-nil at once: refill's
-		// stale-drain report (see continuous.go) makes refill's very first
-		// staleness detection issue an extra, reporting-only discover()
-		// call (continuous.go's refill, around the `case !cfg.PreResolved`
-		// branch), and if that call is also the run's first-ever
-		// discover() call, a transient error from it sets firstQueryErr as
-		// well as staleResult -- without this priority, that error would
-		// flatten the more specific, higher-priority ErrImageStale/exit-4
-		// outcome into a raw error.
+		// continuousDispatchErr deliberately keeps ErrImageStale ahead of
+		// firstQueryErr when both are non-nil (issue #2780's Option 1:
+		// leave this order as-is). As of #2780, the only way both could be
+		// non-nil at once was: refill's stale-drain report (see
+		// continuous.go) made refill's very first staleness detection
+		// issue an extra, reporting-only discover() call, and if that call
+		// was also the run's first-ever discover() call, a transient error
+		// from it set firstQueryErr as well as staleResult.
 		//
 		// A genuine (non-reporting-only) first-ever discover() error can
 		// never coexist with staleness detected independently *later* in
-		// the same run, so this check can only ever mask the
-		// reporting-only case above, never a real, separate error.
-		// Reasoning: refill (continuous.go's refill closure) calls fresh()
-		// first; when fresh() says not-stale, refill's only discover()
-		// call is the genuine one, and if that's the run's first-ever
-		// discover() call and it errors, refill logs to stderr and returns
-		// false before ever reaching the dispatch/launch code -- no Box
-		// ever launches. RunContinuous's bootstrap is
-		// `mu.Lock(); drainRefill(); for outstanding > 0 { idle.Wait() };
-		// closed = true; mu.Unlock()`, and drainRefill is
-		// `for refill() { n++ }`: since that one refill() call already
-		// returned false, drainRefill's loop body never runs again, so
-		// outstanding stays 0 and the `for outstanding > 0` loop's body --
-		// the only place idle.Wait() releases mu -- never runs either. mu
-		// is therefore held continuously from Lock() to Unlock() with no
-		// gap for the poll-ticker or grow-resize listener goroutines to
-		// acquire it and run another refill()/fresh() call. Both of those
-		// goroutines are started before this Lock(), but neither ever
-		// reaches mu.Lock() at all during this call, gap or no gap: the
-		// headless path (nil Session) always builds its own fixed,
-		// never-resized Limiter (continuous.go's RunContinuous, around
-		// `limiter = NewLimiter(cfg.MaxParallel)`), so the grow listener's
-		// Resized() case can never fire; the poll ticker's first tick is
-		// at least pollInterval away (a waves-package-private field,
-		// defaulting to 30s, that main.go has no way to override), and
-		// RunContinuous closes both goroutines down (growDone/pollDone)
-		// immediately after this Unlock(), long before a real 30s could
-		// elapse. RunContinuous returns almost immediately
-		// (ErrOpenNoneDispatchable, since stale and dispatchedAny both
-		// stay false) before fresh() is ever called a second time. So
-		// there is no "later" in this run for staleness to be
-		// independently detected in. And even in the one reachable
-		// masking case, the error isn't silently lost: refill's
-		// reporting-only discover() already prints it to stderr the moment
-		// it happens, before RunContinuous returns -- masking here only
-		// changes the process exit code, not the diagnostic.
+		// the same run — see
+		// TestRunContinuousDispatch_GenuineFirstDiscoverErrorNeverReachesLaterStaleness
+		// for the full unreachability proof (refill's bootstrap never
+		// releases its mutex to a second refill once a genuine first
+		// discover() call has already failed and aborted the run). That
+		// left the reporting-only case above as the only reachable one —
+		// and #2777 closes that too: the heldBack query now runs through
+		// cfg.DiscoverReporting (the discoverReporting closure below),
+		// which never touches firstQueryErr at all. So there is no
+		// currently-reachable production path where both err and
+		// firstQueryErr are non-nil simultaneously; this priority is kept
+		// as documented, tested intent (see continuousDispatchErr's own
+		// doc comment) rather than a live masking guard, in case a future
+		// caller reintroduces a path that can set both.
 		//
 		// See TestRunExitCode_ContinuousDispatch_ImageStaleOnFirstRefillWithTransientDiscoverError_ReturnsExitCode4
-		// (the masked-but-stderr-logged case),
-		// TestRunContinuousDispatch_GenuineFirstDiscoverErrorNeverReachesLaterStaleness
+		// (the historical masked-but-stderr-logged case, now proven inert
+		// by #2777), TestRunContinuousDispatch_GenuineFirstDiscoverErrorNeverReachesLaterStaleness
 		// (pins that a genuine first-discover error can't reach a later
-		// staleness detection), and
-		// TestRun_ContinuousDispatch_StartupQueryError_Propagates (the
-		// never-stale, real-error-surfaces case).
-		if errors.Is(err, waves.ErrImageStale) {
+		// staleness detection), TestRun_ContinuousDispatch_StartupQueryError_Propagates
+		// (the never-stale, real-error-surfaces case), and
+		// TestContinuousDispatchErr_ImageStaleWinsOverFirstQueryErr and its
+		// siblings (continuousDispatchErr's own precedence, pinned directly
+		// against the helper in isolation — not this switch, which no
+		// reachable scenario exercises end-to-end).
+		switch terminal := continuousDispatchErr(err, firstQueryErr); {
+		case errors.Is(terminal, waves.ErrImageStale):
 			if guard.Classify(staleResult) == freshness.HostTainted {
 				fmt.Fprintln(os.Stdout, freshness.HostTaintDiagnostic(c.baseBranch, staleResult.Rev, c.flakeImageAttr, staleResult.TipTag, c.imageTag))
 				return errImageHostTainted
 			}
 			return waves.ErrImageStale
-		}
-		// refill swallows every discover error to stderr and retries on the
-		// next trigger (a transient-tracker-hiccup tolerance that's fine for
-		// refill 2+, but the first call has no next trigger to retry on once
-		// nothing ever dispatches — see RunContinuous). Surface that first
-		// error here instead of letting it flatten into
-		// ErrOpenNoneDispatchable/exit 3, matching the raw-error/exit-1
-		// result the removed precheck gave a startup query failure.
-		if firstQueryErr != nil {
+		case firstQueryErr != nil:
+			// refill swallows every discover error to stderr and retries on
+			// the next trigger (a transient-tracker-hiccup tolerance that's
+			// fine for refill 2+, but the first call has no next trigger to
+			// retry on once nothing ever dispatches — see RunContinuous).
+			// Surface that first error here instead of letting it flatten
+			// into ErrOpenNoneDispatchable/exit 3, matching the
+			// raw-error/exit-1 result the removed precheck gave a startup
+			// query failure.
 			return firstQueryErr
 		}
 		if errors.Is(err, waves.ErrOpenNoneDispatchable) && firstQueryEmpty {
