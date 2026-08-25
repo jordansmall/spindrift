@@ -310,16 +310,17 @@ func TestGatesIssueTrackerWriteAxisResearch(t *testing.T) {
 	for _, tc := range cases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			got := Gates(Env{
+			env := Env{
 				DispatchKind:     "research",
 				FilerEnabled:     tc.filerEnabled,
 				TrackerAxisRead:  tc.trackerAxisRead,
 				TrackerAxisWrite: tc.trackerAxisWrite,
 				BoxWriteEnabled:  tc.boxWriteEnabled,
-			})
+			}
+			got := Gates(env)
 			for k, want := range tc.want {
 				if got[k] != want {
-					t.Errorf("Gates(%+v)[%q] = %v, want %v", tc, k, got[k], want)
+					t.Errorf("Gates(%+v)[%q] = %v, want %v", env, k, got[k], want)
 				}
 			}
 		})
@@ -561,17 +562,18 @@ func TestGatesFilerWriteMechanismResearch(t *testing.T) {
 	for _, tc := range cases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			got := Gates(Env{
+			env := Env{
 				DispatchKind:        "research",
 				FilerEnabled:        tc.filerEnabled,
 				TrackerAxisRead:     tc.trackerAxisRead,
 				TrackerAxisFiler:    tc.trackerAxisFiler,
 				BoxWriteEnabled:     tc.boxWriteEnabled,
 				OrchestratorEnabled: tc.orchestratorEnabled,
-			})
+			}
+			got := Gates(env)
 			for k, want := range tc.want {
 				if got[k] != want {
-					t.Errorf("Gates(%+v)[%q] = %v, want %v", tc, k, got[k], want)
+					t.Errorf("Gates(%+v)[%q] = %v, want %v", env, k, got[k], want)
 				}
 			}
 		})
