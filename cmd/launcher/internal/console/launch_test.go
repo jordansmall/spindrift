@@ -4,6 +4,8 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -12,6 +14,7 @@ import (
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/runner"
 	"spindrift.dev/launcher/internal/settle"
+	"spindrift.dev/launcher/internal/testutil"
 	"spindrift.dev/launcher/internal/waves"
 )
 
@@ -433,6 +436,98 @@ func TestQueue_Discover_AlreadyCompletePick_NeverLaunches(t *testing.T) {
 	}
 	if got := q.Snapshot()[0].State; got != PickDissolved {
 		t.Errorf("pick state = %v, want dissolved (never claimed)", got)
+	}
+}
+
+// TestLauncher_StaleDrainReportsPendingCountAsHeldBack verifies a review
+// finding on #2678: Console's runStack (launcher.go) wires
+// waves.Config.PendingCount to l.queueRef().PendingCount(st.kind), so the
+// stale-drain report's heldBack number reflects Queue's own pure
+// still-queued/held count for a PreResolved caller instead of staying stuck
+// at 0 (the pre-fix behaviour, since Console can't safely call
+// Queue.Discover a second time just to count -- its claim is an
+// inseparable side effect). Two picks are queued with MaxParallel=2: the
+// first claims and starts running (blocked on a release channel) before the
+// freshness check reports stale on the very next refill attempt, leaving
+// the second pick still PickQueued. The drain report -- observable via both
+// the stdout Console() line and the drain.log HostLog() line -- must show
+// heldBack=1 (the still-queued pick), not 0.
+func TestLauncher_StaleDrainReportsPendingCountAsHeldBack(t *testing.T) {
+	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress"})
+	f.SetIssue(forge.Issue{Number: "42", Title: "first", Labels: []string{"ready-for-agent"}})
+	f.SetIssue(forge.Issue{Number: "43", Title: "second", Labels: []string{"ready-for-agent"}})
+
+	q := NewQueue()
+	q.Add(Pick{Number: "42", Title: "first", State: PickQueued})
+	q.Add(Pick{Number: "43", Title: "second", State: PickQueued})
+
+	fr := runner.NewFake()
+	release42 := make(chan struct{})
+	fr.RunFunc = func(box runner.Box) error {
+		if box.Issue == "42" {
+			<-release42
+		}
+		return nil
+	}
+
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	drv, err := driver.New("")
+	if err != nil {
+		t.Fatalf("driver.New: %v", err)
+	}
+	factory, err := dispatch.NewFactory(dispatch.Config{}, dir, fr, drv, dispatch.RealClock())
+	if err != nil {
+		t.Fatalf("dispatch.NewFactory: %v", err)
+	}
+	t.Cleanup(factory.Cleanup)
+
+	// Fresh for the first refill (claims and launches #42), stale for every
+	// refill after -- including the attempt to fill the second slot -- so
+	// #43 stays queued rather than being claimed by a second Discover call.
+	var freshMu sync.Mutex
+	freshCalls := 0
+	freshFn := func() (bool, bool, string) {
+		freshMu.Lock()
+		defer freshMu.Unlock()
+		freshCalls++
+		if freshCalls == 1 {
+			return true, true, "fresh"
+		}
+		return true, false, "rebuild needed (base tip changed image inputs)"
+	}
+
+	launch := &Launcher{CodeForge: f, Factory: factory, Settle: settle.NewFake(), queue: q, MaxParallel: 2, Fresh: freshFn}
+
+	stdout := testutil.CaptureStdout(t, func() {
+		launch.tryLaunch(f, dir)
+		close(release42)
+		launch.Wait()
+	})
+
+	if !strings.Contains(stdout, "1 issue(s) held back") {
+		t.Fatalf("stdout: got %q, want a drain report line mentioning 1 issue(s) held back (pick #43, still queued)", stdout)
+	}
+
+	logPath := filepath.Join(dispatch.HostLogDirFor(dir), "drain.log")
+	logBytes, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("ReadFile(%s): %v", logPath, err)
+	}
+	log := string(logBytes)
+	if !strings.Contains(log, "heldBack=1") {
+		t.Fatalf("drain.log: got %q, want heldBack=1", log)
+	}
+
+	snap := q.Snapshot()
+	got := map[string]PickState{}
+	for _, p := range snap {
+		got[p.Number] = p.State
+	}
+	if got["43"] != PickQueued {
+		t.Errorf("pick #43 state = %v, want still PickQueued (never claimed by the stale refill attempt)", got["43"])
 	}
 }
 

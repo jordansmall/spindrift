@@ -684,7 +684,16 @@ func (l *Launcher) runStack(st launchStack, pwd string) bool {
 	// in-progress issue's touched files. TestRunContinuous_ConsoleConfig_SkipsRedundantClaim
 	// and TestRunContinuous_DivergentLabels_DoubleClaims (launch_test.go)
 	// pin this: diverging Label from InProgressLabel double-claims.
-	err := waves.RunContinuous(waves.Config{PreResolved: true}, &waves.Session{Limiter: l.limiter(), Terminated: l.registry()}, st.tracker, l.CodeForge, pwd, st.factory, queueSettler{st.settle, l.queueRef(), l.signalRefresh, l.registry()}, discover, l.freshnessChecker())
+	err := waves.RunContinuous(waves.Config{
+		PreResolved: true,
+		// PendingCount gives the stale-drain report's heldBack number
+		// (#2678) a pure read of Queue's own still-queued depth for
+		// st.kind, rather than the discover()+claim path RunContinuous
+		// falls back to for every other PreResolved==false caller --
+		// Queue.Discover's claim side effect (queue.go) makes calling it a
+		// second time purely for a count unsafe here.
+		PendingCount: func() int { return l.queueRef().PendingCount(st.kind) },
+	}, &waves.Session{Limiter: l.limiter(), Terminated: l.registry()}, st.tracker, l.CodeForge, pwd, st.factory, queueSettler{st.settle, l.queueRef(), l.signalRefresh, l.registry()}, discover, l.freshnessChecker())
 
 	if errors.Is(err, waves.ErrImageStale) {
 		// RunContinuous's own "stale" flag is a one-shot latch for this

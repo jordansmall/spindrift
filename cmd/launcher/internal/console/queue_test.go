@@ -143,6 +143,34 @@ func TestQueue_Empty(t *testing.T) {
 	}
 }
 
+// TestQueue_PendingCount_CountsQueuedOnlyOfMatchingKind verifies PendingCount
+// (#2678) counts only picks in state PickQueued — genuinely ready to launch,
+// just waiting for a slot — whose effectiveKind matches the requested kind.
+// PickHeld never counts: per its own doc (pick.go), a held pick has declared
+// blockers that are not all satisfied yet, so it is not ready to dispatch,
+// matching the headless countReady semantics in waves/continuous.go. A
+// running, settled, dissolved, terminated, or failed pick never counts
+// either, regardless of kind, and a pick of the other kind never counts,
+// regardless of state. This is a pure read (no Discover-style claim side
+// effect), unlike Queue.Discover, which is why RunContinuous's stale-drain
+// report (#2678) reads it instead for a PreResolved caller like Console.
+func TestQueue_PendingCount_CountsQueuedOnlyOfMatchingKind(t *testing.T) {
+	q := NewQueue()
+	q.Add(Pick{Number: "1", State: PickQueued, Kind: KindWork})
+	q.Add(Pick{Number: "2", State: PickHeld, Kind: KindWork})
+	q.Add(Pick{Number: "3", State: PickRunning, Kind: KindWork})
+	q.Add(Pick{Number: "4", State: PickSettled, Kind: KindWork})
+	q.Add(Pick{Number: "5", State: PickQueued, Kind: KindResearch})
+	q.Add(Pick{Number: "6", State: PickHeld, Kind: KindResearch})
+
+	if got := q.PendingCount(KindWork); got != 1 {
+		t.Errorf("PendingCount(KindWork) = %d, want 1 (queued #1 only; held #2 not ready)", got)
+	}
+	if got := q.PendingCount(KindResearch); got != 1 {
+		t.Errorf("PendingCount(KindResearch) = %d, want 1 (queued #5 only; held #6 not ready)", got)
+	}
+}
+
 // TestQueue_Discover_ClaimsAndReturnsFrontQueuedPick verifies Discover
 // performs the atomic Dispatchable->InProgress claim on the front-most
 // queued pick, marks it running, and returns it as a single-issue batch —
