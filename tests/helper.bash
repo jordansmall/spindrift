@@ -129,10 +129,23 @@ wait_for_log_lines() {
 assert_timeout_rejected() {
   local log="$1" timeout_value="$2" absent_substring="${3:-}"
   run wait_for_log_lines "$log" '^run ' 1 "$timeout_value"
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"timeout must be a positive integer"* ]]
-  if [ -n "$absent_substring" ]; then
-    [[ "$output" != *"$absent_substring"* ]]
+  # Each assertion below explicitly returns 1 on failure, with its own
+  # diagnostic, rather than relying on implicit `set -e` propagation: this
+  # helper is called from a context (tests/run-batch-limits.bats'
+  # malformed-timeout loop) that suspends errexit for its call, so a bare
+  # failing statement would otherwise just fall through instead of aborting
+  # the helper.
+  if [ "$status" -ne 1 ]; then
+    echo "assert_timeout_rejected: expected status 1, got $status" >&2
+    return 1
+  fi
+  if [[ "$output" != *"timeout must be a positive integer"* ]]; then
+    echo "assert_timeout_rejected: output missing expected substring [timeout must be a positive integer]: $output" >&2
+    return 1
+  fi
+  if [ -n "$absent_substring" ] && [[ "$output" == *"$absent_substring"* ]]; then
+    echo "assert_timeout_rejected: output unexpectedly contains [$absent_substring]: $output" >&2
+    return 1
   fi
 }
 
