@@ -146,11 +146,40 @@ type Config struct {
 	// PR/issue state.
 	SeedScopeOf func(num string) forge.SeedScope
 
+	// PendingCount, when set, gives RunContinuous a cheap, side-effect-free
+	// way to read how many candidates are still queued for the
+	// stale-drain report's heldBack number (#2678) — the alternative to
+	// calling Discoverer again, which PreResolved callers (Console's
+	// Queue.Discover) cannot safely do purely for a report a second time
+	// without claiming a pick that then never dispatches. nil (every
+	// non-Console construction site) falls back to RunContinuous's own
+	// discover()+readiness-filter computation.
+	PendingCount func() int
+
+	// OnDrainReport, when set, is called with every DrainReport RunContinuous
+	// emits (both the zero-outstanding-at-stale-time case and the
+	// drain-finished case, #2678) -- additive to emitDrainReport's own
+	// stdout print and drain.log append, which stay unchanged for every
+	// headless caller. Console's runStack wires this to
+	// Launcher.recordDrainReport so a stale-drain summary reaches a live TUI
+	// session, which never sees emitDrainReport's raw stdout write (it runs
+	// under tea.WithAltScreen()). nil (every non-Console construction site)
+	// means no-op; RunContinuous guards every call with a nil check.
+	OnDrainReport func(DrainReport)
+
 	// pollInterval overrides RunContinuous's background refill-poll cadence
 	// (issue #1637) — zero (every production construction site) means "use
 	// defaultPollInterval"; only same-package tests shrink it so the poll
 	// test doesn't wait out a real-time interval.
 	pollInterval time.Duration
+
+	// now overrides RunContinuous's clock (issue #2678's stale-drain report
+	// reads it to timestamp/accumulate free-slot-seconds) — nil (every
+	// production construction site) means time.Now; only same-package tests
+	// (continuous_test.go) inject a deterministic sequence so the
+	// accumulated freeSlotSecs value is exactly assertable instead of only
+	// >=0-checkable.
+	now func() time.Time
 }
 
 // NewPlan decides how in.Issues should be dispatched. Every origin —

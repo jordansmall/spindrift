@@ -14,10 +14,15 @@ type Limiter struct {
 	cond *sync.Cond
 	cap  int
 	live int
-	// grow is signaled (coalesced, buffered 1) every time ResizeDelta raises
-	// the cap, so a listener blocked waiting for capacity can retry right
-	// away instead of waiting for an unrelated Release.
-	grow chan struct{}
+	// resized is signaled (coalesced, buffered 1) every time ResizeDelta
+	// actually changes the cap, in either direction. RunContinuous's
+	// drain-checkpoint listener (continuous.go) is the one consumer that
+	// needs a lower too: a Console operator can drop the live cap
+	// mid-drain, and the free-slot-seconds accounting must close out the
+	// interval at the OLD cap before the new, lower one takes effect --
+	// the same retroactive-misattribution risk a raise has, just in the
+	// other direction (#2678 review finding).
+	resized chan struct{}
 }
 
 // NewLimiter returns a Limiter bounded at cap, clamped to at least 1.
@@ -25,7 +30,7 @@ func NewLimiter(cap int) *Limiter {
 	if cap < 1 {
 		cap = 1
 	}
-	l := &Limiter{cap: cap, grow: make(chan struct{}, 1)}
+	l := &Limiter{cap: cap, resized: make(chan struct{}, 1)}
 	l.cond = sync.NewCond(&l.mu)
 	return l
 }
@@ -83,44 +88,45 @@ func (l *Limiter) Cap() int {
 // clamped to at least 1, as a single lock-guarded read-modify-write —
 // unlike a separate read of Cap() followed by a write, which would read and
 // write under separate lock acquisitions and leave a window for a
-// concurrent resize to land in between. Raising the cap wakes Grown's
-// listener so a held pick can launch into the freed capacity right away;
-// lowering it only changes what future TryAcquire calls see — slots already
-// claimed are never revoked, matching ADR 0023's "lowering never terminates
-// anything."
+// concurrent resize to land in between. Any actual cap change wakes
+// Resized's listener and any goroutine blocked in Acquire, so a held pick
+// can retry into freed capacity right away; lowering it only changes what
+// future TryAcquire calls see — slots already claimed are never revoked,
+// matching ADR 0023's "lowering never terminates anything."
 func (l *Limiter) ResizeDelta(delta int) {
 	l.mu.Lock()
+	oldCap := l.cap
 	newCap := l.cap + delta
 	if newCap < 1 {
 		newCap = 1
 	}
-	grew := newCap > l.cap
 	l.cap = newCap
 	l.mu.Unlock()
-	l.signalGrow(grew)
+	if newCap != oldCap {
+		l.signalResized()
+	}
 }
 
-// signalGrow wakes Grown's listener and any Acquire waiters when grew is
-// true. Must be called after releasing l.mu, never while holding it.
-func (l *Limiter) signalGrow(grew bool) {
-	if !grew {
-		return
-	}
+// signalResized wakes Resized's listener and any Acquire waiters on any
+// actual cap change, either direction. Must be called after releasing l.mu,
+// never while holding it.
+func (l *Limiter) signalResized() {
 	l.cond.Broadcast()
 	select {
-	case l.grow <- struct{}{}:
+	case l.resized <- struct{}{}:
 	default:
 	}
 }
 
-// Grown signals (coalesced, buffered 1) every time ResizeDelta raises the
-// cap. A received signal means only "at least one unit of capacity freed,"
-// never "exactly one": a burst of rapid raises can coalesce into a single
-// delivered signal even though Cap()/Live() already reflect every one of
-// them. A caller must drain until a receive would block (or otherwise
-// re-check Cap()/Live()) rather than treat one signal as license for one
-// refill — see RunContinuous's grow listener (continuous.go) for the drain
-// pattern this contract requires.
-func (l *Limiter) Grown() <-chan struct{} {
-	return l.grow
+// Resized signals (coalesced, buffered 1) every time ResizeDelta actually
+// changes the cap, in either direction. A received signal means only "at
+// least one resize happened," never "exactly one," and never which
+// direction: a burst of rapid resizes can coalesce into a single delivered
+// signal even though Cap()/Live() already reflect every one of them. A
+// caller must drain until a receive would block (or otherwise re-check
+// Cap()/Live()) rather than treat one signal as license for one refill. See
+// RunContinuous's drain-checkpoint listener (continuous.go) for the pattern
+// this contract requires.
+func (l *Limiter) Resized() <-chan struct{} {
+	return l.resized
 }

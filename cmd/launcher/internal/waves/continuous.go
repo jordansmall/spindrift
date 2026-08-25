@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -15,7 +16,7 @@ import (
 )
 
 // defaultPollInterval is the background refill poll's fixed cadence (issue
-// #1637): a ticker goroutine, symmetric to the Grown() listener below,
+// #1637): a ticker goroutine, symmetric to the Resized() listener below,
 // retries drainRefill() on this interval so a transient refill miss -- an
 // eventually-consistent discover() result that doesn't yet show a
 // just-merged blocker's child as ready, a blocker resolving while every Box
@@ -24,6 +25,11 @@ import (
 // a follow-up issue (#1638) makes it an operator knob. cfg.pollInterval
 // overrides it for tests that can't wait out a real interval.
 const defaultPollInterval = 30 * time.Second
+
+// drainMarker is the file emitDrainReport appends each stale-drain report's
+// HostLog line to, under .spindrift/logs/ (#2678) -- named like engine.go's
+// blockedMarker rather than left as a scattered string literal.
+const drainMarker = "drain.log"
 
 // ErrImageStale is returned by RunContinuous when the freshness checker
 // reports the loaded image would be rebuilt against the current
@@ -92,27 +98,42 @@ func nextReady(cfg Config, it forge.IssueTracker, cf forge.CodeForge, checkOverl
 		}
 	}
 	for _, iss := range issues {
-		var unready []string
-		if !cfg.PreResolved {
-			unready = unreadyBlockers(it, cf, iss.Number, edges, cfg.SeedScopeOf)
+		ready, line := issueReadiness(cfg, it, cf, checkOverlap, iss, edges, depsOfFailed)
+		if !ready {
+			skip(iss.Number, line)
+			continue
 		}
-		switch {
-		case !cfg.PreResolved && !cfg.IgnoreBlockers && depsOfFailed[iss.Number]:
-			// Own DepsOf call failed (#752, #1103) -- edges[iss.Number] is
-			// unreliable, not a confirmed zero-blocker result. Hold rather
-			// than launch; the next refill retries.
-			skip(iss.Number, fmt.Sprintf("    ~~ #%s blocker check failed; will retry\n", iss.Number))
-		case len(unready) > 0:
-			skip(iss.Number, fmt.Sprintf("    ~~ #%s blocked by #%s; skipping\n", iss.Number, strings.Join(unready, ", #")))
-		default:
-			if collider, overlapped := checkOverlap(iss.Number); overlapped {
-				skip(iss.Number, fmt.Sprintf("    ~~ #%s touches overlap in-progress #%s; deferring\n", iss.Number, collider))
-				continue
-			}
-			return iss, true
-		}
+		return iss, true
 	}
 	return Issue{}, false
+}
+
+// issueReadiness classifies iss the same way nextReady's selection loop
+// does -- own DepsOf failure, unresolved blocker, touch-overlap -- but as a
+// pure query with no printing/dedup side effect, so it can be reused by a
+// caller that only wants to know ready-vs-not (the stale-drain heldBack
+// count, #2678) without nextReady's own skip()/logged bookkeeping. line is
+// the same non-dispatch message nextReady would otherwise print for a
+// not-ready result; it is meaningless when ready is true.
+func issueReadiness(cfg Config, it forge.IssueTracker, cf forge.CodeForge, checkOverlap func(string) (string, bool), iss Issue, edges map[string][]string, depsOfFailed map[string]bool) (ready bool, line string) {
+	var unready []string
+	if !cfg.PreResolved {
+		unready = unreadyBlockers(it, cf, iss.Number, edges, cfg.SeedScopeOf)
+	}
+	switch {
+	case !cfg.PreResolved && !cfg.IgnoreBlockers && depsOfFailed[iss.Number]:
+		// Own DepsOf call failed (#752, #1103) -- edges[iss.Number] is
+		// unreliable, not a confirmed zero-blocker result. Hold rather
+		// than launch; the next refill retries.
+		return false, fmt.Sprintf("    ~~ #%s blocker check failed; will retry\n", iss.Number)
+	case len(unready) > 0:
+		return false, fmt.Sprintf("    ~~ #%s blocked by #%s; skipping\n", iss.Number, strings.Join(unready, ", #"))
+	default:
+		if collider, overlapped := checkOverlap(iss.Number); overlapped {
+			return false, fmt.Sprintf("    ~~ #%s touches overlap in-progress #%s; deferring\n", iss.Number, collider)
+		}
+		return true, ""
+	}
 }
 
 // dropClaimed filters a refill's discover result against the in-run claimed
@@ -130,6 +151,48 @@ func dropClaimed(issues []Issue, claimed map[string]bool) []Issue {
 		}
 	}
 	return unclaimed
+}
+
+// countReady counts how many issues in the batch are actually ready to
+// dispatch -- applying nextReady's own blocked/touch-overlap/failed-check
+// filtering without its print/dedup side effects -- so the stale-drain
+// report's heldBack number (#2678) reflects issues that would genuinely
+// have launched, not every unclaimed issue sitting in the discovered batch
+// regardless of readiness.
+func countReady(cfg Config, it forge.IssueTracker, cf forge.CodeForge, checkOverlap func(string) (string, bool), issues []Issue, edges map[string][]string, depsOfFailed map[string]bool) int {
+	n := 0
+	for _, iss := range issues {
+		if ready, _ := issueReadiness(cfg, it, cf, checkOverlap, iss, edges, depsOfFailed); ready {
+			n++
+		}
+	}
+	return n
+}
+
+// emitDrainReport prints report to stdout and appends its HostLog line to
+// pwd's drain.log, swallowing any file error to stderr (#2678). Shared by
+// both emission sites -- the stale-transition branch's zero-outstanding
+// case (refill, below) and the in-flight completion goroutine's
+// drain-finished case -- so the open/write/close pattern is written once.
+// Also forwards report to cfg.OnDrainReport when set, so a Console session
+// -- which never sees this function's raw stdout write, since it runs under
+// tea.WithAltScreen() -- learns the same report through that callback
+// instead (#2678).
+func emitDrainReport(cfg Config, pwd string, report DrainReport) {
+	fmt.Print(report.Console())
+	if cfg.OnDrainReport != nil {
+		cfg.OnDrainReport(report)
+	}
+	logPath := filepath.Join(dispatch.HostLogDirFor(pwd), drainMarker)
+	logFile, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "continuous: open %s: %v\n", logPath, err)
+		return
+	}
+	defer logFile.Close()
+	if _, err := logFile.WriteString(report.HostLog()); err != nil {
+		fmt.Fprintf(os.Stderr, "continuous: write %s: %v\n", logPath, err)
+	}
 }
 
 // RunContinuous runs the opt-in slot-refill dispatch mode (#527): it fills
@@ -190,6 +253,49 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 	// race.
 	outstanding := 0
 	closed := false
+	// heldBack, drainStart, drainEnd track the stale-drain report (#2678).
+	// drainStart/drainEnd stay zero-valued until the stale verdict fires and
+	// this invocation's report is emitted; that zero value doubles as a
+	// single-emit guard against ever computing a second report for the same
+	// RunContinuous call, since the stale-transition branch below runs at
+	// most once per call.
+	heldBack := 0
+	// heldBackUnknown is set true only when the stale-transition branch's
+	// reporting-only discover() call (below) errors -- a transient tracker
+	// hiccup, not a confirmed zero-blocker result -- so both DrainReport
+	// emission sites can render "unknown" instead of silently asserting a
+	// fabricated 0 (#2678 review finding). It is never set in the
+	// cfg.PendingCount branch: that path has no discover() call to fail.
+	heldBackUnknown := false
+	var drainStart, drainEnd, drainSlotAt time.Time
+	freeSlotSecs := 0.0
+	// drainCap tracks the cap that was actually in effect since the last
+	// checkpoint -- not limiter.Cap() read live at checkpoint time. A
+	// Console operator can raise or lower the live cap mid-interval via
+	// ResizeDelta (ADR 0023); reading limiter.Cap() fresh at the next
+	// checkpoint would retroactively credit the new cap to the whole
+	// preceding interval, when only the cap that actually held during
+	// that interval is correct. checkpointDrain (below) is the only
+	// place drainCap is refreshed, and always after closing out the
+	// interval that just ended -- driven by both the completion goroutine
+	// and the resize listener (below), so a fresh read only ever applies
+	// to the interval starting now, whichever direction the resize went.
+	drainCap := 0
+	// drainInProgress reports whether a stale drain has started and not yet
+	// been reported -- drainStart is only ever set inside the stale=true
+	// branch below, so a bare stale check would be redundant with
+	// !drainStart.IsZero() here; this closure is the single definition both
+	// completion-goroutine guards below share, rather than duplicating the
+	// condition verbatim at each site.
+	drainInProgress := func() bool { return !drainStart.IsZero() && drainEnd.IsZero() }
+	// now is cfg's test override (issue #2678, so the stale-drain report's
+	// freeSlotSecs accumulation is exactly assertable from a deterministic
+	// clock sequence rather than only >=0-checkable against real wall
+	// time), or the production clock.
+	now := cfg.now
+	if now == nil {
+		now = time.Now
+	}
 
 	// refill reports whether it launched a Box, so a caller filling more
 	// than one freed slot from a single trigger (the grow listener below,
@@ -199,6 +305,30 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 	// drainRefill is predeclared here, like refill above, so refill's
 	// completion-handler goroutine can call it before its body is assigned.
 	var drainRefill func() int
+	// checkpointDrain closes out the drain interval since the last
+	// checkpoint (or drainStart) using drainCap -- the cap that was
+	// actually in effect over that interval, not a live limiter.Cap()
+	// read -- then refreshes drainCap from the limiter for the interval
+	// that starts now. Callers must hold mu and have already confirmed
+	// drainInProgress(). Shared by the completion goroutine (below, at
+	// every Box completion) and the resize listener (below, the moment a
+	// Console "+" or "-" changes the live cap mid-drain): the resize
+	// listener's call is what actually fixes the live-sampling bug in
+	// both directions, since it closes out the pre-change interval at the
+	// pre-change cap before drainCap ever sees the new value.
+	checkpointDrain := func() {
+		checkpoint := now()
+		// A Console operator can lower the live cap mid-drain via
+		// ResizeDelta while more Boxes are outstanding than the new cap
+		// allows -- ResizeDelta never revokes an already-claimed slot
+		// (limiter.go), so drainCap-outstanding can go negative here.
+		// Clamp to zero: a lowered-below-outstanding interval has no
+		// free slots to credit, not a negative contribution that would
+		// corrupt the running total.
+		freeSlotSecs += float64(max(drainCap-outstanding, 0)) * checkpoint.Sub(drainSlotAt).Seconds()
+		drainSlotAt = checkpoint
+		drainCap = limiter.Cap()
+	}
 	refill = func() bool {
 		if stale || closed {
 			return false
@@ -216,6 +346,49 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 		if applicable && !isFresh {
 			stale = true
 			fmt.Printf("==> %s\n", msg)
+			drainStart = now()
+			drainSlotAt = drainStart
+			drainCap = limiter.Cap()
+			// heldBack only calls discover() for callers whose Discoverer is
+			// a pure query. Console's Queue.Discover (cfg.PreResolved, the
+			// only PreResolved caller today) claims the ready pick it
+			// returns as an inseparable side effect of discovering it
+			// (queue.go) -- a call here, whose result is otherwise
+			// discarded, would claim a pick this drain then never
+			// dispatches, orphaning it at InProgress. cfg.PendingCount, when
+			// set, is a pure alternative such a caller can supply instead
+			// (Console's Queue.PendingCount, #2678) -- checked first since a
+			// caller that has it available never needs the discover()
+			// fallback, PreResolved or not. When neither applies (PreResolved
+			// with no PendingCount -- no caller does this today), heldBack is
+			// reported unknown rather than risk the claim or fabricate a
+			// confirmed-looking 0 (#2678 review finding).
+			switch {
+			case cfg.PendingCount != nil:
+				heldBack = cfg.PendingCount()
+			case !cfg.PreResolved:
+				if issues, edges, _, failed, err := discover(); err != nil {
+					fmt.Fprintf(os.Stderr, "continuous: re-discover for drain report: %v\n", err)
+					heldBackUnknown = true
+				} else {
+					unclaimed := dropClaimed(issues, claimed)
+					checkOverlap := waveOverlapCheck(cfg, it, cf)
+					heldBack = countReady(cfg, it, cf, checkOverlap, unclaimed, edges, failed)
+				}
+			default:
+				heldBackUnknown = true
+			}
+			if outstanding == 0 {
+				// Nothing in flight -- the drain is already over. Report it
+				// now rather than leaving it to the completion goroutine
+				// (slice 3), which never runs when nothing is outstanding.
+				// drainEnd is set to drainStart itself, not a fresh
+				// time.Now(), so Duration() is exactly zero rather than a
+				// near-zero timing artifact.
+				drainEnd = drainStart
+				report := DrainReport{StaleAt: drainStart, DrainedAt: drainEnd, FreeSlotSecs: 0, HeldBack: heldBack, HeldBackUnknown: heldBackUnknown}
+				emitDrainReport(cfg, pwd, report)
+			}
 			return false
 		}
 		issues, edges, sources, failed, err := discover()
@@ -265,8 +438,23 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 			}
 			limiter.Release()
 			mu.Lock()
+			if drainInProgress() {
+				// A real drain is in progress and not yet finished: integrate
+				// the idle slot-time that elapsed since the last checkpoint,
+				// using the pre-decrement outstanding count -- the busy-slot
+				// count over the interval that just ended -- to derive how
+				// many slots sat free across it. checkpointDrain uses
+				// drainCap, the cap actually in effect over that interval,
+				// not a live limiter.Cap() read (#2678 review finding).
+				checkpointDrain()
+			}
 			outstanding--
 			drainRefill()
+			if drainInProgress() && outstanding == 0 {
+				drainEnd = drainSlotAt
+				report := DrainReport{StaleAt: drainStart, DrainedAt: drainEnd, FreeSlotSecs: freeSlotSecs, HeldBack: heldBack, HeldBackUnknown: heldBackUnknown}
+				emitDrainReport(cfg, pwd, report)
+			}
 			if outstanding == 0 {
 				idle.Broadcast()
 			}
@@ -294,7 +482,7 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 		return n
 	}
 
-	// growDone stops the grow listener once this call is finished; done
+	// growDone stops the resize listener once this call is finished; done
 	// confirms it has actually exited before RunContinuous returns, so no
 	// call ever leaks a goroutine watching a Limiter shared across a whole
 	// Console session.
@@ -304,15 +492,33 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 		defer close(done)
 		for {
 			select {
-			case <-limiter.Grown():
-				// A Console "+" mid-drain (ADR 0023, issue #653): the
-				// operator's raise should launch a held pick right away, not
-				// wait for an unrelated Box to settle or a background poll.
-				// Loop rather than a single refill() call: per Grown's
-				// signal-loss contract, one signal only means "at least one
-				// unit freed" (issue #766) — draining until refill does
-				// nothing catches every slot the raise actually freed.
+			case <-limiter.Resized():
+				// A Console "+" or "-" mid-drain (ADR 0023, issue #653):
+				// listen on Resized, not Grown, because a checkpoint is
+				// needed on EITHER direction, not just a raise -- a lower
+				// mid-drain is exactly as mis-attributing as a raise if the
+				// stale drainCap is left to bridge across it (#2678 review
+				// finding: the raise-only fix left the mirror-image
+				// over-crediting bug on a lower). Loop drainRefill rather
+				// than a single refill() call: per Resized's signal-loss
+				// contract, one signal only means "at least one resize
+				// happened" (issue #766's coalescing, extended) — draining
+				// until refill does nothing catches every slot a raise
+				// actually freed, and is a no-op for a lower (refill()
+				// short-circuits on stale, which always holds during a
+				// drain).
 				mu.Lock()
+				if drainInProgress() {
+					// The resize that just woke this listener is exactly
+					// the moment the live cap changed: close out the
+					// interval that just ended at drainCap, the cap that
+					// held during it, before refreshing drainCap to the
+					// new value for the interval that starts now (#2678
+					// review finding -- this is what stops the new cap
+					// from being retroactively credited to the whole
+					// preceding interval at the next checkpoint).
+					checkpointDrain()
+				}
 				drainRefill()
 				mu.Unlock()
 			case <-growDone:
