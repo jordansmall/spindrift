@@ -195,6 +195,61 @@ func TestNewConsoleFreshness_UsesRunnerKindNotRuntime(t *testing.T) {
 	}
 }
 
+// TestNewConsoleFreshness_NeverWiresLauncherDimension proves newConsoleFreshness
+// omits the launcher-freshness dimension from its freshness.Probe call
+// entirely — a blocking review finding on issue #1364, which scopes the
+// host-launcher-staleness dimension strictly to the headless
+// --continuous-dispatch wave path (main.go's runContinuousDispatch), not the
+// Console. The Console's own Rebuild only pulls the repo and rebuilds the
+// OCI image (consoleNixBuild -> runner.RunNixBuild) — it never rebuilds or
+// restarts the host launcher binary — so if the launcher dimension were
+// wired in here, a launcher-stale verdict could never actually be resolved
+// by the Console's rebuild action.
+//
+// c.flakeLauncherAttr/c.loadedLauncherHash are set to values that would
+// report launcher-stale under a real Probe call (the fake Evaluator returns
+// a launcher outPath hash that mismatches loadedLauncherHash, while the
+// image attr's outPath hash matches imageTag). If newConsoleFreshness wired
+// those two config fields into Probe, fresh() would report Applicable=true,
+// Fresh=false, with a message naming "launcher" as the stale dimension.
+// Asserting fresh() instead reports the plain image-fresh verdict proves the
+// launcher dimension was never configured on this call.
+func TestNewConsoleFreshness_NeverWiresLauncherDimension(t *testing.T) {
+	const imageHash = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	const launcherHashOnDisk = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" // mismatches loadedLauncherHash below
+
+	c := baseConfig()
+	c.runnerKind = "podman"
+	c.baseBranch = "main"
+	c.flakeImageAttr = ".#packages.x86_64-linux.agent-image"
+	c.imageTag = "spindrift:" + imageHash
+	c.flakeLauncherAttr = ".#packages.x86_64-linux.launcher"
+	c.loadedLauncherHash = "cccccccccccccccccccccccccccccccc"
+
+	eval := &freshness.Fake{
+		OutPathForAttr: map[string]string{
+			"packages.x86_64-linux.agent-image": "/nix/store/" + imageHash + "-agent-image",
+			"packages.x86_64-linux.launcher":    "/nix/store/" + launcherHashOnDisk + "-launcher",
+		},
+	}
+
+	pwd := newConsoleGitRepo(t, "main")
+	fresh, _ := newConsoleFreshness(c, pwd, eval, nil, nil)
+
+	applicable, isFresh, msg := fresh()
+	if !applicable || !isFresh {
+		t.Fatalf("fresh() = applicable=%v fresh=%v msg=%q, want applicable=true fresh=true (the launcher dimension must never be wired into the Console's Probe call)", applicable, isFresh, msg)
+	}
+	if strings.Contains(msg, "launcher") {
+		t.Errorf("fresh() message %q names the launcher, want the Console's probe to never report a launcher-driven verdict", msg)
+	}
+	for _, call := range eval.Calls {
+		if call.Attr == "packages.x86_64-linux.launcher" {
+			t.Errorf("Eval called for the launcher attr %q, want the Console's Probe call to never evaluate the launcher dimension at all", call.Attr)
+		}
+	}
+}
+
 // failEvaluator is a freshness.Evaluator that fails the test if Eval is ever
 // called — used to prove a probe call short-circuited before reaching the
 // OCI eval path.

@@ -30,9 +30,18 @@ import (
 // rebuild passes through unchanged. build returns its captured nix output
 // (issue #765) alongside its error, so a background rebuild never writes
 // directly to the Console's own stdout/stderr.
+//
+// Unlike runContinuousDispatch's Probe call, this one deliberately passes
+// "" for both the launcher-attr and loaded-launcher-hash params — issue
+// #1364 scopes the host-launcher-freshness dimension to the headless
+// --continuous-dispatch wave path only. Rebuild (above) only pulls the repo
+// and rebuilds the OCI image via consoleNixBuild; it has no way to rebuild
+// or restart the host launcher binary itself. Wiring the launcher dimension
+// in here would let Probe report a launcher-stale verdict the Console can
+// never actually resolve.
 func newConsoleFreshness(c config, pwd string, eval freshness.Evaluator, pull func() (string, string, error), build func() (string, error)) (waves.FreshnessChecker, func() (string, string, error)) {
 	probe := func() freshness.Result {
-		return freshness.Probe(c.runnerKind, pwd, c.baseBranch, c.flakeImageAttr, c.imageTag, eval)
+		return freshness.Probe(c.runnerKind, pwd, c.baseBranch, c.flakeImageAttr, c.imageTag, "", "", eval)
 	}
 	return newConsoleFreshnessChecker(c.baseBranch, probe, pull, build)
 }

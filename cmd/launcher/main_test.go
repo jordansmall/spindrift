@@ -4770,6 +4770,23 @@ func TestLoadConfig_FlakeLauncherAttr_ReadsArtifact(t *testing.T) {
 	}
 }
 
+// TestLoadConfig_LoadedLauncherHash_ReadsArtifact proves loadConfig() reads
+// LAUNCHER_CURRENCY_HASH into config.loadedLauncherHash, mirroring how
+// FLAKE_LAUNCHER_ATTR/flakeLauncherAttr is wired above (issue #1364 slice 4):
+// freshness.Probe's launcher-staleness comparison needs the loaded
+// launcher's own store hash, computed at build time by lib/preambles.nix and
+// lib/mkHarness.nix (issue #2677) and rendered into the artifacts section
+// alongside FLAKE_LAUNCHER_ATTR, distinct from the OCI image's IMAGE_TAG.
+func TestLoadConfig_LoadedLauncherHash_ReadsArtifact(t *testing.T) {
+	t.Setenv("LAUNCHER_CURRENCY_HASH", "abc123")
+
+	c := loadConfig()
+
+	if c.loadedLauncherHash != "abc123" {
+		t.Errorf("loadConfig().loadedLauncherHash = %q, want %q", c.loadedLauncherHash, "abc123")
+	}
+}
+
 func contains(ss []string, s string) bool {
 	for _, v := range ss {
 		if v == s {
