@@ -2336,6 +2336,63 @@ func TestRunContinuous_StaleDrainHeldBackExcludesBlockedIssues(t *testing.T) {
 	}
 }
 
+// TestRunContinuous_StaleDrainDiscoverReportingSkipsLoggingDiscoverer sets
+// cfg.DiscoverReporting to a pure closure returning one ready, unblocked
+// issue, and gives RunContinuous a discover param that fails the test if
+// ever invoked. It asserts the stale-drain heldBack report (both the stdout
+// line and drain.log) reflects DiscoverReporting's count, proving the
+// stale-transition branch prefers it over discover.
+func TestRunContinuous_StaleDrainDiscoverReportingSkipsLoggingDiscoverer(t *testing.T) {
+	c := baseConfig()
+	c.Label = "agent-trigger"
+	c.MaxParallel = 1
+	c.DiscoverReporting = func() ([]Issue, map[string][]string, Sources, map[string]bool, error) {
+		return []Issue{{Number: "1", Title: "one"}}, nil, nil, nil, nil
+	}
+
+	fc := forge.NewFake(dispatchLabels(c))
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.Label}})
+
+	fr := runner.NewFake()
+
+	dir := tempLogDir(t)
+	f := testFactory(t, dir, fr)
+	s := newSettle(fc, fc)
+
+	discover := func() ([]Issue, map[string][]string, Sources, map[string]bool, error) {
+		t.Errorf("discover: must not be called for the stale-drain heldBack report once cfg.DiscoverReporting is set")
+		return nil, nil, nil, nil, nil
+	}
+	fresh := func() (bool, bool, string) {
+		return true, false, "rebuild needed (base tip changed image inputs)"
+	}
+
+	var err error
+	stdout := testutil.CaptureStdout(t, func() {
+		err = RunContinuous(c, nil, fc, fc, dir, f, s, discover, fresh)
+	})
+
+	if !errors.Is(err, ErrImageStale) {
+		t.Fatalf("RunContinuous: got %v, want ErrImageStale", err)
+	}
+	if len(fr.RunCalls) != 0 {
+		t.Fatalf("RunCalls: got %v, want none (stale fired before any launch)", fr.RunCalls)
+	}
+	if !strings.Contains(stdout, "1 issue(s) held back") {
+		t.Fatalf("stdout: got %q, want a drain report line mentioning 1 issue(s) held back (from cfg.DiscoverReporting, not the discover param)", stdout)
+	}
+
+	logPath := filepath.Join(dispatch.HostLogDirFor(dir), drainMarker)
+	logBytes, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("ReadFile(%s): %v", logPath, err)
+	}
+	log := string(logBytes)
+	if !strings.Contains(log, "heldBack=1") {
+		t.Fatalf("drain.log: got %q, want heldBack=1", log)
+	}
+}
+
 // TestEmitDrainReport_OpenFailureLogsToStderr verifies a review finding on
 // #2678: emitDrainReport's drain.log open failure is swallowed to stderr
 // rather than failing the run, and does not crash or panic. pwd is a
