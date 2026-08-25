@@ -46,7 +46,11 @@ var ErrImageStale = errors.New("image stale; rebuild and re-invoke")
 // a confirmed zero-blocker issue in edges alone unless a caller checks
 // failed explicitly. RunContinuous calls it once at startup and again before
 // every slot refill, so a blocker that merges mid-run is picked up without a
-// fresh invocation.
+// fresh invocation. Config.DiscoverReporting (#2777) is a second,
+// independently-settable value of this same type: RunContinuous never calls
+// it for regular discovery, only for the stale-transition heldBack
+// computation, where it stands in for the discover param when the caller
+// needs that call to stay side-effect free.
 type Discoverer func() (issues []Issue, edges map[string][]string, sources Sources, failed map[string]bool, err error)
 
 // FreshnessChecker answers whether a refill may launch a new Box.
@@ -304,12 +308,22 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 			// fallback, PreResolved or not. When neither applies (PreResolved
 			// with no PendingCount -- no caller does this today), heldBack is
 			// reported unknown rather than risk the claim or fabricate a
-			// confirmed-looking 0 (#2678 review finding).
+			// confirmed-looking 0 (#2678 review finding). Within this case,
+			// cfg.DiscoverReporting, when set, is preferred over the discover
+			// param itself (#2777): the discover param may carry a
+			// caller-side side effect -- the CLI's log-on-poll behavior --
+			// that a reporting-only heldBack call must not trigger, so a
+			// caller with such a side effect supplies a pure
+			// DiscoverReporting closure instead.
 			switch {
 			case cfg.PendingCount != nil:
 				drain.heldBack = cfg.PendingCount()
 			case !cfg.PreResolved:
-				if issues, edges, _, failed, err := discover(); err != nil {
+				reportDiscover := discover
+				if cfg.DiscoverReporting != nil {
+					reportDiscover = cfg.DiscoverReporting
+				}
+				if issues, edges, _, failed, err := reportDiscover(); err != nil {
 					fmt.Fprintf(os.Stderr, "continuous: re-discover for drain report: %v\n", err)
 					drain.heldBackUnknown = true
 				} else {

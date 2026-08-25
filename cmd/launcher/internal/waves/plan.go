@@ -156,6 +156,18 @@ type Config struct {
 	// discover()+readiness-filter computation.
 	PendingCount func() int
 
+	// DiscoverReporting, when set, is a pure alternative to the discover
+	// param, used instead of it for the stale-transition branch's heldBack
+	// computation (#2678) in the !cfg.PreResolved case. The discover param
+	// may carry a caller-side side effect (the CLI's log-on-poll behavior,
+	// #2777) that a reporting-only call must not trigger — calling it a
+	// second time purely to count heldBack would print a misleading
+	// poll-log line even though no real poll happened.
+	// nil (every construction site except the CLI's headless
+	// runContinuousDispatch) falls back to the discover param, today's
+	// unchanged behavior.
+	DiscoverReporting Discoverer
+
 	// OnDrainReport, when set, is called with every DrainReport RunContinuous
 	// emits (both the zero-outstanding-at-stale-time case and the
 	// drain-finished case, #2678) -- additive to emitDrainReport's own
