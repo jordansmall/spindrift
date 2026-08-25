@@ -75,6 +75,60 @@ func TestFake_AsPushOnly_HidesPRForge(t *testing.T) {
 	}
 }
 
+// TestFake_ImplementsBranchProtectionForge asserts that *Fake satisfies the
+// optional BranchProtectionForge surface (issue #2570), matching the
+// github/forgejo adapters' shape.
+func TestFake_ImplementsBranchProtectionForge(t *testing.T) {
+	var _ forge.BranchProtectionForge = forge.NewFake()
+}
+
+// TestFake_AsPushOnly_HidesBranchProtectionForge verifies that AsPushOnly
+// wraps a Fake so a type assertion against BranchProtectionForge reports
+// absence, matching the push-only git adapter's shape — git has no
+// branch-protection API to query.
+func TestFake_AsPushOnly_HidesBranchProtectionForge(t *testing.T) {
+	f := forge.NewFake()
+	cf := f.AsPushOnly()
+	if _, ok := cf.(forge.BranchProtectionForge); ok {
+		t.Error("AsPushOnly() satisfies BranchProtectionForge, want it hidden")
+	}
+}
+
+// TestFake_AsLocal_HidesBranchProtectionForge verifies that AsLocal wraps a
+// Fake so a type assertion against BranchProtectionForge reports absence,
+// matching CODE_FORGE=local's host-mediated adapter shape — local has no
+// branch-protection concept to query.
+func TestFake_AsLocal_HidesBranchProtectionForge(t *testing.T) {
+	f := forge.NewFake()
+	cf := f.AsLocal()
+	if _, ok := cf.(forge.BranchProtectionForge); ok {
+		t.Error("AsLocal() satisfies BranchProtectionForge, want it hidden")
+	}
+}
+
+// TestFake_AsGithubReadOnly_ImplementsBranchProtectionForge asserts that
+// AsGithubReadOnly's wrapper — the github-shaped Fake — satisfies
+// BranchProtectionForge and returns the values SetBranchProtected scripts,
+// proving the wiring a github/forgejo-shaped forge needs for the
+// branch-protection doctor row (issue #2570).
+func TestFake_AsGithubReadOnly_ImplementsBranchProtectionForge(t *testing.T) {
+	f := forge.NewFake()
+	f.SetBranchProtected("main", true)
+	cf := f.AsGithubReadOnly()
+
+	bp, ok := cf.(forge.BranchProtectionForge)
+	if !ok {
+		t.Fatal("AsGithubReadOnly() does not satisfy BranchProtectionForge")
+	}
+	protected, err := bp.BranchProtected("main")
+	if err != nil {
+		t.Fatalf("BranchProtected: unexpected error %v", err)
+	}
+	if !protected {
+		t.Error("BranchProtected(\"main\") = false, want true")
+	}
+}
+
 // TestFake_ImplementsLandingRecorder asserts that *Fake satisfies the
 // optional LandingRecorder surface, matching the local adapter's shape.
 func TestFake_ImplementsLandingRecorder(t *testing.T) {

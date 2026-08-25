@@ -62,8 +62,10 @@ func NewFake(labels ...DispatchLabels) *Fake {
 			issues: map[string]Issue{},
 		},
 		CodeForgeFake: &CodeForgeFake{
-			core:         c,
-			branchExists: map[string]bool{},
+			core:               c,
+			branchExists:       map[string]bool{},
+			branchProtected:    map[string]bool{},
+			branchProtectedErr: map[string]error{},
 		},
 		PRForgeFake: &PRForgeFake{
 			core:            c,

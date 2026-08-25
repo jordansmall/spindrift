@@ -187,6 +187,21 @@ type DraftPRCreator interface {
 	CreateDraftPR(title, body, base, head string) (url string, created bool, err error)
 }
 
+// BranchProtectionForge is the optional branch-protection-query surface
+// (issue #2570): only a forge with a protection API (github, forgejo)
+// implements it; the push-only git adapter and CODE_FORGE=local's
+// host-mediated adapter do not, since neither has a branch-protection
+// concept to query. Callers discover it with a type assertion —
+// `bp, ok := cf.(BranchProtectionForge)` — the same optional-interface
+// pattern PRForge uses.
+type BranchProtectionForge interface {
+	// BranchProtected reports whether branch has protection configured.
+	// A non-nil error means the probe itself could not determine the
+	// answer (e.g. a permission error) -- it never means "determined
+	// unprotected"; a definitive "not protected" result is (false, nil).
+	BranchProtected(branch string) (bool, error)
+}
+
 // BundleCommitSubjects is settle's read-only PR-intent-fallback hook (issue
 // #2447): when a read-only Box's status=ready outcome carries no usable
 // SPINDRIFT_PR_INTENT line, settle still has the relayed branch's own
