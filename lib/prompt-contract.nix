@@ -800,4 +800,71 @@ rec {
   # above.
   outcomeStatusesFor =
     kind: (builtins.head (builtins.filter (r: r.kind == kind) outcomeStatusSets)).statuses;
+
+  # Every (obligation, branch) pair whose branch content is missing one of
+  # the obligation's declared `requiredSubstrings`, given an explicit
+  # content-by-source map (issue #2699). Pure function of its argument, not
+  # of sharedObligations' own declared `source` files, so a test can hand it
+  # synthetic content proving the check can actually fail without touching a
+  # real fragment file on disk.
+  #   contentBySource -- attrset from a branch's `source` string to the text
+  #                      to check it against.
+  # Returns a list of records: { obligationId, branchId, source, missing,
+  # message }, one per (obligation, branch) pair with at least one missing
+  # substring. `missing` is the list of substrings that branch's content
+  # lacked. `message` is fully pre-rendered prose naming both the offending
+  # branch and the obligation.
+  sharedObligationViolationsFor =
+    obligations: contentBySource:
+    builtins.concatMap (
+      obligation:
+      builtins.concatMap (
+        branch:
+        let
+          content = contentBySource.${branch.source} or "";
+          missing = builtins.filter (needle: !(hasInfix needle content)) obligation.requiredSubstrings;
+        in
+        if missing == [ ] then
+          [ ]
+        else
+          [
+            {
+              obligationId = obligation.id;
+              branchId = branch.id;
+              source = branch.source;
+              inherit missing;
+              message = "prompt-contract: fork branch '${branch.id}' (${branch.source}) is missing shared obligation '${obligation.id}' -- missing substring(s): [${builtins.concatStringsSep ", " missing}].";
+            }
+          ]
+      ) obligation.branches
+    ) obligations;
+
+  # Sixth pure-data registry (issue #2699): obligations that BOTH branches of
+  # a paired prompt fork must satisfy, so a future fork can't silently drop a
+  # shared instruction the way commit-folding almost did across REVIEW's
+  # inline/orchestrator split (#2698). Declares WHAT each branch's content
+  # must contain, not HOW it's worded -- each branch is free to phrase its
+  # own copy differently; `requiredSubstrings` only needs a literal
+  # substring in each.
+  #
+  #   id       -- short, stable identifier for the obligation.
+  #   branches -- every fork branch this obligation applies to. Each entry:
+  #     id     -- short, stable identifier for the branch (named in a
+  #               violation message, so a human can tell forks apart).
+  #     source -- the fragment/prompt file (relative to
+  #               templates/default/prompts/) this branch's raw fragment
+  #               text (unexpanded, e.g. `${BASE_BRANCH}` unsubstituted) is
+  #               read from.
+  #   requiredSubstrings -- every literal substring each branch's own
+  #               content must contain for that branch to satisfy the
+  #               obligation. A branch may phrase the obligation
+  #               differently from its sibling; only these substrings are
+  #               compared, not the obligation's overall wording.
+  #
+  # Empty for this slice (issue #2699 is scaffolding only): the real
+  # commit-folding row -- naming REVIEW's inline/orchestrator split and its
+  # amend/fixup obligation -- lands wired to the real fragment files in a
+  # follow-up commit, once sharedObligationViolationsFor above has proven
+  # itself against synthetic fixtures.
+  sharedObligations = [ ];
 }
