@@ -82,13 +82,13 @@ type SpindriftOp struct {
 	Pass int    `json:"pass,omitempty"`
 	// Role names the pass's own role on a pass_start op (issue #2037):
 	// "implement" for the first pass, "review" for a code-owned review
-	// pass, "fix" for an implement/fix pass a review's BLOCK (or APPROVE,
-	// to land) triggered, or "land" for a terminal, cap-triggered
-	// implement-role pass (issue #2457) that runs exactly once per run and
-	// cannot re-enter the review cycle -- distinct from "fix", which is a
-	// review-BLOCK/APPROVE-triggered pass that can loop further under
-	// BLOCK. Empty on every other op kind, and on a pass_start from the
-	// legacy single-loop path that never distinguishes roles.
+	// pass, "fix" for a review-BLOCK-triggered pass that can loop back into
+	// another review, or "land" for the terminal pass (issue #2457,
+	// #2654) -- reached either because a review APPROVEd or because a cap
+	// committed the run to land -- that runs exactly once per run and
+	// cannot re-enter the review cycle. Empty on every other op kind, and
+	// on a pass_start from the legacy single-loop path that never
+	// distinguishes roles.
 	Role     string `json:"role,omitempty"`
 	Verdict  string `json:"verdict,omitempty"`
 	Decision string `json:"decision,omitempty"` // "continue" or "stop"
@@ -171,22 +171,27 @@ func CollectTaskRoles(ev Event, taskRole map[string]string) {
 }
 
 // AttributionRoleForPass maps a pass_start SpindriftOp's Role field (the
-// orchestrator's own pass vocabulary: "implement", "review", "fix" — see
-// SpindriftOp.Role) to the attribution role constants console surfaces use
-// (ImplementorRole or ReviewerRole): "review" becomes
-// ReviewerRole; "implement" and "fix" both become ImplementorRole, since a
-// fix pass is an implementor pass from the attribution surface's point of
-// view. An empty passRole (legacy pass_start with no role, or any op that
-// isn't a pass_start) and any unrecognized value both map to "" rather than
-// ImplementorRole — collapsing "no role info" into "explicitly implementor"
-// would make it impossible for a caller to tell "use the default" apart
-// from "the default was chosen"; the caller decides what "no change"/"use
-// default" means.
+// orchestrator's own pass vocabulary: "implement", "review", "fix", "land" —
+// see SpindriftOp.Role) to the attribution role constants console surfaces
+// use (ImplementorRole or ReviewerRole): "review" becomes ReviewerRole;
+// "implement", "fix", and "land" all become ImplementorRole, since a fix
+// pass and a land pass are both implementor passes from the attribution
+// surface's point of view. An empty passRole (legacy pass_start with no
+// role, or any op that isn't a pass_start) and any unrecognized value both
+// map to "" rather than ImplementorRole — collapsing "no role info" into
+// "explicitly implementor" would make it impossible for a caller to tell
+// "use the default" apart from "the default was chosen"; the caller decides
+// what "no change"/"use default" means. These four cases are bare string
+// literals rather than passmachine's RoleReview/RoleImplement/RoleFix/
+// RoleLand constants deliberately: driver-exec's own Nix build (lib/mkHarness.nix
+// driverExecBin) sources this package through a fileset that excludes
+// internal/passmachine on purpose, so pulling that package in here would
+// break the box's own image build, not just add a dependency.
 func AttributionRoleForPass(passRole string) string {
 	switch passRole {
 	case "review":
 		return ReviewerRole
-	case "implement", "fix":
+	case "implement", "fix", "land":
 		return ImplementorRole
 	default:
 		return ""

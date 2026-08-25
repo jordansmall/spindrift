@@ -67,6 +67,7 @@ func TestAttributionRoleForPass(t *testing.T) {
 		{"review", ReviewerRole},
 		{"implement", ImplementorRole},
 		{"fix", ImplementorRole},
+		{"land", ImplementorRole},
 		{"", ""},
 		{"unrecognized", ""},
 	}
