@@ -3,6 +3,7 @@ package doctor
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -258,6 +259,118 @@ func TestReportResults_PrintsNameErrAndRemedyForFailure(t *testing.T) {
 
 	want := "MISSING: git-user-name: GIT_USER_NAME is unset\n" +
 		"  remedy: set GIT_USER_NAME, or configure git user.name on the host\n"
+	if buf.String() != want {
+		t.Fatalf("ReportResults() wrote %q, want %q", buf.String(), want)
+	}
+}
+
+func TestFirstRequiredError_IgnoresDegradedRequiredFailureButSurfacesLaterGenuineOne(t *testing.T) {
+	degradedErr := fmt.Errorf("permission denied reading protection: %w", ErrDegraded)
+	genuineErr := errors.New("branch is unprotected")
+	results := []Result{
+		{Check: Check{Name: "branch-protection", Tier: Required}, Err: degradedErr},
+		{Check: Check{Name: "other-required", Tier: Required}, Err: genuineErr},
+	}
+
+	got := FirstRequiredError(results)
+
+	if !errors.Is(got, genuineErr) {
+		t.Fatalf("FirstRequiredError() = %v, want %v (the later genuine required failure)", got, genuineErr)
+	}
+}
+
+func TestFirstRequiredError_ReturnsNilWhenOnlyDegradedRequiredFailure(t *testing.T) {
+	degradedErr := fmt.Errorf("permission denied reading protection: %w", ErrDegraded)
+	results := []Result{
+		{Check: Check{Name: "branch-protection", Tier: Required}, Err: degradedErr},
+	}
+
+	got := FirstRequiredError(results)
+
+	if got != nil {
+		t.Fatalf("FirstRequiredError() = %v, want nil (a degraded required failure must not block)", got)
+	}
+}
+
+func TestRunChecksFailFast_DegradedRequiredFailureDoesNotStopIteration(t *testing.T) {
+	var ran []string
+	checks := []Check{
+		{
+			Name: "branch-protection",
+			Tier: Required,
+			Probe: func() error {
+				ran = append(ran, "branch-protection")
+				return fmt.Errorf("permission denied: %w", ErrDegraded)
+			},
+		},
+		{
+			Name: "still-runs",
+			Tier: Required,
+			Probe: func() error {
+				ran = append(ran, "still-runs")
+				return nil
+			},
+		},
+	}
+
+	results := RunChecksFailFast(checks)
+
+	if len(results) != 2 {
+		t.Fatalf("len(results) = %d, want 2", len(results))
+	}
+	if len(ran) != 2 || ran[0] != "branch-protection" || ran[1] != "still-runs" {
+		t.Fatalf("ran = %v, want [branch-protection still-runs]", ran)
+	}
+}
+
+func TestRunChecksFailFast_NonDegradedRequiredFailureStillStopsIteration(t *testing.T) {
+	var ran []string
+	checks := []Check{
+		{
+			Name: "genuine-required-fails",
+			Tier: Required,
+			Probe: func() error {
+				ran = append(ran, "genuine-required-fails")
+				return errors.New("boom")
+			},
+		},
+		{
+			Name: "never-runs",
+			Tier: Required,
+			Probe: func() error {
+				ran = append(ran, "never-runs")
+				return nil
+			},
+		},
+	}
+
+	results := RunChecksFailFast(checks)
+
+	if len(results) != 1 {
+		t.Fatalf("len(results) = %d, want 1", len(results))
+	}
+	if len(ran) != 1 || ran[0] != "genuine-required-fails" {
+		t.Fatalf("ran = %v, want only [genuine-required-fails] to have run", ran)
+	}
+}
+
+func TestReportResults_PrintsAdvisoryForDegradedFailure(t *testing.T) {
+	results := []Result{
+		{
+			Check: Check{
+				Name:   "branch-protection",
+				Tier:   Required,
+				Remedy: "protect main: block direct pushes and require CI status checks",
+			},
+			Err: fmt.Errorf("branch protection probe for %q failed: %w: %w", "main", errors.New("permission denied"), ErrDegraded),
+		},
+	}
+
+	var buf bytes.Buffer
+	ReportResults(&buf, results)
+
+	want := "advisory: branch-protection: branch protection probe for \"main\" failed: permission denied\n" +
+		"  remedy: protect main: block direct pushes and require CI status checks\n"
 	if buf.String() != want {
 		t.Fatalf("ReportResults() wrote %q, want %q", buf.String(), want)
 	}

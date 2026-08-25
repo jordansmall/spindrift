@@ -1,14 +1,30 @@
 package doctor
 
 import (
+	"errors"
 	"fmt"
 	"io"
+	"strings"
 )
+
+// ErrDegraded, wrapped into a Required-tier Check's Probe error (e.g. via
+// fmt.Errorf("...: %w", ErrDegraded)), tells FirstRequiredError and
+// RunChecksFailFast to treat that one failure as non-blocking even though
+// the Check's own Tier is Required -- for a probe that could not determine
+// the condition it exists to check (e.g. a permission error), as distinct
+// from one that affirmatively detected the condition it guards against.
+// ReportResults still reports the failure (MISSING line) and its Remedy
+// line exactly as any other failure; only the fail-fast/required-error
+// gating changes.
+var ErrDegraded = errors.New("check degraded: probe could not determine result")
 
 // Tier classifies a Check as either blocking (Required) or non-blocking
 // (Advisory). FirstRequiredError uses this to decide which failures fail
 // fast a caller like validate() and which are surfaced for information
-// only.
+// only. Exception: a Required-tier failure whose Err wraps ErrDegraded is
+// treated as non-blocking, the same as an Advisory failure, because the
+// probe could not determine the condition it checks rather than
+// affirmatively detecting it.
 type Tier int
 
 const (
@@ -55,6 +71,15 @@ func runOne(c Check) Result {
 	return Result{Check: c, Err: c.Probe()}
 }
 
+// blocking reports whether r should stop a fail-fast chain (RunChecksFailFast)
+// or count as the failure a fail-fast gate surfaces (FirstRequiredError): a
+// Required-tier Result with a non-nil Err that does not wrap ErrDegraded. A
+// Required-tier Err wrapping ErrDegraded, or any Advisory-tier Err, is never
+// blocking.
+func blocking(r Result) bool {
+	return r.Check.Tier == Required && r.Err != nil && !errors.Is(r.Err, ErrDegraded)
+}
+
 // RunChecks runs every check's Probe in order, always running all of them
 // (no short-circuiting on failure), and returns one Result per check.
 func RunChecks(checks []Check) []Result {
@@ -70,8 +95,10 @@ func RunChecks(checks []Check) []Result {
 // RunChecks, which always runs every check regardless of outcome -- stops
 // immediately after the first Result whose Check.Tier is Required and whose
 // Err is non-nil, never running any later check in the slice. An
-// Advisory-tier failure does not stop iteration. The returned slice holds
-// only the Results for checks that actually ran, so its length can be
+// Advisory-tier failure does not stop iteration -- and neither does a
+// Required-tier failure whose Err wraps ErrDegraded, which is treated as
+// non-blocking even though its Check.Tier is Required. The returned slice
+// holds only the Results for checks that actually ran, so its length can be
 // shorter than len(checks). This lets a fail-fast doctor probe chain avoid
 // running a later check -- e.g. an extra live network call -- once an
 // earlier required one has already failed.
@@ -80,7 +107,7 @@ func RunChecksFailFast(checks []Check) []Result {
 	for _, c := range checks {
 		r := runOne(c)
 		results = append(results, r)
-		if r.Check.Tier == Required && r.Err != nil {
+		if blocking(r) {
 			break
 		}
 	}
@@ -89,12 +116,15 @@ func RunChecksFailFast(checks []Check) []Result {
 
 // FirstRequiredError returns the Err of the first Result in slice order
 // whose Check.Tier is Required and whose Err is non-nil, returning nil if
-// there is no such failure. It returns the error verbatim — never wrapped
-// or reformatted — so it's a drop-in fail-fast replacement for callers like
-// validate() that assert on exact error messages.
+// there is no such failure. A Required-tier Result whose Err wraps
+// ErrDegraded is skipped, the same as an Advisory-tier failure, and scanning
+// continues into later results looking for a genuine Required failure. It
+// returns the error verbatim — never wrapped or reformatted — so it's a
+// drop-in fail-fast replacement for callers like validate() that assert on
+// exact error messages.
 func FirstRequiredError(results []Result) error {
 	for _, r := range results {
-		if r.Check.Tier == Required && r.Err != nil {
+		if blocking(r) {
 			return r.Err
 		}
 	}
@@ -111,12 +141,16 @@ func RunRequiredFailFast(checks []Check) error {
 }
 
 // ReportResults writes one line per Result to w: "ok: <name>" on success,
-// or "MISSING: <name>: <err>" plus a "  remedy: <remedy>" line on failure --
-// so a Check row's Name and Remedy alone drive its own doctor-visible status
-// line, with no bespoke fmt.Fprintf needed per Probe. The remedy line is
-// skipped when Remedy is identical to the error text, so a row whose Remedy
-// simply repeats its own error message doesn't print the same sentence
-// twice.
+// "MISSING: <name>: <err>" plus a "  remedy: <remedy>" line on a genuine
+// failure, or "advisory: <name>: <err>" plus remedy for a Result whose Err
+// wraps ErrDegraded (the probe couldn't determine the answer, so it reads
+// like every other advisory line rather than a hard failure) -- so a Check
+// row's Name and Remedy alone drive its own doctor-visible status line, with
+// no bespoke fmt.Fprintf needed per Probe. ErrDegraded's own sentinel text
+// is trimmed off the degraded line, since it's an internal marker, not a
+// detail an operator needs. The remedy line is skipped when Remedy is
+// identical to the error text, so a row whose Remedy simply repeats its own
+// error message doesn't print the same sentence twice.
 func ReportResults(w io.Writer, results []Result) {
 	for _, r := range results {
 		if r.Err == nil {
@@ -125,6 +159,14 @@ func ReportResults(w io.Writer, results []Result) {
 				continue
 			}
 			fmt.Fprintf(w, "ok: %s\n", r.Check.Name)
+			continue
+		}
+		if errors.Is(r.Err, ErrDegraded) {
+			msg := strings.TrimSuffix(r.Err.Error(), ": "+ErrDegraded.Error())
+			fmt.Fprintf(w, "advisory: %s: %s\n", r.Check.Name, msg)
+			if r.Check.Remedy != "" && r.Check.Remedy != msg {
+				fmt.Fprintf(w, "  remedy: %s\n", r.Check.Remedy)
+			}
 			continue
 		}
 		fmt.Fprintf(w, "MISSING: %s: %s\n", r.Check.Name, r.Err)
