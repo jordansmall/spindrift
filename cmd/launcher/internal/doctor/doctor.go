@@ -17,6 +17,29 @@ import (
 	"spindrift.dev/launcher/internal/runner"
 )
 
+// ErrConnectivity classifies a Run failure as an auth-or-connectivity
+// problem reaching the issue tracker or code forge (exit 3 in the doctor
+// exit-code vocabulary, issue #2569): the three builtin probes
+// (issue-tracker, code-forge, recoverable-issues) and the label-list/
+// label-create calls all wrap it via %w, regardless of the underlying
+// cause, so a caller can classify by errors.Is without matching message
+// text.
+var ErrConnectivity = errors.New("issue tracker or code forge connectivity failure")
+
+// ErrRequiredLabelsMissing classifies a Run failure as required-checks-
+// failed-or-declined (exit 4 in the doctor exit-code vocabulary, issue
+// #2569): one or more work-tier triage labels are missing and were not
+// created, whether because the operator declined the create-labels prompt,
+// ran non-interactively, or a create attempt still left one missing.
+var ErrRequiredLabelsMissing = errors.New("required triage label(s) missing or declined")
+
+// errRequiredLabelsMissing builds the ErrRequiredLabelsMissing error for a
+// non-empty workMissing, shared by the non-interactive and interactive-
+// decline paths below so their identical message can't drift apart.
+func errRequiredLabelsMissing(workMissing []string) error {
+	return fmt.Errorf("%w: %s missing — create them in the repository", ErrRequiredLabelsMissing, strings.Join(workMissing, ", "))
+}
+
 // LabelMeta holds the default color and description for a triage label.
 type LabelMeta struct {
 	Description string
@@ -170,12 +193,12 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, w io.Writer, stdin
 				repo, err := it.Probe()
 				if err != nil {
 					if errors.Is(err, forge.ErrAuthFailure) {
-						return fmt.Errorf("forge auth check failed (check %s is set and valid): %w", tokenHint, err)
+						return fmt.Errorf("%w: forge auth check failed (check %s is set and valid): %w", ErrConnectivity, tokenHint, err)
 					}
 					if errors.Is(err, forge.ErrRepoNotFound) {
-						return fmt.Errorf("forge repo not found (check %s is correct): %w", slugHint, err)
+						return fmt.Errorf("%w: forge repo not found (check %s is correct): %w", ErrConnectivity, slugHint, err)
 					}
-					return fmt.Errorf("forge connectivity check failed: %w", err)
+					return fmt.Errorf("%w: forge connectivity check failed: %w", ErrConnectivity, err)
 				}
 				itRepo = repo
 				return nil
@@ -190,7 +213,7 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, w io.Writer, stdin
 			Probe: func() error {
 				repo, err := cf.Probe()
 				if err != nil {
-					return fmt.Errorf("code forge connectivity check failed: %w", err)
+					return fmt.Errorf("%w: code forge connectivity check failed: %w", ErrConnectivity, err)
 				}
 				cfRepo = repo
 				return nil
@@ -215,7 +238,7 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, w io.Writer, stdin
 				if lt, ok := it.(forge.LabeledTracker); !ok || lt.StateLabels().Label(forge.Recoverable) != "" {
 					recoverable, err := it.ListIssues(forge.Recoverable)
 					if err != nil {
-						return fmt.Errorf("recoverable issue check failed: %w", err)
+						return fmt.Errorf("%w: recoverable issue check failed: %w", ErrConnectivity, err)
 					}
 					recoverableCount = len(recoverable)
 				}
@@ -284,7 +307,7 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, w io.Writer, stdin
 	checkLabels := func() (workMissing, researchMissing, priorityMissing, ambiguousMissing []string, err error) {
 		existing, lerr := it.ListLabels()
 		if lerr != nil {
-			return nil, nil, nil, nil, fmt.Errorf("label check failed: %w", lerr)
+			return nil, nil, nil, nil, fmt.Errorf("%w: label check failed: %w", ErrConnectivity, lerr)
 		}
 		present := make(map[string]bool, len(existing))
 		for _, l := range existing {
@@ -318,16 +341,26 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, w io.Writer, stdin
 
 	if !interactive {
 		if len(workMissing) > 0 {
-			return fmt.Errorf("one or more triage labels are missing — create them in the repository")
+			return errRequiredLabelsMissing(workMissing)
 		}
 		return nil
 	}
 
-	fmt.Fprintf(w, "Create %d missing label(s)? [y/N] ", len(missing))
+	advisoryCount := len(researchMissing) + len(priorityMissing) + len(ambiguousMissing)
+	requiredClause := fmt.Sprintf("%d required", len(workMissing))
+	if len(workMissing) > 0 {
+		requiredClause += " (declining leaves this check failing)"
+	}
+	advisoryClause := fmt.Sprintf("%d advisory", advisoryCount)
+	if advisoryCount > 0 {
+		advisoryClause += " (declining is safe, does not fail this check)"
+	}
+	fmt.Fprintf(w, "Create %d missing label(s) — %s and %s? [y/N] ",
+		len(missing), requiredClause, advisoryClause)
 	if !stdin.Scan() || strings.ToLower(strings.TrimSpace(stdin.Text())) != "y" {
 		fmt.Fprintln(w)
 		if len(workMissing) > 0 {
-			return fmt.Errorf("one or more triage labels are missing — create them in the repository")
+			return errRequiredLabelsMissing(workMissing)
 		}
 		return nil
 	}
@@ -357,10 +390,25 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, w io.Writer, stdin
 		return LabelMeta{Color: "ededed"}
 	}
 
+	// A CreateLabel failure on a work-tier label is fatal (ErrConnectivity) —
+	// that tier is required, so a create attempt that can't even try is no
+	// better than never having offered it. A failure on a research/priority/
+	// ambiguous-spec label is advisory: reported here and, since it leaves
+	// the label missing, again by the "still missing after creation" advisory
+	// lines below — accepting the prompt must never be worse than declining
+	// it, which is safe for an advisory-only run (doctor.go, issue #2569).
+	workSet := make(map[string]bool, len(workMissing))
+	for _, name := range workMissing {
+		workSet[name] = true
+	}
 	for _, name := range missing {
 		meta := metaFor(name)
 		if cerr := it.CreateLabel(name, meta.Description, meta.Color); cerr != nil {
-			return fmt.Errorf("create label %q: %w", name, cerr)
+			if workSet[name] {
+				return fmt.Errorf("%w: create label %q: %w", ErrConnectivity, name, cerr)
+			}
+			fmt.Fprintf(w, "advisory: create label %q failed: %v — does not fail this check\n", name, cerr)
+			continue
 		}
 		fmt.Fprintf(w, "created: label %q\n", name)
 	}
@@ -371,7 +419,7 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, w io.Writer, stdin
 		return err
 	}
 	if len(workMissing) > 0 {
-		return fmt.Errorf("one or more triage labels are still missing after creation")
+		return fmt.Errorf("%w: %s still missing after creation", ErrRequiredLabelsMissing, strings.Join(workMissing, ", "))
 	}
 	// Work labels are fatal (handled above) and research/priority/
 	// ambiguous-spec labels are advisory (ADR 0022 / ADR 0040 / ADR 0041 /

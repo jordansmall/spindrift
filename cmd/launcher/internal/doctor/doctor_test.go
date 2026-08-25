@@ -82,6 +82,9 @@ func TestRun_IssueTrackerAuthFailure_CodeForgeProbeDoesNotRun(t *testing.T) {
 	if !errors.Is(err, forge.ErrAuthFailure) {
 		t.Errorf("want ErrAuthFailure, got %v", err)
 	}
+	if !errors.Is(err, ErrConnectivity) {
+		t.Errorf("want ErrConnectivity (issue #2569 exit-code vocabulary), got %v", err)
+	}
 	if !strings.Contains(err.Error(), "GH_TOKEN") {
 		t.Errorf("want error to mention GH_TOKEN, got: %v", err)
 	}
@@ -119,6 +122,9 @@ func TestRun_CodeForgeProbeFailure_ReportsMissingLineAndSkipsRecoverableCheck(t 
 	}
 	if !strings.Contains(err.Error(), "code forge connectivity check failed") || !errors.Is(err, wantErr) {
 		t.Errorf("want wrapped code-forge connectivity error, got: %v", err)
+	}
+	if !errors.Is(err, ErrConnectivity) {
+		t.Errorf("want ErrConnectivity (issue #2569 exit-code vocabulary), got %v", err)
 	}
 
 	out := buf.String()
@@ -341,5 +347,175 @@ func TestRun_BranchProtection_ProtectedAndRequiredSucceeds(t *testing.T) {
 	out := buf.String()
 	if !strings.Contains(out, `ok: base branch "main" is protected`) {
 		t.Errorf("want ok line for branch-protection row, got:\n%s", out)
+	}
+}
+
+// TestRun_RecoverableIssuesProbeFailure_WrapsErrConnectivity verifies the
+// third built-in probe (recoverable-issue count) also wraps ErrConnectivity
+// (issue #2569 exit-code vocabulary) when its ListIssues call fails, the same
+// treatment as the issue-tracker and code-forge probes above.
+func TestRun_RecoverableIssuesProbeFailure_WrapsErrConnectivity(t *testing.T) {
+	// Recoverable must map to a real label for the probe to call ListIssues
+	// at all — see builtinChecks' recoverable-issues Probe doc comment: an
+	// unmapped Recoverable (the zero-value forge.NewFake() default) skips
+	// the call entirely to avoid false-matching every open issue.
+	f := forge.NewFake(forge.DispatchLabels{Recoverable: "needs-recovery"})
+	f.ProbeRepo = "owner/repo"
+	wantErr := errors.New("boom")
+	f.ListIssuesErr = wantErr
+
+	var buf bytes.Buffer
+	err := Run(f, f, defaultDoctorConfig(), &buf, bufio.NewScanner(strings.NewReader("")), false, nil)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !errors.Is(err, wantErr) {
+		t.Errorf("want wrapped underlying error, got: %v", err)
+	}
+	if !errors.Is(err, ErrConnectivity) {
+		t.Errorf("want ErrConnectivity (issue #2569 exit-code vocabulary), got %v", err)
+	}
+}
+
+// TestRun_ListLabelsFailure_WrapsErrConnectivity verifies checkLabels'
+// ListLabels failure also wraps ErrConnectivity (issue #2569 exit-code
+// vocabulary) — the label-tier probe is a connectivity failure the same way
+// the three built-in probes above are.
+func TestRun_ListLabelsFailure_WrapsErrConnectivity(t *testing.T) {
+	f := forge.NewFake()
+	f.ProbeRepo = "owner/repo"
+	wantErr := errors.New("boom")
+	f.ListLabelsErr = wantErr
+
+	var buf bytes.Buffer
+	err := Run(f, f, defaultDoctorConfig(), &buf, bufio.NewScanner(strings.NewReader("")), false, nil)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !errors.Is(err, wantErr) {
+		t.Errorf("want wrapped underlying error, got: %v", err)
+	}
+	if !errors.Is(err, ErrConnectivity) {
+		t.Errorf("want ErrConnectivity (issue #2569 exit-code vocabulary), got %v", err)
+	}
+}
+
+// TestRun_CreateLabelFailure_WrapsErrConnectivity verifies a CreateLabel
+// failure during the interactive label-creation loop also wraps
+// ErrConnectivity (issue #2569 exit-code vocabulary) — creating a label is
+// itself a code-forge/issue-tracker connectivity operation.
+func TestRun_CreateLabelFailure_WrapsErrConnectivity(t *testing.T) {
+	f := forge.NewFake()
+	f.ProbeRepo = "owner/repo"
+	f.Labels = []string{"ready-for-agent"} // three work labels missing
+	wantErr := errors.New("boom")
+	f.CreateLabelErr = wantErr
+
+	var buf bytes.Buffer
+	err := Run(f, f, defaultDoctorConfig(), &buf, bufio.NewScanner(strings.NewReader("y\n")), true, nil)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !errors.Is(err, wantErr) {
+		t.Errorf("want wrapped underlying error, got: %v", err)
+	}
+	if !errors.Is(err, ErrConnectivity) {
+		t.Errorf("want ErrConnectivity (issue #2569 exit-code vocabulary), got %v", err)
+	}
+}
+
+// TestRun_CreateLabelFailure_AdvisoryLabelDoesNotFailRun verifies that a
+// CreateLabel failure on a purely advisory-tier label (here, research) does
+// NOT make Run return an error — accepting the create-labels prompt must
+// never be worse than declining it, which is safe for an advisory-only run
+// (issue #2569). Only a failure on a work-tier label is fatal
+// (TestRun_CreateLabelFailure_WrapsErrConnectivity above).
+func TestRun_CreateLabelFailure_AdvisoryLabelDoesNotFailRun(t *testing.T) {
+	f := forge.NewFake()
+	f.ProbeRepo = "owner/repo"
+	// All four work labels present; every research label missing.
+	f.Labels = []string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}
+	wantErr := errors.New("boom")
+	f.CreateLabelErr = wantErr
+
+	var buf bytes.Buffer
+	err := Run(f, f, defaultDoctorConfig(), &buf, bufio.NewScanner(strings.NewReader("y\n")), true, nil)
+	if err != nil {
+		t.Fatalf("advisory-label create failure must not fail Run, got: %v", err)
+	}
+	if !strings.Contains(buf.String(), "advisory: create label") {
+		t.Errorf("want an advisory create-failure line, got:\n%s", buf.String())
+	}
+}
+
+// TestRun_NonInteractive_MissingWorkLabels_WrapsErrRequiredLabelsMissing verifies
+// that when work-tier triage labels are missing and Run is non-interactive,
+// the returned error wraps ErrRequiredLabelsMissing (issue #2569 exit-code
+// vocabulary) and names each missing label in its message — not just "one or
+// more" — so a stderr summary can tell an operator exactly which labels to
+// create.
+func TestRun_NonInteractive_MissingWorkLabels_WrapsErrRequiredLabelsMissing(t *testing.T) {
+	f := forge.NewFake()
+	f.ProbeRepo = "owner/repo"
+	f.Labels = []string{"ready-for-agent"} // agent-in-progress, agent-failed, agent-complete missing
+
+	var buf bytes.Buffer
+	err := Run(f, f, defaultDoctorConfig(), &buf, bufio.NewScanner(strings.NewReader("")), false, nil)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !errors.Is(err, ErrRequiredLabelsMissing) {
+		t.Errorf("want ErrRequiredLabelsMissing (issue #2569 exit-code vocabulary), got %v", err)
+	}
+	for _, label := range []string{"agent-in-progress", "agent-failed", "agent-complete"} {
+		if !strings.Contains(err.Error(), label) {
+			t.Errorf("want error to name missing label %q, got: %v", label, err)
+		}
+	}
+}
+
+// TestRun_TTY_Decline_WrapsErrRequiredLabelsMissing verifies that declining the
+// interactive create-labels prompt also wraps ErrRequiredLabelsMissing (issue #2569
+// exit-code vocabulary) — the same classification as the non-interactive
+// missing-labels path above, since both are "required labels missing" exits.
+func TestRun_TTY_Decline_WrapsErrRequiredLabelsMissing(t *testing.T) {
+	f := forge.NewFake()
+	f.ProbeRepo = "owner/repo"
+	f.Labels = []string{"ready-for-agent"} // three work labels missing
+
+	var buf bytes.Buffer
+	err := Run(f, f, defaultDoctorConfig(), &buf, bufio.NewScanner(strings.NewReader("n\n")), true, nil)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !errors.Is(err, ErrRequiredLabelsMissing) {
+		t.Errorf("want ErrRequiredLabelsMissing (issue #2569 exit-code vocabulary), got %v", err)
+	}
+}
+
+// TestRun_StillMissingAfterCreation_WrapsErrRequiredLabelsMissing verifies that when
+// a work-tier label is still missing on the post-creation re-verify, the
+// returned error wraps ErrRequiredLabelsMissing (issue #2569 exit-code vocabulary)
+// and names the still-missing label.
+func TestRun_StillMissingAfterCreation_WrapsErrRequiredLabelsMissing(t *testing.T) {
+	f := forge.NewFake()
+	f.ProbeRepo = "owner/repo"
+	present := []string{"ready-for-agent", "agent-in-progress", "agent-failed"} // agent-complete missing
+	f.Labels = present
+	f.LabelsSeq = [][]string{
+		present,
+		present, // re-verify: agent-complete still missing despite CreateLabel "succeeding"
+	}
+
+	var buf bytes.Buffer
+	err := Run(f, f, defaultDoctorConfig(), &buf, bufio.NewScanner(strings.NewReader("y\n")), true, nil)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !errors.Is(err, ErrRequiredLabelsMissing) {
+		t.Errorf("want ErrRequiredLabelsMissing (issue #2569 exit-code vocabulary), got %v", err)
+	}
+	if !strings.Contains(err.Error(), "agent-complete") {
+		t.Errorf("want error to name still-missing label \"agent-complete\", got: %v", err)
 	}
 }
