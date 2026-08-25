@@ -34,12 +34,17 @@ issue_prompt_outcome_section() {
 # tests that intentionally exercise the timeout path). An unset OR
 # empty-string 4th arg falls through to the env var/default instead, per
 # bash's own "${4:-...}" fallback rule. Whichever source it comes from, the
-# timeout value must be a non-negative integer no more than 6 digits (up to
+# timeout value must be a positive integer no more than 6 digits (up to
 # 999999) -- it flows into a `timeout * 20` arithmetic context, so anything
 # else is rejected outright rather than risking a bash syntax error, an
 # arithmetic overflow (an 18+ digit value can wrap the poll-count negative
 # and silently skip the loop instead of erroring), or, worse, code
-# execution.
+# execution. Zero is rejected too: timeout=0 collapses the main retry
+# loop to zero retries, so only the first check ever runs, falling
+# straight to either the confirm window (if it already matches) or the
+# timeout error (if it doesn't) -- defeating the point of a wait/poll
+# helper (issue #2450), so issue #2759 rejects 0 outright rather than
+# treating it as a valid bound.
 #
 # Reaching expected_count mid-poll is not itself proof the count has
 # settled: it may just be passing through on its way to a higher, wrong
@@ -62,13 +67,13 @@ _count_matches() {
 }
 
 # Usage: wait_for_log_lines <file> <pattern> <expected_count> [timeout_seconds]
-# timeout must be a non-negative integer of at most 6 digits (up to 999999)
-# (rejects fractional/negative/oversized/injection values before they reach
-# an arithmetic context).
+# timeout must be a positive integer of at most 6 digits (up to 999999)
+# (rejects fractional/negative/zero/oversized/injection values before they
+# reach an arithmetic context).
 wait_for_log_lines() {
   local file="$1" pattern="$2" expected="$3" timeout="${4:-${WAIT_FOR_LOG_LINES_TIMEOUT:-2}}"
-  if ! [[ "$timeout" =~ ^(0|[1-9][0-9]{0,5})$ ]]; then
-    echo "wait_for_log_lines: timeout must be a non-negative integer of at most 6 digits, got '$timeout'" >&2
+  if ! [[ "$timeout" =~ ^[1-9][0-9]{0,5}$ ]]; then
+    echo "wait_for_log_lines: timeout must be a positive integer of at most 6 digits, got '$timeout'" >&2
     return 1
   fi
   local interval="0.05"
@@ -105,6 +110,20 @@ wait_for_log_lines() {
   echo "wait_for_log_lines: timed out after ${timeout}s waiting for" \
     "$expected line(s) matching '$pattern' in $file (got $actual)" >&2
   return 1
+}
+
+# Runs wait_for_log_lines with a deliberately invalid timeout and asserts
+# it's rejected cleanly: status 1, the shared rejection message, and (if
+# given) that a specific pre-fix symptom string is absent from the output.
+# shellcheck disable=SC2154 # $status/$output are bats-provided by the `run` call above, not assigned directly
+assert_timeout_rejected() {
+  local log="$1" timeout_value="$2" absent_substring="${3:-}"
+  run wait_for_log_lines "$log" '^run ' 1 "$timeout_value"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"timeout must be a positive integer"* ]]
+  if [ -n "$absent_substring" ]; then
+    [[ "$output" != *"$absent_substring"* ]]
+  fi
 }
 
 # Shared setup for the split entrypoint-*.bats suites (issue #518): every
