@@ -4490,22 +4490,35 @@ var deprecatedDocSpellings = []string{
 // today. canonicalPrefix is the domain-tree path (from
 // lib/structural-paths.nix, joined by "." with a trailing ".") that must
 // immediately precede a "<name> = " occurrence for it to be the canonical,
-// non-deprecated spelling; an empty canonicalPrefix means the flat name has
-// no such valid preceding form at all (nixInBox's and nixStoreWritable's
-// canonical forms are infra.nix.inBox and infra.nix.storeWritable — the
-// flat name isn't even a suffix of those, so any bare occurrence is
-// unconditionally deprecated).
+// non-deprecated spelling; an empty canonicalPrefix means the flat name is
+// never even a suffix of its canonical dotted form in the first place —
+// lib/structural-paths.nix renames the leaf itself for nixInBox and
+// nixStoreWritable (to infra.nix.inBox and infra.nix.storeWritable), so no
+// prefix could ever make the bare spelling canonical, and the check treats
+// every bare occurrence as deprecated unconditionally.
 //
 // packages, roster, and nixpkgs are deliberately EXCLUDED from this list —
-// do not "fix" that by adding them. Each is also a legitimate, currently
-// non-deprecated Nix identifier elsewhere in the docs: docs/reference.md's
+// do not "fix" that by adding them. This exclusion is contingent, not
+// principled: every other marker below is *equally* a legitimate bare
+// lib/mkHarness.nix parameter name — the three excluded here aren't
+// uniquely "ambiguous" in some deeper sense. They're excluded only because,
+// as the docs stand today, they're the ones that actually appear bare in
+// doc prose and would false-positive if generalized: docs/reference.md's
 // "Calling mkHarness directly" section uses `packages = p: [ p.go ];` and
 // `nixpkgs = inputs.nixpkgs;` as literal, still-canonical bare mkHarness
-// arguments; docs/reference.md also describes nix/dogfood-defaults.nix's own
-// internal `roster = rosterLib.defaultRoster {...}` field; and README.md's
-// `packages = [ config.packages.spindrift ];` is nixpkgs' own unrelated
-// `mkShell` argument. Generalizing those three would turn this check into a
-// false-positive generator against real, correct doc prose.
+// arguments; docs/reference.md also describes nix/dogfood-defaults.nix's
+// own internal `roster = rosterLib.defaultRoster {...}` field; and
+// README.md's `packages = [ config.packages.spindrift ];` is nixpkgs' own
+// unrelated `mkShell` argument. Nothing here rules out a future doc example
+// introducing a bare `driver = `, `overlays = `, or any other marker in
+// this list in an equally legitimate way — when that happens, the fix is:
+// (1) remove that marker from flatShimGeneralizedMarkers, (2) add it to
+// flatShimDeliberateCollisions below, and (3) update wantCollisions inside
+// TestFlatShimGeneralizedMarkers_ExcludesDeliberateCollisions to match —
+// that test pins flatShimDeliberateCollisions's exact contents, so step (2)
+// alone still fails the pin.
+// TestFlatShimGeneralizedMarkers_ExcludesDeliberateCollisions enforces the
+// two lists stay disjoint.
 var flatShimGeneralizedMarkers = []struct {
 	name            string
 	canonicalPrefix string
@@ -4521,6 +4534,14 @@ var flatShimGeneralizedMarkers = []struct {
 	{"nixInBox", ""},
 	{"nixStoreWritable", ""},
 }
+
+// flatShimDeliberateCollisions lists flat marker names deliberately excluded
+// from flatShimGeneralizedMarkers because each collides with a live bare doc
+// usage today; see the doc comment on flatShimGeneralizedMarkers for the
+// full rationale and
+// TestFlatShimGeneralizedMarkers_ExcludesDeliberateCollisions for
+// enforcement.
+var flatShimDeliberateCollisions = []string{"packages", "roster", "nixpkgs"}
 
 // findDeprecatedDocSpellings scans content for any deprecatedDocSpellings
 // substring, plus any occurrence anywhere in the content (not just at a
@@ -4563,6 +4584,31 @@ func findDeprecatedDocSpellings(content string) []string {
 	}
 
 	return found
+}
+
+// bareOccurrenceExists reports whether name appears in content as a bare
+// "<name> = " assignment — one not immediately preceded by "." — as
+// opposed to only ever appearing as the tail of a longer dotted attribute
+// path (e.g. "infra.image.packages = "). Unlike findDeprecatedDocSpellings'
+// canonicalPrefix check, which validates against one specific known-dotted
+// spelling per marker, this rejects any dotted prefix at all, since a
+// flatShimDeliberateCollisions name (packages, roster, nixpkgs) has no
+// single canonical dotted form to compare against — it can legitimately
+// appear dotted under several unrelated attribute paths.
+func bareOccurrenceExists(content, name string) bool {
+	marker := name + " = "
+	searchFrom := 0
+	for {
+		idx := strings.Index(content[searchFrom:], marker)
+		if idx < 0 {
+			return false
+		}
+		matchStart := searchFrom + idx
+		if matchStart == 0 || content[matchStart-1] != '.' {
+			return true
+		}
+		searchFrom = matchStart + len(marker)
+	}
 }
 
 // TestFindDeprecatedDocSpellings_DetectsReintroducedSpelling is the
@@ -4636,12 +4682,12 @@ func TestFindDeprecatedDocSpellings_DetectsReintroducedSpelling(t *testing.T) {
 			want:    []string{"settings.promptSkillIteration"},
 		},
 		{
-			name:    "bare nixInBox flat structural shim (always deprecated, no canonical bare form)",
+			name:    "bare nixInBox flat structural shim (empty canonicalPrefix — no dotted prefix could make it canonical)",
 			content: "  nixInBox = false;\n",
 			want:    []string{"nixInBox = "},
 		},
 		{
-			name:    "bare nixStoreWritable flat structural shim (always deprecated, no canonical bare form)",
+			name:    "bare nixStoreWritable flat structural shim (empty canonicalPrefix — no dotted prefix could make it canonical)",
 			content: "  nixStoreWritable = true;\n",
 			want:    []string{"nixStoreWritable = "},
 		},
@@ -4663,14 +4709,15 @@ func TestFindDeprecatedDocSpellings_DetectsReintroducedSpelling(t *testing.T) {
 		{
 			// packages/roster/nixpkgs are deliberately NOT generalized: each
 			// collides with a legitimate, non-deprecated doc usage today —
-			// docs/reference.md ~line 824 `packages = p: [ p.go ];` and
-			// ~line 822 `nixpkgs = inputs.nixpkgs;` (mkHarness-direct
-			// arguments), ~line 370 `roster = rosterLib.defaultRoster
-			// {...}` (nix/dogfood-defaults.nix's own field), and
-			// README.md ~line 162 `packages = [ config.packages.spindrift
-			// ];` (nixpkgs' own unrelated mkShell argument). Do not add
-			// these three to flatShimGeneralizedMarkers — it would turn
-			// this check into a false-positive generator.
+			// docs/reference.md's "Calling mkHarness directly" section uses
+			// `packages = p: [ p.go ];` and `nixpkgs = inputs.nixpkgs;` as
+			// literal, still-canonical bare mkHarness arguments;
+			// docs/reference.md also documents nix/dogfood-defaults.nix's
+			// own `roster = rosterLib.defaultRoster {...}` field; and
+			// README.md's `packages = [ config.packages.spindrift ];` is
+			// nixpkgs' own unrelated mkShell argument. Do not add these
+			// three to flatShimGeneralizedMarkers — it would turn this
+			// check into a false-positive generator.
 			name:    "packages/roster/nixpkgs deliberately not generalized",
 			content: "  packages = p: [ p.go ];\n  roster = rosterLib.defaultRoster {};\n  nixpkgs = inputs.nixpkgs;\n",
 			want:    nil,
@@ -4694,31 +4741,83 @@ func TestFindDeprecatedDocSpellings_DetectsReintroducedSpelling(t *testing.T) {
 	}
 }
 
-// TestDocsHaveNoDeprecatedSpellings guards README.md and every .md file
-// under docs/ (recursively — docs/adr/*.md, docs/console.md,
-// docs/flake-options.md, docs/measurements/*.md, docs/reference.md, ...)
-// against the deprecatedDocSpellings old settings.<section>.<knob> shim
-// paths (and the bare flat structural-shim spellings) creeping back in.
-// This is the integration counterpart to
-// TestFindDeprecatedDocSpellings_DetectsReintroducedSpelling, which only
-// exercises the checker against synthetic content — this test runs it
-// against the real docs (#2566). MIGRATING.md is the one place the
-// deprecated spellings are expected and documented on purpose, so the
-// docs/ walk below skips it by name (not just because it currently lives
-// at the repo root, outside docs/) — moving it under docs/ must not
-// silently start linting it.
-func TestDocsHaveNoDeprecatedSpellings(t *testing.T) {
+// TestFlatShimGeneralizedMarkers_ExcludesDeliberateCollisions enforces, at
+// the Go level, the prose rule documented above flatShimGeneralizedMarkers:
+// packages, roster, and nixpkgs must never be (re-)added to it, because each
+// collides with a legitimate, non-deprecated bare doc usage today. This
+// turns "do not fix that by adding them" from a comment a human might miss
+// into a test that fails the moment someone does.
+//
+// It first pins flatShimDeliberateCollisions to its exact expected
+// membership (compared order-insensitively — this test cares which names
+// are excluded, not what order they're declared in) — otherwise shrinking
+// or emptying that list (e.g. moving "packages" out of it and into
+// flatShimGeneralizedMarkers) would make the exclusion loop below assert
+// nothing and stay green through exactly the regression this test exists
+// to catch. Deliberately re-pinned on every edit to flatShimDeliberateCollisions,
+// including a pure reorder: that friction is the point, not an oversight to
+// simplify away. It then confirms each collision name still has a bare
+// occurrence (not a suffix of some longer dotted attribute path, e.g.
+// infra.image.packages) somewhere across README.md and docs/, tying the
+// carve-out to the actual doc contingency it claims to rest on: if those
+// doc examples are ever rewritten to the dotted canonical form, this test
+// flags that the carve-out is no longer justified.
+func TestFlatShimGeneralizedMarkers_ExcludesDeliberateCollisions(t *testing.T) {
+	wantCollisions := []string{"packages", "roster", "nixpkgs"}
+	gotCollisions := append([]string(nil), flatShimDeliberateCollisions...)
+	sort.Strings(gotCollisions)
+	sortedWant := append([]string(nil), wantCollisions...)
+	sort.Strings(sortedWant)
+	if !reflect.DeepEqual(gotCollisions, sortedWant) {
+		t.Fatalf("flatShimDeliberateCollisions = %v, want (any order) %v", flatShimDeliberateCollisions, wantCollisions)
+	}
+
+	for _, shim := range flatShimGeneralizedMarkers {
+		for _, collision := range flatShimDeliberateCollisions {
+			if shim.name == collision {
+				t.Errorf("flatShimGeneralizedMarkers contains %q, which is a deliberate collision that must stay excluded", shim.name)
+			}
+		}
+	}
+
+	docs := collectMarkdownDocs(t)
+	for _, collision := range flatShimDeliberateCollisions {
+		found := false
+		for _, doc := range docs {
+			if bareOccurrenceExists(doc.content, collision) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("deliberate collision %q no longer appears bare in README.md or docs/ — the carve-out may no longer be justified; if so, move it into flatShimGeneralizedMarkers and update wantCollisions in this test to match", collision)
+		}
+	}
+}
+
+// namedDoc pairs a doc's repo-relative display name with its content, for
+// tests that scan across README.md and docs/.
+type namedDoc struct {
+	name    string
+	content string
+}
+
+// collectMarkdownDocs returns README.md plus every .md file under docs/
+// (recursively — docs/adr/*.md, docs/console.md, docs/flake-options.md,
+// docs/measurements/*.md, docs/reference.md, ...), for tests that scan doc
+// content. MIGRATING.md is the one place deprecated spellings are expected
+// and documented on purpose, so the docs/ walk skips it by name (not just
+// because it currently lives at the repo root, outside docs/) — moving it
+// under docs/ must not silently start linting it.
+func collectMarkdownDocs(t *testing.T) []namedDoc {
+	t.Helper()
+
 	readme, err := os.ReadFile(filepath.Join("..", "..", "README.md"))
 	if err != nil {
 		t.Fatalf("read README.md: %v", err)
 	}
 
-	docs := []struct {
-		name    string
-		content string
-	}{
-		{"README.md", string(readme)},
-	}
+	docs := []namedDoc{{"README.md", string(readme)}}
 
 	docsDir := filepath.Join("..", "..", "docs")
 	walkErr := filepath.Walk(docsDir, func(path string, info os.FileInfo, err error) error {
@@ -4739,17 +4838,25 @@ func TestDocsHaveNoDeprecatedSpellings(t *testing.T) {
 		if relErr != nil {
 			relName = path
 		}
-		docs = append(docs, struct {
-			name    string
-			content string
-		}{relName, string(content)})
+		docs = append(docs, namedDoc{relName, string(content)})
 		return nil
 	})
 	if walkErr != nil {
 		t.Fatalf("walk docs/: %v", walkErr)
 	}
 
-	for _, doc := range docs {
+	return docs
+}
+
+// TestDocsHaveNoDeprecatedSpellings guards every doc collectMarkdownDocs
+// returns against the deprecatedDocSpellings old settings.<section>.<knob>
+// shim paths (and the bare flat structural-shim spellings) creeping back
+// in. This is the integration counterpart to
+// TestFindDeprecatedDocSpellings_DetectsReintroducedSpelling, which only
+// exercises the checker against synthetic content — this test runs it
+// against the real docs (#2566).
+func TestDocsHaveNoDeprecatedSpellings(t *testing.T) {
+	for _, doc := range collectMarkdownDocs(t) {
 		if found := findDeprecatedDocSpellings(doc.content); len(found) > 0 {
 			t.Errorf("%s contains %d deprecated spelling(s): %v", doc.name, len(found), found)
 		}
