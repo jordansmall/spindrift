@@ -92,21 +92,24 @@ let
   # with its own tests/fakes/<name> fake is covered automatically, no edits
   # needed here.
   nonClaudeDrivers = pkgs.lib.filterAttrs (name: _: name != "claude") driverRegistry.entries;
+  # nativeBuildInputs migrated to the shared batsNativeBuildInputs (issue
+  # #2751); the env vars below stay hand-listed rather than building on
+  # `batsLightweightEnv // { ... }` -- unlike batsShardChecks (batsEnv) this
+  # derivation never runs the suites that need
+  # batsLightweightEnv's other vars (SKILLS_*/OPENCODE_*/PROMPT_PATH/
+  # PROMPT_HARNESS_DIR/DRIVER_OUTCOME_MANIFEST/PROMPT_CONTRACT_PARITY_FIXTURE/
+  # WAIT_FOR_LOG_LINES_TIMEOUT/etc.), so merging batsLightweightEnv wholesale
+  # would silently pull those harnesses (skillsHarness, skillsBwrapHarness,
+  # opencodeHarness, promptHarness, ...) into this derivation's build closure
+  # and change its output path for no behavioral benefit -- exactly the
+  # "forces realization" cost batsLightweightEnv/batsImageEnv were split to
+  # avoid in the first place.
   outcomeBatsChecks = pkgs.lib.mapAttrs' (
     name: entry:
     pkgs.lib.nameValuePair "bats-outcome-${name}" (
       pkgs.runCommand "bats-outcome-${name}"
         {
-          nativeBuildInputs = [
-            pkgs.bats
-            pkgs.bash
-            pkgs.git
-            pkgs.gettext
-            pkgs.coreutils
-            pkgs.gnugrep
-            pkgs.gnused
-            pkgs.jq
-          ];
+          nativeBuildInputs = batsNativeBuildInputs;
           ENTRYPOINT = ../../agent/entrypoint.sh;
           PROMPTS_DIR = ../../templates/default/prompts;
           OUTCOME_CONTRACT_FILE = batsHarness.internals.outcomeContractFile;
@@ -130,15 +133,7 @@ let
           FORBIDDEN_MARKERS_REGISTRY_FILE = forbiddenMarkersRegistryJsonFile;
         }
         ''
-          export HOME="$TMPDIR/home"
-          mkdir -p "$HOME"
-          cp -r ${../../tests} tests
-          chmod -R +w tests
-          for f in tests/fakes/*; do
-            substituteInPlace "$f" \
-              --replace '#!/usr/bin/env bash' "#!${pkgs.bash}/bin/bash"
-          done
-          export FAKES_DIR="$PWD/tests/fakes"
+          ${batsBuilderSetup}
           bats --print-output-on-failure \
             tests/entrypoint-outcome-contract.bats \
             tests/entrypoint-outcome-recovery.bats \
@@ -149,9 +144,10 @@ let
   ) nonClaudeDrivers;
 
   # nativeBuildInputs shared by every bats-shaped derivation in this file
-  # (batsLightweightEnv/batsImageEnv below, plus outcomeBatsChecks and
-  # bats-prompt-contract-parity, which still hand-duplicate this list inline
-  # pending a later migration slice -- issue #2751).
+  # (batsLightweightEnv/batsImageEnv below, plus outcomeBatsChecks above,
+  # which now consumes this binding, and bats-prompt-contract-parity, which
+  # still hand-duplicates this list inline pending a later migration slice
+  # -- issue #2751).
   batsNativeBuildInputs = [
     pkgs.bats
     pkgs.bash
