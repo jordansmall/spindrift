@@ -1010,6 +1010,10 @@ func renderHeader(m Model) string {
 		b.WriteString(roleStyle(RoleDim).Render(fmt.Sprintf("%s notice: %s", glyphNotice, m.RebuildStatus.BranchSwitchNotice)))
 		b.WriteString("\n")
 	}
+	if m.RebuildStatus.DrainSummary != "" {
+		b.WriteString(roleStyle(RoleDim).Render(fmt.Sprintf("%s notice: %s", glyphNotice, strings.TrimPrefix(m.RebuildStatus.DrainSummary, "==> "))))
+		b.WriteString("\n")
+	}
 	if m.DogfoodLive {
 		b.WriteString(roleStyle(RoleDim).Render(glyphNotice + " notice: a live dogfood loop (.spindrift/dogfood.pid) is competing for the same queue"))
 		b.WriteString("\n")

@@ -531,6 +531,132 @@ func TestLauncher_StaleDrainReportsPendingCountAsHeldBack(t *testing.T) {
 	}
 }
 
+// TestLauncher_StaleDrainReportSurfacesOnStaleStatus verifies the other half
+// of #2678's AC 5: a code review blocked the original PR because a stale
+// drain's report only ever reached stdout/drain.log (waves.RunContinuous's
+// emitDrainReport), a path a Console session running under
+// tea.WithAltScreen() never renders. runStack now wires
+// waves.Config.OnDrainReport to Launcher.recordDrainReport, so the exact
+// same report reaches StaleStatus().DrainSummary — the field the console's
+// renderer reads. Same scripted two-pick/one-release setup as
+// TestLauncher_StaleDrainReportsPendingCountAsHeldBack above, but this test
+// asserts on the TUI-reachable StaleStatus() field instead of stdout, and
+// checks the same substring that test's stdout assertion checks, proving
+// both paths carry the same information.
+func TestLauncher_StaleDrainReportSurfacesOnStaleStatus(t *testing.T) {
+	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress"})
+	f.SetIssue(forge.Issue{Number: "42", Title: "first", Labels: []string{"ready-for-agent"}})
+	f.SetIssue(forge.Issue{Number: "43", Title: "second", Labels: []string{"ready-for-agent"}})
+
+	q := NewQueue()
+	q.Add(Pick{Number: "42", Title: "first", State: PickQueued})
+	q.Add(Pick{Number: "43", Title: "second", State: PickQueued})
+
+	fr := runner.NewFake()
+	release42 := make(chan struct{})
+	fr.RunFunc = func(box runner.Box) error {
+		if box.Issue == "42" {
+			<-release42
+		}
+		return nil
+	}
+
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	drv, err := driver.New("")
+	if err != nil {
+		t.Fatalf("driver.New: %v", err)
+	}
+	factory, err := dispatch.NewFactory(dispatch.Config{}, dir, fr, drv, dispatch.RealClock())
+	if err != nil {
+		t.Fatalf("dispatch.NewFactory: %v", err)
+	}
+	t.Cleanup(factory.Cleanup)
+
+	var freshMu sync.Mutex
+	freshCalls := 0
+	freshFn := func() (bool, bool, string) {
+		freshMu.Lock()
+		defer freshMu.Unlock()
+		freshCalls++
+		if freshCalls == 1 {
+			return true, true, "fresh"
+		}
+		return true, false, "rebuild needed (base tip changed image inputs)"
+	}
+
+	launch := &Launcher{CodeForge: f, Factory: factory, Settle: settle.NewFake(), queue: q, MaxParallel: 2, Fresh: freshFn}
+
+	testutil.CaptureStdout(t, func() {
+		launch.tryLaunch(f, dir)
+		close(release42)
+		launch.Wait()
+	})
+
+	summary := launch.StaleStatus().DrainSummary
+	if summary == "" {
+		t.Fatalf("StaleStatus().DrainSummary is empty, want the stale-drain report's rendered summary")
+	}
+	if !strings.Contains(summary, "1 issue(s) held back") {
+		t.Errorf("DrainSummary = %q, want it to mention 1 issue(s) held back (pick #43, still queued)", summary)
+	}
+	if !strings.Contains(summary, "drain:") {
+		t.Errorf("DrainSummary = %q, want it to contain the drain: prefix", summary)
+	}
+}
+
+// TestLauncher_Rebuild_Success_ClearsLastDrainSummary verifies a successful
+// Rebuild clears lastDrainSummary alongside the stale gate (#2678 review
+// finding): a stale-drain report is a retrospective one-off event that
+// becomes stale itself once a later rebuild resolves the staleness it was
+// about, unlike rebuildOutput (kept on success so an operator can still
+// inspect it). Without the fix, StaleStatus().DrainSummary stays pinned to
+// the recorded report for the rest of the Console session even long after
+// the rebuild it was about has succeeded.
+func TestLauncher_Rebuild_Success_ClearsLastDrainSummary(t *testing.T) {
+	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress"})
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", Labels: []string{"ready-for-agent"}})
+
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	drv, err := driver.New("")
+	if err != nil {
+		t.Fatalf("driver.New: %v", err)
+	}
+	fr := runner.NewFake()
+	factory, err := dispatch.NewFactory(dispatch.Config{}, dir, fr, drv, dispatch.RealClock())
+	if err != nil {
+		t.Fatalf("dispatch.NewFactory: %v", err)
+	}
+	t.Cleanup(factory.Cleanup)
+
+	launch := &Launcher{
+		CodeForge: f,
+		Factory:   factory,
+		Settle:    settle.NewFake(),
+		queue:     NewQueue(),
+		Fresh:     func() (bool, bool, string) { return true, false, "rebuild needed" },
+		RebuildFn: func() (string, string, error) { return "", "", nil },
+	}
+
+	now := time.Now()
+	launch.recordDrainReport(waves.DrainReport{StaleAt: now, DrainedAt: now.Add(time.Second), FreeSlotSecs: 1.5, HeldBack: 2})
+	if launch.StaleStatus().DrainSummary == "" {
+		t.Fatalf("StaleStatus().DrainSummary is empty after recordDrainReport, want the recorded summary")
+	}
+
+	launch.Rebuild(f, dir)
+	launch.Wait()
+
+	if summary := launch.StaleStatus().DrainSummary; summary != "" {
+		t.Errorf("StaleStatus().DrainSummary after successful Rebuild = %q, want cleared", summary)
+	}
+}
+
 // waitForPickStates polls q until every numbered pick in want holds the
 // expected state, or fails the test after a two-second deadline — the same
 // no-real-sleep-in-production, bounded-poll-in-test pattern the rest of the

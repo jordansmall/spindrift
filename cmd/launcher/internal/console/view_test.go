@@ -700,6 +700,39 @@ func TestView_BranchSwitchNotice_Surfaced(t *testing.T) {
 	}
 }
 
+// TestView_DrainSummary_Surfaced verifies a stale-drain report's summary
+// (#2678) appears in the rendered header — the TUI-reachable counterpart to
+// RunContinuous's stdout/drain.log emission, which a Console session running
+// under tea.WithAltScreen() never renders. A zero-value RebuildStatus (every
+// pre-#2678 Model) must render byte-identical to before this change: no new
+// blank line, no stray banner.
+func TestView_DrainSummary_Surfaced(t *testing.T) {
+	before := View(NewModel())
+	fresh := View(NewModel())
+	if fresh != before {
+		t.Fatalf("View(NewModel()) is non-deterministic across calls; can't use it as a regression baseline")
+	}
+	if strings.Contains(fresh, "drain:") {
+		t.Errorf("View() with no drain summary = %q, want no mention of a drain report", fresh)
+	}
+
+	m := Update(NewModel(), StaleStatusMsg{RebuildStatus: RebuildStatus{DrainSummary: "==> drain: 1.2s idle, 3.4 free-slot-s, 2 issue(s) held back"}})
+	out := View(m)
+	if strings.Contains(out, "==>") {
+		t.Errorf("View() = %q, want the stdout-style \"==>\" arrow stripped from the TUI banner", out)
+	}
+	if !strings.Contains(out, "notice: drain: 1.2s idle, 3.4 free-slot-s, 2 issue(s) held back") {
+		t.Errorf("View() = %q, want the drain summary surfaced with the sibling lines' \"notice: \" prefix", out)
+	}
+
+	// Empty DrainSummary (the zero value) must render byte-identical to the
+	// pre-#2678 baseline captured above — no new blank line, no stray banner.
+	unchanged := View(Update(NewModel(), StaleStatusMsg{RebuildStatus: RebuildStatus{}}))
+	if unchanged != before {
+		t.Errorf("View() with empty DrainSummary regressed the pre-#2678 rendering:\ngot:  %q\nwant: %q", unchanged, before)
+	}
+}
+
 // TestView_Header_BranchSwitchAndDogfoodNotices_StyledWithGlyph verifies the
 // branch-switch and competing-dogfood notice lines carry the plain-Unicode
 // notice glyph and render styled by role (ADR 0031), while keeping their
