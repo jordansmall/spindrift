@@ -86,6 +86,12 @@ func newIntegrationBwrapAdapter(t *testing.T, unshareNet bool) (*bwrapAdapter, s
 	if err := os.MkdirAll(filepath.Join(agentFiles, "agent"), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	// buildArgs unconditionally ro-binds agentFiles/home/agent (issue #2843);
+	// production's baked agentFiles always has this subtree (lib/image.nix),
+	// so match that here even for probes that don't care about its contents.
+	if err := os.MkdirAll(filepath.Join(agentFiles, "home", "agent"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	etcDir := t.TempDir()
 	passwd := "root:x:0:0:root:/root:/bin/bash\nagent:x:1000:1000:agent:/home/agent:/bin/bash\n"
 	group := "root:x:0:\nagent:x:1000:\n"
@@ -177,6 +183,41 @@ func TestBwrapIntegration_UnshareNetBlocksNetwork(t *testing.T) {
 	}
 	if !strings.Contains(string(out), "Network is unreachable") {
 		t.Fatalf("expected a network-unreachable failure, got: %s (%v)", out, err)
+	}
+}
+
+// TestBwrapIntegration_HomeAgentStagingReadable launches a real bwrap sandbox
+// and asserts, from inside it, that a file staged under agentFiles'
+// home/agent/ subtree is actually readable at the staging path bwrap.go's
+// ro-bind targets — not just that the ro-bind pair appears on argv (issue
+// #2843). A prior version of this fix ro-bound the staged content nested
+// under /agent (already itself an existing read-only bind by the time that
+// mount was appended), which bubblewrap cannot mkdir into: it would fail
+// this test with a "Read-only file system" error from bwrap itself, not a
+// Go-level assertion.
+func TestBwrapIntegration_HomeAgentStagingReadable(t *testing.T) {
+	bashBin := requireRealBwrap(t)
+	catBin := resolveSandboxBin(t, "cat")
+	a, etcDir := newIntegrationBwrapAdapter(t, true)
+
+	const marker = "spindrift-integration-home-agent-marker"
+	homeAgentDir := filepath.Join(a.agentFiles, "home", "agent")
+	if err := os.MkdirAll(homeAgentDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(homeAgentDir, "marker.txt"), []byte(marker), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	box := Box{Env: map[string]string{}}
+	args := bwrapProbeArgs(a, etcDir, box, bashBin, catBin+" "+homeAgentStagingDir+"/marker.txt")
+
+	out, err := exec.Command("bwrap", args...).CombinedOutput()
+	if err != nil {
+		t.Fatalf("bwrap probe failed: %v: %s", err, out)
+	}
+	if got := strings.TrimSpace(string(out)); got != marker {
+		t.Errorf("marker read from %s/marker.txt = %q, want %q", homeAgentStagingDir, got, marker)
 	}
 }
 
