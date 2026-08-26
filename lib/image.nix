@@ -411,6 +411,17 @@ let
       chmod 1777 tmp
       cp ${passwdFile} etc/passwd
       cp ${groupFile} etc/group
+      # contents (below) merges agentFiles into this layer as symlinks back
+      # into its own store output, so home/agent's leaf files are not really
+      # part of this layer at all -- fakeRootCommands' chown/chmod on
+      # home/agent only ever reaches the symlinks themselves, never the
+      # store bytes the symlinks point at, which stay in agentFiles' own
+      # immutable, root-owned closure layer (issue #2843). Replacing the
+      # merged symlinks with a real recursive copy makes home/agent's
+      # contents genuinely part of this (mutable, still-building) layer, so
+      # the chown/chmod below actually land on them.
+      rm -rf home/agent
+      cp -r ${agentFiles}/home/agent home/agent
     ''
     # Make nix operable in an unprivileged throwaway container: a single-user,
     # sandbox-off nix.conf and a store DB registered from the baked closure, so
@@ -440,6 +451,11 @@ let
     # write gcroots/profiles when nix commands run inside the container.
     fakeRootCommands = ''
       chown -R 1000:1000 home/agent work
+      # agentFiles cp's its tree in from the read-only Nix store, so the
+      # copied files keep the store's read-only mode bits; chown alone
+      # changes ownership, not permission, so home/agent also needs an
+      # explicit chmod to become writable by its new owner.
+      chmod -R u+w home/agent
     ''
     + lib.optionalString knobs.nixInBox ''
       chown -R 1000:1000 nix/var
