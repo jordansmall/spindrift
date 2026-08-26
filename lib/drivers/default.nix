@@ -220,6 +220,18 @@ let
       + lib.escapeShellArg "/home/agent/${driverEntry.agentFilesDirRelative}"
       + "\n"
     )
+    # Optional, symmetric with DRIVER_AGENT_FILES_DIR above (issue #2843):
+    # rendered only when the Driver entry declares sessionCacheDirRelative
+    # (currently claude.nix only), so agent/entrypoint.sh can see the
+    # session-cache path inside the box -- the var stays unset, not empty,
+    # for a Driver (opencode) with no resumable session state. This is a
+    # distinct consumer from lib/preambles.nix's renderDriverMountPreamble,
+    # which renders the same-named var for the host-side launcher process.
+    + lib.optionalString (driverEntry ? sessionCacheDirRelative) (
+      "DRIVER_SESSION_CACHE_DIR="
+      + lib.escapeShellArg "/home/agent/${driverEntry.sessionCacheDirRelative}"
+      + "\n"
+    )
     + renderEnvCommon driverEntry
     + renderArgvShape driverEntry
     + renderFunctions driverEntry;

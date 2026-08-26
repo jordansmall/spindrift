@@ -91,6 +91,18 @@ configure_env() {
   HARNESS_SKILLS_DIR="${HARNESS_SKILLS_DIR:-/agent/skills}"
   OPERATOR_SKILLS_DIR="${OPERATOR_SKILLS_DIR:-/operator-skills}"
 
+  # HARNESS_HOME_AGENT_DIR is where bwrap.go's homeAgentStagingDir ro-bind
+  # stages baked /home/agent content (Claude hooks, settings.json, opencode
+  # agent files) read-only (issue #2843). It is a fresh top-level path, not
+  # nested under /agent: /agent is already bound read-only by the time that
+  # mount is added, and bwrap cannot fabricate a new mountpoint inside an
+  # existing read-only bind. The OCI image instead bakes this content
+  # directly, writable, at the real /home/agent (lib/image.nix's
+  # fakeRootCommands), so under bwrap it must be copied into the real
+  # (tmpfs) /home/agent/$HOME at startup instead -- mirrors
+  # HARNESS_SKILLS_DIR's copy-not-mount pattern above.
+  HARNESS_HOME_AGENT_DIR="${HARNESS_HOME_AGENT_DIR:-/home-agent-staged}"
+
   # DRIVER_NAME, DRIVER_BIN, DRIVER_FLAGS_COMMON, and DRIVER_SKILLS_DIR are
   # baked by the selected Driver's lib/drivers/<name>.nix registry entry (ADR
   # 0009, issue #624) via the nix-rendered preamble prepended ahead of this
@@ -593,6 +605,80 @@ _populate_driver_skills_dir() {
   fi
   if [ -d "$OPERATOR_SKILLS_DIR" ]; then
     cp -r "$OPERATOR_SKILLS_DIR"/. "$DRIVER_SKILLS_DIR"/
+  fi
+}
+
+# _populate_home_agent_files copies HARNESS_HOME_AGENT_DIR's staged content
+# (issue #2843) into the real $HOME, by copying rather than mounting -- the
+# same copy-not-mount reasoning as _populate_driver_skills_dir above. Guarded
+# on [ -d "$HARNESS_HOME_AGENT_DIR" ], a no-op under the OCI runner: OCI never
+# creates that path, since lib/image.nix already bakes /home/agent directly,
+# writable, at the real location -- this must not fight or duplicate that.
+# Under bwrap, bwrap.go ro-binds the same baked content at
+# HARNESS_HOME_AGENT_DIR, a distinct source from the real (tmpfs) $HOME, so it
+# must be copied in before anything reads it from $HOME. The follow-up chmod
+# is required, not optional: a plain `cp -r` from a read-only source
+# (bwrap's ro-bind, or a Nix store path) preserves the source's read-only
+# mode bits, the same subtlety lib/image.nix's own fix hit (commit
+# 8961b62e) -- without it, a hook or settings.json copied in here would land
+# unwritable under $HOME.
+#
+# Every plain FILE enumerated under HARNESS_HOME_AGENT_DIR gets an
+# unconditional `chmod u+w` on its mirrored $HOME path -- that only needs
+# the file's own write bit, never its parent directory's, so it's always
+# safe (round 3's review, issue #2843).
+#
+# A DIRECTORY is writable-by-default too, for the same reason: the box
+# needs to create new content under arbitrary copied-in directories -- e.g.
+# `gh` doing `mkdir ~/.config/gh` inside a copied-in (otherwise read-only)
+# ~/.config -- and there's no way to enumerate ahead of time which
+# directories will need that. An earlier round of this fix instead used a
+# narrow DRIVER_AGENT_FILES_DIR-only allowlist, which under-covered this:
+# every OTHER copied-in directory (~/.config, ~/.claude/hooks, ...) kept
+# the Nix store's read-only r-xr-xr-x mode, which was the actual "opencode
+# driver dispatch fails under bwrap" bug this issue is about.
+#
+# There is exactly ONE directory that must be excluded from this
+# writable-by-default treatment: lib/image.nix (300-303) pre-creates an
+# EMPTY placeholder directory inside the baked home/agent tree whenever the
+# driver declares sessionCacheDirRelative (e.g. home/agent/.claude/projects
+# for the claude driver) -- the exact same HOME-relative path bwrap also
+# uses as the live --bind (read-write) mount target for the Driver's
+# session-cache dir, a directory that lives on the HOST filesystem
+# (cmd/launcher/internal/runner/mount.go). bwrap.go ro-binds the whole
+# baked tree, placeholder included, at HARNESS_HOME_AGENT_DIR, so a naive
+# per-path chmod loop -- even a non-recursive one that never uses `chmod
+# -R` -- still walks into that placeholder path and lands directly on the
+# HOST bind-mount's root directory, mutating its permission bits: a
+# container process reaching out and modifying a directory outside the
+# sandbox (and, under `set -euo pipefail`, a chmod failure there aborts box
+# startup entirely).
+#
+# So every enumerated directory is chmod'd EXCEPT when its $HOME-relative
+# target is exactly $DRIVER_SESSION_CACHE_DIR (guarded on it being
+# set/non-empty) -- the env var lib/drivers/default.nix's renderPreamble
+# exports into entrypoint.sh's environment whenever the selected driver
+# declares sessionCacheDirRelative (e.g. /home/agent/.claude/projects for
+# the claude driver; unset entirely for opencode, which declares no
+# session-cache dir). This naturally makes DRIVER_AGENT_FILES_DIR itself
+# get chmod'd too, since it's never the session-cache dir, so it needs no
+# allowlist entry of its own anymore: it's the one directory that
+# genuinely needs directory-level write access from this copy-in --
+# cmd/launcher/internal/promptassembly/assemble.go's rewriteAgentFiles does
+# `os.Remove` on a file inside it when the orchestrator is on, and removing
+# a file needs write+execute on its *containing* directory, not just the
+# file.
+_populate_home_agent_files() {
+  local _src _target
+  if [ -d "$HARNESS_HOME_AGENT_DIR" ]; then
+    cp -r "$HARNESS_HOME_AGENT_DIR"/. "$HOME"/
+    while IFS= read -r _src; do
+      _target="$HOME/${_src#"$HARNESS_HOME_AGENT_DIR"/}"
+      if [ -d "$_src" ] && [ -n "${DRIVER_SESSION_CACHE_DIR:-}" ] && [ "$_target" = "$DRIVER_SESSION_CACHE_DIR" ]; then
+        continue
+      fi
+      chmod u+w "$_target"
+    done < <(find "$HARNESS_HOME_AGENT_DIR" -mindepth 1)
   fi
 }
 
@@ -1231,6 +1317,16 @@ main() {
   # leaving a conflict-resolve prompt that tells the agent to invoke a skill
   # (e.g. `/caveman`) structurally unable to find it.
   _populate_driver_skills_dir
+  # _populate_home_agent_files runs alongside _populate_driver_skills_dir, at
+  # the same early position, for the same reason (issue #2843): under bwrap,
+  # phase_conflict_resolve's own driver invocation and both its early-exit
+  # paths need the baked hooks/settings.json/opencode agent files already
+  # copied into $HOME by the time they run, and phase_prompt_assembly's
+  # driver-exec assemble-prompt rewrites .config/opencode/agents/*.md in
+  # place under $HOME per DRIVER_AGENT_FILES_DIR, which also needs the real
+  # files to exist under $HOME by then. A no-op under the OCI runner (see the
+  # function's own doc comment).
+  _populate_home_agent_files
   phase_conflict_resolve
   phase_prompt_assembly
 

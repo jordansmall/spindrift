@@ -658,6 +658,34 @@ in
       "renderPreamble must omit DRIVER_AGENT_FILES_DIR entirely for a Driver entry with no agentFilesDirRelative, got: ${out}";
     pkgs.runCommand "drivers-render-preamble-omits-agent-files-dir-when-absent" { } "touch $out";
 
+  # Issue #2843: renderPreamble must bake DRIVER_SESSION_CACHE_DIR from the
+  # real claude entry's sessionCacheDirRelative, symmetric with
+  # DRIVER_AGENT_FILES_DIR above, so agent/entrypoint.sh can see the
+  # session-cache path inside the box (a separate consumer from
+  # lib/preambles.nix's renderDriverMountPreamble, which renders the
+  # same-named var for the host-side launcher process).
+  drivers-render-preamble-session-cache-dir =
+    let
+      claudeEntry = driverRegistry.entries.claude;
+      out = driverRegistry.renderPreamble claudeEntry;
+    in
+    assert assertMsg (hasInfix "DRIVER_SESSION_CACHE_DIR=/home/agent/.claude/projects" out)
+      "renderPreamble must bake DRIVER_SESSION_CACHE_DIR from the claude Driver entry's sessionCacheDirRelative under /home/agent, got: ${out}";
+    pkgs.runCommand "drivers-render-preamble-session-cache-dir" { } "touch $out";
+
+  # A Driver entry that declares no sessionCacheDirRelative (every stub
+  # fixture in this file, and opencode.nix in production) must render no
+  # DRIVER_SESSION_CACHE_DIR line at all -- an empty/unset var, not an empty
+  # string assignment -- symmetric with the agent-files-dir omission check
+  # above.
+  drivers-render-preamble-omits-session-cache-dir-when-absent =
+    let
+      out = driverRegistry.renderPreamble stubDriverBase;
+    in
+    assert assertMsg (!(hasInfix "DRIVER_SESSION_CACHE_DIR" out))
+      "renderPreamble must omit DRIVER_SESSION_CACHE_DIR entirely for a Driver entry with no sessionCacheDirRelative, got: ${out}";
+    pkgs.runCommand "drivers-render-preamble-omits-session-cache-dir-when-absent" { } "touch $out";
+
   # Issue #2152 slice C: claude's agentsJsonTemplate builds an attrset and
   # returns builtins.toJSON over the whole thing, so every scalar -- not just
   # description -- is already properly JSON-encoded. Round-trip a
