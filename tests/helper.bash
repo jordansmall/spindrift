@@ -356,6 +356,17 @@ setup_fakes() {
         # HOME happens to be while this file is assembled.
         # shellcheck disable=SC2016 # intentionally unexpanded -- written verbatim into $_wrapped
         echo 'DRIVER_SKILLS_DIR="$HOME/${DRIVER_SKILLS_DIR#/home/agent/}"'
+        # Same re-rooting, for DRIVER_SESSION_CACHE_DIR (issue #2843): the
+        # registry-rendered preamble bakes it as an absolute /home/agent
+        # path too, but only when the selected Driver declares
+        # sessionCacheDirRelative (claude; unset for opencode) -- so unlike
+        # DRIVER_SKILLS_DIR above, this rewrite is itself conditional on the
+        # var actually being set by the cat'd preamble, evaluated at
+        # $_wrapped's own runtime (not at fixture-assembly time here), so a
+        # driver preamble that never sets it leaves it correctly unset
+        # rather than becoming empty-but-set.
+        # shellcheck disable=SC2016 # intentionally unexpanded -- written verbatim into $_wrapped
+        echo 'if [ -n "${DRIVER_SESSION_CACHE_DIR:-}" ]; then DRIVER_SESSION_CACHE_DIR="$HOME/${DRIVER_SESSION_CACHE_DIR#/home/agent/}"; fi'
       fi
       if [ -n "${AGENT_PATHS_PREAMBLE_FILE:-}" ]; then
         cat "$AGENT_PATHS_PREAMBLE_FILE"
