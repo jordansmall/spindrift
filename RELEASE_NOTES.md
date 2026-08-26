@@ -10,6 +10,51 @@ depending on how you use spindrift; it won't affect everyone.
 
 ---
 
+## 0.11.0 — 2026-08-26
+
+Configuration mistakes stop being silent. A bad roster entry or an out-of-range
+knob now fails nix eval instead of rendering something empty into the Box, and
+`spindrift doctor` reports what it found with exit codes a script can read.
+
+**⚠ Breaking changes** this release: doctor's exit codes, strict roster and knob
+validation, and `REVIEW_EFFORT` moving into the baked image.
+
+- **⚠ Breaking: bad config fails at eval instead of quietly degrading.** A roster
+  entry with an unknown key, a missing `model`, or an unresolvable prompt file
+  now stops evaluation. The seven choices-bearing knobs (`mergeMode`,
+  `codeForge`, `issueTracker`, `overlapGate`, `mergeMethod`, `syncMethod`,
+  `boxForgeAndIssueAccess`) became typed enums, so a typo like
+  `git.merge.policy = "Auto"` fails the build instead of reaching the Box as an
+  empty string. `MIGRATING.md` has the fix for each.
+- **⚠ Breaking: `spindrift doctor` exits with a code you can branch on.** 0
+  healthy, 1 internal error, 2 config invalid, 3 auth or connectivity, 4
+  required checks failed or declined. Anything scripted against the old flat 0/1
+  needs a look. Doctor also picked up a check registry, a container-runtime
+  readiness row, branch-protection reporting, and it now degrades an
+  inconclusive probe instead of calling it a failure.
+- **⚠ Breaking: `REVIEW_EFFORT` is baked into the image, not set per dispatch.**
+  Passing `REVIEW_EFFORT` or `--review-effort` at dispatch time is a silent
+  no-op now. The value comes from the roster's reviewer entry
+  (`settings.models.reviewEffort`), so changing it means an image rebuild, the
+  same shape `REVIEW_MODEL` already had. Under `DRIVER=opencode` the review pass
+  falls back to the coordinator's own effort.
+- **The review loop remembers what it already decided.** Multi-pass orchestrator
+  runs keep a decisions record, a dispositions file, and a per-run findings log,
+  and round-N review prompts are seeded from run state with a delta focus on
+  what changed since the last reviewed commit. Budget caps reach the review loop
+  too, so a long review can't quietly outspend the run.
+- **Research files its own findings, and read-only Boxes enforce it.** A research
+  pass can file findings as issues through a host-side relay and link them back
+  in its verdict comment, tagged `agent-research-finding`. Read-only guards are
+  rendered and installed inside the Box at runtime, git hooks in extra repo dirs
+  included, rather than leaving it to the prompt to ask nicely.
+- **Stale runs get caught before they start.** The launcher spots when the host
+  launcher or the image is behind, realizes the fresh tip, and the console
+  banner reports what the drain cost.
+- **Auto-lint and auto-format ship with the harness.** Both are baked into every
+  image as harness-owned skills and merged in at Box startup, so an agent lints
+  and formats without the Consumer wiring anything.
+
 ## 0.10.0 — 2026-08-15
 
 spindrift stops being GitHub-only, and stops losing runs that actually did the
