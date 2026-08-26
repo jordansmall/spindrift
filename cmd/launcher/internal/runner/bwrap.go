@@ -26,6 +26,13 @@ var statResolvConf = func() error {
 	return err
 }
 
+// homeAgentStagingDir is the fixed in-box path bwrap ro-binds agentFiles'
+// baked /home/agent subtree onto (issue #2843). It must be a fresh
+// top-level path, not nested under /agent: /agent is already bound
+// read-only by the time this mount is added, and bwrap cannot create a
+// new mountpoint inside an existing read-only bind.
+const homeAgentStagingDir = "/home-agent-staged"
+
 // bwrapSecrets is the set of box.Env keys whose values must not appear on the
 // bwrap command line. They are delivered via the process environment instead
 // so that ps/proc cannot expose them to other local users.
@@ -166,6 +173,15 @@ func (a *bwrapAdapter) buildArgs(etcDir string, box Box) []string {
 		}
 	}
 	args = append(args, "--ro-bind", a.agentFiles+"/agent", "/agent")
+	// The real /home/agent above is a fresh writable tmpfs, so baked content
+	// (Claude hooks, settings.json, opencode agent files) can't be ro-bound
+	// there directly; stage it read-only at a fresh top-level path instead.
+	// It cannot nest under /agent: the --ro-bind above already bound /agent
+	// read-only, and bwrap processes --ro-bind args in argv order, so it
+	// cannot fabricate a new mountpoint inside a bind already made read-only
+	// (issue #2843). entrypoint.sh copies the staged content into the
+	// writable /home/agent at startup.
+	args = append(args, "--ro-bind", a.agentFiles+"/home/agent", homeAgentStagingDir)
 	// Mount decisions (gates, existence guards, operator messages) are
 	// computed once in buildMountSpecs, shared with the OCI adapter; bwrap
 	// only renders each spec into its own bind syntax. The driver-cache spec

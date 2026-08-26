@@ -73,6 +73,35 @@ func TestBwrapArgs_SkillsDirMounted(t *testing.T) {
 	}
 }
 
+// TestBwrapArgs_HomeAgentStagingMounted verifies that buildArgs ro-binds the
+// baked agentFiles' /home/agent subtree (hooks, settings.json, opencode agent
+// files) to a fixed top-level staging path, rather than exposing it nowhere
+// in the sandbox (issue #2843). It must not nest under /agent: /agent is
+// already bound read-only by the time this mount is added, and bwrap cannot
+// fabricate a new mountpoint inside an existing read-only bind. The real
+// /home/agent stays a fresh writable tmpfs (see the --tmpfs /home/agent line
+// above in buildArgs); entrypoint.sh is responsible for copying this staged
+// content into it at startup.
+func TestBwrapArgs_HomeAgentStagingMounted(t *testing.T) {
+	a := &bwrapAdapter{
+		agentFiles:    "/fake/agent",
+		agentEnv:      "/fake/env",
+		bakedPrefetch: "echo ok",
+	}
+	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}})
+
+	found := false
+	for i := 0; i+2 < len(args); i++ {
+		if args[i] == "--ro-bind" && args[i+1] == "/fake/agent/home/agent" && args[i+2] == "/home-agent-staged" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected --ro-bind /fake/agent/home/agent /home-agent-staged in args: %v", args)
+	}
+}
+
 // stubResolvConfPresent forces statResolvConf to report /etc/resolv.conf as
 // present, independent of whether the test host actually has one (some nix
 // build sandboxes don't). Returns a restore func to defer.
