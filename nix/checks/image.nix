@@ -254,6 +254,59 @@ in
     touch $out
   '';
 
+  # Regression check for issue #2843: opencode driver dispatch failed
+  # "permission denied" because home/agent's files, though chowned to uid
+  # 1000 by fakeRootCommands, kept the read-only mode bits `cp` preserved
+  # from the Nix store. Realizes the real built opencodeHarness.image (not
+  # just the opencode-agent-files derivation above, which only inspects
+  # agentFiles in isolation) and inspects the image's top (customisation)
+  # layer directly, resolving through the Nix symlink-forest indirection
+  # (contents merges agentFiles' tree in as symlinks back into its own
+  # store output) to find wherever scout.md's real bytes actually live, so
+  # the assertion holds regardless of which layer physically carries them.
+  opencode-agent-files-writable-in-image =
+    let
+      bakedPath = "home/agent/.config/opencode/agents/scout.md";
+    in
+    pkgs.runCommand "opencode-agent-files-writable-in-image" { nativeBuildInputs = [ pkgs.jq ]; } ''
+      mkdir img && tar -xf ${opencodeHarness.image} -C img
+      layer="$(jq -r '.[0].Layers[-1]' img/manifest.json)"
+      line="$(tar -tvf "img/$layer" | grep -F '${bakedPath}' | head -1 || true)"
+      [ -n "$line" ] || {
+        echo "${bakedPath} not found in the image's top (customisation) layer" >&2
+        exit 1
+      }
+
+      case "$line" in
+        *' -> '*)
+          target="''${line##* -> }"
+          relTarget="''${target#/}"
+          mode=""
+          for l in $(jq -r '.[0].Layers[]' img/manifest.json); do
+            found_line="$(tar -tvf "img/$l" | grep -F "$relTarget" | head -1 || true)"
+            if [ -n "$found_line" ]; then
+              mode="$(awk '{ print $1 }' <<<"$found_line")"
+              break
+            fi
+          done
+          [ -n "$mode" ] || {
+            echo "${bakedPath} symlinks to $target, but that target is not in any image layer" >&2
+            exit 1
+          }
+          ;;
+        *)
+          mode="$(awk '{ print $1 }' <<<"$line")"
+          ;;
+      esac
+
+      owner_write="''${mode:2:1}"
+      [ "$owner_write" = "w" ] || {
+        echo "expected ${bakedPath} (resolved through any symlink) to be owner-writable in the built image, but its effective mode is '$mode' (owner write bit missing -- fakeRootCommands chowns but never chmods, issue #2843)" >&2
+        exit 1
+      }
+      touch $out
+    '';
+
   # Issue #262 AC1: `driver = "opencode"` builds a distinct, driver-named
   # image. Proven eval-only off buildLayeredImage's `.imageName` passthru (no
   # image realization needed): the default claude Driver keeps the historical
