@@ -132,6 +132,46 @@ baked `packages` list. Baking is an opt-in *speed* knob — a warm store so the
 runtime `nix develop` substitutes nothing — not the primary source (ADR 0014).
 _Avoid_: packages, baked toolchain, dependencies.
 
+**Registry proxy**:
+The launcher-side authenticating proxy that lets the Project toolchain resolve
+dependencies from a private registry without the credential ever entering the
+Box (ADR 0044). Holds the credential in launcher memory, attaches it on the way
+upstream, and exposes an unauthenticated endpoint to the Box over a per-Box unix
+socket. A **read-only mirror**: `GET`/`HEAD` only, credential attached only for
+the configured upstream host, and never carried across a redirect. The Agent can
+*use* the channel and can never *read* the secret — the guarantee is structural,
+not a denylist, which is what distinguishes it from the Driver-credential scrub
+hooks (`agent/env-credential-scrub.sh`) it deliberately does not reuse.
+_Avoid_: mirror, cache, credential helper, MITM (it does not intercept TLS).
+
+**Credential reference**:
+What a Consumer declares to feed the Registry proxy: a `fromFile` path or a
+`fromEnv` variable name — never a value. The rule that keeps secrets out of the
+nix store by construction rather than by discipline, since nothing secret is
+ever evaluable. Extends to the upstream registry URL, which is not a credential
+but is still private, and so is a runtime input rather than a flake value.
+Resolved once at launcher startup, and unset from the launcher's own environment
+immediately after, so the ambient environment cannot carry it into a Box.
+_Avoid_: secret, credential (the value itself), token path.
+
+**Binding**:
+How a Project toolchain is pointed at the Registry proxy. Config-layer in v1: an
+env override where one suffices, plus a textual host substitution of in-tree
+config marked `skip-worktree` so the Agent neither sees nor commits it. The
+deliberately swappable last mile of ADR 0044 — everything above it is identical
+under the rejected TLS-interception alternative, so the choice is reversible on
+evidence. Each ecosystem is a small table entry, not a parser; `cargo` is the
+only entry in v1.
+_Avoid_: adapter, registry config, ecosystem support.
+
+**Forwarder**:
+The small in-Box process that presents the Registry proxy's mounted unix socket
+as a local TCP endpoint, because package managers take a URL and not a socket.
+Exists so the harness opens no host TCP port and stays runtime-agnostic — the
+socket form works identically under bwrap and every OCI runtime and composes
+with `networkMode=no-host-loopback` instead of contradicting it.
+_Avoid_: proxy (that is the launcher-side half), shim, tunnel.
+
 **Issue Tracker**:
 The seam that supplies work and carries dispatch state: listing dispatchable
 issues, reading an issue's body/title/state, transitioning its Dispatch state,
