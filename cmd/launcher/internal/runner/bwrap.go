@@ -7,7 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
+	"sort"
 	"sync"
 )
 
@@ -204,8 +204,10 @@ func (a *bwrapAdapter) buildArgs(etcDir string, box Box) []string {
 		args = append(args, "--ro-bind", m.Source, m.Target)
 	}
 	// --clearenv is intentionally absent: secrets (GH_TOKEN, auth tokens) reach
-	// the sandbox by inheriting the launcher's process environment. Values on
-	// argv are visible in ps/proc, so secrets must not appear there.
+	// the sandbox via resolvedRunEnv(box.Env) below -- the bwrapSecrets subset
+	// of the schema-driven box.Env -- which Run sets as cmd.Env and bwrap
+	// inherits without --clearenv. Values on argv are visible in ps/proc, so
+	// secrets must not appear there.
 	args = append(args,
 		"--setenv", "HOME", "/home/agent",
 		"--setenv", "PATH", a.agentEnv+"/bin",
@@ -229,34 +231,49 @@ func (a *bwrapAdapter) buildArgs(etcDir string, box Box) []string {
 }
 
 // resolvedRunEnv returns the process environment the bwrap child should
-// inherit: ambient with its GH_TOKEN entry (if any) replaced by
-// box.Env["GH_TOKEN"] -- the value dispatchConfig's ResolveEnv chain
-// computed, which reflects a BOX_GH_TOKEN override (ADR 0016, issue #380)
-// when the operator set one. buildArgs's --setenv loop skips GH_TOKEN
-// (bwrapSecrets) to keep it off argv, and bwrap has no --clearenv, so
-// without this substitution the sandbox would inherit ambient's GH_TOKEN
-// unconditionally, silently ignoring any override. BOX_GH_TOKEN itself is
-// always stripped from ambient, present or not: it's a real var on the
-// launcher's own process environment whenever the operator sets one, and
-// lib/env-schema.nix's boxGhToken entry is deliberately boxEnv=false -- it
-// must never reach the Box under its own name, only ever as GH_TOKEN's
-// substituted value above. A missing "GH_TOKEN" key in box.Env (every
-// caller outside production, and any future BoxEnvVars config that drops
-// it) leaves ambient's own GH_TOKEN untouched.
-func resolvedRunEnv(ambient []string, boxEnv map[string]string) []string {
-	token, hasOverride := boxEnv["GH_TOKEN"]
-	out := make([]string, 0, len(ambient)+1)
-	for _, kv := range ambient {
-		if strings.HasPrefix(kv, "BOX_GH_TOKEN=") {
-			continue
-		}
-		if hasOverride && strings.HasPrefix(kv, "GH_TOKEN=") {
-			continue
-		}
-		out = append(out, kv)
+// inherit. It is an allowlist, not a denylist: the launcher's own ambient
+// environment (os.Environ()) is never read here, so nothing outside boxEnv
+// can reach the sandbox this way. boxEnv is already the schema-driven
+// allowlist (lib/env-schema.nix boxEnv=true names, resolved through
+// dispatchConfig's ResolveEnv chain -- including any BOX_GH_TOKEN override,
+// ADR 0016, issue #380 -- plus a fixed set of launcher-synthesized keys);
+// buildArgs's --setenv loop already delivers every one of those keys to the
+// sandbox on argv except the bwrapSecrets subset (GH_TOKEN,
+// CLAUDE_CODE_OAUTH_TOKEN, ANTHROPIC_API_KEY, OPENCODE_AUTH_CONTENT), which
+// it deliberately excludes so ps/proc can't expose them to other local
+// users. bwrapSecrets is not every secret boxEnv can carry -- e.g.
+// FORGEJO_TOKEN (lib/env-schema.nix) is secret=true and boxEnv=true but
+// absent from bwrapSecrets, so it still renders to argv; that gap predates
+// this function and is untouched by it. This function's sole remaining job
+// is handing the bwrapSecrets subset to the sandbox via the inherited
+// process environment instead (bwrap runs with no --clearenv). BOX_GH_TOKEN
+// itself is never forwarded:
+// it isn't a bwrapSecrets key, and lib/env-schema.nix's boxGhToken entry is
+// boxEnv=false, so it's never a key in boxEnv to begin with -- by the time
+// Run(box) is called, any BOX_GH_TOKEN override has already been folded
+// into boxEnv["GH_TOKEN"] upstream (main.go's boxTokenResolver).
+//
+// TERM/LANG/LC_ALL/TZ/TMPDIR/proxy vars are deliberately not part of this
+// allowlist: the OCI runner (oci.go buildRunArgs) is existing production
+// precedent that none are load-bearing -- it has never forwarded ambient
+// env at all (podman/docker don't inherit host env by default), and the
+// same in-Box agent runs under it today without them. A sweep of
+// agent/entrypoint.sh and every nix-rendered preamble found no read of any
+// of them either, though that sweep covers the Box's shell surface, not
+// the Driver binary's own env reads (ANTHROPIC_BASE_URL,
+// NODE_EXTRA_CA_CERTS, proxy variables) -- the OCI precedent is what
+// actually carries the claim for those.
+func resolvedRunEnv(boxEnv map[string]string) []string {
+	keys := make([]string, 0, len(bwrapSecrets))
+	for k := range bwrapSecrets {
+		keys = append(keys, k)
 	}
-	if hasOverride {
-		out = append(out, "GH_TOKEN="+token)
+	sort.Strings(keys)
+	out := make([]string, 0, len(keys))
+	for _, k := range keys {
+		if v, ok := boxEnv[k]; ok {
+			out = append(out, k+"="+v)
+		}
 	}
 	return out
 }
@@ -283,12 +300,12 @@ func (a *bwrapAdapter) Run(box Box) error {
 		out = io.Discard
 	}
 
-	// The bwrap process inherits the launcher's full environment (with
-	// GH_TOKEN substituted per resolvedRunEnv). Without --clearenv, the
-	// sandbox also inherits it. Secrets (GH_TOKEN, auth tokens) are
-	// therefore available inside the sandbox without appearing on argv.
+	// The bwrap process's env is resolvedRunEnv(box.Env) -- the bwrapSecrets
+	// subset of box.Env, not the launcher's own ambient environment. Without
+	// --clearenv, the sandbox inherits it. Secrets (GH_TOKEN, auth tokens)
+	// are therefore available inside the sandbox without appearing on argv.
 	cmd := execCommand("bwrap", a.buildArgs(etcDir, box)...)
-	cmd.Env = resolvedRunEnv(os.Environ(), box.Env)
+	cmd.Env = resolvedRunEnv(box.Env)
 	cmd.Stdout = out
 	cmd.Stderr = out
 	if err := cmd.Start(); err != nil {

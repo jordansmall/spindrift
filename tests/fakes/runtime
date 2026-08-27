@@ -1,16 +1,24 @@
 #!/usr/bin/env bash
 # Unified runtime fake: dispatches on basename "$0" (podman/docker/bwrap).
-# Records every invocation to ${RT}_LOG and simulates just enough behaviour for
-# the harness scripts. Outcome emission, AUTO_COMPLETE, and GH_STATE writes are
-# available under all three names — none is a lagging copy of another.
+# Records every invocation to ${RT}_LOG (bwrap falls back to a cwd-relative
+# path, since the launcher no longer forwards ambient env to the bwrap
+# child) and simulates just enough behaviour for the harness scripts.
+# Outcome emission, AUTO_COMPLETE, and GH_STATE writes are available under
+# all three names — none is a lagging copy of another.
 set -euo pipefail
 
-runtime="$(basename "$0")"
-rt="$(printf '%s' "$runtime" | tr '[:lower:]' '[:upper:]')"
+runtime="${0##*/}"
+rt="${runtime^^}"
 
 log_var="${rt}_LOG"
-: "${!log_var:?${log_var} must point at a log file}"
-log="${!log_var}"
+if [ "$runtime" = "bwrap" ]; then
+  # bwrap's cmd.Env is the schema-driven allowlist, not the launcher's
+  # ambient env, so a suite can no longer hand this fake a BWRAP_LOG var;
+  # fall back to a cwd-relative path instead of failing loudly.
+  log="${!log_var:-$PWD/${runtime}.log}"
+else
+  log="${!log_var:?}"
+fi
 
 # bwrap: extract ISSUE_NUMBER early so each concurrent box writes its own log
 # file, eliminating concurrent-write races when multiple issues run concurrently.
@@ -124,13 +132,23 @@ case "$runtime" in
     esac
     ;;
   bwrap)
+    # No FAKE_${rt}_OUTCOME_*/FAKE_${rt}_RUN_EXIT env lookups here: bwrap's
+    # cmd.Env is the schema-driven allowlist, so the launcher never forwards
+    # an ambient control var to this child. The control-file path below is
+    # the only reachable channel for the bwrap case.
     if [ -n "$issue_num" ]; then
-      outcome_var="FAKE_${rt}_OUTCOME_${issue_num}"
-      outcome_val="${!outcome_var:-}"
-      [ -n "$outcome_val" ] && printf '%s\n' "$(_with_nonce "$outcome_val")"
+      outcome_file="$PWD/.fake_${runtime}_outcome_${issue_num}"
+      if [ -f "$outcome_file" ]; then
+        outcome_val="$(<"$outcome_file")"
+        [ -n "$outcome_val" ] && printf '%s\n' "$(_with_nonce "$outcome_val")"
+      fi
     fi
-    run_exit_var="FAKE_${rt}_RUN_EXIT"
-    exit "${!run_exit_var:-0}"
+    run_exit_file="$PWD/.fake_${runtime}_run_exit"
+    run_exit=""
+    if [ -f "$run_exit_file" ]; then
+      run_exit="$(<"$run_exit_file")"
+    fi
+    exit "${run_exit:-0}"
     ;;
 esac
 

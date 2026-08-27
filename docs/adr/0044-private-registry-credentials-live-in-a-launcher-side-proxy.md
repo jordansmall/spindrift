@@ -69,12 +69,14 @@ channel that is authenticated on its behalf.**
   into a world-readable store path either.
 
 - **The launcher reads the credential at startup and immediately unsets it.**
-  `resolvedRunEnv` (`internal/runner/bwrap.go`) forwards the launcher's entire
-  ambient environment into a bwrap Box minus two hardcoded names. Without this
-  step a `fromEnv` credential is inherited by the Agent Box automatically, and
-  the Agent reads it with `echo` while the proxy behaves perfectly. Reading and
-  unsetting at startup removes it from ambient under both runtimes and from the
-  launcher's own `/proc/self/environ`.
+  At the time this ADR was written, `resolvedRunEnv` (`internal/runner/bwrap.go`)
+  forwarded the launcher's entire ambient environment into a bwrap Box minus two
+  hardcoded names (issue #2859 later inverted this to a schema-driven
+  allowlist). Without this read-and-unset step, a `fromEnv` credential was
+  inherited by the Agent Box automatically, and the Agent could read it with
+  `echo` while the proxy behaved perfectly. Reading and unsetting at startup
+  removes it from ambient under both runtimes and from the launcher's own
+  `/proc/self/environ`.
 
 - **The Box reaches the proxy over a per-Box unix socket.** Mounted through the
   existing `Mounts` plumbing, with a small in-Box forwarder presenting it as a
@@ -126,7 +128,7 @@ as their own tickets, added when something needs them.
   to reading dependencies it was going to build anyway, but the residual is real
   and is the same residual every design in this space has.
 
-- **`resolvedRunEnv`'s denylist is a latent leak beyond this feature.** Removing
-  two names from an inherited environment protects exactly two secrets. Read-and-
+- **`resolvedRunEnv`'s denylist was a latent leak beyond this feature.** Removing
+  two names from an inherited environment protected exactly two secrets. Read-and-
   unset fixes this credential; inverting the denylist to a schema-driven
-  allowlist is the structural fix, tracked separately.
+  allowlist was the structural fix, tracked separately (issue #2859).

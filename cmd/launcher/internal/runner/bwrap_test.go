@@ -163,41 +163,116 @@ func TestBwrapKill_UnknownNameIsNoop(t *testing.T) {
 	}
 }
 
-// TestResolvedRunEnv_OverridesGHTokenFromBoxEnv verifies opt-in two-actor
-// separation (ADR 0016, issue #380): the sandbox's process environment
-// substitutes box.Env's resolved GH_TOKEN in place of whatever the
-// launcher's own ambient GH_TOKEN was -- buildArgs's --setenv loop skips
-// GH_TOKEN (bwrapSecrets) to keep it off argv, and bwrap has no --clearenv,
-// so without this substitution the sandbox would silently inherit the
-// launcher's ambient value instead of the resolved (possibly
-// BOX_GH_TOKEN-overridden) one.
-func TestResolvedRunEnv_OverridesGHTokenFromBoxEnv(t *testing.T) {
-	ambient := []string{"PATH=/bin", "GH_TOKEN=launcher-token", "HOME=/root"}
+// TestResolvedRunEnv_DropsUndeclaredAmbientVariable characterizes the
+// allowlist invariant the denylist version leaked: a name set on the
+// launcher's own real ambient process environment, absent from box.Env
+// entirely, must never appear in the env the bwrap child actually receives
+// -- while a real bwrapSecrets key present in box.Env still does. This
+// drives through Run itself (not resolvedRunEnv in isolation with an empty
+// box.Env, which would pin only the drop half) to pin the real seam:
+// bwrap.go's `cmd.Env = resolvedRunEnv(box.Env)`.
+func TestResolvedRunEnv_DropsUndeclaredAmbientVariable(t *testing.T) {
+	t.Setenv("SOME_UNDECLARED_SECRET", "leaked-value")
+	script, _ := newFakeCLI(t, fakeCall{exit: 0})
+	orig := execCommand
+	t.Cleanup(func() { execCommand = orig })
+	var gotCmd *exec.Cmd
+	execCommand = func(name string, args ...string) *exec.Cmd {
+		gotCmd = exec.Command(script, args...)
+		return gotCmd
+	}
+
+	a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok"}
+	if err := a.Run(Box{Env: map[string]string{"GH_TOKEN": "box-token"}}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	sawGHToken := false
+	for _, kv := range gotCmd.Env {
+		if strings.HasPrefix(kv, "SOME_UNDECLARED_SECRET=") {
+			t.Errorf("Run's cmd.Env leaked an ambient var absent from box.Env: %v", gotCmd.Env)
+		}
+		if kv == "GH_TOKEN=box-token" {
+			sawGHToken = true
+		}
+	}
+	if !sawGHToken {
+		t.Errorf("Run's cmd.Env dropped a real bwrapSecrets key present in box.Env: %v", gotCmd.Env)
+	}
+}
+
+// TestResolvedRunEnv_ForwardsGHTokenFromBoxEnv verifies opt-in two-actor
+// separation (ADR 0016, issue #380) still works under the allowlist: when
+// box.Env carries a resolved GH_TOKEN (reflecting any BOX_GH_TOKEN override
+// dispatchConfig's ResolveEnv chain applied), resolvedRunEnv forwards it
+// verbatim -- buildArgs's --setenv loop skips GH_TOKEN (bwrapSecrets) to
+// keep it off argv, and bwrap has no --clearenv, so this is the only path
+// left for it to reach the sandbox at all.
+func TestResolvedRunEnv_ForwardsGHTokenFromBoxEnv(t *testing.T) {
 	boxEnv := map[string]string{"GH_TOKEN": "box-token"}
 
-	got := resolvedRunEnv(ambient, boxEnv)
+	got := resolvedRunEnv(boxEnv)
 
-	want := []string{"PATH=/bin", "HOME=/root", "GH_TOKEN=box-token"}
+	want := []string{"GH_TOKEN=box-token"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("resolvedRunEnv = %v, want %v", got, want)
 	}
 }
 
-// TestResolvedRunEnv_StripsBoxGHTokenFromAmbient verifies BOX_GH_TOKEN never
-// reaches the sandbox under its own name (lib/env-schema.nix's boxGhToken
-// entry is deliberately boxEnv=false): bwrap's ambient-env inheritance would
-// otherwise leak it as-is, since it's a real var on the launcher's own
-// process environment whenever the operator has set it, unrelated to
-// buildBoxEnv's schema-driven forwarding.
-func TestResolvedRunEnv_StripsBoxGHTokenFromAmbient(t *testing.T) {
-	ambient := []string{"PATH=/bin", "GH_TOKEN=launcher-token", "BOX_GH_TOKEN=box-token"}
-	boxEnv := map[string]string{"GH_TOKEN": "box-token"}
+// TestResolvedRunEnv_ForwardsAllBwrapSecrets verifies every bwrapSecrets
+// name (not just GH_TOKEN) is forwarded from box.Env through the process
+// environment, since buildArgs's --setenv loop excludes all of them from
+// argv identically.
+func TestResolvedRunEnv_ForwardsAllBwrapSecrets(t *testing.T) {
+	boxEnv := map[string]string{
+		"GH_TOKEN":                "gh-token-value",
+		"CLAUDE_CODE_OAUTH_TOKEN": "oauth-token-value",
+		"ANTHROPIC_API_KEY":       "anthropic-key-value",
+		"OPENCODE_AUTH_CONTENT":   "opencode-auth-value",
+	}
 
-	got := resolvedRunEnv(ambient, boxEnv)
+	got := resolvedRunEnv(boxEnv)
 
-	for _, kv := range got {
-		if strings.HasPrefix(kv, "BOX_GH_TOKEN=") {
-			t.Errorf("resolvedRunEnv leaked BOX_GH_TOKEN into the sandbox env: %v", got)
+	if len(got) != len(boxEnv) {
+		t.Fatalf("resolvedRunEnv returned %d entries, want %d: %v", len(got), len(boxEnv), got)
+	}
+	for k, v := range boxEnv {
+		want := k + "=" + v
+		found := false
+		for _, kv := range got {
+			if kv == want {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("resolvedRunEnv missing %q, got %v", want, got)
+		}
+	}
+}
+
+// TestResolvedRunEnv_ExcludesKeysNotInBwrapSecrets covers two ways a key can
+// be legitimately excluded from resolvedRunEnv's output: BOX_GH_TOKEN is
+// never a bwrapSecrets key at all (lib/env-schema.nix's boxGhToken entry is
+// boxEnv=false, so it would never actually be a box.Env key in production
+// either -- this just proves resolvedRunEnv would still drop it if it somehow
+// were); ISSUE_NUMBER is a legitimate box.Env key but not a bwrapSecrets one,
+// so buildArgs's --setenv loop already delivers it to the sandbox on argv,
+// and resolvedRunEnv correctly leaves it out to avoid delivering it twice.
+func TestResolvedRunEnv_ExcludesKeysNotInBwrapSecrets(t *testing.T) {
+	tests := []struct {
+		name      string
+		boxEnv    map[string]string
+		absentKey string
+	}{
+		{"BOX_GH_TOKEN is not a bwrapSecrets key", map[string]string{"BOX_GH_TOKEN": "box-token"}, "BOX_GH_TOKEN"},
+		{"non-secret box.Env key already delivered via --setenv", map[string]string{"GH_TOKEN": "gh-token-value", "ISSUE_NUMBER": "42"}, "ISSUE_NUMBER"},
+	}
+	for _, tc := range tests {
+		got := resolvedRunEnv(tc.boxEnv)
+		for _, kv := range got {
+			if strings.HasPrefix(kv, tc.absentKey+"=") {
+				t.Errorf("%s: resolvedRunEnv forwarded %s, want absent: %v", tc.name, tc.absentKey, got)
+			}
 		}
 	}
 }
