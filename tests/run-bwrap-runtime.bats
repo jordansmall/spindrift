@@ -76,7 +76,7 @@ setup() {
 }
 
 @test "runtime=bwrap a non-zero exit swaps agent-in-progress -> agent-failed" {
-  export FAKE_BWRAP_RUN_EXIT=1
+  printf '1' >.fake_bwrap_run_exit
   export FAKE_GH_ISSUES=$'1\tOnly issue'
   run "$BWRAP_RUN_CMD"
   [ "$status" -eq 0 ]
@@ -85,7 +85,7 @@ setup() {
 
 @test "runtime=bwrap outcome report lists dispatched issues" {
   export FAKE_GH_ISSUES=$'1\tSingle'
-  export FAKE_BWRAP_OUTCOME_1="SPINDRIFT_OUTCOME issue=1 landing=https://github.com/owner/repo/pull/1 status=merged note=ok"
+  printf '%s' "SPINDRIFT_OUTCOME issue=1 landing=https://github.com/owner/repo/pull/1 status=merged note=ok" >.fake_bwrap_outcome_1
   # verifyMerged host-derives the ref from the branch (#1955), so the merged
   # arm resolves the PR via `gh pr list --head`, not the Agent's landing=.
   export FAKE_GH_PR_LIST_1="https://github.com/owner/repo/pull/1"
