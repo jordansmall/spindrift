@@ -2510,3 +2510,16 @@ func TestEmitStaleDrainReportReleasingMu_ReleasesMuAroundIO(t *testing.T) {
 		t.Error("mu after emitStaleDrainReportReleasingMu returns: got released, want held (re-acquired before return)")
 	}
 }
+
+// TestResolvePollInterval covers resolvePollInterval's fallback (issue
+// #2874); see defaultPollInterval's doc comment for the cadence rationale.
+func TestResolvePollInterval(t *testing.T) {
+	if got := resolvePollInterval(0); got != defaultPollInterval {
+		t.Errorf("resolvePollInterval(0): got %s, want %s", got, defaultPollInterval)
+	}
+
+	const override = 10 * time.Millisecond
+	if got := resolvePollInterval(override); got != override {
+		t.Errorf("resolvePollInterval(%s): got %s, want %s", override, got, override)
+	}
+}
