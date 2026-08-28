@@ -539,6 +539,88 @@ EOF
   echo "==> registry proxy Forwarder up on 127.0.0.1:${REGISTRY_PROXY_FORWARDER_PORT} — cargo bound to it via $_cargo_home/config.toml"
 }
 
+# phase_cargo_intree_binding_apply rewrites a Target repo's own committed
+# in-tree $WORK_DIR/.cargo/config.toml (ADR 0044, issue #2851).
+# phase_registry_proxy_forwarder's user-level $CARGO_HOME/config.toml binding
+# above only redirects crates-io's [source] table -- a repo that instead pins
+# a private registry directly in its own in-tree config (e.g.
+# [registries.NAME] index = "sparse+https://HOST/index/") wins over that
+# user-level file, and cargo's table-valued [source]/[registries] keys are
+# still not overridable via CARGO_* env vars (cargo#5416, the same upstream
+# limitation). This textually rewrites every occurrence of the upstream host
+# (REGISTRY_PROXY_UPSTREAM_HOST, forwarded non-secret by dispatch.go's
+# buildBoxEnv) to the local Forwarder's own endpoint -- a plain sed
+# substitution, not a TOML parse, since the job is only to redirect the URL's
+# scheme+host, not to understand the file's structure -- then marks the file
+# skip-worktree so the rewrite can never be staged or committed back.
+#
+# Idempotent and safe to call more than once per run: the leading grep guard
+# no-ops harmlessly if the working-tree content doesn't currently mention the
+# upstream host, which is exactly the state cargo_intree_binding_revert
+# restores before a further harness-driven git operation, and exactly the
+# state to re-establish the binding against afterward. Sets
+# _cargo_intree_binding_applied, read (and cleared) by
+# cargo_intree_binding_revert -- the same local + dynamic-scoping cross-phase
+# sentinel convention as _rebase_and_publish/_had_rebase_conflict (issue
+# #515).
+#
+# Called from main() right after clone_repo (the file this rewrites doesn't
+# exist until after the clone, so it can't run alongside
+# phase_registry_proxy_forwarder above), then again right after
+# phase_prework_rebase returns to re-establish the binding once that rebase
+# (and any conflict-resolve dance) has settled. ADR 0044 calls for the
+# rewrite to be reverted around any *further* harness-driven git operation
+# downstream of the first apply -- git's checkout-safety check compares the
+# working tree against the target blob whenever that blob's content is
+# actually changing, and skip-worktree does not suppress that check (it only
+# suppresses git status/diff reporting and `git add -A` staging), so a
+# harness-driven rebase/checkout that needs to write a genuinely different
+# committed .cargo/config.toml than what this function left in the working
+# tree would otherwise abort with "local changes ... would be overwritten by
+# checkout". cargo_intree_binding_revert (below) is that revert half; main()
+# and phase_conflict_resolve call it around the git operations that need it.
+phase_cargo_intree_binding_apply() {
+  [ -n "${REGISTRY_PROXY_UPSTREAM_HOST:-}" ] || return 0
+  [ -S "$REGISTRY_PROXY_SOCKET_PATH" ] || return 0
+  [ -f "$WORK_DIR/.cargo/config.toml" ] || return 0
+
+  grep -qF -- "$REGISTRY_PROXY_UPSTREAM_HOST" "$WORK_DIR/.cargo/config.toml" || return 0
+
+  # Two separate passes, not one alternation: a cargo sparse registry URL
+  # looks like sparse+https://HOST/index/, and since "sparse+https://"
+  # contains "https://" as a substring, a plain s#https://HOST#...#g pass
+  # matches it correctly without special-casing the sparse+/git+/bare
+  # prefix. The Forwarder itself is plain HTTP, so both https:// and http://
+  # source forms collapse to the same http://127.0.0.1:<port> destination.
+  sed -i "s#https://${REGISTRY_PROXY_UPSTREAM_HOST}#http://127.0.0.1:${REGISTRY_PROXY_FORWARDER_PORT}#g" \
+    "$WORK_DIR/.cargo/config.toml"
+  sed -i "s#http://${REGISTRY_PROXY_UPSTREAM_HOST}#http://127.0.0.1:${REGISTRY_PROXY_FORWARDER_PORT}#g" \
+    "$WORK_DIR/.cargo/config.toml"
+
+  git -C "$WORK_DIR" update-index --skip-worktree .cargo/config.toml
+  _cargo_intree_binding_applied=1
+
+  echo "==> in-tree .cargo/config.toml rewritten to point at the local registry proxy Forwarder (127.0.0.1:${REGISTRY_PROXY_FORWARDER_PORT}) and hidden from git via skip-worktree"
+}
+
+# cargo_intree_binding_revert undoes phase_cargo_intree_binding_apply's
+# rewrite before a further harness-driven git operation on $WORK_DIR touches
+# .cargo/config.toml (ADR 0044, issue #2851) -- see
+# phase_cargo_intree_binding_apply's doc comment above for why the rewrite
+# must be reverted around such an operation rather than left in place.
+# Restores the original committed content via `git checkout --` and clears
+# the skip-worktree bit, so the working tree looks completely ordinary to
+# the operation that follows; phase_cargo_intree_binding_apply is expected to
+# re-run afterward to re-establish the binding. A true no-op, cheap to call
+# defensively, unless this run's phase_cargo_intree_binding_apply actually
+# rewrote the file (tracked via _cargo_intree_binding_applied).
+cargo_intree_binding_revert() {
+  [ -n "${_cargo_intree_binding_applied:-}" ] || return 0
+  git -C "$WORK_DIR" update-index --no-skip-worktree .cargo/config.toml
+  git -C "$WORK_DIR" checkout -- .cargo/config.toml
+  _cargo_intree_binding_applied=""
+}
+
 # phase_toolchain_nudge emits a one-time hint for a cold run with a
 # recognized lockfile and no prefetch configured.
 phase_toolchain_nudge() {
@@ -856,6 +938,10 @@ phase_conflict_resolve() {
     local _use_dev_shell=0
     run_driver_in_env "$_cr_prompt" "" "" "" || true
     if [ -d ".git/rebase-merge" ] || [ -d ".git/rebase-apply" ]; then
+      # Defensive: cheap no-op unless .cargo/config.toml was itself one of the
+      # conflicting paths (ADR 0044, issue #2851) -- restores ordinary
+      # working-tree content before the abort below re-checks out HEAD.
+      cargo_intree_binding_revert
       git rebase --abort 2>/dev/null || true
       echo "==> pre-work rebase onto origin/${BASE_BRANCH:-} failed — conflict agent could not resolve"
       exit 1
@@ -1353,6 +1439,7 @@ main() {
   # each phase function assign them by plain (non-local) assignment while
   # keeping them out of true global scope (issue #515).
   local _rebase_and_publish _had_rebase_conflict
+  local _cargo_intree_binding_applied
   local _use_dev_shell _harness_path
   local prompt agents_json _handoff
   local _last_outcome_line _last_near_miss_line _last_pr_intent_line
@@ -1401,11 +1488,19 @@ main() {
     _use_dev_shell=0
   else
     clone_repo
+    # phase_cargo_intree_binding_apply runs here, right after clone_repo --
+    # see its own doc comment above for why this exact placement, and for the
+    # revert/re-apply dance around phase_branch_recovery/phase_prework_rebase
+    # just below.
+    phase_cargo_intree_binding_apply
     # A research dispatch (ADR 0022, issue #640) explores the fresh clone but
-    # never lands code: no branch to cut, adopt, or rebase.
+    # never lands code: no branch to cut, adopt, or rebase -- and so never
+    # needs the revert/re-apply dance either.
     if ! _is_research_kind; then
+      cargo_intree_binding_revert
       phase_branch_recovery
       phase_prework_rebase
+      phase_cargo_intree_binding_apply
     fi
     phase_toolchain_nudge
     phase_devshell_probe
