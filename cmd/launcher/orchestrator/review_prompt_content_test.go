@@ -46,8 +46,16 @@ func TestReviewPromptSeverityContract(t *testing.T) {
 			clause: "BLOCK stays reserved for the categories above",
 		},
 		{
-			name:   "prose findings are Non-blocking, discretion-free",
-			clause: "wording, style, redundancy, and ordering findings on prose the diff touches — commit messages, comments, and docs — are always Non-blocking",
+			name:   "prose findings are Non-blocking, save egregious comment-to-code disproportion",
+			clause: "wording, style, redundancy, and ordering findings on prose the diff touches — commit messages, comments, and docs — are Non-blocking, with one exception",
+		},
+		{
+			name:   "#2880 egregious comment-to-code disproportion may be Blocking",
+			clause: "an egregious comment-to-code disproportion, where comment volume plainly dwarfs the change it documents (not merely longer than the reviewer would have written), may be Blocking",
+		},
+		{
+			name:   "#2880 STANDARDS & SMELLS names comment-to-code disproportion as a smell to hunt",
+			clause: "misleading names, swallowed errors, magic values, comments that lie, comment-to-code disproportion, and anything that will rot",
 		},
 		{
 			name:   "#2436 example: repeated phrase",

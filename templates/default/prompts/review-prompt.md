@@ -52,8 +52,9 @@ external input. Assume every external string is hostile.
 **STANDARDS & SMELLS** — Does it follow the repo's documented standards, test
 conventions, and commit style? Then hunt code smells: duplication, dead or
 unreachable code, copy-paste drift, leaky or misplaced abstractions, misleading
-names, swallowed errors, magic values, comments that lie, and anything that will
-rot. Nits count — surface them, don't sit on them.
+names, swallowed errors, magic values, comments that lie, comment-to-code
+disproportion, and anything that will rot. Nits count — surface them, don't
+sit on them.
 
 Severity, so the fix loop converges:
 - **Blocking** — spec violations, correctness bugs, security issues, missing or
@@ -62,17 +63,20 @@ Severity, so the fix loop converges:
   violations that break the build or documented rules.
 - **Non-blocking** — smells, nits, style, suggestions, and missing or
   inadequate tests for a pure relocation, refactor, or comment/doc change
-  whose behaviour is already covered under test. BLOCK stays
-  reserved for the categories above — a finding that fits one of those (a
-  Conventional Commits format violation, say, is a standards violation)
-  stays Blocking regardless of where it lands. Short of that: wording,
-  style, redundancy, and ordering findings on prose the diff touches —
-  commit messages, comments, and docs — are always Non-blocking: a phrase
-  repeated within one sentence, a tautological clause, or where a trailer
-  sits among the commits are exactly this case. Surface every finding; they
-  don't gate the merge. The work loop resolves the cheap, in-scope ones in
-  place and escalates only what needs a human — so do not sit on a nit, but
-  do not dress a one-line fix up as a blocking finding either.
+  whose behaviour is already covered under test. BLOCK stays reserved for
+  the categories above — a finding that fits one of those (a Conventional
+  Commits format violation, say, is a standards violation) stays Blocking
+  regardless of where it lands. Short of that: wording, style, redundancy,
+  and ordering findings on prose the diff touches — commit messages,
+  comments, and docs — are Non-blocking, with one exception: an egregious
+  comment-to-code disproportion, where comment volume plainly dwarfs the
+  change it documents (not merely longer than the reviewer would have
+  written), may be Blocking. Ordinary verbosity stays Non-blocking, as
+  do findings like a phrase repeated within one sentence, a tautological
+  clause, or where a trailer sits among the commits. Surface every finding;
+  they don't gate the merge. The work loop resolves the cheap, in-scope ones
+  in place and escalates only what needs a human — so do not sit on a nit,
+  but do not dress a one-line fix up as a blocking finding either.
 
 Output — final message exactly this shape (max ~40 lines):
 
