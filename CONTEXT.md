@@ -156,22 +156,23 @@ _Avoid_: secret, credential (the value itself), token path.
 
 **Binding**:
 How a Project toolchain is pointed at the Registry proxy. Config-layer in v1: an
-env override where one suffices, plus — for cargo — a user-level
-`$CARGO_HOME/config.toml` write (issue #2849) as the primary binding, layered
-with a textual host substitution of in-tree config marked `skip-worktree`
-(issue #2851) so the Agent neither sees nor commits it; `gradle` needs
-neither — a home-level Gradle init script hooked to
+env override where one suffices, plus — for cargo and npm — a layered textual
+host substitution of in-tree config marked `skip-worktree` (issue #2851,
+#2854) so the Agent neither sees nor commits it; `gradle` needs neither — a
+home-level Gradle init script hooked to
 `beforeSettings`/`projectsEvaluated`/`settingsEvaluated` (plus a plain
 top-level hook for buildscript classpath, which resolves too early for any
 of those lifecycle callbacks) points resolution at the Forwarder with no
 in-tree touch at all. The deliberately swappable last mile of ADR 0044 —
 everything above it is identical under the rejected TLS-interception
 alternative, so the choice is reversible on evidence. Each ecosystem needing
-one is a small path-allowlist table entry, not a parser; `cargo` (the
-config-file write plus the textual substitution layered on top) and `go`
-(the env override) are v1's two table entries — `gradle`'s own Binding needs
-no table entry, since its artifact base path is registry-specific rather
-than a derivable shape.
+one is a small path-allowlist table entry, not a parser; `cargo` (a
+user-level `$CARGO_HOME/config.toml` write, issue #2849, plus the textual
+substitution layered on top), `go` (the env override alone), and `npm` (an
+`npm_config_registry` env override plus the textual substitution layered on
+top) are v1's three table entries — `gradle`'s own Binding needs no table
+entry, since its artifact base path is registry-specific rather than a
+derivable shape.
 _Avoid_: adapter, registry config, ecosystem support.
 
 **Forwarder**:
