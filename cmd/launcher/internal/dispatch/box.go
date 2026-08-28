@@ -8,6 +8,7 @@ import (
 
 	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/driver/driverkit"
+	"spindrift.dev/launcher/internal/registryproxy"
 	"spindrift.dev/launcher/internal/runner"
 )
 
@@ -197,13 +198,40 @@ func (d *Dispatch) runOnce(logPath string, env map[string]string, driverCacheDir
 		}
 	}
 
+	// A per-Box registry-credential proxy (ADR 0044, issue #2849) is created
+	// fresh for this one Run call and torn down right after it returns --
+	// its lifetime is scoped exactly to this dispatch, never shared across
+	// Boxes the way the runner.Runner adapter itself is (issue #2849 Part
+	// A). Empty RegistryProxyUpstreamURL leaves the feature off entirely:
+	// no directory, no listener, no socket path on box.
+	var registryProxySocketPath string
+	if d.cfg.RegistryProxyUpstreamURL != "" {
+		proxyDir, err := os.MkdirTemp("", "spindrift-registry-proxy-*")
+		if err != nil {
+			return fmt.Errorf("mktemp registry proxy dir: %w", err)
+		}
+		defer os.RemoveAll(proxyDir)
+
+		handler, err := registryproxy.New(d.cfg.RegistryProxyUpstreamURL)
+		if err != nil {
+			return fmt.Errorf("registry proxy: %w", err)
+		}
+		proxy := &registryproxy.Proxy{Handler: handler}
+		registryProxySocketPath = filepath.Join(proxyDir, "proxy.sock")
+		if err := proxy.ListenAndServe(registryProxySocketPath); err != nil {
+			return fmt.Errorf("registry proxy: %w", err)
+		}
+		defer proxy.Close()
+	}
+
 	box := runner.Box{
-		Issue:          d.number,
-		Name:           name,
-		Env:            env,
-		Output:         d.driver.NewHeartbeatWriter(logFile, d.number, d.humanOut(), driverkit.RenderOptions{}),
-		DriverCacheDir: driverCacheDir,
-		OutboxDir:      outboxDir,
+		Issue:                   d.number,
+		Name:                    name,
+		Env:                     env,
+		Output:                  d.driver.NewHeartbeatWriter(logFile, d.number, d.humanOut(), driverkit.RenderOptions{}),
+		DriverCacheDir:          driverCacheDir,
+		OutboxDir:               outboxDir,
+		RegistryProxySocketPath: registryProxySocketPath,
 	}
 	return d.runner.Run(box)
 }
