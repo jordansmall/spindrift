@@ -392,6 +392,22 @@ in
     doc = "upstream registry URL the Registry proxy forwards GET/HEAD requests to (ADR 0044); a runtime input, never a flake value, so a private registry hostname never lands in a world-readable store path; unset disables the registry proxy entirely";
     boxEnv = false;
   };
+  registryProxyCredentialFile = {
+    env = "REGISTRY_PROXY_CREDENTIAL_FILE";
+    group = "infra";
+    doc = "path to a file whose contents are the credential the Registry proxy attaches to the outbound leg of requests to REGISTRY_PROXY_UPSTREAM_URL (ADR 0044); the path itself is not secret, only the file's contents are, so unlike the credential value this may be a flake value; mutually exclusive with REGISTRY_PROXY_CREDENTIAL_ENV; both unset leaves the proxy unauthenticated (plain pass-through)";
+    flakeOption = true;
+    legacySettingsExempt = true;
+    boxEnv = false;
+  };
+  registryProxyCredentialEnv = {
+    env = "REGISTRY_PROXY_CREDENTIAL_ENV";
+    group = "infra";
+    doc = "name of an ambient environment variable holding the credential the Registry proxy attaches to the outbound leg of requests to REGISTRY_PROXY_UPSTREAM_URL (ADR 0044); the launcher reads it once at startup and immediately unsets it so it never reaches ambient environment again, and by construction never reaches the Box under either runtime since it's never added to boxEnv; the variable NAME itself is not secret, so unlike the credential value this may be a flake value; mutually exclusive with REGISTRY_PROXY_CREDENTIAL_FILE; both unset leaves the proxy unauthenticated (plain pass-through)";
+    flakeOption = true;
+    legacySettingsExempt = true;
+    boxEnv = false;
+  };
   jiraBaseURL = {
     env = "JIRA_BASE_URL";
     group = "issues";

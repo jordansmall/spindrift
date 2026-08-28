@@ -203,6 +203,10 @@
             #     # --network value for podman run; empty applies no flag (podman NAT default); set to 'pasta' to restrict egress
             #     podman = "";
             #   };
+            #   # name of an ambient environment variable holding the credential the Registry proxy attaches to the outbound leg of requests to REGISTRY_PROXY_UPSTREAM_URL (ADR 0044); the launcher reads it once at startup and immediately unsets it so it never reaches ambient environment again, and by construction never reaches the Box under either runtime since it's never added to boxEnv; the variable NAME itself is not secret, so unlike the credential value this may be a flake value; mutually exclusive with REGISTRY_PROXY_CREDENTIAL_FILE; both unset leaves the proxy unauthenticated (plain pass-through)
+            #   registryProxyCredentialEnv = "";
+            #   # path to a file whose contents are the credential the Registry proxy attaches to the outbound leg of requests to REGISTRY_PROXY_UPSTREAM_URL (ADR 0044); the path itself is not secret, only the file's contents are, so unlike the credential value this may be a flake value; mutually exclusive with REGISTRY_PROXY_CREDENTIAL_ENV; both unset leaves the proxy unauthenticated (plain pass-through)
+            #   registryProxyCredentialFile = "";
             # };
             # issues = {
             #   forgejo = {
