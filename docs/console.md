@@ -163,9 +163,13 @@ the operator is already the cap.
 The Console keeps the backlog fresh without spending the shared rate-limit
 window: `R` re-queries on demand, the backlog auto-refreshes whenever the
 session itself writes to the tracker — a claim, a settle, or a promotion —
-and a slow background poll re-queries on a fixed cadence (60–120s) even on an
+and a slow background poll re-queries on a fixed cadence (3 minutes) even on an
 otherwise idle session. Nothing refreshes faster than that poll; only the
 session's own writes and the operator's own `R` trigger a refresh in between.
+The same poll also re-evaluates a held pick, so a blocker that clears
+out-of-band (another agent or a human merge, with no sibling Dispatch in
+this session to trigger a refill) launches within one poll interval even
+without an operator keypress.
 
 A running pick's queue row also shows its latest heartbeat — phase, turn
 count, last tool — reusing the same heartbeat parser the live dispatch's own

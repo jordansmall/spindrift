@@ -167,14 +167,15 @@ func toastDismissTick(gen uint64) tea.Cmd {
 }
 
 // sidebarActivityTickInterval is how often the docked sidebar's own live-tail
-// tick fires — independent of both keypresses and the 90s pollTick backlog
-// cadence, so a running Dispatch's open sidebar advances while the operator
-// sits and watches, including while zoomed (issue #1735).
+// tick fires — independent of both keypresses and the pollTick backlog
+// cadence (defaultPollInterval, or a test override), so a running Dispatch's
+// open sidebar advances while the operator sits and watches, including while
+// zoomed (issue #1735).
 const sidebarActivityTickInterval = time.Second
 
 // sidebarActivityTickMsg is the tea layer's dedicated live-tail signal.
 // Landing it is enough to reach Update's post-switch refreshPickDecorations
-// call, the same refresh path a keypress or the 90s pollTick already drives.
+// call, the same refresh path a keypress or the pollTick already drives.
 // gen pins it to the teaModel.sidebarTickGen that armed it: tea.Tick can't be
 // cancelled once scheduled, so a close-then-reopen within one tick interval
 // can leave a stale timer in flight alongside a freshly armed one — gen lets

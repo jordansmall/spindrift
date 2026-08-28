@@ -1486,8 +1486,9 @@ func TestTea_SidebarActivityTick_AdvancesWhileZoomed(t *testing.T) {
 
 // TestTea_SidebarActivityTick_FollowAutoScrollsToNewLines verifies follow's
 // auto-scroll-to-bottom lands on the dedicated tick itself, not just a
-// keypress or the 90s pollTick (AC2 of issue #1735). The feed starts taller
-// than the docked viewport so a genuine scroll is observable: a line
+// keypress or the pollTick backlog poll (defaultPollInterval, or a test
+// override; AC2 of issue #1735). The feed starts
+// taller than the docked viewport so a genuine scroll is observable: a line
 // appended below the current bottom only becomes visible if the tick
 // actually re-snapped Offset, not merely refreshed the underlying content.
 func TestTea_SidebarActivityTick_FollowAutoScrollsToNewLines(t *testing.T) {
@@ -2564,12 +2565,13 @@ func TestTea_StaleStatus_RendersBanner(t *testing.T) {
 }
 
 // TestTea_StaleDetectedWhileIdle_SignalsRefreshWithoutPoll verifies stale
-// detection itself wakes an already-idling Program — not the next poll tick
-// (90s) or a coincidental Msg. TestTea_StaleStatus_RendersBanner above drives
-// staleness synchronously via freshnessChecker() before the tea model even
-// exists, masking this exact gap; this test detects staleness only after the
-// Program is running idle, with pollInterval set far longer than the test's
-// wait window so a poll tick could never be the cause (issue #762).
+// detection itself wakes an already-idling Program — not the next poll
+// tick (defaultPollInterval, or a test override) or a coincidental Msg.
+// TestTea_StaleStatus_RendersBanner above drives staleness synchronously
+// via freshnessChecker() before the tea model even exists, masking this
+// exact gap; this test detects staleness only after the Program is
+// running idle, with pollInterval set far longer than the test's wait
+// window so a poll tick could never be the cause (issue #762).
 func TestTea_StaleDetectedWhileIdle_SignalsRefreshWithoutPoll(t *testing.T) {
 	f := forge.NewFake()
 	f.SetIssue(forge.Issue{Number: "1", Title: "first", State: forge.IssueOpen})
