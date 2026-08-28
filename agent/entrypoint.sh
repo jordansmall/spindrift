@@ -435,6 +435,81 @@ phase_prework_rebase() {
   fi
 }
 
+# REGISTRY_PROXY_FORWARDER_PORT is the fixed localhost TCP port
+# phase_registry_proxy_forwarder's Forwarder listens on, forwarding to the
+# registry proxy's mounted unix socket (ADR 0044, issue #2849). Mirrors
+# mount.go's registryProxySocketTarget: an implementation-internal contract
+# between this phase and the CARGO_* binding it sets up below, not a
+# user-facing knob. Chosen to collide with nothing else this harness or a
+# typical Target devShell binds (unlike the common 3000/8000/8080 dev-server
+# range).
+REGISTRY_PROXY_FORWARDER_PORT=27182
+
+# phase_registry_proxy_forwarder starts the in-Box Forwarder (ADR 0044,
+# issue #2849): socat presents the registry proxy's mounted unix socket
+# (/registry-proxy.sock, cmd/launcher/internal/runner/mount.go's
+# registryProxySocketTarget) as a local TCP endpoint, since package managers
+# like cargo take a URL, not a socket path. A silent no-op when the socket
+# isn't mounted -- REGISTRY_PROXY_UPSTREAM_URL is off by default, and this
+# Box then carries no /registry-proxy.sock at all (lib/env-schema.nix).
+# Called from main() right after configure_env, before the
+# _is_self_contained branch and thus before clone_repo, phase_prefetch,
+# phase_devshell_probe, or any driver invocation -- every place a cargo
+# build could first happen.
+#
+# Cargo's crates-io source-replacement config ([source.crates-io]
+# replace-with, [source.NAME] registry) is table-valued, and Cargo does not
+# proxy table-valued config through its CARGO_<SECTION>_<KEY> env-var
+# mechanism -- a documented upstream limitation (cargo#5416, still open;
+# https://doc.rust-lang.org/cargo/reference/config.html#environment-variables
+# lists every [source.<name>.*] key as "Environment: not supported"). A
+# CARGO_SOURCE_CRATES_IO_REPLACE_WITH-style env override therefore cannot
+# redirect crates-io dependency resolution, so this writes the binding to
+# the user-level Cargo config ($CARGO_HOME/config.toml, default
+# $HOME/.cargo/config.toml) instead of the ADR's in-tree-plus-skip-worktree
+# fallback: that file lives outside any git working tree, so it needs no
+# skip-worktree invisibility trick, and -- unlike an in-tree
+# $WORK_DIR/.cargo/config.toml -- it can be written here, before clone_repo
+# has even created $WORK_DIR.
+phase_registry_proxy_forwarder() {
+  [ -S /registry-proxy.sock ] || return 0
+
+  if ! command -v socat >/dev/null 2>&1; then
+    echo "==> WARNING: /registry-proxy.sock is mounted but socat is not on PATH — cargo will fall back to the public registry"
+    return 0
+  fi
+
+  socat "TCP-LISTEN:${REGISTRY_PROXY_FORWARDER_PORT},bind=127.0.0.1,fork,reuseaddr" \
+    UNIX-CONNECT:/registry-proxy.sock &
+
+  local _rpf_ready=0 _rpf_tries=0
+  while [ "$_rpf_tries" -lt 50 ]; do
+    if (exec 3<>"/dev/tcp/127.0.0.1/${REGISTRY_PROXY_FORWARDER_PORT}") 2>/dev/null; then
+      _rpf_ready=1
+      break
+    fi
+    sleep 0.1
+    _rpf_tries=$((_rpf_tries + 1))
+  done
+  if [ "$_rpf_ready" != "1" ]; then
+    echo "==> WARNING: registry proxy Forwarder did not start listening on 127.0.0.1:${REGISTRY_PROXY_FORWARDER_PORT} within 5s — cargo will fall back to the public registry"
+    return 0
+  fi
+
+  local _cargo_home
+  _cargo_home="${CARGO_HOME:-$HOME/.cargo}"
+  mkdir -p "$_cargo_home"
+  cat >"$_cargo_home/config.toml" <<EOF
+[source.crates-io]
+replace-with = "spindrift-registry-proxy"
+
+[source.spindrift-registry-proxy]
+registry = "sparse+http://127.0.0.1:${REGISTRY_PROXY_FORWARDER_PORT}/"
+EOF
+
+  echo "==> registry proxy Forwarder up on 127.0.0.1:${REGISTRY_PROXY_FORWARDER_PORT} — cargo bound to it via $_cargo_home/config.toml"
+}
+
 # phase_toolchain_nudge emits a one-time hint for a cold run with a
 # recognized lockfile and no prefetch configured.
 phase_toolchain_nudge() {
@@ -1261,6 +1336,11 @@ main() {
   local ORCHESTRATOR
 
   configure_env
+
+  # phase_registry_proxy_forwarder must run before any phase that could first
+  # invoke a cargo build (clone_repo's devShell/prefetch phases below, the
+  # driver itself) -- see its own doc comment for why this exact placement.
+  phase_registry_proxy_forwarder
 
   # ORCHESTRATOR (issue #2047, ADR 0035 amendment; issue #2354 slice 3 hoisted
   # phase_conflict_resolve here, ahead of phase_prompt_assembly): the single
