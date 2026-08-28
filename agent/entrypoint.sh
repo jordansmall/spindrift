@@ -943,6 +943,65 @@ cargo_intree_binding_revert() {
   _cargo_intree_binding_applied=""
 }
 
+# phase_npm_intree_binding_apply is npm's counterpart to
+# phase_cargo_intree_binding_apply above (issue #2854): a Target repo's own
+# committed $WORK_DIR/.npmrc can pin a private registry per-scope (e.g.
+# `@mycorp:registry=https://HOST/`). phase_registry_proxy_forwarder's
+# npm_config_registry export above only overrides npm's single unscoped
+# default registry -- npm has no per-scope env-var equivalent, so a
+# per-scope `@scope:registry=` entry can only be redirected by rewriting the
+# `.npmrc` line that sets it, which is what this phase does.
+# Same plain-sed rewrite, same skip-worktree hide, same
+# _npm_intree_binding_applied sentinel, same revert/re-apply call sites in
+# main()/phase_conflict_resolve -- see phase_cargo_intree_binding_apply's doc
+# comment above for the full reasoning (this is the same mechanism, not a
+# second explanation of it).
+phase_npm_intree_binding_apply() {
+  [ -n "${REGISTRY_PROXY_UPSTREAM_HOST:-}" ] || return 0
+  [ -n "${_registry_proxy_forwarder_ready:-}" ] || return 0
+  [ -f "$WORK_DIR/.npmrc" ] || return 0
+
+  # `.npmrc` is one of the files most commonly gitignored in a real npm repo,
+  # so an untracked one reaching this point (however it got there) is not
+  # actually rare -- and `git update-index --skip-worktree` exits 128 on an
+  # untracked path, which would abort this whole script under `set -euo
+  # pipefail` rather than just no-op this phase. Guard on trackedness before
+  # ever touching the file.
+  if ! git -C "$WORK_DIR" ls-files --error-unmatch -- .npmrc >/dev/null 2>&1; then
+    echo "==> WARNING: $WORK_DIR/.npmrc exists but is untracked — skipping in-tree npm registry binding"
+    return 0
+  fi
+
+  grep -qF -- "$REGISTRY_PROXY_UPSTREAM_HOST" "$WORK_DIR/.npmrc" || return 0
+
+  # REGISTRY_PROXY_UPSTREAM_HOST is interpolated into a `#`-delimited sed
+  # basic-regex pattern below, not a literal string match -- escape its
+  # regex metacharacters first so a literal "." in the hostname can't match
+  # any character, and a literal "#" can't break the expression outright.
+  local _npm_upstream_host_escaped
+  _npm_upstream_host_escaped=$(printf '%s' "$REGISTRY_PROXY_UPSTREAM_HOST" | sed -e 's/[.[\*^$#]/\\&/g')
+
+  sed -i "s#https://${_npm_upstream_host_escaped}#http://127.0.0.1:${REGISTRY_PROXY_FORWARDER_PORT}#g" \
+    "$WORK_DIR/.npmrc"
+  sed -i "s#http://${_npm_upstream_host_escaped}#http://127.0.0.1:${REGISTRY_PROXY_FORWARDER_PORT}#g" \
+    "$WORK_DIR/.npmrc"
+
+  git -C "$WORK_DIR" update-index --skip-worktree .npmrc
+  _npm_intree_binding_applied=1
+
+  echo "==> in-tree .npmrc rewritten to point at the local registry proxy Forwarder (127.0.0.1:${REGISTRY_PROXY_FORWARDER_PORT}) and hidden from git via skip-worktree"
+}
+
+# npm_intree_binding_revert undoes phase_npm_intree_binding_apply's rewrite --
+# mirrors cargo_intree_binding_revert exactly, see that function's doc
+# comment above.
+npm_intree_binding_revert() {
+  [ -n "${_npm_intree_binding_applied:-}" ] || return 0
+  git -C "$WORK_DIR" update-index --no-skip-worktree .npmrc
+  git -C "$WORK_DIR" checkout -- .npmrc
+  _npm_intree_binding_applied=""
+}
+
 # phase_toolchain_nudge emits a one-time hint for a cold run with a
 # recognized dependency-manifest file and no prefetch configured.
 phase_toolchain_nudge() {
@@ -1274,6 +1333,7 @@ phase_conflict_resolve() {
       # conflicting paths (ADR 0044, issue #2851) -- restores ordinary
       # working-tree content before the abort below re-checks out HEAD.
       cargo_intree_binding_revert
+      npm_intree_binding_revert
       git rebase --abort 2>/dev/null || true
       echo "==> pre-work rebase onto origin/${BASE_BRANCH:-} failed — conflict agent could not resolve"
       exit 1
@@ -1772,7 +1832,7 @@ main() {
   # each phase function assign them by plain (non-local) assignment while
   # keeping them out of true global scope (issue #515).
   local _rebase_and_publish _had_rebase_conflict
-  local _cargo_intree_binding_applied
+  local _cargo_intree_binding_applied _npm_intree_binding_applied
   local _registry_proxy_forwarder_ready
   local _use_dev_shell _harness_path
   local prompt agents_json _handoff
@@ -1827,19 +1887,23 @@ main() {
     _use_dev_shell=0
   else
     clone_repo
-    # phase_cargo_intree_binding_apply runs here, right after clone_repo --
-    # see its own doc comment above for why this exact placement, and for the
+    # phase_cargo_intree_binding_apply/phase_npm_intree_binding_apply run
+    # here, right after clone_repo -- see phase_cargo_intree_binding_apply's
+    # own doc comment above for why this exact placement, and for the
     # revert/re-apply dance around phase_branch_recovery/phase_prework_rebase
     # just below.
     phase_cargo_intree_binding_apply
+    phase_npm_intree_binding_apply
     # A research dispatch (ADR 0022, issue #640) explores the fresh clone but
     # never lands code: no branch to cut, adopt, or rebase -- and so never
     # needs the revert/re-apply dance either.
     if ! _is_research_kind; then
       cargo_intree_binding_revert
+      npm_intree_binding_revert
       phase_branch_recovery
       phase_prework_rebase
       phase_cargo_intree_binding_apply
+      phase_npm_intree_binding_apply
     fi
     phase_toolchain_nudge
     phase_devshell_probe
