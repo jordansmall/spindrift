@@ -31,6 +31,10 @@
   # (issue #2854) reaches this Driver process, not just the entrypoint shell
   # that exported it.
   printf 'env: npm_config_registry=%s\n' "${npm_config_registry:-}"
+
+  # Same proof, but for yarn berry's own env-var override of the counterpart
+  # setting (issue #2856).
+  printf 'env: YARN_NPM_REGISTRY_SERVER=%s\n' "${YARN_NPM_REGISTRY_SERVER:-}"
 } >>"$DRIVER_LOG"
 
 # Report any skills discoverable at the path Claude Code scans. Real claude -p
