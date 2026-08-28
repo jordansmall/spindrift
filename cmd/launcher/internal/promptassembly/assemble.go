@@ -348,14 +348,14 @@ func Assemble(e Env, reg Registry) (Result, error) {
 
 	// Shared-block injection (entrypoint.sh: 1064-1074): the research branch
 	// only ever injects research-verdict; every other covered cell injects
-	// comms, then check, then outcome, in that order.
+	// comms, then code comments, then check, then outcome, in that order.
 	if kind == "research" {
 		promptText, err = injectSharedBlock(promptText, e.ResearchOutcomeContractFile, allowlist)
 		if err != nil {
 			return Result{}, err
 		}
 	} else {
-		for _, contractFile := range []string{e.CommsContractFile, e.CheckContractFile, e.OutcomeContractFile} {
+		for _, contractFile := range []string{e.CommsContractFile, e.CodeCommentsContractFile, e.CheckContractFile, e.OutcomeContractFile} {
 			promptText, err = injectSharedBlock(promptText, contractFile, allowlist)
 			if err != nil {
 				return Result{}, err

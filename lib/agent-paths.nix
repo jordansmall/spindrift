@@ -1,4 +1,4 @@
-# The 8 baked /agent/* path literals (contracts, registries, prompts dir) --
+# The 9 baked /agent/* path literals (contracts, registries, prompts dir) --
 # the single nix binding lib/image.nix's agentFiles cp destinations and
 # lib/mkHarness.nix's agentPathsPreamble both read, so a rename in this file
 # updates the image's copy destination and the rendered preamble default
@@ -24,6 +24,9 @@
   # treatment.
   COMMS_CONTRACT_FILE = "/agent/comms-contract.md";
   CHECK_CONTRACT_FILE = "/agent/check-contract.md";
+  # The CODE COMMENTS block fix-prompt.md shares with issue-prompt.md (issue
+  # #2880): baked and injected the same way as COMMS/CHECK above.
+  CODE_COMMENTS_CONTRACT_FILE = "/agent/code-comments-contract.md";
   # The research dispatch kind's own harness-owned outcome contract (ADR
   # 0022, issue #640): posting the verdict comment and emitting the outcome
   # line. Baked and injected the same way as the work contract above, so a

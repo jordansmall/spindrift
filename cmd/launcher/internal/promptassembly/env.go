@@ -172,6 +172,7 @@ type Env struct {
 	// (entrypoint.sh: 1064-1074) — Assemble's concern, not Gates's.
 	CommsContractFile           string // entrypoint.sh: $COMMS_CONTRACT_FILE
 	CheckContractFile           string // entrypoint.sh: $CHECK_CONTRACT_FILE
+	CodeCommentsContractFile    string // entrypoint.sh: $CODE_COMMENTS_CONTRACT_FILE
 	OutcomeContractFile         string // entrypoint.sh: $OUTCOME_CONTRACT_FILE
 	ResearchOutcomeContractFile string // entrypoint.sh: $RESEARCH_OUTCOME_CONTRACT_FILE
 

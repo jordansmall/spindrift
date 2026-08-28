@@ -857,7 +857,7 @@ rec {
     + "\n"
     + "// Regenerate with `nix run .#regen` after editing lib/agent-paths.nix.\n"
     + "//\n"
-    + "// The 8 baked /agent/* path literals (lib/agent-paths.nix), single-sourced\n"
+    + "// The 9 baked /agent/* path literals (lib/agent-paths.nix), single-sourced\n"
     + "// here so the Go launcher can never drift from the Nix image/preamble\n"
     + "// source of truth (issue #2531) -- a rename in lib/agent-paths.nix now fails\n"
     + "// nix/checks/schema-drift.nix's agent-paths-gen check instead of silently\n"

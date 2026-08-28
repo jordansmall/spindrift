@@ -307,6 +307,15 @@ setup_fakes() {
     printf '# CHECK\n\ncanonical check contract fixture\n' >"$CHECK_CONTRACT_FILE"
   fi
 
+  # Same fallback, for the CODE COMMENTS block fix-prompt.md shares with
+  # issue-prompt.md (issue #2880). A test exercising the injection itself
+  # overrides this with its own fixture.
+  : "${CODE_COMMENTS_CONTRACT_FILE:=$BATS_TEST_TMPDIR/code-comments-contract.md}"
+  export CODE_COMMENTS_CONTRACT_FILE
+  if [ ! -s "$CODE_COMMENTS_CONTRACT_FILE" ]; then
+    printf '# CODE COMMENTS\n\ncanonical code comments contract fixture\n' >"$CODE_COMMENTS_CONTRACT_FILE"
+  fi
+
   # Same fallback, for the research dispatch kind's outcome contract (issue
   # #640). A test exercising the injection itself overrides this with its own
   # fixture.
@@ -325,7 +334,7 @@ setup_fakes() {
   # DRIVER_PREAMBLE_FILE is the registry-rendered Driver preamble -- the
   # DRIVER_* variable block and function definitions alike (issue #624,
   # #433) -- AGENT_PATHS_PREAMBLE_FILE is the rendered fallback-default
-  # preamble for the 8 baked /agent/* path literals (issue #2531), and
+  # preamble for the 9 baked /agent/* path literals (issue #2531), and
   # FRAGMENT_REGISTRY_FILE is the registry-rendered Conditional fragment
   # loop input and substitution allowlist (issue #622): prepend whichever of
   # the three are set to the entrypoint, in the same order lib/image.nix

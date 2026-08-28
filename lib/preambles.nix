@@ -73,11 +73,11 @@ rec {
     )
     + "\n";
 
-  # The 8 baked /agent/* path fallbacks (lib/agent-paths.nix), rendered the
+  # The 9 baked /agent/* path fallbacks (lib/agent-paths.nix), rendered the
   # same `VAR=${VAR:-<baked>}` fallback-preserving way as
   # renderDefaultsPreamble above -- not an unconditional overwrite like
   # renderDriverMountPreamble/renderPreamble (lib/drivers/default.nix), whose
-  # Driver-identity vars are fixed per Box invocation. These 8 vars must stay
+  # Driver-identity vars are fixed per Box invocation. These 9 vars must stay
   # overridable by an already-exported env var: existing bats fixtures rely
   # on overriding a subset of them, and a future path relocation should still
   # be able to override the baked default without editing nix.

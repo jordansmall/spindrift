@@ -337,9 +337,9 @@ in
       '';
 
   # fix-prompt.md's default template carries only its fix-specific preamble
-  # (issue #455): the rendered prompt must still gain the COMMS, CHECK/COMMIT,
-  # and outcome-contract blocks, each exactly once, mirroring the issue
-  # prompt's own guard above.
+  # (issue #455): the rendered prompt must still gain the COMMS, CODE
+  # COMMENTS, CHECK/COMMIT, and outcome-contract blocks, each exactly once,
+  # mirroring the issue prompt's own guard above.
   mkharness-prompt-fix-comms-injected = pkgs.runCommand "mkharness-prompt-fix-comms-injected" { } ''
     count=$(grep -c '# COMMS' ${batsHarness.internals.promptDir}/fix-prompt.md)
     [ "$count" -eq 1 ] || {
@@ -348,6 +348,19 @@ in
     }
     touch $out
   '';
+
+  # Issue #2880: fix-prompt.md shares issue-prompt.md's comment-discipline
+  # rule the same way it already shares COMMS and CHECK/COMMIT.
+  mkharness-prompt-fix-code-comments-injected =
+    pkgs.runCommand "mkharness-prompt-fix-code-comments-injected" { }
+      ''
+        count=$(grep -c '# CODE COMMENTS' ${batsHarness.internals.promptDir}/fix-prompt.md)
+        [ "$count" -eq 1 ] || {
+          echo "expected the fix prompt's CODE COMMENTS block injected exactly once, got $count" >&2
+          exit 1
+        }
+        touch $out
+      '';
 
   mkharness-prompt-fix-check-injected = pkgs.runCommand "mkharness-prompt-fix-check-injected" { } ''
     count=$(grep -c '# CHECK' ${batsHarness.internals.promptDir}/fix-prompt.md)
@@ -370,36 +383,49 @@ in
       '';
 
   # A Consumer fixPrompt that carries only a fix-specific preamble — no
-  # shared-block markers at all — must still gain all three, in COMMS, CHECK,
-  # outcome-contract order, the same #420 runtime-override parity the issue
-  # prompt already has (proven at the Nix layer here; agent/entrypoint.sh's
-  # own runtime injection is covered by tests/entrypoint-outcome-contract.bats).
+  # shared-block markers at all — must still gain all four, in COMMS, CODE
+  # COMMENTS, CHECK, outcome-contract order, the same #420 runtime-override
+  # parity the issue prompt already has (proven at the Nix layer here;
+  # agent/entrypoint.sh's own runtime injection is covered by
+  # tests/entrypoint-outcome-contract.bats).
   mkharness-prompt-fix-consumer-override-injected =
     pkgs.runCommand "mkharness-prompt-fix-consumer-override-injected" { }
       ''
         grep -q 'CONFIGURED-FIX-PROMPT-MARKER' ${fixPromptHarness.internals.promptDir}/fix-prompt.md
         [ "$(grep -c '# COMMS' ${fixPromptHarness.internals.promptDir}/fix-prompt.md)" -eq 1 ]
+        [ "$(grep -c '# CODE COMMENTS' ${fixPromptHarness.internals.promptDir}/fix-prompt.md)" -eq 1 ]
         [ "$(grep -c '# CHECK' ${fixPromptHarness.internals.promptDir}/fix-prompt.md)" -eq 1 ]
         [ "$(grep -c '# LAND THE CHANGE' ${fixPromptHarness.internals.promptDir}/fix-prompt.md)" -eq 1 ]
         marker_line=$(grep -n 'CONFIGURED-FIX-PROMPT-MARKER' ${fixPromptHarness.internals.promptDir}/fix-prompt.md | head -1 | cut -d: -f1)
         comms_line=$(grep -n '# COMMS' ${fixPromptHarness.internals.promptDir}/fix-prompt.md | head -1 | cut -d: -f1)
+        code_comments_line=$(grep -n '# CODE COMMENTS' ${fixPromptHarness.internals.promptDir}/fix-prompt.md | head -1 | cut -d: -f1)
         check_line=$(grep -n '# CHECK' ${fixPromptHarness.internals.promptDir}/fix-prompt.md | head -1 | cut -d: -f1)
         outcome_line=$(grep -n '# LAND THE CHANGE' ${fixPromptHarness.internals.promptDir}/fix-prompt.md | head -1 | cut -d: -f1)
         [ "$marker_line" -lt "$comms_line" ]
-        [ "$comms_line" -lt "$check_line" ]
+        [ "$comms_line" -lt "$code_comments_line" ]
+        [ "$code_comments_line" -lt "$check_line" ]
         [ "$check_line" -lt "$outcome_line" ]
         touch $out
       '';
 
-  # The injected COMMS and CHECK/COMMIT blocks must be byte-identical to the
-  # canonical sections mkHarness slices them from — same source, same bytes,
-  # so fix-prompt.md and issue-prompt.md cannot drift apart (issue #455,
-  # mirrors mkharness-prompt-outcome-no-drift above).
+  # The injected COMMS, CODE COMMENTS, and CHECK/COMMIT blocks must be
+  # byte-identical to the canonical sections mkHarness slices them from —
+  # same source, same bytes, so fix-prompt.md and issue-prompt.md cannot
+  # drift apart (issue #455, #2880; mirrors mkharness-prompt-outcome-no-drift
+  # above).
   mkharness-prompt-fix-comms-no-drift = pkgs.runCommand "mkharness-prompt-fix-comms-no-drift" { } ''
-    awk '/^# COMMS$/{f=1} /^# CHECK$/{exit} f' ${fixPromptHarness.internals.promptDir}/fix-prompt.md > injected-comms.txt
+    awk '/^# COMMS$/{f=1} /^# CODE COMMENTS$/{exit} f' ${fixPromptHarness.internals.promptDir}/fix-prompt.md > injected-comms.txt
     diff ${batsHarness.internals.commsContractFile} injected-comms.txt
     touch $out
   '';
+
+  mkharness-prompt-fix-code-comments-no-drift =
+    pkgs.runCommand "mkharness-prompt-fix-code-comments-no-drift" { }
+      ''
+        awk '/^# CODE COMMENTS$/{f=1} /^# CHECK$/{exit} f' ${fixPromptHarness.internals.promptDir}/fix-prompt.md > injected-code-comments.txt
+        diff ${batsHarness.internals.codeCommentsContractFile} injected-code-comments.txt
+        touch $out
+      '';
 
   mkharness-prompt-fix-check-no-drift = pkgs.runCommand "mkharness-prompt-fix-check-no-drift" { } ''
     awk '/^# CHECK$/{f=1} /^# LAND THE CHANGE$/{exit} f' ${fixPromptHarness.internals.promptDir}/fix-prompt.md > injected-check.txt

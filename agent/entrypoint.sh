@@ -117,13 +117,14 @@ configure_env() {
   # catches an omitted Driver preamble at build time instead (issue #2531).
 
   # OUTCOME_CONTRACT_FILE, COMMS_CONTRACT_FILE, CHECK_CONTRACT_FILE,
-  # RESEARCH_OUTCOME_CONTRACT_FILE, PROMPTASSEMBLY_REGISTRY_FILE,
-  # PROMPT_CONTRACT_REGISTRY_FILE, and FORBIDDEN_MARKERS_REGISTRY_FILE --
-  # like PROMPTS_DIR above -- are baked by the nix-rendered agent-paths
-  # preamble (lib/preambles.nix's renderAgentPathsPreamble); no fallback
-  # literal or per-var commentary lives here anymore. See lib/agent-paths.nix
-  # for what each path is, why it lives outside PROMPTS_DIR, and which
-  # driver-exec verb/flag reads it (issue #2531).
+  # CODE_COMMENTS_CONTRACT_FILE, RESEARCH_OUTCOME_CONTRACT_FILE,
+  # PROMPTASSEMBLY_REGISTRY_FILE, PROMPT_CONTRACT_REGISTRY_FILE, and
+  # FORBIDDEN_MARKERS_REGISTRY_FILE -- like PROMPTS_DIR above -- are
+  # baked by the nix-rendered agent-paths preamble (lib/preambles.nix's
+  # renderAgentPathsPreamble); no fallback literal or per-var commentary
+  # lives here anymore. See lib/agent-paths.nix for what each path is, why
+  # it lives outside PROMPTS_DIR, and which driver-exec verb/flag reads it
+  # (issue #2531).
 
   # _driver_extract_outcome and _driver_session_flags are defined by the Driver
   # registry (lib/drivers/<name>.nix); a nix-built image prepends them via
@@ -1027,6 +1028,7 @@ phase_prompt_assembly() {
     --driver-agent-files-dir "${DRIVER_AGENT_FILES_DIR:-}"
     --comms-contract-file "$COMMS_CONTRACT_FILE"
     --check-contract-file "$CHECK_CONTRACT_FILE"
+    --code-comments-contract-file "$CODE_COMMENTS_CONTRACT_FILE"
     --outcome-contract-file "$OUTCOME_CONTRACT_FILE"
     --research-outcome-contract-file "$RESEARCH_OUTCOME_CONTRACT_FILE"
     --skills-found "$SKILLS_FOUND"
