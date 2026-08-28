@@ -251,6 +251,50 @@ SKILL
   [ "$status" -ne 0 ]
 }
 
+# Unlike CAVEMAN_STEP/SKILL_PREAMBLE above, CODE_COMMENTS_STEP (issue #2880)
+# is set unconditionally in phase_conflict_resolve -- no caveman/skills gate
+# -- because resolving a rebase conflict always edits code, so the
+# comment-discipline rule always applies. This test uses the same minimal
+# no-harness-skills setup as the "by default" test above to prove the rule
+# renders even when nothing is baked.
+@test "pre-work rebase conflict: unresolvable conflict prompt carries code-comments rule unconditionally" {
+  setup_rebase_conflict
+  export HARNESS_SKILLS_DIR="$BATS_TEST_TMPDIR/no-harness-skills"
+  # No FAKE_DRIVER_RESOLVE_CONFLICT — stub does not complete the rebase.
+
+  run bash "$ENTRYPOINT"
+  [ "$status" -ne 0 ]
+  grep -q "proportional to the size of the change" "$DRIVER_PROMPT_FILE"
+
+  run grep -q '\${CODE_COMMENTS_STEP}' "$DRIVER_PROMPT_FILE"
+  [ "$status" -ne 0 ]
+}
+
+# CODE_COMMENTS_STEP's precompute (line ~937) is an unguarded
+# `_subst "${PROMPTS_DIR}/fragments/code-comments.md"` read under
+# `set -euo pipefail`, with no `-f` existence check first (unlike the
+# CAVEMAN_STEP/SKILL_PREAMBLE precomputes just above it, which are gated on
+# a file check and so degrade gracefully). A SPINDRIFT_PROMPT_DIR override
+# (docs/reference.md) that forgets fragments/code-comments.md therefore
+# aborts the whole box the moment it hits a rebase conflict, rather than
+# rendering the conflict-resolve prompt without the rule. Mirrors the
+# "entrypoint does not require filer-prompt.md" test's copy-then-remove
+# PROMPTS_DIR override pattern (tests/entrypoint-prompt-fragments.bats).
+@test "pre-work rebase conflict: PROMPTS_DIR override missing fragments/code-comments.md aborts the run" {
+  setup_rebase_conflict
+  local prompt_dir="$BATS_TEST_TMPDIR/prompts-missing-code-comments"
+  cp -r "$PROMPTS_DIR" "$prompt_dir"
+  chmod -R u+w "$prompt_dir"
+  rm "$prompt_dir/fragments/code-comments.md"
+  export PROMPTS_DIR="$prompt_dir"
+  # No FAKE_DRIVER_RESOLVE_CONFLICT — irrelevant here: the missing fragment
+  # aborts phase_conflict_resolve before the driver is ever invoked.
+
+  run bash "$ENTRYPOINT"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"fragments/code-comments.md"* ]]
+}
+
 @test "CONFLICT_RESOLVE_PR_URL: exits after resolving without running main agent" {
   setup_rebase_conflict
   export FAKE_DRIVER_RESOLVE_CONFLICT=1

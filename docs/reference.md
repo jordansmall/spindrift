@@ -460,6 +460,21 @@ already must ship `filer-prompt.md` when the filer is configured — the
 entrypoint reads the fragment unconditionally once its gate is on, with no
 baked-in fallback.
 
+The comment-discipline fragment (`fragments/code-comments.md`,
+`CODE_COMMENTS_STEP`) narrows that same rule further: it's read
+unconditionally by both render paths, not merely once its gate is on. The
+Conditional fragment registry row uses an always-true gate
+(`CODE_COMMENTS_MANDATORY`, not knob-derived — see `lib/fragments.nix`), and
+`phase_conflict_resolve`'s own hand-precompute (`agent/entrypoint.sh`)
+reads it with no `if` guard at all, unlike its `CAVEMAN_STEP`/
+`SKILL_PREAMBLE` neighbors in that same function, which only read their
+fragment inside an `[ -f ... ]` presence check. Concretely: a
+`SPINDRIFT_PROMPT_DIR` override directory that ships no other fragment at
+all must still ship `fragments/code-comments.md`, or `phase_conflict_resolve`
+aborts under `set -euo pipefail` the moment a rebase conflict actually
+occurs — the plain assignment `CODE_COMMENTS_STEP="$(_subst ...)"` trips
+`set -e` on a failed command substitution, unlike its guarded siblings.
+
 The `OPEN A PULL REQUEST` ticket-reference line is the one row with three
 mutually exclusive fragments (`pr-body-closes.md` / `pr-body-local-ref.md` /
 `pr-body-local-noref.md`) instead of one on/off pair: `ISSUE_TRACKER` and
