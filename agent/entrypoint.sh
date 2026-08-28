@@ -1011,6 +1011,68 @@ npm_intree_binding_revert() {
   _npm_intree_binding_applied=""
 }
 
+# phase_yarn_berry_intree_binding_apply is yarn berry's counterpart to
+# phase_npm_intree_binding_apply above (issue #2856): a Target repo's own
+# committed $WORK_DIR/.yarnrc.yml can pin a private registry per-scope (e.g.
+# `npmScopes.mycorp.npmRegistryServer: https://HOST/`).
+# phase_registry_proxy_forwarder's YARN_NPM_REGISTRY_SERVER env-var override
+# above only reaches yarn berry's single top-level default npmRegistryServer
+# key -- npmScopes entries have no env-var equivalent, same shape of gap
+# npm's own per-scope `@scope:registry=` entries have. Same plain-sed
+# rewrite, same skip-worktree hide, same _yarn_berry_intree_binding_applied
+# sentinel -- see phase_cargo_intree_binding_apply's doc comment above for
+# the full reasoning (this is the same mechanism, not a second explanation
+# of it). The one difference worth calling out: .yarnrc.yml is YAML, not
+# INI-ish, but the rewrite below is still dumb text substitution, not a YAML
+# parse -- verified empirically against real yarn-berry 4.14.1 that a plain
+# host-string substitution parses back fine for both the top-level key
+# (already covered by the env var above, but rewritten here too, uniformly,
+# the same way npm's own rewrite also touches unscoped `.npmrc` entries
+# already covered by npm_config_registry) and every npmScopes entry (issue
+# #2856).
+phase_yarn_berry_intree_binding_apply() {
+  [ -n "${REGISTRY_PROXY_UPSTREAM_HOST:-}" ] || return 0
+  [ -n "${_registry_proxy_forwarder_ready:-}" ] || return 0
+  [ -f "$WORK_DIR/.yarnrc.yml" ] || return 0
+
+  # Same untracked-file guard as phase_npm_intree_binding_apply, same reason:
+  # `git update-index --skip-worktree` exits 128 on an untracked path, which
+  # would abort this whole script under `set -euo pipefail` rather than just
+  # no-op this phase.
+  if ! git -C "$WORK_DIR" ls-files --error-unmatch -- .yarnrc.yml >/dev/null 2>&1; then
+    echo "==> WARNING: $WORK_DIR/.yarnrc.yml exists but is untracked — skipping in-tree yarn berry registry binding"
+    return 0
+  fi
+
+  grep -qF -- "$REGISTRY_PROXY_UPSTREAM_HOST" "$WORK_DIR/.yarnrc.yml" || return 0
+
+  # Same regex-metacharacter escape as phase_npm_intree_binding_apply, same
+  # reason: REGISTRY_PROXY_UPSTREAM_HOST is interpolated into a `#`-delimited
+  # sed basic-regex pattern, not matched as a literal string.
+  local _yarn_berry_upstream_host_escaped
+  _yarn_berry_upstream_host_escaped=$(printf '%s' "$REGISTRY_PROXY_UPSTREAM_HOST" | sed -e 's/[.[\*^$#]/\\&/g')
+
+  sed -i "s#https://${_yarn_berry_upstream_host_escaped}#http://127.0.0.1:${REGISTRY_PROXY_FORWARDER_PORT}#g" \
+    "$WORK_DIR/.yarnrc.yml"
+  sed -i "s#http://${_yarn_berry_upstream_host_escaped}#http://127.0.0.1:${REGISTRY_PROXY_FORWARDER_PORT}#g" \
+    "$WORK_DIR/.yarnrc.yml"
+
+  git -C "$WORK_DIR" update-index --skip-worktree .yarnrc.yml
+  _yarn_berry_intree_binding_applied=1
+
+  echo "==> in-tree .yarnrc.yml rewritten to point at the local registry proxy Forwarder (127.0.0.1:${REGISTRY_PROXY_FORWARDER_PORT}) and hidden from git via skip-worktree"
+}
+
+# yarn_berry_intree_binding_revert undoes
+# phase_yarn_berry_intree_binding_apply's rewrite -- mirrors
+# cargo_intree_binding_revert exactly, see that function's doc comment above.
+yarn_berry_intree_binding_revert() {
+  [ -n "${_yarn_berry_intree_binding_applied:-}" ] || return 0
+  git -C "$WORK_DIR" update-index --no-skip-worktree .yarnrc.yml
+  git -C "$WORK_DIR" checkout -- .yarnrc.yml
+  _yarn_berry_intree_binding_applied=""
+}
+
 # phase_toolchain_nudge emits a one-time hint for a cold run with a
 # recognized dependency-manifest file and no prefetch configured.
 phase_toolchain_nudge() {
@@ -1343,6 +1405,7 @@ phase_conflict_resolve() {
       # working-tree content before the abort below re-checks out HEAD.
       cargo_intree_binding_revert
       npm_intree_binding_revert
+      yarn_berry_intree_binding_revert
       git rebase --abort 2>/dev/null || true
       echo "==> pre-work rebase onto origin/${BASE_BRANCH:-} failed — conflict agent could not resolve"
       exit 1
@@ -1903,16 +1966,19 @@ main() {
     # just below.
     phase_cargo_intree_binding_apply
     phase_npm_intree_binding_apply
+    phase_yarn_berry_intree_binding_apply
     # A research dispatch (ADR 0022, issue #640) explores the fresh clone but
     # never lands code: no branch to cut, adopt, or rebase -- and so never
     # needs the revert/re-apply dance either.
     if ! _is_research_kind; then
       cargo_intree_binding_revert
       npm_intree_binding_revert
+      yarn_berry_intree_binding_revert
       phase_branch_recovery
       phase_prework_rebase
       phase_cargo_intree_binding_apply
       phase_npm_intree_binding_apply
+      phase_yarn_berry_intree_binding_apply
     fi
     phase_toolchain_nudge
     phase_devshell_probe
