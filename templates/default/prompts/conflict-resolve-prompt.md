@@ -25,7 +25,7 @@ branch `${BRANCH}`. Resolve them and complete the rebase.
 Do not narrate between tool calls; the only text you output is the short
 explanation described below if the conflict is unresolvable.
 
-# SIGNALS
+${CODE_COMMENTS_STEP}# SIGNALS
 
 - The rebase is complete when `.git/rebase-merge` and `.git/rebase-apply`
   directories no longer exist.

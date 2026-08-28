@@ -927,6 +927,14 @@ phase_conflict_resolve() {
       # shellcheck disable=SC2034 # consumed by _subst's envsubst allowlist via ${!v:-} indirection
       SKILL_PREAMBLE="$(_subst "${PROMPTS_DIR}/fragments/skill-preamble.md")"$'\n\n'
     fi
+    # Unlike its two siblings above, CODE_COMMENTS_STEP is set unconditionally
+    # -- it's not gated on caveman/skills being baked, because resolving a
+    # rebase conflict always edits code, so the comment-discipline rule
+    # (issue #2880) always applies here (reuses lib/fragments.nix's
+    # already-registered code-comments.md var/fragment).
+    local CODE_COMMENTS_STEP
+    # shellcheck disable=SC2034 # consumed by _subst's envsubst allowlist via ${!v:-} indirection
+    CODE_COMMENTS_STEP="$(_subst "${PROMPTS_DIR}/fragments/code-comments.md")"$'\n\n'
     local _cr_prompt
     _cr_prompt="$(_subst "${PROMPTS_DIR}/conflict-resolve-prompt.md")"
     # No agents config or session to pin/resume for this pass; its exit
