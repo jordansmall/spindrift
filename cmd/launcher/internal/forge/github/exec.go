@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+	"unicode/utf8"
 
 	"spindrift.dev/launcher/internal/forge"
 )
@@ -18,6 +19,28 @@ import (
 // pathological gh failure can't dump unbounded output into an error message
 // (and, transitively, whatever logs it).
 const ghCommandErrStderrCap = 4096
+
+// ghCommandErrText is ghCommandErr's counterpart for a call site that must
+// inspect gh's stderr content itself (e.g. to classify a specific failure)
+// before deciding on an error, and so wires cmd.Stderr to its own buffer
+// instead of leaving it nil for cmd.Output to auto-populate the
+// *exec.ExitError's Stderr field. It folds that same already-captured text
+// into the message, so the diagnostic still reaches the caller exactly once
+// — never both here and via a second, independent ghCommandErr/manual-wrap
+// call on the same failure (that would double-report the same stderr text).
+func ghCommandErrText(description string, err error, stderr string) error {
+	if msg := strings.TrimSpace(stderr); msg != "" {
+		if len(msg) > ghCommandErrStderrCap {
+			cut := ghCommandErrStderrCap
+			for cut > 0 && !utf8.RuneStart(msg[cut]) {
+				cut--
+			}
+			msg = msg[:cut] + "...(truncated)"
+		}
+		return fmt.Errorf("%s: %w: %s", description, err, msg)
+	}
+	return fmt.Errorf("%s: %w", description, err)
+}
 
 // ghCommandErr turns a failed gh invocation's error into one that also
 // surfaces gh's own stderr diagnostic, when available. description names the
@@ -33,12 +56,7 @@ const ghCommandErrStderrCap = 4096
 func ghCommandErr(description string, err error) error {
 	var exitErr *exec.ExitError
 	if errors.As(err, &exitErr) {
-		if msg := strings.TrimSpace(string(exitErr.Stderr)); msg != "" {
-			if len(msg) > ghCommandErrStderrCap {
-				msg = msg[:ghCommandErrStderrCap] + "...(truncated)"
-			}
-			return fmt.Errorf("%s: %w: %s", description, err, msg)
-		}
+		return ghCommandErrText(description, err, string(exitErr.Stderr))
 	}
 	return fmt.Errorf("%s: %w", description, err)
 }
