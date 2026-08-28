@@ -386,6 +386,12 @@ in
     nixSubPath = "limits.pids";
     boxEnv = false;
   };
+  registryProxyUpstreamURL = {
+    env = "REGISTRY_PROXY_UPSTREAM_URL";
+    group = "infra";
+    doc = "upstream registry URL the Registry proxy forwards GET/HEAD requests to (ADR 0044); a runtime input, never a flake value, so a private registry hostname never lands in a world-readable store path; unset disables the registry proxy entirely";
+    boxEnv = false;
+  };
   jiraBaseURL = {
     env = "JIRA_BASE_URL";
     group = "issues";

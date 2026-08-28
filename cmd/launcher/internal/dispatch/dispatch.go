@@ -49,6 +49,13 @@ type Config struct {
 	// at all -- there is nowhere in-box to mount it (issue #448).
 	DriverSessionCacheDir string
 
+	// RegistryProxyUpstreamURL is the REGISTRY_PROXY_UPSTREAM_URL knob value
+	// (ADR 0044, issue #2849): the upstream registry the launcher-side
+	// Registry proxy forwards GET/HEAD requests to. Empty means the
+	// registry-proxy feature is off, in which case runOnce starts no proxy
+	// and mounts no socket into the Box.
+	RegistryProxyUpstreamURL string
+
 	// Kind is the dispatch kind ("work" or "research", ADR 0022) forwarded
 	// into every Box as DISPATCH_KIND, so the entrypoint can select its
 	// prompt and skip clone-branch/PR/CI phases for research. Empty defaults
