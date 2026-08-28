@@ -156,12 +156,15 @@ _Avoid_: secret, credential (the value itself), token path.
 
 **Binding**:
 How a Project toolchain is pointed at the Registry proxy. Config-layer in v1: an
-env override where one suffices, plus a textual host substitution of in-tree
-config marked `skip-worktree` so the Agent neither sees nor commits it. The
-deliberately swappable last mile of ADR 0044 — everything above it is identical
-under the rejected TLS-interception alternative, so the choice is reversible on
-evidence. Each ecosystem is a small table entry, not a parser; `cargo` is the
-only entry in v1.
+env override where one suffices, plus — for cargo — a user-level
+`$CARGO_HOME/config.toml` write (issue #2849) as the primary binding, layered
+with a textual host substitution of in-tree config marked `skip-worktree`
+(issue #2851) so the Agent neither sees nor commits it. The deliberately
+swappable last mile of ADR 0044 — everything above it is identical under the
+rejected TLS-interception alternative, so the choice is reversible on
+evidence. Each ecosystem is a small table entry, not a parser; `cargo` (the
+config-file write plus the textual substitution layered on top) and `go` (the
+env override) are v1's two entries.
 _Avoid_: adapter, registry config, ecosystem support.
 
 **Forwarder**:

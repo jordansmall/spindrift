@@ -101,8 +101,8 @@ channel that is authenticated on its behalf.**
   automatic and self-maintaining, but not provably complete, and a false denial
   presents as a registry outage.
 
-**v1 ships `cargo` alone.** Other ecosystems are additive table entries, filed
-as their own tickets, added when something needs them.
+**v1 ships `cargo` and `go`.** Other ecosystems are additive table entries,
+filed as their own tickets, added when something needs them.
 
 ## Consequences
 
