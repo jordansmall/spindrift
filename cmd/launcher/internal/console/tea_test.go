@@ -252,6 +252,18 @@ func TestTeaUpdate_WindowSizeMsg_SetsModelDimensions(t *testing.T) {
 	}
 }
 
+// TestNewTeaModel_PollInterval_FallsBackToDefault verifies a teaModel built
+// without a Launcher (issue #2876) picks up defaultPollInterval directly,
+// same as a Launcher with no test override.
+func TestNewTeaModel_PollInterval_FallsBackToDefault(t *testing.T) {
+	f := forge.NewFake()
+	tm := newTeaModel(f, t.TempDir(), nil)
+
+	if got, want := tm.pollInterval, 3*time.Minute; got != want {
+		t.Fatalf("pollInterval = %v, want %v", got, want)
+	}
+}
+
 // TestTea_InitialTermSize_SetsModelDimensions verifies the program's initial
 // size event (teatest.WithInitialTermSize, sent through the real Bubble Tea
 // program before Init) lands on the pure Model the same as a later resize

@@ -131,7 +131,7 @@ type Launcher struct {
 	lastStaleDrainSummary string
 	// pollInterval overrides Run's default background poll cadence — unset
 	// (zero) in every production construction site, so only same-package
-	// tests reach in to shrink it below defaultPollInterval.
+	// tests reach in to override defaultPollInterval.
 	pollInterval time.Duration
 	// terminated is the shared registry Terminate marks and RunContinuous /
 	// Settle check at their loop checkpoints (ADR 0024, issue #649). Lazily
@@ -302,15 +302,16 @@ func (l *Launcher) Driver() driver.Driver {
 	return l.Factory.Driver()
 }
 
-// defaultPollInterval is the background backlog poll's fixed cadence when a
-// Launcher doesn't override it (production always uses this) — slow enough
-// to never spend the rate-limit window the session's Agents share (#647 AC5).
-const defaultPollInterval = 90 * time.Second
+// defaultPollInterval is the background backlog poll's fixed 3-minute
+// cadence when a Launcher doesn't override it (production always uses
+// this) — slow enough to never spend the rate-limit window the session's
+// Agents share (#647 AC5).
+const defaultPollInterval = 3 * time.Minute
 
-// PollInterval returns l.pollInterval when a test has shrunk it below
-// defaultPollInterval, or the default otherwise — the tea side's poll-tick
-// cadence goes through this accessor instead of reaching into the
-// unexported field directly (issue #1542).
+// PollInterval returns l.pollInterval when a test has overridden it, or
+// defaultPollInterval otherwise — the tea side's poll-tick cadence goes
+// through this accessor instead of reaching into the unexported field
+// directly (issue #1542).
 func (l *Launcher) PollInterval() time.Duration {
 	if l.pollInterval > 0 {
 		return l.pollInterval
