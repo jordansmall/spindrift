@@ -28,6 +28,16 @@ func TestLauncher_CapDefaultsToMaxParallel(t *testing.T) {
 	}
 }
 
+// TestLauncher_PollInterval_FallsBackToDefault verifies a Launcher with no
+// test override reports defaultPollInterval, the background backlog poll's
+// production cadence (#647 AC5).
+func TestLauncher_PollInterval_FallsBackToDefault(t *testing.T) {
+	launch := &Launcher{}
+	if got, want := launch.PollInterval(), 3*time.Minute; got != want {
+		t.Fatalf("PollInterval: got %v, want %v", got, want)
+	}
+}
+
 // TestLauncher_Pick_QueuesAndReturnsSnapshot verifies Pick mutates the
 // private queue and hands back the fresh snapshot synchronously, in the
 // same call — the tea side never has to pull Queue itself to see the row it
