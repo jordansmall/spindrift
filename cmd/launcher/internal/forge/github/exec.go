@@ -4,7 +4,44 @@
 // dispatch label mapping are fixed at construction time.
 package github
 
-import "spindrift.dev/launcher/internal/forge"
+import (
+	"errors"
+	"fmt"
+	"os/exec"
+	"strings"
+
+	"spindrift.dev/launcher/internal/forge"
+)
+
+// ghCommandErrStderrCap bounds how much of a failed gh invocation's captured
+// stderr ghCommandErr folds into the returned error's message, so a
+// pathological gh failure can't dump unbounded output into an error message
+// (and, transitively, whatever logs it).
+const ghCommandErrStderrCap = 4096
+
+// ghCommandErr turns a failed gh invocation's error into one that also
+// surfaces gh's own stderr diagnostic, when available. description names the
+// operation (e.g. "gh issue list"); err is whatever `cmd.Output()` returned.
+//
+// exec.Cmd.Output populates (*exec.ExitError).Stderr automatically whenever
+// the command's Stderr field was left nil, so this needs no caller-wired
+// stderr buffer — it recovers the diagnostic from err itself via errors.As.
+// When err isn't an *exec.ExitError (e.g. *exec.Error when the gh binary is
+// missing from PATH) or its Stderr is empty/whitespace-only, this degrades
+// to the plain "description: err" form — never a dangling ": " separator
+// with nothing after it.
+func ghCommandErr(description string, err error) error {
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		if msg := strings.TrimSpace(string(exitErr.Stderr)); msg != "" {
+			if len(msg) > ghCommandErrStderrCap {
+				msg = msg[:ghCommandErrStderrCap] + "...(truncated)"
+			}
+			return fmt.Errorf("%s: %w: %s", description, err, msg)
+		}
+	}
+	return fmt.Errorf("%s: %w", description, err)
+}
 
 // execClient is the gh-exec adapter.
 type execClient struct {

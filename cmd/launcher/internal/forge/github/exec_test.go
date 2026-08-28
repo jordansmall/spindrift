@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -1639,5 +1640,126 @@ fi
 	}
 	if !strings.Contains(err.Error(), "403") {
 		t.Errorf("error should surface gh's stderr, got: %v", err)
+	}
+}
+
+// TestGhCommandErr_StderrSurfaced verifies ghCommandErr folds a genuine
+// *exec.ExitError's captured Stderr (as exec.Cmd.Output populates it whenever
+// Stderr was left nil, e.g. ListIssues/Issue/issueLabels today) into the
+// returned error's message, alongside the exit status from %w.
+func TestGhCommandErr_StderrSurfaced(t *testing.T) {
+	_, err := exec.Command("sh", "-c", "printf hello 1>&2; exit 1").Output()
+	if err == nil {
+		t.Fatal("want subprocess error, got nil")
+	}
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) {
+		t.Fatalf("want *exec.ExitError, got %T: %v", err, err)
+	}
+
+	got := ghCommandErr("gh issue list", err)
+	if got == nil {
+		t.Fatal("want error, got nil")
+	}
+	if !strings.Contains(got.Error(), "gh issue list") {
+		t.Errorf("error should name the operation, got: %v", got)
+	}
+	if !strings.Contains(got.Error(), "hello") {
+		t.Errorf("error should surface gh's stderr, got: %v", got)
+	}
+	if !strings.Contains(got.Error(), "exit status") {
+		t.Errorf("error should still carry the exit status, got: %v", got)
+	}
+	if !errors.As(got, &exitErr) {
+		t.Errorf("error should still wrap the original *exec.ExitError, got: %v", got)
+	}
+}
+
+// TestGhCommandErr_EmptyStderrDegradesCleanly verifies ghCommandErr never
+// appends a dangling ": " or empty suffix when the ExitError's Stderr is
+// empty or whitespace-only — the exact bug PostIssue exhibits today
+// (exec_issues.go), where the stderr suffix is appended unconditionally.
+func TestGhCommandErr_EmptyStderrDegradesCleanly(t *testing.T) {
+	cases := []struct {
+		name   string
+		script string
+	}{
+		{"empty stderr", "exit 1"},
+		{"whitespace-only stderr", "printf '   \\n\\t ' 1>&2; exit 1"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := exec.Command("sh", "-c", tc.script).Output()
+			if err == nil {
+				t.Fatal("want subprocess error, got nil")
+			}
+
+			got := ghCommandErr("gh issue list", err)
+			if got == nil {
+				t.Fatal("want error, got nil")
+			}
+			want := fmt.Sprintf("gh issue list: %s", err)
+			if got.Error() != want {
+				t.Errorf("error = %q, want %q (no dangling separator)", got.Error(), want)
+			}
+		})
+	}
+}
+
+// TestGhCommandErr_NonExitError verifies ghCommandErr handles a non-ExitError
+// failure (e.g. *exec.Error when the gh binary is missing from PATH)
+// gracefully — no panic, and the description is still wrapped in front of
+// the original error.
+func TestGhCommandErr_NonExitError(t *testing.T) {
+	_, err := exec.Command("this-binary-does-not-exist-xyz").Output()
+	if err == nil {
+		t.Fatal("want error, got nil")
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		t.Fatalf("want a non-ExitError failure, got *exec.ExitError: %v", err)
+	}
+
+	got := ghCommandErr("gh issue list", err)
+	if got == nil {
+		t.Fatal("want error, got nil")
+	}
+	want := fmt.Sprintf("gh issue list: %s", err)
+	if got.Error() != want {
+		t.Errorf("error = %q, want %q", got.Error(), want)
+	}
+	if !errors.Is(got, err) {
+		t.Errorf("error should still wrap the original error, got: %v", got)
+	}
+}
+
+// TestGhCommandErr_StderrTruncated verifies ghCommandErr bounds how much of
+// gh's captured stderr it folds into the error message: a pathological
+// stderr dump is truncated to a reasonable cap, with the truncation made
+// visible in the message rather than silently swallowed or left unbounded.
+func TestGhCommandErr_StderrTruncated(t *testing.T) {
+	_, err := exec.Command("sh", "-c", "yes x | head -c 100000 1>&2; exit 1").Output()
+	if err == nil {
+		t.Fatal("want subprocess error, got nil")
+	}
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) {
+		t.Fatalf("want *exec.ExitError, got %T: %v", err, err)
+	}
+	// exec.Cmd itself caps captured stderr around 64KiB (prefixSuffixSaver),
+	// well above ghCommandErr's own cap — plenty to exercise truncation.
+	if len(exitErr.Stderr) < 8192 {
+		t.Fatalf("test setup: want a large captured stderr, got %d bytes", len(exitErr.Stderr))
+	}
+
+	got := ghCommandErr("gh issue list", err)
+	if got == nil {
+		t.Fatal("want error, got nil")
+	}
+	if len(got.Error()) >= len(exitErr.Stderr) {
+		t.Errorf("error message should be bounded well below the untruncated stderr size, got %d bytes", len(got.Error()))
+	}
+	if !strings.Contains(got.Error(), "truncated") {
+		t.Errorf("truncation should be visible in the message, got a %d-byte message", len(got.Error()))
 	}
 }
