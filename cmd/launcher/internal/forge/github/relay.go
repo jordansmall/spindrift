@@ -2,7 +2,6 @@ package github
 
 import (
 	"bytes"
-	"fmt"
 	"os/exec"
 	"strings"
 
@@ -45,8 +44,8 @@ func NewReadOnlyCodeForge(repo string, labels forge.DispatchLabels, branchPrefix
 // not treat as a no-op.
 func (c *readOnlyCodeForge) RelayBundle(outboxDir, ref string) error {
 	return bundlerelay.Relay("github", outboxDir, ref, func(dir string) error {
-		if out, err := exec.Command("gh", "repo", "clone", c.repo, dir, "--", "--no-single-branch").CombinedOutput(); err != nil {
-			return fmt.Errorf("github: relay bundle: gh repo clone: %w: %s", err, out)
+		if _, err := exec.Command("gh", "repo", "clone", c.repo, dir, "--", "--no-single-branch").Output(); err != nil {
+			return ghCommandErr("github: relay bundle: gh repo clone", err)
 		}
 		return nil
 	})
@@ -60,8 +59,8 @@ func (c *readOnlyCodeForge) RelayBundle(outboxDir, ref string) error {
 // the remote -- a read path only.
 func (c *readOnlyCodeForge) CommitSubjects(outboxDir, base, ref string) ([]string, error) {
 	return bundlerelay.CommitSubjects("github", outboxDir, base, ref, func(dir string) error {
-		if out, err := exec.Command("gh", "repo", "clone", c.repo, dir, "--", "--no-single-branch").CombinedOutput(); err != nil {
-			return fmt.Errorf("github: relay bundle: gh repo clone: %w: %s", err, out)
+		if _, err := exec.Command("gh", "repo", "clone", c.repo, dir, "--", "--no-single-branch").Output(); err != nil {
+			return ghCommandErr("github: commit subjects: gh repo clone", err)
 		}
 		return nil
 	})
@@ -108,7 +107,7 @@ func (c *readOnlyCodeForge) CreateDraftPR(title, body, base, head string) (strin
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
 	if err != nil {
-		createErr := fmt.Errorf("github: create draft PR: gh pr create: %w: %s", err, strings.TrimSpace(stderr.String()))
+		createErr := ghCommandErrText("github: create draft PR: gh pr create", err, stderr.String())
 		if strings.Contains(stderr.String(), "already exists") {
 			if pr, ok, openErr := c.OpenPRForBranch(head); openErr == nil && ok {
 				return pr.URL, false, nil

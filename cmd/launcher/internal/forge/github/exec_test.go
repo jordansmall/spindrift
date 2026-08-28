@@ -746,7 +746,9 @@ esac`)
 // isn't GitHub's "Branch not protected" body, e.g. a base branch that hasn't
 // been pushed yet, a typo'd branch name, or a repo the token can't see: all
 // return a bare 404 that must not be conflated with a definitive "no
-// protection rule" answer.
+// protection rule" answer. It also verifies the fallback error routes
+// through ghCommandErrText (issue #2864): the classic endpoint's captured
+// stderr text ends up in the returned error's message.
 func TestExecClient_BranchProtected_GenericNotFound(t *testing.T) {
 	prependFakeGH(t, `case "$*" in
 *branches/main/protection*)
@@ -765,6 +767,36 @@ esac`)
 	}
 	if protected {
 		t.Error("BranchProtected(main) = true, want false alongside the error")
+	}
+	if !strings.Contains(err.Error(), "Not Found (HTTP 404)") {
+		t.Errorf("BranchProtected: error should surface gh's stderr, got: %v", err)
+	}
+}
+
+// TestExecClient_BranchProtected_GenericFailureEmptyStderr verifies
+// BranchProtected's generic-failure fallback degrades cleanly -- no dangling
+// ": " suffix -- when the classic endpoint fails without writing anything to
+// stderr (issue #2864: the bug class this ticket targets).
+func TestExecClient_BranchProtected_GenericFailureEmptyStderr(t *testing.T) {
+	prependFakeGH(t, `case "$*" in
+*branches/main/protection*)
+	exit 1
+	;;
+*)
+	exit 1
+	;;
+esac`)
+
+	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	protected, err := c.BranchProtected("main")
+	if err == nil {
+		t.Fatal("BranchProtected: want error for a generic failure, got nil")
+	}
+	if protected {
+		t.Error("BranchProtected(main) = true, want false alongside the error")
+	}
+	if strings.Contains(err.Error(), ": \n") || strings.HasSuffix(err.Error(), ": ") {
+		t.Errorf("BranchProtected: error should not have a dangling \": \" suffix for empty stderr, got: %q", err.Error())
 	}
 }
 
@@ -811,6 +843,27 @@ esac`)
 	}
 }
 
+// TestExecClient_Issue_ErrorSurfacesStderr verifies that when `gh issue
+// view` exits non-zero with a diagnostic on stderr, Issue's returned error
+// includes that stderr text (issue #2864).
+func TestExecClient_Issue_ErrorSurfacesStderr(t *testing.T) {
+	prependFakeGH(t, `case "$*" in
+*"issue view"*)
+	printf 'HTTP 404: Not Found\n' >&2
+	exit 1
+	;;
+esac`)
+
+	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	_, err := c.Issue("10")
+	if err == nil {
+		t.Fatal("Issue: want error, got nil")
+	}
+	if !strings.Contains(err.Error(), "404") {
+		t.Fatalf("Issue error must contain gh's stderr; got: %q", err.Error())
+	}
+}
+
 // TestExecClient_ListOpenIssues_NoLabelFilterIncludesLabels verifies
 // ListOpenIssues queries every open issue with no --label filter (unlike
 // ListIssues, which scopes to one dispatch state's label) and returns each
@@ -847,6 +900,28 @@ esac`)
 	}
 	if strings.Contains(argv, "--label") {
 		t.Errorf("argv = %q, must not scope by --label", argv)
+	}
+}
+
+// TestExecClient_ListOpenIssues_ErrorSurfacesStderr verifies that when `gh
+// issue list` exits non-zero with a diagnostic on stderr, ListOpenIssues's
+// returned error includes that stderr text, matching ListIssues's own
+// stderr-surfacing behavior (issue #2864).
+func TestExecClient_ListOpenIssues_ErrorSurfacesStderr(t *testing.T) {
+	prependFakeGH(t, `case "$*" in
+*"issue list"*)
+	echo 'GraphQL: Could not resolve to a Repository with the name '"'"'owner/repo'"'"'. (repository)' >&2
+	exit 1
+	;;
+esac`)
+
+	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	_, err := c.ListOpenIssues()
+	if err == nil {
+		t.Fatal("ListOpenIssues: want error, got nil")
+	}
+	if !strings.Contains(err.Error(), "Could not resolve to a Repository") {
+		t.Fatalf("ListOpenIssues error must contain gh's stderr; got: %q", err.Error())
 	}
 }
 
@@ -890,6 +965,27 @@ esac`)
 	}
 	if strings.HasSuffix(err.Error(), ": ") {
 		t.Fatalf("ListIssues error must not have a trailing colon-space; got: %q", err.Error())
+	}
+}
+
+// TestExecClient_IssueLabels_ErrorSurfacesStderr verifies that when `gh
+// issue view` exits non-zero with a diagnostic on stderr, issueLabels's
+// returned error includes that stderr text (issue #2864).
+func TestExecClient_IssueLabels_ErrorSurfacesStderr(t *testing.T) {
+	prependFakeGH(t, `case "$*" in
+*"issue view"*)
+	printf 'HTTP 404: Not Found\n' >&2
+	exit 1
+	;;
+esac`)
+
+	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	_, err := c.issueLabels("10")
+	if err == nil {
+		t.Fatal("issueLabels: want error, got nil")
+	}
+	if !strings.Contains(err.Error(), "404") {
+		t.Fatalf("issueLabels error must contain gh's stderr; got: %q", err.Error())
 	}
 }
 
@@ -992,6 +1088,48 @@ esac
 	calls, _ := filepath.Glob(filepath.Join(dir, "call-*.txt"))
 	if len(calls) != 2 {
 		t.Errorf("gh call count = %d, want 2 (view + exactly one edit)", len(calls))
+	}
+}
+
+// TestExecClient_TransitionState_GenuineFailureSurfaced verifies that when
+// `gh issue edit` exits non-zero with a diagnostic on stderr, TransitionState's
+// returned error includes that stderr text (issue #2864).
+func TestExecClient_TransitionState_GenuineFailureSurfaced(t *testing.T) {
+	prependFakeGH(t, `printf 'HTTP 403: Resource not accessible by integration\n' >&2
+exit 1`)
+
+	c := NewExecClient("owner/repo", testLabels, "agent/issue-")
+	err := c.TransitionState("10", forge.Dispatchable, forge.InProgress)
+	if err == nil {
+		t.Fatal("TransitionState: want error, got nil")
+	}
+	if !strings.Contains(err.Error(), "403") {
+		t.Fatalf("TransitionState error must contain gh's stderr; got: %q", err.Error())
+	}
+}
+
+// TestExecClient_CompleteVerdict_GenuineEditFailureSurfaced verifies that
+// when the InProgress precondition is satisfied but the subsequent `gh issue
+// edit` call itself fails, CompleteVerdict's returned error includes gh's
+// stderr text (issue #2864).
+func TestExecClient_CompleteVerdict_GenuineEditFailureSurfaced(t *testing.T) {
+	prependFakeGH(t, `case "$*" in
+*"issue view"*)
+	printf '{"number":10,"title":"t","body":"b","state":"OPEN","labels":[{"name":"agent-in-progress"}]}\n'
+	;;
+*"issue edit"*)
+	printf 'HTTP 403: Resource not accessible by integration\n' >&2
+	exit 1
+	;;
+esac`)
+
+	c := NewExecClient("owner/repo", testLabels, "agent/issue-", WithVerdictLabels(forge.ResearchVerdictLabels()))
+	err := c.CompleteVerdict("10", forge.Recommend)
+	if err == nil {
+		t.Fatal("CompleteVerdict: want error, got nil")
+	}
+	if !strings.Contains(err.Error(), "403") {
+		t.Fatalf("CompleteVerdict error must contain gh's stderr; got: %q", err.Error())
 	}
 }
 
@@ -1213,6 +1351,24 @@ fi
 	}
 	if !found42 {
 		t.Fatalf("PR number not passed as a GraphQL variable; args: %q", args)
+	}
+}
+
+// TestFailureDetail_GraphQLFailureSurfacesStderr verifies that when `gh api
+// graphql` fails, the error FailureDetail returns includes gh's actual
+// stderr text, routed through ghCommandErr (issue #2864).
+func TestFailureDetail_GraphQLFailureSurfacesStderr(t *testing.T) {
+	prependFakeGH(t, `printf 'HTTP 403: Forbidden\n' >&2
+exit 1
+`)
+
+	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	_, err := c.FailureDetail("https://github.com/owner/repo/pull/42")
+	if err == nil {
+		t.Fatal("FailureDetail: want error, got nil")
+	}
+	if !strings.Contains(err.Error(), "HTTP 403: Forbidden") {
+		t.Fatalf("FailureDetail error must surface gh's stderr; got: %v", err)
 	}
 }
 
@@ -1582,6 +1738,47 @@ fi
 	}
 }
 
+// TestExecClient_CloseMergedIssue_EmptyStderrNoTrailingColon verifies that
+// when `gh issue close` exits non-zero without writing to stderr, the
+// returned error has no dangling "exit status 1: " trailing colon-space
+// (issue #2864).
+func TestExecClient_CloseMergedIssue_EmptyStderrNoTrailingColon(t *testing.T) {
+	prependFakeGH(t, `if [ "$1" = "issue" ] && [ "$2" = "view" ]; then
+  echo '{"number":42,"title":"t","body":"","state":"OPEN","labels":[]}'
+  exit 0
+fi
+if [ "$1" = "issue" ] && [ "$2" = "close" ]; then
+  exit 1
+fi
+`)
+
+	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	err := c.CloseMergedIssue("42")
+	if err == nil {
+		t.Fatal("CloseMergedIssue: want error, got nil")
+	}
+	if strings.HasSuffix(err.Error(), ": ") {
+		t.Fatalf("CloseMergedIssue error must not have a trailing colon-space; got: %q", err.Error())
+	}
+}
+
+// TestExecClient_Comment_GenuineFailureSurfaced verifies that when `gh issue
+// comment` exits non-zero with a diagnostic on stderr, Comment's returned
+// error includes that stderr text (issue #2864).
+func TestExecClient_Comment_GenuineFailureSurfaced(t *testing.T) {
+	prependFakeGH(t, `printf 'HTTP 403: Resource not accessible by integration\n' >&2
+exit 1`)
+
+	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	err := c.Comment("10", "hello")
+	if err == nil {
+		t.Fatal("Comment: want error, got nil")
+	}
+	if !strings.Contains(err.Error(), "403") {
+		t.Fatalf("Comment error must contain gh's stderr; got: %q", err.Error())
+	}
+}
+
 // TestExecClient_ImplementsHostPostedIssueFiler verifies the github adapter
 // satisfies forge.HostPostedIssueFiler (issue #2028) — the read-only
 // capability gate's issue-filing axis, closed by this adapter method.
@@ -1683,6 +1880,28 @@ fi
 	}
 	if !strings.Contains(err.Error(), "403") {
 		t.Errorf("error should surface gh's stderr, got: %v", err)
+	}
+}
+
+// TestExecClient_PostIssue_ErrorEmptyStderrNoTrailingColon verifies that
+// when `gh issue create` exits non-zero without writing to stderr, the
+// returned error has no dangling "exit status 1: " trailing colon-space —
+// the bug TestGhCommandErr_EmptyStderrDegradesCleanly's doc comment calls
+// out, previously present because PostIssue unconditionally appended
+// stderr.String() even when empty (issue #2864).
+func TestExecClient_PostIssue_ErrorEmptyStderrNoTrailingColon(t *testing.T) {
+	prependFakeGH(t, `if [ "$1" = "issue" ] && [ "$2" = "create" ]; then
+  exit 1
+fi
+`)
+
+	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	_, err := c.PostIssue("a title", "a body", nil)
+	if err == nil {
+		t.Fatal("PostIssue: want error, got nil")
+	}
+	if strings.HasSuffix(err.Error(), ": ") {
+		t.Fatalf("PostIssue error must not have a trailing colon-space; got: %q", err.Error())
 	}
 }
 
@@ -1800,6 +2019,88 @@ func TestGhCommandErr_StderrTruncated(t *testing.T) {
 		t.Fatal("want error, got nil")
 	}
 	if len(got.Error()) >= len(exitErr.Stderr) {
+		t.Errorf("error message should be bounded well below the untruncated stderr size, got %d bytes", len(got.Error()))
+	}
+	if !strings.Contains(got.Error(), "truncated") {
+		t.Errorf("truncation should be visible in the message, got a %d-byte message", len(got.Error()))
+	}
+}
+
+// TestGhCommandErrText_StderrSurfaced verifies ghCommandErrText folds a
+// caller-supplied stderr string (captured by a call site that wired
+// cmd.Stderr to its own buffer, e.g. BranchProtected/classifyMergeFailure)
+// into the returned error's message, alongside the exit status from %w.
+func TestGhCommandErrText_StderrSurfaced(t *testing.T) {
+	_, err := exec.Command("sh", "-c", "exit 1").Output()
+	if err == nil {
+		t.Fatal("want subprocess error, got nil")
+	}
+
+	got := ghCommandErrText("gh api branch protection", err, "hello")
+	if got == nil {
+		t.Fatal("want error, got nil")
+	}
+	if !strings.Contains(got.Error(), "gh api branch protection") {
+		t.Errorf("error should name the operation, got: %v", got)
+	}
+	if !strings.Contains(got.Error(), "hello") {
+		t.Errorf("error should surface the supplied stderr, got: %v", got)
+	}
+	if !strings.Contains(got.Error(), "exit status") {
+		t.Errorf("error should still carry the exit status, got: %v", got)
+	}
+	if !errors.Is(got, err) {
+		t.Errorf("error should still wrap the original error, got: %v", got)
+	}
+}
+
+// TestGhCommandErrText_EmptyStderrDegradesCleanly verifies ghCommandErrText
+// never appends a dangling ": " or empty suffix when the supplied stderr
+// text is empty or whitespace-only, mirroring
+// TestGhCommandErr_EmptyStderrDegradesCleanly.
+func TestGhCommandErrText_EmptyStderrDegradesCleanly(t *testing.T) {
+	cases := []struct {
+		name   string
+		stderr string
+	}{
+		{"empty stderr", ""},
+		{"whitespace-only stderr", "   \n\t "},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := exec.Command("sh", "-c", "exit 1").Output()
+			if err == nil {
+				t.Fatal("want subprocess error, got nil")
+			}
+
+			got := ghCommandErrText("gh api branch protection", err, tc.stderr)
+			if got == nil {
+				t.Fatal("want error, got nil")
+			}
+			want := fmt.Sprintf("gh api branch protection: %s", err)
+			if got.Error() != want {
+				t.Errorf("error = %q, want %q (no dangling separator)", got.Error(), want)
+			}
+		})
+	}
+}
+
+// TestGhCommandErrText_StderrTruncated verifies ghCommandErrText bounds how
+// much of the supplied stderr text it folds into the error message, the same
+// cap ghCommandErr applies, with the truncation made visible in the message
+// rather than silently swallowed or left unbounded.
+func TestGhCommandErrText_StderrTruncated(t *testing.T) {
+	_, err := exec.Command("sh", "-c", "exit 1").Output()
+	if err == nil {
+		t.Fatal("want subprocess error, got nil")
+	}
+
+	stderr := strings.Repeat("x", 100000)
+	got := ghCommandErrText("gh api branch protection", err, stderr)
+	if got == nil {
+		t.Fatal("want error, got nil")
+	}
+	if len(got.Error()) >= len(stderr) {
 		t.Errorf("error message should be bounded well below the untruncated stderr size, got %d bytes", len(got.Error()))
 	}
 	if !strings.Contains(got.Error(), "truncated") {

@@ -61,7 +61,7 @@ func (e *execClient) FailureDetail(url string) (string, error) {
 	)
 	out, err := cmd.Output()
 	if err != nil {
-		return "", fmt.Errorf("gh api graphql: %w", err)
+		return "", ghCommandErr("gh api graphql (statusCheckRollup contexts)", err)
 	}
 	var contexts []failureDetailContext
 	if err := json.Unmarshal(out, &contexts); err != nil {
