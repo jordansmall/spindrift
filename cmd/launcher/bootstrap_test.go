@@ -46,6 +46,97 @@ func TestBootstrap_ValidateError_WrapsErrConfigInvalid(t *testing.T) {
 	}
 }
 
+// TestBootstrap_BadRegistryProxyCredentialEnv_NoUpstreamURL_DoesNotError
+// proves bootstrap() only resolves the registry proxy credential when
+// REGISTRY_PROXY_UPSTREAM_URL is actually set (issue #2850 review finding):
+// a typo'd REGISTRY_PROXY_CREDENTIAL_ENV reference must not abort a launcher
+// invocation that never touches the registry proxy at all, since no proxy
+// will ever start to use it. REGISTRY_PROXY_CREDENTIAL_ENV here names a
+// variable that is deliberately never set with t.Setenv, so resolution would
+// fail closed if it ran.
+func TestBootstrap_BadRegistryProxyCredentialEnv_NoUpstreamURL_DoesNotError(t *testing.T) {
+	checkout := mustSeedableCheckout(t)
+	repoPath := filepath.Join(t.TempDir(), "accum.git")
+
+	issuesDir := t.TempDir()
+	issueFile := `---
+title: Some issue
+state: untriaged
+labels: []
+created: 2026-07-09T12:00:00Z
+---
+body
+`
+	if err := os.WriteFile(filepath.Join(issuesDir, "42.md"), []byte(issueFile), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("REPO_SLUG", "owner/repo")
+	t.Setenv("GH_TOKEN", "test-token")
+	t.Setenv("GIT_USER_NAME", "Test")
+	t.Setenv("GIT_USER_EMAIL", "test@example.com")
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "test-oauth-token")
+	t.Setenv("CODE_FORGE", "local")
+	t.Setenv("CODE_FORGE_ACCUMULATION_REPO_DIR", repoPath)
+	t.Setenv("BASE_BRANCH", "main")
+	t.Setenv("MERGE_MODE", "immediate")
+	t.Setenv("RUNTIME", "bwrap")
+	t.Setenv("RUNNER_KIND", "bwrap")
+	t.Setenv("ISSUE_TRACKER", "local")
+	t.Setenv("LOCAL_ISSUES_DIR", issuesDir)
+	t.Setenv("REGISTRY_PROXY_CREDENTIAL_ENV", "SPINDRIFT_TEST_REGISTRY_PROXY_CRED_DOES_NOT_EXIST")
+	t.Chdir(checkout)
+
+	lc, err := bootstrap(true, dispatchKindWork, false)
+	if err != nil {
+		t.Fatalf("bootstrap() = %v, want no error: an unresolved registry proxy credential ref must not matter when REGISTRY_PROXY_UPSTREAM_URL is unset", err)
+	}
+	if lc == nil {
+		t.Fatal("bootstrap() launch context = nil, want a non-nil *launchContext on success")
+	}
+	t.Cleanup(lc.cleanup)
+}
+
+// TestBootstrap_BadRegistryProxyCredentialEnv_WithUpstreamURL_WrapsErrConfigInvalid
+// is the sibling of the test above: once REGISTRY_PROXY_UPSTREAM_URL is set,
+// the proxy will actually start, so the same unresolved
+// REGISTRY_PROXY_CREDENTIAL_ENV reference must now fail bootstrap(), and the
+// error must wrap errConfigInvalid the same way the validate(c) error two
+// lines above it does (issue #2850 review finding) -- a caller distinguishing
+// "the loaded config failed validation" from other bootstrap failures via
+// errors.Is must not see this case differently just because it's caught by
+// resolveRegistryProxyCredential instead of validate(c) itself.
+func TestBootstrap_BadRegistryProxyCredentialEnv_WithUpstreamURL_WrapsErrConfigInvalid(t *testing.T) {
+	checkout := mustSeedableCheckout(t)
+	repoPath := filepath.Join(t.TempDir(), "accum.git")
+
+	t.Setenv("REPO_SLUG", "owner/repo")
+	t.Setenv("GH_TOKEN", "test-token")
+	t.Setenv("GIT_USER_NAME", "Test")
+	t.Setenv("GIT_USER_EMAIL", "test@example.com")
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "test-oauth-token")
+	t.Setenv("CODE_FORGE", "local")
+	t.Setenv("CODE_FORGE_ACCUMULATION_REPO_DIR", repoPath)
+	t.Setenv("BASE_BRANCH", "main")
+	t.Setenv("MERGE_MODE", "immediate")
+	t.Setenv("RUNTIME", "bwrap")
+	t.Setenv("RUNNER_KIND", "bwrap")
+	t.Setenv("REGISTRY_PROXY_UPSTREAM_URL", "https://registry.example.com")
+	t.Setenv("REGISTRY_PROXY_CREDENTIAL_ENV", "SPINDRIFT_TEST_REGISTRY_PROXY_CRED_DOES_NOT_EXIST")
+	t.Chdir(checkout)
+
+	lc, err := bootstrap(true, dispatchKindWork, false)
+	if err == nil {
+		t.Fatal("bootstrap() = nil error, want an error: REGISTRY_PROXY_UPSTREAM_URL is set and REGISTRY_PROXY_CREDENTIAL_ENV names a variable that is not set")
+	}
+	if lc != nil {
+		t.Fatalf("bootstrap() on error = %+v, want nil launch context", lc)
+	}
+	if !errors.Is(err, errConfigInvalid) {
+		t.Fatalf("bootstrap() error = %v, want errors.Is(err, errConfigInvalid) = true", err)
+	}
+}
+
 // mustRunGit runs `git -C dir args...` via the package's own runGit helper,
 // failing t on error.
 func mustRunGit(t *testing.T, dir string, args ...string) {

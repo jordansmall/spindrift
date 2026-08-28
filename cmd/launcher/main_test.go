@@ -1991,6 +1991,33 @@ func TestValidate_ChoiceErrorsPrecedeCrossKnobErrors(t *testing.T) {
 	}
 }
 
+// TestValidate_ChoiceErrorsPrecedeRegistryProxyCredentialError pins the same
+// ordering as TestValidate_ChoiceErrorsPrecedeCrossKnobErrors, but for the
+// registry-proxy-credential row folded into launcherCrossKnobChecks: an
+// invalid MERGE_MODE must surface validateChoice's enum-choice error, not
+// the registry-proxy-credential mutual-exclusion error, even though both are
+// broken. This pins that moving the registry-proxy-credential check off its
+// old hand-written call site (main.go, ahead of the validateChoice calls) and
+// into launcherCrossKnobChecks (checks.go) did not change validate()'s
+// fail-fast precedence versus origin/main.
+func TestValidate_ChoiceErrorsPrecedeRegistryProxyCredentialError(t *testing.T) {
+	c := minimalValidConfig()
+	c.mergeMode = "bogus"
+	c.registryProxyCredentialFile = "/some/file"
+	c.registryProxyCredentialEnv = "SOME_ENV"
+
+	err := validate(c)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if strings.Contains(err.Error(), "REGISTRY_PROXY_CREDENTIAL") {
+		t.Fatalf("got registry-proxy-credential error (wrong precedence), want MERGE_MODE enum-choice error: %v", err)
+	}
+	if !strings.Contains(err.Error(), "MERGE_MODE") {
+		t.Fatalf("want error to mention MERGE_MODE, got: %v", err)
+	}
+}
+
 // TestValidate_ResearchSelfContainedExemptsRepoSlugAndGhToken verifies that
 // validate() does not require REPO_SLUG or GH_TOKEN for a research dispatch
 // with selfContained set and a local issue tracker (issue #2202,
@@ -2194,6 +2221,59 @@ func TestValidate_OpencodeCopilotCredential(t *testing.T) {
 	c.anthropicAPIKey = ""
 	if err := validate(c); err == nil {
 		t.Fatal("validate() should still require a claude credential under the default (claude) Driver")
+	}
+}
+
+// TestValidate_RegistryProxyCredentialBothSetIsRejected verifies that
+// validate() rejects a config with both REGISTRY_PROXY_CREDENTIAL_FILE and
+// REGISTRY_PROXY_CREDENTIAL_ENV set (ADR 0044): a Credential reference names
+// exactly one source.
+func TestValidate_RegistryProxyCredentialBothSetIsRejected(t *testing.T) {
+	c := minimalValidConfig()
+	c.registryProxyCredentialFile = "/some/file"
+	c.registryProxyCredentialEnv = "SOME_ENV"
+	if err := validate(c); err == nil {
+		t.Fatal("validate() should reject both REGISTRY_PROXY_CREDENTIAL_FILE and REGISTRY_PROXY_CREDENTIAL_ENV set")
+	}
+}
+
+// TestValidate_RegistryProxyCredentialEitherAloneOrNeitherIsAccepted
+// verifies that validate() accepts a config with only one of
+// REGISTRY_PROXY_CREDENTIAL_FILE/REGISTRY_PROXY_CREDENTIAL_ENV set, or
+// neither (ADR 0044).
+func TestValidate_RegistryProxyCredentialEitherAloneOrNeitherIsAccepted(t *testing.T) {
+	c := minimalValidConfig()
+	c.registryProxyCredentialFile = "/some/file"
+	c.registryProxyCredentialEnv = ""
+	if err := validate(c); err != nil {
+		t.Errorf("validate() should accept REGISTRY_PROXY_CREDENTIAL_FILE alone: %v", err)
+	}
+
+	c = minimalValidConfig()
+	c.registryProxyCredentialFile = ""
+	c.registryProxyCredentialEnv = "SOME_ENV"
+	if err := validate(c); err != nil {
+		t.Errorf("validate() should accept REGISTRY_PROXY_CREDENTIAL_ENV alone: %v", err)
+	}
+
+	c = minimalValidConfig()
+	c.registryProxyCredentialFile = ""
+	c.registryProxyCredentialEnv = ""
+	if err := validate(c); err != nil {
+		t.Errorf("validate() should accept neither REGISTRY_PROXY_CREDENTIAL_FILE nor REGISTRY_PROXY_CREDENTIAL_ENV set: %v", err)
+	}
+}
+
+// TestValidateConfig_RegistryProxyCredentialBothSetIsRejected verifies that
+// validateConfig() (the spindrift doctor path) also rejects both
+// REGISTRY_PROXY_CREDENTIAL_FILE and REGISTRY_PROXY_CREDENTIAL_ENV set (ADR
+// 0044), matching validate()'s check.
+func TestValidateConfig_RegistryProxyCredentialBothSetIsRejected(t *testing.T) {
+	c := minimalValidConfig()
+	c.registryProxyCredentialFile = "/some/file"
+	c.registryProxyCredentialEnv = "SOME_ENV"
+	if err := validateConfig(c); err == nil {
+		t.Fatal("validateConfig() should reject both REGISTRY_PROXY_CREDENTIAL_FILE and REGISTRY_PROXY_CREDENTIAL_ENV set")
 	}
 }
 

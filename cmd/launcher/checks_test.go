@@ -38,12 +38,13 @@ func TestLauncherRequiredKnobChecks_ReturnsSixRows(t *testing.T) {
 	}
 }
 
-// TestLauncherCrossKnobChecks_ReturnsTwoRows verifies launcherCrossKnobChecks
-// returns exactly the two rows that ran after validate()'s validateChoice
-// calls on origin/main, in that exact order.
-func TestLauncherCrossKnobChecks_ReturnsTwoRows(t *testing.T) {
+// TestLauncherCrossKnobChecks_ReturnsThreeRows verifies launcherCrossKnobChecks
+// returns exactly the three rows that ran after validate()'s validateChoice
+// calls on origin/main plus the registry-proxy-credential row folded in
+// later, in that exact order.
+func TestLauncherCrossKnobChecks_ReturnsThreeRows(t *testing.T) {
 	checks := launcherCrossKnobChecks(minimalValidConfig())
-	want := []string{"issue-tracker-config", "code-forge-config"}
+	want := []string{"issue-tracker-config", "code-forge-config", "registry-proxy-credential"}
 	if len(checks) != len(want) {
 		t.Fatalf("launcherCrossKnobChecks returned %d rows, want %d", len(checks), len(want))
 	}
@@ -78,7 +79,7 @@ func TestLauncherChecks_AllRequiredTier(t *testing.T) {
 // relative to its validateChoice calls (checks.go's doc comment).
 func TestLauncherChecks_GroupOrder(t *testing.T) {
 	checks := launcherChecks(minimalValidConfig())
-	want := []string{"repo-slug", "git-user-name", "git-user-email", "gh-token", "driver-credentials", "runtime", "issue-tracker-config", "code-forge-config"}
+	want := []string{"repo-slug", "git-user-name", "git-user-email", "gh-token", "driver-credentials", "runtime", "issue-tracker-config", "code-forge-config", "registry-proxy-credential"}
 	if len(checks) != len(want) {
 		t.Fatalf("launcherChecks returned %d rows, want %d", len(checks), len(want))
 	}
@@ -398,5 +399,39 @@ func TestLauncherChecks_CodeForge_FailsAndPasses(t *testing.T) {
 	ch = checkByName(t, launcherChecks(c), "code-forge-config")
 	if _, err := ch.Probe(); err != nil {
 		t.Errorf("code-forge Probe() unexpected error for default github config: %v", err)
+	}
+}
+
+// TestLauncherChecks_RegistryProxyCredential_FailsAndPasses covers the
+// registry-proxy-credential row: it must fail when both
+// REGISTRY_PROXY_CREDENTIAL_FILE and REGISTRY_PROXY_CREDENTIAL_ENV are set
+// (ADR 0044) and pass when either alone, or neither, is set.
+func TestLauncherChecks_RegistryProxyCredential_FailsAndPasses(t *testing.T) {
+	c := minimalValidConfig()
+	c.registryProxyCredentialFile = "/some/file"
+	c.registryProxyCredentialEnv = "SOME_ENV"
+	ch := checkByName(t, launcherChecks(c), "registry-proxy-credential")
+	if _, err := ch.Probe(); err == nil {
+		t.Fatal("registry-proxy-credential Probe() must fail when both REGISTRY_PROXY_CREDENTIAL_FILE and REGISTRY_PROXY_CREDENTIAL_ENV are set")
+	}
+
+	c = minimalValidConfig()
+	c.registryProxyCredentialFile = "/some/file"
+	ch = checkByName(t, launcherChecks(c), "registry-proxy-credential")
+	if _, err := ch.Probe(); err != nil {
+		t.Errorf("registry-proxy-credential Probe() unexpected error for REGISTRY_PROXY_CREDENTIAL_FILE alone: %v", err)
+	}
+
+	c = minimalValidConfig()
+	c.registryProxyCredentialEnv = "SOME_ENV"
+	ch = checkByName(t, launcherChecks(c), "registry-proxy-credential")
+	if _, err := ch.Probe(); err != nil {
+		t.Errorf("registry-proxy-credential Probe() unexpected error for REGISTRY_PROXY_CREDENTIAL_ENV alone: %v", err)
+	}
+
+	c = minimalValidConfig()
+	ch = checkByName(t, launcherChecks(c), "registry-proxy-credential")
+	if _, err := ch.Probe(); err != nil {
+		t.Errorf("registry-proxy-credential Probe() unexpected error when neither is set: %v", err)
 	}
 }
