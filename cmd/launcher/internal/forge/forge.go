@@ -58,6 +58,11 @@ var ErrBundleNotFound = errors.New("forge bundle not found")
 // callers can errors.Is check for any REST lookup.
 var ErrNotFound = errors.New("forge: not found")
 
+// ErrRateLimit is returned when a forge operation fails because GitHub is
+// rate-limiting the caller — either the primary hourly API quota or the
+// secondary/abuse-detection limit. Callers may retry after backing off.
+var ErrRateLimit = errors.New("forge rate limited")
+
 // Issue is a GitHub issue as seen by the launcher.
 type Issue struct {
 	Number string // launcher keeps issue numbers as strings
