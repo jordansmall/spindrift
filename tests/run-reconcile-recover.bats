@@ -92,7 +92,7 @@ setup() {
   # recover adopts the discovered PR, so its gate (issue #1652) will not
   # trust an immediate SUCCESS until a non-terminal state proves this run's
   # checks registered — lead with a PENDING and bound the poll so a misscript
-  # can't real-sleep out the baked MERGE_POLL_TIMEOUT (1800s).
+  # can't real-sleep out the baked MERGE_POLL_TIMEOUT (3600s).
   export MERGE_POLL_INTERVAL=0
   export MERGE_POLL_TIMEOUT=100
   export FAKE_GH_GRAPHQL_ROLLUP_SEQ_1="PENDING,SUCCESS,SUCCESS"
@@ -206,7 +206,7 @@ setup() {
   # recover adopts the discovered PR, so its gate (issue #1652) will not
   # trust an immediate SUCCESS until a non-terminal state proves this run's
   # checks registered — lead with a PENDING and bound the poll so a misscript
-  # can't real-sleep out the baked MERGE_POLL_TIMEOUT (1800s).
+  # can't real-sleep out the baked MERGE_POLL_TIMEOUT (3600s).
   export MERGE_POLL_INTERVAL=0
   export MERGE_POLL_TIMEOUT=100
   export FAKE_GH_GRAPHQL_ROLLUP_SEQ_1="PENDING,SUCCESS,SUCCESS"

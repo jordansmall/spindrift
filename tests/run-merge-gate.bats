@@ -262,11 +262,12 @@ setup() {
 # MERGE_POLL_TIMEOUT itself -- prove that by NOT exporting either here and
 # reaching the poll loop via a non-terminal PENDING rollup. Wrap the run in
 # the `timeout` coreutil so a regression back to the launcher's real
-# production default (MERGE_POLL_TIMEOUT=1800s) fails fast here instead of
-# hanging this test for 30 minutes: pre-fix, the outer `timeout 5` kills the
-# launcher first (status=124, no launcher-authored deadline message);
-# post-fix, the launcher's own small default deadline fires well inside the
-# 5s bound and exits 0 with its own "ci-timeout:" deadline message.
+# production default (MERGE_POLL_TIMEOUT=3600s, i.e. 60 minutes) fails fast
+# here instead of hanging this test: without setup_run_env's own bound
+# (issue #2424, pre-fix), the outer `timeout 5` kills the launcher first
+# (status=124, no launcher-authored deadline message); with it (post-fix),
+# the launcher's own small default deadline fires well inside the 5s bound
+# and exits 0 with its own "ci-timeout:" deadline message.
 @test "no explicit poll override → setup_run_env default still bounds the gate" {
   export FAKE_PODMAN_IMAGE_PRESENT=1
   export FAKE_GH_ISSUES=$'1\tFirst issue'
