@@ -78,6 +78,12 @@ configure_env() {
   # CODE_FORGE=local's seam bundle into (ADR 0033, issue #1808); unused
   # otherwise.
   OUTBOX_DIR="${OUTBOX_DIR:-/outbox}"
+  # REGISTRY_PROXY_SOCKET_PATH is the fixed in-box path the registry proxy's
+  # unix socket mount lands at when REGISTRY_PROXY_UPSTREAM_URL is set (ADR
+  # 0044, issue #2849) -- mirrors mount.go's registryProxySocketTarget
+  # exactly. Overridable only so phase_registry_proxy_forwarder can be
+  # exercised in bats tests without touching the real host filesystem root.
+  REGISTRY_PROXY_SOCKET_PATH="${REGISTRY_PROXY_SOCKET_PATH:-/registry-proxy.sock}"
 
   # HARNESS_SKILLS_DIR is where harness-owned and build-time
   # Consumer-configured skills are baked (lib/image.nix), a sibling of
@@ -443,7 +449,7 @@ phase_prework_rebase() {
 # user-facing knob. Chosen to collide with nothing else this harness or a
 # typical Target devShell binds (unlike the common 3000/8000/8080 dev-server
 # range).
-REGISTRY_PROXY_FORWARDER_PORT=27182
+REGISTRY_PROXY_FORWARDER_PORT="${REGISTRY_PROXY_FORWARDER_PORT:-27182}"
 
 # phase_registry_proxy_forwarder starts the in-Box Forwarder (ADR 0044,
 # issue #2849): socat presents the registry proxy's mounted unix socket
@@ -472,15 +478,38 @@ REGISTRY_PROXY_FORWARDER_PORT=27182
 # $WORK_DIR/.cargo/config.toml -- it can be written here, before clone_repo
 # has even created $WORK_DIR.
 phase_registry_proxy_forwarder() {
-  [ -S /registry-proxy.sock ] || return 0
+  [ -S "$REGISTRY_PROXY_SOCKET_PATH" ] || return 0
 
   if ! command -v socat >/dev/null 2>&1; then
-    echo "==> WARNING: /registry-proxy.sock is mounted but socat is not on PATH — cargo will fall back to the public registry"
+    echo "==> WARNING: $REGISTRY_PROXY_SOCKET_PATH is mounted but socat is not on PATH — cargo will fall back to the public registry"
     return 0
   fi
 
-  socat "TCP-LISTEN:${REGISTRY_PROXY_FORWARDER_PORT},bind=127.0.0.1,fork,reuseaddr" \
-    UNIX-CONNECT:/registry-proxy.sock &
+  # Backgrounded as a genuinely detached daemon, not just with 0/1/2
+  # redirected: `fork,reuseaddr` never exits on its own, so a background job
+  # here that still held one of this shell's *other* inherited fds (bash
+  # hands a background job every fd its parent had open, not only 0/1/2)
+  # would keep that fd open for as long as the Forwarder runs, well past
+  # this script's own exit. In production that fd is torn down with the
+  # whole container, harmlessly -- but any plain host process that pipes
+  # this script's output through an fd of its own (verified against bats
+  # 1.12: `run bash "$ENTRYPOINT"` inherits extra internal fds beyond
+  # 0/1/2) would then hang forever waiting for EOF that never comes, since
+  # the orphaned socat process is still holding it open. The subshell below
+  # closes every fd above 2 before exec'ing socat, then redirects 0/1/2 to
+  # /dev/null itself, so the Forwarder starts detached from whatever its
+  # caller happened to have open.
+  (
+    for _rpf_fd in /proc/self/fd/*; do
+      _rpf_fd="${_rpf_fd##*/}"
+      case "$_rpf_fd" in
+      0 | 1 | 2 | "") ;;
+      *) eval "exec ${_rpf_fd}<&-" 2>/dev/null || true ;;
+      esac
+    done
+    exec socat "TCP-LISTEN:${REGISTRY_PROXY_FORWARDER_PORT},bind=127.0.0.1,fork,reuseaddr" \
+      "UNIX-CONNECT:$REGISTRY_PROXY_SOCKET_PATH" >/dev/null 2>&1 </dev/null
+  ) &
 
   local _rpf_ready=0 _rpf_tries=0
   while [ "$_rpf_tries" -lt 50 ]; do
