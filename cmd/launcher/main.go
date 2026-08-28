@@ -1081,6 +1081,14 @@ func wavesConfig(c config) waves.Config {
 		FailedLabel:     c.failedLabel,
 		IgnoreBlockers:  c.dispatchKind == dispatchKindResearch,
 		Verb:            verb,
+		// TransientRetryMax/TransientBackoffSecs are the same
+		// TRANSIENT_RETRY_MAX/TRANSIENT_BACKOFF_SECS knob dispatch's
+		// exit-retry path and settleConfig already thread (issue #2866),
+		// now reaching RunContinuous's rate-limited re-discover retry loop.
+		// Clock is left zero here; RunContinuous defaults it to RealClock,
+		// same as settle.New does (see main.go's settleConfig comment).
+		TransientRetryMax:    c.transientRetryMax,
+		TransientBackoffSecs: c.transientBackoffSecs,
 	}
 }
 
