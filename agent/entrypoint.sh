@@ -526,6 +526,13 @@ phase_registry_proxy_forwarder() {
     return 0
   fi
 
+  # Read by phase_go_binding just below (issue #2857 slice 2): the readiness
+  # loop above is the one place that already confirms the Forwarder is
+  # actually listening, so a second binding shares that result via the same
+  # dynamic-scoping sentinel convention (issue #515) instead of re-probing
+  # the TCP port itself.
+  _registry_proxy_forwarder_ready=1
+
   local _cargo_home
   _cargo_home="${CARGO_HOME:-$HOME/.cargo}"
   mkdir -p "$_cargo_home"
@@ -538,6 +545,80 @@ registry = "sparse+http://127.0.0.1:${REGISTRY_PROXY_FORWARDER_PORT}/"
 EOF
 
   echo "==> registry proxy Forwarder up on 127.0.0.1:${REGISTRY_PROXY_FORWARDER_PORT} — cargo bound to it via $_cargo_home/config.toml"
+}
+
+# phase_go_binding points Go's own module-fetch tooling at the local
+# Forwarder (ADR 0044, issue #2857 slice 2). Unlike cargo above,
+# GOPROXY/GOPRIVATE/GONOPROXY/GOSUMDB/GONOSUMDB are all plain environment
+# variables Go's tooling reads directly -- no table-valued config file
+# limitation forces a written file here, and there is no in-tree, committed
+# Go config surface analogous to .cargo/config.toml either (`go env -w`
+# writes a user-level file outside any git working tree, not an in-tree
+# one), so this phase has no skip-worktree counterpart to
+# phase_cargo_intree_binding_apply below.
+#
+# Gated on _registry_proxy_forwarder_ready (set by
+# phase_registry_proxy_forwarder above once its own readiness poll confirms
+# the Forwarder is actually listening), so this never binds to a Forwarder
+# that failed to start.
+phase_go_binding() {
+  [ -n "${_registry_proxy_forwarder_ready:-}" ] || return 0
+
+  export GOPROXY="http://127.0.0.1:${REGISTRY_PROXY_FORWARDER_PORT}"
+
+  # Pin GOTOOLCHAIN=local so the default GOTOOLCHAIN=auto never triggers a
+  # toolchain switch: useSumDB ($GOROOT/src/cmd/go/internal/modfetch/sumdb.go)
+  # forces a checksum-database lookup for golang.org/toolchain even when
+  # GOSUMDB=off, so a Target repo naming a newer toolchain would otherwise die
+  # on a checksum failure that looks like tampering, not a version mismatch.
+  # This Box only ever offers one baked Go toolchain through the Forwarder
+  # anyway, so a repo needing a newer one gets Go's own clear
+  # "go.mod requires go >= X.Y.Z" error instead.
+  local _go_binding_prior_toolchain="${GOTOOLCHAIN:-}"
+  if [ -n "$_go_binding_prior_toolchain" ] && [ "$_go_binding_prior_toolchain" != "local" ]; then
+    echo "==> WARNING: overriding GOTOOLCHAIN=$_go_binding_prior_toolchain with GOTOOLCHAIN=local — this Box only offers one baked Go toolchain through the Forwarder"
+  fi
+  export GOTOOLCHAIN=local
+
+  # GOPRIVATE, if the repo's own env/devShell/CI already set it to mark
+  # module paths private, defaults GONOPROXY to that same value too --
+  # routing those paths' fetches directly to the internet, bypassing GOPROXY
+  # entirely. Go's own cfg.envOr("GONOPROXY", GOPRIVATE) treats an unset and
+  # an empty-string GONOPROXY identically, both falling back to GOPRIVATE --
+  # so a plain empty string here does NOT neutralize that default. "none" is
+  # the documented sentinel for "matches nothing" (see `go help private`),
+  # and is the only value that actually closes this bypass, forcing every
+  # module path, private or not, through the Forwarder. GOPRIVATE's *other*
+  # default effect (also defaulting GONOSUMDB, exempting private paths from
+  # the public checksum database) is left untouched below -- that half is
+  # the leak-prevention behavior we want.
+  if [ -n "${GONOPROXY:-}" ] || [ -n "${GOPRIVATE:-}" ]; then
+    echo "==> WARNING: overriding pre-existing GONOPROXY/GOPRIVATE with GONOPROXY=none — every module path, private or not, now routes through the Forwarder"
+  fi
+  export GONOPROXY="none"
+
+  if [ -z "${GOPRIVATE:-}" ] && [ -z "${GONOSUMDB:-}" ]; then
+    # A single-upstream mirror has no way to know which module paths under
+    # that upstream are actually private without the repo declaring an
+    # exemption, and a checksum-database lookup for a module that turns out
+    # to be private is exactly the leak this binding exists to prevent --
+    # go.sum's own committed hashes remain the primary integrity check; this
+    # only forgoes the live database lookup for a genuinely new/unresolved
+    # checksum. Keyed on GOPRIVATE/GONOSUMDB (the two ways a repo can declare
+    # an exemption), not on GOSUMDB itself: if GOPRIVATE is set, Go's own
+    # default already derives GONOSUMDB from it, exempting those paths, so
+    # this branch doesn't fire and GOSUMDB is left alone; if GONOSUMDB is set
+    # explicitly, the repo has taken responsibility for what's exempted, so
+    # again GOSUMDB is left alone. But with neither exemption declared, this
+    # deliberately overrides even an explicit repo-set GOSUMDB -- there is no
+    # way to otherwise guarantee a private path never reaches it.
+    if [ -n "${GOSUMDB:-}" ]; then
+      echo "==> WARNING: overriding explicit GOSUMDB=$GOSUMDB with GOSUMDB=off — no GOPRIVATE/GONOSUMDB exemption declared"
+    fi
+    export GOSUMDB=off
+  fi
+
+  echo "==> go bound to it via GOPROXY=http://127.0.0.1:${REGISTRY_PROXY_FORWARDER_PORT}"
 }
 
 # phase_cargo_intree_binding_apply rewrites a Target repo's own committed
@@ -1450,6 +1531,7 @@ main() {
   # keeping them out of true global scope (issue #515).
   local _rebase_and_publish _had_rebase_conflict
   local _cargo_intree_binding_applied
+  local _registry_proxy_forwarder_ready
   local _use_dev_shell _harness_path
   local prompt agents_json _handoff
   local _last_outcome_line _last_near_miss_line _last_pr_intent_line
@@ -1467,6 +1549,9 @@ main() {
   # invoke a cargo build (clone_repo's devShell/prefetch phases below, the
   # driver itself) -- see its own doc comment for why this exact placement.
   phase_registry_proxy_forwarder
+  # phase_go_binding runs right after, same rationale: before clone_repo/any
+  # build, so `go` never resolves a module through the public proxy first.
+  phase_go_binding
 
   # ORCHESTRATOR (issue #2047, ADR 0035 amendment; issue #2354 slice 3 hoisted
   # phase_conflict_resolve here, ahead of phase_prompt_assembly): the single
