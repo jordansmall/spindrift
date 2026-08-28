@@ -7,6 +7,7 @@ package dispatch
 
 import (
 	"io"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -228,6 +229,22 @@ func buildBoxEnv(cfg Config, number, title string, fixPass int, ciFailureSummary
 	}
 	if cfg.ForgeBackend != "" {
 		env["BOX_FORGE_BACKEND"] = cfg.ForgeBackend
+	}
+	// REGISTRY_PROXY_UPSTREAM_HOST is the host[:port] portion of
+	// RegistryProxyUpstreamURL, forwarded so an in-Box phase (issue #2851,
+	// ADR 0044) can textually find-and-replace this exact host string in a
+	// Target repo's own committed registry config (e.g. a cargo
+	// .cargo/config.toml), redirecting it at the local registry-proxy
+	// Forwarder instead of the real upstream. Non-secret -- ADR 0044
+	// already treats the upstream URL itself as non-secret, only the
+	// credential attached to it is. Set only when the URL is non-empty,
+	// parses, and yields a non-empty host, so a malformed or unset knob
+	// leaves the var absent rather than forwarding an empty string an
+	// in-Box substitution could match against everything.
+	if cfg.RegistryProxyUpstreamURL != "" {
+		if u, err := url.Parse(cfg.RegistryProxyUpstreamURL); err == nil && u.Host != "" {
+			env["REGISTRY_PROXY_UPSTREAM_HOST"] = u.Host
+		}
 	}
 	// FilerEnabled/WorkerProvisioned/ReviewLoopInline/ReviewLoopOrchestrator
 	// are nix-resolved static prompt-gate values (issue #2533), forwarded as
