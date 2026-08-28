@@ -1,6 +1,8 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -403,9 +405,12 @@ func TestLauncherChecks_CodeForge_FailsAndPasses(t *testing.T) {
 }
 
 // TestLauncherChecks_RegistryProxyCredential_FailsAndPasses covers the
-// registry-proxy-credential row: it must fail when both
-// REGISTRY_PROXY_CREDENTIAL_FILE and REGISTRY_PROXY_CREDENTIAL_ENV are set
-// (ADR 0044) and pass when either alone, or neither, is set.
+// registry-proxy-credential row's mutual-exclusion check: it must fail when
+// both REGISTRY_PROXY_CREDENTIAL_FILE and REGISTRY_PROXY_CREDENTIAL_ENV are
+// set (ADR 0044), and pass when either alone (with REGISTRY_PROXY_UPSTREAM_URL
+// also set, so the credential-source-without-upstream check added by issue
+// #2853 doesn't confound this test's mutual-exclusion focus), or neither, is
+// set.
 func TestLauncherChecks_RegistryProxyCredential_FailsAndPasses(t *testing.T) {
 	c := minimalValidConfig()
 	c.registryProxyCredentialFile = "/some/file"
@@ -415,18 +420,26 @@ func TestLauncherChecks_RegistryProxyCredential_FailsAndPasses(t *testing.T) {
 		t.Fatal("registry-proxy-credential Probe() must fail when both REGISTRY_PROXY_CREDENTIAL_FILE and REGISTRY_PROXY_CREDENTIAL_ENV are set")
 	}
 
+	credFile := filepath.Join(t.TempDir(), "registry-credential")
+	if err := os.WriteFile(credFile, []byte("s3cr3t-value\n"), 0o600); err != nil {
+		t.Fatalf("writing test credential file: %v", err)
+	}
 	c = minimalValidConfig()
-	c.registryProxyCredentialFile = "/some/file"
+	c.registryProxyUpstreamURL = "https://registry.example.com"
+	c.registryProxyCredentialFile = credFile
 	ch = checkByName(t, launcherChecks(c), "registry-proxy-credential")
 	if _, err := ch.Probe(); err != nil {
-		t.Errorf("registry-proxy-credential Probe() unexpected error for REGISTRY_PROXY_CREDENTIAL_FILE alone: %v", err)
+		t.Errorf("registry-proxy-credential Probe() unexpected error for REGISTRY_PROXY_CREDENTIAL_FILE alone with upstream set: %v", err)
 	}
 
+	const envVar = "SPINDRIFT_TEST_REGISTRY_PROXY_CREDENTIAL_FAILSANDPASSES"
+	t.Setenv(envVar, "s3cr3t-value")
 	c = minimalValidConfig()
-	c.registryProxyCredentialEnv = "SOME_ENV"
+	c.registryProxyUpstreamURL = "https://registry.example.com"
+	c.registryProxyCredentialEnv = envVar
 	ch = checkByName(t, launcherChecks(c), "registry-proxy-credential")
 	if _, err := ch.Probe(); err != nil {
-		t.Errorf("registry-proxy-credential Probe() unexpected error for REGISTRY_PROXY_CREDENTIAL_ENV alone: %v", err)
+		t.Errorf("registry-proxy-credential Probe() unexpected error for REGISTRY_PROXY_CREDENTIAL_ENV alone with upstream set: %v", err)
 	}
 
 	c = minimalValidConfig()
@@ -434,4 +447,164 @@ func TestLauncherChecks_RegistryProxyCredential_FailsAndPasses(t *testing.T) {
 	if _, err := ch.Probe(); err != nil {
 		t.Errorf("registry-proxy-credential Probe() unexpected error when neither is set: %v", err)
 	}
+}
+
+// TestLauncherChecks_RegistryProxyCredential_UpstreamConfigured covers the
+// registry-proxy-credential row once REGISTRY_PROXY_UPSTREAM_URL is set
+// (opted in): unauthenticated (neither credential field set) must still
+// succeed, a broken credential source (missing file / unset env) must fail
+// without leaking any secret, a working env-sourced credential must succeed
+// AND must leave the source env var untouched (the regression case for the
+// critical constraint that doctor's Probe must never call
+// resolveRegistryProxyCredential, which unsets it), and SuccessMsg must
+// render a different line for "not configured", "unauthenticated", and
+// "configured".
+func TestLauncherChecks_RegistryProxyCredential_UpstreamConfigured(t *testing.T) {
+	t.Run("unauthenticated when upstream set but no credential source", func(t *testing.T) {
+		c := minimalValidConfig()
+		c.registryProxyUpstreamURL = "https://registry.example.com"
+		ch := checkByName(t, launcherChecks(c), "registry-proxy-credential")
+		if _, err := ch.Probe(); err != nil {
+			t.Errorf("Probe() unexpected error for upstream set with no credential source: %v", err)
+		}
+	})
+
+	t.Run("fails when credential file is missing, without leaking a secret", func(t *testing.T) {
+		c := minimalValidConfig()
+		c.registryProxyUpstreamURL = "https://registry.example.com"
+		c.registryProxyCredentialFile = "/nonexistent/registry-credential-file"
+		ch := checkByName(t, launcherChecks(c), "registry-proxy-credential")
+		_, err := ch.Probe()
+		if err == nil {
+			t.Fatal("Probe() must fail when REGISTRY_PROXY_CREDENTIAL_FILE names a nonexistent file")
+		}
+		if !strings.Contains(err.Error(), c.registryProxyCredentialFile) {
+			t.Errorf("Probe() error %q must name the file path %q", err.Error(), c.registryProxyCredentialFile)
+		}
+	})
+
+	t.Run("succeeds with env credential and leaves the source env var set", func(t *testing.T) {
+		const envVar = "SPINDRIFT_TEST_REGISTRY_PROXY_CREDENTIAL"
+		t.Setenv(envVar, "s3cr3t-value")
+
+		c := minimalValidConfig()
+		c.registryProxyUpstreamURL = "https://registry.example.com"
+		c.registryProxyCredentialEnv = envVar
+		ch := checkByName(t, launcherChecks(c), "registry-proxy-credential")
+		if _, err := ch.Probe(); err != nil {
+			t.Errorf("Probe() unexpected error for a valid env credential: %v", err)
+		}
+		if v, ok := os.LookupEnv(envVar); !ok || v != "s3cr3t-value" {
+			t.Errorf("Probe() must not unset/consume %s; LookupEnv returned (%q, %v)", envVar, v, ok)
+		}
+	})
+
+	t.Run("fails when credential env var is unset", func(t *testing.T) {
+		const envVar = "SPINDRIFT_TEST_REGISTRY_PROXY_CREDENTIAL_UNSET"
+		t.Setenv(envVar, "x")
+		os.Unsetenv(envVar)
+
+		c := minimalValidConfig()
+		c.registryProxyUpstreamURL = "https://registry.example.com"
+		c.registryProxyCredentialEnv = envVar
+		ch := checkByName(t, launcherChecks(c), "registry-proxy-credential")
+		_, err := ch.Probe()
+		if err == nil {
+			t.Fatal("Probe() must fail when REGISTRY_PROXY_CREDENTIAL_ENV names an unset variable")
+		}
+		if !strings.Contains(err.Error(), envVar) {
+			t.Errorf("Probe() error %q must name the env var %q", err.Error(), envVar)
+		}
+	})
+
+	t.Run("SuccessMsg distinguishes not-configured, unauthenticated, and configured", func(t *testing.T) {
+		notConfigured := minimalValidConfig()
+		ch := checkByName(t, launcherChecks(notConfigured), "registry-proxy-credential")
+		notConfiguredOutput, err := ch.Probe()
+		if err != nil {
+			t.Fatalf("Probe() unexpected error for not-configured case: %v", err)
+		}
+		notConfiguredMsg := ch.SuccessMsg(notConfiguredOutput)
+
+		unauthenticated := minimalValidConfig()
+		unauthenticated.registryProxyUpstreamURL = "https://registry.example.com"
+		ch = checkByName(t, launcherChecks(unauthenticated), "registry-proxy-credential")
+		unauthenticatedOutput, err := ch.Probe()
+		if err != nil {
+			t.Fatalf("Probe() unexpected error for unauthenticated case: %v", err)
+		}
+		unauthenticatedMsg := ch.SuccessMsg(unauthenticatedOutput)
+
+		const envVar = "SPINDRIFT_TEST_REGISTRY_PROXY_CREDENTIAL_SUCCESSMSG"
+		t.Setenv(envVar, "s3cr3t-value")
+		configured := minimalValidConfig()
+		configured.registryProxyUpstreamURL = "https://registry.example.com"
+		configured.registryProxyCredentialEnv = envVar
+		ch = checkByName(t, launcherChecks(configured), "registry-proxy-credential")
+		configuredOutput, err := ch.Probe()
+		if err != nil {
+			t.Fatalf("Probe() unexpected error for configured case: %v", err)
+		}
+		configuredMsg := ch.SuccessMsg(configuredOutput)
+
+		if notConfiguredMsg == unauthenticatedMsg {
+			t.Errorf("SuccessMsg must differ between not-configured and unauthenticated cases; both rendered %q", notConfiguredMsg)
+		}
+		if notConfiguredMsg == configuredMsg {
+			t.Errorf("SuccessMsg must differ between not-configured and configured cases; both rendered %q", notConfiguredMsg)
+		}
+		if unauthenticatedMsg == configuredMsg {
+			t.Errorf("SuccessMsg must differ between unauthenticated and configured cases; both rendered %q", unauthenticatedMsg)
+		}
+	})
+}
+
+// TestLauncherChecks_RegistryProxyCredential_UpstreamAbsent covers the
+// registry-proxy-credential row when REGISTRY_PROXY_UPSTREAM_URL is unset
+// (opted out): the row must succeed as "not configured" regardless of a
+// leftover credential source, per lib/env-schema.nix:389-398 -- but that
+// leftover-source case must render a distinct message from the true
+// nothing-set-at-all case (issue #2853), since the two are different
+// situations for an operator even though both are non-fatal.
+func TestLauncherChecks_RegistryProxyCredential_UpstreamAbsent(t *testing.T) {
+	trueNotConfigured := minimalValidConfig()
+	ch := checkByName(t, launcherChecks(trueNotConfigured), "registry-proxy-credential")
+	trueNotConfiguredOutput, err := ch.Probe()
+	if err != nil {
+		t.Fatalf("Probe() unexpected error when nothing is set: %v", err)
+	}
+	trueNotConfiguredMsg := ch.SuccessMsg(trueNotConfiguredOutput)
+
+	t.Run("succeeds as not-configured when credential source is set but upstream URL is absent", func(t *testing.T) {
+		// REGISTRY_PROXY_UPSTREAM_URL is a runtime-only value while the
+		// credential fields may be committed in flake.nix as standing
+		// config (lib/env-schema.nix); a run that leaves it unset opts the
+		// whole proxy out, regardless of a leftover credential source, so
+		// this must report "not configured", not fail.
+		fileCase := minimalValidConfig()
+		fileCase.registryProxyCredentialFile = "/nonexistent/registry-credential-file"
+		ch := checkByName(t, launcherChecks(fileCase), "registry-proxy-credential")
+		fileOutput, err := ch.Probe()
+		if err != nil {
+			t.Errorf("Probe() unexpected error when REGISTRY_PROXY_CREDENTIAL_FILE is set but REGISTRY_PROXY_UPSTREAM_URL is not: %v", err)
+		}
+		fileMsg := ch.SuccessMsg(fileOutput)
+		if fileMsg == trueNotConfiguredMsg {
+			t.Errorf("SuccessMsg must differ between a leftover credential-file source and nothing set at all; both rendered %q", fileMsg)
+		}
+
+		const envVar = "SPINDRIFT_TEST_REGISTRY_PROXY_CREDENTIAL_NO_UPSTREAM"
+		t.Setenv(envVar, "s3cr3t-value")
+		envCase := minimalValidConfig()
+		envCase.registryProxyCredentialEnv = envVar
+		ch = checkByName(t, launcherChecks(envCase), "registry-proxy-credential")
+		envOutput, err := ch.Probe()
+		if err != nil {
+			t.Errorf("Probe() unexpected error when REGISTRY_PROXY_CREDENTIAL_ENV is set but REGISTRY_PROXY_UPSTREAM_URL is not: %v", err)
+		}
+		envMsg := ch.SuccessMsg(envOutput)
+		if envMsg == trueNotConfiguredMsg {
+			t.Errorf("SuccessMsg must differ between a leftover credential-env source and nothing set at all; both rendered %q", envMsg)
+		}
+	})
 }

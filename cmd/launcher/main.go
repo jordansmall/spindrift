@@ -582,8 +582,9 @@ func validate(c config) error {
 // Unlike validate(), which runs its checks fail-fast because dispatch only
 // needs to know about the first blocking problem, validateConfig runs every
 // row via doctor.RunChecks and joins every failure with errors.Join: none
-// of these checks are network probes, so running every row costs nothing,
-// and cmdDoctor's stderr summary can then name each simultaneously-broken
+// of these checks are network probes -- registry-proxy-credential does read
+// local env/file state, but that cost is negligible -- so running every row
+// is cheap, and cmdDoctor's stderr summary can then name each simultaneously-broken
 // check (issue #2569 AC2) instead of only the first. validate() itself is
 // untouched by this function and keeps its own fail-fast precedence
 // (TestValidate_ChoiceErrorsPrecedeCrossKnobErrors and friends).

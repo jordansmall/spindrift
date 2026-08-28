@@ -186,6 +186,11 @@ func crossKnobCheck(rowName, knobName, value, remedy string, validAs func(backen
 // `spindrift doctor` status table and puts it in the same fail-fast position
 // as the other cross-knob rows, after the validateChoice calls, instead of
 // ahead of all of them.
+// registryProxyCredentialCheckName is the registry-proxy-credential row's
+// Name, factored into a const so the row's Name field and its SuccessMsg
+// closure can't drift apart on a future rename (issue #2853).
+const registryProxyCredentialCheckName = "registry-proxy-credential"
+
 func launcherCrossKnobChecks(c config) []doctor.Check {
 	return []doctor.Check{
 		crossKnobCheck("issue-tracker-config", "ISSUE_TRACKER", c.issueTracker,
@@ -201,11 +206,44 @@ func launcherCrossKnobChecks(c config) []doctor.Check {
 			func(r backendRow) func(config) error { return r.validateCodeForge },
 			c),
 		{
-			Name:   "registry-proxy-credential",
+			Name:   registryProxyCredentialCheckName,
 			Tier:   doctor.Required,
-			Remedy: "set at most one of REGISTRY_PROXY_CREDENTIAL_FILE and REGISTRY_PROXY_CREDENTIAL_ENV: a registry proxy credential names exactly one source",
+			Remedy: "set at most one of REGISTRY_PROXY_CREDENTIAL_FILE and REGISTRY_PROXY_CREDENTIAL_ENV: a registry proxy credential names exactly one source; if REGISTRY_PROXY_UPSTREAM_URL is set and a source is configured, that source must actually resolve (file present/non-empty/single-line, or env var set/non-empty)",
 			Probe: func() (any, error) {
-				return nil, validateRegistryProxyCredential(c.registryProxyCredentialFile, c.registryProxyCredentialEnv)
+				if err := validateRegistryProxyCredential(c.registryProxyCredentialFile, c.registryProxyCredentialEnv); err != nil {
+					return nil, err
+				}
+				// REGISTRY_PROXY_UPSTREAM_URL is a runtime-only value (never a
+				// flake value, per lib/env-schema.nix), while the credential
+				// fields may be committed in flake.nix as standing config. A
+				// run that leaves the upstream URL unset disables the proxy
+				// entirely regardless of what the credential fields say --
+				// that's the documented opt-out, not a broken declaration, so
+				// a leftover credential source here is reported, not an error.
+				// It's still a distinct situation from nothing being set at
+				// all, so the two render different messages (issue #2853)
+				// even though neither is fatal.
+				if c.registryProxyUpstreamURL == "" {
+					if c.registryProxyCredentialFile != "" || c.registryProxyCredentialEnv != "" {
+						return "not configured (credential source set, REGISTRY_PROXY_UPSTREAM_URL unset)", nil
+					}
+					return "not configured", nil
+				}
+				if c.registryProxyCredentialFile == "" && c.registryProxyCredentialEnv == "" {
+					return "unauthenticated", nil
+				}
+				// peekRegistryProxyCredential (not resolveRegistryProxyCredential)
+				// deliberately: this Probe runs ahead of bootstrap.go's own
+				// resolveRegistryProxyCredential call, and that call's
+				// os.Unsetenv side effect must fire exactly once, at the real
+				// resolution site, not here.
+				if _, err := peekRegistryProxyCredential(c.registryProxyCredentialFile, c.registryProxyCredentialEnv); err != nil {
+					return nil, err
+				}
+				return "configured", nil
+			},
+			SuccessMsg: func(output any) string {
+				return fmt.Sprintf("%s (%s)", registryProxyCredentialCheckName, output)
 			},
 		},
 	}

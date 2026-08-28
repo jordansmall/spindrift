@@ -2240,7 +2240,11 @@ func TestValidate_RegistryProxyCredentialBothSetIsRejected(t *testing.T) {
 // TestValidate_RegistryProxyCredentialEitherAloneOrNeitherIsAccepted
 // verifies that validate() accepts a config with only one of
 // REGISTRY_PROXY_CREDENTIAL_FILE/REGISTRY_PROXY_CREDENTIAL_ENV set, or
-// neither (ADR 0044).
+// neither (ADR 0044). REGISTRY_PROXY_UPSTREAM_URL is deliberately left unset
+// here: it's a runtime-only value while the credential fields may be
+// committed in flake.nix as standing config (lib/env-schema.nix), so a
+// leftover credential source with no upstream URL must still validate --
+// the whole proxy is opted out, not broken (issue #2853).
 func TestValidate_RegistryProxyCredentialEitherAloneOrNeitherIsAccepted(t *testing.T) {
 	c := minimalValidConfig()
 	c.registryProxyCredentialFile = "/some/file"
