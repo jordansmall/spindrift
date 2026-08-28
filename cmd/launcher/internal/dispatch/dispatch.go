@@ -56,6 +56,15 @@ type Config struct {
 	// and mounts no socket into the Box.
 	RegistryProxyUpstreamURL string
 
+	// RegistryProxyCredential is the launcher-resolved plaintext credential
+	// (ADR 0044, issue #2850) attached to every request the registry proxy
+	// forwards to RegistryProxyUpstreamURL, as "Authorization: Bearer
+	// <value>". It is the resolved value itself -- never a reference like a
+	// file path or env var name, those are resolved once at launcher
+	// startup before this Config is built. Empty means an unauthenticated
+	// pass-through, matching RegistryProxyUpstreamURL's own on/off gate.
+	RegistryProxyCredential string
+
 	// Kind is the dispatch kind ("work" or "research", ADR 0022) forwarded
 	// into every Box as DISPATCH_KIND, so the entrypoint can select its
 	// prompt and skip clone-branch/PR/CI phases for research. Empty defaults

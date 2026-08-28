@@ -706,6 +706,65 @@ func TestRunOnce_RegistryProxyUpstreamURLSet_MountsListeningSocket(t *testing.T)
 	}
 }
 
+// TestRunOnce_RegistryProxyCredentialSet_AttachesAuthorizationHeader verifies
+// that a set Config.RegistryProxyCredential (ADR 0044, issue #2850) reaches
+// the outbound leg through the real wiring -- Run through the Box's mounted
+// socket to a local upstream that echoes back the Authorization header it
+// received -- proving the credential travels from Config all the way to the
+// request the proxy sends upstream, not just through registryproxy.New's own
+// unit tests.
+func TestRunOnce_RegistryProxyCredentialSet_AttachesAuthorizationHeader(t *testing.T) {
+	var gotAuth string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	const credential = "s3kr1t-e2e-token"
+
+	cfg := retryConfig(3, 0, 0)
+	cfg.RegistryProxyUpstreamURL = upstream.URL
+	cfg.RegistryProxyCredential = credential
+
+	fr := runner.NewFake()
+	fr.RunFunc = func(box runner.Box) error {
+		if box.RegistryProxySocketPath != "" {
+			client := &http.Client{Transport: &http.Transport{
+				DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
+					return net.Dial("unix", box.RegistryProxySocketPath)
+				},
+			}}
+			resp, err := client.Get("http://unix/")
+			if err != nil {
+				t.Errorf("GET through registry proxy socket: %v", err)
+			} else {
+				resp.Body.Close() //nolint:errcheck
+			}
+		}
+		for k, v := range box.Env {
+			if v == credential {
+				t.Errorf("box.Env[%q] leaked the registry proxy credential into the Box environment", k)
+			}
+			if strings.Contains(strings.ToUpper(k), "REGISTRY_PROXY_CREDENTIAL") {
+				t.Errorf("box.Env contains unexpected registry-proxy-credential-like key %q", k)
+			}
+		}
+		box.Output.Write([]byte("SPINDRIFT_OUTCOME issue=1 landing=https://github.com/o/r/pull/1 status=ready note=ok nonce=" + box.Env["RUN_NONCE"] + "\n")) //nolint:errcheck
+		return nil
+	}
+
+	d := newTestDispatch(t, cfg, fr, fakeDriver{}, RealClock())
+	result := d.Run()
+
+	if !result.Success {
+		t.Fatalf("Run: want Success=true, got %+v", result)
+	}
+	if want := "Bearer " + credential; gotAuth != want {
+		t.Errorf("upstream got Authorization %q, want %q", gotAuth, want)
+	}
+}
+
 // TestRunOnce_RegistryProxyUpstreamURLUnset_NoSocketNoProxy verifies that an
 // empty Config.RegistryProxyUpstreamURL leaves the Box's
 // RegistryProxySocketPath empty and starts no proxy -- no spindrift-registry-
