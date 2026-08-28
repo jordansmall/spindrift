@@ -71,3 +71,91 @@ func TestIsAllowedPath_UnrelatedRejected(t *testing.T) {
 		})
 	}
 }
+
+// TestIsAllowedPath_GoModuleShapesAllowed verifies each of the go module
+// proxy protocol's five path shapes is allowed, plus a "~" in a module-path
+// segment (a legal module.CheckPath character, e.g.
+// module.CheckPath("example.com/a~b/d") returns nil) and a "!"-escaped
+// version segment (goproxy case-encodes uppercase letters, e.g.
+// module.EscapeVersion("v1.0.0-RC1") returns "v1.0.0-!r!c1").
+func TestIsAllowedPath_GoModuleShapesAllowed(t *testing.T) {
+	cases := []string{
+		"/github.com/foo/bar/@v/list",
+		"/github.com/foo/bar/@latest",
+		"/github.com/foo/bar/@v/v1.2.3.info",
+		"/github.com/foo/bar/@v/v1.2.3.mod",
+		"/github.com/foo/bar/@v/v1.2.3.zip",
+		"/example.com/a~b/d/@v/list",
+		"/github.com/foo/bar/@v/v1.0.0-!r!c1.info",
+	}
+	for _, path := range cases {
+		t.Run(path, func(t *testing.T) {
+			if !isAllowedPath(path) {
+				t.Errorf("isAllowedPath(%q) = false, want true", path)
+			}
+		})
+	}
+}
+
+// TestIsAllowedPath_GoModuleUppercaseEscapeAllowed verifies module paths
+// with a "!"-escaped originally-uppercase segment (per the goproxy-protocol
+// spec's case-encoding rule) are allowed across all five path shapes.
+func TestIsAllowedPath_GoModuleUppercaseEscapeAllowed(t *testing.T) {
+	cases := []string{
+		"/github.com/!google-cloud/foo/@v/list",
+		"/github.com/!google-cloud/foo/@latest",
+		"/github.com/!google-cloud/foo/@v/v1.2.3.info",
+		"/github.com/!google-cloud/foo/@v/v1.2.3.mod",
+		"/github.com/!google-cloud/foo/@v/v1.2.3.zip",
+	}
+	for _, path := range cases {
+		t.Run(path, func(t *testing.T) {
+			if !isAllowedPath(path) {
+				t.Errorf("isAllowedPath(%q) = false, want true", path)
+			}
+		})
+	}
+}
+
+// TestIsAllowedPath_GoModuleMissingMarkerRejected verifies a module path
+// without the @v/@latest marker is not allowed.
+func TestIsAllowedPath_GoModuleMissingMarkerRejected(t *testing.T) {
+	if isAllowedPath("/github.com/foo/bar") {
+		t.Errorf("isAllowedPath(%q) = true, want false", "/github.com/foo/bar")
+	}
+}
+
+// TestIsAllowedPath_GoModulePathTraversalRejected verifies a path attempting
+// to escape upward is not allowed, including a traversal segment placed
+// ahead of an otherwise-valid @v/list suffix (a dots-only segment must not
+// satisfy the module-path segment class).
+func TestIsAllowedPath_GoModulePathTraversalRejected(t *testing.T) {
+	cases := []string{
+		"/../../etc/passwd",
+		"/foo/../../../@v/list",
+	}
+	for _, path := range cases {
+		t.Run(path, func(t *testing.T) {
+			if isAllowedPath(path) {
+				t.Errorf("isAllowedPath(%q) = true, want false", path)
+			}
+		})
+	}
+}
+
+// TestIsAllowedPath_GoModuleWriteShapedRejected verifies a write-shaped path
+// under @v/ (not one of the protocol's read-only list/latest/info/mod/zip
+// shapes) is not allowed.
+func TestIsAllowedPath_GoModuleWriteShapedRejected(t *testing.T) {
+	if isAllowedPath("/github.com/foo/bar/@v/publish") {
+		t.Errorf("isAllowedPath(%q) = true, want false", "/github.com/foo/bar/@v/publish")
+	}
+}
+
+// TestIsAllowedPath_GoModuleUnrelatedRejected verifies a path with no
+// relation to the go module proxy protocol's shape is not allowed.
+func TestIsAllowedPath_GoModuleUnrelatedRejected(t *testing.T) {
+	if isAllowedPath("/evil") {
+		t.Errorf("isAllowedPath(%q) = true, want false", "/evil")
+	}
+}
