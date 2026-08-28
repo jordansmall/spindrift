@@ -116,7 +116,8 @@ You still own CHECK, COMMIT, REVIEW, and OUTCOME yourself: the worker only
 implements each slice; the coordinator keeps the checks green, reviews, and
 commits. The one-slice, test-first Hard rule below is what each delegated
 slice must satisfy — you enforce it; the worker performs each
-red-green-refactor cycle.
+red-green-refactor cycle. You also hold the worker to the CODE COMMENTS rule
+on each slice it returns, the same way you enforce the test-first Hard rule.
 
 Skills available: caveman, code-review, commit, tdd. Prefer invoking with /skill-name; the inline guidance below is the fallback when a skill is absent.
 
@@ -133,6 +134,14 @@ Work test-first, one slice at a time. Hard rule:
 
 Never batch: no tests up front, no all-tests-then-all-code.
 One failing test, one change, at a time.
+
+# CODE COMMENTS
+
+A comment earns its place only by carrying something the code cannot state
+itself: the non-obvious why, a constraint, or a gotcha. Never write a
+comment that just restates what the code already says. Keep comment volume
+proportional to the size of the change — a one-line fix does not earn a
+paragraph of commentary.
 
 # CHECK
 
