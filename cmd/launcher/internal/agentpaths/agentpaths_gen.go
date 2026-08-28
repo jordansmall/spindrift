@@ -3,7 +3,7 @@ package agentpaths
 
 // Regenerate with `nix run .#regen` after editing lib/agent-paths.nix.
 //
-// The 8 baked /agent/* path literals (lib/agent-paths.nix), single-sourced
+// The 9 baked /agent/* path literals (lib/agent-paths.nix), single-sourced
 // here so the Go launcher can never drift from the Nix image/preamble
 // source of truth (issue #2531) -- a rename in lib/agent-paths.nix now fails
 // nix/checks/schema-drift.nix's agent-paths-gen check instead of silently
@@ -11,6 +11,9 @@ package agentpaths
 
 // CheckContractFile is the baked in-box path for CHECK_CONTRACT_FILE.
 const CheckContractFile = "/agent/check-contract.md"
+
+// CodeCommentsContractFile is the baked in-box path for CODE_COMMENTS_CONTRACT_FILE.
+const CodeCommentsContractFile = "/agent/code-comments-contract.md"
 
 // CommsContractFile is the baked in-box path for COMMS_CONTRACT_FILE.
 const CommsContractFile = "/agent/comms-contract.md"

@@ -64,6 +64,7 @@ func runAssemblePrompt(args []string, stdout io.Writer) int {
 
 	commsContractFile := fs.String("comms-contract-file", "", "COMMS_CONTRACT_FILE")
 	checkContractFile := fs.String("check-contract-file", "", "CHECK_CONTRACT_FILE")
+	codeCommentsContractFile := fs.String("code-comments-contract-file", "", "CODE_COMMENTS_CONTRACT_FILE")
 	outcomeContractFile := fs.String("outcome-contract-file", "", "OUTCOME_CONTRACT_FILE")
 	researchOutcomeContractFile := fs.String("research-outcome-contract-file", "", "RESEARCH_OUTCOME_CONTRACT_FILE")
 
@@ -154,6 +155,7 @@ func runAssemblePrompt(args []string, stdout io.Writer) int {
 
 		CommsContractFile:           *commsContractFile,
 		CheckContractFile:           *checkContractFile,
+		CodeCommentsContractFile:    *codeCommentsContractFile,
 		OutcomeContractFile:         *outcomeContractFile,
 		ResearchOutcomeContractFile: *researchOutcomeContractFile,
 
