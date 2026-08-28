@@ -462,7 +462,7 @@ REGISTRY_PROXY_FORWARDER_PORT="${REGISTRY_PROXY_FORWARDER_PORT:-27182}"
 # Called from main() right after configure_env, before the
 # _is_self_contained branch and thus before clone_repo, phase_prefetch,
 # phase_devshell_probe, or any driver invocation -- every place a cargo
-# build could first happen.
+# build or npm install could first happen.
 #
 # Cargo's crates-io source-replacement config ([source.crates-io]
 # replace-with, [source.NAME] registry) is table-valued, and Cargo does not
@@ -478,11 +478,32 @@ REGISTRY_PROXY_FORWARDER_PORT="${REGISTRY_PROXY_FORWARDER_PORT:-27182}"
 # skip-worktree invisibility trick, and -- unlike an in-tree
 # $WORK_DIR/.cargo/config.toml -- it can be written here, before clone_repo
 # has even created $WORK_DIR.
+#
+# Same binding for npm's plain default registry (issue #2854), done here by
+# exporting npm_config_registry rather than writing a file: npm's documented
+# config precedence is env > project .npmrc > user .npmrc > global .npmrc, so
+# an env var is the only mechanism that wins even against a Target repo's own
+# committed project-level .npmrc pointing at some other host -- a user-level
+# $HOME/.npmrc write would lose that fight and leak egress to the public
+# registry. `export` here is plain bash in this script's own process; nothing
+# between here and the eventual Driver invocation resets or strips the
+# environment (no `env -i`/`--ignore-environment` in this file), so every
+# child process this script forks afterward inherits it same as any other
+# env var. This binding covers packument/metadata requests, not the tarball
+# fetch that follows: npm's own packument JSON embeds an absolute tarball
+# URL that pacote fetches verbatim rather than deriving it from this
+# registry setting, so that request leaves the proxy and reaches upstream
+# directly, unauthenticated -- the same accepted gap ADR 0044 already
+# documents for cargo's own download endpoint, and out of scope for this
+# ticket's own "no proxy-policy changes" acceptance criterion (issue #2854,
+# ADR 0044's Update). Covers only the unscoped default registry; a repo
+# pinning packages under an `@scope:registry=` entry is instead handled by
+# phase_npm_intree_binding_apply further down this file.
 phase_registry_proxy_forwarder() {
   [ -S "$REGISTRY_PROXY_SOCKET_PATH" ] || return 0
 
   if ! command -v socat >/dev/null 2>&1; then
-    echo "==> WARNING: $REGISTRY_PROXY_SOCKET_PATH is mounted but socat is not on PATH — cargo will fall back to the public registry"
+    echo "==> WARNING: $REGISTRY_PROXY_SOCKET_PATH is mounted but socat is not on PATH — cargo and npm will fall back to the public registry"
     return 0
   fi
 
@@ -522,7 +543,7 @@ phase_registry_proxy_forwarder() {
     _rpf_tries=$((_rpf_tries + 1))
   done
   if [ "$_rpf_ready" != "1" ]; then
-    echo "==> WARNING: registry proxy Forwarder did not start listening on 127.0.0.1:${REGISTRY_PROXY_FORWARDER_PORT} within 5s — cargo will fall back to the public registry"
+    echo "==> WARNING: registry proxy Forwarder did not start listening on 127.0.0.1:${REGISTRY_PROXY_FORWARDER_PORT} within 5s — cargo and npm will fall back to the public registry"
     return 0
   fi
 
@@ -544,7 +565,18 @@ replace-with = "spindrift-registry-proxy"
 registry = "sparse+http://127.0.0.1:${REGISTRY_PROXY_FORWARDER_PORT}/"
 EOF
 
-  echo "==> registry proxy Forwarder up on 127.0.0.1:${REGISTRY_PROXY_FORWARDER_PORT} — cargo bound to it via $_cargo_home/config.toml"
+  # npm has no per-registry table like cargo's [source] -- a single
+  # `npm_config_registry` env var overrides its one default registry
+  # outright, and unlike a written .npmrc it wins even over a Target repo's
+  # own committed project-level .npmrc (npm's env > project .npmrc > user
+  # .npmrc > global .npmrc precedence). This env var carries packument and
+  # metadata requests through the proxy; the tarball fetch that follows
+  # does not (see the comment above this function for why). Unscoped only:
+  # `@scope:registry=` overrides are handled separately by
+  # phase_npm_intree_binding_apply.
+  export npm_config_registry="http://127.0.0.1:${REGISTRY_PROXY_FORWARDER_PORT}/"
+
+  echo "==> registry proxy Forwarder up on 127.0.0.1:${REGISTRY_PROXY_FORWARDER_PORT} — cargo bound to it via $_cargo_home/config.toml and npm bound to it via npm_config_registry"
 }
 
 # phase_go_binding points Go's own module-fetch tooling at the local
