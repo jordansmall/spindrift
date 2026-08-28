@@ -41,6 +41,7 @@ teardown() {
   grep -q "registry = \"sparse+http://127.0.0.1:${REGISTRY_PROXY_FORWARDER_PORT}/\"" "$HOME/.cargo/config.toml"
 
   grep -q "env: npm_config_registry=http://127.0.0.1:${REGISTRY_PROXY_FORWARDER_PORT}/" "$DRIVER_LOG"
+  grep -q "env: YARN_NPM_REGISTRY_SERVER=http://127.0.0.1:${REGISTRY_PROXY_FORWARDER_PORT}/" "$DRIVER_LOG"
 
   [[ "$output" == *"==> registry proxy Forwarder up on 127.0.0.1:${REGISTRY_PROXY_FORWARDER_PORT}"* ]]
 }
@@ -54,6 +55,7 @@ teardown() {
 
   [ ! -f "$HOME/.cargo/config.toml" ]
   grep -q "env: npm_config_registry=$" "$DRIVER_LOG"
+  grep -q "env: YARN_NPM_REGISTRY_SERVER=$" "$DRIVER_LOG"
 
   [[ "$output" != *"==> registry proxy Forwarder"* ]]
   [[ "$output" != *"==> WARNING:"*"socat"* ]]

@@ -576,7 +576,16 @@ EOF
   # phase_npm_intree_binding_apply.
   export npm_config_registry="http://127.0.0.1:${REGISTRY_PROXY_FORWARDER_PORT}/"
 
-  echo "==> registry proxy Forwarder up on 127.0.0.1:${REGISTRY_PROXY_FORWARDER_PORT} — cargo bound to it via $_cargo_home/config.toml and npm bound to it via npm_config_registry"
+  # Yarn berry (modern yarn, .yarnrc.yml) has its own env-var convention for
+  # overriding a single config key -- YARN_<KEY> upper-snake-cased -- and its
+  # own default-registry key, npmRegistryServer, is exactly this single-key
+  # case, so the same override-beats-in-tree-file reasoning as
+  # npm_config_registry above applies verbatim. Also unscoped only: per-scope
+  # npmScopes entries are handled separately by
+  # phase_yarn_berry_intree_binding_apply further down this file.
+  export YARN_NPM_REGISTRY_SERVER="http://127.0.0.1:${REGISTRY_PROXY_FORWARDER_PORT}/"
+
+  echo "==> registry proxy Forwarder up on 127.0.0.1:${REGISTRY_PROXY_FORWARDER_PORT} — cargo bound to it via $_cargo_home/config.toml, npm bound to it via npm_config_registry, and yarn berry bound to it via YARN_NPM_REGISTRY_SERVER"
 }
 
 # phase_go_binding points Go's own module-fetch tooling at the local
