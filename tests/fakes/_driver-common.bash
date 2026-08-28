@@ -32,6 +32,12 @@
   # that exported it.
   printf 'env: npm_config_registry=%s\n' "${npm_config_registry:-}"
 
+  # Same reasoning again, but for the pnpm Binding (issue #2855): pnpm no
+  # longer honors the generic npm_config_registry env var, only its own
+  # pnpm_config_registry-prefixed form, so this proves that var reaches the
+  # Driver process too.
+  printf 'env: pnpm_config_registry=%s\n' "${pnpm_config_registry:-}"
+
   # Same proof, but for yarn berry's own env-var override of the counterpart
   # setting (issue #2856).
   printf 'env: YARN_NPM_REGISTRY_SERVER=%s\n' "${YARN_NPM_REGISTRY_SERVER:-}"

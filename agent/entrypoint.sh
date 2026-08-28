@@ -503,7 +503,7 @@ phase_registry_proxy_forwarder() {
   [ -S "$REGISTRY_PROXY_SOCKET_PATH" ] || return 0
 
   if ! command -v socat >/dev/null 2>&1; then
-    echo "==> WARNING: $REGISTRY_PROXY_SOCKET_PATH is mounted but socat is not on PATH — cargo and npm will fall back to the public registry"
+    echo "==> WARNING: $REGISTRY_PROXY_SOCKET_PATH is mounted but socat is not on PATH — cargo, npm, pnpm, and yarn will fall back to the public registry"
     return 0
   fi
 
@@ -543,7 +543,7 @@ phase_registry_proxy_forwarder() {
     _rpf_tries=$((_rpf_tries + 1))
   done
   if [ "$_rpf_ready" != "1" ]; then
-    echo "==> WARNING: registry proxy Forwarder did not start listening on 127.0.0.1:${REGISTRY_PROXY_FORWARDER_PORT} within 5s — cargo and npm will fall back to the public registry"
+    echo "==> WARNING: registry proxy Forwarder did not start listening on 127.0.0.1:${REGISTRY_PROXY_FORWARDER_PORT} within 5s — cargo, npm, pnpm, and yarn will fall back to the public registry"
     return 0
   fi
 
@@ -573,8 +573,13 @@ EOF
   # metadata requests through the proxy; the tarball fetch that follows
   # does not (see the comment above this function for why). Unscoped only:
   # `@scope:registry=` overrides are handled separately by
-  # phase_npm_intree_binding_apply.
-  export npm_config_registry="http://127.0.0.1:${REGISTRY_PROXY_FORWARDER_PORT}/"
+  # phase_npm_intree_binding_apply. Modern pnpm no longer honors the generic
+  # `npm_config_*` prefix for this (pnpm.io/configuring), only its own
+  # `pnpm_config_*` prefix (issue #2855) -- export the same Forwarder URL
+  # under both var names.
+  local _registry_proxy_forwarder_url="http://127.0.0.1:${REGISTRY_PROXY_FORWARDER_PORT}/"
+  export npm_config_registry="$_registry_proxy_forwarder_url"
+  export pnpm_config_registry="$_registry_proxy_forwarder_url"
 
   # Yarn berry (modern yarn, .yarnrc.yml) has its own env-var convention for
   # overriding a single config key -- YARN_<KEY> upper-snake-cased -- and its
@@ -583,9 +588,9 @@ EOF
   # npm_config_registry above applies verbatim. Also unscoped only: per-scope
   # npmScopes entries are handled separately by
   # phase_yarn_berry_intree_binding_apply further down this file.
-  export YARN_NPM_REGISTRY_SERVER="http://127.0.0.1:${REGISTRY_PROXY_FORWARDER_PORT}/"
+  export YARN_NPM_REGISTRY_SERVER="$_registry_proxy_forwarder_url"
 
-  echo "==> registry proxy Forwarder up on 127.0.0.1:${REGISTRY_PROXY_FORWARDER_PORT} — cargo bound to it via $_cargo_home/config.toml, npm bound to it via npm_config_registry, and yarn berry bound to it via YARN_NPM_REGISTRY_SERVER"
+  echo "==> registry proxy Forwarder up on 127.0.0.1:${REGISTRY_PROXY_FORWARDER_PORT} — cargo bound to it via $_cargo_home/config.toml, npm bound to it via npm_config_registry, pnpm bound to it via pnpm_config_registry, and yarn berry bound to it via YARN_NPM_REGISTRY_SERVER"
 }
 
 # phase_go_binding points Go's own module-fetch tooling at the local
