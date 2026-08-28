@@ -99,6 +99,7 @@ let
       gh
       (driver.driverEntry.package pkgs)
       cacert
+      socat # unix-socket<->TCP Forwarder for the registry proxy (ADR 0044, issue #2849)
       driver.driverExecBin # in-box Driver runner (#626)
       driver.orchestratorBin # in-box orchestrator (#1996)
     ])
