@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# Fake openssl for tests/mint-token.bats (issue #2867): implements only the
+# two openssl invocations mint-token.sh's b64url()/signing steps make --
+# `base64 -A` (real, unwrapped base64 encoding, so the JWT's header/payload/
+# signature segments are genuinely base64url-encoded) and `dgst -sha256
+# -sign <key>` (returns a fixed deterministic byte string instead of doing
+# real RSA signing, since the test has no real App private key) -- so the
+# JWT-construction recipe runs for real without needing network or a real
+# key. Never used outside the bats sandbox.
+set -euo pipefail
+case "${1:-}" in
+  base64)
+    exec base64 -w0
+    ;;
+  dgst)
+    printf 'fake-signature-bytes'
+    ;;
+  *)
+    echo "fake openssl: unsupported subcommand: ${1:-}" >&2
+    exit 1
+    ;;
+esac
