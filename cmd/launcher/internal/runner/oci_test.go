@@ -518,6 +518,24 @@ func TestBuildRunArgs_DriverCacheDirMountedWritable(t *testing.T) {
 	}
 }
 
+// TestBuildRunArgs_RegistryProxySocketMounted verifies that a Box-derived
+// RegistryProxySocketPath produces a -v <source>:/registry-proxy.sock entry
+// (ADR 0044, issue #2849).
+func TestBuildRunArgs_RegistryProxySocketMounted(t *testing.T) {
+	sock := newTestSocket(t, "registry-proxy.sock")
+	a := &ociAdapter{
+		cli:   "podman",
+		image: "spindrift:test",
+	}
+	box := Box{Name: "agent-issue-1", Env: map[string]string{}, RegistryProxySocketPath: sock}
+	args := a.buildRunArgs(box)
+
+	want := sock + ":/registry-proxy.sock"
+	if !containsArg(args, want) {
+		t.Errorf("registry-proxy socket mount %q not found in args: %v", want, args)
+	}
+}
+
 // TestBuildRunArgs_DriverCacheDirMounted_BakedSkillsSurvive verifies that the
 // writable cache mount, scoped to /home/agent/.claude/projects, does not
 // shadow /home/agent/.claude/skills baked into the image — the regression a

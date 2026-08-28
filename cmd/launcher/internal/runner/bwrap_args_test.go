@@ -73,6 +73,25 @@ func TestBwrapArgs_SkillsDirMounted(t *testing.T) {
 	}
 }
 
+// TestBwrapArgs_RegistryProxySocketMounted verifies that a Box-derived
+// RegistryProxySocketPath produces a --bind <source> /registry-proxy.sock
+// entry (ADR 0044, issue #2849).
+func TestBwrapArgs_RegistryProxySocketMounted(t *testing.T) {
+	sock := newTestSocket(t, "registry-proxy.sock")
+	a := &bwrapAdapter{
+		agentFiles:    "/fake/agent",
+		agentEnv:      "/fake/env",
+		bakedPrefetch: "echo ok",
+	}
+	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}, RegistryProxySocketPath: sock})
+
+	argStr := strings.Join(args, " ")
+	want := "--bind " + sock + " /registry-proxy.sock"
+	if !strings.Contains(argStr, want) {
+		t.Errorf("registry-proxy socket bind %q not found in args: %v", want, args)
+	}
+}
+
 // TestBwrapArgs_HomeAgentStagingMounted verifies that buildArgs ro-binds the
 // baked agentFiles' /home/agent subtree (hooks, settings.json, opencode agent
 // files) to a fixed top-level staging path, rather than exposing it nowhere

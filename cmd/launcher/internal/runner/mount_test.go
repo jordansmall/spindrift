@@ -1,7 +1,9 @@
 package runner
 
 import (
+	"net"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -375,6 +377,7 @@ func TestMountSpecs_RenderedIdenticallyAcrossBackends(t *testing.T) {
 	promptDir := t.TempDir()
 	skillsDir := t.TempDir()
 	cacheDir := t.TempDir()
+	proxySocket := newTestSocket(t, "registry-proxy.sock")
 
 	oci := &ociAdapter{
 		cli:                   "podman",
@@ -391,7 +394,7 @@ func TestMountSpecs_RenderedIdenticallyAcrossBackends(t *testing.T) {
 		skillsDir:             skillsDir,
 		driverSessionCacheDir: "/home/agent/.claude/projects",
 	}
-	box := Box{Name: "agent-issue-1", Env: map[string]string{}, DriverCacheDir: cacheDir}
+	box := Box{Name: "agent-issue-1", Env: map[string]string{}, DriverCacheDir: cacheDir, RegistryProxySocketPath: proxySocket}
 
 	ociArgs := strings.Join(oci.buildRunArgs(box), " ")
 	bwrapArgs := strings.Join(bwrap.buildArgs("/tmp/fake-etc", box), " ")
@@ -400,6 +403,7 @@ func TestMountSpecs_RenderedIdenticallyAcrossBackends(t *testing.T) {
 		{promptDir, "/agent/prompts"},
 		{skillsDir, "/operator-skills"},
 		{cacheDir, "/home/agent/.claude/projects"},
+		{proxySocket, "/registry-proxy.sock"},
 	} {
 		if !strings.Contains(ociArgs, mount.source+":"+mount.target) {
 			t.Errorf("OCI missing mount %s -> %s in args: %s", mount.source, mount.target, ociArgs)
@@ -520,5 +524,120 @@ func TestLocalCodeForgeMounts_AbsentOnNonLocalBackends(t *testing.T) {
 	}
 	if strings.Contains(bwrapArgs, "--ro-bind "+repoDir+" /repo") || strings.Contains(bwrapArgs, "--bind "+outboxDir+" /outbox") {
 		t.Errorf("bwrap must not mount /repo or /outbox with CodeForge unset: %s", bwrapArgs)
+	}
+}
+
+// newTestSocket creates a real unix domain socket file named name and
+// returns its path, closing the listener on test cleanup. It deliberately
+// does not nest under t.TempDir(): that helper's directory embeds the full
+// test (and subtest) name, and under a nix build sandbox the build root
+// itself is already a long path -- concatenating the two can exceed
+// AF_UNIX's ~108-byte sun_path limit (net.Listen then fails with "bind:
+// invalid argument"). A short os.MkdirTemp prefix keeps the whole path well
+// under that limit regardless of the test name's length or the sandbox's
+// own root path.
+func newTestSocket(t *testing.T, name string) string {
+	t.Helper()
+	dir, err := os.MkdirTemp("", "sock-")
+	if err != nil {
+		t.Fatalf("MkdirTemp: %v", err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	path := filepath.Join(dir, name)
+	l, err := net.Listen("unix", path)
+	if err != nil {
+		t.Fatalf("net.Listen(unix, %s): %v", path, err)
+	}
+	t.Cleanup(func() { l.Close() })
+	return path
+}
+
+// TestCandidateSocketMount_RealSocket verifies that a real unix socket file
+// on disk produces a MountSpec, unlike candidateMount, which rejects it.
+func TestCandidateSocketMount_RealSocket(t *testing.T) {
+	sock := newTestSocket(t, "registry-proxy.sock")
+
+	spec, ok := candidateSocketMount(sock, "/registry-proxy.sock")
+	if !ok {
+		t.Fatalf("expected a mount for socket %s", sock)
+	}
+	if spec.Source != sock {
+		t.Errorf("Source = %q, want %q", spec.Source, sock)
+	}
+	if spec.Target != "/registry-proxy.sock" {
+		t.Errorf("Target = %q, want /registry-proxy.sock", spec.Target)
+	}
+	if spec.ReadOnly {
+		t.Errorf("socket mount must be writable, not read-only")
+	}
+}
+
+// TestCandidateSocketMount_RegularFile_NoMount verifies that a plain regular
+// file (not a socket) at the source path yields no mount.
+func TestCandidateSocketMount_RegularFile_NoMount(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "not-a-socket")
+	if err := os.WriteFile(path, []byte("x"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	if _, ok := candidateSocketMount(path, "/registry-proxy.sock"); ok {
+		t.Errorf("expected no mount for a regular file at %s", path)
+	}
+}
+
+// TestCandidateSocketMount_Directory_NoMount verifies that a directory at the
+// source path yields no mount.
+func TestCandidateSocketMount_Directory_NoMount(t *testing.T) {
+	dir := t.TempDir()
+
+	if _, ok := candidateSocketMount(dir, "/registry-proxy.sock"); ok {
+		t.Errorf("expected no mount for a directory at %s", dir)
+	}
+}
+
+// TestCandidateSocketMount_EmptyPath_NoMount verifies that an empty source
+// path yields no mount.
+func TestCandidateSocketMount_EmptyPath_NoMount(t *testing.T) {
+	if _, ok := candidateSocketMount("", "/registry-proxy.sock"); ok {
+		t.Errorf("expected no mount for an empty source path")
+	}
+}
+
+// TestBuildMountSpecs_RegistryProxySocketMounted verifies that a set
+// RegistryProxySocketPath produces a writable MountSpec at the fixed in-box
+// target /registry-proxy.sock (ADR 0044) — computed once, independent of
+// backend.
+func TestBuildMountSpecs_RegistryProxySocketMounted(t *testing.T) {
+	sock := newTestSocket(t, "registry-proxy.sock")
+	specs := buildMountSpecs(MountParams{}, Box{RegistryProxySocketPath: sock})
+
+	var found *MountSpec
+	for i := range specs {
+		if specs[i].Target == "/registry-proxy.sock" {
+			found = &specs[i]
+		}
+	}
+	if found == nil {
+		t.Fatalf("expected a /registry-proxy.sock spec in %+v", specs)
+	}
+	if found.Source != sock {
+		t.Errorf("Source = %q, want %q", found.Source, sock)
+	}
+	if found.ReadOnly {
+		t.Errorf("registry-proxy socket mount must be writable, not read-only")
+	}
+}
+
+// TestBuildMountSpecs_RegistryProxySocketUnset_NoMount verifies that omitting
+// RegistryProxySocketPath produces no /registry-proxy.sock spec — the
+// registry proxy feature is off for this Box.
+func TestBuildMountSpecs_RegistryProxySocketUnset_NoMount(t *testing.T) {
+	specs := buildMountSpecs(MountParams{}, Box{})
+
+	for _, s := range specs {
+		if s.Target == "/registry-proxy.sock" {
+			t.Errorf("unexpected /registry-proxy.sock spec when RegistryProxySocketPath is empty: %+v", specs)
+		}
 	}
 }

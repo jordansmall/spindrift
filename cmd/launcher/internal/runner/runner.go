@@ -37,6 +37,13 @@ type Box struct {
 	// the Launcher relays the bundle host-side after the run. Empty omits
 	// the mount, the same convention as DriverCacheDir.
 	OutboxDir string
+
+	// RegistryProxySocketPath is the host path to the per-Box unix domain
+	// socket the launcher-side registry-credential proxy (ADR 0044, issue
+	// #2849) listens on. Empty means the registry proxy feature is off for
+	// this Box, so no mount. When set, mounted read-write at the fixed
+	// in-box target registryProxySocketTarget.
+	RegistryProxySocketPath string
 }
 
 // Runner is the seam through which the launcher manages agent sandbox life-cycles.
