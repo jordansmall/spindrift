@@ -82,7 +82,7 @@ func TestNextReady_BlockedLineNamesBlockers(t *testing.T) {
 // TestNextReady_BlockedLineLogsOncePerState verifies that with a shared
 // dedup map, nextReady's blocked-skip line prints once across identical
 // re-walks — refill re-walks on every completion and the background poll
-// re-walks every ~30s (#1637), which would otherwise reprint the same
+// re-walks every ~3m (#1637), which would otherwise reprint the same
 // blocked line indefinitely — and re-prints only when the blocker set
 // changes.
 func TestNextReady_BlockedLineLogsOncePerState(t *testing.T) {

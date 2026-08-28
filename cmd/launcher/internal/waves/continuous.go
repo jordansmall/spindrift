@@ -21,10 +21,22 @@ import (
 // eventually-consistent discover() result that doesn't yet show a
 // just-merged blocker's child as ready, a blocker resolving while every Box
 // is busy, a touch-overlap deferral, or a transient DepsOf hiccup -- gets
-// retried without waiting for an unrelated Box to finish. Hardcoded for now;
-// a follow-up issue (#1638) makes it an operator knob. cfg.pollInterval
-// overrides it for tests that can't wait out a real interval.
-const defaultPollInterval = 30 * time.Second
+// retried without waiting for an unrelated Box to finish. Set to 3 minutes
+// (issue #2874, down from an original 30s) since each tick spends a share
+// of the tracker's rate-limit budget: a poll this infrequent still catches
+// a missed refill, while costing far less of that budget than a 30s poll
+// would. Hardcoded for now; a follow-up issue (#1638) makes it an operator
+// knob. cfg.pollInterval overrides it for tests that can't wait out a real
+// interval.
+const defaultPollInterval = 3 * time.Minute
+
+// resolvePollInterval is cfg's test override, or defaultPollInterval.
+func resolvePollInterval(override time.Duration) time.Duration {
+	if override <= 0 {
+		return defaultPollInterval
+	}
+	return override
+}
 
 // staleDrainMarker is the file emitStaleDrainReport appends each stale-drain
 // report's HostLog line to, under .spindrift/logs/ (#2678) -- named like
@@ -86,7 +98,7 @@ func nextReady(cfg Config, it forge.IssueTracker, cf forge.CodeForge, checkOverl
 	}
 	// skip logs a non-dispatch outcome for an issue at most once per distinct
 	// line: refill re-walks this list on every completion and the background
-	// poll re-walks it every ~30s (#1637), so an unchanged blocked/deferred
+	// poll re-walks it every ~3m (#1637), so an unchanged blocked/deferred
 	// reason would otherwise reprint on every tick. logged carries the last
 	// line emitted per issue across those re-walks; a nil map (direct unit
 	// tests) disables dedup. The line re-prints when it changes -- a new
@@ -297,7 +309,7 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 	dispatchedAny := false
 	claimed := make(map[string]bool)
 	// logged dedups nextReady's non-dispatch skip/defer lines across the
-	// refill re-walks that share mu -- every completion, grow, and ~30s poll
+	// refill re-walks that share mu -- every completion, grow, and ~3m poll
 	// tick (#1637) re-walks the same candidates, so an unchanged
 	// blocked/deferred reason would otherwise reprint on every tick. Keyed by
 	// issue number to the last line emitted for it; nextReady re-prints only
@@ -538,14 +550,10 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 		}
 	}()
 
-	// pollInterval is cfg's test override, or the production default.
 	// pollDone/pollExited mirror growDone/done exactly: pollDone stops the
 	// ticker once this call is finished, pollExited confirms it has actually
 	// exited before RunContinuous returns.
-	pollInterval := cfg.pollInterval
-	if pollInterval <= 0 {
-		pollInterval = defaultPollInterval
-	}
+	pollInterval := resolvePollInterval(cfg.pollInterval)
 	pollDone := make(chan struct{})
 	pollExited := make(chan struct{})
 	go func() {
