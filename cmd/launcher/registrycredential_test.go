@@ -202,6 +202,64 @@ func TestResolveRegistryProxyCredential_FromEnvEmptyVarIsError(t *testing.T) {
 	}
 }
 
+// TestPeekRegistryProxyCredential_FromEnvDoesNotUnset verifies that, unlike
+// resolveRegistryProxyCredential, peekRegistryProxyCredential resolves a
+// fromEnv reference to the variable's value without unsetting the source
+// variable -- doctor uses this non-destructive read so it doesn't consume
+// the credential before bootstrap's real resolution runs.
+func TestPeekRegistryProxyCredential_FromEnvDoesNotUnset(t *testing.T) {
+	t.Setenv("SPINDRIFT_TEST_REGISTRY_CRED_PEEK", "s3kr3t")
+
+	got, err := peekRegistryProxyCredential("", "SPINDRIFT_TEST_REGISTRY_CRED_PEEK")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != "s3kr3t" {
+		t.Errorf("got %q, want %q", got, "s3kr3t")
+	}
+	if v := os.Getenv("SPINDRIFT_TEST_REGISTRY_CRED_PEEK"); v != "s3kr3t" {
+		t.Errorf("source env var must still be set after peek, got %q", v)
+	}
+}
+
+// TestPeekRegistryProxyCredential_NeverEchoesSecret proves that a peek
+// resolution error never contains a real secret value that happens to be in
+// scope elsewhere in the same test -- guards against a future change
+// accidentally interpolating the resolved value into an error message.
+func TestPeekRegistryProxyCredential_NeverEchoesSecret(t *testing.T) {
+	const secret = "s3kr3t-do-not-echo"
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "cred")
+	if err := os.WriteFile(path, []byte(secret), 0o600); err != nil {
+		t.Fatalf("failed to write temp cred file: %v", err)
+	}
+
+	got, err := peekRegistryProxyCredential(path, "")
+	if err != nil {
+		t.Fatalf("unexpected error resolving valid secret: %v", err)
+	}
+	if got != secret {
+		t.Fatalf("got %q, want %q", got, secret)
+	}
+
+	// The embedded-newline error path is the meaningful case: v (the
+	// trimmed file content) holds the real secret in scope right up to the
+	// point the function errors out, so this is where an accidental
+	// interpolation of v into the error message would actually leak it.
+	newlinePath := filepath.Join(dir, "cred-with-newline")
+	if err := os.WriteFile(newlinePath, []byte(secret+"\nextra-line"), 0o600); err != nil {
+		t.Fatalf("failed to write temp cred file: %v", err)
+	}
+	_, err = peekRegistryProxyCredential(newlinePath, "")
+	if err == nil {
+		t.Fatal("expected error for credential file with embedded newline, got nil")
+	}
+	if strings.Contains(err.Error(), secret) {
+		t.Errorf("error must never echo the secret value, got: %v", err)
+	}
+}
+
 // TestResolveRegistryProxyCredential_BothSetPrefersEnv verifies the
 // unreachable-under-normal-use fallback documented on
 // resolveRegistryProxyCredential: if a caller skips validation and both
