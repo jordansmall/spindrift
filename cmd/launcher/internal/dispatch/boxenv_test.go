@@ -208,8 +208,30 @@ func TestBuildBoxEnvForwardsTrackerAxisAndForgeBackend(t *testing.T) {
 	env = buildBoxEnv(Config{}, "3", "T", 0, "", "")
 	for _, name := range []string{"BOX_TRACKER_AXIS_READ", "BOX_TRACKER_AXIS_WRITE", "BOX_TRACKER_AXIS_FILER", "BOX_FORGE_BACKEND"} {
 		if _, ok := env[name]; ok {
-			t.Errorf("%s should be absent when the Config field is empty", name)
+			t.Errorf("%s should be absent when Config is zero-valued", name)
 		}
+	}
+}
+
+// TestBuildBoxEnvForwardsRegistryProxyUpstreamHost verifies buildBoxEnv
+// forwards the host (and port, if present) of Config.RegistryProxyUpstreamURL
+// into the Box as REGISTRY_PROXY_UPSTREAM_HOST when the URL is set and
+// parses to a non-empty host, and leaves the var absent when the URL is
+// empty, malformed, or hostless (issue #2851, ADR 0044).
+func TestBuildBoxEnvForwardsRegistryProxyUpstreamHost(t *testing.T) {
+	env := buildBoxEnv(Config{RegistryProxyUpstreamURL: "https://cargo.mycorp.example:8443/index/"}, "3", "T", 0, "", "")
+	if got := env["REGISTRY_PROXY_UPSTREAM_HOST"]; got != "cargo.mycorp.example:8443" {
+		t.Errorf("REGISTRY_PROXY_UPSTREAM_HOST: got %q, want %q", got, "cargo.mycorp.example:8443")
+	}
+
+	env = buildBoxEnv(Config{}, "3", "T", 0, "", "")
+	if _, ok := env["REGISTRY_PROXY_UPSTREAM_HOST"]; ok {
+		t.Error("REGISTRY_PROXY_UPSTREAM_HOST should be absent when Config.RegistryProxyUpstreamURL is empty")
+	}
+
+	env = buildBoxEnv(Config{RegistryProxyUpstreamURL: "not a url with spaces and://bad"}, "3", "T", 0, "", "")
+	if _, ok := env["REGISTRY_PROXY_UPSTREAM_HOST"]; ok {
+		t.Error("REGISTRY_PROXY_UPSTREAM_HOST should be absent when Config.RegistryProxyUpstreamURL is malformed/hostless")
 	}
 }
 
