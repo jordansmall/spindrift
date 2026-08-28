@@ -183,6 +183,9 @@ fi
 	if !errors.Is(err, forge.ErrAuthFailure) {
 		t.Fatalf("Probe error must be errors.Is forge.ErrAuthFailure; got: %v", err)
 	}
+	if errors.Is(err, forge.ErrRateLimit) {
+		t.Fatalf("non-rate-limited auth failure must not classify as forge.ErrRateLimit, got: %v", err)
+	}
 	if !strings.Contains(err.Error(), "You are not logged into any GitHub hosts") {
 		t.Fatalf("Probe error must surface gh's stderr; got: %v", err)
 	}
@@ -327,5 +330,61 @@ exit 1
 	}
 	if len(matches) != 1 {
 		t.Fatalf("OpenPRForBranch made %d gh calls, want exactly 1", len(matches))
+	}
+}
+
+// TestProbe_RateLimitedSurfacesErrRateLimit verifies that when `gh repo
+// view` fails with rate-limit-shaped stderr, Probe's returned error is
+// errors.Is-detectable as forge.ErrRateLimit — proving the central
+// ghCommandErrText classification (issue #2865) reaches a real adapter
+// method end-to-end, not just the exec.go helper in isolation.
+func TestProbe_RateLimitedSurfacesErrRateLimit(t *testing.T) {
+	// Call 0: gh auth status — succeed.
+	// Call 1: gh repo view — fail with rate-limit stderr.
+	prependFakeGH(t, `if [ "$1" = "repo" ]; then
+  printf 'API rate limit exceeded for installation ID 12345678.\n' >&2
+  exit 1
+fi
+`)
+
+	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	_, err := c.Probe()
+	if err == nil {
+		t.Fatal("Probe: want error, got nil")
+	}
+	if !errors.Is(err, forge.ErrRateLimit) {
+		t.Fatalf("Probe error must be errors.Is forge.ErrRateLimit; got: %v", err)
+	}
+	if errors.Is(err, forge.ErrRepoNotFound) {
+		t.Fatalf("Probe error must not also be errors.Is forge.ErrRepoNotFound; got: %v", err)
+	}
+}
+
+// TestProbe_AuthRateLimitedSurfacesErrRateLimit verifies that when `gh auth
+// status` itself fails with rate-limit-shaped stderr (GitHub's token
+// validation call getting throttled), Probe's returned error is
+// errors.Is-detectable as forge.ErrRateLimit and NOT as forge.ErrAuthFailure
+// — the two sentinels must stay mutually exclusive so a caller (e.g. doctor)
+// checking ErrAuthFailure first doesn't misreport a throttled operator's
+// real cause (issue #2865, round 2: the round-1 fix only covered the `gh
+// repo view` branch, missing this identical bug in the `gh auth status`
+// branch).
+func TestProbe_AuthRateLimitedSurfacesErrRateLimit(t *testing.T) {
+	prependFakeGH(t, `if [ "$1" = "auth" ]; then
+  printf 'error validating token: HTTP 403: API rate limit exceeded for user ID 1.\n' >&2
+  exit 1
+fi
+`)
+
+	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	_, err := c.Probe()
+	if err == nil {
+		t.Fatal("Probe: want error, got nil")
+	}
+	if !errors.Is(err, forge.ErrRateLimit) {
+		t.Fatalf("Probe error must be errors.Is forge.ErrRateLimit; got: %v", err)
+	}
+	if errors.Is(err, forge.ErrAuthFailure) {
+		t.Fatalf("Probe error must not also be errors.Is forge.ErrAuthFailure; got: %v", err)
 	}
 }
