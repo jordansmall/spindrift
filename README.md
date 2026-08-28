@@ -30,7 +30,10 @@ Run headless [Claude Code](https://claude.com/claude-code) agents in
   size it to at least `MEMORY_LIMIT` × `MAX_PARALLEL` plus VM overhead. See
   [Dogfood loop](docs/reference.md#dogfood-loop).
 - A **fine-grained single-repo GitHub PAT** — scoped to the Target repo only
-  (see [Before you deploy](#before-you-deploy)).
+  (see [Before you deploy](#before-you-deploy)). Local dispatch can instead
+  authenticate via a GitHub App installation token it mints itself (optional);
+  that path additionally needs `bash`, `openssl`, `curl`, `jq`, and `date` on
+  PATH — see [Local dispatch](docs/reference.md#local-dispatch).
 - **Claude Code auth**: run `claude setup-token` on the host, or an API key.
 - Using the **opencode** Driver's `github-copilot` Provider instead: run
   `opencode auth login -p github-copilot` on the host (one-time device flow),

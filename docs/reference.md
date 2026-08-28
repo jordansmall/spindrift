@@ -1089,6 +1089,9 @@ exceptions.
 | `REPO_SLUG`               | — (required unless `CODE_FORGE` and `ISSUE_TRACKER` are both `local`; baked via `forge.repoSlug`) | target repo, `owner/repo` |
 | `GH_TOKEN`                | — (required unless `CODE_FORGE` and `ISSUE_TRACKER` are both `local`) | GitHub token for `gh` inside containers (secret; env only) |
 | `GH_TOKEN_REFRESH_FILE`   | — (baked via `forge.ghTokenRefreshFile`) | path the launcher polls to keep `GH_TOKEN` current past an installation token's ~1h lifetime — see [GitHub App installation token](#github-app-installation-token-recommended) |
+| `GH_APP_ID`               | —                       | GitHub App ID for local dispatch's own installation-token minting, alternative to a static `GH_TOKEN` — see [Local dispatch](#local-dispatch) |
+| `GH_APP_PRIVATE_KEY_FILE` | —                       | path to the GitHub App's PEM private key, read from disk by the mint recipe (never opened by the launcher process itself) and never forwarded to the Box — see [Local dispatch](#local-dispatch) |
+| `GH_APP_INSTALLATION_ID`  | —                       | installation ID to mint GitHub App tokens for — see [Local dispatch](#local-dispatch) |
 | `CLAUDE_CODE_OAUTH_TOKEN` | — (one auth required)  | from `claude setup-token` (secret; env only) |
 | `ANTHROPIC_API_KEY`       | —                      | alternative to the OAuth token (secret; env only) |
 | `GIT_USER_NAME`           | host `git config`; baked via `git.user.name` | commit author name (applied repo-locally inside the Box — see [Hermetic git config](#hermetic-git-config)) |
@@ -3184,6 +3187,67 @@ most recently minted rather than the token captured at job start. The knob is
 optional and off by default — an unset `GH_TOKEN_REFRESH_FILE` leaves `GH_TOKEN`
 static for the whole run, as before (the fine-grained-PAT path, and any
 deployment that doesn't wire up a refresher, are unaffected).
+
+#### Local dispatch
+
+Local dispatch (`spindrift dispatch`/`run`/etc., including the dogfood loop)
+can mint its own GitHub App installation token the same way CI does, instead
+of requiring a static `GH_TOKEN` PAT. Set the trio via the
+`--gh-app-id`, `--gh-app-private-key-file`, and `--gh-app-installation-id`
+flags as an alternative to `GH_TOKEN` — not `harness.env`: that file is
+secrets-only (ADR 0020), and none of the three are secret knobs — not even
+the private key path (the key *content* would be, but this launcher takes a
+file path instead, never the PEM body itself). The bare
+`GH_APP_ID`/`GH_APP_PRIVATE_KEY_FILE`/`GH_APP_INSTALLATION_ID` env vars still
+work this release too, but are deprecated the same as every other ambient
+knob override — prefer the flags. `GH_APP_PRIVATE_KEY_FILE` is a path to the
+App's PEM private key on disk — never the key content itself, so nothing
+routes it through a `--<secret>-cmd`/vault indirection layer that assumes it
+holds a plain value. Point it at a vault-mounted file or similar if you don't
+want the key resident in plaintext on disk long-term.
+
+Find the installation ID on the App's installation settings page —
+`https://github.com/settings/installations` for a personal-account
+installation, or `https://github.com/organizations/<org>/settings/installations`
+for an org installation — it's the trailing numeric path segment of that
+installation's own URL. CI never has to look this up by hand: it comes from
+`actions/create-github-app-token`'s `installation-id` output
+(`agent-dispatch.yml`).
+
+The mint recipe (`cmd/launcher/internal/ghapptoken/mint-token.sh`, shared
+with CI's `gh-token-refresher` action) shells out to `bash`, `openssl`,
+`curl`, `jq`, and `date` — install all five on the host running local
+dispatch (see [Prerequisites](../README.md#prerequisites)) before setting the
+trio, or the mint fails with an opaque `exit status 127` naming no missing
+tool.
+
+This reuses the same App a maintainer would already provision for CI (the
+same permissions listed above) — reuse the CI worker App's own credentials
+locally, or provision a second installation (or a second App entirely) if you
+want the local and CI rate-limit buckets kept separate.
+
+Mechanically, `bootstrap()` mints an initial token before `validate(c)` runs,
+so no ambient `GH_TOKEN` is required when the App trio is set. It then keeps
+the token fresh with the identical mint recipe CI's `gh-token-refresher`
+action runs — `cmd/launcher/internal/ghapptoken/mint-token.sh` is the single
+shared script behind both, not a parallel implementation — re-minting every
+45 minutes into a token file that the launcher's existing
+`--gh-token-refresh-file`/`GH_TOKEN_REFRESH_FILE` poll (above) then picks up
+unchanged.
+
+The three knobs are all-or-nothing: setting only one or two of them is a
+configuration error. They're also mutually exclusive with explicitly setting
+`GH_TOKEN_REFRESH_FILE` yourself — local App minting owns and rewrites its
+own refresh file, so combining the two is ambiguous and rejected at
+validation.
+
+The private key never reaches a Box (issue #2867): the launcher process
+itself never opens it — the host-side mint recipe (`openssl`) reads it from
+disk each time it mints or re-mints — and only the resulting short-lived
+installation token — never the key — flows onward the same way
+`GH_TOKEN` already does today. Leaving all three App knobs unset is
+unchanged from before this issue: `GH_TOKEN` alone still works exactly as it
+always has.
 
 ### Research token (least-privilege, optional)
 
