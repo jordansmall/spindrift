@@ -89,6 +89,17 @@ type config struct {
 	// when the Driver declares no session-state dir.
 	driverSessionCacheDir string
 
+	// registryProxyCredential is the resolved value of the registry proxy
+	// Credential reference (ADR 0044): schemaConfig's
+	// registryProxyCredentialEnv/registryProxyCredentialFile carry a
+	// *reference* (an env-var NAME or a file PATH), never the credential
+	// value itself. bootstrap() resolves that reference exactly once via
+	// resolveRegistryProxyCredential and stores the result here -- a
+	// hand-added field, not a schemaConfig member, since it holds a
+	// resolved value rather than a raw env read. Empty when neither
+	// reference is set.
+	registryProxyCredential string
+
 	// Space-separated list of env var names to forward into each Box container.
 	// Set by the nix-rendered preamble from the schema's boxEnv=true entries so
 	// the Go source never needs to enumerate them by hand.
@@ -949,6 +960,7 @@ func dispatchConfig(c config, it forge.IssueTracker, lw *localloop.Wired, cf for
 		HoldJitterSecs:           c.holdJitterSecs,
 		DriverSessionCacheDir:    c.driverSessionCacheDir,
 		RegistryProxyUpstreamURL: c.registryProxyUpstreamURL,
+		RegistryProxyCredential:  c.registryProxyCredential,
 		OpenPRForIssue: func(number string) (bool, error) {
 			res, err := forge.ResolveOpenPR(cf, number)
 			return res.Found, err

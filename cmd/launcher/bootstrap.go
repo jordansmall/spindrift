@@ -79,6 +79,13 @@ func bootstrap(ensureReady bool, kind string, selfContained bool) (lc *launchCon
 	if err := validate(c); err != nil {
 		return nil, fmt.Errorf("%w: %w", errConfigInvalid, err)
 	}
+	if c.registryProxyUpstreamURL != "" {
+		cred, err := resolveRegistryProxyCredential(c.registryProxyCredentialFile, c.registryProxyCredentialEnv)
+		if err != nil {
+			return nil, fmt.Errorf("%w: %w", errConfigInvalid, err)
+		}
+		c.registryProxyCredential = cred
+	}
 	// One-time relocation (issue #2138): fold any legacy top-level logs/
 	// left by an earlier spindrift into the new .spindrift/logs before any
 	// host-side site reads or creates a log path this run.

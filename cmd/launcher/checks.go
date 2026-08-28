@@ -17,11 +17,11 @@ import (
 // rows through doctor.RunChecksFailFast (issue #2559). See doctor.go for
 // runDoctor and main.go for validateConfig.
 //
-// The eight rows are split into two ordered groups —
-// launcherRequiredKnobChecks (6 rows) and launcherCrossKnobChecks (2 rows) —
+// The nine rows are split into two ordered groups —
+// launcherRequiredKnobChecks (6 rows) and launcherCrossKnobChecks (3 rows) —
 // matching where validate() runs them: the six required-knob rows run
 // before validate()'s validateChoice calls (MERGE_MODE, MERGE_METHOD,
-// SYNC_METHOD, OVERLAP_GATE), and the two cross-knob rows run after those
+// SYNC_METHOD, OVERLAP_GATE), and the three cross-knob rows run after those
 // calls (and before BOX_FORGE_AND_ISSUE_ACCESS), fail-fast and gating
 // dispatch. launcherChecks concatenates both groups; doctorExtraChecks below
 // (runtime filtered out) feeds two different `spindrift doctor` consumers:
@@ -177,9 +177,15 @@ func crossKnobCheck(rowName, knobName, value, remedy string, validAs func(backen
 	}
 }
 
-// launcherCrossKnobChecks builds the two Required-tier rows that ran after
+// launcherCrossKnobChecks builds the three Required-tier rows that ran after
 // validate()'s validateChoice calls on origin/main: issue-tracker-config,
-// code-forge-config.
+// code-forge-config, registry-proxy-credential. The last one folds in the
+// registry-proxy-credential mutual-exclusion check (ADR 0044) that used to be
+// a hand-written call in both validate() and validateConfig() (main.go)
+// ahead of these rows; moving it here gives it its own named row in the
+// `spindrift doctor` status table and puts it in the same fail-fast position
+// as the other cross-knob rows, after the validateChoice calls, instead of
+// ahead of all of them.
 func launcherCrossKnobChecks(c config) []doctor.Check {
 	return []doctor.Check{
 		crossKnobCheck("issue-tracker-config", "ISSUE_TRACKER", c.issueTracker,
@@ -194,5 +200,13 @@ func launcherCrossKnobChecks(c config) []doctor.Check {
 			validCodeForgeNames,
 			func(r backendRow) func(config) error { return r.validateCodeForge },
 			c),
+		{
+			Name:   "registry-proxy-credential",
+			Tier:   doctor.Required,
+			Remedy: "set at most one of REGISTRY_PROXY_CREDENTIAL_FILE and REGISTRY_PROXY_CREDENTIAL_ENV: a registry proxy credential names exactly one source",
+			Probe: func() (any, error) {
+				return nil, validateRegistryProxyCredential(c.registryProxyCredentialFile, c.registryProxyCredentialEnv)
+			},
+		},
 	}
 }
