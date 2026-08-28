@@ -156,10 +156,10 @@ _Avoid_: secret, credential (the value itself), token path.
 
 **Binding**:
 How a Project toolchain is pointed at the Registry proxy. Config-layer in v1: an
-env override where one suffices, plus — for cargo and npm — a layered textual
-host substitution of in-tree config marked `skip-worktree` (issue #2851,
-#2854) so the Agent neither sees nor commits it; `gradle` needs neither — a
-home-level Gradle init script hooked to
+env override where one suffices, plus — for cargo, npm, and yarn berry — a
+layered textual host substitution of in-tree config marked `skip-worktree`
+(issue #2851, #2854, #2856) so the Agent neither sees nor commits it; `gradle`
+needs neither — a home-level Gradle init script hooked to
 `beforeSettings`/`projectsEvaluated`/`settingsEvaluated` (plus a plain
 top-level hook for buildscript classpath, which resolves too early for any
 of those lifecycle callbacks) points resolution at the Forwarder with no
@@ -172,7 +172,11 @@ substitution layered on top), `go` (the env override alone), and `npm` (an
 `npm_config_registry` env override plus the textual substitution layered on
 top) are v1's three table entries — `gradle`'s own Binding needs no table
 entry, since its artifact base path is registry-specific rather than a
-derivable shape.
+derivable shape, and yarn (both classic, which rides npm's table entry and
+Binding verbatim, and berry, which layers `YARN_NPM_REGISTRY_SERVER` plus a
+textual `.yarnrc.yml` rewrite on top) needs no table entry of its own either,
+since it resolves through the same npm-compatible registry protocol paths
+npm's existing entry already allows.
 _Avoid_: adapter, registry config, ecosystem support.
 
 **Forwarder**:
