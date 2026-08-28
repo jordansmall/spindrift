@@ -526,11 +526,11 @@ phase_registry_proxy_forwarder() {
     return 0
   fi
 
-  # Read by phase_go_binding just below (issue #2857 slice 2): the readiness
-  # loop above is the one place that already confirms the Forwarder is
-  # actually listening, so a second binding shares that result via the same
-  # dynamic-scoping sentinel convention (issue #515) instead of re-probing
-  # the TCP port itself.
+  # Read by phase_go_binding and phase_gradle_binding just below (issue
+  # #2857 slice 2, issue #2858): the readiness loop above is the one place
+  # that already confirms the Forwarder is actually listening, so each
+  # binding phase shares that result via the same dynamic-scoping sentinel
+  # convention (issue #515) instead of re-probing the TCP port itself.
   _registry_proxy_forwarder_ready=1
 
   local _cargo_home
@@ -619,6 +619,214 @@ phase_go_binding() {
   fi
 
   echo "==> go bound to it via GOPROXY=http://127.0.0.1:${REGISTRY_PROXY_FORWARDER_PORT}"
+}
+
+# phase_gradle_binding binds Gradle to the same in-Box Forwarder
+# phase_registry_proxy_forwarder starts (ADR 0044, issue #2858), via a Gradle
+# init script under $GRADLE_USER_HOME/init.d/ -- Gradle auto-loads every
+# .gradle/.gradle.kts file there, the home-level equivalent of cargo's
+# $CARGO_HOME/config.toml above, so (unlike phase_cargo_intree_binding_apply
+# below) no in-tree rewrite of a Target repo's own build files is needed
+# here. A JVM-level forward-proxy property (-Dhttps.proxyHost/
+# JAVA_TOOL_OPTIONS) cannot stand in for this: Gradle resolves dependencies
+# against whatever repositories{} its own build/settings scripts declare, not
+# through a JVM-wide HTTP proxy.
+#
+# The redirect URL carries no path beyond the Forwarder's own root -- like
+# cargo's $CARGO_HOME/config.toml above, it leans on
+# REGISTRY_PROXY_UPSTREAM_URL (set launcher-side) already carrying whatever
+# base path the operator's registry needs; guessing a path shape here (e.g.
+# Maven Central's own "/maven2") would land at the wrong path on any upstream
+# that doesn't happen to share it, and allowlist.go's own bindings table
+# already documents artifact-base paths as registry-specific, not derivable.
+#
+# Two redirect forms, and three call sites for the persistent one, all
+# empirically verified against a real Gradle 8.14.4 (a local stand-in HTTP
+# server standing in for the Forwarder; not exercised by this repo's own
+# toolchain or bats suite, which has no JDK/gradle dependency):
+#
+#   - The one-shot form (spindriftRedirect below) clears whatever a
+#     repository container already holds and adds ours. This is only correct
+#     where the override installs *after* the thing it competes with has
+#     already finished declaring repositories, so nothing can still append
+#     behind it once the override runs.
+#   - The persistent form (spindriftPersistentRedirect below) adds ours once,
+#     then installs a `repos.all{}` listener that removes any OTHER
+#     repository the container gains afterward, forever.
+#     `RepositoryHandler.all(Action)` (a `NamedDomainObjectContainer`) fires
+#     its action immediately for every repository already present in the
+#     container AND again for every repository added later, so the listener
+#     keeps winning instead of losing to whatever declaration runs last. This
+#     matters because a project's own
+#     `buildscript { repositories { mavenCentral() } }` block, or a
+#     settings.gradle's own `buildscript { }` block, runs *after* the
+#     one-shot form's clear-then-add and silently appends the real upstream
+#     back in, so buildscript classpath resolution falls through to it on
+#     any Forwarder 404. Verified against both an explicit `maven { url ...
+#     }` block and the bare `mavenCentral()`/`gradlePluginPortal()`
+#     shorthand a real build/settings script is more likely to use, and
+#     against a settings script's own *explicit*
+#     `pluginManagement { repositories { gradlePluginPortal() } }` block --
+#     the one case an earlier revision of this comment documented as an
+#     unclosable gap (that block's own plugins{} resolution happens
+#     synchronously as part of settings-script evaluation, before any later
+#     lifecycle callback fires), closed because the listener, once installed
+#     from beforeSettings below, is already attached to the container by the
+#     time that block's own `gradlePluginPortal()` call runs and removes it
+#     on the spot.
+#
+# Call sites:
+#   - buildscript.repositories, given the persistent form from a plain
+#     top-level allprojects{} (run immediately as each project is
+#     configured, not deferred to a lifecycle callback, and before that
+#     project's own build script body runs): buildscript classpath
+#     resolution completes before gradle.projectsEvaluated ever fires, so
+#     deferring this one to projectsEvaluated (as settings/project
+#     repositories must be, below) would leave it silently resolving against
+#     the real upstream instead.
+#   - settings.pluginManagement.repositories and settings.buildscript.repositories,
+#     given the persistent form from gradle.beforeSettings -- the only hook
+#     early enough to win before the settings script body itself runs. This
+#     matters because a settings-level plugins{} block (e.g. the
+#     "org.gradle.toolchains.foojay-resolver-convention" id `gradle
+#     init`-generated settings.gradle.kts ships by default) resolves its
+#     plugins *during* settings evaluation, using whatever
+#     pluginManagement.repositories are declared at that point -- this
+#     completes before gradle.settingsEvaluated ever fires. settings.buildscript{}
+#     (a buildscript{} block written directly in settings.gradle) is likewise
+#     only reachable this early. gradle.beforeSettings and the
+#     allowInsecureProtocol property both require Gradle 6.0+; on older
+#     Gradle the unguarded forms would throw and kill every build in the Box,
+#     so both are wrapped in try/catch --
+#     see the inline comments below for exactly what coverage is lost when
+#     the catch triggers.
+#   - settings.pluginManagement.repositories again, and
+#     settings.dependencyResolutionManagement.repositories, both given the
+#     one-shot form from gradle.settingsEvaluated. The pluginManagement.repositories
+#     call is guarded on spindriftPluginManagementManaged (set true only once
+#     beforeSettings' persistent redirects above have installed) and runs
+#     *only* when that guard is false -- i.e. only as the Gradle <6.0
+#     fallback, where the beforeSettings try/catch never installed the
+#     listener at all. Without the guard this one-shot form would fire on
+#     Gradle 6.0+ too, on the very container the persistent listener is
+#     already attached to: clear-then-add re-adds an unnamed repo the
+#     listener immediately strips (its name never became 'spindrift'),
+#     leaving pluginManagement.repositories empty and every plugins{} block
+#     unresolvable.
+#     dependencyResolutionManagement/repositoriesMode require Gradle 6.8+;
+#     wrapped in try/catch since a Target repo pinning an older Gradle would
+#     otherwise throw here and kill every build in the Box -- pluginManagement.repositories
+#     needs no such guard, it's much older Gradle API.
+#   - each project's own repositories, given the one-shot form from
+#     gradle.projectsEvaluated once every project's own build script (and
+#     its own repositories{} block) has already run -- the naive top-level
+#     allprojects{}/gradle.beforeSettings forms run too early here and are
+#     silently undone once that script re-declares the real repository. Only
+#     applied when settingsEvaluated found the project is not already using
+#     Gradle 7+ centralized dependency management
+#     (RepositoriesMode.FAIL_ON_PROJECT_REPOS/PREFER_SETTINGS), or never
+#     reached that determination at all (the pre-6.8 try/catch fallback
+#     above): under FAIL_ON_PROJECT_REPOS this same allprojects{} override is
+#     itself rejected as a forbidden project-level repository, turning a
+#     working build into a hard failure.
+phase_gradle_binding() {
+  [ -n "${_registry_proxy_forwarder_ready:-}" ] || return 0
+
+  local _gradle_user_home
+  _gradle_user_home="${GRADLE_USER_HOME:-$HOME/.gradle}"
+  mkdir -p "$_gradle_user_home/init.d"
+  # Heredoc deliberately unquoted for the one bash substitution below
+  # (REGISTRY_PROXY_FORWARDER_PORT); any Groovy GString added elsewhere in
+  # this script would need its own "\$" escape to survive bash expansion.
+  cat >"$_gradle_user_home/init.d/spindrift-registry-proxy.init.gradle" <<EOF
+def spindriftMavenUrl = "http://127.0.0.1:${REGISTRY_PROXY_FORWARDER_PORT}/"
+def spindriftSettingsManaged = false
+def spindriftPluginManagementManaged = false
+
+def spindriftConfigureRepo = { repo ->
+  repo.url = uri(spindriftMavenUrl)
+  try {
+    repo.allowInsecureProtocol = true
+  } catch (MissingPropertyException ignored) {
+    // allowInsecureProtocol requires Gradle 6.0+ -- it exists specifically
+    // to add friction to insecure-protocol repositories, and older Gradle
+    // never restricted http:// repositories in the first place, so there is
+    // nothing to opt into and nothing lost by skipping it here.
+  }
+}
+
+// One-shot: only correct where this fires after the thing it competes with
+// has already finished declaring repositories (see the call sites below).
+def spindriftRedirect = { repos ->
+  repos.clear()
+  repos.maven { spindriftConfigureRepo(it) }
+}
+
+// Persistent: installs ours once, then removes any OTHER repository this
+// container gains afterward, forever -- see the doc comment above
+// phase_gradle_binding for why this is needed: a competing declaration
+// (e.g. a project's own buildscript{repositories{}} block) can still run
+// after the one-shot form's clear-then-add and silently append the real
+// upstream back in.
+def spindriftPersistentRedirect = { repos ->
+  repos.maven { repo ->
+    repo.name = 'spindrift'
+    spindriftConfigureRepo(repo)
+  }
+  repos.all { repo ->
+    if (repo.name != 'spindrift') {
+      repos.remove(repo)
+    }
+  }
+}
+
+allprojects {
+  spindriftPersistentRedirect(buildscript.repositories)
+}
+
+try {
+  gradle.beforeSettings { settings ->
+    spindriftPersistentRedirect(settings.pluginManagement.repositories)
+    spindriftPersistentRedirect(settings.buildscript.repositories)
+    spindriftPluginManagementManaged = true
+  }
+} catch (MissingMethodException ignored) {
+  // gradle.beforeSettings requires Gradle 6.0+ -- on older Gradle this
+  // throws at registration time above, so the hook is simply never
+  // installed. settingsEvaluated below still covers
+  // pluginManagement.repositories, just after the settings script's own
+  // declarations run instead of before -- a settings-level plugins{} block,
+  // or a settings.buildscript{} block written directly in settings.gradle,
+  // can still resolve against the real upstream on pre-6.0 Gradle
+  // specifically.
+}
+
+gradle.settingsEvaluated { settings ->
+  if (!spindriftPluginManagementManaged) {
+    spindriftRedirect(settings.pluginManagement.repositories)
+  }
+  try {
+    spindriftRedirect(settings.dependencyResolutionManagement.repositories)
+    spindriftSettingsManaged = settings.dependencyResolutionManagement.repositoriesMode.get().name() != "PREFER_PROJECT"
+  } catch (Exception ignored) {
+    // dependencyResolutionManagement/repositoriesMode require Gradle 6.8+ --
+    // on older Gradle this throws (MissingPropertyException/
+    // MissingMethodException), so fall back to the per-project
+    // projectsEvaluated override below instead of crashing every build.
+    spindriftSettingsManaged = false
+  }
+}
+
+gradle.projectsEvaluated {
+  if (!spindriftSettingsManaged) {
+    allprojects {
+      spindriftRedirect(repositories)
+    }
+  }
+}
+EOF
+
+  echo "==> gradle bound to the registry proxy Forwarder via $_gradle_user_home/init.d/spindrift-registry-proxy.init.gradle"
 }
 
 # phase_cargo_intree_binding_apply rewrites a Target repo's own committed
@@ -1549,9 +1757,11 @@ main() {
   # invoke a cargo build (clone_repo's devShell/prefetch phases below, the
   # driver itself) -- see its own doc comment for why this exact placement.
   phase_registry_proxy_forwarder
-  # phase_go_binding runs right after, same rationale: before clone_repo/any
-  # build, so `go` never resolves a module through the public proxy first.
+  # phase_go_binding and phase_gradle_binding run right after, same
+  # rationale: before clone_repo/any build, so neither ecosystem resolves a
+  # module/dependency through the public registry first.
   phase_go_binding
+  phase_gradle_binding
 
   # ORCHESTRATOR (issue #2047, ADR 0035 amendment; issue #2354 slice 3 hoisted
   # phase_conflict_resolve here, ahead of phase_prompt_assembly): the single

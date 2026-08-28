@@ -16,26 +16,9 @@ setup() {
 }
 
 # Kills any backgrounded stand-in socat process this suite started, so a
-# leaked process never survives past the test -- mirrors the chmod-then-
-# continue shape of entrypoint-home-agent-files.bats' teardown, but for
-# process cleanup instead of filesystem permissions.
+# leaked process never survives past the test.
 teardown() {
-  [ -n "${_test_socat_pid:-}" ] && kill "$_test_socat_pid" 2>/dev/null
-  true
-}
-
-# Bounded poll for the stand-in socat's UNIX-LISTEN socket file to actually
-# exist -- a freshly backgrounded socat may take a moment to bind -- in the
-# same bounded-poll spirit as wait_for_log_lines (tests/helper.bash), just
-# shaped around a filesystem test instead of a log-line count.
-_wait_for_socket() {
-  local _path="$1" _tries=0
-  while [ "$_tries" -lt 50 ]; do
-    [ -S "$_path" ] && return 0
-    sleep 0.1
-    _tries=$((_tries + 1))
-  done
-  return 1
+  kill_stand_in_socat
 }
 
 @test "socket present: Forwarder starts and cargo config.toml is written (issue #2849)" {
@@ -45,7 +28,7 @@ _wait_for_socket() {
   socat "UNIX-LISTEN:$REGISTRY_PROXY_SOCKET_PATH,fork,reuseaddr" EXEC:true &
   _test_socat_pid=$!
 
-  _wait_for_socket "$REGISTRY_PROXY_SOCKET_PATH"
+  wait_for_socket "$REGISTRY_PROXY_SOCKET_PATH"
 
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
