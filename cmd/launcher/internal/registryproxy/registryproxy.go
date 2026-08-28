@@ -13,6 +13,7 @@ package registryproxy
 import (
 	"errors"
 	"fmt"
+	"log"
 	"net"
 	"net/http"
 	"net/http/httputil"
@@ -80,6 +81,18 @@ func New(upstream, credential string) (http.Handler, error) {
 			w.Header().Set("Allow", "GET, HEAD")
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
+		}
+		// Log-only, not enforced (ADR 0044, issue #2852): the derived
+		// allowlist covers only cargo's protocol-fixed sparse-index path
+		// shapes, never the download/artifact endpoint, whose path is
+		// registry-specific (named by each registry's own config.json "dl"
+		// field) and so can't be statically derived here. Promoting this to
+		// a reject would first require deriving or learning that per-
+		// registry download path too -- e.g. fetching and parsing each
+		// configured registry's config.json at startup, or observing enough
+		// real traffic to prove the derived set complete.
+		if !isAllowedPath(r.URL.Path) {
+			log.Printf("registryproxy: path outside derived allowlist: %s %s", r.Method, r.URL.Path)
 		}
 		rp.ServeHTTP(w, r)
 	}), nil
