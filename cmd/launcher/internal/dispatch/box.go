@@ -212,7 +212,7 @@ func (d *Dispatch) runOnce(logPath string, env map[string]string, driverCacheDir
 		}
 		defer os.RemoveAll(proxyDir)
 
-		handler, err := registryproxy.New(d.cfg.RegistryProxyUpstreamURL)
+		handler, err := registryproxy.New(d.cfg.RegistryProxyUpstreamURL, d.cfg.RegistryProxyCredential)
 		if err != nil {
 			return fmt.Errorf("registry proxy: %w", err)
 		}
