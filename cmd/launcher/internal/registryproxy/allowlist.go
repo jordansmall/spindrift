@@ -4,8 +4,9 @@ import "regexp"
 
 // binding is one ecosystem's entry in the path-allowlist table (ADR 0044):
 // "each ecosystem is a small table entry, not a parser." v1 ships cargo and
-// go; a future ecosystem is added as another entry in bindings, not a
-// rewrite of this file.
+// go; gradle has a Binding (agent/entrypoint.sh) but no table entry, see the
+// comment above bindings below; a future ecosystem that does need a table
+// entry is added as another entry in bindings, not a rewrite of this file.
 type binding struct {
 	ecosystem string
 	patterns  []*regexp.Regexp
@@ -63,6 +64,12 @@ var goModulePatterns = []*regexp.Regexp{
 	regexp.MustCompile(goModulePathPrefix + `@v/` + goModuleVersion + `\.zip$`),
 }
 
+// bindings is the path-allowlist table (ADR 0044); gradle has no entry here
+// because its Binding (agent/entrypoint.sh) is a home-level init script
+// pointing resolution at the Forwarder, and like cargo's own excluded
+// download endpoint above, a Maven/Gradle repository's artifact base path is
+// registry-specific (the repository ID/layout configured on whatever
+// Nexus/Artifactory/etc. serves it) rather than a single derivable shape.
 var bindings = []binding{
 	{
 		ecosystem: "cargo",

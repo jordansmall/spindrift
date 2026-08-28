@@ -101,8 +101,12 @@ channel that is authenticated on its behalf.**
   automatic and self-maintaining, but not provably complete, and a false denial
   presents as a registry outage.
 
-**v1 ships `cargo` and `go`.** Other ecosystems are additive table entries,
-filed as their own tickets, added when something needs them.
+**v1 ships `cargo` and `go` in the path-allowlist table**
+(`cmd/launcher/internal/registryproxy/allowlist.go`). Other ecosystems are
+additive table entries, filed as their own tickets, added when something
+needs one — `gradle`'s own Binding (below) needs no table entry at all, for
+the same reason cargo's own download endpoint is excluded from its patterns:
+the artifact base path is registry-specific, not a fixed shape.
 
 ## Consequences
 
@@ -113,6 +117,82 @@ filed as their own tickets, added when something needs them.
   Gradle and Maven ignore `HTTPS_PROXY` and want `-Dhttps.proxyHost` — MITM can
   be added later as an additional binding mode, on evidence, without disturbing
   anything above.
+
+- **Gradle turned out not to need the JVM MITM the Consequences above
+  speculated about (issue #2858).** A home-level Gradle init script
+  (`$GRADLE_USER_HOME/init.d/*.gradle`) can point all dependency and plugin
+  resolution at the Forwarder with no in-tree rewrite at all. This was
+  verified by interactively running a real Gradle 8.14.4 against a local
+  stand-in HTTP server outside this repo's own toolchain — no JDK/gradle
+  dependency is added here, so the entrypoint's bats suite covers the
+  generated init script's shape and the entrypoint's control flow, not an
+  actual Gradle invocation. `-Dhttps.proxyHost`/`JAVA_TOOL_OPTIONS` were
+  confirmed the wrong mechanism, since a forward proxy cannot inject a header
+  into an HTTPS CONNECT tunnel and the Forwarder is a reverse proxy standing
+  in as the origin, not a forward proxy. The init script uses two redirect
+  forms. A one-shot clear-then-add is correct only where the override
+  installs *after* the thing it competes with has already finished declaring
+  repositories — Gradle 7+'s centralized `dependencyResolutionManagement`
+  and plain per-project repositories both qualify, since both are overridden
+  from a lifecycle callback (`gradle.settingsEvaluated`/
+  `gradle.projectsEvaluated`) that fires only once the competing declaration
+  is done. Everywhere else, a one-shot clear-then-add was found (by the same
+  interactive testing, issue #2858 review findings 1/1b) to have an
+  append-after-clear escape: a project's own
+  `buildscript { repositories { mavenCentral() } }` block, or a
+  `buildscript { }` block written directly in `settings.gradle`, runs
+  *after* the override and silently appends the real upstream back in, so
+  resolution falls through to it on any Forwarder 404 — the same is true of
+  an *explicit* `pluginManagement { repositories { } }` block in the
+  settings script itself, previously documented here as an unclosable gap.
+  The fix is a persistent form: install the Forwarder repository once, then
+  register a `repos.all { }` listener that removes any other repository the
+  container gains afterward, forever — `RepositoryHandler.all(Action)`
+  fires its action immediately for every repository already present AND
+  again for every repository added later, so the listener keeps winning
+  instead of losing to whatever declaration runs last, closing the
+  previously-documented gap along with it. Buildscript classpath resolution
+  completes *before* `gradle.projectsEvaluated` ever fires, so only a plain
+  top-level `allprojects { buildscript { ... } }` (run immediately, not
+  deferred to a lifecycle callback, installing the listener before that
+  project's own build script body runs) catches it; a settings-level
+  `plugins { }` block (which ships by default in `gradle init`-generated
+  `settings.gradle.kts`) and any `buildscript { }` block written directly in
+  `settings.gradle` both resolve *during* settings-script evaluation, before
+  `gradle.settingsEvaluated` ever fires, so both need the persistent form
+  installed from `gradle.beforeSettings` — the one hook early enough to win
+  before the settings script body itself runs. `gradle.settingsEvaluated`
+  still re-applies a one-shot `pluginManagement.repositories` override
+  afterwards, but it is guarded on a `spindriftPluginManagementManaged` flag
+  set only once `gradle.beforeSettings`' persistent redirects have installed,
+  and runs *only* when that flag is false — i.e. only as the Gradle <6.0
+  fallback, where `gradle.beforeSettings` itself requires 6.0+ and is
+  wrapped in a `try`/`catch` (issue #2858 review finding 3) rather than
+  thrown unguarded. An earlier revision ran this one-shot override
+  unconditionally, on the theory that it was merely redundant once the
+  persistent listener had installed; in fact, on Gradle 6.0+ it was
+  destructive — clear-then-add re-adds an unnamed repository the listener,
+  already attached to that same container, immediately strips (its name
+  never became `'spindrift'`), leaving `pluginManagement.repositories` empty
+  and every `plugins { }` block unresolvable on every Gradle 6.0+ build
+  (issue #2858 review round 4). The guard above is the fix. The same
+  `try`/`catch` guard wraps `allowInsecureProtocol`, also
+  6.0+, everywhere the init script sets it. Plain project repositories need
+  `gradle.projectsEvaluated`, not `allprojects { repositories.clear();
+  ... }`, which runs *before* the project's own build script and so is
+  silently undone once that script re-declares the real repository; Gradle
+  7+'s centralized `dependencyResolutionManagement` needs its own
+  `gradle.settingsEvaluated` override, applied *instead of* (not alongside)
+  the plain per-project override once `RepositoriesMode` is anything but
+  `PREFER_PROJECT` — a project enforcing `FAIL_ON_PROJECT_REPOS` rejects the
+  per-project override itself as a forbidden project-level repository; and
+  `dependencyResolutionManagement`/`repositoriesMode` themselves require
+  Gradle 6.8+, so that one override is wrapped in its own `try`/`catch`,
+  falling back to the per-project override on older Gradle instead of
+  throwing and killing every build in the Box. This is evidence against
+  reopening MITM here, and it narrows the case for MITM to ecosystems that
+  actually resist config-layer binding, not merely ones that ignore
+  `HTTPS_PROXY`.
 
 - **A per-toolchain table is accepted, deliberately.** Roughly five fields per
   ecosystem: home-config path, render template, env override, and in-tree
