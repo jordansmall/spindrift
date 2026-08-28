@@ -225,8 +225,9 @@ setup_run_env() {
   # Guard (issue #2424): bound the merge gate's poll loop by default so any
   # test that reaches it without setting its own MERGE_POLL_INTERVAL /
   # MERGE_POLL_TIMEOUT can't inherit the launcher's real production default
-  # (MERGE_POLL_TIMEOUT=1800s, MERGE_POLL_INTERVAL=30s) and real-sleep for up
-  # to 30 minutes before failing (as happened in CI on PR #2410). A poll
+  # (MERGE_POLL_TIMEOUT=3600s, MERGE_POLL_INTERVAL=180s) and real-sleep for up
+  # to 60 minutes before failing; a 30-minute version of this happened in
+  # CI on PR #2410. A poll
   # interval of 0 keeps iterations instant; a small nonzero timeout still
   # lets a poll loop actually iterate at least once before its own deadline
   # fires. Individual tests (e.g. tests/run-merge-gate.bats,
