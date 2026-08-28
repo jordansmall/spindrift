@@ -149,6 +149,32 @@ assert_timeout_rejected() {
   fi
 }
 
+# Kills any backgrounded stand-in socat process a suite started (via its own
+# _test_socat_pid), so a leaked process never survives past the test.
+# Extracted here once multiple entrypoint-*.bats suites needed the exact same
+# teardown logic, to avoid copying it verbatim into each one. Call from each
+# suite's own teardown() -- bats requires that hook defined per file, but the
+# body is just this one call.
+kill_stand_in_socat() {
+  [ -n "${_test_socat_pid:-}" ] && kill "$_test_socat_pid" 2>/dev/null
+  true
+}
+
+# Bounded poll for a stand-in socat's UNIX-LISTEN socket file to actually
+# exist -- a freshly backgrounded socat may take a moment to bind -- in the
+# same bounded-poll spirit as wait_for_log_lines above, just shaped around a
+# filesystem test instead of a log-line count. Same extraction as
+# kill_stand_in_socat above.
+wait_for_socket() {
+  local _path="$1" _tries=0
+  while [ "$_tries" -lt 50 ]; do
+    [ -S "$_path" ] && return 0
+    sleep 0.1
+    _tries=$((_tries + 1))
+  done
+  return 1
+}
+
 # Shared setup for the split entrypoint-*.bats suites (issue #518): every
 # concern file needs its own setup() hook per bats semantics, so the body
 # entrypoint.bats used to run once now lives here instead.

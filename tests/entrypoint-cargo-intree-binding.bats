@@ -18,20 +18,7 @@ setup() {
 }
 
 teardown() {
-  [ -n "${_test_socat_pid:-}" ] && kill "$_test_socat_pid" 2>/dev/null
-  true
-}
-
-# Bounded poll for the stand-in socat's UNIX-LISTEN socket file to actually
-# exist -- copied from entrypoint-registry-proxy-forwarder.bats.
-_wait_for_socket() {
-  local _path="$1" _tries=0
-  while [ "$_tries" -lt 50 ]; do
-    [ -S "$_path" ] && return 0
-    sleep 0.1
-    _tries=$((_tries + 1))
-  done
-  return 1
+  kill_stand_in_socat
 }
 
 # Seeds the remote's main branch with a committed .cargo/config.toml pinning
@@ -58,7 +45,7 @@ EOF
 
   socat "UNIX-LISTEN:$REGISTRY_PROXY_SOCKET_PATH,fork,reuseaddr" EXEC:true &
   _test_socat_pid=$!
-  _wait_for_socket "$REGISTRY_PROXY_SOCKET_PATH"
+  wait_for_socket "$REGISTRY_PROXY_SOCKET_PATH"
 
   _seed_cargo_intree_config "$REGISTRY_PROXY_UPSTREAM_HOST"
 
@@ -91,7 +78,7 @@ EOF
 
   socat "UNIX-LISTEN:$REGISTRY_PROXY_SOCKET_PATH,fork,reuseaddr" EXEC:true &
   _test_socat_pid=$!
-  _wait_for_socket "$REGISTRY_PROXY_SOCKET_PATH"
+  wait_for_socket "$REGISTRY_PROXY_SOCKET_PATH"
 
   _seed_cargo_intree_config "$REGISTRY_PROXY_UPSTREAM_HOST"
 
@@ -113,7 +100,7 @@ EOF
 
   socat "UNIX-LISTEN:$REGISTRY_PROXY_SOCKET_PATH,fork,reuseaddr" EXEC:true &
   _test_socat_pid=$!
-  _wait_for_socket "$REGISTRY_PROXY_SOCKET_PATH"
+  wait_for_socket "$REGISTRY_PROXY_SOCKET_PATH"
 
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
@@ -148,7 +135,7 @@ EOF
 
   socat "UNIX-LISTEN:$REGISTRY_PROXY_SOCKET_PATH,fork,reuseaddr" EXEC:true &
   _test_socat_pid=$!
-  _wait_for_socket "$REGISTRY_PROXY_SOCKET_PATH"
+  wait_for_socket "$REGISTRY_PROXY_SOCKET_PATH"
 
   _seed_cargo_intree_config "$REGISTRY_PROXY_UPSTREAM_HOST"
 
@@ -203,7 +190,7 @@ EOF
 
   socat "UNIX-LISTEN:$REGISTRY_PROXY_SOCKET_PATH,fork,reuseaddr" EXEC:true &
   _test_socat_pid=$!
-  _wait_for_socket "$REGISTRY_PROXY_SOCKET_PATH"
+  wait_for_socket "$REGISTRY_PROXY_SOCKET_PATH"
 
   _seed_cargo_intree_config "cargo.other-registry.example"
 
