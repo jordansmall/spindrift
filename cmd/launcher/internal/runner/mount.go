@@ -16,6 +16,13 @@ import (
 // rather than replaces.
 const operatorSkillsDir = "/operator-skills"
 
+// registryProxySocketTarget is the fixed in-box path the registry proxy's
+// unix domain socket mounts onto (ADR 0044, issue #2849). Not
+// configurable — the Forwarder component a later slice adds expects the
+// socket at this well-known path, so it's an implementation-internal
+// contract, not a user-facing knob.
+const registryProxySocketTarget = "/registry-proxy.sock"
+
 // MountSpec describes a single host-to-box mount: what to mount, where, and
 // under what read-only policy. The decision of whether a mount applies —
 // gate, existence guard, operator message — is computed once by
@@ -75,6 +82,22 @@ func candidateMount(source, target string, readOnly bool) (MountSpec, bool) {
 	return MountSpec{Source: source, Target: target, ReadOnly: readOnly}, true
 }
 
+// candidateSocketMount reports whether source should be mounted at target as
+// a unix domain socket: both must be set and source must be an
+// already-existing socket file, not a directory or regular file. Unlike
+// candidateMount, the returned spec is always writable/connectable — a proxy
+// socket mount only ever makes sense read-write, never read-only.
+func candidateSocketMount(source, target string) (MountSpec, bool) {
+	if source == "" || target == "" {
+		return MountSpec{}, false
+	}
+	info, err := os.Stat(source)
+	if err != nil || info.Mode()&os.ModeSocket == 0 {
+		return MountSpec{}, false
+	}
+	return MountSpec{Source: source, Target: target, ReadOnly: false}, true
+}
+
 // buildMountSpecs computes the list of host-to-box mounts that apply for p
 // and box, independent of runtime backend.
 func buildMountSpecs(p MountParams, box Box) []MountSpec {
@@ -116,6 +139,10 @@ func buildMountSpecs(p MountParams, box Box) []MountSpec {
 		if spec, ok := candidateMount(p.LocalIssuesDir, "/issues", true); ok {
 			specs = append(specs, spec)
 		}
+	}
+
+	if spec, ok := candidateSocketMount(box.RegistryProxySocketPath, registryProxySocketTarget); ok {
+		specs = append(specs, spec)
 	}
 
 	return specs
