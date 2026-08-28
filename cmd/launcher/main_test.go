@@ -3331,6 +3331,26 @@ func TestSettleConfig_BaseBranchThreadsFromConfig(t *testing.T) {
 	}
 }
 
+// TestWavesConfig_WiresTransientRetryKnobs verifies wavesConfig threads
+// c.transientRetryMax and c.transientBackoffSecs into waves.Config's
+// TransientRetryMax/TransientBackoffSecs fields (issue #2866) — the same
+// launcher-wide TRANSIENT_RETRY_MAX/TRANSIENT_BACKOFF_SECS knob dispatch's
+// exit-retry path and settleConfig already thread, now reaching
+// RunContinuous's rate-limited re-discover retry loop too.
+func TestWavesConfig_WiresTransientRetryKnobs(t *testing.T) {
+	c := minimalValidConfig()
+	c.transientRetryMax = 5
+	c.transientBackoffSecs = 10
+
+	wc := wavesConfig(c)
+	if wc.TransientRetryMax != 5 {
+		t.Errorf("wavesConfig(c).TransientRetryMax = %d, want 5", wc.TransientRetryMax)
+	}
+	if wc.TransientBackoffSecs != 10 {
+		t.Errorf("wavesConfig(c).TransientBackoffSecs = %d, want 10", wc.TransientBackoffSecs)
+	}
+}
+
 // TestNewSettle_ResearchReadOnly_RelaysVerdictComment verifies that newSettle,
 // for the research dispatch kind under BOX_FORGE_AND_ISSUE_ACCESS=read-only,
 // wires a ResearchSettle that relays the SPINDRIFT_COMMENT verdict via
