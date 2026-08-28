@@ -152,6 +152,36 @@ the artifact base path is registry-specific, not a fixed shape.
 > default registry and the rewritten per-scope registry hosts (verified
 > against real yarn-berry 4.14.1).
 
+> **Update.** `pnpm` (issue #2855) needed no new path-allowlist table entry —
+> `allowlist.go`'s existing `npm` entry already matches pnpm's requests,
+> since pnpm's client fetches from the same registry protocol with the same
+> URL shapes as npm's client. The per-scope in-tree `.npmrc` rewrite
+> (`phase_npm_intree_binding_apply`) needed no changes either: it is a
+> content-driven textual rewrite, not npm-specific parsing, so a pnpm
+> project's `.npmrc` (default or per-scope `@scope:registry=`) is covered
+> identically — proven by `tests/entrypoint-pnpm-intree-binding.bats` with
+> zero production diff. Two genuine divergences did surface. First: pnpm
+> dropped support for generic `npm_config_*` environment variables and reads
+> only `pnpm_config_*` (e.g. `pnpm_config_registry`) for this purpose now
+> (per pnpm's own docs, pnpm.io/configuring), so
+> `phase_registry_proxy_forwarder`'s existing `npm_config_registry` export
+> gained a same-shape additive `pnpm_config_registry` export line next to it
+> — not a new table entry or a new Binding phase. Second: pnpm 11.23.0+ can
+> also pin a scope to a private registry via a `registries:` block in
+> `pnpm-workspace.yaml` (pnpm.io/registries), a file `.npmrc`'s rewrite never
+> touches — a project using only that mechanism would have resolved straight
+> to the real upstream host, uncredentialed. Unlike the env-var divergence,
+> this one is a distinct committed file with its own git-tracked/skip-
+> worktree/revert-around-rebase lifecycle, so it got its own phase pair,
+> `phase_pnpm_workspace_intree_binding_apply` /
+> `pnpm_workspace_intree_binding_revert`, mirroring
+> `phase_npm_intree_binding_apply` exactly (same plain-sed textual rewrite,
+> not YAML-aware parsing) rather than folding into the `.npmrc` phase.
+> Confirms the additive per-ecosystem table design holds for the
+> path-allowlist half, and that a second package-manager client can still
+> need its own in-tree rewrite phase when it introduces a new config file,
+> not just a new env var.
+
 ## Consequences
 
 - **The binding mechanism is a swappable last mile, not an architecture.**
