@@ -10,7 +10,7 @@ setup() {
 # --- cold-run toolchain nudge (issue #343) ------------------------------------
 
 @test "nudge: hint emitted when no prefetch configured and go.sum present" {
-  seed_lockfile "go.sum"
+  seed_dependency_manifest "go.sum"
   unset PREFETCH
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
@@ -19,8 +19,52 @@ setup() {
   echo "$output" | grep -q "packages"
 }
 
+@test "nudge: hint emitted when no prefetch configured and build.gradle.kts present" {
+  # Gradle projects don't always commit a lockfile, so a build/settings file
+  # alone must be sufficient to trigger the hint.
+  seed_dependency_manifest "build.gradle.kts"
+  unset PREFETCH
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "gradle"
+  echo "$output" | grep -q "prefetch"
+  echo "$output" | grep -q "packages"
+}
+
+@test "nudge: hint emitted when no prefetch configured and build.gradle present" {
+  seed_dependency_manifest "build.gradle"
+  unset PREFETCH
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "gradle"
+}
+
+@test "nudge: hint emitted when no prefetch configured and settings.gradle present" {
+  seed_dependency_manifest "settings.gradle"
+  unset PREFETCH
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "gradle"
+}
+
+@test "nudge: hint emitted when no prefetch configured and settings.gradle.kts present" {
+  seed_dependency_manifest "settings.gradle.kts"
+  unset PREFETCH
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "gradle"
+}
+
+@test "nudge: hint emitted when no prefetch configured and gradle.lockfile present" {
+  seed_dependency_manifest "gradle.lockfile"
+  unset PREFETCH
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "gradle"
+}
+
 @test "nudge: hint suppressed when prefetch is configured" {
-  seed_lockfile "go.sum"
+  seed_dependency_manifest "go.sum"
   export PREFETCH="true"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]

@@ -912,12 +912,12 @@ cargo_intree_binding_revert() {
 }
 
 # phase_toolchain_nudge emits a one-time hint for a cold run with a
-# recognized lockfile and no prefetch configured.
+# recognized dependency-manifest file and no prefetch configured.
 phase_toolchain_nudge() {
   # Cold-run toolchain nudge: when no prefetch is configured and a recognized
-  # lockfile is present, emit a one-time hint pointing at the two knobs that
-  # actually help (prefetch for per-run cache warm, packages for a baked
-  # cross-run toolchain). Unknown ecosystems emit nothing.
+  # dependency-manifest file is present, emit a one-time hint pointing at the
+  # two knobs that actually help (prefetch for per-run cache warm, packages
+  # for a baked cross-run toolchain). Unknown ecosystems emit nothing.
   if [ -z "${PREFETCH:-}" ]; then
     local _nudge_ecosystem=""
     if [ -f "Cargo.lock" ]; then
@@ -926,6 +926,8 @@ phase_toolchain_nudge() {
       _nudge_ecosystem="npm/pnpm/yarn"
     elif [ -f "go.sum" ]; then
       _nudge_ecosystem="go mod"
+    elif [ -f "build.gradle" ] || [ -f "build.gradle.kts" ] || [ -f "settings.gradle" ] || [ -f "settings.gradle.kts" ] || [ -f "gradle.lockfile" ]; then
+      _nudge_ecosystem="gradle"
     fi
     if [ -n "$_nudge_ecosystem" ]; then
       echo "==> hint: ${_nudge_ecosystem} project detected; set 'prefetch' to warm dependency caches per run, or 'packages' to bake a toolchain into the image"

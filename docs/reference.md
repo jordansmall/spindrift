@@ -905,13 +905,16 @@ The hint names the detected ecosystem and the two knobs that help:
 | `prefetch` | shell snippet that runs in the work tree after each clone; use it to download and cache dependencies so the agent doesn't fetch them cold on every tool invocation |
 | `packages` | bakes a toolchain into the image itself; pre-warmed across runs (no per-run network fetch needed) |
 
-Detection covers the following lockfiles (first match wins):
+Detection covers the following files (first match wins) — a lockfile for most
+ecosystems, but Gradle projects don't always commit one, so any of its
+build/settings files is enough on its own:
 
-| lockfile                                              | reported ecosystem |
-| ----------------------------------------------------- | ------------------ |
-| `Cargo.lock`                                          | cargo              |
-| `package-lock.json`, `pnpm-lock.yaml`, `yarn.lock`   | npm/pnpm/yarn      |
-| `go.sum`                                              | go mod             |
+| file(s)                                                                                         | reported ecosystem |
+| ----------------------------------------------------------------------------------------------- | ------------------ |
+| `Cargo.lock`                                                                                    | cargo              |
+| `package-lock.json`, `pnpm-lock.yaml`, `yarn.lock`                                              | npm/pnpm/yarn      |
+| `go.sum`                                                                                        | go mod             |
+| `build.gradle`, `build.gradle.kts`, `settings.gradle`, `settings.gradle.kts`, `gradle.lockfile` | gradle             |
 
 Unrecognized ecosystems emit no hint. The hint is suppressed entirely when
 `prefetch` is already configured, so it is ignorable once you have acted on it.

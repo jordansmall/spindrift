@@ -495,14 +495,15 @@ seed_release_branch() {
   git -C "$seed" push -q origin "main:$branch"
 }
 
-# Push a named lockfile to the remote's main branch. Call after setup_bare_repo.
-# Usage: seed_lockfile "go.sum"
-seed_lockfile() {
-  local lockfile="$1"
-  local seed="$BATS_TEST_TMPDIR/seed-lockfile"
+# Push a named dependency-manifest file (a lockfile, or a Gradle
+# build/settings file) to the remote's main branch. Call after setup_bare_repo.
+# Usage: seed_dependency_manifest "go.sum"
+seed_dependency_manifest() {
+  local manifest="$1"
+  local seed="$BATS_TEST_TMPDIR/seed-dependency-manifest"
   git clone -q "https://github.com/owner/repo.git" "$seed"
-  touch "$seed/$lockfile"
-  git -C "$seed" add "$lockfile"
-  git -C "$seed" commit -q -m "chore: add $lockfile"
+  touch "$seed/$manifest"
+  git -C "$seed" add "$manifest"
+  git -C "$seed" commit -q -m "chore: add $manifest"
   git -C "$seed" push -q origin HEAD:main
 }
