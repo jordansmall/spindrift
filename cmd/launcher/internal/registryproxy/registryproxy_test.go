@@ -605,3 +605,139 @@ func TestNew_NeverLogsCredential(t *testing.T) {
 		t.Errorf("log output contained the credential: %q", logBuf.String())
 	}
 }
+
+// TestNew_ServesPathOutsideAllowlist verifies a request whose path falls
+// outside the derived allowlist (e.g. cargo's download endpoint, which
+// isAllowedPath deliberately excludes) is still served normally -- the
+// allowlist is log-only in v1, never enforced (issue #2852).
+func TestNew_ServesPathOutsideAllowlist(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("download body"))
+	}))
+	defer upstream.Close()
+
+	p, err := New(upstream.URL, "")
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/crates/foo/1.0.0/download", nil)
+	p.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d (out-of-allowlist path must still be served)", rr.Code, http.StatusOK)
+	}
+	body, err := io.ReadAll(rr.Body)
+	if err != nil {
+		t.Fatalf("ReadAll: %v", err)
+	}
+	if string(body) != "download body" {
+		t.Errorf("body = %q, want %q", string(body), "download body")
+	}
+}
+
+// TestNew_LogsPathOutsideAllowlist verifies a request whose path falls
+// outside the derived allowlist produces a distinguishable log line naming
+// the method and path.
+func TestNew_LogsPathOutsideAllowlist(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	p, err := New(upstream.URL, "")
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	var logBuf bytes.Buffer
+	prevOutput := log.Writer()
+	log.SetOutput(&logBuf)
+	defer log.SetOutput(prevOutput)
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/crates/foo/1.0.0/download", nil)
+	p.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
+	}
+	logged := logBuf.String()
+	if !strings.Contains(logged, "registryproxy: path outside derived allowlist:") {
+		t.Errorf("log output = %q, want it to contain the distinguishing marker", logged)
+	}
+	if !strings.Contains(logged, http.MethodGet) {
+		t.Errorf("log output = %q, want it to contain the method %q", logged, http.MethodGet)
+	}
+	if !strings.Contains(logged, "/api/v1/crates/foo/1.0.0/download") {
+		t.Errorf("log output = %q, want it to contain the path", logged)
+	}
+}
+
+// TestNew_NoLogForAllowlistedPath verifies a request whose path falls inside
+// the derived allowlist produces no "outside allowlist" log line.
+func TestNew_NoLogForAllowlistedPath(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	p, err := New(upstream.URL, "")
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	var logBuf bytes.Buffer
+	prevOutput := log.Writer()
+	log.SetOutput(&logBuf)
+	defer log.SetOutput(prevOutput)
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/config.json", nil)
+	p.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
+	}
+	if strings.Contains(logBuf.String(), "registryproxy: path outside derived allowlist:") {
+		t.Errorf("log output = %q, want no allowlist-miss log line for an allowlisted path", logBuf.String())
+	}
+}
+
+// TestNew_NeverLogsCredentialForOutOfAllowlistPath verifies that the new
+// allowlist-miss log line, specifically, never carries a configured
+// credential -- mirroring TestNew_NeverLogsCredential but exercising the
+// out-of-allowlist code path directly, since that test's own path
+// ("/crates/foo") happens to also fall outside the allowlist but was written
+// before this log line existed and doesn't assert against it.
+func TestNew_NeverLogsCredentialForOutOfAllowlistPath(t *testing.T) {
+	const credential = "sekret-token"
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	p, err := New(upstream.URL, credential)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	var logBuf bytes.Buffer
+	prevOutput := log.Writer()
+	log.SetOutput(&logBuf)
+	defer log.SetOutput(prevOutput)
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/crates/foo/1.0.0/download", nil)
+	p.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
+	}
+	if strings.Contains(logBuf.String(), credential) {
+		t.Errorf("log output contained the credential: %q", logBuf.String())
+	}
+}
