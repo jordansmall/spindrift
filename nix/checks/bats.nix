@@ -156,6 +156,7 @@ let
     pkgs.gnugrep
     pkgs.gnused
     pkgs.jq
+    pkgs.socat
   ];
 
   # The full env for the bats-shard-N derivations (batsShardChecks below):
