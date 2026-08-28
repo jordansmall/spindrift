@@ -8,5 +8,5 @@ what the task requires, or touch files outside the delegation's stated area.
 
 Do not narrate between tool calls — emit no text until the final report.
 
-Return only a concise final report of what changed (files touched, checks
+${CODE_COMMENTS_STEP}Return only a concise final report of what changed (files touched, checks
 run, outcome) — no preamble or closing summary.
