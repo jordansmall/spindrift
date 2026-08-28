@@ -60,9 +60,13 @@ func TestIsAllowedPath_RootRejected(t *testing.T) {
 }
 
 // TestIsAllowedPath_UnrelatedRejected verifies paths with no relation to
-// cargo's sparse-index shape are not allowed.
+// any bound ecosystem's path shape are not allowed. "/evil" is deliberately
+// excluded here: npm's unscoped package metadata shape is a bare name
+// segment (any package name looks like this), so a single lowercase word is
+// no longer "unrelated" once npm is bound -- see
+// TestIsAllowedPath_NpmUnrelatedRejected for npm-specific over-match cases.
 func TestIsAllowedPath_UnrelatedRejected(t *testing.T) {
-	cases := []string{"/../etc/passwd", "/evil"}
+	cases := []string{"/../etc/passwd", "/foo/bar/baz"}
 	for _, path := range cases {
 		t.Run(path, func(t *testing.T) {
 			if isAllowedPath(path) {
@@ -153,9 +157,129 @@ func TestIsAllowedPath_GoModuleWriteShapedRejected(t *testing.T) {
 }
 
 // TestIsAllowedPath_GoModuleUnrelatedRejected verifies a path with no
-// relation to the go module proxy protocol's shape is not allowed.
+// relation to the go module proxy protocol's shape is not allowed. Three
+// plain segments, no "@": also unrelated to npm's shapes, which need either
+// a leading "@scope" segment or a trailing "-/name-version.tgz" pair to
+// match past two segments.
 func TestIsAllowedPath_GoModuleUnrelatedRejected(t *testing.T) {
-	if isAllowedPath("/evil") {
-		t.Errorf("isAllowedPath(%q) = true, want false", "/evil")
+	if isAllowedPath("/evil/module/path") {
+		t.Errorf("isAllowedPath(%q) = true, want false", "/evil/module/path")
+	}
+}
+
+// TestIsAllowedPath_NpmUnscopedPackage verifies npm's unscoped package
+// metadata path shape is allowed.
+func TestIsAllowedPath_NpmUnscopedPackage(t *testing.T) {
+	if !isAllowedPath("/lodash") {
+		t.Errorf("isAllowedPath(%q) = false, want true", "/lodash")
+	}
+}
+
+// TestIsAllowedPath_NpmUnscopedPackageVersion verifies npm's unscoped
+// version-specific metadata path shape is allowed.
+func TestIsAllowedPath_NpmUnscopedPackageVersion(t *testing.T) {
+	if !isAllowedPath("/lodash/4.17.21") {
+		t.Errorf("isAllowedPath(%q) = false, want true", "/lodash/4.17.21")
+	}
+}
+
+// TestIsAllowedPath_NpmUnscopedTarball verifies npm's unscoped tarball path
+// shape is allowed.
+func TestIsAllowedPath_NpmUnscopedTarball(t *testing.T) {
+	if !isAllowedPath("/lodash/-/lodash-4.17.21.tgz") {
+		t.Errorf("isAllowedPath(%q) = false, want true", "/lodash/-/lodash-4.17.21.tgz")
+	}
+}
+
+// TestIsAllowedPath_NpmUnscopedTarballWrongExtensionRejected verifies an
+// unscoped tarball-shaped path with an extension other than .tgz is not
+// allowed.
+func TestIsAllowedPath_NpmUnscopedTarballWrongExtensionRejected(t *testing.T) {
+	if isAllowedPath("/lodash/-/lodash-4.17.21.zip") {
+		t.Errorf("isAllowedPath(%q) = true, want false", "/lodash/-/lodash-4.17.21.zip")
+	}
+}
+
+// TestIsAllowedPath_NpmUnscopedTarballSemverBuildMetadata verifies a
+// tarball filename carrying legal semver build metadata (a "+" segment,
+// e.g. "1.0.0+build") is allowed.
+func TestIsAllowedPath_NpmUnscopedTarballSemverBuildMetadata(t *testing.T) {
+	if !isAllowedPath("/foo/-/foo-1.0.0+build.tgz") {
+		t.Errorf("isAllowedPath(%q) = false, want true", "/foo/-/foo-1.0.0+build.tgz")
+	}
+}
+
+// TestIsAllowedPath_NpmScopedPackage verifies npm's scoped package metadata
+// path shape is allowed.
+func TestIsAllowedPath_NpmScopedPackage(t *testing.T) {
+	if !isAllowedPath("/@types/node") {
+		t.Errorf("isAllowedPath(%q) = false, want true", "/@types/node")
+	}
+}
+
+// TestIsAllowedPath_NpmScopedPackageVersion verifies npm's scoped
+// version-specific metadata path shape is allowed.
+func TestIsAllowedPath_NpmScopedPackageVersion(t *testing.T) {
+	if !isAllowedPath("/@types/node/20.0.0") {
+		t.Errorf("isAllowedPath(%q) = false, want true", "/@types/node/20.0.0")
+	}
+}
+
+// TestIsAllowedPath_NpmScopedTarball verifies npm's scoped tarball path
+// shape is allowed.
+func TestIsAllowedPath_NpmScopedTarball(t *testing.T) {
+	if !isAllowedPath("/@types/node/-/node-20.0.0.tgz") {
+		t.Errorf("isAllowedPath(%q) = false, want true", "/@types/node/-/node-20.0.0.tgz")
+	}
+}
+
+// TestIsAllowedPath_NpmScopedTarballWrongExtensionRejected verifies a
+// scoped tarball-shaped path with an extension other than .tgz is not
+// allowed.
+func TestIsAllowedPath_NpmScopedTarballWrongExtensionRejected(t *testing.T) {
+	if isAllowedPath("/@types/node/-/node-20.0.0.zip") {
+		t.Errorf("isAllowedPath(%q) = true, want false", "/@types/node/-/node-20.0.0.zip")
+	}
+}
+
+// TestIsAllowedPath_NpmUnrelatedRejected verifies npm-shaped-but-malformed
+// paths -- a scope with no package name segment, and an empty scope name --
+// are not allowed. This does not cover every way npm's patterns could
+// over-match; see TestIsAllowedPath_NpmDotLeadingSegmentRejected for the
+// dot-leading-segment/traversal-shaped cases.
+func TestIsAllowedPath_NpmUnrelatedRejected(t *testing.T) {
+	cases := []string{"/@types", "/@/pkg"}
+	for _, path := range cases {
+		t.Run(path, func(t *testing.T) {
+			if isAllowedPath(path) {
+				t.Errorf("isAllowedPath(%q) = true, want false", path)
+			}
+		})
+	}
+}
+
+// TestIsAllowedPath_NpmDotLeadingSegmentRejected verifies path segments that
+// start with a dot -- including traversal-shaped ones -- are not allowed.
+// Real npm package/scope names can never start with "." or "_"
+// (https://docs.npmjs.com/cli/v10/configuring-npm/package-json#name), so a
+// path segment starting with "." never matches a real npm request; matching
+// it anyway would let a traversal-shaped path pass the allowlist under
+// npm's bare-name and unscoped name/version shapes.
+func TestIsAllowedPath_NpmDotLeadingSegmentRejected(t *testing.T) {
+	cases := []string{"/..", "/../etc", "/.env", "/.hidden"}
+	for _, path := range cases {
+		t.Run(path, func(t *testing.T) {
+			if isAllowedPath(path) {
+				t.Errorf("isAllowedPath(%q) = true, want false", path)
+			}
+		})
+	}
+}
+
+// TestIsAllowedPath_NpmSearch verifies npm's search endpoint path is
+// allowed.
+func TestIsAllowedPath_NpmSearch(t *testing.T) {
+	if !isAllowedPath("/-/v1/search") {
+		t.Errorf("isAllowedPath(%q) = false, want true", "/-/v1/search")
 	}
 }

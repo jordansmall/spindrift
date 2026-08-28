@@ -3,10 +3,11 @@ package registryproxy
 import "regexp"
 
 // binding is one ecosystem's entry in the path-allowlist table (ADR 0044):
-// "each ecosystem is a small table entry, not a parser." v1 ships cargo and
-// go; gradle has a Binding (agent/entrypoint.sh) but no table entry, see the
-// comment above bindings below; a future ecosystem that does need a table
-// entry is added as another entry in bindings, not a rewrite of this file.
+// "each ecosystem is a small table entry, not a parser." v1 ships cargo,
+// go, and npm; gradle has a Binding (agent/entrypoint.sh) but no table
+// entry, see the comment above bindings below; a future ecosystem that
+// does need a table entry is added as another entry in bindings, not a
+// rewrite of this file.
 type binding struct {
 	ecosystem string
 	patterns  []*regexp.Regexp
@@ -64,6 +65,52 @@ var goModulePatterns = []*regexp.Regexp{
 	regexp.MustCompile(goModulePathPrefix + `@v/` + goModuleVersion + `\.zip$`),
 }
 
+// npmNameSegment is the package/scope name segment class shared by every
+// npmPackageRegistryPatterns shape below, factored into one constant so a
+// fix to the charset only needs to change in one place (the same reasoning
+// as goModulePathPrefix above). The registry protocol doesn't enforce npm's
+// lowercase-by-convention naming at the URL level, but every segment must
+// start with an alphanumeric character -- real npm package/scope names can
+// never start with "." or "_"
+// (https://docs.npmjs.com/cli/v10/configuring-npm/package-json#name), and
+// requiring a leading alnum keeps a dot-leading, traversal-shaped segment
+// (e.g. "..") from matching the bare-name/name-version shapes below.
+const npmNameSegment = `[A-Za-z0-9][A-Za-z0-9._-]*`
+
+// npmTarballFilenameSegment is npmNameSegment widened with "+": a tarball
+// filename embeds a semver version, and semver's build-metadata component
+// (e.g. "1.0.0+build") legally contains a "+" that a package/scope name
+// never does.
+const npmTarballFilenameSegment = `[A-Za-z0-9][A-Za-z0-9._+-]*`
+
+// npmPackageRegistryPatterns are the registry path shapes npm's package
+// registry protocol defines (unofficially documented at
+// https://github.com/npm/registry/blob/main/docs/REGISTRY-API.md): package
+// metadata, version-specific metadata, tarball fetches, and the search
+// endpoint, each in scoped (@scope/name) and unscoped (name) form where
+// applicable. The tarball shape is included for completeness, but like
+// cargo's own download endpoint it's rarely reached through the proxy in
+// practice: npm's client (pacote) fetches the packument's embedded
+// "tarball" URL verbatim rather than deriving this path from the
+// configured registry, so that request goes straight to upstream --
+// unauthenticated, the same accepted gap ADR 0044 already documents for a
+// redirect-based download (docs/adr/0044-private-registry-credentials-live-in-a-launcher-side-proxy.md).
+var npmPackageRegistryPatterns = []*regexp.Regexp{
+	// These two bare-name/two-segment shapes also match plenty of paths that
+	// aren't real packages (e.g. "/admin", "/login", "/v1/tokens") -- npm's
+	// flat namespace gives a real package name and an arbitrary one/two-
+	// segment path the same shape, so this is a known, unfixable residual
+	// false-positive: issue #2852's allowlist-miss log is near-vacuous for
+	// paths of this shape as a result.
+	regexp.MustCompile(`^/` + npmNameSegment + `$`),
+	regexp.MustCompile(`^/` + npmNameSegment + `/` + npmNameSegment + `$`),
+	regexp.MustCompile(`^/` + npmNameSegment + `/-/` + npmTarballFilenameSegment + `\.tgz$`),
+	regexp.MustCompile(`^/@` + npmNameSegment + `/` + npmNameSegment + `$`),
+	regexp.MustCompile(`^/@` + npmNameSegment + `/` + npmNameSegment + `/` + npmNameSegment + `$`),
+	regexp.MustCompile(`^/@` + npmNameSegment + `/` + npmNameSegment + `/-/` + npmTarballFilenameSegment + `\.tgz$`),
+	regexp.MustCompile(`^/-/v1/search$`),
+}
+
 // bindings is the path-allowlist table (ADR 0044); gradle has no entry here
 // because its Binding (agent/entrypoint.sh) is a home-level init script
 // pointing resolution at the Forwarder, and like cargo's own excluded
@@ -78,6 +125,10 @@ var bindings = []binding{
 	{
 		ecosystem: "go",
 		patterns:  goModulePatterns,
+	},
+	{
+		ecosystem: "npm",
+		patterns:  npmPackageRegistryPatterns,
 	},
 }
 

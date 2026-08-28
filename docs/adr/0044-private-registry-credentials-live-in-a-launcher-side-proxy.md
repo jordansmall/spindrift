@@ -101,12 +101,31 @@ channel that is authenticated on its behalf.**
   automatic and self-maintaining, but not provably complete, and a false denial
   presents as a registry outage.
 
-**v1 ships `cargo` and `go` in the path-allowlist table**
+**v1 ships `cargo`, `go`, and `npm` in the path-allowlist table**
 (`cmd/launcher/internal/registryproxy/allowlist.go`). Other ecosystems are
 additive table entries, filed as their own tickets, added when something
 needs one — `gradle`'s own Binding (below) needs no table entry at all, for
 the same reason cargo's own download endpoint is excluded from its patterns:
 the artifact base path is registry-specific, not a fixed shape.
+
+> **Update.** `npm` landed as a third v1 table entry (issue #2854), with
+> zero changes to ingress, containment, or proxy policy — confirming the
+> "additive table entry" claim above unmodified. An earlier draft of this
+> Binding gave the proxy a `ModifyResponse` hook that rewrote npm's
+> `dist.tarball` URL in a packument response, specifically to route the
+> follow-up tarball fetch back through the proxy; that hook was reverted
+> after review found it was itself the proxy-policy change this ticket's
+> own acceptance criteria forbade, on top of several correctness bugs of
+> its own (wrong media-type match against npm's actual `Accept`, a
+> path-prefixed-upstream double-join, and a `HEAD`-request crash). npm's
+> client (`pacote`) still fetches that tarball URL verbatim rather than
+> deriving it from the configured registry host, so the request leaves the
+> proxy and reaches upstream directly, unauthenticated — the same class of
+> gap this ADR already accepts for cargo's own download endpoint, above
+> ("registries routinely answer downloads with a `302` to a CDN... The
+> `302` is returned to the client, which fetches the target directly and
+> unauthenticated"). Reported, not worked around, per the ticket's own
+> instruction.
 
 ## Consequences
 
