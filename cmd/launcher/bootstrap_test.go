@@ -48,12 +48,15 @@ func TestBootstrap_ValidateError_WrapsErrConfigInvalid(t *testing.T) {
 
 // TestBootstrap_BadRegistryProxyCredentialEnv_NoUpstreamURL_DoesNotError
 // proves bootstrap() only resolves the registry proxy credential when
-// REGISTRY_PROXY_UPSTREAM_URL is actually set (issue #2850 review finding):
-// a typo'd REGISTRY_PROXY_CREDENTIAL_ENV reference must not abort a launcher
-// invocation that never touches the registry proxy at all, since no proxy
-// will ever start to use it. REGISTRY_PROXY_CREDENTIAL_ENV here names a
-// variable that is deliberately never set with t.Setenv, so resolution would
-// fail closed if it ran.
+// REGISTRY_PROXY_UPSTREAM_URL is actually set (issue #2850 review finding),
+// and that the registry-proxy-credential doctor row (issue #2853) agrees:
+// REGISTRY_PROXY_UPSTREAM_URL is a runtime-only value while the credential
+// fields may be committed in flake.nix as standing config, so a credential
+// reference left over from that standing config must not abort a launcher
+// invocation that never touches the registry proxy at all -- no proxy will
+// ever start to use it. REGISTRY_PROXY_CREDENTIAL_ENV here names a variable
+// that is deliberately never set with t.Setenv, so resolution would fail
+// closed if it ran.
 func TestBootstrap_BadRegistryProxyCredentialEnv_NoUpstreamURL_DoesNotError(t *testing.T) {
 	checkout := mustSeedableCheckout(t)
 	repoPath := filepath.Join(t.TempDir(), "accum.git")
