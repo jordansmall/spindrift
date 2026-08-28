@@ -15,14 +15,23 @@
 # Callers must already have `set -euo pipefail`, DRIVER_LOG validated, and
 # $model/$prompt parsed before sourcing this file.
 
-printf 'driver invoked for issue #%s model=%s\n' "${ISSUE_NUMBER:-?}" "${model:-}" >>"$DRIVER_LOG"
+{
+  printf 'driver invoked for issue #%s model=%s\n' "${ISSUE_NUMBER:-?}" "${model:-}"
 
-# Real claude reads CLAUDE_CODE_DISABLE_BACKGROUND_TASKS from its own process
-# environment (issue #2011) to omit run_in_background from the Bash/Agent/
-# Task/PowerShell tools' schema; this fake logs whatever it actually
-# inherited so a test can assert the var reaches it identically regardless of
-# which in-box binary (driver-exec or the orchestrator) spawned this process.
-printf 'env: CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=%s\n' "${CLAUDE_CODE_DISABLE_BACKGROUND_TASKS:-}" >>"$DRIVER_LOG"
+  # Real claude reads CLAUDE_CODE_DISABLE_BACKGROUND_TASKS from its own
+  # process environment (issue #2011) to omit run_in_background from the
+  # Bash/Agent/Task/PowerShell tools' schema; this fake logs whatever it
+  # actually inherited so a test can assert the var reaches it identically
+  # regardless of which in-box binary (driver-exec or the orchestrator)
+  # spawned this process.
+  printf 'env: CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=%s\n' "${CLAUDE_CODE_DISABLE_BACKGROUND_TASKS:-}"
+
+  # Same reasoning as the CLAUDE_CODE_DISABLE_BACKGROUND_TASKS line above, but
+  # proving the registry-proxy Binding's npm_config_registry env override
+  # (issue #2854) reaches this Driver process, not just the entrypoint shell
+  # that exported it.
+  printf 'env: npm_config_registry=%s\n' "${npm_config_registry:-}"
+} >>"$DRIVER_LOG"
 
 # Report any skills discoverable at the path Claude Code scans. Real claude -p
 # discovers a skill only as a directory holding a SKILL.md

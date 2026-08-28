@@ -2,7 +2,10 @@
 # In-Box Forwarder (ADR 0044, issue #2849): phase_registry_proxy_forwarder
 # presents the registry proxy's mounted unix socket
 # (cmd/launcher/internal/runner/mount.go's registryProxySocketTarget) as a
-# local TCP endpoint via socat, then binds cargo's crates-io source to it.
+# local TCP endpoint via socat, then binds cargo's crates-io source to it
+# (user-level $CARGO_HOME/config.toml) and npm's default registry to it
+# (npm_config_registry env var, issue #2854 -- npm's env > .npmrc precedence
+# is what lets this win over a Target repo's own project-level .npmrc).
 # REGISTRY_PROXY_SOCKET_PATH/REGISTRY_PROXY_FORWARDER_PORT are the
 # test-only overrides these two tests rely on (agent/entrypoint.sh's
 # configure_env) so this suite never touches the real host
@@ -37,6 +40,8 @@ teardown() {
   grep -q 'replace-with = "spindrift-registry-proxy"' "$HOME/.cargo/config.toml"
   grep -q "registry = \"sparse+http://127.0.0.1:${REGISTRY_PROXY_FORWARDER_PORT}/\"" "$HOME/.cargo/config.toml"
 
+  grep -q "env: npm_config_registry=http://127.0.0.1:${REGISTRY_PROXY_FORWARDER_PORT}/" "$DRIVER_LOG"
+
   [[ "$output" == *"==> registry proxy Forwarder up on 127.0.0.1:${REGISTRY_PROXY_FORWARDER_PORT}"* ]]
 }
 
@@ -48,6 +53,7 @@ teardown() {
   [ "$status" -eq 0 ]
 
   [ ! -f "$HOME/.cargo/config.toml" ]
+  grep -q "env: npm_config_registry=$" "$DRIVER_LOG"
 
   [[ "$output" != *"==> registry proxy Forwarder"* ]]
   [[ "$output" != *"==> WARNING:"*"socat"* ]]
