@@ -2701,8 +2701,8 @@ in
         + "git.branchPrefix       = \"agent/issue-\";\n"
         + "git.merge.policy       = \"manual\";\n"
         + "git.merge.guardPaths   = \".github/**,.forgejo/**,**/CLAUDE.md,**/AGENTS.md,.claude/**,.opencode/**\";\n"
-        + "git.merge.pollInterval = 30;\n"
-        + "git.merge.pollTimeout  = 1800;\n"
+        + "git.merge.pollInterval = 180;\n"
+        + "git.merge.pollTimeout  = 3600;\n"
         + "dispatch.maxParallel   = 3;\n"
         + "dispatch.maxJobs       = 0;\n";
       driftedDocSrc = beginMarker + driftedBlock + endMarker + "\n";

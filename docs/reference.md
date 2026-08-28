@@ -172,8 +172,8 @@ git.baseBranch         = "main";
 git.branchPrefix       = "agent/issue-";
 git.merge.policy       = "manual";
 git.merge.guardPaths   = ".github/**,.forgejo/**,**/CLAUDE.md,**/AGENTS.md,.claude/**,.opencode/**";
-git.merge.pollInterval = 30;
-git.merge.pollTimeout  = 1800;
+git.merge.pollInterval = 180;
+git.merge.pollTimeout  = 3600;
 dispatch.maxParallel   = 3;
 dispatch.maxJobs       = 0;
 # END GENERATED SETTINGS EXAMPLE CONFIG

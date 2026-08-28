@@ -727,7 +727,7 @@ in
   mergePollInterval = {
     env = "MERGE_POLL_INTERVAL";
     group = "git";
-    default = 30;
+    default = 180;
     doc = "seconds between merge-gate poll iterations";
     flakeOption = true;
     intKind = "nonneg";
@@ -737,7 +737,7 @@ in
   mergePollTimeout = {
     env = "MERGE_POLL_TIMEOUT";
     group = "git";
-    default = 1800;
+    default = 3600;
     doc = "total seconds to wait for CI green before abandoning the merge attempt";
     flakeOption = true;
     intKind = "nonneg";
