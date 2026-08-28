@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/retry"
 )
 
 // ErrOpenNoneDispatchable is returned by Dispatch when ModeDrain selects zero
@@ -211,6 +212,23 @@ type Config struct {
 	// accumulated freeSlotSecs value is exactly assertable instead of only
 	// >=0-checkable.
 	now func() time.Time
+
+	// TransientRetryMax caps continuous re-discover retries against a
+	// rate-limited forge (forge.ErrRateLimit, issue #2866) — the same
+	// TRANSIENT_RETRY_MAX knob dispatch.Config's own exit-retry loop honors,
+	// reused here rather than inventing a second retry-count knob.
+	TransientRetryMax int
+
+	// TransientBackoffSecs is the linear-backoff unit a rate-limited
+	// re-discover retry sleeps between attempts (issue #2866) — the same
+	// TRANSIENT_BACKOFF_SECS knob dispatch.Config's own exit-retry loop
+	// honors.
+	TransientBackoffSecs int
+
+	// Clock is the injectable sleep seam a rate-limited re-discover retry's
+	// backoff sleeps through — defaults to retry.RealClock() when unset (its
+	// Sleep field left nil).
+	Clock retry.Clock
 }
 
 // NewPlan decides how in.Issues should be dispatched. Every origin —

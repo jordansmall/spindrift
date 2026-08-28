@@ -2,6 +2,7 @@ package waves
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -12,11 +13,23 @@ import (
 
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/retry"
 	"spindrift.dev/launcher/internal/runner"
 	"spindrift.dev/launcher/internal/settle"
 	"spindrift.dev/launcher/internal/terminate"
 	"spindrift.dev/launcher/internal/testutil"
 )
+
+// fakeWavesClock returns a retry.Clock with a fixed Now and a Sleep that
+// records durations into calls, mirroring
+// dispatch/retry_test.go's fakeClock for the waves package's own Clock seam
+// (issue #2866).
+func fakeWavesClock(now time.Time, calls *[]time.Duration) retry.Clock {
+	return retry.Clock{
+		Now:   func() time.Time { return now },
+		Sleep: func(d time.Duration) { *calls = append(*calls, d) },
+	}
+}
 
 // TestRunContinuous_RefillsFreedSlotWhileOthersRunning verifies the core
 // slot-refill behavior (#527 AC1): with MaxParallel=2 and three ready
@@ -1423,6 +1436,172 @@ func TestRunContinuous_AllBlockedReturnsErrOpenNoneDispatchable(t *testing.T) {
 	}
 	if len(fr.RunCalls) != 0 {
 		t.Errorf("RunCalls: got %d, want 0", len(fr.RunCalls))
+	}
+}
+
+// TestRunContinuous_RateLimitedRediscoverRetriesWithBackoffThenSucceeds
+// verifies issue #2866: a re-discover that fails with forge.ErrRateLimit
+// retries with backoff instead of ending the run. discover fails on its
+// first 2 calls, then succeeds on the 3rd; RunContinuous must retry through
+// the failures, dispatch the issue once it discovers it, and return nil --
+// sleeping through the injected fake Clock for exactly the 2 rate-limited
+// attempts, with durations matching LinearBackoff{Unit: 1s}.Duration(1) and
+// .Duration(2) (1s, 2s).
+func TestRunContinuous_RateLimitedRediscoverRetriesWithBackoffThenSucceeds(t *testing.T) {
+	c := baseConfig()
+	c.Label = "agent-trigger"
+	c.MaxParallel = 1
+	c.TransientRetryMax = 3
+	c.TransientBackoffSecs = 1
+
+	var sleeps []time.Duration
+	c.Clock = fakeWavesClock(time.Time{}, &sleeps)
+
+	fc := forge.NewFake(dispatchLabels(c))
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.Label}})
+
+	fr := runner.NewFake()
+	dir := tempLogDir(t)
+	f := testFactory(t, dir, fr)
+	s := newSettle(fc, fc)
+
+	discoverCalls := 0
+	discover := func() ([]Issue, map[string][]string, Sources, map[string]bool, error) {
+		discoverCalls++
+		if discoverCalls <= 2 {
+			return nil, nil, nil, nil, fmt.Errorf("%w: rate limited", forge.ErrRateLimit)
+		}
+		raw, err := fc.ListIssues(forge.Dispatchable)
+		if err != nil {
+			return nil, nil, nil, nil, err
+		}
+		out := make([]Issue, len(raw))
+		for i, fi := range raw {
+			out[i] = Issue{Number: fi.Number, Title: fi.Title}
+		}
+		return out, nil, nil, nil, nil
+	}
+	fresh := func() (bool, bool, string) { return true, true, "fresh" }
+
+	err := RunContinuous(c, nil, fc, fc, dir, f, s, discover, fresh)
+	if err != nil {
+		t.Fatalf("RunContinuous: got %v, want nil", err)
+	}
+	if len(fr.RunCalls) != 1 {
+		t.Fatalf("RunCalls: got %d, want 1", len(fr.RunCalls))
+	}
+
+	lb := retry.LinearBackoff{Unit: time.Duration(c.TransientBackoffSecs) * time.Second, Clock: c.Clock}
+	wantSleeps := []time.Duration{lb.Duration(1), lb.Duration(2)}
+	if len(sleeps) != len(wantSleeps) || sleeps[0] != wantSleeps[0] || sleeps[1] != wantSleeps[1] {
+		t.Fatalf("sleeps: got %v, want %v", sleeps, wantSleeps)
+	}
+}
+
+// TestRunContinuous_RateLimitedRediscoverExhaustsRetries verifies issue
+// #2866's exhaustion path: a re-discover that keeps failing with
+// forge.ErrRateLimit for TransientRetryMax+1 total attempts must give up the
+// same way a non-rate-limit error does today -- refill returns false, no
+// panic, no infinite loop -- but the stderr message it prints must name rate
+// limiting as the cause. With nothing ever dispatched, RunContinuous falls
+// out to ErrOpenNoneDispatchable exactly as an ordinary all-blocked run
+// does; no special-casing of the rate-limit-exhausted path is needed for
+// that.
+func TestRunContinuous_RateLimitedRediscoverExhaustsRetries(t *testing.T) {
+	c := baseConfig()
+	c.Label = "agent-trigger"
+	c.MaxParallel = 1
+	c.TransientRetryMax = 2
+	c.TransientBackoffSecs = 1
+
+	var sleeps []time.Duration
+	c.Clock = fakeWavesClock(time.Time{}, &sleeps)
+
+	fc := forge.NewFake(dispatchLabels(c))
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.Label}})
+
+	fr := runner.NewFake()
+	dir := tempLogDir(t)
+	f := testFactory(t, dir, fr)
+	s := newSettle(fc, fc)
+
+	discoverCalls := 0
+	discover := func() ([]Issue, map[string][]string, Sources, map[string]bool, error) {
+		discoverCalls++
+		return nil, nil, nil, nil, fmt.Errorf("%w: rate limited", forge.ErrRateLimit)
+	}
+	fresh := func() (bool, bool, string) { return true, true, "fresh" }
+
+	var err error
+	out := testutil.CaptureStderr(t, func() {
+		err = RunContinuous(c, nil, fc, fc, dir, f, s, discover, fresh)
+	})
+
+	if !errors.Is(err, ErrOpenNoneDispatchable) {
+		t.Fatalf("RunContinuous: got %v, want ErrOpenNoneDispatchable", err)
+	}
+	if len(fr.RunCalls) != 0 {
+		t.Fatalf("RunCalls: got %d, want 0", len(fr.RunCalls))
+	}
+	if discoverCalls != 1+c.TransientRetryMax {
+		t.Fatalf("discoverCalls: got %d, want %d (1 initial + TransientRetryMax retries)", discoverCalls, 1+c.TransientRetryMax)
+	}
+	if len(sleeps) != c.TransientRetryMax {
+		t.Fatalf("sleeps: got %d, want %d (one backoff sleep before each retry, none after the final failed attempt)", len(sleeps), c.TransientRetryMax)
+	}
+	if !strings.Contains(out, "rate limit") {
+		t.Fatalf("stderr must name rate limiting as the exhaustion cause, got:\n%s", out)
+	}
+}
+
+// TestRunContinuous_NonRateLimitRediscoverErrorFailsFastUnchanged verifies
+// issue #2866 left the pre-existing non-rate-limit re-discover failure path
+// untouched: a discover() error that is not forge.ErrRateLimit ends the
+// refill on the very first call, with the exact original stderr message and
+// no backoff sleep.
+func TestRunContinuous_NonRateLimitRediscoverErrorFailsFastUnchanged(t *testing.T) {
+	c := baseConfig()
+	c.Label = "agent-trigger"
+	c.MaxParallel = 1
+	c.TransientRetryMax = 2
+	c.TransientBackoffSecs = 1
+
+	var sleeps []time.Duration
+	c.Clock = fakeWavesClock(time.Time{}, &sleeps)
+
+	fc := forge.NewFake(dispatchLabels(c))
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.Label}})
+
+	fr := runner.NewFake()
+	dir := tempLogDir(t)
+	f := testFactory(t, dir, fr)
+	s := newSettle(fc, fc)
+
+	discoverCalls := 0
+	wantErr := errors.New("boom")
+	discover := func() ([]Issue, map[string][]string, Sources, map[string]bool, error) {
+		discoverCalls++
+		return nil, nil, nil, nil, wantErr
+	}
+	fresh := func() (bool, bool, string) { return true, true, "fresh" }
+
+	var err error
+	out := testutil.CaptureStderr(t, func() {
+		err = RunContinuous(c, nil, fc, fc, dir, f, s, discover, fresh)
+	})
+
+	if !errors.Is(err, ErrOpenNoneDispatchable) {
+		t.Fatalf("RunContinuous: got %v, want ErrOpenNoneDispatchable", err)
+	}
+	if discoverCalls != 1 {
+		t.Fatalf("discoverCalls: got %d, want 1 (non-rate-limit error must fail fast on the very first attempt)", discoverCalls)
+	}
+	if len(sleeps) != 0 {
+		t.Fatalf("sleeps: got %d, want 0 (non-rate-limit error must never back off)", len(sleeps))
+	}
+	wantMsg := fmt.Sprintf("continuous: re-discover: %v\n", wantErr)
+	if out != wantMsg {
+		t.Fatalf("stderr: got %q, want exactly %q (unchanged message)", out, wantMsg)
 	}
 }
 

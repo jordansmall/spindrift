@@ -11,6 +11,7 @@ import (
 
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/retry"
 	"spindrift.dev/launcher/internal/settle"
 	"spindrift.dev/launcher/internal/terminate"
 )
@@ -336,6 +337,14 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 	if now == nil {
 		now = time.Now
 	}
+	// clock is cfg's injectable sleep seam for a rate-limited re-discover
+	// retry's backoff (issue #2866) — nil (every production construction
+	// site) means retry.RealClock(); only same-package tests inject a fake
+	// Clock so the retry backoff sleeps through it instead of a real sleep.
+	clock := cfg.Clock
+	if clock.Sleep == nil {
+		clock = retry.RealClock()
+	}
 
 	// refill reports whether it launched a Box, so a caller filling more
 	// than one freed slot from a single trigger (the grow listener below,
@@ -418,10 +427,30 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 			}
 			return false
 		}
-		issues, edges, sources, failed, err := discover()
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "continuous: re-discover: %v\n", err)
-			return false
+		var issues []Issue
+		var edges map[string][]string
+		var sources Sources
+		var failed map[string]bool
+		attempt := 0
+		for {
+			var err error
+			issues, edges, sources, failed, err = discover()
+			if err == nil {
+				break
+			}
+			if !errors.Is(err, forge.ErrRateLimit) {
+				fmt.Fprintf(os.Stderr, "continuous: re-discover: %v\n", err)
+				return false
+			}
+			attempt++
+			if attempt > cfg.TransientRetryMax {
+				fmt.Fprintf(os.Stderr, "continuous: re-discover: rate limited; retry cap exhausted (%d)\n", cfg.TransientRetryMax)
+				return false
+			}
+			lb := retry.LinearBackoff{Unit: time.Duration(cfg.TransientBackoffSecs) * time.Second, Clock: clock}
+			backoff := lb.Duration(attempt)
+			fmt.Fprintf(os.Stderr, "continuous: re-discover: rate limited; retry %d/%d in %s\n", attempt, cfg.TransientRetryMax, backoff)
+			clock.Sleep(backoff)
 		}
 		// Continuous refill has no Origin concept — it is always the
 		// discovered pool, never a hand-picked selective list — so, unlike
