@@ -1307,6 +1307,9 @@ fi
 	if !errors.Is(err, forge.ErrRepoNotFound) {
 		t.Fatalf("want forge.ErrRepoNotFound, got: %v", err)
 	}
+	if errors.Is(err, forge.ErrRateLimit) {
+		t.Fatalf("error must not be errors.Is forge.ErrRateLimit; got: %v", err)
+	}
 	if !strings.Contains(err.Error(), "unknown flag") {
 		t.Fatalf("error must contain gh's stderr; got: %v", err)
 	}
@@ -1601,6 +1604,61 @@ fi
 	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
 	if err := c.MarkReady("https://github.com/owner/repo/pull/42"); err != nil {
 		t.Fatalf("MarkReady on an already-ready PR must be a no-op, got: %v", err)
+	}
+}
+
+// TestIsRateLimited verifies that isRateLimited recognizes both GitHub's
+// primary hourly-quota phrasing and its secondary/abuse-detection phrasings
+// (issue #2865), and that it does not misclassify unrelated gh failures
+// (auth, not-found, network) as rate limiting.
+func TestIsRateLimited(t *testing.T) {
+	tests := []struct {
+		name   string
+		stderr string
+		want   bool
+	}{
+		{
+			name:   "primary quota exceeded",
+			stderr: "API rate limit exceeded for installation ID 12345678.",
+			want:   true,
+		},
+		{
+			name:   "secondary abuse detection",
+			stderr: "You have triggered an abuse detection mechanism and have been temporarily blocked from content creation. Please retry your request again later.",
+			want:   true,
+		},
+		{
+			name:   "secondary generic rate limit",
+			stderr: "You have exceeded a secondary rate limit and have been temporarily blocked from content creation. Please retry your request again later.",
+			want:   true,
+		},
+		{
+			name:   "already exceeded phrasing",
+			stderr: "You have already exceeded your GraphQL points budget for this hour. Please wait a few minutes before you try again.",
+			want:   true,
+		},
+		{
+			name:   "unauthorized is not rate limiting",
+			stderr: "HTTP 401: Bad credentials (https://api.github.com/graphql)",
+			want:   false,
+		},
+		{
+			name:   "not found is not rate limiting",
+			stderr: "GraphQL: Could not resolve to a Repository with the name 'owner/repo'. (repository)",
+			want:   false,
+		},
+		{
+			name:   "network failure is not rate limiting",
+			stderr: "dial tcp: lookup api.github.com: no such host",
+			want:   false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isRateLimited(tt.stderr); got != tt.want {
+				t.Errorf("isRateLimited(%q) = %v, want %v", tt.stderr, got, tt.want)
+			}
+		})
 	}
 }
 
@@ -2105,5 +2163,57 @@ func TestGhCommandErrText_StderrTruncated(t *testing.T) {
 	}
 	if !strings.Contains(got.Error(), "truncated") {
 		t.Errorf("truncation should be visible in the message, got a %d-byte message", len(got.Error()))
+	}
+}
+
+// TestGhCommandErrText_RateLimitedStderrWrapsErrRateLimit verifies that when
+// the supplied stderr text classifies as rate limiting (isRateLimited),
+// ghCommandErrText's returned error additionally wraps forge.ErrRateLimit —
+// centralizing the classification here means every call site routed through
+// ghCommandErrText/ghCommandErr picks this up for free (issue #2865).
+func TestGhCommandErrText_RateLimitedStderrWrapsErrRateLimit(t *testing.T) {
+	_, err := exec.Command("sh", "-c", "exit 1").Output()
+	if err == nil {
+		t.Fatal("want subprocess error, got nil")
+	}
+
+	stderr := "API rate limit exceeded for installation ID 12345678."
+	got := ghCommandErrText("gh issue list", err, stderr)
+	if got == nil {
+		t.Fatal("want error, got nil")
+	}
+	if !errors.Is(got, forge.ErrRateLimit) {
+		t.Errorf("error should wrap forge.ErrRateLimit, got: %v", got)
+	}
+	if !strings.Contains(strings.ToLower(got.Error()), "rate limit") {
+		t.Errorf("error message should name rate limiting, got: %q", got.Error())
+	}
+	if !strings.Contains(got.Error(), stderr) {
+		t.Errorf("error should still surface gh's stderr, got: %q", got.Error())
+	}
+}
+
+// TestGhCommandErr_RateLimitedStderrWrapsErrRateLimit verifies the
+// *exec.ExitError-based sibling ghCommandErr inherits the same
+// forge.ErrRateLimit wrapping, since it delegates to ghCommandErrText.
+func TestGhCommandErr_RateLimitedStderrWrapsErrRateLimit(t *testing.T) {
+	_, err := exec.Command("sh", "-c", "printf 'You have exceeded a secondary rate limit and have been temporarily blocked from content creation.' 1>&2; exit 1").Output()
+	if err == nil {
+		t.Fatal("want subprocess error, got nil")
+	}
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) {
+		t.Fatalf("want *exec.ExitError, got %T: %v", err, err)
+	}
+
+	got := ghCommandErr("gh issue list", err)
+	if got == nil {
+		t.Fatal("want error, got nil")
+	}
+	if !errors.Is(got, forge.ErrRateLimit) {
+		t.Errorf("error should wrap forge.ErrRateLimit, got: %v", got)
+	}
+	if !strings.Contains(strings.ToLower(got.Error()), "rate limit") {
+		t.Errorf("error message should name rate limiting, got: %q", got.Error())
 	}
 }

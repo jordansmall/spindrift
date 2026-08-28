@@ -29,6 +29,7 @@ const ghCommandErrStderrCap = 4096
 // — never both here and via a second, independent ghCommandErr/manual-wrap
 // call on the same failure (that would double-report the same stderr text).
 func ghCommandErrText(description string, err error, stderr string) error {
+	var base error
 	if msg := strings.TrimSpace(stderr); msg != "" {
 		if len(msg) > ghCommandErrStderrCap {
 			cut := ghCommandErrStderrCap
@@ -37,9 +38,14 @@ func ghCommandErrText(description string, err error, stderr string) error {
 			}
 			msg = msg[:cut] + "...(truncated)"
 		}
-		return fmt.Errorf("%s: %w: %s", description, err, msg)
+		base = fmt.Errorf("%s: %w: %s", description, err, msg)
+	} else {
+		base = fmt.Errorf("%s: %w", description, err)
 	}
-	return fmt.Errorf("%s: %w", description, err)
+	if isRateLimited(stderr) {
+		return fmt.Errorf("%w: %w", forge.ErrRateLimit, base)
+	}
+	return base
 }
 
 // ghCommandErr turns a failed gh invocation's error into one that also
@@ -59,6 +65,30 @@ func ghCommandErr(description string, err error) error {
 		return ghCommandErrText(description, err, string(exitErr.Stderr))
 	}
 	return fmt.Errorf("%s: %w", description, err)
+}
+
+// rateLimitMarkers are the substrings isRateLimited looks for in gh's
+// stderr — the fixed GitHub rate-limit vocabulary, named once here rather
+// than inlined in isRateLimited.
+var rateLimitMarkers = []string{
+	"api rate limit exceeded",
+	"already exceeded",
+	"secondary rate limit",
+	"abuse detection",
+}
+
+// isRateLimited returns true when gh's stderr indicates GitHub is
+// rate-limiting the caller — either the primary hourly API quota being
+// exhausted or the secondary/abuse-detection limit kicking in — as opposed
+// to an unrelated failure such as an auth, not-found, or network error.
+func isRateLimited(stderr string) bool {
+	s := strings.ToLower(stderr)
+	for _, marker := range rateLimitMarkers {
+		if strings.Contains(s, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 // execClient is the gh-exec adapter.

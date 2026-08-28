@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	neturl "net/url"
 	"os"
@@ -439,10 +440,18 @@ func runGHReadyToggle(prURL string, args ...string) error {
 
 // Probe checks that gh is authenticated and the configured repository is
 // reachable. It returns the resolved repo slug on success, ErrAuthFailure if
-// the credential check fails, or ErrRepoNotFound if the repo cannot be found.
+// the credential check fails, ErrRepoNotFound if the repo cannot be found,
+// or ErrRateLimit if either gh call failed because GitHub is rate-limiting
+// the caller — mutually exclusive with the other two, so a caller checking
+// ErrAuthFailure/ErrRepoNotFound first doesn't misreport a throttled
+// operator's real cause.
 func (e *execClient) Probe() (string, error) {
 	if _, err := exec.Command("gh", "auth", "status").Output(); err != nil {
-		return "", fmt.Errorf("%w: %w", forge.ErrAuthFailure, ghCommandErr("gh auth status", err))
+		wrapped := ghCommandErr("gh auth status", err)
+		if errors.Is(wrapped, forge.ErrRateLimit) {
+			return "", wrapped
+		}
+		return "", fmt.Errorf("%w: %w", forge.ErrAuthFailure, wrapped)
 	}
 	var stderr bytes.Buffer
 	cmd := exec.Command("gh", "repo", "view", e.repo,
@@ -451,7 +460,11 @@ func (e *execClient) Probe() (string, error) {
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
 	if err != nil {
-		return "", fmt.Errorf("%w: %w", forge.ErrRepoNotFound, ghCommandErrText(fmt.Sprintf("gh repo view %s", e.repo), err, stderr.String()))
+		wrapped := ghCommandErrText(fmt.Sprintf("gh repo view %s", e.repo), err, stderr.String())
+		if errors.Is(wrapped, forge.ErrRateLimit) {
+			return "", wrapped
+		}
+		return "", fmt.Errorf("%w: %w", forge.ErrRepoNotFound, wrapped)
 	}
 	return strings.TrimSpace(string(out)), nil
 }
