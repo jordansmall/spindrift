@@ -61,6 +61,11 @@
     "var": "COORDINATOR_STEP"
   },
   {
+    "gate": "CODE_COMMENTS_MANDATORY",
+    "fragment": "code-comments.md",
+    "var": "CODE_COMMENTS_STEP"
+  },
+  {
     "gate": "FILER_FILE_DIRECT_ANY",
     "fragment": "file-issues-direct.md",
     "var": "FILE_ISSUES_DIRECT_STEP"

@@ -427,6 +427,22 @@ in
         touch $out
       '';
 
+  # templates/default/prompts/fragments/code-comments.md is a hand-
+  # maintained second copy of issue-prompt.md's "# CODE COMMENTS" body
+  # (worker-prompt.md/conflict-resolve-prompt.md splice it in as inline
+  # prose, not a headed section, so it can't reuse the injectBlocks
+  # mechanism verbatim) -- this pins the two together the same way
+  # mkharness-prompt-fix-code-comments-no-drift pins fix-prompt.md's own
+  # injected copy, so an edit to one without the other fails loudly
+  # (issue #2880 review finding).
+  mkharness-fragment-code-comments-no-drift =
+    pkgs.runCommand "mkharness-fragment-code-comments-no-drift" { }
+      ''
+        tail -n +3 ${batsHarness.internals.codeCommentsContractFile} | head -n -1 > canonical-code-comments-body.txt
+        diff canonical-code-comments-body.txt ${../../templates/default/prompts/fragments/code-comments.md}
+        touch $out
+      '';
+
   mkharness-prompt-fix-check-no-drift = pkgs.runCommand "mkharness-prompt-fix-check-no-drift" { } ''
     awk '/^# CHECK$/{f=1} /^# LAND THE CHANGE$/{exit} f' ${fixPromptHarness.internals.promptDir}/fix-prompt.md > injected-check.txt
     diff ${batsHarness.internals.checkContractFile} injected-check.txt

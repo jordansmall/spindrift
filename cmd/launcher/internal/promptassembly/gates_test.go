@@ -90,6 +90,24 @@ func TestGatesSkillsBaking(t *testing.T) {
 	}
 }
 
+// TestGatesCodeCommentsMandatory covers CODE_COMMENTS_MANDATORY (issue
+// #2880): unlike WORKER_PROVISIONED, this gate carries no Env field and is
+// always true, regardless of what else Env sets -- so the code-comments
+// rule reaches worker-prompt.md on every Driver, including opencode, where
+// WorkerProvisioned stays false by design even when a worker exists.
+func TestGatesCodeCommentsMandatory(t *testing.T) {
+	for name, env := range map[string]Env{
+		"zero-value Env{}": {},
+		"coveredEnv()":     coveredEnv(),
+	} {
+		t.Run(name, func(t *testing.T) {
+			if got := Gates(env)["CODE_COMMENTS_MANDATORY"]; !got {
+				t.Errorf("Gates(%s)[%q] = %v, want true", name, "CODE_COMMENTS_MANDATORY", got)
+			}
+		})
+	}
+}
+
 // TestGatesOrchestratorReviewLoop covers ORCHESTRATOR (entrypoint.sh:
 // 761-762), the REVIEW_LOOP_INLINE/REVIEW_LOOP_ORCHESTRATOR exactly-one-on
 // pairing it drives (entrypoint.sh: 771-779), and FILER_ENABLED/

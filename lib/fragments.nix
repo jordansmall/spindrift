@@ -169,6 +169,13 @@
     fragment = "coordinator.md";
     var = "COORDINATOR_STEP";
   }
+  # Gates on CODE_COMMENTS_MANDATORY, not WORKER_PROVISIONED -- see that
+  # gate's comment in cmd/launcher/internal/promptassembly/gates.go for why.
+  {
+    gate = "CODE_COMMENTS_MANDATORY";
+    fragment = "code-comments.md";
+    var = "CODE_COMMENTS_STEP";
+  }
   # The write-mechanism split (issue #2019): a filer configured under
   # read-only + ORCHESTRATOR_ENABLED holds no write token, so its FILE
   # ISSUES step (this pair) and its own in-agent label/file steps (the two

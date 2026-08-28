@@ -32,7 +32,9 @@ import (
 // added (this branch): filer-label-relay.md's write-mechanism gate split
 // from the combined FILER_FILE_RELAY into FILER_FILE_RELAY_WORK (kept on
 // the existing filer-label-relay.md row) and FILER_FILE_RELAY_RESEARCH (this
-// new row, on the new filer-label-relay-research.md fragment) (74)) — and
+// new row, on the new filer-label-relay-research.md fragment) (74), plus 1
+// for the CODE_COMMENTS_STEP row issue #2880 added on the new always-true
+// CODE_COMMENTS_MANDATORY gate (75)) — and
 // spot-checks a handful of known rows rather than asserting the full
 // payload verbatim, so this test doesn't itself become the thing that
 // silently drifts from fragments.nix.
@@ -48,7 +50,7 @@ func TestLoadRegistryParsesAllRows(t *testing.T) {
 		t.Fatalf("LoadRegistry: %v", err)
 	}
 
-	const wantRows = 74
+	const wantRows = 75
 	if len(reg.Rows) != wantRows {
 		t.Fatalf("len(reg.Rows) = %d, want %d", len(reg.Rows), wantRows)
 	}

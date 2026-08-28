@@ -65,6 +65,17 @@ func Gates(e Env) map[string]bool {
 	g["FILER_ENABLED"] = e.FilerEnabled
 	g["WORKER_PROVISIONED"] = e.WorkerProvisioned
 
+	// CODE_COMMENTS_MANDATORY (issue #2880): always true, no Env field
+	// behind it. worker-prompt.md's code-comments rule is mandatory, not
+	// conditional, so it can't reuse WORKER_PROVISIONED -- that gate is
+	// false for the opencode Driver by design even when a worker exists
+	// (see lib/mkHarness.nix's workerProvisioned comment), which silently
+	// dropped the rule from opencode workers. This gate exists purely to
+	// route the rule through the existing Conditional fragment
+	// registry's render/gate/substitute plumbing, not because the content
+	// is actually conditional.
+	g["CODE_COMMENTS_MANDATORY"] = true
+
 	// Issue-Tracker gate family (entrypoint.sh: 801-814, 816-860, 862-938):
 	// the tracker read/write/filer descriptor gates and the PR-body
 	// ticket-reference gates, computed in gates_tracker.go and merged in.
