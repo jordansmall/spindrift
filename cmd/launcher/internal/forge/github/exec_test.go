@@ -850,6 +850,49 @@ esac`)
 	}
 }
 
+// TestExecClient_ListIssues_ErrorSurfacesStderr verifies that when `gh issue
+// list` exits non-zero with a diagnostic on stderr, ListIssues's returned
+// error includes that stderr text — the re-discover loop's queryOpenIssues
+// path (main.go) otherwise sees only a bare "exit status 1".
+func TestExecClient_ListIssues_ErrorSurfacesStderr(t *testing.T) {
+	prependFakeGH(t, `case "$*" in
+*"issue list"*)
+	echo 'GraphQL: Could not resolve to a Repository with the name '"'"'owner/repo'"'"'. (repository)' >&2
+	exit 1
+	;;
+esac`)
+
+	c := NewExecClient("owner/repo", testLabels, "agent/issue-")
+	_, err := c.ListIssues(forge.Dispatchable)
+	if err == nil {
+		t.Fatal("ListIssues: want error, got nil")
+	}
+	if !strings.Contains(err.Error(), "Could not resolve to a Repository") {
+		t.Fatalf("ListIssues error must contain gh's stderr; got: %q", err.Error())
+	}
+}
+
+// TestExecClient_ListIssues_ErrorEmptyStderrNoTrailingColon verifies that
+// when `gh issue list` exits non-zero without writing to stderr, the
+// returned error degrades cleanly — no dangling "exit status 1: " trailing
+// colon-space.
+func TestExecClient_ListIssues_ErrorEmptyStderrNoTrailingColon(t *testing.T) {
+	prependFakeGH(t, `case "$*" in
+*"issue list"*)
+	exit 1
+	;;
+esac`)
+
+	c := NewExecClient("owner/repo", testLabels, "agent/issue-")
+	_, err := c.ListIssues(forge.Dispatchable)
+	if err == nil {
+		t.Fatal("ListIssues: want error, got nil")
+	}
+	if strings.HasSuffix(err.Error(), ": ") {
+		t.Fatalf("ListIssues error must not have a trailing colon-space; got: %q", err.Error())
+	}
+}
+
 // TestExecClient_CompleteVerdict_UnconfiguredErrorsWithoutShellingOut
 // verifies that CompleteVerdict on a client constructed with no
 // VerdictLabels (the work-kind construction path) errors instead of

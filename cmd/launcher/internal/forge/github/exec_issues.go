@@ -42,7 +42,7 @@ func (e *execClient) ListIssues(state forge.DispatchState) ([]forge.Issue, error
 	)
 	out, err := cmd.Output()
 	if err != nil {
-		return nil, fmt.Errorf("gh issue list: %w", err)
+		return nil, ghCommandErr("gh issue list", err)
 	}
 	var raw []struct {
 		Number int       `json:"number"`
