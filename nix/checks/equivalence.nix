@@ -634,7 +634,7 @@ in
         };
         branches = {
           mergePollInterval = 90;
-          mergePollTimeout = 3600;
+          mergePollTimeout = 5400;
         };
       });
 
@@ -717,8 +717,8 @@ in
           || { echo "MAX_JOBS=2 not baked in the input document" >&2; exit 1; }
         grep -q '"MERGE_POLL_INTERVAL":"90"' "$behaviorDoc" \
           || { echo "MERGE_POLL_INTERVAL=90 not baked in the input document" >&2; exit 1; }
-        grep -q '"MERGE_POLL_TIMEOUT":"3600"' "$behaviorDoc" \
-          || { echo "MERGE_POLL_TIMEOUT=3600 not baked in the input document" >&2; exit 1; }
+        grep -q '"MERGE_POLL_TIMEOUT":"5400"' "$behaviorDoc" \
+          || { echo "MERGE_POLL_TIMEOUT=5400 not baked in the input document" >&2; exit 1; }
         grep -q '"REPO_SLUG":"test-org/test-repo"' "$identityDoc" \
           || { echo "REPO_SLUG=test-org/test-repo not baked in the input document" >&2; exit 1; }
         grep -q '"GIT_USER_NAME":"Test Bot"' "$identityDoc" \
