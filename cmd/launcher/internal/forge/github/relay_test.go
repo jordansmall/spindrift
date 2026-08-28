@@ -94,6 +94,58 @@ func TestReadOnlyCodeForge_RelayBundle_PushesRefToOrigin(t *testing.T) {
 	}
 }
 
+// TestReadOnlyCodeForge_RelayBundle_CloneFailureSurfacesStderr asserts a
+// `gh repo clone` failure's stderr text reaches the returned error (via
+// ghCommandErr), not just err's own Go-side message.
+func TestReadOnlyCodeForge_RelayBundle_CloneFailureSurfacesStderr(t *testing.T) {
+	prependFakeGH(t, `case "$1-$2" in
+repo-clone)
+	printf 'gh: repository not found\n' >&2
+	exit 1
+	;;
+esac
+`)
+	outbox := t.TempDir()
+	forgetest.WriteFile(t, filepath.Join(outbox, seambundle.FileName), "not a bundle")
+
+	cf := NewReadOnlyCodeForge("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	br := cf.(forge.BundleRelay)
+
+	err := br.RelayBundle(outbox, "agent/issue-1918")
+	if err == nil {
+		t.Fatal("RelayBundle with a failing gh repo clone: got nil error, want one")
+	}
+	if !strings.Contains(err.Error(), "repository not found") {
+		t.Errorf("RelayBundle error = %q, want it to contain gh's stderr %q", err.Error(), "repository not found")
+	}
+}
+
+// TestReadOnlyCodeForge_CommitSubjects_CloneFailureSurfacesStderr mirrors
+// TestReadOnlyCodeForge_RelayBundle_CloneFailureSurfacesStderr for
+// CommitSubjects's own `gh repo clone` closure.
+func TestReadOnlyCodeForge_CommitSubjects_CloneFailureSurfacesStderr(t *testing.T) {
+	prependFakeGH(t, `case "$1-$2" in
+repo-clone)
+	printf 'gh: repository not found\n' >&2
+	exit 1
+	;;
+esac
+`)
+	outbox := t.TempDir()
+	forgetest.WriteFile(t, filepath.Join(outbox, seambundle.FileName), "not a bundle")
+
+	cf := NewReadOnlyCodeForge("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	cs := cf.(forge.BundleCommitSubjects)
+
+	_, err := cs.CommitSubjects(outbox, "main", "agent/issue-1918")
+	if err == nil {
+		t.Fatal("CommitSubjects with a failing gh repo clone: got nil error, want one")
+	}
+	if !strings.Contains(err.Error(), "repository not found") {
+		t.Errorf("CommitSubjects error = %q, want it to contain gh's stderr %q", err.Error(), "repository not found")
+	}
+}
+
 // TestReadOnlyCodeForge_RelayBundle_MissingBundleErrors asserts an empty
 // outbox (the Box never wrote a bundle) blocks the seam via an error rather
 // than a nil-error no-op, mirroring local's RelayBundle (ADR 0033).

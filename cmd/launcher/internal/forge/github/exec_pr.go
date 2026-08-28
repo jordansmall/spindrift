@@ -25,7 +25,6 @@ import (
 const rebaseForcePushTimeout = 5 * time.Minute
 
 func (e *execClient) OpenPRForBranch(branch string) (forge.PR, bool, error) {
-	var stderr bytes.Buffer
 	cmd := exec.Command("gh", "pr", "list",
 		"--repo", e.repo,
 		"--head", branch,
@@ -33,14 +32,9 @@ func (e *execClient) OpenPRForBranch(branch string) (forge.PR, bool, error) {
 		"--json", "url",
 		"--jq", `.[0].url // ""`,
 	)
-	cmd.Stderr = &stderr
 	out, err := cmd.Output()
 	if err != nil {
-		suffix := ""
-		if s := strings.TrimSpace(stderr.String()); s != "" {
-			suffix = ": " + s
-		}
-		return forge.PR{}, false, fmt.Errorf("gh pr list: %w%s", err, suffix)
+		return forge.PR{}, false, ghCommandErr("gh pr list", err)
 	}
 	url := strings.TrimSpace(string(out))
 	if url == "" {
@@ -66,7 +60,7 @@ func (e *execClient) BranchExists(branch string) (bool, error) {
 	)
 	out, err := cmd.Output()
 	if err != nil {
-		return false, fmt.Errorf("gh api matching-refs heads/%s: %w", branch, err)
+		return false, ghCommandErr(fmt.Sprintf("gh api matching-refs heads/%s", branch), err)
 	}
 	want := "refs/heads/" + branch
 	for _, ref := range strings.Split(strings.TrimSpace(string(out)), "\n") {
@@ -125,11 +119,7 @@ func (e *execClient) BranchProtected(branch string) (bool, error) {
 			}
 			return false, fmt.Errorf("gh api branches/%s/protection: HTTP 403 (classic protection unreadable) and no ruleset applies -- cannot determine whether %s carries a classic-only protection rule", branch, branch)
 		}
-		suffix := ""
-		if s := strings.TrimSpace(stderr.String()); s != "" {
-			suffix = ": " + s
-		}
-		return false, fmt.Errorf("gh api branches/%s/protection: %w%s", branch, err, suffix)
+		return false, ghCommandErrText(fmt.Sprintf("gh api branches/%s/protection", branch), err, stderr.String())
 	}
 	return true, nil
 }
@@ -150,7 +140,7 @@ func (e *execClient) branchProtectedByRuleset(branch string) (bool, error) {
 	)
 	out, err := cmd.Output()
 	if err != nil {
-		return false, fmt.Errorf("gh api rules/branches/%s: %w", branch, err)
+		return false, ghCommandErr(fmt.Sprintf("gh api rules/branches/%s", branch), err)
 	}
 	n, parseErr := strconv.Atoi(strings.TrimSpace(string(out)))
 	if parseErr != nil {
@@ -169,7 +159,7 @@ func (e *execClient) PRForBranch(branch string) (string, bool, error) {
 	)
 	out, err := cmd.Output()
 	if err != nil {
-		return "", false, fmt.Errorf("gh pr list: %w", err)
+		return "", false, ghCommandErr("gh pr list", err)
 	}
 	url := strings.TrimSpace(string(out))
 	if url == "" {
@@ -182,7 +172,7 @@ func (e *execClient) PRState(url string) (forge.PRState, error) {
 	cmd := exec.Command("gh", "pr", "view", url, "--json", "state", "--jq", ".state")
 	out, err := cmd.Output()
 	if err != nil {
-		return "", fmt.Errorf("gh pr view %s state: %w", url, err)
+		return "", ghCommandErr(fmt.Sprintf("gh pr view %s state", url), err)
 	}
 	return forge.PRState(strings.TrimSpace(string(out))), nil
 }
@@ -207,7 +197,7 @@ func (e *execClient) CheckState(url string) (forge.RollupState, error) {
 	)
 	out, err := cmd.Output()
 	if err != nil {
-		return forge.StateNone, fmt.Errorf("gh api graphql: %w", err)
+		return forge.StateNone, ghCommandErr("gh api graphql (statusCheckRollup)", err)
 	}
 	s := strings.TrimSpace(string(out))
 	if s == "" {
@@ -220,7 +210,7 @@ func (e *execClient) CheckState(url string) (forge.RollupState, error) {
 func (e *execClient) HeadCommitSHA(url string) (string, error) {
 	out, err := exec.Command("gh", "pr", "view", url, "--json", "headRefOid", "--jq", ".headRefOid").Output()
 	if err != nil {
-		return "", fmt.Errorf("gh pr view %s headRefOid: %w", url, err)
+		return "", ghCommandErr(fmt.Sprintf("gh pr view %s headRefOid", url), err)
 	}
 	return strings.TrimSpace(string(out)), nil
 }
@@ -245,7 +235,7 @@ func (e *execClient) Mergeable(url string) (forge.MergeableState, error) {
 	)
 	out, err := cmd.Output()
 	if err != nil {
-		return forge.MergeableUnknown, fmt.Errorf("gh api graphql: %w", err)
+		return forge.MergeableUnknown, ghCommandErr("gh api graphql (mergeable)", err)
 	}
 	s := strings.TrimSpace(string(out))
 	if s == "" {
@@ -281,7 +271,7 @@ func (e *execClient) NeedsUpdate(prURL string) (bool, error) {
 		"--jq", "[.headRefName,.baseRefName]|@tsv",
 	).Output()
 	if err != nil {
-		return false, fmt.Errorf("gh pr view %s: %w", prURL, err)
+		return false, ghCommandErr(fmt.Sprintf("gh pr view %s", prURL), err)
 	}
 	fields := strings.SplitN(strings.TrimSpace(string(out)), "\t", 2)
 	if len(fields) != 2 {
@@ -299,7 +289,7 @@ func (e *execClient) NeedsUpdate(prURL string) (bool, error) {
 		"--jq", ".behind_by",
 	).Output()
 	if err != nil {
-		return false, fmt.Errorf("gh api compare %s: %w", basehead, err)
+		return false, ghCommandErr(fmt.Sprintf("gh api compare %s", basehead), err)
 	}
 	behindBy, convErr := strconv.Atoi(strings.TrimSpace(string(cmpOut)))
 	if convErr != nil {
@@ -325,7 +315,7 @@ func (e *execClient) ListPRFiles(url string) ([]string, error) {
 	)
 	out, err := cmd.Output()
 	if err != nil {
-		return nil, fmt.Errorf("gh api pulls files: %w", err)
+		return nil, ghCommandErr("gh api pulls files", err)
 	}
 	var files []string
 	sc := bufio.NewScanner(strings.NewReader(string(out)))
@@ -370,20 +360,21 @@ func mergeMethodFlag(method string) string {
 // mergeable state that function cannot map to either outcome is surfaced as
 // its own error rather than folded into ErrMergeConflict.
 func (e *execClient) classifyMergeFailure(url string, mergeErr error, stderr string) error {
+	base := ghCommandErrText(fmt.Sprintf("gh pr merge %s", url), mergeErr, stderr)
 	if !gitplumbing.IsMergeConflict(stderr) {
 		if gitplumbing.IsMergeTransient(stderr) {
-			return fmt.Errorf("gh pr merge %s: %w: %s: %w", url, mergeErr, strings.TrimSpace(stderr), forge.ErrMergeTransient)
+			return fmt.Errorf("%w: %w", base, forge.ErrMergeTransient)
 		}
-		return fmt.Errorf("gh pr merge %s: %w: %s", url, mergeErr, strings.TrimSpace(stderr))
+		return base
 	}
 	state, err := e.Mergeable(url)
 	if err != nil {
-		return fmt.Errorf("gh pr merge %s: %w (mergeable state unavailable: %v)", url, mergeErr, err)
+		return fmt.Errorf("%w (mergeable state unavailable: %v)", base, err)
 	}
 	if sentinel, ok := forge.ClassifyMergeFailure(state); ok {
 		return sentinel
 	}
-	return fmt.Errorf("gh pr merge %s: %w (mergeable state %q undetermined)", url, mergeErr, state)
+	return fmt.Errorf("%w (mergeable state %q undetermined)", base, state)
 }
 
 // CanAutoMerge queries whether the repo allows GitHub's native auto-merge feature.
@@ -402,7 +393,7 @@ func (e *execClient) CanAutoMerge() (bool, error) {
 	)
 	out, err := cmd.Output()
 	if err != nil {
-		return false, fmt.Errorf("gh api graphql (autoMergeAllowed): %w", err)
+		return false, ghCommandErr("gh api graphql (autoMergeAllowed)", err)
 	}
 	return strings.TrimSpace(string(out)) == "true", nil
 }
@@ -411,8 +402,8 @@ func (e *execClient) CanAutoMerge() (bool, error) {
 // merge the PR automatically once all branch-protection requirements are met.
 func (e *execClient) EnqueueAutoMerge(prURL string) error {
 	cmd := exec.Command("gh", "pr", "merge", prURL, "--auto", mergeMethodFlag(e.mergeMethod), "--delete-branch")
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("gh pr merge --auto %s: %w", prURL, err)
+	if _, err := cmd.Output(); err != nil {
+		return ghCommandErr(fmt.Sprintf("gh pr merge --auto %s", prURL), err)
 	}
 	return nil
 }
@@ -439,15 +430,9 @@ func (e *execClient) MarkDraft(prURL string) error {
 // (MarkReady's `gh pr ready` or MarkDraft's `gh pr ready --undo`), wrapping
 // any failure with the command's own stderr for context.
 func runGHReadyToggle(prURL string, args ...string) error {
-	var stderr bytes.Buffer
 	cmd := exec.Command("gh", args...)
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		suffix := ""
-		if s := strings.TrimSpace(stderr.String()); s != "" {
-			suffix = ": " + s
-		}
-		return fmt.Errorf("gh %s %s: %w%s", strings.Join(args[:len(args)-1], " "), prURL, err, suffix)
+	if _, err := cmd.Output(); err != nil {
+		return ghCommandErr(fmt.Sprintf("gh %s %s", strings.Join(args[:len(args)-1], " "), prURL), err)
 	}
 	return nil
 }
@@ -456,8 +441,8 @@ func runGHReadyToggle(prURL string, args ...string) error {
 // reachable. It returns the resolved repo slug on success, ErrAuthFailure if
 // the credential check fails, or ErrRepoNotFound if the repo cannot be found.
 func (e *execClient) Probe() (string, error) {
-	if err := exec.Command("gh", "auth", "status").Run(); err != nil {
-		return "", fmt.Errorf("%w: %s", forge.ErrAuthFailure, err)
+	if _, err := exec.Command("gh", "auth", "status").Output(); err != nil {
+		return "", fmt.Errorf("%w: %w", forge.ErrAuthFailure, ghCommandErr("gh auth status", err))
 	}
 	var stderr bytes.Buffer
 	cmd := exec.Command("gh", "repo", "view", e.repo,
@@ -466,7 +451,7 @@ func (e *execClient) Probe() (string, error) {
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
 	if err != nil {
-		return "", fmt.Errorf("%w: %s", forge.ErrRepoNotFound, strings.TrimSpace(stderr.String()))
+		return "", fmt.Errorf("%w: %w", forge.ErrRepoNotFound, ghCommandErrText(fmt.Sprintf("gh repo view %s", e.repo), err, stderr.String()))
 	}
 	return strings.TrimSpace(string(out)), nil
 }
@@ -480,7 +465,7 @@ func (e *execClient) ListLabels() ([]string, error) {
 		"--limit", "100",
 	).Output()
 	if err != nil {
-		return nil, fmt.Errorf("gh label list: %w", err)
+		return nil, ghCommandErr("gh label list", err)
 	}
 	var labels []string
 	sc := bufio.NewScanner(strings.NewReader(string(out)))
@@ -495,13 +480,13 @@ func (e *execClient) ListLabels() ([]string, error) {
 // CreateLabel creates a new label in the repository with the given name,
 // description, and hex color (without the leading #).
 func (e *execClient) CreateLabel(name, description, color string) error {
-	out, err := exec.Command("gh", "label", "create", name,
+	_, err := exec.Command("gh", "label", "create", name,
 		"--repo", e.repo,
 		"--description", description,
 		"--color", color,
-	).CombinedOutput()
+	).Output()
 	if err != nil {
-		return fmt.Errorf("gh label create %q: %w: %s", name, err, strings.TrimSpace(string(out)))
+		return ghCommandErr(fmt.Sprintf("gh label create %q", name), err)
 	}
 	return nil
 }
@@ -519,7 +504,7 @@ func (e *execClient) Rebase(prURL string) error {
 		"--jq", "[.headRefName,.baseRefName]|@tsv",
 	).Output()
 	if err != nil {
-		return fmt.Errorf("gh pr view %s: %w", prURL, err)
+		return ghCommandErr(fmt.Sprintf("gh pr view %s", prURL), err)
 	}
 	fields := strings.SplitN(strings.TrimSpace(string(out)), "\t", 2)
 	if len(fields) != 2 {
@@ -533,9 +518,9 @@ func (e *execClient) Rebase(prURL string) error {
 	}
 	defer os.RemoveAll(dir)
 
-	if err := exec.Command("gh", "repo", "clone", e.repo, dir,
-		"--", "--no-single-branch").Run(); err != nil {
-		return fmt.Errorf("gh repo clone: %w", err)
+	if _, err := exec.Command("gh", "repo", "clone", e.repo, dir,
+		"--", "--no-single-branch").Output(); err != nil {
+		return ghCommandErr("gh repo clone", err)
 	}
 
 	gitIn := func(args ...string) *exec.Cmd {

@@ -2,7 +2,6 @@ package github
 
 import (
 	"bufio"
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -85,7 +84,7 @@ func (e *execClient) ListOpenIssues() ([]forge.Issue, error) {
 	)
 	out, err := cmd.Output()
 	if err != nil {
-		return nil, fmt.Errorf("gh issue list: %w", err)
+		return nil, ghCommandErr("gh issue list", err)
 	}
 	var raw []struct {
 		Number int       `json:"number"`
@@ -121,7 +120,7 @@ func (e *execClient) Issue(num string) (forge.Issue, error) {
 	)
 	out, err := cmd.Output()
 	if err != nil {
-		return forge.Issue{}, fmt.Errorf("gh issue view %s: %w", num, err)
+		return forge.Issue{}, ghCommandErr(fmt.Sprintf("gh issue view %s", num), err)
 	}
 	var raw struct {
 		Number int       `json:"number"`
@@ -165,8 +164,8 @@ func (e *execClient) TransitionState(num string, from, to forge.DispatchState) e
 		args = append(args, "--remove-label", remove)
 	}
 	cmd := exec.Command("gh", args...)
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("gh issue edit %s: %w", num, err)
+	if _, err := cmd.Output(); err != nil {
+		return ghCommandErr(fmt.Sprintf("gh issue edit %s", num), err)
 	}
 	return nil
 }
@@ -181,7 +180,7 @@ func (e *execClient) issueLabels(num string) ([]string, error) {
 	)
 	out, err := cmd.Output()
 	if err != nil {
-		return nil, fmt.Errorf("gh issue view %s: %w", num, err)
+		return nil, ghCommandErr(fmt.Sprintf("gh issue view %s", num), err)
 	}
 	var raw struct {
 		Labels []ghLabel `json:"labels"`
@@ -227,8 +226,8 @@ func (e *execClient) CompleteVerdict(num string, verdict forge.Verdict) error {
 		args = append(args, "--remove-label", remove)
 	}
 	cmd := exec.Command("gh", args...)
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("gh issue edit %s: %w", num, err)
+	if _, err := cmd.Output(); err != nil {
+		return ghCommandErr(fmt.Sprintf("gh issue edit %s", num), err)
 	}
 	return nil
 }
@@ -279,14 +278,9 @@ func (e *execClient) nativeDependencyIDs(num, direction string) ([]string, error
 		fmt.Sprintf("repos/%s/issues/%s/dependencies/%s", e.repo, num, direction),
 		"--jq", ".[].number",
 	)
-	var stderr strings.Builder
-	cmd.Stderr = &stderr
 	out, err := cmd.Output()
 	if err != nil {
-		if msg := strings.TrimSpace(stderr.String()); msg != "" {
-			return nil, fmt.Errorf("gh api dependencies/%s %s: %w: %s", direction, num, err, msg)
-		}
-		return nil, fmt.Errorf("gh api dependencies/%s %s: %w", direction, num, err)
+		return nil, ghCommandErr(fmt.Sprintf("gh api dependencies/%s %s", direction, num), err)
 	}
 	var deps []string
 	seen := map[string]bool{}
@@ -315,14 +309,9 @@ func (e *execClient) PriorClaimState(num string) (forge.DispatchState, bool, err
 		"--paginate",
 		"--jq", `.[] | select(.event == "unlabeled") | .label.name`,
 	)
-	var stderr strings.Builder
-	cmd.Stderr = &stderr
 	out, err := cmd.Output()
 	if err != nil {
-		if msg := strings.TrimSpace(stderr.String()); msg != "" {
-			return forge.Untriaged, false, fmt.Errorf("gh api timeline %s: %w: %s", num, err, msg)
-		}
-		return forge.Untriaged, false, fmt.Errorf("gh api timeline %s: %w", num, err)
+		return forge.Untriaged, false, ghCommandErr(fmt.Sprintf("gh api timeline %s", num), err)
 	}
 	var prior forge.DispatchState
 	found := false
@@ -363,15 +352,9 @@ func (e *execClient) CloseMergedIssue(num string) error {
 	if iss.State == forge.IssueClosed {
 		return nil
 	}
-	var stderr bytes.Buffer
 	cmd := exec.Command("gh", "issue", "close", num, "--repo", e.repo)
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		suffix := ""
-		if s := strings.TrimSpace(stderr.String()); s != "" {
-			suffix = ": " + s
-		}
-		return fmt.Errorf("gh issue close %s: %w%s", num, err, suffix)
+	if _, err := cmd.Output(); err != nil {
+		return ghCommandErr(fmt.Sprintf("gh issue close %s", num), err)
 	}
 	return nil
 }
@@ -381,8 +364,8 @@ func (e *execClient) Comment(num, body string) error {
 		"--repo", e.repo,
 		"--body", body,
 	)
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("gh issue comment %s: %w", num, err)
+	if _, err := cmd.Output(); err != nil {
+		return ghCommandErr(fmt.Sprintf("gh issue comment %s", num), err)
 	}
 	return nil
 }
@@ -400,12 +383,10 @@ func (e *execClient) PostIssue(title, body string, labels []string) (string, err
 	for _, label := range labels {
 		args = append(args, "--label", label)
 	}
-	var stderr bytes.Buffer
 	cmd := exec.Command("gh", args...)
-	cmd.Stderr = &stderr
 	out, err := cmd.Output()
 	if err != nil {
-		return "", fmt.Errorf("gh issue create: %w: %s", err, strings.TrimSpace(stderr.String()))
+		return "", ghCommandErr("gh issue create", err)
 	}
 	return strings.TrimSpace(string(out)), nil
 }

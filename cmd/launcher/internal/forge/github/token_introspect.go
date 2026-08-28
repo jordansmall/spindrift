@@ -20,7 +20,7 @@ func TokenOAuthScopes(token string) ([]string, error) {
 	cmd.Env = append(os.Environ(), "GH_TOKEN="+token)
 	out, err := cmd.Output()
 	if err != nil {
-		return nil, fmt.Errorf("gh api -i user: %w", err)
+		return nil, ghCommandErr("gh api -i user", err)
 	}
 	for _, line := range strings.Split(string(out), "\n") {
 		name, value, ok := strings.Cut(line, ":")
@@ -50,7 +50,7 @@ func TokenRepoPushPermission(token, repoSlug string) (bool, error) {
 	cmd.Env = append(os.Environ(), "GH_TOKEN="+token)
 	out, err := cmd.Output()
 	if err != nil {
-		return false, fmt.Errorf("gh api repos/%s: %w", repoSlug, err)
+		return false, ghCommandErr(fmt.Sprintf("gh api repos/%s", repoSlug), err)
 	}
 	var resp struct {
 		Permissions *struct {

@@ -48,6 +48,24 @@ func TestTokenOAuthScopes_EmptyHeaderReturnsNil(t *testing.T) {
 	}
 }
 
+// TestTokenOAuthScopes_ErrorSurfacesStderr verifies that when `gh api -i
+// user` exits non-zero with a diagnostic on stderr, TokenOAuthScopes's
+// returned error includes that stderr text, routed through ghCommandErr
+// (issue #2864).
+func TestTokenOAuthScopes_ErrorSurfacesStderr(t *testing.T) {
+	prependFakeGH(t, `printf 'HTTP 401: Bad credentials\n' >&2
+exit 1
+`)
+
+	_, err := TokenOAuthScopes("ghp_test")
+	if err == nil {
+		t.Fatal("TokenOAuthScopes: want error, got nil")
+	}
+	if !strings.Contains(err.Error(), "HTTP 401: Bad credentials") {
+		t.Fatalf("TokenOAuthScopes error must surface gh's stderr; got: %v", err)
+	}
+}
+
 // TestTokenRepoPushPermission_ParsesPushTrue verifies TokenRepoPushPermission
 // reads `permissions.push` out of the repo endpoint's JSON body.
 func TestTokenRepoPushPermission_ParsesPushTrue(t *testing.T) {
@@ -73,6 +91,24 @@ func TestTokenRepoPushPermission_ParsesPushFalse(t *testing.T) {
 	}
 	if push {
 		t.Error("TokenRepoPushPermission() = true, want false")
+	}
+}
+
+// TestTokenRepoPushPermission_ErrorSurfacesStderr verifies that when `gh api
+// repos/<slug>` exits non-zero with a diagnostic on stderr,
+// TokenRepoPushPermission's returned error includes that stderr text, routed
+// through ghCommandErr (issue #2864).
+func TestTokenRepoPushPermission_ErrorSurfacesStderr(t *testing.T) {
+	prependFakeGH(t, `printf 'HTTP 404: Not Found\n' >&2
+exit 1
+`)
+
+	_, err := TokenRepoPushPermission("ghs_test", "owner/repo")
+	if err == nil {
+		t.Fatal("TokenRepoPushPermission: want error, got nil")
+	}
+	if !strings.Contains(err.Error(), "HTTP 404: Not Found") {
+		t.Fatalf("TokenRepoPushPermission error must surface gh's stderr; got: %v", err)
 	}
 }
 
