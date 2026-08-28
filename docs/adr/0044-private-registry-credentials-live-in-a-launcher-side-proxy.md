@@ -127,6 +127,31 @@ the artifact base path is registry-specific, not a fixed shape.
 > unauthenticated"). Reported, not worked around, per the ticket's own
 > instruction.
 
+> **Update.** `yarn` needed no table changes at all (issue #2856) — a
+> stronger version of npm's own "additive table entry" claim above, since
+> yarn adds nothing to the table rather than one more entry to it. Yarn
+> classic rode npm's existing table entry and Binding
+> (`npm_config_registry`, the in-tree `.npmrc` rewrite) completely verbatim:
+> neither mechanism checks anything npm-specific, so the only change landed
+> was a characterization test proving it. Yarn berry needed its own Binding
+> — `YARN_NPM_REGISTRY_SERVER` (yarn berry's own env-var override,
+> mirroring npm's env half) for its single default `npmRegistryServer` key,
+> plus a textual `.yarnrc.yml` rewrite (mirroring npm's in-tree half) for
+> the per-scope `npmScopes` entries no env var reaches — but explicitly no
+> new table entry, since both yarn lineages resolve packages through the
+> identical npm-compatible registry protocol paths (packument, tarball,
+> scoped `@scope/name`) the existing `npm` entry
+> (`allowlist.go:98-112`/`allowlist.go:129-132`) already allows: the table
+> matches on URL path shape, not on which client sent the request. The more
+> significant finding is that the textual-substitution mechanism itself
+> turned out to be format-agnostic in practice, not just in the "textual,
+> not a parser" framing above: `.yarnrc.yml` is YAML, not npm's INI-like
+> `.npmrc`, and the same plain two-pass https/http substitution npm's
+> Binding already uses — no YAML parsing involved — left the file valid
+> YAML that yarn berry parsed correctly, resolving both the rewritten
+> default registry and the rewritten per-scope registry hosts (verified
+> against real yarn-berry 4.14.1).
+
 ## Consequences
 
 - **The binding mechanism is a swappable last mile, not an architecture.**
