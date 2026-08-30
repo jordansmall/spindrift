@@ -808,14 +808,18 @@ let
   # internal/runstate (issue #2505's shared RunState type/read/write,
   # imported by outcomebackstop's readLastVerdict), internal/markergate
   # (issue #2511's marker-gate verb: the outcome/pr-intent required-marker
-  # gate's nudge-prompt/resolve decision logic), and internal/readonlyguards
+  # gate's nudge-prompt/resolve decision logic), internal/readonlyguards
   # (issue #2509's readonly-guards verb: renders and installs the runtime
   # read-only guards named by the forbiddenMarkers registry, the Go
   # successor to agent/entrypoint.sh's
-  # install_readonly_push_hook/install_readonly_gh_shim) only, with
-  # *_test.go excluded. If a new import is added outside this closure the
-  # build fails loudly (missing package) — that is the intended failure mode
-  # (#474).
+  # install_readonly_push_hook/install_readonly_gh_shim), internal/bindregistry
+  # (issue #2930's bind-registry verb: collapses the shared ecosystem table's
+  # rows into the toolchain-nudge classification, agent/entrypoint.sh's
+  # phase_toolchain_nudge's Go successor), and internal/registryproxy
+  # (the ecosystem table bindregistry.Classify reads, shared with the
+  # Registry proxy's own path-allowlist) only, with *_test.go excluded. If a
+  # new import is added outside this closure the build fails loudly (missing
+  # package) — that is the intended failure mode (#474).
   driverExecBin = pkgs.buildGoModule {
     pname = "driver-exec";
     version = spindriftVersion;
@@ -869,6 +873,12 @@ let
         (lib.fileset.fileFilter (
           f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
         ) ../cmd/launcher/internal/readonlyguards)
+        (lib.fileset.fileFilter (
+          f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
+        ) ../cmd/launcher/internal/bindregistry)
+        (lib.fileset.fileFilter (
+          f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
+        ) ../cmd/launcher/internal/registryproxy)
       ];
     };
     # Same go.mod/go.sum as launcherBin above, but NOT the same vendorHash:
