@@ -436,12 +436,18 @@ let
   # network.bwrapUnshare) are alternative ways to say the same thing, and
   # there is no precedence rule between them -- a Consumer that sets both
   # must pick one rather than have mkHarness silently choose a winner.
-  # Separately, network.mode = no-host-loopback has no bwrap rendering:
-  # bwrap can only unshare its network namespace all-or-nothing
-  # (--unshare-net), so there is no partial host-loopback-only isolation for
-  # it to express -- unlike the podman/docker/rancher OCI adapters, which
-  # render it as a network mode that keeps the container off the host
-  # network but still reachable via slirp4netns/pasta port-forwarding.
+  # Separately, network.mode = no-host-loopback has no bwrap rendering: since
+  # issue #2666 a bwrap Box isolates its network namespace by default (via a
+  # hardened pasta helper -- working egress, host loopback blocked), so
+  # no-host-loopback would render byte-identical to the default "open" on
+  # bwrap. It stays rejected anyway, not because it's mechanically
+  # impossible (pasta demonstrably gives bwrap exactly that partial-
+  # isolation posture), but because a distinct choice with no distinct
+  # rendering would mislead a Consumer into thinking they get something
+  # "open" doesn't already give them -- unlike the podman/docker/rancher OCI
+  # adapters, which render it as a network mode that keeps the container off
+  # the host network but still reachable via slirp4netns/pasta
+  # port-forwarding.
   networkModeCoherenceOk =
     if
       (defaults ? networkMode)
@@ -449,7 +455,7 @@ let
     then
       throw "mkHarness: network.mode=${mergedDefaults.networkMode} is set together with a raw network knob (network.podman/network.bwrapUnshare) -- there is no precedence rule between them, so the Consumer must pick one"
     else if mergedDefaults.networkMode or "open" == "no-host-loopback" && runnerKind == "bwrap" then
-      throw "mkHarness: network.mode=no-host-loopback is unsupported on runtime=bwrap -- bwrap can only unshare its network namespace all-or-nothing (--unshare-net), with no partial host-loopback isolation; use runtime=podman/docker/rancher instead, or network.mode=none/open on bwrap"
+      throw "mkHarness: network.mode=no-host-loopback is unsupported on runtime=bwrap -- it has no rendering distinct from the isolated-by-default network.mode=open; use network.mode=open instead, or runtime=podman/docker/rancher for the docker/nerdctl inert-but-correct render"
     else
       true;
 

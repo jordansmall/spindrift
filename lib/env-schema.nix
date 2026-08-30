@@ -325,11 +325,12 @@ in
     env = "NETWORK_MODE";
     group = "infra";
     default = "open";
-    doc = "Box network posture, rendered per runtime/OCI backend into the right flag/syntax: 'open' (default) shares the host netns as-is (bwrap) or applies no flag, the runtime's own default network (OCI); 'no-host-loopback' keeps internet egress while denying host-loopback on podman (renders pasta, no --map-gw); on docker/nerdctl it renders their own default bridge network, an inert-but-correct render that does not yet deny host-loopback there -- unsupported on runtime=bwrap (bwrap can only unshare its network namespace all-or-nothing, no partial isolation -- throws at eval); 'none' is fully offline, documented test-only since a Driver can't reach its Provider under it. Mutually exclusive at eval time with the raw PODMAN_NETWORK/BWRAP_UNSHARE_NET escape-hatch knobs (network.podman/network.bwrapUnshare) -- setting both throws, there is no precedence rule";
+    doc = "Box network posture, rendered per runtime/OCI backend into the right flag/syntax: 'open' (default) isolates bwrap into its own network namespace behind a hardened pasta helper -- working egress, host loopback blocked, podman-rootless parity (issue #2666) -- while applying no flag on OCI (unchanged there, the runtime's own default network); 'host' is a bwrap-only opt-out that deliberately restores the pre-#2666 shared-host-netns posture (no OCI rendering -- falls through to the same no-flag default 'open' renders there, a harmless no-op); 'no-host-loopback' keeps internet egress while denying host-loopback on podman (renders pasta, no --map-gw); on docker/nerdctl it renders their own default bridge network, an inert-but-correct render that does not yet deny host-loopback there -- unsupported on runtime=bwrap (no rendering distinct from the new isolated-by-default 'open' -- throws at eval); 'none' is fully offline, documented test-only since a Driver can't reach its Provider under it. Mutually exclusive at eval time with the raw PODMAN_NETWORK/BWRAP_UNSHARE_NET escape-hatch knobs (network.podman/network.bwrapUnshare) -- setting both throws, there is no precedence rule";
     choices = [
       "open"
       "no-host-loopback"
       "none"
+      "host"
     ];
     flakeOption = true;
     legacySettingsExempt = true;
@@ -353,7 +354,7 @@ in
     # not accepted. The boolean `default` also makes it a `types.bool` flake
     # option; `kind` opts its CLI flag into presence parsing.
     kind = "bool";
-    doc = "when non-empty, adds --unshare-net to bwrap; requires slirp/pasta for DNS; by default bwrap shares the host network namespace (host-loopback reachable)";
+    doc = "when non-empty, forces bwrap's network-namespace isolation on (pasta-backed since issue #2666, no longer DNS-breaking); redundant with the new isolate-by-default posture unless paired with NETWORK_MODE=host, which nix eval already rejects -- see network.mode";
     flakeOption = true;
     nixSubPath = "network.bwrapUnshare";
     boxEnv = false;
