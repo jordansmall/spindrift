@@ -180,15 +180,15 @@ type Config struct {
 	// is out of scope here.
 	PendingCount func() int
 
-	// DiscoverReporting, when set, is a pure alternative to the discover
-	// param, used instead of it for the stale-transition branch's heldBack
-	// computation (#2678) in the !cfg.PreResolved case. The discover param
-	// may carry a caller-side side effect (the CLI's log-on-poll behavior,
-	// #2777) that a reporting-only call must not trigger — calling it a
-	// second time purely to count heldBack would print a misleading
-	// poll-log line even though no real poll happened.
+	// DiscoverReporting, when set, is a pure alternative to the Queue's own
+	// Discover method, used instead of it for the stale-transition branch's
+	// heldBack computation (#2678) in the !cfg.PreResolved case.
+	// queue.Discover may carry a caller-side side effect (the CLI's
+	// log-on-poll behavior, #2777) that a reporting-only call must not
+	// trigger — calling it a second time purely to count heldBack would
+	// print a misleading poll-log line even though no real poll happened.
 	// nil (every construction site except the CLI's headless
-	// runContinuousDispatch) falls back to the discover param, today's
+	// runContinuousDispatch) falls back to queue.Discover, today's
 	// unchanged behavior.
 	DiscoverReporting Discoverer
 

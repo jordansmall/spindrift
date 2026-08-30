@@ -148,7 +148,7 @@ func runStaleDrain(t *testing.T, c Config, fc *forge.Fake, discover Discoverer) 
 
 	var err error
 	stdout = testutil.CaptureStdout(t, func() {
-		err = RunContinuous(c, nil, fc, fc, dir, f, s, discover, fresh)
+		err = RunContinuous(c, nil, fc, fc, dir, f, s, QueueFromDiscoverer(discover), fresh)
 	})
 	if !errors.Is(err, ErrImageStale) {
 		t.Fatalf("RunContinuous: got %v, want ErrImageStale", err)
