@@ -10,6 +10,42 @@ depending on how you use spindrift; it won't affect everyone.
 
 ---
 
+## 0.12.0 — 2026-08-29
+
+Boxes can install from private package registries without ever holding the
+credential, and `gh` rate limiting stops silently killing runs.
+
+No breaking changes.
+
+- **Private registries work inside the Box.** Each dispatched Box gets its own
+  registry proxy: package-manager traffic goes to a local forwarder, and the
+  proxy attaches your registry credential on the way out. The launcher resolves
+  the credential at startup and keeps it host-side, so it never enters the Box.
+  cargo, go modules, npm, pnpm, yarn (berry and classic), and Gradle are bound
+  automatically, including rewrites of in-tree `.npmrc`, `.yarnrc.yml`, and
+  `pnpm-workspace.yaml` files that pin their own registries. New schema knobs
+  reference the credential, and `spindrift doctor` verifies it resolves before
+  a run depends on it.
+- **`gh` failures finally say why.** Stderr from failed `gh` calls surfaces in
+  error messages instead of vanishing, and rate-limited failures are recognized
+  as their own kind rather than a generic error.
+- **Rate limits bend the run instead of breaking it.** Continuous mode retries
+  a rate-limited issue re-discover instead of giving up, with retry knobs to
+  tune it. Console backlog polls, continuous refill polls, and the merge poll
+  defaults all slowed down, so long runs put far less pressure on the API in
+  the first place.
+- **Agents write fewer comments.** A code-comments rule (minimal, only the
+  non-obvious why) now reaches the fix, worker, conflict-resolve, and
+  coordinator prompts, and the reviewer can block a change whose comments are
+  out of proportion to its code.
+- **Baked agent files no longer break opencode runs.** The image's baked
+  `home/agent` contents are copied into the Box's HOME and made writable, under
+  both the docker and bwrap runners, fixing runs that tripped over read-only
+  agent files.
+- **The bwrap runner stops leaking host env.** Only an allowlist of environment
+  variables crosses into the Box instead of whatever the host process happened
+  to carry.
+
 ## 0.11.0 — 2026-08-26
 
 Configuration mistakes stop being silent. A bad roster entry or an out-of-range
