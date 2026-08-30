@@ -491,5 +491,5 @@ let
   };
 in
 {
-  inherit image agentEnv agentFiles;
+  inherit image agentEnv agentFiles passwdFile groupFile;
 }

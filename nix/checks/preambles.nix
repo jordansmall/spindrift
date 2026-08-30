@@ -235,6 +235,8 @@ in
         };
         agentFilesPath = "/nix/store/aaa-agent-files";
         agentEnvPath = "/nix/store/bbb-agent-env";
+        passwdFilePath = "/nix/store/eee-passwd";
+        groupFilePath = "/nix/store/fff-group";
         prefetch = "";
         imagePath = "/nix/store/ccc-image";
         imageHash = "deadbeef";
@@ -274,6 +276,12 @@ in
     assert assertMsg (
       out.AGENT_ENV == "/nix/store/bbb-agent-env"
     ) "runArtifacts (bwrap) must set AGENT_ENV, got: ${builtins.toJSON out}";
+    assert assertMsg (
+      out.PASSWD_FILE == "/nix/store/eee-passwd"
+    ) "runArtifacts (bwrap) must set PASSWD_FILE, got: ${builtins.toJSON out}";
+    assert assertMsg (
+      out.GROUP_FILE == "/nix/store/fff-group"
+    ) "runArtifacts (bwrap) must set GROUP_FILE, got: ${builtins.toJSON out}";
     assert assertMsg (
       out ? BAKED_PREFETCH
     ) "runArtifacts (bwrap) must set BAKED_PREFETCH, got: ${builtins.toJSON out}";
@@ -332,6 +340,8 @@ in
         };
         agentFilesPath = "/nix/store/aaa-agent-files";
         agentEnvPath = "/nix/store/bbb-agent-env";
+        passwdFilePath = "/nix/store/eee-passwd";
+        groupFilePath = "/nix/store/fff-group";
         prefetch = "";
         imagePath = "/nix/store/ccc-image";
         imageHash = "deadbeef";
@@ -417,6 +427,12 @@ in
     assert assertMsg (
       !(out ? AGENT_FILES)
     ) "runArtifacts (oci) must not set bwrap-only keys, got: ${builtins.toJSON out}";
+    assert assertMsg (
+      !(out ? PASSWD_FILE)
+    ) "runArtifacts (oci) must not set bwrap-only keys, got: ${builtins.toJSON out}";
+    assert assertMsg (
+      !(out ? GROUP_FILE)
+    ) "runArtifacts (oci) must not set bwrap-only keys, got: ${builtins.toJSON out}";
     pkgs.runCommand "preambles-run-artifacts-oci" { } "touch $out";
 
   # Issue #262 AC1: a driver-scoped image name flows into IMAGE_TAG, so an
@@ -432,6 +448,8 @@ in
         };
         agentFilesPath = "/nix/store/aaa-agent-files";
         agentEnvPath = "/nix/store/bbb-agent-env";
+        passwdFilePath = "/nix/store/eee-passwd";
+        groupFilePath = "/nix/store/fff-group";
         prefetch = "";
         imagePath = "/nix/store/ccc-image";
         imageHash = "deadbeef";
@@ -496,6 +514,8 @@ in
         runnerKind = "bwrap";
         agentFilesDrv = "/nix/store/aaa-agent-files.drv";
         agentEnvDrv = "/nix/store/bbb-agent-env.drv";
+        passwdFileDrv = "/nix/store/eee-passwd.drv";
+        groupFileDrv = "/nix/store/fff-group.drv";
         runtime = "bwrap";
         imagePath = "/nix/store/ccc-image";
         imageHash = "deadbeef";
@@ -519,6 +539,12 @@ in
       out.AGENT_ENV_DRV == "/nix/store/bbb-agent-env.drv"
     ) "buildArtifacts (bwrap) must set AGENT_ENV_DRV, got: ${builtins.toJSON out}";
     assert assertMsg (
+      out.PASSWD_FILE_DRV == "/nix/store/eee-passwd.drv"
+    ) "buildArtifacts (bwrap) must set PASSWD_FILE_DRV, got: ${builtins.toJSON out}";
+    assert assertMsg (
+      out.GROUP_FILE_DRV == "/nix/store/fff-group.drv"
+    ) "buildArtifacts (bwrap) must set GROUP_FILE_DRV, got: ${builtins.toJSON out}";
+    assert assertMsg (
       !(out ? IMAGE_DRV)
     ) "buildArtifacts (bwrap) must not set OCI-only keys, got: ${builtins.toJSON out}";
     assert assertMsg (
@@ -535,6 +561,8 @@ in
         runnerKind = "oci";
         agentFilesDrv = "/nix/store/aaa-agent-files.drv";
         agentEnvDrv = "/nix/store/bbb-agent-env.drv";
+        passwdFileDrv = "/nix/store/eee-passwd.drv";
+        groupFileDrv = "/nix/store/fff-group.drv";
         runtime = "podman";
         imagePath = "/nix/store/ccc-image";
         imageHash = "deadbeef";
@@ -572,6 +600,12 @@ in
     assert assertMsg (
       !(out ? AGENT_FILES_DRV)
     ) "buildArtifacts (oci) must not set bwrap-only keys, got: ${builtins.toJSON out}";
+    assert assertMsg (
+      !(out ? PASSWD_FILE_DRV)
+    ) "buildArtifacts (oci) must not set bwrap-only keys, got: ${builtins.toJSON out}";
+    assert assertMsg (
+      !(out ? GROUP_FILE_DRV)
+    ) "buildArtifacts (oci) must not set bwrap-only keys, got: ${builtins.toJSON out}";
     pkgs.runCommand "preambles-build-artifacts-oci" { } "touch $out";
 
   # documentArtifactKeys must be derived from what runArtifacts/buildArtifacts
@@ -602,6 +636,8 @@ in
         "FORGE_BACKEND"
         "FULLY_LOCAL"
         "GITHUB_OUTPUT"
+        "GROUP_FILE"
+        "GROUP_FILE_DRV"
         "HOST_MEDIATED_REMOTE"
         "IMAGE"
         "IMAGE_ARCHIVE"
@@ -612,6 +648,8 @@ in
         "NIX_BUILDER_IMAGE"
         "NIX_VOLUME"
         "OUTBOX_RELAY_CAPABLE"
+        "PASSWD_FILE"
+        "PASSWD_FILE_DRV"
         "REVIEW_LOOP_INLINE"
         "REVIEW_LOOP_ORCHESTRATOR"
         "RUNNER_KIND"
