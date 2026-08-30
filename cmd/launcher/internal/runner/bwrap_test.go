@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -278,6 +279,322 @@ func TestBwrapBuildEnsureReady_GroupFileFailureWrapsError(t *testing.T) {
 	}
 }
 
+// TestBwrapBuildEnsureReady_GeneratesStoreDBSnapshotWhenNixConfigDrvSet
+// verifies that when nixConfigFileDrv is set, EnsureReady realizes it as a
+// fifth closure (via the same "nix"-seamed execCommand as the other four)
+// and then snapshots the host nix store DB via a single "sqlite3 ... VACUUM
+// INTO" call through the same seam, for a total of 6 execCommand
+// invocations. It also asserts the actual sqlite3 argv: the statement names
+// a destination under nixVarSnapshotDir's nix/db/db.sqlite layout, quoted so
+// a dest containing a space would round-trip correctly.
+func TestBwrapBuildEnsureReady_GeneratesStoreDBSnapshotWhenNixConfigDrvSet(t *testing.T) {
+	script, dir := newFakeCLI(t,
+		fakeCall{exit: 0}, fakeCall{exit: 0}, fakeCall{exit: 0}, fakeCall{exit: 0},
+		fakeCall{exit: 0}, fakeCall{exit: 0},
+	)
+	orig := execCommand
+	t.Cleanup(func() { execCommand = orig })
+	origStat := statHostNixDB
+	t.Cleanup(func() { statHostNixDB = origStat })
+	statHostNixDB = func() error { return nil }
+	var gotNames []string
+	execCommand = func(name string, args ...string) *exec.Cmd {
+		gotNames = append(gotNames, name)
+		return exec.Command(script, args...)
+	}
+
+	snapshotDir := t.TempDir() + "/nix-var-snapshot"
+	a := &bwrapBuildAdapter{
+		agentFilesDrv:     "/fake/files.drv",
+		agentEnvDrv:       "/fake/env.drv",
+		passwdFileDrv:     "/fake/passwd.drv",
+		groupFileDrv:      "/fake/group.drv",
+		nixConfigFileDrv:  "/fake/nix-config.drv",
+		nixVarSnapshotDir: snapshotDir,
+	}
+	err := a.EnsureReady()
+
+	if err != nil {
+		t.Fatalf("EnsureReady() = %v, want nil", err)
+	}
+	if got := callCount(t, dir); got != 6 {
+		t.Errorf("callCount = %d, want 6", got)
+	}
+	if len(gotNames) != 6 {
+		t.Fatalf("execCommand invoked %d times, want 6: %v", len(gotNames), gotNames)
+	}
+	for i := 0; i < 5; i++ {
+		if gotNames[i] != "nix" {
+			t.Errorf("gotNames[%d] = %q, want %q", i, gotNames[i], "nix")
+		}
+	}
+	if gotNames[5] != "sqlite3" {
+		t.Errorf("gotNames[5] = %q, want %q", gotNames[5], "sqlite3")
+	}
+
+	wantDest := filepath.Join(snapshotDir, "nix", "db", "db.sqlite")
+	call := readCall(t, dir, 5)
+	if len(call) != 2 {
+		t.Fatalf("sqlite3 call argv = %v, want 2 elements (host db path, statement)", call)
+	}
+	if call[0] != hostNixDBPath {
+		t.Errorf("sqlite3 call[0] = %q, want %q", call[0], hostNixDBPath)
+	}
+	if !strings.Contains(call[1], "VACUUM INTO") {
+		t.Errorf("sqlite3 statement = %q, want it to contain %q", call[1], "VACUUM INTO")
+	}
+	if !strings.Contains(call[1], wantDest) {
+		t.Errorf("sqlite3 statement = %q, want it to reference dest %q", call[1], wantDest)
+	}
+}
+
+// TestBwrapBuildEnsureReady_RemovesStaleSnapshotBeforeVacuumInto verifies
+// that EnsureReady moves a pre-existing file at the snapshot dest out of the
+// way before invoking sqlite3, since "VACUUM INTO" refuses to run against a
+// dest that already exists. The execCommand stub itself asserts dest is gone
+// by the time the sqlite3 call is made, pinning the ordering rather than only
+// checking the end state (which a "remove after" implementation could also
+// satisfy).
+func TestBwrapBuildEnsureReady_RemovesStaleSnapshotBeforeVacuumInto(t *testing.T) {
+	script, _ := newFakeCLI(t,
+		fakeCall{exit: 0}, fakeCall{exit: 0}, fakeCall{exit: 0}, fakeCall{exit: 0},
+		fakeCall{exit: 0}, fakeCall{exit: 0},
+	)
+	orig := execCommand
+	t.Cleanup(func() { execCommand = orig })
+	origStat := statHostNixDB
+	t.Cleanup(func() { statHostNixDB = origStat })
+	statHostNixDB = func() error { return nil }
+
+	snapshotDir := t.TempDir() + "/nix-var-snapshot"
+	dest := filepath.Join(snapshotDir, "nix", "db", "db.sqlite")
+	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+		t.Fatalf("MkdirAll(%q) = %v, want nil", filepath.Dir(dest), err)
+	}
+	if err := os.WriteFile(dest, []byte("stale"), 0o644); err != nil {
+		t.Fatalf("WriteFile(%q) = %v, want nil", dest, err)
+	}
+
+	execCommand = func(name string, args ...string) *exec.Cmd {
+		if name == "sqlite3" {
+			if _, err := os.Stat(dest); err == nil {
+				t.Fatal("dest still exists when sqlite3 invoked — rename-aside must happen before VACUUM INTO")
+			}
+		}
+		return exec.Command(script, args...)
+	}
+
+	a := &bwrapBuildAdapter{
+		agentFilesDrv:     "/fake/files.drv",
+		agentEnvDrv:       "/fake/env.drv",
+		passwdFileDrv:     "/fake/passwd.drv",
+		groupFileDrv:      "/fake/group.drv",
+		nixConfigFileDrv:  "/fake/nix-config.drv",
+		nixVarSnapshotDir: snapshotDir,
+	}
+	err := a.EnsureReady()
+
+	if err != nil {
+		t.Fatalf("EnsureReady() = %v, want nil", err)
+	}
+	// With the rename-aside design, a successful EnsureReady leaves dest
+	// absent: production moves the pre-existing file to dest+".bak" before
+	// VACUUM INTO, and the fake sqlite3 script (a no-op stub) never itself
+	// creates dest, so nothing recreates it after the rename.
+	if _, statErr := os.Stat(dest); !os.IsNotExist(statErr) {
+		t.Errorf("os.Stat(%q) after EnsureReady = %v, want IsNotExist (fake sqlite3 never creates dest)", dest, statErr)
+	}
+}
+
+// TestBwrapBuildEnsureReady_RestoresStaleSnapshotOnVacuumIntoFailure verifies
+// the fix for the review finding at the heart of this test: a failed VACUUM
+// INTO must not destroy a previously-working snapshot. dest is seeded with
+// known content before EnsureReady runs; the scripted sqlite3 failure (6th
+// call, matching TestBwrapBuildEnsureReady_SnapshotFailureWrapsError's
+// pattern) must leave dest restored with that exact original content, not
+// merely present.
+func TestBwrapBuildEnsureReady_RestoresStaleSnapshotOnVacuumIntoFailure(t *testing.T) {
+	script, dir := newFakeCLI(t,
+		fakeCall{exit: 0}, fakeCall{exit: 0}, fakeCall{exit: 0}, fakeCall{exit: 0},
+		fakeCall{exit: 0}, fakeCall{exit: 1},
+	)
+	orig := execCommand
+	t.Cleanup(func() { execCommand = orig })
+	origStat := statHostNixDB
+	t.Cleanup(func() { statHostNixDB = origStat })
+	statHostNixDB = func() error { return nil }
+	execCommand = func(name string, args ...string) *exec.Cmd {
+		return exec.Command(script, args...)
+	}
+
+	snapshotDir := t.TempDir() + "/nix-var-snapshot"
+	dest := filepath.Join(snapshotDir, "nix", "db", "db.sqlite")
+	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+		t.Fatalf("MkdirAll(%q) = %v, want nil", filepath.Dir(dest), err)
+	}
+	wantContent := []byte("previously-working snapshot")
+	if err := os.WriteFile(dest, wantContent, 0o644); err != nil {
+		t.Fatalf("WriteFile(%q) = %v, want nil", dest, err)
+	}
+
+	a := &bwrapBuildAdapter{
+		agentFilesDrv:     "/fake/files.drv",
+		agentEnvDrv:       "/fake/env.drv",
+		passwdFileDrv:     "/fake/passwd.drv",
+		groupFileDrv:      "/fake/group.drv",
+		nixConfigFileDrv:  "/fake/nix-config.drv",
+		nixVarSnapshotDir: snapshotDir,
+	}
+	err := a.EnsureReady()
+
+	if err == nil {
+		t.Fatal("EnsureReady() = nil, want error from scripted sqlite3 failure")
+	}
+	if got := callCount(t, dir); got != 6 {
+		t.Errorf("callCount = %d, want 6", got)
+	}
+	gotContent, readErr := os.ReadFile(dest)
+	if readErr != nil {
+		t.Fatalf("os.ReadFile(%q) after failed EnsureReady = %v, want the previous snapshot restored", dest, readErr)
+	}
+	if string(gotContent) != string(wantContent) {
+		t.Errorf("dest content after failed EnsureReady = %q, want original %q (restore must recover the previously-working snapshot)", gotContent, wantContent)
+	}
+}
+
+// TestBwrapBuildEnsureReady_SkipsSnapshotWhenNixConfigDrvEmpty verifies that
+// when nixConfigFileDrv is empty (the Consumer's nixInBox knob is off),
+// EnsureReady realizes only the original four closures and never invokes
+// sqlite3 at all — and, since the whole snapshot step (including its
+// statHostNixDB preflight) is gated on nixConfigFileDrv, never calls
+// statHostNixDB either. statHostNixDB is stubbed to fail loudly if called,
+// rather than left at its real os.Stat default, so this assertion doesn't
+// silently pass on a machine that happens to have a real host nix db.
+func TestBwrapBuildEnsureReady_SkipsSnapshotWhenNixConfigDrvEmpty(t *testing.T) {
+	script, dir := newFakeCLI(t, fakeCall{exit: 0}, fakeCall{exit: 0}, fakeCall{exit: 0}, fakeCall{exit: 0})
+	orig := execCommand
+	t.Cleanup(func() { execCommand = orig })
+	origStat := statHostNixDB
+	t.Cleanup(func() { statHostNixDB = origStat })
+	statCalled := false
+	statHostNixDB = func() error {
+		statCalled = true
+		return nil
+	}
+	var gotNames []string
+	execCommand = func(name string, args ...string) *exec.Cmd {
+		gotNames = append(gotNames, name)
+		return exec.Command(script, args...)
+	}
+
+	a := &bwrapBuildAdapter{
+		agentFilesDrv:     "/fake/files.drv",
+		agentEnvDrv:       "/fake/env.drv",
+		passwdFileDrv:     "/fake/passwd.drv",
+		groupFileDrv:      "/fake/group.drv",
+		nixConfigFileDrv:  "",
+		nixVarSnapshotDir: t.TempDir() + "/nix-var-snapshot",
+	}
+	err := a.EnsureReady()
+
+	if err != nil {
+		t.Fatalf("EnsureReady() = %v, want nil", err)
+	}
+	if got := callCount(t, dir); got != 4 {
+		t.Errorf("callCount = %d, want 4", got)
+	}
+	for _, n := range gotNames {
+		if n == "sqlite3" {
+			t.Errorf("gotNames = %v, want no \"sqlite3\" entry when nixConfigFileDrv is empty", gotNames)
+		}
+	}
+	if statCalled {
+		t.Error("statHostNixDB was called, want it skipped when nixConfigFileDrv is empty")
+	}
+}
+
+// TestBwrapBuildEnsureReady_SnapshotFailureWrapsError verifies that a
+// scripted sqlite3 failure (the 6th execCommand call, immediately after all
+// 5 closures succeed) surfaces as a wrapped "sqlite3 vacuum-into nix store
+// db snapshot" error. The old two-step backup/vacuum design had two
+// separate failure tests here; VACUUM INTO collapses backup+compact into
+// one sqlite3 invocation, so there is only one failure mode left to cover.
+func TestBwrapBuildEnsureReady_SnapshotFailureWrapsError(t *testing.T) {
+	script, dir := newFakeCLI(t,
+		fakeCall{exit: 0}, fakeCall{exit: 0}, fakeCall{exit: 0}, fakeCall{exit: 0},
+		fakeCall{exit: 0}, fakeCall{exit: 1},
+	)
+	orig := execCommand
+	t.Cleanup(func() { execCommand = orig })
+	origStat := statHostNixDB
+	t.Cleanup(func() { statHostNixDB = origStat })
+	statHostNixDB = func() error { return nil }
+	execCommand = func(name string, args ...string) *exec.Cmd {
+		return exec.Command(script, args...)
+	}
+
+	a := &bwrapBuildAdapter{
+		agentFilesDrv:     "/fake/files.drv",
+		agentEnvDrv:       "/fake/env.drv",
+		passwdFileDrv:     "/fake/passwd.drv",
+		groupFileDrv:      "/fake/group.drv",
+		nixConfigFileDrv:  "/fake/nix-config.drv",
+		nixVarSnapshotDir: t.TempDir() + "/nix-var-snapshot",
+	}
+	err := a.EnsureReady()
+
+	if err == nil || !strings.Contains(err.Error(), "sqlite3 vacuum-into nix store db snapshot") {
+		t.Errorf("EnsureReady() = %v, want error containing %q", err, "sqlite3 vacuum-into nix store db snapshot")
+	}
+	if got := callCount(t, dir); got != 6 {
+		t.Errorf("callCount = %d, want 6", got)
+	}
+}
+
+// TestBwrapBuildEnsureReady_MissingHostNixDBFailsBeforeAnySqlite3Call
+// verifies that when statHostNixDB reports the host db missing, EnsureReady
+// fails fast with a wrapped "host nix store db not found" error before
+// invoking sqlite3 at all (issue #2664 review finding: a missing host db
+// previously produced a silently-empty, valid-looking snapshot instead of an
+// error). The 5 nix-build closures still run first — the snapshot step (and
+// its preflight check) happens only after they all succeed — so callCount is
+// 5, not 0.
+func TestBwrapBuildEnsureReady_MissingHostNixDBFailsBeforeAnySqlite3Call(t *testing.T) {
+	script, dir := newFakeCLI(t, fakeCall{exit: 0})
+	orig := execCommand
+	t.Cleanup(func() { execCommand = orig })
+	origStat := statHostNixDB
+	t.Cleanup(func() { statHostNixDB = origStat })
+	statHostNixDB = func() error { return errors.New("no such file or directory") }
+	var gotNames []string
+	execCommand = func(name string, args ...string) *exec.Cmd {
+		gotNames = append(gotNames, name)
+		return exec.Command(script, args...)
+	}
+
+	a := &bwrapBuildAdapter{
+		agentFilesDrv:     "/fake/files.drv",
+		agentEnvDrv:       "/fake/env.drv",
+		passwdFileDrv:     "/fake/passwd.drv",
+		groupFileDrv:      "/fake/group.drv",
+		nixConfigFileDrv:  "/fake/nix-config.drv",
+		nixVarSnapshotDir: t.TempDir() + "/nix-var-snapshot",
+	}
+	err := a.EnsureReady()
+
+	if err == nil || !strings.Contains(err.Error(), "host nix store db not found") {
+		t.Errorf("EnsureReady() = %v, want error containing %q", err, "host nix store db not found")
+	}
+	if got := callCount(t, dir); got != 5 {
+		t.Errorf("callCount = %d, want 5 (closures run before the snapshot preflight check)", got)
+	}
+	for _, n := range gotNames {
+		if n == "sqlite3" {
+			t.Errorf("gotNames = %v, want no %q entry when the host db is missing", gotNames, "sqlite3")
+		}
+	}
+}
+
 // TestBwrapKill_TerminatesRunningProcess verifies Kill (issue #649) reaches
 // a bwrap sandbox's live process — the one Runner an external caller has no
 // other way to observe, since IsRunning/Reap are both no-ops for bwrap.
@@ -326,6 +643,144 @@ func TestBwrapKill_UnknownNameIsNoop(t *testing.T) {
 	a := &bwrapAdapter{}
 	if err := a.Kill("agent-issue-404"); err != nil {
 		t.Errorf("Kill on unknown name: want nil, got %v", err)
+	}
+}
+
+// TestBwrapIsReady_NixConfigEmptySkipsSnapshotCheck verifies the gate is
+// scoped to nixInBox Consumers only: with nixConfigFile empty, IsReady
+// returns nil even when nixVarSnapshotDir points somewhere nonexistent —
+// Consumers who never use the bwrap+nix mechanism must never see this check
+// fire (issue #2664).
+func TestBwrapIsReady_NixConfigEmptySkipsSnapshotCheck(t *testing.T) {
+	a := &bwrapAdapter{nixConfigFile: "", nixVarSnapshotDir: "/does/not/exist"}
+	if err := a.IsReady(); err != nil {
+		t.Errorf("IsReady with nixConfigFile empty: want nil, got %v", err)
+	}
+}
+
+// TestBwrapIsReady_NixConfigSetAndSnapshotPresentReturnsNil verifies IsReady
+// succeeds once `launcher build` has populated nixVarSnapshotDir with its
+// db.sqlite snapshot (snapshotStoreDB's actual write target).
+func TestBwrapIsReady_NixConfigSetAndSnapshotPresentReturnsNil(t *testing.T) {
+	dir := t.TempDir()
+	dbDir := filepath.Join(dir, "nix", "db")
+	if err := os.MkdirAll(dbDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dbDir, "db.sqlite"), []byte("fake"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	a := &bwrapAdapter{nixConfigFile: "/fake/nix.conf", nixVarSnapshotDir: dir}
+	if err := a.IsReady(); err != nil {
+		t.Errorf("IsReady with snapshot db.sqlite present: want nil, got %v", err)
+	}
+}
+
+// TestBwrapIsReady_NixConfigSetAndSnapshotDirExistsButDBFileMissingReturnsActionableError
+// guards the finding at the heart of issue #2664: snapshotStoreDB creates
+// <nixVarSnapshotDir>/nix/db via MkdirAll before it ever runs the sqlite3
+// VACUUM INTO that writes db.sqlite, so a dir-only check falsely reports
+// ready when that VACUUM INTO failed partway (disk full, missing host db,
+// a killed build) and left an empty directory behind.
+func TestBwrapIsReady_NixConfigSetAndSnapshotDirExistsButDBFileMissingReturnsActionableError(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "nix", "db"), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	a := &bwrapAdapter{nixConfigFile: "/fake/nix.conf", nixVarSnapshotDir: dir}
+	err := a.IsReady()
+	if err == nil {
+		t.Fatal("IsReady with dir present but db.sqlite missing: want error, got nil")
+	}
+	wantPath := filepath.Join(dir, "nix", "db", "db.sqlite")
+	if !strings.Contains(err.Error(), wantPath) {
+		t.Errorf("IsReady error %q: want it to mention the missing path %q", err.Error(), wantPath)
+	}
+	if !strings.Contains(err.Error(), "launcher build") {
+		t.Errorf("IsReady error %q: want it to hint at running `launcher build`", err.Error())
+	}
+}
+
+// TestBwrapIsReady_NixConfigSetAndSnapshotMissingReturnsActionableError
+// verifies the finding's core fix: a missing nixVarSnapshotDir surfaces as a
+// clear launcher-level error pointing at `launcher build`, not a raw bwrap
+// mount failure (issue #2664).
+func TestBwrapIsReady_NixConfigSetAndSnapshotMissingReturnsActionableError(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "missing")
+	a := &bwrapAdapter{nixConfigFile: "/fake/nix.conf", nixVarSnapshotDir: missing}
+	err := a.IsReady()
+	if err == nil {
+		t.Fatal("IsReady with missing snapshot dir: want error, got nil")
+	}
+	if !strings.Contains(err.Error(), missing) {
+		t.Errorf("IsReady error %q: want it to mention the missing path %q", err.Error(), missing)
+	}
+	if !strings.Contains(err.Error(), "launcher build") {
+		t.Errorf("IsReady error %q: want it to hint at running `launcher build`", err.Error())
+	}
+}
+
+// TestBwrapIsReady_NixConfigSetAndStatErrorOtherThanNotExistReturnsWrappedError
+// verifies that a stat failure on dbPath other than "not exist" (e.g. EACCES,
+// ENOTDIR) is not misreported as "not found". It uses ENOTDIR rather than a
+// permission-denied directory: chmod-based EACCES is unreliable in a sandbox
+// that may run tests as root, where permission checks are bypassed entirely.
+// Making the "db" path component a plain file instead of a directory forces
+// any os.Stat of a path below it to fail with ENOTDIR regardless of uid.
+func TestBwrapIsReady_NixConfigSetAndStatErrorOtherThanNotExistReturnsWrappedError(t *testing.T) {
+	dir := t.TempDir()
+	dbDirParent := filepath.Join(dir, "nix")
+	if err := os.MkdirAll(dbDirParent, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	dbDir := filepath.Join(dbDirParent, "db")
+	if err := os.WriteFile(dbDir, []byte("not a directory"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	a := &bwrapAdapter{nixConfigFile: "/fake/nix.conf", nixVarSnapshotDir: dir}
+	err := a.IsReady()
+	if err == nil {
+		t.Fatal("IsReady with ENOTDIR stat error: want error, got nil")
+	}
+	if strings.Contains(err.Error(), "not found") {
+		t.Errorf("IsReady error %q: want it to NOT claim \"not found\" for a non-ENOENT stat error", err.Error())
+	}
+	dbPath := filepath.Join(dbDir, "db.sqlite")
+	if !strings.Contains(err.Error(), dbPath) {
+		t.Errorf("IsReady error %q: want it to mention the stat path %q", err.Error(), dbPath)
+	}
+}
+
+// TestBwrapEnsureReady_DelegatesToIsReady is the regression test for issue
+// #2664's other half: bootstrap only calls IsReady on the `--no-build` path
+// (main package's bootstrap()), so on the default run/dispatch path a
+// missing nix-in-box snapshot used to sail straight past EnsureReady's
+// unconditional no-op and surface as a raw bwrap overlay mount failure
+// instead. EnsureReady must perform the same actionable check IsReady does.
+func TestBwrapEnsureReady_DelegatesToIsReady(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "missing")
+	a := &bwrapAdapter{nixConfigFile: "/fake/nix.conf", nixVarSnapshotDir: missing}
+	err := a.EnsureReady()
+	if err == nil {
+		t.Fatal("EnsureReady with missing snapshot dir: want error, got nil")
+	}
+	wantPath := filepath.Join(missing, "nix", "db", "db.sqlite")
+	if !strings.Contains(err.Error(), wantPath) {
+		t.Errorf("EnsureReady error %q: want it to mention the missing path %q", err.Error(), wantPath)
+	}
+	if !strings.Contains(err.Error(), "launcher build") {
+		t.Errorf("EnsureReady error %q: want it to hint at running `launcher build`", err.Error())
+	}
+}
+
+// TestBwrapEnsureReady_NixConfigEmptySkipsSnapshotCheck mirrors
+// TestBwrapIsReady_NixConfigEmptySkipsSnapshotCheck: Consumers who never use
+// nix-in-box must not regress once EnsureReady delegates to IsReady
+// (issue #2664).
+func TestBwrapEnsureReady_NixConfigEmptySkipsSnapshotCheck(t *testing.T) {
+	a := &bwrapAdapter{nixConfigFile: "", nixVarSnapshotDir: "/does/not/exist"}
+	if err := a.EnsureReady(); err != nil {
+		t.Errorf("EnsureReady with nixConfigFile empty: want nil, got %v", err)
 	}
 }
 

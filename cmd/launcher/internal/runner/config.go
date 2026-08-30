@@ -63,6 +63,12 @@ type Config struct {
 	GroupFileDrv    string // .drv path; realized by `launcher build`
 	BakedPrefetch   string
 	BwrapUnshareNet bool
+	// NixConfigFile is the baked nix store path for /etc/nix/nix.conf (ADR
+	// 0042); empty when the Consumer's nixInBox knob is off.
+	NixConfigFile string
+	// NixConfigFileDrv is its .drv path; realized by `launcher build`
+	// alongside the other bwrap agent store closures, when set.
+	NixConfigFileDrv string
 
 	// Optional host overrides shared by the OCI and bwrap run adapters
 	// (unused by the build adapters).

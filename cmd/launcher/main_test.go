@@ -497,6 +497,25 @@ func TestRunnerConfig_PasswdGroupFiles(t *testing.T) {
 	}
 }
 
+// TestRunnerConfig_NixConfigFile verifies NIX_CONFIG_FILE/NIX_CONFIG_FILE_DRV
+// (nix-in-a-Box config + store-DB snapshot plumbing, issue #2664) reach
+// runner.Config so the bwrap adapter can mount the config and realize its
+// snapshot closure.
+func TestRunnerConfig_NixConfigFile(t *testing.T) {
+	t.Setenv("NIX_CONFIG_FILE", "/nix/store/abc-nix-conf")
+	t.Setenv("NIX_CONFIG_FILE_DRV", "/nix/store/abc-nix-conf.drv")
+
+	c := loadConfig()
+	rc := runnerConfig(c)
+
+	if rc.NixConfigFile != "/nix/store/abc-nix-conf" {
+		t.Errorf("NixConfigFile = %q, want /nix/store/abc-nix-conf", rc.NixConfigFile)
+	}
+	if rc.NixConfigFileDrv != "/nix/store/abc-nix-conf.drv" {
+		t.Errorf("NixConfigFileDrv = %q, want /nix/store/abc-nix-conf.drv", rc.NixConfigFileDrv)
+	}
+}
+
 // TestRunnerConfig_DriverSessionCacheDirUnset verifies that an unset
 // DRIVER_SESSION_CACHE_DIR (a Driver declaring no session-state dir) reaches
 // runner.Config as empty, not a fallback literal.

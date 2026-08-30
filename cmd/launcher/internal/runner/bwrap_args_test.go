@@ -109,14 +109,7 @@ func TestBwrapArgs_HomeAgentStagingMounted(t *testing.T) {
 	}
 	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}})
 
-	found := false
-	for i := 0; i+2 < len(args); i++ {
-		if args[i] == "--ro-bind" && args[i+1] == "/fake/agent/home/agent" && args[i+2] == "/home-agent-staged" {
-			found = true
-			break
-		}
-	}
-	if !found {
+	if !wantTriple(args, "--ro-bind", "/fake/agent/home/agent", "/home-agent-staged") {
 		t.Errorf("expected --ro-bind /fake/agent/home/agent /home-agent-staged in args: %v", args)
 	}
 }
@@ -134,18 +127,10 @@ func TestBwrapArgs_AccountFilesBindStorePaths(t *testing.T) {
 	}
 	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}})
 
-	wantTriple := func(a0, a1, a2 string) bool {
-		for i := 0; i+2 < len(args); i++ {
-			if args[i] == a0 && args[i+1] == a1 && args[i+2] == a2 {
-				return true
-			}
-		}
-		return false
-	}
-	if !wantTriple("--ro-bind", "/nix/store/abc123-passwd/passwd", "/etc/passwd") {
+	if !wantTriple(args, "--ro-bind", "/nix/store/abc123-passwd/passwd", "/etc/passwd") {
 		t.Errorf("expected --ro-bind /nix/store/abc123-passwd/passwd /etc/passwd in args: %v", args)
 	}
-	if !wantTriple("--ro-bind", "/nix/store/def456-group/group", "/etc/group") {
+	if !wantTriple(args, "--ro-bind", "/nix/store/def456-group/group", "/etc/group") {
 		t.Errorf("expected --ro-bind /nix/store/def456-group/group /etc/group in args: %v", args)
 	}
 }
@@ -683,6 +668,69 @@ func TestBwrapArgs_SkillsDirUnset_NoMount(t *testing.T) {
 // not a bwrap.go-issued mount, so there is nothing left in this adapter for
 // these tests to exercise; TestBwrapArgs_SkillsDirUnset_NoMount above already
 // covers "no skills bind when skillsDir is empty".
+
+// TestBwrapArgs_MountsNixConfigAndStoreDBSnapshotWhenSet verifies that a
+// non-empty nixConfigFile (ADR 0042: nixInBox knob on) renders both the
+// nix.conf ro-bind and the store-DB snapshot overlay onto /nix/var.
+func TestBwrapArgs_MountsNixConfigAndStoreDBSnapshotWhenSet(t *testing.T) {
+	a := &bwrapAdapter{
+		agentFiles:        "/fake/agent",
+		agentEnv:          "/fake/env",
+		nixConfigFile:     "/nix/store/fake-hash-nix-conf/nix.conf",
+		nixVarSnapshotDir: "/fake/pwd/.spindrift/nix-var-snapshot",
+	}
+	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}})
+
+	if !wantTriple(args, "--ro-bind", "/nix/store/fake-hash-nix-conf/nix.conf", "/etc/nix/nix.conf") {
+		t.Errorf("expected --ro-bind /nix/store/fake-hash-nix-conf/nix.conf /etc/nix/nix.conf in args: %v", args)
+	}
+	if !strings.Contains(strings.Join(args, " "), "--overlay-src /fake/pwd/.spindrift/nix-var-snapshot --tmp-overlay /nix/var") {
+		t.Errorf("expected --overlay-src /fake/pwd/.spindrift/nix-var-snapshot --tmp-overlay /nix/var in args: %v", args)
+	}
+}
+
+// TestBwrapArgs_NoNixMountsWhenNixConfigFileEmpty verifies that the nix.conf
+// and store-DB snapshot mounts are gated on nixConfigFile alone: even with a
+// non-empty nixVarSnapshotDir (as production always computes, ADR 0042),
+// leaving nixConfigFile at its zero value (nixInBox off) skips both mounts.
+func TestBwrapArgs_NoNixMountsWhenNixConfigFileEmpty(t *testing.T) {
+	a := &bwrapAdapter{
+		agentFiles:        "/fake/agent",
+		agentEnv:          "/fake/env",
+		nixVarSnapshotDir: "/fake/pwd/.spindrift/nix-var-snapshot",
+	}
+	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}})
+
+	argStr := strings.Join(args, " ")
+	for _, unwanted := range []string{"/etc/nix/nix.conf", "--overlay-src", "/nix/var"} {
+		if strings.Contains(argStr, unwanted) {
+			t.Errorf("unexpected %q in args when nixConfigFile is empty: %v", unwanted, args)
+		}
+	}
+}
+
+// TestBwrapArgs_StoreAlwaysReadOnlyBindRegardlessOfNixConfig pins the "store
+// remains read-only" acceptance criterion for this slice: even with the nix
+// mounts present, the /nix/store bind stays a plain, unconditional
+// --ro-bind, never itself overlaid.
+func TestBwrapArgs_StoreAlwaysReadOnlyBindRegardlessOfNixConfig(t *testing.T) {
+	a := &bwrapAdapter{
+		agentFiles:        "/fake/agent",
+		agentEnv:          "/fake/env",
+		nixConfigFile:     "/nix/store/fake/nix.conf",
+		nixVarSnapshotDir: "/fake/snap",
+	}
+	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}})
+
+	if !wantTriple(args, "--ro-bind", "/nix/store", "/nix/store") {
+		t.Errorf("expected --ro-bind /nix/store /nix/store in args: %v", args)
+	}
+	for i := 0; i+1 < len(args); i++ {
+		if args[i] == "--overlay-src" && args[i+1] == "/nix/store" {
+			t.Errorf("/nix/store must never be overlaid by this change: %v", args)
+		}
+	}
+}
 
 // TestBwrapArgs_NonSecretOnArgv verifies that non-secret env vars still reach
 // the sandbox via --setenv (so they appear in argv).

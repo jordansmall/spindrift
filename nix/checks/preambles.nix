@@ -5,6 +5,47 @@
 let
   preambles = import ../../lib/preambles.nix;
   inherit (pkgs.lib) assertMsg hasInfix;
+
+  # Shared by preambles-run-artifacts-bwrap and its
+  # -nix-config-omitted sibling below, which differ only in whether
+  # nixConfigPath is set (issue #2664).
+  bwrapRunArtifactsBase = {
+    runnerKind = "bwrap";
+    driverEntry = {
+      name = "claude";
+      skillsDirRelative = ".claude/skills";
+    };
+    agentFilesPath = "/nix/store/aaa-agent-files";
+    agentEnvPath = "/nix/store/bbb-agent-env";
+    passwdFilePath = "/nix/store/eee-passwd";
+    groupFilePath = "/nix/store/fff-group";
+    agentClosurePath = "/nix/store/ggg-agent-closure";
+    prefetch = "";
+    imagePath = "/nix/store/ccc-image";
+    imageHash = "deadbeef";
+    launcherCurrencyHash = "deadbeefdeadbeefdeadbeefdeadbeef";
+    imageName = "spindrift";
+    runtime = "bwrap";
+    imageDrv = "/nix/store/ddd-image.drv";
+    nixBuilderImage = "docker.io/nixos/nix@sha256:aaaa";
+    systems = {
+      host = "aarch64-darwin";
+      linux = "x86_64-linux";
+    };
+    boxEnvVars = "MODEL BASE_BRANCH";
+    hostMediatedRemote = false;
+    outboxRelayCapable = true;
+    inBoxUnreachableTracker = false;
+    fullyLocal = false;
+    trackerAxisRead = "GITHUB";
+    trackerAxisWrite = "GITHUB";
+    trackerAxisFiler = "GH";
+    forgeBackend = "GH";
+    filerEnabled = true;
+    workerProvisioned = true;
+    reviewLoopInline = true;
+    reviewLoopOrchestrator = false;
+  };
 in
 {
   preambles-defaults-shape =
@@ -227,44 +268,12 @@ in
 
   preambles-run-artifacts-bwrap =
     let
-      out = preambles.runArtifacts {
-        runnerKind = "bwrap";
-        driverEntry = {
-          name = "claude";
-          skillsDirRelative = ".claude/skills";
-        };
-        agentFilesPath = "/nix/store/aaa-agent-files";
-        agentEnvPath = "/nix/store/bbb-agent-env";
-        passwdFilePath = "/nix/store/eee-passwd";
-        groupFilePath = "/nix/store/fff-group";
-        agentClosurePath = "/nix/store/ggg-agent-closure";
-        prefetch = "";
-        imagePath = "/nix/store/ccc-image";
-        imageHash = "deadbeef";
-        launcherCurrencyHash = "deadbeefdeadbeefdeadbeefdeadbeef";
-        imageName = "spindrift";
-        runtime = "bwrap";
-        imageDrv = "/nix/store/ddd-image.drv";
-        nixBuilderImage = "docker.io/nixos/nix@sha256:aaaa";
-        systems = {
-          host = "aarch64-darwin";
-          linux = "x86_64-linux";
-        };
-        boxEnvVars = "MODEL BASE_BRANCH";
-        hostMediatedRemote = false;
-        outboxRelayCapable = true;
-        inBoxUnreachableTracker = false;
-        fullyLocal = false;
-        trackerAxisRead = "GITHUB";
-        trackerAxisWrite = "GITHUB";
-        trackerAxisFiler = "GH";
-        forgeBackend = "GH";
-        filerEnabled = true;
-        workerProvisioned = true;
-        reviewLoopInline = true;
-        reviewLoopOrchestrator = false;
-        nixConfigPath = "/nix/store/fake-nix-conf-path/nix.conf";
-      };
+      out = preambles.runArtifacts (
+        bwrapRunArtifactsBase
+        // {
+          nixConfigPath = "/nix/store/fake-nix-conf-path/nix.conf";
+        }
+      );
     in
     assert assertMsg (
       out.RUNTIME == "bwrap"
@@ -346,46 +355,10 @@ in
   # preambles-run-artifacts-oci).
   preambles-run-artifacts-bwrap-nix-config-omitted =
     let
-      out = preambles.runArtifacts {
-        runnerKind = "bwrap";
-        driverEntry = {
-          name = "claude";
-          skillsDirRelative = ".claude/skills";
-        };
-        agentFilesPath = "/nix/store/aaa-agent-files";
-        agentEnvPath = "/nix/store/bbb-agent-env";
-        passwdFilePath = "/nix/store/eee-passwd";
-        groupFilePath = "/nix/store/fff-group";
-        agentClosurePath = "/nix/store/ggg-agent-closure";
-        prefetch = "";
-        imagePath = "/nix/store/ccc-image";
-        imageHash = "deadbeef";
-        launcherCurrencyHash = "deadbeefdeadbeefdeadbeefdeadbeef";
-        imageName = "spindrift";
-        runtime = "bwrap";
-        imageDrv = "/nix/store/ddd-image.drv";
-        nixBuilderImage = "docker.io/nixos/nix@sha256:aaaa";
-        systems = {
-          host = "aarch64-darwin";
-          linux = "x86_64-linux";
-        };
-        boxEnvVars = "MODEL BASE_BRANCH";
-        hostMediatedRemote = false;
-        outboxRelayCapable = true;
-        inBoxUnreachableTracker = false;
-        fullyLocal = false;
-        trackerAxisRead = "GITHUB";
-        trackerAxisWrite = "GITHUB";
-        trackerAxisFiler = "GH";
-        forgeBackend = "GH";
-        filerEnabled = true;
-        workerProvisioned = true;
-        reviewLoopInline = true;
-        reviewLoopOrchestrator = false;
-        # nixConfigPath deliberately omitted -- pins the nixInBox-off default
-        # mkHarness.nix's `if nixInBox then nixConfigFilePath else ""` relies
-        # on, which a Go-side test can't see directly.
-      };
+      # nixConfigPath deliberately omitted -- pins the nixInBox-off default
+      # mkHarness.nix's `if nixInBox then nixConfigFilePath else ""` relies
+      # on, which a Go-side test can't see directly.
+      out = preambles.runArtifacts bwrapRunArtifactsBase;
     in
     assert assertMsg (out.NIX_CONFIG_FILE == "")
       "runArtifacts (bwrap) must default NIX_CONFIG_FILE to \"\" when nixConfigPath is omitted (the nixInBox-off shape), got: ${builtins.toJSON out}";

@@ -242,11 +242,23 @@ let
   };
 
   # The daemonless bubblewrap runner fixture (issue #54): exercises the
-  # bwrap build/run path through the bats suite.
+  # bwrap build/run path through the bats suite. nixInBox = false here: `bwrap
+  # build`'s EnsureReady (cmd/launcher/internal/runner/bwrap.go
+  # snapshotStoreDB, ADR 0042) reaches into the real, live
+  # /nix/var/nix/db/db.sqlite whenever nixInBox is on -- a path a sandboxed
+  # `nix flake check` build never has access to (unlike /nix/store, it isn't
+  # bind-mounted into the derivation sandbox), so leaving this fixture on the
+  # schema's true default broke every generic BWRAP_BUILD_CMD bats test with
+  # "host nix store db not found" in CI (issue #2664). None of the bats
+  # suites assert anything about the nix.conf/store-DB-snapshot mounts this
+  # knob adds -- that is covered by the Go-level bwrap_test.go/
+  # bwrap_integration_test.go instead -- so turning it off here costs no
+  # coverage.
   bwrapHarness = import ../lib/mkHarness.nix {
     inherit nixpkgs system;
     overlays = [ ghFakeOverlay ];
     runtime = "bwrap";
+    nixInBox = false;
     packages = p: [ p.hello ];
   };
 

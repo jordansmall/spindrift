@@ -100,8 +100,9 @@ func TestNewBwrap_UsesConfigFields(t *testing.T) {
 		DriverSessionCacheDir: "/home/agent/.claude/projects",
 		BwrapUnshareNet:       true,
 		NetworkMode:           "none",
+		NixConfigFile:         "/nix/store/fake-hash-nix-conf/nix.conf",
 	}
-	r := NewBwrap(cfg)
+	r := NewBwrap(cfg, "/pwd")
 	a, ok := r.(*bwrapAdapter)
 	if !ok {
 		t.Fatalf("NewBwrap did not return *bwrapAdapter")
@@ -117,6 +118,8 @@ func TestNewBwrap_UsesConfigFields(t *testing.T) {
 		driverSessionCacheDir: cfg.DriverSessionCacheDir,
 		unshareNet:            cfg.BwrapUnshareNet,
 		networkMode:           cfg.NetworkMode,
+		nixConfigFile:         cfg.NixConfigFile,
+		nixVarSnapshotDir:     nixVarSnapshotDir("/pwd"),
 	}
 	// reflect.DeepEqual over pointers, not !=: bwrapAdapter now also carries
 	// the mu/running process-tracking fields Kill (issue #649) uses, which a
@@ -132,21 +135,24 @@ func TestNewBwrap_UsesConfigFields(t *testing.T) {
 // adapter fields from Config instead of a positional-argument list.
 func TestNewBwrapBuild_UsesConfigFields(t *testing.T) {
 	cfg := Config{
-		AgentFilesDrv: "/files.drv",
-		AgentEnvDrv:   "/env.drv",
-		PasswdFileDrv: "/passwd.drv",
-		GroupFileDrv:  "/group.drv",
+		AgentFilesDrv:    "/files.drv",
+		AgentEnvDrv:      "/env.drv",
+		PasswdFileDrv:    "/passwd.drv",
+		GroupFileDrv:     "/group.drv",
+		NixConfigFileDrv: "/nix-config.drv",
 	}
-	r := NewBwrapBuild(cfg)
+	r := NewBwrapBuild(cfg, "/pwd")
 	a, ok := r.(*bwrapBuildAdapter)
 	if !ok {
 		t.Fatalf("NewBwrapBuild did not return *bwrapBuildAdapter")
 	}
 	want := bwrapBuildAdapter{
-		agentFilesDrv: cfg.AgentFilesDrv,
-		agentEnvDrv:   cfg.AgentEnvDrv,
-		passwdFileDrv: cfg.PasswdFileDrv,
-		groupFileDrv:  cfg.GroupFileDrv,
+		agentFilesDrv:     cfg.AgentFilesDrv,
+		agentEnvDrv:       cfg.AgentEnvDrv,
+		passwdFileDrv:     cfg.PasswdFileDrv,
+		groupFileDrv:      cfg.GroupFileDrv,
+		nixConfigFileDrv:  cfg.NixConfigFileDrv,
+		nixVarSnapshotDir: nixVarSnapshotDir("/pwd"),
 	}
 	if *a != want {
 		t.Errorf("NewBwrapBuild(cfg) fields = %+v, want %+v", *a, want)

@@ -1182,6 +1182,10 @@ let
       name = "env";
       path = agentEnv;
     }
+    {
+      name = "nix-config";
+      path = nixConfigFile;
+    }
   ];
   agentClosurePath = builtins.unsafeDiscardStringContext (toString agentClosure);
 
@@ -1438,7 +1442,14 @@ let
   build =
     (hostPkgs.writeShellApplication {
       name = "build";
-      runtimeInputs = [ hostPkgs.coreutils ];
+      # sqlite3 backs `launcher build`'s bwrap+nixInBox store-DB snapshot
+      # step (ADR 0042, cmd/launcher/internal/runner/bwrap.go
+      # snapshotStoreDB) -- this fixture mirrors spindriftBin's real
+      # runtimeInputs.
+      runtimeInputs = [
+        hostPkgs.coreutils
+        hostPkgs.sqlite
+      ];
       text = ''
         exec ${launcherBin}/bin/launcher --input ${buildInputDocumentFile} build
       '';
@@ -1511,10 +1522,21 @@ let
   spindriftBin =
     (hostPkgs.writeShellApplication {
       name = "spindrift";
+      # sqlite3 backs `launcher build`'s bwrap+nixInBox store-DB snapshot
+      # step (ADR 0042, cmd/launcher/internal/runner/bwrap.go
+      # snapshotStoreDB). spindriftBin is the single generic CLI package
+      # every Consumer's build/run/dispatch commands run through -- which
+      # commands actually need sqlite3 is a runtime decision (the Consumer's
+      # nixInBox knob, read from the input document), not something this nix
+      # derivation can gate per-Consumer, so it carries sqlite3
+      # unconditionally. The `run` derivation below is a separate,
+      # dispatch-only wrapper (always execs `launcher dispatch`) that never
+      # runs `build`, so it alone can omit sqlite3.
       runtimeInputs = with hostPkgs; [
         gh
         git
         coreutils
+        sqlite
       ];
       text = runShellBody + ''
         exec ${launcherBin}/bin/launcher --input ${runInputDocumentFile} "$@"
