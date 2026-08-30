@@ -84,6 +84,12 @@ type config struct {
 	// realize the closure and snapshot the host nix store DB (ADR 0042).
 	nixConfigFileDrv string
 
+	// nixStoreWritable gates whether the bwrap adapter overlays /nix/store
+	// as an ephemeral tmpfs-backed writable layer instead of a plain
+	// read-only bind (ADR 0042, bwrap only). Populated by loadConfig from
+	// the NIX_STORE_WRITABLE artifact (issue #2665).
+	nixStoreWritable bool
+
 	// Runtime: podman | docker | rancher | bwrap (runner.ValidValues)
 	runtime string
 
@@ -317,6 +323,7 @@ func loadConfig() config {
 		groupFileDrv:       getenvArtifact("GROUP_FILE_DRV", ""),
 		nixConfigFile:      getenvArtifact("NIX_CONFIG_FILE", ""),
 		nixConfigFileDrv:   getenvArtifact("NIX_CONFIG_FILE_DRV", ""),
+		nixStoreWritable:   getenvArtifact("NIX_STORE_WRITABLE", "") == "true",
 		runtime:            runtime,
 		runnerKind:         runnerKind,
 		driver:             getenvArtifact("DRIVER", ""),
@@ -820,6 +827,7 @@ func runnerConfig(c config) runner.Config {
 		GroupFileDrv:             c.groupFileDrv,
 		NixConfigFile:            c.nixConfigFile,
 		NixConfigFileDrv:         c.nixConfigFileDrv,
+		NixStoreWritable:         c.nixStoreWritable,
 		BwrapUnshareNet:          c.bwrapUnshareNet,
 		PromptDir:                c.spindriftPromptDir,
 		SkillsDir:                c.spindriftSkillsDir,
@@ -1305,6 +1313,28 @@ func checkBwrapPastaGate(c config) error {
 		return nil
 	}
 	return runner.ValidatePasta()
+}
+
+// checkBwrapOverlayGate refuses to launch rather than let bwrap fail deep
+// inside sandbox startup when the bwrap runner's in-box /nix/store is made
+// writable via an ephemeral tmpfs overlay (ADR 0042, issue #2665) but the
+// host kernel/config does not allow an unprivileged user namespace to mount
+// overlayfs. It is a no-op for the OCI runner, for a run with
+// nixStoreWritable unset, and for a run with nixConfigFile unset -- mirroring
+// bwrap.go's own AND-gate (runnerKind==bwrap && nixStoreWritable &&
+// nixConfigFile != ""), since the overlay flags never render in buildArgs at
+// all when any of those three don't hold, leaving nothing to validate.
+func checkBwrapOverlayGate(c config) error {
+	if c.runnerKind != freshness.KindBwrap {
+		return nil
+	}
+	if !c.nixStoreWritable {
+		return nil
+	}
+	if c.nixConfigFile == "" {
+		return nil
+	}
+	return runner.ValidateOverlay()
 }
 
 // Sentinel error translated to a specific exit code so callers like

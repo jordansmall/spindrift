@@ -125,3 +125,37 @@ func TestValidatePasta_NotOnPath(t *testing.T) {
 		t.Fatal("ValidatePasta() should error when pasta is absent from PATH")
 	}
 }
+
+// TestValidateOverlayWithExec_Succeeds verifies ValidateOverlayWithExec
+// returns nil when the injected exec seam's smoke-test command succeeds
+// (standing in for a kernel/host that does allow unprivileged overlayfs
+// mounts inside a user namespace).
+func TestValidateOverlayWithExec_Succeeds(t *testing.T) {
+	fakeExec := func(name string, args ...string) *exec.Cmd {
+		return exec.Command("true")
+	}
+	if err := ValidateOverlayWithExec(fakeExec); err != nil {
+		t.Errorf("ValidateOverlayWithExec() = %v, want nil when the smoke test succeeds", err)
+	}
+}
+
+// TestValidateOverlayWithExec_Fails verifies ValidateOverlayWithExec returns
+// an actionable, non-nil error when the injected exec seam's smoke-test
+// command fails (standing in for a host without unprivileged overlayfs
+// support, issue #2665 / ADR 0042) -- naming the nixStoreWritable knob and
+// what's missing, not just surfacing a raw bwrap mount error.
+func TestValidateOverlayWithExec_Fails(t *testing.T) {
+	fakeExec := func(name string, args ...string) *exec.Cmd {
+		return exec.Command("false")
+	}
+	err := ValidateOverlayWithExec(fakeExec)
+	if err == nil {
+		t.Fatal("ValidateOverlayWithExec() should error when the smoke test fails")
+	}
+	if !strings.Contains(err.Error(), "overlay") {
+		t.Errorf("error = %q, want it to mention overlay", err.Error())
+	}
+	if !strings.Contains(err.Error(), "nixStoreWritable") && !strings.Contains(err.Error(), "NIX_STORE_WRITABLE") {
+		t.Errorf("error = %q, want it to mention the nixStoreWritable/NIX_STORE_WRITABLE knob", err.Error())
+	}
+}

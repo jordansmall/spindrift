@@ -138,6 +138,9 @@ func preview(issueNums []string) error {
 	if err := checkBwrapPastaGate(c); err != nil {
 		return err
 	}
+	if err := checkBwrapOverlayGate(c); err != nil {
+		return err
+	}
 	if _, err := checkReadOnlyTokenGate(c, ghTokenIntrospector, os.Stdout); err != nil {
 		return err
 	}

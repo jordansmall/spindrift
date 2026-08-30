@@ -516,6 +516,59 @@ func TestRunnerConfig_NixConfigFile(t *testing.T) {
 	}
 }
 
+// TestLoadConfig_NixStoreWritable_ReadsArtifact verifies loadConfig() reads
+// the NIX_STORE_WRITABLE artifact into config.nixStoreWritable (issue #2665):
+// the bwrap adapter's read-write /nix/store overlay gate.
+func TestLoadConfig_NixStoreWritable_ReadsArtifact(t *testing.T) {
+	t.Setenv("NIX_STORE_WRITABLE", "true")
+
+	c := loadConfig()
+
+	if !c.nixStoreWritable {
+		t.Errorf("loadConfig().nixStoreWritable = false, want true")
+	}
+}
+
+// TestLoadConfig_NixStoreWritable_DefaultsFalse verifies an unset
+// NIX_STORE_WRITABLE leaves config.nixStoreWritable false, matching every
+// other artifact-backed bool default in this file.
+func TestLoadConfig_NixStoreWritable_DefaultsFalse(t *testing.T) {
+	t.Setenv("NIX_STORE_WRITABLE", "")
+
+	c := loadConfig()
+
+	if c.nixStoreWritable {
+		t.Errorf("loadConfig().nixStoreWritable = true, want false when NIX_STORE_WRITABLE is unset")
+	}
+}
+
+// TestRunnerConfig_NixStoreWritable verifies NIX_STORE_WRITABLE reaches
+// runner.Config so the bwrap adapter can decide whether to overlay
+// /nix/store as a writable tmpfs layer (issue #2665, ADR 0042).
+func TestRunnerConfig_NixStoreWritable(t *testing.T) {
+	t.Setenv("NIX_STORE_WRITABLE", "true")
+
+	c := loadConfig()
+	rc := runnerConfig(c)
+
+	if !rc.NixStoreWritable {
+		t.Errorf("rc.NixStoreWritable = false, want true")
+	}
+}
+
+// TestRunnerConfig_NixStoreWritable_DefaultsFalse verifies an unset
+// NIX_STORE_WRITABLE reaches runner.Config as false, not a stray default.
+func TestRunnerConfig_NixStoreWritable_DefaultsFalse(t *testing.T) {
+	t.Setenv("NIX_STORE_WRITABLE", "")
+
+	c := loadConfig()
+	rc := runnerConfig(c)
+
+	if rc.NixStoreWritable {
+		t.Errorf("rc.NixStoreWritable = true, want false when NIX_STORE_WRITABLE is unset")
+	}
+}
+
 // TestRunnerConfig_DriverSessionCacheDirUnset verifies that an unset
 // DRIVER_SESSION_CACHE_DIR (a Driver declaring no session-state dir) reaches
 // runner.Config as empty, not a fallback literal.
