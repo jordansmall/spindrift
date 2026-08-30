@@ -102,8 +102,8 @@ func launcherRequiredKnobChecks(c config) []doctor.Check {
 		requiredValue("git-user-email", "set GIT_USER_EMAIL, or configure git user.email on the host", func() bool {
 			return c.gitUserEmail == ""
 		}),
-		requiredValue("gh-token", "set GH_TOKEN (fine-grained PAT scoped to the single target repo: Issues RW, Contents RW, Pull requests RW, Metadata R)", func() bool {
-			return !repoRequirementExemptionFor(sig, c) && c.ghToken == ""
+		requiredValue("gh-token", "set GH_TOKEN (fine-grained PAT scoped to the single target repo: Issues RW, Contents RW, Pull requests RW, Metadata R), or set GH_APP_ID, GH_APP_PRIVATE_KEY_FILE, and GH_APP_INSTALLATION_ID together to mint one", func() bool {
+			return !repoRequirementExemptionFor(sig, c) && c.ghToken == "" && !ghAppConfigured(c)
 		}),
 		{
 			Name:   "driver-credentials",
@@ -177,15 +177,18 @@ func crossKnobCheck(rowName, knobName, value, remedy string, validAs func(backen
 	}
 }
 
-// launcherCrossKnobChecks builds the three Required-tier rows that ran after
-// validate()'s validateChoice calls on origin/main: issue-tracker-config,
-// code-forge-config, registry-proxy-credential. The last one folds in the
-// registry-proxy-credential mutual-exclusion check (ADR 0044) that used to be
-// a hand-written call in both validate() and validateConfig() (main.go)
-// ahead of these rows; moving it here gives it its own named row in the
-// `spindrift doctor` status table and puts it in the same fail-fast position
-// as the other cross-knob rows, after the validateChoice calls, instead of
-// ahead of all of them.
+// launcherCrossKnobChecks builds the four Required-tier rows that run after
+// validate()'s validateChoice calls: issue-tracker-config, code-forge-config,
+// registry-proxy-credential, gh-app-config. The registry-proxy-credential row
+// folds in the registry-proxy-credential mutual-exclusion check (ADR 0044)
+// that used to be a hand-written call in both validate() and
+// validateConfig() (main.go) ahead of these rows; moving it here gives it its
+// own named row in the `spindrift doctor` status table and puts it in the
+// same fail-fast position as the other cross-knob rows, after the
+// validateChoice calls, instead of ahead of all of them. gh-app-config
+// (issue #2867) is the newest addition, sharing validateGHAppConfig
+// (ghappconfig.go) with bootstrap.go's own pre-mint gate so `spindrift
+// doctor` reports the identical diagnosis bootstrap() would.
 // registryProxyCredentialCheckName is the registry-proxy-credential row's
 // Name, factored into a const so the row's Name field and its SuccessMsg
 // closure can't drift apart on a future rename (issue #2853).
@@ -244,6 +247,14 @@ func launcherCrossKnobChecks(c config) []doctor.Check {
 			},
 			SuccessMsg: func(output any) string {
 				return fmt.Sprintf("%s (%s)", registryProxyCredentialCheckName, output)
+			},
+		},
+		{
+			Name:   "gh-app-config",
+			Tier:   doctor.Required,
+			Remedy: "set GH_APP_ID, GH_APP_PRIVATE_KEY_FILE, and GH_APP_INSTALLATION_ID together (all three) to mint a local-dispatch GitHub App installation token, or leave all three unset; never combine any of them with an explicit GH_TOKEN_REFRESH_FILE",
+			Probe: func() (any, error) {
+				return nil, validateGHAppConfig(c.ghAppID, c.ghAppPrivateKeyFile, c.ghAppInstallationID, c.ghTokenRefreshFile)
 			},
 		},
 	}

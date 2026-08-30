@@ -2281,6 +2281,24 @@ func TestValidateConfig_RegistryProxyCredentialBothSetIsRejected(t *testing.T) {
 	}
 }
 
+// TestValidateConfig_GHAppTrioWithoutGHTokenPasses is the `spindrift doctor`
+// regression for issue #2867 AC1: with only GH_APP_ID/
+// GH_APP_PRIVATE_KEY_FILE/GH_APP_INSTALLATION_ID set and no GH_TOKEN at all,
+// validateConfig(c) -- unlike validate(c), which runs through bootstrap's
+// applyGHAppToken first and so never sees an empty c.ghToken -- must still
+// pass: doctor never mints (validateConfig makes no network call), so the
+// gh-token row itself has to recognize the App trio as sufficient.
+func TestValidateConfig_GHAppTrioWithoutGHTokenPasses(t *testing.T) {
+	c := minimalValidConfig()
+	c.ghToken = ""
+	c.ghAppID = "123"
+	c.ghAppPrivateKeyFile = "/key.pem"
+	c.ghAppInstallationID = "456"
+	if err := validateConfig(c); err != nil {
+		t.Errorf("validateConfig() = %v, want nil for a full GH_APP_* trio without GH_TOKEN", err)
+	}
+}
+
 // TestValidateMergeMode_AcceptsKnown verifies that validate() accepts the three
 // documented MERGE_MODE values.
 func TestValidateMergeMode_AcceptsKnown(t *testing.T) {

@@ -196,6 +196,10 @@ let
     # tests/ab-orchestrator.bats resolves the script through this env var
     # rather than $BATS_TEST_DIRNAME/../ab-orchestrator.sh.
     AB_ORCHESTRATOR_SH = ../../ab-orchestrator.sh;
+    # The shared GH App JWT-mint-and-exchange recipe (issue #2867).
+    # tests/mint-token.bats resolves the script through this var since
+    # cmd/launcher/internal/ghapptoken/ isn't copied into the bats sandbox.
+    MINT_TOKEN_SCRIPT = ../../cmd/launcher/internal/ghapptoken/mint-token.sh;
     PROMPTS_DIR = ../../templates/default/prompts;
     # The baked default prompt dir the `run` command mounts, and a
     # Consumer-configured one whose rendered content flows through
@@ -382,6 +386,9 @@ in
           ${../../agent/bash-output-summary.sh} \
           ${../../ab-orchestrator.sh} \
           ${../../.github/actions/forgejo-label-swap/label-swap.sh} \
+          ${../../cmd/launcher/internal/ghapptoken/mint-token.sh} \
+          ${../../tests/fakes/openssl} \
+          ${../../tests/fakes/curl} \
           ${../../tests/fakes/runtime} \
           ${../../tests/fakes/gh} \
           ${../../tests/fakes/claude} \

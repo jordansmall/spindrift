@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# Fake curl for tests/mint-token.bats (issue #2867): records this
+# invocation's full argv to $FAKE_CURL_LOG instead of making a real network
+# call (the Nix sandbox has none anyway), then emits a canned installation-
+# token JSON response for the real jq to parse -- proves mint-token.sh's
+# request shape (URL, Bearer JWT header) without needing network access.
+# Set FAKE_CURL_EXIT_CODE to make this fake fail instead, to test
+# mint-token.sh's failure-propagation path.
+set -euo pipefail
+: "${FAKE_CURL_LOG:?FAKE_CURL_LOG must be set}"
+printf '%s\n' "$*" >>"$FAKE_CURL_LOG"
+if [ -n "${FAKE_CURL_EXIT_CODE:-}" ]; then
+  exit "$FAKE_CURL_EXIT_CODE"
+fi
+printf '{"token":"faked-installation-token"}'

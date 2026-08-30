@@ -1,15 +1,18 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/local"
+	"spindrift.dev/launcher/internal/ghapptoken"
 	"spindrift.dev/launcher/internal/settle"
 )
 
@@ -670,5 +673,449 @@ body
 	}
 	if _, ok := s.(*settle.ResearchSettle); !ok {
 		t.Errorf("researchLaunchStack settle = %T, want *settle.ResearchSettle", s)
+	}
+}
+
+// --- applyGHAppToken / GitHub App installation token wiring (issue #2867) ---
+
+// stubGHAppTokenWatch swaps the package-level ghAppTokenWatch var (bootstrap.go)
+// for the duration of the calling test with a fake that returns token/err
+// without any real network call, and — when writeFile is true — writes token
+// to the tokenFile argument it's called with, mirroring what the real
+// ghapptoken.Watch does on a successful first mint. Restored via t.Cleanup.
+func stubGHAppTokenWatch(t *testing.T, token string, err error, writeFile bool) *int {
+	t.Helper()
+	calls := 0
+	orig := ghAppTokenWatch
+	ghAppTokenWatch = func(ctx context.Context, cfg ghapptoken.Config, tokenFile string, interval time.Duration, stop <-chan struct{}) (string, error) {
+		calls++
+		if err != nil {
+			return "", err
+		}
+		if writeFile {
+			if werr := os.WriteFile(tokenFile, []byte(token), 0o600); werr != nil {
+				t.Fatalf("stubGHAppTokenWatch: WriteFile(tokenFile): %v", werr)
+			}
+		}
+		return token, nil
+	}
+	t.Cleanup(func() { ghAppTokenWatch = orig })
+	return &calls
+}
+
+// TestApplyGHAppToken_NoAppID_NoOp verifies applyGHAppToken is a no-op — no
+// mint attempted, c left untouched — when c.ghAppID is unset, the
+// pre-issue-#2867 default.
+func TestApplyGHAppToken_NoAppID_NoOp(t *testing.T) {
+	calls := stubGHAppTokenWatch(t, "should-not-be-used", nil, false)
+
+	c := minimalValidConfig()
+	c.ghAppID = ""
+	c.ghToken = "ambient-token"
+
+	tokenFile, err := applyGHAppToken(&c)
+	if err != nil {
+		t.Fatalf("applyGHAppToken() = %v, want nil error", err)
+	}
+	if tokenFile != "" {
+		t.Errorf("applyGHAppToken() tokenFile = %q, want empty", tokenFile)
+	}
+	if c.ghToken != "ambient-token" {
+		t.Errorf("applyGHAppToken() left c.ghToken = %q, want unchanged %q", c.ghToken, "ambient-token")
+	}
+	if *calls != 0 {
+		t.Errorf("ghAppTokenWatch called %d times, want 0 (no-op path)", *calls)
+	}
+}
+
+// TestApplyGHAppToken_PartialConfig_ErrorsWithoutMinting verifies a partial
+// App config (only GH_APP_ID set) is rejected by applyGHAppToken's own
+// validateGHAppConfig call before any mint is attempted.
+func TestApplyGHAppToken_PartialConfig_ErrorsWithoutMinting(t *testing.T) {
+	calls := stubGHAppTokenWatch(t, "should-not-be-used", nil, false)
+
+	c := minimalValidConfig()
+	c.ghAppID = "123"
+	c.ghAppPrivateKeyFile = ""
+	c.ghAppInstallationID = ""
+
+	tokenFile, err := applyGHAppToken(&c)
+	if err == nil {
+		t.Fatal("applyGHAppToken() with only GH_APP_ID set = nil error, want a partial-config error")
+	}
+	if !strings.Contains(err.Error(), "GH_APP_PRIVATE_KEY_FILE") {
+		t.Errorf("applyGHAppToken() error = %v, want it to mention GH_APP_PRIVATE_KEY_FILE", err)
+	}
+	if tokenFile != "" {
+		t.Errorf("applyGHAppToken() tokenFile = %q, want empty on error", tokenFile)
+	}
+	if *calls != 0 {
+		t.Errorf("ghAppTokenWatch called %d times, want 0: minting must not be attempted against a partial config", *calls)
+	}
+}
+
+// TestApplyGHAppToken_FullConfigWithExplicitRefreshFile_ErrorsWithoutMinting
+// verifies a fully configured App trio combined with an explicit
+// GH_TOKEN_REFRESH_FILE is rejected before any mint is attempted (the
+// mutual-exclusion half of validateGHAppConfig).
+func TestApplyGHAppToken_FullConfigWithExplicitRefreshFile_ErrorsWithoutMinting(t *testing.T) {
+	calls := stubGHAppTokenWatch(t, "should-not-be-used", nil, false)
+
+	c := minimalValidConfig()
+	c.ghAppID = "123"
+	c.ghAppPrivateKeyFile = "/key.pem"
+	c.ghAppInstallationID = "456"
+	c.ghTokenRefreshFile = "/some/refresh/file"
+
+	tokenFile, err := applyGHAppToken(&c)
+	if err == nil {
+		t.Fatal("applyGHAppToken() with an explicit GH_TOKEN_REFRESH_FILE alongside a full App trio = nil error, want a mutual-exclusion error")
+	}
+	if tokenFile != "" {
+		t.Errorf("applyGHAppToken() tokenFile = %q, want empty on error", tokenFile)
+	}
+	if *calls != 0 {
+		t.Errorf("ghAppTokenWatch called %d times, want 0: minting must not be attempted against a conflicting config", *calls)
+	}
+}
+
+// TestApplyGHAppToken_FullConfig_MintsSetsTokenAndEnv verifies a fully
+// configured App trio mints via ghAppTokenWatch, populates c.ghToken and the
+// GH_TOKEN env var with the returned token, and returns a non-empty token
+// file.
+func TestApplyGHAppToken_FullConfig_MintsSetsTokenAndEnv(t *testing.T) {
+	const wantToken = "fake-minted-token"
+	origGHToken, hadGHToken := os.LookupEnv("GH_TOKEN")
+	t.Cleanup(func() {
+		if hadGHToken {
+			_ = os.Setenv("GH_TOKEN", origGHToken)
+		} else {
+			_ = os.Unsetenv("GH_TOKEN")
+		}
+	})
+	calls := stubGHAppTokenWatch(t, wantToken, nil, true)
+
+	c := minimalValidConfig()
+	c.ghToken = ""
+	c.ghAppID = "123"
+	c.ghAppPrivateKeyFile = "/key.pem"
+	c.ghAppInstallationID = "456"
+
+	tokenFile, err := applyGHAppToken(&c)
+	if err != nil {
+		t.Fatalf("applyGHAppToken() = %v, want nil error", err)
+	}
+	if *calls != 1 {
+		t.Errorf("ghAppTokenWatch called %d times, want exactly 1", *calls)
+	}
+	if tokenFile == "" {
+		t.Fatal("applyGHAppToken() tokenFile = empty, want a non-empty path")
+	}
+	if c.ghToken != wantToken {
+		t.Errorf("applyGHAppToken() c.ghToken = %q, want %q", c.ghToken, wantToken)
+	}
+	if got := os.Getenv("GH_TOKEN"); got != wantToken {
+		t.Errorf("applyGHAppToken() GH_TOKEN env = %q, want %q", got, wantToken)
+	}
+	data, rerr := os.ReadFile(tokenFile)
+	if rerr != nil {
+		t.Fatalf("ReadFile(tokenFile): %v", rerr)
+	}
+	if string(data) != wantToken {
+		t.Errorf("tokenFile content = %q, want %q", string(data), wantToken)
+	}
+}
+
+// TestApplyGHAppToken_MintError_ReturnsError verifies a ghAppTokenWatch
+// failure surfaces as an applyGHAppToken error (which bootstrap() wraps in
+// errConfigInvalid) rather than being swallowed, and leaves c.ghToken
+// untouched.
+func TestApplyGHAppToken_MintError_ReturnsError(t *testing.T) {
+	wantErr := errors.New("boom: bad App credentials")
+	stubGHAppTokenWatch(t, "", wantErr, false)
+
+	c := minimalValidConfig()
+	c.ghToken = ""
+	c.ghAppID = "123"
+	c.ghAppPrivateKeyFile = "/key.pem"
+	c.ghAppInstallationID = "456"
+
+	tokenFile, err := applyGHAppToken(&c)
+	if err == nil {
+		t.Fatal("applyGHAppToken() = nil error, want the mint failure surfaced")
+	}
+	if !errors.Is(err, wantErr) {
+		t.Errorf("applyGHAppToken() error = %v, want it to wrap %v", err, wantErr)
+	}
+	if tokenFile != "" {
+		t.Errorf("applyGHAppToken() tokenFile = %q, want empty on error", tokenFile)
+	}
+	if c.ghToken != "" {
+		t.Errorf("applyGHAppToken() c.ghToken = %q, want unchanged empty on mint failure", c.ghToken)
+	}
+}
+
+// --- bootstrap()'s GitHub App wiring end-to-end (issue #2867) ---
+
+// ghAppEnvSetup sets the common env bootstrap() needs to reach the App
+// wiring step successfully once GH_TOKEN itself comes from the mint rather
+// than the ambient environment: everything TestBootstrap_Success_
+// HoldsAccumLockUntilCleanup sets, minus GH_TOKEN.
+func ghAppEnvSetup(t *testing.T, repoPath, issuesDir string) {
+	t.Helper()
+	t.Setenv("REPO_SLUG", "owner/repo")
+	t.Setenv("GIT_USER_NAME", "Test")
+	t.Setenv("GIT_USER_EMAIL", "test@example.com")
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "test-oauth-token")
+	t.Setenv("CODE_FORGE", "local")
+	t.Setenv("CODE_FORGE_ACCUMULATION_REPO_DIR", repoPath)
+	t.Setenv("BASE_BRANCH", "main")
+	t.Setenv("MERGE_MODE", "immediate")
+	t.Setenv("RUNTIME", "bwrap")
+	t.Setenv("RUNNER_KIND", "bwrap")
+	t.Setenv("ISSUE_TRACKER", "local")
+	t.Setenv("LOCAL_ISSUES_DIR", issuesDir)
+}
+
+func writeMinimalLocalIssue(t *testing.T, issuesDir string) {
+	t.Helper()
+	issueFile := `---
+title: Some issue
+state: untriaged
+labels: []
+created: 2026-07-09T12:00:00Z
+---
+body
+`
+	if err := os.WriteFile(filepath.Join(issuesDir, "42.md"), []byte(issueFile), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestBootstrap_GHAppFullConfig_WiresTokenAndRefreshFile is the end-to-end
+// success case (issue #2867): with GH_APP_ID/GH_APP_PRIVATE_KEY_FILE/
+// GH_APP_INSTALLATION_ID set and no ambient GH_TOKEN at all, bootstrap()
+// mints via the stubbed ghAppTokenWatch, ends up with c.ghToken set to the
+// fake token (satisfying validate(c)'s "gh-token" required-knob check
+// purely from the mint), GH_TOKEN itself set in the environment, and
+// c.ghTokenRefreshFile pointing at a file that actually contains that token.
+func TestBootstrap_GHAppFullConfig_WiresTokenAndRefreshFile(t *testing.T) {
+	const wantToken = "fake-minted-token"
+	origGHToken, hadGHToken := os.LookupEnv("GH_TOKEN")
+	t.Cleanup(func() {
+		if hadGHToken {
+			_ = os.Setenv("GH_TOKEN", origGHToken)
+		} else {
+			_ = os.Unsetenv("GH_TOKEN")
+		}
+	})
+	// The AC1 claim under test is "no ambient GH_TOKEN at all" -- saving and
+	// restoring the surrounding env isn't enough to exercise that if the
+	// process running this test happens to have GH_TOKEN exported already;
+	// unset it explicitly so the test fails honestly if bootstrap() ever
+	// starts relying on an ambient value instead of the mint.
+	_ = os.Unsetenv("GH_TOKEN")
+	stubGHAppTokenWatch(t, wantToken, nil, true)
+
+	checkout := mustSeedableCheckout(t)
+	repoPath := filepath.Join(t.TempDir(), "accum.git")
+	issuesDir := t.TempDir()
+	writeMinimalLocalIssue(t, issuesDir)
+
+	ghAppEnvSetup(t, repoPath, issuesDir)
+	t.Setenv("GH_APP_ID", "123")
+	t.Setenv("GH_APP_PRIVATE_KEY_FILE", "/key.pem")
+	t.Setenv("GH_APP_INSTALLATION_ID", "456")
+	t.Chdir(checkout)
+
+	lc, err := bootstrap(true, dispatchKindWork, false)
+	if err != nil {
+		t.Fatalf("bootstrap() = %v, want success", err)
+	}
+	if lc == nil {
+		t.Fatal("bootstrap() launch context = nil, want a non-nil *launchContext on success")
+	}
+	t.Cleanup(lc.cleanup)
+
+	if lc.config.ghToken != wantToken {
+		t.Errorf("bootstrap() config.ghToken = %q, want %q", lc.config.ghToken, wantToken)
+	}
+	if got := os.Getenv("GH_TOKEN"); got != wantToken {
+		t.Errorf("bootstrap() GH_TOKEN env = %q, want %q", got, wantToken)
+	}
+	if lc.config.ghTokenRefreshFile == "" {
+		t.Fatal("bootstrap() config.ghTokenRefreshFile = empty, want it wired to the minted token file")
+	}
+	data, rerr := os.ReadFile(lc.config.ghTokenRefreshFile)
+	if rerr != nil {
+		t.Fatalf("ReadFile(config.ghTokenRefreshFile): %v", rerr)
+	}
+	if string(data) != wantToken {
+		t.Errorf("config.ghTokenRefreshFile content = %q, want %q", string(data), wantToken)
+	}
+
+	// lc.cleanup (registered above via t.Cleanup) must remove the minted
+	// token directory (bootstrap.go), not just the accumulation lock --
+	// otherwise a live installation token stays readable on disk
+	// indefinitely after the run ends. Calling it early and asserting here,
+	// ahead of the t.Cleanup-registered call, verifies that directly; the
+	// later, idempotent call from t.Cleanup is a no-op against an
+	// already-removed directory.
+	tokenDir := filepath.Dir(lc.config.ghTokenRefreshFile)
+	lc.cleanup()
+	if _, statErr := os.Stat(tokenDir); !os.IsNotExist(statErr) {
+		t.Errorf("bootstrap() cleanup() left token dir %q behind, want it removed", tokenDir)
+	}
+}
+
+// TestBootstrap_GHAppPartialConfig_WrapsErrConfigInvalid verifies bootstrap()
+// rejects a partial App config (only GH_APP_ID set) with a clear
+// errConfigInvalid-wrapped error naming the missing knobs, rather than the
+// confusing generic "gh-token required" error a naive implementation might
+// surface instead.
+func TestBootstrap_GHAppPartialConfig_WrapsErrConfigInvalid(t *testing.T) {
+	checkout := mustSeedableCheckout(t)
+	repoPath := filepath.Join(t.TempDir(), "accum.git")
+	issuesDir := t.TempDir()
+	writeMinimalLocalIssue(t, issuesDir)
+
+	ghAppEnvSetup(t, repoPath, issuesDir)
+	t.Setenv("GH_APP_ID", "123")
+	t.Chdir(checkout)
+
+	lc, err := bootstrap(true, dispatchKindWork, false)
+	if lc != nil {
+		t.Errorf("bootstrap() launch context = %+v, want nil on a partial App config error", lc)
+	}
+	if err == nil || !strings.Contains(err.Error(), "GH_APP_PRIVATE_KEY_FILE") {
+		t.Fatalf("bootstrap() error = %v, want a GH_APP_PRIVATE_KEY_FILE partial-config error", err)
+	}
+	if !errors.Is(err, errConfigInvalid) {
+		t.Fatalf("bootstrap() error = %v, want errors.Is(err, errConfigInvalid) = true", err)
+	}
+}
+
+// TestBootstrap_GHAppMintError_WrapsErrConfigInvalid verifies a
+// ghAppTokenWatch mint failure surfaces from bootstrap() wrapped in
+// errConfigInvalid, mirroring TestBootstrap_ValidateError_WrapsErrConfigInvalid's
+// style for the other config-invalid paths.
+func TestBootstrap_GHAppMintError_WrapsErrConfigInvalid(t *testing.T) {
+	mintErr := errors.New("boom: bad App credentials")
+	stubGHAppTokenWatch(t, "", mintErr, false)
+
+	checkout := mustSeedableCheckout(t)
+	repoPath := filepath.Join(t.TempDir(), "accum.git")
+	issuesDir := t.TempDir()
+	writeMinimalLocalIssue(t, issuesDir)
+
+	ghAppEnvSetup(t, repoPath, issuesDir)
+	t.Setenv("GH_APP_ID", "123")
+	t.Setenv("GH_APP_PRIVATE_KEY_FILE", "/key.pem")
+	t.Setenv("GH_APP_INSTALLATION_ID", "456")
+	t.Chdir(checkout)
+
+	lc, err := bootstrap(true, dispatchKindWork, false)
+	if lc != nil {
+		t.Errorf("bootstrap() launch context = %+v, want nil on a mint failure", lc)
+	}
+	if err == nil || !strings.Contains(err.Error(), mintErr.Error()) {
+		t.Fatalf("bootstrap() error = %v, want it to surface %v", err, mintErr)
+	}
+	if !errors.Is(err, errConfigInvalid) {
+		t.Fatalf("bootstrap() error = %v, want errors.Is(err, errConfigInvalid) = true", err)
+	}
+}
+
+// TestBootstrap_GHAppFullConfig_ValidateErrorAfterMint_CleansUpTokenDir
+// verifies bootstrap() removes the minted token directory when a step after
+// a *successful* mint fails -- here, validate(c) itself rejecting an
+// invalid MERGE_MODE, the exact scenario a prior review round reproduced
+// empirically (MERGE_MODE=not-a-real-mode left
+// /tmp/spindrift-gh-app-token-*/token on disk). Before this fix, only
+// applyGHAppToken's own internal errors were cleaned up; every later
+// `return nil, err` in bootstrap() left a live installation token on disk
+// indefinitely.
+func TestBootstrap_GHAppFullConfig_ValidateErrorAfterMint_CleansUpTokenDir(t *testing.T) {
+	origGHToken, hadGHToken := os.LookupEnv("GH_TOKEN")
+	t.Cleanup(func() {
+		if hadGHToken {
+			_ = os.Setenv("GH_TOKEN", origGHToken)
+		} else {
+			_ = os.Unsetenv("GH_TOKEN")
+		}
+	})
+	_ = os.Unsetenv("GH_TOKEN")
+
+	origWatch := ghAppTokenWatch
+	var tokenDir string
+	ghAppTokenWatch = func(_ context.Context, _ ghapptoken.Config, tokenFile string, _ time.Duration, _ <-chan struct{}) (string, error) {
+		tokenDir = filepath.Dir(tokenFile)
+		if err := os.WriteFile(tokenFile, []byte("fake-minted-token"), 0o600); err != nil {
+			t.Fatalf("write fake token file: %v", err)
+		}
+		return "fake-minted-token", nil
+	}
+	t.Cleanup(func() { ghAppTokenWatch = origWatch })
+
+	checkout := mustSeedableCheckout(t)
+	repoPath := filepath.Join(t.TempDir(), "accum.git")
+	issuesDir := t.TempDir()
+	writeMinimalLocalIssue(t, issuesDir)
+
+	ghAppEnvSetup(t, repoPath, issuesDir)
+	t.Setenv("GH_APP_ID", "123")
+	t.Setenv("GH_APP_PRIVATE_KEY_FILE", "/key.pem")
+	t.Setenv("GH_APP_INSTALLATION_ID", "456")
+	t.Setenv("MERGE_MODE", "not-a-real-mode")
+	t.Chdir(checkout)
+
+	lc, err := bootstrap(true, dispatchKindWork, false)
+	if lc != nil {
+		t.Errorf("bootstrap() launch context = %+v, want nil on a validate(c) error", lc)
+	}
+	if err == nil {
+		t.Fatal("bootstrap() error = nil, want the invalid MERGE_MODE to surface")
+	}
+	if tokenDir == "" {
+		t.Fatal("ghAppTokenWatch was never called, test setup broken")
+	}
+	if _, statErr := os.Stat(tokenDir); !os.IsNotExist(statErr) {
+		t.Errorf("bootstrap() left token dir %q behind after a post-mint validate(c) failure, want it removed", tokenDir)
+	}
+}
+
+// TestBootstrap_GHTokenAlone_RegressionUnaffectedByAppWiring verifies the
+// pre-issue-#2867 GH_TOKEN-only path is byte-for-byte unaffected by the new
+// App wiring: no GH_APP_* vars set, so applyGHAppToken is a no-op and
+// bootstrap() behaves exactly as it did before this slice.
+func TestBootstrap_GHTokenAlone_RegressionUnaffectedByAppWiring(t *testing.T) {
+	calls := stubGHAppTokenWatch(t, "should-not-be-used", nil, false)
+
+	checkout := mustSeedableCheckout(t)
+	repoPath := filepath.Join(t.TempDir(), "accum.git")
+	issuesDir := t.TempDir()
+	writeMinimalLocalIssue(t, issuesDir)
+
+	ghAppEnvSetup(t, repoPath, issuesDir)
+	t.Setenv("GH_TOKEN", "test-token")
+	t.Chdir(checkout)
+
+	lc, err := bootstrap(true, dispatchKindWork, false)
+	if err != nil {
+		t.Fatalf("bootstrap() = %v, want success (GH_TOKEN-only regression path)", err)
+	}
+	if lc == nil {
+		t.Fatal("bootstrap() launch context = nil, want a non-nil *launchContext on success")
+	}
+	t.Cleanup(lc.cleanup)
+
+	if lc.config.ghToken != "test-token" {
+		t.Errorf("bootstrap() config.ghToken = %q, want unchanged ambient %q", lc.config.ghToken, "test-token")
+	}
+	if lc.config.ghTokenRefreshFile != "" {
+		t.Errorf("bootstrap() config.ghTokenRefreshFile = %q, want empty (no App minting happened)", lc.config.ghTokenRefreshFile)
+	}
+	if *calls != 0 {
+		t.Errorf("ghAppTokenWatch called %d times, want 0", *calls)
 	}
 }

@@ -497,6 +497,24 @@ in
     flakeOption = true;
     boxEnv = false;
   };
+  ghAppID = {
+    env = "GH_APP_ID";
+    group = "forge";
+    doc = "GitHub App ID for local dispatch's own installation-token minting (issue #2867) — reuses the same mint recipe agent-dispatch.yml's gh-token-refresher already runs in CI (cmd/launcher/internal/ghapptoken); set alongside GH_APP_PRIVATE_KEY_FILE and GH_APP_INSTALLATION_ID as an alternative to a static GH_TOKEN PAT. Empty (default) leaves the PAT path (GH_TOKEN) as the sole auth source, unchanged.";
+    boxEnv = false;
+  };
+  ghAppPrivateKeyFile = {
+    env = "GH_APP_PRIVATE_KEY_FILE";
+    group = "forge";
+    doc = "path to the GitHub App's PEM private key, read directly by the local mint step (cmd/launcher/internal/ghapptoken) and never forwarded to the Box or written anywhere else; required alongside GH_APP_ID and GH_APP_INSTALLATION_ID to mint locally instead of using a static GH_TOKEN PAT";
+    boxEnv = false;
+  };
+  ghAppInstallationID = {
+    env = "GH_APP_INSTALLATION_ID";
+    group = "forge";
+    doc = "installation ID to mint GitHub App tokens for (see GH_APP_ID); required alongside GH_APP_ID and GH_APP_PRIVATE_KEY_FILE to mint locally instead of using a static GH_TOKEN PAT";
+    boxEnv = false;
+  };
   boxGhToken = {
     env = "BOX_GH_TOKEN";
     secret = true;

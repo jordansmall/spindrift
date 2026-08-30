@@ -40,13 +40,14 @@ func TestLauncherRequiredKnobChecks_ReturnsSixRows(t *testing.T) {
 	}
 }
 
-// TestLauncherCrossKnobChecks_ReturnsThreeRows verifies launcherCrossKnobChecks
-// returns exactly the three rows that ran after validate()'s validateChoice
-// calls on origin/main plus the registry-proxy-credential row folded in
-// later, in that exact order.
-func TestLauncherCrossKnobChecks_ReturnsThreeRows(t *testing.T) {
+// TestLauncherCrossKnobChecks_ReturnsFourRows verifies launcherCrossKnobChecks
+// returns exactly the four rows that run after validate()'s validateChoice
+// calls: the three that ran on origin/main plus the registry-proxy-credential
+// row folded in later, plus the gh-app-config row (issue #2867), in that
+// exact order.
+func TestLauncherCrossKnobChecks_ReturnsFourRows(t *testing.T) {
 	checks := launcherCrossKnobChecks(minimalValidConfig())
-	want := []string{"issue-tracker-config", "code-forge-config", "registry-proxy-credential"}
+	want := []string{"issue-tracker-config", "code-forge-config", "registry-proxy-credential", "gh-app-config"}
 	if len(checks) != len(want) {
 		t.Fatalf("launcherCrossKnobChecks returned %d rows, want %d", len(checks), len(want))
 	}
@@ -81,7 +82,7 @@ func TestLauncherChecks_AllRequiredTier(t *testing.T) {
 // relative to its validateChoice calls (checks.go's doc comment).
 func TestLauncherChecks_GroupOrder(t *testing.T) {
 	checks := launcherChecks(minimalValidConfig())
-	want := []string{"repo-slug", "git-user-name", "git-user-email", "gh-token", "driver-credentials", "runtime", "issue-tracker-config", "code-forge-config", "registry-proxy-credential"}
+	want := []string{"repo-slug", "git-user-name", "git-user-email", "gh-token", "driver-credentials", "runtime", "issue-tracker-config", "code-forge-config", "registry-proxy-credential", "gh-app-config"}
 	if len(checks) != len(want) {
 		t.Fatalf("launcherChecks returned %d rows, want %d", len(checks), len(want))
 	}
@@ -204,9 +205,42 @@ func TestLauncherChecks_GhToken_Fails(t *testing.T) {
 	c.ghToken = ""
 	ch := checkByName(t, launcherChecks(c), "gh-token")
 	_, err := ch.Probe()
-	want := "set GH_TOKEN (fine-grained PAT scoped to the single target repo: Issues RW, Contents RW, Pull requests RW, Metadata R)"
+	want := "set GH_TOKEN (fine-grained PAT scoped to the single target repo: Issues RW, Contents RW, Pull requests RW, Metadata R), or set GH_APP_ID, GH_APP_PRIVATE_KEY_FILE, and GH_APP_INSTALLATION_ID together to mint one"
 	if err == nil || err.Error() != want {
 		t.Errorf("gh-token Probe() = %v, want %q", err, want)
+	}
+}
+
+// TestLauncherChecks_GhToken_GHAppTrioExempt verifies the gh-token row
+// (issue #2867) does not require GH_TOKEN when the full GH_APP_ID/
+// GH_APP_PRIVATE_KEY_FILE/GH_APP_INSTALLATION_ID trio is set: `spindrift
+// doctor`'s validateConfig never mints (unlike bootstrap's applyGHAppToken),
+// so this row must treat the trio itself, not a minted c.ghToken, as
+// sufficient (regression: AC1 previously failed doctor for this exact
+// configuration).
+func TestLauncherChecks_GhToken_GHAppTrioExempt(t *testing.T) {
+	c := minimalValidConfig()
+	c.ghToken = ""
+	c.ghAppID = "123"
+	c.ghAppPrivateKeyFile = "/key.pem"
+	c.ghAppInstallationID = "456"
+	ch := checkByName(t, launcherChecks(c), "gh-token")
+	if _, err := ch.Probe(); err != nil {
+		t.Errorf("gh-token Probe() should exempt GH_TOKEN when the GH App trio is set: %v", err)
+	}
+}
+
+// TestLauncherChecks_GhToken_PartialGHAppTrioNotExempt verifies a partial
+// GH_APP_* trio does not exempt the gh-token row -- ghAppConfigured requires
+// all three, leaving the more specific "gh-app-config" row (checks.go) to
+// report the partial-config diagnosis instead.
+func TestLauncherChecks_GhToken_PartialGHAppTrioNotExempt(t *testing.T) {
+	c := minimalValidConfig()
+	c.ghToken = ""
+	c.ghAppID = "123"
+	ch := checkByName(t, launcherChecks(c), "gh-token")
+	if _, err := ch.Probe(); err == nil {
+		t.Error("gh-token Probe() = nil error, want a partial GH_APP_* trio to still require GH_TOKEN")
 	}
 }
 
@@ -607,4 +641,43 @@ func TestLauncherChecks_RegistryProxyCredential_UpstreamAbsent(t *testing.T) {
 			t.Errorf("SuccessMsg must differ between a leftover credential-env source and nothing set at all; both rendered %q", envMsg)
 		}
 	})
+}
+
+// TestLauncherChecks_GHAppConfig_FailsAndPasses covers the gh-app-config row
+// (issue #2867): it must fail when only some of GH_APP_ID,
+// GH_APP_PRIVATE_KEY_FILE, and GH_APP_INSTALLATION_ID are set, fail when all
+// three are set alongside an explicit GH_TOKEN_REFRESH_FILE, and pass both
+// when all three are set alone and when none are set.
+func TestLauncherChecks_GHAppConfig_FailsAndPasses(t *testing.T) {
+	c := minimalValidConfig()
+	c.ghAppID = "123"
+	ch := checkByName(t, launcherChecks(c), "gh-app-config")
+	if _, err := ch.Probe(); err == nil {
+		t.Fatal("gh-app-config Probe() must fail when only GH_APP_ID is set")
+	}
+
+	c = minimalValidConfig()
+	c.ghAppID = "123"
+	c.ghAppPrivateKeyFile = "/key.pem"
+	c.ghAppInstallationID = "456"
+	c.ghTokenRefreshFile = "/some/refresh/file"
+	ch = checkByName(t, launcherChecks(c), "gh-app-config")
+	if _, err := ch.Probe(); err == nil {
+		t.Fatal("gh-app-config Probe() must fail when all three App knobs are set alongside an explicit GH_TOKEN_REFRESH_FILE")
+	}
+
+	c = minimalValidConfig()
+	c.ghAppID = "123"
+	c.ghAppPrivateKeyFile = "/key.pem"
+	c.ghAppInstallationID = "456"
+	ch = checkByName(t, launcherChecks(c), "gh-app-config")
+	if _, err := ch.Probe(); err != nil {
+		t.Errorf("gh-app-config Probe() unexpected error when all three App knobs alone are set: %v", err)
+	}
+
+	c = minimalValidConfig()
+	ch = checkByName(t, launcherChecks(c), "gh-app-config")
+	if _, err := ch.Probe(); err != nil {
+		t.Errorf("gh-app-config Probe() unexpected error when none are set: %v", err)
+	}
 }

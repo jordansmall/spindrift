@@ -1,14 +1,17 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"time"
 
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/local"
+	"spindrift.dev/launcher/internal/ghapptoken"
 	"spindrift.dev/launcher/internal/localloop"
 	"spindrift.dev/launcher/internal/runner"
 	"spindrift.dev/launcher/internal/settle"
@@ -25,8 +28,93 @@ var errConfigInvalid = errors.New("config invalid")
 
 // ghTokenRefreshInterval is how often bootstrap polls GH_TOKEN_REFRESH_FILE
 // (when set) for a freshly minted token. An installation token's ~1h
-// lifetime (issue #1027) gives ample slack for a minute-scale poll.
+// lifetime (issue #1027) gives ample slack for a minute-scale poll. Paired
+// with ghAppRefreshInterval below: whichever process re-mints the file (an
+// external CI minter, or bootstrap's own applyGHAppToken under local
+// dispatch, issue #2867) re-mints well inside that ~1h margin, so a poll
+// interval this much smaller than the re-mint cadence never observes a
+// stale token.
 const ghTokenRefreshInterval = 60 * time.Second
+
+// ghAppRefreshInterval is how often applyGHAppToken's ghapptoken.Watch loop
+// re-mints a fresh GitHub App installation token under local dispatch (issue
+// #2867). Matches .github/actions/gh-token-refresher's own re-mint cadence
+// (`sleep_secs=2700 # 45m`) — comfortably inside an installation token's ~1h
+// lifetime (issue #1027), and well above ghTokenRefreshInterval's 60s poll
+// so the poller reliably observes each re-mint promptly rather than missing
+// it between polls.
+const ghAppRefreshInterval = 45 * time.Minute
+
+// ghAppTokenWatch mints a GitHub App installation token and starts its
+// periodic re-mint loop; production wiring for ghapptoken.Watch. Swapped in
+// tests to avoid a real network call — the same seam pattern as
+// readonly_token_gate.go's ghTokenIntrospector var in this package.
+var ghAppTokenWatch = ghapptoken.Watch
+
+// applyGHAppToken mints an initial GitHub App installation token via
+// ghAppTokenWatch when c.ghAppID is set (issue #2867), populating c.ghToken
+// and the GH_TOKEN env var synchronously so validate(c)'s existing
+// "gh-token" required-knob check (main.go) is satisfied without any ambient
+// GH_TOKEN, and other code that reads c.ghToken directly (e.g.
+// readonly_token_gate.go's boxToken == c.ghToken comparison) sees the
+// current token too. Returns the token file ghAppTokenWatch's background
+// loop is periodically rewriting; the caller (bootstrap) wires that file
+// into c.ghTokenRefreshFile itself, and only after validate(c) has already
+// run — so validateGHAppConfig's own mutual-exclusion check (called first,
+// here, against the not-yet-mutated c.ghTokenRefreshFile) and
+// launcherCrossKnobChecks' "gh-app-config" row (run inside validate(c))
+// always see the operator's own raw GH_TOKEN_REFRESH_FILE, never the value
+// this function's caller sets afterward.
+//
+// A no-op — ("", nil) — when c.ghAppID is unset, the pre-issue-#2867
+// default; c is left untouched in that case. c is taken by pointer since a
+// successful mint mutates c.ghToken in place.
+func applyGHAppToken(c *config) (tokenFile string, err error) {
+	if err := validateGHAppConfig(c.ghAppID, c.ghAppPrivateKeyFile, c.ghAppInstallationID, c.ghTokenRefreshFile); err != nil {
+		return "", err
+	}
+	if c.ghAppID == "" {
+		return "", nil
+	}
+
+	// A predictable path (e.g. PID-derived) lets an attacker on a shared host
+	// pre-create the sibling ".tmp" path writeTokenFileAtomic renames from as
+	// a symlink; os.WriteFile follows it and hands the attacker the token.
+	// MkdirTemp's random suffix and 0700 mode close that off, matching the
+	// repo's own randomized-temp idiom (dispatch/box.go's
+	// "spindrift-registry-proxy-*").
+	tokenDir, err := os.MkdirTemp("", "spindrift-gh-app-token-*")
+	if err != nil {
+		return "", err
+	}
+	// Every return below this point returns a non-nil err on failure (the
+	// named result), so a single deferred cleanup covers every such path --
+	// including the os.Setenv one two lines below the mint call, which used
+	// to strand tokenDir (and ghAppTokenWatch's still-running re-mint
+	// goroutine) because the old code only removed it on the mint call's own
+	// error path.
+	defer func() {
+		if err != nil {
+			_ = os.RemoveAll(tokenDir)
+		}
+	}()
+
+	tokenFile = filepath.Join(tokenDir, "token")
+	token, err := ghAppTokenWatch(context.Background(), ghapptoken.Config{
+		AppID:          c.ghAppID,
+		PrivateKeyFile: c.ghAppPrivateKeyFile,
+		InstallationID: c.ghAppInstallationID,
+	}, tokenFile, ghAppRefreshInterval, nil)
+	if err != nil {
+		return "", fmt.Errorf("mint GitHub App installation token: %w", err)
+	}
+
+	c.ghToken = token
+	if err := os.Setenv("GH_TOKEN", token); err != nil {
+		return "", err
+	}
+	return tokenFile, nil
+}
 
 // launchContext bundles the wiring shared by every top-level dispatch entry
 // point (run, the selective `dispatch <nums>` path, recover): the loaded and
@@ -76,8 +164,44 @@ func bootstrap(ensureReady bool, kind string, selfContained bool) (lc *launchCon
 
 	c := applyDispatchKind(loadConfig(), kind)
 	c.selfContained = selfContained
+	// Mint a GitHub App installation token (issue #2867) before validate(c)
+	// runs, not after: a local-dispatch operator authenticating purely via
+	// GH_APP_ID/GH_APP_PRIVATE_KEY_FILE/GH_APP_INSTALLATION_ID sets no
+	// ambient GH_TOKEN at all, and validate(c)'s "gh-token" required-knob
+	// check (main.go) needs c.ghToken populated by the time it runs. A
+	// partial App config, or a full one combined with an explicit
+	// GH_TOKEN_REFRESH_FILE, is rejected by applyGHAppToken's own
+	// validateGHAppConfig call before any mint is attempted, so a confusing
+	// "gh-token required" error can never mask the real, more specific
+	// misconfiguration. c.ghTokenRefreshFile itself is deliberately left
+	// unset here — wired in below, only once validate(c) has already run —
+	// so validate(c)'s own "gh-app-config" row (checks.go) still sees the
+	// operator's raw, not-yet-mutated GH_TOKEN_REFRESH_FILE.
+	ghAppTokenFile, err := applyGHAppToken(&c)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", errConfigInvalid, err)
+	}
+	if ghAppTokenFile != "" {
+		// A live installation token now sits on disk. Every remaining early
+		// `return nil, err` below -- validate(c) immediately following, the
+		// registry-proxy credential resolve, MigrateLegacyLogDir, the
+		// Accumulation seed, EnsureReady/IsReady, and the four read-only
+		// gates -- would otherwise strand it there indefinitely, since
+		// nothing else on that failure path removes it (mirrors the
+		// accumLock defer below). A no-op once the final `return
+		// &launchContext{...}, nil` sets err back to nil: from that point,
+		// launchContext.cleanup (below) becomes the token dir's sole owner.
+		defer func() {
+			if err != nil {
+				_ = os.RemoveAll(filepath.Dir(ghAppTokenFile))
+			}
+		}()
+	}
 	if err := validate(c); err != nil {
 		return nil, fmt.Errorf("%w: %w", errConfigInvalid, err)
+	}
+	if ghAppTokenFile != "" {
+		c.ghTokenRefreshFile = ghAppTokenFile
 	}
 	if c.registryProxyUpstreamURL != "" {
 		cred, err := resolveRegistryProxyCredential(c.registryProxyCredentialFile, c.registryProxyCredentialEnv)
@@ -112,9 +236,15 @@ func bootstrap(ensureReady bool, kind string, selfContained bool) (lc *launchCon
 	// A run that outlives GH_TOKEN_REFRESH_FILE's minter's token lifetime
 	// (issue #1027) would otherwise 401 at the terminal gh calls (merge,
 	// label edits, final comment): keep GH_TOKEN current for the rest of
-	// the process by polling the file an external minter rewrites in
-	// place. No-op when unset (the default) — GH_TOKEN then stays whatever
-	// the ambient environment set it to for the whole run, as before.
+	// the process by polling the file its minter rewrites in place. That
+	// minter is either external (CI's gh-token-refresher action, the
+	// pre-issue-#2867 case) or, when GH_APP_ID is set, applyGHAppToken's own
+	// ghAppTokenWatch goroutine above (issue #2867, local dispatch) — this
+	// poll loop is the single consumer either way, per ghapptoken.Watch's
+	// own doc comment. No-op when unset (true by default, and also whenever
+	// applyGHAppToken was itself a no-op above) — GH_TOKEN then stays
+	// whatever the ambient environment set it to for the whole run, as
+	// before.
 	if c.ghTokenRefreshFile != "" {
 		go tokenrefresh.Watch(c.ghTokenRefreshFile, ghTokenRefreshInterval, nil, func(v string) error {
 			return os.Setenv("GH_TOKEN", v)
@@ -169,6 +299,18 @@ func bootstrap(ensureReady bool, kind string, selfContained bool) (lc *launchCon
 			// to go and is ignored, same as other best-effort cleanup here.
 			if accumLock != nil {
 				_ = accumLock.Release()
+			}
+			// applyGHAppToken's minted token directory (issue #2867):
+			// nothing else on this process's exit path removes it, unlike
+			// the CI equivalent's runner-temp file ("removed when the job
+			// ends", gh-token-refresher/action.yml), so a local dispatch run
+			// would otherwise leave a live installation token readable on
+			// disk indefinitely. Only ever removes a directory this process
+			// itself created via MkdirTemp above -- never an
+			// externally-supplied GH_TOKEN_REFRESH_FILE, which
+			// ghAppTokenFile is empty for.
+			if ghAppTokenFile != "" {
+				_ = os.RemoveAll(filepath.Dir(ghAppTokenFile))
 			}
 		},
 	}, nil

@@ -1324,11 +1324,22 @@ let
   # graph (e.g. internal/passmachine is orchestrator-only, internal/testutil
   # is test-support-only), so perturbing those still moves this
   # derivation's outPath too (issue #2677 review fix).
+  #
+  # internal/ghapptoken/mint-token.sh is an explicit carve-out on top of
+  # that .go-only filter: ghapptoken.go embeds it via `//go:embed
+  # mint-token.sh` (issue #2867), and a //go:embed directive needs the
+  # exact file it names on disk at build time, regardless of extension --
+  # the generic "every non-test .go file" rule above has no way to see
+  # that a .sh file is a build input too. Listed explicitly here, the same
+  # way go.mod/go.sum are, rather than widening f.hasExt to also match
+  # "sh" (which would pull in any future shell script under cmd/launcher
+  # whether or not it's actually go:embed'd).
   launcherCurrencyFileset =
     lib.fileset.difference
       (lib.fileset.unions [
         ../cmd/launcher/go.mod
         ../cmd/launcher/go.sum
+        ../cmd/launcher/internal/ghapptoken/mint-token.sh
         (lib.fileset.fileFilter (f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name) ../cmd/launcher)
       ])
       (
@@ -1465,6 +1476,9 @@ let
         gh
         git
         coreutils
+        openssl
+        curl
+        jq
       ];
       text = runShellBody + ''
         exec ${launcherBin}/bin/launcher --input ${runInputDocumentFile} "$@"

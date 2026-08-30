@@ -24,6 +24,9 @@ type schemaConfig struct {
 	failedLabel                  string
 	forgejoBaseURL               string
 	forgejoToken                 string
+	ghAppID                      string
+	ghAppInstallationID          string
+	ghAppPrivateKeyFile          string
 	ghToken                      string
 	ghTokenRefreshFile           string
 	gitUserEmail                 string
@@ -93,6 +96,9 @@ func loadSchemaConfig() schemaConfig {
 		failedLabel:                 getenvSchema("FAILED_LABEL"),
 		forgejoBaseURL:              getenvSchema("FORGEJO_BASE_URL"),
 		forgejoToken:                os.Getenv("FORGEJO_TOKEN"),
+		ghAppID:                     getenvSchema("GH_APP_ID"),
+		ghAppInstallationID:         getenvSchema("GH_APP_INSTALLATION_ID"),
+		ghAppPrivateKeyFile:         getenvSchema("GH_APP_PRIVATE_KEY_FILE"),
 		ghToken:                     os.Getenv("GH_TOKEN"),
 		ghTokenRefreshFile:          getenvSchema("GH_TOKEN_REFRESH_FILE"),
 		holdJitterSecs:              atoiNonnegSchema("HOLD_JITTER_SECS"),
