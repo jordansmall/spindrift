@@ -77,7 +77,7 @@ func TestRunContinuous_RealProbe_LauncherStaleImageFresh(t *testing.T) {
 	}
 
 	resultCh := make(chan error, 1)
-	go func() { resultCh <- RunContinuous(c, nil, fc, fc, dir, f, s, discover, fresh) }()
+	go func() { resultCh <- RunContinuous(c, nil, fc, fc, dir, f, s, QueueFromDiscoverer(discover), fresh) }()
 
 	var runErr error
 	select {

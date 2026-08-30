@@ -63,7 +63,8 @@ var ErrImageStale = errors.New("image stale; rebuild and re-invoke")
 // (#2777) is a second, independently-settable value of this same type:
 // RunContinuous never calls it for regular discovery, only for the
 // stale-transition heldBack computation, where it stands in for the
-// discover param when the caller needs that call to stay side-effect free.
+// Queue's own Discover method when the caller needs that call to stay
+// side-effect free.
 type Discoverer func() (Batch, error)
 
 // FreshnessChecker answers whether a refill may launch a new Box.
@@ -269,9 +270,9 @@ func emitStaleDrainReportReleasingMu(mu *sync.Mutex, cfg Config, pwd string, rep
 }
 
 // RunContinuous runs the opt-in slot-refill dispatch mode (#527): it fills
-// up to cfg.MaxParallel slots from discover's result, then, as each Box
-// finishes, consults fresh before refilling the slot it freed. A fresh
-// result re-runs discover (blocker readiness, touch overlap — the same
+// up to cfg.MaxParallel slots from queue.Discover's result, then, as each
+// Box finishes, consults fresh before refilling the slot it freed. A fresh
+// result re-runs queue.Discover (blocker readiness, touch overlap — the same
 // selection nextReady applies) and claims and launches
 // the next unblocked issue; a rebuild-needed result stops refilling — the
 // slot stays empty and in-flight Boxes still run to completion — and
@@ -283,7 +284,7 @@ func emitStaleDrainReportReleasingMu(mu *sync.Mutex, cfg Config, pwd string, rep
 // issue listing is eventually consistent, so a refill soon after a claim
 // can still see the just-claimed issue as dispatchable; the in-run record
 // is what actually stops a second Box from launching for it.
-func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge.CodeForge, pwd string, f *dispatch.Factory, s settle.Settler, discover Discoverer, fresh FreshnessChecker) error {
+func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge.CodeForge, pwd string, f *dispatch.Factory, s settle.Settler, queue Queue, fresh FreshnessChecker) error {
 	if err := os.MkdirAll(dispatch.HostLogDirFor(pwd), 0o755); err != nil {
 		return err
 	}
@@ -372,8 +373,8 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 			stale = true
 			fmt.Printf("==> %s\n", msg)
 			staleDrain.begin(now(), limiter.Cap())
-			// heldBack only calls discover() for callers whose Discoverer is
-			// a pure query. Console's Queue.Discover (cfg.PreResolved, the
+			// heldBack only calls queue.Discover for callers whose Discoverer
+			// is a pure query. Console's Queue.Discover (cfg.PreResolved, the
 			// only PreResolved caller today) claims the ready pick it
 			// returns as an inseparable side effect of discovering it
 			// (queue.go) -- a call here, whose result is otherwise
@@ -381,19 +382,19 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 			// dispatches, orphaning it at InProgress. cfg.PendingCount, when
 			// set, is a pure alternative such a caller can supply instead
 			// (Console's Queue.PendingCount, #2678) -- checked first since a
-			// caller that has it available never needs the discover()
+			// caller that has it available never needs the queue.Discover()
 			// fallback, PreResolved or not. When neither applies (PreResolved
 			// with no PendingCount -- no caller does this today), heldBack is
 			// reported unknown rather than risk the claim or fabricate a
 			// confirmed-looking 0 (#2678 review finding). Within this case,
-			// cfg.DiscoverReporting, when set, is preferred over the discover
-			// param itself (#2777): the discover param may carry a
-			// caller-side side effect -- the CLI's log-on-poll behavior --
-			// that a reporting-only heldBack call must not trigger, so a
-			// caller with such a side effect supplies a pure
+			// cfg.DiscoverReporting, when set, is preferred over the
+			// queue's Discover method itself (#2777): queue.Discover may
+			// carry a caller-side side effect -- the CLI's log-on-poll
+			// behavior -- that a reporting-only heldBack call must not
+			// trigger, so a caller with such a side effect supplies a pure
 			// DiscoverReporting closure instead.
 			//
-			// The !cfg.PreResolved branch below pays a real discover()+
+			// The !cfg.PreResolved branch below pays a real queue.Discover()+
 			// countReady() cost every headless CONTINUOUS_DISPATCH caller
 			// incurs; see Config.PendingCount's own doc comment (plan.go)
 			// for the accepted-cost rationale (#2778).
@@ -401,7 +402,7 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 			case cfg.PendingCount != nil:
 				staleDrain.heldBack = cfg.PendingCount()
 			case !cfg.PreResolved:
-				reportDiscover := discover
+				reportDiscover := queue.Discover
 				if cfg.DiscoverReporting != nil {
 					reportDiscover = cfg.DiscoverReporting
 				}
@@ -431,7 +432,7 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 		attempt := 0
 		for {
 			var err error
-			batch, err = discover()
+			batch, err = queue.Discover()
 			if err == nil {
 				break
 			}
