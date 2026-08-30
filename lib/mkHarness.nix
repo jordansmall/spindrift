@@ -1226,6 +1226,10 @@ let
       agentEnvPath
       passwdFilePath
       groupFilePath
+      agentFilesDrv
+      agentEnvDrv
+      passwdFileDrv
+      groupFileDrv
       agentClosurePath
       imagePath
       imageHash
@@ -1261,10 +1265,13 @@ let
     # key at all -- the ephemeral overlay store's nix.conf is only relevant
     # when the Box actually gets in-box nix.
     nixConfigPath = if nixInBox then nixConfigFilePath else "";
+    # Mirrors the nixConfigPath line above -- see buildArtifacts' own
+    # nixConfigDrv call below for the same nixInBox-off empty-string default.
+    nixConfigDrv = if nixInBox then nixConfigFileDrv else "";
     # Unlike nixConfigPath above, the syscall filter is a bwrap-hardening
     # concern orthogonal to nix-in-box -- it always builds and always
     # renders its real path, on or off.
-    inherit syscallFilterPath;
+    inherit syscallFilterPath syscallFilterDrv;
   };
 
   buildArtifacts = preambles.buildArtifacts {

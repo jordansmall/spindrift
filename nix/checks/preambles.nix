@@ -19,6 +19,16 @@ let
     agentEnvPath = "/nix/store/bbb-agent-env";
     passwdFilePath = "/nix/store/eee-passwd";
     groupFilePath = "/nix/store/fff-group";
+    # Same literal values preambles-build-artifacts-bwrap's own fixture uses
+    # for these (below) -- runArtifacts and buildArtifacts render both the
+    # run-time paths above and these build-time drvs from the same Consumer
+    # config (issue #2672); preambles-run-build-artifacts-bwrap-drv-parity
+    # below asserts the two outputs actually agree on these six keys.
+    agentFilesDrv = "/nix/store/aaa-agent-files.drv";
+    agentEnvDrv = "/nix/store/bbb-agent-env.drv";
+    passwdFileDrv = "/nix/store/eee-passwd.drv";
+    groupFileDrv = "/nix/store/fff-group.drv";
+    syscallFilterDrv = "/nix/store/fake-syscall-filter-path/filter.bpf.drv";
     agentClosurePath = "/nix/store/ggg-agent-closure";
     prefetch = "";
     imagePath = "/nix/store/ccc-image";
@@ -274,6 +284,7 @@ in
         bwrapRunArtifactsBase
         // {
           nixConfigPath = "/nix/store/fake-nix-conf-path/nix.conf";
+          nixConfigDrv = "/nix/store/fake-nix-conf-path.drv";
         }
       );
     in
@@ -295,6 +306,21 @@ in
     assert assertMsg (
       out.GROUP_FILE == "/nix/store/fff-group"
     ) "runArtifacts (bwrap) must set GROUP_FILE, got: ${builtins.toJSON out}";
+    assert assertMsg (
+      out.AGENT_FILES_DRV == "/nix/store/aaa-agent-files.drv"
+    ) "runArtifacts (bwrap) must set AGENT_FILES_DRV, got: ${builtins.toJSON out}";
+    assert assertMsg (
+      out.AGENT_ENV_DRV == "/nix/store/bbb-agent-env.drv"
+    ) "runArtifacts (bwrap) must set AGENT_ENV_DRV, got: ${builtins.toJSON out}";
+    assert assertMsg (
+      out.PASSWD_FILE_DRV == "/nix/store/eee-passwd.drv"
+    ) "runArtifacts (bwrap) must set PASSWD_FILE_DRV, got: ${builtins.toJSON out}";
+    assert assertMsg (
+      out.GROUP_FILE_DRV == "/nix/store/fff-group.drv"
+    ) "runArtifacts (bwrap) must set GROUP_FILE_DRV, got: ${builtins.toJSON out}";
+    assert assertMsg (
+      out.SYSCALL_FILTER_DRV == "/nix/store/fake-syscall-filter-path/filter.bpf.drv"
+    ) "runArtifacts (bwrap) must set SYSCALL_FILTER_DRV, got: ${builtins.toJSON out}";
     assert assertMsg (
       out ? BAKED_PREFETCH
     ) "runArtifacts (bwrap) must set BAKED_PREFETCH, got: ${builtins.toJSON out}";
@@ -348,6 +374,9 @@ in
     assert assertMsg (
       out.NIX_CONFIG_FILE == "/nix/store/fake-nix-conf-path/nix.conf"
     ) "runArtifacts (bwrap) must set NIX_CONFIG_FILE, got: ${builtins.toJSON out}";
+    assert assertMsg (
+      out.NIX_CONFIG_FILE_DRV == "/nix/store/fake-nix-conf-path.drv"
+    ) "runArtifacts (bwrap) must set NIX_CONFIG_FILE_DRV, got: ${builtins.toJSON out}";
     assert assertMsg (out.NIX_STORE_WRITABLE == "true")
       "runArtifacts (bwrap) must render NIX_STORE_WRITABLE as the literal string \"true\" when nixStoreWritable is true, got: ${builtins.toJSON out}";
     assert assertMsg (
@@ -400,6 +429,13 @@ in
         agentEnvPath = "/nix/store/bbb-agent-env";
         passwdFilePath = "/nix/store/eee-passwd";
         groupFilePath = "/nix/store/fff-group";
+        # Required (no default), same reasoning as nixStoreWritable/
+        # syscallFilterPath below -- the OCI branch never reads these either
+        # (issue #2672).
+        agentFilesDrv = "/nix/store/aaa-agent-files.drv";
+        agentEnvDrv = "/nix/store/bbb-agent-env.drv";
+        passwdFileDrv = "/nix/store/eee-passwd.drv";
+        groupFileDrv = "/nix/store/fff-group.drv";
         agentClosurePath = "/nix/store/ggg-agent-closure";
         prefetch = "";
         imagePath = "/nix/store/ccc-image";
@@ -433,6 +469,7 @@ in
         # Required (no default), same reasoning as nixStoreWritable above --
         # the OCI branch never reads it either (issue #2670).
         syscallFilterPath = "/nix/store/fake-syscall-filter-path/filter.bpf";
+        syscallFilterDrv = "/nix/store/fake-syscall-filter-path/filter.bpf.drv";
       };
     in
     assert assertMsg (
@@ -525,6 +562,13 @@ in
         agentEnvPath = "/nix/store/bbb-agent-env";
         passwdFilePath = "/nix/store/eee-passwd";
         groupFilePath = "/nix/store/fff-group";
+        # Required (no default), same reasoning as nixStoreWritable/
+        # syscallFilterPath below -- the OCI branch never reads these either
+        # (issue #2672).
+        agentFilesDrv = "/nix/store/aaa-agent-files.drv";
+        agentEnvDrv = "/nix/store/bbb-agent-env.drv";
+        passwdFileDrv = "/nix/store/eee-passwd.drv";
+        groupFileDrv = "/nix/store/fff-group.drv";
         agentClosurePath = "/nix/store/ggg-agent-closure";
         prefetch = "";
         imagePath = "/nix/store/ccc-image";
@@ -553,6 +597,7 @@ in
         reviewLoopOrchestrator = false;
         nixStoreWritable = false;
         syscallFilterPath = "/nix/store/fake-syscall-filter-path/filter.bpf";
+        syscallFilterDrv = "/nix/store/fake-syscall-filter-path/filter.bpf.drv";
       };
     in
     assert assertMsg (
@@ -640,6 +685,55 @@ in
       out.SYSCALL_FILTER_DRV == "/nix/store/fake-syscall-filter-path/filter.bpf.drv"
     ) "buildArtifacts (bwrap) must set SYSCALL_FILTER_DRV, got: ${builtins.toJSON out}";
     pkgs.runCommand "preambles-build-artifacts-bwrap" { } "touch $out";
+
+  # Issue #2672: runArtifacts and buildArtifacts render these six drv keys
+  # from the same shared bwrapDrvArtifacts helper (lib/preambles.nix) against
+  # the same Consumer config, so the two outputs must agree bit-for-bit --
+  # unlike preambles-run-artifacts-bwrap and preambles-build-artifacts-bwrap
+  # above, which each only pin their own output against a literal and would
+  # both go on passing even if the two renderers silently diverged from each
+  # other.
+  preambles-run-build-artifacts-bwrap-drv-parity =
+    let
+      runOut = preambles.runArtifacts (
+        bwrapRunArtifactsBase
+        // {
+          nixConfigPath = "/nix/store/fake-nix-conf-path/nix.conf";
+          nixConfigDrv = "/nix/store/fake-nix-conf-path.drv";
+        }
+      );
+      buildOut = preambles.buildArtifacts {
+        runnerKind = "bwrap";
+        agentFilesDrv = bwrapRunArtifactsBase.agentFilesDrv;
+        agentEnvDrv = bwrapRunArtifactsBase.agentEnvDrv;
+        passwdFileDrv = bwrapRunArtifactsBase.passwdFileDrv;
+        groupFileDrv = bwrapRunArtifactsBase.groupFileDrv;
+        runtime = "bwrap";
+        imagePath = "/nix/store/ccc-image";
+        imageHash = "deadbeef";
+        launcherCurrencyHash = "deadbeefdeadbeefdeadbeefdeadbeef";
+        imageName = "spindrift";
+        imageDrv = "/nix/store/ddd-image.drv";
+        nixBuilderImage = "docker.io/nixos/nix@sha256:aaaa";
+        systems = {
+          host = "aarch64-darwin";
+          linux = "x86_64-linux";
+        };
+        nixConfigDrv = "/nix/store/fake-nix-conf-path.drv";
+        syscallFilterDrv = bwrapRunArtifactsBase.syscallFilterDrv;
+      };
+      mismatched = builtins.filter (key: runOut.${key} != buildOut.${key}) [
+        "AGENT_FILES_DRV"
+        "AGENT_ENV_DRV"
+        "PASSWD_FILE_DRV"
+        "GROUP_FILE_DRV"
+        "NIX_CONFIG_FILE_DRV"
+        "SYSCALL_FILTER_DRV"
+      ];
+    in
+    assert assertMsg (mismatched == [ ])
+      "runArtifacts and buildArtifacts (bwrap) must render identical values for the shared drv keys when fed the same Consumer config, mismatched keys: ${builtins.toJSON mismatched}, runArtifacts: ${builtins.toJSON runOut}, buildArtifacts: ${builtins.toJSON buildOut}";
+    pkgs.runCommand "preambles-run-build-artifacts-bwrap-drv-parity" { } "touch $out";
 
   preambles-build-artifacts-oci =
     let
