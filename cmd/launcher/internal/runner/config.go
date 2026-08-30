@@ -69,6 +69,11 @@ type Config struct {
 	// NixConfigFileDrv is its .drv path; realized by `launcher build`
 	// alongside the other bwrap agent store closures, when set.
 	NixConfigFileDrv string
+	// NixStoreWritable gates whether the bwrap adapter overlays /nix/store
+	// with an ephemeral tmpfs upper instead of binding it read-only (ADR
+	// 0042). Has no effect unless NixConfigFile is also set: nix isn't even
+	// on PATH in the Box otherwise.
+	NixStoreWritable bool
 
 	// Optional host overrides shared by the OCI and bwrap run adapters
 	// (unused by the build adapters).

@@ -709,16 +709,17 @@ func TestBwrapArgs_NoNixMountsWhenNixConfigFileEmpty(t *testing.T) {
 	}
 }
 
-// TestBwrapArgs_StoreAlwaysReadOnlyBindRegardlessOfNixConfig pins the "store
-// remains read-only" acceptance criterion for this slice: even with the nix
-// mounts present, the /nix/store bind stays a plain, unconditional
-// --ro-bind, never itself overlaid.
-func TestBwrapArgs_StoreAlwaysReadOnlyBindRegardlessOfNixConfig(t *testing.T) {
+// TestBwrapArgs_StoreReadOnlyBindWhenNotWritable pins the off-by-default
+// behavior (ADR 0042, issue #2665): with nixConfigFile set but
+// nixStoreWritable explicitly false, /nix/store stays a plain, unconditional
+// --ro-bind, never overlaid.
+func TestBwrapArgs_StoreReadOnlyBindWhenNotWritable(t *testing.T) {
 	a := &bwrapAdapter{
 		agentFiles:        "/fake/agent",
 		agentEnv:          "/fake/env",
 		nixConfigFile:     "/nix/store/fake/nix.conf",
 		nixVarSnapshotDir: "/fake/snap",
+		nixStoreWritable:  false,
 	}
 	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}})
 
@@ -727,7 +728,50 @@ func TestBwrapArgs_StoreAlwaysReadOnlyBindRegardlessOfNixConfig(t *testing.T) {
 	}
 	for i := 0; i+1 < len(args); i++ {
 		if args[i] == "--overlay-src" && args[i+1] == "/nix/store" {
-			t.Errorf("/nix/store must never be overlaid by this change: %v", args)
+			t.Errorf("/nix/store must not be overlaid when nixStoreWritable is false: %v", args)
+		}
+	}
+}
+
+// TestBwrapArgs_StoreOverlayWhenWritable verifies that nixConfigFile set AND
+// nixStoreWritable true renders /nix/store as an ephemeral tmpfs overlay
+// (ADR 0042, issue #2665) instead of a plain read-only bind.
+func TestBwrapArgs_StoreOverlayWhenWritable(t *testing.T) {
+	a := &bwrapAdapter{
+		agentFiles:        "/fake/agent",
+		agentEnv:          "/fake/env",
+		nixConfigFile:     "/nix/store/fake/nix.conf",
+		nixVarSnapshotDir: "/fake/snap",
+		nixStoreWritable:  true,
+	}
+	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}})
+
+	if !strings.Contains(strings.Join(args, " "), "--overlay-src /nix/store --tmp-overlay /nix/store") {
+		t.Errorf("expected --overlay-src /nix/store --tmp-overlay /nix/store in args: %v", args)
+	}
+	if wantTriple(args, "--ro-bind", "/nix/store", "/nix/store") {
+		t.Errorf("/nix/store must not be plain read-only bound when nixStoreWritable is true: %v", args)
+	}
+}
+
+// TestBwrapArgs_StoreReadOnlyWhenConfigFileEmptyEvenIfWritable proves the
+// AND-gate is real: nixStoreWritable alone (with nixConfigFile empty, i.e.
+// nixInBox off) must not trigger the overlay, since nix isn't even on PATH
+// in the Box in that case.
+func TestBwrapArgs_StoreReadOnlyWhenConfigFileEmptyEvenIfWritable(t *testing.T) {
+	a := &bwrapAdapter{
+		agentFiles:       "/fake/agent",
+		agentEnv:         "/fake/env",
+		nixStoreWritable: true,
+	}
+	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}})
+
+	if !wantTriple(args, "--ro-bind", "/nix/store", "/nix/store") {
+		t.Errorf("expected --ro-bind /nix/store /nix/store in args: %v", args)
+	}
+	for i := 0; i+1 < len(args); i++ {
+		if args[i] == "--overlay-src" && args[i+1] == "/nix/store" {
+			t.Errorf("/nix/store must not be overlaid when nixConfigFile is empty, even if nixStoreWritable is true: %v", args)
 		}
 	}
 }
