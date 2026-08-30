@@ -54,8 +54,9 @@ type Readiness struct {
 // matching the original best-effort behaviour, but named in the returned
 // Failed set so a caller can tell a transient DepsOf failure apart from a
 // confirmed zero-blocker issue (#752) — the two look identical in Edges
-// alone, since both simply omit the issue's key. Callers pass the result's
-// Edges as Input.Edges and Sources as Input.Sources to NewPlan.
+// alone, since both simply omit the issue's key. Callers assemble the
+// result's Edges, Sources, and Failed into a Batch and set it as
+// Input.Batch for NewPlan.
 func NewReadiness(it forge.IssueTracker, issues []Issue) (Readiness, error) {
 	type depsResult struct {
 		deps []forge.Dependency

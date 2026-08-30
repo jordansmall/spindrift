@@ -79,11 +79,11 @@ type Issue struct {
 	Priority forge.Priority
 }
 
-// Input is what a caller supplies to NewPlan: the batch to dispatch and the
-// blocker edges among them (child -> blockers), already resolved by the
-// caller — Plan itself makes no Forge calls.
-type Input struct {
-	Origin  Origin
+// Batch is discovery's sealed result: the candidate issues plus the blocker
+// graph resolved for them. A Discoverer returns one; Input and Plan each
+// embed one so the four fields travel together instead of drifting apart
+// as separate parameters.
+type Batch struct {
 	Issues  []Issue
 	Edges   map[string][]string
 	Sources Sources
@@ -96,18 +96,22 @@ type Input struct {
 	Failed map[string]bool
 }
 
-// Plan is the pure result of validating a batch of issues for dispatch:
-// which Mode (always ModeDrain), in what order, and against which blocker
-// edges.
-type Plan struct {
-	Mode    Mode
-	Origin  Origin
-	Issues  []Issue
-	Edges   map[string][]string
-	Sources Sources
+// Input is what a caller supplies to NewPlan: an Origin plus the Batch to
+// dispatch, already resolved by the caller — Plan itself makes no Forge
+// calls.
+type Input struct {
+	Origin Origin
+	Batch
+}
 
-	// Failed carries Input.Failed through unchanged; see its doc comment.
-	Failed map[string]bool
+// Plan is the pure result of validating a batch of issues for dispatch:
+// which Mode (always ModeDrain), in what order, tagged with the dispatch's
+// Origin, and against which Batch — the issues plus their resolved blocker
+// graph.
+type Plan struct {
+	Mode   Mode
+	Origin Origin
+	Batch
 }
 
 // Config carries the subset of launcher config the wave engine needs.
@@ -248,5 +252,5 @@ func NewPlan(cfg Config, in Input) (Plan, error) {
 	if in.Origin != OriginSelective {
 		forge.SortByPriority(in.Issues, func(i Issue) forge.Priority { return i.Priority })
 	}
-	return Plan{Mode: ModeDrain, Origin: in.Origin, Issues: in.Issues, Edges: in.Edges, Sources: in.Sources, Failed: in.Failed}, nil
+	return Plan{Mode: ModeDrain, Origin: in.Origin, Batch: in.Batch}, nil
 }

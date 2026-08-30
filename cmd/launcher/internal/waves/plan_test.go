@@ -13,7 +13,7 @@ func TestNewPlan_Discovered_NoEdges_SelectsDrainMode(t *testing.T) {
 	cfg := Config{}
 	in := Input{
 		Origin: OriginDiscovered,
-		Issues: []Issue{{Number: "1", Title: "a"}},
+		Batch:  Batch{Issues: []Issue{{Number: "1", Title: "a"}}},
 	}
 	plan, err := NewPlan(cfg, in)
 	if err != nil {
@@ -32,8 +32,7 @@ func TestNewPlan_Discovered_Edges_SelectsDrainMode(t *testing.T) {
 	cfg := Config{}
 	in := Input{
 		Origin: OriginDiscovered,
-		Issues: []Issue{{Number: "1"}, {Number: "2"}},
-		Edges:  map[string][]string{"2": {"1"}},
+		Batch:  Batch{Issues: []Issue{{Number: "1"}, {Number: "2"}}, Edges: map[string][]string{"2": {"1"}}},
 	}
 	plan, err := NewPlan(cfg, in)
 	if err != nil {
@@ -55,7 +54,7 @@ func TestNewPlan_Selective_NoEdges_SelectsDrainMode(t *testing.T) {
 	cfg := Config{}
 	in := Input{
 		Origin: OriginSelective,
-		Issues: []Issue{{Number: "1", Title: "a"}},
+		Batch:  Batch{Issues: []Issue{{Number: "1", Title: "a"}}},
 	}
 	plan, err := NewPlan(cfg, in)
 	if err != nil {
@@ -74,8 +73,7 @@ func TestNewPlan_Cycle_ReturnsError(t *testing.T) {
 	cfg := Config{}
 	in := Input{
 		Origin: OriginDiscovered,
-		Issues: []Issue{{Number: "1"}, {Number: "2"}},
-		Edges:  map[string][]string{"1": {"2"}, "2": {"1"}},
+		Batch:  Batch{Issues: []Issue{{Number: "1"}, {Number: "2"}}, Edges: map[string][]string{"1": {"2"}, "2": {"1"}}},
 	}
 	_, err := NewPlan(cfg, in)
 	if err == nil {
@@ -91,8 +89,7 @@ func TestNewPlan_Cycle_ReturnsError_EvenWithMaxJobs(t *testing.T) {
 	cfg := Config{MaxJobs: 1}
 	in := Input{
 		Origin: OriginDiscovered,
-		Issues: []Issue{{Number: "1"}, {Number: "2"}},
-		Edges:  map[string][]string{"1": {"2"}, "2": {"1"}},
+		Batch:  Batch{Issues: []Issue{{Number: "1"}, {Number: "2"}}, Edges: map[string][]string{"1": {"2"}, "2": {"1"}}},
 	}
 	_, err := NewPlan(cfg, in)
 	if err == nil {
@@ -106,7 +103,7 @@ func TestNewPlan_MaxJobs_SelectsDrainMode(t *testing.T) {
 	cfg := Config{MaxJobs: 2}
 	in := Input{
 		Origin: OriginDiscovered,
-		Issues: []Issue{{Number: "1"}, {Number: "2"}, {Number: "3"}},
+		Batch:  Batch{Issues: []Issue{{Number: "1"}, {Number: "2"}, {Number: "3"}}},
 	}
 	plan, err := NewPlan(cfg, in)
 	if err != nil {
@@ -122,7 +119,7 @@ func TestNewPlan_MaxJobs_SelectsDrainMode(t *testing.T) {
 // issueNumber != "" sentinel.
 func TestNewPlan_OriginPropagates(t *testing.T) {
 	for _, origin := range []Origin{OriginDiscovered, OriginClaimed, OriginSelective} {
-		in := Input{Origin: origin, Issues: []Issue{{Number: "1"}}}
+		in := Input{Origin: origin, Batch: Batch{Issues: []Issue{{Number: "1"}}}}
 		plan, err := NewPlan(Config{}, in)
 		if err != nil {
 			t.Fatalf("NewPlan: %v", err)
@@ -141,8 +138,7 @@ func TestNewPlan_FailedPropagates(t *testing.T) {
 	cfg := Config{}
 	in := Input{
 		Origin: OriginDiscovered,
-		Issues: []Issue{{Number: "1", Title: "a"}},
-		Failed: map[string]bool{"1": true},
+		Batch:  Batch{Issues: []Issue{{Number: "1", Title: "a"}}, Failed: map[string]bool{"1": true}},
 	}
 	plan, err := NewPlan(cfg, in)
 	if err != nil {
@@ -164,12 +160,12 @@ func TestNewPlan_SortsByPriorityDescending(t *testing.T) {
 	cfg := Config{}
 	in := Input{
 		Origin: OriginDiscovered,
-		Issues: []Issue{
+		Batch: Batch{Issues: []Issue{
 			{Number: "1", Priority: forge.PriorityNormal},
 			{Number: "2", Priority: forge.PriorityCritical},
 			{Number: "3", Priority: forge.PriorityLow},
 			{Number: "4", Priority: forge.PriorityHigh},
-		},
+		}},
 	}
 	plan, err := NewPlan(cfg, in)
 	if err != nil {
@@ -195,11 +191,11 @@ func TestNewPlan_SortIsStableWithinTier(t *testing.T) {
 	cfg := Config{}
 	in := Input{
 		Origin: OriginDiscovered,
-		Issues: []Issue{
+		Batch: Batch{Issues: []Issue{
 			{Number: "10", Priority: forge.PriorityHigh},
 			{Number: "5", Priority: forge.PriorityHigh},
 			{Number: "7", Priority: forge.PriorityHigh},
-		},
+		}},
 	}
 	plan, err := NewPlan(cfg, in)
 	if err != nil {
@@ -221,12 +217,12 @@ func TestNewPlan_LowSortsLast(t *testing.T) {
 	cfg := Config{}
 	in := Input{
 		Origin: OriginDiscovered,
-		Issues: []Issue{
+		Batch: Batch{Issues: []Issue{
 			{Number: "1", Priority: forge.PriorityLow},
 			{Number: "2", Priority: forge.PriorityNormal},
 			{Number: "3", Priority: forge.PriorityLow},
 			{Number: "4", Priority: forge.PriorityNormal},
-		},
+		}},
 	}
 	plan, err := NewPlan(cfg, in)
 	if err != nil {
@@ -251,11 +247,10 @@ func TestNewPlan_PriorityNeverInherited(t *testing.T) {
 	cfg := Config{}
 	in := Input{
 		Origin: OriginDiscovered,
-		Issues: []Issue{
+		Batch: Batch{Issues: []Issue{
 			{Number: "1", Priority: forge.PriorityLow},      // blocker
 			{Number: "2", Priority: forge.PriorityCritical}, // dependent
-		},
-		Edges: map[string][]string{"2": {"1"}},
+		}, Edges: map[string][]string{"2": {"1"}}},
 	}
 	plan, err := NewPlan(cfg, in)
 	if err != nil {
@@ -282,11 +277,10 @@ func TestNewPlan_EdgesCarriedThroughUnchangedByPrioritySort(t *testing.T) {
 	edges := map[string][]string{"2": {"1"}}
 	in := Input{
 		Origin: OriginDiscovered,
-		Issues: []Issue{
+		Batch: Batch{Issues: []Issue{
 			{Number: "1", Priority: forge.PriorityLow},      // blocker
 			{Number: "2", Priority: forge.PriorityCritical}, // dependent, blocked
-		},
-		Edges: edges,
+		}, Edges: edges},
 	}
 	plan, err := NewPlan(cfg, in)
 	if err != nil {
@@ -310,12 +304,12 @@ func TestNewPlan_UnlabeledBatchByteIdenticalOrder(t *testing.T) {
 	cfg := Config{}
 	in := Input{
 		Origin: OriginDiscovered,
-		Issues: []Issue{
+		Batch: Batch{Issues: []Issue{
 			{Number: "42"},
 			{Number: "7"},
 			{Number: "13"},
 			{Number: "1"},
-		},
+		}},
 	}
 	want := []string{"42", "7", "13", "1"}
 	plan, err := NewPlan(cfg, in)
@@ -338,11 +332,11 @@ func TestNewPlan_SelectiveNeverReordersByPriority(t *testing.T) {
 	cfg := Config{}
 	in := Input{
 		Origin: OriginSelective,
-		Issues: []Issue{
+		Batch: Batch{Issues: []Issue{
 			{Number: "1", Priority: forge.PriorityLow},
 			{Number: "2", Priority: forge.PriorityCritical},
 			{Number: "3", Priority: forge.PriorityNormal},
-		},
+		}},
 	}
 	want := []string{"1", "2", "3"}
 	plan, err := NewPlan(cfg, in)

@@ -590,7 +590,16 @@ in-process poll waits for later waves. No label-based gate serializes issues;
 ordering is purely by dispatch order and blocker edges.
 _Was_: "fan-out" — the launch act and the batch carried two names; unified on
 the batch noun.
-_Avoid_: fan-out, batch, round.
+_Avoid_: fan-out, batch (as loose prose for a wave — `waves.Batch` is a
+distinct type, see [[Batch]]), round.
+
+**Batch** (`waves.Batch`):
+Discovery's sealed result type — the candidate Issues plus the blocker graph
+resolved for them (Edges, Sources, Failed) — carried by a Discoverer's
+return, and embedded in Input and Plan, so those four fields move and stay
+in sync as one value instead of drifting independently. Distinct from
+[[Wave]]: Batch is discovery-time data (what to dispatch and why it's
+ready), Wave is launch-time scheduling (what actually launches together).
 
 **Readiness**:
 The query seam answering "may this issue dispatch now, and if not, why"

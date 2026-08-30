@@ -32,8 +32,7 @@ func TestDispatch_DependencyEdge_DispatchesOnlyUnblocked(t *testing.T) {
 
 	in := Input{
 		Origin: OriginDiscovered,
-		Issues: []Issue{{Number: "1", Title: "unblocked"}, {Number: "2", Title: "dependent"}},
-		Edges:  map[string][]string{"2": {"3"}},
+		Batch:  Batch{Issues: []Issue{{Number: "1", Title: "unblocked"}, {Number: "2", Title: "dependent"}}, Edges: map[string][]string{"2": {"3"}}},
 	}
 	if err := Dispatch(c, fc, fc, dir, f, s, in); err != nil {
 		t.Fatalf("Dispatch: %v", err)
@@ -74,8 +73,7 @@ func TestDispatch_Cycle_ReturnsErrorWithoutDispatching(t *testing.T) {
 
 	in := Input{
 		Origin: OriginDiscovered,
-		Issues: []Issue{{Number: "1"}, {Number: "2"}},
-		Edges:  map[string][]string{"1": {"2"}, "2": {"1"}},
+		Batch:  Batch{Issues: []Issue{{Number: "1"}, {Number: "2"}}, Edges: map[string][]string{"1": {"2"}, "2": {"1"}}},
 	}
 	err := Dispatch(c, fc, fc, dir, f, s, in)
 	if err == nil || !strings.Contains(err.Error(), "cycle") {
