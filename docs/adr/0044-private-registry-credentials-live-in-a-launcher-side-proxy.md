@@ -182,6 +182,23 @@ the artifact base path is registry-specific, not a fixed shape.
 > need its own in-tree rewrite phase when it introduces a new config file,
 > not just a new env var.
 
+> **Update.** Issue #2930 gave `gradle`, `yarn`, and `pnpm` each an explicit
+> row in the shared `bindings` table
+> (`cmd/launcher/internal/registryproxy/allowlist.go`) after all, softening
+> the "no table entry at all" / "no new table entry" claims made above — but
+> not the path-allowlist policy those claims were really about. Each new row
+> carries `lockfileGlobs` for a second table consumer,
+> `cmd/launcher/internal/bindregistry`, a toolchain-nudge classifier that
+> reads the table's ecosystem/lockfile shape through a new `Ecosystems()`
+> accessor, entirely independent of the `patterns` field the path allowlist
+> itself matches on. The allowlist-derivation claims stand exactly as
+> written: gradle's row still carries a nil `patterns` (no allowlist
+> derivable, same reasoning as cargo's excluded download endpoint above),
+> and yarn's and pnpm's rows still share npm's exact `patterns` value
+> verbatim (no new allowlist pattern, same npm-compatible-protocol reasoning
+> above) — only the table itself gained rows, to serve a second consumer the
+> table's shape happened to already fit.
+
 ## Consequences
 
 - **The binding mechanism is a swappable last mile, not an architecture.**
