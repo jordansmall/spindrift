@@ -47,6 +47,9 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 	if isReadonlyGuardsInvocation(argv) {
 		return runReadonlyGuards(argv[1:], stdout)
 	}
+	if isBindRegistryInvocation(argv) {
+		return runBindRegistry(argv[1:], stdout)
+	}
 
 	fs := flag.NewFlagSet("driver-exec", flag.ContinueOnError)
 	fs.SetOutput(stderr)
