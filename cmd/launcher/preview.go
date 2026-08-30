@@ -50,7 +50,7 @@ func previewIssues(c config, it forge.IssueTracker, cf forge.CodeForge, w io.Wri
 	if err != nil {
 		return err
 	}
-	plan, err := waves.NewPlan(wavesConfig(c), waves.Input{Origin: origin, Issues: toWaveIssues(issues), Edges: result.Edges, Sources: result.Sources, Failed: result.Failed})
+	plan, err := waves.NewPlan(wavesConfig(c), waves.Input{Origin: origin, Batch: waves.Batch{Issues: toWaveIssues(issues), Edges: result.Edges, Sources: result.Sources, Failed: result.Failed}})
 	if err != nil {
 		return err
 	}
@@ -91,7 +91,7 @@ func previewSelectiveList(c config, it forge.IssueTracker, cf forge.CodeForge, w
 		fmt.Fprintf(w, "no issues would be dispatched after eviction\n")
 		return nil
 	}
-	plan, err := waves.NewPlan(selectiveWavesConfig(c), waves.Input{Origin: waves.OriginSelective, Issues: toWaveIssues(kept), Edges: edges, Sources: sources, Failed: failed})
+	plan, err := waves.NewPlan(selectiveWavesConfig(c), waves.Input{Origin: waves.OriginSelective, Batch: waves.Batch{Issues: toWaveIssues(kept), Edges: edges, Sources: sources, Failed: failed}})
 	if err != nil {
 		return err
 	}
