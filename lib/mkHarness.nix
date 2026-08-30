@@ -1242,6 +1242,11 @@ let
     prefetch = imageKnobs.prefetch;
     imageName = imageKnobs.imageName;
     boxEnvVars = preambles.renderBoxEnvVarsList schema;
+    # bwrap-only (issue #2664): omitted entirely (renders as "") when the
+    # Consumer has nixInBox off, matching how the OCI branch never gets this
+    # key at all -- the ephemeral overlay store's nix.conf is only relevant
+    # when the Box actually gets in-box nix.
+    nixConfigPath = if nixInBox then nixConfigFilePath else "";
   };
 
   buildArtifacts = preambles.buildArtifacts {
@@ -1260,6 +1265,9 @@ let
       systems
       ;
     imageName = imageKnobs.imageName;
+    # See runArtifacts' nixConfigPath comment above for the nixInBox-off
+    # empty-string default.
+    nixConfigDrv = if nixInBox then nixConfigFileDrv else "";
   };
 
   # The rendered documents as host store-path JSON files. The generated

@@ -31,12 +31,12 @@ in
         };
       };
     in
-    assert assertMsg (hasInfix ''MAX_PARALLEL=''${MAX_PARALLEL:-5}'' out)
+    assert assertMsg (hasInfix "MAX_PARALLEL=\${MAX_PARALLEL:-5}" out)
       "renderDefaultsPreamble must emit VAR=\${VAR:-<baked>} per flakeOption entry";
     assert assertMsg (
       !hasInfix "export " out
     ) "renderDefaultsPreamble export=false must not emit `export`";
-    assert assertMsg (hasInfix ''export MAX_PARALLEL=''${MAX_PARALLEL:-5}'' outExported)
+    assert assertMsg (hasInfix "export MAX_PARALLEL=\${MAX_PARALLEL:-5}" outExported)
       "renderDefaultsPreamble export=true must prefix each line with `export `";
     pkgs.runCommand "preambles-defaults-shape" { } "touch $out";
 
@@ -263,6 +263,7 @@ in
         workerProvisioned = true;
         reviewLoopInline = true;
         reviewLoopOrchestrator = false;
+        nixConfigPath = "/nix/store/fake-nix-conf-path/nix.conf";
       };
     in
     assert assertMsg (
@@ -329,13 +330,66 @@ in
     assert assertMsg (
       out.LAUNCHER_CURRENCY_HASH == "deadbeefdeadbeefdeadbeefdeadbeef"
     ) "runArtifacts (bwrap) must set LAUNCHER_CURRENCY_HASH, got: ${builtins.toJSON out}";
+    assert assertMsg (out.FLAKE_IMAGE_ATTR == ".#packages.x86_64-linux.agent-closure")
+      "runArtifacts (bwrap) must set FLAKE_IMAGE_ATTR to the agent-closure package, got: ${builtins.toJSON out}";
+    assert assertMsg (out.IMAGE_TAG == "/nix/store/ggg-agent-closure")
+      "runArtifacts (bwrap) must set IMAGE_TAG to the loaded agent-closure output path, got: ${builtins.toJSON out}";
     assert assertMsg (
-      out.FLAKE_IMAGE_ATTR == ".#packages.x86_64-linux.agent-closure"
-    ) "runArtifacts (bwrap) must set FLAKE_IMAGE_ATTR to the agent-closure package, got: ${builtins.toJSON out}";
-    assert assertMsg (
-      out.IMAGE_TAG == "/nix/store/ggg-agent-closure"
-    ) "runArtifacts (bwrap) must set IMAGE_TAG to the loaded agent-closure output path, got: ${builtins.toJSON out}";
+      out.NIX_CONFIG_FILE == "/nix/store/fake-nix-conf-path/nix.conf"
+    ) "runArtifacts (bwrap) must set NIX_CONFIG_FILE, got: ${builtins.toJSON out}";
     pkgs.runCommand "preambles-run-artifacts-bwrap" { } "touch $out";
+
+  # Issue #2664: nixConfigPath is optional (defaults to ""), the shape
+  # mkHarness.nix relies on when the Consumer has nixInBox off -- the key
+  # must still be present (not absent), just empty, matching the OCI branch's
+  # "never even a key" absence being a *different* case (asserted below in
+  # preambles-run-artifacts-oci).
+  preambles-run-artifacts-bwrap-nix-config-omitted =
+    let
+      out = preambles.runArtifacts {
+        runnerKind = "bwrap";
+        driverEntry = {
+          name = "claude";
+          skillsDirRelative = ".claude/skills";
+        };
+        agentFilesPath = "/nix/store/aaa-agent-files";
+        agentEnvPath = "/nix/store/bbb-agent-env";
+        passwdFilePath = "/nix/store/eee-passwd";
+        groupFilePath = "/nix/store/fff-group";
+        agentClosurePath = "/nix/store/ggg-agent-closure";
+        prefetch = "";
+        imagePath = "/nix/store/ccc-image";
+        imageHash = "deadbeef";
+        launcherCurrencyHash = "deadbeefdeadbeefdeadbeefdeadbeef";
+        imageName = "spindrift";
+        runtime = "bwrap";
+        imageDrv = "/nix/store/ddd-image.drv";
+        nixBuilderImage = "docker.io/nixos/nix@sha256:aaaa";
+        systems = {
+          host = "aarch64-darwin";
+          linux = "x86_64-linux";
+        };
+        boxEnvVars = "MODEL BASE_BRANCH";
+        hostMediatedRemote = false;
+        outboxRelayCapable = true;
+        inBoxUnreachableTracker = false;
+        fullyLocal = false;
+        trackerAxisRead = "GITHUB";
+        trackerAxisWrite = "GITHUB";
+        trackerAxisFiler = "GH";
+        forgeBackend = "GH";
+        filerEnabled = true;
+        workerProvisioned = true;
+        reviewLoopInline = true;
+        reviewLoopOrchestrator = false;
+        # nixConfigPath deliberately omitted -- pins the nixInBox-off default
+        # mkHarness.nix's `if nixInBox then nixConfigFilePath else ""` relies
+        # on, which a Go-side test can't see directly.
+      };
+    in
+    assert assertMsg (out.NIX_CONFIG_FILE == "")
+      "runArtifacts (bwrap) must default NIX_CONFIG_FILE to \"\" when nixConfigPath is omitted (the nixInBox-off shape), got: ${builtins.toJSON out}";
+    pkgs.runCommand "preambles-run-artifacts-bwrap-nix-config-omitted" { } "touch $out";
 
   preambles-run-artifacts-oci =
     let
@@ -441,6 +495,9 @@ in
     assert assertMsg (
       !(out ? GROUP_FILE)
     ) "runArtifacts (oci) must not set bwrap-only keys, got: ${builtins.toJSON out}";
+    assert assertMsg (
+      !(out ? NIX_CONFIG_FILE)
+    ) "runArtifacts (oci) must not set bwrap-only keys, got: ${builtins.toJSON out}";
     pkgs.runCommand "preambles-run-artifacts-oci" { } "touch $out";
 
   # Issue #262 AC1: a driver-scoped image name flows into IMAGE_TAG, so an
@@ -536,6 +593,7 @@ in
           host = "aarch64-darwin";
           linux = "x86_64-linux";
         };
+        nixConfigDrv = "/nix/store/fake-nix-conf-path.drv";
       };
     in
     assert assertMsg (
@@ -562,6 +620,9 @@ in
     assert assertMsg (
       out.LAUNCHER_CURRENCY_HASH == "deadbeefdeadbeefdeadbeefdeadbeef"
     ) "buildArtifacts (bwrap) must set LAUNCHER_CURRENCY_HASH, got: ${builtins.toJSON out}";
+    assert assertMsg (
+      out.NIX_CONFIG_FILE_DRV == "/nix/store/fake-nix-conf-path.drv"
+    ) "buildArtifacts (bwrap) must set NIX_CONFIG_FILE_DRV, got: ${builtins.toJSON out}";
     pkgs.runCommand "preambles-build-artifacts-bwrap" { } "touch $out";
 
   preambles-build-artifacts-oci =
@@ -615,6 +676,9 @@ in
     assert assertMsg (
       !(out ? GROUP_FILE_DRV)
     ) "buildArtifacts (oci) must not set bwrap-only keys, got: ${builtins.toJSON out}";
+    assert assertMsg (
+      !(out ? NIX_CONFIG_FILE_DRV)
+    ) "buildArtifacts (oci) must not set bwrap-only keys, got: ${builtins.toJSON out}";
     pkgs.runCommand "preambles-build-artifacts-oci" { } "touch $out";
 
   # documentArtifactKeys must be derived from what runArtifacts/buildArtifacts
@@ -655,6 +719,8 @@ in
         "IN_BOX_UNREACHABLE_TRACKER"
         "LAUNCHER_CURRENCY_HASH"
         "NIX_BUILDER_IMAGE"
+        "NIX_CONFIG_FILE"
+        "NIX_CONFIG_FILE_DRV"
         "NIX_VOLUME"
         "OUTBOX_RELAY_CAPABLE"
         "PASSWD_FILE"
