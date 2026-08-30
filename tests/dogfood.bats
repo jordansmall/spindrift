@@ -68,6 +68,25 @@ EOF
   chmod +x "$FAKE_BIN/nix"
 }
 
+# Fakes `uname -s` to report $1, scoped to the calling test: DOGFOOD_RUNTIME
+# tests that must pass regardless of the actual host OS (e.g. a real Linux
+# CI runner vs. a macOS dev host) fake this rather than relying on whichever
+# OS bats happens to run on (#2672 review finding). Reuses the
+# already-rewritten-for-this-environment shebang off the fake nix (same
+# trick _install_exit_code_nix uses) instead of hardcoding
+# "#!/usr/bin/env bash", so this also works under the nix sandboxed build,
+# which has no /usr/bin/env.
+_fake_uname() {
+  local os="$1"
+  local shebang
+  shebang="$(head -n1 "$FAKE_BIN/nix")"
+  {
+    printf '%s\n' "$shebang"
+    printf 'echo %s\n' "$os"
+  } >"$FAKE_BIN/uname"
+  chmod +x "$FAKE_BIN/uname"
+}
+
 setup() {
   setup_fakes
 
@@ -229,6 +248,54 @@ EOF
   [ "$(grep -c -- '-- research' "$NIX_LOG")" -eq 2 ]
 }
 
+@test "DOGFOOD_RUNTIME unset targets the default (podman) flake app" {
+  run timeout 15 env BASE_BRANCH=main bash "$WORK/dogfood.sh"
+  [ "$status" -eq 0 ]
+  grep -qF -- 'run .# --' "$NIX_LOG"
+  ! grep -qF -- '.#dogfood-bwrap' "$NIX_LOG"
+}
+
+@test "DOGFOOD_RUNTIME=podman explicitly targets the default flake app" {
+  run timeout 15 env BASE_BRANCH=main DOGFOOD_RUNTIME=podman bash "$WORK/dogfood.sh"
+  [ "$status" -eq 0 ]
+  grep -qF -- 'run .# --' "$NIX_LOG"
+  ! grep -qF -- '.#dogfood-bwrap' "$NIX_LOG"
+}
+
+@test "DOGFOOD_RUNTIME=bwrap targets the dogfood-bwrap flake app" {
+  # Fake Linux regardless of the actual host OS: dogfood.sh:107 rejects
+  # DOGFOOD_RUNTIME=bwrap on a real macOS dev host, which would otherwise
+  # fail this test there (#2672 review finding).
+  _fake_uname Linux
+  run timeout 15 env BASE_BRANCH=main DOGFOOD_RUNTIME=bwrap bash "$WORK/dogfood.sh"
+  [ "$status" -eq 0 ]
+  grep -qF -- 'run .#dogfood-bwrap --' "$NIX_LOG"
+  ! grep -qF -- 'run .# --' "$NIX_LOG"
+}
+
+@test "DOGFOOD_RUNTIME=bogus fails fast before any nix run" {
+  run env BASE_BRANCH=main DOGFOOD_RUNTIME=bogus bash "$WORK/dogfood.sh"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"DOGFOOD_RUNTIME must be 'podman' or 'bwrap', got: bogus"* ]]
+  # Empty NIX_LOG (truncated fresh by setup_fakes) proves the script exited
+  # before its first `nix run` call, which sits well after this check.
+  [ ! -s "$NIX_LOG" ]
+}
+
+@test "DOGFOOD_RUNTIME=bwrap fails fast on a faked-Darwin host before any nix run" {
+  # bubblewrap is Linux-only; on macOS DOGFOOD_RUNTIME=bwrap must be rejected
+  # here with a clear message instead of sailing past this preflight and
+  # failing opaquely deep inside the launcher (#2672 review finding).
+  _fake_uname Darwin
+
+  run env BASE_BRANCH=main DOGFOOD_RUNTIME=bwrap bash "$WORK/dogfood.sh"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"DOGFOOD_RUNTIME=bwrap requires Linux"* ]]
+  # Empty NIX_LOG proves the script exited before its first `nix run` call,
+  # same proof pattern as the bogus-value test above.
+  [ ! -s "$NIX_LOG" ]
+}
+
 @test "dogfood aborts when podman machine RAM is below MEMORY_LIMIT" {
   export FAKE_PODMAN_MACHINE_MEMORY_MIB=2048
   run env BASE_BRANCH=main MEMORY_LIMIT=4g bash "$WORK/dogfood.sh"
@@ -236,6 +303,19 @@ EOF
   [[ "$output" == *"2048"* ]]
   [[ "$output" == *"4g"* ]]
   [[ "$output" == *"podman machine set --memory"* ]]
+}
+
+@test "dogfood skips the podman memory preflight when DOGFOOD_RUNTIME=bwrap" {
+  # Same RAM/MEMORY_LIMIT shape as the podman-machine-below-limit case above,
+  # which would abort under DOGFOOD_RUNTIME=podman (default): bwrap is
+  # daemonless and has no VM, so this preflight must not gate it (#2672).
+  # Fake Linux regardless of the actual host OS, same reason as the
+  # dogfood-bwrap-app test above.
+  _fake_uname Linux
+  export FAKE_PODMAN_MACHINE_MEMORY_MIB=2048
+  run env BASE_BRANCH=main MEMORY_LIMIT=4g DOGFOOD_RUNTIME=bwrap bash "$WORK/dogfood.sh"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"podman machine set --memory"* ]]
 }
 
 @test "dogfood proceeds when podman machine RAM meets MEMORY_LIMIT" {
