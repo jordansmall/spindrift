@@ -7,6 +7,14 @@ const (
 	NetworkModeOpen           = "open"
 	NetworkModeNoHostLoopback = "no-host-loopback"
 	NetworkModeNone           = "none"
+
+	// NetworkModeHost is a bwrap-only documented opt-out (issue #2666): it
+	// restores the pre-#2666 behavior of sharing the host's network
+	// namespace, which every other mode (and the zero value) no longer does
+	// by default. It has no OCI rendering — oci.go's networkArg() switch's
+	// `default: return ""` catches it the same as "open", which is fine and
+	// out of scope for this issue.
+	NetworkModeHost = "host"
 )
 
 // Config carries the subset of launcher config the runner package's
