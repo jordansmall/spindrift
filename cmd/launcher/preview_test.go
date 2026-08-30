@@ -94,12 +94,14 @@ func TestPreviewIssues_FullyLocal_OmitsBareRepoLine(t *testing.T) {
 // that carry blockers.
 func TestPrintPlan_AnnotatesBlockers(t *testing.T) {
 	plan := waves.Plan{
-		Issues: []waves.Issue{
-			{Number: "99", Title: "blocker issue"},
-			{Number: "15", Title: "dependent"},
+		Batch: waves.Batch{
+			Issues: []waves.Issue{
+				{Number: "99", Title: "blocker issue"},
+				{Number: "15", Title: "dependent"},
+			},
+			Edges:   map[string][]string{"15": {"99"}},
+			Sources: waves.Sources{"15": {"99": forge.DepSourceNative}},
 		},
-		Edges:   map[string][]string{"15": {"99"}},
-		Sources: waves.Sources{"15": {"99": forge.DepSourceNative}},
 	}
 
 	var buf bytes.Buffer

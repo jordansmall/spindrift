@@ -1454,20 +1454,20 @@ func queryOpenIssues(c config, it forge.IssueTracker) ([]issue, error) {
 	return issues, nil
 }
 
-// readinessFor resolves waveIssues/edges/sources/failed from a raw issues
-// batch via toWaveIssues + waves.NewReadiness — shared by discover, which
-// must call logDiscoveryPoll on the raw issues between its own
-// queryOpenIssues and this call (see discover's own comment on why that
-// announcement has to run before readinessFor's DepsOf fan-out), and
-// discoverReporting, which has no announce-timing constraint of its own and
-// so chains queryOpenIssues straight into this call.
-func readinessFor(it forge.IssueTracker, issues []issue) ([]waves.Issue, map[string][]string, waves.Sources, map[string]bool, error) {
+// readinessFor resolves a waves.Batch from a raw issues batch via
+// toWaveIssues + waves.NewReadiness — shared by discover, which must call
+// logDiscoveryPoll on the raw issues between its own queryOpenIssues and
+// this call (see discover's own comment on why that announcement has to run
+// before readinessFor's DepsOf fan-out), and discoverReporting, which has no
+// announce-timing constraint of its own and so chains queryOpenIssues
+// straight into this call.
+func readinessFor(it forge.IssueTracker, issues []issue) (waves.Batch, error) {
 	waveIssues := toWaveIssues(issues)
 	result, err := waves.NewReadiness(it, waveIssues)
 	if err != nil {
-		return nil, nil, nil, nil, err
+		return waves.Batch{}, err
 	}
-	return waveIssues, result.Edges, result.Sources, result.Failed, nil
+	return waves.Batch{Issues: waveIssues, Edges: result.Edges, Sources: result.Sources, Failed: result.Failed}, nil
 }
 
 // logDiscoveryPoll decides whether a continuous-dispatch refill poll should
@@ -1666,7 +1666,7 @@ func run(lc *launchContext) error {
 	if err != nil {
 		return err
 	}
-	in := waves.Input{Origin: origin, Issues: toWaveIssues(issues), Edges: readiness.Edges, Sources: readiness.Sources, Failed: readiness.Failed}
+	in := waves.Input{Origin: origin, Batch: waves.Batch{Issues: toWaveIssues(issues), Edges: readiness.Edges, Sources: readiness.Sources, Failed: readiness.Failed}}
 	cfg := wavesConfig(c)
 	cfg.SeedScopeOf = localloop.SeedScopeResolver(it, cf)
 	if err := waves.Dispatch(cfg, it, cf, pwd, f, s, in); err != nil {
@@ -1738,7 +1738,7 @@ func runContinuousDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, 
 	// every discover() call, on every refill, runs under RunContinuous's own
 	// mutex (see its doc comment), so this closure is never invoked
 	// concurrently with itself.
-	discover := func() ([]waves.Issue, map[string][]string, waves.Sources, map[string]bool, error) {
+	discover := func() (waves.Batch, error) {
 		wasFirst := firstQuery
 		issues, err := queryOpenIssues(c, it)
 		if firstQuery {
@@ -1757,13 +1757,9 @@ func runContinuousDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, 
 		// round-trip must never delay "==> querying open" behind it.
 		logDiscoveryPoll(c, issues, wasFirst, seenIssues)
 		if err != nil {
-			return nil, nil, nil, nil, err
+			return waves.Batch{}, err
 		}
-		waveIssues, edges, sources, failed, err := readinessFor(it, issues)
-		if err != nil {
-			return nil, nil, nil, nil, err
-		}
-		return waveIssues, edges, sources, failed, nil
+		return readinessFor(it, issues)
 	}
 	// discoverReporting is a pure, side-effect-free alternative to discover,
 	// wired into cfg.DiscoverReporting below and used only for the
@@ -1781,16 +1777,12 @@ func runContinuousDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, 
 	// announcing." Unlike discover, it has no announce-timing constraint of
 	// its own, so it goes straight from queryOpenIssues to readinessFor with
 	// no raw issues slice to thread through in between.
-	discoverReporting := func() ([]waves.Issue, map[string][]string, waves.Sources, map[string]bool, error) {
+	discoverReporting := func() (waves.Batch, error) {
 		issues, err := queryOpenIssues(c, it)
 		if err != nil {
-			return nil, nil, nil, nil, err
+			return waves.Batch{}, err
 		}
-		waveIssues, edges, sources, failed, err := readinessFor(it, issues)
-		if err != nil {
-			return nil, nil, nil, nil, err
-		}
-		return waveIssues, edges, sources, failed, nil
+		return readinessFor(it, issues)
 	}
 
 	guard := freshness.NewGuard(pwd)

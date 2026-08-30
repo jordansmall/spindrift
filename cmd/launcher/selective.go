@@ -52,7 +52,7 @@ func selectiveListDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, 
 		return nil
 	}
 
-	in := waves.Input{Origin: waves.OriginSelective, Issues: toWaveIssues(issues), Edges: readiness.Edges, Sources: readiness.Sources, Failed: readiness.Failed}
+	in := waves.Input{Origin: waves.OriginSelective, Batch: waves.Batch{Issues: toWaveIssues(issues), Edges: readiness.Edges, Sources: readiness.Sources, Failed: readiness.Failed}}
 	cfg := selectiveWavesConfig(c)
 	cfg.SeedScopeOf = localloop.SeedScopeResolver(it, cf)
 	return waves.Dispatch(cfg, it, cf, pwd, f, s, in)
