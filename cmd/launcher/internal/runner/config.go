@@ -42,8 +42,12 @@ type Config struct {
 	// bwrap agent closure paths (bwrap only).
 	AgentFiles      string
 	AgentEnv        string
+	PasswdFile      string
+	GroupFile       string
 	AgentFilesDrv   string // .drv path; realized by `launcher build`
 	AgentEnvDrv     string // .drv path; realized by `launcher build`
+	PasswdFileDrv   string // .drv path; realized by `launcher build`
+	GroupFileDrv    string // .drv path; realized by `launcher build`
 	BakedPrefetch   string
 	BwrapUnshareNet bool
 

@@ -92,23 +92,85 @@ func TestBwrapBuildEnsureReady_NixBuildFailureWrapsError(t *testing.T) {
 }
 
 // TestBwrapBuildEnsureReady_NixBuildSuccessReturnsNil verifies that
-// EnsureReady returns nil when both scripted nix build calls succeed.
+// EnsureReady returns nil when all four scripted nix build calls succeed
+// (agent-files, agent-env, passwd-file, group-file — issue #2663).
 func TestBwrapBuildEnsureReady_NixBuildSuccessReturnsNil(t *testing.T) {
-	script, dir := newFakeCLI(t, fakeCall{exit: 0}, fakeCall{exit: 0})
+	script, dir := newFakeCLI(t, fakeCall{exit: 0}, fakeCall{exit: 0}, fakeCall{exit: 0}, fakeCall{exit: 0})
 	orig := execCommand
 	t.Cleanup(func() { execCommand = orig })
 	execCommand = func(name string, args ...string) *exec.Cmd {
 		return exec.Command(script, args...)
 	}
 
-	a := &bwrapBuildAdapter{agentFilesDrv: "/fake/files.drv", agentEnvDrv: "/fake/env.drv"}
+	a := &bwrapBuildAdapter{
+		agentFilesDrv: "/fake/files.drv",
+		agentEnvDrv:   "/fake/env.drv",
+		passwdFileDrv: "/fake/passwd.drv",
+		groupFileDrv:  "/fake/group.drv",
+	}
 	err := a.EnsureReady()
 
 	if err != nil {
 		t.Errorf("EnsureReady() = %v, want nil", err)
 	}
-	if got := callCount(t, dir); got != 2 {
-		t.Errorf("callCount = %d, want 2 (agent-files + agent-env)", got)
+	if got := callCount(t, dir); got != 4 {
+		t.Errorf("callCount = %d, want 4 (agent-files + agent-env + passwd-file + group-file)", got)
+	}
+}
+
+// TestBwrapBuildEnsureReady_PasswdFileFailureWrapsErrorAndStops verifies that
+// a scripted `nix build` failure on the passwd-file realization (the third
+// closure) surfaces as a wrapped "nix build passwd-file" error and stops
+// before the group-file closure runs (issue #2663).
+func TestBwrapBuildEnsureReady_PasswdFileFailureWrapsErrorAndStops(t *testing.T) {
+	script, dir := newFakeCLI(t, fakeCall{exit: 0}, fakeCall{exit: 0}, fakeCall{exit: 1})
+	orig := execCommand
+	t.Cleanup(func() { execCommand = orig })
+	execCommand = func(name string, args ...string) *exec.Cmd {
+		return exec.Command(script, args...)
+	}
+
+	a := &bwrapBuildAdapter{
+		agentFilesDrv: "/fake/files.drv",
+		agentEnvDrv:   "/fake/env.drv",
+		passwdFileDrv: "/fake/passwd.drv",
+		groupFileDrv:  "/fake/group.drv",
+	}
+	err := a.EnsureReady()
+
+	if err == nil || !strings.Contains(err.Error(), "nix build passwd-file") {
+		t.Errorf("EnsureReady() = %v, want error containing %q", err, "nix build passwd-file")
+	}
+	if got := callCount(t, dir); got != 3 {
+		t.Errorf("callCount = %d, want 3 (must not proceed to group-file build after failure)", got)
+	}
+}
+
+// TestBwrapBuildEnsureReady_GroupFileFailureWrapsError verifies that a
+// scripted `nix build` failure on the group-file realization (the fourth and
+// final closure) surfaces as a wrapped "nix build group-file" error (issue
+// #2663).
+func TestBwrapBuildEnsureReady_GroupFileFailureWrapsError(t *testing.T) {
+	script, dir := newFakeCLI(t, fakeCall{exit: 0}, fakeCall{exit: 0}, fakeCall{exit: 0}, fakeCall{exit: 1})
+	orig := execCommand
+	t.Cleanup(func() { execCommand = orig })
+	execCommand = func(name string, args ...string) *exec.Cmd {
+		return exec.Command(script, args...)
+	}
+
+	a := &bwrapBuildAdapter{
+		agentFilesDrv: "/fake/files.drv",
+		agentEnvDrv:   "/fake/env.drv",
+		passwdFileDrv: "/fake/passwd.drv",
+		groupFileDrv:  "/fake/group.drv",
+	}
+	err := a.EnsureReady()
+
+	if err == nil || !strings.Contains(err.Error(), "nix build group-file") {
+		t.Errorf("EnsureReady() = %v, want error containing %q", err, "nix build group-file")
+	}
+	if got := callCount(t, dir); got != 4 {
+		t.Errorf("callCount = %d, want 4", got)
 	}
 }
 
@@ -341,7 +403,7 @@ func TestBwrapRun_OpencodeAuthContentOffArgvButInProcessEnv(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	for _, arg := range a.buildArgs("/tmp/fake-etc", box) {
+	for _, arg := range a.buildArgs(box) {
 		if strings.Contains(arg, sentinel) {
 			t.Errorf("OPENCODE_AUTH_CONTENT sentinel found in bwrap argv: %v", arg)
 		}

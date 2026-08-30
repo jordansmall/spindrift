@@ -23,7 +23,7 @@ func TestBwrapArgs_NoSecretOnArgv(t *testing.T) {
 		},
 	}
 
-	args := a.buildArgs("/tmp/fake-etc", box)
+	args := a.buildArgs(box)
 
 	secrets := []string{"gh-secret-value", "claude-secret-value", "anthropic-secret-value"}
 	for _, arg := range args {
@@ -43,7 +43,7 @@ func TestBwrapArgs_NoClearEnv(t *testing.T) {
 		agentEnv:      "/fake/env",
 		bakedPrefetch: "echo ok",
 	}
-	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{"GH_TOKEN": "s"}})
+	args := a.buildArgs(Box{Env: map[string]string{"GH_TOKEN": "s"}})
 	for _, arg := range args {
 		if arg == "--clearenv" {
 			t.Errorf("--clearenv found in bwrap argv; secrets would not reach sandbox")
@@ -64,7 +64,7 @@ func TestBwrapArgs_SkillsDirMounted(t *testing.T) {
 		bakedPrefetch: "echo ok",
 		skillsDir:     dir,
 	}
-	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}})
+	args := a.buildArgs(Box{Env: map[string]string{}})
 
 	argStr := strings.Join(args, " ")
 	want := "--ro-bind " + dir + " /operator-skills"
@@ -83,7 +83,7 @@ func TestBwrapArgs_RegistryProxySocketMounted(t *testing.T) {
 		agentEnv:      "/fake/env",
 		bakedPrefetch: "echo ok",
 	}
-	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}, RegistryProxySocketPath: sock})
+	args := a.buildArgs(Box{Env: map[string]string{}, RegistryProxySocketPath: sock})
 
 	argStr := strings.Join(args, " ")
 	want := "--bind " + sock + " /registry-proxy.sock"
@@ -107,7 +107,7 @@ func TestBwrapArgs_HomeAgentStagingMounted(t *testing.T) {
 		agentEnv:      "/fake/env",
 		bakedPrefetch: "echo ok",
 	}
-	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}})
+	args := a.buildArgs(Box{Env: map[string]string{}})
 
 	found := false
 	for i := 0; i+2 < len(args); i++ {
@@ -118,6 +118,35 @@ func TestBwrapArgs_HomeAgentStagingMounted(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("expected --ro-bind /fake/agent/home/agent /home-agent-staged in args: %v", args)
+	}
+}
+
+// TestBwrapArgs_AccountFilesBindStorePaths verifies that buildArgs binds
+// /etc/passwd and /etc/group from the nix-sourced store paths carried on the
+// adapter (issue #2663), rather than a runner-written temp-dir copy — the
+// fake paths below deliberately look like real nix store paths.
+func TestBwrapArgs_AccountFilesBindStorePaths(t *testing.T) {
+	a := &bwrapAdapter{
+		agentFiles: "/fake/agent",
+		agentEnv:   "/fake/env",
+		passwdFile: "/nix/store/abc123-passwd/passwd",
+		groupFile:  "/nix/store/def456-group/group",
+	}
+	args := a.buildArgs(Box{Env: map[string]string{}})
+
+	wantTriple := func(a0, a1, a2 string) bool {
+		for i := 0; i+2 < len(args); i++ {
+			if args[i] == a0 && args[i+1] == a1 && args[i+2] == a2 {
+				return true
+			}
+		}
+		return false
+	}
+	if !wantTriple("--ro-bind", "/nix/store/abc123-passwd/passwd", "/etc/passwd") {
+		t.Errorf("expected --ro-bind /nix/store/abc123-passwd/passwd /etc/passwd in args: %v", args)
+	}
+	if !wantTriple("--ro-bind", "/nix/store/def456-group/group", "/etc/group") {
+		t.Errorf("expected --ro-bind /nix/store/def456-group/group /etc/group in args: %v", args)
 	}
 }
 
@@ -147,7 +176,7 @@ func TestBwrapArgs_NetworkModeNoneUnsharesNet(t *testing.T) {
 		bakedPrefetch: "echo ok",
 		networkMode:   "none",
 	}
-	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}})
+	args := a.buildArgs(Box{Env: map[string]string{}})
 
 	if !containsArg(args, "--unshare-net") {
 		t.Errorf("--unshare-net missing for networkMode=none; args: %v", args)
@@ -170,7 +199,7 @@ func TestBwrapArgs_NetworkModeOpenNoUnshareNet(t *testing.T) {
 		bakedPrefetch: "echo ok",
 		networkMode:   "open",
 	}
-	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}})
+	args := a.buildArgs(Box{Env: map[string]string{}})
 
 	if containsArg(args, "--unshare-net") {
 		t.Errorf("--unshare-net must be absent for networkMode=open; args: %v", args)
@@ -200,7 +229,7 @@ func TestBwrapArgs_NetworkModeNoHostLoopbackFailsOpen(t *testing.T) {
 		bakedPrefetch: "echo ok",
 		networkMode:   "no-host-loopback",
 	}
-	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}})
+	args := a.buildArgs(Box{Env: map[string]string{}})
 
 	if containsArg(args, "--unshare-net") {
 		t.Errorf("fail-open characterization broke: --unshare-net present for networkMode=no-host-loopback; args: %v", args)
@@ -229,7 +258,7 @@ func TestBwrapArgs_IssuesDirMounted(t *testing.T) {
 		hostMediatedIssueTracker: true,
 		localIssuesDir:           dir,
 	}
-	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}})
+	args := a.buildArgs(Box{Env: map[string]string{}})
 
 	argStr := strings.Join(args, " ")
 	want := "--ro-bind " + dir + " /issues"
@@ -252,7 +281,7 @@ func TestBwrapArgs_IssuesDirUnset_NoMount(t *testing.T) {
 		hostMediatedIssueTracker: false,
 		localIssuesDir:           dir,
 	}
-	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}})
+	args := a.buildArgs(Box{Env: map[string]string{}})
 
 	argStr := strings.Join(args, " ")
 	if strings.Contains(argStr, "/issues") {
@@ -271,7 +300,7 @@ func TestBwrapArgs_DriverCacheDirMountedWritable(t *testing.T) {
 		bakedPrefetch:         "echo ok",
 		driverSessionCacheDir: "/home/agent/.claude/projects",
 	}
-	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}, DriverCacheDir: dir})
+	args := a.buildArgs(Box{Env: map[string]string{}, DriverCacheDir: dir})
 
 	argStr := strings.Join(args, " ")
 	want := "--bind " + dir + " /home/agent/.claude/projects"
@@ -294,7 +323,7 @@ func TestBwrapArgs_DriverCacheDirMounted_HardeningPreserved(t *testing.T) {
 		bakedPrefetch:         "echo ok",
 		driverSessionCacheDir: "/home/agent/.claude/projects",
 	}
-	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}, DriverCacheDir: dir})
+	args := a.buildArgs(Box{Env: map[string]string{}, DriverCacheDir: dir})
 
 	for _, flag := range []string{"--unshare-user", "--unshare-pid", "--unshare-ipc", "--unshare-uts"} {
 		if !containsArg(args, flag) {
@@ -315,7 +344,7 @@ func TestBwrapArgs_DriverCacheDir_DotClaudeParentCreated(t *testing.T) {
 		bakedPrefetch:         "echo ok",
 		driverSessionCacheDir: "/home/agent/.claude/projects",
 	}
-	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}, DriverCacheDir: dir})
+	args := a.buildArgs(Box{Env: map[string]string{}, DriverCacheDir: dir})
 
 	dirIdx := -1
 	bindIdx := -1
@@ -351,7 +380,7 @@ func TestBwrapArgs_DriverCacheMountTarget_FromDriverDeclaration(t *testing.T) {
 		bakedPrefetch:         "echo ok",
 		driverSessionCacheDir: "/home/agent/custom-driver/state",
 	}
-	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}, DriverCacheDir: dir})
+	args := a.buildArgs(Box{Env: map[string]string{}, DriverCacheDir: dir})
 
 	argStr := strings.Join(args, " ")
 	wantBind := "--bind " + dir + " /home/agent/custom-driver/state"
@@ -375,7 +404,7 @@ func TestBwrapArgs_DriverSessionCacheDirUndeclared_NoMount(t *testing.T) {
 		agentEnv:      "/fake/env",
 		bakedPrefetch: "echo ok",
 	}
-	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}, DriverCacheDir: dir})
+	args := a.buildArgs(Box{Env: map[string]string{}, DriverCacheDir: dir})
 	for _, arg := range args {
 		if arg == dir {
 			t.Errorf("unexpected driver cache bind in args when Driver declares no session-cache dir: %v", args)
@@ -392,7 +421,7 @@ func TestBwrapArgs_DriverCacheDirUnset_NoMount(t *testing.T) {
 		bakedPrefetch:         "echo ok",
 		driverSessionCacheDir: "/home/agent/.claude/projects",
 	}
-	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}})
+	args := a.buildArgs(Box{Env: map[string]string{}})
 	argStr := strings.Join(args, " ")
 	if strings.Contains(argStr, "/home/agent/.claude/projects") {
 		t.Errorf("unexpected driver cache bind in args when DriverCacheDir is empty: %v", args)
@@ -408,7 +437,7 @@ func TestBwrapArgs_SkillsDirUnset_NoMount(t *testing.T) {
 		bakedPrefetch: "echo ok",
 		skillsDir:     "",
 	}
-	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}})
+	args := a.buildArgs(Box{Env: map[string]string{}})
 	argStr := strings.Join(args, " ")
 	if strings.Contains(argStr, ".claude/skills") {
 		t.Errorf("unexpected skills bind in args when skillsDir is empty: %v", args)
@@ -441,7 +470,7 @@ func TestBwrapArgs_NonSecretOnArgv(t *testing.T) {
 		},
 	}
 
-	args := a.buildArgs("/tmp/fake-etc", box)
+	args := a.buildArgs(box)
 
 	argStr := strings.Join(args, " ")
 	for _, name := range []string{"REPO_SLUG", "ISSUE_NUMBER"} {

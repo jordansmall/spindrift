@@ -92,6 +92,8 @@ func TestNewBwrap_UsesConfigFields(t *testing.T) {
 	cfg := Config{
 		AgentFiles:            "/agent-files",
 		AgentEnv:              "/agent-env",
+		PasswdFile:            "/nix/store/abc-passwd/passwd",
+		GroupFile:             "/nix/store/def-group/group",
 		BakedPrefetch:         "prefetch-snippet",
 		PromptDir:             "/prompts",
 		SkillsDir:             "/skills",
@@ -107,6 +109,8 @@ func TestNewBwrap_UsesConfigFields(t *testing.T) {
 	want := bwrapAdapter{
 		agentFiles:            cfg.AgentFiles,
 		agentEnv:              cfg.AgentEnv,
+		passwdFile:            cfg.PasswdFile,
+		groupFile:             cfg.GroupFile,
 		bakedPrefetch:         cfg.BakedPrefetch,
 		promptDir:             cfg.PromptDir,
 		skillsDir:             cfg.SkillsDir,
@@ -127,13 +131,23 @@ func TestNewBwrap_UsesConfigFields(t *testing.T) {
 // TestNewBwrapBuild_UsesConfigFields verifies NewBwrapBuild builds its
 // adapter fields from Config instead of a positional-argument list.
 func TestNewBwrapBuild_UsesConfigFields(t *testing.T) {
-	cfg := Config{AgentFilesDrv: "/files.drv", AgentEnvDrv: "/env.drv"}
+	cfg := Config{
+		AgentFilesDrv: "/files.drv",
+		AgentEnvDrv:   "/env.drv",
+		PasswdFileDrv: "/passwd.drv",
+		GroupFileDrv:  "/group.drv",
+	}
 	r := NewBwrapBuild(cfg)
 	a, ok := r.(*bwrapBuildAdapter)
 	if !ok {
 		t.Fatalf("NewBwrapBuild did not return *bwrapBuildAdapter")
 	}
-	want := bwrapBuildAdapter{agentFilesDrv: cfg.AgentFilesDrv, agentEnvDrv: cfg.AgentEnvDrv}
+	want := bwrapBuildAdapter{
+		agentFilesDrv: cfg.AgentFilesDrv,
+		agentEnvDrv:   cfg.AgentEnvDrv,
+		passwdFileDrv: cfg.PasswdFileDrv,
+		groupFileDrv:  cfg.GroupFileDrv,
+	}
 	if *a != want {
 		t.Errorf("NewBwrapBuild(cfg) fields = %+v, want %+v", *a, want)
 	}

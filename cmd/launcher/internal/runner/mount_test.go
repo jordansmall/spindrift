@@ -397,7 +397,7 @@ func TestMountSpecs_RenderedIdenticallyAcrossBackends(t *testing.T) {
 	box := Box{Name: "agent-issue-1", Env: map[string]string{}, DriverCacheDir: cacheDir, RegistryProxySocketPath: proxySocket}
 
 	ociArgs := strings.Join(oci.buildRunArgs(box), " ")
-	bwrapArgs := strings.Join(bwrap.buildArgs("/tmp/fake-etc", box), " ")
+	bwrapArgs := strings.Join(bwrap.buildArgs(box), " ")
 
 	for _, mount := range []struct{ source, target string }{
 		{promptDir, "/agent/prompts"},
@@ -440,7 +440,7 @@ func TestLocalCodeForgeMounts_RenderedIdenticallyAcrossBackends(t *testing.T) {
 
 	ociArgSlice := oci.buildRunArgs(box)
 	ociArgs := strings.Join(ociArgSlice, " ")
-	bwrapArgs := strings.Join(bwrap.buildArgs("/tmp/fake-etc", box), " ")
+	bwrapArgs := strings.Join(bwrap.buildArgs(box), " ")
 
 	if !slices.Contains(ociArgSlice, repoDir+":/repo:ro") {
 		t.Errorf("OCI missing read-only /repo mount in args: %s", ociArgs)
@@ -482,7 +482,7 @@ func TestGithubReadOnlyOutboxMount_RenderedIdenticallyAcrossBackends(t *testing.
 
 	ociArgSlice := oci.buildRunArgs(box)
 	ociArgs := strings.Join(ociArgSlice, " ")
-	bwrapArgs := strings.Join(bwrap.buildArgs("/tmp/fake-etc", box), " ")
+	bwrapArgs := strings.Join(bwrap.buildArgs(box), " ")
 
 	if !slices.Contains(ociArgSlice, outboxDir+":/outbox") {
 		t.Errorf("OCI missing writable /outbox mount in args: %s", ociArgs)
@@ -517,7 +517,7 @@ func TestLocalCodeForgeMounts_AbsentOnNonLocalBackends(t *testing.T) {
 	box := Box{Name: "agent-issue-1", Env: map[string]string{}, OutboxDir: outboxDir}
 
 	ociArgSlice := oci.buildRunArgs(box)
-	bwrapArgs := strings.Join(bwrap.buildArgs("/tmp/fake-etc", box), " ")
+	bwrapArgs := strings.Join(bwrap.buildArgs(box), " ")
 
 	if slices.Contains(ociArgSlice, repoDir+":/repo:ro") || slices.Contains(ociArgSlice, outboxDir+":/outbox") {
 		t.Errorf("OCI must not mount /repo or /outbox with CodeForge unset: %s", strings.Join(ociArgSlice, " "))

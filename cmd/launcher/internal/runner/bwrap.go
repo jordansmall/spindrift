@@ -48,6 +48,8 @@ var bwrapSecrets = map[string]bool{
 type bwrapAdapter struct {
 	agentFiles    string // baked nix store path for agent files (/agent/…)
 	agentEnv      string // baked nix store path for the agent env (PATH, SSL, …)
+	passwdFile    string // baked nix store path for /etc/passwd
+	groupFile     string // baked nix store path for /etc/group
 	bakedPrefetch string // baked prefetch snippet fed to the entrypoint
 	promptDir     string // optional host path to bind-mount over /agent/prompts
 	skillsDir     string // optional host path to bind-mount over operatorSkillsDir (issue #2489)
@@ -88,6 +90,8 @@ func NewBwrap(cfg Config) Runner {
 	return &bwrapAdapter{
 		agentFiles:               cfg.AgentFiles,
 		agentEnv:                 cfg.AgentEnv,
+		passwdFile:               cfg.PasswdFile,
+		groupFile:                cfg.GroupFile,
 		bakedPrefetch:            cfg.BakedPrefetch,
 		promptDir:                cfg.PromptDir,
 		skillsDir:                cfg.SkillsDir,
@@ -128,10 +132,11 @@ func (a *bwrapAdapter) mountSpecs(box Box) []MountSpec {
 }
 
 // buildArgs constructs the bwrap command-line arguments for the given box.
-// etcDir is the temp directory holding the synthesised /etc/passwd and /etc/group.
+// The /etc/passwd and /etc/group binds source a.passwdFile/a.groupFile, baked
+// nix store paths rather than a runner-written temp-dir copy (issue #2663).
 // Secret env vars (GH_TOKEN, auth tokens) are intentionally excluded from argv;
 // they reach the sandbox via inherited process environment (no --clearenv).
-func (a *bwrapAdapter) buildArgs(etcDir string, box Box) []string {
+func (a *bwrapAdapter) buildArgs(box Box) []string {
 	// isolateNet is the effective "cut off the host netns" decision: the raw
 	// BWRAP_UNSHARE_NET escape hatch, or NETWORK_MODE=none (issue #2562).
 	// Same shared invariant as oci.go's networkArg/config.go's Config doc
@@ -164,8 +169,8 @@ func (a *bwrapAdapter) buildArgs(etcDir string, box Box) []string {
 		"--proc", "/proc",
 		"--dev", "/dev",
 		"--dir", "/etc",
-		"--ro-bind", filepath.Join(etcDir, "passwd"), "/etc/passwd",
-		"--ro-bind", filepath.Join(etcDir, "group"), "/etc/group",
+		"--ro-bind", a.passwdFile, "/etc/passwd",
+		"--ro-bind", a.groupFile, "/etc/group",
 	}
 	if !isolateNet {
 		if err := statResolvConf(); err == nil {
@@ -280,21 +285,6 @@ func resolvedRunEnv(boxEnv map[string]string) []string {
 
 // Run launches a single issue into a bubblewrap sandbox.
 func (a *bwrapAdapter) Run(box Box) error {
-	etcDir, err := os.MkdirTemp("", "spindrift-etc-*")
-	if err != nil {
-		return fmt.Errorf("mktemp: %w", err)
-	}
-	defer os.RemoveAll(etcDir)
-
-	passwd := "root:x:0:0:root:/root:/bin/bash\nagent:x:1000:1000:agent:/home/agent:/bin/bash\n"
-	group := "root:x:0:\nagent:x:1000:\n"
-	if err := os.WriteFile(filepath.Join(etcDir, "passwd"), []byte(passwd), 0o644); err != nil {
-		return err
-	}
-	if err := os.WriteFile(filepath.Join(etcDir, "group"), []byte(group), 0o644); err != nil {
-		return err
-	}
-
 	out := box.Output
 	if out == nil {
 		out = io.Discard
@@ -304,7 +294,7 @@ func (a *bwrapAdapter) Run(box Box) error {
 	// subset of box.Env, not the launcher's own ambient environment. Without
 	// --clearenv, the sandbox inherits it. Secrets (GH_TOKEN, auth tokens)
 	// are therefore available inside the sandbox without appearing on argv.
-	cmd := execCommand("bwrap", a.buildArgs(etcDir, box)...)
+	cmd := execCommand("bwrap", a.buildArgs(box)...)
 	cmd.Env = resolvedRunEnv(box.Env)
 	cmd.Stdout = out
 	cmd.Stderr = out
@@ -376,6 +366,8 @@ func (a *bwrapAdapter) ListRunning() ([]string, error) { return nil, nil }
 type bwrapBuildAdapter struct {
 	agentFilesDrv string // .drv path for agentFiles
 	agentEnvDrv   string // .drv path for agentEnv
+	passwdFileDrv string // .drv path for passwdFile
+	groupFileDrv  string // .drv path for groupFile
 }
 
 // NewBwrapBuild constructs a bwrap adapter for the build command from cfg.
@@ -384,6 +376,8 @@ func NewBwrapBuild(cfg Config) Runner {
 	return &bwrapBuildAdapter{
 		agentFilesDrv: cfg.AgentFilesDrv,
 		agentEnvDrv:   cfg.AgentEnvDrv,
+		passwdFileDrv: cfg.PasswdFileDrv,
+		groupFileDrv:  cfg.GroupFileDrv,
 	}
 }
 
@@ -392,21 +386,34 @@ func NewBwrapBuild(cfg Config) Runner {
 func (a *bwrapBuildAdapter) EnsureReady() error {
 	fmt.Println("==> bwrap runner: realizing agent store closures (no image build/load)")
 
-	nixFiles := execCommand("nix", "build", a.agentFilesDrv+"^*", "--no-link")
-	nixFiles.Stdout = os.Stdout
-	nixFiles.Stderr = os.Stderr
-	if err := nixFiles.Run(); err != nil {
-		return fmt.Errorf("nix build agent-files: %w", err)
+	closures := []struct {
+		label string
+		drv   string
+	}{
+		{"agent-files", a.agentFilesDrv},
+		{"agent-env", a.agentEnvDrv},
+		{"passwd-file", a.passwdFileDrv},
+		{"group-file", a.groupFileDrv},
 	}
-
-	nixEnv := execCommand("nix", "build", a.agentEnvDrv+"^*", "--no-link")
-	nixEnv.Stdout = os.Stdout
-	nixEnv.Stderr = os.Stderr
-	if err := nixEnv.Run(); err != nil {
-		return fmt.Errorf("nix build agent-env: %w", err)
+	for _, c := range closures {
+		if err := a.realize(c.label, c.drv); err != nil {
+			return err
+		}
 	}
 
 	fmt.Println("==> done: agent store closures realized")
+	return nil
+}
+
+// realize runs `nix build <drv>^* --no-link` for a single closure, wrapping
+// any failure with label so the caller can tell which closure failed.
+func (a *bwrapBuildAdapter) realize(label, drv string) error {
+	cmd := execCommand("nix", "build", drv+"^*", "--no-link")
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("nix build %s: %w", label, err)
+	}
 	return nil
 }
 
