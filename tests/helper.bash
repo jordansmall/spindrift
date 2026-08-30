@@ -270,6 +270,12 @@ setup_fakes() {
   cp "$FAKES_DIR/runtime" "$FAKE_BIN/podman"
   cp "$FAKES_DIR/runtime" "$FAKE_BIN/docker"
   cp "$FAKES_DIR/runtime" "$FAKE_BIN/bwrap"
+  # checkBwrapPastaGate (issue #2666) probes the launcher's own PATH for
+  # pasta before bwrap ever runs. bwrap.go's execTarget also makes this fake
+  # the real top-level exec target by default (any NetworkMode but the
+  # "host" opt-out), so it must exec through to the fake bwrap below -- see
+  # tests/fakes/pasta.
+  cp "$FAKES_DIR/pasta" "$FAKE_BIN/pasta"
   : "${DRIVER:=claude}"
   cp "$FAKES_DIR/gh" "$FAKES_DIR/$DRIVER" "$FAKES_DIR/nix" \
      "$FAKES_DIR/driver-exec" "$FAKES_DIR/orchestrator" "$FAKE_BIN/"
@@ -284,6 +290,10 @@ setup_fakes() {
   export PODMAN_LOG="$BATS_TEST_TMPDIR/podman.log"
   export DOCKER_LOG="$BATS_TEST_TMPDIR/docker.log"
   export BWRAP_LOG="$BATS_TEST_TMPDIR/bwrap.log"
+  # tests/fakes/pasta (issue #2666) execs through to the fake bwrap after
+  # logging its own invocation here -- independent of $BWRAP_LOG, which only
+  # ever sees what pasta's trailing argv hands to bwrap.
+  export PASTA_LOG="$BATS_TEST_TMPDIR/pasta.log"
   export GH_LOG="$BATS_TEST_TMPDIR/gh.log"
   export GIT_LOG="$BATS_TEST_TMPDIR/git.log"
   export DRIVER_LOG="$BATS_TEST_TMPDIR/$DRIVER.log"
@@ -300,6 +310,7 @@ setup_fakes() {
   : >"$PODMAN_LOG"
   : >"$DOCKER_LOG"
   : >"$BWRAP_LOG"
+  : >"$PASTA_LOG"
   : >"$GH_LOG"
   : >"$DRIVER_LOG"
   : >"$NIX_LOG"

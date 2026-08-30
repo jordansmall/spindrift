@@ -1208,15 +1208,18 @@ func checkReadOnlyCapabilityGate(c config) error {
 // runtime-overridable:
 //
 //  1. NETWORK_MODE=no-host-loopback's runner requirement (issue #2562):
-//     bwrap can only unshare its network namespace all-or-nothing
-//     (--unshare-net), with no partial host-loopback-only isolation, so
-//     no-host-loopback has no bwrap rendering. An override can set
-//     NETWORK_MODE=no-host-loopback at runtime on an image nix validated
-//     for a different runner, a combination the eval assert never saw. The
-//     bwrap runner adapter itself only special-cases networkMode="none" and
-//     otherwise fails open (shares the full host network namespace) rather
-//     than reject no-host-loopback, so this gate is what actually prevents
-//     the combination from reaching it.
+//     no-host-loopback has no bwrap rendering distinct from the
+//     isolated-by-default "open" (issue #2666's pasta-backed netns
+//     isolation applies to every mode except the "host" opt-out, so
+//     no-host-loopback and open would render byte-identical on bwrap). An
+//     override can set NETWORK_MODE=no-host-loopback at runtime on an image
+//     nix validated for a different runner, a combination the eval assert
+//     never saw. The bwrap runner adapter itself only special-cases
+//     networkMode="host" (shares the full host network namespace, the
+//     documented opt-out) and "none" (fully offline) and otherwise isolates
+//     with pasta regardless of no-host-loopback vs. open, so this gate is
+//     what actually prevents a Consumer from being misled into thinking
+//     no-host-loopback buys them something open doesn't already give them.
 //
 //  2. NETWORK_MODE / raw-knob coherence (review finding on issue #2562):
 //     mkHarness rejects baking a non-default networkMode alongside a raw
@@ -1248,7 +1251,7 @@ func checkReadOnlyCapabilityGate(c config) error {
 // scope here and left to raw-wins in networkArg().
 func checkNetworkModeRuntimeGate(c config) error {
 	if c.networkMode == runner.NetworkModeNoHostLoopback && c.runnerKind == freshness.KindBwrap {
-		return fmt.Errorf("NETWORK_MODE=no-host-loopback is unsupported on RUNNER_KIND=bwrap -- bwrap can only unshare its network namespace all-or-nothing (--unshare-net), with no partial host-loopback isolation; use RUNNER_KIND=oci instead, or NETWORK_MODE=none/open on bwrap")
+		return fmt.Errorf("NETWORK_MODE=no-host-loopback is unsupported on RUNNER_KIND=bwrap -- it has no rendering distinct from the isolated-by-default NETWORK_MODE=open; use NETWORK_MODE=open instead, or RUNNER_KIND=oci for the docker/nerdctl inert-but-correct render")
 	}
 	if c.networkMode != runner.NetworkModeOpen && c.networkMode != "" && (c.podmanNetwork != "" || c.bwrapUnshareNet) {
 		var rawKnobs []string
@@ -1261,6 +1264,26 @@ func checkNetworkModeRuntimeGate(c config) error {
 		return fmt.Errorf("NETWORK_MODE=%s is set alongside raw network knob(s) %s -- there is no precedence rule between a runtime-overridden NETWORK_MODE and a raw knob; set only one", c.networkMode, strings.Join(rawKnobs, ", "))
 	}
 	return nil
+}
+
+// checkBwrapPastaGate refuses to launch rather than silently sharing the
+// host network namespace when the bwrap runner needs pasta (own netns with
+// working egress, issue #2666) and pasta is not on PATH. NetworkMode="host"
+// (the documented opt-out) and "none" (fully offline, bare --unshare-net, no
+// helper) never invoke pasta, so this gate is a no-op for them -- same as
+// bwrap.go's buildArgs isolateNet/pasta-wrap condition. A raw
+// BwrapUnshareNet knob paired with NetworkMode="host" would also invoke
+// pasta in bwrap.go's isolateNet computation, but checkNetworkModeRuntimeGate
+// (above) already rejects that combination before this gate ever runs, so it
+// is not a gap here.
+func checkBwrapPastaGate(c config) error {
+	if c.runnerKind != freshness.KindBwrap {
+		return nil
+	}
+	if c.networkMode == runner.NetworkModeHost || c.networkMode == runner.NetworkModeNone {
+		return nil
+	}
+	return runner.ValidatePasta()
 }
 
 // Sentinel error translated to a specific exit code so callers like

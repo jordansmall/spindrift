@@ -139,6 +139,9 @@ func bootstrap(ensureReady bool, kind string, selfContained bool) (lc *launchCon
 	if err := checkNetworkModeRuntimeGate(c); err != nil {
 		return nil, err
 	}
+	if err := checkBwrapPastaGate(c); err != nil {
+		return nil, err
+	}
 	if _, err := checkReadOnlyTokenGate(c, ghTokenIntrospector, os.Stdout); err != nil {
 		return nil, err
 	}
