@@ -1,17 +1,18 @@
 #!/usr/bin/env bash
 # Dogfood loop: spindrift building spindrift.
 #
-# The box's behaviour — entrypoint, toolchain, and prompt — is baked into the OCI
-# image at `nix run .# -- build` time (the merge gate itself lives in the launcher).
-# When an agent merges a fix to the base branch, later issues stay blind to it
-# until the image is rebuilt from an updated tree. This loop closes both
-# staleness sources:
+# The box's behaviour — entrypoint, toolchain, and prompt — is baked into the
+# OCI image (DOGFOOD_RUNTIME=podman, default) or the bwrap-realized closures
+# (DOGFOOD_RUNTIME=bwrap, #2672) at `nix run $NIX_APP -- build` time (the
+# merge gate itself lives in the launcher). When an agent merges a fix to the
+# base branch, later issues stay blind to it until the box is rebuilt from an
+# updated tree. This loop closes both staleness sources:
 #
 #   1. `git checkout $BASE_BRANCH && git pull --ff-only`
 #                              — reset to the base branch and pull the just-merged
 #                                change into the local tree, which is what
-#                                `nix run .# -- build` reads from ($PWD).
-#   2. `nix run .# -- build` — re-bake the image from that updated tree.
+#                                `nix run $NIX_APP -- build` reads from ($PWD).
+#   2. `nix run $NIX_APP -- build` — re-bake the box from that updated tree.
 #
 # Each invocation runs CONTINUOUS_DISPATCH's slot-refill loop (#527): as each
 # Box finishes, the launcher re-discovers the queue and refills the freed slot
@@ -84,6 +85,30 @@ case "$DOGFOOD_KIND" in
     ;;
 esac
 
+# Selects which flake app the loop drives: "podman" (default, apps.default) or
+# "bwrap" (apps.dogfood-bwrap, #2672). NIX_APP is resolved once here so every
+# `nix run` call site below shares one source of truth instead of each
+# hardcoding a target string.
+DOGFOOD_RUNTIME="${DOGFOOD_RUNTIME:-podman}"
+case "$DOGFOOD_RUNTIME" in
+  podman) NIX_APP=".#" ;;
+  bwrap) NIX_APP=".#dogfood-bwrap" ;;
+  *)
+    echo "!! DOGFOOD_RUNTIME must be 'podman' or 'bwrap', got: $DOGFOOD_RUNTIME" >&2
+    exit 1
+    ;;
+esac
+
+# bwrap is Linux-only (bubblewrap has no macOS build) -- reject it here with
+# a clear message instead of sailing past this preflight and only failing
+# deep inside the launcher with an opaque error (#2672 review finding).
+# podman needs no such gate: it already runs on macOS via podman machine,
+# which is what check_podman_machine_memory below exists to guard.
+if [ "$DOGFOOD_RUNTIME" = "bwrap" ] && [ "$(uname -s)" != "Linux" ]; then
+  echo "!! DOGFOOD_RUNTIME=bwrap requires Linux (bubblewrap is not available on macOS)." >&2
+  exit 1
+fi
+
 if [ -n "$(git status --porcelain)" ]; then
   echo "!! working tree is dirty — commit/stash before dogfooding (build reads \$PWD)." >&2
   exit 1
@@ -143,7 +168,11 @@ check_podman_machine_memory() {
     exit 1
   fi
 }
-check_podman_machine_memory
+# Podman-specific (VM RAM under a podman machine); bwrap is daemonless and
+# has no VM, so this preflight cannot apply and must not gate DOGFOOD_RUNTIME=bwrap.
+if [ "$DOGFOOD_RUNTIME" = "podman" ]; then
+  check_podman_machine_memory
+fi
 
 # Graceful stop: signal this PID with USR1 or TERM (the devShell `dogfood-stop`
 # alias does this) to exit after the current wave instead of aborting it. Bash
@@ -169,13 +198,13 @@ echo "==> dogfood: git checkout $BASE_BRANCH && git pull --ff-only"
 git checkout "$BASE_BRANCH"
 git pull --ff-only
 
-echo "==> dogfood: nix run .# -- build"
-nix run .# -- build
+echo "==> dogfood: nix run $NIX_APP -- build"
+nix run "$NIX_APP" -- build
 
 while :; do
-  echo "==> dogfood: nix run .# -- $DOGFOOD_KIND --max-jobs $MAX_JOBS --continuous-dispatch=$CONTINUOUS_DISPATCH"
+  echo "==> dogfood: nix run $NIX_APP -- $DOGFOOD_KIND --max-jobs $MAX_JOBS --continuous-dispatch=$CONTINUOUS_DISPATCH"
   nix_exit=0
-  nix run .# -- "$DOGFOOD_KIND" --max-jobs "$MAX_JOBS" --continuous-dispatch="$CONTINUOUS_DISPATCH" || nix_exit=$?
+  nix run "$NIX_APP" -- "$DOGFOOD_KIND" --max-jobs "$MAX_JOBS" --continuous-dispatch="$CONTINUOUS_DISPATCH" || nix_exit=$?
 
   if [ "$nix_exit" -eq 2 ]; then
     echo "==> dogfood: queue empty — done after $iteration iteration(s)."
@@ -199,8 +228,8 @@ while :; do
     fi
 
     echo "==> dogfood: pull advanced HEAD past a prior none-dispatchable exit — rebuilding and retrying once"
-    echo "==> dogfood: nix run .# -- build"
-    nix run .# -- build
+    echo "==> dogfood: nix run $NIX_APP -- build"
+    nix run "$NIX_APP" -- build
     continue
   fi
 
@@ -228,6 +257,6 @@ while :; do
   git checkout "$BASE_BRANCH"
   git pull --ff-only
 
-  echo "==> dogfood: nix run .# -- build"
-  nix run .# -- build
+  echo "==> dogfood: nix run $NIX_APP -- build"
+  nix run "$NIX_APP" -- build
 done
