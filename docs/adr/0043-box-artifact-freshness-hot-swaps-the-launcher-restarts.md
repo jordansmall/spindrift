@@ -70,7 +70,9 @@ The decision set:
   agent closure is realized, and each Box mounts it as an overlay lower for
   the whole life of the sandbox. A swap therefore adds a generation named for
   the closure it was taken against; it never replaces a file a running Box is
-  reading. Generations are reclaimed once no live Box references them.
+  reading. Generations are reclaimed once no live Box references them —
+  see the Consequences section below for the divergence the shipped
+  implementation accepted instead.
 
 - **Non-convergence halts a swap loop exactly as it halts a rebuild loop.**
   The host-taint guard keys on the fetched rev and the tip tag, and a swap
@@ -129,11 +131,25 @@ launcher dimension of the probe is a prerequisite for the swap, not a
 companion improvement to it.
 
 A bwrap Box's snapshot generation pins the store paths it was taken against,
-so several generations can be live at once and the host holds their disk until
-the last Box referencing one exits. This is bounded by the number of
-concurrent Boxes, and it interacts with ADR 0042's accepted
-garbage-collection race rather than worsening it: a generation with a live Box
-is exactly the thing a host `nix-store --gc` could already invalidate
+so several generations can be live at once and the host holds their disk
+until something reclaims it. In principle that bound is the number of
+concurrent Boxes referencing a generation; in the implementation issue #2682
+shipped, it isn't, because reclaim only ever ran at `launcher build` time
+(ADR 0042) and no mechanism tracks which generations a live-but-idle
+`Dispatch` still references across a `Run`-then-`Fix` gap (a Box can finish
+and sit idle for minutes awaiting CI before launching another Box against
+the same generation). Reclaiming on the swap itself would risk deleting a
+generation still needed there, so `SnapshotGeneration` never calls
+`reclaimStaleSnapshots` at all: a hot-swapping launcher simply accumulates
+one generation per swap, unreclaimed for the rest of the process's life, and
+the actual bound is swap count over process lifetime, not concurrent Box
+count. `launcher build` remains the only reclaim point, so a launcher that
+hot-swaps for hours without restarting holds every generation it ever swapped
+to. This is accepted for the same reason the two-mechanism cost above is
+accepted — pending a real reference-counted reclaim design, which is out of
+scope for #2682 — and it interacts with ADR 0042's accepted
+garbage-collection race rather than worsening it: a generation, live-Box or
+not, is exactly the thing a host `nix-store --gc` could already invalidate
 underneath.
 
 Reproducibility is unchanged. Each Box still runs from one realized closure

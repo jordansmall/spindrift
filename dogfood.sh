@@ -41,10 +41,17 @@
 #             HEAD doesn't move, the block is genuine and the loop stops for
 #             human triage (typically a failed blocker needing re-label).
 #   exit 4 — CONTINUOUS_DISPATCH mode: the freshness probe found the loaded
-#             image stale, the loaded host launcher stale relative to the
-#             flake's launcher-currency attr, or both; in-flight Boxes
+#             host launcher stale relative to the flake's launcher-currency
+#             attr (alone, or alongside a stale image); in-flight Boxes
 #             finished, no new ones launched. Loop pulls, rebuilds, and
-#             re-invokes, like exit 0.
+#             re-invokes, like exit 0. Under DOGFOOD_RUNTIME=bwrap, an
+#             image-only-stale verdict no longer reaches this exit at all:
+#             the launcher hot-swaps the realized closure in place and keeps
+#             refilling instead of draining (ADR 0043, #2682) — a process
+#             cannot swap itself, so a launcher-stale verdict is the one case
+#             that still has to drain and exit. DOGFOOD_RUNTIME=podman is
+#             unaffected: it never swaps, so an image-only-stale verdict
+#             still reaches exit 4 there exactly as before.
 set -euo pipefail
 
 cd "$(dirname "$0")"

@@ -216,16 +216,18 @@ func TestRunContinuousDispatch_FailedRealizeDoesNotChangeOutcome(t *testing.T) {
 	}
 }
 
-// TestRunContinuousDispatch_Bwrap_StaleClosure_ReturnsExitCode4 is issue
-// #2667 AC2's own test: a stale bwrap agent-closure must produce the same
-// exit code (4, waves.ErrImageStale) a stale OCI image does. Every other
-// exit-code-4 test in this file drives the shared path with an OCI-style
-// runnerKind/imageTag; this one is the bwrap twin, proving the shared
-// mapping is actually exercised for bwrap rather than only argued from code
-// sharing between the two runnerKinds. Mirrors
-// TestRunContinuousDispatch_StaleRealizesTipInBackground's setup, but with a
-// bwrap runnerKind and a bare-store-path imageTag (no "repo:hash" tag shape).
-func TestRunContinuousDispatch_Bwrap_StaleClosure_ReturnsExitCode4(t *testing.T) {
+// TestRunContinuousDispatch_Bwrap_StaleClosure_HotSwapsThenReachesEmptyQueue
+// was issue #2667 AC2's own test, pinning exit code 4 (waves.ErrImageStale)
+// for a stale bwrap agent-closure. ADR 0043 (issue #2682) superseded that:
+// an image-only-stale (LauncherFresh true and genuinely evaluated -- the
+// swap branch requires flakeLauncherAttr configured, issue #2682 review
+// finding) verdict under bwrap now hot-swaps in place instead of draining,
+// so with no open issue at all the run falls through to the ordinary
+// empty-queue exit (2, errQueueEmpty) once the swap succeeds. See
+// TestRunContinuousDispatch_BwrapImageOnlyStale_HotSwapsAndKeepsRefilling
+// (continuous_bwrap_hotswap_test.go) for the same shape with a dispatchable
+// issue present.
+func TestRunContinuousDispatch_Bwrap_StaleClosure_HotSwapsThenReachesEmptyQueue(t *testing.T) {
 	const loadedHash = "11111111111111111111111111111111" // 32 chars, the loaded closure
 	const staleHash = "22222222222222222222222222222222"  // 32 chars, distinct -- never matches loadedHash
 
@@ -239,13 +241,22 @@ func TestRunContinuousDispatch_Bwrap_StaleClosure_ReturnsExitCode4(t *testing.T)
 	c.codeForge = "local"
 	c.flakeImageAttr = ".#packages.x86_64-linux.agent-closure"
 	c.imageTag = "/nix/store/" + loadedHash + "-agent-closure"
+	// flakeLauncherAttr configured and genuinely fresh: the swap branch
+	// requires the launcher dimension to have actually been probed (ADR
+	// 0043, issue #2682 review finding), not merely defaulted true by an
+	// unconfigured attr. staleEval below (freshness.Fake.OutPath) returns
+	// the same outpath for every attr, so the launcher tip hash equals
+	// staleHash too -- loadedLauncherHash is set to staleHash to keep the
+	// launcher dimension genuinely evaluated AND fresh.
+	c.flakeLauncherAttr = ".#launcher-currency"
+	c.loadedLauncherHash = staleHash
 
 	dir, _ := newStaleProbeRepo(t)
 
 	it := forge.NewFake(testDispatchLabels)
-	// No open issue at all: the stale verdict short-circuits the bootstrap
-	// refill before any discover/dispatch happens, so this test needs no
-	// dispatchable issue to observe the stale exit.
+	// No open issue at all: the swap succeeds against an empty queue, so
+	// this test needs no dispatchable issue to observe the hot-swap
+	// followed by the ordinary empty-queue exit.
 	cf := it
 
 	fr := runner.NewFake()
@@ -257,10 +268,13 @@ func TestRunContinuousDispatch_Bwrap_StaleClosure_ReturnsExitCode4(t *testing.T)
 	realizeFake := freshness.NewRealizerFake()
 
 	err := runContinuousDispatch(c, it, cf, dir, f, s, staleEval, realizeFake, lp)
-	if got := exitCodeFor(err); got != 4 {
-		t.Fatalf("exitCodeFor(err) = %d, want 4 (waves.ErrImageStale) -- a stale bwrap agent-closure must exit the same way a stale OCI image does", got)
+	if got := exitCodeFor(err); got != 2 {
+		t.Fatalf("exitCodeFor(err) = %d, want 2 (errQueueEmpty) -- ADR 0043: an image-only-stale bwrap verdict hot-swaps instead of draining, so with no open issue at all the run falls through to the ordinary empty-queue exit", got)
 	}
 	if len(fr.RunCalls) != 0 {
-		t.Errorf("RunCalls: got %d, want 0 (no Box launches once the probe is stale)", len(fr.RunCalls))
+		t.Errorf("RunCalls: got %d, want 0 (no open issue to dispatch)", len(fr.RunCalls))
+	}
+	if calls := realizeFake.CallsCopy(); len(calls) != 1 {
+		t.Errorf("realizeFake.CallsCopy() = %v, want exactly one synchronous RealizeSync call (the hot-swap's own realize)", calls)
 	}
 }

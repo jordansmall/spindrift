@@ -3593,7 +3593,16 @@ guaranteed correct for your config.
 | 0    | dispatched work | pull + rebuild, then continue |
 | 2    | queue empty (no open issues with the dispatch label) | exit cleanly |
 | 3    | open issues exist but none are dispatchable | stop and print a triage message — typically a failed blocker needs re-labeling before the queue can drain |
-| 4    | `CONTINUOUS_DISPATCH` mode: the freshness probe found either the loaded image would be rebuilt against the current base-branch tip, or the loaded host launcher is stale relative to the flake's launcher-currency attr; in-flight Boxes finished, no new ones launched | pull + rebuild, then re-invoke — the same boundary exit 0 runs; on an image-stale verdict the rebuild is often already pre-warmed by a background `nix build` the launcher kicked off during the drain, so the driving loop's rebuild is frequently a cache hit — a launcher-only-stale verdict does not trigger that background prebuild, so the rebuild there always runs cold |
+| 4    | `CONTINUOUS_DISPATCH` mode: the freshness probe found the loaded host launcher is stale relative to the flake's launcher-currency attr (or, under the OCI runtime, that the loaded image would also be rebuilt against the current base-branch tip); in-flight Boxes finished, no new ones launched | pull + rebuild, then re-invoke — the same boundary exit 0 runs; on an image-stale verdict the rebuild is often already pre-warmed by a background `nix build` the launcher kicked off during the drain, so the driving loop's rebuild is frequently a cache hit — a launcher-only-stale verdict does not trigger that background prebuild, so the rebuild there always runs cold |
+
+Under the bwrap runtime, a verdict where only the agent-closure image
+dimension is stale no longer reaches this exit at all: the launcher
+hot-swaps the realized closure in place and keeps refilling instead of
+draining (ADR 0043, issue #2682). Exit 4 under bwrap now fires only when
+the launcher dimension itself is stale (alone, or alongside the image) —
+a process cannot swap itself, so that case still drains and exits exactly
+as before. The OCI runtime is unaffected: it never swaps, so any stale
+dimension there still reaches this exit the way the table above describes.
 
 This exit-4 "stale drain" is a distinct concept from the `MAX_JOBS` refill
 drain: the stale drain is `CONTINUOUS_DISPATCH` pausing new dispatch while
