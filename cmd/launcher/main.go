@@ -65,6 +65,10 @@ type config struct {
 	agentFilesDrv string // .drv path; used by `launcher build` to realize the closure
 	agentEnvDrv   string // .drv path; used by `launcher build` to realize the closure
 	bakedPrefetch string
+	passwdFile    string
+	groupFile     string
+	passwdFileDrv string // .drv path; used by `launcher build` to realize the closure
+	groupFileDrv  string // .drv path; used by `launcher build` to realize the closure
 
 	// Runtime: podman | docker | rancher | bwrap (runner.ValidValues)
 	runtime string
@@ -290,6 +294,10 @@ func loadConfig() config {
 		agentFilesDrv:      getenvArtifact("AGENT_FILES_DRV", ""),
 		agentEnvDrv:        getenvArtifact("AGENT_ENV_DRV", ""),
 		bakedPrefetch:      getenvArtifact("BAKED_PREFETCH", ""),
+		passwdFile:         getenvArtifact("PASSWD_FILE", ""),
+		groupFile:          getenvArtifact("GROUP_FILE", ""),
+		passwdFileDrv:      getenvArtifact("PASSWD_FILE_DRV", ""),
+		groupFileDrv:       getenvArtifact("GROUP_FILE_DRV", ""),
 		runtime:            runtime,
 		runnerKind:         runnerKind,
 		driver:             getenvArtifact("DRIVER", ""),
@@ -787,6 +795,10 @@ func runnerConfig(c config) runner.Config {
 		AgentFilesDrv:            c.agentFilesDrv,
 		AgentEnvDrv:              c.agentEnvDrv,
 		BakedPrefetch:            c.bakedPrefetch,
+		PasswdFile:               c.passwdFile,
+		GroupFile:                c.groupFile,
+		PasswdFileDrv:            c.passwdFileDrv,
+		GroupFileDrv:             c.groupFileDrv,
 		BwrapUnshareNet:          c.bwrapUnshareNet,
 		PromptDir:                c.spindriftPromptDir,
 		SkillsDir:                c.spindriftSkillsDir,
