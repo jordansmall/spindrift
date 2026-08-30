@@ -1,9 +1,11 @@
 package runner
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 )
 
 // ValidateRuntime checks that runtime ("podman", "docker", "rancher", or
@@ -87,5 +89,57 @@ func ValidateOverlayWithExec(run func(string, ...string) *exec.Cmd) error {
 	if err != nil {
 		return fmt.Errorf("nixStoreWritable/NIX_STORE_WRITABLE is set but this host's kernel does not appear to allow an unprivileged user namespace to mount overlayfs (bwrap --overlay-src/--tmp-overlay smoke test failed: %w; output: %s) — either unset nixStoreWritable, or check kernel support for unprivileged user namespaces + overlayfs (e.g. the unprivileged_userns_clone sysctl on some distros)", err, stderr)
 	}
+	return nil
+}
+
+// statCgroupControllerFile is os.Stat, swappable in tests the same way
+// readSelfCgroup/cgroupFSRoot are (bwrap.go): a plain temp-dir-backed test
+// has no real kernel to auto-populate pids.max/memory.max the way a genuine
+// delegated cgroup v2 subtree would, so tests fake presence through this
+// seam instead of relying on real cgroup filesystem behaviour.
+var statCgroupControllerFile = os.Stat
+
+// ValidateCgroupDelegation checks that the launcher's own cgroup v2 subtree
+// is delegated (writable) to this process, AND that the pids/memory
+// controllers are actually available in it -- both required for bwrap to
+// enforce PIDS_LIMIT/MEMORY_LIMIT under each Box's per-run cgroup (ADR
+// 0042). It creates a throwaway subtree under the launcher's own cgroup,
+// checks for pids.max/memory.max, and immediately removes the subtree --
+// this mutates the cgroup filesystem transiently but leaves nothing behind
+// on success. It shares the readSelfCgroup/cgroupFSRoot package seams with
+// provisionCgroup (bwrap.go), so the two probe the same parent subtree, but
+// provisionCgroup only writes pids.max/memory.max when the corresponding
+// limit is configured non-empty, so this probe can report a controller
+// present that provisionCgroup will still skip under an explicit
+// empty-string opt-out.
+func ValidateCgroupDelegation() error {
+	self, err := readSelfCgroup()
+	if err != nil {
+		return fmt.Errorf("cgroup v2 delegation cannot be determined (%w) — this host may be missing a unified cgroup v2 mount", err)
+	}
+	dir := filepath.Join(cgroupFSRoot, self, fmt.Sprintf("spindrift-doctor-probe-%d", os.Getpid()))
+	mkErr := os.Mkdir(dir, 0o755)
+	if errors.Is(mkErr, os.ErrExist) {
+		// A prior doctor run killed between Mkdir and Remove below (or a
+		// reused PID) can leave this exact directory behind; clear it and
+		// retry once rather than permanently misreporting a delegated host
+		// as non-delegated.
+		if rmErr := os.Remove(dir); rmErr == nil {
+			mkErr = os.Mkdir(dir, 0o755)
+		}
+	}
+	if mkErr != nil {
+		return fmt.Errorf("cgroup v2 subtree %s is not writable — this process's cgroup does not appear to be delegated to it (%w)", dir, mkErr)
+	}
+	for _, ctrlFile := range []string{"pids.max", "memory.max"} {
+		if _, statErr := statCgroupControllerFile(filepath.Join(dir, ctrlFile)); statErr != nil {
+			_ = os.Remove(dir)
+			return fmt.Errorf("cgroup v2 subtree %s was created but is missing %s — this host's cgroup.subtree_control does not delegate that controller, so PIDS_LIMIT/MEMORY_LIMIT enforcement would silently fail even though subtree creation itself succeeded (%w)", dir, ctrlFile, statErr)
+		}
+	}
+	// The capability question is already answered above; a failure to
+	// remove the throwaway probe dir doesn't change that answer, so removal
+	// is best-effort.
+	_ = os.Remove(dir)
 	return nil
 }
