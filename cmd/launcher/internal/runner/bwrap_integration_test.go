@@ -4,6 +4,7 @@ package runner
 
 import (
 	"bytes"
+	"encoding/binary"
 	"fmt"
 	"net"
 	"os"
@@ -11,6 +12,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -748,6 +750,164 @@ func TestBwrapIntegration_HostStoreUnchangedAfterOverlayWrite(t *testing.T) {
 		t.Errorf("marker file %s was written to the host's real /nix/store; the overlay write should have stayed in the tmpfs upper", hostPath)
 	} else if !os.IsNotExist(statErr) {
 		t.Fatalf("stat %s: %v", hostPath, statErr)
+	}
+}
+
+// buildDenySyscallFilterBPF hand-assembles a classic-BPF seccomp program
+// (the same raw format bubblewrap's own --seccomp FD reads: a flat array of
+// 8-byte struct sock_filter{code uint16, jt uint8, jf uint8, k uint32}
+// entries, no sock_fprog envelope or length header) that denies sysNr and
+// allows everything else. This duplicates production's compiled-filter
+// shape as a Go literal rather than shelling out to `nix build` on
+// lib/seccomp.nix at test time, mirroring
+// newIntegrationBwrapAdapterWithNix's own doc comment on why this file
+// prefers that convention. Skips (not fails) on any GOARCH other than
+// amd64/arm64: this test only ever runs on its own native arch, so the
+// AUDIT_ARCH table only needs those two entries.
+//
+// Instruction layout (indices 0-5). jt/jf each count how many FOLLOWING
+// instructions to skip, zero-indexed from the instruction right after the
+// jump itself:
+//
+//	0: load seccomp_data.arch (offset 4 of the struct)
+//	1: arch == this GOARCH's AUDIT_ARCH?
+//	     jt=0 -> fall through to 2 (the syscall-nr check)
+//	     jf=3 -> skip 2,3,4 and land on 5 (ALLOW) -- an arch mismatch
+//	             never happens in this test (no foreign-arch re-exec), so
+//	             treating it as "allow everything" instead of a hard kill
+//	             keeps the fixture simple without weakening what's tested.
+//	2: load seccomp_data.nr (offset 0 of the struct)
+//	3: nr == sysNr?
+//	     jt=0 -> fall through to 4 (DENY)
+//	     jf=1 -> skip 4, land on 5 (ALLOW)
+//	4: RET deny  (SECCOMP_RET_ERRNO | EPERM)
+//	5: RET allow (SECCOMP_RET_ALLOW)
+func buildDenySyscallFilterBPF(t *testing.T, sysNr uint64) []byte {
+	t.Helper()
+
+	var auditArch uint32
+	switch runtime.GOARCH {
+	case "amd64":
+		auditArch = 0xC000003E // AUDIT_ARCH_X86_64
+	case "arm64":
+		auditArch = 0xC00000B7 // AUDIT_ARCH_AARCH64
+	default:
+		t.Skipf("no AUDIT_ARCH constant wired up for GOARCH %q", runtime.GOARCH)
+	}
+
+	const (
+		bpfLdWAbs = 0x20 // BPF_LD  | BPF_W | BPF_ABS
+		bpfJeqK   = 0x15 // BPF_JMP | BPF_JEQ | BPF_K
+		bpfRetK   = 0x06 // BPF_RET | BPF_K
+
+		seccompRetErrno    = 0x00050000 // SECCOMP_RET_ERRNO
+		seccompRetDataMask = 0x0000ffff // SECCOMP_RET_DATA_MASK
+		seccompRetAllow    = 0x7fff0000 // SECCOMP_RET_ALLOW
+	)
+
+	type sockFilter struct {
+		code uint16
+		jt   uint8
+		jf   uint8
+		k    uint32
+	}
+	instrs := []sockFilter{
+		{code: bpfLdWAbs, k: 4},
+		{code: bpfJeqK, k: auditArch, jt: 0, jf: 3},
+		{code: bpfLdWAbs, k: 0},
+		{code: bpfJeqK, k: uint32(sysNr), jt: 0, jf: 1},
+		{code: bpfRetK, k: seccompRetErrno | (uint32(syscall.EPERM) & seccompRetDataMask)},
+		{code: bpfRetK, k: seccompRetAllow},
+	}
+
+	buf := make([]byte, 0, len(instrs)*8)
+	for _, in := range instrs {
+		var b [8]byte
+		binary.LittleEndian.PutUint16(b[0:2], in.code)
+		b[2] = in.jt
+		b[3] = in.jf
+		binary.LittleEndian.PutUint32(b[4:8], in.k)
+		buf = append(buf, b[:]...)
+	}
+	return buf
+}
+
+// TestBwrapIntegration_SyscallFilterDeniesKill is issue #2670's central
+// missing guarantee: a syscall the compiled BPF filter denies must actually
+// fail inside a real bwrap sandbox, using the same fd-passing mechanism
+// production uses (bwrapAdapter.buildArgs' "--seccomp 3" plus
+// cmd.ExtraFiles), not just a Go-level assertion about argv.
+func TestBwrapIntegration_SyscallFilterDeniesKill(t *testing.T) {
+	bashBin := requireRealBwrap(t)
+	a, etcDir := newIntegrationBwrapAdapter(t)
+
+	filterPath := filepath.Join(t.TempDir(), "deny-kill.bpf")
+	if err := os.WriteFile(filterPath, buildDenySyscallFilterBPF(t, uint64(syscall.SYS_KILL)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	a.syscallFilterPath = filterPath
+
+	box := Box{Env: map[string]string{}}
+	// bash's "kill -0 $$" is a builtin that calls kill(2) directly against
+	// bash's own pid -- no extra binary needed beyond bash itself, and
+	// nothing else bash does at startup touches kill(2).
+	args := bwrapProbeArgs(a, etcDir, box, bashBin, "kill -0 $$")
+	if !strings.Contains(strings.Join(args, " "), "--seccomp 3") {
+		t.Fatalf("expected --seccomp 3 in the constructed argv: %v", args)
+	}
+
+	filterFile, err := os.Open(filterPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer filterFile.Close()
+
+	cmd := exec.Command("bwrap", args...)
+	cmd.ExtraFiles = []*os.File{filterFile}
+	out, runErr := cmd.CombinedOutput()
+	if runErr == nil {
+		t.Fatalf("expected kill(2) to fail under the syscall filter; bwrap output: %s", out)
+	}
+	if !strings.Contains(string(out), "Operation not permitted") {
+		t.Fatalf("expected an \"Operation not permitted\" failure, got: %s (%v)", out, runErr)
+	}
+}
+
+// TestBwrapIntegration_SyscallFilterAllowsNormalWork is
+// TestBwrapIntegration_SyscallFilterDeniesKill's positive control: the same
+// filter, attached the same way, must not collaterally break an ordinary
+// command that never touches the denied syscall -- proving the filter is
+// scoped to kill(2), not a blanket deny that would sink every Dispatch.
+func TestBwrapIntegration_SyscallFilterAllowsNormalWork(t *testing.T) {
+	bashBin := requireRealBwrap(t)
+	a, etcDir := newIntegrationBwrapAdapter(t)
+
+	filterPath := filepath.Join(t.TempDir(), "deny-kill.bpf")
+	if err := os.WriteFile(filterPath, buildDenySyscallFilterBPF(t, uint64(syscall.SYS_KILL)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	a.syscallFilterPath = filterPath
+
+	box := Box{Env: map[string]string{}}
+	args := bwrapProbeArgs(a, etcDir, box, bashBin, "echo ok")
+	if !strings.Contains(strings.Join(args, " "), "--seccomp 3") {
+		t.Fatalf("expected --seccomp 3 in the constructed argv: %v", args)
+	}
+
+	filterFile, err := os.Open(filterPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer filterFile.Close()
+
+	cmd := exec.Command("bwrap", args...)
+	cmd.ExtraFiles = []*os.File{filterFile}
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("bwrap probe under the syscall filter failed: %v: %s", err, out)
+	}
+	if got := strings.TrimSpace(string(out)); got != "ok" {
+		t.Errorf("output = %q, want \"ok\"", got)
 	}
 }
 
