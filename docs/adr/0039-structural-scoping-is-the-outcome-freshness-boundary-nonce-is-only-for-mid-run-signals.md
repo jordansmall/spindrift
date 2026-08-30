@@ -2,6 +2,11 @@
 
 ## Context
 
+> **Note (issue #2973):** `outcome.LastInLog` below is now the unexported
+> `lastInLog` (issue #2260), and "primary tier" is stale — issue #2973
+> dropped the near-miss fallback tier entirely, so there is no longer a
+> secondary tier to be primary *over*. Leading-token is the only rule left.
+
 The per-run control nonce (`RUN_NONCE`, issues #1937/#1939) was introduced as
 a *uniform* anti-replay defense across every control-signal line the Box
 writes to stdout: the launcher gates a token-bearing line on the run's own
