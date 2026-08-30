@@ -111,8 +111,8 @@
       substitute/build new store paths inside the Box instead of hitting
       EACCES. New paths land only in the container's ephemeral
       copy-on-write layer. Defaults to false; the entrypoint prints a loud
-      warning when enabled. OCI-runner only — the bwrap runner keeps its
-      read-only store bind.
+      warning when enabled. Both runtimes support it now (ADR 0042): bwrap
+      overlays an ephemeral tmpfs upper on the store at run time instead.
     '';
     docType = "bool";
     docDefault = "`false`";

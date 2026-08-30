@@ -152,6 +152,16 @@ rec {
       # for it). Defaults to "" so a non-nixInBox Consumer's runArtifacts
       # call renders the key present-but-empty rather than omitting it.
       nixConfigPath ? "",
+      # The bwrap ephemeral-overlay-store knob (ADR 0042, issue #2665): the
+      # sibling of nixConfigPath -- when nixConfigPath is truthy (nixInBox
+      # on), this decides whether the /nix/store overlay bwrap.go mounts is
+      # additionally writable, vs. a plain read-only bind. No `?` default:
+      # unlike nixConfigPath (meaningless, so blanked to "" when nixInBox is
+      # off), nixStoreWritable is a real Consumer knob independent of
+      # nixInBox and must always render its true value -- the AND-gate with
+      # NixConfigFile that makes it a no-op when nixInBox is off lives in
+      # cmd/launcher/internal/runner/bwrap.go, not here.
+      nixStoreWritable,
     }:
     (
       if runnerKind == "bwrap" then
@@ -164,6 +174,7 @@ rec {
           GROUP_FILE = groupFilePath;
           BAKED_PREFETCH = prefetch;
           NIX_CONFIG_FILE = nixConfigPath;
+          NIX_STORE_WRITABLE = if nixStoreWritable then "true" else "false";
           # The bwrap freshness dimension (issue #2667): the same two keys
           # the OCI branch below renders, populated with the bwrap agent
           # closure's own flake attr/output path so Probe() can compare
@@ -320,6 +331,7 @@ rec {
           reviewLoopInline = false;
           reviewLoopOrchestrator = false;
           nixConfigPath = "dummy";
+          nixStoreWritable = false;
         };
       dummyBuildArtifacts =
         runnerKind:
