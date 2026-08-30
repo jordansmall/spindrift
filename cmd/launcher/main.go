@@ -42,7 +42,14 @@ type config struct {
 	// caller's config through the embedded struct.
 	schemaConfig
 
-	// OCI image config (baked by nix wrapper; empty for bwrap)
+	// OCI image config (baked by nix wrapper). imageArchive/imageDrv/
+	// nixBuilderImage/nixVolume are empty for bwrap (no image to load).
+	// flakeImageAttr/imageTag are dual-purpose (issue #2667): the OCI image's
+	// flake attr/content-hash tag for an OCI runtime, or the bundled bwrap
+	// agent-closure's flake attr/loaded output path for bwrap — either way,
+	// freshness.Probe compares a freshly-evaluated value at these same two
+	// slots against a base-branch tip. flakeLauncherAttr is populated for
+	// both runtimes (issue #1364, host-launcher freshness).
 	imageArchive      string
 	imageTag          string
 	imageDrv          string
@@ -85,7 +92,10 @@ type config struct {
 	// matching the nix side's default.
 	driver string
 
-	// image is the runtime image reference; defaults to imageTag
+	// image is the OCI runtime image reference; defaults to imageTag, which
+	// for bwrap holds the bundled agent-closure's store path instead of an
+	// image tag (issue #2667) — harmless since only oci.go reads image, and
+	// oci.go is never reached for a bwrap runnerKind.
 	image string
 
 	// driverSessionCacheDir is the in-box mount target for the selected
@@ -1744,7 +1754,7 @@ func runContinuousDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, 
 		switch terminal := continuousDispatchErr(err, firstQueryErr); {
 		case errors.Is(terminal, waves.ErrImageStale):
 			if guard.Classify(staleResult) == freshness.HostTainted {
-				fmt.Fprintln(os.Stdout, freshness.HostTaintDiagnostic(c.baseBranch, staleResult.Rev, c.flakeImageAttr, staleResult.TipTag, c.imageTag))
+				fmt.Fprintln(os.Stdout, freshness.HostTaintDiagnostic(c.runnerKind, c.baseBranch, staleResult.Rev, c.flakeImageAttr, staleResult.TipTag, c.imageTag))
 				return errImageHostTainted
 			}
 			return waves.ErrImageStale
