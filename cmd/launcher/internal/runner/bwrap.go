@@ -80,6 +80,14 @@ type bwrapAdapter struct {
 	// before bwrap ever runs, rather than a raw bwrap mount failure.
 	nixConfigFile     string
 	nixVarSnapshotDir string
+	// nixStoreWritable gates whether /nix/store itself gets the same
+	// overlay treatment as /nix/var above (ADR 0042): an ephemeral tmpfs
+	// upper over the host's real store, so paths built/substituted in the
+	// Box land in the upper and vanish with the sandbox instead of ever
+	// touching host disk. AND-gated with nixConfigFile in buildArgs — true
+	// here alone does nothing when nixConfigFile is empty (nixInBox off),
+	// since nix isn't on PATH in the Box in that case either.
+	nixStoreWritable bool
 	// hostMediatedRemote/outboxRelayCapable/accumulationRepoDir/
 	// boxForgeAndIssueAccess gate the /repo and /outbox mounts (ADR 0033,
 	// issue #1697; issue #1918); see MountParams.
@@ -137,6 +145,7 @@ func NewBwrap(cfg Config, pwd string) Runner {
 		driverSessionCacheDir:    cfg.DriverSessionCacheDir,
 		nixConfigFile:            cfg.NixConfigFile,
 		nixVarSnapshotDir:        nixVarSnapshotDir(pwd),
+		nixStoreWritable:         cfg.NixStoreWritable,
 		hostMediatedRemote:       cfg.HostMediatedRemote,
 		accumulationRepoDir:      cfg.AccumulationRepoDir,
 		outboxRelayCapable:       cfg.OutboxRelayCapable,
@@ -232,8 +241,13 @@ func (a *bwrapAdapter) pastaPath() bool {
 // bwrap's own argv with pasta as the outer process when pastaPath applies.
 func (a *bwrapAdapter) buildArgs(etcDir string, box Box) []string {
 	isolateNet := a.isolateNet()
-	args := []string{
-		"--ro-bind", "/nix/store", "/nix/store",
+	var args []string
+	if a.nixConfigFile != "" && a.nixStoreWritable {
+		args = append(args, "--overlay-src", "/nix/store", "--tmp-overlay", "/nix/store")
+	} else {
+		args = append(args, "--ro-bind", "/nix/store", "/nix/store")
+	}
+	args = append(args,
 		"--tmpfs", "/tmp",
 		"--tmpfs", "/work",
 		"--tmpfs", "/home/agent",
@@ -242,7 +256,7 @@ func (a *bwrapAdapter) buildArgs(etcDir string, box Box) []string {
 		"--dir", "/etc",
 		"--ro-bind", a.passwdFile, "/etc/passwd",
 		"--ro-bind", a.groupFile, "/etc/group",
-	}
+	)
 	// nixConfigFile empty means the Consumer's nixInBox knob is off (nix isn't
 	// even on PATH in that case), so both nix-related mounts below are
 	// skipped together rather than independently. When set: --overlay-src +
@@ -251,8 +265,13 @@ func (a *bwrapAdapter) buildArgs(etcDir string, box Box) []string {
 	// 0042) with an ephemeral tmpfs upper, so nix's own writes inside the Box
 	// (gcroots, profiles, WAL files) land in the upper and vanish with the
 	// sandbox rather than touching host disk. The store itself (/nix/store,
-	// bound unconditionally at the top of this function) stays a separate,
-	// plain read-only bind — never overlaid, regardless of this knob.
+	// rendered at the top of this function) is gated on nixConfigFile alone
+	// plus one further AND with nixStoreWritable, not nixConfigFile alone
+	// like the mounts below: with nixStoreWritable false (the default) it
+	// stays a plain read-only bind even when nixConfigFile is set, and only
+	// becomes an ephemeral tmpfs overlay — new store paths built/substituted
+	// in the Box land in the upper and vanish on exit, never touching the
+	// host's real store — when both are true.
 	if a.nixConfigFile != "" {
 		args = append(args, "--ro-bind", a.nixConfigFile, "/etc/nix/nix.conf")
 		args = append(args, "--overlay-src", a.nixVarSnapshotDir, "--tmp-overlay", "/nix/var")

@@ -258,6 +258,25 @@ func newIntegrationBwrapAdapterWithNix(t *testing.T) (*bwrapAdapter, string) {
 	return a, etcDir
 }
 
+// newIntegrationBwrapAdapterWithWritableStore is
+// newIntegrationBwrapAdapterWithNix's sibling for issue #2665's writable
+// /nix/store overlay: buildArgs' own AND-gate only swaps /nix/store's
+// --ro-bind for --overlay-src+--tmp-overlay when both nixConfigFile != "" AND
+// nixStoreWritable are true, so this helper wires the identical real
+// nix.conf + real VACUUMed store-db snapshot newIntegrationBwrapAdapterWithNix
+// sets up (nixConfigFile alone still activates the unconditional /nix/var
+// overlay -- that machinery has to be present and correct even though these
+// probes never invoke nix itself) and additionally sets nixStoreWritable so
+// the /nix/store mount itself becomes the ephemeral tmpfs overlay under test.
+// Skips for the same reasons newIntegrationBwrapAdapterWithNix does (no
+// sqlite3/nix on PATH, no host nix store db to snapshot).
+func newIntegrationBwrapAdapterWithWritableStore(t *testing.T) (*bwrapAdapter, string) {
+	t.Helper()
+	a, etcDir := newIntegrationBwrapAdapterWithNix(t)
+	a.nixStoreWritable = true
+	return a, etcDir
+}
+
 // bwrapProbeArgs takes the real buildArgs() output for box, drops the
 // --proc/--dev mounts a nested sandbox can't nest (see stripMountPair), and
 // swaps the fixed "-- /agent/entrypoint.sh" tail for script, run via
@@ -677,5 +696,93 @@ func TestBwrapIntegration_NixBuildAttemptsSubstitutionOnEmptyStoreSnapshot(t *te
 	}
 	if !strings.Contains(string(out), "there is no substituter that can build it") {
 		t.Fatalf("expected a \"there is no substituter that can build it\" failure, got: %s (%v)", out, err)
+	}
+}
+
+// TestBwrapIntegration_StoreWritableWhenOverlayEnabled is
+// TestBwrapIntegration_NixStoreReadOnly's mirror image and issue #2665's
+// central positive proof: with nixStoreWritable set (on top of nixConfigFile,
+// satisfying buildArgs' AND-gate), the very same write into /nix/store that
+// fails against the plain --ro-bind must now succeed, because /nix/store is
+// instead --overlay-src/--tmp-overlay'd -- a real tmpfs upper the kernel
+// lets a process write into, not just a different flag pair present on argv
+// (ADR 0042).
+func TestBwrapIntegration_StoreWritableWhenOverlayEnabled(t *testing.T) {
+	bashBin := requireRealBwrap(t)
+	a, etcDir := newIntegrationBwrapAdapterWithWritableStore(t)
+	box := Box{Env: map[string]string{}}
+	const marker = "spindrift-integration-overlay-write-probe"
+	args := bwrapProbeArgs(a, etcDir, box, bashBin, "echo x > /nix/store/"+marker)
+
+	out, err := exec.Command("bwrap", args...).CombinedOutput()
+	if err != nil {
+		t.Fatalf("expected write into the overlaid /nix/store to succeed inside the sandbox: %v: %s", err, out)
+	}
+}
+
+// TestBwrapIntegration_HostStoreUnchangedAfterOverlayWrite proves issue
+// #2665's second acceptance criterion: "the host's store is unchanged
+// afterwards." The write-into-/nix/store probe above only shows the guest
+// process's own write syscall succeeded; it says nothing about where that
+// write actually landed. This test performs the identical write, then -- from
+// the test process itself, running on the host, not inside any sandbox --
+// stats the host's real /nix/store directory for the exact marker filename
+// and asserts it is absent. --tmp-overlay gives bwrap a tmpfs upper that only
+// exists for the lifetime of this one bwrap invocation; a write is expected
+// to disappear along with it rather than ever reaching the read-only
+// --overlay-src lower (the host's real store).
+func TestBwrapIntegration_HostStoreUnchangedAfterOverlayWrite(t *testing.T) {
+	bashBin := requireRealBwrap(t)
+	a, etcDir := newIntegrationBwrapAdapterWithWritableStore(t)
+	box := Box{Env: map[string]string{}}
+	const marker = "spindrift-integration-overlay-write-probe-host-check"
+	args := bwrapProbeArgs(a, etcDir, box, bashBin, "echo x > /nix/store/"+marker)
+
+	out, err := exec.Command("bwrap", args...).CombinedOutput()
+	if err != nil {
+		t.Fatalf("write into the overlaid /nix/store failed inside the sandbox: %v: %s", err, out)
+	}
+
+	hostPath := filepath.Join("/nix/store", marker)
+	if _, statErr := os.Stat(hostPath); statErr == nil {
+		t.Errorf("marker file %s was written to the host's real /nix/store; the overlay write should have stayed in the tmpfs upper", hostPath)
+	} else if !os.IsNotExist(statErr) {
+		t.Fatalf("stat %s: %v", hostPath, statErr)
+	}
+}
+
+// TestBwrapIntegration_OverlayUpperNotSharedAcrossInvocations proves issue
+// #2665's third acceptance criterion: "paths built in one Box are absent from
+// a freshly started Box." It runs the write probe as a first, independent
+// bwrap invocation (asserting it succeeds, same as
+// TestBwrapIntegration_StoreWritableWhenOverlayEnabled above), then launches
+// a second, entirely separate bwrap invocation using the identical
+// writable-store adapter/args and checks, from inside that second sandbox,
+// whether the first invocation's marker file is visible under /nix/store.
+// --tmp-overlay's tmpfs upper is scoped to a single bwrap process's mount
+// namespace; nothing about --overlay-src/--tmp-overlay persists an upper
+// across separate invocations even when both point at the identical lower
+// and identical host paths, so the second sandbox must report the file
+// absent -- direct evidence each Box gets its own fresh, throwaway overlay
+// rather than one that quietly accumulates state across runs.
+func TestBwrapIntegration_OverlayUpperNotSharedAcrossInvocations(t *testing.T) {
+	bashBin := requireRealBwrap(t)
+	a, etcDir := newIntegrationBwrapAdapterWithWritableStore(t)
+	box := Box{Env: map[string]string{}}
+	const marker = "spindrift-integration-overlay-write-probe-not-shared"
+	storePath := "/nix/store/" + marker
+
+	firstArgs := bwrapProbeArgs(a, etcDir, box, bashBin, "echo x > "+storePath)
+	if out, err := exec.Command("bwrap", firstArgs...).CombinedOutput(); err != nil {
+		t.Fatalf("first bwrap invocation's write into the overlaid /nix/store failed: %v: %s", err, out)
+	}
+
+	secondArgs := bwrapProbeArgs(a, etcDir, box, bashBin, "test -e "+storePath+" && echo FOUND || echo ABSENT")
+	out, err := exec.Command("bwrap", secondArgs...).CombinedOutput()
+	if err != nil {
+		t.Fatalf("second bwrap invocation failed to run: %v: %s", err, out)
+	}
+	if got := strings.TrimSpace(string(out)); got != "ABSENT" {
+		t.Errorf("marker written by the first bwrap invocation was visible in a second, independent invocation's overlay = %q, want ABSENT (each invocation should get its own fresh tmpfs upper)", got)
 	}
 }
