@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -823,6 +824,267 @@ func TestBwrapKill_TerminatesRunningProcess(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("Run did not return after Kill")
+	}
+}
+
+// TestBwrapRun_HoldsSharedLockOnNixVarSnapshotDirWhileRunning verifies Run
+// acquires a shared advisory flock on nixVarSnapshotDir+".lock" -- a sibling
+// of the generation dir itself, never inside it -- for the duration of the
+// sandboxed process, so a later reclaim step can tell a generation is still
+// in use by attempting (and failing to get) an exclusive lock on the same
+// file. Once Run returns, the lock must be released so reclaim can proceed.
+func TestBwrapRun_HoldsSharedLockOnNixVarSnapshotDirWhileRunning(t *testing.T) {
+	orig := execCommand
+	t.Cleanup(func() { execCommand = orig })
+	execCommand = func(name string, args ...string) *exec.Cmd {
+		return exec.Command("sleep", "5")
+	}
+
+	snapshotDir := filepath.Join(t.TempDir(), "nix-var-snapshot", "abc123-agent-closure")
+	if err := os.MkdirAll(snapshotDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	lockPath := snapshotDir + ".lock"
+
+	a := &bwrapAdapter{
+		agentFiles:        "/fake/agent",
+		agentEnv:          "/fake/env",
+		bakedPrefetch:     "echo ok",
+		nixConfigFile:     "/fake/nix.conf",
+		nixVarSnapshotDir: snapshotDir,
+	}
+	done := make(chan error, 1)
+	go func() { done <- a.Run(Box{Name: "agent-issue-9", Env: map[string]string{}}) }()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		a.mu.Lock()
+		_, tracked := a.running["agent-issue-9"]
+		a.mu.Unlock()
+		if tracked {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("Run never tracked its process")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o644)
+	if err != nil {
+		t.Fatalf("OpenFile lock: %v", err)
+	}
+	defer f.Close()
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err == nil {
+		t.Error("exclusive Flock while Run in flight: want error (lock held), got nil")
+		_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+	}
+
+	if err := a.Kill("agent-issue-9"); err != nil {
+		t.Fatalf("Kill: %v", err)
+	}
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Run did not return after Kill")
+	}
+
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		t.Errorf("exclusive Flock after Run returned: want nil (lock released), got %v", err)
+	} else {
+		_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+	}
+}
+
+// TestBwrapRun_NixConfigEmptySkipsLock verifies the lock is gated on the same
+// condition as the nixVarSnapshotDir mount itself (nixConfigFile != "") --
+// with nix-in-box off, there is nothing mounted to protect, so Run must not
+// create a lock file at all.
+func TestBwrapRun_NixConfigEmptySkipsLock(t *testing.T) {
+	script, _ := newFakeCLI(t, fakeCall{})
+	orig := execCommand
+	t.Cleanup(func() { execCommand = orig })
+	execCommand = func(name string, args ...string) *exec.Cmd {
+		return exec.Command(script, args...)
+	}
+
+	snapshotDir := filepath.Join(t.TempDir(), "nix-var-snapshot", "abc123-agent-closure")
+	if err := os.MkdirAll(snapshotDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	lockPath := snapshotDir + ".lock"
+
+	a := &bwrapAdapter{
+		agentFiles:        "/fake/agent",
+		agentEnv:          "/fake/env",
+		bakedPrefetch:     "echo ok",
+		nixConfigFile:     "",
+		nixVarSnapshotDir: snapshotDir,
+	}
+	if err := a.Run(Box{Name: "agent-issue-10", Env: map[string]string{}}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if _, err := os.Stat(lockPath); !os.IsNotExist(err) {
+		t.Errorf("lock file %s: want not-exist (nixConfigFile empty), got err=%v", lockPath, err)
+	}
+}
+
+// TestBwrapRun_LockAcquireFailureDoesNotFailRun verifies a failure to
+// open/lock the snapshot lock file degrades to a warning rather than
+// failing Run (ADR 0042's own degrade-don't-lie precedent) -- this is a
+// hardening/correctness-for-reclaim concern, not a functional requirement
+// for the Box itself. The parent of nixVarSnapshotDir is itself a regular
+// file here, forcing os.OpenFile(lockPath, O_CREATE|...) to fail with
+// ENOTDIR. Captures stdout and asserts the warning text itself
+// is printed (not just that Run returns nil) -- otherwise a regression that
+// silently drops the fmt.Printf call in this branch would pass undetected
+// (issue #2680 review finding: test coverage gap).
+func TestBwrapRun_LockAcquireFailureDoesNotFailRun(t *testing.T) {
+	script, _ := newFakeCLI(t, fakeCall{})
+	orig := execCommand
+	t.Cleanup(func() { execCommand = orig })
+	execCommand = func(name string, args ...string) *exec.Cmd {
+		return exec.Command(script, args...)
+	}
+
+	notADir := filepath.Join(t.TempDir(), "not-a-dir")
+	if err := os.WriteFile(notADir, []byte("x"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	snapshotDir := filepath.Join(notADir, "abc123-agent-closure")
+
+	a := &bwrapAdapter{
+		agentFiles:        "/fake/agent",
+		agentEnv:          "/fake/env",
+		bakedPrefetch:     "echo ok",
+		nixConfigFile:     "/fake/nix.conf",
+		nixVarSnapshotDir: snapshotDir,
+	}
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldStdout := os.Stdout
+	os.Stdout = w
+
+	runErr := a.Run(Box{Name: "agent-issue-11", Env: map[string]string{}})
+
+	w.Close()
+	os.Stdout = oldStdout
+	var buf bytes.Buffer
+	if _, err := io.Copy(&buf, r); err != nil {
+		t.Fatal(err)
+	}
+
+	if runErr != nil {
+		t.Fatalf("Run: want nil despite lock-acquire failure, got %v", runErr)
+	}
+	if !strings.Contains(buf.String(), "could not acquire nix-var snapshot lock") {
+		t.Errorf("Run output missing lock-acquire-failure warning: %q", buf.String())
+	}
+}
+
+// TestBwrapRun_SnapshotGoneAfterLockAcquiredFailsRunRatherThanExec verifies
+// the fix for the open-then-lock race: nixVarSnapshotDir points at a path
+// that does not exist (standing in for a generation reclaimStaleSnapshots
+// already removed between Run's OpenFile
+// and its blocking Flock(LOCK_SH) succeeding), while the lock file's own
+// parent dir does exist, so acquiring the shared lock itself still succeeds.
+// Run must re-check the generation dir once it holds the lock and bail out
+// with a clear error rather than proceeding to exec bwrap against a
+// mountpoint that no longer exists.
+func TestBwrapRun_SnapshotGoneAfterLockAcquiredFailsRunRatherThanExec(t *testing.T) {
+	script, dir := newFakeCLI(t, fakeCall{exit: 0})
+	orig := execCommand
+	t.Cleanup(func() { execCommand = orig })
+	execCommand = func(name string, args ...string) *exec.Cmd {
+		return exec.Command(script, args...)
+	}
+
+	snapshotDir := filepath.Join(t.TempDir(), "gen-reclaimed") // deliberately never created
+
+	a := &bwrapAdapter{
+		agentFiles:        "/fake/agent",
+		agentEnv:          "/fake/env",
+		bakedPrefetch:     "echo ok",
+		nixConfigFile:     "/fake/nix.conf",
+		nixVarSnapshotDir: snapshotDir,
+	}
+	err := a.Run(Box{Name: "agent-issue-12", Env: map[string]string{}})
+
+	if err == nil {
+		t.Fatal("Run: want error when nix-var snapshot dir is gone once the lock is held, got nil")
+	}
+	if !strings.Contains(err.Error(), "no longer exists") {
+		t.Errorf("Run error = %q, want it to mention %q", err.Error(), "no longer exists")
+	}
+	if got := callCount(t, dir); got != 0 {
+		t.Errorf("callCount = %d, want 0 (Run must bail before exec'ing bwrap)", got)
+	}
+
+	// The lock must not be left held: a fresh exclusive Flock attempt should
+	// succeed once Run has returned its error.
+	lockPath := snapshotDir + ".lock"
+	f, err := os.OpenFile(lockPath, os.O_RDWR, 0o644)
+	if err != nil {
+		t.Fatalf("OpenFile lock: %v", err)
+	}
+	defer f.Close()
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		t.Errorf("exclusive Flock after Run returned error: want nil (lock released), got %v", err)
+	} else {
+		_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+	}
+}
+
+// TestBwrapRun_StartFailureReleasesNixVarSnapshotLock verifies the lock
+// release on cmd.Start()'s own failure path: the shared lock is acquired
+// (nixVarSnapshotDir exists, so the post-acquire re-stat above passes too),
+// but the exec itself fails, and Run must still release the lock before
+// returning rather than leaking it -- previously untested (issue #2680
+// review finding: test coverage gap). execCommand is pointed at a nonexistent
+// absolute path so exec.Command skips its own LookPath (only bare names are
+// resolved that way) and the failure surfaces from cmd.Start() itself, not
+// from exec.Command's construction.
+func TestBwrapRun_StartFailureReleasesNixVarSnapshotLock(t *testing.T) {
+	orig := execCommand
+	t.Cleanup(func() { execCommand = orig })
+	execCommand = func(name string, args ...string) *exec.Cmd {
+		return exec.Command(filepath.Join(t.TempDir(), "no-such-binary"), args...)
+	}
+
+	snapshotDir := t.TempDir()
+
+	a := &bwrapAdapter{
+		agentFiles:        "/fake/agent",
+		agentEnv:          "/fake/env",
+		bakedPrefetch:     "echo ok",
+		nixConfigFile:     "/fake/nix.conf",
+		nixVarSnapshotDir: snapshotDir,
+	}
+	err := a.Run(Box{Name: "agent-issue-13", Env: map[string]string{}})
+
+	if err == nil {
+		t.Fatal("Run: want error when cmd.Start() fails, got nil")
+	}
+
+	// The lock must not be left held: a fresh exclusive Flock attempt should
+	// succeed once Run has returned its Start() error, proving Run released
+	// it on this path (same idiom as
+	// TestBwrapRun_SnapshotGoneAfterLockAcquiredFailsRunRatherThanExec above).
+	lockPath := snapshotDir + ".lock"
+	f, err := os.OpenFile(lockPath, os.O_RDWR, 0o644)
+	if err != nil {
+		t.Fatalf("OpenFile lock: %v", err)
+	}
+	defer f.Close()
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		t.Errorf("exclusive Flock after Run returned Start() error: want nil (lock released), got %v", err)
+	} else {
+		_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
 	}
 }
 
