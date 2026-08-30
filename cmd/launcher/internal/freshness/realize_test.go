@@ -228,3 +228,104 @@ func TestRealizeTip_TrimsFlakeAttrPrefix(t *testing.T) {
 		t.Errorf("Attr = %q, want the \".#\" prefix trimmed", calls[0].Attr)
 	}
 }
+
+// TestRealizeSync_NotApplicableNoOp mirrors TestRealizeTip_NotApplicableNoOp:
+// RealizeSync must never call Start when res.Applicable is false.
+func TestRealizeSync_NotApplicableNoOp(t *testing.T) {
+	rf := NewRealizerFake()
+	res := Result{Applicable: false, Fresh: false, Rev: "deadbeef"}
+
+	if err := RealizeSync(rf, "/pwd", res, ".#packages.x86_64-linux.agent-image"); err != nil {
+		t.Fatalf("RealizeSync() = %v, want nil for a no-op guard", err)
+	}
+	if calls := rf.CallsCopy(); len(calls) != 0 {
+		t.Fatalf("len(calls) = %d, want 0 when Applicable is false", len(calls))
+	}
+}
+
+// TestRealizeSync_FreshNoOp mirrors TestRealizeTip_FreshNoOp: RealizeSync
+// must never call Start when res.Fresh is true.
+func TestRealizeSync_FreshNoOp(t *testing.T) {
+	rf := NewRealizerFake()
+	res := Result{Applicable: true, Fresh: true, Rev: "deadbeef"}
+
+	if err := RealizeSync(rf, "/pwd", res, ".#packages.x86_64-linux.agent-image"); err != nil {
+		t.Fatalf("RealizeSync() = %v, want nil for a no-op guard", err)
+	}
+	if calls := rf.CallsCopy(); len(calls) != 0 {
+		t.Fatalf("len(calls) = %d, want 0 when Fresh is true", len(calls))
+	}
+}
+
+// TestRealizeSync_EmptyTipTagNoOp mirrors
+// TestRealizeTip_NonEmptyRevEmptyTipTagNoOp: RealizeSync must never call
+// Start on a Result with an empty TipTag, even with a real Rev set.
+func TestRealizeSync_EmptyTipTagNoOp(t *testing.T) {
+	rf := NewRealizerFake()
+	res := Result{Applicable: true, Fresh: false, Rev: "somerev", TipTag: ""}
+
+	if err := RealizeSync(rf, "/pwd", res, ".#packages.x86_64-linux.agent-image"); err != nil {
+		t.Fatalf("RealizeSync() = %v, want nil for a no-op guard", err)
+	}
+	if calls := rf.CallsCopy(); len(calls) != 0 {
+		t.Fatalf("len(calls) = %d, want 0 when TipTag is empty", len(calls))
+	}
+}
+
+// TestRealizeSync_BlocksUntilWaitCompletes proves RealizeSync is genuinely
+// synchronous, unlike RealizeTip's fire-and-forget: by the time RealizeSync
+// returns, the fake's wait function has already run and signaled Done —
+// there is no background goroutine still catching up.
+func TestRealizeSync_BlocksUntilWaitCompletes(t *testing.T) {
+	rf := NewRealizerFake()
+	res := Result{Applicable: true, Fresh: false, Rev: "deadbeefcafe", TipTag: "spindrift:abc123"}
+
+	if err := RealizeSync(rf, "/pwd", res, ".#packages.x86_64-linux.agent-image"); err != nil {
+		t.Fatalf("RealizeSync() = %v, want nil on success", err)
+	}
+
+	select {
+	case <-rf.Done:
+	default:
+		t.Fatal("Done did not fire by the time RealizeSync returned, want a synchronous wait")
+	}
+
+	calls := rf.CallsCopy()
+	if len(calls) != 1 {
+		t.Fatalf("len(calls) = %d, want 1", len(calls))
+	}
+	want := FakeCall{Pwd: "/pwd", Rev: "deadbeefcafe", Attr: "packages.x86_64-linux.agent-image"}
+	if calls[0] != want {
+		t.Errorf("call = %+v, want %+v", calls[0], want)
+	}
+}
+
+// TestRealizeSync_StartErrorReturnsErr verifies RealizeSync surfaces a Start
+// fork failure as a returned error, rather than logging to stderr the way
+// RealizeTip does — RealizeSync's caller handles/logs the error itself.
+func TestRealizeSync_StartErrorReturnsErr(t *testing.T) {
+	rf := NewRealizerFake()
+	rf.StartErr = errors.New("fork failed: nix not found")
+	res := Result{Applicable: true, Fresh: false, Rev: "deadbeefcafe", TipTag: "spindrift:abc123"}
+
+	err := RealizeSync(rf, "/pwd", res, ".#packages.x86_64-linux.agent-image")
+	if err == nil {
+		t.Fatal("RealizeSync() = nil, want an error when Start fails to fork")
+	}
+	if calls := rf.CallsCopy(); len(calls) != 0 {
+		t.Fatalf("len(calls) = %d, want 0 when Start fails to fork", len(calls))
+	}
+}
+
+// TestRealizeSync_WaitErrorReturnsErr verifies RealizeSync surfaces a wait()
+// failure (the build itself failing) as a returned error.
+func TestRealizeSync_WaitErrorReturnsErr(t *testing.T) {
+	rf := NewRealizerFake()
+	rf.Err = errors.New("nix build failed: attribute not found")
+	res := Result{Applicable: true, Fresh: false, Rev: "deadbeefcafe", TipTag: "spindrift:abc123"}
+
+	err := RealizeSync(rf, "/pwd", res, ".#packages.x86_64-linux.agent-image")
+	if err == nil {
+		t.Fatal("RealizeSync() = nil, want an error when wait() fails")
+	}
+}

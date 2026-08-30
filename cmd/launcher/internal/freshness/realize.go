@@ -64,12 +64,10 @@ type Realizer interface {
 // trimFlakeAttrPrefix helper Probe uses immediately before its own
 // eval.Eval call, so the two paths always address the same flake attribute.
 func RealizeTip(r Realizer, pwd string, res Result, flakeImageAttr string) {
-	if !res.Applicable || res.Fresh || res.TipTag == "" {
+	wait, attr, skipped, err := startRealize(r, pwd, res, flakeImageAttr)
+	if skipped {
 		return
 	}
-
-	attr := trimFlakeAttrPrefix(flakeImageAttr)
-	wait, err := r.Start(pwd, res.Rev, attr)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "background realize of %s tip %s (%s) failed to start: %v\n", res.TipTag, res.Rev, attr, err)
 		return
@@ -79,4 +77,47 @@ func RealizeTip(r Realizer, pwd string, res Result, flakeImageAttr string) {
 			fmt.Fprintf(os.Stderr, "background realize of %s tip %s (%s) failed: %v\n", res.TipTag, res.Rev, attr, err)
 		}
 	}()
+}
+
+// startRealize centralizes RealizeTip's and RealizeSync's shared no-op
+// guard, attr-trimming, and Start call, so the two can no longer silently
+// drift apart despite their doc comments promising they behave "the exact
+// same" up to this point (issue #2682 review finding). skipped true means
+// the guard skipped the realize entirely (a genuine no-op, not a failure) --
+// callers must check it before err, rather than inferring a skip from
+// wait == nil && err == nil, which a Start implementation returning (nil,
+// nil) on success (a Realizer contract violation, but not one this package
+// enforces) would read identically (issue #2682 review finding).
+func startRealize(r Realizer, pwd string, res Result, flakeImageAttr string) (wait func() error, attr string, skipped bool, err error) {
+	if !res.Applicable || res.Fresh || res.TipTag == "" {
+		return nil, "", true, nil
+	}
+	attr = trimFlakeAttrPrefix(flakeImageAttr)
+	wait, err = r.Start(pwd, res.Rev, attr)
+	return wait, attr, false, err
+}
+
+// RealizeSync is RealizeTip's synchronous counterpart, for a caller that
+// cannot fire-and-forget: the upcoming bwrap Box-only staleness hot-swap
+// (issue #2682) must know whether the realize succeeded before it binds the
+// newly-realized closure for subsequent Box launches, so unlike RealizeTip
+// (whose caller reaches os.Exit right after and must never block on the
+// build) it blocks on wait() itself and returns the outcome instead of
+// forking the wait into a background goroutine. It shares the exact same
+// no-op guard and attr-trimming as RealizeTip — see RealizeTip's doc comment
+// for why those checks are what they are — and, since its caller is
+// expected to handle/log the error itself, it never writes to stderr the way
+// RealizeTip's background goroutine does.
+func RealizeSync(r Realizer, pwd string, res Result, flakeImageAttr string) error {
+	wait, attr, skipped, err := startRealize(r, pwd, res, flakeImageAttr)
+	if skipped {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("realize of %s tip %s (%s) failed to start: %w", res.TipTag, res.Rev, attr, err)
+	}
+	if err := wait(); err != nil {
+		return fmt.Errorf("realize of %s tip %s (%s) failed: %w", res.TipTag, res.Rev, attr, err)
+	}
+	return nil
 }
