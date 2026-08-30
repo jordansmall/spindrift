@@ -31,6 +31,26 @@ type Dispatch struct {
 	// (successResult, retry.go) can check a log line against the same value
 	// without re-deriving it.
 	nonce string
+
+	// agentGeneration is the agent-closure generation snapshot taken from
+	// Factory.AgentGeneration() at New()-time (issue #2682), forwarded into
+	// every Box this Dispatch launches as ClosureGeneration. Nil unless the
+	// Factory ever had SetAgentGeneration called on it before this Dispatch
+	// was constructed -- matching runner.Box.ClosureGeneration's own
+	// nil-means-default contract. Snapshotting once here, rather than
+	// re-reading the Factory live at each call, is deliberate and is what
+	// implements the AC "Boxes already running finish on the one they
+	// started with": in continuous-dispatch mode (waves/continuous.go)
+	// New() and the first Run() happen back-to-back in the same goroutine,
+	// but a later Fix() (settle/ready.go) on this same Dispatch can run
+	// well after -- a Box can finish and sit idle for minutes awaiting CI
+	// before Fix() launches the next Box against the same issue
+	// (runner/bwrap.go's SnapshotGeneration doc comment covers the
+	// consequence: that generation's snapshot dir stays unreclaimed for the
+	// gap). Reusing the New()-time value for Fix() too, rather than a live
+	// getter, is what keeps that whole Dispatch pinned to the generation it
+	// started on even across that gap.
+	agentGeneration *runner.AgentGeneration
 }
 
 var _ Dispatcher = (*Dispatch)(nil)
@@ -232,6 +252,7 @@ func (d *Dispatch) runOnce(logPath string, env map[string]string, driverCacheDir
 		DriverCacheDir:          driverCacheDir,
 		OutboxDir:               outboxDir,
 		RegistryProxySocketPath: registryProxySocketPath,
+		ClosureGeneration:       d.agentGeneration,
 	}
 	return d.runner.Run(box)
 }

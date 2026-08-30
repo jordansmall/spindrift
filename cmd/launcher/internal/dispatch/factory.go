@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"io"
+	"sync"
 	"sync/atomic"
 
 	"spindrift.dev/launcher/internal/driver"
@@ -31,6 +32,15 @@ type Factory struct {
 	clock     Clock
 	cache     *cache
 	newCalled atomic.Bool
+
+	// genMu guards agentGeneration -- unlike cfg (copied by value into every
+	// Dispatch at New() and protected only by the coarse newCalled panic
+	// guard on SetHeartbeatOut), a bwrap staleness hot-swap (issue #2682)
+	// must be able to land at any time, including concurrently with New()
+	// and with an already-launched Box's own in-flight Run(). A mutex, not a
+	// before-any-New() panic, is what makes that safe.
+	genMu           sync.RWMutex
+	agentGeneration *runner.AgentGeneration
 }
 
 // NewFactory constructs a Factory and its driver-cache root. When cfg
@@ -54,16 +64,17 @@ func NewFactory(cfg Config, pwd string, r runner.Runner, drv driver.Driver, cloc
 func (f *Factory) New(number, title string) *Dispatch {
 	f.newCalled.Store(true)
 	return &Dispatch{
-		number:   number,
-		title:    title,
-		pwd:      f.pwd,
-		runner:   f.runner,
-		driver:   f.driver,
-		clock:    f.clock,
-		cfg:      f.cfg,
-		cacheDir: f.cache.dirFor(number),
-		cache:    f.cache,
-		nonce:    newNonce(),
+		number:          number,
+		title:           title,
+		pwd:             f.pwd,
+		runner:          f.runner,
+		driver:          f.driver,
+		clock:           f.clock,
+		cfg:             f.cfg,
+		cacheDir:        f.cache.dirFor(number),
+		cache:           f.cache,
+		nonce:           newNonce(),
+		agentGeneration: f.AgentGeneration(),
 	}
 }
 
@@ -120,4 +131,33 @@ func (f *Factory) SetHeartbeatOut(w io.Writer) {
 // Driver's existing test-spy role.
 func (f *Factory) HeartbeatOut() io.Writer {
 	return f.cfg.HeartbeatOut
+}
+
+// SetAgentGeneration overrides the agent-closure generation every Box
+// launched by a Dispatch this Factory constructs afterward will bind (issue
+// #2682, the bwrap Box-only staleness hot-swap). Unlike SetHeartbeatOut,
+// this carries no before-any-New() panic guard: a hot-swap must be able to
+// land well after dispatching has already started -- concurrently with
+// New() minting new Dispatch values on other goroutines, and with an
+// already-launched Box's own in-flight Run() -- so the mutex here, not a
+// runtime-enforced ordering, is what keeps a concurrent set/read race-free.
+// A nil gen restores "use the runner adapter's own startup-baked default",
+// matching runner.Box.ClosureGeneration's own nil-means-default contract.
+func (f *Factory) SetAgentGeneration(gen *runner.AgentGeneration) {
+	f.genMu.Lock()
+	defer f.genMu.Unlock()
+	f.agentGeneration = gen
+}
+
+// AgentGeneration returns the agent-closure generation this Factory
+// currently carries -- nil until SetAgentGeneration is ever called (every
+// non-bwrap runtime, and a bwrap run before its first hot-swap), meaning
+// "use the runner adapter's own startup-baked default." New() snapshots this
+// value into each Dispatch it constructs, so a swap that lands mid-run only
+// affects Boxes launched by a Dispatch minted after the swap, never one
+// already in flight.
+func (f *Factory) AgentGeneration() *runner.AgentGeneration {
+	f.genMu.RLock()
+	defer f.genMu.RUnlock()
+	return f.agentGeneration
 }
