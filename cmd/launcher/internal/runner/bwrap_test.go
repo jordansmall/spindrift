@@ -1301,3 +1301,105 @@ func TestMemoryLimitToBytes(t *testing.T) {
 		}
 	}
 }
+
+// TestBwrapRun_MissingSyscallFilterWarnsAndProceeds verifies that a
+// syscallFilterPath pointing at a nonexistent file (issue #2670) is treated
+// as a hardening gap, not a safety blocker (ADR 0042's degrade-don't-lie
+// posture, matching provisionCgroup/prlimit): Run still succeeds and prints
+// a warning, rather than failing the whole Box launch over an unopenable
+// filter file.
+func TestBwrapRun_MissingSyscallFilterWarnsAndProceeds(t *testing.T) {
+	script, _ := newFakeCLI(t, fakeCall{exit: 0})
+	origExec := execCommand
+	t.Cleanup(func() { execCommand = origExec })
+	var gotCmd *exec.Cmd
+	execCommand = func(name string, args ...string) *exec.Cmd {
+		gotCmd = exec.Command(script, args...)
+		return gotCmd
+	}
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldStdout := os.Stdout
+	os.Stdout = w
+
+	a := &bwrapAdapter{
+		agentFiles:        "/fake/agent",
+		agentEnv:          "/fake/env",
+		bakedPrefetch:     "echo ok",
+		networkMode:       NetworkModeHost,
+		syscallFilterPath: filepath.Join(t.TempDir(), "does-not-exist.bpf"),
+	}
+	runErr := a.Run(Box{Name: "test-box", Env: map[string]string{}})
+
+	w.Close()
+	os.Stdout = oldStdout
+	var buf bytes.Buffer
+	if _, err := io.Copy(&buf, r); err != nil {
+		t.Fatal(err)
+	}
+
+	if runErr != nil {
+		t.Fatalf("Run: %v", runErr)
+	}
+	if !strings.Contains(buf.String(), "warning") {
+		t.Errorf("Run output missing missing-syscall-filter warning: %q", buf.String())
+	}
+	// A failed open must also drop "--seccomp" from argv, not just skip
+	// attaching ExtraFiles -- otherwise bwrap tries to read a nonexistent fd
+	// 3 at its own startup and the whole Box launch fails (issue #2670).
+	for _, arg := range gotCmd.Args {
+		if arg == "--seccomp" {
+			t.Errorf("gotCmd.Args = %v, want no --seccomp flag when the filter file failed to open", gotCmd.Args)
+			break
+		}
+	}
+}
+
+// TestBwrapRun_SyscallFilterAttachedAsExtraFile verifies that a
+// syscallFilterPath pointing at a real, readable file ends up attached to
+// the bwrap cmd.ExtraFiles (issue #2670) -- the mechanism by which bwrap's
+// own --seccomp 3 argument (buildArgs) finds an actual open fd to read the
+// compiled BPF filter from.
+func TestBwrapRun_SyscallFilterAttachedAsExtraFile(t *testing.T) {
+	script, _ := newFakeCLI(t, fakeCall{exit: 0})
+	origExec := execCommand
+	t.Cleanup(func() { execCommand = origExec })
+	var gotCmd *exec.Cmd
+	execCommand = func(name string, args ...string) *exec.Cmd {
+		gotCmd = exec.Command(script, args...)
+		return gotCmd
+	}
+
+	filterPath := filepath.Join(t.TempDir(), "filter.bpf")
+	if err := os.WriteFile(filterPath, []byte("fake-bpf-bytes"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	a := &bwrapAdapter{
+		agentFiles:        "/fake/agent",
+		agentEnv:          "/fake/env",
+		bakedPrefetch:     "echo ok",
+		networkMode:       NetworkModeHost,
+		syscallFilterPath: filterPath,
+	}
+	if err := a.Run(Box{Env: map[string]string{}}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if len(gotCmd.ExtraFiles) != 1 {
+		t.Fatalf("gotCmd.ExtraFiles = %v, want exactly one entry", gotCmd.ExtraFiles)
+	}
+	found := false
+	for i, arg := range gotCmd.Args {
+		if arg == "--seccomp" && i+1 < len(gotCmd.Args) && gotCmd.Args[i+1] == "3" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("gotCmd.Args = %v, want \"--seccomp\" \"3\"", gotCmd.Args)
+	}
+}

@@ -69,6 +69,13 @@ type Config struct {
 	// NixConfigFileDrv is its .drv path; realized by `launcher build`
 	// alongside the other bwrap agent store closures, when set.
 	NixConfigFileDrv string
+	// SyscallFilterPath is the baked nix store path to the compiled BPF
+	// syscall-filter file (issue #2670), used by the bwrap run adapter.
+	// Unlike NixConfigFile, this is unconditional: it always builds
+	// regardless of the Consumer's nixInBox knob.
+	SyscallFilterPath string
+	// SyscallFilterDrv is its .drv path; realized by `launcher build`.
+	SyscallFilterDrv string
 	// NixStoreWritable gates whether the bwrap adapter overlays /nix/store
 	// with an ephemeral tmpfs upper instead of binding it read-only (ADR
 	// 0042). Has no effect unless NixConfigFile is also set: nix isn't even
