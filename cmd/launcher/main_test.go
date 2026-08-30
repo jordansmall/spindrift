@@ -21,6 +21,7 @@ import (
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/forgetest"
 	"spindrift.dev/launcher/internal/forge/local"
+	"spindrift.dev/launcher/internal/freshness"
 	"spindrift.dev/launcher/internal/localloop"
 	"spindrift.dev/launcher/internal/outcome"
 )
@@ -3607,6 +3608,58 @@ func TestRunDoctor_WiresLauncherChecksIntoOutput(t *testing.T) {
 	out := buf.String()
 	if !strings.Contains(out, "MISSING: git-user-name") {
 		t.Errorf("want runDoctor's output to report launcherChecks(c)'s failing git-user-name row (proves it wired launcherChecks(c), not nil), got:\n%s", out)
+	}
+}
+
+// TestRunDoctor_WiresBwrapCapabilityChecksIntoOutput verifies runDoctor
+// passes doctorReportChecks(c) -- not doctorExtraChecks(c) -- as doctor.Run's
+// extraChecks argument: doctorReportChecks(c) appends
+// bwrapCapabilityChecks(c)'s three bwrap-capability rows on top of
+// doctorExtraChecks(c), so an operator running `spindrift doctor` on a
+// bwrap-runner config sees the host's bwrap capability posture. Swapping
+// runDoctor's call site back to doctorExtraChecks(c) would drop these rows
+// silently -- the full suite would still pass, since
+// TestRunDoctor_WiresLauncherChecksIntoOutput above only proves
+// doctorExtraChecks(c) itself is wired, not the bwrap rows appended on top
+// (issue #2671 round-3 review finding). c.runnerKind = freshness.KindBwrap
+// is required for bwrapCapabilityChecks to return any rows at all
+// (self-gated, see bwrap_doctor_checks.go); validateCgroupDelegationFn is
+// swapped to fail so the always-Advisory bwrap-cgroup-delegation row renders
+// deterministically as "advisory:" rather than depending on this host's
+// real cgroup delegation state.
+func TestRunDoctor_WiresBwrapCapabilityChecksIntoOutput(t *testing.T) {
+	f := forge.NewFake()
+	f.ProbeRepo = "owner/repo"
+	f.Labels = []string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}
+
+	c := minimalValidConfig()
+	c.label, c.inProgressLabel, c.failedLabel, c.completeLabel =
+		"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"
+	c.runnerKind = freshness.KindBwrap
+
+	origCgroup := validateCgroupDelegationFn
+	t.Cleanup(func() { validateCgroupDelegationFn = origCgroup })
+	validateCgroupDelegationFn = func() error { return errors.New("distinguishable cgroup delegation sentinel") }
+
+	// Deterministic stand-ins so this test never spawns a real bwrap
+	// subprocess (validateOverlayFn) or does a real PATH lookup
+	// (validatePastaFn) -- their return value doesn't matter to the
+	// assertion below, which targets bwrap-cgroup-delegation only.
+	origOverlay := validateOverlayFn
+	t.Cleanup(func() { validateOverlayFn = origOverlay })
+	validateOverlayFn = func() error { return nil }
+
+	origPasta := validatePastaFn
+	t.Cleanup(func() { validatePastaFn = origPasta })
+	validatePastaFn = func() error { return nil }
+
+	var buf bytes.Buffer
+	if err := runDoctor(f, f, c, &buf, strings.NewReader(""), false); err != nil {
+		t.Fatalf("unexpected error: %v", err) // extraChecks are informational-only, never fail Run
+	}
+	out := buf.String()
+	if !strings.Contains(out, "advisory: bwrap-cgroup-delegation") {
+		t.Errorf("want runDoctor's output to report bwrapCapabilityChecks(c)'s bwrap-cgroup-delegation row (proves it wired doctorReportChecks(c), not doctorExtraChecks(c)), got:\n%s", out)
 	}
 }
 

@@ -100,7 +100,7 @@ func runDoctor(it forge.IssueTracker, cf forge.CodeForge, c config, w io.Writer,
 		Runtime:         c.runtime,
 		MergePolicy:     c.mergeMode,
 		BaseBranch:      c.baseBranch,
-	}, w, bufio.NewScanner(stdin), interactive, doctorExtraChecks(c)); err != nil {
+	}, w, bufio.NewScanner(stdin), interactive, doctorReportChecks(c)); err != nil {
 		return err
 	}
 	return reportReadOnlyTokenGate(c, w)
