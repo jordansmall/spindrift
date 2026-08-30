@@ -46,11 +46,12 @@ let
     packages = p: [ p.hello ];
   };
 
-  # The dogfood as a direct call, mirroring the `spindrift = { ... }`
-  # module config below. Kept so the equivalence check can prove the
-  # module and direct paths yield byte-identical outputs.  Uses the
-  # same revision as the dogfood module (passed in from flake.nix).
-  harness = import ../lib/mkHarness.nix {
+  # The tuned dogfood args shared verbatim by every dogfood-flavored mkHarness
+  # call below (issue #2672 review fix) — bound once so a future
+  # nix/dogfood-defaults.nix key threaded into only one call site can't quietly
+  # make the podman/bwrap A/B a comparison of diverging configs instead of a
+  # runtime-only one.
+  dogfoodHarnessArgs = {
     inherit nixpkgs system revision;
     inherit (dogfoodDefaults)
       prefetch
@@ -62,6 +63,18 @@ let
       ;
     skills = dogfoodSkills;
   };
+
+  # The dogfood as a direct call, mirroring the `spindrift = { ... }`
+  # module config below. Kept so the equivalence check can prove the
+  # module and direct paths yield byte-identical outputs.  Uses the
+  # same revision as the dogfood module (passed in from flake.nix).
+  harness = import ../lib/mkHarness.nix dogfoodHarnessArgs;
+
+  # The dogfood-over-bwrap A/B twin of `harness` above (issue #2672): same
+  # tuned dogfood values verbatim, only `runtime` swapped to "bwrap", so the
+  # dogfood loop can be run through the daemonless bwrap runner without a
+  # second, hand-copied config drifting from the podman-backed original.
+  dogfoodBwrapHarness = import ../lib/mkHarness.nix (dogfoodHarnessArgs // { runtime = "bwrap"; });
 
   # The template's config as a direct call with revision = "unknown".
   # Used by template-fixture: the template module consumer has a stub self
@@ -428,6 +441,7 @@ in
     ghFakeOverlay
     batsHarness
     harness
+    dogfoodBwrapHarness
     nonRustHarness
     leanHarness
     nixStoreWritableHarness
