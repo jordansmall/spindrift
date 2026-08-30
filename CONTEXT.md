@@ -804,10 +804,12 @@ only through Resolve; the one door left open beside it is the exported
 `LastSelfReport`, a single-log read for a caller that wants the self-report
 signal unconditionally, alongside a possibly already-found genuine outcome,
 rather than adjudicated against it as Resolve's own last-resort tier does.
-This ticket wires the seam only — `dispatch.Result` does not yet carry a
-`Provenance` field, and settle still re-derives its own view of which tier
-produced an outcome rather than reading it off Resolved; a follow-on ticket
-makes those consumers read through Resolve instead.
+The seam's consumers now read through it: `dispatch.Result` carries the
+whole `Resolved` value, settle branches on `Result.Resolved`
+(`Provenance`, `SelfReport`) without ever scanning a log itself, and
+dispatch's own single-log scans (`successResult`, `settledOutcome`)
+deliberately exclude the self-report tier, settling only on a genuine or
+synthetic outcome.
 _Avoid_: box truth, verdict.
 
 **Guardrail prompt**:
