@@ -72,7 +72,8 @@ let
     // (import ./go.nix common)
     // (import ./roster.nix common)
     // (import ./promptassembly.nix common)
-    // (import ./baked-skills.nix common);
+    // (import ./baked-skills.nix common)
+    // (import ./seccomp.nix common);
 
   imageChecks = pkgs.lib.optionalAttrs pkgs.stdenv.isLinux (import ./image.nix common);
 
@@ -130,6 +131,11 @@ let
     # for the same reason agent-closure itself is Linux-only.
     "mkharness-agent-closure-package"
     "mkharness-agent-closure-bundles-both"
+    # lib/seccomp.nix (nix/checks/seccomp.nix) builds against pkgs.libseccomp,
+    # whose meta.platforms is Linux-only -- evaluating it on darwin throws
+    # "Refusing to evaluate package 'libseccomp' ... not available on the
+    # requested hostPlatform" before the check derivation itself ever runs.
+    "seccomp-filter-is-regular-file-multiple-of-8-bytes"
   ];
 
   # The darwin checkset drops the Linux-bound checks; Linux keeps everything.
