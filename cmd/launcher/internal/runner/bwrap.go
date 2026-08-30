@@ -382,8 +382,13 @@ func (a *bwrapAdapter) buildArgs(etcDir string, box Box) []string {
 			args = append(args, "--setenv", k, v)
 		}
 	}
+	// bwrap is PID 1 inside its own unshared PID namespace, so
+	// --die-with-parent's PR_SET_PDEATHSIG kills the whole sandbox when
+	// bwrap's own immediate OS parent dies (issue #2669) -- the launcher
+	// itself on the direct-exec chain, but only pasta on the pasta chain
+	// (see setDeathSignal's call-site comment in Run for that gap).
 	unshareFlags := []string{"--unshare-user", "--uid", "1000", "--gid", "1000",
-		"--unshare-pid", "--unshare-ipc", "--unshare-uts"}
+		"--unshare-pid", "--unshare-ipc", "--unshare-uts", "--die-with-parent"}
 	// bwrap only unshares net itself for the fully offline networkMode=none
 	// case. Every other isolating mode leaves this to pasta: pasta's own
 	// documented behavior is to create and configure the fresh network
@@ -623,6 +628,17 @@ func (a *bwrapAdapter) Run(box Box) error {
 	// are therefore available inside the sandbox without appearing on argv.
 	program, execArgs := a.execTarget(etcDir, box)
 	cmd := execCommand(program, execArgs...)
+	// Pdeathsig kills this direct child (bwrap, pasta, or prlimit, whichever
+	// execTarget resolved to) the moment the launcher itself dies, so a
+	// killed/crashed launcher never leaves an orphaned Box running. This is
+	// separate from bwrap's own --die-with-parent flag (buildArgs), which
+	// only protects bwrap against ITS immediate OS parent -- pasta, in the
+	// fork case, not the launcher two hops up. setDeathSignal is a
+	// platform-split seam (bwrap_pdeathsig_linux.go /
+	// bwrap_pdeathsig_other.go): syscall.SysProcAttr.Pdeathsig is Linux-only,
+	// but the launcher binary itself must still cross-compile for darwin
+	// (nix/checks/go.nix's launcher-cross-build).
+	setDeathSignal(cmd)
 	cmd.Env = resolvedRunEnv(box.Env)
 	if program == "pasta" {
 		// pasta is now the top-level process and execs "bwrap" itself (as a
