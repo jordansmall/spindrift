@@ -770,8 +770,8 @@ per-run control nonce (`RUN_NONCE`, issues #1937/#1939): `SPINDRIFT_OUTCOME`
 is defended by **structure** instead. In-box, the per-driver extractor
 jq-scopes to the agent's own final message (claude
 `select(.type=="result")`, opencode `select(.type=="text")`) and re-emits one
-**bare, leading** line; host-side, `LastInLog`'s primary tier requires the
-token to _lead_ the line. Untrusted corpus reaches the log only as a
+**bare, leading** line; host-side, `lastInLog` treats only a leading-token
+line as a candidate. Untrusted corpus reaches the log only as a
 `tool_result` (wrong event type) or buried mid-JSON in the raw transcript
 (non-leading), so it cannot win regardless of any nonce. ADR 0039 records the
 decision to retire the nonce here — structural scoping is the freshness
@@ -782,7 +782,7 @@ survive only as a token embedded in one JSON-escaped line. The line carries only
 Box — never backend identity or other run config, which the Launcher already
 holds authoritatively. The `cmd/launcher/internal/outcome` package is the
 authoritative spec and implementation: `Parse` validates the grammar, `Line`
-produces the canonical form, and `LastInLog` scans a Box log while gracefully
+produces the canonical form, and `lastInLog` scans a Box log while gracefully
 skipping lines too large for the scanner buffer. The line is *evidence*, not
 the verdict: the Launcher is the sole authority that decides a run's
 disposition (ADR 0039), reading it alongside the outbox bundle (present ⇒
