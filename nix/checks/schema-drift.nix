@@ -1181,8 +1181,9 @@ in
         "open"
         "no-host-loopback"
         "none"
+        "host"
       ]
-    ) "lib/env-schema.nix: networkMode.choices must be [ open no-host-loopback none ]";
+    ) "lib/env-schema.nix: networkMode.choices must be [ open no-host-loopback none host ]";
     pkgs.runCommand "schema-choices" { } "touch $out";
 
   # Regression guard (issue #2519): the choices-bearing knob-set assertion

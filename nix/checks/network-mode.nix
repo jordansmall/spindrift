@@ -46,6 +46,18 @@ in
       "mkHarness.nix must not throw when networkMode is set to a valid choice (none)";
     pkgs.runCommand "network-mode-none-does-not-throw" { } "touch $out";
 
+  # network.mode = "host" (issue #2666) is the bwrap-only documented opt-out
+  # that restores the pre-#2666 shared-host-netns posture; it's a valid
+  # choice on every runtime (no OCI rendering, harmless no-op there), so it
+  # must not throw on the default runtime (podman) either.
+  network-mode-host-does-not-throw =
+    let
+      ok = builtins.tryEval (builtins.seq (mkHarnessWith { networkMode = "host"; }) "reached");
+    in
+    assert assertMsg ok.success
+      "mkHarness.nix must not throw when networkMode is set to a valid choice (host)";
+    pkgs.runCommand "network-mode-host-does-not-throw" { } "touch $out";
+
   # network.mode set together with a raw network knob (network.podman) has
   # no precedence rule -- the Consumer must pick one, so the assert must
   # throw rather than silently pick a winner.
@@ -63,9 +75,12 @@ in
     ) "mkHarness.nix must throw when networkMode is set together with the raw podmanNetwork knob";
     pkgs.runCommand "network-mode-and-raw-podman-network-both-set-throws" { } "touch $out";
 
-  # network.mode = no-host-loopback is unsupported on runtime = bwrap: bwrap
-  # can only unshare its network namespace all-or-nothing, so there is no
-  # partial host-loopback isolation to render.
+  # network.mode = no-host-loopback is unsupported on runtime = bwrap: since
+  # issue #2666 a bwrap Box isolates its network namespace by default (via a
+  # hardened pasta helper), so no-host-loopback would render
+  # byte-identical to the default "open" -- the choice stays rejected rather
+  # than let a Consumer believe it buys something "open" doesn't already
+  # give.
   network-mode-no-host-loopback-on-bwrap-throws =
     let
       broken = builtins.tryEval (
