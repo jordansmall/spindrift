@@ -41,6 +41,15 @@ func launcherChecks(c config) []doctor.Check {
 // removed: doctor.Run reports runtime validity itself via Config.Runtime's
 // own advisory line (non-fatal, distinct from the MISSING framing generic
 // extraChecks rows get), so the two never both print for one invocation.
+//
+// This is the row set validateConfig (main.go) also consumes to classify
+// exit 2 "configuration invalid" — bwrapCapabilityChecks(c)'s rows must
+// never be folded in here, even though they're Required-tier when
+// applicable: a bwrap host missing pasta is an environment/installation
+// concern (mirroring doctor.RuntimeCheck's own exclusion above), not a
+// configuration fault, so it must not make `spindrift doctor` exit 2 (issue
+// #2671 round-1 review finding). See doctorReportChecks
+// (bwrap_doctor_checks.go) for the superset runDoctor reports.
 func doctorExtraChecks(c config) []doctor.Check {
 	checks := launcherChecks(c)
 	out := make([]doctor.Check, 0, len(checks))

@@ -7,12 +7,13 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/doctor"
+	"spindrift.dev/launcher/internal/freshness"
 )
 
-// checkByName finds the row named name among launcherChecks(c)'s rows,
-// failing the test if it's absent — every test below wants exactly one row,
-// not linear position, so a reordering of launcherChecks's slice literal
-// doesn't break these tests.
+// checkByName finds the row named name among the given checks' rows, failing
+// the test if it's absent — every test below wants exactly one row, not
+// linear position, so a reordering of the underlying slice literal doesn't
+// break these tests.
 func checkByName(t *testing.T, checks []doctor.Check, name string) doctor.Check {
 	t.Helper()
 	for _, ch := range checks {
@@ -20,7 +21,7 @@ func checkByName(t *testing.T, checks []doctor.Check, name string) doctor.Check 
 			return ch
 		}
 	}
-	t.Fatalf("no check named %q in launcherChecks output", name)
+	t.Fatalf("no check named %q in checks", name)
 	return doctor.Check{}
 }
 
@@ -367,6 +368,56 @@ func TestDoctorExtraChecks_StripsRuntimeRowOnly(t *testing.T) {
 	for _, ch := range extra {
 		if ch.Name == doctor.RuntimeCheckName {
 			t.Errorf("doctorExtraChecks output still contains a row named %q", doctor.RuntimeCheckName)
+		}
+	}
+}
+
+// TestDoctorReportChecks_BwrapRowsGatedOnRunnerKind verifies
+// doctorReportChecks appends bwrapCapabilityChecks(c)'s three rows only when
+// c.runnerKind == freshness.KindBwrap, and omits them entirely for any other
+// runnerKind (issue #2671 AC: "Reported only when the configured runtime is
+// bwrap").
+func TestDoctorReportChecks_BwrapRowsGatedOnRunnerKind(t *testing.T) {
+	bwrapRowNames := []string{"bwrap-overlay-support", "bwrap-network-isolation", "bwrap-cgroup-delegation"}
+
+	c := minimalValidConfig()
+	c.runnerKind = freshness.KindBwrap
+	report := doctorReportChecks(c)
+	for _, name := range bwrapRowNames {
+		checkByName(t, report, name)
+	}
+
+	c = minimalValidConfig()
+	c.runnerKind = "oci"
+	report = doctorReportChecks(c)
+	for _, ch := range report {
+		for _, name := range bwrapRowNames {
+			if ch.Name == name {
+				t.Errorf("doctorReportChecks output contains %q for non-bwrap runnerKind %q", name, c.runnerKind)
+			}
+		}
+	}
+}
+
+// TestDoctorExtraChecks_NeverIncludesBwrapCapabilityRows verifies
+// doctorExtraChecks never contains any bwrap-capability row, even when
+// c.runnerKind == freshness.KindBwrap: this is the row set validateConfig
+// (main.go) also consumes to classify exit 2 "configuration invalid", and a
+// bwrap host-capability gap (e.g. missing pasta) is an
+// environment/installation concern, not a configuration fault (issue #2671
+// round-1 review finding) -- folding these rows in here previously made
+// `spindrift doctor` wrongly exit 2 for that case.
+func TestDoctorExtraChecks_NeverIncludesBwrapCapabilityRows(t *testing.T) {
+	bwrapRowNames := []string{"bwrap-overlay-support", "bwrap-network-isolation", "bwrap-cgroup-delegation"}
+
+	c := minimalValidConfig()
+	c.runnerKind = freshness.KindBwrap
+	extra := doctorExtraChecks(c)
+	for _, ch := range extra {
+		for _, name := range bwrapRowNames {
+			if ch.Name == name {
+				t.Errorf("doctorExtraChecks output contains %q; bwrap-capability rows must never feed validateConfig", name)
+			}
 		}
 	}
 }
