@@ -52,19 +52,19 @@ const staleDrainMarker = "stale-drain.log"
 // main.go's runExitCode).
 var ErrImageStale = errors.New("image stale; rebuild and re-invoke")
 
-// Discoverer re-queries the dispatchable batch, its blocker edges, the
-// source (native relationship vs body-text parsing) each blocker was
-// resolved from, and the set of issues whose own NewReadiness/DepsOf call
-// errored (#752, #1103) — a transient tracker hiccup that looks identical to
-// a confirmed zero-blocker issue in edges alone unless a caller checks
-// failed explicitly. RunContinuous calls it once at startup and again before
-// every slot refill, so a blocker that merges mid-run is picked up without a
-// fresh invocation. Config.DiscoverReporting (#2777) is a second,
-// independently-settable value of this same type: RunContinuous never calls
-// it for regular discovery, only for the stale-transition heldBack
-// computation, where it stands in for the discover param when the caller
-// needs that call to stay side-effect free.
-type Discoverer func() (issues []Issue, edges map[string][]string, sources Sources, failed map[string]bool, err error)
+// Discoverer re-queries the dispatchable Batch — its candidate issues, their
+// blocker edges, the source (native relationship vs body-text parsing) each
+// blocker was resolved from, and the set of issues whose own
+// NewReadiness/DepsOf call errored (#752, #1103, a transient tracker hiccup
+// that looks identical to a confirmed zero-blocker issue in Edges alone
+// unless a caller checks Failed explicitly). RunContinuous calls it once at
+// startup and again before every slot refill, so a blocker that merges
+// mid-run is picked up without a fresh invocation. Config.DiscoverReporting
+// (#2777) is a second, independently-settable value of this same type:
+// RunContinuous never calls it for regular discovery, only for the
+// stale-transition heldBack computation, where it stands in for the
+// discover param when the caller needs that call to stay side-effect free.
+type Discoverer func() (Batch, error)
 
 // FreshnessChecker answers whether a refill may launch a new Box.
 // Applicable is false for a runtime with no loaded image to compare
@@ -405,13 +405,13 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 				if cfg.DiscoverReporting != nil {
 					reportDiscover = cfg.DiscoverReporting
 				}
-				if issues, edges, _, failed, err := reportDiscover(); err != nil {
+				if batch, err := reportDiscover(); err != nil {
 					fmt.Fprintf(os.Stderr, "continuous: re-discover for stale-drain report: %v\n", err)
 					staleDrain.heldBackUnknown = true
 				} else {
-					unclaimed := dropClaimed(issues, claimed)
+					unclaimed := dropClaimed(batch.Issues, claimed)
 					checkOverlap := waveOverlapCheck(cfg, it, cf)
-					staleDrain.heldBack = countReady(cfg, it, cf, checkOverlap, unclaimed, edges, failed)
+					staleDrain.heldBack = countReady(cfg, it, cf, checkOverlap, unclaimed, batch.Edges, batch.Failed)
 				}
 			default:
 				staleDrain.heldBackUnknown = true
@@ -427,14 +427,11 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 			}
 			return false
 		}
-		var issues []Issue
-		var edges map[string][]string
-		var sources Sources
-		var failed map[string]bool
+		var batch Batch
 		attempt := 0
 		for {
 			var err error
-			issues, edges, sources, failed, err = discover()
+			batch, err = discover()
 			if err == nil {
 				break
 			}
@@ -455,16 +452,16 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 		// Continuous refill has no Origin concept — it is always the
 		// discovered pool, never a hand-picked selective list — so, unlike
 		// NewPlan, sort unconditionally (ADR 0040).
-		forge.SortByPriority(issues, func(i Issue) forge.Priority { return i.Priority })
-		if len(edges) > 0 {
-			if node, cycle := detectCycle(edges, forge.Numbers(issues, func(i Issue) string { return i.Number })); cycle {
+		forge.SortByPriority(batch.Issues, func(i Issue) forge.Priority { return i.Priority })
+		if len(batch.Edges) > 0 {
+			if node, cycle := detectCycle(batch.Edges, forge.Numbers(batch.Issues, func(i Issue) string { return i.Number })); cycle {
 				fmt.Fprintf(os.Stderr, "==> ERROR: dependency cycle detected (issue #%s is in the cycle); skipping this refill\n", node)
 				return false
 			}
 		}
 		checkOverlap := waveOverlapCheck(cfg, it, cf)
-		unclaimed := dropClaimed(issues, claimed)
-		iss, ok := nextReady(cfg, it, cf, checkOverlap, unclaimed, edges, sources, failed, logged)
+		unclaimed := dropClaimed(batch.Issues, claimed)
+		iss, ok := nextReady(cfg, it, cf, checkOverlap, unclaimed, batch.Edges, batch.Sources, batch.Failed, logged)
 		if !ok {
 			return false
 		}

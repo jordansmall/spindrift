@@ -63,16 +63,16 @@ func TestRunContinuous_RefillsFreedSlotWhileOthersRunning(t *testing.T) {
 	f := testFactory(t, dir, fr)
 	s := newSettle(fc, fc)
 
-	discover := func() ([]Issue, map[string][]string, Sources, map[string]bool, error) {
+	discover := func() (Batch, error) {
 		raw, err := fc.ListIssues(forge.Dispatchable)
 		if err != nil {
-			return nil, nil, nil, nil, err
+			return Batch{}, err
 		}
 		out := make([]Issue, len(raw))
 		for i, fi := range raw {
 			out[i] = Issue{Number: fi.Number, Title: fi.Title}
 		}
-		return out, map[string][]string{}, nil, nil, nil
+		return Batch{Issues: out, Edges: map[string][]string{}}, nil
 	}
 	fresh := func() (bool, bool, string) { return true, true, "fresh" }
 
@@ -133,16 +133,16 @@ func TestRunContinuous_RefillPicksUpIssueUnblockedMidRun(t *testing.T) {
 	s := newSettle(fc, fc)
 
 	edges := map[string][]string{"2": {"3"}}
-	discover := func() ([]Issue, map[string][]string, Sources, map[string]bool, error) {
+	discover := func() (Batch, error) {
 		raw, err := fc.ListIssues(forge.Dispatchable)
 		if err != nil {
-			return nil, nil, nil, nil, err
+			return Batch{}, err
 		}
 		out := make([]Issue, len(raw))
 		for i, fi := range raw {
 			out[i] = Issue{Number: fi.Number, Title: fi.Title}
 		}
-		return out, edges, nil, nil, nil
+		return Batch{Issues: out, Edges: edges}, nil
 	}
 	fresh := func() (bool, bool, string) { return true, true, "fresh" }
 
@@ -209,16 +209,16 @@ func TestRunContinuous_ResizeUpMidDrainLaunchesNextIssue(t *testing.T) {
 	f := testFactory(t, dir, fr)
 	s := newSettle(fc, fc)
 
-	discover := func() ([]Issue, map[string][]string, Sources, map[string]bool, error) {
+	discover := func() (Batch, error) {
 		raw, err := fc.ListIssues(forge.Dispatchable)
 		if err != nil {
-			return nil, nil, nil, nil, err
+			return Batch{}, err
 		}
 		out := make([]Issue, len(raw))
 		for i, fi := range raw {
 			out[i] = Issue{Number: fi.Number, Title: fi.Title}
 		}
-		return out, map[string][]string{}, nil, nil, nil
+		return Batch{Issues: out, Edges: map[string][]string{}}, nil
 	}
 	fresh := func() (bool, bool, string) { return true, true, "fresh" }
 
@@ -296,16 +296,16 @@ func TestRunContinuous_RapidResizeLaunchesAllHeldPicks(t *testing.T) {
 	f := testFactory(t, dir, fr)
 	s := newSettle(fc, fc)
 
-	discover := func() ([]Issue, map[string][]string, Sources, map[string]bool, error) {
+	discover := func() (Batch, error) {
 		raw, err := fc.ListIssues(forge.Dispatchable)
 		if err != nil {
-			return nil, nil, nil, nil, err
+			return Batch{}, err
 		}
 		out := make([]Issue, len(raw))
 		for i, fi := range raw {
 			out[i] = Issue{Number: fi.Number, Title: fi.Title}
 		}
-		return out, map[string][]string{}, nil, nil, nil
+		return Batch{Issues: out, Edges: map[string][]string{}}, nil
 	}
 	fresh := func() (bool, bool, string) { return true, true, "fresh" }
 
@@ -414,16 +414,16 @@ func TestRunContinuous_ResizeDownNeverTerminatesGatesNewLaunches(t *testing.T) {
 	f := testFactory(t, dir, fr)
 	s := newSettle(fc, fc)
 
-	discover := func() ([]Issue, map[string][]string, Sources, map[string]bool, error) {
+	discover := func() (Batch, error) {
 		raw, err := fc.ListIssues(forge.Dispatchable)
 		if err != nil {
-			return nil, nil, nil, nil, err
+			return Batch{}, err
 		}
 		out := make([]Issue, len(raw))
 		for i, fi := range raw {
 			out[i] = Issue{Number: fi.Number, Title: fi.Title}
 		}
-		return out, map[string][]string{}, nil, nil, nil
+		return Batch{Issues: out, Edges: map[string][]string{}}, nil
 	}
 	fresh := func() (bool, bool, string) { return true, true, "fresh" }
 
@@ -503,16 +503,16 @@ func TestRunContinuous_StaleProbeStopsRefillLetsInFlightFinish(t *testing.T) {
 	f := testFactory(t, dir, fr)
 	s := newSettle(fc, fc)
 
-	discover := func() ([]Issue, map[string][]string, Sources, map[string]bool, error) {
+	discover := func() (Batch, error) {
 		raw, err := fc.ListIssues(forge.Dispatchable)
 		if err != nil {
-			return nil, nil, nil, nil, err
+			return Batch{}, err
 		}
 		out := make([]Issue, len(raw))
 		for i, fi := range raw {
 			out[i] = Issue{Number: fi.Number, Title: fi.Title}
 		}
-		return out, map[string][]string{}, nil, nil, nil
+		return Batch{Issues: out, Edges: map[string][]string{}}, nil
 	}
 
 	// Fresh for the first refill (fills #1's slot), stale for every
@@ -600,16 +600,16 @@ func TestRunContinuous_StaleDrainWithInFlightBoxReportsHeldBack(t *testing.T) {
 	f := testFactory(t, dir, fr)
 	s := newSettle(fc, fc)
 
-	discover := func() ([]Issue, map[string][]string, Sources, map[string]bool, error) {
+	discover := func() (Batch, error) {
 		raw, err := fc.ListIssues(forge.Dispatchable)
 		if err != nil {
-			return nil, nil, nil, nil, err
+			return Batch{}, err
 		}
 		out := make([]Issue, len(raw))
 		for i, fi := range raw {
 			out[i] = Issue{Number: fi.Number, Title: fi.Title}
 		}
-		return out, map[string][]string{}, nil, nil, nil
+		return Batch{Issues: out, Edges: map[string][]string{}}, nil
 	}
 
 	// Fresh for the first refill (fills #1's slot), stale for every
@@ -717,7 +717,7 @@ func TestRunContinuous_StaleDrainDiscoverErrorReportsHeldBackUnknown(t *testing.
 	errDiscover := errors.New("tracker rate limited")
 	var discoverMu sync.Mutex
 	discoverCalls := 0
-	discover := func() ([]Issue, map[string][]string, Sources, map[string]bool, error) {
+	discover := func() (Batch, error) {
 		discoverMu.Lock()
 		discoverCalls++
 		n := discoverCalls
@@ -726,17 +726,17 @@ func TestRunContinuous_StaleDrainDiscoverErrorReportsHeldBackUnknown(t *testing.
 			// The stale-transition's reporting-only re-discover call: a
 			// transient tracker hiccup, distinct from the bootstrap call
 			// (n == 1) that must succeed to get #1 in flight at all.
-			return nil, nil, nil, nil, errDiscover
+			return Batch{}, errDiscover
 		}
 		raw, err := fc.ListIssues(forge.Dispatchable)
 		if err != nil {
-			return nil, nil, nil, nil, err
+			return Batch{}, err
 		}
 		out := make([]Issue, len(raw))
 		for i, fi := range raw {
 			out[i] = Issue{Number: fi.Number, Title: fi.Title}
 		}
-		return out, map[string][]string{}, nil, nil, nil
+		return Batch{Issues: out, Edges: map[string][]string{}}, nil
 	}
 
 	// Fresh for the first refill (fills #1's slot), stale for every refill
@@ -928,16 +928,16 @@ func TestRunContinuous_StaleDrainResizeBelowOutstandingClampsFreeSlotSecs(t *tes
 	f := testFactory(t, dir, fr)
 	s := newSettle(fc, fc)
 
-	discover := func() ([]Issue, map[string][]string, Sources, map[string]bool, error) {
+	discover := func() (Batch, error) {
 		raw, err := fc.ListIssues(forge.Dispatchable)
 		if err != nil {
-			return nil, nil, nil, nil, err
+			return Batch{}, err
 		}
 		out := make([]Issue, len(raw))
 		for i, fi := range raw {
 			out[i] = Issue{Number: fi.Number, Title: fi.Title}
 		}
-		return out, map[string][]string{}, nil, nil, nil
+		return Batch{Issues: out, Edges: map[string][]string{}}, nil
 	}
 
 	// Fresh for the first three refills (fills #1, #2, and #3's slots
@@ -1108,16 +1108,16 @@ func TestRunContinuous_StaleDrainResizeUpCheckpointsBeforeCapChange(t *testing.T
 	f := testFactory(t, dir, fr)
 	s := newSettle(fc, fc)
 
-	discover := func() ([]Issue, map[string][]string, Sources, map[string]bool, error) {
+	discover := func() (Batch, error) {
 		raw, err := fc.ListIssues(forge.Dispatchable)
 		if err != nil {
-			return nil, nil, nil, nil, err
+			return Batch{}, err
 		}
 		out := make([]Issue, len(raw))
 		for i, fi := range raw {
 			out[i] = Issue{Number: fi.Number, Title: fi.Title}
 		}
-		return out, map[string][]string{}, nil, nil, nil
+		return Batch{Issues: out, Edges: map[string][]string{}}, nil
 	}
 
 	// Fresh for the first refill (fills #1's slot against cap=2), stale for
@@ -1303,16 +1303,16 @@ func TestRunContinuous_StaleDrainResizeDownAboveOutstandingCheckpointsBeforeCapC
 	f := testFactory(t, dir, fr)
 	s := newSettle(fc, fc)
 
-	discover := func() ([]Issue, map[string][]string, Sources, map[string]bool, error) {
+	discover := func() (Batch, error) {
 		raw, err := fc.ListIssues(forge.Dispatchable)
 		if err != nil {
-			return nil, nil, nil, nil, err
+			return Batch{}, err
 		}
 		out := make([]Issue, len(raw))
 		for i, fi := range raw {
 			out[i] = Issue{Number: fi.Number, Title: fi.Title}
 		}
-		return out, map[string][]string{}, nil, nil, nil
+		return Batch{Issues: out, Edges: map[string][]string{}}, nil
 	}
 
 	// Fresh for the first two refills (fills #1's and #2's slots against
@@ -1417,16 +1417,16 @@ func TestRunContinuous_AllBlockedReturnsErrOpenNoneDispatchable(t *testing.T) {
 	s := newSettle(fc, fc)
 
 	edges := map[string][]string{"1": {"2"}}
-	discover := func() ([]Issue, map[string][]string, Sources, map[string]bool, error) {
+	discover := func() (Batch, error) {
 		raw, err := fc.ListIssues(forge.Dispatchable)
 		if err != nil {
-			return nil, nil, nil, nil, err
+			return Batch{}, err
 		}
 		out := make([]Issue, len(raw))
 		for i, fi := range raw {
 			out[i] = Issue{Number: fi.Number, Title: fi.Title}
 		}
-		return out, edges, nil, nil, nil
+		return Batch{Issues: out, Edges: edges}, nil
 	}
 	fresh := func() (bool, bool, string) { return true, true, "fresh" }
 
@@ -1466,20 +1466,20 @@ func TestRunContinuous_RateLimitedRediscoverRetriesWithBackoffThenSucceeds(t *te
 	s := newSettle(fc, fc)
 
 	discoverCalls := 0
-	discover := func() ([]Issue, map[string][]string, Sources, map[string]bool, error) {
+	discover := func() (Batch, error) {
 		discoverCalls++
 		if discoverCalls <= 2 {
-			return nil, nil, nil, nil, fmt.Errorf("%w: rate limited", forge.ErrRateLimit)
+			return Batch{}, fmt.Errorf("%w: rate limited", forge.ErrRateLimit)
 		}
 		raw, err := fc.ListIssues(forge.Dispatchable)
 		if err != nil {
-			return nil, nil, nil, nil, err
+			return Batch{}, err
 		}
 		out := make([]Issue, len(raw))
 		for i, fi := range raw {
 			out[i] = Issue{Number: fi.Number, Title: fi.Title}
 		}
-		return out, nil, nil, nil, nil
+		return Batch{Issues: out}, nil
 	}
 	fresh := func() (bool, bool, string) { return true, true, "fresh" }
 
@@ -1526,9 +1526,9 @@ func TestRunContinuous_RateLimitedRediscoverExhaustsRetries(t *testing.T) {
 	s := newSettle(fc, fc)
 
 	discoverCalls := 0
-	discover := func() ([]Issue, map[string][]string, Sources, map[string]bool, error) {
+	discover := func() (Batch, error) {
 		discoverCalls++
-		return nil, nil, nil, nil, fmt.Errorf("%w: rate limited", forge.ErrRateLimit)
+		return Batch{}, fmt.Errorf("%w: rate limited", forge.ErrRateLimit)
 	}
 	fresh := func() (bool, bool, string) { return true, true, "fresh" }
 
@@ -1579,9 +1579,9 @@ func TestRunContinuous_NonRateLimitRediscoverErrorFailsFastUnchanged(t *testing.
 
 	discoverCalls := 0
 	wantErr := errors.New("boom")
-	discover := func() ([]Issue, map[string][]string, Sources, map[string]bool, error) {
+	discover := func() (Batch, error) {
 		discoverCalls++
-		return nil, nil, nil, nil, wantErr
+		return Batch{}, wantErr
 	}
 	fresh := func() (bool, bool, string) { return true, true, "fresh" }
 
@@ -1627,10 +1627,10 @@ func TestRunContinuous_DiscoverSourcesReachRefill(t *testing.T) {
 	s := newSettle(fc, fc)
 
 	var gotSources Sources
-	discover := func() ([]Issue, map[string][]string, Sources, map[string]bool, error) {
+	discover := func() (Batch, error) {
 		raw, err := fc.ListIssues(forge.Dispatchable)
 		if err != nil {
-			return nil, nil, nil, nil, err
+			return Batch{}, err
 		}
 		out := make([]Issue, len(raw))
 		for i, fi := range raw {
@@ -1638,10 +1638,10 @@ func TestRunContinuous_DiscoverSourcesReachRefill(t *testing.T) {
 		}
 		result, err := NewReadiness(fc, out)
 		if err != nil {
-			return nil, nil, nil, nil, err
+			return Batch{}, err
 		}
 		gotSources = result.Sources
-		return out, result.Edges, result.Sources, result.Failed, nil
+		return Batch{Issues: out, Edges: result.Edges, Sources: result.Sources, Failed: result.Failed}, nil
 	}
 	fresh := func() (bool, bool, string) { return true, true, "fresh" }
 
@@ -1696,16 +1696,16 @@ func TestRunContinuous_RefillCycleGuardSkipsAndReports(t *testing.T) {
 		"2": {"3"},
 		"3": {"1"},
 	}
-	discover := func() ([]Issue, map[string][]string, Sources, map[string]bool, error) {
+	discover := func() (Batch, error) {
 		raw, err := fc.ListIssues(forge.Dispatchable)
 		if err != nil {
-			return nil, nil, nil, nil, err
+			return Batch{}, err
 		}
 		out := make([]Issue, len(raw))
 		for i, fi := range raw {
 			out[i] = Issue{Number: fi.Number, Title: fi.Title}
 		}
-		return out, edges, nil, nil, nil
+		return Batch{Issues: out, Edges: edges}, nil
 	}
 	fresh := func() (bool, bool, string) { return true, true, "fresh" }
 
@@ -1755,8 +1755,8 @@ func TestRunContinuous_StaleDiscoveryNeverDoubleDispatches(t *testing.T) {
 
 	// Always reports #1 as dispatchable, regardless of the claim already
 	// made against it — a stale search result, not a live forge query.
-	discover := func() ([]Issue, map[string][]string, Sources, map[string]bool, error) {
-		return []Issue{{Number: "1", Title: "stale"}}, map[string][]string{}, nil, nil, nil
+	discover := func() (Batch, error) {
+		return Batch{Issues: []Issue{{Number: "1", Title: "stale"}}, Edges: map[string][]string{}}, nil
 	}
 	fresh := func() (bool, bool, string) { return true, true, "fresh" }
 
@@ -1807,16 +1807,16 @@ func TestRunContinuous_TerminatedIssueSkipsFailedTransitionAndSettle(t *testing.
 	f := testFactory(t, dir, fr)
 	fakeSettle := settle.NewFake()
 
-	discover := func() ([]Issue, map[string][]string, Sources, map[string]bool, error) {
+	discover := func() (Batch, error) {
 		raw, err := fc.ListIssues(forge.Dispatchable)
 		if err != nil {
-			return nil, nil, nil, nil, err
+			return Batch{}, err
 		}
 		out := make([]Issue, len(raw))
 		for i, fi := range raw {
 			out[i] = Issue{Number: fi.Number, Title: fi.Title}
 		}
-		return out, map[string][]string{}, nil, nil, nil
+		return Batch{Issues: out, Edges: map[string][]string{}}, nil
 	}
 	fresh := func() (bool, bool, string) { return true, true, "fresh" }
 
@@ -1855,16 +1855,16 @@ func TestRunContinuous_FailedBoxCallsSettlerFail(t *testing.T) {
 	f := testFactory(t, dir, fr)
 	fakeSettle := settle.NewFake()
 
-	discover := func() ([]Issue, map[string][]string, Sources, map[string]bool, error) {
+	discover := func() (Batch, error) {
 		raw, err := fc.ListIssues(forge.Dispatchable)
 		if err != nil {
-			return nil, nil, nil, nil, err
+			return Batch{}, err
 		}
 		out := make([]Issue, len(raw))
 		for i, fi := range raw {
 			out[i] = Issue{Number: fi.Number, Title: fi.Title}
 		}
-		return out, map[string][]string{}, nil, nil, nil
+		return Batch{Issues: out, Edges: map[string][]string{}}, nil
 	}
 	fresh := func() (bool, bool, string) { return true, true, "fresh" }
 
@@ -1909,16 +1909,16 @@ func TestRunContinuous_RefillHoldsDepsOfFailedIssue(t *testing.T) {
 	s := newSettle(fc, fc)
 
 	failed := map[string]bool{"1": true}
-	discover := func() ([]Issue, map[string][]string, Sources, map[string]bool, error) {
+	discover := func() (Batch, error) {
 		raw, err := fc.ListIssues(forge.Dispatchable)
 		if err != nil {
-			return nil, nil, nil, nil, err
+			return Batch{}, err
 		}
 		out := make([]Issue, len(raw))
 		for i, fi := range raw {
 			out[i] = Issue{Number: fi.Number, Title: fi.Title}
 		}
-		return out, map[string][]string{}, nil, failed, nil
+		return Batch{Issues: out, Edges: map[string][]string{}, Failed: failed}, nil
 	}
 	fresh := func() (bool, bool, string) { return true, true, "fresh" }
 
@@ -1958,7 +1958,7 @@ func TestRunContinuous_CompletionDrainsAllFreedSlots(t *testing.T) {
 	var visMu sync.Mutex
 	visible := []string{"1", "2", "3"}
 	calls := make(chan struct{}, 100)
-	discover := func() ([]Issue, map[string][]string, Sources, map[string]bool, error) {
+	discover := func() (Batch, error) {
 		visMu.Lock()
 		nums := append([]string(nil), visible...)
 		visMu.Unlock()
@@ -1967,7 +1967,7 @@ func TestRunContinuous_CompletionDrainsAllFreedSlots(t *testing.T) {
 			out[i] = Issue{Number: n, Title: "issue " + n}
 		}
 		calls <- struct{}{}
-		return out, map[string][]string{}, nil, nil, nil
+		return Batch{Issues: out, Edges: map[string][]string{}}, nil
 	}
 	fresh := func() (bool, bool, string) { return true, true, "fresh" }
 
@@ -2079,7 +2079,7 @@ func TestRunContinuous_PollRefillsSlotLeftIdleByTransientMiss(t *testing.T) {
 	var visMu sync.Mutex
 	visible := []string{"1"}
 	calls := make(chan struct{}, 100)
-	discover := func() ([]Issue, map[string][]string, Sources, map[string]bool, error) {
+	discover := func() (Batch, error) {
 		visMu.Lock()
 		nums := append([]string(nil), visible...)
 		visMu.Unlock()
@@ -2088,7 +2088,7 @@ func TestRunContinuous_PollRefillsSlotLeftIdleByTransientMiss(t *testing.T) {
 			out[i] = Issue{Number: n, Title: "issue " + n}
 		}
 		calls <- struct{}{}
-		return out, map[string][]string{}, nil, nil, nil
+		return Batch{Issues: out, Edges: map[string][]string{}}, nil
 	}
 	fresh := func() (bool, bool, string) { return true, true, "fresh" }
 
@@ -2189,16 +2189,16 @@ func TestRunContinuous_RefillDispatchesInPriorityOrder(t *testing.T) {
 	f := testFactory(t, dir, fr)
 	s := newSettle(fc, fc)
 
-	discover := func() ([]Issue, map[string][]string, Sources, map[string]bool, error) {
+	discover := func() (Batch, error) {
 		raw, err := fc.ListIssues(forge.Dispatchable)
 		if err != nil {
-			return nil, nil, nil, nil, err
+			return Batch{}, err
 		}
 		out := make([]Issue, len(raw))
 		for i, fi := range raw {
 			out[i] = Issue{Number: fi.Number, Title: fi.Title, Priority: fi.Priority}
 		}
-		return out, map[string][]string{}, nil, nil, nil
+		return Batch{Issues: out, Edges: map[string][]string{}}, nil
 	}
 	fresh := func() (bool, bool, string) { return true, true, "fresh" }
 
@@ -2236,16 +2236,16 @@ func TestRunContinuous_StaleWithNothingInFlightReportsZeroLengthDrain(t *testing
 	f := testFactory(t, dir, fr)
 	s := newSettle(fc, fc)
 
-	discover := func() ([]Issue, map[string][]string, Sources, map[string]bool, error) {
+	discover := func() (Batch, error) {
 		raw, err := fc.ListIssues(forge.Dispatchable)
 		if err != nil {
-			return nil, nil, nil, nil, err
+			return Batch{}, err
 		}
 		out := make([]Issue, len(raw))
 		for i, fi := range raw {
 			out[i] = Issue{Number: fi.Number, Title: fi.Title}
 		}
-		return out, map[string][]string{}, nil, nil, nil
+		return Batch{Issues: out, Edges: map[string][]string{}}, nil
 	}
 	fresh := func() (bool, bool, string) {
 		return true, false, "rebuild needed (base tip changed image inputs)"
@@ -2306,12 +2306,12 @@ func TestRunContinuous_StaleDrainPendingCountOverridesPreResolvedFallback(t *tes
 	f := testFactory(t, dir, fr)
 	s := newSettle(fc, fc)
 
-	discover := func() ([]Issue, map[string][]string, Sources, map[string]bool, error) {
+	discover := func() (Batch, error) {
 		// PreResolved's own discover (a stand-in for Console's
 		// Queue.Discover) never returns a candidate to count here -- a real
 		// Queue.Discover call would instead claim any ready pick, which is
 		// exactly the side effect cfg.PendingCount exists to avoid needing.
-		return nil, nil, nil, nil, nil
+		return Batch{}, nil
 	}
 	fresh := func() (bool, bool, string) {
 		return true, false, "rebuild needed (base tip changed image inputs)"
@@ -2366,12 +2366,12 @@ func TestRunContinuous_StaleDrainPreResolvedWithoutPendingCountReportsUnknown(t 
 	f := testFactory(t, dir, fr)
 	s := newSettle(fc, fc)
 
-	discover := func() ([]Issue, map[string][]string, Sources, map[string]bool, error) {
+	discover := func() (Batch, error) {
 		// Never consulted on this path: PreResolved with no PendingCount
 		// must not fall back to calling discover() again (that would risk
 		// the claim-as-side-effect problem PendingCount exists to avoid);
 		// it must report heldBackUnknown instead.
-		return nil, nil, nil, nil, nil
+		return Batch{}, nil
 	}
 	fresh := func() (bool, bool, string) {
 		return true, false, "rebuild needed (base tip changed image inputs)"
@@ -2421,16 +2421,16 @@ func TestRunContinuous_StaleDrainHeldBackExcludesBlockedIssues(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "9", State: "OPEN"}) // #2's blocker, unmet
 
 	edges := map[string][]string{"2": {"9"}}
-	discover := func() ([]Issue, map[string][]string, Sources, map[string]bool, error) {
+	discover := func() (Batch, error) {
 		raw, err := fc.ListIssues(forge.Dispatchable)
 		if err != nil {
-			return nil, nil, nil, nil, err
+			return Batch{}, err
 		}
 		out := make([]Issue, len(raw))
 		for i, fi := range raw {
 			out[i] = Issue{Number: fi.Number, Title: fi.Title}
 		}
-		return out, edges, nil, nil, nil
+		return Batch{Issues: out, Edges: edges}, nil
 	}
 
 	stdout, log := runStaleDrain(t, c, fc, discover)
@@ -2453,8 +2453,8 @@ func TestRunContinuous_StaleDrainDiscoverReportingSkipsLoggingDiscoverer(t *test
 	c := baseConfig()
 	c.Label = "agent-trigger"
 	c.MaxParallel = 1
-	c.DiscoverReporting = func() ([]Issue, map[string][]string, Sources, map[string]bool, error) {
-		return []Issue{{Number: "1", Title: "one"}}, nil, nil, nil, nil
+	c.DiscoverReporting = func() (Batch, error) {
+		return Batch{Issues: []Issue{{Number: "1", Title: "one"}}}, nil
 	}
 
 	fc := forge.NewFake(dispatchLabels(c))
@@ -2466,9 +2466,9 @@ func TestRunContinuous_StaleDrainDiscoverReportingSkipsLoggingDiscoverer(t *test
 	f := testFactory(t, dir, fr)
 	s := newSettle(fc, fc)
 
-	discover := func() ([]Issue, map[string][]string, Sources, map[string]bool, error) {
+	discover := func() (Batch, error) {
 		t.Errorf("discover: must not be called for the stale-drain heldBack report once cfg.DiscoverReporting is set")
-		return nil, nil, nil, nil, nil
+		return Batch{}, nil
 	}
 	fresh := func() (bool, bool, string) {
 		return true, false, "rebuild needed (base tip changed image inputs)"
@@ -2517,16 +2517,16 @@ func TestRunContinuous_StaleDrainHeldBackExcludesTouchOverlapDeferredIssues(t *t
 	fc.SetIssue(forge.Issue{Number: "2", Body: "## Touches\n- lib/foo.nix", Labels: []string{c.Label}})
 	fc.SetIssue(forge.Issue{Number: "9", Body: "## Touches\n- lib/foo.nix", Labels: []string{c.InProgressLabel}, State: "OPEN"}) // #2's overlap collider
 
-	discover := func() ([]Issue, map[string][]string, Sources, map[string]bool, error) {
+	discover := func() (Batch, error) {
 		raw, err := fc.ListIssues(forge.Dispatchable)
 		if err != nil {
-			return nil, nil, nil, nil, err
+			return Batch{}, err
 		}
 		out := make([]Issue, len(raw))
 		for i, fi := range raw {
 			out[i] = Issue{Number: fi.Number, Title: fi.Title}
 		}
-		return out, nil, nil, nil, nil
+		return Batch{Issues: out}, nil
 	}
 
 	stdout, log := runStaleDrain(t, c, fc, discover)
@@ -2555,16 +2555,16 @@ func TestRunContinuous_StaleDrainHeldBackExcludesDepsOfFailedIssues(t *testing.T
 	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{c.Label}}) // its own DepsOf check fails
 
 	failed := map[string]bool{"2": true}
-	discover := func() ([]Issue, map[string][]string, Sources, map[string]bool, error) {
+	discover := func() (Batch, error) {
 		raw, err := fc.ListIssues(forge.Dispatchable)
 		if err != nil {
-			return nil, nil, nil, nil, err
+			return Batch{}, err
 		}
 		out := make([]Issue, len(raw))
 		for i, fi := range raw {
 			out[i] = Issue{Number: fi.Number, Title: fi.Title}
 		}
-		return out, nil, nil, failed, nil
+		return Batch{Issues: out, Failed: failed}, nil
 	}
 
 	stdout, log := runStaleDrain(t, c, fc, discover)
@@ -2607,16 +2607,16 @@ func TestRunContinuous_StaleDrainHeldBackCountsAllExclusionsWhenIgnoreBlockers(t
 
 	edges := map[string][]string{"3": {"9"}}
 	failed := map[string]bool{"2": true}
-	discover := func() ([]Issue, map[string][]string, Sources, map[string]bool, error) {
+	discover := func() (Batch, error) {
 		raw, err := fc.ListIssues(forge.Dispatchable)
 		if err != nil {
-			return nil, nil, nil, nil, err
+			return Batch{}, err
 		}
 		out := make([]Issue, len(raw))
 		for i, fi := range raw {
 			out[i] = Issue{Number: fi.Number, Title: fi.Title}
 		}
-		return out, edges, nil, failed, nil
+		return Batch{Issues: out, Edges: edges, Failed: failed}, nil
 	}
 
 	stdout, log := runStaleDrain(t, c, fc, discover)

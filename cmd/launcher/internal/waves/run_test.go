@@ -38,7 +38,7 @@ func TestRun_Selective_NoEdges_TouchOverlapDefersThenExits(t *testing.T) {
 	dir := tempLogDir(t)
 	f := testFactory(t, dir, fr)
 	s := newSettle(fc, fc)
-	plan, err := NewPlan(c, Input{Origin: OriginSelective, Issues: []Issue{{Number: "10", Title: "candidate"}}})
+	plan, err := NewPlan(c, Input{Origin: OriginSelective, Batch: Batch{Issues: []Issue{{Number: "10", Title: "candidate"}}}})
 	if err != nil {
 		t.Fatalf("NewPlan: %v", err)
 	}
@@ -76,8 +76,7 @@ func TestRun_Discovered_MaxJobsZero_DependencyEdge_DispatchesOnlyUnblockedWave(t
 	s := newSettle(fc, fc)
 	plan, err := NewPlan(c, Input{
 		Origin: OriginDiscovered,
-		Issues: []Issue{{Number: "1", Title: "unblocked"}, {Number: "2", Title: "dependent"}},
-		Edges:  edges,
+		Batch:  Batch{Issues: []Issue{{Number: "1", Title: "unblocked"}, {Number: "2", Title: "dependent"}}, Edges: edges},
 	})
 	if err != nil {
 		t.Fatalf("NewPlan: %v", err)
@@ -135,7 +134,7 @@ func TestRun_Discovered_NoEdges_TouchOverlapDefersThenExits(t *testing.T) {
 	dir := tempLogDir(t)
 	f := testFactory(t, dir, fr)
 	s := newSettle(fc, fc)
-	plan, err := NewPlan(c, Input{Origin: OriginDiscovered, Issues: []Issue{{Number: "10", Title: "candidate"}}})
+	plan, err := NewPlan(c, Input{Origin: OriginDiscovered, Batch: Batch{Issues: []Issue{{Number: "10", Title: "candidate"}}}})
 	if err != nil {
 		t.Fatalf("NewPlan: %v", err)
 	}
@@ -185,7 +184,7 @@ func TestRun_Discovered_NoEdges_TouchOverlapDispatchesOnNextInvocation(t *testin
 	dir := tempLogDir(t)
 	f := testFactory(t, dir, fr)
 	s := newSettle(fc, fc)
-	plan, err := NewPlan(c, Input{Origin: OriginDiscovered, Issues: []Issue{{Number: "10", Title: "candidate"}}})
+	plan, err := NewPlan(c, Input{Origin: OriginDiscovered, Batch: Batch{Issues: []Issue{{Number: "10", Title: "candidate"}}}})
 	if err != nil {
 		t.Fatalf("NewPlan: %v", err)
 	}
