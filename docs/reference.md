@@ -3566,11 +3566,14 @@ image hash).
 so the slot pool holds that many Boxes at once. Set `MAX_JOBS` explicitly to
 run a larger or unbounded pool.
 
-**Podman machine RAM.** `dogfood.sh` refuses to start against a podman machine
-whose RAM is smaller than `MEMORY_LIMIT` × `MAX_PARALLEL` (plus a fixed 512MiB
-VM overhead): that mismatch lets the VM's own OOM-killer kill an in-box build —
-or, once enough boxes run concurrently, the whole VM — before any single
-container's `--memory` cap ever bites. The check reads `podman machine
+**Podman machine RAM.** Under `DOGFOOD_RUNTIME=podman` (default), `dogfood.sh`
+refuses to start against a podman machine whose RAM is smaller than
+`MEMORY_LIMIT` × `MAX_PARALLEL` (plus a fixed 512MiB VM overhead): that
+mismatch lets the VM's own OOM-killer kill an in-box build — or, once enough
+boxes run concurrently, the whole VM — before any single container's
+`--memory` cap ever bites. `DOGFOOD_RUNTIME=bwrap` skips this preflight
+outright — bwrap is daemonless and has no VM for the check to inspect. The
+check reads `podman machine
 inspect`, compares its `Resources.Memory` (MiB) against the required total,
 and on shortfall prints the machine RAM, the required RAM, and a fix
 (`podman machine set --memory <N>`, lower `MAX_PARALLEL`, or lower
@@ -3629,6 +3632,25 @@ the same slot-refill loop, `MAX_JOBS`, and exit-code contract apply
 unchanged, since both kinds share `cmdDispatch`'s exit codes (ADR 0022). Kinds
 are homogeneous per invocation (`research` and `dispatch` never mix issues in
 one run) — run `dogfood.sh` twice, once per kind, to drive both queues.
+
+**Runtime.** `dogfood.sh` drives `apps.default` (the podman runner) by
+default; set `DOGFOOD_RUNTIME=bwrap` to route the same loop through
+`apps.dogfood-bwrap` instead. `apps.default` is built from flake.nix's
+`spindrift = { ... }` module config, and `apps.dogfood-bwrap` from a direct
+`mkHarness` call (`dogfoodHarnessArgs` in `nix/fixtures.nix`) with only
+`runtime` swapped to `"bwrap"` — the equivalence check proves the two paths
+are instantiated from the exact same tuned dogfood values
+(`nix/dogfood-defaults.nix`, plus `revision` and the baked skills from
+`nix/dogfood-skills.nix`), so only the runner differs. An invalid value exits
+1 with a clear error, same as `DOGFOOD_KIND` above. `DOGFOOD_RUNTIME=bwrap`
+additionally requires Linux — bubblewrap has no macOS build — and exits 1
+with a clear message on any other host, before the loop's first `nix run`.
+Runtimes are homogeneous per invocation the same way kinds are: both
+loops share one working tree, `.spindrift/dogfood.pid`, and per-issue logs,
+so running them concurrently against the same queue races on all three —
+run `dogfood.sh` twice, sequentially, once per `DOGFOOD_RUNTIME` value, to
+compare the two runners head-to-head under identical roster/skill/policy
+settings.
 
 **Baked skills.** The dogfood Box bakes five pinned upstream skills (via the
 Consumer-configured `skills` list — see the `skills` row and
