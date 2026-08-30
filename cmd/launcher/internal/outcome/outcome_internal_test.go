@@ -137,6 +137,14 @@ func TestLastInLog_NearMiss(t *testing.T) {
 	}
 }
 
+// TestLastInLog_BareMentionIsNotNearMiss, TestLastInLog_FieldBearingMidSentenceMentionIsNotACandidate,
+// and TestLastInLog_ToolResultEchoIsNotFound all pin the same contract: a
+// mention that doesn't lead the line is never a candidate, unconditionally —
+// found=false, err=nil — regardless of whether it carries field markers.
+// Each pins a distinct, realistic input shape (bare prose, mid-sentence
+// with fields, JSON-embedded) that a regression could plausibly break
+// independently even though today's code doesn't branch on field presence.
+
 func TestLastInLog_BareMentionIsNotNearMiss(t *testing.T) {
 	path := writeLog(t,
 		"some output",
@@ -145,14 +153,14 @@ func TestLastInLog_BareMentionIsNotNearMiss(t *testing.T) {
 	)
 	_, found, err := lastInLog(path)
 	if err != nil {
-		t.Fatalf("unexpected error for a fieldless mention: %v", err)
+		t.Fatalf("unexpected error for a non-leading mention: %v", err)
 	}
 	if found {
-		t.Fatal("expected found=false: a bare mention with no fields is not an attempt")
+		t.Fatal("expected found=false: the mention doesn't lead the line, so it's never a candidate regardless of fields")
 	}
 }
 
-func TestLastInLog_FieldBearingMidSentenceMentionIsNearMiss(t *testing.T) {
+func TestLastInLog_FieldBearingMidSentenceMentionIsNotACandidate(t *testing.T) {
 	path := writeLog(t,
 		"some output",
 		"done: SPINDRIFT_OUTCOME issue=1 landing=https://github.com/o/r/pull/1 status=ready note=ok wrapped in a sentence",
@@ -161,11 +169,25 @@ func TestLastInLog_FieldBearingMidSentenceMentionIsNearMiss(t *testing.T) {
 	if found {
 		t.Fatal("expected found=false for a mid-sentence mention")
 	}
-	if err == nil {
-		t.Fatal("expected a near-miss error, got nil")
+	if err != nil {
+		t.Errorf("expected no error (not a near-miss candidate), got %v", err)
 	}
-	if !IsNearMiss(err) {
-		t.Errorf("expected near-miss error, got %v", err)
+}
+
+// TestLastInLog_ToolResultEchoIsNotFound pins issue #2973's acceptance
+// criterion: a tool_result echo of issue/comment text that happens to embed
+// the token mid-JSON, with field markers but no leading-token line anywhere
+// in the log, resolves as plain no-outcome rather than a near-miss.
+func TestLastInLog_ToolResultEchoIsNotFound(t *testing.T) {
+	path := writeLog(t,
+		`{"type":"tool_result","content":"...text mentioning SPINDRIFT_OUTCOME issue=1 landing=agent/issue-2973 status=ready note=echoed from issue body..."}`,
+	)
+	_, found, err := lastInLog(path)
+	if found {
+		t.Fatal("expected found=false for a mid-JSON tool_result echo")
+	}
+	if err != nil {
+		t.Errorf("expected no error (no-outcome, not near-miss), got %v", err)
 	}
 }
 

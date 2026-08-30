@@ -70,10 +70,11 @@ func IsNearMiss(err error) bool {
 // Returns an error if the line lacks the required prefix or is missing the
 // landing or status fields. The latter case, and a line where the token
 // appears but not as a standalone-line prefix, are wrapped in ErrNearMiss
-// (see IsNearMiss). Parse alone doesn't require a field marker for the
-// mid-sentence case — that extra gate belongs to lastInLog, which scans
-// whole logs and needs it to avoid mistaking a bare mention in prose for an
-// attempt; a caller handing Parse a single already-selected line doesn't.
+// (see IsNearMiss). That leading-token requirement belongs to lastInLog,
+// which scans whole logs and only ever treats a leading-token line as a
+// candidate, so a bare mention in prose never reaches Parse from that path;
+// a caller handing Parse a single already-selected line makes that
+// leading-token decision itself.
 func Parse(line string) (Outcome, error) {
 	line = strings.TrimSpace(line)
 	rest, ok := stripToken(line, Token)
@@ -134,21 +135,16 @@ func ParseAnywhere(line string) (Outcome, bool) {
 
 // lastInLog scans the file at path for the SPINDRIFT_OUTCOME token and
 // parses the result via Parse, so the same colon/whitespace tolerance and
-// near-miss classification apply. It prefers the last line that leads with
-// the token (a genuine attempt at the grammar, however it fares in Parse)
-// over any line that merely carries the token mid-sentence alongside at
-// least one field marker (issue=/landing=/status=/note=) — a genuine, if
-// malformed, attempt wrapped in prose. A line that just names the token in
-// passing, with no field marker at all, is not a candidate: agent
-// reasoning routinely mentions "SPINDRIFT_OUTCOME" without attempting the
-// grammar, and treating every such mention as a near-miss would abandon
-// runs the prior no-outcome-found path handled fine. Only when no
-// leading-token line exists at all does the last field-bearing mid-sentence
-// mention become the near-miss candidate. Lines larger than the 4 MiB scan
-// buffer are skipped rather than aborting the scan.
+// near-miss classification apply. Only the last line that leads with the
+// token (a genuine attempt at the grammar, however it fares in Parse) is a
+// candidate; a line that merely carries the token mid-sentence or mid-JSON
+// — e.g. a tool_result echo of issue/comment text — is not, no matter how
+// many field markers (issue=/landing=/status=/note=) it happens to carry.
+// Lines larger than the 4 MiB scan buffer are skipped rather than aborting
+// the scan.
 //
-// Returns (Outcome{}, false, nil) when no qualifying line is present, or the
-// file does not exist. Returns (Outcome{}, false, err) when the chosen
+// Returns (Outcome{}, false, nil) when no leading-token line is present, or
+// the file does not exist. Returns (Outcome{}, false, err) when the chosen
 // candidate line fails to parse — err satisfies IsNearMiss in that case —
 // or on an I/O error other than file-not-found or oversized lines.
 //
@@ -157,18 +153,13 @@ func ParseAnywhere(line string) (Outcome, bool) {
 // SPINDRIFT_ISSUE_INTENT), the outcome line is a single, final,
 // end-of-Box-lifetime signal the launcher reads only after the Box has
 // exited, so there is no later mid-run window left for an untrusted
-// issue/comment author's echoed line to race ahead of. Every leading-token
-// or field-bearing-mention line is a candidate regardless of any nonce= field
-// it may or may not carry.
+// issue/comment author's echoed line to race ahead of. A leading-token line
+// is a candidate regardless of any nonce= field it may or may not carry.
 func lastInLog(path string) (o Outcome, found bool, err error) {
-	var lastLeading, lastMention string
+	var lastLeading string
 	scanErr := logscan.ForEachLine(path, logscan.SkipOversized, func(line string) {
 		if _, ok := stripToken(strings.TrimSpace(line), Token); ok {
 			lastLeading = line
-			return
-		}
-		if containsToken(line, Token) && looksLikeAttempt(line) {
-			lastMention = line
 		}
 	})
 	if scanErr != nil {
@@ -178,14 +169,10 @@ func lastInLog(path string) (o Outcome, found bool, err error) {
 		return Outcome{}, false, scanErr
 	}
 
-	candidate := lastLeading
-	if candidate == "" {
-		candidate = lastMention
-	}
-	if candidate == "" {
+	if lastLeading == "" {
 		return Outcome{}, false, nil
 	}
-	o, err = Parse(candidate)
+	o, err = Parse(lastLeading)
 	if err != nil {
 		return Outcome{}, false, err
 	}
@@ -384,8 +371,8 @@ type Resolved struct {
 // ProvenanceSynthetic when the winning line's Outcome.Synthetic is true,
 // otherwise ProvenanceGenuine. The outcome path applies no nonce gate (ADR
 // 0039, issue #2274): its freshness boundary is structural, so every
-// leading-token or field-bearing line is a candidate regardless of any
-// nonce= field it carries.
+// leading-token line is a candidate regardless of any nonce= field it
+// carries.
 //
 // Regardless of whether the genuine/synthetic tier found a winner, Resolve
 // also always walks logs calling lastSelfReportInLog(log.Path) — the
@@ -803,17 +790,6 @@ func tokenIndex(line, token string) int {
 
 func isTokenChar(b byte) bool {
 	return b == '_' || ('a' <= b && b <= 'z') || ('A' <= b && b <= 'Z') || ('0' <= b && b <= '9')
-}
-
-// looksLikeAttempt reports whether line carries at least one recognizable
-// outcome field marker, distinguishing a genuine (if malformed or
-// mid-sentence) attempt at the grammar from prose that merely names the
-// token.
-func looksLikeAttempt(line string) bool {
-	return tokenField(line, "issue") != "" ||
-		tokenField(line, "landing") != "" ||
-		tokenField(line, "status") != "" ||
-		noteField(line) != ""
 }
 
 // stripToken reports whether line begins with token followed by a space or a
