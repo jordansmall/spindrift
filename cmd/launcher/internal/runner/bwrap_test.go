@@ -1217,6 +1217,245 @@ func TestBwrapRun_LocksPerLaunchSnapshotDirWhenClosureGenerationSet(t *testing.T
 	}
 }
 
+// TestBwrapRun_BindsSwappedNixConfigFileWhenClosureGenerationSet verifies
+// that Run's /etc/nix/nix.conf bind resolves through box.ClosureGeneration's
+// NixConfigFile override (issue #2682 review finding), not the adapter's own
+// startup-baked a.nixConfigFile alone -- a tip closure whose store path moved
+// because nix.conf itself changed must swap that file in too, mirroring how
+// AgentFiles/AgentEnv already swap (see agentFilesFor/agentEnvFor).
+func TestBwrapRun_BindsSwappedNixConfigFileWhenClosureGenerationSet(t *testing.T) {
+	script, dir := newFakeCLI(t, fakeCall{exit: 0})
+	orig := execCommand
+	t.Cleanup(func() { execCommand = orig })
+	execCommand = func(name string, args ...string) *exec.Cmd {
+		return exec.Command(script, args...)
+	}
+
+	root := t.TempDir()
+	genDir := filepath.Join(root, "gen1")
+	if err := os.MkdirAll(genDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll gen1: %v", err)
+	}
+
+	a := &bwrapAdapter{
+		agentFiles:         "/fake/agent",
+		agentEnv:           "/fake/env",
+		bakedPrefetch:      "echo ok",
+		nixConfigFile:      "/fake/baked-nix.conf",
+		nixVarSnapshotDir:  filepath.Join(root, "baked-gen-never-created"),
+		nixVarSnapshotRoot: root,
+	}
+
+	gen := &AgentGeneration{
+		AgentFiles:    "/gen1/agent-files",
+		NixConfigFile: "/gen1/swapped-nix.conf",
+		Generation:    "gen1",
+	}
+	if err := a.Run(Box{Name: "agent-issue-gen1", Env: map[string]string{}, ClosureGeneration: gen}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	argv := readCall(t, dir, 0)
+	if !slices.Contains(argv, "/gen1/swapped-nix.conf") {
+		t.Errorf("argv: want a --ro-bind of swapped /gen1/swapped-nix.conf, got %v", argv)
+	}
+	if slices.Contains(argv, "/fake/baked-nix.conf") {
+		t.Errorf("argv: want the adapter's baked nix.conf NOT bound when ClosureGeneration overrides it, got %v", argv)
+	}
+}
+
+// TestSnapshotGeneration_WritesDBAtDerivedGenerationDir verifies the fix for
+// issue #2682's slice-2 blocking bug: a hot-swap never wrote the nix-var
+// store-DB snapshot generation it goes on to name (bwrapAdapter.IsReady/Run
+// only ever read from a generation `launcher build`'s EnsureReady wrote).
+// SnapshotGeneration is the run-time counterpart, callable once per
+// successful swap: it derives the same generation label
+// runner.NewAgentGeneration derives from the identical closure path
+// (closureGeneration/safePathComponent) and VACUUMs the host nix store DB
+// into that generation's own dir, using the exact same execCommand/
+// statHostNixDB seams and destination layout snapshotStoreDB's own tests
+// already exercise.
+func TestSnapshotGeneration_WritesDBAtDerivedGenerationDir(t *testing.T) {
+	script, dir := newFakeCLI(t, fakeCall{exit: 0})
+	orig := execCommand
+	t.Cleanup(func() { execCommand = orig })
+	origStat := statHostNixDB
+	t.Cleanup(func() { statHostNixDB = origStat })
+	statHostNixDB = func() error { return nil }
+
+	var gotNames []string
+	execCommand = func(name string, args ...string) *exec.Cmd {
+		gotNames = append(gotNames, name)
+		return exec.Command(script, args...)
+	}
+
+	pwd := t.TempDir()
+	closure := "/nix/store/abc-agent-closure"
+
+	if err := SnapshotGeneration(pwd, closure); err != nil {
+		t.Fatalf("SnapshotGeneration(%q, %q) = %v, want nil", pwd, closure, err)
+	}
+	if len(gotNames) != 1 || gotNames[0] != "sqlite3" {
+		t.Errorf("execCommand invoked with %v, want exactly one call to %q", gotNames, "sqlite3")
+	}
+	if got := callCount(t, dir); got != 1 {
+		t.Errorf("callCount = %d, want 1", got)
+	}
+
+	// The fake sqlite3 script is a no-op stub (exit 0, writes nothing), so
+	// the file itself never lands on disk here (see
+	// TestBwrapBuildEnsureReady_RemovesStaleSnapshotBeforeVacuumInto's own
+	// comment on this), but the directory MkdirAll'd for real before the
+	// scripted call, and the argv naming the destination, together pin
+	// SnapshotGeneration onto the derived-generation dir this test names.
+	wantDest := filepath.Join(pwd, ".spindrift", "nix-var-snapshot", "abc-agent-closure", "nix", "db", "db.sqlite")
+	if _, err := os.Stat(filepath.Dir(wantDest)); err != nil {
+		t.Errorf("os.Stat(%q) = %v, want the destination dir created at the derived generation dir", filepath.Dir(wantDest), err)
+	}
+	call := readCall(t, dir, 0)
+	if len(call) != 2 {
+		t.Fatalf("sqlite3 call argv = %v, want 2 elements (host db path, statement)", call)
+	}
+	if !strings.Contains(call[1], wantDest) {
+		t.Errorf("sqlite3 statement = %q, want it to reference dest %q", call[1], wantDest)
+	}
+}
+
+// TestSnapshotGeneration_ThenRunPassesStatGuard proves the round trip
+// SnapshotGeneration exists to close: bwrapAdapter.Run's shared-lock/stat
+// guard around box.ClosureGeneration's snapshot dir (bwrap.go, "nix-var
+// snapshot %s no longer exists") must find a real directory once
+// SnapshotGeneration has run against the same pwd/closure a swap binds via
+// runner.NewAgentGeneration — i.e. a swap's snapshot dir and its bound
+// AgentGeneration.Generation always name the same thing. Mirrors
+// TestBwrapRun_LocksPerLaunchSnapshotDirWhenClosureGenerationSet's own
+// pattern for constructing a real bwrapAdapter and calling Run in tests.
+func TestSnapshotGeneration_ThenRunPassesStatGuard(t *testing.T) {
+	script, _ := newFakeCLI(t, fakeCall{exit: 0}, fakeCall{exit: 0})
+	orig := execCommand
+	t.Cleanup(func() { execCommand = orig })
+	origStat := statHostNixDB
+	t.Cleanup(func() { statHostNixDB = origStat })
+	statHostNixDB = func() error { return nil }
+	execCommand = func(name string, args ...string) *exec.Cmd {
+		return exec.Command(script, args...)
+	}
+
+	pwd := t.TempDir()
+	closure := "/nix/store/abc-agent-closure"
+
+	if err := SnapshotGeneration(pwd, closure); err != nil {
+		t.Fatalf("SnapshotGeneration(%q, %q) = %v, want nil", pwd, closure, err)
+	}
+
+	gen := NewAgentGeneration(closure)
+	a := &bwrapAdapter{
+		agentFiles:         "/fake/agent",
+		agentEnv:           "/fake/env",
+		bakedPrefetch:      "echo ok",
+		nixConfigFile:      "/fake/nix.conf",
+		nixVarSnapshotDir:  filepath.Join(pwd, ".spindrift", "nix-var-snapshot", "baked-gen-never-created"),
+		nixVarSnapshotRoot: nixVarSnapshotRoot(pwd),
+	}
+
+	err := a.Run(Box{Name: "agent-issue-swap", Env: map[string]string{}, ClosureGeneration: &gen})
+	if err != nil {
+		t.Fatalf("Run() after SnapshotGeneration = %v, want nil (snapshot dir must exist)", err)
+	}
+}
+
+// TestSnapshotGeneration_NeverReclaimsSiblingGenerations verifies the fix for
+// issue #2682's review Finding A: unlike EnsureReady's build-time snapshot
+// step, the hot-swap path must never call reclaimStaleSnapshots, because a
+// live dispatch.Dispatch can hold no flock at all on its own generation
+// during the gap between its Run() and a later Fix() call (waiting on CI) --
+// a swap landing in that window must not delete a sibling generation a still-
+// live Dispatch will need again. A sibling generation dir with no lock held
+// on it (as here) is exactly what reclaimStaleSnapshots would sweep if
+// SnapshotGeneration still called it.
+func TestSnapshotGeneration_NeverReclaimsSiblingGenerations(t *testing.T) {
+	script, _ := newFakeCLI(t, fakeCall{exit: 0})
+	orig := execCommand
+	t.Cleanup(func() { execCommand = orig })
+	origStat := statHostNixDB
+	t.Cleanup(func() { statHostNixDB = origStat })
+	statHostNixDB = func() error { return nil }
+	execCommand = func(name string, args ...string) *exec.Cmd {
+		return exec.Command(script, args...)
+	}
+
+	pwd := t.TempDir()
+	root := nixVarSnapshotRoot(pwd)
+
+	// A sibling generation from an earlier swap, unrelated to the closure
+	// this test snapshots, with no flock held on it (as would be the case
+	// during a live Dispatch's CI-wait gap).
+	otherGenDB := filepath.Join(root, "other-gen", "nix", "db", "db.sqlite")
+	if err := os.MkdirAll(filepath.Dir(otherGenDB), 0o755); err != nil {
+		t.Fatalf("MkdirAll other-gen: %v", err)
+	}
+	if err := os.WriteFile(otherGenDB, []byte("fake db"), 0o644); err != nil {
+		t.Fatalf("WriteFile other-gen db: %v", err)
+	}
+
+	closure := "/nix/store/abc-agent-closure"
+	if err := SnapshotGeneration(pwd, closure); err != nil {
+		t.Fatalf("SnapshotGeneration(%q, %q) = %v, want nil", pwd, closure, err)
+	}
+
+	if _, err := os.Stat(filepath.Join(root, "other-gen")); err != nil {
+		t.Errorf("other-gen: want still present (hot-swap must never reclaim), got err=%v", err)
+	}
+}
+
+// TestSnapshotGeneration_SkipsVacuumWhenAlreadySnapshotted verifies the fix
+// for issue #2682's review Finding B: generations are immutable once
+// created, and a generation dir already snapshotted by an earlier swap to
+// the same closure (e.g. a revert commit swapping back to a previously-seen
+// closure) may already be --overlay-src-mounted by a live Box.
+// vacuumStoreDBInto renames the existing db.sqlite aside and writes a fresh
+// one in its place -- mutating a file a running Box may be reading, which
+// ADR 0043 forbids. SnapshotGeneration must detect the destination already
+// exists and skip the vacuum entirely on a repeat call for the same closure.
+func TestSnapshotGeneration_SkipsVacuumWhenAlreadySnapshotted(t *testing.T) {
+	script, dir := newFakeCLI(t, fakeCall{exit: 0})
+	orig := execCommand
+	t.Cleanup(func() { execCommand = orig })
+	origStat := statHostNixDB
+	t.Cleanup(func() { statHostNixDB = origStat })
+	statHostNixDB = func() error { return nil }
+	execCommand = func(name string, args ...string) *exec.Cmd {
+		return exec.Command(script, args...)
+	}
+
+	pwd := t.TempDir()
+	closure := "/nix/store/abc-agent-closure"
+
+	if err := SnapshotGeneration(pwd, closure); err != nil {
+		t.Fatalf("SnapshotGeneration(%q, %q) [1st] = %v, want nil", pwd, closure, err)
+	}
+
+	// The fake sqlite3 script is a no-op stub (see
+	// TestSnapshotGeneration_WritesDBAtDerivedGenerationDir's own comment on
+	// this), so simulate the first call having actually produced the
+	// snapshot before the second call runs.
+	dest := filepath.Join(nixVarSnapshotDir(pwd, closureGeneration(closure)), "nix", "db", "db.sqlite")
+	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+		t.Fatalf("MkdirAll dest: %v", err)
+	}
+	if err := os.WriteFile(dest, []byte("already snapshotted"), 0o644); err != nil {
+		t.Fatalf("WriteFile dest: %v", err)
+	}
+
+	if err := SnapshotGeneration(pwd, closure); err != nil {
+		t.Fatalf("SnapshotGeneration(%q, %q) [2nd] = %v, want nil", pwd, closure, err)
+	}
+
+	if got := callCount(t, dir); got != 1 {
+		t.Errorf("callCount = %d, want 1 (2nd call must skip vacuum, dest already exists)", got)
+	}
+}
+
 // TestBwrapKill_UnknownNameIsNoop verifies Kill on a name Run never tracked
 // (already exited, or never launched) returns nil rather than erroring.
 func TestBwrapKill_UnknownNameIsNoop(t *testing.T) {
@@ -2752,5 +2991,93 @@ func TestBwrapBuildEnsureReady_EmptyGenerationDoesNotSweepSiblings(t *testing.T)
 
 	if _, err := os.Stat(sibling); err != nil {
 		t.Errorf("os.Stat(%q) after EnsureReady = %v, want nil (sibling of the flat snapshot dir must never be swept)", sibling, err)
+	}
+}
+
+// TestNewAgentGeneration_DerivesFilesAndEnvFromAgentClosurePath verifies
+// NewAgentGeneration treats its argument as the agent-closure linkFarm's own
+// store path (e.g. /nix/store/<hash>-agent-closure -- res.TipTag under
+// bwrap, see freshness.Probe), not the agentFiles derivation directly: it
+// derives AgentFiles as that closure's "files" child, AgentEnv as its "env"
+// child, and NixConfigFile as its "nix-config" child (lib/mkHarness.nix's
+// agentClosure linkFarm), while Generation is still derived from the closure
+// path itself via the same safePathComponent rule closureGeneration uses for
+// a baked Config.ImageTag, so a hot-swapped generation (issue #2682) nests
+// its store-DB snapshot dir under the identical naming convention an
+// ordinary baked generation uses.
+func TestNewAgentGeneration_DerivesFilesAndEnvFromAgentClosurePath(t *testing.T) {
+	cases := []struct {
+		name    string
+		closure string
+		want    AgentGeneration
+	}{
+		{
+			"normal store path",
+			"/nix/store/abc123-agent-closure",
+			AgentGeneration{
+				AgentFiles:    "/nix/store/abc123-agent-closure/files",
+				AgentEnv:      "/nix/store/abc123-agent-closure/env",
+				NixConfigFile: "/nix/store/abc123-agent-closure/nix-config",
+				Generation:    "abc123-agent-closure",
+			},
+		},
+		// filepath.Join elides an empty first element rather than preserving
+		// it, so an empty closure still yields relative "files"/"env"/
+		// "nix-config" (not ""); Generation still comes out "" since
+		// safePathComponent rejects an empty input directly.
+		{"empty", "", AgentGeneration{AgentFiles: "files", AgentEnv: "env", NixConfigFile: "nix-config", Generation: ""}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := NewAgentGeneration(tc.closure)
+			if got != tc.want {
+				t.Errorf("NewAgentGeneration(%q) = %+v, want %+v", tc.closure, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestBuildArgs_ClosureGenerationAgentEnvOverridesSetenv verifies that a Box
+// carrying a ClosureGeneration with AgentEnv set overrides the adapter's own
+// startup-baked a.agentEnv in the rendered --setenv PATH/SSL_CERT_FILE/
+// GIT_SSL_CAINFO args, the same way ClosureGeneration.AgentFiles already
+// overrides the --ro-bind /agent and /home/agent staging args (issue #2682
+// review finding: a swap must rebind AgentEnv too, not just AgentFiles, or
+// PATH/SSL_CERT_FILE/GIT_SSL_CAINFO keep pointing at the pre-swap
+// generation).
+func TestBuildArgs_ClosureGenerationAgentEnvOverridesSetenv(t *testing.T) {
+	a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok", networkMode: NetworkModeHost}
+	box := Box{
+		Env:               map[string]string{},
+		ClosureGeneration: &AgentGeneration{AgentFiles: "/swapped/agent", AgentEnv: "/swapped/env", Generation: "swapped"},
+	}
+
+	args := a.buildArgs("", box)
+
+	wantSetenvs := []string{
+		"PATH", "/swapped/env/bin",
+		"SSL_CERT_FILE", "/swapped/env/etc/ssl/certs/ca-bundle.crt",
+		"GIT_SSL_CAINFO", "/swapped/env/etc/ssl/certs/ca-bundle.crt",
+	}
+	for i := 0; i < len(wantSetenvs); i += 2 {
+		wantKey, wantVal := wantSetenvs[i], wantSetenvs[i+1]
+		found := false
+		for j, arg := range args {
+			if arg == "--setenv" && j+2 < len(args) && args[j+1] == wantKey {
+				found = true
+				if args[j+2] != wantVal {
+					t.Errorf("--setenv %s = %q, want %q", wantKey, args[j+2], wantVal)
+				}
+			}
+		}
+		if !found {
+			t.Errorf("no --setenv %s found in args: %v", wantKey, args)
+		}
+	}
+
+	for _, arg := range args {
+		if strings.Contains(arg, "/fake/env") {
+			t.Errorf("args still reference the adapter's pre-swap a.agentEnv %q: %v", "/fake/env", args)
+		}
 	}
 }

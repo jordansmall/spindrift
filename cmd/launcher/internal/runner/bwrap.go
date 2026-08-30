@@ -220,6 +220,29 @@ func closureGeneration(imageTag string) string {
 	return safePathComponent(imageTag)
 }
 
+// NewAgentGeneration derives an AgentGeneration for a Box launch from
+// closure -- the just-realized tip agent-closure linkFarm's own store output
+// path (issue #2682's bwrap Box-only hot-swap; e.g.
+// /nix/store/<hash>-agent-closure, what freshness.Probe reports as
+// res.TipTag under bwrap), NOT the agentFiles derivation directly. That
+// linkFarm nests three children (lib/mkHarness.nix's agentClosure =
+// pkgs.linkFarm "agent-closure" [...]): "files" (the agentFiles derivation),
+// "env" (the agentEnv derivation), and "nix-config". AgentFiles, AgentEnv,
+// and NixConfigFile are therefore closure's "files", "env", and "nix-config"
+// children, not closure itself. Generation is still derived from the closure
+// path itself, the same way closureGeneration derives one from a baked
+// Config.ImageTag (safePathComponent), so a hot-swapped generation nests its
+// store-DB snapshot dir under the identical naming convention an ordinary
+// baked generation uses, rather than a second one.
+func NewAgentGeneration(closure string) AgentGeneration {
+	return AgentGeneration{
+		AgentFiles:    filepath.Join(closure, "files"),
+		AgentEnv:      filepath.Join(closure, "env"),
+		NixConfigFile: filepath.Join(closure, "nix-config"),
+		Generation:    safePathComponent(closure),
+	}
+}
+
 // safePathComponent returns s unless it is unsafe to use as a single path
 // component — empty, ".", "..", or a bare separator — in which case it
 // returns "" so the caller can fall back to a known-safe default. Shared by
@@ -420,19 +443,53 @@ func (a *bwrapAdapter) pastaPath() bool {
 	return a.isolateNet() && a.networkMode != NetworkModeNone
 }
 
-// agentFilesFor resolves the agent-closure store path box's launch should
-// bind: box.ClosureGeneration's override when set AND non-empty (issue
-// #2681), else the adapter's own startup-baked a.agentFiles — today's
-// behaviour, unchanged. A non-nil ClosureGeneration with an empty AgentFiles
-// (a partially-populated override) falls back to a.agentFiles too, rather
-// than returning "" verbatim — callers append "/agent" and "/home/agent" to
-// this result, and an empty base would silently bind the HOST's own /agent
-// and home directory into the sandbox instead of a store closure.
-func (a *bwrapAdapter) agentFilesFor(box Box) string {
-	if box.ClosureGeneration != nil && box.ClosureGeneration.AgentFiles != "" {
-		return box.ClosureGeneration.AgentFiles
+// pick returns override if it's non-empty, else baked -- the shared shape
+// behind agentFilesFor/agentEnvFor/nixConfigFileFor below: a box's
+// ClosureGeneration override (issue #2681, extended to agentEnv/nixConfig by
+// issue #2682's bwrap Box-only hot-swap) wins when set AND non-empty, else
+// the adapter's own startup-baked value -- today's behaviour, unchanged. A
+// non-nil ClosureGeneration with an empty field (a partially-populated
+// override) falls back to baked too, rather than returning "" verbatim --
+// every caller appends a path segment to this result, and an empty base
+// would silently bind/point at the sandbox's own root or the host's, not a
+// store closure (issue #2682 review finding: was three copies of this same
+// two-line shape).
+func pick(override, baked string) string {
+	if override != "" {
+		return override
 	}
-	return a.agentFiles
+	return baked
+}
+
+// agentFilesFor resolves the agent-closure store path box's launch should
+// bind: box.ClosureGeneration.AgentFiles when set, else a.agentFiles.
+// Callers append "/agent" and "/home/agent" to this result.
+func (a *bwrapAdapter) agentFilesFor(box Box) string {
+	if box.ClosureGeneration == nil {
+		return a.agentFiles
+	}
+	return pick(box.ClosureGeneration.AgentFiles, a.agentFiles)
+}
+
+// agentEnvFor resolves the agentEnv store path box's launch should bind for
+// PATH/SSL_CERT_FILE/GIT_SSL_CAINFO: box.ClosureGeneration.AgentEnv when
+// set, else a.agentEnv. Callers append "/bin" and
+// "/etc/ssl/certs/ca-bundle.crt" to this result.
+func (a *bwrapAdapter) agentEnvFor(box Box) string {
+	if box.ClosureGeneration == nil {
+		return a.agentEnv
+	}
+	return pick(box.ClosureGeneration.AgentEnv, a.agentEnv)
+}
+
+// nixConfigFileFor resolves the nix.conf store path box's launch should bind
+// for /etc/nix/nix.conf: box.ClosureGeneration.NixConfigFile when set, else
+// a.nixConfigFile.
+func (a *bwrapAdapter) nixConfigFileFor(box Box) string {
+	if box.ClosureGeneration == nil {
+		return a.nixConfigFile
+	}
+	return pick(box.ClosureGeneration.NixConfigFile, a.nixConfigFile)
 }
 
 // snapshotDirFor resolves the nix-var store-DB snapshot directory box's
@@ -501,7 +558,7 @@ func (a *bwrapAdapter) buildArgs(etcDir string, box Box) []string {
 	// in the Box land in the upper and vanish on exit, never touching the
 	// host's real store — when both are true.
 	if a.nixConfigFile != "" {
-		args = append(args, "--ro-bind", a.nixConfigFile, "/etc/nix/nix.conf")
+		args = append(args, "--ro-bind", a.nixConfigFileFor(box), "/etc/nix/nix.conf")
 		args = append(args, "--overlay-src", a.snapshotDirFor(box), "--tmp-overlay", "/nix/var")
 	}
 	if !isolateNet {
@@ -551,11 +608,12 @@ func (a *bwrapAdapter) buildArgs(etcDir string, box Box) []string {
 	// of the schema-driven box.Env -- which Run sets as cmd.Env and bwrap
 	// inherits without --clearenv. Values on argv are visible in ps/proc, so
 	// secrets must not appear there.
+	agentEnv := a.agentEnvFor(box)
 	args = append(args,
 		"--setenv", "HOME", "/home/agent",
-		"--setenv", "PATH", a.agentEnv+"/bin",
-		"--setenv", "SSL_CERT_FILE", a.agentEnv+"/etc/ssl/certs/ca-bundle.crt",
-		"--setenv", "GIT_SSL_CAINFO", a.agentEnv+"/etc/ssl/certs/ca-bundle.crt",
+		"--setenv", "PATH", agentEnv+"/bin",
+		"--setenv", "SSL_CERT_FILE", agentEnv+"/etc/ssl/certs/ca-bundle.crt",
+		"--setenv", "GIT_SSL_CAINFO", agentEnv+"/etc/ssl/certs/ca-bundle.crt",
 		"--setenv", "PREFETCH", a.bakedPrefetch,
 	)
 	for k, v := range box.Env {
@@ -1332,6 +1390,83 @@ func (a *bwrapBuildAdapter) EnsureReady() error {
 	return nil
 }
 
+// SnapshotGeneration is the hot-swap counterpart to
+// bwrapBuildAdapter.EnsureReady's build-time snapshot step above: `launcher
+// build` writes a generation once, at startup, against the adapter's own
+// baked closure; a hot-swap (ADR 0043, issue #2682) realizes a new agent
+// closure mid-run, without ever going through a bwrapBuildAdapter at all, so
+// nothing has written a generation for it until this runs. ADR 0043: "A
+// swap therefore adds a generation named for the closure it was taken
+// against; it never replaces a file a running Box is reading." Call this
+// once per successful swap, after the closure is realized and before
+// binding it (runner.NewAgentGeneration) onto subsequent Box launches --
+// bwrapAdapter.IsReady/Run's stat guard fails any Box that names a
+// generation with no directory on disk.
+//
+// closurePath is the same just-realized agent-closure store path
+// runner.NewAgentGeneration derives AgentFiles/AgentEnv/Generation from
+// (e.g. freshness.Result.TipTag under bwrap); generation here is derived
+// the identical way (closureGeneration/safePathComponent) so this
+// function's snapshot dir and NewAgentGeneration's own Generation field
+// always name the same directory. pwd is the launcher's own working
+// directory, mirroring every other nixVarSnapshotDir/nixVarSnapshotRoot
+// caller in this file.
+//
+// Unlike EnsureReady, this never calls reclaimStaleSnapshots -- reclaim
+// stays a build-time-only operation. A dispatch.Dispatch can launch a Box
+// (Run), finish it, and sit idle for minutes waiting on CI before launching
+// another Box against the same generation (Fix) -- during that gap no flock
+// is held on its generation dir at all, so a swap reclaiming here could
+// delete a generation a still-live Dispatch will need again. There is no
+// mechanism tracking which generations a live-but-idle Dispatch references
+// across that gap, so a hot-swapped run simply accumulates generation
+// directories for the life of the launcher process; they're cleaned up on
+// the next `launcher build`. ADR 0043's Consequences section records this
+// as an accepted divergence from the concurrent-Box-bounded reclaim it
+// originally specified, not an oversight.
+//
+// Idempotent per closure: generations are immutable once created (keyed by
+// closure path, see above), and a generation dir may already be
+// --overlay-src-mounted by a live Box (e.g. a revert commit swapping back to
+// a previously-seen closure). vacuumStoreDBInto renames the existing
+// db.sqlite aside and writes a fresh one in its place, which would mutate a
+// file a running Box is reading (forbidden by ADR 0043) -- so if dir's
+// db.sqlite already exists, this skips the vacuum entirely.
+//
+// Otherwise mirrors EnsureReady's own MkdirAll-root-best-effort /
+// lockSnapshotShared-best-effort / vacuum / unlock shape and its
+// degrade-don't-lie posture: a failure to create the root or acquire the
+// snapshot lock only degrades a concurrent build/reclaim's ability to detect
+// this generation is mid-write (warn, continue) since the actual write below
+// is unaffected either way, but a vacuumStoreDBInto failure is real -- the
+// generation this call was supposed to produce genuinely doesn't exist --
+// and propagates as this function's own returned error, exactly like
+// EnsureReady propagates snapshotStoreDB's.
+func SnapshotGeneration(pwd, closurePath string) error {
+	generation := closureGeneration(closurePath)
+	dir := nixVarSnapshotDir(pwd, generation)
+	root := nixVarSnapshotRoot(pwd)
+
+	dest := filepath.Join(dir, "nix", "db", "db.sqlite")
+	if _, err := os.Stat(dest); err == nil {
+		fmt.Printf("==> bwrap runner: nix-var snapshot for generation %s already exists; skipping vacuum\n", generation)
+		return nil
+	}
+
+	fmt.Printf("==> bwrap runner: snapshotting host nix store DB (VACUUMed) for hot-swapped generation %s\n", generation)
+
+	if mkErr := os.MkdirAll(root, 0o755); mkErr != nil {
+		fmt.Printf("==> bwrap runner: warning: could not create nix-var snapshot root %s (%v); a concurrent build cannot detect this generation is mid-write\n", root, mkErr)
+	}
+	lf, lockErr := lockSnapshotShared(dir)
+	if lockErr != nil {
+		fmt.Printf("==> bwrap runner: warning: could not acquire nix-var snapshot lock %s (%v); a concurrent build cannot detect this generation is mid-write\n", snapshotLockPath(dir), lockErr)
+	}
+	err := vacuumStoreDBInto(dir)
+	unlockSnapshot(lf)
+	return err
+}
+
 // hostNixDBPath is the host's real, live nix store database — never a path
 // inside a sandbox. snapshotStoreDB runs during `launcher build`, on the
 // operator's (or CI job's) own machine.
@@ -1350,12 +1485,25 @@ const hostNixDBPath = "/nix/var/nix/db/db.sqlite"
 // requirement), so no explicit chown is needed here.
 func (a *bwrapBuildAdapter) snapshotStoreDB() error {
 	fmt.Println("==> bwrap runner: snapshotting host nix store DB (VACUUMed)")
+	return vacuumStoreDBInto(a.nixVarSnapshotDir)
+}
 
+// vacuumStoreDBInto does the actual VACUUM INTO/backup-rename work
+// snapshotStoreDB used to do inline against a.nixVarSnapshotDir, factored
+// out to a free function over an explicit dir parameter (issue #2682's
+// hot-swap slice) so a run-time caller — SnapshotGeneration, invoked once
+// per hot-swap rather than once per `launcher build` — can reuse the exact
+// same VACUUM INTO/backup-rename dance against a directory it derives
+// itself, instead of this logic only ever being reachable through a
+// bwrapBuildAdapter's own startup-baked nixVarSnapshotDir field. Writes
+// dir's own db.sqlite (dir/nix/db/db.sqlite), the shared destination layout
+// nixVarSnapshotDir's callers all expect.
+func vacuumStoreDBInto(dir string) error {
 	if err := statHostNixDB(); err != nil {
 		return fmt.Errorf("host nix store db not found at %s: %w", hostNixDBPath, err)
 	}
 
-	dest := filepath.Join(a.nixVarSnapshotDir, "nix", "db", "db.sqlite")
+	dest := filepath.Join(dir, "nix", "db", "db.sqlite")
 	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
 		return fmt.Errorf("mkdir nix-var-snapshot: %w", err)
 	}
