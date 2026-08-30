@@ -86,8 +86,10 @@ type Runner interface {
 	// under this runtime — Console startup orphan detection (issue #651):
 	// a crash or dropped SSH leaves these running with no live goroutine in
 	// a fresh process to account for them. bwrap sandboxes are unprivileged
-	// child processes with no daemon tracking them, so the bwrap adapter
-	// always returns an empty list, matching its already-false IsRunning.
+	// child processes with no daemon tracking them by name; the bwrap
+	// adapter addresses them instead via the named per-Box cgroup a live
+	// Box is moved into at launch (issue #2669), degrading to an empty
+	// list on a host with no cgroup v2 delegation.
 	ListRunning() ([]string, error)
 }
 
