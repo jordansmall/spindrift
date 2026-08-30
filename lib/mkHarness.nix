@@ -1032,6 +1032,7 @@ let
     agentFiles
     passwdFile
     groupFile
+    nixConfigFile
     ;
 
   # The canonical outcome contract as a host store path, so checks can diff
@@ -1163,6 +1164,8 @@ let
   passwdFileDrv = builtins.unsafeDiscardStringContext passwdFile.drvPath;
   groupFilePath = builtins.unsafeDiscardStringContext (toString groupFile);
   groupFileDrv = builtins.unsafeDiscardStringContext groupFile.drvPath;
+  nixConfigFilePath = builtins.unsafeDiscardStringContext (toString nixConfigFile);
+  nixConfigFileDrv = builtins.unsafeDiscardStringContext nixConfigFile.drvPath;
 
   # The bwrap freshness dimension (issue #2667) needs ONE comparable output
   # path standing in for "the bwrap agent closure as a whole" — linkFarm
