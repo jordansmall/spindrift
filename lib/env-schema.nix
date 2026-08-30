@@ -373,7 +373,7 @@ in
     # (nix/dogfood-defaults.nix) leaves it unset on native Linux; this "5g"
     # default remains unchanged for every other Consumer.
     default = "5g";
-    doc = "max memory per agent container (--memory); empty string disables the limit";
+    doc = "max memory per agent Box: hard --memory cap under OCI; under bwrap, a per-Box cgroup v2 memory.max when the host delegates a writable cgroup subtree, else best-effort (warns and proceeds uncapped -- ADR 0042); empty string disables the limit";
     flakeOption = true;
     nixSubPath = "limits.memory";
     boxEnv = false;
@@ -382,7 +382,7 @@ in
     env = "PIDS_LIMIT";
     group = "infra";
     default = "512";
-    doc = "max processes per agent container (--pids-limit); empty string disables the limit";
+    doc = "max processes per agent Box: hard --pids-limit cap under OCI; under bwrap, unconditional prlimit --nproc plus a per-Box cgroup v2 pids.max when delegation is available (ADR 0042); empty string disables the limit";
     flakeOption = true;
     nixSubPath = "limits.pids";
     boxEnv = false;

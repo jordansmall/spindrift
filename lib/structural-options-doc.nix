@@ -95,10 +95,10 @@
 
   nixInBox = {
     doc = ''
-      Bake nix (binary + registered store DB + sandbox-off config) into the
-      box so `nix flake check` and `nix develop` work inside the container.
-      Defaults to true (the nix-centric baseline); set to false for a lean,
-      nix-free image.
+      Bake nix (binary + registered store DB + sandbox-off, cores=4-bounded
+      config) into the box so `nix flake check` and `nix develop` work
+      inside the container. Defaults to true (the nix-centric baseline);
+      set to false for a lean, nix-free image.
     '';
     docType = "bool";
     docDefault = "`true`";
