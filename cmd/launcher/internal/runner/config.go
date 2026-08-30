@@ -27,7 +27,12 @@ type Config struct {
 	// CLI binary (via BinaryFor).
 	Runtime string
 
-	// OCI image config (baked by nix wrapper; empty for bwrap).
+	// OCI image config (baked by nix wrapper). Image/ImageArchive/ImageDrv/
+	// NixBuilderImage/NixVolume are empty for bwrap (no image to load).
+	// ImageTag/FlakeImageAttr are dual-purpose (issue #2667): the OCI
+	// image's content-hash tag/flake attr for an OCI runtime, or the
+	// bundled bwrap agent-closure's loaded output path/flake attr for
+	// bwrap.
 	Image           string
 	ImageArchive    string
 	ImageDrv        string
