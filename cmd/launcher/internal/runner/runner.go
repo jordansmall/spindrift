@@ -11,6 +11,15 @@ import (
 	"os/exec"
 )
 
+// AgentGeneration names one realized agent-closure generation a Box launch
+// binds (issue #2681): the store path bwrap ro-binds for /agent and its
+// /home/agent staging, paired with the label its store-DB snapshot nests
+// under (see closureGeneration in bwrap.go).
+type AgentGeneration struct {
+	AgentFiles string
+	Generation string
+}
+
 // Box describes a single disposable agent sandbox.
 type Box struct {
 	Issue  string            // issue number, e.g. "42"
@@ -44,6 +53,13 @@ type Box struct {
 	// this Box, so no mount. When set, mounted read-write at the fixed
 	// in-box target registryProxySocketTarget.
 	RegistryProxySocketPath string
+
+	// ClosureGeneration optionally names the agent-closure generation this
+	// launch should bind (issue #2681), overriding the runner adapter's own
+	// startup-baked default. Nil (every existing Box{...} literal's zero
+	// value) binds whatever the adapter was constructed with — today's
+	// behaviour, unchanged.
+	ClosureGeneration *AgentGeneration
 }
 
 // Runner is the seam through which the launcher manages agent sandbox life-cycles.
