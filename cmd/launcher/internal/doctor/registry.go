@@ -15,7 +15,11 @@ import (
 // from one that affirmatively detected the condition it guards against.
 // ReportResults still reports the failure (MISSING line) and its Remedy
 // line exactly as any other failure; only the fail-fast/required-error
-// gating changes.
+// gating changes. A second, deliberate use: an Advisory-tier Check whose
+// Probe genuinely (not indeterminately) detects the absent condition can
+// still wrap ErrDegraded purely to pick up ReportResults' "advisory:"
+// rendering over "MISSING:" -- see bwrap-cgroup-delegation in
+// cmd/launcher/bwrap_doctor_checks.go.
 var ErrDegraded = errors.New("check degraded: probe could not determine result")
 
 // Tier classifies a Check as either blocking (Required) or non-blocking
