@@ -32,3 +32,21 @@ func ValidateRuntimeWithLookup(runtime string, lookPath func(string) (string, er
 	}
 	return nil
 }
+
+// ValidatePasta checks that pasta is available on PATH — required whenever a
+// bwrap Box isolates its network namespace with working egress (issue
+// #2666): without it, the sandbox's own network helper is missing and the
+// launcher must refuse to start rather than silently falling back to a
+// weaker (shared-host-netns) sandbox.
+func ValidatePasta() error {
+	return ValidatePastaWithLookup(exec.LookPath)
+}
+
+// ValidatePastaWithLookup is ValidatePasta with the PATH lookup injected,
+// same shape as ValidateRuntimeWithLookup.
+func ValidatePastaWithLookup(lookPath func(string) (string, error)) error {
+	if _, err := lookPath("pasta"); err != nil {
+		return fmt.Errorf("pasta not found on PATH — required to give a bwrap Box its own network namespace with the host loopback blocked (issue #2666); install pasta (the passt project) on PATH, or set NETWORK_MODE=host to explicitly opt into the pre-#2666 shared-network-namespace behaviour")
+	}
+	return nil
+}

@@ -1,0 +1,58 @@
+#!/usr/bin/env bash
+# Fake pasta: bwrap.go's execTarget (issue #2666) makes pasta the top-level
+# host-exec'd process whenever the bwrap Box isolates its network namespace
+# (the default), with real bwrap appended after a "--" separator. This fake
+# must actually delegate to that trailing command -- if it doesn't, the fake
+# bwrap in tests/fakes/runtime never runs at all, and every bats assertion
+# against $BWRAP_LOG silently stops firing for any test that doesn't opt out
+# via NETWORK_MODE=host or NETWORK_MODE=none.
+set -euo pipefail
+
+log="${PASTA_LOG:-$PWD/pasta.log}"
+printf '%s\n' "$*" >>"$log"
+
+# pasta.go's execTarget only ever emits the fixed hardened-flag prefix before
+# a literal "--" (ADR 0042: -t none -T none -u none -U none --no-map-gw
+# --dns-forward <addr> -f -- bwrap ...), so splitting on the first "--" token
+# is simpler and more robust than trying to walk/skip each flag by hand.
+args=("$@")
+cmd=()
+found_sep=0
+for ((i = 0; i < ${#args[@]}; i++)); do
+  if [ "${args[$i]}" = "--" ]; then
+    found_sep=1
+    cmd=("${args[@]:$((i + 1))}")
+    break
+  fi
+done
+
+if [ "$found_sep" -ne 1 ] || [ "${#cmd[@]}" -eq 0 ]; then
+  echo "fake pasta: no '--'-delimited command found in argv: $*" >&2
+  exit 1
+fi
+
+# bwrap.go's cmd.Env for the pasta child is resolvedRunEnv's bwrapSecrets-only
+# allowlist -- it never carries PATH (by design: nothing outside boxEnv should
+# reach the sandbox this way). A real pasta binary still finds "bwrap" because
+# glibc's execvp() falls back to the OS's compiled-in default PATH
+# (confstr(_CS_PATH)) when the process has no PATH at all, and a production
+# host has bwrap installed somewhere on that default path. Bash's own `exec`
+# builtin does not share that fallback (nixpkgs-patched bash defaults to an
+# unusable placeholder PATH instead), so mimic the same "found via the host's
+# well-known install layout" effect here by resolving an unqualified command
+# name against this fake's own directory -- setup_fakes (tests/helper.bash)
+# always stages the fake bwrap right alongside this fake pasta.
+if [[ "${cmd[0]}" != */* ]]; then
+  # No PATH means no external commands either (this shell's own `exec` would
+  # fail the same way a `dirname`/`readlink` call would), so resolve $0's
+  # directory via pure bash parameter expansion rather than shelling out.
+  # binfmt_script always rewrites a shebang-exec'd script's $0 to the
+  # absolute path the kernel actually opened, so this is reliable even
+  # though nothing set $PATH.
+  self_dir="${0%/*}"
+  if [ -x "$self_dir/${cmd[0]}" ]; then
+    cmd[0]="$self_dir/${cmd[0]}"
+  fi
+fi
+
+exec "${cmd[@]}"

@@ -58,6 +58,7 @@ func TestBootstrap_ValidateError_WrapsErrConfigInvalid(t *testing.T) {
 // that is deliberately never set with t.Setenv, so resolution would fail
 // closed if it ran.
 func TestBootstrap_BadRegistryProxyCredentialEnv_NoUpstreamURL_DoesNotError(t *testing.T) {
+	stubExecutableOnPath(t, "pasta")
 	checkout := mustSeedableCheckout(t)
 	repoPath := filepath.Join(t.TempDir(), "accum.git")
 
@@ -429,6 +430,7 @@ func TestBootstrap_EarlyErrorAfterAccumLockAcquired_ReleasesLock(t *testing.T) {
 // successful launchContext, proves the lock is still contended before
 // cleanup runs, then proves it's free again after.
 func TestBootstrap_Success_HoldsAccumLockUntilCleanup(t *testing.T) {
+	stubExecutableOnPath(t, "pasta")
 	checkout := mustSeedableCheckout(t)
 	repoPath := filepath.Join(t.TempDir(), "accum.git")
 
@@ -485,6 +487,93 @@ body
 	t.Cleanup(func() { _ = reacquired.Release() })
 }
 
+// pathWithoutPasta returns a PATH value that still resolves "git" (needed by
+// bootstrap's own accumulation-repo seeding, which shells out to it before
+// ever reaching checkBwrapPastaGate) and a stub "bwrap" (needed by
+// validate(c)'s own doctor.RuntimeCheck(c.runtime) LookPath probe, which
+// runs even earlier — see stubExecutableOnPath's doc comment for why any
+// executable file satisfies it) — but deliberately excludes pasta, so
+// checkBwrapPastaGate's exec.LookPath("pasta") call fails deterministically
+// regardless of whether pasta happens to be installed elsewhere on the real
+// test-runner's ambient PATH (this sandbox's own devShell has none, but a
+// future CI image might).
+func pathWithoutPasta(t *testing.T) string {
+	t.Helper()
+	git, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatalf("git not found on PATH: %v", err)
+	}
+	bwrapStubDir := t.TempDir()
+	bwrapStub := filepath.Join(bwrapStubDir, "bwrap")
+	if err := os.WriteFile(bwrapStub, []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil {
+		t.Fatalf("write stub bwrap: %v", err)
+	}
+	return bwrapStubDir + string(os.PathListSeparator) + filepath.Dir(git)
+}
+
+// TestBootstrap_BwrapDefaultNetworkModeMissingPasta_BlocksLaunch is Finding
+// B's wiring test (issue #2666 review): checkBwrapPastaGate is unit-tested
+// directly in bwrap_pasta_gate_test.go, but nothing previously asserted it
+// is actually reached from bootstrap()'s real startup path — every existing
+// RUNNER_KIND=bwrap bootstrap test stubs pasta onto PATH
+// (stubExecutableOnPath(t, "pasta")), so a bootstrap() that silently
+// stopped calling checkBwrapPastaGate at all would leave every one of them
+// green. This is the mirror image: RUNNER_KIND=bwrap, NETWORK_MODE left
+// unset (the isolate-by-default path, same as
+// TestBootstrap_Success_HoldsAccumLockUntilCleanup), pasta deliberately
+// absent from PATH, asserting bootstrap() itself — not checkBwrapPastaGate
+// in isolation — returns an error naming pasta and PATH.
+func TestBootstrap_BwrapDefaultNetworkModeMissingPasta_BlocksLaunch(t *testing.T) {
+	checkout := mustSeedableCheckout(t)
+	repoPath := filepath.Join(t.TempDir(), "accum.git")
+
+	issuesDir := t.TempDir()
+	issueFile := `---
+title: Some issue
+state: untriaged
+labels: []
+created: 2026-07-09T12:00:00Z
+---
+body
+`
+	if err := os.WriteFile(filepath.Join(issuesDir, "42.md"), []byte(issueFile), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("REPO_SLUG", "owner/repo")
+	t.Setenv("GH_TOKEN", "test-token")
+	t.Setenv("GIT_USER_NAME", "Test")
+	t.Setenv("GIT_USER_EMAIL", "test@example.com")
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "test-oauth-token")
+	t.Setenv("CODE_FORGE", "local")
+	t.Setenv("CODE_FORGE_ACCUMULATION_REPO_DIR", repoPath)
+	t.Setenv("BASE_BRANCH", "main")
+	t.Setenv("MERGE_MODE", "immediate")
+	t.Setenv("RUNTIME", "bwrap")
+	t.Setenv("RUNNER_KIND", "bwrap")
+	t.Setenv("ISSUE_TRACKER", "local")
+	t.Setenv("LOCAL_ISSUES_DIR", issuesDir)
+	t.Chdir(checkout)
+	// Deliberately the opposite of every other RUNNER_KIND=bwrap test in this
+	// file: no stubExecutableOnPath(t, "pasta") — PATH is pinned to just a
+	// stub bwrap and git's own directory, so pasta cannot resolve.
+	t.Setenv("PATH", pathWithoutPasta(t))
+
+	lc, err := bootstrap(true, dispatchKindWork, false)
+	if err == nil {
+		t.Fatal("bootstrap() with RUNNER_KIND=bwrap, default NETWORK_MODE, and pasta absent from PATH = nil error, want checkBwrapPastaGate to block the launch")
+	}
+	if lc != nil {
+		t.Fatalf("bootstrap() on a pasta-gate error = %+v, want nil launch context", lc)
+	}
+	if !strings.Contains(err.Error(), "pasta") {
+		t.Errorf("bootstrap() error = %q, want it to mention pasta", err.Error())
+	}
+	if !strings.Contains(err.Error(), "PATH") {
+		t.Errorf("bootstrap() error = %q, want it to mention PATH", err.Error())
+	}
+}
+
 // stubExecutableOnPath creates an executable script named name in a
 // throwaway dir and prepends that dir to PATH, so runner.ValidateRuntime's
 // exec.LookPath(name) succeeds without the real CLI being installed —
@@ -520,6 +609,7 @@ func stubExecutableOnPath(t *testing.T, name string) {
 // never invoked once the bwrap branch is correctly selected).
 func TestBootstrap_RunnerKindBwrap_OverridesMismatchedRuntime(t *testing.T) {
 	stubExecutableOnPath(t, "podman")
+	stubExecutableOnPath(t, "pasta")
 	checkout := mustSeedableCheckout(t)
 	repoPath := filepath.Join(t.TempDir(), "accum.git")
 

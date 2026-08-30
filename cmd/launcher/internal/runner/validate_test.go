@@ -79,3 +79,49 @@ func TestValidateRuntimeWithLookup_RancherLooksUpNerdctl(t *testing.T) {
 		t.Errorf("error = %q, want it to mention Rancher Desktop", err.Error())
 	}
 }
+
+// TestValidatePastaWithLookup_Found verifies ValidatePastaWithLookup accepts
+// a lookPath that resolves "pasta".
+func TestValidatePastaWithLookup_Found(t *testing.T) {
+	fakeLookPath := func(file string) (string, error) {
+		return "/usr/bin/" + file, nil
+	}
+	if err := ValidatePastaWithLookup(fakeLookPath); err != nil {
+		t.Errorf("ValidatePastaWithLookup() = %v, want nil when pasta resolves", err)
+	}
+}
+
+// TestValidatePastaWithLookup_NotFound verifies ValidatePastaWithLookup
+// rejects a lookPath that cannot resolve "pasta", with an actionable error
+// naming both pasta itself and the NETWORK_MODE=host opt-out (issue #2666) —
+// so the launcher refuses to start rather than silently falling back to a
+// shared host network namespace.
+func TestValidatePastaWithLookup_NotFound(t *testing.T) {
+	fakeLookPath := func(file string) (string, error) {
+		return "", fmt.Errorf("not found")
+	}
+	err := ValidatePastaWithLookup(fakeLookPath)
+	if err == nil {
+		t.Fatal("ValidatePastaWithLookup() should error when pasta is absent from PATH")
+	}
+	if !strings.Contains(err.Error(), "pasta") {
+		t.Errorf("error = %q, want it to mention pasta", err.Error())
+	}
+	if !strings.Contains(err.Error(), "NETWORK_MODE=host") {
+		t.Errorf("error = %q, want it to mention NETWORK_MODE=host", err.Error())
+	}
+}
+
+// TestValidatePasta_NotOnPath verifies ValidatePasta (the real-PATH entry
+// point) rejects a binary name that cannot be found on PATH, mirroring
+// TestValidateRuntime_NotOnPath.
+func TestValidatePasta_NotOnPath(t *testing.T) {
+	// pasta is unlikely to be on the test-runner's PATH; if it is, this test
+	// is a no-op success case rather than a false failure.
+	if _, err := exec.LookPath("pasta"); err == nil {
+		t.Skip("pasta is on PATH in this environment; nothing to assert")
+	}
+	if err := ValidatePasta(); err == nil {
+		t.Fatal("ValidatePasta() should error when pasta is absent from PATH")
+	}
+}
