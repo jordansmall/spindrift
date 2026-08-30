@@ -1374,6 +1374,46 @@ Reopening host loopback under a restricted-egress config is a deliberate
 weakening of that posture — treat it as an explicit opt-in, never something a
 Provider selection implies silently.
 
+#### Syscall filter
+
+Every bwrap Box runs under a compiled BPF seccomp filter attached via
+bwrap's own `--seccomp FD` flag ([ADR 0045](adr/0045-bwrap-boxes-run-under-a-compiled-syscall-denylist.md),
+issue #2670). It is unconditional — no `settings` toggle, no env knob — and
+built at nix eval time from `lib/seccomp.nix`.
+
+The filter is a curated **denylist**, not a podman-style full allowlist: it
+denies exactly the following syscalls (`SCMP_ACT_ERRNO(EPERM)`) and allows
+everything else —
+
+`acct`, `add_key`, `bpf`, `clock_adjtime`, `clock_settime`, `create_module`,
+`delete_module`, `finit_module`, `get_kernel_syms`, `init_module`, `ioperm`,
+`iopl`, `kexec_file_load`, `kexec_load`, `keyctl`, `lookup_dcookie`, `mount`,
+`nfsservctl`, `open_by_handle_at`, `perf_event_open`, `pivot_root`,
+`process_vm_readv`, `process_vm_writev`, `ptrace`, `query_module`, `reboot`,
+`request_key`, `settimeofday`, `stime`, `swapoff`, `swapon`, `syslog`,
+`umount2`, `ustat`, `vm86`, `vm86old`.
+
+A denylist is deliberately the opposite risk profile from podman's own
+allowlist default: enumerating every syscall an arbitrary Driver's or
+Consumer's toolchain might legitimately need is unverifiable, and a false
+negative in an allowlist silently breaks a Dispatch outright. A denylist can
+only ever be too narrow — a documented gap to close later, not an outage.
+
+**Known limitations.** `clone`, `unshare`, `setns`, and `personality` are
+**not** denied, even though podman's own default profile applies nuanced,
+argument-based restrictions to some of them — bare `clone(2)` backs ordinary
+thread creation everywhere, and scoping a deny to just the dangerous flag/
+value combinations needs argument-aware BPF rules this cut does not attempt.
+The filter also covers the **native architecture only** (libseccomp's
+`seccomp_init` default) — no 32-bit/multiarch compat-syscall coverage.
+
+**Failure posture.** If the compiled filter file is missing or unreadable,
+the launcher warns and proceeds without it rather than refusing to launch
+the Box — the same degrade-don't-lie precedent ADR 0042 already applies to a
+missing prlimit/cgroup: the filter is defense-in-depth on top of bwrap's
+existing namespace/mount isolation, not the sandbox's sole isolation
+mechanism.
+
 ### Claude Code output caps
 
 Unlike every knob above, `BASH_MAX_OUTPUT_LENGTH` and `MAX_MCP_OUTPUT_TOKENS`
