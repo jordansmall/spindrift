@@ -17,7 +17,17 @@ import (
 // under (see closureGeneration in bwrap.go).
 type AgentGeneration struct {
 	AgentFiles string
-	Generation string
+	// AgentEnv parallels AgentFiles: the realized agentEnv store path (the
+	// agent-closure's "env" linkFarm child) a swap should bind for
+	// PATH/SSL_CERT_FILE/GIT_SSL_CAINFO, instead of the adapter's own
+	// startup-baked default (issue #2682's bwrap Box-only hot-swap).
+	AgentEnv string
+	// NixConfigFile parallels AgentFiles/AgentEnv: the realized nix.conf store
+	// path (the agent-closure's "nix-config" linkFarm child) a swap should
+	// bind for /etc/nix/nix.conf, instead of the adapter's own startup-baked
+	// default (issue #2682's bwrap Box-only hot-swap).
+	NixConfigFile string
+	Generation    string
 }
 
 // Box describes a single disposable agent sandbox.
