@@ -429,6 +429,31 @@ rec {
     + "| `filer` | ${filerCell} |\n"
     + "| `worker` | `${schemaDefaults.workerModel}` |\n";
 
+  # MIGRATING.md's generated "Flag names re-cut to domains" table (issue
+  # #2558): one row per lib/legacy-settings-section.nix entry, mapping the
+  # frozen `perSystem.spindrift.settings.<section>.<knob>` alias to its
+  # current `perSystem.spindrift.<path>` home (path via resolveNixPath, same
+  # as renderSettingsExampleModelsDoc/renderSettingsExampleLabelsDoc below).
+  # Both columns carry the full `perSystem.spindrift.` prefix, matching
+  # flakeModule.nix's own deprecation warning -- this table stands in for
+  # hand-diffing docs/flake-options.md, so its paths must read exactly as
+  # they do there. Sorted by "<section>.<knob>" so rows group by section,
+  # matching a migrating Consumer's own nested `settings` block.
+  renderLegacySettingsMappingDoc =
+    legacySettingsSection: schema:
+    let
+      sortKey = knob: "${legacySettingsSection.${knob}}.${knob}";
+      knobs = builtins.sort (a: b: builtins.lessThan (sortKey a) (sortKey b)) (
+        builtins.attrNames legacySettingsSection
+      );
+      row =
+        knob:
+        "| `perSystem.spindrift.settings.${legacySettingsSection.${knob}}.${knob}` | `perSystem.spindrift.${
+          resolveNixPath knob schema.${knob}
+        }` |\n";
+    in
+    "| Legacy alias | Canonical replacement |\n" + "| --- | --- |\n" + concatStrings (map row knobs);
+
   # docs/reference.md's generated flat domain-tree example's `agents.models.*`
   # lines (issue #2514; ADR 0037 re-spelling, issue #2557): the same four
   # schemaDefaults leaves (model/scoutModel/reviewModel/filerModel)

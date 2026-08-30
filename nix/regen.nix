@@ -16,8 +16,9 @@
 # generated `models` sub-block of docs/reference.md's `settings = { ... }`
 # example, the generated `issueDiscovery`/`lifecycleLabels` and `branches`/
 # `concurrency` sub-blocks of that same example (issue #2537),
-# agent/entrypoint.sh's generated skill-baked probe block, and the generated
-# skill-baked flags/Env-assignments/fields/gates spans of
+# MIGRATING.md's generated legacy settings alias -> domain path table (issue
+# #2558), agent/entrypoint.sh's generated skill-baked probe block, and the
+# generated skill-baked flags/Env-assignments/fields/gates spans of
 # cmd/launcher/driver-exec/assembleprompt_cmd.go,
 # cmd/launcher/internal/promptassembly/env.go, and
 # cmd/launcher/internal/promptassembly/gates.go (lib/baked-skills.nix, issue
@@ -77,6 +78,8 @@ let
   defaultModelFixtureBash = renderers.renderDefaultModelFixtureBash defaultModelFixture;
   defaultModelFixtureGo = renderers.renderDefaultModelFixtureGo defaultModelFixture;
   defaultModelsDoc = renderers.renderDefaultModelsDoc defaultModelFixture;
+  legacySettingsSection = import ../lib/legacy-settings-section.nix;
+  legacySettingsMappingDoc = renderers.renderLegacySettingsMappingDoc legacySettingsSection schema;
   settingsExampleModelsDoc = renderers.renderSettingsExampleModelsDoc defaultModelFixture schema;
   settingsExampleLabelsDoc = renderers.renderSettingsExampleLabelsDoc schema;
   settingsExampleConfigDoc = renderers.renderSettingsExampleConfigDoc schema;
@@ -170,6 +173,10 @@ pkgs.writeShellApplication {
       ${escapeShellArg "# BEGIN GENERATED SETTINGS EXAMPLE CONFIG -- nix run .#regen -- DO NOT EDIT"} \
       ${escapeShellArg "# END GENERATED SETTINGS EXAMPLE CONFIG"} \
       ${escapeShellArg settingsExampleConfigDoc}
+    write_between MIGRATING.md \
+      ${escapeShellArg "<!-- BEGIN GENERATED LEGACY SETTINGS MAPPING -- nix run .#regen -- DO NOT EDIT -->"} \
+      ${escapeShellArg "<!-- END GENERATED LEGACY SETTINGS MAPPING -->"} \
+      ${escapeShellArg legacySettingsMappingDoc}
     write_between agent/entrypoint.sh \
       ${escapeShellArg "  # BEGIN GENERATED SKILL-BAKED PROBES -- nix run .#regen -- DO NOT EDIT"} \
       ${escapeShellArg "  # END GENERATED SKILL-BAKED PROBES"} \
