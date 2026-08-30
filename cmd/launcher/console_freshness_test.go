@@ -171,27 +171,40 @@ func TestNewConsoleFreshnessChecker_Rebuild_PropagatesPullNotice(t *testing.T) {
 // wires config.runnerKind, not config.runtime, into freshness.Probe (issue
 // #2538 AC1/AC2): runtime is set to "podman" — a real OCI runtime name a
 // runtime-name comparison would read as "not bwrap" — while runnerKind is
-// "bwrap". A pwd that isn't a git repository at all would also come back
-// not-applicable via the OCI arm's own isNotAGitRepository check (see
-// freshness.Probe), so Applicable alone can't tell the two arms apart;
-// asserting the bwrap arm's distinct message text is what actually
-// discriminates a c.runtime regression from the correct c.runnerKind read. A
-// fake Evaluator that fails the test if ever called backs this up: the OCI
-// arm's fetch would fail closed before eval ever runs on this non-repo pwd,
-// so a called Eval would itself already prove a regression.
+// "bwrap". Since probe.go no longer special-cases bwrap before the
+// fetch+eval, both a bwrap and an OCI read reach the same comparison point;
+// the two arms only diverge in HOW they compare the freshly evaluated
+// outPath against c.imageTag. c.imageTag is set to a bare store path with no
+// colon at all, and the fake Evaluator is scripted to return that exact same
+// path. The bwrap arm compares outPath to imageTag byte-for-byte, so a
+// correct runnerKind read reports Fresh=true with no "spindrift:" in the
+// message. A wrong c.runtime read would instead take the OCI arm, which
+// derives a "<repo>:<hash>" tip tag via imageTagFromOutPath — since imageTag
+// has no colon, imageRepo falls back to the default "spindrift" repo,
+// producing a tip tag like "spindrift:<hash>" that can never equal the
+// colon-less imageTag, so that arm would report Fresh=false with a message
+// naming "spindrift:". Asserting Fresh=true and the absence of "spindrift:"
+// is what discriminates a c.runtime regression from the correct c.runnerKind
+// read.
 func TestNewConsoleFreshness_UsesRunnerKindNotRuntime(t *testing.T) {
+	const outPath = "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-agent-closure"
+
 	c := baseConfig()
 	c.runnerKind = "bwrap"
 	c.runtime = "podman"
 	c.baseBranch = "main"
-	eval := failEvaluator{t: t}
+	c.imageTag = outPath // bare store path, no colon — bwrap's own tag shape
+	eval := &freshness.Fake{OutPath: outPath}
 
-	fresh, _ := newConsoleFreshness(c, t.TempDir(), eval, nil, nil)
+	pwd := newConsoleGitRepo(t, "main")
+	fresh, _ := newConsoleFreshness(c, pwd, eval, nil, nil)
 
-	const wantMsg = "not applicable (bwrap runtime keeps its store read-only; no loaded image to compare)"
 	applicable, isFresh, msg := fresh()
-	if applicable || isFresh || msg != wantMsg {
-		t.Fatalf("fresh() = applicable=%v fresh=%v msg=%q, want applicable=false fresh=false msg=%q (the bwrap arm, proving runnerKind was read)", applicable, isFresh, msg, wantMsg)
+	if !applicable || !isFresh {
+		t.Fatalf("fresh() = applicable=%v fresh=%v msg=%q, want applicable=true fresh=true (the bwrap arm's direct outPath-vs-imageTag comparison; a wrong c.runtime read would take the OCI arm instead, which can never match a colon-less imageTag)", applicable, isFresh, msg)
+	}
+	if strings.Contains(msg, "spindrift:") {
+		t.Errorf("fresh() message %q names an OCI-style %q tag, want the bwrap arm's bare-outPath comparison — proves runnerKind (not runtime) drove Probe", msg, "spindrift:")
 	}
 }
 
@@ -248,17 +261,6 @@ func TestNewConsoleFreshness_NeverWiresLauncherDimension(t *testing.T) {
 			t.Errorf("Eval called for the launcher attr %q, want the Console's Probe call to never evaluate the launcher dimension at all", call.Attr)
 		}
 	}
-}
-
-// failEvaluator is a freshness.Evaluator that fails the test if Eval is ever
-// called — used to prove a probe call short-circuited before reaching the
-// OCI eval path.
-type failEvaluator struct{ t *testing.T }
-
-func (f failEvaluator) Eval(pwd, rev, attr string) (string, error) {
-	f.t.Helper()
-	f.t.Fatal("Eval called, want the bwrap branch to short-circuit before evaluating")
-	return "", nil
 }
 
 // TestConsoleGitSync_DirtyOffBranch_RefusesCheckout verifies that when pwd is
