@@ -94,7 +94,11 @@ let
     "drivers-claude-cli-knows-disable-background-tasks-env"
   ];
 
-  checksInboxSet = removeAttrs sourceChecks imageOnlyCheckNames;
+  # Built from portableSourceChecks (not sourceChecks) so a darwin eval also
+  # drops linuxOnlyCheckNames here -- otherwise packages.<system>.checks-inbox
+  # below forces mkharness-agent-closure-package's build on darwin, where
+  # bwrapHarness.packages lacks agent-closure and its own assert throws.
+  checksInboxSet = removeAttrs portableSourceChecks imageOnlyCheckNames;
 
   # A narrower axis than imageOnlyCheckNames: source checks whose *build*
   # closure embeds the aarch64-linux image — each bats-shard-N pulls it in
@@ -119,6 +123,13 @@ let
     "promptassembly-parity"
     "bats-outcome-opencode"
     "bats-prompt-contract-parity"
+    # nix/fixtures.nix's bwrapHarness is instantiated at the *current*
+    # system, and lib/mkHarness.nix only exposes packages.agent-closure when
+    # isLinux (system == linuxSystem) -- on darwin bwrapHarness.packages
+    # lacks it, so this check's own assert throws during eval. Linux-only
+    # for the same reason agent-closure itself is Linux-only.
+    "mkharness-agent-closure-package"
+    "mkharness-agent-closure-bundles-both"
   ];
 
   # The darwin checkset drops the Linux-bound checks; Linux keeps everything.

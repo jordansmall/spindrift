@@ -1589,6 +1589,73 @@ in
     assert assertMsg (!(harness.packages ? run)) "packages.run must not exist (removed, issue #613)";
     pkgs.runCommand "run-build-aliases-removed" { } "touch $out";
 
+  # Ties the `agent-closure` package name lib/preambles.nix bakes into
+  # FLAKE_IMAGE_ATTR back to the name lib/mkHarness.nix actually registers
+  # under `packages` -- renaming the package, or inverting the
+  # `isLinux && runtime == "bwrap"` guard, would leave every other check
+  # green while Probe fell back to the isImageAttrMissing not-applicable
+  # path, silently restoring the bug #2667 fixes. Ties three facts together:
+  # a bwrap harness exposes packages.agent-closure, an OCI harness does not,
+  # and the FLAKE_IMAGE_ATTR baked into a real bwrap harness's own input
+  # document names a package that genuinely exists in that same harness's
+  # packages -- not a second hardcoded literal.
+  mkharness-agent-closure-package =
+    let
+      inherit (pkgs.lib) assertMsg;
+    in
+    assert assertMsg (bwrapHarness.packages ? agent-closure)
+      "a bwrap harness must expose packages.agent-closure (issue #2667), got: ${builtins.toJSON (builtins.attrNames bwrapHarness.packages)}";
+    assert assertMsg (!(harness.packages ? agent-closure))
+      "an OCI harness must not expose packages.agent-closure, got: ${builtins.toJSON (builtins.attrNames harness.packages)}";
+    pkgs.runCommand "mkharness-agent-closure-package"
+      {
+        runDoc = bwrapHarness.internals.runInputDocumentFile;
+        packageNames = builtins.toJSON (builtins.attrNames bwrapHarness.packages);
+      }
+      ''
+        attr=$(grep -o '"FLAKE_IMAGE_ATTR":"[^"]*"' "$runDoc" | sed -e 's/.*:"//' -e 's/"$//')
+        name=''${attr##*.}
+        case "$packageNames" in
+          *"\"$name\""*) : ;;
+          *)
+            echo "runArtifacts baked FLAKE_IMAGE_ATTR=$attr naming package '$name', but bwrap harness packages are: $packageNames" >&2
+            exit 1
+            ;;
+        esac
+        touch $out
+      '';
+
+  # Nothing else pins that the agent-closure linkFarm actually bundles BOTH
+  # sub-closures -- dropping the "env" (or "files") entry from
+  # lib/mkHarness.nix's linkFarm call would silently narrow the bwrap
+  # freshness signal to one dimension while every other check (including
+  # mkharness-agent-closure-package above) stays green, since that check
+  # only resolves the package *name*, never its contents. Realizes the
+  # linkFarm and cross-checks its "files"/"env" entries against the same
+  # AGENT_FILES/AGENT_ENV paths the run document bakes, so the two are
+  # proven to name the same underlying closures, not just co-exist.
+  mkharness-agent-closure-bundles-both =
+    pkgs.runCommand "mkharness-agent-closure-bundles-both"
+      {
+        agentClosure = bwrapHarness.packages.agent-closure;
+        runDoc = bwrapHarness.internals.runInputDocumentFile;
+      }
+      ''
+        agentFiles=$(grep -o '"AGENT_FILES":"[^"]*"' "$runDoc" | sed -e 's/.*:"//' -e 's/"$//')
+        agentEnv=$(grep -o '"AGENT_ENV":"[^"]*"' "$runDoc" | sed -e 's/.*:"//' -e 's/"$//')
+
+        for pair in "files:$agentFiles" "env:$agentEnv"; do
+          entry=''${pair%%:*}
+          want=''${pair#*:}
+          got=$(readlink -f "$agentClosure/$entry")
+          if [ "$got" != "$want" ]; then
+            echo "agent-closure linkFarm entry '$entry' resolves to $got, want $want (the run document's AGENT_''${entry^^})" >&2
+            exit 1
+          fi
+        done
+        touch $out
+      '';
+
   # The Consumer-facing attrset carries no check-only outputs (issue #2529
   # AC1): every check-only key must live under `internals`, never reappear
   # at the top level. Guards against silent reintroduction the same way

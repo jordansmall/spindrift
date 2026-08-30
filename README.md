@@ -168,7 +168,8 @@ your inputs and import the flake-parts module:
 ```
 
 This yields the **`spindrift` CLI** as `packages.<system>.spindrift` and as
-`apps.<system>.default`, plus the Linux-only `agent-image`. It also exposes
+`apps.<system>.default`, plus the Linux-only `agent-image` (OCI runtimes) and
+`agent-closure` (bwrap runtime, issue #2667). It also exposes
 `packages.<system>.launcher-currency` — a sibling build of the launcher
 binary, never invoked, whose store hash tracks the launcher's own source
 independent of the commit revision (issue #2677); nothing consumes it for
