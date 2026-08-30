@@ -1,7 +1,9 @@
 package runner
 
 import (
+	"bytes"
 	"errors"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -64,6 +66,193 @@ func TestBwrapRun_PastaIsTopLevelProgramByDefault(t *testing.T) {
 
 	if gotName != "pasta" {
 		t.Errorf("execCommand called with %q, want %q", gotName, "pasta")
+	}
+}
+
+// TestBwrapRun_NoPidsLimitLeavesTopLevelProgramUnwrapped verifies that an
+// empty pidsLimit (the Go zero value, matching every existing struct literal
+// in this file that never sets the field) is a pure regression guard: the
+// top-level program stays "bwrap" (host networking, as in
+// TestBwrapRun_LaunchesViaSeamAndSurfacesFailure), never "prlimit". This
+// pins the baseline before the prlimit-wrapping change below.
+func TestBwrapRun_NoPidsLimitLeavesTopLevelProgramUnwrapped(t *testing.T) {
+	script, _ := newFakeCLI(t, fakeCall{exit: 0})
+	orig := execCommand
+	t.Cleanup(func() { execCommand = orig })
+	var gotName string
+	execCommand = func(name string, args ...string) *exec.Cmd {
+		gotName = name
+		return exec.Command(script, args...)
+	}
+
+	a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok", networkMode: NetworkModeHost}
+	if err := a.Run(Box{Env: map[string]string{}}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if gotName != "bwrap" {
+		t.Errorf("execCommand called with %q, want %q", gotName, "bwrap")
+	}
+}
+
+// TestBwrapRun_PidsLimitWrapsBareBwrapWithPrlimit verifies that a non-empty
+// pidsLimit, with no pasta path (host networking), makes "prlimit" the
+// top-level host-exec'd program, with argv --nproc=<N>, --, then the
+// original bare-bwrap program/args unchanged.
+func TestBwrapRun_PidsLimitWrapsBareBwrapWithPrlimit(t *testing.T) {
+	script, _ := newFakeCLI(t, fakeCall{exit: 0})
+	orig := execCommand
+	t.Cleanup(func() { execCommand = orig })
+	var gotName string
+	var gotArgs []string
+	execCommand = func(name string, args ...string) *exec.Cmd {
+		gotName = name
+		gotArgs = args
+		return exec.Command(script, args...)
+	}
+
+	origLookPath := lookPath
+	t.Cleanup(func() { lookPath = origLookPath })
+	lookPath = func(file string) (string, error) { return "/usr/bin/" + file, nil }
+
+	a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok", networkMode: NetworkModeHost, pidsLimit: "512"}
+	if err := a.Run(Box{Env: map[string]string{}}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if gotName != "prlimit" {
+		t.Fatalf("execCommand called with %q, want %q", gotName, "prlimit")
+	}
+	if len(gotArgs) < 3 {
+		t.Fatalf("execCommand args too short: %v", gotArgs)
+	}
+	if gotArgs[0] != "--nproc=512" {
+		t.Errorf("gotArgs[0] = %q, want %q", gotArgs[0], "--nproc=512")
+	}
+	if gotArgs[1] != "--" {
+		t.Errorf("gotArgs[1] = %q, want %q", gotArgs[1], "--")
+	}
+	if gotArgs[2] != "bwrap" {
+		t.Errorf("gotArgs[2] = %q, want %q", gotArgs[2], "bwrap")
+	}
+	wantInner := a.buildArgs("", Box{Env: map[string]string{}})
+	// buildArgs above is called with etcDir="" for comparison purposes only
+	// (networkMode=host means buildArgs never touches etcDir), matching
+	// what Run itself passed internally.
+	if got := gotArgs[3:]; len(got) != len(wantInner) || !reflect.DeepEqual(got, wantInner) {
+		t.Errorf("trailing args = %v, want bwrap args %v", got, wantInner)
+	}
+}
+
+// TestBwrapRun_PidsLimitWrapsWholePastaChain verifies that a non-empty
+// pidsLimit, with the default (pasta) networking path, still makes
+// "prlimit" the top-level program — with argv --nproc=<N>, --, then "pasta"
+// followed by pasta's own original args (which themselves end with "--
+// bwrap" and the bwrap args). This proves prlimit wraps the whole
+// pasta-wrapping-bwrap chain as a single outermost layer, not just bwrap
+// alone.
+func TestBwrapRun_PidsLimitWrapsWholePastaChain(t *testing.T) {
+	script, _ := newFakeCLI(t, fakeCall{exit: 0})
+	orig := execCommand
+	t.Cleanup(func() { execCommand = orig })
+	var gotName string
+	var gotArgs []string
+	execCommand = func(name string, args ...string) *exec.Cmd {
+		gotName = name
+		gotArgs = args
+		return exec.Command(script, args...)
+	}
+
+	origLookPath := lookPath
+	t.Cleanup(func() { lookPath = origLookPath })
+	lookPath = func(file string) (string, error) { return "/usr/bin/" + file, nil }
+
+	a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok", pidsLimit: "512"}
+	if err := a.Run(Box{Env: map[string]string{}}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if gotName != "prlimit" {
+		t.Fatalf("execCommand called with %q, want %q", gotName, "prlimit")
+	}
+	if len(gotArgs) < 3 {
+		t.Fatalf("execCommand args too short: %v", gotArgs)
+	}
+	if gotArgs[0] != "--nproc=512" {
+		t.Errorf("gotArgs[0] = %q, want %q", gotArgs[0], "--nproc=512")
+	}
+	if gotArgs[1] != "--" {
+		t.Errorf("gotArgs[1] = %q, want %q", gotArgs[1], "--")
+	}
+	if gotArgs[2] != "pasta" {
+		t.Errorf("gotArgs[2] = %q, want %q", gotArgs[2], "pasta")
+	}
+	// The trailing args must still contain pasta's own "-- bwrap" hop,
+	// proving prlimit wraps the entire chain rather than sitting between
+	// pasta and bwrap.
+	trailing := gotArgs[3:]
+	foundBwrapHop := false
+	for i := 0; i+1 < len(trailing); i++ {
+		if trailing[i] == "--" && trailing[i+1] == "bwrap" {
+			foundBwrapHop = true
+			break
+		}
+	}
+	if !foundBwrapHop {
+		t.Errorf("trailing args %v do not contain the pasta -> bwrap hop (-- bwrap)", trailing)
+	}
+}
+
+// TestBwrapRun_PrlimitNotOnPathWarnsAndProceedsUnwrapped verifies that when
+// pidsLimit is set but prlimit is not found on PATH (the real-world state of
+// this repo's own nix develop devShell — util-linux's prlimit isn't baked
+// in), Run still succeeds with "bwrap" as the unwrapped top-level program,
+// and prints a warning explaining that the box runs without prlimit's
+// process-count containment — mirroring provisionCgroup's own
+// degrade-don't-lie posture (issue #2668) rather than the prior bug, where a
+// missing prlimit made execCommand exec a nonexistent binary and fail the
+// whole Box launch.
+func TestBwrapRun_PrlimitNotOnPathWarnsAndProceedsUnwrapped(t *testing.T) {
+	script, _ := newFakeCLI(t, fakeCall{exit: 0})
+	origExec := execCommand
+	t.Cleanup(func() { execCommand = origExec })
+	var gotName string
+	execCommand = func(name string, args ...string) *exec.Cmd {
+		gotName = name
+		return exec.Command(script, args...)
+	}
+
+	origLookPath := lookPath
+	t.Cleanup(func() { lookPath = origLookPath })
+	lookPath = func(file string) (string, error) {
+		return "", exec.ErrNotFound
+	}
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldStdout := os.Stdout
+	os.Stdout = w
+
+	a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok", networkMode: NetworkModeHost, pidsLimit: "512"}
+	runErr := a.Run(Box{Name: "test-box", Env: map[string]string{}})
+
+	w.Close()
+	os.Stdout = oldStdout
+	var buf bytes.Buffer
+	if _, err := io.Copy(&buf, r); err != nil {
+		t.Fatal(err)
+	}
+
+	if runErr != nil {
+		t.Fatalf("Run: %v", runErr)
+	}
+	if gotName != "bwrap" {
+		t.Errorf("execCommand called with %q, want %q (unwrapped)", gotName, "bwrap")
+	}
+	if !strings.Contains(buf.String(), "warning") {
+		t.Errorf("Run output missing prlimit-not-found warning: %q", buf.String())
 	}
 }
 
@@ -976,5 +1165,139 @@ func TestBwrapRun_OpencodeAuthContentOffArgvButInProcessEnv(t *testing.T) {
 	}
 	if !found {
 		t.Error("sandbox process env missing OPENCODE_AUTH_CONTENT sentinel")
+	}
+}
+
+// TestBwrapRun_NoCgroupDelegationWarnsAndProceeds verifies that when the
+// per-Box cgroup can't be created (cgroupFSRoot points at a path with no
+// writable parent for the computed subtree, standing in for a host with no
+// cgroup v2 delegation), Run still succeeds — never refuses, never reduces
+// PidsLimit/MemoryLimit — and prints a warning explaining why cgroup
+// containment is unavailable.
+func TestBwrapRun_NoCgroupDelegationWarnsAndProceeds(t *testing.T) {
+	script, _ := newFakeCLI(t, fakeCall{exit: 0})
+	origExec := execCommand
+	t.Cleanup(func() { execCommand = origExec })
+	execCommand = func(name string, args ...string) *exec.Cmd {
+		return exec.Command(script, args...)
+	}
+
+	origSelf := readSelfCgroup
+	t.Cleanup(func() { readSelfCgroup = origSelf })
+	readSelfCgroup = func() (string, error) { return "/x", nil }
+
+	origRoot := cgroupFSRoot
+	t.Cleanup(func() { cgroupFSRoot = origRoot })
+	// No parent "/x" dir exists under this root, so the per-Box os.Mkdir
+	// fails exactly as it would on a host with no writable delegated
+	// subtree.
+	cgroupFSRoot = filepath.Join(t.TempDir(), "does-not-exist")
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldStdout := os.Stdout
+	os.Stdout = w
+
+	a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok", networkMode: NetworkModeHost}
+	runErr := a.Run(Box{Name: "test-box", Env: map[string]string{}})
+
+	w.Close()
+	os.Stdout = oldStdout
+	var buf bytes.Buffer
+	if _, err := io.Copy(&buf, r); err != nil {
+		t.Fatal(err)
+	}
+
+	if runErr != nil {
+		t.Fatalf("Run: %v", runErr)
+	}
+	if !strings.Contains(buf.String(), "warning") {
+		t.Errorf("Run output missing cgroup delegation warning: %q", buf.String())
+	}
+}
+
+// TestBwrapRun_CgroupDelegationWritesLimitsAndCleansUp verifies that when a
+// writable delegated cgroup subtree is available, Run writes pids.max and
+// memory.max into the per-Box cgroup dir before launching, then removes that
+// dir again once Run returns (ADR 0042's strictly-ephemeral posture). The
+// written content is read from inside the execCommand seam override,
+// synchronously before Start/Wait, mirroring
+// TestBwrapRun_WritesSynthesizedResolvConfForPastaPath -- Run's own cleanup
+// has already removed the dir by the time Run returns.
+func TestBwrapRun_CgroupDelegationWritesLimitsAndCleansUp(t *testing.T) {
+	script, _ := newFakeCLI(t, fakeCall{exit: 0})
+	origExec := execCommand
+	t.Cleanup(func() { execCommand = origExec })
+
+	origSelf := readSelfCgroup
+	t.Cleanup(func() { readSelfCgroup = origSelf })
+	readSelfCgroup = func() (string, error) { return "", nil }
+
+	origRoot := cgroupFSRoot
+	t.Cleanup(func() { cgroupFSRoot = origRoot })
+	cgroupFSRoot = t.TempDir()
+
+	wantDir := filepath.Join(cgroupFSRoot, "spindrift-test-box")
+	var gotPidsMax, gotMemoryMax []byte
+	execCommand = func(name string, args ...string) *exec.Cmd {
+		gotPidsMax, _ = os.ReadFile(filepath.Join(wantDir, "pids.max"))
+		gotMemoryMax, _ = os.ReadFile(filepath.Join(wantDir, "memory.max"))
+		return exec.Command(script, args...)
+	}
+
+	a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok", networkMode: NetworkModeHost, pidsLimit: "256", memoryLimit: "5g"}
+	if err := a.Run(Box{Name: "test-box", Env: map[string]string{}}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if string(gotPidsMax) != "256" {
+		t.Errorf("pids.max = %q, want %q", gotPidsMax, "256")
+	}
+	if string(gotMemoryMax) != "5368709120" {
+		t.Errorf("memory.max = %q, want %q", gotMemoryMax, "5368709120")
+	}
+	if _, err := os.Stat(wantDir); !os.IsNotExist(err) {
+		t.Errorf("cgroup dir %s still exists after Run returned, want removed: %v", wantDir, err)
+	}
+}
+
+// TestMemoryLimitToBytes verifies the podman/docker-style unit-suffixed
+// string -> raw byte count conversion memory.max's cgroup v2 kernel
+// interface needs (unlike podman's own --memory flag, which accepts the
+// suffixed string unconverted).
+func TestMemoryLimitToBytes(t *testing.T) {
+	cases := []struct {
+		in      string
+		want    int64
+		wantErr bool
+	}{
+		{in: "5g", want: 5 * 1024 * 1024 * 1024},
+		{in: "5G", want: 5 * 1024 * 1024 * 1024},
+		{in: "512m", want: 512 * 1024 * 1024},
+		{in: "512M", want: 512 * 1024 * 1024},
+		{in: "1024k", want: 1024 * 1024},
+		{in: "1024K", want: 1024 * 1024},
+		{in: "2048", want: 2048},
+		{in: "", wantErr: true},
+		{in: "not-a-number", wantErr: true},
+		{in: "5x", wantErr: true},
+	}
+	for _, c := range cases {
+		got, err := memoryLimitToBytes(c.in)
+		if c.wantErr {
+			if err == nil {
+				t.Errorf("memoryLimitToBytes(%q): want error, got %d", c.in, got)
+			}
+			continue
+		}
+		if err != nil {
+			t.Errorf("memoryLimitToBytes(%q): unexpected error: %v", c.in, err)
+			continue
+		}
+		if got != c.want {
+			t.Errorf("memoryLimitToBytes(%q) = %d, want %d", c.in, got, c.want)
+		}
 	}
 }

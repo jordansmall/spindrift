@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 )
@@ -35,6 +36,34 @@ var statHostNixDB = func() error {
 	_, err := os.Stat(hostNixDBPath)
 	return err
 }
+
+// lookPath backs the "is prlimit on PATH" check in execTarget. Tests swap
+// this seam to fake prlimit's presence/absence deterministically, since the
+// real answer depends on the host's own PATH (e.g. util-linux's prlimit is
+// absent from this repo's own nix develop devShell).
+var lookPath = exec.LookPath
+
+// readSelfCgroup returns the calling (launcher) process's own cgroup v2
+// path, parsed from /proc/self/cgroup's unified-hierarchy line ("0::<path>").
+// Tests swap this seam to fake an ancestor path directly rather than writing
+// a fake /proc/self/cgroup, which isn't writable in a test sandbox anyway.
+var readSelfCgroup = func() (string, error) {
+	raw, err := os.ReadFile("/proc/self/cgroup")
+	if err != nil {
+		return "", err
+	}
+	for _, line := range strings.Split(string(raw), "\n") {
+		if rest, ok := strings.CutPrefix(line, "0::"); ok {
+			return rest, nil
+		}
+	}
+	return "", fmt.Errorf("no unified cgroup v2 line (0::...) in /proc/self/cgroup")
+}
+
+// cgroupFSRoot is the host's cgroup v2 filesystem mountpoint. Tests
+// reassign this to a t.TempDir() to fake a writable delegated subtree
+// without touching the real host cgroup filesystem.
+var cgroupFSRoot = "/sys/fs/cgroup"
 
 // homeAgentStagingDir is the fixed in-box path bwrap ro-binds agentFiles'
 // baked /home/agent subtree onto (issue #2843). It must be a fresh
@@ -101,6 +130,23 @@ type bwrapAdapter struct {
 	localIssuesDir           string
 	unshareNet               bool   // raw BWRAP_UNSHARE_NET knob; forces network isolation on (redundant with the new isolate-by-default, kept for defense in depth — see buildArgs)
 	networkMode              string // NETWORK_MODE knob; every value except the "host" opt-out (issue #2666) isolates from the host netns. "no-host-loopback" never legitimately reaches bwrap — nix eval-rejects it for a valid Consumer flake (lib/mkHarness.nix networkModeCoherenceOk).
+	// pidsLimit is the PIDS_LIMIT knob (empty disables it, matching the OCI
+	// adapter's own convention — oci.go's pidsLimit field). bwrap itself
+	// imposes no process-count cap; execTarget wraps the whole exec target
+	// with the external `prlimit --nproc` CLI tool to enforce one (ADR
+	// 0042), rather than a raw syscall.Setrlimit in the launcher's own
+	// process, which would be process-wide (shared by the whole thread
+	// group, not scoped to one fork) and race against concurrent goroutine
+	// Box launches under MAX_PARALLEL.
+	pidsLimit string
+	// memoryLimit is the MEMORY_LIMIT knob (empty disables it, same
+	// convention as pidsLimit above and the OCI adapter's own memoryLimit
+	// field). It backs the per-Box cgroup's memory.max control file (ADR
+	// 0042, provisionCgroup) rather than any bwrap/prlimit flag — bwrap has
+	// no per-process memory cap of its own, and memory.max needs a raw
+	// byte count (memoryLimitToBytes), unlike podman's own --memory flag
+	// which accepts the unit-suffixed string as-is.
+	memoryLimit string
 
 	// mu guards running, the box-name -> live process map Kill (issue #649)
 	// consults — bwrap sandboxes are unnamed child processes with no
@@ -154,6 +200,8 @@ func NewBwrap(cfg Config, pwd string) Runner {
 		localIssuesDir:           cfg.LocalIssuesDir,
 		unshareNet:               cfg.BwrapUnshareNet,
 		networkMode:              cfg.NetworkMode,
+		pidsLimit:                cfg.PidsLimit,
+		memoryLimit:              cfg.MemoryLimit,
 	}
 }
 
@@ -355,23 +403,44 @@ func (a *bwrapAdapter) buildArgs(etcDir string, box Box) []string {
 // execTarget computes the top-level host-exec'd program and argv for box's
 // bwrap invocation. When pastaPath applies, pasta must be the outer process
 // (see buildArgs' unshare-net comment for why); otherwise bwrap itself is the
-// top-level program, unchanged.
+// top-level program. When a.pidsLimit is set AND prlimit is found on PATH,
+// the result of that decision is wrapped one level further out with
+// `prlimit --nproc` (ADR 0042) — outside pasta, never between pasta and
+// bwrap, so the process-count cap governs the whole
+// pasta-plus-bwrap-plus-entrypoint tree pasta's own fork produces, not just
+// the bwrap leaf. prlimit is an external util-linux CLI tool, not guaranteed
+// present on every host (e.g. absent from this repo's own nix develop
+// devShell) — matching provisionCgroup's degrade-don't-lie posture (issue
+// #2668), a missing prlimit warns and proceeds unwrapped rather than
+// crashing the Box launch over an unavailable resource-containment nicety.
 func (a *bwrapAdapter) execTarget(etcDir string, box Box) (string, []string) {
 	bwrapArgs := a.buildArgs(etcDir, box)
+	var program string
+	var args []string
 	if !a.pastaPath() {
-		return "bwrap", bwrapArgs
+		program, args = "bwrap", bwrapArgs
+	} else {
+		pastaArgs := append([]string{}, pastaHardenedFlags...)
+		pastaArgs = append(pastaArgs, "--dns-forward", pastaDNSForwardAddr,
+			// -f/--foreground is load-bearing, not cosmetic: pasta's documented
+			// default is to fork into the background and detach once the
+			// namespace is set up. Without it, Go's cmd.Start()/cmd.Wait() would
+			// track pasta's own short-lived detaching parent instead of the real
+			// bwrap+entrypoint child, breaking exit-code propagation, stdout/
+			// stderr capture, and the Kill()/Terminate() process map (a.running).
+			"-f", "--", "bwrap")
+		pastaArgs = append(pastaArgs, bwrapArgs...)
+		program, args = "pasta", pastaArgs
 	}
-	pastaArgs := append([]string{}, pastaHardenedFlags...)
-	pastaArgs = append(pastaArgs, "--dns-forward", pastaDNSForwardAddr,
-		// -f/--foreground is load-bearing, not cosmetic: pasta's documented
-		// default is to fork into the background and detach once the
-		// namespace is set up. Without it, Go's cmd.Start()/cmd.Wait() would
-		// track pasta's own short-lived detaching parent instead of the real
-		// bwrap+entrypoint child, breaking exit-code propagation, stdout/
-		// stderr capture, and the Kill()/Terminate() process map (a.running).
-		"-f", "--", "bwrap")
-	pastaArgs = append(pastaArgs, bwrapArgs...)
-	return "pasta", pastaArgs
+	if a.pidsLimit == "" {
+		return program, args
+	}
+	if _, err := lookPath("prlimit"); err != nil {
+		fmt.Printf("==> bwrap runner: warning: prlimit not found on PATH (%v); running box %q without process-count resource containment\n", err, box.Name)
+		return program, args
+	}
+	prlimitArgs := append([]string{"--nproc=" + a.pidsLimit, "--", program}, args...)
+	return "prlimit", prlimitArgs
 }
 
 // pastaDNSForwardAddr is pasta's own documented default IPv4 gateway address
@@ -443,6 +512,81 @@ func resolvedRunEnv(boxEnv map[string]string) []string {
 	return out
 }
 
+// memoryLimitToBytes converts a podman/docker-style unit-suffixed memory
+// limit ("5g", "512m", "1024k"; bare digits already bytes; case-insensitive
+// suffix) to a raw byte count. cgroup v2's memory.max control file, unlike
+// podman's own --memory flag, takes only a plain integer (or the literal
+// "max"), so this conversion has no OCI-adapter equivalent to reuse.
+func memoryLimitToBytes(limit string) (int64, error) {
+	if limit == "" {
+		return 0, fmt.Errorf("empty memory limit")
+	}
+	mult := int64(1)
+	numPart := limit
+	switch limit[len(limit)-1] {
+	case 'g', 'G':
+		mult = 1024 * 1024 * 1024
+		numPart = limit[:len(limit)-1]
+	case 'm', 'M':
+		mult = 1024 * 1024
+		numPart = limit[:len(limit)-1]
+	case 'k', 'K':
+		mult = 1024
+		numPart = limit[:len(limit)-1]
+	}
+	n, err := strconv.ParseInt(numPart, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("invalid memory limit %q: %w", limit, err)
+	}
+	return n * mult, nil
+}
+
+// provisionCgroup attempts to create a per-Box cgroup v2 subtree under the
+// launcher's own delegated cgroup (readSelfCgroup + cgroupFSRoot), then
+// writes pids.max/memory.max into it. Detection and creation are the same
+// os.Mkdir call rather than a separate probe-then-create step: whether the
+// parent subtree is writable can only be learned by trying, and a distinct
+// probe would just race this Mkdir for nothing. Any failure here — no
+// unified cgroup v2 mount (cgroup v1/hybrid hosts), a non-delegated
+// (read-only) parent, or a malformed a.memoryLimit — means no usable
+// delegation on this host, which ADR 0042 treats as expected and
+// non-fatal: it warns and reports ok=false so Run proceeds without cgroup
+// enforcement rather than refusing to launch or quietly shrinking
+// PidsLimit/MemoryLimit to compensate.
+func (a *bwrapAdapter) provisionCgroup(box Box) (dir string, ok bool) {
+	self, err := readSelfCgroup()
+	if err != nil {
+		fmt.Printf("==> bwrap runner: warning: cgroup v2 delegation unavailable (%v); running box %q without cgroup resource containment\n", err, box.Name)
+		return "", false
+	}
+	dir = filepath.Join(cgroupFSRoot, self, "spindrift-"+box.Name)
+	if err := os.Mkdir(dir, 0o755); err != nil {
+		fmt.Printf("==> bwrap runner: warning: could not create delegated cgroup %s (%v); running box %q without cgroup resource containment\n", dir, err, box.Name)
+		return "", false
+	}
+	if a.pidsLimit != "" {
+		if err := os.WriteFile(filepath.Join(dir, "pids.max"), []byte(a.pidsLimit), 0o644); err != nil {
+			fmt.Printf("==> bwrap runner: warning: could not write cgroup pids.max (%v); running box %q without cgroup resource containment\n", err, box.Name)
+			_ = os.Remove(dir)
+			return "", false
+		}
+	}
+	if a.memoryLimit != "" {
+		bytesLimit, err := memoryLimitToBytes(a.memoryLimit)
+		if err != nil {
+			fmt.Printf("==> bwrap runner: warning: could not parse MEMORY_LIMIT %q (%v); running box %q without cgroup resource containment\n", a.memoryLimit, err, box.Name)
+			_ = os.Remove(dir)
+			return "", false
+		}
+		if err := os.WriteFile(filepath.Join(dir, "memory.max"), []byte(strconv.FormatInt(bytesLimit, 10)), 0o644); err != nil {
+			fmt.Printf("==> bwrap runner: warning: could not write cgroup memory.max (%v); running box %q without cgroup resource containment\n", err, box.Name)
+			_ = os.Remove(dir)
+			return "", false
+		}
+	}
+	return dir, true
+}
+
 // Run launches a single issue into a bubblewrap sandbox.
 func (a *bwrapAdapter) Run(box Box) error {
 	// etcDir is only needed for the synthesised /etc/resolv.conf (pastaPath
@@ -467,6 +611,11 @@ func (a *bwrapAdapter) Run(box Box) error {
 	if out == nil {
 		out = io.Discard
 	}
+
+	// Provisioned (and its pids.max/memory.max written) before Start, so the
+	// control files exist by the time bwrap is exec'd; moving the process in
+	// happens after Start below, once the real PID exists.
+	cgroupDir, cgroupOK := a.provisionCgroup(box)
 
 	// The bwrap process's env is resolvedRunEnv(box.Env) -- the bwrapSecrets
 	// subset of box.Env, not the launcher's own ambient environment. Without
@@ -493,10 +642,43 @@ func (a *bwrapAdapter) Run(box Box) error {
 	cmd.Stdout = out
 	cmd.Stderr = out
 	if err := cmd.Start(); err != nil {
+		if cgroupOK {
+			_ = os.Remove(cgroupDir)
+		}
 		return err
+	}
+	if cgroupOK {
+		// Best-effort: the box process is already running by this point, so
+		// a failure to move it in must not fail Run over it -- it just means
+		// this Box runs outside cgroup enforcement despite delegation being
+		// available.
+		pid := strconv.Itoa(cmd.Process.Pid)
+		if err := os.WriteFile(filepath.Join(cgroupDir, "cgroup.procs"), []byte(pid), 0o644); err != nil {
+			fmt.Printf("==> bwrap runner: warning: could not move box %q into cgroup %s: %v\n", box.Name, cgroupDir, err)
+		}
 	}
 	a.trackRunning(box.Name, cmd.Process)
 	defer a.untrackRunning(box.Name)
+	if cgroupOK {
+		// Deferred so cleanup runs after cmd.Wait() below returns -- the
+		// cgroup dir can only be rmdir'd once no live process remains
+		// inside it (ADR 0042's strictly-ephemeral posture). The three
+		// os.Remove calls on the individual control files are a plain
+		// unlink no-op on a real cgroupfs (its pids.max/memory.max/
+		// cgroup.procs are kernel interface nodes that a real rmdir clears
+		// as part of removing the whole subtree, not files unlink can touch
+		// individually) — they only do real work against a plain directory
+		// standing in for cgroupfs in tests, where they're genuine files
+		// that would otherwise make the final rmdir fail with ENOTEMPTY.
+		defer func() {
+			for _, f := range []string{"pids.max", "memory.max", "cgroup.procs"} {
+				_ = os.Remove(filepath.Join(cgroupDir, f))
+			}
+			if err := os.Remove(cgroupDir); err != nil {
+				fmt.Printf("==> bwrap runner: warning: could not remove cgroup %s: %v\n", cgroupDir, err)
+			}
+		}()
+	}
 	return asRunError(cmd.Wait())
 }
 
