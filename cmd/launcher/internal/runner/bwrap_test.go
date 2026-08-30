@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -535,6 +537,71 @@ func TestBwrapBuildEnsureReady_GeneratesStoreDBSnapshotWhenNixConfigDrvSet(t *te
 	}
 	if !strings.Contains(call[1], wantDest) {
 		t.Errorf("sqlite3 statement = %q, want it to reference dest %q", call[1], wantDest)
+	}
+}
+
+// TestBwrapBuildEnsureReady_HoldsSnapshotLockDuringVacuumInto verifies the
+// fix for issue #2680's remaining blocking finding: EnsureReady must hold a
+// shared advisory lock on the snapshot dir for the whole duration of
+// snapshotStoreDB's write, so a concurrent build process's
+// reclaimStaleSnapshots call (a non-blocking exclusive Flock probe) sees the
+// lock held and skips this generation instead of RemoveAll-ing it mid-write.
+// The execCommand seam intercepts the "sqlite3" call before it actually
+// runs, so the probe below fires from this test's own goroutine at the exact
+// point production code is inside snapshotStoreDB, after EnsureReady's own
+// lockSnapshotShared call: a fresh os.OpenFile + non-blocking exclusive
+// Flock on the same lock path, simulating a concurrent process's
+// reclaimStaleSnapshots probe. flock locks are scoped to the open file
+// description, not the pid, so a second fd opened by this same test process
+// genuinely conflicts with EnsureReady's still-held shared lock exactly like
+// a second process's fd would (see lockSnapshotShared's own doc comment).
+func TestBwrapBuildEnsureReady_HoldsSnapshotLockDuringVacuumInto(t *testing.T) {
+	script, _ := newFakeCLI(t,
+		fakeCall{exit: 0}, fakeCall{exit: 0}, fakeCall{exit: 0}, fakeCall{exit: 0},
+		fakeCall{exit: 0}, fakeCall{exit: 0},
+	)
+	orig := execCommand
+	t.Cleanup(func() { execCommand = orig })
+	origStat := statHostNixDB
+	t.Cleanup(func() { statHostNixDB = origStat })
+	statHostNixDB = func() error { return nil }
+
+	root := filepath.Join(t.TempDir(), ".spindrift", "nix-var-snapshot")
+	snapshotDir := filepath.Join(root, "gen-a")
+	lockPath := snapshotLockPath(snapshotDir)
+	probed := false
+	execCommand = func(name string, args ...string) *exec.Cmd {
+		if name == "sqlite3" {
+			probed = true
+			lf, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o644)
+			if err != nil {
+				t.Fatalf("open lock file %q for probe: %v", lockPath, err)
+			}
+			defer lf.Close()
+			if err := syscall.Flock(int(lf.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err == nil {
+				_ = syscall.Flock(int(lf.Fd()), syscall.LOCK_UN)
+				t.Error("exclusive Flock probe on snapshot lock succeeded during snapshotStoreDB — the shared lock was not held while VACUUM INTO ran")
+			}
+		}
+		return exec.Command(script, args...)
+	}
+
+	a := &bwrapBuildAdapter{
+		agentFilesDrv:      "/fake/files.drv",
+		agentEnvDrv:        "/fake/env.drv",
+		passwdFileDrv:      "/fake/passwd.drv",
+		groupFileDrv:       "/fake/group.drv",
+		nixConfigFileDrv:   "/fake/nix-config.drv",
+		nixVarSnapshotDir:  snapshotDir,
+		nixVarSnapshotRoot: root,
+	}
+	err := a.EnsureReady()
+
+	if err != nil {
+		t.Fatalf("EnsureReady() = %v, want nil", err)
+	}
+	if !probed {
+		t.Fatal("sqlite3 execCommand fake never invoked; probe never ran")
 	}
 }
 
@@ -2130,5 +2197,498 @@ func TestClosureGeneration_RejectsUnsafeGenerationNames(t *testing.T) {
 				t.Errorf("closureGeneration(%q) = %q, want %q", tc.imageTag, got, tc.want)
 			}
 		})
+	}
+}
+
+// TestReclaimStaleSnapshots_RemovesUnreferencedStaleGeneration verifies the
+// core reclaim path: a generation directory that isn't keepGeneration and
+// has no live Box holding its sibling ".lock" file is removed, while
+// keepGeneration itself is left untouched.
+func TestReclaimStaleSnapshots_RemovesUnreferencedStaleGeneration(t *testing.T) {
+	root := t.TempDir()
+	keep := filepath.Join(root, "gen-a")
+	stale := filepath.Join(root, "gen-b")
+	if err := os.MkdirAll(keep, 0o755); err != nil {
+		t.Fatalf("MkdirAll(%q): %v", keep, err)
+	}
+	if err := os.MkdirAll(stale, 0o755); err != nil {
+		t.Fatalf("MkdirAll(%q): %v", stale, err)
+	}
+	// The lock file must already exist before reclaim runs, matching what
+	// production always has (Run or a prior build already created it) --
+	// otherwise reclaimStaleSnapshots creates it itself mid-pass and the
+	// survival assertion below would pass for the wrong reason.
+	preLock, err := os.OpenFile(stale+".lock", os.O_CREATE|os.O_RDWR, 0o644)
+	if err != nil {
+		t.Fatalf("OpenFile(%q): %v", stale+".lock", err)
+	}
+	preLock.Close()
+
+	if err := reclaimStaleSnapshots(root, "gen-a"); err != nil {
+		t.Fatalf("reclaimStaleSnapshots: %v", err)
+	}
+
+	if _, err := os.Stat(stale); !os.IsNotExist(err) {
+		t.Errorf("os.Stat(%q) after reclaim = %v, want IsNotExist", stale, err)
+	}
+	// The lock file itself must survive the reclaim, not just the generation
+	// dir it guards: a fresh Run for a same-named future generation reuses
+	// this path, and deleting it would let a later os.OpenFile recreate it as
+	// a distinct inode, breaking mutual exclusion between two callers that
+	// both believe they hold "the" lock on that name.
+	if _, err := os.Stat(stale + ".lock"); err != nil {
+		t.Errorf("os.Stat(%q) after reclaim = %v, want nil (lock file must survive reclaim)", stale+".lock", err)
+	}
+	if _, err := os.Stat(keep); err != nil {
+		t.Errorf("os.Stat(%q) after reclaim = %v, want nil (keepGeneration must survive)", keep, err)
+	}
+}
+
+// TestReclaimStaleSnapshots_SkipsGenerationWithLiveLock verifies that a
+// stale generation whose ".lock" file is held (simulating a running Box,
+// mirroring bwrapAdapter.Run's shared lock) is left in place -- reclaim
+// must never remove a snapshot a running Box still references.
+func TestReclaimStaleSnapshots_SkipsGenerationWithLiveLock(t *testing.T) {
+	root := t.TempDir()
+	stale := filepath.Join(root, "gen-b")
+	if err := os.MkdirAll(stale, 0o755); err != nil {
+		t.Fatalf("MkdirAll(%q): %v", stale, err)
+	}
+	lockPath := stale + ".lock"
+	lf, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o644)
+	if err != nil {
+		t.Fatalf("OpenFile(%q): %v", lockPath, err)
+	}
+	defer lf.Close()
+	if err := syscall.Flock(int(lf.Fd()), syscall.LOCK_SH); err != nil {
+		t.Fatalf("Flock(LOCK_SH): %v", err)
+	}
+	defer syscall.Flock(int(lf.Fd()), syscall.LOCK_UN)
+
+	if err := reclaimStaleSnapshots(root, "gen-a"); err != nil {
+		t.Fatalf("reclaimStaleSnapshots: %v", err)
+	}
+
+	if _, err := os.Stat(stale); err != nil {
+		t.Errorf("os.Stat(%q) after reclaim = %v, want nil (locked generation must survive)", stale, err)
+	}
+}
+
+// TestReclaimStaleSnapshots_NeverRemovesKeepGeneration verifies keepGeneration
+// is never removed even when nothing holds its lock -- it's the generation
+// the current build invocation just produced/is using.
+func TestReclaimStaleSnapshots_NeverRemovesKeepGeneration(t *testing.T) {
+	root := t.TempDir()
+	keep := filepath.Join(root, "gen-a")
+	if err := os.MkdirAll(keep, 0o755); err != nil {
+		t.Fatalf("MkdirAll(%q): %v", keep, err)
+	}
+
+	if err := reclaimStaleSnapshots(root, "gen-a"); err != nil {
+		t.Fatalf("reclaimStaleSnapshots: %v", err)
+	}
+
+	if _, err := os.Stat(keep); err != nil {
+		t.Errorf("os.Stat(%q) after reclaim = %v, want nil", keep, err)
+	}
+}
+
+// TestReclaimStaleSnapshots_NonexistentRootReturnsNil verifies a root that
+// doesn't exist yet (e.g. the very first build) is not an error -- there is
+// simply nothing to reclaim.
+func TestReclaimStaleSnapshots_NonexistentRootReturnsNil(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "does-not-exist")
+	if err := reclaimStaleSnapshots(root, "gen-a"); err != nil {
+		t.Errorf("reclaimStaleSnapshots(%q, ...) = %v, want nil", root, err)
+	}
+}
+
+// TestReclaimStaleSnapshots_SweepsOrphanedLockWithNoGenerationDir verifies
+// that a "<generation>.lock" file sitting directly in root with no matching
+// generation dir (e.g. left behind by the open-then-lock race Run's
+// re-verify-after-lock guards against) is removed once nothing holds it,
+// rather than accumulating forever -- reclaimStaleSnapshots previously
+// skipped every non-directory entry unconditionally (issue #2680 review
+// finding: test coverage gap / non-blocking cleanup).
+func TestReclaimStaleSnapshots_SweepsOrphanedLockWithNoGenerationDir(t *testing.T) {
+	root := t.TempDir()
+	orphanLock := filepath.Join(root, "gen-gone.lock")
+	if _, err := os.Create(orphanLock); err != nil {
+		t.Fatalf("Create(%q): %v", orphanLock, err)
+	}
+
+	if err := reclaimStaleSnapshots(root, "gen-a"); err != nil {
+		t.Fatalf("reclaimStaleSnapshots: %v", err)
+	}
+
+	if _, err := os.Stat(orphanLock); !os.IsNotExist(err) {
+		t.Errorf("os.Stat(%q) after reclaim = %v, want IsNotExist (orphaned lock must be swept)", orphanLock, err)
+	}
+}
+
+// TestReclaimStaleSnapshots_LeavesOrphanedLockStillHeld verifies the flip
+// side: an orphaned "<generation>.lock" file (no matching generation dir)
+// that's still exclusively held (e.g. Run is mid-race between creating it
+// and finding its generation dir already reclaimed) is left in place rather
+// than removed out from under whatever's holding it.
+func TestReclaimStaleSnapshots_LeavesOrphanedLockStillHeld(t *testing.T) {
+	root := t.TempDir()
+	orphanLock := filepath.Join(root, "gen-gone.lock")
+	lf, err := os.OpenFile(orphanLock, os.O_CREATE|os.O_RDWR, 0o644)
+	if err != nil {
+		t.Fatalf("OpenFile(%q): %v", orphanLock, err)
+	}
+	defer lf.Close()
+	if err := syscall.Flock(int(lf.Fd()), syscall.LOCK_SH); err != nil {
+		t.Fatalf("Flock(LOCK_SH): %v", err)
+	}
+	defer syscall.Flock(int(lf.Fd()), syscall.LOCK_UN)
+
+	if err := reclaimStaleSnapshots(root, "gen-a"); err != nil {
+		t.Fatalf("reclaimStaleSnapshots: %v", err)
+	}
+
+	if _, err := os.Stat(orphanLock); err != nil {
+		t.Errorf("os.Stat(%q) after reclaim = %v, want nil (held orphaned lock must survive)", orphanLock, err)
+	}
+}
+
+// TestLockSnapshotShared_SurvivesConcurrentOrphanSweep drives
+// lockSnapshotShared against a hostile adversary running exactly
+// sweepOrphanedLock's own steps against the same lock path -- open with no
+// O_CREATE, LOCK_EX|LOCK_NB, and on success os.Remove the path -- to prove
+// the *os.File it hands back always identifies whatever currently sits at
+// snapshotLockPath, never an inode that was swapped or unlinked out from
+// under it between its own os.OpenFile and syscall.Flock (issue #2680
+// review finding: EnsureReady calls lockSnapshotShared before the
+// generation dir exists, so a concurrent build's reclaim pass can
+// legitimately see this lock file as orphaned and win LOCK_EX on it in
+// that exact open-then-lock window). The hazard is a nanosecond-scale
+// interleaving, so this hammers real contention -- several adversary
+// goroutines tightly looping against a deadline while the main goroutine
+// repeatedly acquires/verifies/releases -- rather than trying to script the
+// exact timing, and fails outright if the adversary never actually wins a
+// race during the run, so the test can't silently pass vacuous on a fast or
+// idle machine.
+func TestLockSnapshotShared_SurvivesConcurrentOrphanSweep(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "gen-race")
+	lockPath := snapshotLockPath(dir)
+
+	const adversaries = 4
+	const minRemovals = 5
+	deadline := time.Now().Add(2 * time.Second)
+	stop := make(chan struct{})
+	var removals int64
+
+	var wg sync.WaitGroup
+	for i := 0; i < adversaries; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+				}
+				lf, err := os.OpenFile(lockPath, os.O_RDWR, 0o644)
+				if err != nil {
+					continue // sweepOrphanedLock: no lock file yet -- nothing to sweep
+				}
+				if err := syscall.Flock(int(lf.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+					lf.Close()
+					continue // still referenced -- sweepOrphanedLock leaves it alone
+				}
+				_ = os.Remove(lockPath)
+				_ = syscall.Flock(int(lf.Fd()), syscall.LOCK_UN)
+				lf.Close()
+				atomic.AddInt64(&removals, 1)
+			}
+		}()
+	}
+
+	attempts := 0
+	for time.Now().Before(deadline) && atomic.LoadInt64(&removals) < minRemovals {
+		attempts++
+		lf, err := lockSnapshotShared(dir)
+		if err != nil {
+			close(stop)
+			wg.Wait()
+			t.Fatalf("lockSnapshotShared(%q) attempt %d: %v", dir, attempts, err)
+		}
+		fdStat, statErr := lf.Stat()
+		var pathStat os.FileInfo
+		if statErr == nil {
+			pathStat, statErr = os.Stat(lockPath)
+		}
+		sameFile := statErr == nil && os.SameFile(fdStat, pathStat)
+		unlockSnapshot(lf)
+		if !sameFile {
+			close(stop)
+			wg.Wait()
+			t.Fatalf("attempt %d: lockSnapshotShared returned a lock on an inode that no longer identifies %s (statErr=%v) -- the orphan-sweep race won", attempts, lockPath, statErr)
+		}
+	}
+	close(stop)
+	wg.Wait()
+
+	if got := atomic.LoadInt64(&removals); got == 0 {
+		t.Fatalf("adversary never won a race against lockSnapshotShared across %d attempts -- test did not exercise the hazard", attempts)
+	}
+}
+
+// TestReclaimStaleSnapshots_OpenLockFailureLeavesGenerationAndWarns verifies
+// the open-failure branch: when os.OpenFile(lockPath, O_CREATE|...) itself
+// fails, the generation dir is left in place (nothing was ever locked or
+// inspected) and the warning naming the lock path is printed -- previously
+// untested (issue #2680 review finding: test coverage gap). root is chmod'd
+// read-only (0o555) so os.ReadDir(root) still succeeds (needs only r-x) but
+// creating the new sibling "<gen>.lock" file inside root fails for lack of
+// write permission -- root's uid owns the dir, so this only bites a
+// non-root test process; uid 0 ignores directory permission bits entirely.
+func TestReclaimStaleSnapshots_OpenLockFailureLeavesGenerationAndWarns(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("running as root: directory permission bits are not enforced, so the lock file open cannot be made to fail this way")
+	}
+
+	root := t.TempDir()
+	stale := filepath.Join(root, "gen-b")
+	if err := os.MkdirAll(stale, 0o755); err != nil {
+		t.Fatalf("MkdirAll(%q): %v", stale, err)
+	}
+	if err := os.Chmod(root, 0o555); err != nil {
+		t.Fatalf("Chmod(%q): %v", root, err)
+	}
+	// t.TempDir()'s own cleanup needs write permission on root to remove
+	// its contents; restore it before that runs.
+	t.Cleanup(func() { _ = os.Chmod(root, 0o755) })
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldStdout := os.Stdout
+	os.Stdout = w
+
+	reclaimErr := reclaimStaleSnapshots(root, "gen-a")
+
+	w.Close()
+	os.Stdout = oldStdout
+	var buf bytes.Buffer
+	if _, err := io.Copy(&buf, r); err != nil {
+		t.Fatal(err)
+	}
+
+	if reclaimErr != nil {
+		t.Fatalf("reclaimStaleSnapshots: want nil (best-effort), got %v", reclaimErr)
+	}
+	if _, err := os.Stat(stale); err != nil {
+		t.Errorf("os.Stat(%q) after reclaim = %v, want nil (generation must survive a lock-open failure)", stale, err)
+	}
+	if !strings.Contains(buf.String(), "could not open nix-var snapshot lock") {
+		t.Errorf("reclaimStaleSnapshots output missing lock-open-failure warning: %q", buf.String())
+	}
+}
+
+// TestReclaimStaleSnapshots_RemoveAllFailureWarnsButReturnsNilAndReleasesLock
+// verifies the RemoveAll-failure branch: once the exclusive lock is
+// successfully acquired (no live Box), a RemoveAll failure on the
+// generation dir itself is warned rather than propagated (best-effort, per
+// the function's contract), and the lock is still released rather than
+// leaked -- previously untested (issue #2680 review finding: test coverage
+// gap). genDir is chmod'd read-only (0o555) after seeding a file inside it:
+// removing that file requires write permission on its containing directory
+// (genDir), not on the file itself, so RemoveAll fails partway through
+// rather than up front. Skipped under uid 0 for the same reason as the
+// open-failure sibling test above.
+func TestReclaimStaleSnapshots_RemoveAllFailureWarnsButReturnsNilAndReleasesLock(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("running as root: directory permission bits are not enforced, so RemoveAll cannot be made to fail this way")
+	}
+
+	root := t.TempDir()
+	stale := filepath.Join(root, "gen-b")
+	if err := os.MkdirAll(stale, 0o755); err != nil {
+		t.Fatalf("MkdirAll(%q): %v", stale, err)
+	}
+	if err := os.WriteFile(filepath.Join(stale, "somefile"), []byte("x"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	if err := os.Chmod(stale, 0o555); err != nil {
+		t.Fatalf("Chmod(%q): %v", stale, err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(stale, 0o755) })
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldStdout := os.Stdout
+	os.Stdout = w
+
+	reclaimErr := reclaimStaleSnapshots(root, "gen-a")
+
+	w.Close()
+	os.Stdout = oldStdout
+	var buf bytes.Buffer
+	if _, err := io.Copy(&buf, r); err != nil {
+		t.Fatal(err)
+	}
+
+	if reclaimErr != nil {
+		t.Fatalf("reclaimStaleSnapshots: want nil (best-effort), got %v", reclaimErr)
+	}
+	if !strings.Contains(buf.String(), "could not remove stale nix-var snapshot") {
+		t.Errorf("reclaimStaleSnapshots output missing RemoveAll-failure warning: %q", buf.String())
+	}
+	// The lock must not be leaked: a fresh exclusive Flock attempt should
+	// succeed once reclaimStaleSnapshots has returned.
+	lockPath := stale + ".lock"
+	lf, err := os.OpenFile(lockPath, os.O_RDWR, 0o644)
+	if err != nil {
+		t.Fatalf("OpenFile lock: %v", err)
+	}
+	defer lf.Close()
+	if err := syscall.Flock(int(lf.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		t.Errorf("exclusive Flock after reclaim returned: want nil (lock released), got %v", err)
+	} else {
+		_ = syscall.Flock(int(lf.Fd()), syscall.LOCK_UN)
+	}
+}
+
+// TestBwrapBuildEnsureReady_ReclaimSkipsGenerationWithLiveLock is the
+// end-to-end acceptance test for "reclaiming never removes a snapshot a
+// running Box holds open" (issue #2680): a stale generation directory is
+// seeded under the build adapter's snapshot root with its sibling ".lock"
+// file either held (simulating a running Box, as bwrapAdapter.Run would
+// hold it) or not, then EnsureReady runs end to end (with execCommand faked
+// so nix build/sqlite3 succeed without touching a real store or db) and
+// must leave a locked stale generation untouched while reclaiming an
+// unlocked one, alongside the newly-snapshotted current generation. The two
+// table cases below vary only whether the lock is held, proving reclaim's
+// live-Box check is what decides a stale generation's fate either way.
+func TestBwrapBuildEnsureReady_ReclaimSkipsGenerationWithLiveLock(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		holdLock  bool
+		wantStale func(err error) bool
+		staleWhy  string
+	}{
+		{
+			name:      "locked generation survives reclaim",
+			holdLock:  true,
+			wantStale: func(err error) bool { return err == nil },
+			staleWhy:  "want nil (locked generation must survive reclaim)",
+		},
+		{
+			name:      "unlocked generation is reclaimed",
+			holdLock:  false,
+			wantStale: os.IsNotExist,
+			staleWhy:  "want IsNotExist (unlocked stale generation must be reclaimed)",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			script, _ := newFakeCLI(t,
+				fakeCall{exit: 0}, fakeCall{exit: 0}, fakeCall{exit: 0}, fakeCall{exit: 0},
+				fakeCall{exit: 0}, fakeCall{exit: 0},
+			)
+			orig := execCommand
+			t.Cleanup(func() { execCommand = orig })
+			origStat := statHostNixDB
+			t.Cleanup(func() { statHostNixDB = origStat })
+			statHostNixDB = func() error { return nil }
+			execCommand = func(name string, args ...string) *exec.Cmd {
+				return exec.Command(script, args...)
+			}
+
+			root := t.TempDir()
+			currentGenDir := filepath.Join(root, "current-gen")
+			staleGenDir := filepath.Join(root, "stale-gen")
+			if err := os.MkdirAll(staleGenDir, 0o755); err != nil {
+				t.Fatalf("MkdirAll(%q): %v", staleGenDir, err)
+			}
+			if tc.holdLock {
+				lockPath := staleGenDir + ".lock"
+				lf, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o644)
+				if err != nil {
+					t.Fatalf("OpenFile(%q): %v", lockPath, err)
+				}
+				defer lf.Close()
+				if err := syscall.Flock(int(lf.Fd()), syscall.LOCK_SH); err != nil {
+					t.Fatalf("Flock(LOCK_SH): %v", err)
+				}
+				defer syscall.Flock(int(lf.Fd()), syscall.LOCK_UN)
+			}
+
+			a := &bwrapBuildAdapter{
+				agentFilesDrv:      "/fake/files.drv",
+				agentEnvDrv:        "/fake/env.drv",
+				passwdFileDrv:      "/fake/passwd.drv",
+				groupFileDrv:       "/fake/group.drv",
+				nixConfigFileDrv:   "/fake/nix-config.drv",
+				nixVarSnapshotDir:  currentGenDir,
+				nixVarSnapshotRoot: root,
+				nixVarGeneration:   "current-gen",
+			}
+			if err := a.EnsureReady(); err != nil {
+				t.Fatalf("EnsureReady() = %v, want nil", err)
+			}
+
+			if _, err := os.Stat(staleGenDir); !tc.wantStale(err) {
+				t.Errorf("os.Stat(%q) after EnsureReady = %v, %s", staleGenDir, err, tc.staleWhy)
+			}
+			if _, err := os.Stat(currentGenDir); err != nil {
+				t.Errorf("os.Stat(%q) after EnsureReady = %v, want nil (current generation must exist)", currentGenDir, err)
+			}
+		})
+	}
+}
+
+// TestBwrapBuildEnsureReady_EmptyGenerationDoesNotSweepSiblings guards
+// against re-deriving reclaimStaleSnapshots' root/keepGeneration by
+// filepath.Dir/Base surgery on nixVarSnapshotDir (issue #2680 review
+// finding): when generation is "" (the flat/legacy path), nixVarSnapshotDir
+// itself IS the snapshot root -- its parent is .spindrift, a directory that
+// also holds unrelated siblings like accum.git. Dir/Base surgery on the flat
+// path misidentifies that parent as the sweep root and would delete any
+// sibling it finds there that isn't the flat snapshot dir itself. EnsureReady
+// must never sweep in this case.
+func TestBwrapBuildEnsureReady_EmptyGenerationDoesNotSweepSiblings(t *testing.T) {
+	script, _ := newFakeCLI(t,
+		fakeCall{exit: 0}, fakeCall{exit: 0}, fakeCall{exit: 0}, fakeCall{exit: 0},
+		fakeCall{exit: 0}, fakeCall{exit: 0},
+	)
+	orig := execCommand
+	t.Cleanup(func() { execCommand = orig })
+	origStat := statHostNixDB
+	t.Cleanup(func() { statHostNixDB = origStat })
+	statHostNixDB = func() error { return nil }
+	execCommand = func(name string, args ...string) *exec.Cmd {
+		return exec.Command(script, args...)
+	}
+
+	spindriftDir := t.TempDir()
+	flatSnapshotDir := filepath.Join(spindriftDir, "nix-var-snapshot")
+	sibling := filepath.Join(spindriftDir, "accum.git")
+	if err := os.MkdirAll(sibling, 0o755); err != nil {
+		t.Fatalf("MkdirAll(%q): %v", sibling, err)
+	}
+
+	a := &bwrapBuildAdapter{
+		agentFilesDrv:      "/fake/files.drv",
+		agentEnvDrv:        "/fake/env.drv",
+		passwdFileDrv:      "/fake/passwd.drv",
+		groupFileDrv:       "/fake/group.drv",
+		nixConfigFileDrv:   "/fake/nix-config.drv",
+		nixVarSnapshotDir:  flatSnapshotDir,
+		nixVarSnapshotRoot: spindriftDir,
+		nixVarGeneration:   "",
+	}
+	if err := a.EnsureReady(); err != nil {
+		t.Fatalf("EnsureReady() = %v, want nil", err)
+	}
+
+	if _, err := os.Stat(sibling); err != nil {
+		t.Errorf("os.Stat(%q) after EnsureReady = %v, want nil (sibling of the flat snapshot dir must never be swept)", sibling, err)
 	}
 }
