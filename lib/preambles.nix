@@ -101,6 +101,8 @@ rec {
       driverEntry,
       agentFilesPath,
       agentEnvPath,
+      passwdFilePath,
+      groupFilePath,
       prefetch,
       imagePath,
       imageHash,
@@ -147,6 +149,8 @@ rec {
           DRIVER = driverEntry.name;
           AGENT_FILES = agentFilesPath;
           AGENT_ENV = agentEnvPath;
+          PASSWD_FILE = passwdFilePath;
+          GROUP_FILE = groupFilePath;
           BAKED_PREFETCH = prefetch;
         }
       else
@@ -199,6 +203,8 @@ rec {
       runnerKind,
       agentFilesDrv,
       agentEnvDrv,
+      passwdFileDrv,
+      groupFileDrv,
       runtime,
       imagePath,
       imageHash,
@@ -218,6 +224,8 @@ rec {
           RUNTIME = "bwrap";
           AGENT_FILES_DRV = agentFilesDrv;
           AGENT_ENV_DRV = agentEnvDrv;
+          PASSWD_FILE_DRV = passwdFileDrv;
+          GROUP_FILE_DRV = groupFileDrv;
         }
       else
         {
@@ -261,6 +269,8 @@ rec {
           driverEntry = dummyDriverEntry;
           agentFilesPath = "dummy";
           agentEnvPath = "dummy";
+          passwdFilePath = "dummy";
+          groupFilePath = "dummy";
           prefetch = "dummy";
           imagePath = "dummy";
           imageHash = "dummy";
@@ -293,6 +303,8 @@ rec {
           inherit runnerKind;
           agentFilesDrv = "dummy";
           agentEnvDrv = "dummy";
+          passwdFileDrv = "dummy";
+          groupFileDrv = "dummy";
           runtime = "dummy";
           imagePath = "dummy";
           imageHash = "dummy";

@@ -1020,7 +1020,13 @@ let
     prompts = imagePrompts;
     knobs = imageKnobs;
   };
-  inherit (imageModule) image agentEnv agentFiles;
+  inherit (imageModule)
+    image
+    agentEnv
+    agentFiles
+    passwdFile
+    groupFile
+    ;
 
   # The canonical outcome contract as a host store path, so checks can diff
   # it against what a Consumer prompt lacking the contract gets injected with
@@ -1147,6 +1153,10 @@ let
   agentFilesDrv = builtins.unsafeDiscardStringContext agentFiles.drvPath;
   agentEnvPath = builtins.unsafeDiscardStringContext (toString agentEnv);
   agentEnvDrv = builtins.unsafeDiscardStringContext agentEnv.drvPath;
+  passwdFilePath = builtins.unsafeDiscardStringContext (toString passwdFile);
+  passwdFileDrv = builtins.unsafeDiscardStringContext passwdFile.drvPath;
+  groupFilePath = builtins.unsafeDiscardStringContext (toString groupFile);
+  groupFileDrv = builtins.unsafeDiscardStringContext groupFile.drvPath;
 
   # runnerKind collapses the runtime knob to the two adapter families the
   # launcher knows: "bwrap" (daemonless) or "oci" (podman/docker).
@@ -1178,6 +1188,8 @@ let
       runnerKind
       agentFilesPath
       agentEnvPath
+      passwdFilePath
+      groupFilePath
       imagePath
       imageHash
       launcherCurrencyHash
@@ -1209,6 +1221,8 @@ let
       runnerKind
       agentFilesDrv
       agentEnvDrv
+      passwdFileDrv
+      groupFileDrv
       runtime
       imagePath
       imageHash
