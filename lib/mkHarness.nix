@@ -120,8 +120,10 @@
   # New paths land in the container's ephemeral copy-on-write layer and die
   # with the Box — the image and any shared volumes are never mutated. Off by
   # default: this trades hermeticity for in-box feedback, so the entrypoint
-  # prints a loud warning when it is enabled. OCI-runner only; the bwrap
-  # runner keeps its read-only store bind.
+  # prints a loud warning when it is enabled. Both runtimes support it now
+  # (ADR 0042): OCI still bakes the writable directory into the image at
+  # build time (chown, lib/image.nix); bwrap instead overlays an ephemeral
+  # tmpfs upper on top of the host's real, unmodified store at run time.
   nixStoreWritable ? false,
   # Extra derivations whose closures are baked into the image contents and,
   # when nixInBox is on, registered in the store DB alongside the runtime
@@ -1241,6 +1243,11 @@ let
       workerProvisioned
       reviewLoopInline
       reviewLoopOrchestrator
+      # Unlike nixConfigPath below (blanked to "" when nixInBox is off),
+      # nixStoreWritable is inherited straight -- it always renders the
+      # Consumer's raw knob value (issue #2665); the AND-gate with
+      # NixConfigFile lives in bwrap.go, not here.
+      nixStoreWritable
       ;
     driverEntry = imageDriver.driverEntry;
     prefetch = imageKnobs.prefetch;

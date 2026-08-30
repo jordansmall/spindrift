@@ -187,6 +187,7 @@ in
     grep -q '"PASSWD_FILE":' ${bwrapHarness.internals.runInputDocumentFile}
     grep -q '"GROUP_FILE":' ${bwrapHarness.internals.runInputDocumentFile}
     grep -q '"NIX_CONFIG_FILE":' ${bwrapHarness.internals.runInputDocumentFile}
+    grep -q '"NIX_STORE_WRITABLE":' ${bwrapHarness.internals.runInputDocumentFile}
     # IMAGE_ARCHIVE is not baked as a store path (empty-default guard is fine).
     ! grep -q '"IMAGE_ARCHIVE":"/nix/store/' ${bwrapHarness.internals.runInputDocumentFile}
     grep -q '"AGENT_FILES_DRV":' ${bwrapHarness.internals.buildInputDocumentFile}

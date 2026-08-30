@@ -45,6 +45,7 @@ let
     workerProvisioned = true;
     reviewLoopInline = true;
     reviewLoopOrchestrator = false;
+    nixStoreWritable = true;
   };
 in
 {
@@ -346,7 +347,26 @@ in
     assert assertMsg (
       out.NIX_CONFIG_FILE == "/nix/store/fake-nix-conf-path/nix.conf"
     ) "runArtifacts (bwrap) must set NIX_CONFIG_FILE, got: ${builtins.toJSON out}";
+    assert assertMsg (out.NIX_STORE_WRITABLE == "true")
+      "runArtifacts (bwrap) must render NIX_STORE_WRITABLE as the literal string \"true\" when nixStoreWritable is true, got: ${builtins.toJSON out}";
     pkgs.runCommand "preambles-run-artifacts-bwrap" { } "touch $out";
+
+  # Issue #2665: the sibling knob to nixConfigPath/NIX_CONFIG_FILE -- proves
+  # the literal-string rendering flips both ways, not just the "true" case
+  # preambles-run-artifacts-bwrap above already pins.
+  preambles-run-artifacts-bwrap-store-not-writable =
+    let
+      out = preambles.runArtifacts (
+        bwrapRunArtifactsBase
+        // {
+          nixConfigPath = "/nix/store/fake-nix-conf-path/nix.conf";
+          nixStoreWritable = false;
+        }
+      );
+    in
+    assert assertMsg (out.NIX_STORE_WRITABLE == "false")
+      "runArtifacts (bwrap) must render NIX_STORE_WRITABLE as the literal string \"false\" when nixStoreWritable is false, got: ${builtins.toJSON out}";
+    pkgs.runCommand "preambles-run-artifacts-bwrap-store-not-writable" { } "touch $out";
 
   # Issue #2664: nixConfigPath is optional (defaults to ""), the shape
   # mkHarness.nix relies on when the Consumer has nixInBox off -- the key
@@ -402,6 +422,10 @@ in
         workerProvisioned = false;
         reviewLoopInline = false;
         reviewLoopOrchestrator = true;
+        # OCI's own writable-store mechanism (lib/image.nix) is separate and
+        # never reads this artifact -- false is a harmless placeholder here,
+        # required only because nixStoreWritable has no default (issue #2665).
+        nixStoreWritable = false;
       };
     in
     assert assertMsg (
@@ -471,6 +495,9 @@ in
     assert assertMsg (
       !(out ? NIX_CONFIG_FILE)
     ) "runArtifacts (oci) must not set bwrap-only keys, got: ${builtins.toJSON out}";
+    assert assertMsg (
+      !(out ? NIX_STORE_WRITABLE)
+    ) "runArtifacts (oci) must not set bwrap-only keys, got: ${builtins.toJSON out}";
     pkgs.runCommand "preambles-run-artifacts-oci" { } "touch $out";
 
   # Issue #262 AC1: a driver-scoped image name flows into IMAGE_TAG, so an
@@ -514,6 +541,7 @@ in
         workerProvisioned = false;
         reviewLoopInline = true;
         reviewLoopOrchestrator = false;
+        nixStoreWritable = false;
       };
     in
     assert assertMsg (
@@ -694,6 +722,7 @@ in
         "NIX_BUILDER_IMAGE"
         "NIX_CONFIG_FILE"
         "NIX_CONFIG_FILE_DRV"
+        "NIX_STORE_WRITABLE"
         "NIX_VOLUME"
         "OUTBOX_RELAY_CAPABLE"
         "PASSWD_FILE"
