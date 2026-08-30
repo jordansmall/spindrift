@@ -131,6 +131,88 @@ func TestBwrapArgs_HomeAgentStagingMounted(t *testing.T) {
 	}
 }
 
+// TestBwrapArgs_ClosureGenerationOverridesAgentFiles verifies that a
+// Box.ClosureGeneration override (issue #2681) replaces the adapter's own
+// startup-baked agentFiles in the /agent and /home-agent-staged binds,
+// rather than the baked path leaking into argv anywhere.
+func TestBwrapArgs_ClosureGenerationOverridesAgentFiles(t *testing.T) {
+	a := &bwrapAdapter{
+		agentFiles:    "/baked/agent-files",
+		agentEnv:      "/fake/env",
+		bakedPrefetch: "echo ok",
+	}
+	box := Box{
+		Env:               map[string]string{},
+		ClosureGeneration: &AgentGeneration{AgentFiles: "/gen2/agent-files"},
+	}
+	args := a.buildArgs("/tmp/fake-etc", box)
+
+	if !wantTriple(args, "--ro-bind", "/gen2/agent-files/agent", "/agent") {
+		t.Errorf("expected --ro-bind /gen2/agent-files/agent /agent in args: %v", args)
+	}
+	if !wantTriple(args, "--ro-bind", "/gen2/agent-files/home/agent", homeAgentStagingDir) {
+		t.Errorf("expected --ro-bind /gen2/agent-files/home/agent %s in args: %v", homeAgentStagingDir, args)
+	}
+	for _, arg := range args {
+		if strings.Contains(arg, "/baked/agent-files") {
+			t.Errorf("baked agentFiles %q leaked into args despite ClosureGeneration override: %v", "/baked/agent-files", args)
+		}
+	}
+}
+
+// TestBwrapArgs_ClosureGenerationEmptyAgentFilesFallsBackToBaked verifies
+// that a non-nil Box.ClosureGeneration whose AgentFiles is the empty string
+// (a partially-populated override) falls back to the adapter's own
+// startup-baked agentFiles, rather than binding a bare "/agent" and
+// "/home/agent" -- which would pull the HOST's own /agent and home
+// directory into the sandbox instead of a store closure (issue #2681 review
+// finding).
+func TestBwrapArgs_ClosureGenerationEmptyAgentFilesFallsBackToBaked(t *testing.T) {
+	a := &bwrapAdapter{
+		agentFiles:    "/baked/agent-files",
+		agentEnv:      "/fake/env",
+		bakedPrefetch: "echo ok",
+	}
+	box := Box{
+		Env:               map[string]string{},
+		ClosureGeneration: &AgentGeneration{Generation: "gen2"},
+	}
+	args := a.buildArgs("/tmp/fake-etc", box)
+
+	if !wantTriple(args, "--ro-bind", "/baked/agent-files/agent", "/agent") {
+		t.Errorf("expected --ro-bind /baked/agent-files/agent /agent in args: %v", args)
+	}
+	if !wantTriple(args, "--ro-bind", "/baked/agent-files/home/agent", homeAgentStagingDir) {
+		t.Errorf("expected --ro-bind /baked/agent-files/home/agent %s in args: %v", homeAgentStagingDir, args)
+	}
+	if wantTriple(args, "--ro-bind", "/agent", "/agent") {
+		t.Errorf("bare host /agent bound into sandbox despite empty ClosureGeneration.AgentFiles: %v", args)
+	}
+	if wantTriple(args, "--ro-bind", "/home/agent", homeAgentStagingDir) {
+		t.Errorf("bare host /home/agent bound into sandbox despite empty ClosureGeneration.AgentFiles: %v", args)
+	}
+}
+
+// TestBwrapArgs_ClosureGenerationNilKeepsBakedAgentFiles verifies that a nil
+// Box.ClosureGeneration (every existing Box{...} literal's zero value)
+// preserves today's behaviour: binds derive from the adapter's own
+// startup-baked agentFiles, unchanged (issue #2681).
+func TestBwrapArgs_ClosureGenerationNilKeepsBakedAgentFiles(t *testing.T) {
+	a := &bwrapAdapter{
+		agentFiles:    "/baked/agent-files",
+		agentEnv:      "/fake/env",
+		bakedPrefetch: "echo ok",
+	}
+	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}})
+
+	if !wantTriple(args, "--ro-bind", "/baked/agent-files/agent", "/agent") {
+		t.Errorf("expected --ro-bind /baked/agent-files/agent /agent in args: %v", args)
+	}
+	if !wantTriple(args, "--ro-bind", "/baked/agent-files/home/agent", homeAgentStagingDir) {
+		t.Errorf("expected --ro-bind /baked/agent-files/home/agent %s in args: %v", homeAgentStagingDir, args)
+	}
+}
+
 // TestBwrapArgs_AccountFilesBindStorePaths verifies that buildArgs binds
 // /etc/passwd and /etc/group from the nix-sourced store paths carried on the
 // adapter (issue #2663), rather than a runner-written temp-dir copy — the
@@ -703,6 +785,95 @@ func TestBwrapArgs_MountsNixConfigAndStoreDBSnapshotWhenSet(t *testing.T) {
 	}
 	if !strings.Contains(strings.Join(args, " "), "--overlay-src /fake/pwd/.spindrift/nix-var-snapshot --tmp-overlay /nix/var") {
 		t.Errorf("expected --overlay-src /fake/pwd/.spindrift/nix-var-snapshot --tmp-overlay /nix/var in args: %v", args)
+	}
+}
+
+// TestBwrapArgs_ClosureGenerationOverridesNixVarSnapshotDir verifies that a
+// Box.ClosureGeneration override (issue #2681) replaces the adapter's own
+// startup-baked nixVarSnapshotDir in the /nix/var overlay bind, deriving the
+// per-launch snapshot dir from the adapter's own pwd-derived
+// nixVarSnapshotRoot instead.
+func TestBwrapArgs_ClosureGenerationOverridesNixVarSnapshotDir(t *testing.T) {
+	a := &bwrapAdapter{
+		agentFiles:         "/fake/agent",
+		agentEnv:           "/fake/env",
+		nixConfigFile:      "/nix/store/fake-hash-nix-conf/nix.conf",
+		nixVarSnapshotDir:  "/fake/pwd/.spindrift/nix-var-snapshot/gen1",
+		nixVarSnapshotRoot: "/fake/pwd/.spindrift/nix-var-snapshot",
+	}
+	box := Box{
+		Env:               map[string]string{},
+		ClosureGeneration: &AgentGeneration{AgentFiles: "/gen2/agent-files", Generation: "gen2"},
+	}
+	args := a.buildArgs("/tmp/fake-etc", box)
+
+	if !strings.Contains(strings.Join(args, " "), "--overlay-src /fake/pwd/.spindrift/nix-var-snapshot/gen2 --tmp-overlay /nix/var") {
+		t.Errorf("expected --overlay-src /fake/pwd/.spindrift/nix-var-snapshot/gen2 --tmp-overlay /nix/var in args: %v", args)
+	}
+	for _, arg := range args {
+		if strings.Contains(arg, "/nix-var-snapshot/gen1") {
+			t.Errorf("baked nixVarSnapshotDir %q leaked into args despite ClosureGeneration override: %v", a.nixVarSnapshotDir, args)
+		}
+	}
+}
+
+// TestBwrapArgs_ClosureGenerationEmptyGenerationFallsBackToBaked verifies
+// that a non-nil Box.ClosureGeneration whose Generation is the empty string
+// (a partially-populated override) falls back to the adapter's own
+// startup-baked nixVarSnapshotDir, rather than overlaying the bare
+// nixVarSnapshotRoot -- the container of every generation dir, which holds
+// no db.sqlite of its own (issue #2681 review finding).
+func TestBwrapArgs_ClosureGenerationEmptyGenerationFallsBackToBaked(t *testing.T) {
+	a := &bwrapAdapter{
+		agentFiles:         "/fake/agent",
+		agentEnv:           "/fake/env",
+		nixConfigFile:      "/nix/store/fake-hash-nix-conf/nix.conf",
+		nixVarSnapshotDir:  "/fake/pwd/.spindrift/nix-var-snapshot/gen1",
+		nixVarSnapshotRoot: "/fake/pwd/.spindrift/nix-var-snapshot",
+	}
+	box := Box{
+		Env:               map[string]string{},
+		ClosureGeneration: &AgentGeneration{AgentFiles: "/gen2/agent-files"},
+	}
+	args := a.buildArgs("/tmp/fake-etc", box)
+
+	argStr := strings.Join(args, " ")
+	if !strings.Contains(argStr, "--overlay-src /fake/pwd/.spindrift/nix-var-snapshot/gen1 --tmp-overlay /nix/var") {
+		t.Errorf("expected fallback --overlay-src /fake/pwd/.spindrift/nix-var-snapshot/gen1 --tmp-overlay /nix/var in args: %v", args)
+	}
+	if strings.Contains(argStr, "--overlay-src /fake/pwd/.spindrift/nix-var-snapshot --tmp-overlay") {
+		t.Errorf("bare nixVarSnapshotRoot bound as overlay-src despite empty ClosureGeneration.Generation: %v", args)
+	}
+}
+
+// TestBwrapArgs_ClosureGenerationUnsafeGenerationFallsBackToBaked verifies
+// that a Box.ClosureGeneration.Generation of ".." (which would resolve one
+// level above nixVarSnapshotRoot via a raw filepath.Join) is rejected the
+// same way closureGeneration rejects an unsafe imageTag-derived label,
+// falling back to the adapter's own startup-baked nixVarSnapshotDir instead
+// of escaping the snapshot root (issue #2681 review finding).
+func TestBwrapArgs_ClosureGenerationUnsafeGenerationFallsBackToBaked(t *testing.T) {
+	a := &bwrapAdapter{
+		agentFiles:         "/fake/agent",
+		agentEnv:           "/fake/env",
+		nixConfigFile:      "/nix/store/fake-hash-nix-conf/nix.conf",
+		nixVarSnapshotDir:  "/fake/pwd/.spindrift/nix-var-snapshot/gen1",
+		nixVarSnapshotRoot: "/fake/pwd/.spindrift/nix-var-snapshot",
+	}
+	box := Box{
+		Env:               map[string]string{},
+		ClosureGeneration: &AgentGeneration{AgentFiles: "/gen2/agent-files", Generation: ".."},
+	}
+	args := a.buildArgs("/tmp/fake-etc", box)
+
+	argStr := strings.Join(args, " ")
+	if !strings.Contains(argStr, "--overlay-src /fake/pwd/.spindrift/nix-var-snapshot/gen1 --tmp-overlay /nix/var") {
+		t.Errorf("expected fallback --overlay-src /fake/pwd/.spindrift/nix-var-snapshot/gen1 --tmp-overlay /nix/var in args: %v", args)
+	}
+	for _, arg := range args {
+		if strings.Contains(arg, "/nix-var-snapshot/..") {
+			t.Errorf("unsafe Generation \"..\" escaped nixVarSnapshotRoot: %v", args)
+		}
 	}
 }
 

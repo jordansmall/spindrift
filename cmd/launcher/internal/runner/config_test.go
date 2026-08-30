@@ -121,6 +121,7 @@ func TestNewBwrap_UsesConfigFields(t *testing.T) {
 		networkMode:           cfg.NetworkMode,
 		nixConfigFile:         cfg.NixConfigFile,
 		nixVarSnapshotDir:     nixVarSnapshotDir("/pwd", closureGeneration(cfg.ImageTag)),
+		nixVarSnapshotRoot:    nixVarSnapshotRoot("/pwd"),
 	}
 	// reflect.DeepEqual over pointers, not !=: bwrapAdapter now also carries
 	// the mu/running process-tracking fields Kill (issue #649) uses, which a

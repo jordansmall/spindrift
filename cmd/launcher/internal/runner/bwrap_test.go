@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -1152,6 +1153,67 @@ func TestBwrapRun_StartFailureReleasesNixVarSnapshotLock(t *testing.T) {
 		t.Errorf("exclusive Flock after Run returned Start() error: want nil (lock released), got %v", err)
 	} else {
 		_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+	}
+}
+
+// TestBwrapRun_LocksPerLaunchSnapshotDirWhenClosureGenerationSet verifies
+// that Run's shared-lock/stat step guards box.ClosureGeneration's per-launch
+// snapshot dir (issue #2681), not the adapter's own startup-baked
+// nixVarSnapshotDir -- two Run calls on the same adapter instance, each
+// naming a different real generation dir, each lock/stat their own dir
+// rather than colliding on (or falling back to) one shared path. The
+// adapter's own baked nixVarSnapshotDir deliberately points at a directory
+// that is never created, so a Run that mistakenly used it instead of the
+// per-launch override would fail with "no longer exists".
+func TestBwrapRun_LocksPerLaunchSnapshotDirWhenClosureGenerationSet(t *testing.T) {
+	script, dir := newFakeCLI(t, fakeCall{exit: 0})
+	orig := execCommand
+	t.Cleanup(func() { execCommand = orig })
+	execCommand = func(name string, args ...string) *exec.Cmd {
+		return exec.Command(script, args...)
+	}
+
+	root := t.TempDir()
+	gen1Dir := filepath.Join(root, "gen1")
+	gen2Dir := filepath.Join(root, "gen2")
+	if err := os.MkdirAll(gen1Dir, 0o755); err != nil {
+		t.Fatalf("MkdirAll gen1: %v", err)
+	}
+	if err := os.MkdirAll(gen2Dir, 0o755); err != nil {
+		t.Fatalf("MkdirAll gen2: %v", err)
+	}
+
+	a := &bwrapAdapter{
+		agentFiles:         "/fake/agent",
+		agentEnv:           "/fake/env",
+		bakedPrefetch:      "echo ok",
+		nixConfigFile:      "/fake/nix.conf",
+		nixVarSnapshotDir:  filepath.Join(root, "baked-gen-never-created"),
+		nixVarSnapshotRoot: root,
+	}
+
+	if err := a.Run(Box{Name: "agent-issue-gen1", Env: map[string]string{}, ClosureGeneration: &AgentGeneration{AgentFiles: "/gen1/agent-files", Generation: "gen1"}}); err != nil {
+		t.Fatalf("Run (gen1): %v", err)
+	}
+	if _, err := os.Stat(gen1Dir + ".lock"); err != nil {
+		t.Errorf("gen1 lock file %s: want present, got err=%v", gen1Dir+".lock", err)
+	}
+	if argv := readCall(t, dir, 0); !slices.Contains(argv, "/gen1/agent-files/agent") {
+		t.Errorf("gen1 argv: want a --ro-bind of /gen1/agent-files/agent, got %v", argv)
+	}
+
+	if err := a.Run(Box{Name: "agent-issue-gen2", Env: map[string]string{}, ClosureGeneration: &AgentGeneration{AgentFiles: "/gen2/agent-files", Generation: "gen2"}}); err != nil {
+		t.Fatalf("Run (gen2): %v", err)
+	}
+	if _, err := os.Stat(gen2Dir + ".lock"); err != nil {
+		t.Errorf("gen2 lock file %s: want present, got err=%v", gen2Dir+".lock", err)
+	}
+	if argv := readCall(t, dir, 1); !slices.Contains(argv, "/gen2/agent-files/agent") {
+		t.Errorf("gen2 argv: want a --ro-bind of /gen2/agent-files/agent, got %v", argv)
+	}
+
+	if _, err := os.Stat(filepath.Join(root, "baked-gen-never-created") + ".lock"); !os.IsNotExist(err) {
+		t.Errorf("baked snapshot's lock file: want not-exist (per-launch overrides used instead), got err=%v", err)
 	}
 }
 
