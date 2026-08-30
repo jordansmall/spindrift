@@ -1749,6 +1749,7 @@ else
       inherit
         agentEnv
         agentFiles
+        agentClosurePath
         build
         run
         manpage

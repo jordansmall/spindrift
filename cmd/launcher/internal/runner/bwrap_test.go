@@ -1809,3 +1809,64 @@ func TestBwrapRun_SyscallFilterAttachedAsExtraFile(t *testing.T) {
 		t.Errorf("gotCmd.Args = %v, want \"--seccomp\" \"3\"", gotCmd.Args)
 	}
 }
+
+// TestNixVarSnapshotDir_DifferentGenerationsProduceDistinctDirs verifies that
+// two different closure generations nest into two different, non-overlapping
+// directories under the same pwd/.spindrift/nix-var-snapshot root rather
+// than sharing the one flat path every closure used to collide on.
+func TestNixVarSnapshotDir_DifferentGenerationsProduceDistinctDirs(t *testing.T) {
+	root := filepath.Join("/pwd", ".spindrift", "nix-var-snapshot")
+	got1 := nixVarSnapshotDir("/pwd", "abc123-agent-closure")
+	got2 := nixVarSnapshotDir("/pwd", "def456-agent-closure")
+
+	if got1 == got2 {
+		t.Fatalf("nixVarSnapshotDir with different generations returned the same dir: %q", got1)
+	}
+	for _, got := range []string{got1, got2} {
+		if !strings.HasPrefix(got, root+string(filepath.Separator)) {
+			t.Errorf("nixVarSnapshotDir(%q) = %q, want it nested under root %q", got, got, root)
+		}
+	}
+}
+
+// TestNixVarSnapshotDir_EmptyGenerationProducesFlatPath verifies that an
+// empty generation (no closure known, e.g. a bare test-constructed adapter)
+// preserves the pre-#2680 flat path exactly, so behavior for a run that only
+// ever uses one closure is unchanged.
+func TestNixVarSnapshotDir_EmptyGenerationProducesFlatPath(t *testing.T) {
+	got := nixVarSnapshotDir("/pwd", "")
+	want := filepath.Join("/pwd", ".spindrift", "nix-var-snapshot")
+	if got != want {
+		t.Errorf("nixVarSnapshotDir(%q, \"\") = %q, want %q", "/pwd", got, want)
+	}
+}
+
+// TestClosureGeneration_RejectsUnsafeGenerationNames verifies that
+// closureGeneration falls back to "" (the pre-#2680 flat-path behavior)
+// whenever filepath.Base(imageTag) would yield something other than a safe,
+// single path component -- imageTag is cfg.ImageTag, sourced from an
+// environment variable / input-document artifact an untrusted source can
+// influence (getenvArtifact, cmd/launcher/inputdoc.go), and the returned
+// generation is later threaded into a path that reclaimStaleSnapshots
+// os.RemoveAll's (issue #2680 review finding).
+func TestClosureGeneration_RejectsUnsafeGenerationNames(t *testing.T) {
+	cases := []struct {
+		name     string
+		imageTag string
+		want     string
+	}{
+		{"empty", "", ""},
+		{"normal store path", "/nix/store/abc123-agent-closure", "abc123-agent-closure"},
+		{"dot-dot", "..", ""},
+		{"dot", ".", ""},
+		{"root separator", "/", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := closureGeneration(tc.imageTag)
+			if got != tc.want {
+				t.Errorf("closureGeneration(%q) = %q, want %q", tc.imageTag, got, tc.want)
+			}
+		})
+	}
+}

@@ -252,6 +252,13 @@ let
     # The run command embeds the path via unsafeDiscardStringContext, which
     # drops the Nix dependency — without this attr the path is absent.
     SKILLS_AGENT_FILES = skillsBwrapHarness.internals.agentFiles;
+    # The generation name (bwrap.go closureGeneration/nixVarSnapshotDir, issue
+    # #2680) skillsBwrapHarness's own IMAGE_TAG resolves to in production --
+    # each mkHarness invocation bakes a distinct agent-closure store path, so
+    # skills.bats's own stub_nix_var_snapshot (tests/helper.bash) needs THIS
+    # harness's generation, not bwrapHarness's below, to satisfy
+    # bwrapAdapter.IsReady's now generation-scoped snapshot check.
+    SKILLS_BWRAP_IMAGE_TAG = skillsBwrapHarness.internals.agentClosurePath;
     # The opencode Driver's registry-rendered preamble (issue #2262), so
     # the cross-half integration test derives DRIVER_AGENT_FILES_DIR from
     # the same rendered bytes an opencode image bakes in, instead of
@@ -296,6 +303,13 @@ let
     CUSTOM_RUN_CMD = "${customHarness.internals.run}/bin/run";
     DOCKER_RUN_CMD = "${dockerHarness.internals.run}/bin/run";
     BWRAP_RUN_CMD = "${bwrapHarness.internals.run}/bin/run";
+    # bwrapHarness's own agent-closure store path -- the generation name
+    # bwrapAdapter.IsReady's now generation-scoped snapshot check (issue
+    # #2680) derives via closureGeneration(IMAGE_TAG) for boxes launched
+    # through $BWRAP_RUN_CMD. helper.bash's stub_nix_var_snapshot reads this
+    # to stub the snapshot under the SAME generation the real launcher
+    # computes, rather than the flat pre-#2680 path.
+    BWRAP_IMAGE_TAG = bwrapHarness.internals.agentClosurePath;
     BWRAP_BUILD_CMD = "${bwrapHarness.internals.build}/bin/build";
     IMAGE_PATH = batsHarness.internals.imagePath;
   };

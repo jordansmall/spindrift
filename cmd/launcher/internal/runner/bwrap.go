@@ -177,8 +177,130 @@ type bwrapAdapter struct {
 // re-substituting them. Shared, package-level, between the run adapter (this
 // file, to mount) and the build adapter (snapshotStoreDB, to write) so the
 // path convention lives in exactly one place.
-func nixVarSnapshotDir(pwd string) string {
+//
+// generation (see closureGeneration) nests the snapshot one directory level
+// deeper, scoped to the agent-closure it was taken against (issue #2680), so
+// two different closures get two different, coexisting directories instead
+// of colliding on one shared path. An empty generation
+// (no closure known, e.g. a bare test-constructed adapter) falls back to the
+// pre-#2680 flat path — filepath.Join drops empty components, so this is the
+// same call either way.
+func nixVarSnapshotDir(pwd, generation string) string {
+	return filepath.Join(nixVarSnapshotRoot(pwd), generation)
+}
+
+// nixVarSnapshotRoot is the directory nixVarSnapshotDir nests generation
+// subdirs under -- the sweep root reclaimStaleSnapshots reads/RemoveAlls
+// entries of. Factored out so callers that need the root (bwrapBuildAdapter,
+// to reclaim stale generations) derive it the same way nixVarSnapshotDir
+// does, from pwd directly, rather than by filepath.Dir/Base surgery on an
+// already-joined nixVarSnapshotDir path -- surgery that misidentifies the
+// root when generation is "" (issue #2680 review finding: the flat/legacy
+// path IS the snapshot dir, not a subdir of it, so its parent is actually
+// .spindrift, home to unrelated siblings a sweep must never touch).
+func nixVarSnapshotRoot(pwd string) string {
 	return filepath.Join(pwd, ".spindrift", "nix-var-snapshot")
+}
+
+// closureGeneration derives the generation subdir nixVarSnapshotDir nests
+// under from a bwrap-runtime Config.ImageTag (the bundled agent-closure's
+// loaded nix store path, e.g. /nix/store/<hash>-agent-closure — see
+// Config.ImageTag's doc comment). Empty imageTag (no closure known) returns
+// "" rather than filepath.Base("")'s "." — "." is not a safe/intended
+// directory name here, and "" is what makes nixVarSnapshotDir's empty-
+// generation fallback kick in.
+//
+// imageTag is read from an environment variable / input-document artifact
+// (getenvArtifact, cmd/launcher/inputdoc.go) that an untrusted source can
+// influence, and the result becomes a path component threaded into a
+// directory reclaimStaleSnapshots later os.RemoveAll's. filepath.Base alone
+// doesn't guard against a hostile imageTag: filepath.Base("..") is "..",
+// filepath.Base(".") is ".", filepath.Base("/") is the separator itself —
+// any of those steer the eventual RemoveAll outside the intended snapshot
+// root. Reject them the same way empty is rejected, falling back to the
+// flat-path "".
+func closureGeneration(imageTag string) string {
+	if imageTag == "" {
+		return ""
+	}
+	gen := filepath.Base(imageTag)
+	if gen == "." || gen == ".." || gen == string(filepath.Separator) {
+		return ""
+	}
+	return gen
+}
+
+// snapshotLockPath is the one place the "<generation dir>.lock" naming
+// convention is spelled: a sibling of the generation dir itself, never a
+// file inside it, since the generation dir is what buildArgs --overlay-src
+// binds into the sandbox and a lock file living inside it would risk being
+// swept up by that mount. Shared by Run (to acquire a shared lock for the
+// life of the sandboxed process) and reclaimStaleSnapshots (to probe for an
+// exclusive lock, i.e. no live Box holding the shared one).
+func snapshotLockPath(dir string) string {
+	return dir + ".lock"
+}
+
+// lockSnapshotShared opens (creating if needed) and takes a blocking shared
+// advisory flock on dir's snapshotLockPath. The lock file is NOT guaranteed
+// to stay the same inode for a generation's whole existence: sweepOrphanedLock
+// (reclaimStaleSnapshots) removes it once a later pass's os.ReadDir no longer
+// sees a matching generation dir -- deleting and recreating it without the
+// guard below would let two callers each believe they hold "the" lock while
+// actually flocking two different inodes that happen to share a name (issue
+// #2680 review finding).
+//
+// EnsureReady, unlike Run, calls this before the generation dir exists --
+// sweepOrphanedLock (a concurrent build's own reclaim pass) can therefore
+// legitimately see this lock file with no matching generation dir yet and
+// classify it as orphaned. If sweepOrphanedLock's LOCK_EX probe lands
+// between this func's os.OpenFile and its Flock(LOCK_SH), it can win the
+// exclusive lock on the not-yet-locked fd and os.Remove the path out from
+// under it -- Flock still succeeds afterward (flock locks the open file
+// description, not the path), so a naive caller would believe it holds a
+// live lock on a path that actually resolves to nothing, letting a later
+// pass O_CREATE a fresh inode there and win its own lock uncontested. So
+// after locking, verify the fd still identifies whatever is currently at
+// the path (fstat vs. a fresh os.Stat via os.SameFile) and retry against a
+// freshly opened fd if not, bounded so a persistent adversary gets a clear
+// error instead of an infinite loop.
+func lockSnapshotShared(dir string) (*os.File, error) {
+	const maxAttempts = 100
+	path := snapshotLockPath(dir)
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		lf, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o644)
+		if err != nil {
+			return nil, err
+		}
+		if err := syscall.Flock(int(lf.Fd()), syscall.LOCK_SH); err != nil {
+			lf.Close()
+			return nil, err
+		}
+		var fdStat, pathStat os.FileInfo
+		if fdStat, err = lf.Stat(); err == nil {
+			pathStat, err = os.Stat(path)
+		}
+		if err == nil && os.SameFile(fdStat, pathStat) {
+			return lf, nil
+		}
+		// The path was swapped or unlinked out from under lf between open
+		// and lock (e.g. by a concurrent sweepOrphanedLock) -- lf's lock is
+		// now worthless, since it protects an inode nothing resolves to
+		// anymore. Drop it and retry against whatever is at the path now.
+		unlockSnapshot(lf)
+	}
+	return nil, fmt.Errorf("lockSnapshotShared: %s kept changing identity after locking across %d attempts", path, maxAttempts)
+}
+
+// unlockSnapshot releases lf's flock and closes it; lf == nil (lock
+// acquisition itself failed, or was never attempted) is a no-op so callers
+// can defer/call this unconditionally.
+func unlockSnapshot(lf *os.File) {
+	if lf == nil {
+		return
+	}
+	_ = syscall.Flock(int(lf.Fd()), syscall.LOCK_UN)
+	lf.Close()
 }
 
 // NewBwrap constructs a bwrap adapter for the run command from cfg and pwd
@@ -201,7 +323,7 @@ func NewBwrap(cfg Config, pwd string) Runner {
 		skillsDir:                cfg.SkillsDir,
 		driverSessionCacheDir:    cfg.DriverSessionCacheDir,
 		nixConfigFile:            cfg.NixConfigFile,
-		nixVarSnapshotDir:        nixVarSnapshotDir(pwd),
+		nixVarSnapshotDir:        nixVarSnapshotDir(pwd, closureGeneration(cfg.ImageTag)),
 		nixStoreWritable:         cfg.NixStoreWritable,
 		hostMediatedRemote:       cfg.HostMediatedRemote,
 		accumulationRepoDir:      cfg.AccumulationRepoDir,
@@ -988,6 +1110,16 @@ type bwrapBuildAdapter struct {
 	// into (shared package-level convention with the run adapter's mount —
 	// see nixVarSnapshotDir's doc comment).
 	nixVarSnapshotDir string
+	// nixVarSnapshotRoot and nixVarGeneration are the same pwd/generation
+	// EnsureReady built nixVarSnapshotDir from, kept as their own fields
+	// (rather than re-derived from nixVarSnapshotDir via filepath.Dir/Base)
+	// so reclaimStaleSnapshots' root/keepGeneration arguments can never be
+	// misidentified by path surgery on the already-joined dir (issue #2680
+	// review finding). nixVarGeneration == "" is the flat/legacy path,
+	// distinguishable here from "" meaning "root itself" the way Dir/Base
+	// surgery could not.
+	nixVarSnapshotRoot string
+	nixVarGeneration   string
 }
 
 // NewBwrapBuild constructs a bwrap adapter for the build command from cfg and
@@ -995,14 +1127,17 @@ type bwrapBuildAdapter struct {
 // parameter). EnsureReady realizes agent store closures via nix build and,
 // when nixInBox is on, snapshots the host nix store DB.
 func NewBwrapBuild(cfg Config, pwd string) Runner {
+	generation := closureGeneration(cfg.ImageTag)
 	return &bwrapBuildAdapter{
-		agentFilesDrv:     cfg.AgentFilesDrv,
-		agentEnvDrv:       cfg.AgentEnvDrv,
-		passwdFileDrv:     cfg.PasswdFileDrv,
-		groupFileDrv:      cfg.GroupFileDrv,
-		nixConfigFileDrv:  cfg.NixConfigFileDrv,
-		syscallFilterDrv:  cfg.SyscallFilterDrv,
-		nixVarSnapshotDir: nixVarSnapshotDir(pwd),
+		agentFilesDrv:      cfg.AgentFilesDrv,
+		agentEnvDrv:        cfg.AgentEnvDrv,
+		passwdFileDrv:      cfg.PasswdFileDrv,
+		groupFileDrv:       cfg.GroupFileDrv,
+		nixConfigFileDrv:   cfg.NixConfigFileDrv,
+		syscallFilterDrv:   cfg.SyscallFilterDrv,
+		nixVarSnapshotDir:  nixVarSnapshotDir(pwd, generation),
+		nixVarSnapshotRoot: nixVarSnapshotRoot(pwd),
+		nixVarGeneration:   generation,
 	}
 }
 
