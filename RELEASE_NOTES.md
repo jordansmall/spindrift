@@ -10,6 +10,48 @@ depending on how you use spindrift; it won't affect everyone.
 
 ---
 
+## 0.13.0 — 2026-08-30
+
+The bwrap runner grows up: isolated networking, a syscall filter, resource
+limits, a writable store, and rebuilds that no longer stall the run.
+
+**⚠ Breaking changes** this release: bwrap Boxes get their own network
+namespace by default and the launcher now requires `pasta` for it.
+
+- **⚠ Breaking: bwrap Boxes no longer share the host's network.** A bwrap Box
+  used to sit in the host's network namespace and could reach anything on your
+  loopback. It now gets its own namespace with egress through a hardened
+  `pasta` helper, matching what the podman runner already did. The launcher
+  refuses to start if `pasta` isn't on PATH; `networkMode = "host"` is the
+  documented opt-out back to the old shared posture, and `"none"` still means
+  fully offline.
+- **A real sandbox, not just a chroot.** bwrap Boxes now run behind a seccomp
+  syscall filter compiled from a denylist (verified by a test that actually
+  runs denied syscalls in a sandbox), enforce the same `PIDS_LIMIT` and
+  `MEMORY_LIMIT` knobs as podman via per-Box cgroups, and get killed when the
+  launcher dies instead of outliving it.
+- **Writable `/nix/store` works under bwrap.** The `nixStoreWritable` knob now
+  reaches the bwrap runner: the store is overlaid as an ephemeral tmpfs, in-box
+  nix builds are bounded so they can't eat the host, and on kernels that can't
+  do unprivileged overlay mounts the launcher refuses up front with a clear
+  message instead of failing mid-run.
+- **A stale agent closure swaps in without draining the wave.** Under bwrap a
+  rebuild is seconds of mostly-cached work, so when only the agent closure is
+  stale the launcher now realizes the fresh one and uses it for every new Box
+  while running Boxes finish on the closure they started with. A stale launcher
+  still drains and exits as before. Box snapshots are kept per closure
+  generation and unreferenced generations get reclaimed.
+- **bwrap Boxes survive launcher restarts.** `is-running`, `list-running`, and
+  `reap` were stubs for bwrap; they now work across launcher runs using each
+  Box's cgroup, so a crashed launcher's leftovers get spotted and cleaned up.
+- **`spindrift doctor` checks bwrap hosts.** When the bwrap runner is
+  configured, doctor reports the capabilities that runner actually needs,
+  including whether the host delegates cgroup v2 control.
+- **The dogfood loop can drive either runtime.** `DOGFOOD_RUNTIME` picks podman
+  (still the default) or bwrap for a whole dogfood run, and `MIGRATING.md` now
+  carries a generated table mapping every legacy settings spelling to its
+  current home, drift-checked so it can't go stale.
+
 ## 0.12.0 — 2026-08-29
 
 Boxes can install from private package registries without ever holding the
