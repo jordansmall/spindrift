@@ -2,7 +2,9 @@ package runner
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -157,5 +159,147 @@ func TestValidateOverlayWithExec_Fails(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "nixStoreWritable") && !strings.Contains(err.Error(), "NIX_STORE_WRITABLE") {
 		t.Errorf("error = %q, want it to mention the nixStoreWritable/NIX_STORE_WRITABLE knob", err.Error())
+	}
+}
+
+// TestValidateCgroupDelegation_NotDelegated verifies ValidateCgroupDelegation
+// returns a non-nil, descriptive error when the probe subtree can't be
+// created -- standing in for a host with no cgroup v2 delegation to this
+// process (ADR 0042), mirroring provisionCgroup's own
+// TestBwrapRun_NoCgroupDelegationWarnsAndProceeds seam-swap.
+func TestValidateCgroupDelegation_NotDelegated(t *testing.T) {
+	origSelf := readSelfCgroup
+	t.Cleanup(func() { readSelfCgroup = origSelf })
+	readSelfCgroup = func() (string, error) { return "/x", nil }
+
+	origRoot := cgroupFSRoot
+	t.Cleanup(func() { cgroupFSRoot = origRoot })
+	// No parent "/x" dir exists under this root, so the probe os.Mkdir fails
+	// exactly as it would on a host with no writable delegated subtree.
+	cgroupFSRoot = filepath.Join(t.TempDir(), "does-not-exist")
+
+	err := ValidateCgroupDelegation()
+	if err == nil {
+		t.Fatal("ValidateCgroupDelegation() should error when the probe subtree can't be created")
+	}
+	if !strings.Contains(err.Error(), "cgroup") {
+		t.Errorf("error = %q, want it to mention cgroup", err.Error())
+	}
+}
+
+// probeDirName mirrors the PID-keyed probe directory name
+// ValidateCgroupDelegation computes internally, so tests can predict the
+// exact path it will Mkdir/Stat/Remove without exporting the naming scheme
+// itself.
+func probeDirName() string {
+	return fmt.Sprintf("spindrift-doctor-probe-%d", os.Getpid())
+}
+
+// TestValidateCgroupDelegation_Delegated verifies ValidateCgroupDelegation
+// returns nil when the probe subtree can be created and the pids.max/
+// memory.max controller files exist inside it, and that it removes the probe
+// directory again before returning -- nothing should be left behind for the
+// caller to clean up. Real cgroup v2 auto-populates pids.max/memory.max in a
+// freshly created subtree whenever the parent's cgroup.subtree_control
+// enables those controllers; a plain tmpfs test dir has no such kernel
+// behaviour, so the test swaps the statCgroupControllerFile seam to report
+// both files present, standing in for a host that does delegate them.
+func TestValidateCgroupDelegation_Delegated(t *testing.T) {
+	origSelf := readSelfCgroup
+	t.Cleanup(func() { readSelfCgroup = origSelf })
+	readSelfCgroup = func() (string, error) { return "", nil }
+
+	origRoot := cgroupFSRoot
+	t.Cleanup(func() { cgroupFSRoot = origRoot })
+	cgroupFSRoot = t.TempDir()
+
+	origStat := statCgroupControllerFile
+	t.Cleanup(func() { statCgroupControllerFile = origStat })
+	statCgroupControllerFile = func(string) (os.FileInfo, error) { return nil, nil }
+
+	if err := ValidateCgroupDelegation(); err != nil {
+		t.Fatalf("ValidateCgroupDelegation() = %v, want nil", err)
+	}
+
+	entries, err := os.ReadDir(cgroupFSRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Errorf("cgroupFSRoot has leftover entries after ValidateCgroupDelegation: %v", entries)
+	}
+}
+
+// TestValidateCgroupDelegation_MissingController verifies
+// ValidateCgroupDelegation returns a descriptive, non-nil error when the
+// probe subtree can be created but is missing pids.max/memory.max -- standing
+// in for a host whose cgroup.subtree_control doesn't delegate the pids/
+// memory controllers, where provisionCgroup's later writes would otherwise
+// silently fail even though subtree creation itself succeeded. It uses the
+// real statCgroupControllerFile (os.Stat), so a plain empty temp dir behaves
+// exactly like a controller-not-delegated host.
+func TestValidateCgroupDelegation_MissingController(t *testing.T) {
+	origSelf := readSelfCgroup
+	t.Cleanup(func() { readSelfCgroup = origSelf })
+	readSelfCgroup = func() (string, error) { return "", nil }
+
+	origRoot := cgroupFSRoot
+	t.Cleanup(func() { cgroupFSRoot = origRoot })
+	cgroupFSRoot = t.TempDir()
+
+	err := ValidateCgroupDelegation()
+	if err == nil {
+		t.Fatal("ValidateCgroupDelegation() should error when pids.max/memory.max are missing from the probe subtree")
+	}
+	if !strings.Contains(err.Error(), "pids.max") && !strings.Contains(err.Error(), "memory.max") {
+		t.Errorf("error = %q, want it to mention pids.max or memory.max", err.Error())
+	}
+
+	entries, err := os.ReadDir(cgroupFSRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Errorf("cgroupFSRoot has leftover entries after a failed ValidateCgroupDelegation: %v", entries)
+	}
+}
+
+// TestValidateCgroupDelegation_StaleLeftoverSelfHeals verifies
+// ValidateCgroupDelegation does not permanently misreport a delegated host as
+// non-delegated when a prior run's probe directory (same PID-keyed name) was
+// left behind empty -- e.g. a doctor run killed between Mkdir and Remove. It
+// should clear the stale directory and retry the Mkdir rather than failing on
+// EEXIST forever.
+func TestValidateCgroupDelegation_StaleLeftoverSelfHeals(t *testing.T) {
+	origSelf := readSelfCgroup
+	t.Cleanup(func() { readSelfCgroup = origSelf })
+	readSelfCgroup = func() (string, error) { return "", nil }
+
+	origRoot := cgroupFSRoot
+	t.Cleanup(func() { cgroupFSRoot = origRoot })
+	cgroupFSRoot = t.TempDir()
+
+	origStat := statCgroupControllerFile
+	t.Cleanup(func() { statCgroupControllerFile = origStat })
+	statCgroupControllerFile = func(string) (os.FileInfo, error) { return nil, nil }
+
+	// Pre-create the exact PID-keyed probe dir the function under test will
+	// compute, standing in for a stale leftover from a killed prior run.
+	dir := filepath.Join(cgroupFSRoot, probeDirName())
+	if err := os.Mkdir(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	err := ValidateCgroupDelegation()
+	if err != nil {
+		t.Fatalf("ValidateCgroupDelegation() = %v, want nil (should self-heal the stale leftover directory)", err)
+	}
+
+	entries, err := os.ReadDir(cgroupFSRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Errorf("cgroupFSRoot has leftover entries after ValidateCgroupDelegation self-heal: %v", entries)
 	}
 }
