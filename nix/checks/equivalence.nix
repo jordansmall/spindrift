@@ -1659,6 +1659,48 @@ in
         touch $out
       '';
 
+  # Pins the wiring the bwrap dogfood loop actually needs end-to-end (issue
+  # #2672): mkharness-agent-closure-package above proves a bwrap harness's
+  # *own* packages carry agent-closure naming what its *own* run document's
+  # FLAKE_IMAGE_ATTR points at, but flake.nix's dogfood-bwrap app is fed
+  # from fixtures.dogfoodBwrapHarness (not bwrapHarness), and freshness's
+  # Probe resolves FLAKE_IMAGE_ATTR against the flake's TOP-LEVEL
+  # `packages.<system>` output, not any harness's own local packages
+  # attrset. A regression re-scoping agent-closure to only the harness's
+  # local attrset (or dropping the flake.nix re-export) would leave
+  # mkharness-agent-closure-package green while `nix run .#dogfood-bwrap --
+  # build` still died resolving `.#packages.<system>.agent-closure`.
+  dogfood-bwrap-app-wiring =
+    let
+      inherit (pkgs.lib) assertMsg;
+    in
+    assert assertMsg (config.apps ? dogfood-bwrap)
+      "flake.nix must expose apps.dogfood-bwrap at the top level (issue #2672) so `nix run .#dogfood-bwrap` actually resolves, got top-level app names: ${builtins.toJSON (builtins.attrNames config.apps)}";
+    assert assertMsg (config.apps.dogfood-bwrap.type == "app")
+      "flake.nix's top-level apps.dogfood-bwrap must be a real app, got: ${builtins.toJSON config.apps.dogfood-bwrap}";
+    # .program string equality (not mere existence/type) is what actually
+    # catches flake.nix:200 pointing at the wrong harness (e.g. the podman
+    # `fixtures.harness` instead of `fixtures.dogfoodBwrapHarness`): each
+    # harness's apps.default.program path bakes in that harness's own
+    # runInputDocumentFile (RUNNER_KIND, *_DRV artifacts, ...), so the two
+    # harnesses' program paths differ even though both satisfy the
+    # existence/type asserts above.
+    assert assertMsg
+      (config.apps.dogfood-bwrap.program == fixtures.dogfoodBwrapHarness.apps.default.program)
+      "flake.nix's top-level apps.dogfood-bwrap must be the SAME app as fixtures.dogfoodBwrapHarness.apps.default (issue #2672) -- otherwise `nix run .#dogfood-bwrap` silently runs a foreign harness's spindrift binary: ${config.apps.dogfood-bwrap.program} != ${fixtures.dogfoodBwrapHarness.apps.default.program}";
+    assert assertMsg (config.packages ? agent-closure)
+      "flake.nix must expose packages.agent-closure at the top level (issue #2672) so FLAKE_IMAGE_ATTR=.#packages.<system>.agent-closure actually resolves, got top-level package names: ${builtins.toJSON (builtins.attrNames config.packages)}";
+    assert assertMsg
+      (
+        config.packages.agent-closure.outPath == fixtures.dogfoodBwrapHarness.packages.agent-closure.outPath
+      )
+      "flake.nix's top-level packages.agent-closure must be the SAME derivation as fixtures.dogfoodBwrapHarness.packages.agent-closure (issue #2672) -- otherwise the freshness Probe compares IMAGE_TAG against a foreign closure's outPath and silently reports perpetually stale: ${config.packages.agent-closure.outPath} != ${fixtures.dogfoodBwrapHarness.packages.agent-closure.outPath}";
+    # RUNNER_KIND=bwrap for a bwrap-runtime harness is already pinned above
+    # (mkharness-defaults greps it against bwrapHarness's own run document)
+    # -- the eval-time asserts above are this check's entire real content;
+    # this derivation exists only to give the check a buildable output.
+    pkgs.runCommand "dogfood-bwrap-app-wiring" { } "touch $out";
+
   # The Consumer-facing attrset carries no check-only outputs (issue #2529
   # AC1): every check-only key must live under `internals`, never reappear
   # at the top level. Guards against silent reintroduction the same way
