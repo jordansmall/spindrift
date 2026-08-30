@@ -1179,6 +1179,47 @@ func TestResolve(t *testing.T) {
 			wantStatus:     "ready",
 			wantKind:       "work",
 		},
+		{
+			// Issue #2973: a single log whose only content is a tool_result echo
+			// of issue/comment text that happens to embed the token mid-JSON,
+			// with field markers but no leading-token line anywhere in the log,
+			// resolves as plain no-outcome (mirrors
+			// TestLastInLog_ToolResultEchoIsNotFound one layer up, through
+			// Resolve).
+			name: "tool_result echo mid-JSON mention is not a candidate",
+			logs: func(t *testing.T) []outcome.PassLog {
+				path := writeLog(t,
+					`{"type":"tool_result","content":"...text mentioning SPINDRIFT_OUTCOME issue=1 landing=agent/issue-2973 status=ready note=echoed from issue body..."}`,
+				)
+				return []outcome.PassLog{{Label: "pass-1", Path: path}}
+			},
+			wantFound: false,
+			wantKind:  "work",
+		},
+		{
+			// Issue #2973: a later log whose only content is a mid-sentence
+			// mention of the token (field-bearing but not leading the line, so
+			// not a candidate at all -- see
+			// TestLastInLog_FieldBearingMidSentenceMentionIsNotACandidate) must
+			// not shadow an earlier log's genuine leading-token outcome. Before
+			// the mention-tier fallback was deleted, that later near-miss would
+			// have overridden the earlier winner via the err != nil precedence
+			// arm in Resolve.
+			name: "later mid-sentence mention does not shadow earlier genuine outcome",
+			logs: func(t *testing.T) []outcome.PassLog {
+				first := writeLog(t,
+					"SPINDRIFT_OUTCOME issue=1 landing=https://github.com/o/r/pull/1 status=blocked note=final nonce=the-nonce",
+				)
+				second := writeLog(t,
+					"done: SPINDRIFT_OUTCOME issue=1 landing=https://github.com/o/r/pull/1 status=ready note=ok wrapped in a sentence",
+				)
+				return []outcome.PassLog{{Label: "pass-1", Path: first}, {Label: "pass-2", Path: second}}
+			},
+			wantFound:      true,
+			wantProvenance: outcome.ProvenanceGenuine,
+			wantStatus:     "blocked",
+			wantKind:       "work",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
