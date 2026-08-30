@@ -1374,6 +1374,24 @@ func checkBwrapOverlayGate(c config) error {
 //	  accumulation-repo seed, etc.), which still falls back to exit 1.
 var errQueueEmpty = errors.New("queue empty")
 
+// snapshotGeneration creates the nix-var store-DB snapshot generation a
+// bwrap hot-swap (ADR 0043, issue #2682) is about to bind, once per
+// successful swap under a nixInBox Consumer -- see runContinuousDispatch's
+// fresh() closure, and runner.SnapshotGeneration's own doc comment for why
+// this step exists (nothing else ever writes a generation for a
+// hot-swapped closure the way `launcher build`'s EnsureReady does for its
+// own baked one). A package-level var, not a parameter threaded alongside
+// eval/realize: runContinuousDispatch already has more than a dozen
+// existing test call sites that never touch nixInBox at all, and this seam
+// only ever fires when c.nixConfigFile is set -- adding it there would force
+// every one of those unrelated call sites to pass a value they don't care
+// about. Mirrors bwrap.go's own execCommand/statHostNixDB package-level
+// seam convention instead: tests that DO exercise the nixInBox swap path
+// reassign this var to a fake, exactly like those seams, so they never
+// shell out to sqlite3 or read a host nix store db that doesn't exist in a
+// test sandbox.
+var snapshotGeneration = runner.SnapshotGeneration
+
 // exitConfigInvalid is the process exit code for a bootstrap() failure whose
 // error wraps errConfigInvalid (bootstrap.go) -- see the exit-code doc
 // comment above for the full mapping.
@@ -1703,7 +1721,10 @@ func continuousDispatchErr(err, firstQueryErr error) error {
 // shelling out to nix — mirrors previewIssues's own eval parameter. realize
 // is injected for the same reason: tests substitute a RealizerFake instead
 // of shelling out to `nix build` for the background base-tip realize
-// (#2679).
+// (#2679). The nixInBox hot-swap snapshot step below reaches
+// runner.SnapshotGeneration through the package-level snapshotGeneration
+// seam instead of a threaded parameter (see that var's own doc comment for
+// why), so it needs no injection here.
 func runContinuousDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, pwd string, f *dispatch.Factory, s settle.Settler, eval freshness.Evaluator, realize freshness.Realizer, lp reconcile.LivenessProbe) error {
 	firstQuery := true
 	firstQueryEmpty := false
@@ -1774,15 +1795,131 @@ func runContinuousDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, 
 
 	guard := freshness.NewGuard(pwd)
 	var staleResult freshness.Result
+	// currentImageTag is the effective "loaded" baseline Probe compares
+	// against -- starts at c.imageTag (today's behavior) and advances to
+	// res.TipTag after every successful hot-swap below, so a later probe
+	// against an unchanged base tip converges to fresh instead of
+	// re-detecting the same divergence against the original baked value
+	// forever (ADR 0043, issue #2682).
+	currentImageTag := c.imageTag
+	// swapClassified records that guard.Classify already ran against this
+	// call's own probe result (res) inside fresh()'s hot-swap branch below --
+	// true whenever that branch reaches a Classify call at all, regardless of
+	// the disposition it returned. staleResult is only assigned res on a
+	// disposition that also makes fresh() report not-fresh (HostTainted, or a
+	// Rebuild a subsequent RealizeSync/snapshot failure falls back to
+	// draining with) -- on a successful swap, staleResult is left untouched
+	// by this branch, since fresh() reports fresh and the terminal switch
+	// below is never reached for this res at all. Whenever the terminal
+	// switch below IS reached with staleResult holding this same Result,
+	// swapClassified true means it must never call Classify on it a second
+	// time -- Classify already recorded/cleared its persisted state for that
+	// exact Result, and a second call would read back that write as if it
+	// were "the prior run's" state (see Guard.Classify's own doc comment).
+	var swapClassified bool
+	// swapHostTainted records which disposition swapClassified's Classify
+	// call returned, and therefore whether the swap branch already printed
+	// HostTaintDiagnostic for staleResult (so the terminal switch must not
+	// print it again).
+	var swapHostTainted bool
 
 	fresh := func() (bool, bool, string) {
-		res := freshness.Probe(c.runnerKind, pwd, c.baseBranch, c.flakeImageAttr, c.imageTag, c.flakeLauncherAttr, c.loadedLauncherHash, eval)
+		res := freshness.Probe(c.runnerKind, pwd, c.baseBranch, c.flakeImageAttr, currentImageTag, c.flakeLauncherAttr, c.loadedLauncherHash, eval)
+
+		if c.runnerKind == freshness.KindBwrap && res.Applicable && !res.ImageFresh && res.LauncherFresh && c.flakeLauncherAttr != "" {
+			// drain records res as staleResult and reports not-fresh, the
+			// shared exit every failure branch below this point falls back
+			// to (issue #2682 review finding: was four copies of the same
+			// two lines).
+			drain := func() (bool, bool, string) {
+				staleResult = res
+				return res.Applicable, false, res.Message
+			}
+
+			// Box-only staleness under bwrap (ADR 0043, issue #2682): hot-swap
+			// instead of draining. !res.ImageFresh implies !res.Fresh
+			// (Fresh = ImageFresh && LauncherFresh) so this is reached exactly
+			// when the image dimension alone is stale; res.LauncherFresh keeps a
+			// both-moved verdict out of this branch (ADR: "when both moved, the
+			// launcher wins"), and the KindBwrap guard keeps every OCI verdict
+			// out of it (ADR: "the OCI path keeps the drain-exit unchanged").
+			// c.flakeLauncherAttr != "" requires the launcher dimension to
+			// have actually been evaluated: Probe hard-codes LauncherFresh
+			// true when the attr is unconfigured (not-configured is not
+			// stale), which would otherwise let an unconfigured launcher
+			// dimension hot-swap forever with no incidental restart to
+			// catch a launcher-side change (ADR 0043: "The launcher
+			// dimension of the probe is a prerequisite for the swap, not a
+			// companion improvement to it" -- issue #2682 review finding).
+			// An unconfigured launcher falls through to the pre-existing
+			// drain path below instead, same as before this feature.
+			//
+			// guard.Classify decides Rebuild (content staleness -- realize and
+			// bind) vs HostTainted (this exact divergence already failed to
+			// converge) the same way it always has for the launcher-stale/
+			// both-stale drain path below; it's just reached from here too now,
+			// since a swap can re-detect staleness many times across one
+			// process's life instead of at most once (issue #2682: "gets the
+			// same halt, not a second mechanism"). Called exactly once per
+			// entry into this branch -- see swapClassified's doc comment for
+			// why both outcomes below must record that it ran.
+			disposition := guard.Classify(res)
+			swapClassified = true
+			swapHostTainted = disposition == freshness.HostTainted
+			if swapHostTainted {
+				fmt.Fprintln(os.Stdout, freshness.HostTaintDiagnostic(c.runnerKind, c.baseBranch, res.Rev, c.flakeImageAttr, res.TipTag, currentImageTag))
+				return drain()
+			}
+			if err := freshness.RealizeSync(realize, pwd, res, c.flakeImageAttr); err != nil {
+				fmt.Fprintf(os.Stderr, "==> bwrap hot-swap: realize failed, draining instead: %v\n", err)
+				return drain()
+			}
+			// res.TipTag becomes both a bind-mount source (via
+			// runner.NewAgentGeneration below) and a path component (the
+			// snapshot generation's dir name) -- reject anything that isn't
+			// a genuine nix store path before either use, rather than trust
+			// a Probe-side regression to never hand back a foreign host
+			// directory (issue #2682 review finding).
+			if !strings.HasPrefix(res.TipTag, "/nix/store/") {
+				fmt.Fprintf(os.Stderr, "==> bwrap hot-swap: realized tip tag %q is not a nix store path, draining instead\n", res.TipTag)
+				return drain()
+			}
+			// nixInBox Consumers (c.nixConfigFile != "" -- the same gate
+			// bwrapAdapter.IsReady/Run already use to decide the /nix/var
+			// overlay is in play) need a real nix-var store-DB snapshot
+			// generation on disk before any Box can bind it: unlike
+			// `launcher build`'s own baked generation
+			// (bwrapBuildAdapter.EnsureReady), nothing else ever writes one
+			// for a hot-swapped closure (ADR 0043: "A swap therefore adds a
+			// generation named for the closure it was taken against"). A
+			// failure here is treated exactly like a failed realize above --
+			// fall back to draining rather than binding a generation whose
+			// snapshot dir doesn't exist, which would otherwise only surface
+			// later as every subsequent Box launch's own "no longer exists"
+			// stat-guard failure instead of failing cleanly here.
+			if c.nixConfigFile != "" {
+				if err := snapshotGeneration(pwd, res.TipTag); err != nil {
+					fmt.Fprintf(os.Stderr, "==> bwrap hot-swap: snapshot generation failed, draining instead: %v\n", err)
+					return drain()
+				}
+			}
+			gen := runner.NewAgentGeneration(res.TipTag)
+			f.SetAgentGeneration(&gen)
+			currentImageTag = res.TipTag
+			fmt.Printf("==> hot-swapped bwrap agent closure to %s tip %s (%s)\n", c.baseBranch, res.Rev, res.TipTag)
+			return res.Applicable, true, res.Message
+		}
+
 		// fresh() is called under RunContinuous's mutex (see its doc
 		// comment), so this plain write is serialized — no separate
 		// locking needed, mirroring the firstQuery*/firstQueryEmpty comment
-		// above.
+		// above. staleResult, once set here, was NOT classified by the swap
+		// branch above -- reset swapClassified/swapHostTainted so the
+		// terminal switch classifies this genuinely new Result normally.
 		if res.Applicable && !res.Fresh {
 			staleResult = res
+			swapClassified = false
+			swapHostTainted = false
 		}
 		freshness.RealizeTip(realize, pwd, res, c.flakeImageAttr)
 		return res.Applicable, res.Fresh, res.Message
@@ -1830,8 +1967,24 @@ func runContinuousDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, 
 		// reachable scenario exercises end-to-end).
 		switch terminal := continuousDispatchErr(err, firstQueryErr); {
 		case errors.Is(terminal, waves.ErrImageStale):
-			if guard.Classify(staleResult) == freshness.HostTainted {
-				fmt.Fprintln(os.Stdout, freshness.HostTaintDiagnostic(c.runnerKind, c.baseBranch, staleResult.Rev, c.flakeImageAttr, staleResult.TipTag, c.imageTag))
+			// swapClassified true means fresh()'s hot-swap branch already ran
+			// guard.Classify against this exact staleResult -- on EITHER
+			// disposition, not just HostTainted (a Rebuild verdict there that
+			// a subsequent RealizeSync failure fell back to draining with
+			// still ran Classify once). guard.Classify must never run twice
+			// on the same Result (see its own doc comment on the
+			// record/clear side effect), so this switch trusts the
+			// already-computed swapHostTainted instead of re-classifying,
+			// and skips the diagnostic print too (already printed by the
+			// swap branch when swapHostTainted is true).
+			hostTainted := swapHostTainted
+			if !swapClassified {
+				hostTainted = guard.Classify(staleResult) == freshness.HostTainted
+				if hostTainted {
+					fmt.Fprintln(os.Stdout, freshness.HostTaintDiagnostic(c.runnerKind, c.baseBranch, staleResult.Rev, c.flakeImageAttr, staleResult.TipTag, currentImageTag))
+				}
+			}
+			if hostTainted {
 				return errImageHostTainted
 			}
 			return waves.ErrImageStale
