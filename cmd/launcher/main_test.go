@@ -467,6 +467,36 @@ func TestRunnerConfig_DriverMountTargets(t *testing.T) {
 	}
 }
 
+// TestRunnerConfig_PasswdGroupFiles verifies PASSWD_FILE/GROUP_FILE and their
+// .drv companions (nix-sourced account files, issue #2663) reach
+// runner.Config so the bwrap adapter can bind them instead of runner-written
+// copies.
+func TestRunnerConfig_PasswdGroupFiles(t *testing.T) {
+	// PASSWD_FILE/GROUP_FILE are bare store-path files (pkgs.writeText
+	// output), not directories containing a nested passwd/group file --
+	// matches the shape nix/checks/preambles.nix asserts against.
+	t.Setenv("PASSWD_FILE", "/nix/store/abc-passwd")
+	t.Setenv("GROUP_FILE", "/nix/store/def-group")
+	t.Setenv("PASSWD_FILE_DRV", "/nix/store/abc-passwd.drv")
+	t.Setenv("GROUP_FILE_DRV", "/nix/store/def-group.drv")
+
+	c := loadConfig()
+	rc := runnerConfig(c)
+
+	if rc.PasswdFile != "/nix/store/abc-passwd" {
+		t.Errorf("PasswdFile = %q, want /nix/store/abc-passwd", rc.PasswdFile)
+	}
+	if rc.GroupFile != "/nix/store/def-group" {
+		t.Errorf("GroupFile = %q, want /nix/store/def-group", rc.GroupFile)
+	}
+	if rc.PasswdFileDrv != "/nix/store/abc-passwd.drv" {
+		t.Errorf("PasswdFileDrv = %q, want /nix/store/abc-passwd.drv", rc.PasswdFileDrv)
+	}
+	if rc.GroupFileDrv != "/nix/store/def-group.drv" {
+		t.Errorf("GroupFileDrv = %q, want /nix/store/def-group.drv", rc.GroupFileDrv)
+	}
+}
+
 // TestRunnerConfig_DriverSessionCacheDirUnset verifies that an unset
 // DRIVER_SESSION_CACHE_DIR (a Driver declaring no session-state dir) reaches
 // runner.Config as empty, not a fallback literal.
