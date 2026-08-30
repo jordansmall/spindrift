@@ -178,3 +178,41 @@ written for the host/box hand-off seam; only the boundary of what seams the
 rule governs is broadened to cover `assemble-prompt` and, by the same
 reasoning, whatever in-box decision tree over launcher-delivered plumbing
 comes after it.
+
+## Amendment (issue #2930): bind-registry continues the rule's pattern
+
+`driver-exec bind-registry` (backed by `cmd/launcher/internal/bindregistry`)
+is the sixth verb `main.go`'s `mainRun` dispatch chain checks, in the order it
+checks them: `bundle-out` (1st), `outcome-backstop` (2nd), `marker-gate`
+(3rd), `assemble-prompt` (4th), `readonly-guards` (5th), `bind-registry`
+(6th). That dispatch-chain position is a separate fact from this ADR's own
+instance count of the rule it names — the amendment above already counts
+`assemble-prompt` as the *third* instance despite it sitting 4th in dispatch
+order, so dispatch position and rule-instance count are not the same
+number. What this amendment records is narrower: `bind-registry` is a
+further instance of the rule — an in-box decision tree over
+launcher-delivered plumbing gets a named `driver-exec` verb owner, not ad hoc
+bash — continuing the pattern `bundle-out`, `outcome-backstop`, and
+`assemble-prompt` already established.
+
+As it lands in issue #2930, the verb owns computing the toolchain-nudge
+ecosystem classification from the shared ecosystem table
+(`cmd/launcher/internal/registryproxy.Ecosystems()`, the same table the
+Registry proxy's own path-allowlist already reads), collapsing the
+npm-family rows (npm, yarn, pnpm) into one presentation classification, and
+emitting that classification into a sourceable env file. `agent/entrypoint.sh`'s
+`phase_toolchain_nudge` sources that file instead of re-deriving its own
+lockfile if/elif chain — the same file-output idiom `assemble-prompt` already
+established for handing decisions back to a parent process that cannot
+inherit a child's exports.
+
+Following the `assemble-prompt` amendment's own precedent, this amendment
+does not design `bind-registry`'s eventual fuller scope — the apply/revert
+Binding mechanisms and Forwarder lifecycle spec issue #2918 describes are
+later sibling issues' concern. It only records that the verb, as it exists
+after #2930, is governed by this ADR's rule, and that those sibling issues
+extending its responsibilities remain governed by the same rule without
+needing an amendment of their own.
+
+This is an amendment to the rule's scope, not a reversal of anything decided
+above.

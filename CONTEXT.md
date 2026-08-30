@@ -170,13 +170,14 @@ one is a small path-allowlist table entry, not a parser; `cargo` (a
 user-level `$CARGO_HOME/config.toml` write, issue #2849, plus the textual
 substitution layered on top), `go` (the env override alone), and `npm` (an
 `npm_config_registry` env override plus the textual substitution layered on
-top) are v1's three table entries — `gradle`'s own Binding needs no table
-entry, since its artifact base path is registry-specific rather than a
-derivable shape, and yarn (both classic, which rides npm's table entry and
-Binding verbatim, and berry, which layers `YARN_NPM_REGISTRY_SERVER` plus a
-textual `.yarnrc.yml` rewrite on top) needs no table entry of its own either,
-since it resolves through the same npm-compatible registry protocol paths
-npm's existing entry already allows.
+top) were v1's original three table entries — `gradle`'s own table row carries an
+explicitly nil allowlist, since its artifact base path is registry-specific
+rather than a derivable shape, and yarn (both classic, which rides npm's
+table entry and Binding verbatim, and berry, which layers
+`YARN_NPM_REGISTRY_SERVER` plus a textual `.yarnrc.yml` rewrite on top) and
+pnpm each have their own table row (for their own lockfile glob), sharing
+npm's own allowlist patterns for path-matching, since all three resolve
+through the same npm-compatible registry protocol paths.
 _Avoid_: adapter, registry config, ecosystem support.
 
 **Forwarder**:
