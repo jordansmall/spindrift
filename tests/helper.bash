@@ -271,6 +271,25 @@ stub_nix_var_snapshot() {
   done
 }
 
+# Overwrite $FAKE_BIN/driver-exec with a wrapper that fails only the
+# bind-registry verb (entrypoint's cosmetic-hint nudge phase), delegating
+# every other verb to the real fake -- shared by both
+# tests/entrypoint-toolchain-nudge.bats cases exercising that failure path.
+# Must run after setup_fakes so $FAKE_BIN/driver-exec already exists to be
+# overwritten.
+stub_failing_bind_registry() {
+  {
+    printf '#!%s\n' "$(command -v bash)"
+    cat <<FAKE
+if [ "\$1" = "bind-registry" ]; then
+  exit 3
+fi
+exec "$FAKES_DIR/driver-exec" "\$@"
+FAKE
+  } >"$FAKE_BIN/driver-exec"
+  chmod +x "$FAKE_BIN/driver-exec"
+}
+
 setup_run_env() {
   setup_fakes
   set_run_env
