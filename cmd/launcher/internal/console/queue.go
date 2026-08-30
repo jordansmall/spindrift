@@ -134,7 +134,7 @@ func (q *Queue) Snapshot() []Pick {
 // time with the tracker instance carrying that kind's own label family, so a
 // pick of the other kind is skipped in place (left at its current state)
 // rather than claimed on the wrong tracker.
-func (q *Queue) Discover(tracker forge.IssueTracker, cf forge.CodeForge, failedLabel string, kind Kind) ([]waves.Issue, map[string][]string, waves.Sources, error) {
+func (q *Queue) Discover(tracker forge.IssueTracker, cf forge.CodeForge, failedLabel string, kind Kind) (waves.Batch, error) {
 	for _, pick := range q.claimable() {
 		if pick.effectiveKind() != kind {
 			continue
@@ -167,12 +167,12 @@ func (q *Queue) Discover(tracker forge.IssueTracker, cf forge.CodeForge, failedL
 			continue
 		}
 		q.setState(pick.Number, PickRunning, "")
-		// nil, not the zero-value maps: matches the no-launchable-candidate
-		// fallback below, and main.go's runContinuousDispatch's sibling
-		// Discoverer (#903).
-		return []waves.Issue{{Number: pick.Number, Title: pick.Title}}, nil, nil, nil
+		// Edges/Sources/Failed left nil, not the zero-value maps: matches
+		// the no-launchable-candidate fallback below, and main.go's
+		// runContinuousDispatch's sibling Discoverer (#903).
+		return waves.Batch{Issues: []waves.Issue{{Number: pick.Number, Title: pick.Title}}}, nil
 	}
-	return nil, nil, nil, nil
+	return waves.Batch{}, nil
 }
 
 // Empty reports whether the queue has no pick left to launch — none at

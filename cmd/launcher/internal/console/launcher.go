@@ -668,9 +668,9 @@ func (l *Launcher) drain(tracker forge.IssueTracker, pwd string) {
 // the image went stale and the caller must abort the whole drain rather than
 // try the next stack.
 func (l *Launcher) runStack(st launchStack, pwd string) bool {
-	discover := func() ([]waves.Issue, map[string][]string, waves.Sources, map[string]bool, error) {
+	discover := func() (waves.Batch, error) {
 		defer l.signalRefresh() // a claim attempt is always a tracker write, win or lose
-		issues, edges, sources, err := l.queueRef().Discover(st.tracker, l.CodeForge, st.failedLabel, st.kind)
+		batch, err := l.queueRef().Discover(st.tracker, l.CodeForge, st.failedLabel, st.kind)
 		// A successful claim here is a fresh Dispatch starting for issues,
 		// so any earlier Terminate mark for these numbers must not carry
 		// over — otherwise a re-pick's own settle would abandon on its very
@@ -683,13 +683,14 @@ func (l *Launcher) runStack(st launchStack, pwd string) bool {
 		// many later re-picks start and clear their own fresh generations in
 		// the meantime. See the race this closes, documented on registry()
 		// below.
-		for i, iss := range issues {
-			issues[i].Generation = l.registry().Begin(iss.Number)
+		for i, iss := range batch.Issues {
+			batch.Issues[i].Generation = l.registry().Begin(iss.Number)
 		}
 		// Queue.Discover already resolved this pick's own DepsOf-failure
-		// case internally (held it, rather than returning it) -- nil is
-		// always correct here, never a set nextReady would need to act on.
-		return issues, edges, sources, nil, err
+		// case internally (held it, rather than returning it) -- Batch.Failed
+		// is always its zero value (nil) here, never a set nextReady would
+		// need to act on.
+		return batch, err
 	}
 	// Label, InProgressLabel, and OverlapGate are deliberately left
 	// zero-value (#706). Label==InProgressLabel (both "") makes claimIssue
