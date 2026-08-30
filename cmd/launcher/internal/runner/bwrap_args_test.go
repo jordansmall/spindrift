@@ -801,3 +801,38 @@ func TestBwrapArgs_NonSecretOnArgv(t *testing.T) {
 		}
 	}
 }
+
+// TestBwrapArgs_SyscallFilterFlagWhenSet verifies that a non-empty
+// syscallFilterPath renders --seccomp 3 (issue #2670): bwrap reads the
+// compiled BPF filter off fd 3, the one entry the adapter's Run ever adds to
+// cmd.ExtraFiles.
+func TestBwrapArgs_SyscallFilterFlagWhenSet(t *testing.T) {
+	a := &bwrapAdapter{
+		agentFiles:        "/fake/agent",
+		agentEnv:          "/fake/env",
+		syscallFilterPath: "/nix/store/fake-hash-seccomp/filter.bpf",
+	}
+	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}})
+
+	if !strings.Contains(strings.Join(args, " "), "--seccomp 3") {
+		t.Errorf("expected --seccomp 3 in args: %v", args)
+	}
+}
+
+// TestBwrapArgs_NoSyscallFilterFlagWhenEmpty is a regression guard: leaving
+// syscallFilterPath at its zero value must never render --seccomp at all,
+// matching the empty-knob-disables convention used throughout this file
+// (e.g. nixConfigFile).
+func TestBwrapArgs_NoSyscallFilterFlagWhenEmpty(t *testing.T) {
+	a := &bwrapAdapter{
+		agentFiles: "/fake/agent",
+		agentEnv:   "/fake/env",
+	}
+	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}})
+
+	for _, arg := range args {
+		if arg == "--seccomp" {
+			t.Errorf("unexpected --seccomp in args when syscallFilterPath is empty: %v", args)
+		}
+	}
+}

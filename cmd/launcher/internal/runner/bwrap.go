@@ -148,6 +148,16 @@ type bwrapAdapter struct {
 	// which accepts the unit-suffixed string as-is.
 	memoryLimit string
 
+	// syscallFilterPath is the baked nix store path to the compiled BPF
+	// syscall filter (issue #2670). When non-empty, buildArgs appends
+	// "--seccomp <seccompFilterFD>" and Run opens the file and attaches it
+	// via cmd.ExtraFiles so bwrap can read it. A failure to open it at Run
+	// time is treated as a hardening gap, not a safety blocker (matches ADR
+	// 0042's degrade-don't-lie posture for missing prlimit/cgroup) -- Run
+	// warns and proceeds without the filter rather than refusing to launch
+	// the Box.
+	syscallFilterPath string
+
 	// mu guards running, the box-name -> live process map Kill (issue #649)
 	// consults — bwrap sandboxes are unnamed child processes with no
 	// persistent daemon IsRunning/Reap can query by name, so Run tracks its
@@ -202,6 +212,7 @@ func NewBwrap(cfg Config, pwd string) Runner {
 		networkMode:              cfg.NetworkMode,
 		pidsLimit:                cfg.PidsLimit,
 		memoryLimit:              cfg.MemoryLimit,
+		syscallFilterPath:        cfg.SyscallFilterPath,
 	}
 }
 
@@ -396,6 +407,13 @@ func (a *bwrapAdapter) buildArgs(etcDir string, box Box) []string {
 		unshareFlags = append(unshareFlags, "--unshare-net")
 	}
 	args = append(args, unshareFlags...)
+	// --seccomp only ever names seccompFilterFD, the one fd Run's
+	// cmd.ExtraFiles ever attaches (issue #2670); empty syscallFilterPath
+	// (e.g. before the nix threading in a later slice populates it) skips
+	// the flag entirely.
+	if a.syscallFilterPath != "" {
+		args = append(args, "--seccomp", strconv.Itoa(seccompFilterFD))
+	}
 	args = append(args, "--", "/agent/entrypoint.sh")
 	return args
 }
@@ -456,6 +474,34 @@ func (a *bwrapAdapter) execTarget(etcDir string, box Box) (string, []string) {
 // to this address, restoring DNS without reopening the general host-loopback
 // splice (ADR 0042).
 const pastaDNSForwardAddr = "169.254.2.2"
+
+// seccompFilterFD is the file descriptor number bwrap's own --seccomp
+// flag argument names. Go's exec.Cmd.ExtraFiles numbers extra file
+// descriptors sequentially starting at 3 (0/1/2 are stdin/stdout/stderr);
+// this is the only entry the bwrap adapter ever adds to ExtraFiles, so
+// the number is fixed at 3, and it survives the prlimit/pasta/bwrap exec
+// chain unchanged (execTarget's outer wrappers never touch fd 3, and a
+// non-close-on-exec fd -- which is what ExtraFiles produces -- is
+// preserved across every execve() in that chain, not just the first).
+const seccompFilterFD = 3
+
+// removeSeccompFlag strips a "--seccomp <fd>" pair back out of a flattened
+// argv slice, used by Run when a.syscallFilterPath is set but the file
+// failed to open: execTarget/buildArgs decide whether to emit the flag
+// purely from a.syscallFilterPath's own emptiness (they have no way to know
+// the open failed), so Run reconciles argv with the real outcome afterward
+// rather than threading the open result down through execTarget/buildArgs.
+func removeSeccompFlag(args []string) []string {
+	out := make([]string, 0, len(args))
+	for i := 0; i < len(args); i++ {
+		if args[i] == "--seccomp" && i+1 < len(args) {
+			i++ // also drop the fd value that follows the flag
+			continue
+		}
+		out = append(out, args[i])
+	}
+	return out
+}
 
 // pastaHardenedFlags are the exact 5 flags ADR 0042 requires when a bwrap
 // Box's exec target is wrapped with pasta to restore egress inside its
@@ -621,7 +667,34 @@ func (a *bwrapAdapter) Run(box Box) error {
 	// subset of box.Env, not the launcher's own ambient environment. Without
 	// --clearenv, the sandbox inherits it. Secrets (GH_TOKEN, auth tokens)
 	// are therefore available inside the sandbox without appearing on argv.
+	// Opened here, before cmd is built, not after: a failed open must also
+	// drop the "--seccomp" flag itself from argv, not just skip attaching
+	// ExtraFiles -- otherwise bwrap tries to read a nonexistent fd 3 at its
+	// own startup and the whole Box launch fails over a hardening nicety,
+	// defeating the warn-and-proceed contract (issue #2670).
+	var syscallFilterFile *os.File
+	syscallFilterOpenFailed := false
+	if a.syscallFilterPath != "" {
+		f, err := os.Open(a.syscallFilterPath)
+		if err != nil {
+			fmt.Printf("==> bwrap runner: warning: could not open syscall filter %s (%v); running box %q without seccomp hardening\n", a.syscallFilterPath, err, box.Name)
+			syscallFilterOpenFailed = true
+		} else {
+			syscallFilterFile = f
+			defer f.Close()
+		}
+	}
 	program, execArgs := a.execTarget(etcDir, box)
+	if syscallFilterOpenFailed {
+		// buildArgs (via execTarget) unconditionally appended "--seccomp
+		// <fd>" from a.syscallFilterPath alone, before the open above was
+		// known to fail; strip that pair back out of the flattened argv
+		// rather than mutate a shallow copy of *a (which would copy the
+		// live sync.Mutex embedded in bwrapAdapter -- go vet's copylocks
+		// check, and a real hazard since Run executes concurrently for
+		// different boxes under MAX_PARALLEL).
+		execArgs = removeSeccompFlag(execArgs)
+	}
 	cmd := execCommand(program, execArgs...)
 	cmd.Env = resolvedRunEnv(box.Env)
 	if program == "pasta" {
@@ -638,6 +711,9 @@ func (a *bwrapAdapter) Run(box Box) error {
 		// resolvedRunEnv's documented no-ambient-leak guarantee for the
 		// sandboxed child's own secrets.
 		cmd.Env = append(cmd.Env, "PATH="+os.Getenv("PATH"))
+	}
+	if syscallFilterFile != nil {
+		cmd.ExtraFiles = []*os.File{syscallFilterFile}
 	}
 	cmd.Stdout = out
 	cmd.Stderr = out
@@ -749,6 +825,12 @@ type bwrapBuildAdapter struct {
 	// extra nix-config closure realization and the store-DB snapshot step
 	// below together.
 	nixConfigFileDrv string
+	// syscallFilterDrv is the .drv path for the compiled BPF syscall filter
+	// (issue #2670). Unconditional in production (see Config.SyscallFilterDrv),
+	// but guarded the same way as nixConfigFileDrv below so a zero-value
+	// adapter (e.g. an existing test's bare struct literal) never tries to
+	// realize an empty drv path.
+	syscallFilterDrv string
 	// nixVarSnapshotDir is the host-side directory snapshotStoreDB writes
 	// into (shared package-level convention with the run adapter's mount —
 	// see nixVarSnapshotDir's doc comment).
@@ -766,6 +848,7 @@ func NewBwrapBuild(cfg Config, pwd string) Runner {
 		passwdFileDrv:     cfg.PasswdFileDrv,
 		groupFileDrv:      cfg.GroupFileDrv,
 		nixConfigFileDrv:  cfg.NixConfigFileDrv,
+		syscallFilterDrv:  cfg.SyscallFilterDrv,
 		nixVarSnapshotDir: nixVarSnapshotDir(pwd),
 	}
 }
@@ -795,6 +878,9 @@ func (a *bwrapBuildAdapter) EnsureReady() error {
 	}
 	if a.nixConfigFileDrv != "" {
 		closures = append(closures, closureSpec{"nix-config", a.nixConfigFileDrv})
+	}
+	if a.syscallFilterDrv != "" {
+		closures = append(closures, closureSpec{"syscall-filter", a.syscallFilterDrv})
 	}
 	for _, c := range closures {
 		if err := a.realize(c.label, c.drv); err != nil {
