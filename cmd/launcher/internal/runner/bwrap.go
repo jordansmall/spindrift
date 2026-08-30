@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -592,6 +593,74 @@ func memoryLimitToBytes(limit string) (int64, error) {
 	return n * mult, nil
 }
 
+// cgroupDirForName computes the per-Box cgroup v2 directory path that
+// provisionCgroup creates, under THIS calling process's own delegated
+// cgroup (readSelfCgroup + cgroupFSRoot) -- the only subtree it has Mkdir
+// permission in. It is creation-time-only: IsRunning/ListRunning/Reap read
+// back via findCgroupDir instead (see its doc comment), since a Box's
+// creating process and the process later polling/reaping it are often
+// different launcher invocations with different self-cgroup paths. Returns
+// an error when this host has no cgroup v2 delegation (readSelfCgroup
+// fails); provisionCgroup turns that into a one-time warning.
+func (a *bwrapAdapter) cgroupDirForName(name string) (string, error) {
+	self, err := readSelfCgroup()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(cgroupFSRoot, self, "spindrift-"+name), nil
+}
+
+// findCgroupDir searches the whole cgroupFSRoot tree (not just the calling
+// process's own self-cgroup subtree) for a directory named "spindrift-"+name
+// at any depth, and returns its path. This backs IsRunning/ListRunning/Reap
+// so a Box created by one launcher invocation/session (via cgroupDirForName,
+// under ITS self-cgroup path) is still discoverable by a read/cleanup call
+// from a different invocation/session with a different self-cgroup path --
+// e.g. a dropped SSH reconnect, a second console, or a concurrent dogfood
+// loop. A missing cgroupFSRoot, a walk error, or no match anywhere all
+// degrade to ("", false) rather than an error, matching the read paths'
+// existing warn-never, degrade-sanely posture. A per-entry walk error (e.g.
+// permission denied descending into some other process's non-delegated
+// cgroup subtree) is skipped rather than aborting the whole walk.
+func findCgroupDir(name string) (dir string, ok bool) {
+	want := "spindrift-" + name
+	_ = filepath.WalkDir(cgroupFSRoot, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return nil // skip this entry, keep walking the rest of the tree
+		}
+		if path == cgroupFSRoot {
+			return nil
+		}
+		if !entry.IsDir() {
+			return nil
+		}
+		if entry.Name() != want {
+			return nil
+		}
+		dir, ok = path, true
+		return filepath.SkipAll
+	})
+	return dir, ok
+}
+
+// removeCgroupDir removes a per-Box delegated cgroup v2 directory created by
+// provisionCgroup. The three individual os.Remove calls on pids.max/
+// memory.max/cgroup.procs are a plain unlink no-op on a real cgroupfs (its
+// control files are kernel interface nodes that a real rmdir clears as part
+// of removing the whole subtree, not files unlink can touch individually) --
+// they only do real work against a plain directory standing in for cgroupfs
+// in tests, where they're genuine files that would otherwise make the final
+// os.Remove(dir) fail with ENOTEMPTY. Shared by Run's deferred cleanup (dir
+// is empty: cmd.Wait() has already returned) and Reap (dir is expected to be
+// empty: IsRunning's unsynchronized snapshot found no resident PID a moment
+// earlier, not a guarantee held under a lock).
+func removeCgroupDir(dir string) error {
+	for _, f := range []string{"pids.max", "memory.max", "cgroup.procs"} {
+		_ = os.Remove(filepath.Join(dir, f))
+	}
+	return os.Remove(dir)
+}
+
 // provisionCgroup attempts to create a per-Box cgroup v2 subtree under the
 // launcher's own delegated cgroup (readSelfCgroup + cgroupFSRoot), then
 // writes pids.max/memory.max into it. Detection and creation are the same
@@ -605,12 +674,11 @@ func memoryLimitToBytes(limit string) (int64, error) {
 // enforcement rather than refusing to launch or quietly shrinking
 // PidsLimit/MemoryLimit to compensate.
 func (a *bwrapAdapter) provisionCgroup(box Box) (dir string, ok bool) {
-	self, err := readSelfCgroup()
+	dir, err := a.cgroupDirForName(box.Name)
 	if err != nil {
 		fmt.Printf("==> bwrap runner: warning: cgroup v2 delegation unavailable (%v); running box %q without cgroup resource containment\n", err, box.Name)
 		return "", false
 	}
-	dir = filepath.Join(cgroupFSRoot, self, "spindrift-"+box.Name)
 	if err := os.Mkdir(dir, 0o755); err != nil {
 		fmt.Printf("==> bwrap runner: warning: could not create delegated cgroup %s (%v); running box %q without cgroup resource containment\n", dir, err, box.Name)
 		return "", false
@@ -763,10 +831,7 @@ func (a *bwrapAdapter) Run(box Box) error {
 		// standing in for cgroupfs in tests, where they're genuine files
 		// that would otherwise make the final rmdir fail with ENOTEMPTY.
 		defer func() {
-			for _, f := range []string{"pids.max", "memory.max", "cgroup.procs"} {
-				_ = os.Remove(filepath.Join(cgroupDir, f))
-			}
-			if err := os.Remove(cgroupDir); err != nil {
+			if err := removeCgroupDir(cgroupDir); err != nil {
 				fmt.Printf("==> bwrap runner: warning: could not remove cgroup %s: %v\n", cgroupDir, err)
 			}
 		}()
@@ -795,8 +860,30 @@ func (a *bwrapAdapter) untrackRunning(name string) {
 	delete(a.running, name)
 }
 
-// Reap is a no-op for bwrap — sandboxes are ephemeral and exit when done.
-func (a *bwrapAdapter) Reap(_ string) error { return nil }
+// Reap best-effort removes a leftover per-Box delegated cgroup dir (see
+// provisionCgroup) for name, e.g. one orphaned by a launcher that crashed
+// before Run's own deferred cleanup could rmdir it once the sandboxed
+// process exited. It resolves the dir via findCgroupDir (searching the whole
+// cgroupFSRoot tree) rather than this process's own self-cgroup, so it can
+// clean up a Box left behind by a DIFFERENT, e.g. crashed, launcher
+// invocation/session too. It never touches a running sandbox -- Kill is the
+// operator-driven counterpart for that, per the Runner.Reap contract. No
+// cgroup dir for name (never ran, already reaped, or Run's own deferred
+// cleanup already removed it), no cgroup v2 tree to search, and any removal
+// failure all degrade to a silent nil return rather than propagating an
+// error, matching Reap's best-effort contract and the OCI adapter's own
+// Reap.
+func (a *bwrapAdapter) Reap(name string) error {
+	if a.IsRunning(name) {
+		return nil
+	}
+	dir, ok := findCgroupDir(name)
+	if !ok {
+		return nil
+	}
+	_ = removeCgroupDir(dir)
+	return nil
+}
 
 // Kill sends SIGKILL to name's tracked live process, if Run currently has
 // one running under that name. A miss (already exited, or never launched) is
@@ -818,16 +905,66 @@ func (a *bwrapAdapter) Kill(name string) error {
 	return nil
 }
 
-// IsRunning always reports false for bwrap: sandboxes are unnamed child
-// processes, not persistent named containers, so there is nothing to collide
-// with by name.
-func (a *bwrapAdapter) IsRunning(_ string) bool { return false }
+// IsRunning reports whether a Box's per-name delegated cgroup (see
+// provisionCgroup) still has a resident PID in its cgroup.procs. The dir is
+// resolved via findCgroupDir, which searches the whole cgroupFSRoot tree
+// rather than just this process's own self-cgroup subtree, so a Box created
+// by a DIFFERENT launcher invocation/session is found too. This is a
+// best-effort, read-only check: no cgroup v2 tree to search, or no cgroup
+// dir for this name (never ran, already reaped, or the deferred cleanup in
+// Run already removed it), both degrade to false rather than erroring,
+// matching ADR 0042's warn-and-proceed tiering -- but IsRunning itself never
+// warns, since a poll loop calling it repeatedly would make that noisy;
+// provisionCgroup already warns once at launch time.
+func (a *bwrapAdapter) IsRunning(name string) bool {
+	dir, ok := findCgroupDir(name)
+	if !ok {
+		return false
+	}
+	procs, err := os.ReadFile(filepath.Join(dir, "cgroup.procs"))
+	if err != nil {
+		return false
+	}
+	return len(strings.TrimSpace(string(procs))) > 0
+}
 
-// ListRunning always returns an empty list for bwrap: sandboxes are
-// unprivileged child processes with no daemon tracking them by name, so
-// there is nothing for Console startup orphan detection (issue #651) to
-// find, matching IsRunning's already-false.
-func (a *bwrapAdapter) ListRunning() ([]string, error) { return nil, nil }
+// ListRunning enumerates every spindrift-* cgroup dir anywhere under
+// cgroupFSRoot -- not just the calling process's own delegated self-cgroup
+// subtree -- and reports the subset that are actually live, so Console
+// startup orphan detection (issue #651) can find Boxes started by a PRIOR,
+// possibly different, launcher invocation/session (issue #2669). No cgroup
+// v2 tree to search degrades to a nil slice and no error, matching
+// IsRunning's own warn-never, degrade-sanely posture -- this is a read-only
+// capability probe, not a hard failure. Liveness is checked directly against
+// each candidate's own cgroup.procs (the walk callback already has the
+// path, so there's no need to re-derive it through findCgroupDir/IsRunning
+// per candidate), so a leftover empty/stale cgroup dir (crashed launcher,
+// cleanup never ran, sandboxed process since exited) is excluded rather than
+// reported as running.
+func (a *bwrapAdapter) ListRunning() ([]string, error) {
+	var names []string
+	_ = filepath.WalkDir(cgroupFSRoot, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return nil // skip this entry, keep walking the rest of the tree
+		}
+		if path == cgroupFSRoot {
+			return nil
+		}
+		if !entry.IsDir() {
+			return nil
+		}
+		name, ok := strings.CutPrefix(entry.Name(), "spindrift-")
+		if !ok {
+			return nil
+		}
+		procs, err := os.ReadFile(filepath.Join(path, "cgroup.procs"))
+		if err == nil && len(strings.TrimSpace(string(procs))) > 0 {
+			names = append(names, name)
+		}
+		return fs.SkipDir // box cgroup dirs are leaves; no need to descend further
+	})
+	return names, nil
+}
 
 // bwrapBuildAdapter implements Runner for the `launcher build` bwrap path.
 // EnsureReady realizes the agent store closures; Run is not supported.

@@ -1263,6 +1263,412 @@ func TestBwrapRun_CgroupDelegationWritesLimitsAndCleansUp(t *testing.T) {
 	}
 }
 
+// TestBwrapIsRunning_TrueWhenCgroupProcsNonEmpty verifies that IsRunning
+// reports true when the per-Box cgroup's cgroup.procs file exists and has
+// non-empty content, meaning at least one PID is still resident in it.
+func TestBwrapIsRunning_TrueWhenCgroupProcsNonEmpty(t *testing.T) {
+	origSelf := readSelfCgroup
+	t.Cleanup(func() { readSelfCgroup = origSelf })
+	readSelfCgroup = func() (string, error) { return "/x", nil }
+
+	origRoot := cgroupFSRoot
+	t.Cleanup(func() { cgroupFSRoot = origRoot })
+	cgroupFSRoot = t.TempDir()
+
+	dir := filepath.Join(cgroupFSRoot, "/x", "spindrift-test-box")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "cgroup.procs"), []byte("12345\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	a := &bwrapAdapter{}
+	if !a.IsRunning("test-box") {
+		t.Error("IsRunning: got false, want true when cgroup.procs is non-empty")
+	}
+}
+
+// TestBwrapIsRunning_FalseWhenCgroupProcsEmpty verifies that IsRunning
+// reports false when the per-Box cgroup dir and its cgroup.procs file both
+// exist but cgroup.procs is empty -- the process already exited and the
+// kernel emptied cgroup.procs, but the dir itself hasn't been rmdir'd yet.
+func TestBwrapIsRunning_FalseWhenCgroupProcsEmpty(t *testing.T) {
+	origSelf := readSelfCgroup
+	t.Cleanup(func() { readSelfCgroup = origSelf })
+	readSelfCgroup = func() (string, error) { return "/x", nil }
+
+	origRoot := cgroupFSRoot
+	t.Cleanup(func() { cgroupFSRoot = origRoot })
+	cgroupFSRoot = t.TempDir()
+
+	dir := filepath.Join(cgroupFSRoot, "/x", "spindrift-test-box")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "cgroup.procs"), []byte(""), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	a := &bwrapAdapter{}
+	if a.IsRunning("test-box") {
+		t.Error("IsRunning: got true, want false when cgroup.procs is empty")
+	}
+}
+
+// TestBwrapIsRunning_FalseWhenNoCgroupDir verifies that IsRunning reports
+// false when no per-Box cgroup dir was ever created for this name (box never
+// ran, or Run's deferred cleanup already removed it after the box exited).
+func TestBwrapIsRunning_FalseWhenNoCgroupDir(t *testing.T) {
+	origSelf := readSelfCgroup
+	t.Cleanup(func() { readSelfCgroup = origSelf })
+	readSelfCgroup = func() (string, error) { return "/x", nil }
+
+	origRoot := cgroupFSRoot
+	t.Cleanup(func() { cgroupFSRoot = origRoot })
+	cgroupFSRoot = t.TempDir()
+
+	a := &bwrapAdapter{}
+	if a.IsRunning("test-box") {
+		t.Error("IsRunning: got true, want false when no cgroup dir exists")
+	}
+}
+
+// TestBwrapIsRunning_FalseWhenNoCgroupDelegation verifies that IsRunning
+// degrades to false without panicking or erroring when there's no cgroupfs
+// tree to search at all (cgroupFSRoot doesn't exist -- no cgroup v2
+// delegation on this host), matching provisionCgroup's warn-and-proceed
+// posture -- except IsRunning stays silent, since a poll loop would make a
+// per-call warning noisy. readSelfCgroup failing is no longer meaningful for
+// this read path -- it's only consulted by the create path
+// (provisionCgroup, via cgroupDirForName), which has its own tests.
+func TestBwrapIsRunning_FalseWhenNoCgroupDelegation(t *testing.T) {
+	origRoot := cgroupFSRoot
+	t.Cleanup(func() { cgroupFSRoot = origRoot })
+	cgroupFSRoot = filepath.Join(t.TempDir(), "does-not-exist")
+
+	a := &bwrapAdapter{}
+	if a.IsRunning("test-box") {
+		t.Error("IsRunning: got true, want false when cgroupFSRoot doesn't exist")
+	}
+}
+
+// TestBwrapIsRunning_TrueAcrossDifferentLauncherInvocations verifies that
+// IsRunning finds a Box's cgroup dir even when it was created under a
+// DIFFERENT self-cgroup path than the one readSelfCgroup reports for the
+// invocation now calling IsRunning -- e.g. "session-a" launched the Box,
+// then a second launcher invocation ("session-b", a dropped-and-reconnected
+// SSH session or a concurrent dogfood loop) polls IsRunning for it. Without
+// this, IsRunning would only ever find Boxes created by the SAME calling
+// process's own self-cgroup, defeating issue #2669's cross-invocation
+// acceptance criterion.
+func TestBwrapIsRunning_TrueAcrossDifferentLauncherInvocations(t *testing.T) {
+	origRoot := cgroupFSRoot
+	t.Cleanup(func() { cgroupFSRoot = origRoot })
+	cgroupFSRoot = t.TempDir()
+
+	// "session-a" creates the Box's cgroup dir under its own self-cgroup path.
+	dir := filepath.Join(cgroupFSRoot, "session-a", "spindrift-test-box")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "cgroup.procs"), []byte("12345\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// "session-b" is a different launcher invocation now calling IsRunning.
+	origSelf := readSelfCgroup
+	t.Cleanup(func() { readSelfCgroup = origSelf })
+	readSelfCgroup = func() (string, error) { return "/session-b", nil }
+
+	a := &bwrapAdapter{}
+	if !a.IsRunning("test-box") {
+		t.Error("IsRunning: got false, want true for a Box created under a different launcher invocation's self-cgroup")
+	}
+}
+
+// TestBwrapListRunning_TrueAcrossDifferentLauncherInvocations verifies that
+// ListRunning surfaces a Box created under a different self-cgroup path than
+// the one the calling ("session-b") invocation reports, matching IsRunning's
+// cross-invocation fix above.
+func TestBwrapListRunning_TrueAcrossDifferentLauncherInvocations(t *testing.T) {
+	origRoot := cgroupFSRoot
+	t.Cleanup(func() { cgroupFSRoot = origRoot })
+	cgroupFSRoot = t.TempDir()
+
+	dir := filepath.Join(cgroupFSRoot, "session-a", "spindrift-test-box")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "cgroup.procs"), []byte("12345\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	origSelf := readSelfCgroup
+	t.Cleanup(func() { readSelfCgroup = origSelf })
+	readSelfCgroup = func() (string, error) { return "/session-b", nil }
+
+	a := &bwrapAdapter{}
+	got, err := a.ListRunning()
+	if err != nil {
+		t.Fatalf("ListRunning: unexpected error: %v", err)
+	}
+	want := []string{"test-box"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("ListRunning: got %v, want %v", got, want)
+	}
+}
+
+// TestBwrapReap_RemovesLeftoverCgroupDirAcrossDifferentLauncherInvocations
+// verifies that Reap can clean up a stale, non-running Box cgroup dir left
+// behind under a DIFFERENT launcher invocation's self-cgroup path -- e.g. a
+// crashed "session-a" invocation never rmdir'd it, and a later "session-b"
+// invocation's Reap call must still find and remove it.
+func TestBwrapReap_RemovesLeftoverCgroupDirAcrossDifferentLauncherInvocations(t *testing.T) {
+	origRoot := cgroupFSRoot
+	t.Cleanup(func() { cgroupFSRoot = origRoot })
+	cgroupFSRoot = t.TempDir()
+
+	dir := filepath.Join(cgroupFSRoot, "session-a", "spindrift-test-box")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "cgroup.procs"), []byte(""), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	origSelf := readSelfCgroup
+	t.Cleanup(func() { readSelfCgroup = origSelf })
+	readSelfCgroup = func() (string, error) { return "/session-b", nil }
+
+	a := &bwrapAdapter{}
+	if err := a.Reap("test-box"); err != nil {
+		t.Fatalf("Reap: unexpected error: %v", err)
+	}
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Errorf("Reap: cgroup dir %s still exists after reaping a non-running box created under a different launcher invocation", dir)
+	}
+}
+
+// TestBwrapListRunning_ReturnsLiveBoxNames verifies that ListRunning finds a
+// box whose delegated cgroup still has a resident PID in cgroup.procs, and
+// excludes a sibling cgroup dir left behind by a box that has since exited
+// (empty cgroup.procs, dir not yet rmdir'd).
+func TestBwrapListRunning_ReturnsLiveBoxNames(t *testing.T) {
+	origSelf := readSelfCgroup
+	t.Cleanup(func() { readSelfCgroup = origSelf })
+	readSelfCgroup = func() (string, error) { return "/x", nil }
+
+	origRoot := cgroupFSRoot
+	t.Cleanup(func() { cgroupFSRoot = origRoot })
+	cgroupFSRoot = t.TempDir()
+
+	liveDir := filepath.Join(cgroupFSRoot, "/x", "spindrift-live-box")
+	if err := os.MkdirAll(liveDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(liveDir, "cgroup.procs"), []byte("12345\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	staleDir := filepath.Join(cgroupFSRoot, "/x", "spindrift-stale-box")
+	if err := os.MkdirAll(staleDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(staleDir, "cgroup.procs"), []byte(""), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	a := &bwrapAdapter{}
+	got, err := a.ListRunning()
+	if err != nil {
+		t.Fatalf("ListRunning: unexpected error: %v", err)
+	}
+	want := []string{"live-box"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("ListRunning: got %v, want %v", got, want)
+	}
+}
+
+// TestBwrapListRunning_IgnoresNonSpindriftDirs verifies that ListRunning
+// only considers entries with the "spindrift-" prefix, ignoring unrelated
+// directories that might share the delegated cgroup subtree.
+func TestBwrapListRunning_IgnoresNonSpindriftDirs(t *testing.T) {
+	origSelf := readSelfCgroup
+	t.Cleanup(func() { readSelfCgroup = origSelf })
+	readSelfCgroup = func() (string, error) { return "/x", nil }
+
+	origRoot := cgroupFSRoot
+	t.Cleanup(func() { cgroupFSRoot = origRoot })
+	cgroupFSRoot = t.TempDir()
+
+	liveDir := filepath.Join(cgroupFSRoot, "/x", "spindrift-foo")
+	if err := os.MkdirAll(liveDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(liveDir, "cgroup.procs"), []byte("12345\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	unrelatedDir := filepath.Join(cgroupFSRoot, "/x", "not-a-box-dir")
+	if err := os.MkdirAll(unrelatedDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(unrelatedDir, "cgroup.procs"), []byte("6789\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	a := &bwrapAdapter{}
+	got, err := a.ListRunning()
+	if err != nil {
+		t.Fatalf("ListRunning: unexpected error: %v", err)
+	}
+	want := []string{"foo"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("ListRunning: got %v, want %v", got, want)
+	}
+}
+
+// TestBwrapListRunning_EmptyWhenNoCgroupDelegation verifies that ListRunning
+// degrades to a nil slice and no error when there's no cgroupfs tree to
+// search at all (cgroupFSRoot doesn't exist -- no cgroup v2 delegation on
+// this host), matching IsRunning's own degrade-sanely posture rather than
+// surfacing an error. readSelfCgroup failing is no longer meaningful for
+// this read path -- it's only consulted by the create path
+// (provisionCgroup, via cgroupDirForName), which has its own tests.
+func TestBwrapListRunning_EmptyWhenNoCgroupDelegation(t *testing.T) {
+	origRoot := cgroupFSRoot
+	t.Cleanup(func() { cgroupFSRoot = origRoot })
+	cgroupFSRoot = filepath.Join(t.TempDir(), "does-not-exist")
+
+	a := &bwrapAdapter{}
+	got, err := a.ListRunning()
+	if err != nil {
+		t.Fatalf("ListRunning: unexpected error: %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("ListRunning: got %v, want empty", got)
+	}
+}
+
+// TestBwrapListRunning_EmptyWhenSelfCgroupDirMissing verifies that
+// ListRunning degrades to a nil slice and no error when readSelfCgroup
+// succeeds but the resulting directory doesn't exist on disk (e.g. this
+// launcher has never provisioned a cgroup under its own delegated subtree).
+func TestBwrapListRunning_EmptyWhenSelfCgroupDirMissing(t *testing.T) {
+	origSelf := readSelfCgroup
+	t.Cleanup(func() { readSelfCgroup = origSelf })
+	readSelfCgroup = func() (string, error) { return "/x", nil }
+
+	origRoot := cgroupFSRoot
+	t.Cleanup(func() { cgroupFSRoot = origRoot })
+	cgroupFSRoot = t.TempDir()
+
+	a := &bwrapAdapter{}
+	got, err := a.ListRunning()
+	if err != nil {
+		t.Fatalf("ListRunning: unexpected error: %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("ListRunning: got %v, want empty", got)
+	}
+}
+
+// TestBwrapReap_RemovesLeftoverCgroupDirWhenNotRunning verifies that Reap
+// removes a leftover per-Box cgroup dir (empty cgroup.procs -- the sandboxed
+// process has since exited, but a crashed launcher never ran Run's deferred
+// cleanup to rmdir it) and reports no error.
+func TestBwrapReap_RemovesLeftoverCgroupDirWhenNotRunning(t *testing.T) {
+	origSelf := readSelfCgroup
+	t.Cleanup(func() { readSelfCgroup = origSelf })
+	readSelfCgroup = func() (string, error) { return "/x", nil }
+
+	origRoot := cgroupFSRoot
+	t.Cleanup(func() { cgroupFSRoot = origRoot })
+	cgroupFSRoot = t.TempDir()
+
+	dir := filepath.Join(cgroupFSRoot, "/x", "spindrift-test-box")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "cgroup.procs"), []byte(""), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	a := &bwrapAdapter{}
+	if err := a.Reap("test-box"); err != nil {
+		t.Fatalf("Reap: unexpected error: %v", err)
+	}
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Errorf("Reap: cgroup dir %s still exists after reaping a non-running box", dir)
+	}
+}
+
+// TestBwrapReap_LeavesRunningCgroupDirUntouched verifies that Reap never
+// touches a still-running box's cgroup dir -- Kill is the operator-driven
+// counterpart for that, per the Runner.Reap contract.
+func TestBwrapReap_LeavesRunningCgroupDirUntouched(t *testing.T) {
+	origSelf := readSelfCgroup
+	t.Cleanup(func() { readSelfCgroup = origSelf })
+	readSelfCgroup = func() (string, error) { return "/x", nil }
+
+	origRoot := cgroupFSRoot
+	t.Cleanup(func() { cgroupFSRoot = origRoot })
+	cgroupFSRoot = t.TempDir()
+
+	dir := filepath.Join(cgroupFSRoot, "/x", "spindrift-test-box")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "cgroup.procs"), []byte("12345\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	a := &bwrapAdapter{}
+	if err := a.Reap("test-box"); err != nil {
+		t.Fatalf("Reap: unexpected error: %v", err)
+	}
+	if _, err := os.Stat(dir); err != nil {
+		t.Errorf("Reap: cgroup dir %s should still exist for a running box, stat error: %v", dir, err)
+	}
+}
+
+// TestBwrapReap_NoopWhenNoCgroupDir verifies that Reap is a silent no-op
+// (no panic, no error) when no per-Box cgroup dir exists for this name at
+// all (box never ran, or already reaped).
+func TestBwrapReap_NoopWhenNoCgroupDir(t *testing.T) {
+	origSelf := readSelfCgroup
+	t.Cleanup(func() { readSelfCgroup = origSelf })
+	readSelfCgroup = func() (string, error) { return "/x", nil }
+
+	origRoot := cgroupFSRoot
+	t.Cleanup(func() { cgroupFSRoot = origRoot })
+	cgroupFSRoot = t.TempDir()
+
+	a := &bwrapAdapter{}
+	if err := a.Reap("test-box"); err != nil {
+		t.Fatalf("Reap: unexpected error: %v", err)
+	}
+}
+
+// TestBwrapReap_NoopWhenNoCgroupDelegation verifies that Reap degrades to a
+// silent no-op (no panic, no error) when there's no cgroupfs tree to search
+// at all (cgroupFSRoot doesn't exist -- no cgroup v2 delegation on this
+// host), matching IsRunning/ListRunning's own degrade-sanely posture.
+// readSelfCgroup failing is no longer meaningful for this read/cleanup path
+// -- it's only consulted by the create path (provisionCgroup, via
+// cgroupDirForName), which has its own tests.
+func TestBwrapReap_NoopWhenNoCgroupDelegation(t *testing.T) {
+	origRoot := cgroupFSRoot
+	t.Cleanup(func() { cgroupFSRoot = origRoot })
+	cgroupFSRoot = filepath.Join(t.TempDir(), "does-not-exist")
+
+	a := &bwrapAdapter{}
+	if err := a.Reap("test-box"); err != nil {
+		t.Fatalf("Reap: unexpected error: %v", err)
+	}
+}
+
 // TestMemoryLimitToBytes verifies the podman/docker-style unit-suffixed
 // string -> raw byte count conversion memory.max's cgroup v2 kernel
 // interface needs (unlike podman's own --memory flag, which accepts the
