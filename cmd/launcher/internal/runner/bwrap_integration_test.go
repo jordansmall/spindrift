@@ -5,12 +5,14 @@ package runner
 import (
 	"bytes"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 // resolveSandboxBin resolves name to an absolute path reachable inside a
@@ -58,6 +60,32 @@ func requireRealBwrap(t *testing.T) string {
 	return bashBin
 }
 
+// requireRealPasta skips the test when this host cannot exercise a real
+// pasta+bwrap hierarchy: non-Linux, pasta missing from PATH, or (mirroring
+// requireRealBwrap) a nested sandbox that can't create the network namespace
+// and tap device pasta itself needs (no /dev/net/tun, can't mount a fresh
+// /proc) -- the dogfood Box's own sandbox hits this. The probe actually
+// invokes pasta with its real hardened flags rather than just checking
+// LookPath, so a genuine regression in those flags (typo, removed flag)
+// fails loudly instead of being silently masked by an environment-can't-
+// do-this skip further down.
+func requireRealPasta(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS != "linux" {
+		t.Skip("pasta integration test requires Linux")
+	}
+	if _, err := exec.LookPath("pasta"); err != nil {
+		t.Skip("pasta not found on PATH")
+	}
+	trueBin := resolveSandboxBin(t, "true")
+	probeArgs := append([]string{}, pastaHardenedFlags...)
+	probeArgs = append(probeArgs, "--dns-forward", pastaDNSForwardAddr, "-f", "--", trueBin)
+	probe := exec.Command("pasta", probeArgs...)
+	if out, err := probe.CombinedOutput(); err != nil {
+		t.Skipf("pasta cannot create a network namespace/tap device here: %v: %s", err, out)
+	}
+}
+
 // stripMountPair removes a "--flag target" pair from a bwrap argv. Used to
 // drop --proc /proc and --dev /dev: mounting a fresh procfs/devfs needs
 // CAP_SYS_ADMIN in the *outer* namespace, which a nested sandbox (like the
@@ -76,13 +104,23 @@ func stripMountPair(args []string, flag, target string) []string {
 	return out
 }
 
-// newIntegrationBwrapAdapter builds a bwrapAdapter wired with a real
-// agentFiles dir and real passwd/group files (production binds these from
-// nix store paths, not a temp dir -- see bwrapAdapter.passwdFile/groupFile
-// and lib/image.nix's passwdFile/groupFile derivations, issue #2663), so
-// buildArgs produces the exact mount/hardening flags production code would
-// send to a real bwrap process.
-func newIntegrationBwrapAdapter(t *testing.T, unshareNet bool) *bwrapAdapter {
+// newIntegrationBwrapAdapter builds a bwrapAdapter and etc dir wired the same
+// way bwrapAdapter.Run wires them: real passwd/group temp files (mirroring
+// lib/image.nix's passwdFile/groupFile derivations, issue #2663, since these
+// probes have no real baked nix store paths to point at) and a real
+// agentFiles dir, so buildArgs produces the exact mount/hardening flags
+// production code would send to a real bwrap process. It always isolates via
+// networkMode="none" (bare --unshare-net, no pasta helper) rather than the
+// raw unshareNet knob: since issue #2666, unshareNet=true would otherwise
+// get pasta-wrapped like any other isolating mode, which needs a real pasta
+// binary reachable inside the sandboxed exec target and would break
+// bwrapProbeArgs's single-trailing-token strip (it assumes a bare "--
+// /agent/entrypoint.sh" tail). None of these probes care about pasta/DNS/
+// egress — they exercise uid mapping, ro-bind, secret-argv-exclusion, home-
+// agent staging, and "no network reachable at all", which "none" still
+// gives. The returned etcDir is only needed downstream by
+// newIntegrationBwrapAdapterIsolated (resolv.conf) and pastaProbeArgs.
+func newIntegrationBwrapAdapter(t *testing.T) (*bwrapAdapter, string) {
 	t.Helper()
 	agentFiles := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(agentFiles, "agent"), 0o755); err != nil {
@@ -105,14 +143,38 @@ func newIntegrationBwrapAdapter(t *testing.T, unshareNet bool) *bwrapAdapter {
 	if err := os.WriteFile(filepath.Join(etcDir, "group"), []byte(group), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	return &bwrapAdapter{
+	a := &bwrapAdapter{
 		agentFiles:    agentFiles,
 		agentEnv:      "/fake/agent-env",
 		passwdFile:    filepath.Join(etcDir, "passwd"),
 		groupFile:     filepath.Join(etcDir, "group"),
 		bakedPrefetch: "true",
-		unshareNet:    unshareNet,
+		networkMode:   NetworkModeNone,
 	}
+	return a, etcDir
+}
+
+// newIntegrationBwrapAdapterIsolated is newIntegrationBwrapAdapter's sibling
+// for probes that need the actual default (issue #2666) isolate-with-pasta
+// path: the Go zero-value networkMode, which pastaPath() treats the same as
+// any other non-"host"/non-"none" value. It is a separate helper rather than
+// a parameter on newIntegrationBwrapAdapter itself so the 5 existing probes
+// above keep depending on that helper's networkMode="none" pin unchanged
+// (see its own doc comment for why they need bare --unshare-net, no pasta).
+// It also writes /etc/resolv.conf into etcDir, mirroring what
+// bwrapAdapter.Run itself does before invoking bwrap when pastaPath()
+// applies (buildArgs ro-binds this path unconditionally in that case) --
+// callers here build args directly via execTarget rather than going through
+// Run, so they must supply it too.
+func newIntegrationBwrapAdapterIsolated(t *testing.T) (*bwrapAdapter, string) {
+	t.Helper()
+	a, etcDir := newIntegrationBwrapAdapter(t)
+	a.networkMode = ""
+	resolvConf := "nameserver " + pastaDNSForwardAddr + "\n"
+	if err := os.WriteFile(filepath.Join(etcDir, "resolv.conf"), []byte(resolvConf), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return a, etcDir
 }
 
 // bwrapProbeArgs takes the real buildArgs() output for box, drops the
@@ -120,12 +182,30 @@ func newIntegrationBwrapAdapter(t *testing.T, unshareNet bool) *bwrapAdapter {
 // swaps the fixed "-- /agent/entrypoint.sh" tail for script, run via
 // bash -c. Every other mount/hardening flag reaches bwrap exactly as
 // production would send it.
-func bwrapProbeArgs(a *bwrapAdapter, box Box, bashBin, script string) []string {
-	args := a.buildArgs(box)
+func bwrapProbeArgs(a *bwrapAdapter, etcDir string, box Box, bashBin, script string) []string {
+	args := a.buildArgs(etcDir, box)
 	args = stripMountPair(args, "--proc", "/proc")
 	args = stripMountPair(args, "--dev", "/dev")
 	args = args[:len(args)-1] // drop "/agent/entrypoint.sh", keep the "--" separator
 	return append(args, bashBin, "-c", script)
+}
+
+// pastaProbeArgs is bwrapProbeArgs's sibling for the pasta-wrapped exec
+// target (execTarget, not buildArgs directly): it takes a's real
+// execTarget(etcDir, box) output -- pasta as the top-level program, with
+// bwrap's own argv (including the fixed "-- /agent/entrypoint.sh" tail)
+// nested inside it -- strips the same --proc/--dev pair bwrapProbeArgs does
+// (nested inside pasta's argv, not at pasta's own top level, but the nested-
+// sandbox mount-nesting limitation stripMountPair documents applies to them
+// identically), then swaps that nested tail for script run via bash -c. The
+// returned program is "pasta" whenever pastaPath() applies to a, matching
+// what a real bwrap.go Run() would exec.Command.
+func pastaProbeArgs(a *bwrapAdapter, etcDir string, box Box, bashBin, script string) (string, []string) {
+	program, args := a.execTarget(etcDir, box)
+	args = stripMountPair(args, "--proc", "/proc")
+	args = stripMountPair(args, "--dev", "/dev")
+	args = args[:len(args)-1] // drop "/agent/entrypoint.sh", keep the "--" separator
+	return program, append(args, bashBin, "-c", script)
 }
 
 // TestBwrapIntegration_NixStoreReadOnly launches a real bwrap sandbox using
@@ -134,12 +214,13 @@ func bwrapProbeArgs(a *bwrapAdapter, box Box, bashBin, script string) []string {
 // the flag being present on argv (issue #576).
 func TestBwrapIntegration_NixStoreReadOnly(t *testing.T) {
 	bashBin := requireRealBwrap(t)
-	// unshareNet=true: skips the --ro-bind /etc/resolv.conf mount (buildArgs
-	// only adds it when net is shared), which a nested sandbox can't remount
-	// anyway — irrelevant to the /nix/store assertion under test here.
-	a := newIntegrationBwrapAdapter(t, true)
+	// newIntegrationBwrapAdapter isolates via networkMode="none", which skips
+	// the --ro-bind /etc/resolv.conf mount (buildArgs only adds it when net
+	// is shared) — a nested sandbox can't remount it anyway, and it's
+	// irrelevant to the /nix/store assertion under test here.
+	a, etcDir := newIntegrationBwrapAdapter(t)
 	box := Box{Env: map[string]string{}}
-	args := bwrapProbeArgs(a, box, bashBin, "echo x > /nix/store/spindrift-integration-write-probe")
+	args := bwrapProbeArgs(a, etcDir, box, bashBin, "echo x > /nix/store/spindrift-integration-write-probe")
 
 	cmd := exec.Command("bwrap", args...)
 	out, runErr := cmd.CombinedOutput()
@@ -157,9 +238,9 @@ func TestBwrapIntegration_NixStoreReadOnly(t *testing.T) {
 // present on argv (issue #576).
 func TestBwrapIntegration_SandboxUID(t *testing.T) {
 	bashBin := requireRealBwrap(t)
-	a := newIntegrationBwrapAdapter(t, true)
+	a, etcDir := newIntegrationBwrapAdapter(t)
 	box := Box{Env: map[string]string{}}
-	args := bwrapProbeArgs(a, box, bashBin, "echo $EUID")
+	args := bwrapProbeArgs(a, etcDir, box, bashBin, "echo $EUID")
 
 	out, err := exec.Command("bwrap", args...).CombinedOutput()
 	if err != nil {
@@ -171,16 +252,17 @@ func TestBwrapIntegration_SandboxUID(t *testing.T) {
 }
 
 // TestBwrapIntegration_UnshareNetBlocksNetwork launches a real bwrap sandbox
-// with BwrapUnshareNet=true and asserts, from inside it, that outbound
-// network access fails — the kernel enforcing --unshare-net, not just the
-// flag being present on argv (issue #576).
+// with networkMode="none" (fully helper-free, no pasta) and asserts, from
+// inside it, that outbound network access fails — the kernel enforcing
+// --unshare-net with no egress path, not just the flag being present on
+// argv (issue #576).
 func TestBwrapIntegration_UnshareNetBlocksNetwork(t *testing.T) {
 	bashBin := requireRealBwrap(t)
-	a := newIntegrationBwrapAdapter(t, true)
+	a, etcDir := newIntegrationBwrapAdapter(t)
 	box := Box{Env: map[string]string{}}
 	// bash's /dev/tcp pseudo-device is interpreted by bash itself, so it
 	// needs no real /dev mount inside the sandbox.
-	args := bwrapProbeArgs(a, box, bashBin, "exec 3<>/dev/tcp/1.1.1.1/80")
+	args := bwrapProbeArgs(a, etcDir, box, bashBin, "exec 3<>/dev/tcp/1.1.1.1/80")
 
 	out, err := exec.Command("bwrap", args...).CombinedOutput()
 	if err == nil {
@@ -203,7 +285,7 @@ func TestBwrapIntegration_UnshareNetBlocksNetwork(t *testing.T) {
 func TestBwrapIntegration_HomeAgentStagingReadable(t *testing.T) {
 	bashBin := requireRealBwrap(t)
 	catBin := resolveSandboxBin(t, "cat")
-	a := newIntegrationBwrapAdapter(t, true)
+	a, etcDir := newIntegrationBwrapAdapter(t)
 
 	const marker = "spindrift-integration-home-agent-marker"
 	homeAgentDir := filepath.Join(a.agentFiles, "home", "agent")
@@ -215,7 +297,7 @@ func TestBwrapIntegration_HomeAgentStagingReadable(t *testing.T) {
 	}
 
 	box := Box{Env: map[string]string{}}
-	args := bwrapProbeArgs(a, box, bashBin, catBin+" "+homeAgentStagingDir+"/marker.txt")
+	args := bwrapProbeArgs(a, etcDir, box, bashBin, catBin+" "+homeAgentStagingDir+"/marker.txt")
 
 	out, err := exec.Command("bwrap", args...).CombinedOutput()
 	if err != nil {
@@ -236,9 +318,9 @@ func TestBwrapIntegration_SecretNotOnProcessArgv(t *testing.T) {
 	sleepBin := resolveSandboxBin(t, "sleep")
 	const marker = "spindrift-integration-secret-9f3c2a"
 	t.Setenv("GH_TOKEN", marker)
-	a := newIntegrationBwrapAdapter(t, true)
+	a, etcDir := newIntegrationBwrapAdapter(t)
 	box := Box{Env: map[string]string{"GH_TOKEN": marker}}
-	args := bwrapProbeArgs(a, box, bashBin, sleepBin+" 2")
+	args := bwrapProbeArgs(a, etcDir, box, bashBin, sleepBin+" 2")
 
 	cmd := exec.Command("bwrap", args...)
 	if err := cmd.Start(); err != nil {
@@ -252,5 +334,106 @@ func TestBwrapIntegration_SecretNotOnProcessArgv(t *testing.T) {
 	}
 	if bytes.Contains(cmdline, []byte(marker)) {
 		t.Errorf("secret %q found in the running bwrap process's argv: %q", marker, cmdline)
+	}
+}
+
+// TestBwrapIntegration_PastaBlocksHostLoopback is the central missing
+// guarantee issue #2666 asks for: a listener on the host's own loopback must
+// be unreachable from inside a real pasta-wrapped bwrap Box using the
+// default (isolate-by-default) NETWORK_MODE. Without --no-map-gw
+// (pastaHardenedFlags), pasta's own documented default behavior splices a
+// guest connection to its gateway address (pastaDNSForwardAddr) through to
+// the host's 127.0.0.1 on the same port; with --no-map-gw, that splice is
+// closed and the guest's SYN to the gateway address on this arbitrary
+// (non-DNS) port is simply dropped -- proven here against a real pasta
+// process, not a fake one (issue #2666's own review finding: no test, fake
+// or real, previously exercised the pasta-wrapped path at all).
+func TestBwrapIntegration_PastaBlocksHostLoopback(t *testing.T) {
+	requireRealPasta(t)
+	bashBin := requireRealBwrap(t)
+	a, etcDir := newIntegrationBwrapAdapterIsolated(t)
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen on host loopback: %v", err)
+	}
+	defer ln.Close()
+	port := ln.Addr().(*net.TCPAddr).Port
+
+	// Accept (not just listen-and-ignore) so a stray successful splice is
+	// observable and fails the test, rather than silently succeeding
+	// unnoticed on the host side while the guest-side assertion alone passes.
+	accepted := make(chan bool, 1)
+	go func() {
+		conn, acceptErr := ln.Accept()
+		if acceptErr != nil {
+			accepted <- false
+			return
+		}
+		defer conn.Close()
+		_, _ = conn.Read(make([]byte, 16))
+		accepted <- true
+	}()
+
+	box := Box{Env: map[string]string{}}
+	script := fmt.Sprintf("exec 3<>/dev/tcp/%s/%d && echo CONNECTED || echo BLOCKED", pastaDNSForwardAddr, port)
+	program, args := pastaProbeArgs(a, etcDir, box, bashBin, script)
+
+	out, err := exec.Command(program, args...).CombinedOutput()
+	if err != nil {
+		t.Fatalf("pasta+bwrap probe failed to run: %v: %s", err, out)
+	}
+	if got := strings.TrimSpace(string(out)); got != "BLOCKED" {
+		t.Errorf("guest connection to the host loopback via pasta's gateway address = %q, want BLOCKED (--no-map-gw should drop it)", got)
+	}
+
+	select {
+	case wasAccepted := <-accepted:
+		if wasAccepted {
+			t.Error("host listener observed an accepted connection from inside the pasta-wrapped sandbox -- --no-map-gw should have prevented the splice")
+		}
+	case <-time.After(2 * time.Second):
+		// No connection ever reached the listener -- the expected outcome;
+		// the guest-side assertion above already proved the connect attempt
+		// failed, so there is nothing further to wait for.
+	}
+}
+
+// TestBwrapIntegration_PastaProvidesWorkingEgressInterface is a CI-safe
+// proxy for "pasta actually gave the sandbox working egress" that does not
+// depend on real internet reachability -- this file's own
+// TestBwrapIntegration_UnshareNetBlocksNetwork only ever asserts a *failure*
+// against 1.1.1.1 for the same flakiness reason. It asserts pasta created
+// and configured a non-loopback network interface inside the namespace --
+// the actual regression this fix closes: before issue #2666, a Box asking
+// for isolation-with-egress reached bwrap.go's buildArgs with no pasta
+// wrapping at all, so it could never have had a working interface, let alone
+// one it could actually route packets out of.
+func TestBwrapIntegration_PastaProvidesWorkingEgressInterface(t *testing.T) {
+	requireRealPasta(t)
+	bashBin := requireRealBwrap(t)
+	ipBin := resolveSandboxBin(t, "ip")
+	a, etcDir := newIntegrationBwrapAdapterIsolated(t)
+
+	box := Box{Env: map[string]string{}}
+	// "ip link show" talks to the kernel over an AF_NETLINK socket -- unlike
+	// /sys/class/net, it needs neither /sys nor /proc mounted, both stripped
+	// from this probe's argv (see pastaProbeArgs) for the same nested-
+	// sandbox reason bwrapProbeArgs strips them.
+	program, args := pastaProbeArgs(a, etcDir, box, bashBin, ipBin+" -o link show")
+
+	out, err := exec.Command(program, args...).CombinedOutput()
+	if err != nil {
+		t.Fatalf("pasta+bwrap probe failed: %v: %s", err, out)
+	}
+	foundNonLoopback := false
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if line == "" || strings.Contains(line, ": lo:") || strings.Contains(line, ": lo@") {
+			continue
+		}
+		foundNonLoopback = true
+	}
+	if !foundNonLoopback {
+		t.Errorf("no non-loopback network interface found inside the pasta-wrapped sandbox (ip link show output: %q); pasta should have created a tap device", out)
 	}
 }

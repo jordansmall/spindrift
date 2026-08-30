@@ -69,8 +69,8 @@ type bwrapAdapter struct {
 	// mount (ADR 0032); see MountParams.
 	hostMediatedIssueTracker bool
 	localIssuesDir           string
-	unshareNet               bool   // raw BWRAP_UNSHARE_NET knob; when true, adds --unshare-net (isolates from host netns)
-	networkMode              string // NETWORK_MODE knob; "none" also isolates from the host netns. "no-host-loopback" never reaches bwrap — nix eval-rejects it for a valid Consumer flake (lib/mkHarness.nix networkModeCoherenceOk).
+	unshareNet               bool   // raw BWRAP_UNSHARE_NET knob; forces network isolation on (redundant with the new isolate-by-default, kept for defense in depth — see buildArgs)
+	networkMode              string // NETWORK_MODE knob; every value except the "host" opt-out (issue #2666) isolates from the host netns. "no-host-loopback" never legitimately reaches bwrap — nix eval-rejects it for a valid Consumer flake (lib/mkHarness.nix networkModeCoherenceOk).
 
 	// mu guards running, the box-name -> live process map Kill (issue #649)
 	// consults — bwrap sandboxes are unnamed child processes with no
@@ -82,10 +82,12 @@ type bwrapAdapter struct {
 }
 
 // NewBwrap constructs a bwrap adapter for the run command from cfg.
-// EnsureReady is a no-op; call NewBwrapBuild for the build command.
-// cfg.BwrapUnshareNet adds --unshare-net to isolate from the host network
-// namespace; when false, the sandbox shares the host netns (host-loopback
-// reachable).
+// EnsureReady is a no-op; call NewBwrapBuild for the build command. By
+// default (any cfg.NetworkMode except the "host" opt-out, issue #2666) the
+// resulting adapter isolates the sandbox into its own network namespace,
+// with egress restored via a hardened pasta helper (ADR 0042) — podman-
+// rootless parity. cfg.NetworkMode="host" and the raw cfg.BwrapUnshareNet
+// knob are documented separately in buildArgs.
 func NewBwrap(cfg Config) Runner {
 	return &bwrapAdapter{
 		agentFiles:               cfg.AgentFiles,
@@ -131,36 +133,37 @@ func (a *bwrapAdapter) mountSpecs(box Box) []MountSpec {
 	}, box)
 }
 
+// isolateNet is the effective "cut off the host netns" decision (issue
+// #2666, ADR 0042): every NetworkMode value except the explicit "host"
+// opt-out isolates by default, including the Go zero value and
+// "no-host-loopback" (nix eval-rejects the latter reaching bwrap in
+// production; main.go's checkNetworkModeRuntimeGate backstops it). The raw
+// BwrapUnshareNet knob can only ever force isolation on, already the
+// default outcome, but is kept for defense in depth. See
+// TestBwrapArgs_NetworkModeNoHostLoopbackDefaultsToIsolate.
+func (a *bwrapAdapter) isolateNet() bool {
+	return a.unshareNet || a.networkMode != NetworkModeHost
+}
+
+// pastaPath reports whether the isolated network namespace gets restored
+// egress via a pasta helper. networkMode="none" is the deliberate exception:
+// fully offline, bare --unshare-net, no helper, no egress at all (a Driver
+// can't reach its Provider under it, documented elsewhere).
+func (a *bwrapAdapter) pastaPath() bool {
+	return a.isolateNet() && a.networkMode != NetworkModeNone
+}
+
 // buildArgs constructs the bwrap command-line arguments for the given box.
 // The /etc/passwd and /etc/group binds source a.passwdFile/a.groupFile, baked
 // nix store paths rather than a runner-written temp-dir copy (issue #2663).
-// Secret env vars (GH_TOKEN, auth tokens) are intentionally excluded from argv;
-// they reach the sandbox via inherited process environment (no --clearenv).
-func (a *bwrapAdapter) buildArgs(box Box) []string {
-	// isolateNet is the effective "cut off the host netns" decision: the raw
-	// BWRAP_UNSHARE_NET escape hatch, or NETWORK_MODE=none (issue #2562).
-	// Same shared invariant as oci.go's networkArg/config.go's Config doc
-	// (raw wins whenever set) even though this is an OR rather than an
-	// explicit "prefer raw" branch: BWRAP_UNSHARE_NET is bool-typed and only
-	// ever forces isolation *on* (true) -- there's no raw value here that
-	// forces it *off* against an isolating mode, unlike podman's
-	// string-typed raw knob, which can render any --network value including
-	// one that reopens what a mode would have closed. So OR-ing the two
-	// reaches the same answer "raw wins" would for every combination Go can
-	// observe. nix eval-rejects setting both on a valid Consumer flake
-	// (lib/mkHarness.nix networkModeCoherenceOk), so this is defense in
-	// depth for a case that can't actually occur there; it still needs a
-	// deterministic answer here since Go has no way to observe that
-	// invariant. NETWORK_MODE=no-host-loopback is not handled here on
-	// purpose: bwrap's --unshare-net is all-or-nothing and can't express a
-	// partial isolation, so this adapter has no rendering for it and falls
-	// open (treats it like "open") if it ever arrives. RUNTIME is baked at
-	// eval time while NETWORK_MODE is runtime-overridable -- main.go's
-	// checkNetworkModeRuntimeGate is the actual backstop that keeps a
-	// runtime override of NETWORK_MODE from reaching this adapter; see
-	// TestBwrapArgs_NetworkModeNoHostLoopbackFailsOpen for the
-	// characterization of what happens here if that gate is bypassed.
-	isolateNet := a.unshareNet || a.networkMode == NetworkModeNone
+// etcDir is only still needed for the synthesised /etc/resolv.conf (pastaPath
+// only, see below) -- passwd/group no longer live there. Secret env vars
+// (GH_TOKEN, auth tokens) are intentionally excluded from argv; they reach
+// the sandbox via inherited process environment (no --clearenv). Pasta
+// itself is never part of this return value -- see execTarget, which wraps
+// bwrap's own argv with pasta as the outer process when pastaPath applies.
+func (a *bwrapAdapter) buildArgs(etcDir string, box Box) []string {
+	isolateNet := a.isolateNet()
 	args := []string{
 		"--ro-bind", "/nix/store", "/nix/store",
 		"--tmpfs", "/tmp",
@@ -176,6 +179,11 @@ func (a *bwrapAdapter) buildArgs(box Box) []string {
 		if err := statResolvConf(); err == nil {
 			args = append(args, "--ro-bind", "/etc/resolv.conf", "/etc/resolv.conf")
 		}
+	} else if a.pastaPath() {
+		// Nothing writes /etc/resolv.conf inside the guest otherwise (unlike
+		// the OCI runner, where podman supplies its own) -- Run writes this
+		// file pointed at pastaDNSForwardAddr before invoking bwrap.
+		args = append(args, "--ro-bind", filepath.Join(etcDir, "resolv.conf"), "/etc/resolv.conf")
 	}
 	args = append(args, "--ro-bind", a.agentFiles+"/agent", "/agent")
 	// The real /home/agent above is a fresh writable tmpfs, so baked content
@@ -227,13 +235,64 @@ func (a *bwrapAdapter) buildArgs(box Box) []string {
 	}
 	unshareFlags := []string{"--unshare-user", "--uid", "1000", "--gid", "1000",
 		"--unshare-pid", "--unshare-ipc", "--unshare-uts"}
-	if isolateNet {
+	// bwrap only unshares net itself for the fully offline networkMode=none
+	// case. Every other isolating mode leaves this to pasta: pasta's own
+	// documented behavior is to create and configure the fresh network
+	// namespace (tap device, routes) for its COMMAND argument, then exec that
+	// command inside the namespace it just built -- bwrap must inherit that
+	// already-configured namespace via execTarget's pasta-as-outer-process
+	// composition, not re-unshare a second, empty one on top of it (issue
+	// #2666).
+	if isolateNet && !a.pastaPath() {
 		unshareFlags = append(unshareFlags, "--unshare-net")
 	}
 	args = append(args, unshareFlags...)
 	args = append(args, "--", "/agent/entrypoint.sh")
 	return args
 }
+
+// execTarget computes the top-level host-exec'd program and argv for box's
+// bwrap invocation. When pastaPath applies, pasta must be the outer process
+// (see buildArgs' unshare-net comment for why); otherwise bwrap itself is the
+// top-level program, unchanged.
+func (a *bwrapAdapter) execTarget(etcDir string, box Box) (string, []string) {
+	bwrapArgs := a.buildArgs(etcDir, box)
+	if !a.pastaPath() {
+		return "bwrap", bwrapArgs
+	}
+	pastaArgs := append([]string{}, pastaHardenedFlags...)
+	pastaArgs = append(pastaArgs, "--dns-forward", pastaDNSForwardAddr,
+		// -f/--foreground is load-bearing, not cosmetic: pasta's documented
+		// default is to fork into the background and detach once the
+		// namespace is set up. Without it, Go's cmd.Start()/cmd.Wait() would
+		// track pasta's own short-lived detaching parent instead of the real
+		// bwrap+entrypoint child, breaking exit-code propagation, stdout/
+		// stderr capture, and the Kill()/Terminate() process map (a.running).
+		"-f", "--", "bwrap")
+	pastaArgs = append(pastaArgs, bwrapArgs...)
+	return "pasta", pastaArgs
+}
+
+// pastaDNSForwardAddr is pasta's own documented default IPv4 gateway address
+// when it creates a namespace with no host default route visible (always
+// true here, since pasta always creates a brand-new, empty netns in this
+// "run given command" unshare mode) -- see pasta(1) NOTES ("Default gateways
+// will be assigned as the link-local address 169.254.2.2 for IPv4 ...
+// 169.254.2.1 [guest]"). Passed to --dns-forward so pasta itself (running on
+// the host, with full host network access) relays DNS queries to whatever
+// the host's real resolver is -- independent of --no-map-gw, which only
+// disables the generic loopback-splice-on-any-port behavior; --dns-forward
+// is a separate, always-on interception rule scoped to port 53/853 traffic
+// to this address, restoring DNS without reopening the general host-loopback
+// splice (ADR 0042).
+const pastaDNSForwardAddr = "169.254.2.2"
+
+// pastaHardenedFlags are the exact 5 flags ADR 0042 requires when a bwrap
+// Box's exec target is wrapped with pasta to restore egress inside its
+// isolated network namespace: no TCP/UDP port forwarding into the box and no
+// gateway-address mapping, closing the host-loopback splice pasta's own
+// defaults leave open.
+var pastaHardenedFlags = []string{"-t", "none", "-T", "none", "-u", "none", "-U", "none", "--no-map-gw"}
 
 // resolvedRunEnv returns the process environment the bwrap child should
 // inherit. It is an allowlist, not a denylist: the launcher's own ambient
@@ -285,6 +344,24 @@ func resolvedRunEnv(boxEnv map[string]string) []string {
 
 // Run launches a single issue into a bubblewrap sandbox.
 func (a *bwrapAdapter) Run(box Box) error {
+	// etcDir is only needed for the synthesised /etc/resolv.conf (pastaPath
+	// only) -- passwd/group are baked nix store paths now (issue #2663) and
+	// no longer written here.
+	etcDir, err := os.MkdirTemp("", "spindrift-etc-*")
+	if err != nil {
+		return fmt.Errorf("mktemp: %w", err)
+	}
+	defer os.RemoveAll(etcDir)
+
+	if a.pastaPath() {
+		// Nothing else writes /etc/resolv.conf into the guest for the bwrap
+		// runtime; buildArgs ro-binds this file when pastaPath applies.
+		resolvConf := "nameserver " + pastaDNSForwardAddr + "\n"
+		if err := os.WriteFile(filepath.Join(etcDir, "resolv.conf"), []byte(resolvConf), 0o644); err != nil {
+			return err
+		}
+	}
+
 	out := box.Output
 	if out == nil {
 		out = io.Discard
@@ -294,8 +371,24 @@ func (a *bwrapAdapter) Run(box Box) error {
 	// subset of box.Env, not the launcher's own ambient environment. Without
 	// --clearenv, the sandbox inherits it. Secrets (GH_TOKEN, auth tokens)
 	// are therefore available inside the sandbox without appearing on argv.
-	cmd := execCommand("bwrap", a.buildArgs(box)...)
+	program, execArgs := a.execTarget(etcDir, box)
+	cmd := execCommand(program, execArgs...)
 	cmd.Env = resolvedRunEnv(box.Env)
+	if program == "pasta" {
+		// pasta is now the top-level process and execs "bwrap" itself (as a
+		// bare name, positionally after its own flags -- see execTarget) via
+		// its own execvp, using its own process environment's PATH, not Go's
+		// exec.Command LookPath (which only resolved "pasta" itself, at
+		// Command-construction time, against the launcher's ambient PATH).
+		// Without this, pasta's env carries no PATH at all (resolvedRunEnv is
+		// a secrets-only allowlist), so pasta's own child exec of "bwrap"
+		// would fail with ENOENT even though pasta itself started fine --
+		// the same class of bug this whole fix closes, one process hop over.
+		// PATH carries no secret, so forwarding it here doesn't widen
+		// resolvedRunEnv's documented no-ambient-leak guarantee for the
+		// sandboxed child's own secrets.
+		cmd.Env = append(cmd.Env, "PATH="+os.Getenv("PATH"))
+	}
 	cmd.Stdout = out
 	cmd.Stderr = out
 	if err := cmd.Start(); err != nil {

@@ -2,6 +2,7 @@ package runner
 
 import (
 	"errors"
+	"os"
 	"os/exec"
 	"reflect"
 	"strings"
@@ -12,7 +13,9 @@ import (
 // TestBwrapRun_LaunchesViaSeamAndSurfacesFailure verifies that Run invokes
 // bwrap through the package-level execCommand seam (rather than a hardcoded
 // exec.Command("bwrap", ...)) and that a scripted failure surfaces as an
-// error.
+// error. networkMode="host" keeps this test's exec target bare bwrap
+// (execTarget's non-pasta branch); TestBwrapRun_PastaIsTopLevelProgramByDefault
+// covers the pasta-wrapped default.
 func TestBwrapRun_LaunchesViaSeamAndSurfacesFailure(t *testing.T) {
 	script, dir := newFakeCLI(t, fakeCall{exit: 1})
 	orig := execCommand
@@ -23,7 +26,7 @@ func TestBwrapRun_LaunchesViaSeamAndSurfacesFailure(t *testing.T) {
 		return exec.Command(script, args...)
 	}
 
-	a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok"}
+	a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok", networkMode: NetworkModeHost}
 	err := a.Run(Box{Env: map[string]string{}})
 
 	if gotName != "bwrap" {
@@ -34,6 +37,107 @@ func TestBwrapRun_LaunchesViaSeamAndSurfacesFailure(t *testing.T) {
 	}
 	if got := callCount(t, dir); got != 1 {
 		t.Errorf("callCount = %d, want 1", got)
+	}
+}
+
+// TestBwrapRun_PastaIsTopLevelProgramByDefault verifies that Run invokes
+// execCommand with "pasta" as the top-level program for the default
+// (zero-value) networkMode — the fix for the pre-#2666-fix-up bug where
+// bwrap was always the literal top-level command even when isolating with
+// pasta, leaving pasta buried in bwrap's own trailing argv where it had no
+// namespace left to configure (issue #2666 review finding).
+func TestBwrapRun_PastaIsTopLevelProgramByDefault(t *testing.T) {
+	script, _ := newFakeCLI(t, fakeCall{exit: 0})
+	orig := execCommand
+	t.Cleanup(func() { execCommand = orig })
+	var gotName string
+	execCommand = func(name string, args ...string) *exec.Cmd {
+		gotName = name
+		return exec.Command(script, args...)
+	}
+
+	a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok"}
+	if err := a.Run(Box{Env: map[string]string{}}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if gotName != "pasta" {
+		t.Errorf("execCommand called with %q, want %q", gotName, "pasta")
+	}
+}
+
+// TestBwrapRun_WritesSynthesizedResolvConfForPastaPath verifies that Run
+// writes <etcDir>/resolv.conf (the file buildArgs ro-binds to
+// /etc/resolv.conf under the pasta path) before launching, pointed at
+// pastaDNSForwardAddr — without this file the guest has no resolv.conf at
+// all, since nothing else writes one into the sandbox for the bwrap runtime
+// (unlike the OCI runner, podman writes its own). The content is read from
+// inside the execCommand seam override, synchronously before Start/Wait,
+// since Run's own deferred os.RemoveAll(etcDir) has already fired by the
+// time Run returns.
+func TestBwrapRun_WritesSynthesizedResolvConfForPastaPath(t *testing.T) {
+	script, _ := newFakeCLI(t, fakeCall{exit: 0})
+	orig := execCommand
+	t.Cleanup(func() { execCommand = orig })
+	var gotResolvConf []byte
+	var readErr error
+	execCommand = func(name string, args ...string) *exec.Cmd {
+		for i, arg := range args {
+			if arg == "--ro-bind" && i+2 < len(args) && args[i+2] == "/etc/resolv.conf" {
+				gotResolvConf, readErr = os.ReadFile(args[i+1])
+			}
+		}
+		return exec.Command(script, args...)
+	}
+
+	a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok"}
+	if err := a.Run(Box{Env: map[string]string{}}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if readErr != nil {
+		t.Fatalf("read synthesized resolv.conf: %v", readErr)
+	}
+	if gotResolvConf == nil {
+		t.Fatal("no --ro-bind ... /etc/resolv.conf found in exec args")
+	}
+	want := "nameserver " + pastaDNSForwardAddr + "\n"
+	if string(gotResolvConf) != want {
+		t.Errorf("synthesized resolv.conf = %q, want %q", gotResolvConf, want)
+	}
+}
+
+// TestBwrapRun_PastaChildEnvCarriesPathToFindBwrap verifies that when Run
+// wraps with pasta (the default networkMode), pasta's own process env
+// carries a PATH entry -- without one, pasta's own execvp("bwrap") (a bare
+// name, resolved by pasta itself at runtime, not by Go's exec.Command
+// LookPath, which only ever resolved "pasta" itself) would fail with ENOENT
+// even though pasta launched fine, defeating the whole fix one process hop
+// later. TestResolvedRunEnv_DropsUndeclaredAmbientVariable already pins that
+// this doesn't widen the ambient-leak guarantee for anything else.
+func TestBwrapRun_PastaChildEnvCarriesPathToFindBwrap(t *testing.T) {
+	script, _ := newFakeCLI(t, fakeCall{exit: 0})
+	orig := execCommand
+	t.Cleanup(func() { execCommand = orig })
+	var gotCmd *exec.Cmd
+	execCommand = func(name string, args ...string) *exec.Cmd {
+		gotCmd = exec.Command(script, args...)
+		return gotCmd
+	}
+
+	a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok"}
+	if err := a.Run(Box{Env: map[string]string{}}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	found := false
+	for _, kv := range gotCmd.Env {
+		if strings.HasPrefix(kv, "PATH=") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("Run's cmd.Env for the pasta-wrapped path has no PATH entry, pasta's own execvp(\"bwrap\") would fail: %v", gotCmd.Env)
 	}
 }
 
@@ -403,7 +507,7 @@ func TestBwrapRun_OpencodeAuthContentOffArgvButInProcessEnv(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	for _, arg := range a.buildArgs(box) {
+	for _, arg := range a.buildArgs("/tmp/fake-etc", box) {
 		if strings.Contains(arg, sentinel) {
 			t.Errorf("OPENCODE_AUTH_CONTENT sentinel found in bwrap argv: %v", arg)
 		}

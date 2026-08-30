@@ -187,8 +187,15 @@
               ]
               # bubblewrap only builds on Linux; the runner integration tests
               # (go test -tags=integration ./cmd/launcher/internal/runner/...,
-              # issue #576) need it on PATH to exercise a real sandbox.
-              ++ pkgs.lib.optionals pkgs.stdenv.isLinux [ pkgs.bubblewrap ];
+              # issue #576) need it on PATH to exercise a real sandbox. passt
+              # (provides the `pasta` binary) is the same story for the
+              # pasta-wrapped default network isolation path (issue #2666) --
+              # without it those integration tests skip rather than exercise
+              # anything real.
+              ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
+                pkgs.bubblewrap
+                pkgs.passt
+              ];
               # `dogfood-stop`: ask a running ./dogfood.sh to exit after its current
               # wave (see the USR1/TERM trap in dogfood.sh) instead of Ctrl-C, which
               # would abort the wave mid-flight.
