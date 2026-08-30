@@ -1224,8 +1224,56 @@ func (a *bwrapBuildAdapter) EnsureReady() error {
 	}
 
 	if a.nixConfigFileDrv != "" {
-		if err := a.snapshotStoreDB(); err != nil {
+		// Hold the same shared advisory lock Run holds for the life of a
+		// sandboxed process, but here only for the duration of the write below:
+		// a concurrently-running `launcher build` (a different process, against
+		// a different closure) has no idea this generation is mid-write, and
+		// its own reclaimStaleSnapshots pass skips keepGeneration by name only
+		// for *its own* generation, not this one -- from that other process's
+		// point of view this dir looks like any other unreferenced stale
+		// generation, and its non-blocking exclusive Flock probe would succeed
+		// and RemoveAll it out from under the still-running VACUUM INTO below
+		// (issue #2680 review finding). A failure to acquire the lock only
+		// degrades protection against that narrow race; it must never fail the
+		// build (same degrade-don't-lie precedent as every other lock-acquire
+		// site in this file).
+		//
+		// lockSnapshotShared opens dir+".lock", a sibling of dir itself --
+		// a child of nixVarSnapshotRoot in the generation-scoped case, or a
+		// sibling of the root in the flat/legacy case where
+		// nixVarSnapshotDir IS nixVarSnapshotRoot. Either way its parent
+		// must already exist for O_CREATE to succeed, and on a fresh
+		// checkout nixVarSnapshotRoot itself doesn't exist yet. MkdirAll
+		// here so the lock below gets a real shot at succeeding instead of
+		// always degrading on the first build; a MkdirAll failure degrades
+		// the same way a lock-acquire failure already does (warn, don't
+		// fail the build).
+		if mkErr := os.MkdirAll(a.nixVarSnapshotRoot, 0o755); mkErr != nil {
+			fmt.Printf("==> bwrap runner: warning: could not create nix-var snapshot root %s (%v); a concurrent build cannot detect this generation is mid-write\n", a.nixVarSnapshotRoot, mkErr)
+		}
+		lf, lockErr := lockSnapshotShared(a.nixVarSnapshotDir)
+		if lockErr != nil {
+			fmt.Printf("==> bwrap runner: warning: could not acquire nix-var snapshot lock %s (%v); a concurrent build cannot detect this generation is mid-write\n", snapshotLockPath(a.nixVarSnapshotDir), lockErr)
+		}
+		err := a.snapshotStoreDB()
+		unlockSnapshot(lf)
+		if err != nil {
 			return err
+		}
+		// nixVarGeneration == "" means the flat/legacy path: nixVarSnapshotDir
+		// IS a.nixVarSnapshotRoot (nixVarSnapshotDir(pwd, "") drops the empty
+		// component), so there is no set of sibling generations to sweep --
+		// reclaiming against the root here would sweep the root's own
+		// unrelated siblings (e.g. .spindrift/accum.git) as if they were
+		// stale generations.
+		if a.nixVarGeneration == "" {
+			fmt.Println("==> bwrap runner: nix-var snapshot is unscoped (no closure generation known); skipping stale-generation reclaim")
+		} else if err := reclaimStaleSnapshots(a.nixVarSnapshotRoot, a.nixVarGeneration); err != nil {
+			// Best-effort, like the backup cleanup above: an old generation that
+			// couldn't be reclaimed wastes disk but doesn't make the snapshot
+			// EnsureReady just produced any less usable, so it's not worth
+			// failing an otherwise-successful `launcher build` over.
+			fmt.Printf("==> bwrap runner: warning: could not reclaim stale nix-var snapshots under %s: %v\n", a.nixVarSnapshotRoot, err)
 		}
 	}
 
@@ -1314,6 +1362,113 @@ func (a *bwrapBuildAdapter) snapshotStoreDB() error {
 		}
 	}
 	return nil
+}
+
+// reclaimStaleSnapshots removes generation directories under root that are
+// neither keepGeneration (the generation this build invocation just
+// produced/is using) nor still referenced by a live Box. Liveness is
+// detected via bwrapAdapter.Run's own shared lock: a non-blocking exclusive
+// Flock attempt on the generation's sibling snapshotLockPath fails while any
+// Box holds the shared lock Run takes for the life of the sandboxed
+// process, and succeeds once none do -- no separate box->generation
+// tracking is needed anywhere else. This loop removes only the generation
+// dir, never its lock file directly (see snapshotLockPath/lockSnapshotShared)
+// -- the lock file outlives its generation dir by at least one reclaim pass,
+// removed later (and only then) by sweepOrphanedLock below, once a pass's own
+// os.ReadDir no longer sees a matching dir for it; lockSnapshotShared's own
+// doc comment covers why a caller mid-lock-acquire tolerates that removal
+// instead of it silently breaking mutual exclusion. A root that doesn't exist
+// yet (e.g. the very first build) is not an error; there is simply nothing to
+// reclaim. Every
+// other step is best-effort per entry: a failure removing one stale
+// generation is warned and reclamation continues with the rest, matching
+// this file's own degrade-don't-lie precedent rather than aborting the
+// whole pass over one bad entry.
+func reclaimStaleSnapshots(root, keepGeneration string) error {
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("read nix-var-snapshot root %s: %w", root, err)
+	}
+	// Captured once, before any removal in this pass, so sweepOrphanedLock
+	// can tell "orphaned before this pass started" (safe to remove its lock)
+	// apart from "this pass itself just reclaimed it a moment ago" (must
+	// not touch its lock -- see sweepOrphanedLock). Directory entries sort
+	// before their "<name>.lock" sibling, so a live os.Stat post-removal
+	// would always see the former as gone (issue #2680 review finding).
+	knownGenerations := make(map[string]bool, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() {
+			knownGenerations[entry.Name()] = true
+		}
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			sweepOrphanedLock(root, entry.Name(), keepGeneration, knownGenerations)
+			continue
+		}
+		name := entry.Name()
+		if name == keepGeneration {
+			continue
+		}
+		genDir := filepath.Join(root, name)
+		lockPath := snapshotLockPath(genDir)
+		lf, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o644)
+		if err != nil {
+			fmt.Printf("==> bwrap runner: warning: could not open nix-var snapshot lock %s (%v); leaving stale generation %s in place\n", lockPath, err, name)
+			continue
+		}
+		if err := syscall.Flock(int(lf.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+			// A live Box holds the shared lock -- leave this generation alone.
+			lf.Close()
+			continue
+		}
+		if err := os.RemoveAll(genDir); err != nil {
+			fmt.Printf("==> bwrap runner: warning: could not remove stale nix-var snapshot %s: %v\n", genDir, err)
+		}
+		unlockSnapshot(lf)
+	}
+	return nil
+}
+
+// sweepOrphanedLock removes entryName from root if it's a "<generation>.lock"
+// file whose generation dir was already absent from knownGenerations -- the
+// set of directories present when this pass's os.ReadDir ran, before any of
+// this pass's own removals (e.g. Run created the lock file via
+// lockSnapshotShared's O_CREATE, then lost the re-verify-after-lock race
+// against an *earlier* reclaim pass that had already RemoveAll'd the dir) --
+// otherwise these accumulate in root forever, since the main loop above only
+// ever considers directory entries. knownGenerations, not a live os.Stat,
+// is what makes this safe: a live check would also treat "this pass just
+// RemoveAll'd it a moment ago" as orphaned, deleting a lock file whose
+// generation was still live at the start of the pass and breaking mutual
+// exclusion for anyone concurrently holding it (issue #2680 review
+// finding). Best-effort and silent on any failure, same posture as every
+// other per-entry step in reclaimStaleSnapshots: a leftover orphaned lock
+// file wastes a negligible amount of disk, never correctness.
+func sweepOrphanedLock(root, entryName, keepGeneration string, knownGenerations map[string]bool) {
+	generation, ok := strings.CutSuffix(entryName, ".lock")
+	if !ok || generation == keepGeneration {
+		return
+	}
+	if knownGenerations[generation] {
+		return // generation dir was present at the start of this pass -- not orphaned
+	}
+	lockPath := filepath.Join(root, entryName)
+	lf, err := os.OpenFile(lockPath, os.O_RDWR, 0o644)
+	if err != nil {
+		return
+	}
+	if err := syscall.Flock(int(lf.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		// Still referenced (e.g. Run is mid-race, about to discover its
+		// generation dir is gone) -- leave it for a later reclaim pass.
+		lf.Close()
+		return
+	}
+	_ = os.Remove(lockPath)
+	unlockSnapshot(lf)
 }
 
 // realize runs `nix build <drv>^* --no-link` for a single closure, wrapping
