@@ -1158,6 +1158,24 @@ let
   groupFilePath = builtins.unsafeDiscardStringContext (toString groupFile);
   groupFileDrv = builtins.unsafeDiscardStringContext groupFile.drvPath;
 
+  # The bwrap freshness dimension (issue #2667) needs ONE comparable output
+  # path standing in for "the bwrap agent closure as a whole" — linkFarm
+  # bundles agentFiles + agentEnv into a single derivation whose own output
+  # path changes whenever either sub-closure does, without merging their
+  # directory trees (which agentFiles/agentEnv aren't guaranteed not to
+  # collide on).
+  agentClosure = pkgs.linkFarm "agent-closure" [
+    {
+      name = "files";
+      path = agentFiles;
+    }
+    {
+      name = "env";
+      path = agentEnv;
+    }
+  ];
+  agentClosurePath = builtins.unsafeDiscardStringContext (toString agentClosure);
+
   # runnerKind collapses the runtime knob to the two adapter families the
   # launcher knows: "bwrap" (daemonless) or "oci" (podman/docker).
   runnerKind = if runtime == "bwrap" then "bwrap" else "oci";
@@ -1190,6 +1208,7 @@ let
       agentEnvPath
       passwdFilePath
       groupFilePath
+      agentClosurePath
       imagePath
       imageHash
       launcherCurrencyHash
@@ -1728,7 +1747,10 @@ else
       spindrift-zsh-completion = zshCompletion;
     }
     # The OCI image is not relevant for the bwrap runner (no image build/load).
-    // lib.optionalAttrs (isLinux && runtime != "bwrap") { agent-image = image; };
+    // lib.optionalAttrs (isLinux && runtime != "bwrap") { agent-image = image; }
+    # The bwrap counterpart: one flake package standing in for the whole
+    # agent closure, so freshness (issue #2667) has a single attr to realize.
+    // lib.optionalAttrs (isLinux && runtime == "bwrap") { agent-closure = agentClosure; };
 
     # apps.default (`nix run .`) is the sole app output: the spindrift CLI.
     # The `build`/`run` app-style aliases were removed (issue #613); the

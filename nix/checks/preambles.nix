@@ -237,6 +237,7 @@ in
         agentEnvPath = "/nix/store/bbb-agent-env";
         passwdFilePath = "/nix/store/eee-passwd";
         groupFilePath = "/nix/store/fff-group";
+        agentClosurePath = "/nix/store/ggg-agent-closure";
         prefetch = "";
         imagePath = "/nix/store/ccc-image";
         imageHash = "deadbeef";
@@ -328,6 +329,12 @@ in
     assert assertMsg (
       out.LAUNCHER_CURRENCY_HASH == "deadbeefdeadbeefdeadbeefdeadbeef"
     ) "runArtifacts (bwrap) must set LAUNCHER_CURRENCY_HASH, got: ${builtins.toJSON out}";
+    assert assertMsg (
+      out.FLAKE_IMAGE_ATTR == ".#packages.x86_64-linux.agent-closure"
+    ) "runArtifacts (bwrap) must set FLAKE_IMAGE_ATTR to the agent-closure package, got: ${builtins.toJSON out}";
+    assert assertMsg (
+      out.IMAGE_TAG == "/nix/store/ggg-agent-closure"
+    ) "runArtifacts (bwrap) must set IMAGE_TAG to the loaded agent-closure output path, got: ${builtins.toJSON out}";
     pkgs.runCommand "preambles-run-artifacts-bwrap" { } "touch $out";
 
   preambles-run-artifacts-oci =
@@ -342,6 +349,7 @@ in
         agentEnvPath = "/nix/store/bbb-agent-env";
         passwdFilePath = "/nix/store/eee-passwd";
         groupFilePath = "/nix/store/fff-group";
+        agentClosurePath = "/nix/store/ggg-agent-closure";
         prefetch = "";
         imagePath = "/nix/store/ccc-image";
         imageHash = "deadbeef";
@@ -450,6 +458,7 @@ in
         agentEnvPath = "/nix/store/bbb-agent-env";
         passwdFilePath = "/nix/store/eee-passwd";
         groupFilePath = "/nix/store/fff-group";
+        agentClosurePath = "/nix/store/ggg-agent-closure";
         prefetch = "";
         imagePath = "/nix/store/ccc-image";
         imageHash = "deadbeef";

@@ -16,6 +16,10 @@ let
   # so the FLAKE_LAUNCHER_ATTR string is defined once instead of duplicated
   # verbatim at both call sites.
   launcherCurrencyAttr = system: ".#packages.${system}.launcher-currency";
+  # Shared by runArtifacts' bwrap/OCI branches and buildArtifacts' OCI branch
+  # below (issue #2667 review fix) so the FLAKE_IMAGE_ATTR shape is defined
+  # once instead of hand-assembled at each call site.
+  flakeImageAttrFor = system: name: ".#packages.${system}.${name}";
 in
 rec {
   # One renderer used by both the shell and Go preamble families: iterates
@@ -103,6 +107,7 @@ rec {
       agentEnvPath,
       passwdFilePath,
       groupFilePath,
+      agentClosurePath,
       prefetch,
       imagePath,
       imageHash,
@@ -152,6 +157,12 @@ rec {
           PASSWD_FILE = passwdFilePath;
           GROUP_FILE = groupFilePath;
           BAKED_PREFETCH = prefetch;
+          # The bwrap freshness dimension (issue #2667): the same two keys
+          # the OCI branch below renders, populated with the bwrap agent
+          # closure's own flake attr/output path so Probe() can compare
+          # them without caring which runnerKind produced them.
+          FLAKE_IMAGE_ATTR = flakeImageAttrFor systems.linux "agent-closure";
+          IMAGE_TAG = agentClosurePath;
         }
       else
         {
@@ -162,7 +173,7 @@ rec {
           IMAGE_DRV = imageDrv;
           NIX_BUILDER_IMAGE = nixBuilderImage;
           NIX_VOLUME = "spindrift-nix";
-          FLAKE_IMAGE_ATTR = ".#packages.${systems.linux}.agent-image";
+          FLAKE_IMAGE_ATTR = flakeImageAttrFor systems.linux "agent-image";
         }
     )
     // {
@@ -235,7 +246,7 @@ rec {
           IMAGE_DRV = imageDrv;
           NIX_BUILDER_IMAGE = nixBuilderImage;
           NIX_VOLUME = "spindrift-nix";
-          FLAKE_IMAGE_ATTR = ".#packages.${systems.linux}.agent-image";
+          FLAKE_IMAGE_ATTR = flakeImageAttrFor systems.linux "agent-image";
         }
     )
     // {
@@ -271,6 +282,7 @@ rec {
           agentEnvPath = "dummy";
           passwdFilePath = "dummy";
           groupFilePath = "dummy";
+          agentClosurePath = "dummy";
           prefetch = "dummy";
           imagePath = "dummy";
           imageHash = "dummy";
