@@ -146,6 +146,12 @@ rec {
       workerProvisioned,
       reviewLoopInline,
       reviewLoopOrchestrator,
+      # The bwrap-only nix.conf artifact (issue #2664): the ephemeral overlay
+      # store's nix.conf, sourced from the same nixConfigFile derivation the
+      # OCI image bakes in directly (so oci never needs a runtime artifact
+      # for it). Defaults to "" so a non-nixInBox Consumer's runArtifacts
+      # call renders the key present-but-empty rather than omitting it.
+      nixConfigPath ? "",
     }:
     (
       if runnerKind == "bwrap" then
@@ -157,6 +163,7 @@ rec {
           PASSWD_FILE = passwdFilePath;
           GROUP_FILE = groupFilePath;
           BAKED_PREFETCH = prefetch;
+          NIX_CONFIG_FILE = nixConfigPath;
           # The bwrap freshness dimension (issue #2667): the same two keys
           # the OCI branch below renders, populated with the bwrap agent
           # closure's own flake attr/output path so Probe() can compare
@@ -228,6 +235,9 @@ rec {
       # its comment for the bundling rationale and the FLAKE_IMAGE_ATTR/
       # FLAKE_LAUNCHER_ATTR divergence.
       systems,
+      # The bwrap-only nix.conf build artifact (issue #2664) -- see
+      # runArtifacts' nixConfigPath comment above for why it defaults to "".
+      nixConfigDrv ? "",
     }:
     (
       if runnerKind == "bwrap" then
@@ -237,6 +247,7 @@ rec {
           AGENT_ENV_DRV = agentEnvDrv;
           PASSWD_FILE_DRV = passwdFileDrv;
           GROUP_FILE_DRV = groupFileDrv;
+          NIX_CONFIG_FILE_DRV = nixConfigDrv;
         }
       else
         {
@@ -308,6 +319,7 @@ rec {
           workerProvisioned = false;
           reviewLoopInline = false;
           reviewLoopOrchestrator = false;
+          nixConfigPath = "dummy";
         };
       dummyBuildArtifacts =
         runnerKind:
@@ -328,6 +340,7 @@ rec {
             host = "dummy";
             linux = "dummy";
           };
+          nixConfigDrv = "dummy";
         };
       allKeys =
         builtins.concatMap (runnerKind: builtins.attrNames (dummyRunArtifacts runnerKind)) [
