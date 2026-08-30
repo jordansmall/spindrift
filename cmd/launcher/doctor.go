@@ -9,19 +9,17 @@ import (
 
 	"spindrift.dev/launcher/internal/doctor"
 	"spindrift.dev/launcher/internal/forge"
-	"spindrift.dev/launcher/internal/forge/local"
 )
 
 // cmdDoctor is the `doctor` subcommand: probe each forge seam through its
 // own adapter (not the combined Client) so a CODE_FORGE=git deployment
 // checks the actual remote it will push to, not the IssueTracker's repo a
-// second time. No runner/dispatch/settle wiring needed, so it does not go
-// through bootstrap.
+// second time. No runner/dispatch/settle wiring needed, so it builds its
+// wiring via newReadContext (issue #2941) rather than going through
+// bootstrap.
 func cmdDoctor() int {
-	c := loadConfig()
-	it := newIssueTracker(c)
-	cf := newCodeForge(c, local.SanitizedParent{}, it)
-	return doctorReport(it, cf, c, os.Stdout, os.Stderr, os.Stdin, isStdinTTY())
+	rc := newReadContext()
+	return doctorReport(rc.issueTracker, rc.codeForge, rc.config, os.Stdout, os.Stderr, os.Stdin, isStdinTTY())
 }
 
 // doctorReport runs cmdDoctor's full exit-vocabulary classification (issue

@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"spindrift.dev/launcher/internal/forge"
-	"spindrift.dev/launcher/internal/forge/local"
 	"spindrift.dev/launcher/internal/localloop"
 	"spindrift.dev/launcher/internal/reconcile"
 )
@@ -93,12 +92,11 @@ func surfaceAfterDispatch(c config, lw *localloop.Wired, pwd string, w io.Writer
 // cmdReconcile is the `reconcile` subcommand: the local-tracker bookkeeping
 // sweep (ADR 0029). Like cmdDoctor, it needs only the IssueTracker/CodeForge
 // seams plus a bare runner for the LivenessProbe's container check — no
-// EnsureReady/IsReady gate, dispatch factory, or settle wiring — so it does
-// not go through bootstrap.
+// EnsureReady/IsReady gate, dispatch factory, or settle wiring — so it builds
+// its wiring via newReadContext (issue #2941), including the LivenessProbe's
+// conditional runner, rather than going through bootstrap.
 func cmdReconcile() int {
-	c := loadConfig()
-	it := newIssueTracker(c)
-	cf := newCodeForge(c, local.SanitizedParent{}, it)
+	rc := newReadContext()
 
 	pwd, err := os.Getwd()
 	if err != nil {
@@ -106,16 +104,8 @@ func cmdReconcile() int {
 		return 1
 	}
 
-	// The runner only matters for the LivenessProbe's container check, which
-	// runReconcile below only reaches for a local tracker — skip building one
-	// for the common github/jira "nothing to do" refusal.
-	var lp reconcile.LivenessProbe
-	if c.issueTracker == "local" {
-		rc := runnerConfig(c)
-		r := runnerForKind(c, rc, pwd)
-		lp = reconcile.NewFSProbe(pwd, r)
-	}
-	if err := runReconcile(c, it, cf, lp, pwd, os.Stdout); err != nil {
+	lp := rc.reconcileLivenessProbe(pwd)
+	if err := runReconcile(rc.config, rc.issueTracker, rc.codeForge, lp, pwd, os.Stdout); err != nil {
 		fmt.Fprintf(os.Stderr, "%s\n", err)
 		return 1
 	}
