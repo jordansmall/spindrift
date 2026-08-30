@@ -111,6 +111,10 @@ type bwrapAdapter struct {
 	// before bwrap ever runs, rather than a raw bwrap mount failure.
 	nixConfigFile     string
 	nixVarSnapshotDir string
+	// nixVarSnapshotRoot is the pwd-derived root snapshotDirFor joins a
+	// per-launch generation (box.ClosureGeneration, issue #2681) onto — see
+	// nixVarSnapshotRoot(pwd) below.
+	nixVarSnapshotRoot string
 	// nixStoreWritable gates whether /nix/store itself gets the same
 	// overlay treatment as /nix/var above (ADR 0042): an ephemeral tmpfs
 	// upper over the host's real store, so paths built/substituted in the
@@ -206,29 +210,31 @@ func nixVarSnapshotRoot(pwd string) string {
 // closureGeneration derives the generation subdir nixVarSnapshotDir nests
 // under from a bwrap-runtime Config.ImageTag (the bundled agent-closure's
 // loaded nix store path, e.g. /nix/store/<hash>-agent-closure — see
-// Config.ImageTag's doc comment). Empty imageTag (no closure known) returns
-// "" rather than filepath.Base("")'s "." — "." is not a safe/intended
-// directory name here, and "" is what makes nixVarSnapshotDir's empty-
-// generation fallback kick in.
-//
-// imageTag is read from an environment variable / input-document artifact
-// (getenvArtifact, cmd/launcher/inputdoc.go) that an untrusted source can
-// influence, and the result becomes a path component threaded into a
-// directory reclaimStaleSnapshots later os.RemoveAll's. filepath.Base alone
-// doesn't guard against a hostile imageTag: filepath.Base("..") is "..",
-// filepath.Base(".") is ".", filepath.Base("/") is the separator itself —
-// any of those steer the eventual RemoveAll outside the intended snapshot
-// root. Reject them the same way empty is rejected, falling back to the
-// flat-path "".
+// Config.ImageTag's doc comment). imageTag is read from an environment
+// variable / input-document artifact (getenvArtifact,
+// cmd/launcher/inputdoc.go) that an untrusted source can influence, and the
+// result becomes a path component threaded into a directory
+// reclaimStaleSnapshots later os.RemoveAll's — see safePathComponent's doc
+// comment for the empty/"."/".."/separator rejection rule this delegates to.
 func closureGeneration(imageTag string) string {
-	if imageTag == "" {
+	return safePathComponent(imageTag)
+}
+
+// safePathComponent returns s unless it is unsafe to use as a single path
+// component — empty, ".", "..", or a bare separator — in which case it
+// returns "" so the caller can fall back to a known-safe default. Shared by
+// closureGeneration (derives a generation label from Config.ImageTag) and
+// snapshotDirFor (validates a Box-supplied AgentGeneration.Generation, issue
+// #2681) so both rejection paths stay in lockstep.
+func safePathComponent(s string) string {
+	if s == "" {
 		return ""
 	}
-	gen := filepath.Base(imageTag)
-	if gen == "." || gen == ".." || gen == string(filepath.Separator) {
+	base := filepath.Base(s)
+	if base == "." || base == ".." || base == string(filepath.Separator) {
 		return ""
 	}
-	return gen
+	return base
 }
 
 // snapshotLockPath is the one place the "<generation dir>.lock" naming
@@ -325,6 +331,7 @@ func NewBwrap(cfg Config, pwd string) Runner {
 		driverSessionCacheDir:    cfg.DriverSessionCacheDir,
 		nixConfigFile:            cfg.NixConfigFile,
 		nixVarSnapshotDir:        nixVarSnapshotDir(pwd, closureGeneration(cfg.ImageTag)),
+		nixVarSnapshotRoot:       nixVarSnapshotRoot(pwd),
 		nixStoreWritable:         cfg.NixStoreWritable,
 		hostMediatedRemote:       cfg.HostMediatedRemote,
 		accumulationRepoDir:      cfg.AccumulationRepoDir,
@@ -413,6 +420,44 @@ func (a *bwrapAdapter) pastaPath() bool {
 	return a.isolateNet() && a.networkMode != NetworkModeNone
 }
 
+// agentFilesFor resolves the agent-closure store path box's launch should
+// bind: box.ClosureGeneration's override when set AND non-empty (issue
+// #2681), else the adapter's own startup-baked a.agentFiles — today's
+// behaviour, unchanged. A non-nil ClosureGeneration with an empty AgentFiles
+// (a partially-populated override) falls back to a.agentFiles too, rather
+// than returning "" verbatim — callers append "/agent" and "/home/agent" to
+// this result, and an empty base would silently bind the HOST's own /agent
+// and home directory into the sandbox instead of a store closure.
+func (a *bwrapAdapter) agentFilesFor(box Box) string {
+	if box.ClosureGeneration != nil && box.ClosureGeneration.AgentFiles != "" {
+		return box.ClosureGeneration.AgentFiles
+	}
+	return a.agentFiles
+}
+
+// snapshotDirFor resolves the nix-var store-DB snapshot directory box's
+// launch should overlay onto /nix/var and lock for its lifetime: box.
+// ClosureGeneration's Generation label (issue #2681), validated through
+// safePathComponent and joined onto the adapter's own pwd-derived root, when
+// set and safe — else the adapter's own startup-baked a.nixVarSnapshotDir,
+// today's behaviour, unchanged. An empty or unsafe (".", "..", bare
+// separator) Generation falls back the same way: joining a raw "" would
+// resolve to the root itself (the container of every generation dir, with
+// no db.sqlite of its own), and joining a raw ".." would escape it entirely.
+// Joins directly with filepath.Join rather than calling the
+// nixVarSnapshotDir free function (which itself re-derives the root via
+// nixVarSnapshotRoot(pwd)) — a.nixVarSnapshotRoot is already that root, so
+// routing it back through nixVarSnapshotDir would double-append
+// ".spindrift/nix-var-snapshot".
+func (a *bwrapAdapter) snapshotDirFor(box Box) string {
+	if box.ClosureGeneration != nil {
+		if gen := safePathComponent(box.ClosureGeneration.Generation); gen != "" {
+			return filepath.Join(a.nixVarSnapshotRoot, gen)
+		}
+	}
+	return a.nixVarSnapshotDir
+}
+
 // buildArgs constructs the bwrap command-line arguments for the given box.
 // The /etc/passwd and /etc/group binds source a.passwdFile/a.groupFile, baked
 // nix store paths rather than a runner-written temp-dir copy (issue #2663).
@@ -457,7 +502,7 @@ func (a *bwrapAdapter) buildArgs(etcDir string, box Box) []string {
 	// host's real store — when both are true.
 	if a.nixConfigFile != "" {
 		args = append(args, "--ro-bind", a.nixConfigFile, "/etc/nix/nix.conf")
-		args = append(args, "--overlay-src", a.nixVarSnapshotDir, "--tmp-overlay", "/nix/var")
+		args = append(args, "--overlay-src", a.snapshotDirFor(box), "--tmp-overlay", "/nix/var")
 	}
 	if !isolateNet {
 		if err := statResolvConf(); err == nil {
@@ -469,7 +514,8 @@ func (a *bwrapAdapter) buildArgs(etcDir string, box Box) []string {
 		// file pointed at pastaDNSForwardAddr before invoking bwrap.
 		args = append(args, "--ro-bind", filepath.Join(etcDir, "resolv.conf"), "/etc/resolv.conf")
 	}
-	args = append(args, "--ro-bind", a.agentFiles+"/agent", "/agent")
+	agentFiles := a.agentFilesFor(box)
+	args = append(args, "--ro-bind", agentFiles+"/agent", "/agent")
 	// The real /home/agent above is a fresh writable tmpfs, so baked content
 	// (Claude hooks, settings.json, opencode agent files) can't be ro-bound
 	// there directly; stage it read-only at a fresh top-level path instead.
@@ -478,7 +524,7 @@ func (a *bwrapAdapter) buildArgs(etcDir string, box Box) []string {
 	// cannot fabricate a new mountpoint inside a bind already made read-only
 	// (issue #2843). entrypoint.sh copies the staged content into the
 	// writable /home/agent at startup.
-	args = append(args, "--ro-bind", a.agentFiles+"/home/agent", homeAgentStagingDir)
+	args = append(args, "--ro-bind", agentFiles+"/home/agent", homeAgentStagingDir)
 	// Mount decisions (gates, existence guards, operator messages) are
 	// computed once in buildMountSpecs, shared with the OCI adapter; bwrap
 	// only renders each spec into its own bind syntax. The driver-cache spec
@@ -926,9 +972,9 @@ func (a *bwrapAdapter) Run(box Box) error {
 	cmd.Stderr = out
 
 	// nixVarSnapshotLock, when non-nil, holds a shared advisory flock on
-	// snapshotLockPath(a.nixVarSnapshotDir) for the life of the sandboxed
+	// snapshotLockPath(a.snapshotDirFor(box)) for the life of the sandboxed
 	// process. Gated on nixConfigFile, the same condition buildArgs uses to
-	// decide whether to mount nixVarSnapshotDir at all -- nix-in-box off
+	// decide whether to mount a.snapshotDirFor(box) at all -- nix-in-box off
 	// means nothing is mounted, so there is nothing to protect.
 	// reclaimStaleSnapshots attempts a non-blocking exclusive lock on this
 	// same file to tell whether any live Box is still reading this
@@ -947,15 +993,20 @@ func (a *bwrapAdapter) Run(box Box) error {
 	// path alone must never fail Run, which is why it's warn-and-proceed.
 	var nixVarSnapshotLock *os.File
 	if a.nixConfigFile != "" {
-		lf, err := lockSnapshotShared(a.nixVarSnapshotDir)
+		// snapshotDirFor doc comment above covers the resolution rule; this
+		// is the same call buildArgs' --overlay-src bind uses, so the
+		// lock/stat below always guards the exact directory this launch
+		// actually mounts.
+		snapshotDir := a.snapshotDirFor(box)
+		lf, err := lockSnapshotShared(snapshotDir)
 		if err != nil {
-			fmt.Printf("==> bwrap runner: warning: could not acquire nix-var snapshot lock %s (%v); reclaim cannot detect box %q is reading this generation\n", snapshotLockPath(a.nixVarSnapshotDir), err, box.Name)
-		} else if _, statErr := os.Stat(a.nixVarSnapshotDir); statErr != nil {
+			fmt.Printf("==> bwrap runner: warning: could not acquire nix-var snapshot lock %s (%v); reclaim cannot detect box %q is reading this generation\n", snapshotLockPath(snapshotDir), err, box.Name)
+		} else if _, statErr := os.Stat(snapshotDir); statErr != nil {
 			unlockSnapshot(lf)
 			if cgroupOK {
 				_ = os.Remove(cgroupDir)
 			}
-			return fmt.Errorf("nix-var snapshot %s no longer exists (reclaimed by a concurrent build?): %w", a.nixVarSnapshotDir, statErr)
+			return fmt.Errorf("nix-var snapshot %s no longer exists (reclaimed by a concurrent build?): %w", snapshotDir, statErr)
 		} else {
 			nixVarSnapshotLock = lf
 		}
