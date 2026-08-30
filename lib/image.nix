@@ -397,6 +397,14 @@ let
     agent:x:1000:
   '';
 
+  # Single-sourced so the OCI image and the bwrap runner both consume the
+  # identical file -- never write it twice.
+  nixConfigFile = pkgs.writeText "nix.conf" ''
+    experimental-features = nix-command flakes
+    sandbox = false
+    filter-syscalls = false
+  '';
+
   # Evaluated once so the image's contents, closure registration, and Env
   # marker below all see the identical set of extra derivations.
   extraClosurePaths = packageSet.extraClosures pkgs;
@@ -431,10 +439,7 @@ let
     # `nix flake check` reuses the image's store instead of treating it as empty.
     + lib.optionalString knobs.nixInBox ''
       mkdir -p etc/nix nix/var/nix/db nix/var/nix/gcroots nix/var/nix/profiles nix/var/nix/temproots nix/var/log/nix
-      printf '%s\n' \
-        'experimental-features = nix-command flakes' \
-        'sandbox = false' \
-        'filter-syscalls = false' > etc/nix/nix.conf
+      cp ${nixConfigFile} etc/nix/nix.conf
       export NIX_REMOTE="local?root=$PWD"
       # buildPackages.nix runs at image-build time on the builder host;
       # pkgs.nix (above) is what gets baked into the container's PATH.
@@ -491,5 +496,12 @@ let
   };
 in
 {
-  inherit image agentEnv agentFiles passwdFile groupFile;
+  inherit
+    image
+    agentEnv
+    agentFiles
+    passwdFile
+    groupFile
+    nixConfigFile
+    ;
 }
