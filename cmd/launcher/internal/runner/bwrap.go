@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 )
 
 // execCommand builds the *exec.Cmd for hardcoded-binary orchestration (nix,
@@ -923,10 +924,47 @@ func (a *bwrapAdapter) Run(box Box) error {
 	}
 	cmd.Stdout = out
 	cmd.Stderr = out
+
+	// nixVarSnapshotLock, when non-nil, holds a shared advisory flock on
+	// snapshotLockPath(a.nixVarSnapshotDir) for the life of the sandboxed
+	// process. Gated on nixConfigFile, the same condition buildArgs uses to
+	// decide whether to mount nixVarSnapshotDir at all -- nix-in-box off
+	// means nothing is mounted, so there is nothing to protect.
+	// reclaimStaleSnapshots attempts a non-blocking exclusive lock on this
+	// same file to tell whether any live Box is still reading this
+	// generation, without tracking box->generation mappings anywhere else.
+	// lockSnapshotShared's Flock(LOCK_SH) call is blocking (no LOCK_NB), so
+	// Run genuinely waits out a concurrent reclaim's exclusive hold rather
+	// than racing past it -- but the open and the blocking lock acquire are
+	// still two separate steps, leaving a window where reclaim can win the
+	// exclusive lock and RemoveAll the generation dir in between. Once the
+	// shared lock is actually held, Run re-stats the generation dir (below)
+	// to close that window: proceeding to exec bwrap against a directory
+	// reclaim has already removed would break --overlay-src's mount, so a
+	// failed re-stat here returns an error instead. A failure to open or
+	// lock the file in the first place only degrades reclaim's ability to
+	// detect this box (ADR 0042's own degrade-don't-lie precedent) -- that
+	// path alone must never fail Run, which is why it's warn-and-proceed.
+	var nixVarSnapshotLock *os.File
+	if a.nixConfigFile != "" {
+		lf, err := lockSnapshotShared(a.nixVarSnapshotDir)
+		if err != nil {
+			fmt.Printf("==> bwrap runner: warning: could not acquire nix-var snapshot lock %s (%v); reclaim cannot detect box %q is reading this generation\n", snapshotLockPath(a.nixVarSnapshotDir), err, box.Name)
+		} else if _, statErr := os.Stat(a.nixVarSnapshotDir); statErr != nil {
+			unlockSnapshot(lf)
+			if cgroupOK {
+				_ = os.Remove(cgroupDir)
+			}
+			return fmt.Errorf("nix-var snapshot %s no longer exists (reclaimed by a concurrent build?): %w", a.nixVarSnapshotDir, statErr)
+		} else {
+			nixVarSnapshotLock = lf
+		}
+	}
 	if err := cmd.Start(); err != nil {
 		if cgroupOK {
 			_ = os.Remove(cgroupDir)
 		}
+		unlockSnapshot(nixVarSnapshotLock)
 		return err
 	}
 	if cgroupOK {
@@ -941,6 +979,15 @@ func (a *bwrapAdapter) Run(box Box) error {
 	}
 	a.trackRunning(box.Name, cmd.Process)
 	defer a.untrackRunning(box.Name)
+	// Deferred (unconditionally -- unlockSnapshot no-ops on a nil lock) so a
+	// held shared lock spans cmd.Wait()'s entire duration and is released
+	// only once it returns below -- releasing it any earlier would let
+	// reclaimStaleSnapshots believe this generation is free while the
+	// sandboxed process is still reading it. syscall.Flock releases
+	// automatically if the launcher process itself dies before this defer
+	// runs (fd closes on process exit), so no separate crash-recovery path
+	// is needed here.
+	defer unlockSnapshot(nixVarSnapshotLock)
 	if cgroupOK {
 		// Deferred so cleanup runs after cmd.Wait() below returns -- the
 		// cgroup dir can only be rmdir'd once no live process remains
