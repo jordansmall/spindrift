@@ -1,5 +1,86 @@
 # Changelog
 
+## [0.12.0](https://github.com/jordansmall/spindrift/compare/v0.11.0...v0.12.0) (2026-08-30)
+
+
+### Features
+
+* **console:** slow backlog poll to 3 minutes ([40ad09e](https://github.com/jordansmall/spindrift/commit/40ad09e065898e5caf85de2493f8a4bb4f158976)), closes [#2876](https://github.com/jordansmall/spindrift/issues/2876)
+* **dispatch:** forward registry proxy upstream host ([90ecb1b](https://github.com/jordansmall/spindrift/commit/90ecb1be02a62ea85a8687908af2c2d8abe251a2)), closes [#2851](https://github.com/jordansmall/spindrift/issues/2851)
+* **dispatch:** start a registry proxy per dispatched Box ([576fa94](https://github.com/jordansmall/spindrift/commit/576fa948825ba5054d7ed79cc3b4481a2e2b8750)), closes [#2849](https://github.com/jordansmall/spindrift/issues/2849)
+* **entrypoint:** add in-Box registry proxy Forwarder ([0dd9aca](https://github.com/jordansmall/spindrift/commit/0dd9aca20815843c628523a7fcca0ea37a229d71)), closes [#2849](https://github.com/jordansmall/spindrift/issues/2849)
+* **entrypoint:** bind Gradle to the registry proxy Forwarder ([9a12a6b](https://github.com/jordansmall/spindrift/commit/9a12a6ba72c545ffe0416e3b081b1f64af21df25))
+* **entrypoint:** bind in-tree cargo config to proxy ([026d9e7](https://github.com/jordansmall/spindrift/commit/026d9e7e12efb2f15e5e8403e35c99744369f26a)), closes [#2851](https://github.com/jordansmall/spindrift/issues/2851)
+* **entrypoint:** bind npm's default registry to the Forwarder ([46f9d04](https://github.com/jordansmall/spindrift/commit/46f9d046652a8c3d48554a8342e83baee8659ef8))
+* **entrypoint:** bind pnpm's default registry to the Forwarder ([7e77016](https://github.com/jordansmall/spindrift/commit/7e7701655f261548a07271b2c9eeaeca2eb6c172))
+* **entrypoint:** bind yarn berry's default registry to the Forwarder ([3ae7057](https://github.com/jordansmall/spindrift/commit/3ae70579cb72f61ca6e023e1c22389990d173185))
+* **entrypoint:** recognize Gradle projects in toolchain nudge ([ca0ba43](https://github.com/jordansmall/spindrift/commit/ca0ba43eaa80e406914aa863793dc4c395f8a5bd))
+* **entrypoint:** rewrite in-tree .npmrc for scoped registries ([00f349d](https://github.com/jordansmall/spindrift/commit/00f349dae1127300ca9933bd750a085b4946256e))
+* **entrypoint:** rewrite in-tree .yarnrc.yml for yarn berry scoped registries ([2e88818](https://github.com/jordansmall/spindrift/commit/2e88818b868e45ffe51f222b9e6132826817b993))
+* **entrypoint:** rewrite pnpm-workspace.yaml registries ([52f0943](https://github.com/jordansmall/spindrift/commit/52f09433a483214a97ea758fd19373ec6727edfc)), closes [#2855](https://github.com/jordansmall/spindrift/issues/2855)
+* **forge/github:** add gh stderr error helper ([549ac60](https://github.com/jordansmall/spindrift/commit/549ac604aa532b2664f2d1f29df4619948f3d088))
+* **forge/github:** add ghCommandErrText helper ([d43678d](https://github.com/jordansmall/spindrift/commit/d43678d63ce367479f2a40efa427cafb524d9cb9))
+* **forge/github:** classify rate-limited gh failures ([46a6d8e](https://github.com/jordansmall/spindrift/commit/46a6d8e23e24098b4a508c345c31acf92e270771))
+* **launcher:** add non-destructive credential peek ([5999be7](https://github.com/jordansmall/spindrift/commit/5999be77b4e4147005bee522732040c01f653537))
+* **launcher:** doctor checks credential resolvability ([0732ef1](https://github.com/jordansmall/spindrift/commit/0732ef1602816c044219d44da1da5bfa686d88d7))
+* **launcher:** resolve registry proxy credential at startup ([5bf4493](https://github.com/jordansmall/spindrift/commit/5bf4493eb0133de24edec93fc032e44d3332de99)), closes [#2850](https://github.com/jordansmall/spindrift/issues/2850)
+* **launcher:** wire transient-retry knobs into waves.Config ([75eddb5](https://github.com/jordansmall/spindrift/commit/75eddb526906b7be9d90a2109a7c67a32902e0d0))
+* **prompts:** add code-comments rule, inject into fix-prompt ([8e7ccce](https://github.com/jordansmall/spindrift/commit/8e7ccce6bf33b211241c55b0fbcdc99224053289))
+* **prompts:** coordinator enforces code-comments on slices ([db4f2a1](https://github.com/jordansmall/spindrift/commit/db4f2a180e084d0561df30a356e8607c28ab6892))
+* **prompts:** deliver code-comments rule to conflict-resolve ([952fb3e](https://github.com/jordansmall/spindrift/commit/952fb3ec67d4c7bd3d75a296b2b7c3c183caded1))
+* **prompts:** deliver code-comments rule to worker-prompt.md ([552ff91](https://github.com/jordansmall/spindrift/commit/552ff9171893e1ce0eed4adb7e9da09af74d9ba6))
+* **registryproxy:** add go module binding to allowlist ([0fd5bf1](https://github.com/jordansmall/spindrift/commit/0fd5bf16e46cfceae3b5cdd36c8e4800f6e9e41c))
+* **registryproxy:** add npm to the path-allowlist table ([07ce126](https://github.com/jordansmall/spindrift/commit/07ce1264bb7c6369cef94a1cef251f8bc2dcdff7))
+* **registryproxy:** add unauthenticated pass-through proxy ([ded438d](https://github.com/jordansmall/spindrift/commit/ded438d8e7086b2e8d090f73d75c5e7b3d4290b1)), closes [#2849](https://github.com/jordansmall/spindrift/issues/2849)
+* **registryproxy:** attach credential to outbound requests ([d8246b5](https://github.com/jordansmall/spindrift/commit/d8246b5764628a0a00e3de86607ca5bf5f98824b)), closes [#2850](https://github.com/jordansmall/spindrift/issues/2850)
+* **registryproxy:** bind go module fetches to the proxy ([89b259e](https://github.com/jordansmall/spindrift/commit/89b259e39bcb75b6203668928fb6aac3d6e5a646))
+* **registryproxy:** derive path allowlist from binding table ([a3c1f68](https://github.com/jordansmall/spindrift/commit/a3c1f68375f4a2f1e92d4bbd5390c28970820a6e))
+* **registryproxy:** log requests outside path allowlist ([fabfb14](https://github.com/jordansmall/spindrift/commit/fabfb1492dcf654888f057c0b739239067f751be))
+* **review:** flag comment-to-code disproportion as blockable ([b83edc1](https://github.com/jordansmall/spindrift/commit/b83edc1269c69fd6c5de740184469267e599a5b5))
+* **runner:** mount the registry-proxy socket per-Box ([c143d00](https://github.com/jordansmall/spindrift/commit/c143d001378e41422624f0ea5d8e91420d1edc81)), closes [#2849](https://github.com/jordansmall/spindrift/issues/2849)
+* **schema:** add registry proxy credential reference knobs ([be74eb9](https://github.com/jordansmall/spindrift/commit/be74eb98eec6f9b57ef7bc7c66ac5c2cd14eef46)), closes [#2850](https://github.com/jordansmall/spindrift/issues/2850)
+* **schema:** bump merge poll interval/timeout defaults ([0f61984](https://github.com/jordansmall/spindrift/commit/0f61984bd338168d8ead830abb931dadc8534c5d))
+* **waves:** retry rate-limited continuous re-discover ([8f53e87](https://github.com/jordansmall/spindrift/commit/8f53e8799f7882e4eccd931c97dabec49d756723)), closes [#2866](https://github.com/jordansmall/spindrift/issues/2866)
+* **waves:** slow continuous refill poll to 3 minutes ([459114b](https://github.com/jordansmall/spindrift/commit/459114b98007e872b971244059e93991ceb6db99)), closes [#2874](https://github.com/jordansmall/spindrift/issues/2874)
+
+
+### Bug Fixes
+
+* **entrypoint:** copy baked home/agent into HOME ([ceb32fd](https://github.com/jordansmall/spindrift/commit/ceb32fd479c70d79c6118408109aa772feac566b)), closes [#2843](https://github.com/jordansmall/spindrift/issues/2843)
+* **forge/github:** route gh exec errors through helper ([a8cd1a4](https://github.com/jordansmall/spindrift/commit/a8cd1a42ea7a607577c3b2ed811eb59790eff666))
+* **forge/github:** surface gh stderr on issue list ([485a217](https://github.com/jordansmall/spindrift/commit/485a217cbd7245eec43a939296c79a10483d5515)), closes [#2863](https://github.com/jordansmall/spindrift/issues/2863)
+* **image:** make baked home/agent contents writable ([241f57f](https://github.com/jordansmall/spindrift/commit/241f57fdd6b0cd29acc1495d01dc6db1441162eb))
+* **runner:** stage baked home/agent under bwrap ([eed4af1](https://github.com/jordansmall/spindrift/commit/eed4af182f33e26761885adf43c25e432f3d3352)), closes [#2843](https://github.com/jordansmall/spindrift/issues/2843)
+
+
+### Security
+
+* **runner:** allowlist bwrap's inherited env ([b961254](https://github.com/jordansmall/spindrift/commit/b961254a99466a506acb59c86d94687e7dcf8af4))
+
+
+### Documentation
+
+* **adr:** add private registry credential design ([8dd0b1f](https://github.com/jordansmall/spindrift/commit/8dd0b1f73682d1b0e5d01c4e2e7115e9a1a82205))
+* **console:** update stale 90s poll comments ([709992e](https://github.com/jordansmall/spindrift/commit/709992e2d0497520d76dced077d41a50fe68e5b4)), closes [#2876](https://github.com/jordansmall/spindrift/issues/2876)
+* **reference:** mirror new merge poll defaults ([a34576e](https://github.com/jordansmall/spindrift/commit/a34576eb2333e69e82912d142b2a2634eb32ace4))
+* **registryproxy:** note go joined cargo in the binding table ([4865657](https://github.com/jordansmall/spindrift/commit/4865657502abfdf1965ce255fc4ba25e8c4223fc))
+* **registryproxy:** record Gradle binding evidence in ADR 0044 ([e4ef19e](https://github.com/jordansmall/spindrift/commit/e4ef19ef4fad2bb3028642ecca51a5f833a3db2d))
+* **registryproxy:** record pnpm binding evidence in ADR 0044 ([d782282](https://github.com/jordansmall/spindrift/commit/d782282d992b02c8c1efe8e22c8ff9bf95ad5c20))
+* **registryproxy:** record yarn Binding evidence in ADR 0044 ([7e45649](https://github.com/jordansmall/spindrift/commit/7e4564908adbbe56424441312c1f8c76b00b4f17))
+* **release-notes:** add 0.12.0 highlights ([5d67c10](https://github.com/jordansmall/spindrift/commit/5d67c10dc2de2524f2420282f937e1908f77f47b))
+
+
+### Tests
+
+* **entrypoint:** confirm yarn classic rides npm's in-tree binding ([0bf7787](https://github.com/jordansmall/spindrift/commit/0bf7787ef95c5b97e40f8eb38821128450cc7e13))
+* **entrypoint:** cover pnpm's in-tree .npmrc binding ([70c083d](https://github.com/jordansmall/spindrift/commit/70c083df980a05fe849b0be668a8de8aca45e80e))
+* **entrypoint:** cover the registry proxy Forwarder phase ([22c1932](https://github.com/jordansmall/spindrift/commit/22c1932930836d2fbeddf84cb5dec186ef693e8c)), closes [#2849](https://github.com/jordansmall/spindrift/issues/2849)
+* **forge/github:** cover rate limit via Probe end-to-end ([8eb984f](https://github.com/jordansmall/spindrift/commit/8eb984f2d31cd0ffbcb022cce1d03ecc77b726e5))
+* **forge/github:** guard bare-wrapped gh exec sites ([49960f1](https://github.com/jordansmall/spindrift/commit/49960f1665113064ae9aa20af340c318dcbcff97)), closes [#2864](https://github.com/jordansmall/spindrift/issues/2864)
+* **image:** catch unwritable baked opencode agent files ([1258cd2](https://github.com/jordansmall/spindrift/commit/1258cd212893aff24fdf836ef8ea07cfc92f27f7))
+* **prompts:** refresh golden fixtures for code-comments rule ([0b70f4c](https://github.com/jordansmall/spindrift/commit/0b70f4c7c69f7fe2f3e43cbbbd4e69b1cc80203f))
+* update merge poll comments to new defaults ([475b6a1](https://github.com/jordansmall/spindrift/commit/475b6a1d862d0dfa10dea37fbc4d32babe0863bf))
+
 ## [0.11.0](https://github.com/jordansmall/spindrift/compare/v0.10.0...v0.11.0) (2026-08-26)
 
 
