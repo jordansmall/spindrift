@@ -20,6 +20,26 @@ let
   # below (issue #2667 review fix) so the FLAKE_IMAGE_ATTR shape is defined
   # once instead of hand-assembled at each call site.
   flakeImageAttrFor = system: name: ".#packages.${system}.${name}";
+  # Shared by runArtifacts' and buildArtifacts' bwrap branches (issue #2672
+  # review fix) so the six build-time drv keys can never render differently
+  # between the run and build documents.
+  bwrapDrvArtifacts =
+    {
+      agentFilesDrv,
+      agentEnvDrv,
+      passwdFileDrv,
+      groupFileDrv,
+      nixConfigDrv ? "",
+      syscallFilterDrv,
+    }:
+    {
+      AGENT_FILES_DRV = agentFilesDrv;
+      AGENT_ENV_DRV = agentEnvDrv;
+      PASSWD_FILE_DRV = passwdFileDrv;
+      GROUP_FILE_DRV = groupFileDrv;
+      NIX_CONFIG_FILE_DRV = nixConfigDrv;
+      SYSCALL_FILTER_DRV = syscallFilterDrv;
+    };
 in
 rec {
   # One renderer used by both the shell and Go preamble families: iterates
@@ -107,6 +127,15 @@ rec {
       agentEnvPath,
       passwdFilePath,
       groupFilePath,
+      # The bwrap-only build-time drv counterparts of the four run-time paths
+      # above (issue #2672): `spindrift build` has no doc of its own -- it
+      # runs against this SAME run document (see the OCI-branch comment
+      # below), so the bwrap branch needs its build artifacts here too, not
+      # only in buildArtifacts' own bwrap branch.
+      agentFilesDrv,
+      agentEnvDrv,
+      passwdFileDrv,
+      groupFileDrv,
       agentClosurePath,
       prefetch,
       imagePath,
@@ -162,11 +191,18 @@ rec {
       # NixConfigFile that makes it a no-op when nixInBox is off lives in
       # cmd/launcher/internal/runner/bwrap.go, not here.
       nixStoreWritable,
+      # The bwrap-only nix.conf build artifact (issue #2672): the drv
+      # counterpart of nixConfigPath above, defaulting to "" for the same
+      # nixInBox-off reason.
+      nixConfigDrv ? "",
       # The compiled BPF syscall-filter artifact (issue #2670 slice 3): unlike
       # nixConfigPath above, this is a bwrap-hardening concern orthogonal to
       # nix-in-box -- it always builds and always renders a real path, so no
       # `?` default and no on/off knob.
       syscallFilterPath,
+      # The build-time drv counterpart of syscallFilterPath above (issue
+      # #2672), same reasoning as agentFilesDrv et al.
+      syscallFilterDrv,
     }:
     (
       if runnerKind == "bwrap" then
@@ -187,6 +223,22 @@ rec {
           # them without caring which runnerKind produced them.
           FLAKE_IMAGE_ATTR = flakeImageAttrFor systems.linux "agent-closure";
           IMAGE_TAG = agentClosurePath;
+        }
+        # The build-time drv counterparts (issue #2672): `spindrift build`
+        # has no doc of its own -- cmdBuild reads this same run document, so
+        # the bwrap branch must carry its own build artifacts the way the
+        # OCI branch already does (IMAGE_DRV et al below), instead of
+        # relying on buildArtifacts' bwrap branch, which only backs the
+        # separate build wrapper script, not `build` run against this doc.
+        // bwrapDrvArtifacts {
+          inherit
+            agentFilesDrv
+            agentEnvDrv
+            passwdFileDrv
+            groupFileDrv
+            nixConfigDrv
+            syscallFilterDrv
+            ;
         }
       else
         {
@@ -263,12 +315,16 @@ rec {
       if runnerKind == "bwrap" then
         {
           RUNTIME = "bwrap";
-          AGENT_FILES_DRV = agentFilesDrv;
-          AGENT_ENV_DRV = agentEnvDrv;
-          PASSWD_FILE_DRV = passwdFileDrv;
-          GROUP_FILE_DRV = groupFileDrv;
-          NIX_CONFIG_FILE_DRV = nixConfigDrv;
-          SYSCALL_FILTER_DRV = syscallFilterDrv;
+        }
+        // bwrapDrvArtifacts {
+          inherit
+            agentFilesDrv
+            agentEnvDrv
+            passwdFileDrv
+            groupFileDrv
+            nixConfigDrv
+            syscallFilterDrv
+            ;
         }
       else
         {
@@ -314,6 +370,10 @@ rec {
           agentEnvPath = "dummy";
           passwdFilePath = "dummy";
           groupFilePath = "dummy";
+          agentFilesDrv = "dummy";
+          agentEnvDrv = "dummy";
+          passwdFileDrv = "dummy";
+          groupFileDrv = "dummy";
           agentClosurePath = "dummy";
           prefetch = "dummy";
           imagePath = "dummy";
@@ -341,8 +401,10 @@ rec {
           reviewLoopInline = false;
           reviewLoopOrchestrator = false;
           nixConfigPath = "dummy";
+          nixConfigDrv = "dummy";
           nixStoreWritable = false;
           syscallFilterPath = "dummy";
+          syscallFilterDrv = "dummy";
         };
       dummyBuildArtifacts =
         runnerKind:

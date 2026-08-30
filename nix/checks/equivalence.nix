@@ -190,11 +190,24 @@ in
     grep -q '"NIX_STORE_WRITABLE":' ${bwrapHarness.internals.runInputDocumentFile}
     # IMAGE_ARCHIVE is not baked as a store path (empty-default guard is fine).
     ! grep -q '"IMAGE_ARCHIVE":"/nix/store/' ${bwrapHarness.internals.runInputDocumentFile}
+    # The build-time drv counterparts (issue #2672): `spindrift build` reads
+    # this SAME run document (no doc of its own), so runArtifacts' bwrap
+    # branch must carry its own copy of these six *_DRV keys independent of
+    # buildArtifacts' bwrap branch below -- a regression that drops them from
+    # runArtifacts alone must fail here, not only in the synthetic fixture
+    # check (nix/checks/preambles.nix).
+    grep -q '"AGENT_FILES_DRV":' ${bwrapHarness.internals.runInputDocumentFile}
+    grep -q '"AGENT_ENV_DRV":' ${bwrapHarness.internals.runInputDocumentFile}
+    grep -q '"PASSWD_FILE_DRV":' ${bwrapHarness.internals.runInputDocumentFile}
+    grep -q '"GROUP_FILE_DRV":' ${bwrapHarness.internals.runInputDocumentFile}
+    grep -q '"NIX_CONFIG_FILE_DRV":' ${bwrapHarness.internals.runInputDocumentFile}
+    grep -q '"SYSCALL_FILTER_DRV":' ${bwrapHarness.internals.runInputDocumentFile}
     grep -q '"AGENT_FILES_DRV":' ${bwrapHarness.internals.buildInputDocumentFile}
     grep -q '"AGENT_ENV_DRV":' ${bwrapHarness.internals.buildInputDocumentFile}
     grep -q '"PASSWD_FILE_DRV":' ${bwrapHarness.internals.buildInputDocumentFile}
     grep -q '"GROUP_FILE_DRV":' ${bwrapHarness.internals.buildInputDocumentFile}
     grep -q '"NIX_CONFIG_FILE_DRV":' ${bwrapHarness.internals.buildInputDocumentFile}
+    grep -q '"SYSCALL_FILTER_DRV":' ${bwrapHarness.internals.buildInputDocumentFile}
     ! grep -q '"IMAGE_DRV":' ${bwrapHarness.internals.buildInputDocumentFile}
     touch $out
   '';
