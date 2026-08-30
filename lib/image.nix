@@ -409,6 +409,10 @@ let
     cores = 4
   '';
 
+  # bwrap-only hardening artifact (issue #2670), unrelated to nix-in-box --
+  # always computed, never gated on knobs.nixInBox.
+  syscallFilter = import ./seccomp.nix { inherit pkgs; };
+
   # Evaluated once so the image's contents, closure registration, and Env
   # marker below all see the identical set of extra derivations.
   extraClosurePaths = packageSet.extraClosures pkgs;
@@ -507,5 +511,6 @@ in
     passwdFile
     groupFile
     nixConfigFile
+    syscallFilter
     ;
 }

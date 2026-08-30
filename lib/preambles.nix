@@ -162,6 +162,11 @@ rec {
       # NixConfigFile that makes it a no-op when nixInBox is off lives in
       # cmd/launcher/internal/runner/bwrap.go, not here.
       nixStoreWritable,
+      # The compiled BPF syscall-filter artifact (issue #2670 slice 3): unlike
+      # nixConfigPath above, this is a bwrap-hardening concern orthogonal to
+      # nix-in-box -- it always builds and always renders a real path, so no
+      # `?` default and no on/off knob.
+      syscallFilterPath,
     }:
     (
       if runnerKind == "bwrap" then
@@ -175,6 +180,7 @@ rec {
           BAKED_PREFETCH = prefetch;
           NIX_CONFIG_FILE = nixConfigPath;
           NIX_STORE_WRITABLE = if nixStoreWritable then "true" else "false";
+          SYSCALL_FILTER = syscallFilterPath;
           # The bwrap freshness dimension (issue #2667): the same two keys
           # the OCI branch below renders, populated with the bwrap agent
           # closure's own flake attr/output path so Probe() can compare
@@ -249,6 +255,9 @@ rec {
       # The bwrap-only nix.conf build artifact (issue #2664) -- see
       # runArtifacts' nixConfigPath comment above for why it defaults to "".
       nixConfigDrv ? "",
+      # See runArtifacts' syscallFilterPath comment above -- unconditional,
+      # no `?` default.
+      syscallFilterDrv,
     }:
     (
       if runnerKind == "bwrap" then
@@ -259,6 +268,7 @@ rec {
           PASSWD_FILE_DRV = passwdFileDrv;
           GROUP_FILE_DRV = groupFileDrv;
           NIX_CONFIG_FILE_DRV = nixConfigDrv;
+          SYSCALL_FILTER_DRV = syscallFilterDrv;
         }
       else
         {
@@ -332,6 +342,7 @@ rec {
           reviewLoopOrchestrator = false;
           nixConfigPath = "dummy";
           nixStoreWritable = false;
+          syscallFilterPath = "dummy";
         };
       dummyBuildArtifacts =
         runnerKind:
@@ -353,6 +364,7 @@ rec {
             linux = "dummy";
           };
           nixConfigDrv = "dummy";
+          syscallFilterDrv = "dummy";
         };
       allKeys =
         builtins.concatMap (runnerKind: builtins.attrNames (dummyRunArtifacts runnerKind)) [

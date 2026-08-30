@@ -1035,6 +1035,7 @@ let
     passwdFile
     groupFile
     nixConfigFile
+    syscallFilter
     ;
 
   # The canonical outcome contract as a host store path, so checks can diff
@@ -1168,6 +1169,8 @@ let
   groupFileDrv = builtins.unsafeDiscardStringContext groupFile.drvPath;
   nixConfigFilePath = builtins.unsafeDiscardStringContext (toString nixConfigFile);
   nixConfigFileDrv = builtins.unsafeDiscardStringContext nixConfigFile.drvPath;
+  syscallFilterPath = builtins.unsafeDiscardStringContext (toString syscallFilter);
+  syscallFilterDrv = builtins.unsafeDiscardStringContext syscallFilter.drvPath;
 
   # The bwrap freshness dimension (issue #2667) needs ONE comparable output
   # path standing in for "the bwrap agent closure as a whole" — linkFarm
@@ -1258,6 +1261,10 @@ let
     # key at all -- the ephemeral overlay store's nix.conf is only relevant
     # when the Box actually gets in-box nix.
     nixConfigPath = if nixInBox then nixConfigFilePath else "";
+    # Unlike nixConfigPath above, the syscall filter is a bwrap-hardening
+    # concern orthogonal to nix-in-box -- it always builds and always
+    # renders its real path, on or off.
+    inherit syscallFilterPath;
   };
 
   buildArtifacts = preambles.buildArtifacts {
@@ -1279,6 +1286,8 @@ let
     # See runArtifacts' nixConfigPath comment above for the nixInBox-off
     # empty-string default.
     nixConfigDrv = if nixInBox then nixConfigFileDrv else "";
+    # See runArtifacts' syscallFilterPath comment above -- unconditional.
+    inherit syscallFilterDrv;
   };
 
   # The rendered documents as host store-path JSON files. The generated
