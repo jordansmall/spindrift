@@ -240,6 +240,66 @@ at 1.0. The env-var names are unchanged. The primary flake surface is the domain
 tree under `perSystem.spindrift.*` (see `docs/flake-options.md`); the
 `settings.<section>.*` paths above remain as deprecated aliases until 1.0.
 
+Full alias-to-domain mapping:
+
+<!-- BEGIN GENERATED LEGACY SETTINGS MAPPING -- nix run .#regen -- DO NOT EDIT -->
+| Legacy alias | Canonical replacement |
+| --- | --- |
+| `perSystem.spindrift.settings.branches.baseBranch` | `perSystem.spindrift.git.baseBranch` |
+| `perSystem.spindrift.settings.branches.branchPrefix` | `perSystem.spindrift.git.branchPrefix` |
+| `perSystem.spindrift.settings.branches.mergeGuardPaths` | `perSystem.spindrift.git.merge.guardPaths` |
+| `perSystem.spindrift.settings.branches.mergeMethod` | `perSystem.spindrift.git.merge.method` |
+| `perSystem.spindrift.settings.branches.mergeMode` | `perSystem.spindrift.git.merge.policy` |
+| `perSystem.spindrift.settings.branches.mergePollInterval` | `perSystem.spindrift.git.merge.pollInterval` |
+| `perSystem.spindrift.settings.branches.mergePollTimeout` | `perSystem.spindrift.git.merge.pollTimeout` |
+| `perSystem.spindrift.settings.concurrency.continuousDispatch` | `perSystem.spindrift.dispatch.continuous.enable` |
+| `perSystem.spindrift.settings.concurrency.maxJobs` | `perSystem.spindrift.dispatch.maxJobs` |
+| `perSystem.spindrift.settings.concurrency.maxParallel` | `perSystem.spindrift.dispatch.maxParallel` |
+| `perSystem.spindrift.settings.concurrency.overlapGate` | `perSystem.spindrift.dispatch.overlapGate` |
+| `perSystem.spindrift.settings.issueDiscovery.issueTracker` | `perSystem.spindrift.issues.tracker` |
+| `perSystem.spindrift.settings.issueDiscovery.jiraIncludeComments` | `perSystem.spindrift.issues.jira.includeComments` |
+| `perSystem.spindrift.settings.issueDiscovery.label` | `perSystem.spindrift.issues.labels.dispatch` |
+| `perSystem.spindrift.settings.issueDiscovery.localIssueReference` | `perSystem.spindrift.issues.localReference` |
+| `perSystem.spindrift.settings.issueDiscovery.localIssuesDir` | `perSystem.spindrift.issues.localDir` |
+| `perSystem.spindrift.settings.lifecycleLabels.completeLabel` | `perSystem.spindrift.issues.labels.complete` |
+| `perSystem.spindrift.settings.lifecycleLabels.failedLabel` | `perSystem.spindrift.issues.labels.failed` |
+| `perSystem.spindrift.settings.lifecycleLabels.inProgressLabel` | `perSystem.spindrift.issues.labels.inProgress` |
+| `perSystem.spindrift.settings.lifecycleLabels.jiraStatusMapping` | `perSystem.spindrift.issues.jira.statusMapping` |
+| `perSystem.spindrift.settings.models.filerModel` | `perSystem.spindrift.agents.models.filer` |
+| `perSystem.spindrift.settings.models.model` | `perSystem.spindrift.agents.models.default` |
+| `perSystem.spindrift.settings.models.reviewModel` | `perSystem.spindrift.agents.models.review` |
+| `perSystem.spindrift.settings.models.scoutModel` | `perSystem.spindrift.agents.models.scout` |
+| `perSystem.spindrift.settings.models.workerModel` | `perSystem.spindrift.agents.models.worker` |
+| `perSystem.spindrift.settings.promptSkillIteration.autoFormat` | `perSystem.spindrift.agents.format.enable` |
+| `perSystem.spindrift.settings.promptSkillIteration.autoLint` | `perSystem.spindrift.agents.lint.enable` |
+| `perSystem.spindrift.settings.promptSkillIteration.orchestratorEnabled` | `perSystem.spindrift.dispatch.orchestrator.enable` |
+| `perSystem.spindrift.settings.repository.boxForgeAndIssueAccess` | `perSystem.spindrift.forge.boxAccess` |
+| `perSystem.spindrift.settings.repository.codeForge` | `perSystem.spindrift.forge.backend` |
+| `perSystem.spindrift.settings.repository.codeForgeAccumulationRepoDir` | `perSystem.spindrift.forge.accumulationRepoDir` |
+| `perSystem.spindrift.settings.repository.codeForgeRemoteURL` | `perSystem.spindrift.forge.remoteURL` |
+| `perSystem.spindrift.settings.repository.ghTokenRefreshFile` | `perSystem.spindrift.forge.ghTokenRefreshFile` |
+| `perSystem.spindrift.settings.repository.gitUserEmail` | `perSystem.spindrift.git.user.email` |
+| `perSystem.spindrift.settings.repository.gitUserName` | `perSystem.spindrift.git.user.name` |
+| `perSystem.spindrift.settings.repository.jiraBaseURL` | `perSystem.spindrift.issues.jira.baseURL` |
+| `perSystem.spindrift.settings.repository.jiraEmail` | `perSystem.spindrift.issues.jira.email` |
+| `perSystem.spindrift.settings.repository.jiraProjectKey` | `perSystem.spindrift.issues.jira.projectKey` |
+| `perSystem.spindrift.settings.repository.repoSlug` | `perSystem.spindrift.forge.repoSlug` |
+| `perSystem.spindrift.settings.sandbox.bwrapUnshareNet` | `perSystem.spindrift.infra.network.bwrapUnshare` |
+| `perSystem.spindrift.settings.sandbox.devShellName` | `perSystem.spindrift.infra.devShell.name` |
+| `perSystem.spindrift.settings.sandbox.devShellProbeTimeout` | `perSystem.spindrift.infra.devShell.probeTimeout` |
+| `perSystem.spindrift.settings.sandbox.memoryLimit` | `perSystem.spindrift.infra.limits.memory` |
+| `perSystem.spindrift.settings.sandbox.pidsLimit` | `perSystem.spindrift.infra.limits.pids` |
+| `perSystem.spindrift.settings.sandbox.podmanNetwork` | `perSystem.spindrift.infra.network.podman` |
+| `perSystem.spindrift.settings.selfHealing.holdJitterSecs` | `perSystem.spindrift.dispatch.retry.holdJitter` |
+| `perSystem.spindrift.settings.selfHealing.maxBudgetTokens` | `perSystem.spindrift.dispatch.budget.tokens` |
+| `perSystem.spindrift.settings.selfHealing.maxBudgetUSD` | `perSystem.spindrift.dispatch.budget.usd` |
+| `perSystem.spindrift.settings.selfHealing.maxFixAttempts` | `perSystem.spindrift.dispatch.retry.maxFix` |
+| `perSystem.spindrift.settings.selfHealing.maxRebaseAttempts` | `perSystem.spindrift.dispatch.retry.maxRebase` |
+| `perSystem.spindrift.settings.selfHealing.preflightStaleBase` | `perSystem.spindrift.git.merge.preflightStaleBase` |
+| `perSystem.spindrift.settings.selfHealing.transientBackoffSecs` | `perSystem.spindrift.dispatch.retry.transientBackoff` |
+| `perSystem.spindrift.settings.selfHealing.transientRetryMax` | `perSystem.spindrift.dispatch.retry.transientMax` |
+<!-- END GENERATED LEGACY SETTINGS MAPPING -->
+
 ## `REVIEW_EFFORT` dispatch-time override removed (issue #2512)
 
 `REVIEW_EFFORT` (`--review-effort` / `perSystem.spindrift.agents.models.reviewEffort`)

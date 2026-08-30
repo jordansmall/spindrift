@@ -49,6 +49,7 @@ let
   rosterDefaults =
     (import ../../lib/roster-schema-defaults.nix { inherit (pkgs) lib; }).rosterDefaults;
   defaultModelFixture = import ../../lib/default-model-fixture.nix;
+  legacySettingsSection = import ../../lib/legacy-settings-section.nix;
   # Shared by roster-doc-efforts and roster-doc-efforts-guard so the doc's
   # expected effort string and its name list/format can't drift between the
   # check and its regression guard.
@@ -612,6 +613,25 @@ let
         want: ${generated}'';
     docSrc;
 
+  # Asserts docSrc's generated legacy-settings-to-domain-tree mapping table
+  # (between its BEGIN/END GENERATED LEGACY SETTINGS MAPPING markers, issue
+  # #2558) matches generated, else throws. Factored out onto the shared
+  # assertMarkedBlockOk above (with docPath = "MIGRATING.md", since this
+  # table lives in MIGRATING.md rather than docs/reference.md), so
+  # legacy-settings-mapping-doc-guard can exercise this exact marker-split +
+  # equality assertion path against a synthetic doc, not only the real
+  # MIGRATING.md content.
+  assertLegacySettingsMappingDocOk =
+    { docSrc, generated }:
+    assertMarkedBlockOk {
+      blockName = "LEGACY SETTINGS MAPPING";
+      sourceDesc = "lib/legacy-settings-section.nix";
+      docPath = "MIGRATING.md";
+      beginMarker = "<!-- BEGIN GENERATED LEGACY SETTINGS MAPPING -- nix run .#regen -- DO NOT EDIT -->\n";
+      endMarker = "<!-- END GENERATED LEGACY SETTINGS MAPPING -->";
+      inherit docSrc generated;
+    };
+
   # Shared by assertSettingsExampleModelsDocOk/assertSettingsExampleLabelsDocOk/
   # assertSettingsExampleConfigDocOk: each settings-example sub-block lives
   # between its own BEGIN/END marker pair inside the doc's illustrative flat
@@ -629,6 +649,7 @@ let
       endMarker,
       docSrc,
       generated,
+      docPath ? "docs/reference.md",
     }:
     let
       inherit (pkgs.lib) assertMsg;
@@ -639,7 +660,7 @@ let
         if builtins.length parts >= 3 then
           builtins.elemAt parts 2
         else
-          throw "docs/reference.md: BEGIN GENERATED ${blockName} marker not found";
+          throw "${docPath}: BEGIN GENERATED ${blockName} marker not found";
       committed =
         let
           parts = builtins.split endMarker afterBegin;
@@ -647,10 +668,10 @@ let
         if builtins.length parts >= 3 then
           builtins.elemAt parts 0
         else
-          throw "docs/reference.md: END GENERATED ${blockName} marker not found";
+          throw "${docPath}: END GENERATED ${blockName} marker not found";
     in
     assert assertMsg (committed == generated) ''
-      docs/reference.md generated ${blockName} sub-block is out of sync with ${sourceDesc} — regenerate it with `nix run .#regen`
+      ${docPath} generated ${blockName} sub-block is out of sync with ${sourceDesc} — regenerate it with `nix run .#regen`
         got:  ${committed}
         want: ${generated}'';
     docSrc;
@@ -2568,6 +2589,58 @@ in
       "default-models-doc-guard: expected assertDefaultModelsDocOk to reject a synthetic doc whose generated Default models table has drifted, but it evaluated successfully";
     pkgs.runCommand "default-models-doc-guard" { } "touch $out";
 
+  # MIGRATING.md's generated legacy-settings-to-domain-tree mapping table
+  # (between its BEGIN/END GENERATED LEGACY SETTINGS MAPPING markers, issue
+  # #2558) must match the content rendered from
+  # lib/legacy-settings-section.nix -- one row per legacy `settings.<section>`
+  # alias mapped to its canonical `perSystem.spindrift.*` domain-tree path, so
+  # the table can't drift from the frozen alias map the way the four
+  # hand-picked prose examples in the surrounding "Flag names re-cut to
+  # domains" section could. Shares its renderer with `nix run .#regen` via
+  # lib/renderers.nix, so guard and regenerator cannot drift from each other
+  # (issue #402). Mirrors default-models-doc above.
+  legacy-settings-mapping-doc =
+    let
+      generated = renderers.renderLegacySettingsMappingDoc legacySettingsSection schema;
+      docSrc = builtins.readFile ../../MIGRATING.md;
+    in
+    assert (assertLegacySettingsMappingDocOk { inherit docSrc generated; }) == docSrc;
+    pkgs.runCommand "legacy-settings-mapping-doc" { } "touch $out";
+
+  # Regression guard (issue #2558): the doc-drift assertion above must
+  # actually detect a drifted generated legacy settings mapping table, not
+  # just pass vacuously because MIGRATING.md's table currently agrees with
+  # lib/legacy-settings-section.nix. Runs assertLegacySettingsMappingDocOk --
+  # the exact function legacy-settings-mapping-doc calls -- against a
+  # synthetic doc whose row for `filerModel` states a wrong canonical path (a
+  # plausible drift a schema `group`/`nixSubPath` rename could leave behind),
+  # via tryEval, so this fails if the equality assert is ever dropped from
+  # assertLegacySettingsMappingDocOk. Mirrors default-models-doc-guard above.
+  legacy-settings-mapping-doc-guard =
+    let
+      inherit (pkgs.lib) assertMsg replaceStrings;
+      generated = renderers.renderLegacySettingsMappingDoc legacySettingsSection schema;
+      beginMarker = "<!-- BEGIN GENERATED LEGACY SETTINGS MAPPING -- nix run .#regen -- DO NOT EDIT -->\n";
+      endMarker = "<!-- END GENERATED LEGACY SETTINGS MAPPING -->";
+      filerModelPath = "perSystem.spindrift.${resolveNixPath "filerModel" schema.filerModel}";
+      driftedFilerModelPath =
+        if filerModelPath == "perSystem.spindrift.agents.models.filerModel" then
+          "perSystem.spindrift.agents.models.wrongPath"
+        else
+          "perSystem.spindrift.agents.models.filerModel";
+      driftedGenerated =
+        replaceStrings [ "`${filerModelPath}`" ] [ "`${driftedFilerModelPath}`" ]
+          generated;
+      driftedDocSrc = beginMarker + driftedGenerated + endMarker + "\n";
+      result = builtins.tryEval (assertLegacySettingsMappingDocOk {
+        docSrc = driftedDocSrc;
+        inherit generated;
+      });
+    in
+    assert assertMsg (!result.success)
+      "legacy-settings-mapping-doc-guard: expected assertLegacySettingsMappingDocOk to reject a synthetic doc whose generated legacy settings mapping table has drifted, but it evaluated successfully";
+    pkgs.runCommand "legacy-settings-mapping-doc-guard" { } "touch $out";
+
   # The generated `agents.models.*` sub-block of docs/reference.md's
   # illustrative flat domain-tree example (between its BEGIN/END GENERATED
   # SETTINGS EXAMPLE MODELS markers) must match the content rendered from
@@ -3039,9 +3112,6 @@ in
   # outlives its schema knob. Runs assertLegacySettingsSectionOk against the
   # real map/schema.
   legacy-settings-section-coverage =
-    let
-      legacySettingsSection = import ../../lib/legacy-settings-section.nix;
-    in
     assert
       (assertLegacySettingsSectionOk { inherit legacySettingsSection schema; }) == legacySettingsSection;
     pkgs.runCommand "legacy-settings-section-coverage" { } "touch $out";
@@ -3064,7 +3134,6 @@ in
   legacy-settings-section-coverage-guard =
     let
       inherit (pkgs.lib) assertMsg;
-      legacySettingsSection = import ../../lib/legacy-settings-section.nix;
       # filerModel is a real row for a real flakeOption knob that carries no
       # legacySettingsExempt -- dropping its row must be caught by missing.
       missingLegacySettingsSection = builtins.removeAttrs legacySettingsSection [ "filerModel" ];
