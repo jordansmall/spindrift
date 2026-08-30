@@ -131,6 +131,11 @@ let
     # for the same reason agent-closure itself is Linux-only.
     "mkharness-agent-closure-package"
     "mkharness-agent-closure-bundles-both"
+    # Same isLinux gate, one hop further out: asserts config.packages (the
+    # flake's own top-level output) carries agent-closure, which flake.nix
+    # only re-exports when fixtures.dogfoodBwrapHarness.packages has it --
+    # absent on darwin for the same reason as the two checks above.
+    "dogfood-bwrap-app-wiring"
     # lib/seccomp.nix (nix/checks/seccomp.nix) builds against pkgs.libseccomp,
     # whose meta.platforms is Linux-only -- evaluating it on darwin throws
     # "Refusing to evaluate package 'libseccomp' ... not available on the

@@ -153,26 +153,60 @@
 
             checks = checksResult.checks;
 
-            # Scoped in-box gate (issue #581): `nix build .#checks-inbox`
-            # builds the source-level checks only, skipping the OCI-image
-            # realization the full `checks` set above still covers for CI.
-            packages.checks-inbox = checksResult.checks-inbox;
-
-            # Repo-internal dev tooling, not consumer surface (issue #402):
-            # `nix run .#regen` regenerates every schema-generated artifact that
-            # nix/checks/schema-drift.nix drift-guards, sharing lib/renderers.nix
-            # with those checks so the two can never diverge.
-            apps.regen = {
-              type = "app";
-              program = "${import ./nix/regen.nix { inherit pkgs; }}/bin/regen";
+            packages = {
+              # Scoped in-box gate (issue #581): `nix build .#checks-inbox`
+              # builds the source-level checks only, skipping the OCI-image
+              # realization the full `checks` set above still covers for CI.
+              checks-inbox = checksResult.checks-inbox;
+            }
+            # lib/preambles.nix bakes FLAKE_IMAGE_ATTR as the fixed structural
+            # path `.#packages.<system>.agent-closure` into every bwrap run
+            # document (issue #2672 review fix), so cmd/launcher's freshness
+            # Probe needs a real `agent-closure` at THIS flake's top-level
+            # `packages` output -- not merely on fixtures.dogfoodBwrapHarness's
+            # own local `packages` attrset. Re-export the bwrap dogfood
+            # harness's own agent-closure output here. Guarded the same way
+            # lib/mkHarness.nix guards its own `packages.agent-closure` output
+            # (the `isLinux && runtime == "bwrap"` optionalAttrs guard on its
+            # `packages` attrset): on aarch64-darwin the harness's
+            # packages set never has agent-closure, so an unconditional
+            # access here would throw during `nix flake show`/`nix flake
+            # check` on that system.
+            // pkgs.lib.optionalAttrs (fixtures.dogfoodBwrapHarness.packages ? agent-closure) {
+              agent-closure = fixtures.dogfoodBwrapHarness.packages.agent-closure;
             };
 
-            # `nix run github:jordansmall/spindrift#quickstart` (ADR 0027):
-            # the pre-CLI interactive scaffolder. Standalone from the
-            # Consumer-facing lib/mkHarness.nix pipeline — see nix/quickstart.nix.
-            apps.quickstart = {
-              type = "app";
-              program = "${import ./nix/quickstart.nix { inherit pkgs; }}/bin/quickstart";
+            apps = {
+              # Repo-internal dev tooling, not consumer surface (issue #402):
+              # `nix run .#regen` regenerates every schema-generated artifact
+              # that nix/checks/schema-drift.nix drift-guards, sharing
+              # lib/renderers.nix with those checks so the two can never diverge.
+              regen = {
+                type = "app";
+                program = "${import ./nix/regen.nix { inherit pkgs; }}/bin/regen";
+              };
+
+              # `nix run github:jordansmall/spindrift#quickstart` (ADR 0027):
+              # the pre-CLI interactive scaffolder. Standalone from the
+              # Consumer-facing lib/mkHarness.nix pipeline — see nix/quickstart.nix.
+              quickstart = {
+                type = "app";
+                program = "${import ./nix/quickstart.nix { inherit pkgs; }}/bin/quickstart";
+              };
+            }
+            # `nix run .#dogfood-bwrap` (issue #2672): the same spindrift CLI
+            # as apps.default, built off fixtures.dogfoodBwrapHarness instead
+            # of the podman-configured `harness` — lets dogfood.sh drive a
+            # bwrap Box without touching apps.default/the podman module config.
+            # Guarded by the same `packages ? agent-closure` predicate as
+            # packages.agent-closure above (both true only under
+            # isLinux && runtime == "bwrap"): without it, `nix run
+            # .#dogfood-bwrap` would resolve on aarch64-darwin and only fail
+            # opaquely once the launcher tried to realize
+            # packages.<system>.agent-closure, instead of a clear "flake
+            # does not provide" error at resolution time (review finding).
+            // pkgs.lib.optionalAttrs (fixtures.dogfoodBwrapHarness.packages ? agent-closure) {
+              dogfood-bwrap = fixtures.dogfoodBwrapHarness.apps.default;
             };
 
             # For hacking ON the harness itself (host-side).
