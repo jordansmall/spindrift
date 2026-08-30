@@ -190,9 +190,9 @@
             #     probeTimeout = 300;
             #   };
             #   limits = {
-            #     # max memory per agent container (--memory); empty string disables the limit
+            #     # max memory per agent Box: hard --memory cap under OCI; under bwrap, a per-Box cgroup v2 memory.max when the host delegates a writable cgroup subtree, else best-effort (warns and proceeds uncapped -- ADR 0042); empty string disables the limit
             #     memory = "5g";
-            #     # max processes per agent container (--pids-limit); empty string disables the limit
+            #     # max processes per agent Box: hard --pids-limit cap under OCI; under bwrap, unconditional prlimit --nproc plus a per-Box cgroup v2 pids.max when delegation is available (ADR 0042); empty string disables the limit
             #     pids = "512";
             #   };
             #   network = {
