@@ -84,6 +84,15 @@ type config struct {
 	// realize the closure and snapshot the host nix store DB (ADR 0042).
 	nixConfigFileDrv string
 
+	// syscallFilterPath is the baked nix store path to the compiled BPF
+	// syscall-filter file (issue #2670, bwrap only). Unlike nixConfigFile,
+	// always populated -- the filter is a bwrap-hardening concern
+	// independent of the nixInBox knob.
+	syscallFilterPath string
+	// syscallFilterDrv is its .drv path; used by `launcher build` to
+	// realize it.
+	syscallFilterDrv string
+
 	// nixStoreWritable gates whether the bwrap adapter overlays /nix/store
 	// as an ephemeral tmpfs-backed writable layer instead of a plain
 	// read-only bind (ADR 0042, bwrap only). Populated by loadConfig from
@@ -323,6 +332,8 @@ func loadConfig() config {
 		groupFileDrv:       getenvArtifact("GROUP_FILE_DRV", ""),
 		nixConfigFile:      getenvArtifact("NIX_CONFIG_FILE", ""),
 		nixConfigFileDrv:   getenvArtifact("NIX_CONFIG_FILE_DRV", ""),
+		syscallFilterPath:  getenvArtifact("SYSCALL_FILTER", ""),
+		syscallFilterDrv:   getenvArtifact("SYSCALL_FILTER_DRV", ""),
 		nixStoreWritable:   getenvArtifact("NIX_STORE_WRITABLE", "") == "true",
 		runtime:            runtime,
 		runnerKind:         runnerKind,
@@ -828,6 +839,8 @@ func runnerConfig(c config) runner.Config {
 		NixConfigFile:            c.nixConfigFile,
 		NixConfigFileDrv:         c.nixConfigFileDrv,
 		NixStoreWritable:         c.nixStoreWritable,
+		SyscallFilterPath:        c.syscallFilterPath,
+		SyscallFilterDrv:         c.syscallFilterDrv,
 		BwrapUnshareNet:          c.bwrapUnshareNet,
 		PromptDir:                c.spindriftPromptDir,
 		SkillsDir:                c.spindriftSkillsDir,

@@ -46,6 +46,7 @@ let
     reviewLoopInline = true;
     reviewLoopOrchestrator = false;
     nixStoreWritable = true;
+    syscallFilterPath = "/nix/store/fake-syscall-filter-path/filter.bpf";
   };
 in
 {
@@ -349,6 +350,9 @@ in
     ) "runArtifacts (bwrap) must set NIX_CONFIG_FILE, got: ${builtins.toJSON out}";
     assert assertMsg (out.NIX_STORE_WRITABLE == "true")
       "runArtifacts (bwrap) must render NIX_STORE_WRITABLE as the literal string \"true\" when nixStoreWritable is true, got: ${builtins.toJSON out}";
+    assert assertMsg (
+      out.SYSCALL_FILTER == "/nix/store/fake-syscall-filter-path/filter.bpf"
+    ) "runArtifacts (bwrap) must set SYSCALL_FILTER, got: ${builtins.toJSON out}";
     pkgs.runCommand "preambles-run-artifacts-bwrap" { } "touch $out";
 
   # Issue #2665: the sibling knob to nixConfigPath/NIX_CONFIG_FILE -- proves
@@ -426,6 +430,9 @@ in
         # never reads this artifact -- false is a harmless placeholder here,
         # required only because nixStoreWritable has no default (issue #2665).
         nixStoreWritable = false;
+        # Required (no default), same reasoning as nixStoreWritable above --
+        # the OCI branch never reads it either (issue #2670).
+        syscallFilterPath = "/nix/store/fake-syscall-filter-path/filter.bpf";
       };
     in
     assert assertMsg (
@@ -498,6 +505,9 @@ in
     assert assertMsg (
       !(out ? NIX_STORE_WRITABLE)
     ) "runArtifacts (oci) must not set bwrap-only keys, got: ${builtins.toJSON out}";
+    assert assertMsg (
+      !(out ? SYSCALL_FILTER)
+    ) "runArtifacts (oci) must not set bwrap-only keys, got: ${builtins.toJSON out}";
     pkgs.runCommand "preambles-run-artifacts-oci" { } "touch $out";
 
   # Issue #262 AC1: a driver-scoped image name flows into IMAGE_TAG, so an
@@ -542,6 +552,7 @@ in
         reviewLoopInline = true;
         reviewLoopOrchestrator = false;
         nixStoreWritable = false;
+        syscallFilterPath = "/nix/store/fake-syscall-filter-path/filter.bpf";
       };
     in
     assert assertMsg (
@@ -595,6 +606,7 @@ in
           linux = "x86_64-linux";
         };
         nixConfigDrv = "/nix/store/fake-nix-conf-path.drv";
+        syscallFilterDrv = "/nix/store/fake-syscall-filter-path/filter.bpf.drv";
       };
     in
     assert assertMsg (
@@ -624,6 +636,9 @@ in
     assert assertMsg (
       out.NIX_CONFIG_FILE_DRV == "/nix/store/fake-nix-conf-path.drv"
     ) "buildArtifacts (bwrap) must set NIX_CONFIG_FILE_DRV, got: ${builtins.toJSON out}";
+    assert assertMsg (
+      out.SYSCALL_FILTER_DRV == "/nix/store/fake-syscall-filter-path/filter.bpf.drv"
+    ) "buildArtifacts (bwrap) must set SYSCALL_FILTER_DRV, got: ${builtins.toJSON out}";
     pkgs.runCommand "preambles-build-artifacts-bwrap" { } "touch $out";
 
   preambles-build-artifacts-oci =
@@ -645,6 +660,9 @@ in
           host = "aarch64-darwin";
           linux = "x86_64-linux";
         };
+        # Required (no default) -- the OCI branch never reads it either
+        # (issue #2670).
+        syscallFilterDrv = "/nix/store/fake-syscall-filter-path/filter.bpf.drv";
       };
     in
     assert assertMsg (
@@ -679,6 +697,9 @@ in
     ) "buildArtifacts (oci) must not set bwrap-only keys, got: ${builtins.toJSON out}";
     assert assertMsg (
       !(out ? NIX_CONFIG_FILE_DRV)
+    ) "buildArtifacts (oci) must not set bwrap-only keys, got: ${builtins.toJSON out}";
+    assert assertMsg (
+      !(out ? SYSCALL_FILTER_DRV)
     ) "buildArtifacts (oci) must not set bwrap-only keys, got: ${builtins.toJSON out}";
     pkgs.runCommand "preambles-build-artifacts-oci" { } "touch $out";
 
@@ -731,6 +752,8 @@ in
         "REVIEW_LOOP_ORCHESTRATOR"
         "RUNNER_KIND"
         "RUNTIME"
+        "SYSCALL_FILTER"
+        "SYSCALL_FILTER_DRV"
         "TRACKER_AXIS_FILER"
         "TRACKER_AXIS_READ"
         "TRACKER_AXIS_WRITE"
