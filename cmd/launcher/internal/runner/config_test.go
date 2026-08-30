@@ -1,6 +1,7 @@
 package runner
 
 import (
+	"path/filepath"
 	"reflect"
 	"testing"
 )
@@ -119,7 +120,7 @@ func TestNewBwrap_UsesConfigFields(t *testing.T) {
 		unshareNet:            cfg.BwrapUnshareNet,
 		networkMode:           cfg.NetworkMode,
 		nixConfigFile:         cfg.NixConfigFile,
-		nixVarSnapshotDir:     nixVarSnapshotDir("/pwd"),
+		nixVarSnapshotDir:     nixVarSnapshotDir("/pwd", closureGeneration(cfg.ImageTag)),
 	}
 	// reflect.DeepEqual over pointers, not !=: bwrapAdapter now also carries
 	// the mu/running process-tracking fields Kill (issue #649) uses, which a
@@ -147,14 +148,52 @@ func TestNewBwrapBuild_UsesConfigFields(t *testing.T) {
 		t.Fatalf("NewBwrapBuild did not return *bwrapBuildAdapter")
 	}
 	want := bwrapBuildAdapter{
-		agentFilesDrv:     cfg.AgentFilesDrv,
-		agentEnvDrv:       cfg.AgentEnvDrv,
-		passwdFileDrv:     cfg.PasswdFileDrv,
-		groupFileDrv:      cfg.GroupFileDrv,
-		nixConfigFileDrv:  cfg.NixConfigFileDrv,
-		nixVarSnapshotDir: nixVarSnapshotDir("/pwd"),
+		agentFilesDrv:      cfg.AgentFilesDrv,
+		agentEnvDrv:        cfg.AgentEnvDrv,
+		passwdFileDrv:      cfg.PasswdFileDrv,
+		groupFileDrv:       cfg.GroupFileDrv,
+		nixConfigFileDrv:   cfg.NixConfigFileDrv,
+		nixVarSnapshotDir:  nixVarSnapshotDir("/pwd", closureGeneration(cfg.ImageTag)),
+		nixVarSnapshotRoot: nixVarSnapshotRoot("/pwd"),
+		nixVarGeneration:   closureGeneration(cfg.ImageTag),
 	}
 	if *a != want {
 		t.Errorf("NewBwrapBuild(cfg) fields = %+v, want %+v", *a, want)
+	}
+}
+
+// TestNewBwrap_ImageTagScopesSnapshotDirToClosureGeneration verifies that a
+// real closure ImageTag (as lib/preambles.nix's bwrap branch renders it — a
+// nix store path like /nix/store/<hash>-agent-closure) scopes the run
+// adapter's nixVarSnapshotDir to a generation subdir named after that
+// closure's basename, rather than the shared flat path every closure used
+// to collide on.
+func TestNewBwrap_ImageTagScopesSnapshotDirToClosureGeneration(t *testing.T) {
+	cfg := Config{ImageTag: "/nix/store/abc123-agent-closure"}
+	r := NewBwrap(cfg, "/pwd")
+	a, ok := r.(*bwrapAdapter)
+	if !ok {
+		t.Fatalf("NewBwrap did not return *bwrapAdapter")
+	}
+	want := filepath.Join("/pwd", ".spindrift", "nix-var-snapshot", "abc123-agent-closure")
+	if a.nixVarSnapshotDir != want {
+		t.Errorf("NewBwrap(cfg).nixVarSnapshotDir = %q, want %q", a.nixVarSnapshotDir, want)
+	}
+}
+
+// TestNewBwrapBuild_ImageTagScopesSnapshotDirToClosureGeneration is the build
+// adapter's counterpart to TestNewBwrap_ImageTagScopesSnapshotDirToClosureGeneration
+// — the build side writes the snapshot the run side above mounts, so both
+// must resolve to the same generation-scoped path for a given ImageTag.
+func TestNewBwrapBuild_ImageTagScopesSnapshotDirToClosureGeneration(t *testing.T) {
+	cfg := Config{ImageTag: "/nix/store/abc123-agent-closure"}
+	r := NewBwrapBuild(cfg, "/pwd")
+	a, ok := r.(*bwrapBuildAdapter)
+	if !ok {
+		t.Fatalf("NewBwrapBuild did not return *bwrapBuildAdapter")
+	}
+	want := filepath.Join("/pwd", ".spindrift", "nix-var-snapshot", "abc123-agent-closure")
+	if a.nixVarSnapshotDir != want {
+		t.Errorf("NewBwrapBuild(cfg).nixVarSnapshotDir = %q, want %q", a.nixVarSnapshotDir, want)
 	}
 }

@@ -1744,6 +1744,7 @@ in
     let
       inherit (pkgs.lib) assertMsg sort;
       expected = [
+        "agentClosurePath"
         "agentEnv"
         "agentFiles"
         "build"

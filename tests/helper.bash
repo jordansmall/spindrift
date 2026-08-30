@@ -251,8 +251,24 @@ stub_nix_var_snapshot() {
   # fixture's readiness check without invoking a real build (issue #2664).
   # Must run after cd'ing into the test's own $BATS_TEST_TMPDIR, since the
   # launcher resolves the snapshot dir relative to its own working directory.
-  mkdir -p .spindrift/nix-var-snapshot/nix/db
-  : >.spindrift/nix-var-snapshot/nix/db/db.sqlite
+  #
+  # The snapshot dir is now generation-scoped, nested under a subdir named
+  # for the agent-closure store path IsReady's caller was built against
+  # (bwrap.go nixVarSnapshotDir/closureGeneration, issue #2680) rather than
+  # one shared flat path. $BWRAP_RUN_CMD and $SKILLS_BWRAP_RUN_CMD are each
+  # baked from their OWN mkHarness invocation (nix/checks/bats.nix), so each
+  # closes over a DIFFERENT agent-closure store path and needs its OWN
+  # generation subdir stubbed -- one stub can't satisfy both. BWRAP_IMAGE_TAG/
+  # SKILLS_BWRAP_IMAGE_TAG (also nix-exported) carry those same closure paths
+  # so this stub can mirror closureGeneration's own filepath.Base(imageTag)
+  # logic here in bash.
+  local tag generation
+  for tag in "$BWRAP_IMAGE_TAG" "$SKILLS_BWRAP_IMAGE_TAG"; do
+    [ -n "$tag" ] || continue
+    generation=$(basename "$tag")
+    mkdir -p ".spindrift/nix-var-snapshot/$generation/nix/db"
+    : >".spindrift/nix-var-snapshot/$generation/nix/db/db.sqlite"
+  done
 }
 
 setup_run_env() {
