@@ -1141,24 +1141,74 @@ pnpm_workspace_intree_binding_revert() {
 # phase_toolchain_nudge emits a one-time hint for a cold run with a
 # recognized dependency-manifest file and no prefetch configured.
 phase_toolchain_nudge() {
-  # Cold-run toolchain nudge: when no prefetch is configured and a recognized
-  # dependency-manifest file is present, emit a one-time hint pointing at the
-  # two knobs that actually help (prefetch for per-run cache warm, packages
-  # for a baked cross-run toolchain). Unknown ecosystems emit nothing.
-  if [ -z "${PREFETCH:-}" ]; then
-    local _nudge_ecosystem=""
-    if [ -f "Cargo.lock" ]; then
-      _nudge_ecosystem="cargo"
-    elif [ -f "package-lock.json" ] || [ -f "pnpm-lock.yaml" ] || [ -f "yarn.lock" ]; then
-      _nudge_ecosystem="npm/pnpm/yarn"
-    elif [ -f "go.sum" ]; then
-      _nudge_ecosystem="go mod"
-    elif [ -f "build.gradle" ] || [ -f "build.gradle.kts" ] || [ -f "settings.gradle" ] || [ -f "settings.gradle.kts" ] || [ -f "gradle.lockfile" ]; then
-      _nudge_ecosystem="gradle"
+  # Cold-run toolchain nudge: classification now delegates to `driver-exec
+  # bind-registry` (issue #2930), which reads the shared ecosystem table
+  # (cmd/launcher/internal/registryproxy) instead of this function
+  # re-deriving its own lockfile chain. The verb runs unconditionally --
+  # not gated on PREFETCH or the registry proxy's own on/off state -- so the
+  # env file is always available; only the hint's own emission stays gated
+  # on PREFETCH, same as before.
+  local _nudge_env_out _bind_registry_rc=0 _source_rc=0 _nudge_ecosystem=""
+  # This phase is cosmetic-hint-only -- a verb failure (mktemp, unwritable
+  # output path) must not take the whole box run down under
+  # set -euo pipefail. Bail before sourcing a possibly-missing/garbage env
+  # file rather than letting the failure propagate (mirrors
+  # phase_devshell_probe's own rc-capture a few functions below). mktemp
+  # itself is wrapped in the same guard: it runs the same "verb tooling"
+  # this phase must survive losing.
+  if ! _nudge_env_out="$(mktemp)"; then
+    if [ -z "${PREFETCH:-}" ]; then
+      echo "==> WARNING: mktemp failed — skipping toolchain nudge"
     fi
-    if [ -n "$_nudge_ecosystem" ]; then
-      echo "==> hint: ${_nudge_ecosystem} project detected; set 'prefetch' to warm dependency caches per run, or 'packages' to bake a toolchain into the image"
+    return 0
+  fi
+
+  # Registered as soon as mktemp has actually produced a path, so every exit
+  # out of this function from here on -- an early `return 0` below or
+  # falling off the end -- removes the tempfile once, instead of repeating
+  # an `rm -f` at each return site. The handler unsets itself the moment it
+  # fires: a bash RETURN trap is a process-global setting, not truly
+  # function-scoped, so leaving it registered would fire again on the next
+  # unrelated function's return anywhere later in this script and dereference
+  # a `local` that no longer exists.
+  trap 'rm -f "$_nudge_env_out"; trap - RETURN' RETURN
+
+  driver-exec bind-registry \
+    --work-dir "$WORK_DIR" \
+    --ecosystem-env-output "$_nudge_env_out" \
+    || _bind_registry_rc=$?
+
+  if [ "$_bind_registry_rc" -ne 0 ]; then
+    if [ -z "${PREFETCH:-}" ]; then
+      echo "==> WARNING: driver-exec bind-registry failed (exit ${_bind_registry_rc}) — skipping toolchain nudge"
     fi
+    return 0
+  fi
+
+  # rc-captured rather than left to fail straight into set -euo pipefail's
+  # errexit: an unguarded `source` failure (e.g. a malformed env file) would
+  # abort the whole entrypoint script mid-phase, which the RETURN trap above
+  # can never clean up after -- errexit unwinds the process without
+  # "returning" from any function on the way out.
+  # shellcheck disable=SC1090  # dynamic path (tempfile), sourced by design: the verb's own env-file output
+  source "$_nudge_env_out" || _source_rc=$?
+  if [ "$_source_rc" -ne 0 ]; then
+    if [ -z "${PREFETCH:-}" ]; then
+      echo "==> WARNING: sourcing driver-exec bind-registry's env output failed (exit ${_source_rc}) — skipping toolchain nudge"
+    fi
+    return 0
+  fi
+  # Captured into a local, underscore-prefixed variable and unset immediately:
+  # every sibling local in this function (and phase_devshell_probe right
+  # below) is underscore-prefixed precisely so phase-local state never
+  # outlives the phase -- NUDGE_ECOSYSTEM is the env file's own on-disk
+  # variable name (cmd/launcher/driver-exec/bindregistry_cmd.go), not this
+  # shell's naming convention, so it must not survive past sourcing.
+  _nudge_ecosystem="${NUDGE_ECOSYSTEM:-}"
+  unset NUDGE_ECOSYSTEM
+
+  if [ -z "${PREFETCH:-}" ] && [ -n "$_nudge_ecosystem" ]; then
+    echo "==> hint: ${_nudge_ecosystem} project detected; set 'prefetch' to warm dependency caches per run, or 'packages' to bake a toolchain into the image"
   fi
 }
 
