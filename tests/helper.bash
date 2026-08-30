@@ -243,10 +243,23 @@ setup_entrypoint_env() {
 # Shared setup for the split run-*.bats suites (issue #519): every concern
 # file needs its own setup() hook per bats semantics, so the body run.bats
 # used to run once now lives here instead.
+stub_nix_var_snapshot() {
+  # Stand in for `launcher build`'s VACUUMed host nix store DB snapshot
+  # (ADR 0042, cmd/launcher/internal/runner/bwrap.go snapshotStoreDB):
+  # bwrapAdapter.IsReady only checks that this file exists and isn't a
+  # directory, so a bare stub is enough to satisfy any $BWRAP_RUN_CMD-family
+  # fixture's readiness check without invoking a real build (issue #2664).
+  # Must run after cd'ing into the test's own $BATS_TEST_TMPDIR, since the
+  # launcher resolves the snapshot dir relative to its own working directory.
+  mkdir -p .spindrift/nix-var-snapshot/nix/db
+  : >.spindrift/nix-var-snapshot/nix/db/db.sqlite
+}
+
 setup_run_env() {
   setup_fakes
   set_run_env
   cd "$BATS_TEST_TMPDIR" || exit
+  stub_nix_var_snapshot
   export FAKE_GH_ISSUES=$'1\tFirst issue\n2\tSecond issue'
   # Guard (issue #2424): bound the merge gate's poll loop by default so any
   # test that reaches it without setting its own MERGE_POLL_INTERVAL /

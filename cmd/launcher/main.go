@@ -77,6 +77,13 @@ type config struct {
 	passwdFileDrv string // .drv path; used by `launcher build` to realize the closure
 	groupFileDrv  string // .drv path; used by `launcher build` to realize the closure
 
+	// nixConfigFile is the baked nix store path for /etc/nix/nix.conf (ADR
+	// 0042, bwrap only); empty when the Consumer's nixInBox knob is off.
+	nixConfigFile string
+	// nixConfigFileDrv is its .drv path; used by `launcher build` to
+	// realize the closure and snapshot the host nix store DB (ADR 0042).
+	nixConfigFileDrv string
+
 	// Runtime: podman | docker | rancher | bwrap (runner.ValidValues)
 	runtime string
 
@@ -308,6 +315,8 @@ func loadConfig() config {
 		groupFile:          getenvArtifact("GROUP_FILE", ""),
 		passwdFileDrv:      getenvArtifact("PASSWD_FILE_DRV", ""),
 		groupFileDrv:       getenvArtifact("GROUP_FILE_DRV", ""),
+		nixConfigFile:      getenvArtifact("NIX_CONFIG_FILE", ""),
+		nixConfigFileDrv:   getenvArtifact("NIX_CONFIG_FILE_DRV", ""),
 		runtime:            runtime,
 		runnerKind:         runnerKind,
 		driver:             getenvArtifact("DRIVER", ""),
@@ -809,6 +818,8 @@ func runnerConfig(c config) runner.Config {
 		GroupFile:                c.groupFile,
 		PasswdFileDrv:            c.passwdFileDrv,
 		GroupFileDrv:             c.groupFileDrv,
+		NixConfigFile:            c.nixConfigFile,
+		NixConfigFileDrv:         c.nixConfigFileDrv,
 		BwrapUnshareNet:          c.bwrapUnshareNet,
 		PromptDir:                c.spindriftPromptDir,
 		SkillsDir:                c.spindriftSkillsDir,
@@ -829,7 +840,7 @@ func runnerConfig(c config) runner.Config {
 // docker, rancher) that aren't "oci" literally.
 func runnerForKind(c config, rc runner.Config, pwd string) runner.Runner {
 	if c.runnerKind == freshness.KindBwrap {
-		return runner.NewBwrap(rc)
+		return runner.NewBwrap(rc, pwd)
 	}
 	return runner.NewOCI(rc, pwd)
 }
@@ -840,7 +851,7 @@ func runnerForKind(c config, rc runner.Config, pwd string) runner.Runner {
 // c.runnerKind == freshness.KindBwrap check.
 func buildRunnerForKind(c config, rc runner.Config, pwd string) runner.Runner {
 	if c.runnerKind == freshness.KindBwrap {
-		return runner.NewBwrapBuild(rc)
+		return runner.NewBwrapBuild(rc, pwd)
 	}
 	return runner.NewOCI(rc, pwd)
 }

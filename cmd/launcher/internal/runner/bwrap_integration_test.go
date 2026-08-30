@@ -60,6 +60,38 @@ func requireRealBwrap(t *testing.T) string {
 	return bashBin
 }
 
+// requireRealBwrapProc extends requireRealBwrap with a further preflight
+// probe that keeps --proc/--dev mounted, unlike every other probe in this
+// file (see stripMountPair's doc comment for why those are normally
+// stripped). TestBwrapIntegration_NixTrustsHostStorePaths and its negative
+// control cannot strip either: nix resolves its own binary via
+// /proc/self/exe and fails immediately without a real /proc mounted. The
+// probe also unshares pid/ipc/uts, matching buildArgs' own unshareFlags: a
+// bare --proc/--dev probe without --unshare-pid mounts fine even in a
+// nested sandbox that then fails to mount /proc once a fresh pid namespace
+// is layered on top (a real regression this file's own dogfood Box hit
+// while writing this test -- "bwrap: Can't mount proc on /newroot/proc:
+// Operation not permitted" -- so probing with the weaker flag set would
+// have let the real test fail outright here instead of skipping). Skips
+// (doesn't fail) with the captured stderr when this specific probe can't
+// nest a fresh pid/procfs/devfs namespace (no CAP_SYS_ADMIN in a
+// doubly-nested sandbox), mirroring requireRealBwrap's own skip-not-fail
+// contract for the bare-namespace case.
+func requireRealBwrapProc(t *testing.T) string {
+	t.Helper()
+	bashBin := requireRealBwrap(t)
+	probe := exec.Command("bwrap",
+		"--ro-bind", "/nix/store", "/nix/store",
+		"--proc", "/proc", "--dev", "/dev",
+		"--unshare-user", "--uid", "1000", "--gid", "1000",
+		"--unshare-pid", "--unshare-ipc", "--unshare-uts",
+		"--tmpfs", "/tmp", "--", bashBin, "-c", "true")
+	if out, err := probe.CombinedOutput(); err != nil {
+		t.Skipf("bwrap cannot mount --proc/--dev with a fresh pid namespace in this nested sandbox: %v: %s", err, out)
+	}
+	return bashBin
+}
+
 // requireRealPasta skips the test when this host cannot exercise a real
 // pasta+bwrap hierarchy: non-Linux, pasta missing from PATH, or (mirroring
 // requireRealBwrap) a nested sandbox that can't create the network namespace
@@ -177,6 +209,55 @@ func newIntegrationBwrapAdapterIsolated(t *testing.T) (*bwrapAdapter, string) {
 	return a, etcDir
 }
 
+// newIntegrationBwrapAdapterWithNix is newIntegrationBwrapAdapter's sibling
+// for probes that exercise ADR 0042's in-box nix mechanism (issue #2664): it
+// additionally wires nixConfigFile to a real temp nix.conf (content mirrors
+// lib/image.nix's nixConfigFile derivation verbatim) and nixVarSnapshotDir to
+// a real temp dir populated by VACUUMing the host's live nix store DB into it
+// directly with sqlite3 -- the same "VACUUM INTO" statement
+// bwrapBuildAdapter.snapshotStoreDB runs in production -- rather than
+// invoking that production seam, so this test stays decoupled from
+// bwrap.go's internal build-vs-run adapter split. Skips (not fails) when
+// sqlite3 isn't on PATH, when the host has no live nix store db to snapshot,
+// or when nix itself isn't on PATH, mirroring requireRealBwrap's
+// skip-on-missing-prerequisite style -- this mechanism needs all three
+// present to prove anything real.
+func newIntegrationBwrapAdapterWithNix(t *testing.T) (*bwrapAdapter, string) {
+	t.Helper()
+	if _, err := exec.LookPath("sqlite3"); err != nil {
+		t.Skip("sqlite3 not found on PATH")
+	}
+	if _, err := os.Stat(hostNixDBPath); err != nil {
+		t.Skipf("host nix store db not found at %s", hostNixDBPath)
+	}
+	if _, err := exec.LookPath("nix"); err != nil {
+		t.Skip("nix not found on PATH")
+	}
+
+	a, etcDir := newIntegrationBwrapAdapter(t)
+
+	nixConfPath := filepath.Join(t.TempDir(), "nix.conf")
+	conf := "experimental-features = nix-command flakes\nsandbox = false\nfilter-syscalls = false\n"
+	if err := os.WriteFile(nixConfPath, []byte(conf), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	a.nixConfigFile = nixConfPath
+
+	snapDir := t.TempDir()
+	dbDir := filepath.Join(snapDir, "nix", "db")
+	if err := os.MkdirAll(dbDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	dest := filepath.Join(dbDir, "db.sqlite")
+	stmt := fmt.Sprintf("VACUUM INTO '%s';", strings.ReplaceAll(dest, "'", "''"))
+	if out, err := exec.Command("sqlite3", hostNixDBPath, stmt).CombinedOutput(); err != nil {
+		t.Fatalf("sqlite3 vacuum-into store db snapshot: %v: %s", err, out)
+	}
+	a.nixVarSnapshotDir = snapDir
+
+	return a, etcDir
+}
+
 // bwrapProbeArgs takes the real buildArgs() output for box, drops the
 // --proc/--dev mounts a nested sandbox can't nest (see stripMountPair), and
 // swaps the fixed "-- /agent/entrypoint.sh" tail for script, run via
@@ -186,6 +267,23 @@ func bwrapProbeArgs(a *bwrapAdapter, etcDir string, box Box, bashBin, script str
 	args := a.buildArgs(etcDir, box)
 	args = stripMountPair(args, "--proc", "/proc")
 	args = stripMountPair(args, "--dev", "/dev")
+	args = args[:len(args)-1] // drop "/agent/entrypoint.sh", keep the "--" separator
+	return append(args, bashBin, "-c", script)
+}
+
+// nixProbeArgs is bwrapProbeArgs's sibling for the four nix-in-a-Box probes
+// (TestBwrapIntegration_NixTrustsHostStorePaths,
+// TestBwrapIntegration_NixRejectsEmptyStoreSnapshot,
+// TestBwrapIntegration_NixBuildSubstitutesNothingForValidSnapshot, and
+// TestBwrapIntegration_NixBuildAttemptsSubstitutionOnEmptyStoreSnapshot):
+// unlike every other probe here, it does NOT strip --proc/--dev from the
+// real buildArgs() output. nix resolves its own binary via
+// /proc/self/exe and fails immediately ("error: reading symbolic link
+// \"/proc/self/exe\": No such file or directory") without a real /proc
+// mounted, so these probes use requireRealBwrapProc instead of
+// requireRealBwrap to guard for that.
+func nixProbeArgs(a *bwrapAdapter, etcDir string, box Box, bashBin, script string) []string {
+	args := a.buildArgs(etcDir, box)
 	args = args[:len(args)-1] // drop "/agent/entrypoint.sh", keep the "--" separator
 	return append(args, bashBin, "-c", script)
 }
@@ -435,5 +533,149 @@ func TestBwrapIntegration_PastaProvidesWorkingEgressInterface(t *testing.T) {
 	}
 	if !foundNonLoopback {
 		t.Errorf("no non-loopback network interface found inside the pasta-wrapped sandbox (ip link show output: %q); pasta should have created a tap device", out)
+	}
+}
+
+// TestBwrapIntegration_NixTrustsHostStorePaths is issue #2664's missing
+// acceptance criterion 4: "In a real sandbox, nix reports host store paths
+// as valid and a devShell entry substitutes nothing." It launches a real
+// bwrap sandbox wired with ADR 0042's in-box nix mechanism exactly as
+// bwrapAdapter.buildArgs assembles it: a real nix.conf ro-bound to
+// /etc/nix/nix.conf, and a real, freshly-VACUUMed snapshot of the host's own
+// /nix/var/nix/db/db.sqlite overlaid onto /nix/var (--overlay-src +
+// --tmp-overlay), with /nix/store itself staying the plain, unrelated
+// --ro-bind newIntegrationBwrapAdapter already wires up. Network is fully
+// isolated (NetworkModeNone, mirroring
+// TestBwrapIntegration_UnshareNetBlocksNetwork), so an accidental
+// substitution attempt fails loudly against a real store-path lookup rather
+// than silently succeeding over the network.
+//
+// bash's own resolved binary stands in for "a devShell entry": it's already
+// a realized host store path, exactly what the acceptance criterion
+// describes, and is otherwise unrelated to the nix.conf/snapshot machinery
+// under test. The assertion is nix exiting 0, reporting that path, and never
+// logging "will be fetched"/"copying path" -- i.e. it trusted the snapshot's
+// own records for a path it never had to re-realize. Those two substring
+// checks are, on their own, vacuous evidence for the "substitutes nothing"
+// half of the criterion: path-info is a pure metadata lookup with no
+// substituter codepath at all, so it could never log either phrase even if
+// the whole snapshot/overlay mechanism were broken. What actually proves
+// "substitutes nothing" is TestBwrapIntegration_NixBuildSubstitutesNothingForValidSnapshot
+// below, which runs `nix build` (a command with a real substituter
+// codepath) against the same path instead.
+//
+// This test's negative control, TestBwrapIntegration_NixRejectsEmptyStoreSnapshot,
+// proves the assertion here isn't vacuous: point --overlay-src at a
+// snapshot dir with no db.sqlite at all, and nix instead reports the exact
+// same path as invalid.
+func TestBwrapIntegration_NixTrustsHostStorePaths(t *testing.T) {
+	bashBin := requireRealBwrapProc(t)
+	nixBin := resolveSandboxBin(t, "nix")
+	a, etcDir := newIntegrationBwrapAdapterWithNix(t)
+	box := Box{Env: map[string]string{}}
+
+	script := fmt.Sprintf("export HOME=/tmp; %s --extra-experimental-features 'nix-command flakes' path-info %s", nixBin, bashBin)
+	args := nixProbeArgs(a, etcDir, box, bashBin, script)
+
+	out, err := exec.Command("bwrap", args...).CombinedOutput()
+	if err != nil {
+		t.Fatalf("nix path-info failed inside the sandbox: %v: %s", err, out)
+	}
+	if !strings.Contains(string(out), bashBin) {
+		t.Errorf("nix path-info output = %q, want it to contain the resolved store path %q", out, bashBin)
+	}
+	if strings.Contains(string(out), "will be fetched") || strings.Contains(string(out), "copying path") {
+		t.Errorf("nix path-info attempted to substitute/copy a path it should have trusted from the snapshot instead: %s", out)
+	}
+}
+
+// TestBwrapIntegration_NixRejectsEmptyStoreSnapshot is
+// TestBwrapIntegration_NixTrustsHostStorePaths's negative control (issue
+// #2664, ADR 0042): with nixVarSnapshotDir pointing at an empty directory
+// (no db.sqlite at all, unlike the real VACUUMed snapshot the positive test
+// wires in), the identical `nix path-info` command against the identical
+// resolved store path instead fails with "is not valid" -- nix falls back
+// to a fresh, empty chroot store under /nix/var and has no record of the
+// path at all. Without this control, the positive test's assertions would
+// also hold for a `nix path-info` that always exits 0 regardless of whether
+// the snapshot mechanism does anything at all.
+func TestBwrapIntegration_NixRejectsEmptyStoreSnapshot(t *testing.T) {
+	bashBin := requireRealBwrapProc(t)
+	nixBin := resolveSandboxBin(t, "nix")
+	a, etcDir := newIntegrationBwrapAdapterWithNix(t)
+	a.nixVarSnapshotDir = t.TempDir() // empty: no nix/db/db.sqlite in it at all
+	box := Box{Env: map[string]string{}}
+
+	script := fmt.Sprintf("export HOME=/tmp; %s --extra-experimental-features 'nix-command flakes' path-info %s", nixBin, bashBin)
+	args := nixProbeArgs(a, etcDir, box, bashBin, script)
+
+	out, err := exec.Command("bwrap", args...).CombinedOutput()
+	if err == nil {
+		t.Fatalf("expected nix path-info to fail against an empty store snapshot; bwrap output: %s", out)
+	}
+	if !strings.Contains(string(out), "is not valid") {
+		t.Fatalf("expected an \"is not valid\" failure, got: %s (%v)", out, err)
+	}
+}
+
+// TestBwrapIntegration_NixBuildSubstitutesNothingForValidSnapshot is the
+// other half of issue #2664's acceptance criterion 4 that
+// TestBwrapIntegration_NixTrustsHostStorePaths's own `nix path-info` probe
+// cannot cover: path-info never touches a substituter at all, so its
+// "will be fetched"/"copying path" checks would pass even if the
+// snapshot/overlay mechanism substituted paths freely. `nix build` does have
+// a real substituter codepath (empirically verified: it fails outright
+// against an unregistered path with "there is no substituter that can build
+// it", the same error TestBwrapIntegration_NixBuildAttemptsSubstitutionOnEmptyStoreSnapshot
+// below asserts on), so a clean, silent exit 0 against the identical
+// resolved bash path here is real evidence the snapshot satisfied the build
+// without reaching for a substituter.
+func TestBwrapIntegration_NixBuildSubstitutesNothingForValidSnapshot(t *testing.T) {
+	bashBin := requireRealBwrapProc(t)
+	nixBin := resolveSandboxBin(t, "nix")
+	a, etcDir := newIntegrationBwrapAdapterWithNix(t)
+	box := Box{Env: map[string]string{}}
+
+	script := fmt.Sprintf("export HOME=/tmp; %s --extra-experimental-features 'nix-command flakes' build --no-link %s", nixBin, bashBin)
+	args := nixProbeArgs(a, etcDir, box, bashBin, script)
+
+	out, err := exec.Command("bwrap", args...).CombinedOutput()
+	if err != nil {
+		t.Fatalf("nix build failed inside the sandbox: %v: %s", err, out)
+	}
+	for _, needle := range []string{"will be fetched", "copying path", "downloading", "querying info about"} {
+		if strings.Contains(string(out), needle) {
+			t.Errorf("nix build attempted to substitute a path it should have trusted from the snapshot instead (output contains %q): %s", needle, out)
+		}
+	}
+}
+
+// TestBwrapIntegration_NixBuildAttemptsSubstitutionOnEmptyStoreSnapshot is
+// TestBwrapIntegration_NixBuildSubstitutesNothingForValidSnapshot's negative
+// control, the same role TestBwrapIntegration_NixRejectsEmptyStoreSnapshot
+// plays for the path-info probe: with nixVarSnapshotDir pointing at an empty
+// directory, the identical `nix build --no-link` against the identical
+// resolved store path can no longer find it in the snapshot's records, so it
+// must reach for a substituter to satisfy the build -- and, network fully
+// isolated (NetworkModeNone), that reach fails outright rather than silently
+// succeeding the way the positive case's build does. Without this control,
+// the positive test's silence would also hold for a `nix build` that always
+// exits 0 regardless of whether the snapshot mechanism does anything at all.
+func TestBwrapIntegration_NixBuildAttemptsSubstitutionOnEmptyStoreSnapshot(t *testing.T) {
+	bashBin := requireRealBwrapProc(t)
+	nixBin := resolveSandboxBin(t, "nix")
+	a, etcDir := newIntegrationBwrapAdapterWithNix(t)
+	a.nixVarSnapshotDir = t.TempDir() // empty: no nix/db/db.sqlite in it at all
+	box := Box{Env: map[string]string{}}
+
+	script := fmt.Sprintf("export HOME=/tmp; %s --extra-experimental-features 'nix-command flakes' build --no-link %s", nixBin, bashBin)
+	args := nixProbeArgs(a, etcDir, box, bashBin, script)
+
+	out, err := exec.Command("bwrap", args...).CombinedOutput()
+	if err == nil {
+		t.Fatalf("expected nix build to fail against an empty store snapshot; bwrap output: %s", out)
+	}
+	if !strings.Contains(string(out), "there is no substituter that can build it") {
+		t.Fatalf("expected a \"there is no substituter that can build it\" failure, got: %s (%v)", out, err)
 	}
 }

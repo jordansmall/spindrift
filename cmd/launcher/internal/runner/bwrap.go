@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 )
 
@@ -23,6 +24,15 @@ var execCommand = exec.Command
 // to have /etc/resolv.conf (it doesn't inside some nix build sandboxes).
 var statResolvConf = func() error {
 	_, err := os.Stat("/etc/resolv.conf")
+	return err
+}
+
+// statHostNixDB backs the "does hostNixDBPath exist" preflight check in
+// snapshotStoreDB. Tests swap this package-level seam so the missing-host-db
+// assertion doesn't depend on whether the machine running `go test` happens
+// to have a real /nix/var/nix/db/db.sqlite.
+var statHostNixDB = func() error {
+	_, err := os.Stat(hostNixDBPath)
 	return err
 }
 
@@ -44,7 +54,8 @@ var bwrapSecrets = map[string]bool{
 }
 
 // bwrapAdapter implements Runner for the daemonless bubblewrap sandbox.
-// EnsureReady is a no-op — store closures are realized by the build command.
+// EnsureReady delegates to IsReady rather than realizing anything itself —
+// store closures are realized by the build command.
 type bwrapAdapter struct {
 	agentFiles    string // baked nix store path for agent files (/agent/…)
 	agentEnv      string // baked nix store path for the agent env (PATH, SSL, …)
@@ -58,6 +69,17 @@ type bwrapAdapter struct {
 	// selected Driver declares no session-state dir, in which case
 	// box.DriverCacheDir is never bound regardless of its value.
 	driverSessionCacheDir string
+	// nixConfigFile is the baked nix store path for /etc/nix/nix.conf (ADR
+	// 0042); empty when the Consumer's nixInBox knob is off, which gates both
+	// this mount and nixVarSnapshotDir's mount together (nix isn't even on
+	// PATH in that case). nixVarSnapshotDir is the host-side directory
+	// standing in for /nix/var's overlay lower (see nixVarSnapshotDir below);
+	// it is always computed, so its presence on disk — not its own emptiness
+	// — is what IsReady/EnsureReady actually check when nixConfigFile is set,
+	// surfacing a missing snapshot as an actionable launcher-level error
+	// before bwrap ever runs, rather than a raw bwrap mount failure.
+	nixConfigFile     string
+	nixVarSnapshotDir string
 	// hostMediatedRemote/outboxRelayCapable/accumulationRepoDir/
 	// boxForgeAndIssueAccess gate the /repo and /outbox mounts (ADR 0033,
 	// issue #1697; issue #1918); see MountParams.
@@ -81,14 +103,29 @@ type bwrapAdapter struct {
 	running map[string]*os.Process
 }
 
-// NewBwrap constructs a bwrap adapter for the run command from cfg.
-// EnsureReady is a no-op; call NewBwrapBuild for the build command. By
+// nixVarSnapshotDir is the host-side directory that stands in for /nix/var
+// inside a bwrap Box's overlay lower (ADR 0042): the build command writes an
+// agent-owned, VACUUMed snapshot of the host's own /nix/var/nix/db/db.sqlite
+// to <dir>/nix/db/db.sqlite (bwrapBuildAdapter.EnsureReady, via
+// snapshotStoreDB), and the run adapter overlays this whole directory onto
+// /nix/var so the Box's nix trusts host-present store paths without
+// re-substituting them. Shared, package-level, between the run adapter (this
+// file, to mount) and the build adapter (snapshotStoreDB, to write) so the
+// path convention lives in exactly one place.
+func nixVarSnapshotDir(pwd string) string {
+	return filepath.Join(pwd, ".spindrift", "nix-var-snapshot")
+}
+
+// NewBwrap constructs a bwrap adapter for the run command from cfg and pwd
+// (the launcher's own working directory, mirroring NewOCI's pwd parameter).
+// EnsureReady delegates to IsReady, which checks readiness rather than
+// realizing anything; call NewBwrapBuild for the build command. By
 // default (any cfg.NetworkMode except the "host" opt-out, issue #2666) the
 // resulting adapter isolates the sandbox into its own network namespace,
 // with egress restored via a hardened pasta helper (ADR 0042) — podman-
 // rootless parity. cfg.NetworkMode="host" and the raw cfg.BwrapUnshareNet
 // knob are documented separately in buildArgs.
-func NewBwrap(cfg Config) Runner {
+func NewBwrap(cfg Config, pwd string) Runner {
 	return &bwrapAdapter{
 		agentFiles:               cfg.AgentFiles,
 		agentEnv:                 cfg.AgentEnv,
@@ -98,6 +135,8 @@ func NewBwrap(cfg Config) Runner {
 		promptDir:                cfg.PromptDir,
 		skillsDir:                cfg.SkillsDir,
 		driverSessionCacheDir:    cfg.DriverSessionCacheDir,
+		nixConfigFile:            cfg.NixConfigFile,
+		nixVarSnapshotDir:        nixVarSnapshotDir(pwd),
 		hostMediatedRemote:       cfg.HostMediatedRemote,
 		accumulationRepoDir:      cfg.AccumulationRepoDir,
 		outboxRelayCapable:       cfg.OutboxRelayCapable,
@@ -109,13 +148,42 @@ func NewBwrap(cfg Config) Runner {
 	}
 }
 
-// EnsureReady is a no-op for bwrap run: store closures are realized by
-// `launcher build` (bwrapBuildAdapter.EnsureReady) before `run` is invoked.
-func (a *bwrapAdapter) EnsureReady() error { return nil }
+// EnsureReady does not build anything for bwrap run: store closures are
+// realized by `launcher build` (bwrapBuildAdapter.EnsureReady) before `run`
+// is invoked. It delegates to IsReady so the same actionable
+// snapshot-missing error fires on the default run/dispatch path too, not
+// only on `--no-build` (bootstrap only calls IsReady there) — issue #2664.
+func (a *bwrapAdapter) EnsureReady() error { return a.IsReady() }
 
-// IsReady is a no-op for bwrap: store closures are realized out-of-band by
-// `spindrift build` and are either present or absent at bwrap invocation time.
-func (a *bwrapAdapter) IsReady() error { return nil }
+// IsReady checks that the nix-in-box snapshot `launcher build` writes is
+// present, when the Consumer's nixInBox knob is on (ADR 0042). Store
+// closures otherwise (agentFiles/agentEnv/passwd/group) are realized
+// out-of-band by `spindrift build` too, but buildArgs never conditions a
+// mount on their absence the way it does nixVarSnapshotDir, so this check is
+// scoped to that one gap (issue #2664): without it, a missing snapshot only
+// surfaces as a raw bwrap overlay mount failure instead of an actionable
+// launcher-level error.
+func (a *bwrapAdapter) IsReady() error {
+	if a.nixConfigFile == "" {
+		return nil
+	}
+	// Check the db.sqlite file itself, not just its parent dir: snapshotStoreDB
+	// MkdirAlls <nixVarSnapshotDir>/nix/db before it writes db.sqlite, so a
+	// dir-only check would report ready on a dir left behind by a failed
+	// snapshot (issue #2664).
+	dbPath := filepath.Join(a.nixVarSnapshotDir, "nix", "db", "db.sqlite")
+	info, err := os.Stat(dbPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("nix store snapshot not found at %s; run \"launcher build\" first", dbPath)
+		}
+		return fmt.Errorf("checking nix store snapshot at %s: %w", dbPath, err)
+	}
+	if info.IsDir() {
+		return fmt.Errorf("nix store snapshot at %s is a directory, not a file; run \"launcher build\" first", dbPath)
+	}
+	return nil
+}
 
 // mountSpecs computes the host-to-box mounts that apply for box, shared with
 // the OCI adapter (buildMountSpecs); only the rendering below differs.
@@ -174,6 +242,20 @@ func (a *bwrapAdapter) buildArgs(etcDir string, box Box) []string {
 		"--dir", "/etc",
 		"--ro-bind", a.passwdFile, "/etc/passwd",
 		"--ro-bind", a.groupFile, "/etc/group",
+	}
+	// nixConfigFile empty means the Consumer's nixInBox knob is off (nix isn't
+	// even on PATH in that case), so both nix-related mounts below are
+	// skipped together rather than independently. When set: --overlay-src +
+	// --tmp-overlay gives bwrap a read-only lower (the VACUUMed
+	// /nix/var/nix/db/db.sqlite snapshot written by `launcher build`, ADR
+	// 0042) with an ephemeral tmpfs upper, so nix's own writes inside the Box
+	// (gcroots, profiles, WAL files) land in the upper and vanish with the
+	// sandbox rather than touching host disk. The store itself (/nix/store,
+	// bound unconditionally at the top of this function) stays a separate,
+	// plain read-only bind — never overlaid, regardless of this knob.
+	if a.nixConfigFile != "" {
+		args = append(args, "--ro-bind", a.nixConfigFile, "/etc/nix/nix.conf")
+		args = append(args, "--overlay-src", a.nixVarSnapshotDir, "--tmp-overlay", "/nix/var")
 	}
 	if !isolateNet {
 		if err := statResolvConf(); err == nil {
@@ -461,32 +543,57 @@ type bwrapBuildAdapter struct {
 	agentEnvDrv   string // .drv path for agentEnv
 	passwdFileDrv string // .drv path for passwdFile
 	groupFileDrv  string // .drv path for groupFile
+	// nixConfigFileDrv is the .drv path for /etc/nix/nix.conf (ADR 0042);
+	// empty when the Consumer's nixInBox knob is off, which gates both the
+	// extra nix-config closure realization and the store-DB snapshot step
+	// below together.
+	nixConfigFileDrv string
+	// nixVarSnapshotDir is the host-side directory snapshotStoreDB writes
+	// into (shared package-level convention with the run adapter's mount —
+	// see nixVarSnapshotDir's doc comment).
+	nixVarSnapshotDir string
 }
 
-// NewBwrapBuild constructs a bwrap adapter for the build command from cfg.
-// EnsureReady realizes agent store closures via nix build.
-func NewBwrapBuild(cfg Config) Runner {
+// NewBwrapBuild constructs a bwrap adapter for the build command from cfg and
+// pwd (the launcher's own working directory, mirroring NewBwrap's pwd
+// parameter). EnsureReady realizes agent store closures via nix build and,
+// when nixInBox is on, snapshots the host nix store DB.
+func NewBwrapBuild(cfg Config, pwd string) Runner {
 	return &bwrapBuildAdapter{
-		agentFilesDrv: cfg.AgentFilesDrv,
-		agentEnvDrv:   cfg.AgentEnvDrv,
-		passwdFileDrv: cfg.PasswdFileDrv,
-		groupFileDrv:  cfg.GroupFileDrv,
+		agentFilesDrv:     cfg.AgentFilesDrv,
+		agentEnvDrv:       cfg.AgentEnvDrv,
+		passwdFileDrv:     cfg.PasswdFileDrv,
+		groupFileDrv:      cfg.GroupFileDrv,
+		nixConfigFileDrv:  cfg.NixConfigFileDrv,
+		nixVarSnapshotDir: nixVarSnapshotDir(pwd),
 	}
+}
+
+// closureSpec pairs a human-readable label with the .drv path EnsureReady
+// realizes it from, so the same shape isn't respelled at each of the two call
+// sites that build a []closureSpec (the fixed four closures and the
+// conditionally-appended nix-config one).
+type closureSpec struct {
+	label string
+	drv   string
 }
 
 // EnsureReady realizes the agent store closures via nix build. Nix is
 // idempotent — if already realized this is fast. Real nix errors surface.
+// When nixConfigFileDrv is set (Consumer's nixInBox knob is on), it also
+// realizes the nix-config closure and snapshots the host nix store DB (ADR
+// 0042) for the run adapter's /nix/var overlay to mount.
 func (a *bwrapBuildAdapter) EnsureReady() error {
 	fmt.Println("==> bwrap runner: realizing agent store closures (no image build/load)")
 
-	closures := []struct {
-		label string
-		drv   string
-	}{
+	closures := []closureSpec{
 		{"agent-files", a.agentFilesDrv},
 		{"agent-env", a.agentEnvDrv},
 		{"passwd-file", a.passwdFileDrv},
 		{"group-file", a.groupFileDrv},
+	}
+	if a.nixConfigFileDrv != "" {
+		closures = append(closures, closureSpec{"nix-config", a.nixConfigFileDrv})
 	}
 	for _, c := range closures {
 		if err := a.realize(c.label, c.drv); err != nil {
@@ -494,7 +601,96 @@ func (a *bwrapBuildAdapter) EnsureReady() error {
 		}
 	}
 
+	if a.nixConfigFileDrv != "" {
+		if err := a.snapshotStoreDB(); err != nil {
+			return err
+		}
+	}
+
 	fmt.Println("==> done: agent store closures realized")
+	return nil
+}
+
+// hostNixDBPath is the host's real, live nix store database — never a path
+// inside a sandbox. snapshotStoreDB runs during `launcher build`, on the
+// operator's (or CI job's) own machine.
+const hostNixDBPath = "/nix/var/nix/db/db.sqlite"
+
+// snapshotStoreDB copies the host's live nix store database into
+// a.nixVarSnapshotDir, compacting it in the same step (ADR 0042: ~302MB raw
+// vs ~104MB compacted — an overlay copy-up rewrites a file whole, so the
+// compacted size is what actually lands in the Box's tmpfs upper on first
+// touch). This is the one Go call site in the whole launcher that reaches
+// into the host's live nix store metadata (as opposed to a nix-store-
+// realized artifact). The resulting file's ownership is whatever uid runs
+// `launcher build` (the operator, or the CI job), never root, regardless of
+// hostNixDBPath's own ownership — sqlite3's "VACUUM INTO" always creates a
+// fresh file owned by the invoking process (ADR 0042's "agent-owned"
+// requirement), so no explicit chown is needed here.
+func (a *bwrapBuildAdapter) snapshotStoreDB() error {
+	fmt.Println("==> bwrap runner: snapshotting host nix store DB (VACUUMed)")
+
+	if err := statHostNixDB(); err != nil {
+		return fmt.Errorf("host nix store db not found at %s: %w", hostNixDBPath, err)
+	}
+
+	dest := filepath.Join(a.nixVarSnapshotDir, "nix", "db", "db.sqlite")
+	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+		return fmt.Errorf("mkdir nix-var-snapshot: %w", err)
+	}
+
+	// "VACUUM INTO" uses the same online-backup mechanism as sqlite's ".backup"
+	// dot-command internally, so it correctly handles a concurrent host
+	// nix-daemon write (WAL journal not yet checkpointed) that a plain file
+	// copy could snapshot mid-write, producing a truncated/inconsistent
+	// database — while also compacting into the destination in the same
+	// step, so no separate VACUUM pass is needed. dest is escaped for
+	// embedding in a single-quoted SQL string literal; sqlite3's dot-commands
+	// are whitespace-tokenized (a bare ".backup <dest>" with a space in dest
+	// breaks), but a SQL statement passed as sqlite3's third argv element is
+	// not.
+	//
+	// "VACUUM INTO" refuses to run if dest already exists (e.g. a prior
+	// `launcher build` on the same nixVarSnapshotDir), so move any existing
+	// snapshot aside instead of deleting it outright: if VACUUM INTO then
+	// fails (disk full, host db locked), the rename below lets us restore the
+	// previously-working snapshot instead of leaving `launcher run` unable to
+	// start from a snapshot that was destroyed for nothing (issue #2664
+	// review finding).
+	backup := dest + ".bak"
+	hadBackup := false
+	if _, err := os.Stat(dest); err == nil {
+		if err := os.Rename(dest, backup); err != nil {
+			return fmt.Errorf("move aside stale nix store db snapshot %s: %w", dest, err)
+		}
+		hadBackup = true
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("stat nix store db snapshot %s: %w", dest, err)
+	}
+
+	escapedDest := strings.ReplaceAll(dest, "'", "''")
+	stmt := fmt.Sprintf("VACUUM INTO '%s';", escapedDest)
+	vacuumInto := execCommand("sqlite3", hostNixDBPath, stmt)
+	vacuumInto.Stdout = os.Stdout
+	vacuumInto.Stderr = os.Stderr
+	if err := vacuumInto.Run(); err != nil {
+		wrapped := fmt.Errorf("sqlite3 vacuum-into nix store db snapshot: %w", err)
+		if hadBackup {
+			if restoreErr := os.Rename(backup, dest); restoreErr != nil {
+				return fmt.Errorf("%w (additionally failed to restore previous snapshot from %s to %s: %v)", wrapped, backup, dest, restoreErr)
+			}
+		}
+		return wrapped
+	}
+
+	if hadBackup {
+		// Backup cleanup is best-effort: a leftover .bak file wastes disk but
+		// doesn't break the snapshot VACUUM INTO just wrote to dest, so it's
+		// not worth failing an otherwise-successful EnsureReady over.
+		if err := os.Remove(backup); err != nil {
+			fmt.Printf("==> bwrap runner: warning: could not remove backup snapshot %s: %v\n", backup, err)
+		}
+	}
 	return nil
 }
 

@@ -12,6 +12,7 @@ setup() {
   setup_fakes
   set_run_env
   cd "$BATS_TEST_TMPDIR"
+  stub_nix_var_snapshot
   export FAKE_GH_ISSUES=$'1\tFirst issue'
   export FAKE_PODMAN_IMAGE_PRESENT=1
   unset SPINDRIFT_SKILLS_DIR

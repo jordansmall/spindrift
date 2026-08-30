@@ -769,6 +769,17 @@ func containsArg(args []string, flag string) bool {
 	return false
 }
 
+// wantTriple reports whether args contains the contiguous 3-element
+// subsequence a0, a1, a2 (e.g. a flag and its two positional values).
+func wantTriple(args []string, a0, a1, a2 string) bool {
+	for i := 0; i+2 < len(args); i++ {
+		if args[i] == a0 && args[i+1] == a1 && args[i+2] == a2 {
+			return true
+		}
+	}
+	return false
+}
+
 // TestReap_NeverRemovesRunningContainer verifies the safety guard: when the
 // fake CLI reports the container is running, Reap must not issue `rm -f`.
 func TestReap_NeverRemovesRunningContainer(t *testing.T) {

@@ -30,9 +30,9 @@ func TestRunnerForKind_And_BuildRunnerForKind(t *testing.T) {
 
 	for _, sel := range selectors {
 		t.Run(sel.name, func(t *testing.T) {
-			bwrapWant := runner.NewBwrap(rc)
+			bwrapWant := runner.NewBwrap(rc, pwd)
 			if sel.name == "buildRunnerForKind" {
-				bwrapWant = runner.NewBwrapBuild(rc)
+				bwrapWant = runner.NewBwrapBuild(rc, pwd)
 			}
 			cases := []struct {
 				name       string
