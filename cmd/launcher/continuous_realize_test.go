@@ -215,3 +215,52 @@ func TestRunContinuousDispatch_FailedRealizeDoesNotChangeOutcome(t *testing.T) {
 		t.Fatalf("realizeFake.CallsCopy() = %v, want exactly one Realize call recorded", calls)
 	}
 }
+
+// TestRunContinuousDispatch_Bwrap_StaleClosure_ReturnsExitCode4 is issue
+// #2667 AC2's own test: a stale bwrap agent-closure must produce the same
+// exit code (4, waves.ErrImageStale) a stale OCI image does. Every other
+// exit-code-4 test in this file drives the shared path with an OCI-style
+// runnerKind/imageTag; this one is the bwrap twin, proving the shared
+// mapping is actually exercised for bwrap rather than only argued from code
+// sharing between the two runnerKinds. Mirrors
+// TestRunContinuousDispatch_StaleRealizesTipInBackground's setup, but with a
+// bwrap runnerKind and a bare-store-path imageTag (no "repo:hash" tag shape).
+func TestRunContinuousDispatch_Bwrap_StaleClosure_ReturnsExitCode4(t *testing.T) {
+	const loadedHash = "11111111111111111111111111111111" // 32 chars, the loaded closure
+	const staleHash = "22222222222222222222222222222222"  // 32 chars, distinct -- never matches loadedHash
+
+	c := baseConfig()
+	c.continuousDispatch = true
+	c.maxParallel = 1
+	c.runnerKind = "bwrap"
+	c.baseBranch = "main"
+	c.label = "ready-for-agent"
+	c.issueTracker = "local"
+	c.codeForge = "local"
+	c.flakeImageAttr = ".#packages.x86_64-linux.agent-closure"
+	c.imageTag = "/nix/store/" + loadedHash + "-agent-closure"
+
+	dir, _ := newStaleProbeRepo(t)
+
+	it := forge.NewFake(testDispatchLabels)
+	// No open issue at all: the stale verdict short-circuits the bootstrap
+	// refill before any discover/dispatch happens, so this test needs no
+	// dispatchable issue to observe the stale exit.
+	cf := it
+
+	fr := runner.NewFake()
+	f := testFactory(t, dir, fr)
+	s := settle.NewFake()
+	lp := fakeLiveness{}
+
+	staleEval := &freshness.Fake{OutPath: "/nix/store/" + staleHash + "-agent-closure"}
+	realizeFake := freshness.NewRealizerFake()
+
+	err := runContinuousDispatch(c, it, cf, dir, f, s, staleEval, realizeFake, lp)
+	if got := exitCodeFor(err); got != 4 {
+		t.Fatalf("exitCodeFor(err) = %d, want 4 (waves.ErrImageStale) -- a stale bwrap agent-closure must exit the same way a stale OCI image does", got)
+	}
+	if len(fr.RunCalls) != 0 {
+		t.Errorf("RunCalls: got %d, want 0 (no Box launches once the probe is stale)", len(fr.RunCalls))
+	}
+}

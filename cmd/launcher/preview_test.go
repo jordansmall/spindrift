@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/freshness"
 	"spindrift.dev/launcher/internal/waves"
 )
 
@@ -180,6 +181,42 @@ func TestPreviewIssues_PrintsFreshnessLine(t *testing.T) {
 	}
 	if !strings.Contains(out, "bwrap runtime keeps its store read-only") {
 		t.Errorf("output missing the bwrap runnerKind not-applicable message (want the runnerKind early-return, not a git-repo-missing fallback); got:\n%s", out)
+	}
+}
+
+// TestPreviewIssues_Bwrap_PrintsRealFreshnessLine verifies that previewIssues
+// prints a genuine fresh/stale freshness verdict for a bwrap runnerKind, not
+// just the not-applicable path TestPreviewIssues_PrintsFreshnessLine covers
+// (issue #2667 AC3) — a real git clone with an origin remote and an injected
+// Evaluator drive Probe all the way to a comparison, proving preview's own
+// freshness line reflects a bwrap closure's actual outPath comparison.
+func TestPreviewIssues_Bwrap_PrintsRealFreshnessLine(t *testing.T) {
+	const staleHash = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	const freshHash = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+
+	c := baseConfig()
+	c.repoSlug = "owner/repo"
+	c.label = "ready-for-agent"
+	c.runnerKind = "bwrap"
+	c.baseBranch = "main"
+	c.flakeImageAttr = ".#packages.x86_64-linux.agent-closure"
+	c.imageTag = "/nix/store/" + staleHash + "-agent-closure"
+	fc := forge.NewFake()
+
+	pwd := newConsoleGitRepo(t, "main")
+	eval := &freshness.Fake{OutPath: "/nix/store/" + freshHash + "-agent-closure"}
+
+	var buf bytes.Buffer
+	if err := previewIssues(c, fc, fc, &buf, nil, pwd, eval); err != nil {
+		t.Fatalf("previewIssues: %v", err)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "rebuild needed") {
+		t.Errorf("output missing the rebuild-needed verdict for a diverging bwrap closure; got:\n%s", out)
+	}
+	if !strings.Contains(out, "loaded closure") {
+		t.Errorf("output does not name the loaded closure; got:\n%s", out)
 	}
 }
 
