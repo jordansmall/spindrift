@@ -76,11 +76,13 @@ func stripMountPair(args []string, flag, target string) []string {
 	return out
 }
 
-// newIntegrationBwrapAdapter builds a bwrapAdapter and etc dir wired the same
-// way bwrapAdapter.Run wires them (real passwd/group files, a real agentFiles
-// dir), so buildArgs produces the exact mount/hardening flags production
-// code would send to a real bwrap process.
-func newIntegrationBwrapAdapter(t *testing.T, unshareNet bool) (*bwrapAdapter, string) {
+// newIntegrationBwrapAdapter builds a bwrapAdapter wired with a real
+// agentFiles dir and real passwd/group files (production binds these from
+// nix store paths, not a temp dir -- see bwrapAdapter.passwdFile/groupFile
+// and lib/image.nix's passwdFile/groupFile derivations, issue #2663), so
+// buildArgs produces the exact mount/hardening flags production code would
+// send to a real bwrap process.
+func newIntegrationBwrapAdapter(t *testing.T, unshareNet bool) *bwrapAdapter {
 	t.Helper()
 	agentFiles := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(agentFiles, "agent"), 0o755); err != nil {
@@ -93,6 +95,8 @@ func newIntegrationBwrapAdapter(t *testing.T, unshareNet bool) (*bwrapAdapter, s
 		t.Fatal(err)
 	}
 	etcDir := t.TempDir()
+	// Mirrors lib/image.nix's passwdFile/groupFile content verbatim -- keep
+	// these two in sync by hand if that derivation's content ever changes.
 	passwd := "root:x:0:0:root:/root:/bin/bash\nagent:x:1000:1000:agent:/home/agent:/bin/bash\n"
 	group := "root:x:0:\nagent:x:1000:\n"
 	if err := os.WriteFile(filepath.Join(etcDir, "passwd"), []byte(passwd), 0o644); err != nil {
@@ -101,13 +105,14 @@ func newIntegrationBwrapAdapter(t *testing.T, unshareNet bool) (*bwrapAdapter, s
 	if err := os.WriteFile(filepath.Join(etcDir, "group"), []byte(group), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	a := &bwrapAdapter{
+	return &bwrapAdapter{
 		agentFiles:    agentFiles,
 		agentEnv:      "/fake/agent-env",
+		passwdFile:    filepath.Join(etcDir, "passwd"),
+		groupFile:     filepath.Join(etcDir, "group"),
 		bakedPrefetch: "true",
 		unshareNet:    unshareNet,
 	}
-	return a, etcDir
 }
 
 // bwrapProbeArgs takes the real buildArgs() output for box, drops the
@@ -115,8 +120,8 @@ func newIntegrationBwrapAdapter(t *testing.T, unshareNet bool) (*bwrapAdapter, s
 // swaps the fixed "-- /agent/entrypoint.sh" tail for script, run via
 // bash -c. Every other mount/hardening flag reaches bwrap exactly as
 // production would send it.
-func bwrapProbeArgs(a *bwrapAdapter, etcDir string, box Box, bashBin, script string) []string {
-	args := a.buildArgs(etcDir, box)
+func bwrapProbeArgs(a *bwrapAdapter, box Box, bashBin, script string) []string {
+	args := a.buildArgs(box)
 	args = stripMountPair(args, "--proc", "/proc")
 	args = stripMountPair(args, "--dev", "/dev")
 	args = args[:len(args)-1] // drop "/agent/entrypoint.sh", keep the "--" separator
@@ -132,9 +137,9 @@ func TestBwrapIntegration_NixStoreReadOnly(t *testing.T) {
 	// unshareNet=true: skips the --ro-bind /etc/resolv.conf mount (buildArgs
 	// only adds it when net is shared), which a nested sandbox can't remount
 	// anyway — irrelevant to the /nix/store assertion under test here.
-	a, etcDir := newIntegrationBwrapAdapter(t, true)
+	a := newIntegrationBwrapAdapter(t, true)
 	box := Box{Env: map[string]string{}}
-	args := bwrapProbeArgs(a, etcDir, box, bashBin, "echo x > /nix/store/spindrift-integration-write-probe")
+	args := bwrapProbeArgs(a, box, bashBin, "echo x > /nix/store/spindrift-integration-write-probe")
 
 	cmd := exec.Command("bwrap", args...)
 	out, runErr := cmd.CombinedOutput()
@@ -152,9 +157,9 @@ func TestBwrapIntegration_NixStoreReadOnly(t *testing.T) {
 // present on argv (issue #576).
 func TestBwrapIntegration_SandboxUID(t *testing.T) {
 	bashBin := requireRealBwrap(t)
-	a, etcDir := newIntegrationBwrapAdapter(t, true)
+	a := newIntegrationBwrapAdapter(t, true)
 	box := Box{Env: map[string]string{}}
-	args := bwrapProbeArgs(a, etcDir, box, bashBin, "echo $EUID")
+	args := bwrapProbeArgs(a, box, bashBin, "echo $EUID")
 
 	out, err := exec.Command("bwrap", args...).CombinedOutput()
 	if err != nil {
@@ -171,11 +176,11 @@ func TestBwrapIntegration_SandboxUID(t *testing.T) {
 // flag being present on argv (issue #576).
 func TestBwrapIntegration_UnshareNetBlocksNetwork(t *testing.T) {
 	bashBin := requireRealBwrap(t)
-	a, etcDir := newIntegrationBwrapAdapter(t, true)
+	a := newIntegrationBwrapAdapter(t, true)
 	box := Box{Env: map[string]string{}}
 	// bash's /dev/tcp pseudo-device is interpreted by bash itself, so it
 	// needs no real /dev mount inside the sandbox.
-	args := bwrapProbeArgs(a, etcDir, box, bashBin, "exec 3<>/dev/tcp/1.1.1.1/80")
+	args := bwrapProbeArgs(a, box, bashBin, "exec 3<>/dev/tcp/1.1.1.1/80")
 
 	out, err := exec.Command("bwrap", args...).CombinedOutput()
 	if err == nil {
@@ -198,7 +203,7 @@ func TestBwrapIntegration_UnshareNetBlocksNetwork(t *testing.T) {
 func TestBwrapIntegration_HomeAgentStagingReadable(t *testing.T) {
 	bashBin := requireRealBwrap(t)
 	catBin := resolveSandboxBin(t, "cat")
-	a, etcDir := newIntegrationBwrapAdapter(t, true)
+	a := newIntegrationBwrapAdapter(t, true)
 
 	const marker = "spindrift-integration-home-agent-marker"
 	homeAgentDir := filepath.Join(a.agentFiles, "home", "agent")
@@ -210,7 +215,7 @@ func TestBwrapIntegration_HomeAgentStagingReadable(t *testing.T) {
 	}
 
 	box := Box{Env: map[string]string{}}
-	args := bwrapProbeArgs(a, etcDir, box, bashBin, catBin+" "+homeAgentStagingDir+"/marker.txt")
+	args := bwrapProbeArgs(a, box, bashBin, catBin+" "+homeAgentStagingDir+"/marker.txt")
 
 	out, err := exec.Command("bwrap", args...).CombinedOutput()
 	if err != nil {
@@ -231,9 +236,9 @@ func TestBwrapIntegration_SecretNotOnProcessArgv(t *testing.T) {
 	sleepBin := resolveSandboxBin(t, "sleep")
 	const marker = "spindrift-integration-secret-9f3c2a"
 	t.Setenv("GH_TOKEN", marker)
-	a, etcDir := newIntegrationBwrapAdapter(t, true)
+	a := newIntegrationBwrapAdapter(t, true)
 	box := Box{Env: map[string]string{"GH_TOKEN": marker}}
-	args := bwrapProbeArgs(a, etcDir, box, bashBin, sleepBin+" 2")
+	args := bwrapProbeArgs(a, box, bashBin, sleepBin+" 2")
 
 	cmd := exec.Command("bwrap", args...)
 	if err := cmd.Start(); err != nil {
