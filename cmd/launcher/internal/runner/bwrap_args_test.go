@@ -51,6 +51,23 @@ func TestBwrapArgs_NoClearEnv(t *testing.T) {
 	}
 }
 
+// TestBwrapArgs_DieWithParent verifies that --die-with-parent is always
+// present, unconditionally, so bwrap registers PR_SET_PDEATHSIG against its
+// own parent and the sandbox terminates when the launcher process dies
+// (issue #2669).
+func TestBwrapArgs_DieWithParent(t *testing.T) {
+	a := &bwrapAdapter{
+		agentFiles:    "/fake/agent",
+		agentEnv:      "/fake/env",
+		bakedPrefetch: "echo ok",
+	}
+	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}})
+
+	if !containsArg(args, "--die-with-parent") {
+		t.Errorf("expected --die-with-parent in args: %v", args)
+	}
+}
+
 // TestBwrapArgs_SkillsDirMounted verifies that a valid SPINDRIFT_SKILLS_DIR
 // produces a --ro-bind entry for the fixed operator-override staging path
 // /operator-skills (issue #2489) — entrypoint.sh merges it into the real
