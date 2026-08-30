@@ -1,5 +1,78 @@
 # Changelog
 
+## [0.12.1](https://github.com/jordansmall/spindrift/compare/v0.12.0...v0.12.1) (2026-08-30)
+
+
+### Features
+
+* **bwrap:** apply PIDS_LIMIT/MEMORY_LIMIT under bwrap ([9fae5a1](https://github.com/jordansmall/spindrift/commit/9fae5a161eefc1ae89126869f2b6cdf10fdf2317))
+* **bwrap:** attach a compiled seccomp filter to the sandbox ([5778d67](https://github.com/jordansmall/spindrift/commit/5778d67b64d4934d7568cec5a74dddc0d648ba95))
+* **bwrap:** bind the agent-closure generation a Box supplies ([8f54e7c](https://github.com/jordansmall/spindrift/commit/8f54e7c9489caf35cc8ce45f4362da6ae407cc2d))
+* **bwrap:** hold shared lock on box snapshot gen ([0091854](https://github.com/jordansmall/spindrift/commit/009185499317ed568928cf8275db470ffccc9dd3))
+* **bwrap:** hot-swap Box-only staleness instead of draining ([3713d21](https://github.com/jordansmall/spindrift/commit/3713d2118404860ec150b12c2e6341e2f485283b))
+* **bwrap:** isolate network namespace by default ([d5dade8](https://github.com/jordansmall/spindrift/commit/d5dade81ceb7cd71dc6f417d71084087a0fb6577)), closes [#2666](https://github.com/jordansmall/spindrift/issues/2666)
+* **bwrap:** kill the sandbox when the launcher dies ([fcba8a2](https://github.com/jordansmall/spindrift/commit/fcba8a2005efff4b22582a92591359974a7b41cf))
+* **bwrap:** make Boxes addressable across launcher runs ([b6476fe](https://github.com/jordansmall/spindrift/commit/b6476fe4a2be9a8fd4a4ff61deeb1c64778d037b))
+* **bwrap:** overlay /nix/store as ephemeral tmpfs when writable ([166f288](https://github.com/jordansmall/spindrift/commit/166f28894968faded774b76060072da36e364f91))
+* **bwrap:** read-only in-box nix via config + store-db snapshot ([28835a5](https://github.com/jordansmall/spindrift/commit/28835a5517ab7f4f4d1054ae284313f79598c31e)), closes [#2664](https://github.com/jordansmall/spindrift/issues/2664)
+* **bwrap:** reclaim unreferenced snapshot gens ([fc10e61](https://github.com/jordansmall/spindrift/commit/fc10e610bd7b4dae06ce36f93f127d927153a2cb))
+* **bwrap:** scope snapshot dir by closure ([e8f35df](https://github.com/jordansmall/spindrift/commit/e8f35df897dd543b6e68ccc991f314c25e14c6a1))
+* **checks:** drift-check the legacy settings mapping table ([dac19ea](https://github.com/jordansmall/spindrift/commit/dac19ea63a8874a8722e1e97038270079766492d)), closes [#2558](https://github.com/jordansmall/spindrift/issues/2558)
+* **dispatch:** let a Factory bind a swapped generation ([1bfd6c3](https://github.com/jordansmall/spindrift/commit/1bfd6c3e68fe32ca1f019b0cbda5c158e103a4b8))
+* **doctor:** build bwrap capability check rows ([00b5a2b](https://github.com/jordansmall/spindrift/commit/00b5a2b14c4bbe606274a1f29499812806702829))
+* **doctor:** report bwrap checks only under bwrap runner ([00f59e9](https://github.com/jordansmall/spindrift/commit/00f59e95ed4023a643a854faf7989af86bc33333))
+* **dogfood:** select runtime via DOGFOOD_RUNTIME ([0b430d9](https://github.com/jordansmall/spindrift/commit/0b430d94c8d2b6880fd306123cf73b7d9cb13957))
+* **freshness:** add synchronous realize for hot-swap ([dd5e39c](https://github.com/jordansmall/spindrift/commit/dd5e39c51e749c94265eb75dc71971446f01b3f1))
+* **freshness:** detect a stale bwrap agent closure ([f116464](https://github.com/jordansmall/spindrift/commit/f116464aa25a342bd954baf72708b900a7ad9b53))
+* **launcher:** read passwd/group store paths from document ([6ad42bf](https://github.com/jordansmall/spindrift/commit/6ad42bf618fca2a9a1fc54de5fe42aa806349fb0))
+* **launcher:** refuse bwrap launch without overlay support ([38c499d](https://github.com/jordansmall/spindrift/commit/38c499d0170fc4305222c88f4275f97d0aff2273))
+* **launcher:** refuse to launch bwrap without pasta ([7487a8c](https://github.com/jordansmall/spindrift/commit/7487a8cb5e8b1c88b1a05722c561ae31750ddac2))
+* **nix:** bound bwrap Box nix build parallelism ([e679335](https://github.com/jordansmall/spindrift/commit/e67933554a1d1901712b81efd0017380844d097d))
+* **nix:** bundle bwrap agent files/env into agent-closure ([362cbf4](https://github.com/jordansmall/spindrift/commit/362cbf422c90ea19b479ccbafd5e22f9dba784aa))
+* **nix:** compile a bwrap syscall filter from a denylist ([904133c](https://github.com/jordansmall/spindrift/commit/904133cdfe7777b47b91acc993e9c57ed3bbba91))
+* **nix:** expose apps.dogfood-bwrap flake app ([c52e4ab](https://github.com/jordansmall/spindrift/commit/c52e4ab8fa38eea3363cbe9e1103dd16166c15b4))
+* **nix:** instantiate a bwrap dogfood harness ([b9f80cd](https://github.com/jordansmall/spindrift/commit/b9f80cd6e872513a099689f3a3f51612b845b4eb))
+* **nix:** thread nixStoreWritable to a bwrap artifact ([1a3e6aa](https://github.com/jordansmall/spindrift/commit/1a3e6aa4a0ef4c1ef5d837560916fd41251c9e1b))
+* **nix:** thread the syscall filter into the launcher config ([c5a286b](https://github.com/jordansmall/spindrift/commit/c5a286b64008a279bfd8e20b55ba68b4bd895970))
+* **preambles:** export passwd/group as document artifacts ([47871b1](https://github.com/jordansmall/spindrift/commit/47871b12951e7ef4cd6eb4508b5aa6f9b525ac53))
+* **preambles:** thread nix.conf artifact into the run/build docs ([2fff214](https://github.com/jordansmall/spindrift/commit/2fff214f30fcca5b3eba2fcf3661de8da412a7f8))
+* **renderers:** render legacy settings mapping table ([c583ac5](https://github.com/jordansmall/spindrift/commit/c583ac59c09a8a41f5d8af4462a539cffcb21f53))
+* **runner:** accept a per-launch agent-closure generation ([7475e9b](https://github.com/jordansmall/spindrift/commit/7475e9bf753ee1a4d86cee316d7855b080185539))
+* **runner:** add cgroup v2 delegation probe ([168cd1b](https://github.com/jordansmall/spindrift/commit/168cd1b6453efba77668d2523f7111415db07a54))
+* **runner:** bind bwrap account files from Config paths ([effd2a3](https://github.com/jordansmall/spindrift/commit/effd2a3c428276ed1ef17ee2166afa5a2919b497))
+* **runner:** derive AgentGeneration from a tip closure ([24a52d0](https://github.com/jordansmall/spindrift/commit/24a52d074f237f07387afc147c05dbe19f3d4561))
+
+
+### Bug Fixes
+
+* **bwrap:** carry build-time drv artifacts in the run document ([f38b156](https://github.com/jordansmall/spindrift/commit/f38b156228e7ac46ddfe29cf823bb99058d5aafd))
+
+
+### Documentation
+
+* add 0.13.0 release notes ([ebd9915](https://github.com/jordansmall/spindrift/commit/ebd99159ca1ea8e8d37aaa8eb4dffe902d39883a))
+* bwrap now enforces PIDS_LIMIT/MEMORY_LIMIT ([9ba16a8](https://github.com/jordansmall/spindrift/commit/9ba16a893e406848e70d90d4aaa51a26683f6c39))
+* **context:** drop stale Resolved re-derivation claim ([4b2f448](https://github.com/jordansmall/spindrift/commit/4b2f4485f37fccc2d9798feb2c4270daea69023f))
+* describe DOGFOOD_RUNTIME in the dogfood loop ([b1e530d](https://github.com/jordansmall/spindrift/commit/b1e530d5fe5355252b1e6382ae76356ca5379b5f))
+* doctor now reports bwrap host capabilities ([abba527](https://github.com/jordansmall/spindrift/commit/abba527a764e4c81f39004db7285b32db5c4b50f))
+* document the bwrap syscall filter denylist ([a3dc9ed](https://github.com/jordansmall/spindrift/commit/a3dc9ed52522647c3d739171839125df0a5e6b6b))
+* **launcher:** clarify dual-purpose bwrap image slots ([c71fd69](https://github.com/jordansmall/spindrift/commit/c71fd69783630400fc1d17893ac772d11783189f))
+* **launcher:** fix rebuild comment for bwrap closures ([e8954eb](https://github.com/jordansmall/spindrift/commit/e8954ebc1e9af7b4a115859dc5d112e078fdcd3e))
+* **network:** document bwrap host-loopback isolation ([5710bf5](https://github.com/jordansmall/spindrift/commit/5710bf582d91ff9928da29446a8803ca63e7a4bd))
+* **runner:** fix stale ListRunning doc for bwrap ([128cefa](https://github.com/jordansmall/spindrift/commit/128cefacd29d6cc0eb397e71d0899df71138925b))
+
+
+### Code Refactoring
+
+* **image:** extract nix.conf into a shared derivation ([588426d](https://github.com/jordansmall/spindrift/commit/588426d1ed501c95aa0bf10858956a00ad7a63f2))
+
+
+### Tests
+
+* **bwrap:** prove the syscall filter denies in a real sandbox ([9d28b0d](https://github.com/jordansmall/spindrift/commit/9d28b0d2cd051d3874f57f6699b3dd9a29f5877f))
+* **dogfood:** cover DOGFOOD_RUNTIME selection ([098ad4f](https://github.com/jordansmall/spindrift/commit/098ad4f0c5f292fe25a71c2f1b5e138365c3af28))
+* **launcher:** fix bwrap fallout in freshness tests ([dd1cbb8](https://github.com/jordansmall/spindrift/commit/dd1cbb8720cef2f3759301649d77bfef2b47401e))
+
 ## [0.12.0](https://github.com/jordansmall/spindrift/compare/v0.11.0...v0.12.0) (2026-08-30)
 
 
