@@ -763,6 +763,10 @@ in
       echo "nix.conf is missing sandbox = false" >&2
       exit 1
     }
+    grep -q 'cores = 4' nix.conf || {
+      echo "nix.conf is missing cores = 4" >&2
+      exit 1
+    }
     touch $out
   '';
 

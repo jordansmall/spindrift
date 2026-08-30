@@ -403,6 +403,10 @@ let
     experimental-features = nix-command flakes
     sandbox = false
     filter-syscalls = false
+    # Fixed, conservative bound -- not host-detected (Nix eval is
+    # pure/hermetic, can't shell out to nproc here without IFD) -- so a
+    # single Box's nix build never claims every core on hosts with many.
+    cores = 4
   '';
 
   # Evaluated once so the image's contents, closure registration, and Env
