@@ -13,21 +13,131 @@ import (
 
 var errEvalBoom = errors.New("nix eval boom")
 
-// TestProbe_BwrapNotApplicable verifies that a "bwrap" runnerKind — which
-// keeps its store read-only and has no loaded image to compare — reports the
-// probe as not applicable rather than attempting a fetch or eval. Probe's
-// first parameter is runnerKind (the RUNNER_KIND document artifact, issue
-// #2538 AC1), never a runtime-name comparison; it happens to equal the
-// literal runtime name "bwrap" only because that's bwrap's own runnerKind
-// value too.
-func TestProbe_BwrapNotApplicable(t *testing.T) {
-	res := Probe("bwrap", "/nonexistent", "main", ".#packages.x86_64-linux.agent-image", "spindrift:"+testutil.SameHash, "", "", nil)
+// TestProbe_Bwrap_NotApplicable_WhenNotAGitRepo verifies that a "bwrap"
+// runnerKind is not special-cased to always report not-applicable — it now
+// flows through the same fetch-base-tip + eval logic as any other
+// runnerKind, and only reports not-applicable for the same underlying
+// reasons (here: pwd isn't inside any git repository at all), naming that
+// reason rather than stale bwrap-specific wording. Mirrors
+// TestProbe_NotAGitRepo but with runnerKind "bwrap".
+func TestProbe_Bwrap_NotApplicable_WhenNotAGitRepo(t *testing.T) {
+	pwd := t.TempDir()
+	eval := &Fake{OutPath: "/nix/store/" + testutil.SameHash + "-agent-closure"}
+
+	res := Probe("bwrap", pwd, "main", ".#packages.x86_64-linux.agent-closure", "/nix/store/"+testutil.SameHash+"-agent-closure", "", "", eval)
 
 	if res.Applicable {
-		t.Errorf("Applicable = true, want false for runnerKind bwrap")
+		t.Errorf("Applicable = true, want false when pwd is not a git repository")
 	}
-	if res.Message == "" {
-		t.Error("Message is empty, want a not-applicable explanation")
+	if !strings.Contains(res.Message, "not a git repository") {
+		t.Errorf("Message %q does not name the not-a-git-repository condition", res.Message)
+	}
+	if len(eval.Calls) != 0 {
+		t.Errorf("Eval called %d times, want 0 when pwd is not a git repository", len(eval.Calls))
+	}
+}
+
+// TestProbe_Bwrap_FreshWhenClosureOutPathMatches verifies that a "bwrap"
+// runnerKind compares the freshly evaluated outPath directly against
+// imageTag (a bare nix store path for bwrap, not a "repo:tag" string) — an
+// exact match reports fresh with no genuine divergence to name.
+func TestProbe_Bwrap_FreshWhenClosureOutPathMatches(t *testing.T) {
+	pwd := testutil.NewCloneWithOrigin(t, "main")
+	closurePath := "/nix/store/" + testutil.SameHash + "-agent-closure"
+	eval := &Fake{OutPath: closurePath}
+
+	res := Probe("bwrap", pwd, "main", ".#packages.x86_64-linux.agent-closure", closurePath, "", "", eval)
+
+	if !res.Applicable {
+		t.Fatalf("Applicable = false, want true for a bwrap closure that can be fetched and evaluated")
+	}
+	if !res.Fresh {
+		t.Errorf("Fresh = false, want true when the loaded outPath matches the freshly evaluated one; message: %s", res.Message)
+	}
+	if res.TipTag != "" {
+		t.Errorf("TipTag = %q, want empty when fresh (no genuine divergence to name)", res.TipTag)
+	}
+}
+
+// TestProbe_Bwrap_RebuildNeededWhenClosureOutPathDiffers verifies that a
+// "bwrap" runnerKind reports rebuild-needed when the freshly evaluated
+// outPath differs from the loaded one, and that TipTag carries the raw fresh
+// outPath verbatim — never the OCI "<repo>:<hash>" tag format, since a raw
+// nix store path never contains a colon.
+func TestProbe_Bwrap_RebuildNeededWhenClosureOutPathDiffers(t *testing.T) {
+	pwd := testutil.NewCloneWithOrigin(t, "main")
+	freshPath := "/nix/store/" + testutil.DiffHash + "-agent-closure"
+	loadedPath := "/nix/store/" + testutil.SameHash + "-agent-closure"
+	eval := &Fake{OutPath: freshPath}
+
+	res := Probe("bwrap", pwd, "main", ".#packages.x86_64-linux.agent-closure", loadedPath, "", "", eval)
+
+	if !res.Applicable {
+		t.Fatalf("Applicable = false, want true for a bwrap closure that can be fetched and evaluated")
+	}
+	if res.Fresh {
+		t.Errorf("Fresh = true, want false when the outPath differs; message: %s", res.Message)
+	}
+	if res.TipTag != freshPath {
+		t.Errorf("TipTag = %q, want the raw fresh outPath %q verbatim", res.TipTag, freshPath)
+	}
+	if strings.Contains(res.TipTag, ":") {
+		t.Errorf("TipTag = %q contains a colon; the OCI repo:tag formatting path must be skipped for bwrap", res.TipTag)
+	}
+}
+
+// TestProbe_Bwrap_RebuildNeededMessage_SaysClosureNotImage verifies that a
+// "bwrap" runnerKind's rebuild-needed message calls the loaded value a
+// "closure", never an "image" — the loaded value is a bundled nix store
+// path, not an OCI image, and calling it "the loaded image" is misleading
+// for an operator reading the message.
+func TestProbe_Bwrap_RebuildNeededMessage_SaysClosureNotImage(t *testing.T) {
+	pwd := testutil.NewCloneWithOrigin(t, "main")
+	freshPath := "/nix/store/" + testutil.DiffHash + "-agent-closure"
+	loadedPath := "/nix/store/" + testutil.SameHash + "-agent-closure"
+	eval := &Fake{OutPath: freshPath}
+
+	res := Probe("bwrap", pwd, "main", ".#packages.x86_64-linux.agent-closure", loadedPath, "", "", eval)
+
+	if !strings.Contains(res.Message, "loaded closure") {
+		t.Errorf("Message %q does not say \"loaded closure\"", res.Message)
+	}
+	if strings.Contains(res.Message, "loaded image") {
+		t.Errorf("Message %q says \"loaded image\", want \"loaded closure\" for a bwrap runnerKind", res.Message)
+	}
+}
+
+// TestProbe_Bwrap_LauncherStale_ImageFresh_RebuildNeeded verifies that the
+// launcher dimension still composes correctly for a "bwrap" runnerKind: a
+// matching closure outPath but a stale launcher hash drives Fresh to false
+// and LauncherFresh to false while ImageFresh stays true, and Message names
+// the launcher (not "image:") as the cause.
+func TestProbe_Bwrap_LauncherStale_ImageFresh_RebuildNeeded(t *testing.T) {
+	pwd := testutil.NewCloneWithOrigin(t, "main")
+	closurePath := "/nix/store/" + testutil.SameHash + "-agent-closure"
+	eval := &Fake{
+		OutPathForAttr: map[string]string{
+			"packages.x86_64-linux.agent-closure": closurePath,
+			"packages.x86_64-linux.launcher":      "/nix/store/" + testutil.DiffHash + "-launcher",
+		},
+	}
+
+	res := Probe("bwrap", pwd, "main", ".#packages.x86_64-linux.agent-closure", closurePath, ".#packages.x86_64-linux.launcher", testutil.SameHash, eval)
+
+	if res.Fresh {
+		t.Errorf("Fresh = true, want false when the launcher hash differs; message: %s", res.Message)
+	}
+	if res.LauncherFresh {
+		t.Errorf("LauncherFresh = true, want false when the launcher hash differs")
+	}
+	if !res.ImageFresh {
+		t.Errorf("ImageFresh = false, want true when the closure outPath matched")
+	}
+	if !strings.Contains(res.Message, "launcher") {
+		t.Errorf("Message %q does not name the launcher as the stale dimension", res.Message)
+	}
+	if strings.Contains(res.Message, "image:") {
+		t.Errorf("Message %q names the image as a cause, but only the launcher is stale", res.Message)
 	}
 }
 
