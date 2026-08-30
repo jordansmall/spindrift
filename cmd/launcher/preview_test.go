@@ -150,18 +150,16 @@ func TestPreviewIssues_EmptyQueue(t *testing.T) {
 	}
 }
 
-// TestPreviewIssues_PrintsFreshnessLine verifies that previewIssues
-// surfaces the freshness probe result as its own line — a "bwrap"
-// runnerKind has no loaded image, so it must report "not applicable" rather
-// than attempting a fetch or eval. c.runtime is deliberately set to a real
-// OCI CLI name ("podman") while c.runnerKind is "bwrap" to prove the
-// freshness line is driven by c.runnerKind (the RUNNER_KIND document
-// artifact, issue #2538 AC1), not a runtime-name comparison: the old
-// c.runtime == "bwrap" check would have taken the OCI branch here and tried
-// to git-fetch against pwd="/unused" instead, producing a different
-// not-applicable message (a missing-git-repo diagnostic, not the bwrap
-// one) — this asserts the bwrap-specific message text, not just any
-// "not applicable" substring, so that mismatch would be caught.
+// TestPreviewIssues_PrintsFreshnessLine verifies that previewIssues surfaces
+// the freshness probe result as its own line. probe.go no longer special-
+// cases bwrap before the fetch step, so a bwrap and an OCI runnerKind now
+// hit the exact same not-a-git-repository not-applicable path against a pwd
+// that isn't a git checkout at all — there is no longer a bwrap-specific
+// message to discriminate against an OCI one here (c.runtime is still set to
+// a real OCI CLI name, "podman", alongside c.runnerKind "bwrap", but nothing
+// in this path reads c.runtime; see internal/freshness's own tests for that
+// coverage). This only asserts the freshness line appears and names the
+// actual not-applicable diagnostic for a non-git pwd.
 func TestPreviewIssues_PrintsFreshnessLine(t *testing.T) {
 	c := baseConfig()
 	c.repoSlug = "owner/repo"
@@ -171,7 +169,7 @@ func TestPreviewIssues_PrintsFreshnessLine(t *testing.T) {
 	fc := forge.NewFake()
 
 	var buf bytes.Buffer
-	if err := previewIssues(c, fc, fc, &buf, nil, "/unused", nil); err != nil {
+	if err := previewIssues(c, fc, fc, &buf, nil, t.TempDir(), nil); err != nil {
 		t.Fatalf("previewIssues: %v", err)
 	}
 
@@ -179,8 +177,8 @@ func TestPreviewIssues_PrintsFreshnessLine(t *testing.T) {
 	if !strings.Contains(out, "freshness:") {
 		t.Errorf("output missing freshness line; got:\n%s", out)
 	}
-	if !strings.Contains(out, "bwrap runtime keeps its store read-only") {
-		t.Errorf("output missing the bwrap runnerKind not-applicable message (want the runnerKind early-return, not a git-repo-missing fallback); got:\n%s", out)
+	if !strings.Contains(out, "is not a git repository") {
+		t.Errorf("output missing the not-a-git-repository not-applicable message; got:\n%s", out)
 	}
 }
 
