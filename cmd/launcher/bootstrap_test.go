@@ -141,6 +141,63 @@ func TestBootstrap_BadRegistryProxyCredentialEnv_WithUpstreamURL_WrapsErrConfigI
 	}
 }
 
+// TestBootstrap_ResolvableRegistryProxyCredentialEnv_WithUpstreamURL_Succeeds
+// guards against a double-validate/double-peek bug: bootstrap() used to run
+// the mutating resolveRegistryProxyCredential (which os.Unsetenv's the
+// REGISTRY_PROXY_CREDENTIAL_ENV var on success) before newGatedContext, but
+// newGatedContext's own loadConfig+validate re-peeks that same env var --
+// which resolveRegistryProxyCredential had already unset, so a perfectly
+// valid, resolvable credential made validate(gc.config) fail with "registry
+// proxy credential env var ... is unset or empty" even though nothing was
+// ever actually wrong. Unlike the two tests above (which name an env var
+// that is deliberately never set, so they never exercise the second
+// validate pass), this test sets REGISTRY_PROXY_CREDENTIAL_ENV to the name
+// of a variable that really is set, proving both that bootstrap() succeeds
+// and that the resolved credential value actually lands on the returned
+// launch context's config.
+func TestBootstrap_ResolvableRegistryProxyCredentialEnv_WithUpstreamURL_Succeeds(t *testing.T) {
+	stubExecutableOnPath(t, "pasta")
+	checkout := mustSeedableCheckout(t)
+	repoPath := filepath.Join(t.TempDir(), "accum.git")
+
+	t.Setenv("REPO_SLUG", "owner/repo")
+	t.Setenv("GH_TOKEN", "test-token")
+	t.Setenv("GIT_USER_NAME", "Test")
+	t.Setenv("GIT_USER_EMAIL", "test@example.com")
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "test-oauth-token")
+	t.Setenv("CODE_FORGE", "local")
+	t.Setenv("CODE_FORGE_ACCUMULATION_REPO_DIR", repoPath)
+	t.Setenv("BASE_BRANCH", "main")
+	t.Setenv("MERGE_MODE", "immediate")
+	t.Setenv("RUNTIME", "bwrap")
+	t.Setenv("RUNNER_KIND", "bwrap")
+	// ISSUE_TRACKER=local (with BOX_FORGE_AND_ISSUE_ACCESS left at its
+	// read-write default) keeps this test's success independent of an
+	// ambient BOX_FORGE_AND_ISSUE_ACCESS the surrounding process happens to
+	// export -- this test reaches newGatedContext's read-only-token gate
+	// (unlike the two tests above, which fail before getting that far), and
+	// that gate only fires for ISSUE_TRACKER/CODE_FORGE=github or forgejo.
+	t.Setenv("ISSUE_TRACKER", "local")
+	t.Setenv("LOCAL_ISSUES_DIR", t.TempDir())
+	t.Setenv("REGISTRY_PROXY_UPSTREAM_URL", "https://registry.example.com")
+	t.Setenv("SOME_TEST_REGISTRY_PROXY_CRED", "s3cr3t")
+	t.Setenv("REGISTRY_PROXY_CREDENTIAL_ENV", "SOME_TEST_REGISTRY_PROXY_CRED")
+	t.Chdir(checkout)
+
+	lc, err := bootstrap(true, dispatchKindWork, false)
+	if err != nil {
+		t.Fatalf("bootstrap() = %v, want no error: a resolvable registry proxy credential must not be rejected by a second, stale peek", err)
+	}
+	if lc == nil {
+		t.Fatal("bootstrap() launch context = nil, want a non-nil *launchContext on success")
+	}
+	t.Cleanup(lc.cleanup)
+
+	if lc.config.registryProxyCredential != "s3cr3t" {
+		t.Errorf("lc.config.registryProxyCredential = %q, want %q", lc.config.registryProxyCredential, "s3cr3t")
+	}
+}
+
 // mustRunGit runs `git -C dir args...` via the package's own runGit helper,
 // failing t on error.
 func mustRunGit(t *testing.T, dir string, args ...string) {
