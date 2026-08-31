@@ -14,8 +14,12 @@ import (
 func TestRunContinuousQueue_Pending(t *testing.T) {
 	q := runContinuousQueue{pending: func() int { return 3 }}
 
-	if got := q.Pending(); got != 3 {
+	got, err := q.Pending()
+	if got != 3 {
 		t.Errorf("Pending() = %d, want 3", got)
+	}
+	if err != nil {
+		t.Errorf("Pending() err = %v, want nil", err)
 	}
 }
 

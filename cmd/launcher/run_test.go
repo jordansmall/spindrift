@@ -441,8 +441,8 @@ func TestRunExitCode_ContinuousDispatch_ImageStale_ReturnsExitCode4(t *testing.T
 
 // TestRunExitCode_ContinuousDispatch_ImageStaleOnFirstRefillWithTransientDiscoverError_ReturnsExitCode4
 // is the regression test for #2777: the stale-drain report's heldBack count
-// is computed by a separate, reporting-only discoverReporting()/
-// cfg.DiscoverReporting() call, never by the CLI's own discover() closure.
+// is computed by a separate, reporting-only queue.Pending() call (the
+// pending closure in main.go), never by the CLI's own discover() closure.
 // This test forces the run's fetched-tracker-query (fc.ListIssuesErr) to
 // fail so that the heldBack call — fired the first time staleness is
 // detected (fresh() is stale from the start, as in
@@ -505,6 +505,69 @@ func TestRunExitCode_ContinuousDispatch_ImageStaleOnFirstRefillWithTransientDisc
 	}
 	if strings.Contains(out, "==> querying open") {
 		t.Errorf("stdout must not contain \"==> querying open\" (heldBack discover() call is reporting-only, not a real poll):\n%s", out)
+	}
+}
+
+// TestRunExitCode_ContinuousDispatch_ImageStaleHeldBackExcludesBlockedIssue
+// is the regression test for the #2939 review finding this pass fixes: the
+// headless pending closure (main.go) used to report a raw
+// len(queryOpenIssues(...)) with no readiness filtering at all, so a
+// candidate blocked by an unresolved edge inflated the stale-drain report's
+// heldBack count exactly as if it were dispatchable. Two dispatchable-labeled
+// issues are set up here -- #1 with no blocker, #2 blocked by still-open #9
+// -- with the freshness probe stale from the very first refill (same
+// runtime=podman/no-reachable-origin setup as
+// TestRunExitCode_ContinuousDispatch_ImageStale_ReturnsExitCode4 above), so
+// the drain report's heldBack query fires before any Box ever launches. The
+// pre-fix bug reported heldBack=2; this test pins the fixed value, 1 (#2
+// excluded by its unresolved blocker).
+func TestRunExitCode_ContinuousDispatch_ImageStaleHeldBackExcludesBlockedIssue(t *testing.T) {
+	c := baseConfig()
+	c.label = "ready-for-agent"
+	c.continuousDispatch = true
+	c.maxParallel = 1
+	c.runtime = "podman"
+	c.baseBranch = "main"
+	dir := tempLogDir(t)
+	if err := runGit(dir, "init"); err != nil {
+		t.Fatalf("git init: %v", err)
+	}
+	if err := runGit(dir, "remote", "add", "origin", "https://example.invalid/nope.git"); err != nil {
+		t.Fatalf("git remote add: %v", err)
+	}
+
+	fc := forge.NewFake(testDispatchLabels)
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.label}})
+	fc.SetIssue(forge.Issue{
+		Number: "2",
+		Body:   "## Blocked by\n- #9",
+		Labels: []string{c.label},
+	})
+	fc.SetIssue(forge.Issue{Number: "9", State: "OPEN"}) // #2's blocker, unmet
+
+	fr := runner.NewFake()
+	lc := &launchContext{
+		config:       c,
+		pwd:          dir,
+		issueTracker: fc,
+		codeForge:    fc,
+		factory:      testFactory(t, dir, fr),
+		settle:       settle.NewFake(),
+	}
+
+	out := testutil.CaptureStdout(t, func() {
+		if got := runExitCode(lc); got != 4 {
+			t.Errorf("runExitCode(lc) = %d, want 4 (waves.ErrImageStale)", got)
+		}
+	})
+	if len(fr.RunCalls) != 0 {
+		t.Errorf("RunCalls: got %d, want 0 (no Box launches once the probe is stale)", len(fr.RunCalls))
+	}
+	if !strings.Contains(out, "1 issue(s) held back") {
+		t.Errorf("stdout: got %q, want a drain report line reporting exactly 1 issue held back (issue #2 excluded by its unresolved blocker)", out)
+	}
+	if strings.Contains(out, "2 issue(s) held back") {
+		t.Errorf("stdout: got %q, must not count issue #2 as held back while it's still blocked by open #9", out)
 	}
 }
 

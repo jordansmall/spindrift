@@ -159,13 +159,13 @@ func TestQueue_Empty(t *testing.T) {
 // (#2678) counts only picks in state PickQueued — genuinely ready to launch,
 // just waiting for a slot — whose effectiveKind matches the requested kind.
 // PickHeld never counts: per its own doc (pick.go), a held pick has declared
-// blockers that are not all satisfied yet, so it is not ready to dispatch,
-// matching the headless countReady semantics in waves/continuous.go. A
+// blockers that are not all satisfied yet, so it is not ready to dispatch. A
 // running, settled, dissolved, terminated, or failed pick never counts
 // either, regardless of kind, and a pick of the other kind never counts,
 // regardless of state. This is a pure read (no Discover-style claim side
-// effect), unlike Queue.Discover, which is why RunContinuous's stale-drain
-// report (#2678) reads it instead for a PreResolved caller like Console.
+// effect), unlike Queue.Discover, which is why runStack's runContinuousQueue
+// (#2939) reads it, via waves.Queue.Pending, for the stale-drain report's
+// heldBack number instead.
 func TestQueue_PendingCount_CountsQueuedOnlyOfMatchingKind(t *testing.T) {
 	q := NewQueue()
 	q.Add(Pick{Number: "1", State: PickQueued, Kind: KindWork})

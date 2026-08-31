@@ -41,12 +41,21 @@ func TestFake_RecordsCallsAndReturnsConfigured(t *testing.T) {
 		t.Errorf("ClaimCalls = %v, want [42]", f.ClaimCalls)
 	}
 
-	gotPending := f.Pending()
+	gotPending, gotPendingErr := f.Pending()
 	if gotPending != 7 {
 		t.Errorf("Pending() = %d, want 7", gotPending)
 	}
+	if gotPendingErr != nil {
+		t.Errorf("Pending() err = %v, want nil", gotPendingErr)
+	}
 	if f.PendingCalls != 1 {
 		t.Errorf("PendingCalls = %d, want 1", f.PendingCalls)
+	}
+
+	wantPendingErr := errors.New("pending boom")
+	f.PendingErr = wantPendingErr
+	if _, gotPendingErr := f.Pending(); !errors.Is(gotPendingErr, wantPendingErr) {
+		t.Errorf("Pending() err = %v, want %v", gotPendingErr, wantPendingErr)
 	}
 
 	f.ReportStaleDrain(wantReport)
