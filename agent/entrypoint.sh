@@ -39,8 +39,7 @@ fi
 : "${GIT_USER_EMAIL:?GIT_USER_EMAIL is required}"
 
 # BEGIN GENERATED OUTCOME STATUS WORDS -- nix run .#regen -- DO NOT EDIT
-# shellcheck disable=SC2034 # consumed by _subst's envsubst allowlist, wired in a later slice (issue #2504)
-RESEARCH_STATUS_ENUM="recommend|reject|unclear"
+export RESEARCH_STATUS_ENUM="recommend|reject|unclear"
 # END GENERATED OUTCOME STATUS WORDS
 
 # configure_env sets up the config/env-derived globals every later phase
@@ -62,7 +61,7 @@ configure_env() {
   # AGENTS_JSON_TEMPLATE is a nix-computed derived value also prepended at
   # image-build time; it is not a schema knob.  The :-  expansions below keep
   # set -u and the linter happy for standalone use.
-  BRANCH="${BRANCH_PREFIX:-}${ISSUE_NUMBER}"
+  export BRANCH="${BRANCH_PREFIX:-}${ISSUE_NUMBER}"
 
   # Baked-in locations; overridable only so the harness can be exercised on the
   # host without a container. PROMPTS_DIR moved to the nix-rendered agent-paths
@@ -1584,29 +1583,17 @@ phase_prompt_assembly() {
   local SKILLS_FOUND
   SKILLS_FOUND="$(_scan_skills_found "$DRIVER_SKILLS_DIR")"
 
-  # Build the assemble-prompt invocation. Every string flag maps 1:1 onto a
-  # bash env var this Box already carries -- no gate computation here
-  # anymore, just forwarding (assembleprompt_cmd.go re-derives every gate the
-  # old inline precompute/fragment-loop/roster-injection blocks used to).
+  # Build the assemble-prompt invocation. What remains here is paths, the
+  # skill-baked probes, and Handoff passthrough (issue #2975, out of scope
+  # for #2979) -- every other Box env var assembleprompt_cmd.go now reads
+  # straight off os.Getenv itself (promptassembly.EnvFromEnviron, issue
+  # #2979), so this array no longer forwards it as a flag.
   # Boolean gates ride bare flags (`flag.Bool` on the verb side), appended
   # only when true; the verb's own zero-value default covers the rest, so an
   # unset knob here is indistinguishable from an explicit off.
   local -a _ap_args=(
     --registry "$PROMPTASSEMBLY_REGISTRY_FILE"
     --validate-markers-registry "$PROMPT_CONTRACT_REGISTRY_FILE"
-    --agents-json-template "${AGENTS_JSON_TEMPLATE:-}"
-    --issue-tracker "${ISSUE_TRACKER:-}"
-    --code-forge "${CODE_FORGE:-}"
-    # Nix-precomputed static gate values (issue #2533) forwarded verbatim as
-    # BOX_* env vars -- assembleprompt_cmd.go re-derives nothing from them,
-    # it just receives the axis/backend strings the flake eval already
-    # settled per-tracker.
-    --tracker-axis-read "${BOX_TRACKER_AXIS_READ:-}"
-    --tracker-axis-write "${BOX_TRACKER_AXIS_WRITE:-}"
-    --tracker-axis-filer "${BOX_TRACKER_AXIS_FILER:-}"
-    --forge-backend "${BOX_FORGE_BACKEND:-}"
-    --dispatch-kind "${DISPATCH_KIND:-}"
-    --fix-pass "${FIX_PASS:-0}"
     --prompts-dir "$PROMPTS_DIR"
     --agents-prompt-files "${AGENTS_PROMPT_FILES:-}"
     --driver-agent-files-dir "${DRIVER_AGENT_FILES_DIR:-}"
@@ -1616,15 +1603,6 @@ phase_prompt_assembly() {
     --outcome-contract-file "$OUTCOME_CONTRACT_FILE"
     --research-outcome-contract-file "$RESEARCH_OUTCOME_CONTRACT_FILE"
     --skills-found "$SKILLS_FOUND"
-    --issue-number "$ISSUE_NUMBER"
-    --issue-title "$ISSUE_TITLE"
-    --branch "$BRANCH"
-    --base-branch "${BASE_BRANCH:-}"
-    --in-progress-label "${IN_PROGRESS_LABEL:-}"
-    --complete-label "${COMPLETE_LABEL:-}"
-    --run-nonce "${RUN_NONCE:-}"
-    --ci-failure-summary "${CI_FAILURE_SUMMARY:-}"
-    --research-status-enum "${RESEARCH_STATUS_ENUM:-}"
     # Driver-invocation passthrough (issue #2975): every fact run_driver_in_env
     # used to rebuild into ~20 per-call CLI flags now rides the Handoff
     # descriptor instead, sourced once here from the same env knobs and
@@ -1654,41 +1632,14 @@ phase_prompt_assembly() {
   [ -f "$DRIVER_SKILLS_DIR/auto-format/SKILL.md" ] && _ap_args+=(--auto-format-skill-baked)
   [ -f "$DRIVER_SKILLS_DIR/auto-lint/SKILL.md" ] && _ap_args+=(--auto-lint-skill-baked)
   # END GENERATED SKILL-BAKED PROBES
-  # Reads $ORCHESTRATOR (main's early ORCHESTRATOR_ENABLED-derived cross-phase
-  # sentinel, issue #2354 slice 3), not ORCHESTRATOR_ENABLED directly -- the
-  # orchestrator-fork-well-formed check (nix/checks/prompts.nix) pins exactly
-  # one raw ORCHESTRATOR_ENABLED test in this file (main's own early
-  # computation); every fork downstream, this one included, reads that one
-  # computed gate instead. This call happens before the driver-exec
-  # assemble-prompt verb runs, so no Handoff exists yet to read Invoker from
-  # regardless -- and unlike before issue #2355, nothing downstream ever
-  # reassigns $ORCHESTRATOR from the resulting Handoff either: the two are
-  # always mathematically identical, so main's one early computation is
-  # $ORCHESTRATOR's value for this entire run, read as-is by every consumer
-  # (this flag, and run_driver_in_env's own pre-Handoff conflict-resolve
-  # fallback -- the reject/warn marker matrix these gates used to also feed
-  # moved into the Go verb itself, issue #2356).
-  [ -n "$ORCHESTRATOR" ] && _ap_args+=(--orchestrator-enabled)
-  [ -n "${BOX_WRITE_ENABLED:-}" ] && _ap_args+=(--box-write-enabled)
-  [ -n "${LOCAL_ISSUE_REFERENCE:-}" ] && _ap_args+=(--local-issue-reference)
-  # More nix-precomputed static gates (issue #2533), presence-only like the
-  # flags just above -- forwarded verbatim, not derived here.
-  [ -n "${BOX_FILER_ENABLED:-}" ] && _ap_args+=(--filer-enabled)
-  [ -n "${BOX_WORKER_PROVISIONED:-}" ] && _ap_args+=(--worker-provisioned)
-  [ -n "${BOX_REVIEW_LOOP_INLINE:-}" ] && _ap_args+=(--review-loop-inline)
-  [ -n "${BOX_REVIEW_LOOP_ORCHESTRATOR:-}" ] && _ap_args+=(--review-loop-orchestrator)
-  _is_self_contained && _ap_args+=(--self-contained)
-  [ -n "${RESUME_AFTER_HOLD:-}" ] && _ap_args+=(--resume-after-hold)
-  [ -n "${AUTO_FORMAT:-}" ] && _ap_args+=(--auto-format)
-  [ -n "${AUTO_LINT:-}" ] && _ap_args+=(--auto-lint)
-  # Two more driver-invocation passthrough gates (issue #2975), bare like the
-  # ORCHESTRATOR block above: DRIVER_ARGV_MODEL_OMIT_EMPTY is the Driver
-  # registry's own model-slot gate, and --devshell/--devshell-name mirror the
-  # devShell wrapping run_driver_in_env's own _devshell_flags block used to
-  # build per-call -- both now baked into the handoff once here. _use_dev_shell
-  # is main's cross-phase sentinel (phase_devshell_probe/self-contained both
-  # set it before this phase), read via dynamic scoping the same way the rest
-  # of this run's phases read it.
+  # Driver-invocation passthrough gates (issue #2975), bare:
+  # DRIVER_ARGV_MODEL_OMIT_EMPTY is the Driver registry's own model-slot gate,
+  # and --devshell/--devshell-name mirror the devShell wrapping
+  # run_driver_in_env's own _devshell_flags block used to build per-call --
+  # both now baked into the handoff once here. _use_dev_shell is main's
+  # cross-phase sentinel (phase_devshell_probe/self-contained both set it
+  # before this phase), read via dynamic scoping the same way the rest of
+  # this run's phases read it.
   [ -n "${DRIVER_ARGV_MODEL_OMIT_EMPTY:-}" ] && _ap_args+=(--argv-model-omit-empty)
   [ "$_use_dev_shell" = "1" ] && _ap_args+=(--devshell --devshell-name "${DEV_SHELL_NAME:-default}")
 

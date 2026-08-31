@@ -1849,9 +1849,10 @@ loaded handoff, the same way `driver-exec` does for the pass whose
 The review pass's own model/effort travel the same way, as the handoff's
 `ReviewModel`/`ReviewEffort` fields — but unlike `ReviewPromptFile`, neither
 is a passthrough of an `assemble-prompt` flag: `Assemble` itself extracts
-them from the `reviewer` entry of the `--agents-json-template` JSON
-`entrypoint.sh` hands it (the nix-baked roster reflecting `REVIEW_MODEL`/
-`REVIEW_EFFORT`, a nix-build-time-only knob pair — see the table above)
+them from the `reviewer` entry of the `AGENTS_JSON_TEMPLATE` environment
+variable `entrypoint.sh` exports (the nix-baked roster reflecting
+`REVIEW_MODEL`/`REVIEW_EFFORT`, a nix-build-time-only knob pair — see the
+table above)
 before stripping that entry from what becomes `--agents`, so the review pass
 never provisions its own `reviewer` subagent. `driver-exec`'s role-aware
 resolution applies `ReviewModel`/`ReviewEffort` only on the reviewer-role

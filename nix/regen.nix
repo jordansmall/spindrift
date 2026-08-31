@@ -159,8 +159,7 @@ pkgs.writeShellApplication {
       ${escapeShellArg "# BEGIN GENERATED OUTCOME STATUS WORDS -- nix run .#regen -- DO NOT EDIT"} \
       ${escapeShellArg "# END GENERATED OUTCOME STATUS WORDS"} \
       ${escapeShellArg (
-        "# shellcheck disable=SC2034 # consumed by _subst's envsubst allowlist, wired in a later slice (issue #2504)\n"
-        + "RESEARCH_STATUS_ENUM=\""
+        "export RESEARCH_STATUS_ENUM=\""
         + researchStatusPipe
         + "\"\n"
       )}
