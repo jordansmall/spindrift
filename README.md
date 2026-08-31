@@ -6,18 +6,34 @@
 
 *A nix-based agent automation harness, consumed as a flake.*
 
-Run headless [Claude Code](https://claude.com/claude-code) agents in
-**disposable, nix-built containers** — one per GitHub issue. spindrift is
-**imported by your flake**, not cloned. Two ideas carry it (see
-[`CONTEXT.md`](CONTEXT.md) for the full vocabulary):
+Run headless coding agents in **disposable, nix-built containers** — one per
+issue. spindrift is **imported by your flake**, not cloned. Two ideas carry it
+(see [`CONTEXT.md`](CONTEXT.md) for the full vocabulary):
 
 1. **The container is the isolation boundary.** Each issue runs in its own
    throwaway container with a fresh clone, a scoped token, and no host access.
-   That is what makes `claude --dangerously-skip-permissions` safe: the agent
-   can do anything it likes, but only inside the box.
+   That is what makes running the agent with permission prompts skipped safe:
+   the agent can do anything it likes, but only inside the box.
 2. **The toolchain is a nix image.** The image is built with `dockerTools` from
    the *same* pinned nixpkgs your dev shell uses, so the agent's environment and
    yours can never drift. One source of truth, no hand-maintained Dockerfile.
+
+Everything around those two ideas is a seam you pick at build time, so spindrift
+is not tied to one vendor's CLI or one vendor's tracker:
+
+- **Driver** — the agent CLI baked into the Box:
+  [Claude Code](https://claude.com/claude-code) or
+  [opencode](https://opencode.ai), the latter pointed at any Provider it
+  supports (e.g. GitHub Copilot).
+- **Issue Tracker** — where the work comes from: GitHub, Jira, Forgejo
+  (Codeberg), or a purely local, offline tracker.
+- **Code Forge** — where the work goes: GitHub, Forgejo, a plain git remote, or
+  a host-mediated local bundle with no remote at all.
+- **Runtime** — what actually confines the Box: podman, docker, Rancher Desktop
+  (`nerdctl`), or daemonless bubblewrap on Linux.
+- **Dispatch kind** — what the agent is asked to do: `work` (implement the
+  issue, open a pull request, drive it through a merge gate) or `research`
+  (advise only — post one structured verdict comment and stop).
 
 ## Prerequisites
 

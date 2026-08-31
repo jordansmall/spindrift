@@ -557,7 +557,7 @@ func printSubcommands(w io.Writer) {
 // (man spindrift / --help --all). The exhaustive knob list lives in
 // printHelpFull so the default --help stays scannable.
 func printHelp(w io.Writer) {
-	fmt.Fprintln(w, "spindrift — launch waves of headless Claude Code agents across GitHub issues")
+	fmt.Fprintln(w, "spindrift — launch waves of headless coding agents, one container per issue")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Usage: spindrift [flags] <subcommand> [args]")
 	fmt.Fprintln(w)
@@ -580,7 +580,7 @@ func printHelp(w io.Writer) {
 // ADR 0020), and the secret env-only / file-flag surface. Reached via
 // `spindrift --help --all`.
 func printHelpFull(w io.Writer) {
-	fmt.Fprintln(w, "spindrift — launch waves of headless Claude Code agents across GitHub issues")
+	fmt.Fprintln(w, "spindrift — launch waves of headless coding agents, one container per issue")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Usage: spindrift [flags] <subcommand> [args]")
 	fmt.Fprintln(w)

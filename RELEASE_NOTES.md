@@ -1,8 +1,7 @@
 # Release notes
 
 Highlights for each released version of **spindrift**, the nix-based harness
-that runs headless [Claude Code](https://claude.com/claude-code) agents in
-disposable per-issue containers (the "Box").
+that runs headless coding agents in disposable per-issue containers (the "Box").
 
 For a detailed view of every change, see [`CHANGELOG.md`](CHANGELOG.md).
 Anything tagged **⚠ Breaking** may need a change on your end when you upgrade,
