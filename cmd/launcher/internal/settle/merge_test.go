@@ -87,8 +87,8 @@ func TestMergeImmediate(t *testing.T) {
 		{
 			// TRANSIENT_RETRY_MAX, not MaxRebaseAttempts, must bound the
 			// merge-transient retry loop (issue #2325 AC #4): a much larger
-			// MaxRebaseAttempts must not mask a small TransientRetryMax.
-			name:              "transient merge failure honors TransientRetryMax independent of MaxRebaseAttempts",
+			// MaxRebaseAttempts must not mask a small Policy.Max.
+			name:              "transient merge failure honors Policy.Max independent of MaxRebaseAttempts",
 			maxRebaseAttempts: 10,
 			transientRetryMax: 1,
 			mergeErrs: []error{
@@ -194,7 +194,7 @@ func TestMergeImmediate(t *testing.T) {
 				c.MaxRebaseAttempts = tc.maxRebaseAttempts
 			}
 			if tc.transientRetryMax != 0 {
-				c.TransientRetryMax = tc.transientRetryMax
+				c.Policy.Max = tc.transientRetryMax
 			}
 			fc := forge.NewFake()
 			if len(tc.mergeErrs) > 0 {

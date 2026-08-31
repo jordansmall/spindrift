@@ -9,6 +9,7 @@ package settle
 import (
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/retry"
 	"spindrift.dev/launcher/internal/terminate"
 )
 
@@ -33,22 +34,13 @@ type Config struct {
 	MaxFixAttempts    int
 	MaxRebaseAttempts int
 
-	// TransientBackoffSecs is the linear backoff unit applied between
-	// rebase-push retries on forge.ErrTransientPushFailure (issue #2095):
-	// attempt N waits TransientBackoffSecs*N, mirroring
-	// dispatch.Config.TransientBackoffSecs' own semantics.
-	TransientBackoffSecs int
-
-	// HoldJitterSecs is added to every rebase-push backoff sleep, mirroring
-	// dispatch.Config.HoldJitterSecs.
-	HoldJitterSecs int
-
-	// TransientRetryMax caps merge-transient retries (forge.ErrMergeTransient,
-	// issue #2325) — the same TRANSIENT_RETRY_MAX knob dispatch.Config's own
-	// exit-retry loop honors, reused here rather than overloading
-	// MaxRebaseAttempts (a merge-conflict-retry budget with a different
-	// meaning) for an unrelated failure class.
-	TransientRetryMax int
+	// Policy is retry.Policy's transient-retry tuning, built once by
+	// retryPolicy and carried into this Config (issue #2928). The
+	// rebase-push retry loops reuse the same policy dispatch's exit-retry
+	// path does (issue #2095); Policy.Max caps merge-transient retries
+	// (issue #2325) on the same knob, not MaxRebaseAttempts (a
+	// merge-conflict budget).
+	Policy retry.Policy
 
 	// Clock is the injectable sleep seam the rebase-push backoff sleeps
 	// through — defaults to dispatch.RealClock() when unset (its Sleep
