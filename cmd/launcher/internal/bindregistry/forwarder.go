@@ -79,12 +79,22 @@ func SpawnSocat(socketPath string, port int) error {
 // the Forwarder is detached and long-running, it would then hold that
 // pipe/file open indefinitely, hanging whatever is waiting on it to close.
 func closeOnExecInheritedFDs() error {
-	entries, err := os.ReadDir("/proc/self/fd")
+	dir, err := os.Open("/dev/fd")
 	if err != nil {
 		return err
 	}
-	for _, entry := range entries {
-		fd, err := strconv.Atoi(entry.Name())
+	defer dir.Close()
+
+	// Readdirnames, not ReadDir: /dev/fd entries report DT_UNKNOWN on
+	// darwin, which sends os.ReadDir down an lstatat-per-entry fallback
+	// that fails against this synthetic fs ("bad file descriptor").
+	// Names are all this loop needs, and that path never stats.
+	names, err := dir.Readdirnames(-1)
+	if err != nil {
+		return err
+	}
+	for _, name := range names {
+		fd, err := strconv.Atoi(name)
 		if err != nil || fd <= 2 {
 			continue
 		}
