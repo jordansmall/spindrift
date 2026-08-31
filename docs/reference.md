@@ -1133,7 +1133,7 @@ exceptions.
 | `EFFORT`                  | — (empty, no baked default) | main/coordinator reasoning-effort level, passed straight through to the Driver with no normalization — the value must be valid for the active `DRIVER`: on `claude` it becomes `--effort <level>` (`low`/`medium`/`high`/`xhigh`/`max`), on `opencode` it becomes `--variant <level>` (opencode's cross-provider variant selector); unset emits no flag either way, so the Driver's own default effort applies |
 | `SCOUT_MODEL`             | (baked; see [Default models](#default-models)) | scout subagent model tier (empty drops the scout entry from `--agents`). **Deprecated** — superseded by the [`roster`](#subagent-roster) option |
 | `REVIEW_MODEL`            | (baked; see [Default models](#default-models)) | reviewer subagent model tier (empty drops the reviewer entry from `--agents`). **Deprecated for non-orchestrator use** — superseded by the [`roster`](#subagent-roster) option. Under `ORCHESTRATOR`, the roster reviewer entry is itself superseded by the code-owned review pass, which binds its model from this value instead (falling back to the coordinator model when unset) |
-| `REVIEW_EFFORT`           | — (empty, no baked default) | value for the orchestrator's code-owned review pass's own `--effort` flag; pass-through only, no normalization, same accepted values as `EFFORT` for the active Driver. Overrides the roster reviewer entry's own effort (`rosterDefaults.reviewer.effort` by default) the same way `REVIEW_MODEL` overrides the reviewer's model — empty means follow the roster, a non-empty value overrides it. Meaningful only under `ORCHESTRATOR`. Like `REVIEW_MODEL`, this is a nix-build-time-only knob (issue #2512): a dispatch-time `REVIEW_EFFORT=...`/`--review-effort ...` override on an already-built image is a no-op — set `perSystem.spindrift.agents.models.reviewEffort` and rebuild instead |
+| `REVIEW_EFFORT`           | — (empty, no baked default) | value for the code-owned review pass's own effort argument to the Driver; pass-through only, no normalization, same accepted values as `EFFORT` for the active Driver. Reaches the review pass via the handoff document's `ReviewEffort` field (issue #2975), not a direct flag — `driver-exec assemble-prompt` extracts it from the roster's `reviewer` entry, and `driver-exec` applies it only on the reviewer-role pass (see the code-owned review pass discussion under [In-box orchestrator](#in-box-orchestrator)). Overrides the roster reviewer entry's own effort (`rosterDefaults.reviewer.effort` by default) the same way `REVIEW_MODEL` overrides the reviewer's model — empty means follow the roster, a non-empty value overrides it. Meaningful only under `ORCHESTRATOR`. Like `REVIEW_MODEL`, this is a nix-build-time-only knob (issue #2512): a dispatch-time `REVIEW_EFFORT=...`/`--review-effort ...` override on an already-built image is a no-op — set `perSystem.spindrift.agents.models.reviewEffort` and rebuild instead |
 | `FILER_MODEL`             | (baked; see [Default models](#default-models)) | filer subagent model tier; empty (default) means the filer is not provisioned — setting a model is the opt-in (recommended: the same model as the `scout` default, see [Default models](#default-models)); see [Filer](#filer). **Deprecated** — superseded by the [`roster`](#subagent-roster) option |
 | `WORKER_MODEL`            | (baked; see [Default models](#default-models)) | implement-capable worker subagent model tier (empty drops the worker entry from `--agents`); when set, the implementor runs IMPLEMENT as a coordinator and delegates one slice at a time to it. **Deprecated** — superseded by the [`roster`](#subagent-roster) option |
 | `IMAGE`                   | `spindrift:latest`     | image tag to run                         |
@@ -1748,7 +1748,13 @@ artifact, not a growing transcript:
   round-N *review* prompt, the decisions log seeds every *implement/fix*
   pass's prompt (pass N>1). A missing or unreadable decisions log degrades to
   an unseeded prompt, never an error.
-- **Code-owned caps.** `--max-review-rounds` (default 3) caps additional
+- **Code-owned caps.** `--max-review-rounds`/`--max-slices` are
+  `driver-exec assemble-prompt`'s own flags (issue #2975): assemble-prompt
+  folds them straight into the handoff document's `Caps.MaxReviewRounds`/
+  `Caps.MaxSlices` fields, and the orchestrator reads them off the loaded
+  handoff rather than taking either as its own flag — neither `orchestrator`
+  nor plain `driver-exec` declares a `-max-review-rounds`/`-max-slices` flag
+  of its own any more. `--max-review-rounds` (default 3) caps additional
   passes a `BLOCK` verdict may trigger; `--max-slices` (default 9) caps the
   implement/fix/review invocation count regardless of verdict; either set to
   `0` disables that cap. Every `driver-exec` invocation this loop makes —
@@ -1767,12 +1773,12 @@ artifact, not a growing transcript:
   `--max-review-rounds` can only actually reach `N` rounds — rather than
   being silently shadowed by `--max-slices` firing first — if `--max-slices`
   is large enough, and the minimum depends on which driver loop is running.
-  With the code-owned review pass enabled (`--review-prompt-file` set, the
-  default — see below), implement and review are separate `driver-exec`
-  invocations, so the minimum is `2N + 3`: 1 initial implement pass +
-  (`N`+1) review passes + `N` fix passes + 1 terminal land pass. Without a
-  review pass (the legacy single-loop path, reached only when
-  `--review-prompt-file` is unset), each pass folds its own review in
+  With the code-owned review pass enabled (the handoff's `ReviewPromptFile`
+  field non-empty, the default — see below), implement and review are
+  separate `driver-exec` invocations, so the minimum is `2N + 3`: 1 initial
+  implement pass + (`N`+1) review passes + `N` fix passes + 1 terminal land
+  pass. Without a review pass (the legacy single-loop path, reached only
+  when `ReviewPromptFile` is empty), each pass folds its own review in
   inline instead of splitting implement/review into separate invocations,
   so the minimum is one less than half: `N + 2`. The shipped defaults sit
   exactly at the review-pass loop's minimum for `N=3`: `--max-slices=9` is
@@ -1783,8 +1789,10 @@ artifact, not a growing transcript:
   `--max-slices` shadowing `--max-review-rounds` exactly as it would have
   gone unwarned before.
 
-  A third cap, `--max-budget-tokens`/`--max-budget-usd` (issue #2694; both
-  default `0`, disabled), bounds the review-pass loop's own review-round
+  A third cap, `--max-budget-tokens`/`--max-budget-usd` — also
+  `assemble-prompt`'s own flags now, folded into `Caps.MaxBudgetTokens`/
+  `Caps.MaxBudgetUSD` the same way as the two caps above (issue #2694; both
+  default `0`, disabled) — bounds the review-pass loop's own review-round
   decision by cumulative spend instead of a pass or round count: once
   cumulative token or USD usage across every pass *this Box has run so far*
   (implement, fix, and review passes alike, plus any dispatched worker's
@@ -1799,36 +1807,59 @@ artifact, not a growing transcript:
   total. Either dimension alone can trip it; a negative or malformed value
   degrades to `0` (disabled) rather than erroring, mirroring the host
   launcher's own tolerance for the identical `MAX_BUDGET_TOKENS`/
-  `MAX_BUDGET_USD` env vars (`atoiNonneg`/`floatNonneg`), with one
-  difference: the Box logs one stderr line naming the degraded value, since
-  it has no other channel back to an operator. Unlike
+  `MAX_BUDGET_USD` env vars (`atoiNonneg`/`floatNonneg`). The two CLI
+  wrappers that parse the raw string — `driver-exec assemble-prompt`'s and
+  `driver-exec env-handoff`'s own `--max-budget-tokens`/`--max-budget-usd`
+  flags — degrade a malformed value silently, the same as the host launcher:
+  neither has an operator-facing diagnostics channel to log to. Only
+  `orchestrator`'s own defense-in-depth clamp against an already-loaded
+  handoff's typed (`int`/`float64`) `Caps.MaxBudgetTokens`/`Caps.MaxBudgetUSD`
+  fields — reachable only via a hand-edited or otherwise corrupted handoff
+  file, since both producers already reject a negative value before writing
+  one — logs one stderr line naming the degraded value, since the Box has no
+  other channel back to an operator. Unlike
   `--max-review-rounds`/`--max-slices` — both consulted by the
   legacy single-loop path too — `--max-budget-tokens`/`--max-budget-usd` is
   consulted only by the code-owned review pass's own decision: the legacy
-  loop (`--review-prompt-file` unset) accepts both flags without error but
-  never reads them, so a run on that path spends past a configured budget
-  cap with no warning at all. Forwarded from the same `MAX_BUDGET_TOKENS`/
+  loop (`ReviewPromptFile` empty) still receives the same `Caps.MaxBudgetTokens`/
+  `Caps.MaxBudgetUSD` values off the handoff but never reads them, so a run
+  on that path spends past a configured budget cap with no warning at all.
+  Forwarded from the same `MAX_BUDGET_TOKENS`/
   `MAX_BUDGET_USD` knobs the [Advanced tuning](#advanced-tuning) table's
   `selfHealing` group already documents — see that table for the
   operator-facing env var/`settings` surface.
 
-**Code-owned review pass (issue #2037).** `--review-prompt-file` names a
-distinct prompt (`review-prompt.md`) the orchestrator invokes as its own
-fresh-session pass, in between implement/fix passes, instead of the
-implementor spawning a `reviewer` subagent inline. `entrypoint.sh` sets the
-flag only on the ORCHESTRATOR-on work-dispatch path — never for research or a
-warm `FIX_PASS` box — so this is a consumer of ADR 0035's master switch, not a
-separate sub-knob: turning the orchestrator on always drives the review pass.
-`--review-model` (from `REVIEW_MODEL`) binds the review pass's own `--model`
-flag, so the review pass runs on the reviewer model tier instead of silently
-inheriting the coordinator/implementor's `--model`; empty falls back to the
-coordinator model, matching the pre-#2277 behavior.
-`--review-effort` (from `REVIEW_EFFORT`, a nix-build-time-only knob like
-`REVIEW_MODEL` — see the table above) binds the review pass's own
-`--effort` flag the same way, so the review pass runs at its own reasoning
-effort instead of silently inheriting the coordinator/implementor's
-`--effort`; empty now means the review pass follows the roster reviewer
-entry's own effort, and a non-empty value overrides it (issue #2512).
+**Code-owned review pass (issue #2037).** The review pass is enabled whenever
+the handoff document's `ReviewPromptFile` field is non-empty (issue #2975):
+`driver-exec assemble-prompt` sets it, via its own `--review-prompt-output`
+flag, to the path it wrote the rendered `review-prompt.md` text to, and only
+when that pass's `Assemble` call actually rendered one. `entrypoint.sh`
+passes `--review-prompt-output` unconditionally — `phase_prompt_assembly`,
+the one call site that builds the `assemble-prompt` invocation, runs
+unconditionally from `main()` regardless of ORCHESTRATOR/research/`FIX_PASS`.
+The real gate lives inside `Assemble` itself: `Result.ReviewPromptText` is
+populated only when the orchestrator is on, this is the default fresh-work
+dispatch, and `FixPass == 0`, so the flag is always passed but the file it
+names is only ever non-empty under those conditions — this is a consumer of
+ADR 0035's master switch, not a separate sub-knob: turning the orchestrator
+on always drives the review pass. The orchestrator itself takes no
+review-prompt flag of its own; it reads `ReviewPromptFile` straight off the
+loaded handoff, the same way `driver-exec` does for the pass whose
+`--top-level-role` is `reviewer`.
+The review pass's own model/effort travel the same way, as the handoff's
+`ReviewModel`/`ReviewEffort` fields — but unlike `ReviewPromptFile`, neither
+is a passthrough of an `assemble-prompt` flag: `Assemble` itself extracts
+them from the `reviewer` entry of the `--agents-json-template` JSON
+`entrypoint.sh` hands it (the nix-baked roster reflecting `REVIEW_MODEL`/
+`REVIEW_EFFORT`, a nix-build-time-only knob pair — see the table above)
+before stripping that entry from what becomes `--agents`, so the review pass
+never provisions its own `reviewer` subagent. `driver-exec`'s role-aware
+resolution applies `ReviewModel`/`ReviewEffort` only on the reviewer-role
+pass, overriding the coordinator's own `Model`/`Effort` field by field: an
+empty `ReviewModel` falls back to the coordinator model, matching the
+pre-#2277 behavior, and an empty `ReviewEffort` means the review pass follows
+the roster reviewer entry's own effort rather than the coordinator's, a
+non-empty value overriding either (issue #2512).
 An implement/fix pass's own REVIEW section is stripped to a deferral
 (`review-loop-orchestrator.md`) that stops the turn right after COMMIT unless
 the seeded run-state above it already shows an `APPROVE` verdict, and the
@@ -1857,9 +1888,14 @@ instead; the implement pass authoring the first slice, seeded with no
 verdict yet, keeps the unmodified preference.
 
 The Driver stays pluggable ([ADR 0009](adr/0009-agent-cli-is-a-pluggable-driver.md)):
-the orchestrator only ever talks to `driver-exec` through the same
-`--prompt-file`/`--agents-file`/`--session-file`/`--log-path` surface (plus
-the devshell pair) `entrypoint.sh`'s direct call already used.
+the turn's Driver/model/effort/argv-shape/devshell facts all ride the shared
+handoff document instead of a per-pass flag surface (issue #2975,
+[ADR 0046](adr/0046-the-turn-configuration-crosses-the-box-seam-as-one-handoff-document.md)).
+`--handoff-file` is the one flag both `orchestrator` and `driver-exec`
+require; `--prompt-file`/`--session-file`/`--log-path` remain genuinely
+per-pass flags on both (falling back to the handoff's own `PromptFile` when
+`--prompt-file` is omitted), and `--agents-file` no longer exists at all —
+the roster rides the handoff's own `AgentsFile` field instead.
 
 ### Prompt contract build-time/runtime parity
 
