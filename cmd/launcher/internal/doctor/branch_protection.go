@@ -26,11 +26,13 @@ const BranchProtectionCheckName = "branch-protection"
 // actually configured as manual" than "operator deliberately relaxed this
 // check".
 //
-// Probe first type-asserts cf against forge.BranchProtectionForge. A forge
-// with no branch-protection API (push-only git, CODE_FORGE=local) is the
-// not-applicable case: Probe succeeds unconditionally and SuccessMsg reports
-// "not applicable" instead of a real protection state. A forge that does
-// implement the interface is queried via BranchProtected(baseBranch):
+// Probe reads caps.BranchProtectionForge (issue #2946), the code forge's
+// resolved typed handle for the optional branch-protection interface, rather
+// than asserting cf itself. A forge with no branch-protection API (push-only
+// git, CODE_FORGE=local) resolves that handle nil — the not-applicable case:
+// Probe succeeds unconditionally and SuccessMsg reports "not applicable"
+// instead of a real protection state. A forge that does implement the
+// interface is queried via BranchProtected(baseBranch):
 //   - a non-nil error means the probe itself could not determine the
 //     answer (e.g. a permission error) -- this is wrapped with ErrDegraded so
 //     a Required-tier row still doesn't block Run (AC3: a probe failure must
@@ -38,7 +40,7 @@ const BranchProtectionCheckName = "branch-protection"
 //     (MISSING line + Remedy) for visibility;
 //   - protected == false is a definitive, non-degraded failure;
 //   - protected == true is success.
-func BranchProtectionCheck(cf forge.CodeForge, mergePolicy, baseBranch string) Check {
+func BranchProtectionCheck(caps forge.Capabilities, mergePolicy, baseBranch string) Check {
 	tier := Required
 	if mergePolicy == "manual" {
 		tier = Advisory
@@ -53,8 +55,8 @@ func BranchProtectionCheck(cf forge.CodeForge, mergePolicy, baseBranch string) C
 			baseBranch,
 		),
 		Probe: func() (any, error) {
-			bp, ok := cf.(forge.BranchProtectionForge)
-			if !ok {
+			bp := caps.BranchProtectionForge
+			if bp == nil {
 				successMsg = "not applicable (code forge has no branch-protection API)"
 				return nil, nil
 			}

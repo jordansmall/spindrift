@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/localloop"
 	"spindrift.dev/launcher/internal/waves"
@@ -137,6 +138,14 @@ func (q *Queue) Snapshot() []Pick {
 // pick of the other kind is skipped in place (left at its current state)
 // rather than claimed on the wrong tracker.
 func (q *Queue) Discover(tracker forge.IssueTracker, cf forge.CodeForge, failedLabel string, kind Kind) (waves.Batch, error) {
+	// caps is cf's and tracker's resolved forge.Capabilities (issue #2946),
+	// resolved fresh per Discover call rather than cached on Queue: tracker
+	// varies per stack (work vs research, runStack's own st.tracker), so a
+	// value cached against one incarnation could carry the wrong tracker-side
+	// state into the other's picks. Zero-value backend.Descriptor rows are
+	// fine here too, same as engine.go's drainMaxJobs -- Status only reads
+	// caps' PRForge/LandingContainmentQuery handles.
+	caps := forge.ResolveCapabilities(cf, tracker, backend.Descriptor{}, backend.Descriptor{})
 	for _, pick := range q.claimable() {
 		if pick.effectiveKind() != kind {
 			continue
@@ -151,8 +160,8 @@ func (q *Queue) Discover(tracker forge.IssueTracker, cf forge.CodeForge, failedL
 			continue
 		}
 		cfg := waves.Config{FailedLabel: failedLabel}
-		cfg.SeedScopeOf = localloop.SeedScopeResolver(tracker, cf)
-		ready, failed, unready := readiness.Status(cfg, tracker, cf, pick.Number)
+		cfg.SeedScopeOf = localloop.SeedScopeResolver(tracker, caps)
+		ready, failed, unready := readiness.Status(cfg, tracker, cf, caps, pick.Number)
 		if !ready {
 			q.setHeld(pick.Number, unready, failed, readiness.Sources[pick.Number])
 			continue

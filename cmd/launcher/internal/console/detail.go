@@ -9,6 +9,7 @@ package console
 import (
 	tea "github.com/charmbracelet/bubbletea"
 
+	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/forge"
 )
 
@@ -34,8 +35,14 @@ func openDetailModalCmd(tracker forge.IssueTracker, all []forge.Issue, number st
 		}
 		blockedBy := resolveEdgeRefs(tracker, all, tracker.DepsOf, number)
 		var blocks []BlockerRef
-		if bl, ok := tracker.(forge.BlockersLister); ok {
-			blocks = resolveEdgeRefs(tracker, all, bl.BlocksOf, number)
+		// caps is tracker's resolved forge.Capabilities (issue #2946),
+		// resolved fresh per modal open rather than a raw
+		// tracker.(forge.BlockersLister) assertion — cf is nil since this
+		// seam has no CodeForge in scope, and BlockersLister lives on the
+		// tracker side only.
+		caps := forge.ResolveCapabilities(nil, tracker, backend.Descriptor{}, backend.Descriptor{})
+		if caps.BlockersLister != nil {
+			blocks = resolveEdgeRefs(tracker, all, caps.BlockersLister.BlocksOf, number)
 		}
 		return DetailModalLoadedMsg{Number: number, Body: issue.Body, BlockedBy: blockedBy, Blocks: blocks}
 	}
