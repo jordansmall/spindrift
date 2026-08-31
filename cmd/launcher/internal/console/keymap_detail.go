@@ -34,7 +34,7 @@ var detailBindings = []Binding{
 		Help: "  ctrl+f/ctrl+b, pgdown/pgup  page the ticket detail modal's body\n" +
 			"              (while it is open)",
 		Action: func(t teaModel, msg tea.KeyMsg, mode Mode) (teaModel, tea.Cmd) {
-			delta := detailModalScrollBudget(t.m)
+			delta := ResolveLayout(t.m).DetailScrollBudget
 			if s := msg.String(); s == "pgup" || s == "ctrl+b" {
 				delta = -delta
 			}
@@ -47,7 +47,7 @@ var detailBindings = []Binding{
 		Help: "  ctrl+d/ctrl+u  scroll the ticket detail modal's body a half page\n" +
 			"              (while it is open)",
 		Action: func(t teaModel, msg tea.KeyMsg, mode Mode) (teaModel, tea.Cmd) {
-			delta := detailModalScrollBudget(t.m) / 2
+			delta := ResolveLayout(t.m).DetailScrollBudget / 2
 			if msg.String() == "ctrl+u" {
 				delta = -delta
 			}
