@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/agentpaths"
+	"spindrift.dev/launcher/internal/backend"
 )
 
 // TestBuildMountSpecs_PromptDirMounted verifies that a valid PromptDir
@@ -268,23 +269,56 @@ func TestBuildMountSpecs_GithubReadWrite_NoOutboxMount(t *testing.T) {
 	}
 }
 
-// TestBuildMountSpecs_ForgejoReadOnly_NoOutboxMount pins a pre-existing
-// asymmetry (issue #2267): CODE_FORGE=forgejo does NOT get the outbox-relay
-// treatment under BoxForgeAndIssueAccess="read-only", unlike github, even
-// though forgejo also has its own read-only CodeForge constructor
-// (NewReadOnlyForgejoCodeForge). This mirrors github's own OutboxRelayCapable
-// field being false for forgejo in the backendRow registry
-// (cmd/launcher/backend.go) -- confirmed by running this exact scenario
-// (via the string-based CodeForge=="github" check that predates #2267)
-// against the pre-migration code, where it also passed, proving this is a
-// behavior pin and not new behavior.
-func TestBuildMountSpecs_ForgejoReadOnly_NoOutboxMount(t *testing.T) {
+// TestBuildMountSpecs_ForgejoReadOnly_OutboxMountedWritable verifies that
+// CODE_FORGE=forgejo plus BoxForgeAndIssueAccess="read-only" plus a present
+// Box.OutboxDir produces a writable /outbox mount, now that forgejo's
+// backendRow carries OutboxRelayCapable: true (issue #2927) -- forgejo gets
+// the same outbox-relay treatment as github (issue #1918): the Box writes
+// seam.bundle there instead of pushing, since its token can't push under
+// read-only. It gets no /repo mount, though -- like github, forgejo clones
+// over the network in-box, not from a locally mounted Accumulation repo.
+// Builds MountParams from backend.Forgejo's real OutboxRelayCapable field
+// rather than a hand-built literal, so the test exercises the actual
+// registry row.
+func TestBuildMountSpecs_ForgejoReadOnly_OutboxMountedWritable(t *testing.T) {
+	dir := t.TempDir()
+	specs := buildMountSpecs(MountParams{HostMediatedRemote: backend.Forgejo.HostMediatedRemote, OutboxRelayCapable: backend.Forgejo.OutboxRelayCapable, BoxForgeAndIssueAccess: "read-only"}, Box{OutboxDir: dir})
+
+	var found *MountSpec
+	for i := range specs {
+		if specs[i].Target == "/outbox" {
+			found = &specs[i]
+		}
+		if specs[i].Target == "/repo" {
+			t.Errorf("unexpected /repo spec for CODE_FORGE=forgejo: %+v", specs[i])
+		}
+	}
+	if found == nil {
+		t.Fatalf("expected an /outbox spec in %+v", specs)
+	}
+	if found.Source != dir {
+		t.Errorf("Source = %q, want %q", found.Source, dir)
+	}
+	if found.ReadOnly {
+		t.Errorf("outbox mount must be writable, not read-only")
+	}
+}
+
+// TestBuildMountSpecs_OutboxIncapableReadOnly_NoOutboxMount verifies that a
+// backend with OutboxRelayCapable: false produces no /outbox mount even
+// under BoxForgeAndIssueAccess="read-only" with a present Box.OutboxDir --
+// the outbox-relay mount is gated on the backend's capability, not just the
+// access mode. No backendRow valid as a CODE_FORGE under read-only (github,
+// local, forgejo) leaves both OutboxRelayCapable and HostMediatedRemote
+// false today, so this is a hypothetical-backend-shape case rather than a
+// pin on any specific backend's real behavior.
+func TestBuildMountSpecs_OutboxIncapableReadOnly_NoOutboxMount(t *testing.T) {
 	dir := t.TempDir()
 	specs := buildMountSpecs(MountParams{HostMediatedRemote: false, OutboxRelayCapable: false, BoxForgeAndIssueAccess: "read-only"}, Box{OutboxDir: dir})
 
 	for _, s := range specs {
 		if s.Target == "/outbox" {
-			t.Errorf("unexpected /outbox spec for CODE_FORGE=forgejo read-only: %+v", specs)
+			t.Errorf("unexpected /outbox spec for OutboxRelayCapable=false read-only: %+v", specs)
 		}
 	}
 }
