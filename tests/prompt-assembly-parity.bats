@@ -215,7 +215,21 @@ assert_review_handoff_golden() {
 
   [ -s "$ORCHESTRATOR_LOG" ]
 
-  diff <(jq -S . "$GOLDEN_DIR/${golden_name}.handoff.json") <(jq -S . "$DRIVER_HANDOFF_FILE")
+  # Since issue #2975 the Handoff carries the full driver-invocation fact set
+  # (Model, ArgvShape, Caps, DriverBin, ...) plus per-run mktemp paths
+  # (PromptFile, AgentsFile, ReviewPromptFile) that can't be pinned byte-exact.
+  # The orchestrator-only facts this harness exists to pin are Invoker,
+  # ReviewModel, and ReviewEffort -- diff just those against the golden.
+  # ReviewPromptFile is now a path to the rendered review-prompt rather than
+  # the text itself, so assert it's a non-empty file that actually got written
+  # (the review pass's real input), not its exact value.
+  diff <(jq -S '{Invoker, ReviewModel, ReviewEffort}' "$GOLDEN_DIR/${golden_name}.handoff.json") \
+       <(jq -S '{Invoker, ReviewModel, ReviewEffort}' "$DRIVER_HANDOFF_FILE")
+
+  local review_prompt_file
+  review_prompt_file="$(jq -r '.ReviewPromptFile' "$DRIVER_HANDOFF_FILE")"
+  [ -n "$review_prompt_file" ]
+  [ -s "$review_prompt_file" ]
 }
 
 # issue #2349: a realistic multi-agent roster -- scout, reviewer (present, not

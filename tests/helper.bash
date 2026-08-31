@@ -149,6 +149,29 @@ assert_timeout_rejected() {
   fi
 }
 
+# Extracts the --handoff-file path agent/entrypoint.sh's run_driver_in_env
+# passed to the invoker, read from a verbatim-argv log ($1, e.g.
+# $ORCHESTRATOR_LOG, whose fake echoes `$@`). Since issue #2975 every
+# driver/model/effort/argv-shape/review/caps fact lives inside that handoff
+# JSON rather than on the argv line, so a test asserting one of those facts
+# extracts this path and `jq`s it. phase_prompt_assembly keeps the handoff
+# temp file alive for the whole run (every run_driver_in_env call reads it),
+# so the returned path is still readable when bats inspects it here. Prints
+# the first --handoff-file value: main's implement pass always runs first and
+# always hands run_driver_in_env the shared $_handoff_file (no override), so
+# head -1 deliberately picks that initial, full-fidelity handoff. A later
+# corrective-resume call (the SPINDRIFT_OUTCOME/PR-intent marker gates) hands
+# its own run_driver_in_env call a *different* path -- a throwaway copy from
+# _stripped_review_handoff with only ReviewPromptFile cleared (issue #2975)
+# -- so head -1 no longer picks an arbitrary one of two identical paths; it
+# specifically skips that stripped copy. Every other field these tests assert
+# on is copied verbatim into that stripped copy, so callers asserting on
+# fields other than ReviewPromptFile would get the same answer from either
+# invocation anyway.
+handoff_path_from_log() {
+  grep -oE -- '--handoff-file [^ ]+' "$1" | head -1 | awk '{print $2}'
+}
+
 # Kills any backgrounded stand-in socat process a suite started (via its own
 # _test_socat_pid), so a leaked process never survives past the test.
 # Extracted here once multiple entrypoint-*.bats suites needed the exact same
