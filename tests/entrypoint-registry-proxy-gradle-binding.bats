@@ -262,11 +262,13 @@ teardown() {
   local _stub_bin="$BATS_TEST_TMPDIR/stub-bin"
   mkdir -p "$_stub_bin"
   _stub_socat_pidfile="$BATS_TEST_TMPDIR/stub-socat.pid"
-  cat >"$_stub_bin/socat" <<EOF
-#!/usr/bin/env bash
+  {
+    printf '#!%s\n' "$(command -v bash)"
+    cat <<EOF
 echo \$\$ >"$_stub_socat_pidfile"
 exec sleep 60
 EOF
+  } >"$_stub_bin/socat"
   chmod +x "$_stub_bin/socat"
 
   local _orig_path="$PATH"
