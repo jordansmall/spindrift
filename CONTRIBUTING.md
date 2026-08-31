@@ -83,11 +83,18 @@ The regenerator and the drift-guard checks share one renderer per artifact
 (`lib/renderers.nix`), so they can't drift from each other. It's repo-internal
 dev tooling, not part of the flake-option/env-schema consumer surface. The man
 page rebuilds fresh from the schema on every `nix flake check` (nothing to
-regenerate). `lib/env-schema.nix` is the only hand-edit a new knob requires;
+regenerate).
+`lib/env-schema.nix` is the only hand-edit a new knob requires;
 the launcher's Go wiring (when the binary reads the knob directly) is the only
 other hand-edit. A structural knob's doc/type/default metadata lives instead
 in `lib/structural-options-doc.nix`, paired with its `mkOption` declaration in
-`lib/flakeModule.nix`'s `structuralOptions`.
+`lib/flakeModule.nix`'s `structuralOptions`. A generated block embedded
+between BEGIN/END markers in a committed doc (like `docs/reference.md`'s
+Default models table) is a documented-fact row — add one to
+`lib/documented-facts.nix` rather than hand-writing a new check/guard/regen
+call (issue #2948); MIGRATING.md's legacy settings mapping block predates
+the registry and is the one deliberate exception, out of this migration's
+scope (see `lib/documented-facts.nix`).
 
 To exercise the whole loop end to end against a live repo, use `./dogfood.sh`
 (never hand-run `spindrift dispatch`) — see [`docs/reference.md`](docs/reference.md).
