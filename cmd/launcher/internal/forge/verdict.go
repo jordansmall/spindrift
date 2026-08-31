@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	"spindrift.dev/launcher/internal/outcome"
 )
 
 // Verdict is the research dispatch's relevance judgment (ADR 0022). It is
@@ -15,9 +17,9 @@ import (
 type Verdict string
 
 const (
-	Recommend Verdict = "recommend"
-	Reject    Verdict = "reject"
-	Unclear   Verdict = "unclear"
+	Recommend Verdict = Verdict(outcome.StatusRecommend)
+	Reject    Verdict = Verdict(outcome.StatusReject)
+	Unclear   Verdict = Verdict(outcome.StatusUnclear)
 )
 
 // String renders the verdict as the outcome-line status token.
@@ -134,7 +136,7 @@ func ResearchVerdictLabels() VerdictLabels {
 // the researcher couldn't reach a verdict at all (crash or no verdict),
 // never a concluded verdict, so it can never be a configurable verdict
 // token.
-const blockedVerdict = "blocked"
+const blockedVerdict = outcome.StatusBlocked
 
 // ParseResearchVerdicts parses the RESEARCH_VERDICTS knob: a JSON array of
 // {verdict,label,description} objects, order preserved. Empty string
