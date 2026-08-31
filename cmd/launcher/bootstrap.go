@@ -49,50 +49,69 @@ type launchContext struct {
 
 // bootstrap wires the prologue shared by run, the selective `dispatch <nums>`
 // path, research (and `research <nums>`), and recover: working-dir
-// resolution, config load+validate, runner construction, a readiness check,
-// the forge client, the dispatch factory (including driver-cache setup), and
-// settle. ensureReady selects EnsureReady() (build if absent, the default)
-// over IsReady() (fail fast without building, --no-build) -- the one axis
-// that varies per entry point. kind (dispatchKindWork or
-// dispatchKindResearch, ADR 0022) selects the label family, waves blocker
-// handling, and Settle implementation via applyDispatchKind — the other axis,
-// carried by which subcommand launched. selfContained (issue #2202,
-// --self-contained) is the research kind's no-repo sub-mode: set only by the
-// research subcommand handler, false everywhere else. No step here can fail
-// after the dispatch factory is constructed, so an error return never
-// carries a launch context that still needs cleanup. The one thing that can
-// still be outstanding on an early error return is the accumulation lock
-// (issue #2441): it's acquired well before the factory exists, so a bare
-// `return nil, err` from any step between acquisition and launchContext's
-// construction would otherwise leak a held lock for the rest of the
-// process. A single deferred release, registered right after acquisition,
-// covers that whole window instead of relying on every such return site to
-// remember it.
+// resolution, the accumulation-lock seed, runner construction, a readiness
+// check, the dispatch factory (including driver-cache setup), and settle.
+// Config load+validate and the issueTracker/codeForge/gate prologue live in
+// newGatedContext; see the seedConfig/gc split below for why the
+// accumulation-lock seed still has to run outside that call. ensureReady
+// selects EnsureReady() (build if absent, the default) over IsReady() (fail
+// fast without building, --no-build) -- the one axis that varies per entry
+// point. kind (dispatchKindWork or dispatchKindResearch, ADR 0022) selects
+// the label family, waves blocker handling, and Settle implementation via
+// applyDispatchKind — the other axis, carried by which subcommand launched.
+// selfContained (issue #2202, --self-contained) is the research kind's
+// no-repo sub-mode: set only by the research subcommand handler, false
+// everywhere else. No step here can fail after the dispatch factory is
+// constructed, so an error return never carries a launch context that still
+// needs cleanup. The one thing that can still be outstanding on an early
+// error return is the accumulation lock (issue #2441): it's acquired well
+// before the factory exists, so a bare `return nil, err` from any step
+// between acquisition and launchContext's construction would otherwise leak
+// a held lock for the rest of the process. A single deferred release,
+// registered right after acquisition, covers that whole window instead of
+// relying on every such return site to remember it. Two other steps also
+// stay inline here rather than moving into newGatedContext/newReadContext:
+// the mutating registry-proxy-credential resolve (issue #2944 -- must run
+// exactly once, after the gate walk's own validate peek has already
+// succeeded) and the GH-token-refresh watch (starts a background goroutine
+// that outlives this call, which neither constructor owns).
 func bootstrap(ensureReady bool, kind string, selfContained bool) (lc *launchContext, err error) {
 	pwd, err := os.Getwd()
 	if err != nil {
 		return nil, err
 	}
 
-	c := applyDispatchKind(loadConfig(), kind)
-	c.selfContained = selfContained
-	if err := validate(c); err != nil {
+	// seedConfig backs the two steps below that must run before
+	// newGatedContext's gate walk but don't depend on validate(c) having
+	// succeeded first: MigrateLegacyLogDir needs only pwd, and
+	// seedAccumulationRepoIfLocal must already hold the accumulation lock
+	// by the time a gate can fail
+	// (TestBootstrap_EarlyErrorAfterAccumLockAcquired_ReleasesLock).
+	// newGatedContext below loads config again for gc.config; the two
+	// loads agree because loadConfig is a deterministic function of env
+	// vars and host git config.
+	seedConfig := applyDispatchKind(loadConfig(), kind)
+	seedConfig.selfContained = selfContained
+
+	// validate(seedConfig) duplicates the validate(gc.config) call
+	// newGatedContext makes below: seedAccumulationRepoIfLocal has a real
+	// git side effect, which must not run ahead of config validation (an
+	// invalid REPO_SLUG under CODE_FORGE=local must surface as validate's
+	// own error, not a confusing git-push failure --
+	// TestMainRun_Dispatch_MissingRepoSlugUnderLocalForge_ExitsConfigInvalid).
+	// Nothing between here and newGatedContext's own validate(gc.config)
+	// mutates env or config, so the two calls agree.
+	if err := validate(seedConfig); err != nil {
 		return nil, fmt.Errorf("%w: %w", errConfigInvalid, err)
 	}
-	if c.registryProxyUpstreamURL != "" {
-		cred, err := resolveRegistryProxyCredential(c.registryProxyCredentialFile, c.registryProxyCredentialEnv)
-		if err != nil {
-			return nil, fmt.Errorf("%w: %w", errConfigInvalid, err)
-		}
-		c.registryProxyCredential = cred
-	}
+
 	// One-time relocation (issue #2138): fold any legacy top-level logs/
 	// left by an earlier spindrift into the new .spindrift/logs before any
 	// host-side site reads or creates a log path this run.
 	if err := dispatch.MigrateLegacyLogDir(pwd); err != nil {
 		return nil, err
 	}
-	accumLock, err := seedAccumulationRepoIfLocal(c, pwd)
+	accumLock, err := seedAccumulationRepoIfLocal(seedConfig, pwd)
 	if err != nil {
 		return nil, err
 	}
@@ -107,6 +126,31 @@ func bootstrap(ensureReady bool, kind string, selfContained bool) (lc *launchCon
 				_ = accumLock.Release()
 			}
 		}()
+	}
+
+	gc, err := newGatedContext(os.Stdout, kind, selfContained)
+	if err != nil {
+		return nil, err
+	}
+	// c is copied out of gc here and diverges below (registryProxyCredential
+	// is set on c only) -- safe only because gc itself is never read again.
+	c := gc.config
+	it := gc.issueTracker
+	cf := gc.codeForge
+
+	// Resolved here, after newGatedContext's own validate(gc.config) peek
+	// has already succeeded: resolution mutates env (os.Unsetenv on the
+	// env-var form, see resolveRegistryProxyCredential) and must run
+	// exactly once, so it can't run before that peek re-reads the same var.
+	// validate(seedConfig) above already gives the "a bad credential fails
+	// before the git push and network gates run" guarantee, since peek and
+	// resolve share identical read/validate logic (credentialFromSource).
+	if c.registryProxyUpstreamURL != "" {
+		cred, err := resolveRegistryProxyCredential(c.registryProxyCredentialFile, c.registryProxyCredentialEnv)
+		if err != nil {
+			return nil, fmt.Errorf("%w: %w", errConfigInvalid, err)
+		}
+		c.registryProxyCredential = cred
 	}
 
 	// A run that outlives GH_TOKEN_REFRESH_FILE's minter's token lifetime
@@ -131,26 +175,6 @@ func bootstrap(ensureReady bool, kind string, selfContained bool) (lc *launchCon
 		return nil, err
 	}
 
-	it := newIssueTracker(c)
-	cf := newCodeForge(c, local.SanitizedParent{}, it)
-	if err := checkReadOnlyCapabilityGate(c); err != nil {
-		return nil, err
-	}
-	if err := checkNetworkModeRuntimeGate(c); err != nil {
-		return nil, err
-	}
-	if err := checkBwrapPastaGate(c); err != nil {
-		return nil, err
-	}
-	if err := checkBwrapOverlayGate(c); err != nil {
-		return nil, err
-	}
-	if _, err := checkReadOnlyTokenGate(c, ghTokenIntrospector, os.Stdout); err != nil {
-		return nil, err
-	}
-	if _, err := checkReadOnlyForgejoTokenGate(c, os.Stdout); err != nil {
-		return nil, err
-	}
 	lw := localloop.Wire(localloopConfig(c), it)
 	f := newDispatchFactory(c, pwd, r, it, lw, cf)
 	s := newSettle(c, it, lw, cf)
