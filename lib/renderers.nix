@@ -632,9 +632,12 @@ rec {
     );
 
   # cmd/launcher/driver-exec/assembleprompt_cmd.go's generated skill-baked
-  # promptassembly.Env{} struct-literal assignments (issue #2532).
+  # env.Field assignment statements (issue #2979): env is built from
+  # promptassembly.EnvFromEnviron()'s returned value, not a struct literal,
+  # so each row is a plain statement (1-tab indent, no trailing comma)
+  # rather than a struct-literal field (2-tab indent, trailing comma).
   renderBakedSkillEnvAssignGo =
-    bakedSkills: concatStrings (map (s: "\t\t${s.field}: *${s.goVar},\n") bakedSkills);
+    bakedSkills: concatStrings (map (s: "\tenv.${s.field} = *${s.goVar}\n") bakedSkills);
 
   # cmd/launcher/internal/promptassembly/env.go's generated skill-baked
   # struct fields (issue #2532).

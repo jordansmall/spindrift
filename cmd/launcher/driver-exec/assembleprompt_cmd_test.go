@@ -26,14 +26,50 @@ const registryPathForTest = "../internal/promptassembly/testdata/registry.json"
 // duplicating it by hand.
 const validateMarkersRegistryPathForTest = "../internal/promptassembly/testdata/validate-markers.json"
 
-// coveredCellArgs returns the flag set that puts runAssemblePrompt's Env
-// squarely in promptassembly.Assemble's covered cell (see promptassembly's
+// coveredCellArgs puts runAssemblePrompt's Env squarely in
+// promptassembly.Assemble's covered cell (see promptassembly's
 // checkCoveredCell, which as of issue #2540 checks only dispatch kind
 // "work"): github tracker, github forge, a read-write box, dispatch kind
 // "work", a fresh box (fix-pass 0), the orchestrator off, and every skill
-// baked.
+// baked. Since issue #2979, the 29 Box-env-sourced Env fields
+// (promptassembly.EnvFromEnviron, boxenv_gen.go) reach runAssemblePrompt via
+// t.Setenv rather than a CLI flag -- every field is set explicitly here
+// (even to "" for a false/empty default) so a leftover value in the test
+// process's own environment can never leak into a covered-cell run. The
+// remaining flag set (skill-baked bools, prompts-dir, skills-found, and the
+// required registry/output paths) is still a genuine CLI flag and is
+// returned for the caller to pass to runAssemblePrompt.
 func coveredCellArgs(t *testing.T, promptOutput, agentsJSONOutput, handoffOutput string) []string {
 	t.Helper()
+	t.Setenv("ORCHESTRATOR_ENABLED", "")
+	t.Setenv("AGENTS_JSON_TEMPLATE", "")
+	t.Setenv("BOX_FILER_ENABLED", "")
+	t.Setenv("BOX_WORKER_PROVISIONED", "")
+	t.Setenv("BOX_REVIEW_LOOP_INLINE", "")
+	t.Setenv("BOX_REVIEW_LOOP_ORCHESTRATOR", "")
+	t.Setenv("ISSUE_TRACKER", "github")
+	t.Setenv("BOX_TRACKER_AXIS_READ", "")
+	t.Setenv("BOX_TRACKER_AXIS_WRITE", "")
+	t.Setenv("BOX_TRACKER_AXIS_FILER", "")
+	t.Setenv("BOX_WRITE_ENABLED", "1")
+	t.Setenv("LOCAL_ISSUE_REFERENCE", "")
+	t.Setenv("CODE_FORGE", "github")
+	t.Setenv("BOX_FORGE_BACKEND", "")
+	t.Setenv("DISPATCH_KIND", "work")
+	t.Setenv("SELF_CONTAINED", "")
+	t.Setenv("FIX_PASS", "0")
+	t.Setenv("RESUME_AFTER_HOLD", "")
+	t.Setenv("AUTO_FORMAT", "")
+	t.Setenv("AUTO_LINT", "")
+	t.Setenv("CI_FAILURE_SUMMARY", "")
+	t.Setenv("ISSUE_NUMBER", "2349")
+	t.Setenv("ISSUE_TITLE", "Add assemble-prompt CLI verb")
+	t.Setenv("BRANCH", "agent/issue-2349")
+	t.Setenv("BASE_BRANCH", "main")
+	t.Setenv("IN_PROGRESS_LABEL", "agent-in-progress")
+	t.Setenv("COMPLETE_LABEL", "agent-complete")
+	t.Setenv("RUN_NONCE", "run-nonce-abc123")
+	t.Setenv("RESEARCH_STATUS_ENUM", "")
 	return []string{
 		"--caveman-skill-baked=true",
 		"--tdd-skill-baked=true",
@@ -41,21 +77,8 @@ func coveredCellArgs(t *testing.T, promptOutput, agentsJSONOutput, handoffOutput
 		"--code-review-skill-baked=true",
 		"--auto-format-skill-baked=true",
 		"--auto-lint-skill-baked=true",
-		"--orchestrator-enabled=false",
-		"--issue-tracker", "github",
-		"--box-write-enabled=true",
-		"--code-forge", "github",
-		"--dispatch-kind", "work",
-		"--fix-pass", "0",
 		"--prompts-dir", promptsDirForTest,
 		"--skills-found", "caveman, tdd, commit, code-review",
-		"--issue-number", "2349",
-		"--issue-title", "Add assemble-prompt CLI verb",
-		"--branch", "agent/issue-2349",
-		"--base-branch", "main",
-		"--in-progress-label", "agent-in-progress",
-		"--complete-label", "agent-complete",
-		"--run-nonce", "run-nonce-abc123",
 		"--registry", registryPathForTest,
 		"--validate-markers-registry", validateMarkersRegistryPathForTest,
 		"--prompt-output", promptOutput,
@@ -122,11 +145,7 @@ func TestRunAssemblePrompt_UnsupportedCellReturnsNonZero(t *testing.T) {
 	handoffOutput := filepath.Join(dir, "handoff.json")
 
 	args := coveredCellArgs(t, promptOutput, agentsJSONOutput, handoffOutput)
-	for i, a := range args {
-		if a == "work" && args[i-1] == "--dispatch-kind" {
-			args[i] = "bogus-kind"
-		}
-	}
+	t.Setenv("DISPATCH_KIND", "bogus-kind")
 
 	var stdout bytes.Buffer
 	rc := runAssemblePrompt(args, &stdout)
@@ -251,8 +270,8 @@ func TestRunAssemblePrompt_ValidatorRejectBlocksOutputs(t *testing.T) {
 	handoffOutput := filepath.Join(dir, "handoff.json")
 
 	args := coveredCellArgs(t, promptOutput, agentsJSONOutput, handoffOutput)
-	args = replaceArg(args, "--dispatch-kind", "research")
-	args = replaceArg(args, "--box-write-enabled", "false")
+	t.Setenv("DISPATCH_KIND", "research")
+	t.Setenv("BOX_WRITE_ENABLED", "")
 	args = replaceArg(args, "--prompts-dir", researchPromptDirLackingSpindriftComment(t))
 
 	var stdout bytes.Buffer
@@ -286,7 +305,7 @@ func TestRunAssemblePrompt_ValidatorWarnStillWritesOutputs(t *testing.T) {
 	handoffOutput := filepath.Join(dir, "handoff.json")
 
 	args := coveredCellArgs(t, promptOutput, agentsJSONOutput, handoffOutput)
-	args = replaceArg(args, "--box-write-enabled", "false")
+	t.Setenv("BOX_WRITE_ENABLED", "")
 	args = replaceArg(args, "--prompts-dir", issuePromptDirLackingSpindriftPRIntent(t))
 
 	var stdout bytes.Buffer
@@ -299,7 +318,7 @@ func TestRunAssemblePrompt_ValidatorWarnStillWritesOutputs(t *testing.T) {
 	}
 
 	// agentsJSONOutput is only Stat-checked, not size-checked: with no
-	// --agents-json-template configured (as here) Assemble's own AgentsJSON
+	// AGENTS_JSON_TEMPLATE configured (as here) Assemble's own AgentsJSON
 	// legitimately renders empty -- TestRunAssemblePrompt_CoveredCellWritesOutputs
 	// makes the same distinction. promptOutput/handoffOutput are always
 	// non-empty in the covered cell.
@@ -317,26 +336,27 @@ func TestRunAssemblePrompt_ValidatorWarnStillWritesOutputs(t *testing.T) {
 	}
 }
 
-// TestRunAssemblePrompt_TrackerAxisFlagsReachGates verifies the
-// --tracker-axis-read/--tracker-axis-write/--tracker-axis-filer flags reach
-// promptassembly.Env's TrackerAxisRead/TrackerAxisWrite/TrackerAxisFiler
-// fields (issue #2533 slice 2): setting --tracker-axis-read=FORGEJO fires
-// the ISSUE_TRACKER_FORGEJO gate (gates_tracker.go reads the axis fields
-// directly, no longer re-deriving them from --issue-tracker), rendering
+// TestRunAssemblePrompt_TrackerAxisEnvVarsReachGates verifies the
+// BOX_TRACKER_AXIS_READ/BOX_TRACKER_AXIS_WRITE/BOX_TRACKER_AXIS_FILER env
+// vars reach promptassembly.Env's
+// TrackerAxisRead/TrackerAxisWrite/TrackerAxisFiler fields (issue #2533
+// slice 2): setting BOX_TRACKER_AXIS_READ=FORGEJO fires the
+// ISSUE_TRACKER_FORGEJO gate (gates_tracker.go reads the axis fields
+// directly, no longer re-deriving them from ISSUE_TRACKER), rendering
 // issue-read-forgejo.md's distinctive "fj issue view" text instead of
-// issue-read-github.md's "gh issue view" -- even though --issue-tracker
+// issue-read-github.md's "gh issue view" -- even though ISSUE_TRACKER
 // itself is left at "github", since checkCoveredCell no longer re-validates
 // IssueTracker (issue #2540) and the axis fields are the sole gate input.
-func TestRunAssemblePrompt_TrackerAxisFlagsReachGates(t *testing.T) {
+func TestRunAssemblePrompt_TrackerAxisEnvVarsReachGates(t *testing.T) {
 	dir := t.TempDir()
 	promptOutput := filepath.Join(dir, "prompt.txt")
 	agentsJSONOutput := filepath.Join(dir, "agents.json")
 	handoffOutput := filepath.Join(dir, "handoff.json")
 
 	args := coveredCellArgs(t, promptOutput, agentsJSONOutput, handoffOutput)
-	args = replaceArg(args, "--tracker-axis-read", "FORGEJO")
-	args = replaceArg(args, "--tracker-axis-write", "FORGEJO")
-	args = replaceArg(args, "--tracker-axis-filer", "FORGEJO")
+	t.Setenv("BOX_TRACKER_AXIS_READ", "FORGEJO")
+	t.Setenv("BOX_TRACKER_AXIS_WRITE", "FORGEJO")
+	t.Setenv("BOX_TRACKER_AXIS_FILER", "FORGEJO")
 
 	var stdout bytes.Buffer
 	rc := runAssemblePrompt(args, &stdout)
@@ -357,21 +377,21 @@ func TestRunAssemblePrompt_TrackerAxisFlagsReachGates(t *testing.T) {
 	}
 }
 
-// TestRunAssemblePrompt_ForgeBackendFlagReachesGates verifies the
-// --forge-backend flag reaches promptassembly.Env.ForgeBackend
+// TestRunAssemblePrompt_ForgeBackendEnvVarReachesGates verifies the
+// BOX_FORGE_BACKEND env var reaches promptassembly.Env.ForgeBackend
 // (gates_access_forge.go reads it directly, no longer re-deriving it from
-// --code-forge, issue #2533 slice 2): setting --forge-backend=FORGEJO fires
-// FIX_CI_READ_FORGEJO instead of FIX_CI_READ_GH, even with --code-forge
+// CODE_FORGE, issue #2533 slice 2): setting BOX_FORGE_BACKEND=FORGEJO fires
+// FIX_CI_READ_FORGEJO instead of FIX_CI_READ_GH, even with CODE_FORGE
 // left at "github".
-func TestRunAssemblePrompt_ForgeBackendFlagReachesGates(t *testing.T) {
+func TestRunAssemblePrompt_ForgeBackendEnvVarReachesGates(t *testing.T) {
 	dir := t.TempDir()
 	promptOutput := filepath.Join(dir, "prompt.txt")
 	agentsJSONOutput := filepath.Join(dir, "agents.json")
 	handoffOutput := filepath.Join(dir, "handoff.json")
 
 	args := coveredCellArgs(t, promptOutput, agentsJSONOutput, handoffOutput)
-	args = replaceArg(args, "--fix-pass", "1")
-	args = replaceArg(args, "--forge-backend", "FORGEJO")
+	t.Setenv("FIX_PASS", "1")
+	t.Setenv("BOX_FORGE_BACKEND", "FORGEJO")
 
 	var stdout bytes.Buffer
 	rc := runAssemblePrompt(args, &stdout)
@@ -435,12 +455,12 @@ func assemblePromptForTest(t *testing.T, dir string, args []string) string {
 	return string(promptBytes)
 }
 
-// TestRunAssemblePrompt_FilerEnabledFlagReachesPrompt verifies --filer-enabled
-// reaches promptassembly.Env.FilerEnabled and, through it, the FILER_ENABLED
-// gate: on, the rendered prompt carries the filer's FILE ISSUES heading; off
-// (coveredCellArgs' default -- the flag defaults to false and is never set
-// by coveredCellArgs itself), it does not (issue #2533 slice 2).
-func TestRunAssemblePrompt_FilerEnabledFlagReachesPrompt(t *testing.T) {
+// TestRunAssemblePrompt_FilerEnabledEnvVarReachesPrompt verifies
+// BOX_FILER_ENABLED reaches promptassembly.Env.FilerEnabled and, through it,
+// the FILER_ENABLED gate: on, the rendered prompt carries the filer's FILE
+// ISSUES heading; off (coveredCellArgs' default -- unset there), it does not
+// (issue #2533 slice 2).
+func TestRunAssemblePrompt_FilerEnabledEnvVarReachesPrompt(t *testing.T) {
 	for _, enabled := range []bool{true, false} {
 		name := "disabled"
 		if enabled {
@@ -453,22 +473,22 @@ func TestRunAssemblePrompt_FilerEnabledFlagReachesPrompt(t *testing.T) {
 			handoffOutput := filepath.Join(dir, "handoff.json")
 
 			args := coveredCellArgs(t, promptOutput, agentsJSONOutput, handoffOutput)
-			args = replaceArg(args, "--filer-enabled", boolFlagValue(enabled))
+			t.Setenv("BOX_FILER_ENABLED", presenceEnvValue(enabled))
 
 			prompt := assemblePromptForTest(t, dir, args)
 			got := strings.Contains(prompt, filerEnabledMarker)
 			if got != enabled {
-				t.Errorf("prompt contains %q = %v, want %v (--filer-enabled=%v)", filerEnabledMarker, got, enabled, enabled)
+				t.Errorf("prompt contains %q = %v, want %v (BOX_FILER_ENABLED=%v)", filerEnabledMarker, got, enabled, enabled)
 			}
 		})
 	}
 }
 
-// TestRunAssemblePrompt_WorkerProvisionedFlagReachesPrompt verifies
-// --worker-provisioned reaches promptassembly.Env.WorkerProvisioned and, through
-// it, the WORKER_PROVISIONED gate: on, the rendered prompt carries
+// TestRunAssemblePrompt_WorkerProvisionedEnvVarReachesPrompt verifies
+// BOX_WORKER_PROVISIONED reaches promptassembly.Env.WorkerProvisioned and,
+// through it, the WORKER_PROVISIONED gate: on, the rendered prompt carries
 // coordinator.md's marker text; off, it does not (issue #2533 slice 2).
-func TestRunAssemblePrompt_WorkerProvisionedFlagReachesPrompt(t *testing.T) {
+func TestRunAssemblePrompt_WorkerProvisionedEnvVarReachesPrompt(t *testing.T) {
 	for _, provisioned := range []bool{true, false} {
 		name := "unprovisioned"
 		if provisioned {
@@ -481,25 +501,25 @@ func TestRunAssemblePrompt_WorkerProvisionedFlagReachesPrompt(t *testing.T) {
 			handoffOutput := filepath.Join(dir, "handoff.json")
 
 			args := coveredCellArgs(t, promptOutput, agentsJSONOutput, handoffOutput)
-			args = replaceArg(args, "--worker-provisioned", boolFlagValue(provisioned))
+			t.Setenv("BOX_WORKER_PROVISIONED", presenceEnvValue(provisioned))
 
 			prompt := assemblePromptForTest(t, dir, args)
 			got := strings.Contains(prompt, workerProvisionedMarker)
 			if got != provisioned {
-				t.Errorf("prompt contains %q = %v, want %v (--worker-provisioned=%v)", workerProvisionedMarker, got, provisioned, provisioned)
+				t.Errorf("prompt contains %q = %v, want %v (BOX_WORKER_PROVISIONED=%v)", workerProvisionedMarker, got, provisioned, provisioned)
 			}
 		})
 	}
 }
 
-// TestRunAssemblePrompt_ReviewLoopFlagsReachPrompt verifies
-// --review-loop-inline/--review-loop-orchestrator reach
+// TestRunAssemblePrompt_ReviewLoopEnvVarsReachPrompt verifies
+// BOX_REVIEW_LOOP_INLINE/BOX_REVIEW_LOOP_ORCHESTRATOR reach
 // promptassembly.Env.ReviewLoopInline/Env.ReviewLoopOrchestrator and, through
-// them, the REVIEW_LOOP_INLINE/REVIEW_LOOP_ORCHESTRATOR gates: each flag
+// them, the REVIEW_LOOP_INLINE/REVIEW_LOOP_ORCHESTRATOR gates: each
 // combination renders exactly its own fragment's marker and never the
-// other's, proving the two flags aren't swapped or aliased (issue #2533
+// other's, proving the two env vars aren't swapped or aliased (issue #2533
 // slice 2).
-func TestRunAssemblePrompt_ReviewLoopFlagsReachPrompt(t *testing.T) {
+func TestRunAssemblePrompt_ReviewLoopEnvVarsReachPrompt(t *testing.T) {
 	cases := []struct {
 		name         string
 		inline       bool
@@ -516,29 +536,29 @@ func TestRunAssemblePrompt_ReviewLoopFlagsReachPrompt(t *testing.T) {
 			handoffOutput := filepath.Join(dir, "handoff.json")
 
 			args := coveredCellArgs(t, promptOutput, agentsJSONOutput, handoffOutput)
-			args = replaceArg(args, "--review-loop-inline", boolFlagValue(c.inline))
-			args = replaceArg(args, "--review-loop-orchestrator", boolFlagValue(c.orchestrator))
+			t.Setenv("BOX_REVIEW_LOOP_INLINE", presenceEnvValue(c.inline))
+			t.Setenv("BOX_REVIEW_LOOP_ORCHESTRATOR", presenceEnvValue(c.orchestrator))
 
 			prompt := assemblePromptForTest(t, dir, args)
 			if gotInline := strings.Contains(prompt, reviewLoopInlineMarker); gotInline != c.inline {
-				t.Errorf("prompt contains %q = %v, want %v (--review-loop-inline=%v)", reviewLoopInlineMarker, gotInline, c.inline, c.inline)
+				t.Errorf("prompt contains %q = %v, want %v (BOX_REVIEW_LOOP_INLINE=%v)", reviewLoopInlineMarker, gotInline, c.inline, c.inline)
 			}
 			if gotOrchestrator := strings.Contains(prompt, reviewLoopOrchestratorMarker); gotOrchestrator != c.orchestrator {
-				t.Errorf("prompt contains %q = %v, want %v (--review-loop-orchestrator=%v)", reviewLoopOrchestratorMarker, gotOrchestrator, c.orchestrator, c.orchestrator)
+				t.Errorf("prompt contains %q = %v, want %v (BOX_REVIEW_LOOP_ORCHESTRATOR=%v)", reviewLoopOrchestratorMarker, gotOrchestrator, c.orchestrator, c.orchestrator)
 			}
 		})
 	}
 }
 
-// TestRunAssemblePrompt_FilerAndWorkerFlagsNotCrossWired proves
-// --filer-enabled and --worker-provisioned reach their own, distinct Env
-// fields rather than being crossed (e.g. --filer-enabled accidentally
+// TestRunAssemblePrompt_FilerAndWorkerEnvVarsNotCrossWired proves
+// BOX_FILER_ENABLED and BOX_WORKER_PROVISIONED reach their own, distinct Env
+// fields rather than being crossed (e.g. BOX_FILER_ENABLED accidentally
 // wired to Env.WorkerProvisioned, or vice versa): with exactly one of the
-// two flags on, only that flag's own marker appears in the rendered
-// prompt, never the other's -- a wiring bug that swapped the two flags'
+// two env vars on, only that one's own marker appears in the rendered
+// prompt, never the other's -- a wiring bug that swapped the two
 // destinations would show both markers together or neither, failing this
 // test (issue #2533 slice 2, the review finding this pins closed).
-func TestRunAssemblePrompt_FilerAndWorkerFlagsNotCrossWired(t *testing.T) {
+func TestRunAssemblePrompt_FilerAndWorkerEnvVarsNotCrossWired(t *testing.T) {
 	cases := []struct {
 		name       string
 		filer      bool
@@ -557,27 +577,28 @@ func TestRunAssemblePrompt_FilerAndWorkerFlagsNotCrossWired(t *testing.T) {
 			handoffOutput := filepath.Join(dir, "handoff.json")
 
 			args := coveredCellArgs(t, promptOutput, agentsJSONOutput, handoffOutput)
-			args = replaceArg(args, "--filer-enabled", boolFlagValue(c.filer))
-			args = replaceArg(args, "--worker-provisioned", boolFlagValue(c.worker))
+			t.Setenv("BOX_FILER_ENABLED", presenceEnvValue(c.filer))
+			t.Setenv("BOX_WORKER_PROVISIONED", presenceEnvValue(c.worker))
 
 			prompt := assemblePromptForTest(t, dir, args)
 			if gotFiler := strings.Contains(prompt, filerEnabledMarker); gotFiler != c.wantFiler {
-				t.Errorf("prompt contains %q = %v, want %v (--filer-enabled=%v, --worker-provisioned=%v)", filerEnabledMarker, gotFiler, c.wantFiler, c.filer, c.worker)
+				t.Errorf("prompt contains %q = %v, want %v (BOX_FILER_ENABLED=%v, BOX_WORKER_PROVISIONED=%v)", filerEnabledMarker, gotFiler, c.wantFiler, c.filer, c.worker)
 			}
 			if gotWorker := strings.Contains(prompt, workerProvisionedMarker); gotWorker != c.wantWorker {
-				t.Errorf("prompt contains %q = %v, want %v (--filer-enabled=%v, --worker-provisioned=%v)", workerProvisionedMarker, gotWorker, c.wantWorker, c.filer, c.worker)
+				t.Errorf("prompt contains %q = %v, want %v (BOX_FILER_ENABLED=%v, BOX_WORKER_PROVISIONED=%v)", workerProvisionedMarker, gotWorker, c.wantWorker, c.filer, c.worker)
 			}
 		})
 	}
 }
 
-// boolFlagValue renders b the way replaceArg/the flag package expect a bool
-// flag's value token ("true"/"false").
-func boolFlagValue(b bool) string {
+// presenceEnvValue renders b the way a presence-kind Env field
+// (os.Getenv(k) != "") expects: "1" when set, "" (unset) when not -- the
+// env-var analog of the old bool flag's "true"/"false" token (issue #2979).
+func presenceEnvValue(b bool) string {
 	if b {
-		return "true"
+		return "1"
 	}
-	return "false"
+	return ""
 }
 
 // TestIsAssemblePromptInvocation verifies the assemble-prompt subcommand's
@@ -801,9 +822,9 @@ func TestRunAssemblePrompt_MalformedBudgetCapsDegradeToZero(t *testing.T) {
 func TestRunAssemblePrompt_ReviewPromptOutput(t *testing.T) {
 	orchestratorOnArgs := func(t *testing.T, promptOutput, agentsJSONOutput, handoffOutput string) []string {
 		args := coveredCellArgs(t, promptOutput, agentsJSONOutput, handoffOutput)
-		args = replaceArg(args, "--orchestrator-enabled", "true")
-		args = replaceArg(args, "--review-loop-inline", "false")
-		args = replaceArg(args, "--review-loop-orchestrator", "true")
+		t.Setenv("ORCHESTRATOR_ENABLED", "1")
+		t.Setenv("BOX_REVIEW_LOOP_INLINE", "")
+		t.Setenv("BOX_REVIEW_LOOP_ORCHESTRATOR", "1")
 		return args
 	}
 

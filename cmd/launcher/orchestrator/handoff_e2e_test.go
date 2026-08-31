@@ -103,13 +103,56 @@ func TestHandoffEndToEnd(t *testing.T) {
 	reviewPromptOutput := filepath.Join(dir, "review-prompt.txt")
 
 	// The real assemble-prompt verb, invoked as a subprocess exactly the way
-	// entrypoint.sh's phase_prompt_assembly does. --orchestrator-enabled=true
-	// (plus the review-loop flags) puts the render on the one cell that emits a
-	// review prompt, and --review-prompt-output makes Handoff.ReviewPromptFile
-	// non-empty -- the master switch that dispatches the orchestrator into its
-	// implement/review/land loop. The registry/prompts paths are passed as
-	// CLI flags (not the PROMPTASSEMBLY_* env vars entrypoint.sh reads), per
-	// assembleprompt_cmd_test.go's own convention.
+	// entrypoint.sh's phase_prompt_assembly does. Since issue #2979, the 29
+	// Box-env-sourced Env fields (promptassembly.EnvFromEnviron) reach it via
+	// the process environment rather than a CLI flag; this subprocess is
+	// exec'd with no explicit .Env, so it inherits this test process's
+	// environment and the t.Setenv calls below reach it exactly like a flag
+	// would have. ORCHESTRATOR_ENABLED=1 (plus the review-loop env vars) puts
+	// the render on the one cell that emits a review prompt, and
+	// --review-prompt-output makes Handoff.ReviewPromptFile non-empty -- the
+	// master switch that dispatches the orchestrator into its
+	// implement/review/land loop. The registry/prompts paths are still passed
+	// as CLI flags (not the PROMPTASSEMBLY_* env vars entrypoint.sh reads),
+	// per assembleprompt_cmd_test.go's own convention.
+	// This test process may itself run inside a spindrift Box, so the
+	// ambient environment can already carry real values for the 14
+	// Box-env vars below that this test doesn't otherwise pin -- clear
+	// them first so the subprocess sees only what this test sets,
+	// matching boxenv_test.go's TestEnvFromEnviron guard.
+	for _, envVar := range []string{
+		"AGENTS_JSON_TEMPLATE",
+		"BOX_FILER_ENABLED",
+		"BOX_WORKER_PROVISIONED",
+		"BOX_TRACKER_AXIS_READ",
+		"BOX_TRACKER_AXIS_WRITE",
+		"BOX_TRACKER_AXIS_FILER",
+		"LOCAL_ISSUE_REFERENCE",
+		"BOX_FORGE_BACKEND",
+		"SELF_CONTAINED",
+		"RESUME_AFTER_HOLD",
+		"AUTO_FORMAT",
+		"AUTO_LINT",
+		"CI_FAILURE_SUMMARY",
+		"RESEARCH_STATUS_ENUM",
+	} {
+		t.Setenv(envVar, "")
+	}
+	t.Setenv("ORCHESTRATOR_ENABLED", "1")
+	t.Setenv("BOX_REVIEW_LOOP_INLINE", "")
+	t.Setenv("BOX_REVIEW_LOOP_ORCHESTRATOR", "1")
+	t.Setenv("ISSUE_TRACKER", "github")
+	t.Setenv("BOX_WRITE_ENABLED", "1")
+	t.Setenv("CODE_FORGE", "github")
+	t.Setenv("DISPATCH_KIND", "work")
+	t.Setenv("FIX_PASS", "0")
+	t.Setenv("ISSUE_NUMBER", "7")
+	t.Setenv("ISSUE_TITLE", "End-to-end handoff turn")
+	t.Setenv("BRANCH", "agent/issue-7")
+	t.Setenv("BASE_BRANCH", "main")
+	t.Setenv("IN_PROGRESS_LABEL", "agent-in-progress")
+	t.Setenv("COMPLETE_LABEL", "agent-complete")
+	t.Setenv("RUN_NONCE", "run-nonce-e2e")
 	assembleArgs := []string{
 		"assemble-prompt",
 		"--caveman-skill-baked=true",
@@ -118,23 +161,8 @@ func TestHandoffEndToEnd(t *testing.T) {
 		"--code-review-skill-baked=true",
 		"--auto-format-skill-baked=true",
 		"--auto-lint-skill-baked=true",
-		"--orchestrator-enabled=true",
-		"--review-loop-inline=false",
-		"--review-loop-orchestrator=true",
-		"--issue-tracker", "github",
-		"--box-write-enabled=true",
-		"--code-forge", "github",
-		"--dispatch-kind", "work",
-		"--fix-pass", "0",
 		"--prompts-dir", filepath.Join(moduleRoot, "..", "..", "templates", "default", "prompts"),
 		"--skills-found", "caveman, tdd, commit, code-review",
-		"--issue-number", "7",
-		"--issue-title", "End-to-end handoff turn",
-		"--branch", "agent/issue-7",
-		"--base-branch", "main",
-		"--in-progress-label", "agent-in-progress",
-		"--complete-label", "agent-complete",
-		"--run-nonce", "run-nonce-e2e",
 		"--registry", filepath.Join(moduleRoot, "internal", "promptassembly", "testdata", "registry.json"),
 		"--validate-markers-registry", filepath.Join(moduleRoot, "internal", "promptassembly", "testdata", "validate-markers.json"),
 		"--driver", "claude",
