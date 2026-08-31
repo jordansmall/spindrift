@@ -213,8 +213,6 @@ func runBindRegistryBindings(stdout io.Writer, socketPath string, port int, bind
 	for _, e := range exports {
 		rendered += fmt.Sprintf("export %s=%q\n", e.Name, e.Value)
 	}
-	rendered += "FORWARDER_READY=\"1\"\n"
-
 	if err := os.WriteFile(bindingsEnvOutput, []byte(rendered), 0o644); err != nil {
 		fmt.Fprintln(stdout, "driver-exec bind-registry: write bindings env output:", err)
 		return 1
