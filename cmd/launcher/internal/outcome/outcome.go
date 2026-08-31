@@ -20,8 +20,10 @@ import (
 // multi-pass loop to single-pass on ORCHESTRATOR_ENABLED runs. Exported so
 // that guard (cmd/launcher/orchestrator's TestPromptMarkersMatchScanner) and
 // this package's own Parse/ParseAnywhere/lastInLog share one literal instead
-// of each redeclaring it.
-const Token = "SPINDRIFT_OUTCOME"
+// of each redeclaring it. The literal itself comes from the generated
+// markerChannelOutcomeToken (markerchannels_gen.go, issue #2974), the single
+// source of truth lib/prompt-contract.nix's markerChannels registry renders.
+const Token = markerChannelOutcomeToken
 
 // PRIntentToken is the exact SPINDRIFT_PR_INTENT marker literal (issue
 // #2045, the #2036 fix): a read-only Box's draft-PR title/body hand-off,
@@ -31,8 +33,37 @@ const Token = "SPINDRIFT_OUTCOME"
 // the marker-contract parity guard (cmd/launcher/orchestrator's
 // TestPromptMarkersMatchScanner) can pin the two PR-intent-emitting
 // fragments (open-pr-create-outbox.md, if-blocked-pr-outbox.md) against
-// this one literal instead of a hardcoded string of its own.
-const PRIntentToken = "SPINDRIFT_PR_INTENT"
+// this one literal instead of a hardcoded string of its own. The literal
+// itself comes from the generated markerChannelPRIntentToken
+// (markerchannels_gen.go, issue #2974).
+const PRIntentToken = markerChannelPRIntentToken
+
+// CommentToken is the exact SPINDRIFT_COMMENT marker literal (issue #1940):
+// the mid-run comment-relay channel LastCommentLineInLog below scans for.
+// Newly exported (issue #2974) so a marker-contract parity guard can
+// reference this generated-backed const instead of a hand-typed literal of
+// its own; the literal itself comes from the generated
+// markerChannelCommentToken (markerchannels_gen.go).
+const CommentToken = markerChannelCommentToken
+
+// IssueIntentToken is the exact SPINDRIFT_ISSUE_INTENT marker literal (issue
+// #2018): the file-an-issue relay channel AllIssueIntentLinesInLog below
+// scans for. Newly exported and promoted to package level (issue #2974, it
+// was previously a function-local const) so a marker-contract parity guard
+// can reference this generated-backed const instead of a hand-typed literal
+// of its own; the literal itself comes from the generated
+// markerChannelIssueIntentToken (markerchannels_gen.go).
+const IssueIntentToken = markerChannelIssueIntentToken
+
+// ReviewVerdictToken is the bare SPINDRIFT review-verdict channel token
+// (issue #2974) -- distinct from the two full field-shape values
+// orchestrator's VerdictApprove/VerdictBlock compose from it ("VERDICT:
+// APPROVE" / "VERDICT: BLOCK"). Exported so orchestrator, a different
+// package that cannot see the generated markerChannelReviewVerdictToken
+// const (unexported, package outcome), can still compose its own verdict
+// literals from the one generated-backed source instead of redeclaring the
+// bare token itself.
+const ReviewVerdictToken = markerChannelReviewVerdictToken
 
 // Outcome is the machine-readable result written by a Box as its final line.
 // Grammar: SPINDRIFT_OUTCOME issue=<num> landing=<landing-ref> status=<status> note=<text>
@@ -553,7 +584,7 @@ func lastSelfReportAcrossLogs(logs []PassLog) (SelfReport, bool, error) {
 // return contract can't carry both a successful relay and a warning at
 // once, and the successful relay is what matters.
 func LastCommentLineInLog(path, expectedNonce string) (string, bool, error) {
-	return lastVerifiedSignalInLog(path, "SPINDRIFT_COMMENT", expectedNonce,
+	return lastVerifiedSignalInLog(path, CommentToken, expectedNonce,
 		"comment line found but did not verify: nonce mismatch or malformed payload")
 }
 
@@ -629,7 +660,6 @@ func LastPRIntentInLog(path, expectedNonce string) (string, bool, error) {
 // error, since a caller has no single result to attach a warning to the way
 // the singleton scanners do.
 func AllIssueIntentLinesInLog(path, expectedNonce string) ([]string, error) {
-	const token = "SPINDRIFT_ISSUE_INTENT"
 	var payloads []string
 	// seen dedups by the host-side decoded payload's byte identity — see the
 	// doc comment above for why the subagent Filer echoes each intent line
@@ -638,10 +668,10 @@ func AllIssueIntentLinesInLog(path, expectedNonce string) ([]string, error) {
 	// parsed-but-ignored downstream.
 	seen := make(map[string]bool)
 	err := logscan.ForEachLine(path, logscan.SkipOversized, func(line string) {
-		if !containsToken(line, token) {
+		if !containsToken(line, IssueIntentToken) {
 			return
 		}
-		if body, ok := parseSignalLine(line, token, expectedNonce); ok {
+		if body, ok := parseSignalLine(line, IssueIntentToken, expectedNonce); ok {
 			if seen[body] {
 				return
 			}
