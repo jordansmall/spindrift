@@ -96,7 +96,10 @@ func surfaceAfterDispatch(c config, lw *localloop.Wired, pwd string, w io.Writer
 // its wiring via newReadContext (issue #2941), including the LivenessProbe's
 // conditional runner, rather than going through bootstrap.
 func cmdReconcile() int {
-	rc := newReadContext()
+	// "" (not dispatchKindWork): reconcile never dispatches, so it carries
+	// no dispatch kind at all, matching its config before kind threading
+	// (issue #2944) existed.
+	rc := newReadContext("", false)
 
 	pwd, err := os.Getwd()
 	if err != nil {

@@ -141,10 +141,14 @@ type config struct {
 	// the Go source never needs to enumerate them by hand.
 	boxEnvVars string
 
-	// dispatchKind is "work" (the default, zero value) or "research" (ADR
-	// 0022). Set once by bootstrap via applyDispatchKind, never read from
-	// the environment directly — it is operator intent carried by which
-	// subcommand launched (dispatch vs research), not a config knob.
+	// dispatchKind is "" (no dispatch kind at all -- doctor, reconcile,
+	// preview, none of which ever dispatch), or dispatchKindWork/
+	// dispatchKindResearch (ADR 0022) for bootstrap, which does. Set via
+	// applyDispatchKind -- called by newReadContext (issue #2944) for every
+	// entry point built on the read/gated tiers, and by bootstrap's own
+	// seedConfig load -- never read from the environment directly. It is
+	// operator intent carried by which subcommand launched, not a config
+	// knob.
 	dispatchKind string
 
 	// selfContained is the research kind's no-repo sub-mode (issue #2202,
@@ -616,10 +620,11 @@ func validate(c config) error {
 // fold into cmdDoctor's exit-2 "configuration invalid" classification
 // (issue #2569) even though validate(c) itself still requires it before
 // dispatch can launch a Box. --self-contained is a dispatch-kind check
-// (checks.go), and cmdDoctor's only config source, loadConfig(), never sets
-// c.selfContained — only bootstrap() does, from the dispatch flag — so the
-// check can never fire here; validateConfig omits it rather than carry dead
-// code. It reuses doctorExtraChecks(c) — the same runtime-filtered row set
+// (checks.go), and cmdDoctor's config source, newReadContext("", false)
+// (issue #2944), always passes selfContained=false, so the check can never
+// fire here regardless of what a real dispatch run set; validateConfig
+// omits it rather than carry dead code. It reuses doctorExtraChecks(c) — the
+// same runtime-filtered row set
 // runDoctor already reports informationally — so the two never disagree
 // about which rows count as "configuration".
 //

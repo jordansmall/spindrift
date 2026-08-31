@@ -18,7 +18,10 @@ import (
 // wiring via newReadContext (issue #2941) rather than going through
 // bootstrap.
 func cmdDoctor() int {
-	rc := newReadContext()
+	// "" (not dispatchKindWork): doctor never dispatches, so it carries no
+	// dispatch kind at all, matching its config before kind threading (issue
+	// #2944) existed.
+	rc := newReadContext("", false)
 	return doctorReport(rc.issueTracker, rc.codeForge, rc.config, os.Stdout, os.Stderr, os.Stdin, isStdinTTY())
 }
 
