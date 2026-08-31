@@ -24,7 +24,7 @@ import (
 // label-bypass warnings, blocker annotations, and cascade-eviction notices
 // without launching any Box or prompting; when issueNums is empty it falls
 // back to queue-drain discovery.
-func previewIssues(c config, it forge.IssueTracker, cf forge.CodeForge, w io.Writer, issueNums []string, pwd string, eval freshness.Evaluator) error {
+func previewIssues(c config, it forge.IssueTracker, cf forge.CodeForge, caps forge.Capabilities, w io.Writer, issueNums []string, pwd string, eval freshness.Evaluator) error {
 	res := freshness.Probe(freshness.ProbeSpec{
 		RunnerKind:         c.runnerKind,
 		Pwd:                pwd,
@@ -42,7 +42,7 @@ func previewIssues(c config, it forge.IssueTracker, cf forge.CodeForge, w io.Wri
 	fmt.Fprintf(w, "launcher-currency-attr: %s\n", launcherAttr)
 
 	if len(issueNums) > 0 {
-		return previewSelectiveList(c, it, cf, w, issueNums)
+		return previewSelectiveList(c, it, cf, caps, w, issueNums)
 	}
 
 	issues, origin, err := discoverIssues(c, it)
@@ -69,7 +69,7 @@ func previewIssues(c config, it forge.IssueTracker, cf forge.CodeForge, w io.Wri
 // previewSelectiveList performs a dry-run of the selective-list dispatch path.
 // It prints label-bypass warnings, per-issue blocker annotations, and cascade-
 // eviction notices. No Boxes are started and no Forge mutations occur.
-func previewSelectiveList(c config, it forge.IssueTracker, cf forge.CodeForge, w io.Writer, nums []string) error {
+func previewSelectiveList(c config, it forge.IssueTracker, cf forge.CodeForge, caps forge.Capabilities, w io.Writer, nums []string) error {
 	issues, unlabeled, err := fetchSelectiveIssues(c, it, nums)
 	if err != nil {
 		return err
@@ -88,7 +88,7 @@ func previewSelectiveList(c config, it forge.IssueTracker, cf forge.CodeForge, w
 	edges, sources, failed := readiness.Edges, readiness.Sources, readiness.Failed
 
 	// Eviction pass (dry-run; no side effects).
-	kept, notices := evictUnmetBlockers(it, cf, readiness, issues)
+	kept, notices := evictUnmetBlockers(it, cf, caps, readiness, issues)
 	for _, n := range notices {
 		fmt.Fprintln(w, n)
 	}
@@ -141,5 +141,5 @@ func preview(issueNums []string) error {
 	if err != nil {
 		return err
 	}
-	return previewIssues(gc.config, gc.issueTracker, gc.codeForge, os.Stdout, issueNums, pwd, runner.NixEvaluator{})
+	return previewIssues(gc.config, gc.issueTracker, gc.codeForge, gc.capabilities, os.Stdout, issueNums, pwd, runner.NixEvaluator{})
 }

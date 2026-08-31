@@ -18,13 +18,17 @@ import (
 // not only at callers that already know a ticket just finished. reconcile
 // itself is `local`-tracker-specific (ADR 0029): for any other
 // c.issueTracker it is a clear no-op, not an error that looks like a crash.
-func runReconcile(c config, it forge.IssueTracker, cf forge.CodeForge, lp reconcile.LivenessProbe, pwd string, w io.Writer) error {
+//
+// caps is threaded straight through to reconcile.Run (issue #2946) — every
+// caller here already has one resolved (readContext/launchContext), so
+// runReconcile never resolves its own.
+func runReconcile(c config, it forge.IssueTracker, cf forge.CodeForge, lp reconcile.LivenessProbe, caps forge.Capabilities, pwd string, w io.Writer) error {
 	if c.issueTracker != "local" {
 		fmt.Fprintf(w, "reconcile is a local-tracker concern (ISSUE_TRACKER=%q) — nothing to do.\n", c.issueTracker)
 		return nil
 	}
 	lw := localloop.Wire(localloopConfig(c), it)
-	res, err := reconcile.Run(it, cf, lp, lw.SeedScopeOf)
+	res, err := reconcile.Run(it, cf, lp, caps, lw.SeedScopeOf)
 	if err != nil {
 		if len(res.Closed) > 0 {
 			fmt.Fprintf(w, "reconcile: closed %d issue(s) before error: %s\n", len(res.Closed), strings.Join(res.Closed, ", "))
@@ -52,7 +56,7 @@ func runReconcile(c config, it forge.IssueTracker, cf forge.CodeForge, lp reconc
 	} else {
 		fmt.Fprintf(w, "reconcile: reset %d issue(s): %s\n", len(res.Reset), strings.Join(res.Reset, ", "))
 	}
-	return surfaceAfterDispatch(c, lw, pwd, w, res.Stuck)
+	return surfaceAfterDispatch(c, lw, caps, pwd, w, res.Stuck)
 }
 
 // reconcileAfterDispatch auto-invokes the reconcile sweep at the end of a
@@ -60,12 +64,13 @@ func runReconcile(c config, it forge.IssueTracker, cf forge.CodeForge, lp reconc
 // (dispatch -> immediate-merge -> issue auto-closes) needs no extra command.
 // Unlike runReconcile's explicit refusal message on the standalone
 // `spindrift reconcile` verb, this is a silent no-op for any other tracker —
-// a routine github/jira dispatch run has nothing to report here.
-func reconcileAfterDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, lp reconcile.LivenessProbe, pwd string, w io.Writer) error {
+// a routine github/jira dispatch run has nothing to report here. caps is as
+// in runReconcile.
+func reconcileAfterDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, lp reconcile.LivenessProbe, caps forge.Capabilities, pwd string, w io.Writer) error {
 	if c.issueTracker != "local" {
 		return nil
 	}
-	return runReconcile(c, it, cf, lp, pwd, w)
+	return runReconcile(c, it, cf, lp, caps, pwd, w)
 }
 
 // surfaceAfterDispatch surfaces every completed broad ticket's Integration
@@ -81,12 +86,13 @@ func reconcileAfterDispatch(c config, it forge.IssueTracker, cf forge.CodeForge,
 // (issue #1833): runReconcile's own lw is already in scope on every call
 // path (cmdReconcile and reconcileAfterDispatch alike), so a second,
 // independently-memoizing Wired only risked resolving a stuck issue's parent
-// twice for no benefit.
-func surfaceAfterDispatch(c config, lw *localloop.Wired, pwd string, w io.Writer, stuck map[string]string) error {
+// twice for no benefit. caps is as in runReconcile, threaded straight
+// through to lw.Surface (issue #2946).
+func surfaceAfterDispatch(c config, lw *localloop.Wired, caps forge.Capabilities, pwd string, w io.Writer, stuck map[string]string) error {
 	if c.codeForge != "local" {
 		return nil
 	}
-	return lw.Surface(pwd, w, stuck)
+	return lw.Surface(pwd, w, stuck, caps)
 }
 
 // cmdReconcile is the `reconcile` subcommand: the local-tracker bookkeeping
@@ -108,7 +114,7 @@ func cmdReconcile() int {
 	}
 
 	lp := rc.reconcileLivenessProbe(pwd)
-	if err := runReconcile(rc.config, rc.issueTracker, rc.codeForge, lp, pwd, os.Stdout); err != nil {
+	if err := runReconcile(rc.config, rc.issueTracker, rc.codeForge, lp, rc.capabilities, pwd, os.Stdout); err != nil {
 		fmt.Fprintf(os.Stderr, "%s\n", err)
 		return 1
 	}
