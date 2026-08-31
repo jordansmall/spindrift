@@ -23,6 +23,7 @@ let
     "skillsDirRelative"
     "outcomeExtractFnBody"
     "outcomeExtractNearMissFnBody"
+    "resultTextExtractFnBody"
     "sessionFlagsFnBody"
     "agentsJsonTemplate"
     "agentFilesTemplate"
@@ -132,8 +133,20 @@ let
     "_driver_extract_outcome() {\n"
     + driverEntry.outcomeExtractFnBody
     + "}\n"
+    # issue #2978: entrypoint.sh's own call site was removed (the required-
+    # marker gate's verb now scans $_last_driver_text_log itself via
+    # outcome.LastNearMissOutcomeLine instead of bash pre-extracting a near-
+    # miss line), so shellcheck sees this function as unreferenced within
+    # the composed entrypoint script it renders into. It stays defined --
+    # a prior round's decision record rejected deleting/renaming it as out
+    # of scope -- because tests/driver-registry-outcome-extraction.bats
+    # still invokes it directly to pin the extraction grammar itself.
+    + "# shellcheck disable=SC2329\n"
     + "_driver_extract_near_miss_outcome() {\n"
     + driverEntry.outcomeExtractNearMissFnBody
+    + "}\n"
+    + "_driver_extract_result_text() {\n"
+    + driverEntry.resultTextExtractFnBody
     + "}\n"
     + "_driver_session_flags() {\n"
     + driverEntry.sessionFlagsFnBody

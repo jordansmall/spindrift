@@ -123,6 +123,24 @@
       | tail -1 || true
   '';
 
+  # Shell function body extracting claude's stream-json result text, unwrapped
+  # and markdown-stripped, with NO grep/landing/status classification and NO
+  # `tail -1` filtering on top -- the shared prefix outcomeExtractFnBody and
+  # outcomeExtractNearMissFnBody above both further classify. Factored out
+  # here so the driver-exec marker-gate verb (issue #2978) can scan the
+  # Driver's raw unwrapped text itself via outcome.LastFieldedOutcomeLine/
+  # outcome.LastNearMissOutcomeLine (cmd/launcher/internal/outcome/outcome.go)
+  # instead of trusting a bash-side classification for the SPINDRIFT_OUTCOME
+  # nudge decision; called as
+  # `_driver_extract_result_text "$stream_log"`.
+  resultTextExtractFnBody = ''
+    # The backtick below is a literal char in a single-quoted sed script, not
+    # an unexpanded command substitution.
+    # shellcheck disable=SC2016
+    jq -r 'select(.type == "result") | .result // empty' "$1" 2>/dev/null \
+      | sed -E 's/^[[:space:]]*(\*\*|`)?//; s/(\*\*|`)?[[:space:]]*$//' || true
+  '';
+
   # Shell function body computing the claude-specific session pin/resume
   # flags (issue #427/ADR 0009): a deterministic per-issue session id (so no
   # state beyond ISSUE_NUMBER/REPO_SLUG is needed to recompute it) plus the

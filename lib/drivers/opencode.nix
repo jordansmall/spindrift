@@ -96,6 +96,24 @@
       | tail -1 || true
   '';
 
+  # Shell function body extracting opencode's NDJSON text-event text,
+  # unwrapped and markdown-stripped, with NO grep/landing/status
+  # classification and NO `tail -1` filtering on top -- the shared prefix
+  # outcomeExtractFnBody and outcomeExtractNearMissFnBody above both further
+  # classify. Factored out here so the driver-exec marker-gate verb (issue
+  # #2978) can scan the Driver's raw unwrapped text itself via
+  # outcome.LastFieldedOutcomeLine/outcome.LastNearMissOutcomeLine
+  # (cmd/launcher/internal/outcome/outcome.go) instead of trusting a
+  # bash-side classification for the SPINDRIFT_OUTCOME nudge decision;
+  # called as `_driver_extract_result_text "$stream_log"`.
+  resultTextExtractFnBody = ''
+    # The backtick below is a literal char in a single-quoted sed script, not
+    # an unexpanded command substitution.
+    # shellcheck disable=SC2016
+    jq -r 'select(.type == "text") | .part.text // empty' "$1" 2>/dev/null \
+      | sed -E 's/^[[:space:]]*(\*\*|`)?//; s/(\*\*|`)?[[:space:]]*$//' || true
+  '';
+
   # Shell function body computing opencode-specific session pin/resume flags.
   # opencode wires no session resume (contrast claude.nix's deterministic
   # --session-id/--resume pinning), so this is a defined no-op body -- the
