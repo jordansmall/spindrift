@@ -16,12 +16,12 @@ import (
 // pre-#1547 hand-sequenced NewPlan-then-Run pair produced.
 func TestDispatch_DependencyEdge_DispatchesOnlyUnblocked(t *testing.T) {
 	c := baseConfig()
-	c.Label = "agent-trigger"
+	label := "agent-trigger"
 	c.MaxParallel = 2
 
-	fc := forge.NewFake(dispatchLabels(c))
-	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.Label}})
-	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{c.Label}})
+	fc := forge.NewFake(dispatchLabels(c, label))
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
+	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{label}})
 	fc.SetIssue(forge.Issue{Number: "3", State: "OPEN"}) // #2's blocker, not yet complete
 
 	fr := runner.NewFake()
@@ -29,12 +29,13 @@ func TestDispatch_DependencyEdge_DispatchesOnlyUnblocked(t *testing.T) {
 	dir := tempLogDir(t)
 	f := testFactory(t, dir, fr)
 	s := newSettle(fc, fc)
+	claimer := NewLabelClaimer(fc, label, testInProgressLabel)
 
 	in := Input{
 		Origin: OriginDiscovered,
 		Batch:  Batch{Issues: []Issue{{Number: "1", Title: "unblocked"}, {Number: "2", Title: "dependent"}}, Edges: map[string][]string{"2": {"3"}}},
 	}
-	if err := Dispatch(c, fc, fc, dir, f, s, in); err != nil {
+	if err := Dispatch(c, fc, fc, dir, f, s, in, claimer); err != nil {
 		t.Fatalf("Dispatch: %v", err)
 	}
 
@@ -46,10 +47,10 @@ func TestDispatch_DependencyEdge_DispatchesOnlyUnblocked(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Issue(2): %v", err)
 	}
-	if !containsLabel(iss2.Labels, c.Label) {
+	if !containsLabel(iss2.Labels, label) {
 		t.Errorf("issue 2 must stay on the dispatch label for the next invocation; labels=%v", iss2.Labels)
 	}
-	if containsLabel(iss2.Labels, c.InProgressLabel) {
+	if containsLabel(iss2.Labels, testInProgressLabel) {
 		t.Errorf("issue 2 must not be claimed while its blocker is unmet; labels=%v", iss2.Labels)
 	}
 }
@@ -59,23 +60,24 @@ func TestDispatch_DependencyEdge_DispatchesOnlyUnblocked(t *testing.T) {
 // invalid batch — the validation half of the plan-then-run pair it folds.
 func TestDispatch_Cycle_ReturnsErrorWithoutDispatching(t *testing.T) {
 	c := baseConfig()
-	c.Label = "agent-trigger"
+	label := "agent-trigger"
 
-	fc := forge.NewFake(dispatchLabels(c))
-	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.Label}})
-	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{c.Label}})
+	fc := forge.NewFake(dispatchLabels(c, label))
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
+	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{label}})
 
 	fr := runner.NewFake()
 
 	dir := tempLogDir(t)
 	f := testFactory(t, dir, fr)
 	s := newSettle(fc, fc)
+	claimer := NewLabelClaimer(fc, label, testInProgressLabel)
 
 	in := Input{
 		Origin: OriginDiscovered,
 		Batch:  Batch{Issues: []Issue{{Number: "1"}, {Number: "2"}}, Edges: map[string][]string{"1": {"2"}, "2": {"1"}}},
 	}
-	err := Dispatch(c, fc, fc, dir, f, s, in)
+	err := Dispatch(c, fc, fc, dir, f, s, in, claimer)
 	if err == nil || !strings.Contains(err.Error(), "cycle") {
 		t.Fatalf("Dispatch: got %v, want a dependency-cycle error", err)
 	}

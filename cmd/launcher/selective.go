@@ -55,7 +55,8 @@ func selectiveListDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, 
 	in := waves.Input{Origin: waves.OriginSelective, Batch: waves.Batch{Issues: toWaveIssues(issues), Edges: readiness.Edges, Sources: readiness.Sources, Failed: readiness.Failed}}
 	cfg := selectiveWavesConfig(c)
 	cfg.SeedScopeOf = localloop.SeedScopeResolver(it, cf)
-	return waves.Dispatch(cfg, it, cf, pwd, f, s, in)
+	claimer := waves.NewLabelClaimer(it, c.label, c.inProgressLabel)
+	return waves.Dispatch(cfg, it, cf, pwd, f, s, in, claimer)
 }
 
 // fetchSelectiveIssues fetches each issue by number and returns the full list

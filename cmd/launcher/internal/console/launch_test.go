@@ -80,11 +80,15 @@ func TestRunContinuous_DrainsScriptedQueue_LaunchesOneDispatchEndToEnd(t *testin
 }
 
 // TestRunContinuous_ConsoleConfig_SkipsRedundantClaim pins the coupling
-// launcher.go's drain loop relies on (#706): passing waves.Config with
-// Label and InProgressLabel both left zero-value (equal) makes claimIssue
-// (engine.go) skip a second Dispatchable->InProgress transition, because
-// Queue.Discover (queue.go) already performed that transition when it
-// claimed the pick. Only one TransitionState call should ever happen.
+// launcher.go's drain loop relies on (#706): Console's own Queue.Discover
+// (queue.go) already performs the Dispatchable->InProgress transition when
+// it claims the pick, and RunContinuous's own claim -- routed through
+// waves.QueueFromDiscoverer's no-op Claim (issue #2938) -- never issues a
+// second one. Only one TransitionState call should ever happen. (The
+// zero-label short-circuit this test used to also pin, and its
+// divergent-labels negative case, were deleted wholesale with claimIssue
+// itself in #2938 -- the no-op Claim above makes redundancy impossible
+// regardless of Label/InProgressLabel now.)
 func TestRunContinuous_ConsoleConfig_SkipsRedundantClaim(t *testing.T) {
 	f, dir, factory, qs, discover, fresh := setupForgeQueueFactory(t)
 
@@ -98,25 +102,6 @@ func TestRunContinuous_ConsoleConfig_SkipsRedundantClaim(t *testing.T) {
 
 	if len(f.TransitionStateCalls) != 1 {
 		t.Errorf("TransitionStateCalls = %+v, want exactly one (redundant claim must be skipped)", f.TransitionStateCalls)
-	}
-}
-
-// TestRunContinuous_DivergentLabels_DoubleClaims is the negative case for
-// TestRunContinuous_ConsoleConfig_SkipsRedundantClaim (#706): if Label and
-// InProgressLabel are ever passed as different values, claimIssue no longer
-// recognizes Queue.Discover's upstream claim as already done and issues a
-// second Dispatchable->InProgress transition. This is why the Console's
-// drain-path Config must keep the two equal (both left zero-value).
-func TestRunContinuous_DivergentLabels_DoubleClaims(t *testing.T) {
-	f, dir, factory, qs, discover, fresh := setupForgeQueueFactory(t)
-
-	err := waves.RunContinuous(waves.Config{MaxParallel: 1, Label: "ready-for-agent", InProgressLabel: "agent-in-progress"}, nil, f, f, dir, factory, qs, waves.QueueFromDiscoverer(discover), fresh)
-	if err != nil {
-		t.Fatalf("RunContinuous: %v", err)
-	}
-
-	if len(f.TransitionStateCalls) != 2 {
-		t.Errorf("TransitionStateCalls = %+v, want exactly two (Queue.Discover's claim plus claimIssue's redundant one)", f.TransitionStateCalls)
 	}
 }
 
@@ -264,10 +249,8 @@ func TestQueue_Discover_HeldPickLaunchesOnceBlockerClears(t *testing.T) {
 }
 
 // setupForgeQueueFactory wires the fake forge, a single-pick queue, and a
-// dispatch factory shared by TestRunContinuous_ConsoleConfig_SkipsRedundantClaim
-// and TestRunContinuous_DivergentLabels_DoubleClaims (#706, #980): both drive
-// waves.RunContinuous over the same queued #42 pick and differ only in the
-// waves.Config they pass and the assertion on f.TransitionStateCalls.
+// dispatch factory for TestRunContinuous_ConsoleConfig_SkipsRedundantClaim
+// (#706, #980), which drives waves.RunContinuous over the queued #42 pick.
 func setupForgeQueueFactory(t *testing.T) (f *forge.Fake, dir string, factory *dispatch.Factory, qs queueSettler, discover func() (waves.Batch, error), fresh func() (bool, bool, string)) {
 	t.Helper()
 

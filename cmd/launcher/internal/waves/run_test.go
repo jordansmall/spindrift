@@ -16,21 +16,21 @@ import (
 // deleted multi-wave loop and has no reason to survive it.
 func TestRun_Selective_NoEdges_TouchOverlapDefersThenExits(t *testing.T) {
 	c := baseConfig()
-	c.Label = "agent-trigger"
+	label := "agent-trigger"
 	c.MaxParallel = 1
 	c.OverlapGate = "defer"
 
-	fc := forge.NewFake(dispatchLabels(c))
+	fc := forge.NewFake(dispatchLabels(c, label))
 	fc.SetIssue(forge.Issue{
 		Number: "10",
 		Body:   "## Touches\n- lib/env-schema.nix",
-		Labels: []string{c.Label},
+		Labels: []string{label},
 	})
 	fc.SetIssue(forge.Issue{
 		Number: "20",
 		Body:   "## Touches\n- lib/env-schema.nix",
 		State:  "OPEN",
-		Labels: []string{c.InProgressLabel},
+		Labels: []string{testInProgressLabel},
 	})
 
 	fr := runner.NewFake()
@@ -38,11 +38,12 @@ func TestRun_Selective_NoEdges_TouchOverlapDefersThenExits(t *testing.T) {
 	dir := tempLogDir(t)
 	f := testFactory(t, dir, fr)
 	s := newSettle(fc, fc)
+	claimer := NewLabelClaimer(fc, label, testInProgressLabel)
 	plan, err := NewPlan(c, Input{Origin: OriginSelective, Batch: Batch{Issues: []Issue{{Number: "10", Title: "candidate"}}}})
 	if err != nil {
 		t.Fatalf("NewPlan: %v", err)
 	}
-	if err := run(c, fc, fc, dir, f, s, plan); !errors.Is(err, ErrOpenNoneDispatchable) {
+	if err := run(c, fc, fc, dir, f, s, plan, claimer); !errors.Is(err, ErrOpenNoneDispatchable) {
 		t.Fatalf("Run: got %v, want ErrOpenNoneDispatchable", err)
 	}
 	if len(fr.RunCalls) != 0 {
@@ -59,12 +60,12 @@ func TestRun_Selective_NoEdges_TouchOverlapDefersThenExits(t *testing.T) {
 // image inside the same process.
 func TestRun_Discovered_MaxJobsZero_DependencyEdge_DispatchesOnlyUnblockedWave(t *testing.T) {
 	c := baseConfig()
-	c.Label = "agent-trigger"
+	label := "agent-trigger"
 	c.MaxParallel = 2
 
-	fc := forge.NewFake(dispatchLabels(c))
-	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.Label}})
-	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{c.Label}})
+	fc := forge.NewFake(dispatchLabels(c, label))
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
+	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{label}})
 	fc.SetIssue(forge.Issue{Number: "3", State: "OPEN"}) // #2's blocker, not yet complete
 
 	fr := runner.NewFake()
@@ -74,6 +75,7 @@ func TestRun_Discovered_MaxJobsZero_DependencyEdge_DispatchesOnlyUnblockedWave(t
 	dir := tempLogDir(t)
 	f := testFactory(t, dir, fr)
 	s := newSettle(fc, fc)
+	claimer := NewLabelClaimer(fc, label, testInProgressLabel)
 	plan, err := NewPlan(c, Input{
 		Origin: OriginDiscovered,
 		Batch:  Batch{Issues: []Issue{{Number: "1", Title: "unblocked"}, {Number: "2", Title: "dependent"}}, Edges: edges},
@@ -84,7 +86,7 @@ func TestRun_Discovered_MaxJobsZero_DependencyEdge_DispatchesOnlyUnblockedWave(t
 	if plan.Mode != ModeDrain {
 		t.Fatalf("Mode = %v, want ModeDrain", plan.Mode)
 	}
-	if err := run(c, fc, fc, dir, f, s, plan); err != nil {
+	if err := run(c, fc, fc, dir, f, s, plan, claimer); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 
@@ -96,10 +98,10 @@ func TestRun_Discovered_MaxJobsZero_DependencyEdge_DispatchesOnlyUnblockedWave(t
 	if err != nil {
 		t.Fatalf("Issue(2): %v", err)
 	}
-	if !containsLabel(iss2.Labels, c.Label) {
+	if !containsLabel(iss2.Labels, label) {
 		t.Errorf("issue 2 must stay on the dispatch label for the next invocation; labels=%v", iss2.Labels)
 	}
-	if containsLabel(iss2.Labels, c.InProgressLabel) {
+	if containsLabel(iss2.Labels, testInProgressLabel) {
 		t.Errorf("issue 2 must not be claimed while its blocker is unmet; labels=%v", iss2.Labels)
 	}
 }
@@ -112,21 +114,21 @@ func TestRun_Discovered_MaxJobsZero_DependencyEdge_DispatchesOnlyUnblockedWave(t
 // next invocation instead).
 func TestRun_Discovered_NoEdges_TouchOverlapDefersThenExits(t *testing.T) {
 	c := baseConfig()
-	c.Label = "agent-trigger"
+	label := "agent-trigger"
 	c.MaxParallel = 1
 	c.OverlapGate = "defer"
 
-	fc := forge.NewFake(dispatchLabels(c))
+	fc := forge.NewFake(dispatchLabels(c, label))
 	fc.SetIssue(forge.Issue{
 		Number: "10",
 		Body:   "## Touches\n- lib/env-schema.nix",
-		Labels: []string{c.Label},
+		Labels: []string{label},
 	})
 	fc.SetIssue(forge.Issue{
 		Number: "20",
 		Body:   "## Touches\n- lib/env-schema.nix",
 		State:  "OPEN",
-		Labels: []string{c.InProgressLabel},
+		Labels: []string{testInProgressLabel},
 	})
 
 	fr := runner.NewFake()
@@ -134,11 +136,12 @@ func TestRun_Discovered_NoEdges_TouchOverlapDefersThenExits(t *testing.T) {
 	dir := tempLogDir(t)
 	f := testFactory(t, dir, fr)
 	s := newSettle(fc, fc)
+	claimer := NewLabelClaimer(fc, label, testInProgressLabel)
 	plan, err := NewPlan(c, Input{Origin: OriginDiscovered, Batch: Batch{Issues: []Issue{{Number: "10", Title: "candidate"}}}})
 	if err != nil {
 		t.Fatalf("NewPlan: %v", err)
 	}
-	err = run(c, fc, fc, dir, f, s, plan)
+	err = run(c, fc, fc, dir, f, s, plan, claimer)
 	if !errors.Is(err, ErrOpenNoneDispatchable) {
 		t.Fatalf("Run: got %v, want ErrOpenNoneDispatchable", err)
 	}
@@ -150,7 +153,7 @@ func TestRun_Discovered_NoEdges_TouchOverlapDefersThenExits(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Issue(10): %v", err)
 	}
-	if !containsLabel(iss10.Labels, c.Label) {
+	if !containsLabel(iss10.Labels, label) {
 		t.Errorf("issue 10 must stay on the dispatch label for the next invocation; labels=%v", iss10.Labels)
 	}
 }
@@ -162,21 +165,21 @@ func TestRun_Discovered_NoEdges_TouchOverlapDefersThenExits(t *testing.T) {
 // dispatch) performs across process invocations.
 func TestRun_Discovered_NoEdges_TouchOverlapDispatchesOnNextInvocation(t *testing.T) {
 	c := baseConfig()
-	c.Label = "agent-trigger"
+	label := "agent-trigger"
 	c.MaxParallel = 1
 	c.OverlapGate = "defer"
 
-	fc := forge.NewFake(dispatchLabels(c))
+	fc := forge.NewFake(dispatchLabels(c, label))
 	fc.SetIssue(forge.Issue{
 		Number: "10",
 		Body:   "## Touches\n- lib/env-schema.nix",
-		Labels: []string{c.Label},
+		Labels: []string{label},
 	})
 	fc.SetIssue(forge.Issue{
 		Number: "20",
 		Body:   "## Touches\n- lib/env-schema.nix",
 		State:  "OPEN",
-		Labels: []string{c.InProgressLabel},
+		Labels: []string{testInProgressLabel},
 	})
 
 	fr := runner.NewFake()
@@ -184,13 +187,14 @@ func TestRun_Discovered_NoEdges_TouchOverlapDispatchesOnNextInvocation(t *testin
 	dir := tempLogDir(t)
 	f := testFactory(t, dir, fr)
 	s := newSettle(fc, fc)
+	claimer := NewLabelClaimer(fc, label, testInProgressLabel)
 	plan, err := NewPlan(c, Input{Origin: OriginDiscovered, Batch: Batch{Issues: []Issue{{Number: "10", Title: "candidate"}}}})
 	if err != nil {
 		t.Fatalf("NewPlan: %v", err)
 	}
 
 	// First invocation: the collider is still in-progress, so #10 defers.
-	if err := run(c, fc, fc, dir, f, s, plan); !errors.Is(err, ErrOpenNoneDispatchable) {
+	if err := run(c, fc, fc, dir, f, s, plan, claimer); !errors.Is(err, ErrOpenNoneDispatchable) {
 		t.Fatalf("first Run: got %v, want ErrOpenNoneDispatchable", err)
 	}
 	if len(fr.RunCalls) != 0 {
@@ -199,7 +203,7 @@ func TestRun_Discovered_NoEdges_TouchOverlapDispatchesOnNextInvocation(t *testin
 
 	// The collider completes; a fresh invocation now dispatches #10.
 	fc.TransitionState("20", forge.InProgress, forge.Complete)
-	if err := run(c, fc, fc, dir, f, s, plan); err != nil {
+	if err := run(c, fc, fc, dir, f, s, plan, claimer); err != nil {
 		t.Fatalf("second Run: %v", err)
 	}
 	if len(fr.RunCalls) != 1 {

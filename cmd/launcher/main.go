@@ -1127,15 +1127,13 @@ func wavesConfig(c config) waves.Config {
 		verb = dispatchKindResearch
 	}
 	return waves.Config{
-		MaxParallel:     c.maxParallel,
-		MaxJobs:         c.maxJobs,
-		OverlapGate:     c.overlapGate,
-		Label:           c.label,
-		InProgressLabel: c.inProgressLabel,
-		CompleteLabel:   c.completeLabel,
-		FailedLabel:     c.failedLabel,
-		IgnoreBlockers:  c.dispatchKind == dispatchKindResearch,
-		Verb:            verb,
+		MaxParallel:    c.maxParallel,
+		MaxJobs:        c.maxJobs,
+		OverlapGate:    c.overlapGate,
+		CompleteLabel:  c.completeLabel,
+		FailedLabel:    c.failedLabel,
+		IgnoreBlockers: c.dispatchKind == dispatchKindResearch,
+		Verb:           verb,
 		// TransientRetryMax/TransientBackoffSecs are the same
 		// TRANSIENT_RETRY_MAX/TRANSIENT_BACKOFF_SECS knob dispatch's
 		// exit-retry path and settleConfig already thread (issue #2866),
@@ -1669,7 +1667,8 @@ func run(lc *launchContext) error {
 	in := waves.Input{Origin: origin, Batch: waves.Batch{Issues: toWaveIssues(issues), Edges: readiness.Edges, Sources: readiness.Sources, Failed: readiness.Failed}}
 	cfg := wavesConfig(c)
 	cfg.SeedScopeOf = localloop.SeedScopeResolver(it, cf)
-	if err := waves.Dispatch(cfg, it, cf, pwd, f, s, in); err != nil {
+	claimer := waves.NewLabelClaimer(it, c.label, c.inProgressLabel)
+	if err := waves.Dispatch(cfg, it, cf, pwd, f, s, in, claimer); err != nil {
 		return err
 	}
 
@@ -1920,7 +1919,7 @@ func runContinuousDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, 
 	cfg := wavesConfig(c)
 	cfg.SeedScopeOf = localloop.SeedScopeResolver(it, cf)
 	cfg.DiscoverReporting = discoverReporting
-	queue := waves.QueueFromDiscoverer(discover)
+	queue := waves.NewHeadlessQueue(discover, waves.NewLabelClaimer(it, c.label, c.inProgressLabel))
 	if err := waves.RunContinuous(cfg, nil, it, cf, pwd, f, s, queue, fresh); err != nil {
 		// continuousDispatchErr deliberately keeps ErrImageStale ahead of
 		// firstQueryErr when both are non-nil (issue #2780's Option 1:

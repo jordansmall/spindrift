@@ -16,9 +16,10 @@ func TestDrainMaxJobs_PreResolved_DispatchesDespiteUnmetBlocker(t *testing.T) {
 	c := baseConfig()
 	c.MaxParallel = 1
 	c.PreResolved = true
+	label := "" // empty: this test never sets a Dispatchable label
 
 	fc := forge.NewFake()
-	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.Label}})
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
 	fc.SetIssue(forge.Issue{Number: "3", State: "OPEN"})
 
 	fr := runner.NewFake()
@@ -29,9 +30,10 @@ func TestDrainMaxJobs_PreResolved_DispatchesDespiteUnmetBlocker(t *testing.T) {
 	dir := tempLogDir(t)
 	f := testFactory(t, dir, fr)
 	s := newSettle(fc, fc)
+	claimer := NewLabelClaimer(fc, label, testInProgressLabel)
 	if err := drainMaxJobs(c, fc, fc, dir, f, s, []Issue{
 		{Number: "1", Title: "pre-resolved issue"},
-	}, edges, nil, nil, OriginDiscovered); err != nil {
+	}, edges, nil, nil, OriginDiscovered, claimer); err != nil {
 		t.Fatalf("drainMaxJobs: %v", err)
 	}
 
@@ -52,7 +54,7 @@ func TestNextReady_PreResolved_ReturnsIssueDespiteUnmetBlocker(t *testing.T) {
 	c.PreResolved = true
 
 	fc := forge.NewFake()
-	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.Label}})
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{""}}) // empty: this test never sets a Dispatchable label
 	fc.SetIssue(forge.Issue{Number: "3", State: "OPEN"})
 
 	edges := map[string][]string{"1": {"3"}}
@@ -79,9 +81,10 @@ func TestDrainMaxJobs_PreResolved_DispatchesDespiteDepsOfFailed(t *testing.T) {
 	c := baseConfig()
 	c.MaxParallel = 1
 	c.PreResolved = true
+	label := "" // empty: this test never sets a Dispatchable label
 
 	fc := forge.NewFake()
-	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.Label}})
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
 
 	fr := runner.NewFake()
 	depsOfFailed := map[string]bool{"1": true}
@@ -89,9 +92,10 @@ func TestDrainMaxJobs_PreResolved_DispatchesDespiteDepsOfFailed(t *testing.T) {
 	dir := tempLogDir(t)
 	f := testFactory(t, dir, fr)
 	s := newSettle(fc, fc)
+	claimer := NewLabelClaimer(fc, label, testInProgressLabel)
 	if err := drainMaxJobs(c, fc, fc, dir, f, s, []Issue{
 		{Number: "1", Title: "pre-resolved issue"},
-	}, nil, nil, depsOfFailed, OriginDiscovered); err != nil {
+	}, nil, nil, depsOfFailed, OriginDiscovered, claimer); err != nil {
 		t.Fatalf("drainMaxJobs: %v", err)
 	}
 
@@ -108,7 +112,7 @@ func TestNextReady_PreResolved_ReturnsIssueDespiteDepsOfFailed(t *testing.T) {
 	c.PreResolved = true
 
 	fc := forge.NewFake()
-	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.Label}})
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{""}}) // empty: this test never sets a Dispatchable label
 
 	depsOfFailed := map[string]bool{"1": true}
 	checkOverlap := func(string) (string, bool) { return "", false }

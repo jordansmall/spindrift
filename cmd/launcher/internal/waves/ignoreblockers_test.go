@@ -17,14 +17,14 @@ import (
 // an issue even though its declared blocker is unmet.
 func TestDrainMaxJobs_IgnoreBlockers_DispatchesDespiteUnmetBlocker(t *testing.T) {
 	c := baseConfig()
-	c.Label = "agent-research"
+	label := "agent-research"
 	c.MaxParallel = 1
 	c.IgnoreBlockers = true
 
 	fc := forge.NewFake()
 	// Issue #1 is blocked by #3 (open, no complete label) — would normally
 	// hold #1 for a later invocation.
-	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.Label}})
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
 	fc.SetIssue(forge.Issue{Number: "3", State: "OPEN"})
 
 	fr := runner.NewFake()
@@ -33,9 +33,10 @@ func TestDrainMaxJobs_IgnoreBlockers_DispatchesDespiteUnmetBlocker(t *testing.T)
 	dir := tempLogDir(t)
 	f := testFactory(t, dir, fr)
 	s := newSettle(fc, fc)
+	claimer := NewLabelClaimer(fc, label, testInProgressLabel)
 	if err := drainMaxJobs(c, fc, fc, dir, f, s, []Issue{
 		{Number: "1", Title: "blocked issue"},
-	}, edges, nil, nil, OriginDiscovered); err != nil {
+	}, edges, nil, nil, OriginDiscovered, claimer); err != nil {
 		t.Fatalf("drainMaxJobs: %v", err)
 	}
 
@@ -52,12 +53,12 @@ func TestDrainMaxJobs_IgnoreBlockers_DispatchesDespiteUnmetBlocker(t *testing.T)
 // sibling reaching FailedLabel never fails a research dependent.
 func TestDrainMaxJobs_IgnoreBlockers_FailedBlockerDoesNotCascade(t *testing.T) {
 	c := baseConfig()
-	c.Label = "agent-research"
+	label := "agent-research"
 	c.MaxParallel = 1
 	c.IgnoreBlockers = true
 
 	fc := forge.NewFake()
-	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.Label}})
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
 	fc.SetIssue(forge.Issue{Number: "3", Labels: []string{c.FailedLabel}})
 
 	fr := runner.NewFake()
@@ -66,9 +67,10 @@ func TestDrainMaxJobs_IgnoreBlockers_FailedBlockerDoesNotCascade(t *testing.T) {
 	dir := tempLogDir(t)
 	f := testFactory(t, dir, fr)
 	s := newSettle(fc, fc)
+	claimer := NewLabelClaimer(fc, label, testInProgressLabel)
 	if err := drainMaxJobs(c, fc, fc, dir, f, s, []Issue{
 		{Number: "1", Title: "dependent issue"},
-	}, edges, nil, nil, OriginDiscovered); err != nil {
+	}, edges, nil, nil, OriginDiscovered, claimer); err != nil {
 		t.Fatalf("drainMaxJobs: %v", err)
 	}
 
@@ -83,25 +85,26 @@ func TestDrainMaxJobs_IgnoreBlockers_FailedBlockerDoesNotCascade(t *testing.T) {
 // actually carries the remainder into the next invocation (ADR 0022).
 func TestDrainMaxJobs_Selective_RerunHint_UsesConfigVerb(t *testing.T) {
 	c := baseConfig()
-	c.Label = "agent-research"
+	label := "agent-research"
 	c.MaxParallel = 1
 	c.MaxJobs = 1
 	c.Verb = "research"
 
 	fc := forge.NewFake()
-	fc.SetIssue(forge.Issue{Number: "10", Labels: []string{c.Label}})
-	fc.SetIssue(forge.Issue{Number: "15", Labels: []string{c.Label}})
+	fc.SetIssue(forge.Issue{Number: "10", Labels: []string{label}})
+	fc.SetIssue(forge.Issue{Number: "15", Labels: []string{label}})
 
 	fr := runner.NewFake()
 	dir := tempLogDir(t)
 	f := testFactory(t, dir, fr)
 	s := newSettle(fc, fc)
+	claimer := NewLabelClaimer(fc, label, testInProgressLabel)
 
 	out := testutil.CaptureStdout(t, func() {
 		if err := drainMaxJobs(c, fc, fc, dir, f, s, []Issue{
 			{Number: "10", Title: "first"},
 			{Number: "15", Title: "second"},
-		}, nil, nil, nil, OriginSelective); err != nil {
+		}, nil, nil, nil, OriginSelective, claimer); err != nil {
 			t.Fatalf("drainMaxJobs: %v", err)
 		}
 	})
@@ -119,12 +122,12 @@ func TestDrainMaxJobs_Selective_RerunHint_UsesConfigVerb(t *testing.T) {
 // when IgnoreBlockers is set — research is dispatched instead of held.
 func TestDrainMaxJobs_IgnoreBlockers_ClaimedIssueWritesNoBlockedMarker(t *testing.T) {
 	c := baseConfig()
-	c.Label = "agent-research"
+	label := "agent-research"
 	c.MaxParallel = 1
 	c.IgnoreBlockers = true
 
 	fc := forge.NewFake()
-	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.InProgressLabel}})
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{testInProgressLabel}})
 	fc.SetIssue(forge.Issue{Number: "3", State: "OPEN"})
 
 	fr := runner.NewFake()
@@ -133,9 +136,10 @@ func TestDrainMaxJobs_IgnoreBlockers_ClaimedIssueWritesNoBlockedMarker(t *testin
 	dir := tempLogDir(t)
 	f := testFactory(t, dir, fr)
 	s := newSettle(fc, fc)
+	claimer := NewLabelClaimer(fc, label, testInProgressLabel)
 	if err := drainMaxJobs(c, fc, fc, dir, f, s, []Issue{
 		{Number: "1", Title: "claimed issue"},
-	}, edges, nil, nil, OriginClaimed); err != nil {
+	}, edges, nil, nil, OriginClaimed, claimer); err != nil {
 		t.Fatalf("drainMaxJobs: %v", err)
 	}
 

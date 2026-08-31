@@ -25,21 +25,27 @@ var testDispatchLabels = forge.DispatchLabels{
 	Failed:       "agent-failed",
 }
 
+// testInProgressLabel is the in-progress label every waves test used to
+// read off Config.InProgressLabel before that field moved onto
+// LabelClaimer's constructor (issue #2938) — kept as one constant since no
+// test ever varied it from baseConfig()'s "agent-in-progress" default.
+const testInProgressLabel = "agent-in-progress"
+
 // baseConfig returns a Config suitable for wave/drain/touches tests.
 func baseConfig() Config {
 	return Config{
-		InProgressLabel: "agent-in-progress",
-		FailedLabel:     "agent-failed",
-		CompleteLabel:   "agent-complete",
+		FailedLabel:   "agent-failed",
+		CompleteLabel: "agent-complete",
 	}
 }
 
-// dispatchLabels builds the DispatchLabels mapping a fake forge adapter needs
-// from a test Config.
-func dispatchLabels(cfg Config) forge.DispatchLabels {
+// dispatchLabels builds the DispatchLabels mapping a fake forge adapter
+// needs from a test Config plus the caller's own dispatchable label (a
+// local, no longer Config.Label — issue #2938).
+func dispatchLabels(cfg Config, label string) forge.DispatchLabels {
 	return forge.DispatchLabels{
-		Dispatchable: cfg.Label,
-		InProgress:   cfg.InProgressLabel,
+		Dispatchable: label,
+		InProgress:   testInProgressLabel,
 		Complete:     cfg.CompleteLabel,
 		Failed:       cfg.FailedLabel,
 	}

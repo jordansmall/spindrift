@@ -16,14 +16,14 @@ import (
 // the oldest blocked issue is skipped and the next unblocked issue is dispatched.
 func TestDrainMaxJobs_SkipsBlockedDispatchesNext(t *testing.T) {
 	c := baseConfig()
-	c.Label = "agent-trigger"
+	label := "agent-trigger"
 	c.MaxParallel = 2
 	c.MaxJobs = 1
 
 	fc := forge.NewFake()
 	// Issue #1 is blocked by #3 (open, no complete label).
-	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.Label}})
-	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{c.Label}})
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
+	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{label}})
 	fc.SetIssue(forge.Issue{Number: "3", State: "OPEN"}) // blocker, not complete
 
 	fr := runner.NewFake()
@@ -33,10 +33,11 @@ func TestDrainMaxJobs_SkipsBlockedDispatchesNext(t *testing.T) {
 	dir := tempLogDir(t)
 	f := testFactory(t, dir, fr)
 	s := newSettle(fc, fc)
+	claimer := NewLabelClaimer(fc, label, testInProgressLabel)
 	if err := drainMaxJobs(c, fc, fc, dir, f, s, []Issue{
 		{Number: "1", Title: "blocked issue"},
 		{Number: "2", Title: "unblocked issue"},
-	}, edges, nil, nil, OriginDiscovered); err != nil {
+	}, edges, nil, nil, OriginDiscovered, claimer); err != nil {
 		t.Fatalf("drainMaxJobs: %v", err)
 	}
 
@@ -55,23 +56,23 @@ func TestDrainMaxJobs_SkipsBlockedDispatchesNext(t *testing.T) {
 // matching how it already treats an unmet declared blocker.
 func TestDrainMaxJobs_SkipsTouchOverlapDispatchesNext(t *testing.T) {
 	c := baseConfig()
-	c.Label = "agent-trigger"
+	label := "agent-trigger"
 	c.MaxParallel = 2
 	c.MaxJobs = 2
 	c.OverlapGate = "defer"
 
-	fc := forge.NewFake(dispatchLabels(c))
+	fc := forge.NewFake(dispatchLabels(c, label))
 	fc.SetIssue(forge.Issue{
 		Number: "1",
 		Body:   "## Touches\n- lib/env-schema.nix",
-		Labels: []string{c.Label},
+		Labels: []string{label},
 	})
-	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{c.Label}})
+	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{label}})
 	fc.SetIssue(forge.Issue{
 		Number: "20",
 		Body:   "## Touches\n- lib/env-schema.nix",
 		State:  "OPEN",
-		Labels: []string{c.InProgressLabel},
+		Labels: []string{testInProgressLabel},
 	})
 
 	fr := runner.NewFake()
@@ -79,10 +80,11 @@ func TestDrainMaxJobs_SkipsTouchOverlapDispatchesNext(t *testing.T) {
 	dir := tempLogDir(t)
 	f := testFactory(t, dir, fr)
 	s := newSettle(fc, fc)
+	claimer := NewLabelClaimer(fc, label, testInProgressLabel)
 	if err := drainMaxJobs(c, fc, fc, dir, f, s, []Issue{
 		{Number: "1", Title: "overlapping issue"},
 		{Number: "2", Title: "clean issue"},
-	}, map[string][]string{}, nil, nil, OriginDiscovered); err != nil {
+	}, map[string][]string{}, nil, nil, OriginDiscovered, claimer); err != nil {
 		t.Fatalf("drainMaxJobs: %v", err)
 	}
 
@@ -101,14 +103,14 @@ func TestDrainMaxJobs_SkipsTouchOverlapDispatchesNext(t *testing.T) {
 // instead of being mislabeled failed itself (#1984, incident #1972).
 func TestDrainMaxJobs_HoldsDependentWhenBlockerFails(t *testing.T) {
 	c := baseConfig()
-	c.Label = "agent-trigger"
+	label := "agent-trigger"
 	c.MaxParallel = 2
 	c.MaxJobs = 2
 
-	fc := forge.NewFake(dispatchLabels(c))
+	fc := forge.NewFake(dispatchLabels(c, label))
 	// Issue #1 is blocked by #3 which has already reached the failed label.
-	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.Label}})
-	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{c.Label}})
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
+	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{label}})
 	fc.SetIssue(forge.Issue{Number: "3", Labels: []string{c.FailedLabel}})
 
 	fr := runner.NewFake()
@@ -118,11 +120,12 @@ func TestDrainMaxJobs_HoldsDependentWhenBlockerFails(t *testing.T) {
 	dir := tempLogDir(t)
 	f := testFactory(t, dir, fr)
 	s := newSettle(fc, fc)
+	claimer := NewLabelClaimer(fc, label, testInProgressLabel)
 	out := testutil.CaptureStdout(t, func() {
 		if err := drainMaxJobs(c, fc, fc, dir, f, s, []Issue{
 			{Number: "1", Title: "dependent"},
 			{Number: "2", Title: "unblocked"},
-		}, edges, nil, nil, OriginDiscovered); err != nil {
+		}, edges, nil, nil, OriginDiscovered, claimer); err != nil {
 			t.Fatalf("drainMaxJobs: %v", err)
 		}
 	})
@@ -135,8 +138,8 @@ func TestDrainMaxJobs_HoldsDependentWhenBlockerFails(t *testing.T) {
 	if containsLabel(iss1.Labels, c.FailedLabel) {
 		t.Errorf("issue 1 must not gain %q when blocker failed; labels=%v", c.FailedLabel, iss1.Labels)
 	}
-	if !containsLabel(iss1.Labels, c.Label) {
-		t.Errorf("issue 1 must keep %q while held; labels=%v", c.Label, iss1.Labels)
+	if !containsLabel(iss1.Labels, label) {
+		t.Errorf("issue 1 must keep %q while held; labels=%v", label, iss1.Labels)
 	}
 	if !strings.Contains(out, "~~ #1 blocked by #3; skipping") {
 		t.Errorf("output must hold with the standard blocked-skip line; got:\n%s", out)
@@ -160,15 +163,15 @@ func TestDrainMaxJobs_HoldsDependentWhenBlockerFails(t *testing.T) {
 // own turn.
 func TestDrainMaxJobs_PriorityOrderDoesNotBypassBlocker(t *testing.T) {
 	c := baseConfig()
-	c.Label = "agent-trigger"
+	label := "agent-trigger"
 	c.MaxParallel = 2
 	c.MaxJobs = 0
 
-	fc := forge.NewFake(dispatchLabels(c))
+	fc := forge.NewFake(dispatchLabels(c, label))
 	// Issue #1 is the (Low-priority) blocker; issue #2 is the
 	// (Critical-priority) dependent, blocked by #1, which is not complete.
-	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.Label}})
-	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{c.Label}})
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
+	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{label}})
 
 	fr := runner.NewFake()
 	edges := map[string][]string{"2": {"1"}}
@@ -176,13 +179,14 @@ func TestDrainMaxJobs_PriorityOrderDoesNotBypassBlocker(t *testing.T) {
 	dir := tempLogDir(t)
 	f := testFactory(t, dir, fr)
 	s := newSettle(fc, fc)
+	claimer := NewLabelClaimer(fc, label, testInProgressLabel)
 	out := testutil.CaptureStdout(t, func() {
 		// Issue order mirrors what NewPlan's priority sort would produce:
 		// the Critical dependent (#2) ahead of its Low blocker (#1).
 		if err := drainMaxJobs(c, fc, fc, dir, f, s, []Issue{
 			{Number: "2", Title: "dependent", Priority: forge.PriorityCritical},
 			{Number: "1", Title: "blocker", Priority: forge.PriorityLow},
-		}, edges, nil, nil, OriginDiscovered); err != nil {
+		}, edges, nil, nil, OriginDiscovered, claimer); err != nil {
 			t.Fatalf("drainMaxJobs: %v", err)
 		}
 	})
@@ -203,25 +207,26 @@ func TestDrainMaxJobs_PriorityOrderDoesNotBypassBlocker(t *testing.T) {
 // batch — i.e. the labeled-break exits the for loop, not just the switch.
 func TestDrainMaxJobs_MaxJobsCapHonored(t *testing.T) {
 	c := baseConfig()
-	c.Label = "agent-trigger"
+	label := "agent-trigger"
 	c.MaxParallel = 3
 	c.MaxJobs = 1
 
 	fc := forge.NewFake()
-	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.Label}})
-	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{c.Label}})
-	fc.SetIssue(forge.Issue{Number: "3", Labels: []string{c.Label}})
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
+	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{label}})
+	fc.SetIssue(forge.Issue{Number: "3", Labels: []string{label}})
 
 	fr := runner.NewFake()
 
 	dir := tempLogDir(t)
 	f := testFactory(t, dir, fr)
 	s := newSettle(fc, fc)
+	claimer := NewLabelClaimer(fc, label, testInProgressLabel)
 	if err := drainMaxJobs(c, fc, fc, dir, f, s, []Issue{
 		{Number: "1", Title: "first"},
 		{Number: "2", Title: "second"},
 		{Number: "3", Title: "third"},
-	}, map[string][]string{}, nil, nil, OriginDiscovered); err != nil {
+	}, map[string][]string{}, nil, nil, OriginDiscovered, claimer); err != nil {
 		t.Fatalf("drainMaxJobs: %v", err)
 	}
 
@@ -236,27 +241,28 @@ func TestDrainMaxJobs_MaxJobsCapHonored(t *testing.T) {
 // deferred" — they are simply past the cap, ready for the next invocation.
 func TestDrainMaxJobs_PrintsRemainingCountAfterCapNotFalselyBlocked(t *testing.T) {
 	c := baseConfig()
-	c.Label = "agent-trigger"
+	label := "agent-trigger"
 	c.MaxParallel = 3
 	c.MaxJobs = 1
 
 	fc := forge.NewFake()
-	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.Label}})
-	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{c.Label}})
-	fc.SetIssue(forge.Issue{Number: "3", Labels: []string{c.Label}})
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
+	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{label}})
+	fc.SetIssue(forge.Issue{Number: "3", Labels: []string{label}})
 
 	fr := runner.NewFake()
 
 	dir := tempLogDir(t)
 	f := testFactory(t, dir, fr)
 	s := newSettle(fc, fc)
+	claimer := NewLabelClaimer(fc, label, testInProgressLabel)
 
 	out := testutil.CaptureStdout(t, func() {
 		if err := drainMaxJobs(c, fc, fc, dir, f, s, []Issue{
 			{Number: "1", Title: "first"},
 			{Number: "2", Title: "second"},
 			{Number: "3", Title: "third"},
-		}, map[string][]string{}, nil, nil, OriginDiscovered); err != nil {
+		}, map[string][]string{}, nil, nil, OriginDiscovered, claimer); err != nil {
 			t.Fatalf("drainMaxJobs: %v", err)
 		}
 	})
@@ -275,25 +281,26 @@ func TestDrainMaxJobs_PrintsRemainingCountAfterCapNotFalselyBlocked(t *testing.T
 // nothing").
 func TestDrainMaxJobs_ZeroMeansUncapped(t *testing.T) {
 	c := baseConfig()
-	c.Label = "agent-trigger"
+	label := "agent-trigger"
 	c.MaxParallel = 3
 	c.MaxJobs = 0
 
 	fc := forge.NewFake()
-	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.Label}})
-	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{c.Label}})
-	fc.SetIssue(forge.Issue{Number: "3", Labels: []string{c.Label}})
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
+	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{label}})
+	fc.SetIssue(forge.Issue{Number: "3", Labels: []string{label}})
 
 	fr := runner.NewFake()
 
 	dir := tempLogDir(t)
 	f := testFactory(t, dir, fr)
 	s := newSettle(fc, fc)
+	claimer := NewLabelClaimer(fc, label, testInProgressLabel)
 	if err := drainMaxJobs(c, fc, fc, dir, f, s, []Issue{
 		{Number: "1", Title: "first"},
 		{Number: "2", Title: "second"},
 		{Number: "3", Title: "third"},
-	}, map[string][]string{}, nil, nil, OriginDiscovered); err != nil {
+	}, map[string][]string{}, nil, nil, OriginDiscovered, claimer); err != nil {
 		t.Fatalf("drainMaxJobs: %v", err)
 	}
 
@@ -309,13 +316,13 @@ func TestDrainMaxJobs_ZeroMeansUncapped(t *testing.T) {
 // drained (ADR 0019).
 func TestDrainMaxJobs_PrintsRemainingCountAfterPartialWave(t *testing.T) {
 	c := baseConfig()
-	c.Label = "agent-trigger"
+	label := "agent-trigger"
 	c.MaxParallel = 2
 	c.MaxJobs = 0
 
 	fc := forge.NewFake()
-	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.Label}})
-	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{c.Label}})
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
+	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{label}})
 	fc.SetIssue(forge.Issue{Number: "3", State: "OPEN"}) // #2's blocker, not yet complete
 
 	fr := runner.NewFake()
@@ -325,12 +332,13 @@ func TestDrainMaxJobs_PrintsRemainingCountAfterPartialWave(t *testing.T) {
 	dir := tempLogDir(t)
 	f := testFactory(t, dir, fr)
 	s := newSettle(fc, fc)
+	claimer := NewLabelClaimer(fc, label, testInProgressLabel)
 
 	out := testutil.CaptureStdout(t, func() {
 		if err := drainMaxJobs(c, fc, fc, dir, f, s, []Issue{
 			{Number: "1", Title: "unblocked"},
 			{Number: "2", Title: "dependent"},
-		}, edges, nil, nil, OriginDiscovered); err != nil {
+		}, edges, nil, nil, OriginDiscovered, claimer); err != nil {
 			t.Fatalf("drainMaxJobs: %v", err)
 		}
 	})
@@ -348,13 +356,13 @@ func TestDrainMaxJobs_PrintsRemainingCountAfterPartialWave(t *testing.T) {
 // can be selected (all blocked), so a driving loop stops instead of hot-looping.
 func TestDrainMaxJobs_ReturnsErrOpenNoneDispatchable(t *testing.T) {
 	c := baseConfig()
-	c.Label = "agent-trigger"
+	label := "agent-trigger"
 	c.MaxParallel = 2
 	c.MaxJobs = 1
 
 	fc := forge.NewFake()
 	// Issue #1 is blocked by #3 (open, not yet complete).
-	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.Label}})
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
 	fc.SetIssue(forge.Issue{Number: "3", State: "OPEN"}) // blocker
 
 	fr := runner.NewFake()
@@ -364,9 +372,10 @@ func TestDrainMaxJobs_ReturnsErrOpenNoneDispatchable(t *testing.T) {
 	dir := tempLogDir(t)
 	f := testFactory(t, dir, fr)
 	s := newSettle(fc, fc)
+	claimer := NewLabelClaimer(fc, label, testInProgressLabel)
 	err := drainMaxJobs(c, fc, fc, dir, f, s, []Issue{
 		{Number: "1", Title: "blocked issue"},
-	}, edges, nil, nil, OriginDiscovered)
+	}, edges, nil, nil, OriginDiscovered, claimer)
 
 	if !errors.Is(err, ErrOpenNoneDispatchable) {
 		t.Errorf("drainMaxJobs: got %v, want ErrOpenNoneDispatchable", err)
@@ -384,12 +393,12 @@ func TestDrainMaxJobs_ReturnsErrOpenNoneDispatchable(t *testing.T) {
 // dispatch bypasses the label gate, so re-discovery can't).
 func TestDrainMaxJobs_Selective_PartialWave_PrintsRemainingAndRerunCommand(t *testing.T) {
 	c := baseConfig()
-	c.Label = "ready-for-agent"
+	label := "ready-for-agent"
 	c.MaxParallel = 2
 
-	fc := forge.NewFake(dispatchLabels(c))
-	fc.SetIssue(forge.Issue{Number: "12", Labels: []string{c.Label}})
-	fc.SetIssue(forge.Issue{Number: "15", Labels: []string{c.Label}})
+	fc := forge.NewFake(dispatchLabels(c, label))
+	fc.SetIssue(forge.Issue{Number: "12", Labels: []string{label}})
+	fc.SetIssue(forge.Issue{Number: "15", Labels: []string{label}})
 
 	fr := runner.NewFake()
 
@@ -398,12 +407,13 @@ func TestDrainMaxJobs_Selective_PartialWave_PrintsRemainingAndRerunCommand(t *te
 	dir := tempLogDir(t)
 	f := testFactory(t, dir, fr)
 	s := newSettle(fc, fc)
+	claimer := NewLabelClaimer(fc, label, testInProgressLabel)
 
 	out := testutil.CaptureStdout(t, func() {
 		if err := drainMaxJobs(c, fc, fc, dir, f, s, []Issue{
 			{Number: "12", Title: "blocker"},
 			{Number: "15", Title: "dependent"},
-		}, edges, nil, nil, OriginSelective); err != nil {
+		}, edges, nil, nil, OriginSelective, claimer); err != nil {
 			t.Fatalf("drainMaxJobs: %v", err)
 		}
 	})
@@ -416,7 +426,7 @@ func TestDrainMaxJobs_Selective_PartialWave_PrintsRemainingAndRerunCommand(t *te
 	if err != nil {
 		t.Fatalf("Issue(15): %v", err)
 	}
-	if containsLabel(iss15.Labels, c.InProgressLabel) {
+	if containsLabel(iss15.Labels, testInProgressLabel) {
 		t.Errorf("issue 15 must not be claimed while its blocker is unmet; labels=%v", iss15.Labels)
 	}
 
@@ -434,21 +444,21 @@ func TestDrainMaxJobs_Selective_PartialWave_PrintsRemainingAndRerunCommand(t *te
 // and still prints the re-run hint, rather than waiting in-process.
 func TestDrainMaxJobs_Selective_ZeroSelected_ExitsWithRerunHint(t *testing.T) {
 	c := baseConfig()
-	c.Label = "agent-trigger"
+	label := "agent-trigger"
 	c.MaxParallel = 1
 	c.OverlapGate = "defer"
 
-	fc := forge.NewFake(dispatchLabels(c))
+	fc := forge.NewFake(dispatchLabels(c, label))
 	fc.SetIssue(forge.Issue{
 		Number: "10",
 		Body:   "## Touches\n- lib/env-schema.nix",
-		Labels: []string{c.Label},
+		Labels: []string{label},
 	})
 	fc.SetIssue(forge.Issue{
 		Number: "20",
 		Body:   "## Touches\n- lib/env-schema.nix",
 		State:  "OPEN",
-		Labels: []string{c.InProgressLabel},
+		Labels: []string{testInProgressLabel},
 	})
 
 	fr := runner.NewFake()
@@ -456,12 +466,13 @@ func TestDrainMaxJobs_Selective_ZeroSelected_ExitsWithRerunHint(t *testing.T) {
 	dir := tempLogDir(t)
 	f := testFactory(t, dir, fr)
 	s := newSettle(fc, fc)
+	claimer := NewLabelClaimer(fc, label, testInProgressLabel)
 
 	var runErr error
 	out := testutil.CaptureStdout(t, func() {
 		runErr = drainMaxJobs(c, fc, fc, dir, f, s, []Issue{
 			{Number: "10", Title: "candidate"},
-		}, map[string][]string{}, nil, nil, OriginSelective)
+		}, map[string][]string{}, nil, nil, OriginSelective, claimer)
 	})
 
 	if !errors.Is(runErr, ErrOpenNoneDispatchable) {
@@ -480,13 +491,13 @@ func TestDrainMaxJobs_Selective_ZeroSelected_ExitsWithRerunHint(t *testing.T) {
 // rather than the generic "a blocker is not 'agent-complete'" message.
 func TestDrainMaxJobs_BlockedLineNamesBlockers(t *testing.T) {
 	c := baseConfig()
-	c.Label = "agent-trigger"
+	label := "agent-trigger"
 	c.MaxParallel = 2
 	c.MaxJobs = 1
 
 	fc := forge.NewFake()
 	// Issue #1 is blocked by both #3 and #4 (open, no complete label).
-	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.Label}})
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
 	fc.SetIssue(forge.Issue{Number: "3", State: "OPEN"})
 	fc.SetIssue(forge.Issue{Number: "4", State: "OPEN"})
 
@@ -497,11 +508,12 @@ func TestDrainMaxJobs_BlockedLineNamesBlockers(t *testing.T) {
 	dir := tempLogDir(t)
 	f := testFactory(t, dir, fr)
 	s := newSettle(fc, fc)
+	claimer := NewLabelClaimer(fc, label, testInProgressLabel)
 
 	out := testutil.CaptureStdout(t, func() {
 		err := drainMaxJobs(c, fc, fc, dir, f, s, []Issue{
 			{Number: "1", Title: "blocked issue"},
-		}, edges, nil, nil, OriginDiscovered)
+		}, edges, nil, nil, OriginDiscovered, claimer)
 		if !errors.Is(err, ErrOpenNoneDispatchable) {
 			t.Fatalf("drainMaxJobs: got %v, want ErrOpenNoneDispatchable", err)
 		}
@@ -519,12 +531,12 @@ func TestDrainMaxJobs_BlockedLineNamesBlockers(t *testing.T) {
 // dispatch cleanly the moment the blocker reaches a satisfied state.
 func TestDrainMaxJobs_Issue1972_HeldAcrossBlockerRetries(t *testing.T) {
 	c := baseConfig()
-	c.Label = "agent-trigger"
+	label := "agent-trigger"
 	c.MaxParallel = 2
 	c.MaxJobs = 2
 
-	fc := forge.NewFake(dispatchLabels(c))
-	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.Label}})
+	fc := forge.NewFake(dispatchLabels(c, label))
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
 	fc.SetIssue(forge.Issue{Number: "3", Labels: []string{c.FailedLabel}})
 
 	fr := runner.NewFake()
@@ -534,6 +546,7 @@ func TestDrainMaxJobs_Issue1972_HeldAcrossBlockerRetries(t *testing.T) {
 	dir := tempLogDir(t)
 	f := testFactory(t, dir, fr)
 	s := newSettle(fc, fc)
+	claimer := NewLabelClaimer(fc, label, testInProgressLabel)
 
 	// Round 1 and round 2 (agent-recover retried #3, failed again): #1 must
 	// never be cascade-failed, only held (ErrOpenNoneDispatchable signals
@@ -541,7 +554,7 @@ func TestDrainMaxJobs_Issue1972_HeldAcrossBlockerRetries(t *testing.T) {
 	for round := 1; round <= 2; round++ {
 		if err := drainMaxJobs(c, fc, fc, dir, f, s, []Issue{
 			{Number: "1", Title: "dependent"},
-		}, edges, nil, nil, OriginDiscovered); err != ErrOpenNoneDispatchable {
+		}, edges, nil, nil, OriginDiscovered, claimer); err != ErrOpenNoneDispatchable {
 			t.Fatalf("round %d: drainMaxJobs: got %v, want ErrOpenNoneDispatchable", round, err)
 		}
 	}
@@ -561,7 +574,7 @@ func TestDrainMaxJobs_Issue1972_HeldAcrossBlockerRetries(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "3", Labels: []string{c.FailedLabel}, State: "CLOSED"})
 	if err := drainMaxJobs(c, fc, fc, dir, f, s, []Issue{
 		{Number: "1", Title: "dependent"},
-	}, edges, nil, nil, OriginDiscovered); err != nil {
+	}, edges, nil, nil, OriginDiscovered, claimer); err != nil {
 		t.Fatalf("round 3: drainMaxJobs: %v", err)
 	}
 	if len(fr.RunCalls) != 1 || fr.RunCalls[0].Issue != "1" {
@@ -576,13 +589,13 @@ func TestDrainMaxJobs_Issue1972_HeldAcrossBlockerRetries(t *testing.T) {
 // workflow interpolates this file's contents verbatim into its comment.
 func TestDrainMaxJobs_ClaimedIssue_MarkerAnnotatesSource(t *testing.T) {
 	c := baseConfig()
-	c.Label = "agent-trigger"
+	label := "agent-trigger"
 	c.MaxParallel = 1
 	c.MaxJobs = 1
 
 	fc := forge.NewFake()
 	// Issue #1 is claimed (in-progress); its blocker #3 is open (unmet, native-sourced).
-	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.InProgressLabel}})
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{testInProgressLabel}})
 	fc.SetIssue(forge.Issue{Number: "3", State: "OPEN"})
 
 	fr := runner.NewFake()
@@ -592,9 +605,10 @@ func TestDrainMaxJobs_ClaimedIssue_MarkerAnnotatesSource(t *testing.T) {
 	dir := tempLogDir(t)
 	f := testFactory(t, dir, fr)
 	s := newSettle(fc, fc)
+	claimer := NewLabelClaimer(fc, label, testInProgressLabel)
 	if err := drainMaxJobs(c, fc, fc, dir, f, s, []Issue{
 		{Number: "1", Title: "claimed issue"},
-	}, edges, sources, nil, OriginClaimed); err != nil {
+	}, edges, sources, nil, OriginClaimed, claimer); err != nil {
 		t.Fatalf("drainMaxJobs: %v", err)
 	}
 
@@ -613,13 +627,13 @@ func TestDrainMaxJobs_ClaimedIssue_MarkerAnnotatesSource(t *testing.T) {
 // already on in-progress, so cascading would produce a double-labeled state.
 func TestDrainMaxJobs_ClaimedIssue_FailedBlockerDoesNotCascade(t *testing.T) {
 	c := baseConfig()
-	c.Label = "agent-trigger"
+	label := "agent-trigger"
 	c.MaxParallel = 1
 	c.MaxJobs = 1
 
 	fc := forge.NewFake()
 	// Issue #1 is on in-progress (claimed); its blocker #3 has failed.
-	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.InProgressLabel}})
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{testInProgressLabel}})
 	fc.SetIssue(forge.Issue{Number: "3", Labels: []string{c.FailedLabel}})
 
 	fr := runner.NewFake()
@@ -629,11 +643,12 @@ func TestDrainMaxJobs_ClaimedIssue_FailedBlockerDoesNotCascade(t *testing.T) {
 	dir := tempLogDir(t)
 	f := testFactory(t, dir, fr)
 	s := newSettle(fc, fc)
+	claimer := NewLabelClaimer(fc, label, testInProgressLabel)
 	// The claimed path returns nil (writes blocked marker path internally),
 	// not ErrOpenNoneDispatchable and not a cascade-fail.
 	if err := drainMaxJobs(c, fc, fc, dir, f, s, []Issue{
 		{Number: "1", Title: "claimed issue"},
-	}, edges, nil, nil, OriginClaimed); err != nil {
+	}, edges, nil, nil, OriginClaimed, claimer); err != nil {
 		t.Fatalf("drainMaxJobs: %v", err)
 	}
 
@@ -657,13 +672,13 @@ func TestDrainMaxJobs_ClaimedIssue_FailedBlockerDoesNotCascade(t *testing.T) {
 // cascade-failed, mirroring the console's Queue.Discover hold (#752).
 func TestDrainMaxJobs_HoldsDepsOfCheckFailedIssue(t *testing.T) {
 	c := baseConfig()
-	c.Label = "agent-trigger"
+	label := "agent-trigger"
 	c.MaxParallel = 2
 	c.MaxJobs = 2
 
-	fc := forge.NewFake(dispatchLabels(c))
-	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.Label}})
-	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{c.Label}})
+	fc := forge.NewFake(dispatchLabels(c, label))
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
+	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{label}})
 
 	fr := runner.NewFake()
 
@@ -672,12 +687,13 @@ func TestDrainMaxJobs_HoldsDepsOfCheckFailedIssue(t *testing.T) {
 	dir := tempLogDir(t)
 	f := testFactory(t, dir, fr)
 	s := newSettle(fc, fc)
+	claimer := NewLabelClaimer(fc, label, testInProgressLabel)
 
 	out := testutil.CaptureStdout(t, func() {
 		if err := drainMaxJobs(c, fc, fc, dir, f, s, []Issue{
 			{Number: "1", Title: "deps-of-failed issue"},
 			{Number: "2", Title: "clean issue"},
-		}, map[string][]string{}, nil, failed, OriginDiscovered); err != nil {
+		}, map[string][]string{}, nil, failed, OriginDiscovered, claimer); err != nil {
 			t.Fatalf("drainMaxJobs: %v", err)
 		}
 	})
@@ -707,12 +723,12 @@ func TestDrainMaxJobs_HoldsDepsOfCheckFailedIssue(t *testing.T) {
 // blockers").
 func TestDrainMaxJobs_ClaimedIssue_DepsOfFailedWritesRetryMarker(t *testing.T) {
 	c := baseConfig()
-	c.Label = "agent-trigger"
+	label := "agent-trigger"
 	c.MaxParallel = 1
 	c.MaxJobs = 1
 
 	fc := forge.NewFake()
-	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.InProgressLabel}})
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{testInProgressLabel}})
 
 	fr := runner.NewFake()
 	failed := map[string]bool{"1": true}
@@ -720,9 +736,10 @@ func TestDrainMaxJobs_ClaimedIssue_DepsOfFailedWritesRetryMarker(t *testing.T) {
 	dir := tempLogDir(t)
 	f := testFactory(t, dir, fr)
 	s := newSettle(fc, fc)
+	claimer := NewLabelClaimer(fc, label, testInProgressLabel)
 	if err := drainMaxJobs(c, fc, fc, dir, f, s, []Issue{
 		{Number: "1", Title: "claimed issue"},
-	}, map[string][]string{}, nil, failed, OriginClaimed); err != nil {
+	}, map[string][]string{}, nil, failed, OriginClaimed, claimer); err != nil {
 		t.Fatalf("drainMaxJobs: %v", err)
 	}
 

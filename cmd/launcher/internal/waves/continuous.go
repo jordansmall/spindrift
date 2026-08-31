@@ -466,9 +466,12 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 		if !ok {
 			return false
 		}
+		if err := queue.Claim(iss.Number); err != nil {
+			fmt.Printf("    ~~ #%s claim failed; skipping (%v)\n", iss.Number, err)
+			return false
+		}
 		dispatchedAny = true
 		claimed[iss.Number] = true
-		claimIssue(cfg, it, iss.Number)
 		launched = true
 		outstanding++
 		go func() {
