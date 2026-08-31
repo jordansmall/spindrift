@@ -16,6 +16,7 @@ import (
 	"strings"
 	"testing"
 
+	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/doctor"
 	"spindrift.dev/launcher/internal/forge"
@@ -3079,7 +3080,7 @@ func TestDispatchConfig_NoDocument_UsesGuardedResolvers(t *testing.T) {
 
 	cf := forge.NewFake()
 	it := forge.NewFake()
-	cfg := dispatchConfig(minimalValidConfig(), it, testWired(it), cf)
+	cfg := dispatchConfig(minimalValidConfig(), it, testWired(it), cf, forge.Capabilities{})
 
 	if !cfg.WorkerProvisioned {
 		t.Error("WorkerProvisioned = false, want true (WORKER_MODEL schema default is non-empty)")
@@ -3095,6 +3096,32 @@ func TestDispatchConfig_NoDocument_UsesGuardedResolvers(t *testing.T) {
 	}
 }
 
+// TestDispatchConfig_CopiesCapabilitiesArgumentThrough proves dispatchConfig
+// copies its caps forge.Capabilities argument straight into the returned
+// dispatch.Config's Capabilities field, rather than dropping it or
+// rebuilding some subset of it. dispatch.go's own splitOutbox/box.go read
+// cfg.Capabilities.ForgeDescriptor/TrackerDescriptor to decide outbox-relay
+// routing (issue #2533 area), so a caller that built a caps value upstream
+// (e.g. from resolveCapabilities) must see that exact value survive the
+// dispatchConfig hand-off untouched. ForgeDescriptor and TrackerDescriptor
+// are set to distinct backend.Descriptor names here specifically so a
+// passthrough bug that swaps the two fields, or drops one, is visible via
+// reflect.DeepEqual rather than accidentally still comparing equal.
+func TestDispatchConfig_CopiesCapabilitiesArgumentThrough(t *testing.T) {
+	caps := forge.Capabilities{
+		ForgeDescriptor:   backend.Descriptor{Name: "test-forge", HostMediatedRemote: true},
+		TrackerDescriptor: backend.Descriptor{Name: "test-tracker", InBoxUnreachableTracker: true},
+	}
+
+	cf := forge.NewFake()
+	it := forge.NewFake()
+	cfg := dispatchConfig(minimalValidConfig(), it, testWired(it), cf, caps)
+
+	if !reflect.DeepEqual(cfg.Capabilities, caps) {
+		t.Errorf("dispatchConfig() Capabilities = %+v, want %+v (the caps argument copied through unchanged)", cfg.Capabilities, caps)
+	}
+}
+
 // TestDispatchConfig_PRForge_WiresOpenPRForIssue verifies issue #565's
 // wiring: when cf implements forge.PRForge, dispatchConfig sets
 // OpenPRForIssue to a closure that resolves the issue's agent branch and
@@ -3104,7 +3131,7 @@ func TestDispatchConfig_PRForge_WiresOpenPRForIssue(t *testing.T) {
 	cf.SetPR(cf.AgentBranch("42"), forge.PR{URL: "https://github.com/o/r/pull/1"})
 
 	it := forge.NewFake()
-	cfg := dispatchConfig(minimalValidConfig(), it, testWired(it), cf)
+	cfg := dispatchConfig(minimalValidConfig(), it, testWired(it), cf, forge.Capabilities{})
 
 	if cfg.OpenPRForIssue == nil {
 		t.Fatal("want OpenPRForIssue set for a PRForge-implementing Code Forge")
@@ -3140,7 +3167,7 @@ func TestDispatchConfig_NonPRForge_OpenPRForIssueAlwaysReportsNotFound(t *testin
 	}
 
 	it := forge.NewFake()
-	cfg := dispatchConfig(c, it, testWired(it), cf)
+	cfg := dispatchConfig(c, it, testWired(it), cf, forge.Capabilities{})
 
 	if cfg.OpenPRForIssue == nil {
 		t.Fatal("want OpenPRForIssue set for a non-PRForge Code Forge")
@@ -3170,7 +3197,7 @@ func TestDispatchConfig_Local_ResolveEnv_ForwardsIntegrationBranchAsBaseBranch(t
 	fc.SetBranchExists("integration/42", true)
 	cf := fc.AsLocal()
 
-	cfg := dispatchConfig(c, fc, testWired(fc), cf)
+	cfg := dispatchConfig(c, fc, testWired(fc), cf, forge.Capabilities{ForgeDescriptor: backend.Descriptor{HostMediatedRemote: true}})
 
 	if got := cfg.ResolveEnv("42", "BASE_BRANCH"); got != "integration/42" {
 		t.Errorf("ResolveEnv(42, BASE_BRANCH) = %q, want %q", got, "integration/42")
@@ -3192,7 +3219,7 @@ func TestDispatchConfig_Local_ResolveEnv_UsesEachIssuesOwnParent(t *testing.T) {
 	fc.SetBranchExists("integration/render-pipeline", true)
 	cf := fc.AsLocal()
 
-	cfg := dispatchConfig(c, fc, testWired(fc), cf)
+	cfg := dispatchConfig(c, fc, testWired(fc), cf, forge.Capabilities{ForgeDescriptor: backend.Descriptor{HostMediatedRemote: true}})
 
 	if got := cfg.ResolveEnv("10", "BASE_BRANCH"); got != "integration/calc-engine" {
 		t.Errorf("ResolveEnv(10, BASE_BRANCH) = %q, want %q", got, "integration/calc-engine")
@@ -3221,7 +3248,7 @@ func TestDispatchConfig_Local_ResolveEnv_FallsBackToBaseBranchBeforeFirstLand(t 
 	fc.SetBranchExists("integration/42", false)
 	cf := fc.AsLocal()
 
-	cfg := dispatchConfig(c, fc, testWired(fc), cf)
+	cfg := dispatchConfig(c, fc, testWired(fc), cf, forge.Capabilities{ForgeDescriptor: backend.Descriptor{HostMediatedRemote: true}})
 
 	if got := cfg.ResolveEnv("42", "BASE_BRANCH"); got != "main" {
 		t.Errorf("ResolveEnv(42, BASE_BRANCH) = %q, want %q", got, "main")
@@ -3247,7 +3274,7 @@ func TestDispatchConfig_Local_ResolveEnv_LoudlyFallsBackWhenBlockedSeamMissesInt
 	fc.NativeDeps = map[string][]string{"42": {"41"}}
 	cf := fc.AsLocal()
 
-	cfg := dispatchConfig(c, fc, testWired(fc), cf)
+	cfg := dispatchConfig(c, fc, testWired(fc), cf, forge.Capabilities{ForgeDescriptor: backend.Descriptor{HostMediatedRemote: true}})
 
 	var got string
 	out := captureStdout(t, func() {
@@ -3277,7 +3304,7 @@ func TestDispatchConfig_Local_ResolveEnv_SilentlyFallsBackWhenBlockerFreeSeamMis
 	fc.SetBranchExists("integration/42", false)
 	cf := fc.AsLocal()
 
-	cfg := dispatchConfig(c, fc, testWired(fc), cf)
+	cfg := dispatchConfig(c, fc, testWired(fc), cf, forge.Capabilities{ForgeDescriptor: backend.Descriptor{HostMediatedRemote: true}})
 
 	var got string
 	out := captureStdout(t, func() {
@@ -3310,7 +3337,7 @@ func TestDispatchConfig_Local_ResolveEnv_LoudlyFallsBackWhenBlockerLookupErrors(
 	fc.SetBranchExists("integration/42", false)
 	cf := fc.AsLocal()
 
-	cfg := dispatchConfig(c, fc, testWired(fc), cf)
+	cfg := dispatchConfig(c, fc, testWired(fc), cf, forge.Capabilities{ForgeDescriptor: backend.Descriptor{HostMediatedRemote: true}})
 
 	var got string
 	out := captureStdout(t, func() {
@@ -3335,7 +3362,7 @@ func TestDispatchConfig_NonLocal_ResolveEnv_PassesThroughUnchanged(t *testing.T)
 	cf := forge.NewFake()
 
 	t.Setenv("BASE_BRANCH", "release")
-	cfg := dispatchConfig(c, cf, testWired(forge.NewFake()), cf)
+	cfg := dispatchConfig(c, cf, testWired(forge.NewFake()), cf, forge.Capabilities{})
 
 	if got := cfg.ResolveEnv("42", "BASE_BRANCH"); got != "release" {
 		t.Errorf("ResolveEnv(42, BASE_BRANCH) = %q, want %q", got, "release")
@@ -3354,7 +3381,7 @@ func TestDispatchConfig_ResolveEnv_BoxGHTokenOverridesGHToken(t *testing.T) {
 	t.Setenv("BOX_GH_TOKEN", "box-token")
 	cf := forge.NewFake()
 
-	cfg := dispatchConfig(c, cf, testWired(forge.NewFake()), cf)
+	cfg := dispatchConfig(c, cf, testWired(forge.NewFake()), cf, forge.Capabilities{})
 
 	if got := cfg.ResolveEnv("42", "GH_TOKEN"); got != "box-token" {
 		t.Errorf("ResolveEnv(42, GH_TOKEN) = %q, want %q", got, "box-token")
@@ -3374,7 +3401,7 @@ func TestDispatchConfig_ResolveEnv_GHTokenPassthroughWhenBoxGHTokenUnset(t *test
 	t.Setenv("GH_TOKEN", "launcher-token")
 	cf := forge.NewFake()
 
-	cfg := dispatchConfig(c, cf, testWired(forge.NewFake()), cf)
+	cfg := dispatchConfig(c, cf, testWired(forge.NewFake()), cf, forge.Capabilities{})
 
 	if got := cfg.ResolveEnv("42", "GH_TOKEN"); got != "launcher-token" {
 		t.Errorf("ResolveEnv(42, GH_TOKEN) = %q, want %q", got, "launcher-token")
@@ -3395,7 +3422,7 @@ func TestDispatchConfig_ResolveEnv_BoxForgejoTokenOverridesForgejoToken(t *testi
 	t.Setenv("BOX_FORGEJO_TOKEN", "box-fj-tok")
 	cf := newCodeForge(c, local.SanitizedParent{}, nil)
 
-	cfg := dispatchConfig(c, forge.NewFake(), testWired(forge.NewFake()), cf)
+	cfg := dispatchConfig(c, forge.NewFake(), testWired(forge.NewFake()), cf, forge.Capabilities{})
 
 	if got := cfg.ResolveEnv("1", "FORGEJO_TOKEN"); got != "box-fj-tok" {
 		t.Errorf("ResolveEnv(1, FORGEJO_TOKEN) = %q, want %q", got, "box-fj-tok")
@@ -3415,7 +3442,7 @@ func TestDispatchConfig_ResolveEnv_BoxForgejoTokenUnsetFallsThrough(t *testing.T
 	t.Setenv("BOX_FORGEJO_TOKEN", "")
 	cf := newCodeForge(c, local.SanitizedParent{}, nil)
 
-	cfg := dispatchConfig(c, forge.NewFake(), testWired(forge.NewFake()), cf)
+	cfg := dispatchConfig(c, forge.NewFake(), testWired(forge.NewFake()), cf, forge.Capabilities{})
 
 	if got := cfg.ResolveEnv("1", "FORGEJO_TOKEN"); got != "launcher-fj-tok" {
 		t.Errorf("ResolveEnv(1, FORGEJO_TOKEN) = %q, want %q", got, "launcher-fj-tok")
@@ -3435,7 +3462,7 @@ func TestDispatchConfig_ResolveEnv_BoxForgejoTokenDoesNotAffectOtherNames(t *tes
 	t.Setenv("BOX_FORGEJO_TOKEN", "box-fj-tok")
 	cf := newCodeForge(c, local.SanitizedParent{}, nil)
 
-	cfg := dispatchConfig(c, forge.NewFake(), testWired(forge.NewFake()), cf)
+	cfg := dispatchConfig(c, forge.NewFake(), testWired(forge.NewFake()), cf, forge.Capabilities{})
 
 	if got := cfg.ResolveEnv("1", "GH_TOKEN"); got != "launcher-gh-tok" {
 		t.Errorf("ResolveEnv(1, GH_TOKEN) = %q, want %q", got, "launcher-gh-tok")
@@ -3454,7 +3481,7 @@ func TestDispatchConfig_ResolveEnv_JiraTokenFallsThroughUntouched(t *testing.T) 
 	t.Setenv("JIRA_TOKEN", "launcher-jira-tok")
 	cf := forge.NewFake()
 
-	cfg := dispatchConfig(c, cf, testWired(forge.NewFake()), cf)
+	cfg := dispatchConfig(c, cf, testWired(forge.NewFake()), cf, forge.Capabilities{})
 
 	if got := cfg.ResolveEnv("1", "JIRA_TOKEN"); got != "launcher-jira-tok" {
 		t.Errorf("ResolveEnv(1, JIRA_TOKEN) = %q, want %q", got, "launcher-jira-tok")
@@ -3475,7 +3502,7 @@ func TestDispatchConfig_Local_ResolveEnv_BoxGHTokenOverridesGHToken(t *testing.T
 	fc.SetIssue(forge.Issue{Number: "42"})
 	cf := fc.AsLocal()
 
-	cfg := dispatchConfig(c, fc, testWired(fc), cf)
+	cfg := dispatchConfig(c, fc, testWired(fc), cf, forge.Capabilities{ForgeDescriptor: backend.Descriptor{HostMediatedRemote: true}})
 
 	if got := cfg.ResolveEnv("42", "GH_TOKEN"); got != "box-token" {
 		t.Errorf("ResolveEnv(42, GH_TOKEN) = %q, want %q", got, "box-token")
@@ -3497,7 +3524,7 @@ func TestDispatchConfig_Local_ResolveEnv_FallsBackToBaseBranchOnBranchExistsErro
 	fc.BranchExistsErr = errors.New("repo path unreadable")
 	cf := fc.AsLocal()
 
-	cfg := dispatchConfig(c, fc, testWired(fc), cf)
+	cfg := dispatchConfig(c, fc, testWired(fc), cf, forge.Capabilities{ForgeDescriptor: backend.Descriptor{HostMediatedRemote: true}})
 
 	if got := cfg.ResolveEnv("42", "BASE_BRANCH"); got != "main" {
 		t.Errorf("ResolveEnv(42, BASE_BRANCH) = %q, want %q", got, "main")
@@ -3635,7 +3662,7 @@ func TestSettleConfig_Local_CodeForgeForIssueResolvesEachIssuesOwnParent(t *test
 	fc.SetIssue(forge.Issue{Number: "10", Parent: "Calc Engine"})
 	fc.SetIssue(forge.Issue{Number: "11", Parent: "Render Pipeline"})
 
-	sc := settleConfig(c, localloop.Wire(localloopConfig(c), fc), fc.AsLocal(), forge.Capabilities{})
+	sc := settleConfig(c, localloop.Wire(localloopConfig(c), fc), fc.AsLocal(), forge.Capabilities{ForgeDescriptor: backend.Descriptor{HostMediatedRemote: true}})
 	if sc.CodeForgeForIssue == nil {
 		t.Fatal("settleConfig(CODE_FORGE=local).CodeForgeForIssue is nil")
 	}

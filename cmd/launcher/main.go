@@ -800,7 +800,8 @@ func absLocalIssuesDir(dir string) string {
 // agreement. Other forges leave dir untouched and unresolved, matching the
 // field's existing empty-and-unused treatment.
 func absCodeForgeAccumulationRepoDir(codeForge, dir string) string {
-	if codeForge != "local" {
+	row, _ := backendByName(codeForge)
+	if !row.HostMediatedRemote {
 		return dir
 	}
 	if dir == "" {
@@ -917,8 +918,8 @@ func newDriver(c config) driver.Driver {
 // #2130 readiness gate until its blocker landed onto this very branch, so
 // that combination is logged loudly rather than silently seeded onto bare
 // base (issue #2130 complementary hardening).
-func localBaseBranchResolver(c config, it forge.IssueTracker, lw *localloop.Wired, cf forge.CodeForge) func(num, name string) string {
-	if c.codeForge != "local" {
+func localBaseBranchResolver(c config, it forge.IssueTracker, lw *localloop.Wired, cf forge.CodeForge, caps forge.Capabilities) func(num, name string) string {
+	if !caps.ForgeDescriptor.HostMediatedRemote {
 		return func(_, name string) string { return resolveBoxEnvVar(name) }
 	}
 	return func(num, name string) string {
@@ -995,19 +996,15 @@ func boxTokenResolver(next func(num, name string) string) func(num, name string)
 // rate-limited retry never re-runs a box whose work already landed a PR;
 // ResolveOpenPR itself resolves to Found: false, nil for a push-only Code
 // Forge, so the retry proceeds unguarded there without any guard here.
-func dispatchConfig(c config, it forge.IssueTracker, lw *localloop.Wired, cf forge.CodeForge) dispatch.Config {
-	sig := resolveCapabilitySignals(c.codeForge, c.issueTracker)
+func dispatchConfig(c config, it forge.IssueTracker, lw *localloop.Wired, cf forge.CodeForge, caps forge.Capabilities) dispatch.Config {
 	trackerAxisRead, trackerAxisWrite, trackerAxisFiler, forgeBackend := resolveTrackerAndForgeSignals(c.codeForge, c.issueTracker)
 	filerEnabled, workerProvisioned, reviewLoopInline, reviewLoopOrchestrator := resolveAgentPresenceSignals(c.driver)
 	return dispatch.Config{
 		BoxEnvVars:               c.boxEnvVars,
-		ResolveEnv:               boxTokenResolver(localBaseBranchResolver(c, it, lw, cf)),
+		ResolveEnv:               boxTokenResolver(localBaseBranchResolver(c, it, lw, cf, caps)),
 		Kind:                     c.dispatchKind,
 		SelfContained:            c.selfContained,
-		HostMediatedRemote:       sig.hostMediatedRemote,
-		OutboxRelayCapable:       sig.outboxRelayCapable,
-		FullyLocal:               sig.fullyLocal,
-		InBoxUnreachableTracker:  sig.inBoxUnreachableTracker,
+		Capabilities:             caps,
 		BoxForgeAndIssueAccess:   c.boxForgeAndIssueAccess,
 		TrackerAxisRead:          trackerAxisRead,
 		TrackerAxisWrite:         trackerAxisWrite,
@@ -1035,8 +1032,8 @@ func dispatchConfig(c config, it forge.IssueTracker, lw *localloop.Wired, cf for
 // recover). A driver-cache creation failure is logged and degrades to no
 // cache (fix boxes cold-start) rather than failing the dispatch -- the cache
 // is a resume optimization, not a correctness requirement (issue #427).
-func newDispatchFactory(c config, pwd string, r runner.Runner, it forge.IssueTracker, lw *localloop.Wired, cf forge.CodeForge) *dispatch.Factory {
-	f, err := dispatch.NewFactory(dispatchConfig(c, it, lw, cf), pwd, r, newDriver(c), dispatch.RealClock())
+func newDispatchFactory(c config, pwd string, r runner.Runner, it forge.IssueTracker, lw *localloop.Wired, cf forge.CodeForge, caps forge.Capabilities) *dispatch.Factory {
+	f, err := dispatch.NewFactory(dispatchConfig(c, it, lw, cf, caps), pwd, r, newDriver(c), dispatch.RealClock())
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "==> driver cache unavailable (%v) -- fix boxes will cold-start\n", err)
 	}
@@ -1091,7 +1088,7 @@ func settleConfig(c config, lw *localloop.Wired, cf forge.CodeForge, caps forge.
 		PreflightStaleBase: c.preflightStaleBase,
 		OutboxDir:          lw.OutboxDir,
 		CodeForgeForIssue: func(num string) forge.CodeForge {
-			if c.codeForge != "local" {
+			if !caps.ForgeDescriptor.HostMediatedRemote {
 				return cf
 			}
 			return lw.CodeForgeForIssue(num)
