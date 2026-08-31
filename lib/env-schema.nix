@@ -382,7 +382,7 @@ in
     env = "PIDS_LIMIT";
     group = "infra";
     default = "512";
-    doc = "max processes per agent Box: hard --pids-limit cap under OCI; under bwrap, unconditional prlimit --nproc plus a per-Box cgroup v2 pids.max when delegation is available (ADR 0042); empty string disables the limit";
+    doc = "max processes per agent Box: hard --pids-limit cap under OCI; under bwrap, a per-Box cgroup v2 pids.max when delegation is available, else best-effort (warns and proceeds uncapped -- ADR 0042); empty string disables the limit";
     flakeOption = true;
     nixSubPath = "limits.pids";
     boxEnv = false;
