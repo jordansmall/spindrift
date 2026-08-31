@@ -1602,31 +1602,23 @@ func TestRunContinuous_AllBlockedReturnsErrOpenNoneDispatchable(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
 	fc.SetIssue(forge.Issue{Number: "2", State: "OPEN"}) // blocker, not complete
 
-	fr := runner.NewFake()
 	dir := tempLogDir(t)
-	f := testFactory(t, dir, fr)
-	s := newSettle(fc, fc)
 
 	edges := map[string][]string{"1": {"2"}}
-	discover := func() (Batch, error) {
-		raw, err := fc.ListIssues(forge.Dispatchable)
-		if err != nil {
-			return Batch{}, err
-		}
-		out := make([]Issue, len(raw))
-		for i, fi := range raw {
-			out[i] = Issue{Number: fi.Number, Title: fi.Title}
-		}
-		return Batch{Issues: out, Edges: edges}, nil
+	fake := NewFake()
+	fake.DiscoverReturn = Batch{
+		Issues: []Issue{{Number: "1"}},
+		Edges:  edges,
 	}
 	fresh := func() (bool, bool, string) { return true, true, "fresh" }
 
-	err := RunContinuous(c, nil, fc, fc, dir, f, s, NewHeadlessQueue(discover, NewLabelClaimer(fc, label, testInProgressLabel), noopPending, dir), fresh)
+	// nil, nil: nothing ever dispatches, so a nil *dispatch.Factory and
+	// settle.Settler is a stronger guarantee than a fr.RunCalls==0
+	// assertion -- with no Factory, dispatch is not merely unobserved, it
+	// is impossible.
+	err := RunContinuous(c, nil, fc, fc, dir, nil, nil, fake, fresh)
 	if !errors.Is(err, ErrOpenNoneDispatchable) {
 		t.Fatalf("RunContinuous: got %v, want ErrOpenNoneDispatchable", err)
-	}
-	if len(fr.RunCalls) != 0 {
-		t.Errorf("RunCalls: got %d, want 0", len(fr.RunCalls))
 	}
 }
 
@@ -1654,27 +1646,18 @@ func TestRunContinuous_RateLimitedRediscoverRetriesWithBackoffThenSucceeds(t *te
 	fr := runner.NewFake()
 	dir := tempLogDir(t)
 	f := testFactory(t, dir, fr)
-	s := newSettle(fc, fc)
+	s := settle.NewFake()
 
-	discoverCalls := 0
-	discover := func() (Batch, error) {
-		discoverCalls++
-		if discoverCalls <= 2 {
+	fake := NewFake()
+	fake.DiscoverFunc = func(callN int) (Batch, error) {
+		if callN <= 2 {
 			return Batch{}, fmt.Errorf("%w: rate limited", forge.ErrRateLimit)
 		}
-		raw, err := fc.ListIssues(forge.Dispatchable)
-		if err != nil {
-			return Batch{}, err
-		}
-		out := make([]Issue, len(raw))
-		for i, fi := range raw {
-			out[i] = Issue{Number: fi.Number, Title: fi.Title}
-		}
-		return Batch{Issues: out}, nil
+		return Batch{Issues: []Issue{{Number: "1"}}}, nil
 	}
 	fresh := func() (bool, bool, string) { return true, true, "fresh" }
 
-	err := RunContinuous(c, nil, fc, fc, dir, f, s, NewHeadlessQueue(discover, NewLabelClaimer(fc, label, testInProgressLabel), noopPending, dir), fresh)
+	err := RunContinuous(c, nil, fc, fc, dir, f, s, fake, fresh)
 	if err != nil {
 		t.Fatalf("RunContinuous: got %v, want nil", err)
 	}
@@ -1711,31 +1694,22 @@ func TestRunContinuous_RateLimitedRediscoverExhaustsRetries(t *testing.T) {
 	fc := forge.NewFake(dispatchLabels(c, label))
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
 
-	fr := runner.NewFake()
 	dir := tempLogDir(t)
-	f := testFactory(t, dir, fr)
-	s := newSettle(fc, fc)
 
-	discoverCalls := 0
-	discover := func() (Batch, error) {
-		discoverCalls++
-		return Batch{}, fmt.Errorf("%w: rate limited", forge.ErrRateLimit)
-	}
+	fake := NewFake()
+	fake.DiscoverErr = fmt.Errorf("%w: rate limited", forge.ErrRateLimit)
 	fresh := func() (bool, bool, string) { return true, true, "fresh" }
 
 	var err error
 	out := testutil.CaptureStderr(t, func() {
-		err = RunContinuous(c, nil, fc, fc, dir, f, s, NewHeadlessQueue(discover, NewLabelClaimer(fc, label, testInProgressLabel), noopPending, dir), fresh)
+		err = RunContinuous(c, nil, fc, fc, dir, nil, nil, fake, fresh)
 	})
 
 	if !errors.Is(err, ErrOpenNoneDispatchable) {
 		t.Fatalf("RunContinuous: got %v, want ErrOpenNoneDispatchable", err)
 	}
-	if len(fr.RunCalls) != 0 {
-		t.Fatalf("RunCalls: got %d, want 0", len(fr.RunCalls))
-	}
-	if discoverCalls != 1+c.TransientRetryMax {
-		t.Fatalf("discoverCalls: got %d, want %d (1 initial + TransientRetryMax retries)", discoverCalls, 1+c.TransientRetryMax)
+	if fake.DiscoverCalls != 1+c.TransientRetryMax {
+		t.Fatalf("DiscoverCalls: got %d, want %d (1 initial + TransientRetryMax retries)", fake.DiscoverCalls, 1+c.TransientRetryMax)
 	}
 	if len(sleeps) != c.TransientRetryMax {
 		t.Fatalf("sleeps: got %d, want %d (one backoff sleep before each retry, none after the final failed attempt)", len(sleeps), c.TransientRetryMax)
@@ -1763,29 +1737,23 @@ func TestRunContinuous_NonRateLimitRediscoverErrorFailsFastUnchanged(t *testing.
 	fc := forge.NewFake(dispatchLabels(c, label))
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
 
-	fr := runner.NewFake()
 	dir := tempLogDir(t)
-	f := testFactory(t, dir, fr)
-	s := newSettle(fc, fc)
 
-	discoverCalls := 0
 	wantErr := errors.New("boom")
-	discover := func() (Batch, error) {
-		discoverCalls++
-		return Batch{}, wantErr
-	}
+	fake := NewFake()
+	fake.DiscoverErr = wantErr
 	fresh := func() (bool, bool, string) { return true, true, "fresh" }
 
 	var err error
 	out := testutil.CaptureStderr(t, func() {
-		err = RunContinuous(c, nil, fc, fc, dir, f, s, NewHeadlessQueue(discover, NewLabelClaimer(fc, label, testInProgressLabel), noopPending, dir), fresh)
+		err = RunContinuous(c, nil, fc, fc, dir, nil, nil, fake, fresh)
 	})
 
 	if !errors.Is(err, ErrOpenNoneDispatchable) {
 		t.Fatalf("RunContinuous: got %v, want ErrOpenNoneDispatchable", err)
 	}
-	if discoverCalls != 1 {
-		t.Fatalf("discoverCalls: got %d, want 1 (non-rate-limit error must fail fast on the very first attempt)", discoverCalls)
+	if fake.DiscoverCalls != 1 {
+		t.Fatalf("DiscoverCalls: got %d, want 1 (non-rate-limit error must fail fast on the very first attempt)", fake.DiscoverCalls)
 	}
 	if len(sleeps) != 0 {
 		t.Fatalf("sleeps: got %d, want 0 (non-rate-limit error must never back off)", len(sleeps))
@@ -1815,28 +1783,27 @@ func TestRunContinuous_DiscoverSourcesReachRefill(t *testing.T) {
 	fr := runner.NewFake()
 	dir := tempLogDir(t)
 	f := testFactory(t, dir, fr)
-	s := newSettle(fc, fc)
+	s := settle.NewFake()
 
-	var gotSources Sources
-	discover := func() (Batch, error) {
-		raw, err := fc.ListIssues(forge.Dispatchable)
-		if err != nil {
-			return Batch{}, err
-		}
-		out := make([]Issue, len(raw))
-		for i, fi := range raw {
-			out[i] = Issue{Number: fi.Number, Title: fi.Title}
-		}
-		result, err := NewReadiness(fc, out)
-		if err != nil {
-			return Batch{}, err
-		}
-		gotSources = result.Sources
-		return Batch{Issues: out, Edges: result.Edges, Sources: result.Sources, Failed: result.Failed}, nil
+	raw, err := fc.ListIssues(forge.Dispatchable)
+	if err != nil {
+		t.Fatalf("ListIssues: %v", err)
 	}
+	out := make([]Issue, len(raw))
+	for i, fi := range raw {
+		out[i] = Issue{Number: fi.Number, Title: fi.Title}
+	}
+	result, err := NewReadiness(fc, out)
+	if err != nil {
+		t.Fatalf("NewReadiness: %v", err)
+	}
+	gotSources := result.Sources
+
+	fake := NewFake()
+	fake.DiscoverReturn = Batch{Issues: out, Edges: result.Edges, Sources: result.Sources, Failed: result.Failed}
 	fresh := func() (bool, bool, string) { return true, true, "fresh" }
 
-	if err := RunContinuous(c, nil, fc, fc, dir, f, s, NewHeadlessQueue(discover, NewLabelClaimer(fc, label, testInProgressLabel), noopPending, dir), fresh); err != nil {
+	if err := RunContinuous(c, nil, fc, fc, dir, f, s, fake, fresh); err != nil {
 		t.Fatalf("RunContinuous: got %v, want nil", err)
 	}
 
