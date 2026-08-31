@@ -12,11 +12,11 @@
 # cmd/launcher/internal/doctor/labelmeta_gen.go (lib/labels.nix, issue
 # #2528), tests/box_env_gen.bash, tests/default_models_gen.bash,
 # cmd/launcher/defaultmodels_gen_test.go, the generated section of
-# templates/default/flake.nix's commented-out `settings` example, the
-# generated section of docs/reference.md's Default models table, the
-# generated `models` sub-block of docs/reference.md's `settings = { ... }`
-# example, the generated `issueDiscovery`/`lifecycleLabels` and `branches`/
-# `concurrency` sub-blocks of that same example (issue #2537),
+# templates/default/flake.nix's commented-out `settings` example, every
+# documented-fact row's generated block in docs/reference.md (the Default
+# models table and the `models`/`issueDiscovery`+`lifecycleLabels`/
+# `branches`+`concurrency` sub-blocks of its `settings = { ... }` example;
+# lib/documented-facts.nix, issue #2948),
 # MIGRATING.md's generated legacy settings alias -> domain path table (issue
 # #2558), agent/entrypoint.sh's generated skill-baked probe block, and the
 # generated skill-baked flags/Env-assignments/fields/gates spans of
@@ -80,12 +80,8 @@ let
   defaultModelFixture = import ../lib/default-model-fixture.nix;
   defaultModelFixtureBash = renderers.renderDefaultModelFixtureBash defaultModelFixture;
   defaultModelFixtureGo = renderers.renderDefaultModelFixtureGo defaultModelFixture;
-  defaultModelsDoc = renderers.renderDefaultModelsDoc defaultModelFixture;
   legacySettingsSection = import ../lib/legacy-settings-section.nix;
   legacySettingsMappingDoc = renderers.renderLegacySettingsMappingDoc legacySettingsSection schema;
-  settingsExampleModelsDoc = renderers.renderSettingsExampleModelsDoc defaultModelFixture schema;
-  settingsExampleLabelsDoc = renderers.renderSettingsExampleLabelsDoc schema;
-  settingsExampleConfigDoc = renderers.renderSettingsExampleConfigDoc schema;
   bakedSkills = import ../lib/baked-skills.nix;
   bakedSkillProbesShell = renderers.renderBakedSkillProbesShell bakedSkills;
   bakedSkillFlagsGo = renderers.renderBakedSkillFlagsGo bakedSkills;
@@ -94,7 +90,8 @@ let
   bakedSkillGatesGo = renderers.renderBakedSkillGatesGo bakedSkills;
   promptAssemblyBoxEnv = import ../lib/promptassembly-boxenv.nix;
   promptAssemblyBoxEnvFile = renderers.renderPromptAssemblyBoxEnvGo promptAssemblyBoxEnv;
-  inherit (pkgs.lib) escapeShellArg;
+  documentedFacts = import ../lib/documented-facts.nix;
+  inherit (pkgs.lib) escapeShellArg concatStrings removeSuffix;
 in
 pkgs.writeShellApplication {
   name = "regen";
@@ -158,27 +155,15 @@ pkgs.writeShellApplication {
     write_between agent/entrypoint.sh \
       ${escapeShellArg "# BEGIN GENERATED OUTCOME STATUS WORDS -- nix run .#regen -- DO NOT EDIT"} \
       ${escapeShellArg "# END GENERATED OUTCOME STATUS WORDS"} \
-      ${escapeShellArg (
-        "export RESEARCH_STATUS_ENUM=\""
-        + researchStatusPipe
-        + "\"\n"
-      )}
-    write_between docs/reference.md \
-      ${escapeShellArg "<!-- BEGIN GENERATED DEFAULT MODELS -- nix run .#regen -- DO NOT EDIT -->"} \
-      ${escapeShellArg "<!-- END GENERATED DEFAULT MODELS -->"} \
-      ${escapeShellArg defaultModelsDoc}
-    write_between docs/reference.md \
-      ${escapeShellArg "# BEGIN GENERATED SETTINGS EXAMPLE MODELS -- nix run .#regen -- DO NOT EDIT"} \
-      ${escapeShellArg "# END GENERATED SETTINGS EXAMPLE MODELS"} \
-      ${escapeShellArg settingsExampleModelsDoc}
-    write_between docs/reference.md \
-      ${escapeShellArg "# BEGIN GENERATED SETTINGS EXAMPLE LABELS -- nix run .#regen -- DO NOT EDIT"} \
-      ${escapeShellArg "# END GENERATED SETTINGS EXAMPLE LABELS"} \
-      ${escapeShellArg settingsExampleLabelsDoc}
-    write_between docs/reference.md \
-      ${escapeShellArg "# BEGIN GENERATED SETTINGS EXAMPLE CONFIG -- nix run .#regen -- DO NOT EDIT"} \
-      ${escapeShellArg "# END GENERATED SETTINGS EXAMPLE CONFIG"} \
-      ${escapeShellArg settingsExampleConfigDoc}
+      ${escapeShellArg ("export RESEARCH_STATUS_ENUM=\"" + researchStatusPipe + "\"\n")}
+    ${concatStrings (
+      map (row: ''
+        write_between ${escapeShellArg row.docPath} \
+          ${escapeShellArg (removeSuffix "\n" row.beginMarker)} \
+          ${escapeShellArg row.endMarker} \
+          ${escapeShellArg row.generated}
+      '') documentedFacts
+    )}
     write_between MIGRATING.md \
       ${escapeShellArg "<!-- BEGIN GENERATED LEGACY SETTINGS MAPPING -- nix run .#regen -- DO NOT EDIT -->"} \
       ${escapeShellArg "<!-- END GENERATED LEGACY SETTINGS MAPPING -->"} \
