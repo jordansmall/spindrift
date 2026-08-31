@@ -1,15 +1,7 @@
-// This file is package waves_test, not the rest of this directory's
-// internal (package waves) test files, because wavestest.Harness
-// implementations that call wavestest.RunQueueContract must import
-// wavestest -- and wavestest itself imports waves (its own contract.go doc
-// comment explains why: the Console adapter's test, package console,
-// already imports waves, so putting the contract inside waves's own test
-// files would cycle back through wavestest). An internal (package waves)
-// test file that imported wavestest would hit exactly that cycle -- go vet
-// confirms it: "imports .../waves/wavestest from queue_fake_test.go imports
-// .../waves from contract.go: import cycle not allowed in test". So the two
-// harnesses below, and the wavestest.RunQueueContract call sites for them,
-// live here instead of inline in queue_test.go/queue_fake_test.go.
+// This file is package waves_test: a harness that calls
+// wavestest.RunQueueContract must import wavestest, which itself imports
+// waves (see contract.go's own doc comment), so an internal (package waves)
+// test file importing wavestest would import-cycle back through it.
 package waves_test
 
 import (
@@ -21,9 +13,9 @@ import (
 )
 
 // contractDispatchLabels mirrors the conventional lifecycle-label set this
-// package's own internal tests build via testhelpers_test.go's
-// dispatchLabels -- unexported, so unreachable from this external test
-// package; inlined here instead of duplicated as an exported helper nothing
+// package's own internal tests hold as testhelpers_test.go's
+// testDispatchLabels -- unexported, so unreachable from this external test
+// package; inlined here instead of duplicated as an exported var nothing
 // else needs.
 var contractDispatchLabels = forge.DispatchLabels{
 	Dispatchable: "ready-for-agent",
