@@ -50,13 +50,11 @@ let
   schema = import ../lib/env-schema.nix;
   structuralOptionsDoc = import ../lib/structural-options-doc.nix;
   structuralPaths = import ../lib/structural-paths.nix;
-  structuralTemplateExamples = import ../lib/structural-template-examples.nix { inherit (pkgs) lib; };
   envExample = renderers.renderHarnessEnvExample schema;
   flagTable = renderers.renderFlagTableGo schema;
   schemaConfigFile = renderers.renderSchemaConfigGo schema;
   flakeOptionsDoc = renderers.renderFlakeOptionsDocFull schema structuralOptionsDoc structuralPaths;
   boxEnvFixture = renderers.renderSetBoxEnvFixture schema;
-  templateSettingsBlock = renderers.renderTemplateSettingsBlock schema structuralTemplateExamples;
   driverRegistry = import ../lib/drivers/default.nix { inherit (pkgs) lib; };
   driverNamesFile = renderers.renderDriverNamesGo driverRegistry.entries;
   agentPaths = import ../lib/agent-paths.nix;
@@ -70,9 +68,6 @@ let
   promptContract = import ../lib/prompt-contract.nix;
   outcomeStatusGoFile = renderers.renderOutcomeStatusGo promptContract.outcomeStatusSets;
   markerChannelsGoFile = renderers.renderMarkerChannelsGo promptContract.markerChannels;
-  researchStatusPipe = renderers.renderOutcomeStatusPipe (
-    builtins.filter (s: s != "blocked") (promptContract.outcomeStatusesFor "research")
-  );
   backendRegistry = import ../lib/backends/default.nix;
   backendRegistryFile = renderers.renderBackendRegistryGo backendRegistry;
   labelRegistry = import ../lib/labels.nix;
@@ -82,16 +77,37 @@ let
   defaultModelFixtureGo = renderers.renderDefaultModelFixtureGo defaultModelFixture;
   legacySettingsSection = import ../lib/legacy-settings-section.nix;
   legacySettingsMappingDoc = renderers.renderLegacySettingsMappingDoc legacySettingsSection schema;
-  bakedSkills = import ../lib/baked-skills.nix;
-  bakedSkillProbesShell = renderers.renderBakedSkillProbesShell bakedSkills;
-  bakedSkillFlagsGo = renderers.renderBakedSkillFlagsGo bakedSkills;
-  bakedSkillEnvAssignGo = renderers.renderBakedSkillEnvAssignGo bakedSkills;
-  bakedSkillFieldsGo = renderers.renderBakedSkillFieldsGo bakedSkills;
-  bakedSkillGatesGo = renderers.renderBakedSkillGatesGo bakedSkills;
   promptAssemblyBoxEnv = import ../lib/promptassembly-boxenv.nix;
   promptAssemblyBoxEnvFile = renderers.renderPromptAssemblyBoxEnvGo promptAssemblyBoxEnv;
-  documentedFacts = import ../lib/documented-facts.nix;
+  documentedFacts = import ../lib/documented-facts.nix { inherit (pkgs) lib; };
+  # The shared marker-splice implementation (issue #2949) backing
+  # write_between below -- also imported by nix/checks/schema-drift.nix and
+  # nix/checks/baked-skills.nix, so this file no longer hand-mirrors its own
+  # copy of the awk-based marker-splitting logic.
+  documentedFactChecker = import ../lib/documented-fact-checker.nix { inherit pkgs; };
+  inherit (documentedFactChecker) spliceShellFn;
   inherit (pkgs.lib) escapeShellArg concatStrings removeSuffix;
+  # Named so nix/checks/schema-drift.nix's regen-postsplice-dispatch-guard
+  # can call this exact function against synthetic rows (issue #2949 review
+  # finding) instead of a hand-mirrored reimplementation -- a typo in a
+  # row's postSplice field (wrong case, misspelling) would otherwise
+  # silently take the no-gofmt branch with nothing catching it.
+  regenRowScript =
+    row:
+    ''
+      write_between ${escapeShellArg row.docPath} \
+        ${escapeShellArg (removeSuffix "\n" row.beginMarker)} \
+        ${escapeShellArg row.endMarker} \
+        ${escapeShellArg row.generated}
+    ''
+    + (
+      if (row.postSplice or null) == "gofmt" then
+        ''
+          gofmt -w "$root/"${escapeShellArg row.docPath}
+        ''
+      else
+        ""
+    );
 in
 pkgs.writeShellApplication {
   name = "regen";
@@ -112,17 +128,35 @@ pkgs.writeShellApplication {
       echo "regenerated $1"
     }
 
+    ${spliceShellFn}
+
     # Replaces the lines strictly between (and preserving) a literal
     # begin/end marker line pair with $4, for a generated section embedded
-    # in an otherwise hand-written file.
+    # in an otherwise hand-written file -- delegates to the shared `splice`
+    # function above instead of its own awk pipeline.
     write_between() {
       local file="$root/$1" begin="$2" end="$3" content="$4"
-      awk -v begin="$begin" -v end="$end" -v content="$content" '
-        $0 == begin { print; printf "%s", content; skip=1; next }
-        $0 == end { skip=0 }
-        skip { next }
-        { print }
-      ' "$file" > "$file.regen-tmp" && mv "$file.regen-tmp" "$file"
+      local content_file
+      content_file="$(mktemp)"
+      # Under `set -e`, a failing `splice` (e.g. a missing marker) aborts the
+      # whole script before reaching the unconditional `rm -f` further down,
+      # leaking the mktemp'd file. A RETURN trap doesn't help here -- `set -e`
+      # kills the script directly on the failing command without ever
+      # "returning" from this function. An EXIT trap does fire, but by the
+      # time it runs, this function's `local content_file` has already gone
+      # out of scope, so a trap body that references "$content_file" (single
+      # quotes, expanded when the trap fires) sees it empty. Double-quoting
+      # here expands $content_file immediately, baking the real path into the
+      # trap command literally, so it survives the function's local scope
+      # unwinding. Verified: a RETURN trap and a single-quoted EXIT trap were
+      # both tried and both left the temp file behind on a forced `splice`
+      # failure; only this form actually removes it.
+      trap "rm -f '$content_file'" EXIT
+      printf '%s' "$content" > "$content_file"
+      splice "$file" "$begin" "$end" "$content_file" "$file.regen-tmp"
+      mv "$file.regen-tmp" "$file"
+      rm -f "$content_file"
+      trap - EXIT
       echo "regenerated $1 (generated section)"
     }
 
@@ -148,50 +182,22 @@ pkgs.writeShellApplication {
     write tests/default_models_gen.bash ${escapeShellArg defaultModelFixtureBash}
     write cmd/launcher/defaultmodels_gen_test.go ${escapeShellArg defaultModelFixtureGo}
     gofmt -w "$root/cmd/launcher/defaultmodels_gen_test.go"
-    write_between templates/default/flake.nix \
-      ${escapeShellArg "            # BEGIN GENERATED SETTINGS EXAMPLE -- nix run .#regen -- DO NOT EDIT"} \
-      ${escapeShellArg "            # END GENERATED SETTINGS EXAMPLE"} \
-      ${escapeShellArg templateSettingsBlock}
-    write_between agent/entrypoint.sh \
-      ${escapeShellArg "# BEGIN GENERATED OUTCOME STATUS WORDS -- nix run .#regen -- DO NOT EDIT"} \
-      ${escapeShellArg "# END GENERATED OUTCOME STATUS WORDS"} \
-      ${escapeShellArg ("export RESEARCH_STATUS_ENUM=\"" + researchStatusPipe + "\"\n")}
-    ${concatStrings (
-      map (row: ''
-        write_between ${escapeShellArg row.docPath} \
-          ${escapeShellArg (removeSuffix "\n" row.beginMarker)} \
-          ${escapeShellArg row.endMarker} \
-          ${escapeShellArg row.generated}
-      '') documentedFacts
-    )}
+    ${concatStrings (map regenRowScript documentedFacts)}
     write_between MIGRATING.md \
       ${escapeShellArg "<!-- BEGIN GENERATED LEGACY SETTINGS MAPPING -- nix run .#regen -- DO NOT EDIT -->"} \
       ${escapeShellArg "<!-- END GENERATED LEGACY SETTINGS MAPPING -->"} \
       ${escapeShellArg legacySettingsMappingDoc}
-    write_between agent/entrypoint.sh \
-      ${escapeShellArg "  # BEGIN GENERATED SKILL-BAKED PROBES -- nix run .#regen -- DO NOT EDIT"} \
-      ${escapeShellArg "  # END GENERATED SKILL-BAKED PROBES"} \
-      ${escapeShellArg bakedSkillProbesShell}
-    write_between cmd/launcher/driver-exec/assembleprompt_cmd.go \
-      ${escapeShellArg "\t// BEGIN GENERATED SKILL-BAKED FLAGS -- nix run .#regen -- DO NOT EDIT"} \
-      ${escapeShellArg "\t// END GENERATED SKILL-BAKED FLAGS"} \
-      ${escapeShellArg bakedSkillFlagsGo}
-    write_between cmd/launcher/driver-exec/assembleprompt_cmd.go \
-      ${escapeShellArg "\t\t// BEGIN GENERATED SKILL-BAKED ENV -- nix run .#regen -- DO NOT EDIT"} \
-      ${escapeShellArg "\t\t// END GENERATED SKILL-BAKED ENV"} \
-      ${escapeShellArg bakedSkillEnvAssignGo}
-    gofmt -w "$root/cmd/launcher/driver-exec/assembleprompt_cmd.go"
-    write_between cmd/launcher/internal/promptassembly/env.go \
-      ${escapeShellArg "\t// BEGIN GENERATED SKILL-BAKED FIELDS -- nix run .#regen -- DO NOT EDIT"} \
-      ${escapeShellArg "\t// END GENERATED SKILL-BAKED FIELDS"} \
-      ${escapeShellArg bakedSkillFieldsGo}
-    gofmt -w "$root/cmd/launcher/internal/promptassembly/env.go"
-    write_between cmd/launcher/internal/promptassembly/gates.go \
-      ${escapeShellArg "\t// BEGIN GENERATED SKILL-BAKED GATES -- nix run .#regen -- DO NOT EDIT"} \
-      ${escapeShellArg "\t// END GENERATED SKILL-BAKED GATES"} \
-      ${escapeShellArg bakedSkillGatesGo}
-    gofmt -w "$root/cmd/launcher/internal/promptassembly/gates.go"
     write cmd/launcher/internal/promptassembly/boxenv_gen.go ${escapeShellArg promptAssemblyBoxEnvFile}
     gofmt -w "$root/cmd/launcher/internal/promptassembly/boxenv_gen.go"
   '';
+}
+# `//` only adds an attribute here -- it doesn't touch the derivation's
+# outPath/build behavior, so flake.nix's `${import ./nix/regen.nix { ... }}`
+# string coercion (which resolves via outPath) is unaffected. This exposes
+# regenRowScript so nix/checks/schema-drift.nix's
+# regen-postsplice-dispatch-guard can call the exact function `nix run
+# .#regen` uses, not a hand-mirrored reimplementation (issue #2949 review
+# finding).
+// {
+  inherit regenRowScript;
 }

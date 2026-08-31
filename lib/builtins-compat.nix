@@ -11,8 +11,9 @@ rec {
   # Escapes a literal string's regex metacharacters so it can be used as a
   # builtins.split/builtins.match pattern without them being read as regex --
   # used by marker-splitting call sites (e.g. lib/prompt-inject.nix's own
-  # splitOnce/injectSection, nix/checks/baked-skills.nix's `between`) that
-  # split on a literal marker and must guard against it being read as regex.
+  # splitOnce/injectSection, lib/documented-fact-checker.nix's
+  # splitMarkedBlock) that split on a literal marker and must guard against
+  # it being read as regex.
   escapeRegex =
     builtins.replaceStrings
       [

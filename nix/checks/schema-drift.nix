@@ -17,7 +17,16 @@ let
   # The documentedFact registry (issue #2948): shared with nix/regen.nix's
   # marker-splice loop so a block's marker literals/renderer call are typed
   # exactly once. documentedFactChecks below derives one named check per row.
-  documentedFacts = import ../../lib/documented-facts.nix;
+  documentedFacts = import ../../lib/documented-facts.nix { inherit (pkgs) lib; };
+  # The shared marker-splice + drift-comparison implementation (issue #2949)
+  # backing assertMarkedBlockOk below -- also imported by
+  # nix/checks/baked-skills.nix so the two files never fork their own
+  # hand-mirrored copies again.
+  documentedFactChecker = import ../../lib/documented-fact-checker.nix { inherit pkgs; };
+  # regenRowScript (issue #2949 review finding): the exact per-row
+  # postSplice-dispatch function `nix run .#regen` uses, exercised directly
+  # by regen-postsplice-dispatch-guard below against synthetic rows.
+  regen = import ../regen.nix { inherit pkgs; };
   # Shared by template-settings-block and the
   # structural-template-examples-*-valid checks below (issue #2572 round 2)
   # so all three consumers of lib/structural-template-examples.nix's byName/
@@ -601,52 +610,18 @@ let
     };
 
   # Shared by every documentedFacts row's check (documentedFactChecks below)
-  # and by assertLegacySettingsMappingDocOk: each marker-delimited sub-block lives
-  # between its own BEGIN/END marker pair inside the doc's illustrative flat
-  # domain-tree example (ADR 0037) and is checked the same way -- split docSrc
+  # and by assertLegacySettingsMappingDocOk: each marker-delimited sub-block
+  # lives inside its own host file (a doc's illustrative example per
+  # ADR 0037, for the docs/reference.md rows; a template, bash script, or Go
+  # source file for the others), between its own BEGIN/END marker pair, and
+  # is checked the same way -- split docSrc
   # on the markers, compare the committed slice against generated, else
   # throw a message naming which sub-block (blockName) and which schema file
-  # (sourceDesc) it drifted from. Parameterized so the three callers below
-  # stay one-liners instead of ~28-line copies of the same marker-split +
-  # equality assertion (issue #2537).
-  assertMarkedBlockOk =
-    {
-      blockName,
-      sourceDesc,
-      beginMarker,
-      endMarker,
-      docSrc,
-      generated,
-      docPath ? "docs/reference.md",
-    }:
-    let
-      inherit (pkgs.lib) assertMsg escapeRegex;
-      # builtins.split's pattern argument is a POSIX extended regex, not a
-      # literal string -- escape the marker text so a marker that ever picks
-      # up a metacharacter (".", "(", "*", ...) still splits on itself
-      # literally instead of silently mis-splitting (issue #2948).
-      afterBegin =
-        let
-          parts = builtins.split (escapeRegex beginMarker) docSrc;
-        in
-        if builtins.length parts >= 3 then
-          builtins.elemAt parts 2
-        else
-          throw "${docPath}: BEGIN GENERATED ${blockName} marker not found";
-      committed =
-        let
-          parts = builtins.split (escapeRegex endMarker) afterBegin;
-        in
-        if builtins.length parts >= 3 then
-          builtins.elemAt parts 0
-        else
-          throw "${docPath}: END GENERATED ${blockName} marker not found";
-    in
-    assert assertMsg (committed == generated) ''
-      ${docPath} generated ${blockName} sub-block is out of sync with ${sourceDesc} — regenerate it with `nix run .#regen`
-        got:  ${committed}
-        want: ${generated}'';
-    docSrc;
+  # (sourceDesc) it drifted from. Body now lives in
+  # lib/documented-fact-checker.nix (issue #2949) so
+  # nix/checks/baked-skills.nix shares this exact implementation instead of
+  # hand-mirroring its own copy.
+  inherit (documentedFactChecker) assertMarkedBlockOk;
 
   # Asserts `generated` (one of renderSettingsExampleModelsDoc/LabelsDoc/
   # ConfigDoc's output) contains, for every schema `key` in `keys`, a line
@@ -744,22 +719,36 @@ let
       map (row: {
         name = row.name;
         value =
-          let
-            docSrc = builtins.readFile (../../. + "/${row.docPath}");
-          in
-          assert
-            (assertMarkedBlockOk {
+          if (row.postSplice or null) == "gofmt" then
+            documentedFactChecker.assertSplicedSpanOk {
               inherit (row)
+                name
                 blockName
                 sourceDesc
                 beginMarker
                 endMarker
-                docPath
                 generated
                 ;
-              inherit docSrc;
-            }) == docSrc;
-          pkgs.runCommand row.name { } "touch $out";
+              file = ../../. + "/${row.docPath}";
+              gofmt = true;
+            }
+          else
+            let
+              docSrc = builtins.readFile (../../. + "/${row.docPath}");
+            in
+            assert
+              (assertMarkedBlockOk {
+                inherit (row)
+                  blockName
+                  sourceDesc
+                  beginMarker
+                  endMarker
+                  docPath
+                  generated
+                  ;
+                inherit docSrc;
+              }) == docSrc;
+            pkgs.runCommand row.name { } "touch $out";
       }) documentedFacts
     );
 
@@ -1569,42 +1558,6 @@ checkedMerge {
         touch $out
       '';
 
-  # The generated settings block between templates/default/flake.nix's
-  # BEGIN/END GENERATED SETTINGS EXAMPLE markers must match the content
-  # rendered from env-schema.nix — every flakeOption knob, exhaustively,
-  # with its doc string (issue #520). Shares its renderer with
-  # `nix run .#regen` via lib/renderers.nix, so guard and regenerator cannot
-  # drift from each other (issue #402).
-  template-settings-block =
-    let
-      inherit (pkgs.lib) assertMsg;
-      generated = renderers.renderTemplateSettingsBlock schema structuralTemplateExamples;
-      templateSrc = builtins.readFile ../../templates/default/flake.nix;
-      beginMarker = "BEGIN GENERATED SETTINGS EXAMPLE -- nix run .#regen -- DO NOT EDIT\n";
-      endMarker = "            # END GENERATED SETTINGS EXAMPLE";
-      afterBegin =
-        let
-          parts = builtins.split beginMarker templateSrc;
-        in
-        if builtins.length parts >= 3 then
-          builtins.elemAt parts 2
-        else
-          throw "templates/default/flake.nix: BEGIN GENERATED SETTINGS EXAMPLE marker not found";
-      committed =
-        let
-          parts = builtins.split endMarker afterBegin;
-        in
-        if builtins.length parts >= 3 then
-          builtins.elemAt parts 0
-        else
-          throw "templates/default/flake.nix: END GENERATED SETTINGS EXAMPLE marker not found";
-    in
-    assert assertMsg (committed == generated) ''
-      templates/default/flake.nix generated settings block is out of sync with lib/env-schema.nix — regenerate it with `nix run .#regen`
-        got:  ${committed}
-        want: ${generated}'';
-    pkgs.runCommand "template-settings-block" { } "touch $out";
-
   # Issue #2572 round 2 (blocking finding 2): checkEntry inside
   # lib/structural-template-examples.nix only regex-matches the *rendered
   # text* of each worked example -- it never runs the example *values*
@@ -1751,44 +1704,6 @@ checkedMerge {
     assert assertMsg (result.success)
       "structural-template-examples-byname-valid (issue #2572): lib/structural-template-examples.nix's byName example must survive rosterLib.defaultRoster { byName = ...; } without throwing";
     pkgs.runCommand "structural-template-examples-byname-valid" { } "touch $out";
-
-  # The generated status-word span between agent/entrypoint.sh's BEGIN/END
-  # GENERATED OUTCOME STATUS WORDS markers must match the content rendered
-  # from lib/prompt-contract.nix's outcomeStatusSets (issue #2504). Shares
-  # its renderers with `nix run .#regen` via lib/renderers.nix.
-  outcome-status-words =
-    let
-      promptContract = import ../../lib/prompt-contract.nix;
-      inherit (pkgs.lib) assertMsg;
-      researchStatusPipe = renderers.renderOutcomeStatusPipe (
-        builtins.filter (s: s != "blocked") (promptContract.outcomeStatusesFor "research")
-      );
-      generated = "export RESEARCH_STATUS_ENUM=\"${researchStatusPipe}\"\n";
-      entrypointSrc = builtins.readFile ../../agent/entrypoint.sh;
-      beginMarker = "# BEGIN GENERATED OUTCOME STATUS WORDS -- nix run .#regen -- DO NOT EDIT\n";
-      endMarker = "# END GENERATED OUTCOME STATUS WORDS";
-      afterBegin =
-        let
-          parts = builtins.split beginMarker entrypointSrc;
-        in
-        if builtins.length parts >= 3 then
-          builtins.elemAt parts 2
-        else
-          throw "agent/entrypoint.sh: BEGIN GENERATED OUTCOME STATUS WORDS marker not found";
-      committed =
-        let
-          parts = builtins.split endMarker afterBegin;
-        in
-        if builtins.length parts >= 3 then
-          builtins.elemAt parts 0
-        else
-          throw "agent/entrypoint.sh: END GENERATED OUTCOME STATUS WORDS marker not found";
-    in
-    assert assertMsg (committed == generated) ''
-      agent/entrypoint.sh generated outcome-status-words block is out of sync with lib/prompt-contract.nix — regenerate it with `nix run .#regen`
-        got:  ${committed}
-        want: ${generated}'';
-    pkgs.runCommand "outcome-status-words" { } "touch $out";
 
   # The generated man page must render (mandoc parses it) and totally cover the
   # schema: every SH section, every OPTIONS group, every non-secret flag, and
@@ -2589,14 +2504,24 @@ checkedMerge {
   # doesn't need to know anything about any one row's actual business content
   # (per-row content coverage stays with documentedFactChecks;
   # marked-block-escaping-guard above separately covers the regex-
-  # metacharacter marker hazard with a fully synthetic row). Still ONE
-  # derivation (not fanned out per row) so the check-name surface stays
-  # unchanged. Via tryEval per row, so this fails if the equality assert is
-  # ever dropped from assertMarkedBlockOk, naming which row(s) it failed to
-  # catch.
+  # metacharacter marker hazard with a fully synthetic row). Via tryEval per
+  # row, so this fails if the equality assert is ever dropped from
+  # assertMarkedBlockOk, naming which row(s) it failed to catch. `postSplice
+  # == "gofmt"` rows never go through assertMarkedBlockOk in production
+  # (documentedFactChecks above routes them to assertSplicedSpanOk instead),
+  # so running them through assertMarkedBlockOk here would prove nothing
+  # about the path they actually take -- those rows instead drive
+  # assertSplicedSpanOk's own diff-rejection path (via its `expectMismatch`
+  # flag) against a synthetic drift, collected into gofmtDriftGuards below
+  # and forced to build alongside the assertMarkedBlockOk rows (issue #2949
+  # review finding) so a `postSplice == "gofmt"` row's rejection path stays
+  # covered too. Still ONE derivation (not fanned out per row) so the
+  # check-name surface stays unchanged.
   documented-fact-guard =
     let
       inherit (pkgs.lib) assertMsg concatStringsSep filter;
+      markedBlockRows = filter (row: (row.postSplice or null) != "gofmt") documentedFacts;
+      gofmtRows = filter (row: (row.postSplice or null) == "gofmt") documentedFacts;
       results = map (row: {
         inherit (row) name;
         result = builtins.tryEval (assertMarkedBlockOk {
@@ -2607,14 +2532,80 @@ checkedMerge {
             endMarker
             generated
             ;
+          docPath = "<synthetic-test-doc>";
           docSrc = row.beginMarker + row.generated + "DRIFTED-SENTINEL" + row.endMarker + "\n";
         });
-      }) documentedFacts;
+      }) markedBlockRows;
       unexpectedlySucceeded = map (r: r.name) (filter (r: r.result.success) results);
+      gofmtDriftGuards = map (
+        row:
+        documentedFactChecker.assertSplicedSpanOk {
+          name = "${row.name}-drift-guard";
+          file = ../../. + "/${row.docPath}";
+          generated = row.generated + "// DRIFTED-SENTINEL\n";
+          inherit (row)
+            blockName
+            sourceDesc
+            beginMarker
+            endMarker
+            ;
+          gofmt = true;
+          expectMismatch = true;
+        }
+      ) gofmtRows;
     in
     assert assertMsg (unexpectedlySucceeded == [ ])
       "documented-fact-guard: expected assertMarkedBlockOk to reject a synthetic drifted docSrc for every documentedFacts row, but it evaluated successfully for: ${concatStringsSep ", " unexpectedlySucceeded}";
-    pkgs.runCommand "documented-fact-guard" { } "touch $out";
+    pkgs.runCommand "documented-fact-guard" { inherit gofmtDriftGuards; } "touch $out";
+
+  # regen's postSplice dispatch had zero test coverage before this (issue
+  # #2949 review finding): nothing proved `nix run .#regen` actually runs
+  # `gofmt -w` on a postSplice == "gofmt" row's host file after splicing, and
+  # a typo in the field (wrong case, misspelling) would silently take the
+  # no-gofmt branch with nothing catching it. Calls regen.regenRowScript
+  # directly -- the exact function nix/regen.nix's text uses for real, not a
+  # hand-mirrored reimplementation -- against three synthetic rows sharing a
+  # documentedFacts row's shape, and pins its current, exact dispatch
+  # behavior: "gofmt" fires the gofmt -w line, no postSplice field doesn't,
+  # and (deliberately, to document rather than fix the typo hazard --
+  # validating the field itself is a separate concern) neither does a
+  # wrong-case "Gofmt" typo. The positive assertion checks for the exact
+  # `gofmt -w "$root/<docPath>"` substring (not just the bare text
+  # "gofmt -w"), so a regression that ran gofmt against the wrong path (e.g.
+  # a copy-pasted literal from a different row) would actually be caught --
+  # the two negative assertions stay bare substring checks since they're
+  # proving absence, not correctness-of-path.
+  regen-postsplice-dispatch-guard =
+    let
+      inherit (pkgs.lib) assertMsg hasInfix escapeShellArg;
+      gofmtRow = {
+        docPath = "docs/placeholder.md";
+        beginMarker = "<!-- BEGIN PLACEHOLDER -->\n";
+        endMarker = "<!-- END PLACEHOLDER -->";
+        generated = "placeholder generated content\n";
+        postSplice = "gofmt";
+      };
+      plainRow = builtins.removeAttrs gofmtRow [ "postSplice" ];
+      typoRow = gofmtRow // {
+        postSplice = "Gofmt";
+      };
+      gofmtScript = regen.regenRowScript gofmtRow;
+      plainScript = regen.regenRowScript plainRow;
+      typoScript = regen.regenRowScript typoRow;
+      # regenRowScript escapeShellArg's the docPath (issue #2949 review
+      # finding: the old `"$root/${row.docPath}"` form spliced docPath raw
+      # into the generated script), so the emitted invocation is the
+      # double-quoted "$root/" prefix immediately followed by a
+      # single-quoted docPath literal, not one single double-quoted string.
+      expectedGofmtInvocation = ''gofmt -w "$root/"${escapeShellArg gofmtRow.docPath}'';
+    in
+    assert assertMsg (hasInfix expectedGofmtInvocation gofmtScript)
+      "regen-postsplice-dispatch-guard: expected regenRowScript to emit \"${expectedGofmtInvocation}\" for a postSplice = \"gofmt\"; row, but it did not";
+    assert assertMsg (!(hasInfix "gofmt -w" plainScript))
+      "regen-postsplice-dispatch-guard: expected regenRowScript NOT to emit \"gofmt -w\" for a row with no postSplice field, but it did";
+    assert assertMsg (!(hasInfix "gofmt -w" typoScript))
+      "regen-postsplice-dispatch-guard: expected regenRowScript NOT to emit \"gofmt -w\" for a postSplice = \"Gofmt\"; (wrong-case typo) row, but it did -- this pins the current typo-silently-no-ops behavior, not a validation guarantee";
+    pkgs.runCommand "regen-postsplice-dispatch-guard" { } "touch $out";
 
   # Regression guard for checkedMerge (issue #2948 blocking review finding):
   # proves `//`'s silent-overwrite-on-collision hazard is actually caught,
@@ -2778,12 +2769,14 @@ checkedMerge {
       okResult = builtins.tryEval (assertMarkedBlockOk {
         blockName = "TEST";
         sourceDesc = "synthetic";
+        docPath = "<synthetic-test-doc>";
         inherit beginMarker endMarker generated;
         docSrc = okDocSrc;
       });
       driftedResult = builtins.tryEval (assertMarkedBlockOk {
         blockName = "TEST";
         sourceDesc = "synthetic";
+        docPath = "<synthetic-test-doc>";
         inherit beginMarker endMarker generated;
         docSrc = driftedDocSrc;
       });

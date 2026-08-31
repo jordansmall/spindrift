@@ -1,195 +1,48 @@
-# Baked-skill name list drift guards (issue #2532): lib/baked-skills.nix is
-# the single source the skill-baked probe list, driver-exec flags, and
-# promptassembly Env fields/Gates map render from -- these guards assert
-# each committed generated span still matches lib/renderers.nix's
-# renderBakedSkill* output, and that adding a row to the list flows through
-# every renderer without touching any consumer file.
+# Baked-skill end-to-end regression guards (issue #2532). The five per-span
+# drift checks that used to live in this file (probes/flags/env-assign/
+# fields/gates) are now generic lib/documented-facts.nix rows, checked by
+# nix/checks/schema-drift.nix's documentedFactChecks (issue #2949) under the
+# names baked-skills-probes-gen / baked-skills-flags-gen /
+# baked-skills-env-assign-gen / baked-skills-fields-gen /
+# baked-skills-gates-gen -- this file no longer duplicates that coverage.
+# What remains here are the two guards that a generic per-row string-diff
+# can't express:
+#   - baked-skills-add-row-guard: proves a synthetic seventh
+#     lib/baked-skills.nix row flows through every renderer end-to-end --
+#     compiles Go, runs it, execs the reconstructed bash probes.
+#   - baked-skills-marker-guard: proves a missing BEGIN marker makes the
+#     checker throw, not silently pass.
 { pkgs, launcherGoModules, ... }:
 let
   renderers = import ../../lib/renderers.nix;
   bakedSkills = import ../../lib/baked-skills.nix;
-  inherit (import ../../lib/builtins-compat.nix) escapeRegex;
+  # The shared marker-splice + drift-comparison implementation (issue #2949)
+  # backing the two guards below -- also imported by nix/checks/schema-drift.nix,
+  # so this file no longer hand-mirrors its own copy of the builtins.split-based
+  # marker-splitting logic.
+  documentedFactChecker = import ../../lib/documented-fact-checker.nix { inherit pkgs; };
+  inherit (documentedFactChecker) spliceShellFn;
 
-  # Isolates the text strictly between a literal begin/end marker line pair,
-  # mirroring nix/checks/schema-drift.nix's assertMarkedBlockOk (which
-  # itself mirrors nix/regen.nix's write_between) so this guard can never
-  # drift from what write_between actually replaces. escapeRegex guards
-  # `builtins.split`, which reads its pattern arg as an ERE, not a literal --
-  # a future marker containing a regex metacharacter (`(`, `+`, `[`, ...)
-  # would otherwise silently split on the wrong text instead of the literal
-  # marker line.
-  between =
-    {
-      src,
-      file,
-      begin,
-      end,
-    }:
+  # The registry rows for the five skill-baked spans (issue #2949) -- the two
+  # guards below source their marker literals from here instead of
+  # hand-maintaining a separate copy.
+  documentedFacts = import ../../lib/documented-facts.nix { inherit (pkgs) lib; };
+  rowByName =
+    name:
     let
-      beginMarker = escapeRegex (begin + "\n");
-      afterBegin =
-        let
-          parts = builtins.split beginMarker src;
-        in
-        if builtins.length parts >= 3 then
-          builtins.elemAt parts 2
-        else
-          throw "${file}: BEGIN marker not found: ${begin}";
-      committed =
-        let
-          parts = builtins.split (escapeRegex end) afterBegin;
-        in
-        if builtins.length parts >= 3 then
-          builtins.elemAt parts 0
-        else
-          throw "${file}: END marker not found: ${end}";
+      matches = builtins.filter (r: r.name == name) documentedFacts;
     in
-    committed;
-
-  assertSpanOk =
-    {
-      file,
-      begin,
-      end,
-      generated,
-    }:
-    let
-      committed = between {
-        src = builtins.readFile file;
-        file = toString file;
-        inherit begin end;
-      };
-      inherit (pkgs.lib) assertMsg;
-    in
-    assert assertMsg (committed == generated) ''
-      ${toString file} generated skill-baked span (between "${begin}" / "${end}") is out of sync with lib/baked-skills.nix -- regenerate it with `nix run .#regen`
-        got:  ${committed}
-        want: ${generated}'';
-    true;
-
-  # The awk technique that replaces the text strictly between (and
-  # preserving) a literal begin/end marker line pair with the contents of a
-  # raw file -- shared, as a single bash function definition interpolated
-  # into every runCommand script below that needs it, so
-  # assertGoSpanGofmtOk's single-span reconstruction and
-  # baked-skills-add-row-guard's multi-file, multi-span reconstruction can't
-  # drift into two different splice implementations.
-  spliceShellFn = ''
-    splice() {
-      local committed="$1" beginMarker="$2" endMarker="$3" rawfile="$4" outfile="$5"
-      awk -v begin="$beginMarker" -v end="$endMarker" -v rawfile="$rawfile" '
-        BEGIN { while ((getline line < rawfile) > 0) content = content line "\n" }
-        $0 == begin { print; printf "%s", content; skip=1; next }
-        $0 == end { skip=0 }
-        skip { next }
-        { print }
-      ' "$committed" > "$outfile"
-    }
-  '';
-
-  # Two of the five generated spans need a post-splice `gofmt -w`, not a raw
-  # string diff, before comparing against the committed file: env.go's struct
-  # fields sit inside a Go struct type whose contiguous field block `gofmt -w`
-  # column-aligns (types, trailing comments) across the *whole* type, not just
-  # the inserted span (the same reason renderSchemaConfigGo/
-  # renderBackendRegistryGo's own drift checks, above, gofmt-normalize before
-  # comparing); assembleprompt_cmd.go's env.Field = *goVar assignments (issue
-  # #2979 -- plain statements since env is built from EnvFromEnviron()'s
-  # returned value, not a struct literal) don't need alignment but still go
-  # through the same gofmt-then-diff path for one consistent splice
-  # implementation. This mirrors that: reconstruct the real file with the
-  # span replaced by the *raw* (unaligned) renderer
-  # output, `gofmt -w` the whole reconstruction (exactly what `nix run
-  # .#regen`'s own write_between + gofmt -w pairing does), and diff against
-  # the real committed file.
-  assertGoSpanGofmtOk =
-    {
-      name,
-      file,
-      begin,
-      end,
-      generated,
-    }:
-    let
-      raw = pkgs.writeText "${name}.raw" generated;
-      # The awk reconstruction below only ever *replaces* a span it finds
-      # between the begin/end marker lines -- if a marker line is missing
-      # entirely, awk just falls through printing the committed file
-      # unchanged, so reconstructed.go ends up identical to the committed
-      # file and the diff below reports no drift even though the generated
-      # content never got inserted. Force the same eval-time marker-presence
-      # check assertSpanOk gets via `between` (it throws when a marker is
-      # absent) before ever constructing the runCommand derivation below, so
-      # a missing marker fails loudly instead of silently passing.
-      markersPresent = between {
-        src = builtins.readFile file;
-        file = toString file;
-        inherit begin end;
-      };
-    in
-    builtins.seq markersPresent (
-      pkgs.runCommand name
-        {
-          nativeBuildInputs = [ pkgs.go ];
-          committed = file;
-          inherit raw;
-          beginMarker = begin;
-          endMarker = end;
-        }
-        ''
-          ${spliceShellFn}
-          splice "$committed" "$beginMarker" "$endMarker" "$raw" reconstructed.go
-          gofmt -w reconstructed.go
-          diff reconstructed.go "$committed" \
-            || { echo "${toString file} generated skill-baked span (between \"${begin}\" / \"${end}\") is out of sync with lib/baked-skills.nix -- regenerate it with \`nix run .#regen\`" >&2; exit 1; }
-          touch $out
-        ''
-    );
+    if matches == [ ] then
+      throw "nix/checks/baked-skills.nix: no documentedFacts row named \"${name}\" (lib/documented-facts.nix row name may have been renamed)"
+    else
+      builtins.head matches;
+  probesRow = rowByName "baked-skills-probes-gen";
+  flagsRow = rowByName "baked-skills-flags-gen";
+  envRow = rowByName "baked-skills-env-assign-gen";
+  fieldsRow = rowByName "baked-skills-fields-gen";
+  gatesRow = rowByName "baked-skills-gates-gen";
 in
 {
-  baked-skills-probes-gen =
-    assert assertSpanOk {
-      file = ../../agent/entrypoint.sh;
-      begin = "  # BEGIN GENERATED SKILL-BAKED PROBES -- nix run .#regen -- DO NOT EDIT";
-      end = "  # END GENERATED SKILL-BAKED PROBES";
-      generated = renderers.renderBakedSkillProbesShell bakedSkills;
-    };
-    pkgs.runCommand "baked-skills-probes-gen" { } "touch $out";
-
-  baked-skills-flags-gen =
-    assert assertSpanOk {
-      file = ../../cmd/launcher/driver-exec/assembleprompt_cmd.go;
-      begin = "\t// BEGIN GENERATED SKILL-BAKED FLAGS -- nix run .#regen -- DO NOT EDIT";
-      end = "\t// END GENERATED SKILL-BAKED FLAGS";
-      generated = renderers.renderBakedSkillFlagsGo bakedSkills;
-    };
-    pkgs.runCommand "baked-skills-flags-gen" { } "touch $out";
-
-  baked-skills-env-assign-gen = assertGoSpanGofmtOk {
-    name = "baked-skills-env-assign-gen";
-    file = ../../cmd/launcher/driver-exec/assembleprompt_cmd.go;
-    begin = "\t// BEGIN GENERATED SKILL-BAKED ENV -- nix run .#regen -- DO NOT EDIT";
-    end = "\t// END GENERATED SKILL-BAKED ENV";
-    generated = renderers.renderBakedSkillEnvAssignGo bakedSkills;
-  };
-
-  baked-skills-fields-gen = assertGoSpanGofmtOk {
-    name = "baked-skills-fields-gen";
-    file = ../../cmd/launcher/internal/promptassembly/env.go;
-    begin = "\t// BEGIN GENERATED SKILL-BAKED FIELDS -- nix run .#regen -- DO NOT EDIT";
-    end = "\t// END GENERATED SKILL-BAKED FIELDS";
-    generated = renderers.renderBakedSkillFieldsGo bakedSkills;
-  };
-
-  baked-skills-gates-gen =
-    assert assertSpanOk {
-      file = ../../cmd/launcher/internal/promptassembly/gates.go;
-      begin = "\t// BEGIN GENERATED SKILL-BAKED GATES -- nix run .#regen -- DO NOT EDIT";
-      end = "\t// END GENERATED SKILL-BAKED GATES";
-      generated = renderers.renderBakedSkillGatesGo bakedSkills;
-    };
-    pkgs.runCommand "baked-skills-gates-gen" { } "touch $out";
-
   # Regression guard (issue #2532 AC2): adding a row to lib/baked-skills.nix
   # must flow through every renderer -- the probe line, the flag decl, the
   # Env-literal assignment, the struct field, and the gate assignment -- with
@@ -207,6 +60,8 @@ in
   # stopped emitting some substring.
   baked-skills-add-row-guard =
     let
+      inherit (pkgs.lib) removeSuffix;
+
       extra = {
         name = "test-skill";
         goVar = "testSkillSkillBaked";
@@ -215,16 +70,21 @@ in
       };
       withExtra = bakedSkills ++ [ extra ];
 
-      probesBegin = "  # BEGIN GENERATED SKILL-BAKED PROBES -- nix run .#regen -- DO NOT EDIT";
-      probesEnd = "  # END GENERATED SKILL-BAKED PROBES";
-      flagsBegin = "\t// BEGIN GENERATED SKILL-BAKED FLAGS -- nix run .#regen -- DO NOT EDIT";
-      flagsEnd = "\t// END GENERATED SKILL-BAKED FLAGS";
-      envBegin = "\t// BEGIN GENERATED SKILL-BAKED ENV -- nix run .#regen -- DO NOT EDIT";
-      envEnd = "\t// END GENERATED SKILL-BAKED ENV";
-      fieldsBegin = "\t// BEGIN GENERATED SKILL-BAKED FIELDS -- nix run .#regen -- DO NOT EDIT";
-      fieldsEnd = "\t// END GENERATED SKILL-BAKED FIELDS";
-      gatesBegin = "\t// BEGIN GENERATED SKILL-BAKED GATES -- nix run .#regen -- DO NOT EDIT";
-      gatesEnd = "\t// END GENERATED SKILL-BAKED GATES";
+      # spliceShellFn's `splice` bash function does an exact-line `awk $0 ==
+      # begin` match against a bare line (no trailing newline), while rows
+      # store beginMarker WITH a trailing "\n" (documentedFactChecker's
+      # convention) -- same removeSuffix "\n" as nix/regen.nix's
+      # write_between call sites.
+      probesBegin = removeSuffix "\n" probesRow.beginMarker;
+      probesEnd = probesRow.endMarker;
+      flagsBegin = removeSuffix "\n" flagsRow.beginMarker;
+      flagsEnd = flagsRow.endMarker;
+      envBegin = removeSuffix "\n" envRow.beginMarker;
+      envEnd = envRow.endMarker;
+      fieldsBegin = removeSuffix "\n" fieldsRow.beginMarker;
+      fieldsEnd = fieldsRow.endMarker;
+      gatesBegin = removeSuffix "\n" gatesRow.beginMarker;
+      gatesEnd = gatesRow.endMarker;
 
       probesRaw = pkgs.writeText "baked-skills-add-row-guard-probes.raw" (
         renderers.renderBakedSkillProbesShell withExtra
@@ -470,9 +330,9 @@ in
       '';
 
   # Regression guard for the marker-presence bug the two guards above (issue
-  # #2532 review) fixed: assertSpanOk already throws at eval time when a
-  # begin/end marker line is missing (via `between`), and assertGoSpanGofmtOk
-  # now forces that same `between` check before ever diffing its gofmt
+  # #2532 review) fixed: assertMarkedBlockOk already throws at eval time when
+  # a begin/end marker line is missing (via `splitMarkedBlock`), and
+  # assertSplicedSpanOk forces that same check before ever diffing its
   # reconstruction -- without this guard, a future edit could silently drop
   # that eval-time check again (exactly how the bug shipped undetected the
   # first time) and no check would complain. Mirrors
@@ -484,36 +344,62 @@ in
     let
       inherit (pkgs.lib) assertMsg replaceStrings;
 
-      probesBegin = "  # BEGIN GENERATED SKILL-BAKED PROBES -- nix run .#regen -- DO NOT EDIT";
-      probesEnd = "  # END GENERATED SKILL-BAKED PROBES";
       probesSrc = builtins.readFile ../../agent/entrypoint.sh;
       probesSynthetic = pkgs.writeText "baked-skills-marker-guard-probes.sh" (
-        replaceStrings [ (probesBegin + "\n") ] [ "" ] probesSrc
+        replaceStrings [ probesRow.beginMarker ] [ "" ] probesSrc
       );
-      spanResult = builtins.tryEval (assertSpanOk {
-        file = probesSynthetic;
-        begin = probesBegin;
-        end = probesEnd;
-        generated = renderers.renderBakedSkillProbesShell bakedSkills;
-      });
+      spanResult = builtins.tryEval (
+        documentedFactChecker.assertMarkedBlockOk {
+          inherit (probesRow)
+            blockName
+            sourceDesc
+            beginMarker
+            endMarker
+            docPath
+            generated
+            ;
+          docSrc = builtins.readFile probesSynthetic;
+        }
+      );
 
-      fieldsBegin = "\t// BEGIN GENERATED SKILL-BAKED FIELDS -- nix run .#regen -- DO NOT EDIT";
-      fieldsEnd = "\t// END GENERATED SKILL-BAKED FIELDS";
       fieldsSrc = builtins.readFile ../../cmd/launcher/internal/promptassembly/env.go;
       fieldsSynthetic = pkgs.writeText "baked-skills-marker-guard-env.go" (
-        replaceStrings [ (fieldsBegin + "\n") ] [ "" ] fieldsSrc
+        replaceStrings [ fieldsRow.beginMarker ] [ "" ] fieldsSrc
       );
-      goSpanResult = builtins.tryEval (assertGoSpanGofmtOk {
-        name = "baked-skills-marker-guard-fields-gen";
-        file = fieldsSynthetic;
-        begin = fieldsBegin;
-        end = fieldsEnd;
-        generated = renderers.renderBakedSkillFieldsGo bakedSkills;
-      });
+      goSpanResult = builtins.tryEval (
+        documentedFactChecker.assertSplicedSpanOk {
+          name = "baked-skills-marker-guard-fields-gen";
+          file = fieldsSynthetic;
+          inherit (fieldsRow)
+            blockName
+            sourceDesc
+            beginMarker
+            endMarker
+            generated
+            ;
+          gofmt = true;
+        }
+      );
     in
     assert assertMsg (!spanResult.success)
-      "baked-skills-marker-guard: expected assertSpanOk to reject a synthetic file whose BEGIN GENERATED SKILL-BAKED PROBES marker is missing, but it evaluated successfully";
+      "baked-skills-marker-guard: expected assertMarkedBlockOk to reject a synthetic file whose BEGIN GENERATED SKILL-BAKED PROBES marker is missing, but it evaluated successfully";
     assert assertMsg (!goSpanResult.success)
-      "baked-skills-marker-guard: expected assertGoSpanGofmtOk to reject a synthetic file whose BEGIN GENERATED SKILL-BAKED FIELDS marker is missing, but it evaluated successfully";
+      "baked-skills-marker-guard: expected assertSplicedSpanOk to reject a synthetic file whose BEGIN GENERATED SKILL-BAKED FIELDS marker is missing, but it evaluated successfully";
     pkgs.runCommand "baked-skills-marker-guard" { } "touch $out";
+
+  # Regression guard (issue #2949 review): rowByName used to call bare
+  # builtins.head on the filtered list, so a row name with no match (e.g.
+  # after a future lib/documented-facts.nix row rename this file's
+  # hand-typed names fall out of sync with) threw Nix's unhelpful "list is
+  # empty" with no indication of which row it was looking for. Proves
+  # rowByName now throws instead of returning, for an unknown name, the same
+  # tryEval + assertMsg pattern as baked-skills-marker-guard above.
+  baked-skills-row-by-name-guard =
+    let
+      inherit (pkgs.lib) assertMsg;
+      result = builtins.tryEval (rowByName "no-such-row");
+    in
+    assert assertMsg (!result.success)
+      "baked-skills-row-by-name-guard: expected rowByName to throw for an unknown row name, but it evaluated successfully";
+    pkgs.runCommand "baked-skills-row-by-name-guard" { } "touch $out";
 }
