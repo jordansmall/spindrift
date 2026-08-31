@@ -9,11 +9,9 @@ import (
 
 // PassLog names one log file belonging to a Dispatch's history — the
 // initial run, a fix pass, or conflict-resolve — in the chronological order
-// LogPaths returns them.
-type PassLog struct {
-	Label string
-	Path  string
-}
+// LogPaths returns them. It is an alias for outcome.PassLog, the single
+// source of truth for this shape.
+type PassLog = outcome.PassLog
 
 // LogPaths returns every pass log that exists on disk for issue number under
 // pwd, in chronological order: the initial run, each fix pass (probed
@@ -102,11 +100,7 @@ func AllAttemptLogPaths(pwd, number string) []PassLog {
 // #2225) whose original run's Box has long since exited. kind is forwarded to
 // outcome.Resolve unchanged ("" normalizes to "work").
 func ResolveFromLogs(pwd, num, kind string) (outcome.Resolved, error) {
-	var logs []outcome.PassLog
-	for _, pl := range LogPaths(pwd, num) {
-		logs = append(logs, outcome.PassLog{Label: pl.Label, Path: pl.Path})
-	}
-	return outcome.Resolve(logs, kind)
+	return outcome.Resolve(LogPaths(pwd, num), kind)
 }
 
 func fileExists(path string) bool {

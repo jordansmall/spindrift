@@ -466,11 +466,10 @@ const (
 )
 
 // PassLog names one pass's log file for Resolve to scan, in the order the
-// passes ran. It mirrors dispatch.PassLog's {Label, Path} shape: outcome
-// cannot import dispatch (that would cycle back through outcome), so this is
-// its own copy of that shape and a dispatch caller converts its own
-// []dispatch.PassLog to []outcome.PassLog, field for field, at the call
-// site.
+// passes ran. This is the single canonical definition of the shape:
+// dispatch.PassLog is a type alias for this type (outcome cannot import
+// dispatch, that would cycle back through outcome, but dispatch already
+// imports outcome, so the alias lives on the dispatch side).
 type PassLog struct {
 	Label string
 	Path  string
