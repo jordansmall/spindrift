@@ -37,28 +37,6 @@ func runAssemblePrompt(args []string, stdout io.Writer) int {
 	autoLintSkillBaked := fs.Bool("auto-lint-skill-baked", false, "true when DRIVER_SKILLS_DIR/auto-lint/SKILL.md was baked")
 	// END GENERATED SKILL-BAKED FLAGS
 
-	orchestratorEnabled := fs.Bool("orchestrator-enabled", false, "true when ORCHESTRATOR_ENABLED is set")
-	reviewLoopInline := fs.Bool("review-loop-inline", false, "nix-resolved REVIEW_LOOP_INLINE gate: !ORCHESTRATOR_ENABLED")
-	reviewLoopOrchestrator := fs.Bool("review-loop-orchestrator", false, "nix-resolved REVIEW_LOOP_ORCHESTRATOR gate: ORCHESTRATOR_ENABLED verbatim")
-	agentsJSONTemplate := fs.String("agents-json-template", "", "the nix-baked --agents JSON template, empty when no subagent model is configured")
-	filerEnabled := fs.Bool("filer-enabled", false, "nix-resolved roster fact: roster carries a \"filer\" entry")
-	workerProvisioned := fs.Bool("worker-provisioned", false, "nix-resolved roster fact: roster carries a \"worker\" entry")
-	issueTracker := fs.String("issue-tracker", "", "ISSUE_TRACKER value, defaults to github when empty")
-	trackerAxisRead := fs.String("tracker-axis-read", "", "nix-precomputed tracker read-axis suffix (GITHUB/LOCAL/FORGEJO)")
-	trackerAxisWrite := fs.String("tracker-axis-write", "", "nix-precomputed tracker write-axis suffix (GITHUB/FORGEJO, empty when the tracker has no direct-write path)")
-	trackerAxisFiler := fs.String("tracker-axis-filer", "", "nix-precomputed tracker filer-axis suffix (GH/FORGEJO)")
-	boxWriteEnabled := fs.Bool("box-write-enabled", false, "true when BOX_WRITE_ENABLED is set")
-	localIssueReference := fs.Bool("local-issue-reference", false, "true when LOCAL_ISSUE_REFERENCE is set")
-	codeForge := fs.String("code-forge", "", "CODE_FORGE value, defaults to github when empty")
-	forgeBackend := fs.String("forge-backend", "", "nix-precomputed CODE_FORGE backend suffix (GH/FORGEJO)")
-	dispatchKind := fs.String("dispatch-kind", "", "DISPATCH_KIND value, defaults to work when empty")
-	selfContained := fs.Bool("self-contained", false, "true when SELF_CONTAINED == 1")
-	fixPass := fs.Int("fix-pass", 0, "FIX_PASS number; >0 selects fix-prompt.md")
-	resumeAfterHold := fs.Bool("resume-after-hold", false, "true when RESUME_AFTER_HOLD is set")
-	autoFormat := fs.Bool("auto-format", false, "true when AUTO_FORMAT is set")
-	autoLint := fs.Bool("auto-lint", false, "true when AUTO_LINT is set")
-	ciFailureSummary := fs.String("ci-failure-summary", "", "CI_FAILURE_SUMMARY value, launcher-forwarded on a fix pass (issue #426)")
-
 	promptsDir := fs.String("prompts-dir", "", "PROMPTS_DIR, default /agent/prompts")
 	agentsPromptFiles := fs.String("agents-prompt-files", "", "nix-baked agent-name -> promptFile JSON map")
 	driverAgentFilesDir := fs.String("driver-agent-files-dir", "", "opencode-style baked agent files dir, empty for claude")
@@ -70,15 +48,6 @@ func runAssemblePrompt(args []string, stdout io.Writer) int {
 	researchOutcomeContractFile := fs.String("research-outcome-contract-file", "", "RESEARCH_OUTCOME_CONTRACT_FILE")
 
 	skillsFound := fs.String("skills-found", "", "comma-separated list of skill directory basenames found under DRIVER_SKILLS_DIR")
-
-	issueNumber := fs.String("issue-number", "", "ISSUE_NUMBER")
-	issueTitle := fs.String("issue-title", "", "ISSUE_TITLE")
-	branch := fs.String("branch", "", "BRANCH")
-	baseBranch := fs.String("base-branch", "", "BASE_BRANCH")
-	inProgressLabel := fs.String("in-progress-label", "", "IN_PROGRESS_LABEL")
-	completeLabel := fs.String("complete-label", "", "COMPLETE_LABEL")
-	runNonce := fs.String("run-nonce", "", "RUN_NONCE")
-	researchStatusEnum := fs.String("research-status-enum", "", "RESEARCH_STATUS_ENUM (regen-generated research-kind verdict enumeration, issue #2504)")
 
 	registryPath := fs.String("registry", "", "path to the fragment registry JSON file (required)")
 	validateMarkersRegistryPath := fs.String("validate-markers-registry", "", "path to the prompt-contract validateMarkers registry JSON file (required)")
@@ -146,71 +115,24 @@ func runAssemblePrompt(args []string, stdout io.Writer) int {
 		return 1
 	}
 
-	env := promptassembly.Env{
-		// BEGIN GENERATED SKILL-BAKED ENV -- nix run .#regen -- DO NOT EDIT
-		CavemanSkillBaked:    *cavemanSkillBaked,
-		TDDSkillBaked:        *tddSkillBaked,
-		CommitSkillBaked:     *commitSkillBaked,
-		CodeReviewSkillBaked: *codeReviewSkillBaked,
-		AutoFormatSkillBaked: *autoFormatSkillBaked,
-		AutoLintSkillBaked:   *autoLintSkillBaked,
-		// END GENERATED SKILL-BAKED ENV
-
-		OrchestratorEnabled: *orchestratorEnabled,
-
-		ReviewLoopInline:       *reviewLoopInline,
-		ReviewLoopOrchestrator: *reviewLoopOrchestrator,
-
-		AgentsJSONTemplate: *agentsJSONTemplate,
-
-		FilerEnabled:      *filerEnabled,
-		WorkerProvisioned: *workerProvisioned,
-
-		IssueTracker: *issueTracker,
-
-		TrackerAxisRead:  *trackerAxisRead,
-		TrackerAxisWrite: *trackerAxisWrite,
-		TrackerAxisFiler: *trackerAxisFiler,
-
-		BoxWriteEnabled: *boxWriteEnabled,
-
-		LocalIssueReference: *localIssueReference,
-
-		CodeForge: *codeForge,
-
-		ForgeBackend: *forgeBackend,
-
-		DispatchKind:    *dispatchKind,
-		SelfContained:   *selfContained,
-		FixPass:         *fixPass,
-		ResumeAfterHold: *resumeAfterHold,
-
-		AutoFormat:       *autoFormat,
-		AutoLint:         *autoLint,
-		CIFailureSummary: *ciFailureSummary,
-
-		PromptsDir:          *promptsDir,
-		AgentsPromptFiles:   *agentsPromptFiles,
-		DriverAgentFilesDir: *driverAgentFilesDir,
-
-		CommsContractFile:           *commsContractFile,
-		CheckContractFile:           *checkContractFile,
-		CodeCommentsContractFile:    *codeCommentsContractFile,
-		OutcomeContractFile:         *outcomeContractFile,
-		ResearchOutcomeContractFile: *researchOutcomeContractFile,
-
-		SkillsFound: *skillsFound,
-
-		IssueNumber:     *issueNumber,
-		IssueTitle:      *issueTitle,
-		Branch:          *branch,
-		BaseBranch:      *baseBranch,
-		InProgressLabel: *inProgressLabel,
-		CompleteLabel:   *completeLabel,
-		RunNonce:        *runNonce,
-
-		ResearchStatusEnum: *researchStatusEnum,
-	}
+	env := promptassembly.EnvFromEnviron()
+	// BEGIN GENERATED SKILL-BAKED ENV -- nix run .#regen -- DO NOT EDIT
+	env.CavemanSkillBaked = *cavemanSkillBaked
+	env.TDDSkillBaked = *tddSkillBaked
+	env.CommitSkillBaked = *commitSkillBaked
+	env.CodeReviewSkillBaked = *codeReviewSkillBaked
+	env.AutoFormatSkillBaked = *autoFormatSkillBaked
+	env.AutoLintSkillBaked = *autoLintSkillBaked
+	// END GENERATED SKILL-BAKED ENV
+	env.PromptsDir = *promptsDir
+	env.AgentsPromptFiles = *agentsPromptFiles
+	env.DriverAgentFilesDir = *driverAgentFilesDir
+	env.CommsContractFile = *commsContractFile
+	env.CheckContractFile = *checkContractFile
+	env.CodeCommentsContractFile = *codeCommentsContractFile
+	env.OutcomeContractFile = *outcomeContractFile
+	env.ResearchOutcomeContractFile = *researchOutcomeContractFile
+	env.SkillsFound = *skillsFound
 
 	result, err := promptassembly.Assemble(env, registry)
 	if err != nil {
@@ -238,7 +160,9 @@ func runAssemblePrompt(args []string, stdout io.Writer) int {
 
 	// Every field set below is pure passthrough (issue #2975): Assemble never
 	// touches them, so they're layered onto result.Handoff here, after
-	// Assemble/Validate both succeed, straight from this command's own flags.
+	// Assemble/Validate both succeed, straight from this command's own flags
+	// (Issue from env.IssueNumber, issue #2979 -- ISSUE_NUMBER is now read via
+	// EnvFromEnviron rather than its own flag).
 	result.Handoff.PromptFile = *promptOutput
 	if result.AgentsJSON != "" {
 		result.Handoff.AgentsFile = *agentsJSONOutput
@@ -250,7 +174,7 @@ func runAssemblePrompt(args []string, stdout io.Writer) int {
 	result.Handoff.DriverFlags = *driverFlags
 	result.Handoff.Devshell = *devshell
 	result.Handoff.DevshellName = *devshellName
-	result.Handoff.Issue = *issueNumber
+	result.Handoff.Issue = env.IssueNumber
 	result.Handoff.HeartbeatLog = *heartbeatLog
 	result.Handoff.ArgvShape = promptassembly.ArgvShape{
 		PromptStyle:    *argvPromptStyle,

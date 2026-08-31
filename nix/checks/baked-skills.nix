@@ -87,14 +87,18 @@ let
     }
   '';
 
-  # Two of the five generated spans (the assembleprompt_cmd.go Env{} literal
-  # assignments and the env.go struct fields) sit inside a Go struct
-  # literal/struct type whose contiguous field block `gofmt -w` column-
-  # aligns (colons, types) across the *whole* run, not just the inserted
-  # span -- the same reason renderSchemaConfigGo/renderBackendRegistryGo's
-  # own drift checks (above) gofmt-normalize before comparing instead of
-  # diffing the raw renderer string directly. This mirrors that: reconstruct
-  # the real file with the span replaced by the *raw* (unaligned) renderer
+  # Two of the five generated spans need a post-splice `gofmt -w`, not a raw
+  # string diff, before comparing against the committed file: env.go's struct
+  # fields sit inside a Go struct type whose contiguous field block `gofmt -w`
+  # column-aligns (types, trailing comments) across the *whole* type, not just
+  # the inserted span (the same reason renderSchemaConfigGo/
+  # renderBackendRegistryGo's own drift checks, above, gofmt-normalize before
+  # comparing); assembleprompt_cmd.go's env.Field = *goVar assignments (issue
+  # #2979 -- plain statements since env is built from EnvFromEnviron()'s
+  # returned value, not a struct literal) don't need alignment but still go
+  # through the same gofmt-then-diff path for one consistent splice
+  # implementation. This mirrors that: reconstruct the real file with the
+  # span replaced by the *raw* (unaligned) renderer
   # output, `gofmt -w` the whole reconstruction (exactly what `nix run
   # .#regen`'s own write_between + gofmt -w pairing does), and diff against
   # the real committed file.
@@ -164,8 +168,8 @@ in
   baked-skills-env-assign-gen = assertGoSpanGofmtOk {
     name = "baked-skills-env-assign-gen";
     file = ../../cmd/launcher/driver-exec/assembleprompt_cmd.go;
-    begin = "\t\t// BEGIN GENERATED SKILL-BAKED ENV -- nix run .#regen -- DO NOT EDIT";
-    end = "\t\t// END GENERATED SKILL-BAKED ENV";
+    begin = "\t// BEGIN GENERATED SKILL-BAKED ENV -- nix run .#regen -- DO NOT EDIT";
+    end = "\t// END GENERATED SKILL-BAKED ENV";
     generated = renderers.renderBakedSkillEnvAssignGo bakedSkills;
   };
 
@@ -215,8 +219,8 @@ in
       probesEnd = "  # END GENERATED SKILL-BAKED PROBES";
       flagsBegin = "\t// BEGIN GENERATED SKILL-BAKED FLAGS -- nix run .#regen -- DO NOT EDIT";
       flagsEnd = "\t// END GENERATED SKILL-BAKED FLAGS";
-      envBegin = "\t\t// BEGIN GENERATED SKILL-BAKED ENV -- nix run .#regen -- DO NOT EDIT";
-      envEnd = "\t\t// END GENERATED SKILL-BAKED ENV";
+      envBegin = "\t// BEGIN GENERATED SKILL-BAKED ENV -- nix run .#regen -- DO NOT EDIT";
+      envEnd = "\t// END GENERATED SKILL-BAKED ENV";
       fieldsBegin = "\t// BEGIN GENERATED SKILL-BAKED FIELDS -- nix run .#regen -- DO NOT EDIT";
       fieldsEnd = "\t// END GENERATED SKILL-BAKED FIELDS";
       gatesBegin = "\t// BEGIN GENERATED SKILL-BAKED GATES -- nix run .#regen -- DO NOT EDIT";
