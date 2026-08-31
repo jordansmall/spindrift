@@ -1781,6 +1781,7 @@ else
         buildInputDocumentFile
         ;
       driverExecBin = imageDriver.driverExecBin;
+      orchestratorBin = imageDriver.orchestratorBin;
       driverEntry = imageDriver.driverEntry;
 
       # The fully resolved agent roster (issue #2512), after the #392

@@ -126,6 +126,7 @@ let
           # its own comment above promptassemblyRegistryJsonFile) -- this
           # derivation's own entrypoint-outcome-*.bats run is no exception.
           DRIVER_EXEC_BIN = "${batsHarness.internals.driverExecBin}/bin/driver-exec";
+          ORCHESTRATOR_BIN = "${batsHarness.internals.orchestratorBin}/bin/orchestrator";
           PROMPTASSEMBLY_REGISTRY_FILE = promptassemblyRegistryJsonFile;
           PROMPT_CONTRACT_REGISTRY_FILE = promptContractRegistryJsonFile;
           FORBIDDEN_MARKERS_REGISTRY_FILE = forbiddenMarkersRegistryJsonFile;
@@ -280,6 +281,7 @@ let
     # tests/prompt-assembly-parity.bats's required env (see comment above
     # promptassemblyRegistryJsonFile).
     DRIVER_EXEC_BIN = "${batsHarness.internals.driverExecBin}/bin/driver-exec";
+    ORCHESTRATOR_BIN = "${batsHarness.internals.orchestratorBin}/bin/orchestrator";
     PROMPTASSEMBLY_REGISTRY_FILE = promptassemblyRegistryJsonFile;
     PROMPT_CONTRACT_REGISTRY_FILE = promptContractRegistryJsonFile;
     FORBIDDEN_MARKERS_REGISTRY_FILE = forbiddenMarkersRegistryJsonFile;
@@ -465,6 +467,7 @@ in
         # $ENTRYPOINT unconditionally calls `driver-exec assemble-prompt`
         # now (issue #2354).
         DRIVER_EXEC_BIN = "${batsHarness.internals.driverExecBin}/bin/driver-exec";
+        ORCHESTRATOR_BIN = "${batsHarness.internals.orchestratorBin}/bin/orchestrator";
         PROMPTASSEMBLY_REGISTRY_FILE = promptassemblyRegistryJsonFile;
         PROMPT_CONTRACT_REGISTRY_FILE = promptContractRegistryJsonFile;
         FORBIDDEN_MARKERS_REGISTRY_FILE = forbiddenMarkersRegistryJsonFile;

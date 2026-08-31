@@ -1765,6 +1765,7 @@ in
         "agentPathsPreambleFile"
         "fragmentRegistryFile"
         "driverExecBin"
+        "orchestratorBin"
         "driverEntry"
         "runInputDocumentFile"
         "buildInputDocumentFile"
