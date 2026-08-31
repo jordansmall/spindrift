@@ -1,3 +1,12 @@
+// This file holds the minimal, target-shape demonstrations of driving
+// RunContinuous through the Fake Queue (issue #2937): one dispatching case,
+// one all-blocked case needing neither a *dispatch.Factory nor a
+// settle.Settler. continuous_test.go's own scenario suite (slot-refill
+// timing, stale-drain, rate-limit retry, and the rest) now drives through
+// the same Fake too, but belongs there, not here -- this file is for a new
+// case that pins something about the Queue seam itself (a new adapter
+// behavior, a new Batch field reaching RunContinuous), not a new
+// RunContinuous scenario that happens to use the Fake as its Queue.
 package waves
 
 import (

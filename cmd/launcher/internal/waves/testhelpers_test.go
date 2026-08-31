@@ -125,7 +125,16 @@ func fakePending(fc *forge.Fake, c Config, edges map[string][]string, failed map
 }
 
 // testFactory builds a dispatch.Factory wired to dir and r, matching
-// cmd/launcher's own test helper.
+// cmd/launcher's own test helper. RunContinuous's f *dispatch.Factory
+// parameter is a concrete struct, not an interface, so there is no fake
+// substitute for it: any test that needs a Box to actually launch
+// (assertions on fr.RunCalls, or on fc.TransitionStateCalls/
+// CompleteVerdictCalls driven by a real dispatch) must call testFactory.
+// AC1's "no real dispatch Factory" (issue #2940) only applies to, and is
+// achieved by, tests where nothing ever dispatches — those pass a literal
+// nil, nil for f and s instead (e.g. the StaleDrainHeldBack* exclusion
+// tests in this file and queue_engine_test.go's
+// TestRunContinuous_ThroughQueueFake_AllBlockedNeedsNoFactory).
 func testFactory(t *testing.T, dir string, r runner.Runner) *dispatch.Factory {
 	t.Helper()
 	drv, err := driver.New("")

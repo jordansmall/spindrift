@@ -1,3 +1,17 @@
+// This file's RunContinuous scenarios drive the Queue seam through *Fake
+// (issue #2937) -- see queue_engine_test.go's own file-header comment for
+// the line between the two files. A scenario typically constructs both a
+// forge.Fake (fc, seeded via SetIssue) and a Fake Queue (fake, given a
+// DiscoverReturn/DiscoverFunc): the two aren't the same list wearing two
+// hats, even when a scenario's fake.DiscoverReturn happens to name the same
+// issue numbers fc carries. fc is the tracker RunContinuous claims against,
+// checks blocker/priority/DepsOf state on, and settles against; fake is
+// only what Discover returns. Keeping them independent, rather than
+// deriving one from the other, is what lets a scenario put fake.Claim out
+// of step with fc's real label state on purpose (TestRunContinuous_
+// StaleDiscoveryNeverDoubleDispatches's stale-search-result batch is the
+// clearest example) -- collapsing them back into one hand-maintained list
+// would silently reintroduce the live re-listing this migration removed.
 package waves
 
 import (
