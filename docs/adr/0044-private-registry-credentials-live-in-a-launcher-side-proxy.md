@@ -234,9 +234,14 @@ the artifact base path is registry-specific, not a fixed shape.
   resolution at the Forwarder with no in-tree rewrite at all. This was
   verified by interactively running a real Gradle 8.14.4 against a local
   stand-in HTTP server outside this repo's own toolchain — no JDK/gradle
-  dependency is added here, so the entrypoint's bats suite covers the
-  generated init script's shape and the entrypoint's control flow, not an
-  actual Gradle invocation. `-Dhttps.proxyHost`/`JAVA_TOOL_OPTIONS` were
+  dependency is added here, so a Go golden test
+  (`cmd/launcher/internal/bindregistry/gradlebinding_test.go`,
+  `TestGradleInitScript_ExactContent`) covers the generated init script's
+  shape, and `tests/entrypoint-registry-proxy-bindings.bats` covers the
+  entrypoint's control flow (that `driver-exec bind-registry` actually
+  writes the init script to `$GRADLE_USER_HOME/init.d/` when the phase
+  runs), not an actual Gradle invocation.
+  `-Dhttps.proxyHost`/`JAVA_TOOL_OPTIONS` were
   confirmed the wrong mechanism, since a forward proxy cannot inject a header
   into an HTTPS CONNECT tunnel and the Forwarder is a reverse proxy standing
   in as the origin, not a forward proxy. The init script uses two redirect

@@ -187,12 +187,11 @@ func TestRunBindRegistryWithDeps_SocketAbsentIsNoOp(t *testing.T) {
 // withFakeSocatOnPath to make the LookPath check succeed instead): given a
 // real mounted socket, a probe reporting nothing is listening yet (so
 // something would need spawning), and no socat on PATH, bindings mode
-// prints the exact warning wording
-// tests/entrypoint-registry-proxy-gradle-binding.bats:188 asserts on, exits
-// 0, calls probe (issue #2931 finding: the LookPath check only gates the
-// spawn path, so it must run after probe, not before) but never spawn (it
-// returns before EnsureForwarderReady's own spawn call), and leaves
-// bindings-env-output untouched.
+// prints the exact warning wording below, exits 0, calls probe (issue
+// #2931 finding: the LookPath check only gates the spawn path, so it must
+// run after probe, not before) but never spawn (it returns before
+// EnsureForwarderReady's own spawn call), and leaves bindings-env-output
+// untouched.
 func TestRunBindRegistryWithDeps_SocatMissingWarnsAndSkipsBindings(t *testing.T) {
 	// An empty temp dir on PATH guarantees exec.LookPath("socat") fails
 	// deterministically, regardless of whether the ambient sandbox happens to

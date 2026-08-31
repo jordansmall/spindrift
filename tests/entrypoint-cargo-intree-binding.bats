@@ -31,16 +31,16 @@
 #
 # Cargo's row spawns/probes a Forwarder via `socat` exactly like
 # phase_registry_proxy_bindings' own bindings mode does (see
-# tests/entrypoint-registry-proxy-gradle-binding.bats) -- so this suite uses
+# tests/entrypoint-pnpm-intree-binding.bats) -- so this suite uses
 # the shared helper.bash `wait_for_socket`/`kill_stand_in_socat` stand-in
 # socat pattern those suites use.
 #
 # REGISTRY_PROXY_FORWARDER_PORT=27191 here is distinct from every port
 # already claimed elsewhere in this suite's siblings (grep
-# `REGISTRY_PROXY_FORWARDER_PORT=` across tests/*.bats: 27184 npm, 27185-27187
-# gradle, 27188 yarn-classic, 27189 yarn-berry, 27190 pnpm), so a socat
-# TCP-LISTEN bind never collides if bats sharding runs multiple *.bats files
-# concurrently.
+# `REGISTRY_PROXY_FORWARDER_PORT=` across tests/*.bats: 27184 npm, 27185
+# registry-proxy-bindings, 27188 yarn-classic, 27189 yarn-berry, 27190
+# pnpm), so a socat TCP-LISTEN bind never collides if bats sharding runs
+# multiple *.bats files concurrently.
 
 load helper
 
