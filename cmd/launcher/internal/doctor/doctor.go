@@ -13,6 +13,7 @@ import (
 	"io"
 	"strings"
 
+	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/runner"
 )
@@ -174,6 +175,12 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, w io.Writer, stdin
 		tokenHint, slugHint = c.TokenHint, c.SlugHint
 	}
 
+	// caps is it's/cf's resolved forge.Capabilities (issue #2946), resolved
+	// once here since both are stable for this whole Run call — shared by
+	// BranchProtectionCheck below and the recoverable-issues Probe closure,
+	// rather than each asserting its own optional interface independently.
+	caps := forge.ResolveCapabilities(cf, it, backend.Descriptor{}, backend.Descriptor{})
+
 	// builtinChecks are the always-run doctor rows: issue-tracker
 	// connectivity, code-forge connectivity, branch protection, and the
 	// recoverable-issue count. Each Probe returns its fetched detail (repo
@@ -216,7 +223,7 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, w io.Writer, stdin
 				return fmt.Sprintf("code forge confirmed — %s is reachable", output.(string))
 			},
 		},
-		BranchProtectionCheck(cf, c.MergePolicy, c.BaseBranch),
+		BranchProtectionCheck(caps, c.MergePolicy, c.BaseBranch),
 		{
 			Name: "recoverable-issues",
 			Tier: Required,
@@ -228,9 +235,10 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, w io.Writer, stdin
 				// ignore an empty label filter instead of erroring
 				// (forge.LabeledTracker's doc comment) — mirroring
 				// console/adapter.go's countRecoverable guard for the same
-				// reason.
+				// reason. caps.LabeledTracker is it's resolved typed handle
+				// (issue #2946) rather than a raw assertion here.
 				recoverableCount := 0
-				if lt, ok := it.(forge.LabeledTracker); !ok || lt.StateLabels().Label(forge.Recoverable) != "" {
+				if caps.LabeledTracker == nil || caps.LabeledTracker.StateLabels().Label(forge.Recoverable) != "" {
 					recoverable, err := it.ListIssues(forge.Recoverable)
 					if err != nil {
 						return nil, fmt.Errorf("%w: recoverable issue check failed: %w", ErrConnectivity, err)

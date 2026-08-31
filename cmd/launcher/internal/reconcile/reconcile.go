@@ -77,19 +77,25 @@ type LivenessProbe interface {
 // callback, mirroring settle.Config.CodeForgeForIssue, rather than importing
 // forge/local itself to resolve it. Unused on every path but the local-only
 // healing/discovery path.
-func Run(it forge.IssueTracker, cf forge.CodeForge, lp LivenessProbe, scopeFor func(num string) forge.SeedScope) (Result, error) {
-	closer, ok := it.(forge.IssueCloser)
-	if !ok {
+//
+// caps is it's and cf's resolved forge.Capabilities (issue #2946), read for
+// every optional-interface surface Run needs instead of Run re-deriving them
+// itself via type assertion — the caller resolves once (typically via
+// forge.ResolveCapabilities) and threads the same value through every
+// consumer.
+func Run(it forge.IssueTracker, cf forge.CodeForge, lp LivenessProbe, caps forge.Capabilities, scopeFor func(num string) forge.SeedScope) (Result, error) {
+	closer := caps.IssueCloser
+	if closer == nil {
 		return Result{}, nil
 	}
-	pr, hasPR := cf.(forge.PRForge)
-	container, hasLocal := cf.(forge.LandingContainmentQuery)
-	if !hasPR && !hasLocal {
+	pr := caps.PRForge
+	container := caps.LandingContainmentQuery
+	if pr == nil && container == nil {
 		return Result{}, nil
 	}
-	lr, _ := it.(forge.LandingRecorder)
-	flagger, _ := it.(forge.AbandonedFlagger)
-	repair, _ := cf.(forge.LandingRepair)
+	lr := caps.LandingRecorder
+	flagger := caps.AbandonedFlagger
+	repair := caps.LandingRepair
 
 	issues, err := it.ListOpenIssues()
 	if err != nil {
@@ -100,7 +106,7 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, lp LivenessProbe, scopeFor f
 	prc := prReconciler{closer: closer, pr: pr, cf: cf, lr: lr, flagger: flagger}
 	llc := localLandingReconciler{closer: closer, container: container, repair: repair, lr: lr, cf: cf, scopeFor: scopeFor}
 	for _, iss := range issues {
-		if hasPR {
+		if pr != nil {
 			if err := prc.reconcile(&res, iss); err != nil {
 				return res, err
 			}
@@ -111,7 +117,7 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, lp LivenessProbe, scopeFor f
 		}
 	}
 
-	if !hasPR {
+	if pr == nil {
 		return res, nil
 	}
 	inProgress, err := it.ListIssues(forge.InProgress)

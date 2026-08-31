@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/retry"
@@ -125,7 +126,15 @@ func nextReady(cfg Config, it forge.IssueTracker, cf forge.CodeForge, checkOverl
 func issueReadiness(cfg Config, it forge.IssueTracker, cf forge.CodeForge, checkOverlap func(string) (string, bool), iss Issue, edges map[string][]string, depsOfFailed map[string]bool) (ready bool, line string) {
 	var unready []string
 	if !cfg.IgnoreBlockers {
-		unready = unreadyBlockers(it, cf, iss.Number, edges, cfg.SeedScopeOf)
+		// caps is it's and cf's resolved forge.Capabilities (issue #2946),
+		// resolved fresh per call (issueReadiness itself is called once per
+		// candidate issue by both nextReady's and CountReady's own loops)
+		// rather than threaded in as a parameter — it/cf never vary within a
+		// single Dispatch/RunContinuous invocation, so this is the same
+		// assertion work blockerReady's old cf.(forge.PRForge) did, just
+		// centralized through forge.ResolveCapabilities.
+		caps := forge.ResolveCapabilities(cf, it, backend.Descriptor{}, backend.Descriptor{})
+		unready = unreadyBlockers(it, cf, caps, iss.Number, edges, cfg.SeedScopeOf)
 	}
 	switch {
 	case !cfg.IgnoreBlockers && depsOfFailed[iss.Number]:

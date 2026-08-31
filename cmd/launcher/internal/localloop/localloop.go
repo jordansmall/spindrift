@@ -98,12 +98,13 @@ func seedScopeFor(p local.SanitizedParent) forge.SeedScope {
 
 // SeedScopeResolver returns the waves.Config.SeedScopeOf resolver for the
 // local blocker gate (#2130, #2150): a dependent num -> the opaque
-// forge.SeedScope its blocker gate is checked against. Non-nil only when cf is
-// CODE_FORGE=local's containment-query surface; nil for every other forge,
-// where the seed-branch containment gate never fires and a blocker is judged
-// solely by its PR/issue state.
-func SeedScopeResolver(it forge.IssueTracker, cf forge.CodeForge) func(string) forge.SeedScope {
-	if _, ok := cf.(forge.LandingContainmentQuery); !ok {
+// forge.SeedScope its blocker gate is checked against. Non-nil only when
+// caps' LandingContainmentQuery handle is set (cf's containment-query
+// surface, resolved once by the caller — issue #2946); nil for every other
+// forge, where the seed-branch containment gate never fires and a blocker is
+// judged solely by its PR/issue state.
+func SeedScopeResolver(it forge.IssueTracker, caps forge.Capabilities) func(string) forge.SeedScope {
+	if caps.LandingContainmentQuery == nil {
 		return nil
 	}
 	return func(num string) forge.SeedScope { return SeedScopeOf(it, num) }
@@ -185,13 +186,15 @@ type seamGroup struct {
 // LandingBranchRef branch name (reconcile.Result.Stuck), letting a held
 // ticket's gate read "stuck landing" instead of the generic "open seam"
 // without Surface redoing reconcile's own ancestry check. It is a no-op for
-// a tracker with no SeamLister surface (every tracker but local).
-func (w *Wired) Surface(pwd string, out io.Writer, stuck map[string]string) error {
-	sl, ok := w.it.(forge.SeamLister)
-	if !ok {
+// a tracker with no SeamLister surface (every tracker but local); caps is
+// w.it's resolved forge.Capabilities (issue #2946), threaded in rather than
+// asserted here since every caller (reconcile_cmd.go's runReconcile chain,
+// the composed loop test) already has one resolved.
+func (w *Wired) Surface(pwd string, out io.Writer, stuck map[string]string, caps forge.Capabilities) error {
+	if caps.SeamLister == nil {
 		return nil
 	}
-	issues, err := sl.AllIssues()
+	issues, err := caps.SeamLister.AllIssues()
 	if err != nil {
 		return fmt.Errorf("surface: list issues: %w", err)
 	}

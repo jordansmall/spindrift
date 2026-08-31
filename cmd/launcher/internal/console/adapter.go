@@ -8,6 +8,7 @@ import (
 	"strings"
 	"syscall"
 
+	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/forge"
 )
 
@@ -20,22 +21,29 @@ import (
 func Refresh(tracker forge.IssueTracker) Msg {
 	issues, err := tracker.ListOpenIssues()
 	forge.SortByPriority(issues, func(i forge.Issue) forge.Priority { return i.Priority })
-	return IssuesLoadedMsg{Issues: issues, Err: err, RecoverableCount: countRecoverable(tracker, issues)}
+	// caps is tracker's resolved forge.Capabilities (issue #2946), resolved
+	// fresh per Refresh call (poll tick, "R" key, or an out-of-band launch
+	// signal, tea.go's refreshCmd — tracker itself never varies between
+	// them, but there's no single shared caller-side scope to cache this
+	// against) rather than a raw tracker.(forge.LabeledTracker) assertion in
+	// countRecoverable. cf is nil: Refresh has no CodeForge in scope, and
+	// none of the handles it reads here live on that side.
+	caps := forge.ResolveCapabilities(nil, tracker, backend.Descriptor{}, backend.Descriptor{})
+	return IssuesLoadedMsg{Issues: issues, Err: err, RecoverableCount: countRecoverable(caps, issues)}
 }
 
-// countRecoverable reports how many of issues carry tracker's Recoverable
+// countRecoverable reports how many of issues carry caps' Recoverable
 // dispatch-state label, resolved from the already-fetched ListOpenIssues
 // result rather than a second tracker query. Mirrors issueInState's
 // optional-interface idiom and its "unmapped label means never present"
-// caution (#1742): a tracker that doesn't implement forge.LabeledTracker, or
-// that leaves Recoverable unmapped (empty label string), reports zero rather
-// than matching every issue.
-func countRecoverable(tracker forge.IssueTracker, issues []forge.Issue) int {
-	lt, ok := tracker.(forge.LabeledTracker)
-	if !ok {
+// caution (#1742): a tracker whose resolved forge.Capabilities carries no
+// LabeledTracker handle, or whose LabeledTracker leaves Recoverable unmapped
+// (empty label string), reports zero rather than matching every issue.
+func countRecoverable(caps forge.Capabilities, issues []forge.Issue) int {
+	if caps.LabeledTracker == nil {
 		return 0
 	}
-	label := lt.StateLabels().Label(forge.Recoverable)
+	label := caps.LabeledTracker.StateLabels().Label(forge.Recoverable)
 	if label == "" {
 		return 0
 	}
@@ -112,8 +120,12 @@ func PickIssue(tracker forge.IssueTracker, num, title string, kind Kind) Msg {
 	if iss.State == forge.IssueClosed {
 		return PickDissolvedMsg{Number: num, Title: title, Reason: alreadyReason(num, "closed")}
 	}
+	// caps is tracker's resolved forge.Capabilities (issue #2946), resolved
+	// once here for both terminal-state checks below rather than
+	// issueInState re-deriving it (two raw type assertions) on each call.
+	caps := forge.ResolveCapabilities(nil, tracker, backend.Descriptor{}, backend.Descriptor{})
 	for _, state := range []forge.DispatchState{forge.InProgress, forge.Complete} {
-		active, err := issueInState(tracker, num, state)
+		active, err := issueInState(tracker, caps, num, state)
 		if err != nil {
 			return PickDissolvedMsg{Number: num, Title: title, Reason: err.Error()}
 		}
@@ -176,8 +188,8 @@ func transitionToDispatchable(tracker forge.IssueTracker, num, title string, kin
 // genuinely holds >= forge.ResultPageLimit issues. forge.Fake and the
 // still-single-page github gh-exec adapter don't implement it, so they keep
 // paying the conservative fail-safe above unchanged.
-func issueInState(tracker forge.IssueTracker, num string, state forge.DispatchState) (bool, error) {
-	if lt, ok := tracker.(forge.LabeledTracker); ok && lt.StateLabels().Label(state) == "" {
+func issueInState(tracker forge.IssueTracker, caps forge.Capabilities, num string, state forge.DispatchState) (bool, error) {
+	if caps.LabeledTracker != nil && caps.LabeledTracker.StateLabels().Label(state) == "" {
 		return false, nil
 	}
 	issues, err := tracker.ListIssues(state)
@@ -189,7 +201,7 @@ func issueInState(tracker forge.IssueTracker, num string, state forge.DispatchSt
 			return true, nil
 		}
 	}
-	if fp, ok := tracker.(forge.FullyPaginated); ok && fp.WalksAllPages() {
+	if caps.FullyPaginated != nil && caps.FullyPaginated.WalksAllPages() {
 		return false, nil
 	}
 	if len(issues) >= forge.ResultPageLimit {

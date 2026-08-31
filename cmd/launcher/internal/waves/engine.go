@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 
+	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/settle"
@@ -135,6 +136,14 @@ func printSelectiveRerunHint(cfg Config, held []Issue) {
 // in-batch dependency graph is assumed already cycle-checked by NewPlan.
 func drainMaxJobs(cfg Config, it forge.IssueTracker, cf forge.CodeForge, pwd string, f *dispatch.Factory, s settle.Settler, issues []Issue, edges map[string][]string, sources Sources, depsOfFailed map[string]bool, origin Origin, claimer Claimer) error {
 	checkOverlap := waveOverlapCheck(cfg, it, cf)
+	// caps is it's and cf's resolved forge.Capabilities (issue #2946),
+	// resolved once here for the whole drain rather than unreadyBlockers
+	// re-deriving it (via blockerReady's own type assertions) on every
+	// blocker check below. Zero-value backend.Descriptor rows are fine: the
+	// blocker gate never reads Capabilities' ForgeDescriptor/
+	// TrackerDescriptor fields, only its PRForge/LandingContainmentQuery
+	// handles.
+	caps := forge.ResolveCapabilities(cf, it, backend.Descriptor{}, backend.Descriptor{})
 	var selected []Issue
 outer:
 	for _, iss := range issues {
@@ -150,7 +159,7 @@ outer:
 		}
 		var unready []string
 		if !cfg.IgnoreBlockers {
-			unready = unreadyBlockers(it, cf, iss.Number, edges, cfg.SeedScopeOf)
+			unready = unreadyBlockers(it, cf, caps, iss.Number, edges, cfg.SeedScopeOf)
 		}
 		switch {
 		// A blocker bearing FailedLabel is held here too (unreadyBlockers
@@ -194,7 +203,7 @@ outer:
 					}
 					fmt.Printf("==> #%s blocker check failed; wrote .spindrift/logs/%s for the pipeline to release the claim\n", num, blockedMarker)
 				default:
-					if blockers := unreadyBlockers(it, cf, num, edges, cfg.SeedScopeOf); len(blockers) > 0 {
+					if blockers := unreadyBlockers(it, cf, caps, num, edges, cfg.SeedScopeOf); len(blockers) > 0 {
 						if err := writeBlockedMarker(pwd, blockers, sources[num]); err != nil {
 							return err
 						}

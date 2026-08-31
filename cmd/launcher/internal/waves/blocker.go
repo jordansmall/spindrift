@@ -118,8 +118,8 @@ func NewReadiness(it forge.IssueTracker, issues []Issue) (Readiness, error) {
 // unready drives the console's BlockedBy badge and failed drives Reason
 // (queue.go's setHeld), and collapsing the two would reintroduce the
 // redundant rendering #755 removes.
-func (r Readiness) Status(cfg Config, it forge.IssueTracker, cf forge.CodeForge, num string) (ready bool, failed, unready []string) {
-	return blockerStatus(cfg, it, cf, num, r.Edges)
+func (r Readiness) Status(cfg Config, it forge.IssueTracker, cf forge.CodeForge, caps forge.Capabilities, num string) (ready bool, failed, unready []string) {
+	return blockerStatus(cfg, it, cf, caps, num, r.Edges)
 }
 
 // Ready reports whether a single blocker ref — not necessarily one of r's
@@ -128,15 +128,18 @@ func (r Readiness) Status(cfg Config, it forge.IssueTracker, cf forge.CodeForge,
 // r was resolved from — is satisfied: the blocker's PR is merged, or it
 // resolves (via the issue-fallback path) to an issue that is closed or a PR
 // that is merged, with no discoverable agent branch (human-handled work, or
-// a blocker ref that names a PR number directly). cf's PR surface is
-// optional: a push-only Code Forge (no PRForge) has no PR to discover, so
+// a blocker ref that names a PR number directly). caps' PRForge handle is
+// optional: a push-only Code Forge (nil PRForge) has no PR to discover, so
 // readiness falls straight to the issue-closed check. scope is the caller's
-// dependent's already-resolved opaque SeedScope (#2130) that a
-// LandingContainmentQuery forge checks the blocker's landing against; a
-// zero SeedScope (no parent) means the containment check never runs, leaving
-// an open IntegrationRef-landed blocker unready until it closes.
-func (r Readiness) Ready(it forge.IssueTracker, cf forge.CodeForge, dep string, scope forge.SeedScope) bool {
-	ready, _ := blockerReady(it, cf, dep, scope)
+// dependent's already-resolved opaque SeedScope (#2130) that caps'
+// LandingContainmentQuery handle, when non-nil, checks the blocker's landing
+// against; a zero SeedScope (no parent) means the containment check never
+// runs, leaving an open IntegrationRef-landed blocker unready until it
+// closes. caps is cf's and it's resolved forge.Capabilities (issue #2946),
+// read for both optional surfaces instead of Ready asserting them from cf
+// itself.
+func (r Readiness) Ready(it forge.IssueTracker, cf forge.CodeForge, caps forge.Capabilities, dep string, scope forge.SeedScope) bool {
+	ready, _ := blockerReady(it, cf, caps, dep, scope)
 	return ready
 }
 
@@ -202,9 +205,12 @@ func detectCycle(edges map[string][]string, nums []string) (string, bool) {
 // fetch happened" apart from "fetched and still open" without a second call.
 // scope is the dependent's own already-resolved opaque SeedScope (#2130); a
 // zero SeedScope (no parent) skips the seed-branch containment check
-// entirely, so an open IntegrationRef-landed blocker stays unready.
-func blockerReady(it forge.IssueTracker, cf forge.CodeForge, dep string, scope forge.SeedScope) (ready bool, fi *forge.Issue) {
-	if pr, ok := cf.(forge.PRForge); ok {
+// entirely, so an open IntegrationRef-landed blocker stays unready. caps is
+// cf's and it's resolved forge.Capabilities (issue #2946), read for both of
+// this function's optional surfaces (PRForge, LandingContainmentQuery)
+// instead of asserting them from cf via type assertion.
+func blockerReady(it forge.IssueTracker, cf forge.CodeForge, caps forge.Capabilities, dep string, scope forge.SeedScope) (ready bool, fi *forge.Issue) {
+	if pr := caps.PRForge; pr != nil {
 		branch := cf.AgentBranch(dep)
 		prURL, found, err := pr.PRForBranch(branch)
 		if err == nil && found {
@@ -229,7 +235,7 @@ func blockerReady(it forge.IssueTracker, cf forge.CodeForge, dep string, scope f
 	}
 	if issue.Landing != "" {
 		if landing, perr := forge.ParseLanding(issue.Landing); perr == nil && landing.Kind == forge.LandingIntegrationRef {
-			if q, ok := cf.(forge.LandingContainmentQuery); ok && scope.Parent() != "" {
+			if q := caps.LandingContainmentQuery; q != nil && scope.Parent() != "" {
 				contained, cerr := q.LandingContained(landing, scope)
 				if cerr != nil {
 					fmt.Printf("    .. blocker #%s seed-branch containment check failed: %v; holding\n", dep, cerr)
@@ -259,15 +265,16 @@ func containsLabel(labels []string, target string) bool {
 // in edge order. Empty means the issue is ready to dispatch. scopeOf
 // resolves num to its own opaque SeedScope (#2130); nil yields a zero scope,
 // which skips the seed-branch containment check so an IntegrationRef-landed
-// blocker stays unready.
-func unreadyBlockers(it forge.IssueTracker, cf forge.CodeForge, num string, edges map[string][]string, scopeOf func(num string) forge.SeedScope) []string {
+// blocker stays unready. caps is cf's and it's resolved forge.Capabilities
+// (issue #2946), threaded straight through to blockerReady.
+func unreadyBlockers(it forge.IssueTracker, cf forge.CodeForge, caps forge.Capabilities, num string, edges map[string][]string, scopeOf func(num string) forge.SeedScope) []string {
 	var scope forge.SeedScope
 	if scopeOf != nil {
 		scope = scopeOf(num)
 	}
 	var out []string
 	for _, dep := range edges[num] {
-		if ready, _ := blockerReady(it, cf, dep, scope); !ready {
+		if ready, _ := blockerReady(it, cf, caps, dep, scope); !ready {
 			out = append(out, dep)
 		}
 	}
@@ -277,14 +284,15 @@ func unreadyBlockers(it forge.IssueTracker, cf forge.CodeForge, num string, edge
 // blockerStatus is Readiness.Status's logic, generalized to an arbitrary
 // edges map so the engine's own internal callers (drainMaxJobs, nextReady)
 // can reuse it against a Plan's edges without going through a Readiness
-// value.
-func blockerStatus(cfg Config, it forge.IssueTracker, cf forge.CodeForge, num string, edges map[string][]string) (ready bool, failed, unready []string) {
+// value. caps is cf's and it's resolved forge.Capabilities (issue #2946),
+// threaded straight through to blockerReady.
+func blockerStatus(cfg Config, it forge.IssueTracker, cf forge.CodeForge, caps forge.Capabilities, num string, edges map[string][]string) (ready bool, failed, unready []string) {
 	var scope forge.SeedScope
 	if cfg.SeedScopeOf != nil {
 		scope = cfg.SeedScopeOf(num)
 	}
 	for _, dep := range edges[num] {
-		depReady, fi := blockerReady(it, cf, dep, scope)
+		depReady, fi := blockerReady(it, cf, caps, dep, scope)
 		if !depReady {
 			unready = append(unready, dep)
 		}
