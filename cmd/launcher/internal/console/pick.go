@@ -191,6 +191,13 @@ type Pick struct {
 	// leaves PickRunning, matching every other terminal-state row that keeps
 	// its last-known detail rather than blanking it.
 	Heartbeat string
+	// PassState is the last-parsed pass-manifest summary for a PickRunning row
+	// (issue #2983) — "" until a running Box's outbox carries a manifest with
+	// at least one entry, and left stale (not cleared) once a pick leaves
+	// PickRunning, matching Heartbeat's own convention above. Advisory only:
+	// purely a display annotation, never consulted by any settle/dispatch
+	// decision.
+	PassState string
 	// QueuedAt is the wall-clock moment Queue.Add landed this pick — the
 	// source Age formats from. Set by the impure Queue, never by Update, so
 	// a pick a pure Update-only test constructs (no Launcher) carries the
