@@ -63,7 +63,7 @@ its fd via `cmd.ExtraFiles`. Three questions had to be settled to get there.
   left as a documented follow-up, not attempted in this cut.
 
 - **Missing/unreadable filter file warns and proceeds without it, matching
-  ADR 0042's own degrade-don't-lie precedent for prlimit/cgroup.** The
+  ADR 0042's own degrade-don't-lie precedent for cgroup delegation.** The
   filter is defense-in-depth layered on top of bwrap's existing namespace and
   mount isolation, not the sandbox's sole isolation mechanism, so a Box built
   without the filter is a hardening gap, not an unsafe launch. Refusing to

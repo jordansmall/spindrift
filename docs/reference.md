@@ -1256,7 +1256,7 @@ the authoritative list.
 | `DEV_SHELL_NAME`       | `default` | `sandbox`        | which devShell to enter; set `ci` to use a lean headless shell distinct from the interactive `default` |
 | `DEV_SHELL_PROBE_TIMEOUT` | `300` | `sandbox`        | seconds before the in-box devShell probe is abandoned for the baked toolchain |
 | `MEMORY_LIMIT`         | `5g`    | `sandbox`          | memory cap: hard `--memory` cap under OCI; under bwrap, a per-Box cgroup v2 `memory.max` when the host delegates a writable cgroup subtree, else best-effort — warns and proceeds uncapped rather than refusing to launch (ADR 0042); empty disables |
-| `PIDS_LIMIT`           | `512`   | `sandbox`          | process-count cap: hard `--pids-limit` cap under OCI; under bwrap, unconditional `prlimit --nproc` plus a per-Box cgroup v2 `pids.max` when cgroup delegation is available (ADR 0042); empty disables |
+| `PIDS_LIMIT`           | `512`   | `sandbox`          | process-count cap: hard `--pids-limit` cap under OCI; under bwrap, a per-Box cgroup v2 `pids.max` when the host delegates a writable cgroup subtree, else best-effort — warns and proceeds uncapped rather than refusing to launch (ADR 0042); empty disables |
 | `NETWORK_MODE`         | `open`  | — (post-freeze; no legacy alias — set `infra.network.mode`) | Box network posture: `open` (default; isolates bwrap into its own netns behind a hardened pasta helper — working egress, host loopback blocked, issue #2666 — OCI unchanged, no isolation there), `host` (bwrap-only opt-out restoring the pre-#2666 shared-host-netns behavior; no-op on OCI), `no-host-loopback` (keep egress, deny host-loopback on podman; inert-but-correct on docker/nerdctl, same as `open` there — unsupported on `runtime=bwrap`, eval error), `none` (fully offline — documented test-only, a Driver can't reach its Provider) — see [Network mode](#network-mode-network_mode) |
 | `PODMAN_NETWORK`       | —       | `sandbox`          | raw `--network` escape hatch for podman run; mutually exclusive with `NETWORK_MODE` at eval time |
 | `BWRAP_UNSHARE_NET`    | —       | `sandbox`          | raw `--unshare-net` escape hatch for bwrap, now pasta-backed (issue #2666); redundant with the isolate-by-default posture unless paired with `NETWORK_MODE=host`, which nix eval already rejects; mutually exclusive with `NETWORK_MODE` at eval time |
@@ -1418,8 +1418,8 @@ The filter also covers the **native architecture only** (libseccomp's
 
 **Failure posture.** If the compiled filter file is missing or unreadable,
 the launcher warns and proceeds without it rather than refusing to launch
-the Box — the same degrade-don't-lie precedent ADR 0042 already applies to a
-missing prlimit/cgroup: the filter is defense-in-depth on top of bwrap's
+the Box — the same degrade-don't-lie precedent ADR 0042 already applies to
+missing cgroup delegation: the filter is defense-in-depth on top of bwrap's
 existing namespace/mount isolation, not the sandbox's sole isolation
 mechanism.
 
@@ -3701,7 +3701,7 @@ settings.
 For one-shot bwrap runs outside the loop, `nix develop .#bwrap` (Linux-only,
 same guard as `apps.dogfood-bwrap`) puts the bwrap-baked `spindrift` CLI on
 PATH together with the host binaries the launcher execs from ambient PATH —
-`bwrap`, `pasta` (issue #2666), and `prlimit` (ADR 0042) — so
+`bwrap` and `pasta` (issue #2666) — so
 `spindrift build && spindrift dispatch <issue> --yes` works directly, with
 no `nix run` prefix and no reliance on the default dev shell's toolchain.
 

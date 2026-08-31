@@ -263,18 +263,17 @@
             # `spindrift dispatch`/`build`/`doctor` without dogfood.sh or a
             # `nix run .#dogfood-bwrap --` prefix): the bwrap-baked CLI plus
             # the host binaries the Go launcher execs from ambient PATH —
-            # bwrap, pasta (issue #2666), and prlimit (ADR 0042) — which the
-            # CLI wrapper's own runtimeInputs deliberately don't pin (it is
-            # the generic every-runtime package). Guarded by the same
-            # predicate as apps.dogfood-bwrap above (Linux-only), for the
-            # same resolve-time-clarity reason.
+            # bwrap and pasta (issue #2666) — which the CLI wrapper's own
+            # runtimeInputs deliberately don't pin (it is the generic
+            # every-runtime package). Guarded by the same predicate as
+            # apps.dogfood-bwrap above (Linux-only), for the same
+            # resolve-time-clarity reason.
             // pkgs.lib.optionalAttrs (fixtures.dogfoodBwrapHarness.packages ? agent-closure) {
               bwrap = pkgs.mkShell {
                 packages = [
                   fixtures.dogfoodBwrapHarness.packages.spindrift
                   pkgs.bubblewrap
                   pkgs.passt
-                  pkgs.util-linux
                 ];
               };
             };
