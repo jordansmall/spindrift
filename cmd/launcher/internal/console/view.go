@@ -24,72 +24,6 @@ const (
 	dockedBorderCols = boxBorderCols * 2
 )
 
-// sidebarWidth is the docked live-tail sidebar's minimum column width — wide
-// enough for a realistic Activity status line without wrapping in the
-// common case (ADR 0030), and the floor computeSidebarWidth never shrinks
-// below regardless of terminal width. This is the sidebar's interior
-// content width; its bordered panel renders boxBorderCols wider still.
-const sidebarWidth = 42
-
-// sidebarMinListWidth is the narrowest the list column can render at and
-// still be usable beside a docked sidebar — the threshold sidebarFits checks
-// against, below which the sidebar falls back to a fullscreen takeover
-// instead of squeezing both columns illegibly (ADR 0030's narrow-terminal
-// degradation). Sized against the wider of the two tables, a work Section's
-// (workFixedWidth + extrasBudget, currently 60), so a docked row's title
-// keeps a legible ~20 columns on every Section, not just the Backlog's
-// narrower one.
-const sidebarMinListWidth = 80
-
-// sidebarFits reports whether m.Width has room for the list column (at
-// least sidebarMinListWidth) plus the docked sidebar (sidebarWidth) plus
-// dockedBorderCols for the two panels' bordered edges — the gate View and
-// handleKey both check before choosing the docked layout over the
-// fullscreen fallback, so the two can never disagree about which one is
-// showing (issue #1500's sectionTabsReserved precedent, extended to the
-// sidebar, widened for the panel borders by issue #1755).
-func sidebarFits(m Model) bool {
-	return m.Width >= sidebarMinListWidth+sidebarWidth+dockedBorderCols
-}
-
-// sidebarWidthTargetPercent is the share of the terminal's total width the
-// docked sidebar targets once there's room to grow past its sidebarWidth
-// floor (issue #1751) — the activity stream should read as a real column,
-// not a sliver, on a wide terminal.
-const sidebarWidthTargetPercent = 45
-
-// computeSidebarWidth returns the docked sidebar's interior column width for
-// a terminal totalWidth columns wide: sidebarWidthTargetPercent of
-// totalWidth, clamped down to whatever leaves the queue list at least
-// sidebarMinListWidth (plus dockedBorderCols for both panels' borders), and
-// clamped up to never shrink below the sidebarWidth floor (issue #1751).
-// Only meaningful when sidebarFits(m) is true — totalWidth values below that
-// threshold can drive the clamp's upper bound under its lower one, which
-// callers on the fullscreen fallback path never observe.
-func computeSidebarWidth(totalWidth int) int {
-	target := totalWidth * sidebarWidthTargetPercent / 100
-	if target < sidebarWidth {
-		target = sidebarWidth
-	}
-	if listFloorMax := totalWidth - sidebarMinListWidth - dockedBorderCols; target > listFloorMax {
-		target = listFloorMax
-	}
-	return target
-}
-
-// queueNarrowed reports whether the queue list column is currently rendered
-// at the sidebar-docked narrowed width rather than the terminal's full width
-// — the trigger for the compact/wrapped queue-row form (issue #1752). Mirrors
-// View's own condition for choosing the docked layout over the fullscreen
-// sidebar takeover (m.SidebarZoom or !sidebarFits(m)), so a caller checking
-// before the list is even rendered (model.go's cursor-follow) can never
-// disagree with what View ends up drawing: a fullscreen sidebar, zoomed or
-// too-narrow-to-dock, hides the list entirely, so it never counts as
-// "narrowed."
-func queueNarrowed(m Model) bool {
-	return m.Sidebar != nil && !m.SidebarZoom && sidebarFits(m)
-}
-
 // padColumnsToEqualHeight pads the shorter of the list and sidebar columns'
 // rendered content with trailing blank lines up to the taller one's line
 // count, so their bordered boxes close on the same row instead of the
@@ -1037,78 +971,6 @@ func renderHelp() string {
 	return strings.Join(lines, "\n")
 }
 
-// bodyBudget returns the row budget left for the active Section's table
-// after the header, Section tabs, and any active prompt/error lines — the
-// same figure View computes before calling renderBody (issue #1035, ADR
-// 0030). Update reuses it so cursor-follows-viewport (issue #1036) scrolls
-// against the exact window View is about to render, rather than a second,
-// potentially-diverging calculation.
-func bodyBudget(m Model) int {
-	headerLines := strings.Count(renderBoxedHeader(m), "\n")
-	reservedLines := sectionTabsReserved(m, headerLines)
-	if m.Mode == ModeFilterEdit {
-		reservedLines++
-	}
-	if m.Mode == ModeTerminateConfirm {
-		reservedLines++
-	}
-	if m.Mode == ModeQuitConfirm {
-		reservedLines++
-	}
-	if m.QueueEnterNotice != "" {
-		reservedLines++
-	}
-	if m.Toast != "" {
-		reservedLines++
-	}
-	if m.Err != nil {
-		reservedLines++
-	}
-	// Mirrors viewBody's own "-1" (issue #1825): the body is the only
-	// budget component still free to shrink, so it's where the reservation
-	// for View()'s guaranteed trailing "\n" lands, keeping this figure in
-	// agreement with the one View actually renders against.
-	budget := m.Height - headerLines - reservedLines - 1
-	if budget < 0 {
-		budget = 0
-	}
-	if m.Sidebar != nil && sidebarFits(m) && !m.SidebarZoom {
-		// Docked, both bordered panels eat boxBorderRows out of the same
-		// row band View renders them into — bodyBudget must match, or
-		// Update's scroll/cursor clamps cap the last page against a taller
-		// budget than the bordered render actually has room to show,
-		// stranding the last couple of lines behind the border forever
-		// (issue #1755, extending the #1501/#1502 shared-budget invariant).
-		budget -= boxBorderRows
-		if budget < 0 {
-			budget = 0
-		}
-	}
-	return budget
-}
-
-// listContentBudget is bodyBudget(m) less listFooterLines whenever ModeList's
-// own pinned footer (issue #1792) is about to consume a row — Update's
-// cursor/scroll clamp (model.go) and sectionPageSize go through this instead
-// of bodyBudget(m) directly, the same way model.go's sidebar clamp
-// separately subtracts sidebarDockedFooterLines, so neither ever targets a
-// taller page than renderBody's own "-listFooterLines" reservation actually
-// leaves room to show (issue #1755's shared-budget invariant, extended to
-// the list's footer). Unlike sidebarDockedFooterLines's docked-only
-// reservation, this applies whenever m.Mode is ModeList regardless of
-// whether a sidebar is docked beside the list — renderBody appends the same
-// footer to the list column either way.
-func listContentBudget(m Model) int {
-	budget := bodyBudget(m)
-	if m.Mode == ModeList {
-		budget -= listFooterLines
-		if budget < 0 {
-			budget = 0
-		}
-	}
-	return budget
-}
-
 // positionLabel returns a compact " (X-Y of N)" position indicator for a
 // column's label, describing the rows vp actually renders at itemBudget of
 // total — or "" when there is nothing to show a range for (an empty list, or
@@ -1409,63 +1271,6 @@ const (
 	detailModalBoxMaxHeight = 30
 )
 
-// detailModalFits reports whether m.Width and m.Height leave room for a
-// floating detail modal box at least detailModalBoxMin{Width,Height} — the
-// gate View and the modal's own width/height-dependent routing (the Lines
-// wrap width, the scroll budget) both check before choosing the floating
-// box over the small-terminal fullscreen fallback, so the two can never
-// disagree about which one is showing (sidebarFits' detail-modal analogue,
-// issue #1759). Delegates to modalBoxFits, the modal-agnostic gate (issue
-// #1844).
-func detailModalFits(m Model) bool {
-	return modalBoxFits(m.Width, m.Height, detailModalBoxMinWidth, detailModalBoxMinHeight)
-}
-
-// detailModalWrapWidth returns the width the detail modal's body should wrap
-// against: the floating box's interior width when detailModalFits(m), the
-// same fullscreen renderer's raw m.Width otherwise — so a resize that
-// crosses the fit threshold rewraps against whichever width the render path
-// (gated by the same predicate) is actually about to show, instead of a
-// floating-box width that never fit the terminal in the first place (issue
-// #1759).
-func detailModalWrapWidth(m Model) int {
-	if !detailModalFits(m) {
-		return m.Width
-	}
-	innerWidth, _ := detailModalInnerSize(m.Width, m.Height)
-	return innerWidth
-}
-
-// detailModalScrollBudget returns the row budget the detail modal's scroll
-// clamp windows against: the floating box's interior body rows
-// (detailModalInnerSize, minus its own wrapped labels line count and
-// detailModalFooterLines — the same accounting renderDetailModalContent
-// does, since a ticket's labels wrap onto further interior rows instead of
-// spending a fixed one-row budget, issue #1772) when detailModalFits(m), or
-// the fullscreen renderer's own title-line-plus-wrapped-labels budget
-// otherwise — detailModalWrapWidth's height analogue, gated by the same
-// predicate (issue #1759). Both branches use detailModalLabelLinesCapped,
-// not the bare detailModalLabelLines, so a ticket with enough labels to
-// fill the content budget clamps against the same "+N more labels" row
-// count the render actually shows, not the uncapped wrap it never shows
-// (issue #1778) — the fullscreen renderer's own pinned label row wraps and
-// brackets the same way the floating box's does (issue #1832), so its
-// budget can no longer assume a fixed one-row label spend either.
-func detailModalScrollBudget(m Model) int {
-	if !detailModalFits(m) {
-		contentBudget := m.Height - detailModalTitleLines - detailModalFooterLines
-		if contentBudget < 0 {
-			contentBudget = 0
-		}
-		labelLines := detailModalLabelLinesCapped(m.DetailModal.Labels, m.Width, contentBudget)
-		return contentBudget - len(labelLines)
-	}
-	innerWidth, innerHeight := detailModalInnerSize(m.Width, m.Height)
-	contentBudget := innerHeight - detailModalFooterLines
-	labelLines := detailModalLabelLinesCapped(m.DetailModal.Labels, innerWidth, contentBudget)
-	return contentBudget - len(labelLines)
-}
-
 // detailModalBoxSize returns the floating detail modal box's outer width and
 // height for a termWidth x termHeight terminal: detailModalBox{Width,Height}
 // Percent of the terminal's own dimensions, clamped down to
@@ -1537,16 +1342,6 @@ const (
 	sidebarModalBoxMaxHeight = 54
 )
 
-// sidebarModalFits reports whether m.Width and m.Height leave room for a
-// floating log modal box at least sidebarModalBoxMin{Width,Height} — the
-// gate View checks before choosing the floating box over the small-terminal
-// fullscreen fallback (renderSidebarFullscreen), detailModalFits' log-modal
-// analogue (issue #1845). Delegates to modalBoxFits, the modal-agnostic gate
-// (issue #1844).
-func sidebarModalFits(m Model) bool {
-	return modalBoxFits(m.Width, m.Height, sidebarModalBoxMinWidth, sidebarModalBoxMinHeight)
-}
-
 // sidebarModalBoxSize returns the floating log modal box's outer width and
 // height for a termWidth x termHeight terminal — detailModalBoxSize's
 // log-modal analogue (issue #1845). Delegates to modalBoxSize, the
@@ -1577,25 +1372,6 @@ func sidebarModalBoxOrigin(termWidth, termHeight, boxWidth, boxHeight int) (x, y
 func sidebarModalInnerSize(termWidth, termHeight int) (width, height int) {
 	boxWidth, boxHeight := sidebarModalBoxSize(termWidth, termHeight)
 	return modalBoxInnerSize(boxWidth, boxHeight)
-}
-
-// sidebarModalScrollBudget returns the content-line budget the floating log
-// modal box actually has room to show for an m.Width x m.Height terminal —
-// detailModalScrollBudget's log-modal analogue (issue #1845), and the piece
-// Update's Sidebar.Offset clamp needs to stay in lockstep with what View
-// renders once the fullscreen sidebar became a modal: renderSidebarModalContent
-// budgets its content window as innerHeight minus sidebarModalLabelLines and
-// trailingNewlineRow (the label row and the footer-hints row), so the clamp
-// must subtract exactly that, not the wider headerFooterLines budget the
-// true fullscreen fallback (renderSidebarFullscreen, below sidebarModalFits)
-// uses.
-func sidebarModalScrollBudget(m Model) int {
-	_, innerHeight := sidebarModalInnerSize(m.Width, m.Height)
-	contentBudget := innerHeight - sidebarModalLabelLines - trailingNewlineRow
-	if contentBudget < 0 {
-		contentBudget = 0
-	}
-	return contentBudget
 }
 
 // padBaseForOverlay pads every line of s out to at least width display
