@@ -1,6 +1,7 @@
 package settle
 
 import (
+	"fmt"
 	"io"
 	"os"
 	"regexp"
@@ -610,6 +611,91 @@ func TestSettle_RecordLanding_NoOpWhenTrackerDoesNotImplementIt(t *testing.T) {
 	if len(fc.RecordLandingCalls) != 0 {
 		t.Errorf("want no RecordLanding calls against a tracker that doesn't implement it, got %+v", fc.RecordLandingCalls)
 	}
+}
+
+// TestSettle_NonceRejectedIssueIntent_LogsWarning verifies a nonce-mismatched
+// SPINDRIFT_ISSUE_INTENT line — one that carried the token but failed nonce
+// verification, surfaced only via Result.IssueIntentsRejected (issue #2976)
+// — produces a settle-logged warning naming the channel and the count,
+// instead of the old silent-drop behavior where a rejected line left no
+// trace at all.
+func TestSettle_NonceRejectedIssueIntent_LogsWarning(t *testing.T) {
+	const issNum = "2976"
+	const prURL = "https://github.com/owner/repo/pull/2976"
+
+	fc := forge.NewFake(testDispatchLabels)
+	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
+
+	result := dispatch.Result{
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: issNum, Landing: prURL, Status: "blocked", Note: "tests failing"},
+		},
+		IssueIntentsRejected: 1,
+	}
+
+	s := New(baseConfig(), fc, fc)
+	stderr := testutil.CaptureStderr(t, func() {
+		s.Settle(dispatch.NewFake(), issNum, 0, result)
+	})
+
+	want := fmt.Sprintf("#%s: 1 nonce-mismatched issue-intent line(s) rejected", issNum)
+	if !strings.Contains(stderr, want) {
+		t.Errorf("stderr must warn about the rejected issue-intent line; want substring %q, got: %q", want, stderr)
+	}
+}
+
+// TestSettle_NonceRejectedComment_FoundSuppressesDuplicate verifies
+// gate.go's logRejectedSignals warns for a rejected comment line only when a
+// verifying match was also found on that channel (CommentFound true) —
+// dispatch.outcomeResult's own comment-scan warning (retry.go) already
+// covers the CommentFound=false case (every line on the channel rejected),
+// so gate.go must stay silent there rather than double-warn.
+func TestSettle_NonceRejectedComment_FoundSuppressesDuplicate(t *testing.T) {
+	const issNum = "2976"
+	const prURL = "https://github.com/owner/repo/pull/2976"
+
+	baseResult := func(commentFound bool) dispatch.Result {
+		return dispatch.Result{
+			Success: true,
+			Resolved: outcome.Resolved{
+				Found:   true,
+				Outcome: outcome.Outcome{Issue: issNum, Landing: prURL, Status: "blocked", Note: "tests failing"},
+			},
+			CommentFound:    commentFound,
+			CommentRejected: 1,
+		}
+	}
+
+	t.Run("found=false stays silent", func(t *testing.T) {
+		fc := forge.NewFake(testDispatchLabels)
+		fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
+
+		s := New(baseConfig(), fc, fc)
+		stderr := testutil.CaptureStderr(t, func() {
+			s.Settle(dispatch.NewFake(), issNum, 0, baseResult(false))
+		})
+
+		if strings.Contains(stderr, "nonce-mismatched comment") {
+			t.Errorf("expected no comment-rejection warning when CommentFound is false (retry.go's scan-error path already covers it); got: %q", stderr)
+		}
+	})
+
+	t.Run("found=true warns", func(t *testing.T) {
+		fc := forge.NewFake(testDispatchLabels)
+		fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
+
+		s := New(baseConfig(), fc, fc)
+		stderr := testutil.CaptureStderr(t, func() {
+			s.Settle(dispatch.NewFake(), issNum, 0, baseResult(true))
+		})
+
+		want := fmt.Sprintf("#%s: 1 nonce-mismatched comment line(s) rejected", issNum)
+		if !strings.Contains(stderr, want) {
+			t.Errorf("stderr must warn about the rejected comment line when CommentFound is true; want substring %q, got: %q", want, stderr)
+		}
+	})
 }
 
 var errFake = fakeErr("fake error")
