@@ -1079,6 +1079,68 @@ func TestLoadConfig_SpindriftDirsEnvBeatsSchemaTable_Mixed(t *testing.T) {
 	}
 }
 
+// TestLoadConfig_EmptyDisablesLimit proves loadConfig() routes PIDS_LIMIT
+// and MEMORY_LIMIT through the schema's emptyDisables loader
+// (getenvSchemaPreserveEmpty, not getenvSchema): an unset env var still
+// falls back to the schema default, but an explicit KEY="" override
+// resolves to "" instead of collapsing into that default -- the contract
+// getenvSchema deliberately lacks (issue #3048).
+func TestLoadConfig_EmptyDisablesLimit(t *testing.T) {
+	cases := []struct {
+		name string
+		env  string
+		// useRealTable true means leave the ambient package-level
+		// schemaFlags (the real generated flagtable_gen.go table) in
+		// place instead of stubbing it via withSchemaFlags -- want below
+		// is still the acceptance criterion's literal (issue #3048: "512"
+		// / "5g"), but now checked against what loadConfig() actually
+		// resolves from the live schema, so a drifted flagtable_gen.go
+		// default fails this test instead of silently matching a
+		// disconnected stub. The other cases assert override behavior
+		// that's independent of the actual default value, so stubbing is
+		// fine there and keeps them decoupled from the real table's
+		// contents.
+		useRealTable bool
+		setEnv       bool
+		envVal       string
+		dflt         string // only used when useRealTable is false
+		want         string
+		getGot       func(c config) string
+	}{
+		{name: "pidsLimit unset falls back to schema default", env: "PIDS_LIMIT", useRealTable: true, setEnv: false, want: "512", getGot: func(c config) string { return c.pidsLimit }},
+		{name: "pidsLimit empty override disables the limit", env: "PIDS_LIMIT", setEnv: true, envVal: "", dflt: "512", want: "", getGot: func(c config) string { return c.pidsLimit }},
+		{name: "pidsLimit non-empty override passes through verbatim", env: "PIDS_LIMIT", setEnv: true, envVal: "4096", dflt: "512", want: "4096", getGot: func(c config) string { return c.pidsLimit }},
+		{name: "memoryLimit unset falls back to schema default", env: "MEMORY_LIMIT", useRealTable: true, setEnv: false, want: "5g", getGot: func(c config) string { return c.memoryLimit }},
+		{name: "memoryLimit empty override disables the limit", env: "MEMORY_LIMIT", setEnv: true, envVal: "", dflt: "5g", want: "", getGot: func(c config) string { return c.memoryLimit }},
+		{name: "memoryLimit non-empty override passes through verbatim", env: "MEMORY_LIMIT", setEnv: true, envVal: "8g", dflt: "5g", want: "8g", getGot: func(c config) string { return c.memoryLimit }},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.setEnv {
+				t.Setenv(tc.env, tc.envVal)
+			} else {
+				t.Setenv(tc.env, "")
+				os.Unsetenv(tc.env)
+			}
+
+			if !tc.useRealTable {
+				withSchemaFlags(t, []flagEntry{{env: tc.env, dflt: tc.dflt}})
+			}
+			// useRealTable cases call no withSchemaFlags at all: the
+			// package-level schemaFlags is whatever the real
+			// flagtable_gen.go loaded it as (previous subtests' stubs are
+			// already restored by their own t.Cleanup, per
+			// TestWithSchemaFlags_SwapsAndRestores above).
+
+			got := tc.getGot(loadConfig())
+			if got != tc.want {
+				t.Errorf("%s = %q, want %q", tc.env, got, tc.want)
+			}
+		})
+	}
+}
+
 // TestIntSchemaDefault covers intSchemaDefault directly: a numeric schema
 // default parses, a non-numeric one falls back to 0, and an absent key falls
 // back to 0 too (issue #672).

@@ -65,6 +65,11 @@
 #   hostDerived  bool    marks a field that is generated but whose loader is
 #                        hand-written (not a plain getenvSchema/atoiSchema
 #                        call); implies host-config membership
+#   emptyDisables bool   string-typed knobs only: an explicit KEY= empty
+#                        override is itself a meaningful value (not "use the
+#                        default") for this knob's runtime env lookup;
+#                        loaderLine in lib/renderers.nix routes it through
+#                        getenvSchemaPreserveEmpty instead of getenvSchema
 #   legacySettingsExempt bool  flakeOption knobs only: true when this knob
 #                        postdates the ADR 0037 Pass 2 freeze and therefore
 #                        never had an old `settings.<section>` alias; exempts
@@ -377,6 +382,7 @@ in
     flakeOption = true;
     nixSubPath = "limits.memory";
     boxEnv = false;
+    emptyDisables = true;
   };
   pidsLimit = {
     env = "PIDS_LIMIT";
@@ -386,6 +392,7 @@ in
     flakeOption = true;
     nixSubPath = "limits.pids";
     boxEnv = false;
+    emptyDisables = true;
   };
   registryProxyUpstreamURL = {
     env = "REGISTRY_PROXY_UPSTREAM_URL";
