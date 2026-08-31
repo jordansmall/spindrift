@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"spindrift.dev/launcher/internal/promptassembly"
 )
@@ -84,10 +85,49 @@ func runAssemblePrompt(args []string, stdout io.Writer) int {
 	promptOutput := fs.String("prompt-output", "", "path to write the assembled prompt text to (required)")
 	agentsJSONOutput := fs.String("agents-json-output", "", "path to write the (possibly empty) --agents JSON to (required)")
 	handoffOutput := fs.String("handoff-output", "", "path to write the driver hand-off facts as JSON to (required)")
+	reviewPromptOutput := fs.String("review-prompt-output", "", "path to write the rendered review-prompt text to, only when the cell actually renders one")
+
+	// The following flags are pure passthrough into result.Handoff after
+	// Assemble returns -- Assemble itself never reads them (issue #2975).
+	argvPromptStyle := fs.String("argv-prompt-style", "flag", "Handoff.ArgvShape.PromptStyle")
+	argvPromptFlag := fs.String("argv-prompt-flag", "", "Handoff.ArgvShape.PromptFlag")
+	argvModelFlag := fs.String("argv-model-flag", "--model", "Handoff.ArgvShape.ModelFlag")
+	argvModelOmitEmpty := fs.Bool("argv-model-omit-empty", false, "Handoff.ArgvShape.ModelOmitEmpty")
+	argvAgentsFlag := fs.String("argv-agents-flag", "", "Handoff.ArgvShape.AgentsFlag")
+	argvEffortFlag := fs.String("argv-effort-flag", "--effort", "Handoff.ArgvShape.EffortFlag")
+	argvOrder := fs.String("argv-order", "prompt model agents session driverFlags effort", "space-separated Handoff.ArgvShape.Order")
+
+	model := fs.String("model", "", "Handoff.Model")
+	effort := fs.String("effort", "", "Handoff.Effort")
+	driverName := fs.String("driver", "claude", "Handoff.Driver")
+	driverBin := fs.String("driver-bin", "", "Handoff.DriverBin")
+	driverFlags := fs.String("driver-flags", "", "Handoff.DriverFlags")
+	devshell := fs.Bool("devshell", false, "Handoff.Devshell")
+	devshellName := fs.String("devshell-name", "default", "Handoff.DevshellName")
+
+	maxReviewRounds := fs.Int("max-review-rounds", promptassembly.DefaultMaxReviewRounds, "Handoff.Caps.MaxReviewRounds")
+	maxSlices := fs.Int("max-slices", promptassembly.DefaultMaxSlices, "Handoff.Caps.MaxSlices")
+	// String, not Int/Float64: a malformed forwarded value must degrade to 0
+	// via promptassembly.ParseNonnegBudgetTokens/ParseNonnegBudgetUSD after
+	// fs.Parse succeeds, never make fs.Parse itself fail and return non-zero
+	// -- entrypoint.sh runs under set -euo pipefail, so a fatal exit here
+	// kills the whole box run over a value that was never fatal before this
+	// cap existed (issue #2975 review finding #1, issue #2694's original
+	// rationale).
+	maxBudgetTokensRaw := fs.String("max-budget-tokens", "0", "Handoff.Caps.MaxBudgetTokens")
+	maxBudgetUSDRaw := fs.String("max-budget-usd", "0", "Handoff.Caps.MaxBudgetUSD")
+
+	heartbeatLog := fs.String("heartbeat-log", "", "Handoff.HeartbeatLog")
 
 	if err := fs.Parse(args); err != nil {
 		return 1
 	}
+
+	// Degrades a malformed/negative --max-budget-tokens/--max-budget-usd to 0
+	// rather than failing the run; ok is discarded since this passthrough CLI
+	// wrapper has no operator-facing diagnostics channel for it today.
+	maxBudgetTokens, _ := promptassembly.ParseNonnegBudgetTokens(*maxBudgetTokensRaw)
+	maxBudgetUSD, _ := promptassembly.ParseNonnegBudgetUSD(*maxBudgetUSDRaw)
 
 	if *registryPath == "" || *validateMarkersRegistryPath == "" || *promptOutput == "" || *agentsJSONOutput == "" || *handoffOutput == "" {
 		fmt.Fprintln(fs.Output(), "driver-exec assemble-prompt: -registry, -validate-markers-registry, -prompt-output, -agents-json-output, and -handoff-output are all required")
@@ -195,6 +235,46 @@ func runAssemblePrompt(args []string, stdout io.Writer) int {
 		fmt.Fprintln(fs.Output(), "driver-exec assemble-prompt: write agents json output:", err)
 		return 1
 	}
+
+	// Every field set below is pure passthrough (issue #2975): Assemble never
+	// touches them, so they're layered onto result.Handoff here, after
+	// Assemble/Validate both succeed, straight from this command's own flags.
+	result.Handoff.PromptFile = *promptOutput
+	if result.AgentsJSON != "" {
+		result.Handoff.AgentsFile = *agentsJSONOutput
+	}
+	result.Handoff.Model = *model
+	result.Handoff.Effort = *effort
+	result.Handoff.Driver = *driverName
+	result.Handoff.DriverBin = *driverBin
+	result.Handoff.DriverFlags = *driverFlags
+	result.Handoff.Devshell = *devshell
+	result.Handoff.DevshellName = *devshellName
+	result.Handoff.Issue = *issueNumber
+	result.Handoff.HeartbeatLog = *heartbeatLog
+	result.Handoff.ArgvShape = promptassembly.ArgvShape{
+		PromptStyle:    *argvPromptStyle,
+		PromptFlag:     *argvPromptFlag,
+		ModelFlag:      *argvModelFlag,
+		ModelOmitEmpty: *argvModelOmitEmpty,
+		AgentsFlag:     *argvAgentsFlag,
+		EffortFlag:     *argvEffortFlag,
+		Order:          strings.Fields(*argvOrder),
+	}
+	result.Handoff.Caps = promptassembly.Caps{
+		MaxSlices:       *maxSlices,
+		MaxReviewRounds: *maxReviewRounds,
+		MaxBudgetTokens: maxBudgetTokens,
+		MaxBudgetUSD:    maxBudgetUSD,
+	}
+	if result.ReviewPromptText != "" && *reviewPromptOutput != "" {
+		if err := os.WriteFile(*reviewPromptOutput, []byte(result.ReviewPromptText), 0o644); err != nil {
+			fmt.Fprintln(fs.Output(), "driver-exec assemble-prompt: write review prompt output:", err)
+			return 1
+		}
+		result.Handoff.ReviewPromptFile = *reviewPromptOutput
+	}
+
 	handoffJSON, err := json.Marshal(result.Handoff)
 	if err != nil {
 		fmt.Fprintln(fs.Output(), "driver-exec assemble-prompt: marshal handoff:", err)
