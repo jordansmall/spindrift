@@ -335,6 +335,86 @@ func TestBwrapRun_PastaChildEnvCarriesPathToFindBwrap(t *testing.T) {
 	}
 }
 
+// TestBwrapRun_PrlimitWrappedPastaEnvCarriesPath pins the prlimit variant of
+// the same guarantee: with pidsLimit set and prlimit found on PATH, the
+// top-level program is prlimit, which execvp's "pasta" (a bare name, argv
+// position after --) using its own process env's PATH -- not Go's
+// exec.Command LookPath, which only resolved "prlimit" itself. Keying the
+// PATH forwarding on `program == "pasta"` misses this wrapper and the Box
+// dies with `prlimit: failed to execute pasta: No such file or directory`
+// before pasta ever starts.
+func TestBwrapRun_PrlimitWrappedPastaEnvCarriesPath(t *testing.T) {
+	script, _ := newFakeCLI(t, fakeCall{exit: 0})
+	orig := execCommand
+	t.Cleanup(func() { execCommand = orig })
+	origLookPath := lookPath
+	t.Cleanup(func() { lookPath = origLookPath })
+	lookPath = func(file string) (string, error) { return "/usr/bin/" + file, nil }
+	var gotProgram string
+	var gotCmd *exec.Cmd
+	execCommand = func(name string, args ...string) *exec.Cmd {
+		gotProgram = name
+		gotCmd = exec.Command(script, args...)
+		return gotCmd
+	}
+
+	a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok", pidsLimit: "512"}
+	if err := a.Run(Box{Env: map[string]string{}}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if gotProgram != "prlimit" {
+		t.Fatalf("top-level program: want prlimit, got %q", gotProgram)
+	}
+	found := false
+	for _, kv := range gotCmd.Env {
+		if strings.HasPrefix(kv, "PATH=") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("Run's cmd.Env for the prlimit-wrapped pasta path has no PATH entry, prlimit's own execvp(\"pasta\") would fail: %v", gotCmd.Env)
+	}
+}
+
+// TestBwrapRun_PrlimitWrappedBwrapEnvCarriesPath covers the third chain
+// shape: pidsLimit set with networkMode=host (no pasta), so prlimit wraps
+// bwrap directly and execvp's "bwrap" by bare name -- the same missing-PATH
+// failure one wrapper over, with no pasta involved at all.
+func TestBwrapRun_PrlimitWrappedBwrapEnvCarriesPath(t *testing.T) {
+	script, _ := newFakeCLI(t, fakeCall{exit: 0})
+	orig := execCommand
+	t.Cleanup(func() { execCommand = orig })
+	origLookPath := lookPath
+	t.Cleanup(func() { lookPath = origLookPath })
+	lookPath = func(file string) (string, error) { return "/usr/bin/" + file, nil }
+	var gotProgram string
+	var gotCmd *exec.Cmd
+	execCommand = func(name string, args ...string) *exec.Cmd {
+		gotProgram = name
+		gotCmd = exec.Command(script, args...)
+		return gotCmd
+	}
+
+	a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok", pidsLimit: "512", networkMode: "host"}
+	if err := a.Run(Box{Env: map[string]string{}}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if gotProgram != "prlimit" {
+		t.Fatalf("top-level program: want prlimit, got %q", gotProgram)
+	}
+	found := false
+	for _, kv := range gotCmd.Env {
+		if strings.HasPrefix(kv, "PATH=") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("Run's cmd.Env for the prlimit-wrapped bwrap path has no PATH entry, prlimit's own execvp(\"bwrap\") would fail: %v", gotCmd.Env)
+	}
+}
+
 // TestBwrapRun_ExitCodeSurfacedAsRunError verifies that a non-zero exit from
 // the scripted bwrap invocation surfaces as a *RunError carrying that exit
 // code, so later slices can detect signal-kill exit codes (128+N) through a

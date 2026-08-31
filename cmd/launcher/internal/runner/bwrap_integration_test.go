@@ -320,7 +320,7 @@ func nixProbeArgs(a *bwrapAdapter, etcDir string, box Box, bashBin, script strin
 // returned program is "pasta" whenever pastaPath() applies to a, matching
 // what a real bwrap.go Run() would exec.Command.
 func pastaProbeArgs(a *bwrapAdapter, etcDir string, box Box, bashBin, script string) (string, []string) {
-	program, args := a.execTarget(etcDir, box)
+	program, args, _ := a.execTarget(etcDir, box)
 	args = stripMountPair(args, "--proc", "/proc")
 	args = stripMountPair(args, "--dev", "/dev")
 	args = args[:len(args)-1] // drop "/agent/entrypoint.sh", keep the "--" separator
